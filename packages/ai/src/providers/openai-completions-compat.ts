@@ -58,7 +58,6 @@ export function detectOpenAICompat(model: Model<"openai-completions">, resolvedB
 		baseUrl.includes("api.anthropic.com") ||
 		/(^|\/)claude[-.]/i.test(model.id) ||
 		/(^|\/)anthropic\//i.test(model.id);
-	const isAlibaba = provider === "alibaba-coding-plan" || baseUrl.includes("dashscope");
 	const isQwen = model.id.toLowerCase().includes("qwen");
 	// DeepSeek V4 (and other reasoning-capable DeepSeek models) reject follow-up requests in
 	// thinking mode unless prior assistant tool-call turns include `reasoning_content`. The
@@ -83,7 +82,6 @@ export function detectOpenAICompat(model: Model<"openai-completions">, resolvedB
 		baseUrl.includes("chutes.ai") ||
 		baseUrl.includes("deepseek.com") ||
 		baseUrl.includes("fireworks.ai") ||
-		isAlibaba ||
 		isZai ||
 		isKilo ||
 		isQwen ||
@@ -129,7 +127,6 @@ export function detectOpenAICompat(model: Model<"openai-completions">, resolvedB
 	const isQwenPortal = provider === "qwen-portal" || baseUrl.includes("portal.qwen.ai");
 	const supportsMultipleSystemMessagesDefault =
 		!isMiniMaxHost &&
-		!isAlibaba &&
 		!isQwenPortal &&
 		(isOpenAIHost ||
 			isAzureHost ||
@@ -177,7 +174,7 @@ export function detectOpenAICompat(model: Model<"openai-completions">, resolvedB
 			? "zai"
 			: provider === "openrouter" || baseUrl.includes("openrouter.ai")
 				? "openrouter"
-				: isAlibaba || isQwen
+				: isQwen
 					? "qwen"
 					: "openai",
 		reasoningContentField: "reasoning_content",

@@ -807,12 +807,6 @@ export class AuthStorage {
 				});
 				break;
 			}
-			case "alibaba-coding-plan": {
-				const { loginAlibabaCodingPlan } = await import("./utils/oauth/alibaba-coding-plan");
-				const apiKey = await loginAlibabaCodingPlan(ctrl);
-				await saveApiKeyCredential(apiKey);
-				return;
-			}
 			case "github-copilot": {
 				const { loginGitHubCopilot } = await import("./utils/oauth/github-copilot");
 				credentials = await loginGitHubCopilot({
