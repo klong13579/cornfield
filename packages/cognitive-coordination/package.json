@@ -1,0 +1,8 @@
+{
+	"name": "@oh-my-pi/cognitive-coordination",
+	"type": "module",
+	"main": "src/index.ts",
+	"dependencies": {
+		"@oh-my-pi/pi-utils": "workspace:*"
+	}
+}

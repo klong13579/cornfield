@@ -16,8 +16,8 @@ import { ConventionComplianceChecker } from "./convention-compliance";
 import { ConventionExtractor } from "./convention-extractor";
 import { CrossSessionNudgeEngine } from "./cross-session-nudge";
 import { EffectivenessAnalyzer } from "./effectiveness-analyzer";
-import { ErrorPatternExtractor } from "./error-pattern-extractor";
-import type { SkillExtractor } from "./extractor";
+import type { ErrorPatternExtractor } from "./error-pattern-extractor";
+import { SkillExtractor } from "./extractor";
 import { FeedbackTracker } from "./feedback-tracker";
 import { InjectionFormatter } from "./injection-formatter";
 import { IntentClassifier } from "./intent-classifier";
@@ -196,7 +196,7 @@ export const createSelfEvolutionExtension: ExtensionFactory = api => {
 		conventionExtractor = new ConventionExtractor();
 		effectivenessAnalyzer = new EffectivenessAnalyzer();
 		injectionFormatter = new InjectionFormatter();
-		errorPatternExtractor = new ErrorPatternExtractor();
+		extractor = new SkillExtractor();
 		diagnosisStore = new SqliteEpisodeDiagnosisStore(db);
 		statsStore = new SqliteStatsStore(db);
 
@@ -639,6 +639,7 @@ export const createSelfEvolutionExtension: ExtensionFactory = api => {
 
 	api.on("before_agent_start", async (event, ctx) => {
 		try {
+			_ensureInit(ctx.cwd);
 			// Capture user prompt from before_agent_start before trace exists
 			recorder?.seedPrompt(event.prompt);
 			if (!flags.enablePromptInjection) return;
