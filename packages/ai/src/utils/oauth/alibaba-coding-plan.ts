@@ -13,8 +13,21 @@ import type { OAuthController } from "./types";
 
 const AUTH_URL = "https://modelstudio.console.alibabacloud.com/";
 const API_BASE_URL = "https://coding.dashscope.aliyuncs.com/v1";
-const VALIDATION_MODEL = "qwen3.5-plus";
+const VALIDATION_MODEL_CLASSIC = "qwen3.5-plus";
+const VALIDATION_MODEL_SK_SP = "qwen3-coder-plus";
 const VALIDATION_TIMEOUT_MS = 15_000;
+
+/**
+ * DashScope coding OpenAI-compatible endpoint accepts classic keys as raw `Authorization`,
+ * but `sk-sp-*` (Bailian-style) keys require `Bearer` or the server returns 401.
+ */
+export function alibabaCodingPlanAuthorizationHeader(apiKey: string): string {
+	const trimmed = apiKey.trim();
+	if (trimmed.startsWith("sk-sp-")) {
+		return `Bearer ${trimmed}`;
+	}
+	return trimmed;
+}
 
 async function validateAlibabaApiKey(options: {
 	apiKey: string;
@@ -29,7 +42,7 @@ async function validateAlibabaApiKey(options: {
 		method: "POST",
 		headers: {
 			"Content-Type": "application/json",
-			Authorization: options.apiKey,
+			Authorization: alibabaCodingPlanAuthorizationHeader(options.apiKey),
 		},
 		body: JSON.stringify({
 			model: options.model,
@@ -88,10 +101,11 @@ export async function loginAlibabaCodingPlan(options: OAuthController): Promise<
 	}
 
 	options.onProgress?.("Validating API key...");
+	const validationModel = trimmed.startsWith("sk-sp-") ? VALIDATION_MODEL_SK_SP : VALIDATION_MODEL_CLASSIC;
 	await validateAlibabaApiKey({
 		apiKey: trimmed,
 		baseUrl: API_BASE_URL,
-		model: VALIDATION_MODEL,
+		model: validationModel,
 		signal: options.signal,
 	});
 

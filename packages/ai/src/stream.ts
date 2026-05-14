@@ -56,7 +56,7 @@ function hasVertexAdcCredentials(): boolean {
 type KeyResolver = string | (() => string | undefined);
 
 const serviceProviderMap: Record<string, KeyResolver> = {
-	"alibaba-coding-plan": "ALIBABA_CODING_PLAN_API_KEY",
+	"alibaba-coding-plan": () => $pickenv("ALIBABA_CODING_PLAN_API_KEY", "ALIBABA_API_KEY"),
 	"bailian-coding-plan": () => $pickenv("ALIBABA_API_KEY", "BAILIAN_CODING_PLAN_API_KEY"),
 	openai: "OPENAI_API_KEY",
 	google: "GEMINI_API_KEY",

@@ -46,6 +46,7 @@ import {
 	iterateWithIdleTimeout,
 } from "../utils/idle-iterator";
 import { parseStreamingJson } from "../utils/json-parse";
+import { alibabaCodingPlanAuthorizationHeader } from "../utils/oauth/alibaba-coding-plan";
 import { parseGitHubCopilotApiKey } from "../utils/oauth/github-copilot";
 import { getKimiCommonHeaders } from "../utils/oauth/kimi";
 import { notifyProviderResponse } from "../utils/provider-response";
@@ -729,7 +730,7 @@ async function createClient(
 	if (!apiKey) {
 		if (model.provider === "alibaba-coding-plan") {
 			throw new Error(
-				"Alibaba Coding Plan API key is required. Set ALIBABA_CODING_PLAN_API_KEY environment variable or pass it as an argument.",
+				"Alibaba Coding Plan API key is required. Set ALIBABA_CODING_PLAN_API_KEY or ALIBABA_API_KEY environment variable or pass it as an argument.",
 			);
 		}
 		if (!$env.OPENAI_API_KEY) {
@@ -779,9 +780,28 @@ async function createClient(
 		azureDefaultQuery = { "api-version": apiVersion };
 	}
 	let capturedErrorResponse: CapturedHttpErrorResponse | undefined;
+	const alibabaWireAuthorization =
+		model.provider === "alibaba-coding-plan" ? alibabaCodingPlanAuthorizationHeader(apiKey) : undefined;
 	const wrappedFetch = Object.assign(
 		async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
-			const response = await fetch(input, init);
+			let wireInput: string | URL | Request = input;
+			let wireInit: RequestInit | undefined = init;
+			// OpenAI SDK always injects `Authorization: Bearer <apiKey>` while we also set
+			// `defaultHeaders.Authorization` for DashScope quirks. Multiple Authorization values
+			// confuse some gateways (401 invalid_api_key). Force a single wire header.
+			if (alibabaWireAuthorization !== undefined) {
+				if (input instanceof Request) {
+					const merged = new Headers(input.headers);
+					merged.set("Authorization", alibabaWireAuthorization);
+					wireInput = new Request(input, { headers: merged });
+					wireInit = undefined;
+				} else {
+					const merged = new Headers(init?.headers ?? undefined);
+					merged.set("Authorization", alibabaWireAuthorization);
+					wireInit = { ...init, headers: merged };
+				}
+			}
+			const response = await fetch(wireInput, wireInit);
 			if (response.ok) {
 				capturedErrorResponse = undefined;
 				return response;
@@ -806,8 +826,8 @@ async function createClient(
 		},
 		{ preconnect: fetch.preconnect },
 	);
-	if (model.provider === "alibaba-coding-plan") {
-		headers.Authorization = apiKey;
+	if (alibabaWireAuthorization !== undefined) {
+		headers.Authorization = alibabaWireAuthorization;
 	}
 
 	return {

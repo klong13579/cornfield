@@ -131,7 +131,7 @@ export const PROVIDER_DESCRIPTORS: readonly ProviderDescriptor[] = [
 		"alibaba-coding-plan",
 		"qwen3.5-plus",
 		config => alibabaCodingPlanModelManagerOptions(config),
-		catalog("Alibaba Coding Plan", ["ALIBABA_CODING_PLAN_API_KEY"]),
+		catalog("Alibaba Coding Plan", ["ALIBABA_CODING_PLAN_API_KEY", "ALIBABA_API_KEY"]),
 	),
 	catalogDescriptor(
 		"bailian-coding-plan",

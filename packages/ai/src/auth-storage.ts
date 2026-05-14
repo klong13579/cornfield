@@ -1925,6 +1925,22 @@ export class AuthStorage {
 	}
 
 	/**
+	 * DashScope-related providers: prefer live env / models.yml fallback over persisted
+	 * `api_key` rows so a stale `/login` credential cannot shadow `ALIBABA_*` in the shell
+	 * (interactive mode always resolves keys via {@link getApiKey}).
+	 */
+	#dashScopePreferredWireKey(provider: string): string | undefined {
+		if (provider !== "alibaba-coding-plan" && provider !== "bailian-coding-plan") {
+			return undefined;
+		}
+		const fromEnv = getEnvApiKey(provider);
+		if (fromEnv) {
+			return fromEnv;
+		}
+		return this.#fallbackResolver?.(provider);
+	}
+
+	/**
 	 * Peek at API key for a provider without refreshing OAuth tokens.
 	 * Used for model discovery where we only need to know if credentials exist
 	 * and get a best-effort token. For GitHub Copilot we preserve enterprise
@@ -1934,6 +1950,11 @@ export class AuthStorage {
 		const runtimeKey = this.#runtimeOverrides.get(provider);
 		if (runtimeKey) {
 			return runtimeKey;
+		}
+
+		const dashScopeKey = this.#dashScopePreferredWireKey(provider);
+		if (dashScopeKey) {
+			return dashScopeKey;
 		}
 
 		const apiKeySelection = this.#selectCredentialByType(provider, "api_key");
@@ -1966,16 +1987,23 @@ export class AuthStorage {
 	 * Get API key for a provider.
 	 * Priority:
 	 * 1. Runtime override (CLI --api-key)
-	 * 2. API key from storage
-	 * 3. OAuth token from storage (auto-refreshed)
-	 * 4. Environment variable
-	 * 5. Fallback resolver (models.json custom providers)
+	 * 2. For `alibaba-coding-plan` / `bailian-coding-plan`: environment variables, then
+	 *    {@link AuthStorage.setFallbackResolver} (e.g. models.yml), before any persisted api_key
+	 * 3. API key from storage
+	 * 4. OAuth token from storage (auto-refreshed)
+	 * 5. Environment variable
+	 * 6. Fallback resolver (models.json custom providers)
 	 */
 	async getApiKey(provider: string, sessionId?: string, options?: AuthApiKeyOptions): Promise<string | undefined> {
 		// Runtime override takes highest priority
 		const runtimeKey = this.#runtimeOverrides.get(provider);
 		if (runtimeKey) {
 			return runtimeKey;
+		}
+
+		const dashScopeKey = this.#dashScopePreferredWireKey(provider);
+		if (dashScopeKey) {
+			return dashScopeKey;
 		}
 
 		const apiKeySelection = this.#selectCredentialByType(provider, "api_key", sessionId);

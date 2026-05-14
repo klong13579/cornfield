@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Alibaba / Bailian Coding Plan: `getApiKey` / `peekApiKey` now prefer `ALIBABA_*` env and models.yml fallback over persisted SQLite `api_key` rows so stale `/login` keys no longer shadow the shell in interactive mode (401 invalid key).
+- Alibaba Coding Plan: send `Authorization: Bearer` for `sk-sp-*` DashScope keys (raw header returned 401); accept `ALIBABA_API_KEY` as fallback when `ALIBABA_CODING_PLAN_API_KEY` is unset.
+- Alibaba Coding Plan: normalize outgoing `fetch` to a single `Authorization` header (OpenAI SDK bearer + `defaultHeaders` previously produced duplicates that some gateways reject with 401).
+
 ## [14.5.10] - 2026-04-30
 
 ### Added
