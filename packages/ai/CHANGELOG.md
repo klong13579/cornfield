@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Alibaba Coding Plan: limit bundled catalog and runtime discovery to six DashScope compatible-mode models (`qwen3.6-flash`, `qwen3.6-plus`, `deepseek-v4-pro`, `deepseek-v4-flash`, `glm-5.1`, `MiniMax-M2.5`); default model id is now `qwen3.6-plus` (was `qwen3.5-plus`). The coding-agent `ModelRegistry` applies the same allowlist after merging bundled `models.json` and discovery so `omp --list-models` stays aligned with the selector.
+- Alibaba Coding Plan default OpenAI-compat base URL is now `https://dashscope.aliyuncs.com/compatible-mode/v1` (was `https://coding.dashscope.aliyuncs.com/v1`). Override via `models.yml` or discovery config if your account must use the Coding endpoint.
+
 ### Fixed
 
 - Alibaba / Bailian Coding Plan: `getApiKey` / `peekApiKey` now prefer `ALIBABA_*` env and models.yml fallback over persisted SQLite `api_key` rows so stale `/login` keys no longer shadow the shell in interactive mode (401 invalid key).

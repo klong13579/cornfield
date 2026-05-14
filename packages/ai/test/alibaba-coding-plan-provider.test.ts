@@ -22,8 +22,8 @@ describe("alibaba-coding-plan provider support", () => {
 	test("registers built-in descriptor and default model", () => {
 		const descriptor = PROVIDER_DESCRIPTORS.find(item => item.providerId === "alibaba-coding-plan");
 		expect(descriptor).toBeDefined();
-		expect(descriptor?.defaultModel).toBe("qwen3.5-plus");
-		expect(DEFAULT_MODEL_PER_PROVIDER["alibaba-coding-plan"]).toBe("qwen3.5-plus");
+		expect(descriptor?.defaultModel).toBe("qwen3.6-plus");
+		expect(DEFAULT_MODEL_PER_PROVIDER["alibaba-coding-plan"]).toBe("qwen3.6-plus");
 	});
 
 	test("builds model manager options with alibaba-coding-plan defaults", () => {

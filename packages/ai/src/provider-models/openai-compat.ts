@@ -9,6 +9,7 @@ import {
 } from "../utils/discovery/openai-compatible";
 import { toFireworksPublicModelId } from "../utils/fireworks-model-id";
 import { getGitHubCopilotBaseUrl, OPENCODE_HEADERS, parseGitHubCopilotApiKey } from "../utils/oauth/github-copilot";
+import { ALIBABA_CODING_PLAN_SELECTOR_MODEL_IDS } from "./alibaba-coding-plan-curated";
 import { createBundledReferenceMap, createReferenceResolver } from "./bundled-references";
 
 const MODELS_DEV_URL = "https://models.dev/api.json";
@@ -953,16 +954,21 @@ export function alibabaCodingPlanModelManagerOptions(
 	config?: AlibabaCodingPlanModelManagerConfig,
 ): ModelManagerOptions<"openai-completions"> {
 	const apiKey = config?.apiKey;
-	const baseUrl = config?.baseUrl ?? "https://coding.dashscope.aliyuncs.com/v1";
+	const baseUrl = config?.baseUrl ?? "https://dashscope.aliyuncs.com/compatible-mode/v1";
 	const references = createBundledReferenceMap<"openai-completions">("alibaba-coding-plan");
+	const staticModels = getBundledModels("alibaba-coding-plan").filter(model =>
+		ALIBABA_CODING_PLAN_SELECTOR_MODEL_IDS.has(model.id),
+	);
 	return {
 		providerId: "alibaba-coding-plan",
+		staticModels,
 		fetchDynamicModels: () =>
 			fetchOpenAICompatibleModels({
 				api: "openai-completions",
 				provider: "alibaba-coding-plan",
 				baseUrl,
 				apiKey,
+				filterModel: (_entry, model) => ALIBABA_CODING_PLAN_SELECTOR_MODEL_IDS.has(model.id),
 				mapModel: (entry, defaults) => {
 					const reference = references.get(defaults.id);
 					return mapWithBundledReference(entry, defaults, reference);
@@ -2074,7 +2080,7 @@ const MODELS_DEV_PROVIDER_DESCRIPTORS_CODING_PLANS: readonly ModelsDevProviderDe
 	openAiCompletionsDescriptor(
 		"alibaba-coding-plan",
 		"alibaba-coding-plan",
-		"https://coding.dashscope.aliyuncs.com/v1",
+		"https://dashscope.aliyuncs.com/compatible-mode/v1",
 		{
 			compat: {
 				supportsDeveloperRole: false,
