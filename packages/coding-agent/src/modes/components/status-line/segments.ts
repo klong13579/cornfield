@@ -50,10 +50,7 @@ const modelSegment: StatusLineSegment = {
 		const state = ctx.session.state;
 		const opts = ctx.options.model ?? {};
 
-		let modelName = state.model?.name || state.model?.id || "no-model";
-		if (modelName.startsWith("Claude ")) {
-			modelName = modelName.slice(7);
-		}
+		const modelName = state.model ? `${state.model.provider}/${state.model.id}` : "no-model";
 
 		let content = withIcon(theme.icon.model, modelName);
 

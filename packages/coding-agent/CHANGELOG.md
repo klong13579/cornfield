@@ -5,6 +5,7 @@
 ### Changed
 
 - Alibaba Coding Plan: after loading bundled models and provider discovery, the model registry keeps only the six curated DashScope models so `omp --list-models` matches the selector allowlist (same ids as `pi-ai`).
+- Status line and footer show the active model as `provider/model-id` (same as CLI selectors), not display name or bare id alone.
 
 ## [14.5.11] - 2026-04-30
 ### Breaking Changes
