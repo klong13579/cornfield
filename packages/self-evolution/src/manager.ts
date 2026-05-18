@@ -6,8 +6,10 @@ import { logger } from "@oh-my-pi/pi-utils";
 import { AggressiveSkillOptimizer } from "./aggressive-optimizer";
 import { HeuristicSkillEvaluator } from "./evaluator";
 import type { ActivityLogger } from "./logging/activity-logger";
+import type { SkillPopulationEngine } from "./skill-population-engine";
 import type { EpisodeStore, SkillEffectivenessStore, SkillStore, SkillVersionStore } from "./storage/types";
 import type { EvolvedSkill, ExtractedSkill, SkillVersion } from "./types";
+import type { BackgroundLlmAuth } from "./utils/llm";
 
 export interface SkillManagerOptions {
 	enableVersioning: boolean;
@@ -23,6 +25,7 @@ export class SkillManager {
 	#options: SkillManagerOptions;
 	#skillEffectivenessStore: SkillEffectivenessStore;
 	#episodeStore: EpisodeStore;
+	#populationEngine?: SkillPopulationEngine;
 
 	constructor(
 		skillStore: SkillStore,
@@ -31,6 +34,7 @@ export class SkillManager {
 		skillEffectivenessStore: SkillEffectivenessStore,
 		episodeStore: EpisodeStore,
 		options: SkillManagerOptions,
+		populationEngine?: SkillPopulationEngine,
 	) {
 		this.#skillStore = skillStore;
 		this.#versionStore = versionStore;
@@ -38,12 +42,13 @@ export class SkillManager {
 		this.#skillEffectivenessStore = skillEffectivenessStore;
 		this.#episodeStore = episodeStore;
 		this.#options = options;
+		this.#populationEngine = populationEngine;
 	}
 
 	/**
 	 * Integrate a newly extracted skill into the skill library.
 	 */
-	async integrate(extracted: ExtractedSkill, model?: Model): Promise<EvolvedSkill> {
+	async integrate(extracted: ExtractedSkill, model?: Model, auth?: BackgroundLlmAuth): Promise<EvolvedSkill> {
 		const existing = await this.#skillStore.get(extracted.name);
 
 		if (existing) {
@@ -54,7 +59,7 @@ export class SkillManager {
 			if (merged.qualityScore < 40 && merged.successCount > 0 && model) {
 				try {
 					const failureHistory = await this.#loadFailureHistory(merged);
-					const optimized = await this.#optimizer.optimize(merged, model, failureHistory);
+					const optimized = await this.#optimizer.optimize(merged, model, failureHistory, auth);
 					if (optimized !== merged) {
 						Object.assign(merged, optimized);
 					}
@@ -71,7 +76,7 @@ export class SkillManager {
 			if ((merged.qualityScore < 50 || merged.approach.length < 200) && model) {
 				try {
 					const failureHistory = await this.#loadFailureHistory(merged);
-					const optimized = await this.#optimizer.optimize(merged, model, failureHistory);
+					const optimized = await this.#optimizer.optimize(merged, model, failureHistory, auth);
 					if (optimized !== merged) {
 						Object.assign(merged, optimized);
 						merged.qualityScore = this.#evaluator.reevaluate(merged).total;
@@ -84,7 +89,7 @@ export class SkillManager {
 				}
 			}
 
-			await this.autoOptimizeIfNeeded(merged.name, model);
+			await this.autoOptimizeIfNeeded(merged.name, model, auth);
 
 			await this.#skillStore.upsert(merged);
 			if (this.#options.enableVersioning) {
@@ -97,6 +102,10 @@ export class SkillManager {
 				newVersion: merged.version,
 				approachChanged: existing.approach !== merged.approach,
 			});
+
+			// Update population record
+			await this.#populationEngine?.recordUsage(merged.name, true);
+
 			return merged;
 		}
 
@@ -121,6 +130,10 @@ export class SkillManager {
 			qualityScore: skill.qualityScore,
 			llmRefined: extracted.llmRefined,
 		});
+
+		// Register in population as candidate
+		await this.#populationEngine?.register(skill.name);
+
 		return skill;
 	}
 
@@ -189,11 +202,120 @@ export class SkillManager {
 		}
 		return archived;
 	}
-	async recordSkillUsage(name: string, succeeded: boolean): Promise<void> {
-		await this.#skillEffectivenessStore.recordOutcome(name, succeeded);
+
+	/**
+	 * Synthesize a variant of a skill when it has consecutive failures ≥ 3 in the same scenario.
+	 * The variant is created as a new skill with a modified approach, tested in parallel
+	 * with the original. Architecture §6.5: consecutive failure ≥ 3 → synthesize variant.
+	 *
+	 * @param name - The failing skill name
+	 * @param model - LLM model for approach regeneration
+	 * @param failureContext - Specific scenario description that caused repeated failures
+	 * @returns The variant skill name, or undefined if synthesis was not possible
+	 */
+	async synthesizeVariant(
+		name: string,
+		model?: Model,
+		failureContext?: string,
+		auth?: BackgroundLlmAuth,
+	): Promise<string | undefined> {
+		const skill = await this.#skillStore.get(name);
+		if (!skill || skill.deprecated) return undefined;
+
+		const effectiveness = await this.#skillEffectivenessStore.get(name);
+		if (!effectiveness || effectiveness.timesFailed < 3) {
+			logger.debug("Variant synthesis skipped: insufficient failures", {
+				skill: name,
+				timesFailed: effectiveness?.timesFailed ?? 0,
+			});
+			return undefined;
+		}
+
+		// Generate variant name
+		const variantName = `${name}-v${skill.version + 1}`;
+		const existingVariant = await this.#skillStore.get(variantName);
+		if (existingVariant) {
+			logger.debug("Variant synthesis skipped: variant already exists", { variantName });
+			return undefined;
+		}
+
+		logger.debug("Synthesizing skill variant", {
+			skill: name,
+			variantName,
+			timesFailed: effectiveness.timesFailed,
+		});
+
+		// Create variant by modifying the approach
+		let variantApproach = skill.approach;
+		let variantPitfalls = [...skill.pitfalls];
+		let variantTools = [...skill.tools];
+
+		if (model) {
+			try {
+				const failureHistory = await this.#loadFailureHistory(skill);
+				// Augment failure history with the specific context if provided
+				if (failureContext && failureHistory.length > 0) {
+					failureHistory[failureHistory.length - 1].summary =
+						`${failureHistory[failureHistory.length - 1].summary} (Context: ${failureContext})`;
+				}
+
+				const optimized = await this.#optimizer.optimize(skill, model, failureHistory, auth);
+				variantApproach = optimized.approach;
+				variantPitfalls = optimized.pitfalls;
+				variantTools = optimized.tools;
+			} catch (err) {
+				logger.warn("Variant LLM optimization failed, using manual variant", {
+					skill: name,
+					error: String(err),
+				});
+				// Fallback: add explicit guidance to avoid the failure pattern
+				variantApproach = `${skill.approach}\n\n## Failure Mitigation\nPrevious executions failed repeatedly. If this approach encounters errors, immediately report the specific failure and stop.`;
+			}
+		} else {
+			variantApproach = `${skill.approach}\n\n## Failure Mitigation\nPrevious executions failed repeatedly. If this approach encounters errors, immediately report the specific failure and stop.`;
+		}
+
+		const variant: EvolvedSkill = {
+			...skill,
+			name: variantName,
+			description: `Variant of ${name} — synthesized due to ${effectiveness.timesFailed} consecutive failures`,
+			approach: variantApproach,
+			tools: variantTools,
+			pitfalls: variantPitfalls,
+			createdAt: Date.now(),
+			usageCount: 0,
+			lastUsedAt: Date.now(),
+			successCount: 0,
+			failureCount: 0,
+			version: 1,
+			qualityScore: skill.qualityScore ?? 50,
+			deprecated: false,
+			deprecationReason: undefined,
+		};
+
+		await this.#skillStore.upsert(variant);
+		if (this.#options.enableVersioning) {
+			await this.#snapshot(variant, "extracted", "synthesized variant from consecutive failures");
+		}
+
+		// Register variant in population as candidate
+		await this.#populationEngine?.register(variantName);
+
+		await this.#activityLogger.log("skill_variant_synthesized", {
+			originalSkill: name,
+			variantName,
+			timesFailed: effectiveness.timesFailed,
+		});
+
+		return variantName;
 	}
 
-	async autoOptimizeIfNeeded(name: string, model?: Model): Promise<void> {
+	async recordSkillUsage(name: string, succeeded: boolean): Promise<void> {
+		await this.#skillEffectivenessStore.recordOutcome(name, succeeded);
+		await this.#populationEngine?.recordUsage(name, succeeded);
+	}
+
+	async autoOptimizeIfNeeded(name: string, model?: Model, auth?: BackgroundLlmAuth): Promise<void> {
 		const effectiveness = await this.#skillEffectivenessStore.get(name);
 		if (!effectiveness) return;
 
@@ -228,7 +350,7 @@ export class SkillManager {
 		if (shouldOptimize && model) {
 			try {
 				const failureHistory = await this.#loadFailureHistory(skill);
-				const optimized = await this.#optimizer.optimize(skill, model, failureHistory);
+				const optimized = await this.#optimizer.optimize(skill, model, failureHistory, auth);
 				if (optimized !== skill) {
 					skill.taskPattern = optimized.taskPattern;
 					skill.approach = optimized.approach;

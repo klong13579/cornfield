@@ -55,7 +55,7 @@ All output is scanned for secrets before being written to disk.
 
 ### Extraction behavior
 
-Memory extraction and consolidation behavior is driven by static prompt files in `packages/coding-agent/src/prompts/memories/`.
+Memory extraction and consolidation behavior is driven by static prompt files in `packages/self-evolution/src/memory/prompts/`.
 
 | File                  | Purpose                                     | Variables                                   |
 | --------------------- | ------------------------------------------- | ------------------------------------------- |
@@ -89,7 +89,8 @@ Additional tuning knobs (concurrency, lease durations, token budgets) are availa
 
 ## Key files
 
-- `packages/coding-agent/src/memories/index.ts` — pipeline orchestration, injection, slash command handling
-- `packages/coding-agent/src/memories/storage.ts` — SQLite-backed job queue and thread registry
-- `packages/coding-agent/src/prompts/memories/` — memory prompt templates
+- `packages/self-evolution/src/memory/index.ts` — pipeline orchestration and injection
+- `packages/self-evolution/src/memory/storage.ts` — SQLite-backed job queue and thread registry
+- `packages/self-evolution/src/memory/prompts/` — memory prompt templates
+- `@oh-my-pi/pi-coding-agent/memories` — compatibility re-exports
 - `packages/coding-agent/src/internal-urls/memory-protocol.ts` — `memory://` URL handler

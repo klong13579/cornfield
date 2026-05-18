@@ -6,7 +6,6 @@ import { mineImplicitConventions } from "./convention-miner";
 describe("mineImplicitConventions", () => {
 	let tempDir: string;
 
-
 	beforeEach(async () => {
 		tempDir = await fs.mkdtemp("/tmp/miner-test-");
 	});
@@ -90,9 +89,7 @@ describe("mineImplicitConventions", () => {
 	});
 
 	test("convention includes sourceSessionId", async () => {
-		const entries = [
-			{ type: "user_message", content: "Don't use raw SQL queries, always use the ORM." },
-		];
+		const entries = [{ type: "user_message", content: "Don't use raw SQL queries, always use the ORM." }];
 
 		const filePath = makeJsonlFile("source.jsonl", entries);
 		const conventions = await mineImplicitConventions(filePath);
@@ -117,7 +114,7 @@ describe("mineImplicitConventions", () => {
 
 	test("handles invalid JSON lines gracefully", async () => {
 		const filePath = path.join(tempDir, "invalid.jsonl");
-		await Bun.write(filePath, "not json\n{\"type\": \"user_message\", \"content\": \"Don't use this pattern.\"}\n{broken");
+		await Bun.write(filePath, 'not json\n{"type": "user_message", "content": "Don\'t use this pattern."}\n{broken');
 
 		const conventions = await mineImplicitConventions(filePath);
 

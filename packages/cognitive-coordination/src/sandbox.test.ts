@@ -103,7 +103,10 @@ describe("validateSkill (Virtual Sandbox)", () => {
 
 	test("scoreDelta is within expected range (-1.0 to +1.0)", () => {
 		const scenarios = [
-			{ skill: makeSkill("fix-tool", "Fix and avoid errors at all costs"), log: '{"isError": true, "error": "crash"}' },
+			{
+				skill: makeSkill("fix-tool", "Fix and avoid errors at all costs"),
+				log: '{"isError": true, "error": "crash"}',
+			},
 			{ skill: makeSkill("read-tool", "Read files before editing"), log: '{"toolName": "read", "result": "ok"}' },
 			{ skill: makeSkill("python-fix", "Fix python type checking issues"), log: '{"isError": true}' },
 			{ skill: makeSkill("unrelated", "something completely random here"), log: '{"result": "success"}' },
@@ -126,7 +129,11 @@ describe("validateSkill (Virtual Sandbox)", () => {
 	});
 
 	test("skill with description is used for relevance matching", () => {
-		const skill = makeSkill("typescript-tool", "Handle TS files and fix type errors. Ensure proper linting.", "TypeScript compilation and linting tools");
+		const skill = makeSkill(
+			"typescript-tool",
+			"Handle TS files and fix type errors. Ensure proper linting.",
+			"TypeScript compilation and linting tools",
+		);
 		const logContent = "typescript compilation failed with linting errors";
 
 		const report = validateSkill(skill, logContent);

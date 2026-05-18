@@ -11,7 +11,12 @@ import {
 	startMemoryStartupTask,
 } from "@oh-my-pi/pi-coding-agent/memories";
 import * as memoryStorage from "@oh-my-pi/pi-coding-agent/memories/storage";
-import { getAgentDbPath, Snowflake } from "@oh-my-pi/pi-utils";
+import { Snowflake } from "@oh-my-pi/pi-utils";
+import { getUnifiedSkillsDir } from "@oh-my-pi/self-evolution/skill-storage";
+
+function memoryDbPath(cwd: string): string {
+	return memoryStorage.resolveMemoryDbPath(cwd, false);
+}
 
 interface SessionFixture {
 	agentDir: string;
@@ -124,7 +129,7 @@ describe("memories runtime", () => {
 
 	test("startup gating skips when disabled or subagent depth", async () => {
 		const disabled = await createFixture({ "memories.enabled": false });
-		const openSpy = vi.spyOn(memoryStorage, "openMemoryDb");
+		const openSpy = vi.spyOn(memoryStorage, "getMemoryDb");
 		startMemoryStartupTask({
 			session: disabled.session,
 			settings: disabled.settings,
@@ -147,7 +152,7 @@ describe("memories runtime", () => {
 
 	test("startup gating skips when DB is unavailable", async () => {
 		const fx = await createFixture();
-		vi.spyOn(memoryStorage, "openMemoryDb").mockImplementation(() => {
+		vi.spyOn(memoryStorage, "getMemoryDb").mockImplementation(() => {
 			throw new Error("db unavailable");
 		});
 		const stage1Spy = vi.spyOn(ai, "completeSimple");
@@ -196,7 +201,15 @@ describe("memories runtime", () => {
 						text: JSON.stringify({
 							memory_md: "# Memory\n\nConsolidated body",
 							memory_summary: "Consolidated summary",
-							skills: [{ name: "deploy-playbook", content: "# Deploy\nUse blue/green." }],
+							skills: [
+								{
+									name: "deploy-playbook",
+									content: "# Deploy\nUse blue/green.",
+									scripts: [],
+									templates: [],
+									examples: [],
+								},
+							],
 						}),
 					},
 				],
@@ -218,9 +231,9 @@ describe("memories runtime", () => {
 			expect((await fs.readFile(path.join(memoryRoot, "memory_summary.md"), "utf8")).trim()).toBe(
 				"Consolidated summary",
 			);
-			expect(
-				(await fs.readFile(path.join(memoryRoot, "skills", "deploy-playbook", "SKILL.md"), "utf8")).trim(),
-			).toBe("# Deploy\nUse blue/green.");
+			const skillMd = path.join(getUnifiedSkillsDir(fx.session.sessionManager.getCwd(), true), "deploy-playbook.md");
+			expect((await fs.readFile(skillMd, "utf8")).trim()).toContain("# Deploy");
+			expect((await fs.readFile(skillMd, "utf8")).trim()).toContain("Use blue/green.");
 		});
 
 		expect(fx.session.refreshBaseSystemPrompt).toHaveBeenCalledTimes(1);
@@ -244,7 +257,7 @@ describe("memories runtime", () => {
 			],
 		} as any);
 
-		const db = memoryStorage.openMemoryDb(getAgentDbPath(fx.agentDir));
+		const db = memoryStorage.openMemoryDb(memoryDbPath(fx.session.sessionManager.getCwd()));
 		memoryStorage.upsertThreads(db, [
 			{
 				id: "thread-a",
@@ -301,7 +314,7 @@ describe("memories runtime", () => {
 		await fs.writeFile(path.join(memoryRoot, "memory_summary.md"), "legacy summary");
 		await fs.writeFile(path.join(memoryRoot, "skills", "legacy", "SKILL.md"), "legacy skill");
 
-		const db = memoryStorage.openMemoryDb(getAgentDbPath(fx.agentDir));
+		const db = memoryStorage.openMemoryDb(memoryDbPath(fx.session.sessionManager.getCwd()));
 		memoryStorage.enqueueGlobalWatermark(db, 300, fx.session.sessionManager.getCwd(), {
 			forceDirtyWhenNotAdvanced: true,
 		});
@@ -349,7 +362,8 @@ describe("buildMemoryToolDeveloperInstructions", () => {
 
 	test("returns undefined for missing or empty summaries", async () => {
 		const agentDir = await makeTempDir("memories-runtime-instructions");
-		const settings = Settings.isolated({ "memories.enabled": true });
+		const projectDir = await makeTempDir("memories-runtime-project-empty");
+		const settings = Settings.isolated({ "memories.enabled": true }, { cwd: projectDir, agentDir });
 
 		expect(await buildMemoryToolDeveloperInstructions(agentDir, settings)).toBeUndefined();
 
@@ -361,10 +375,14 @@ describe("buildMemoryToolDeveloperInstructions", () => {
 
 	test("renders payload with truncation for non-empty summary", async () => {
 		const agentDir = await makeTempDir("memories-runtime-instructions");
-		const settings = Settings.isolated({
-			"memories.enabled": true,
-			"memories.summaryInjectionTokenLimit": 8,
-		});
+		const projectDir = await makeTempDir("memories-runtime-project-summary");
+		const settings = Settings.isolated(
+			{
+				"memories.enabled": true,
+				"memories.summaryInjectionTokenLimit": 8,
+			},
+			{ cwd: projectDir, agentDir },
+		);
 		const memoryRoot = getMemoryRoot(agentDir, settings.getCwd());
 		await fs.mkdir(memoryRoot, { recursive: true });
 		await fs.writeFile(

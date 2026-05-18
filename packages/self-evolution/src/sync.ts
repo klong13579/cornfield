@@ -1,151 +1,214 @@
 /**
  * Sync Evolution Skills from SQLite to Files
  *
- * Phase 1 of Project Synapse: Export skills from the SQLite database
- * to individual Markdown files with YAML frontmatter.
+ * Exports skills to ~/.omp/self-evolution/skills/*.md per prompts/skill-template.md.
+ * Evolution metrics live in YAML only; the body is agent-facing content.
  */
 
 import type { Database } from "bun:sqlite";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import type { SkillFrontmatter } from "@oh-my-pi/cognitive-coordination";
 import { logger } from "@oh-my-pi/pi-utils";
 
+import { HeuristicSkillEvaluator, type ScoreBreakdown } from "./evaluator";
+import { formatSkillMarkdown } from "./skill-format";
+import { isValidSkillName, normalizeEvolutionScore } from "./skill-score";
+import { getUnifiedSkillsDir } from "./skill-storage";
+import { validateSkillContent } from "./skill-validation";
+import { SqliteSkillEffectivenessStore } from "./storage/skill-effectiveness";
+import { SqliteSkillPopulationStore } from "./storage/skill-population";
 import { SqliteSkillStore } from "./storage/skills";
-import type { EvolvedSkill } from "./types";
+import type { EvolvedSkill, SkillEffectiveness, SkillPopulationRecord } from "./types";
 
-/**
- * Sync all active skills from SQLite to Markdown files.
- *
- * @param db - SQLite database instance
- * @param outputDir - Directory to write skill Markdown files
- */
-export async function syncSkillsToFiles(db: Database, outputDir: string): Promise<void> {
-	logger.debug(`Starting skill sync to ${outputDir}`);
+export interface SkillSyncResult {
+	written: number;
+	skippedInvalid: number;
+	skippedQuality: number;
+	purgedInvalid: number;
+	repairedPopulationScores: number;
+}
 
-	// Ensure output directory exists
-	await ensureDirectory(outputDir);
-
-	// Fetch all active (non-deprecated) skills from the database
-	const store = new SqliteSkillStore(db);
-	const skills = await store.list({ deprecated: false });
-
-	logger.debug(`Found ${skills.length} active skills to sync`);
-
-	// Track which skill files were written for cleanup
-	const writtenFiles = new Set<string>();
-
-	// Write each skill to a Markdown file
-	for (const skill of skills) {
-		const filename = `${sanitizeFilename(skill.name)}.md`;
-
-		await writeSkillFile(skill, outputDir, filename);
-		writtenFiles.add(filename);
-	}
-
-	// Cleanup: remove files for deprecated/deleted skills
-	await cleanupRemovedSkills(outputDir, writtenFiles);
-
-	logger.debug(`Skill sync completed: ${skills.length} skills written`);
+export interface SkillExportContext {
+	breakdown: ScoreBreakdown;
+	population?: SkillPopulationRecord;
+	effectiveness?: SkillEffectiveness;
 }
 
 /**
- * Ensure a directory exists, creating it if necessary.
+ * Directory for evolution skill markdown exports (alongside evolution.db).
  */
+/** @deprecated Use getUnifiedSkillsDir */
+export function resolveEvolutionSkillsDir(cwd: string, globalStore?: boolean): string {
+	return getUnifiedSkillsDir(cwd, globalStore ?? true);
+}
+
+/**
+ * Remove skills with empty/invalid names and related population/effectiveness rows.
+ */
+export async function purgeInvalidSkills(db: Database): Promise<number> {
+	const store = new SqliteSkillStore(db);
+	const populationStore = new SqliteSkillPopulationStore(db);
+	const effectivenessStore = new SqliteSkillEffectivenessStore(db);
+	const all = await store.list();
+	let purged = 0;
+
+	for (const skill of all) {
+		if (isValidSkillName(skill.name)) continue;
+		await store.delete(skill.name);
+		if (tableExists(db, "skill_population")) {
+			await populationStore.delete(skill.name).catch(() => {});
+		}
+		if (tableExists(db, "skill_effectiveness")) {
+			const eff = await effectivenessStore.get(skill.name);
+			if (eff) {
+				const stmt = db.prepare("DELETE FROM skill_effectiveness WHERE skill_name = ?");
+				stmt.run(skill.name);
+				stmt.finalize();
+			}
+		}
+		purged++;
+		logger.warn("Purged invalid skill from database", { name: JSON.stringify(skill.name) });
+	}
+
+	return purged;
+}
+
+function tableExists(db: Database, table: string): boolean {
+	const row = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table);
+	return row !== undefined && row !== null;
+}
+
+export function repairPopulationScores(db: Database): number {
+	if (!tableExists(db, "skill_population")) return 0;
+
+	const rows = db
+		.prepare("SELECT name, evolution_score FROM skill_population WHERE evolution_score > 1")
+		.all() as Array<{ name: string; evolution_score: number }>;
+	if (rows.length === 0) return 0;
+
+	const update = db.prepare("UPDATE skill_population SET evolution_score = ? WHERE name = ?");
+	for (const row of rows) {
+		update.run(normalizeEvolutionScore(row.evolution_score), row.name);
+	}
+	update.finalize();
+	logger.debug("Repaired population evolution scores", { count: rows.length });
+	return rows.length;
+}
+
+/**
+ * Sync all active skills from SQLite to Markdown files.
+ */
+export async function syncSkillsToFiles(db: Database, outputDir: string): Promise<SkillSyncResult> {
+	logger.debug(`Starting skill sync to ${outputDir}`);
+
+	const purgedInvalid = await purgeInvalidSkills(db);
+	const repairedPopulationScores = repairPopulationScores(db);
+
+	await ensureDirectory(outputDir);
+
+	const store = new SqliteSkillStore(db);
+	const populationStore = new SqliteSkillPopulationStore(db);
+	const effectivenessStore = new SqliteSkillEffectivenessStore(db);
+	const evaluator = new HeuristicSkillEvaluator();
+
+	const skills = await store.list({ deprecated: false });
+	const writtenFiles = new Set<string>();
+	let written = 0;
+	let skippedInvalid = 0;
+	let skippedQuality = 0;
+
+	for (const skill of skills) {
+		if (!isValidSkillName(skill.name)) {
+			skippedInvalid++;
+			continue;
+		}
+
+		const validation = validateSkillContent({
+			name: skill.name,
+			description: skill.description,
+			taskPattern: skill.taskPattern,
+			approach: skill.approach,
+			pitfalls: skill.pitfalls,
+		});
+		if (!validation.ok) {
+			skippedQuality++;
+			logger.debug("Skipped skill export (template validation)", {
+				name: skill.name,
+				failures: validation.failures,
+			});
+			continue;
+		}
+
+		const breakdown = evaluator.reevaluate(skill);
+		const population = tableExists(db, "skill_population") ? await populationStore.get(skill.name) : undefined;
+		const effectiveness = tableExists(db, "skill_effectiveness")
+			? await effectivenessStore.get(skill.name)
+			: undefined;
+		const ctx: SkillExportContext = { breakdown, population, effectiveness };
+
+		const filename = `${sanitizeFilename(skill.name)}.md`;
+		await writeSkillFile(skill, ctx, outputDir, filename);
+		writtenFiles.add(filename);
+		written++;
+	}
+
+	await cleanupRemovedSkills(outputDir, writtenFiles);
+
+	logger.debug(`Skill sync completed`, {
+		written,
+		skippedInvalid,
+		skippedQuality,
+		purgedInvalid,
+		repairedPopulationScores,
+	});
+
+	return { written, skippedInvalid, skippedQuality, purgedInvalid, repairedPopulationScores };
+}
+
 async function ensureDirectory(dirPath: string): Promise<void> {
-	const dirExists = await fs
-		.access(dirPath)
-		.then(() => true)
-		.catch(() => false);
-	if (!dirExists) {
+	try {
+		await fs.access(dirPath);
+	} catch {
 		await fs.mkdir(dirPath, { recursive: true });
 		logger.debug(`Created output directory: ${dirPath}`);
 	}
 }
 
-/**
- * Write a single skill to a Markdown file with YAML frontmatter.
- * Uses atomic write: write to .tmp first, then rename to .md
- */
-async function writeSkillFile(skill: EvolvedSkill, outputDir: string, filename: string): Promise<void> {
+async function writeSkillFile(
+	skill: EvolvedSkill,
+	ctx: SkillExportContext,
+	outputDir: string,
+	filename: string,
+): Promise<void> {
 	const tmpFilename = filename.replace(/\.md$/, ".tmp");
 	const tmpPath = path.join(outputDir, tmpFilename);
 	const finalPath = path.join(outputDir, filename);
 
-	const frontmatter = buildFrontmatter(skill);
-	const content = formatSkillContent(frontmatter, skill.approach);
+	const content = formatSkillMarkdown(skill, {
+		source: "evolution",
+		qualityScore: ctx.breakdown.total,
+		population: ctx.population
+			? {
+					state: ctx.population.state,
+					evolutionScore: ctx.population.evolutionScore,
+					successRate: ctx.population.successRate,
+				}
+			: undefined,
+		effectiveness: ctx.effectiveness
+			? {
+					timesInjected: ctx.effectiveness.timesInjected,
+					timesHelped: ctx.effectiveness.timesHelped,
+					timesFailed: ctx.effectiveness.timesFailed,
+				}
+			: undefined,
+	});
 
-	// Atomic write: write to .tmp first, then rename
 	await Bun.write(tmpPath, content);
 	await fs.rename(tmpPath, finalPath);
 
 	logger.debug(`Synced skill: ${skill.name}`);
 }
 
-/**
- * Build YAML frontmatter from a skill.
- */
-function buildFrontmatter(skill: EvolvedSkill): SkillFrontmatter {
-	// Calculate confidence score from qualityScore or success/usage ratio
-	let confidenceScore: number;
-	if (skill.qualityScore !== undefined) {
-		confidenceScore = skill.qualityScore / 100; // qualityScore is 0-100
-	} else if (skill.usageCount > 0) {
-		confidenceScore = skill.successCount / skill.usageCount;
-	} else {
-		confidenceScore = 0;
-	}
-
-	// Determine status
-	const status: SkillFrontmatter["status"] = skill.deprecated ? "deprecated" : "active";
-
-	// Format last_used_at as ISO string
-	const lastUsedAt = skill.lastUsedAt ? new Date(skill.lastUsedAt * 1000).toISOString() : new Date().toISOString();
-
-	return {
-		name: skill.name,
-		version: String(skill.version),
-		source: "evolution",
-		confidence_score: Math.round(confidenceScore * 100) / 100,
-		last_used_at: lastUsedAt,
-		status,
-		description: skill.description || undefined,
-	};
-}
-
-/**
- * Format skill content with YAML frontmatter and body.
- */
-function formatSkillContent(frontmatter: SkillFrontmatter, approach: string): string {
-	const yamlLines = [
-		"---",
-		`name: "${frontmatter.name}"`,
-		`version: "${frontmatter.version}"`,
-		`source: "${frontmatter.source}"`,
-		`confidence_score: ${frontmatter.confidence_score}`,
-		`last_used_at: "${frontmatter.last_used_at}"`,
-		`status: "${frontmatter.status}"`,
-	];
-
-	if (frontmatter.description) {
-		yamlLines.push(`description: "${escapeYamlString(frontmatter.description)}"`);
-	}
-
-	yamlLines.push("---", "", approach);
-
-	return yamlLines.join("\n");
-}
-
-/**
- * Escape special characters in YAML string values.
- */
-function escapeYamlString(str: string): string {
-	return str.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n");
-}
-
-/**
- * Sanitize a skill name for use as a filename.
- */
 function sanitizeFilename(name: string): string {
 	return name
 		.toLowerCase()
@@ -153,36 +216,25 @@ function sanitizeFilename(name: string): string {
 		.replace(/^-|-$/g, "");
 }
 
-/**
- * Remove skill files that are no longer in the database (deprecated/deleted).
- * Only removes files that were previously created by this sync process.
- */
 async function cleanupRemovedSkills(outputDir: string, writtenFiles: Set<string>): Promise<void> {
 	const entries = await fs.readdir(outputDir);
 	let removedCount = 0;
 
 	for (const entry of entries) {
-		// Skip non-markdown files
 		if (!entry.endsWith(".md")) continue;
-
-		// Skip the sync state file if it exists
 		if (entry === ".sync-state.json") continue;
+		if (writtenFiles.has(entry)) continue;
 
-		// Only remove files that were previously written by this sync process
-		// and are no longer in the database
-		if (!writtenFiles.has(entry)) {
-			const filepath = path.join(outputDir, entry);
-			// Safety: only remove if the file has our frontmatter marker
-			try {
-				const content = await fs.readFile(filepath, "utf-8");
-				if (content.includes('source: "evolution"')) {
-					await fs.unlink(filepath);
-					removedCount++;
-					logger.debug(`Removed deprecated skill file: ${entry}`);
-				}
-			} catch {
-				// Ignore read errors
+		const filepath = path.join(outputDir, entry);
+		try {
+			const content = await fs.readFile(filepath, "utf-8");
+			if (content.includes('source: "evolution"')) {
+				await fs.unlink(filepath);
+				removedCount++;
+				logger.debug(`Removed deprecated skill file: ${entry}`);
 			}
+		} catch {
+			// Ignore read errors
 		}
 	}
 

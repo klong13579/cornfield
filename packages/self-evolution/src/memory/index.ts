@@ -1,0 +1,1606 @@
+import type { Database } from "bun:sqlite";
+import type * as fsNode from "node:fs";
+import { readFileSync } from "node:fs";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
+import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
+import { completeSimple, Effort, type Model } from "@oh-my-pi/pi-ai";
+import type { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
+import { resolveModelRoleValue } from "@oh-my-pi/pi-coding-agent/config/model-resolver";
+import type { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
+import { logger, parseJsonlLenient, prompt } from "@oh-my-pi/pi-utils";
+import { getMemoryRoot } from "../paths";
+import { ensureUnifiedSkillStorage, importConsolidationSkillsToDb, writeConsolidationSkills } from "../skill-storage";
+import { sanitizeConsolidatedMemoryMd, sanitizeConsolidatedMemorySummary } from "./consolidation-v3";
+import consolidationTemplate from "./prompts/consolidation.md" with { type: "text" };
+import readPathTemplate from "./prompts/read-path.md" with { type: "text" };
+import stageOneInputTemplate from "./prompts/stage_one_input.md" with { type: "text" };
+import stageOneSystemTemplate from "./prompts/stage_one_system.md" with { type: "text" };
+import {
+	claimStage1Jobs,
+	clearMemoryData as clearMemoryDataInDb,
+	enqueueGlobalWatermark,
+	getMemoryDb,
+	heartbeatGlobalJob,
+	listStage1OutputsForGlobal,
+	type MemoryThread,
+	markGlobalPhase2Failed,
+	markGlobalPhase2FailedUnowned,
+	markGlobalPhase2Succeeded,
+	markStage1Failed,
+	markStage1SucceededNoOutput,
+	markStage1SucceededWithOutput,
+	releaseMemoryDb,
+	type Stage1Claim,
+	type Stage1OutputRow,
+	tryClaimGlobalPhase2Job,
+	upsertThreads,
+} from "./storage";
+import { ensureMemorySummaryFromMemory } from "./summary";
+
+interface MemoryRuntimeConfig {
+	enabled: boolean;
+	maxRolloutsPerStartup: number;
+	maxRolloutAgeDays: number;
+	minRolloutIdleHours: number;
+	threadScanLimit: number;
+	maxRawMemoriesForGlobal: number;
+	stage1Concurrency: number;
+	stage1LeaseSeconds: number;
+	stage1RetryDelaySeconds: number;
+	phase2LeaseSeconds: number;
+	phase2RetryDelaySeconds: number;
+	phase2HeartbeatSeconds: number;
+	rolloutPayloadPercent: number;
+	phase1InputTokenLimit: number;
+	fallbackTokenLimit: number;
+	summaryInjectionTokenLimit: number;
+}
+
+const DEFAULTS: MemoryRuntimeConfig = {
+	enabled: false,
+	maxRolloutsPerStartup: 64,
+	maxRolloutAgeDays: 30,
+	minRolloutIdleHours: 12,
+	threadScanLimit: 300,
+	maxRawMemoriesForGlobal: 200,
+	stage1Concurrency: 8,
+	stage1LeaseSeconds: 120,
+	stage1RetryDelaySeconds: 120,
+	phase2LeaseSeconds: 180,
+	phase2RetryDelaySeconds: 180,
+	phase2HeartbeatSeconds: 30,
+	rolloutPayloadPercent: 0.7,
+	phase1InputTokenLimit: 4_000,
+	fallbackTokenLimit: 16_000,
+	summaryInjectionTokenLimit: 5_000,
+};
+
+interface Stage1Stats {
+	claimed: number;
+	succeeded: number;
+	succeededNoOutput: number;
+	failed: number;
+	produced: number;
+	usage: {
+		input: number;
+		output: number;
+		cacheRead: number;
+		cacheWrite: number;
+		total: number;
+	};
+}
+
+interface Stage1OutputSchema {
+	raw_memory: string;
+	rollout_summary: string;
+	rollout_slug: string | null;
+}
+
+interface ConsolidationSkillFileSchema {
+	path: string;
+	content: string;
+}
+
+interface ConsolidationSkillSchema {
+	name: string;
+	content?: string;
+	scripts?: ConsolidationSkillFileSchema[];
+	templates?: ConsolidationSkillFileSchema[];
+	examples?: ConsolidationSkillFileSchema[];
+}
+interface ConsolidationOutputSchema {
+	memory_md: string;
+	memory_summary: string;
+	skills: ConsolidationSkillSchema[];
+}
+
+/**
+ * Start the background memory startup pipeline.
+ *
+ * Skips for ephemeral sessions, subagent sessions, disabled settings, or DB failures.
+ */
+export function startMemoryStartupTask(options: {
+	session: AgentSession;
+	settings: Settings;
+	modelRegistry: ModelRegistry;
+	agentDir: string;
+	taskDepth: number;
+}): void {
+	const { session, settings, modelRegistry, agentDir, taskDepth } = options;
+	const cfg = loadMemoryConfig(settings);
+	if (!cfg.enabled) return;
+	if (taskDepth > 0) return;
+	if (!session.sessionManager.getSessionFile()) return;
+
+	const cwd = session.sessionManager.getCwd();
+	try {
+		getMemoryDb(cwd, false);
+		releaseMemoryDb(cwd, false);
+	} catch (error) {
+		logger.debug("Memory startup skipped: state DB unavailable", { error: String(error) });
+		return;
+	}
+
+	void runMemoryStartup({ session, settings, modelRegistry, agentDir, config: cfg }).catch(error => {
+		logger.warn("Memory startup failed", { error: String(error) });
+	});
+}
+
+/**
+ * Build memory usage instructions for prompt injection.
+ */
+export async function buildMemoryToolDeveloperInstructions(
+	agentDir: string,
+	settings: Settings,
+): Promise<string | undefined> {
+	const cfg = loadMemoryConfig(settings);
+	if (!cfg.enabled) return undefined;
+	const memoryRoot = getMemoryRoot(agentDir, settings.getCwd());
+	const summaryPath = path.join(memoryRoot, "memory_summary.md");
+
+	let text: string;
+	try {
+		text = await Bun.file(summaryPath).text();
+	} catch {
+		return undefined;
+	}
+
+	const summary = text.trim();
+	if (!summary) return undefined;
+	const truncated = truncateByApproxTokens(summary, cfg.summaryInjectionTokenLimit);
+	if (!truncated.trim()) return undefined;
+
+	return prompt.render(readPathTemplate, {
+		memory_summary: truncated,
+	});
+}
+
+/**
+ * Clear all persisted memory state and generated artifacts.
+ */
+export async function clearMemoryData(agentDir: string, cwd: string): Promise<void> {
+	const db = getMemoryDb(cwd, false);
+	try {
+		clearMemoryDataInDb(db);
+	} finally {
+		releaseMemoryDb(cwd, false);
+	}
+	await fs.rm(getMemoryRoot(agentDir, cwd), { recursive: true, force: true });
+}
+
+/**
+ * Run Phase1+Phase2 memory maintenance to completion (for scripts / ops).
+ */
+export async function runMemoryMaintenanceOnce(options: {
+	session: AgentSession;
+	settings: Settings;
+	modelRegistry: ModelRegistry;
+	agentDir: string;
+	phase?: "all" | "phase2";
+}): Promise<void> {
+	const cfg = loadMemoryConfig(options.settings);
+	if (!cfg.enabled) {
+		throw new Error("memories.enabled is false");
+	}
+	if (options.phase === "phase2") {
+		await runPhase2({ ...options, config: cfg });
+		return;
+	}
+	await runMemoryStartup({ ...options, config: cfg });
+}
+
+/**
+ * Force-enqueue global consolidation maintenance work.
+ */
+export function enqueueMemoryConsolidation(_agentDir: string, cwd: string, sourceUpdatedAt = unixNow()): void {
+	const db = getMemoryDb(cwd, false);
+	try {
+		enqueueGlobalWatermark(db, sourceUpdatedAt, cwd, { forceDirtyWhenNotAdvanced: true });
+	} finally {
+		releaseMemoryDb(cwd, false);
+	}
+}
+
+async function runMemoryStartup(options: {
+	session: AgentSession;
+	settings: Settings;
+	modelRegistry: ModelRegistry;
+	agentDir: string;
+	config: MemoryRuntimeConfig;
+}): Promise<void> {
+	await runPhase1(options);
+	await runPhase2(options);
+	await options.session.refreshBaseSystemPrompt?.();
+}
+
+async function runPhase1(options: {
+	session: AgentSession;
+	settings: Settings;
+	modelRegistry: ModelRegistry;
+	agentDir: string;
+	config: MemoryRuntimeConfig;
+}): Promise<void> {
+	const { session, modelRegistry, agentDir, config } = options;
+	const cwd = session.sessionManager.getCwd();
+	const db = getMemoryDb(cwd, false);
+	const nowSec = unixNow();
+	const workerId = `memory-${process.pid}`;
+	const memoryRoot = getMemoryRoot(agentDir, cwd);
+	const currentThreadId = session.sessionManager.getSessionId();
+
+	try {
+		const threads = await collectThreads(session, currentThreadId);
+		upsertThreads(db, threads);
+
+		const phase1Model = await resolveMemoryModel({
+			modelRegistry,
+			session,
+			fallbackRole: "default",
+		});
+		if (!phase1Model) {
+			logger.debug("Phase1 skipped: no model available");
+			return;
+		}
+		const phase1ApiKey = await modelRegistry.getApiKey(phase1Model, session.sessionManager.getSessionId());
+		if (!phase1ApiKey) {
+			logger.debug("Phase1 skipped: no API key for phase1 model", {
+				provider: phase1Model.provider,
+				model: phase1Model.id,
+			});
+			return;
+		}
+		const phase1LlmModel = adaptModelForDashScopeCodingKey(phase1Model, phase1ApiKey, modelRegistry);
+
+		const claims = claimStage1Jobs(db, {
+			nowSec,
+			threadScanLimit: config.threadScanLimit,
+			maxRolloutsPerStartup: config.maxRolloutsPerStartup,
+			maxRolloutAgeDays: config.maxRolloutAgeDays,
+			minRolloutIdleHours: config.minRolloutIdleHours,
+			leaseSeconds: config.stage1LeaseSeconds,
+			runningConcurrencyCap: config.stage1Concurrency,
+			workerId,
+			excludeThreadIds: currentThreadId ? [currentThreadId] : [],
+		});
+		if (claims.length === 0) return;
+
+		const stats: Stage1Stats = {
+			claimed: claims.length,
+			succeeded: 0,
+			succeededNoOutput: 0,
+			failed: 0,
+			produced: 0,
+			usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		};
+
+		await runWithConcurrency(claims, config.stage1Concurrency, async claim => {
+			const result = await runStage1JobWithFallback({
+				claim,
+				model: phase1LlmModel,
+				apiKey: phase1ApiKey,
+				modelMaxTokens: computeModelTokenBudget(phase1LlmModel, config),
+				config,
+			});
+
+			if (result.kind === "failed") {
+				logger.error("Memory phase1 stage1 job failed", {
+					threadId: claim.threadId,
+					rolloutPath: claim.rolloutPath,
+					reason: result.reason,
+				});
+				markStage1Failed(db, {
+					threadId: claim.threadId,
+					ownershipToken: claim.ownershipToken,
+					retryDelaySeconds: config.stage1RetryDelaySeconds,
+					reason: result.reason,
+					nowSec: unixNow(),
+				});
+				stats.failed += 1;
+				return;
+			}
+
+			if (result.kind === "no_output") {
+				markStage1SucceededNoOutput(db, {
+					threadId: claim.threadId,
+					ownershipToken: claim.ownershipToken,
+					sourceUpdatedAt: claim.sourceUpdatedAt,
+					nowSec: unixNow(),
+					cwd: claim.cwd,
+				});
+				stats.succeededNoOutput += 1;
+				return;
+			}
+
+			markStage1SucceededWithOutput(db, {
+				threadId: claim.threadId,
+				ownershipToken: claim.ownershipToken,
+				sourceUpdatedAt: claim.sourceUpdatedAt,
+				rawMemory: result.output.rawMemory,
+				rolloutSummary: result.output.rolloutSummary,
+				rolloutSlug: result.output.rolloutSlug,
+				nowSec: unixNow(),
+				cwd: claim.cwd,
+			});
+			stats.succeeded += 1;
+			stats.produced += 1;
+			if (result.usage) {
+				stats.usage.input += result.usage.input;
+				stats.usage.output += result.usage.output;
+				stats.usage.cacheRead += result.usage.cacheRead;
+				stats.usage.cacheWrite += result.usage.cacheWrite;
+				stats.usage.total += result.usage.totalTokens || 0;
+			}
+		});
+
+		logger.debug("Memory phase1 completed", {
+			memoryRoot,
+			claimed: stats.claimed,
+			succeeded: stats.succeeded,
+			succeededNoOutput: stats.succeededNoOutput,
+			failed: stats.failed,
+			produced: stats.produced,
+			usage: stats.usage,
+		});
+	} finally {
+		releaseMemoryDb(cwd, false);
+	}
+}
+
+async function runPhase2(options: {
+	session: AgentSession;
+	settings: Settings;
+	modelRegistry: ModelRegistry;
+	agentDir: string;
+	config: MemoryRuntimeConfig;
+}): Promise<void> {
+	const { session, modelRegistry, agentDir, config } = options;
+	const cwd = session.sessionManager.getCwd();
+	const db = getMemoryDb(cwd, false);
+	const nowSec = unixNow();
+	const workerId = `memory-${process.pid}`;
+	const memoryRoot = getMemoryRoot(agentDir, cwd);
+
+	try {
+		const claimResult = tryClaimGlobalPhase2Job(db, {
+			workerId,
+			leaseSeconds: config.phase2LeaseSeconds,
+			nowSec,
+			cwd,
+		});
+		if (claimResult.kind !== "claimed") return;
+
+		const claim = claimResult.claim;
+		const outputs = listStage1OutputsForGlobal(db, config.maxRawMemoriesForGlobal, cwd);
+		const newWatermark = computeCompletionWatermark(claim.inputWatermark, outputs);
+
+		await syncPhase2Artifacts(memoryRoot, outputs);
+		if (outputs.length === 0) {
+			await cleanupConsolidatedArtifacts(memoryRoot);
+			const marked = markGlobalPhase2Succeeded(db, {
+				ownershipToken: claim.ownershipToken,
+				newWatermark,
+				nowSec: unixNow(),
+				cwd,
+			});
+			if (!marked) {
+				logger.warn("Phase2 empty-input completion lost ownership", { memoryRoot });
+			}
+			return;
+		}
+
+		const phase2Model = await resolveMemoryModel({
+			modelRegistry,
+			session,
+			fallbackRole: "default",
+		});
+		if (!phase2Model) {
+			markPhase2FailureWithFallback(db, {
+				claim,
+				retryDelaySeconds: config.phase2RetryDelaySeconds,
+				reason: "No model available for phase2",
+				memoryRoot,
+				cwd,
+			});
+			return;
+		}
+		const phase2ApiKey = await modelRegistry.getApiKey(phase2Model, session.sessionManager.getSessionId());
+		if (!phase2ApiKey) {
+			markPhase2FailureWithFallback(db, {
+				claim,
+				retryDelaySeconds: config.phase2RetryDelaySeconds,
+				reason: "No API key available for phase2",
+				memoryRoot,
+				cwd,
+			});
+			return;
+		}
+		const phase2LlmModel = adaptModelForDashScopeCodingKey(phase2Model, phase2ApiKey, modelRegistry);
+
+		let heartbeatLostOwnership = false;
+		const heartbeat = setInterval(() => {
+			const ok = heartbeatGlobalJob(db, {
+				ownershipToken: claim.ownershipToken,
+				leaseSeconds: config.phase2LeaseSeconds,
+				nowSec: unixNow(),
+				cwd,
+			});
+			if (!ok) {
+				heartbeatLostOwnership = true;
+				clearInterval(heartbeat);
+			}
+		}, config.phase2HeartbeatSeconds * 1000);
+
+		try {
+			const consolidated = await runConsolidationWithFallback({
+				memoryRoot,
+				model: phase2LlmModel,
+				apiKey: phase2ApiKey,
+				outputs,
+			});
+			await applyConsolidation(memoryRoot, cwd, consolidated);
+			if (heartbeatLostOwnership) {
+				throw new Error("Phase2 lease ownership lost before completion");
+			}
+			const marked = markGlobalPhase2Succeeded(db, {
+				ownershipToken: claim.ownershipToken,
+				newWatermark,
+				nowSec: unixNow(),
+				cwd,
+			});
+			if (!marked) {
+				throw new Error("Phase2 could not mark success: ownership lost");
+			}
+		} catch (error) {
+			markPhase2FailureWithFallback(db, {
+				claim,
+				retryDelaySeconds: config.phase2RetryDelaySeconds,
+				reason: String(error),
+				memoryRoot,
+				cwd,
+				error,
+			});
+		} finally {
+			clearInterval(heartbeat);
+		}
+	} finally {
+		releaseMemoryDb(cwd, false);
+	}
+}
+
+function markPhase2FailureWithFallback(
+	db: Database,
+	params: {
+		claim: { ownershipToken: string; inputWatermark: number };
+		retryDelaySeconds: number;
+		reason: string;
+		memoryRoot: string;
+		cwd: string;
+		error?: unknown;
+	},
+): void {
+	const { claim, retryDelaySeconds, reason, memoryRoot, cwd, error } = params;
+	const nowSec = unixNow();
+	const strictFailed = markGlobalPhase2Failed(db, {
+		ownershipToken: claim.ownershipToken,
+		retryDelaySeconds,
+		reason,
+		nowSec,
+		cwd,
+	});
+	if (strictFailed) return;
+
+	const unownedFailed = markGlobalPhase2FailedUnowned(db, {
+		retryDelaySeconds,
+		reason,
+		nowSec,
+		cwd,
+	});
+	if (!unownedFailed) {
+		logger.warn("Phase2 could not mark failure (ownership lost and unowned fallback skipped)", {
+			error: error ? String(error) : undefined,
+			memoryRoot,
+			reason,
+			inputWatermark: claim.inputWatermark,
+		});
+	}
+}
+
+async function collectThreads(session: AgentSession, currentThreadId?: string): Promise<MemoryThread[]> {
+	const sessionDir = session.sessionManager.getSessionDir();
+	const files = await fs.readdir(sessionDir);
+	const threads: MemoryThread[] = [];
+	for (const name of files) {
+		if (!name.endsWith(".jsonl")) continue;
+		const fullPath = path.join(sessionDir, name);
+		let stat: fsNode.Stats;
+		try {
+			stat = await fs.stat(fullPath);
+		} catch {
+			continue;
+		}
+		let cwd = "";
+		let id = name.slice(0, -6);
+		try {
+			const fileText = await Bun.file(fullPath).text();
+			const firstLine = fileText.split("\n", 1)[0] ?? "";
+			const parsed = parseJsonlLenient(firstLine);
+			const header = Array.isArray(parsed) && parsed.length > 0 ? (parsed[0] as Record<string, unknown>) : undefined;
+			if (header && header.type === "session") {
+				if (typeof header.cwd === "string") cwd = header.cwd;
+				if (typeof header.id === "string") id = header.id;
+			}
+		} catch {
+			// ignore malformed session files
+		}
+
+		if (currentThreadId && id === currentThreadId) continue;
+		threads.push({
+			id,
+			updatedAt: Math.floor(stat.mtimeMs / 1000),
+			rolloutPath: fullPath,
+			cwd,
+			sourceKind: "cli",
+		});
+	}
+	return threads;
+}
+
+function shouldPersistResponseItemForMemories(message: AgentMessage): boolean {
+	const role = (message as { role: string }).role;
+	if (role === "system" || role === "developer" || role === "user" || role === "assistant") {
+		return true;
+	}
+	if (role !== "toolResult") return false;
+	const toolName = (message as { toolName?: string }).toolName;
+	if (toolName === "bash" || toolName === "python" || toolName === "read" || toolName === "search") {
+		const text = extractMessageText(message);
+		return text.length > 0 && text.length <= 32_000;
+	}
+	return false;
+}
+
+function extractPersistableMessages(payload: string): AgentMessage[] {
+	const rows = parseJsonlLenient(payload);
+	if (!Array.isArray(rows)) return [];
+	const messages: AgentMessage[] = [];
+	for (const row of rows) {
+		if (!row || typeof row !== "object") continue;
+		const entry = row as Record<string, unknown>;
+		if (entry.type !== "message") continue;
+		const maybeMessage = entry.message;
+		if (!maybeMessage || typeof maybeMessage !== "object") continue;
+		const message = maybeMessage as AgentMessage;
+		if (shouldPersistResponseItemForMemories(message)) {
+			messages.push(message);
+		}
+	}
+	return messages;
+}
+
+async function runStage1Job(options: {
+	claim: Stage1Claim;
+	model: Model;
+	apiKey: string;
+	modelMaxTokens: number;
+	config: MemoryRuntimeConfig;
+}): Promise<
+	| {
+			kind: "output";
+			output: { rawMemory: string; rolloutSummary: string; rolloutSlug: string | null };
+			usage?: { input: number; output: number; cacheRead: number; cacheWrite: number; totalTokens?: number };
+	  }
+	| { kind: "no_output" }
+	| { kind: "failed"; reason: string }
+> {
+	const { claim, model, apiKey, modelMaxTokens, config } = options;
+	try {
+		const rolloutRaw = await Bun.file(claim.rolloutPath).text();
+		const persisted = extractPersistableMessages(rolloutRaw);
+		const serializedItems = JSON.stringify(persisted);
+		const budgetTokens = Math.min(
+			config.phase1InputTokenLimit,
+			Math.floor(modelMaxTokens * config.rolloutPayloadPercent),
+		);
+		const truncatedItems = truncateByApproxTokens(serializedItems, budgetTokens);
+		const inputPrompt = prompt.render(stageOneInputTemplate, {
+			thread_id: claim.threadId,
+			response_items_json: truncatedItems,
+		});
+
+		const response = await completeSimple(
+			model,
+			{
+				systemPrompt: stageOneSystemTemplate,
+				messages: [{ role: "user", content: [{ type: "text", text: inputPrompt }], timestamp: Date.now() }],
+			},
+			{
+				apiKey,
+				maxTokens: Math.max(1024, Math.min(4096, Math.floor(modelMaxTokens * 0.2))),
+				reasoning: Effort.Low,
+			},
+		);
+
+		if (response.stopReason === "error") {
+			return { kind: "failed", reason: response.errorMessage || "stage1 model error" };
+		}
+		const text = response.content
+			.filter((c): c is { type: "text"; text: string } => c.type === "text")
+			.map(c => c.text)
+			.join("\n")
+			.trim();
+		const parsed = parseJsonObject(text);
+		if (!parsed) {
+			return { kind: "failed", reason: "stage1 JSON parse failure" };
+		}
+		const schemaOutput = parseStage1OutputSchema(parsed);
+		if (!schemaOutput) {
+			return { kind: "failed", reason: "stage1 JSON schema validation failure" };
+		}
+
+		const rawMemory = redactSecrets(schemaOutput.raw_memory).trim();
+		const rolloutSummary = redactSecrets(schemaOutput.rollout_summary).trim();
+		const rolloutSlug = schemaOutput.rollout_slug === null ? null : redactSecrets(schemaOutput.rollout_slug).trim();
+		if (!rawMemory || !rolloutSummary) {
+			return { kind: "no_output" };
+		}
+		return {
+			kind: "output",
+			output: {
+				rawMemory,
+				rolloutSummary,
+				rolloutSlug: rolloutSlug || null,
+			},
+			usage: response.usage,
+		};
+	} catch (error) {
+		return { kind: "failed", reason: String(error) };
+	}
+}
+
+async function syncPhase2Artifacts(memoryRoot: string, outputs: Stage1OutputRow[]): Promise<void> {
+	const summariesDir = path.join(memoryRoot, "rollout_summaries");
+	await fs.mkdir(summariesDir, { recursive: true });
+
+	const keepFiles = new Set<string>();
+	for (const row of outputs) {
+		const stem = formatRolloutFilename(row.threadId, row.rolloutSlug);
+		const filename = `${stem}.md`;
+		keepFiles.add(filename);
+		const body = [`thread_id: ${row.threadId}`, `updated_at: ${row.sourceUpdatedAt}`, "", row.rolloutSummary].join(
+			"\n",
+		);
+		await Bun.write(path.join(summariesDir, filename), `${body.trim()}\n`);
+	}
+
+	const currentFiles = await fs.readdir(summariesDir).catch(() => [] as string[]);
+	for (const file of currentFiles) {
+		if (!file.endsWith(".md")) continue;
+		if (keepFiles.has(file)) continue;
+		await fs.rm(path.join(summariesDir, file), { force: true });
+	}
+
+	const rawBody = buildRawMemoriesMarkdown(outputs);
+	await Bun.write(path.join(memoryRoot, "raw_memories.md"), rawBody);
+}
+
+async function cleanupConsolidatedArtifacts(memoryRoot: string): Promise<void> {
+	await fs.rm(path.join(memoryRoot, "MEMORY.md"), { force: true });
+	await fs.rm(path.join(memoryRoot, "memory_summary.md"), { force: true });
+	await fs.rm(path.join(memoryRoot, "skills"), { recursive: true, force: true });
+}
+
+function buildRawMemoriesMarkdown(outputs: Stage1OutputRow[]): string {
+	if (outputs.length === 0) {
+		return "# Raw Memories\n\nNo raw memories yet.\n";
+	}
+
+	const blocks = outputs.map(row => {
+		const header = [`## ${row.threadId}`, `updated_at: ${row.sourceUpdatedAt}`, ""].join("\n");
+		return `${header}${row.rawMemory.trim()}\n`;
+	});
+	return `# Raw Memories\n\n${blocks.join("\n")}`;
+}
+
+async function readRolloutSummaries(memoryRoot: string): Promise<string> {
+	const summariesDir = path.join(memoryRoot, "rollout_summaries");
+	const names = await fs.readdir(summariesDir).catch(() => [] as string[]);
+	const summaryNames = names.filter(name => name.endsWith(".md")).sort((a, b) => a.localeCompare(b));
+	if (summaryNames.length === 0) return "No rollout summaries yet.";
+
+	const blocks: string[] = [];
+	for (const name of summaryNames) {
+		const text = await Bun.file(path.join(summariesDir, name))
+			.text()
+			.catch(() => "");
+		if (!text.trim()) continue;
+		blocks.push(`--- ${name} ---\n${text.trim()}`);
+	}
+	if (blocks.length === 0) return "No rollout summaries yet.";
+	return blocks.join("\n\n");
+}
+
+async function runConsolidationModel(options: { memoryRoot: string; model: Model; apiKey: string }): Promise<{
+	memoryMd: string;
+	memorySummary: string;
+	skills: Array<{
+		name: string;
+		content: string;
+		scripts: ConsolidationSkillFileSchema[];
+		templates: ConsolidationSkillFileSchema[];
+		examples: ConsolidationSkillFileSchema[];
+	}>;
+}> {
+	const { memoryRoot, model, apiKey } = options;
+	const rawMemories = await Bun.file(path.join(memoryRoot, "raw_memories.md")).text();
+	const rolloutSummaries = await readRolloutSummaries(memoryRoot);
+	const input = prompt.render(consolidationTemplate, {
+		raw_memories: truncateByApproxTokens(rawMemories, 20_000),
+		rollout_summaries: truncateByApproxTokens(rolloutSummaries, 12_000),
+	});
+
+	const response = await completeSimple(
+		model,
+		{
+			messages: [{ role: "user", content: [{ type: "text", text: input }], timestamp: Date.now() }],
+		},
+		{ apiKey, maxTokens: 8192, reasoning: Effort.Medium },
+	);
+	if (response.stopReason === "error") {
+		throw new Error(response.errorMessage || "phase2 model error");
+	}
+	const text = response.content
+		.filter((c): c is { type: "text"; text: string } => c.type === "text")
+		.map(c => c.text)
+		.join("\n")
+		.trim();
+	const parsed = parseJsonObject(text);
+	if (!parsed) {
+		logger.warn("phase2 JSON parse failure — raw text logged", { textSnippet: text.slice(0, 500) });
+		throw new Error("phase2 JSON parse failure");
+	}
+	const schemaOutput = parseConsolidationOutputSchema(parsed);
+	if (!schemaOutput) {
+		logger.warn("phase2 JSON schema validation failure — parsed object logged", {
+			parsedKeys: Object.keys(parsed).join(", "),
+		});
+		throw new Error("phase2 JSON schema validation failure");
+	}
+	const memoryMd = sanitizeConsolidatedMemoryMd(redactSecrets(schemaOutput.memory_md).trim());
+	let memorySummary = sanitizeConsolidatedMemorySummary(redactSecrets(schemaOutput.memory_summary).trim(), memoryMd);
+	const skills = schemaOutput.skills
+		.map(item => {
+			const name = sanitizeSkillName(item.name.trim());
+			const content = redactSecrets(item.content ?? "").trim();
+			if (!name || !content) return null;
+			return {
+				name,
+				content,
+				scripts: sanitizeConsolidationSkillFiles(item.scripts, "scripts"),
+				templates: sanitizeConsolidationSkillFiles(item.templates, "templates"),
+				examples: sanitizeConsolidationSkillFiles(item.examples, "examples"),
+			};
+		})
+		.filter(
+			(
+				item,
+			): item is {
+				name: string;
+				content: string;
+				scripts: ConsolidationSkillFileSchema[];
+				templates: ConsolidationSkillFileSchema[];
+				examples: ConsolidationSkillFileSchema[];
+			} => item !== null,
+		);
+	if (!memoryMd) {
+		throw new Error("phase2 returned empty consolidated memory");
+	}
+	if (!memorySummary.trim()) {
+		memorySummary = sanitizeConsolidatedMemorySummary("", memoryMd);
+	}
+	return { memoryMd, memorySummary, skills };
+}
+
+async function applyConsolidation(
+	memoryRoot: string,
+	cwd: string,
+	consolidated: {
+		memoryMd: string;
+		memorySummary: string;
+		skills: Array<{
+			name: string;
+			content: string;
+			scripts: ConsolidationSkillFileSchema[];
+			templates: ConsolidationSkillFileSchema[];
+			examples: ConsolidationSkillFileSchema[];
+		}>;
+	},
+): Promise<void> {
+	const memoryMd = sanitizeConsolidatedMemoryMd(consolidated.memoryMd.trim());
+	const memorySummary = sanitizeConsolidatedMemorySummary(consolidated.memorySummary.trim(), memoryMd);
+	await Bun.write(path.join(memoryRoot, "MEMORY.md"), `${memoryMd}\n`);
+	await ensureMemorySummaryFromMemory(memoryRoot, {
+		memoryMd,
+		llmSummary: memorySummary,
+	});
+
+	const unifiedDir = await ensureUnifiedSkillStorage(cwd, memoryRoot);
+	await writeConsolidationSkills(unifiedDir, consolidated.skills);
+	await importConsolidationSkillsToDb(cwd, consolidated.skills);
+}
+
+async function _listRelativeFiles(rootDir: string, prefix = ""): Promise<string[]> {
+	const entries = await fs.readdir(rootDir, { withFileTypes: true }).catch(() => []);
+	const files: string[] = [];
+	for (const entry of entries) {
+		const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
+		if (entry.isDirectory()) {
+			files.push(...(await _listRelativeFiles(path.join(rootDir, entry.name), relative)));
+			continue;
+		}
+		if (entry.isFile()) files.push(relative);
+	}
+	return files;
+}
+
+async function _pruneEmptyDirectories(rootDir: string): Promise<void> {
+	const entries = await fs.readdir(rootDir, { withFileTypes: true }).catch(() => []);
+	for (const entry of entries) {
+		if (!entry.isDirectory()) continue;
+		const child = path.join(rootDir, entry.name);
+		await _pruneEmptyDirectories(child);
+		const childEntries = await fs.readdir(child).catch(() => []);
+		if (childEntries.length === 0) {
+			await fs.rm(child, { recursive: true, force: true });
+		}
+	}
+}
+
+function computeCompletionWatermark(claimedInputWatermark: number, outputs: Stage1OutputRow[]): number {
+	const maxOutputWatermark = outputs.reduce((max, row) => Math.max(max, row.sourceUpdatedAt), claimedInputWatermark);
+	return Math.max(claimedInputWatermark, maxOutputWatermark);
+}
+
+function formatRolloutFilename(threadId: string, rolloutSlug: string | null): string {
+	if (!rolloutSlug) return threadId;
+	const normalized = rolloutSlug
+		.toLowerCase()
+		.replace(/[^a-z0-9]+/g, "_")
+		.replace(/_+$/g, "")
+		.slice(0, 20);
+	if (!normalized) return threadId;
+	return `${threadId}-${normalized}`;
+}
+
+function parseJsonObject(text: string): Record<string, unknown> | undefined {
+	if (!text) return undefined;
+
+	// 1. Strip markdown code blocks
+	let candidate = text.trim();
+	const codeBlockMatch = candidate.match(/```(?:json)?\s*([\s\S]*?)```/);
+	if (codeBlockMatch) {
+		candidate = codeBlockMatch[1].trim();
+	}
+
+	// 2. Try direct parse
+	try {
+		const parsed = JSON.parse(candidate) as unknown;
+		if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+			return parsed as Record<string, unknown>;
+		}
+	} catch {
+		/* continue */
+	}
+
+	// 3. Try to extract outermost JSON object using balanced brace matching
+	let depth = 0;
+	let start = -1;
+	for (let i = 0; i < candidate.length; i++) {
+		if (candidate[i] === "{" && (i === 0 || candidate[i - 1] !== "\\")) {
+			if (depth === 0) start = i;
+			depth++;
+		} else if (candidate[i] === "}" && (i === 0 || candidate[i - 1] !== "\\")) {
+			depth--;
+			if (depth === 0 && start !== -1) {
+				try {
+					const extracted = candidate.slice(start, i + 1);
+					const parsed = JSON.parse(extracted) as unknown;
+					if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+						return parsed as Record<string, unknown>;
+					}
+				} catch {
+					/* continue searching */
+				}
+			}
+		}
+	}
+
+	return undefined;
+}
+
+function parseStage1OutputSchema(value: Record<string, unknown>): Stage1OutputSchema | undefined {
+	if (!hasExactKeys(value, ["rollout_summary", "rollout_slug", "raw_memory"])) return undefined;
+	if (typeof value.rollout_summary !== "string") return undefined;
+	if (!(typeof value.rollout_slug === "string" || value.rollout_slug === null)) return undefined;
+	if (typeof value.raw_memory !== "string") return undefined;
+	return {
+		rollout_summary: value.rollout_summary,
+		rollout_slug: value.rollout_slug,
+		raw_memory: value.raw_memory,
+	};
+}
+
+function parseConsolidationOutputSchema(value: Record<string, unknown>): ConsolidationOutputSchema | undefined {
+	if (!hasExactKeys(value, ["memory_md", "memory_summary", "skills"])) return undefined;
+	if (typeof value.memory_md !== "string") return undefined;
+	if (typeof value.memory_summary !== "string") return undefined;
+	if (!Array.isArray(value.skills)) return undefined;
+	const skills: ConsolidationSkillSchema[] = [];
+	for (const item of value.skills) {
+		if (!item || typeof item !== "object" || Array.isArray(item)) return undefined;
+		const data = item as Record<string, unknown>;
+		if (!hasExactKeys(data, ["name", "content", "scripts", "templates", "examples"], false, true)) return undefined;
+		if (typeof data.name !== "string") return undefined;
+		if (!(typeof data.content === "string" || data.content === undefined)) return undefined;
+		const scripts = parseConsolidationSkillFileArray(data.scripts);
+		const templates = parseConsolidationSkillFileArray(data.templates);
+		const examples = parseConsolidationSkillFileArray(data.examples);
+		if (!scripts || !templates || !examples) return undefined;
+		skills.push({
+			name: data.name,
+			content: data.content,
+			scripts,
+			templates,
+			examples,
+		});
+	}
+	return {
+		memory_md: value.memory_md,
+		memory_summary: value.memory_summary,
+		skills,
+	};
+}
+
+function hasExactKeys(
+	value: Record<string, unknown>,
+	expectedKeys: string[],
+	allowMissing = false,
+	allowExtra = false,
+): boolean {
+	const sortedKeys = Object.keys(value).sort();
+	const sortedExpected = [...expectedKeys].sort();
+
+	// Check for extra keys
+	if (!allowExtra) {
+		for (const key of sortedKeys) {
+			if (!sortedExpected.includes(key)) return false;
+		}
+	}
+
+	// Check length (if no extras allowed and no missing allowed)
+	if (!allowExtra && !allowMissing && sortedKeys.length !== sortedExpected.length) return false;
+
+	// Check that all expected keys are present
+	for (const key of sortedExpected) {
+		if (!sortedKeys.includes(key) && !allowMissing) return false;
+	}
+
+	return true;
+}
+
+function redactSecrets(input: string): string {
+	let out = input;
+	const patterns = [
+		/(?:sk|pk|rk|tok|key|secret|token|password)[-_A-Za-z0-9]{12,}/g,
+		/[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}/g,
+		/(?:AKIA|ASIA)[A-Z0-9]{16}/g,
+	];
+	for (const pattern of patterns) {
+		out = out.replace(pattern, "[REDACTED]");
+	}
+	return out;
+}
+
+function sanitizeSkillName(name: string): string {
+	return name
+		.toLowerCase()
+		.replace(/[^a-z0-9_-]+/g, "-")
+		.replace(/^-+|-+$/g, "")
+		.slice(0, 64);
+}
+
+function parseConsolidationSkillFileArray(value: unknown): ConsolidationSkillFileSchema[] | undefined {
+	if (value === undefined) return [];
+	if (!Array.isArray(value)) return undefined;
+	const files: ConsolidationSkillFileSchema[] = [];
+	for (const item of value) {
+		if (!item || typeof item !== "object" || Array.isArray(item)) return undefined;
+		const data = item as Record<string, unknown>;
+		if (!hasExactKeys(data, ["path", "content"])) return undefined;
+		if (typeof data.path !== "string" || typeof data.content !== "string") return undefined;
+		files.push({ path: data.path, content: data.content });
+	}
+	return files;
+}
+
+function sanitizeConsolidationSkillFiles(
+	files: ConsolidationSkillFileSchema[] | undefined,
+	bucket: "scripts" | "templates" | "examples",
+): ConsolidationSkillFileSchema[] {
+	if (!files || files.length === 0) return [];
+	const sanitized = new Map<string, string>();
+	for (const file of files) {
+		const relativePath = sanitizeSkillRelativePath(file.path);
+		if (!relativePath) continue;
+		const content = redactSecrets(file.content).trim();
+		if (!content) continue;
+		sanitized.set(path.posix.join(bucket, relativePath), content);
+	}
+	return [...sanitized.entries()]
+		.sort(([a], [b]) => a.localeCompare(b))
+		.map(([fullPath, content]) => ({
+			path: fullPath.slice(bucket.length + 1),
+			content,
+		}));
+}
+
+function sanitizeSkillRelativePath(rawPath: string): string | undefined {
+	const normalized = rawPath.replace(/\\/g, "/").trim();
+	if (!normalized) return undefined;
+	if (normalized.startsWith("/")) return undefined;
+	if (normalized.includes("\0")) return undefined;
+	if (normalized.includes(":")) return undefined;
+	const parts = normalized.split("/").filter(Boolean);
+	if (parts.length === 0) return undefined;
+	for (const part of parts) {
+		if (part === "." || part === "..") return undefined;
+		if (!/^[A-Za-z0-9._-]+$/.test(part)) return undefined;
+	}
+	return parts.join("/");
+}
+
+function extractMessageText(message: AgentMessage): string {
+	const content = (message as { content?: unknown }).content;
+	if (typeof content === "string") return content;
+	if (!Array.isArray(content)) return "";
+	return content
+		.map(item => {
+			if (item.type === "text") return item.text;
+			if (item.type === "toolCall") return `${item.toolName} ${JSON.stringify(item.arguments)}`;
+			return "";
+		})
+		.join("\n");
+}
+
+function truncateByApproxTokens(text: string, tokenLimit: number): string {
+	if (tokenLimit <= 0) return "";
+	const maxChars = tokenLimit * 4;
+	if (text.length <= maxChars) return text;
+	const head = Math.floor(maxChars * 0.6);
+	const tail = maxChars - head;
+	return `${text.slice(0, head)}\n\n...[truncated]...\n\n${text.slice(-tail)}`;
+}
+
+function computeModelTokenBudget(model: Model, config: MemoryRuntimeConfig): number {
+	const maxTokens =
+		Number.isFinite(model.contextWindow) && model.contextWindow > 0 ? model.contextWindow : config.fallbackTokenLimit;
+	return Math.max(2048, Math.floor(maxTokens));
+}
+
+const DASHSCOPE_CODING_BASE_URL = "https://coding.dashscope.aliyuncs.com/v1";
+const SK_SP_MEMORY_LLM_MODEL_ID = "qwen3-coder-plus";
+
+/**
+ * `sk-sp-*` keys authenticate against the Coding Plan endpoint, not compatible-mode.
+ * Default role models (e.g. deepseek-v4-flash) are often bound to compatible-mode and return 401.
+ */
+function adaptModelForDashScopeCodingKey(model: Model, apiKey: string, modelRegistry: ModelRegistry): Model {
+	if (!apiKey.trim().startsWith("sk-sp-")) {
+		return model;
+	}
+	const fallback =
+		modelRegistry.getAvailable().find(m => m.provider === "alibaba-coding-plan" && m.id === SK_SP_MEMORY_LLM_MODEL_ID) ??
+		modelRegistry.getAvailable().find(m => m.provider === "alibaba-coding-plan");
+	const base = fallback ?? model;
+	if (
+		base.provider === "alibaba-coding-plan" &&
+		base.baseUrl === DASHSCOPE_CODING_BASE_URL &&
+		base.id === SK_SP_MEMORY_LLM_MODEL_ID
+	) {
+		return base;
+	}
+	logger.debug("Memory LLM: routing sk-sp key to alibaba Coding Plan endpoint", {
+		from: `${model.provider}/${model.id}`,
+		to: `alibaba-coding-plan/${SK_SP_MEMORY_LLM_MODEL_ID}`,
+		baseUrl: DASHSCOPE_CODING_BASE_URL,
+	});
+	return {
+		...base,
+		provider: "alibaba-coding-plan",
+		id: SK_SP_MEMORY_LLM_MODEL_ID,
+		baseUrl: DASHSCOPE_CODING_BASE_URL,
+	};
+}
+
+async function resolveMemoryModel(options: {
+	modelRegistry: ModelRegistry;
+	session: AgentSession;
+	fallbackRole: string;
+}): Promise<Model | undefined> {
+	const { modelRegistry, session, fallbackRole } = options;
+	const requestedModel = session.settings.getModelRole(fallbackRole) || session.settings.getModelRole("default");
+	if (requestedModel) {
+		const resolved = resolveModelRoleValue(requestedModel, modelRegistry.getAll(), {
+			settings: session.settings,
+			matchPreferences: { usageOrder: session.settings.getStorage()?.getModelUsageOrder() },
+			modelRegistry,
+		});
+		if (resolved.model) return resolved.model;
+	}
+	return session.model ?? modelRegistry.getAll()[0];
+}
+
+function loadMemoryConfig(settings: Settings): MemoryRuntimeConfig {
+	return {
+		enabled: settings.get("memories.enabled") ?? DEFAULTS.enabled,
+		maxRolloutsPerStartup: settings.get("memories.maxRolloutsPerStartup") ?? DEFAULTS.maxRolloutsPerStartup,
+		maxRolloutAgeDays: settings.get("memories.maxRolloutAgeDays") ?? DEFAULTS.maxRolloutAgeDays,
+		minRolloutIdleHours: settings.get("memories.minRolloutIdleHours") ?? DEFAULTS.minRolloutIdleHours,
+		threadScanLimit: settings.get("memories.threadScanLimit") ?? DEFAULTS.threadScanLimit,
+		maxRawMemoriesForGlobal: settings.get("memories.maxRawMemoriesForGlobal") ?? DEFAULTS.maxRawMemoriesForGlobal,
+		stage1Concurrency: settings.get("memories.stage1Concurrency") ?? DEFAULTS.stage1Concurrency,
+		stage1LeaseSeconds: settings.get("memories.stage1LeaseSeconds") ?? DEFAULTS.stage1LeaseSeconds,
+		stage1RetryDelaySeconds: settings.get("memories.stage1RetryDelaySeconds") ?? DEFAULTS.stage1RetryDelaySeconds,
+		phase2LeaseSeconds: settings.get("memories.phase2LeaseSeconds") ?? DEFAULTS.phase2LeaseSeconds,
+		phase2RetryDelaySeconds: settings.get("memories.phase2RetryDelaySeconds") ?? DEFAULTS.phase2RetryDelaySeconds,
+		phase2HeartbeatSeconds: settings.get("memories.phase2HeartbeatSeconds") ?? DEFAULTS.phase2HeartbeatSeconds,
+		rolloutPayloadPercent: settings.get("memories.rolloutPayloadPercent") ?? DEFAULTS.rolloutPayloadPercent,
+		phase1InputTokenLimit: settings.get("memories.phase1InputTokenLimit") ?? DEFAULTS.phase1InputTokenLimit,
+		fallbackTokenLimit: settings.get("memories.fallbackTokenLimit") ?? DEFAULTS.fallbackTokenLimit,
+		summaryInjectionTokenLimit:
+			settings.get("memories.summaryInjectionTokenLimit") ?? DEFAULTS.summaryInjectionTokenLimit,
+	};
+}
+
+export { encodeProjectPathForLegacyMemory as encodeProjectPath, getMemoryRoot } from "../paths";
+export { closeMemoryDb, getMemoryDb, openMemoryDb, releaseMemoryDb, resolveMemoryDbPath } from "./storage";
+export { ensureMemorySummaryFromMemory } from "./summary";
+
+function unixNow(): number {
+	return Math.floor(Date.now() / 1000);
+}
+
+async function runWithConcurrency<T>(
+	items: T[],
+	concurrency: number,
+	worker: (item: T) => Promise<void>,
+): Promise<void> {
+	const queue = [...items];
+	const workers = new Array(Math.max(1, concurrency)).fill(0).map(async () => {
+		while (queue.length > 0) {
+			const item = queue.shift();
+			if (!item) return;
+			await worker(item);
+		}
+	});
+	await Promise.all(workers);
+}
+
+// ============================================================================
+// Phase 1 Fallback: Rule-based extraction when LLM fails
+// ============================================================================
+
+interface ExtractedSignals {
+	toolSequence: string[];
+	filesModified: string[];
+	userCorrections: string[];
+	errorCount: number;
+	hadRecovery: boolean;
+	sessionDuration: number;
+	userPrompt: string;
+}
+
+interface RolloutTraceEntry {
+	type?: string;
+	toolName?: string;
+	args?: { path?: string };
+	content?: string;
+	isError?: boolean;
+}
+
+function extractSignalsFromTrace(rolloutPath: string): ExtractedSignals {
+	const signals: ExtractedSignals = {
+		toolSequence: [],
+		filesModified: [],
+		userCorrections: [],
+		errorCount: 0,
+		hadRecovery: false,
+		sessionDuration: 0,
+		userPrompt: "",
+	};
+
+	try {
+		const rolloutRaw = readFileSync(rolloutPath, "utf8");
+		const entries = parseJsonlLenient(rolloutRaw);
+		if (!Array.isArray(entries)) return signals;
+
+		const toolsUsed = new Set<string>();
+		const filesModified = new Set<string>();
+		const corrections: string[] = [];
+		let errorCount = 0;
+		let hadRecovery = false;
+		let userPrompt = "";
+
+		for (const raw of entries) {
+			if (!raw || typeof raw !== "object") continue;
+			const entry = raw as RolloutTraceEntry;
+
+			// Extract tool calls
+			if (entry.type === "tool_call" && entry.toolName) {
+				toolsUsed.add(entry.toolName);
+				if (entry.toolName === "write" || entry.toolName === "edit" || entry.toolName === "ast_edit") {
+					const p = entry.args?.path;
+					if (typeof p === "string") filesModified.add(p);
+				}
+			}
+
+			// Extract user corrections
+			if (entry.type === "user_input" && entry.content) {
+				userPrompt = entry.content;
+				const correctionPatterns = [
+					/不对|错了|should be|应该是|不是|不要|别|incorrect|wrong/i,
+					/用.*而不是|use.*instead of|prefer.*over/i,
+					/请记住|记住|remember|note that/i,
+				];
+				for (const pattern of correctionPatterns) {
+					if (pattern.test(entry.content)) {
+						corrections.push(entry.content);
+						break;
+					}
+				}
+			}
+
+			// Count errors
+			if (entry.type === "tool_result" && entry.isError) {
+				errorCount++;
+			}
+
+			// Check for recovery
+			if (entry.type === "tool_result" && !entry.isError && errorCount > 0) {
+				hadRecovery = true;
+			}
+		}
+
+		signals.toolSequence = Array.from(toolsUsed);
+		signals.filesModified = Array.from(filesModified);
+		signals.userCorrections = corrections;
+		signals.errorCount = errorCount;
+		signals.hadRecovery = hadRecovery;
+		signals.userPrompt = userPrompt;
+	} catch {
+		// If we can't read the trace, return empty signals
+	}
+
+	return signals;
+}
+
+function buildRawMemory(signals: ExtractedSignals): string {
+	const parts: string[] = [];
+
+	if (signals.toolSequence.length > 0) {
+		parts.push(`Used tools: ${signals.toolSequence.join(" → ")}`);
+	}
+
+	if (signals.filesModified.length > 0) {
+		parts.push(`Modified files: ${signals.filesModified.join(", ")}`);
+	}
+
+	if (signals.errorCount > 0) {
+		parts.push(`Encountered ${signals.errorCount} error(s)${signals.hadRecovery ? ", recovered successfully" : ""}`);
+	}
+
+	if (signals.userCorrections.length > 0) {
+		parts.push(`User corrections: ${signals.userCorrections.join("; ")}`);
+	}
+
+	return parts.join("\n") || "No significant signals extracted.";
+}
+
+function buildRolloutSummary(signals: ExtractedSignals): string {
+	const toolCount = signals.toolSequence.length;
+	const duration = signals.sessionDuration;
+
+	if (toolCount === 0) return "Session with no tool calls.";
+
+	const durationSec = Math.round(duration / 1000);
+	const _avgTimePerTool = toolCount > 0 ? Math.round(durationSec / toolCount) : 0;
+
+	let summary = `${toolCount} tool(s) used`;
+	if (durationSec > 0) {
+		summary += ` in ${durationSec}s`;
+	}
+	if (signals.errorCount > 0) {
+		summary += `, ${signals.errorCount} error(s)${signals.hadRecovery ? " (recovered)" : ""}`;
+	}
+	if (signals.filesModified.length > 0) {
+		summary += `, modified ${signals.filesModified.length} file(s)`;
+	}
+
+	return `${summary}.`;
+}
+
+function buildRolloutSlug(signals: ExtractedSignals): string | null {
+	const parts: string[] = [];
+
+	// Intent-based prefix
+	if (signals.errorCount > 0) parts.push("fix");
+	else if (signals.filesModified.length > 2) parts.push("refactor");
+	else parts.push("update");
+
+	// Domain hint
+	const domains = new Set(
+		signals.filesModified
+			.map(f => {
+				const ext = f.split(".").pop();
+				return ext;
+			})
+			.filter(Boolean),
+	);
+	if (domains.has("ts")) parts.push("ts");
+	if (domains.has("rs")) parts.push("rs");
+	if (domains.has("js")) parts.push("js");
+
+	// Tool hint
+	if (signals.toolSequence.includes("test")) parts.push("test");
+	if (signals.toolSequence.includes("search")) parts.push("search");
+
+	return parts.join("-") || null;
+}
+
+function runStage1Fallback(claim: Stage1Claim): Stage1OutputSchema {
+	const signals = extractSignalsFromTrace(claim.rolloutPath);
+
+	const rawMemory = buildRawMemory(signals);
+	const rolloutSummary = buildRolloutSummary(signals);
+	const rolloutSlug = buildRolloutSlug(signals);
+
+	return {
+		raw_memory: rawMemory,
+		rollout_summary: rolloutSummary,
+		rollout_slug: rolloutSlug,
+	};
+}
+
+// ============================================================================
+// Phase 2 Fallback: Template-based consolidation when LLM fails
+// ============================================================================
+
+function levenshteinDistance(a: string, b: string): number {
+	const matrix: number[][] = [];
+	for (let i = 0; i <= a.length; i++) {
+		matrix[i] = [i];
+	}
+	for (let j = 0; j <= b.length; j++) {
+		matrix[0][j] = j;
+	}
+	for (let i = 1; i <= a.length; i++) {
+		for (let j = 1; j <= b.length; j++) {
+			const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+			matrix[i][j] = Math.min(matrix[i - 1][j] + 1, matrix[i][j - 1] + 1, matrix[i - 1][j - 1] + cost);
+		}
+	}
+	return matrix[a.length][b.length];
+}
+
+function similarity(a: string, b: string): number {
+	const maxLen = Math.max(a.length, b.length);
+	if (maxLen === 0) return 1;
+	const distance = levenshteinDistance(a, b);
+	return (maxLen - distance) / maxLen;
+}
+
+function groupSimilarMemories(outputs: Stage1OutputRow[]): Map<string, Stage1OutputRow[]> {
+	const groups = new Map<string, Stage1OutputRow[]>();
+	const visited = new Set<number>();
+
+	for (let i = 0; i < outputs.length; i++) {
+		if (visited.has(i)) continue;
+
+		const group: Stage1OutputRow[] = [outputs[i]];
+		visited.add(i);
+
+		for (let j = i + 1; j < outputs.length; j++) {
+			if (visited.has(j)) continue;
+			const sim = similarity(outputs[i].rawMemory, outputs[j].rawMemory);
+			if (sim > 0.7) {
+				group.push(outputs[j]);
+				visited.add(j);
+			}
+		}
+
+		const key = group[0].threadId;
+		groups.set(key, group);
+	}
+
+	return groups;
+}
+
+function assembleConsolidationFallback(outputs: Stage1OutputRow[]): {
+	memoryMd: string;
+	memorySummary: string;
+	skills: never[];
+} {
+	if (outputs.length === 0) {
+		return {
+			memoryMd: "# Memory\n\nNo memories yet.\n",
+			memorySummary: "No memories yet.",
+			skills: [],
+		};
+	}
+
+	// Group similar memories and build consolidated output
+	const groups = groupSimilarMemories(outputs);
+	const sections: string[] = [];
+	const summaries: string[] = [];
+
+	for (const [key, group] of groups) {
+		const latest = group.reduce((latest, current) =>
+			current.sourceUpdatedAt > latest.sourceUpdatedAt ? current : latest,
+		);
+
+		sections.push(`## ${key}\n\n${latest.rawMemory}`);
+		summaries.push(latest.rolloutSummary);
+	}
+
+	const memoryMd = `# Memory\n\n${sections.join("\n\n")}`;
+	const memorySummary = summaries.join("; ").slice(0, 500);
+
+	return {
+		memoryMd,
+		memorySummary,
+		skills: [],
+	};
+}
+
+// ============================================================================
+// Phase 2 Fallback: Last known good memory
+// ============================================================================
+
+async function loadLastKnownGood(memoryRoot: string): Promise<{
+	memoryMd: string;
+	memorySummary: string;
+	skills: never[];
+}> {
+	try {
+		const memoryMd = await Bun.file(path.join(memoryRoot, "MEMORY.md")).text();
+		const memorySummary = await Bun.file(path.join(memoryRoot, "memory_summary.md")).text();
+		return {
+			memoryMd: `${memoryMd}\n\n[STALE - LLM consolidation failed]`,
+			memorySummary: `${memorySummary} [STALE]`,
+			skills: [],
+		};
+	} catch {
+		return {
+			memoryMd: "# Memory\n\nNo memories yet.\n",
+			memorySummary: "No memories yet.",
+			skills: [],
+		};
+	}
+}
+
+// ============================================================================
+// Wrapper functions with fallback
+// ============================================================================
+
+async function runStage1JobWithFallback(options: {
+	claim: Stage1Claim;
+	model: Model;
+	apiKey: string;
+	modelMaxTokens: number;
+	config: MemoryRuntimeConfig;
+}): Promise<
+	| {
+			kind: "output";
+			output: { rawMemory: string; rolloutSummary: string; rolloutSlug: string | null };
+			usage?: { input: number; output: number; cacheRead: number; cacheWrite: number; totalTokens?: number };
+	  }
+	| { kind: "no_output" }
+	| { kind: "failed"; reason: string }
+> {
+	// Try LLM first
+	const result = await runStage1Job(options);
+	if (result.kind === "output") return result;
+
+	// Fallback to rule-based extraction
+	logger.warn("Stage1 LLM failed, using fallback", {
+		threadId: options.claim.threadId,
+		reason: result.kind === "failed" ? result.reason : "no_output",
+	});
+
+	try {
+		const fallback = runStage1Fallback(options.claim);
+		return {
+			kind: "output",
+			output: {
+				rawMemory: fallback.raw_memory,
+				rolloutSummary: fallback.rollout_summary,
+				rolloutSlug: fallback.rollout_slug,
+			},
+		};
+	} catch (error) {
+		return { kind: "failed", reason: String(error) };
+	}
+}
+
+async function runConsolidationWithFallback(options: {
+	memoryRoot: string;
+	model: Model;
+	apiKey: string;
+	outputs: Stage1OutputRow[];
+}): Promise<{
+	memoryMd: string;
+	memorySummary: string;
+	skills: Array<{
+		name: string;
+		content: string;
+		scripts: ConsolidationSkillFileSchema[];
+		templates: ConsolidationSkillFileSchema[];
+		examples: ConsolidationSkillFileSchema[];
+	}>;
+}> {
+	// Tier 1: LLM
+	try {
+		return await runConsolidationModel(options);
+	} catch (error) {
+		logger.warn("Consolidation failed, trying fallback", { error: String(error) });
+	}
+
+	// Tier 2: Last known good (avoid template dump overwriting a healthy MEMORY.md on LLM failure)
+	const lastKnown = await loadLastKnownGood(options.memoryRoot);
+	if (!lastKnown.memoryMd.includes("No memories yet.")) {
+		return {
+			memoryMd: lastKnown.memoryMd.replace(/\n\n\[STALE - LLM consolidation failed\]\s*$/, ""),
+			memorySummary: lastKnown.memorySummary.replace(/\s*\[STALE\]\s*$/, ""),
+			skills: [],
+		};
+	}
+
+	// Tier 3: Template-based assembly
+	try {
+		const assembled = assembleConsolidationFallback(options.outputs);
+		return {
+			memoryMd: sanitizeConsolidatedMemoryMd(assembled.memoryMd),
+			memorySummary: sanitizeConsolidatedMemorySummary(assembled.memorySummary, assembled.memoryMd),
+			skills: assembled.skills,
+		};
+	} catch (error) {
+		logger.warn("Fallback assembly failed, using empty memory shell", { error: String(error) });
+	}
+
+	return {
+		memoryMd: sanitizeConsolidatedMemoryMd("# Memory\n\nNo memories yet.\n"),
+		memorySummary: "No memories yet.",
+		skills: [],
+	};
+}

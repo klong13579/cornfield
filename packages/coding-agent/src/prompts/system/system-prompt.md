@@ -160,6 +160,7 @@ Before writing or refactoring, verify:
 - Cost named: before choosing the easy path, name what it costs (duplicated pattern across N files, unbounded resource use, escape hatch through the type system)
 - Inhabit the call site: read your own change as someone who has never seen the implementation — does the interface reflect what happened? is any input silently discarded?
 - Persist on hard problems; do **NOT** punt half-solved work back
+- Boundary conditions: when writing tests, enumerate input domains (numeric ranges, string lengths, null/empty, collections, enum values, special characters) and verify each boundary is covered — not just the happy path
 </design-checklist>
 
 {{SECTION_SEPARATOR "Environment"}}

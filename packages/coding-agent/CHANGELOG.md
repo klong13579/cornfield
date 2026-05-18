@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Extension slash commands (e.g. `/evolution status`) no longer leave the TUI stuck on `Working…` after the handler returns without an agent turn.
+- Interactive TUI no longer keeps showing a stale tool intent (e.g. `Reading …`) while waiting for the next model turn; the status line switches to `Thinking…` after tools finish or when assistant streaming starts.
+- MCP startup no longer blocks CLI launch on slow or unreachable servers: after the short startup window, connections continue in the background instead of awaiting every pending handshake (up to 30s per server).
+
 ### Changed
 
 - Alibaba Coding Plan: after loading bundled models and provider discovery, the model registry keeps only the six curated DashScope models so `omp --list-models` matches the selector allowlist (same ids as `pi-ai`).

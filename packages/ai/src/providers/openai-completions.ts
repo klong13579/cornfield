@@ -1,4 +1,4 @@
-import { $env } from "@oh-my-pi/pi-utils";
+import { $env, logger } from "@oh-my-pi/pi-utils";
 import OpenAI from "openai";
 import type {
 	ChatCompletionAssistantMessageParam,
@@ -267,6 +267,43 @@ function getTrailingPartialDeepseekToken(text: string): string {
 const OPENAI_COMPLETIONS_FIRST_EVENT_TIMEOUT_MESSAGE =
 	"OpenAI completions stream timed out while waiting for the first event";
 
+/** When `PI_DEBUG_OPENAI_CHAT_HTTP` is `1`/`true`/`yes`, logs URL + redacted auth. `full` logs full headers (secrets). */
+function logOpenAiChatCompletionsWireIfEnabled(
+	provider: string,
+	modelId: string,
+	baseUrl: string | undefined,
+	headers: Record<string, string>,
+): void {
+	const flag = ($env.PI_DEBUG_OPENAI_CHAT_HTTP ?? "").trim().toLowerCase();
+	if (flag !== "1" && flag !== "true" && flag !== "yes" && flag !== "full") {
+		return;
+	}
+	const urlPath = `${baseUrl ?? "(no-base-url)"}/chat/completions`;
+	const fullSecrets = flag === "full";
+	const authHeader = (() => {
+		for (const [key, value] of Object.entries(headers)) {
+			if (key.toLowerCase() === "authorization") return value;
+		}
+		return undefined;
+	})();
+	const body: Record<string, unknown> = {
+		url: urlPath,
+		provider,
+		model: modelId,
+		baseUrl: baseUrl ?? null,
+	};
+	if (fullSecrets) {
+		body.requestHeaders = { ...headers };
+	} else if (authHeader !== undefined) {
+		body.authorizationLength = authHeader.length;
+		body.authorizationPeek =
+			authHeader.length <= 32 ? `${authHeader.slice(0, 4)}…` : `${authHeader.slice(0, 20)}…${authHeader.slice(-8)}`;
+	} else {
+		body.authorization = "absent";
+	}
+	logger.debug("openai-completions: chat wire (PI_DEBUG_OPENAI_CHAT_HTTP)", body);
+}
+
 export const streamOpenAICompletions: StreamFunction<"openai-completions"> = (
 	model: Model<"openai-completions">,
 	context: Context,
@@ -342,6 +379,7 @@ export const streamOpenAICompletions: StreamFunction<"openai-completions"> = (
 					headers: requestHeaders,
 					body: params,
 				};
+				logOpenAiChatCompletionsWireIfEnabled(model.provider, model.id, baseUrl, requestHeaders);
 				const { data, response, request_id } = await client.chat.completions
 					.create(params, { signal: requestSignal })
 					.withResponse();

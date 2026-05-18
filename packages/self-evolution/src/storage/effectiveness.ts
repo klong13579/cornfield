@@ -16,6 +16,15 @@ export class SqliteEffectivenessStore implements EffectivenessStore {
 		return rowToEffectiveness(row);
 	}
 
+	async getMany(episodeIds: string[]): Promise<EpisodeEffectiveness[]> {
+		if (episodeIds.length === 0) return [];
+		const placeholders = episodeIds.map(() => "?").join(",");
+		const stmt = this.db.prepare(`SELECT * FROM episode_effectiveness WHERE episode_id IN (${placeholders})`);
+		const rows = stmt.all(...episodeIds) as RawRow[];
+		stmt.finalize();
+		return rows.map(rowToEffectiveness);
+	}
+
 	async recordInjection(episodeId: string): Promise<void> {
 		const stmt = this.db.prepare(`
 			INSERT INTO episode_effectiveness (episode_id, times_injected, times_helped, times_failed)

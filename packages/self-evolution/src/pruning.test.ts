@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite";
-import { afterAll, describe, expect, test } from "bun:test";
-import { applySandboxReports } from "./pruning";
+import { describe, expect, test } from "bun:test";
 import type { SandboxReport } from "@oh-my-pi/cognitive-coordination";
+import { applySandboxReports } from "./pruning";
 
 describe("applySandboxReports (SR-01: Auto-Rollback)", () => {
 	function createDb(): Database {
@@ -43,14 +43,31 @@ describe("applySandboxReports (SR-01: Auto-Rollback)", () => {
 			);
 
 			const reports: SandboxReport[] = [
-				{ skillId: "evolution_extraction:unstable-skill", scoreDelta: -0.3, reason: "Failed validation", passed: false },
-				{ skillId: "evolution_extraction:unstable-skill", scoreDelta: -0.3, reason: "Failed validation", passed: false },
-				{ skillId: "evolution_extraction:unstable-skill", scoreDelta: -0.3, reason: "Failed validation", passed: false },
+				{
+					skillId: "evolution_extraction:unstable-skill",
+					scoreDelta: -0.3,
+					reason: "Failed validation",
+					passed: false,
+				},
+				{
+					skillId: "evolution_extraction:unstable-skill",
+					scoreDelta: -0.3,
+					reason: "Failed validation",
+					passed: false,
+				},
+				{
+					skillId: "evolution_extraction:unstable-skill",
+					scoreDelta: -0.3,
+					reason: "Failed validation",
+					passed: false,
+				},
 			];
 
 			await applySandboxReports(db, reports, { deprecationThreshold: 0.2, minUsageCount: 5 });
 
-			const row = db.prepare("SELECT quality_score, deprecated FROM skills WHERE name = ?").get("unstable-skill") as {
+			const row = db
+				.prepare("SELECT quality_score, deprecated FROM skills WHERE name = ?")
+				.get("unstable-skill") as {
 				quality_score: number;
 				deprecated: number;
 			};
@@ -104,8 +121,18 @@ describe("applySandboxReports (SR-01: Auto-Rollback)", () => {
 			);
 
 			const reports: SandboxReport[] = [
-				{ skillId: "evolution_extraction:improving-skill", scoreDelta: 0.15, reason: "Passed validation", passed: true },
-				{ skillId: "evolution_extraction:improving-skill", scoreDelta: 0.15, reason: "Passed validation", passed: true },
+				{
+					skillId: "evolution_extraction:improving-skill",
+					scoreDelta: 0.15,
+					reason: "Passed validation",
+					passed: true,
+				},
+				{
+					skillId: "evolution_extraction:improving-skill",
+					scoreDelta: 0.15,
+					reason: "Passed validation",
+					passed: true,
+				},
 			];
 
 			await applySandboxReports(db, reports);
@@ -173,7 +200,12 @@ describe("applySandboxReports (SR-01: Auto-Rollback)", () => {
 			);
 
 			const reports: SandboxReport[] = [
-				{ skillId: "evolution_extraction:note-skill", scoreDelta: 0.1, reason: "Passed sandbox test", passed: true },
+				{
+					skillId: "evolution_extraction:note-skill",
+					scoreDelta: 0.1,
+					reason: "Passed sandbox test",
+					passed: true,
+				},
 			];
 
 			await applySandboxReports(db, reports);

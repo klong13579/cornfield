@@ -5,21 +5,22 @@
 import { TraceAnalyzer } from "./trace-analyzer";
 import type { Nudge, SessionTrace } from "./types";
 
-const NUDGE_COOLDOWN_MS = 30_000;
+const NUDGE_COOLDOWN_WARN_MS = 15_000;
+const NUDGE_COOLDOWN_INFO_MS = 30_000;
 
 export class NudgeDetector {
-	#lastNudgeAt = 0;
+	#lastNudgeAtByType = new Map<string, number>();
 	readonly #analyzer = new TraceAnalyzer();
 
-	check(trace: SessionTrace): Nudge | undefined {
+	check(trace: SessionTrace, isTypeAllowed?: (type: string) => boolean): Nudge | undefined {
 		const now = Date.now();
-		if (now - this.#lastNudgeAt < NUDGE_COOLDOWN_MS) return undefined;
 
 		// Run full causal analysis first
 		const diagnosis = this.#analyzer.analyze(trace);
 
-		// Priority ordering: cascades > read failures > error cascade > redundant search > slow loop > read-only-after-write
+		// Priority ordering: early edit-verify > cascades > read failures > error cascade > ...
 		const nudge =
+			this.#detectEarlyEditVerifyFailure(diagnosis) ??
 			this.#detectCascadingReadFailures(diagnosis) ??
 			this.#detectEditVerifyMismatch(diagnosis) ??
 			this.#detectSearchMisledRead(diagnosis) ??
@@ -28,10 +29,30 @@ export class NudgeDetector {
 			this.#detectSlowLoop(trace) ??
 			this.#detectReadOnlyAfterWrite(trace);
 
-		if (nudge) {
-			this.#lastNudgeAt = now;
-		}
+		if (!nudge) return undefined;
+		if (isTypeAllowed && !isTypeAllowed(nudge.type)) return undefined;
+
+		const cooldown = nudge.severity === "warn" ? NUDGE_COOLDOWN_WARN_MS : NUDGE_COOLDOWN_INFO_MS;
+		const lastAt = this.#lastNudgeAtByType.get(nudge.type) ?? 0;
+		if (now - lastAt < cooldown) return undefined;
+
+		this.#lastNudgeAtByType.set(nudge.type, now);
 		return nudge;
+	}
+
+	#detectEarlyEditVerifyFailure(diagnosis: import("./types").ToolChainDiagnosis): Nudge | undefined {
+		const verifyFailures = diagnosis.readFailures.filter(rf => rf.failureType === "verify_after_edit_failure");
+		if (verifyFailures.length >= 1) {
+			const first = verifyFailures[0]!;
+			return {
+				type: "edit-verify-path-mismatch",
+				severity: "warn",
+				message: `Read verification failed after ${first.precedingTool ?? "edit"} did not modify the file.`,
+				suggestion:
+					"Fix the edit (anchors/payload) before verifying with read. The file still reflects the pre-edit state.",
+			};
+		}
+		return undefined;
 	}
 
 	#detectCascadingReadFailures(diagnosis: import("./types").ToolChainDiagnosis): Nudge | undefined {

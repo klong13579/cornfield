@@ -91,7 +91,10 @@ describe("analyzeActivityTrends", () => {
 	test("skips invalid JSON lines", async () => {
 		const recentDate = new Date().toISOString();
 		const filePath = path.join(tempDir, "invalid.jsonl");
-		await Bun.write(filePath, `not json\n{"type": "evolution-fit", "timestamp": "${recentDate}", "score": 50}\n{broken`);
+		await Bun.write(
+			filePath,
+			`not json\n{"type": "evolution-fit", "timestamp": "${recentDate}", "score": 50}\n{broken`,
+		);
 		const report = await analyzeActivityTrends(filePath);
 		expect(report.fitScoreTrend.scores).toHaveLength(1);
 		expect(report.fitScoreTrend.average).toBe(50);

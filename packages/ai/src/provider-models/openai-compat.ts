@@ -956,8 +956,9 @@ export function alibabaCodingPlanModelManagerOptions(
 	const apiKey = config?.apiKey;
 	const baseUrl = config?.baseUrl ?? "https://dashscope.aliyuncs.com/compatible-mode/v1";
 	const references = createBundledReferenceMap<"openai-completions">("alibaba-coding-plan");
-	const staticModels = getBundledModels("alibaba-coding-plan").filter(model =>
-		ALIBABA_CODING_PLAN_SELECTOR_MODEL_IDS.has(model.id),
+	const staticModels = getBundledModels("alibaba-coding-plan").filter(
+		(model): model is Model<"openai-completions"> =>
+			ALIBABA_CODING_PLAN_SELECTOR_MODEL_IDS.has(model.id) && model.api === "openai-completions",
 	);
 	return {
 		providerId: "alibaba-coding-plan",

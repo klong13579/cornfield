@@ -43,7 +43,22 @@ describe("syncSkillsToFiles", () => {
 			const result = db.run(
 				`INSERT INTO skills (name, description, task_pattern, approach, version, quality_score, deprecated, created_at, usage_count, last_used_at, success_count, failure_count, tools, pitfalls)
 				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-				["test-skill", "A test skill", "When testing", "Do this step by step.", 1, 80, 0, now, 0, now, 0, 0, "[]", "[]"],
+				[
+					"test-skill",
+					"Apply boundary checks when designing API validation tests.",
+					"When adding API validation tests",
+					"If inputs have bounds, test min, max, and just outside each edge.",
+					1,
+					80,
+					0,
+					now,
+					0,
+					now,
+					0,
+					0,
+					"[]",
+					'["Do not use for pure UI layout without numeric contracts."]',
+				],
 			);
 			expect(result.changes).toBe(1);
 
@@ -54,8 +69,12 @@ describe("syncSkillsToFiles", () => {
 
 			const file = await Bun.file(path.join(outputDir, "test-skill.md")).text();
 			expect(file).toContain('name: "test-skill"');
-			expect(file).toContain("Do this step by step.");
+			expect(file).toContain("## Procedure");
+			expect(file).toContain("If inputs have bounds");
 			expect(file).toContain('source: "evolution"');
+			expect(file).toContain("quality_score:");
+			expect(file).not.toContain("## 评分详情");
+			expect(file).not.toContain("## 种群生命周期");
 		} finally {
 			db.close();
 			await fs.rm(tempDir, { recursive: true, force: true });
@@ -139,6 +158,49 @@ Old content`,
 		}
 	});
 
+	test("skips and purges invalid skill names", async () => {
+		const db = createDb();
+		const tempDir = `/tmp/sync-test-invalid-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+		const outputDir = path.join(tempDir, "skills");
+
+		try {
+			const now = Date.now();
+			db.run(
+				`INSERT INTO skills (name, approach, version, deprecated, created_at, last_used_at, tools, pitfalls)
+				 VALUES (?, ?, ?, 0, ?, ?, ?, ?)`,
+				["", "bad", 1, now, now, "[]", "[]"],
+			);
+			db.run(
+				`INSERT INTO skills (name, description, task_pattern, approach, version, deprecated, created_at, last_used_at, tools, pitfalls)
+				 VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
+				[
+					"good-skill",
+					"Apply checks when validating API inputs.",
+					"When validating APIs",
+					"If fields have bounds, test edges and just-outside values.",
+					1,
+					now,
+					now,
+					"[]",
+					'["Not for UI-only tasks"]',
+				],
+			);
+
+			await fs.mkdir(outputDir, { recursive: true });
+			const result = await syncSkillsToFiles(db, outputDir);
+
+			expect(result.purgedInvalid).toBe(1);
+			expect(result.written).toBe(1);
+			const badExists = await Bun.file(path.join(outputDir, ".md")).exists();
+			expect(badExists).toBeFalse();
+			const goodExists = await Bun.file(path.join(outputDir, "good-skill.md")).exists();
+			expect(goodExists).toBeTrue();
+		} finally {
+			db.close();
+			await fs.rm(tempDir, { recursive: true, force: true });
+		}
+	});
+
 	test("handles empty DB gracefully", async () => {
 		const db = createDb();
 		const tempDir = `/tmp/sync-test-empty-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -148,7 +210,10 @@ Old content`,
 			await fs.mkdir(outputDir, { recursive: true });
 			await syncSkillsToFiles(db, outputDir);
 
-			const exists = await fs.stat(outputDir).then(() => true).catch(() => false);
+			const exists = await fs
+				.stat(outputDir)
+				.then(() => true)
+				.catch(() => false);
 			expect(exists).toBeTrue();
 			const entries = await fs.readdir(outputDir);
 			expect(entries).toHaveLength(0);

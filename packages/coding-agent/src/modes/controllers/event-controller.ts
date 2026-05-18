@@ -24,6 +24,7 @@ export class EventController {
 	#lastThinkingCount = 0;
 	#renderedCustomMessages = new Set<string>();
 	#lastIntent: string | undefined = undefined;
+	readonly #waitingForModelMessage = "Thinking… (esc to interrupt)";
 	#backgroundToolCallIds = new Set<string>();
 	#readToolCallArgs = new Map<string, Record<string, unknown>>();
 	#readToolCallAssistantComponents = new Map<string, AssistantMessageComponent>();
@@ -117,6 +118,20 @@ export class EventController {
 		this.ctx.setWorkingMessage(`${trimmed} (esc to interrupt)`);
 	}
 
+	#resetWorkingMessageForModelWait(): void {
+		this.#lastIntent = undefined;
+		this.ctx.setWorkingMessage(this.#waitingForModelMessage);
+	}
+
+	#syncWorkingMessageAfterToolExecution(): void {
+		for (const toolCallId of this.ctx.pendingTools.keys()) {
+			if (!this.#backgroundToolCallIds.has(toolCallId)) {
+				return;
+			}
+		}
+		this.#resetWorkingMessageForModelWait();
+	}
+
 	subscribeToAgent(): void {
 		this.ctx.unsubscribe = this.ctx.session.subscribe(async (event: AgentSessionEvent) => {
 			await this.handleEvent(event);
@@ -199,6 +214,7 @@ export class EventController {
 			this.ctx.addMessageToChat(event.message);
 			this.ctx.ui.requestRender();
 		} else if (event.message.role === "assistant") {
+			this.#resetWorkingMessageForModelWait();
 			this.#lastThinkingCount = 0;
 			this.#resetReadGroup();
 			this.ctx.streamingComponent = new AssistantMessageComponent(undefined, this.ctx.hideThinkingBlock);
@@ -475,6 +491,7 @@ export class EventController {
 				await this.ctx.handleExitPlanModeTool(details);
 			}
 		}
+		this.#syncWorkingMessageAfterToolExecution();
 	}
 
 	async #handleAgentEnd(_event: Extract<AgentSessionEvent, { type: "agent_end" }>): Promise<void> {

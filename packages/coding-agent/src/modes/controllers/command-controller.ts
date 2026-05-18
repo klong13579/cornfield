@@ -11,13 +11,14 @@ import {
 } from "@oh-my-pi/pi-ai";
 import { Loader, Markdown, padding, Spacer, Text, visibleWidth } from "@oh-my-pi/pi-tui";
 import { formatDuration, Snowflake, setProjectDir } from "@oh-my-pi/pi-utils";
+import { runEvolutionMemorySubcommand } from "@oh-my-pi/self-evolution/evolution-memory";
 import { $ } from "bun";
 import { reset as resetCapabilities } from "../../capability";
 import { clearClaudePluginRootsCache } from "../../discovery/helpers";
 import { loadCustomShare } from "../../export/custom-share";
 import type { CompactOptions } from "../../extensibility/extensions/types";
 import { getGatewayStatus } from "../../ipy/gateway-coordinator";
-import { buildMemoryToolDeveloperInstructions, clearMemoryData, enqueueMemoryConsolidation } from "../../memories";
+import { getMemoryDb, releaseMemoryDb } from "../../memories";
 import { BashExecutionComponent } from "../../modes/components/bash-execution";
 import { BorderedLoader } from "../../modes/components/bordered-loader";
 import { DynamicBorder } from "../../modes/components/dynamic-border";
@@ -703,48 +704,31 @@ export class CommandController {
 	}
 
 	async handleMemoryCommand(text: string): Promise<void> {
+		const runner = this.ctx.session.extensionRunner;
+		if (!runner) {
+			this.ctx.showError("Use /evolution memory <subcommand> (self-evolution extension required).");
+			return;
+		}
+		const cwd = this.ctx.sessionManager.getCwd();
+		const db = getMemoryDb(cwd, false);
+		if (!db) {
+			this.ctx.showError("Memory DB not available.");
+			return;
+		}
+		const cmdCtx = runner.createCommandContext();
 		const argumentText = text.slice(7).trim();
-		const action = argumentText.split(/\s+/, 1)[0]?.toLowerCase() || "view";
-		const agentDir = this.ctx.settings.getAgentDir();
-
-		if (action === "view") {
-			const payload = await buildMemoryToolDeveloperInstructions(agentDir, this.ctx.settings);
-			if (!payload) {
-				this.ctx.showWarning("Memory payload is empty (memories disabled or no memory summary found).");
-				return;
-			}
-			this.ctx.chatContainer.addChild(new Spacer(1));
-			this.ctx.chatContainer.addChild(new DynamicBorder());
-			this.ctx.chatContainer.addChild(new Text(theme.bold(theme.fg("accent", "Memory Injection Payload")), 1, 0));
-			this.ctx.chatContainer.addChild(new Spacer(1));
-			this.ctx.chatContainer.addChild(new Markdown(payload, 1, 1, getMarkdownTheme()));
-			this.ctx.chatContainer.addChild(new DynamicBorder());
-			this.ctx.ui.requestRender();
-			return;
+		try {
+			await runEvolutionMemorySubcommand({
+				db,
+				ctx: cmdCtx,
+				args: argumentText,
+				globalStore: false,
+			});
+		} catch (error) {
+			this.ctx.showError(`Memory command failed: ${error instanceof Error ? error.message : String(error)}`);
+		} finally {
+			releaseMemoryDb(cwd, false);
 		}
-
-		if (action === "reset" || action === "clear") {
-			try {
-				await clearMemoryData(agentDir, this.ctx.sessionManager.getCwd());
-				await this.ctx.session.refreshBaseSystemPrompt();
-				this.ctx.showStatus("Memory data cleared and system prompt refreshed.");
-			} catch (error) {
-				this.ctx.showError(`Memory clear failed: ${error instanceof Error ? error.message : String(error)}`);
-			}
-			return;
-		}
-
-		if (action === "enqueue" || action === "rebuild") {
-			try {
-				enqueueMemoryConsolidation(agentDir, this.ctx.sessionManager.getCwd());
-				this.ctx.showStatus("Memory consolidation enqueued.");
-			} catch (error) {
-				this.ctx.showError(`Memory enqueue failed: ${error instanceof Error ? error.message : String(error)}`);
-			}
-			return;
-		}
-
-		this.ctx.showError("Usage: /memory <view|clear|reset|enqueue|rebuild>");
 	}
 
 	async #runNewSessionFlow(options?: NewSessionOptions, label: string = "New session started"): Promise<void> {

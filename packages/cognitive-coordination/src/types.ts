@@ -57,10 +57,19 @@ export interface TrendReport {
 }
 
 /**
+/**
  * Implicit Convention mined from Session Logs.
  */
 export interface ImplicitConvention {
 	rule: string;
 	confidence: number;
 	sourceSessionId?: string;
+	/** Provenance level for conflict resolution. Higher provenance wins on merge. */
+	provenance?: "user_stated" | "implied" | "inferred" | "fallback";
+	/** Timestamp of last update, for decay calculations. */
+	updatedAt?: number;
+	/** ID of the convention that superseded this one (audit trail). */
+	supersededBy?: string;
+	/** When this convention was superseded. */
+	supersededAt?: number;
 }

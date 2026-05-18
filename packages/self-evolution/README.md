@@ -88,32 +88,59 @@ The self-evolution package transforms the agent from a passive executor into an 
 
 ## Storage
 
-### SQLite Database (`~/.omp/self-evolution/evolution.db`)
+**Default (per project):** all evolution + memory state lives under `<project-root>/.omp/`. Session JSONL remains in `~/.omp/agent/sessions/`; credentials stay in `~/.omp/agent/agent.db` (not mixed with evolution data).
+
+### Layout
+
+```
+<repo>/.omp/
+├── memory/                    # Memory pipeline artifacts
+│   ├── MEMORY.md
+│   ├── memory_summary.md
+│   ├── raw_memories.md
+│   └── rollout_summaries/
+├── evolution/
+│   ├── evolution.db           # SQLite (evolution + memory tables)
+│   ├── conventions.md         # Projected conventions (editable)
+│   ├── system-diagnosis.md
+│   ├── user_profile.md
+│   ├── activity.log
+│   └── evolution_log.md
+└── skills/                    # Exported skill markdown (*.md)
+```
+
+### SQLite (`<repo>/.omp/evolution/evolution.db`)
 
 | Table | Purpose |
 |---|---|
+| `episodes` | Archived session summaries |
+| `session_traces` | Full traces for regression replay |
+| `conventions` | Mined rules from user dialogue |
 | `skills` | Evolved skills with quality scores, usage stats |
 | `skill_versions` | Version snapshots for rollback |
-| `episodes` | Archived session summaries |
-| `conventions` | Mined rules from user feedback |
+| `threads` | Memory: session rollout index |
+| `stage1_outputs` | Memory: per-thread Stage 1 output |
+| `jobs` | Memory: stage1 / consolidate job queue |
+| `vector_embeddings` | Memory: optional embedding store |
 | `fit_scores` | 懂我程度 evaluation history |
-| `intents` | Episode intent classifications |
-| `profiles` | User behavioral profiles |
+| `episode_intents` | Intent classification per episode |
+| `user_profiles` | User behavioral profiles |
 | `workflow_patterns` | Mined tool call sequences |
-| `effectiveness` | Episode/skill injection tracking |
+| `episode_effectiveness` | Episode injection tracking |
+| `skill_effectiveness` | Skill injection tracking |
 | `nudge_history` | Cross-session nudge records |
 | `stats` | System counters |
 
-### File System (`~/.omp/self-evolution/`)
+**Legacy global layout** (opt-in `--self-evolution-global-store`): `~/.omp/self-evolution/` plus encoded memory under `~/.omp/agent/memories/--encoded-cwd--/`. On first session, empty project dirs are auto-filled from legacy paths when possible (`migrate-paths.ts`).
 
-```
-self-evolution/
-├── evolution.db          # SQLite database
-├── skills/               # Markdown skill files (agent-editable)
-│   ├── git-workflow.md
-│   └── python-debugging.md
-├── conventions.jsonl     # Mined implicit conventions
-└── activity.jsonl        # System activity log
+### Migrating from older installs
+
+```bash
+# FS copy + agent.db memory rows → project evolution.db
+bash packages/self-evolution/scripts/migrate-evolution-data.sh /path/to/repo
+
+# Re-archive sessions from ~/.omp/agent/sessions/*.jsonl
+bun packages/self-evolution/scripts/backfill-episodes-from-sessions.ts --cwd /path/to/repo --per-project
 ```
 
 ## CLI Commands
@@ -122,7 +149,7 @@ self-evolution/
 /evolution status              Show statistics (episodes, skills, versions)
 /evolution skills [--detail]   List evolved skills with score breakdown
 /evolution rate <name> <1-5>   Rate a skill
-/evolution clear               Clear all self-evolution data
+/evolution clear               Delete project .omp/memory, evolution, skills (after confirm)
 /evolution archive             Archive low-quality skills
 /evolution history <name>      View version history for a skill
 /evolution rollback <n> <v>    Rollback a skill to a version
@@ -147,7 +174,7 @@ Flags passed via CLI or config:
 | `--self-evolution-llm-rerank` | `true` | Use LLM to rerank episodes |
 | `--self-evolution-enable-versioning` | `true` | Enable skill version snapshots |
 | `--self-evolution-enable-activity-log` | `true` | Enable JSONL activity logging |
-| `--self-evolution-global-store` | `true` | Shared store across projects |
+| `--self-evolution-global-store` | `false` | Legacy: shared `~/.omp/self-evolution` + encoded agent memories |
 
 ## API
 

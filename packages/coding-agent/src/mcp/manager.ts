@@ -57,7 +57,8 @@ type TrackedPromise<T> = {
 	reason?: unknown;
 };
 
-const STARTUP_TIMEOUT_MS = 250;
+/** Max time to wait for MCP handshakes during CLI startup before returning. */
+const STARTUP_TIMEOUT_MS = 500;
 
 function trackPromise<T>(promise: Promise<T>): TrackedPromise<T> {
 	const tracked: TrackedPromise<T> = { promise, status: "pending" };
@@ -426,10 +427,9 @@ export class MCPManager {
 					);
 				}
 
-				const pendingWithoutCache = pendingTasks.filter(task => !cachedTools.has(task.name));
-				if (pendingWithoutCache.length > 0) {
-					await Promise.allSettled(pendingWithoutCache.map(task => task.tracked.promise));
-				}
+				// Do not await slow servers here — each connect can take up to config.timeout
+				// (30s default). Background connectionTasks continue and call #onToolsChanged
+				// when tools load; cached servers already got DeferredMCPTool above.
 			}
 
 			for (const task of connectionTasks) {

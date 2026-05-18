@@ -4,16 +4,16 @@
 import type { Model } from "@oh-my-pi/pi-ai";
 import optimizePromptTemplate from "./prompts/optimize-prompt.md" with { type: "text" };
 import type { EvolvedSkill } from "./types";
-import { callBackgroundLlm } from "./utils/llm";
+import { type BackgroundLlmAuth, callBackgroundLlm } from "./utils/llm";
 
 export class RuleBasedPromptOptimizer {
 	/**
 	 * Optimize a skill's approach text. Returns the optimized text, or the original if optimization fails.
 	 */
-	async optimize(skill: EvolvedSkill, model?: Model): Promise<string> {
+	async optimize(skill: EvolvedSkill, model?: Model, auth?: BackgroundLlmAuth): Promise<string> {
 		const userPrompt = `Skill: ${skill.name}\nDescription: ${skill.description}\nTask pattern: ${skill.taskPattern}\nCurrent approach:\n${skill.approach}\n\nTools used: ${skill.tools.join(", ")}\nPitfalls: ${skill.pitfalls.join("; ")}\nUsage count: ${skill.usageCount}\nSuccess count: ${skill.successCount}\n\nPlease optimize the approach text.`;
 
-		const result = await callBackgroundLlm(model, optimizePromptTemplate, userPrompt);
+		const result = await callBackgroundLlm(model, optimizePromptTemplate, userPrompt, { auth });
 		if (!result || result.length < 20) {
 			return skill.approach;
 		}

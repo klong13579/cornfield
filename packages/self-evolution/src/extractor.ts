@@ -7,12 +7,13 @@ import { logger } from "@oh-my-pi/pi-utils";
 import { HeuristicSkillEvaluator } from "./evaluator";
 import extractSkillPromptTemplate from "./prompts/extract-skill.md" with { type: "text" };
 import type { ExtractedSkill, SessionTrace, ToolChainDiagnosis } from "./types";
-import { callBackgroundLlm } from "./utils/llm";
+import { type BackgroundLlmAuth, callBackgroundLlm } from "./utils/llm";
 
 export interface ExtractorOptions {
 	skillThreshold: number;
 	llmRefinement: boolean;
 	model?: Model;
+	auth?: BackgroundLlmAuth;
 }
 
 export class SkillExtractor {
@@ -38,7 +39,7 @@ export class SkillExtractor {
 
 		// LLM refinement (only for complex successful tasks)
 		if (options.llmRefinement && trace.toolCallCount >= options.skillThreshold && trace.completedSuccessfully) {
-			const refined = await this.#llmRefine(ruleSkill, trace, options.model);
+			const refined = await this.#llmRefine(ruleSkill, trace, options.model, options.auth);
 			if (refined) {
 				const score = this.#evaluator.evaluate(refined);
 				refined.qualityScore = score.total;
@@ -94,6 +95,7 @@ export class SkillExtractor {
 		ruleSkill: ExtractedSkill,
 		trace: SessionTrace,
 		model?: Model,
+		auth?: BackgroundLlmAuth,
 	): Promise<ExtractedSkill | undefined> {
 		// Build a condensed trace summary for the LLM
 		const toolSummary = trace.entries
@@ -117,7 +119,7 @@ export class SkillExtractor {
 
 		const userPrompt = `Task: ${trace.userPrompt}\n\nTools used: ${toolSummary}\n${errorSummary}\n${recoverySummary}\n\nRecent user dialogue:\n${userInputs || "(none recorded)"}\n\nRecent agent reasoning:\n${assistantMessages || "(none recorded)"}\n\nWhat project-specific conventions did the user enforce? What pitfalls are specific to THIS codebase?\n\nCurrent rule-based extraction:\n- Name: ${ruleSkill.name}\n- Task pattern: ${ruleSkill.taskPattern}\n- Approach: ${ruleSkill.approach}\n- Tools: ${ruleSkill.tools.join(", ")}\n- Pitfalls: ${ruleSkill.pitfalls.join("; ") || "none"}\n\nPlease refine the approach and pitfalls based on the actual execution trace. Return ONLY a JSON object with fields: approach (string), pitfalls (string[]), description (string), taskPattern (string).`;
 
-		const response = await callBackgroundLlm(model, extractSkillPromptTemplate, userPrompt);
+		const response = await callBackgroundLlm(model, extractSkillPromptTemplate, userPrompt, { auth });
 		if (!response) return undefined;
 
 		try {

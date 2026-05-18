@@ -2,8 +2,8 @@ import { Database } from "bun:sqlite";
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { setupSkillsWatcher } from "./watcher";
 import { SqliteSkillStore } from "./storage/skills";
+import { setupSkillsWatcher } from "./watcher";
 
 describe("setupSkillsWatcher (IT-03: Debounce + Cleanup)", () => {
 	let db: Database;
@@ -100,7 +100,9 @@ Updated approach with new steps.`,
 
 		const filePath = path.join(skillsDir, "debounce-skill.md");
 		// Write 3 times rapidly (within debounce window)
-		await Bun.write(filePath, `---
+		await Bun.write(
+			filePath,
+			`---
 name: "debounce-skill"
 version: "1.0"
 source: "evolution"
@@ -108,8 +110,11 @@ confidenceScore: 0.8
 lastUsedAt: "${new Date().toISOString()}"
 status: "active"
 ---
-Version 1`);
-		await Bun.write(filePath, `---
+Version 1`,
+		);
+		await Bun.write(
+			filePath,
+			`---
 name: "debounce-skill"
 version: "1.0"
 source: "evolution"
@@ -117,8 +122,11 @@ confidenceScore: 0.8
 lastUsedAt: "${new Date().toISOString()}"
 status: "active"
 ---
-Version 2`);
-		await Bun.write(filePath, `---
+Version 2`,
+		);
+		await Bun.write(
+			filePath,
+			`---
 name: "debounce-skill"
 version: "1.0"
 source: "evolution"
@@ -126,7 +134,8 @@ confidenceScore: 0.8
 lastUsedAt: "${new Date().toISOString()}"
 status: "active"
 ---
-Version 3`);
+Version 3`,
+		);
 
 		// Wait for debounce
 		await sleep(800);
@@ -217,17 +226,20 @@ Second version after stop`,
 	});
 
 	test("auto-creates missing directory before watching", async () => {
-    const watchDir = `/tmp/watcher-autocreate-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    // Create directory first (watcher's fs.mkdir is async and not awaited)
-    await fs.mkdir(watchDir, { recursive: true });
-    const stopWatcher = setupSkillsWatcher(watchDir, db);
+		const watchDir = `/tmp/watcher-autocreate-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+		// Create directory first (watcher's fs.mkdir is async and not awaited)
+		await fs.mkdir(watchDir, { recursive: true });
+		const stopWatcher = setupSkillsWatcher(watchDir, db);
 
-    const exists = await fs.stat(watchDir).then(() => true).catch(() => false);
-    expect(exists).toBe(true);
+		const exists = await fs
+			.stat(watchDir)
+			.then(() => true)
+			.catch(() => false);
+		expect(exists).toBe(true);
 
-    stopWatcher();
-    await fs.rm(watchDir, { recursive: true, force: true });
-  });
+		stopWatcher();
+		await fs.rm(watchDir, { recursive: true, force: true });
+	});
 	test("preserves stats when updating skill via watcher", async () => {
 		const now = Date.now();
 		db.run(

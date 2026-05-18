@@ -2,6 +2,11 @@
 	"name": "@oh-my-pi/cognitive-coordination",
 	"type": "module",
 	"main": "src/index.ts",
+	"exports": {
+		".": "./src/index.ts",
+		"./assembler": "./src/assembler.ts",
+		"./*": "./src/*.ts"
+	},
 	"dependencies": {
 		"@oh-my-pi/pi-utils": "workspace:*"
 	}

@@ -19,7 +19,7 @@ import type {
 	ToolChainDiagnosis,
 	TraceEntry,
 } from "./types";
-import { callBackgroundLlm } from "./utils/llm";
+import { type BackgroundLlmAuth, callBackgroundLlm } from "./utils/llm";
 
 interface PairedToolCall {
 	call: TraceEntry;
@@ -75,6 +75,30 @@ const READ_FAILURE_SIGNATURES: Array<{
 	},
 ];
 
+const PROMPT_TOOL_HINTS = ["bash", "read", "edit", "write", "grep", "search", "find", "task"] as const;
+
+export function inferToolHintFromUserPrompt(prompt: string): string | undefined {
+	const lower = prompt.toLowerCase();
+	for (const tool of PROMPT_TOOL_HINTS) {
+		if (lower.includes(tool)) return tool;
+	}
+	return undefined;
+}
+
+/** Rule-based dominant error labels for regression fixtures and escalations. */
+export function inferDominantErrorsFromTrace(trace: SessionTrace): {
+	dominantErrorTool?: string;
+	dominantErrorPattern?: string;
+} {
+	const diagnosis = new TraceAnalyzer().analyze(trace);
+	let dominantErrorTool = diagnosis.dominantErrorTool;
+	const dominantErrorPattern = diagnosis.dominantErrorPattern;
+	if (!dominantErrorTool && trace.errorCount > 0) {
+		dominantErrorTool = inferToolHintFromUserPrompt(trace.userPrompt);
+	}
+	return { dominantErrorTool, dominantErrorPattern };
+}
+
 export class TraceAnalyzer {
 	/**
 	 * Run full causal analysis on a session trace.
@@ -97,6 +121,12 @@ export class TraceAnalyzer {
 			dominantErrorTool,
 		);
 
+		// Extract implicit signals from trace patterns
+		const implicitSignals = this.#extractImplicitSignals(trace, paired);
+
+		// Enhance trace data for downstream analysis
+		const traceEnhancement = this.#enhanceTrace(trace, paired);
+
 		return {
 			sessionId: trace.sessionId,
 			readFailures,
@@ -107,6 +137,8 @@ export class TraceAnalyzer {
 			dominantErrorTool,
 			dominantErrorPattern,
 			suggestedAction,
+			implicitSignals,
+			traceEnhancement,
 		};
 	}
 
@@ -116,17 +148,21 @@ export class TraceAnalyzer {
 	 *
 	 * Falls back to rule-based analysis if the LLM call fails or no model is provided.
 	 */
-	async analyzeWithLlm(trace: SessionTrace, model?: Model): Promise<ToolChainDiagnosis> {
+	async analyzeWithLlm(trace: SessionTrace, model?: Model, auth?: BackgroundLlmAuth): Promise<ToolChainDiagnosis> {
 		const ruleBased = this.analyze(trace);
 		if (!model) return ruleBased;
 
-		const llmResult = await this.#callLlmDiagnosis(trace, model);
+		const llmResult = await this.#callLlmDiagnosis(trace, model, auth);
 		if (!llmResult) return ruleBased;
 
 		return this.#mergeDiagnoses(ruleBased, llmResult);
 	}
 
-	async #callLlmDiagnosis(trace: SessionTrace, model: Model): Promise<LlmDiagnosisOutput | undefined> {
+	async #callLlmDiagnosis(
+		trace: SessionTrace,
+		model: Model,
+		auth?: BackgroundLlmAuth,
+	): Promise<LlmDiagnosisOutput | undefined> {
 		const toolEntries = trace.entries
 			.filter(e => e.type === "tool_call" || e.type === "tool_result")
 			.map(e => ({
@@ -150,7 +186,7 @@ export class TraceAnalyzer {
 			trace_json: traceJson,
 		});
 
-		const responseText = await callBackgroundLlm(model, traceAnalysisSystemTemplate, userPrompt);
+		const responseText = await callBackgroundLlm(model, traceAnalysisSystemTemplate, userPrompt, { auth });
 		if (!responseText) return undefined;
 
 		try {
@@ -580,6 +616,118 @@ export class TraceAnalyzer {
 			result[key].push(item);
 		}
 		return result;
+	}
+
+	/**
+	 * Extract implicit signals from trace patterns:
+	 * - User manually reverts an edit (edit → subsequent edit reversing it)
+	 * - Duplicate same request ≥ 2 times
+	 * - Same tool consecutive failures ≥ 3 times
+	 * - User accepts modifications without follow-up corrections
+	 */
+	#extractImplicitSignals(trace: SessionTrace, paired: PairedToolCall[]): import("./types").ImplicitSignals {
+		const signals: import("./types").ImplicitSignals = {
+			userRevertedEdit: false,
+			duplicateRequestCount: 0,
+			consecutiveFailureTools: [],
+			userAcceptedWithoutCorrection: false,
+		};
+
+		// Detect user manual revert: edit followed by another edit to the same file that reverses it
+		const editEntries = paired.filter(
+			p => p.call.toolName === "edit" || p.call.toolName === "write" || p.call.toolName === "ast_edit",
+		);
+		if (editEntries.length >= 2) {
+			// Check if the last two edits are to the same file with opposite intent
+			const lastTwo = editEntries.slice(-2);
+			const pathA = this.#extractPath(lastTwo[0].call.args);
+			const pathB = this.#extractPath(lastTwo[1].call.args);
+			if (pathA && pathB && pathA === pathB) {
+				// Both edits to the same file — potential revert
+				signals.userRevertedEdit = true;
+			}
+		}
+
+		// Detect duplicate requests (same user_input content ≥ 2 times)
+		const userInputs = trace.entries.filter(e => e.type === "user_input" && e.content);
+		const inputCounts = new Map<string, number>();
+		for (const input of userInputs) {
+			const normalized = input.content!.toLowerCase().trim().replace(/\s+/g, " ");
+			inputCounts.set(normalized, (inputCounts.get(normalized) ?? 0) + 1);
+		}
+		for (const [text, count] of inputCounts) {
+			if (count >= 2) {
+				signals.duplicateRequestCount = Math.max(signals.duplicateRequestCount, count);
+				signals.duplicateRequestText = text;
+			}
+		}
+
+		// Detect same tool consecutive failures ≥ 3 times
+		const failureCounts = new Map<string, number>();
+		let lastFailedTool = "";
+		let consecutiveFailures = 0;
+		for (const { call, result } of paired) {
+			if (!result.isError || !call.toolName) {
+				lastFailedTool = "";
+				consecutiveFailures = 0;
+				continue;
+			}
+			if (call.toolName === lastFailedTool) {
+				consecutiveFailures++;
+			} else {
+				lastFailedTool = call.toolName;
+				consecutiveFailures = 1;
+			}
+			if (consecutiveFailures >= 3) {
+				failureCounts.set(call.toolName, Math.max(failureCounts.get(call.toolName) ?? 0, consecutiveFailures));
+			}
+		}
+		signals.consecutiveFailureTools = Array.from(failureCounts.entries()).map(([tool, count]) => ({ tool, count }));
+
+		// Detect user accepted modifications without follow-up corrections
+		const hasModification = editEntries.some(p => !p.result.isError);
+		const hasSubsequentCorrection = editEntries.slice(1).some(p => p.result.isError);
+		if (hasModification && !hasSubsequentCorrection) {
+			signals.userAcceptedWithoutCorrection = true;
+		}
+
+		return signals;
+	}
+
+	/**
+	 * Enhance trace data for downstream analysis:
+	 * - Capture last 3 assistant_message entries (truncated to 500 chars)
+	 * - Record model_error entries with status codes
+	 * - Truncate tool results to 2KB for storage
+	 */
+	#enhanceTrace(trace: SessionTrace, paired: PairedToolCall[]): import("./types").TraceEnhancement {
+		// Last 3 assistant_message entries
+		const assistantMessages = trace.entries
+			.filter(e => e.type === "assistant_message" && e.content)
+			.slice(-3)
+			.map(e => e.content!.slice(0, 500));
+
+		// Model error entries
+		const modelErrors = trace.entries
+			.filter(e => e.type === "model_error" && e.content)
+			.map(e => ({ timestamp: e.timestamp, content: e.content!.slice(0, 200) }));
+
+		// Truncated tool results (2KB = 2048 chars)
+		const truncatedToolResults = paired
+			.filter(p => p.result.result)
+			.map(p => {
+				const resultText = typeof p.result.result === "string" ? p.result.result : JSON.stringify(p.result.result);
+				return {
+					toolName: p.call.toolName ?? "unknown",
+					resultSnippet: resultText.slice(0, 2048),
+				};
+			});
+
+		return {
+			lastAssistantMessages: assistantMessages,
+			modelErrors,
+			truncatedToolResults,
+		};
 	}
 }
 

@@ -3,8 +3,7 @@
  */
 
 import { afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
-import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
-import type { Model } from "@oh-my-pi/pi-ai";
+import { Effort, type Model } from "@oh-my-pi/pi-ai";
 import { FooterComponent } from "@oh-my-pi/pi-coding-agent/modes/components/footer";
 import { renderSegment, type SegmentContext } from "@oh-my-pi/pi-coding-agent/modes/components/status-line/segments";
 import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
@@ -15,11 +14,11 @@ function stripAnsi(line: string): string {
 	return line.replace(/\x1b\[[0-9;]*m/g, "");
 }
 
-function minimalSession(mock: Partial<AgentSession>): AgentSession {
-	return mock as unknown as AgentSession;
+function minimalSession(mock: unknown): AgentSession {
+	return mock as AgentSession;
 }
 
-function minimalSegmentCtx(model: Model | undefined, thinkingLevel: ThinkingLevel): SegmentContext {
+function minimalSegmentCtx(model: Model | undefined, thinkingLevel: Effort | undefined): SegmentContext {
 	return {
 		session: {
 			state: { model, thinkingLevel },
@@ -75,7 +74,7 @@ describe("CLI footer and status-line model label", () => {
 			const session = minimalSession({
 				state: {
 					model: baseModel,
-					thinkingLevel: ThinkingLevel.Off,
+					thinkingLevel: undefined,
 				},
 				sessionManager: { getEntries: () => [] },
 				getContextUsage: () => undefined,
@@ -102,7 +101,7 @@ describe("CLI footer and status-line model label", () => {
 			const session = minimalSession({
 				state: {
 					model: modelWithThinking,
-					thinkingLevel: ThinkingLevel.Medium,
+					thinkingLevel: Effort.Medium,
 				},
 				sessionManager: { getEntries: () => [] },
 				getContextUsage: () => undefined,
@@ -111,14 +110,14 @@ describe("CLI footer and status-line model label", () => {
 
 			const footer = new FooterComponent(session);
 			const statsLine = stripAnsi(footer.render(width)[1]!);
-			expect(statsLine.endsWith(`${baseModel.provider}/${baseModel.id} • ${ThinkingLevel.Medium}`)).toBe(true);
+			expect(statsLine.endsWith(`${baseModel.provider}/${baseModel.id} • ${Effort.Medium}`)).toBe(true);
 		});
 
 		it("shows no-model when agent has no resolved model", () => {
 			vi.spyOn(piUtils, "getProjectDir").mockReturnValue("/tmp/omp-footer-test");
 
 			const session = minimalSession({
-				state: { model: undefined, thinkingLevel: ThinkingLevel.Off },
+				state: { model: undefined, thinkingLevel: undefined },
 				sessionManager: { getEntries: () => [] },
 				getContextUsage: () => undefined,
 				modelRegistry: { isUsingOAuth: () => false },
@@ -132,7 +131,7 @@ describe("CLI footer and status-line model label", () => {
 
 	describe("Status line model segment", () => {
 		it("shows provider/model-id matching the footer convention", () => {
-			const rendered = renderSegment("model", minimalSegmentCtx(baseModel, ThinkingLevel.Off));
+			const rendered = renderSegment("model", minimalSegmentCtx(baseModel, undefined));
 			expect(rendered.visible).toBe(true);
 			const plain = stripAnsi(rendered.content);
 			expect(plain).toContain(`${baseModel.provider}/${baseModel.id}`);
@@ -140,7 +139,7 @@ describe("CLI footer and status-line model label", () => {
 		});
 
 		it("shows no-model when there is no resolved model", () => {
-			const rendered = renderSegment("model", minimalSegmentCtx(undefined, ThinkingLevel.Off));
+			const rendered = renderSegment("model", minimalSegmentCtx(undefined, undefined));
 			expect(rendered.visible).toBe(true);
 			expect(stripAnsi(rendered.content)).toContain("no-model");
 		});

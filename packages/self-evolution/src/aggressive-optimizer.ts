@@ -6,7 +6,7 @@ import type { Model } from "@oh-my-pi/pi-ai";
 import { logger } from "@oh-my-pi/pi-utils";
 import aggressiveOptimizeTemplate from "./prompts/aggressive-optimize.md" with { type: "text" };
 import type { EvolvedSkill } from "./types";
-import { callBackgroundLlm } from "./utils/llm";
+import { type BackgroundLlmAuth, callBackgroundLlm } from "./utils/llm";
 
 export interface FailureCase {
 	episodeId: string;
@@ -19,6 +19,7 @@ export class AggressiveSkillOptimizer {
 		skill: EvolvedSkill,
 		model: Model | undefined,
 		failureHistory?: FailureCase[],
+		auth?: BackgroundLlmAuth,
 	): Promise<EvolvedSkill> {
 		if (!model) {
 			logger.debug("Aggressive optimization skipped: no model available");
@@ -26,7 +27,7 @@ export class AggressiveSkillOptimizer {
 		}
 
 		const userPrompt = this.#buildPrompt(skill, failureHistory);
-		const response = await callBackgroundLlm(model, aggressiveOptimizeTemplate, userPrompt);
+		const response = await callBackgroundLlm(model, aggressiveOptimizeTemplate, userPrompt, { auth });
 
 		if (!response || response.length < 50) {
 			logger.debug("Aggressive optimization skipped: empty or too-short LLM response");

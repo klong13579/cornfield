@@ -5,7 +5,7 @@
 import type { Model } from "@oh-my-pi/pi-ai";
 import classifyIntentTemplate from "./prompts/classify-intent.md" with { type: "text" };
 import type { IntentCategory, IntentResult, SessionTrace } from "./types";
-import { callBackgroundLlm } from "./utils/llm";
+import { type BackgroundLlmAuth, callBackgroundLlm } from "./utils/llm";
 
 const INTENT_KEYWORDS: Record<IntentCategory, string[]> = {
 	refactoring: ["refactor", "rename", "extract", "restructure", "clean up", "clean-up", "simplify"],
@@ -92,7 +92,7 @@ export class IntentClassifier {
 		};
 	}
 
-	async classify(trace: SessionTrace, model?: Model): Promise<IntentResult> {
+	async classify(trace: SessionTrace, model?: Model, auth?: BackgroundLlmAuth): Promise<IntentResult> {
 		const ruleResult = this.ruleClassify(trace);
 		if (ruleResult.confidence >= CONFIDENCE_THRESHOLD) {
 			return { ...ruleResult, source: "rule" };
@@ -100,7 +100,7 @@ export class IntentClassifier {
 		if (!model) {
 			return { ...ruleResult, source: "rule" };
 		}
-		const llmResult = await this.#llmClassify(trace, model, ruleResult.allScores);
+		const llmResult = await this.#llmClassify(trace, model, ruleResult.allScores, auth);
 		if (llmResult) {
 			return llmResult;
 		}
@@ -111,6 +111,7 @@ export class IntentClassifier {
 		trace: SessionTrace,
 		model: Model,
 		ruleScores: Record<IntentCategory, number>,
+		auth?: BackgroundLlmAuth,
 	): Promise<IntentResult | undefined> {
 		const toolsUsed = trace.entries
 			.filter(e => e.type === "tool_call" && e.toolName)
@@ -119,7 +120,7 @@ export class IntentClassifier {
 
 		const userPrompt = `Task: "${trace.userPrompt}"\nTools used: ${toolsUsed || "none"}\nErrors: ${trace.errorCount}\nRecovered: ${trace.hadRecovery ? "yes" : "no"}\nCompleted: ${trace.completedSuccessfully ? "yes" : "no"}`;
 
-		const response = await callBackgroundLlm(model, classifyIntentTemplate, userPrompt);
+		const response = await callBackgroundLlm(model, classifyIntentTemplate, userPrompt, { auth });
 		if (!response) return undefined;
 
 		try {

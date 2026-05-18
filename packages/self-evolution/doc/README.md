@@ -51,7 +51,7 @@ Self-evolution plugin for oh-my-pi. Automatically extracts reusable skills from 
 
 ### Reporting & Diagnostics
 
-- **Daily Report** (`/evolution report`): Session breakdown with success/failure/empty/partial counts, top error patterns, key moments (error/recovery/success/correction), new conventions, top tools
+- **Daily Report** (`/evolution report`): Session breakdown with success/failure/empty/partial counts, top error patterns, key moments (error/recovery/success/correction), new learnings, top tools
 - **Audit Report** (`/evolution audit`): System health check — episode capacity, success rate, skill quality, injection help rate, intent distribution, workflow meaningfulness, convention coverage, user profile summary, auto-generated issues and recommendations
 - **Fit Evaluation** (`/evolution fit`): "懂我程度" scoring across 5 dimensions — 个人记忆留存 (memory), 思维模式适配 (thinking), 输出风格贴合 (style), 隐含需求预判 (prediction), 历史对话联动 (history). Total 0-100 with trend tracking and verdict (明显更懂我 → 明显不懂我)
 - **Trace Analyzer** (v2.6): Causal tool-chain diagnosis — read failure classification, cascade pattern detection, tool efficiency metrics, cross-session trend analysis
@@ -85,6 +85,7 @@ This plugin is bundled with `pi-coding-agent` and loads automatically as an inli
 | `--no-self-evolution-llm-rerank` | — | — | Use keyword-only retrieval (no LLM rerank) |
 | `--no-self-evolution-enable-versioning` | — | — | Disable skill version snapshots |
 | `--no-self-evolution-enable-activity-log` | — | — | Disable JSONL activity logging |
+| `--self-evolution-global-store` | boolean | `false` | Legacy: use `~/.omp/self-evolution` instead of `<repo>/.omp/` |
 
 Example:
 
@@ -105,7 +106,7 @@ All commands are consolidated under `/evolution <subcommand>`. Old flat commands
 | `/evolution status` | Show statistics: episodes, skills, versions, sessions archived |
 | `/evolution skills [--detail]` | List evolved skills with quality, success rate, user rating; `--detail` shows score breakdown |
 | `/evolution rate <name> <1-5>` | Rate a skill 1-5 stars (affects quality score) |
-| `/evolution clear` | Clear all self-evolution data (requires manual directory deletion) |
+| `/evolution clear` | Delete `.omp/memory`, `.omp/evolution`, and `.omp/skills` for this project (after confirmation) |
 | `/evolution archive` | Archive low-quality skills (quality < 30, unused) |
 | `/evolution history <name>` | View version history for a skill |
 | `/evolution rollback <name> <version>` | Rollback a skill to a specific version |
@@ -114,6 +115,16 @@ All commands are consolidated under `/evolution <subcommand>`. Old flat commands
 | `/evolution audit` | Generate system health report with issues and recommendations |
 | `/evolution report` | Generate daily session report |
 | `/evolution fit` | Run "懂我程度" evaluation |
+| `/evolution population` | Skill population lifecycle status |
+| `/evolution memory <sub>` | Memory hub (search, stats, report, view, enqueue, clear); `/memory` is an alias |
+| `/evolution learnings` | List/search/pin/archive/seed project learnings (V3) |
+| `/evolution log` | Evolution event timeline from activity log |
+| `/evolution nudges` | Recent nudges; `ack` / `dismiss` by id |
+| `/evolution stuck` | Open evolution escalations; `ack` / `resolve` |
+| `/evolution sync-skills` | Export DB skills to `.omp/skills/*.md` |
+| `/evolution backfill-traces` | Rebuild `session_traces` from session JSONL |
+| `/evolution refresh-admission` | Re-run benefit admission + regression gates |
+| `/evolution regression` | List recent regression trials (keep/discard) |
 
 ## Learning Loop
 
@@ -150,30 +161,44 @@ before_agent_start next session:
 
 ## Storage
 
-All data is stored project-local under `<project-root>/.omp/self-evolution/`:
+**Default:** project-local under `<project-root>/.omp/` (memory, evolution DB + projections, skills). This keeps **project isolation** — skills and conventions from one repo do not leak into another.
 
 ```
-.omp/self-evolution/
-├── evolution.db          # SQLite with WAL + FTS5
-│   ├── episodes          # Session archives
-│   ├── episodes_fts      # Full-text search virtual table
-│   ├── skills            # Current skill versions (with user_rating)
-│   ├── skill_versions    # Historical snapshots
-│   ├── stats             # Counters
-│   ├── episode_intents   # Per-episode intent classification
-│   ├── workflow_patterns # Reusable tool-sequence patterns
-│   ├── user_profiles     # Behavioral profiles
-│   ├── episode_effectiveness # Episode injection outcome tracking
-│   ├── skill_effectiveness # Skill injection outcome tracking
-│   ├── conventions       # Project-specific rules extracted from dialogue
-│   ├── convention_feedback # Per-session convention compliance records
-│   ├── episode_detailed_outcomes # Detailed outcome analysis
-│   ├── nudge_history     # Cross-session nudge records
-│   └── fit_scores        # "懂我程度" evaluation history
-└── activity.log          # JSONL audit log
+<repo>/.omp/
+├── memory/
+│   ├── MEMORY.md
+│   ├── memory_summary.md
+│   ├── raw_memories.md
+│   └── rollout_summaries/
+├── evolution/
+│   ├── evolution.db          # SQLite with WAL + FTS5 (evolution + memory tables)
+│   ├── conventions.md
+│   ├── system-diagnosis.md
+│   ├── user_profile.md
+│   ├── activity.log
+│   └── evolution_log.md
+└── skills/                   # Flat *.md skill exports
 ```
 
-This design ensures **project isolation**: skills learned in a React project never leak into a Python project.
+### Tables in `evolution.db`
+
+Logical groupings inside the single database file:
+
+| Group | Tables |
+|---|---|
+| Evolution | `episodes`, `episodes_fts`, `skills`, `skill_versions`, `conventions`, `session_traces`, `regression_fixtures`, `regression_trials`, `evolution_escalations`, `episode_intents`, `workflow_patterns`, `user_profiles`, `episode_effectiveness`, `skill_effectiveness`, `episode_detailed_outcomes`, `episode_diagnoses`, `nudge_history`, `fit_scores`, `stats`, … |
+| Memory | `threads`, `stage1_outputs`, `jobs`, `vector_embeddings` |
+
+Session transcripts (JSONL) stay in `~/.omp/agent/sessions/`. Auth and CLI settings use `~/.omp/agent/agent.db` — memory/evolution rows are **not** stored there anymore.
+
+**Legacy:** `--self-evolution-global-store` uses `~/.omp/self-evolution/` and encoded paths under `~/.omp/agent/memories/`. First run can copy into the project tree when `.omp/` is empty.
+
+### One-time migration
+
+```bash
+bash packages/self-evolution/scripts/migrate-evolution-data.sh /path/to/repo
+bun packages/self-evolution/scripts/backfill-episodes-from-sessions.ts --cwd /path/to/repo --per-project
+```
 
 ### Database Schema Overview
 
@@ -199,36 +224,54 @@ View recent operations:
 
 ```bash
 # All events
-cat .omp/self-evolution/activity.log
+cat .omp/evolution/activity.log
 
 # Last 20 events
-tail -20 .omp/self-evolution/activity.log
+tail -20 .omp/evolution/activity.log
 
 # Pretty-print
-cat .omp/self-evolution/activity.log | jq .
+cat .omp/evolution/activity.log | jq .
 ```
 
 Log rotates automatically at 10MB (keeps 3 files).
 
 ## Database Queries
 
-Inspect stored data directly:
+**Default DB path:** `<repo>/.omp/evolution/evolution.db`
+
+**Legacy global path** (only with `--self-evolution-global-store`): `~/.omp/self-evolution/evolution.db`
+
+Use `sqlite3` from the repo root (column names must match current schema):
 
 ```bash
+DB=.omp/evolution/evolution.db
+
 # Recent episodes
-sqlite3 .omp/self-evolution/evolution.db \
-  "SELECT user_prompt, tool_call_count, completed_successfully FROM episodes ORDER BY timestamp DESC LIMIT 5;"
+sqlite3 -header -column "$DB" \
+  "SELECT substr(user_prompt,1,80) AS prompt, tool_call_count, completed_successfully FROM episodes ORDER BY timestamp DESC LIMIT 5;"
+
+# Convention lifecycle (not `status` — use lifecycle_state)
+sqlite3 -header -column "$DB" \
+  "SELECT lifecycle_state, COUNT(*) FROM conventions GROUP BY lifecycle_state;"
+
+# Regression fixtures (entries live in session_traces.trace_json, not fixtures)
+sqlite3 -header -column "$DB" \
+  "SELECT dominant_error_tool, COUNT(*) FROM regression_fixtures GROUP BY dominant_error_tool;"
+
+# Episode diagnoses (table is episode_diagnoses, not session_diagnoses)
+sqlite3 -header -column "$DB" \
+  "SELECT episode_id, dominant_error_tool, dominant_error_pattern FROM episode_diagnoses ORDER BY recorded_at DESC LIMIT 5;"
+
+# Escalations (pattern_key, not pattern_id)
+sqlite3 -header -column "$DB" \
+  "SELECT id, pattern_key, occurrence_count, status FROM evolution_escalations WHERE status = 'open';"
 
 # Skills with user ratings
-sqlite3 .omp/self-evolution/evolution.db \
-  "SELECT name, version, quality_score, user_rating, tools FROM skills;"
+sqlite3 -header -column "$DB" \
+  "SELECT name, version, quality_score, user_rating FROM skills WHERE deprecated = 0;"
 
-# Convention compliance
-sqlite3 .omp/self-evolution/evolution.db \
-  "SELECT c.type, c.content, COUNT(cf.complied) as checks, SUM(CAST(cf.complied AS INT)) as complied FROM conventions c LEFT JOIN convention_feedback cf ON c.id = cf.convention_id GROUP BY c.id;"
-
-# Fit score trend
-sqlite3 .omp/self-evolution/evolution.db \
+# Fit score trend (empty until /evolution fit has run once)
+sqlite3 -header -column "$DB" \
   "SELECT date, total_score, verdict FROM fit_scores ORDER BY date DESC LIMIT 5;"
 ```
 
@@ -248,7 +291,7 @@ sqlite3 .omp/self-evolution/evolution.db \
 | `workflow-miner.ts` | Tool-sequence pattern extraction |
 | `feedback-tracker.ts` | Episode injection outcome tracking |
 | `effectiveness-analyzer.ts` | Multi-dimensional injection outcome scoring (6 signals) |
-| `convention-extractor.ts` | Project-specific rule extraction from dialogue |
+| `session-learner.ts` | V3 per-session learning extraction (replaces convention extractor) |
 | `convention-compliance.ts` | Heuristic convention adherence checking |
 | `nudge-detector.ts` | Real-time inefficiency pattern detection with causal attribution |
 | `nudge-deliverer.ts` | In-session nudge delivery with cooldown |

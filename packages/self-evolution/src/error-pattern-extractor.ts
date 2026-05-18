@@ -1,6 +1,7 @@
 /**
- * ErrorPatternExtractor: analyzes SessionTrace to identify recurring error
- * patterns with root-cause attribution and causal tool-chain context.
+ * ErrorPatternExtractor: recurring error patterns for escalations.
+ *
+ * Patterns feed `evolution_escalations` only — no `negative_rule` convention writes.
  */
 import { logger } from "@oh-my-pi/pi-utils";
 import { TraceAnalyzer } from "./trace-analyzer";

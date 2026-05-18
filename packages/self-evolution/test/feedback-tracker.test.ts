@@ -28,6 +28,11 @@ class MockEffectivenessStore implements EffectivenessStore {
 		else d.failed++;
 		this.#data.set(episodeId, d);
 	}
+
+	async getMany(episodeIds: string[]) {
+		const results = await Promise.all(episodeIds.map(id => this.get(id)));
+		return results.filter((r): r is NonNullable<typeof r> => r !== undefined);
+	}
 }
 class MockSkillEffectivenessStore implements SkillEffectivenessStore {
 	#data = new Map<string, { injected: number; helped: number; failed: number }>();

@@ -172,8 +172,11 @@ export class Settings {
 	 * Create an isolated instance for testing.
 	 * Does not affect the global singleton.
 	 */
-	static isolated(overrides: Partial<Record<SettingPath, unknown>> = {}): Settings {
-		const instance = new Settings({ inMemory: true, overrides });
+	static isolated(
+		overrides: Partial<Record<SettingPath, unknown>> = {},
+		options?: Pick<SettingsOptions, "cwd" | "agentDir">,
+	): Settings {
+		const instance = new Settings({ inMemory: true, overrides, ...options });
 		instance.#rebuildMerged();
 		return instance;
 	}

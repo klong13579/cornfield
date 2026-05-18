@@ -1,5 +1,6 @@
-import type { ConventionStore, EffectivenessStore, EpisodeStore } from "./storage/types";
-import type { DailyReport, Episode, ErrorPattern } from "./types";
+import type { SqliteLearningStore } from "./storage/learnings";
+import type { EffectivenessStore, EpisodeStore } from "./storage/types";
+import type { DailyReport, Episode, EpisodeEffectiveness, ErrorPattern } from "./types";
 
 const CORRECTION_KEYWORDS = [
 	"fix",
@@ -19,12 +20,12 @@ const CORRECTION_KEYWORDS = [
 
 export class DailyReportGenerator {
 	#episodeStore: EpisodeStore;
-	#conventionStore: ConventionStore;
+	#learningStore: SqliteLearningStore;
 	#effectivenessStore: EffectivenessStore;
 
-	constructor(episodeStore: EpisodeStore, conventionStore: ConventionStore, effectivenessStore: EffectivenessStore) {
+	constructor(episodeStore: EpisodeStore, learningStore: SqliteLearningStore, effectivenessStore: EffectivenessStore) {
 		this.#episodeStore = episodeStore;
-		this.#conventionStore = conventionStore;
+		this.#learningStore = learningStore;
 		this.#effectivenessStore = effectivenessStore;
 	}
 
@@ -36,8 +37,13 @@ export class DailyReportGenerator {
 		const episodes = await this.#episodeStore.listRecent(1000);
 		const dayEpisodes = episodes.filter(e => e.timestamp >= startOfDay && e.timestamp < endOfDay);
 
-		// Fetch effectiveness data for episodes
-		const effectivenessResults = await Promise.all(dayEpisodes.map(e => this.#effectivenessStore.get(e.id)));
+		// Fetch effectiveness data for episodes (batched query)
+		const effectivenessMap = new Map<string, EpisodeEffectiveness | undefined>();
+		const allEff = await this.#effectivenessStore.getMany(dayEpisodes.map(e => e.id));
+		for (const eff of allEff) {
+			effectivenessMap.set(eff.episodeId, eff);
+		}
+		const effectivenessResults = dayEpisodes.map(e => effectivenessMap.get(e.id));
 
 		const sessions = dayEpisodes.map((e, i) => ({
 			sessionId: e.sessionId,
@@ -53,8 +59,8 @@ export class DailyReportGenerator {
 		const topTools = this.#buildTopTools(dayEpisodes);
 		const keyMoments = this.#buildKeyMoments(dayEpisodes);
 
-		const allConventions = await this.#conventionStore.listAll();
-		const newConventions = allConventions.filter(c => c.createdAt >= startOfDay && c.createdAt < endOfDay);
+		const allLearnings = await this.#learningStore.listAll();
+		const newLearnings = allLearnings.filter(l => l.createdAt >= startOfDay && l.createdAt < endOfDay);
 
 		const totalSessions = dayEpisodes.length;
 		const successfulSessions = dayEpisodes.filter(e => e.completedSuccessfully).length;
@@ -75,7 +81,7 @@ export class DailyReportGenerator {
 			partialSessions,
 			sessions,
 			topErrorPatterns,
-			newConventions,
+			newLearnings,
 			topTools,
 			keyMoments,
 		};
@@ -114,12 +120,12 @@ export class DailyReportGenerator {
 		}
 		lines.push("");
 
-		lines.push("## New Conventions");
-		if (report.newConventions.length === 0) {
-			lines.push("_No new conventions extracted._");
+		lines.push("## New Learnings");
+		if (report.newLearnings.length === 0) {
+			lines.push("_No new learnings extracted._");
 		} else {
-			for (const c of report.newConventions) {
-				lines.push(`- **${c.type}**: ${c.content} (confidence: ${c.confidence}%)`);
+			for (const l of report.newLearnings) {
+				lines.push(`- **${l.kind}** [${l.lifecycle}]: ${l.content} (confidence: ${l.confidence})`);
 			}
 		}
 		lines.push("");

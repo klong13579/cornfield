@@ -1,9 +1,8 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { assembleContext } from "@oh-my-pi/cognitive-coordination";
-import { mineImplicitConventions } from "@oh-my-pi/cognitive-coordination";
-import type { ImplicitConvention, UnifiedSkill } from "@oh-my-pi/cognitive-coordination";
+import type { UnifiedSkill } from "@oh-my-pi/cognitive-coordination";
+import { assembleContext, mineImplicitConventions } from "@oh-my-pi/cognitive-coordination";
 
 /**
  * AB-01: AB Test — Before/After Convention Injection Effectiveness
@@ -88,10 +87,10 @@ describe("AB-01: Convention Injection AB Test", () => {
 		const logPath = path.join(tempDir, "session.jsonl");
 		await Bun.write(
 			logPath,
-			JSON.stringify({
+			`${JSON.stringify({
 				type: "user_message",
 				content: "Never commit directly to main branch. Always use feature branches.",
-			}) + "\n",
+			})}\n`,
 		);
 
 		const conventions = await mineImplicitConventions(logPath);
@@ -119,13 +118,13 @@ describe("AB-01: Convention Injection AB Test", () => {
 		const logPath = path.join(tempDir, "session.jsonl");
 		await Bun.write(
 			logPath,
-			[
+			`${[
 				{ type: "user_message", content: "Don't use console.log for logging." },
 				{ type: "user_message", content: "Never use var declarations." },
 				{ type: "user_message", content: "Avoid using any type in TypeScript." },
 			]
 				.map(e => JSON.stringify(e))
-				.join("\n") + "\n",
+				.join("\n")}\n`,
 		);
 
 		const conventions = await mineImplicitConventions(logPath);
@@ -149,10 +148,10 @@ describe("AB-01: Convention Injection AB Test", () => {
 		const logPath = path.join(tempDir, "session.jsonl");
 		await Bun.write(
 			logPath,
-			JSON.stringify({
+			`${JSON.stringify({
 				type: "user_message",
 				content: "You must never expose API keys in logs.", // weight 1.0
-			}) + "\n",
+			})}\n`,
 		);
 
 		const conventions = await mineImplicitConventions(logPath);

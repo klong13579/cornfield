@@ -3,7 +3,7 @@
  */
 import * as path from "node:path";
 import type { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
-import type { Api, Model } from "@oh-my-pi/pi-ai";
+import type { Api, AssistantMessage, Model } from "@oh-my-pi/pi-ai";
 import { completeSimple } from "@oh-my-pi/pi-ai";
 import { logger, prompt } from "@oh-my-pi/pi-utils";
 import type { ModelRegistry } from "../config/model-registry";
@@ -18,6 +18,18 @@ const DEFAULT_TERMINAL_TITLE = "π";
 const TERMINAL_TITLE_CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f]/g;
 
 const MAX_INPUT_CHARS = 2000;
+
+/** Heuristic for OpenAI-compat + DashScope-style credential errors (exported for tests). */
+export function isLikelyCredentialAuthFailureForTitle(message: string | undefined): boolean {
+	if (!message) return false;
+	return /\b401\b|invalid[_\s-]*api[_\s-]*key|Invalid API-key|invalid access token|token expired|param=invalid_api_key/i.test(
+		message,
+	);
+}
+
+function titleModelsDiffer(a: Model<Api>, b: Model<Api>): boolean {
+	return a.provider !== b.provider || a.id !== b.id;
+}
 
 function getTitleModel(
 	registry: ModelRegistry,
@@ -84,53 +96,122 @@ ${truncatedMessage}
 	};
 	logger.debug("title-generator: request", request);
 
-	try {
-		const response = await completeSimple(
-			candidate.model,
+	async function runCompletionForModel(
+		model: Model<Api>,
+		thinkingLevel: ThinkingLevel | undefined,
+		key: string,
+	): Promise<AssistantMessage> {
+		return completeSimple(
+			model,
 			{
-				systemPrompt: request.systemPrompt,
-				messages: [{ role: "user", content: request.userMessage, timestamp: Date.now() }],
+				systemPrompt: TITLE_SYSTEM_PROMPT,
+				messages: [{ role: "user", content: userMessage, timestamp: Date.now() }],
 			},
 			{
-				apiKey,
+				apiKey: key,
 				maxTokens: 30,
-				reasoning: toReasoningEffort(candidate.thinkingLevel),
+				reasoning: toReasoningEffort(thinkingLevel),
 			},
 		);
+	}
 
-		if (response.stopReason === "error") {
-			logger.debug("title-generator: response error", {
-				model: request.model,
-				stopReason: response.stopReason,
-				errorMessage: response.errorMessage,
-			});
-			return null;
-		}
-
+	function extractTitleText(response: AssistantMessage): string {
 		let title = "";
 		for (const content of response.content) {
 			if (content.type === "text") {
 				title += content.text;
 			}
 		}
-		title = title.trim();
+		return title.trim();
+	}
+
+	try {
+		let response = await runCompletionForModel(candidate.model, candidate.thinkingLevel, apiKey);
+		let modelLabelForLog = request.model;
+
+		if (
+			response.stopReason === "error" &&
+			isLikelyCredentialAuthFailureForTitle(response.errorMessage) &&
+			currentModel &&
+			titleModelsDiffer(currentModel, candidate.model)
+		) {
+			const fallbackKey = await registry.getApiKey(currentModel, sessionId);
+			if (fallbackKey) {
+				logger.debug("title-generator: retrying with active session model after credential error", {
+					failedModel: request.model,
+					fallbackModel: `${currentModel.provider}/${currentModel.id}`,
+				});
+				response = await runCompletionForModel(currentModel, undefined, fallbackKey);
+				modelLabelForLog = `${currentModel.provider}/${currentModel.id}`;
+			}
+		}
+
+		if (response.stopReason === "error") {
+			logger.debug("title-generator: response error", {
+				model: modelLabelForLog,
+				stopReason: response.stopReason,
+				errorMessage: response.errorMessage,
+			});
+			return null;
+		}
+
+		const titleRaw = extractTitleText(response);
 
 		logger.debug("title-generator: response", {
-			model: request.model,
-			title,
+			model: modelLabelForLog,
+			title: titleRaw,
 			usage: response.usage,
 			stopReason: response.stopReason,
 		});
 
-		if (!title) {
+		if (!titleRaw) {
 			return null;
 		}
 
-		return title.replace(/^["']|["']$/g, "").replace(/[.!?]$/, "");
+		return titleRaw.replace(/^["']|["']$/g, "").replace(/[.!?]$/, "");
 	} catch (err) {
+		const msg = err instanceof Error ? err.message : String(err);
+		if (
+			isLikelyCredentialAuthFailureForTitle(msg) &&
+			currentModel &&
+			titleModelsDiffer(currentModel, candidate.model)
+		) {
+			const fallbackKey = await registry.getApiKey(currentModel, sessionId);
+			if (fallbackKey) {
+				try {
+					logger.debug("title-generator: retrying with active session model after thrown credential error", {
+						failedModel: request.model,
+						fallbackModel: `${currentModel.provider}/${currentModel.id}`,
+					});
+					const response = await runCompletionForModel(currentModel, undefined, fallbackKey);
+					if (response.stopReason !== "error") {
+						const titleRaw = extractTitleText(response);
+						if (titleRaw) {
+							logger.debug("title-generator: response", {
+								model: `${currentModel.provider}/${currentModel.id}`,
+								title: titleRaw,
+								usage: response.usage,
+								stopReason: response.stopReason,
+							});
+							return titleRaw.replace(/^["']|["']$/g, "").replace(/[.!?]$/, "");
+						}
+					}
+					logger.debug("title-generator: response error after retry", {
+						model: `${currentModel.provider}/${currentModel.id}`,
+						stopReason: response.stopReason,
+						errorMessage: response.errorMessage,
+					});
+				} catch (retryErr) {
+					logger.debug("title-generator: error on credential retry", {
+						model: `${currentModel.provider}/${currentModel.id}`,
+						error: retryErr instanceof Error ? retryErr.message : String(retryErr),
+					});
+				}
+			}
+		}
 		logger.debug("title-generator: error", {
 			model: request.model,
-			error: err instanceof Error ? err.message : String(err),
+			error: msg,
 		});
 		return null;
 	}

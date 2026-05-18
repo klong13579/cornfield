@@ -60,6 +60,7 @@ export interface ProfileStore {
 
 export interface EffectivenessStore {
 	get(episodeId: string): Promise<EpisodeEffectiveness | undefined>;
+	getMany(episodeIds: string[]): Promise<EpisodeEffectiveness[]>;
 	recordInjection(episodeId: string): Promise<void>;
 	recordOutcome(episodeId: string, helped: boolean): Promise<void>;
 }
@@ -69,13 +70,23 @@ export interface SkillEffectivenessStore {
 	recordOutcome(skillName: string, succeeded: boolean): Promise<void>;
 }
 
+export interface NudgeOutcomeUpdate {
+	postToolCalls: number;
+	patternRepeated: boolean;
+	outcomeScore: number;
+}
+
 export interface NudgeHistoryStore {
 	insert(record: NudgeRecord): Promise<void>;
+	get(id: string): Promise<NudgeRecord | undefined>;
 	listRecent(limit: number): Promise<NudgeRecord[]>;
 	listByType(type: string, limit: number): Promise<NudgeRecord[]>;
 	countByType(type: string, since: number): Promise<number>;
 	acknowledge(id: string): Promise<void>;
 	dismiss(id: string): Promise<void>;
+	markContextInjected(ids: string[], injectedAt: number): Promise<void>;
+	recordOutcome(id: string, update: NudgeOutcomeUpdate): Promise<void>;
+	listUnscoredInjectedForSession(sessionId: string): Promise<import("../types").NudgeRecord[]>;
 }
 
 export interface ConventionStore {
@@ -84,6 +95,7 @@ export interface ConventionStore {
 	listAll(): Promise<import("../types").Convention[]>;
 	listByType(type: string): Promise<import("../types").Convention[]>;
 	updateStats(id: string, applied: boolean, violated: boolean): Promise<void>;
+	updateLifecycleState(id: string, lifecycleState: import("../types").ConventionLifecycleState): Promise<void>;
 }
 
 export interface DetailedOutcomeStore {
@@ -111,4 +123,37 @@ export interface EpisodeDiagnosisStore {
 	listByEpisodeIds(episodeIds: string[]): Promise<import("../types").ToolChainDiagnosis[]>;
 	count(): Promise<number>;
 	deleteOld(keepCount: number): Promise<number>;
+}
+export interface RegressionFixtureStore {
+	insert(fixture: import("../types").RegressionFixture): Promise<void>;
+	listRecent(limit: number): Promise<import("../types").RegressionFixture[]>;
+	listForErrorTool(tool: string | undefined, limit: number): Promise<import("../types").RegressionFixture[]>;
+}
+
+export interface RegressionTrialStore {
+	insert(trial: import("../types").RegressionTrial): Promise<void>;
+	listRecent(limit: number): Promise<import("../types").RegressionTrial[]>;
+}
+
+export interface SessionTraceStore {
+	upsert(trace: import("../types").SessionTrace, episodeId: string): Promise<void>;
+	getBySessionId(sessionId: string): Promise<import("../types").SessionTrace | undefined>;
+}
+
+export interface SkillPopulationStore {
+	insert(record: import("../types").SkillPopulationRecord): Promise<void>;
+	get(name: string): Promise<import("../types").SkillPopulationRecord | undefined>;
+	list(filter?: {
+		state?: import("../types").SkillPopulationState;
+		minScore?: number;
+	}): Promise<import("../types").SkillPopulationRecord[]>;
+	update(record: import("../types").SkillPopulationRecord): Promise<void>;
+	delete(name: string): Promise<void>;
+	transitionState(
+		name: string,
+		newState: import("../types").SkillPopulationState,
+		reason: string,
+		score: number,
+	): Promise<void>;
+	countByState(state: import("../types").SkillPopulationState): Promise<number>;
 }

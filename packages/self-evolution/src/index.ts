@@ -5,44 +5,84 @@
  * skill extraction and episodic memory retrieval.
  */
 import type { Database } from "bun:sqlite";
+import * as path from "node:path";
+import { Pipeline } from "@oh-my-pi/cognitive-coordination/assembler";
+import { validateSkill } from "@oh-my-pi/cognitive-coordination/sandbox";
 import type { ExtensionAPI, ExtensionFactory } from "@oh-my-pi/pi-coding-agent/extensibility/extensions";
 import { FilePersonaStore } from "@oh-my-pi/pi-coding-agent/persona/store";
 import { SchedulerDbStorage } from "@oh-my-pi/pi-coding-agent/scheduler/storage";
 import { getNextRun, getSchedulerDbPath } from "@oh-my-pi/pi-coding-agent/scheduler/types";
-import { logger } from "@oh-my-pi/pi-utils";
-import { registerSelfEvolutionCommands } from "./commands";
+import { getAgentDir, getSessionsDir, isEnoent, logger } from "@oh-my-pi/pi-utils";
+import { isSkillEligibleForInjection } from "./benefit-admission";
+import { refreshAdmissionAfterSessionEnd, refreshBenefitAdmissionState } from "./benefit-admission-refresh";
+import {
+	registerEpisodicCommands,
+	registerModelCommand,
+	registerProfileCommand,
+	registerSelfEvolutionCommands,
+} from "./commands";
 import { ContextAwareRetriever } from "./context-aware-retriever";
-import { ConventionComplianceChecker } from "./convention-compliance";
-import { ConventionExtractor } from "./convention-extractor";
 import { CrossSessionNudgeEngine } from "./cross-session-nudge";
 import { EffectivenessAnalyzer } from "./effectiveness-analyzer";
-import type { ErrorPatternExtractor } from "./error-pattern-extractor";
+import { EpisodicManager } from "./episodic-manager";
+import { ErrorPatternExtractor } from "./error-pattern-extractor";
+import { errorPatternKey } from "./escalation/pattern-key";
+import { syncEvolutionEscalations } from "./escalation/sync";
 import { SkillExtractor } from "./extractor";
 import { FeedbackTracker } from "./feedback-tracker";
-import { InjectionFormatter } from "./injection-formatter";
+import type { InjectionFormatter } from "./injection-formatter";
 import { IntentClassifier } from "./intent-classifier";
 import { type ActivityLogger, closeActivityLogger, getActivityLogger } from "./logging/activity-logger";
+import { projectEvolutionLog } from "./logging/evolution-log";
 import { SkillManager } from "./manager";
+import { registerMemoryCommands } from "./memory-commands";
+import { migrateLegacyEvolutionPathsIfNeeded } from "./migrate-paths";
+import { buildNudgeContextUserMessage } from "./nudge-context-injector";
 import { NudgeDeliverer } from "./nudge-deliverer";
+import { NudgeEffectivenessTracker } from "./nudge-effectiveness";
+import { persistNudgeRecord } from "./nudge-persist";
+import { crossSessionNudgeToNudge, NudgeSuppressionCache } from "./nudge-suppression";
+import { getMemoryRoot, getUnifiedSkillsDir, resolveEvolutionProjectionDir } from "./paths";
+import { projectLearnings } from "./projection/learnings";
+import { projectSystemDiagnosis } from "./projection/system-diagnosis";
+import { hydrateSessionTraceFromJsonlIfRicher } from "./regression/backfill-traces";
+import { buildRegressionFixtureFromTrace } from "./regression/fixture-from-trace";
+import {
+	createRegressionReplayBackend,
+	parseRegressionReplayBackendKind,
+	type RegressionReplayBackend,
+} from "./regression/replay-backend";
+import { setRegressionReplayRuntime } from "./regression/replay-runtime";
 import { EpisodeRetriever } from "./retrieval";
-import { SqliteConventionFeedbackStore } from "./storage/convention-feedback";
-import { SqliteConventionStore } from "./storage/conventions";
+import { extractSessionLearnings } from "./session-learner";
+import { SkillPopulationEngine } from "./skill-population-engine";
 import { closeEvolutionDb, getEvolutionDb } from "./storage/db";
 import { SqliteDetailedOutcomeStore } from "./storage/detailed-outcomes";
 import { SqliteEpisodeDiagnosisStore } from "./storage/diagnoses";
 import { SqliteEffectivenessStore } from "./storage/effectiveness";
 import { SqliteEpisodeStore } from "./storage/episodes";
+import { SqliteEvolutionEscalationStore } from "./storage/evolution-escalations";
 import { SqliteIntentStore } from "./storage/intents";
+import { SqliteLearningStore } from "./storage/learnings";
 import { SqliteNudgeHistoryStore } from "./storage/nudge-history";
 import { SqliteProfileStore } from "./storage/profiles";
+import { SqliteRegressionFixtureStore } from "./storage/regression-fixtures";
+import { SqliteRegressionTrialStore } from "./storage/regression-trials";
+import { SqliteSessionTraceStore } from "./storage/session-traces";
 import { SqliteSkillEffectivenessStore } from "./storage/skill-effectiveness";
+import { SqliteSkillPopulationStore } from "./storage/skill-population";
 import { SqliteSkillStore, SqliteSkillVersionStore, SqliteStatsStore } from "./storage/skills";
 import { SqliteWorkflowPatternStore } from "./storage/workflow-patterns";
 import { registerSelfEvolutionTools } from "./tools";
 import { summarizeTrace, TraceRecorder } from "./trace";
 import { TraceAnalyzer } from "./trace-analyzer";
 import type { SelfEvolutionFlags } from "./types";
-import { UserProfiler } from "./user-profiler";
+import { loadUnifiedSkillsForInjection } from "./unified-skills";
+import { extractUserExplicitLearnings } from "./user-explicit-learnings";
+import { projectUserProfile, UserProfiler } from "./user-profiler";
+import { createBackgroundLlmAuth } from "./utils/background-llm-auth";
+import { resolveBackgroundModel } from "./utils/background-model";
+import { setupSkillsWatcher } from "./watcher";
 import { WorkflowMiner } from "./workflow-miner";
 
 export type { SelfEvolutionFlags };
@@ -53,11 +93,17 @@ export function parseFlags(api: ExtensionAPI): SelfEvolutionFlags {
 		skillThreshold: Number(api.getFlag("self-evolution-skill-threshold") ?? "5"),
 		maxEpisodes: Number(api.getFlag("self-evolution-max-episodes") ?? "100"),
 		enablePromptInjection: api.getFlag("self-evolution-enable-prompt-injection") !== false,
+		enableNudgeContextInjection: api.getFlag("self-evolution-enable-nudge-context-injection") !== false,
 		llmRefinement: api.getFlag("self-evolution-llm-refinement") !== false,
 		llmRerank: api.getFlag("self-evolution-llm-rerank") !== false,
 		enableVersioning: api.getFlag("self-evolution-enable-versioning") !== false,
 		enableActivityLog: api.getFlag("self-evolution-enable-activity-log") !== false,
-		globalStore: api.getFlag("self-evolution-global-store") !== false,
+		globalStore: api.getFlag("self-evolution-global-store") === true,
+		regressionReplayBackend: parseRegressionReplayBackendKind(api.getFlag("self-evolution-regression-replay")),
+		admissionReclassifyInterval: Math.max(
+			1,
+			Number(api.getFlag("self-evolution-admission-reclassify-interval") ?? "5"),
+		),
 	};
 }
 export const createSelfEvolutionExtension: ExtensionFactory = api => {
@@ -72,6 +118,11 @@ export const createSelfEvolutionExtension: ExtensionFactory = api => {
 		type: "string",
 		default: "500",
 		description: "Max episodes to retain for retrieval",
+	});
+	api.registerFlag("self-evolution-enable-nudge-context-injection", {
+		type: "boolean",
+		default: true,
+		description: "Inject session nudges into the next LLM context (off = control arm for A/B)",
 	});
 	api.registerFlag("self-evolution-enable-prompt-injection", {
 		type: "boolean",
@@ -100,8 +151,20 @@ export const createSelfEvolutionExtension: ExtensionFactory = api => {
 	});
 	api.registerFlag("self-evolution-global-store", {
 		type: "boolean",
-		default: true,
-		description: "Use a global store shared across all projects (instead of per-project isolation)",
+		default: false,
+		description:
+			"Legacy: use ~/.omp/self-evolution + encoded memory paths. Default is per-project <cwd>/.omp/memory|evolution|skills",
+	});
+	api.registerFlag("self-evolution-regression-replay", {
+		type: "string",
+		default: "heuristic",
+		description:
+			"Regression replay backend: heuristic | llm | subagent (subagent spawns omp -p with --no-self-evolution)",
+	});
+	api.registerFlag("self-evolution-admission-reclassify-interval", {
+		type: "string",
+		default: "5",
+		description: "Reserved for skill regression cadence when using llm/subagent replay backends",
 	});
 
 	let flags = parseFlags(api);
@@ -134,33 +197,98 @@ export const createSelfEvolutionExtension: ExtensionFactory = api => {
 	let episodeRetriever: EpisodeRetriever | undefined;
 	let extractor: SkillExtractor | undefined;
 	let nudgeHistoryStore: SqliteNudgeHistoryStore | undefined;
+	let nudgeSuppressionCache: NudgeSuppressionCache | undefined;
+	let nudgeEffectivenessTracker: NudgeEffectivenessTracker | undefined;
 	let crossSessionNudgeEngine: CrossSessionNudgeEngine | undefined;
 
-	let conventionStore: SqliteConventionStore | undefined;
-	let conventionExtractor: ConventionExtractor | undefined;
-	let effectivenessAnalyzer: EffectivenessAnalyzer | undefined;
-	let injectionFormatter: InjectionFormatter | undefined;
 	let errorPatternExtractor: ErrorPatternExtractor | undefined;
+	let effectivenessAnalyzer: EffectivenessAnalyzer | undefined;
+	let populationStore: SqliteSkillPopulationStore | undefined;
+	let populationEngine: SkillPopulationEngine | undefined;
 	let detailedOutcomeStore: SqliteDetailedOutcomeStore | undefined;
-	let conventionFeedbackStore: import("./storage/convention-feedback").SqliteConventionFeedbackStore | undefined;
-	let conventionComplianceChecker: import("./convention-compliance").ConventionComplianceChecker | undefined;
+	let injectionFormatter: InjectionFormatter | undefined;
+	let episodicManager: EpisodicManager | undefined;
+	let pipeline: Pipeline | undefined;
 	let db: Database | undefined;
+	let memoryDb: Database | undefined;
+	let stopSkillsWatcher: (() => void) | undefined;
+	let sessionTraceStore: SqliteSessionTraceStore | undefined;
+	let regressionFixtureStore: SqliteRegressionFixtureStore | undefined;
+	let regressionTrialStore: SqliteRegressionTrialStore | undefined;
+	let evolutionEscalationStore: SqliteEvolutionEscalationStore | undefined;
+	let learningStore: SqliteLearningStore | undefined;
+	let benefitAdmissionRefreshed = false;
+	let regressionReplayBackend: RegressionReplayBackend | undefined;
+	let admissionSessionOrdinal = 0;
+	const pathsMigratedKeys = new Set<string>();
+
+	async function ensurePathsMigrated(cwd: string): Promise<void> {
+		const activeFlags = flags ?? parseFlags(api);
+		const key = `${cwd}\0${activeFlags.globalStore}`;
+		if (pathsMigratedKeys.has(key)) return;
+		pathsMigratedKeys.add(key);
+		await migrateLegacyEvolutionPathsIfNeeded(cwd, getAgentDir(), activeFlags.globalStore);
+	}
+
+	function _regressionReplayBackend(): RegressionReplayBackend {
+		if (!regressionReplayBackend) {
+			regressionReplayBackend = createRegressionReplayBackend(flags.regressionReplayBackend);
+		}
+		return regressionReplayBackend;
+	}
+
+	async function _ensureBenefitAdmissionRefresh(): Promise<void> {
+		if (benefitAdmissionRefreshed || !skillStore || !skillEffectivenessStore) return;
+		benefitAdmissionRefreshed = true;
+		try {
+			const result = await refreshBenefitAdmissionState({
+				skillStore,
+				skillEffectivenessStore,
+				populationStore,
+			});
+			if (result.skillsDeprecated > 0) {
+				logger.debug("Benefit admission refresh applied", { ...result });
+			}
+		} catch (err) {
+			logger.warn("Benefit admission refresh failed", { error: String(err) });
+			benefitAdmissionRefreshed = false;
+		}
+	}
+
 	function _ensureInit(cwd: string): void {
 		if (recorder) return;
 		flags = parseFlags(api);
+		regressionReplayBackend = undefined;
 		traceAnalyzer = new TraceAnalyzer();
 		recorder = new TraceRecorder();
 		activityLogger = getActivityLogger(cwd, flags.globalStore);
 		const evolutionDb = getEvolutionDb(cwd, flags.globalStore);
 		db = evolutionDb;
-		episodeStore = new SqliteEpisodeStore(db);
 		skillStore = new SqliteSkillStore(db);
 		versionStore = new SqliteSkillVersionStore(db);
 		skillEffectivenessStore = new SqliteSkillEffectivenessStore(db);
-		skillManager = new SkillManager(skillStore, versionStore, activityLogger, skillEffectivenessStore, episodeStore, {
-			enableVersioning: flags.enableVersioning,
-			maxVersions: 20,
-		});
+		episodeStore = new SqliteEpisodeStore(db);
+		populationStore = new SqliteSkillPopulationStore(db);
+		populationEngine = new SkillPopulationEngine(populationStore, skillStore);
+		if (regressionFixtureStore && regressionTrialStore) {
+			populationEngine.setRegressionDeps({
+				fixtureStore: regressionFixtureStore,
+				trialStore: regressionTrialStore,
+				replayBackend: _regressionReplayBackend(),
+			});
+		}
+		skillManager = new SkillManager(
+			skillStore,
+			versionStore,
+			activityLogger,
+			skillEffectivenessStore,
+			episodeStore,
+			{
+				enableVersioning: flags.enableVersioning,
+				maxVersions: 20,
+			},
+			populationEngine,
+		);
 
 		intentStore = new SqliteIntentStore(db);
 		profileStore = new SqliteProfileStore(db);
@@ -184,21 +312,33 @@ export const createSelfEvolutionExtension: ExtensionFactory = api => {
 		detailedOutcomeStore = new SqliteDetailedOutcomeStore(db);
 		feedbackTracker = new FeedbackTracker(effectivenessStore, skillEffectivenessStore, detailedOutcomeStore);
 		nudgeHistoryStore = new SqliteNudgeHistoryStore(db);
+		nudgeSuppressionCache = new NudgeSuppressionCache();
+		nudgeEffectivenessTracker = new NudgeEffectivenessTracker();
 		crossSessionNudgeEngine = new CrossSessionNudgeEngine(
 			nudgeHistoryStore,
 			episodeStore,
 			profileStore,
 			diagnosisStore,
 		);
-		conventionStore = new SqliteConventionStore(db);
-		conventionFeedbackStore = new SqliteConventionFeedbackStore(db);
-		conventionComplianceChecker = new ConventionComplianceChecker();
-		conventionExtractor = new ConventionExtractor();
+		sessionTraceStore = new SqliteSessionTraceStore(db);
+		regressionFixtureStore = new SqliteRegressionFixtureStore(db);
+		regressionTrialStore = new SqliteRegressionTrialStore(db);
+		evolutionEscalationStore = new SqliteEvolutionEscalationStore(db);
+		learningStore = new SqliteLearningStore(db);
+		errorPatternExtractor = new ErrorPatternExtractor();
 		effectivenessAnalyzer = new EffectivenessAnalyzer();
-		injectionFormatter = new InjectionFormatter();
 		extractor = new SkillExtractor();
 		diagnosisStore = new SqliteEpisodeDiagnosisStore(db);
 		statsStore = new SqliteStatsStore(db);
+		episodicManager = EpisodicManager.create(db);
+		pipeline = new Pipeline({ maxTokens: 2000 });
+
+		if (!stopSkillsWatcher && db) {
+			const skillsDir = getUnifiedSkillsDir(cwd, flags.globalStore);
+			stopSkillsWatcher = setupSkillsWatcher(skillsDir, db);
+		}
+
+		memoryDb = evolutionDb;
 
 		// Auto-register daily audit scheduled task if not present
 		try {
@@ -212,7 +352,7 @@ export const createSelfEvolutionExtension: ExtensionFactory = api => {
 					description: "Daily self-evolution health audit",
 					cron,
 					command:
-						"Analyze the self-evolution database at ./.omp/self-evolution/evolution.db. " +
+						"Analyze the self-evolution database at ./.omp/evolution/evolution.db. " +
 						"Query the episodes, skills, effectiveness, episode_intents, workflow_patterns, and conventions tables to assess the health of the learning system. " +
 						"Calculate key metrics: episode count, skill extraction rate, average success rate, error rate, intent distribution, and convention coverage. " +
 						"Identify data quality issues (e.g., low skill extraction rate, poor episode success rate, stale conventions, workflow pattern noise). " +
@@ -269,9 +409,26 @@ export const createSelfEvolutionExtension: ExtensionFactory = api => {
 			// Scheduler DB may not be available; ignore
 		}
 	}
+
 	async function _retrieveRelevantSkills(
 		query: string,
 	): Promise<Array<{ name: string; taskPattern: string; approach: string }>> {
+		// Use population engine for selection bias (prefers graduated > high-score experimental)
+		const selected = await populationEngine?.selectForInjection(query);
+		if (selected && selected.length > 0) {
+			// Fetch full skill details for the selected population records
+			const skills: Array<{ name: string; taskPattern: string; approach: string }> = [];
+			for (const record of selected) {
+				const skill = await skillStore?.get(record.name);
+				if (!skill || skill.deprecated) continue;
+				const eff = await skillEffectivenessStore?.get(skill.name);
+				if (!isSkillEligibleForInjection(skill, eff)) continue;
+				skills.push({ name: skill.name, taskPattern: skill.taskPattern, approach: skill.approach });
+			}
+			return skills;
+		}
+
+		// Fallback to simple keyword matching if population engine is unavailable
 		if (!skillStore) return [];
 		const skills = await skillStore.list({ deprecated: false });
 		if (skills.length === 0) return [];
@@ -300,7 +457,7 @@ export const createSelfEvolutionExtension: ExtensionFactory = api => {
 
 	// Register commands and tools in the factory body so they are collected
 	// by the extension loader. Handlers call ensureInit on demand.
-	registerSelfEvolutionCommands(api, {
+	const commandStores = {
 		ensureInit: _ensureInit,
 		episodeStore: () => episodeStore!,
 		skillStore: () => skillStore!,
@@ -310,11 +467,33 @@ export const createSelfEvolutionExtension: ExtensionFactory = api => {
 		activityLogger: () => activityLogger!,
 		profileStore: () => profileStore!,
 		workflowPatternStore: () => workflowPatternStore!,
-		conventionStore: () => conventionStore!,
+		learningStore: () => learningStore!,
 		effectivenessStore: () => effectivenessStore!,
+		skillEffectivenessStore: () => skillEffectivenessStore!,
+		populationStore: () => populationStore!,
+		populationEngine: () => populationEngine!,
+		nudgeHistoryStore: () => nudgeHistoryStore!,
 		db: () => db!,
 		flags: () => flags,
-	});
+		episodicManager: () => episodicManager!,
+		escalationStore: () => evolutionEscalationStore!,
+		regressionFixtureStore: () => regressionFixtureStore!,
+		regressionTrialStore: () => regressionTrialStore!,
+		sessionTraceStore: () => sessionTraceStore!,
+		memoryDb: () => memoryDb,
+		embeddingGenerator: () => undefined,
+	};
+
+	registerSelfEvolutionCommands(api, commandStores);
+	registerEpisodicCommands(api, commandStores);
+	registerProfileCommand(api, commandStores);
+	registerModelCommand(api, commandStores);
+	registerMemoryCommands(
+		api,
+		() => memoryDb,
+		undefined,
+		() => flags.globalStore,
+	);
 
 	registerSelfEvolutionTools(api, {
 		ensureInit: _ensureInit,
@@ -324,18 +503,30 @@ export const createSelfEvolutionExtension: ExtensionFactory = api => {
 		activityLogger: () => activityLogger!,
 	});
 
-	api.on("agent_start", (event, ctx) => {
+	api.on("agent_start", async (event, ctx) => {
 		try {
+			await ensurePathsMigrated(ctx.cwd);
 			_ensureInit(ctx.cwd);
+			recorder!.seedBackgroundModel(resolveBackgroundModel(ctx));
 			recorder!.onAgentStart(event, ctx);
 			crossSessionNudgeEngine?.resetSession();
+			const cycleUserPrompt = recorder!.getTrace()?.userPrompt.trim() ?? "";
 			activityLogger!
 				.log("trace_started", {
 					sessionId: ctx.sessionManager.getSessionId(),
 					cwd: ctx.cwd,
-					userPrompt: "",
+					userPrompt: cycleUserPrompt,
 				})
 				.catch((err: unknown) => logger.warn("activity log failed", { error: String(err) }));
+			episodicManager
+				?.recordEvent({
+					sessionId: ctx.sessionManager.getSessionId(),
+					cwd: ctx.cwd,
+					eventType: "session_started",
+					eventData: { userPrompt: cycleUserPrompt },
+					importanceScore: 0.5,
+				})
+				.catch((err: unknown) => logger.warn("episodic record failed", { error: String(err) }));
 		} catch (err) {
 			logger.error("Self-evolution agent_start handler failed", { error: String(err) });
 		}
@@ -359,12 +550,21 @@ export const createSelfEvolutionExtension: ExtensionFactory = api => {
 					toolName: event.toolName,
 				})
 				.catch((err: unknown) => logger.warn("activity log failed", { error: String(err) }));
+			episodicManager
+				?.recordEvent({
+					sessionId: recorder?.getTrace()?.sessionId ?? "unknown",
+					cwd: _ctx.cwd,
+					eventType: "tool_called",
+					eventData: { toolName: event.toolName, toolCallId: event.toolCallId },
+					importanceScore: 0.3,
+				})
+				.catch((err: unknown) => logger.warn("episodic record failed", { error: String(err) }));
 		} catch (err) {
 			logger.error("Self-evolution tool_execution_start handler failed", { error: String(err) });
 		}
 	});
 
-	api.on("tool_execution_end", (event, _ctx) => {
+	api.on("tool_execution_end", async (event, _ctx) => {
 		try {
 			recorder?.onToolExecutionEnd(event);
 			activityLogger
@@ -375,25 +575,35 @@ export const createSelfEvolutionExtension: ExtensionFactory = api => {
 				})
 				.catch((err: unknown) => logger.warn("activity log failed", { error: String(err) }));
 
-			const nudge = recorder?.checkForNudges();
-			if (nudge && _ctx.hasUI) {
-				new NudgeDeliverer().deliver(nudge, _ctx);
+			const isNudgeTypeAllowed = (type: string) => !nudgeSuppressionCache?.isSuppressed(type);
+			const nudge = recorder?.checkForNudges(isNudgeTypeAllowed);
+			if (nudge && nudgeHistoryStore && recorder) {
+				const trace = recorder.getTrace();
+				const sessionId = trace?.sessionId ?? _ctx.sessionManager.getSessionId();
+				const historyId = await persistNudgeRecord(nudgeHistoryStore, {
+					sessionId,
+					project: trace?.cwd ?? _ctx.cwd,
+					nudge,
+				}).catch((err: unknown) => {
+					logger.warn("nudge history insert failed", { error: String(err) });
+					return undefined;
+				});
+				if (historyId) {
+					recorder.enqueuePendingAgentNudge(nudge, historyId);
+					if (_ctx.hasUI) {
+						new NudgeDeliverer().deliver(nudge, _ctx);
+					}
+					activityLogger
+						?.log("session_nudge_detected", {
+							sessionId,
+							type: nudge.type,
+							severity: nudge.severity,
+							historyId,
+						})
+						.catch((err: unknown) => logger.warn("activity log failed", { error: String(err) }));
+				}
 			}
-			if (nudge && nudgeHistoryStore) {
-				const trace = recorder?.getTrace();
-				nudgeHistoryStore
-					.insert({
-						id: `${trace?.sessionId ?? "unknown"}-${nudge.type}-${Date.now()}`,
-						sessionId: trace?.sessionId ?? "unknown",
-						project: trace?.cwd ?? "",
-						type: nudge.type,
-						severity: nudge.severity,
-						message: nudge.message,
-						suggestion: nudge.suggestion,
-						detectedAt: Date.now(),
-					})
-					.catch((err: unknown) => logger.warn("nudge history insert failed", { error: String(err) }));
-			}
+			nudgeEffectivenessTracker?.onToolExecution();
 		} catch (err) {
 			logger.error("Self-evolution tool_execution_end handler failed", { error: String(err) });
 		}
@@ -407,10 +617,96 @@ export const createSelfEvolutionExtension: ExtensionFactory = api => {
 		}
 	});
 
+	// ── Cognitive Pipeline: inject context before each LLM call ──
+	api.on("context", async (event, _ctx) => {
+		try {
+			await ensurePathsMigrated(_ctx.cwd);
+			_ensureInit(_ctx.cwd);
+
+			if (flags.enableNudgeContextInjection) {
+				const pendingNudges = recorder?.drainPendingAgentNudges() ?? [];
+				const nudgeContextMsg = buildNudgeContextUserMessage(pendingNudges);
+				if (nudgeContextMsg) {
+					event.messages.push(nudgeContextMsg as (typeof event.messages)[0]);
+					const injectedAt = Date.now();
+					const ids = pendingNudges.map(q => q.historyId);
+					await nudgeHistoryStore?.markContextInjected(ids, injectedAt);
+					nudgeEffectivenessTracker?.registerInjected(pendingNudges, injectedAt);
+					logger.debug("Nudge context injected", {
+						count: pendingNudges.length,
+						types: pendingNudges.map(q => q.nudge.type),
+						sessionId: recorder?.getTrace()?.sessionId,
+					});
+				}
+			} else {
+				recorder?.drainPendingAgentNudges();
+			}
+
+			if (!pipeline || !skillStore || !learningStore) return;
+
+			const messages = event.messages;
+			let userQuery = "";
+			for (let i = messages.length - 1; i >= 0; i--) {
+				const msg = messages[i] as { role?: string; content?: string | unknown[] };
+				if (msg.role === "user") {
+					userQuery = typeof msg.content === "string" ? msg.content : "";
+					break;
+				}
+			}
+			if (!userQuery) return;
+
+			const unifiedSkills = await loadUnifiedSkillsForInjection(_ctx.cwd, skillStore!, {
+				globalStore: flags.globalStore,
+			});
+			const implicitConventions = (await learningStore.listForInjection(_ctx.cwd, 8)).map(l => ({
+				rule: l.content,
+				confidence: l.confidence / 5,
+				sourceSessionId: l.sessionId,
+			}));
+
+			// Sandbox: validate skills before injection
+			const sandboxedSkills = unifiedSkills.filter(s => {
+				const report = validateSkill(s, userQuery);
+				return report.passed;
+			});
+
+			const pctx = await pipeline!.run(userQuery, sandboxedSkills, implicitConventions);
+			if (pctx.contextMd && pctx.contextMd.length > 0) {
+				const contextMsg = { role: "user", content: `[System Context]\n${pctx.contextMd}` };
+				event.messages.unshift(contextMsg as (typeof messages)[0]);
+			}
+		} catch (err) {
+			logger.warn("Pipeline context injection failed", { error: String(err) });
+		}
+	});
+
 	api.on("agent_end", async (_event, ctx) => {
 		try {
-			const trace = recorder?.onAgentEnd(_event);
+			await ensurePathsMigrated(ctx.cwd);
+			_ensureInit(ctx.cwd);
+			let trace = recorder?.onAgentEnd(_event);
 			if (!trace) return;
+
+			const episodeStub = {
+				id: `${trace.sessionId}-${trace.startTime}`,
+				sessionId: trace.sessionId,
+				cwd: trace.cwd,
+				userPrompt: trace.userPrompt,
+				timestamp: trace.startTime,
+				durationMs: trace.endTime - trace.startTime,
+				toolCallCount: trace.toolCallCount,
+				errorCount: trace.errorCount,
+				hadRecovery: trace.hadRecovery,
+				completedSuccessfully: trace.completedSuccessfully,
+				summary: "",
+				toolsUsed: [] as string[],
+				filesModified: [] as string[],
+			};
+			trace = await hydrateSessionTraceFromJsonlIfRicher(trace, episodeStub, getSessionsDir());
+
+			if (nudgeHistoryStore && nudgeEffectivenessTracker) {
+				await nudgeEffectivenessTracker.finalizeSession(trace, nudgeHistoryStore);
+			}
 
 			await activityLogger?.log("trace_finalized", {
 				sessionId: trace.sessionId,
@@ -437,6 +733,7 @@ export const createSelfEvolutionExtension: ExtensionFactory = api => {
 				filesModified,
 			};
 			await episodeStore?.insert(episode);
+			await sessionTraceStore?.upsert(trace, episode.id);
 			await statsStore?.increment("sessions_archived");
 			await activityLogger?.log("episode_archived", {
 				episodeId: episode.id,
@@ -444,9 +741,43 @@ export const createSelfEvolutionExtension: ExtensionFactory = api => {
 				summary,
 				toolCallCount: trace.toolCallCount,
 			});
+			await episodicManager?.markSessionEnded(trace.sessionId, {
+				toolCallCount: trace.toolCallCount,
+				errorCount: trace.errorCount,
+				hadRecovery: trace.hadRecovery,
+				completedSuccessfully: trace.completedSuccessfully,
+				durationMs: trace.endTime - trace.startTime,
+			});
+
+			// Schedule md projections asynchronously (fire-and-forget)
+			const outputDir = resolveEvolutionProjectionDir(ctx.cwd, flags.globalStore);
+			const activityLogPath = path.join(outputDir, "activity.log");
+			projectLearnings(db!, { outputDir }).catch(e => logger.warn("projectLearnings failed", { error: String(e) }));
+			projectEvolutionLog(activityLogPath, { outputDir }).catch(e =>
+				logger.warn("projectEvolutionLog failed", { error: String(e) }),
+			);
+			projectUserProfile(db!, { outputDir }).catch(e =>
+				logger.warn("projectUserProfile failed", { error: String(e) }),
+			);
+			if (episodeStore && skillStore) {
+				projectSystemDiagnosis(db!, {
+					outputDir,
+					maxEpisodes: flags.maxEpisodes,
+					episodeStore,
+					skillStore,
+					activityLogger,
+					auditRuntime: {
+						regressionReplayBackend: flags.regressionReplayBackend,
+						admissionReclassifyInterval: flags.admissionReclassifyInterval,
+					},
+				}).catch(e => logger.warn("projectSystemDiagnosis failed", { error: String(e) }));
+			}
+
+			const backgroundModel = trace.backgroundModel ?? resolveBackgroundModel(ctx);
+			const backgroundAuth = createBackgroundLlmAuth(ctx);
 
 			// Deep causal diagnosis (LLM-enhanced when model is available)
-			const diagnosis = await traceAnalyzer?.analyzeWithLlm(trace, ctx.model);
+			const diagnosis = await traceAnalyzer?.analyzeWithLlm(trace, backgroundModel, backgroundAuth);
 			if (diagnosis) {
 				// Align diagnosis sessionId with episode id for FK constraint
 				diagnosis.sessionId = episode.id;
@@ -462,8 +793,22 @@ export const createSelfEvolutionExtension: ExtensionFactory = api => {
 			if (diagnosis) {
 				await diagnosisStore?.insert(diagnosis);
 			}
-			// Extract intent
-			const intentResult = intentClassifier?.ruleClassify(trace);
+
+			const regressionFixture = buildRegressionFixtureFromTrace(trace, episode.id, {
+				dominantErrorTool: diagnosis?.dominantErrorTool,
+				dominantErrorPattern: diagnosis?.dominantErrorPattern,
+			});
+			if (regressionFixture) {
+				await regressionFixtureStore?.insert(regressionFixture);
+				await activityLogger?.log("regression_fixture_created", {
+					fixtureId: regressionFixture.id,
+					sessionId: trace.sessionId,
+					errorCount: regressionFixture.errorCount,
+				});
+			}
+
+			// Extract intent (rule first; LLM when rule confidence is low and model is available)
+			const intentResult = await intentClassifier?.classify(trace, backgroundModel, backgroundAuth);
 			if (intentResult) {
 				await intentStore?.insert({
 					episodeId: episode.id,
@@ -501,49 +846,32 @@ export const createSelfEvolutionExtension: ExtensionFactory = api => {
 				});
 			}
 
-			// Extract conventions from user dialogue (enhanced with causal diagnosis)
-			if (conventionExtractor && conventionStore) {
-				const conventions = conventionExtractor.extract(trace);
-				let diagnosisConventions: import("./types").Convention[] = [];
-				for (const c of conventions) {
-					await conventionStore.insert(c);
-					await conventionStore.updateStats(c.id, true, false);
+			// SessionLearner + explicit user learnings (≤3 per session)
+			if (learningStore) {
+				const explicit = extractUserExplicitLearnings(trace, episode.id);
+				for (const l of explicit) {
+					await learningStore.insert(l);
 				}
-				if (diagnosis) {
-					diagnosisConventions = conventionExtractor.extractFromDiagnosis(diagnosis);
-					for (const c of diagnosisConventions) {
-						await conventionStore.insert(c);
-						await conventionStore.updateStats(c.id, true, false);
-					}
-					if (diagnosisConventions.length > 0) {
-						await activityLogger?.log("diagnosis_conventions_extracted", { count: diagnosisConventions.length });
-					}
+				const fromLlm = await extractSessionLearnings(trace, episode.id, backgroundModel, backgroundAuth);
+				for (const l of fromLlm) {
+					await learningStore.insert(l);
 				}
-				const total = conventions.length + diagnosisConventions.length;
-				if (total > 0) {
-					await activityLogger?.log("conventions_extracted", { count: total });
+				const learningCount = explicit.length + fromLlm.length;
+				if (learningCount > 0) {
+					await activityLogger?.log("learnings_extracted", { count: learningCount, episodeId: episode.id });
 				}
+				await learningStore.refreshLifecycles();
 			}
 
-			// Extract error patterns from this session
-			if (errorPatternExtractor && conventionStore) {
+			// Error patterns → escalations only (no convention writes)
+			if (errorPatternExtractor) {
 				const patterns = errorPatternExtractor.extract(trace);
 				for (const p of patterns) {
-					for (const convention of p.extractedConventions) {
-						const c = {
-							id: `conv_${Bun.hash(`negative_rule:${convention}`).toString(36)}`,
-							type: "negative_rule" as const,
-							content: convention,
-							sourceEpisodeId: trace.sessionId,
-							confidence: 60,
-							timesApplied: 0,
-							timesViolated: 0,
-							createdAt: Date.now(),
-							lastSeenAt: Date.now(),
-						};
-						// insert() handles deduplication and confidence boost
-						await conventionStore.insert(c);
-						await conventionStore.updateStats(c.id, true, false);
+					if (await evolutionEscalationStore?.isPatternSuppressed(errorPatternKey(p.id))) {
+						await activityLogger?.log("error_pattern_suppressed", {
+							patternId: p.id,
+							sessionId: trace.sessionId,
+						});
 					}
 				}
 				if (patterns.length > 0) {
@@ -552,6 +880,15 @@ export const createSelfEvolutionExtension: ExtensionFactory = api => {
 						sessionId: trace.sessionId,
 					});
 				}
+			}
+
+			const prevInjectedLearnings = trace.injectedLearningIds;
+			if (prevInjectedLearnings && prevInjectedLearnings.length > 0 && learningStore) {
+				const helped = trace.completedSuccessfully && trace.errorCount === 0;
+				for (const id of prevInjectedLearnings) {
+					await learningStore.recordOutcome(id, helped);
+				}
+				await learningStore.refreshLifecycles();
 			}
 
 			// Record feedback for previously injected episodes using multi-dimensional analysis
@@ -588,48 +925,47 @@ export const createSelfEvolutionExtension: ExtensionFactory = api => {
 					{
 						skillThreshold: flags.skillThreshold,
 						llmRefinement: flags.llmRefinement,
-						model: ctx.model,
+						model: backgroundModel,
+						auth: backgroundAuth,
 					},
 					diagnosis ?? undefined,
 				);
 				if (extracted && skillManager) {
-					await skillManager.integrate(extracted, ctx.model);
+					await skillManager.integrate(extracted, backgroundModel, backgroundAuth);
 				}
 			}
 
-			// Check convention compliance for injected conventions
-			const prevInjectedConventions = trace.injectedConventionIds;
-			if (
-				prevInjectedConventions &&
-				prevInjectedConventions.length > 0 &&
-				conventionComplianceChecker &&
-				conventionStore &&
-				conventionFeedbackStore
-			) {
-				const injectedConventions = [];
-				for (const id of prevInjectedConventions) {
-					const c = await conventionStore.get(id);
-					if (c) injectedConventions.push(c);
-				}
-				if (injectedConventions.length > 0) {
-					const feedback = conventionComplianceChecker.check(trace, injectedConventions);
-					for (const fb of feedback) {
-						await conventionFeedbackStore.record(fb);
-						if (!fb.complied) {
-							// Update convention stats to reflect violation
-							await conventionStore.updateStats(fb.conventionId, false, true);
-						}
-					}
-					const violations = feedback.filter(f => !f.complied);
-					if (violations.length > 0) {
-						await activityLogger?.log("conventions_violated", {
-							sessionId: trace.sessionId,
-							count: violations.length,
-							conventionIds: violations.map(v => v.conventionId),
-						});
-					}
+			setRegressionReplayRuntime({ model: backgroundModel, auth: backgroundAuth });
+			admissionSessionOrdinal++;
+			if (skillStore && skillEffectivenessStore) {
+				const admission = await refreshAdmissionAfterSessionEnd({
+					skillStore,
+					skillEffectivenessStore,
+					populationStore,
+					fixtureStore: regressionFixtureStore,
+					trialStore: regressionTrialStore,
+					replayBackend: _regressionReplayBackend(),
+					regressionReplayBackend: flags.regressionReplayBackend,
+					sessionOrdinal: admissionSessionOrdinal,
+					admissionReclassifyInterval: flags.admissionReclassifyInterval,
+				});
+				if (admission.skillsDeprecated > 0) {
+					logger.debug("Session benefit admission refresh", admission);
 				}
 			}
+
+			if (evolutionEscalationStore && regressionFixtureStore && learningStore && regressionTrialStore) {
+				const escalated = await syncEvolutionEscalations({
+					escalationStore: evolutionEscalationStore,
+					fixtureStore: regressionFixtureStore,
+					learningStore,
+					trialStore: regressionTrialStore,
+				});
+				if (escalated > 0) {
+					await activityLogger?.log("evolution_escalations_synced", { count: escalated });
+				}
+			}
+
 			// Cleanup old episodes
 			await episodeStore?.deleteOld(flags.maxEpisodes);
 		} catch (err) {
@@ -639,9 +975,57 @@ export const createSelfEvolutionExtension: ExtensionFactory = api => {
 
 	api.on("before_agent_start", async (event, ctx) => {
 		try {
+			await ensurePathsMigrated(ctx.cwd);
 			_ensureInit(ctx.cwd);
+			await _ensureBenefitAdmissionRefresh();
+
+			if (evolutionEscalationStore && ctx.hasUI) {
+				const openEscalations = await evolutionEscalationStore.listOpen();
+				for (const escalation of openEscalations.filter(e => e.status === "open").slice(0, 2)) {
+					ctx.ui.notify(`[Evolution stuck] ${escalation.message} — ${escalation.suggestion}`, "warning");
+				}
+			}
+
 			// Capture user prompt from before_agent_start before trace exists
 			recorder?.seedPrompt(event.prompt);
+			recorder?.beginTurn();
+			if (nudgeHistoryStore && nudgeSuppressionCache) {
+				await nudgeSuppressionCache.refreshFromRecent(nudgeHistoryStore);
+			}
+
+			if (flags.enableNudgeContextInjection && crossSessionNudgeEngine && recorder) {
+				const crossNudge = await crossSessionNudgeEngine.analyze(ctx.cwd, event.prompt);
+				if (crossNudge && !nudgeSuppressionCache?.isSuppressed(crossNudge.type)) {
+					const nudge = crossSessionNudgeToNudge(crossNudge);
+					const sessionId = ctx.sessionManager.getSessionId();
+					const historyId = nudgeHistoryStore
+						? await persistNudgeRecord(nudgeHistoryStore, {
+								sessionId,
+								project: ctx.cwd,
+								nudge,
+							}).catch((err: unknown) => {
+								logger.warn("nudge history insert failed", { error: String(err) });
+								return undefined;
+							})
+						: undefined;
+					if (historyId && recorder.enqueuePendingAgentNudge(nudge, historyId)) {
+						if (ctx.hasUI) {
+							ctx.ui.notify(
+								`[Cross-Session ${crossNudge.severity === "warn" ? "Warning" : "Tip"}] ${crossNudge.message} (added to agent context)`,
+								crossNudge.severity === "warn" ? "warning" : "info",
+							);
+						}
+						await activityLogger
+							?.log("cross_session_nudge_queued", {
+								sessionId,
+								type: crossNudge.type,
+								historyId,
+							})
+							.catch((err: unknown) => logger.warn("activity log failed", { error: String(err) }));
+					}
+				}
+			}
+
 			if (!flags.enablePromptInjection) return;
 			if (!contextAwareRetriever || !recorder) return;
 
@@ -664,16 +1048,36 @@ export const createSelfEvolutionExtension: ExtensionFactory = api => {
 				maxEpisodes: flags.maxEpisodes,
 				llmRerank: flags.llmRerank,
 				model: ctx.model,
+				auth: createBackgroundLlmAuth(ctx),
 				currentIntent: intentResult?.intent,
 				profile: profile ?? undefined,
 			});
 			const relevantSkills = await _retrieveRelevantSkills(event.prompt);
-			const conventions = ((await conventionStore?.listAll()) ?? [])
-				.filter(c => c.confidence >= 60)
-				.sort((a, b) => b.confidence - a.confidence)
-				.slice(0, 10);
-			if (episodes.length === 0 && relevantSkills.length === 0 && conventions.length === 0 && !profile && !persona)
+			const conventions: import("./types").Convention[] = [];
+			const learnings = learningStore ? await learningStore.listForInjection(ctx.cwd, 8) : [];
+
+			let memorySummary: string | undefined;
+			try {
+				const memoryRoot = getMemoryRoot(getAgentDir(), ctx.cwd, { globalStore: flags.globalStore });
+				const text = (await Bun.file(path.join(memoryRoot, "memory_summary.md")).text()).trim();
+				if (text.length > 0) memorySummary = text;
+			} catch (err) {
+				if (!isEnoent(err)) {
+					logger.warn("memory_summary read failed", { error: String(err) });
+				}
+			}
+
+			if (
+				episodes.length === 0 &&
+				relevantSkills.length === 0 &&
+				conventions.length === 0 &&
+				learnings.length === 0 &&
+				!memorySummary &&
+				!profile &&
+				!persona
+			) {
 				return;
+			}
 
 			// Track injected episodes for feedback
 			recorder?.setInjectedEpisodes(episodes.map(e => e.episode.id));
@@ -683,28 +1087,11 @@ export const createSelfEvolutionExtension: ExtensionFactory = api => {
 			recorder?.setInjectedSkills(relevantSkills.map(s => s.name));
 			await feedbackTracker?.trackSkillInjection(relevantSkills.map(s => s.name));
 
-			// Track injected conventions for compliance checking
-			recorder?.setInjectedConventions(conventions.map(c => c.id));
-
-			// Cross-session nudge analysis
-			const crossNudge = await crossSessionNudgeEngine?.analyze(ctx.cwd, event.prompt);
-			if (crossNudge && ctx.hasUI) {
-				ctx.ui.notify(
-					`[Cross-Session ${crossNudge.severity === "warn" ? "Warning" : "Tip"}] ${crossNudge.message}\nSuggestion: ${crossNudge.suggestion}`,
-					crossNudge.severity === "warn" ? "warning" : "info",
-				);
-				// Record cross-session nudge to history for feedback loop
-				await nudgeHistoryStore?.insert({
-					id: `${ctx.sessionManager.getSessionId()}-${crossNudge.type}-${Date.now()}`,
-					sessionId: ctx.sessionManager.getSessionId(),
-					project: ctx.cwd,
-					type: crossNudge.type,
-					severity: crossNudge.severity,
-					message: crossNudge.message,
-					suggestion: crossNudge.suggestion,
-					detectedAt: Date.now(),
-				});
+			recorder?.setInjectedLearnings(learnings.map(l => l.id));
+			for (const l of learnings) {
+				await learningStore?.recordInjection(l.id);
 			}
+
 			// Build injection using formatter
 			let injection = "";
 			if (injectionFormatter) {
@@ -714,6 +1101,8 @@ export const createSelfEvolutionExtension: ExtensionFactory = api => {
 					relevantSkills,
 					profile ?? undefined,
 					persona ?? undefined,
+					{ memorySummary },
+					learnings,
 				);
 			} else {
 				// Fallback: old inline formatting
@@ -742,6 +1131,7 @@ export const createSelfEvolutionExtension: ExtensionFactory = api => {
 				episodeIds: episodes.map(e => e.episode.id),
 				skillNames: relevantSkills.map(s => s.name),
 				conventionCount: conventions.length,
+				learningCount: learnings.length,
 				tokenCount: Math.ceil(injection.length / 4),
 				intent: intentResult?.intent,
 			});
@@ -771,9 +1161,9 @@ export const createSelfEvolutionExtension: ExtensionFactory = api => {
 			effectivenessStore = undefined;
 			skillEffectivenessStore = undefined;
 			nudgeHistoryStore = undefined;
+			nudgeSuppressionCache = undefined;
+			nudgeEffectivenessTracker = undefined;
 			crossSessionNudgeEngine = undefined;
-			conventionStore = undefined;
-			conventionExtractor = undefined;
 			effectivenessAnalyzer = undefined;
 			injectionFormatter = undefined;
 			errorPatternExtractor = undefined;

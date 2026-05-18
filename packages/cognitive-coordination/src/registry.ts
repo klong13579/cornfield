@@ -4,31 +4,22 @@ import type { SkillFrontmatter, UnifiedSkill } from "./types.js";
 
 /**
  * Unified Skill Registry
- * Loads and merges skills from Memory and Self-Evolution systems.
+ * Loads skills from the canonical on-disk directory (~/.omp/self-evolution/skills/).
  */
 export class UnifiedSkillRegistry {
 	/**
-	 * Load and merge skills from memory and evolution roots.
-	 * @param memoryRoot - Root path of memory skills (subdirectories with SKILL.md)
-	 * @param evolutionRoot - Root path of evolution skills (<name>.md files)
+	 * Load all skills from a single directory.
+	 * Supports flat `<name>.md` files and legacy `<name>/SKILL.md` subdirectories.
 	 */
-	async load(memoryRoot: string, evolutionRoot: string): Promise<UnifiedSkill[]> {
-		const skills: UnifiedSkill[] = [];
+	async loadDir(skillsDir: string): Promise<UnifiedSkill[]> {
+		const flat = await this.#loadFlatMarkdownSkills(skillsDir);
+		const legacy = await this.#loadLegacySubdirSkills(skillsDir);
+		const merged = this.mergeByName([...flat, ...legacy]);
 
-		// Load memory consolidation skills
-		const memorySkills = await this.loadMemorySkills(memoryRoot);
-		skills.push(...memorySkills);
-
-		// Load evolution extraction skills
-		const evolutionSkills = await this.loadEvolutionSkills(evolutionRoot);
-		skills.push(...evolutionSkills);
-
-		// Merge by name, resolving conflicts based on confidence_score and source
-		const merged = this.mergeByName(skills);
-
-		logger.debug("UnifiedSkillRegistry.load", {
-			memoryCount: memorySkills.length,
-			evolutionCount: evolutionSkills.length,
+		logger.debug("UnifiedSkillRegistry.loadDir", {
+			skillsDir,
+			flatCount: flat.length,
+			legacyCount: legacy.length,
 			mergedCount: merged.length,
 		});
 
@@ -36,12 +27,23 @@ export class UnifiedSkillRegistry {
 	}
 
 	/**
-	 * Load skills from memory root's skills directory.
-	 * Each subdirectory contains a SKILL.md file.
+	 * @deprecated Use loadDir(getUnifiedSkillsDir(cwd)) — memory and evolution share one tree.
 	 */
-	private async loadMemorySkills(memoryRoot: string): Promise<UnifiedSkill[]> {
+	async load(memoryRoot: string, evolutionRoot: string): Promise<UnifiedSkill[]> {
+		const skillsDir = `${evolutionRoot}/skills`;
+		const legacyDir = `${memoryRoot}/skills`;
+		const flat = await this.#loadFlatMarkdownSkills(skillsDir);
+		const fromEvolutionRoot = flat;
+		const fromLegacy = await this.#loadLegacySubdirSkills(legacyDir);
+		const fromUnifiedLegacy = await this.#loadLegacySubdirSkills(skillsDir);
+		return this.mergeByName([...fromEvolutionRoot, ...fromLegacy, ...fromUnifiedLegacy]);
+	}
+
+	/**
+	 * Load legacy subdirectory skills (`<skillsDir>/<name>/SKILL.md`).
+	 */
+	async #loadLegacySubdirSkills(skillsDir: string): Promise<UnifiedSkill[]> {
 		const skills: UnifiedSkill[] = [];
-		const skillsDir = `${memoryRoot}/skills`;
 
 		try {
 			const entries = await this.listDirectory(skillsDir);
@@ -56,7 +58,7 @@ export class UnifiedSkillRegistry {
 					if (!(await file.exists())) continue;
 
 					const content = await file.text();
-					const parsed = this.parseSkillFile(content, entry.name);
+					const parsed = this.parseMemorySkillFile(content, entry.name);
 					if (parsed) skills.push(this.toUnifiedSkill(parsed, "memory_consolidation"));
 				} catch (err) {
 					logger.warn("UnifiedSkillRegistry: failed to load memory skill", {
@@ -72,13 +74,9 @@ export class UnifiedSkillRegistry {
 		return skills;
 	}
 
-	/**
-	 * Load skills from evolution root's skills directory.
-	 * Each file is a <name>.md file.
-	 */
-	private async loadEvolutionSkills(evolutionRoot: string): Promise<UnifiedSkill[]> {
+	/** Load flat `<name>.md` skill files. */
+	async #loadFlatMarkdownSkills(skillsDir: string): Promise<UnifiedSkill[]> {
 		const skills: UnifiedSkill[] = [];
-		const skillsDir = `${evolutionRoot}/skills`;
 
 		try {
 			const entries = await this.listDirectory(skillsDir);
@@ -93,7 +91,10 @@ export class UnifiedSkillRegistry {
 				try {
 					const content = await Bun.file(skillPath).text();
 					const parsed = this.parseSkillFile(content, skillName);
-					if (parsed) skills.push(this.toUnifiedSkill(parsed, "evolution_extraction"));
+					if (parsed) {
+						const source = parsed.source === "memory" ? "memory_consolidation" : "evolution_extraction";
+						skills.push(this.toUnifiedSkill(parsed, source));
+					}
 				} catch (err) {
 					logger.warn("UnifiedSkillRegistry: failed to load evolution skill", {
 						skill: skillName,
@@ -109,6 +110,27 @@ export class UnifiedSkillRegistry {
 	}
 
 	/**
+	 * Parse a memory consolidation SKILL.md (frontmatter optional).
+	 */
+	private parseMemorySkillFile(content: string, dirName: string): (SkillFrontmatter & { content: string }) | null {
+		const parsed = this.parseSkillFile(content, dirName);
+		if (parsed) return parsed;
+
+		const body = content.trim();
+		if (!body) return null;
+
+		return {
+			name: dirName,
+			version: "1",
+			source: "memory",
+			confidence_score: 0.6,
+			last_used_at: new Date().toISOString(),
+			status: "active",
+			content: body,
+		};
+	}
+
+	/**
 	 * Parse a skill file, extracting frontmatter and content.
 	 */
 	private parseSkillFile(content: string, fallbackName: string): (SkillFrontmatter & { content: string }) | null {
@@ -117,8 +139,8 @@ export class UnifiedSkillRegistry {
 		// Validate required fields
 		const name = frontmatter.name as string | undefined;
 		const version = frontmatter.version as string | undefined;
-		const confidenceScore = frontmatter.confidenceScore as number | undefined;
-		const lastUsedAt = frontmatter.lastUsedAt as string | undefined;
+		const confidenceScore = (frontmatter.confidenceScore ?? frontmatter.confidence_score) as number | undefined;
+		const lastUsedAt = (frontmatter.lastUsedAt ?? frontmatter.last_used_at) as string | undefined;
 		const status = frontmatter.status as string | undefined;
 
 		if (!name || !version || confidenceScore === undefined || !lastUsedAt || !status) {

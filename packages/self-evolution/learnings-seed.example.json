@@ -1,0 +1,22 @@
+[
+	{
+		"kind": "preference",
+		"content": "改代码或执行破坏性命令前必须先向用户确认，同意后再加 --yes",
+		"pin": true
+	},
+	{
+		"kind": "preference",
+		"content": "用中文回复；技术说明要简洁，避免废话",
+		"pin": true
+	},
+	{
+		"kind": "preference",
+		"content": "测试用例必须主动覆盖边界条件，不要只测 happy path",
+		"pin": true
+	},
+	{
+		"kind": "procedure",
+		"content": "在 coding-agent 包中禁止 console.log，使用 @oh-my-pi/pi-utils 的 logger",
+		"pin": true
+	}
+]

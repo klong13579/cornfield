@@ -5,9 +5,8 @@
  * global store do not interfere with each other's flush timers.
  */
 import * as fs from "node:fs/promises";
-import * as os from "node:os";
-import * as path from "node:path";
 import { logger } from "@oh-my-pi/pi-utils";
+import { resolveEvolutionPathLayout } from "../paths";
 import type { LogEntry } from "../types";
 
 const MAX_LOG_SIZE = 10 * 1024 * 1024; // 10MB
@@ -21,10 +20,7 @@ interface LoggerEntry {
 const loggerCache = new Map<string, LoggerEntry>();
 
 function resolveLogPath(cwd: string, globalStore?: boolean): string {
-	const baseDir = globalStore
-		? path.join(os.homedir(), ".omp", "self-evolution")
-		: path.join(cwd, ".omp", "self-evolution");
-	return path.join(baseDir, "activity.log");
+	return resolveEvolutionPathLayout(cwd, globalStore).activityLogPath;
 }
 
 export function getActivityLogger(cwd: string, globalStore?: boolean): ActivityLogger {

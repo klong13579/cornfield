@@ -14,11 +14,11 @@ class MockEpisodeStore implements EpisodeStore {
 	async listRecent(limit: number): Promise<Episode[]> {
 		return this.#episodes.slice(0, limit);
 	}
-	async searchByKeyword(): Promise<Episode[]> {
-		return [];
+	async searchByKeyword(_query: string, _limit: number): Promise<Episode[]> {
+		return [...this.#episodes];
 	}
-	async searchFailedByKeyword(): Promise<Episode[]> {
-		return [];
+	async searchFailedByKeyword(_query: string, _limit: number): Promise<Episode[]> {
+		return [...this.#episodes.filter(e => !e.completedSuccessfully)];
 	}
 	async deleteOld(): Promise<number> {
 		return 0;
@@ -63,6 +63,15 @@ class MockEffectivenessStore implements EffectivenessStore {
 
 	async recordInjection(): Promise<void> {}
 	async recordOutcome(): Promise<void> {}
+
+	async getMany(episodeIds: string[]): Promise<EpisodeEffectiveness[]> {
+		const results: EpisodeEffectiveness[] = [];
+		for (const episodeId of episodeIds) {
+			const row = await this.get(episodeId);
+			if (row) results.push(row);
+		}
+		return results;
+	}
 }
 
 function makeEpisode(id: string, prompt: string, toolCallCount: number = 2, overrides: Partial<Episode> = {}): Episode {

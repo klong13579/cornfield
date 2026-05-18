@@ -1,16 +1,16 @@
 import { Database } from "bun:sqlite";
 import { beforeEach, describe, expect, test } from "bun:test";
 import { DailyReportGenerator } from "../src/daily-report";
-import { SqliteConventionStore } from "../src/storage/conventions";
 import { initSchema } from "../src/storage/db";
 import { SqliteEffectivenessStore } from "../src/storage/effectiveness";
 import { SqliteEpisodeStore } from "../src/storage/episodes";
-import type { Convention, Episode } from "../src/types";
+import { SqliteLearningStore } from "../src/storage/learnings";
+import type { Episode, Learning } from "../src/types";
 
 describe("DailyReportGenerator", () => {
 	let db: Database;
 	let episodeStore: SqliteEpisodeStore;
-	let conventionStore: SqliteConventionStore;
+	let learningStore: SqliteLearningStore;
 	let effectivenessStore: SqliteEffectivenessStore;
 	let generator: DailyReportGenerator;
 
@@ -18,9 +18,9 @@ describe("DailyReportGenerator", () => {
 		db = new Database(":memory:");
 		initSchema(db);
 		episodeStore = new SqliteEpisodeStore(db);
-		conventionStore = new SqliteConventionStore(db);
+		learningStore = new SqliteLearningStore(db);
 		effectivenessStore = new SqliteEffectivenessStore(db);
-		generator = new DailyReportGenerator(episodeStore, conventionStore, effectivenessStore);
+		generator = new DailyReportGenerator(episodeStore, learningStore, effectivenessStore);
 	});
 
 	function makeEpisode(overrides: Partial<Episode> = {}): Episode {
@@ -154,24 +154,28 @@ describe("DailyReportGenerator", () => {
 		expect(report.keyMoments.some(m => m.type === "correction")).toBe(true);
 	});
 
-	test("generate includes new conventions from the day", async () => {
+	test("generate includes new learnings from the day", async () => {
 		const now = Date.now();
-		const convention: Convention = {
-			id: "conv-1",
-			type: "positive_rule",
+		const item: Learning = {
+			id: "learn-1",
+			cwd: "/test",
+			kind: "preference",
 			content: "Always use async/await",
-			sourceEpisodeId: "ep-1",
-			confidence: 85,
-			timesApplied: 0,
-			timesViolated: 0,
+			source: "session_llm",
+			confidence: 4,
+			lifecycle: "active",
+			sessionId: "ep-1",
 			createdAt: now,
-			lastSeenAt: now,
+			updatedAt: now,
+			timesInjected: 0,
+			timesHelped: 0,
+			timesIgnored: 0,
 		};
-		await conventionStore.insert(convention);
+		await learningStore.insert(item);
 
 		const report = await generator.generate(new Date(now));
-		expect(report.newConventions.length).toBe(1);
-		expect(report.newConventions[0]?.content).toBe("Always use async/await");
+		expect(report.newLearnings.length).toBe(1);
+		expect(report.newLearnings[0]?.content).toBe("Always use async/await");
 	});
 
 	test("generate builds top tools", async () => {
@@ -213,7 +217,7 @@ describe("DailyReportGenerator", () => {
 		expect(markdown).toContain("## Summary:");
 		expect(markdown).toContain("## Key Moments");
 		expect(markdown).toContain("## Top Error Patterns");
-		expect(markdown).toContain("## New Conventions");
+		expect(markdown).toContain("## New Learnings");
 		expect(markdown).toContain("## Top Tools");
 		expect(markdown).toContain("## Session Details");
 		expect(markdown).toContain("Test task");
@@ -226,6 +230,6 @@ describe("DailyReportGenerator", () => {
 		expect(markdown).toContain("# Daily Report:");
 		expect(markdown).toContain("_No key moments recorded._");
 		expect(markdown).toContain("_No errors recorded._");
-		expect(markdown).toContain("_No new conventions extracted._");
+		expect(markdown).toContain("_No new learnings extracted._");
 	});
 });

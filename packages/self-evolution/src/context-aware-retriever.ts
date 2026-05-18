@@ -7,12 +7,13 @@ import { logger } from "@oh-my-pi/pi-utils";
 import rerankEpisodesTemplate from "./prompts/rerank-episodes.md" with { type: "text" };
 import type { EffectivenessStore, EpisodeStore, IntentStore } from "./storage/types";
 import type { Episode, UserProfile } from "./types";
-import { callBackgroundLlm } from "./utils/llm";
+import { type BackgroundLlmAuth, callBackgroundLlm } from "./utils/llm";
 
 export interface ContextRetrievalOptions {
 	maxEpisodes: number;
 	llmRerank: boolean;
 	model?: Model;
+	auth?: BackgroundLlmAuth;
 	currentIntent?: string;
 	profile?: UserProfile;
 }
@@ -104,7 +105,7 @@ export class ContextAwareRetriever {
 			}));
 		}
 
-		return this.#llmRerank(topCandidates, query, options.model);
+		return this.#llmRerank(topCandidates, query, options.model, options.auth);
 	}
 
 	async #scoreCandidates(
@@ -232,6 +233,7 @@ export class ContextAwareRetriever {
 		candidates: Array<{ episode: Episode; score: number; reason: string; timesInjected: number; helpRate: number }>,
 		query: string,
 		model: Model,
+		auth?: BackgroundLlmAuth,
 	): Promise<RetrievedEpisode[]> {
 		const episodesBlock = candidates
 			.map(
@@ -242,7 +244,7 @@ export class ContextAwareRetriever {
 
 		const userPrompt = `Current task: "${query}"\n\nCandidate episodes:\n${episodesBlock}\n\nSelect the most relevant episodes. Return a JSON array: [{"episodeId": "...", "relevanceScore": 0-100, "reason": "..."}]`;
 
-		const response = await callBackgroundLlm(model, rerankEpisodesTemplate, userPrompt);
+		const response = await callBackgroundLlm(model, rerankEpisodesTemplate, userPrompt, { auth });
 		if (!response) {
 			return candidates.slice(0, 3).map(c => ({
 				episode: c.episode,

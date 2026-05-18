@@ -22,6 +22,7 @@
 		"fmt": "biome format --write ."
 	},
 	"dependencies": {
+		"@oh-my-pi/cognitive-coordination": "workspace:*",
 		"@oh-my-pi/pi-ai": "catalog:",
 		"@oh-my-pi/pi-coding-agent": "catalog:",
 		"@oh-my-pi/pi-utils": "catalog:"
@@ -42,6 +43,18 @@
 		".": {
 			"types": "./src/index.ts",
 			"import": "./src/index.ts"
+		},
+		"./memory": {
+			"types": "./src/memory/index.ts",
+			"import": "./src/memory/index.ts"
+		},
+		"./evolution-memory": {
+			"types": "./src/evolution-memory.ts",
+			"import": "./src/evolution-memory.ts"
+		},
+		"./memory/*": {
+			"types": "./src/memory/*.ts",
+			"import": "./src/memory/*.ts"
 		},
 		"./*": {
 			"types": "./src/*.ts",

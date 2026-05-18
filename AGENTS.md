@@ -6,18 +6,31 @@ This repo contains multiple packages, but **`packages/coding-agent/`** is the pr
 
 **Terminology**: When the user says "agent" or asks "why is agent doing X", they mean the **coding-agent package implementation**, not you (the assistant). The coding-agent is a CLI tool that uses Claude—questions about its behavior refer to the code in `packages/coding-agent/`, not your current session.
 
-### Package Structure
+### Repository map
 
-| Package                 | Description                                          |
-| ----------------------- | ---------------------------------------------------- |
-| `packages/ai`           | Multi-provider LLM client with streaming support     |
-| `packages/agent`        | Agent runtime with tool calling and state management |
-| `packages/coding-agent` | Main CLI application (primary focus)                 |
-| `packages/tui`          | Terminal UI library with differential rendering      |
-| `packages/natives`      | bindings for native text/image/grep operations       |
-| `packages/stats`        | Local observability dashboard (`omp stats`)          |
-| `packages/utils`        | Shared utilities (logger, streams, temp files)       |
-| `crates/pi-natives`     | Rust crate for performance-critical text/grep ops    |
+Use this when landing in an unfamiliar area: pick the package, then open the paths below.
+
+- **Runnable entry**: `packages/coding-agent/src/cli.ts` (local dev is often `bun packages/coding-agent/src/cli.ts`; interactive verification in tmux — see Interactive Testing).
+- **Bundled prompts and agent copy**: `packages/coding-agent/src/prompts/` — static `.md` (and Handlebars where already used). Never inline prompt strings in TypeScript (see Code Quality).
+- **End-user behavior** (flags, subcommands, sessions, settings): [README.md](README.md) — sections Usage, Configuration, CLI Reference, Sessions.
+- **Deep topics**: `docs/` (session format, memory, models, environment variables, custom tools, etc.).
+- **Evolution / episodic / conventions pipeline**: `packages/self-evolution/`; high-level flow in root `ARCHITECTURE.md`.
+- **Other workspace packages** (e.g. `packages/swarm-extension/`, `packages/pi-gateway/`, `packages/typescript-edit-benchmark/`): treat as their own surfaces; follow code and local docs in that folder.
+
+### Packages (roles and typical edits)
+
+| Package | Role | Typical edits |
+| ------- | ---- | ------------- |
+| `packages/coding-agent` | Main terminal CLI, TUI, tools, modes, session UX | Tools, slash commands, model selector, event/render paths, user-visible workflows |
+| `packages/ai` | Multi-provider LLM client, streaming, OAuth helpers | Providers, transport, resolver/descriptor logic — not hand-editing `models.json` (see Generated Files) |
+| `packages/agent` | Agent runtime, tool calling, state | Message/tool loop, session integration with `coding-agent` |
+| `packages/tui` | Differential terminal UI, layout helpers | Components, truncation/sanitization helpers consumed by the CLI |
+| `packages/natives` | JS bindings for native text/image/grep | Bridge to `crates/pi-natives` |
+| `packages/stats` | Local observability (`omp stats`) | Stats UI and embedded client |
+| `packages/utils` | Shared utilities (logger, streams, temp files) | Cross-package helpers (`logger`, `isEnoent`, etc.) |
+| `packages/self-evolution` | Evolution DB, convention mining, episodic storage | SQLite layout, watchers, commands that sync evolution state |
+| `packages/cognitive-coordination` | Coordination registry / shared orchestration types | Features that span sessions or agent coordination |
+| `crates/pi-natives` | Rust performance-critical text and grep | Native performance or capability gaps |
 
 ## Code Quality
 
@@ -439,6 +452,19 @@ For the bash tool specifically:
 
 ## Commands
 
+### End-user `omp` (installed CLI)
+
+Shipped command is **`omp`**. Authoritative reference: [README.md — CLI Reference](README.md#cli-reference) (invocation, flags, subcommands).
+
+- **Common patterns**: `omp` (interactive), `omp -p "…"` (non-interactive), `omp -c` / `omp -r` (session resume), `omp @file.md "…"` (file args).
+- **Dedicated subcommands** (see README): `commit`, `config`, `grep`, `jupyter`, `plugin`, `search` (`q`), `setup`, `shell`, `ssh`, `stats`, `update`.
+- **User data dir** (default): `~/.omp/agent/` — `config.yml`, `sessions/`, `memories/`, credentials store, etc. Override with `PI_CODING_AGENT_DIR`.
+- **Logs** (coding-agent): `~/.omp/logs/omp.YYYY-MM-DD.log` (see Logging).
+
+When answering “how do users run X”, consult README first; when answering “where is X implemented”, use Repository map and package table above.
+
+### Monorepo (contributors)
+
 | Command        | Description                      |
 | -------------- | -------------------------------- |
 | `bun check`    | Check all (TypeScript + Rust)    |
@@ -455,11 +481,13 @@ For the bash tool specifically:
 | `bun fix:rs`   | Clippy --fix + cargo fmt         |
 
 - NEVER run: `bun run dev`, `bun test` unless user instructs
-- Only run specific tests if user instructs: `bun test test/specific.test.ts`
+- Only run specific tests if user instructs: `bun test path/to/file.test.ts`
 - NEVER commit unless user asks
 - Do NOT use `tsc` or `npx tsc` - always use `bun check`
 
 ## Testing Guidance
+
+**Mechanics**: Prefer targeted runs: `bun test <path-to-test-file>` from repo root or the relevant package; co-locate tests as `*.test.ts` / `*.integration.test.ts` next to or under the package you changed.
 
 When adding or changing tests, test the contract the system exposes — not the easiest internal detail to assert.
 
@@ -476,6 +504,26 @@ When adding or changing tests, test the contract the system exposes — not the 
 - If a guarantee is purely compile-time, enforce it with type checks or type-test coverage, not a runtime test disguised as a placeholder.
 - Do not add tests for tiny, low-risk changes unless the change affects a real contract, fixes a regression-prone edge case, or would otherwise be easy to break silently.
 - When trimming or adding tests, prefer focused package-local verification for the changed area so the surviving suite proves the contract it claims to protect.
+
+### Multi-Consumer Contracts
+
+Registration-based features (commands, tools, extensions, flags, MCP, skills) publish data that **multiple consumers** rely on. Tests must verify every consumer layer, not just the handler.
+
+**Before writing tests for registration features, enumerate consumers:**
+
+|Consumer|What it consumes|Common miss|
+|---|---|---|
+|Handler/runner|Execution path, notify result|✅ usually tested|
+|TUI autocomplete|`getArgumentCompletions`, `getInlineHint`|❌ silently dropped by narrow mocks|
+|Renderer|Component props, render metadata|❌ tested with `not.toThrow()` only|
+|Help/diagnostics|`description`, field visibility|❌ assumed present, never asserted|
+|Downstream APIs|Shape of registered object, optional fields|❌ mock type narrows away new fields|
+
+**Rules:**
+
+1. **Never hand-write a mock that narrows the API type.** If `registerCommand` takes `{ description, handler, getArgumentCompletions, getInlineHint }`, the mock MUST capture all fields. Use `spyOn` on the real API object or type the mock with the full interface — never a hand-typed subset.
+2. **Assert registration metadata, not just handler presence.** `expect(cmd.getArgumentCompletions).toBeDefined()` + call it with a prefix and verify the returned items.
+3. **One minimal test per consumer layer.** If the feature adds a new optional field to a registration API, write a test that reads it back. The regression pattern is: mock was narrow → new field lost → TUI/help/diagnostic broken.
 
 ## Interactive Testing
 
@@ -558,11 +606,13 @@ The script handles: version bump, CHANGELOG finalization, commit, tag, publish, 
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **oh-my-pi** (56773 symbols, 103671 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **oh-my-pi** (56773 symbols, 103671 relationships, 300 execution flows). Use the GitNexus MCP tools **when they are available in your environment** to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
-## Always Do
+## When GitNexus MCP is available
+
+### Always Do
 
 - **MUST run impact analysis before editing any symbol.** Before modifying a function, class, or method, run `gitnexus_impact({target: "symbolName", direction: "upstream"})` and report the blast radius (direct callers, affected processes, risk level) to the user.
 - **MUST run `gitnexus_detect_changes()` before committing** to verify your changes only affect expected symbols and execution flows.
@@ -570,12 +620,16 @@ This project is indexed by GitNexus as **oh-my-pi** (56773 symbols, 103671 relat
 - When exploring unfamiliar code, use `gitnexus_query({query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
 - When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `gitnexus_context({name: "symbolName"})`.
 
-## Never Do
+### Never Do
 
 - NEVER edit a function, class, or method without first running `gitnexus_impact` on it.
 - NEVER ignore HIGH or CRITICAL risk warnings from impact analysis.
 - NEVER rename symbols with find-and-replace — use `gitnexus_rename` which understands the call graph.
 - NEVER commit changes without running `gitnexus_detect_changes()` to check affected scope.
+
+## When GitNexus is not available
+
+Use **Repository map**, **Packages** (roles and typical edits), and [README.md](README.md), `docs/`, [ARCHITECTURE.md](ARCHITECTURE.md); use search and read call sites manually. Avoid blind blanket renames — trace callers before renaming public API.
 
 ## Resources
 

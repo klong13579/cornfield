@@ -274,3 +274,94 @@ function createEmptyReport(): TrendReport {
 		analyzedAt: now.toISOString(),
 	};
 }
+
+// ============================================================================
+// Alert thresholds (Phase 7.5)
+// ============================================================================
+
+export interface AlertRule {
+	name: string;
+	description: string;
+	evaluate(metrics: AlertMetrics): AlertResult | null;
+}
+
+export interface AlertMetrics {
+	errorRate: number;
+	skillDecayRate: number;
+	conventionViolationRate: number;
+	populationStagnationDays: number;
+}
+
+export interface AlertResult {
+	rule: string;
+	severity: "info" | "warn" | "critical";
+	message: string;
+}
+
+export const DEFAULT_ALERT_RULES: AlertRule[] = [
+	{
+		name: "high_error_rate",
+		description: "Error rate exceeds 30% threshold",
+		evaluate(metrics) {
+			if (metrics.errorRate > 0.3) {
+				return {
+					rule: "high_error_rate",
+					severity: "critical",
+					message: `Error rate at ${(metrics.errorRate * 100).toFixed(0)}% (threshold: 30%)`,
+				};
+			}
+			return null;
+		},
+	},
+	{
+		name: "skill_decay",
+		description: "Skills unused for > 30 days",
+		evaluate(metrics) {
+			if (metrics.skillDecayRate > 0.5) {
+				return {
+					rule: "skill_decay",
+					severity: "warn",
+					message: `${(metrics.skillDecayRate * 100).toFixed(0)}% of skills unused for 30+ days`,
+				};
+			}
+			return null;
+		},
+	},
+	{
+		name: "convention_violations",
+		description: "Convention violation rate exceeds 20%",
+		evaluate(metrics) {
+			if (metrics.conventionViolationRate > 0.2) {
+				return {
+					rule: "convention_violations",
+					severity: "warn",
+					message: `${(metrics.conventionViolationRate * 100).toFixed(0)}% convention violation rate`,
+				};
+			}
+			return null;
+		},
+	},
+	{
+		name: "population_stagnation",
+		description: "No population evaluation for > 7 days",
+		evaluate(metrics) {
+			if (metrics.populationStagnationDays > 7) {
+				return {
+					rule: "population_stagnation",
+					severity: "info",
+					message: `Skill population not evaluated for ${metrics.populationStagnationDays} days`,
+				};
+			}
+			return null;
+		},
+	},
+];
+
+export function evaluateAlerts(metrics: AlertMetrics, rules: AlertRule[] = DEFAULT_ALERT_RULES): AlertResult[] {
+	const results: AlertResult[] = [];
+	for (const rule of rules) {
+		const result = rule.evaluate(metrics);
+		if (result) results.push(result);
+	}
+	return results;
+}

@@ -75,7 +75,7 @@ export class SqliteFitScoreStore implements FitScoreStore {
 					verdict: string;
 					detail_json: string;
 					computed_at: number;
-				}
+			  }
 			| undefined;
 		stmt.finalize();
 
@@ -111,7 +111,7 @@ export class SqliteFitScoreStore implements FitScoreStore {
 					verdict: string;
 					detail_json: string;
 					computed_at: number;
-				}
+			  }
 			| undefined;
 		stmt.finalize();
 

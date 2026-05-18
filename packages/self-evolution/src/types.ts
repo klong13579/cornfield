@@ -1,24 +1,41 @@
 /**
  * Core types for the self-evolution plugin.
  */
+import type { Model } from "@oh-my-pi/pi-ai";
 
 // ============================================================================
 // Session Trace (in-memory, per-session)
 // ============================================================================
 
 export interface TraceEntry {
-	type: "tool_call" | "tool_result" | "user_input" | "assistant_message" | "model_error";
+	type:
+		| "tool_call"
+		| "tool_result"
+		| "user_input"
+		| "assistant_message"
+		| "model_error"
+		| "session_start"
+		| "session_end";
 	timestamp: number;
 	toolName?: string;
+	toolCallId?: string;
 	args?: unknown;
 	result?: unknown;
+	output?: unknown;
 	isError?: boolean;
 	content?: string;
+	sessionId?: string;
+	cwd?: string;
+	userPrompt?: string;
+	success?: boolean;
+	duration?: number;
 }
 
 export interface SessionTrace {
 	sessionId: string;
 	cwd: string;
+	/** Model captured at agent_start for background LLM extraction on agent_end */
+	backgroundModel?: Model;
 	userPrompt: string;
 	startTime: number;
 	endTime: number;
@@ -32,6 +49,7 @@ export interface SessionTrace {
 	injectedEpisodeIds?: string[];
 	injectedSkillNames?: string[];
 	injectedConventionIds?: string[];
+	injectedLearningIds?: string[];
 }
 // ============================================================================
 // Episode (persisted)
@@ -128,12 +146,18 @@ export interface SelfEvolutionFlags {
 	skillThreshold: number;
 	maxEpisodes: number;
 	enablePromptInjection: boolean;
+	/** Inject pending session nudges into the next LLM context (disable for live A/B control arm) */
+	enableNudgeContextInjection: boolean;
 	llmRefinement: boolean;
 	llmRerank: boolean;
 	enableVersioning: boolean;
 	enableActivityLog: boolean;
 	/** Use a global store shared across all projects instead of per-project isolation */
 	globalStore: boolean;
+	/** Regression replay backend: heuristic | llm (background LLM judge) | subagent (omp -p rerun, falls back to llm/heuristic) */
+	regressionReplayBackend: "heuristic" | "llm" | "subagent";
+	/** Sessions between convention reclassify runs when using llm/subagent replay (heuristic always every session) */
+	admissionReclassifyInterval: number;
 }
 
 // ============================================================================
@@ -203,6 +227,7 @@ export interface UserProfile {
 	intentDistribution: Record<string, number>;
 	avgToolCallsPerSession: number;
 	avgFilesModifiedPerSession: number;
+	/** Mean tool errors per session (not a 0–1 failure rate). */
 	errorRate: number;
 	recoveryRate: number;
 	preferredLanguages: string[];
@@ -251,6 +276,11 @@ export interface CrossSessionNudge {
 	detectedAt: number;
 }
 
+export interface QueuedAgentNudge {
+	nudge: Nudge;
+	historyId: string;
+}
+
 export interface NudgeRecord {
 	id: string;
 	sessionId: string;
@@ -262,13 +292,54 @@ export interface NudgeRecord {
 	detectedAt: number;
 	dismissedAt?: number;
 	acknowledged?: boolean;
+	contextInjected?: boolean;
+	injectedAt?: number;
+	postToolCalls?: number;
+	patternRepeated?: boolean;
+	outcomeScore?: number;
+	outcomeRecordedAt?: number;
+}
+
+export interface NudgeOutcomeUpdate {
+	postToolCalls: number;
+	patternRepeated: boolean;
+	outcomeScore: number;
 }
 
 // ============================================================================
+export type ProvenanceLevel = "user_stated" | "implied" | "inferred" | "fallback";
+
 // Convention — project-specific rules extracted from user dialogue (v2.5)
 // ============================================================================
 
 export type ConventionType = "negative_rule" | "positive_rule" | "preference" | "project_fact" | "procedural_rule";
+
+export type ConventionLifecycleState = "candidate" | "active" | "archived";
+
+// ============================================================================
+// Learnings (V3 — replaces conventions for prompt injection)
+// ============================================================================
+
+export type LearningKind = "preference" | "fact" | "procedure" | "skill_hint";
+export type LearningSource = "user_explicit" | "session_llm" | "manual_pin";
+export type LearningLifecycle = "candidate" | "active" | "archived";
+
+export interface Learning {
+	id: string;
+	cwd: string;
+	kind: LearningKind;
+	content: string;
+	source: LearningSource;
+	/** 1–5 at write time */
+	confidence: number;
+	lifecycle: LearningLifecycle;
+	sessionId: string;
+	createdAt: number;
+	updatedAt: number;
+	timesInjected: number;
+	timesHelped: number;
+	timesIgnored: number;
+}
 
 export interface Convention {
 	id: string;
@@ -280,6 +351,8 @@ export interface Convention {
 	timesViolated: number;
 	createdAt: number;
 	lastSeenAt: number;
+	provenance?: ProvenanceLevel;
+	lifecycleState?: ConventionLifecycleState;
 }
 
 export interface ConventionFeedback {
@@ -294,6 +367,55 @@ export interface ConventionViolation {
 	convention: Convention;
 	violationCount: number;
 	lastViolationAt: number;
+}
+
+// ============================================================================
+// Regression fixtures (failed-session replay)
+// ============================================================================
+
+export interface RegressionFixture {
+	id: string;
+	sessionId: string;
+	episodeId: string;
+	cwd: string;
+	userPrompt: string;
+	errorCount: number;
+	completedSuccessfully: boolean;
+	dominantErrorTool?: string;
+	dominantErrorPattern?: string;
+	entries: TraceEntry[];
+	createdAt: number;
+}
+
+export type RegressionVerdict = "keep" | "discard" | "pending";
+
+export interface RegressionTrial {
+	id: string;
+	targetType: "convention" | "skill";
+	targetId: string;
+	fixtureId: string;
+	verdict: RegressionVerdict;
+	reason: string;
+	createdAt: number;
+}
+
+export type EvolutionEscalationStatus = "open" | "acknowledged" | "resolved";
+
+export interface EvolutionEscalation {
+	id: string;
+	patternKey: string;
+	patternLabel: string;
+	dominantErrorTool?: string;
+	dominantErrorPattern?: string;
+	occurrenceCount: number;
+	failedImprovementCount: number;
+	status: EvolutionEscalationStatus;
+	message: string;
+	suggestion: string;
+	createdAt: number;
+	updatedAt: number;
+	acknowledgedAt?: number;
+	resolvedAt?: number;
 }
 
 // ============================================================================
@@ -340,7 +462,7 @@ export interface DailyReport {
 		highlights: string[];
 	}>;
 	topErrorPatterns: ErrorPattern[];
-	newConventions: Convention[];
+	newLearnings: Learning[];
 	topTools: Array<{ tool: string; count: number }>;
 	keyMoments: Array<{
 		type: "error" | "recovery" | "success" | "correction";
@@ -424,6 +546,28 @@ export interface ReadFailureAnalysis {
 	suggestion: string;
 }
 
+export interface ImplicitSignals {
+	/** User manually reverted a modification (edit followed by reversal edit). */
+	userRevertedEdit: boolean;
+	/** Number of times the same request was repeated. */
+	duplicateRequestCount: number;
+	/** Duplicate request text if detected ≥ 2 times. */
+	duplicateRequestText?: string;
+	/** Tools that failed 3+ times consecutively. */
+	consecutiveFailureTools: Array<{ tool: string; count: number }>;
+	/** Whether user accepted modifications without follow-up corrections. */
+	userAcceptedWithoutCorrection: boolean;
+}
+
+export interface TraceEnhancement {
+	/** Last 3 assistant_message entries (truncated to 500 chars each). */
+	lastAssistantMessages: string[];
+	/** Model error entries with status codes. */
+	modelErrors: Array<{ timestamp: number; content: string }>;
+	/** Tool results truncated to 2KB for storage. */
+	truncatedToolResults: Array<{ toolName: string; resultSnippet: string }>;
+}
+
 export interface ToolChainDiagnosis {
 	sessionId: string;
 	readFailures: ReadFailureAnalysis[];
@@ -434,6 +578,10 @@ export interface ToolChainDiagnosis {
 	dominantErrorTool?: string;
 	dominantErrorPattern?: string;
 	suggestedAction: string;
+	/** Implicit signals extracted from trace patterns. */
+	implicitSignals?: ImplicitSignals;
+	/** Enhanced trace data for downstream analysis. */
+	traceEnhancement?: TraceEnhancement;
 }
 
 export interface CrossSessionDiagnosis {
@@ -445,4 +593,59 @@ export interface CrossSessionDiagnosis {
 	topCascadePattern?: CascadePattern;
 	trend: "improving" | "stable" | "degrading";
 	rootCauseSummary: string;
+}
+
+export type SkillPopulationState = "candidate" | "experimental" | "graduated" | "deprecated" | "archived";
+
+export interface SkillPopulationQualityMetrics {
+	successRate: number;
+	usageCount: number;
+	qualityScore: number;
+	userRating: number;
+	recencyScore: number;
+}
+
+export interface SkillPopulationEvolutionEvent {
+	at: number;
+	fromState: SkillPopulationState;
+	toState: SkillPopulationState;
+	reason: string;
+	evolutionScore: number;
+}
+
+export interface SkillPopulationRecord {
+	name: string;
+	createdAt: number;
+	updatedAt: number;
+	usageCount: number;
+	successRate: number;
+	state: SkillPopulationState;
+	evolutionScore: number;
+	lastEvaluatedAt?: number;
+	nextEvaluationAt?: number;
+	qualityMetrics?: SkillPopulationQualityMetrics;
+	evolutionHistory?: SkillPopulationEvolutionEvent[];
+}
+
+// ============================================================================
+// Episodic Record (Phase 3)
+// ============================================================================
+
+export type EpisodicReviewStatus = "active" | "pending_review" | "reviewed" | "promoted" | "deleted";
+
+export interface EpisodicRecord {
+	id: string;
+	sessionId: string;
+	cwd: string;
+	timestamp: number;
+	eventType: string;
+	eventData: Record<string, unknown>;
+	importanceScore: number;
+	ttlSeconds?: number;
+	expirationTime?: number;
+	archived?: boolean;
+	/** Review status for the pending-review state machine. */
+	reviewStatus?: EpisodicReviewStatus;
+	/** When the review was completed (for reviewed/promoted/deleted). */
+	reviewedAt?: number;
 }

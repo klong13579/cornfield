@@ -48,6 +48,26 @@ describe("Storage", () => {
 		expect(recent[0]!.toolsUsed).toEqual(["read", "edit"]);
 	});
 
+	test("episode searchByKeyword tolerates FTS5 special characters via tokenization", async () => {
+		await episodeStore.insert({
+			id: "e-fts-chars",
+			sessionId: "s1",
+			cwd: "/test",
+			userPrompt: "fix TypeError near <anonymous>",
+			timestamp: 2000,
+			durationMs: 1,
+			toolCallCount: 1,
+			errorCount: 0,
+			hadRecovery: false,
+			completedSuccessfully: true,
+			summary: "patched nullable access",
+			toolsUsed: ["read"],
+			filesModified: ["x.ts"],
+		});
+		const hits = await episodeStore.searchByKeyword("<anonymous> stack.foo trace", 10);
+		expect(hits.some(e => e.id === "e-fts-chars")).toBe(true);
+	});
+
 	test("episode deleteOld", async () => {
 		for (let i = 0; i < 5; i++) {
 			await episodeStore.insert({

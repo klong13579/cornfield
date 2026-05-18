@@ -2,8 +2,8 @@ import { Database } from "bun:sqlite";
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { syncSkillsToFiles } from "./sync";
 import { SqliteSkillStore } from "./storage/skills";
+import { syncSkillsToFiles } from "./sync";
 
 describe("E2E Evolution (E2E-01: Full Closed Loop)", () => {
 	let db: Database;
@@ -46,10 +46,26 @@ describe("E2E Evolution (E2E-01: Full Closed Loop)", () => {
 
 	function insertSkill(name: string, deprecated: boolean, approach: string): void {
 		const now = Date.now();
+		const body = /\b(if|when|unless|当|若)\b/i.test(approach) ? approach : `If the task matches ${name}, ${approach}`;
 		db.run(
-			`INSERT INTO skills (name, description, task_pattern, approach, version, quality_score, deprecated, created_at, last_used_at, usage_count, success_count, failure_count)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			[name, `${name} desc`, `When doing ${name}`, approach, 1, 80, deprecated ? 1 : 0, now, now, 0, 0, 0],
+			`INSERT INTO skills (name, description, task_pattern, approach, version, quality_score, deprecated, created_at, last_used_at, usage_count, success_count, failure_count, tools, pitfalls)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			[
+				name,
+				`Apply ${name} workflow when the task pattern matches.`,
+				`When doing ${name}`,
+				body,
+				1,
+				80,
+				deprecated ? 1 : 0,
+				now,
+				now,
+				0,
+				0,
+				0,
+				"[]",
+				'["Do not apply outside the stated triggers."]',
+			],
 		);
 	}
 
@@ -86,7 +102,11 @@ describe("E2E Evolution (E2E-01: Full Closed Loop)", () => {
 	});
 
 	test("sync preserves content integrity", async () => {
-		const complexApproach = `## Steps
+		const complexApproach = `## When to use
+
+When parsing structured input that must pass schema validation before transform.
+
+## Steps
 1. Parse the input
 2. Validate schema
 3. Transform data
@@ -96,7 +116,10 @@ describe("E2E Evolution (E2E-01: Full Closed Loop)", () => {
 const result = await transform(input);
 \`\`\`
 
-> Note: Always validate before transforming.`;
+> Note: Always validate before transforming.
+
+## Anti-patterns
+- Do not transform before schema validation succeeds.`;
 
 		insertSkill("complex-skill", false, complexApproach);
 
@@ -168,17 +191,27 @@ describe("E2E-02: Self-Modification → DB Sync生效", () => {
 		await fs.rm(tempDir, { recursive: true, force: true });
 	});
 
-	function sleep(ms: number): Promise<void> {
-		return new Promise(resolve => setTimeout(resolve, ms));
-	}
-
 	test("agent edit → watcher → DB update生效", async () => {
 		// Insert initial skill
 		const now = Date.now();
 		db.run(
-			`INSERT INTO skills (name, description, approach, version, quality_score, created_at, last_used_at, usage_count, success_count, failure_count)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			["self-mod-skill", "Original desc", "Original approach", 1, 70, now, now, 5, 4, 1],
+			`INSERT INTO skills (name, description, task_pattern, approach, version, quality_score, created_at, last_used_at, usage_count, success_count, failure_count, tools, pitfalls)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			[
+				"self-mod-skill",
+				"Apply self-mod workflow when the agent edits exported skill files.",
+				"When editing skill markdown on disk",
+				"If the agent edits the exported file, verify the watcher syncs version and preserves usage stats.",
+				1,
+				70,
+				now,
+				now,
+				5,
+				4,
+				1,
+				"[]",
+				'["Not for manual DB edits without a file change."]',
+			],
 		);
 
 		// Sync to create file
@@ -211,12 +244,15 @@ description: "Updated description by agent"
 This approach was improved by the agent itself.`,
 		);
 
-		// Wait for watcher debounce
-		await sleep(800);
+		// Wait for watcher debounce (500ms) + fs event delivery
+		const store = new SqliteSkillStore(db);
+		let skill = await store.get("self-mod-skill");
+		for (let i = 0; i < 40 && (skill?.version ?? 0) < 2; i++) {
+			await Bun.sleep(50);
+			skill = await store.get("self-mod-skill");
+		}
 
 		// Verify DB was updated
-		const store = new SqliteSkillStore(db);
-		const skill = await store.get("self-mod-skill");
 
 		expect(skill).toBeDefined();
 		expect(skill!.version).toBe(2); // Incremented
@@ -232,9 +268,23 @@ This approach was improved by the agent itself.`,
 	test("multiple sequential edits each increment version", async () => {
 		const now = Date.now();
 		db.run(
-			`INSERT INTO skills (name, description, approach, version, quality_score, created_at, last_used_at, usage_count, success_count, failure_count)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			["multi-edit-skill", "Desc", "Original", 1, 60, now, now, 0, 0, 0],
+			`INSERT INTO skills (name, description, task_pattern, approach, version, quality_score, created_at, last_used_at, usage_count, success_count, failure_count, tools, pitfalls)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			[
+				"multi-edit-skill",
+				"Apply sequential edit handling when the agent updates skill files repeatedly.",
+				"When multiple file edits occur in one session",
+				"If the watcher debounces edits, each save should increment version while preserving counters.",
+				1,
+				60,
+				now,
+				now,
+				0,
+				0,
+				0,
+				"[]",
+				'["Not for single-shot edits."]',
+			],
 		);
 
 		await syncSkillsToFiles(db, skillsDir);
@@ -257,7 +307,7 @@ status: "active"
 ---
 Edit 1 content`,
 		);
-		await sleep(800);
+		await Bun.sleep(800);
 
 		// Edit 2
 		await Bun.write(
@@ -272,10 +322,14 @@ status: "active"
 ---
 Edit 2 content`,
 		);
-		await sleep(800);
+		await Bun.sleep(800);
 
 		const store = new SqliteSkillStore(db);
-		const skill = await store.get("multi-edit-skill");
+		let skill = await store.get("multi-edit-skill");
+		for (let i = 0; i < 40 && (skill?.version ?? 0) < 3; i++) {
+			await Bun.sleep(50);
+			skill = await store.get("multi-edit-skill");
+		}
 
 		expect(skill).toBeDefined();
 		expect(skill!.version).toBe(3); // Original 1 + 2 edits

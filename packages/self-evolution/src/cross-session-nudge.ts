@@ -3,6 +3,8 @@
  * and delivers proactive insights before each new session starts.
  */
 import { logger } from "@oh-my-pi/pi-utils";
+import { formatProfileAvgErrorsPerSession, isHighAvgErrorsPerSession } from "./benefit-admission";
+import { shouldSuppressNudgeType } from "./nudge-suppression";
 import type { EpisodeDiagnosisStore, EpisodeStore, NudgeHistoryStore, ProfileStore } from "./storage/types";
 import type { CrossSessionNudge, Episode, UserProfile } from "./types";
 
@@ -11,7 +13,6 @@ const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 const HIGH_TOOL_CALL_THRESHOLD = 20;
 const LOW_SUCCESS_RATE_THRESHOLD = 0.3;
 const MIN_EPISODES_FOR_PROJECT_ANALYSIS = 5;
-const DISMISS_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const AUTO_DISMISS_THRESHOLD = 3; // auto-dismiss after 3 deliveries in 30 days
 
 export class CrossSessionNudgeEngine {
@@ -78,12 +79,7 @@ export class CrossSessionNudgeEngine {
 	}
 
 	async #shouldSkipNudge(type: string, now: number): Promise<boolean> {
-		const recent = await this.#nudgeHistoryStore.listByType(type, 10);
-		for (const record of recent) {
-			if (record.acknowledged) return true;
-			if (record.dismissedAt && now - record.dismissedAt < DISMISS_COOLDOWN_MS) return true;
-		}
-		return false;
+		return shouldSuppressNudgeType(this.#nudgeHistoryStore, type, now);
 	}
 
 	async #autoDismissIfStale(type: string, since: number): Promise<void> {
@@ -134,7 +130,8 @@ export class CrossSessionNudgeEngine {
 
 	async #detectHighGlobalErrorRate(profile: UserProfile | undefined): Promise<CrossSessionNudge | undefined> {
 		if (!profile || profile.sessionCount < 5) return undefined;
-		if (profile.errorRate <= 0.3) return undefined;
+		if (!isHighAvgErrorsPerSession(profile)) return undefined;
+		const errorSummary = formatProfileAvgErrorsPerSession(profile.errorRate);
 
 		// If diagnosis store is available, use aggregateDiagnoses for root-cause analysis
 		if (this.#diagnosisStore) {
@@ -148,7 +145,7 @@ export class CrossSessionNudgeEngine {
 					return {
 						type: "cross-session-high-error-rate",
 						severity: "warn",
-						message: `Your recent sessions have a ${(profile.errorRate * 100).toFixed(0)}% error rate.`,
+						message: `Your recent sessions average elevated tool errors (${errorSummary}).`,
 						suggestion,
 						detectedAt: Date.now(),
 					};
@@ -164,7 +161,7 @@ export class CrossSessionNudgeEngine {
 		return {
 			type: "cross-session-high-error-rate",
 			severity: "warn",
-			message: `Your recent sessions have a ${(profile.errorRate * 100).toFixed(0)}% error rate.`,
+			message: `Your recent sessions average elevated tool errors (${errorSummary}).`,
 			suggestion,
 			detectedAt: Date.now(),
 		};
@@ -297,7 +294,7 @@ export class CrossSessionNudgeEngine {
 
 		// Use profile baseline if available, otherwise use fixed thresholds
 		const baselineToolCalls = profile?.avgToolCallsPerSession ?? HIGH_TOOL_CALL_THRESHOLD;
-		const baselineSuccessRate = profile ? 1 - profile.errorRate : 1 - LOW_SUCCESS_RATE_THRESHOLD;
+		const baselineSuccessRate = 1 - LOW_SUCCESS_RATE_THRESHOLD;
 
 		if (avgToolCalls >= baselineToolCalls * 1.5 && successRate <= baselineSuccessRate * 0.7) {
 			return {

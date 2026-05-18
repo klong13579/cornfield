@@ -1,6 +1,7 @@
 /**
  * TraceRecorder: consumes agent events and builds a SessionTrace in memory.
  */
+import type { Model } from "@oh-my-pi/pi-ai";
 import type {
 	AgentEndEvent,
 	AgentStartEvent,
@@ -10,16 +11,20 @@ import type {
 	ToolExecutionStartEvent,
 } from "@oh-my-pi/pi-coding-agent/extensibility/extensions";
 import { NudgeDetector } from "./nudge-detector";
-import type { SessionTrace } from "./types";
+import type { Nudge, QueuedAgentNudge, SessionTrace } from "./types";
 
 export class TraceRecorder {
 	#trace: SessionTrace | undefined;
 	#sessionId: string | undefined;
 	#pendingPrompt: string | undefined;
+	#pendingBackgroundModel: Model | undefined;
 
 	#injectedEpisodeIds: string[] = [];
 	#injectedSkillNames: string[] = [];
 	#injectedConventionIds: string[] = [];
+	#injectedLearningIds: string[] = [];
+	#pendingAgentNudges: QueuedAgentNudge[] = [];
+	#deliveredNudgeTypesThisTurn = new Set<string>();
 	#nudgeDetector = new NudgeDetector();
 
 	getTrace(): SessionTrace | undefined {
@@ -37,6 +42,14 @@ export class TraceRecorder {
 		}
 	}
 
+	seedBackgroundModel(model: Model | undefined): void {
+		if (this.#trace) {
+			this.#trace.backgroundModel = model;
+		} else {
+			this.#pendingBackgroundModel = model;
+		}
+	}
+
 	setInjectedEpisodes(ids: string[]): void {
 		this.#injectedEpisodeIds = ids;
 	}
@@ -46,14 +59,20 @@ export class TraceRecorder {
 	setInjectedConventions(ids: string[]): void {
 		this.#injectedConventionIds = ids;
 	}
+	setInjectedLearnings(ids: string[]): void {
+		this.#injectedLearningIds = ids;
+	}
 	onAgentStart(_event: AgentStartEvent, ctx: ExtensionContext): void {
 		this.#sessionId = ctx.sessionManager.getSessionId();
 		// Use pending prompt if set by before_agent_start before trace existed
 		const userPrompt = this.#pendingPrompt ?? this.#trace?.userPrompt ?? "";
+		const backgroundModel = this.#pendingBackgroundModel;
 		this.#pendingPrompt = undefined;
+		this.#pendingBackgroundModel = undefined;
 		this.#trace = {
 			sessionId: this.#sessionId,
 			cwd: ctx.cwd,
+			backgroundModel,
 			userPrompt,
 			startTime: Date.now(),
 			endTime: 0,
@@ -148,14 +167,38 @@ export class TraceRecorder {
 		}
 	}
 
-	checkForNudges(): import("./types").Nudge | undefined {
+	/** Start of a new user turn: allow nudge types again (pending queue unchanged). */
+	beginTurn(): void {
+		this.#deliveredNudgeTypesThisTurn.clear();
+	}
+
+	enqueuePendingAgentNudge(nudge: Nudge, historyId: string): boolean {
+		if (this.#deliveredNudgeTypesThisTurn.has(nudge.type)) return false;
+		this.#deliveredNudgeTypesThisTurn.add(nudge.type);
+		this.#pendingAgentNudges.push({ nudge, historyId });
+		return true;
+	}
+
+	/** Detect only; caller persists history and calls enqueuePendingAgentNudge. */
+	checkForNudges(isTypeAllowed?: (type: string) => boolean): Nudge | undefined {
 		if (!this.#trace) return undefined;
-		const nudge = this.#nudgeDetector.check(this.#trace);
-		if (nudge) {
-			this.#trace.nudges ??= [];
-			this.#trace.nudges.push(nudge);
-		}
+		const allowed = (type: string) => {
+			if (this.#deliveredNudgeTypesThisTurn.has(type)) return false;
+			return isTypeAllowed ? isTypeAllowed(type) : true;
+		};
+		const nudge = this.#nudgeDetector.check(this.#trace, allowed);
+		if (!nudge) return undefined;
+		this.#trace.nudges ??= [];
+		this.#trace.nudges.push(nudge);
 		return nudge;
+	}
+
+	/** Nudges queued since the last LLM call; consumed by the context hook. */
+	drainPendingAgentNudges(): QueuedAgentNudge[] {
+		if (this.#pendingAgentNudges.length === 0) return [];
+		const drained = [...this.#pendingAgentNudges];
+		this.#pendingAgentNudges = [];
+		return drained;
 	}
 
 	onAgentEnd(_event: AgentEndEvent): SessionTrace | undefined {
@@ -167,9 +210,11 @@ export class TraceRecorder {
 		this.#trace.injectedEpisodeIds = this.#injectedEpisodeIds;
 		this.#trace.injectedSkillNames = this.#injectedSkillNames;
 		this.#trace.injectedConventionIds = this.#injectedConventionIds;
+		this.#trace.injectedLearningIds = this.#injectedLearningIds;
 		this.#injectedSkillNames = [];
 		this.#injectedEpisodeIds = [];
 		this.#injectedConventionIds = [];
+		this.#injectedLearningIds = [];
 		this.#trace = undefined;
 		return result;
 	}
@@ -177,9 +222,13 @@ export class TraceRecorder {
 	reset(): void {
 		this.#trace = undefined;
 		this.#pendingPrompt = undefined;
+		this.#pendingBackgroundModel = undefined;
 		this.#injectedSkillNames = [];
 		this.#injectedEpisodeIds = [];
 		this.#injectedConventionIds = [];
+		this.#injectedLearningIds = [];
+		this.#pendingAgentNudges = [];
+		this.#deliveredNudgeTypesThisTurn.clear();
 	}
 }
 

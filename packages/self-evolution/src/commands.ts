@@ -6,27 +6,54 @@
  * compatibility but redirect to the new hierarchy.
  */
 import type { Database } from "bun:sqlite";
-import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent/extensibility/extensions";
-import { logger } from "@oh-my-pi/pi-utils";
-import { formatAuditReport, generateAuditReport } from "./audit-report";
+import type { ExtensionAPI, ExtensionCommandContext } from "@oh-my-pi/pi-coding-agent/extensibility/extensions";
+import { getAgentDir, getSessionsDir, logger } from "@oh-my-pi/pi-utils";
+import { queryAdmissionAuditStats } from "./audit-admission-stats";
+import { formatAuditReport } from "./audit-report";
+import { refreshBenefitAdmissionState } from "./benefit-admission-refresh";
+import { clearProjectEvolutionData } from "./clear-project-evolution";
 import { DailyReportGenerator } from "./daily-report";
+import type { EmbeddingGenerator } from "./embedding";
+import type { EpisodicManager } from "./episodic-manager";
+import { syncEvolutionEscalations } from "./escalation/sync";
 import { formatFitReport, runFitEval, saveFitScore } from "./eval/fit-evaluator";
 import { HeuristicSkillEvaluator } from "./evaluator";
+import { EVOLUTION_MEMORY_SUBCOMMANDS, runEvolutionMemorySubcommand } from "./evolution-memory";
+import { applyLearningsSeed, defaultLearningsSeedPath, readLearningsSeedFile } from "./learnings-seed";
 import type { ActivityLogger } from "./logging/activity-logger";
 import type { SkillManager } from "./manager";
+import { ensureMemorySummaryFromMemory } from "./memory/summary";
+import { ModelScorer } from "./model-scorer";
+import { getMemoryRoot, resolveEvolutionPathLayout } from "./paths";
+import { projectLearnings } from "./projection/learnings";
+import { projectSystemDiagnosis } from "./projection/system-diagnosis";
+import { backfillSessionTracesFromEpisodes } from "./regression/backfill-traces";
+import { repairRegressionFixtureLabels } from "./regression/repair-regression-fixture-labels";
+import { parseReplayBackendFromTrialReason, parseToolchainTagFromTrialReason } from "./regression/trial-reason";
+import type { SkillPopulationEngine } from "./skill-population-engine";
+import { getUnifiedSkillsDir, resolveEvolutionProjectionDir } from "./skill-storage";
+import { SqliteEpisodeDiagnosisStore } from "./storage/diagnoses";
+import type { SqliteEvolutionEscalationStore } from "./storage/evolution-escalations";
+import type { SqliteLearningStore } from "./storage/learnings";
+import type { SqliteRegressionFixtureStore } from "./storage/regression-fixtures";
+import type { SqliteRegressionTrialStore } from "./storage/regression-trials";
+import { SqliteSessionModelStatsStore } from "./storage/session-model-stats";
+import type { SqliteSessionTraceStore } from "./storage/session-traces";
 import type { SqliteStatsStore } from "./storage/skills";
 import { SqliteFitScoreStore } from "./storage/sqlite-fit-scores";
 import type {
-	ConventionStore,
 	EffectivenessStore,
 	EpisodeStore,
 	FitScoreStore,
+	NudgeHistoryStore,
 	ProfileStore,
+	SkillEffectivenessStore,
+	SkillPopulationStore,
 	SkillStore,
 	SkillVersionStore,
 	WorkflowPatternStore,
 } from "./storage/types";
-
+import { syncSkillsToFiles } from "./sync";
 import type { SelfEvolutionFlags, UserProfile } from "./types";
 
 export interface CommandStores {
@@ -39,10 +66,21 @@ export interface CommandStores {
 	activityLogger(): ActivityLogger;
 	profileStore(): ProfileStore;
 	workflowPatternStore(): WorkflowPatternStore;
-	conventionStore(): ConventionStore;
+	learningStore(): SqliteLearningStore;
 	effectivenessStore(): EffectivenessStore;
+	skillEffectivenessStore(): SkillEffectivenessStore;
+	populationStore(): SkillPopulationStore;
+	populationEngine(): SkillPopulationEngine;
+	nudgeHistoryStore(): NudgeHistoryStore;
 	db(): Database;
 	flags(): SelfEvolutionFlags;
+	episodicManager(): EpisodicManager;
+	escalationStore(): SqliteEvolutionEscalationStore;
+	regressionFixtureStore(): SqliteRegressionFixtureStore;
+	regressionTrialStore(): SqliteRegressionTrialStore;
+	sessionTraceStore(): SqliteSessionTraceStore;
+	memoryDb(): Database | undefined;
+	embeddingGenerator(): EmbeddingGenerator | undefined;
 }
 
 function getFitStore(db: () => Database): FitScoreStore {
@@ -50,12 +88,148 @@ function getFitStore(db: () => Database): FitScoreStore {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// /episodic command
+// ─────────────────────────────────────────────────────────────────────────────
+
+const EPISODIC_SUBCOMMANDS = [
+	{ name: "sessions", description: "List recent sessions" },
+	{ name: "show", description: "Show events for a session" },
+	{ name: "clear", description: "Clear episodic data" },
+];
+
+export function registerEpisodicCommands(api: ExtensionAPI, stores: CommandStores): void {
+	api.registerCommand("episodic", {
+		description: "Episodic memory command hub. Usage: /episodic <subcommand> [args]",
+		getArgumentCompletions(argumentPrefix: string) {
+			if (argumentPrefix.includes(" ")) return null;
+			const lower = argumentPrefix.toLowerCase();
+			const matches = EPISODIC_SUBCOMMANDS.filter(s => s.name.startsWith(lower)).map(s => ({
+				value: `${s.name} `,
+				label: s.name,
+				description: s.description,
+			}));
+			return matches.length > 0 ? matches : null;
+		},
+		async handler(args, ctx): Promise<void> {
+			stores.ensureInit(ctx.cwd);
+			const trimmed = args.trim();
+			const subcommand = trimmed.split(/\s+/, 1)[0]?.toLowerCase() || "sessions";
+			const rest = trimmed.slice(subcommand.length).trim();
+
+			const manager = stores.episodicManager();
+			if (!manager) {
+				ctx.ui.notify("Episodic store not available", "error");
+				return;
+			}
+
+			switch (subcommand) {
+				case "sessions": {
+					const events = await manager.getRecentEvents(20);
+					if (events.length === 0) {
+						ctx.ui.notify("No episodic records yet", "info");
+						return;
+					}
+					const sessionSet = new Set<string>();
+					const lines: string[] = [];
+					for (const e of events) {
+						if (!sessionSet.has(e.sessionId)) {
+							sessionSet.add(e.sessionId);
+							lines.push(
+								`Session: ${e.sessionId} | ${new Date(e.timestamp).toISOString().slice(0, 19).replace("T", " ")}`,
+							);
+						}
+					}
+					ctx.ui.notify(lines.join("\n"), "info");
+					break;
+				}
+				case "show": {
+					if (!rest) {
+						ctx.ui.notify("Usage: /episodic show <session-id>", "warning");
+						return;
+					}
+					const events = await manager.getSessionEvents(rest);
+					if (events.length === 0) {
+						ctx.ui.notify(`No events found for session "${rest}"`, "info");
+						return;
+					}
+					const lines = events.map(
+						e =>
+							`[${new Date(e.timestamp).toISOString().slice(0, 19).replace("T", " ")}] ${e.eventType}: ${JSON.stringify(e.eventData).slice(0, 80)}`,
+					);
+					ctx.ui.notify(lines.join("\n"), "info");
+					break;
+				}
+				case "clear": {
+					const confirmed = await ctx.ui.confirm(
+						"Clear episodic data",
+						"This will delete all episodic records. Continue?",
+					);
+					if (!confirmed) {
+						ctx.ui.notify("Cancelled", "info");
+						return;
+					}
+					const db = stores.db();
+					db.exec("DELETE FROM episodic_records");
+					ctx.ui.notify("Episodic data cleared", "info");
+					break;
+				}
+			}
+		},
+	});
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Main /evolution command dispatcher
 // ─────────────────────────────────────────────────────────────────────────────
+
+// Subcommand definitions for TUI autocomplete
+const EVOLUTION_SUBCOMMANDS = [
+	{ name: "status", description: "Show statistics (episodes, skills, versions)" },
+	{ name: "skills", description: "List evolved skills" },
+	{ name: "rate", description: "Rate a skill" },
+	{ name: "clear", description: "Delete .omp/memory + evolution + skills (full project reset)" },
+	{ name: "memory", description: "Memory hub: search, view, enqueue, clear (memory only), …" },
+	{ name: "archive", description: "Archive low-quality skills" },
+	{ name: "history", description: "View version history for a skill" },
+	{ name: "rollback", description: "Rollback a skill to a version" },
+	{ name: "profile", description: "Display user behavioral profile" },
+	{ name: "workflows", description: "List mined workflow patterns" },
+	{ name: "audit", description: "Generate health report" },
+	{ name: "report", description: "Generate daily report" },
+	{ name: "population", description: "Show skill population status" },
+	{ name: "fit", description: "Run fit evaluation" },
+	{ name: "learnings", description: "List/search/pin/archive/seed learnings" },
+	{ name: "log", description: "Show evolution event timeline" },
+	{ name: "nudges", description: "Show recent nudges" },
+	{ name: "stuck", description: "Show or acknowledge evolution deadlocks needing human help" },
+	{ name: "sync-skills", description: "Export skills to <cwd>/.omp/skills/ (or legacy global store)" },
+	{ name: "backfill-traces", description: "Backfill session_traces from omp session JSONL for regression replay" },
+	{ name: "refresh-admission", description: "Re-run skill benefit admission (+ skill regression when configured)" },
+	{ name: "regression", description: "List recent regression trials (keep/discard audit)" },
+];
 
 export function registerSelfEvolutionCommands(api: ExtensionAPI, stores: CommandStores): void {
 	api.registerCommand("evolution", {
 		description: "Self-evolution command hub. Usage: /evolution <subcommand> [args]",
+		getArgumentCompletions(argumentPrefix: string) {
+			const lower = argumentPrefix.toLowerCase();
+			if (lower.startsWith("memory ")) {
+				const rest = lower.slice("memory ".length);
+				const matches = EVOLUTION_MEMORY_SUBCOMMANDS.filter(s => s.name.startsWith(rest)).map(s => ({
+					value: `memory ${s.name} `,
+					label: s.name,
+					description: s.description,
+				}));
+				return matches.length > 0 ? matches : null;
+			}
+			if (argumentPrefix.includes(" ")) return null;
+			const matches = EVOLUTION_SUBCOMMANDS.filter(s => s.name.startsWith(lower)).map(s => ({
+				value: `${s.name} `,
+				label: s.name,
+				description: s.description,
+			}));
+			return matches.length > 0 ? matches : null;
+		},
 		async handler(args, ctx): Promise<void> {
 			stores.ensureInit(ctx.cwd);
 			const trimmed = args.trim();
@@ -70,7 +244,7 @@ export function registerSelfEvolutionCommands(api: ExtensionAPI, stores: Command
 				case "rate":
 					return handleRate(stores, ctx, rest);
 				case "clear":
-					return handleClear(ctx);
+					return handleClear(stores, ctx);
 				case "archive":
 					return handleArchive(stores, ctx);
 				case "history":
@@ -87,6 +261,26 @@ export function registerSelfEvolutionCommands(api: ExtensionAPI, stores: Command
 					return handleReport(stores, ctx);
 				case "fit":
 					return handleFit(stores, ctx);
+				case "population":
+					return handlePopulation(stores, ctx);
+				case "memory":
+					return handleEvolutionMemory(stores, ctx, rest);
+				case "learnings":
+					return handleLearnings(stores, ctx, rest);
+				case "log":
+					return handleLog(stores, ctx, rest);
+				case "nudges":
+					return handleNudges(stores, ctx, rest);
+				case "stuck":
+					return handleStuck(stores, ctx, rest);
+				case "sync-skills":
+					return handleSyncSkills(stores, ctx);
+				case "backfill-traces":
+					return handleBackfillTraces(stores, ctx, rest);
+				case "refresh-admission":
+					return handleRefreshAdmission(stores, ctx);
+				case "regression":
+					return handleRegressionTrials(stores, ctx, rest);
 				default:
 					return handleHelp(ctx);
 			}
@@ -106,8 +300,14 @@ async function handleStatus(stores: CommandStores, ctx: any): Promise<void> {
 			stores.versionStore().count(),
 			stores.statsStore().get("sessions_archived"),
 		]);
+		const admission = queryAdmissionAuditStats(stores.db());
+		const flags = stores.flags();
 		ctx.ui.notify(
-			`Episodes: ${episodeCount} | Skills: ${skillCount} | Versions: ${versionCount} | Sessions archived: ${archivedSessions}`,
+			[
+				`Episodes: ${episodeCount} | Skills: ${skillCount} | Versions: ${versionCount} | Sessions archived: ${archivedSessions}`,
+				`Regression: traces ${admission.sessionTraceCount}, fixtures ${admission.regressionFixtureCount}, trials keep ${admission.regressionKeep} / discard ${admission.regressionDiscard}`,
+				`Replay backend: ${flags.regressionReplayBackend} | reclassify every ${flags.admissionReclassifyInterval} session(s) (llm/subagent)`,
+			].join("\n"),
 			"info",
 		);
 	} catch (err) {
@@ -198,19 +398,28 @@ async function handleRate(stores: CommandStores, ctx: any, args: string): Promis
 	}
 }
 
-async function handleClear(ctx: any): Promise<void> {
+async function handleClear(stores: CommandStores, ctx: ExtensionCommandContext): Promise<void> {
 	try {
+		const globalStore = stores.flags().globalStore;
+		const layout = resolveEvolutionPathLayout(ctx.cwd, globalStore, getAgentDir());
+		const scopeLabel = globalStore ? "legacy global store" : "this project";
 		const confirmed = await ctx.ui.confirm(
-			"Clear self-evolution data",
-			"This will delete all episodes, skills, and version history for this project. Continue?",
+			"Clear project OMP data",
+			`Full reset — deletes memory, evolution DB, and skills:\n${layout.memoryDir}\n${layout.evolutionDir}\n${layout.skillsDir}\n\n(Memory-only clear: /evolution memory clear)\n\nContinue?`,
 		);
 		if (!confirmed) {
 			ctx.ui.notify("Cancelled", "info");
 			return;
 		}
-		ctx.ui.notify("Please delete the ~/.omp/self-evolution/ directory manually to clear all data.", "warning");
+		const { removedDirs } = await clearProjectEvolutionData({
+			cwd: ctx.cwd,
+			globalStore,
+			agentDir: getAgentDir(),
+		});
+		ctx.ui.notify(`Cleared ${scopeLabel} evolution data:\n${removedDirs.map(d => `  ${d}`).join("\n")}`, "info");
 	} catch (err) {
 		logger.error("evolution clear failed", { error: String(err) });
+		ctx.ui.notify("Failed to clear evolution data", "error");
 	}
 }
 
@@ -284,7 +493,7 @@ async function handleProfile(stores: CommandStores, ctx: any): Promise<void> {
 			`Sessions: ${profile.sessionCount} | Tool calls/session: ${profile.avgToolCallsPerSession.toFixed(1)} | Files/session: ${profile.avgFilesModifiedPerSession.toFixed(1)}`,
 		);
 		lines.push(
-			`Error rate: ${(profile.errorRate * 100).toFixed(0)}% | Recovery rate: ${(profile.recoveryRate * 100).toFixed(0)}%`,
+			`Avg tool errors/session: ${profile.errorRate.toFixed(1)} | Recovery rate: ${(profile.recoveryRate * 100).toFixed(0)}%`,
 		);
 		lines.push(`Preferred languages: ${profile.preferredLanguages.join(", ") || "none yet"}`);
 
@@ -331,14 +540,20 @@ async function handleWorkflows(stores: CommandStores, ctx: any, args: string): P
 
 async function handleAudit(stores: CommandStores, ctx: any): Promise<void> {
 	try {
-		const report = await generateAuditReport(
-			stores.db(),
-			stores.episodeStore(),
-			stores.skillStore(),
-			stores.flags().maxEpisodes,
-			stores.activityLogger(),
-		);
-		ctx.ui.notify(formatAuditReport(report), "info");
+		const outputDir = resolveEvolutionProjectionDir(ctx.cwd, stores.flags().globalStore);
+		const flags = stores.flags();
+		const { path: outPath, report } = await projectSystemDiagnosis(stores.db(), {
+			outputDir,
+			maxEpisodes: flags.maxEpisodes,
+			episodeStore: stores.episodeStore(),
+			skillStore: stores.skillStore(),
+			activityLogger: stores.activityLogger(),
+			auditRuntime: {
+				regressionReplayBackend: flags.regressionReplayBackend,
+				admissionReclassifyInterval: flags.admissionReclassifyInterval,
+			},
+		});
+		ctx.ui.notify(`${formatAuditReport(report)}\n\nWritten to ${outPath}`, "info");
 	} catch (err) {
 		logger.error("evolution audit failed", { error: String(err) });
 		ctx.ui.notify("Failed to generate audit report", "error");
@@ -349,7 +564,7 @@ async function handleReport(stores: CommandStores, ctx: any): Promise<void> {
 	try {
 		const generator = new DailyReportGenerator(
 			stores.episodeStore(),
-			stores.conventionStore(),
+			stores.learningStore(),
 			stores.effectivenessStore(),
 		);
 		const report = await generator.generate();
@@ -381,6 +596,280 @@ async function handleFit(stores: CommandStores, ctx: any): Promise<void> {
 	}
 }
 
+async function handlePopulation(stores: CommandStores, ctx: any): Promise<void> {
+	try {
+		const engine = stores.populationEngine();
+		const result = await engine.evaluateAll();
+
+		const states = ["candidate", "experimental", "graduated", "deprecated", "archived"] as const;
+		const counts: Record<string, number> = {};
+		for (const state of states) {
+			counts[state] = await stores.populationStore().countByState(state);
+		}
+
+		const lines = [
+			"Skill Population Status:",
+			`  Evaluated: ${result.evaluated} | Transitions: ${result.transitions} | Graduated: ${result.graduated} | Eliminated: ${result.eliminated} | Regression blocked: ${result.regressionBlocked}`,
+			`  candidate: ${counts.candidate} | experimental: ${counts.experimental} | graduated: ${counts.graduated} | deprecated: ${counts.deprecated} | archived: ${counts.archived}`,
+		];
+		ctx.ui.notify(lines.join("\n"), "info");
+	} catch (err) {
+		logger.error("evolution population failed", { error: String(err) });
+		ctx.ui.notify("Failed to evaluate skill population", "error");
+	}
+}
+
+async function handleEvolutionMemory(stores: CommandStores, ctx: ExtensionCommandContext, args: string): Promise<void> {
+	const db = stores.memoryDb();
+	if (!db) {
+		ctx.ui.notify("Memory DB not available. Start a coding session first.", "error");
+		return;
+	}
+	await runEvolutionMemorySubcommand({
+		db,
+		ctx,
+		args,
+		globalStore: stores.flags().globalStore,
+		getEmbeddingGenerator: () => stores.embeddingGenerator(),
+	});
+}
+
+async function handleLearnings(stores: CommandStores, ctx: ExtensionCommandContext, args: string): Promise<void> {
+	const subAction = args.trim().split(/\s+/, 1)[0]?.toLowerCase() || "list";
+	const rest = args.trim().slice(subAction.length).trim();
+	try {
+		const store = stores.learningStore();
+		const learnings = await store.listAll();
+		const cwdLearnings = learnings.filter(l => l.cwd === ctx.cwd);
+		if (cwdLearnings.length === 0 && subAction !== "pin" && subAction !== "seed") {
+			ctx.ui.notify("No learnings for this project yet (V3 extracts after each session).", "info");
+			return;
+		}
+		switch (subAction) {
+			case "seed": {
+				const outputDir = resolveEvolutionProjectionDir(ctx.cwd, stores.flags().globalStore);
+				const seedPath = rest.trim() || defaultLearningsSeedPath(outputDir);
+				const entries = await readLearningsSeedFile(seedPath);
+				if (entries.length === 0) {
+					ctx.ui.notify(`No valid entries in ${seedPath}`, "warning");
+					return;
+				}
+				const result = await applyLearningsSeed(store, ctx.cwd, entries);
+				await projectLearnings(stores.db(), { outputDir });
+				const memoryRoot = getMemoryRoot(getAgentDir(), ctx.cwd, {
+					globalStore: stores.flags().globalStore,
+				});
+				const summary = await ensureMemorySummaryFromMemory(memoryRoot);
+				const lines = [`Loaded ${result.loaded} learning(s), pinned ${result.pinned}.`, `Seed: ${seedPath}`];
+				if (result.skipped > 0) {
+					lines.push(`Skipped ${result.skipped} invalid row(s).`);
+				}
+				if (summary.written) {
+					lines.push(`memory_summary.md refreshed (${summary.length} chars, from ${summary.source}).`);
+				}
+				ctx.ui.notify(lines.join("\n"), "info");
+				break;
+			}
+			case "search": {
+				const query = rest.toLowerCase();
+				const filtered = cwdLearnings.filter(l => l.content.toLowerCase().includes(query));
+				if (filtered.length === 0) {
+					ctx.ui.notify(`No learnings matching "${rest}"`, "info");
+					return;
+				}
+				const lines = filtered.map(
+					l => `[${l.lifecycle}] ${l.kind}: ${l.content} (id: ${l.id}, source: ${l.source})`,
+				);
+				ctx.ui.notify(lines.join("\n"), "info");
+				break;
+			}
+			case "pin": {
+				const id = rest;
+				if (!id) {
+					ctx.ui.notify("Usage: /evolution learnings pin <id>", "warning");
+					return;
+				}
+				const ok = await store.pin(id);
+				if (!ok) {
+					ctx.ui.notify(`Learning "${id}" not found`, "error");
+					return;
+				}
+				const outputDir = resolveEvolutionProjectionDir(ctx.cwd, stores.flags().globalStore);
+				await projectLearnings(stores.db(), { outputDir });
+				ctx.ui.notify(`Pinned learning ${id} (active, injected on next turn)`, "info");
+				break;
+			}
+			case "archive": {
+				const id = rest;
+				if (!id) {
+					ctx.ui.notify("Usage: /evolution learnings archive <id>", "warning");
+					return;
+				}
+				const ok = await store.archive(id);
+				if (!ok) {
+					ctx.ui.notify(`Learning "${id}" not found`, "error");
+					return;
+				}
+				ctx.ui.notify(`Archived learning ${id}`, "info");
+				break;
+			}
+			case "delete": {
+				const id = rest;
+				if (!id) {
+					ctx.ui.notify("Usage: /evolution learnings delete <id>", "warning");
+					return;
+				}
+				const ok = await store.delete(id);
+				ctx.ui.notify(ok ? `Deleted learning ${id}` : `Learning "${id}" not found`, ok ? "info" : "error");
+				break;
+			}
+			default: {
+				const lines = cwdLearnings
+					.slice(0, 30)
+					.map(
+						l =>
+							`[${l.lifecycle}] ${l.kind}: ${l.content.slice(0, 100)} (conf ${l.confidence}, ${l.source}, id: ${l.id})`,
+					);
+				if (cwdLearnings.length > 30) {
+					lines.push(`... and ${cwdLearnings.length - 30} more. Use /evolution learnings search <keyword>`);
+				}
+				ctx.ui.notify(lines.join("\n"), "info");
+			}
+		}
+	} catch (err) {
+		logger.error("evolution learnings failed", { error: String(err) });
+		ctx.ui.notify("Failed to manage learnings", "error");
+	}
+}
+
+async function handleLog(stores: CommandStores, ctx: any, _args: string): Promise<void> {
+	try {
+		const logger = stores.activityLogger();
+		const entries = await logger.query({ limit: 50 });
+		if (entries.length === 0) {
+			ctx.ui.notify("No activity log entries yet", "info");
+			return;
+		}
+		const lines = entries.map(
+			e =>
+				`[${new Date(e.timestamp).toISOString().slice(0, 19).replace("T", " ")}] ${e.event}: ${JSON.stringify(e.details).slice(0, 80)}`,
+		);
+		ctx.ui.notify(lines.join("\n"), "info");
+	} catch (err) {
+		logger.error("evolution log failed", { error: String(err) });
+		ctx.ui.notify("Failed to read activity log", "error");
+	}
+}
+
+async function handleNudges(stores: CommandStores, ctx: any, args: string): Promise<void> {
+	try {
+		const parts = args.trim().split(/\s+/).filter(Boolean);
+		const sub = parts[0]?.toLowerCase();
+		const id = parts[1];
+
+		if (sub === "ack" && id) {
+			const record = await stores.nudgeHistoryStore().get(id);
+			if (!record) {
+				ctx.ui.notify(`Nudge not found: ${id}`, "warning");
+				return;
+			}
+			await stores.nudgeHistoryStore().acknowledge(id);
+			ctx.ui.notify(`Acknowledged nudge ${id}`, "info");
+			return;
+		}
+
+		if (sub === "dismiss" && id) {
+			const record = await stores.nudgeHistoryStore().get(id);
+			if (!record) {
+				ctx.ui.notify(`Nudge not found: ${id}`, "warning");
+				return;
+			}
+			await stores.nudgeHistoryStore().dismiss(id);
+			ctx.ui.notify(`Dismissed nudge ${id} (suppressed for 7 days)`, "info");
+			return;
+		}
+
+		const nudges = await stores.nudgeHistoryStore().listRecent(20);
+		if (nudges.length === 0) {
+			ctx.ui.notify("No nudges recorded yet", "info");
+			return;
+		}
+		const lines = nudges.map(n => {
+			const flags = [
+				n.contextInjected ? "injected" : "pending",
+				n.acknowledged ? "ack" : null,
+				n.dismissedAt ? "dismissed" : null,
+				n.outcomeScore !== undefined ? `score:${n.outcomeScore.toFixed(2)}` : null,
+				n.patternRepeated ? "repeated" : null,
+			]
+				.filter(Boolean)
+				.join(", ");
+			return `${n.id}\n  [${n.type}] ${n.severity} (${flags})\n  ${n.message}`;
+		});
+		ctx.ui.notify(`${lines.join("\n\n")}\n\nUsage: /evolution nudges ack <id> | dismiss <id>`, "info");
+	} catch (err) {
+		logger.error("evolution nudges failed", { error: String(err) });
+		ctx.ui.notify("Failed to list nudges", "error");
+	}
+}
+
+async function handleStuck(stores: CommandStores, ctx: any, args: string): Promise<void> {
+	try {
+		const parts = args.trim().split(/\s+/).filter(Boolean);
+		const sub = parts[0]?.toLowerCase();
+		const id = parts[1];
+		const escalationStore = stores.escalationStore();
+
+		if (sub === "sync") {
+			await syncEvolutionEscalations({
+				escalationStore,
+				fixtureStore: stores.regressionFixtureStore(),
+				learningStore: stores.learningStore(),
+				trialStore: stores.regressionTrialStore(),
+			});
+			ctx.ui.notify("Escalation scan complete", "info");
+			return;
+		}
+
+		if (sub === "ack" && id) {
+			const record = await escalationStore.get(id);
+			if (!record) {
+				ctx.ui.notify(`Escalation not found: ${id}`, "warning");
+				return;
+			}
+			await escalationStore.acknowledge(id);
+			ctx.ui.notify(`Acknowledged escalation ${id}`, "info");
+			return;
+		}
+
+		if (sub === "resolve" && id) {
+			const record = await escalationStore.get(id);
+			if (!record) {
+				ctx.ui.notify(`Escalation not found: ${id}`, "warning");
+				return;
+			}
+			await escalationStore.resolve(id);
+			ctx.ui.notify(`Resolved escalation ${id} — auto-insert for this pattern re-enabled`, "info");
+			return;
+		}
+
+		const open = await escalationStore.listOpen();
+		if (open.length === 0) {
+			ctx.ui.notify("No open evolution deadlocks. System is not stuck on a recurring pattern.", "info");
+			return;
+		}
+
+		const lines = open.map(
+			e =>
+				`${e.id} [${e.status}] (${e.occurrenceCount}x, ${e.failedImprovementCount} failed auto-fixes)\n  ${e.patternLabel}\n  ${e.message}\n  ${e.suggestion}`,
+		);
+		ctx.ui.notify(`${lines.join("\n\n")}\n\nUsage: /evolution stuck ack <id> | resolve <id> | sync`, "warning");
+	} catch (err) {
+		logger.error("evolution stuck failed", { error: String(err) });
+		ctx.ui.notify("Failed to load evolution escalations", "error");
+	}
+}
+
 async function handleHelp(ctx: any): Promise<void> {
 	const lines = [
 		"Usage: /evolution <subcommand> [args]",
@@ -389,7 +878,8 @@ async function handleHelp(ctx: any): Promise<void> {
 		"  status              Show statistics (episodes, skills, versions)",
 		"  skills [--detail]   List evolved skills with optional score breakdown",
 		"  rate <name> <1-5>   Rate a skill",
-		"  clear               Clear all self-evolution data",
+		"  clear               Delete .omp/memory + evolution + skills (full reset)",
+		"  memory <sub>        Memory: search|stats|report|view|enqueue|refresh-summary|clear",
 		"  archive             Archive low-quality skills",
 		"  history <name>      View version history for a skill",
 		"  rollback <n> <v>    Rollback a skill to a version",
@@ -398,8 +888,239 @@ async function handleHelp(ctx: any): Promise<void> {
 		"  audit               Generate health report",
 		"  report              Generate daily report",
 		"  fit                 Run '懂我程度' evaluation",
+		"  population          Show skill population status",
+		"  learnings [search|pin|archive|delete|seed [file]]  Learnings; seed imports JSON rules",
+		"  log                     Show evolution event timeline",
+		"  nudges [ack|dismiss] <id>  List nudges or acknowledge/dismiss by id",
+		"  stuck [ack|resolve|sync]   Evolution deadlocks needing human intervention",
+		"  sync-skills             Export skills with scores to markdown files",
+		"  backfill-traces [limit] Backfill session_traces from omp session JSONL",
+		"  refresh-admission       Skill benefit admission (+ skill regression when configured)",
+		"  regression [limit]      List recent regression trials",
+		"",
+		"",
+		"/memory is an alias for /evolution memory.",
+		"CLI flags: --self-evolution-regression-replay=heuristic|llm|subagent",
 	];
 	ctx.ui.notify(lines.join("\n"), "info");
+}
+
+async function handleRefreshAdmission(stores: CommandStores, ctx: any): Promise<void> {
+	try {
+		const result = await refreshBenefitAdmissionState({
+			skillStore: stores.skillStore(),
+			skillEffectivenessStore: stores.skillEffectivenessStore(),
+			populationStore: stores.populationStore(),
+		});
+		ctx.ui.notify(
+			[`Admission refresh complete.`, `Skills deprecated: ${result.skillsDeprecated}`].join("\n"),
+			"info",
+		);
+	} catch (err) {
+		logger.error("evolution refresh-admission failed", { error: String(err) });
+		ctx.ui.notify("Failed to refresh benefit admission", "error");
+	}
+}
+
+async function handleRegressionTrials(stores: CommandStores, ctx: any, args: string): Promise<void> {
+	try {
+		const limit = args.trim() ? Number.parseInt(args.trim(), 10) : 15;
+		if (!Number.isFinite(limit) || limit < 1) {
+			ctx.ui.notify("Usage: /evolution regression [limit]", "warning");
+			return;
+		}
+		const trials = await stores.regressionTrialStore().listRecent(limit);
+		if (trials.length === 0) {
+			ctx.ui.notify("No regression trials recorded yet. Run sessions or /evolution backfill-traces first.", "info");
+			return;
+		}
+		const lines = trials.map(t => {
+			const backend = parseReplayBackendFromTrialReason(t.reason) ?? "?";
+			const chain = parseToolchainTagFromTrialReason(t.reason);
+			const chainLabel = chain ? ` toolchain:${chain}` : "";
+			const shortReason = t.reason.length > 100 ? `${t.reason.slice(0, 97)}...` : t.reason;
+			return `${t.id} [${t.verdict}] ${t.targetType}/${t.targetId} replay:${backend}${chainLabel}\n  ${shortReason}`;
+		});
+		ctx.ui.notify(lines.join("\n\n"), "info");
+	} catch (err) {
+		logger.error("evolution regression trials failed", { error: String(err) });
+		ctx.ui.notify("Failed to list regression trials", "error");
+	}
+}
+
+async function handleBackfillTraces(stores: CommandStores, ctx: any, args: string): Promise<void> {
+	try {
+		const limit = args.trim() ? Number.parseInt(args.trim(), 10) : 200;
+		if (!Number.isFinite(limit) || limit < 1) {
+			ctx.ui.notify("Usage: /evolution backfill-traces [limit]", "warning");
+			return;
+		}
+		const result = await backfillSessionTracesFromEpisodes({
+			episodeStore: stores.episodeStore(),
+			traceStore: stores.sessionTraceStore(),
+			fixtureStore: stores.regressionFixtureStore(),
+			sessionsRoot: getSessionsDir(),
+			limit,
+		});
+		const repair = await repairRegressionFixtureLabels({
+			db: stores.db(),
+			fixtureStore: stores.regressionFixtureStore(),
+			traceStore: stores.sessionTraceStore(),
+			diagnosisStore: new SqliteEpisodeDiagnosisStore(stores.db()),
+		});
+		await syncEvolutionEscalationsAfterRepair(stores);
+		await refreshBenefitAdmissionAfterBackfill(stores);
+		ctx.ui.notify(
+			[
+				`Backfill: scanned ${result.scanned}, traces ${result.tracesWritten}, upgraded ${result.tracesUpgraded}, fixtures ${result.fixturesWritten}, skipped ${result.skippedExisting}, jsonl misses ${result.jsonlMisses}`,
+				`Fixture labels repaired: ${repair.updated} updated (${repair.unchanged} unchanged, ${repair.missingTrace} missing trace)`,
+			].join("\n"),
+			"info",
+		);
+	} catch (err) {
+		logger.error("evolution backfill-traces failed", { error: String(err) });
+		ctx.ui.notify("Failed to backfill session traces", "error");
+	}
+}
+
+async function syncEvolutionEscalationsAfterRepair(stores: CommandStores): Promise<void> {
+	await syncEvolutionEscalations({
+		escalationStore: stores.escalationStore(),
+		fixtureStore: stores.regressionFixtureStore(),
+		learningStore: stores.learningStore(),
+		trialStore: stores.regressionTrialStore(),
+		fixtureLookback: 80,
+	});
+}
+
+async function refreshBenefitAdmissionAfterBackfill(stores: CommandStores): Promise<void> {
+	await refreshBenefitAdmissionState({
+		skillStore: stores.skillStore(),
+		skillEffectivenessStore: stores.skillEffectivenessStore(),
+		populationStore: stores.populationStore(),
+	});
+}
+
+async function handleSyncSkills(stores: CommandStores, ctx: ExtensionCommandContext): Promise<void> {
+	try {
+		const outputDir = getUnifiedSkillsDir(ctx.cwd, stores.flags().globalStore);
+		const result = await syncSkillsToFiles(stores.db(), outputDir);
+		ctx.ui.notify(
+			`Synced ${result.written} skills to ${outputDir}` +
+				(result.skippedQuality > 0 ? ` (skipped ${result.skippedQuality} below template)` : "") +
+				(result.purgedInvalid > 0 ? ` (purged ${result.purgedInvalid} invalid)` : "") +
+				(result.repairedPopulationScores > 0
+					? ` (repaired ${result.repairedPopulationScores} population scores)`
+					: ""),
+			"info",
+		);
+	} catch (err) {
+		logger.error("evolution sync-skills failed", { error: String(err) });
+		ctx.ui.notify("Failed to sync skills to files", "error");
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// /profile standalone command
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function registerProfileCommand(api: ExtensionAPI, stores: CommandStores): void {
+	api.registerCommand("profile", {
+		description: "User profile. Usage: /profile <subcommand> [args]",
+		getArgumentCompletions(argumentPrefix: string) {
+			if (argumentPrefix.includes(" ")) return null;
+			const subs = [
+				{ name: "show", description: "Show user profile" },
+				{ name: "stats", description: "Show profile statistics" },
+			];
+			const lower = argumentPrefix.toLowerCase();
+			return subs
+				.filter(s => s.name.startsWith(lower))
+				.map(s => ({ value: `${s.name} `, label: s.name, description: s.description }));
+		},
+		async handler(args, ctx): Promise<void> {
+			stores.ensureInit(ctx.cwd);
+			const trimmed = args.trim();
+			const subcommand = trimmed.split(/\s+/, 1)[0]?.toLowerCase() || "show";
+
+			try {
+				const profile = await stores.profileStore().get("default");
+				if (!profile) {
+					ctx.ui.notify("No profile data yet", "info");
+					return;
+				}
+				switch (subcommand) {
+					case "show": {
+						const lines = [
+							`Sessions: ${profile.sessionCount}`,
+							`Avg tools/session: ${profile.avgToolCallsPerSession.toFixed(1)}`,
+							`Avg files/session: ${profile.avgFilesModifiedPerSession.toFixed(1)}`,
+							`Avg tool errors/session: ${profile.errorRate.toFixed(1)}`,
+							`Recovery rate: ${(profile.recoveryRate * 100).toFixed(0)}%`,
+							`Languages: ${profile.preferredLanguages.join(", ") || "none"}`,
+							`Top tools: ${Object.entries(profile.toolFrequency)
+								.sort((a, b) => b[1] - a[1])
+								.slice(0, 5)
+								.map(([t, c]) => `${t}(${c})`)
+								.join(", ")}`,
+						];
+						ctx.ui.notify(lines.join("\n"), "info");
+						break;
+					}
+					case "stats": {
+						const topIntents = Object.entries(profile.intentDistribution)
+							.sort((a, b) => b[1] - a[1])
+							.map(([i, c]) => `${i}: ${c}`)
+							.join(", ");
+						ctx.ui.notify(`Intents: ${topIntents || "none"}`, "info");
+						break;
+					}
+				}
+			} catch (err) {
+				logger.error("profile command failed", { error: String(err) });
+				ctx.ui.notify("Failed to load profile", "error");
+			}
+		},
+	});
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// /model standalone command
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function registerModelCommand(api: ExtensionAPI, stores: CommandStores): void {
+	api.registerCommand("model", {
+		description: "Model scores and routing. Usage: /model <subcommand>",
+		getArgumentCompletions(argumentPrefix: string) {
+			if (argumentPrefix.includes(" ")) return null;
+			const subs = [{ name: "scores", description: "Show model scores and stats" }];
+			const lower = argumentPrefix.toLowerCase();
+			return subs
+				.filter(s => s.name.startsWith(lower))
+				.map(s => ({ value: `${s.name} `, label: s.name, description: s.description }));
+		},
+		async handler(_args, ctx): Promise<void> {
+			stores.ensureInit(ctx.cwd);
+			try {
+				const statsStore = new SqliteSessionModelStatsStore(stores.db());
+				const _scorer = new ModelScorer(statsStore);
+				const allStats = await statsStore.getAggregates();
+				const lines: string[] = [];
+				if (allStats.totalSessions === 0) {
+					lines.push("No model data collected yet. Stats are recorded during agent sessions.");
+				} else {
+					lines.push(`Total sessions tracked: ${allStats.totalSessions}`);
+					lines.push(
+						`Overall avg tokens: ${allStats.avgTokens.toFixed(0)} | avg duration: ${(allStats.avgDuration / 1000).toFixed(1)}s | success rate: ${(allStats.successRate * 100).toFixed(0)}%`,
+					);
+				}
+				ctx.ui.notify(lines.join("\n"), "info");
+			} catch (err) {
+				logger.error("model scores failed", { error: String(err) });
+				ctx.ui.notify("Model scoring not yet available", "info");
+			}
+		},
+	});
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -6,6 +6,7 @@ import type { ActivityLogger } from "./logging/activity-logger";
 import type { SkillManager } from "./manager";
 import type { EpisodeRetriever } from "./retrieval";
 import type { SkillStore } from "./storage/types";
+import { createBackgroundLlmAuth } from "./utils/background-llm-auth";
 
 export interface ToolStores {
 	ensureInit(cwd: string): void;
@@ -90,7 +91,7 @@ export function registerSelfEvolutionTools(api: ExtensionAPI, stores: ToolStores
 			const { RuleBasedPromptOptimizer } = await import("./optimizer");
 			const optimizer = new RuleBasedPromptOptimizer();
 			const oldApproach = skill.approach;
-			const newApproach = await optimizer.optimize(skill, ctx.model);
+			const newApproach = await optimizer.optimize(skill, ctx.model, createBackgroundLlmAuth(ctx));
 			skill.approach = newApproach;
 			skill.version += 1;
 			await stores.skillStore().upsert(skill);

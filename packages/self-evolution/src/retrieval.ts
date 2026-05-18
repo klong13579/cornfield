@@ -1,17 +1,15 @@
-/**
- * Episodic memory retrieval: FTS5 BM25 recall + scoring + optional LLM reranking.
- */
 import type { Model } from "@oh-my-pi/pi-ai";
 import { logger } from "@oh-my-pi/pi-utils";
 import rerankEpisodesTemplate from "./prompts/rerank-episodes.md" with { type: "text" };
+import type { EpisodicBackend } from "./storage/episodic-backend";
 import type { EpisodeStore } from "./storage/types";
-import type { Episode, RerankedEpisode } from "./types";
-import { callBackgroundLlm } from "./utils/llm";
-
+import type { Episode, EpisodicRecord, RerankedEpisode } from "./types";
+import { type BackgroundLlmAuth, callBackgroundLlm } from "./utils/llm";
 export interface RetrievalOptions {
 	maxEpisodes: number;
 	llmRerank: boolean;
 	model?: Model;
+	auth?: BackgroundLlmAuth;
 }
 
 export class EpisodeRetriever {
@@ -41,7 +39,7 @@ export class EpisodeRetriever {
 		}
 
 		// Stage 3: LLM rerank
-		const reranked = await this.#llmRerank(topCandidates, query, options.model);
+		const reranked = await this.#llmRerank(topCandidates, query, options.model, options.auth);
 		reranked.sort((a, b) => b.relevanceScore - a.relevanceScore);
 		return reranked.slice(0, 3);
 	}
@@ -88,6 +86,7 @@ export class EpisodeRetriever {
 		candidates: Array<{ episode: Episode; score: number; reason: string }>,
 		query: string,
 		model: Model,
+		auth?: BackgroundLlmAuth,
 	): Promise<RerankedEpisode[]> {
 		const episodesBlock = candidates
 			.map(
@@ -98,7 +97,7 @@ export class EpisodeRetriever {
 
 		const userPrompt = `Current task: "${query}"\n\nCandidate episodes:\n${episodesBlock}\n\nSelect the most relevant episodes. Return a JSON array: [{"episodeId": "...", "relevanceScore": 0-100, "reason": "..."}]`;
 
-		const response = await callBackgroundLlm(model, rerankEpisodesTemplate, userPrompt);
+		const response = await callBackgroundLlm(model, rerankEpisodesTemplate, userPrompt, { auth });
 		if (!response) {
 			return candidates.slice(0, 3).map(c => ({
 				episode: c.episode,
@@ -145,5 +144,92 @@ export class EpisodeRetriever {
 				reason: "LLM rerank parse failed",
 			}));
 		}
+	}
+}
+
+// ============================================================================
+// Episodic Record Retrieval (Phase 3.6)
+// ============================================================================
+
+export interface EpisodicRecordSearchResult {
+	record: EpisodicRecord;
+	score: number;
+	reason: string;
+}
+
+export interface EpisodicRecordSearchOptions {
+	limit?: number;
+	minScore?: number;
+	includeArchived?: boolean;
+}
+
+/**
+ * Semantic retrieval for episodic records.
+ *
+ * Uses the backend's text search plus heuristic scoring for relevance.
+ */
+export class EpisodicRecordRetriever {
+	#backend: EpisodicBackend;
+
+	constructor(backend: EpisodicBackend) {
+		this.#backend = backend;
+	}
+
+	async search(query: string, options: EpisodicRecordSearchOptions = {}): Promise<EpisodicRecordSearchResult[]> {
+		const { limit = 10, minScore = 0 } = options;
+
+		// Stage 1: Backend text search
+		const candidates = await this.#backend.search(query, limit * 2);
+
+		// Stage 2: Heuristic scoring
+		const scored = this.#scoreRecords(candidates, query);
+		scored.sort((a, b) => b.score - a.score);
+
+		return scored.filter(r => r.score >= minScore).slice(0, limit);
+	}
+
+	async getRecent(limit: number): Promise<EpisodicRecord[]> {
+		return this.#backend.getRecent(limit);
+	}
+
+	async getBySession(sessionId: string): Promise<EpisodicRecord[]> {
+		return this.#backend.getBySession(sessionId);
+	}
+
+	#scoreRecords(records: EpisodicRecord[], query: string): EpisodicRecordSearchResult[] {
+		const queryWords = query
+			.toLowerCase()
+			.split(/\W+/)
+			.filter(w => w.length > 2);
+
+		return records.map(record => {
+			const text = `${record.eventType} ${JSON.stringify(record.eventData)}`.toLowerCase();
+			let keywordMatches = 0;
+			for (const word of queryWords) {
+				if (text.includes(word)) keywordMatches++;
+			}
+
+			let score = 30; // Base score for being retrieved
+			if (queryWords.length > 0) {
+				score += (keywordMatches / queryWords.length) * 40;
+			}
+
+			// Importance boost
+			score += (record.importanceScore ?? 0.5) * 20;
+
+			// Recency boost
+			const daysAgo = Math.floor((Date.now() - record.timestamp) / 86400000);
+			score += Math.max(0, 10 - daysAgo);
+
+			const reasons: string[] = ["text match"];
+			if ((record.importanceScore ?? 0) > 0.7) reasons.push("high importance");
+			if (daysAgo < 1) reasons.push("recent");
+
+			return {
+				record,
+				score: Math.min(100, Math.round(score)),
+				reason: reasons.join(", "),
+			};
+		});
 	}
 }

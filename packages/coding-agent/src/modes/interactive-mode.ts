@@ -603,12 +603,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.#pendingSubmittedInput = undefined;
 		this.optimisticUserMessageSignature = undefined;
 		this.locallySubmittedUserSignatures.delete(`${submission.text}\u0000${submission.images?.length ?? 0}`);
-		this.#pendingWorkingMessage = undefined;
-		if (this.loadingAnimation) {
-			this.loadingAnimation.stop();
-			this.loadingAnimation = undefined;
-			this.statusContainer.clear();
-		}
+		this.#clearLoadingAnimation();
 		this.pendingImages = submission.images ? [...submission.images] : [];
 		this.rebuildChatFromMessages();
 		this.editor.setText(submission.text);
@@ -628,6 +623,18 @@ export class InteractiveMode implements InteractiveModeContext {
 	finishPendingSubmission(input: SubmittedUserInput): void {
 		if (this.#pendingSubmittedInput === input) {
 			this.#pendingSubmittedInput = undefined;
+		}
+		if (!this.session.isStreaming) {
+			this.#clearLoadingAnimation();
+		}
+	}
+
+	#clearLoadingAnimation(): void {
+		this.#pendingWorkingMessage = undefined;
+		if (this.loadingAnimation) {
+			this.loadingAnimation.stop();
+			this.loadingAnimation = undefined;
+			this.statusContainer.clear();
 		}
 	}
 
@@ -1225,12 +1232,7 @@ export class InteractiveMode implements InteractiveModeContext {
 	showError(message: string): void {
 		this.#pendingSubmittedInput = undefined;
 		this.optimisticUserMessageSignature = undefined;
-		this.#pendingWorkingMessage = undefined;
-		if (this.loadingAnimation) {
-			this.loadingAnimation.stop();
-			this.loadingAnimation = undefined;
-			this.statusContainer.clear();
-		}
+		this.#clearLoadingAnimation();
 		this.#uiHelpers.showError(message);
 	}
 

@@ -1,7 +1,7 @@
 /**
  * Alibaba Coding Plan login flow.
  *
- * Alibaba Coding Plan provides OpenAI-compatible models via https://coding.dashscope.aliyuncs.com/v1.
+ * Alibaba Coding Plan provides OpenAI-compatible models via https://dashscope.aliyuncs.com/compatible-mode/v1.
  *
  * This is not OAuth - it's a simple API key flow:
  * 1. Open browser to Alibaba Cloud DashScope API key settings
@@ -12,7 +12,7 @@
 import type { OAuthController } from "./types";
 
 const AUTH_URL = "https://modelstudio.console.alibabacloud.com/";
-const API_BASE_URL = "https://coding.dashscope.aliyuncs.com/v1";
+const API_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1";
 const VALIDATION_MODEL_CLASSIC = "qwen3.5-plus";
 const VALIDATION_MODEL_SK_SP = "qwen3-coder-plus";
 const VALIDATION_TIMEOUT_MS = 15_000;
