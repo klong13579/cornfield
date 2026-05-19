@@ -1,10 +1,10 @@
 /**
- * Remove project-local (or legacy global) evolution artifacts: memory, evolution DB, skills.
+ * Remove project-local (or global user-level) evolution artifacts: memory, evolution DB, skills.
  */
 import { Database } from "bun:sqlite";
 import * as fs from "node:fs/promises";
 import { getAgentDir } from "@oh-my-pi/pi-utils";
-import { resolveEvolutionPathLayout } from "./paths";
+import { DEFAULT_EVOLUTION_GLOBAL_STORE, resolveEvolutionPathLayout } from "./paths";
 import { closeEvolutionDb } from "./storage/db";
 
 export interface ClearProjectEvolutionResult {
@@ -18,7 +18,7 @@ export async function clearProjectEvolutionData(opts: {
 	agentDir?: string;
 }): Promise<ClearProjectEvolutionResult> {
 	const agentDir = opts.agentDir ?? getAgentDir();
-	const globalStore = opts.globalStore ?? false;
+	const globalStore = opts.globalStore ?? DEFAULT_EVOLUTION_GLOBAL_STORE;
 	const layout = resolveEvolutionPathLayout(opts.cwd, globalStore, agentDir);
 
 	closeEvolutionDb(opts.cwd, globalStore);

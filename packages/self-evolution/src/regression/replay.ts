@@ -1,8 +1,8 @@
 /**
- * Heuristic replay of conventions/skills against failed-session fixtures.
+ * Heuristic replay of skills against failed-session fixtures.
  * Full sub-agent rerun is pluggable via `replay-backend.ts` (defaults to this module).
  */
-import type { Convention, EvolvedSkill, RegressionFixture } from "../types";
+import type { EvolvedSkill, RegressionFixture } from "../types";
 
 export interface FixtureReplayResult {
 	passed: boolean;
@@ -54,21 +54,6 @@ function matchesErrorTheme(conventionText: string, logText: string): boolean {
 	const hasSearchTheme =
 		/(ast_grep|redundant search|narrowing your search)/.test(c) && /(search|grep|ast_grep|too many)/.test(logText);
 	return hasPathTheme || hasEditTheme || hasSearchTheme;
-}
-
-export function evaluateConventionOnFixture(convention: Convention, fixture: RegressionFixture): FixtureReplayResult {
-	const logText = fixtureLogText(fixture);
-
-	if (matchesErrorTheme(convention.content, logText)) {
-		return { passed: true, reason: "Convention theme matches fixture error pattern." };
-	}
-
-	const overlap = tokenOverlap(convention.content.toLowerCase(), logText);
-	if ((convention.type === "negative_rule" || convention.type === "procedural_rule") && overlap >= 0.2) {
-		return { passed: true, reason: `Rule keyword overlap ${(overlap * 100).toFixed(0)}% with fixture errors.` };
-	}
-
-	return { passed: false, reason: "Convention does not address this fixture failure pattern." };
 }
 
 export function evaluateSkillOnFixture(skill: EvolvedSkill, fixture: RegressionFixture): FixtureReplayResult {
@@ -175,90 +160,5 @@ export function runSkillRegressionGate(
 		passCount,
 		failCount,
 		reason: `Skill regression discard: ${passCount}/${slice.length} fixtures passed (need ${(minPassRate * 100).toFixed(0)}%).`,
-	};
-}
-
-export async function runRegressionGateEval(
-	evaluate: (fixture: RegressionFixture) => FixtureReplayResult | Promise<FixtureReplayResult>,
-	fixtures: RegressionFixture[],
-	opts?: { minPassRate?: number; maxFixtures?: number; emptyReason?: string },
-): Promise<RegressionGateResult> {
-	const minPassRate = opts?.minPassRate ?? REGRESSION_MIN_PASS_RATE;
-	const maxFixtures = opts?.maxFixtures ?? REGRESSION_MAX_FIXTURES;
-	const emptyReason = opts?.emptyReason ?? "No regression fixtures; cannot promote without replay evidence.";
-
-	if (fixtures.length === 0) {
-		return { verdict: "discard", passCount: 0, failCount: 0, reason: emptyReason };
-	}
-
-	const slice = fixtures.slice(0, maxFixtures);
-	let passCount = 0;
-	for (const fixture of slice) {
-		const result = await evaluate(fixture);
-		if (result.passed) {
-			passCount++;
-		}
-	}
-	const failCount = slice.length - passCount;
-	const passRate = passCount / slice.length;
-
-	if (passRate >= minPassRate) {
-		return {
-			verdict: "keep",
-			passCount,
-			failCount,
-			reason: `Regression keep: ${passCount}/${slice.length} fixtures passed (${(passRate * 100).toFixed(0)}%).`,
-		};
-	}
-
-	return {
-		verdict: "discard",
-		passCount,
-		failCount,
-		reason: `Regression discard: ${passCount}/${slice.length} fixtures passed (need ${(minPassRate * 100).toFixed(0)}%).`,
-	};
-}
-
-export function runRegressionGate(
-	convention: Convention,
-	fixtures: RegressionFixture[],
-	opts?: { minPassRate?: number; maxFixtures?: number },
-): RegressionGateResult {
-	const minPassRate = opts?.minPassRate ?? REGRESSION_MIN_PASS_RATE;
-	const maxFixtures = opts?.maxFixtures ?? REGRESSION_MAX_FIXTURES;
-
-	if (fixtures.length === 0) {
-		return {
-			verdict: "discard",
-			passCount: 0,
-			failCount: 0,
-			reason: "No regression fixtures; cannot promote without replay evidence.",
-		};
-	}
-
-	const slice = fixtures.slice(0, maxFixtures);
-	let passCount = 0;
-	for (const fixture of slice) {
-		if (evaluateConventionOnFixture(convention, fixture).passed) {
-			passCount++;
-		}
-	}
-	const failCount = slice.length - passCount;
-	const passRate = passCount / slice.length;
-
-	if (passRate >= minPassRate) {
-		return {
-			verdict: "keep",
-			passCount,
-			failCount,
-			reason: `Regression keep: ${passCount}/${slice.length} fixtures passed (${(passRate * 100).toFixed(0)}%).`,
-		};
-	}
-
-	return {
-		verdict: "discard",
-		passCount,
-		failCount,
-		reason: `Regression discard: ${passCount}/${slice.length} fixtures passed (need ${(minPassRate * 100).toFixed(0)}%).`,
 	};
 }

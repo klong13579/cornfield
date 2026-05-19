@@ -72,7 +72,7 @@ export class FeedbackTracker {
 	 */
 	parseUserFeedback(
 		feedback: string,
-		_context: { injectedEpisodeIds: string[]; injectedConventionIds: string[] },
+		_context: { injectedEpisodeIds: string[] },
 	): ParsedFeedback {
 		const normalized = feedback.toLowerCase().trim();
 

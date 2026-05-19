@@ -2,7 +2,6 @@
  * Coverage tests for V2.1 architecture gaps identified in the test plan.
  *
  * Covers:
- * - ConventionStore: provenance-aware merge + monthly decay
  * - TraceAnalyzer: implicit signal extraction + trace enhancement
  * - FeedbackTracker: implicit signal detection
  * - InjectionFormatter: 7-layer injection + dynamic token budget
@@ -10,39 +9,31 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import type { ImplicitConvention } from "@oh-my-pi/cognitive-coordination";
-import { applyDecay, mergeConventions } from "../src/convention-store";
 import { FeedbackTracker } from "../src/feedback-tracker";
 import { InjectionFormatter } from "../src/injection-formatter";
 import { TraceAnalyzer } from "../src/trace-analyzer";
-import type { Convention, SessionTrace, TraceEntry } from "../src/types";
+import type { Learning, SessionTrace, TraceEntry } from "../src/types";
 
 // ============================================================================
 // Helpers
 // ============================================================================
 
-function makeConvention(overrides: Partial<Convention> = {}): Convention {
+function makeLearning(overrides: Partial<Learning> = {}): Learning {
 	return {
-		id: overrides.id ?? "conv-1",
-		type: overrides.type ?? "preference",
+		id: overrides.id ?? "learn-1",
+		cwd: overrides.cwd ?? "/proj",
+		kind: overrides.kind ?? "preference",
 		content: overrides.content ?? "Use bun test",
-		sourceEpisodeId: overrides.sourceEpisodeId ?? "ep-1",
+		source: overrides.source ?? "manual_pin",
 		confidence: overrides.confidence ?? 80,
-		timesApplied: overrides.timesApplied ?? 0,
-		timesViolated: overrides.timesViolated ?? 0,
+		lifecycle: overrides.lifecycle ?? "active",
+		sessionId: overrides.sessionId ?? "s1",
 		createdAt: overrides.createdAt ?? Date.now(),
-		lastSeenAt: overrides.lastSeenAt ?? Date.now(),
-		provenance: overrides.provenance,
+		updatedAt: overrides.updatedAt ?? Date.now(),
+		timesInjected: overrides.timesInjected ?? 0,
+		timesHelped: overrides.timesHelped ?? 0,
+		timesIgnored: overrides.timesIgnored ?? 0,
 	};
-}
-
-function makeImplicitConvention(
-	rule: string,
-	confidence: number,
-	provenance?: ImplicitConvention["provenance"],
-	updatedAt?: number,
-): ImplicitConvention {
-	return { rule, confidence, provenance, updatedAt };
 }
 
 function makeTraceEntry(overrides: Partial<TraceEntry> = {}): TraceEntry {
@@ -71,96 +62,6 @@ function makeTrace(overrides: Partial<SessionTrace> = {}): SessionTrace {
 		completedSuccessfully: overrides.completedSuccessfully ?? true,
 	};
 }
-
-// ============================================================================
-// ConventionStore: provenance-aware merge + decay
-// ============================================================================
-
-describe("ConventionStore — provenance-aware merge", () => {
-	test("higher provenance supersedes lower on merge", () => {
-		const existing: ImplicitConvention[] = [makeImplicitConvention("use bun test", 60, "inferred")];
-		const newOnes: ImplicitConvention[] = [makeImplicitConvention("use bun test", 50, "user_stated")];
-
-		const merged = mergeConventions(existing, newOnes);
-		expect(merged).toHaveLength(1);
-		expect(merged[0].provenance).toBe("user_stated");
-		// Confidence takes max of both when superseding
-		expect(merged[0].confidence).toBe(60);
-	});
-
-	test("same provenance, higher confidence wins", () => {
-		const existing: ImplicitConvention[] = [makeImplicitConvention("use bun test", 60, "implied")];
-		const newOnes: ImplicitConvention[] = [makeImplicitConvention("use bun test", 90, "implied")];
-
-		const merged = mergeConventions(existing, newOnes);
-		expect(merged).toHaveLength(1);
-		expect(merged[0].confidence).toBe(90);
-	});
-
-	test("same provenance, lower confidence does not replace", () => {
-		const existing: ImplicitConvention[] = [makeImplicitConvention("use bun test", 90, "implied")];
-		const newOnes: ImplicitConvention[] = [makeImplicitConvention("use bun test", 60, "implied")];
-
-		const merged = mergeConventions(existing, newOnes);
-		expect(merged).toHaveLength(1);
-		expect(merged[0].confidence).toBe(90);
-	});
-
-	test("new conventions without conflict are added", () => {
-		const existing: ImplicitConvention[] = [makeImplicitConvention("use bun test", 80, "implied")];
-		const newOnes: ImplicitConvention[] = [makeImplicitConvention("prefer ast_grep", 70, "user_stated")];
-
-		const merged = mergeConventions(existing, newOnes);
-		expect(merged).toHaveLength(2);
-	});
-
-	test("updatedAt is set on merge", () => {
-		const existing: ImplicitConvention[] = [makeImplicitConvention("use bun test", 80, "implied", 1000)];
-		const newOnes: ImplicitConvention[] = [makeImplicitConvention("use bun test", 90, "user_stated")];
-
-		const merged = mergeConventions(existing, newOnes);
-		expect(merged[0].updatedAt).toBeDefined();
-		expect(merged[0].updatedAt!).toBeGreaterThan(1000);
-	});
-});
-
-describe("ConventionStore — monthly confidence decay", () => {
-	test("applyDecay reduces confidence after time passes", () => {
-		const convention = makeImplicitConvention(
-			"use bun test",
-			100,
-			"user_stated",
-			Date.now() - 31 * 24 * 60 * 60 * 1000,
-		); // 31 days ago
-		const decayed = applyDecay(convention, Date.now());
-		// After 31 days with half-life of 30, should be ~100 * 0.5^(31/30) ≈ 48
-		expect(decayed.confidence).toBeLessThan(60);
-		expect(decayed.confidence).toBeGreaterThan(30);
-	});
-
-	test("applyDecay does not decay within first day", () => {
-		const convention = makeImplicitConvention("use bun test", 100, "user_stated", Date.now() - 12 * 60 * 60 * 1000); // 12 hours ago
-		const decayed = applyDecay(convention, Date.now());
-		expect(decayed.confidence).toBe(100);
-	});
-
-	test("applyDecay has floor of 1", () => {
-		const convention = makeImplicitConvention(
-			"use bun test",
-			10,
-			"user_stated",
-			Date.now() - 365 * 24 * 60 * 60 * 1000,
-		); // 1 year ago
-		const decayed = applyDecay(convention, Date.now());
-		expect(decayed.confidence).toBeGreaterThanOrEqual(1);
-	});
-
-	test("applyDecay does nothing when no updatedAt", () => {
-		const convention = makeImplicitConvention("use bun test", 100);
-		const decayed = applyDecay(convention, Date.now());
-		expect(decayed).toBe(convention);
-	});
-});
 
 // ============================================================================
 // TraceAnalyzer: implicit signals + trace enhancement
@@ -368,32 +269,27 @@ describe("InjectionFormatter — 7-layer injection", () => {
 	const formatter = new InjectionFormatter();
 
 	test("7-layer mode produces AGENTS.md as first layer", () => {
-		const result = formatter.formatInjection([], [], [], undefined, undefined, {
-			useSevenLayer: true,
+		const result = formatter.formatInjection([], [], undefined, undefined, {
 			maxTokens: 2000,
 		});
 		expect(result).toContain("## AGENTS.md");
 	});
 
 	test("7-layer mode includes all expected layers", () => {
-		const conventions: Convention[] = [makeConvention({ content: "Use bun test", confidence: 80 })];
+		const learnings = [makeLearning({ content: "Use bun test", confidence: 80 })];
 		const skills = [{ name: "test-skill", taskPattern: "run tests", approach: "use bun test", qualityScore: 75 }];
 
-		const result = formatter.formatInjection([], conventions, skills, undefined, undefined, {
-			useSevenLayer: true,
-			maxTokens: 2000,
-		});
+		const result = formatter.formatInjection([], skills, undefined, undefined, { maxTokens: 2000 }, learnings);
 
 		expect(result).toContain("## AGENTS.md");
 		expect(result).toContain("## Memory Summary");
-		expect(result).toContain("## Conventions");
+		expect(result).toContain("## Project Learnings");
 		expect(result).toContain("## Relevant Skills");
 		expect(result).toContain("## Past Episodes");
 	});
 
 	test("dynamic token budget for refactoring task type", () => {
-		const result = formatter.formatInjection([], [], [], undefined, undefined, {
-			useSevenLayer: true,
+		const result = formatter.formatInjection([], [], undefined, undefined, {
 			maxTokens: 1000,
 			taskType: "refactoring",
 		});
@@ -403,8 +299,7 @@ describe("InjectionFormatter — 7-layer injection", () => {
 	});
 
 	test("dynamic token budget for exploration task type", () => {
-		const result = formatter.formatInjection([], [], [], undefined, undefined, {
-			useSevenLayer: true,
+		const result = formatter.formatInjection([], [], undefined, undefined, {
 			maxTokens: 1000,
 			taskType: "exploration",
 		});
@@ -419,8 +314,7 @@ describe("InjectionFormatter — 7-layer injection", () => {
 			{ name: "mid", taskPattern: "mid", approach: "mid", qualityScore: 60 },
 		];
 
-		const result = formatter.formatInjection([], [], skills, undefined, undefined, {
-			useSevenLayer: true,
+		const result = formatter.formatInjection([], skills, undefined, undefined, {
 			maxTokens: 500,
 		});
 
@@ -432,30 +326,18 @@ describe("InjectionFormatter — 7-layer injection", () => {
 		expect(midIdx).toBeLessThan(lowIdx);
 	});
 
-	test("legacy mode still works correctly", () => {
-		const conventions: Convention[] = [makeConvention({ content: "Short rule", confidence: 90 })];
-		const result = formatter.formatInjection([], conventions, []);
-		expect(result).toContain("## Project Conventions");
-		expect(result).toContain("Short rule");
-		expect(result.length).toBeLessThan(2000);
-		expect(result).not.toContain("AGENTS.md");
-	});
-
 	test("7-layer mode truncates at token limit", () => {
-		const conventions: Convention[] = [];
+		const learnings: Learning[] = [];
 		for (let i = 0; i < 100; i++) {
-			conventions.push(
-				makeConvention({
-					content: `Very long convention text number ${i} that will definitely exceed any reasonable token limit`,
+			learnings.push(
+				makeLearning({
+					content: `Very long learning text number ${i} that will definitely exceed any reasonable token limit`,
 					confidence: 80,
 				}),
 			);
 		}
 
-		const result = formatter.formatInjection([], conventions, [], undefined, undefined, {
-			useSevenLayer: true,
-			maxTokens: 500, // 2000 chars
-		});
+		const result = formatter.formatInjection([], [], undefined, undefined, { maxTokens: 500 }, learnings);
 
 		expect(result.length).toBeLessThanOrEqual(2100);
 		expect(result).toContain("... (truncated");

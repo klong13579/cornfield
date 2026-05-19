@@ -1,5 +1,5 @@
 /**
- * Memory persistence uses the same SQLite file as self-evolution (per-project or legacy global).
+ * Memory persistence uses the same SQLite file as self-evolution (per-project or global user store).
  */
 
 import type { Database as DatabaseType } from "bun:sqlite";
@@ -10,15 +10,15 @@ import { resolveEvolutionPathLayout } from "../paths";
 import { closeEvolutionDb, getEvolutionDb } from "../storage/db";
 import { initMemoryTables } from "./schema";
 
-export function getMemoryDb(cwd: string, globalStore = false): DatabaseType {
+export function getMemoryDb(cwd: string, globalStore = true): DatabaseType {
 	return getEvolutionDb(cwd, globalStore);
 }
 
-export function releaseMemoryDb(cwd: string, globalStore = false): void {
+export function releaseMemoryDb(cwd: string, globalStore = true): void {
 	closeEvolutionDb(cwd, globalStore);
 }
 
-export function resolveMemoryDbPath(cwd: string, globalStore = false): string {
+export function resolveMemoryDbPath(cwd: string, globalStore = true): string {
 	return resolveEvolutionPathLayout(cwd, globalStore).dbPath;
 }
 

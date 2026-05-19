@@ -378,7 +378,7 @@ lifecycle: candidate | active | archived
 
 会话 transcript：`~/.omp/agent/sessions/*.jsonl`（不进项目 `.omp`，但 Memory Phase1 会读）。
 
-**Legacy**：`--self-evolution-global-store` → `~/.omp/self-evolution/`；首次可迁移到项目 `.omp/`。
+**默认（用户级）**：`~/.omp/self-evolution/` + encoded memory。**项目级**：`--self-evolution-project-store` → `<cwd>/.omp/`；可用 `migrate-evolution-data.sh` 做一次性拷贝。
 
 ---
 
@@ -445,7 +445,8 @@ lifecycle: candidate | active | archived
 | `--self-evolution-max-episodes` | 100 | episode 保留上限 |
 | `--no-self-evolution-llm-refinement` | — | 技能仅规则提取 |
 | `--no-self-evolution-llm-rerank` | — | episode 仅关键词检索 |
-| `--self-evolution-global-store` | off | 使用 `~/.omp/self-evolution` |
+| `--self-evolution-global-store` | on | 用户级 `~/.omp/self-evolution`（默认） |
+| `--self-evolution-project-store` | off | 项目级 `<cwd>/.omp/` |
 
 实现与自动补全定义：`packages/self-evolution/src/commands.ts`、`evolution-memory.ts`、`memory-commands.ts`。
 
@@ -461,7 +462,7 @@ lifecycle: candidate | active | archived
 | **帮助** | 无子命令或未知子命令 → 输出内置 help（同 `handleHelp`） |
 | **别名** | `/memory …` ≡ `/evolution memory …`（`memory-commands.ts`） |
 | **旧命令** | `/evolution-status` 等扁平命令已废弃，会提示重定向到 `/evolution` |
-| **作用域** | 默认操作当前项目 `ctx.cwd` 下 `.omp/`；`--self-evolution-global-store` 时用 legacy 全局路径 |
+| **作用域** | 默认用户级 `~/.omp/self-evolution`；`--self-evolution-project-store` 时用当前项目 `ctx.cwd` 下 `.omp/` |
 | **前置条件** | 多数子命令需已启动过至少一次会话（`ensureInit` 打开 `evolution.db`） |
 
 **已移除（V3）**：`/evolution conventions`、`--no-self-evolution-v2-writer`。

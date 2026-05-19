@@ -2,7 +2,7 @@ import { describe, expect, spyOn, test } from "bun:test";
 import { LlmRegressionReplayBackend } from "../src/regression/replay-backend";
 import { parseReplayVerdictFromResponse } from "../src/regression/replay-llm";
 import { clearRegressionReplayRuntime, setRegressionReplayRuntime } from "../src/regression/replay-runtime";
-import type { Convention, RegressionFixture, TraceEntry } from "../src/types";
+import type { EvolvedSkill, RegressionFixture, TraceEntry } from "../src/types";
 import * as llmModule from "../src/utils/llm";
 
 describe("parseReplayVerdictFromResponse", () => {
@@ -35,17 +35,20 @@ describe("LlmRegressionReplayBackend", () => {
 		createdAt: Date.now(),
 	};
 
-	const convention: Convention = {
-		id: "c1",
-		type: "negative_rule",
-		content: "Verify paths exist before read.",
-		sourceEpisodeId: "e1",
-		confidence: 80,
-		timesApplied: 5,
-		timesViolated: 0,
+	const skill: EvolvedSkill = {
+		name: "safe-read",
+		description: "Read files safely",
+		taskPattern: "read before edit",
+		approach: "Verify paths exist before read.",
+		tools: ["read"],
+		pitfalls: [],
 		createdAt: Date.now(),
-		lastSeenAt: Date.now(),
-		lifecycleState: "candidate",
+		usageCount: 0,
+		lastUsedAt: 0,
+		successCount: 0,
+		failureCount: 0,
+		version: 1,
+		deprecated: false,
 	};
 
 	test("uses LLM verdict when model returns JSON", async () => {
@@ -56,7 +59,7 @@ describe("LlmRegressionReplayBackend", () => {
 			model: { provider: "openai", id: "test", api: "openai-completions" } as import("@oh-my-pi/pi-ai").Model,
 		});
 		const backend = new LlmRegressionReplayBackend();
-		const result = await backend.evaluateConventionOnFixture(convention, fixture);
+		const result = await backend.evaluateSkillOnFixture(skill, fixture);
 		expect(result.passed).toBe(false);
 		expect(result.reason).toContain("Unrelated");
 		spy.mockRestore();
@@ -69,7 +72,7 @@ describe("LlmRegressionReplayBackend", () => {
 			model: { provider: "openai", id: "test", api: "openai-completions" } as import("@oh-my-pi/pi-ai").Model,
 		});
 		const backend = new LlmRegressionReplayBackend();
-		const result = await backend.evaluateConventionOnFixture(convention, fixture);
+		const result = await backend.evaluateSkillOnFixture(skill, fixture);
 		expect(result.passed).toBe(true);
 		spy.mockRestore();
 		clearRegressionReplayRuntime();

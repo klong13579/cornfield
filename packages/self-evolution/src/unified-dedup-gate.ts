@@ -1,18 +1,16 @@
 /**
  * Unified Dedup Gate (Phase 3 — §6.8).
  *
- * Single entry point for all extracted items (conventions, skills, raw_memory)
+ * Single entry point for extracted items (skills, raw_memory)
  * before they enter the Cognitive Pipeline. Ensures no semantic overlap
  * across sources.
  */
 import { logger } from "@oh-my-pi/pi-utils";
-import type { Convention } from "./types";
-
 export interface DedupEntry {
 	/** Unique identifier */
 	id: string;
 	/** Source type */
-	source: "convention" | "skill" | "raw_memory";
+	source: "skill" | "raw_memory";
 	/** Semantic content for comparison */
 	content: string;
 	/** Confidence/provenance metadata */
@@ -147,16 +145,3 @@ export function deduplicateEntries(entries: DedupEntry[]): DedupResult {
 	return result;
 }
 
-/**
- * Convenience: convert conventions to dedup entries.
- */
-export function conventionsToDedupEntries(conventions: Convention[]): DedupEntry[] {
-	return conventions.map(c => ({
-		id: c.id,
-		source: "convention" as const,
-		content: c.content,
-		confidence: c.confidence,
-		provenance: c.provenance ?? "inferred",
-		original: c,
-	}));
-}

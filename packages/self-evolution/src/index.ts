@@ -36,13 +36,12 @@ import { type ActivityLogger, closeActivityLogger, getActivityLogger } from "./l
 import { projectEvolutionLog } from "./logging/evolution-log";
 import { SkillManager } from "./manager";
 import { registerMemoryCommands } from "./memory-commands";
-import { migrateLegacyEvolutionPathsIfNeeded } from "./migrate-paths";
 import { buildNudgeContextUserMessage } from "./nudge-context-injector";
 import { NudgeDeliverer } from "./nudge-deliverer";
 import { NudgeEffectivenessTracker } from "./nudge-effectiveness";
 import { persistNudgeRecord } from "./nudge-persist";
 import { crossSessionNudgeToNudge, NudgeSuppressionCache } from "./nudge-suppression";
-import { getMemoryRoot, getUnifiedSkillsDir, resolveEvolutionProjectionDir } from "./paths";
+import { getMemoryRoot, getUnifiedSkillsDir, resolveEvolutionProjectionDir, resolveGlobalStoreFromFlag } from "./paths";
 import { projectLearnings } from "./projection/learnings";
 import { projectSystemDiagnosis } from "./projection/system-diagnosis";
 import { hydrateSessionTraceFromJsonlIfRicher } from "./regression/backfill-traces";
@@ -85,6 +84,7 @@ import { resolveBackgroundModel } from "./utils/background-model";
 import { setupSkillsWatcher } from "./watcher";
 import { WorkflowMiner } from "./workflow-miner";
 
+export { DEFAULT_EVOLUTION_GLOBAL_STORE, resolveGlobalStoreFromFlag } from "./paths";
 export type { SelfEvolutionFlags };
 
 export function parseFlags(api: ExtensionAPI): SelfEvolutionFlags {
@@ -98,7 +98,7 @@ export function parseFlags(api: ExtensionAPI): SelfEvolutionFlags {
 		llmRerank: api.getFlag("self-evolution-llm-rerank") !== false,
 		enableVersioning: api.getFlag("self-evolution-enable-versioning") !== false,
 		enableActivityLog: api.getFlag("self-evolution-enable-activity-log") !== false,
-		globalStore: api.getFlag("self-evolution-global-store") === true,
+		globalStore: resolveGlobalStoreFromFlag(api.getFlag.bind(api)),
 		regressionReplayBackend: parseRegressionReplayBackendKind(api.getFlag("self-evolution-regression-replay")),
 		admissionReclassifyInterval: Math.max(
 			1,
@@ -151,9 +151,13 @@ export const createSelfEvolutionExtension: ExtensionFactory = api => {
 	});
 	api.registerFlag("self-evolution-global-store", {
 		type: "boolean",
+		default: true,
+		description: "Global user store (default): ~/.omp/self-evolution + encoded memory under ~/.omp/agent/memories/",
+	});
+	api.registerFlag("self-evolution-project-store", {
+		type: "boolean",
 		default: false,
-		description:
-			"Legacy: use ~/.omp/self-evolution + encoded memory paths. Default is per-project <cwd>/.omp/memory|evolution|skills",
+		description: "Per-project store: <cwd>/.omp/memory, evolution, and skills instead of ~/.omp/self-evolution",
 	});
 	api.registerFlag("self-evolution-regression-replay", {
 		type: "string",
@@ -220,15 +224,6 @@ export const createSelfEvolutionExtension: ExtensionFactory = api => {
 	let benefitAdmissionRefreshed = false;
 	let regressionReplayBackend: RegressionReplayBackend | undefined;
 	let admissionSessionOrdinal = 0;
-	const pathsMigratedKeys = new Set<string>();
-
-	async function ensurePathsMigrated(cwd: string): Promise<void> {
-		const activeFlags = flags ?? parseFlags(api);
-		const key = `${cwd}\0${activeFlags.globalStore}`;
-		if (pathsMigratedKeys.has(key)) return;
-		pathsMigratedKeys.add(key);
-		await migrateLegacyEvolutionPathsIfNeeded(cwd, getAgentDir(), activeFlags.globalStore);
-	}
 
 	function _regressionReplayBackend(): RegressionReplayBackend {
 		if (!regressionReplayBackend) {
@@ -505,7 +500,6 @@ export const createSelfEvolutionExtension: ExtensionFactory = api => {
 
 	api.on("agent_start", async (event, ctx) => {
 		try {
-			await ensurePathsMigrated(ctx.cwd);
 			_ensureInit(ctx.cwd);
 			recorder!.seedBackgroundModel(resolveBackgroundModel(ctx));
 			recorder!.onAgentStart(event, ctx);
@@ -620,7 +614,6 @@ export const createSelfEvolutionExtension: ExtensionFactory = api => {
 	// ── Cognitive Pipeline: inject context before each LLM call ──
 	api.on("context", async (event, _ctx) => {
 		try {
-			await ensurePathsMigrated(_ctx.cwd);
 			_ensureInit(_ctx.cwd);
 
 			if (flags.enableNudgeContextInjection) {
@@ -682,7 +675,6 @@ export const createSelfEvolutionExtension: ExtensionFactory = api => {
 
 	api.on("agent_end", async (_event, ctx) => {
 		try {
-			await ensurePathsMigrated(ctx.cwd);
 			_ensureInit(ctx.cwd);
 			let trace = recorder?.onAgentEnd(_event);
 			if (!trace) return;
@@ -942,12 +934,8 @@ export const createSelfEvolutionExtension: ExtensionFactory = api => {
 					skillStore,
 					skillEffectivenessStore,
 					populationStore,
-					fixtureStore: regressionFixtureStore,
-					trialStore: regressionTrialStore,
-					replayBackend: _regressionReplayBackend(),
 					regressionReplayBackend: flags.regressionReplayBackend,
 					sessionOrdinal: admissionSessionOrdinal,
-					admissionReclassifyInterval: flags.admissionReclassifyInterval,
 				});
 				if (admission.skillsDeprecated > 0) {
 					logger.debug("Session benefit admission refresh", admission);
@@ -975,7 +963,6 @@ export const createSelfEvolutionExtension: ExtensionFactory = api => {
 
 	api.on("before_agent_start", async (event, ctx) => {
 		try {
-			await ensurePathsMigrated(ctx.cwd);
 			_ensureInit(ctx.cwd);
 			await _ensureBenefitAdmissionRefresh();
 
@@ -1053,7 +1040,6 @@ export const createSelfEvolutionExtension: ExtensionFactory = api => {
 				profile: profile ?? undefined,
 			});
 			const relevantSkills = await _retrieveRelevantSkills(event.prompt);
-			const conventions: import("./types").Convention[] = [];
 			const learnings = learningStore ? await learningStore.listForInjection(ctx.cwd, 8) : [];
 
 			let memorySummary: string | undefined;
@@ -1070,7 +1056,6 @@ export const createSelfEvolutionExtension: ExtensionFactory = api => {
 			if (
 				episodes.length === 0 &&
 				relevantSkills.length === 0 &&
-				conventions.length === 0 &&
 				learnings.length === 0 &&
 				!memorySummary &&
 				!profile &&
@@ -1097,7 +1082,6 @@ export const createSelfEvolutionExtension: ExtensionFactory = api => {
 			if (injectionFormatter) {
 				injection = injectionFormatter.formatInjection(
 					episodes,
-					conventions,
 					relevantSkills,
 					profile ?? undefined,
 					persona ?? undefined,
@@ -1130,7 +1114,6 @@ export const createSelfEvolutionExtension: ExtensionFactory = api => {
 				sessionId: ctx.sessionManager.getSessionId(),
 				episodeIds: episodes.map(e => e.episode.id),
 				skillNames: relevantSkills.map(s => s.name),
-				conventionCount: conventions.length,
 				learningCount: learnings.length,
 				tokenCount: Math.ceil(injection.length / 4),
 				intent: intentResult?.intent,

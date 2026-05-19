@@ -1,12 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import type { Convention } from "../src/types";
-import { conventionsToDedupEntries, type DedupEntry, deduplicateEntries } from "../src/unified-dedup-gate";
+import { type DedupEntry, deduplicateEntries } from "../src/unified-dedup-gate";
 
 describe("UnifiedDedupGate", () => {
 	function makeEntry(overrides: Partial<DedupEntry> = {}): DedupEntry {
 		return {
 			id: overrides.id ?? "test-1",
-			source: overrides.source ?? "convention",
+			source: overrides.source ?? "skill",
 			content: overrides.content ?? "use async await",
 			confidence: overrides.confidence ?? 80,
 			provenance: overrides.provenance ?? "inferred",
@@ -83,28 +82,5 @@ describe("UnifiedDedupGate", () => {
 		];
 		const result = deduplicateEntries(entries);
 		expect(result.conflicts.length).toBeGreaterThanOrEqual(1);
-	});
-});
-
-describe("conventionsToDedupEntries", () => {
-	test("converts conventions to dedup entries", () => {
-		const conventions: Convention[] = [
-			{
-				id: "c1",
-				type: "negative_rule",
-				content: "do not use console.log",
-				sourceEpisodeId: "ep1",
-				confidence: 90,
-				timesApplied: 3,
-				timesViolated: 0,
-				createdAt: Date.now(),
-				lastSeenAt: Date.now(),
-				provenance: "user_stated",
-			},
-		];
-		const entries = conventionsToDedupEntries(conventions);
-		expect(entries).toHaveLength(1);
-		expect(entries[0]!.source).toBe("convention");
-		expect(entries[0]!.provenance).toBe("user_stated");
 	});
 });

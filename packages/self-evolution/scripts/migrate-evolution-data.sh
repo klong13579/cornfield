@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Migrate legacy OMP evolution + memory artifacts into <repo>/.omp/{memory,evolution,skills}
+# Migrate global user-store OMP evolution + memory artifacts into <repo>/.omp/{memory,evolution,skills}
 # and merge memory_* rows from ~/.omp/agent/agent.db into project evolution.db
 set -euo pipefail
 
@@ -63,7 +63,7 @@ PROJ_SKILLS="${PROJ_OMP}/skills"
 DEST_DB="${PROJ_EVOLUTION}/evolution.db"
 
 echo "Repo: ${REPO_ROOT}"
-echo "Encoded legacy key: ${ENCODED}"
+echo "Encoded global memory key: ${ENCODED}"
 
 mkdir -p "$PROJ_MEMORY" "$PROJ_EVOLUTION" "$PROJ_SKILLS"
 

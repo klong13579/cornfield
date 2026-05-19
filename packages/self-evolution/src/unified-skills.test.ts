@@ -102,8 +102,8 @@ From unified dir.
 		tempCwd = await fs.mkdtemp("/tmp/unified-skills-cwd-");
 		setAgentDir(tempAgentDir);
 
-		const { resolveLegacyMemoryRoot } = await import("./paths");
-		const legacyDir = path.join(resolveLegacyMemoryRoot(tempAgentDir, tempCwd), "skills", "legacy-skill");
+		const { resolveGlobalMemoryRoot } = await import("./paths");
+		const legacyDir = path.join(resolveGlobalMemoryRoot(tempAgentDir, tempCwd), "skills", "legacy-skill");
 		await fs.mkdir(legacyDir, { recursive: true });
 		await Bun.write(path.join(legacyDir, "SKILL.md"), "Legacy playbook content.\n");
 

@@ -449,7 +449,7 @@ export function formatAuditReport(report: AuditReport): string {
 	lines.push(`- Meaningful (≥2 occurrences): ${report.workflows.meaningfulPatterns}`);
 	lines.push("");
 
-	lines.push("## Conventions (legacy)");
+	lines.push("## Conventions (V2 table removed)");
 	lines.push(`- Total: ${report.conventions.total}`);
 	for (const [type, count] of Object.entries(report.conventions.byType)) {
 		lines.push(`  - ${type}: ${count}`);

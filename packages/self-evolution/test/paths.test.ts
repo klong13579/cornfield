@@ -5,8 +5,8 @@ import * as path from "node:path";
 import {
 	getMemoryRoot,
 	resolveEvolutionPathLayout,
-	resolveLegacyGlobalEvolutionDir,
-	resolveLegacyMemoryRoot,
+	resolveGlobalEvolutionDir,
+	resolveGlobalMemoryRoot,
 	resolveProjectEvolutionDir,
 	resolveProjectMemoryDir,
 	resolveProjectSkillsDir,
@@ -36,24 +36,32 @@ describe("evolution paths", () => {
 		expect(layout.skillsDir).toBe(path.join(cwd, ".omp", "skills"));
 	});
 
-	it("uses legacy home layout when globalStore is true", () => {
-		tempDir = path.join(os.tmpdir(), `evolution-paths-legacy-${Date.now()}`);
+	it("uses global user layout when globalStore is true", () => {
+		tempDir = path.join(os.tmpdir(), `evolution-paths-global-${Date.now()}`);
 		const cwd = path.join(tempDir, "repo");
 		const agentDir = path.join(tempDir, "agent");
 		const layout = resolveEvolutionPathLayout(cwd, true, agentDir);
 
 		expect(layout.scope).toBe("user");
-		expect(layout.evolutionDir).toBe(resolveLegacyGlobalEvolutionDir());
-		expect(layout.memoryDir).toBe(resolveLegacyMemoryRoot(agentDir, cwd));
-		expect(layout.dbPath).toBe(path.join(resolveLegacyGlobalEvolutionDir(), "evolution.db"));
+		expect(layout.evolutionDir).toBe(resolveGlobalEvolutionDir());
+		expect(layout.memoryDir).toBe(resolveGlobalMemoryRoot(agentDir, cwd));
+		expect(layout.dbPath).toBe(path.join(resolveGlobalEvolutionDir(), "evolution.db"));
 	});
 
-	it("getMemoryRoot defaults to project memory dir", () => {
+	it("getMemoryRoot defaults to global user memory dir", () => {
 		tempDir = path.join(os.tmpdir(), `evolution-paths-mem-${Date.now()}`);
 		const cwd = path.join(tempDir, "repo");
 		const agentDir = path.join(tempDir, "agent");
 
-		expect(getMemoryRoot(agentDir, cwd)).toBe(resolveProjectMemoryDir(cwd));
+		expect(getMemoryRoot(agentDir, cwd)).toBe(resolveGlobalMemoryRoot(agentDir, cwd));
+	});
+
+	it("getMemoryRoot uses project memory when globalStore is false", () => {
+		tempDir = path.join(os.tmpdir(), `evolution-paths-mem-proj-${Date.now()}`);
+		const cwd = path.join(tempDir, "repo");
+		const agentDir = path.join(tempDir, "agent");
+
+		expect(getMemoryRoot(agentDir, cwd, { globalStore: false })).toBe(resolveProjectMemoryDir(cwd));
 	});
 
 	it("resolveUserEvolutionDir is under agent dir not project", () => {

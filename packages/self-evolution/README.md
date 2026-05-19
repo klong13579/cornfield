@@ -131,7 +131,7 @@ The self-evolution package transforms the agent from a passive executor into an 
 | `nudge_history` | Cross-session nudge records |
 | `stats` | System counters |
 
-**Legacy global layout** (opt-in `--self-evolution-global-store`): `~/.omp/self-evolution/` plus encoded memory under `~/.omp/agent/memories/--encoded-cwd--/`. On first session, empty project dirs are auto-filled from legacy paths when possible (`migrate-paths.ts`).
+**Default (global user store)**: `~/.omp/self-evolution/` plus encoded memory under `~/.omp/agent/memories/--encoded-cwd--/`. **Per-project layout** (opt-in `--self-evolution-project-store`): `<cwd>/.omp/{memory,evolution,skills}`. To copy global-store data into a repo tree, run `packages/self-evolution/scripts/migrate-evolution-data.sh <repo>`.
 
 ### Migrating from older installs
 
@@ -174,7 +174,8 @@ Flags passed via CLI or config:
 | `--self-evolution-llm-rerank` | `true` | Use LLM to rerank episodes |
 | `--self-evolution-enable-versioning` | `true` | Enable skill version snapshots |
 | `--self-evolution-enable-activity-log` | `true` | Enable JSONL activity logging |
-| `--self-evolution-global-store` | `false` | Legacy: shared `~/.omp/self-evolution` + encoded agent memories |
+| `--self-evolution-global-store` | `true` | Global user store: `~/.omp/self-evolution` + encoded agent memories (default) |
+| `--self-evolution-project-store` | `false` | Per-project `<cwd>/.omp/memory`, `evolution`, `skills` |
 
 ## API
 

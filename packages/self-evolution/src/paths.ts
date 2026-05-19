@@ -1,13 +1,23 @@
 /**
  * Canonical filesystem layout for OMP evolution (memory + self-evolution).
  *
- * - **Project scope** (default): `<cwd>/.omp/memory`, `evolution`, `skills`
- * - **User scope** (legacy `globalStore`): `~/.omp/self-evolution` + encoded memory under agent dir
+ * - **User scope** (default): `~/.omp/self-evolution` + encoded memory under agent dir
+ * - **Project scope** (`--self-evolution-project-store`): `<cwd>/.omp/memory`, `evolution`, `skills`
  * - **User evolution utilities**: `~/.omp/agent/evolution` (fit / cross-project; not mixed with project dirs)
  */
 import * as os from "node:os";
 import * as path from "node:path";
 import { getAgentDir, getMemoriesDir, getProjectAgentDir } from "@oh-my-pi/pi-utils";
+
+/** Default: user-level `~/.omp/self-evolution` + encoded memory paths. */
+export const DEFAULT_EVOLUTION_GLOBAL_STORE = true;
+
+export function resolveGlobalStoreFromFlag(getFlag: (name: string) => boolean | string | undefined): boolean {
+	if (getFlag("self-evolution-project-store") === true) {
+		return false;
+	}
+	return getFlag("self-evolution-global-store") !== false;
+}
 
 export type EvolutionPathScope = "project" | "user";
 
@@ -50,27 +60,28 @@ function userHomeDir(): string {
 	return fromEnv && fromEnv.length > 0 ? fromEnv : os.homedir();
 }
 
-/** @deprecated Legacy global store at ~/.omp/self-evolution */
-export function resolveLegacyGlobalEvolutionDir(): string {
+/** Global (user-level) evolution root at `~/.omp/self-evolution`. */
+export function resolveGlobalEvolutionDir(): string {
 	return path.join(userHomeDir(), ".omp", "self-evolution");
 }
 
-export function encodeProjectPathForLegacyMemory(cwd: string): string {
+/** Encode `cwd` for per-project memory under `~/.omp/agent/memories/`. */
+export function encodeProjectPathForGlobalMemory(cwd: string): string {
 	return `--${cwd.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`;
 }
 
-/** @deprecated Legacy per-project memory under ~/.omp/agent/memories/... */
-export function resolveLegacyMemoryRoot(agentDir: string, cwd: string): string {
+/** Global-store memory root: encoded path under agent `memories/`. */
+export function resolveGlobalMemoryRoot(agentDir: string, cwd: string): string {
 	const agent = agentDir ?? getAgentDir();
-	const encoded = encodeProjectPathForLegacyMemory(cwd);
+	const encoded = encodeProjectPathForGlobalMemory(cwd);
 	const flat = path.join(agent, "memories", encoded);
 	const _statePath = path.join(getMemoriesDir(agentDir), encoded);
 	return flat;
 }
 
-/** Prefer flat `memories/--encoded--` (older layout) over `memories/state/--encoded--`. */
-export function resolveLegacyMemoryRootCandidates(agentDir: string, cwd: string): string[] {
-	const encoded = encodeProjectPathForLegacyMemory(cwd);
+/** Prefer flat `memories/--encoded--` over `memories/state/--encoded--` when both exist. */
+export function resolveGlobalMemoryRootCandidates(agentDir: string, cwd: string): string[] {
+	const encoded = encodeProjectPathForGlobalMemory(cwd);
 	const agent = agentDir ?? getAgentDir();
 	const flat = path.join(agent, "memories", encoded);
 	const statePath = path.join(getMemoriesDir(agentDir), encoded);
@@ -79,8 +90,8 @@ export function resolveLegacyMemoryRootCandidates(agentDir: string, cwd: string)
 
 export function resolveEvolutionPathLayout(cwd: string, globalStore?: boolean, agentDir?: string): EvolutionPathLayout {
 	if (globalStore) {
-		const root = resolveLegacyGlobalEvolutionDir();
-		const mem = resolveLegacyMemoryRoot(agentDir ?? getAgentDir(), cwd);
+		const root = resolveGlobalEvolutionDir();
+		const mem = resolveGlobalMemoryRoot(agentDir ?? getAgentDir(), cwd);
 		return {
 			scope: "user",
 			memoryDir: mem,
@@ -102,7 +113,7 @@ export function resolveEvolutionPathLayout(cwd: string, globalStore?: boolean, a
 	};
 }
 
-/** Evolution DB + projection root (project `.omp/evolution` by default). */
+/** Evolution DB + projection root (user `~/.omp/self-evolution` by default). */
 export function resolveEvolutionRoot(cwd: string, globalStore?: boolean): string {
 	return resolveEvolutionPathLayout(cwd, globalStore).evolutionDir;
 }
@@ -111,10 +122,10 @@ export function resolveEvolutionProjectionDir(cwd: string, globalStore?: boolean
 	return resolveEvolutionRoot(cwd, globalStore);
 }
 
-export function getUnifiedSkillsDir(cwd: string, globalStore = false): string {
+export function getUnifiedSkillsDir(cwd: string, globalStore = DEFAULT_EVOLUTION_GLOBAL_STORE): string {
 	return resolveEvolutionPathLayout(cwd, globalStore).skillsDir;
 }
 
 export function getMemoryRoot(agentDir: string, cwd: string, options?: { globalStore?: boolean }): string {
-	return resolveEvolutionPathLayout(cwd, options?.globalStore ?? false, agentDir).memoryDir;
+	return resolveEvolutionPathLayout(cwd, options?.globalStore ?? DEFAULT_EVOLUTION_GLOBAL_STORE, agentDir).memoryDir;
 }

@@ -1,17 +1,17 @@
 import { describe, expect, test } from "bun:test";
 import {
-	containsLegacyEvolutionContent,
+	containsV2EvolutionContent,
 	sanitizeConsolidatedMemoryMd,
 	sanitizeConsolidatedMemorySummary,
 } from "../../src/memory/consolidation-v3";
 
 describe("consolidation-v3 sanitize", () => {
-	test("detects legacy convention extractor text", () => {
-		expect(containsLegacyEvolutionContent("ConventionExtractor.extract()")).toBe(true);
-		expect(containsLegacyEvolutionContent("Use Bun for tests.")).toBe(false);
+	test("detects V2 convention extractor text", () => {
+		expect(containsV2EvolutionContent("ConventionExtractor.extract()")).toBe(true);
+		expect(containsV2EvolutionContent("Use Bun for tests.")).toBe(false);
 	});
 
-	test("strips legacy sections and appends V3 block", () => {
+	test("strips V2 sections and appends V3 block", () => {
 		const input = `# Doc
 
 ## OMP Evolution System
@@ -29,7 +29,7 @@ describe("consolidation-v3 sanitize", () => {
 		expect(out).toContain("## Testing");
 	});
 
-	test("replaces legacy memory_summary with derive from memory_md", () => {
+	test("replaces V2-tainted memory_summary with derive from memory_md", () => {
 		const md = sanitizeConsolidatedMemoryMd("# Hi\n\n## Self-Evolution System (V3)\n- learnings\n");
 		const summary = sanitizeConsolidatedMemorySummary(
 			"OMP evolution pipeline extracts conventions (confidence>=80)",

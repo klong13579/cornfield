@@ -89,25 +89,10 @@ export interface NudgeHistoryStore {
 	listUnscoredInjectedForSession(sessionId: string): Promise<import("../types").NudgeRecord[]>;
 }
 
-export interface ConventionStore {
-	insert(convention: import("../types").Convention): Promise<void>;
-	get(id: string): Promise<import("../types").Convention | undefined>;
-	listAll(): Promise<import("../types").Convention[]>;
-	listByType(type: string): Promise<import("../types").Convention[]>;
-	updateStats(id: string, applied: boolean, violated: boolean): Promise<void>;
-	updateLifecycleState(id: string, lifecycleState: import("../types").ConventionLifecycleState): Promise<void>;
-}
-
 export interface DetailedOutcomeStore {
 	record(outcome: import("../types").InjectionOutcome): Promise<void>;
 	get(episodeId: string): Promise<import("../types").InjectionOutcome | undefined>;
 	listRecent(limit: number): Promise<import("../types").InjectionOutcome[]>;
-}
-
-export interface ConventionFeedbackStore {
-	record(feedback: import("../types").ConventionFeedback): Promise<void>;
-	getByConvention(conventionId: string, limit: number): Promise<import("../types").ConventionFeedback[]>;
-	getViolations(since: number): Promise<import("../types").ConventionViolation[]>;
 }
 
 export interface FitScoreStore {

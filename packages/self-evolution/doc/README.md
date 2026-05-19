@@ -85,7 +85,8 @@ This plugin is bundled with `pi-coding-agent` and loads automatically as an inli
 | `--no-self-evolution-llm-rerank` | — | — | Use keyword-only retrieval (no LLM rerank) |
 | `--no-self-evolution-enable-versioning` | — | — | Disable skill version snapshots |
 | `--no-self-evolution-enable-activity-log` | — | — | Disable JSONL activity logging |
-| `--self-evolution-global-store` | boolean | `false` | Legacy: use `~/.omp/self-evolution` instead of `<repo>/.omp/` |
+| `--self-evolution-global-store` | boolean | `true` | Global user store: `~/.omp/self-evolution` (default) |
+| `--self-evolution-project-store` | boolean | `false` | Per-repo `<cwd>/.omp/memory`, `evolution`, `skills` |
 
 Example:
 
@@ -191,7 +192,7 @@ Logical groupings inside the single database file:
 
 Session transcripts (JSONL) stay in `~/.omp/agent/sessions/`. Auth and CLI settings use `~/.omp/agent/agent.db` — memory/evolution rows are **not** stored there anymore.
 
-**Legacy:** `--self-evolution-global-store` uses `~/.omp/self-evolution/` and encoded paths under `~/.omp/agent/memories/`. First run can copy into the project tree when `.omp/` is empty.
+**Global user store (default):** `~/.omp/self-evolution/` and encoded paths under `~/.omp/agent/memories/`. Use `--self-evolution-project-store` for `<repo>/.omp/`; `migrate-evolution-data.sh` copies global data into a project tree when needed.
 
 ### One-time migration
 
@@ -239,7 +240,7 @@ Log rotates automatically at 10MB (keeps 3 files).
 
 **Default DB path:** `<repo>/.omp/evolution/evolution.db`
 
-**Legacy global path** (only with `--self-evolution-global-store`): `~/.omp/self-evolution/evolution.db`
+**Global user store path** (default): `~/.omp/self-evolution/evolution.db`
 
 Use `sqlite3` from the repo root (column names must match current schema):
 
@@ -292,7 +293,6 @@ sqlite3 -header -column "$DB" \
 | `feedback-tracker.ts` | Episode injection outcome tracking |
 | `effectiveness-analyzer.ts` | Multi-dimensional injection outcome scoring (6 signals) |
 | `session-learner.ts` | V3 per-session learning extraction (replaces convention extractor) |
-| `convention-compliance.ts` | Heuristic convention adherence checking |
 | `nudge-detector.ts` | Real-time inefficiency pattern detection with causal attribution |
 | `nudge-deliverer.ts` | In-session nudge delivery with cooldown |
 | `trace-analyzer.ts` | Causal tool-chain diagnosis, read failure classification |

@@ -136,8 +136,8 @@ export function startMemoryStartupTask(options: {
 
 	const cwd = session.sessionManager.getCwd();
 	try {
-		getMemoryDb(cwd, false);
-		releaseMemoryDb(cwd, false);
+		getMemoryDb(cwd);
+		releaseMemoryDb(cwd);
 	} catch (error) {
 		logger.debug("Memory startup skipped: state DB unavailable", { error: String(error) });
 		return;
@@ -181,11 +181,11 @@ export async function buildMemoryToolDeveloperInstructions(
  * Clear all persisted memory state and generated artifacts.
  */
 export async function clearMemoryData(agentDir: string, cwd: string): Promise<void> {
-	const db = getMemoryDb(cwd, false);
+	const db = getMemoryDb(cwd);
 	try {
 		clearMemoryDataInDb(db);
 	} finally {
-		releaseMemoryDb(cwd, false);
+		releaseMemoryDb(cwd);
 	}
 	await fs.rm(getMemoryRoot(agentDir, cwd), { recursive: true, force: true });
 }
@@ -215,11 +215,11 @@ export async function runMemoryMaintenanceOnce(options: {
  * Force-enqueue global consolidation maintenance work.
  */
 export function enqueueMemoryConsolidation(_agentDir: string, cwd: string, sourceUpdatedAt = unixNow()): void {
-	const db = getMemoryDb(cwd, false);
+	const db = getMemoryDb(cwd);
 	try {
 		enqueueGlobalWatermark(db, sourceUpdatedAt, cwd, { forceDirtyWhenNotAdvanced: true });
 	} finally {
-		releaseMemoryDb(cwd, false);
+		releaseMemoryDb(cwd);
 	}
 }
 
@@ -244,7 +244,7 @@ async function runPhase1(options: {
 }): Promise<void> {
 	const { session, modelRegistry, agentDir, config } = options;
 	const cwd = session.sessionManager.getCwd();
-	const db = getMemoryDb(cwd, false);
+	const db = getMemoryDb(cwd);
 	const nowSec = unixNow();
 	const workerId = `memory-${process.pid}`;
 	const memoryRoot = getMemoryRoot(agentDir, cwd);
@@ -364,7 +364,7 @@ async function runPhase1(options: {
 			usage: stats.usage,
 		});
 	} finally {
-		releaseMemoryDb(cwd, false);
+		releaseMemoryDb(cwd);
 	}
 }
 
@@ -377,7 +377,7 @@ async function runPhase2(options: {
 }): Promise<void> {
 	const { session, modelRegistry, agentDir, config } = options;
 	const cwd = session.sessionManager.getCwd();
-	const db = getMemoryDb(cwd, false);
+	const db = getMemoryDb(cwd);
 	const nowSec = unixNow();
 	const workerId = `memory-${process.pid}`;
 	const memoryRoot = getMemoryRoot(agentDir, cwd);
@@ -485,7 +485,7 @@ async function runPhase2(options: {
 			clearInterval(heartbeat);
 		}
 	} finally {
-		releaseMemoryDb(cwd, false);
+		releaseMemoryDb(cwd);
 	}
 }
 
@@ -1120,7 +1120,9 @@ function adaptModelForDashScopeCodingKey(model: Model, apiKey: string, modelRegi
 		return model;
 	}
 	const fallback =
-		modelRegistry.getAvailable().find(m => m.provider === "alibaba-coding-plan" && m.id === SK_SP_MEMORY_LLM_MODEL_ID) ??
+		modelRegistry
+			.getAvailable()
+			.find(m => m.provider === "alibaba-coding-plan" && m.id === SK_SP_MEMORY_LLM_MODEL_ID) ??
 		modelRegistry.getAvailable().find(m => m.provider === "alibaba-coding-plan");
 	const base = fallback ?? model;
 	if (
@@ -1183,7 +1185,7 @@ function loadMemoryConfig(settings: Settings): MemoryRuntimeConfig {
 	};
 }
 
-export { encodeProjectPathForLegacyMemory as encodeProjectPath, getMemoryRoot } from "../paths";
+export { encodeProjectPathForGlobalMemory as encodeProjectPath, getMemoryRoot } from "../paths";
 export { closeMemoryDb, getMemoryDb, openMemoryDb, releaseMemoryDb, resolveMemoryDbPath } from "./storage";
 export { ensureMemorySummaryFromMemory } from "./summary";
 

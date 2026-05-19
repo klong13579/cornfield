@@ -55,7 +55,7 @@ export async function loadUnifiedSkillsForInjection(
 	skillStore: SkillStore,
 	options?: { globalStore?: boolean },
 ): Promise<UnifiedSkill[]> {
-	const globalStore = options?.globalStore ?? false;
+	const globalStore = options?.globalStore ?? true;
 	const memoryRoot = getMemoryRoot(getAgentDir(), cwd);
 	const skillsDir = await ensureUnifiedSkillStorage(cwd, memoryRoot, globalStore);
 

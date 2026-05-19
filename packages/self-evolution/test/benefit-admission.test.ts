@@ -1,58 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import {
-	classifyConventionLifecycle,
 	formatProfileAvgErrorsPerSession,
-	isConventionEligibleForInjection,
 	isHighAvgErrorsPerSession,
 	isSkillEligibleForInjection,
 	shouldDeprecateSkillFromInjectionStats,
 	skillHelpRate,
 } from "../src/benefit-admission";
-import type { Convention, SkillEffectiveness, UserProfile } from "../src/types";
-
-function convention(overrides: Partial<Convention> = {}): Convention {
-	return {
-		id: "c1",
-		type: "preference",
-		content: "test",
-		sourceEpisodeId: "ep1",
-		confidence: 80,
-		timesApplied: 0,
-		timesViolated: 0,
-		createdAt: Date.now(),
-		lastSeenAt: Date.now(),
-		lifecycleState: "candidate",
-		...overrides,
-	};
-}
-
-describe("benefit-admission conventions", () => {
-	test("new convention stays candidate until observed", () => {
-		expect(classifyConventionLifecycle(convention({ confidence: 100 }))).toBe("candidate");
-		expect(isConventionEligibleForInjection(convention({ confidence: 100 }))).toBe(false);
-	});
-
-	test("eligible by stats stays candidate until regression keep", () => {
-		const c = convention({
-			lifecycleState: "candidate",
-			timesApplied: 6,
-			timesViolated: 4,
-			confidence: 70,
-		});
-		expect(classifyConventionLifecycle(c)).toBe("candidate");
-		const active = { ...c, lifecycleState: "active" as const };
-		expect(isConventionEligibleForInjection(active)).toBe(true);
-	});
-
-	test("archived when observed but low compliance", () => {
-		const c = convention({
-			timesApplied: 2,
-			timesViolated: 8,
-			confidence: 100,
-		});
-		expect(classifyConventionLifecycle(c)).toBe("archived");
-	});
-});
+import type { SkillEffectiveness, UserProfile } from "../src/types";
 
 describe("benefit-admission skills", () => {
 	test("omp-like zero help fails injection eligibility", () => {

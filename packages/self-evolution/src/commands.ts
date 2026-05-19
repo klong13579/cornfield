@@ -202,7 +202,7 @@ const EVOLUTION_SUBCOMMANDS = [
 	{ name: "log", description: "Show evolution event timeline" },
 	{ name: "nudges", description: "Show recent nudges" },
 	{ name: "stuck", description: "Show or acknowledge evolution deadlocks needing human help" },
-	{ name: "sync-skills", description: "Export skills to <cwd>/.omp/skills/ (or legacy global store)" },
+	{ name: "sync-skills", description: "Export skills to <cwd>/.omp/skills/ (or global user store)" },
 	{ name: "backfill-traces", description: "Backfill session_traces from omp session JSONL for regression replay" },
 	{ name: "refresh-admission", description: "Re-run skill benefit admission (+ skill regression when configured)" },
 	{ name: "regression", description: "List recent regression trials (keep/discard audit)" },
@@ -402,7 +402,7 @@ async function handleClear(stores: CommandStores, ctx: ExtensionCommandContext):
 	try {
 		const globalStore = stores.flags().globalStore;
 		const layout = resolveEvolutionPathLayout(ctx.cwd, globalStore, getAgentDir());
-		const scopeLabel = globalStore ? "legacy global store" : "this project";
+		const scopeLabel = globalStore ? "global user store" : "this project";
 		const confirmed = await ctx.ui.confirm(
 			"Clear project OMP data",
 			`Full reset — deletes memory, evolution DB, and skills:\n${layout.memoryDir}\n${layout.evolutionDir}\n${layout.skillsDir}\n\n(Memory-only clear: /evolution memory clear)\n\nContinue?`,

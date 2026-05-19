@@ -6,7 +6,7 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { getAgentDir, logger } from "@oh-my-pi/pi-utils";
-import { getUnifiedSkillsDir, resolveLegacyMemoryRootCandidates } from "./paths";
+import { getUnifiedSkillsDir, resolveGlobalMemoryRootCandidates } from "./paths";
 import { ensureAgentBodyShape } from "./skill-format";
 import { isValidSkillName } from "./skill-score";
 import { normalizeSkillDescription, validateSkillContent } from "./skill-validation";
@@ -75,20 +75,20 @@ function formatConsolidationMarkdown(name: string, content: string): string {
 }
 
 /**
- * Move legacy memory consolidation layout (memoryRoot/skills/<name>/SKILL.md)
+ * Move nested memory skills layout (memoryRoot/skills/<name>/SKILL.md)
  * into the unified flat directory.
  */
-export async function migrateLegacyMemorySkills(memoryRoot: string, unifiedDir: string): Promise<number> {
-	const legacyDir = path.join(memoryRoot, "skills");
+export async function migrateNestedMemorySkills(memoryRoot: string, unifiedDir: string): Promise<number> {
+	const nestedDir = path.join(memoryRoot, "skills");
 	let migrated = 0;
 
 	try {
-		const entries = await fs.readdir(legacyDir, { withFileTypes: true });
+		const entries = await fs.readdir(nestedDir, { withFileTypes: true });
 		for (const entry of entries) {
 			if (!entry.isDirectory()) continue;
 			if (!isValidSkillName(entry.name)) continue;
 
-			const skillPath = path.join(legacyDir, entry.name, "SKILL.md");
+			const skillPath = path.join(nestedDir, entry.name, "SKILL.md");
 			let content: string;
 			try {
 				content = await Bun.file(skillPath).text();
@@ -107,11 +107,11 @@ export async function migrateLegacyMemorySkills(memoryRoot: string, unifiedDir: 
 		}
 
 		if (entries.length > 0) {
-			await fs.rm(legacyDir, { recursive: true, force: true });
-			logger.debug("Removed legacy memory skills directory after migration", { legacyDir, migrated });
+			await fs.rm(nestedDir, { recursive: true, force: true });
+			logger.debug("Removed nested memory skills directory after migration", { nestedDir, migrated });
 		}
 	} catch {
-		// No legacy directory
+		// No nested skills directory
 	}
 
 	return migrated;
@@ -187,7 +187,7 @@ export async function writeConsolidationSkills(unifiedDir: string, skills: Conso
 export async function importConsolidationSkillsToDb(
 	cwd: string,
 	skills: ConsolidationSkillInput[],
-	globalStore = false,
+	globalStore = true,
 ): Promise<void> {
 	if (skills.length === 0) return;
 
@@ -224,14 +224,14 @@ export async function importConsolidationSkillsToDb(
 	}
 }
 
-export async function ensureUnifiedSkillStorage(cwd: string, memoryRoot: string, globalStore = false): Promise<string> {
+export async function ensureUnifiedSkillStorage(cwd: string, memoryRoot: string, globalStore = true): Promise<string> {
 	const unifiedDir = getUnifiedSkillsDir(cwd, globalStore);
 	await fs.mkdir(unifiedDir, { recursive: true });
-	await migrateLegacyMemorySkills(memoryRoot, unifiedDir);
+	await migrateNestedMemorySkills(memoryRoot, unifiedDir);
 	if (!globalStore) {
-		for (const legacyMemoryRoot of resolveLegacyMemoryRootCandidates(getAgentDir(), cwd)) {
-			if (legacyMemoryRoot === memoryRoot) continue;
-			await migrateLegacyMemorySkills(legacyMemoryRoot, unifiedDir);
+		for (const globalMemoryRoot of resolveGlobalMemoryRootCandidates(getAgentDir(), cwd)) {
+			if (globalMemoryRoot === memoryRoot) continue;
+			await migrateNestedMemorySkills(globalMemoryRoot, unifiedDir);
 		}
 	}
 	return unifiedDir;

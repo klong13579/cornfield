@@ -48,7 +48,6 @@ export interface SessionTrace {
 	nudges?: Nudge[];
 	injectedEpisodeIds?: string[];
 	injectedSkillNames?: string[];
-	injectedConventionIds?: string[];
 	injectedLearningIds?: string[];
 }
 // ============================================================================
@@ -307,17 +306,7 @@ export interface NudgeOutcomeUpdate {
 }
 
 // ============================================================================
-export type ProvenanceLevel = "user_stated" | "implied" | "inferred" | "fallback";
-
-// Convention — project-specific rules extracted from user dialogue (v2.5)
-// ============================================================================
-
-export type ConventionType = "negative_rule" | "positive_rule" | "preference" | "project_fact" | "procedural_rule";
-
-export type ConventionLifecycleState = "candidate" | "active" | "archived";
-
-// ============================================================================
-// Learnings (V3 — replaces conventions for prompt injection)
+// Learnings (V3 prompt injection)
 // ============================================================================
 
 export type LearningKind = "preference" | "fact" | "procedure" | "skill_hint";
@@ -339,34 +328,6 @@ export interface Learning {
 	timesInjected: number;
 	timesHelped: number;
 	timesIgnored: number;
-}
-
-export interface Convention {
-	id: string;
-	type: ConventionType;
-	content: string;
-	sourceEpisodeId: string;
-	confidence: number;
-	timesApplied: number;
-	timesViolated: number;
-	createdAt: number;
-	lastSeenAt: number;
-	provenance?: ProvenanceLevel;
-	lifecycleState?: ConventionLifecycleState;
-}
-
-export interface ConventionFeedback {
-	conventionId: string;
-	sessionId: string;
-	complied: boolean; // true = agent followed, false = violated
-	violationDetails?: string; // what the agent did that violated the rule
-	recordedAt: number;
-}
-
-export interface ConventionViolation {
-	convention: Convention;
-	violationCount: number;
-	lastViolationAt: number;
 }
 
 // ============================================================================
@@ -391,7 +352,7 @@ export type RegressionVerdict = "keep" | "discard" | "pending";
 
 export interface RegressionTrial {
 	id: string;
-	targetType: "convention" | "skill";
+	targetType: "skill";
 	targetId: string;
 	fixtureId: string;
 	verdict: RegressionVerdict;

@@ -12,6 +12,7 @@ import {
 import { Loader, Markdown, padding, Spacer, Text, visibleWidth } from "@oh-my-pi/pi-tui";
 import { formatDuration, Snowflake, setProjectDir } from "@oh-my-pi/pi-utils";
 import { runEvolutionMemorySubcommand } from "@oh-my-pi/self-evolution/evolution-memory";
+import { resolveGlobalStoreFromFlag } from "@oh-my-pi/self-evolution/paths";
 import { $ } from "bun";
 import { reset as resetCapabilities } from "../../capability";
 import { clearClaudePluginRootsCache } from "../../discovery/helpers";
@@ -710,7 +711,8 @@ export class CommandController {
 			return;
 		}
 		const cwd = this.ctx.sessionManager.getCwd();
-		const db = getMemoryDb(cwd, false);
+		const globalStore = resolveGlobalStoreFromFlag(name => runner.getFlagValues().get(name));
+		const db = getMemoryDb(cwd, globalStore);
 		if (!db) {
 			this.ctx.showError("Memory DB not available.");
 			return;
@@ -722,12 +724,12 @@ export class CommandController {
 				db,
 				ctx: cmdCtx,
 				args: argumentText,
-				globalStore: false,
+				globalStore,
 			});
 		} catch (error) {
 			this.ctx.showError(`Memory command failed: ${error instanceof Error ? error.message : String(error)}`);
 		} finally {
-			releaseMemoryDb(cwd, false);
+			releaseMemoryDb(cwd, globalStore);
 		}
 	}
 

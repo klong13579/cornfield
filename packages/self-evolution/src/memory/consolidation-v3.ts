@@ -3,7 +3,7 @@
  */
 import v3EvolutionMemoryBlock from "./prompts/v3-evolution-memory-block.md" with { type: "text" };
 
-const LEGACY_LINE_PATTERNS: RegExp[] = [
+const V2_LINE_PATTERNS: RegExp[] = [
 	/ConventionExtractor/i,
 	/extractConventionsWithLlm/i,
 	/convention_feedback/i,
@@ -18,7 +18,7 @@ const LEGACY_LINE_PATTERNS: RegExp[] = [
 	/confidence\s*>=\s*80.*inject/i,
 ];
 
-function isLegacyEvolutionSectionHeader(line: string): boolean {
+function isV2EvolutionSectionHeader(line: string): boolean {
 	const h = line.trim();
 	if (!/^##\s+/.test(h)) return false;
 	if (/self-evolution|omp evolution|convention extraction/i.test(h)) return true;
@@ -26,19 +26,19 @@ function isLegacyEvolutionSectionHeader(line: string): boolean {
 	return false;
 }
 
-export function containsLegacyEvolutionContent(text: string): boolean {
+export function containsV2EvolutionContent(text: string): boolean {
 	const normalized = text.trim();
 	if (!normalized) return false;
-	return LEGACY_LINE_PATTERNS.some(re => re.test(normalized));
+	return V2_LINE_PATTERNS.some(re => re.test(normalized));
 }
 
-function stripLegacySections(markdown: string): string {
+function stripV2Sections(markdown: string): string {
 	const lines = markdown.split("\n");
 	const out: string[] = [];
 	let skipping = false;
 
 	for (const line of lines) {
-		if (isLegacyEvolutionSectionHeader(line)) {
+		if (isV2EvolutionSectionHeader(line)) {
 			skipping = true;
 			continue;
 		}
@@ -46,7 +46,7 @@ function stripLegacySections(markdown: string): string {
 			skipping = false;
 		}
 		if (skipping) continue;
-		if (LEGACY_LINE_PATTERNS.some(re => re.test(line))) continue;
+		if (V2_LINE_PATTERNS.some(re => re.test(line))) continue;
 		out.push(line);
 	}
 
@@ -61,7 +61,7 @@ function hasV3EvolutionSection(markdown: string): boolean {
 }
 
 export function sanitizeConsolidatedMemoryMd(memoryMd: string): string {
-	let text = stripLegacySections(memoryMd.trim());
+	let text = stripV2Sections(memoryMd.trim());
 	if (!hasV3EvolutionSection(text)) {
 		text = text.length > 0 ? `${text}\n\n${v3EvolutionMemoryBlock.trim()}` : v3EvolutionMemoryBlock.trim();
 	}
@@ -70,7 +70,7 @@ export function sanitizeConsolidatedMemoryMd(memoryMd: string): string {
 
 export function sanitizeConsolidatedMemorySummary(memorySummary: string, sanitizedMemoryMd: string): string {
 	const summary = memorySummary.trim();
-	if (!summary || containsLegacyEvolutionContent(summary)) {
+	if (!summary || containsV2EvolutionContent(summary)) {
 		return deriveSummaryFromMemoryMd(sanitizedMemoryMd);
 	}
 	return `${summary}\n`;

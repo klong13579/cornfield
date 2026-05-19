@@ -21,7 +21,6 @@ export class TraceRecorder {
 
 	#injectedEpisodeIds: string[] = [];
 	#injectedSkillNames: string[] = [];
-	#injectedConventionIds: string[] = [];
 	#injectedLearningIds: string[] = [];
 	#pendingAgentNudges: QueuedAgentNudge[] = [];
 	#deliveredNudgeTypesThisTurn = new Set<string>();
@@ -55,9 +54,6 @@ export class TraceRecorder {
 	}
 	setInjectedSkills(names: string[]): void {
 		this.#injectedSkillNames = names;
-	}
-	setInjectedConventions(ids: string[]): void {
-		this.#injectedConventionIds = ids;
 	}
 	setInjectedLearnings(ids: string[]): void {
 		this.#injectedLearningIds = ids;
@@ -209,11 +205,9 @@ export class TraceRecorder {
 		const result = this.#trace;
 		this.#trace.injectedEpisodeIds = this.#injectedEpisodeIds;
 		this.#trace.injectedSkillNames = this.#injectedSkillNames;
-		this.#trace.injectedConventionIds = this.#injectedConventionIds;
 		this.#trace.injectedLearningIds = this.#injectedLearningIds;
 		this.#injectedSkillNames = [];
 		this.#injectedEpisodeIds = [];
-		this.#injectedConventionIds = [];
 		this.#injectedLearningIds = [];
 		this.#trace = undefined;
 		return result;
@@ -225,7 +219,6 @@ export class TraceRecorder {
 		this.#pendingBackgroundModel = undefined;
 		this.#injectedSkillNames = [];
 		this.#injectedEpisodeIds = [];
-		this.#injectedConventionIds = [];
 		this.#injectedLearningIds = [];
 		this.#pendingAgentNudges = [];
 		this.#deliveredNudgeTypesThisTurn.clear();

@@ -3,19 +3,13 @@
  */
 
 import { logger } from "@oh-my-pi/pi-utils";
-import {
-	applyRegressionVerdict,
-	classifyConventionLifecycle,
-	conventionStatsTier,
-	shouldDeprecateSkillFromInjectionStats,
-} from "./benefit-admission";
+import { shouldDeprecateSkillFromInjectionStats } from "./benefit-admission";
 import { REGRESSION_MAX_FIXTURES } from "./regression/replay";
 import type { RegressionReplayBackend } from "./regression/replay-backend";
 import { createRegressionReplayBackend } from "./regression/replay-backend";
-import { selectFixturesForConvention, selectFixturesForSkill } from "./regression/select-fixtures";
+import { selectFixturesForSkill } from "./regression/select-fixtures";
 import { formatRegressionTrialReason, type ToolChainTrialTag } from "./regression/trial-reason";
 import type {
-	ConventionStore,
 	RegressionFixtureStore,
 	RegressionTrialStore,
 	SkillEffectivenessStore,
@@ -37,62 +31,8 @@ function regressionTrialReason(
 }
 
 export interface BenefitAdmissionRefreshResult {
-	conventionsReclassified: number;
-	conventionsRegressionPromoted: number;
 	skillsDeprecated: number;
 	skillsRegressionBlocked: number;
-}
-
-export interface ReclassifyConventionOptions {
-	conventionStore: ConventionStore;
-	fixtureStore?: RegressionFixtureStore;
-	trialStore?: RegressionTrialStore;
-	replayBackend?: RegressionReplayBackend;
-}
-
-export async function reclassifyConventionLifecycles(
-	opts: ReclassifyConventionOptions,
-): Promise<{ reclassified: number; promoted: number }> {
-	const { conventionStore, fixtureStore, trialStore } = opts;
-	const backend = opts.replayBackend ?? createRegressionReplayBackend("heuristic");
-	let reclassified = 0;
-	let promoted = 0;
-
-	const conventions = await conventionStore.listAll();
-
-	for (const c of conventions) {
-		const tier = conventionStatsTier(c);
-		let next = classifyConventionLifecycle(c);
-
-		if (tier === "eligible" && fixtureStore) {
-			const fixtures = await selectFixturesForConvention(fixtureStore, c, REGRESSION_MAX_FIXTURES);
-			if (fixtures.length > 0) {
-				const gate = await backend.runConventionGate(c, fixtures);
-				next = applyRegressionVerdict(c, gate.verdict);
-				if (trialStore && fixtures[0]) {
-					await trialStore.insert({
-						id: `trial_${Bun.hash(`${c.id}:${gate.verdict}:${Date.now()}`).toString(36)}`,
-						targetType: "convention",
-						targetId: c.id,
-						fixtureId: fixtures[0].id,
-						verdict: gate.verdict,
-						reason: regressionTrialReason(backend, gate.reason),
-						createdAt: Date.now(),
-					});
-				}
-				if (next === "active" && c.lifecycleState !== "active") {
-					promoted++;
-				}
-			}
-		}
-
-		if (next !== (c.lifecycleState ?? "candidate")) {
-			await conventionStore.updateLifecycleState(c.id, next);
-			reclassified++;
-		}
-	}
-
-	return { reclassified, promoted };
 }
 
 const PROMOTION_STATES: SkillPopulationState[] = ["experimental", "graduated"];
@@ -143,17 +83,13 @@ export async function refreshBenefitAdmissionState(opts: {
 	skillEffectivenessStore: SkillEffectivenessStore;
 	populationStore?: SkillPopulationStore;
 }): Promise<BenefitAdmissionRefreshResult> {
-	const { skillStore, skillEffectivenessStore, populationStore } = opts;
-
 	const skillsDeprecated = await deprecateSkillsFromBenefitAdmission({
-		skillStore,
-		skillEffectivenessStore,
-		populationStore,
+		skillStore: opts.skillStore,
+		skillEffectivenessStore: opts.skillEffectivenessStore,
+		populationStore: opts.populationStore,
 	});
 
 	return {
-		conventionsReclassified: 0,
-		conventionsRegressionPromoted: 0,
 		skillsDeprecated,
 		skillsRegressionBlocked: 0,
 	};
@@ -180,37 +116,24 @@ export async function deprecateSkillsFromBenefitAdmission(opts: {
 	return skillsDeprecated;
 }
 
-const HEAVY_REGRESSION_BACKENDS = new Set(["llm", "subagent"]);
-const DEFAULT_HEAVY_RECLASSIFY_INTERVAL = 5;
-
 export interface RefreshAdmissionAfterSessionOptions {
 	skillStore: SkillStore;
 	skillEffectivenessStore: SkillEffectivenessStore;
 	populationStore?: SkillPopulationStore;
-	fixtureStore?: RegressionFixtureStore;
-	trialStore?: RegressionTrialStore;
-	replayBackend?: RegressionReplayBackend;
 	regressionReplayBackend: "heuristic" | "llm" | "subagent";
 	sessionOrdinal: number;
 	admissionReclassifyInterval?: number;
 }
 
-/**
- * Per-session admission maintenance: always deprecate failing skills; reclassify conventions
- * every session for heuristic replay, every N sessions for LLM/sub-agent backends.
- */
+/** Per-session admission maintenance: deprecate skills that fail injection benefit thresholds. */
 export async function refreshAdmissionAfterSessionEnd(
 	opts: RefreshAdmissionAfterSessionOptions,
-): Promise<{ skillsDeprecated: number; conventionsReclassified: number; conventionsPromoted: number }> {
+): Promise<{ skillsDeprecated: number }> {
 	const skillsDeprecated = await deprecateSkillsFromBenefitAdmission({
 		skillStore: opts.skillStore,
 		skillEffectivenessStore: opts.skillEffectivenessStore,
 		populationStore: opts.populationStore,
 	});
 
-	const heavy = HEAVY_REGRESSION_BACKENDS.has(opts.regressionReplayBackend);
-	const interval = heavy ? Math.max(1, opts.admissionReclassifyInterval ?? DEFAULT_HEAVY_RECLASSIFY_INTERVAL) : 1;
-	const _runReclassify = opts.sessionOrdinal % interval === 0;
-
-	return { skillsDeprecated, conventionsReclassified: 0, conventionsPromoted: 0 };
+	return { skillsDeprecated };
 }

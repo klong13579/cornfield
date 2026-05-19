@@ -63,8 +63,8 @@ export function closeEvolutionDb(cwd?: string, globalStore?: boolean): void {
 	}
 }
 
-/** V3: remove legacy convention tables (replaced by `learnings`). */
-function dropLegacyConventionTables(db: Database): void {
+/** V3: remove V2 convention tables (replaced by `learnings`). */
+function dropV2ConventionTables(db: Database): void {
 	const row = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'conventions'").get() as
 		| { name: string }
 		| undefined;
@@ -484,7 +484,7 @@ export function initSchema(db: Database): void {
 	if (!nudgeColNames.has("outcome_recorded_at")) {
 		db.exec(`ALTER TABLE nudge_history ADD COLUMN outcome_recorded_at INTEGER;`);
 	}
-	dropLegacyConventionTables(db);
+	dropV2ConventionTables(db);
 
 	db.exec(`
 		CREATE TABLE IF NOT EXISTS fit_scores (

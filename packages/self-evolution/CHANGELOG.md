@@ -10,6 +10,8 @@
 
 ### Changed
 
+- **Removed V2 dead code**: JSONL `convention-store`, `projection.ts` conventions import/export, `SqliteConventionStore`, convention compliance checker, 4-layer injection formatter path, convention regression replay on `RegressionReplayBackend`; production injection always uses 7-layer formatter.
+- **Default evolution scope is global user store**: memory and evolution DB use `~/.omp/self-evolution` and encoded agent memory paths by default; pass `--self-evolution-project-store` for per-repo `<cwd>/.omp/{memory,evolution,skills}`. Path helpers renamed from `resolveLegacy*` to `resolveGlobal*` (deprecated aliases kept).
 - **V2 convention pipeline removed**: no `ConventionExtractor`, no `--no-self-evolution-v2-writer`, no `/evolution conventions`; admission refresh is skill-only; `backfill-episodes-from-sessions` writes episodes/traces/fixtures + `projectLearnings` only.
 - **`/evolution learnings seed [file]`**: Import pinned learnings from `<project>/.omp/evolution/learnings-seed.json` (see `learnings-seed.example.json`) after `/evolution clear` so the next session has injectable rules without waiting for SessionLearner.
 - **`ensureMemorySummaryFromMemory`**: After memory consolidation, backfill `memory_summary.md` from `MEMORY.md` when the LLM summary is shorter than 200 chars (fixes empty short-term injection).
@@ -17,6 +19,8 @@
 
 ### Removed
 
+- **`Convention` types and injection parameter**: dropped `Convention` / lifecycle / feedback types from `types.ts`; `formatInjection` no longer accepts a conventions array (learnings are the last argument); trace no longer tracks `injectedConventionIds`.
+- **Automatic legacy path migration** (`migrate-paths.ts`): no longer copies `~/.omp/self-evolution` or encoded memory into project `.omp/` on session start; use `scripts/migrate-evolution-data.sh` manually when needed.
 - **V2 writer**: convention L2/L3 extractor, `src/legacy/`, `/evolution conventions`, convention regression on session end, `OMP_BACKFILL_LLM` convention extraction.
 - **SQLite `conventions` / `convention_feedback`**: dropped on `initSchema`; escalation and daily report use `learnings` only; audit tolerates missing legacy table.
 - Dev/ops scripts superseded by `/evolution` subcommands and project-local DB: `evolution-db-inspect.sh`, `run-evolution-command-test.ts`, `repair-and-backfill-traces.ts`, `migrate-to-global.ts`, `watch-omp-evolution-test.sh`.
@@ -25,12 +29,11 @@
 
 - **V3 write path (default)**: `agent_end` no longer inserts diagnosis/error-pattern conventions; admission skips convention regression replay; `before_agent_start` injects `memory_summary.md` + active/pinned learnings.
 - **Docs**: `README.md` and `doc/README.md` describe project-local `.omp/{memory,evolution,skills}` layout (default DB path, migration scripts, memory tables in `evolution.db`).
-- **`/evolution clear`**: Deletes project-local (or legacy global) `.omp/memory`, `.omp/evolution`, and `.omp/skills` after confirmation instead of asking users to remove `~/.omp/self-evolution` manually.
-- **Legacy DB migration**: `migrateLegacyEvolutionPathsIfNeeded` skips copying corrupt/unreadable `evolution.db` files (e.g. 18-byte placeholders).
+- **`/evolution clear`**: Deletes project-local (or global user store) `.omp/memory`, `.omp/evolution`, and `.omp/skills` after confirmation instead of asking users to remove `~/.omp/self-evolution` manually.
 - **`backfill-episodes-from-sessions.ts`**: Re-archive `~/.omp/agent/sessions/*.jsonl` into project `evolution.db` (episodes, traces, fixtures) and refresh learnings/diagnosis projections.
 - **P3: Memory SQLite tables share project `evolution.db`**: `threads`, `stage1_outputs`, `jobs` (memory kinds), and `vector_embeddings` are created in the same file as evolution/episodic tables (`<cwd>/.omp/evolution/evolution.db`). Memory runtime uses `getMemoryDb` / `releaseMemoryDb` (ref-counted with evolution). Run `packages/self-evolution/scripts/migrate-evolution-data.sh <repo>` to copy legacy FS artifacts and merge rows from `~/.omp/agent/agent.db`.
 - **Memory module moved into self-evolution**: `packages/coding-agent/src/memories/` implementation now lives at `packages/self-evolution/src/memory/` (prompts under `src/memory/prompts/`). `@oh-my-pi/pi-coding-agent/memories` re-exports remain for compatibility.
-- **Project-local evolution layout (default)**: memory → `<cwd>/.omp/memory/`, evolution DB + projections → `<cwd>/.omp/evolution/`, skills → `<cwd>/.omp/skills/`. Legacy `~/.omp/self-evolution` and `~/.omp/agent/memories/state/--encoded--` remain available with `--self-evolution-global-store` and are auto-migrated into the project tree on first session when empty.
+- **Project-local evolution layout** (opt-in `--self-evolution-project-store`): memory → `<cwd>/.omp/memory/`, evolution DB + projections → `<cwd>/.omp/evolution/`, skills → `<cwd>/.omp/skills/`. User-level `~/.omp/self-evolution` is the default.
 
 ### Fixed
 

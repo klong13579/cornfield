@@ -359,7 +359,6 @@ describe("Feature 2: Instant Feedback Loop", () => {
 
 			const result = tracker.parseUserFeedback("好的，这个方案不错", {
 				injectedEpisodeIds: ["ep-1"],
-				injectedConventionIds: [],
 			});
 
 			expect(result.type).toBe("approval");
@@ -381,7 +380,6 @@ describe("Feature 2: Instant Feedback Loop", () => {
 
 			const result = tracker.parseUserFeedback("不对，这里不应该用箭头函数", {
 				injectedEpisodeIds: ["ep-1"],
-				injectedConventionIds: [],
 			});
 
 			expect(result.type).toBe("correction");
@@ -406,7 +404,6 @@ describe("Feature 2: Instant Feedback Loop", () => {
 
 			const result = tracker.parseUserFeedback("不要用全局变量，用模块作用域", {
 				injectedEpisodeIds: ["ep-1"],
-				injectedConventionIds: [],
 			});
 
 			expect(result.type).toBe("new_negative_rule");
@@ -429,7 +426,6 @@ describe("Feature 2: Instant Feedback Loop", () => {
 
 			const result = tracker.parseUserFeedback("记住这个，我喜欢用 const 而不是 let", {
 				injectedEpisodeIds: ["ep-1"],
-				injectedConventionIds: [],
 			});
 
 			expect(result.type).toBe("new_preference");
@@ -451,7 +447,6 @@ describe("Feature 2: Instant Feedback Loop", () => {
 
 			const result = tracker.parseUserFeedback("今天天气很好", {
 				injectedEpisodeIds: ["ep-1"],
-				injectedConventionIds: [],
 			});
 
 			expect(result.type).toBe("none");

@@ -1,36 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { refreshAdmissionAfterSessionEnd } from "../src/benefit-admission-refresh";
-import { HeuristicRegressionReplayBackend } from "../src/regression/replay-backend";
-import type {
-	RegressionFixtureStore,
-	RegressionTrialStore,
-	SkillEffectivenessStore,
-	SkillStore,
-} from "../src/storage/types";
+import type { SkillEffectivenessStore, SkillStore } from "../src/storage/types";
 import type { EvolvedSkill, SkillEffectiveness } from "../src/types";
 
-function emptyFixtureStore(): RegressionFixtureStore {
-	return {
-		list: async () => [],
-	} as unknown as RegressionFixtureStore;
-}
-
 describe("refreshAdmissionAfterSessionEnd", () => {
-	test("V3 session admission is skill-only (no convention reclassify)", async () => {
-		const result = await refreshAdmissionAfterSessionEnd({
-			skillStore: { list: async () => [] } as unknown as SkillStore,
-			skillEffectivenessStore: { get: async () => undefined } as unknown as SkillEffectivenessStore,
-			fixtureStore: emptyFixtureStore(),
-			trialStore: { insert: async () => {} } as unknown as RegressionTrialStore,
-			replayBackend: new HeuristicRegressionReplayBackend(),
-			regressionReplayBackend: "llm",
-			sessionOrdinal: 5,
-		});
-
-		expect(result.conventionsReclassified).toBe(0);
-		expect(result.conventionsPromoted).toBe(0);
-	});
-
 	test("deprecates skills with poor injection stats", async () => {
 		const skill: EvolvedSkill = {
 			name: "bad-skill",

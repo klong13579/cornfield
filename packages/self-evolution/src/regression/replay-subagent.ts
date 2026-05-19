@@ -1,7 +1,7 @@
 import * as path from "node:path";
 import { logger, prompt } from "@oh-my-pi/pi-utils";
 import regressionReplaySubagentTemplate from "../prompts/regression-replay-subagent.md" with { type: "text" };
-import type { Convention, EvolvedSkill, RegressionFixture } from "../types";
+import type { EvolvedSkill, RegressionFixture } from "../types";
 import { applyToolChainCompareToVerdict, compareFixtureToReplayChain } from "./compare-tool-chains";
 import { formatFixtureToolChainSummary } from "./fixture-tool-chain";
 import { extractReplayVerdictFromJsonStream, parseOmpJsonEventStreamToTraceEntries } from "./parse-omp-json-events";
@@ -17,13 +17,9 @@ function defaultOmpExecutable(): string[] {
 	return ["bun", cliPath];
 }
 
-function renderSubagentPrompt(
-	targetType: "convention" | "skill",
-	assetBody: string,
-	fixture: RegressionFixture,
-): string {
+function renderSubagentPrompt(assetBody: string, fixture: RegressionFixture): string {
 	return prompt.render(regressionReplaySubagentTemplate, {
-		target_type: targetType,
+		target_type: "skill",
 		asset_body: assetBody,
 		user_prompt: fixture.userPrompt.slice(0, 400),
 		dominant_error_tool: fixture.dominantErrorTool ?? "unknown",
@@ -102,22 +98,6 @@ async function readChildOutput(stream: ReadableStream<Uint8Array> | null): Promi
 	return await new Response(stream).text();
 }
 
-export async function evaluateConventionWithSubagent(
-	convention: Convention,
-	fixture: RegressionFixture,
-	runtime: RegressionReplayRuntime,
-): Promise<FixtureReplayResult | undefined> {
-	if (process.env.OMP_REGRESSION_REPLAY_SUBPROCESS === "1") {
-		return undefined;
-	}
-
-	const userPrompt = renderSubagentPrompt("convention", `type=${convention.type}\n${convention.content}`, fixture);
-	return runSubagentReplay(userPrompt, fixture, runtime, {
-		targetId: convention.id,
-		fixtureId: fixture.id,
-	});
-}
-
 export async function evaluateSkillWithSubagent(
 	skill: EvolvedSkill,
 	fixture: RegressionFixture,
@@ -128,7 +108,7 @@ export async function evaluateSkillWithSubagent(
 	}
 
 	const body = `${skill.description}\n${skill.taskPattern}\n${skill.approach}`;
-	const userPrompt = renderSubagentPrompt("skill", body, fixture);
+	const userPrompt = renderSubagentPrompt(body, fixture);
 	return runSubagentReplay(userPrompt, fixture, runtime, {
 		targetId: skill.name,
 		fixtureId: fixture.id,

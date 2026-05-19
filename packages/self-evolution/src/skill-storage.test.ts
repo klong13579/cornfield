@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { getUnifiedSkillsDir, migrateLegacyMemorySkills, writeConsolidationSkills } from "./skill-storage";
+import { getUnifiedSkillsDir, migrateNestedMemorySkills, writeConsolidationSkills } from "./skill-storage";
 
 describe("skill-storage", () => {
-	test("migrateLegacyMemorySkills moves subdirectory skills to flat md files", async () => {
+	test("migrateNestedMemorySkills moves subdirectory skills to flat md files", async () => {
 		const root = await fs.mkdtemp("/tmp/skill-storage-");
 		const memoryRoot = path.join(root, "memory");
 		const unifiedDir = path.join(root, "unified");
@@ -13,7 +13,7 @@ describe("skill-storage", () => {
 		await fs.mkdir(legacySkillDir, { recursive: true });
 		await Bun.write(path.join(legacySkillDir, "SKILL.md"), "Do the thing.\n");
 
-		const migrated = await migrateLegacyMemorySkills(memoryRoot, unifiedDir);
+		const migrated = await migrateNestedMemorySkills(memoryRoot, unifiedDir);
 		expect(migrated).toBe(1);
 
 		const text = await Bun.file(path.join(unifiedDir, "my-playbook.md")).text();
@@ -29,7 +29,7 @@ describe("skill-storage", () => {
 		await fs.rm(root, { recursive: true, force: true });
 	});
 
-	test("getUnifiedSkillsDir uses legacy global layout when globalStore", () => {
+	test("getUnifiedSkillsDir uses global user layout when globalStore", () => {
 		const dir = getUnifiedSkillsDir("/tmp/project", true);
 		expect(dir).toEndWith("/.omp/self-evolution/skills");
 	});

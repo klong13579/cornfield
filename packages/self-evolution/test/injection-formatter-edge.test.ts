@@ -1,22 +1,26 @@
 import { describe, expect, test } from "bun:test";
 import type { RetrievedEpisode } from "../src/context-aware-retriever";
 import { InjectionFormatter } from "../src/injection-formatter";
-import type { Convention, Episode } from "../src/types";
+import type { Episode, Learning } from "../src/types";
 
 describe("InjectionFormatter edge cases (IF-02, IF-03)", () => {
 	const formatter = new InjectionFormatter();
 
-	function makeConvention(content: string, confidence: number): Convention {
+	function makeLearning(content: string): Learning {
 		return {
-			id: `c-${content.slice(0, 10)}`,
-			type: "preference",
+			id: `l-${content.slice(0, 8)}`,
+			cwd: "/test",
+			kind: "preference",
 			content,
-			sourceEpisodeId: "ep1",
-			confidence,
-			timesApplied: 0,
-			timesViolated: 0,
+			source: "manual_pin",
+			confidence: 80,
+			lifecycle: "active",
+			sessionId: "s1",
 			createdAt: Date.now(),
-			lastSeenAt: Date.now(),
+			updatedAt: Date.now(),
+			timesInjected: 0,
+			timesHelped: 0,
+			timesIgnored: 0,
 		};
 	}
 
@@ -49,48 +53,46 @@ describe("InjectionFormatter edge cases (IF-02, IF-03)", () => {
 		};
 	}
 
-	// IF-02: Token guard — 截断至 2000 字符
-	test("IF-02: output is truncated when exceeding 2000 chars", () => {
-		const conventions: Convention[] = [];
+	test("IF-02: output is truncated when exceeding token budget", () => {
+		const learnings: Learning[] = [];
 		for (let i = 0; i < 50; i++) {
-			conventions.push(
-				makeConvention(
-					`This is a very long convention text that should eventually cause truncation when there are enough of them numbered ${i}`,
-					80,
+			learnings.push(
+				makeLearning(
+					`This is a very long learning text that should eventually cause truncation when there are enough of them numbered ${i}`,
 				),
 			);
 		}
 
-		const result = formatter.formatInjection([], conventions, []);
-		expect(result.length).toBeLessThanOrEqual(2050); // ~2000 + truncation suffix
+		const result = formatter.formatInjection([], [], undefined, undefined, { maxTokens: 500 }, learnings);
+		expect(result.length).toBeLessThanOrEqual(2100);
 		expect(result).toContain("... (truncated");
 	});
 
-	test("IF-02: output is NOT truncated when under 2000 chars", () => {
-		const conventions = [makeConvention("Short rule", 90)];
-		const result = formatter.formatInjection([], conventions, []);
-		expect(result.length).toBeLessThan(2000);
+	test("IF-02: output is NOT truncated when under budget", () => {
+		const learnings = [makeLearning("Short rule")];
+		const result = formatter.formatInjection([], [], undefined, undefined, { maxTokens: 2000 }, learnings);
+		expect(result.length).toBeLessThan(8000);
 		expect(result).not.toContain("... (truncated");
 	});
-	// IF-03: episodes 过滤 — relevanceScore < 40 且 helpRate < 0.5 的被过滤
+
 	test("IF-03: episode with relevanceScore=30 and helpRate=0.3 is excluded", () => {
 		const episodes = [makeRetrievedEpisode(makeEpisode({ id: "ep-low" }), 30, 0.3)];
-		const result = formatter.formatInjection(episodes, [], []);
+		const result = formatter.formatInjection(episodes, [], undefined, undefined, {}, []);
 		expect(result).not.toContain("ep-low");
-		expect(result).not.toContain("Relevant Past Experiences");
+		expect(result).not.toContain("Episodic Context");
 	});
 
 	test("IF-03: episode with relevanceScore=50 and helpRate=0.3 is included (score >= 40)", () => {
 		const episodes = [makeRetrievedEpisode(makeEpisode({ id: "ep-mid", summary: "Mid score episode" }), 50, 0.3)];
-		const result = formatter.formatInjection(episodes, [], []);
-		expect(result).toContain("Relevant Past Experiences");
+		const result = formatter.formatInjection(episodes, [], undefined, undefined, {}, []);
+		expect(result).toContain("Episodic Context");
 		expect(result).toContain("Mid score episode");
 	});
 
 	test("IF-03: episode with relevanceScore=30 and helpRate=0.6 is included (helpRate > 0.5)", () => {
 		const episodes = [makeRetrievedEpisode(makeEpisode({ id: "ep-help", summary: "Helpful episode" }), 30, 0.6)];
-		const result = formatter.formatInjection(episodes, [], []);
-		expect(result).toContain("Relevant Past Experiences");
+		const result = formatter.formatInjection(episodes, [], undefined, undefined, {}, []);
+		expect(result).toContain("Episodic Context");
 		expect(result).toContain("Helpful episode");
 	});
 
@@ -99,7 +101,7 @@ describe("InjectionFormatter edge cases (IF-02, IF-03)", () => {
 			makeRetrievedEpisode(makeEpisode({ id: "ep-bad", summary: "Bad episode" }), 20, 0.1),
 			makeRetrievedEpisode(makeEpisode({ id: "ep-good", summary: "Good episode" }), 80, 0.8),
 		];
-		const result = formatter.formatInjection(episodes, [], []);
+		const result = formatter.formatInjection(episodes, [], undefined, undefined, {}, []);
 		expect(result).toContain("Good episode");
 		expect(result).not.toContain("Bad episode");
 	});
