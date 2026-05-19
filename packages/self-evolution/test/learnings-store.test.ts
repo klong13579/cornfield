@@ -30,6 +30,7 @@ describe("SqliteLearningStore", () => {
 			source: "session_llm",
 			confidence: 4,
 			lifecycle: "candidate",
+			scope: "project" as const,
 			sessionId: "ep",
 			createdAt: Date.now(),
 			updatedAt: Date.now(),

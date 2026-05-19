@@ -27,6 +27,9 @@ import { ModelScorer } from "./model-scorer";
 import { getMemoryRoot, resolveEvolutionPathLayout } from "./paths";
 import { projectLearnings } from "./projection/learnings";
 import { projectSystemDiagnosis } from "./projection/system-diagnosis";
+import auditSystemDiagnosisTemplate from "./prompts/audit-system-diagnosis.md" with { type: "text" };
+import { type BackgroundLlmAuth, callBackgroundLlm } from "./utils/llm";
+import { resolveBackgroundModel } from "./utils/background-model";
 import { backfillSessionTracesFromEpisodes } from "./regression/backfill-traces";
 import { repairRegressionFixtureLabels } from "./regression/repair-regression-fixture-labels";
 import { parseReplayBackendFromTrialReason, parseToolchainTagFromTrialReason } from "./regression/trial-reason";
@@ -553,7 +556,23 @@ async function handleAudit(stores: CommandStores, ctx: any): Promise<void> {
 				admissionReclassifyInterval: flags.admissionReclassifyInterval,
 			},
 		});
-		ctx.ui.notify(`${formatAuditReport(report)}\n\nWritten to ${outPath}`, "info");
+
+		let diagnosis = "";
+		try {
+			const model = resolveBackgroundModel(ctx);
+			if (model) {
+				const reportText = formatAuditReport(report);
+				const auth: BackgroundLlmAuth = { auth: ctx.auth };
+				const response = await callBackgroundLlm(model, auditSystemDiagnosisTemplate, reportText, { auth, maxTokens: 2000 });
+				if (response) {
+					diagnosis = "\n\n## LLM 系统诊断\n" + response;
+				}
+			}
+		} catch (diagErr) {
+			logger.warn("LLM audit diagnosis failed", { error: String(diagErr) });
+		}
+
+		ctx.ui.notify(`${formatAuditReport(report)}\n\nWritten to ${outPath}${diagnosis}`, "info");
 	} catch (err) {
 		logger.error("evolution audit failed", { error: String(err) });
 		ctx.ui.notify("Failed to generate audit report", "error");
@@ -566,6 +585,7 @@ async function handleReport(stores: CommandStores, ctx: any): Promise<void> {
 			stores.episodeStore(),
 			stores.learningStore(),
 			stores.effectivenessStore(),
+			stores.skillStore(),
 		);
 		const report = await generator.generate();
 		const text = generator.formatReport(report);

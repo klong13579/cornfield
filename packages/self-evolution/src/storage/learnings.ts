@@ -4,7 +4,7 @@ import {
 	isLearningEligibleForInjection,
 	validateLearningContent,
 } from "../learning-admission";
-import type { Learning, LearningKind, LearningLifecycle, LearningSource } from "../types";
+import type { Learning, LearningKind, LearningLifecycle, LearningScope, LearningSource } from "../types";
 
 interface RawLearningRow {
 	id: string;
@@ -14,6 +14,7 @@ interface RawLearningRow {
 	source: string;
 	confidence: number;
 	lifecycle: string;
+	scope: string;
 	session_id: string;
 	created_at: number;
 	updated_at: number;
@@ -31,6 +32,7 @@ function rowToLearning(row: RawLearningRow): Learning {
 		source: row.source as LearningSource,
 		confidence: row.confidence,
 		lifecycle: row.lifecycle as LearningLifecycle,
+		scope: row.scope as LearningScope,
 		sessionId: row.session_id,
 		createdAt: row.created_at,
 		updatedAt: row.updated_at,
@@ -50,8 +52,8 @@ export class SqliteLearningStore {
 		this.#insertStmt = db.prepare(`
 			INSERT INTO learnings (
 				id, cwd, kind, content, source, confidence, lifecycle, session_id,
-				created_at, updated_at, times_injected, times_helped, times_ignored
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				created_at, updated_at, times_injected, times_helped, times_ignored, scope
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(id) DO UPDATE SET
 				confidence = MAX(learnings.confidence, excluded.confidence),
 				updated_at = excluded.updated_at,
@@ -80,6 +82,7 @@ export class SqliteLearningStore {
 			learning.timesInjected,
 			learning.timesHelped,
 			learning.timesIgnored,
+			learning.scope,
 		);
 	}
 

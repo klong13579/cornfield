@@ -623,11 +623,11 @@ describe("Self-evolution commands — full coverage", () => {
 			expect(notified[0]!.type).toBe("info");
 			const msg = notified[0]!.message;
 			// Should contain report sections
-			expect(msg).toContain("Self-Evolution Audit Report");
-			expect(msg).toContain("## Episodes");
-			expect(msg).toContain("## Skills");
-			expect(msg).toContain("## Effectiveness");
-			expect(msg).toContain("## Issues Found");
+			expect(msg).toContain("进化审计报告");
+			expect(msg).toContain("概览");
+			expect(msg).toContain("已采纳的进化");
+			expect(msg).toContain("收益分析");
+			expect(msg).toContain("待解决问题");
 			expect(msg).toContain("No skills extracted yet");
 		});
 
@@ -689,9 +689,9 @@ describe("Self-evolution commands — full coverage", () => {
 
 			expect(notified.length).toBe(1);
 			const msg = notified[0]!.message;
-			expect(msg).toContain("Self-Evolution Audit Report");
-			expect(msg).toContain("Total: 2");
-			expect(msg).toContain("Total: 1 (0 deprecated)");
+			expect(msg).toContain("进化审计报告");
+			expect(msg).toContain("归档会话: 2");
+			expect(msg).toContain("Skills (1 个, 0 个已废弃)");
 			expect(msg).toContain("test-case-design");
 		});
 
@@ -716,12 +716,12 @@ describe("Self-evolution commands — full coverage", () => {
 			expect(notified.length).toBe(1);
 			expect(notified[0]!.type).toBe("info");
 			const msg = notified[0]!.message;
-			expect(msg).toContain("Daily Report");
-			expect(msg).toContain("Summary: 0 total");
-			expect(msg).toContain("Key Moments");
-			expect(msg).toContain("Top Error Patterns");
-			expect(msg).toContain("New Conventions");
-			expect(msg).toContain("Top Tools");
+			expect(msg).toContain("进化日报");
+			expect(msg).toContain("会话概览");
+			expect(msg).toContain("今日采纳的进化");
+			expect(msg).toContain("已采纳进化的收益");
+			expect(msg).toContain("关键事件");
+			expect(msg).toContain("会话明细");
 		});
 
 		test("generates daily report with session data", async () => {
@@ -750,9 +750,9 @@ describe("Self-evolution commands — full coverage", () => {
 
 			expect(notified.length).toBe(1);
 			const msg = notified[0]!.message;
-			expect(msg).toContain("Daily Report");
-			expect(msg).toContain("Summary: 1 total");
-			expect(msg).toContain("1 success");
+			expect(msg).toContain("进化日报");
+			expect(msg).toContain("会话概览: 1 次会话");
+			expect(msg).toContain("1 成功");
 		});
 
 		test("notifies error when report fails", async () => {

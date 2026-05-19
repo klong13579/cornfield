@@ -312,8 +312,9 @@ export interface NudgeOutcomeUpdate {
 export type LearningKind = "preference" | "fact" | "procedure" | "skill_hint";
 export type LearningSource = "user_explicit" | "session_llm" | "manual_pin";
 export type LearningLifecycle = "candidate" | "active" | "archived";
+export type LearningScope = "global" | "project" | "ephemeral";
 
-export interface Learning {
+	export interface Learning {
 	id: string;
 	cwd: string;
 	kind: LearningKind;
@@ -322,6 +323,11 @@ export interface Learning {
 	/** 1–5 at write time */
 	confidence: number;
 	lifecycle: LearningLifecycle;
+	/** Scope distinguishes behavioral rules from one-time task descriptions.
+	 * global: applies across all sessions (communication style, safety).
+	 * project: applies within this project (code conventions).
+	 * ephemeral: one-time task ask — should not be injected. */
+	scope: LearningScope;
 	sessionId: string;
 	createdAt: number;
 	updatedAt: number;
@@ -431,6 +437,28 @@ export interface DailyReport {
 		description: string;
 		timestamp: number;
 	}>;
+	skillsToday: Array<{
+		skill: EvolvedSkill;
+		wasCreatedToday: boolean;
+		wasUpdatedToday: boolean;
+	}>;
+	injectionEffectiveness: {
+		skillCount: number;
+		skillRates: Array<{
+			name: string;
+			version: number;
+			qualityScore?: number;
+			usageCount: number;
+			helpRate: string;
+		}>;
+		learningCount: number;
+		learningRates: Array<{
+			content: string;
+			confidence: number;
+			timesInjected: number;
+			helpRate: string;
+		}>;
+	};
 }
 
 // ============================================================================

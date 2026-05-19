@@ -403,140 +403,103 @@ export async function generateAuditReport(
 
 export function formatAuditReport(report: AuditReport): string {
 	const lines: string[] = [];
-	lines.push(`# Self-Evolution Audit Report`);
-	lines.push(`Generated: ${new Date(report.generatedAt).toISOString()}`);
+	lines.push("# 进化审计报告");
+	lines.push(`生成时间: ${new Date(report.generatedAt).toISOString()}`);
 	lines.push("");
 
-	lines.push("## Episodes");
-	lines.push(`- Total: ${report.episodes.total} / ${report.episodes.maxAllowed} max`);
-	lines.push(`- Success rate: ${(report.episodes.successRate * 100).toFixed(0)}%`);
-	lines.push(`- Avg tool calls: ${report.episodes.avgToolCalls.toFixed(1)}`);
-	lines.push(`- Avg errors: ${report.episodes.avgErrors.toFixed(1)}`);
+	// ── 1. 概览 ──
+	lines.push("## 1. 概览");
+	lines.push(`- 归档会话: ${report.episodes.total} / ${report.episodes.maxAllowed} 最大`);
+	lines.push(`- 会话成功率: ${(report.episodes.successRate * 100).toFixed(0)}%`);
+	lines.push(`- 平均工具调用/会话: ${report.episodes.avgToolCalls.toFixed(1)}`);
+	lines.push(`- 平均错误/会话: ${report.episodes.avgErrors.toFixed(1)}`);
+	lines.push(`- 用户画像: ${report.profile.sessionCount} 次会话, 主要意图: ${report.profile.topIntent}`);
 	lines.push("");
 
-	lines.push("## Skills");
-	lines.push(`- Total: ${report.skills.total} (${report.skills.deprecated} deprecated)`);
-	if (report.skills.names.length > 0) {
-		lines.push(`- Names: ${report.skills.names.join(", ")}`);
-		lines.push(`- Quality scores: ${report.skills.qualityScores.join(", ")}`);
+	// ── 2. 已采纳的进化 (Skills) ──
+	lines.push("## 2. 已采纳的进化");
+	lines.push(`### Skills (${report.skills.total} 个, ${report.skills.deprecated} 个已废弃)`);
+	for (let i = 0; i < report.skills.names.length; i++) {
+		const name = report.skills.names[i];
+		const q = report.skills.qualityScores[i];
+		lines.push(`- **${name}** (质量: ${q})`);
 	}
 	lines.push("");
 
-	lines.push("## Effectiveness");
-	lines.push(`- Episodes tracked: ${report.effectiveness.episodesTracked}`);
-	lines.push(`- Injections: ${report.effectiveness.totalInjections}`);
-	lines.push(`- Helped: ${report.effectiveness.totalHelped}`);
-	lines.push(`- Help rate: ${(report.effectiveness.helpRate * 100).toFixed(0)}%`);
-	lines.push(`- Skills tracked: ${report.effectiveness.skillsTracked}`);
+	lines.push("### 注入表现");
+	lines.push(`- Evolution 回放后端: ${report.runtime?.regressionReplayBackend ?? "heuristic"}`);
+	lines.push(`- 被追踪的技能数: ${report.effectiveness.skillsTracked}`);
+	lines.push(`- 技能注入: ${report.effectiveness.totalInjections} 次`);
+	const helpPct = (report.effectiveness.helpRate * 100).toFixed(0);
+	lines.push(`- 帮助率: ${helpPct}% (${report.effectiveness.totalHelped} / ${report.effectiveness.totalInjections})`);
 	lines.push("");
 
-	lines.push("## Nudges");
-	lines.push(`- Total recorded: ${report.nudges.total}`);
-	lines.push(`- Injected into context: ${report.nudges.contextInjected}`);
-	lines.push(`- Outcomes scored: ${report.nudges.outcomesRecorded}`);
-	lines.push(`- Help rate: ${(report.nudges.helpRate * 100).toFixed(0)}%`);
-	lines.push(`- Pattern repeat rate: ${(report.nudges.repeatRate * 100).toFixed(0)}%`);
-	lines.push("");
-
-	lines.push("## Intents");
-	for (const i of report.intents) {
-		lines.push(`- ${i.intent}: ${i.count} (avg confidence: ${i.avgConfidence.toFixed(1)})`);
-	}
-	lines.push("");
-
-	lines.push("## Workflow Patterns");
-	lines.push(`- Total: ${report.workflows.totalPatterns}`);
-	lines.push(`- Meaningful (≥2 occurrences): ${report.workflows.meaningfulPatterns}`);
-	lines.push("");
-
-	lines.push("## Conventions (V2 table removed)");
-	lines.push(`- Total: ${report.conventions.total}`);
-	for (const [type, count] of Object.entries(report.conventions.byType)) {
-		lines.push(`  - ${type}: ${count}`);
-	}
-	lines.push("");
-
-	lines.push("## Learnings (V3)");
-	lines.push(`- Total: ${report.learnings.total}`);
-	lines.push(`- Active: ${report.learnings.active} | Pinned (manual): ${report.learnings.pinned}`);
-	lines.push(`- Injection stats: helped ${report.learnings.totalHelped} / injected ${report.learnings.totalInjected}`);
+	lines.push("### Learnings");
+	lines.push(`- 总数: ${report.learnings.total}`);
+	lines.push(`- Active: ${report.learnings.active} | 手动固定: ${report.learnings.pinned}`);
+	lines.push(`- 注入统计: 帮助 ${report.learnings.totalHelped} / 注入 ${report.learnings.totalInjected}`);
 	for (const [lifecycle, count] of Object.entries(report.learnings.byLifecycle)) {
 		lines.push(`  - ${lifecycle}: ${count}`);
 	}
 	lines.push("");
 
-	lines.push("## Profile");
-	lines.push(`- Sessions: ${report.profile.sessionCount}`);
-	lines.push(`- Avg tool errors/session: ${report.profile.errorRate.toFixed(1)}`);
-	lines.push(`- Top intent: ${report.profile.topIntent}`);
+	// ── 3. 收益分析 ──
+	lines.push("## 3. 收益分析");
+	const nudgeHelpPct = (report.nudges.helpRate * 100).toFixed(0);
+	const nudgeRepeatPct = (report.nudges.repeatRate * 100).toFixed(0);
+	lines.push(`### Nudge 行为修正`);
+	lines.push(`- 总检测: ${report.nudges.total} | 注入上下文: ${report.nudges.contextInjected}`);
+	lines.push(`- 已评分: ${report.nudges.outcomesRecorded} | 帮助率: ${nudgeHelpPct}% | 重复率: ${nudgeRepeatPct}%`);
 	lines.push("");
 
-	lines.push("## Escalations (stuck patterns)");
-	lines.push(`- Open: ${report.escalations.open} / ${report.escalations.total} total`);
-	for (const e of report.escalations.recent) {
-		lines.push(`  - ${e.id} [${e.status}] ${e.patternLabel} (${e.occurrenceCount}x)`);
+	lines.push("### 用户意图分布");
+	for (const i of report.intents) {
+		lines.push(`- ${i.intent}: ${i.count} 次 (平均置信度: ${i.avgConfidence.toFixed(1)})`);
 	}
 	lines.push("");
 
-	lines.push("## Regression replay");
-	if (report.runtime?.regressionReplayBackend) {
-		lines.push(`- Backend: ${report.runtime.regressionReplayBackend}`);
-		if (report.runtime.regressionReplayBackend !== "heuristic" && report.runtime.admissionReclassifyInterval) {
-			lines.push(`- Convention reclassify interval: every ${report.runtime.admissionReclassifyInterval} session(s)`);
-		}
-	}
-	lines.push(`- Session traces: ${report.admission.sessionTraceCount}`);
-	lines.push(`- Regression fixtures: ${report.admission.regressionFixtureCount}`);
-	lines.push(
-		`- Trials: keep ${report.admission.regressionKeep}, discard ${report.admission.regressionDiscard}, pending ${report.admission.regressionPending}`,
-	);
-	const byTarget = report.admission.trialsByTarget;
-	lines.push(`  - conventions: keep ${byTarget.convention.keep}, discard ${byTarget.convention.discard}`);
-	lines.push(`  - skills: keep ${byTarget.skill.keep}, discard ${byTarget.skill.discard}`);
-	const byBackend = report.admission.trialsByReplayBackend;
-	lines.push(
-		`  - by backend: heuristic ${byBackend.heuristic ?? 0}, llm ${byBackend.llm ?? 0}, subagent ${byBackend.subagent ?? 0}`,
-	);
-	lines.push(
-		`  - tool-chain tags: overturn ${report.admission.regressionToolchainOverturns}, confirm ${report.admission.regressionToolchainConfirm}, only ${report.admission.regressionToolchainOnly}`,
-	);
-	if (report.admission.recentTrials.length > 0) {
-		lines.push("- Recent trials:");
-		for (const t of report.admission.recentTrials) {
-			const reason = t.reason.length > 72 ? `${t.reason.slice(0, 69)}...` : t.reason;
-			lines.push(
-				`  - [${t.verdict}] ${t.targetType}/${t.targetId} @ ${new Date(t.createdAt).toISOString()}: ${reason}`,
-			);
-		}
-	}
+	lines.push("### 工作流模式");
+	lines.push(`- 总模式: ${report.workflows.totalPatterns} | 有意义的 (>=2次): ${report.workflows.meaningfulPatterns}`);
 	lines.push("");
 
-	lines.push("## Benefit admission (reject / deprecate)");
-	const life = report.admission.learningsByLifecycle;
-	lines.push(
-		`- Learnings: active ${life.active ?? 0}, candidate ${life.candidate ?? 0}, archived ${life.archived ?? 0}`,
-	);
-	lines.push(`- Skills deprecated: ${report.admission.skillsDeprecated}`);
-	lines.push(
-		`- Nudges dismissed: ${report.admission.nudgesDismissed}, acknowledged: ${report.admission.nudgesAcknowledged}`,
-	);
-	lines.push("");
-
+	// ── 4. 问题 ──
 	if (report.issues.length > 0) {
-		lines.push("## Issues Found");
+		lines.push("## 4. 待解决问题");
 		for (const issue of report.issues) {
 			lines.push(`- ${issue}`);
 		}
 		lines.push("");
 	}
 
+	// ── 5. 推荐 ──
 	if (report.recommendations.length > 0) {
-		lines.push("## Recommendations");
+		lines.push("## 5. 改进建议");
 		for (const rec of report.recommendations) {
 			lines.push(`- ${rec}`);
 		}
 		lines.push("");
 	}
+
+	// ── 6. 技术明细 (简略) ──
+	lines.push("## 6. 技术明细");
+	lines.push("### Escalations");
+	lines.push(`- Open: ${report.escalations.open} / ${report.escalations.total} 总数`);
+	for (const e of report.escalations.recent) {
+		lines.push(`  - ${e.id} [${e.status}] ${e.patternLabel} (${e.occurrenceCount}x)`);
+	}
+	lines.push("");
+
+	lines.push("### Regression");
+	lines.push(`- Session traces: ${report.admission.sessionTraceCount}`);
+	lines.push(`- Regression fixtures: ${report.admission.regressionFixtureCount}`);
+	lines.push(
+		`- Trials: keep ${report.admission.regressionKeep}, discard ${report.admission.regressionDiscard}, pending ${report.admission.regressionPending}`,
+	);
+	lines.push("");
+
+	lines.push("### Nudge 明细");
+	lines.push(`- 已忽略: ${report.admission.nudgesDismissed}, 已确认: ${report.admission.nudgesAcknowledged}`);
+	lines.push("");
 
 	return lines.join("\n");
 }

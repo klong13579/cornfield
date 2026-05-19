@@ -70,10 +70,7 @@ export class FeedbackTracker {
 	 * @param context - Injection context for contradiction checking
 	 * @returns Structured parsed feedback with type classification and outcome delta
 	 */
-	parseUserFeedback(
-		feedback: string,
-		_context: { injectedEpisodeIds: string[] },
-	): ParsedFeedback {
+	parseUserFeedback(feedback: string, _context: { injectedEpisodeIds: string[] }): ParsedFeedback {
 		const normalized = feedback.toLowerCase().trim();
 
 		// Approval keywords

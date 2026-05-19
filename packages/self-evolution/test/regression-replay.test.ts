@@ -56,19 +56,17 @@ describe("regression fixture from trace", () => {
 });
 
 const readEnoentFixture: RegressionFixture = {
-		id: "fx-1",
-		sessionId: "s1",
-		episodeId: "e1",
-		cwd: "/proj",
-		userPrompt: "read config",
-		errorCount: 1,
-		completedSuccessfully: false,
-		dominantErrorTool: "read",
-		dominantErrorPattern: "ENOENT",
-		entries: [
-			{ type: "tool_result", timestamp: 2, toolName: "read", result: "ENOENT", isError: true },
-		] as TraceEntry[],
-		createdAt: Date.now(),
+	id: "fx-1",
+	sessionId: "s1",
+	episodeId: "e1",
+	cwd: "/proj",
+	userPrompt: "read config",
+	errorCount: 1,
+	completedSuccessfully: false,
+	dominantErrorTool: "read",
+	dominantErrorPattern: "ENOENT",
+	entries: [{ type: "tool_result", timestamp: 2, toolName: "read", result: "ENOENT", isError: true }] as TraceEntry[],
+	createdAt: Date.now(),
 };
 
 describe("regression replay skill", () => {

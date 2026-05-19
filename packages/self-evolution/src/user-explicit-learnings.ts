@@ -3,7 +3,7 @@
  */
 
 import { LEARNING_MAX_PER_SESSION, newLearningLifecycleState, validateLearningContent } from "./learning-admission";
-import type { Learning, LearningKind, SessionTrace } from "./types";
+import type { Learning, LearningKind, LearningScope, SessionTrace } from "./types";
 
 const EXPLICIT_PATTERNS: Array<{ kind: LearningKind; pattern: RegExp; confidence: number }> = [
 	{
@@ -66,6 +66,7 @@ export function extractUserExplicitLearnings(trace: SessionTrace, episodeId: str
 					source: "user_explicit",
 					confidence,
 					lifecycle: newLearningLifecycleState("user_explicit"),
+					scope: "project" as LearningScope,
 					sessionId: episodeId,
 					createdAt: now,
 					updatedAt: now,

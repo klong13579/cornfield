@@ -6,13 +6,14 @@ import { logger, prompt } from "@oh-my-pi/pi-utils";
 import { LEARNING_MAX_PER_SESSION, newLearningLifecycleState, validateLearningContent } from "./learning-admission";
 import extractSessionLearningsSystemTemplate from "./prompts/extract-session-learnings.md" with { type: "text" };
 import extractSessionLearningsInputTemplate from "./prompts/extract-session-learnings-input.md" with { type: "text" };
-import type { Learning, LearningKind, SessionTrace } from "./types";
+import type { Learning, LearningKind, LearningScope, SessionTrace } from "./types";
 import { type BackgroundLlmAuth, callBackgroundLlm } from "./utils/llm";
 
 interface LlmLearningItem {
 	kind: string;
 	content: string;
 	confidence: number;
+	scope?: string;
 }
 
 function learningId(content: string, kind: LearningKind): string {
@@ -80,6 +81,11 @@ function parseResponse(response: string, trace: SessionTrace, episodeId: string)
 			if (seen.has(key)) continue;
 			seen.add(key);
 
+			const rawScope = String(item.scope ?? '').trim().toLowerCase();
+			const scope: LearningScope = rawScope === 'global' || rawScope === 'project' || rawScope === 'ephemeral'
+				? rawScope
+				: 'project';
+
 			results.push({
 				id: learningId(content, kind),
 				cwd: trace.cwd,
@@ -88,6 +94,8 @@ function parseResponse(response: string, trace: SessionTrace, episodeId: string)
 				source: "session_llm",
 				confidence,
 				lifecycle: newLearningLifecycleState("session_llm"),
+				// LLM-determined scope; ephemeral learnings are filtered out of injection
+				scope,
 				sessionId: episodeId,
 				createdAt: now,
 				updatedAt: now,

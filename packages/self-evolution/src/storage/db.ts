@@ -251,7 +251,8 @@ export function initSchema(db: Database): void {
 			updated_at INTEGER NOT NULL,
 			times_injected INTEGER NOT NULL DEFAULT 0,
 			times_helped INTEGER NOT NULL DEFAULT 0,
-			times_ignored INTEGER NOT NULL DEFAULT 0
+			times_ignored INTEGER NOT NULL DEFAULT 0,
+			scope TEXT NOT NULL DEFAULT 'project' CHECK(scope IN ('global','project','ephemeral'))
 		);
 	`);
 
@@ -379,6 +380,13 @@ export function initSchema(db: Database): void {
 	}
 	try {
 		db.exec("ALTER TABLE episodic_records ADD COLUMN reviewed_at INTEGER");
+	} catch {
+		/* column already exists */
+	}
+
+	// Add scope column to learnings (migration)
+	try {
+		db.exec("ALTER TABLE learnings ADD COLUMN scope TEXT NOT NULL DEFAULT 'project' CHECK(scope IN ('global','project','ephemeral'))");
 	} catch {
 		/* column already exists */
 	}
