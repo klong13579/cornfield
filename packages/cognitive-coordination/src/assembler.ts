@@ -791,7 +791,7 @@ export class Pipeline {
 					}
 					case "conventions": {
 						const conventions = ctx.retrievedConventions ?? ctx.conventions;
-						layerContent = `## 📐 Conventions\nEstablished team and project conventions.\n${conventions.map(c => `- [Rule] ${c.rule} (Confidence: ${c.confidence.toFixed(2)})`).join("\n")}\n`;
+						layerContent = `## 📐 Rules\nEstablished procedural rules from past sessions.\n${conventions.map(c => `- [Rule] ${c.rule} (Confidence: ${c.confidence.toFixed(2)})`).join("\n")}\n`;
 						break;
 					}
 					case "skills": {
