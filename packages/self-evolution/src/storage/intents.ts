@@ -33,6 +33,18 @@ export class SqliteIntentStore implements IntentStore {
 		stmt.finalize();
 		return rows.map(rowToIntent);
 	}
+
+	async getRecent(limit: number): Promise<EpisodeIntent[]> {
+		const stmt = this.db.prepare(`
+			SELECT ei.* FROM episode_intents ei
+			JOIN episodes e ON ei.episode_id = e.id
+			ORDER BY e.timestamp DESC
+			LIMIT ?
+		`);
+		const rows = stmt.all(limit) as RawIntentRow[];
+		stmt.finalize();
+		return rows.map(rowToIntent);
+	}
 }
 
 interface RawIntentRow {

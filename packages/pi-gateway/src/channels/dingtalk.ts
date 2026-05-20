@@ -83,35 +83,49 @@ export class DingTalkChannel extends BaseChannel {
 				: msg.content.type === "text"
 					? msg.content.text
 					: "[unsupported content type]";
-		const body = {
-			msgtype: "markdown" as const,
-			markdown: {
-				title: "消息",
-				text,
-			},
-			at: {
-				atUserIds: msg.mentions ?? [],
-				isAtAll: false,
-			},
-		};
 
-		// Use the sessionWebhook from the raw message if available
-		// For proactive messages, use the REST API
-		const url = this.#buildSendUrl(msg.conversationId);
-		const headers = this.#buildAuthHeaders();
-
-		const response = await fetch(url, {
-			method: "POST",
-			headers,
-			body: JSON.stringify(body),
-		});
-
-		if (!response.ok) {
-			const error = await response.text();
-			throw new Error(`DingTalk send failed: ${response.status} ${error}`);
+		const robotCode = this.#config.robotCode;
+		if (!robotCode) {
+			logger.warn("DingTalk send skipped: no robotCode configured");
+			return;
 		}
 
-		logger.debug("DingTalk message sent", { conversationId: msg.conversationId });
+		// Outbound via dws CLI (ADR-1: gateway does not hold DingTalk business tokens)
+		const args = [
+			"dws",
+			"chat",
+			"message",
+			"send-by-bot",
+			"--robot-code",
+			robotCode,
+			"--group",
+			msg.conversationId,
+			"--title",
+			"消息",
+			"--text",
+			text,
+			"--format",
+			"json",
+			"-y",
+		];
+
+		logger.debug("DingTalk outbound via dws", {
+			conversationId: msg.conversationId,
+			robotCode,
+			textLength: text.length,
+		});
+
+		try {
+			const result = Bun.spawnSync(args, { env: { ...process.env } });
+			if (result.exitCode !== 0) {
+				const stderr = new TextDecoder().decode(result.stderr);
+				logger.error("dws send-by-bot failed", { exitCode: result.exitCode, stderr });
+			} else {
+				logger.debug("DingTalk message sent", { conversationId: msg.conversationId });
+			}
+		} catch (err) {
+			logger.error("dws spawn failed", { error: String(err) });
+		}
 	}
 
 	// ═══════════════════════════════════════════════════════════════════
@@ -219,23 +233,5 @@ export class DingTalkChannel extends BaseChannel {
 			timestamp: new Date(raw.createAt),
 			raw,
 		};
-	}
-
-	#buildSendUrl(_conversationId: string): string {
-		// For proactive messaging, use the REST API
-		return `https://api.dingtalk.com/v1.0/robot/oToMessages/batchSend`;
-	}
-
-	#buildAuthHeaders(): Record<string, string> {
-		return {
-			"Content-Type": "application/json",
-			"x-acs-dingtalk-access-token": this.#getAccessToken(),
-		};
-	}
-
-	#getAccessToken(): string {
-		// In production, this should call the token API and cache the result
-		// For now, return placeholder — actual implementation needs OAuth flow
-		return "";
 	}
 }

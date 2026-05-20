@@ -1,0 +1,158 @@
+# Evolution Log
+
+Audit timeline of self-evolution events.
+
+## 2026-05-20
+
+- [16:23] **Skill extracted**: `omp-thingking` (quality: 78)
+- [16:23] **Profile updated**: 6 sessions, top intent: exploration
+- [16:23] **Workflow mined**: feature-add (2 tools)
+- [16:23] **Intent classified**: feature-add (9000%)
+- [16:23] **Trace diagnosed**: 0 read failure(s), 0 cascade pattern(s)
+- [16:22] **Audit report**: 23 episodes, 17 skills
+- [16:22] **Episode archived**: `019e4479-55c0-7000-933f-ec76b3db6347-1779265329822`
+- [16:22] **Episode archived**: `019e447a-8115-7000-883e-3e062b023e9b-1779265344021`
+- [16:22] **Episode archived**: `019e447a-8113-7000-a76c-b23cf698f8bb-1779265343919`
+- [16:22] **Skill merged**: `system-reminder-you-stopped-without-ca` v7 → v8
+- [16:22] **Intent classified**: bugfix (7000%)
+- [16:22] **Profile updated**: 8 sessions, top intent: exploration
+- [16:22] **Trace diagnosed**: 0 read failure(s), 0 cascade pattern(s)
+- [16:22] **Skill merged**: `system-reminder-you-stopped-without-ca` v6 → v7
+- [16:22] **Intent classified**: bugfix (7000%)
+- [16:22] **Profile updated**: 8 sessions, top intent: exploration
+- [16:22] **Trace diagnosed**: 0 read failure(s), 0 cascade pattern(s)
+- [16:22] **Audit report**: 22 episodes, 17 skills
+- [16:22] **Episode archived**: `019e447a-8115-7000-883e-3e062b023e9b-1779265342772`
+- [16:22] **Audit report**: 21 episodes, 17 skills
+- [16:22] **Episode archived**: `019e447a-8113-7000-a76c-b23cf698f8bb-1779265342688`
+- [16:22] **Skill merged**: `system-reminder-you-stopped-without-ca` v5 → v6
+- [16:22] **Skill merged**: `system-reminder-you-stopped-without-ca` v4 → v5
+- [16:22] **Intent classified**: bugfix (7000%)
+- [16:22] **Profile updated**: 7 sessions, top intent: exploration
+- [16:22] **Trace diagnosed**: 0 read failure(s), 0 cascade pattern(s)
+- [16:22] **Trace diagnosed**: 0 read failure(s), 0 cascade pattern(s)
+- [16:22] **Intent classified**: bugfix (7000%)
+- [16:22] **Profile updated**: 7 sessions, top intent: exploration
+- [16:22] **Audit report**: 20 episodes, 17 skills
+- [16:22] **Episode archived**: `019e447a-8115-7000-883e-3e062b023e9b-1779265341564`
+- [16:22] **Audit report**: 19 episodes, 17 skills
+- [16:22] **Episode archived**: `019e447a-8113-7000-a76c-b23cf698f8bb-1779265341424`
+- [16:22] **Skill merged**: `background-conte` v3 → v4
+- [16:22] **Intent classified**: testing (4500%)
+- [16:22] **Profile updated**: 6 sessions, top intent: exploration
+- [16:22] **Skill merged**: `background-conte` v2 → v3
+- [16:22] **Trace diagnosed**: 0 read failure(s), 0 cascade pattern(s)
+- [16:22] **Intent classified**: exploration (4500%)
+- [16:22] **Profile updated**: 6 sessions, top intent: exploration
+- [16:22] **Trace diagnosed**: 0 read failure(s), 0 cascade pattern(s)
+- [16:22] **Audit report**: 18 episodes, 17 skills
+- [16:22] **Episode archived**: `019e447a-8115-7000-883e-3e062b023e9b-1779265340281`
+- [16:22] **Audit report**: 17 episodes, 17 skills
+- [16:22] **Episode archived**: `019e447a-8113-7000-a76c-b23cf698f8bb-1779265340243`
+
+## 2026-05-19
+
+- [02:26] **Skill extracted**: `omp-api-key` (quality: 100)
+- [02:26] **Workflow mined**: exploration (3 tools)
+- [02:26] **Profile updated**: 5 sessions, top intent: exploration
+- [02:26] **Intent classified**: exploration (9500%)
+- [02:26] **Trace diagnosed**: 0 read failure(s), 0 cascade pattern(s)
+- [02:26] **Audit report**: 16 episodes, 16 skills
+- [02:26] **Episode archived**: `019e417b-16a8-7000-a759-a9011e2690ca-1779215046312`
+- [02:24] **Skill extracted**: `omp-zshrc-alibaba-codin` (quality: 100)
+- [02:24] **Profile updated**: 4 sessions, top intent: exploration
+- [02:24] **Intent classified**: exploration (9500%)
+- [02:24] **Trace diagnosed**: 0 read failure(s), 0 cascade pattern(s)
+- [02:24] **Audit report**: 15 episodes, 15 skills
+- [02:24] **Episode archived**: `019e417b-16a8-7000-a759-a9011e2690ca-1779215047244`
+- [00:02] **Episode archived**: `019e40f9-3f78-7000-b90d-cbd5745ba2b4-1779206541564`
+- [00:02] **Skill merged**: `system-reminder-you-stopped-without-ca` v3 → v4
+- [00:02] **Intent classified**: bugfix (7000%)
+- [00:02] **Profile updated**: 12 sessions, top intent: exploration
+- [00:02] **Trace diagnosed**: 0 read failure(s), 0 cascade pattern(s)
+- [00:02] **Audit report**: 14 episodes, 14 skills
+- [00:02] **Episode archived**: `019e40f9-3f78-7000-b90d-cbd5745ba2b4-1779206540358`
+- [00:02] **Skill merged**: `system-reminder-you-stopped-without-ca` v2 → v3
+- [00:02] **Intent classified**: bugfix (7000%)
+- [00:02] **Profile updated**: 11 sessions, top intent: exploration
+- [00:02] **Trace diagnosed**: 0 read failure(s), 0 cascade pattern(s)
+- [00:02] **Audit report**: 13 episodes, 14 skills
+- [00:02] **Episode archived**: `019e40f9-3f78-7000-b90d-cbd5745ba2b4-1779206539187`
+- [00:02] **Skill optimized**: `background-conte` (quality: 60)
+- [00:02] **Skill merged**: `background-conte` v1 → v2
+- [00:02] **Intent classified**: feature-add (4500%)
+- [00:02] **Profile updated**: 10 sessions, top intent: exploration
+- [00:02] **Trace diagnosed**: 0 read failure(s), 0 cascade pattern(s)
+- [00:02] **Audit report**: 12 episodes, 14 skills
+- [00:02] **Episode archived**: `019e40f9-3f78-7000-b90d-cbd5745ba2b4-1779206537879`
+- [23:58] **Episode archived**: `019e40f3-26f9-7000-9b72-00baec070f64-1779206154532`
+- [21:28] **Skill extracted**: `hermes-agent-agent-agent` (quality: 100)
+- [21:28] **Profile updated**: 9 sessions, top intent: exploration
+- [21:28] **Intent classified**: exploration (9500%)
+- [21:28] **Workflow mined**: exploration (6 tools)
+- [21:28] **Trace diagnosed**: 1 read failure(s), 1 cascade pattern(s)
+- [21:28] **Audit report**: 11 episodes, 13 skills
+- [21:28] **Episode archived**: `019e4066-135d-7000-a6e0-e9457a3c58de-1779196891997`
+- [21:22] **Skill extracted**: `hermes-agent` (quality: 93)
+- [21:22] **Workflow mined**: exploration (4 tools)
+- [21:22] **Profile updated**: 8 sessions, top intent: exploration
+- [21:22] **Intent classified**: exploration (9500%)
+- [21:22] **Trace diagnosed**: 1 read failure(s), 1 cascade pattern(s)
+- [21:22] **Audit report**: 10 episodes, 12 skills
+- [21:22] **Episode archived**: `019e4066-135d-7000-a6e0-e9457a3c58de-1779196908792`
+- [21:16] **Episode archived**: `019e4061-6bdd-7000-a2d7-436749040700-1779196590790`
+- [21:16] **Skill merged**: `system-reminder-you-stopped-without-ca` v1 → v2
+- [21:16] **Skill optimized**: `system-reminder-you-stopped-without-ca` (quality: 60)
+- [21:16] **Intent classified**: bugfix (7000%)
+- [21:16] **Profile updated**: 7 sessions, top intent: exploration
+- [21:16] **Trace diagnosed**: 0 read failure(s), 0 cascade pattern(s)
+- [21:16] **Audit report**: 9 episodes, 11 skills
+- [21:16] **Episode archived**: `019e4061-6bdd-7000-a2d7-436749040700-1779196589625`
+- [21:16] **Skill extracted**: `system-reminder-you-stopped-without-ca` (quality: 60)
+- [21:16] **Intent classified**: bugfix (7000%)
+- [21:16] **Profile updated**: 6 sessions, top intent: exploration
+- [21:16] **Trace diagnosed**: 0 read failure(s), 0 cascade pattern(s)
+- [21:16] **Audit report**: 8 episodes, 10 skills
+- [21:16] **Episode archived**: `019e4061-6bdd-7000-a2d7-436749040700-1779196588435`
+- [21:16] **Skill extracted**: `background-conte` (quality: 60)
+- [21:16] **Intent classified**: bugfix (7000%)
+- [21:16] **Profile updated**: 5 sessions, top intent: exploration
+- [21:16] **Trace diagnosed**: 0 read failure(s), 0 cascade pattern(s)
+- [21:16] **Audit report**: 7 episodes, 9 skills
+- [21:16] **Episode archived**: `019e4061-6bdd-7000-a2d7-436749040700-1779196587311`
+- [21:04] **Skill extracted**: `daemon` (quality: 100)
+- [21:04] **Profile updated**: 4 sessions, top intent: exploration
+- [21:04] **Workflow mined**: exploration (9 tools)
+- [21:04] **Intent classified**: exploration (8500%)
+- [21:04] **Trace diagnosed**: 0 read failure(s), 0 cascade pattern(s)
+- [21:04] **Audit report**: 6 episodes, 8 skills
+- [21:04] **Episode archived**: `019e4053-acaf-7000-b521-000810802717-1779195686063`
+- [21:04] **Skill extracted**: `bunfs-root-omp` (quality: 100)
+- [21:04] **Profile updated**: 3 sessions, top intent: exploration
+- [21:04] **Workflow mined**: configuration (6 tools)
+- [21:04] **Intent classified**: configuration (9500%)
+- [21:04] **Trace diagnosed**: 0 read failure(s), 0 cascade pattern(s)
+- [21:04] **Audit report**: 5 episodes, 7 skills
+- [21:04] **Episode archived**: `019e4053-acaf-7000-b521-000810802717-1779195687331`
+- [21:02] **Skill extracted**: `scheduler` (quality: 93)
+- [21:02] **Profile updated**: 2 sessions, top intent: exploration
+- [21:02] **Workflow mined**: feature-add (39 tools)
+- [21:02] **Intent classified**: feature-add (9500%)
+- [21:02] **Trace diagnosed**: 0 read failure(s), 6 cascade pattern(s)
+- [21:02] **Skill extracted**: `5` (quality: 68)
+- [21:02] **Audit report**: 4 episodes, 3 skills
+- [21:02] **Episode archived**: `019e4047-4e57-7000-a6a0-d9860037f0c4-1779194875480`
+- [21:01] **Profile updated**: 3 sessions, top intent: exploration
+- [21:01] **Workflow mined**: exploration (4 tools)
+- [21:01] **Intent classified**: exploration (8500%)
+- [21:01] **Trace diagnosed**: 0 read failure(s), 0 cascade pattern(s)
+- [21:01] **Audit report**: 3 episodes, 3 skills
+- [21:01] **Episode archived**: `019e4051-5aab-7000-a173-e1d01c4d5c6a-1779195533995`
+- [21:00] **Skill extracted**: `ask-llm` (quality: 100)
+- [20:59] **Profile updated**: 2 sessions, top intent: exploration
+- [20:59] **Workflow mined**: exploration (4 tools)
+- [20:59] **Intent classified**: exploration (9500%)
+_... and 10 more events_
+
+---
+*Generated on 2026-05-20T08:25:11.951Z | 155 events*

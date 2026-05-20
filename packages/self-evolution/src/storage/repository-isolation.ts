@@ -95,7 +95,6 @@ export const STORAGE_ISOLATION_CONSTRAINTS: IsolationConstraint[] = [
 	// Table access constraints
 	createTableAccessConstraint("skills"),
 	createTableAccessConstraint("episodes"),
-	createTableAccessConstraint("conventions"),
 	createTableAccessConstraint("profiles"),
 	createTableAccessConstraint("nudges"),
 	createTableAccessConstraint("effectiveness"),

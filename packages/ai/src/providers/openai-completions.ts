@@ -900,11 +900,9 @@ function buildParams(
 	maybeAddOpenRouterAnthropicCacheControl(model, messages);
 	const supportsReasoningParams = model.provider !== "github-copilot";
 
-	// Kimi (including via OpenRouter) calculates TPM rate limits based on max_tokens, not actual output.
-	// Always send max_tokens to avoid their high default causing rate limit issues.
-	// Note: Direct kimi-code provider is handled by the dedicated Kimi provider in kimi.ts.
-	const isKimi = model.id.includes("moonshotai/kimi");
-	const effectiveMaxTokens = options?.maxTokens ?? (isKimi ? model.maxTokens : undefined);
+	// Send max_tokens explicitly when available — needed by providers like DashScope
+	// that reject requests without it or whose default is out of valid range.
+	const effectiveMaxTokens = options?.maxTokens ?? model.maxTokens;
 
 	const requestModelId = model.provider === "fireworks" ? toFireworksWireModelId(model.id) : model.id;
 	const params: OpenAICompletionsSamplingParams = {

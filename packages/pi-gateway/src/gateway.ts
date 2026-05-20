@@ -23,7 +23,7 @@ export class Gateway {
 
 	constructor(config: GatewayConfig) {
 		this.#config = config;
-		this.#bridge = new AgentBridge(config.agent);
+		this.#bridge = new AgentBridge(config.agent ?? {});
 	}
 
 	async start(): Promise<void> {
@@ -49,6 +49,14 @@ export class Gateway {
 		}
 
 		// Connect all channels
+
+		// Start agent bridge (RPC process)
+		try {
+			await this.#bridge.start();
+			logger.debug("Agent bridge started");
+		} catch (err) {
+			logger.error("Failed to start agent bridge", { error: String(err) });
+		}
 		await this.#registry.connectAll(async msg => this.#handleInboundMessage(msg));
 
 		this.#running = true;
@@ -59,6 +67,7 @@ export class Gateway {
 		if (!this.#running) return;
 
 		logger.debug("Stopping gateway...");
+		this.#bridge.stop();
 		await this.#registry.disconnectAll();
 		this.#store?.close();
 		this.#running = false;

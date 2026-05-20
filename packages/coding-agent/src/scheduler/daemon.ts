@@ -5,11 +5,15 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { logger } from "@oh-my-pi/pi-utils";
 import { SchedulerEngine } from "./engine";
+import { appendExecutionLog } from "./execution-log";
 import { executeScheduledCommand } from "./executor";
+import { SchedulerFileStore } from "./file-store";
 import { SchedulerDbStorage } from "./storage";
-import type { DaemonOptions, DaemonStatus, ScheduledTask } from "./types";
+import type { DaemonOptions, DaemonStatus, ScheduledTask, SchedulerConfig } from "./types";
 import {
 	clearDaemonPid,
+	DEFAULT_SCHEDULER_CONFIG,
+	getSchedulerDir,
 	getSchedulerLogPath,
 	getSchedulerPidPath,
 	isDaemonRunning,
@@ -17,13 +21,19 @@ import {
 	writeDaemonPid,
 } from "./types";
 
+const SCHEDULER_DIR_MODE = 0o700;
+const SCHEDULER_LOCK_NAME = ".scheduler.lock";
+
 export class SchedulerDaemon {
 	readonly #dbPath: string;
 	readonly #ompBinary: string;
 	readonly #foreground: boolean;
+	readonly #config: SchedulerConfig;
 	#storage?: SchedulerDbStorage;
 	#engine?: SchedulerEngine;
+	#fileStore?: SchedulerFileStore;
 	#pidPath: string;
+	#lockPath: string;
 	#started = false;
 
 	constructor(options: DaemonOptions) {
@@ -31,6 +41,12 @@ export class SchedulerDaemon {
 		this.#ompBinary = options.ompBinary;
 		this.#foreground = options.foreground ?? false;
 		this.#pidPath = getSchedulerPidPath();
+		this.#lockPath = path.join(getSchedulerDir(), SCHEDULER_LOCK_NAME);
+		this.#config = {
+			...DEFAULT_SCHEDULER_CONFIG,
+			taskDir: path.join(getSchedulerDir(), "scheduler", "tasks"),
+			...(options.config ?? {}),
+		};
 	}
 
 	start(): void {
@@ -49,10 +65,30 @@ export class SchedulerDaemon {
 			return;
 		}
 
+		// Acquire mkdir-based lock — POSIX-atomic, auto-released on process exit
+		try {
+			fs.mkdirSync(this.#lockPath, { mode: SCHEDULER_DIR_MODE });
+		} catch (err: unknown) {
+			if ((err as NodeJS.ErrnoException).code === "EEXIST") {
+				logger.warn("Scheduler daemon is already running (lock exists)");
+				return;
+			}
+			throw err;
+		}
+
 		this.#storage = new SchedulerDbStorage(this.#dbPath);
+
+		// Initialize file store and sync to DB
+		this.#fileStore = new SchedulerFileStore(this.#config.taskDir, this.#storage);
+		const syncResult = this.#fileStore.syncToDb();
+		if (syncResult.added > 0 || syncResult.removed > 0 || syncResult.updated > 0) {
+			logger.debug("File store initial sync", syncResult);
+		}
+
 		this.#engine = new SchedulerEngine({
 			storage: this.#storage,
 			onTrigger: this.#onTrigger.bind(this),
+			config: this.#config,
 		});
 
 		this.#engine.start();
@@ -61,7 +97,10 @@ export class SchedulerDaemon {
 
 		this.#setupSignalHandlers();
 
-		logger.debug("Scheduler daemon started", { pid: process.pid });
+		logger.debug("Scheduler daemon started", {
+			pid: process.pid,
+			taskDir: this.#config.taskDir,
+		});
 	}
 
 	stop(): void {
@@ -74,6 +113,14 @@ export class SchedulerDaemon {
 
 		this.#storage?.close();
 		this.#storage = undefined;
+		this.#fileStore = undefined;
+
+		// Release lock
+		try {
+			fs.rmdirSync(this.#lockPath);
+		} catch {
+			// ignore — lock may have been cleaned up by a signal handler
+		}
 
 		this.#started = false;
 
@@ -92,12 +139,16 @@ export class SchedulerDaemon {
 	async #onTrigger(task: ScheduledTask, executionId: string): Promise<void> {
 		if (!this.#storage) return;
 
+		const startedAt = Date.now();
 		const { exitCode, output, stderr, timedOut } = await executeScheduledCommand(task.command, {
 			taskType: task.taskType,
 			timeoutMs: task.timeoutMs,
 			ompBinary: this.#ompBinary,
+			skills: task.skills,
+			preScript: task.preScript,
 		});
 		const endedAt = Date.now();
+		const durationMs = endedAt - startedAt;
 
 		this.#storage.updateExecution(executionId, {
 			status: exitCode === 0 ? "success" : "failure",
@@ -111,6 +162,19 @@ ${output}`
 ${stderr}`
 				: stderr,
 			endedAt,
+		});
+
+		// Append execution log to JSONL
+		const finalOutput = timedOut ? `[TIMED OUT after ${task.timeoutMs ?? 30_000}ms]\n${output}` : output;
+		const finalStderr = timedOut ? `[TIMED OUT]\n${stderr}` : stderr;
+		appendExecutionLog(task.name, {
+			id: executionId,
+			ts: endedAt,
+			exitCode,
+			status: exitCode === 0 ? "success" : "failure",
+			durationMs,
+			output: finalOutput,
+			stderr: finalStderr,
 		});
 
 		if (exitCode !== 0 || timedOut) {

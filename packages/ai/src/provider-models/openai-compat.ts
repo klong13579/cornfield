@@ -2095,7 +2095,6 @@ const MODELS_DEV_PROVIDER_DESCRIPTORS_CODING_PLANS: readonly ModelsDevProviderDe
 		"https://coding.dashscope.aliyuncs.com/v1",
 		{
 			defaultContextWindow: 1000000,
-			defaultMaxTokens: 65536,
 		},
 	),
 ];

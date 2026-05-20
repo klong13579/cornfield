@@ -1,15 +1,12 @@
 /**
- * Agent Bridge — forwards IM messages to the OMP agent and returns responses.
- *
- * Uses `omp -p` (non-interactive print mode) to process messages and capture output.
+ * Agent Bridge — forwards IM messages to OMP via RPC mode.
  *
  * Architecture:
- *   [DingTalk Message] → AgentBridge.forward() → `omp -p --no-session "msg"` → stdout → [Reply]
+ *   [DingTalk Message] → AgentBridge.forward() → omp --mode rpc → JSON-line protocol → [Reply]
  *
- * Future improvements:
- * - Session persistence per conversation (`--session-dir` + `--resume`)
- * - Streaming responses (progressive output instead of wait-for-completion)
- * - Tool result rendering (format file edits, bash output for IM)
+ * Spawns `omp --mode rpc` as a long-running child process. Communicates via
+ * the RPC JSON-line protocol (stdin/stdout). Handles process lifecycle: spawn,
+ * crash detection, and recovery with exponential backoff.
  */
 
 import { logger } from "@oh-my-pi/pi-utils";
@@ -20,174 +17,345 @@ export interface AgentBridgeOptions {
 	ompPath?: string;
 	/** Model to use (default: undefined = omp default) */
 	model?: string;
-	/** Session directory for persistence (default: undefined = ephemeral) */
-	sessionDir?: string;
 	/** Maximum time to wait for agent response in ms (default: 120000) */
 	timeoutMs?: number;
 	/** Working directory for agent execution (default: process.cwd()) */
 	cwd?: string;
+	/** Max retries for RPC process crash recovery (default: 3) */
+	maxCrashRetries?: number;
+	/** Base delay for crash recovery backoff in ms (default: 1000) */
+	crashBackoffMs?: number;
+}
+
+/** Agent event from RPC stream */
+interface AgentEvent {
+	type: string;
+	message?: {
+		role?: string;
+		content?: Array<{ type: string; text?: string }>;
+	};
+	text?: string;
 }
 
 export class AgentBridge {
+	#proc: { pid: number; kill: () => void } | null = null;
+	#stdinWriter?: { write: (data: Uint8Array) => void };
+	#ready = false;
+	#pendingPrompts = new Map<string, { resolve: (events: AgentEvent[]) => void; reject: (error: Error) => void }>();
+	#eventBuffer: string[] = [];
+	#crashCount = 0;
 	#options: AgentBridgeOptions;
 
 	constructor(options: AgentBridgeOptions = {}) {
 		this.#options = options;
 	}
 
+	// ═══════════════════════════════════════════════════════════════
+	// Process Lifecycle
+	// ═══════════════════════════════════════════════════════════════
+
+	async start(): Promise<void> {
+		await this.#spawnAndWaitReady();
+	}
+
+	stop(): void {
+		this.#crashCount = 0;
+		this.#ready = false;
+		if (this.#proc) {
+			this.#proc.kill();
+			this.#proc = null;
+		}
+		this.#stdinWriter = undefined;
+		const error = new Error("Agent bridge stopped");
+		for (const pending of this.#pendingPrompts.values()) {
+			pending.reject(error);
+		}
+		this.#pendingPrompts.clear();
+	}
+
+	get isRunning(): boolean {
+		return this.#ready && this.#proc !== null;
+	}
+
+	// ═══════════════════════════════════════════════════════════════
+	// Message Forwarding
+	// ═══════════════════════════════════════════════════════════════
+
 	/**
-	 * Forward a message to the OMP agent and return the response text.
-	 *
-	 * Spawns `omp -p --no-session <message>` and captures stdout.
-	 * Returns null if the agent fails or times out.
+	 * Forward a message to OMP and return the assistant's response text.
 	 */
-	async forward(msg: InboundMessage, session: SessionRecord): Promise<string | null> {
+	async forward(msg: InboundMessage, _session: SessionRecord): Promise<string | null> {
 		const text = this.#extractText(msg);
 		if (!text.trim()) {
 			logger.debug("Empty message, skipping agent");
 			return null;
 		}
 
+		if (!this.isRunning) {
+			logger.warn("Agent bridge not running, attempting restart");
+			await this.#spawnAndWaitReady();
+		}
+
 		logger.debug("Forwarding to agent", {
 			userId: msg.userId,
 			conversationId: msg.conversationId,
 			messageLength: text.length,
-			sessionId: session.id,
 		});
 
-		const ompPath = this.#options.ompPath ?? "omp";
 		const timeoutMs = this.#options.timeoutMs ?? 120_000;
 
-		// Build omp command arguments
-		const args = ["-p"];
-		if (session.ompSessionPath) {
-			args.push("--resume", session.ompSessionPath);
-		} else {
-			args.push("--no-session");
-		}
-		if (this.#options.model) {
-			args.push("--model", this.#options.model);
-		}
-		if (this.#options.sessionDir) {
-			args.push("--session-dir", this.#options.sessionDir);
-		}
-		args.push(text);
-
 		try {
-			const result = await this.#spawnAgent(ompPath, args, timeoutMs);
+			const events = await this.#promptAndWait(text, timeoutMs);
+			const response = this.#extractAssistantText(events);
 
-			if (result.error) {
-				logger.error("Agent execution failed", { error: result.error });
-				return `执行出错：${result.error}`;
-			}
-
-			const response = this.#formatResponse(this.#stripAnsi(result.stdout).trim());
 			if (!response) {
 				logger.warn("Agent returned empty response");
 				return "（Agent 未返回内容）";
 			}
 
-			logger.debug("Agent responded", {
-				responseLength: response.length,
-				exitCode: result.exitCode,
-			});
-
-			return response;
+			const formatted = this.#formatResponse(response.trim());
+			logger.debug("Agent responded", { responseLength: formatted.length });
+			return formatted;
 		} catch (err) {
+			if (this.#isCrashError(err)) {
+				logger.warn("Agent process crashed, attempting recovery");
+				await this.#attemptRecovery();
+				return "系统正在恢复中，请稍后再试。";
+			}
 			const message = err instanceof Error ? err.message : String(err);
 			logger.error("Agent bridge failed", { error: message });
 			return `系统错误：${message}`;
 		}
 	}
 
-	// ═══════════════════════════════════════════════════════════════════
-	// Private
-	// ═══════════════════════════════════════════════════════════════════
+	// ═══════════════════════════════════════════════════════════════
+	// RPC Protocol
+	// ═══════════════════════════════════════════════════════════════
 
-	async #spawnAgent(
-		command: string,
-		args: string[],
-		timeoutMs: number,
-	): Promise<{ stdout: string; stderr: string; exitCode: number; error?: string }> {
-		const { promise, resolve } = Promise.withResolvers<{
-			stdout: string;
-			stderr: string;
-			exitCode: number;
-			error?: string;
-		}>();
+	async #spawnAndWaitReady(): Promise<void> {
+		if (this.#proc) {
+			this.#proc.kill();
+			this.#proc = null;
+		}
+		this.#ready = false;
+		this.#eventBuffer = [];
 
-		const proc = Bun.spawn([command, ...args], {
+		const ompPath = this.#options.ompPath ?? "omp";
+		const args = ["--mode", "rpc"];
+		if (this.#options.model) {
+			args.push("--model", this.#options.model);
+		}
+
+		logger.debug("Spawning agent RPC process", { ompPath, args });
+
+		const proc = Bun.spawn([ompPath, ...args], {
 			stdout: "pipe",
 			stderr: "pipe",
+			stdin: "pipe",
 			cwd: this.#options.cwd ?? process.cwd(),
 			env: { ...process.env },
 		});
 
-		// Timeout handler
+		// WritableStream writer for stdin
+		const stdinWriter = proc.stdin.getWriter();
+
+		this.#proc = { pid: proc.pid, kill: () => proc.kill() };
+		this.#stdinWriter = {
+			write: (data: Uint8Array) => {
+				stdinWriter.write(data);
+			},
+		};
+
+		// Process stdout lines asynchronously
+		void this.#readLines(proc.stdout as ReadableStream<Uint8Array>).then(async lines => {
+			for await (const line of lines) {
+				this.#handleRpcLine(line);
+			}
+		});
+
+		// Drain stderr (non-blocking)
+		void this.#readLines(proc.stderr as ReadableStream<Uint8Array>).then(async lines => {
+			for await (const _line of lines) {
+				// stderr logging only, no action needed
+			}
+		});
+
+		// Wait for "ready" signal or process exit
+		const { promise, resolve, reject } = Promise.withResolvers<void>();
+		let settled = false;
+
 		const timeout = setTimeout(() => {
-			proc.kill("SIGTERM");
-			resolve({
-				stdout: "",
-				stderr: "",
-				exitCode: -1,
-				error: `Agent timed out after ${timeoutMs}ms`,
-			});
+			if (settled) return;
+			settled = true;
+			proc.kill();
+			reject(new Error("Agent RPC process timed out waiting for ready signal"));
+		}, 30000);
+
+		const checkReady = setInterval(() => {
+			if (settled) return;
+			if (this.#ready) {
+				settled = true;
+				clearTimeout(timeout);
+				clearInterval(checkReady);
+				resolve();
+			}
+		}, 50);
+
+		void proc.exited.then(exitCode => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timeout);
+			clearInterval(checkReady);
+			reject(new Error(`Agent RPC process exited with code ${exitCode} before ready`));
+		});
+
+		try {
+			await promise;
+			this.#crashCount = 0;
+			logger.debug("Agent RPC process ready", { pid: proc.pid });
+		} catch (err) {
+			proc.kill();
+			this.#proc = null;
+			this.#stdinWriter = undefined;
+			throw err;
+		}
+	}
+
+	#handleRpcLine(line: string): void {
+		try {
+			const parsed = JSON.parse(line);
+
+			if (parsed.type === "ready") {
+				this.#ready = true;
+				return;
+			}
+
+			// Collect agent events for pending prompts
+			this.#eventBuffer.push(line);
+		} catch {
+			// Non-JSON line — ignore
+		}
+	}
+
+	async #promptAndWait(message: string, timeoutMs: number): Promise<AgentEvent[]> {
+		this.#eventBuffer = [];
+
+		const { promise, resolve, reject } = Promise.withResolvers<AgentEvent[]>();
+		let settled = false;
+
+		const timeout = setTimeout(() => {
+			if (settled) return;
+			settled = true;
+			reject(new Error(`Agent RPC timed out after ${timeoutMs}ms`));
 		}, timeoutMs);
 
-		// Capture output
-		const stdoutChunks: Uint8Array[] = [];
-		const stderrChunks: Uint8Array[] = [];
-
-		const stdoutReader = (proc.stdout as ReadableStream<Uint8Array>).getReader();
-		const stderrReader = (proc.stderr as ReadableStream<Uint8Array>).getReader();
-
-		// Read stdout
-		(async () => {
-			try {
-				while (true) {
-					const { done, value } = await stdoutReader.read();
-					if (done) break;
-					stdoutChunks.push(value);
-				}
-			} catch {
-				// ignore
-			}
-		})();
-
-		// Read stderr
-		(async () => {
-			try {
-				while (true) {
-					const { done, value } = await stderrReader.read();
-					if (done) break;
-					stderrChunks.push(value);
-				}
-			} catch {
-				// ignore
-			}
-		})();
-
-		// Wait for process exit
-		proc.exited.then(exitCode => {
+		// Write prompt to stdin
+		const frame = `${JSON.stringify({ type: "prompt", message })}\n`;
+		if (this.#stdinWriter) {
+			this.#stdinWriter.write(new TextEncoder().encode(frame));
+		} else {
 			clearTimeout(timeout);
-			const stdout = this.#decodeChunks(stdoutChunks);
-			const stderr = this.#decodeChunks(stderrChunks);
-			resolve({ stdout, stderr, exitCode });
-		});
+			reject(new Error("Agent process not running"));
+			return promise;
+		}
+
+		// Check event buffer for agent_end (events processed by #handleRpcLine in real-time)
+		const checkInterval = setInterval(() => {
+			if (settled) {
+				clearInterval(checkInterval);
+				return;
+			}
+			const events: AgentEvent[] = [];
+			let agentEndFound = false;
+			for (const line of this.#eventBuffer) {
+				try {
+					const parsed = JSON.parse(line);
+					events.push(parsed);
+					if (parsed.type === "agent_end") {
+						agentEndFound = true;
+						break;
+					}
+				} catch {
+					// skip invalid JSON
+				}
+			}
+			if (agentEndFound) {
+				settled = true;
+				clearTimeout(timeout);
+				clearInterval(checkInterval);
+				resolve(events);
+			}
+		}, 100);
 
 		return promise;
 	}
 
-	#decodeChunks(chunks: Uint8Array[]): string {
-		if (chunks.length === 0) return "";
-		const total = chunks.reduce((sum, c) => sum + c.length, 0);
-		const merged = new Uint8Array(total);
-		let offset = 0;
-		for (const chunk of chunks) {
-			merged.set(chunk, offset);
-			offset += chunk.length;
+	#extractAssistantText(events: AgentEvent[]): string | null {
+		const assistantEvents = events.filter(e => e.type === "message_end" && e.message?.role === "assistant");
+		const last = assistantEvents[assistantEvents.length - 1];
+		if (!last?.message?.content) return null;
+		const textContent = last.message.content.find(c => c.type === "text");
+		return textContent?.text ?? null;
+	}
+
+	// ═══════════════════════════════════════════════════════════════
+	// Crash Recovery
+	// ═══════════════════════════════════════════════════════════════
+
+	#isCrashError(err: unknown): boolean {
+		if (err instanceof Error) {
+			const msg = err.message;
+			return msg.includes("exited") || msg.includes("before ready") || msg.includes("not running");
 		}
-		return new TextDecoder().decode(merged);
+		return false;
+	}
+
+	async #attemptRecovery(): Promise<void> {
+		const maxRetries = this.#options.maxCrashRetries ?? 3;
+		const baseDelay = this.#options.crashBackoffMs ?? 1000;
+
+		if (this.#crashCount >= maxRetries) {
+			logger.error("Max crash retries exceeded, giving up", {
+				crashCount: this.#crashCount,
+				maxRetries,
+			});
+			return;
+		}
+
+		this.#crashCount++;
+		const delay = baseDelay * 2 ** (this.#crashCount - 1);
+		logger.warn("Agent process crashed, restarting", {
+			crashCount: this.#crashCount,
+			delayMs: delay,
+		});
+
+		await Bun.sleep(delay);
+		await this.#spawnAndWaitReady();
+	}
+
+	// ═══════════════════════════════════════════════════════════════
+	// Helpers
+	// ═══════════════════════════════════════════════════════════════
+
+	async *#readLines(stream: ReadableStream<Uint8Array>): AsyncGenerator<string> {
+		const reader = stream.getReader();
+		let buffer = "";
+		try {
+			while (true) {
+				const { done, value } = await reader.read();
+				if (done) break;
+				buffer += new TextDecoder().decode(value);
+				let idx = buffer.indexOf("\n");
+				while (idx !== -1) {
+					const line = buffer.slice(0, idx).trim();
+					buffer = buffer.slice(idx + 1);
+					if (line) yield line;
+					idx = buffer.indexOf("\n");
+				}
+			}
+		} catch {
+			if (buffer.trim()) yield buffer.trim();
+		}
 	}
 
 	#extractText(msg: InboundMessage): string {
@@ -197,40 +365,17 @@ export class AgentBridge {
 		return "[non-text message]";
 	}
 
-	/**
-	 * Format agent response for IM delivery.
-	 * - Truncate overly long output
-	 * - Summarize tool call results
-	 * - Handle code blocks and diffs
-	 */
 	#formatResponse(text: string): string {
 		const MAX_LENGTH = 2000;
 		const TRUNCATE_NOTICE = "\n\n...(内容已截断，请使用终端查看完整输出)";
-
-		if (text.length <= MAX_LENGTH) {
-			return text;
-		}
-
-		// Try to truncate at a paragraph boundary
+		if (text.length <= MAX_LENGTH) return text;
 		let cutAt = text.lastIndexOf("\n\n", MAX_LENGTH - TRUNCATE_NOTICE.length);
 		if (cutAt < MAX_LENGTH * 0.5) {
-			// No good paragraph boundary, try line break
 			cutAt = text.lastIndexOf("\n", MAX_LENGTH - TRUNCATE_NOTICE.length);
 		}
 		if (cutAt < MAX_LENGTH * 0.5) {
-			// Fallback to hard cut
 			cutAt = MAX_LENGTH - TRUNCATE_NOTICE.length;
 		}
-
 		return text.slice(0, cutAt) + TRUNCATE_NOTICE;
-	}
-
-	/**
-	 * Strip ANSI escape codes from text.
-	 * OMP output may contain color codes, progress indicators, etc.
-	 */
-	#stripAnsi(text: string): string {
-		// eslint-disable-next-line no-control-regex
-		return text.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
 	}
 }

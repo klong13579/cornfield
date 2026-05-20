@@ -3,6 +3,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { type AgentTool, INTENT_FIELD } from "@oh-my-pi/pi-agent-core";
+import { countTokens } from "@oh-my-pi/pi-natives";
 import { buildSystemPrompt, buildSystemPromptToolMetadata } from "@oh-my-pi/pi-coding-agent/system-prompt";
 import { prompt } from "@oh-my-pi/pi-utils";
 import { Type } from "@sinclair/typebox";
@@ -184,6 +185,143 @@ describe("system Handlebars prompt templates", () => {
 			tools: baseTools.filter((tool: string) => tool !== "inspect_image"),
 		});
 		expect(withoutInspectImage).not.toContain("### Image inspection");
+	});
+
+	test("system-prompt lists AGENTS noYieldRules once in hard-constraints", async () => {
+		const templatePath = path.join(systemPromptsDir, "system-prompt.md");
+		const template = await Bun.file(templatePath).text();
+		const sampleRule = "- NEVER commit untracked secrets to the repository";
+		const rendered = prompt.render(template, {
+			...baseRenderContext,
+			noYieldRules: [sampleRule, "- MUST NOT use console.log in coding-agent"],
+		});
+
+		expect(rendered).toContain("<hard-constraints>");
+		expect(rendered).toContain(sampleRule);
+		expect(rendered).not.toContain("<no-yield-rules>");
+		expect(rendered).not.toContain("****MUST NOT**");
+		expect(countOccurrences(rendered, sampleRule)).toBe(1);
+		expect(rendered).toContain("<contract>");
+		expect(rendered).toContain("listed once in `<hard-constraints>`");
+	});
+
+	test("system-prompt critical block references identity tool actions", async () => {
+		const templatePath = path.join(systemPromptsDir, "system-prompt.md");
+		const template = await Bun.file(templatePath).text();
+		const rendered = prompt.render(template, baseRenderContext);
+
+		expect(rendered).toContain('action: "whoRu"');
+		expect(rendered).toContain('action: "whoisme"');
+		expect(rendered).toContain('action: "update_persona"');
+	});
+
+	test("buildSystemPrompt promotes AGENTS NEVER lines to hard-constraints without context duplication", async () => {
+		const neverRule = "- NEVER commit untracked secrets to the repository";
+		const guidance = "Prefer targeted bun tests for changed packages.";
+		await withTempDir(async dir => {
+			const agentsPath = path.join(dir, "AGENTS.md");
+			await fs.writeFile(agentsPath, ["# Project", "", neverRule, guidance].join("\n"));
+
+			const rendered = await buildSystemPrompt({
+				cwd: dir,
+				contextFiles: [{ path: agentsPath, content: await Bun.file(agentsPath).text() }],
+				skills: [],
+				rules: [],
+				toolNames: ["read"],
+			});
+
+			expect(rendered).toContain("<hard-constraints>");
+			expect(countOccurrences(rendered, neverRule)).toBe(1);
+			expect(rendered).toContain(guidance);
+			expect(rendered).not.toContain(`${neverRule}\n${guidance}`);
+		});
+	});
+
+	test("buildSystemPrompt omits AGENTS context file when only NEVER rules remain", async () => {
+		const neverRule = "- MUST NOT use console.log in coding-agent";
+		await withTempDir(async dir => {
+			const agentsPath = path.join(dir, "AGENTS.md");
+			await fs.writeFile(agentsPath, neverRule);
+
+			const rendered = await buildSystemPrompt({
+				cwd: dir,
+				contextFiles: [{ path: agentsPath, content: neverRule }],
+				skills: [],
+				rules: [],
+				toolNames: ["read"],
+			});
+
+			expect(rendered).toContain("<hard-constraints>");
+			expect(rendered).toContain(neverRule);
+			expect(rendered).not.toContain(`<file path="${agentsPath}">`);
+		});
+	});
+
+	test("buildSystemPrompt injects extracted NEVER rules only inside hard-constraints", async () => {
+		const sampleRule = "- NEVER disable tests to make CI pass";
+		await withTempDir(async dir => {
+			const agentsPath = path.join(dir, "AGENTS.md");
+			await fs.writeFile(
+				agentsPath,
+				["# Project", "", sampleRule, "- MUST NOT hand-edit models.json"].join("\n"),
+			);
+
+			const rendered = await buildSystemPrompt({
+				cwd: dir,
+				contextFiles: [{ path: agentsPath, content: await Bun.file(agentsPath).text() }],
+				skills: [],
+				rules: [],
+				toolNames: ["read"],
+			});
+
+			const hardConstraints = /<hard-constraints>[\s\S]*?<\/hard-constraints>/u.exec(rendered)?.[0] ?? "";
+			expect(hardConstraints).toContain(sampleRule);
+			expect(rendered).not.toContain("<no-yield-rules>");
+			expect(rendered).not.toContain("****MUST NOT**");
+			expect(countOccurrences(hardConstraints, sampleRule)).toBe(1);
+		});
+	});
+
+	test("buildSystemPrompt full fixture dedupes AGENTS NEVER rules across context and hard-constraints", async () => {
+		const neverRule = "- NEVER commit untracked secrets to the repository";
+		const agentsMd = ["# Agents", "", neverRule, "- MUST NOT use console.log in coding-agent", "Run bun check before yielding."].join(
+			"\n",
+		);
+		const rendered = await buildSystemPrompt({
+			cwd: os.tmpdir(),
+			contextFiles: [{ path: "/tmp/project/AGENTS.md", content: agentsMd }],
+			skills: baseRenderContext.skills as Array<{ name: string; description: string }>,
+			rules: baseRenderContext.rules as Array<{ name: string; description: string; globs: string[] }>,
+			toolNames: baseRenderContext.tools as string[],
+			appendSystemPrompt: "Appendix instructions",
+			alwaysApplyRules: [{ name: "validate-boundaries", content: "Validate inputs at boundaries.", path: "/tmp/rule.md" }],
+			intentField: INTENT_FIELD,
+			mcpDiscoveryMode: true,
+			mcpDiscoveryServerSummaries: ["github (2 tools)"],
+			eagerTasks: true,
+		});
+
+		expect(countOccurrences(rendered, neverRule)).toBe(1);
+		expect(rendered).toContain("Run bun check before yielding.");
+	});
+
+	test("buildSystemPrompt full fixture stays within token budget", async () => {
+		const rendered = await buildSystemPrompt({
+			cwd: os.tmpdir(),
+			contextFiles: [],
+			skills: baseRenderContext.skills as Array<{ name: string; description: string }>,
+			rules: baseRenderContext.rules as Array<{ name: string; description: string; globs: string[] }>,
+			toolNames: baseRenderContext.tools as string[],
+			appendSystemPrompt: "Appendix instructions",
+			alwaysApplyRules: [{ name: "validate-boundaries", content: "Validate inputs at boundaries.", path: "/tmp/rule.md" }],
+			intentField: INTENT_FIELD,
+			mcpDiscoveryMode: true,
+			mcpDiscoveryServerSummaries: ["github (2 tools)"],
+			eagerTasks: true,
+		});
+
+		expect(rendered).not.toContain("<no-yield-rules>");
+		expect(countTokens(rendered)).toBeLessThan(12_000);
 	});
 
 	test("system-prompt renders MCP discovery hint when enabled", async () => {

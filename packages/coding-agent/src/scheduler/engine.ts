@@ -3,8 +3,21 @@
  */
 import { logger } from "@oh-my-pi/pi-utils";
 import { Cron } from "croner";
-import type { EngineOptions, ScheduledTask, SchedulerStorage } from "./types";
-import { getNextRun, parseSchedule } from "./types";
+import type { EngineOptions, ScheduledTask, SchedulerConfig, SchedulerStorage } from "./types";
+import { DEFAULT_SCHEDULER_CONFIG, getNextRun, parseSchedule } from "./types";
+
+const MAX_RETRY_DELAY_MS = 300_000; // 5 min cap
+
+function getRetryDelay(backoffMs: number[], attemptIndex: number): number {
+	if (attemptIndex < backoffMs.length) {
+		return Math.min(backoffMs[attemptIndex]!, MAX_RETRY_DELAY_MS);
+	}
+	return Math.min(backoffMs[backoffMs.length - 1]! * 2, MAX_RETRY_DELAY_MS);
+}
+
+function _resolveConfig(partial?: Partial<SchedulerConfig>): SchedulerConfig {
+	return { ...DEFAULT_SCHEDULER_CONFIG, ...partial };
+}
 
 export class SchedulerEngine {
 	readonly #storage: SchedulerStorage;
@@ -162,28 +175,74 @@ export class SchedulerEngine {
 		const task = this.#taskMap.get(taskId);
 		if (!task || !this.#running) return;
 
-		const exec = this.#storage.recordExecution({
-			taskId: task.id,
-			startedAt: Date.now(),
-			status: "running",
-		});
+		const retryConfig = task.retry;
+		const maxAttempts = retryConfig?.maxAttempts ?? 0;
+		const backoffMs = retryConfig?.backoffMs ?? [10_000, 30_000, 60_000];
 
-		try {
-			await this.#onTrigger(task, exec.id);
-		} catch (error) {
-			logger.error("Task trigger failed", { taskId: task.id, error: String(error) });
-			this.#storage.updateExecution(exec.id, {
-				status: "failure",
-				endedAt: Date.now(),
+		let lastError: Error | undefined;
+		let succeeded = false;
+
+		for (let attempt = 0; attempt <= maxAttempts; attempt++) {
+			if (attempt > 0) {
+				const delay = getRetryDelay(backoffMs, attempt - 1);
+				logger.debug("Retrying task", { taskId, attempt, delayMs: delay });
+				await Bun.sleep(delay);
+			}
+
+			const exec = this.#storage.recordExecution({
+				taskId: task.id,
+				startedAt: Date.now(),
+				status: "running",
 			});
-		} finally {
-			const nextRun = getNextRun(task.cron);
-			const currentTask = this.#storage.getTask(task.id);
+
+			try {
+				await this.#onTrigger(task, exec.id);
+				this.#storage.updateExecution(exec.id, {
+					status: "success",
+					endedAt: Date.now(),
+				});
+				succeeded = true;
+				break;
+			} catch (error) {
+				lastError = error instanceof Error ? error : new Error(String(error));
+				this.#storage.updateExecution(exec.id, {
+					status: "failure",
+					endedAt: Date.now(),
+				});
+				logger.warn("Task attempt failed", {
+					taskId,
+					attempt,
+					error: lastError.message,
+				});
+			}
+		}
+
+		const currentTask = this.#storage.getTask(task.id);
+		const nextRun = getNextRun(task.cron);
+
+		if (succeeded) {
 			this.#storage.updateTask(task.id, {
 				lastRunAt: Date.now(),
 				runCount: (currentTask?.runCount ?? 0) + 1,
+				consecutiveFailures: 0,
 				nextRunAt: nextRun?.getTime(),
 			});
+		} else {
+			this.#storage.updateTask(task.id, {
+				lastRunAt: Date.now(),
+				runCount: (currentTask?.runCount ?? 0) + 1,
+				failCount: (currentTask?.failCount ?? 0) + 1,
+				consecutiveFailures: (currentTask?.consecutiveFailures ?? 0) + 1,
+				nextRunAt: nextRun?.getTime(),
+			});
+			if (lastError) {
+				logger.error("Task failed after all retries", {
+					taskId,
+					task: task.name,
+					maxAttempts,
+					error: lastError.message,
+				});
+			}
 		}
 	}
 }

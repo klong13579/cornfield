@@ -1,6 +1,6 @@
 # @oh-my-pi/self-evolution
 
-Self-evolution plugin for oh-my-pi. Automatically extracts reusable skills from agent sessions, learns project conventions, detects inefficiency patterns in real time, and retrieves relevant past experiences to improve future task performance.
+Self-evolution plugin for oh-my-pi. Automatically extracts reusable skills from agent sessions, extracts reusable learnings, detects inefficiency patterns in real time, and retrieves relevant past experiences to improve future task performance.
 
 ## Features
 
@@ -8,7 +8,7 @@ Self-evolution plugin for oh-my-pi. Automatically extracts reusable skills from 
 
 - **Automatic skill extraction**: Identifies reusable patterns from completed sessions (rule-based + optional LLM refinement)
 - **Episodic memory**: Archives session traces with full-text search (FTS5) for cross-session recall
-- **Experience injection**: Injects relevant past episodes, skills, and conventions into the system prompt before each session
+- **Experience injection**: Injects relevant past episodes, skills, and learnings into the system prompt before each session
 - **Skill versioning**: Keeps historical snapshots with rollback support and GEPA-style prompt optimization
 - **Heuristic quality scoring**: 0-100 multi-dimensional evaluation (success rate, tool diversity, pitfall coverage, description quality, user rating)
 
@@ -31,13 +31,6 @@ Self-evolution plugin for oh-my-pi. Automatically extracts reusable skills from 
   - Slow loops (high tool count, no file modifications — possible spinning)
   - Read-only after write (multiple reads after last modification, suggesting verification is complete)
 - **NudgeDeliverer**: Shows in-session hints with cooldown (30s) to prevent spam
-
-### Convention System (v2.5)
-
-- **Convention extraction**: Extracts project-specific rules from user dialogue — 5 types: `negative_rule`, `positive_rule`, `preference`, `project_fact`, `procedural_rule`
-- **Convention compliance**: Heuristic checker verifies whether the agent followed injected conventions during a session (file modification checks, tool usage checks)
-- **Convention feedback loop**: Tracks compliance/violation per session, surfaces violations in daily/audit reports
-
 ### Effectiveness Analysis (v2.5)
 
 - **EffectivenessAnalyzer**: Multi-dimensional scoring of injection outcomes:
@@ -144,9 +137,8 @@ agent_end:
   - classify intent → store in episode_intents
   - mine workflow pattern → store in workflow_patterns
   - update user profile → store in user_profiles
-  - extract conventions from dialogue → store in conventions
-  - check convention compliance for this session → store in convention_feedback
-  - if episodes were injected: analyze effectiveness → store in episode_effectiveness / skill_effectiveness
+  - extract learnings from session → store in learnings
+  - if learnings/episodes were injected: analyze effectiveness → store in episode_effectiveness / skill_effectiveness
     |
     v
 If significant (tool calls >= threshold): extract Skill (rule + optional LLM)
@@ -155,14 +147,14 @@ If significant (tool calls >= threshold): extract Skill (rule + optional LLM)
 before_agent_start next session:
   - classify current intent
   - retrieve relevant Episodes (context-aware scoring: intent + keyword + success + profile + effectiveness)
-  - retrieve relevant Skills and Conventions
+  - retrieve relevant Skills and Learnings
   - inject into system prompt
-  - track injected episode/skill/convention IDs for feedback
+  - track injected episode/skill/learning IDs for feedback
 ```
 
 ## Storage
 
-**Default:** project-local under `<project-root>/.omp/` (memory, evolution DB + projections, skills). This keeps **project isolation** — skills and conventions from one repo do not leak into another.
+**Default:** project-local under `<project-root>/.omp/` (memory, evolution DB + projections, skills). This keeps **project isolation** — skills and learnings from one repo do not leak into another.
 
 ```
 <repo>/.omp/
@@ -173,7 +165,6 @@ before_agent_start next session:
 │   └── rollout_summaries/
 ├── evolution/
 │   ├── evolution.db          # SQLite with WAL + FTS5 (evolution + memory tables)
-│   ├── conventions.md
 │   ├── system-diagnosis.md
 │   ├── user_profile.md
 │   ├── activity.log
@@ -187,7 +178,7 @@ Logical groupings inside the single database file:
 
 | Group | Tables |
 |---|---|
-| Evolution | `episodes`, `episodes_fts`, `skills`, `skill_versions`, `conventions`, `session_traces`, `regression_fixtures`, `regression_trials`, `evolution_escalations`, `episode_intents`, `workflow_patterns`, `user_profiles`, `episode_effectiveness`, `skill_effectiveness`, `episode_detailed_outcomes`, `episode_diagnoses`, `nudge_history`, `fit_scores`, `stats`, … |
+| Evolution | `episodes`, `episodes_fts`, `skills`, `skill_versions`, `learnings`, `session_traces`, `regression_fixtures`, `regression_trials`, `evolution_escalations`, `episode_intents`, `workflow_patterns`, `user_profiles`, `episode_effectiveness`, `skill_effectiveness`, `episode_detailed_outcomes`, `episode_diagnoses`, `nudge_history`, `fit_scores`, `stats`, … |
 | Memory | `threads`, `stage1_outputs`, `jobs`, `vector_embeddings` |
 
 Session transcripts (JSONL) stay in `~/.omp/agent/sessions/`. Auth and CLI settings use `~/.omp/agent/agent.db` — memory/evolution rows are **not** stored there anymore.
@@ -214,8 +205,7 @@ bun packages/self-evolution/scripts/backfill-episodes-from-sessions.ts --cwd /pa
 | `user_profiles` | Aggregated behavioral profile (tool frequency, transitions, intent distribution) |
 | `episode_effectiveness` | Injection tracking — times injected, helped, failed per episode |
 | `skill_effectiveness` | Injection tracking — times injected, helped, failed per skill |
-| `conventions` | Project rules — type, content, confidence, violation counters |
-| `convention_feedback` | Compliance records — per-session complied/violated with details |
+| `learnings` | Session-derived rules and preferences (V3, replaces conventions) |
 | `nudge_history` | Real-time nudge records — type, severity, message, suggestion |
 | `fit_scores` | Fit evaluation history — 5 dimension scores, verdict, trend |
 
@@ -250,10 +240,6 @@ DB=.omp/evolution/evolution.db
 # Recent episodes
 sqlite3 -header -column "$DB" \
   "SELECT substr(user_prompt,1,80) AS prompt, tool_call_count, completed_successfully FROM episodes ORDER BY timestamp DESC LIMIT 5;"
-
-# Convention lifecycle (not `status` — use lifecycle_state)
-sqlite3 -header -column "$DB" \
-  "SELECT lifecycle_state, COUNT(*) FROM conventions GROUP BY lifecycle_state;"
 
 # Regression fixtures (entries live in session_traces.trace_json, not fixtures)
 sqlite3 -header -column "$DB" \

@@ -8,6 +8,18 @@ export type ScheduleType = "cron" | "interval" | "once";
 
 export type TaskType = "shell" | "agent";
 
+export interface RetryConfig {
+	maxAttempts: number;
+	backoffMs: number[];
+	retryOn?: string[];
+}
+
+export interface SchedulerConfig {
+	enabled: boolean;
+	taskDir: string;
+	maxConcurrentRuns: number;
+}
+
 export interface ScheduledTask {
 	id: string;
 	name: string;
@@ -18,12 +30,28 @@ export interface ScheduledTask {
 	scheduleType?: "cron" | "interval" | "once";
 	taskType?: "shell" | "agent";
 	timeoutMs?: number;
+	retry?: RetryConfig;
+	skills?: string[];
+	preScript?: string;
+	consecutiveFailures: number;
 	createdAt: number;
 	updatedAt: number;
 	lastRunAt?: number;
 	nextRunAt?: number;
 	runCount: number;
 	failCount: number;
+}
+
+export interface TaskFileDefinition {
+	name: string;
+	description?: string;
+	cron: string;
+	command: string;
+	type?: "shell" | "agent";
+	timeoutMs?: number;
+	retry?: RetryConfig;
+	skills?: string[];
+	preScript?: string;
 }
 
 export interface TaskExecution {
@@ -47,18 +75,27 @@ export interface SchedulerStorage {
 	recordExecution(exec: Omit<TaskExecution, "id">): TaskExecution;
 	updateExecution(id: string, updates: Partial<TaskExecution>): void;
 	getExecutions(taskId: string, limit?: number): TaskExecution[];
+	pruneExecutions(maxAgeDays?: number, maxCount?: number): number;
 }
 
 export interface EngineOptions {
 	storage: SchedulerStorage;
 	onTrigger: (task: ScheduledTask, executionId: string) => Promise<void>;
+	config?: Partial<SchedulerConfig>;
 }
 
 export interface DaemonOptions {
 	dbPath: string;
 	ompBinary: string;
 	foreground?: boolean;
+	config?: Partial<SchedulerConfig>;
 }
+
+export const DEFAULT_SCHEDULER_CONFIG: SchedulerConfig = {
+	enabled: true,
+	taskDir: "", // resolved at init time
+	maxConcurrentRuns: 3,
+};
 
 export interface DaemonStatus {
 	running: boolean;
@@ -74,6 +111,7 @@ export type DaemonAction = "start" | "stop" | "status" | "restart";
 export const SCHEDULER_DB_NAME = "scheduler.db";
 export const SCHEDULER_PID_FILE = "scheduler.pid";
 export const SCHEDULER_LOG_FILE = "scheduler.log";
+export const SCHEDULER_SCRIPTS_DIR = "scripts";
 
 export function getSchedulerDir(): string {
 	const os = require("node:os");
@@ -94,6 +132,11 @@ export function getSchedulerPidPath(): string {
 export function getSchedulerLogPath(): string {
 	const path = require("node:path");
 	return path.join(getSchedulerDir(), SCHEDULER_LOG_FILE);
+}
+
+export function getSchedulerScriptsDir(): string {
+	const path = require("node:path");
+	return path.join(getSchedulerDir(), SCHEDULER_SCRIPTS_DIR);
 }
 
 export function generateTaskId(): string {
@@ -230,7 +273,8 @@ export function writeDaemonPid(pidPath: string, pid: number): void {
 	if (!fs.existsSync(dir)) {
 		fs.mkdirSync(dir, { recursive: true });
 	}
-	fs.writeFileSync(pidPath, String(pid), { flag: "w" });
+	fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+	fs.writeFileSync(pidPath, String(pid), { mode: 0o600, flag: "w" });
 }
 
 export function clearDaemonPid(pidPath: string): void {

@@ -75,6 +75,11 @@ export interface AuditReport {
 	};
 	admission: AdmissionAuditStats;
 	runtime?: AuditRuntimeContext;
+	trend?: {
+		recentIntents: Array<{ intent: string; count: number }>;
+		phaseShift: string | null;
+		suggestion: string | null;
+	};
 	issues: string[];
 	recommendations: string[];
 }
@@ -320,6 +325,52 @@ export async function generateAuditReport(
 		);
 	}
 
+	// Compute session intent trend (recent vs historical)
+	let trend: AuditReport["trend"] = undefined;
+	try {
+		const recentRows = db
+			.prepare(`
+				SELECT ei.intent, COUNT(*) as cnt
+				FROM episode_intents ei
+				JOIN episodes e ON ei.episode_id = e.id
+				WHERE e.timestamp > ?
+				GROUP BY ei.intent
+				ORDER BY cnt DESC
+			`)
+			.all(Date.now() - 7 * 24 * 60 * 60 * 1000) as Array<{ intent: string; cnt: number }>;
+
+		const totalRecent = recentRows.reduce((s, r) => s + r.cnt, 0);
+		if (totalRecent >= 3) {
+			const topRecent = recentRows[0]?.intent ?? "unknown";
+			const historicalRows = db
+				.prepare(`SELECT ei.intent, COUNT(*) as cnt FROM episode_intents ei
+					JOIN episodes e ON ei.episode_id = e.id
+					WHERE e.timestamp <= ?
+					GROUP BY ei.intent ORDER BY cnt DESC LIMIT 1`)
+				.all(Date.now() - 7 * 24 * 60 * 60 * 1000) as Array<{ intent: string; cnt: number }>;
+			const topHistorical = historicalRows[0]?.intent ?? "unknown";
+
+			let phaseShift: string | null = null;
+			let suggestion: string | null = null;
+			if (topRecent !== topHistorical && topHistorical !== "unknown") {
+				phaseShift = `${topHistorical} → ${topRecent}`;
+				suggestion = `Intent shift detected: from "${topHistorical}" to "${topRecent}". ${topRecent === "exploration" ? "User is exploring the codebase — prioritize discovery tools." : topRecent === "bugfix" ? "User is fixing issues — inject troubleshooting skills." : topRecent === "feature-add" || topRecent === "optimization" ? "User is building/optimizing — inject architecture and pattern skills." : "Adapt injection strategy to match current intent."}`;
+			}
+
+			trend = {
+				recentIntents: recentRows.map(r => ({ intent: r.intent, count: r.cnt })),
+				phaseShift,
+				suggestion,
+			};
+
+			if (phaseShift) {
+				recommendations.push(suggestion!);
+			}
+		}
+	} catch {
+		// Trend computation is best-effort
+	}
+
 	const report: AuditReport = {
 		generatedAt: Date.now(),
 		episodes: {
@@ -388,6 +439,7 @@ export async function generateAuditReport(
 		},
 		admission,
 		runtime,
+		trend,
 		issues,
 		recommendations,
 	};
@@ -461,6 +513,22 @@ export function formatAuditReport(report: AuditReport): string {
 	lines.push("### 工作流模式");
 	lines.push(`- 总模式: ${report.workflows.totalPatterns} | 有意义的 (>=2次): ${report.workflows.meaningfulPatterns}`);
 	lines.push("");
+
+	// Trend analysis
+	if (report.trend) {
+		lines.push("### 阶段变化");
+		lines.push("- 最近 7 天意图分布:");
+		for (const ri of report.trend.recentIntents) {
+			lines.push(`  - ${ri.intent}: ${ri.count} 次`);
+		}
+		if (report.trend.phaseShift) {
+			lines.push(`- 检测到阶段变化: **${report.trend.phaseShift}**`);
+			lines.push(`- ${report.trend.suggestion}`);
+		} else {
+			lines.push("- 无显著阶段变化");
+		}
+		lines.push("");
+	}
 
 	// ── 4. 问题 ──
 	if (report.issues.length > 0) {

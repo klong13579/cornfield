@@ -60,7 +60,7 @@ export interface TrendReport {
 /**
  * Implicit Convention mined from Session Logs.
  */
-export interface ImplicitConvention {
+export interface ProceduralRule {
 	rule: string;
 	confidence: number;
 	sourceSessionId?: string;

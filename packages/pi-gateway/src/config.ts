@@ -27,9 +27,11 @@ const dingtalkConfigSchema = channelConfigSchema.extend({
 });
 
 const agentConfigSchema = z.object({
-	ompPath: z.string().optional(),
+	omPath: z.string().optional(),
 	model: z.string().optional(),
 	maxConcurrentSessions: z.number().int().positive().optional(),
+	maxCrashRetries: z.number().int().positive().optional(),
+	crashBackoffMs: z.number().int().positive().optional(),
 });
 
 const sessionConfigSchema = z.object({

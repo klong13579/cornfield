@@ -161,7 +161,7 @@ export const createSelfEvolutionExtension: ExtensionFactory = api => {
 	});
 	api.registerFlag("self-evolution-regression-replay", {
 		type: "string",
-		default: "heuristic",
+		default: "llm",
 		description:
 			"Regression replay backend: heuristic | llm | subagent (subagent spawns omp -p with --no-self-evolution)",
 	});
@@ -651,7 +651,7 @@ export const createSelfEvolutionExtension: ExtensionFactory = api => {
 			const unifiedSkills = await loadUnifiedSkillsForInjection(_ctx.cwd, skillStore!, {
 				globalStore: flags.globalStore,
 			});
-			const implicitConventions = (await learningStore.listForInjection(_ctx.cwd, 8)).map(l => ({
+			const implicitRules = (await learningStore.listForInjection(_ctx.cwd, 8)).map(l => ({
 				rule: l.content,
 				confidence: l.confidence / 5,
 				sourceSessionId: l.sessionId,
@@ -663,7 +663,7 @@ export const createSelfEvolutionExtension: ExtensionFactory = api => {
 				return report.passed;
 			});
 
-			const pctx = await pipeline!.run(userQuery, sandboxedSkills, implicitConventions);
+			const pctx = await pipeline!.run(userQuery, sandboxedSkills, implicitRules);
 			if (pctx.contextMd && pctx.contextMd.length > 0) {
 				const contextMsg = { role: "user", content: `[System Context]\n${pctx.contextMd}` };
 				event.messages.unshift(contextMsg as (typeof messages)[0]);

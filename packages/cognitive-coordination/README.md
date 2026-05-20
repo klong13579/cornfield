@@ -2,7 +2,7 @@
 
 > Cognitive Coordination Layer — Project Synapse
 
-Bridges the Memory and Self-Evolution systems into a unified context injection pipeline. Provides shared logic for skill aggregation, convention mining, activity monitoring, and virtual sandbox validation.
+Bridges the Memory and Self-Evolution systems into a unified context injection pipeline. Provides shared logic for skill aggregation, activity monitoring, and virtual sandbox validation.
 
 ## Modules
 
@@ -14,12 +14,6 @@ Assembles skills and conventions into a single markdown context block with:
 - **Priority ordering**: Conventions first (safety rules), then Skills (sorted by confidence)
 - **Token budget control**: Truncates low-priority content when exceeding limits
 - **Convention preservation**: Conventions are never truncated
-
-### ConventionMiner
-Scans session logs for implicit conventions by detecting negative user instructions:
-- 20+ keyword patterns with confidence weights (0.4–1.0)
-- False positive filtering for common phrases
-- Sentence-level extraction around matched keywords
 
 ### ActivityMonitor
 Analyzes activity logs (`activity.jsonl`) for:
@@ -39,7 +33,6 @@ Heuristically validates skills against session log content:
 import {
   UnifiedSkillRegistry,
   assembleContext,
-  mineImplicitConventions,
   analyzeActivityTrends,
   validateSkill,
 } from "@oh-my-pi/cognitive-coordination";
@@ -50,9 +43,6 @@ const skills = await registry.load(memoryRoot, evolutionRoot);
 
 // Assemble context with token budget
 const context = assembleContext(skills, conventions, { maxTokens: 2000 });
-
-// Mine conventions from session log
-const conventions = await mineImplicitConventions(sessionLogPath);
 
 // Analyze activity trends
 const report = await analyzeActivityTrends(activityLogPath);
@@ -67,7 +57,7 @@ const result = validateSkill(skill, logContent);
 bun test packages/cognitive-coordination/src/
 ```
 
-**29 tests** covering registry merging, context trimming, trend analysis, sandbox validation, and convention mining.
+**29 tests** covering registry merging, context trimming, trend analysis, and sandbox validation.
 
 ## Related
 

@@ -1,0 +1,37 @@
+[
+	{
+		"kind": "preference",
+		"content": "用简体中文回复；技术说明简洁直接，避免废话和过度寒暄",
+		"pin": true
+	},
+	{
+		"kind": "preference",
+		"content": "执行 git 破坏性操作、清库、删文件或改配置前必须先征得用户明确同意",
+		"pin": true
+	},
+	{
+		"kind": "preference",
+		"content": "编写或修改测试时必须覆盖边界条件与回归点，不要只写 happy path",
+		"pin": true
+	},
+	{
+		"kind": "procedure",
+		"content": "packages/coding-agent 内禁止 console.log/console.warn，统一用 @oh-my-pi/pi-utils 的 logger，避免破坏 TUI",
+		"pin": true
+	},
+	{
+		"kind": "procedure",
+		"content": "默认在 packages/coding-agent 改 CLI/TUI/工具；进化与记忆在 packages/self-evolution；勿手改 packages/ai/src/models.json",
+		"pin": true
+	},
+	{
+		"kind": "fact",
+		"content": "本仓库用 Bun 运行与测试；文件读写优先 Bun.file/Bun.write；禁止为简单 mkdir 再 spawn shell",
+		"pin": true
+	},
+	{
+		"kind": "skill_hint",
+		"content": "Evolution V3 用 learnings 表与 SessionLearner 注入；清库后用 /evolution learnings seed 冷启动，勿依赖旧 convention 噪音",
+		"pin": true
+	}
+]

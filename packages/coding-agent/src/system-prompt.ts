@@ -73,17 +73,49 @@ function firstNonEmpty(...values: (string | undefined | null)[]): string | null 
 	}
 	return null;
 }
+function isAgentsMdPath(filePath: string): boolean {
+	const normalized = filePath.replace(/\\/g, "/");
+	return normalized.endsWith("/AGENTS.md") || normalized === "AGENTS.md";
+}
+
+function isNeverRuleLine(line: string): boolean {
+	const stripped = line.replace(/\*\*/g, "").trim();
+	return (
+		/\bNEVER\b|\bMUST NOT\b/i.test(stripped) &&
+		!stripped.startsWith("<!--") &&
+		!stripped.startsWith("#")
+	);
+}
+
 function extractNeverRules(agentsMdContent: string): string[] {
-	const lines = agentsMdContent.split("\n");
 	const neverRules: string[] = [];
-	for (const line of lines) {
+	for (const line of agentsMdContent.split("\n")) {
+		if (!isNeverRuleLine(line)) continue;
 		const stripped = line.replace(/\*\*/g, "").trim();
-		if (/\bNEVER\b|\bMUST NOT\b/i.test(stripped) && !stripped.startsWith("<!--") && !stripped.startsWith("#")) {
-			const entry = stripped.startsWith("- ") ? stripped : `- ${stripped}`;
-			neverRules.push(entry);
-		}
+		const entry = stripped.startsWith("- ") ? stripped : `- ${stripped}`;
+		neverRules.push(entry);
 	}
 	return neverRules;
+}
+
+/** Remove lines promoted to `<hard-constraints>` so AGENTS.md is not duplicated in `<context>`. */
+function stripNeverRuleLinesFromAgentsMd(content: string): string {
+	return content
+		.split("\n")
+		.filter(line => !isNeverRuleLine(line))
+		.join("\n")
+		.trim();
+}
+
+function prepareContextFilesForPrompt(
+	contextFiles: Array<{ path: string; content: string; depth?: number }>,
+): Array<{ path: string; content: string; depth?: number }> {
+	return contextFiles
+		.map(file => {
+			if (!isAgentsMdPath(file.path)) return file;
+			return { ...file, content: stripNeverRuleLinesFromAgentsMd(file.content) };
+		})
+		.filter(file => file.content.length > 0);
 }
 
 function parseWmicTable(output: string, header: string): string | null {
@@ -611,9 +643,10 @@ export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}):
 
 	const environment = await logger.time("getEnvironmentInfo", getEnvironmentInfo);
 	const agentsMdRules = contextFiles
-		.filter(f => f.path.endsWith("/AGENTS.md") || f.path === "AGENTS.md")
+		.filter(f => isAgentsMdPath(f.path))
 		.map(f => ({ path: f.path, content: f.content }));
 	const neverRules = extractNeverRules(agentsMdRules.map(f => f.content).join("\n\n"));
+	const promptContextFiles = prepareContextFilesForPrompt(contextFiles);
 	const reportToolIssueToolName = toolPromptNames.get("report_tool_issue") ?? "report_tool_issue";
 	const data = {
 		systemPromptCustomization: effectiveSystemPromptCustomization,
@@ -624,7 +657,7 @@ export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}):
 		repeatToolDescriptions,
 		toolRefs,
 		environment,
-		contextFiles,
+		contextFiles: promptContextFiles,
 		agentsMdSearch,
 		noYieldRules: neverRules,
 		rules: rules ?? [],

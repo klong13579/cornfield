@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { assembleContext } from "./assembler";
-import type { ImplicitConvention, UnifiedSkill } from "./types";
+import type { ProceduralRule, UnifiedSkill } from "./types";
 
 describe("assembleContext", () => {
 	const makeSkill = (name: string, confidence: number, content: string): UnifiedSkill => ({
@@ -14,7 +14,7 @@ describe("assembleContext", () => {
 		status: "active",
 	});
 
-	const makeConvention = (rule: string, confidence: number): ImplicitConvention => ({
+	const makeRule = (rule: string, confidence: number): ProceduralRule => ({
 		rule,
 		confidence,
 	});
@@ -26,11 +26,11 @@ describe("assembleContext", () => {
 
 	test("includes conventions at top priority", () => {
 		const skills: UnifiedSkill[] = [];
-		const conventions: ImplicitConvention[] = [makeConvention("Don't use async/await", 0.9)];
+		const conventions: ProceduralRule[] = [makeRule("Don't use async/await", 0.9)];
 
 		const result = assembleContext(skills, conventions, { maxTokens: 2000 });
 
-		expect(result).toContain("## Active Conventions");
+		expect(result).toContain("## Active Rules");
 		expect(result).toContain("Don't use async/await");
 		expect(result).toContain("Confidence: 0.90");
 	});
@@ -79,7 +79,7 @@ describe("assembleContext", () => {
 	});
 
 	test("conventions are never truncated (highest priority)", () => {
-		const convention = makeConvention("CRITICAL: Never deploy on Friday", 0.95);
+		const convention = makeRule("CRITICAL: Never deploy on Friday", 0.95);
 		const skills: UnifiedSkill[] = [makeSkill("big-skill", 0.5, "a".repeat(1000))];
 
 		const result = assembleContext(skills, [convention], { maxTokens: 100 });
@@ -90,11 +90,11 @@ describe("assembleContext", () => {
 
 	test("conventions appear before skills", () => {
 		const skills = [makeSkill("test-skill", 0.8, "Skill content")];
-		const conventions = [makeConvention("Always test first", 0.9)];
+		const conventions = [makeRule("Always test first", 0.9)];
 
 		const result = assembleContext(skills, conventions, { maxTokens: 2000 });
 
-		const convIdx = result.indexOf("## Active Conventions");
+		const convIdx = result.indexOf("## Active Rules");
 		const skillIdx = result.indexOf("## Relevant Skills");
 
 		expect(convIdx).toBeLessThan(skillIdx);

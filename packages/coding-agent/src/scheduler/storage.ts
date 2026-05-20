@@ -28,6 +28,10 @@ type TaskRow = {
 	schedule_type: string | null;
 	task_type: string | null;
 	timeout_ms: number | null;
+	retry_config: string | null;
+	skills_config: string | null;
+	pre_script: string | null;
+	consecutive_failures: number;
 	created_at: number;
 	updated_at: number;
 	last_run_at: number | null;
@@ -60,6 +64,10 @@ const TASK_UPDATE_FIELDS = new Set<string>([
 	"scheduleType",
 	"taskType",
 	"timeoutMs",
+	"retryConfig",
+	"skills",
+	"preScript",
+	"consecutiveFailures",
 	"createdAt",
 	"updatedAt",
 	"lastRunAt",
@@ -93,6 +101,10 @@ function toTask(row: TaskRow): ScheduledTask {
 		scheduleType: (row.schedule_type as ScheduledTask["scheduleType"]) ?? "cron",
 		taskType: (row.task_type as ScheduledTask["taskType"]) ?? "shell",
 		timeoutMs: row.timeout_ms ?? 30_000,
+		retry: row.retry_config ? JSON.parse(row.retry_config) : undefined,
+		skills: row.skills_config ? JSON.parse(row.skills_config) : undefined,
+		preScript: row.pre_script ?? undefined,
+		consecutiveFailures: row.consecutive_failures,
 		createdAt: row.created_at,
 		updatedAt: row.updated_at,
 		lastRunAt: row.last_run_at ?? undefined,
@@ -165,7 +177,7 @@ export class SchedulerDbStorage implements SchedulerStorage {
 
 	constructor(dbPath: string = getSchedulerDbPath()) {
 		const dir = path.dirname(dbPath);
-		fs.mkdirSync(dir, { recursive: true });
+		fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
 
 		this.#db = new Database(dbPath);
 		this.#db.exec("PRAGMA journal_mode = WAL;");
@@ -178,9 +190,10 @@ export class SchedulerDbStorage implements SchedulerStorage {
 			INSERT INTO tasks (
 				id, name, description, cron, command, status,
 				schedule_type, task_type, timeout_ms,
+				retry_config, skills_config, pre_script, consecutive_failures,
 				created_at, updated_at, last_run_at, next_run_at,
 				run_count, fail_count
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`);
 
 		this.#getTaskStmt = this.#db.prepare("SELECT * FROM tasks WHERE id = ?");
@@ -242,9 +255,18 @@ export class SchedulerDbStorage implements SchedulerStorage {
 		const hasScheduleType = columns.some(c => c.name === "schedule_type");
 		const hasTaskType = columns.some(c => c.name === "task_type");
 		const hasTimeoutMs = columns.some(c => c.name === "timeout_ms");
+		const hasRetry = columns.some(c => c.name === "retry_config");
+		const hasSkills = columns.some(c => c.name === "skills_config");
+		const hasPreScript = columns.some(c => c.name === "pre_script");
+		const hasConsecutiveFails = columns.some(c => c.name === "consecutive_failures");
 		if (!hasScheduleType) this.#db.exec("ALTER TABLE tasks ADD COLUMN schedule_type TEXT;");
 		if (!hasTaskType) this.#db.exec("ALTER TABLE tasks ADD COLUMN task_type TEXT;");
 		if (!hasTimeoutMs) this.#db.exec("ALTER TABLE tasks ADD COLUMN timeout_ms INTEGER;");
+		if (!hasRetry) this.#db.exec("ALTER TABLE tasks ADD COLUMN retry_config TEXT;");
+		if (!hasSkills) this.#db.exec("ALTER TABLE tasks ADD COLUMN skills_config TEXT;");
+		if (!hasPreScript) this.#db.exec("ALTER TABLE tasks ADD COLUMN pre_script TEXT;");
+		if (!hasConsecutiveFails)
+			this.#db.exec("ALTER TABLE tasks ADD COLUMN consecutive_failures INTEGER NOT NULL DEFAULT 0;");
 		this.#db.exec("CREATE INDEX IF NOT EXISTS idx_executions_task_id ON executions(task_id)");
 		this.#db.exec("CREATE INDEX IF NOT EXISTS idx_executions_started_at ON executions(started_at DESC)");
 	}
@@ -262,6 +284,10 @@ export class SchedulerDbStorage implements SchedulerStorage {
 			task.scheduleType ?? "cron",
 			task.taskType ?? "shell",
 			task.timeoutMs ?? 30_000,
+			task.retry ? JSON.stringify(task.retry) : null,
+			task.skills ? JSON.stringify(task.skills) : null,
+			task.preScript ?? null,
+			task.consecutiveFailures ?? 0,
 			task.createdAt ?? now,
 			task.updatedAt ?? now,
 			task.lastRunAt ?? null,
@@ -328,6 +354,41 @@ export class SchedulerDbStorage implements SchedulerStorage {
 		const safeLimit = Number.isFinite(limit) && limit! > 0 ? limit! : 1_000_000;
 		const rows = this.#getExecutionsStmt.all(taskId, safeLimit) as ExecutionRow[];
 		return rows.map(toExecution);
+	}
+
+	pruneExecutions(maxAgeDays?: number, maxCount?: number): number {
+		let deleted = 0;
+
+		if (maxAgeDays && maxAgeDays > 0) {
+			const cutoff = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000;
+			const result = this.#db.run("DELETE FROM executions WHERE started_at < ?", cutoff);
+			deleted += Number(result.changes);
+		}
+
+		if (maxCount && maxCount > 0) {
+			const tasks = this.listTasks();
+			for (const task of tasks) {
+				const keepIds = (
+					this.#db
+						.prepare("SELECT id FROM executions WHERE task_id = ? ORDER BY started_at DESC LIMIT ?")
+						.all(task.id, maxCount) as Array<{ id: string }>
+				).map(r => r.id);
+				if (keepIds.length > 0) {
+					const placeholders = keepIds.map(() => "?").join(",");
+					const result = this.#db.run(
+						`DELETE FROM executions WHERE task_id = ? AND id NOT IN (${placeholders})`,
+						task.id,
+						...keepIds,
+					);
+					deleted += Number(result.changes);
+				}
+			}
+		}
+
+		if (deleted > 0) {
+			this.#db.run("PRAGMA wal_checkpoint(TRUNCATE);");
+		}
+		return deleted;
 	}
 
 	close(): void {

@@ -1,0 +1,6 @@
+# Reduce GitNexus parse pressure / scope-extractor noise so `analyze` can finish
+# and FTS indexes can be built (fixes empty MCP `query`).
+python/omp-rpc/
+scripts/rate-edit-tool.py
+scripts/__init__.py
+packages/coding-agent/src/ipy/prelude.py

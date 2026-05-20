@@ -44,6 +44,7 @@ export interface IntentStore {
 	insert(intent: EpisodeIntent): Promise<void>;
 	getByEpisode(episodeId: string): Promise<EpisodeIntent[]>;
 	getByIntent(intent: string, limit: number): Promise<EpisodeIntent[]>;
+	getRecent(limit: number): Promise<EpisodeIntent[]>;
 }
 
 export interface WorkflowPatternStore {

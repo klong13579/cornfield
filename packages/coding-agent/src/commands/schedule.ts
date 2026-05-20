@@ -247,6 +247,8 @@ export default class Schedule extends Command {
 			const { exitCode, output, stderr, timedOut } = await executeScheduledCommand(task.command, {
 				taskType: task.taskType,
 				timeoutMs: task.timeoutMs,
+				skills: task.skills,
+				preScript: task.preScript,
 			});
 			delete process.env._OMP_SCHEDULE_EXECUTING;
 

@@ -2,7 +2,6 @@ export { analyzeActivityTrends } from "./activity-monitor";
 export { assembleContext } from "./assembler";
 export type { ConflictReport, ConflictType } from "./conflict-resolver";
 export { ConflictResolver } from "./conflict-resolver";
-export { mineImplicitConventions } from "./convention-miner";
 export type {
 	IntentCategory,
 	QueryAnalysis,
@@ -12,4 +11,4 @@ export { QueryAnalyzer } from "./query-analyzer";
 export { UnifiedSkillRegistry } from "./registry";
 export { type SandboxReport, validateSkill } from "./sandbox";
 
-export type { ContextInjection, ImplicitConvention, SkillFrontmatter, TrendReport, UnifiedSkill } from "./types";
+export type { ContextInjection, ProceduralRule, SkillFrontmatter, TrendReport, UnifiedSkill } from "./types";

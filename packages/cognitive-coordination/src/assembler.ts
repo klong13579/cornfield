@@ -18,7 +18,7 @@ import { logger } from "@oh-my-pi/pi-utils";
 import type { ConflictReport } from "./conflict-resolver";
 import type { QueryAnalysis } from "./query-analyzer";
 import { QueryAnalyzer } from "./query-analyzer";
-import type { ImplicitConvention, UnifiedSkill } from "./types";
+import type { ProceduralRule, UnifiedSkill } from "./types";
 
 // ---------------------------------------------------------------------------
 // Public types & interfaces
@@ -45,7 +45,7 @@ const DEFAULT_TOKENS_PER_CHAR = 4.0;
  */
 export function assembleContext(
 	skills: UnifiedSkill[],
-	conventions: ImplicitConvention[],
+	conventions: ProceduralRule[],
 	options: AssemblerOptions = { maxTokens: 2000 },
 ): string {
 	const { maxTokens, tokensPerChar = DEFAULT_TOKENS_PER_CHAR } = options;
@@ -55,7 +55,7 @@ export function assembleContext(
 
 	// 1. Conventions (Top Priority)
 	if (conventions.length > 0) {
-		parts.push("## Active Conventions");
+		parts.push("## Active Rules");
 		for (const c of conventions) {
 			parts.push(`- [Rule] ${c.rule} (Confidence: ${c.confidence.toFixed(2)})`);
 		}
@@ -106,7 +106,7 @@ export type PipelineStage = "analyze" | "retrieve" | "fuse" | "resolve" | "alloc
 export interface PipelineContext {
 	query: string;
 	skills: UnifiedSkill[];
-	conventions: ImplicitConvention[];
+	conventions: ProceduralRule[];
 	analysis?: QueryAnalysis;
 	retrievedSkills?: UnifiedSkill[];
 	resolved?: { resolved: Array<{ id: string; content: string }>; reports: ConflictReport[] };
@@ -119,7 +119,7 @@ export interface PipelineContext {
 	>;
 
 	/** Retrieved conventions (Stage 2 output). */
-	retrievedConventions?: ImplicitConvention[];
+	retrievedConventions?: ProceduralRule[];
 	/** Retrieved memory skills (pre-fusion). */
 	retrievedMemory?: UnifiedSkill[];
 	/** Whether profile injection flag was set. */
@@ -384,7 +384,7 @@ function extractKeywords(text: string): string[] {
  */
 function resolveConflictsBetweenSkills(
 	skills: UnifiedSkill[],
-	conventions: ImplicitConvention[],
+	conventions: ProceduralRule[],
 ): {
 	enriched: {
 		item: UnifiedSkill;
@@ -539,7 +539,7 @@ export class Pipeline {
 		this.#maxTokens = options?.maxTokens ?? 4000;
 	}
 
-	static #createContext(query: string, skills: UnifiedSkill[], conventions: ImplicitConvention[]): PipelineContext {
+	static #createContext(query: string, skills: UnifiedSkill[], conventions: ProceduralRule[]): PipelineContext {
 		return {
 			query,
 			skills,
@@ -560,7 +560,7 @@ export class Pipeline {
 	 * Run all 6 pipeline stages sequentially. Each stage fails independently;
 	 * failures are recorded in ctx.errors but do not stop subsequent stages.
 	 */
-	async run(query: string, skills: UnifiedSkill[], conventions: ImplicitConvention[]): Promise<PipelineContext> {
+	async run(query: string, skills: UnifiedSkill[], conventions: ProceduralRule[]): Promise<PipelineContext> {
 		const ctx = Pipeline.#createContext(query, skills, conventions);
 
 		await this.#stageAnalyze(ctx);
@@ -870,7 +870,7 @@ export class Pipeline {
 export function runPipeline(
 	query: string,
 	skills: UnifiedSkill[],
-	conventions: ImplicitConvention[],
+	conventions: ProceduralRule[],
 	options?: { maxTokens?: number },
 ): Promise<PipelineContext> {
 	const pipeline = new Pipeline(options);

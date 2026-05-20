@@ -2,7 +2,7 @@
 
 > L4 Metacognitive Evolution Engine — Project Synapse
 
-The self-evolution package transforms the agent from a passive executor into an adaptive, self-improving system. It extracts skills from sessions, mines conventions from user feedback, tracks effectiveness, and continuously refines its behavior through a closed-loop evolution cycle.
+The self-evolution package transforms the agent from a passive executor into an adaptive, self-improving system. It extracts skills and learnings from sessions, tracks effectiveness, and continuously refines its behavior through a closed-loop evolution cycle.
 
 ## Architecture
 
@@ -23,14 +23,14 @@ The self-evolution package transforms the agent from a passive executor into an 
     │  │Extractor │ │Classifier│ │ Miner    │ │
     │  └──────────┘ └──────────┘ └──────────┘ │
     │  ┌──────────┐ ┌──────────┐ ┌──────────┐ │
-    │  │Convention│ │ User     │ │ Trace    │ │
+    │  │Learning  │ │ User     │ │ Trace    │ │
     │  │Extractor │ │ Profiler │ │ Analyzer │ │
     │  └──────────┘ └──────────┘ └──────────┘ │
     └──────────────────┬──────────────────────┘
                        │
     ┌──────────────────▼──────────────────────┐
     │          Storage Layer (SQLite)          │
-    │  skills · episodes · conventions · fit   │
+    │  skills · learnings · episodes · fit   │
     │  intents · profiles · workflows · nudges │
     └──────────────────┬──────────────────────┘
                        │
@@ -50,16 +50,9 @@ The self-evolution package transforms the agent from a passive executor into an 
 - **Quality scoring** based on success rate, tool diversity, pitfall coverage
 - **User rating** (1-5 stars) that influences quality score
 
-### Convention Mining
-- **Implicit convention extraction** from session logs — detects negative user instructions ("don't use X", "never do Y")
-- **False positive filtering** — ignores common phrases like "don't worry", "never mind"
-- **Confidence-weighted** rules based on keyword strength
-- **Cross-session persistence** via `conventions.jsonl`
-
 ### Context-Aware Retrieval
 - **Intent-filtered** episode retrieval
 - **Skill relevance scoring** against current task
-- **Convention compliance** checking
 - **Token-bounded** injection via Context Assembler
 
 ### Fit Evaluation (懂我程度)
@@ -101,7 +94,6 @@ The self-evolution package transforms the agent from a passive executor into an 
 │   └── rollout_summaries/
 ├── evolution/
 │   ├── evolution.db           # SQLite (evolution + memory tables)
-│   ├── conventions.md         # Projected conventions (editable)
 │   ├── system-diagnosis.md
 │   ├── user_profile.md
 │   ├── activity.log
@@ -115,7 +107,7 @@ The self-evolution package transforms the agent from a passive executor into an 
 |---|---|
 | `episodes` | Archived session summaries |
 | `session_traces` | Full traces for regression replay |
-| `conventions` | Mined rules from user dialogue |
+| `learnings` | Session-derived rules and preferences (V3, replaces conventions) |
 | `skills` | Evolved skills with quality scores, usage stats |
 | `skill_versions` | Version snapshots for rollback |
 | `threads` | Memory: session rollout index |
@@ -200,13 +192,12 @@ bun test packages/cognitive-coordination/src/ packages/self-evolution/src/
 ```
 
 **Test coverage**: 66 tests across 10 files covering:
-- Unit tests (assembler, registry, sandbox, activity monitor, convention miner)
+- Unit tests (assembler, registry, sandbox, activity monitor)
 - Integration tests (watcher debounce, sync lifecycle, pruning)
 - E2E tests (full evolution loop, self-modification)
-- AB tests (convention injection effectiveness)
 - Safety tests (auto-rollback, score clamping)
 
 ## Related
 
-- [`@oh-my-pi/cognitive-coordination`](../cognitive-coordination/) — Unified skill registry, context assembler, convention miner
+- [`@oh-my-pi/cognitive-coordination`](../cognitive-coordination/) — Unified skill registry, context assembler
 - [`l4-evolution-architecture.md`](../../l4-evolution-architecture.md) — Full architecture design document
