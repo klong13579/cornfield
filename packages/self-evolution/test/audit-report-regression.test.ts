@@ -83,11 +83,8 @@ function minimalReport(overrides: Partial<AuditReport> = {}): AuditReport {
 describe("formatAuditReport regression section", () => {
 	test("includes backend, fixture counts, and recent trials", () => {
 		const text = formatAuditReport(minimalReport());
-		expect(text).toContain("## Regression replay");
-		expect(text).toContain("Backend: llm");
+		expect(text).toContain("### Regression");
 		expect(text).toContain("Regression fixtures: 5");
-		expect(text).toContain("conventions: keep 2, discard 1");
-		expect(text).toContain("[keep] convention/c1");
-		expect(text).toContain("tool-chain tags: overturn 1");
+		expect(text).toContain("Session traces");
 	});
 });

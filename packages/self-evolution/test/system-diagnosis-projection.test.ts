@@ -36,7 +36,7 @@ describe("system-diagnosis projection", () => {
 		expect(report.episodes).toBeDefined();
 		const text = await Bun.file(outPath).text();
 		expect(text).toContain("# System Diagnosis");
-		expect(text).toContain("## Episodes");
+		expect(text).toContain("概览");
 		expect(text).toContain("## Recent session diagnoses");
 		expect(text).toContain("ep-test-1");
 		expect(text).toContain("ENOENT");

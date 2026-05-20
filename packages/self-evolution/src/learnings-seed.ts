@@ -91,6 +91,7 @@ export async function applyLearningsSeed(
 			source: pin ? "manual_pin" : "session_llm",
 			confidence: 5,
 			lifecycle: pin ? "active" : "candidate",
+			scope: "global" as import("./types").LearningScope,
 			sessionId: "seed",
 			createdAt: now,
 			updatedAt: now,

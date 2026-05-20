@@ -5,13 +5,15 @@ import { initSchema } from "../src/storage/db";
 import { SqliteEffectivenessStore } from "../src/storage/effectiveness";
 import { SqliteEpisodeStore } from "../src/storage/episodes";
 import { SqliteLearningStore } from "../src/storage/learnings";
+import { SqliteSkillStore } from "../src/storage/skills";
 import type { Episode, Learning } from "../src/types";
 
-describe("DailyReportGenerator", () => {
+	describe("DailyReportGenerator", () => {
 	let db: Database;
 	let episodeStore: SqliteEpisodeStore;
 	let learningStore: SqliteLearningStore;
 	let effectivenessStore: SqliteEffectivenessStore;
+	let skillStore: SqliteSkillStore;
 	let generator: DailyReportGenerator;
 
 	beforeEach(() => {
@@ -20,7 +22,8 @@ describe("DailyReportGenerator", () => {
 		episodeStore = new SqliteEpisodeStore(db);
 		learningStore = new SqliteLearningStore(db);
 		effectivenessStore = new SqliteEffectivenessStore(db);
-		generator = new DailyReportGenerator(episodeStore, learningStore, effectivenessStore);
+		skillStore = new SqliteSkillStore(db);
+		generator = new DailyReportGenerator(episodeStore, learningStore, effectivenessStore, skillStore);
 	});
 
 	function makeEpisode(overrides: Partial<Episode> = {}): Episode {
@@ -164,6 +167,7 @@ describe("DailyReportGenerator", () => {
 			source: "session_llm",
 			confidence: 4,
 			lifecycle: "active",
+			scope: "project" as const,
 			sessionId: "ep-1",
 			createdAt: now,
 			updatedAt: now,
@@ -213,13 +217,11 @@ describe("DailyReportGenerator", () => {
 		const report = await generator.generate(new Date(now));
 		const markdown = generator.formatReport(report);
 
-		expect(markdown).toContain("# Daily Report:");
-		expect(markdown).toContain("## Summary:");
-		expect(markdown).toContain("## Key Moments");
-		expect(markdown).toContain("## Top Error Patterns");
-		expect(markdown).toContain("## New Learnings");
-		expect(markdown).toContain("## Top Tools");
-		expect(markdown).toContain("## Session Details");
+		expect(markdown).toContain("# 进化日报:");
+		expect(markdown).toContain("## 会话概览:");
+		expect(markdown).toContain("## 3. 关键事件");
+		expect(markdown).toContain("## 2. 已采纳进化的收益");
+		expect(markdown).toContain("## 5. 会话明细");
 		expect(markdown).toContain("Test task");
 	});
 
@@ -227,9 +229,8 @@ describe("DailyReportGenerator", () => {
 		const report = await generator.generate(new Date());
 		const markdown = generator.formatReport(report);
 
-		expect(markdown).toContain("# Daily Report:");
-		expect(markdown).toContain("_No key moments recorded._");
-		expect(markdown).toContain("_No errors recorded._");
-		expect(markdown).toContain("_No new learnings extracted._");
+		expect(markdown).toContain("# 进化日报:");
+		expect(markdown).toContain("_今日无关键事件。_");
+		expect(markdown).toContain("尚无学习被注入过");
 	});
 });

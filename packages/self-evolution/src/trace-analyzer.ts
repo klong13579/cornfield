@@ -149,6 +149,20 @@ export class TraceAnalyzer {
 	 * Falls back to rule-based analysis if the LLM call fails or no model is provided.
 	 */
 	async analyzeWithLlm(trace: SessionTrace, model?: Model, auth?: BackgroundLlmAuth): Promise<ToolChainDiagnosis> {
+		// Skip analysis for empty traces (system-reminder, human abort)
+		if (!trace.toolCallCount || trace.toolCallCount === 0) {
+			return {
+				sessionId: trace.sessionId,
+				readFailures: [],
+				cascadePatterns: [],
+				redundantSearches: false,
+				slowLoop: false,
+				toolEfficiency: 1.0,
+				dominantErrorTool: null,
+				dominantErrorPattern: null,
+				suggestedAction: "No tool calls in trace — likely system reminder or user abort.",
+			};
+		}
 		const ruleBased = this.analyze(trace);
 		if (!model) return ruleBased;
 
