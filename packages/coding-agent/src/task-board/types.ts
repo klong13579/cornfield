@@ -1,6 +1,6 @@
 export type TopicStatus = "planned" | "in-progress" | "review" | "testing" | "shipped" | "deferred";
 
-export interface EvolutionTopic {
+export interface TaskTopic {
 	id: string;
 	name: string;
 	brief: string;
@@ -17,13 +17,13 @@ export interface EvolutionTopic {
 	tags?: string[];
 }
 
-export interface EvolutionBoard {
-	getTopics(): EvolutionTopic[];
-	getTopic(id: string): EvolutionTopic | undefined;
-	getByStatus(status: TopicStatus): EvolutionTopic[];
-	getByModule(module: string): EvolutionTopic[];
-	getByTag(tag: string): EvolutionTopic[];
-	addTopic(topic: EvolutionTopic): void;
+export interface TaskBoard {
+	getTopics(): TaskTopic[];
+	getTopic(id: string): TaskTopic | undefined;
+	getByStatus(status: TopicStatus): TaskTopic[];
+	getByModule(module: string): TaskTopic[];
+	getByTag(tag: string): TaskTopic[];
+	addTopic(topic: TaskTopic): void;
 	load(yamlContent: string): void;
 	save(yamlPath: string): Promise<void>;
 }

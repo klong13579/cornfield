@@ -1,6 +1,6 @@
 import { replaceTabs, truncateToWidth } from "@oh-my-pi/pi-tui";
 import type { Theme } from "../modes/theme/theme";
-import type { EvolutionTopic, TopicStatus } from "./types";
+import type { TaskTopic, TopicStatus } from "./types";
 
 const STATUS_LABELS: Record<TopicStatus, string> = {
 	planned: "planned",
@@ -20,7 +20,7 @@ const STATUS_COLORS: Record<TopicStatus, string> = {
 	deferred: "muted",
 };
 
-export function renderTopicList(topics: EvolutionTopic[], width: number, theme: Theme): string[] {
+export function renderTopicList(topics: TaskTopic[], width: number, theme: Theme): string[] {
 	if (topics.length === 0) {
 		return [theme.fg("dim", "No topics found.")];
 	}
@@ -36,7 +36,7 @@ export function renderTopicList(topics: EvolutionTopic[], width: number, theme: 
 	});
 }
 
-export function renderTopicDetail(topic: EvolutionTopic, width: number, theme: Theme): string[] {
+export function renderTopicDetail(topic: TaskTopic, width: number, theme: Theme): string[] {
 	const lines: string[] = [];
 	const statusColor = STATUS_COLORS[topic.status];
 

@@ -650,7 +650,7 @@ bun packages/self-evolution/scripts/backfill-episodes-from-sessions.ts --cwd /pa
 | 包 README | `packages/self-evolution/doc/README.md` |
 | 测试方案 | `docs/omp-evolution-test-plan.md` |
 | L4 规划（未默认实现） | `l4-evolution-architecture.md` |
-| 功能看板 | `docs/evolution-board.yaml` |
+| 功能看板 | `docs/task-board.yaml` |
 
 ---
 

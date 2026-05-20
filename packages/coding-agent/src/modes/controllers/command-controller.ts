@@ -532,22 +532,22 @@ export class CommandController {
 		showMarkdownPanel(this.ctx, "Available Tools", tools);
 	}
 
-	async handleEvolutionBoardCommand(text: string): Promise<void> {
-		const argumentText = text.slice(17).trim(); // "/evolution-board" length
+	async handleTaskBoardCommand(text: string): Promise<void> {
+		const argumentText = text.slice(11).trim(); // "/task-board" length
 		const action = argumentText.split(/\s+/, 1)[0]?.toLowerCase() || "list";
 		const args = argumentText.slice(action.length).trim();
 
-		const { createEvolutionBoard } = await import("../../evolution-board/board");
-		const { renderTopicDetail } = await import("../../evolution-board/renderer");
+		const { createTaskBoard } = await import("../../task-board/board");
+		const { renderTopicDetail } = await import("../../task-board/renderer");
 
-		const board = createEvolutionBoard();
-		const yamlPath = path.join(this.ctx.session.sessionManager.getCwd(), "docs", "evolution-board.yaml");
+		const board = createTaskBoard();
+		const yamlPath = path.join(this.ctx.session.sessionManager.getCwd(), "docs", "task-board.yaml");
 
 		try {
 			const content = await Bun.file(yamlPath).text();
 			board.load(content);
 		} catch {
-			this.ctx.showWarning("No evolution board found. Create docs/evolution-board.yaml first.");
+			this.ctx.showWarning("No task board found. Create docs/task-board.yaml first.");
 			return;
 		}
 
@@ -565,7 +565,7 @@ export class CommandController {
 			case "show": {
 				const topicId = args || argumentText;
 				if (!topicId) {
-					this.ctx.showWarning("Topic ID is required. Usage: /evolution-board show <id>");
+					this.ctx.showWarning("Topic ID is required. Usage: /task-board show <id>");
 					return;
 				}
 				const topic = board.getTopic(topicId);
@@ -590,7 +590,7 @@ export class CommandController {
 					topics = board.getByTag(tag);
 				} else {
 					this.ctx.showWarning(
-						"Filter requires status:|module:|tag: prefix. Usage: /evolution-board filter status:in-progress",
+						"Filter requires status:|module:|tag: prefix. Usage: /task-board filter status:in-progress",
 					);
 					return;
 				}
@@ -602,7 +602,7 @@ export class CommandController {
 				break;
 			}
 			case "add": {
-				await this.#handleEvolutionBoardAdd(board, yamlPath);
+				await this.#handleTaskBoardAdd(board, yamlPath);
 				return;
 			}
 
@@ -614,20 +614,20 @@ export class CommandController {
 
 		this.ctx.chatContainer.addChild(new Spacer(1));
 		this.ctx.chatContainer.addChild(new DynamicBorder());
-		this.ctx.chatContainer.addChild(new Text(theme.bold(theme.fg("accent", "Evolution Board")), 1, 0));
+		this.ctx.chatContainer.addChild(new Text(theme.bold(theme.fg("accent", "Task Board")), 1, 0));
 		this.ctx.chatContainer.addChild(new Spacer(1));
 		this.ctx.chatContainer.addChild(new Text(output, 1, 0));
 		this.ctx.chatContainer.addChild(new DynamicBorder());
 		this.ctx.editor.setText("");
 	}
 
-	async #handleEvolutionBoardAdd(
-		board: import("../../evolution-board/types").EvolutionBoard,
+	async #handleTaskBoardAdd(
+		board: import("../../task-board/types").TaskBoard,
 		yamlPath: string,
 	): Promise<void> {
-		const { generateTopicId } = await import("../../evolution-board/board");
-		type TopicStatus = import("../../evolution-board/types").TopicStatus;
-		type EvolutionTopic = import("../../evolution-board/types").EvolutionTopic;
+		const { generateTopicId } = await import("../../task-board/board");
+		type TopicStatus = import("../../task-board/types").TopicStatus;
+		type TaskTopic = import("../../task-board/types").TaskTopic;
 
 		// Get name (required)
 		const name = await this.ctx.showHookInput("Add Topic", "Enter topic name (required)");
@@ -671,7 +671,7 @@ export class CommandController {
 		}
 
 		// Create and add topic
-		const topic: EvolutionTopic = {
+		const topic: TaskTopic = {
 			id,
 			name: name.trim(),
 			brief: brief.trim(),

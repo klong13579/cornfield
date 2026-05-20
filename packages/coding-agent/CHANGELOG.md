@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- Renamed feature evolution board to **task board**: slash command `/task-board`, agent tool `task_board`, data file `docs/task-board.yaml`, module `task-board/` (was `evolution-board`, `evolution_board`, `docs/evolution-board.yaml`).
+
 ### Fixed
 
 - Extension slash commands (e.g. `/evolution status`) no longer leave the TUI stuck on `Working…` after the handler returns without an agent turn.

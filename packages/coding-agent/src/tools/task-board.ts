@@ -1,12 +1,12 @@
 import type { AgentTool, AgentToolResult } from "@oh-my-pi/pi-agent-core";
 import { prompt } from "@oh-my-pi/pi-utils";
 import { type Static, Type } from "@sinclair/typebox";
-import { createEvolutionBoard, generateTopicId } from "../evolution-board/board";
-import type { EvolutionTopic } from "../evolution-board/types";
-import evolutionBoardDescription from "../prompts/tools/evolution-board.md" with { type: "text" };
+import { createTaskBoard, generateTopicId } from "../task-board/board";
+import type { TaskTopic } from "../task-board/types";
+import taskBoardDescription from "../prompts/tools/task-board.md" with { type: "text" };
 import type { ToolSession } from ".";
 
-const evolutionBoardSchema = Type.Object({
+const taskBoardSchema = Type.Object({
 	action: Type.Union([Type.Literal("list"), Type.Literal("show"), Type.Literal("filter"), Type.Literal("add")], {
 		description: "操作类型",
 	}),
@@ -46,23 +46,23 @@ const evolutionBoardSchema = Type.Object({
 	),
 });
 
-type EvolutionBoardParams = Static<typeof evolutionBoardSchema>;
+type TaskBoardParams = Static<typeof taskBoardSchema>;
 
-export class EvolutionBoardTool implements AgentTool<typeof evolutionBoardSchema> {
-	readonly name = "evolution_board";
-	readonly label = "Evolution Board";
+export class TaskBoardTool implements AgentTool<typeof taskBoardSchema> {
+	readonly name = "task_board";
+	readonly label = "Task Board";
 	readonly description: string;
-	readonly parameters = evolutionBoardSchema;
+	readonly parameters = taskBoardSchema;
 	readonly strict = true;
 
 	constructor(private readonly session: ToolSession) {
-		this.description = prompt.render(evolutionBoardDescription);
+		this.description = prompt.render(taskBoardDescription);
 	}
 
-	async execute(_toolCallId: string, params: EvolutionBoardParams): Promise<AgentToolResult> {
-		const board = createEvolutionBoard();
+	async execute(_toolCallId: string, params: TaskBoardParams): Promise<AgentToolResult> {
+		const board = createTaskBoard();
 
-		const yamlPath = `${this.session.cwd}/docs/evolution-board.yaml`;
+		const yamlPath = `${this.session.cwd}/docs/task-board.yaml`;
 		try {
 			const content = await Bun.file(yamlPath).text();
 			board.load(content);
@@ -71,7 +71,7 @@ export class EvolutionBoardTool implements AgentTool<typeof evolutionBoardSchema
 				content: [
 					{
 						type: "text",
-						text: "No evolution board found. Create docs/evolution-board.yaml first.",
+						text: "No task board found. Create docs/task-board.yaml first.",
 					},
 				],
 			};
@@ -168,9 +168,9 @@ export class EvolutionBoardTool implements AgentTool<typeof evolutionBoardSchema
 				const validStatuses = ["planned", "in-progress", "review", "testing", "shipped", "deferred"] as const;
 				const rawStatus = params.topic.status ?? "planned";
 				const status = validStatuses.includes(rawStatus as (typeof validStatuses)[number])
-					? (rawStatus as EvolutionTopic["status"])
+					? (rawStatus as TaskTopic["status"])
 					: "planned";
-				const topic: EvolutionTopic = {
+				const topic: TaskTopic = {
 					id,
 					name: name.trim(),
 					brief: brief.trim(),

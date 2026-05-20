@@ -356,8 +356,8 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<BuiltinSlashCommandSpec> = [
 		},
 	},
 	{
-		name: "evolution-board",
-		description: "Show OMP feature evolution board (development progress tracking)",
+		name: "task-board",
+		description: "Show OMP task board (development progress tracking)",
 		subcommands: [
 			{ name: "list", description: "List all topics" },
 			{ name: "add", description: "Add a new topic interactively" },
@@ -367,7 +367,7 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<BuiltinSlashCommandSpec> = [
 		allowArgs: true,
 		handle: async (command, runtime) => {
 			runtime.ctx.editor.setText("");
-			await runtime.ctx.handleEvolutionBoardCommand(`/${command.name} ${command.args}`);
+			await runtime.ctx.handleTaskBoardCommand(`/${command.name} ${command.args}`);
 		},
 	},
 	{

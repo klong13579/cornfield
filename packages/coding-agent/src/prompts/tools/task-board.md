@@ -1,6 +1,6 @@
-# evolution_board
+# task_board
 
-查询 omp 功能进化看板，获取当前开发中的功能 Topic 列表或详情。
+查询 omp 任务看板，获取当前开发中的功能 Topic 列表或详情。
 
 ## 参数
 - `action`: 操作类型
@@ -26,7 +26,7 @@
 
 ## 使用场景
 - 用户问"当前在做什么功能"时，调用 `action=list`
-- 用户问"功能看板进度如何"时，调用 `action=list`
+- 用户问"任务看板进度如何"时，调用 `action=list`
 - 用户问"某个功能详情"时，调用 `action=show` 并传入 topicId
 - 用户想按状态/模块查看时，调用 `action=filter`
 - 用户想添加新功能到看板时，调用 `action=add` 并传入 topic 参数

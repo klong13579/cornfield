@@ -3,7 +3,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
-import { EvolutionBoardTool } from "@oh-my-pi/pi-coding-agent/tools/evolution-board";
+import { TaskBoardTool } from "@oh-my-pi/pi-coding-agent/tools/task-board";
 
 function createSession(overrides: Partial<ToolSession> = {}): ToolSession {
 	return {
@@ -28,25 +28,25 @@ afterAll(async () => {
 	}
 });
 
-describe("EvolutionBoardTool", () => {
-	it("returns error when no evolution board file exists", async () => {
-		tmpDir = await fs.mkdtemp(path.join("/tmp", "evolution-board-test-"));
-		const tool = new EvolutionBoardTool(createSessionInTmp());
+describe("TaskBoardTool", () => {
+	it("returns error when no task board file exists", async () => {
+		tmpDir = await fs.mkdtemp(path.join("/tmp", "task-board-test-"));
+		const tool = new TaskBoardTool(createSessionInTmp());
 		const result = await tool.execute("test-id", { action: "list" });
-		expect((result.content[0] as { type: string; text: string }).text).toContain("No evolution board found");
+		expect((result.content[0] as { type: string; text: string }).text).toContain("No task board found");
 	});
 
 	describe("add action", () => {
 		it("creates topic and saves to YAML", async () => {
-			tmpDir = await fs.mkdtemp(path.join("/tmp", "evolution-board-add-"));
-			const yamlPath = path.join(tmpDir, "docs", "evolution-board.yaml");
+			tmpDir = await fs.mkdtemp(path.join("/tmp", "task-board-add-"));
+			const yamlPath = path.join(tmpDir, "docs", "task-board.yaml");
 			await fs.mkdir(path.dirname(yamlPath), { recursive: true });
 			await Bun.write(yamlPath, "topics: []");
 
-			const tool = new EvolutionBoardTool(createSessionInTmp());
+			const tool = new TaskBoardTool(createSessionInTmp());
 			const result = await tool.execute("test-id", {
 				action: "add",
-				topic: { name: "Test Feature", brief: "A test feature for evolution board" },
+				topic: { name: "Test Feature", brief: "A test feature for task board" },
 			});
 
 			const text = (result.content[0] as { type: string; text: string }).text;
@@ -59,12 +59,12 @@ describe("EvolutionBoardTool", () => {
 		});
 
 		it("rejects duplicate ID", async () => {
-			tmpDir = await fs.mkdtemp(path.join("/tmp", "evolution-board-dup-"));
-			const yamlPath = path.join(tmpDir, "docs", "evolution-board.yaml");
+			tmpDir = await fs.mkdtemp(path.join("/tmp", "task-board-dup-"));
+			const yamlPath = path.join(tmpDir, "docs", "task-board.yaml");
 			await fs.mkdir(path.dirname(yamlPath), { recursive: true });
 			await Bun.write(yamlPath, "topics: []");
 
-			const tool = new EvolutionBoardTool(createSessionInTmp());
+			const tool = new TaskBoardTool(createSessionInTmp());
 			await tool.execute("test-id", {
 				action: "add",
 				topic: { name: "Duplicate Test", brief: "First one" },
@@ -80,12 +80,12 @@ describe("EvolutionBoardTool", () => {
 		});
 
 		it("requires topic parameter", async () => {
-			tmpDir = await fs.mkdtemp(path.join("/tmp", "evolution-board-req-"));
-			const yamlPath = path.join(tmpDir, "docs", "evolution-board.yaml");
+			tmpDir = await fs.mkdtemp(path.join("/tmp", "task-board-req-"));
+			const yamlPath = path.join(tmpDir, "docs", "task-board.yaml");
 			await fs.mkdir(path.dirname(yamlPath), { recursive: true });
 			await Bun.write(yamlPath, "topics: []");
 
-			const tool = new EvolutionBoardTool(createSessionInTmp());
+			const tool = new TaskBoardTool(createSessionInTmp());
 			const result = await tool.execute("test-id", { action: "add" });
 
 			const text = (result.content[0] as { type: string; text: string }).text;
@@ -93,12 +93,12 @@ describe("EvolutionBoardTool", () => {
 		});
 
 		it("sets default status to planned", async () => {
-			tmpDir = await fs.mkdtemp(path.join("/tmp", "evolution-board-status-"));
-			const yamlPath = path.join(tmpDir, "docs", "evolution-board.yaml");
+			tmpDir = await fs.mkdtemp(path.join("/tmp", "task-board-status-"));
+			const yamlPath = path.join(tmpDir, "docs", "task-board.yaml");
 			await fs.mkdir(path.dirname(yamlPath), { recursive: true });
 			await Bun.write(yamlPath, "topics: []");
 
-			const tool = new EvolutionBoardTool(createSessionInTmp());
+			const tool = new TaskBoardTool(createSessionInTmp());
 			await tool.execute("test-id", {
 				action: "add",
 				topic: { name: "Status Test", brief: "Testing default status" },
@@ -109,12 +109,12 @@ describe("EvolutionBoardTool", () => {
 		});
 
 		it("accepts optional fields", async () => {
-			tmpDir = await fs.mkdtemp(path.join("/tmp", "evolution-board-fields-"));
-			const yamlPath = path.join(tmpDir, "docs", "evolution-board.yaml");
+			tmpDir = await fs.mkdtemp(path.join("/tmp", "task-board-fields-"));
+			const yamlPath = path.join(tmpDir, "docs", "task-board.yaml");
 			await fs.mkdir(path.dirname(yamlPath), { recursive: true });
 			await Bun.write(yamlPath, "topics: []");
 
-			const tool = new EvolutionBoardTool(createSessionInTmp());
+			const tool = new TaskBoardTool(createSessionInTmp());
 			await tool.execute("test-id", {
 				action: "add",
 				topic: {
