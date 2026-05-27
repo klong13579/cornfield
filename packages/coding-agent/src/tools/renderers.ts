@@ -16,9 +16,8 @@ import { astGrepToolRenderer } from "./ast-grep";
 import { bashToolRenderer } from "./bash";
 import { calculatorToolRenderer } from "./calculator";
 import { debugToolRenderer } from "./debug";
-import { findToolRenderer } from "./find";
 import { githubToolRenderer } from "./gh-renderer";
-import { identityToolRenderer } from "./identity-render";
+import { findToolRenderer } from "./find";
 import { inspectImageToolRenderer } from "./inspect-image-renderer";
 import { jobToolRenderer } from "./job";
 import { notebookToolRenderer } from "./notebook";
@@ -70,6 +69,4 @@ export const toolRenderers: Record<string, ToolRenderer> = {
 	todo_write: todoWriteToolRenderer as ToolRenderer,
 	github: githubToolRenderer as ToolRenderer,
 	web_search: webSearchToolRenderer as ToolRenderer,
-	write: writeToolRenderer as ToolRenderer,
-	identity: identityToolRenderer as ToolRenderer,
 };

@@ -1332,15 +1332,6 @@ export const SETTINGS_SCHEMA = {
 			description: "Enable the calculator tool for basic calculations",
 		},
 	},
-	"identity.enabled": {
-		type: "boolean",
-		default: true,
-		ui: {
-			tab: "tools",
-			label: "Identity",
-			description: "Enable the identity tool for whoRu and whoisme queries",
-		},
-	},
 
 	"recipe.enabled": {
 		type: "boolean",

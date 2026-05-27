@@ -24,6 +24,7 @@ import type { LoadContext, LoadResult } from "../capability/types";
 import { expandTilde } from "../tools/path-utils";
 import {
 	buildRuleFromMarkdown,
+	calculateDepth,
 	createSourceMeta,
 	discoverExtensionModulePaths,
 	expandEnvVarsDeep,
@@ -839,6 +840,27 @@ async function loadContextFiles(ctx: LoadContext): Promise<LoadResult<ContextFil
 			return { items, warnings };
 		}
 	}
+
+	// Also check for root-level AGENTS.md (cwd and ancestors up to repoRoot)
+	let currentDir = ctx.cwd;
+	while (currentDir && currentDir !== "/") {
+		const rootAgentsMd = path.join(currentDir, "AGENTS.md");
+		const rootContent = await readFile(rootAgentsMd);
+		if (rootContent) {
+			items.push({
+				path: rootAgentsMd,
+				content: rootContent,
+				level: "project",
+				depth: calculateDepth(ctx.cwd, currentDir, path.sep),
+				_source: createSourceMeta(PROVIDER_ID, rootAgentsMd, "project"),
+			});
+		}
+		if (currentDir === ctx.repoRoot || currentDir === ctx.home) break;
+		const parent = path.dirname(currentDir);
+		if (parent === currentDir) break;
+		currentDir = parent;
+	}
+
 	return { items, warnings };
 }
 
