@@ -23,6 +23,22 @@ interface RawLearningRow {
 	times_ignored: number;
 }
 
+/** Compute Jaccard similarity using character bigrams (fast, language-agnostic). */
+function jaccardSimilarity(a: string, b: string): number {
+	const setA = new Set<string>();
+	const setB = new Set<string>();
+	const aNorm = a.toLowerCase().trim();
+	const bNorm = b.toLowerCase().trim();
+	if (aNorm === bNorm) return 1;
+	const minLen = Math.min(aNorm.length, bNorm.length);
+	if (minLen <= 3) return aNorm === bNorm ? 1 : 0;
+	for (let i = 0; i < aNorm.length - 1; i++) setA.add(aNorm.slice(i, i + 2));
+	for (let i = 0; i < bNorm.length - 1; i++) setB.add(bNorm.slice(i, i + 2));
+	let intersection = 0;
+	for (const g of setA) if (setB.has(g)) intersection++;
+	const union = setA.size + setB.size - intersection;
+	return union === 0 ? 0 : intersection / union;
+}
 function rowToLearning(row: RawLearningRow): Learning {
 	return {
 		id: row.id,
@@ -46,6 +62,7 @@ export class SqliteLearningStore {
 	#db: Database;
 	#insertStmt: Statement;
 	#updateLifecycleStmt: Statement;
+	#mergeStmt: Statement;
 
 	constructor(db: Database) {
 		this.#db = db;
@@ -64,10 +81,44 @@ export class SqliteLearningStore {
 				END
 		`);
 		this.#updateLifecycleStmt = db.prepare("UPDATE learnings SET lifecycle = ?, updated_at = ? WHERE id = ?");
+		this.#mergeStmt = db.prepare(`
+			UPDATE learnings SET
+				confidence = MAX(confidence, ?),
+				lifecycle = CASE
+					WHEN lifecycle = 'archived' THEN 'archived'
+					WHEN ? = 'active' THEN 'active'
+					ELSE lifecycle
+				END,
+				scope = CASE
+					WHEN scope = 'global' OR ? = 'global' THEN 'global'
+					ELSE scope
+				END,
+				times_injected = times_injected + ?,
+				times_helped = times_helped + ?,
+				times_ignored = times_ignored + ?,
+				updated_at = ?
+			WHERE id = ?
+		`);
 	}
 
 	async insert(learning: Learning): Promise<void> {
 		if (!validateLearningContent(learning.content)) return;
+
+		const duplicate = await this.#findDuplicate(learning);
+		if (duplicate) {
+			this.#mergeStmt.run(
+				learning.confidence,
+				learning.lifecycle,
+				learning.scope,
+				learning.timesInjected,
+				learning.timesHelped,
+				learning.timesIgnored,
+				Date.now(),
+				duplicate.id,
+			);
+			return;
+		}
+
 		this.#insertStmt.run(
 			learning.id,
 			learning.cwd,
@@ -89,6 +140,16 @@ export class SqliteLearningStore {
 	async get(id: string): Promise<Learning | undefined> {
 		const row = this.#db.prepare("SELECT * FROM learnings WHERE id = ?").get(id) as RawLearningRow | null;
 		return row ? rowToLearning(row) : undefined;
+	}
+	async #findDuplicate(learning: Learning): Promise<Learning | undefined> {
+		const rows = this.#db
+			.prepare("SELECT * FROM learnings WHERE kind = ? AND cwd = ?")
+			.all(learning.kind, learning.cwd) as RawLearningRow[];
+		for (const row of rows) {
+			const sim = jaccardSimilarity(learning.content, row.content);
+			if (sim >= 0.75) return rowToLearning(row);
+		}
+		return undefined;
 	}
 
 	async listAll(): Promise<Learning[]> {
