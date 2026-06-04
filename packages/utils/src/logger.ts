@@ -48,11 +48,23 @@ const fileTransport = new DailyRotateFile({
 	zippedArchive: true,
 });
 
+/** Console transport for terminal output */
+const consoleTransport = new winston.transports.Console({
+	format: winston.format.combine(winston.format.colorize(), winston.format.simple()),
+	silent: process.env.PI_LOG_SILENT === "true",
+});
+
+/** Whether console transport is enabled (default: true) */
+const consoleEnabled = process.env.PI_LOG_CONSOLE !== "false";
+
+/** Log level from environment (default: info) */
+const logLevel = process.env.PI_LOG_LEVEL || "info";
+
 /** The winston logger instance */
 const winstonLogger = winston.createLogger({
-	level: "debug",
+	level: logLevel,
 	format: logFormat,
-	transports: [fileTransport],
+	transports: [fileTransport, ...(consoleEnabled ? [consoleTransport] : [])],
 	// Don't exit on error - logging failures shouldn't crash the app
 	exitOnError: false,
 });

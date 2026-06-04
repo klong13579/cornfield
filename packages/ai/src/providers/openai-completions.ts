@@ -969,9 +969,16 @@ function buildParams(
 		Reflect.set(params, "thinking", { type: options?.reasoning ? "enabled" : "disabled" });
 	} else if (supportsReasoningParams && compat.thinkingFormat === "qwen" && model.reasoning) {
 		// Qwen uses top-level enable_thinking: boolean
-		Reflect.set(params, "enable_thinking", !!options?.reasoning);
+		// Only send when enabled - some providers (MiniMax) require it to be true
+		if (options?.reasoning) {
+			Reflect.set(params, "enable_thinking", true);
+		}
 	} else if (supportsReasoningParams && compat.thinkingFormat === "qwen-chat-template" && model.reasoning) {
-		Reflect.set(params, "chat_template_kwargs", { enable_thinking: !!options?.reasoning });
+		// Qwen chat template uses chat_template_kwargs.enable_thinking
+		// Only send when enabled - some providers (MiniMax) require it to be true
+		if (options?.reasoning) {
+			Reflect.set(params, "chat_template_kwargs", { enable_thinking: true });
+		}
 	} else if (
 		supportsReasoningParams &&
 		compat.thinkingFormat === "openrouter" &&
