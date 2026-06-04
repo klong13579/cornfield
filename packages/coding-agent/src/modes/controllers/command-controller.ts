@@ -621,10 +621,7 @@ export class CommandController {
 		this.ctx.editor.setText("");
 	}
 
-	async #handleTaskBoardAdd(
-		board: import("../../task-board/types").TaskBoard,
-		yamlPath: string,
-	): Promise<void> {
+	async #handleTaskBoardAdd(board: import("../../task-board/types").TaskBoard, yamlPath: string): Promise<void> {
 		const { generateTopicId } = await import("../../task-board/board");
 		type TopicStatus = import("../../task-board/types").TopicStatus;
 		type TaskTopic = import("../../task-board/types").TaskTopic;

@@ -261,10 +261,7 @@ describe("system Handlebars prompt templates", () => {
 		const sampleRule = "- NEVER disable tests to make CI pass";
 		await withTempDir(async dir => {
 			const agentsPath = path.join(dir, "AGENTS.md");
-			await fs.writeFile(
-				agentsPath,
-				["# Project", "", sampleRule, "- MUST NOT hand-edit models.json"].join("\n"),
-			);
+			await fs.writeFile(agentsPath, ["# Project", "", sampleRule, "- MUST NOT hand-edit models.json"].join("\n"));
 
 			const rendered = await buildSystemPrompt({
 				cwd: dir,
@@ -284,9 +281,13 @@ describe("system Handlebars prompt templates", () => {
 
 	test("buildSystemPrompt full fixture dedupes AGENTS NEVER rules across context and hard-constraints", async () => {
 		const neverRule = "- NEVER commit untracked secrets to the repository";
-		const agentsMd = ["# Agents", "", neverRule, "- MUST NOT use console.log in coding-agent", "Run bun check before yielding."].join(
-			"\n",
-		);
+		const agentsMd = [
+			"# Agents",
+			"",
+			neverRule,
+			"- MUST NOT use console.log in coding-agent",
+			"Run bun check before yielding.",
+		].join("\n");
 		const rendered = await buildSystemPrompt({
 			cwd: os.tmpdir(),
 			contextFiles: [{ path: "/tmp/project/AGENTS.md", content: agentsMd }],
@@ -294,7 +295,9 @@ describe("system Handlebars prompt templates", () => {
 			rules: baseRenderContext.rules as Array<{ name: string; description: string; globs: string[] }>,
 			toolNames: baseRenderContext.tools as string[],
 			appendSystemPrompt: "Appendix instructions",
-			alwaysApplyRules: [{ name: "validate-boundaries", content: "Validate inputs at boundaries.", path: "/tmp/rule.md" }],
+			alwaysApplyRules: [
+				{ name: "validate-boundaries", content: "Validate inputs at boundaries.", path: "/tmp/rule.md" },
+			],
 			intentField: INTENT_FIELD,
 			mcpDiscoveryMode: true,
 			mcpDiscoveryServerSummaries: ["github (2 tools)"],
@@ -313,7 +316,9 @@ describe("system Handlebars prompt templates", () => {
 			rules: baseRenderContext.rules as Array<{ name: string; description: string; globs: string[] }>,
 			toolNames: baseRenderContext.tools as string[],
 			appendSystemPrompt: "Appendix instructions",
-			alwaysApplyRules: [{ name: "validate-boundaries", content: "Validate inputs at boundaries.", path: "/tmp/rule.md" }],
+			alwaysApplyRules: [
+				{ name: "validate-boundaries", content: "Validate inputs at boundaries.", path: "/tmp/rule.md" },
+			],
 			intentField: INTENT_FIELD,
 			mcpDiscoveryMode: true,
 			mcpDiscoveryServerSummaries: ["github (2 tools)"],

@@ -20,11 +20,12 @@ import { toJsonRpcError } from "../../mcp/types";
 /**
  * HTTP transport for MCP servers.
  * Uses POST for requests, supports SSE responses.
- */
+*/
 export class HttpTransport implements MCPTransport {
 	#connected = false;
 	#sessionId: string | null = null;
 	#sseConnection: AbortController | null = null;
+	#startingSSE = false; // Prevent concurrent SSE startup
 
 	onClose?: () => void;
 	onError?: (error: Error) => void;
@@ -56,50 +57,55 @@ export class HttpTransport implements MCPTransport {
 	 * Start SSE listener for server-initiated messages.
 	 * Resolves once the SSE connection is established (or fails/unsupported).
 	 * Message reading continues in the background.
-	 */
+*/
 	async startSSEListener(): Promise<void> {
 		if (!this.#connected) return;
 		if (this.#sseConnection) return;
-
-		this.#sseConnection = new AbortController();
-		const headers: Record<string, string> = {
-			Accept: "text/event-stream",
-			...this.config.headers,
-		};
-
-		if (this.#sessionId) {
-			headers["Mcp-Session-Id"] = this.#sessionId;
-		}
-
-		let response: Response;
+		if (this.#startingSSE) return;
+		this.#startingSSE = true;
 		try {
-			response = await fetch(this.config.url, {
-				method: "GET",
-				headers,
-				signal: this.#sseConnection.signal,
-			});
-		} catch (error) {
-			this.#sseConnection = null;
-			if (error instanceof Error && error.name !== "AbortError") {
-				this.onError?.(error);
+			this.#sseConnection = new AbortController();
+			const headers: Record<string, string> = {
+				Accept: "text/event-stream",
+				...this.config.headers,
+			};
+
+			if (this.#sessionId) {
+				headers["Mcp-Session-Id"] = this.#sessionId;
 			}
-			return;
-		}
 
-		if (response.status === 405 || !response.ok || !response.body) {
-			this.#sseConnection = null;
-			return;
-		}
+			let response: Response;
+			try {
+				response = await fetch(this.config.url, {
+					method: "GET",
+					headers,
+					signal: this.#sseConnection.signal,
+				});
+			} catch (error) {
+				this.#sseConnection = null;
+				if (error instanceof Error && error.name !== "AbortError") {
+					this.onError?.(error);
+				}
+				return;
+			}
 
-		// Connection established — read messages in background.
-		// If the stream ends unexpectedly (server restart, network drop),
-		// fire onClose so the manager can trigger reconnection.
-		const signal = this.#sseConnection.signal;
-		void this.#readSSEStream(response.body!, signal).finally(() => {
-			const wasConnected = this.#connected;
-			this.#sseConnection = null;
-			if (wasConnected) this.onClose?.();
-		});
+			if (response.status === 405 || !response.ok || !response.body) {
+				this.#sseConnection = null;
+				return;
+			}
+
+			// Connection established — read messages in background.
+			// If the stream ends unexpectedly (server restart, network drop),
+			// fire onClose so the manager can trigger reconnection.
+const signal = this.#sseConnection.signal;
+			void this.#readSSEStream(response.body!, signal).finally(() => {
+				const wasConnected = this.#connected;
+				this.#sseConnection = null;
+				if (wasConnected) this.onClose?.();
+			});
+		} finally {
+			this.#startingSSE = false;
+		}
 	}
 	async #readSSEStream(body: ReadableStream<Uint8Array>, signal: AbortSignal): Promise<void> {
 		try {

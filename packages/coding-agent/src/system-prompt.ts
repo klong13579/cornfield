@@ -80,11 +80,7 @@ function isAgentsMdPath(filePath: string): boolean {
 
 function isNeverRuleLine(line: string): boolean {
 	const stripped = line.replace(/\*\*/g, "").trim();
-	return (
-		/\bNEVER\b|\bMUST NOT\b/i.test(stripped) &&
-		!stripped.startsWith("<!--") &&
-		!stripped.startsWith("#")
-	);
+	return /\bNEVER\b|\bMUST NOT\b/i.test(stripped) && !stripped.startsWith("<!--") && !stripped.startsWith("#");
 }
 
 function extractNeverRules(agentsMdContent: string): string[] {
@@ -96,6 +92,33 @@ function extractNeverRules(agentsMdContent: string): string[] {
 		neverRules.push(entry);
 	}
 	return neverRules;
+
+/** Extract the "Agent 定位" section from AGENTS.md content */
+function extractAgentRole(agentsMdContent: string): string | null {
+	const lines = agentsMdContent.split("\n");
+	let inAgentRoleSection = false;
+	const sectionLines: string[] = [];
+
+	for (const line of lines) {
+		// Check for section header
+		if (/^#{1,6}\s*[-−]\s*Agent[\u4e00-\u9fa5a-zA-Z]/.test(line) || /^#{1,6}\s*Agent[\u4e00-\u9fa5a-zA-Z]/.test(line)) {
+			inAgentRoleSection = true;
+			continue;
+		}
+
+		// Stop at next section (starts with ## or ---)
+		if (inAgentRoleSection && (/^#{1,6}\s*[-−]/.test(line) || /^---$/.test(line))) {
+			break;
+		}
+
+		if (inAgentRoleSection) {
+			sectionLines.push(line);
+		}
+	}
+
+	const result = sectionLines.map(l => l.trim()).filter(l => l.length > 0).join("\n");
+	return result.length > 0 ? result : null;
+}
 }
 
 /** Remove lines promoted to `<hard-constraints>` so AGENTS.md is not duplicated in `<context>`. */

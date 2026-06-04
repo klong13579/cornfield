@@ -705,16 +705,19 @@ export class MCPManager {
 		// Tools stay available (stale) while we establish the new connection.
 		// Fire-and-forget: don't await the close — HttpTransport.close() sends a
 		// DELETE with config.timeout (30s default), and blocking here delays the
-		// reconnect loop by that amount on every server restart.
-		const reconnectEpoch = this.#epoch;
-		if (oldConnection) {
+// reconnect loop by that amount on every server restart.
+const reconnectEpoch = this.#epoch;
+	if (oldConnection) {
+		// Detach onClose to prevent re-entrant reconnect from the close itself
 			// Detach onClose to prevent re-entrant reconnect from the close itself
 			oldConnection.transport.onClose = undefined;
-			void oldConnection.transport.close().catch(() => {});
+			await oldConnection.transport.close().catch(() => {});
 			this.#connections.delete(name);
 		}
-		this.#pendingConnections.delete(name);
-		this.#pendingToolLoads.delete(name);
+
+		// Wait for the old SSE stream to fully drain before reconnecting.
+		// This prevents "ReadableStream already has a controller" errors.
+		await Bun.sleep(50);
 
 		// Retry with backoff — the server may still be starting up.
 		const delays = [500, 1000, 2000, 4000];

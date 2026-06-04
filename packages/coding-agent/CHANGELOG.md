@@ -2,8 +2,29 @@
 
 ## [Unreleased]
 
-### Breaking Changes
+### Added
 
+- **Unified Gateway**: `omp gateway` command replaces `omp daemon` and `omp schedule` with a single process that manages IM channels, cron scheduler, agent bridge, and heartbeat (following Hermes/OpenClaw pattern).
+  - `omp gateway start` — start the unified gateway
+  - `omp gateway status` — show gateway + scheduler status
+  - `omp gateway cron create/list/pause/resume/run/remove` — manage scheduled tasks
+  - `omp gateway service install/uninstall/start/stop/status` — system service management
+  - `omp gateway config` — show resolved configuration
+  - Cron tasks can deliver results to IM channels via `--deliver <channel>`
+  - Heartbeat support for periodic agent prompts
+- **Backward compatibility**: `omp daemon` and `omp schedule` remain as aliases, delegating to the unified gateway.
+
+### Changed
+
+- Scheduler moved from `packages/coding-agent/src/scheduler/` to `packages/pi-gateway/src/scheduler/`
+- Data directory changed from `~/.omp/` to `~/.pi/gateway-data/` for scheduler state
+
+### Removed
+
+- Old standalone scheduler files in `packages/coding-agent/src/scheduler/`
+
+
+### Breaking Changes
 - Renamed feature evolution board to **task board**: slash command `/task-board`, agent tool `task_board`, data file `docs/task-board.yaml`, module `task-board/` (was `evolution-board`, `evolution_board`, `docs/evolution-board.yaml`).
 
 ### Fixed
