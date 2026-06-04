@@ -1179,6 +1179,74 @@ omp <command> [args] [flags]
 - `ssh`
 - `stats`
 - `update`
+- `gateway`
+
+### Gateway
+
+The `omp gateway` command provides unified IM gateway management:
+
+```bash
+# Start gateway (foreground)
+omp gateway start
+
+# Start with custom config
+omp gateway start --config /path/to/gateway.json
+
+# Show gateway status
+omp gateway status
+
+# Show gateway config
+omp gateway config
+```
+
+#### Cron Jobs
+
+```bash
+# Create a shell task
+omp gateway cron create '0 9 * * *' 'bun run daily-report.ts' --name daily-report
+
+# Create an agent (LLM) task
+omp gateway cron create '+1h' '分析今天的代码提交' --type agent --name code-analysis
+
+# List all tasks
+omp gateway cron list
+omp gateway cron list --json
+
+# Pause/Resume a task
+omp gateway cron pause daily-report
+omp gateway cron resume daily-report
+
+# Run a task immediately
+omp gateway cron run daily-report
+
+# View execution logs
+omp gateway cron logs daily-report
+omp gateway cron logs daily-report --json
+
+# Remove a task
+omp gateway cron remove daily-report
+
+# Scheduler status
+omp gateway cron status
+omp gateway cron diagnose
+```
+
+#### Schedule Format
+
+Supported formats:
+- Cron: `0 9 * * *` (daily at 9am)
+- Interval: `3s`, `5m`, `1h`
+- One-shot: `+30m` (30 minutes from now), `2026-06-02T10:00:00`
+
+#### Service Management
+
+```bash
+omp gateway service install
+omp gateway service start
+omp gateway service stop
+omp gateway service status
+omp gateway service uninstall
+```
 
 ### File Arguments
 
