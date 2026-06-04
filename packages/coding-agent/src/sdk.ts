@@ -1239,6 +1239,11 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 				sessionManager,
 				modelRegistry,
 			);
+			// Set config-based flag values for extensions
+			const nudgeContextInjection = settings.get("selfEvolution.nudgeContextInjection");
+			if (nudgeContextInjection !== undefined) {
+				extensionRunner.setFlagValue("self-evolution-enable-nudge-context-injection", nudgeContextInjection);
+			}
 		}
 
 		const getSessionContext = () => ({

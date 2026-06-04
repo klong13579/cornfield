@@ -932,6 +932,17 @@ export const SETTINGS_SCHEMA = {
 
 	"memories.summaryInjectionTokenLimit": { type: "number", default: 5000 },
 
+	// Self Evolution
+	"selfEvolution.nudgeContextInjection": {
+		type: "boolean",
+		default: true,
+		ui: {
+			tab: "context",
+			label: "Nudge Context Injection",
+			description: "Inject session nudges into the next LLM context",
+		},
+	},
+
 	// TTSR
 	"ttsr.enabled": {
 		type: "boolean",
