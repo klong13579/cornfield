@@ -64,8 +64,7 @@ export class TaskBoardTool implements AgentTool<typeof taskBoardSchema> {
 
 		const yamlPath = `${this.session.cwd}/docs/task-board.yaml`;
 		try {
-			const content = await Bun.file(yamlPath).text();
-			board.load(content);
+			await board.reload(yamlPath);
 		} catch {
 			return {
 				content: [
@@ -126,16 +125,17 @@ export class TaskBoardTool implements AgentTool<typeof taskBoardSchema> {
 				};
 			}
 			case "filter": {
-				let topics = board.getTopics();
-				if (params.filter?.status) {
-					topics = board.getByStatus(params.filter.status as never);
-				}
-				if (params.filter?.module) {
-					topics = board.getByModule(params.filter.module);
-				}
-				if (params.filter?.tag) {
-					topics = board.getByTag(params.filter.tag);
-				}
+				const allTopics = board.getTopics();
+				const filterStatus = params.filter?.status;
+				const filterModule = params.filter?.module;
+				const filterTag = params.filter?.tag;
+				// Single-pass filter to avoid multiple array traversals
+				const topics = allTopics.filter(t => {
+					if (filterStatus && t.status !== filterStatus) return false;
+					if (filterModule && !t.modules?.includes(filterModule)) return false;
+					if (filterTag && !t.tags?.includes(filterTag)) return false;
+					return true;
+				});
 				const output = topics.map(t => `${t.status} | ${t.name} | ${t.brief}`).join("\n");
 				return {
 					content: [{ type: "text", text: output || "No topics match the filter." }],

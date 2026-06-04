@@ -544,8 +544,7 @@ export class CommandController {
 		const yamlPath = path.join(this.ctx.session.sessionManager.getCwd(), "docs", "task-board.yaml");
 
 		try {
-			const content = await Bun.file(yamlPath).text();
-			board.load(content);
+			await board.reload(yamlPath);
 		} catch {
 			this.ctx.showWarning("No task board found. Create docs/task-board.yaml first.");
 			return;
@@ -679,12 +678,19 @@ export class CommandController {
 		try {
 			board.addTopic(topic);
 			await board.save(yamlPath);
+			// Show success in both status bar and chat container
 			this.ctx.showStatus(`Topic "${name}" added successfully with ID: ${id}`);
+			this.ctx.chatContainer.addChild(new Spacer(1));
+			this.ctx.chatContainer.addChild(new DynamicBorder());
+			this.ctx.chatContainer.addChild(new Text(theme.bold(theme.fg("accent", "Task Board")), 1, 0));
+			this.ctx.chatContainer.addChild(new Spacer(1));
+			this.ctx.chatContainer.addChild(new Text(`${theme.fg("green", `✓ Topic "${name}" added successfully`)} (ID: ${id})`, 1, 0));
+			this.ctx.chatContainer.addChild(new DynamicBorder());
+			this.ctx.ui.requestRender();
 		} catch (error) {
 			this.ctx.showError(`Failed to save topic: ${error instanceof Error ? error.message : String(error)}`);
 		}
 	}
-
 	handleContextCommand(): void {
 		const breakdown = computeContextBreakdown(this.ctx.session);
 		if (breakdown.contextWindow <= 0) {
