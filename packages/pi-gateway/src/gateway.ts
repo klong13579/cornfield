@@ -1,16 +1,25 @@
 /**
- * Gateway core — orchestrates channels, sessions, and agent bridge.
+ * Gateway core — orchestrates channels, sessions, agent bridge, and cron scheduler.
  *
  * The gateway is the central hub that:
  * 1. Manages channel connections (DingTalk, Feishu, etc.)
  * 2. Routes inbound messages to the appropriate agent session
  * 3. Bridges agent responses back to the originating channel
+ * 4. Runs the cron scheduler for periodic tasks
+ * 5. Delivers scheduled task results to configured channels
  */
 
+import * as path from "node:path";
 import { logger } from "@oh-my-pi/pi-utils";
 import { AgentBridge } from "./agent-bridge";
 import { ChannelRegistry } from "./channels/registry";
-import { type GatewayConfig, getEnabledChannels } from "./config";
+import { getDataDir, type GatewayConfig, getEnabledChannels } from "./config";
+import { SchedulerEngine } from "./scheduler/engine";
+import { executeScheduledCommand } from "./scheduler/executor";
+import { SchedulerFileStore } from "./scheduler/file-store";
+import { SchedulerDbStorage } from "./scheduler/storage";
+import type { ScheduledTask } from "./scheduler/types";
+import { DEFAULT_SCHEDULER_CONFIG, getSchedulerDbPath, getSchedulerDir } from "./scheduler/types";
 import { SQLiteSessionStore } from "./session-store";
 import type { InboundMessage, OutboundMessage, SessionRecord } from "./types";
 
@@ -20,6 +29,10 @@ export class Gateway {
 	#store: SQLiteSessionStore | null = null;
 	#running = false;
 	#bridge: AgentBridge;
+	#schedulerEngine?: SchedulerEngine;
+	#schedulerStorage?: SchedulerDbStorage;
+	#schedulerFileStore?: SchedulerFileStore;
+	#watchInterval?: ReturnType<typeof setInterval>;
 
 	constructor(config: GatewayConfig) {
 		this.#config = config;
@@ -35,7 +48,7 @@ export class Gateway {
 		logger.debug("Starting gateway...");
 
 		// Initialize session store
-		const dataDir = this.#config.dataDir ?? `${process.env.HOME}/.pi/gateway-data`;
+		const dataDir = getDataDir(this.#config);
 		this.#store = new SQLiteSessionStore(`${dataDir}/sessions.db`);
 
 		// Register channels
@@ -48,8 +61,6 @@ export class Gateway {
 			// Future: feishu, wechat, etc.
 		}
 
-		// Connect all channels
-
 		// Start agent bridge (RPC process)
 		try {
 			await this.#bridge.start();
@@ -57,7 +68,11 @@ export class Gateway {
 		} catch (err) {
 			logger.error("Failed to start agent bridge", { error: String(err) });
 		}
+
 		await this.#registry.connectAll(async msg => this.#handleInboundMessage(msg));
+
+		// Start cron scheduler
+		await this.#startScheduler();
 
 		this.#running = true;
 		logger.debug("Gateway started");
@@ -67,6 +82,8 @@ export class Gateway {
 		if (!this.#running) return;
 
 		logger.debug("Stopping gateway...");
+
+		this.#stopScheduler();
 		this.#bridge.stop();
 		await this.#registry.disconnectAll();
 		this.#store?.close();
@@ -78,10 +95,46 @@ export class Gateway {
 		return this.#running;
 	}
 
+	/**
+	 * 直接发送消息给 Agent (用于 CLI 交互模式)
+	 */
+	async sendDirectMessage(text: string): Promise<string | null> {
+		if (!this.#bridge.isRunning) {
+			logger.warn("Agent bridge not running");
+			return null;
+		}
+
+		const mockSession = {
+			id: "cli-session",
+			channelId: "cli",
+			userId: "cli-user",
+			conversationId: "cli-conv",
+			createdAt: Date.now(),
+			updatedAt: Date.now(),
+			status: "active" as const,
+		};
+
+		const mockMessage = {
+			channelId: "cli",
+			userId: "cli-user",
+			userName: "CLI User",
+			conversationId: "cli-conv",
+			isGroup: false,
+			content: { type: "text" as const, text },
+			timestamp: new Date(),
+		};
+
+		return await this.#bridge.forward(mockMessage, mockSession);
+	}
+
 	async getStatus(): Promise<{
 		running: boolean;
 		channels: Array<{ id: string; name: string; connected: boolean }>;
 		sessions: number;
+		scheduler: {
+			running: boolean;
+			taskCount: number;
+		};
 	}> {
 		const channels = this.#registry.getAll().map(c => ({
 			id: c.id,
@@ -95,7 +148,94 @@ export class Gateway {
 			running: this.#running,
 			channels,
 			sessions: sessions.length,
+			scheduler: {
+				running: this.#schedulerEngine != null,
+				taskCount: this.#schedulerEngine?.getActiveTaskIds().length ?? 0,
+			},
 		};
+	}
+
+	// ═══════════════════════════════════════════════════════════════════
+	// Scheduler
+	// ═══════════════════════════════════════════════════════════════════
+
+	async #startScheduler(): Promise<void> {
+		const cronConfig = this.#config.cron;
+		if (!cronConfig?.enabled) {
+			logger.debug("Cron scheduler disabled in config");
+			return;
+		}
+
+		const dbPath = getSchedulerDbPath();
+		this.#schedulerStorage = new SchedulerDbStorage(dbPath);
+
+		const taskDir = path.join(getSchedulerDir(), "tasks");
+		this.#schedulerFileStore = new SchedulerFileStore(taskDir, this.#schedulerStorage);
+		const syncResult = this.#schedulerFileStore.syncToDb();
+		if (syncResult.added > 0 || syncResult.removed > 0 || syncResult.updated > 0) {
+			logger.debug("File store initial sync", syncResult);
+		}
+
+		this.#schedulerEngine = new SchedulerEngine({
+			storage: this.#schedulerStorage,
+			onTrigger: this.#onCronTrigger.bind(this),
+			config: {
+				...DEFAULT_SCHEDULER_CONFIG,
+				maxConcurrentRuns: cronConfig.maxConcurrentRuns ?? 3,
+				taskDir,
+			},
+		});
+
+		this.#schedulerEngine.start();
+
+		// Reload tasks periodically to pick up file changes
+		const tickMs = cronConfig.tickIntervalMs ?? 60_000;
+		this.#watchInterval = setInterval(() => {
+			this.#schedulerFileStore?.syncToDb();
+			this.#schedulerEngine?.reload();
+		}, tickMs);
+
+		logger.debug("Cron scheduler started", { taskCount: this.#schedulerEngine.getActiveTaskIds().length, tickMs });
+	}
+
+	#stopScheduler(): void {
+		if (this.#watchInterval) {
+			clearInterval(this.#watchInterval);
+			this.#watchInterval = undefined;
+		}
+		this.#schedulerEngine?.stop();
+		this.#schedulerEngine = undefined;
+		this.#schedulerStorage?.close();
+		this.#schedulerStorage = undefined;
+		this.#schedulerFileStore = undefined;
+	}
+
+	async #onCronTrigger(task: ScheduledTask, executionId: string): Promise<void> {
+		if (!this.#schedulerStorage) return;
+
+		const ompBinary = this.#config.agent?.ompPath ?? "omp";
+		const { exitCode, output, stderr, timedOut } = await executeScheduledCommand(task.command, {
+			taskType: task.taskType,
+			timeoutMs: task.timeoutMs,
+			ompBinary,
+			skills: task.skills,
+			preScript: task.preScript,
+		});
+		const endedAt = Date.now();
+
+		this.#schedulerStorage.updateExecution(executionId, {
+			status: exitCode === 0 ? "success" : "failure",
+			exitCode,
+			output: timedOut ? `[TIMED OUT after ${task.timeoutMs ?? 30_000}ms]\n${output}` : output,
+			stderr: timedOut ? `[TIMED OUT]\n${stderr}` : stderr,
+			endedAt,
+		});
+
+		if (exitCode !== 0 || timedOut) {
+			logger.warn("Cron task failed", { taskId: task.id, taskName: task.name, exitCode, timedOut });
+		} else {
+			logger.debug("Cron task succeeded", { taskId: task.id, taskName: task.name });
+		}
 	}
 
 	// ═══════════════════════════════════════════════════════════════════
@@ -140,7 +280,7 @@ export class Gateway {
 			const placeholder: OutboundMessage = {
 				channelId: msg.channelId,
 				conversationId: msg.conversationId,
-				content: { type: "markdown", markdown: "💭 思考中..." },
+				content: { type: "markdown", markdown: "thinking..." },
 			};
 			await this.#registry.sendMessage(placeholder);
 
@@ -173,7 +313,7 @@ export class Gateway {
 	}
 
 	#buildSessionPath(channelId: string, conversationId: string): string {
-		const dataDir = this.#config.dataDir ?? `${process.env.HOME}/.pi/gateway-data`;
+		const dataDir = getDataDir(this.#config);
 		// Sanitize conversationId for filesystem safety
 		const safeId = conversationId.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64);
 		return `${dataDir}/sessions/${channelId}/${safeId}.jsonl`;

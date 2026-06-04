@@ -19,6 +19,7 @@
   "dependencies": {
     "@oh-my-pi/pi-utils": "catalog:",
     "@sinclair/typebox": "catalog:",
+    "croner": "10.0.1",
     "zod": "catalog:"
   },
   "devDependencies": {

@@ -156,29 +156,32 @@ export class AgentBridge {
 			env: { ...process.env },
 		});
 
-		// WritableStream writer for stdin
-		const stdinWriter = proc.stdin.getWriter();
+		// FileSink for stdin (Bun specific)
+		const stdin = proc.stdin as FileSink;
+		if (!stdin || typeof stdin.write !== 'function') {
+			logger.error("Invalid stdin for agent bridge");
+			throw new Error("Failed to initialize agent bridge stdin");
+		}
 
 		this.#proc = { pid: proc.pid, kill: () => proc.kill() };
 		this.#stdinWriter = {
 			write: (data: Uint8Array) => {
-				stdinWriter.write(data);
+				stdin.write(data);
 			},
 		};
-
 		// Process stdout lines asynchronously
-		void this.#readLines(proc.stdout as ReadableStream<Uint8Array>).then(async lines => {
-			for await (const line of lines) {
+		(async () => {
+			for await (const line of this.#readLines(proc.stdout as ReadableStream<Uint8Array>)) {
 				this.#handleRpcLine(line);
 			}
-		});
+		})();
 
 		// Drain stderr (non-blocking)
-		void this.#readLines(proc.stderr as ReadableStream<Uint8Array>).then(async lines => {
-			for await (const _line of lines) {
+		(async () => {
+			for await (const _line of this.#readLines(proc.stderr as ReadableStream<Uint8Array>)) {
 				// stderr logging only, no action needed
 			}
-		});
+		})();
 
 		// Wait for "ready" signal or process exit
 		const { promise, resolve, reject } = Promise.withResolvers<void>();

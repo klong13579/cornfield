@@ -41,7 +41,7 @@ export function detectPlatform(): Platform {
 export function getServicePaths() {
 	const platform = detectPlatform();
 	const home = os.homedir();
-	const dataDir = path.join(home, ".pi", "gateway-data");
+	const dataDir = path.join(home, ".omp", "gateway-data");
 	const logDir = path.join(dataDir, "logs");
 
 	switch (platform) {

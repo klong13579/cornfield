@@ -15,11 +15,11 @@ describe("config", () => {
 
 	it("resolves config path in home directory", () => {
 		const path = getConfigPath();
-		expect(path).toContain(".pi/gateway.json");
+		expect(path).toContain(".omp/gateway.json");
 	});
 
 	it("resolves data dir", () => {
 		const dir = getDataDir();
-		expect(dir).toContain(".pi/gateway-data");
+		expect(dir).toContain(".omp/gateway-data");
 	});
 });

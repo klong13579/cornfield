@@ -103,18 +103,34 @@ export interface AgentConfig {
 	ompPath?: string;
 	model?: string;
 	maxConcurrentSessions?: number;
+	maxCrashRetries?: number;
+	crashBackoffMs?: number;
 }
-
 export interface SessionConfig {
 	idleTimeoutMinutes?: number;
 	resetPolicy?: "none" | "daily" | "idle";
 	dailyResetHour?: number;
 }
 
+export interface HeartbeatConfig {
+	enabled?: boolean;
+	every?: string;
+	prompt?: string;
+	deliver?: string;
+}
+
+export interface CronConfig {
+	enabled?: boolean;
+	tickIntervalMs?: number;
+	maxConcurrentRuns?: number;
+	heartbeat?: HeartbeatConfig;
+}
+
 export interface GatewayConfig {
 	channels: Record<string, ChannelConfig>;
 	agent?: AgentConfig;
 	session?: SessionConfig;
+	cron?: CronConfig;
 	dataDir?: string;
 }
 
