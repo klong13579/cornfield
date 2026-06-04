@@ -79,7 +79,7 @@ This plugin is bundled with `pi-coding-agent` and loads automatically as an inli
 | `--no-self-evolution-enable-versioning` | — | — | Disable skill version snapshots |
 | `--no-self-evolution-enable-activity-log` | — | — | Disable JSONL activity logging |
 | `--self-evolution-global-store` | boolean | `true` | Global user store: `~/.omp/self-evolution` (default) |
-| `--self-evolution-project-store` | boolean | `false` | Per-repo `<cwd>/.omp/memory`, `evolution`, `skills` |
+| `--self-evolution-project-store` | boolean | `false` | Per-repo `<cwd>/.omp/evolution/{memory,skills,evolution.db}` |
 
 Example:
 
@@ -100,7 +100,7 @@ All commands are consolidated under `/evolution <subcommand>`. Old flat commands
 | `/evolution status` | Show statistics: episodes, skills, versions, sessions archived |
 | `/evolution skills [--detail]` | List evolved skills with quality, success rate, user rating; `--detail` shows score breakdown |
 | `/evolution rate <name> <1-5>` | Rate a skill 1-5 stars (affects quality score) |
-| `/evolution clear` | Delete `.omp/memory`, `.omp/evolution`, and `.omp/skills` for this project (after confirmation) |
+| `/evolution clear` | Delete `.omp/evolution/memory`, `.omp/evolution`, and `.omp/skills` for this project (after confirmation) |
 | `/evolution archive` | Archive low-quality skills (quality < 30, unused) |
 | `/evolution history <name>` | View version history for a skill |
 | `/evolution rollback <name> <version>` | Rollback a skill to a specific version |

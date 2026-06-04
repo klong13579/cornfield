@@ -10,6 +10,14 @@ interface SessionHeader {
 	timestamp?: string;
 }
 
+interface SessionEndEntry {
+	type: "session_end";
+	timestamp?: string;
+	completedSuccessfully?: boolean;
+	toolCallCount?: number;
+	errorCount?: number;
+}
+
 interface SessionMessageEntry {
 	type: "message";
 	timestamp: string;
@@ -78,6 +86,23 @@ export function parseOmpSessionJsonlToTrace(jsonlText: string, episode: Episode)
 		if (parsed.type === "session") {
 			header = parsed as SessionHeader;
 			startTime = parseTimestamp(header.timestamp, startTime);
+			continue;
+		}
+
+		if (parsed.type === "session_end") {
+			const end = parsed as SessionEndEntry;
+			if (end.completedSuccessfully !== undefined) {
+				completedSuccessfully = end.completedSuccessfully;
+			}
+			if (end.errorCount !== undefined) {
+				errorCount = Math.max(errorCount, end.errorCount);
+			}
+			if (end.toolCallCount !== undefined) {
+				toolCallCount = Math.max(toolCallCount, end.toolCallCount);
+			}
+			if (end.timestamp) {
+				endTime = Math.max(endTime, parseTimestamp(end.timestamp, endTime));
+			}
 			continue;
 		}
 

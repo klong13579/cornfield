@@ -28,4 +28,8 @@ When finished, respond with JSON only (no markdown fences):
 }
 ```
 
+- `passed`: whether replay likely succeeded or the asset would prevent the original failure mode.
+- `addresses_dominant_error`: false if the dominant error would still occur.
+- `would_change_tool_chain`: advisory — whether the first failing step would likely differ (actual chains may be compared separately).
+
 If you cannot emit JSON, end with: `VERDICT: KEEP` or `VERDICT: DISCARD`.

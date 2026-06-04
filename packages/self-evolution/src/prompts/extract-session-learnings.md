@@ -9,7 +9,7 @@ Rules:
 - At most 3 items. Return `[]` if nothing worth persisting.
 - `content` must be one clear rule or fact (>=20 characters), in the user's language when possible.
 - Only include what the **user** explicitly stated or clearly agreed to — not tool errors, not generic coding advice.
-- `confidence` 5 = explicit "remember this"; 4 = strong preference; 3 = useful project fact; omit below 4 unless clearly user-stated.
+- Use `confidence` 4–5 for items worth persisting; items below 4 are discarded by the pipeline.
 - NEVER output: tool failure remediation templates, code fragments, CLI flags, "do not use X after failure", assistant boilerplate.
 - Do not duplicate items already obvious from project docs.
 

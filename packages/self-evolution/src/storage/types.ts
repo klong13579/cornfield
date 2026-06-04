@@ -6,7 +6,6 @@ import type {
 	NudgeRecord,
 	SkillEffectiveness,
 	SkillVersion,
-	UserProfile,
 	WorkflowPattern,
 } from "../types";
 
@@ -52,11 +51,6 @@ export interface WorkflowPatternStore {
 	getByIntent(intent: string, limit: number): Promise<WorkflowPattern[]>;
 	getById(id: string): Promise<WorkflowPattern | undefined>;
 	listAll(): Promise<WorkflowPattern[]>;
-}
-
-export interface ProfileStore {
-	get(id: string): Promise<UserProfile | undefined>;
-	upsert(id: string, profile: UserProfile): Promise<void>;
 }
 
 export interface EffectivenessStore {

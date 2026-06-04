@@ -28,8 +28,6 @@ import { getMemoryRoot, resolveEvolutionPathLayout } from "./paths";
 import { projectLearnings } from "./projection/learnings";
 import { projectSystemDiagnosis } from "./projection/system-diagnosis";
 import auditSystemDiagnosisTemplate from "./prompts/audit-system-diagnosis.md" with { type: "text" };
-import { type BackgroundLlmAuth, callBackgroundLlm } from "./utils/llm";
-import { resolveBackgroundModel } from "./utils/background-model";
 import { backfillSessionTracesFromEpisodes } from "./regression/backfill-traces";
 import { repairRegressionFixtureLabels } from "./regression/repair-regression-fixture-labels";
 import { parseReplayBackendFromTrialReason, parseToolchainTagFromTrialReason } from "./regression/trial-reason";
@@ -49,7 +47,6 @@ import type {
 	EpisodeStore,
 	FitScoreStore,
 	NudgeHistoryStore,
-	ProfileStore,
 	SkillEffectivenessStore,
 	SkillPopulationStore,
 	SkillStore,
@@ -57,7 +54,9 @@ import type {
 	WorkflowPatternStore,
 } from "./storage/types";
 import { syncSkillsToFiles } from "./sync";
-import type { SelfEvolutionFlags, UserProfile } from "./types";
+import type { SelfEvolutionFlags } from "./types";
+import { resolveBackgroundModel } from "./utils/background-model";
+import { type BackgroundLlmAuth, callBackgroundLlm } from "./utils/llm";
 
 export interface CommandStores {
 	ensureInit(cwd: string): void;
@@ -67,7 +66,6 @@ export interface CommandStores {
 	statsStore(): SqliteStatsStore;
 	skillManager(): SkillManager;
 	activityLogger(): ActivityLogger;
-	profileStore(): ProfileStore;
 	workflowPatternStore(): WorkflowPatternStore;
 	learningStore(): SqliteLearningStore;
 	effectivenessStore(): EffectivenessStore;
@@ -190,12 +188,11 @@ const EVOLUTION_SUBCOMMANDS = [
 	{ name: "status", description: "Show statistics (episodes, skills, versions)" },
 	{ name: "skills", description: "List evolved skills" },
 	{ name: "rate", description: "Rate a skill" },
-	{ name: "clear", description: "Delete .omp/memory + evolution + skills (full project reset)" },
+	{ name: "clear", description: "Delete .omp/evolution/memory + .omp/evolution + .omp/skills (full project reset)" },
 	{ name: "memory", description: "Memory hub: search, view, enqueue, clear (memory only), …" },
 	{ name: "archive", description: "Archive low-quality skills" },
 	{ name: "history", description: "View version history for a skill" },
 	{ name: "rollback", description: "Rollback a skill to a version" },
-	{ name: "profile", description: "Display user behavioral profile" },
 	{ name: "workflows", description: "List mined workflow patterns" },
 	{ name: "audit", description: "Generate health report" },
 	{ name: "report", description: "Generate daily report" },
@@ -254,8 +251,6 @@ export function registerSelfEvolutionCommands(api: ExtensionAPI, stores: Command
 					return handleHistory(stores, ctx, rest);
 				case "rollback":
 					return handleRollback(stores, ctx, rest);
-				case "profile":
-					return handleProfile(stores, ctx);
 				case "workflows":
 					return handleWorkflows(stores, ctx, rest);
 				case "audit":
@@ -404,7 +399,7 @@ async function handleRate(stores: CommandStores, ctx: any, args: string): Promis
 async function handleClear(stores: CommandStores, ctx: ExtensionCommandContext): Promise<void> {
 	try {
 		const globalStore = stores.flags().globalStore;
-		const layout = resolveEvolutionPathLayout(ctx.cwd, globalStore, getAgentDir());
+		const layout = resolveEvolutionPathLayout(ctx.cwd, globalStore);
 		const scopeLabel = globalStore ? "global user store" : "this project";
 		const confirmed = await ctx.ui.confirm(
 			"Clear project OMP data",
@@ -417,7 +412,6 @@ async function handleClear(stores: CommandStores, ctx: ExtensionCommandContext):
 		const { removedDirs } = await clearProjectEvolutionData({
 			cwd: ctx.cwd,
 			globalStore,
-			agentDir: getAgentDir(),
 		});
 		ctx.ui.notify(`Cleared ${scopeLabel} evolution data:\n${removedDirs.map(d => `  ${d}`).join("\n")}`, "info");
 	} catch (err) {
@@ -484,7 +478,7 @@ async function handleRollback(stores: CommandStores, ctx: any, args: string): Pr
 	}
 }
 
-async function handleProfile(stores: CommandStores, ctx: any): Promise<void> {
+async function _handleProfile(stores: CommandStores, ctx: any): Promise<void> {
 	try {
 		const profile = await stores.profileStore().get("default");
 		if (!profile) {
@@ -563,9 +557,12 @@ async function handleAudit(stores: CommandStores, ctx: any): Promise<void> {
 			if (model) {
 				const reportText = formatAuditReport(report);
 				const auth: BackgroundLlmAuth = { auth: ctx.auth };
-				const response = await callBackgroundLlm(model, auditSystemDiagnosisTemplate, reportText, { auth, maxTokens: 2000 });
+				const response = await callBackgroundLlm(model, auditSystemDiagnosisTemplate, reportText, {
+					auth,
+					maxTokens: 2000,
+				});
 				if (response) {
-					diagnosis = "\n\n## LLM 系统诊断\n" + response;
+					diagnosis = `\n\n## LLM 系统诊断\n${response}`;
 				}
 			}
 		} catch (diagErr) {
@@ -881,7 +878,7 @@ async function handleStuck(stores: CommandStores, ctx: any, args: string): Promi
 
 		const lines = open.map(
 			e =>
-				`${e.id} [${e.status}] (${e.occurrenceCount}x, ${e.failedImprovementCount} failed auto-fixes)\n  ${e.patternLabel}\n  ${e.message}\n  ${e.suggestion}`,
+				`${e.id} [${e.status}] (${e.occurrenceCount}x, ${e.failedImprovementCount} failed auto-fixes)\n  Label: ${e.patternLabel}\n  Tool: ${e.dominantErrorTool ?? "—"}\n  Error: ${e.dominantErrorPattern ?? "—"}\n  ${e.message}\n  ${e.suggestion}`,
 		);
 		ctx.ui.notify(`${lines.join("\n\n")}\n\nUsage: /evolution stuck ack <id> | resolve <id> | sync`, "warning");
 	} catch (err) {
@@ -898,7 +895,7 @@ async function handleHelp(ctx: any): Promise<void> {
 		"  status              Show statistics (episodes, skills, versions)",
 		"  skills [--detail]   List evolved skills with optional score breakdown",
 		"  rate <name> <1-5>   Rate a skill",
-		"  clear               Delete .omp/memory + evolution + skills (full reset)",
+		"  clear               Delete .omp/evolution/memory + evolution + skills (full reset)",
 		"  memory <sub>        Memory: search|stats|report|view|enqueue|refresh-summary|clear",
 		"  archive             Archive low-quality skills",
 		"  history <name>      View version history for a skill",
@@ -1108,9 +1105,9 @@ export function registerProfileCommand(api: ExtensionAPI, stores: CommandStores)
 // /model standalone command
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function registerModelCommand(api: ExtensionAPI, stores: CommandStores): void {
-	api.registerCommand("model", {
-		description: "Model scores and routing. Usage: /model <subcommand>",
+export function registerModelStatsCommand(api: ExtensionAPI, stores: CommandStores): void {
+	api.registerCommand("model-stats", {
+		description: "Model scores and routing. Usage: /model-stats",
 		getArgumentCompletions(argumentPrefix: string) {
 			if (argumentPrefix.includes(" ")) return null;
 			const subs = [{ name: "scores", description: "Show model scores and stats" }];

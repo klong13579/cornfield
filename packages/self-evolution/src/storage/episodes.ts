@@ -27,7 +27,7 @@ export class SqliteEpisodeStore implements EpisodeStore {
 
 	async insert(episode: Episode): Promise<void> {
 		const stmt = this.db.prepare(`
-			INSERT INTO episodes (
+			INSERT OR REPLACE INTO episodes (
 				id, session_id, cwd, user_prompt, timestamp, duration_ms,
 				tool_call_count, error_count, had_recovery, completed_successfully,
 				summary, tools_used, files_modified

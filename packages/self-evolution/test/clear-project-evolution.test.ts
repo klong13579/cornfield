@@ -3,7 +3,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { clearProjectEvolutionData, isUsableSqliteDatabase } from "../src/clear-project-evolution";
-import { resolveProjectEvolutionDir, resolveProjectMemoryDir, resolveProjectSkillsDir } from "../src/paths";
+import { resolveProjectEvolutionDir, resolveProjectSkillsDir } from "../src/paths";
 import { getEvolutionDb, initSchema } from "../src/storage/db";
 
 describe("clearProjectEvolutionData", () => {
@@ -20,17 +20,18 @@ describe("clearProjectEvolutionData", () => {
 		const cwd = path.join(tempDir, "repo");
 		await fs.mkdir(cwd, { recursive: true });
 
-		await fs.mkdir(resolveProjectMemoryDir(cwd), { recursive: true });
+		const memoryDir = path.join(resolveProjectEvolutionDir(cwd), "memory");
+		await fs.mkdir(memoryDir, { recursive: true });
 		await fs.mkdir(resolveProjectEvolutionDir(cwd), { recursive: true });
 		await fs.mkdir(resolveProjectSkillsDir(cwd), { recursive: true });
-		await Bun.write(path.join(resolveProjectMemoryDir(cwd), "MEMORY.md"), "# x");
+		await Bun.write(path.join(memoryDir, "MEMORY.md"), "# x");
 
 		const db = getEvolutionDb(cwd, false);
 		initSchema(db);
 
 		const result = await clearProjectEvolutionData({ cwd, globalStore: false });
 		expect(result.removedDirs).toHaveLength(3);
-		expect(await Bun.file(path.join(resolveProjectMemoryDir(cwd), "MEMORY.md")).exists()).toBe(false);
+		expect(await Bun.file(path.join(memoryDir, "MEMORY.md")).exists()).toBe(false);
 	});
 
 	test("isUsableSqliteDatabase rejects non-database files", async () => {

@@ -1,7 +1,7 @@
 /**
  * V3 learnings: write-time confidence + injection stats (no regression replay).
  */
-import type { Learning, LearningLifecycle, LearningScope, LearningSource } from "./types";
+import type { Learning, LearningLifecycle, LearningSource } from "./types";
 
 export const LEARNING_MIN_CONTENT_LENGTH = 20;
 export const LEARNING_MAX_PER_SESSION = 3;
@@ -24,19 +24,15 @@ export function isLearningEligibleForInjection(l: Learning): boolean {
 }
 
 export function classifyLearningLifecycle(l: Learning): LearningLifecycle {
-	if (l.lifecycle === "archived") return "archived";
-	if (l.source === "manual_pin") return "active";
-	if (l.lifecycle === "active") return "active";
-	// Auto-promote high-confidence learnings to break the chicken-and-egg:
-	// learnings cannot be promoted via injection stats if never injected,
-	// and cannot be injected if not active. Confidence >= 4 is a strong
-	// signal the content is meaningful enough to start injection.
-	if (l.confidence >= 4) return "active";
-	const rate = learningHelpRate(l);
-	if (l.timesInjected >= LEARNING_INJECTION_PROMOTE_MIN && rate !== null && rate >= LEARNING_INJECTION_HELP_RATE) {
-		return "active";
-	}
-	return "candidate";
+if (l.lifecycle === "archived") return "archived";
+if (l.source === "manual_pin") return "active";
+if (l.confidence >= 4) return "active";
+if (l.lifecycle === "active") return "active";
+const rate = learningHelpRate(l);
+if (l.timesInjected >= LEARNING_INJECTION_PROMOTE_MIN && rate !== null && rate >= LEARNING_INJECTION_HELP_RATE) {
+return "active";
+}
+return "candidate";
 }
 
 export function newLearningLifecycleState(source: LearningSource): LearningLifecycle {

@@ -1,6 +1,7 @@
 import type { Model } from "@oh-my-pi/pi-ai";
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger, prompt } from "@oh-my-pi/pi-utils";
 import rerankEpisodesTemplate from "./prompts/rerank-episodes.md" with { type: "text" };
+import rerankEpisodesInputTemplate from "./prompts/rerank-episodes-input.md" with { type: "text" };
 import type { EpisodicBackend } from "./storage/episodic-backend";
 import type { EpisodeStore } from "./storage/types";
 import type { Episode, EpisodicRecord, RerankedEpisode } from "./types";
@@ -95,7 +96,10 @@ export class EpisodeRetriever {
 			)
 			.join("\n");
 
-		const userPrompt = `Current task: "${query}"\n\nCandidate episodes:\n${episodesBlock}\n\nSelect the most relevant episodes. Return a JSON array: [{"episodeId": "...", "relevanceScore": 0-100, "reason": "..."}]`;
+		const userPrompt = prompt.render(rerankEpisodesInputTemplate, {
+			query,
+			episodes_block: episodesBlock,
+		});
 
 		const response = await callBackgroundLlm(model, rerankEpisodesTemplate, userPrompt, { auth });
 		if (!response) {

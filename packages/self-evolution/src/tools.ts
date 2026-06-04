@@ -5,18 +5,24 @@ import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent/extensibility/exten
 import type { ActivityLogger } from "./logging/activity-logger";
 import type { SkillManager } from "./manager";
 import type { EpisodeRetriever } from "./retrieval";
+import type { SqliteLearningStore } from "./storage/learnings";
 import type { SkillStore } from "./storage/types";
 import { createBackgroundLlmAuth } from "./utils/background-llm-auth";
+import { WriteMemoryTool } from "./write-memory-tool";
 
 export interface ToolStores {
 	ensureInit(cwd: string): void;
 	episodeRetriever(): EpisodeRetriever;
+	learningStore(): SqliteLearningStore;
 	skillStore(): SkillStore;
 	skillManager(): SkillManager;
 	activityLogger(): ActivityLogger;
+	getCwd(): string;
 }
 
 export function registerSelfEvolutionTools(api: ExtensionAPI, stores: ToolStores): void {
+	api.registerTool(new WriteMemoryTool(stores.learningStore(), () => stores.getCwd()));
+
 	api.registerTool({
 		name: "query_episodic_memory",
 		label: "Query Episodic Memory",

@@ -8,7 +8,7 @@ import { SqliteLearningStore } from "../src/storage/learnings";
 import { SqliteSkillStore } from "../src/storage/skills";
 import type { Episode, Learning } from "../src/types";
 
-	describe("DailyReportGenerator", () => {
+describe("DailyReportGenerator", () => {
 	let db: Database;
 	let episodeStore: SqliteEpisodeStore;
 	let learningStore: SqliteLearningStore;

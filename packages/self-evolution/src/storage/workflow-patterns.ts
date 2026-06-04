@@ -10,6 +10,7 @@ interface RawWorkflowRow {
 	id: string;
 	intent: string;
 	tool_sequence: string;
+	command_sequence: string | null;
 	occurrence_count: number;
 	avg_quality_score: number | null;
 	last_seen_at: number;
@@ -20,6 +21,7 @@ function rowToPattern(row: RawWorkflowRow): WorkflowPattern {
 		id: row.id,
 		intent: row.intent as WorkflowPattern["intent"],
 		toolSequence: JSON.parse(row.tool_sequence) as string[],
+		commandSequence: row.command_sequence ? (JSON.parse(row.command_sequence) as string[]) : undefined,
 		occurrenceCount: row.occurrence_count,
 		avgQualityScore: row.avg_quality_score ?? 0,
 		lastSeenAt: row.last_seen_at,
@@ -67,13 +69,14 @@ export class SqliteWorkflowPatternStore implements WorkflowPatternStore {
 			});
 		} else {
 			const stmt = this.#db.prepare(`
-				INSERT INTO workflow_patterns (id, intent, tool_sequence, occurrence_count, avg_quality_score, last_seen_at)
-				VALUES (?, ?, ?, ?, ?, ?)
+				INSERT INTO workflow_patterns (id, intent, tool_sequence, command_sequence, occurrence_count, avg_quality_score, last_seen_at)
+				VALUES (?, ?, ?, ?, ?, ?, ?)
 			`);
 			stmt.run(
 				pattern.id,
 				pattern.intent,
 				JSON.stringify(pattern.toolSequence),
+				pattern.commandSequence ? JSON.stringify(pattern.commandSequence) : null,
 				pattern.occurrenceCount,
 				pattern.avgQualityScore,
 				pattern.lastSeenAt,

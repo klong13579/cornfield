@@ -81,10 +81,11 @@ function parseResponse(response: string, trace: SessionTrace, episodeId: string)
 			if (seen.has(key)) continue;
 			seen.add(key);
 
-			const rawScope = String(item.scope ?? '').trim().toLowerCase();
-			const scope: LearningScope = rawScope === 'global' || rawScope === 'project' || rawScope === 'ephemeral'
-				? rawScope
-				: 'project';
+			const rawScope = String(item.scope ?? "")
+				.trim()
+				.toLowerCase();
+			const scope: LearningScope =
+				rawScope === "global" || rawScope === "project" || rawScope === "ephemeral" ? rawScope : "project";
 
 			results.push({
 				id: learningId(content, kind),

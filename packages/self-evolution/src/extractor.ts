@@ -54,25 +54,19 @@ export class SkillExtractor {
 
 	#ruleExtract(trace: SessionTrace, diagnosis?: ToolChainDiagnosis): ExtractedSkill {
 		const toolsUsed = new Set<string>();
-		const filesModified = new Set<string>();
 
 		for (const entry of trace.entries) {
 			if (entry.type === "tool_call" && entry.toolName) {
 				toolsUsed.add(entry.toolName);
-				if (entry.toolName === "write" || entry.toolName === "edit" || entry.toolName === "ast_edit") {
-					const p = (entry.args as Record<string, unknown>)?.path;
-					if (typeof p === "string") filesModified.add(p);
-				}
 			}
 		}
 
 		const userPrompt = trace.userPrompt || "untitled task";
 		const name = this.#toKebabCase(userPrompt.slice(0, 40));
-		const description = `Extracted from session ${trace.sessionId}: ${userPrompt.slice(0, 120)}`;
+		const description = this.#buildRuleDescription(userPrompt);
 		const taskPattern = userPrompt.slice(0, 200);
 
-		// Build a simple approach from the tool sequence
-		const approach = this.#buildApproach(trace, Array.from(filesModified));
+		const approach = this.#buildRuleApproach(trace, diagnosis);
 
 		// Build pitfalls from errors observed
 		// Build pitfalls from errors observed (enhanced with causal diagnosis)
@@ -117,7 +111,7 @@ export class SkillExtractor {
 			.map((e, i) => `Agent reasoning ${i + 1}: ${e.content}`)
 			.join("\n");
 
-		const userPrompt = `Task: ${trace.userPrompt}\n\nTools used: ${toolSummary}\n${errorSummary}\n${recoverySummary}\n\nRecent user dialogue:\n${userInputs || "(none recorded)"}\n\nRecent agent reasoning:\n${assistantMessages || "(none recorded)"}\n\nWhat project-specific conventions did the user enforce? What pitfalls are specific to THIS codebase?\n\nCurrent rule-based extraction:\n- Name: ${ruleSkill.name}\n- Task pattern: ${ruleSkill.taskPattern}\n- Approach: ${ruleSkill.approach}\n- Tools: ${ruleSkill.tools.join(", ")}\n- Pitfalls: ${ruleSkill.pitfalls.join("; ") || "none"}\n\nPlease refine the approach and pitfalls based on the actual execution trace. Return ONLY a JSON object with fields: approach (string), pitfalls (string[]), description (string), taskPattern (string).`;
+		const userPrompt = `Task: ${trace.userPrompt}\n\nTools used: ${toolSummary}\n${errorSummary}\n${recoverySummary}\n\nRecent user dialogue:\n${userInputs || "(none recorded)"}\n\nRecent agent reasoning:\n${assistantMessages || "(none recorded)"}\n\nWhat project-specific conventions did the user enforce? What pitfalls are specific to THIS codebase?\n\nCurrent rule-based extraction:\n- Name: ${ruleSkill.name}\n- Description: ${ruleSkill.description}\n- Task pattern: ${ruleSkill.taskPattern}\n- Approach: ${ruleSkill.approach}\n- Tools: ${ruleSkill.tools.join(", ")}\n- Pitfalls: ${ruleSkill.pitfalls.join("; ") || "none"}\n\nRefine description, taskPattern, approach, and pitfalls per the system contract.`;
 
 		const response = await callBackgroundLlm(model, extractSkillPromptTemplate, userPrompt, { auth });
 		if (!response) return undefined;
@@ -163,16 +157,38 @@ export class SkillExtractor {
 			.slice(0, 60);
 	}
 
-	#buildApproach(trace: SessionTrace, files: string[]): string {
-		const steps: string[] = [];
-		for (const entry of trace.entries) {
-			if (entry.type === "tool_call" && entry.toolName) {
-				steps.push(entry.toolName);
-			}
+	#buildRuleDescription(userPrompt: string): string {
+		const trimmed = userPrompt.trim();
+		if (trimmed.length < 10) {
+			return "Apply repeatable workflows from successful agent sessions when tackling comparable coding tasks.";
 		}
-		const deduped = [...new Set(steps)];
-		const fileHint = files.length > 0 ? ` Modified files: ${files.join(", ")}.` : "";
-		return `Tool sequence: ${deduped.join(" → ")}.${fileHint}`;
+		const verb = /^(fix|add|implement|refactor|update|create|debug|test|document)\b/i.exec(trimmed);
+		if (verb) {
+			const v = verb[1];
+			const cap = v.charAt(0).toUpperCase() + v.slice(1).toLowerCase();
+			return `${cap} similar coding-agent tasks using lessons from past successful runs in this project.`;
+		}
+		return "Apply lessons from successful agent sessions when tackling comparable coding tasks in this project.";
+	}
+
+	#buildRuleApproach(trace: SessionTrace, diagnosis?: ToolChainDiagnosis): string {
+		const parts: string[] = [];
+		if (trace.completedSuccessfully) {
+			parts.push(
+				"When a comparable session completed successfully, reuse the same high-level strategy before trying unrelated tools.",
+			);
+		}
+		if (trace.hadRecovery) {
+			parts.push("If errors occur mid-task, identify root cause before repeating the same failing tool chain.");
+		}
+		if (diagnosis?.suggestedAction) {
+			parts.push(diagnosis.suggestedAction);
+		} else {
+			parts.push(
+				"Confirm targets with search or grep before reads; verify edits succeeded before rereading for validation.",
+			);
+		}
+		return parts.join(" ");
 	}
 
 	#buildPitfalls(trace: SessionTrace, diagnosis?: ToolChainDiagnosis): string[] {
@@ -204,7 +220,9 @@ export class SkillExtractor {
 			}
 
 			if (diagnosis.redundantSearches) {
-				pitfalls.push("Redundant search chains detected; prefer find or ast_grep for structural queries.");
+				pitfalls.push(
+					"Redundant search chains detected; narrow scope with grep or targeted search before rereading the same paths.",
+				);
 			}
 
 			if (diagnosis.slowLoop) {

@@ -44,6 +44,7 @@ export interface SessionTrace {
 	errorCount: number;
 	hadRecovery: boolean;
 	completedSuccessfully: boolean;
+	source?: "omp" | "external";
 	errorDetails?: string[];
 	nudges?: Nudge[];
 	injectedEpisodeIds?: string[];
@@ -145,6 +146,8 @@ export interface SelfEvolutionFlags {
 	skillThreshold: number;
 	maxEpisodes: number;
 	enablePromptInjection: boolean;
+	/** Inject retrieved episode summaries into system prompt (learnings/skills unaffected) */
+	enableEpisodeInjection: boolean;
 	/** Inject pending session nudges into the next LLM context (disable for live A/B control arm) */
 	enableNudgeContextInjection: boolean;
 	llmRefinement: boolean;
@@ -211,27 +214,11 @@ export interface WorkflowPattern {
 	id: string;
 	intent: IntentCategory;
 	toolSequence: string[];
+	/** Command-level sequence (e.g., "bash:dws" instead of just "bash"), extracted from tool args */
+	commandSequence?: string[];
 	occurrenceCount: number;
 	avgQualityScore: number;
 	lastSeenAt: number;
-}
-
-// ============================================================================
-// User Profile (v2)
-// ============================================================================
-
-export interface UserProfile {
-	toolFrequency: Record<string, number>;
-	toolTransitions: Record<string, number>;
-	intentDistribution: Record<string, number>;
-	avgToolCallsPerSession: number;
-	avgFilesModifiedPerSession: number;
-	/** Mean tool errors per session (not a 0–1 failure rate). */
-	errorRate: number;
-	recoveryRate: number;
-	preferredLanguages: string[];
-	sessionCount: number;
-	updatedAt: number;
 }
 
 // ============================================================================
@@ -310,11 +297,11 @@ export interface NudgeOutcomeUpdate {
 // ============================================================================
 
 export type LearningKind = "preference" | "fact" | "procedure" | "skill_hint";
-export type LearningSource = "user_explicit" | "session_llm" | "manual_pin";
+export type LearningSource = "user_explicit" | "session_llm" | "manual_pin" | "agent_written";
 export type LearningLifecycle = "candidate" | "active" | "archived";
 export type LearningScope = "global" | "project" | "ephemeral";
 
-	export interface Learning {
+export interface Learning {
 	id: string;
 	cwd: string;
 	kind: LearningKind;

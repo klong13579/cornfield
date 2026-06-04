@@ -3,10 +3,11 @@
  */
 
 import type { Model } from "@oh-my-pi/pi-ai";
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger, prompt } from "@oh-my-pi/pi-utils";
 import rerankEpisodesTemplate from "./prompts/rerank-episodes.md" with { type: "text" };
+import rerankEpisodesInputTemplate from "./prompts/rerank-episodes-input.md" with { type: "text" };
 import type { EffectivenessStore, EpisodeStore, IntentStore } from "./storage/types";
-import type { Episode, UserProfile } from "./types";
+import type { Episode } from "./types";
 import { type BackgroundLlmAuth, callBackgroundLlm } from "./utils/llm";
 
 export interface ContextRetrievalOptions {
@@ -15,7 +16,6 @@ export interface ContextRetrievalOptions {
 	model?: Model;
 	auth?: BackgroundLlmAuth;
 	currentIntent?: string;
-	profile?: UserProfile;
 }
 export interface RetrievedEpisode {
 	episode: Episode;
@@ -23,43 +23,6 @@ export interface RetrievedEpisode {
 	reason: string;
 	timesInjected: number;
 	helpRate: number;
-}
-
-function getLanguageFromPath(filePath: string): string | undefined {
-	const ext = filePath.match(/\.([a-zA-Z0-9]+)$/)?.[1]?.toLowerCase();
-	if (!ext) return undefined;
-	const map: Record<string, string> = {
-		ts: "typescript",
-		tsx: "typescript",
-		js: "javascript",
-		jsx: "javascript",
-		rs: "rust",
-		py: "python",
-		go: "go",
-		java: "java",
-		kt: "kotlin",
-		swift: "swift",
-		cpp: "cpp",
-		cc: "cpp",
-		cxx: "cpp",
-		h: "cpp",
-		hpp: "cpp",
-		c: "c",
-		cs: "csharp",
-		rb: "ruby",
-		php: "php",
-		scala: "scala",
-		r: "r",
-		sh: "shell",
-		bash: "shell",
-		zsh: "shell",
-		md: "markdown",
-		yml: "yaml",
-		yaml: "yaml",
-		json: "json",
-		toml: "toml",
-	};
-	return map[ext];
 }
 
 export class ContextAwareRetriever {
@@ -160,45 +123,6 @@ export class ContextAwareRetriever {
 				const daysAgo = Math.floor((Date.now() - episode.timestamp) / 86400000);
 				score += Math.max(0, 10 - daysAgo);
 
-				// 6. Profile affinity boost (0-15 points)
-				if (options.profile) {
-					const p = options.profile;
-
-					// 6a. Language match (0-5)
-					const epLangs = new Set<string>();
-					for (const file of episode.filesModified) {
-						const lang = getLanguageFromPath(file);
-						if (lang) epLangs.add(lang);
-					}
-					const langMatch = [...epLangs].some(l => p.preferredLanguages.includes(l));
-					if (langMatch) {
-						score += 5;
-						reasons.push("language match");
-					}
-
-					// 6b. Tool affinity (0-5)
-					const topTools = Object.entries(p.toolFrequency)
-						.sort((a, b) => b[1] - a[1])
-						.slice(0, 3)
-						.map(([t]) => t);
-					const hasTopTool = episode.toolsUsed.some(t => topTools.includes(t));
-					if (hasTopTool) {
-						score += 5;
-						reasons.push("tool affinity");
-					}
-
-					// 6c. Intent affinity (0-5) — reuse intents queried above
-					const topIntents = Object.entries(p.intentDistribution)
-						.sort((a, b) => b[1] - a[1])
-						.slice(0, 3)
-						.map(([i]) => i);
-					const hasTopIntent = intents.some(i => topIntents.includes(i.intent));
-					if (hasTopIntent && !reasons.includes("intent match")) {
-						score += 5;
-						reasons.push("intent affinity");
-					}
-				}
-
 				// 7. Effectiveness feedback boost (0-20 points)
 				const eff = await this.#effectivenessStore.get(episode.id);
 				let timesInjected = 0;
@@ -242,7 +166,10 @@ export class ContextAwareRetriever {
 			)
 			.join("\n");
 
-		const userPrompt = `Current task: "${query}"\n\nCandidate episodes:\n${episodesBlock}\n\nSelect the most relevant episodes. Return a JSON array: [{"episodeId": "...", "relevanceScore": 0-100, "reason": "..."}]`;
+		const userPrompt = prompt.render(rerankEpisodesInputTemplate, {
+			query,
+			episodes_block: episodesBlock,
+		});
 
 		const response = await callBackgroundLlm(model, rerankEpisodesTemplate, userPrompt, { auth });
 		if (!response) {

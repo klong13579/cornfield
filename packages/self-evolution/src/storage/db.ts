@@ -10,6 +10,7 @@ import * as path from "node:path";
 import { logger } from "@oh-my-pi/pi-utils";
 import { initMemoryTables } from "../memory/schema";
 import { resolveEvolutionPathLayout } from "../paths";
+import { migrateAddAgentWrittenSource } from "./migrations/add-agent-written-source";
 import { runStorageDedupMigrations } from "./migrations/storage-dedup";
 
 interface DbEntry {
@@ -188,11 +189,19 @@ export function initSchema(db: Database): void {
 			id TEXT PRIMARY KEY,
 			intent TEXT NOT NULL,
 			tool_sequence TEXT NOT NULL,
+			command_sequence TEXT,
 			occurrence_count INTEGER NOT NULL DEFAULT 1,
 			avg_quality_score REAL,
 			last_seen_at INTEGER NOT NULL
 		);
 	`);
+
+	// Migration: add command_sequence column for existing databases
+	try {
+		db.exec("ALTER TABLE workflow_patterns ADD COLUMN command_sequence TEXT");
+	} catch {
+		// Column already exists — ignore
+	}
 
 	db.exec(`
 		CREATE TABLE IF NOT EXISTS user_profiles (
@@ -243,7 +252,7 @@ export function initSchema(db: Database): void {
 			cwd TEXT NOT NULL,
 			kind TEXT NOT NULL CHECK(kind IN ('preference','fact','procedure','skill_hint')),
 			content TEXT NOT NULL,
-			source TEXT NOT NULL CHECK(source IN ('user_explicit','session_llm','manual_pin')),
+			source TEXT NOT NULL CHECK(source IN ('user_explicit','session_llm','manual_pin','agent_written')),
 			confidence INTEGER NOT NULL CHECK(confidence BETWEEN 1 AND 5),
 			lifecycle TEXT NOT NULL DEFAULT 'candidate' CHECK(lifecycle IN ('candidate','active','archived')),
 			session_id TEXT NOT NULL,
@@ -386,7 +395,9 @@ export function initSchema(db: Database): void {
 
 	// Add scope column to learnings (migration)
 	try {
-		db.exec("ALTER TABLE learnings ADD COLUMN scope TEXT NOT NULL DEFAULT 'project' CHECK(scope IN ('global','project','ephemeral'))");
+		db.exec(
+			"ALTER TABLE learnings ADD COLUMN scope TEXT NOT NULL DEFAULT 'project' CHECK(scope IN ('global','project','ephemeral'))",
+		);
 	} catch {
 		/* column already exists */
 	}
@@ -511,4 +522,5 @@ export function initSchema(db: Database): void {
 	`);
 
 	runStorageDedupMigrations(db);
+	migrateAddAgentWrittenSource(db);
 }

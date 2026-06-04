@@ -123,7 +123,7 @@ The self-evolution package transforms the agent from a passive executor into an 
 | `nudge_history` | Cross-session nudge records |
 | `stats` | System counters |
 
-**Default (global user store)**: `~/.omp/self-evolution/` plus encoded memory under `~/.omp/agent/memories/--encoded-cwd--/`. **Per-project layout** (opt-in `--self-evolution-project-store`): `<cwd>/.omp/{memory,evolution,skills}`. To copy global-store data into a repo tree, run `packages/self-evolution/scripts/migrate-evolution-data.sh <repo>`.
+**Default (global user store)**: `~/.omp/self-evolution/` — memory under `~/.omp/self-evolution/memory/--encoded-cwd--/`. **Per-project layout** (opt-in `--self-evolution-project-store`): `<cwd>/.omp/evolution/{memory,skills,evolution.db}`. To copy global-store data into a repo tree, run `packages/self-evolution/scripts/migrate-evolution-data.sh <repo>`.
 
 ### Migrating from older installs
 

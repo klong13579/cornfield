@@ -326,7 +326,7 @@ export async function generateAuditReport(
 	}
 
 	// Compute session intent trend (recent vs historical)
-	let trend: AuditReport["trend"] = undefined;
+	let trend: AuditReport["trend"];
 	try {
 		const recentRows = db
 			.prepare(`

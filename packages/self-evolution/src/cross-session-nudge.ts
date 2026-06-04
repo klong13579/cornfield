@@ -3,10 +3,9 @@
  * and delivers proactive insights before each new session starts.
  */
 import { logger } from "@oh-my-pi/pi-utils";
-import { formatProfileAvgErrorsPerSession, isHighAvgErrorsPerSession } from "./benefit-admission";
 import { shouldSuppressNudgeType } from "./nudge-suppression";
-import type { EpisodeDiagnosisStore, EpisodeStore, NudgeHistoryStore, ProfileStore } from "./storage/types";
-import type { CrossSessionNudge, Episode, UserProfile } from "./types";
+import type { EpisodeDiagnosisStore, EpisodeStore, NudgeHistoryStore } from "./storage/types";
+import type { CrossSessionNudge } from "./types";
 
 const CROSS_SESSION_COOLDOWN_MS = 60_000;
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
@@ -18,21 +17,18 @@ const AUTO_DISMISS_THRESHOLD = 3; // auto-dismiss after 3 deliveries in 30 days
 export class CrossSessionNudgeEngine {
 	#nudgeHistoryStore: NudgeHistoryStore;
 	#episodeStore: EpisodeStore;
-	#profileStore: ProfileStore;
-	#diagnosisStore: EpisodeDiagnosisStore | undefined;
+#diagnosisStore?: EpisodeDiagnosisStore;
 
-	#lastDeliveredAt = 0;
-	#deliveredThisSession = false;
+#lastDeliveredAt = 0;
+#deliveredThisSession = false;
 
-	constructor(
+constructor(
 		nudgeHistoryStore: NudgeHistoryStore,
 		episodeStore: EpisodeStore,
-		profileStore: ProfileStore,
 		diagnosisStore?: EpisodeDiagnosisStore,
 	) {
 		this.#nudgeHistoryStore = nudgeHistoryStore;
 		this.#episodeStore = episodeStore;
-		this.#profileStore = profileStore;
 		this.#diagnosisStore = diagnosisStore;
 	}
 
@@ -48,14 +44,12 @@ export class CrossSessionNudgeEngine {
 		try {
 			const last30d = now - THIRTY_DAYS_MS;
 			const project = cwd;
-			const profile = await this.#profileStore.get("default");
 
 			const nudge =
-				(await this.#detectHighGlobalErrorRate(profile)) ??
 				(await this.#detectRecurringRedundantSearch(last30d)) ??
 				(await this.#detectRecurringErrorCascade(last30d)) ??
-				(await this.#detectSlowProjectWarmup(project, profile)) ??
-				(await this.#detectSkillUnderutilization(userPrompt, profile));
+				(await this.#detectSlowProjectWarmup(project)) ??
+				(await this.#detectSkillUnderutilization(userPrompt));
 
 			if (nudge) {
 				// Feedback loop: skip if this nudge type was dismissed recently or acknowledged
@@ -128,158 +122,7 @@ export class CrossSessionNudgeEngine {
 		return undefined;
 	}
 
-	async #detectHighGlobalErrorRate(profile: UserProfile | undefined): Promise<CrossSessionNudge | undefined> {
-		if (!profile || profile.sessionCount < 5) return undefined;
-		if (!isHighAvgErrorsPerSession(profile)) return undefined;
-		const errorSummary = formatProfileAvgErrorsPerSession(profile.errorRate);
-
-		// If diagnosis store is available, use aggregateDiagnoses for root-cause analysis
-		if (this.#diagnosisStore) {
-			const recentDiagnoses = await this.#diagnosisStore.listRecent(30);
-			if (recentDiagnoses.length >= 3) {
-				const { aggregateDiagnoses } = await import("./trace-analyzer");
-				const project = "global"; // Cross-session nudges are global for now
-				const aggregated = aggregateDiagnoses(recentDiagnoses, project);
-				if (aggregated.failedEpisodes >= 2) {
-					const suggestion = this.#buildDiagnosisSuggestion(aggregated);
-					return {
-						type: "cross-session-high-error-rate",
-						severity: "warn",
-						message: `Your recent sessions average elevated tool errors (${errorSummary}).`,
-						suggestion,
-						detectedAt: Date.now(),
-					};
-				}
-			}
-		}
-
-		// Fallback: episode-based heuristic
-		const recentEpisodes = await this.#episodeStore.listRecent(30);
-		const failedEpisodes = recentEpisodes.filter(e => e.errorCount > 0 || !e.completedSuccessfully);
-		const suggestion = this.#buildErrorSuggestion(failedEpisodes);
-
-		return {
-			type: "cross-session-high-error-rate",
-			severity: "warn",
-			message: `Your recent sessions average elevated tool errors (${errorSummary}).`,
-			suggestion,
-			detectedAt: Date.now(),
-		};
-	}
-
-	#buildErrorSuggestion(failedEpisodes: Episode[]): string {
-		if (failedEpisodes.length === 0) {
-			return "Review recent sessions for patterns. High error rate may indicate tool misuse or environmental issues.";
-		}
-
-		// Count tool usage in failed episodes
-		const toolCounts: Record<string, number> = {};
-		const toolComboCounts: Record<string, number> = {};
-		for (const ep of failedEpisodes) {
-			for (const tool of ep.toolsUsed) {
-				toolCounts[tool] = (toolCounts[tool] || 0) + 1;
-			}
-			// Detect high-risk tool combos
-			if (ep.toolsUsed.includes("read") && ep.toolsUsed.includes("edit")) {
-				toolComboCounts["read+edit"] = (toolComboCounts["read+edit"] || 0) + 1;
-			}
-			if (ep.toolsUsed.includes("read") && ep.toolsUsed.includes("search")) {
-				toolComboCounts["read+search"] = (toolComboCounts["read+search"] || 0) + 1;
-			}
-			if (ep.toolsUsed.includes("bash") && ep.toolsUsed.includes("read")) {
-				toolComboCounts["bash+read"] = (toolComboCounts["bash+read"] || 0) + 1;
-			}
-		}
-		const dominantTool = Object.entries(toolCounts).sort((a, b) => b[1] - a[1])[0]?.[0];
-		const dominantCombo = Object.entries(toolComboCounts).sort((a, b) => b[1] - a[1])[0];
-
-		// Check for specific patterns in summaries
-		const summaries = failedEpisodes.map(e => e.summary.toLowerCase()).join(" ");
-		const hasNotFound =
-			summaries.includes("enoent") || summaries.includes("not found") || summaries.includes("no such file");
-		const hasPermission = summaries.includes("eacces") || summaries.includes("permission denied");
-		const hasTimeout =
-			summaries.includes("timeout") || summaries.includes("etimedout") || summaries.includes("econnrefused");
-		const hasTypeError = summaries.includes("typeerror") || summaries.includes("cannot read property");
-		const hasSyntax = summaries.includes("syntaxerror") || summaries.includes("unexpected token");
-		const hasCommandFail = summaries.includes("exit code") || summaries.includes("command failed");
-		const hasEditFail = summaries.includes("edit") && (summaries.includes("anchor") || summaries.includes("payload"));
-
-		const patterns: string[] = [];
-		if (hasNotFound) patterns.push("missing files or paths");
-		if (hasPermission) patterns.push("permission issues");
-		if (hasTimeout) patterns.push("network timeouts or unavailable services");
-		if (hasTypeError) patterns.push("type errors or undefined values");
-		if (hasSyntax) patterns.push("syntax errors in generated code");
-		if (hasCommandFail) patterns.push("shell command failures");
-		if (hasEditFail) patterns.push("edit tool failures (anchor/payload mismatch)");
-
-		// Build targeted suggestion based on dominant tool + combo + patterns
-		if (dominantTool === "read" && dominantCombo) {
-			const [combo, count] = dominantCombo;
-			if (combo === "read+edit" && count >= 2) {
-				return `${count} failed sessions show a read+edit cascade: edits are failing (anchor/payload mismatch) and subsequent read verifications see unchanged/missing files. Fix: confirm edit success before reading back.`;
-			}
-			if (combo === "read+search" && count >= 2) {
-				return `${count} failed sessions show search→read guess failures. Fix: use find to confirm file existence before reading, rather than guessing paths after failed searches.`;
-			}
-			if (combo === "bash+read" && count >= 2) {
-				return `${count} failed sessions show bash commands failing, then reads targeting output files that were never created. Fix: verify command exit code before reading expected outputs.`;
-			}
-		}
-
-		if (patterns.length > 0) {
-			let suggestion = `Dominant failure patterns: ${patterns.join(", ")}.`;
-			if (dominantTool) {
-				suggestion += ` Most errors involve the "${dominantTool}" tool.`;
-			}
-			return suggestion;
-		}
-
-		if (dominantTool) {
-			return `Most failed episodes involve "${dominantTool}". Review how this tool is being used — check arguments, paths, and preconditions.`;
-		}
-
-		return `Review common failure patterns across ${failedEpisodes.length} recent failed sessions. Check tool arguments, file paths, and command syntax.`;
-	}
-
-	#buildDiagnosisSuggestion(aggregated: import("./types").CrossSessionDiagnosis): string {
-		const parts: string[] = [];
-
-		// Report dominant read failure type with count
-		const breakdown = aggregated.readFailureBreakdown;
-		const topType = Object.entries(breakdown)
-			.filter(([, count]) => count > 0)
-			.sort((a, b) => b[1] - a[1])[0];
-		if (topType) {
-			const [type, count] = topType;
-			parts.push(`${count} sessions show "${type}" read failures.`);
-		}
-
-		// Report top cascade pattern
-		if (aggregated.topCascadePattern) {
-			const c = aggregated.topCascadePattern;
-			parts.push(`Top cascade: ${c.triggerTool} failure → ${c.followUpTool} failure (${c.count}x). ${c.rootCause}.`);
-		}
-
-		// Report trend
-		if (aggregated.trend === "degrading") {
-			parts.push("Trend is degrading — failures are increasing over time.");
-		} else if (aggregated.trend === "improving") {
-			parts.push("Trend is improving — keep current practices.");
-		}
-
-		if (parts.length === 0) {
-			return aggregated.rootCauseSummary;
-		}
-
-		return parts.join(" ");
-	}
-
-	async #detectSlowProjectWarmup(
-		project: string,
-		profile: UserProfile | undefined,
-	): Promise<CrossSessionNudge | undefined> {
+	async #detectSlowProjectWarmup(project: string): Promise<CrossSessionNudge | undefined> {
 		const recentEpisodes = await this.#episodeStore.listRecent(50);
 		const projectEpisodes = recentEpisodes.filter(e => e.cwd === project);
 
@@ -293,7 +136,7 @@ export class CrossSessionNudgeEngine {
 		const successRate = successCount / projectEpisodes.length;
 
 		// Use profile baseline if available, otherwise use fixed thresholds
-		const baselineToolCalls = profile?.avgToolCallsPerSession ?? HIGH_TOOL_CALL_THRESHOLD;
+		const baselineToolCalls = HIGH_TOOL_CALL_THRESHOLD;
 		const baselineSuccessRate = 1 - LOW_SUCCESS_RATE_THRESHOLD;
 
 		if (avgToolCalls >= baselineToolCalls * 1.5 && successRate <= baselineSuccessRate * 0.7) {
@@ -308,80 +151,36 @@ export class CrossSessionNudgeEngine {
 		return undefined;
 	}
 
-	async #detectSkillUnderutilization(
-		userPrompt: string,
-		profile: UserProfile | undefined,
-	): Promise<CrossSessionNudge | undefined> {
-		if (!profile || profile.sessionCount < 3) {
-			// Fall back to episode-based heuristic when profile is unavailable
-			const recentEpisodes = await this.#episodeStore.listRecent(20);
-			if (recentEpisodes.length < 3) return undefined;
+	async #detectSkillUnderutilization(userPrompt: string): Promise<CrossSessionNudge | undefined> {
+		// Episode-based heuristic: check for similar tasks with high tool usage
+		const recentEpisodes = await this.#episodeStore.listRecent(20);
+		if (recentEpisodes.length < 3) return undefined;
 
-			const promptWords = userPrompt
-				.toLowerCase()
-				.split(/\W+/)
-				.filter(w => w.length > 3);
-
-			const similarEpisodes = recentEpisodes.filter(e => {
-				const epWords = e.userPrompt
-					.toLowerCase()
-					.split(/\W+/)
-					.filter(w => w.length > 3);
-				const common = promptWords.filter(w => epWords.includes(w));
-				return common.length >= 2;
-			});
-
-			if (similarEpisodes.length >= 3) {
-				const avgToolCalls = similarEpisodes.reduce((sum, e) => sum + e.toolCallCount, 0) / similarEpisodes.length;
-				if (avgToolCalls >= 10) {
-					return {
-						type: "cross-session-skill-underutilization",
-						severity: "info",
-						message: `You've performed similar tasks multiple times with high tool usage.`,
-						suggestion: "Consider extracting a skill for this workflow to reduce repetition in future sessions.",
-						detectedAt: Date.now(),
-					};
-				}
-			}
-			return undefined;
-		}
-
-		// Profile-based heuristic: check if current prompt words match top intents
 		const promptWords = userPrompt
 			.toLowerCase()
 			.split(/\W+/)
 			.filter(w => w.length > 3);
-		const topIntents = Object.entries(profile.intentDistribution)
-			.sort((a, b) => b[1] - a[1])
-			.slice(0, 3)
-			.map(([i]) => i);
 
-		// Simple heuristic: if prompt contains words related to top intent
-		const intentWordMap: Record<string, string[]> = {
-			refactoring: ["refactor", "restructure", "rename", "extract", "move"],
-			bugfix: ["fix", "bug", "error", "crash", "broken", "repair"],
-			"feature-add": ["add", "feature", "implement", "create", "new"],
-			testing: ["test", "spec", "coverage", "jest", "vitest"],
-			documentation: ["doc", "readme", "comment", "markdown"],
-			configuration: ["config", "setup", "env", "dockerfile", "yaml"],
-			exploration: ["explore", "investigate", "research", "understand"],
-			optimization: ["optimize", "perf", "performance", "cache", "speed"],
-			integration: ["integrate", "api", "webhook", "sync", "connect"],
-		};
-
-		const matchedTopIntent = topIntents.find(intent => {
-			const words = intentWordMap[intent] ?? [];
-			return words.some(w => promptWords.includes(w));
+		const similarEpisodes = recentEpisodes.filter(e => {
+			const epWords = e.userPrompt
+				.toLowerCase()
+				.split(/\W+/)
+				.filter(w => w.length > 3);
+			const common = promptWords.filter(w => epWords.includes(w));
+			return common.length >= 2;
 		});
 
-		if (matchedTopIntent && profile.avgToolCallsPerSession >= 10) {
-			return {
-				type: "cross-session-skill-underutilization",
-				severity: "info",
-				message: `You frequently work on "${matchedTopIntent}" tasks with ${profile.avgToolCallsPerSession.toFixed(1)} avg tool calls per session.`,
-				suggestion: `Consider extracting a skill for "${matchedTopIntent}" workflows to reduce repetition.`,
-				detectedAt: Date.now(),
-			};
+		if (similarEpisodes.length >= 3) {
+			const avgToolCalls = similarEpisodes.reduce((sum, e) => sum + e.toolCallCount, 0) / similarEpisodes.length;
+			if (avgToolCalls >= 10) {
+				return {
+					type: "cross-session-skill-underutilization",
+					severity: "info",
+					message: `You've performed similar tasks multiple times with high tool usage.`,
+					suggestion: "Consider extracting a skill for this workflow to reduce repetition in future sessions.",
+					detectedAt: Date.now(),
+				};
+			}
 		}
 		return undefined;
 	}

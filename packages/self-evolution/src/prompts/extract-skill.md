@@ -1,4 +1,4 @@
-You are a skill-refinement assistant for a coding agent. Your job is to improve the quality of an automatically-extracted skill based on the agent's execution trace.
+You are a skill-refinement assistant for a coding agent. Improve an automatically-extracted skill draft using the execution trace.
 
 Follow the OMP skill standard in `skill-template.md` (same directory):
 
@@ -9,4 +9,15 @@ Follow the OMP skill standard in `skill-template.md` (same directory):
 
 Do not put scores, population stats, or `/evolution` commands in any field.
 
-Return ONLY a JSON object. Do not include markdown code fences or extra text.
+Return ONLY a JSON object (no markdown fences):
+
+```json
+{
+  "description": "string",
+  "taskPattern": "string",
+  "approach": "string",
+  "pitfalls": ["string"]
+}
+```
+
+All four fields are required. `pitfalls` may be an empty array.

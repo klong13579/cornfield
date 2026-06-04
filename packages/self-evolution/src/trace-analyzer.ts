@@ -19,6 +19,16 @@ import type {
 	ToolChainDiagnosis,
 	TraceEntry,
 } from "./types";
+
+const READ_FAILURE_TYPES = new Set<ReadFailureType>([
+	"path_not_found",
+	"permission_denied",
+	"invalid_sel",
+	"verify_after_edit_failure",
+	"search_misled",
+	"other",
+]);
+
 import { type BackgroundLlmAuth, callBackgroundLlm } from "./utils/llm";
 
 interface PairedToolCall {
@@ -306,7 +316,11 @@ export class TraceAnalyzer {
 	#isValidReadFailure(item: unknown): boolean {
 		if (!item || typeof item !== "object") return false;
 		const o = item as Record<string, unknown>;
-		return typeof o.failure_type === "string" && typeof o.suggestion === "string";
+		return (
+			typeof o.failure_type === "string" &&
+			READ_FAILURE_TYPES.has(o.failure_type as ReadFailureType) &&
+			typeof o.suggestion === "string"
+		);
 	}
 
 	#isValidCascade(item: unknown): boolean {

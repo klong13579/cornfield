@@ -3,12 +3,11 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import {
+	encodeProjectPathForGlobalMemory,
 	getMemoryRoot,
 	resolveEvolutionPathLayout,
 	resolveGlobalEvolutionDir,
-	resolveGlobalMemoryRoot,
 	resolveProjectEvolutionDir,
-	resolveProjectMemoryDir,
 	resolveProjectSkillsDir,
 	resolveUserEvolutionDir,
 } from "../src/paths";
@@ -25,14 +24,14 @@ describe("evolution paths", () => {
 	it("uses project-local .omp layout when globalStore is false", () => {
 		tempDir = path.join(os.tmpdir(), `evolution-paths-${Date.now()}`);
 		const cwd = path.join(tempDir, "repo");
-		const layout = resolveEvolutionPathLayout(cwd, false, path.join(tempDir, "agent"));
+		const layout = resolveEvolutionPathLayout(cwd, false);
 
 		expect(layout.scope).toBe("project");
-		expect(layout.memoryDir).toBe(resolveProjectMemoryDir(cwd));
+		expect(layout.memoryDir).toBe(path.join(resolveProjectEvolutionDir(cwd), "memory"));
 		expect(layout.evolutionDir).toBe(resolveProjectEvolutionDir(cwd));
 		expect(layout.skillsDir).toBe(resolveProjectSkillsDir(cwd));
 		expect(layout.dbPath).toBe(path.join(cwd, ".omp", "evolution", "evolution.db"));
-		expect(layout.memoryDir).toBe(path.join(cwd, ".omp", "memory"));
+		expect(layout.memoryDir).toBe(path.join(cwd, ".omp", "evolution", "memory"));
 		expect(layout.skillsDir).toBe(path.join(cwd, ".omp", "skills"));
 	});
 
@@ -40,11 +39,13 @@ describe("evolution paths", () => {
 		tempDir = path.join(os.tmpdir(), `evolution-paths-global-${Date.now()}`);
 		const cwd = path.join(tempDir, "repo");
 		const agentDir = path.join(tempDir, "agent");
-		const layout = resolveEvolutionPathLayout(cwd, true, agentDir);
+		const layout = resolveEvolutionPathLayout(cwd, true);
 
 		expect(layout.scope).toBe("user");
 		expect(layout.evolutionDir).toBe(resolveGlobalEvolutionDir());
-		expect(layout.memoryDir).toBe(resolveGlobalMemoryRoot(agentDir, cwd));
+		expect(layout.memoryDir).toBe(
+			path.join(resolveGlobalEvolutionDir(), "memory", encodeProjectPathForGlobalMemory(cwd)),
+		);
 		expect(layout.dbPath).toBe(path.join(resolveGlobalEvolutionDir(), "evolution.db"));
 	});
 
@@ -53,7 +54,9 @@ describe("evolution paths", () => {
 		const cwd = path.join(tempDir, "repo");
 		const agentDir = path.join(tempDir, "agent");
 
-		expect(getMemoryRoot(agentDir, cwd)).toBe(resolveGlobalMemoryRoot(agentDir, cwd));
+		expect(getMemoryRoot(agentDir, cwd)).toBe(
+			path.join(resolveGlobalEvolutionDir(), "memory", encodeProjectPathForGlobalMemory(cwd)),
+		);
 	});
 
 	it("getMemoryRoot uses project memory when globalStore is false", () => {
@@ -61,7 +64,9 @@ describe("evolution paths", () => {
 		const cwd = path.join(tempDir, "repo");
 		const agentDir = path.join(tempDir, "agent");
 
-		expect(getMemoryRoot(agentDir, cwd, { globalStore: false })).toBe(resolveProjectMemoryDir(cwd));
+		expect(getMemoryRoot(agentDir, cwd, { globalStore: false })).toBe(
+			path.join(resolveProjectEvolutionDir(cwd), "memory"),
+		);
 	});
 
 	it("resolveUserEvolutionDir is under agent dir not project", () => {

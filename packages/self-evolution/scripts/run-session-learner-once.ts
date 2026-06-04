@@ -8,7 +8,7 @@
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { discoverAuthStorage } from "@oh-my-pi/pi-coding-agent/sdk";
 import { getAgentDir } from "@oh-my-pi/pi-utils";
-import { resolveEvolutionProjectionDir } from "../src/paths";
+import { resolveEvolutionProjectionDir, DEFAULT_EVOLUTION_GLOBAL_STORE } from "../src/paths";
 import { projectLearnings } from "../src/projection/learnings";
 import { extractSessionLearnings } from "../src/session-learner";
 import { closeEvolutionDb, getEvolutionDb, initSchema } from "../src/storage/db";
@@ -16,10 +16,10 @@ import { SqliteLearningStore } from "../src/storage/learnings";
 import { SqliteSessionTraceStore } from "../src/storage/session-traces";
 import type { SessionTrace } from "../src/types";
 import type { BackgroundLlmAuth } from "../src/utils/llm";
-
 const cwdIdx = process.argv.indexOf("--cwd");
 const repoCwd = cwdIdx >= 0 ? (process.argv[cwdIdx + 1] ?? process.cwd()) : process.cwd();
-const globalStore = process.argv.includes("--global-store");
+// Default to user-level (globalStore = true), use --project-store to override to project-level
+const globalStore = process.argv.includes("--project-store") ? false : DEFAULT_EVOLUTION_GLOBAL_STORE;
 const sessionIdx = process.argv.indexOf("--session-id");
 const sessionIdArg = sessionIdx >= 0 ? process.argv[sessionIdx + 1] : undefined;
 
