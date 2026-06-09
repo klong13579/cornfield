@@ -1,1 +1,0 @@
-OMP coding agent with self-evolution V3. Automatic boundary condition testing in test design. Skill quality guidelines established. Step timing and user persona awareness planned. Read caching not recommended; LLM TTFT is main bottleneck.

@@ -83,9 +83,9 @@ function isNeverRuleLine(line: string): boolean {
 	return /\bNEVER\b|\bMUST NOT\b/i.test(stripped) && !stripped.startsWith("<!--") && !stripped.startsWith("#");
 }
 
-function extractNeverRules(agentsMdContent: string): string[] {
+function extractNeverRules(content: string): string[] {
 	const neverRules: string[] = [];
-	for (const line of agentsMdContent.split("\n")) {
+	for (const line of content.split("\n")) {
 		if (!isNeverRuleLine(line)) continue;
 		const stripped = line.replace(/\*\*/g, "").trim();
 		const entry = stripped.startsWith("- ") ? stripped : `- ${stripped}`;
@@ -121,8 +121,8 @@ function extractAgentRole(agentsMdContent: string): string | null {
 }
 }
 
-/** Remove lines promoted to `<hard-constraints>` so AGENTS.md is not duplicated in `<context>`. */
-function stripNeverRuleLinesFromAgentsMd(content: string): string {
+/** Remove lines promoted to `<hard-constraints>` so context files are not duplicated in `<context>`. */
+function stripNeverRuleLines(content: string): string {
 	return content
 		.split("\n")
 		.filter(line => !isNeverRuleLine(line))
@@ -134,10 +134,7 @@ function prepareContextFilesForPrompt(
 	contextFiles: Array<{ path: string; content: string; depth?: number }>,
 ): Array<{ path: string; content: string; depth?: number }> {
 	return contextFiles
-		.map(file => {
-			if (!isAgentsMdPath(file.path)) return file;
-			return { ...file, content: stripNeverRuleLinesFromAgentsMd(file.content) };
-		})
+		.map(file => ({ ...file, content: stripNeverRuleLines(file.content) }))
 		.filter(file => file.content.length > 0);
 }
 
@@ -665,10 +662,7 @@ export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}):
 	const injectedAlwaysApplyRules = dedupeAlwaysApplyRules(alwaysApplyRules, promptSources);
 
 	const environment = await logger.time("getEnvironmentInfo", getEnvironmentInfo);
-	const agentsMdRules = contextFiles
-		.filter(f => isAgentsMdPath(f.path))
-		.map(f => ({ path: f.path, content: f.content }));
-	const neverRules = extractNeverRules(agentsMdRules.map(f => f.content).join("\n\n"));
+	const neverRules = extractNeverRules(contextFiles.map(f => f.content).join("\n\n"));
 	const promptContextFiles = prepareContextFilesForPrompt(contextFiles);
 	const reportToolIssueToolName = toolPromptNames.get("report_tool_issue") ?? "report_tool_issue";
 	const data = {
