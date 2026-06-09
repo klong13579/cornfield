@@ -809,20 +809,68 @@ registerProvider<Settings>(settingsCapability.id, {
 	load: loadSettings,
 });
 
-// Context Files (AGENTS.md)
+// Prompt includes JSON file name
+const PROMPT_INCLUDES_FILE = "prompt-includes.json";
+
+/** Load extra prompt files listed in `prompt-includes.json` from the same directory */
+async function loadExtraPromptFiles(
+	dir: string,
+	level: "project" | "user",
+	depth: number | undefined,
+	alreadyFound: Set<string>,
+): Promise<ContextFile[]> {
+	const items: ContextFile[] = [];
+	const includesPath = path.join(dir, PROMPT_INCLUDES_FILE);
+	const raw = await readFile(includesPath);
+	if (!raw) return items;
+
+	try {
+		const config = JSON.parse(raw) as { files?: string[] };
+		if (!Array.isArray(config.files) || config.files.length === 0) return items;
+
+		for (const name of config.files) {
+			if (alreadyFound.has(name)) continue; // avoid duplicate by name
+			const filePath = path.join(dir, name);
+			const content = await readFile(filePath);
+			if (content) {
+				alreadyFound.add(name);
+				items.push({
+					path: filePath,
+					content,
+					level,
+					depth,
+					_source: createSourceMeta(PROVIDER_ID, filePath, level),
+				});
+			} else {
+				logger.warn(`Extra prompt file not found: ${filePath} (listed in ${PROMPT_INCLUDES_FILE})`);
+			}
+		}
+	} catch (e) {
+		logger.warn(`Failed to parse ${PROMPT_INCLUDES_FILE}: ${String(e)}`);
+	}
+
+	return items;
+}
+
+// Context Files (AGENTS.md + prompt-includes.json)
 async function loadContextFiles(ctx: LoadContext): Promise<LoadResult<ContextFile>> {
 	const items: ContextFile[] = [];
 	const warnings: string[] = [];
+	const loadedNames = new Set<string>();
 
 	const userPath = path.join(ctx.home, PATHS.userAgent, "AGENTS.md");
 	const userContent = await readFile(userPath);
 	if (userContent) {
+		loadedNames.add("AGENTS.md");
 		items.push({
 			path: userPath,
 			content: userContent,
 			level: "user",
 			_source: createSourceMeta(PROVIDER_ID, userPath, "user"),
 		});
+		// User-level extra prompt includes
+		const extra = await loadExtraPromptFiles(path.join(ctx.home, PATHS.userAgent), "user", undefined, loadedNames);
+		items.push(...extra);
 	}
 
 	const nearestProjectConfigDir = await findNearestProjectConfigDir(ctx.cwd, ctx.repoRoot);
@@ -830,6 +878,7 @@ async function loadContextFiles(ctx: LoadContext): Promise<LoadResult<ContextFil
 		const projectPath = path.join(nearestProjectConfigDir.dir, "AGENTS.md");
 		const projectContent = await readFile(projectPath);
 		if (projectContent) {
+			loadedNames.add("AGENTS.md");
 			items.push({
 				path: projectPath,
 				content: projectContent,
@@ -837,6 +886,14 @@ async function loadContextFiles(ctx: LoadContext): Promise<LoadResult<ContextFil
 				depth: nearestProjectConfigDir.depth,
 				_source: createSourceMeta(PROVIDER_ID, projectPath, "project"),
 			});
+			// Project-level extra prompt includes
+			const extra = await loadExtraPromptFiles(
+				nearestProjectConfigDir.dir,
+				"project",
+				nearestProjectConfigDir.depth,
+				loadedNames,
+			);
+			items.push(...extra);
 			return { items, warnings };
 		}
 	}
@@ -847,6 +904,7 @@ async function loadContextFiles(ctx: LoadContext): Promise<LoadResult<ContextFil
 		const rootAgentsMd = path.join(currentDir, "AGENTS.md");
 		const rootContent = await readFile(rootAgentsMd);
 		if (rootContent) {
+			loadedNames.add("AGENTS.md");
 			items.push({
 				path: rootAgentsMd,
 				content: rootContent,
@@ -854,6 +912,20 @@ async function loadContextFiles(ctx: LoadContext): Promise<LoadResult<ContextFil
 				depth: calculateDepth(ctx.cwd, currentDir, path.sep),
 				_source: createSourceMeta(PROVIDER_ID, rootAgentsMd, "project"),
 			});
+			// Root-level extra prompt includes
+			// Also check .omp/ subdirectory for prompt-includes.json
+			const configDir = path.join(currentDir, PATHS.projectDir);
+			const configDirExists = await ifNonEmptyDir(currentDir, PATHS.projectDir);
+			const extraDirs = configDirExists ? [currentDir, configDir] : [currentDir];
+			for (const dir of extraDirs) {
+				const extra = await loadExtraPromptFiles(
+					dir,
+					"project",
+					calculateDepth(ctx.cwd, currentDir, path.sep),
+					loadedNames,
+				);
+				items.push(...extra);
+			}
 		}
 		if (currentDir === ctx.repoRoot || currentDir === ctx.home) break;
 		const parent = path.dirname(currentDir);
@@ -867,7 +939,7 @@ async function loadContextFiles(ctx: LoadContext): Promise<LoadResult<ContextFil
 registerProvider<ContextFile>(contextFileCapability.id, {
 	id: PROVIDER_ID,
 	displayName: DISPLAY_NAME,
-	description: "Load AGENTS.md from .omp/ directories",
+	description: "Load AGENTS.md (+ prompt-includes.json) from .omp/ directories",
 	priority: PRIORITY,
 	load: loadContextFiles,
 });
