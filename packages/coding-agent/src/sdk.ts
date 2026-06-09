@@ -1128,9 +1128,15 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 
 		// Load extensions (discovers from standard locations + configured paths)
 		let extensionsResult: LoadExtensionsResult;
+		// Build config-based flags to set before extensions load
+		const extensionInitialFlags: Record<string, boolean | string> = {};
+		const nudgeContextInjection = settings.get("selfEvolution.nudgeContextInjection");
+		if (nudgeContextInjection !== undefined) {
+			extensionInitialFlags["self-evolution-enable-nudge-context-injection"] = nudgeContextInjection;
+		}
 		if (options.disableExtensionDiscovery) {
 			const configuredPaths = options.additionalExtensionPaths ?? [];
-			extensionsResult = await logger.time("loadExtensions", loadExtensions, configuredPaths, cwd, eventBus);
+			extensionsResult = await logger.time("loadExtensions", loadExtensions, configuredPaths, cwd, eventBus, extensionInitialFlags);
 			for (const { path, error } of extensionsResult.errors) {
 				logger.error("Failed to load extension", { path, error });
 			}
@@ -1147,6 +1153,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 				cwd,
 				eventBus,
 				disabledExtensionIds,
+				extensionInitialFlags,
 			);
 			for (const { path, error } of extensionsResult.errors) {
 				logger.error("Failed to load extension", { path, error });
@@ -1232,20 +1239,19 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 
 		let extensionRunner: ExtensionRunner | undefined;
 		if (extensionsResult.extensions.length > 0) {
+			// Set config-based flag values BEFORE extension factories run
+			const nudgeContextInjection = settings.get("selfEvolution.nudgeContextInjection");
+			if (nudgeContextInjection !== undefined) {
+				extensionsResult.runtime.flagValues.set("self-evolution-enable-nudge-context-injection", nudgeContextInjection);
+			}
 			extensionRunner = new ExtensionRunner(
 				extensionsResult.extensions,
 				extensionsResult.runtime,
 				cwd,
 				sessionManager,
 				modelRegistry,
-			);
-			// Set config-based flag values for extensions
-			const nudgeContextInjection = settings.get("selfEvolution.nudgeContextInjection");
-			if (nudgeContextInjection !== undefined) {
-				extensionRunner.setFlagValue("self-evolution-enable-nudge-context-injection", nudgeContextInjection);
-			}
+		);
 		}
-
 		const getSessionContext = () => ({
 			sessionManager,
 			modelRegistry,
