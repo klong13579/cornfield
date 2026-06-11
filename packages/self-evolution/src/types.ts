@@ -160,6 +160,8 @@ export interface SelfEvolutionFlags {
 	regressionReplayBackend: "heuristic" | "llm" | "subagent";
 	/** Sessions between convention reclassify runs when using llm/subagent replay (heuristic always every session) */
 	admissionReclassifyInterval: number;
+	/** Show Evolution stuck escalation warnings in the chat UI */
+	enableStuckWarning: boolean;
 }
 
 // ============================================================================

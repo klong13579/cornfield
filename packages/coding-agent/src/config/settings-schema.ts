@@ -942,6 +942,15 @@ export const SETTINGS_SCHEMA = {
 			description: "Inject session nudges into the next LLM context",
 		},
 	},
+	"selfEvolution.showStuckWarning": {
+		type: "boolean",
+		default: true,
+		ui: {
+			tab: "context",
+			label: "Show Stuck Warnings",
+			description: "Show Evolution stuck warnings in the chat UI",
+		},
+	},
 
 	// TTSR
 	"ttsr.enabled": {

@@ -9,11 +9,10 @@ import * as path from "node:path";
 import { Pipeline } from "@oh-my-pi/cognitive-coordination/assembler";
 import { validateSkill } from "@oh-my-pi/cognitive-coordination/sandbox";
 import type { ExtensionAPI, ExtensionFactory } from "@oh-my-pi/pi-coding-agent/extensibility/extensions";
-import { SchedulerDbStorage, getNextRun, getSchedulerDbPath } from "@oh-my-pi/pi-gateway";
+import { getNextRun, getSchedulerDbPath, SchedulerDbStorage } from "@oh-my-pi/pi-gateway";
 import { getAgentDir, getSessionsDir, isEnoent, logger } from "@oh-my-pi/pi-utils";
 import { isSkillEligibleForInjection } from "./benefit-admission";
 import { refreshBenefitAdmissionState } from "./benefit-admission-refresh";
-import { checkLearningRelevance } from "./learning-relevance";
 import {
 	registerEpisodicCommands,
 	registerModelStatsCommand,
@@ -31,6 +30,7 @@ import { syncEvolutionEscalations } from "./escalation/sync";
 import { FeedbackTracker } from "./feedback-tracker";
 import type { InjectionFormatter } from "./injection-formatter";
 import { IntentClassifier } from "./intent-classifier";
+import { checkLearningRelevance } from "./learning-relevance";
 import { type ActivityLogger, closeActivityLogger, getActivityLogger } from "./logging/activity-logger";
 import { projectEvolutionLog } from "./logging/evolution-log";
 import { SkillManager } from "./manager";
@@ -72,7 +72,7 @@ import { SqliteWorkflowPatternStore } from "./storage/workflow-patterns";
 import { registerSelfEvolutionTools } from "./tools";
 import { summarizeTrace, TraceRecorder } from "./trace";
 import { ingestExternalTraces } from "./trace-ingester";
-import type { SelfEvolutionFlags, IntentResult } from "./types";
+import type { IntentResult, SelfEvolutionFlags } from "./types";
 import { loadUnifiedSkillsForInjection } from "./unified-skills";
 import { extractUserExplicitLearnings } from "./user-explicit-learnings";
 
@@ -90,8 +90,7 @@ export function parseFlags(api: ExtensionAPI): SelfEvolutionFlags {
 		skillThreshold: Number(api.getFlag("self-evolution-skill-threshold") ?? "5"),
 		maxEpisodes: Number(api.getFlag("self-evolution-max-episodes") ?? "100"),
 		enablePromptInjection: api.getFlag("self-evolution-enable-prompt-injection") !== false,
-		enableEpisodeInjection: api.getFlag("self-evolution-enable-episode-injection") === true,
-		enableNudgeContextInjection: api.getFlag("self-evolution-enable-nudge-context-injection") !== false,
+		enableNudgeContextInjection: api.getFlag("self-evolution-enable-nudge-context-injection") === true,
 		llmRefinement: api.getFlag("self-evolution-llm-refinement") !== false,
 		llmRerank: api.getFlag("self-evolution-llm-rerank") !== false,
 		enableVersioning: api.getFlag("self-evolution-enable-versioning") !== false,
@@ -102,6 +101,7 @@ export function parseFlags(api: ExtensionAPI): SelfEvolutionFlags {
 			1,
 			Number(api.getFlag("self-evolution-admission-reclassify-interval") ?? "5"),
 		),
+		enableStuckWarning: api.getFlag("self-evolution-enable-stuck-warning") !== false,
 	};
 }
 export const createSelfEvolutionExtension: ExtensionFactory = api => {
@@ -152,16 +152,22 @@ export const createSelfEvolutionExtension: ExtensionFactory = api => {
 		default: true,
 		description: "Enable JSONL activity logging",
 	});
-	api.registerFlag("self-evolution-global-store", {
+	api.registerFlag("self-evolution-enable-stuck-warning", {
 		type: "boolean",
 		default: true,
-		description: "Global user store (default): ~/.omp/self-evolution + memory under ~/.omp/self-evolution/memory/",
+		description: "Show Evolution stuck escalation warnings in the chat UI",
 	});
-	api.registerFlag("self-evolution-project-store", {
+	api.registerFlag("self-evolution-global-store", {
 		type: "boolean",
 		default: false,
 		description:
-			"Per-project store: <cwd>/.omp/evolution/memory, evolution.db, skills instead of ~/.omp/self-evolution",
+			"Global user store: ~/.omp/self-evolution + memory under ~/.omp/self-evolution/memory/ (enable to override project store)",
+	});
+	api.registerFlag("self-evolution-project-store", {
+		type: "boolean",
+		default: true,
+		description:
+			"Per-project store (default): <cwd>/.omp/evolution/memory, evolution.db, skills",
 	});
 	api.registerFlag("self-evolution-regression-replay", {
 		type: "string",
@@ -298,11 +304,7 @@ export const createSelfEvolutionExtension: ExtensionFactory = api => {
 		nudgeHistoryStore = new SqliteNudgeHistoryStore(db);
 		nudgeSuppressionCache = new NudgeSuppressionCache();
 		nudgeEffectivenessTracker = new NudgeEffectivenessTracker();
-crossSessionNudgeEngine = new CrossSessionNudgeEngine(
-nudgeHistoryStore,
-episodeStore,
-diagnosisStore,
-);
+		crossSessionNudgeEngine = new CrossSessionNudgeEngine(nudgeHistoryStore, episodeStore, diagnosisStore);
 		sessionTraceStore = new SqliteSessionTraceStore(db);
 		regressionFixtureStore = new SqliteRegressionFixtureStore(db);
 		regressionTrialStore = new SqliteRegressionTrialStore(db);
@@ -952,7 +954,13 @@ diagnosisStore,
 				}
 			}
 
-			if (evolutionEscalationStore && regressionFixtureStore && learningStore && regressionTrialStore) {
+			if (
+				flags.enableStuckWarning &&
+				evolutionEscalationStore &&
+				regressionFixtureStore &&
+				learningStore &&
+				regressionTrialStore
+			) {
 				const escalated = await syncEvolutionEscalations({
 					escalationStore: evolutionEscalationStore,
 					fixtureStore: regressionFixtureStore,
@@ -976,7 +984,7 @@ diagnosisStore,
 			_ensureInit(ctx.cwd);
 			await _ensureBenefitAdmissionRefresh();
 
-			if (evolutionEscalationStore && ctx.hasUI) {
+			if (evolutionEscalationStore && ctx.hasUI && flags.enableStuckWarning) {
 				const openEscalations = await evolutionEscalationStore.listOpen();
 				for (const escalation of openEscalations.filter(e => e.status === "open").slice(0, 2)) {
 					ctx.ui.notify(`[Evolution stuck] ${escalation.message} — ${escalation.suggestion}`, "warning");

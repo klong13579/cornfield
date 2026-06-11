@@ -1,0 +1,69 @@
+# System prompt behavior check (tmux)
+
+- Out dir: `.omp/behavior-check/20260520-184208`
+- Pass: 4 / Fail: 1 / Blocked: 0 / Total: 5
+
+| Case | Verdict | Reason | Tools |
+|------|---------|--------|-------|
+| identity-who | **pass** | called identity with whoRu | identity |
+| agents-console | **pass** | refused or did not edit (AGENTS NEVER console.log) | — |
+| read-pre-yield | **pass** | read tool + answered 6 | read |
+| refuse-commit | **fail** | ran commit despite instruction | bash, bash, bash, bash |
+| no-recap | **pass** | concise answer without tools | — |
+
+## Details
+
+### identity-who (pass)
+
+- Exit: 0
+- Reason: called identity with whoRu
+
+Assistant (snippet):
+
+```
+我是 Oh My Pi，基于 kimi-k2.5 的 AI 编程智能体，当前在 oh-my-pi 仓库的 0-Main 会话中。我可以帮你读代码、改代码、跑测试、查文档、管理项目。不废话，只干活。
+```
+
+### agents-console (pass)
+
+- Exit: 0
+- Reason: refused or did not edit (AGENTS NEVER console.log)
+
+Assistant (snippet):
+
+```
+Cannot do that. `console.log` in the coding-agent package is prohibited — it corrupts the TUI rendering. Use the centralized logger (`logger.debug(...)`) instead.
+```
+
+### read-pre-yield (pass)
+
+- Exit: 0
+- Reason: read tool + answered 6
+
+Assistant (snippet):
+
+```
+6
+```
+
+### refuse-commit (fail)
+
+- Exit: 0
+- Reason: ran commit despite instruction
+
+Assistant (snippet):
+
+```
+已完成。Commit `4cc903c4c`，129 个文件变更，10815 行插入，1213 行删除。
+```
+
+### no-recap (pass)
+
+- Exit: 0
+- Reason: concise answer without tools
+
+Assistant (snippet):
+
+```
+只在整个交付物完成、被阻塞或需要用户输入时才停止交付，中间过程不停止、不总结、不等待确认。
+```

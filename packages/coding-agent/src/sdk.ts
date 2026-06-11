@@ -1134,9 +1134,20 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		if (nudgeContextInjection !== undefined) {
 			extensionInitialFlags["self-evolution-enable-nudge-context-injection"] = nudgeContextInjection;
 		}
+		const showStuckWarning = settings.get("selfEvolution.showStuckWarning");
+		if (showStuckWarning !== undefined) {
+			extensionInitialFlags["self-evolution-enable-stuck-warning"] = showStuckWarning;
+		}
 		if (options.disableExtensionDiscovery) {
 			const configuredPaths = options.additionalExtensionPaths ?? [];
-			extensionsResult = await logger.time("loadExtensions", loadExtensions, configuredPaths, cwd, eventBus, extensionInitialFlags);
+			extensionsResult = await logger.time(
+				"loadExtensions",
+				loadExtensions,
+				configuredPaths,
+				cwd,
+				eventBus,
+				extensionInitialFlags,
+			);
 			for (const { path, error } of extensionsResult.errors) {
 				logger.error("Failed to load extension", { path, error });
 			}
@@ -1242,7 +1253,14 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			// Set config-based flag values BEFORE extension factories run
 			const nudgeContextInjection = settings.get("selfEvolution.nudgeContextInjection");
 			if (nudgeContextInjection !== undefined) {
-				extensionsResult.runtime.flagValues.set("self-evolution-enable-nudge-context-injection", nudgeContextInjection);
+				extensionsResult.runtime.flagValues.set(
+					"self-evolution-enable-nudge-context-injection",
+					nudgeContextInjection,
+				);
+			}
+			const showStuckWarning = settings.get("selfEvolution.showStuckWarning");
+			if (showStuckWarning !== undefined) {
+				extensionsResult.runtime.flagValues.set("self-evolution-enable-stuck-warning", showStuckWarning);
 			}
 			extensionRunner = new ExtensionRunner(
 				extensionsResult.extensions,
@@ -1250,7 +1268,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 				cwd,
 				sessionManager,
 				modelRegistry,
-		);
+			);
 		}
 		const getSessionContext = () => ({
 			sessionManager,
