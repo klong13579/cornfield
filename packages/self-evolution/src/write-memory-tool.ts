@@ -47,6 +47,12 @@ export interface WriteMemoryToolDetails {
 	entryCount: number;
 }
 
+export interface WriteMemoryToolDeps {
+	getStore(): SqliteLearningStore;
+	getCwd(): string;
+	ensureInit(cwd: string): void;
+}
+
 export class WriteMemoryTool implements AgentTool<typeof writeMemorySchema, WriteMemoryToolDetails> {
 	readonly name = "write_memory";
 	readonly label = "Write Memory";
@@ -54,21 +60,20 @@ export class WriteMemoryTool implements AgentTool<typeof writeMemorySchema, Writ
 	readonly parameters = writeMemorySchema;
 	readonly strict = true;
 
-	readonly #getStore: () => SqliteLearningStore;
-	readonly #getCwd: () => string;
+	readonly #deps: WriteMemoryToolDeps;
 
-	constructor(store: SqliteLearningStore, getCwd: () => string) {
-		this.#getStore = () => store;
-		this.#getCwd = getCwd;
+	constructor(deps: WriteMemoryToolDeps) {
+		this.#deps = deps;
 		this.description = prompt.render(writeMemoryDescription);
 	}
 
 	async execute(
-		_toolCallId: string,
+		toolCallId: string,
 		params: Static<typeof writeMemorySchema>,
-		_signal?: AbortSignal,
+		signal?: AbortSignal,
 	): Promise<AgentToolResult<WriteMemoryToolDetails>> {
-		const store = this.#getStore();
+		this.#deps.ensureInit(this.#deps.getCwd());
+		const store = this.#deps.getStore();
 		if (!store) {
 			throw new Error("Memory store not initialized. Start a coding session first.");
 		}
@@ -106,7 +111,7 @@ export class WriteMemoryTool implements AgentTool<typeof writeMemorySchema, Writ
 
 		const learning: Learning = {
 			id: `lrn_${Bun.hash(`agent_written:${resolvedKind}:${content}`).toString(36)}`,
-			cwd: this.#getCwd(),
+			cwd: this.#deps.getCwd(),
 			kind: resolvedKind,
 			content: content.trim(),
 			source: "agent_written",
