@@ -904,11 +904,15 @@ export class ModelRegistry {
 
 		this.#addImplicitDiscoverableProviders(configuredProviders);
 		const builtInModels = this.#applyHardcodedModelPolicies(this.#loadBuiltInModels(overrides));
+		// First apply custom models (from models.yml) to built-in models - they take precedence
+		const builtInWithConfig = this.#mergeCustomModels(builtInModels, this.#customModelOverlays);
 		const cachedDiscoveries = this.#applyHardcodedModelPolicies(this.#loadCachedDiscoverableModels());
-		const resolvedDefaults = this.#mergeResolvedModels(builtInModels, cachedDiscoveries);
-		const withConfigModels = this.#mergeCustomModels(resolvedDefaults, this.#customModelOverlays);
+		// Filter out cached discoveries that conflict with custom models - models.yml takes precedence over models.db
+		const customModelKeys = new Set(this.#customModelOverlays.map(m => `${m.provider}/${m.id}`));
+		const filteredCache = cachedDiscoveries.filter(m => !customModelKeys.has(`${m.provider}/${m.id}`));
+		const resolvedDefaults = this.#mergeResolvedModels(builtInWithConfig, filteredCache);
 		// Merge runtime extension models so they survive refresh() cycles
-		const combined = this.#mergeCustomModels(withConfigModels, this.#runtimeModelOverlays);
+		const combined = this.#mergeCustomModels(resolvedDefaults, this.#runtimeModelOverlays);
 		const withModelOverrides = this.#applyModelOverrides(combined, this.#modelOverrides);
 		this.#models = this.#pruneAlibabaCodingPlanCatalog(this.#applyRuntimeProviderOverrides(withModelOverrides));
 		this.#rebuildCanonicalIndex();
