@@ -95,6 +95,9 @@ interface MenuRoleAction {
 const ALL_TAB = "ALL";
 const CANONICAL_TAB = "CANONICAL";
 
+/** Providers hidden from the interactive model selector. */
+const BLOCKED_PROVIDERS = new Set(["ollama", "llama.cpp", "lm-studio"]);
+
 /**
  * Component that renders a model selector with provider tabs and context menu.
  * - Tab/Arrow Left/Right: Switch between provider tabs
@@ -371,7 +374,7 @@ export class ModelSelectorComponent extends Container {
 
 			// Load available models (built-in models still work even if models.json failed)
 			try {
-				const availableModels = this.#modelRegistry.getAvailable();
+				const availableModels = this.#modelRegistry.getAvailable().filter(m => !BLOCKED_PROVIDERS.has(m.provider));
 				models = availableModels.map((model: Model) => ({
 					kind: "provider",
 					provider: model.provider,
@@ -437,6 +440,7 @@ export class ModelSelectorComponent extends Container {
 			providerSet.add(item.provider.toUpperCase());
 		}
 		for (const provider of this.#modelRegistry.getDiscoverableProviders()) {
+			if (BLOCKED_PROVIDERS.has(provider)) continue;
 			providerSet.add(provider.toUpperCase());
 		}
 		const sortedProviders = Array.from(providerSet).sort();
