@@ -91,6 +91,7 @@ export function parseFlags(api: ExtensionAPI): SelfEvolutionFlags {
 		maxEpisodes: Number(api.getFlag("self-evolution-max-episodes") ?? "100"),
 		enablePromptInjection: api.getFlag("self-evolution-enable-prompt-injection") !== false,
 		enableNudgeContextInjection: api.getFlag("self-evolution-enable-nudge-context-injection") === true,
+		enableNudgeUI: api.getFlag("self-evolution-enable-nudge-ui") !== false,
 		llmRefinement: api.getFlag("self-evolution-llm-refinement") !== false,
 		llmRerank: api.getFlag("self-evolution-llm-rerank") !== false,
 		enableVersioning: api.getFlag("self-evolution-enable-versioning") !== false,
@@ -121,6 +122,11 @@ export const createSelfEvolutionExtension: ExtensionFactory = api => {
 		type: "boolean",
 		default: true,
 		description: "Inject session nudges into the next LLM context (off = control arm for A/B)",
+	});
+	api.registerFlag("self-evolution-enable-nudge-ui", {
+		type: "boolean",
+		default: true,
+		description: "Show nudge notifications in the chat UI",
 	});
 	api.registerFlag("self-evolution-enable-prompt-injection", {
 		type: "boolean",
@@ -635,7 +641,7 @@ export const createSelfEvolutionExtension: ExtensionFactory = api => {
 				});
 				if (historyId) {
 					recorder.enqueuePendingAgentNudge(nudge, historyId);
-					if (_ctx.hasUI) {
+					if (_ctx.hasUI && flags.enableNudgeUI) {
 						new NudgeDeliverer().deliver(nudge, _ctx);
 					}
 					activityLogger

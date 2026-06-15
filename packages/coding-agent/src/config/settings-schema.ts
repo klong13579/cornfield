@@ -942,6 +942,15 @@ export const SETTINGS_SCHEMA = {
 			description: "Inject session nudges into the next LLM context",
 		},
 	},
+	"selfEvolution.enableNudgeUI": {
+		type: "boolean",
+		default: true,
+		ui: {
+			tab: "context",
+			label: "Show Nudge Notifications",
+			description: "Show nudge notifications in the chat UI",
+		},
+	},
 	"selfEvolution.showStuckWarning": {
 		type: "boolean",
 		default: true,

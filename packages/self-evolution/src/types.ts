@@ -150,6 +150,8 @@ export interface SelfEvolutionFlags {
 	enableEpisodeInjection: boolean;
 	/** Inject pending session nudges into the next LLM context (disable for live A/B control arm) */
 	enableNudgeContextInjection: boolean;
+	/** Show nudge notifications in the chat UI */
+	enableNudgeUI: boolean;
 	llmRefinement: boolean;
 	llmRerank: boolean;
 	enableVersioning: boolean;

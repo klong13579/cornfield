@@ -1134,6 +1134,10 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		if (nudgeContextInjection !== undefined) {
 			extensionInitialFlags["self-evolution-enable-nudge-context-injection"] = nudgeContextInjection;
 		}
+		const enableNudgeUI = settings.get("selfEvolution.enableNudgeUI");
+		if (enableNudgeUI !== undefined) {
+			extensionInitialFlags["self-evolution-enable-nudge-ui"] = enableNudgeUI;
+		}
 		const showStuckWarning = settings.get("selfEvolution.showStuckWarning");
 		if (showStuckWarning !== undefined) {
 			extensionInitialFlags["self-evolution-enable-stuck-warning"] = showStuckWarning;
@@ -1257,6 +1261,10 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 					"self-evolution-enable-nudge-context-injection",
 					nudgeContextInjection,
 				);
+			}
+			const enableNudgeUI = settings.get("selfEvolution.enableNudgeUI");
+			if (enableNudgeUI !== undefined) {
+				extensionsResult.runtime.flagValues.set("self-evolution-enable-nudge-ui", enableNudgeUI);
 			}
 			const showStuckWarning = settings.get("selfEvolution.showStuckWarning");
 			if (showStuckWarning !== undefined) {
