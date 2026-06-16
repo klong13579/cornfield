@@ -78,6 +78,50 @@ export async function stopGatewayDaemon(): Promise<boolean> {
 	}
 }
 
+export interface GatewayDaemonStatus {
+	running: boolean;
+	pid?: number;
+	startedAt?: string;
+	stalePidFile?: boolean;
+}
+
+export async function getGatewayStatus(): Promise<GatewayDaemonStatus> {
+	const dataDir = getDataDir();
+	const pidPath = path.join(dataDir, PID_FILE);
+
+	try {
+		const pidText = await fs.readFile(pidPath, "utf-8");
+		const pid = parseInt(pidText.trim(), 10);
+		if (isNaN(pid) || pid <= 0) {
+			// Clean up invalid PID file
+			await fs.unlink(pidPath).catch(() => {});
+			return { running: false };
+		}
+
+		// Check if process exists
+		try {
+			process.kill(pid, 0);
+		} catch {
+			// Process dead — clean up stale PID file
+			await fs.unlink(pidPath).catch(() => {});
+			return { running: false, stalePidFile: true };
+		}
+
+		// Get PID file mtime as started time
+		let startedAt: string | undefined;
+		try {
+			const stat = await fs.stat(pidPath);
+			startedAt = stat.mtime.toLocaleString();
+		} catch {
+			// Best-effort
+		}
+
+		return { running: true, pid, startedAt };
+	} catch {
+		return { running: false };
+	}
+}
+
 async function checkPidFile(dataDir: string, pidFile: string): Promise<boolean> {
 	try {
 		const pidText = await fs.readFile(path.join(dataDir, pidFile), "utf-8");

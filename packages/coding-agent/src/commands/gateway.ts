@@ -134,21 +134,24 @@ export default class Gateway extends Command {
 				break;
 			}
 			case "status": {
-				const { Gateway: GW } = await import("@oh-my-pi/pi-gateway/src/gateway");
-				const { loadConfig } = await import("@oh-my-pi/pi-gateway/src/config");
+				const { getGatewayStatus } = await import("@oh-my-pi/pi-gateway/src/gateway");
+				const { loadConfig, getConfigPath } = await import("@oh-my-pi/pi-gateway/src/config");
 				const config = await loadConfig(configPath);
-				const gateway = new GW(config);
-				const status = await gateway.getStatus();
+				const status = await getGatewayStatus();
+
 				console.log("Gateway Status:");
 				console.log(`  Running: ${status.running}`);
-				console.log(`  Channels: ${status.channels.length}`);
-				for (const ch of status.channels) {
-					console.log(`    - ${ch.name} (${ch.id}): ${ch.connected ? "connected" : "disconnected"}`);
+				if (status.running) {
+					console.log(`  PID: ${status.pid}`);
+					console.log(`  Started: ${status.startedAt}`);
+				} else if (status.stalePidFile) {
+					console.log(`  (stale PID file removed)`);
 				}
-				console.log(`  Active Sessions: ${status.sessions}`);
-				console.log(
-					`  Scheduler: ${status.scheduler.running ? `running (${status.scheduler.taskCount} tasks)` : "stopped"}`,
-				);
+				console.log(`  Config: ${getConfigPath()}`);
+				const channels = Object.keys(config.channels ?? {});
+				if (channels.length > 0) {
+					console.log(`  Configured channels: ${channels.join(", ")}`);
+				}
 				break;
 			}
 			case "config": {
