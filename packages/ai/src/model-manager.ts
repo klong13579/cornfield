@@ -49,10 +49,17 @@ export interface ModelManagerOptions<TApi extends Api = Api, TModelsDevPayload =
  * - dynamic endpoint data was fetched in this call,
  * - a still-fresh authoritative cache was reused in `online-if-uncached` mode, or
  * - the provider has no dynamic fetcher configured.
+ *
+ * `dynamicModelIds` is present only when a dynamic fetch was actually performed and
+ * succeeded. It lists the model IDs that the provider's API reported as available.
+ * Consumers (e.g. ModelRegistry) use this to prune bundled models that the provider
+ * no longer serves.
  */
 export interface ModelResolutionResult<TApi extends Api = Api> {
 	models: Model<TApi>[];
 	stale: boolean;
+	/** Model IDs returned by the provider's API on the most recent dynamic fetch. */
+	dynamicModelIds?: string[];
 }
 
 /**
@@ -137,6 +144,10 @@ export async function resolveProviderModels<TApi extends Api = Api, TModelsDevPa
 	return {
 		models,
 		stale: !dynamicAuthoritative,
+		dynamicModelIds:
+			shouldFetchFromNetwork && dynamicFetchSucceeded
+				? dynamicModels.map(model => model.id)
+				: undefined,
 	};
 }
 

@@ -791,6 +791,8 @@ export class ModelRegistry {
 	#suppressedSelectors: Map<string, number> = new Map();
 	#backgroundRefresh?: Promise<void>;
 	#lastDiscoveryWarnings: Map<string, string> = new Map();
+	/** Per-provider set of model IDs confirmed by dynamic discovery. */
+	#discoveredModelIds: Map<string, Set<string>> = new Map();
 	// Runtime extension model overlays — persist across refresh() cycles so that
 	// models registered by extensions survive the model selector's offline reload.
 	#runtimeModelOverlays: CustomModelOverlay[] = [];
@@ -1263,6 +1265,12 @@ export class ModelRegistry {
 			fetchDynamicModels,
 		});
 		const result = await manager.refresh(strategy);
+		if (result.dynamicModelIds) {
+			this.#discoveredModelIds.set(providerId, new Set(result.dynamicModelIds));
+		} else if (result.models.length > 0 && !discoveryError) {
+			// No separate dynamic IDs but all models are dynamic (staticModels: []).
+			this.#discoveredModelIds.set(providerId, new Set(result.models.map(m => m.id)));
+		}
 		const status = discoveryError
 			? result.models.length > 0
 				? "cached"
@@ -1414,10 +1422,25 @@ export class ModelRegistry {
 		try {
 			const manager = createModelManager({ ...options, cacheDbPath: this.#cacheDbPath });
 			const result = await manager.refresh(strategy);
+			if (result.dynamicModelIds) {
+				// Successful dynamic fetch — record confirmed model IDs.
+				this.#discoveredModelIds.set(options.providerId, new Set(result.dynamicModelIds));
+			} else if (options.fetchDynamicModels && result.stale) {
+				// Dynamic fetch was configured but failed or the cache is stale.
+				// We cannot confirm which bundled models are actually available —
+				// record empty set so getVerifiedAvailable() shows nothing for
+				// this provider instead of falling back to the full bundled list.
+				this.#discoveredModelIds.set(options.providerId, new Set());
+			}
 			return result.models.map(model =>
 				model.provider === options.providerId ? model : { ...model, provider: options.providerId },
 			);
 		} catch (error) {
+			if (options.fetchDynamicModels) {
+				// Dynamic fetch is configured but threw — record empty set so
+				// getVerifiedAvailable() does not fall back to bundled models.
+				this.#discoveredModelIds.set(options.providerId, new Set());
+			}
 			logger.warn("model discovery failed for provider", {
 				provider: options.providerId,
 				error: error instanceof Error ? error.message : String(error),
@@ -1923,6 +1946,38 @@ export class ModelRegistry {
 	 */
 	getAvailable(): Model<Api>[] {
 		return this.#models.filter(model => this.#isModelAvailable(model));
+	}
+
+	/**
+	 * Get models confirmed as available by dynamic discovery.
+	 *
+	 * For providers that had a successful dynamic fetch, only models returned
+	 * by the provider's API are included. For providers without discovery
+	 * capability or where discovery has not yet run, falls back to showing all
+	 * available models (same as getAvailable).
+	 *
+	 * This is the appropriate method for user-facing model listing (
+	 * --list-models, TUI model selector) when you want to avoid showing
+	 * legacy, deprecated, or versioned models that are bundled in models.json
+	 * but no longer served by the provider.
+	 */
+	/**
+	 * Get models confirmed as available by dynamic discovery.
+	 *
+	 * For providers that had a successful dynamic fetch, only models returned
+	 * by the provider's API are included. For providers without discovery
+	 * capability, falls back to showing all available models (same as
+	 * getAvailable). For providers where discovery is configured but failed
+	 * or returned no models, nothing is shown for that provider — the bundled
+	 * list is not used as a fallback since those models would not actually work.
+	 */
+	getVerifiedAvailable(): Model<Api>[] {
+		return this.#models.filter(model => {
+			if (!this.#isModelAvailable(model)) return false;
+			const discovered = this.#discoveredModelIds.get(model.provider);
+			if (!discovered) return true; // No discovery configured — include all
+			return discovered.has(model.id);
+		});
 	}
 
 	getDiscoverableProviders(): string[] {

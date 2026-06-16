@@ -15,14 +15,6 @@ interface ProviderRow {
 	images: string;
 }
 
-interface CanonicalRow {
-	canonical: string;
-	selected: string;
-	variants: string;
-	context: string;
-	maxOut: string;
-}
-
 function writeLine(line = ""): void {
 	process.stdout.write(`${line}\n`);
 }
@@ -46,10 +38,14 @@ function renderTable<T extends Record<string, string>>(rows: T[], headers: T): v
 }
 
 /**
- * List available models, optionally filtered by search pattern
+ * List available models, optionally filtered by search pattern.
+ *
+ * Only models confirmed by dynamic discovery are shown. For providers whose
+ * discovery fetch failed (e.g. invalid/expired credentials), nothing is shown
+ * for that provider.
  */
 export async function listModels(modelRegistry: ModelRegistry, searchPattern?: string): Promise<void> {
-	const models = modelRegistry.getAvailable();
+	const models = modelRegistry.getVerifiedAvailable();
 
 	if (models.length === 0) {
 		writeLine("No models available. Set API keys in environment variables.");
@@ -61,26 +57,7 @@ export async function listModels(modelRegistry: ModelRegistry, searchPattern?: s
 		filteredModels = fuzzyFilter(models, searchPattern, model => `${model.provider} ${model.id}`);
 	}
 
-	const filteredCanonical = modelRegistry
-		.getCanonicalModels({ availableOnly: true, candidates: filteredModels })
-		.map(record => {
-			const selected = modelRegistry.resolveCanonicalModel(record.id, {
-				availableOnly: true,
-				candidates: filteredModels,
-			});
-			if (!selected) return undefined;
-			return {
-				canonical: record.id,
-				selected: `${selected.provider}/${selected.id}`,
-				variants: String(record.variants.length),
-				context: formatNumber(selected.contextWindow),
-				maxOut: formatNumber(selected.maxTokens),
-			} satisfies CanonicalRow;
-		})
-		.filter((row): row is CanonicalRow => row !== undefined)
-		.sort((left, right) => left.canonical.localeCompare(right.canonical));
-
-	if (filteredModels.length === 0 && filteredCanonical.length === 0) {
+	if (filteredModels.length === 0) {
 		writeLine(`No models matching "${searchPattern}"`);
 		return;
 	}
@@ -100,29 +77,12 @@ export async function listModels(modelRegistry: ModelRegistry, searchPattern?: s
 		images: model.input.includes("image") ? "yes" : "no",
 	})) satisfies ProviderRow[];
 
-	if (filteredCanonical.length > 0) {
-		writeLine("Canonical models");
-		renderTable(filteredCanonical, {
-			canonical: "canonical",
-			selected: "selected",
-			variants: "variants",
-			context: "context",
-			maxOut: "max-out",
-		});
-		if (providerRows.length > 0) {
-			writeLine();
-		}
-	}
-
-	if (providerRows.length > 0) {
-		writeLine("Provider models");
-		renderTable(providerRows, {
-			provider: "provider",
-			model: "model",
-			context: "context",
-			maxOut: "max-out",
-			thinking: "thinking",
-			images: "images",
-		});
-	}
+	renderTable(providerRows, {
+		provider: "provider",
+		model: "model",
+		context: "context",
+		maxOut: "max-out",
+		thinking: "thinking",
+		images: "images",
+	});
 }
