@@ -28,15 +28,16 @@ const dingtalkAccountConfigSchema = z.object({
 	robotCode: z.string().optional(),
 	agentDir: z.string().optional(),
 	model: z.string().optional(),
+	timeoutMs: z.number().int().positive().optional(),
 });
 
 const permissionPolicySchema = z.enum(["open", "allowlist", "closed"]).default("allowlist");
 
 const dingtalkConfigSchema = channelConfigSchema.extend({
-	appKey: z.string().min(1),
-	appSecret: z.string().min(1),
+	appKey: z.string().min(1).optional(),
+	appSecret: z.string().min(1).optional(),
 	robotCode: z.string().optional(),
-	accounts: z.array(dingtalkAccountConfigSchema).optional(),
+	accounts: z.record(z.string(), dingtalkAccountConfigSchema).optional(),
 	dmPolicy: permissionPolicySchema.optional(),
 	groupPolicy: permissionPolicySchema.optional(),
 });
@@ -44,6 +45,7 @@ const dingtalkConfigSchema = channelConfigSchema.extend({
 const agentConfigSchema = z.object({
 	ompPath: z.string().optional(),
 	model: z.string().optional(),
+	timeoutMs: z.number().int().positive().optional(),
 	maxConcurrentSessions: z.number().int().positive().optional(),
 	maxCrashRetries: z.number().int().positive().optional(),
 	crashBackoffMs: z.number().int().positive().optional(),
@@ -152,10 +154,10 @@ export function getDingTalkConfig(config: GatewayConfig): import("./types").Ding
 
 	try {
 		const parsed = dingtalkConfigSchema.parse(raw);
-		if (parsed.accounts && parsed.accounts.length > 0) {
-			for (const account of parsed.accounts) {
+		if (parsed.accounts && Object.keys(parsed.accounts).length > 0) {
+			for (const [accountId, account] of Object.entries(parsed.accounts)) {
 				if (!account.appKey || !account.appSecret) {
-					logger.warn("Invalid DingTalk account config: missing appKey or appSecret");
+					logger.warn("Invalid DingTalk account config", { accountId, error: "missing appKey or appSecret" });
 					return null;
 				}
 			}

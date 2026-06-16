@@ -90,7 +90,7 @@ async function cmdStart(_configPath?: string): Promise<void> {
 
 	rl.prompt();
 
-	rl.on("line", async (line) => {
+	rl.on("line", async line => {
 		const text = line.trim();
 		if (!text) {
 			rl.prompt();
@@ -532,17 +532,18 @@ async function cmdInstall(args: string[]): Promise<void> {
 		output: process.stdout,
 	});
 
-	const ask = (question: string): Promise<string> =>
-		new Promise(resolve => rl.question(question, resolve));
+	const ask = (question: string): Promise<string> => new Promise(resolve => rl.question(question, resolve));
 
 	console.log("\n--- 钉钉机器人凭证配置 ---");
 
-	const appKey =
-		(await ask(`AppKey [${currentAppKey ?? ""}]: `)).trim() || currentAppKey || "";
-	const appSecret =
-		(await ask(`AppSecret [${currentAppSecret ? "已设置" : ""}]: `)).trim() || currentAppSecret || "";
+	const appKey = (await ask(`AppKey [${currentAppKey ?? ""}]: `)).trim() || currentAppKey || "";
+	const appSecret = (await ask(`AppSecret [${currentAppSecret ? "已设置" : ""}]: `)).trim() || currentAppSecret || "";
 	const robotCode =
-		(await ask(`RobotCode (可选) [${((existing.channels.dingtalk as Record<string, unknown>)?.robotCode as string) ?? ""}]: `)).trim() ||
+		(
+			await ask(
+				`RobotCode (可选) [${((existing.channels.dingtalk as Record<string, unknown>)?.robotCode as string) ?? ""}]: `,
+			)
+		).trim() ||
 		((existing.channels.dingtalk as Record<string, unknown>)?.robotCode as string) ||
 		"";
 

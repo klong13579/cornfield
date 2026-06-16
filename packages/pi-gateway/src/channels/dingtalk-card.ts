@@ -40,9 +40,7 @@ export interface AICardInstance {
 	inputingStarted: boolean;
 }
 
-export type AICardTarget =
-	| { type: "user"; userId: string }
-	| { type: "group"; openConversationId: string };
+export type AICardTarget = { type: "user"; userId: string } | { type: "group"; openConversationId: string };
 
 // ═══════════════════════════════════════════════════════════════════════
 // Global Token Bucket Rate Limiter
@@ -254,7 +252,7 @@ export async function getAccessToken(config: DingTalkConfig): Promise<string> {
 		throw new Error(`Failed to get access token: ${resp.status} ${text}`);
 	}
 
-	const data = await resp.json() as { accessToken: string; expireIn?: number };
+	const data = (await resp.json()) as { accessToken: string; expireIn?: number };
 	return data.accessToken;
 }
 
@@ -486,11 +484,7 @@ export async function streamAICard(
 	}
 }
 
-export async function finishAICard(
-	card: AICardInstance,
-	content: string,
-	config?: DingTalkConfig,
-): Promise<void> {
+export async function finishAICard(card: AICardInstance, content: string, config?: DingTalkConfig): Promise<void> {
 	if (!card) return;
 
 	if (config) {
@@ -549,11 +543,7 @@ export async function finishAICard(
 	}
 }
 
-export async function failAICard(
-	card: AICardInstance,
-	content: string,
-	config?: DingTalkConfig,
-): Promise<void> {
+export async function failAICard(card: AICardInstance, content: string, config?: DingTalkConfig): Promise<void> {
 	if (!card) return;
 
 	if (config) {

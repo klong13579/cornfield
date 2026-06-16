@@ -25,14 +25,13 @@ const DINGTALK_API = "https://api.dingtalk.com";
  */
 async function getOapiAccessToken(config: DingTalkConfig): Promise<string | null> {
 	try {
-		const resp = await fetch(
-			`${DINGTALK_OAPI}/gettoken?appkey=${config.appKey}&appsecret=${config.appSecret}`,
-			{ method: "GET" },
-		);
+		const resp = await fetch(`${DINGTALK_OAPI}/gettoken?appkey=${config.appKey}&appsecret=${config.appSecret}`, {
+			method: "GET",
+		});
 
 		if (!resp.ok) return null;
 
-		const data = await resp.json() as { errcode: number; access_token?: string; errmsg?: string };
+		const data = (await resp.json()) as { errcode: number; access_token?: string; errmsg?: string };
 		if (data.errcode === 0 && data.access_token) {
 			return data.access_token;
 		}
@@ -58,10 +57,7 @@ export interface DownloadedMedia {
  * Download a file from DingTalk using downloadCode.
  * Files are stored in a temp directory and cleaned up on process exit.
  */
-async function downloadByDingtalkCode(
-	downloadCode: string,
-	config: DingTalkConfig,
-): Promise<DownloadedMedia | null> {
+async function downloadByDingtalkCode(downloadCode: string, config: DingTalkConfig): Promise<DownloadedMedia | null> {
 	const token = await getOapiAccessToken(config);
 	if (!token) {
 		logger.error("[DingTalk Media] No OAPI token available for download");
@@ -70,23 +66,25 @@ async function downloadByDingtalkCode(
 
 	try {
 		// Step 1: Get download URL
-		const infoResp = await fetch(
-			`${DINGTALK_API}/v1.0/robot/messageFiles/${downloadCode}`,
-			{
-				method: "GET",
-				headers: {
-					"x-acs-dingtalk-access-token": await getAccessToken(config),
-					"Content-Type": "application/json",
-				},
+		const infoResp = await fetch(`${DINGTALK_API}/v1.0/robot/messageFiles/${downloadCode}`, {
+			method: "GET",
+			headers: {
+				"x-acs-dingtalk-access-token": await getAccessToken(config),
+				"Content-Type": "application/json",
 			},
-		);
+		});
 
 		if (!infoResp.ok) {
 			logger.warn("[DingTalk Media] Failed to get file info", { status: infoResp.status });
 			return null;
 		}
 
-		const fileInfo = await infoResp.json() as { downloadUrl?: string; fileName?: string; fileSize?: number; mediaType?: string };
+		const fileInfo = (await infoResp.json()) as {
+			downloadUrl?: string;
+			fileName?: string;
+			fileSize?: number;
+			mediaType?: string;
+		};
 
 		if (!fileInfo.downloadUrl) {
 			logger.warn("[DingTalk Media] No download URL in file info");
@@ -156,10 +154,7 @@ async function downloadByUrl(url: string): Promise<DownloadedMedia | null> {
 /**
  * Download media from a DingTalk message content URL or download code.
  */
-export async function downloadMedia(
-	url: string,
-	config: DingTalkConfig,
-): Promise<DownloadedMedia | null> {
+export async function downloadMedia(url: string, config: DingTalkConfig): Promise<DownloadedMedia | null> {
 	if (url.startsWith("downloadCode:")) {
 		const code = url.slice("downloadCode:".length);
 		return downloadByDingtalkCode(code, config);
@@ -216,7 +211,7 @@ export async function uploadMedia(
 			return null;
 		}
 
-		const data = await resp.json() as { media_id?: string; errcode: number };
+		const data = (await resp.json()) as { media_id?: string; errcode: number };
 		if (data.errcode !== 0 || !data.media_id) {
 			logger.warn("[DingTalk Media] Upload returned error", { errcode: data.errcode });
 			return null;

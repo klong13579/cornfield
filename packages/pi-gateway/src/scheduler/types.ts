@@ -71,6 +71,13 @@ export interface TaskExecution {
 	output?: string;
 	stderr?: string;
 	status: "running" | "success" | "failure";
+	/**
+	 * For agent tasks: absolute path to the OMP agent session JSONL
+	 * that contains the full LLM trace (thinking + tool_use + tool_result).
+	 * Set by CLI cronRun after execution completes. Null for shell tasks
+	 * or when session cannot be located.
+	 */
+	agentSessionPath?: string;
 }
 
 export interface SchedulerStorage {

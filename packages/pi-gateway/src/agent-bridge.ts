@@ -16,7 +16,25 @@
  */
 
 import { logger } from "@oh-my-pi/pi-utils";
+import { resolveCredentialEnvVars } from "./credential-resolver";
 import type { InboundMessage, SessionRecord } from "./types";
+
+// Inline types for RPC protocol messages the bridge handles
+type RpcExtensionUIResponse =
+	| { type: "extension_ui_response"; id: string; value: string }
+	| { type: "extension_ui_response"; id: string; confirmed: boolean }
+	| { type: "extension_ui_response"; id: string; cancelled: true; timedOut?: boolean };
+
+type RpcHostToolResult = {
+	type: "host_tool_result";
+	id: string;
+	result: {
+		type: "tool_result";
+		tool_use_id: string;
+		content: Array<{ type: "text"; text: string }>;
+	};
+	isError?: boolean;
+};
 
 export interface AgentBridgeOptions {
 	/** Path to omp binary (default: "omp") */
@@ -197,7 +215,7 @@ export class AgentBridge {
 				stderr: "pipe",
 				stdin: "pipe",
 				cwd: this.#options.cwd ?? process.cwd(),
-				env: { ...process.env },
+			env: { ...process.env, ...resolveCredentialEnvVars() },
 			});
 
 			const stdin = proc.stdin as import("bun").FileSink;
@@ -324,6 +342,40 @@ export class AgentBridge {
 
 			if (parsed.type === "ready") {
 				this.#ready = true;
+				return;
+			}
+
+			// Handle extension_ui_request: auto-respond to unblock the agent
+			// The bridge is headless and cannot show UI, so we cancel all blocking requests.
+			if (parsed.type === "extension_ui_request") {
+				const method = (parsed as any).method as string;
+				// Blocking methods that require user input: auto-cancel
+				if (method === "confirm" || method === "select" || method === "input" || method === "editor") {
+					const response: RpcExtensionUIResponse = {
+						type: "extension_ui_response",
+						id: (parsed as any).id,
+						cancelled: true,
+						timedOut: true,
+					};
+					this.#writeToStdin(JSON.stringify(response) + "\n");
+				}
+				// Fire-and-forget methods (notify, setWidget, setStatus, etc.) are ignored
+				return;
+			}
+
+			// Handle host_tool_call: reject immediately — bridge has no host tools
+			if (parsed.type === "host_tool_call") {
+				const result: RpcHostToolResult = {
+					type: "host_tool_result",
+					id: (parsed as any).id,
+					result: {
+						type: "tool_result",
+						tool_use_id: (parsed as any).toolCallId,
+						content: [{ type: "text", text: "Host tool not available in gateway mode" }],
+					},
+					isError: true,
+				};
+				this.#writeToStdin(JSON.stringify(result) + "\n");
 				return;
 			}
 
@@ -456,6 +508,13 @@ export class AgentBridge {
 	// Helpers
 	// ═══════════════════════════════════════════════════════════════
 
+	/** Write data to the agent's stdin. */
+	#writeToStdin(data: string): void {
+		if (this.#stdinWriter) {
+			this.#stdinWriter.write(new TextEncoder().encode(data));
+		}
+	}
+
 	#extractText(msg: InboundMessage): string {
 		if (msg.content.type === "text") return msg.content.text;
 		if (msg.content.type === "markdown") return msg.content.markdown;
@@ -464,16 +523,19 @@ export class AgentBridge {
 	}
 
 	#formatResponse(text: string): string {
-		const MAX_LENGTH = 2000;
+		// Strip think blocks from model response
+		const cleaned = text.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+
+		const MAX_LENGTH = 4000;
 		const TRUNCATE_NOTICE = "\n\n...(内容已截断，请使用终端查看完整输出)";
-		if (text.length <= MAX_LENGTH) return text;
-		let cutAt = text.lastIndexOf("\n\n", MAX_LENGTH - TRUNCATE_NOTICE.length);
+		if (cleaned.length <= MAX_LENGTH) return cleaned;
+		let cutAt = cleaned.lastIndexOf("\n\n", MAX_LENGTH - TRUNCATE_NOTICE.length);
 		if (cutAt < MAX_LENGTH * 0.5) {
-			cutAt = text.lastIndexOf("\n", MAX_LENGTH - TRUNCATE_NOTICE.length);
+			cutAt = cleaned.lastIndexOf("\n", MAX_LENGTH - TRUNCATE_NOTICE.length);
 		}
 		if (cutAt < MAX_LENGTH * 0.5) {
 			cutAt = MAX_LENGTH - TRUNCATE_NOTICE.length;
 		}
-		return text.slice(0, cutAt) + TRUNCATE_NOTICE;
+		return cleaned.slice(0, cutAt) + TRUNCATE_NOTICE;
 	}
 }

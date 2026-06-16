@@ -109,6 +109,8 @@ export interface SessionStore {
 export interface AgentConfig {
 	ompPath?: string;
 	model?: string;
+	/** Timeout per agent prompt in ms (default: 300000) */
+	timeoutMs?: number;
 	maxConcurrentSessions?: number;
 	maxCrashRetries?: number;
 	crashBackoffMs?: number;
@@ -159,14 +161,16 @@ export interface DingtalkAccountConfig {
 	agentDir?: string;
 	/** Optional model override for this account */
 	model?: string;
+	/** Optional per-account timeout in ms (overrides agent.timeoutMs) */
+	timeoutMs?: number;
 }
 
 export interface DingTalkConfig extends ChannelConfig {
-	appKey: string;
-	appSecret: string;
+	appKey?: string;
+	appSecret?: string;
 	robotCode?: string;
-	/** Multi-agent support: array of accounts for multiple robots */
-	accounts?: DingtalkAccountConfig[];
+	/** Multi-agent support: named map of accounts for multiple robots */
+	accounts?: Record<string, DingtalkAccountConfig>;
 	/** DM permission policy: open | allowlist | closed */
 	dmPolicy?: PermissionPolicy;
 	/** Group permission policy: open | allowlist | closed */

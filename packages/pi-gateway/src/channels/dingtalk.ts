@@ -17,11 +17,7 @@
 
 import * as fs from "node:fs";
 import { logger } from "@oh-my-pi/pi-utils";
-import {
-	DWClient,
-	type DWClientDownStream,
-	TOPIC_ROBOT,
-} from "dingtalk-stream";
+import { DWClient, type DWClientDownStream, TOPIC_ROBOT } from "dingtalk-stream";
 import type {
 	ChannelConfig,
 	DingTalkConfig,
@@ -440,7 +436,12 @@ export class DingTalkChannel extends BaseChannel {
 			const body =
 				msg.content.type === "markdown"
 					? { msgtype: "markdown", markdown: { title: "消息", text }, conversationId: msg.conversationId }
-					: { msgtype: "text", text: { content: text }, conversationId: msg.conversationId, atUser: msg.mentions ? { dingtalkIds: msg.mentions } : undefined };
+					: {
+							msgtype: "text",
+							text: { content: text },
+							conversationId: msg.conversationId,
+							atUser: msg.mentions ? { dingtalkIds: msg.mentions } : undefined,
+						};
 
 			const res = await fetch(msg.sessionWebhook, {
 				method: "POST",
@@ -686,7 +687,7 @@ export class DingTalkChannel extends BaseChannel {
 
 		// DM policy
 		if (!msg.isGroup) {
-			const dmPolicy = (config as any).dmPolicy as PermissionPolicy ?? "allowlist";
+			const dmPolicy = ((config as any).dmPolicy as PermissionPolicy) ?? "allowlist";
 			if (dmPolicy === "open") return true;
 			if (dmPolicy === "closed") return false;
 			// allowlist mode
@@ -697,7 +698,7 @@ export class DingTalkChannel extends BaseChannel {
 		}
 
 		// Group policy
-		const groupPolicy = (config as any).groupPolicy as PermissionPolicy ?? "allowlist";
+		const groupPolicy = ((config as any).groupPolicy as PermissionPolicy) ?? "allowlist";
 		if (groupPolicy === "closed") return false;
 		if (groupPolicy === "open") return true;
 		// allowlist mode
@@ -773,7 +774,10 @@ export class DingTalkChannel extends BaseChannel {
 							headers: { "Content-Type": "application/json" },
 							body: JSON.stringify({
 								msgtype: "text",
-								text: { content: "抱歉，您没有权限使用此机器人。请联系管理员。\n\nSorry, you don't have permission to use this bot. Please contact the administrator." },
+								text: {
+									content:
+										"抱歉，您没有权限使用此机器人。请联系管理员。\n\nSorry, you don't have permission to use this bot. Please contact the administrator.",
+								},
 							}),
 						});
 					} catch {

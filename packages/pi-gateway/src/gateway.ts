@@ -95,9 +95,8 @@ export class Gateway {
 		}
 
 		// Multi-account mode
-		if (dtConfig.accounts && dtConfig.accounts.length > 0) {
-			for (const account of dtConfig.accounts) {
-				const accountId = `${account.appKey.slice(0, 8)}`;
+		if (dtConfig.accounts && Object.keys(dtConfig.accounts).length > 0) {
+			for (const [accountId, account] of Object.entries(dtConfig.accounts)) {
 				const channel = new DingTalkChannel();
 				channel.setAccountId(accountId);
 

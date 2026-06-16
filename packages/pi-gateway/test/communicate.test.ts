@@ -1,6 +1,6 @@
 /**
  * Gateway Communication Test
- * 
+ *
  * 测试 Gateway 通信的几种方式:
  * 1. 直接使用 omp --mode rpc
  * 2. 通过 AgentBridge.forward() 模拟

@@ -49,7 +49,17 @@ export async function executeScheduledCommand(
 			return { exitCode: 0, output: "[SILENT]", stderr: "", timedOut: false };
 		}
 		if (scriptResult.output) {
-			command = `Pre-script output:\n${scriptResult.output}\n\n${command}`;
+			if (taskType === "shell") {
+				// Use a here-doc with a per-run random marker so the pre-script
+				// output is printed verbatim (no shell interpretation, no
+				// variable expansion, safe for arbitrary content).
+				const marker = `OMP_PRESCRIPT_${Math.random().toString(36).slice(2, 10)}`;
+				command = `cat <<'${marker}'\nPre-script output:\n${scriptResult.output}\n\n${marker}\n\n${command}`;
+			} else {
+				// agent: pass the pre-script output as prompt prefix; OMP
+				// `--print` treats the whole string as a user message.
+				command = `Pre-script output:\n${scriptResult.output}\n\n${command}`;
+			}
 		}
 	}
 
@@ -117,17 +127,49 @@ interface ScriptResult {
 /**
  * Run a pre-script and capture its output.
  *
- * Scripts must reside within ~/.omp/gateway-data/scheduler/scripts/.
- * Relative paths are resolved there; absolute paths are rejected.
+ * Path resolution:
+ * - **Absolute path** (`/foo/bar.py`, `~/baz.py`): used as-is. Caller is
+ *   responsible for ensuring the path is readable and trusted.
+ * - **Relative path** (`mine.py`, `subdir/x.sh`): resolved against
+ *   `~/.omp/gateway-data/scheduler/scripts/`. Must stay within that
+ *   directory; paths that escape it are rejected.
+ *
+ * If the script does not exist or is not readable, the call returns an
+ * empty result (no prefix injected) and a warning is logged. Execution
+ * does not fail — the pre-script is treated as a context injector, not
+ * a hard requirement.
  */
 async function runPreScript(scriptPath: string): Promise<ScriptResult> {
-	const path = require("node:path");
-	const scriptsDir = path.join(require("node:os").homedir(), ".omp", "gateway-data", "scheduler", "scripts");
+	const fs = require("node:fs") as typeof import("node:fs");
+	const path = require("node:path") as typeof import("node:path");
+	const os = require("node:os") as typeof import("node:os");
 
-	// Resolve and validate path: must stay within scriptsDir
-	const resolved = path.resolve(scriptsDir, scriptPath);
-	if (!resolved.startsWith(scriptsDir + path.sep) && resolved !== scriptsDir) {
-		logger.warn("Pre-script path resolves outside scripts directory, skipping", { scriptPath: resolved });
+	// Expand leading ~ to $HOME (Node doesn't do this for us)
+	const expanded =
+		scriptPath === "~"
+			? os.homedir()
+			: scriptPath.startsWith("~/")
+				? path.join(os.homedir(), scriptPath.slice(2))
+				: scriptPath;
+
+	const scriptsDir = path.join(os.homedir(), ".omp", "gateway-data", "scheduler", "scripts");
+
+	let resolved: string;
+	if (path.isAbsolute(expanded)) {
+		// Absolute paths bypass the scriptsDir sandbox.
+		resolved = path.resolve(expanded);
+	} else {
+		// Relative paths must stay inside scriptsDir (defense-in-depth).
+		resolved = path.resolve(scriptsDir, expanded);
+		const ok = resolved === scriptsDir || resolved.startsWith(scriptsDir + path.sep);
+		if (!ok) {
+			logger.warn("Pre-script path escapes scripts directory, skipping", { scriptPath: resolved });
+			return { silent: false, output: "" };
+		}
+	}
+
+	if (!fs.existsSync(resolved)) {
+		logger.warn("Pre-script not found, skipping", { scriptPath: resolved });
 		return { silent: false, output: "" };
 	}
 
@@ -152,7 +194,7 @@ async function runPreScript(scriptPath: string): Promise<ScriptResult> {
 		]);
 
 		if (exitCode !== 0) {
-			logger.warn("Pre-script failed", { scriptPath, exitCode, stderr: errText });
+			logger.warn("Pre-script failed", { scriptPath: resolved, exitCode, stderr: errText });
 			return { silent: false, output: "" };
 		}
 
@@ -163,7 +205,7 @@ async function runPreScript(scriptPath: string): Promise<ScriptResult> {
 
 		return { silent: false, output };
 	} catch (error) {
-		logger.warn("Pre-script execution error", { scriptPath, error: String(error) });
+		logger.warn("Pre-script execution error", { scriptPath: resolved, error: String(error) });
 		return { silent: false, output: "" };
 	}
 }

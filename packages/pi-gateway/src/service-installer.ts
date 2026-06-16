@@ -80,7 +80,6 @@ function generateLaunchdPlist(cliPath: string, logPath: string): string {
 	<key>ProgramArguments</key>
 	<array>
 		<string>${process.execPath}</string>
-		<string>run</string>
 		<string>${cliPath}</string>
 		<string>start</string>
 	</array>
@@ -112,7 +111,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=${process.execPath} run ${cliPath} start
+ExecStart=${process.execPath} ${cliPath} start
 Restart=on-failure
 RestartSec=5
 StandardOutput=append:${logPath}

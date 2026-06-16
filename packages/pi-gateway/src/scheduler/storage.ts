@@ -50,6 +50,7 @@ type ExecutionRow = {
 	output: string | null;
 	stderr: string | null;
 	status: string;
+	agent_session_path: string | null;
 };
 
 // ---------------------------------------------------------------------------
@@ -86,6 +87,7 @@ const EXECUTION_UPDATE_FIELDS = new Set<string>([
 	"output",
 	"stderr",
 	"status",
+	"agentSessionPath",
 ]);
 
 // ---------------------------------------------------------------------------
@@ -127,6 +129,7 @@ function toExecution(row: ExecutionRow): TaskExecution {
 		output: row.output ?? undefined,
 		stderr: row.stderr ?? undefined,
 		status: row.status as TaskExecution["status"],
+		agentSessionPath: row.agent_session_path ?? undefined,
 	};
 }
 
@@ -207,8 +210,9 @@ export class SchedulerDbStorage implements SchedulerStorage {
 		this.#insertExecutionStmt = this.#db.prepare(`
 			INSERT INTO executions (
 				id, task_id, started_at, ended_at,
-				exit_code, output, stderr, status
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+				exit_code, output, stderr, status,
+				agent_session_path
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`);
 
 		this.#getExecutionsStmt = this.#db.prepare(
@@ -249,9 +253,16 @@ export class SchedulerDbStorage implements SchedulerStorage {
 				output TEXT,
 				stderr TEXT,
 				status TEXT NOT NULL CHECK(status IN ('running', 'success', 'failure')),
+				agent_session_path TEXT,
 				FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
 			)
 		`);
+
+		// Migrate: add new columns if missing
+		const execColumns = this.#db.prepare("PRAGMA table_info(executions)").all() as Array<{ name: string }>;
+		if (!execColumns.some(c => c.name === "agent_session_path")) {
+			this.#db.exec("ALTER TABLE executions ADD COLUMN agent_session_path TEXT;");
+		}
 
 		// Migrate: add new columns if missing
 		const columns = this.#db.prepare("PRAGMA table_info(tasks)").all() as Array<{ name: string }>;
@@ -343,6 +354,7 @@ export class SchedulerDbStorage implements SchedulerStorage {
 			exec.output ?? null,
 			exec.stderr ?? null,
 			exec.status,
+			exec.agentSessionPath ?? null,
 		);
 		return this.#getExecution(id)!;
 	}

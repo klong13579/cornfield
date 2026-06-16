@@ -120,17 +120,20 @@ describe("config validation", () => {
 		const tmpDir = await import("node:fs").then(fs => fs.promises.mkdtemp("/tmp/pi-gw-config-"));
 
 		const configPath = `${tmpDir}/gateway.json`;
-		await Bun.write(configPath, JSON.stringify({
-			channels: {
-				dingtalk: {
-					enabled: true,
-					appKey: "dingabc123",
-					appSecret: "sec123456789",
-					dmPolicy: "allowlist",
-					groupPolicy: "open",
+		await Bun.write(
+			configPath,
+			JSON.stringify({
+				channels: {
+					dingtalk: {
+						enabled: true,
+						appKey: "dingabc123",
+						appSecret: "sec123456789",
+						dmPolicy: "allowlist",
+						groupPolicy: "open",
+					},
 				},
-			},
-		}));
+			}),
+		);
 
 		const config = await loadConfig(configPath);
 		const dtConfig = config.channels.dingtalk as Record<string, unknown>;
@@ -146,29 +149,32 @@ describe("config validation", () => {
 		const tmpDir = await import("node:fs").then(fs => fs.promises.mkdtemp("/tmp/pi-gw-config-"));
 
 		const configPath = `${tmpDir}/gateway-multi.json`;
-		await Bun.write(configPath, JSON.stringify({
-			channels: {
-				dingtalk: {
-					enabled: true,
-					appKey: "primary_key",
-					appSecret: "primary_secret",
-					accounts: [
-						{ appKey: "bot1_key", appSecret: "bot1_secret", model: "claude-sonnet" },
-						{ appKey: "bot2_key", appSecret: "bot2_secret", agentDir: "/tmp/bot2" },
-					],
+		await Bun.write(
+			configPath,
+			JSON.stringify({
+				channels: {
+					dingtalk: {
+						enabled: true,
+						appKey: "primary_key",
+						appSecret: "primary_secret",
+						accounts: {
+							"bot1": { appKey: "bot1_key", appSecret: "bot1_secret", model: "claude-sonnet" },
+							"bot2": { appKey: "bot2_key", appSecret: "bot2_secret", agentDir: "/tmp/bot2" },
+						},
+					},
 				},
-			},
-		}));
+			}),
+		);
 
 		const config = await loadConfig(configPath);
 		const { getDingTalkConfig } = await import("../src/config");
 		const dtConfig = getDingTalkConfig(config);
 
 		expect(dtConfig).not.toBeNull();
-		expect(dtConfig!.accounts).toHaveLength(2);
-		expect(dtConfig!.accounts![0]!.appKey).toBe("bot1_key");
-		expect(dtConfig!.accounts![0]!.model).toBe("claude-sonnet");
-		expect(dtConfig!.accounts![1]!.agentDir).toBe("/tmp/bot2");
+		expect(Object.keys(dtConfig!.accounts!)).toHaveLength(2);
+		expect(dtConfig!.accounts!.bot1.appKey).toBe("bot1_key");
+		expect(dtConfig!.accounts!.bot1.model).toBe("claude-sonnet");
+		expect(dtConfig!.accounts!.bot2.agentDir).toBe("/tmp/bot2");
 	});
 
 	test("rejects config with missing credentials", async () => {
@@ -176,15 +182,18 @@ describe("config validation", () => {
 		const tmpDir = await import("node:fs").then(fs => fs.promises.mkdtemp("/tmp/pi-gw-config-"));
 
 		const configPath = `${tmpDir}/gateway-bad.json`;
-		await Bun.write(configPath, JSON.stringify({
-			channels: {
-				dingtalk: {
-					enabled: true,
-					appKey: "",
-					appSecret: "",
+		await Bun.write(
+			configPath,
+			JSON.stringify({
+				channels: {
+					dingtalk: {
+						enabled: true,
+						appKey: "",
+						appSecret: "",
+					},
 				},
-			},
-		}));
+			}),
+		);
 
 		const config = await loadConfig(configPath);
 		const { getDingTalkConfig } = await import("../src/config");
