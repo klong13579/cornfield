@@ -26,6 +26,58 @@ import type { InboundMessage, OutboundMessage, SessionRecord } from "./types";
 
 const PID_FILE = "gateway.pid";
 
+/**
+ * Stop the running gateway daemon by PID file.
+ * Sends SIGTERM first, then SIGKILL if still alive.
+ */
+export async function stopGatewayDaemon(): Promise<boolean> {
+	const dataDir = getDataDir();
+	const pidPath = path.join(dataDir, PID_FILE);
+
+	try {
+		const pidText = await fs.readFile(pidPath, "utf-8");
+		const pid = parseInt(pidText.trim(), 10);
+		if (isNaN(pid) || pid <= 0) {
+			return false;
+		}
+
+		// Check if process exists
+		try {
+			process.kill(pid, 0);
+		} catch {
+			// Process already dead
+			await fs.unlink(pidPath).catch(() => {});
+			return false;
+		}
+
+		// Send SIGTERM
+		process.kill(pid, "SIGTERM");
+
+		// Wait up to 5s for graceful shutdown
+		for (let i = 0; i < 5; i++) {
+			await Bun.sleep(1000);
+			try {
+				process.kill(pid, 0);
+			} catch {
+				// Died
+				await fs.unlink(pidPath).catch(() => {});
+				return true;
+			}
+		}
+
+		// Force kill
+		try {
+			process.kill(pid, "SIGKILL");
+			await fs.unlink(pidPath).catch(() => {});
+			return true;
+		} catch {
+			return false;
+		}
+	} catch {
+		return false;
+	}
+}
+
 async function checkPidFile(dataDir: string, pidFile: string): Promise<boolean> {
 	try {
 		const pidText = await fs.readFile(path.join(dataDir, pidFile), "utf-8");

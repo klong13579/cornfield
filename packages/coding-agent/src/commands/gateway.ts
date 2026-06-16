@@ -1,4 +1,59 @@
 /**
+ * Find the OMP agent session JSONL created during a specific time window.
+ *
+ * OMP writes agent session files to
+ *   `~/.omp/agent/sessions/<encoded-cwd>/<timestamp>_<id>.jsonl`
+ * where the ISO timestamp prefix is the immutable creation time of the
+ * session (e.g. `2026-06-15T09-18-46-865Z_019eca93-...jsonl`).
+ *
+ * Why filename-based, not mtime: OMP frequently touches mtime on existing
+ * session files (compaction, `--continue`, etc.), so mtime-based filtering
+ * produces false positives linking to the wrong (older) session.
+ *
+ * To stay decoupled from OMP's cwd-encoding scheme, we scan ALL session
+ * subdirectories and pick the file whose filename timestamp is closest
+ * to (and >= startedAt - tolerance) within the window.
+ */
+function findAgentSessionPath(startedAt: number, endedAt: number): string | undefined {
+	const os = require("node:os") as typeof import("node:os");
+	const path = require("node:path") as typeof import("node:path");
+	const fs = require("node:fs") as typeof import("node:fs");
+
+	const sessionsRoot = path.join(os.homedir(), ".omp", "agent", "sessions");
+	if (!fs.existsSync(sessionsRoot)) return undefined;
+
+	// 2026-06-15T09-18-46-865Z (ISO basic format, dashes between time fields)
+	const FILENAME_TS = /^(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z_/;
+	const toleranceMs = 5_000; // 容忍启动/创建间 5s 偏差
+
+	let bestMatch: { path: string; score: number } | undefined;
+	try {
+		for (const dirEnt of fs.readdirSync(sessionsRoot, { withFileTypes: true })) {
+			if (!dirEnt.isDirectory()) continue;
+			const dir = path.join(sessionsRoot, dirEnt.name);
+			for (const entry of fs.readdirSync(dir)) {
+				if (!entry.endsWith(".jsonl")) continue;
+				const m = FILENAME_TS.exec(entry);
+				if (!m) continue;
+				// 重组成标准 ISO 让 Date.parse 吃
+				const iso = `${m[1]}T${m[2]}:${m[3]}:${m[4]}.${m[5]}Z`;
+				const createdAt = Date.parse(iso);
+				if (!Number.isFinite(createdAt)) continue;
+				if (createdAt < startedAt - toleranceMs) continue;
+				if (createdAt > endedAt + toleranceMs) continue;
+				const score = Math.abs(createdAt - startedAt);
+				if (!bestMatch || score < bestMatch.score) {
+					bestMatch = { path: path.join(dir, entry), score };
+				}
+			}
+		}
+	} catch {
+		return undefined;
+	}
+	return bestMatch?.path;
+}
+
+/**
  * Unified Gateway command — started via omp gateway or pi-gateway CLI.
  *
  * Manages IM channels, cron scheduler, agent bridge, and heartbeat.
@@ -10,7 +65,7 @@
 import { Args, Command, Flags, renderCommandHelp } from "@oh-my-pi/pi-utils/cli";
 import { initTheme } from "../modes/theme/theme";
 
-const ACTIONS = ["start", "status", "config", "cron", "service", "help"];
+const ACTIONS = ["start", "stop", "status", "config", "cron", "service", "help"];
 
 export default class Gateway extends Command {
 	static description = "Unified gateway: IM channels, cron scheduler, agent bridge";
@@ -30,6 +85,7 @@ export default class Gateway extends Command {
 
 	static examples = [
 		"# Start gateway\n  omp gateway start",
+		"# Stop gateway\n  omp gateway stop",
 		"# Start with custom config\n  omp gateway start --config /path/to/gateway.json",
 		"# Show status\n  omp gateway status",
 		"# Schedule a task\n  omp gateway cron create '0 9 * * *' 'bun run daily-report.ts'",
@@ -67,6 +123,16 @@ export default class Gateway extends Command {
 				await new Promise(() => {});
 				break;
 			}
+			case "stop": {
+				const { stopGatewayDaemon } = await import("@oh-my-pi/pi-gateway/src/gateway");
+				const stopped = await stopGatewayDaemon();
+				if (stopped) {
+					console.log("Gateway stopped.");
+				} else {
+					console.log("Gateway is not running.");
+				}
+				break;
+			}
 			case "status": {
 				const { Gateway: GW } = await import("@oh-my-pi/pi-gateway/src/gateway");
 				const { loadConfig } = await import("@oh-my-pi/pi-gateway/src/config");
@@ -80,7 +146,9 @@ export default class Gateway extends Command {
 					console.log(`    - ${ch.name} (${ch.id}): ${ch.connected ? "connected" : "disconnected"}`);
 				}
 				console.log(`  Active Sessions: ${status.sessions}`);
-				console.log(`  Scheduler: ${status.scheduler.running ? `running (${status.scheduler.taskCount} tasks)` : "stopped"}`);
+				console.log(
+					`  Scheduler: ${status.scheduler.running ? `running (${status.scheduler.taskCount} tasks)` : "stopped"}`,
+				);
 				break;
 			}
 			case "config": {
@@ -163,7 +231,7 @@ export default class Gateway extends Command {
 				default:
 					console.log(`
 Cron management commands:
-  omp gateway cron create <schedule> <command...> [--name <name>] [--type shell|agent] [--deliver <channel>]
+  omp gateway cron create <schedule> <command...> [--name <name>] [--type shell|agent] [--deliver <channel>] [--timeout-ms <ms>] [--skills <s1,s2,...>] [--retry <maxAttempts>] [--pre-script <path>]
   omp gateway cron list [--json]
   omp gateway cron pause <name>
   omp gateway cron resume <name>
@@ -173,6 +241,7 @@ Cron management commands:
   omp gateway cron diagnose [--json]
   omp gateway cron logs <name> [--json]
 `);
+					break;
 			}
 		} finally {
 			storage.close();
@@ -189,14 +258,55 @@ Cron management commands:
 		let schedule: string | undefined;
 		let deliver: string | undefined;
 		let type: "shell" | "agent" = "shell";
+		let timeoutMs: number | undefined;
+		let skills: string[] | undefined;
+		let retryMaxAttempts: number | undefined;
+		let preScript: string | undefined;
 		const commandParts: string[] = [];
 
 		let i = 0;
 		while (i < args.length) {
-			if (args[i] === "--name" && args[i + 1]) { name = args[i + 1]!; i += 2; }
-			else if (args[i] === "--type" && args[i + 1]) { type = args[i + 1] as "shell" | "agent"; i += 2; }
-			else if (args[i] === "--deliver" && args[i + 1]) { deliver = args[i + 1]; i += 2; }
-			else {
+			if (args[i] === "--name" && args[i + 1]) {
+				name = args[i + 1]!;
+				i += 2;
+			} else if (args[i] === "--type" && args[i + 1]) {
+				type = args[i + 1] as "shell" | "agent";
+				i += 2;
+			} else if (args[i] === "--deliver" && args[i + 1]) {
+				deliver = args[i + 1];
+				i += 2;
+			} else if (args[i] === "--timeout-ms" && args[i + 1]) {
+				const v = Number.parseInt(args[i + 1]!, 10);
+				if (!Number.isFinite(v) || v <= 0) {
+					console.error(`Invalid --timeout-ms: must be a positive integer (got "${args[i + 1]}")`);
+					process.exitCode = 1;
+					return;
+				}
+				timeoutMs = v;
+				i += 2;
+			} else if (args[i] === "--skills" && args[i + 1]) {
+				skills = args[i + 1]!.split(",")
+					.map(s => s.trim())
+					.filter(Boolean);
+				if (skills.length === 0) {
+					console.error(`Invalid --skills: must be a non-empty comma-separated list (got "${args[i + 1]}")`);
+					process.exitCode = 1;
+					return;
+				}
+				i += 2;
+			} else if (args[i] === "--retry" && args[i + 1]) {
+				const v = Number.parseInt(args[i + 1]!, 10);
+				if (!Number.isFinite(v) || v < 1) {
+					console.error(`Invalid --retry: must be a positive integer >= 1 (got "${args[i + 1]}")`);
+					process.exitCode = 1;
+					return;
+				}
+				retryMaxAttempts = v;
+				i += 2;
+			} else if (args[i] === "--pre-script" && args[i + 1]) {
+				preScript = args[i + 1]!;
+				i += 2;
+			} else {
 				if (!schedule) schedule = args[i];
 				else commandParts.push(args[i]!);
 				i++;
@@ -205,7 +315,9 @@ Cron management commands:
 
 		const command = commandParts.join(" ");
 		if (!schedule || !command) {
-			console.error("Usage: omp gateway cron create <schedule> <command...> [--name <name>] [--type shell|agent] [--deliver <channel>]");
+			console.error(
+				"Usage: omp gateway cron create <schedule> <command...> [--name <name>] [--type shell|agent] [--deliver <channel>] [--timeout-ms <ms>] [--skills <s1,s2,...>] [--retry <maxAttempts>] [--pre-script <path>]",
+			);
 			process.exitCode = 1;
 			return;
 		}
@@ -225,14 +337,25 @@ Cron management commands:
 			return;
 		}
 
-		const nextRun = parsed.type === "cron" ? getNextRun(parsed.schedule) : parsed.nextRunAt ? new Date(parsed.nextRunAt) : undefined;
+		const nextRun =
+			parsed.type === "cron"
+				? getNextRun(parsed.schedule)
+				: parsed.nextRunAt
+					? new Date(parsed.nextRunAt)
+					: undefined;
 		storage.addTask({
 			name,
 			cron: parsed.schedule,
 			command,
 			scheduleType: parsed.type,
 			taskType: type,
-			timeoutMs: type === "agent" ? 120_000 : 30_000,
+			timeoutMs: timeoutMs ?? (type === "agent" ? 120_000 : 30_000),
+			retry:
+				retryMaxAttempts !== undefined
+					? { maxAttempts: retryMaxAttempts, backoffMs: [1000, 5000, 30000] }
+					: undefined,
+			skills,
+			preScript,
 			deliver,
 			status: "active",
 			createdAt: Date.now(),
@@ -244,8 +367,14 @@ Cron management commands:
 		});
 
 		console.log(`Task "${name}" created.`);
-		console.log(`  Type: ${parsed.type} | Schedule: ${parsed.schedule} | Next: ${nextRun ? nextRun.toLocaleString() : "—"}`);
+		console.log(
+			`  Type: ${parsed.type} | Schedule: ${parsed.schedule} | Next: ${nextRun ? nextRun.toLocaleString() : "—"}`,
+		);
 		if (deliver) console.log(`  Delivery: ${deliver}`);
+		if (timeoutMs !== undefined) console.log(`  Timeout: ${timeoutMs}ms`);
+		if (skills) console.log(`  Skills: ${skills.join(", ")}`);
+		if (retryMaxAttempts !== undefined) console.log(`  Retry: max ${retryMaxAttempts} attempts (backoff 1s/5s/30s)`);
+		if (preScript) console.log(`  Pre-script: ${preScript}`);
 	}
 
 	async #cronList(
@@ -254,8 +383,14 @@ Cron management commands:
 		json: boolean,
 	): Promise<void> {
 		const tasks = storage.listTasks();
-		if (json) { console.log(JSON.stringify(tasks, null, 2)); return; }
-		if (tasks.length === 0) { console.log("No scheduled tasks."); return; }
+		if (json) {
+			console.log(JSON.stringify(tasks, null, 2));
+			return;
+		}
+		if (tasks.length === 0) {
+			console.log("No scheduled tasks.");
+			return;
+		}
 		console.log("NAME                 TYPE    STATUS     CRON                 NEXT RUN             LAST RUN");
 		console.log("─".repeat(96));
 		for (const task of tasks) console.log(formatTaskRow(task));
@@ -267,9 +402,17 @@ Cron management commands:
 		storage: import("@oh-my-pi/pi-gateway/src/scheduler").SchedulerDbStorage,
 		getNextRun: typeof import("@oh-my-pi/pi-gateway/src/scheduler").getNextRun,
 	): Promise<void> {
-		if (!name) { console.error("Usage: omp gateway cron pause|resume <name>"); process.exitCode = 1; return; }
+		if (!name) {
+			console.error("Usage: omp gateway cron pause|resume <name>");
+			process.exitCode = 1;
+			return;
+		}
 		const task = storage.getTaskByName(name);
-		if (!task) { console.error(`Task "${name}" not found.`); process.exitCode = 1; return; }
+		if (!task) {
+			console.error(`Task "${name}" not found.`);
+			process.exitCode = 1;
+			return;
+		}
 		storage.updateTask(task.id, {
 			status,
 			nextRunAt: status === "active" ? getNextRun(task.cron)?.getTime() : undefined,
@@ -283,10 +426,19 @@ Cron management commands:
 		storage: import("@oh-my-pi/pi-gateway/src/scheduler").SchedulerDbStorage,
 		executeScheduledCommand: typeof import("@oh-my-pi/pi-gateway/src/scheduler").executeScheduledCommand,
 	): Promise<void> {
-		if (!name) { console.error("Usage: omp gateway cron run <name>"); process.exitCode = 1; return; }
+		if (!name) {
+			console.error("Usage: omp gateway cron run <name>");
+			process.exitCode = 1;
+			return;
+		}
 		const task = storage.getTaskByName(name);
-		if (!task) { console.error(`Task "${name}" not found.`); process.exitCode = 1; return; }
-		const exec = storage.recordExecution({ taskId: task.id, startedAt: Date.now(), status: "running" });
+		if (!task) {
+			console.error(`Task "${name}" not found.`);
+			process.exitCode = 1;
+			return;
+		}
+		const startedAt = Date.now();
+		const exec = storage.recordExecution({ taskId: task.id, startedAt, status: "running" });
 		try {
 			const { exitCode, output, stderr } = await executeScheduledCommand(task.command, {
 				taskType: task.taskType,
@@ -294,21 +446,83 @@ Cron management commands:
 				skills: task.skills,
 				preScript: task.preScript,
 			});
-			storage.updateExecution(exec.id, { endedAt: Date.now(), exitCode, output, stderr, status: exitCode === 0 ? "success" : "failure" });
-			storage.updateTask(task.id, { lastRunAt: Date.now(), runCount: task.runCount + 1, failCount: exitCode === 0 ? task.failCount : task.failCount + 1 });
-			if (exitCode !== 0) { console.error(`Task "${name}" failed (exit ${exitCode}).`); process.exitCode = exitCode; }
-			else console.log(`Task "${name}" completed.`);
+			const endedAt = Date.now();
+			const durationMs = endedAt - startedAt;
+			const status = exitCode === 0 ? "success" : "failure";
+
+			// G7: agent task → 找本次 run 创建的 OMP session JSONL
+			const agentSessionPath = task.taskType === "agent" ? findAgentSessionPath(startedAt, endedAt) : undefined;
+
+			storage.updateExecution(exec.id, {
+				endedAt,
+				exitCode,
+				output,
+				stderr,
+				status,
+				...(agentSessionPath ? { agentSessionPath } : {}),
+			});
+			storage.updateTask(task.id, {
+				lastRunAt: Date.now(),
+				runCount: task.runCount + 1,
+				failCount: exitCode === 0 ? task.failCount : task.failCount + 1,
+			});
+
+			// G1: 写 logs/<name>.jsonl 完整 stdout/stderr（不只 SQLite 末段）
+			try {
+				const { appendExecutionLog } = await import("@oh-my-pi/pi-gateway/src/scheduler/execution-log");
+				appendExecutionLog(task.name, {
+					id: exec.id,
+					ts: endedAt,
+					exitCode,
+					status,
+					durationMs,
+					output,
+					stderr,
+				});
+			} catch (logErr) {
+				console.error(`[warn] failed to append execution log: ${logErr}`);
+			}
+
+			if (agentSessionPath) {
+				console.log(`[trace] agent session: ${agentSessionPath}`);
+			}
+
+			if (exitCode !== 0) {
+				console.error(`Task "${name}" failed (exit ${exitCode}).`);
+				process.exitCode = exitCode;
+			} else console.log(`Task "${name}" completed.`);
 		} catch (err) {
-			storage.updateExecution(exec.id, { endedAt: Date.now(), exitCode: 1, stderr: String(err), status: "failure" });
+			// G7: failure 路径也试着找 session（agent 任务 timeout 也会写到 session）
+			const endedAt = Date.now();
+			const agentSessionPath = task.taskType === "agent" ? findAgentSessionPath(startedAt, endedAt) : undefined;
+			storage.updateExecution(exec.id, {
+				endedAt,
+				exitCode: 1,
+				stderr: String(err),
+				status: "failure",
+				...(agentSessionPath ? { agentSessionPath } : {}),
+			});
+			if (agentSessionPath) console.log(`[trace] agent session: ${agentSessionPath}`);
 			console.error(`Task "${name}" failed: ${err}`);
 			process.exitCode = 1;
 		}
 	}
 
-	async #cronRemove(name: string, storage: import("@oh-my-pi/pi-gateway/src/scheduler").SchedulerDbStorage): Promise<void> {
-		if (!name) { console.error("Usage: omp gateway cron remove <name>"); process.exitCode = 1; return; }
+	async #cronRemove(
+		name: string,
+		storage: import("@oh-my-pi/pi-gateway/src/scheduler").SchedulerDbStorage,
+	): Promise<void> {
+		if (!name) {
+			console.error("Usage: omp gateway cron remove <name>");
+			process.exitCode = 1;
+			return;
+		}
 		const task = storage.getTaskByName(name);
-		if (!task) { console.error(`Task "${name}" not found.`); process.exitCode = 1; return; }
+		if (!task) {
+			console.error(`Task "${name}" not found.`);
+			process.exitCode = 1;
+			return;
+		}
 		storage.deleteTask(task.id);
 		console.log(`Task "${name}" removed.`);
 	}
@@ -322,13 +536,19 @@ Cron management commands:
 		console.log(`Scheduler: ${running ? "running" : "stopped"}`);
 	}
 
-	async #cronDiagnose(storage: import("@oh-my-pi/pi-gateway/src/scheduler").SchedulerDbStorage, json: boolean): Promise<void> {
+	async #cronDiagnose(
+		storage: import("@oh-my-pi/pi-gateway/src/scheduler").SchedulerDbStorage,
+		json: boolean,
+	): Promise<void> {
 		const tasks = storage.listTasks();
 		const total = tasks.length;
 		const active = tasks.filter(t => t.status === "active").length;
 		const paused = tasks.filter(t => t.status === "paused").length;
 		const disabled = tasks.filter(t => t.status === "disabled").length;
-		if (json) { console.log(JSON.stringify({ taskCounts: { total, active, paused, disabled } }, null, 2)); return; }
+		if (json) {
+			console.log(JSON.stringify({ taskCounts: { total, active, paused, disabled } }, null, 2));
+			return;
+		}
 		console.log("## Scheduler Diagnosis");
 		console.log(`Tasks: ${total} total (${active} active, ${paused} paused, ${disabled} disabled)`);
 	}
@@ -339,12 +559,26 @@ Cron management commands:
 		formatExecutionRow: typeof import("@oh-my-pi/pi-gateway/src/scheduler").formatExecutionRow,
 		json: boolean,
 	): Promise<void> {
-		if (!name) { console.error("Usage: omp gateway cron logs <name>"); process.exitCode = 1; return; }
+		if (!name) {
+			console.error("Usage: omp gateway cron logs <name>");
+			process.exitCode = 1;
+			return;
+		}
 		const task = storage.getTaskByName(name);
-		if (!task) { console.error(`Task "${name}" not found.`); process.exitCode = 1; return; }
+		if (!task) {
+			console.error(`Task "${name}" not found.`);
+			process.exitCode = 1;
+			return;
+		}
 		const executions = storage.getExecutions(task.id, 20);
-		if (json) { console.log(JSON.stringify(executions, null, 2)); return; }
-		if (executions.length === 0) { console.log(`No executions for task "${name}".`); return; }
+		if (json) {
+			console.log(JSON.stringify(executions, null, 2));
+			return;
+		}
+		if (executions.length === 0) {
+			console.log(`No executions for task "${name}".`);
+			return;
+		}
 		console.log("ID                 STATUS   DURATION EXIT");
 		console.log("─".repeat(50));
 		for (const exec of executions) console.log(formatExecutionRow(exec));
@@ -356,13 +590,9 @@ Cron management commands:
 
 	async #handleService(): Promise<void> {
 		const sub = process.argv[process.argv.indexOf("service") + 1];
-		const {
-			installService,
-			uninstallService,
-			startService,
-			stopService,
-			getServiceStatus,
-		} = await import("@oh-my-pi/pi-gateway/src/service-installer");
+		const { installService, uninstallService, startService, stopService, getServiceStatus } = await import(
+			"@oh-my-pi/pi-gateway/src/service-installer"
+		);
 
 		switch (sub) {
 			case "install":
