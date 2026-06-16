@@ -163,8 +163,10 @@ export class AgentBridge {
 				return "（Agent 未返回内容）";
 			}
 
+			logger.debug("Raw response before format", { text: response.slice(0, 300) });
+
 			const formatted = this.#formatResponse(response.trim());
-			logger.debug("Agent responded", { responseLength: formatted.length });
+			logger.debug("Agent responded", { responseLength: formatted.length, preview: formatted.slice(0, 100) });
 			return formatted;
 		} catch (err) {
 			if (this.#isCrashError(err)) {

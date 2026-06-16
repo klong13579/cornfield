@@ -10,6 +10,7 @@
  */
 
 import * as path from "node:path";
+import * as fs from "node:fs/promises";
 import { logger } from "@oh-my-pi/pi-utils";
 import { AgentBridge } from "./agent-bridge";
 import { ChannelRegistry } from "./channels/registry";
@@ -22,6 +23,26 @@ import type { ScheduledTask } from "./scheduler/types";
 import { DEFAULT_SCHEDULER_CONFIG, getSchedulerDbPath, getSchedulerDir } from "./scheduler/types";
 import { SQLiteSessionStore } from "./session-store";
 import type { InboundMessage, OutboundMessage, SessionRecord } from "./types";
+
+const PID_FILE = "gateway.pid";
+
+async function checkPidFile(dataDir: string, pidFile: string): Promise<boolean> {
+	try {
+		const pidText = await fs.readFile(path.join(dataDir, pidFile), "utf-8");
+		const pid = parseInt(pidText.trim(), 10);
+		if (!isNaN(pid) && pid > 0) {
+			try {
+				process.kill(pid, 0); // signal 0 = existence check only
+				return true;
+			} catch {
+				return false;
+			}
+		}
+	} catch {
+		// PID file not found
+	}
+	return false;
+}
 
 export class Gateway {
 	#config: GatewayConfig;
@@ -78,6 +99,14 @@ export class Gateway {
 
 		this.#running = true;
 		logger.debug("Gateway started");
+
+		// Write PID file for cross-process status detection
+		try {
+			await fs.writeFile(path.join(getDataDir(this.#config), PID_FILE), String(process.pid));
+			logger.debug("PID file written", { path: path.join(getDataDir(this.#config), PID_FILE), pid: process.pid });
+		} catch (e) {
+			logger.warn("Failed to write PID file", { error: String(e) });
+		}
 	}
 
 	/**
@@ -151,6 +180,11 @@ export class Gateway {
 		this.#store?.close();
 		this.#running = false;
 		logger.debug("Gateway stopped");
+
+		// Remove PID file
+		try {
+			await fs.unlink(path.join(getDataDir(this.#config), PID_FILE));
+		} catch { /* non-fatal */ }
 	}
 
 	get isRunning(): boolean {
@@ -207,7 +241,8 @@ export class Gateway {
 		const sessions = (await this.#store?.getActiveSessions()) ?? [];
 
 		return {
-			running: this.#running,
+			running: this.#running || await checkPidFile(getDataDir(this.#config), PID_FILE),
+			channels,
 			channels,
 			sessions: sessions.length,
 			scheduler: {
