@@ -29,6 +29,7 @@ const PID_FILE = "gateway.pid";
 /**
  * Stop the running gateway daemon by PID file.
  * Sends SIGTERM first, then SIGKILL if still alive.
+ * Kills orphan RPC child processes in case of hard kill.
  */
 export async function stopGatewayDaemon(): Promise<boolean> {
 	const dataDir = getDataDir();
@@ -50,6 +51,9 @@ export async function stopGatewayDaemon(): Promise<boolean> {
 			return false;
 		}
 
+		// Kill orphan RPC children that might be left from previous hard kills
+		await killOrphanRpcProcesses();
+
 		// Send SIGTERM
 		process.kill(pid, "SIGTERM");
 
@@ -59,22 +63,50 @@ export async function stopGatewayDaemon(): Promise<boolean> {
 			try {
 				process.kill(pid, 0);
 			} catch {
-				// Died
 				await fs.unlink(pidPath).catch(() => {});
 				return true;
 			}
 		}
 
-		// Force kill
+		// Force kill main process + any remaining orphan children
 		try {
 			process.kill(pid, "SIGKILL");
-			await fs.unlink(pidPath).catch(() => {});
-			return true;
-		} catch {
-			return false;
-		}
+		} catch {}
+		await killOrphanRpcProcesses();
+		await fs.unlink(pidPath).catch(() => {});
+		return true;
 	} catch {
 		return false;
+	}
+}
+
+/** Read PID file, return PID or null */
+async function readPidFile(pidPath: string): Promise<number | null> {
+	try {
+		const text = await fs.readFile(pidPath, "utf-8");
+		const pid = parseInt(text.trim(), 10);
+		if (!isNaN(pid) && pid > 0) return pid;
+	} catch {}
+	return null;
+}
+
+/** Kill orphaned omp --mode rpc processes (PPID=1) left from hard kills */
+async function killOrphanRpcProcesses(): Promise<void> {
+	try {
+		const result = Bun.spawnSync(["ps", "-eo", "pid,ppid,comm"]);
+		if (result.exitCode !== 0) return;
+		const lines = result.stdout.toString().trim().split("\n");
+		for (const line of lines) {
+			const parts = line.trim().split(/\s+/);
+			if (parts.length < 3) continue;
+			const pid = parseInt(parts[0], 10);
+			const ppid = parseInt(parts[1], 10);
+			if (!isNaN(pid) && !isNaN(ppid) && ppid === 1 && parts[2] === "omp") {
+				process.kill(pid, "SIGKILL");
+			}
+		}
+	} catch {
+		// Best-effort
 	}
 }
 
@@ -165,10 +197,22 @@ export class Gateway {
 			return;
 		}
 
+		// Cross-process dedup: check PID file
+		const dataDir = getDataDir(this.#config);
+		const existingPid = await readPidFile(path.join(dataDir, PID_FILE));
+		if (existingPid) {
+			try {
+				process.kill(existingPid, 0);
+				logger.error("Gateway already running (PID " + existingPid + ")");
+				return;
+			} catch {
+				// Stale PID file — will overwrite
+			}
+		}
+
 		logger.debug("Starting gateway...");
 
 		// Initialize session store
-		const dataDir = getDataDir(this.#config);
 		this.#store = new SQLiteSessionStore(`${dataDir}/sessions.db`);
 
 		// Register channels (handle multi-account DingTalk)
