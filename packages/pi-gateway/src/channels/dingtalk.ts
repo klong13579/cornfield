@@ -432,6 +432,8 @@ export class DingTalkChannel extends BaseChannel {
 					? msg.content.text
 					: "[unsupported content type]";
 
+		logger.debug("[DingTalk] sending message", { text: text.slice(0, 500), type: msg.content.type });
+
 		try {
 			const body =
 				msg.content.type === "markdown"
