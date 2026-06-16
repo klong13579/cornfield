@@ -22,10 +22,23 @@ const channelConfigSchema = z.object({
 	allowedGroups: z.array(z.string()).optional(),
 });
 
+const dingtalkAccountConfigSchema = z.object({
+	appKey: z.string().min(1),
+	appSecret: z.string().min(1),
+	robotCode: z.string().optional(),
+	agentDir: z.string().optional(),
+	model: z.string().optional(),
+});
+
+const permissionPolicySchema = z.enum(["open", "allowlist", "closed"]).default("allowlist");
+
 const dingtalkConfigSchema = channelConfigSchema.extend({
 	appKey: z.string().min(1),
 	appSecret: z.string().min(1),
 	robotCode: z.string().optional(),
+	accounts: z.array(dingtalkAccountConfigSchema).optional(),
+	dmPolicy: permissionPolicySchema.optional(),
+	groupPolicy: permissionPolicySchema.optional(),
 });
 
 const agentConfigSchema = z.object({
@@ -139,9 +152,20 @@ export function getDingTalkConfig(config: GatewayConfig): import("./types").Ding
 
 	try {
 		const parsed = dingtalkConfigSchema.parse(raw);
+		if (parsed.accounts && parsed.accounts.length > 0) {
+			for (const account of parsed.accounts) {
+				if (!account.appKey || !account.appSecret) {
+					logger.warn("Invalid DingTalk account config: missing appKey or appSecret");
+					return null;
+				}
+			}
+		}
 		return parsed as import("./types").DingTalkConfig;
-	} catch {
+	} catch (err) {
 		logger.warn("Invalid DingTalk config, skipping");
+		if (err instanceof z.ZodError) {
+			logger.debug("Validation errors", { issues: err.issues });
+		}
 		return null;
 	}
 }

@@ -12,7 +12,7 @@ import { theme } from "../modes/theme/theme";
 import { loadBundledAgents } from "../task/agents";
 import type { AgentDefinition } from "../task/types";
 
-export type AgentsAction = "unpack";
+export type AgentsAction = "unpack" | "setup";
 
 export interface AgentsCommandArgs {
 	action: AgentsAction;

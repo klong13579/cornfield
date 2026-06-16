@@ -2,11 +2,17 @@
  * Agent Bridge — forwards IM messages to OMP via RPC mode.
  *
  * Architecture:
- *   [DingTalk Message] → AgentBridge.forward() → omp --mode rpc → JSON-line protocol → [Reply]
+ *   [IM Message] → AgentBridge.forward() → omp --mode rpc → JSON-line protocol → [Reply]
  *
  * Spawns `omp --mode rpc` as a long-running child process. Communicates via
  * the RPC JSON-line protocol (stdin/stdout). Handles process lifecycle: spawn,
  * crash detection, and recovery with exponential backoff.
+ *
+ * Key improvement over polling-based approach:
+ * - Event-driven promise latching: each prompt gets a unique `id`,
+ *   and `agent_end` with matching id immediately resolves the pending promise.
+ * - No polling (no 100ms setInterval overhead).
+ * - Collects all `message_end` events with `role: "assistant"` between prompt and end.
  */
 
 import { logger } from "@oh-my-pi/pi-utils";
@@ -30,6 +36,7 @@ export interface AgentBridgeOptions {
 /** Agent event from RPC stream */
 interface AgentEvent {
 	type: string;
+	id?: string;
 	message?: {
 		role?: string;
 		content?: Array<{ type: string; text?: string }>;
@@ -37,14 +44,32 @@ interface AgentEvent {
 	text?: string;
 }
 
+/** Pending prompt state */
+interface PendingPrompt {
+	promptId: string;
+	resolve: (events: AgentEvent[]) => void;
+	reject: (error: Error) => void;
+	events: AgentEvent[];
+	timeout: ReturnType<typeof setTimeout>;
+}
+
 export class AgentBridge {
 	#proc: { pid: number; kill: () => void } | null = null;
 	#stdinWriter?: { write: (data: Uint8Array) => void };
 	#ready = false;
-	#pendingPrompts = new Map<string, { resolve: (events: AgentEvent[]) => void; reject: (error: Error) => void }>();
-	#eventBuffer: string[] = [];
+	/** Map of prompt IDs to pending prompts */
+	#pendingPrompts = new Map<string, PendingPrompt>();
+	/** Currently active prompt ID (for routing session.subscribe events) */
+	#activePromptId: string | undefined;
+	/** Counter for generating unique prompt IDs */
+	#promptIdCounter = 0;
+	/** stderr reader (kept alive to prevent hanging pipe) */
+	#stderrReader?: Promise<void>;
+	/** stdout reader (kept alive to process events) */
+	#stdoutReader?: Promise<void>;
 	#crashCount = 0;
 	#options: AgentBridgeOptions;
+	#reconnectGuard = false;
 
 	constructor(options: AgentBridgeOptions = {}) {
 		this.#options = options;
@@ -61,13 +86,20 @@ export class AgentBridge {
 	stop(): void {
 		this.#crashCount = 0;
 		this.#ready = false;
+		this.#reconnectGuard = false;
+		this.#activePromptId = undefined;
+
 		if (this.#proc) {
 			this.#proc.kill();
 			this.#proc = null;
 		}
 		this.#stdinWriter = undefined;
+		this.#stdoutReader = undefined;
+		this.#stderrReader = undefined;
+
 		const error = new Error("Agent bridge stopped");
 		for (const pending of this.#pendingPrompts.values()) {
+			clearTimeout(pending.timeout);
 			pending.reject(error);
 		}
 		this.#pendingPrompts.clear();
@@ -133,162 +165,246 @@ export class AgentBridge {
 	// ═══════════════════════════════════════════════════════════════
 
 	async #spawnAndWaitReady(): Promise<void> {
-		if (this.#proc) {
-			this.#proc.kill();
-			this.#proc = null;
-		}
-		this.#ready = false;
-		this.#eventBuffer = [];
+		if (this.#reconnectGuard) return;
+		this.#reconnectGuard = true;
 
-		const ompPath = this.#options.ompPath ?? "omp";
-		const args = ["--mode", "rpc"];
-		if (this.#options.model) {
-			args.push("--model", this.#options.model);
-		}
-
-		logger.debug("Spawning agent RPC process", { ompPath, args });
-
-		const proc = Bun.spawn([ompPath, ...args], {
-			stdout: "pipe",
-			stderr: "pipe",
-			stdin: "pipe",
-			cwd: this.#options.cwd ?? process.cwd(),
-			env: { ...process.env },
-		});
-
-		// FileSink for stdin (Bun specific)
-		const stdin = proc.stdin as FileSink;
-		if (!stdin || typeof stdin.write !== 'function') {
-			logger.error("Invalid stdin for agent bridge");
-			throw new Error("Failed to initialize agent bridge stdin");
-		}
-
-		this.#proc = { pid: proc.pid, kill: () => proc.kill() };
-		this.#stdinWriter = {
-			write: (data: Uint8Array) => {
-				stdin.write(data);
-			},
-		};
-		// Process stdout lines asynchronously
-		(async () => {
-			for await (const line of this.#readLines(proc.stdout as ReadableStream<Uint8Array>)) {
-				this.#handleRpcLine(line);
+		try {
+			if (this.#proc) {
+				this.#proc.kill();
+				this.#proc = null;
 			}
-		})();
+			this.#ready = false;
+			this.#activePromptId = undefined;
 
-		// Drain stderr (non-blocking)
-		(async () => {
-			for await (const _line of this.#readLines(proc.stderr as ReadableStream<Uint8Array>)) {
-				// stderr logging only, no action needed
+			// Reject any pending prompts
+			const error = new Error("Agent bridge restarting");
+			for (const pending of this.#pendingPrompts.values()) {
+				clearTimeout(pending.timeout);
+				pending.reject(error);
 			}
-		})();
+			this.#pendingPrompts.clear();
 
-		// Wait for "ready" signal or process exit
-		const { promise, resolve, reject } = Promise.withResolvers<void>();
-		let settled = false;
+			const ompPath = this.#options.ompPath ?? "omp";
+			const args = ["--mode", "rpc"];
+			if (this.#options.model) {
+				args.push("--model", this.#options.model);
+			}
 
-		const timeout = setTimeout(() => {
-			if (settled) return;
-			settled = true;
-			proc.kill();
-			reject(new Error("Agent RPC process timed out waiting for ready signal"));
-		}, 30000);
+			logger.debug("Spawning agent RPC process", { ompPath, args });
 
-		const checkReady = setInterval(() => {
-			if (settled) return;
-			if (this.#ready) {
+			const proc = Bun.spawn([ompPath, ...args], {
+				stdout: "pipe",
+				stderr: "pipe",
+				stdin: "pipe",
+				cwd: this.#options.cwd ?? process.cwd(),
+				env: { ...process.env },
+			});
+
+			const stdin = proc.stdin as import("bun").FileSink;
+			if (!stdin || typeof stdin.write !== "function") {
+				logger.error("Invalid stdin for agent bridge");
+				throw new Error("Failed to initialize agent bridge stdin");
+			}
+
+			this.#proc = { pid: proc.pid, kill: () => proc.kill() };
+			this.#stdinWriter = {
+				write: (data: Uint8Array) => {
+					stdin.write(data);
+				},
+			};
+
+			// Start stdout reader (processes events in real-time, resolving pending prompts)
+			this.#stdoutReader = this.#startStdoutReader(proc.stdout as ReadableStream<Uint8Array>);
+
+			// Drain stderr (non-blocking, prevent pipe from filling)
+			this.#stderrReader = this.#drainStderr(proc.stderr as ReadableStream<Uint8Array>);
+
+			// Wait for "ready" signal or process exit
+			const { promise, resolve, reject } = Promise.withResolvers<void>();
+			let settled = false;
+
+			const timeout = setTimeout(() => {
+				if (settled) return;
+				settled = true;
+				proc.kill();
+				reject(new Error("Agent RPC process timed out waiting for ready signal"));
+			}, 30000);
+
+			// Poll for ready state (stdout reader sets #ready when it sees "ready" event)
+			const checkReady = setInterval(() => {
+				if (settled) return;
+				if (this.#ready) {
+					settled = true;
+					clearTimeout(timeout);
+					clearInterval(checkReady);
+					resolve();
+				}
+			}, 50);
+
+			void proc.exited.then(exitCode => {
+				if (settled) return;
 				settled = true;
 				clearTimeout(timeout);
 				clearInterval(checkReady);
-				resolve();
+				reject(new Error(`Agent RPC process exited with code ${exitCode} before ready`));
+			});
+
+			try {
+				await promise;
+				this.#crashCount = 0;
+				logger.debug("Agent RPC process ready", { pid: proc.pid });
+			} catch (err) {
+				proc.kill();
+				this.#proc = null;
+				this.#stdinWriter = undefined;
+				throw err;
 			}
-		}, 50);
-
-		void proc.exited.then(exitCode => {
-			if (settled) return;
-			settled = true;
-			clearTimeout(timeout);
-			clearInterval(checkReady);
-			reject(new Error(`Agent RPC process exited with code ${exitCode} before ready`));
-		});
-
-		try {
-			await promise;
-			this.#crashCount = 0;
-			logger.debug("Agent RPC process ready", { pid: proc.pid });
-		} catch (err) {
-			proc.kill();
-			this.#proc = null;
-			this.#stdinWriter = undefined;
-			throw err;
+		} finally {
+			this.#reconnectGuard = false;
 		}
 	}
 
-	#handleRpcLine(line: string): void {
+	/**
+	 * Start async stdout reader that processes incoming JSON lines in real-time.
+	 * When it sees an `agent_end` event with a matching prompt ID, it resolves
+	 * the corresponding pending promise immediately.
+	 */
+	async #startStdoutReader(stream: ReadableStream<Uint8Array>): Promise<void> {
+		const reader = stream.getReader();
+		const decoder = new TextDecoder();
+		let buffer = "";
+
 		try {
-			const parsed = JSON.parse(line);
+			while (true) {
+				const { done, value } = await reader.read();
+				if (done) break;
+
+				buffer += decoder.decode(value, { stream: true });
+				let idx = buffer.indexOf("\n");
+				while (idx !== -1) {
+					const line = buffer.slice(0, idx).trim();
+					buffer = buffer.slice(idx + 1);
+
+					if (line) {
+						await this.#processRpcLine(line);
+					}
+
+					idx = buffer.indexOf("\n");
+				}
+			}
+
+			// Process remaining buffer
+			if (buffer.trim()) {
+				await this.#processRpcLine(buffer.trim());
+			}
+		} catch {
+			// Stream error — handle gracefully
+		} finally {
+			reader.releaseLock();
+		}
+	}
+
+	async #drainStderr(stream: ReadableStream<Uint8Array>): Promise<void> {
+		const reader = stream.getReader();
+		try {
+			while (true) {
+				const { done } = await reader.read();
+				if (done) break;
+			}
+		} catch {
+			// ignore stderr errors
+		} finally {
+			reader.releaseLock();
+		}
+	}
+
+	#processRpcLine(line: string): void {
+		try {
+			const parsed = JSON.parse(line) as AgentEvent;
 
 			if (parsed.type === "ready") {
 				this.#ready = true;
 				return;
 			}
 
-			// Collect agent events for pending prompts
-			this.#eventBuffer.push(line);
+			// Handle command responses: "prompt" response means prompt was submitted
+			// These have an id matching the prompt we sent
+			if (parsed.type === "response" && (parsed as any).command && (parsed as any).id) {
+				const cmdId = (parsed as any).id;
+				const command = (parsed as any).command;
+				const cmdSuccess = (parsed as any).success;
+
+				if (command === "prompt" && cmdSuccess) {
+					// Mark the pending prompt as active (events coming via session.subscribe)
+					// Store the reference so we can route subsequent session events to it
+					const pending = this.#pendingPrompts.get(cmdId);
+					if (pending) {
+						pending.events.push(parsed);
+						this.#activePromptId = cmdId;
+					}
+				} else if (!cmdSuccess) {
+					// Command failed — reject the pending promise
+					const pending = this.#pendingPrompts.get(cmdId);
+					if (pending) {
+						clearTimeout(pending.timeout);
+						this.#pendingPrompts.delete(cmdId);
+						pending.reject(new Error(`RPC command failed: ${command}`));
+					}
+				}
+				return;
+			}
+
+			// Handle session events (emitted via session.subscribe, no id field):
+			// These include agent_start, agent_end, message_start, message_end, etc.
+			// They are routed to the currently active prompt.
+			if (!parsed.id && this.#activePromptId) {
+				const pending = this.#pendingPrompts.get(this.#activePromptId);
+				if (pending) {
+					pending.events.push(parsed);
+
+					// agent_end event means the current agent turn is complete
+					if (parsed.type === "agent_end") {
+						clearTimeout(pending.timeout);
+						this.#pendingPrompts.delete(this.#activePromptId);
+						this.#activePromptId = undefined;
+						pending.resolve(pending.events);
+					}
+				}
+			}
 		} catch {
 			// Non-JSON line — ignore
 		}
 	}
 
 	async #promptAndWait(message: string, timeoutMs: number): Promise<AgentEvent[]> {
-		this.#eventBuffer = [];
+		const promptId = `p_${++this.#promptIdCounter}`;
 
 		const { promise, resolve, reject } = Promise.withResolvers<AgentEvent[]>();
-		let settled = false;
 
 		const timeout = setTimeout(() => {
-			if (settled) return;
-			settled = true;
+			this.#pendingPrompts.delete(promptId);
 			reject(new Error(`Agent RPC timed out after ${timeoutMs}ms`));
 		}, timeoutMs);
 
-		// Write prompt to stdin
-		const frame = `${JSON.stringify({ type: "prompt", message })}\n`;
+		const pending: PendingPrompt = {
+			promptId,
+			resolve,
+			reject,
+			events: [],
+			timeout,
+		};
+
+		this.#pendingPrompts.set(promptId, pending);
+
+		// Write prompt to stdin with unique id
+		const frame = `${JSON.stringify({ type: "prompt", id: promptId, message })}\n`;
 		if (this.#stdinWriter) {
 			this.#stdinWriter.write(new TextEncoder().encode(frame));
 		} else {
 			clearTimeout(timeout);
+			this.#pendingPrompts.delete(promptId);
 			reject(new Error("Agent process not running"));
-			return promise;
 		}
-
-		// Check event buffer for agent_end (events processed by #handleRpcLine in real-time)
-		const checkInterval = setInterval(() => {
-			if (settled) {
-				clearInterval(checkInterval);
-				return;
-			}
-			const events: AgentEvent[] = [];
-			let agentEndFound = false;
-			for (const line of this.#eventBuffer) {
-				try {
-					const parsed = JSON.parse(line);
-					events.push(parsed);
-					if (parsed.type === "agent_end") {
-						agentEndFound = true;
-						break;
-					}
-				} catch {
-					// skip invalid JSON
-				}
-			}
-			if (agentEndFound) {
-				settled = true;
-				clearTimeout(timeout);
-				clearInterval(checkInterval);
-				resolve(events);
-			}
-		}, 100);
 
 		return promise;
 	}
@@ -339,27 +455,6 @@ export class AgentBridge {
 	// ═══════════════════════════════════════════════════════════════
 	// Helpers
 	// ═══════════════════════════════════════════════════════════════
-
-	async *#readLines(stream: ReadableStream<Uint8Array>): AsyncGenerator<string> {
-		const reader = stream.getReader();
-		let buffer = "";
-		try {
-			while (true) {
-				const { done, value } = await reader.read();
-				if (done) break;
-				buffer += new TextDecoder().decode(value);
-				let idx = buffer.indexOf("\n");
-				while (idx !== -1) {
-					const line = buffer.slice(0, idx).trim();
-					buffer = buffer.slice(idx + 1);
-					if (line) yield line;
-					idx = buffer.indexOf("\n");
-				}
-			}
-		} catch {
-			if (buffer.trim()) yield buffer.trim();
-		}
-	}
 
 	#extractText(msg: InboundMessage): string {
 		if (msg.content.type === "text") return msg.content.text;

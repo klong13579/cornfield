@@ -26,6 +26,11 @@ export interface InboundMessage {
 	content: MessageContent;
 	timestamp: Date;
 	raw?: unknown;
+	/** Webhook URL from DingTalk for reply — set by DingTalk channel */
+	sessionWebhook?: string;
+	messageId?: string;
+	/** Account identifier for multi-account channel routing */
+	accountId?: string;
 }
 
 export interface OutboundMessage {
@@ -36,6 +41,8 @@ export interface OutboundMessage {
 	mentions?: string[];
 	/** If set, update an existing message instead of creating new one */
 	messageId?: string;
+	/** Webhook URL for DingTalk reply via sessionWebhook HTTP POST */
+	sessionWebhook?: string;
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -138,10 +145,32 @@ export interface GatewayConfig {
 // DingTalk Specific
 // ═══════════════════════════════════════════════════════════════════════
 
+export type PermissionPolicy = "open" | "allowlist" | "closed";
+
+/**
+ * Per-account DingTalk configuration for multi-agent setups.
+ * Each account represents one DingTalk robot with its own credentials.
+ */
+export interface DingtalkAccountConfig {
+	appKey: string;
+	appSecret: string;
+	robotCode?: string;
+	/** Optional agent workspace directory for this specific account */
+	agentDir?: string;
+	/** Optional model override for this account */
+	model?: string;
+}
+
 export interface DingTalkConfig extends ChannelConfig {
 	appKey: string;
 	appSecret: string;
 	robotCode?: string;
+	/** Multi-agent support: array of accounts for multiple robots */
+	accounts?: DingtalkAccountConfig[];
+	/** DM permission policy: open | allowlist | closed */
+	dmPolicy?: PermissionPolicy;
+	/** Group permission policy: open | allowlist | closed */
+	groupPolicy?: PermissionPolicy;
 }
 
 export interface DingTalkRawMessage {

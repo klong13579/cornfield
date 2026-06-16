@@ -13,7 +13,7 @@ import * as path from "node:path";
 import { logger } from "@oh-my-pi/pi-utils";
 import { AgentBridge } from "./agent-bridge";
 import { ChannelRegistry } from "./channels/registry";
-import { getDataDir, type GatewayConfig, getEnabledChannels } from "./config";
+import { getDingTalkConfig, getDataDir, type GatewayConfig, getEnabledChannels } from "./config";
 import { SchedulerEngine } from "./scheduler/engine";
 import { executeScheduledCommand } from "./scheduler/executor";
 import { SchedulerFileStore } from "./scheduler/file-store";
@@ -28,7 +28,10 @@ export class Gateway {
 	#registry = new ChannelRegistry();
 	#store: SQLiteSessionStore | null = null;
 	#running = false;
+	/** Default agent bridge for single-account mode */
 	#bridge: AgentBridge;
+	/** Per-account agent bridges for multi-agent mode */
+	#accountBridges = new Map<string, AgentBridge>();
 	#schedulerEngine?: SchedulerEngine;
 	#schedulerStorage?: SchedulerDbStorage;
 	#schedulerFileStore?: SchedulerFileStore;
@@ -51,17 +54,16 @@ export class Gateway {
 		const dataDir = getDataDir(this.#config);
 		this.#store = new SQLiteSessionStore(`${dataDir}/sessions.db`);
 
-		// Register channels
+		// Register channels (handle multi-account DingTalk)
 		const enabled = getEnabledChannels(this.#config);
 		for (const { id } of enabled) {
 			if (id === "dingtalk") {
-				const { DingTalkChannel } = await import("./channels/dingtalk");
-				this.#registry.register(new DingTalkChannel(), this.#config.channels[id]);
+				await this.#registerDingTalkChannels();
 			}
 			// Future: feishu, wechat, etc.
 		}
 
-		// Start agent bridge (RPC process)
+		// Start default agent bridge (RPC process)
 		try {
 			await this.#bridge.start();
 			logger.debug("Agent bridge started");
@@ -78,13 +80,74 @@ export class Gateway {
 		logger.debug("Gateway started");
 	}
 
+	/**
+	 * Register DingTalk channel(s). In multi-account mode, each account gets
+	 * its own DingTalkChannel instance and account-specific AgentBridge.
+	 */
+	async #registerDingTalkChannels(): Promise<void> {
+		const { DingTalkChannel } = await import("./channels/dingtalk");
+		const rawConfig = this.#config.channels.dingtalk;
+		const dtConfig = getDingTalkConfig(this.#config);
+
+		if (!dtConfig) {
+			logger.warn("DingTalk config invalid, skipping");
+			return;
+		}
+
+		// Multi-account mode
+		if (dtConfig.accounts && dtConfig.accounts.length > 0) {
+			for (const account of dtConfig.accounts) {
+				const accountId = `${account.appKey.slice(0, 8)}`;
+				const channel = new DingTalkChannel();
+				channel.setAccountId(accountId);
+
+				// Create per-account agent bridge with account-specific config
+				const bridge = new AgentBridge({
+					...this.#config.agent,
+					model: account.model ?? this.#config.agent?.model,
+					cwd: account.agentDir,
+				});
+				this.#accountBridges.set(accountId, bridge);
+
+				// Start per-account bridge
+				try {
+					await bridge.start();
+				} catch (err) {
+					logger.error("Failed to start account bridge", { accountId, error: String(err) });
+				}
+
+				this.#registry.register(channel, {
+					...rawConfig,
+					appKey: account.appKey,
+					appSecret: account.appSecret,
+					robotCode: account.robotCode,
+				});
+				logger.debug("Registered DingTalk account channel", { accountId });
+			}
+			return;
+		}
+
+		// Single-account mode (use legacy appKey/appSecret from config)
+		const channel = new DingTalkChannel();
+		this.#registry.register(channel, rawConfig);
+	}
+
 	async stop(): Promise<void> {
 		if (!this.#running) return;
 
 		logger.debug("Stopping gateway...");
 
 		this.#stopScheduler();
+
+		// Stop all per-account bridges
+		for (const bridge of this.#accountBridges.values()) {
+			bridge.stop();
+		}
+		this.#accountBridges.clear();
+
+		// Stop default bridge
 		this.#bridge.stop();
+
 		await this.#registry.disconnectAll();
 		this.#store?.close();
 		this.#running = false;
@@ -96,7 +159,7 @@ export class Gateway {
 	}
 
 	/**
-	 * 直接发送消息给 Agent (用于 CLI 交互模式)
+	 * Direct message for CLI interactive mode.
 	 */
 	async sendDirectMessage(text: string): Promise<string | null> {
 		if (!this.#bridge.isRunning) {
@@ -247,7 +310,6 @@ export class Gateway {
 			channel: msg.channelId,
 			user: msg.userId,
 			group: msg.isGroup ? msg.conversationTitle : "DM",
-			content: msg.content.type === "text" ? msg.content.text.slice(0, 100) : msg.content.type,
 		});
 
 		try {
@@ -281,6 +343,7 @@ export class Gateway {
 				channelId: msg.channelId,
 				conversationId: msg.conversationId,
 				content: { type: "markdown", markdown: "thinking..." },
+				sessionWebhook: msg.sessionWebhook,
 			};
 			await this.#registry.sendMessage(placeholder);
 
@@ -293,6 +356,7 @@ export class Gateway {
 					channelId: msg.channelId,
 					conversationId: msg.conversationId,
 					content: { type: "text", text: response },
+					sessionWebhook: msg.sessionWebhook,
 				};
 				await this.#registry.sendMessage(outbound);
 			}
@@ -309,12 +373,22 @@ export class Gateway {
 	}
 
 	async #forwardToAgent(msg: InboundMessage, session: SessionRecord): Promise<string | null> {
+		// Multi-account routing: if the message has an accountId, route to
+		// the matching per-account bridge
+		if (msg.accountId && this.#accountBridges.has(msg.accountId)) {
+			const bridge = this.#accountBridges.get(msg.accountId)!;
+			if (bridge.isRunning) {
+				return bridge.forward(msg, session);
+			}
+			logger.warn("Account bridge not running, falling back to default", { accountId: msg.accountId });
+		}
+
+		// Fall through to default bridge
 		return this.#bridge.forward(msg, session);
 	}
 
 	#buildSessionPath(channelId: string, conversationId: string): string {
 		const dataDir = getDataDir(this.#config);
-		// Sanitize conversationId for filesystem safety
 		const safeId = conversationId.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64);
 		return `${dataDir}/sessions/${channelId}/${safeId}.jsonl`;
 	}

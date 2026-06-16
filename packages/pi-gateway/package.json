@@ -20,11 +20,13 @@
     "@oh-my-pi/pi-utils": "catalog:",
     "@sinclair/typebox": "catalog:",
     "croner": "10.0.1",
+    "dingtalk-stream": "2.1.6-beta.1",
     "zod": "catalog:"
   },
   "devDependencies": {
-    "@types/bun": "catalog:",
     "@biomejs/biome": "catalog:",
+    "@dingtalk-real-ai/dingtalk-connector": "0.8.23",
+    "@types/bun": "catalog:",
     "@typescript/native-preview": "catalog:",
     "typescript": "catalog:"
   },

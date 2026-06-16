@@ -69,6 +69,13 @@ async function cmdStart(_configPath?: string): Promise<void> {
 
 	await gateway.start();
 
+	// Non-interactive daemon mode (stdin not a TTY)
+	if (!process.stdin.isTTY) {
+		console.log("\n✅ Gateway started in daemon mode");
+		await new Promise(() => {}); // hang forever until SIGTERM
+		return;
+	}
+
 	// CLI 交互模式
 	console.log("\n✅ Gateway 已启动！");
 	console.log("📝 输入消息直接和 Agent 对话，输入 exit 退出");
@@ -114,6 +121,7 @@ async function cmdStart(_configPath?: string): Promise<void> {
 		await gateway.stop();
 		process.exit(0);
 	});
+}
 
 async function cmdStatus(_configPath?: string): Promise<void> {
 	const config = await loadConfig(_configPath);
@@ -476,6 +484,97 @@ async function cmdServiceStatus(): Promise<void> {
 	if (status.pid) console.log(`  PID: ${status.pid}`);
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+// Install Commands (QR Device Auth for DingTalk)
+// ═══════════════════════════════════════════════════════════════════════
+
+async function cmdInstall(args: string[]): Promise<void> {
+	const configIdx = args.indexOf("--config");
+	const configPath = configIdx >= 0 ? args[configIdx + 1] : undefined;
+
+	console.log(`
+钉钉机器人安装向导
+================
+
+此向导将通过设备码流程配置机器人凭证。
+
+步骤：
+1. 在 https://open-dev.dingtalk.com 创建应用并获取 AppKey/AppSecret
+2. 在应用中添加机器人能力（Stream 模式）
+3. 在此输入凭证信息
+
+按回车跳过此步骤，后续手动编辑配置文件。
+`);
+
+	// Try to load existing config
+	const { loadConfig, getConfigPath } = await import("./config");
+	const cfgPath = configPath ?? getConfigPath();
+	const existing = await loadConfig(cfgPath);
+
+	console.log(`配置文件路径: ${cfgPath}`);
+
+	const currentAppKey = (existing.channels.dingtalk as Record<string, unknown>)?.appKey as string | undefined;
+	const currentAppSecret = (existing.channels.dingtalk as Record<string, unknown>)?.appSecret as string | undefined;
+
+	console.log(`
+当前配置: ${currentAppKey ? "AppKey 已设置" : "未设置"}`);
+	console.log(`          ${currentAppSecret ? "AppSecret 已设置" : "未设置"}`);
+
+	// Interactive input (when TTY)
+	if (!process.stdin.isTTY) {
+		console.log("非交互模式，跳过。请手动编辑配置文件。");
+		return;
+	}
+
+	const readline = await import("node:readline");
+	const rl = readline.createInterface({
+		input: process.stdin,
+		output: process.stdout,
+	});
+
+	const ask = (question: string): Promise<string> =>
+		new Promise(resolve => rl.question(question, resolve));
+
+	console.log("\n--- 钉钉机器人凭证配置 ---");
+
+	const appKey =
+		(await ask(`AppKey [${currentAppKey ?? ""}]: `)).trim() || currentAppKey || "";
+	const appSecret =
+		(await ask(`AppSecret [${currentAppSecret ? "已设置" : ""}]: `)).trim() || currentAppSecret || "";
+	const robotCode =
+		(await ask(`RobotCode (可选) [${((existing.channels.dingtalk as Record<string, unknown>)?.robotCode as string) ?? ""}]: `)).trim() ||
+		((existing.channels.dingtalk as Record<string, unknown>)?.robotCode as string) ||
+		"";
+
+	rl.close();
+
+	if (!appKey || !appSecret) {
+		console.log("\n⚠️ 未提供有效凭证，跳过写入。");
+		return;
+	}
+
+	// Write config
+	const config = {
+		...existing,
+		channels: {
+			...existing.channels,
+			dingtalk: {
+				enabled: true,
+				appKey,
+				appSecret,
+				...(robotCode ? { robotCode } : {}),
+			},
+		},
+	};
+
+	await Bun.write(cfgPath, JSON.stringify(config, null, 2));
+	console.log(`\n✅ 配置已写入 ${cfgPath}`);
+	console.log(`
+下一步：运行以下命令启动网关
+  pi-gateway start --config ${cfgPath}
+`);
+}
+
 async function cmdService(subcommand?: string): Promise<void> {
 	switch (subcommand) {
 		case "install":
@@ -509,31 +608,35 @@ Service management commands:
 // Main
 // ═══════════════════════════════════════════════════════════════════════
 
-const parsedArgs = parseArgs();
-const command = parsedArgs.command;
-const subcommand = parsedArgs.subcommand;
-const args = parsedArgs.args;
-const gatewayConfigPath = parsedArgs.config;
-switch (command) {
-	case "start":
-		await cmdStart(gatewayConfigPath);
-		break;
-	case "status":
-		await cmdStatus(gatewayConfigPath);
-		break;
-	case "config":
-		await cmdConfig(gatewayConfigPath);
-		break;
-	case "cron":
-		await cmdCron([subcommand ?? "help", ...args]);
-		break;
-	case "service":
-		await cmdService(subcommand);
-		break;
-	case "help":
-	case "--help":
-	case "-h":
-		console.log(`
+void (async () => {
+	const parsedArgs = parseArgs();
+	const command = parsedArgs.command;
+	const subcommand = parsedArgs.subcommand;
+	const args = parsedArgs.args;
+	const gatewayConfigPath = parsedArgs.config;
+	switch (command) {
+		case "start":
+			await cmdStart(gatewayConfigPath);
+			break;
+		case "status":
+			await cmdStatus(gatewayConfigPath);
+			break;
+		case "config":
+			await cmdConfig(gatewayConfigPath);
+			break;
+		case "cron":
+			await cmdCron([subcommand ?? "help", ...args]);
+			break;
+		case "install":
+			await cmdInstall([subcommand ?? "", ...args]);
+			break;
+		case "service":
+			await cmdService(subcommand);
+			break;
+		case "help":
+		case "--help":
+		case "-h":
+			console.log(`
 pi-gateway — Unified Gateway for Oh My Pi
 
 Usage:
@@ -543,7 +646,7 @@ Usage:
   pi-gateway cron create <schedule> <cmd...>       Create a scheduled task
   pi-gateway cron list [--json]                    List all tasks
   pi-gateway cron pause <name>                     Pause a task
-  pi-gateway cron resume <name>                    Resume a task
+  pi-gateway cron resume <name>                   Resume a task
   pi-gateway cron run <name>                       Trigger a task now
   pi-gateway cron remove <name>                    Delete a task
   pi-gateway cron status                           Show scheduler status
@@ -553,14 +656,20 @@ Usage:
   pi-gateway service uninstall                     Remove system service
   pi-gateway service start                         Start system service
   pi-gateway service stop                          Stop system service
+  pi-gateway install [--config <path>]              Configure DingTalk credentials interactively
+  pi-gateway service install                       Install as system service
+  pi-gateway service uninstall                     Remove system service
+  pi-gateway service start                         Start system service
+  pi-gateway service stop                          Stop system service
   pi-gateway service status                        Show service status
   pi-gateway help                                  Show this help
 
-Config file: ~/.pi/gateway.json
+Config file: ~/.omp/gateway.json
 `);
-		break;
-	default:
-		console.error(`Unknown command: ${command}`);
-		console.log("Run 'pi-gateway help' for usage");
-		process.exit(1);
-}
+			break;
+		default:
+			console.error(`Unknown command: ${command}`);
+			console.log("Run 'pi-gateway help' for usage");
+			process.exit(1);
+	}
+})();
