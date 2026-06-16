@@ -598,10 +598,15 @@ Cron management commands:
 		);
 
 		switch (sub) {
-			case "install":
-				await installService(import.meta.path);
+			case "install": {
+				// Resolve pi-gateway CLI path from the package location
+				const path = require("node:path");
+				const piGatewayPkg = require.resolve("@oh-my-pi/pi-gateway/package.json");
+				const cliPath = path.join(path.dirname(piGatewayPkg), "src", "cli.ts");
+				await installService(cliPath);
 				console.log("Service installed. Run 'omp gateway service start' to begin.");
 				break;
+			}
 			case "uninstall":
 				await uninstallService();
 				console.log("Service uninstalled.");
