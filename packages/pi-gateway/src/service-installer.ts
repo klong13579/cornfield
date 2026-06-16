@@ -97,7 +97,7 @@ function generateLaunchdPlist(cliPath: string, logPath: string): string {
 	<key>EnvironmentVariables</key>
 	<dict>
 		<key>PATH</key>
-		<string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+		<string>${process.env.HOME}/.bun/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
 	</dict>
 </dict>
 </plist>`;
@@ -116,7 +116,7 @@ Restart=on-failure
 RestartSec=5
 StandardOutput=append:${logPath}
 StandardError=append:${logPath}
-Environment="PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+Environment="PATH=${process.env.HOME}/.bun/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
 [Install]
 WantedBy=default.target`;
@@ -157,9 +157,11 @@ export async function installService(cliPath: string): Promise<void> {
 	// Write config file
 	await Bun.write(paths.configPath, config);
 
-	// Load/enable service
+	// Load/enable service (unload first to refresh cached launchd definition)
 	if (platform === "darwin") {
-		await $`launchctl load -w ${paths.configPath}`.quiet().nothrow();
+		const uid = process.getuid?.() ?? 501;
+		await $`launchctl bootout gui/${uid}/${SERVICE_NAME}`.quiet().nothrow();
+		await $`launchctl bootstrap gui/${uid} ${paths.configPath}`.quiet().nothrow();
 	} else {
 		await $`systemctl --user daemon-reload`.quiet().nothrow();
 		await $`systemctl --user enable ${SERVICE_NAME}.service`.quiet().nothrow();
@@ -182,6 +184,12 @@ export async function uninstallService(): Promise<void> {
 		await stopService();
 	} catch {
 		// ignore stop errors
+	}
+
+	// Unload from launchd/systemd before removing config
+	if (platform === "darwin") {
+		const uid = process.getuid?.() ?? 501;
+		await $`launchctl bootout gui/${uid}/${SERVICE_NAME}`.quiet().nothrow();
 	}
 
 	// Remove config
@@ -207,8 +215,11 @@ export async function startService(): Promise<void> {
 	const platform = detectPlatform();
 
 	if (platform === "darwin") {
-		const result = await $`launchctl start ${SERVICE_NAME}`.quiet().nothrow();
-		if (result.exitCode !== 0) {
+		const paths = getServicePaths();
+		const uid = process.getuid?.() ?? 501;
+		// bootstrap loads + starts the service from plist
+		const result = await $`launchctl bootstrap gui/${uid} ${paths.configPath}`.quiet().nothrow();
+		if (result.exitCode !== 0 && !result.stderr.toString().includes("already bootstrapped")) {
 			throw new Error(`Failed to start service: ${result.stderr}`);
 		}
 	} else {
@@ -228,7 +239,9 @@ export async function stopService(): Promise<void> {
 	const platform = detectPlatform();
 
 	if (platform === "darwin") {
-		await $`launchctl stop ${SERVICE_NAME}`.quiet().nothrow();
+		const uid = process.getuid?.() ?? 501;
+		// bootout unloads + stops, no auto-restart
+		await $`launchctl bootout gui/${uid}/${SERVICE_NAME}`.quiet().nothrow();
 	} else {
 		await $`systemctl --user stop ${SERVICE_NAME}.service`.quiet().nothrow();
 	}
@@ -259,15 +272,11 @@ export async function getServiceStatus(): Promise<ServiceStatus> {
 	if (platform === "darwin") {
 		const result = await $`launchctl list ${SERVICE_NAME}`.quiet().nothrow();
 		if (result.exitCode === 0) {
-			const lines = result.stdout.toString().split("\n");
-			for (const line of lines) {
-				if (line.includes("PID")) {
-					const match = line.match(/"PID"\s*=\s*(\d+)/);
-					if (match) {
-						pid = Number.parseInt(match[1], 10);
-						running = pid > 0;
-					}
-				}
+			// Output is OpenStep-style plist: "PID" = 18821;
+			const match = result.stdout.toString().match(/"PID"\s*=\s*(\d+);/);
+			if (match) {
+				pid = Number.parseInt(match[1], 10);
+				running = pid > 0;
 			}
 		}
 	} else {
