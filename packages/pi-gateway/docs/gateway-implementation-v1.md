@@ -44,7 +44,7 @@
               ├── host_tool_call 自动拒绝
               └── formatResponse: 剥 think 标签 + 截断
               ↓
-        Agent (omp --mode rpc --model <account.model>)
+        Agent (omp --mode rpc)
               ↓
         模型响应 → DingTalk 回复
 ```
@@ -53,7 +53,7 @@
 
 - 钉钉 Stream 连接成功（opencode 机器人 appKey `dingnubwjpndghf8sox8`）
 - 心跳 PING/PONG（10s ping / 20s timeout）
-- 多账号模式：accounts map 配置，per-account bridge + per-account model
+- 多账号模式：accounts map 配置，per-account bridge
 - RPC 集成（AgentBridge → Agent(omp --mode rpc) → 模型响应，含 narwal-plan/minimax-m3）
 - 凭证存储：从 agent.db 读取 API key，不依赖 shell 环境变量
 - Extension/UI 请求自动处理：不阻塞 agent 响应
@@ -91,6 +91,7 @@
 | 速率限制 | 中 | Phase 9 | `session-manager.ts` | §11.6 | ❌ 待实施 |
 | 聚合指标 | 中 | Phase 9 | 新建 `metrics.ts` | §12 | ❌ 待实施 |
 | 健康检查 | 低 | Phase 10 | 新建 `health.ts` | §11.7 | ❌ 待实施 |
+| **配置热加载** (V2) | 中 | V2 | `gateway.ts` | 设计 §3.4 | ⏸️ V2 计划 |
 
 ### 2.2 详细分析
 
@@ -107,7 +108,7 @@
 ```typescript
 // agent-bridge.ts
 const agentDir = opts.cwd ?? defaultAgentDir(opts.accountId);
-const proc = spawn(["omp", "--mode", "rpc", "--model", opts.model], {
+const proc = spawn(["omp", "--mode", "rpc"], {
   cwd: agentDir,
   env: { ...process.env, PI_LOG_LEVEL: "info" },
   stdio: ["pipe", "pipe", "pipe"],
@@ -120,24 +121,54 @@ const proc = spawn(["omp", "--mode", "rpc", "--model", opts.model], {
 
 #### 2.2.2 agentDir 自动创建 skeleton (中)
 
-**目标：** 设计 §6.7 要求 agentDir 不存在时自动创建完整 skeleton。
+**目标：** 设计 §6.1b 要求 agentDir 不存在时自动创建完整 skeleton。
+
+**创建结构：**
+
+```
+<agentDir>/
+├── mission.md              ← 默认人格模板（占位文本，提示用户编辑）
+├── .agent/                 ← omp 探索系统配置目录
+│   ├── skills/             ← 空
+│   ├── prompts/            ← 空
+│   └── rules/              ← 空
+├── sessions/               ← 对话记录目录（空）
+├── cron/                   ← 定时任务
+│   ├── tasks/              ← 空
+│   └── logs/               ← 空
+├── knowledge/              ← 静态知识库（空）
+└── .gitignore              ← 默认忽略规则
+```
 
 **修复：**
 ```typescript
 // gateway.ts
 async function ensureAgentDir(agentDir: string, accountId: string): Promise<void> {
   if (await exists(agentDir)) return;
+  
   await fs.mkdir(join(agentDir, "sessions"), { recursive: true });
   await fs.mkdir(join(agentDir, "knowledge"), { recursive: true });
+  await fs.mkdir(join(agentDir, "cron", "tasks"), { recursive: true });
+  await fs.mkdir(join(agentDir, "cron", "logs"), { recursive: true });
+  await fs.mkdir(join(agentDir, ".agent", "skills"), { recursive: true });
+  await fs.mkdir(join(agentDir, ".agent", "prompts"), { recursive: true });
+  await fs.mkdir(join(agentDir, ".agent", "rules"), { recursive: true });
+  
   await Bun.write(
     join(agentDir, "mission.md"),
     `# ${accountId} 助手\n\n## 身份\n你是一个通用助手，尚未定义具体角色。\n\n⚠️ 请编辑此文件定义机器人的角色、能力、行为准则。\n`,
   );
-  // .omp/ 目录由 omp 首次启动时自动创建
+  
+  await Bun.write(
+    join(agentDir, ".gitignore"),
+    `sessions/\ncron/logs/\nevolution/\n.omp/\n*.log\n`,
+  );
+  
+  // .omp/ 目录由 omp 首次启动时自行生成
 }
 ```
 
-**验收：** 新账号首次启动后，`~/.omp/agents/<id>/` 完整存在含 mission.md 占位；`cat mission.md` 能看到警告提示。
+**验收：** 新账号首次启动后，`~/.omp/agents/<id>/` 完整存在，包含 mission.md 占位、空目录结构（`.agent/`、`sessions/`、`cron/`、`knowledge/`）和 `.gitignore`；`ls -la` 确认目录结构符合设计 §6.1b。
 
 ---
 
@@ -619,7 +650,6 @@ class AgentBridge {
 
 interface AgentBridgeOptions {
   ompPath?: string;
-  model?: string;
   cwd?: string;          // 对应 account.agentDir
   timeoutMs?: number;    // 默认 120000
   maxCrashRetries?: number;
@@ -783,7 +813,7 @@ Week 3: Phase 9 + Phase 10 测试（可观测 + 测试）
 | **群聊会话粒度配置** (`groupSessionScope`) | 群聊整个群一个 session 已足够。 |
 | **per-group 配置覆盖** | accounts 级别已足够；per-group 是优化不是必需。YAGNI。 |
 | **pairing DM 策略** | 仅开放给公司内使用，allowlist 足够；pairing 是公开 chatbot 场景的方案。 |
-| **配置 reload** | 重启即可，reload 需热替换 bridges/channels/queues 复杂。 |
+| **配置 reload** | 重启即可，reload 需热替换 bridges/channels/queues 复杂。详见设计 §3.4 (V2 设计中)。 |
 | **短作业优先调度 (SJF)** | 预估耗时不可靠（短消息可能触发复杂工具调用），用户体验提升有限。 |
 | **Agent 独立部署** (V2) | V1 中 Agent 由 Gateway 作为子进程拥有。V2 需加 `agentUrl` 配置 + AgentBridge 网络连接模式，独立跨机部署。 |
 

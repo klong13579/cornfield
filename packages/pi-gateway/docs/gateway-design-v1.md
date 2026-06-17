@@ -215,6 +215,79 @@ Gateway 作 client 连接: omrpc://host:port
 
 **V1 → V2 迁移路径:**不改 AgentBridge 代码，只改 `accounts.<id>.agentUrl` 字段。V2 模式下 AgentBridge 跳过 spawn，改用网络连接。
 
+### 3.4 配置热加载 (V2)
+
+**V1 状态:** gateway 在 `start()` 时一次性读取 `gateway.json`，运行中不监听配置变化。要修改账号、模型、agentDir 必须 `stop` + 改配置 + `start`。这在生产环境会造成短期不可用。
+
+**V2 目标:** 支持运行时热加载，新增/删除/修改账号不需要重启。
+
+**触发方式(三选一或组合):**
+
+| 触发器 | 用途 |
+|---|---|
+|`omp gateway reload` 命令 | 手动触发，运维控制 |
+| SIGHUP 信号 | Unix 传统：kill -HUP `<pid>` 触发 reload |
+| `gateway.json` 文件 mtime 监控 | 自动响应本地编辑 |
+
+**Diff 检测:**
+
+reload 启动后，gateway 对比新旧配置，计算出三个集合：
+
+```
+added:   new accounts — {appKey 在旧配置中不存在, 现在有}
+removed: old accounts — {appKey 在旧配置中还有, 现在没了}
+changed: { appKey, oldConfig → newConfig } — {model 变化 / agentDir 变化 / 其他字段}
+```
+
+**对每个集合的动作:**
+
+| 集合 | 动作 |
+|---|---|
+|`added`| 为每个新 account 创建一个新 `AgentBridge`，启动后连接到 DingTalk |
+|`removed`| 停掉对应 `AgentBridge`，断开连接，清理 PID |
+|`changed`| 停掉旧 bridge，启动新 bridge（模拟删除+添加）|
+
+**In-flight 消息处理:**
+
+修改 model 或 agentDir 会重启 bridge。重启用原子性 exchange (旧 bridge 处理完手头消息后停掉，不接受新消息)。在 in-flight 期间发到该 account 的新消息:放进内存 queue 等新 bridge 起来后再调度。
+
+**原子性策略:**
+
+```
+reload() {
+    1. Snapshot new config
+    2. Compute diff (added/removed/changed)
+    3. For each account in 'removed' or 'changed':
+        a. Mark bridge as 'draining'
+        b. Wait for in-flight prompt to complete (max 60s)
+        c. Kill bridge process
+    4. For each account in 'added' or 'changed':
+        a. Spawn new bridge
+        b. Wait for ready signal
+        c. Mark as 'active'
+    5. Update internal maps
+    6. Reload complete
+}
+```
+
+**风险与限制:**
+
+| 风险 | 处理 |
+|---|---|
+|in-flight 消息长时间不返回 | 60s 超时后杀掉 bridge，记录 in-flight 为 lost（用户需重发）|
+|配置 reload 本身耗时 | reload 是同步的，期间不收新消息（V2.1 改进：reload 与 in-flight 并行）|
+|agentDir 已删除但账号还在 | 报错不添加，保留其他账号的 reload |
+|文件 mtime 监控抖动 | debounce 1s，写入完成后再处理 |
+|多实例同时 reload | 使用文件锁 `/tmp/gateway.reload.lock`，串行化 |
+
+**V2 范围外（暂不实施）:**
+
+- 在线修改 `model` 参数（不重启 bridge）— 需要 RPC 层支持，复杂度高
+- 在线修改 `agentDir` — agent 已加载的 skill/profile 无法热更新
+- 在线修改 `permission` 策略 (allowUsers 等) — 实施简单，但需要 V1 SessionManager 上线
+
+**迁移路径:** V1.5 阶段先实现命令 + SIGHUP 触发，V2 加文件监控。
+
 ---
 
 ## 4. 核心映射关系
@@ -292,14 +365,12 @@ Spawn 关系：
         "ops": {
           "appKey": "dingbot_ops",
           "appSecret": "sec_ops",
-          "model": "gpt-4.1-mini",
           "agentDir": "/data/robots/ops",
           "timeoutMs": 60000
         },
         "hr": {
           "appKey": "dingbot_hr",
           "appSecret": "$DINGTALK_HR_SECRET",
-          "model": "deepseek-v4-flash",
           "agentDir": "/data/robots/hr"
         }
       }
@@ -310,7 +381,6 @@ Spawn 关系：
   // 单账号时使用。多账号时作为 accounts 中各 account 的默认值
   "agent": {
     "ompPath": "omp",
-    "model": "gpt-4.1-mini",
     "timeoutMs": 120000
   },
 
@@ -332,41 +402,29 @@ Spawn 关系：
 // → 启动一个 Agent，用 omp 自身默认模型
 
 
-// ── 场景 B: 一个机器人，指定模型 ──
-{ "channels": { "dingtalk": { "enabled": true,
-    "appKey": "dingxxx", "appSecret": "secxxx"
-  }},
-  "agent": { "model": "gpt-4.1-mini" }
-}
-// → 启动一个 Agent，用 gpt-4.1-mini
-
-
-// ── 场景 C: 三个机器人，不同模型，不同个性 ──
+// ── 场景 B: 三个机器人，不同个性 ──
 { "channels": { "dingtalk": { "enabled": true,
     "accounts": {
       "ops": {
         "appKey": "dingbot_ops",
         "appSecret": "sec_ops",
-        "model": "gpt-4.1-mini",
         "agentDir": "/data/robots/ops"
         // → 读取 /data/robots/ops/mission.md  → "你是运维助手"
       },
       "hr": {
         "appKey": "dingbot_hr",
         "appSecret": "sec_hr",
-        "model": "deepseek-v4-flash",
         "agentDir": "/data/robots/hr"
       },
       "dev": {
         "appKey": "dingbot_dev",
         "appSecret": "sec_dev",
-        "model": "gpt-5.2-codex",
         "agentDir": "/data/robots/dev"
       }
     }
   }}
 }
-// → 启动三个 Agent，各自 cwd 不同，模型不同，个性不同
+// → 启动三个 Agent，各自 cwd 不同，个性不同
 ```
 
 ### 5.3 配置加载规则
@@ -377,7 +435,6 @@ Spawn 关系：
   有 accounts（非空）？
   ├── 是：多账号模式
   │    每个 account → 创建一个 AgentBridge
-  │    bridge.model  = account.model ?? agent.model
   │    bridge.cwd    = account.agentDir ?? process.cwd()
   │    bridge.secret = 支持 $ENV_VAR 环境变量引用
   │    忽略顶层的 appKey/appSecret
@@ -522,6 +579,47 @@ agentDir 文件系统的设计遵循四个原则:
 
 -
 
+### 6.1b agentDir 自动创建
+
+**行为：** Gateway 启动时，若 account 的 agentDir 不存在，自动创建完整 skeleton。
+
+**创建内容：**
+
+```
+<agentDir>/
+├── mission.md              ← 默认人格模板（占位文本，提示用户编辑）
+├── .agent/                 ← omp 探索系统配置目录
+│   ├── skills/             ← 技能定义（空目录）
+│   ├── prompts/            ← prompt 模板（空目录）
+│   └── rules/              ← 行为规则（空目录）
+├── sessions/               ← 对话记录目录
+├── cron/                   ← 定时任务
+│   ├── tasks/              ← 任务定义（空目录）
+│   └── logs/               ← 运行日志（空目录）
+├── knowledge/              ← 静态知识库（空目录）
+└── .gitignore              ← Git 忽略规则
+```
+
+**规则：**
+
+1. 仅在 agentDir **完全不存在**时触发。设置过 mission.md 的目录不做任何修改。
+2. `mission.md` 写入占位模板，内容为 `{accountId} 助手` 的通用身份定义，明确标注需用户编辑。
+3. 所有目录（`.agent/`、`.agent/skills/`、`.agent/prompts/`、`.agent/rules/`、`sessions/`、`cron/`、`cron/tasks/`、`cron/logs/`、`knowledge/`）创建为空目录。
+4. `.omp/` 目录（含默认 `config.yml`）不在 skeleton 中创建——由 omp 进程首次启动时自行生成。
+5. 创建过程中任何 I/O 失败视为该 account 启动失败，错误信息明确指示路径和故障原因。
+6. 已存在的目录不走创建路径——不影响已有配置。
+7. `.gitignore` 写入默认内容，忽略运行时数据和敏感文件：
+
+   ```gitignore
+   sessions/
+   cron/logs/
+   evolution/
+   .omp/
+   *.log
+   ```
+
+**设计理由：** 降低新账号的配置门槛。用户只需在 gateway.json 声明 `appKey/appSecret`，agentDir 自动就绪。mission.md 占位文件保证 omp 启动时不报错，同时引导用户定义角色。
+
 ### 6.2 mission.md
 
 **核心文件，定义了机器人的"人格"。** omp 在启动时读取此文件作为系统提示词。
@@ -574,7 +672,6 @@ providers:
   secrets:
     enabled: false
 
-# 此机器人的默认模型（可在 gateway.json 的 account.model 覆盖）
 # 模型名来自 omp --list-models 的输出
 # 不写则使用 omp 全局默认
 ```
