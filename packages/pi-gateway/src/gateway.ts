@@ -11,7 +11,7 @@
 
 import * as path from "node:path";
 import * as fs from "node:fs/promises";
-import { logger } from "@oh-my-pi/pi-utils";
+import { isEnoent, logger } from "@oh-my-pi/pi-utils";
 import { AgentBridge } from "./agent-bridge";
 import { ChannelRegistry } from "./channels/registry";
 import { getDingTalkConfig, getDataDir, type GatewayConfig, getEnabledChannels } from "./config";
@@ -23,7 +23,7 @@ import type { ScheduledTask } from "./scheduler/types";
 import { DEFAULT_SCHEDULER_CONFIG, getSchedulerDbPath, getSchedulerDir } from "./scheduler/types";
 import { SQLiteSessionStore } from "./session-store";
 import { SessionManager } from "./session-manager";
-import { ensureAgentDir, resolveAgentDir } from "./setup";
+import { buildAgentSessionPath, ensureAgentDir, resolveAgentDir } from "./setup";
 import type { InboundMessage, OutboundMessage } from "./types";
 
 const PID_FILE = "gateway.pid";
@@ -183,6 +183,7 @@ export class Gateway {
 	#bridge: AgentBridge;
 	/** Per-account agent bridges for multi-agent mode */
 	#accountBridges = new Map<string, AgentBridge>();
+	#accountAgentDirs = new Map<string, string>();
 	#sessionManager?: SessionManager;
 	#schedulerEngine?: SchedulerEngine;
 	#schedulerStorage?: SchedulerDbStorage;
@@ -281,6 +282,7 @@ export class Gateway {
 				channel.setAccountId(accountId);
 
 				const agentDir = resolveAgentDir(accountId, account.agentDir);
+				this.#accountAgentDirs.set(accountId, agentDir);
 				try {
 					await ensureAgentDir(agentDir);
 				} catch (err) {
@@ -342,6 +344,7 @@ export class Gateway {
 		// Stop default bridge
 		this.#bridge.stop();
 
+		this.#accountAgentDirs.clear();
 		this.#sessionManager = undefined;
 		this.#store?.close();
 		this.#running = false;
@@ -529,10 +532,15 @@ export class Gateway {
 					ompSessionPath: sessionPath,
 					status: "active",
 				});
-			} else if (session && !session.ompSessionPath && this.#store) {
+			} else if (session && this.#store) {
 				const sessionPath = this.#buildSessionPath(msg.channelId, accountId, msg.conversationId);
-				await this.#store.updateSession(session.id, { ompSessionPath: sessionPath, updatedAt: now });
-				session = { ...session, ompSessionPath: sessionPath };
+				if (session.ompSessionPath !== sessionPath) {
+					if (session.ompSessionPath) {
+						await this.#migrateSessionPath(session.ompSessionPath, sessionPath);
+					}
+					await this.#store.updateSession(session.id, { ompSessionPath: sessionPath, updatedAt: now });
+					session = { ...session, ompSessionPath: sessionPath };
+				}
 			}
 
 			if (!session) {
@@ -578,8 +586,27 @@ export class Gateway {
 
 
 	#buildSessionPath(channelId: string, accountId: string, conversationId: string): string {
-		const dataDir = getDataDir(this.#config);
 		const safeId = conversationId.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64);
-		return `${dataDir}/sessions/${channelId}/${accountId}/${safeId}.jsonl`;
+		const agentDir = this.#accountAgentDirs.get(accountId);
+		if (agentDir) {
+			return buildAgentSessionPath(agentDir, conversationId);
+		}
+		const dataDir = getDataDir(this.#config);
+		return path.join(dataDir, "sessions", channelId, accountId, `${safeId}.jsonl`);
+	}
+
+	async #migrateSessionPath(fromPath: string, toPath: string): Promise<void> {
+		if (fromPath === toPath) return;
+		try {
+			await fs.mkdir(path.dirname(toPath), { recursive: true });
+			await fs.rename(fromPath, toPath);
+			logger.debug("Migrated gateway session path", { fromPath, toPath });
+		} catch (err) {
+			if (isEnoent(err)) {
+				logger.debug("Session path migration skipped because old path is missing", { fromPath, toPath });
+				return;
+			}
+			throw err;
+		}
 	}
 }

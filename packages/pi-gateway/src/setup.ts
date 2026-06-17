@@ -283,3 +283,8 @@ function getDefaultAgentDir(accountId: string): string {
 export function resolveAgentDir(accountId: string, explicitDir?: string): string {
 	return explicitDir || getDefaultAgentDir(accountId);
 }
+
+export function buildAgentSessionPath(agentDir: string, conversationId: string): string {
+	const safeId = conversationId.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64);
+	return path.join(agentDir, "sessions", `${safeId}.jsonl`);
+}

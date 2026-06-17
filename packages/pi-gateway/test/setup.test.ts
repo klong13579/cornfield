@@ -2,7 +2,7 @@ import { describe, expect, test, beforeEach, afterEach } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import * as os from "node:os";
-import { ensureAgentDir, resolveAgentDir } from "../src/setup";
+import { buildAgentSessionPath, ensureAgentDir, resolveAgentDir } from "../src/setup";
 
 const REQUIRED_FILES = [
 	"mission.md",
@@ -167,5 +167,10 @@ describe("setup", () => {
 		const explicit = "/tmp/explicit-agent-dir";
 		const result = resolveAgentDir("test-account", explicit);
 		expect(result).toBe(explicit);
+	});
+
+	test("buildAgentSessionPath stores sessions under agentDir sessions", () => {
+		const result = buildAgentSessionPath("/tmp/agent", "cid:with/slashes");
+		expect(result).toBe(path.join("/tmp/agent", "sessions", "cid_with_slashes.jsonl"));
 	});
 });
