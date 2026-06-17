@@ -57,11 +57,11 @@ style:
 	},
 	{
 		relPath: ".gitignore",
-		content: `# omp agent directory - 运行时数据
-sessions/
+		content: `sessions/
 cron/logs/
-knowledge/
-.DS_Store
+evolution/
+.omp/
+*.log
 `,
 	},
 	{
@@ -100,27 +100,6 @@ knowledge/
 - 简洁、准确、有依据
 - 不确定时主动询问
 - 避免重复发送“让我查一下”
-`,
-	},
-	{
-		relPath: ".omp/config.yml",
-		content: `# omp 配置
-# omp --mode rpc 启动时读取本文件 (在 agentDir 下运行)
-# 允许为该 agent 覆盖全局配置：模型、主题、工具等
-
-modelRoles:
-  default: narwal-plan/minimax-m3   # 该 agent 使用的默认模型
-  smol: narwal-plan/minimax-m3       # 轻量任务（文本处理、简单问题）
-  slow: narwal-plan/glm-5.2          # 复杂任务（代码生成、深入分析）
-
-theme: dark
-`,
-	},
-	{
-		relPath: ".omp/prompt-includes.json",
-		content: `{
-  "files": []
-}
 `,
 	},
 	{
@@ -187,12 +166,9 @@ const AGENT_SKELETON_DIRS = [
 	".agent/skills",
 	".agent/prompts",
 	".agent/rules",
-	".omp",
 	"sessions",
 	"cron/tasks",
 	"cron/logs",
-	"scripts",
-	"external",
 	"knowledge/handbook",
 ];
 
@@ -221,15 +197,7 @@ const AGENT_SKELETON_DIR_KEEPERS: Array<{ relPath: string; content: string }> = 
 		content: "",
 	},
 	{
-		relPath: "external/.gitkeep",
-		content: "",
-	},
-	{
 		relPath: "knowledge/.gitkeep",
-		content: "",
-	},
-	{
-		relPath: "scripts/.gitkeep",
 		content: "",
 	},
 	{

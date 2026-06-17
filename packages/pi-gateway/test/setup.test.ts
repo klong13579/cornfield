@@ -13,17 +13,25 @@ const REQUIRED_FILES = [
 	".agent/rules/security.md",
 	".agent/skills/.gitkeep",
 	".agent/prompts/.gitkeep",
-	".omp/config.yml",
-	".omp/prompt-includes.json",
 	"sessions/.gitkeep",
 	"cron/tasks/.gitkeep",
 	"cron/logs/.gitkeep",
-	"scripts/.gitkeep",
-	"external/.gitkeep",
 	"knowledge/.gitkeep",
 	"knowledge/faq.md",
 	"knowledge/external-workspaces.md",
 	"knowledge/handbook/server-restart.md",
+];
+
+const FORBIDDEN_PATHS = [
+	// Per design §6.1b rule #4: .omp/ is created by omp, not skeleton
+	".omp/config.yml",
+	".omp/prompt-includes.json",
+	// Per design §6.1b rule #3: scripts/ and external/ are NOT in the
+	// auto-create list, users create them when needed
+	"scripts",
+	"external",
+	"external/.gitkeep",
+	"scripts/.gitkeep",
 ];
 
 describe("setup", () => {
@@ -88,20 +96,14 @@ describe("setup", () => {
 		expect(content).toContain("工具");
 	});
 
-	test(".omp/config.yml contains modelRoles default and theme", async () => {
+	test(".gitignore matches design rule #7 (sessions, cron/logs, evolution, .omp, *.log)", async () => {
 		await ensureAgentDir(tmpDir);
-		const content = await Bun.file(path.join(tmpDir, ".omp/config.yml")).text();
-		expect(content).toContain("modelRoles");
-		expect(content).toContain("default");
-		expect(content).toContain("theme");
-	});
-
-	test(".omp/prompt-includes.json is valid JSON", async () => {
-		await ensureAgentDir(tmpDir);
-		const content = await Bun.file(path.join(tmpDir, ".omp/prompt-includes.json")).text();
-		const parsed = JSON.parse(content);
-		expect(parsed).toHaveProperty("files");
-		expect(Array.isArray(parsed.files)).toBe(true);
+		const content = await Bun.file(path.join(tmpDir, ".gitignore")).text();
+		expect(content).toContain("sessions/");
+		expect(content).toContain("cron/logs/");
+		expect(content).toContain("evolution/");
+		expect(content).toContain(".omp/");
+		expect(content).toContain("*.log");
 	});
 
 	test("knowledge/faq.md has default FAQ template content", async () => {
@@ -123,6 +125,21 @@ describe("setup", () => {
 		const content = await Bun.file(path.join(tmpDir, "knowledge/handbook/server-restart.md")).text();
 		expect(content).toContain("服务器重启");
 		expect(content).toContain("ssh");
+	});
+
+	test("skeleton does NOT create forbidden paths (per design §6.1b rules #3 and #4)", async () => {
+		await ensureAgentDir(tmpDir);
+		for (const relPath of FORBIDDEN_PATHS) {
+			const fullPath = path.join(tmpDir, relPath);
+			let exists = false;
+			try {
+				await fs.access(fullPath);
+				exists = true;
+			} catch {
+				exists = false;
+			}
+			expect(exists).toBe(false);
+		}
 	});
 
 	test("resolveAgentDir defaults to ~/.omp/agents/<id> when no explicit dir", () => {
