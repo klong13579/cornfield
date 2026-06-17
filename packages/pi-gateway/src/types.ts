@@ -108,7 +108,6 @@ export interface SessionStore {
 
 export interface AgentConfig {
 	ompPath?: string;
-	model?: string;
 	/** Timeout per agent prompt in ms (default: 300000) */
 	timeoutMs?: number;
 	maxConcurrentSessions?: number;
@@ -159,8 +158,6 @@ export interface DingtalkAccountConfig {
 	robotCode?: string;
 	/** Optional agent workspace directory for this specific account */
 	agentDir?: string;
-	/** Optional model override for this account */
-	model?: string;
 	/** Optional per-account timeout in ms (overrides agent.timeoutMs) */
 	timeoutMs?: number;
 }

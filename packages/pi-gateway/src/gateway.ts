@@ -270,9 +270,10 @@ export class Gateway {
 				channel.setAccountId(accountId);
 
 				// Create per-account agent bridge with account-specific config
+				// Model is loaded from agentDir/.omp/config.yml by omp itself
 				const bridge = new AgentBridge({
 					...this.#config.agent,
-					model: account.model ?? this.#config.agent?.model,
+					timeoutMs: account.timeoutMs ?? this.#config.agent?.timeoutMs,
 					cwd: account.agentDir,
 				});
 				this.#accountBridges.set(accountId, bridge);

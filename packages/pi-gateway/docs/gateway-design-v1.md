@@ -648,33 +648,21 @@ agentDir 文件系统的设计遵循四个原则:
 
 ### 6.3 .omp/config.yml
 
-**omp 配置，决定模型、工具、外观等。**
+**omp 配置，决定模型、主题、默认行为等。**
 
 ```yaml
-model:
-  defaultThinkingLevel: medium
+# 该 agent 默认使用的模型
+modelRoles:
+  default: narwal-plan/minimax-m3   # 默认场景
+  smol: narwal-plan/minimax-m3       # 轻量任务（文本处理、简单问答）
+  slow: narwal-plan/glm-5.2          # 复杂任务（代码生成、深入分析）
 
-appearance:
-  theme:
-    dark: titanium
-    light: light
-  terminal:
-    showImages: true
-
-context:
-  contextPromotion:
-    enabled: true
-  compaction:
-    enabled: true
-    strategy: context-full
-
-providers:
-  secrets:
-    enabled: false
-
-# 模型名来自 omp --list-models 的输出
-# 不写则使用 omp 全局默认
+# 外观主题
+theme: dark
 ```
+
+**模型名不写在 gateway.json 中** — 它在 `agentDir/.omp/config.yml` 的 `modelRoles.default` 里。这样每个 agent 可以独立选模型。
+不写则使用 omp 全局默认（`~/.omp/agent/config.yml` 的 `modelRoles.default`）。
 
 ### 6.4 sessions/ 目录（对话记录）
 

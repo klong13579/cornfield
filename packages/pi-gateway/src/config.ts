@@ -27,7 +27,6 @@ const dingtalkAccountConfigSchema = z.object({
 	appSecret: z.string().min(1),
 	robotCode: z.string().optional(),
 	agentDir: z.string().optional(),
-	model: z.string().optional(),
 	timeoutMs: z.number().int().positive().optional(),
 });
 
@@ -44,7 +43,6 @@ const dingtalkConfigSchema = channelConfigSchema.extend({
 
 const agentConfigSchema = z.object({
 	ompPath: z.string().optional(),
-	model: z.string().optional(),
 	timeoutMs: z.number().int().positive().optional(),
 	maxConcurrentSessions: z.number().int().positive().optional(),
 	maxCrashRetries: z.number().int().positive().optional(),

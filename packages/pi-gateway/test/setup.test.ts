@@ -85,11 +85,12 @@ describe("setup", () => {
 		expect(content).toContain("工具");
 	});
 
-	test(".omp/config.yml is valid YAML with model/tools/theme placeholders", async () => {
+	test(".omp/config.yml contains modelRoles default and theme", async () => {
 		await ensureAgentDir(tmpDir);
 		const content = await Bun.file(path.join(tmpDir, ".omp/config.yml")).text();
-		expect(content).toContain("model");
-		expect(content).toContain("tools");
+		expect(content).toContain("modelRoles");
+		expect(content).toContain("default");
+		expect(content).toContain("theme");
 	});
 
 	test(".omp/prompt-includes.json is valid JSON", async () => {

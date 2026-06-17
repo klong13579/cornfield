@@ -158,7 +158,7 @@ describe("config validation", () => {
 						appKey: "primary_key",
 						appSecret: "primary_secret",
 						accounts: {
-							"bot1": { appKey: "bot1_key", appSecret: "bot1_secret", model: "claude-sonnet" },
+							"bot1": { appKey: "bot1_key", appSecret: "bot1_secret", agentDir: "/tmp/bot1" },
 							"bot2": { appKey: "bot2_key", appSecret: "bot2_secret", agentDir: "/tmp/bot2" },
 						},
 					},
@@ -173,7 +173,7 @@ describe("config validation", () => {
 		expect(dtConfig).not.toBeNull();
 		expect(Object.keys(dtConfig!.accounts!)).toHaveLength(2);
 		expect(dtConfig!.accounts!.bot1.appKey).toBe("bot1_key");
-		expect(dtConfig!.accounts!.bot1.model).toBe("claude-sonnet");
+		expect(dtConfig!.accounts!.bot1.agentDir).toBe("/tmp/bot1");
 		expect(dtConfig!.accounts!.bot2.agentDir).toBe("/tmp/bot2");
 	});
 

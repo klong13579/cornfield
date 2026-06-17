@@ -9,26 +9,55 @@ import * as os from "node:os";
 const AGENT_SKELETON_FILES: Array<{ relPath: string; content: string }> = [
 	{
 		relPath: "mission.md",
-		content: `# ${path.basename(process.cwd())} 助手
+		content: `# 助手
 
 ## 身份
-你是一个通用助手，尚未定义具体角色。
+你是一个企业内部助手，名为 **<机器人名>**，为员工提供信息查询、文档辅助、任务跟进等服务。
+
+## 能力
+- 解答员工日常问题（流程、制度、联系方式等）
+- 协助编写、修改、审查代码
+- 查询、总结企业内部知识库内容
+- 运行定时任务（日报、周报、提醒等）
 
 ## 行为准则
+- 始终使用 **中文** 回复
 - 友好、专业、简洁
 - 不清楚的事情主动询问，不猜测
+- 遇到敏感信息（密码、密钥、个人隐私）不记录、不转发
+- 遇到不确定的操作（删除、推送、部署）先确认再执行
 
-⚠️ 请编辑此文件定义机器人的角色、能力、行为准则。`,
+## 工具
+- 使用 read 读取本地文件
+- 使用 grep 搜索代码
+- 使用 bash 运行命令
+- 使用 write/edit 修改文件
+
+⚠️ **请编辑本文件定义本机器人的具体角色与能力。**
+`,
 	},
 	{
 		relPath: "profile.yaml",
-		content: `# 领域画像（可选）
-# 定义机器人的知识领域、专业特长
+		content: `# 领域画像
+# 定义机器人的知识领域、专业特长、默认语言风格
+
+domain:
+  primary: general
+  tags: []
+
+language:
+  default: zh-CN
+  fallback: en-US
+
+style:
+  tone: professional
+  length: concise
+  format: markdown
 `,
 	},
 	{
 		relPath: ".gitignore",
-		content: `# omp agent directory
+		content: `# omp agent directory - 运行时数据
 sessions/
 cron/logs/
 knowledge/
@@ -39,42 +68,52 @@ knowledge/
 		relPath: ".agent/SYSTEM.md",
 		content: `# 自定义系统提示词（可选）
 
-在 omp 启动时，本文件内容会 **覆盖** omp 内置的 system prompt 模板。
-留空表示使用 omp 内置模板。
+**重要：** 在 omp 启动时，**本文件内容会覆盖 omp 内置的 system prompt 模板**。
+留空（仅保留本注释）或删除本文件表示使用 omp 内置模板。
+
+## 何时覆盖
+- 机器人需要不同的语言风格
+- 机器人有特殊的安全要求
+- 机器人需要不同的输出格式
 
 ## 示例
 \`\`\`markdown
-你是一个企业内部助手。
-只使用中文回复。
+你是一个仅限中文的企业助手。
+你不应读取会话外的文件。
+你不应执行 bash 命令。
 \`\`\`
 `,
 	},
 	{
 		relPath: ".agent/AGENTS.md",
-		content: `# 上下文指令（可选）
+		content: `# 上下文指令
 
-本文件被注入到 system prompt 的 *之后*，用于引导 agent 行为。
-例如：
+本文件被注入到 system prompt 之后，用于引导 agent 行为。
 
-## 工具使用
-- 使用 read 读取本地文件
-- 使用 grep 搜索代码
-- 使用 bash 运行命令
+## 工具使用指引
+- 读取文件：使用 \`read\`
+- 搜索代码：使用 \`grep\`
+- 运行命令：使用 \`bash\`（需要明确）
+- 修改文件：使用 \`write\` / \`edit\`
 
 ## 回复风格
-- 简洁、准确
+- 简洁、准确、有依据
 - 不确定时主动询问
+- 避免重复发送“让我查一下”
 `,
 	},
 	{
 		relPath: ".omp/config.yml",
 		content: `# omp 配置
-# omp --mode rpc 启动时读取本文件
-# 允许为该 agent 覆盖全局配置：模型、工具、主题等
+# omp --mode rpc 启动时读取本文件 (在 agentDir 下运行)
+# 允许为该 agent 覆盖全局配置：模型、主题、工具等
 
-# model: narwal-plan/minimax-m3
-# tools: []
-# theme: dark
+modelRoles:
+  default: narwal-plan/minimax-m3   # 该 agent 使用的默认模型
+  smol: narwal-plan/minimax-m3       # 轻量任务（文本处理、简单问题）
+  slow: narwal-plan/glm-5.2          # 复杂任务（代码生成、深入分析）
+
+theme: dark
 `,
 	},
 	{
