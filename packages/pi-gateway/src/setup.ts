@@ -103,6 +103,27 @@ evolution/
 `,
 	},
 	{
+		relPath: ".omp/config.yml",
+		content: `# omp 配置 (runtime 硬依赖, 详见设计 §6.1a #5)
+# omp --mode rpc 启动时读取本文件
+# 用于覆盖 omp 全局配置 (modelRoles, theme 等)
+
+modelRoles:
+  default: narwal-plan/minimax-m3   # 该 agent 使用的默认模型
+  smol: narwal-plan/minimax-m3       # 轻量任务（文本处理、简单问题）
+  slow: narwal-plan/glm-5.2          # 复杂任务（代码生成、深入分析）
+
+theme: dark
+`,
+	},
+	{
+		relPath: ".omp/prompt-includes.json",
+		content: `{
+  "files": []
+}
+`,
+	},
+	{
 		relPath: "knowledge/faq.md",
 		content: `# 常见问题
 
@@ -166,6 +187,7 @@ const AGENT_SKELETON_DIRS = [
 	".agent/skills",
 	".agent/prompts",
 	".agent/rules",
+	".omp",
 	"sessions",
 	"cron/tasks",
 	"cron/logs",

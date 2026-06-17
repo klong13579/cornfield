@@ -13,6 +13,8 @@ const REQUIRED_FILES = [
 	".agent/rules/security.md",
 	".agent/skills/.gitkeep",
 	".agent/prompts/.gitkeep",
+	".omp/config.yml",
+	".omp/prompt-includes.json",
 	"sessions/.gitkeep",
 	"cron/tasks/.gitkeep",
 	"cron/logs/.gitkeep",
@@ -23,9 +25,6 @@ const REQUIRED_FILES = [
 ];
 
 const FORBIDDEN_PATHS = [
-	// Per design §6.1b rule #4: .omp/ is created by omp, not skeleton
-	".omp/config.yml",
-	".omp/prompt-includes.json",
 	// Per design §6.1b rule #3: scripts/ and external/ are NOT in the
 	// auto-create list, users create them when needed
 	"scripts",
@@ -94,6 +93,22 @@ describe("setup", () => {
 		await ensureAgentDir(tmpDir);
 		const content = await Bun.file(path.join(tmpDir, ".agent/AGENTS.md")).text();
 		expect(content).toContain("工具");
+	});
+
+	test(".omp/config.yml contains modelRoles default and theme", async () => {
+		await ensureAgentDir(tmpDir);
+		const content = await Bun.file(path.join(tmpDir, ".omp/config.yml")).text();
+		expect(content).toContain("modelRoles");
+		expect(content).toContain("default");
+		expect(content).toContain("theme");
+	});
+
+	test(".omp/prompt-includes.json is valid JSON", async () => {
+		await ensureAgentDir(tmpDir);
+		const content = await Bun.file(path.join(tmpDir, ".omp/prompt-includes.json")).text();
+		const parsed = JSON.parse(content);
+		expect(parsed).toHaveProperty("files");
+		expect(Array.isArray(parsed.files)).toBe(true);
 	});
 
 	test(".gitignore matches design rule #7 (sessions, cron/logs, evolution, .omp, *.log)", async () => {
