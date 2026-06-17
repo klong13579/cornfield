@@ -113,6 +113,7 @@ DingTalk Stream ─→ Channel(协议适配)
               │                                    │                      │
               │                                    │  ├─ mission.md       │
               │                                    │  ├─ .omp/config.yml  │
+              │                                    │  ├─ .omp/prompt-includes.json
               │                                    │  ├─ sessions/        │
               │                                    │  └─ knowledge/       │
               │                                    │                      │
@@ -236,7 +237,7 @@ reload 启动后，gateway 对比新旧配置，计算出三个集合：
 ```
 added:   new accounts — {appKey 在旧配置中不存在, 现在有}
 removed: old accounts — {appKey 在旧配置中还有, 现在没了}
-changed: { appKey, oldConfig → newConfig } — {model 变化 / agentDir 变化 / 其他字段}
+changed: { appKey, oldConfig → newConfig } — {agentDir 变化 / appKey 变化 / timeoutMs 变化}
 ```
 
 **对每个集合的动作:**
@@ -249,7 +250,7 @@ changed: { appKey, oldConfig → newConfig } — {model 变化 / agentDir 变化
 
 **In-flight 消息处理:**
 
-修改 model 或 agentDir 会重启 bridge。重启用原子性 exchange (旧 bridge 处理完手头消息后停掉，不接受新消息)。在 in-flight 期间发到该 account 的新消息:放进内存 queue 等新 bridge 起来后再调度。
+修改 agentDir 或 appKey 会重启 bridge。重启用原子性 exchange (旧 bridge 处理完手头消息后停掉，不接受新消息)。在 in-flight 期间发到该 account 的新消息:放进内存 queue 等新 bridge 起来后再调度。
 
 **原子性策略:**
 
@@ -282,7 +283,7 @@ reload() {
 
 **V2 范围外（暂不实施）:**
 
-- 在线修改 `model` 参数（不重启 bridge）— 需要 RPC 层支持，复杂度高
+- 在线修改 `.omp/config.yml`（不重启 bridge）— 需要 RPC 层支持，复杂度高
 - 在线修改 `agentDir` — agent 已加载的 skill/profile 无法热更新
 - 在线修改 `permission` 策略 (allowUsers 等) — 实施简单，但需要 V1 SessionManager 上线
 
@@ -342,25 +343,50 @@ Spawn 关系：
 ### 5.1 完整格式
 
 ```jsonc
+// ── 场景 A: 单账号 ──
 {
-  // ── 频道配置 ──
   "channels": {
     "dingtalk": {
       "enabled": true,
-
-      // 单账号：顶层凭证
-      "appKey": "xxxx",
-      "appSecret": "xxxx",          // 或 "$ENV_VAR_NAME" 引用环境变量
+      "appKey": "dingxxx",
+      "appSecret": "secxxx",          // 或 "$ENV_VAR_NAME" 引用环境变量
 
       // 权限策略
       "dmPolicy": "allowlist",       // open | allowlist | closed
       "groupPolicy": "allowlist",
       "allowedUsers": ["staff001"],
+      "allowedGroups": []
+    }
+  },
+
+  // ── Agent 配置 ──
+  // model 不在此配置，由 agentDir/.omp/config.yml 决定（§6.3）
+  "agent": {
+    "ompPath": "omp",
+    "timeoutMs": 120000
+  },
+
+  // ── Cron 调度器 ──
+  "cron": {
+    "enabled": true,
+    "maxConcurrentRuns": 3
+  }
+}
+```
+
+```jsonc
+// ── 场景 B: 多账号（accounts map）──
+// key = 账号名，在日志和指标中直接使用
+// 每个 account = 一个钉钉机器人 = 一个 Agent(独立进程 + 独立 agentDir)
+{
+  "channels": {
+    "dingtalk": {
+      "enabled": true,
+      "dmPolicy": "allowlist",
+      "groupPolicy": "allowlist",
+      "allowedUsers": ["staff001"],
       "allowedGroups": [],
 
-      // 多账号（使用命名 map）
-      // key = 账号名，在日志和指标中直接使用
-      // 每个 account = 一个钉钉机器人 = 一个 Agent(独立进程 + 独立 agentDir)
       "accounts": {
         "ops": {
           "appKey": "dingbot_ops",
@@ -378,7 +404,8 @@ Spawn 关系：
   },
 
   // ── Agent 配置 ──
-  // 单账号时使用。多账号时作为 accounts 中各 account 的默认值
+  // model 不在此配置，由 agentDir/.omp/config.yml 决定（§6.3）
+  // 多账号时作为 accounts 中各 account 的默认值
   "agent": {
     "ompPath": "omp",
     "timeoutMs": 120000
@@ -442,8 +469,7 @@ Spawn 关系：
   │
   └── 否：单账号模式
         使用顶层的 appKey/appSecret
-        有 agent 段？→ 创建一个 AgentBridge
-        无 agent 段？→ 不启动 bridge（仅 cron 模式）
+        创建一个 AgentBridge（agent 段有默认值兜底）
 ```
 
 ### 5.4 Secret 环境变量引用
@@ -479,6 +505,22 @@ accounts: { "ops": { "appKey": "...", "appSecret": "..." } }
 ```
 
 **生产建议：** 显式指定 `agentDir` 到集中路径（如 `/data/robots/ops/`），便于备份、迁移、跨机部署。默认路径适合个人开发/实验场景。
+
+### 5.6 LLM API Key 解析
+
+Gateway spawn `omp --mode rpc` 子进程时，需要为 omp 提供 LLM provider 的 API key。
+tmux/launchd 等环境不 source shell profile，导致环境变量缺失。
+
+**机制：** Gateway 从 `~/.omp/agent/agent.db` 的 `auth_credentials` 表读取已存储的
+provider API key，注入为环境变量传给子进程。
+
+| Provider | env var | 来源 |
+|---|---|---|
+| narwal-plan | `NARWAL_PLAN_API_KEY` | agent.db `auth_credentials` |
+| alibaba-coding-plan | `ALIBABA_API_KEY` | agent.db `auth_credentials` |
+
+**与 §5.4 的区别：** §5.4 的 `$ENV_VAR` 是 DingTalk appSecret 解析（gateway 进程内使用）；
+本节是 LLM API key 注入（传给 omp 子进程）。两套独立机制。
 
 ---
 
@@ -535,6 +577,8 @@ accounts: { "ops": { "appKey": "...", "appSecret": "..." } }
 ├── knowledge/                       ← 可选:静态知识库(FAQ/手册)
 │   ├── faq.md                       ← 常见问题
 │   ├── handbook/                    ← 手册
+│   │   └── server-restart.md
+│   ├── external-workspaces.md       ← 外部数据源映射
 │   └── .gitkeep
 │
 ├── evolution/                       ←(V2)自我进化数据
@@ -543,9 +587,29 @@ accounts: { "ops": { "appKey": "...", "appSecret": "..." } }
 └── .gitignore
 ```
 
+### 6.1a-0 文件来源对照
+
+| 路径 | 创建者 | 说明 |
+|---|---|---|
+| mission.md | skeleton | 核心人格 |
+| profile.yaml | skeleton | 领域画像 |
+| .agent/SYSTEM.md, AGENTS.md | skeleton | omp 框架钩子 |
+| .agent/rules/security.md | skeleton | 行为规则示例 |
+| .agent/skills/*, prompts/* | 用户 | 技能和 prompt 模板 |
+| .omp/config.yml | skeleton | runtime 硬依赖 |
+| .omp/prompt-includes.json | skeleton | 文件注入声明 |
+| knowledge/* | skeleton (§6.5) | 静态知识库 |
+| sessions/*.jsonl | omp 运行时 | 对话记录 |
+| cron/tasks/*.json5 | 用户 | 定时任务定义 |
+| cron/logs/*.log | omp 运行时 | 执行日志 |
+| scripts/ | 用户 | helper 脚本 |
+| external/ | 用户 | 外部数据源映射 |
+| evolution/ | V2 | 自我进化数据 |
+
+
 ### 6.1a 文件系统设计说明
 
-agentDir 文件系统的设计遵循四个原则:
+agentDir 文件系统的设计遵循五个原则:
 
 **1. 配置在文件中,不在进程中。**
 
@@ -571,7 +635,7 @@ agentDir 文件系统的设计遵循四个原则:
 
 **4. 内容优先于目录。**
 
-  只定义目录结构,不预定义具体文件名(除 mission.md 外)。agent 创建者决定 .agent/prompts/ 里放什么、knowledge/ 里放什么、external/ 里放什么。结构提供组织框架,不约束内容。
+  只定义目录结构,不预定义用户内容文件名(除 mission.md 外)。omp 框架钩子文件(`.agent/SYSTEM.md`、`.agent/AGENTS.md`、`.omp/config.yml`)在 skeleton 中创建为占位模板;用户内容文件(`.agent/prompts/*`、`knowledge/*`、`external/*`)由 agent 创建者决定。结构提供组织框架,不约束内容。
 
 **5. 可选文件不报错。**
 
@@ -587,27 +651,37 @@ agentDir 文件系统的设计遵循四个原则:
 
 ```
 <agentDir>/
-├── mission.md              ← 默认人格模板（占位文本，提示用户编辑）
+├── mission.md              ← 默认人格模板
+├── profile.yaml            ← 领域画像模板
 ├── .agent/                 ← omp 探索系统配置目录
+│   ├── SYSTEM.md           ← 自定义 system prompt 占位模板
+│   ├── AGENTS.md           ← 上下文指令占位模板
 │   ├── skills/             ← 技能定义（空目录）
 │   ├── prompts/            ← prompt 模板（空目录）
 │   └── rules/              ← 行为规则（空目录）
+├── .omp/                   ← runtime 硬依赖（§6.1a #5）
+│   ├── config.yml          ← 默认 modelRoles 配置
+│   └── prompt-includes.json ← 空文件列表
 ├── sessions/               ← 对话记录目录
 ├── cron/                   ← 定时任务
 │   ├── tasks/              ← 任务定义（空目录）
 │   └── logs/               ← 运行日志（空目录）
-├── knowledge/              ← 静态知识库（空目录）
+├── knowledge/              ← 静态知识库（§6.5）
+│   ├── faq.md
+│   ├── external-workspaces.md
+│   ├── handbook/
+│   └── .gitkeep
 └── .gitignore              ← Git 忽略规则
 ```
 
 **规则：**
 
-1. 仅在 agentDir **完全不存在**时触发。设置过 mission.md 的目录不做任何修改。
-2. `mission.md` 写入占位模板，内容为 `{accountId} 助手` 的通用身份定义，明确标注需用户编辑。
-3. 所有目录（`.agent/`、`.agent/skills/`、`.agent/prompts/`、`.agent/rules/`、`sessions/`、`cron/`、`cron/tasks/`、`cron/logs/`、`knowledge/`）创建为空目录。
-4. `.omp/` 目录（含默认 `config.yml`）不在 skeleton 中创建——由 omp 进程首次启动时自行生成。
+1. 仅当 `mission.md` 不存在时触发全量创建。已初始化的目录（mission.md 存在）执行 additive 更新：补充缺失的 skeleton 文件，不覆盖已有内容。
+2. `mission.md` 写入通用助手占位模板，包含身份、能力、行为准则、工具使用引导，明确标注需用户编辑。
+3. 所有目录（`.agent/`、`.agent/skills/`、`.agent/prompts/`、`.agent/rules/`、`.omp/`、`sessions/`、`cron/`、`cron/tasks/`、`cron/logs/`、`knowledge/`、`knowledge/handbook/`）创建为空目录。`scripts/` 和 `external/` 为用户按需创建的目录，skeleton 不预创建。
+4. `.omp/config.yml` 作为 runtime 硬依赖（§6.1a #5）在 skeleton 中创建，含默认 `modelRoles` 配置。`.omp/prompt-includes.json` 同步创建为空列表 `{"files":[]}`。
 5. 创建过程中任何 I/O 失败视为该 account 启动失败，错误信息明确指示路径和故障原因。
-6. 已存在的目录不走创建路径——不影响已有配置。
+6. additive 更新不覆盖任何已存在文件的内容。
 7. `.gitignore` 写入默认内容，忽略运行时数据和敏感文件：
 
    ```gitignore
@@ -736,6 +810,7 @@ Hermes Agent 是一个参考实现，其 `~/.hermes/` 目录结构与本设计�
 Agent 启动时:
   1. 读取 .omp/config.yml        ← 模型、工具配置
   2. 读取 mission.md              ← 写入 system prompt
+  2.5 读取 profile.yaml           ← 领域画像，追加到 system prompt 附加上下文
   3. omp 发现系统自动扫描:
      - .agent/skills/            ← 技能（注册到 omp 技能系统）
      - .agent/prompts/           ← prompt 模板（注册到 omp prompt 系统）
@@ -903,9 +978,11 @@ reply: string | OutboundMessage
 ```
 ~/.omp/
 ├── gateway.json                    ← gateway 配置（账号/Channel/Cron）
-├── gateway-data/                    ← gateway 运行时状态(暂存,后续逐步迁入 agentDir)
-│   ├── scheduler.db                ← cron 执行记录(待迁移到 agentDir cron/logs/)
-│   └── tasks/                      ← cron 任务定义文件
+├── gateway-data/                    ← gateway 运行时状态
+│   ├── gateway.pid                 ← (永久) 进程 PID
+│   ├── logs/service.log            ← (永久) 服务模式 stdout/stderr
+│   ├── scheduler.db                ← (待迁移) cron 执行记录 → agentDir/cron/logs/
+│   └── tasks/                      ← (待迁移) cron 任务定义 → agentDir/cron/tasks/
 │
 └── agents/                         ← 所有 agent 的工作目录
     ├── ops/                        ← 运维机器人
@@ -953,6 +1030,7 @@ reply: string | OutboundMessage
 |LLM 超时|当前消息失败|返回友好错误给用户；触发熔断器计数|
 |Session 文件损坏|该会话无法加载|尝试恢复(取最近的完整行)；失败则新建 session|
 |appSecret 未设置|该 account 启动失败|启动时检测并报错,不启动对应 bridge,不影响其他 account|
+|agent.db 缺少 provider API key|该 account 的 LLM 调用失败|启动时检测并告警，提示用户通过 omp 配置凭证|
 
 ### 11.2 熔断器（Circuit Breaker）
 
