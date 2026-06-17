@@ -3,7 +3,8 @@
  *
  * Usage:
  *   pi-gateway start                    Start the gateway in foreground
- *   pi-gateway status                   Show gateway status
+ *   pi-gateway stop                     Stop the gateway (via PID file)
+ *   pi-gateway status                   Show gateway status & PID
  *   pi-gateway config                   Show resolved configuration
  *   pi-gateway cron create ...          Create a scheduled task
  *   pi-gateway cron list                List all scheduled tasks
@@ -14,11 +15,22 @@
  *   pi-gateway cron status              Show scheduler status
  *   pi-gateway cron diagnose            Run scheduler diagnostics
  *   pi-gateway cron logs <name>         View task execution logs
- *   pi-gateway service install          Install as system service
+ *   pi-gateway service install          Install as system service (launchd/systemd)
  *   pi-gateway service uninstall        Remove system service
  *   pi-gateway service start            Start system service
  *   pi-gateway service stop             Stop system service
  *   pi-gateway service status           Show service status
+ *
+ * First-time setup:
+ *   1. Create ~/.omp/gateway.json with your DingTalk app credentials
+ *      (example: omp gateway config prints the expected schema)
+ *   2. omp gateway start
+ *   3. Send a message to your DingTalk bot to verify
+ *
+ * Environment variables:
+ *   PI_LOG_LEVEL        Log level for stderr (debug|info|warn|error)
+ *                       File log (~/.omp/logs/omp.*.log) always full
+ *   PI_GATEWAY_CONFIG   Alternative config path (default: ~/.omp/gateway.json)
  */
 
 import { logger } from "@oh-my-pi/pi-utils";
@@ -123,21 +135,34 @@ async function cmdStart(_configPath?: string): Promise<void> {
 	});
 }
 
+async function cmdStop(): Promise<void> {
+	const { stopGatewayDaemon } = await import("./gateway");
+	const stopped = await stopGatewayDaemon();
+	if (stopped) {
+		console.log("Gateway stopped.");
+	} else {
+		console.log("Gateway is not running.");
+	}
+}
+
 async function cmdStatus(_configPath?: string): Promise<void> {
+	const { getGatewayStatus, getDataDir } = await import("./gateway");
 	const config = await loadConfig(_configPath);
-	const gateway = new Gateway(config);
-	const status = await gateway.getStatus();
+	const status = await getGatewayStatus();
 
 	console.log("Gateway Status:");
 	console.log(`  Running: ${status.running}`);
-	console.log(`  Channels: ${status.channels.length}`);
-	for (const ch of status.channels) {
-		console.log(`    - ${ch.name} (${ch.id}): ${ch.connected ? "connected" : "disconnected"}`);
+	if (status.running) {
+		console.log(`  PID: ${status.pid}`);
+		console.log(`  Started: ${status.startedAt}`);
+	} else if (status.stalePidFile) {
+		console.log(`  (stale PID file removed)`);
 	}
-	console.log(`  Active Sessions: ${status.sessions}`);
-	console.log(
-		`  Scheduler: ${status.scheduler.running ? `running (${status.scheduler.taskCount} tasks)` : "stopped"}`,
-	);
+	console.log(`  Data dir: ${getDataDir()}`);
+	const channels = Object.keys(config.channels ?? {});
+	if (channels.length > 0) {
+		console.log(`  Configured channels: ${channels.join(", ")}`);
+	}
 }
 
 async function cmdConfig(_configPath?: string): Promise<void> {
@@ -619,6 +644,9 @@ void (async () => {
 		case "start":
 			await cmdStart(gatewayConfigPath);
 			break;
+		case "stop":
+			await cmdStop();
+			break;
 		case "status":
 			await cmdStatus(gatewayConfigPath);
 			break;
@@ -642,7 +670,8 @@ pi-gateway — Unified Gateway for Oh My Pi
 
 Usage:
   pi-gateway start [--config <path>]              Start gateway in foreground
-  pi-gateway status [--config <path>]             Show gateway status
+  pi-gateway stop                                  Stop gateway (via PID file)
+  pi-gateway status [--config <path>]             Show gateway status & PID
   pi-gateway config [--config <path>]             Show resolved configuration
   pi-gateway cron create <schedule> <cmd...>       Create a scheduled task
   pi-gateway cron list [--json]                    List all tasks
@@ -657,9 +686,8 @@ Usage:
   pi-gateway service uninstall                     Remove system service
   pi-gateway service start                         Start system service
   pi-gateway service stop                          Stop system service
-  pi-gateway install [--config <path>]              Configure DingTalk credentials interactively
-  pi-gateway service install                       Install as system service
-  pi-gateway service uninstall                     Remove system service
+  pi-gateway service status                        Show service status
+  pi-gateway install [--config <path>]             Configure DingTalk credentials interactively
   pi-gateway service start                         Start system service
   pi-gateway service stop                          Stop system service
   pi-gateway service status                        Show service status

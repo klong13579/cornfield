@@ -72,7 +72,7 @@ export default class Gateway extends Command {
 	static strict = false;
 	static args = {
 		action: Args.string({
-			description: "Gateway action",
+			description: "Gateway action: start | stop | status | config | cron | service | help",
 			required: false,
 			options: ACTIONS,
 		}),
@@ -80,15 +80,37 @@ export default class Gateway extends Command {
 
 	static flags = {
 		foreground: Flags.boolean({ description: "Run in foreground (default)" }),
-		config: Flags.string({ description: "Path to gateway config file" }),
+		config: Flags.string({ description: "Path to gateway config file (default: ~/.omp/gateway.json)" }),
 	};
 
 	static examples = [
-		"# Start gateway\n  omp gateway start",
-		"# Stop gateway\n  omp gateway stop",
-		"# Start with custom config\n  omp gateway start --config /path/to/gateway.json",
-		"# Show status\n  omp gateway status",
-		"# Schedule a task\n  omp gateway cron create '0 9 * * *' 'bun run daily-report.ts'",
+		"",
+		"  ======== 生命周期 ========",
+		"  omp gateway start                        Start gateway (foreground)",
+		"  omp gateway start --config /path/gw.json  Start with custom config",
+		"  omp gateway stop                         Stop gateway (via PID file)",
+		"  omp gateway status                       Show running status & PID",
+		"",
+		"  ======== 系统服务 (launchd/systemd) ========",
+		"  omp gateway service install              Install as system daemon",
+		"  omp gateway service uninstall            Remove system daemon",
+		"  omp gateway service start                Start daemon",
+		"  omp gateway service stop                 Stop daemon (no auto-restart)",
+		"  omp gateway service status               Show daemon status",
+		"",
+		"  ======== 配置 ========",
+		"  omp gateway config                       Print resolved config",
+		"  omp gateway config --config /path/gw.json Print custom config",
+		"",
+		"  ======== 定时任务 ========",
+		"  omp gateway cron create '0 9 * * *' 'cmd'  Create cron task",
+		"  omp gateway cron list                     List all tasks",
+		"  omp gateway cron pause <name>             Pause a task",
+		"  omp gateway cron resume <name>            Resume a task",
+		"  omp gateway cron run <name>               Run a task immediately",
+		"  omp gateway cron remove <name>            Delete a task",
+		"  omp gateway cron logs <name>              View execution logs",
+		"",
 	];
 
 	async run(): Promise<void> {
