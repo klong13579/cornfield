@@ -279,6 +279,69 @@ describe("SchedulerEngine", () => {
 		expect(result).toBe("ok");
 	});
 
+	it("updates interval nextRunAt after each execution", async () => {
+		const { promise, resolve } = Promise.withResolvers<void>();
+		const task = storage.addTask({
+			name: "interval-next-run",
+			cron: "80ms",
+			command: "echo interval",
+			status: "active",
+			scheduleType: "interval",
+			createdAt: Date.now(),
+			updatedAt: Date.now(),
+			runCount: 0,
+			failCount: 0,
+			consecutiveFailures: 0,
+		});
+
+		const engine = new SchedulerEngine({
+			storage,
+			onTrigger: async () => {
+				resolve();
+			},
+		});
+
+		engine.start();
+		await Promise.race([promise, Bun.sleep(1000).then(() => undefined)]);
+		engine.stop();
+
+		const updated = storage.getTask(task.id);
+		expect(updated?.runCount).toBeGreaterThan(0);
+		expect(updated?.nextRunAt).toBeGreaterThan(Date.now());
+	});
+
+	it("clears one-shot nextRunAt after execution", async () => {
+		const { promise, resolve } = Promise.withResolvers<void>();
+		const task = storage.addTask({
+			name: "once-next-run",
+			cron: "+30ms",
+			command: "echo once",
+			status: "active",
+			scheduleType: "once",
+			createdAt: Date.now(),
+			updatedAt: Date.now(),
+			runCount: 0,
+			failCount: 0,
+			consecutiveFailures: 0,
+		});
+
+		const engine = new SchedulerEngine({
+			storage,
+			onTrigger: async () => {
+				resolve();
+			},
+		});
+
+		engine.start();
+		await Promise.race([promise, Bun.sleep(1000).then(() => undefined)]);
+		await Bun.sleep(20);
+		engine.stop();
+
+		const updated = storage.getTask(task.id);
+		expect(updated?.status).toBe("disabled");
+		expect(updated?.nextRunAt).toBeUndefined();
+	});
+
 	it("engine handles disabled tasks", () => {
 		storage.addTask({
 			name: "disabled-task",

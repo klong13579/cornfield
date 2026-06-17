@@ -15,6 +15,19 @@ function getRetryDelay(backoffMs: number[], attemptIndex: number): number {
 	return Math.min(backoffMs[backoffMs.length - 1]! * 2, MAX_RETRY_DELAY_MS);
 }
 
+function getNextRunAt(task: ScheduledTask): number | undefined {
+	const parsed = parseSchedule(task.cron);
+	const scheduleType = task.scheduleType ?? parsed.type ?? "cron";
+	if (scheduleType === "interval" && parsed.intervalMs) {
+		return Date.now() + parsed.intervalMs;
+	}
+	if (scheduleType === "once") {
+		return undefined;
+	}
+	const nextRun = getNextRun(task.cron);
+	return nextRun?.getTime();
+}
+
 export class SchedulerEngine {
 	readonly #storage: SchedulerStorage;
 	readonly #onTrigger: (task: ScheduledTask, executionId: string) => Promise<void>;
@@ -214,14 +227,14 @@ export class SchedulerEngine {
 		}
 
 		const currentTask = this.#storage.getTask(task.id);
-		const nextRun = getNextRun(task.cron);
+		const nextRunAt = getNextRunAt(task);
 
 		if (succeeded) {
 			this.#storage.updateTask(task.id, {
 				lastRunAt: Date.now(),
 				runCount: (currentTask?.runCount ?? 0) + 1,
 				consecutiveFailures: 0,
-				nextRunAt: nextRun?.getTime(),
+				nextRunAt,
 			});
 		} else {
 			this.#storage.updateTask(task.id, {
@@ -229,7 +242,7 @@ export class SchedulerEngine {
 				runCount: (currentTask?.runCount ?? 0) + 1,
 				failCount: (currentTask?.failCount ?? 0) + 1,
 				consecutiveFailures: (currentTask?.consecutiveFailures ?? 0) + 1,
-				nextRunAt: nextRun?.getTime(),
+				nextRunAt,
 			});
 			if (lastError) {
 				logger.error("Task failed after all retries", {
