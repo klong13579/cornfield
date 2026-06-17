@@ -34,7 +34,7 @@
  */
 
 import { logger } from "@oh-my-pi/pi-utils";
-import { getConfigPath, loadConfig } from "./config";
+import { getConfigPath, getDataDir, loadConfig } from "./config";
 import { Gateway } from "./gateway";
 import { executeScheduledCommand } from "./scheduler/executor";
 import { SchedulerDbStorage } from "./scheduler/storage";
@@ -59,8 +59,9 @@ function parseArgs(): { command: string; subcommand?: string; args: string[]; co
 	const sub = argv[1];
 	const extra = argv.slice(2);
 	const configIdx = extra.indexOf("--config");
-	const c = configIdx >= 0 ? extra[configIdx + 1] : undefined;
-	return { command: cmd, subcommand: sub, args: extra, config: c };
+	const cliConfig = configIdx >= 0 ? extra[configIdx + 1] : undefined;
+	const config = cliConfig ?? process.env.PI_GATEWAY_CONFIG;
+	return { command: cmd, subcommand: sub, args: extra, config };
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -146,7 +147,7 @@ async function cmdStop(): Promise<void> {
 }
 
 async function cmdStatus(_configPath?: string): Promise<void> {
-	const { getGatewayStatus, getDataDir } = await import("./gateway");
+	const { getGatewayStatus } = await import("./gateway");
 	const config = await loadConfig(_configPath);
 	const status = await getGatewayStatus();
 
@@ -158,7 +159,7 @@ async function cmdStatus(_configPath?: string): Promise<void> {
 	} else if (status.stalePidFile) {
 		console.log(`  (stale PID file removed)`);
 	}
-	console.log(`  Data dir: ${getDataDir()}`);
+	console.log(`  Data dir: ${getDataDir(config)}`);
 	const channels = Object.keys(config.channels ?? {});
 	if (channels.length > 0) {
 		console.log(`  Configured channels: ${channels.join(", ")}`);
@@ -243,7 +244,14 @@ async function cmdCronCreate(args: string[], storage: SchedulerDbStorage): Promi
 			name = args[i + 1]!;
 			i += 2;
 		} else if (args[i] === "--type" && args[i + 1]) {
-			type = args[i + 1] as "shell" | "agent";
+
+			const rawType = args[i + 1];
+			if (rawType !== "shell" && rawType !== "agent") {
+				console.error(`Invalid task type: ${rawType}. Expected "shell" or "agent".`);
+				process.exitCode = 1;
+				return;
+			}
+			type = rawType;
 			i += 2;
 		} else if (args[i] === "--deliver" && args[i + 1]) {
 			deliver = args[i + 1];
@@ -615,7 +623,7 @@ async function cmdInstall(args: string[]): Promise<void> {
 		appKey,
 		appSecret,
 		robotCode,
-		...(agentDirInput ? { agentDir: agentDir } : {}),
+		agentDir,
 	};
 
 	// Config uses accounts map (not top-level appKey/appSecret)

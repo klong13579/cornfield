@@ -10,7 +10,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { isEnoent, logger } from "@oh-my-pi/pi-utils";
 import { z } from "zod";
-import type { GatewayConfig } from "./types";
+import type { ChannelConfig, DingTalkConfig, GatewayConfig } from "./types";
 
 // ═══════════════════════════════════════════════════════════════════════
 // Schema
@@ -146,21 +146,52 @@ export async function loadConfig(configPath?: string): Promise<GatewayConfig> {
 // Channel Config Helpers
 // ═══════════════════════════════════════════════════════════════════════
 
-export function getDingTalkConfig(config: GatewayConfig): import("./types").DingTalkConfig | null {
+function resolveSecret(value: string, label: string): string | null {
+	if (!value.startsWith("$")) return value;
+	const envName = value.slice(1);
+	const resolved = process.env[envName];
+	if (!resolved) {
+		logger.warn("DingTalk secret env var is not set", { secret: value, label });
+		return null;
+	}
+	return resolved;
+}
+
+function resolveDingTalkSecrets(config: DingTalkConfig): DingTalkConfig | null {
+	const resolved: DingTalkConfig = { ...config };
+	if (resolved.appSecret) {
+		const secret = resolveSecret(resolved.appSecret, "dingtalk.appSecret");
+		if (!secret) return null;
+		resolved.appSecret = secret;
+	}
+	if (resolved.accounts) {
+		resolved.accounts = { ...resolved.accounts };
+		for (const [accountId, account] of Object.entries(resolved.accounts)) {
+			const secret = resolveSecret(account.appSecret, `dingtalk.accounts.${accountId}.appSecret`);
+			if (!secret) return null;
+			resolved.accounts[accountId] = { ...account, appSecret: secret };
+		}
+	}
+	return resolved;
+}
+
+export function getDingTalkConfig(config: GatewayConfig): DingTalkConfig | null {
 	const raw = config.channels.dingtalk;
 	if (!raw) return null;
 
 	try {
-		const parsed = dingtalkConfigSchema.parse(raw);
-		if (parsed.accounts && Object.keys(parsed.accounts).length > 0) {
-			for (const [accountId, account] of Object.entries(parsed.accounts)) {
+		const parsed = dingtalkConfigSchema.parse(raw) as DingTalkConfig;
+		const resolved = resolveDingTalkSecrets(parsed);
+		if (!resolved) return null;
+		if (resolved.accounts && Object.keys(resolved.accounts).length > 0) {
+			for (const [accountId, account] of Object.entries(resolved.accounts)) {
 				if (!account.appKey || !account.appSecret) {
 					logger.warn("Invalid DingTalk account config", { accountId, error: "missing appKey or appSecret" });
 					return null;
 				}
 			}
 		}
-		return parsed as import("./types").DingTalkConfig;
+		return resolved;
 	} catch (err) {
 		logger.warn("Invalid DingTalk config, skipping");
 		if (err instanceof z.ZodError) {
@@ -172,8 +203,8 @@ export function getDingTalkConfig(config: GatewayConfig): import("./types").Ding
 
 export function getEnabledChannels(
 	config: GatewayConfig,
-): Array<{ id: string; config: import("./types").ChannelConfig }> {
-	const result: Array<{ id: string; config: import("./types").ChannelConfig }> = [];
+): Array<{ id: string; config: ChannelConfig }> {
+	const result: Array<{ id: string; config: ChannelConfig }> = [];
 
 	for (const [id, raw] of Object.entries(config.channels)) {
 		try {
