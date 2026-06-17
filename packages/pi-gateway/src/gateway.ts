@@ -22,7 +22,9 @@ import { SchedulerDbStorage } from "./scheduler/storage";
 import type { ScheduledTask } from "./scheduler/types";
 import { DEFAULT_SCHEDULER_CONFIG, getSchedulerDbPath, getSchedulerDir } from "./scheduler/types";
 import { SQLiteSessionStore } from "./session-store";
-import type { InboundMessage, OutboundMessage, SessionRecord } from "./types";
+import { SessionManager } from "./session-manager";
+import { ensureAgentDir, resolveAgentDir } from "./setup";
+import type { InboundMessage, OutboundMessage } from "./types";
 
 const PID_FILE = "gateway.pid";
 
@@ -181,6 +183,7 @@ export class Gateway {
 	#bridge: AgentBridge;
 	/** Per-account agent bridges for multi-agent mode */
 	#accountBridges = new Map<string, AgentBridge>();
+	#sessionManager?: SessionManager;
 	#schedulerEngine?: SchedulerEngine;
 	#schedulerStorage?: SchedulerDbStorage;
 	#schedulerFileStore?: SchedulerFileStore;
@@ -224,13 +227,21 @@ export class Gateway {
 			// Future: feishu, wechat, etc.
 		}
 
-		// Start default agent bridge (RPC process)
-		try {
-			await this.#bridge.start();
-			logger.debug("Agent bridge started");
-		} catch (err) {
-			logger.error("Failed to start agent bridge", { error: String(err) });
+		const hasDingTalkAccounts = Boolean(getDingTalkConfig(this.#config)?.accounts && Object.keys(getDingTalkConfig(this.#config)?.accounts ?? {}).length > 0);
+		// Start default agent bridge only outside multi-account mode.
+		if (!hasDingTalkAccounts) {
+			try {
+				await this.#bridge.start();
+				logger.debug("Agent bridge started");
+			} catch (err) {
+				logger.error("Failed to start agent bridge", { error: String(err) });
+			}
 		}
+
+		this.#sessionManager = new SessionManager({
+			bridges: this.#accountBridges,
+			defaultBridge: hasDingTalkAccounts ? undefined : this.#bridge,
+		});
 
 		await this.#registry.connectAll(async msg => this.#handleInboundMessage(msg));
 
@@ -269,12 +280,20 @@ export class Gateway {
 				const channel = new DingTalkChannel();
 				channel.setAccountId(accountId);
 
+				const agentDir = resolveAgentDir(accountId, account.agentDir);
+				try {
+					await ensureAgentDir(agentDir);
+				} catch (err) {
+					logger.error("Failed to initialize account agentDir", { accountId, agentDir, error: String(err) });
+					continue;
+				}
+
 				// Create per-account agent bridge with account-specific config
 				// Model is loaded from agentDir/.omp/config.yml by omp itself
 				const bridge = new AgentBridge({
 					...this.#config.agent,
 					timeoutMs: account.timeoutMs ?? this.#config.agent?.timeoutMs,
-					cwd: account.agentDir,
+					cwd: agentDir,
 				});
 				this.#accountBridges.set(accountId, bridge);
 
@@ -290,7 +309,7 @@ export class Gateway {
 					appKey: account.appKey,
 					appSecret: account.appSecret,
 					robotCode: account.robotCode,
-				});
+				}, `dingtalk:${accountId}`);
 				logger.debug("Registered DingTalk account channel", { accountId });
 			}
 			return;
@@ -306,7 +325,13 @@ export class Gateway {
 
 		logger.debug("Stopping gateway...");
 
+		await this.#registry.disconnectAll();
 		this.#stopScheduler();
+
+		const drained = await this.#sessionManager?.waitForAllDrained(30_000);
+		if (drained === false) {
+			logger.warn("Gateway shutdown timed out waiting for session queues", { queues: this.#sessionManager?.getQueueStats() ?? [] });
+		}
 
 		// Stop all per-account bridges
 		for (const bridge of this.#accountBridges.values()) {
@@ -317,7 +342,7 @@ export class Gateway {
 		// Stop default bridge
 		this.#bridge.stop();
 
-		await this.#registry.disconnectAll();
+		this.#sessionManager = undefined;
 		this.#store?.close();
 		this.#running = false;
 		logger.debug("Gateway stopped");
@@ -344,6 +369,7 @@ export class Gateway {
 		const mockSession = {
 			id: "cli-session",
 			channelId: "cli",
+			accountId: "__default__",
 			userId: "cli-user",
 			conversationId: "cli-conv",
 			createdAt: Date.now(),
@@ -383,7 +409,6 @@ export class Gateway {
 
 		return {
 			running: this.#running || await checkPidFile(getDataDir(this.#config), PID_FILE),
-			channels,
 			channels,
 			sessions: sessions.length,
 			scheduler: {
@@ -489,12 +514,14 @@ export class Gateway {
 
 		try {
 			// Find or create session
-			let session = await this.#store?.getSession(msg.channelId, msg.conversationId);
+			const accountId = msg.accountId ?? "__default__";
+			let session = await this.#store?.getSession(msg.channelId, accountId, msg.conversationId);
 			const now = Date.now();
 			if (!session && this.#store) {
-				const sessionPath = this.#buildSessionPath(msg.channelId, msg.conversationId);
+				const sessionPath = this.#buildSessionPath(msg.channelId, accountId, msg.conversationId);
 				session = await this.#store.createSession({
 					channelId: msg.channelId,
+					accountId,
 					userId: msg.userId,
 					conversationId: msg.conversationId,
 					createdAt: now,
@@ -503,13 +530,13 @@ export class Gateway {
 					status: "active",
 				});
 			} else if (session && !session.ompSessionPath && this.#store) {
-				const sessionPath = this.#buildSessionPath(msg.channelId, msg.conversationId);
+				const sessionPath = this.#buildSessionPath(msg.channelId, accountId, msg.conversationId);
 				await this.#store.updateSession(session.id, { ompSessionPath: sessionPath, updatedAt: now });
 				session = { ...session, ompSessionPath: sessionPath };
 			}
 
 			if (!session) {
-				logger.error("Failed to create session", { channelId: msg.channelId, conversationId: msg.conversationId });
+				logger.error("Failed to create session", { channelId: msg.channelId, accountId, conversationId: msg.conversationId });
 				return;
 			}
 
@@ -519,11 +546,12 @@ export class Gateway {
 				conversationId: msg.conversationId,
 				content: { type: "markdown", markdown: "thinking..." },
 				sessionWebhook: msg.sessionWebhook,
+				accountId: msg.accountId,
 			};
 			await this.#registry.sendMessage(placeholder);
 
-			// Forward to agent bridge
-			const response = await this.#forwardToAgent(msg, session);
+			// Queue and forward to the account bridge
+			const response = await this.#sessionManager?.enqueue(msg, session);
 
 			// Send final response
 			if (response) {
@@ -532,6 +560,7 @@ export class Gateway {
 					conversationId: msg.conversationId,
 					content: { type: "text", text: response },
 					sessionWebhook: msg.sessionWebhook,
+					accountId: msg.accountId,
 				};
 				await this.#registry.sendMessage(outbound);
 			}
@@ -547,24 +576,10 @@ export class Gateway {
 		}
 	}
 
-	async #forwardToAgent(msg: InboundMessage, session: SessionRecord): Promise<string | null> {
-		// Multi-account routing: if the message has an accountId, route to
-		// the matching per-account bridge
-		if (msg.accountId && this.#accountBridges.has(msg.accountId)) {
-			const bridge = this.#accountBridges.get(msg.accountId)!;
-			if (bridge.isRunning) {
-				return bridge.forward(msg, session);
-			}
-			logger.warn("Account bridge not running, falling back to default", { accountId: msg.accountId });
-		}
 
-		// Fall through to default bridge
-		return this.#bridge.forward(msg, session);
-	}
-
-	#buildSessionPath(channelId: string, conversationId: string): string {
+	#buildSessionPath(channelId: string, accountId: string, conversationId: string): string {
 		const dataDir = getDataDir(this.#config);
 		const safeId = conversationId.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64);
-		return `${dataDir}/sessions/${channelId}/${safeId}.jsonl`;
+		return `${dataDir}/sessions/${channelId}/${accountId}/${safeId}.jsonl`;
 	}
 }
