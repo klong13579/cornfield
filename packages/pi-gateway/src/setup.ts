@@ -123,6 +123,64 @@ theme: dark
 }
 `,
 	},
+	{
+		relPath: "knowledge/faq.md",
+		content: `# 常见问题
+
+本文件被自动加载到 system prompt 的附加上下文中。
+适合存放高频率被问到的、但不适合编码到 system prompt 的信息。
+
+## 示例格式
+
+### Q: 如何联系到机器人背后的运维？
+A: 请在钉钉中搜索“运维组”群。
+
+### Q: 机器人能做什么？
+A: 请阅读 \`mission.md\` 了解本机器人的能力。
+
+---
+
+⚠️ **请将真实 FAQ 添加在下方分隔线以下。**
+`,
+	},
+	{
+		relPath: "knowledge/external-workspaces.md",
+		content: `# 外部数据源映射
+
+本文件说明本机器人能够访问的外部数据源。
+仅作为参考文档，不实际触发数据同步。
+
+## 数据源列表
+
+| 名称 | 类型 | 访问方式 | 同步频率 |
+|---|---|---|---|
+| 钉钉知识库 | Workspace | dingtalk MCP | 手动 |
+| GitLab | Code | git MCP | 实时 |
+| 内部 Wiki | Web | http MCP | 定时 |
+
+⚠️ **请编辑本文件补充真实的数据源。**
+`,
+	},
+	{
+		relPath: "knowledge/handbook/server-restart.md",
+		content: `# 服务器重启手册（示例）
+
+## 场景
+某个服务实例出现 OOM 或崩溃，需要重启。
+
+## 步骤
+1. 确认告警与影响范围
+2. 连接跳板机：\`ssh jumpbox.prod\`
+3. 检查实例状态：\`systemctl status <service>\`
+4. 重启实例：\`systemctl restart <service>\`
+5. 验证健康：\`curl http://<host>:<port>/health\`
+6. 汇报结果到运维群
+
+## 警告
+- 重启前必须确认该实例在负载均衡中已下线
+- 跨可用区实例需额外审批
+`,
+	},
 ];
 
 const AGENT_SKELETON_DIRS = [
@@ -135,7 +193,7 @@ const AGENT_SKELETON_DIRS = [
 	"cron/logs",
 	"scripts",
 	"external",
-	"knowledge",
+	"knowledge/handbook",
 ];
 
 // Starter files inside otherwise empty directories (design §6.1)

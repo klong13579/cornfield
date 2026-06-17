@@ -21,6 +21,9 @@ const REQUIRED_FILES = [
 	"scripts/.gitkeep",
 	"external/.gitkeep",
 	"knowledge/.gitkeep",
+	"knowledge/faq.md",
+	"knowledge/external-workspaces.md",
+	"knowledge/handbook/server-restart.md",
 ];
 
 describe("setup", () => {
@@ -99,6 +102,27 @@ describe("setup", () => {
 		const parsed = JSON.parse(content);
 		expect(parsed).toHaveProperty("files");
 		expect(Array.isArray(parsed.files)).toBe(true);
+	});
+
+	test("knowledge/faq.md has default FAQ template content", async () => {
+		await ensureAgentDir(tmpDir);
+		const content = await Bun.file(path.join(tmpDir, "knowledge/faq.md")).text();
+		expect(content).toContain("常见问题");
+		expect(content).toContain("system prompt");
+	});
+
+	test("knowledge/external-workspaces.md has data source mapping template", async () => {
+		await ensureAgentDir(tmpDir);
+		const content = await Bun.file(path.join(tmpDir, "knowledge/external-workspaces.md")).text();
+		expect(content).toContain("外部数据源");
+		expect(content).toContain("钉钉知识库");
+	});
+
+	test("knowledge/handbook/server-restart.md has example handbook content", async () => {
+		await ensureAgentDir(tmpDir);
+		const content = await Bun.file(path.join(tmpDir, "knowledge/handbook/server-restart.md")).text();
+		expect(content).toContain("服务器重启");
+		expect(content).toContain("ssh");
 	});
 
 	test("resolveAgentDir defaults to ~/.omp/agents/<id> when no explicit dir", () => {
