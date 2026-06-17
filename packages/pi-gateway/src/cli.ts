@@ -517,88 +517,135 @@ async function cmdInstall(args: string[]): Promise<void> {
 	const configIdx = args.indexOf("--config");
 	const configPath = configIdx >= 0 ? args[configIdx + 1] : undefined;
 
-	console.log(`
-钉钉机器人安装向导
-================
-
-此向导将通过设备码流程配置机器人凭证。
-
-步骤：
-1. 在 https://open-dev.dingtalk.com 创建应用并获取 AppKey/AppSecret
-2. 在应用中添加机器人能力（Stream 模式）
-3. 在此输入凭证信息
-
-按回车跳过此步骤，后续手动编辑配置文件。
-`);
-
-	// Try to load existing config
 	const { loadConfig, getConfigPath } = await import("./config");
+	const { ensureAgentDir, resolveAgentDir } = await import("./setup");
 	const cfgPath = configPath ?? getConfigPath();
 	const existing = await loadConfig(cfgPath);
 
-	console.log(`配置文件路径: ${cfgPath}`);
-
-	const currentAppKey = (existing.channels.dingtalk as Record<string, unknown>)?.appKey as string | undefined;
-	const currentAppSecret = (existing.channels.dingtalk as Record<string, unknown>)?.appSecret as string | undefined;
-
 	console.log(`
-当前配置: ${currentAppKey ? "AppKey 已设置" : "未设置"}`);
-	console.log(`          ${currentAppSecret ? "AppSecret 已设置" : "未设置"}`);
+========================================`);
+	console.log(`  钉钉机器人安装向导`);
+	console.log(`========================================`);
+	console.log(`
+配置文件: ${cfgPath}`);
 
-	// Interactive input (when TTY)
+	// Non-interactive mode
 	if (!process.stdin.isTTY) {
 		console.log("非交互模式，跳过。请手动编辑配置文件。");
 		return;
 	}
 
 	const readline = await import("node:readline");
-	const rl = readline.createInterface({
-		input: process.stdin,
-		output: process.stdout,
-	});
-
+	const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 	const ask = (question: string): Promise<string> => new Promise(resolve => rl.question(question, resolve));
 
-	console.log("\n--- 钉钉机器人凭证配置 ---");
+	// Show existing accounts
+	const dtConfig = existing.channels?.dingtalk ?? {};
+	const existingAccounts = (dtConfig as any).accounts as Record<string, any> | undefined;
+	const hasTopLevel = !!(dtConfig as any).appKey;
 
-	const appKey = (await ask(`AppKey [${currentAppKey ?? ""}]: `)).trim() || currentAppKey || "";
-	const appSecret = (await ask(`AppSecret [${currentAppSecret ? "已设置" : ""}]: `)).trim() || currentAppSecret || "";
-	const robotCode =
-		(
-			await ask(
-				`RobotCode (可选) [${((existing.channels.dingtalk as Record<string, unknown>)?.robotCode as string) ?? ""}]: `,
-			)
-		).trim() ||
-		((existing.channels.dingtalk as Record<string, unknown>)?.robotCode as string) ||
-		"";
+	console.log(`\n已配置的账号:`);
+	if (hasTopLevel) {
+		console.log(`  [单账号] appKey: ${(dtConfig as any).appKey}`);
+	}
+	if (existingAccounts && Object.keys(existingAccounts).length > 0) {
+		for (const [id, acct] of Object.entries(existingAccounts)) {
+			console.log(`  ${id}: appKey=${(acct as any).appKey}, model=${(acct as any).model ?? "(默认)"}`);
+		}
+	}
+	if (!hasTopLevel && (!existingAccounts || Object.keys(existingAccounts).length === 0)) {
+		console.log(`  (无)`);
+	}
 
-	rl.close();
+	console.log(`\n--- 添加/修改机器人 ---`);
 
-	if (!appKey || !appSecret) {
-		console.log("\n⚠️ 未提供有效凭证，跳过写入。");
+	const accountId = (await ask(`账号ID (唯一标识, 如 ops/hr) []: `)).trim();
+	if (!accountId) {
+		console.log("\n⚠️ 账号ID不能为空，跳过。");
+		rl.close();
 		return;
 	}
 
-	// Write config
+	const appKey = (await ask(`AppKey: `)).trim();
+	if (!appKey) {
+		console.log("\n⚠️ AppKey不能为空，跳过。");
+		rl.close();
+		return;
+	}
+
+	// Dedup: check if same appKey is already configured
+	const allExistingKeys: string[] = [];
+	if (hasTopLevel) allExistingKeys.push((dtConfig as any).appKey);
+	if (existingAccounts) {
+		for (const acct of Object.values(existingAccounts)) {
+			allExistingKeys.push((acct as any).appKey);
+		}
+	}
+	if (allExistingKeys.includes(appKey)) {
+		console.log(`\n⚠️ AppKey "${appKey}" 已经配置过了，跳过。`);
+		rl.close();
+		return;
+	}
+
+	const appSecret = (await ask(`AppSecret: `)).trim();
+	if (!appSecret) {
+		console.log("\n⚠️ AppSecret不能为空，跳过。");
+		rl.close();
+		return;
+	}
+
+	const robotCode = (await ask(`RobotCode (可选, 默认同 AppKey) [${appKey}]: `)).trim() || appKey;
+	const model = (await ask(`模型ID (可选, 如 narwal-plan/minimax-m3) []: `)).trim() || undefined;
+	const agentDirInput = (await ask(`Agent 工作目录 (可选, 默认 ~/.omp/agents/${accountId}/) []: `)).trim();
+
+	rl.close();
+
+	// Resolve agentDir and create skeleton
+	const agentDir = resolveAgentDir(accountId, agentDirInput || undefined);
+	const created = await ensureAgentDir(agentDir);
+	if (created) {
+		console.log(`\n📁 已创建 Agent 工作目录: ${agentDir}`);
+	} else {
+		console.log(`\n📁 Agent 工作目录已存在: ${agentDir}`);
+	}
+
+	// Build config
+	const accounts = { ...(existingAccounts ?? {}) };
+	accounts[accountId] = {
+		appKey,
+		appSecret,
+		robotCode,
+		...(model ? { model } : {}),
+		...(agentDirInput ? { agentDir: agentDir } : {}),
+	};
+
+	// Config uses accounts map (not top-level appKey/appSecret)
 	const config = {
 		...existing,
 		channels: {
 			...existing.channels,
 			dingtalk: {
 				enabled: true,
-				appKey,
-				appSecret,
-				...(robotCode ? { robotCode } : {}),
+				dmPolicy: (dtConfig as any).dmPolicy ?? "open",
+				groupPolicy: (dtConfig as any).groupPolicy ?? "allowlist",
+				allowedUsers: (dtConfig as any).allowedUsers ?? [],
+				allowedGroups: (dtConfig as any).allowedGroups ?? [],
+				accounts,
 			},
 		},
 	};
 
 	await Bun.write(cfgPath, JSON.stringify(config, null, 2));
+
 	console.log(`\n✅ 配置已写入 ${cfgPath}`);
-	console.log(`
-下一步：运行以下命令启动网关
-  pi-gateway start --config ${cfgPath}
-`);
+	console.log(`   账号: ${accountId}`);
+	console.log(`   AppKey: ${appKey}`);
+	console.log(`   Model: ${model ?? "(默认)"}`);
+	console.log(`   AgentDir: ${agentDir}`);
+	console.log(`\n下一步：`);
+	console.log(`  omp gateway start              启动网关`);
+	console.log(`  omp gateway stop               停止网关`);
+	console.log(`  omp gateway service install    安装为系统服务(开机自启)`);
 }
 
 async function cmdService(subcommand?: string): Promise<void> {
@@ -640,7 +687,7 @@ void (async () => {
 	const subcommand = parsedArgs.subcommand;
 	const args = parsedArgs.args;
 	const gatewayConfigPath = parsedArgs.config;
-	switch (command) {
+		switch (command) {
 		case "start":
 			await cmdStart(gatewayConfigPath);
 			break;
@@ -657,6 +704,7 @@ void (async () => {
 			await cmdCron([subcommand ?? "help", ...args]);
 			break;
 		case "install":
+		case "setup":
 			await cmdInstall([subcommand ?? "", ...args]);
 			break;
 		case "service":
@@ -673,6 +721,10 @@ Usage:
   pi-gateway stop                                  Stop gateway (via PID file)
   pi-gateway status [--config <path>]             Show gateway status & PID
   pi-gateway config [--config <path>]             Show resolved configuration
+
+  pi-gateway setup [--config <path>]              Interactive DingTalk credential setup
+  pi-gateway install [--config <path>]            Alias for setup
+
   pi-gateway cron create <schedule> <cmd...>       Create a scheduled task
   pi-gateway cron list [--json]                    List all tasks
   pi-gateway cron pause <name>                     Pause a task
@@ -682,18 +734,19 @@ Usage:
   pi-gateway cron status                           Show scheduler status
   pi-gateway cron diagnose [--json]                Run diagnostics
   pi-gateway cron logs <name> [--json]             View execution logs
+
   pi-gateway service install                       Install as system service
   pi-gateway service uninstall                     Remove system service
   pi-gateway service start                         Start system service
   pi-gateway service stop                          Stop system service
   pi-gateway service status                        Show service status
-  pi-gateway install [--config <path>]             Configure DingTalk credentials interactively
-  pi-gateway service start                         Start system service
-  pi-gateway service stop                          Stop system service
-  pi-gateway service status                        Show service status
+
   pi-gateway help                                  Show this help
 
 Config file: ~/.omp/gateway.json
+Environment:
+  PI_LOG_LEVEL           Log level (debug|info|warn|error), default: info
+  PI_GATEWAY_CONFIG      Alternative config path
 `);
 			break;
 		default:

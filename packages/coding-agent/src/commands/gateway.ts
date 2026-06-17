@@ -65,7 +65,7 @@ function findAgentSessionPath(startedAt: number, endedAt: number): string | unde
 import { Args, Command, Flags, renderCommandHelp } from "@oh-my-pi/pi-utils/cli";
 import { initTheme } from "../modes/theme/theme";
 
-const ACTIONS = ["start", "stop", "status", "config", "cron", "service", "help"];
+const ACTIONS = ["start", "stop", "status", "config", "cron", "service", "setup", "help"];
 
 export default class Gateway extends Command {
 	static description = "Unified gateway: IM channels, cron scheduler, agent bridge";
@@ -99,6 +99,7 @@ export default class Gateway extends Command {
 		"  omp gateway service status               Show daemon status",
 		"",
 		"  ======== 配置 ========",
+		"  omp gateway setup                        Interactive DingTalk credential setup",
 		"  omp gateway config                       Print resolved config",
 		"  omp gateway config --config /path/gw.json Print custom config",
 		"",
@@ -189,6 +190,15 @@ export default class Gateway extends Command {
 			}
 			case "service": {
 				await this.#handleService();
+				break;
+			}
+			case "setup": {
+				// Delegate to pi-gateway CLI install
+				const { $ } = await import("bun");
+				const path = require("node:path");
+				const pkg = require.resolve("@oh-my-pi/pi-gateway/package.json");
+				const cliPath = path.join(path.dirname(pkg), "src", "cli.ts");
+				await $`bun ${cliPath} install`.quiet().nothrow();
 				break;
 			}
 			case "help":
