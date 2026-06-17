@@ -421,8 +421,7 @@ export class DingTalkChannel extends BaseChannel {
 
 	async sendMessage(msg: OutboundMessage): Promise<void> {
 		if (!msg.sessionWebhook) {
-			logger.warn("[DingTalk] sendMessage: no sessionWebhook provided, skipping");
-			return;
+			throw new Error("[DingTalk] sendMessage failed: missing sessionWebhook");
 		}
 
 		const text =
@@ -454,11 +453,12 @@ export class DingTalkChannel extends BaseChannel {
 			if (!res.ok) {
 				const errText = await res.text();
 				logger.error("[DingTalk] send failed", { status: res.status, body: errText });
-			} else {
-				logger.debug("[DingTalk] message sent", { conversationId: msg.conversationId });
+				throw new Error(`[DingTalk] send failed: ${res.status} ${errText}`);
 			}
+			logger.debug("[DingTalk] message sent", { conversationId: msg.conversationId });
 		} catch (err) {
 			logger.error("[DingTalk] send error", { error: String(err) });
+			throw err;
 		}
 	}
 

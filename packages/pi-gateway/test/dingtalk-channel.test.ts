@@ -4,8 +4,11 @@
  * Tests: message parsing, dedup, permission policies, AI Card, config validation.
  */
 
-import { describe, expect, test } from "bun:test";
-import { parseRobotMessage } from "../src/channels/dingtalk";
+import * as fs from "node:fs/promises";
+import { describe, expect, spyOn, test } from "bun:test";
+import { fixNewlines } from "../src/channels/dingtalk-card";
+import { getDingTalkConfig, loadConfig } from "../src/config";
+import { DingTalkChannel, parseRobotMessage } from "../src/channels/dingtalk";
 import type { DingTalkRawMessage } from "../src/types";
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -42,8 +45,8 @@ describe("message parsing", () => {
 		const raw = makeRaw({ text: { content: "你好" }, msgtype: "text" });
 		const result = parseRobotMessage(raw, "dingtalk", "__default__", "msg001");
 		expect(result).not.toBeNull();
-		expect(result!.content.type).toBe("text");
-		expect(result!.content.text).toBe("你好");
+		if (result?.content.type !== "text") throw new Error("expected text content");
+		expect(result.content.text).toBe("你好");
 		expect(result!.userId).toBe("staff001");
 		expect(result!.isGroup).toBe(false);
 		expect(result!.messageId).toBe("msg001");
@@ -69,9 +72,8 @@ describe("message parsing", () => {
 			senderStaffId: "staff003",
 		});
 		const result = parseRobotMessage(raw, "dingtalk", "__default__", "msg003");
-		expect(result).not.toBeNull();
-		expect(result!.content.type).toBe("voice");
-		expect(result!.content.text).toBe("你好这是一条语音消息");
+		if (result?.content.type !== "voice") throw new Error("expected voice content");
+		expect(result.content.text).toBe("你好这是一条语音消息");
 	});
 
 	test("parses file message", () => {
@@ -82,9 +84,8 @@ describe("message parsing", () => {
 			senderStaffId: "staff004",
 		});
 		const result = parseRobotMessage(raw, "dingtalk", "__default__", "msg004");
-		expect(result).not.toBeNull();
-		expect(result!.content.type).toBe("file");
-		expect(result!.content.filename).toBe("report.pdf");
+		if (result?.content.type !== "file") throw new Error("expected file content");
+		expect(result.content.filename).toBe("report.pdf");
 	});
 
 	test("detects group message", () => {
@@ -110,14 +111,44 @@ describe("message parsing", () => {
 	});
 });
 
+describe("message sending", () => {
+	test("throws when sessionWebhook is missing", async () => {
+		const channel = new DingTalkChannel();
+		await expect(
+			channel.sendMessage({
+				channelId: "dingtalk",
+				conversationId: "conv1",
+				content: { type: "text", text: "hello" },
+			}),
+		).rejects.toThrow("missing sessionWebhook");
+	});
+
+	test("throws when DingTalk webhook returns non-2xx", async () => {
+		const channel = new DingTalkChannel();
+		const fetchSpy = spyOn(globalThis, "fetch").mockResolvedValue(new Response("bad", { status: 500 }));
+		try {
+			await expect(
+				channel.sendMessage({
+					channelId: "dingtalk",
+					conversationId: "conv1",
+					sessionWebhook: "https://example.com/webhook",
+					content: { type: "text", text: "hello" },
+				}),
+			).rejects.toThrow("[DingTalk] send failed: 500 bad");
+			expect(fetchSpy).toHaveBeenCalledTimes(1);
+		} finally {
+			fetchSpy.mockRestore();
+		}
+	});
+});
+
 // ═══════════════════════════════════════════════════════════════════════
 // Config Validation
 // ═══════════════════════════════════════════════════════════════════════
 
 describe("config validation", () => {
 	test("validates DingTalk config schema", async () => {
-		const { loadConfig } = await import("../src/config");
-		const tmpDir = await import("node:fs").then(fs => fs.promises.mkdtemp("/tmp/pi-gw-config-"));
+		const tmpDir = await fs.mkdtemp("/tmp/pi-gw-config-");
 
 		const configPath = `${tmpDir}/gateway.json`;
 		await Bun.write(
@@ -145,8 +176,7 @@ describe("config validation", () => {
 	});
 
 	test("validates multi-account config", async () => {
-		const { loadConfig } = await import("../src/config");
-		const tmpDir = await import("node:fs").then(fs => fs.promises.mkdtemp("/tmp/pi-gw-config-"));
+		const tmpDir = await fs.mkdtemp("/tmp/pi-gw-config-");
 
 		const configPath = `${tmpDir}/gateway-multi.json`;
 		await Bun.write(
@@ -167,7 +197,6 @@ describe("config validation", () => {
 		);
 
 		const config = await loadConfig(configPath);
-		const { getDingTalkConfig } = await import("../src/config");
 		const dtConfig = getDingTalkConfig(config);
 
 		expect(dtConfig).not.toBeNull();
@@ -178,8 +207,7 @@ describe("config validation", () => {
 	});
 
 	test("rejects config with missing credentials", async () => {
-		const { loadConfig } = await import("../src/config");
-		const tmpDir = await import("node:fs").then(fs => fs.promises.mkdtemp("/tmp/pi-gw-config-"));
+		const tmpDir = await fs.mkdtemp("/tmp/pi-gw-config-");
 
 		const configPath = `${tmpDir}/gateway-bad.json`;
 		await Bun.write(
@@ -196,7 +224,6 @@ describe("config validation", () => {
 		);
 
 		const config = await loadConfig(configPath);
-		const { getDingTalkConfig } = await import("../src/config");
 		const dtConfig = getDingTalkConfig(config);
 
 		// Should still be loadable (validation strips invalid)
@@ -210,9 +237,7 @@ describe("config validation", () => {
 // ═══════════════════════════════════════════════════════════════════════
 
 describe("AI Card markdown formatting", () => {
-	test("fixNewlines preserves code blocks", async () => {
-		const { fixNewlines } = await import("../src/channels/dingtalk-card");
-
+	test("fixNewlines preserves code blocks", () => {
 		const input = "normal text\n```\ncode line 1\ncode line 2\n```\nmore text";
 		const result = fixNewlines(input);
 
@@ -224,9 +249,7 @@ describe("AI Card markdown formatting", () => {
 		expect(result).toContain("```<br>more text");
 	});
 
-	test("fixNewlines merges quotes", async () => {
-		const { fixNewlines } = await import("../src/channels/dingtalk-card");
-
+	test("fixNewlines merges quotes", () => {
 		const input = "> line 1\n> line 2\n> line 3\n\nnormal text";
 		const result = fixNewlines(input);
 
@@ -234,9 +257,7 @@ describe("AI Card markdown formatting", () => {
 		expect(result).toContain("normal text");
 	});
 
-	test("fixNewlines handles tables", async () => {
-		const { fixNewlines } = await import("../src/channels/dingtalk-card");
-
+	test("fixNewlines handles tables", () => {
 		// Table rows should keep \n before them
 		const input = "header\n| col1 | col2 |\n| --- | --- |\n| a | b |";
 		const result = fixNewlines(input);
@@ -250,12 +271,8 @@ describe("AI Card markdown formatting", () => {
 // ═══════════════════════════════════════════════════════════════════════
 
 describe("message dedup", () => {
-	const DINGTALK_API = "https://api.dingtalk.com";
 
-	test("checkAndMarkDingtalkMessage returns true for duplicate", async () => {
-		// Access the module to get the dedup function
-		const module = await import("../src/channels/dingtalk");
-
+	test("checkAndMarkDingtalkMessage returns true for duplicate", () => {
 		// We need to test through Duck Typing since checkAndMarkDingtalkMessage
 		// is module-scoped, not exported. Let's verify via the channel behavior
 		// by checking that double-processing of the same msgId is prevented.
@@ -263,7 +280,7 @@ describe("message dedup", () => {
 		// The dedup is implemented inside the channel. We test it by
 		// checking that the module imports without issue and the channel
 		// compiles properly (already verified by tsgo).
-		expect(module.DingTalkChannel).toBeDefined();
+		expect(DingTalkChannel).toBeDefined();
 
 		// Direct test of dedup behavior: we can test the exported
 		// type by ensuring the core mechanism works logically
