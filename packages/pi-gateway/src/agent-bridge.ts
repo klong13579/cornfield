@@ -16,6 +16,7 @@
  */
 
 import { logger } from "@oh-my-pi/pi-utils";
+import type { FileSink } from "bun";
 import { resolveCredentialEnvVars } from "./credential-resolver";
 import type { InboundMessage, SessionRecord } from "./types";
 
@@ -36,6 +37,14 @@ type RpcHostToolResult = {
 	isError?: boolean;
 };
 
+type CircuitState = "closed" | "open" | "half-open";
+
+const CRASH_WINDOW_MS = 10 * 60_000;
+const CRASH_WINDOW_LIMIT = 5;
+const CIRCUIT_FAILURE_THRESHOLD = 10;
+const CIRCUIT_COOLDOWN_MS = 30_000;
+const CIRCUIT_OPEN_MESSAGE = "系统繁忙，请稍后再试。";
+
 export interface AgentBridgeOptions {
 	/** Path to omp binary (default: "omp") */
 	ompPath?: string;
@@ -55,6 +64,10 @@ export interface AgentBridgeOptions {
 interface AgentEvent {
 	type: string;
 	id?: string;
+	command?: string;
+	success?: boolean;
+	error?: string;
+	data?: unknown;
 	message?: {
 		role?: string;
 		content?: Array<{ type: string; text?: string }>;
@@ -68,7 +81,14 @@ interface PendingPrompt {
 	resolve: (events: AgentEvent[]) => void;
 	reject: (error: Error) => void;
 	events: AgentEvent[];
-	timeout: ReturnType<typeof setTimeout>;
+	timeout: NodeJS.Timeout;
+}
+
+interface PendingCommand {
+	command: string;
+	resolve: (event: AgentEvent) => void;
+	reject: (error: Error) => void;
+	timeout: NodeJS.Timeout;
 }
 
 export class AgentBridge {
@@ -77,15 +97,24 @@ export class AgentBridge {
 	#ready = false;
 	/** Map of prompt IDs to pending prompts */
 	#pendingPrompts = new Map<string, PendingPrompt>();
+	#pendingCommands = new Map<string, PendingCommand>();
 	/** Currently active prompt ID (for routing session.subscribe events) */
 	#activePromptId: string | undefined;
+	#activeSessionPath: string | undefined;
+	#operationTail: Promise<void> = Promise.resolve();
 	/** Counter for generating unique prompt IDs */
 	#promptIdCounter = 0;
+	#commandIdCounter = 0;
 	/** stderr reader (kept alive to prevent hanging pipe) */
 	#stderrReader?: Promise<void>;
 	/** stdout reader (kept alive to process events) */
 	#stdoutReader?: Promise<void>;
 	#crashCount = 0;
+	#crashTimestamps: number[] = [];
+	#crashSuppressed = false;
+	#circuitState: CircuitState = "closed";
+	#circuitFailures = 0;
+	#circuitOpenedAt = 0;
 	#options: AgentBridgeOptions;
 	#reconnectGuard = false;
 
@@ -106,6 +135,12 @@ export class AgentBridge {
 		this.#ready = false;
 		this.#reconnectGuard = false;
 		this.#activePromptId = undefined;
+		this.#crashTimestamps = [];
+		this.#crashSuppressed = false;
+		this.#circuitState = "closed";
+		this.#circuitFailures = 0;
+		this.#circuitOpenedAt = 0;
+		this.#activeSessionPath = undefined;
 
 		if (this.#proc) {
 			this.#proc.kill();
@@ -121,10 +156,19 @@ export class AgentBridge {
 			pending.reject(error);
 		}
 		this.#pendingPrompts.clear();
+		for (const pending of this.#pendingCommands.values()) {
+			clearTimeout(pending.timeout);
+			pending.reject(error);
+		}
+		this.#pendingCommands.clear();
 	}
 
 	get isRunning(): boolean {
 		return this.#ready && this.#proc !== null;
+	}
+
+	async waitForIdle(): Promise<void> {
+		await this.#operationTail;
 	}
 
 	// ═══════════════════════════════════════════════════════════════
@@ -134,50 +178,100 @@ export class AgentBridge {
 	/**
 	 * Forward a message to OMP and return the assistant's response text.
 	 */
-	async forward(msg: InboundMessage, _session: SessionRecord): Promise<string | null> {
+	async forward(msg: InboundMessage, session: SessionRecord): Promise<string | null> {
 		const text = this.#extractText(msg);
 		if (!text.trim()) {
 			logger.debug("Empty message, skipping agent");
 			return null;
 		}
 
-		if (!this.isRunning) {
-			logger.warn("Agent bridge not running, attempting restart");
-			await this.#spawnAndWaitReady();
-		}
+		return this.#runExclusive(async () => {
+			if (!this.#canAttemptPrompt()) {
+				logger.warn("Agent bridge circuit is open", { openedAt: this.#circuitOpenedAt });
+				return CIRCUIT_OPEN_MESSAGE;
+			}
 
-		logger.debug("Forwarding to agent", {
-			userId: msg.userId,
-			conversationId: msg.conversationId,
-			messageLength: text.length,
+			if (!this.isRunning) {
+				logger.warn("Agent bridge not running, attempting restart");
+				await this.#spawnAndWaitReady();
+			}
+
+			logger.debug("Forwarding to agent", {
+				userId: msg.userId,
+				conversationId: msg.conversationId,
+				messageLength: text.length,
+				sessionPath: session.ompSessionPath,
+			});
+
+			const timeoutMs = this.#options.timeoutMs ?? 120_000;
+
+			try {
+				if (session.ompSessionPath) {
+					await this.#switchSession(session.ompSessionPath);
+				}
+				const events = await this.#promptAndWait(text, timeoutMs);
+				const response = this.#extractAssistantText(events);
+
+				if (!response) {
+					logger.warn("Agent returned empty response");
+					return "（Agent 未返回内容）";
+				}
+
+				logger.debug("Raw response before format", { text: response.slice(0, 300) });
+
+				const formatted = this.#formatResponse(response.trim());
+				logger.debug("Agent responded", { responseLength: formatted.length, preview: formatted.slice(0, 100) });
+				this.#recordPromptSuccess();
+				return formatted;
+			} catch (err) {
+				this.#recordPromptFailure();
+				if (this.#isCrashError(err)) {
+					logger.warn("Agent process crashed, attempting recovery");
+					await this.#attemptRecovery();
+					return "系统正在恢复中，请稍后再试。";
+				}
+				const message = err instanceof Error ? err.message : String(err);
+				logger.error("Agent bridge failed", { error: message });
+				return `系统错误：${message}`;
+			}
 		});
+	}
 
-		const timeoutMs = this.#options.timeoutMs ?? 120_000;
-
-		try {
-			const events = await this.#promptAndWait(text, timeoutMs);
-			const response = this.#extractAssistantText(events);
-
-			if (!response) {
-				logger.warn("Agent returned empty response");
-				return "（Agent 未返回内容）";
-			}
-
-			logger.debug("Raw response before format", { text: response.slice(0, 300) });
-
-			const formatted = this.#formatResponse(response.trim());
-			logger.debug("Agent responded", { responseLength: formatted.length, preview: formatted.slice(0, 100) });
-			return formatted;
-		} catch (err) {
-			if (this.#isCrashError(err)) {
-				logger.warn("Agent process crashed, attempting recovery");
-				await this.#attemptRecovery();
-				return "系统正在恢复中，请稍后再试。";
-			}
-			const message = err instanceof Error ? err.message : String(err);
-			logger.error("Agent bridge failed", { error: message });
-			return `系统错误：${message}`;
+	#canAttemptPrompt(): boolean {
+		if (this.#circuitState !== "open") return true;
+		if (Date.now() - this.#circuitOpenedAt >= CIRCUIT_COOLDOWN_MS) {
+			this.#circuitState = "half-open";
+			return true;
 		}
+		return false;
+	}
+
+	#recordPromptSuccess(): void {
+		this.#circuitState = "closed";
+		this.#circuitFailures = 0;
+		this.#circuitOpenedAt = 0;
+	}
+
+	#recordPromptFailure(): void {
+		this.#circuitFailures++;
+		if (this.#circuitFailures >= CIRCUIT_FAILURE_THRESHOLD || this.#circuitState === "half-open") {
+			this.#circuitState = "open";
+			this.#circuitOpenedAt = Date.now();
+			logger.warn("Agent bridge circuit opened", { failures: this.#circuitFailures });
+		}
+	}
+
+	async switchSession(sessionPath: string): Promise<void> {
+		await this.#runExclusive(() => this.#switchSession(sessionPath));
+	}
+
+	async #switchSession(sessionPath: string): Promise<void> {
+		if (this.#activeSessionPath === sessionPath) return;
+		const response = await this.#sendCommandAndWait("switch_session", { sessionPath }, 30_000);
+		if (response.data && typeof response.data === "object" && "cancelled" in response.data && response.data.cancelled) {
+			throw new Error(`Switch session cancelled: ${sessionPath}`);
+		}
+		this.#activeSessionPath = sessionPath;
 	}
 
 	// ═══════════════════════════════════════════════════════════════
@@ -185,6 +279,9 @@ export class AgentBridge {
 	// ═══════════════════════════════════════════════════════════════
 
 	async #spawnAndWaitReady(): Promise<void> {
+		if (this.#crashSuppressed) {
+			throw new Error("Agent bridge is in ERROR state after repeated crashes");
+		}
 		if (this.#reconnectGuard) return;
 		this.#reconnectGuard = true;
 
@@ -195,6 +292,7 @@ export class AgentBridge {
 			}
 			this.#ready = false;
 			this.#activePromptId = undefined;
+			this.#activeSessionPath = undefined;
 
 			// Reject any pending prompts
 			const error = new Error("Agent bridge restarting");
@@ -203,6 +301,11 @@ export class AgentBridge {
 				pending.reject(error);
 			}
 			this.#pendingPrompts.clear();
+			for (const pending of this.#pendingCommands.values()) {
+				clearTimeout(pending.timeout);
+				pending.reject(error);
+			}
+			this.#pendingCommands.clear();
 
 			const ompPath = this.#options.ompPath ?? "omp";
 			const args = ["--mode", "rpc"];
@@ -220,7 +323,7 @@ export class AgentBridge {
 			env: { ...process.env, ...resolveCredentialEnvVars() },
 			});
 
-			const stdin = proc.stdin as import("bun").FileSink;
+			const stdin = proc.stdin as FileSink;
 			if (!stdin || typeof stdin.write !== "function") {
 				logger.error("Invalid stdin for agent bridge");
 				throw new Error("Failed to initialize agent bridge stdin");
@@ -274,6 +377,7 @@ export class AgentBridge {
 				this.#crashCount = 0;
 				logger.debug("Agent RPC process ready", { pid: proc.pid });
 			} catch (err) {
+				this.#recordCrash();
 				proc.kill();
 				this.#proc = null;
 				this.#stdinWriter = undefined;
@@ -396,13 +500,25 @@ export class AgentBridge {
 						pending.events.push(parsed);
 						this.#activePromptId = cmdId;
 					}
-				} else if (!cmdSuccess) {
-					// Command failed — reject the pending promise
-					const pending = this.#pendingPrompts.get(cmdId);
-					if (pending) {
-						clearTimeout(pending.timeout);
-						this.#pendingPrompts.delete(cmdId);
-						pending.reject(new Error(`RPC command failed: ${command}`));
+					return;
+				}
+
+				const pendingPrompt = this.#pendingPrompts.get(cmdId);
+				if (pendingPrompt) {
+					clearTimeout(pendingPrompt.timeout);
+					this.#pendingPrompts.delete(cmdId);
+					pendingPrompt.reject(new Error(parsed.error ?? `RPC command failed: ${command}`));
+					return;
+				}
+
+				const pendingCommand = this.#pendingCommands.get(cmdId);
+				if (pendingCommand) {
+					clearTimeout(pendingCommand.timeout);
+					this.#pendingCommands.delete(cmdId);
+					if (cmdSuccess) {
+						pendingCommand.resolve(parsed);
+					} else {
+						pendingCommand.reject(new Error(parsed.error ?? `RPC command failed: ${command}`));
 					}
 				}
 				return;
@@ -428,6 +544,38 @@ export class AgentBridge {
 		} catch {
 			// Non-JSON line — ignore
 		}
+	}
+
+	async #runExclusive<T>(operation: () => Promise<T>): Promise<T> {
+		const previous = this.#operationTail;
+		const { promise: current, resolve } = Promise.withResolvers<void>();
+		this.#operationTail = previous.catch(() => {}).then(() => current);
+		await previous.catch(() => {});
+		try {
+			return await operation();
+		} finally {
+			resolve();
+		}
+	}
+
+	async #sendCommandAndWait(command: string, payload: Record<string, unknown>, timeoutMs: number): Promise<AgentEvent> {
+		const commandId = `c_${++this.#commandIdCounter}`;
+		const { promise, resolve, reject } = Promise.withResolvers<AgentEvent>();
+		const timeout = setTimeout(() => {
+			this.#pendingCommands.delete(commandId);
+			reject(new Error(`Agent RPC command ${command} timed out after ${timeoutMs}ms`));
+		}, timeoutMs);
+		this.#pendingCommands.set(commandId, { command, resolve, reject, timeout });
+
+		try {
+			this.#writeToStdin(JSON.stringify({ type: command, id: commandId, ...payload }) + "\n");
+		} catch (err) {
+			clearTimeout(timeout);
+			this.#pendingCommands.delete(commandId);
+			reject(err instanceof Error ? err : new Error(String(err)));
+		}
+
+		return promise;
 	}
 
 	async #promptAndWait(message: string, timeoutMs: number): Promise<AgentEvent[]> {
@@ -483,7 +631,22 @@ export class AgentBridge {
 		return false;
 	}
 
+	#recordCrash(): void {
+		const now = Date.now();
+		this.#crashTimestamps.push(now);
+		this.#crashTimestamps = this.#crashTimestamps.filter(timestamp => now - timestamp <= CRASH_WINDOW_MS);
+		if (this.#crashTimestamps.length > CRASH_WINDOW_LIMIT) {
+			this.#crashSuppressed = true;
+			this.#ready = false;
+			logger.error("Agent bridge entered ERROR state after repeated crashes", { crashes: this.#crashTimestamps.length });
+		}
+	}
+
 	async #attemptRecovery(): Promise<void> {
+		if (this.#crashSuppressed) {
+			logger.error("Agent bridge recovery suppressed after repeated crashes", { crashes: this.#crashTimestamps.length });
+			return;
+		}
 		const maxRetries = this.#options.maxCrashRetries ?? 3;
 		const baseDelay = this.#options.crashBackoffMs ?? 1000;
 
@@ -502,6 +665,7 @@ export class AgentBridge {
 			delayMs: delay,
 		});
 
+		if (this.#crashSuppressed) return;
 		await Bun.sleep(delay);
 		await this.#spawnAndWaitReady();
 	}
@@ -512,9 +676,10 @@ export class AgentBridge {
 
 	/** Write data to the agent's stdin. */
 	#writeToStdin(data: string): void {
-		if (this.#stdinWriter) {
-			this.#stdinWriter.write(new TextEncoder().encode(data));
+		if (!this.#stdinWriter) {
+			throw new Error("Agent process not running");
 		}
+		this.#stdinWriter.write(new TextEncoder().encode(data));
 	}
 
 	#extractText(msg: InboundMessage): string {
