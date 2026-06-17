@@ -9,7 +9,7 @@
 
 ## 1. 当前状态
 
-### 1.1 已完成能力（Phase 1-6）
+### 1.1 已完成能力（Phase 1-6 + 追加修复）
 
 | Phase | 能力 | 状态 |
 |---|---|---|
@@ -18,31 +18,48 @@
 | Phase 3 | AI Card 流式（`dingtalk-card.ts` 令牌桶限流 + QPS 自适应退避） + 媒体下载/上传（`dingtalk-media.ts`）| ✅ |
 | Phase 4 | 多账号 channel 注册、`PermissionPolicy` / `DingtalkAccountConfig` / `setAccountId` 接入、standalone `parseRobotMessage` 导出 | ✅ |
 | Phase 5 | install CLI（交互式钉钉凭证配置）、agents 命令工作区脚手架 | ✅ |
-| Phase 6 | 14 个单元测试 + 钉钉连接 + RPC 集成（7.25s 含推理）| ✅ |
+| Phase 6 | 36 个单元测试 + 钉钉连接 + RPC 集成（含真实模型推理）| ✅ |
+| Phase 7a | accounts 数组→map 重构：`Record<string, DingtalkAccountConfig>` 替换数组 (`types.ts` / `config.ts` / `gateway.ts` / 测试) | ✅ |
+| Phase 7b | 凭证存储：`credential-resolver.ts` 从 agent.db `auth_credentials` 表读取 API key，spawn 时自动设为环境变量 | ✅ |
+| Phase 7c | Extension 自动应答：bridge 自动取消 agent 发出的 `extension_ui_request`（confirm/select/input/editor），防止 agent 挂起 | ✅ |
+| Phase 7d | 响应格式化：剥离 `<think>...</think>` 标签；MAX_LENGTH 从 2000 增至 4000 | ✅ |
+| Phase 7e | PID 文件 + `getGatewayStatus()` + `stopGatewayDaemon()`：跨进程检测运行状态、`omp gateway stop` 命令 | ✅ |
+| Phase 7f | 系统服务修复：launchd `cliPath` 修正、PATH 追加 `~/.bun/bin`、`bootstrap`/`bootout` 替代 `load`/`stop` | ✅ |
+| Phase 7g | 启动去重 + 孤儿进程清理：PID 文件检查防止重复 start；stop 时清理 PPID=1 的孤儿 omp RPC 进程 | ✅ |
 
-### 1.2 当前架构（实施前）
+### 1.2 当前架构（当前状态）
 
 ```
-用户消息 → DingTalk Stream (单 appKey)
+用户消息 → DingTalk Stream (多账号: accounts map)
               ↓
-        DingTalkChannel (parseRobotMessage)
+        DingTalkChannel (parseRobotMessage, 含 accountId 路由)
               ↓
         Gateway.#handleInboundMessage
               ↓
-        AgentBridge (1 个)
+        #forwardToAgent (按 msg.accountId 路由到对应 bridge)
               ↓
-        Agent (1 个进程，cwd 错误)
+        AgentBridge[N] (per-account)
+              ├── credential-resolver 自动注入 API key
+              ├── extension_ui_request 自动取消
+              ├── host_tool_call 自动拒绝
+              └── formatResponse: 剥 think 标签 + 截断
               ↓
-        单一 session 文件
+        Agent (omp --mode rpc --model <account.model>)
+              ↓
+        模型响应 → DingTalk 回复
 ```
 
 ### 1.3 已验证
 
 - 钉钉 Stream 连接成功（opencode 机器人 appKey `dingnubwjpndghf8sox8`）
 - 心跳 PING/PONG（10s ping / 20s timeout）
-- RPC 集成（AgentBridge → Agent(omp --mode rpc) → 模型响应，7.25s）
-- 34 单元测试通过，1 跳过（需真实 LLM 的桥转发测试）
-- 账号路由问题已修复（`channelId` 用基础 `"dingtalk"`，加 `accountId` 字段到 `InboundMessage`）
+- 多账号模式：accounts map 配置，per-account bridge + per-account model
+- RPC 集成（AgentBridge → Agent(omp --mode rpc) → 模型响应，含 narwal-plan/minimax-m3）
+- 凭证存储：从 agent.db 读取 API key，不依赖 shell 环境变量
+- Extension/UI 请求自动处理：不阻塞 agent 响应
+- PID 文件 + `omp gateway stop/status`：跨进程生命周期管理
+- 系统服务：launchd bootstrap/bootout，PATH 含 ~/.bun/bin
+- 36 单元测试通过，1 跳过（需真实 LLM 的桥转发测试）
 
 ---
 
@@ -52,28 +69,28 @@
 
 按严重度和修复阶段分组：
 
-| Gap | 严重度 | 阶段 | 修复位置 | 设计依据 |
-|---|---|---|---|---|
-| Agent spawn `cwd` 与 agentDir 默认值 | 高 | Phase 7 | `agent-bridge.ts` + `gateway.ts` | §5.3 / §5.5 |
-| 缺失 `switchSession()` / `waitForIdle()` / `getState()` | 高 | Phase 7 | `agent-bridge.ts` | §8.1 / §2.3 |
-| 无 SessionManager（无队列、无并发处理）| 高 | Phase 7 | 新建 `session-manager.ts` | §3 / §7 |
-| 无熔断器（连续超时 → 队列堆积 → OOM）| 高 | Phase 7 | `agent-bridge.ts` | §11.2 |
-| 无优雅关闭（stop 直接 kill，正在处理的消息丢失）| 高 | Phase 7 | `gateway.ts` | §11.4 |
-| 队列无深度保护 | 高 | Phase 7 | `session-manager.ts` | §11.3 |
-| agentDir 默认值（`~/.omp/agents/<accountId>/`）未生效 | 中 | Phase 7 | `agent-bridge.ts` | §5.5 |
-| agentDir 不存在时未自动创建 skeleton + mission.md 占位 | 中 | Phase 7 | `gateway.ts` | §6.7 |
-| bridge 持续崩溃检测（10分钟 > 5次）未实现 | 中 | Phase 7 | `agent-bridge.ts` | §11.1 |
-| session 路径迁移到 agentDir/sessions/ | 中 | Phase 7 | `gateway.ts` | §7.2 |
-| accounts 数组→map 的代码重构 | 中 | Phase 8 | `types.ts` + `config.ts` + `gateway.ts` | §5.1 |
-| appSecret `$ENV_VAR` 解析实现 | 中 | Phase 8 | `config.ts` | §5.4 |
-| appSecret 未设置时启动失败 | 中 | Phase 8 | `config.ts` | §5.4 |
-| appSecret 日志/错误不展开 | 中 | Phase 8 | `logger` + `config.ts` | §5.4 |
-| AI Card 接入主消息流 | 中 | Phase 8 | `gateway.ts` | §9.1 |
-| session 文件无压缩（持续增长 → 加载慢）| 中 | Phase 8 | `agent-bridge.ts` | §11.5 |
-| 多账号下默认 bridge 白启动 | 中 | Phase 8 | `gateway.ts` | §5.3 |
-| 速率限制 | 中 | Phase 9 | `session-manager.ts` | §11.6 |
-| 聚合指标 | 中 | Phase 9 | 新建 `metrics.ts` | §12 |
-| 健康检查 | 低 | Phase 10 | 新建 `health.ts` | §11.7 |
+| Gap | 严重度 | 阶段 | 修复位置 | 设计依据 | 状态 |
+|---|---|---|---|---|---|
+| Agent spawn `cwd` 与 agentDir 默认值 | 高 | Phase 7 | `agent-bridge.ts` + `gateway.ts` | §5.3 / §5.5 | ❌ 待实施 |
+| 缺失 `switchSession()` / `waitForIdle()` / `getState()` | 高 | Phase 7 | `agent-bridge.ts` | §8.1 / §2.3 | ❌ 待实施 |
+| 无 SessionManager（无队列、无并发处理）| 高 | Phase 7 | 新建 `session-manager.ts` | §3 / §7 | ❌ 待实施 |
+| 无熔断器（连续超时 → 队列堆积 → OOM）| 高 | Phase 7 | `agent-bridge.ts` | §11.2 | ❌ 待实施 |
+| 无优雅关闭（stop 直接 kill，正在处理的消息丢失）| 高 | Phase 7 | `gateway.ts` | §11.4 | ❌ 待实施 |
+| 队列无深度保护 | 高 | Phase 7 | `session-manager.ts` | §11.3 | ❌ 待实施 |
+| agentDir 默认值（`~/.omp/agents/<accountId>/`）未生效 | 中 | Phase 7 | `agent-bridge.ts` | §5.5 | ❌ 待实施 |
+| agentDir 不存在时未自动创建 skeleton + mission.md 占位 | 中 | Phase 7 | `gateway.ts` | §6.7 | ❌ 待实施 |
+| bridge 持续崩溃检测（10分钟 > 5次）未实现 | 中 | Phase 7 | `agent-bridge.ts` | §11.1 | ❌ 待实施 |
+| session 路径迁移到 agentDir/sessions/ | 中 | Phase 7 | `gateway.ts` | §7.2 | ❌ 待实施 |
+| accounts 数组→map 的代码重构 | 中 | Phase 8 | `types.ts` + `config.ts` + `gateway.ts` | §5.1 | ✅ 已完成 |
+| appSecret `$ENV_VAR` 解析实现 | 中 | Phase 8 | `config.ts` | §5.4 | ❌ 待实施 |
+| appSecret 未设置时启动失败 | 中 | Phase 8 | `config.ts` | §5.4 | ❌ 待实施 |
+| appSecret 日志/错误不展开 | 中 | Phase 8 | `logger` + `config.ts` | §5.4 | ❌ 待实施 |
+| AI Card 接入主消息流 | 中 | Phase 8 | `gateway.ts` | §9.1 | ❌ 待实施 |
+| session 文件无压缩（持续增长 → 加载慢）| 中 | Phase 8 | `agent-bridge.ts` | §11.5 | ❌ 待实施 |
+| 多账号下默认 bridge 白启动 | 中 | Phase 8 | `gateway.ts` | §5.3 | ❌ 待实施 |
+| 速率限制 | 中 | Phase 9 | `session-manager.ts` | §11.6 | ❌ 待实施 |
+| 聚合指标 | 中 | Phase 9 | 新建 `metrics.ts` | §12 | ❌ 待实施 |
+| 健康检查 | 低 | Phase 10 | 新建 `health.ts` | §11.7 | ❌ 待实施 |
 
 ### 2.2 详细分析
 
@@ -430,28 +447,65 @@ function resolveSecret(value: string): string {
 - `config.ts`：反序列化后保留 key
 - `gateway.ts`：遍历 `Object.entries(accounts)` 创建 bridge
 
-#### 2.2.15 速率限制 (中)
+#### 2.2.15 已完成项的补充文档
 
-**算法：** 滑动窗口，每个 conversationId 每 10 秒最多 3 条。
+以下能力已在 Phase 6 基础上追加实现，但原设计文档中无对应章节。在此记录供参考。
 
-**实现：**
-```typescript
-class RateLimiter {
-  #windows = new Map<string, number[]>();
-  
-  allow(conversationId: string, limit = 3, windowMs = 10_000): boolean {
-    const now = Date.now();
-    const window = (this.#windows.get(conversationId) || [])
-      .filter(t => now - t < windowMs);
-    if (window.length >= limit) return false;
-    window.push(now);
-    this.#windows.set(conversationId, window);
-    return true;
-  }
-}
-```
+##### 2.2.15.1 凭证存储（credential-resolver.ts）
 
-**响应：** 超过限制时回复 `"请不要连续发送多条消息，我会依次处理。"`
+**功能：** 从 agent.db `auth_credentials` 表读取 API key，spawn omp RPC 进程时设为环境变量。
+
+**动机：** 解决 gateway 在 tmux/launchd 下无 shell 环境变量的问题。
+
+**流程：**
+1. 读取 `~/.omp/agent/models.yml` 提取 `provider → apiKey` 环境变量名映射
+2. 读取 `agent.db` 的 `auth_credentials` 表获取已存储的 API key
+3. 遍历 provider，对当前进程中未设置的 env var，从 DB 中取出对应的 key
+4. 将解析出的 env vars 合并到 `Bun.spawn()` 的 `env` 参数
+
+**文件：** `packages/pi-gateway/src/credential-resolver.ts`（新增）
+
+##### 2.2.15.2 Extension UI 自动应答
+
+**功能：** bridge 收到 agent 的 `extension_ui_request`（confirm/select/input/editor）时，自动发送 `cancelled: true` 响应，防止 agent 挂起等待用户输入。
+
+**动机：** gateway 是 headless 模式，没有 TUI 可回应 extension 请求。不回应则 agent 永远等待 → 120s 超时。
+
+**同时处理：** `host_tool_call` 请求自动以 `isError: true` 拒绝。
+
+**位置：** `agent-bridge.ts#processRpcLine()`
+
+##### 2.2.15.3 响应格式化
+
+**功能：** `#formatResponse()` 剥离模型返回的 `<think>...</think>` 标签，MAX_LENGTH 从 2000 增至 4000。
+
+**位置：** `agent-bridge.ts#formatResponse()`
+
+##### 2.2.15.4 PID 文件 + 生命周期管理
+
+**功能：** `gateway.ts` 新增：
+- `PID_FILE` 常量 + `checkPidFile()` / `readPidFile()` / `stopGatewayDaemon()` / `getGatewayStatus()`
+- `Gateway.start()` 最后写入 `gateway.pid`
+- `Gateway.stop()` 清理 `gateway.pid`
+- `start()` 前检查 PID 文件，防止重复启动
+- `stopGatewayDaemon()` 支持 SIGTERM → 5s → SIGKILL 链，附带孤儿 RPC 进程清理
+
+**跨进程状态检测：** 新 Gateway 实例可通过 PID 文件判断已有实例是否存活。
+
+##### 2.2.15.5 系统服务修复
+
+**功能：** `service-installer.ts`：
+- `cliPath` 从 `import.meta.path` 改为 `require.resolve("@oh-my-pi/pi-gateway/package.json")` 定位 CLI 入口
+- PATH 追加 `~/.bun/bin` 确保 `omp` 可执行
+- `getServiceStatus()` 修复 launchctl JSON 输出解析
+- `startService()` / `stopService()` 使用 `bootstrap` / `bootout`（避免 KeepAlive 重启）
+- `installService()` / `uninstallService()` 使用 `bootout` 刷新 launchd 缓存
+
+##### 2.2.15.6 Config Schema 兼容
+
+- `appKey` / `appSecret` 在 `dingtalkConfigSchema` 和 `DingTalkConfig` 中改为 `optional`（多账号模式下顶层可不传）
+- `dingtalkAccountConfigSchema` 新增 `timeoutMs` 字段
+- `AgentConfig` 新增 `timeoutMs` 字段
 
 #### 2.2.16 聚合指标 (中)
 
@@ -604,15 +658,14 @@ interface AgentBridgeOptions {
 
 **目标：** 配置安全、AI Card 体验、配置可读性。
 
-| 任务 | 估计代码 | 详细 |
-|---|---|---|
-| accounts 数组→map 代码重构 | ~30 行（types / config / gateway 三处）| §2.2.14 |
-| appSecret `$ENV_VAR` 解析 | ~20 行 | §2.2.13 |
-| appSecret 未设置时启动失败 | ~10 行 | §2.2.13 |
-| appSecret 日志/错误不展开 | ~10 行（中间件层）| §2.2.13 |
-| 多账号下默认 bridge 不启动 | ~15 行 | §2.2.10 |
-| AI Card 接入主消息流 | ~100 行 | §2.2.11 |
-| session 文件自动压缩 | ~30 行 | §2.2.12 |
+| 任务 | 估计代码 | 详细 | 状态 |
+|---|---|---|---|
+| appSecret `$ENV_VAR` 解析 | ~20 行 | §2.2.13 | ❌ |
+| appSecret 未设置时启动失败 | ~10 行 | §2.2.13 | ❌ |
+| appSecret 日志/错误不展开 | ~10 行（中间件层）| §2.2.13 | ❌ |
+| 多账号下默认 bridge 不启动 | ~15 行 | §2.2.10 | ❌ |
+| AI Card 接入主消息流 | ~100 行 | §2.2.11 | ❌ |
+| session 文件自动压缩 | ~30 行 | §2.2.12 | ❌ |
 
 **预计总代码：** ~215 行
 
