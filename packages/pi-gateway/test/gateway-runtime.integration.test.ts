@@ -10,11 +10,13 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { AgentBridge } from "../src/agent-bridge";
+import { parseRobotMessage } from "../src/channels/dingtalk";
 import { ChannelRegistry } from "../src/channels/registry";
-import type { Channel, ChannelCapabilities, ChannelConfig, InboundMessage, OutboundMessage } from "../src/types";
+import type { Channel, ChannelCapabilities, ChannelConfig, DingTalkRawMessage, InboundMessage, OutboundMessage } from "../src/types";
 import { SessionManager } from "../src/session-manager";
 import { SQLiteSessionStore } from "../src/session-store";
 import { buildAgentSessionPath, ensureAgentDir } from "../src/setup";
+import { sampleTextMessage } from "./fixtures/sample-messages";
 
 const FAKE_RPC_SCRIPT = `#!/usr/bin/env bun
 process.stdout.write(JSON.stringify({ type: "ready" }) + "\\n");
@@ -88,6 +90,12 @@ class FakeChannel implements Channel {
 	async emitInbound(msg: InboundMessage): Promise<void> {
 		if (!this.#handler) throw new Error("channel handler not registered");
 		await this.#handler(msg);
+	}
+
+	async emitRobotMessage(raw: DingTalkRawMessage): Promise<void> {
+		const inbound = parseRobotMessage(raw, this.id, this.accountId, raw.msgId);
+		if (!inbound) throw new Error("raw DingTalk message did not parse");
+		await this.emitInbound(inbound);
 	}
 
 	async sendMessage(msg: OutboundMessage): Promise<void> {
@@ -168,17 +176,16 @@ async function createHarness(): Promise<Harness> {
 	return { rootDir, rpcPath, store, registry, manager, bridges, channels };
 }
 
-function makeInbound(accountId: string, conversationId: string, text: string): InboundMessage {
-	return {
-		channelId: "dingtalk",
-		accountId,
-		userId: `${accountId}-user`,
+function makeRobotMessage(accountId: string, conversationId: string, text: string): DingTalkRawMessage {
+	return sampleTextMessage({
 		conversationId,
-		isGroup: false,
-		content: { type: "text", text },
-		timestamp: new Date(),
+		msgId: `${accountId}-${conversationId}-${text.replace(/\s+/g, "-")}`,
+		senderStaffId: `${accountId}-user`,
+		senderId: `${accountId}-user`,
+		senderNick: `${accountId} user`,
 		sessionWebhook: `https://example.com/${accountId}`,
-	};
+		text: { content: text },
+	});
 }
 
 describe("gateway runtime integration", () => {
@@ -204,8 +211,8 @@ describe("gateway runtime integration", () => {
 		if (!ops || !hr) throw new Error("missing channels");
 
 		await Promise.all([
-			ops.emitInbound(makeInbound("ops", "shared-conv", "slow ops")),
-			hr.emitInbound(makeInbound("hr", "shared-conv", "hello hr")),
+			ops.emitRobotMessage(makeRobotMessage("ops", "shared-conv", "slow ops")),
+			hr.emitRobotMessage(makeRobotMessage("hr", "shared-conv", "hello hr")),
 		]);
 
 		expect(ops.sent).toHaveLength(2);
