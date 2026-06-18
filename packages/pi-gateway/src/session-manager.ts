@@ -7,13 +7,17 @@
  * - Queue depth is bounded per account to avoid unbounded memory growth.
  */
 import { logger } from "@oh-my-pi/pi-utils";
-import type { AgentBridge } from "./agent-bridge";
+import type { AgentBridge, AgentBridgeSnapshot } from "./agent-bridge";
 import type { InboundMessage, SessionRecord } from "./types";
 
 export interface QueueStat {
 	accountId: string;
 	depth: number;
 	oldestAgeMs: number;
+}
+
+export interface BridgeStat extends AgentBridgeSnapshot {
+	accountId: string;
 }
 
 export interface SessionManagerOptions {
@@ -80,6 +84,11 @@ export class SessionManager {
 		}
 	}
 
+	async abort(accountId: string): Promise<boolean> {
+		const bridge = this.#resolveBridge(accountId);
+		return await bridge.abort();
+	}
+
 	getQueueStats(): QueueStat[] {
 		const now = Date.now();
 		return Array.from(this.#queues.entries()).map(([accountId, state]) => ({
@@ -87,6 +96,20 @@ export class SessionManager {
 			depth: state.depth,
 			oldestAgeMs: state.oldestQueuedAt ? now - state.oldestQueuedAt : 0,
 		}));
+	}
+
+	getBridgeStats(): BridgeStat[] {
+		const stats = Array.from(this.#bridges.entries()).map(([accountId, bridge]) => ({
+			accountId,
+			...bridge.getSnapshot(),
+		}));
+		if (this.#defaultBridge) {
+			stats.push({
+				accountId: "__default__",
+				...this.#defaultBridge.getSnapshot(),
+			});
+		}
+		return stats;
 	}
 
 	async waitForAllDrained(timeoutMs: number): Promise<boolean> {

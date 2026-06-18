@@ -33,6 +33,10 @@ async function handleFrame(frame) {
       emit({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: sessionAtPrompt + " :: " + frame.message }] } });
       emit({ type: "agent_end" });
     }, delay);
+    return;
+  }
+  if (frame.type === "abort") {
+    emit({ type: "response", id: frame.id, command: "abort", success: true });
   }
 }
 for await (const chunk of Bun.stdin.stream()) {
@@ -111,6 +115,46 @@ describe("AgentBridge", () => {
 
 			expect(slowResponse).toContain("/tmp/session-a.jsonl :: slow");
 			expect(fastResponse).toContain("/tmp/session-b.jsonl :: fast");
+		} finally {
+			bridge.stop();
+			await fake.cleanup();
+		}
+	});
+
+	test("reports bridge lifecycle snapshot", async () => {
+		const fake = await createFakeRpcBinary();
+		const bridge = new AgentBridge({ ompPath: fake.path, timeoutMs: 2_000 });
+		try {
+			expect(bridge.getSnapshot().state).toBe("stopped");
+			await bridge.start();
+			const ready = bridge.getSnapshot();
+			expect(ready.state).toBe("idle");
+			expect(ready.running).toBe(true);
+			expect(ready.ready).toBe(true);
+			expect(ready.pid).toBeGreaterThan(0);
+
+			const pending = bridge.forward(makeMessage("slow", "conv-a"), makeSession("/tmp/session-a.jsonl", "conv-a"));
+			await Bun.sleep(10);
+			const busy = bridge.getSnapshot();
+			expect(busy.state).toBe("busy");
+			expect(busy.pendingPrompts).toBe(1);
+			await pending;
+		} finally {
+			bridge.stop();
+			await fake.cleanup();
+		}
+	});
+
+	test("sends abort while a prompt is active", async () => {
+		const fake = await createFakeRpcBinary();
+		const bridge = new AgentBridge({ ompPath: fake.path, timeoutMs: 2_000 });
+		try {
+			await bridge.start();
+			expect(await bridge.abort()).toBe(false);
+			const pending = bridge.forward(makeMessage("slow", "conv-a"), makeSession("/tmp/session-a.jsonl", "conv-a"));
+			await Bun.sleep(10);
+			expect(await bridge.abort()).toBe(true);
+			expect(await pending).toBe("（已停止）");
 		} finally {
 			bridge.stop();
 			await fake.cleanup();

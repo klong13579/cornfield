@@ -33,6 +33,7 @@ describe("Gateway status", () => {
 		expect(status.running).toBe(false);
 		expect(status.accounts).toEqual([]);
 		expect(status.queues).toEqual([]);
+		expect(status.bridges).toEqual([]);
 	});
 
 	test("reload swaps the gateway config while stopped", async () => {

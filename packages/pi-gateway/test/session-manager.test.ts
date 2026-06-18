@@ -12,6 +12,7 @@ class FakeBridge {
 	maxActive = 0;
 	calls: string[] = [];
 
+	abortCalls = 0;
 	constructor(readonly delayMs: number = 0) {}
 
 	async forward(msg: InboundMessage, session: SessionRecord): Promise<string> {
@@ -24,6 +25,27 @@ class FakeBridge {
 		} finally {
 			this.active--;
 		}
+	}
+
+	abort(): Promise<boolean> {
+		this.abortCalls++;
+		return Promise.resolve(this.active > 0);
+	}
+
+	getSnapshot() {
+		return {
+			state: this.active > 0 ? "busy" : "idle",
+			running: this.isRunning,
+			ready: this.isRunning,
+			pendingPrompts: this.active,
+			pendingCommands: 0,
+			circuitState: "closed",
+			circuitFailures: 0,
+			crashCount: 0,
+			crashWindowCount: 0,
+			crashSuppressed: false,
+			reconnecting: false,
+		};
 	}
 }
 
@@ -113,5 +135,30 @@ describe("SessionManager", () => {
 
 		expect(drained).toBe(true);
 		expect(manager.getQueueStats()).toEqual([]);
+	});
+
+	test("aborts the bridge for the selected account", async () => {
+		const ops = new FakeBridge(50);
+		const hr = new FakeBridge(50);
+		const manager = new SessionManager({
+			bridges: new Map([
+				["ops", asBridge(ops)],
+				["hr", asBridge(hr)],
+			]),
+		});
+
+		const pending = manager.enqueue(makeMessage("ops", "a", "1"), makeSession("ops", "a"));
+		await Bun.sleep(10);
+		expect(await manager.abort("ops")).toBe(true);
+		expect(ops.abortCalls).toBe(1);
+		expect(hr.abortCalls).toBe(0);
+		await pending;
+	});
+
+	test("reports bridge snapshots by account", () => {
+		const ops = new FakeBridge();
+		const manager = new SessionManager({ bridges: new Map([["ops", asBridge(ops)]]) });
+
+		expect(manager.getBridgeStats()).toMatchObject([{ accountId: "ops", state: "idle", running: true }]);
 	});
 });

@@ -45,6 +45,27 @@ const CIRCUIT_FAILURE_THRESHOLD = 10;
 const CIRCUIT_COOLDOWN_MS = 30_000;
 const CIRCUIT_OPEN_MESSAGE = "系统繁忙，请稍后再试。";
 
+export type AgentBridgeLifecycleState = "stopped" | "starting" | "idle" | "busy" | "restarting" | "degraded" | "error";
+
+export interface AgentBridgeSnapshot {
+	state: AgentBridgeLifecycleState;
+	running: boolean;
+	ready: boolean;
+	pid?: number;
+	activeSessionPath?: string;
+	activePromptId?: string;
+	pendingPrompts: number;
+	pendingCommands: number;
+	circuitState: CircuitState;
+	circuitFailures: number;
+	circuitOpenedAt?: number;
+	crashCount: number;
+	crashWindowCount: number;
+	crashSuppressed: boolean;
+	reconnecting: boolean;
+	lastError?: string;
+}
+
 export interface AgentBridgeOptions {
 	/** Path to omp binary (default: "omp") */
 	ompPath?: string;
@@ -117,6 +138,7 @@ export class AgentBridge {
 	#circuitOpenedAt = 0;
 	#options: AgentBridgeOptions;
 	#reconnectGuard = false;
+	#lastError: string | undefined;
 
 	constructor(options: AgentBridgeOptions = {}) {
 		this.#options = options;
@@ -165,6 +187,39 @@ export class AgentBridge {
 
 	get isRunning(): boolean {
 		return this.#ready && this.#proc !== null;
+	}
+
+	getSnapshot(): AgentBridgeSnapshot {
+		const busy = this.#pendingPrompts.size > 0 || this.#pendingCommands.size > 0 || this.#activePromptId !== undefined;
+		const state: AgentBridgeLifecycleState = this.#getLifecycleState(busy);
+		return {
+			state,
+			running: this.isRunning,
+			ready: this.#ready,
+			pid: this.#proc?.pid,
+			activeSessionPath: this.#activeSessionPath,
+			activePromptId: this.#activePromptId,
+			pendingPrompts: this.#pendingPrompts.size,
+			pendingCommands: this.#pendingCommands.size,
+			circuitState: this.#circuitState,
+			circuitFailures: this.#circuitFailures,
+			circuitOpenedAt: this.#circuitOpenedAt || undefined,
+			crashCount: this.#crashCount,
+			crashWindowCount: this.#crashTimestamps.length,
+			crashSuppressed: this.#crashSuppressed,
+			reconnecting: this.#reconnectGuard,
+			lastError: this.#lastError,
+		};
+	}
+
+	#getLifecycleState(busy: boolean): AgentBridgeLifecycleState {
+		if (this.#crashSuppressed) return "error";
+		if (this.#reconnectGuard) return this.#proc ? "restarting" : "starting";
+		if (!this.#proc) return "stopped";
+		if (!this.#ready) return "starting";
+		if (busy) return "busy";
+		if (this.#circuitState !== "closed") return "degraded";
+		return "idle";
 	}
 
 	async waitForIdle(): Promise<void> {
@@ -263,6 +318,18 @@ export class AgentBridge {
 
 	async switchSession(sessionPath: string): Promise<void> {
 		await this.#runExclusive(() => this.#switchSession(sessionPath));
+	}
+
+	async abort(): Promise<boolean> {
+		if (!this.isRunning) {
+			throw new Error("Agent process not running");
+		}
+		if (!this.#activePromptId && this.#pendingPrompts.size === 0) {
+			return false;
+		}
+		await this.#sendCommandAndWait("abort", {}, 30_000);
+		this.#resolveActivePromptAsAborted();
+		return true;
 	}
 
 	async #switchSession(sessionPath: string): Promise<void> {
@@ -376,11 +443,13 @@ export class AgentBridge {
 				await promise;
 				this.#crashCount = 0;
 				logger.debug("Agent RPC process ready", { pid: proc.pid });
+				this.#lastError = undefined;
 			} catch (err) {
 				this.#recordCrash();
 				proc.kill();
 				this.#proc = null;
 				this.#stdinWriter = undefined;
+				this.#lastError = err instanceof Error ? err.message : String(err);
 				throw err;
 			}
 		} finally {
@@ -546,6 +615,28 @@ export class AgentBridge {
 		}
 	}
 
+	#resolveActivePromptAsAborted(): void {
+		if (!this.#activePromptId) return;
+		const promptId = this.#activePromptId;
+		const pending = this.#pendingPrompts.get(promptId);
+		if (!pending) return;
+		clearTimeout(pending.timeout);
+		this.#pendingPrompts.delete(promptId);
+		this.#activePromptId = undefined;
+		pending.resolve([
+			...pending.events,
+			{
+				type: "message_end",
+				message: {
+					role: "assistant",
+					content: [{ type: "text", text: "（已停止）" }],
+				},
+			},
+			{ type: "agent_end" },
+		]);
+	}
+
+
 	async #runExclusive<T>(operation: () => Promise<T>): Promise<T> {
 		const previous = this.#operationTail;
 		const { promise: current, resolve } = Promise.withResolvers<void>();
@@ -639,6 +730,7 @@ export class AgentBridge {
 			this.#crashSuppressed = true;
 			this.#ready = false;
 			logger.error("Agent bridge entered ERROR state after repeated crashes", { crashes: this.#crashTimestamps.length });
+			this.#lastError = "Agent bridge entered ERROR state after repeated crashes";
 		}
 	}
 
