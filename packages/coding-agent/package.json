@@ -439,6 +439,14 @@
 			"types": "./src/secrets/*.ts",
 			"import": "./src/secrets/*.ts"
 		},
+		"./skeleton": {
+			"types": "./src/skeleton/index.ts",
+			"import": "./src/skeleton/index.ts"
+		},
+		"./skeleton/*": {
+			"types": "./src/skeleton/*.ts",
+			"import": "./src/skeleton/*.ts"
+		},
 		"./session/*": {
 			"types": "./src/session/*.ts",
 			"import": "./src/session/*.ts"

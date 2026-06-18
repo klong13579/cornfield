@@ -33,6 +33,7 @@
  *   PI_GATEWAY_CONFIG   Alternative config path (default: ~/.omp/gateway.json)
  */
 
+import { ensureAgentDir, resolveAgentDir } from "@oh-my-pi/pi-coding-agent/skeleton";
 import { logger } from "@oh-my-pi/pi-utils";
 import { getConfigPath, getDataDir, getDingTalkConfig, loadConfig } from "./config";
 import { Gateway } from "./gateway";
@@ -265,7 +266,6 @@ async function cmdCronCreate(args: string[], storage: SchedulerDbStorage): Promi
 			name = args[i + 1]!;
 			i += 2;
 		} else if (args[i] === "--type" && args[i + 1]) {
-
 			const rawType = args[i + 1];
 			if (rawType !== "shell" && rawType !== "agent") {
 				console.error(`Invalid task type: ${rawType}. Expected "shell" or "agent".`);
@@ -549,7 +549,6 @@ async function cmdInstall(args: string[]): Promise<void> {
 	const configPath = configIdx >= 0 ? args[configIdx + 1] : undefined;
 
 	const { loadConfig, getConfigPath } = await import("./config");
-	const { ensureAgentDir, resolveAgentDir } = await import("./setup");
 	const cfgPath = configPath ?? getConfigPath();
 	const existing = await loadConfig(cfgPath);
 
@@ -717,7 +716,7 @@ void (async () => {
 	const subcommand = parsedArgs.subcommand;
 	const args = parsedArgs.args;
 	const gatewayConfigPath = parsedArgs.config;
-		switch (command) {
+	switch (command) {
 		case "start":
 			await cmdStart(gatewayConfigPath);
 			break;

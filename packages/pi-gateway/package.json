@@ -17,6 +17,7 @@
     "test": "bun test"
   },
   "dependencies": {
+    "@oh-my-pi/pi-coding-agent": "workspace:*",
     "@oh-my-pi/pi-utils": "catalog:",
     "@sinclair/typebox": "catalog:",
     "croner": "10.0.1",

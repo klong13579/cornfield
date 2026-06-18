@@ -4,6 +4,16 @@
 
 ### Added
 
+- **agentDir skeleton module**: New `@oh-my-pi/pi-coding-agent/skeleton` subpath exporting `ensureAgentDir`, `resolveAgentDir`, `buildAgentSessionPath`, `SKELETON_FILES`, and `SKELETON_DIRS`. Bundle template assets as real `.md` / `.json` / `.yml` files under `src/skeleton/assets/` and import them via Bun's `with { type: "text" }` (replaces inline string literals previously held by the gateway).
+
+### Changed
+
+- **agentDir skeleton promoted to first-class citizen**: Skeleton template now lives in `coding-agent` (the package whose `omp --mode rpc` binary is the actual consumer of `AGENTS.md` / `prompt-includes.json` / `mission.md` per `packages/agent/docs/agent-design-v1.md` §3). Previously the template was embedded as a 175-line string literal in `packages/pi-gateway/src/setup.ts`.
+- **Skeleton files now match `agent-design-v1.md` §2**: Added the three always-on templates the previous gateway skeleton was missing — root `AGENTS.md` (manifest trigger), root `TOOLS.md` (tool guide + co-located MUST/MUST NOT), and root `TODO.md` (current task). Moved `prompt-includes.json` from `.omp/prompt-includes.json` to root (matches the design, omp-atomix baseline, and OMP's primary discovery path). Moved skills directory from `.agent/skills/` to `.omp/skills/`. Removed out-of-scope files: `profile.yaml`, `.agent/AGENTS.md`, `knowledge/faq.md`, `knowledge/handbook/server-restart.md`, `.agent/rules/security.md` (per design §5, those are user-created).
+- **`.gitignore` content corrected**: Now includes `*.bak` and writes `.omp/evolution/` (with the `.omp/` prefix) per design §2.2. Previous content had a relative `evolution/` line that would not match the directory OMP actually writes to.
+
+### Added
+
 - **Unified Gateway**: `omp gateway` command replaces `omp daemon` and `omp schedule` with a single process that manages IM channels, cron scheduler, agent bridge, and heartbeat (following Hermes/OpenClaw pattern).
   - `omp gateway start` — start the unified gateway
   - `omp gateway status` — show gateway + scheduler status

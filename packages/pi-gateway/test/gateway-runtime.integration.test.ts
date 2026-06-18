@@ -9,13 +9,20 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { buildAgentSessionPath, ensureAgentDir } from "@oh-my-pi/pi-coding-agent/skeleton";
 import { AgentBridge } from "../src/agent-bridge";
 import { parseRobotMessage } from "../src/channels/dingtalk";
 import { ChannelRegistry } from "../src/channels/registry";
-import type { Channel, ChannelCapabilities, ChannelConfig, DingTalkRawMessage, InboundMessage, OutboundMessage } from "../src/types";
 import { SessionManager } from "../src/session-manager";
 import { SQLiteSessionStore } from "../src/session-store";
-import { buildAgentSessionPath, ensureAgentDir } from "../src/setup";
+import type {
+	Channel,
+	ChannelCapabilities,
+	ChannelConfig,
+	DingTalkRawMessage,
+	InboundMessage,
+	OutboundMessage,
+} from "../src/types";
 import { sampleTextMessage } from "./fixtures/sample-messages";
 
 const FAKE_RPC_SCRIPT = `#!/usr/bin/env bun
@@ -227,7 +234,11 @@ describe("gateway runtime integration", () => {
 
 		const opsSession = await harness.store.getSession("dingtalk", "ops", "shared-conv");
 		const hrSession = await harness.store.getSession("dingtalk", "hr", "shared-conv");
-		expect(opsSession?.ompSessionPath).toBe(path.join(harness.rootDir, "agents", "ops", "sessions", "shared-conv.jsonl"));
-		expect(hrSession?.ompSessionPath).toBe(path.join(harness.rootDir, "agents", "hr", "sessions", "shared-conv.jsonl"));
+		expect(opsSession?.ompSessionPath).toBe(
+			path.join(harness.rootDir, "agents", "ops", "sessions", "shared-conv.jsonl"),
+		);
+		expect(hrSession?.ompSessionPath).toBe(
+			path.join(harness.rootDir, "agents", "hr", "sessions", "shared-conv.jsonl"),
+		);
 	});
 });

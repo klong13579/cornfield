@@ -9,22 +9,23 @@
  * 5. Delivers scheduled task results to configured channels
  */
 
-import * as path from "node:path";
 import * as fs from "node:fs/promises";
+import * as path from "node:path";
+import { buildAgentSessionPath, ensureAgentDir, resolveAgentDir } from "@oh-my-pi/pi-coding-agent/skeleton";
 import { isEnoent, logger } from "@oh-my-pi/pi-utils";
 import { AgentBridge, type AgentBridgeOptions } from "./agent-bridge";
+import { DingTalkChannel } from "./channels/dingtalk";
 import { ChannelRegistry } from "./channels/registry";
-import { getDingTalkConfig, getDataDir, getEnabledChannels } from "./config";
+import { getDataDir, getDingTalkConfig, getEnabledChannels } from "./config";
 import { SchedulerEngine } from "./scheduler/engine";
 import { executeScheduledCommand } from "./scheduler/executor";
 import { SchedulerFileStore } from "./scheduler/file-store";
 import { SchedulerDbStorage } from "./scheduler/storage";
 import type { ScheduledTask } from "./scheduler/types";
 import { DEFAULT_SCHEDULER_CONFIG, getSchedulerDbPath, getSchedulerDir } from "./scheduler/types";
+import { type BridgeStat, type QueueStat, SessionManager } from "./session-manager";
 import { SQLiteSessionStore } from "./session-store";
-import { SessionManager } from "./session-manager";
-import { buildAgentSessionPath, ensureAgentDir, resolveAgentDir } from "./setup";
-import type { DingtalkAccountConfig, GatewayConfig, InboundMessage, OutboundMessage } from "./types";
+import type { DingtalkAccountConfig, GatewayConfig, InboundMessage, MessageContent, OutboundMessage } from "./types";
 
 export function createAccountBridgeOptions(
 	agentConfig: GatewayConfig["agent"],
@@ -201,7 +202,7 @@ export class Gateway {
 	#schedulerEngine?: SchedulerEngine;
 	#schedulerStorage?: SchedulerDbStorage;
 	#schedulerFileStore?: SchedulerFileStore;
-	#watchInterval?: ReturnType<typeof setInterval>;
+	#watchInterval?: NodeJS.Timeout;
 
 	constructor(config: GatewayConfig) {
 		this.#config = config;
@@ -241,7 +242,10 @@ export class Gateway {
 			// Future: feishu, wechat, etc.
 		}
 
-		const hasDingTalkAccounts = Boolean(getDingTalkConfig(this.#config)?.accounts && Object.keys(getDingTalkConfig(this.#config)?.accounts ?? {}).length > 0);
+		const hasDingTalkAccounts = Boolean(
+			getDingTalkConfig(this.#config)?.accounts &&
+				Object.keys(getDingTalkConfig(this.#config)?.accounts ?? {}).length > 0,
+		);
 		// Start default agent bridge only outside multi-account mode.
 		if (!hasDingTalkAccounts) {
 			try {
@@ -279,7 +283,6 @@ export class Gateway {
 	 * its own DingTalkChannel instance and account-specific AgentBridge.
 	 */
 	async #registerDingTalkChannels(): Promise<void> {
-		const { DingTalkChannel } = await import("./channels/dingtalk");
 		const rawConfig = this.#config.channels.dingtalk;
 		const dtConfig = getDingTalkConfig(this.#config);
 
@@ -315,12 +318,16 @@ export class Gateway {
 					logger.error("Failed to start account bridge", { accountId, error: String(err) });
 				}
 
-				this.#registry.register(channel, {
-					...rawConfig,
-					appKey: account.appKey,
-					appSecret: account.appSecret,
-					robotCode: account.robotCode,
-				}, `dingtalk:${accountId}`);
+				this.#registry.register(
+					channel,
+					{
+						...rawConfig,
+						appKey: account.appKey,
+						appSecret: account.appSecret,
+						robotCode: account.robotCode,
+					},
+					`dingtalk:${accountId}`,
+				);
 				logger.debug("Registered DingTalk account channel", { accountId });
 			}
 			return;
@@ -341,7 +348,9 @@ export class Gateway {
 
 		const drained = await this.#sessionManager?.waitForAllDrained(30_000);
 		if (drained === false) {
-			logger.warn("Gateway shutdown timed out waiting for session queues", { queues: this.#sessionManager?.getQueueStats() ?? [] });
+			logger.warn("Gateway shutdown timed out waiting for session queues", {
+				queues: this.#sessionManager?.getQueueStats() ?? [],
+			});
 		}
 
 		// Stop all per-account bridges
@@ -363,7 +372,9 @@ export class Gateway {
 		// Remove PID file
 		try {
 			await fs.unlink(path.join(getDataDir(this.#config), PID_FILE));
-		} catch { /* non-fatal */ }
+		} catch {
+			/* non-fatal */
+		}
 	}
 
 	async reload(config: GatewayConfig): Promise<void> {
@@ -423,9 +434,10 @@ export class Gateway {
 	async getStatus(): Promise<{
 		running: boolean;
 		channels: Array<{ id: string; name: string; connected: boolean }>;
-		accounts: Array<{ accountId: string; bridgeRunning: boolean; agentDir?: string }>;
+		accounts: Array<{ accountId: string; bridgeRunning: boolean; agentDir?: string; bridgeState?: string }>;
 		sessions: number;
-		queues: ReturnType<SessionManager["getQueueStats"]>;
+		queues: QueueStat[];
+		bridges: BridgeStat[];
 		scheduler: {
 			running: boolean;
 			taskCount: number;
@@ -438,18 +450,22 @@ export class Gateway {
 		}));
 
 		const sessions = (await this.#store?.getActiveSessions()) ?? [];
+		const bridgeStats = this.#sessionManager?.getBridgeStats() ?? [];
+		const bridgeStatsByAccount = new Map(bridgeStats.map(stat => [stat.accountId, stat]));
 		const accounts = Array.from(this.#accountBridges.entries()).map(([accountId, bridge]) => ({
 			accountId,
 			bridgeRunning: bridge.isRunning,
 			agentDir: this.#accountAgentDirs.get(accountId),
+			bridgeState: bridgeStatsByAccount.get(accountId)?.state,
 		}));
 
 		return {
-			running: this.#running || await checkPidFile(getDataDir(this.#config), PID_FILE),
+			running: this.#running || (await checkPidFile(getDataDir(this.#config), PID_FILE)),
 			channels,
 			sessions: sessions.length,
 			accounts,
 			queues: this.#sessionManager?.getQueueStats() ?? [],
+			bridges: bridgeStats,
 			scheduler: {
 				running: this.#schedulerEngine != null,
 				taskCount: this.#schedulerEngine?.getActiveTaskIds().length ?? 0,
@@ -544,6 +560,61 @@ export class Gateway {
 	// Message Handling
 	// ═══════════════════════════════════════════════════════════════════
 
+	async #handleAbortMessage(msg: InboundMessage, accountId: string): Promise<boolean> {
+		if (!this.#isAbortContent(msg.content)) return false;
+		let aborted = false;
+		try {
+			aborted = (await this.#sessionManager?.abort(accountId)) ?? false;
+		} catch (err) {
+			logger.warn("Failed to abort agent turn", {
+				accountId,
+				conversationId: msg.conversationId,
+				error: err instanceof Error ? err.message : String(err),
+			});
+		}
+		await this.#sendAgentResponse(msg, aborted ? "已请求停止当前任务。" : "当前没有正在运行的任务。");
+		return true;
+	}
+
+	#isAbortContent(content: MessageContent): boolean {
+		const text =
+			content.type === "text"
+				? content.text
+				: content.type === "markdown"
+					? content.markdown
+					: content.type === "voice"
+						? (content.text ?? "")
+						: "";
+		const normalized = text.trim().toLowerCase();
+		return (
+			normalized === "停止" ||
+			normalized === "取消" ||
+			normalized === "中止" ||
+			normalized === "abort" ||
+			normalized === "cancel" ||
+			normalized === "stop"
+		);
+	}
+
+	async #sendAgentResponse(msg: InboundMessage, text: string): Promise<void> {
+		const outbound: OutboundMessage = {
+			channelId: msg.channelId,
+			conversationId: msg.conversationId,
+			content: { type: "text", text },
+			sessionWebhook: msg.sessionWebhook,
+			accountId: msg.accountId,
+		};
+		try {
+			await this.#registry.sendMessage(outbound);
+		} catch (err) {
+			logger.error("Failed to send agent response", {
+				accountId: msg.accountId,
+				conversationId: msg.conversationId,
+				error: err instanceof Error ? err.message : String(err),
+			});
+		}
+	}
+
 	async #handleInboundMessage(msg: InboundMessage): Promise<void> {
 		logger.debug("Received message", {
 			channel: msg.channelId,
@@ -554,6 +625,7 @@ export class Gateway {
 		try {
 			// Find or create session
 			const accountId = msg.accountId ?? "__default__";
+			if (await this.#handleAbortMessage(msg, accountId)) return;
 			let session = await this.#store?.getSession(msg.channelId, accountId, msg.conversationId);
 			const now = Date.now();
 			if (!session && this.#store) {
@@ -580,7 +652,11 @@ export class Gateway {
 			}
 
 			if (!session) {
-				logger.error("Failed to create session", { channelId: msg.channelId, accountId, conversationId: msg.conversationId });
+				logger.error("Failed to create session", {
+					channelId: msg.channelId,
+					accountId,
+					conversationId: msg.conversationId,
+				});
 				return;
 			}
 
@@ -607,22 +683,7 @@ export class Gateway {
 
 			// Send final response
 			if (response) {
-				const outbound: OutboundMessage = {
-					channelId: msg.channelId,
-					conversationId: msg.conversationId,
-					content: { type: "text", text: response },
-					sessionWebhook: msg.sessionWebhook,
-					accountId: msg.accountId,
-				};
-				try {
-					await this.#registry.sendMessage(outbound);
-				} catch (err) {
-					logger.error("Failed to send final response", {
-						accountId,
-						conversationId: msg.conversationId,
-						error: err instanceof Error ? err.message : String(err),
-					});
-				}
+				await this.#sendAgentResponse(msg, response);
 			}
 
 			// Update session timestamp
@@ -635,7 +696,6 @@ export class Gateway {
 			});
 		}
 	}
-
 
 	#buildSessionPath(channelId: string, accountId: string, conversationId: string): string {
 		const safeId = conversationId.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64);

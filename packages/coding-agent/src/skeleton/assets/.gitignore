@@ -1,0 +1,6 @@
+sessions/
+cron/logs/
+.omp/evolution/
+.omp/
+*.log
+*.bak
