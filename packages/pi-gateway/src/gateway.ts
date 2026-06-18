@@ -12,9 +12,9 @@
 import * as path from "node:path";
 import * as fs from "node:fs/promises";
 import { isEnoent, logger } from "@oh-my-pi/pi-utils";
-import { AgentBridge } from "./agent-bridge";
+import { AgentBridge, type AgentBridgeOptions } from "./agent-bridge";
 import { ChannelRegistry } from "./channels/registry";
-import { getDingTalkConfig, getDataDir, type GatewayConfig, getEnabledChannels } from "./config";
+import { getDingTalkConfig, getDataDir, getEnabledChannels } from "./config";
 import { SchedulerEngine } from "./scheduler/engine";
 import { executeScheduledCommand } from "./scheduler/executor";
 import { SchedulerFileStore } from "./scheduler/file-store";
@@ -24,7 +24,20 @@ import { DEFAULT_SCHEDULER_CONFIG, getSchedulerDbPath, getSchedulerDir } from ".
 import { SQLiteSessionStore } from "./session-store";
 import { SessionManager } from "./session-manager";
 import { buildAgentSessionPath, ensureAgentDir, resolveAgentDir } from "./setup";
-import type { InboundMessage, OutboundMessage } from "./types";
+import type { DingtalkAccountConfig, GatewayConfig, InboundMessage, OutboundMessage } from "./types";
+
+export function createAccountBridgeOptions(
+	agentConfig: GatewayConfig["agent"],
+	account: DingtalkAccountConfig,
+	agentDir: string,
+): AgentBridgeOptions {
+	return {
+		...agentConfig,
+		model: account.model ?? agentConfig?.model,
+		timeoutMs: account.timeoutMs ?? agentConfig?.timeoutMs,
+		cwd: agentDir,
+	};
+}
 
 const PID_FILE = "gateway.pid";
 
@@ -292,11 +305,7 @@ export class Gateway {
 
 				// Create per-account agent bridge with account-specific config
 				// Model is loaded from agentDir/.omp/config.yml by omp itself
-				const bridge = new AgentBridge({
-					...this.#config.agent,
-					timeoutMs: account.timeoutMs ?? this.#config.agent?.timeoutMs,
-					cwd: agentDir,
-				});
+				const bridge = new AgentBridge(createAccountBridgeOptions(this.#config.agent, account, agentDir));
 				this.#accountBridges.set(accountId, bridge);
 
 				// Start per-account bridge

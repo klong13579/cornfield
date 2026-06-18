@@ -43,6 +43,8 @@ export interface OutboundMessage {
 	messageId?: string;
 	/** Webhook URL for DingTalk reply via sessionWebhook HTTP POST */
 	sessionWebhook?: string;
+	/** Account identifier for account-specific outbound routing */
+	accountId?: string;
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -85,6 +87,7 @@ export interface Channel {
 export interface SessionRecord {
 	id: string;
 	channelId: string;
+	accountId: string;
 	userId: string;
 	conversationId: string;
 	createdAt: number;
@@ -95,7 +98,7 @@ export interface SessionRecord {
 }
 
 export interface SessionStore {
-	getSession(channelId: string, conversationId: string): Promise<SessionRecord | null>;
+	getSession(channelId: string, accountId: string, conversationId: string): Promise<SessionRecord | null>;
 	createSession(session: Omit<SessionRecord, "id">): Promise<SessionRecord>;
 	updateSession(id: string, updates: Partial<SessionRecord>): Promise<void>;
 	closeSession(id: string): Promise<void>;
@@ -108,6 +111,7 @@ export interface SessionStore {
 
 export interface AgentConfig {
 	ompPath?: string;
+	model?: string;
 	/** Timeout per agent prompt in ms (default: 300000) */
 	timeoutMs?: number;
 	maxConcurrentSessions?: number;
@@ -158,6 +162,8 @@ export interface DingtalkAccountConfig {
 	robotCode?: string;
 	/** Optional agent workspace directory for this specific account */
 	agentDir?: string;
+	/** Optional model override for this account */
+	model?: string;
 	/** Optional per-account timeout in ms (overrides agent.timeoutMs) */
 	timeoutMs?: number;
 }

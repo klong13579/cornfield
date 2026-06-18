@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { Gateway, getGatewayStatus } from "../src/gateway";
+import { createAccountBridgeOptions, Gateway, getGatewayStatus } from "../src/gateway";
 
 describe("Gateway status", () => {
 	let tmpDir: string;
@@ -48,5 +48,17 @@ describe("Gateway status", () => {
 		} finally {
 			await fs.rm(nextDir, { recursive: true, force: true });
 		}
+	});
+
+	test("account bridge options prefer account model over global model", () => {
+		const options = createAccountBridgeOptions(
+			{ model: "global-model", timeoutMs: 10_000 },
+			{ appKey: "app", appSecret: "secret", model: "account-model", timeoutMs: 20_000 },
+			"/tmp/agent",
+		);
+
+		expect(options.model).toBe("account-model");
+		expect(options.timeoutMs).toBe(20_000);
+		expect(options.cwd).toBe("/tmp/agent");
 	});
 });
