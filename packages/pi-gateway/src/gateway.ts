@@ -347,6 +347,7 @@ export class Gateway {
 		this.#accountAgentDirs.clear();
 		this.#sessionManager = undefined;
 		this.#store?.close();
+		this.#store = null;
 		this.#running = false;
 		logger.debug("Gateway stopped");
 
@@ -354,6 +355,23 @@ export class Gateway {
 		try {
 			await fs.unlink(path.join(getDataDir(this.#config), PID_FILE));
 		} catch { /* non-fatal */ }
+	}
+
+	async reload(config: GatewayConfig): Promise<void> {
+		const wasRunning = this.#running;
+		if (wasRunning) {
+			await this.stop();
+		}
+		this.#config = config;
+		this.#registry = new ChannelRegistry();
+		this.#bridge = new AgentBridge(config.agent ?? {});
+		this.#accountBridges.clear();
+		this.#accountAgentDirs.clear();
+		this.#sessionManager = undefined;
+		this.#store = null;
+		if (wasRunning) {
+			await this.start();
+		}
 	}
 
 	get isRunning(): boolean {

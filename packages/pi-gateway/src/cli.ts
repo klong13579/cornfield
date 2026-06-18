@@ -79,6 +79,11 @@ async function cmdStart(_configPath?: string): Promise<void> {
 	};
 
 	process.on("SIGTERM", shutdown);
+	process.on("SIGHUP", async () => {
+		logger.debug("Reloading gateway config...");
+		const nextConfig = await loadConfig(_configPath);
+		await gateway.reload(nextConfig);
+	});
 
 	await gateway.start();
 
@@ -168,6 +173,18 @@ async function cmdStatus(_configPath?: string): Promise<void> {
 	if (dingtalk?.accounts && Object.keys(dingtalk.accounts).length > 0) {
 		console.log(`  Accounts: ${Object.keys(dingtalk.accounts).join(", ")}`);
 	}
+}
+
+async function cmdReload(_configPath?: string): Promise<void> {
+	const { getGatewayStatus } = await import("./gateway");
+	const config = await loadConfig(_configPath);
+	const status = await getGatewayStatus(config);
+	if (!status.running || !status.pid) {
+		console.log("Gateway is not running.");
+		return;
+	}
+	process.kill(status.pid, "SIGHUP");
+	console.log(`Gateway reload signalled (PID ${status.pid}).`);
 }
 
 async function cmdConfig(_configPath?: string): Promise<void> {
@@ -710,6 +727,9 @@ void (async () => {
 		case "status":
 			await cmdStatus(gatewayConfigPath);
 			break;
+		case "reload":
+			await cmdReload(gatewayConfigPath);
+			break;
 		case "config":
 			await cmdConfig(gatewayConfigPath);
 			break;
@@ -734,6 +754,7 @@ Usage:
   pi-gateway stop                                  Stop gateway (via PID file)
   pi-gateway status [--config <path>]             Show gateway status & PID
   pi-gateway config [--config <path>]             Show resolved configuration
+  pi-gateway reload [--config <path>]             Reload running gateway config
 
   pi-gateway setup [--config <path>]              Interactive DingTalk credential setup
   pi-gateway install [--config <path>]            Alias for setup

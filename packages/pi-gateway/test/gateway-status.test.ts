@@ -34,4 +34,19 @@ describe("Gateway status", () => {
 		expect(status.accounts).toEqual([]);
 		expect(status.queues).toEqual([]);
 	});
+
+	test("reload swaps the gateway config while stopped", async () => {
+		const nextDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-gateway-status-next-"));
+		try {
+			await Bun.write(path.join(nextDir, "gateway.pid"), String(process.pid));
+			const gateway = new Gateway({ channels: {}, dataDir: tmpDir });
+
+			await gateway.reload({ channels: {}, dataDir: nextDir });
+			const status = await gateway.getStatus();
+
+			expect(status.running).toBe(true);
+		} finally {
+			await fs.rm(nextDir, { recursive: true, force: true });
+		}
+	});
 });
