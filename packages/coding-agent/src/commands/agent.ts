@@ -66,9 +66,9 @@ export default class Agent extends Command {
 		"  omp agent show hr-bot --json                    Show as JSON",
 		"",
 		"  ======== 校验 ========",
-		"  omp agent validate ~/.omp/agents/hr-bot        Check always-on + runtime hard deps",
-		"  omp agent validate .                            Check current directory",
-		"  omp agent validate ~/.omp/agents/hr-bot --json  Output as JSON",
+		"  omp agent validate --dir ~/.omp/agents/hr-bot        Check always-on + runtime hard deps",
+		"  omp agent validate --dir .                            Check current directory",
+		"  omp agent validate --dir ~/.omp/agents/hr-bot --json  Output as JSON",
 		"",
 	];
 
