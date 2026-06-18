@@ -8,23 +8,24 @@ import { describe, expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { parseRobotMessage } from "../src/channels/dingtalk";
 import { AgentBridge } from "../src/agent-bridge";
 import { ensureAgentDir } from "../src/setup";
-import type { InboundMessage, SessionRecord } from "../src/types";
+import type { SessionRecord } from "../src/types";
+import { sampleTextMessage } from "./fixtures/sample-messages";
 
 const runRealOmp = process.env.PI_GATEWAY_REAL_OMP_TEST === "1";
 const realTest = runRealOmp ? test : test.skip;
 
-function makeMessage(text: string): InboundMessage {
-	return {
-		channelId: "dingtalk",
-		accountId: "real",
-		userId: "real-user",
+function makeRawDingTalkMessage(prompt: string) {
+	return sampleTextMessage({
 		conversationId: "real-conv",
-		isGroup: false,
-		content: { type: "text", text },
-		timestamp: new Date(),
-	};
+		msgId: `real-${Date.now()}`,
+		senderStaffId: "real-user",
+		senderId: "real-user",
+		senderNick: "Real User",
+		text: { content: prompt },
+	});
 }
 
 function makeSession(sessionPath: string): SessionRecord {
@@ -43,7 +44,7 @@ function makeSession(sessionPath: string): SessionRecord {
 
 describe("real OMP gateway integration", () => {
 	realTest(
-		"spawns real omp rpc and receives a model response",
+		"parses a raw DingTalk message, calls real omp rpc, and writes the session log",
 		async () => {
 			const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-gateway-real-omp-"));
 			const ompPath = process.env.PI_GATEWAY_REAL_OMP_PATH ?? "omp";
@@ -55,10 +56,18 @@ describe("real OMP gateway integration", () => {
 			try {
 				await ensureAgentDir(tmpDir);
 				await bridge.start();
-				const response = await bridge.forward(makeMessage(prompt), makeSession(sessionPath));
+				const raw = makeRawDingTalkMessage(prompt);
+				const inbound = parseRobotMessage(raw, "dingtalk", "real", raw.msgId);
+				if (!inbound) throw new Error("raw DingTalk message did not parse");
+
+				const response = await bridge.forward(inbound, makeSession(sessionPath));
 
 				expect(response).toBeTruthy();
 				expect(response?.trim().length).toBeGreaterThan(0);
+
+				const sessionLog = await Bun.file(sessionPath).text();
+				expect(sessionLog).toContain(prompt);
+				expect(sessionLog).toContain("assistant");
 			} finally {
 				bridge.stop();
 				await fs.rm(tmpDir, { recursive: true, force: true });
