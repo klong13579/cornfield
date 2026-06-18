@@ -38,8 +38,14 @@ export interface InitResult {
 }
 
 export async function runAgentInit(args: InitArgs): Promise<InitResult> {
-	if (!args.name || args.name.includes("/") || args.name.includes("\\") || args.name.includes("\0")) {
-		throw new Error(`Invalid agent name: "${args.name}". Names cannot contain path separators or NUL.`);
+	if (!args.name || args.name.includes("\0")) {
+		throw new Error(`Invalid agent name: "${args.name}". Names cannot contain NUL.`);
+	}
+	// Reject path-traversal segments (`..`) so an accountId like
+	// `../../../etc` cannot escape the parent. Forward slashes are allowed
+	// because the gateway uses nested account ids (e.g. `ops/hr`).
+	if (args.name.split(/[/\\]/).some(seg => seg === "..")) {
+		throw new Error(`Invalid agent name: "${args.name}". Names cannot contain '..' segments.`);
 	}
 	if (args.template && args.template !== "default") {
 		throw new Error(`Unknown template: "${args.template}". Only "default" is supported.`);

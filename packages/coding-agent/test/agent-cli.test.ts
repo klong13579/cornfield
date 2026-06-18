@@ -56,9 +56,18 @@ describe("runAgentInit", () => {
 		}
 	});
 
-	test("rejects names with path separators", async () => {
-		await expect(runAgentInit({ name: "bad/name", dir: tmpDir })).rejects.toThrow(/path separator/);
-		await expect(runAgentInit({ name: "bad\\name", dir: tmpDir })).rejects.toThrow(/path separator/);
+	test("rejects names with NUL or path-traversal segments", async () => {
+		await expect(runAgentInit({ name: "bad\0name", dir: tmpDir })).rejects.toThrow(/NUL/);
+		await expect(runAgentInit({ name: "../escape", dir: tmpDir })).rejects.toThrow(/\.\./);
+		await expect(runAgentInit({ name: "ok/../escape", dir: tmpDir })).rejects.toThrow(/\.\./);
+	});
+
+	test("allows names with forward slashes (nested account ids)", async () => {
+		// No throw — `ops/hr` is the canonical gateway account id shape.
+		const result = await runAgentInit({ name: "ops/hr", dir: tmpDir });
+		expect(result.created).toBe(true);
+		expect(result.agentDir).toContain("ops");
+		expect(result.agentDir).toContain("hr");
 	});
 
 	test("rejects unknown templates", async () => {

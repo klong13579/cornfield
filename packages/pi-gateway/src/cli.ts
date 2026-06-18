@@ -33,7 +33,7 @@
  *   PI_GATEWAY_CONFIG   Alternative config path (default: ~/.omp/gateway.json)
  */
 
-import { ensureAgentDir, resolveAgentDir } from "@oh-my-pi/pi-coding-agent/skeleton";
+import { runAgentInit } from "@oh-my-pi/pi-coding-agent/cli/agent-cli";
 import { logger } from "@oh-my-pi/pi-utils";
 import { getConfigPath, getDataDir, getDingTalkConfig, loadConfig } from "./config";
 import { Gateway } from "./gateway";
@@ -627,16 +627,32 @@ async function cmdInstall(args: string[]): Promise<void> {
 	const robotCode = (await ask(`RobotCode (可选, 默认同 AppKey) [${appKey}]: `)).trim() || appKey;
 	// Model is configured in agentDir/.omp/config.yml (modelRoles.default)
 	const agentDirInput = (await ask(`Agent 工作目录 (可选, 默认 ~/.omp/agents/${accountId}/) []: `)).trim();
+	// Mission file: optional. If provided, content is seeded into <agentDir>/mission.md
+	// before the skeleton runs, so the user's identity wins over the default template.
+	const missionInput = (await ask(`Mission 文件 (可选, 直接回车用默认) []: `)).trim();
 
 	rl.close();
 
-	// Resolve agentDir and create skeleton
-	const agentDir = resolveAgentDir(accountId, agentDirInput || undefined);
-	const created = await ensureAgentDir(agentDir);
-	if (created) {
-		console.log(`\n📁 已创建 Agent 工作目录: ${agentDir}`);
-	} else {
-		console.log(`\n📁 Agent 工作目录已存在: ${agentDir}`);
+	// Delegate agentDir creation to the public `omp agent init` handler so install
+	// and the CLI share one source of truth for the skeleton layout.
+	let agentDir: string;
+	try {
+		const initResult = await runAgentInit({
+			name: accountId,
+			dir: agentDirInput || undefined,
+			mission: missionInput || undefined,
+			json: true,
+		});
+		agentDir = initResult.agentDir;
+		if (initResult.created) {
+			console.log(`\n📁 已创建 Agent 工作目录: ${agentDir} (${initResult.filesWritten} 个文件)`);
+		} else {
+			console.log(`\n📁 Agent 工作目录已存在: ${agentDir}`);
+		}
+	} catch (err) {
+		console.error(`\n❌ 创建 Agent 工作目录失败: ${(err as Error).message}`);
+		process.exitCode = 1;
+		return;
 	}
 
 	// Build config
@@ -671,10 +687,12 @@ async function cmdInstall(args: string[]): Promise<void> {
 	console.log(`   AppKey: ${appKey}`);
 	console.log(`   AgentDir: ${agentDir}`);
 	console.log(`\n下一步：`);
+	console.log(`  omp agent show ${accountId}        查看身份/工具/技能`);
+	console.log(`  omp agent validate --dir ${agentDir}   校验目录结构`);
 	console.log(`  omp gateway start              启动网关`);
 	console.log(`  omp gateway stop               停止网关`);
 	console.log(`  omp gateway service install    安装为系统服务(开机自启)`);
-	console.log(`\n配置模型: 编辑 ${agentDir}.omp/config.yml 下的 modelRoles.default`);
+	console.log(`\n配置模型: 编辑 ${agentDir}/.omp/config.yml 下的 modelRoles.default`);
 }
 
 async function cmdService(subcommand?: string): Promise<void> {
