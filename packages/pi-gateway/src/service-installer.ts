@@ -131,6 +131,8 @@ export interface ServiceStatus {
 	running: boolean;
 	pid?: number;
 	platform: Platform;
+	configPath: string;
+	logPath: string;
 }
 
 /**
@@ -289,5 +291,5 @@ export async function getServiceStatus(): Promise<ServiceStatus> {
 		}
 	}
 
-	return { installed, running, pid, platform };
+	return { installed, running, pid, platform, configPath: paths.configPath, logPath: paths.logPath };
 }

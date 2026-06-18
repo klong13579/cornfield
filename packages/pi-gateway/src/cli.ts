@@ -34,7 +34,7 @@
  */
 
 import { logger } from "@oh-my-pi/pi-utils";
-import { getConfigPath, getDataDir, loadConfig } from "./config";
+import { getConfigPath, getDataDir, getDingTalkConfig, loadConfig } from "./config";
 import { Gateway } from "./gateway";
 import { executeScheduledCommand } from "./scheduler/executor";
 import { SchedulerDbStorage } from "./scheduler/storage";
@@ -149,7 +149,7 @@ async function cmdStop(): Promise<void> {
 async function cmdStatus(_configPath?: string): Promise<void> {
 	const { getGatewayStatus } = await import("./gateway");
 	const config = await loadConfig(_configPath);
-	const status = await getGatewayStatus();
+	const status = await getGatewayStatus(config);
 
 	console.log("Gateway Status:");
 	console.log(`  Running: ${status.running}`);
@@ -163,6 +163,10 @@ async function cmdStatus(_configPath?: string): Promise<void> {
 	const channels = Object.keys(config.channels ?? {});
 	if (channels.length > 0) {
 		console.log(`  Configured channels: ${channels.join(", ")}`);
+	}
+	const dingtalk = getDingTalkConfig(config);
+	if (dingtalk?.accounts && Object.keys(dingtalk.accounts).length > 0) {
+		console.log(`  Accounts: ${Object.keys(dingtalk.accounts).join(", ")}`);
 	}
 }
 
@@ -515,6 +519,8 @@ async function cmdServiceStatus(): Promise<void> {
 	console.log(`  Installed: ${status.installed}`);
 	console.log(`  Running: ${status.running}`);
 	if (status.pid) console.log(`  PID: ${status.pid}`);
+	console.log(`  Config: ${status.configPath}`);
+	console.log(`  Log: ${status.logPath}`);
 }
 
 // ═══════════════════════════════════════════════════════════════════════

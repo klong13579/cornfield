@@ -119,8 +119,8 @@ export interface GatewayDaemonStatus {
 	stalePidFile?: boolean;
 }
 
-export async function getGatewayStatus(): Promise<GatewayDaemonStatus> {
-	const dataDir = getDataDir();
+export async function getGatewayStatus(config?: GatewayConfig): Promise<GatewayDaemonStatus> {
+	const dataDir = getDataDir(config);
 	const pidPath = path.join(dataDir, PID_FILE);
 
 	try {
@@ -396,7 +396,9 @@ export class Gateway {
 	async getStatus(): Promise<{
 		running: boolean;
 		channels: Array<{ id: string; name: string; connected: boolean }>;
+		accounts: Array<{ accountId: string; bridgeRunning: boolean; agentDir?: string }>;
 		sessions: number;
+		queues: ReturnType<SessionManager["getQueueStats"]>;
 		scheduler: {
 			running: boolean;
 			taskCount: number;
@@ -409,11 +411,18 @@ export class Gateway {
 		}));
 
 		const sessions = (await this.#store?.getActiveSessions()) ?? [];
+		const accounts = Array.from(this.#accountBridges.entries()).map(([accountId, bridge]) => ({
+			accountId,
+			bridgeRunning: bridge.isRunning,
+			agentDir: this.#accountAgentDirs.get(accountId),
+		}));
 
 		return {
 			running: this.#running || await checkPidFile(getDataDir(this.#config), PID_FILE),
 			channels,
 			sessions: sessions.length,
+			accounts,
+			queues: this.#sessionManager?.getQueueStats() ?? [],
 			scheduler: {
 				running: this.#schedulerEngine != null,
 				taskCount: this.#schedulerEngine?.getActiveTaskIds().length ?? 0,
@@ -548,7 +557,7 @@ export class Gateway {
 				return;
 			}
 
-			// Send "processing" placeholder first
+			// Send "processing" placeholder first. Failure here should not prevent agent processing.
 			const placeholder: OutboundMessage = {
 				channelId: msg.channelId,
 				conversationId: msg.conversationId,
@@ -556,7 +565,15 @@ export class Gateway {
 				sessionWebhook: msg.sessionWebhook,
 				accountId: msg.accountId,
 			};
-			await this.#registry.sendMessage(placeholder);
+			try {
+				await this.#registry.sendMessage(placeholder);
+			} catch (err) {
+				logger.warn("Failed to send processing placeholder", {
+					accountId,
+					conversationId: msg.conversationId,
+					error: err instanceof Error ? err.message : String(err),
+				});
+			}
 
 			// Queue and forward to the account bridge
 			const response = await this.#sessionManager?.enqueue(msg, session);
@@ -570,7 +587,15 @@ export class Gateway {
 					sessionWebhook: msg.sessionWebhook,
 					accountId: msg.accountId,
 				};
-				await this.#registry.sendMessage(outbound);
+				try {
+					await this.#registry.sendMessage(outbound);
+				} catch (err) {
+					logger.error("Failed to send final response", {
+						accountId,
+						conversationId: msg.conversationId,
+						error: err instanceof Error ? err.message : String(err),
+					});
+				}
 			}
 
 			// Update session timestamp
