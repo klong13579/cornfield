@@ -660,6 +660,9 @@ export class Gateway {
 			this.#schedulerFileStore?.syncToDb();
 			this.#schedulerEngine?.reload();
 
+			// Update status file so channel connection state is reflected
+			this.#writeStatusFile();
+
 			// Prune old executions every 10th tick (~10 min at default 60s)
 			tickCount++;
 			if (tickCount % 10 === 0 && this.#schedulerStorage) {
