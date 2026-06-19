@@ -14,7 +14,15 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { runAgentInit, runAgentList, runAgentShow, runAgentValidate } from "../src/cli/agent-cli";
+import {
+	runAgentInit,
+	runAgentList,
+	runAgentReconcile,
+	runAgentRegister,
+	runAgentShow,
+	runAgentUnregister,
+	runAgentValidate,
+} from "../src/cli/agent-cli";
 
 let tmpDir: string;
 
@@ -286,5 +294,57 @@ describe("runAgentValidate", () => {
 		expect(result.valid).toBe(true); // warnings don't invalidate
 		const warnings = result.issues.filter(i => i.level === "warning");
 		expect(warnings.map(i => i.file).sort()).toEqual([".gitignore", "prompt-includes.json"]);
+	});
+});
+
+describe("omp agent register / unregister / reconcile", () => {
+	const savedHome = process.env.HOME;
+	let isolatedHome: string;
+
+	beforeEach(async () => {
+		// isolate HOME so the real registry is never touched
+		isolatedHome = await fs.mkdtemp(path.join(os.tmpdir(), "omp-registry-iso-"));
+		process.env.HOME = isolatedHome;
+	});
+
+	afterEach(async () => {
+		// restore FIRST so we never rm the real home, then clean the isolated one
+		process.env.HOME = savedHome;
+		if (isolatedHome) await fs.rm(isolatedHome, { recursive: true, force: true });
+	});
+
+	test("register adds an existing agentDir", async () => {
+		const liveDir = await fs.mkdtemp(path.join(os.tmpdir(), "live-"));
+		const result = await runAgentRegister({ name: "live", dir: liveDir });
+		expect(result.registered).toBe(true);
+		expect(result.agentDir).toBe(liveDir);
+	});
+
+	test("register rejects non-existent path", async () => {
+		await expect(runAgentRegister({ name: "x", dir: "/nonexistent/never" })).rejects.toThrow(/does not exist/);
+	});
+
+	test("unregister removes a previously-registered entry", async () => {
+		const liveDir = await fs.mkdtemp(path.join(os.tmpdir(), "live-"));
+		await runAgentRegister({ name: "u", dir: liveDir });
+		const result = await runAgentUnregister({ name: "u" });
+		expect(result.removed).toBe(true);
+	});
+
+	test("unregister returns false for unknown names", async () => {
+		const result = await runAgentUnregister({ name: "nope" });
+		expect(result.removed).toBe(false);
+	});
+
+	test("reconcile prunes stale entries and reports them", async () => {
+		const liveDir = await fs.mkdtemp(path.join(os.tmpdir(), "live-"));
+		// Use the low-level registerAgent to add a "dead" entry pointing at a
+		// non-existent path (runAgentRegister would reject that at the API layer).
+		const { registerAgent } = await import("../src/skeleton/registry");
+		await registerAgent("alive", liveDir);
+		await registerAgent("dead", "/nonexistent/never/was");
+		const result = await runAgentReconcile();
+		expect(result.pruned).toContain("dead");
+		expect(result.pruned).not.toContain("alive");
 	});
 });

@@ -12,5 +12,18 @@
 export { SKELETON_FILES, type SkeletonFile } from "./assets";
 export { SKELETON_DIRS } from "./dirs";
 export { ensureAgentDir } from "./ensure";
+export {
+	findAgent,
+	findStaleEntries,
+	listRegistered,
+	loadRegistry,
+	pruneStaleEntries,
+	REGISTRY_FILE_PATH,
+	registerAgent,
+	saveRegistry,
+	unregisterAgent,
+	type AgentEntry,
+	type Registry,
+} from "./registry";
 export { resolveAgentDir } from "./resolve";
 export { buildAgentSessionPath } from "./session";

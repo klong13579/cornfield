@@ -15,19 +15,26 @@ import * as path from "node:path";
 import { Args, Command, Flags, renderCommandHelp } from "@oh-my-pi/pi-utils/cli";
 import {
 	renderList,
+	renderReconcile,
+	renderRegister,
 	renderShow,
+	renderUnregister,
 	renderValidate,
 	runAgentInit,
 	runAgentList,
+	runAgentReconcile,
+	runAgentRegister,
 	runAgentShow,
+	runAgentUnregister,
 	runAgentValidate,
 } from "../cli/agent-cli";
 import { initTheme } from "../modes/theme/theme";
 
-const ACTIONS = ["init", "list", "show", "validate", "help"];
+const ACTIONS = ["init", "list", "show", "validate", "register", "unregister", "reconcile", "help"];
 
 export default class Agent extends Command {
-	static description = "Manage agentDir workspaces: create, list, show, validate (per agent-design §6.2)";
+	static description =
+		"Manage agentDir workspaces: create, list, show, validate, register, unregister, reconcile (per agent-design §6.2)";
 
 	static args = {
 		action: Args.string({
@@ -36,7 +43,14 @@ export default class Agent extends Command {
 			options: ACTIONS,
 		}),
 		name: Args.string({
-			description: "Agent name (init/show)",
+			description: "Agent name (init/show/register/unregister)",
+			required: false,
+		}),
+		// Positional shortcut for `--dir` (init action). Lets users write
+		// `omp agent init hr-bot ./` instead of `omp agent init hr-bot --dir ./`.
+		// For other actions, this is ignored — use `--dir` flag.
+		dir: Args.string({
+			description: "Positional shortcut for --dir (init only)",
 			required: false,
 		}),
 	};
@@ -69,6 +83,12 @@ export default class Agent extends Command {
 		"  omp agent validate --dir ~/.omp/agents/hr-bot        Check always-on + runtime hard deps",
 		"  omp agent validate --dir .                            Check current directory",
 		"  omp agent validate --dir ~/.omp/agents/hr-bot --json  Output as JSON",
+		"",
+		"  ======== 注册表 ========",
+		"  omp agent register hr3 --dir /path/to/hr3       Add an existing agentDir to ~/.omp/agent/registry.json",
+		"  omp agent register hr3 /path/to/hr3              Positional shortcut for --dir",
+		"  omp agent unregister hr3                          Remove hr3 from the registry (does not delete files)",
+		"  omp agent reconcile                               Prune stale entries; re-register any in default location",
 		"",
 	];
 
@@ -155,6 +175,34 @@ export default class Agent extends Command {
 				const result = await runAgentValidate({ agentDir: dirResolved, json: flags.json as boolean | undefined });
 				console.log(renderValidate(result, Boolean(flags.json)));
 				process.exitCode = result.valid ? 0 : 1;
+				return;
+			}
+			case "register": {
+				if (!name) {
+					console.error(
+						"Usage: omp agent register <name> --dir <path>  (or positional: omp agent register <name> <dir>)",
+					);
+					process.exitCode = 1;
+					return;
+				}
+				const result = await runAgentRegister({ name, dir: dirResolved, json: flags.json as boolean | undefined });
+				console.log(renderRegister(result, Boolean(flags.json)));
+				process.exitCode = result.registered ? 0 : 1;
+				return;
+			}
+			case "unregister": {
+				if (!name) {
+					console.error("Usage: omp agent unregister <name>");
+					process.exitCode = 1;
+					return;
+				}
+				const result = await runAgentUnregister({ name, json: flags.json as boolean | undefined });
+				console.log(renderUnregister(result, Boolean(flags.json)));
+				return;
+			}
+			case "reconcile": {
+				const result = await runAgentReconcile({ json: flags.json as boolean | undefined });
+				console.log(renderReconcile(result, Boolean(flags.json)));
 				return;
 			}
 			default:

@@ -15,7 +15,14 @@
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { ensureAgentDir, resolveAgentDir, SKELETON_FILES } from "@oh-my-pi/pi-coding-agent/skeleton";
+import {
+	ensureAgentDir,
+	pruneStaleEntries,
+	registerAgent,
+	resolveAgentDir,
+	SKELETON_FILES,
+	unregisterAgent,
+} from "@oh-my-pi/pi-coding-agent/skeleton";
 
 // ────────────────────────────────────────────────────────────────────────────
 // init
@@ -90,6 +97,11 @@ export async function runAgentInit(args: InitArgs): Promise<InitResult> {
 	const effectiveCreated = created || (!dirExistedBefore && !created);
 	const filesWritten = effectiveCreated ? SKELETON_FILES.length : 0;
 
+	// Persist the (name, path) mapping so `omp agent list` / `show` can find
+	// this agentDir regardless of where it lives (default `~/.omp/agents/`,
+	// custom `--dir`, nested account id like `ops/hr`).
+	await registerAgent(args.name, agentDir, args.template ?? "default");
+
 	return { name: args.name, agentDir, created: effectiveCreated, filesWritten };
 }
 
@@ -106,27 +118,56 @@ export interface AgentSummary {
 	name: string;
 	agentDir: string;
 	status: AgentStatus;
+	/** True if this entry was found in the registry; false if discovered via directory scan. */
+	registered: boolean;
 }
 
 export type AgentStatus = "active" | "incomplete" | "broken";
 
 export async function runAgentList(args: ListArgs): Promise<AgentSummary[]> {
-	const root = path.resolve(args.dir ?? path.join(os.homedir(), ".omp", "agents"));
+	const summaries: AgentSummary[] = [];
+	const seenNames = new Set<string>();
+	const seenPaths = new Set<string>();
 
+	// Step 1: read the registry so custom `--dir` paths (e.g. `OMP-workspace-test/hr3`)
+	// are visible without the user having to pass `--dir` again.
+	if (!args.dir) {
+		const { listRegistered } = await import("@oh-my-pi/pi-coding-agent/skeleton");
+		const registered = await listRegistered();
+		for (const { name, entry } of registered) {
+			const status = await probeAgentStatus(entry.path);
+			summaries.push({ name, agentDir: entry.path, status, registered: true });
+			seenNames.add(name);
+			seenPaths.add(entry.path);
+		}
+	}
+
+	// Step 2: scan the directory (default `~/.omp/agents/`, or `--dir` if given).
+	// This picks up legacy agentDirs created before the registry existed and entries
+	// the user dropped into the default location without going through `omp agent init`.
+	const root = path.resolve(args.dir ?? path.join(homeDir(), ".omp", "agents"));
 	let entries: import("node:fs").Dirent[];
 	try {
 		entries = await fs.readdir(root, { withFileTypes: true });
 	} catch (err) {
-		if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
-		throw err;
+		if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+			// root doesn't exist — that's fine if registry produced all results
+		} else {
+			throw err;
+		}
+		entries = [];
 	}
 
-	const summaries: AgentSummary[] = [];
 	for (const entry of entries) {
 		if (!entry.isDirectory()) continue;
 		const dir = path.join(root, entry.name);
-		const summary = await inspectAgentDir(dir, entry.name);
-		if (summary) summaries.push(summary);
+		if (seenPaths.has(dir)) continue;
+		// If a name is already registered, the registry entry wins (it's the
+		// source of truth for where the agentDir lives).
+		if (seenNames.has(entry.name)) continue;
+		const status = await probeAgentStatus(dir);
+		summaries.push({ name: entry.name, agentDir: dir, status, registered: false });
+		seenNames.add(entry.name);
 	}
 
 	// Stable order: by name.
@@ -134,9 +175,9 @@ export async function runAgentList(args: ListArgs): Promise<AgentSummary[]> {
 	return summaries;
 }
 
-async function inspectAgentDir(dir: string, name: string): Promise<AgentSummary | null> {
-	const status = await probeAgentStatus(dir);
-	return { name, agentDir: dir, status };
+/** `process.env.HOME ?? os.homedir()` so tests can point HOME at a temp dir. */
+function homeDir(): string {
+	return process.env.HOME ?? os.homedir();
 }
 
 async function probeAgentStatus(dir: string): Promise<AgentStatus> {
@@ -181,7 +222,24 @@ export interface AgentDetail {
 }
 
 export async function runAgentShow(args: ShowArgs): Promise<AgentDetail> {
-	const agentDir = path.resolve(args.dir ?? path.join(os.homedir(), ".omp", "agents"), args.name);
+	let agentDir: string;
+	if (args.dir) {
+		// Explicit --dir: same parent/name resolution as init.
+		let stat: Awaited<ReturnType<typeof fs.stat>> | null = null;
+		try {
+			stat = await fs.stat(args.dir);
+		} catch {
+			stat = null;
+		}
+		agentDir = stat?.isDirectory() ? path.join(args.dir, args.name) : path.resolve(args.dir);
+	} else {
+		// Registry lookup first so custom --dir paths (e.g. nested account ids
+		// like `ops/hr` stored under a non-default location) are found without
+		// the user having to pass --dir again.
+		const { findAgent } = await import("@oh-my-pi/pi-coding-agent/skeleton");
+		const entry = await findAgent(args.name);
+		agentDir = entry?.path ?? path.join(homeDir(), ".omp", "agents", args.name);
+	}
 
 	const exists = await pathExists(agentDir);
 	if (!exists) {
@@ -455,6 +513,109 @@ export async function runAgentValidate(args: ValidateArgs): Promise<ValidateResu
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// register / unregister / reconcile
+// ────────────────────────────────────────────────────────────────────────────
+
+export interface RegisterArgs {
+	name: string;
+	dir?: string;
+	json?: boolean;
+}
+
+export interface RegisterResult {
+	name: string;
+	agentDir: string;
+	registered: boolean;
+}
+
+export async function runAgentRegister(args: RegisterArgs): Promise<RegisterResult> {
+	if (!args.name || args.name.includes("\0")) {
+		throw new Error(`Invalid agent name: "${args.name}". Names cannot contain NUL.`);
+	}
+	if (args.name.split(/[/\\]/).some(seg => seg === "..")) {
+		throw new Error(`Invalid agent name: "${args.name}". Names cannot contain '..' segments.`);
+	}
+	if (!args.dir) {
+		throw new Error("register requires --dir <path> (or positional dir): the path to the existing agentDir.");
+	}
+	// For register, `dir` is the full path to the existing agentDir (unlike init,
+	// which uses dir as a parent and appends <name>). Users point at the dir they
+	// want to track; we don't try to derive a child path.
+	const agentDir = path.resolve(args.dir);
+	if (!(await pathExists(agentDir))) {
+		throw new Error(`AgentDir does not exist: ${agentDir}`);
+	}
+	const stat = await fs.stat(agentDir);
+	if (!stat.isDirectory()) {
+		throw new Error(`Path is not a directory: ${agentDir}`);
+	}
+	await registerAgent(args.name, agentDir, "default");
+	return { name: args.name, agentDir, registered: true };
+}
+
+export interface UnregisterArgs {
+	name: string;
+	json?: boolean;
+}
+
+export interface UnregisterResult {
+	name: string;
+	removed: boolean;
+}
+
+export async function runAgentUnregister(args: UnregisterArgs): Promise<UnregisterResult> {
+	const removed = await unregisterAgent(args.name);
+	return { name: args.name, removed };
+}
+
+export interface ReconcileArgs {
+	json?: boolean;
+}
+
+export interface ReconcileResult {
+	pruned: string[];
+	registered: string[];
+	skipped: string[];
+}
+
+/**
+ * Reconcile the registry against the filesystem:
+ *   1. Remove entries whose path no longer exists.
+ *   2. Scan the default `~/.omp/agents/` for agentDirs not yet in the registry
+ *      and add them (so legacy agents are visible).
+ *   3. Surface names that could not be auto-registered.
+ */
+export async function runAgentReconcile(_args: ReconcileArgs = {}): Promise<ReconcileResult> {
+	const pruned = await pruneStaleEntries();
+	const { listRegistered, registerAgent: reg } = await import("@oh-my-pi/pi-coding-agent/skeleton");
+	const existing = await listRegistered();
+	const knownPaths = new Set(existing.map(e => e.entry.path));
+
+	const registered: string[] = [];
+	const skipped: string[] = [];
+	const defaultRoot = path.join(homeDir(), ".omp", "agents");
+	let entries: import("node:fs").Dirent[];
+	try {
+		entries = await fs.readdir(defaultRoot, { withFileTypes: true });
+	} catch {
+		entries = [];
+	}
+	for (const e of entries) {
+		if (!e.isDirectory()) continue;
+		const fullPath = path.join(defaultRoot, e.name);
+		if (knownPaths.has(fullPath)) continue;
+		try {
+			await reg(e.name, fullPath, "default");
+			registered.push(e.name);
+		} catch {
+			skipped.push(e.name);
+		}
+	}
+
+	return { pruned, registered, skipped };
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // renderers (small, no external UI deps)
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -464,17 +625,24 @@ export function renderList(summaries: AgentSummary[], json: boolean): string {
 		return "No agents found. Run `omp agent init <name>` to create one.";
 	}
 	const colGap = 2;
-	const header: [string, string, string] = ["NAME", "AGENT_DIR", "STATUS"];
-	const rows: Array<[string, string, string]> = summaries.map(s => [s.name, s.agentDir, s.status]);
-	const widths = [0, 0, 0];
-	for (const r of rows) for (let i = 0; i < 3; i++) widths[i] = Math.max(widths[i]!, r[i]!.length);
-	for (let i = 0; i < 3; i++) widths[i] = Math.max(widths[i]!, header[i]!.length);
-	const fmt = (cells: [string, string, string]): string =>
+	const header: [string, string, string, string] = ["NAME", "AGENT_DIR", "STATUS", "REG"];
+	const rows: Array<[string, string, string, string]> = summaries.map(s => [
+		s.name,
+		s.agentDir,
+		s.status,
+		s.registered ? "*" : "",
+	]);
+	const widths = [0, 0, 0, 0];
+	for (const r of rows) for (let i = 0; i < 4; i++) widths[i] = Math.max(widths[i]!, r[i]!.length);
+	for (let i = 0; i < 4; i++) widths[i] = Math.max(widths[i]!, header[i]!.length);
+	const fmt = (cells: [string, string, string, string]): string =>
 		cells
-			.map((c, i) => c.padEnd(widths[i]! + (i < 2 ? colGap : 0)))
+			.map((c, i) => c.padEnd(widths[i]! + (i < 3 ? colGap : 0)))
 			.join("")
 			.trimEnd();
-	const lines: string[] = [fmt(header), "─".repeat(widths.reduce((a, b) => a + b, 0) + colGap * 2), ...rows.map(fmt)];
+	const lines: string[] = [fmt(header), "─".repeat(widths.reduce((a, b) => a + b, 0) + colGap * 3), ...rows.map(fmt)];
+	lines.push("");
+	lines.push("REG: *=registered in ~/.omp/agent/registry.json  (blank)=filesystem scan only");
 	return lines.join("\n");
 }
 
@@ -533,3 +701,34 @@ export function renderValidate(result: ValidateResult, json: boolean): string {
 
 // Re-export SKELETON_FILES for callers that want to enumerate the layout.
 export { SKELETON_FILES };
+
+export function renderRegister(result: RegisterResult, json: boolean): string {
+	if (json) return JSON.stringify(result, null, 2);
+	return `✓ Registered ${result.name} -> ${result.agentDir}`;
+}
+
+export function renderUnregister(result: UnregisterResult, json: boolean): string {
+	if (json) return JSON.stringify(result, null, 2);
+	return result.removed
+		? `✓ Unregistered ${result.name} (agentDir on disk is untouched)`
+		: `! ${result.name} was not in the registry`;
+}
+
+export function renderReconcile(result: ReconcileResult, json: boolean): string {
+	if (json) return JSON.stringify(result, null, 2);
+	const lines: string[] = [];
+	if (result.pruned.length > 0) {
+		lines.push(`✗ Pruned ${result.pruned.length} stale entries: ${result.pruned.join(", ")}`);
+	} else {
+		lines.push("✓ No stale entries to prune");
+	}
+	if (result.registered.length > 0) {
+		lines.push(
+			`+ Auto-registered ${result.registered.length} from default location: ${result.registered.join(", ")}`,
+		);
+	}
+	if (result.skipped.length > 0) {
+		lines.push(`! Skipped ${result.skipped.length} (could not register): ${result.skipped.join(", ")}`);
+	}
+	return lines.join("\n");
+}
