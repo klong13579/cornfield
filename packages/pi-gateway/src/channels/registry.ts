@@ -11,8 +11,12 @@ import type { Channel, ChannelConfig, InboundMessage, OutboundMessage } from "..
 export class ChannelRegistry {
 	#channels = new Map<string, { channel: Channel; config: ChannelConfig }>();
 
-	register(channel: Channel, config: ChannelConfig): void {
-		this.#channels.set(channel.id, { channel, config });
+	register(channel: Channel, config: ChannelConfig, key = channel.id): void {
+		this.#channels.set(key, { channel, config });
+	}
+
+	unregister(key: string): void {
+		this.#channels.delete(key);
 	}
 
 	get(id: string): Channel | undefined {
@@ -60,9 +64,10 @@ export class ChannelRegistry {
 	}
 
 	async sendMessage(msg: OutboundMessage): Promise<void> {
-		const channel = this.get(msg.channelId);
+		const channelKey = msg.accountId ? `${msg.channelId}:${msg.accountId}` : msg.channelId;
+		const channel = this.get(channelKey);
 		if (!channel) {
-			throw new Error(`Unknown channel: ${msg.channelId}`);
+			throw new Error(`Unknown channel: ${channelKey}`);
 		}
 		await channel.sendMessage(msg);
 	}

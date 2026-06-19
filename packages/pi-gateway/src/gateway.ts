@@ -43,6 +43,7 @@ export function createAccountBridgeOptions(
 }
 
 const PID_FILE = "gateway.pid";
+const STATUS_FILE = "gateway.status.json";
 
 /**
  * Stop the running gateway daemon by PID file.
@@ -133,31 +134,40 @@ export interface GatewayDaemonStatus {
 	pid?: number;
 	startedAt?: string;
 	stalePidFile?: boolean;
+	channels?: Array<{ id: string; name: string; connected: boolean }>;
+	accounts?: Array<{ accountId: string; bridgeRunning: boolean; agentDir?: string; bridgeState?: string }>;
+	scheduler?: { running: boolean; taskCount: number };
 }
 
 export async function getGatewayStatus(config?: GatewayConfig): Promise<GatewayDaemonStatus> {
 	const dataDir = getDataDir(config);
 	const pidPath = path.join(dataDir, PID_FILE);
+	const statusPath = path.join(dataDir, STATUS_FILE);
+
+	// Try to read cached status file for channel/account info
+	let cachedStatus: Partial<GatewayDaemonStatus> = {};
+	try {
+		const statusText = await fs.readFile(statusPath, "utf-8");
+		cachedStatus = JSON.parse(statusText);
+	} catch {
+		// status file not available
+	}
 
 	try {
 		const pidText = await fs.readFile(pidPath, "utf-8");
 		const pid = parseInt(pidText.trim(), 10);
 		if (isNaN(pid) || pid <= 0) {
-			// Clean up invalid PID file
 			await fs.unlink(pidPath).catch(() => {});
-			return { running: false };
+			return { running: false, ...cachedStatus };
 		}
 
-		// Check if process exists
 		try {
 			process.kill(pid, 0);
 		} catch {
-			// Process dead — clean up stale PID file
 			await fs.unlink(pidPath).catch(() => {});
-			return { running: false, stalePidFile: true };
+			return { running: false, stalePidFile: true, ...cachedStatus };
 		}
 
-		// Get PID file mtime as started time
 		let startedAt: string | undefined;
 		try {
 			const stat = await fs.stat(pidPath);
@@ -166,9 +176,9 @@ export async function getGatewayStatus(config?: GatewayConfig): Promise<GatewayD
 			// Best-effort
 		}
 
-		return { running: true, pid, startedAt };
+		return { running: true, pid, startedAt, ...cachedStatus };
 	} catch {
-		return { running: false };
+		return { running: false, ...cachedStatus };
 	}
 }
 
@@ -278,6 +288,8 @@ export class Gateway {
 		} catch (e) {
 			logger.warn("Failed to write PID file", { error: String(e) });
 		}
+
+		await this.#writeStatusFile();
 	}
 
 	/**
@@ -340,6 +352,76 @@ export class Gateway {
 		this.#registry.register(channel, rawConfig);
 	}
 
+	async #addAccount(
+		accountId: string,
+		account: DingtalkAccountConfig,
+		config: GatewayConfig,
+	): Promise<void> {
+		const rawConfig = config.channels.dingtalk;
+		const channel = new DingTalkChannel();
+		channel.setAccountId(accountId);
+
+		const agentDir = resolveAgentDir(accountId, account.agentDir);
+		this.#accountAgentDirs.set(accountId, agentDir);
+		try {
+			await ensureAgentDir(agentDir);
+		} catch (err) {
+			logger.error("Failed to initialize account agentDir", { accountId, agentDir, error: String(err) });
+			return;
+		}
+
+		const bridge = new AgentBridge(createAccountBridgeOptions(config.agent, account, agentDir));
+		this.#accountBridges.set(accountId, bridge);
+		try {
+			await bridge.start();
+		} catch (err) {
+			logger.error("Failed to start account bridge", { accountId, error: String(err) });
+		}
+
+		this.#registry.register(
+			channel,
+			{
+				...rawConfig,
+				appKey: account.appKey,
+				appSecret: account.appSecret,
+				robotCode: account.robotCode,
+			},
+			`dingtalk:${accountId}`,
+		);
+		logger.debug("Registered DingTalk account channel", { accountId });
+
+		// Connect the new channel
+		try {
+			channel.onMessage(async msg => this.#handleInboundMessage(msg));
+			await channel.connect({
+				...rawConfig,
+				appKey: account.appKey,
+				appSecret: account.appSecret,
+				robotCode: account.robotCode,
+			});
+			logger.debug("DingTalk account channel connected", { accountId });
+		} catch (err) {
+			logger.error("Failed to connect DingTalk account channel", { accountId, error: String(err) });
+		}
+	}
+
+	#removeAccount(accountId: string): void {
+		const channelKey = `dingtalk:${accountId}`;
+		const channel = this.#registry.get(channelKey);
+		if (channel) {
+			channel.disconnect().catch(() => {});
+		}
+		this.#registry.unregister(channelKey);
+
+		const bridge = this.#accountBridges.get(accountId);
+		if (bridge) {
+			bridge.stop();
+		}
+		this.#accountBridges.delete(accountId);
+		this.#accountAgentDirs.delete(accountId);
+		logger.debug("Removed DingTalk account", { accountId });
+	}
+
 	async stop(): Promise<void> {
 		if (!this.#running) return;
 
@@ -380,20 +462,63 @@ export class Gateway {
 	}
 
 	async reload(config: GatewayConfig): Promise<void> {
-		const wasRunning = this.#running;
-		if (wasRunning) {
-			await this.stop();
-		}
+		// Snapshot old config for diff
+		const oldDtConfig = getDingTalkConfig(this.#config);
+		const oldAccounts = oldDtConfig?.accounts ? new Map(Object.entries(oldDtConfig.accounts)) : new Map();
+
 		this.#config = config;
-		this.#registry = new ChannelRegistry();
-		this.#bridge = new AgentBridge(config.agent ?? {});
-		this.#accountBridges.clear();
-		this.#accountAgentDirs.clear();
-		this.#sessionManager = undefined;
-		this.#store = null;
-		if (wasRunning) {
-			await this.start();
+
+		// Reload scheduler config without full restart
+		this.#stopScheduler();
+		await this.#startScheduler();
+
+		// Diff DingTalk accounts: add, remove, or update per-account channels
+		const newDtConfig = getDingTalkConfig(config);
+		const newAccounts = newDtConfig?.accounts ? new Map(Object.entries(newDtConfig.accounts)) : new Map();
+
+		// Remove accounts no longer in config
+		for (const [accountId] of oldAccounts) {
+			if (!newAccounts.has(accountId)) {
+				this.#removeAccount(accountId);
+			}
 		}
+
+		// Add or update accounts
+		for (const [accountId, account] of newAccounts) {
+			if (!oldAccounts.has(accountId)) {
+				await this.#addAccount(accountId, account, config);
+			} else {
+				// Account exists — update bridge options if changed
+				const oldAccount = oldAccounts.get(accountId)!;
+				if (
+					oldAccount.appKey !== account.appKey ||
+					oldAccount.appSecret !== account.appSecret ||
+					oldAccount.robotCode !== account.robotCode ||
+					oldAccount.agentDir !== account.agentDir
+				) {
+					this.#removeAccount(accountId);
+					await this.#addAccount(accountId, account, config);
+				}
+			}
+		}
+
+		// Rebuild SessionManager with updated bridges
+		const hasDingTalkAccounts = newAccounts.size > 0;
+		if (hasDingTalkAccounts) {
+			if (!hasDingTalkAccounts) {
+				this.#bridge.stop();
+			}
+		}
+
+		// Refresh session manager with current bridges
+		this.#sessionManager = new SessionManager({
+			bridges: this.#accountBridges,
+			defaultBridge: hasDingTalkAccounts ? undefined : this.#bridge,
+		});
+
+		await this.#writeStatusFile();
+
+		logger.debug("Gateway config reloaded");
 	}
 
 	get isRunning(): boolean {
@@ -431,6 +556,26 @@ export class Gateway {
 		};
 
 		return await this.#bridge.forward(mockMessage, mockSession);
+	}
+
+	async #writeStatusFile(): Promise<void> {
+		const dataDir = getDataDir(this.#config);
+		const statusPath = path.join(dataDir, STATUS_FILE);
+		try {
+			const status = await this.getStatus();
+			const data = JSON.stringify(
+				{
+					channels: status.channels,
+					accounts: status.accounts,
+					scheduler: status.scheduler,
+				},
+				null,
+				2,
+			);
+			await fs.writeFile(statusPath, data);
+		} catch {
+			// non-fatal
+		}
 	}
 
 	async getStatus(): Promise<{

@@ -24,6 +24,7 @@
  */
 
 import { Args, Command, Flags, renderCommandHelp } from "@oh-my-pi/pi-utils/cli";
+import { logger } from "@oh-my-pi/pi-utils";
 import { initTheme } from "../modes/theme/theme";
 
 const ACTIONS = ["start", "stop", "status", "config", "cron", "service", "setup", "help"];
@@ -103,6 +104,19 @@ export default class Gateway extends Command {
 				process.on("SIGINT", shutdown);
 				process.on("SIGTERM", shutdown);
 
+				// Reload config on SIGHUP without restarting the process
+				process.on("SIGHUP", async () => {
+					logger.debug("Reloading gateway config...");
+					try {
+						const nextConfig = await loadConfig(configPath);
+						await gateway.reload(nextConfig);
+					} catch (err) {
+						logger.error("Failed to reload gateway config", {
+							error: err instanceof Error ? err.message : String(err),
+						});
+					}
+				});
+
 				await gateway.start();
 				await new Promise(() => {});
 				break;
@@ -128,6 +142,23 @@ export default class Gateway extends Command {
 				if (status.running) {
 					console.log(`  PID: ${status.pid}`);
 					console.log(`  Started: ${status.startedAt}`);
+
+					if (status.channels && status.channels.length > 0) {
+						console.log("  Channels:");
+						for (const ch of status.channels) {
+							console.log(`    ${ch.name} (${ch.id}): ${ch.connected ? "connected" : "disconnected"}`);
+						}
+					}
+					if (status.accounts && status.accounts.length > 0) {
+						console.log("  Accounts:");
+						for (const acct of status.accounts) {
+							console.log(`    ${acct.accountId}: bridge ${acct.bridgeRunning ? "running" : "stopped"}` +
+								(acct.bridgeState ? ` [${acct.bridgeState}]` : ""));
+						}
+					}
+					if (status.scheduler) {
+						console.log(`  Scheduler: ${status.scheduler.running ? "running" : "stopped"} (${status.scheduler.taskCount} tasks)`);
+					}
 				} else if (status.stalePidFile) {
 					console.log(`  (stale PID file removed)`);
 				}
