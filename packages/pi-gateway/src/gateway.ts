@@ -19,10 +19,12 @@ import { ChannelRegistry } from "./channels/registry";
 import { getDataDir, getDingTalkConfig, getEnabledChannels } from "./config";
 import { SchedulerEngine } from "./scheduler/engine";
 import { executeScheduledCommand } from "./scheduler/executor";
+import { appendExecutionLog } from "./scheduler/execution-log";
 import { SchedulerFileStore } from "./scheduler/file-store";
 import { SchedulerDbStorage } from "./scheduler/storage";
 import type { ScheduledTask } from "./scheduler/types";
 import { DEFAULT_SCHEDULER_CONFIG, getSchedulerDbPath, getSchedulerDir } from "./scheduler/types";
+import { findAgentSessionPath } from "./scheduler";
 import { type BridgeStat, type QueueStat, SessionManager } from "./session-manager";
 import { SQLiteSessionStore } from "./session-store";
 import type { DingtalkAccountConfig, GatewayConfig, InboundMessage, MessageContent, OutboundMessage } from "./types";
@@ -508,9 +510,16 @@ export class Gateway {
 
 		// Reload tasks periodically to pick up file changes
 		const tickMs = cronConfig.tickIntervalMs ?? 60_000;
+		let tickCount = 0;
 		this.#watchInterval = setInterval(() => {
 			this.#schedulerFileStore?.syncToDb();
 			this.#schedulerEngine?.reload();
+
+			// Prune old executions every 10th tick (~10 min at default 60s)
+			tickCount++;
+			if (tickCount % 10 === 0 && this.#schedulerStorage) {
+				this.#schedulerStorage.pruneExecutions(30, 100);
+			}
 		}, tickMs);
 
 		logger.debug("Cron scheduler started", { taskCount: this.#schedulerEngine.getActiveTaskIds().length, tickMs });
@@ -531,6 +540,7 @@ export class Gateway {
 	async #onCronTrigger(task: ScheduledTask, executionId: string): Promise<void> {
 		if (!this.#schedulerStorage) return;
 
+		const startedAt = Date.now();
 		const ompBinary = this.#config.agent?.ompPath ?? "omp";
 		const { exitCode, output, stderr, timedOut } = await executeScheduledCommand(task.command, {
 			taskType: task.taskType,
@@ -540,20 +550,45 @@ export class Gateway {
 			preScript: task.preScript,
 		});
 		const endedAt = Date.now();
+		const durationMs = endedAt - startedAt;
 
+		// Link agent session trace for agent tasks
+		const agentSessionPath =
+			task.taskType === "agent" ? findAgentSessionPath(startedAt, endedAt) : undefined;
+
+		// Record the execution result with full metadata
 		this.#schedulerStorage.updateExecution(executionId, {
 			status: exitCode === 0 ? "success" : "failure",
 			exitCode,
 			output: timedOut ? `[TIMED OUT after ${task.timeoutMs ?? 30_000}ms]\n${output}` : output,
 			stderr: timedOut ? `[TIMED OUT]\n${stderr}` : stderr,
 			endedAt,
+			...(agentSessionPath ? { agentSessionPath } : {}),
 		});
 
+		// Write full stdout/stderr to JSONL log
+		appendExecutionLog(task.name, {
+			id: executionId,
+			ts: endedAt,
+			exitCode,
+			status: exitCode === 0 ? "success" : "failure",
+			durationMs,
+			output,
+			stderr,
+		});
+
+		// Throw on failure so the engine's retry loop and statistics work.
+		// The engine will overwrite status to "failure" again in its catch
+		// block — that's harmless because the richer metadata is preserved.
 		if (exitCode !== 0 || timedOut) {
-			logger.warn("Cron task failed", { taskId: task.id, taskName: task.name, exitCode, timedOut });
-		} else {
-			logger.debug("Cron task succeeded", { taskId: task.id, taskName: task.name });
+			const msg = timedOut
+				? `Task "${task.name}" timed out after ${task.timeoutMs ?? 30_000}ms`
+				: `Task "${task.name}" failed (exit ${exitCode})`;
+			logger.warn(msg, { taskId: task.id, exitCode, timedOut });
+			throw new Error(msg);
 		}
+
+		logger.debug("Cron task succeeded", { taskId: task.id, taskName: task.name });
 	}
 
 	// ═══════════════════════════════════════════════════════════════════

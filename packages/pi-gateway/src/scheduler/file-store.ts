@@ -12,6 +12,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { logger } from "@oh-my-pi/pi-utils";
 import type { SchedulerStorage, TaskFileDefinition } from "./types";
+import { parseSchedule } from "./types";
 
 const TASK_FILE_GLOB = /\.json5?$/i;
 
@@ -137,7 +138,7 @@ export class SchedulerFileStore {
 						preScript: def.preScript,
 						deliver: def.deliver,
 						consecutiveFailures: 0,
-						scheduleType: undefined, // will be parsed by engine
+						scheduleType: parseSchedule(def.cron).type,
 						status: "active",
 						createdAt: Date.now(),
 						updatedAt: Date.now(),

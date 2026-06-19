@@ -1,4 +1,5 @@
 export { SchedulerDaemon } from "./daemon";
+export { cronCreate, cronDiagnose, cronList, cronLogs, cronRemove, cronRun, cronSetStatus, cronStatus, findAgentSessionPath } from "./cli-commands";
 export { SchedulerEngine } from "./engine";
 export type { ExecutionLogEntry } from "./execution-log";
 export { appendExecutionLog, pruneAllLogs, pruneExecutionLog, readExecutionLog } from "./execution-log";
@@ -17,6 +18,7 @@ export {
 	formatTaskRow,
 	generateExecutionId,
 	generateTaskId,
+	getGatewayPidPath,
 	getNextRun,
 	getNextRuns,
 	getSchedulerDbPath,

@@ -37,17 +37,7 @@ import { runAgentInit } from "@oh-my-pi/pi-coding-agent/cli/agent-cli";
 import { logger } from "@oh-my-pi/pi-utils";
 import { getConfigPath, getDataDir, getDingTalkConfig, loadConfig } from "./config";
 import { Gateway } from "./gateway";
-import { executeScheduledCommand } from "./scheduler/executor";
-import { SchedulerDbStorage } from "./scheduler/storage";
-import {
-	formatExecutionRow,
-	formatTaskRow,
-	getNextRun,
-	getSchedulerDbPath,
-	getSchedulerPidPath,
-	isDaemonRunning,
-	parseSchedule,
-} from "./scheduler/types";
+import { SchedulerDbStorage, cronCreate, cronDiagnose, cronList, cronLogs, cronRemove, cronRun, cronSetStatus, cronStatus, getSchedulerDbPath } from "./scheduler";
 import { getServiceStatus, installService, startService, stopService, uninstallService } from "./service-installer";
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -206,38 +196,38 @@ async function cmdCron(args: string[]): Promise<void> {
 	try {
 		switch (action) {
 			case "create":
-				await cmdCronCreate(args.slice(1), storage);
+				await cronCreate(args.slice(1), storage);
 				break;
 			case "list":
-				await cmdCronList(storage, args.includes("--json"));
+				await cronList(storage, args.includes("--json"));
 				break;
 			case "pause":
 			case "disable":
-				await cmdCronSetStatus(args[1], "disabled", storage);
+				await cronSetStatus(args[1], "disabled", storage);
 				break;
 			case "resume":
 			case "enable":
-				await cmdCronSetStatus(args[1], "active", storage);
+				await cronSetStatus(args[1], "active", storage);
 				break;
 			case "run":
-				await cmdCronRun(args[1], storage);
+				await cronRun(args[1], storage);
 				break;
 			case "remove":
-				await cmdCronRemove(args[1], storage);
+				await cronRemove(args[1], storage);
 				break;
 			case "status":
-				await cmdCronStatus();
+				cronStatus();
 				break;
 			case "diagnose":
-				await cmdCronDiagnose(storage, args.includes("--json"));
+				await cronDiagnose(storage, args.includes("--json"));
 				break;
 			case "logs":
-				await cmdCronLogs(args[1], storage, args.includes("--json"));
+				await cronLogs(args[1], storage, args.includes("--json"));
 				break;
 			default:
 				console.log(`
 Cron management commands:
-  pi-gateway cron create <schedule> <command...> [--name <name>] [--type shell|agent] [--deliver <channel>]
+  pi-gateway cron create <schedule> <command...> [--name <name>] [--type shell|agent] [--deliver <channel>] [--timeout-ms <ms>] [--skills <s1,s2,...>] [--retry <maxAttempts>] [--pre-script <path>]
   pi-gateway cron list [--json]
   pi-gateway cron pause <name>
   pi-gateway cron resume <name>
@@ -250,257 +240,6 @@ Cron management commands:
 		}
 	} finally {
 		storage.close();
-	}
-}
-
-async function cmdCronCreate(args: string[], storage: SchedulerDbStorage): Promise<void> {
-	let name: string | undefined;
-	let schedule: string | undefined;
-	let deliver: string | undefined;
-	let type: "shell" | "agent" = "shell";
-	const commandParts: string[] = [];
-
-	let i = 0;
-	while (i < args.length) {
-		if (args[i] === "--name" && args[i + 1]) {
-			name = args[i + 1]!;
-			i += 2;
-		} else if (args[i] === "--type" && args[i + 1]) {
-			const rawType = args[i + 1];
-			if (rawType !== "shell" && rawType !== "agent") {
-				console.error(`Invalid task type: ${rawType}. Expected "shell" or "agent".`);
-				process.exitCode = 1;
-				return;
-			}
-			type = rawType;
-			i += 2;
-		} else if (args[i] === "--deliver" && args[i + 1]) {
-			deliver = args[i + 1];
-			i += 2;
-		} else {
-			if (!schedule) {
-				schedule = args[i];
-			} else {
-				commandParts.push(args[i]!);
-			}
-			i++;
-		}
-	}
-
-	const command = commandParts.join(" ");
-	if (!schedule || !command) {
-		console.error(
-			"Usage: pi-gateway cron create <schedule> <command...> [--name <name>] [--type shell|agent] [--deliver <channel>]",
-		);
-		console.error("  Schedule: cron expr, interval (5m, 1h), or one-shot (+30m, ISO timestamp)");
-		process.exitCode = 1;
-		return;
-	}
-
-	if (!name) {
-		name = `task_${Date.now()}`;
-	}
-
-	const parsed = parseSchedule(schedule);
-	if (parsed.error) {
-		console.error(`Invalid schedule: ${parsed.error}`);
-		process.exitCode = 1;
-		return;
-	}
-
-	const existing = storage.getTaskByName(name);
-	if (existing) {
-		console.error(`Task "${name}" already exists.`);
-		process.exitCode = 1;
-		return;
-	}
-
-	const nextRun =
-		parsed.type === "cron" ? getNextRun(parsed.schedule) : parsed.nextRunAt ? new Date(parsed.nextRunAt) : undefined;
-	storage.addTask({
-		name,
-		cron: parsed.schedule,
-		command,
-		scheduleType: parsed.type,
-		taskType: type,
-		timeoutMs: type === "agent" ? 120_000 : 30_000,
-		deliver,
-		status: "active",
-		createdAt: Date.now(),
-		updatedAt: Date.now(),
-		nextRunAt: nextRun ? nextRun.getTime() : parsed.nextRunAt,
-		runCount: 0,
-		failCount: 0,
-		consecutiveFailures: 0,
-	});
-
-	console.log(`Task "${name}" created.`);
-	console.log(
-		`  Type: ${parsed.type} | Schedule: ${parsed.schedule} | Next: ${nextRun ? nextRun.toLocaleString() : "—"}`,
-	);
-	if (deliver) console.log(`  Delivery: ${deliver}`);
-}
-
-async function cmdCronList(storage: SchedulerDbStorage, json = false): Promise<void> {
-	const tasks = storage.listTasks();
-	if (json) {
-		console.log(JSON.stringify(tasks, null, 2));
-		return;
-	}
-	if (tasks.length === 0) {
-		console.log("No scheduled tasks.");
-		return;
-	}
-	console.log("NAME                 TYPE    STATUS     CRON                 NEXT RUN             LAST RUN");
-	console.log("─".repeat(96));
-	for (const task of tasks) {
-		console.log(formatTaskRow(task));
-	}
-}
-
-async function cmdCronSetStatus(
-	name: string,
-	status: "active" | "disabled",
-	storage: SchedulerDbStorage,
-): Promise<void> {
-	if (!name) {
-		console.error("Usage: pi-gateway cron pause|resume <name>");
-		process.exitCode = 1;
-		return;
-	}
-	const task = storage.getTaskByName(name);
-	if (!task) {
-		console.error(`Task "${name}" not found.`);
-		process.exitCode = 1;
-		return;
-	}
-	storage.updateTask(task.id, {
-		status,
-		nextRunAt: status === "active" ? getNextRun(task.cron)?.getTime() : undefined,
-		updatedAt: Date.now(),
-	});
-	console.log(`Task "${name}" ${status === "active" ? "resumed" : "paused"}.`);
-}
-
-async function cmdCronRun(name: string, storage: SchedulerDbStorage): Promise<void> {
-	if (!name) {
-		console.error("Usage: pi-gateway cron run <name>");
-		process.exitCode = 1;
-		return;
-	}
-	const task = storage.getTaskByName(name);
-	if (!task) {
-		console.error(`Task "${name}" not found.`);
-		process.exitCode = 1;
-		return;
-	}
-	const exec = storage.recordExecution({ taskId: task.id, startedAt: Date.now(), status: "running" });
-	try {
-		const { exitCode, output, stderr } = await executeScheduledCommand(task.command, {
-			taskType: task.taskType,
-			timeoutMs: task.timeoutMs,
-			skills: task.skills,
-			preScript: task.preScript,
-		});
-		storage.updateExecution(exec.id, {
-			endedAt: Date.now(),
-			exitCode,
-			output,
-			stderr,
-			status: exitCode === 0 ? "success" : "failure",
-		});
-		storage.updateTask(task.id, {
-			lastRunAt: Date.now(),
-			runCount: task.runCount + 1,
-			failCount: exitCode === 0 ? task.failCount : task.failCount + 1,
-		});
-		if (exitCode !== 0) {
-			console.error(`Task "${name}" failed (exit ${exitCode}).`);
-			process.exitCode = exitCode;
-		} else {
-			console.log(`Task "${name}" completed.`);
-		}
-	} catch (err) {
-		storage.updateExecution(exec.id, { endedAt: Date.now(), exitCode: 1, stderr: String(err), status: "failure" });
-		console.error(`Task "${name}" failed: ${err}`);
-		process.exitCode = 1;
-	}
-}
-
-async function cmdCronRemove(name: string, storage: SchedulerDbStorage): Promise<void> {
-	if (!name) {
-		console.error("Usage: pi-gateway cron remove <name>");
-		process.exitCode = 1;
-		return;
-	}
-	const task = storage.getTaskByName(name);
-	if (!task) {
-		console.error(`Task "${name}" not found.`);
-		process.exitCode = 1;
-		return;
-	}
-	storage.deleteTask(task.id);
-	console.log(`Task "${name}" removed.`);
-}
-
-async function cmdCronStatus(): Promise<void> {
-	const pidPath = getSchedulerPidPath();
-	const running = isDaemonRunning(pidPath);
-	console.log(`Scheduler: ${running ? "running" : "stopped"}`);
-	if (running) {
-		const fs = await import("node:fs");
-		try {
-			const pid = Number.parseInt(fs.readFileSync(pidPath, "utf8").trim(), 10);
-			console.log(`  PID: ${pid}`);
-		} catch {
-			/* ignore */
-		}
-	}
-}
-
-async function cmdCronDiagnose(storage: SchedulerDbStorage, json = false): Promise<void> {
-	const tasks = storage.listTasks();
-	const total = tasks.length;
-	const active = tasks.filter(t => t.status === "active").length;
-	const paused = tasks.filter(t => t.status === "paused").length;
-	const disabled = tasks.filter(t => t.status === "disabled").length;
-	const pidPath = getSchedulerPidPath();
-	const daemonRunning = isDaemonRunning(pidPath);
-
-	if (json) {
-		console.log(JSON.stringify({ daemonRunning, taskCounts: { total, active, paused, disabled } }, null, 2));
-		return;
-	}
-	console.log(`## Scheduler Diagnosis`);
-	console.log(`Daemon: ${daemonRunning ? "running" : "stopped"}`);
-	console.log(`Tasks: ${total} total (${active} active, ${paused} paused, ${disabled} disabled)`);
-}
-
-async function cmdCronLogs(name: string, storage: SchedulerDbStorage, json = false): Promise<void> {
-	if (!name) {
-		console.error("Usage: pi-gateway cron logs <name>");
-		process.exitCode = 1;
-		return;
-	}
-	const task = storage.getTaskByName(name);
-	if (!task) {
-		console.error(`Task "${name}" not found.`);
-		process.exitCode = 1;
-		return;
-	}
-	const executions = storage.getExecutions(task.id, 20);
-	if (json) {
-		console.log(JSON.stringify(executions, null, 2));
-		return;
-	}
-	if (executions.length === 0) {
-		console.log(`No executions for task "${name}".`);
-		return;
-	}
-	console.log("ID                 STATUS   DURATION EXIT");
-	console.log("─".repeat(50));
-	for (const exec of executions) {
-		console.log(formatExecutionRow(exec));
 	}
 }
 

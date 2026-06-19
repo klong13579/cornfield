@@ -89,16 +89,6 @@ export async function executeScheduledCommand(
 	let stderr = "";
 	let _timedOut = false;
 
-	const timeoutPromise = Bun.sleep(timeoutMs).then(() => {
-		_timedOut = true;
-		try {
-			proc.kill();
-		} catch {
-			// process may already be gone
-		}
-		return { exitCode: 124, output, stderr, timedOut: true };
-	});
-
 	const execPromise = (async () => {
 		try {
 			const [outText, errText] = await Promise.all([
@@ -113,8 +103,23 @@ export async function executeScheduledCommand(
 		}
 
 		const exitCode = await proc.exited;
-		return { exitCode, output, stderr, timedOut: false };
+		return { exitCode, output, stderr, timedOut: _timedOut };
 	})();
+
+	// Timeout: kill the process, then let execPromise finish with whatever output
+	// was buffered before the kill (streams close, text() resolves with partial data).
+	const timeoutPromise = Bun.sleep(timeoutMs).then(async () => {
+		_timedOut = true;
+		try {
+			proc.kill();
+		} catch {
+			// process may already be gone
+		}
+		// Wait for the exec promise to settle so we get partial output.
+		// If execPromise already resolved, this returns immediately.
+		return (await Promise.race([execPromise, Bun.sleep(1000).then(() => null)])) ??
+			{ exitCode: 124, output, stderr, timedOut: true };
+	});
 
 	return Promise.race([execPromise, timeoutPromise]);
 }

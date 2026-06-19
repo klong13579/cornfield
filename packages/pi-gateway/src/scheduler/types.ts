@@ -143,6 +143,10 @@ export function getSchedulerPidPath(): string {
 	return path.join(getSchedulerDir(), "scheduler.pid");
 }
 
+export function getGatewayPidPath(): string {
+	return path.join(getGatewayDataDir(), "gateway.pid");
+}
+
 export function getSchedulerLogPath(): string {
 	return path.join(getSchedulerDir(), "scheduler.log");
 }

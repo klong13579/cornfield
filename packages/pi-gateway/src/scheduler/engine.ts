@@ -49,7 +49,16 @@ export class SchedulerEngine {
 		const tasks = this.#storage.listTasks();
 		for (const task of tasks) {
 			if (task.status === "active") {
-				this.schedule(task);
+				try {
+					this.schedule(task);
+				} catch (error) {
+					logger.error("Failed to schedule task, skipping", {
+						taskId: task.id,
+						taskName: task.name,
+						error: error instanceof Error ? error.message : String(error),
+					});
+					this.#storage.updateTask(task.id, { status: "disabled" });
+				}
 			}
 		}
 
@@ -140,16 +149,26 @@ export class SchedulerEngine {
 				this.#storage.updateTask(task.id, { status: "disabled" });
 			}
 		} else {
-			const cron = new Cron(task.cron, async () => {
-				if (!this.#running) return;
-				await this.#handleTrigger(task.id);
-			});
-			this.#cronJobs.set(task.id, cron);
-			this.#taskMap.set(task.id, task);
+			try {
+				const cron = new Cron(task.cron, async () => {
+					if (!this.#running) return;
+					await this.#handleTrigger(task.id);
+				});
+				this.#cronJobs.set(task.id, cron);
+				this.#taskMap.set(task.id, task);
 
-			const nextRun = getNextRun(task.cron);
-			if (nextRun) {
-				this.#storage.updateTask(task.id, { nextRunAt: nextRun.getTime() });
+				const nextRun = getNextRun(task.cron);
+				if (nextRun) {
+					this.#storage.updateTask(task.id, { nextRunAt: nextRun.getTime() });
+				}
+			} catch (error) {
+				logger.error("Invalid cron expression for task, disabling", {
+					taskId: task.id,
+					taskName: task.name,
+					cron: task.cron,
+					error: error instanceof Error ? error.message : String(error),
+				});
+				this.#storage.updateTask(task.id, { status: "disabled" });
 			}
 		}
 	}
