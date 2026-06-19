@@ -27,14 +27,14 @@ import { Args, Command, Flags, renderCommandHelp } from "@oh-my-pi/pi-utils/cli"
 import { logger } from "@oh-my-pi/pi-utils";
 import { initTheme } from "../modes/theme/theme";
 
-const ACTIONS = ["start", "stop", "status", "config", "cron", "service", "setup", "help"];
+const ACTIONS = ["start", "stop", "status", "config", "cron", "send", "service", "setup", "help"];
 
 export default class Gateway extends Command {
-	static description = "Unified gateway: IM channels, cron scheduler, agent bridge";
+		static description = "Unified gateway: IM channels, cron scheduler, agent bridge";
 	static strict = false;
 	static args = {
 		action: Args.string({
-			description: "Gateway action: start | stop | status | config | cron | service | help",
+			description: "Gateway action: start | stop | status | config | cron | send | service | help",
 			required: false,
 			options: ACTIONS,
 		}),
@@ -178,6 +178,21 @@ export default class Gateway extends Command {
 			}
 			case "cron": {
 				await this.#handleCron();
+				break;
+			}
+			case "send": {
+				const argv = process.argv.slice(process.argv.indexOf("send") + 1);
+				const channel = argv[0];
+				const message = argv.slice(1).join(" ");
+				if (!channel || !message) {
+					console.error("Usage: omp gateway send <channel> <message>");
+					console.error("  Example: omp gateway send dingtalk:hr 'Hello'");
+					process.exitCode = 1;
+					break;
+				}
+				const { sendToChannel } = await import("@oh-my-pi/pi-gateway/src/gateway");
+				const ok = await sendToChannel(channel, message);
+				if (!ok) process.exitCode = 1;
 				break;
 			}
 			case "service": {

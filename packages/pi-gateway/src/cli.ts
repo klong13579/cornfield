@@ -38,6 +38,7 @@ import { logger } from "@oh-my-pi/pi-utils";
 import { getConfigPath, getDataDir, getDingTalkConfig, loadConfig } from "./config";
 import { Gateway } from "./gateway";
 import { SchedulerDbStorage, cronCreate, cronDiagnose, cronList, cronLogs, cronRemove, cronRun, cronSetStatus, cronStatus, getSchedulerDbPath } from "./scheduler";
+import { SQLiteSessionStore } from "./session-store";
 import { getServiceStatus, installService, startService, stopService, uninstallService } from "./service-installer";
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -183,6 +184,26 @@ async function cmdConfig(_configPath?: string): Promise<void> {
 	const config = await loadConfig(_configPath);
 	console.log(`Config file: ${cfgPath}`);
 	console.log(JSON.stringify(config, null, 2));
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Send Command
+// ═══════════════════════════════════════════════════════════════════════
+
+async function cmdSend(channelArg: string | undefined, args: string[]): Promise<void> {
+	const channel = channelArg ?? args[0];
+	const message = args.slice(channelArg ? 0 : 1).join(" ");
+	if (!channel || !message) {
+		console.error("Usage: pi-gateway send <channel> <message>");
+		console.error("  channel format: dingtalk:<accountId>");
+		console.error("  Example: pi-gateway send dingtalk:hr 'Hello from OMP'");
+		process.exitCode = 1;
+		return;
+	}
+
+	const { sendToChannel } = await import("./gateway");
+	const ok = await sendToChannel(channel, message);
+	if (!ok) process.exitCode = 1;
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -488,6 +509,9 @@ void (async () => {
 			break;
 		case "config":
 			await cmdConfig(gatewayConfigPath);
+			break;
+		case "send":
+			await cmdSend(subcommand, args);
 			break;
 		case "cron":
 			await cmdCron([subcommand ?? "help", ...args]);

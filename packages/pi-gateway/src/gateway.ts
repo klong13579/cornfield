@@ -200,6 +200,66 @@ async function checkPidFile(dataDir: string, pidFile: string): Promise<boolean> 
 	return false;
 }
 
+// ---------------------------------------------------------------------------
+// Send a message through a channel
+// ---------------------------------------------------------------------------
+
+/**
+ * Send a message to a DingTalk channel using the stored session webhook.
+ *
+ * The session must have been established by a previous inbound message
+ * (which stores the webhook URL in the session record).
+ *
+ * Channel format: `dingtalk:<accountId>` (e.g. `dingtalk:hr`, `dingtalk:test`)
+ *
+ * @returns true on success, false on failure
+ */
+export async function sendToChannel(channelArg: string, message: string): Promise<boolean> {
+	const parts = channelArg.split(":");
+	const channelId = parts[0]!;
+	const accountId = parts.slice(1).join(":") || "__default__";
+
+	const dataDir = getDataDir();
+	const store = new SQLiteSessionStore(path.join(dataDir, "sessions.db"));
+
+	try {
+		const sessions = await store.getActiveSessions(channelId);
+		const matched = sessions
+			.filter(s => s.accountId === accountId && s.sessionWebhook)
+			.sort((a, b) => b.updatedAt - a.updatedAt);
+
+		if (matched.length === 0) {
+			console.error(`No active session with webhook for "${channelArg}".`);
+			console.error("Send a message to the bot first to establish a session.");
+			return false;
+		}
+
+		const session = matched[0]!;
+		console.log(`Sending to ${channelArg} (conversation: ${session.conversationId})...`);
+
+		const res = await fetch(session.sessionWebhook!, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({
+				msgtype: "text",
+				text: { content: message },
+				conversationId: session.conversationId,
+			}),
+		});
+
+		if (res.ok) {
+			console.log("Message sent.");
+			return true;
+		}
+
+		const errText = await res.text();
+		console.error(`Send failed (${res.status}): ${errText}`);
+		return false;
+	} finally {
+		store.close();
+	}
+}
+
 export class Gateway {
 	#config: GatewayConfig;
 	#registry = new ChannelRegistry();
@@ -821,6 +881,7 @@ export class Gateway {
 					createdAt: now,
 					updatedAt: now,
 					ompSessionPath: sessionPath,
+					sessionWebhook: msg.sessionWebhook,
 					status: "active",
 				});
 			} else if (session && this.#store) {
@@ -829,8 +890,12 @@ export class Gateway {
 					if (session.ompSessionPath) {
 						await this.#migrateSessionPath(session.ompSessionPath, sessionPath);
 					}
-					await this.#store.updateSession(session.id, { ompSessionPath: sessionPath, updatedAt: now });
-					session = { ...session, ompSessionPath: sessionPath };
+					await this.#store.updateSession(session.id, { ompSessionPath: sessionPath, updatedAt: now, sessionWebhook: msg.sessionWebhook });
+					session = { ...session, ompSessionPath: sessionPath, sessionWebhook: msg.sessionWebhook };
+				} else {
+					// Always update webhook so it stays fresh
+					await this.#store.updateSession(session.id, { updatedAt: now, sessionWebhook: msg.sessionWebhook });
+					session = { ...session, sessionWebhook: msg.sessionWebhook };
 				}
 			}
 

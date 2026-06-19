@@ -94,6 +94,7 @@ export interface SessionRecord {
 	updatedAt: number;
 	lastMessageId?: string;
 	ompSessionPath?: string;
+	sessionWebhook?: string;
 	status: "active" | "idle" | "closed";
 }
 
