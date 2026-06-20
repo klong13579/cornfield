@@ -163,7 +163,13 @@ async function cmdStatus(_configPath?: string): Promise<void> {
 	}
 	const dingtalk = getDingTalkConfig(config);
 	if (dingtalk?.accounts && Object.keys(dingtalk.accounts).length > 0) {
-		console.log(`  Accounts: ${Object.keys(dingtalk.accounts).join(", ")}`);
+		console.log("  Accounts:");
+		const accounts = status.accounts ?? [];
+		for (const acc of accounts) {
+			const channelIcon = acc.channelConnected ? "✅ connected" : "❌ disconnected";
+			const bridgeIcon = acc.bridgeRunning ? "✅ running" : "❌ stopped";
+			console.log(`    ${acc.accountId.padEnd(12)} channel=${channelIcon}  bridge=${bridgeIcon}`);
+		}
 	}
 }
 

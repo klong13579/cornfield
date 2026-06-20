@@ -284,6 +284,7 @@ export class DingTalkChannel extends BaseChannel {
 	#client: DWClient | null = null;
 	#config: DingTalkConfig | null = null;
 	#connected = false;
+	#connectionFailed = false;
 	#accountId = "__default__";
 
 	/** Set the account ID for multi-account routing */
@@ -334,21 +335,22 @@ export class DingTalkChannel extends BaseChannel {
 			clientSecret: this.#config.appSecret,
 			ua: "pi-gateway/0.1.0",
 			debug: false,
+			autoReconnect: false,  // pi-gateway has its own #doReconnect logic
 		});
 
 		// Connection lifecycle
 		this.#client.on("connect", () => {
-			logger.debug("[DingTalk] Stream connect event");
+			logger.debug("[DingTalk] Stream connect event", { accountId: this.#accountId });
 			this.#connected = true;
 		});
 
 		this.#client.on("disconnect", () => {
-			logger.warn("[DingTalk] Stream disconnect event");
+			logger.warn("[DingTalk] Stream disconnect event", { accountId: this.#accountId });
 			this.#connected = false;
 		});
 
 		this.#client.on("error", (err: Error) => {
-			logger.error("[DingTalk] Stream error", { error: err.message });
+			logger.error("[DingTalk] Stream error", { accountId: this.#accountId, error: err.message });
 		});
 
 		// Register robot message listener
@@ -362,6 +364,12 @@ export class DingTalkChannel extends BaseChannel {
 		try {
 			await this.#client.connect();
 
+			// Verify WebSocket actually reached OPEN state (SDK connect() may not throw on failure)
+			const connected = await this.#waitForSocketOpen(10_000);
+			if (!connected) {
+				throw new Error("Socket did not reach OPEN state within 10s");
+			}
+
 			// Setup socket event listeners after connect (client.socket is created)
 			this.#setupPongListener();
 			this.#setupMessageListener();
@@ -370,13 +378,16 @@ export class DingTalkChannel extends BaseChannel {
 			this.#lastSocketAvailableTime = Date.now();
 			this.#connectionEstablishedTime = Date.now();
 			this.#reconnectAttempts = 0;
+			this.#connected = true;
 
 			// Start custom heartbeat
 			this.#startKeepAlive();
 
-			logger.debug("[DingTalk] Connected to DingTalk Stream");
+			logger.debug("[DingTalk] Connected to DingTalk Stream", { accountId: this.#accountId });
 		} catch (err) {
-			logger.error("[DingTalk] Failed to connect", { error: String(err) });
+			this.#connectionFailed = true;
+			this.#connected = false;
+			logger.error("[DingTalk] Failed to connect", { accountId: this.#accountId, error: String(err) });
 			throw err;
 		}
 	}
@@ -416,7 +427,12 @@ export class DingTalkChannel extends BaseChannel {
 	}
 
 	override isConnected(): boolean {
-		return this.#connected;
+		if (this.#connectionFailed) return false;
+		// Check actual WebSocket state instead of relying solely on the #connected flag,
+		// which can be set true by the SDK 'connect' event even when the socket later fails.
+		const socket = (this.#client as any)?.socket;
+		if (socket?.readyState === 1) return true;
+		return this.#connected && socket?.readyState !== 3;
 	}
 
 	async sendMessage(msg: OutboundMessage): Promise<void> {
@@ -521,7 +537,7 @@ export class DingTalkChannel extends BaseChannel {
 				if (typeof data !== "string") return;
 				const msg = JSON.parse(data);
 				if (msg.type === "SYSTEM" && msg.headers?.topic === "disconnect") {
-					logger.debug("[DingTalk] Server disconnect topic received, reconnecting");
+					logger.debug("[DingTalk] Server disconnect topic received, reconnecting", { accountId: this.#accountId });
 					if (!this.#isStopped && !this.#isReconnecting) {
 						void this.#doReconnect(true);
 					}
@@ -534,7 +550,7 @@ export class DingTalkChannel extends BaseChannel {
 
 	#setupCloseListener(): void {
 		(this.#client as any)?.socket?.on("close", (code: number, reason: string) => {
-			logger.debug("[DingTalk] WebSocket close", { code, reason });
+			logger.debug("[DingTalk] WebSocket close", { accountId: this.#accountId, code, reason });
 			this.#connected = false;
 			if (this.#isStopped) return;
 			void this.#doReconnect(true);
@@ -558,7 +574,7 @@ export class DingTalkChannel extends BaseChannel {
 
 		if (!immediate && this.#reconnectAttempts > 0) {
 			const delay = this.#calculateBackoffDelay(this.#reconnectAttempts);
-			logger.debug("[DingTalk] Reconnecting", { attempt: this.#reconnectAttempts + 1, delayMs: Math.round(delay) });
+			logger.debug("[DingTalk] Reconnecting", { accountId: this.#accountId, attempt: this.#reconnectAttempts + 1, delayMs: Math.round(delay) });
 			await Bun.sleep(delay);
 		}
 
@@ -593,12 +609,13 @@ export class DingTalkChannel extends BaseChannel {
 			this.#lastSocketAvailableTime = Date.now();
 			this.#connectionEstablishedTime = Date.now();
 			this.#reconnectAttempts = 0;
+			this.#connectionFailed = false;
 			this.#connected = true;
 
-			logger.debug("[DingTalk] Reconnect successful");
+			logger.debug("[DingTalk] Reconnect successful", { accountId: this.#accountId });
 		} catch (err) {
 			this.#reconnectAttempts++;
-			logger.error("[DingTalk] Reconnect failed", { attempt: this.#reconnectAttempts, error: String(err) });
+			logger.error("[DingTalk] Reconnect failed", { accountId: this.#accountId, attempt: this.#reconnectAttempts, error: String(err) });
 		} finally {
 			this.#isReconnecting = false;
 		}
