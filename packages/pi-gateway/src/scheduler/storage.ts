@@ -39,6 +39,7 @@ type TaskRow = {
 	run_count: number;
 	fail_count: number;
 	deliver: string | null;
+	deliver_user: string | null;
 };
 
 type ExecutionRow = {
@@ -77,6 +78,7 @@ const TASK_UPDATE_FIELDS = new Set<string>([
 	"runCount",
 	"failCount",
 	"deliver",
+	"deliverUser",
 ]);
 
 const EXECUTION_UPDATE_FIELDS = new Set<string>([
@@ -116,6 +118,7 @@ function toTask(row: TaskRow): ScheduledTask {
 		runCount: row.run_count,
 		failCount: row.fail_count,
 		deliver: row.deliver ?? undefined,
+	deliverUser: row.deliver_user ?? undefined,
 	};
 }
 
@@ -198,8 +201,8 @@ export class SchedulerDbStorage implements SchedulerStorage {
 				schedule_type, task_type, timeout_ms,
 				retry_config, skills_config, pre_script, consecutive_failures,
 				created_at, updated_at, last_run_at, next_run_at,
-				run_count, fail_count, deliver
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				run_count, fail_count, deliver, deliver_user
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`);
 
 		this.#getTaskStmt = this.#db.prepare("SELECT * FROM tasks WHERE id = ?");
@@ -274,6 +277,8 @@ export class SchedulerDbStorage implements SchedulerStorage {
 		const hasPreScript = columns.some(c => c.name === "pre_script");
 		const hasConsecutiveFails = columns.some(c => c.name === "consecutive_failures");
 		const hasDeliver = columns.some(c => c.name === "deliver");
+		const hasDeliverUser = columns.some(c => c.name === "deliver_user");
+		if (!hasDeliverUser) this.#db.exec("ALTER TABLE tasks ADD COLUMN deliver_user TEXT;");
 		if (!hasScheduleType) this.#db.exec("ALTER TABLE tasks ADD COLUMN schedule_type TEXT;");
 		if (!hasTaskType) this.#db.exec("ALTER TABLE tasks ADD COLUMN task_type TEXT;");
 		if (!hasTimeoutMs) this.#db.exec("ALTER TABLE tasks ADD COLUMN timeout_ms INTEGER;");
@@ -311,6 +316,7 @@ export class SchedulerDbStorage implements SchedulerStorage {
 			task.runCount ?? 0,
 			task.failCount ?? 0,
 			task.deliver ?? null,
+			task.deliverUser ?? null,
 		);
 		return this.getTask(id)!;
 	}

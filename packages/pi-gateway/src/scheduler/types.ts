@@ -47,6 +47,8 @@ export interface ScheduledTask {
 	failCount: number;
 	/** Channel ID for result delivery (e.g. "dingtalk") */
 	deliver?: string;
+	/** User ID for proactive result delivery via the deliver channel */
+	deliverUser?: string;
 }
 
 export interface TaskFileDefinition {
@@ -60,6 +62,7 @@ export interface TaskFileDefinition {
 	skills?: string[];
 	preScript?: string;
 	deliver?: string;
+	deliverUser?: string;
 }
 
 export interface TaskExecution {

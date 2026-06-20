@@ -925,6 +925,15 @@ export class Gateway {
 			stderr,
 		});
 
+		// Deliver result to user if configured
+		if (task.deliver && task.deliverUser) {
+			const prefix = exitCode === 0 ? "✅" : timedOut ? "⏰" : "❌";
+			const summary = `${prefix} Task "${task.name}" completed (exit ${exitCode}, ${durationMs}ms)\n\n${output.slice(0, 2000)}`;
+			sendToChannel(task.deliver, summary, { userId: task.deliverUser }).catch(err =>
+				logger.error("Failed to deliver cron result", { taskId: task.id, error: String(err) }),
+			);
+		}
+
 		// Throw on failure so the engine's retry loop and statistics work.
 		// The engine will overwrite status to "failure" again in its catch
 		// block — that's harmless because the richer metadata is preserved.

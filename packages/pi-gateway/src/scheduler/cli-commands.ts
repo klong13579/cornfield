@@ -131,6 +131,7 @@ export async function cronCreate(args: string[], storage: SchedulerDbStorage): P
 	let name: string | undefined;
 	let schedule: string | undefined;
 	let deliver: string | undefined;
+	let deliverUser: string | undefined;
 	let type: "shell" | "agent" = "shell";
 	let timeoutMs: number | undefined;
 	let skills: string[] | undefined;
@@ -148,6 +149,9 @@ export async function cronCreate(args: string[], storage: SchedulerDbStorage): P
 			i += 2;
 		} else if (args[i] === "--deliver" && args[i + 1]) {
 			deliver = args[i + 1];
+			i += 2;
+		} else if (args[i] === "--deliver-user" && args[i + 1]) {
+			deliverUser = args[i + 1]!;
 			i += 2;
 		} else if (args[i] === "--timeout-ms" && args[i + 1]) {
 			const v = Number.parseInt(args[i + 1]!, 10);
@@ -225,6 +229,7 @@ export async function cronCreate(args: string[], storage: SchedulerDbStorage): P
 		skills,
 		preScript,
 		deliver,
+		deliverUser,
 		status: "active",
 		createdAt: Date.now(),
 		updatedAt: Date.now(),
@@ -336,6 +341,18 @@ export async function cronRun(name: string, storage: SchedulerDbStorage): Promis
 			output,
 			stderr,
 		});
+
+		// Deliver result to user if configured
+		if (task.deliver && task.deliverUser) {
+			const prefix = exitCode === 0 ? "✅" : "❌";
+			const summary = `${prefix} Task "${task.name}" completed (exit ${exitCode}, ${durationMs}ms)\n\n${output.slice(0, 2000)}`;
+			const { sendToChannel } = await import("../gateway");
+			try {
+				await sendToChannel(task.deliver, summary, { userId: task.deliverUser });
+			} catch (err) {
+				console.error(`[warn] Failed to deliver result: ${err}`);
+			}
+		}
 
 		if (agentSessionPath) {
 			console.log(`[trace] agent session: ${agentSessionPath}`);

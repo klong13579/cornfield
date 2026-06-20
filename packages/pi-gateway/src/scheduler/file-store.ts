@@ -68,6 +68,7 @@ export class SchedulerFileStore {
 				skills?: string[];
 				preScript?: string;
 				deliver?: string;
+				deliverUser?: string;
 			};
 			if (!data.name || !data.cron || !data.command) {
 				logger.warn("Invalid task file, missing required fields", { path: filePath });
@@ -84,6 +85,7 @@ export class SchedulerFileStore {
 				skills: data.skills,
 				preScript: data.preScript,
 				deliver: data.deliver,
+				deliverUser: data.deliverUser,
 			};
 		} catch (error) {
 			logger.warn("Failed to read task file", { path: filePath, error: String(error) });
@@ -137,6 +139,7 @@ export class SchedulerFileStore {
 						skills: def.skills,
 						preScript: def.preScript,
 						deliver: def.deliver,
+						deliverUser: def.deliverUser,
 						consecutiveFailures: 0,
 						scheduleType: parseSchedule(def.cron).type,
 						status: "active",
@@ -154,7 +157,8 @@ export class SchedulerFileStore {
 				const commandChanged = existing.command !== def.command;
 				const typeChanged = existing.taskType !== (def.type ?? "shell");
 				const deliverChanged = existing.deliver !== (def.deliver ?? undefined);
-				if (cronChanged || commandChanged || typeChanged || deliverChanged) {
+				const deliverUserChanged = existing.deliverUser !== (def.deliverUser ?? undefined);
+				if (cronChanged || commandChanged || typeChanged || deliverChanged || deliverUserChanged) {
 					try {
 						this.#storage.updateTask(existing.id, {
 							cron: def.cron,
@@ -165,6 +169,7 @@ export class SchedulerFileStore {
 							skills: def.skills,
 							preScript: def.preScript,
 							deliver: def.deliver,
+							deliverUser: def.deliverUser,
 						});
 						result.updated++;
 					} catch (error) {
