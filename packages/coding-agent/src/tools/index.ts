@@ -27,10 +27,10 @@ import { BrowserTool } from "./browser";
 import { CalculatorTool } from "./calculator";
 import { type CheckpointState, CheckpointTool, RewindTool } from "./checkpoint";
 import { DebugTool } from "./debug";
-import { TaskBoardTool } from "./task-board";
 import { ExitPlanModeTool } from "./exit-plan-mode";
-import { GithubTool } from "./gh";
 import { FindTool } from "./find";
+import { GithubTool } from "./gh";
+import { IdentityTool } from "./identity";
 import { InspectImageTool } from "./inspect-image";
 import { IrcTool } from "./irc";
 import { JobTool } from "./job";
@@ -46,6 +46,7 @@ import { reportFindingTool } from "./review";
 import { SearchTool } from "./search";
 import { SearchToolBm25Tool } from "./search-tool-bm25";
 import { loadSshTool } from "./ssh";
+import { TaskBoardTool } from "./task-board";
 import { type TodoPhase, TodoWriteTool } from "./todo-write";
 import { WriteTool } from "./write";
 import { YieldTool } from "./yield";
@@ -67,10 +68,10 @@ export * from "./browser";
 export * from "./calculator";
 export * from "./checkpoint";
 export * from "./debug";
-export * from "./task-board";
 export * from "./exit-plan-mode";
 export * from "./find";
 export * from "./gh";
+export * from "./identity";
 export * from "./image-gen";
 export * from "./inspect-image";
 export * from "./irc";
@@ -82,10 +83,10 @@ export * from "./recipe";
 export * from "./render-mermaid";
 export * from "./report-tool-issue";
 export * from "./resolve";
-export * from "./review";
 export * from "./search";
 export * from "./search-tool-bm25";
 export * from "./ssh";
+export * from "./task-board";
 export * from "./todo-write";
 export * from "./vim";
 export * from "./write";
@@ -246,6 +247,7 @@ export const HIDDEN_TOOLS: Record<string, ToolFactory> = {
 	report_tool_issue: s => createReportToolIssueTool(s),
 	exit_plan_mode: s => new ExitPlanModeTool(s),
 	resolve: s => new ResolveTool(s),
+	identity: s => new IdentityTool(s),
 };
 
 export type ToolName = keyof typeof BUILTIN_TOOLS;
@@ -290,6 +292,9 @@ export async function createTools(session: ToolSession, toolNames?: string[]): P
 		toolNames && toolNames.length > 0 ? [...new Set(toolNames.map(name => name.toLowerCase()))] : undefined;
 	if (requestedTools && !requestedTools.includes("exit_plan_mode")) {
 		requestedTools.push("exit_plan_mode");
+	}
+	if (requestedTools && !requestedTools.includes("identity")) {
+		requestedTools.push("identity");
 	}
 	const pythonMode = getPythonModeFromEnv() ?? session.settings.get("python.toolMode");
 	const skipPythonPreflight = session.skipPythonPreflight === true;
@@ -427,7 +432,10 @@ export async function createTools(session: ToolSession, toolNames?: string[]): P
 			: [
 					...Object.entries(BUILTIN_TOOLS).filter(([name]) => isToolAllowed(name)),
 					...(includeYield ? ([["yield", HIDDEN_TOOLS.yield]] as const) : []),
-					...([["exit_plan_mode", HIDDEN_TOOLS.exit_plan_mode]] as const),
+					...([
+						["exit_plan_mode", HIDDEN_TOOLS.exit_plan_mode],
+						["identity", HIDDEN_TOOLS.identity],
+					] as const),
 				];
 
 	const baseResults = await Promise.all(

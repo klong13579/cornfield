@@ -4,6 +4,8 @@
 
 ### Added
 
+- **User-level persona (`user.md`) + `identity` tool**: New `~/.omp/user.md` (user-level config root, shared across all agentDirs — not per-agentDir like `mission.md`) stores the user's declarative identity (name, role, timezone, standing instructions) — the user-side analog of `mission.md`. It is read at startup and injected into the system prompt as a `<user>` block so the agent knows who it is assisting without an explicit query. The `identity` tool (always available, like `exit_plan_mode`) exposes three actions: `whoRu` (agent operational identity — model, version, cwd), `whoisme` (read `user.md`), and `update_persona` (merge a section into `user.md` by key — existing keys are replaced, new keys appended, pre-existing duplicate keys deduplicated). Boundary: stable hand-authored identity lives in `user.md`; learned behavioral preferences discovered at runtime remain in `write_memory` (target: `"user"`). This closes the previously dangling `identity` references in the system prompt (the tool description and `<critical>` instructions existed but no tool was registered). CLI-only; gateway bots resolve per-conversation user identity via IM sender context, not this file. `@oh-my-pi/pi-utils` gained `setConfigRootDir` for test isolation of config-root paths.
+
 - **agentDir skeleton module**: New `@oh-my-pi/pi-coding-agent/skeleton` subpath exporting `ensureAgentDir`, `resolveAgentDir`, `buildAgentSessionPath`, `SKELETON_FILES`, and `SKELETON_DIRS`. Bundle template assets as real `.md` / `.json` / `.yml` files under `src/skeleton/assets/` and import them via Bun's `with { type: "text" }` (replaces inline string literals previously held by the gateway).
 
 ### Changed

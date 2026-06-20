@@ -124,7 +124,10 @@ class DirResolver {
 	readonly #agentCache = new Map<string, string>();
 
 	constructor(agentDirOverride?: string) {
-		this.configRoot = path.join(os.homedir(), getConfigDirName());
+		const dirName = getConfigDirName();
+		// PI_CONFIG_DIR may be absolute (e.g. /tmp/test-omp) — use it directly;
+		// otherwise join it under the home directory (relative name like ".omp").
+		this.configRoot = configRootOverride ?? (path.isAbsolute(dirName) ? dirName : path.join(os.homedir(), dirName));
 
 		const defaultAgent = path.join(this.configRoot, "agent");
 		this.agentDir = agentDirOverride ? path.resolve(agentDirOverride) : defaultAgent;
@@ -190,6 +193,10 @@ class DirResolver {
 	}
 }
 
+/** Test-only override for the config root (~/.omp). When set, takes precedence over
+ * the PI_CONFIG_DIR-derived default. Pass `undefined` to reset to the default. */
+let configRootOverride: string | undefined;
+
 let dirs = new DirResolver(process.env.PI_CODING_AGENT_DIR);
 
 // =============================================================================
@@ -199,6 +206,13 @@ let dirs = new DirResolver(process.env.PI_CODING_AGENT_DIR);
 /** Get the config root directory (~/.omp). */
 export function getConfigRootDir(): string {
 	return dirs.configRoot;
+}
+
+/** Set (or reset, when `dir` is undefined) the config root directory (~/.omp).
+ * Rebuilds the resolver, invalidating all cached paths. */
+export function setConfigRootDir(dir: string | undefined): void {
+	configRootOverride = dir;
+	dirs = new DirResolver(process.env.PI_CODING_AGENT_DIR);
 }
 
 /** Set the coding agent directory. Creates a fresh resolver, invalidating all cached paths. */

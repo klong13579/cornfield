@@ -66,6 +66,7 @@ describe("createTools", () => {
 		expect(names).toContain("todo_write");
 		expect(names).toContain("web_search");
 		expect(names).toContain("exit_plan_mode");
+		expect(names).toContain("identity");
 		expect(names).not.toContain("fetch");
 		expect(names).not.toContain("vim");
 	});
@@ -130,7 +131,7 @@ describe("createTools", () => {
 		const tools = await createTools(session, ["read", "lsp", "write"]);
 		const names = tools.map(t => t.name);
 
-		expect(names).toEqual(["read", "write", "exit_plan_mode"]);
+		expect(names).toEqual(["read", "write", "exit_plan_mode", "identity"]);
 	});
 
 	it("excludes lsp tool when disabled", async () => {
@@ -146,7 +147,7 @@ describe("createTools", () => {
 		const tools = await createTools(session, ["read", "write"]);
 		const names = tools.map(t => t.name);
 
-		expect(names).toEqual(["read", "write", "exit_plan_mode"]);
+		expect(names).toEqual(["read", "write", "exit_plan_mode", "identity"]);
 	});
 
 	it("ignores vim as an unknown requested tool even when vim edit mode is active", async () => {
@@ -158,7 +159,7 @@ describe("createTools", () => {
 		const tools = await createTools(session, ["read", "vim"]);
 		const names = tools.map(t => t.name);
 
-		expect(names).toEqual(["read", "exit_plan_mode"]);
+		expect(names).toEqual(["read", "exit_plan_mode", "identity"]);
 	});
 
 	it("lowercases requested tool subset", async () => {
@@ -166,7 +167,7 @@ describe("createTools", () => {
 		const tools = await createTools(session, ["Read", "Write"]);
 		const names = tools.map(t => t.name);
 
-		expect(names).toEqual(["read", "write", "exit_plan_mode"]);
+		expect(names).toEqual(["read", "write", "exit_plan_mode", "identity"]);
 	});
 
 	it("includes hidden tools when explicitly requested", async () => {
@@ -174,7 +175,7 @@ describe("createTools", () => {
 		const tools = await createTools(session, ["report_finding"]);
 		const names = tools.map(t => t.name);
 
-		expect(names).toEqual(["report_finding", "exit_plan_mode"]);
+		expect(names).toEqual(["report_finding", "exit_plan_mode", "identity"]);
 	});
 
 	it("includes yield tool when required", async () => {
@@ -247,6 +248,7 @@ describe("createTools", () => {
 	it("HIDDEN_TOOLS contains review tools", () => {
 		expect(Object.keys(HIDDEN_TOOLS).sort()).toEqual([
 			"exit_plan_mode",
+			"identity",
 			"report_finding",
 			"report_tool_issue",
 			"resolve",

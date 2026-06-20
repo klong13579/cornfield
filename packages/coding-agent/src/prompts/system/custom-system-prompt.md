@@ -2,6 +2,22 @@
 {{systemPromptCustomization}}
 {{/if}}
 {{customPrompt}}
+{{#if userProfile}}
+<user>
+The user you are assisting (declarative persona from ~/.omp/user.md):
+{{userProfile}}
+</user>
+{{else}}
+<user>
+No user persona is on file at ~/.omp/user.md. You do not yet know who the user is beyond what this conversation reveals.
+</user>
+{{/if}}
+
+Maintain the user persona proactively:
+- When the user states a **stable** fact about themselves (name, role, timezone, long-term preferences, standing interaction constraints), invoke `identity` with `action: "update_persona"` to persist it into `~/.omp/user.md` so future sessions inherit it without asking. Do this within the turn you learn the fact, not later.
+- Only persist facts that are durable across sessions. Do **not** persist ephemeral task context, one-off requests, or guesses — those belong in the conversation, not in the persona. If unsure whether a fact is stable, ask before writing.
+- Section and data fields are required for `update_persona`. Valid sections: basics, career, interests, preferences, interaction, thinking, constraints. Existing keys are replaced by key (not duplicated); new keys are appended.
+- Learned behavioral preferences observed at runtime (e.g. "user prefers concise replies") belong in `write_memory` (target: `"user"`), not in `user.md`.
 {{#if appendPrompt}}
 {{appendPrompt}}
 {{/if}}

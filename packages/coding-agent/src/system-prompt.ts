@@ -6,7 +6,17 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { AgentTool } from "@oh-my-pi/pi-agent-core";
-import { $env, getGpuCachePath, getProjectDir, hasFsCode, isEnoent, logger, prompt } from "@oh-my-pi/pi-utils";
+import {
+	$env,
+	getAgentDir,
+	getConfigRootDir,
+	getGpuCachePath,
+	getProjectDir,
+	hasFsCode,
+	isEnoent,
+	logger,
+	prompt,
+} from "@oh-my-pi/pi-utils";
 import { $ } from "bun";
 import { contextFileCapability } from "./capability/context-file";
 import { systemPromptCapability } from "./capability/system-prompt";
@@ -93,32 +103,38 @@ function extractNeverRules(content: string): string[] {
 	}
 	return neverRules;
 
-/** Extract the "Agent 定位" section from AGENTS.md content */
-function extractAgentRole(agentsMdContent: string): string | null {
-	const lines = agentsMdContent.split("\n");
-	let inAgentRoleSection = false;
-	const sectionLines: string[] = [];
+	/** Extract the "Agent 定位" section from AGENTS.md content */
+	function extractAgentRole(agentsMdContent: string): string | null {
+		const lines = agentsMdContent.split("\n");
+		let inAgentRoleSection = false;
+		const sectionLines: string[] = [];
 
-	for (const line of lines) {
-		// Check for section header
-		if (/^#{1,6}\s*[-−]\s*Agent[\u4e00-\u9fa5a-zA-Z]/.test(line) || /^#{1,6}\s*Agent[\u4e00-\u9fa5a-zA-Z]/.test(line)) {
-			inAgentRoleSection = true;
-			continue;
+		for (const line of lines) {
+			// Check for section header
+			if (
+				/^#{1,6}\s*[-−]\s*Agent[\u4e00-\u9fa5a-zA-Z]/.test(line) ||
+				/^#{1,6}\s*Agent[\u4e00-\u9fa5a-zA-Z]/.test(line)
+			) {
+				inAgentRoleSection = true;
+				continue;
+			}
+
+			// Stop at next section (starts with ## or ---)
+			if (inAgentRoleSection && (/^#{1,6}\s*[-−]/.test(line) || /^---$/.test(line))) {
+				break;
+			}
+
+			if (inAgentRoleSection) {
+				sectionLines.push(line);
+			}
 		}
 
-		// Stop at next section (starts with ## or ---)
-		if (inAgentRoleSection && (/^#{1,6}\s*[-−]/.test(line) || /^---$/.test(line))) {
-			break;
-		}
-
-		if (inAgentRoleSection) {
-			sectionLines.push(line);
-		}
+		const result = sectionLines
+			.map(l => l.trim())
+			.filter(l => l.length > 0)
+			.join("\n");
+		return result.length > 0 ? result : null;
 	}
-
-	const result = sectionLines.map(l => l.trim()).filter(l => l.length > 0).join("\n");
-	return result.length > 0 ? result : null;
-}
 }
 
 /** Remove lines promoted to `<hard-constraints>` so context files are not duplicated in `<context>`. */
@@ -426,6 +442,20 @@ export async function loadProjectContextFiles(
 }
 
 /**
+ * Load the user's declarative persona from `~/.omp/user.md` (user-level, shared across all agentDirs).
+ * Returns null when absent (optional file — never an error).
+ * This is the user-side analog of mission.md: hand-authored stable identity.
+ */
+export async function loadUserProfile(): Promise<string | null> {
+	try {
+		return await Bun.file(`${getConfigRootDir()}/user.md`).text();
+	} catch (err) {
+		if (isEnoent(err)) return null;
+		throw err;
+	}
+}
+
+/**
  * Load the effective system prompt customization from SYSTEM.md.
  * Project-level SYSTEM.md overrides user-level SYSTEM.md.
  */
@@ -551,6 +581,7 @@ export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}):
 				: skillsSettings?.enabled !== false
 					? loadSkills({ ...skillsSettings, cwd: resolvedCwd }).then(result => result.skills)
 					: Promise.resolve([]);
+		const userProfilePromise = logger.time("loadUserProfile", loadUserProfile);
 
 		return Promise.all([
 			resolvePromptInput(customPrompt, "system prompt"),
@@ -559,6 +590,7 @@ export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}):
 			contextFilesPromise,
 			agentsMdSearchPromise,
 			skillsPromise,
+			userProfilePromise,
 		]).then(
 			([
 				resolvedCustomPrompt,
@@ -567,6 +599,7 @@ export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}):
 				contextFiles,
 				agentsMdSearch,
 				skills,
+				userProfile,
 			]) => ({
 				resolvedCustomPrompt,
 				resolvedAppendPrompt,
@@ -574,6 +607,7 @@ export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}):
 				contextFiles,
 				agentsMdSearch,
 				skills,
+				userProfile,
 			}),
 		);
 	})();
@@ -598,6 +632,7 @@ export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}):
 		files: [],
 	};
 	let skills: Skill[] = providedSkills ?? [];
+	let userProfile: string | null = null;
 
 	if (prepResult.type === "timeout") {
 		logger.warn("System prompt preparation timed out; using minimal startup context", {
@@ -620,6 +655,7 @@ export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}):
 		contextFiles = dedupeExactContextFiles(prepResult.value.contextFiles);
 		agentsMdSearch = prepResult.value.agentsMdSearch;
 		skills = prepResult.value.skills;
+		userProfile = prepResult.value.userProfile;
 	}
 
 	const date = new Date().toISOString().slice(0, 10);
@@ -689,6 +725,7 @@ export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}):
 		mcpDiscoveryServerSummaries,
 		eagerTasks,
 		secretsEnabled,
+		userProfile,
 	};
 	let rendered = prompt.render(resolvedCustomPrompt ? customSystemPromptTemplate : systemPromptTemplate, data);
 
