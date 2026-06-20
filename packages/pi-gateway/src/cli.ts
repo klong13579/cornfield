@@ -37,7 +37,7 @@ import { runAgentInit } from "@oh-my-pi/pi-coding-agent/cli/agent-cli";
 import { logger } from "@oh-my-pi/pi-utils";
 import { getConfigPath, getDataDir, getDingTalkConfig, loadConfig } from "./config";
 import { Gateway } from "./gateway";
-import { SchedulerDbStorage, cronCreate, cronDiagnose, cronList, cronLogs, cronRemove, cronRun, cronSetStatus, cronStatus, cronUpdate, getSchedulerDbPath } from "./scheduler";
+import { SchedulerDbStorage, cronCreate, cronDiagnose, cronList, cronLogs, cronReconcile, cronRemove, cronRun, cronSetStatus, cronStatus, cronUpdate, getSchedulerDbPath } from "./scheduler";
 import { SQLiteSessionStore } from "./session-store";
 import { getServiceStatus, installService, startService, stopService, uninstallService } from "./service-installer";
 
@@ -259,6 +259,9 @@ async function cmdCron(args: string[]): Promise<void> {
 			case "remove":
 				await cronRemove(args[1], storage);
 				break;
+			case "reconcile":
+				await cronReconcile(args.slice(1), storage);
+				break;
 			case "update":
 				await cronUpdate(args.slice(1), storage);
 				break;
@@ -281,6 +284,7 @@ Cron management commands:
   pi-gateway cron run <name>
   pi-gateway cron remove <name>
   pi-gateway cron update <name> [--account <id> | --clear-account] [--deliver <channel> | --clear-deliver] [--deliver-user <id> | --clear-deliver-user] [--timeout-ms <ms>]
+  pi-gateway cron reconcile [--apply]   Backfill accountId on legacy unbound tasks (dry run by default)
   pi-gateway cron status
   pi-gateway cron diagnose [--json]
   pi-gateway cron logs <name> [--json]
@@ -573,6 +577,7 @@ Usage:
   pi-gateway cron run <name>                       Trigger a task now
   pi-gateway cron remove <name>                    Delete a task
   pi-gateway cron update <name> [--account <id> | --clear-account] [--deliver <ch> | --clear-deliver] [--deliver-user <id> | --clear-deliver-user] [--timeout-ms <ms>]   Update task fields in place
+  pi-gateway cron reconcile [--apply]                  Backfill accountId on legacy unbound tasks (dry run by default)
   pi-gateway cron status                           Show scheduler status
   pi-gateway cron diagnose [--json]                Run diagnostics
   pi-gateway cron logs <name> [--json]             View execution logs

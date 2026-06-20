@@ -650,3 +650,134 @@ export async function cronLogs(name: string, storage: SchedulerDbStorage, json: 
 	console.log("─".repeat(50));
 	for (const exec of executions) console.log(formatExecutionRow(exec));
 }
+
+// ---------------------------------------------------------------------------
+// Reconcile legacy unbound tasks
+// ---------------------------------------------------------------------------
+
+/**
+ * Suggest and (optionally) apply accountId bindings for tasks that
+ * pre-date the AGENT column. Heuristic, in priority order:
+ *
+ *   1. Task name starts with `<accountId>:` (e.g. `hr:daily-report`).
+ *   2. Task name starts with `<agentDir basename>:` (e.g. the task
+ *      `omp-atomix:wiki-cron` matches the `opencode` account whose
+ *      agentDir ends in `omp-atomix`).
+ *
+ * The match must be a colon-delimited prefix, not a substring, so an
+ * accountId of `hr` does not falsely bind a task named `hr3-daily`.
+ *
+ * Extracted from `cronReconcile` so the suggestion logic can be unit
+ * tested with a fixture account map, no gateway.json required.
+ */
+export function suggestAccountBinding(
+	taskName: string,
+	accounts: Record<string, { agentDir?: string }>,
+): { accountId: string; reason: string } | undefined {
+	for (const [accountId, account] of Object.entries(accounts)) {
+		if (taskName.startsWith(`${accountId}:`)) {
+			return { accountId, reason: `name starts with "${accountId}:"` };
+		}
+		if (account.agentDir) {
+			const basename = account.agentDir.split("/").filter(Boolean).pop();
+			if (basename && taskName.startsWith(`${basename}:`)) {
+				return {
+					accountId,
+					reason: `name starts with agentDir basename "${basename}:"`,
+				};
+			}
+		}
+	}
+	return undefined;
+}
+
+/**
+ * One-shot CLI: `cron reconcile [--apply]`.
+ *
+ * Default behaviour is a dry run: lists legacy tasks (no `accountId`)
+ * with a heuristic suggestion column, and the user runs it again with
+ * `--apply` to write the bindings. This is the only safe default —
+ * silently rewriting storage based on a name match would be a footgun.
+ */
+export async function cronReconcile(args: string[], storage: SchedulerDbStorage): Promise<void> {
+	const apply = args.includes("--apply");
+	const unknownFlag = args.find(a => a !== "--apply");
+	if (unknownFlag) {
+		console.error(`Unknown flag: ${unknownFlag}. Usage: cron reconcile [--apply]`);
+		process.exitCode = 1;
+		return;
+	}
+
+	let cfg: Parameters<typeof resolveAgentCwd>[1];
+	try {
+		const { loadConfig } = await import("../config");
+		cfg = await loadConfig();
+	} catch (err) {
+		console.error(`Failed to load gateway.json: ${err}`);
+		process.exitCode = 1;
+		return;
+	}
+	const accounts = cfg.channels?.dingtalk?.accounts ?? {};
+	const accountKeys = Object.keys(accounts);
+	if (accountKeys.length === 0) {
+		console.log("No accounts in gateway.json. Nothing to reconcile against.");
+		return;
+	}
+
+	const unbound = storage.listTasks().filter(t => !t.accountId);
+	if (unbound.length === 0) {
+		console.log("All tasks have an accountId. Nothing to reconcile.");
+		return;
+	}
+
+	const rows = unbound.map(task => {
+		const taskAny = task as { name: string; taskType?: string };
+		const suggestion = suggestAccountBinding(taskAny.name, accounts);
+		return { task, suggestion };
+	});
+
+	// Print table. Column widths are derived from the largest cell in
+	// each column so the table never wraps.
+	const nameColW = Math.max(4, ...rows.map(r => r.task.name.length));
+	const typeColW = Math.max(4, ...rows.map(r => (r.task.taskType ?? "shell").length));
+	const suggColW = Math.max(9, ...rows.map(r => (r.suggestion?.accountId ?? "—").length));
+	const reasonColW = Math.max(6, ...rows.map(r => (r.suggestion?.reason ?? "no match").length));
+	const header =
+		"NAME".padEnd(nameColW) +
+		"  " +
+		"TYPE".padEnd(typeColW) +
+		"  " +
+		"SUGGEST".padEnd(suggColW) +
+		"  " +
+		"REASON";
+	console.log(header);
+	console.log("─".repeat(header.length));
+	for (const { task, suggestion } of rows) {
+		console.log(
+			task.name.padEnd(nameColW) +
+				"  " +
+				(task.taskType ?? "shell").padEnd(typeColW) +
+				"  " +
+				(suggestion?.accountId ?? "—").padEnd(suggColW) +
+				"  " +
+				(suggestion?.reason ?? "no match"),
+		);
+	}
+	console.log("");
+	const matched = rows.filter(r => r.suggestion).length;
+	console.log(
+		`${matched} of ${rows.length} unbound task${rows.length === 1 ? "" : "s"} have a suggestion.`,
+	);
+	if (!apply) {
+		console.log("Re-run with --apply to write the bindings.");
+		return;
+	}
+
+	let applied = 0;
+	for (const { task, suggestion } of rows) {
+		if (!suggestion) continue;
+		storage.updateTask(task.id, { accountId: suggestion.accountId });
+		applied++;
+	}
+	console.log(`Applied ${applied} update${applied === 1 ? "" : "s"}.`);
+}
