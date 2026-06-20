@@ -1,5 +1,6 @@
 export { SchedulerDaemon } from "./daemon";
 export { cronCreate, cronDiagnose, cronList, cronLogs, cronReconcile, cronRemove, cronRun, cronSetStatus, cronStatus, cronUpdate, findAgentSessionPath, resolveAgentCwd, suggestAccountBinding } from "./cli-commands";
+export { createCronTaskFromMessage, parseCronIntent, type CreateFromMessageOutcome, type CreateFromMessageResult, type CreateFromMessageError } from "./from-message";
 export { SchedulerEngine } from "./engine";
 export type { ExecutionLogEntry } from "./execution-log";
 export { appendExecutionLog, pruneAllLogs, pruneExecutionLog, readExecutionLog } from "./execution-log";

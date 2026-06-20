@@ -25,6 +25,7 @@ import { SchedulerDbStorage } from "./scheduler/storage";
 import type { ScheduledTask } from "./scheduler/types";
 import { DEFAULT_SCHEDULER_CONFIG, getSchedulerDbPath, getSchedulerDir } from "./scheduler/types";
 import { findAgentSessionPath } from "./scheduler";
+import { createCronTaskFromMessage } from "./scheduler/from-message";
 import { type BridgeStat, type QueueStat, SessionManager } from "./session-manager";
 import { SQLiteSessionStore } from "./session-store";
 import type { DingtalkAccountConfig, GatewayConfig, InboundMessage, MessageContent, OutboundMessage } from "./types";
@@ -135,7 +136,7 @@ export interface GatewayDaemonStatus {
 	startedAt?: string;
 	stalePidFile?: boolean;
 	channels?: Array<{ id: string; name: string; connected: boolean }>;
-	accounts?: Array<{ accountId: string; bridgeRunning: boolean; agentDir?: string; bridgeState?: string }>;
+	accounts?: Array<{ accountId: string; channelConnected: boolean; bridgeRunning: boolean; agentDir?: string; bridgeState?: string }>;
 	scheduler?: { running: boolean; taskCount: number };
 }
 
@@ -781,7 +782,7 @@ export class Gateway {
 	async getStatus(): Promise<{
 		running: boolean;
 		channels: Array<{ id: string; name: string; connected: boolean }>;
-		accounts: Array<{ accountId: string; bridgeRunning: boolean; agentDir?: string; bridgeState?: string }>;
+		accounts: Array<{ accountId: string; channelConnected: boolean; bridgeRunning: boolean; agentDir?: string; bridgeState?: string }>;
 		sessions: number;
 		queues: QueueStat[];
 		bridges: BridgeStat[];
@@ -799,12 +800,16 @@ export class Gateway {
 		const sessions = (await this.#store?.getActiveSessions()) ?? [];
 		const bridgeStats = this.#sessionManager?.getBridgeStats() ?? [];
 		const bridgeStatsByAccount = new Map(bridgeStats.map(stat => [stat.accountId, stat]));
-		const accounts = Array.from(this.#accountBridges.entries()).map(([accountId, bridge]) => ({
-			accountId,
-			bridgeRunning: bridge.isRunning,
-			agentDir: this.#accountAgentDirs.get(accountId),
-			bridgeState: bridgeStatsByAccount.get(accountId)?.state,
-		}));
+		const accounts = Array.from(this.#accountBridges.entries()).map(([accountId, bridge]) => {
+			const channel = this.#registry.get(`dingtalk:${accountId}`);
+			return {
+				accountId,
+				channelConnected: channel?.isConnected() ?? false,
+				bridgeRunning: bridge.isRunning,
+				agentDir: this.#accountAgentDirs.get(accountId),
+				bridgeState: bridgeStatsByAccount.get(accountId)?.state,
+			};
+		});
 
 		return {
 			running: this.#running || (await checkPidFile(getDataDir(this.#config), PID_FILE)),
@@ -1057,6 +1062,21 @@ export class Gateway {
 				return;
 			}
 
+			// Cron-creation intent: if the message is a /cron create
+			// command, create the task in the owning account's
+			// <agentDir>/cron/tasks/ directory and the global scheduler
+			// DB, then reply with a confirmation. Skips the LLM agent
+			// path entirely — cron creation is a deterministic operation
+			// that doesn't need an LLM round-trip.
+			const cronOutcome = this.#tryCreateCronFromMessage(msg, accountId);
+			if (cronOutcome) {
+				await this.#sendCronOutcomeReply(msg, cronOutcome);
+				if (this.#store && session) {
+					await this.#store.updateSession(session.id, { updatedAt: Date.now() });
+				}
+				return;
+			}
+
 			// Send "processing" placeholder first. Failure here should not prevent agent processing.
 			const placeholder: OutboundMessage = {
 				channelId: msg.channelId,
@@ -1116,6 +1136,87 @@ export class Gateway {
 				return;
 			}
 			throw err;
+		}
+	}
+
+	/**
+	 * Extract plain text from an inbound message's content union.
+	 * Returns the empty string for non-text content types (image,
+	 * etc.) so the cron-intent parser sees a clean signal.
+	 */
+	#extractMessageText(msg: InboundMessage): string {
+		const c = msg.content;
+		if (c.type === "text") return c.text;
+		if (c.type === "markdown") return c.markdown;
+		if (c.type === "voice") return c.text ?? "";
+		return "";
+	}
+
+	/**
+	 * Try to create a cron task from the inbound message text.
+	 * Returns the outcome (success or error) so the caller can
+	 * decide how to reply. Non-cron messages return undefined so
+	 * the normal LLM path takes over.
+	 */
+	#tryCreateCronFromMessage(
+		msg: InboundMessage,
+		accountId: string,
+	): ReturnType<typeof createCronTaskFromMessage> | undefined {
+		const text = this.#extractMessageText(msg);
+		// Fast path: if the message doesn't even start with the
+		// /cron create prefix, skip the parse + storage work entirely.
+		if (!text.trimStart().startsWith("/cron create")) return undefined;
+		if (!this.#schedulerStorage) {
+			logger.warn("Cron creation requested but scheduler storage is not initialised");
+			return {
+				ok: false,
+				error: { reason: "db-failed", detail: "scheduler storage not initialised" },
+			};
+		}
+		return createCronTaskFromMessage(text, msg.accountId ?? accountId, this.#config, this.#schedulerStorage);
+	}
+
+	/**
+	 * Reply to the user with the outcome of a cron-creation attempt.
+	 * Uses the same sessionWebhook the channel registered, so the
+	 * reply lands in the right DingTalk conversation.
+	 */
+	async #sendCronOutcomeReply(
+		msg: InboundMessage,
+		outcome: ReturnType<typeof createCronTaskFromMessage>,
+	): Promise<void> {
+		if (!outcome) return;
+		const lines: string[] = [];
+		if (outcome.ok) {
+			const r = outcome.result;
+			lines.push(`Task "${r.name}" created.`);
+			lines.push(`  Schedule: ${r.schedule}`);
+			lines.push(`  Command: ${r.command}`);
+			lines.push(`  Type: ${r.type}`);
+			lines.push(`  File: ${r.filePath}`);
+		} else {
+			const e = outcome.error;
+			lines.push(`Failed to create task: ${e.reason}`);
+			if (e.detail) lines.push(`  ${e.detail}`);
+			if (e.reason === "not-cron-intent") {
+				// Don't surface a confusing error for ordinary chat messages;
+				// the LLM path will handle them.
+				return;
+			}
+		}
+		const outbound: OutboundMessage = {
+			channelId: msg.channelId,
+			conversationId: msg.conversationId,
+			content: { type: "markdown", markdown: lines.join("\n") },
+			sessionWebhook: msg.sessionWebhook,
+			accountId: msg.accountId,
+		};
+		try {
+			await this.#registry.sendMessage(outbound);
+		} catch (err) {
+			logger.error("Failed to send cron-creation reply", {
+				error: err instanceof Error ? err.message : String(err),
+			});
 		}
 	}
 }
