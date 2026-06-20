@@ -354,7 +354,7 @@ async function sendViaOAuth(
 			method: "POST",
 			headers: {
 				"Content-Type": "application/json",
-				Authorization: `Bearer ${token}`,
+				"x-acs-dingtalk-access-token": token,
 			},
 			body: JSON.stringify({
 				robotCode,
@@ -379,7 +379,7 @@ async function sendViaOAuth(
 			method: "POST",
 			headers: {
 				"Content-Type": "application/json",
-				Authorization: `Bearer ${token}`,
+				"x-acs-dingtalk-access-token": token,
 			},
 			body: JSON.stringify({
 				robotCode,
