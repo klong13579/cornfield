@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- **`cron list` shows a `CHANNEL` column**: Each task row now renders the `deliver` target (e.g. `dingtalk:hr`, `dingtalk:user:601590212`, or `—` when unset) so users can see at a glance which channel a scheduled task's results will land in. The `deliverUser` field is intentionally not inlined into this cell (it's an orthogonal proactive-send destination); use `cron list --json` to see the full record. Over-long task names are truncated to 18 chars with an ellipsis (`omp-atomix:wiki-c…`) so they can't overflow into the `TYPE` column.
+
 ### Changed
 
 - **Hierarchical execution-log layout**: Scheduler execution logs are now written to `<gateway-data>/scheduler/logs/by-task/<slug>/<YYYY-MM-DD>.jsonl` instead of `<gateway-data>/scheduler/logs/<sanitized-name>.jsonl`. The directory slug is `slugify(taskName)` — kebab-case, pinyin for CJK, capped at 32 chars. All runs of a task on the same day go in one file. One file per day keeps the append-only semantics intact and makes day-by-day cleanup trivial. Backward compatibility: readers (`readExecutionLog`, `pruneExecutionLog`, `pruneAllLogs`) also walk the legacy flat files at the logs root. New `setLogRoot()` / `getLogRoot()` helpers make the log root injectable for tests.

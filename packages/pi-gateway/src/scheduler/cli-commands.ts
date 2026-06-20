@@ -260,8 +260,14 @@ export async function cronList(storage: SchedulerDbStorage, json: boolean): Prom
 		console.log("No scheduled tasks.");
 		return;
 	}
-	console.log("NAME                 TYPE    STATUS     CRON                 NEXT RUN             LAST RUN");
-	console.log("─".repeat(96));
+	// Header is constructed to match the formatTaskRow column widths exactly:
+	//   19+1+7+1+11+1+9+1+19+1+29+1+21+1+8 = 130 chars
+	// Use Bun.string.repeat to build it precisely so it stays in sync.
+	const HEADER = "NAME".padEnd(19) + " " + "TYPE".padEnd(7) + " " + "STATUS".padEnd(11) + " " +
+		"SCHED".padEnd(9) + " " + "CRON".padEnd(19) + " " + "CHANNEL".padEnd(29) + " " +
+		"NEXT RUN".padEnd(21) + " " + "LAST RUN";
+	console.log(HEADER);
+	console.log("─".repeat(HEADER.length));
 	for (const task of tasks) console.log(formatTaskRow(task));
 }
 

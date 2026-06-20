@@ -336,7 +336,37 @@ export function formatTaskRow(task: ScheduledTask): string {
 	const next = task.status === "active" && task.nextRunAt ? new Date(task.nextRunAt).toLocaleString() : "—";
 	const last = task.lastRunAt ? new Date(task.lastRunAt).toLocaleString() : "never";
 	const typeLabel = task.taskType === "agent" ? "agent " : "shell ";
-	return `${task.name.padEnd(18)} ${typeLabel.padEnd(6)} ${task.status.padEnd(10)} ${(task.scheduleType || "cron").padEnd(8)} ${task.cron.padEnd(18)} ${next.padEnd(20)} ${last}`;
+	const channel = formatChannel(task.deliver);
+	const name = truncateName(task.name, 18);
+	return `${name.padEnd(19)} ${typeLabel.padEnd(7)} ${task.status.padEnd(11)} ${(task.scheduleType || "cron").padEnd(9)} ${task.cron.padEnd(19)} ${channel.padEnd(29)} ${next.padEnd(21)} ${last}`;
+}
+
+/**
+ * Truncate a string to fit a fixed column width. If the input is longer
+ * than `max`, replace the trailing chars with an ellipsis so the result
+ * is exactly `max` chars long. Keeps the column count stable across
+ * rows regardless of name length.
+ */
+export function truncateName(name: string, max: number): string {
+	if (name.length <= max) return name;
+	return `${name.slice(0, max - 1)}\u2026`;
+}
+
+/**
+ * Render the deliver target as a single human-readable cell.
+ *
+ *   deliver="dingtalk:hr"               → "dingtalk:hr"
+ *   deliver="dingtalk:user:601590212"   → "dingtalk:user:601590212"
+ *   deliver undefined or empty          → "—"
+ *
+ * Note: `deliverUser` (the destination user for proactive send) is NOT
+ * rendered in the table column. It's an orthogonal field that's only
+ * used at delivery time, and folding it in would push the next column
+ * around. Use `--json` to see the full record.
+ */
+export function formatChannel(deliver: string | undefined): string {
+	if (!deliver) return "—";
+	return deliver;
 }
 
 export function formatExecutionRow(exec: TaskExecution): string {
