@@ -4,6 +4,7 @@
 
 ### Added
 
+- **`cron list` shows an `ACCOUNT` column**: Each task row now renders the channel account that owns the agent context for the task (e.g. `hr`, `opencode`, `ops/hr`, or `—` when unset). Bound at task creation time via `cron create --account <accountId>` and resolved at runtime to the account's `agentDir` from `gateway.json` (`channels.dingtalk.accounts[<id>].agentDir`). The agentDir is then used as the `Bun.spawn` cwd so `omp` finds the correct `.omp/config.yml` for the task's owning account. If the account is later removed from `gateway.json`, the task falls back to the gateway cwd with a warning (no break). Storage: new `account_id` column on `tasks` with an idempotent `ALTER TABLE` migration; existing tasks display `—` and continue to run as before.
 - **`cron list` shows a `CHANNEL` column**: Each task row now renders the `deliver` target (e.g. `dingtalk:hr`, `dingtalk:user:601590212`, or `—` when unset) so users can see at a glance which channel a scheduled task's results will land in. The `deliverUser` field is intentionally not inlined into this cell (it's an orthogonal proactive-send destination); use `cron list --json` to see the full record. Over-long task names are truncated to 18 chars with an ellipsis (`omp-atomix:wiki-c…`) so they can't overflow into the `TYPE` column.
 
 ### Changed

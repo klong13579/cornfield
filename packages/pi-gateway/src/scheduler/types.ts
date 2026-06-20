@@ -49,6 +49,13 @@ export interface ScheduledTask {
 	deliver?: string;
 	/** User ID for proactive result delivery via the deliver channel */
 	deliverUser?: string;
+	/**
+	 * Channel account that owns the agent context for this task.
+	 * Resolved at execute time via `gateway.json:channels.<id>.accounts[<accountId>].agentDir`
+	 * and used as the Bun.spawn cwd for `agent` tasks. `shell` tasks ignore it
+	 * at runtime but still display it in the cron list to show ownership.
+	 */
+	accountId?: string;
 }
 
 export interface TaskFileDefinition {
@@ -63,6 +70,7 @@ export interface TaskFileDefinition {
 	preScript?: string;
 	deliver?: string;
 	deliverUser?: string;
+	accountId?: string;
 }
 
 export interface TaskExecution {
@@ -337,8 +345,9 @@ export function formatTaskRow(task: ScheduledTask): string {
 	const last = task.lastRunAt ? new Date(task.lastRunAt).toLocaleString() : "never";
 	const typeLabel = task.taskType === "agent" ? "agent " : "shell ";
 	const channel = formatChannel(task.deliver);
+	const agent = formatAgent(task.accountId);
 	const name = truncateName(task.name, 18);
-	return `${name.padEnd(19)} ${typeLabel.padEnd(7)} ${task.status.padEnd(11)} ${(task.scheduleType || "cron").padEnd(9)} ${task.cron.padEnd(19)} ${channel.padEnd(29)} ${next.padEnd(21)} ${last}`;
+	return `${name.padEnd(19)} ${typeLabel.padEnd(7)} ${agent.padEnd(12)} ${task.status.padEnd(11)} ${(task.scheduleType || "cron").padEnd(9)} ${task.cron.padEnd(19)} ${channel.padEnd(29)} ${next.padEnd(21)} ${last}`;
 }
 
 /**
@@ -367,6 +376,23 @@ export function truncateName(name: string, max: number): string {
 export function formatChannel(deliver: string | undefined): string {
 	if (!deliver) return "—";
 	return deliver;
+}
+
+/**
+ * Render the owning channel account as a single human-readable cell.
+ *
+ *   accountId="hr"          → "hr"
+ *   accountId="ops/hr"      → "ops/hr"
+ *   accountId undefined     → "—"
+ *
+ * The cell shows the account key (not the channel prefix); the cron
+ * list already has a CHANNEL column for that. Long account keys are
+ * truncated with an ellipsis using the shared `truncateName` helper
+ * to keep the column width stable.
+ */
+export function formatAgent(accountId: string | undefined, max = 12): string {
+	if (!accountId) return "—";
+	return truncateName(accountId, max);
 }
 
 export function formatExecutionRow(exec: TaskExecution): string {

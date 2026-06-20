@@ -9,7 +9,7 @@
  */
 import { describe, expect, it } from "bun:test";
 import type { ScheduledTask } from "../src/scheduler/types";
-import { formatChannel, formatTaskRow, truncateName } from "../src/scheduler/types";
+import { formatAgent, formatChannel, formatTaskRow, truncateName } from "../src/scheduler/types";
 
 function makeTask(overrides: Partial<ScheduledTask> = {}): ScheduledTask {
 	return {
@@ -58,6 +58,40 @@ describe("formatChannel", () => {
 	});
 });
 
+describe("formatAgent", () => {
+	it("returns em-dash when accountId is unset", () => {
+		expect(formatAgent(undefined)).toBe("—");
+	});
+
+	it("returns em-dash when accountId is the empty string (DB default)", () => {
+		expect(formatAgent("")).toBe("—");
+	});
+
+	it("returns the accountId as-is when it fits the column", () => {
+		expect(formatAgent("hr")).toBe("hr");
+		expect(formatAgent("ops/hr")).toBe("ops/hr");
+	});
+
+	it("truncates with an ellipsis when accountId exceeds the default max (12)", () => {
+		// accountId "way-too-long-account-id" is 23 chars, well over 12.
+		const cell = formatAgent("way-too-long-account-id");
+		expect(cell.length).toBe(12);
+		expect(cell.endsWith("\u2026")).toBe(true);
+	});
+
+	it("respects a custom max width", () => {
+		// truncateName contract: first (max-1) chars + "…". For max=4
+		// and "ops/hr" (6 chars), it returns "ops" + "…" = "ops…".
+		expect(formatAgent("ops/hr", 4)).toBe("ops…");
+	});
+
+	it("returns the accountId as-is when it equals the max", () => {
+		// "opencode-account" is 15 chars, exactly max=15.
+		const id = "a".repeat(15);
+		expect(formatAgent(id, 15)).toBe(id);
+	});
+});
+
 describe("formatTaskRow column layout", () => {
 	it("renders the same number of space-separated fields for every task shape", () => {
 		const variants: ScheduledTask[] = [
@@ -69,11 +103,35 @@ describe("formatTaskRow column layout", () => {
 			makeTask({ status: "disabled" }),
 			makeTask({ deliver: "dingtalk:hr" }),
 			makeTask({ deliver: "dingtalk:user:601590212" }),
+			makeTask({ accountId: "hr" }),
+			makeTask({ accountId: "ops/hr" }),
+			makeTask({ accountId: "way-too-long-account-id" }),
 		];
-		const counts = variants.map(t => formatTaskRow(t).split(/\s{2,}/).length);
+		// Fixed-width slicing is more robust than /\s{2,}/: when a cell
+		// fills its full width (e.g. accountId that maxes out the 12-char
+		// ACCOUNT column, or a 21-char NEXT RUN timestamp), the only
+		// whitespace between it and the next cell is the single separator,
+		// which a 2+-whitespace regex won't split on. Slicing by known
+		// column widths gives the same answer for every row regardless
+		// of cell content.
+		const widths = [19, 7, 12, 11, 9, 19, 29, 21] as const;
+		const splitByWidth = (row: string): string[] => {
+			const out: string[] = [];
+			let pos = 0;
+			for (const w of widths) {
+				out.push(row.slice(pos, pos + w));
+				pos += w + 1; // +1 for the single-space separator
+			}
+			out.push(row.slice(pos)); // LAST RUN is unpadded
+			return out;
+		};
+		const counts = variants.map(t => splitByWidth(formatTaskRow(t)).length);
 		// All rows should have the same field count. If they don't, columns
-		// will misalign across rows in the rendered table.
+		// will misalign across rows in the rendered table. With 9 columns
+		// (NAME, TYPE, ACCOUNT, STATUS, SCHED, CRON, CHANNEL, NEXT RUN,
+		// LAST RUN), every row must split into exactly 9 fields.
 		expect(new Set(counts).size).toBe(1);
+		expect(counts[0]).toBe(9);
 	});
 
 	it("includes the deliver value in the rendered row", () => {
@@ -114,36 +172,54 @@ describe("formatTaskRow column layout", () => {
 		// Without truncation, the name would overflow into the TYPE column.
 		const row = formatTaskRow(makeTask({ name: "this-name-is-way-longer-than-eighteen-chars" }));
 		const fields = row.split(/\s{2,}/);
-		// Truncation keeps the field count stable.
-		expect(fields.length).toBe(8);
+		// Truncation keeps the field count stable across all 9 columns.
+		expect(fields.length).toBe(9);
 		// The truncated name contains an ellipsis.
 		expect(row).toContain("\u2026");
 		// And the original full name is NOT in the row (it was truncated).
 		expect(row).not.toContain("eighteen-chars");
 	});
 
-	it("renders rows with a fixed leading width of 130 chars (matches the table header)", () => {
-		// Regression: the table header in cronList is built as 130 chars
-		// (19+1+7+1+11+1+9+1+19+1+29+1+21+1+8 = 130, where 8 is "LAST RUN").
-		// formatTaskRow produces the same fixed prefix and appends an
-		// unpadded LAST RUN value. The header underline must equal the
-		// header line length; rows can extend past it for long timestamps.
+	it("renders rows with a fixed leading width of 143 chars (matches the table header)", () => {
+		// Regression: the table header in cronList is built as 143 chars
+		// (19+1+7+1+12+1+11+1+9+1+19+1+29+1+21+1+8 = 143, where 8 is
+		// "LAST RUN" and 12 is the new ACCOUNT column). formatTaskRow
+		// produces the same fixed prefix and appends an unpadded LAST
+		// RUN value. The header underline must equal the header line
+		// length; rows can extend past it for long timestamps.
 		// This test pins the fixed prefix length so a future padEnd change
 		// can't silently desync header and data rows.
-		const fixedWidth = 19 + 1 + 7 + 1 + 11 + 1 + 9 + 1 + 19 + 1 + 29 + 1 + 21;
-		const header = "NAME".padEnd(19) + " " + "TYPE".padEnd(7) + " " + "STATUS".padEnd(11) + " " +
-			"SCHED".padEnd(9) + " " + "CRON".padEnd(19) + " " + "CHANNEL".padEnd(29) + " " +
-			"NEXT RUN".padEnd(21) + " " + "LAST RUN";
-		expect(header.length).toBe(130);
+		const fixedWidth = 19 + 1 + 7 + 1 + 12 + 1 + 11 + 1 + 9 + 1 + 19 + 1 + 29 + 1 + 21;
+		const header = "NAME".padEnd(19) + " " + "TYPE".padEnd(7) + " " + "ACCOUNT".padEnd(12) + " " +
+			"STATUS".padEnd(11) + " " + "SCHED".padEnd(9) + " " + "CRON".padEnd(19) + " " +
+			"CHANNEL".padEnd(29) + " " + "NEXT RUN".padEnd(21) + " " + "LAST RUN";
+		expect(header.length).toBe(143);
 		// For a task with no lastRunAt, the rendered row ends exactly at
 		// the header width (no trailing LAST RUN characters).
 		const row = formatTaskRow(makeTask({ name: "x" }));
 		const lastFieldLen = row.split(/\s{2,}/).pop()!.length;
 		expect(fixedWidth + 1 + lastFieldLen).toBe(row.length);
 		// And a 21-char timestamp (typical toLocaleString) lands the row
-		// at 130 + 21 = 151 chars — a stable upper bound for visual checks.
+		// at 143 + 21 - 8 (header LAST RUN is 8 chars) = 156 chars max.
 		const tsLen = "6/20/2026, 1:01:21 PM".length;
 		expect(tsLen).toBe(21);
+	});
+
+	it("renders the accountId in the row when set", () => {
+		const row = formatTaskRow(makeTask({ name: "x", accountId: "hr" }));
+		expect(row).toContain("hr");
+		// The accountId must appear AFTER the type cell (TYPE column)
+		// and BEFORE the status cell (STATUS column). Splitting on 2+ spaces
+		// gives us cells in order: NAME, TYPE, ACCOUNT, STATUS, ...
+		const fields = row.split(/\s{2,}/);
+		expect(fields[2]).toBe("hr");
+	});
+
+	it("renders an em-dash in the ACCOUNT column when accountId is unset", () => {
+		const row = formatTaskRow(makeTask({ name: "x" }));
+		const fields = row.split(/\s{2,}/);
+		// ACCOUNT is the 3rd column (index 2).
+		expect(fields[2]).toBe("—");
 	});
 });
 

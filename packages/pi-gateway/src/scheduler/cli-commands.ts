@@ -17,6 +17,7 @@ import { appendExecutionLog } from "./execution-log";
 import { executeScheduledCommand } from "./executor";
 import type { SchedulerDbStorage } from "./storage";
 import {
+	formatAgent,
 	formatExecutionRow,
 	formatTaskRow,
 	getGatewayPidPath,
@@ -132,6 +133,7 @@ export async function cronCreate(args: string[], storage: SchedulerDbStorage): P
 	let schedule: string | undefined;
 	let deliver: string | undefined;
 	let deliverUser: string | undefined;
+	let accountId: string | undefined;
 	let type: "shell" | "agent" = "shell";
 	let timeoutMs: number | undefined;
 	let skills: string[] | undefined;
@@ -152,6 +154,9 @@ export async function cronCreate(args: string[], storage: SchedulerDbStorage): P
 			i += 2;
 		} else if (args[i] === "--deliver-user" && args[i + 1]) {
 			deliverUser = args[i + 1]!;
+			i += 2;
+		} else if (args[i] === "--account" && args[i + 1]) {
+			accountId = args[i + 1]!;
 			i += 2;
 		} else if (args[i] === "--timeout-ms" && args[i + 1]) {
 			const v = Number.parseInt(args[i + 1]!, 10);
@@ -194,7 +199,7 @@ export async function cronCreate(args: string[], storage: SchedulerDbStorage): P
 	const command = commandParts.join(" ");
 	if (!schedule || !command) {
 		console.error(
-			"Usage: <schedule> <command...> [--name <name>] [--type shell|agent] [--deliver <channel>] [--timeout-ms <ms>] [--skills <s1,s2,...>] [--retry <maxAttempts>] [--pre-script <path>]",
+			"Usage: <schedule> <command...> [--name <name>] [--type shell|agent] [--deliver <channel>] [--deliver-user <id>] [--account <accountId>] [--timeout-ms <ms>] [--skills <s1,s2,...>] [--retry <maxAttempts>] [--pre-script <path>]",
 		);
 		process.exitCode = 1;
 		return;
@@ -230,6 +235,7 @@ export async function cronCreate(args: string[], storage: SchedulerDbStorage): P
 		preScript,
 		deliver,
 		deliverUser,
+		accountId,
 		status: "active",
 		createdAt: Date.now(),
 		updatedAt: Date.now(),
@@ -244,6 +250,7 @@ export async function cronCreate(args: string[], storage: SchedulerDbStorage): P
 		`  Type: ${parsed.type} | Schedule: ${parsed.schedule} | Next: ${nextRun ? nextRun.toLocaleString() : "—"}`,
 	);
 	if (deliver) console.log(`  Delivery: ${deliver}`);
+	if (accountId) console.log(`  Account: ${accountId}`);
 	if (timeoutMs !== undefined) console.log(`  Timeout: ${timeoutMs}ms`);
 	if (skills) console.log(`  Skills: ${skills.join(", ")}`);
 	if (retryMaxAttempts !== undefined) console.log(`  Retry: max ${retryMaxAttempts} attempts (backoff 1s/5s/30s)`);
@@ -261,11 +268,11 @@ export async function cronList(storage: SchedulerDbStorage, json: boolean): Prom
 		return;
 	}
 	// Header is constructed to match the formatTaskRow column widths exactly:
-	//   19+1+7+1+11+1+9+1+19+1+29+1+21+1+8 = 130 chars
-	// Use Bun.string.repeat to build it precisely so it stays in sync.
-	const HEADER = "NAME".padEnd(19) + " " + "TYPE".padEnd(7) + " " + "STATUS".padEnd(11) + " " +
-		"SCHED".padEnd(9) + " " + "CRON".padEnd(19) + " " + "CHANNEL".padEnd(29) + " " +
-		"NEXT RUN".padEnd(21) + " " + "LAST RUN";
+	//   19+1+7+1+12+1+11+1+9+1+19+1+29+1+21+1+8 = 143 chars
+	// Use padEnd chain so it stays in sync with the row format.
+	const HEADER = "NAME".padEnd(19) + " " + "TYPE".padEnd(7) + " " + "ACCOUNT".padEnd(12) + " " +
+		"STATUS".padEnd(11) + " " + "SCHED".padEnd(9) + " " + "CRON".padEnd(19) + " " +
+		"CHANNEL".padEnd(29) + " " + "NEXT RUN".padEnd(21) + " " + "LAST RUN";
 	console.log(HEADER);
 	console.log("─".repeat(HEADER.length));
 	for (const task of tasks) console.log(formatTaskRow(task));
@@ -310,11 +317,37 @@ export async function cronRun(name: string, storage: SchedulerDbStorage): Promis
 	const startedAt = Date.now();
 	const exec = storage.recordExecution({ taskId: task.id, startedAt, status: "running" });
 	try {
+		// Resolve the task's accountId to an agentDir from gateway.json. The
+		// agentDir becomes the Bun.spawn cwd so omp finds the right
+		// `.omp/config.yml` for this account. Falls back to the gateway's
+		// cwd if the accountId is unset or the account is not in config
+		// (with a warning) so a missing entry doesn't break execution.
+		let cwd: string | undefined;
+		if (task.accountId) {
+			try {
+				const { loadConfig } = await import("../config");
+				const cfg = await loadConfig();
+				const dtCfg = cfg.channels.dingtalk as
+					| { accounts?: Record<string, { agentDir?: string }> }
+					| undefined;
+				const account = dtCfg?.accounts?.[task.accountId];
+				if (account?.agentDir) {
+					cwd = account.agentDir;
+				} else {
+					console.error(
+						`[warn] Task "${task.name}" is bound to account "${task.accountId}" but it has no agentDir in gateway.json. Falling back to gateway cwd.`,
+					);
+				}
+			} catch (err) {
+				console.error(`[warn] Failed to load gateway.json to resolve accountId: ${err}`);
+			}
+		}
 		const { exitCode, output, stderr } = await executeScheduledCommand(task.command, {
 			taskType: task.taskType,
 			timeoutMs: task.timeoutMs,
 			skills: task.skills,
 			preScript: task.preScript,
+			cwd,
 		});
 		const endedAt = Date.now();
 		const durationMs = endedAt - startedAt;

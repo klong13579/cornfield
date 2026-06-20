@@ -22,6 +22,13 @@ export interface ExecutionOptions {
 	ompBinary?: string;
 	skills?: string[];
 	preScript?: string;
+	/**
+	 * Working directory for the spawned process. For `agent` tasks, this
+	 * is the agentDir (where omp finds its `.omp/config.yml`). For
+	 * `shell` tasks, it can be set to scope the command's view of the
+	 * filesystem. When unset, the gateway's cwd is used.
+	 */
+	cwd?: string;
 }
 
 /**
@@ -76,12 +83,14 @@ export async function executeScheduledCommand(
 			stdout: "pipe",
 			stderr: "pipe",
 			stdin: "ignore",
+			...(options.cwd ? { cwd: options.cwd } : {}),
 		});
 	} else {
 		proc = Bun.spawn(["sh", "-c", command], {
 			stdout: "pipe",
 			stderr: "pipe",
 			stdin: "ignore",
+			...(options.cwd ? { cwd: options.cwd } : {}),
 		});
 	}
 
