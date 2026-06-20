@@ -31,6 +31,33 @@ import {
 // ---------------------------------------------------------------------------
 
 /**
+ * Resolve a task's `accountId` to the `agentDir` declared in
+ * `~/.omp/gateway.json` (under `channels.dingtalk.accounts[<id>]`).
+ *
+ * Returns the agentDir path on a hit, or `undefined` when:
+ *   - the accountId has no matching entry in config, OR
+ *   - the entry exists but has no `agentDir` field.
+ *
+ * Callers in `cronRun` use the returned path as the `Bun.spawn` cwd so
+ * the spawned `omp` process finds the right `.omp/config.yml` for the
+ * account that owns the task. Returning `undefined` triggers a fallback
+ * to the gateway cwd with a warning, so a stale or removed binding does
+ * not silently fail (the task still runs, just with the gateway's
+ * default agent context).
+ *
+ * Extracted from `cronRun` so the resolution can be unit-tested with a
+ * fixture config object without touching the real `~/.omp/gateway.json`
+ * or mocking module imports.
+ */
+export function resolveAgentCwd(
+	accountId: string,
+	config: { channels?: { dingtalk?: { accounts?: Record<string, { agentDir?: string }> } } },
+): string | undefined {
+	const account = config.channels?.dingtalk?.accounts?.[accountId];
+	return account?.agentDir;
+}
+
+/**
  * Find the OMP agent session JSONL created during a specific time window.
  *
  * OMP writes agent session files to
@@ -270,7 +297,7 @@ export async function cronList(storage: SchedulerDbStorage, json: boolean): Prom
 	// Header is constructed to match the formatTaskRow column widths exactly:
 	//   19+1+7+1+12+1+11+1+9+1+19+1+29+1+21+1+8 = 143 chars
 	// Use padEnd chain so it stays in sync with the row format.
-	const HEADER = "NAME".padEnd(19) + " " + "TYPE".padEnd(7) + " " + "ACCOUNT".padEnd(12) + " " +
+	const HEADER = "NAME".padEnd(19) + " " + "TYPE".padEnd(7) + " " + "AGENT".padEnd(12) + " " +
 		"STATUS".padEnd(11) + " " + "SCHED".padEnd(9) + " " + "CRON".padEnd(19) + " " +
 		"CHANNEL".padEnd(29) + " " + "NEXT RUN".padEnd(21) + " " + "LAST RUN";
 	console.log(HEADER);
@@ -466,13 +493,8 @@ export async function cronRun(name: string, storage: SchedulerDbStorage): Promis
 			try {
 				const { loadConfig } = await import("../config");
 				const cfg = await loadConfig();
-				const dtCfg = cfg.channels.dingtalk as
-					| { accounts?: Record<string, { agentDir?: string }> }
-					| undefined;
-				const account = dtCfg?.accounts?.[task.accountId];
-				if (account?.agentDir) {
-					cwd = account.agentDir;
-				} else {
+				cwd = resolveAgentCwd(task.accountId, cfg);
+				if (!cwd) {
 					console.error(
 						`[warn] Task "${task.name}" is bound to account "${task.accountId}" but it has no agentDir in gateway.json. Falling back to gateway cwd.`,
 					);

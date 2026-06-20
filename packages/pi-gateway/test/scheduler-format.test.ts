@@ -109,7 +109,7 @@ describe("formatTaskRow column layout", () => {
 		];
 		// Fixed-width slicing is more robust than /\s{2,}/: when a cell
 		// fills its full width (e.g. accountId that maxes out the 12-char
-		// ACCOUNT column, or a 21-char NEXT RUN timestamp), the only
+		// AGENT column, or a 21-char NEXT RUN timestamp), the only
 		// whitespace between it and the next cell is the single separator,
 		// which a 2+-whitespace regex won't split on. Slicing by known
 		// column widths gives the same answer for every row regardless
@@ -128,7 +128,7 @@ describe("formatTaskRow column layout", () => {
 		const counts = variants.map(t => splitByWidth(formatTaskRow(t)).length);
 		// All rows should have the same field count. If they don't, columns
 		// will misalign across rows in the rendered table. With 9 columns
-		// (NAME, TYPE, ACCOUNT, STATUS, SCHED, CRON, CHANNEL, NEXT RUN,
+		// (NAME, TYPE, AGENT, STATUS, SCHED, CRON, CHANNEL, NEXT RUN,
 		// LAST RUN), every row must split into exactly 9 fields.
 		expect(new Set(counts).size).toBe(1);
 		expect(counts[0]).toBe(9);
@@ -183,14 +183,14 @@ describe("formatTaskRow column layout", () => {
 	it("renders rows with a fixed leading width of 143 chars (matches the table header)", () => {
 		// Regression: the table header in cronList is built as 143 chars
 		// (19+1+7+1+12+1+11+1+9+1+19+1+29+1+21+1+8 = 143, where 8 is
-		// "LAST RUN" and 12 is the new ACCOUNT column). formatTaskRow
+		// "LAST RUN" and 12 is the AGENT column). formatTaskRow
 		// produces the same fixed prefix and appends an unpadded LAST
 		// RUN value. The header underline must equal the header line
 		// length; rows can extend past it for long timestamps.
 		// This test pins the fixed prefix length so a future padEnd change
 		// can't silently desync header and data rows.
 		const fixedWidth = 19 + 1 + 7 + 1 + 12 + 1 + 11 + 1 + 9 + 1 + 19 + 1 + 29 + 1 + 21;
-		const header = "NAME".padEnd(19) + " " + "TYPE".padEnd(7) + " " + "ACCOUNT".padEnd(12) + " " +
+		const header = "NAME".padEnd(19) + " " + "TYPE".padEnd(7) + " " + "AGENT".padEnd(12) + " " +
 			"STATUS".padEnd(11) + " " + "SCHED".padEnd(9) + " " + "CRON".padEnd(19) + " " +
 			"CHANNEL".padEnd(29) + " " + "NEXT RUN".padEnd(21) + " " + "LAST RUN";
 		expect(header.length).toBe(143);
@@ -210,15 +210,15 @@ describe("formatTaskRow column layout", () => {
 		expect(row).toContain("hr");
 		// The accountId must appear AFTER the type cell (TYPE column)
 		// and BEFORE the status cell (STATUS column). Splitting on 2+ spaces
-		// gives us cells in order: NAME, TYPE, ACCOUNT, STATUS, ...
+		// gives us cells in order: NAME, TYPE, AGENT, STATUS, ...
 		const fields = row.split(/\s{2,}/);
 		expect(fields[2]).toBe("hr");
 	});
 
-	it("renders an em-dash in the ACCOUNT column when accountId is unset", () => {
+	it("renders an em-dash in the AGENT column when accountId is unset", () => {
 		const row = formatTaskRow(makeTask({ name: "x" }));
 		const fields = row.split(/\s{2,}/);
-		// ACCOUNT is the 3rd column (index 2).
+		// AGENT is the 3rd column (index 2).
 		expect(fields[2]).toBe("—");
 	});
 });
