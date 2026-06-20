@@ -191,18 +191,41 @@ async function cmdConfig(_configPath?: string): Promise<void> {
 // ═══════════════════════════════════════════════════════════════════════
 
 async function cmdSend(channelArg: string | undefined, args: string[]): Promise<void> {
-	const channel = channelArg ?? args[0];
-	const message = args.slice(channelArg ? 0 : 1).join(" ");
+	// Parse optional --user and --conversation flags
+	let userId: string | undefined;
+	let conversationId: string | undefined;
+	let channel: string | undefined;
+	const messageParts: string[] = [];
+
+	let i = 0;
+	const tokens = channelArg ? [channelArg, ...args] : args;
+	while (i < tokens.length) {
+		if (tokens[i] === "--user" && tokens[i + 1]) {
+			userId = tokens[i + 1]!;
+			i += 2;
+		} else if (tokens[i] === "--conversation" && tokens[i + 1]) {
+			conversationId = tokens[i + 1]!;
+			i += 2;
+		} else if (!channel) {
+			channel = tokens[i]!;
+			i++;
+		} else {
+			messageParts.push(tokens[i]!);
+			i++;
+		}
+	}
+
+	const message = messageParts.join(" ");
 	if (!channel || !message) {
-		console.error("Usage: pi-gateway send <channel> <message>");
-		console.error("  channel format: dingtalk:<accountId>");
-		console.error("  Example: pi-gateway send dingtalk:hr 'Hello from OMP'");
+		console.error("Usage: pi-gateway send <channel> <message> [--user <userId>] [--conversation <convId>]");
+		console.error("  Example: pi-gateway send dingtalk:hr 'Hello' --user 'manager123'");
+		console.error("  Example: pi-gateway send dingtalk:hr 'Hello' (uses stored webhook)");
 		process.exitCode = 1;
 		return;
 	}
 
 	const { sendToChannel } = await import("./gateway");
-	const ok = await sendToChannel(channel, message);
+	const ok = await sendToChannel(channel, message, { userId, conversationId });
 	if (!ok) process.exitCode = 1;
 }
 

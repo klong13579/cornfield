@@ -9,23 +9,14 @@
  * - create: --name, --type, --deliver, --timeout-ms, --skills, --retry, --pre-script
  * - run: writes JSONL execution log + links agent session traces
  */
+
+import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import * as fs from "node:fs";
-import { SchedulerDbStorage } from "./storage";
-import { executeScheduledCommand } from "./executor";
 import { appendExecutionLog } from "./execution-log";
-import {
-	type ScheduledTask,
-	formatExecutionRow,
-	formatTaskRow,
-	getGatewayPidPath,
-	getNextRun,
-	getSchedulerDbPath,
-	getSchedulerPidPath,
-	isDaemonRunning,
-	parseSchedule,
-} from "./types";
+import { executeScheduledCommand } from "./executor";
+import type { SchedulerDbStorage } from "./storage";
+import { formatExecutionRow, formatTaskRow, getGatewayPidPath, getNextRun, isDaemonRunning, parseSchedule } from "./types";
 
 // ---------------------------------------------------------------------------
 // Agent session path discovery
@@ -51,30 +42,62 @@ export function findAgentSessionPath(startedAt: number, endedAt: number): string
 	const sessionsRoot = path.join(os.homedir(), ".omp", "agent", "sessions");
 	if (!fs.existsSync(sessionsRoot)) return undefined;
 
-	// 2026-06-15T09-18-46-865Z (ISO basic format, dashes between time fields)
-	const FILENAME_TS = /^(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z_/;
+	// New layout: by-date/<YYYY-MM-DD>/<HHMMSS>[-<slug>]__<8hex>.jsonl
+	// Legacy: <YYYY-MM-DD>T<HH-MM-SS-mmm>Z_<uuidv7>.jsonl
+	const NEW_FILENAME_TS = /^(\d{2})-(\d{2})-(\d{2})(?:-.+)?__[0-9a-f]{8}\.jsonl$/;
+	const LEGACY_FILENAME_TS = /^(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z_/;
 	const toleranceMs = 5_000;
 
 	let bestMatch: { path: string; score: number } | undefined;
 	try {
-		for (const dirEnt of fs.readdirSync(sessionsRoot, { withFileTypes: true })) {
-			if (!dirEnt.isDirectory()) continue;
-			const dir = path.join(sessionsRoot, dirEnt.name);
-			for (const entry of fs.readdirSync(dir)) {
-				if (!entry.endsWith(".jsonl")) continue;
-				const m = FILENAME_TS.exec(entry);
-				if (!m) continue;
-				const iso = `${m[1]}T${m[2]}:${m[3]}:${m[4]}.${m[5]}Z`;
-				const createdAt = Date.parse(iso);
-				if (!Number.isFinite(createdAt)) continue;
+		const walk = (dir: string): void => {
+			let entries: fs.Dirent[];
+			try {
+				entries = fs.readdirSync(dir, { withFileTypes: true });
+			} catch {
+				return;
+			}
+			for (const ent of entries) {
+				const full = path.join(dir, ent.name);
+				if (ent.isDirectory()) {
+					// Only descend into by-date/ at the cwd root, or recurse one level
+					// into the yyyy-mm-dd/ sub-dirs.
+					if (ent.name === "by-date" || /^\d{4}-\d{2}-\d{2}$/.test(ent.name)) walk(full);
+					continue;
+				}
+				if (!ent.isFile() || !ent.name.endsWith(".jsonl")) continue;
+
+				let createdAt: number | undefined;
+				let dateFromDir: string | undefined;
+				// If we're inside a yyyy-mm-dd directory, the date prefix comes from the parent.
+				const parentName = path.basename(dir);
+				if (/^\d{4}-\d{2}-\d{2}$/.test(parentName)) {
+					dateFromDir = parentName;
+				}
+
+				const newMatch = NEW_FILENAME_TS.exec(ent.name);
+				if (newMatch && dateFromDir) {
+					const iso = `${dateFromDir}T${newMatch[1]}:${newMatch[2]}:${newMatch[3]}.000Z`;
+					createdAt = Date.parse(iso);
+				} else {
+					const legacyMatch = LEGACY_FILENAME_TS.exec(ent.name);
+					if (legacyMatch) {
+						const iso = `${legacyMatch[1]}T${legacyMatch[2]}:${legacyMatch[3]}:${legacyMatch[4]}.${legacyMatch[5]}Z`;
+						createdAt = Date.parse(iso);
+					}
+				}
+
+				if (createdAt === undefined || !Number.isFinite(createdAt)) continue;
 				if (createdAt < startedAt - toleranceMs) continue;
 				if (createdAt > endedAt + toleranceMs) continue;
+
 				const score = Math.abs(createdAt - startedAt);
 				if (!bestMatch || score < bestMatch.score) {
-					bestMatch = { path: path.join(dir, entry), score };
+					bestMatch = { path: full, score };
 				}
 			}
-		}
+		};
+		walk(sessionsRoot);
 	} catch {
 		return undefined;
 	}
@@ -170,11 +193,7 @@ export async function cronCreate(args: string[], storage: SchedulerDbStorage): P
 	}
 
 	const nextRun =
-		parsed.type === "cron"
-			? getNextRun(parsed.schedule)
-			: parsed.nextRunAt
-				? new Date(parsed.nextRunAt)
-				: undefined;
+		parsed.type === "cron" ? getNextRun(parsed.schedule) : parsed.nextRunAt ? new Date(parsed.nextRunAt) : undefined;
 	storage.addTask({
 		name,
 		cron: parsed.schedule,
@@ -183,9 +202,7 @@ export async function cronCreate(args: string[], storage: SchedulerDbStorage): P
 		taskType: type,
 		timeoutMs: timeoutMs ?? (type === "agent" ? 120_000 : 30_000),
 		retry:
-			retryMaxAttempts !== undefined
-				? { maxAttempts: retryMaxAttempts, backoffMs: [1000, 5000, 30000] }
-				: undefined,
+			retryMaxAttempts !== undefined ? { maxAttempts: retryMaxAttempts, backoffMs: [1000, 5000, 30000] } : undefined,
 		skills,
 		preScript,
 		deliver,

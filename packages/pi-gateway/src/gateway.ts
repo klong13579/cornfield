@@ -205,20 +205,36 @@ async function checkPidFile(dataDir: string, pidFile: string): Promise<boolean> 
 // ---------------------------------------------------------------------------
 
 /**
- * Send a message to a DingTalk channel using the stored session webhook.
+ * Send a message to a DingTalk channel.
  *
- * The session must have been established by a previous inbound message
- * (which stores the webhook URL in the session record).
+ * Two modes:
+ * 1. Webhook (no options): uses stored session webhook from a prior inbound message.
+ * 2. OAuth API (with userId or conversationId): obtains an OAuth token from
+ *    DingTalk using the account's appKey/appSecret and sends proactively.
  *
  * Channel format: `dingtalk:<accountId>` (e.g. `dingtalk:hr`, `dingtalk:test`)
  *
  * @returns true on success, false on failure
  */
-export async function sendToChannel(channelArg: string, message: string): Promise<boolean> {
+export async function sendToChannel(
+	channelArg: string,
+	message: string,
+	options?: { userId?: string; conversationId?: string },
+): Promise<boolean> {
 	const parts = channelArg.split(":");
 	const channelId = parts[0]!;
 	const accountId = parts.slice(1).join(":") || "__default__";
 
+	// If target info provided, use OAuth API (proactive send)
+	if (options?.userId || options?.conversationId) {
+		return sendViaOAuth(channelId, accountId, message, options);
+	}
+
+	// Otherwise, try webhook from stored session
+	return sendViaWebhook(channelId, accountId, message);
+}
+
+async function sendViaWebhook(channelId: string, accountId: string, message: string): Promise<boolean> {
 	const dataDir = getDataDir();
 	const store = new SQLiteSessionStore(path.join(dataDir, "sessions.db"));
 
@@ -229,13 +245,13 @@ export async function sendToChannel(channelArg: string, message: string): Promis
 			.sort((a, b) => b.updatedAt - a.updatedAt);
 
 		if (matched.length === 0) {
-			console.error(`No active session with webhook for "${channelArg}".`);
-			console.error("Send a message to the bot first to establish a session.");
+			console.error(`No active session with webhook for "${channelId}:${accountId}".`);
+			console.error("Either send a message to the bot first, or specify --user / --conversation.");
 			return false;
 		}
 
 		const session = matched[0]!;
-		console.log(`Sending to ${channelArg} (conversation: ${session.conversationId})...`);
+		console.log(`Sending to ${channelId}:${accountId} (conversation: ${session.conversationId})...`);
 
 		const res = await fetch(session.sessionWebhook!, {
 			method: "POST",
@@ -258,6 +274,130 @@ export async function sendToChannel(channelArg: string, message: string): Promis
 	} finally {
 		store.close();
 	}
+}
+
+async function getDingTalkToken(appKey: string, appSecret: string): Promise<string | undefined> {
+	try {
+		const res = await fetch("https://api.dingtalk.com/v1.0/oauth2/accessToken", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ appKey, appSecret }),
+		});
+		if (!res.ok) {
+			const err = await res.text();
+			console.error(`Failed to get DingTalk token: ${res.status} ${err}`);
+			return undefined;
+		}
+		const data = (await res.json()) as { accessToken?: string };
+		return data.accessToken;
+	} catch (err) {
+		console.error("Failed to get DingTalk token:", String(err));
+		return undefined;
+	}
+}
+
+async function sendViaOAuth(
+	channelId: string,
+	accountId: string,
+	message: string,
+	options: { userId?: string; conversationId?: string },
+): Promise<boolean> {
+	// Load config to get app credentials
+	const { loadConfig } = await import("./config");
+	const config = await loadConfig();
+	const dtConfig = config.channels.dingtalk as
+		| { accounts?: Record<string, { appKey: string; appSecret: string; robotCode?: string }>; appKey?: string; appSecret?: string; robotCode?: string }
+		| undefined;
+
+	if (!dtConfig) {
+		console.error("DingTalk not configured.");
+		return false;
+	}
+
+	// Resolve account credentials
+	let appKey: string | undefined;
+	let appSecret: string | undefined;
+	let robotCode: string | undefined;
+
+	if (dtConfig.accounts && dtConfig.accounts[accountId]) {
+		const acct = dtConfig.accounts[accountId]!;
+		appKey = acct.appKey;
+		appSecret = acct.appSecret;
+		robotCode = acct.robotCode ?? acct.appKey;
+	} else {
+		appKey = dtConfig.appKey;
+		appSecret = dtConfig.appSecret;
+		robotCode = dtConfig.robotCode ?? dtConfig.appKey;
+	}
+
+	if (!appKey || !appSecret) {
+		console.error(`No credentials found for account "${accountId}".`);
+		return false;
+	}
+
+	// Resolve secret references (e.g. $ALIBABA_API_KEY)
+	if (appSecret.startsWith("$")) {
+		const envVal = Bun.env[appSecret.slice(1)];
+		if (envVal) appSecret = envVal;
+	}
+
+	console.log("Getting DingTalk access token...");
+	const token = await getDingTalkToken(appKey, appSecret);
+	if (!token) return false;
+
+	const msgParam = JSON.stringify({ content: message });
+
+	if (options.userId) {
+		// Send to single chat
+		console.log(`Sending to user "${options.userId}" via ${channelId}:${accountId}...`);
+		const res = await fetch("https://api.dingtalk.com/v1.0/robot/oToMessages/batchSend", {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+				Authorization: `Bearer ${token}`,
+			},
+			body: JSON.stringify({
+				robotCode,
+				userIds: [options.userId],
+				msgKey: "sampleText",
+				msgParam,
+			}),
+		});
+		if (res.ok) {
+			console.log("Message sent.");
+			return true;
+		}
+		const err = await res.text();
+		console.error(`Send failed (${res.status}): ${err}`);
+		return false;
+	}
+
+	if (options.conversationId) {
+		// Send to group
+		console.log(`Sending to conversation "${options.conversationId}"...`);
+		const res = await fetch("https://api.dingtalk.com/v1.0/robot/groupMessages/send", {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+				Authorization: `Bearer ${token}`,
+			},
+			body: JSON.stringify({
+				robotCode,
+				openConversationId: options.conversationId,
+				msgKey: "sampleText",
+				msgParam,
+			}),
+		});
+		if (res.ok) {
+			console.log("Message sent.");
+			return true;
+		}
+		const err = await res.text();
+		console.error(`Send failed (${res.status}): ${err}`);
+		return false;
+	}
+
+	return false;
 }
 
 export class Gateway {
