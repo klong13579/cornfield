@@ -48,6 +48,7 @@ import {
 	type PythonExecutionMessage,
 	sanitizeRehydratedOpenAIResponsesAssistantMessage,
 } from "./messages";
+import { sessionFilePath } from "./session-paths";
 import type { SessionStorage, SessionStorageWriter } from "./session-storage";
 import { FileSessionStorage, MemorySessionStorage } from "./session-storage";
 
@@ -937,29 +938,47 @@ function extractFirstUserPrompt(entries: Array<Record<string, unknown>>): string
  * Reads all session files from the directory and returns them sorted by mtime (newest first).
  * Uses low-level file I/O to efficiently read only the first 4KB of each file
  * to extract the JSON header and first user message without loading entire session logs into memory.
+ *
+ * Walks the new `by-date/<YYYY-MM-DD>/<file>.jsonl` tree plus any legacy flat
+ * `*.jsonl` files left at the sessionDir root by older versions. Both forms
+ * are merged into a single mtime-sorted result.
  */
 async function getSortedSessions(sessionDir: string, storage: SessionStorage): Promise<RecentSessionInfo[]> {
-	try {
-		const files: string[] = storage.listFilesSync(sessionDir, "*.jsonl");
-		const sessions: RecentSessionInfo[] = [];
-		await Promise.all(
-			files.map(async (path: string) => {
-				try {
-					const content = await storage.readTextPrefix(path, 4096);
-					const entries = parseJsonlLenient<Record<string, unknown>>(content);
-					if (entries.length === 0) return;
-					const header = entries[0] as Record<string, unknown>;
-					if (header.type !== "session" || typeof header.id !== "string") return;
-					const mtime = storage.statSync(path).mtimeMs;
-					const firstPrompt = header.title ? undefined : extractFirstUserPrompt(entries);
-					sessions.push(new RecentSessionInfo(path, mtime, header, firstPrompt));
-				} catch {}
-			}),
-		);
-		return sessions.sort((a, b) => b.mtime - a.mtime);
-	} catch {
-		return [];
+	const seen = new Set<string>();
+	const files: string[] = [];
+
+	// New hierarchical layout
+	for (const f of storage.listFilesSyncRecursive(sessionDir, "*.jsonl")) {
+		seen.add(f);
+		files.push(f);
 	}
+
+	// Legacy flat files (older versions) — include only those not already seen
+	// via the recursive walk. Also tolerate flat files pre-dating by-date/.
+	try {
+		for (const flat of storage.listFilesSync(sessionDir, "*.jsonl")) {
+			if (!seen.has(flat)) files.push(flat);
+		}
+	} catch {
+		// sessionDir may not exist
+	}
+
+	const sessions: RecentSessionInfo[] = [];
+	await Promise.all(
+		files.map(async (path: string) => {
+			try {
+				const content = await storage.readTextPrefix(path, 4096);
+				const entries = parseJsonlLenient<Record<string, unknown>>(content);
+				if (entries.length === 0) return;
+				const header = entries[0] as Record<string, unknown>;
+				if (header.type !== "session" || typeof header.id !== "string") return;
+				const mtime = storage.statSync(path).mtimeMs;
+				const firstPrompt = header.title ? undefined : extractFirstUserPrompt(entries);
+				sessions.push(new RecentSessionInfo(path, mtime, header, firstPrompt));
+			} catch {}
+		}),
+	);
+	return sessions.sort((a, b) => b.mtime - a.mtime);
 }
 
 /** Exported for testing */
@@ -1759,11 +1778,13 @@ export class SessionManager {
 		// Create new session ID and header
 		this.#sessionId = createSessionId();
 		const timestamp = new Date().toISOString();
-		const fileTimestamp = timestamp.replace(/[:.]/g, "-");
-		this.#sessionFile = path.join(this.getSessionDir(), `${fileTimestamp}_${this.#sessionId}.jsonl`);
-
+		const sessionDate = new Date();
 		// Update the header with new ID but keep all entries
 		const oldHeader = this.#fileEntries.find(e => e.type === "session") as SessionHeader | undefined;
+		// Reuse the source session's title for the slug when forking so the
+		// new file gets a meaningful name in the by-date tree.
+		const forkTitle = oldHeader?.title ?? this.#sessionName;
+		this.#sessionFile = sessionFilePath(this.getSessionDir(), this.#sessionId, sessionDate, forkTitle);
 		const newHeader: SessionHeader = {
 			type: "session",
 			version: CURRENT_SESSION_VERSION,
@@ -1912,8 +1933,7 @@ export class SessionManager {
 		this.#inMemoryArtifactCounter = 0;
 
 		if (this.persist) {
-			const fileTimestamp = timestamp.replace(/[:.]/g, "-");
-			this.#sessionFile = path.join(this.getSessionDir(), `${fileTimestamp}_${this.#sessionId}.jsonl`);
+			this.#sessionFile = sessionFilePath(this.getSessionDir(), this.#sessionId, new Date());
 			writeTerminalBreadcrumb(this.cwd, this.#sessionFile);
 		}
 		return this.#sessionFile;
@@ -2768,8 +2788,8 @@ export class SessionManager {
 
 		const newSessionId = createSessionId();
 		const timestamp = new Date().toISOString();
-		const fileTimestamp = timestamp.replace(/[:.]/g, "-");
-		const newSessionFile = path.join(this.getSessionDir(), `${fileTimestamp}_${newSessionId}.jsonl`);
+		const branchTitle = this.#sessionName ? `branch-of-${this.#sessionName}` : undefined;
+		const newSessionFile = sessionFilePath(this.getSessionDir(), newSessionId, new Date(), branchTitle);
 
 		const header: SessionHeader = {
 			type: "session",

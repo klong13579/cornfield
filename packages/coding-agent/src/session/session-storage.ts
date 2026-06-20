@@ -25,6 +25,8 @@ export interface SessionStorage {
 	writeTextSync(path: string, content: string): void;
 	statSync(path: string): SessionStorageStat;
 	listFilesSync(dir: string, pattern: string): string[];
+	/** Walk `<root>` recursively and return every file matching `<pattern>`. */
+	listFilesSyncRecursive(root: string, pattern: string): string[];
 
 	exists(path: string): Promise<boolean>;
 	readText(path: string): Promise<string>;
@@ -149,6 +151,28 @@ export class FileSessionStorage implements SessionStorage {
 		} catch {
 			return [];
 		}
+	}
+
+	listFilesSyncRecursive(root: string, pattern: string): string[] {
+		const results: string[] = [];
+		const walk = (dir: string): void => {
+			let entries: fs.Dirent[];
+			try {
+				entries = fs.readdirSync(dir, { withFileTypes: true });
+			} catch {
+				return;
+			}
+			for (const entry of entries) {
+				const full = path.join(dir, entry.name);
+				if (entry.isDirectory()) {
+					walk(full);
+				} else if (entry.isFile() && matchesPattern(entry.name, pattern)) {
+					results.push(full);
+				}
+			}
+		};
+		walk(root);
+		return results;
 	}
 
 	async exists(path: string): Promise<boolean> {
@@ -326,6 +350,21 @@ export class MemorySessionStorage implements SessionStorage {
 			files.push(path);
 		}
 		return files;
+	}
+
+	listFilesSyncRecursive(root: string, pattern: string): string[] {
+		const results: string[] = [];
+		const prefix = root.endsWith("/") ? root : `${root}/`;
+		for (const file of this.#files.keys()) {
+			if (!file.startsWith(prefix)) continue;
+			if (!matchesPattern(path.basename(file), pattern)) continue;
+			// Accept only files under by-date/; flat files at the root are
+			// exposed separately by listFilesSync for backward compat.
+			const rest = file.slice(prefix.length);
+			if (!rest.startsWith("by-date/")) continue;
+			results.push(file);
+		}
+		return results;
 	}
 
 	exists(path: string): Promise<boolean> {

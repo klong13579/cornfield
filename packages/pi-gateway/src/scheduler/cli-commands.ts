@@ -16,7 +16,14 @@ import * as path from "node:path";
 import { appendExecutionLog } from "./execution-log";
 import { executeScheduledCommand } from "./executor";
 import type { SchedulerDbStorage } from "./storage";
-import { formatExecutionRow, formatTaskRow, getGatewayPidPath, getNextRun, isDaemonRunning, parseSchedule } from "./types";
+import {
+	formatExecutionRow,
+	formatTaskRow,
+	getGatewayPidPath,
+	getNextRun,
+	isDaemonRunning,
+	parseSchedule,
+} from "./types";
 
 // ---------------------------------------------------------------------------
 // Agent session path discovery
@@ -38,14 +45,34 @@ import { formatExecutionRow, formatTaskRow, getGatewayPidPath, getNextRun, isDae
  * subdirectories and pick the file whose filename timestamp is closest
  * to (and >= startedAt - tolerance) within the window.
  */
-export function findAgentSessionPath(startedAt: number, endedAt: number): string | undefined {
-	const sessionsRoot = path.join(os.homedir(), ".omp", "agent", "sessions");
+export function findAgentSessionPath(
+	startedAt: number,
+	endedAt: number,
+	sessionsRoot: string = path.join(os.homedir(), ".omp", "agent", "sessions"),
+): string | undefined {
 	if (!fs.existsSync(sessionsRoot)) return undefined;
 
-	// New layout: by-date/<YYYY-MM-DD>/<HHMMSS>[-<slug>]__<8hex>.jsonl
-	// Legacy: <YYYY-MM-DD>T<HH-MM-SS-mmm>Z_<uuidv7>.jsonl
-	const NEW_FILENAME_TS = /^(\d{2})-(\d{2})-(\d{2})(?:-.+)?__[0-9a-f]{8}\.jsonl$/;
-	const LEGACY_FILENAME_TS = /^(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z_/;
+	// The order is mtime-first, filename-second:
+	//   - mtime is the only timezone-agnostic truth. The new layout encodes
+	//     HHMMSS in local time; legacy encodes UTC. Parsing either requires
+	//     knowing the writer's TZ. We don't trust filenames for timestamps.
+	//   - Filename regexes are kept as a SANITY filter: a random `notes.jsonl`
+	//     dropped into the session dir must not be considered a session. They
+	//     are NOT used to compute the timestamp, only to accept or reject.
+	//   - Within [startedAt - 5s, endedAt + 5s], the file with the LATEST
+	//     mtime wins. This handles the common case where the agent task
+	//     creates a new session file (its mtime is in the window and is the
+	//     latest) and also the case where a resumed session gets touched
+	//     during the run (its bumped mtime is the latest).
+	//
+	// Layouts we recognise:
+	//   <root>/<project>/by-date/<YYYY-MM-DD>/<HHMMSS>[-<slug>]__<8hex>.jsonl
+	//   <root>/<project>/<YYYY-MM-DD>T<HH-MM-SS-mmm>Z_<uuidv7>.jsonl   (legacy)
+	//
+	// The walker descends into every non-hidden subdirectory at the root
+	// because the cwd-encoded project subdir name is opaque to the gateway.
+	const SESSION_FILE = /^(\d{6})(?:-[a-z0-9-]+)?__[0-9a-f]{8}\.jsonl$/;
+	const LEGACY_SESSION_FILE = /^(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z_/;
 	const toleranceMs = 5_000;
 
 	let bestMatch: { path: string; score: number } | undefined;
@@ -60,38 +87,30 @@ export function findAgentSessionPath(startedAt: number, endedAt: number): string
 			for (const ent of entries) {
 				const full = path.join(dir, ent.name);
 				if (ent.isDirectory()) {
-					// Only descend into by-date/ at the cwd root, or recurse one level
-					// into the yyyy-mm-dd/ sub-dirs.
-					if (ent.name === "by-date" || /^\d{4}-\d{2}-\d{2}$/.test(ent.name)) walk(full);
+					if (ent.name.startsWith(".")) continue;
+					walk(full);
 					continue;
 				}
 				if (!ent.isFile() || !ent.name.endsWith(".jsonl")) continue;
+				// Accept any file that matches the new or legacy naming
+				// convention. Both encode a creation timestamp; legacy embeds
+				// UTC in the filename, new layout embeds local time. mtime is
+				// the only timezone-agnostic truth.
+				if (!SESSION_FILE.test(ent.name) && !LEGACY_SESSION_FILE.test(ent.name)) continue;
 
-				let createdAt: number | undefined;
-				let dateFromDir: string | undefined;
-				// If we're inside a yyyy-mm-dd directory, the date prefix comes from the parent.
-				const parentName = path.basename(dir);
-				if (/^\d{4}-\d{2}-\d{2}$/.test(parentName)) {
-					dateFromDir = parentName;
+				let mtimeMs: number;
+				try {
+					mtimeMs = fs.statSync(full).mtimeMs;
+				} catch {
+					continue;
 				}
+				if (mtimeMs < startedAt - toleranceMs) continue;
+				if (mtimeMs > endedAt + toleranceMs) continue;
 
-				const newMatch = NEW_FILENAME_TS.exec(ent.name);
-				if (newMatch && dateFromDir) {
-					const iso = `${dateFromDir}T${newMatch[1]}:${newMatch[2]}:${newMatch[3]}.000Z`;
-					createdAt = Date.parse(iso);
-				} else {
-					const legacyMatch = LEGACY_FILENAME_TS.exec(ent.name);
-					if (legacyMatch) {
-						const iso = `${legacyMatch[1]}T${legacyMatch[2]}:${legacyMatch[3]}:${legacyMatch[4]}.${legacyMatch[5]}Z`;
-						createdAt = Date.parse(iso);
-					}
-				}
-
-				if (createdAt === undefined || !Number.isFinite(createdAt)) continue;
-				if (createdAt < startedAt - toleranceMs) continue;
-				if (createdAt > endedAt + toleranceMs) continue;
-
-				const score = Math.abs(createdAt - startedAt);
+				// Prefer the most recent file in the window. The agent session
+				// file is created during the cron run, so the latest mtime in
+				// [startedAt, endedAt] is the match. Smaller score = better.
+				const score = endedAt - mtimeMs;
 				if (!bestMatch || score < bestMatch.score) {
 					bestMatch = { path: full, score };
 				}
