@@ -278,6 +278,145 @@ export async function cronList(storage: SchedulerDbStorage, json: boolean): Prom
 	for (const task of tasks) console.log(formatTaskRow(task));
 }
 
+export async function cronUpdate(args: string[], storage: SchedulerDbStorage): Promise<void> {
+	if (args.length === 0) {
+		console.error(
+			"Usage: cron update <name> [--account <id> | --clear-account] [--deliver <channel> | --clear-deliver] [--deliver-user <id> | --clear-deliver-user] [--timeout-ms <ms>]",
+		);
+		process.exitCode = 1;
+		return;
+	}
+	const name = args[0]!;
+	const task = storage.getTaskByName(name);
+	if (!task) {
+		console.error(`Task "${name}" not found.`);
+		process.exitCode = 1;
+		return;
+	}
+
+	type AccountState = { tag: "none" } | { tag: "set"; value: string } | { tag: "clear" };
+	type OptionalStringState = { tag: "none" } | { tag: "set"; value: string } | { tag: "clear" };
+
+	const updates: Partial<typeof task> = {};
+	let accountState: AccountState = { tag: "none" };
+	let deliverState: OptionalStringState = { tag: "none" };
+	let deliverUserState: OptionalStringState = { tag: "none" };
+	let timeoutMs: number | undefined;
+
+	for (let i = 1; i < args.length; i++) {
+		const a = args[i]!;
+		const next = args[i + 1];
+		if (a === "--account") {
+			if (!next) {
+				console.error("--account requires a value");
+				process.exitCode = 1;
+				return;
+			}
+			if (accountState.tag === "clear") {
+				console.error("Cannot combine --account and --clear-account");
+				process.exitCode = 1;
+				return;
+			}
+			accountState = { tag: "set", value: next };
+			i++;
+		} else if (a === "--clear-account") {
+			if (accountState.tag === "set") {
+				console.error("Cannot combine --account and --clear-account");
+				process.exitCode = 1;
+				return;
+			}
+			accountState = { tag: "clear" };
+		} else if (a === "--deliver") {
+			if (!next) {
+				console.error("--deliver requires a value");
+				process.exitCode = 1;
+				return;
+			}
+			if (deliverState.tag === "clear") {
+				console.error("Cannot combine --deliver and --clear-deliver");
+				process.exitCode = 1;
+				return;
+			}
+			deliverState = { tag: "set", value: next };
+			i++;
+		} else if (a === "--clear-deliver") {
+			if (deliverState.tag === "set") {
+				console.error("Cannot combine --deliver and --clear-deliver");
+				process.exitCode = 1;
+				return;
+			}
+			deliverState = { tag: "clear" };
+		} else if (a === "--deliver-user") {
+			if (!next) {
+				console.error("--deliver-user requires a value");
+				process.exitCode = 1;
+				return;
+			}
+			if (deliverUserState.tag === "clear") {
+				console.error("Cannot combine --deliver-user and --clear-deliver-user");
+				process.exitCode = 1;
+				return;
+			}
+			deliverUserState = { tag: "set", value: next };
+			i++;
+		} else if (a === "--clear-deliver-user") {
+			if (deliverUserState.tag === "set") {
+				console.error("Cannot combine --deliver-user and --clear-deliver-user");
+				process.exitCode = 1;
+				return;
+			}
+			deliverUserState = { tag: "clear" };
+		} else if (a === "--timeout-ms") {
+			if (!next) {
+				console.error("--timeout-ms requires a value");
+				process.exitCode = 1;
+				return;
+			}
+			const v = Number.parseInt(next, 10);
+			if (!Number.isFinite(v) || v <= 0) {
+				console.error(`Invalid --timeout-ms: must be a positive integer (got "${next}")`);
+				process.exitCode = 1;
+				return;
+			}
+			timeoutMs = v;
+			i++;
+		} else {
+			console.error(`Unknown flag: ${a}`);
+			process.exitCode = 1;
+			return;
+		}
+	}
+
+	if (accountState.tag === "set") updates.accountId = accountState.value;
+	else if (accountState.tag === "clear") updates.accountId = undefined;
+	if (deliverState.tag === "set") updates.deliver = deliverState.value;
+	else if (deliverState.tag === "clear") updates.deliver = undefined;
+	if (deliverUserState.tag === "set") updates.deliverUser = deliverUserState.value;
+	else if (deliverUserState.tag === "clear") updates.deliverUser = undefined;
+	if (timeoutMs !== undefined) updates.timeoutMs = timeoutMs;
+
+	if (Object.keys(updates).length === 0) {
+		console.error("No changes specified. Pass at least one of --account, --deliver, --deliver-user, --timeout-ms.");
+		process.exitCode = 1;
+		return;
+	}
+
+	// buildDynamicUpdate treats `undefined` as NULL, so --clear-* becomes
+	// the corresponding column = NULL. account_id/deliver/deliver_user are
+	// already in TASK_UPDATE_FIELDS.
+	storage.updateTask(task.id, updates);
+	const changes: string[] = [];
+	if (accountState.tag === "set") changes.push(`account: ${accountState.value}`);
+	else if (accountState.tag === "clear") changes.push("account: cleared");
+	if (deliverState.tag === "set") changes.push(`deliver: ${deliverState.value}`);
+	else if (deliverState.tag === "clear") changes.push("deliver: cleared");
+	if (deliverUserState.tag === "set") changes.push(`deliver-user: ${deliverUserState.value}`);
+	else if (deliverUserState.tag === "clear") changes.push("deliver-user: cleared");
+	if (timeoutMs !== undefined) changes.push(`timeout-ms: ${timeoutMs}`);
+	console.log(`Task "${name}" updated.`);
+	for (const c of changes) console.log(`  ${c}`);
+}
+
 export async function cronSetStatus(
 	name: string,
 	status: "active" | "disabled",
