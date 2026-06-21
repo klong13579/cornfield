@@ -37,8 +37,20 @@ import { runAgentInit } from "@oh-my-pi/pi-coding-agent/cli/agent-cli";
 import { logger } from "@oh-my-pi/pi-utils";
 import { getConfigPath, getDataDir, getDingTalkConfig, loadConfig } from "./config";
 import { Gateway } from "./gateway";
-import { SchedulerDbStorage, cronCreate, cronDiagnose, cronList, cronLogs, cronReconcile, cronRemove, cronRun, cronSetStatus, cronStatus, cronUpdate, getSchedulerDbPath } from "./scheduler";
-import { SQLiteSessionStore } from "./session-store";
+import {
+	cronCreate,
+	cronDiagnose,
+	cronList,
+	cronLogs,
+	cronReconcile,
+	cronRemove,
+	cronRun,
+	cronSetStatus,
+	cronStatus,
+	cronUpdate,
+	getSchedulerDbPath,
+	SchedulerDbStorage,
+} from "./scheduler";
 import { getServiceStatus, installService, startService, stopService, uninstallService } from "./service-installer";
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -87,15 +99,28 @@ async function cmdStart(_configPath?: string): Promise<void> {
 	}
 
 	// CLI 交互模式
+	const dtConfig = getDingTalkConfig(config);
+	const accounts = dtConfig?.accounts ? Object.keys(dtConfig.accounts) : [];
+	const isMultiAccount = accounts.length > 0;
+
 	console.log("\n✅ Gateway 已启动！");
-	console.log("📝 输入消息直接和 Agent 对话，输入 exit 退出");
+	if (isMultiAccount) {
+		console.log(`📝 多账号模式，可用账号: ${accounts.join(", ")}`);
+		console.log("📝 输入 @账号名 消息 和指定 Agent 对话 (如 @hr 你好)");
+		console.log("📝 输入 /switch 账号名 切换默认账号");
+	} else {
+		console.log("📝 输入消息直接和 Agent 对话");
+	}
+	console.log("📝 输入 exit 退出");
 	console.log("---".repeat(30));
+
+	let defaultAccountId: string | undefined = isMultiAccount ? accounts[0] : undefined;
 
 	const readline = await import("node:readline");
 	const rl = readline.createInterface({
 		input: process.stdin,
 		output: process.stdout,
-		prompt: "> ",
+		prompt: isMultiAccount ? `[${defaultAccountId}] > ` : "> ",
 	});
 
 	rl.prompt();
@@ -111,16 +136,60 @@ async function cmdStart(_configPath?: string): Promise<void> {
 			return;
 		}
 
+		// /switch command: change default account for CLI session
+		if (isMultiAccount && text.startsWith("/switch")) {
+			const target = text.slice(7).trim();
+			if (!target || !accounts.includes(target)) {
+				console.log(`\n可用账号: ${accounts.join(", ")}`);
+			} else {
+				defaultAccountId = target;
+				console.log(`\n已切换到账号: ${target}`);
+				rl.setPrompt(`[${target}] > `);
+			}
+			console.log("---".repeat(30));
+			rl.prompt();
+			return;
+		}
+
+		// Parse @accountId prefix from message
+		let accountId: string | undefined;
+		let message = text;
+		if (isMultiAccount && text.startsWith("@")) {
+			const spaceIdx = text.indexOf(" ");
+			if (spaceIdx > 1) {
+				const parsedId = text.slice(1, spaceIdx);
+				if (accounts.includes(parsedId)) {
+					accountId = parsedId;
+					message = text.slice(spaceIdx + 1).trim();
+				} else {
+					console.log(`\n账号 "${parsedId}" 不存在。可用账号: ${accounts.join(", ")}`);
+					console.log("---".repeat(30));
+					rl.prompt();
+					return;
+				}
+			}
+		}
+
+		// Use default account if no prefix specified in multi-account mode
+		if (isMultiAccount && !accountId) {
+			accountId = defaultAccountId;
+		}
+
+		if (!message) {
+			rl.prompt();
+			return;
+		}
+
 		console.log("\n⏳ 处理中...");
 		try {
-			const result = await gateway.sendDirectMessage(text);
+			const result = await gateway.sendDirectMessage(message, accountId);
 			if (result) {
-				console.log("\n🤖 Agent: " + result);
+				console.log(`\n🤖 Agent: ${result}`);
 			} else {
 				console.log("\n⚠️ 无响应");
 			}
 		} catch (e) {
-			console.log("\n❌ 错误: " + e);
+			console.log(`\n❌ 错误: ${e}`);
 		}
 		console.log("---".repeat(30));
 		rl.prompt();

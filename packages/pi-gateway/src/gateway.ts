@@ -17,18 +17,26 @@ import { AgentBridge, type AgentBridgeOptions } from "./agent-bridge";
 import { DingTalkChannel } from "./channels/dingtalk";
 import { ChannelRegistry } from "./channels/registry";
 import { getDataDir, getDingTalkConfig, getEnabledChannels } from "./config";
+import { findAgentSessionPath } from "./scheduler";
 import { SchedulerEngine } from "./scheduler/engine";
-import { executeScheduledCommand } from "./scheduler/executor";
 import { appendExecutionLog } from "./scheduler/execution-log";
+import { executeScheduledCommand } from "./scheduler/executor";
 import { SchedulerFileStore } from "./scheduler/file-store";
+import { createCronTaskFromMessage } from "./scheduler/from-message";
 import { SchedulerDbStorage } from "./scheduler/storage";
 import type { ScheduledTask } from "./scheduler/types";
 import { DEFAULT_SCHEDULER_CONFIG, getSchedulerDbPath, getSchedulerDir } from "./scheduler/types";
-import { findAgentSessionPath } from "./scheduler";
-import { createCronTaskFromMessage } from "./scheduler/from-message";
 import { type BridgeStat, type QueueStat, SessionManager } from "./session-manager";
 import { SQLiteSessionStore } from "./session-store";
-import type { ChannelHealth, DingtalkAccountConfig, GatewayConfig, InboundMessage, MessageContent, OutboundMessage } from "./types";
+import type {
+	ChannelHealth,
+	DingtalkAccountConfig,
+	GatewayConfig,
+	InboundMessage,
+	MessageContent,
+	OutboundMessage,
+	SessionRecord,
+} from "./types";
 
 export function createAccountBridgeOptions(
 	agentConfig: GatewayConfig["agent"],
@@ -58,7 +66,7 @@ export async function stopGatewayDaemon(): Promise<boolean> {
 	try {
 		const pidText = await fs.readFile(pidPath, "utf-8");
 		const pid = parseInt(pidText.trim(), 10);
-		if (isNaN(pid) || pid <= 0) {
+		if (Number.isNaN(pid) || pid <= 0) {
 			return false;
 		}
 
@@ -105,7 +113,7 @@ async function readPidFile(pidPath: string): Promise<number | null> {
 	try {
 		const text = await fs.readFile(pidPath, "utf-8");
 		const pid = parseInt(text.trim(), 10);
-		if (!isNaN(pid) && pid > 0) return pid;
+		if (!Number.isNaN(pid) && pid > 0) return pid;
 	} catch {}
 	return null;
 }
@@ -121,7 +129,7 @@ async function killOrphanRpcProcesses(): Promise<void> {
 			if (parts.length < 3) continue;
 			const pid = parseInt(parts[0], 10);
 			const ppid = parseInt(parts[1], 10);
-			if (!isNaN(pid) && !isNaN(ppid) && ppid === 1 && parts[2] === "omp") {
+			if (!Number.isNaN(pid) && !Number.isNaN(ppid) && ppid === 1 && parts[2] === "omp") {
 				process.kill(pid, "SIGKILL");
 			}
 		}
@@ -171,7 +179,7 @@ export async function getGatewayStatus(config?: GatewayConfig): Promise<GatewayD
 	try {
 		const pidText = await fs.readFile(pidPath, "utf-8");
 		const pid = parseInt(pidText.trim(), 10);
-		if (isNaN(pid) || pid <= 0) {
+		if (Number.isNaN(pid) || pid <= 0) {
 			await fs.unlink(pidPath).catch(() => {});
 			return { running: false, ...cachedStatus };
 		}
@@ -201,7 +209,7 @@ async function checkPidFile(dataDir: string, pidFile: string): Promise<boolean> 
 	try {
 		const pidText = await fs.readFile(path.join(dataDir, pidFile), "utf-8");
 		const pid = parseInt(pidText.trim(), 10);
-		if (!isNaN(pid) && pid > 0) {
+		if (!Number.isNaN(pid) && pid > 0) {
 			try {
 				process.kill(pid, 0); // signal 0 = existence check only
 				return true;
@@ -321,7 +329,12 @@ async function sendViaOAuth(
 	const { loadConfig } = await import("./config");
 	const config = await loadConfig();
 	const dtConfig = config.channels.dingtalk as
-		| { accounts?: Record<string, { appKey: string; appSecret: string; robotCode?: string }>; appKey?: string; appSecret?: string; robotCode?: string }
+		| {
+				accounts?: Record<string, { appKey: string; appSecret: string; robotCode?: string }>;
+				appKey?: string;
+				appSecret?: string;
+				robotCode?: string;
+		  }
 		| undefined;
 
 	if (!dtConfig) {
@@ -334,7 +347,7 @@ async function sendViaOAuth(
 	let appSecret: string | undefined;
 	let robotCode: string | undefined;
 
-	if (dtConfig.accounts && dtConfig.accounts[accountId]) {
+	if (dtConfig.accounts?.[accountId]) {
 		const acct = dtConfig.accounts[accountId]!;
 		appKey = acct.appKey;
 		appSecret = acct.appSecret;
@@ -448,7 +461,7 @@ export class Gateway {
 		if (existingPid) {
 			try {
 				process.kill(existingPid, 0);
-				logger.error("Gateway already running (PID " + existingPid + ")");
+				logger.error(`Gateway already running (PID ${existingPid})`);
 				return;
 			} catch {
 				// Stale PID file — will overwrite
@@ -567,11 +580,7 @@ export class Gateway {
 		this.#registry.register(channel, rawConfig);
 	}
 
-	async #addAccount(
-		accountId: string,
-		account: DingtalkAccountConfig,
-		config: GatewayConfig,
-	): Promise<void> {
+	async #addAccount(accountId: string, account: DingtalkAccountConfig, config: GatewayConfig): Promise<void> {
 		const rawConfig = config.channels.dingtalk;
 		const channel = new DingTalkChannel();
 		channel.setAccountId(accountId);
@@ -742,35 +751,72 @@ export class Gateway {
 
 	/**
 	 * Direct message for CLI interactive mode.
+	 *
+	 * In single-account mode, routes to the default bridge.
+	 * In multi-account mode, requires accountId to select the
+	 * per-account bridge. If accountId is omitted in multi-account
+	 * mode, returns a help string listing available accounts.
 	 */
-	async sendDirectMessage(text: string): Promise<string | null> {
-		if (!this.#bridge.isRunning) {
+	async sendDirectMessage(text: string, accountId?: string): Promise<string | null> {
+		const bridge = this.#resolveDirectBridge(accountId);
+		if (!bridge) {
+			if (this.#accountBridges.size > 0) {
+				const ids = Array.from(this.#accountBridges.keys()).join(", ");
+				return `请指定账号。可用账号: ${ids}\n用法: @账号名 消息内容 (如 @hr 你好)`;
+			}
 			logger.warn("Agent bridge not running");
 			return null;
 		}
+		if (!bridge.isRunning) {
+			logger.warn("Agent bridge not running", { accountId: accountId ?? "__default__" });
+			return null;
+		}
 
-		const mockSession = {
-			id: "cli-session",
+		const resolvedAccountId = accountId ?? "__default__";
+		const agentDir = this.#accountAgentDirs.get(resolvedAccountId) ?? undefined;
+		const conversationId = `cli-conv-${resolvedAccountId}`;
+		const sessionPath = agentDir ? buildAgentSessionPath(agentDir, conversationId) : undefined;
+
+		const mockSession: SessionRecord = {
+			id: `cli-session-${resolvedAccountId}`,
 			channelId: "cli",
-			accountId: "__default__",
+			accountId: resolvedAccountId,
 			userId: "cli-user",
-			conversationId: "cli-conv",
+			conversationId,
 			createdAt: Date.now(),
 			updatedAt: Date.now(),
-			status: "active" as const,
+			ompSessionPath: sessionPath,
+			status: "active",
 		};
 
-		const mockMessage = {
+		const mockMessage: InboundMessage = {
 			channelId: "cli",
 			userId: "cli-user",
 			userName: "CLI User",
-			conversationId: "cli-conv",
+			conversationId,
 			isGroup: false,
-			content: { type: "text" as const, text },
+			content: { type: "text", text },
 			timestamp: new Date(),
 		};
 
-		return await this.#bridge.forward(mockMessage, mockSession);
+		return await bridge.forward(mockMessage, mockSession);
+	}
+
+	/**
+	 * Resolve the correct AgentBridge for a direct (CLI) message.
+	 *
+	 * - accountId provided and matches an account bridge: return it.
+	 * - No accountId, default bridge running: return default (single-account mode).
+	 * - No accountId, multi-account mode: return null (user must specify).
+	 */
+	#resolveDirectBridge(accountId?: string): AgentBridge | null {
+		if (accountId && this.#accountBridges.has(accountId)) {
+			return this.#accountBridges.get(accountId)!;
+		}
+		if (!accountId && this.#accountBridges.size === 0 && this.#bridge.isRunning) {
+			return this.#bridge;
+		}
+		return null;
 	}
 
 	async #writeStatusFile(): Promise<void> {
@@ -931,8 +977,7 @@ export class Gateway {
 		const durationMs = endedAt - startedAt;
 
 		// Link agent session trace for agent tasks
-		const agentSessionPath =
-			task.taskType === "agent" ? findAgentSessionPath(startedAt, endedAt) : undefined;
+		const agentSessionPath = task.taskType === "agent" ? findAgentSessionPath(startedAt, endedAt) : undefined;
 
 		// Record the execution result with full metadata
 		this.#schedulerStorage.updateExecution(executionId, {
@@ -1069,7 +1114,11 @@ export class Gateway {
 					if (session.ompSessionPath) {
 						await this.#migrateSessionPath(session.ompSessionPath, sessionPath);
 					}
-					await this.#store.updateSession(session.id, { ompSessionPath: sessionPath, updatedAt: now, sessionWebhook: msg.sessionWebhook });
+					await this.#store.updateSession(session.id, {
+						ompSessionPath: sessionPath,
+						updatedAt: now,
+						sessionWebhook: msg.sessionWebhook,
+					});
 					session = { ...session, ompSessionPath: sessionPath, sessionWebhook: msg.sessionWebhook };
 				} else {
 					// Always update webhook so it stays fresh
