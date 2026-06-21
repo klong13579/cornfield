@@ -21,7 +21,6 @@
 | `prompt-includes.json`               | RUNTIME (injection manifest)     | read at startup                                                      |
 | `.omp/config.yml`                    | RUNTIME (model/role/theme)       | read at startup (hard dependency)                                    |
 | `.omp/SYSTEM.md`                    | RUNTIME (gateway system prompt)  | overrides OMP built-in prompt — gateway agent baseline                |
-| `.agent/SYSTEM.md`                   | RUNTIME (deprecated)             | kept empty; use `.omp/SYSTEM.md` for system prompt override           |
 | `.omp/skills/<name>.md`              | BEHAVIOR (on-demand)             | via `skill://<name>` URI                                             |
 | `knowledge/faq.md`                   | CONTEXT (on-demand)              | read by agent (user-created)                                         |
 | `knowledge/handbook/*`               | CONTEXT (on-demand)              | read by agent (user-created)                                         |
@@ -39,6 +38,7 @@
 - `prompt-includes.json` — change which files are injected as always-on.
 - `.omp/config.yml` — change `modelRoles.default` to switch the active model.
 - `.omp/SYSTEM.md` — gateway agent system prompt baseline; edit to customize behavior. Leave empty to fall back to OMP's built-in prompt.
+- `.agent/SYSTEM.md` (deprecated) — no longer created by skeleton. Existing files with default comment content are auto-removed by `ensureAgentDir`.
 
 ## Global hard constraints
 

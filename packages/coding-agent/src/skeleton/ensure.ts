@@ -5,6 +5,10 @@
  *   - `mission.md` missing → full creation (directories + content files + .gitkeep stubs).
  *   - `mission.md` present → additive update: only fill in files that are missing.
  *
+ * Post-creation repair:
+ *   - Legacy `.agent/SYSTEM.md` (deprecated path) is detected and removed.
+ *   - `.omp/SYSTEM.md` is force-created from the skeleton template if missing.
+ *
  * I/O failures bubble to the caller (gateway install / omp agent init) which decides
  * whether to abort or retry.
  */
@@ -13,6 +17,13 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { SKELETON_FILES, type SkeletonFile } from "./assets";
 import { SKELETON_DIRS } from "./dirs";
+
+/**
+ * Text prefix that identifies a legacy `.agent/SYSTEM.md` deployed by an older skeleton.
+ * These files contain only comments telling the user to "leave empty" — no actionable instructions.
+ * Matching files are safe to delete; customized files (non-matching) are preserved.
+ */
+const LEGACY_AGENT_SYSTEM_MD_PREFIX = "# 自定义系统提示词（可选）";
 
 /**
  * Ensure `<agentDir>/.gitkeep` exists inside each skeleton directory so git tracks
@@ -55,6 +66,38 @@ async function writeSkeletonFiles(agentDir: string, files: readonly SkeletonFile
 }
 
 /**
+ * Remove legacy `.agent/SYSTEM.md` if it matches the deprecated skeleton comment template.
+ * Customized files (non-matching content) are preserved.
+ */
+async function removeLegacyAgentSystemMd(agentDir: string): Promise<void> {
+	const filePath = path.join(agentDir, ".agent", "SYSTEM.md");
+	try {
+		const content = await Bun.file(filePath).text();
+		if (content.startsWith(LEGACY_AGENT_SYSTEM_MD_PREFIX)) {
+			await fs.rm(filePath);
+		}
+	} catch {
+		// ENOENT → no file to clean up; fine
+	}
+}
+
+/**
+ * Ensure `.omp/SYSTEM.md` exists, creating it from the skeleton template if missing.
+ */
+async function ensureOmpSystemMd(agentDir: string): Promise<void> {
+	const ompSystemMdEntry = SKELETON_FILES.find(f => f.relPath === ".omp/SYSTEM.md");
+	if (!ompSystemMdEntry) return;
+
+	const targetPath = path.join(agentDir, ".omp/SYSTEM.md");
+	try {
+		await fs.access(targetPath);
+	} catch {
+		await fs.mkdir(path.dirname(targetPath), { recursive: true });
+		await fs.writeFile(targetPath, ompSystemMdEntry.content, "utf-8");
+	}
+}
+
+/**
  * Ensure `<agentDir>` exists with the full skeleton layout.
  *
  * @returns `true` if a fresh full creation was performed (no prior `mission.md`),
@@ -78,6 +121,10 @@ export async function ensureAgentDir(agentDir: string): Promise<boolean> {
 
 	await writeGitkeepStubs(agentDir);
 	await writeSkeletonFiles(agentDir, SKELETON_FILES);
+
+	// Post-creation repair: clean up legacy trap file, ensure gateway prompt exists
+	await removeLegacyAgentSystemMd(agentDir);
+	await ensureOmpSystemMd(agentDir);
 
 	return !missionExists;
 }

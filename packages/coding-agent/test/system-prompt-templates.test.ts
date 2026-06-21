@@ -3,8 +3,8 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { type AgentTool, INTENT_FIELD } from "@oh-my-pi/pi-agent-core";
-import { countTokens } from "@oh-my-pi/pi-natives";
 import { buildSystemPrompt, buildSystemPromptToolMetadata } from "@oh-my-pi/pi-coding-agent/system-prompt";
+import { countTokens } from "@oh-my-pi/pi-natives";
 import { prompt } from "@oh-my-pi/pi-utils";
 import { Type } from "@sinclair/typebox";
 import Handlebars from "handlebars";
@@ -120,51 +120,50 @@ describe("system Handlebars prompt templates", () => {
 		}
 	});
 
-	test("custom-system-prompt renders project section for context and git combinations", async () => {
+	test("custom-system-prompt renders context, skills, tools, and structural sections", async () => {
 		const templatePath = path.join(systemPromptsDir, "custom-system-prompt.md");
 		const template = await Bun.file(templatePath).text();
 
-		const both = prompt.render(template, {
+		const rendered = prompt.render(template, {
 			...baseRenderContext,
 			contextFiles: [{ path: "a.txt", content: "A" }],
-			git: { ...baseGitContext, isRepo: true },
+			noYieldRules: ["- MUST NOT use console.log"],
+			skills: [{ name: "test-skill", description: "A test skill" }],
 		});
-		expect(both).toContain("<project>");
-		expect(both).toContain("## Context");
-		expect(both).toContain("## Version Control");
 
-		const contextOnly = prompt.render(template, {
-			...baseRenderContext,
-			contextFiles: [{ path: "a.txt", content: "A" }],
-			git: { isRepo: false },
-		});
-		expect(contextOnly).toContain("<project>");
-		expect(contextOnly).toContain("## Context");
-		expect(contextOnly).not.toContain("## Version Control");
+		// Structural sections
+		expect(rendered).toContain("<hard-constraints>");
+		expect(rendered).toContain("MUST NOT use console.log");
+		expect(rendered).toContain("<instruction-priority>");
+		expect(rendered).toContain("<failure-mode-policy>");
+		expect(rendered).toContain("<pre-yield-check>");
+		expect(rendered).toContain("<communication>");
+		expect(rendered).toContain("<output-contract>");
+		expect(rendered).toContain("<default-follow-through>");
+		expect(rendered).toContain("<behavior>");
+		expect(rendered).toContain("<stakes>");
+		expect(rendered).toContain("<contract>");
+		expect(rendered).toContain("<completeness-contract>");
+		expect(rendered).toContain("<context>");
+		expect(rendered).toContain("<critical>");
+		expect(rendered).toContain('action: "whoRu"');
+		expect(rendered).toContain('action: "whoisme"');
 
-		const gitOnly = prompt.render(template, {
-			...baseRenderContext,
-			contextFiles: [],
-			git: {
-				isRepo: true,
-				currentBranch: "feature/tests",
-				mainBranch: "main",
-				status: "clean",
-				commits: "abc123 test commit",
-			},
-		});
-		expect(gitOnly).toContain("<project>");
-		expect(gitOnly).not.toContain("## Context");
-		expect(gitOnly).toContain("## Version Control");
+		// Context files rendered inside <context>
+		expect(rendered).toContain('<file path="a.txt">');
 
-		const neither = prompt.render(template, {
-			...baseRenderContext,
-			contextFiles: [],
-			git: { isRepo: false },
-		});
-		expect(neither).not.toContain("<project>");
-		expect(neither).not.toContain("## Context");
-		expect(neither).not.toContain("## Version Control");
+		// Skills section
+		expect(rendered).toContain("<skills>");
+		expect(rendered).toContain("test-skill");
+
+		// Tools rendered
+		expect(rendered).toContain("Tools:");
+
+		// No version control (coding-specific, removed from custom template)
+		expect(rendered).not.toContain("## Version Control");
+
+		// Custom prompt body rendered
+		expect(rendered).toContain("Custom prompt body");
 	});
 
 	test("system-prompt conditionally renders inspect_image guidance", async () => {
