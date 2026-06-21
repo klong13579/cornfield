@@ -33,8 +33,9 @@ const REQUIRED_FILES = [
 	".gitignore",
 	// runtime
 	".omp/config.yml",
+	".omp/SYSTEM.md",
 	".agent/SYSTEM.md",
-	// .gitkeep stubs so git tracks otherwise-empty dirs
+	// .agent/SYSTEM.md is deprecated (kept empty); .omp/SYSTEM.md is the override location
 	".omp/skills/.gitkeep",
 	".agent/prompts/.gitkeep",
 	".agent/rules/.gitkeep",
@@ -145,10 +146,18 @@ describe("skeleton", () => {
 		]);
 	});
 
-	test(".agent/SYSTEM.md documents system prompt override", async () => {
+	test(".omp/SYSTEM.md contains gateway agent system prompt baseline", async () => {
+		await ensureAgentDir(tmpDir);
+		const content = await Bun.file(path.join(tmpDir, ".omp/SYSTEM.md")).text();
+		expect(content).toContain("Gateway Agent");
+		expect(content).toContain("工具纪律");
+		expect(content).toContain("安全与授权");
+	});
+
+	test(".agent/SYSTEM.md is empty (deprecated)", async () => {
 		await ensureAgentDir(tmpDir);
 		const content = await Bun.file(path.join(tmpDir, ".agent/SYSTEM.md")).text();
-		expect(content).toContain("系统提示词");
+		expect(content.trim()).toBe("");
 	});
 
 	test(".omp/config.yml contains modelRoles default and theme", async () => {

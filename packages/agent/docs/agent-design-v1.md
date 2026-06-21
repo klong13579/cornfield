@@ -48,12 +48,13 @@
 │
 ├── .omp/
 │   ├── config.yml                     ← [RUNTIME] OMP 配置（modelRoles / 工具 / 主题）
+│   ├── SYSTEM.md                      ← [RUNTIME] 覆盖 OMP 内置 system prompt（gateway agent 基线）
 │   ├── evolution/                     ← [RUNTIME] Evolution 数据（gitignored）
 │   └── skills/                        ← [BEHAVIOR] 项目级 skills（on-demand，OMP 原生路径）
 │       └── <skill-name>.md
 │
 ├── .agent/                            ← [auxiliary] agents provider 加载路径
-│   ├── SYSTEM.md                      ← [RUNTIME] 覆盖 OMP 内置 system prompt（默认保留，按需编辑）
+│   ├── SYSTEM.md                      ← [RUNTIME] 已弃用（保留空文件）；system prompt 覆盖移至 .omp/SYSTEM.md
 │   ├── prompts/                       ← [BEHAVIOR/可选] 可复用 prompt 模板
 │   └── rules/                         ← [CONSTRAINTS/可选] 行为规则
 │
@@ -125,11 +126,11 @@ Agent 进程启动 (cwd = agentDir)
   │         ├── TODO.md
   │         └── knowledge/external-workspaces.md
   │
-  ├── 5. OMP 扫描 .agent/
+  ├── 5. OMP 扫描 .agent/ + .omp/SYSTEM.md
+  │     ├── .omp/SYSTEM.md → 覆盖 OMP 内置 system prompt（gateway agent 基线）
   │     ├── skills/        → 注册到 omp skill 系统
   │     ├── prompts/       → 注册到 omp prompt 系统
-  │     ├── rules/         → 行为规则
-  │     └── SYSTEM.md      → 覆盖 OMP 内置 system prompt
+  │     └── rules/         → 行为规则
   │
   ├── 6. Cron 引擎扫 cron/tasks/*.json5
   │     └── 注册定时任务
@@ -176,7 +177,8 @@ Agent 进程启动 (cwd = agentDir)
 | `.omp/config.yml` | skeleton | 默认 modelRoles |
 | `.omp/evolution/` | 运行时 | Evolution 数据（gitignored） |
 | `.omp/skills/` | 用户 | on-demand 技能 |
-| `.agent/SYSTEM.md` | skeleton | 覆盖 OMP 内置 system prompt（默认保留） |
+| `.omp/SYSTEM.md` | skeleton | 覆盖 OMP 内置 system prompt（gateway agent 基线） |
+| `.agent/SYSTEM.md` | skeleton | 已弃用（保留空文件）；覆盖移至 `.omp/SYSTEM.md` |
 | `.agent/prompts/` | 用户 | 可复用 prompt 模板 |
 | `.agent/rules/` | 用户 | 可选行为规则 |
 | `knowledge/external-workspaces.md` | **skeleton（手动）** | 外部数据源映射 |

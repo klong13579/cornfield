@@ -6,12 +6,12 @@
  *
  * Asset layout mirrors the agentDir layout per `packages/agent/docs/agent-design-v1.md` §2:
  *   - 5 always-on files at root: AGENTS.md, mission.md, TOOLS.md, TODO.md, knowledge/external-workspaces.md
- *   - runtime files: prompt-includes.json, .gitignore, .omp/config.yml, .agent/SYSTEM.md
+ *   - runtime files: prompt-includes.json, .gitignore, .omp/config.yml, .omp/SYSTEM.md, .agent/SYSTEM.md
  */
-
-import systemPrompt from "./assets/.agent/SYSTEM.md" with { type: "text" };
+import agentSystemPrompt from "./assets/.agent/SYSTEM.md" with { type: "text" };
 import gitignore from "./assets/.gitignore" with { type: "text" };
 import ompConfig from "./assets/.omp/config.yml" with { type: "text" };
+import ompSystemPrompt from "./assets/.omp/SYSTEM.md" with { type: "text" };
 import agentsManifest from "./assets/AGENTS.md" with { type: "text" };
 import externalWorkspaces from "./assets/knowledge/external-workspaces.md" with { type: "text" };
 import mission from "./assets/mission.md" with { type: "text" };
@@ -36,6 +36,7 @@ export const SKELETON_FILES: readonly SkeletonFile[] = [
 	{ relPath: "prompt-includes.json", content: promptIncludes },
 	{ relPath: ".gitignore", content: gitignore },
 	{ relPath: ".omp/config.yml", content: ompConfig },
-	{ relPath: ".agent/SYSTEM.md", content: systemPrompt },
+	{ relPath: ".omp/SYSTEM.md", content: ompSystemPrompt },
+	{ relPath: ".agent/SYSTEM.md", content: agentSystemPrompt },
 	{ relPath: "knowledge/external-workspaces.md", content: externalWorkspaces },
 ] as const;

@@ -20,7 +20,8 @@
 | `knowledge/external-workspaces.md`   | CONTEXT (data sources)           | always-on                                                            |
 | `prompt-includes.json`               | RUNTIME (injection manifest)     | read at startup                                                      |
 | `.omp/config.yml`                    | RUNTIME (model/role/theme)       | read at startup (hard dependency)                                    |
-| `.agent/SYSTEM.md`                   | RUNTIME (override system prompt) | optional — empty file uses OMP's built-in prompt                     |
+| `.omp/SYSTEM.md`                    | RUNTIME (gateway system prompt)  | overrides OMP built-in prompt — gateway agent baseline                |
+| `.agent/SYSTEM.md`                   | RUNTIME (deprecated)             | kept empty; use `.omp/SYSTEM.md` for system prompt override           |
 | `.omp/skills/<name>.md`              | BEHAVIOR (on-demand)             | via `skill://<name>` URI                                             |
 | `knowledge/faq.md`                   | CONTEXT (on-demand)              | read by agent (user-created)                                         |
 | `knowledge/handbook/*`               | CONTEXT (on-demand)              | read by agent (user-created)                                         |
@@ -37,7 +38,7 @@
 - `TODO.md` — track the current task; updated by the agent as work progresses.
 - `prompt-includes.json` — change which files are injected as always-on.
 - `.omp/config.yml` — change `modelRoles.default` to switch the active model.
-- `.agent/SYSTEM.md` — leave empty (or delete) to use OMP's built-in system prompt.
+- `.omp/SYSTEM.md` — gateway agent system prompt baseline; edit to customize behavior. Leave empty to fall back to OMP's built-in prompt.
 
 ## Global hard constraints
 

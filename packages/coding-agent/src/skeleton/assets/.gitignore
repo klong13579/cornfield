@@ -1,6 +1,8 @@
 sessions/
 cron/logs/
 .omp/evolution/
-.omp/
+.omp/*
+!.omp/config.yml
+!.omp/SYSTEM.md
 *.log
 *.bak
