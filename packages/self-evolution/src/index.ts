@@ -9,7 +9,7 @@ import * as path from "node:path";
 import { Pipeline } from "@oh-my-pi/cognitive-coordination/assembler";
 import { validateSkill } from "@oh-my-pi/cognitive-coordination/sandbox";
 import type { ExtensionAPI, ExtensionFactory } from "@oh-my-pi/pi-coding-agent/extensibility/extensions";
-import { getNextRun, getSchedulerDbPath, SchedulerDbStorage } from "@oh-my-pi/pi-gateway";
+
 import { getAgentDir, getSessionsDir, isEnoent, logger } from "@oh-my-pi/pi-utils";
 import { isSkillEligibleForInjection } from "./benefit-admission";
 import { refreshBenefitAdmissionState } from "./benefit-admission-refresh";
@@ -172,8 +172,7 @@ export const createSelfEvolutionExtension: ExtensionFactory = api => {
 	api.registerFlag("self-evolution-project-store", {
 		type: "boolean",
 		default: true,
-		description:
-			"Per-project store (default): <cwd>/.omp/evolution/memory, evolution.db, skills",
+		description: "Per-project store (default): <cwd>/.omp/evolution/memory, evolution.db, skills",
 	});
 	api.registerFlag("self-evolution-regression-replay", {
 		type: "string",
@@ -329,74 +328,6 @@ export const createSelfEvolutionExtension: ExtensionFactory = api => {
 		}
 
 		memoryDb = evolutionDb;
-
-		// Auto-register daily audit scheduled task if not present
-		try {
-			const schedulerStorage = new SchedulerDbStorage(getSchedulerDbPath());
-			const existing = schedulerStorage.getTaskByName("evolution-audit");
-			if (!existing) {
-				const cron = "0 9 * * *"; // Daily at 9 AM
-				const nextRun = getNextRun(cron);
-				schedulerStorage.addTask({
-					name: "evolution-audit",
-					description: "Daily self-evolution health audit",
-					cron,
-					command:
-						"Analyze the self-evolution database at ./.omp/evolution/evolution.db. " +
-						"Query the episodes, skills, effectiveness, episode_intents, workflow_patterns, and conventions tables to assess the health of the learning system. " +
-						"Calculate key metrics: episode count, skill extraction rate, average success rate, error rate, intent distribution, and convention coverage. " +
-						"Identify data quality issues (e.g., low skill extraction rate, poor episode success rate, stale conventions, workflow pattern noise). " +
-						"Suggest concrete, actionable improvements. Report findings in a concise summary.",
-					scheduleType: "cron",
-					taskType: "agent",
-					timeoutMs: 300_000,
-					status: "active",
-					createdAt: Date.now(),
-					updatedAt: Date.now(),
-					nextRunAt: nextRun ? nextRun.getTime() : undefined,
-					runCount: 0,
-					consecutiveFailures: 0,
-				});
-			}
-			schedulerStorage.close();
-		} catch {
-			// Scheduler DB may not be available; ignore
-		}
-
-		// Auto-register fit evaluation scheduled task (every 3 days at 10 AM)
-		try {
-			const schedulerStorage = new SchedulerDbStorage(getSchedulerDbPath());
-			const existing = schedulerStorage.getTaskByName("evolution-fit");
-			if (!existing) {
-				const cron = "0 10 */3 * *"; // Every 3 days at 10 AM
-				const nextRun = getNextRun(cron);
-				schedulerStorage.addTask({
-					name: "evolution-fit",
-					description: "Agent '懂我程度' fit evaluation",
-					cron,
-					command:
-						"Run the '懂我程度' (agent understanding me) fit evaluation. " +
-						"Execute each test prompt from the fit-test-tasks dataset (20 prompts across 5 dimensions: memory, thinking, style, prediction, history). " +
-						"For each prompt, respond naturally as you would in a real session. " +
-						"After responding to all prompts, run '/evolution-fit' to generate the score report. " +
-						"The report should show total score out of 100, per-dimension scores, trend vs. last evaluation, and improvement suggestions. " +
-						"Output the report directly — no preamble, no explanation.",
-					scheduleType: "cron",
-					taskType: "agent",
-					timeoutMs: 600_000,
-					status: "active",
-					createdAt: Date.now(),
-					updatedAt: Date.now(),
-					nextRunAt: nextRun ? nextRun.getTime() : undefined,
-					runCount: 0,
-					consecutiveFailures: 0,
-				});
-				logger.debug("Auto-registered evolution-fit scheduled task");
-			}
-			schedulerStorage.close();
-		} catch {
-			// Scheduler DB may not be available; ignore
-		}
 	}
 
 	async function _retrieveRelevantSkills(
