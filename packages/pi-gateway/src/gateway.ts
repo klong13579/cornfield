@@ -28,7 +28,7 @@ import { findAgentSessionPath } from "./scheduler";
 import { createCronTaskFromMessage } from "./scheduler/from-message";
 import { type BridgeStat, type QueueStat, SessionManager } from "./session-manager";
 import { SQLiteSessionStore } from "./session-store";
-import type { DingtalkAccountConfig, GatewayConfig, InboundMessage, MessageContent, OutboundMessage } from "./types";
+import type { ChannelHealth, DingtalkAccountConfig, GatewayConfig, InboundMessage, MessageContent, OutboundMessage } from "./types";
 
 export function createAccountBridgeOptions(
 	agentConfig: GatewayConfig["agent"],
@@ -43,8 +43,8 @@ export function createAccountBridgeOptions(
 	};
 }
 
-const PID_FILE = "gateway.pid";
-const STATUS_FILE = "gateway.status.json";
+export const PID_FILE = "gateway.pid";
+export const STATUS_FILE = "gateway.status.json";
 
 /**
  * Stop the running gateway daemon by PID file.
@@ -135,8 +135,22 @@ export interface GatewayDaemonStatus {
 	pid?: number;
 	startedAt?: string;
 	stalePidFile?: boolean;
+	/** Epoch ms when the status file was last written (staleness check for doctor). */
+	statusWrittenAt?: number;
 	channels?: Array<{ id: string; name: string; connected: boolean }>;
-	accounts?: Array<{ accountId: string; channelConnected: boolean; bridgeRunning: boolean; agentDir?: string; bridgeState?: string }>;
+	accounts?: Array<{
+		accountId: string;
+		channelConnected: boolean;
+		bridgeRunning: boolean;
+		agentDir?: string;
+		bridgeState?: string;
+		/** Deep channel health, present when the channel exposes getHealth(). */
+		channelHealth?: ChannelHealth;
+	}>;
+	/** Per-account agent-bridge snapshots (circuit/crash/lifecycle). */
+	bridges?: BridgeStat[];
+	/** Per-account inbound queue depth/age. */
+	queues?: QueueStat[];
 	scheduler?: { running: boolean; taskCount: number };
 }
 
@@ -766,8 +780,11 @@ export class Gateway {
 			const status = await this.getStatus();
 			const data = JSON.stringify(
 				{
+					statusWrittenAt: Date.now(),
 					channels: status.channels,
 					accounts: status.accounts,
+					bridges: status.bridges,
+					queues: status.queues,
 					scheduler: status.scheduler,
 				},
 				null,
@@ -782,7 +799,14 @@ export class Gateway {
 	async getStatus(): Promise<{
 		running: boolean;
 		channels: Array<{ id: string; name: string; connected: boolean }>;
-		accounts: Array<{ accountId: string; channelConnected: boolean; bridgeRunning: boolean; agentDir?: string; bridgeState?: string }>;
+		accounts: Array<{
+			accountId: string;
+			channelConnected: boolean;
+			bridgeRunning: boolean;
+			agentDir?: string;
+			bridgeState?: string;
+			channelHealth?: ChannelHealth;
+		}>;
 		sessions: number;
 		queues: QueueStat[];
 		bridges: BridgeStat[];
@@ -808,6 +832,7 @@ export class Gateway {
 				bridgeRunning: bridge.isRunning,
 				agentDir: this.#accountAgentDirs.get(accountId),
 				bridgeState: bridgeStatsByAccount.get(accountId)?.state,
+				channelHealth: channel?.getHealth?.(),
 			};
 		});
 

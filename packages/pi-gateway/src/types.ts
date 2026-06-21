@@ -75,9 +75,39 @@ export interface Channel {
 	connect(config: ChannelConfig): Promise<void>;
 	disconnect(): Promise<void>;
 	isConnected(): boolean;
+	/**
+	 * Optional deep health snapshot for diagnostics (`gateway doctor`).
+	 * Channels that track richer connection metrics expose them here;
+	 * channels that only know connected/disconnected may omit this.
+	 */
+	getHealth?(): ChannelHealth;
 
 	onMessage(handler: (msg: InboundMessage) => Promise<void>): void;
 	sendMessage(msg: OutboundMessage): Promise<void>;
+}
+
+/** Deep connection health for a single channel instance. */
+export interface ChannelHealth {
+	connected: boolean;
+	/** True if the initial connect() threw and was never recovered. */
+	connectionFailed: boolean;
+	/** WebSocket readyState (0=CONNECTING,1=OPEN,2=CLOSING,3=CLOSED), if applicable. */
+	socketReadyState?: number;
+	/** Number of reconnect attempts since the last successful connection. */
+	reconnectAttempts: number;
+	/** Epoch ms when the current connection was established (0 if never). */
+	connectionEstablishedAt: number;
+	/** Epoch ms of the last socket-available signal (pong/data), 0 if never. */
+	lastSocketAvailableAt: number;
+	/** Total inbound messages received from the platform. */
+	receivedCount: number;
+	/**
+	 * Inbound messages that reached a terminal non-error state: either
+	 * deduplicated (duplicate delivery) or fully handled. The gap
+	 * `receivedCount - processedCount` is the drop count (parse failures,
+	 * empty/unsupported payloads).
+	 */
+	processedCount: number;
 }
 
 // ═══════════════════════════════════════════════════════════════════════

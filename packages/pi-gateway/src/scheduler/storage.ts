@@ -386,6 +386,23 @@ export class SchedulerDbStorage implements SchedulerStorage {
 		return rows.map(toExecution);
 	}
 
+	/**
+	 * All executions currently in the `running` state, across every task,
+	 * newest first. Used by `gateway doctor` to detect executions that were
+	 * orphaned by a gateway crash (started but never transitioned to
+	 * success/failure). Each row carries the owning task name for reporting.
+	 */
+	getRunningExecutions(): Array<TaskExecution & { taskName: string }> {
+		const rows = this.#db
+			.prepare(
+				`SELECT e.*, t.name AS task_name FROM executions e
+				 LEFT JOIN tasks t ON t.id = e.task_id
+				 WHERE e.status = 'running' ORDER BY e.started_at DESC`,
+			)
+			.all() as Array<ExecutionRow & { task_name: string | null }>;
+		return rows.map(r => ({ ...toExecution(r), taskName: r.task_name ?? "(deleted task)" }));
+	}
+
 	pruneExecutions(maxAgeDays?: number, maxCount?: number): number {
 		let deleted = 0;
 

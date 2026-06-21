@@ -142,6 +142,57 @@ export async function loadConfig(configPath?: string): Promise<GatewayConfig> {
 	}
 }
 
+/**
+ * Validate the gateway config file and report findings WITHOUT swallowing
+ * errors the way {@link loadConfig} does. `loadConfig` deliberately falls back
+ * to DEFAULT_CONFIG on any parse/validation failure so the gateway can still
+ * boot; that is the right behavior for the daemon but it hides real problems
+ * from the operator. `gateway doctor` calls this instead to surface the truth:
+ * a missing file, malformed JSON5, or a schema violation each produce a
+ * distinct, actionable result.
+ */
+export type ConfigValidation =
+	| { status: "missing"; path: string }
+	| { status: "parse-error"; path: string; error: string }
+	| { status: "schema-error"; path: string; issues: Array<{ path: string; message: string }> }
+	| { status: "ok"; path: string; config: GatewayConfig };
+
+export async function validateConfig(configPath?: string): Promise<ConfigValidation> {
+	const filePath = configPath ?? getConfigPath();
+	let raw: string;
+	try {
+		raw = await Bun.file(filePath).text();
+	} catch (err) {
+		if (isEnoent(err)) return { status: "missing", path: filePath };
+		return { status: "parse-error", path: filePath, error: err instanceof Error ? err.message : String(err) };
+	}
+
+	let parsed: unknown;
+	try {
+		parsed = Bun.JSON5.parse(raw);
+	} catch (err) {
+		return { status: "parse-error", path: filePath, error: err instanceof Error ? err.message : String(err) };
+	}
+
+	const result = gatewayConfigSchema.safeParse(parsed);
+	if (!result.success) {
+		return {
+			status: "schema-error",
+			path: filePath,
+			issues: result.error.issues.map(i => ({ path: i.path.join(".") || "(root)", message: i.message })),
+		};
+	}
+
+	const config: GatewayConfig = {
+		...DEFAULT_CONFIG,
+		...result.data,
+		agent: { ...DEFAULT_CONFIG.agent, ...result.data.agent },
+		session: { ...DEFAULT_CONFIG.session, ...result.data.session },
+		cron: { ...DEFAULT_CONFIG.cron, ...result.data.cron },
+	};
+	return { status: "ok", path: filePath, config };
+}
+
 // ═══════════════════════════════════════════════════════════════════════
 // Channel Config Helpers
 // ═══════════════════════════════════════════════════════════════════════

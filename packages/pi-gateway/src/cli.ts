@@ -173,6 +173,38 @@ async function cmdStatus(_configPath?: string): Promise<void> {
 	}
 }
 
+async function cmdDoctor(args: string[], configPath?: string): Promise<void> {
+	const { runDoctor, renderText, renderJson, applyFixes, countBySeverity } = await import("./doctor");
+	const json = args.includes("--json");
+	const doFix = args.includes("--fix");
+
+	const report = await runDoctor(configPath);
+
+	if (json) {
+		console.log(renderJson(report));
+	} else {
+		console.log(renderText(report));
+	}
+
+	if (doFix) {
+		const applied = await applyFixes(report);
+		if (!json) {
+			console.log("");
+			if (applied.length === 0) {
+				console.log("No fixable findings.");
+			} else {
+				console.log("Applied fixes:");
+				for (const a of applied) console.log(`  - ${a}`);
+			}
+		}
+	}
+
+	// Exit non-zero when any error-severity finding is present, so the command
+	// is usable as a health gate in scripts / service health checks.
+	const counts = countBySeverity(report);
+	if (counts.error > 0) process.exitCode = 1;
+}
+
 async function cmdReload(_configPath?: string): Promise<void> {
 	const { getGatewayStatus } = await import("./gateway");
 	const config = await loadConfig(_configPath);
@@ -541,6 +573,9 @@ void (async () => {
 		case "status":
 			await cmdStatus(gatewayConfigPath);
 			break;
+		case "doctor":
+			await cmdDoctor([subcommand ?? "", ...args], gatewayConfigPath);
+			break;
 		case "reload":
 			await cmdReload(gatewayConfigPath);
 			break;
@@ -572,6 +607,7 @@ Usage:
   pi-gateway status [--config <path>]             Show gateway status & PID
   pi-gateway config [--config <path>]             Show resolved configuration
   pi-gateway reload [--config <path>]             Reload running gateway config
+  pi-gateway doctor [--fix] [--json] [--config <path>]   Run health checks (and apply safe fixes with --fix)
 
   pi-gateway setup [--config <path>]              Interactive DingTalk credential setup
   pi-gateway install [--config <path>]            Alias for setup

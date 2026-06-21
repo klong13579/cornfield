@@ -27,14 +27,14 @@ import { Args, Command, Flags, renderCommandHelp } from "@oh-my-pi/pi-utils/cli"
 import { logger } from "@oh-my-pi/pi-utils";
 import { initTheme } from "../modes/theme/theme";
 
-const ACTIONS = ["start", "stop", "status", "config", "cron", "send", "service", "setup", "help"];
+const ACTIONS = ["start", "stop", "status", "doctor", "config", "cron", "send", "service", "setup", "help"];
 
 export default class Gateway extends Command {
 		static description = "Unified gateway: IM channels, cron scheduler, agent bridge";
 	static strict = false;
 	static args = {
 		action: Args.string({
-			description: "Gateway action: start | stop | status | config | cron | send | service | help",
+			description: "Gateway action: start | stop | status | doctor | config | cron | send | service | help",
 			required: false,
 			options: ACTIONS,
 		}),
@@ -52,6 +52,8 @@ export default class Gateway extends Command {
 		"  omp gateway start --config /path/gw.json  Start with custom config",
 		"  omp gateway stop                         Stop gateway (via PID file)",
 		"  omp gateway status                       Show running status & PID",
+		"  omp gateway doctor                       Run health checks (config, creds, channels, scheduler)",
+		"  omp gateway doctor --fix                 Apply safe fixes (clear stale state, fail orphaned execs)",
 		"",
 		"  ======== 系统服务 (launchd/systemd) ========",
 		"  omp gateway service install              Install as system daemon",
@@ -167,6 +169,29 @@ export default class Gateway extends Command {
 				if (channels.length > 0) {
 					console.log(`  Configured channels: ${channels.join(", ")}`);
 				}
+				break;
+			}
+			case "doctor": {
+				const argv = process.argv.slice(process.argv.indexOf("doctor") + 1);
+				const { runDoctor, renderText, renderJson, applyFixes, countBySeverity } = await import(
+					"@oh-my-pi/pi-gateway/src/doctor"
+				);
+				const json = argv.includes("--json");
+				const doFix = argv.includes("--fix");
+				const report = await runDoctor(configPath);
+				console.log(json ? renderJson(report) : renderText(report));
+				if (doFix) {
+					const applied = await applyFixes(report);
+					if (!json) {
+						console.log("");
+						if (applied.length === 0) console.log("No fixable findings.");
+						else {
+							console.log("Applied fixes:");
+							for (const a of applied) console.log(`  - ${a}`);
+						}
+					}
+				}
+				if (countBySeverity(report).error > 0) process.exitCode = 1;
 				break;
 			}
 			case "config": {

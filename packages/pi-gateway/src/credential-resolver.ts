@@ -55,6 +55,51 @@ export function resolveCredentialEnvVars(): Record<string, string> {
 }
 
 /**
+ * Structured credential health for `gateway doctor`.
+ *
+ * Mirrors {@link resolveCredentialEnvVars} but returns findings instead of
+ * side-effecting env vars, so the doctor can report which providers resolve
+ * (from agent.db or an already-set env var) and which are missing. A missing
+ * provider API key silently breaks every agent LLM call, so this is one of the
+ * highest-value checks the doctor performs.
+ */
+export interface CredentialCheck {
+	/** Whether ~/.omp/agent/models.yml was found and parsed. */
+	modelsYmlFound: boolean;
+	/** Whether ~/.omp/agent/agent.db was found. */
+	agentDbFound: boolean;
+	/** Per-provider resolution status. */
+	providers: Array<{
+		provider: string;
+		envVar: string;
+		/** "env" = already in process env, "agent.db" = stored credential, "missing" = neither. */
+		source: "env" | "agent.db" | "missing";
+	}>;
+}
+
+export function checkCredentials(): CredentialCheck {
+	const homeDir = os.homedir();
+	const agentDir = path.join(homeDir, ".omp", "agent");
+	const modelsPath = path.join(agentDir, "models.yml");
+	const dbPath = path.join(agentDir, "agent.db");
+
+	const modelsYmlFound = fs.existsSync(modelsPath);
+	const agentDbFound = fs.existsSync(dbPath);
+	const providerEnvMap = readProviderApiKeyRefs(modelsPath);
+	const storedKeys = readAuthCredentials(dbPath);
+
+	const providers = Object.entries(providerEnvMap).map(([provider, envVar]) => {
+		let source: "env" | "agent.db" | "missing";
+		if (process.env[envVar]) source = "env";
+		else if (storedKeys[provider]) source = "agent.db";
+		else source = "missing";
+		return { provider, envVar, source };
+	});
+
+	return { modelsYmlFound, agentDbFound, providers };
+}
+
+/**
  * Parse models.yml to extract provider → env var name mappings.
  * Matches the pattern:
  *   narwal-plan:
