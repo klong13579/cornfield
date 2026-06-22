@@ -4,7 +4,7 @@
 import { describe, expect, test } from "bun:test";
 import type { AgentBridge } from "../src/agent-bridge";
 import { SessionManager } from "../src/session-manager";
-import type { InboundMessage, SessionRecord } from "../src/types";
+import type { AgentResponseMeta, InboundMessage, SessionRecord } from "../src/types";
 
 class FakeBridge {
 	isRunning = true;
@@ -18,13 +18,34 @@ class FakeBridge {
 	async forward(msg: InboundMessage, session: SessionRecord): Promise<string> {
 		this.active++;
 		this.maxActive = Math.max(this.maxActive, this.active);
-		this.calls.push(`${session.accountId}:${msg.conversationId}:${msg.content.type === "text" ? msg.content.text : ""}`);
+		this.calls.push(
+			`${session.accountId}:${msg.conversationId}:${msg.content.type === "text" ? msg.content.text : ""}`,
+		);
 		try {
 			if (this.delayMs > 0) await Bun.sleep(this.delayMs);
 			return `${session.accountId}:${msg.conversationId}`;
 		} finally {
 			this.active--;
 		}
+	}
+
+	async forwardWithMeta(msg: InboundMessage, session: SessionRecord): Promise<AgentResponseMeta | null> {
+		const text = await this.forward(msg, session);
+		return {
+			text,
+			rawText: text,
+			model: null,
+			provider: null,
+			usage: null,
+			agentDurationMs: null,
+			taskDurationMs: 0,
+			effort: null,
+			toolCalls: [],
+			toolResults: [],
+			error: null,
+			aborted: false,
+			isFallback: false,
+		};
 	}
 
 	abort(): Promise<boolean> {

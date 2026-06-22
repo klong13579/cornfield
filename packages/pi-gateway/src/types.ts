@@ -14,7 +14,8 @@ export type MessageContent =
 	| { type: "markdown"; markdown: string }
 	| { type: "image"; url: string; filename?: string }
 	| { type: "file"; url: string; filename: string; size?: number }
-	| { type: "voice"; url: string; duration?: number; text?: string };
+	| { type: "voice"; url: string; duration?: number; text?: string }
+	| { type: "video"; url: string; filename: string; size?: number; duration?: number; videoType?: string };
 
 export interface InboundMessage {
 	channelId: string;
@@ -84,6 +85,98 @@ export interface Channel {
 
 	onMessage(handler: (msg: InboundMessage) => Promise<void>): void;
 	sendMessage(msg: OutboundMessage): Promise<void>;
+	/**
+	 * Optional: build a channel-specific reply from agent metadata.
+	 * Returning null falls back to a plain text message built by the gateway.
+	 * Channels that want richer visuals (status line, quote content, tool
+	 * summary, AI cards) implement this; channels that just want the raw
+	 * agent text omit it.
+	 */
+	formatReply?(
+		meta: AgentResponseMeta,
+		inbound: InboundMessage,
+		context: ReplyFormatterContext,
+	): OutboundMessage | null;
+}
+
+/**
+ * Context passed to a channel's `formatReply`. Captures the per-account
+ * display details that don't live on the `AgentResponseMeta` itself.
+ */
+export interface ReplyFormatterContext {
+	/** Account id for the inbound message (used as a fallback "agent" label). */
+	accountId: string;
+	/** Per-account agent name (preferred over accountId for the "agent" field). */
+	agentName: string | null;
+	/**
+	 * Count of platform API calls made during this turn (status line "dapi" field).
+	 * Channels that don't track this can pass 0; the formatter still renders
+	 * a placeholder.
+	 */
+	dapiCalls: number;
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// Agent Response Metadata
+// ═════════════════════════════════════════════════════════════════════════
+
+/**
+ * Structured metadata about an agent run, produced by `AgentBridge.forwardWithMeta`.
+ * Used by channel `formatReply` implementations to render richer replies than
+ * a single text blob — status lines, tool summaries, quote content, etc.
+ *
+ * Every field is best-effort: the bridge populates whatever the agent actually
+ * emitted. `null` / empty arrays mean "agent did not report this field", not
+ * "the run failed".
+ */
+export interface AgentResponseMeta {
+	/** Cleaned, length-capped markdown text (think blocks stripped). */
+	text: string;
+	/** Raw assistant text after think strip, before length cap. */
+	rawText: string;
+	/** Model id (e.g. "claude-sonnet-4-5") — null if not reported. */
+	model: string | null;
+	/** Provider name (e.g. "anthropic") — null if not reported. */
+	provider: string | null;
+	/** Token usage breakdown — null if not reported. */
+	usage: {
+		input: number;
+		output: number;
+		cacheRead: number;
+		cacheWrite: number;
+	} | null;
+	/** Agent's reported request duration in ms (model-side). */
+	agentDurationMs: number | null;
+	/** Gateway-measured end-to-end duration in ms (queue + RPC + cleanup). */
+	taskDurationMs: number;
+	/** Reasoning effort string (e.g. "low" / "medium" / "high"). */
+	effort: string | null;
+	/** Tool calls in invocation order. */
+	toolCalls: ReadonlyArray<AgentResponseToolCall>;
+	/** Tool results in arrival order. */
+	toolResults: ReadonlyArray<AgentResponseToolResult>;
+	/** Error message if the run failed / fell back to a canned string. */
+	error: string | null;
+	/** True if the user aborted the run (`/stop`, esc, etc). */
+	aborted: boolean;
+	/**
+	 * True when `text` is a bridge-generated fallback ("系统繁忙", "系统正在恢复中", …)
+	 * rather than a real agent response. Callers should suppress status-line chrome
+	 * for fallback strings so error messages stay readable.
+	 */
+	isFallback: boolean;
+}
+
+export interface AgentResponseToolCall {
+	id: string;
+	name: string;
+	args: unknown;
+}
+
+export interface AgentResponseToolResult {
+	id: string;
+	name: string;
+	isError: boolean;
 }
 
 /** Deep connection health for a single channel instance. */

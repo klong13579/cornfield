@@ -18,13 +18,16 @@
 import * as fs from "node:fs";
 import { logger } from "@oh-my-pi/pi-utils";
 import { DWClient, type DWClientDownStream, TOPIC_ROBOT } from "dingtalk-stream";
+import { formatDingTalkReply } from "./dingtalk-formatter";
 import type {
+	AgentResponseMeta,
 	ChannelConfig,
 	DingTalkConfig,
 	DingTalkRawMessage,
 	InboundMessage,
 	MessageContent,
 	OutboundMessage,
+	ReplyFormatterContext,
 } from "../types";
 
 type PermissionPolicy = "open" | "allowlist" | "closed";
@@ -295,6 +298,43 @@ export class DingTalkChannel extends BaseChannel {
 	/** Get the account ID */
 	getAccountId(): string {
 		return this.#accountId;
+	}
+
+	/**
+	 * Build a richer DingTalk reply from agent metadata: 4 sections
+	 * (quoteContent / tool summary / main answer / status line) instead of
+	 * a single text blob. The gateway calls this after every agent run when
+	 * the channel opts in via the `Channel.formatReply?` method.
+	 */
+	formatReply(
+		meta: AgentResponseMeta,
+		inbound: InboundMessage,
+		context: ReplyFormatterContext,
+	): OutboundMessage {
+		const { markdown, truncated } = formatDingTalkReply({
+			meta,
+			inbound,
+			agentName: context.agentName,
+			accountId: context.accountId,
+			dapiCalls: context.dapiCalls,
+		});
+
+		const outbound: OutboundMessage = {
+			channelId: this.id,
+			conversationId: inbound.conversationId,
+			content: { type: "markdown", markdown },
+			accountId: this.#accountId,
+		};
+		if (inbound.sessionWebhook) outbound.sessionWebhook = inbound.sessionWebhook;
+		if (inbound.messageId) outbound.messageId = inbound.messageId;
+		if (inbound.isGroup && inbound.userName) outbound.mentions = [inbound.userName];
+		if (truncated) {
+			logger.debug("DingTalk reply truncated to 4000-char cap", {
+				conversationId: inbound.conversationId,
+				accountId: this.#accountId,
+			});
+		}
+		return outbound;
 	}
 
 	// Connection state

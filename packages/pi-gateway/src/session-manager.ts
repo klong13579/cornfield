@@ -8,7 +8,7 @@
  */
 import { logger } from "@oh-my-pi/pi-utils";
 import type { AgentBridge, AgentBridgeSnapshot } from "./agent-bridge";
-import type { InboundMessage, SessionRecord } from "./types";
+import type { AgentResponseMeta, InboundMessage, SessionRecord } from "./types";
 
 export interface QueueStat {
 	accountId: string;
@@ -48,6 +48,22 @@ export class SessionManager {
 	}
 
 	async enqueue(msg: InboundMessage, session: SessionRecord): Promise<string | null> {
+		const meta = await this.enqueueWithMeta(msg, session);
+		if (meta === null) return QUEUE_FULL_MESSAGE;
+		return meta.text;
+	}
+
+	/**
+	 * Same queueing / serialization contract as `enqueue`, but returns the
+	 * full `AgentResponseMeta` instead of just the rendered text. Callers
+	 * that want richer reply chrome (status line, tool summary, quote
+	 * content) use this directly.
+	 *
+	 * Returns `null` when the queue is full (caller is expected to handle
+	 * the empty case — typically by sending a localized "system busy"
+	 * message without the chrome).
+	 */
+	async enqueueWithMeta(msg: InboundMessage, session: SessionRecord): Promise<AgentResponseMeta | null> {
 		const accountId = session.accountId;
 		const state = this.#getQueue(accountId);
 		if (state.depth >= this.#maxQueueDepth) {
@@ -57,7 +73,7 @@ export class SessionManager {
 				depth: state.depth,
 				maxQueueDepth: this.#maxQueueDepth,
 			});
-			return QUEUE_FULL_MESSAGE;
+			return null;
 		}
 
 		state.depth++;
@@ -73,7 +89,7 @@ export class SessionManager {
 			if (!bridge.isRunning) {
 				throw new Error(`Agent bridge for account "${accountId}" is not running`);
 			}
-			return await bridge.forward(msg, session);
+			return await bridge.forwardWithMeta(msg, session);
 		} finally {
 			state.depth--;
 			if (state.depth === 0) {
