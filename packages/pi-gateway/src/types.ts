@@ -97,6 +97,31 @@ export interface Channel {
 		inbound: InboundMessage,
 		context: ReplyFormatterContext,
 	): OutboundMessage | null;
+	/**
+	 * Optional: stream the agent response into a platform-native card with
+	 * an animated PROCESSING → INPUTING → FINISHED state machine. The card
+	 * replaces the "thinking..." placeholder: the user sees a card with
+	 * PROCESSING state immediately, content streams in via
+	 * `onTextDelta` → INPUTING with throttled updates, and the run finishes
+	 * with FINISHED on `agent_end`. Returns null when the platform
+	 * doesn't support cards or card creation failed — the gateway falls
+	 * back to `formatReply` (or plain text) in that case.
+	 *
+	 * `submit` is a thin wrapper around `SessionManager.enqueueWithMeta`
+	 * pre-bound to this conversation; pass `handlers` to subscribe to
+	 * streaming events (text / thinking deltas) while the prompt runs.
+	 * The full `AgentResponseMeta` is returned by `submit` so the card
+	 * can render the final formatted chrome (status line, tool summary,
+	 * etc.) at FINISHED time.
+	 */
+	streamCard?(
+		inbound: InboundMessage,
+		session: import("./types").SessionRecord,
+		context: ReplyFormatterContext,
+		submit: (
+			handlers?: import("./types").ForwardStreamHandlers,
+		) => Promise<AgentResponseMeta | null>,
+	): Promise<OutboundMessage | null>;
 }
 
 /**
@@ -178,6 +203,17 @@ export interface AgentResponseToolResult {
 	name: string;
 	isError: boolean;
 }
+
+/**
+ * Streaming callbacks fired by `AgentBridge.forwardWithMeta` as RPC events
+ * arrive during a prompt run. Re-exported here so the `Channel` interface
+ * (and any platform channel implementation) can type its `streamCard`
+ * parameter without importing from `@oh-my-pi/pi-agent-bridge` directly.
+ *
+ * See `packages/pi-gateway/src/agent-bridge.ts` for the authoritative
+ * definition.
+ */
+export type ForwardStreamHandlers = import("./agent-bridge").ForwardStreamHandlers;
 
 /** Deep connection health for a single channel instance. */
 export interface ChannelHealth {

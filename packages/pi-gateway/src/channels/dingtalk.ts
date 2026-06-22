@@ -18,20 +18,31 @@
 import * as fs from "node:fs";
 import { logger } from "@oh-my-pi/pi-utils";
 import { DWClient, type DWClientDownStream, TOPIC_ROBOT } from "dingtalk-stream";
+import {
+	createAICardForTarget,
+	failAICard,
+	finishAICard,
+	streamAICard,
+} from "./dingtalk-card";
 import { formatDingTalkReply } from "./dingtalk-formatter";
 import type {
 	AgentResponseMeta,
 	ChannelConfig,
 	DingTalkConfig,
 	DingTalkRawMessage,
+	ForwardStreamHandlers,
 	InboundMessage,
 	MessageContent,
 	OutboundMessage,
 	ReplyFormatterContext,
+	SessionRecord,
 } from "../types";
 
 type PermissionPolicy = "open" | "allowlist" | "closed";
 import { BaseChannel } from "./base";
+
+/** Throttle window for streaming the assistant text into the AI Card. */
+const CARD_STREAM_THROTTLE_MS = 1_000;
 
 // ═══════════════════════════════════════════════════════════════════════
 // Constants
@@ -301,6 +312,17 @@ export class DingTalkChannel extends BaseChannel {
 	}
 
 	/**
+	 * Test seam: inject a DingTalk config directly without going through
+	 * `onConnect` / the Stream SDK. Used by e2e tests that need the
+	 * channel's card / format-reply logic to see a real config but want
+	 * to skip the WebSocket connect step. Production code paths should
+	 * rely on `onConnect` (called by `connectAll`) for config injection.
+	 */
+	setConfig(config: DingTalkConfig): void {
+		this.#config = config;
+	}
+
+	/**
 	 * Build a richer DingTalk reply from agent metadata: 4 sections
 	 * (quoteContent / tool summary / main answer / status line) instead of
 	 * a single text blob. The gateway calls this after every agent run when
@@ -334,6 +356,120 @@ export class DingTalkChannel extends BaseChannel {
 				accountId: this.#accountId,
 			});
 		}
+		return outbound;
+	}
+
+	/**
+	 * Stream the agent response into a DingTalk AI Card. The card
+	 * replaces the "thinking..." placeholder: it starts in PROCESSING
+	 * state, transitions to INPUTING when the first text delta arrives,
+	 * and finishes with FINISHED + the full v1-formatted chrome (quote
+	 * content / tool summary / status line) on `agent_end`. Returns
+	 * `null` when card creation fails so the gateway falls back to
+	 * `formatReply` (v1 markdown).
+	 *
+	 * Card streaming is throttled to `CARD_STREAM_THROTTLE_MS` (1s) so
+	 * a long agent run doesn't hammer the DingTalk card API on every
+	 * token delta. The last buffered text is flushed on `agent_end`.
+	 */
+	async streamCard(
+		inbound: InboundMessage,
+		_session: SessionRecord,
+		context: ReplyFormatterContext,
+		submit: (handlers?: ForwardStreamHandlers) => Promise<AgentResponseMeta | null>,
+	): Promise<OutboundMessage | null> {
+		if (!this.#config) {
+			logger.debug("[DingTalk] streamCard skipped: channel not connected", {
+				accountId: this.#accountId,
+				conversationId: inbound.conversationId,
+			});
+			return null;
+		}
+
+		const target = inbound.isGroup
+			? ({ type: "group", openConversationId: inbound.conversationId } as const)
+			: ({ type: "user", userId: inbound.userId } as const);
+
+		const card = await createAICardForTarget(this.#config, target);
+		if (!card) {
+			logger.warn("[DingTalk] AI Card creation failed, gateway will fall back to v1 markdown", {
+				accountId: this.#accountId,
+				conversationId: inbound.conversationId,
+			});
+			return null;
+		}
+
+		// Throttle state: track the latest cumulative text and the
+		// pending flush timer. We replace (not append) the buffered text
+		// on every delta because the bridge's `cumulative` argument is
+		// already the full running total.
+		let bufferedText = "";
+		let flushTimer: ReturnType<typeof setTimeout> | null = null;
+
+		const flushBuffered = (): void => {
+			flushTimer = null;
+			if (!bufferedText) return;
+			void streamAICard(card, bufferedText, false, this.#config ?? undefined).catch(err => {
+				logger.warn("[DingTalk] streamAICard failed (mid-stream)", {
+					accountId: this.#accountId,
+					conversationId: inbound.conversationId,
+					error: err instanceof Error ? err.message : String(err),
+				});
+			});
+		};
+
+		const handlers: ForwardStreamHandlers = {
+			onTextDelta: (_delta, cumulative) => {
+				bufferedText = cumulative;
+				if (flushTimer) return;
+				flushTimer = setTimeout(flushBuffered, CARD_STREAM_THROTTLE_MS);
+			},
+		};
+
+		const meta = await submit(handlers);
+
+		// Always cancel the pending flush so we don't double-stream
+		// before the final finish call.
+		if (flushTimer) {
+			clearTimeout(flushTimer);
+			flushTimer = null;
+		}
+
+		if (meta === null) {
+			// Queue full / submit rejected — mark the card as failed so
+			// the user doesn't see a stuck PROCESSING card.
+			await failAICard(card, "系统繁忙，请稍后重试。", this.#config ?? undefined);
+			return null;
+		}
+
+		const { markdown } = formatDingTalkReply({
+			meta,
+			inbound,
+			agentName: context.agentName,
+			accountId: context.accountId,
+			dapiCalls: context.dapiCalls,
+		});
+
+		try {
+			await finishAICard(card, markdown, this.#config ?? undefined);
+		} catch (err) {
+			logger.warn("[DingTalk] finishAICard failed, falling back to v1 markdown", {
+				accountId: this.#accountId,
+				conversationId: inbound.conversationId,
+				error: err instanceof Error ? err.message : String(err),
+			});
+			return null;
+		}
+
+		const outbound: OutboundMessage = {
+			channelId: this.id,
+			conversationId: inbound.conversationId,
+			content: { type: "markdown", markdown },
+			accountId: this.#accountId,
+		};
+		if (inbound.sessionWebhook) outbound.sessionWebhook = inbound.sessionWebhook;
+		if (inbound.messageId) outbound.messageId = inbound.messageId;
+		if (inbound.isGroup && inbound.userName) outbound.mentions = [inbound.userName];
 		return outbound;
 	}
 

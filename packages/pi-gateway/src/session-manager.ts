@@ -7,7 +7,7 @@
  * - Queue depth is bounded per account to avoid unbounded memory growth.
  */
 import { logger } from "@oh-my-pi/pi-utils";
-import type { AgentBridge, AgentBridgeSnapshot } from "./agent-bridge";
+import type { AgentBridge, AgentBridgeSnapshot, ForwardStreamHandlers } from "./agent-bridge";
 import type { AgentResponseMeta, InboundMessage, SessionRecord } from "./types";
 
 export interface QueueStat {
@@ -62,8 +62,17 @@ export class SessionManager {
 	 * Returns `null` when the queue is full (caller is expected to handle
 	 * the empty case — typically by sending a localized "system busy"
 	 * message without the chrome).
+	 *
+	 * When `handlers` is provided, the bridge fires streaming callbacks
+	 * (`onTextDelta` / `onThinkingDelta` / `onAssistantMessageEnd` /
+	 * `onAgentEnd`) as RPC events arrive. Used by the AI Card path to
+	 * surface incremental progress to the user before the run ends.
 	 */
-	async enqueueWithMeta(msg: InboundMessage, session: SessionRecord): Promise<AgentResponseMeta | null> {
+	async enqueueWithMeta(
+		msg: InboundMessage,
+		session: SessionRecord,
+		handlers?: ForwardStreamHandlers,
+	): Promise<AgentResponseMeta | null> {
 		const accountId = session.accountId;
 		const state = this.#getQueue(accountId);
 		if (state.depth >= this.#maxQueueDepth) {
@@ -89,7 +98,7 @@ export class SessionManager {
 			if (!bridge.isRunning) {
 				throw new Error(`Agent bridge for account "${accountId}" is not running`);
 			}
-			return await bridge.forwardWithMeta(msg, session);
+			return await bridge.forwardWithMeta(msg, session, handlers);
 		} finally {
 			state.depth--;
 			if (state.depth === 0) {
