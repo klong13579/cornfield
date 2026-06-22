@@ -351,12 +351,13 @@ export async function waitForDaemonStart(pidPath: string, timeoutMs = 5000): Pro
 
 export function formatTaskRow(task: ScheduledTask): string {
 	const next = task.status === "active" && task.nextRunAt ? new Date(task.nextRunAt).toLocaleString() : "—";
-	const last = task.lastRunAt ? new Date(task.lastRunAt).toLocaleString() : "never";
-	const typeLabel = task.taskType === "agent" ? "agent " : "shell ";
+	const typeLabel = task.taskType === "agent" ? "agent" : "shell";
 	const channel = formatChannel(task.deliver);
 	const agent = formatAgent(task.accountId);
-	const name = truncateName(task.name, 18);
-	return `${name.padEnd(19)} ${typeLabel.padEnd(7)} ${agent.padEnd(12)} ${task.status.padEnd(11)} ${(task.scheduleType || "cron").padEnd(9)} ${task.cron.padEnd(19)} ${channel.padEnd(29)} ${next.padEnd(21)} ${last}`;
+	const name = truncateName(task.name, 20);
+	const model = task.model ?? "—";
+	const lastStatus = task.lastRunAt ? (task.failCount > 0 && task.consecutiveFailures > 0 ? "fail" : "ok") : "—";
+	return `${name.padEnd(21)} ${typeLabel.padEnd(6)} ${agent.padEnd(12)} ${task.status.padEnd(8)} ${task.cron.padEnd(16)} ${truncateName(model, 14).padEnd(15)} ${channel.padEnd(22)} ${lastStatus.padEnd(8)} ${next.padEnd(21)}`;
 }
 
 /**

@@ -10,10 +10,21 @@ import { uriToFile } from "./utils";
 
 /**
  * Apply text edits to a string in-memory.
- * Edits are applied in reverse order (bottom-to-top) to preserve line/character indices.
+ * Edits are applied in reverse order (bottom-to-top, right-to-left) to preserve line/character indices.
+ *
+ * LSP uses `\n`-based character positions, so CRLF content must be normalized before
+ * applying edits. BOM and original line endings are restored afterward.
  */
 export function applyTextEditsToString(content: string, edits: TextEdit[]): string {
-	const lines = content.split("\n");
+	// Preserve BOM and line endings, then normalize to LF for LSP-compatible positions
+	const bom = content.startsWith("\uFEFF") ? "\uFEFF" : "";
+	const hasCRLF = content.includes("\r\n");
+	const normalizedContent = content.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+	const hasBom = bom.length > 0;
+
+	// Strip BOM from first line for position-correct splitting
+	const firstLine = normalizedContent.startsWith("\uFEFF") ? normalizedContent.slice(1) : normalizedContent;
+	const lines = firstLine.split("\n");
 
 	// Sort edits in reverse order (bottom-to-top, right-to-left)
 	const sortedEdits = [...edits].sort((a, b) => {
@@ -39,7 +50,19 @@ export function applyTextEditsToString(content: string, edits: TextEdit[]): stri
 		}
 	}
 
-	return lines.join("\n");
+	let result = lines.join("\n");
+
+	// Restore BOM if original content had one
+	if (hasBom && !result.startsWith("\uFEFF")) {
+		result = `\uFEFF${result}`;
+	}
+
+	// Restore CRLF line endings if original content used them
+	if (hasCRLF) {
+		result = result.replace(/\n/g, "\r\n");
+	}
+
+	return result;
 }
 
 /**
