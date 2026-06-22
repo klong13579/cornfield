@@ -19,7 +19,7 @@ import { ChannelRegistry } from "./channels/registry";
 import { getDataDir, getDingTalkConfig, getEnabledChannels } from "./config";
 import { findAgentSessionPath } from "./scheduler";
 import { SchedulerEngine } from "./scheduler/engine";
-import { appendExecutionLog } from "./scheduler/execution-log";
+import { appendDeliveryFailureLog, appendExecutionLog } from "./scheduler/execution-log";
 import { computeInactivityBudgetMs, executeScheduledCommand } from "./scheduler/executor";
 import { SchedulerFileStore } from "./scheduler/file-store";
 import { createCronTaskFromMessage } from "./scheduler/from-message";
@@ -32,6 +32,7 @@ import type {
 	AgentResponseMeta,
 	ChannelHealth,
 	DingtalkAccountConfig,
+	ForwardStreamHandlers,
 	GatewayConfig,
 	InboundMessage,
 	MessageContent,
@@ -262,6 +263,38 @@ export async function sendToChannel(
 
 	// Otherwise, try webhook from stored session
 	return sendViaWebhook(channelId, accountId, message);
+}
+
+/**
+ * Deliver a message with one retry after 5s for transient channel failures.
+ *
+ * Returns ok=true if either attempt succeeds, ok=false with the last error
+ * reason and total attempts otherwise. The retry targets the common
+ * "channel is restarting / network blip / rate limit window" cases — a
+ * persistent 4xx error (auth failure, invalid target) will fail both
+ * attempts and we report it back to the caller.
+ */
+async function deliverWithRetry(
+	channelArg: string,
+	message: string,
+	options: { userId?: string; conversationId?: string },
+): Promise<{ ok: boolean; attempts: number; reason: string }> {
+	const first = await sendToChannel(channelArg, message, options).catch((err): boolean => {
+		logger.warn("Delivery attempt threw", { error: String(err) });
+		return false;
+	});
+	if (first) return { ok: true, attempts: 1, reason: "" };
+	await Bun.sleep(5_000);
+	const second = await sendToChannel(channelArg, message, options).catch((err): boolean => {
+		logger.warn("Delivery retry threw", { error: String(err) });
+		return false;
+	});
+	if (second) return { ok: true, attempts: 2, reason: "" };
+	return {
+		ok: false,
+		attempts: 2,
+		reason: `sendToChannel returned false for ${channelArg} after 2 attempts`,
+	};
 }
 
 async function sendViaWebhook(channelId: string, accountId: string, message: string): Promise<boolean> {
@@ -1028,6 +1061,15 @@ export class Gateway {
 			}
 		}
 
+		// Soft recursion guard: prepend a cron-context prefix to the prompt
+		// so the agent knows it's running as a scheduled task. The prefix
+		// asks the agent to avoid spawning other cron jobs or sending
+		// unprompted messages to other channels — this is the OMP
+		// analog of Hermes's `disabled_toolsets=["cronjob","messaging",
+		// "clarify"]`, achievable without forcing `--tools` restrictions
+		// that would break legitimate bash-heavy cron work.
+		const cronContextPrefix = `[CRON-CONTEXT] You are running as a scheduled task named "${task.name}" (id: ${task.id}, account: ${task.accountId ?? "default"}). Do not create new cron jobs or schedule follow-on tasks. Do not send messages to other channels. Complete the task below and stop. The deliver channel is preconfigured; the gateway will handle delivery.\n\n`;
+
 		let exitCode = 0;
 		let output = "";
 		let stderr = "";
@@ -1066,7 +1108,7 @@ export class Gateway {
 				}
 
 				try {
-					const response = await bridge.executePrompt(task.command, {
+					const response = await bridge.executePrompt(cronContextPrefix + task.command, {
 						timeoutMs: task.timeoutMs,
 						sessionPath: cronSessionPath,
 						// Inactivity budget: the prompt can run for the full
@@ -1113,6 +1155,7 @@ export class Gateway {
 				skills: task.skills,
 				preScript: task.preScript,
 				cwd: agentDir,
+				promptPrefix: isAgent ? cronContextPrefix : undefined,
 			});
 			exitCode = result.exitCode;
 			output = result.output;
@@ -1146,13 +1189,39 @@ export class Gateway {
 			stderr,
 		});
 
-		// Deliver result to user if configured
+		// Deliver result to user if configured. The delivery path is awaited
+		// (not fire-and-forget) so we can: (1) report the failure in the
+		// task's exit code, (2) retry once after 5s for transient channel
+		// issues, and (3) write a persistent entry to the global
+		// delivery-failure log so operators can see which task results
+		// never made it to the channel even after a gateway restart.
 		if (task.deliver && task.deliverUser) {
 			const prefix = exitCode === 0 ? "✅" : timedOut ? "⏰" : "❌";
 			const summary = `${prefix} Task "${task.name}" completed (exit ${exitCode}, ${durationMs}ms)\n\n${output.slice(0, 2000)}`;
-			sendToChannel(task.deliver, summary, { userId: task.deliverUser }).catch(err =>
-				logger.error("Failed to deliver cron result", { taskId: task.id, error: String(err) }),
-			);
+			const { ok, attempts, reason } = await deliverWithRetry(task.deliver, summary, { userId: task.deliverUser });
+			if (!ok) {
+				appendDeliveryFailureLog({
+					ts: Date.now(),
+					taskId: task.id,
+					taskName: task.name,
+					channel: task.deliver,
+					userId: task.deliverUser,
+					reason,
+					attempts,
+					exitCode,
+				});
+				// Don't override the task's own exit code with a delivery
+				// failure — the task itself may have succeeded. Just log
+				// loudly so the engine's metrics show this as a warning.
+				logger.error("Cron result delivery failed", {
+					taskId: task.id,
+					taskName: task.name,
+					channel: task.deliver,
+					userId: task.deliverUser,
+					attempts,
+					reason,
+				});
+			}
 		}
 
 		// Throw on failure so the engine's retry loop and statistics work.
@@ -1259,6 +1328,83 @@ export class Gateway {
 				conversationId: msg.conversationId,
 				error: err instanceof Error ? err.message : String(err),
 			});
+		}
+	}
+
+	/**
+	 * Try to run the agent through the channel's v2 AI Card streaming
+	 * path. Returns `true` when the channel handled the reply (card
+	 * created + streamed + finished, even if the agent returned a
+	 * fallback string), `false` when the channel doesn't support cards
+	 * or card creation failed and the caller should run the v1 markdown
+	 * fallback. The card path is responsible for marking the card as
+	 * FAILED when submit returns `null` (queue full), so this method
+	 * only returns `false` for "could not start the card path at all".
+	 */
+	async #tryStreamAgentResponse(
+		msg: InboundMessage,
+		session: SessionRecord,
+		accountId: string,
+		channel: import("./channels/registry").Channel | undefined,
+	): Promise<boolean> {
+		if (!channel?.streamCard) return false;
+		if (!this.#sessionManager) return false;
+
+		const context: ReplyFormatterContext = {
+			accountId,
+			agentName: this.#resolveAgentName(accountId),
+			dapiCalls: 0,
+		};
+
+		const submit = (handlers?: ForwardStreamHandlers): Promise<AgentResponseMeta | null> =>
+			this.#sessionManager!.enqueueWithMeta(msg, session, handlers);
+
+		try {
+			const outbound = await channel.streamCard(msg, session, context, submit);
+			return outbound !== null;
+		} catch (err) {
+			logger.error("Failed to run AI Card stream path, falling back to v1 markdown", {
+				accountId,
+				conversationId: msg.conversationId,
+				channel: msg.channelId,
+				error: err instanceof Error ? err.message : String(err),
+			});
+			return false;
+		}
+	}
+
+	/**
+	 * v1 fallback: send the "thinking..." placeholder, then enqueue the
+	 * agent run, then send the formatted reply (channel `formatReply` for
+	 * platforms that opt in, plain text otherwise). Used when the v2 AI
+	 * Card path is unavailable (channel doesn't support cards, card
+	 * creation failed, or the card stream threw).
+	 */
+	async #sendAgentResponseViaV1Markdown(
+		msg: InboundMessage,
+		session: SessionRecord,
+		accountId: string,
+	): Promise<void> {
+		const placeholder: OutboundMessage = {
+			channelId: msg.channelId,
+			conversationId: msg.conversationId,
+			content: { type: "markdown", markdown: "thinking..." },
+			sessionWebhook: msg.sessionWebhook,
+			accountId: msg.accountId,
+		};
+		try {
+			await this.#registry.sendMessage(placeholder);
+		} catch (err) {
+			logger.warn("Failed to send processing placeholder", {
+				accountId,
+				conversationId: msg.conversationId,
+				error: err instanceof Error ? err.message : String(err),
+			});
+		}
+
+		const meta = await this.#sessionManager?.enqueueWithMeta(msg, session);
+		if (meta) {
+			await this.#sendFormattedAgentResponse(msg, meta, accountId);
 		}
 	}
 
@@ -1514,31 +1660,17 @@ ${table}
 				return;
 			}
 
-			// Send "processing" placeholder first. Failure here should not prevent agent processing.
-			const placeholder: OutboundMessage = {
-				channelId: msg.channelId,
-				conversationId: msg.conversationId,
-				content: { type: "markdown", markdown: "thinking..." },
-				sessionWebhook: msg.sessionWebhook,
-				accountId: msg.accountId,
-			};
-			try {
-				await this.#registry.sendMessage(placeholder);
-			} catch (err) {
-				logger.warn("Failed to send processing placeholder", {
-					accountId,
-					conversationId: msg.conversationId,
-					error: err instanceof Error ? err.message : String(err),
-				});
-			}
-
-			// Queue and forward to the account bridge
-			const meta = await this.#sessionManager?.enqueueWithMeta(msg, session);
-
-			// Send formatted response (channel-aware: rich reply for DingTalk,
-			// plain text for everything else).
-			if (meta) {
-				await this.#sendFormattedAgentResponse(msg, meta, accountId);
+			// Try the v2 AI Card path first (DingTalk only). The card
+			// replaces the "thinking..." placeholder: it starts in
+			// PROCESSING state, transitions to INPUTING on text deltas,
+			// and finishes with the full v1-formatted chrome (quote
+			// content / tool summary / status line) on agent_end. If the
+			// channel doesn't support cards or card creation fails, the
+			// v1 markdown path runs instead.
+			const channel = this.#registry.getChannel(msg.channelId);
+			const usedCard = await this.#tryStreamAgentResponse(msg, session, accountId, channel);
+			if (!usedCard) {
+				await this.#sendAgentResponseViaV1Markdown(msg, session, accountId);
 			}
 
 			// Update session timestamp

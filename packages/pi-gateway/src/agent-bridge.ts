@@ -942,11 +942,7 @@ export class AgentBridge {
 		return promise;
 	}
 
-	async #promptAndWait(
-		message: string,
-		timeoutMs: number,
-		handlers?: ForwardStreamHandlers,
-	): Promise<AgentEvent[]> {
+	async #promptAndWait(message: string, timeoutMs: number, handlers?: ForwardStreamHandlers): Promise<AgentEvent[]> {
 		const promptId = `p_${++this.#promptIdCounter}`;
 
 		const { promise, resolve, reject } = Promise.withResolvers<AgentEvent[]>();

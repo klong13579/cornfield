@@ -458,9 +458,9 @@ describe("AgentBridge.executePrompt inactivity timeout", () => {
 		try {
 			await bridge.start();
 			const start = Date.now();
-			await expect(
-				bridge.executePrompt("INACTIVE prompt", { inactivityMs: 200 }),
-			).rejects.toThrow(/inactive for \d+ms \(limit 200ms\)/);
+			await expect(bridge.executePrompt("INACTIVE prompt", { inactivityMs: 200 })).rejects.toThrow(
+				/inactive for \d+ms \(limit 200ms\)/,
+			);
 			const elapsed = Date.now() - start;
 			// Watchdog polls every 500ms; allow generous slack. The point is
 			// it triggers well before the 10s wall timeout.
@@ -501,9 +501,9 @@ describe("AgentBridge.executePrompt inactivity timeout", () => {
 			// No inactivityMs — prompt would hang forever. Set a tight
 			// outer timeout via options.timeoutMs instead. The bridge's
 			// wall-clock timeout fires and rejects.
-			await expect(
-				bridge.executePrompt("INACTIVE prompt", { timeoutMs: 250 }),
-			).rejects.toThrow(/timed out after 250ms/);
+			await expect(bridge.executePrompt("INACTIVE prompt", { timeoutMs: 250 })).rejects.toThrow(
+				/timed out after 250ms/,
+			);
 		} finally {
 			bridge.stop();
 			await fake.cleanup();

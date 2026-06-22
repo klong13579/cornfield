@@ -122,6 +122,45 @@ export function appendExecutionLog(taskName: string, entry: ExecutionLogEntry): 
 	}
 }
 
+/** Single-line delivery-failure log entry. Compact, only the fields an
+ * operator needs to debug. Kept separate from the per-task execution log
+ * because the user can't see the per-task log without knowing the task
+ * name, and the global failure log is the one place a delivery issue
+ * surfaces when the IM channel itself is the problem. */
+export interface DeliveryFailureEntry {
+	ts: number;
+	taskId: string;
+	taskName: string;
+	channel: string;
+	userId: string;
+	reason: string;
+	attempts: number;
+	exitCode: number;
+}
+
+function deliveryFailurePath(): string {
+	return path.join(activeLogRoot, "delivery-failures.jsonl");
+}
+
+/**
+ * Append a delivery-failure entry to the global delivery-failure log.
+ *
+ * Best-effort: a write failure itself is logged and swallowed (we never
+ * throw from logging). This is the escalation target when the configured
+ * deliver channel rejects the message — the entry stays on disk after
+ * the in-memory log lines roll off, so operators have a record even
+ * after a gateway restart.
+ */
+export function appendDeliveryFailureLog(entry: DeliveryFailureEntry): void {
+	const filePath = deliveryFailurePath();
+	try {
+		fs.mkdirSync(path.dirname(filePath), { recursive: true });
+		fs.appendFileSync(filePath, `${JSON.stringify(entry)}\n`, { encoding: "utf-8" });
+	} catch (error) {
+		logger.warn("Failed to append delivery-failure log", { error: String(error) });
+	}
+}
+
 /** Read all log entries for a task from both the new tree and the legacy flat file. */
 export function readExecutionLog(taskName: string, limit = 20): ExecutionLogEntry[] {
 	const entries: ExecutionLogEntry[] = [];

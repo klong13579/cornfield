@@ -46,4 +46,35 @@ describe("executeScheduledCommand cwd", () => {
 		expect(result.exitCode).toBe(0);
 		expect(result.output.trim().length).toBeGreaterThan(0);
 	});
+
+	it("prepends promptPrefix to the agent command (recursion guard)", async () => {
+		// Use a tiny "omp" shim that echoes its argv to stdout, so we
+		// can assert the prefix actually made it into the spawned
+		// process's argument list without depending on the real omp
+		// binary. The shim sits in its own temp dir; the executor only
+		// takes the binary path, not a cwd requirement.
+		const shimDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-gateway-prefix-shim-"));
+		try {
+			const shimPath = path.join(shimDir, "omp-fake");
+			await Bun.write(shimPath, `#!/usr/bin/env sh\nfor a in "$@"; do printf '%s\\n' "$a"; done\n`);
+			await fs.chmod(shimPath, 0o755);
+
+			const result = await executeScheduledCommand("do something", {
+				taskType: "agent",
+				timeoutMs: 5_000,
+				ompBinary: shimPath,
+				promptPrefix: "[CRON-CONTEXT] ",
+			});
+			expect(result.exitCode).toBe(0);
+			// The shim echoes every argv on its own line. The first
+			// lines are flags ("--print"); the last line is the
+			// command. With the prefix, the command line should start
+			// with "[CRON-CONTEXT] ".
+			const lines = result.output.trim().split("\n");
+			expect(lines[0]).toBe("--print");
+			expect(lines[lines.length - 1]).toBe("[CRON-CONTEXT] do something");
+		} finally {
+			await fs.rm(shimDir, { recursive: true, force: true });
+		}
+	});
 });

@@ -49,6 +49,16 @@ export interface ExecutionOptions {
 	skills?: string[];
 	preScript?: string;
 	/**
+	 * Soft recursion guard prefix. For agent tasks, this string is
+	 * prepended to the prompt before it's sent to `omp --print`. Used
+	 * by the gateway's cron path to inject "[CRON-CONTEXT]" framing
+	 * that tells the agent it's running as a scheduled task and to
+	 * avoid spawning follow-on cron jobs or messaging. Mirrors
+	 * Hermes's `disabled_toolsets=["cronjob","messaging"]` for OMP,
+	 * where no equivalent toolset filter exists at the CLI level.
+	 */
+	promptPrefix?: string;
+	/**
 	 * Working directory for the spawned process. For `agent` tasks, this
 	 * is the agentDir (where omp finds its `.omp/config.yml`). For
 	 * `shell` tasks, it can be set to scope the command's view of the
@@ -139,7 +149,8 @@ export async function executeScheduledCommand(
 		if (options.skills?.length) {
 			args.push("--skills", options.skills.join(","));
 		}
-		args.push(command);
+		const finalCommand = options.promptPrefix ? `${options.promptPrefix}${command}` : command;
+		args.push(finalCommand);
 		proc = Bun.spawn(args, {
 			stdout: "pipe",
 			stderr: "pipe",
