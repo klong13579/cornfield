@@ -161,6 +161,89 @@ export function appendDeliveryFailureLog(entry: DeliveryFailureEntry): void {
 	}
 }
 
+/**
+ * Read recent delivery-failure entries from the global log, grouped by
+ * taskId. Returns a Map keyed by taskId with the array of failures
+ * (most-recent first). Use this to surface a per-task "X delivery
+ * failures in last N hours" indicator in `cron list` without forcing
+ * the operator to grep the JSONL file by hand.
+ *
+ * Backed by an in-memory cache: a single `cron list` invocation calls
+ * this once, the file is small (one line per persistent failure), and
+ * re-reading across `formatTaskRow()` calls would be wasted I/O.
+ */
+let deliveryFailureCache: { mtimeMs: number; entries: Map<string, DeliveryFailureEntry[]> } | null = null;
+function loadDeliveryFailureCache(): Map<string, DeliveryFailureEntry[]> {
+	const filePath = deliveryFailurePath();
+	let stat: fs.Stats | null = null;
+	try {
+		stat = fs.statSync(filePath);
+	} catch {
+		// No log file yet = no failures
+		return new Map();
+	}
+	if (deliveryFailureCache && deliveryFailureCache.mtimeMs === stat.mtimeMs) {
+		return deliveryFailureCache.entries;
+	}
+	const grouped = new Map<string, DeliveryFailureEntry[]>();
+	try {
+		const content = fs.readFileSync(filePath, "utf-8");
+		for (const line of content.split("\n")) {
+			if (!line) continue;
+			try {
+				const entry = JSON.parse(line) as DeliveryFailureEntry;
+				const arr = grouped.get(entry.taskId) ?? [];
+				arr.push(entry);
+				grouped.set(entry.taskId, arr);
+			} catch {
+				// skip malformed line
+			}
+		}
+		// Sort each group newest-first
+		for (const arr of grouped.values()) {
+			arr.sort((a, b) => b.ts - a.ts);
+		}
+	} catch (error) {
+		logger.warn("Failed to read delivery-failure log", { error: String(error) });
+	}
+	deliveryFailureCache = { mtimeMs: stat.mtimeMs, entries: grouped };
+	return grouped;
+}
+
+/** Invalidate the delivery-failure cache. Tests call this between
+ *  scenarios; production code never needs to call it. */
+export function clearDeliveryFailureCache(): void {
+	deliveryFailureCache = null;
+}
+
+/**
+ * Get the count of recent delivery failures for a given taskId.
+ * `sinceMs` (default 24h) bounds the window so a task with one
+ * historical failure three months ago doesn't keep showing a warning
+ * forever. The cron list renders this count in a "DELIVERY" column.
+ */
+export function getRecentDeliveryFailureCount(taskId: string, sinceMs = 24 * 60 * 60 * 1000): number {
+	const grouped = loadDeliveryFailureCache();
+	const arr = grouped.get(taskId);
+	if (!arr) return 0;
+	const cutoff = Date.now() - sinceMs;
+	return arr.filter(e => e.ts >= cutoff).length;
+}
+
+/** Read all delivery-failure entries (for tests / debugging). */
+export function readDeliveryFailureLog(): DeliveryFailureEntry[] {
+	const filePath = deliveryFailurePath();
+	try {
+		const content = fs.readFileSync(filePath, "utf-8");
+		return content
+			.split("\n")
+			.filter(Boolean)
+			.map(line => JSON.parse(line) as DeliveryFailureEntry);
+	} catch {
+		return [];
+	}
+}
+
 /** Read all log entries for a task from both the new tree and the legacy flat file. */
 export function readExecutionLog(taskName: string, limit = 20): ExecutionLogEntry[] {
 	const entries: ExecutionLogEntry[] = [];

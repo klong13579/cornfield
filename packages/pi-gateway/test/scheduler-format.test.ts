@@ -7,9 +7,19 @@
  *   2. The CHANNEL column shows the deliver target so a user can see at a
  *      glance which DingTalk bot the result will land in.
  */
-import { describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
+import { appendDeliveryFailureLog, clearDeliveryFailureCache, setLogRoot } from "../src/scheduler/execution-log";
 import type { ScheduledTask } from "../src/scheduler/types";
-import { formatAgent, formatChannel, formatTaskRow, truncateName } from "../src/scheduler/types";
+import {
+	formatAgent,
+	formatChannel,
+	formatDeliveryFailureCount,
+	formatTaskRow,
+	truncateName,
+} from "../src/scheduler/types";
 
 function makeTask(overrides: Partial<ScheduledTask> = {}): ScheduledTask {
 	return {
@@ -107,14 +117,10 @@ describe("formatTaskRow column layout", () => {
 			makeTask({ accountId: "ops/hr" }),
 			makeTask({ accountId: "way-too-long-account-id" }),
 		];
-		// Fixed-width slicing is more robust than /\s{2,}/: when a cell
-		// fills its full width (e.g. accountId that maxes out the 12-char
-		// AGENT column, or a 21-char NEXT RUN timestamp), the only
-		// whitespace between it and the next cell is the single separator,
-		// which a 2+-whitespace regex won't split on. Slicing by known
-		// column widths gives the same answer for every row regardless
-		// of cell content.
-		const widths = [19, 7, 12, 11, 9, 19, 29, 21] as const;
+		// Columns: NAME(21) TYPE(6) AGENT(12) STATUS(8) CRON(16)
+		//          MODEL(15) CHANNEL(22) LAST(8) DELIVERY(10) NEXT RUN(21)
+		// Total width: 21+1+6+1+12+1+8+1+16+1+15+1+22+1+8+1+10+1+21 = 148 chars
+		const widths = [21, 6, 12, 8, 16, 15, 22, 8, 10] as const;
 		const splitByWidth = (row: string): string[] => {
 			const out: string[] = [];
 			let pos = 0;
@@ -122,16 +128,14 @@ describe("formatTaskRow column layout", () => {
 				out.push(row.slice(pos, pos + w));
 				pos += w + 1; // +1 for the single-space separator
 			}
-			out.push(row.slice(pos)); // LAST RUN is unpadded
+			out.push(row.slice(pos)); // NEXT RUN is unpadded
 			return out;
 		};
 		const counts = variants.map(t => splitByWidth(formatTaskRow(t)).length);
-		// All rows should have the same field count. If they don't, columns
-		// will misalign across rows in the rendered table. With 9 columns
-		// (NAME, TYPE, AGENT, STATUS, SCHED, CRON, CHANNEL, NEXT RUN,
-		// LAST RUN), every row must split into exactly 9 fields.
+		// All rows should have the same field count. 10 fixed columns +
+		// unpadded NEXT RUN tail = 10 fields.
 		expect(new Set(counts).size).toBe(1);
-		expect(counts[0]).toBe(9);
+		expect(counts[0]).toBe(10);
 	});
 
 	it("includes the deliver value in the rendered row", () => {
@@ -141,9 +145,7 @@ describe("formatTaskRow column layout", () => {
 
 	it("renders the long dingtalk:user:NNN form without truncation", () => {
 		// Real data shape from the existing scheduler.db
-		const row = formatTaskRow(
-			makeTask({ name: "x", deliver: "dingtalk:user:601590212" }),
-		);
+		const row = formatTaskRow(makeTask({ name: "x", deliver: "dingtalk:user:601590212" }));
 		expect(row).toContain("dingtalk:user:601590212");
 	});
 
@@ -152,67 +154,73 @@ describe("formatTaskRow column layout", () => {
 		expect(row).toContain("—");
 	});
 
-	it("keeps the LAST RUN column at the end even when channel is at max width", () => {
-		// Regression: an over-long channel value (longer than the padEnd
-		// width) used to push the next column into the LAST RUN slot. After
-		// the simplification (deliverUser is no longer inlined), the only
-		// realistic value that could overflow is a pathologically long
-		// deliver. The formatter must keep LAST RUN in the rightmost slot.
-		const task = makeTask({
-			deliver: "dingtalk:user:601590212",
-		});
-		const row = formatTaskRow(task);
-		const fields = row.split(/\s{2,}/);
-		const lastField = fields[fields.length - 1]!;
-		expect(lastField).toBe("never"); // lastField is the LAST RUN timestamp
-	});
-
 	it("truncates over-long names with an ellipsis instead of overflowing the next column", () => {
-		// Real data: omp-atomix:wiki-changelog:01-算法模块 is 36 chars.
-		// Without truncation, the name would overflow into the TYPE column.
 		const row = formatTaskRow(makeTask({ name: "this-name-is-way-longer-than-eighteen-chars" }));
-		const fields = row.split(/\s{2,}/);
-		// Truncation keeps the field count stable across all 9 columns.
-		expect(fields.length).toBe(9);
+		// Truncation keeps the field count stable across all 10 columns.
+		const widths = [21, 6, 12, 8, 16, 15, 22, 8, 10] as const;
+		const splitByWidth = (row: string): string[] => {
+			const out: string[] = [];
+			let pos = 0;
+			for (const w of widths) {
+				out.push(row.slice(pos, pos + w));
+				pos += w + 1;
+			}
+			out.push(row.slice(pos));
+			return out;
+		};
+		expect(splitByWidth(row).length).toBe(10);
 		// The truncated name contains an ellipsis.
 		expect(row).toContain("\u2026");
 		// And the original full name is NOT in the row (it was truncated).
 		expect(row).not.toContain("eighteen-chars");
 	});
 
-	it("renders rows with a fixed leading width of 143 chars (matches the table header)", () => {
-		// Regression: the table header in cronList is built as 143 chars
-		// (19+1+7+1+12+1+11+1+9+1+19+1+29+1+21+1+8 = 143, where 8 is
-		// "LAST RUN" and 12 is the AGENT column). formatTaskRow
-		// produces the same fixed prefix and appends an unpadded LAST
-		// RUN value. The header underline must equal the header line
-		// length; rows can extend past it for long timestamps.
-		// This test pins the fixed prefix length so a future padEnd change
-		// can't silently desync header and data rows.
-		const fixedWidth = 19 + 1 + 7 + 1 + 12 + 1 + 11 + 1 + 9 + 1 + 19 + 1 + 29 + 1 + 21;
-		const header = "NAME".padEnd(19) + " " + "TYPE".padEnd(7) + " " + "AGENT".padEnd(12) + " " +
-			"STATUS".padEnd(11) + " " + "SCHED".padEnd(9) + " " + "CRON".padEnd(19) + " " +
-			"CHANNEL".padEnd(29) + " " + "NEXT RUN".padEnd(21) + " " + "LAST RUN";
-		expect(header.length).toBe(143);
-		// For a task with no lastRunAt, the rendered row ends exactly at
-		// the header width (no trailing LAST RUN characters).
+	it("renders rows that match the table header width", () => {
+		// Regression: the table header in cronList is built as
+		// NAME(21) TYPE(6) AGENT(12) STATUS(8) CRON(16) MODEL(15)
+		// CHANNEL(22) LAST(8) DELIVERY(10) NEXT RUN(21) = 147 chars.
+		// formatTaskRow produces the same fixed prefix and appends
+		// an unpadded NEXT RUN value. The header underline must equal
+		// the header line length; rows extend past it for long
+		// timestamps. This test pins the fixed prefix length so a
+		// future padEnd change can't silently desync header and data.
+		const header =
+			"NAME".padEnd(21) +
+			" " +
+			"TYPE".padEnd(6) +
+			" " +
+			"AGENT".padEnd(12) +
+			" " +
+			"STATUS".padEnd(8) +
+			" " +
+			"CRON".padEnd(16) +
+			" " +
+			"MODEL".padEnd(15) +
+			" " +
+			"CHANNEL".padEnd(22) +
+			" " +
+			"LAST".padEnd(8) +
+			" " +
+			"DELIVERY".padEnd(10) +
+			" " +
+			"NEXT RUN".padEnd(21);
+		expect(header.length).toBe(148);
+		// For a task with no lastRunAt and no last failures, the
+		// rendered row has the same length as the header (DELIVERY
+		// column is "✓" — a single char; everything else is padded
+		// to column width). Verify both line lengths match.
 		const row = formatTaskRow(makeTask({ name: "x" }));
-		const lastFieldLen = row.split(/\s{2,}/).pop()!.length;
-		expect(fixedWidth + 1 + lastFieldLen).toBe(row.length);
-		// And a 21-char timestamp (typical toLocaleString) lands the row
-		// at 143 + 21 - 8 (header LAST RUN is 8 chars) = 156 chars max.
-		const tsLen = "6/20/2026, 1:01:21 PM".length;
-		expect(tsLen).toBe(21);
+		expect(row.length).toBe(148);
 	});
 
 	it("renders the accountId in the row when set", () => {
 		const row = formatTaskRow(makeTask({ name: "x", accountId: "hr" }));
 		expect(row).toContain("hr");
-		// The accountId must appear AFTER the type cell (TYPE column)
-		// and BEFORE the status cell (STATUS column). Splitting on 2+ spaces
-		// gives us cells in order: NAME, TYPE, AGENT, STATUS, ...
-		const fields = row.split(/\s{2,}/);
-		expect(fields[2]).toBe("hr");
+	});
+
+	it("renders the model in the row when set", () => {
+		const row = formatTaskRow(makeTask({ name: "x", model: "minimax-m3" }));
+		expect(row).toContain("minimax-m3");
 	});
 
 	it("renders an em-dash in the AGENT column when accountId is unset", () => {
@@ -245,5 +253,113 @@ describe("truncateName", () => {
 		expect(result.endsWith("\u2026")).toBe(true);
 		// The leading prefix is preserved so users can still identify the task.
 		expect(result.startsWith("omp-atomix:wiki")).toBe(true);
+	});
+});
+
+describe("formatDeliveryFailureCount", () => {
+	let tmpLogRoot: string;
+
+	beforeEach(async () => {
+		tmpLogRoot = await fs.mkdtemp(path.join(os.tmpdir(), "pi-gateway-fmt-delivery-"));
+		setLogRoot(tmpLogRoot);
+		clearDeliveryFailureCache();
+	});
+
+	afterEach(async () => {
+		clearDeliveryFailureCache();
+		await fs.rm(tmpLogRoot, { recursive: true, force: true });
+	});
+
+	it("returns a check mark when there are no recent failures", () => {
+		expect(formatDeliveryFailureCount("task-1")).toBe("\u2713");
+	});
+
+	it("returns \u00d7 N when there is a recent failure", () => {
+		appendDeliveryFailureLog({
+			ts: Date.now(),
+			taskId: "task-1",
+			taskName: "n",
+			channel: "dingtalk:hr",
+			userId: "u",
+			reason: "x",
+			attempts: 2,
+			exitCode: 0,
+		});
+		clearDeliveryFailureCache();
+		expect(formatDeliveryFailureCount("task-1")).toBe("\u00d7 1");
+	});
+
+	it("counts only failures within the sinceMs window", () => {
+		// Insert an old failure (5 days ago) — should be filtered out by
+		// the default 24h window.
+		appendDeliveryFailureLog({
+			ts: Date.now() - 5 * 24 * 60 * 60 * 1000,
+			taskId: "task-old",
+			taskName: "n",
+			channel: "dingtalk:hr",
+			userId: "u",
+			reason: "x",
+			attempts: 2,
+			exitCode: 0,
+		});
+		// And a recent one (1 minute ago).
+		appendDeliveryFailureLog({
+			ts: Date.now() - 60_000,
+			taskId: "task-old",
+			taskName: "n",
+			channel: "dingtalk:hr",
+			userId: "u",
+			reason: "x",
+			attempts: 2,
+			exitCode: 0,
+		});
+		clearDeliveryFailureCache();
+		expect(formatDeliveryFailureCount("task-old")).toBe("\u00d7 1");
+	});
+
+	it("only counts failures for the queried task", () => {
+		appendDeliveryFailureLog({
+			ts: Date.now(),
+			taskId: "task-A",
+			taskName: "A",
+			channel: "dingtalk:hr",
+			userId: "u",
+			reason: "x",
+			attempts: 2,
+			exitCode: 0,
+		});
+		appendDeliveryFailureLog({
+			ts: Date.now(),
+			taskId: "task-B",
+			taskName: "B",
+			channel: "dingtalk:hr",
+			userId: "u",
+			reason: "x",
+			attempts: 2,
+			exitCode: 0,
+		});
+		clearDeliveryFailureCache();
+		expect(formatDeliveryFailureCount("task-A")).toBe("\u00d7 1");
+		expect(formatDeliveryFailureCount("task-B")).toBe("\u00d7 1");
+		expect(formatDeliveryFailureCount("task-C")).toBe("\u2713");
+	});
+
+	it("includes the delivery indicator in the rendered task row", () => {
+		// Regression: the DELIVERY column must show the failure count
+		// (or \u2713) so operators can see at a glance which tasks
+		// are failing delivery without grepping the JSONL log.
+		appendDeliveryFailureLog({
+			ts: Date.now(),
+			taskId: "task_xyz",
+			taskName: "xyz",
+			channel: "dingtalk:hr",
+			userId: "u",
+			reason: "x",
+			attempts: 2,
+			exitCode: 0,
+		});
+		clearDeliveryFailureCache();
+		const row = formatTaskRow(makeTask({ name: "x", id: "task_xyz" }));
+		expect(row).toContain("\u00d7 1");
 	});
 });

@@ -1,12 +1,41 @@
+export {
+	cronCreate,
+	cronDiagnose,
+	cronList,
+	cronLogs,
+	cronReconcile,
+	cronRemove,
+	cronRun,
+	cronSetStatus,
+	cronStatus,
+	cronUpdate,
+	findAgentSessionPath,
+	resolveAgentCwd,
+	suggestAccountBinding,
+} from "./cli-commands";
 export { SchedulerDaemon } from "./daemon";
-export { cronCreate, cronDiagnose, cronList, cronLogs, cronReconcile, cronRemove, cronRun, cronSetStatus, cronStatus, cronUpdate, findAgentSessionPath, resolveAgentCwd, suggestAccountBinding } from "./cli-commands";
-export { createCronTaskFromMessage, parseCronIntent, type CreateFromMessageOutcome, type CreateFromMessageResult, type CreateFromMessageError } from "./from-message";
 export { SchedulerEngine } from "./engine";
-export type { ExecutionLogEntry } from "./execution-log";
-export { appendExecutionLog, pruneAllLogs, pruneExecutionLog, readExecutionLog } from "./execution-log";
+export type { DeliveryFailureEntry, ExecutionLogEntry } from "./execution-log";
+export {
+	appendDeliveryFailureLog,
+	appendExecutionLog,
+	clearDeliveryFailureCache,
+	getRecentDeliveryFailureCount,
+	pruneAllLogs,
+	pruneExecutionLog,
+	readDeliveryFailureLog,
+	readExecutionLog,
+} from "./execution-log";
 export type { ExecutionOptions, ExecutionResult } from "./executor";
 export { executeScheduledCommand } from "./executor";
 export { SchedulerFileStore } from "./file-store";
+export {
+	type CreateFromMessageError,
+	type CreateFromMessageOutcome,
+	type CreateFromMessageResult,
+	createCronTaskFromMessage,
+	parseCronIntent,
+} from "./from-message";
 export { SchedulerDbStorage } from "./storage";
 export {
 	clearDaemonPid,
@@ -14,6 +43,7 @@ export {
 	type DaemonStatus,
 	DEFAULT_SCHEDULER_CONFIG,
 	type EngineOptions,
+	formatDeliveryFailureCount,
 	formatExecutionRow,
 	formatNextRuns,
 	formatTaskRow,

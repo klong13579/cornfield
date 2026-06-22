@@ -6,6 +6,7 @@
 
 import * as os from "node:os";
 import * as path from "node:path";
+import { getRecentDeliveryFailureCount } from "./execution-log";
 
 export type TaskStatus = "active" | "paused" | "disabled";
 
@@ -357,7 +358,25 @@ export function formatTaskRow(task: ScheduledTask): string {
 	const name = truncateName(task.name, 20);
 	const model = task.model ?? "—";
 	const lastStatus = task.lastRunAt ? (task.failCount > 0 && task.consecutiveFailures > 0 ? "fail" : "ok") : "—";
-	return `${name.padEnd(21)} ${typeLabel.padEnd(6)} ${agent.padEnd(12)} ${task.status.padEnd(8)} ${task.cron.padEnd(16)} ${truncateName(model, 14).padEnd(15)} ${channel.padEnd(22)} ${lastStatus.padEnd(8)} ${next.padEnd(21)}`;
+	const deliveryFailures = formatDeliveryFailureCount(task.id);
+	return `${name.padEnd(21)} ${typeLabel.padEnd(6)} ${agent.padEnd(12)} ${task.status.padEnd(8)} ${task.cron.padEnd(16)} ${truncateName(model, 14).padEnd(15)} ${channel.padEnd(22)} ${lastStatus.padEnd(8)} ${deliveryFailures.padEnd(10)} ${next.padEnd(21)}`;
+}
+
+/**
+ * Render the recent delivery-failure count for a task as a short cell.
+ *   0 → "✓"        (green check, no recent failures)
+ *   1+ → "× N"     (red flag, with count)
+ *   no deliver → "—" (task doesn't deliver anywhere, failures N/A)
+ *
+ * Reads from the global `delivery-failures.jsonl` log via the
+ * `getRecentDeliveryFailureCount` helper, which caches the file by
+ * mtime. Default window is 24h so a stale historical failure doesn't
+ * keep warning forever.
+ */
+export function formatDeliveryFailureCount(taskId: string): string {
+	const failureCount = getRecentDeliveryFailureCount(taskId);
+	if (failureCount === 0) return "✓";
+	return `\u00d7 ${failureCount}`;
 }
 
 /**

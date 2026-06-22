@@ -334,7 +334,7 @@ export async function cronList(storage: SchedulerDbStorage, json: boolean): Prom
 		console.log("No scheduled tasks.");
 		return;
 	}
-	// Column widths: 21+1+6+1+12+1+8+1+16+1+15+1+22+1+8+1+21 = 136 chars
+	// Column widths: 21+1+6+1+12+1+8+1+16+1+15+1+22+1+8+1+10+1+21 = 147 chars
 	const HEADER =
 		"NAME".padEnd(21) +
 		" " +
@@ -351,6 +351,8 @@ export async function cronList(storage: SchedulerDbStorage, json: boolean): Prom
 		"CHANNEL".padEnd(22) +
 		" " +
 		"LAST".padEnd(8) +
+		" " +
+		"DELIVERY".padEnd(10) +
 		" " +
 		"NEXT RUN".padEnd(21);
 	console.log(HEADER);
