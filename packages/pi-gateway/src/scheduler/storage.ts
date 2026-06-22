@@ -27,6 +27,9 @@ type TaskRow = {
 	status: string;
 	schedule_type: string | null;
 	task_type: string | null;
+	model: string | null;
+	provider: string | null;
+	enabled_toolsets: string | null;
 	timeout_ms: number | null;
 	retry_config: string | null;
 	skills_config: string | null;
@@ -67,6 +70,9 @@ const TASK_UPDATE_FIELDS = new Set<string>([
 	"status",
 	"scheduleType",
 	"taskType",
+	"model",
+	"provider",
+	"enabledToolsets",
 	"timeoutMs",
 	"retryConfig",
 	"skills",
@@ -108,6 +114,9 @@ function toTask(row: TaskRow): ScheduledTask {
 		status: row.status as ScheduledTask["status"],
 		scheduleType: (row.schedule_type as ScheduledTask["scheduleType"]) ?? "cron",
 		taskType: (row.task_type as ScheduledTask["taskType"]) ?? "shell",
+		model: row.model ?? undefined,
+		provider: row.provider ?? undefined,
+		enabledToolsets: row.enabled_toolsets ? JSON.parse(row.enabled_toolsets) : undefined,
 		timeoutMs: row.timeout_ms ?? 30_000,
 		retry: row.retry_config ? JSON.parse(row.retry_config) : undefined,
 		skills: row.skills_config ? JSON.parse(row.skills_config) : undefined,
@@ -120,9 +129,9 @@ function toTask(row: TaskRow): ScheduledTask {
 		runCount: row.run_count,
 		failCount: row.fail_count,
 		deliver: row.deliver ?? undefined,
-	deliverUser: row.deliver_user ?? undefined,
-	accountId: row.account_id ?? undefined,
-};
+		deliverUser: row.deliver_user ?? undefined,
+		accountId: row.account_id ?? undefined,
+	};
 }
 
 function toExecution(row: ExecutionRow): TaskExecution {
@@ -201,11 +210,12 @@ export class SchedulerDbStorage implements SchedulerStorage {
 		this.#insertTaskStmt = this.#db.prepare(`
 			INSERT INTO tasks (
 				id, name, description, cron, command, status,
-				schedule_type, task_type, timeout_ms,
+				schedule_type, task_type,
+				model, provider, enabled_toolsets, timeout_ms,
 				retry_config, skills_config, pre_script, consecutive_failures,
 				created_at, updated_at, last_run_at, next_run_at,
 				run_count, fail_count, deliver, deliver_user, account_id
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`);
 
 		this.#getTaskStmt = this.#db.prepare("SELECT * FROM tasks WHERE id = ?");
@@ -282,10 +292,16 @@ export class SchedulerDbStorage implements SchedulerStorage {
 		const hasDeliver = columns.some(c => c.name === "deliver");
 		const hasDeliverUser = columns.some(c => c.name === "deliver_user");
 		const hasAccountId = columns.some(c => c.name === "account_id");
+		const hasModel = columns.some(c => c.name === "model");
+		const hasProvider = columns.some(c => c.name === "provider");
+		const hasEnabledToolsets = columns.some(c => c.name === "enabled_toolsets");
 		if (!hasDeliverUser) this.#db.exec("ALTER TABLE tasks ADD COLUMN deliver_user TEXT;");
 		if (!hasAccountId) this.#db.exec("ALTER TABLE tasks ADD COLUMN account_id TEXT;");
 		if (!hasScheduleType) this.#db.exec("ALTER TABLE tasks ADD COLUMN schedule_type TEXT;");
 		if (!hasTaskType) this.#db.exec("ALTER TABLE tasks ADD COLUMN task_type TEXT;");
+		if (!hasModel) this.#db.exec("ALTER TABLE tasks ADD COLUMN model TEXT;");
+		if (!hasProvider) this.#db.exec("ALTER TABLE tasks ADD COLUMN provider TEXT;");
+		if (!hasEnabledToolsets) this.#db.exec("ALTER TABLE tasks ADD COLUMN enabled_toolsets TEXT;");
 		if (!hasTimeoutMs) this.#db.exec("ALTER TABLE tasks ADD COLUMN timeout_ms INTEGER;");
 		if (!hasRetry) this.#db.exec("ALTER TABLE tasks ADD COLUMN retry_config TEXT;");
 		if (!hasSkills) this.#db.exec("ALTER TABLE tasks ADD COLUMN skills_config TEXT;");
@@ -309,7 +325,10 @@ export class SchedulerDbStorage implements SchedulerStorage {
 			task.status,
 			task.scheduleType ?? "cron",
 			task.taskType ?? "shell",
-			task.timeoutMs ?? 30_000,
+			task.model ?? null,
+			task.provider ?? null,
+			task.enabledToolsets ? JSON.stringify(task.enabledToolsets) : null,
+			task.timeoutMs ?? (task.taskType === "agent" ? 120_000 : 30_000),
 			task.retry ? JSON.stringify(task.retry) : null,
 			task.skills ? JSON.stringify(task.skills) : null,
 			task.preScript ?? null,

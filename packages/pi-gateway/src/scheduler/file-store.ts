@@ -63,6 +63,9 @@ export class SchedulerFileStore {
 				cron?: string;
 				command?: string;
 				type?: string;
+				model?: string;
+				provider?: string;
+				enabledToolsets?: string[];
 				timeoutMs?: number;
 				retry?: import("./types").RetryConfig;
 				skills?: string[];
@@ -80,6 +83,9 @@ export class SchedulerFileStore {
 				cron: data.cron,
 				command: data.command,
 				type: (data.type as "shell" | "agent" | undefined) ?? "shell",
+				model: data.model,
+				provider: data.provider,
+				enabledToolsets: data.enabledToolsets,
 				timeoutMs: data.timeoutMs,
 				retry: data.retry,
 				skills: data.skills,
@@ -134,6 +140,9 @@ export class SchedulerFileStore {
 						cron: def.cron,
 						command: def.command,
 						taskType: def.type ?? "shell",
+						model: def.model,
+						provider: def.provider,
+						enabledToolsets: def.enabledToolsets,
 						timeoutMs: def.timeoutMs ?? (def.type === "agent" ? 120_000 : 30_000),
 						retry: def.retry,
 						skills: def.skills,
@@ -156,14 +165,27 @@ export class SchedulerFileStore {
 				const cronChanged = existing.cron !== def.cron;
 				const commandChanged = existing.command !== def.command;
 				const typeChanged = existing.taskType !== (def.type ?? "shell");
+				const modelChanged = existing.model !== (def.model ?? undefined);
+				const providerChanged = existing.provider !== (def.provider ?? undefined);
 				const deliverChanged = existing.deliver !== (def.deliver ?? undefined);
 				const deliverUserChanged = existing.deliverUser !== (def.deliverUser ?? undefined);
-				if (cronChanged || commandChanged || typeChanged || deliverChanged || deliverUserChanged) {
+				if (
+					cronChanged ||
+					commandChanged ||
+					typeChanged ||
+					modelChanged ||
+					providerChanged ||
+					deliverChanged ||
+					deliverUserChanged
+				) {
 					try {
 						this.#storage.updateTask(existing.id, {
 							cron: def.cron,
 							command: def.command,
 							taskType: def.type ?? "shell",
+							model: def.model,
+							provider: def.provider,
+							enabledToolsets: def.enabledToolsets,
 							timeoutMs: def.timeoutMs,
 							retry: def.retry,
 							skills: def.skills,

@@ -15,10 +15,17 @@
  * - Collects all `message_end` events with `role: "assistant"` between prompt and end.
  */
 
+import type { AssistantMessage, ToolCall, ToolResultMessage, Usage } from "@oh-my-pi/pi-ai";
 import { logger } from "@oh-my-pi/pi-utils";
 import type { FileSink } from "bun";
 import { resolveCredentialEnvVars } from "./credential-resolver";
-import type { InboundMessage, SessionRecord } from "./types";
+import type {
+	AgentResponseMeta,
+	AgentResponseToolCall,
+	AgentResponseToolResult,
+	InboundMessage,
+	SessionRecord,
+} from "./types";
 
 // Inline types for RPC protocol messages the bridge handles
 type RpcExtensionUIResponse =
@@ -81,7 +88,7 @@ export interface AgentBridgeOptions {
 	crashBackoffMs?: number;
 }
 
-/** Agent event from RPC stream */
+/** Inline-shape RPC event (subset of @oh-my-pi/pi-agent AgentEvent). */
 interface AgentEvent {
 	type: string;
 	id?: string;
@@ -190,7 +197,8 @@ export class AgentBridge {
 	}
 
 	getSnapshot(): AgentBridgeSnapshot {
-		const busy = this.#pendingPrompts.size > 0 || this.#pendingCommands.size > 0 || this.#activePromptId !== undefined;
+		const busy =
+			this.#pendingPrompts.size > 0 || this.#pendingCommands.size > 0 || this.#activePromptId !== undefined;
 		const state: AgentBridgeLifecycleState = this.#getLifecycleState(busy);
 		return {
 			state,
@@ -232,23 +240,47 @@ export class AgentBridge {
 
 	/**
 	 * Forward a message to OMP and return the assistant's response text.
+	 *
+	 * Backward-compatible thin wrapper around `forwardWithMeta` — returns just
+	 * the formatted `text` field. New callers should prefer `forwardWithMeta`
+	 * when they need tool/model/timing metadata for reply formatting.
 	 */
 	async forward(msg: InboundMessage, session: SessionRecord): Promise<string | null> {
+		const meta = await this.forwardWithMeta(msg, session);
+		return meta?.text ?? null;
+	}
+
+	/**
+	 * Forward a message to OMP and return the full agent response metadata.
+	 *
+	 * Returns `null` for empty inbound text. For circuit-open / not-running /
+	 * crash-recovery paths, returns a populated meta with `isFallback: true`
+	 * and a localized `text` so the caller's user-facing reply still works
+	 * (the caller can choose to suppress status-line chrome via `isFallback`).
+	 */
+	async forwardWithMeta(msg: InboundMessage, session: SessionRecord): Promise<AgentResponseMeta | null> {
 		const text = this.#extractText(msg);
 		if (!text.trim()) {
 			logger.debug("Empty message, skipping agent");
 			return null;
 		}
 
+		const startedAt = Date.now();
+
 		return this.#runExclusive(async () => {
 			if (!this.#canAttemptPrompt()) {
 				logger.warn("Agent bridge circuit is open", { openedAt: this.#circuitOpenedAt });
-				return CIRCUIT_OPEN_MESSAGE;
+				return this.#fallbackMeta(CIRCUIT_OPEN_MESSAGE, startedAt);
 			}
 
 			if (!this.isRunning) {
 				logger.warn("Agent bridge not running, attempting restart");
-				await this.#spawnAndWaitReady();
+				try {
+					await this.#spawnAndWaitReady();
+				} catch (err) {
+					this.#recordPromptFailure();
+					return this.#fallbackMeta(`系统错误：${err instanceof Error ? err.message : String(err)}`, startedAt);
+				}
 			}
 
 			logger.debug("Forwarding to agent", {
@@ -265,29 +297,110 @@ export class AgentBridge {
 					await this.#switchSession(session.ompSessionPath);
 				}
 				const events = await this.#promptAndWait(text, timeoutMs);
-				const response = this.#extractAssistantText(events);
+				const rawResponse = this.#extractAssistantText(events);
 
-				if (!response) {
+				if (!rawResponse) {
 					logger.warn("Agent returned empty response");
-					return "（Agent 未返回内容）";
+					return this.#fallbackMeta("（Agent 未返回内容）", startedAt);
 				}
 
-				logger.debug("Raw response before format", { text: response.slice(0, 300) });
-
-				const formatted = this.#formatResponse(response.trim());
-				logger.debug("Agent responded", { responseLength: formatted.length, preview: formatted.slice(0, 100) });
+				const rawText = rawResponse.trim();
+				const formatted = this.#formatResponse(rawText);
+				logger.debug("Agent responded", {
+					responseLength: formatted.length,
+					preview: formatted.slice(0, 100),
+				});
 				this.#recordPromptSuccess();
-				return formatted;
+				return this.#buildMetaFromEvents(events, rawText, formatted, startedAt, { isFallback: false });
 			} catch (err) {
 				this.#recordPromptFailure();
 				if (this.#isCrashError(err)) {
 					logger.warn("Agent process crashed, attempting recovery");
 					await this.#attemptRecovery();
-					return "系统正在恢复中，请稍后再试。";
+					return this.#fallbackMeta("系统正在恢复中，请稍后再试。", startedAt);
 				}
 				const message = err instanceof Error ? err.message : String(err);
 				logger.error("Agent bridge failed", { error: message });
-				return `系统错误：${message}`;
+				return this.#fallbackMeta(`系统错误：${message}`, startedAt);
+			}
+		});
+	}
+
+	/**
+	 * Execute a plain-text prompt through the agent bridge.
+	 *
+	 * Unlike forward(), this does not need an InboundMessage or SessionRecord.
+	 * It sends the prompt directly to the RPC process and returns the response text.
+	 * Used by the cron scheduler to reuse the already-warm agent process.
+	 *
+	 * When `options.sessionPath` is provided, the bridge switches to that
+	 * session before prompting and restores the previously-active session
+	 * after the prompt completes. This is what the cron path needs: a cron
+	 * task must not pollute the active IM session with its own conversation
+	 * state, and the next IM message after the cron tick should land in its
+	 * own session again. The whole switch/prompt/restore sequence runs
+	 * under the bridge's `#runExclusive` lock, so it is atomic with respect
+	 * to other IM traffic sharing the same bridge.
+	 *
+	 * Throws on failure (no Chinese fallback messages — caller decides error handling).
+	 */
+	async executePrompt(
+		prompt: string,
+		options?: { timeoutMs?: number; sessionPath?: string },
+	): Promise<string> {
+		if (!prompt.trim()) {
+			throw new Error("Empty prompt");
+		}
+
+		return this.#runExclusive(async () => {
+			if (!this.#canAttemptPrompt()) {
+				throw new Error("Agent bridge circuit is open");
+			}
+
+			if (!this.isRunning) {
+				await this.#spawnAndWaitReady();
+			}
+
+			const timeoutMs = options?.timeoutMs ?? this.#options.timeoutMs ?? 120_000;
+			const sessionPath = options?.sessionPath;
+			const previousSessionPath = this.#activeSessionPath;
+
+			if (sessionPath) {
+				try {
+					await this.#switchSession(sessionPath);
+				} catch (err) {
+					const message = err instanceof Error ? err.message : String(err);
+					throw new Error(`Failed to switch to cron session: ${message}`);
+				}
+			}
+
+			try {
+				const events = await this.#promptAndWait(prompt, timeoutMs);
+				const response = this.#extractAssistantText(events);
+
+				if (!response) {
+					throw new Error("Agent returned empty response");
+				}
+
+				this.#recordPromptSuccess();
+				return response.trim();
+			} finally {
+				// Restore the session that was active before this cron call so the
+				// next IM message on this bridge lands back in its own session.
+				// Only restore when (a) caller asked for a session switch and
+				// (b) there was an actual prior session to restore. If there
+				// wasn't, the bridge was idle — leave it on the cron session
+				// (it's harmless because the next prompt will switch anyway).
+				if (sessionPath && previousSessionPath && previousSessionPath !== this.#activeSessionPath) {
+					try {
+						await this.#switchSession(previousSessionPath);
+					} catch (err) {
+						logger.warn("Failed to restore prior session after cron prompt", {
+							priorSession: previousSessionPath,
+							error: err instanceof Error ? err.message : String(err),
+						});
+					}
+				}
 			}
 		});
 	}
@@ -335,7 +448,12 @@ export class AgentBridge {
 	async #switchSession(sessionPath: string): Promise<void> {
 		if (this.#activeSessionPath === sessionPath) return;
 		const response = await this.#sendCommandAndWait("switch_session", { sessionPath }, 30_000);
-		if (response.data && typeof response.data === "object" && "cancelled" in response.data && response.data.cancelled) {
+		if (
+			response.data &&
+			typeof response.data === "object" &&
+			"cancelled" in response.data &&
+			response.data.cancelled
+		) {
 			throw new Error(`Switch session cancelled: ${sessionPath}`);
 		}
 		this.#activeSessionPath = sessionPath;
@@ -387,7 +505,7 @@ export class AgentBridge {
 				stderr: "pipe",
 				stdin: "pipe",
 				cwd: this.#options.cwd ?? process.cwd(),
-			env: { ...process.env, ...resolveCredentialEnvVars() },
+				env: { ...process.env, ...resolveCredentialEnvVars() },
 			});
 
 			const stdin = proc.stdin as FileSink;
@@ -636,7 +754,6 @@ export class AgentBridge {
 		]);
 	}
 
-
 	async #runExclusive<T>(operation: () => Promise<T>): Promise<T> {
 		const previous = this.#operationTail;
 		const { promise: current, resolve } = Promise.withResolvers<void>();
@@ -649,7 +766,11 @@ export class AgentBridge {
 		}
 	}
 
-	async #sendCommandAndWait(command: string, payload: Record<string, unknown>, timeoutMs: number): Promise<AgentEvent> {
+	async #sendCommandAndWait(
+		command: string,
+		payload: Record<string, unknown>,
+		timeoutMs: number,
+	): Promise<AgentEvent> {
 		const commandId = `c_${++this.#commandIdCounter}`;
 		const { promise, resolve, reject } = Promise.withResolvers<AgentEvent>();
 		const timeout = setTimeout(() => {
@@ -710,6 +831,71 @@ export class AgentBridge {
 		return textContent?.text ?? null;
 	}
 
+	/**
+	 * Build a meta object for a successful agent run by mining the event list
+	 * for model, provider, usage, duration, tool calls, and tool results.
+	 *
+	 * The bridge's inline `AgentEvent.message` is loosely typed (the wire
+	 * carries a rich `@oh-my-pi/pi-ai` AssistantMessage / ToolResultMessage,
+	 * but the bridge's local interface is a subset). We cast at the boundary
+	 * via `as unknown as` so the rest of the function has real types and
+	 * `useLiteralKeys` lint passes.
+	 */
+	#buildMetaFromEvents(
+		events: AgentEvent[],
+		rawText: string,
+		formattedText: string,
+		startedAt: number,
+		overrides: { isFallback: boolean; error?: string | null; aborted?: boolean } = {
+			isFallback: false,
+		},
+	): AgentResponseMeta {
+		const wireEvents = events as unknown as Array<WireEvent>;
+
+		const lastAssistant = lastAssistantMessage(wireEvents);
+		const toolResults = collectToolResults(wireEvents);
+		const toolCalls = lastAssistant ? collectToolCallsFromAssistant(lastAssistant) : [];
+
+		const model = lastAssistant?.model ?? null;
+		const provider = (lastAssistant?.provider as string | undefined) ?? null;
+		const agentDurationMs = lastAssistant?.duration ?? null;
+		const usage: AgentResponseMeta["usage"] = lastAssistant?.usage ? extractUsage(lastAssistant.usage) : null;
+
+		return {
+			text: formattedText,
+			rawText,
+			model,
+			provider,
+			usage,
+			agentDurationMs,
+			taskDurationMs: Date.now() - startedAt,
+			effort: null,
+			toolCalls,
+			toolResults,
+			error: overrides.error ?? null,
+			aborted: overrides.aborted ?? false,
+			isFallback: overrides.isFallback,
+		};
+	}
+
+	#fallbackMeta(text: string, startedAt: number, error: string | null = null): AgentResponseMeta {
+		return {
+			text,
+			rawText: text,
+			model: null,
+			provider: null,
+			usage: null,
+			agentDurationMs: null,
+			taskDurationMs: Date.now() - startedAt,
+			effort: null,
+			toolCalls: [],
+			toolResults: [],
+			error,
+			aborted: false,
+			isFallback: true,
+		};
+	}
+
 	// ═══════════════════════════════════════════════════════════════
 	// Crash Recovery
 	// ═══════════════════════════════════════════════════════════════
@@ -729,14 +915,18 @@ export class AgentBridge {
 		if (this.#crashTimestamps.length > CRASH_WINDOW_LIMIT) {
 			this.#crashSuppressed = true;
 			this.#ready = false;
-			logger.error("Agent bridge entered ERROR state after repeated crashes", { crashes: this.#crashTimestamps.length });
+			logger.error("Agent bridge entered ERROR state after repeated crashes", {
+				crashes: this.#crashTimestamps.length,
+			});
 			this.#lastError = "Agent bridge entered ERROR state after repeated crashes";
 		}
 	}
 
 	async #attemptRecovery(): Promise<void> {
 		if (this.#crashSuppressed) {
-			logger.error("Agent bridge recovery suppressed after repeated crashes", { crashes: this.#crashTimestamps.length });
+			logger.error("Agent bridge recovery suppressed after repeated crashes", {
+				crashes: this.#crashTimestamps.length,
+			});
 			return;
 		}
 		const maxRetries = this.#options.maxCrashRetries ?? 3;
@@ -797,4 +987,111 @@ export class AgentBridge {
 		}
 		return cleaned.slice(0, cutAt) + TRUNCATE_NOTICE;
 	}
+
+	// ═══════════════════════════════════════════════════════════════
+	// RPC Commands (model management, state queries)
+	// ═══════════════════════════════════════════════════════════════
+
+	/**
+	 * Get available models from the agent via RPC.
+	 * Returns an array of model objects with provider, id, contextWindow, reasoning, thinking fields.
+	 * Requires the agent process to be running.
+	 */
+	async getAvailableModels(): Promise<AgentEvent> {
+		return this.#runExclusive(async () => {
+			if (!this.isRunning) {
+				throw new Error("Agent process not running");
+			}
+			return await this.#sendCommandAndWait("get_available_models", {}, 30_000);
+		});
+	}
+
+	/**
+	 * Switch the agent's active model via RPC.
+	 * Returns the model object if successful.
+	 * Requires the agent process to be running.
+	 */
+	async setModel(provider: string, modelId: string): Promise<AgentEvent> {
+		return this.#runExclusive(async () => {
+			if (!this.isRunning) {
+				throw new Error("Agent process not running");
+			}
+			return await this.#sendCommandAndWait("set_model", { provider, modelId }, 30_000);
+		});
+	}
+
+	/**
+	 * Get the agent's current session state via RPC.
+	 * Returns model, thinkingLevel, isStreaming, and other state fields.
+	 * Requires the agent process to be running.
+	 */
+	async getState(): Promise<AgentEvent> {
+		return this.#runExclusive(async () => {
+			if (!this.isRunning) {
+				throw new Error("Agent process not running");
+			}
+			return await this.#sendCommandAndWait("get_state", {}, 30_000);
+		});
+	}
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// Type-guarded event extraction
+// ═════════════════════════════════════════════════════════════════════
+
+/**
+ * Wire-shape RPC event carrying a rich `@oh-my-pi/pi-ai` message. The bridge's
+ * public `AgentEvent` type is narrower on purpose; these helpers cast at the
+ * boundary so the rest of the code uses real types.
+ */
+type WireMessage = AssistantMessage | ToolResultMessage | { role: string; [k: string]: unknown };
+type WireEvent = { type: string; message?: WireMessage; [k: string]: unknown };
+
+function lastAssistantMessage(events: WireEvent[]): AssistantMessage | undefined {
+	for (let i = events.length - 1; i >= 0; i--) {
+		const ev = events[i];
+		if (ev.type !== "message_end") continue;
+		const msg = ev.message;
+		if (msg && msg.role === "assistant") return msg as AssistantMessage;
+	}
+	return undefined;
+}
+
+function collectToolResults(events: WireEvent[]): AgentResponseToolResult[] {
+	const out: AgentResponseToolResult[] = [];
+	for (const ev of events) {
+		if (ev.type !== "message_end") continue;
+		const msg = ev.message;
+		if (!msg || msg.role !== "toolResult") continue;
+		const tr = msg as ToolResultMessage;
+		out.push({
+			id: tr.toolCallId,
+			name: tr.toolName,
+			isError: tr.isError === true,
+		});
+	}
+	return out;
+}
+
+function collectToolCallsFromAssistant(assistant: AssistantMessage): AgentResponseToolCall[] {
+	const out: AgentResponseToolCall[] = [];
+	for (const item of assistant.content) {
+		if (item.type !== "toolCall") continue;
+		const tc = item as ToolCall;
+		out.push({
+			id: tc.id,
+			name: tc.name,
+			args: tc.arguments ?? null,
+		});
+	}
+	return out;
+}
+
+function extractUsage(usage: Usage): NonNullable<AgentResponseMeta["usage"]> {
+	return {
+		input: usage.input,
+		output: usage.output,
+		cacheRead: usage.cacheRead,
+		cacheWrite: usage.cacheWrite,
+	};
 }

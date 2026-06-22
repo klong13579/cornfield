@@ -106,6 +106,10 @@ export function createCronTaskFromMessage(
 	accountId: string | undefined,
 	config: Parameters<typeof resolveAgentCwd>[1],
 	storage: SchedulerDbStorage,
+	/** Channel platform for auto-fill deliver (e.g. "dingtalk") */
+	sourceChannel?: string,
+	/** User ID for auto-fill deliverUser */
+	sourceUser?: string,
 ): CreateFromMessageOutcome {
 	if (!accountId) {
 		return { ok: false, error: { reason: "no-account-id" } };
@@ -157,6 +161,8 @@ export function createCronTaskFromMessage(
 			command: intent.command,
 			taskType: intent.type,
 			timeoutMs: fileContent.timeoutMs,
+			deliver: sourceChannel,
+			deliverUser: sourceUser,
 			status: "active",
 			createdAt: Date.now(),
 			updatedAt: Date.now(),

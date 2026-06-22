@@ -31,15 +31,38 @@ export interface ExecutionOptions {
 	cwd?: string;
 }
 
+interface InjectionPattern {
+	pattern: RegExp;
+	id: string;
+}
+
+const CRON_INJECTION_PATTERNS: InjectionPattern[] = [
+	{ pattern: /ignore\s+(?:\w+\s+)*(?:previous|all|above|prior)\s+(?:\w+\s+)*instructions/i, id: "prompt_injection" },
+	{ pattern: /do\s+not\s+tell\s+the\s+user/i, id: "deception_hide" },
+	{ pattern: /system\s+prompt\s+override/i, id: "sys_prompt_override" },
+	{ pattern: /disregard\s+(your|all|any)\s+(instructions|rules|guidelines)/i, id: "disregard_rules" },
+	{ pattern: /cat\s+[^\n]*(\.env|credentials|\.netrc|\.pgpass)/i, id: "read_secrets" },
+	{ pattern: /rm\s+-rf\s+\//i, id: "destructive_root_rm" },
+];
+
+function scanCronPrompt(prompt: string): string | null {
+	for (const entry of CRON_INJECTION_PATTERNS) {
+		if (entry.pattern.test(prompt)) {
+			return entry.id;
+		}
+	}
+	return null;
+}
+
 /**
- * Run a scheduled task command, optionally preceded by a pre-script.
+ * Run a scheduled task command.
  *
  * - shell: executes via `sh -c <command>`
- * - agent: executes via `omp --print <command>` (requires ompBinary)
- * - preScript: optional Python script run before the command; its stdout is
- *   injected as prefix context. If it outputs [SILENT], execution is skipped.
+ * - agent: executes via `omp --print <command>` (requires ompBinary).
+ *   If the command contains injection patterns, execution is blocked.
  *
- * Returns the full stdout, stderr, exit code, and whether a timeout occurred.
+ * preScript: optional script run before the command; its stdout is
+ * injected as prefix context. If it outputs [SILENT], execution is skipped.
  */
 export async function executeScheduledCommand(
 	command: string,
@@ -47,6 +70,23 @@ export async function executeScheduledCommand(
 ): Promise<ExecutionResult> {
 	const taskType = options.taskType ?? "shell";
 	const timeoutMs = options.timeoutMs ?? (taskType === "agent" ? 120_000 : 30_000);
+
+	// Injection scan for agent task prompts
+	if (taskType === "agent") {
+		const blocked = scanCronPrompt(command);
+		if (blocked) {
+			logger.warn("Agent task prompt blocked by injection scanner", {
+				pattern: blocked,
+				preview: command.slice(0, 100),
+			});
+			return {
+				exitCode: 1,
+				output: "",
+				stderr: `[BLOCKED] Task prompt matches threat pattern '${blocked}'.`,
+				timedOut: false,
+			};
+		}
+	}
 
 	// Run pre-script if configured
 	const preScript = options.preScript;
@@ -57,14 +97,9 @@ export async function executeScheduledCommand(
 		}
 		if (scriptResult.output) {
 			if (taskType === "shell") {
-				// Use a here-doc with a per-run random marker so the pre-script
-				// output is printed verbatim (no shell interpretation, no
-				// variable expansion, safe for arbitrary content).
 				const marker = `OMP_PRESCRIPT_${Math.random().toString(36).slice(2, 10)}`;
 				command = `cat <<'${marker}'\nPre-script output:\n${scriptResult.output}\n\n${marker}\n\n${command}`;
 			} else {
-				// agent: pass the pre-script output as prompt prefix; OMP
-				// `--print` treats the whole string as a user message.
 				command = `Pre-script output:\n${scriptResult.output}\n\n${command}`;
 			}
 		}
@@ -115,8 +150,6 @@ export async function executeScheduledCommand(
 		return { exitCode, output, stderr, timedOut: _timedOut };
 	})();
 
-	// Timeout: kill the process, then let execPromise finish with whatever output
-	// was buffered before the kill (streams close, text() resolves with partial data).
 	const timeoutPromise = Bun.sleep(timeoutMs).then(async () => {
 		_timedOut = true;
 		try {
@@ -124,10 +157,14 @@ export async function executeScheduledCommand(
 		} catch {
 			// process may already be gone
 		}
-		// Wait for the exec promise to settle so we get partial output.
-		// If execPromise already resolved, this returns immediately.
-		return (await Promise.race([execPromise, Bun.sleep(1000).then(() => null)])) ??
-			{ exitCode: 124, output, stderr, timedOut: true };
+		return (
+			(await Promise.race([execPromise, Bun.sleep(1000).then(() => null)])) ?? {
+				exitCode: 124,
+				output,
+				stderr,
+				timedOut: true,
+			}
+		);
 	});
 
 	return Promise.race([execPromise, timeoutPromise]);

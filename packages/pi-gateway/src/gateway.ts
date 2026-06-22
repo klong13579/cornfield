@@ -29,15 +29,22 @@ import { DEFAULT_SCHEDULER_CONFIG, getSchedulerDbPath, getSchedulerDir } from ".
 import { type BridgeStat, type QueueStat, SessionManager } from "./session-manager";
 import { SQLiteSessionStore } from "./session-store";
 import type {
+	AgentResponseMeta,
 	ChannelHealth,
 	DingtalkAccountConfig,
 	GatewayConfig,
 	InboundMessage,
 	MessageContent,
 	OutboundMessage,
+	ReplyFormatterContext,
 	SessionRecord,
 } from "./types";
 
+function formatModelNumber(n: number): string {
+	if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+	if (n >= 1_000) return `${(n / 1_000).toFixed(0)}k`;
+	return String(n);
+}
 export function createAccountBridgeOptions(
 	agentConfig: GatewayConfig["agent"],
 	account: DingtalkAccountConfig,
@@ -819,6 +826,22 @@ export class Gateway {
 		return null;
 	}
 
+	/**
+	 * Get an AgentBridge by accountId.
+	 * Used by the cron scheduler to reuse the already-warm agent process
+	 * for scheduled agent tasks instead of spawning a new omp --print.
+	 */
+	getAccountBridge(accountId: string): AgentBridge | undefined {
+		if (this.#accountBridges.has(accountId)) {
+			return this.#accountBridges.get(accountId);
+		}
+		// Fall back to default bridge if no per-account bridges exist
+		if (this.#accountBridges.size === 0 && this.#bridge.isRunning) {
+			return this.#bridge;
+		}
+		return undefined;
+	}
+
 	async #writeStatusFile(): Promise<void> {
 		const dataDir = getDataDir(this.#config);
 		const statusPath = path.join(dataDir, STATUS_FILE);
@@ -966,13 +989,126 @@ export class Gateway {
 
 		const startedAt = Date.now();
 		const ompBinary = this.#config.agent?.ompPath ?? "omp";
-		const { exitCode, output, stderr, timedOut } = await executeScheduledCommand(task.command, {
-			taskType: task.taskType,
-			timeoutMs: task.timeoutMs,
-			ompBinary,
-			skills: task.skills,
-			preScript: task.preScript,
-		});
+		const isAgent = task.taskType === "agent";
+
+		// Resolve the agentDir once for this task. It's used in two places:
+		//   1. The warm-bridge path: build a per-task session file under
+		//      <agentDir>/sessions/, so cron state never mixes with IM sessions.
+		//   2. The fallback path: pass as Bun.spawn cwd so `omp -p` finds
+		//      the right `.omp/config.yml` for this account.
+		// When the task has no accountId, or the account is not in this
+		// gateway's in-memory config (e.g. the account was removed during a
+		// SIGHUP reload, or it was never a per-account bridge to begin with),
+		// both paths fall back gracefully — the warm path skips session
+		// switching, the fallback path runs in the gateway's cwd.
+		const agentDir = task.accountId ? this.#accountAgentDirs.get(task.accountId) : undefined;
+		const cronSessionPath =
+			agentDir && task.accountId ? buildAgentSessionPath(agentDir, `cron_${task.id}`) : undefined;
+
+		// Surface — at warn level, not info — the limitations of the warm
+		// bridge path so operators see them in logs instead of discovering
+		// that task.skills silently does nothing. The fallback path
+		// (omp -p) does honour these; the warm path cannot because the
+		// long-running bridge has no shell to run preScripts and no
+		// per-task skills loading beyond what the agentDir already provides.
+		if (isAgent && task.accountId && this.getAccountBridge(task.accountId)) {
+			if (task.skills?.length) {
+				logger.warn("Cron task has skills set but warm-bridge path cannot override per-task skills", {
+					taskName: task.name,
+					skills: task.skills,
+					note: "fall back to omp -p (remove --account, or set the skill at agentDir level) to honour skills",
+				});
+			}
+			if (task.preScript) {
+				logger.warn("Cron task has preScript set but warm-bridge path cannot run it", {
+					taskName: task.name,
+					preScript: task.preScript,
+					note: "fall back to omp -p (remove --account) to honour preScript",
+				});
+			}
+		}
+
+		let exitCode = 0;
+		let output = "";
+		let stderr = "";
+		let timedOut = false;
+
+		// Try to reuse an already-warm AgentBridge for agent tasks with accountId
+		if (isAgent && task.accountId) {
+			const bridge = this.getAccountBridge(task.accountId);
+			if (bridge) {
+				logger.debug("Reusing AgentBridge for cron task", {
+					taskName: task.name,
+					accountId: task.accountId,
+					modelOverride: task.model ?? null,
+					sessionPath: cronSessionPath,
+				});
+
+				// Switch model if the task specifies a different one
+				let originalModel: { provider?: string; model?: string } | undefined;
+				if (task.model) {
+					try {
+						const state = await bridge.getState();
+						const d = state.data as Record<string, unknown> | undefined;
+						if (d?.model) {
+							originalModel = {
+								provider: typeof d.provider === "string" ? d.provider : undefined,
+								model: typeof d.model === "string" ? d.model : undefined,
+							};
+						}
+						await bridge.setModel(task.provider ?? "", task.model);
+					} catch (switchErr) {
+						logger.warn("Failed to switch model for cron task, continuing with current model", {
+							taskName: task.name,
+							error: String(switchErr),
+						});
+					}
+				}
+
+				try {
+					const response = await bridge.executePrompt(task.command, {
+						timeoutMs: task.timeoutMs,
+						sessionPath: cronSessionPath,
+					});
+					output = response;
+					exitCode = 0;
+				} catch (err) {
+					output = "";
+					stderr = err instanceof Error ? err.message : String(err);
+					exitCode = 1;
+					logger.warn("AgentBridge cron task failed, falling back to omp --print", {
+						taskName: task.name,
+						error: stderr,
+					});
+					// Fall through to executeScheduledCommand fallback below
+				} finally {
+					// Restore original model after execution
+					if (originalModel?.model) {
+						try {
+							await bridge.setModel(originalModel.provider ?? "", originalModel.model);
+						} catch {
+							// Best-effort — bridge will use the overridden model until next channel message
+						}
+					}
+				}
+			}
+		}
+
+		// Fall back to subprocess execution
+		if (!output && !stderr) {
+			const result = await executeScheduledCommand(task.command, {
+				taskType: task.taskType,
+				timeoutMs: task.timeoutMs,
+				ompBinary,
+				skills: task.skills,
+				preScript: task.preScript,
+				cwd: agentDir,
+			});
+			exitCode = result.exitCode;
+			output = result.output;
+			stderr = result.stderr;
+			timedOut = result.timedOut;
+		}
 		const endedAt = Date.now();
 		const durationMs = endedAt - startedAt;
 
@@ -1082,6 +1218,222 @@ export class Gateway {
 		}
 	}
 
+	/**
+	 * Send the agent's reply through the channel-specific `formatReply` (if
+	 * the channel implements one) so platforms that opt into richer visuals
+	 * get status lines, tool summaries, and quote content. Channels that
+	 * haven't implemented `formatReply` get the plain-text fallback.
+	 */
+	async #sendFormattedAgentResponse(msg: InboundMessage, meta: AgentResponseMeta, accountId: string): Promise<void> {
+		const channel = this.#registry.get(msg.channelId);
+		const context: ReplyFormatterContext = {
+			accountId,
+			agentName: this.#resolveAgentName(accountId),
+			// dapiCalls is wired up in a follow-up; until then pass 0 so the
+			// status line renders the placeholder consistently.
+			dapiCalls: 0,
+		};
+
+		const outbound = channel?.formatReply ? channel.formatReply(meta, msg, context) : null;
+
+		if (!outbound) {
+			await this.#sendAgentResponse(msg, meta.text);
+			return;
+		}
+
+		try {
+			await this.#registry.sendMessage(outbound);
+		} catch (err) {
+			logger.error("Failed to send formatted agent response", {
+				accountId,
+				conversationId: msg.conversationId,
+				error: err instanceof Error ? err.message : String(err),
+			});
+		}
+	}
+
+	/**
+	 * Resolve a per-account agent name for the reply status line. v1 uses the
+	 * accountId as a stable fallback; v1.1 can derive a real name from
+	 * `<agentDir>/mission.md` or config.
+	 */
+	#resolveAgentName(accountId: string): string | null {
+		if (!accountId || accountId === "__default__") return null;
+		return accountId;
+	}
+
+	// ═══════════════════════════════════════════════════════════════════
+	// Model Command Interception
+	// ═══════════════════════════════════════════════════════════════════
+
+	async #handleModelCommand(msg: InboundMessage, accountId: string): Promise<boolean> {
+		const text = this.#extractMessageText(msg).trim();
+		if (!text.startsWith("/models") && !text.startsWith("/list-models") && !text.startsWith("/model")) return false;
+
+		// Resolve bridge for this account
+		const bridge = this.#resolveDirectBridge(accountId === "__default__" ? undefined : accountId);
+		if (!bridge?.isRunning) {
+			await this.#sendAgentResponse(msg, "Agent 未启动，无法执行模型命令。请稍后再试。");
+			return true;
+		}
+
+		// /models or /list-models — list all available models
+		if (
+			text === "/models" ||
+			text === "/list-models" ||
+			text.startsWith("/models ") ||
+			text.startsWith("/list-models ")
+		) {
+			try {
+				const response = await bridge.getAvailableModels();
+				if (!response.data || typeof response.data !== "object") {
+					await this.#sendAgentResponse(msg, "无法获取模型列表。");
+					return true;
+				}
+				const { models } = response.data as {
+					models: Array<{
+						provider: string;
+						id: string;
+						contextWindow?: number;
+						reasoning?: boolean;
+						thinking?: unknown;
+					}>;
+				};
+				if (!Array.isArray(models) || models.length === 0) {
+					await this.#sendAgentResponse(msg, "当前没有可用的模型。请检查 API key 配置。");
+					return true;
+				}
+
+				// Filter by search pattern if provided
+				const searchPattern = text.startsWith("/models ")
+					? text.slice(8).trim()
+					: text.startsWith("/list-models ")
+						? text.slice(13).trim()
+						: undefined;
+				let filtered = models;
+				if (searchPattern) {
+					const pattern = searchPattern.toLowerCase();
+					filtered = models.filter(
+						m => m.provider.toLowerCase().includes(pattern) || m.id.toLowerCase().includes(pattern),
+					);
+					if (filtered.length === 0) {
+						await this.#sendAgentResponse(msg, `没有匹配 "${searchPattern}" 的模型。`);
+						return true;
+					}
+				}
+
+				// Build markdown table
+				filtered.sort((a, b) => {
+					const providerCmp = a.provider.localeCompare(b.provider);
+					if (providerCmp !== 0) return providerCmp;
+					return a.id.localeCompare(b.id);
+				});
+
+				const rows = filtered.map(m => {
+					const ctx = m.contextWindow ? formatModelNumber(m.contextWindow) : "-";
+					const think = m.reasoning ? "yes" : "-";
+					return `| ${m.provider} | ${m.id} | ${ctx} | ${think} |`;
+				});
+				const table = `| provider | model | context | reasoning |
+|---|---|---|---|
+${rows.join("\n")}`;
+				const count =
+					filtered.length === models.length ? `${models.length}` : `${filtered.length}/${models.length}`;
+				await this.#sendAgentResponse(
+					msg,
+					`可用模型 (${count}):
+
+${table}
+
+切换模型: /model <provider>/<modelId>`,
+				);
+				return true;
+			} catch (err) {
+				logger.error("Failed to list models", { error: err instanceof Error ? err.message : String(err) });
+				await this.#sendAgentResponse(msg, `获取模型列表失败: ${err instanceof Error ? err.message : String(err)}`);
+				return true;
+			}
+		}
+
+		// /model with no args — show current model
+		if (text === "/model") {
+			try {
+				const response = await bridge.getState();
+				if (!response.data || typeof response.data !== "object") {
+					await this.#sendAgentResponse(msg, "无法获取当前模型信息。");
+					return true;
+				}
+				const state = response.data as { model?: { provider: string; id: string }; thinkingLevel?: string };
+				if (!state.model) {
+					await this.#sendAgentResponse(msg, "当前没有选中模型。");
+					return true;
+				}
+				const modelStr = `${state.model.provider}/${state.model.id}`;
+				const thinking = state.thinkingLevel ? ` (推理级别: ${state.thinkingLevel})` : "";
+				await this.#sendAgentResponse(msg, `当前模型: ${modelStr}${thinking}`);
+				return true;
+			} catch (err) {
+				logger.error("Failed to get current model", { error: err instanceof Error ? err.message : String(err) });
+				await this.#sendAgentResponse(msg, `获取当前模型失败: ${err instanceof Error ? err.message : String(err)}`);
+				return true;
+			}
+		}
+
+		// /model <provider>/<modelId> — switch model
+		const modelArg = text.startsWith("/model ") ? text.slice(7).trim() : undefined;
+		if (!modelArg) return false; // not a /model command with args
+
+		// Parse provider/modelId from argument
+		// Accept formats: "provider/modelId", "provider:modelId", "modelId" (uses current provider)
+		let provider: string | undefined;
+		let modelId: string;
+		if (modelArg.includes("/")) {
+			const [p, m] = modelArg.split("/", 2);
+			provider = p;
+			modelId = m;
+		} else if (modelArg.includes(":")) {
+			const [p, m] = modelArg.split(":", 2);
+			provider = p;
+			modelId = m;
+		} else {
+			// No provider prefix — try to resolve using current model's provider
+			try {
+				const stateResponse = await bridge.getState();
+				const stateData = stateResponse.data as { model?: { provider: string } } | undefined;
+				provider = stateData?.model?.provider;
+				modelId = modelArg;
+			} catch {
+				await this.#sendAgentResponse(msg, `无法确定当前 provider。请使用完整格式: /model <provider>/<modelId>`);
+				return true;
+			}
+		}
+
+		if (!provider) {
+			await this.#sendAgentResponse(msg, `无法确定 provider。请使用完整格式: /model <provider>/<modelId>`);
+			return true;
+		}
+
+		try {
+			const response = await bridge.setModel(provider, modelId);
+			if (!response.success) {
+				await this.#sendAgentResponse(msg, `切换模型失败: ${response.error ?? "未知错误"}`);
+				return true;
+			}
+			const model = response.data as { provider: string; id: string } | undefined;
+			const modelStr = model ? `${model.provider}/${model.id}` : `${provider}/${modelId}`;
+			await this.#sendAgentResponse(msg, `已切换到模型: ${modelStr}`);
+			return true;
+		} catch (err) {
+			logger.error("Failed to switch model", {
+				provider,
+				modelId,
+				error: err instanceof Error ? err.message : String(err),
+			});
+			await this.#sendAgentResponse(msg, `切换模型失败: ${err instanceof Error ? err.message : String(err)}`);
+			return true;
+		}
+	}
+
 	async #handleInboundMessage(msg: InboundMessage): Promise<void> {
 		logger.debug("Received message", {
 			channel: msg.channelId,
@@ -1093,6 +1445,7 @@ export class Gateway {
 			// Find or create session
 			const accountId = msg.accountId ?? "__default__";
 			if (await this.#handleAbortMessage(msg, accountId)) return;
+			if (await this.#handleModelCommand(msg, accountId)) return;
 			let session = await this.#store?.getSession(msg.channelId, accountId, msg.conversationId);
 			const now = Date.now();
 			if (!session && this.#store) {
@@ -1170,11 +1523,12 @@ export class Gateway {
 			}
 
 			// Queue and forward to the account bridge
-			const response = await this.#sessionManager?.enqueue(msg, session);
+			const meta = await this.#sessionManager?.enqueueWithMeta(msg, session);
 
-			// Send final response
-			if (response) {
-				await this.#sendAgentResponse(msg, response);
+			// Send formatted response (channel-aware: rich reply for DingTalk,
+			// plain text for everything else).
+			if (meta) {
+				await this.#sendFormattedAgentResponse(msg, meta, accountId);
 			}
 
 			// Update session timestamp

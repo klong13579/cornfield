@@ -235,10 +235,19 @@ async function cmdStatus(_configPath?: string): Promise<void> {
 		console.log("  Accounts:");
 		const accounts = status.accounts ?? [];
 		for (const acc of accounts) {
-			const channelIcon = acc.channelConnected ? "✅ connected" : "❌ disconnected";
-			const bridgeIcon = acc.bridgeRunning ? "✅ running" : "❌ stopped";
-			console.log(`    ${acc.accountId.padEnd(12)} channel=${channelIcon}  bridge=${bridgeIcon}`);
+			const channelIcon = acc.channelConnected ? "✅" : "❌";
+			const bridgeState = acc.bridgeState ?? (acc.bridgeRunning ? "running" : "stopped");
+			console.log(`    ${acc.accountId.padEnd(12)} channel=${channelIcon}  bridge=${bridgeState.padEnd(10)}`);
+			// Find matching bridge stat for deeper info
+			const bs = status.bridges?.find(b => b.accountId === acc.accountId);
+			if (bs?.pid) {
+				const circuit = bs.circuitState === "closed" ? "" : ` circuit=${bs.circuitState}`;
+				console.log(`      pid=${bs.pid}  crashes=${bs.crashCount}  pending=${bs.pendingPrompts}${circuit}`);
+			}
 		}
+	}
+	if (status.scheduler) {
+		console.log(`  Scheduler: ${status.scheduler.running ? "✅" : "❌"}  tasks=${status.scheduler.taskCount}`);
 	}
 }
 
@@ -384,7 +393,7 @@ async function cmdCron(args: string[]): Promise<void> {
 			default:
 				console.log(`
 Cron management commands:
-  pi-gateway cron create <schedule> <command...> [--name <name>] [--type shell|agent] [--deliver <channel>] [--timeout-ms <ms>] [--skills <s1,s2,...>] [--retry <maxAttempts>] [--pre-script <path>]
+  pi-gateway cron create <schedule> <command...> [--name <name>] [--type shell|agent] [--deliver <channel>] [--deliver-user <id>] [--model <model>] [--provider <provider>] [--toolsets <a,b,c>] [--source-channel <ch>] [--source-user <uid>] [--timeout-ms <ms>] [--skills <s1,s2,...>] [--retry <maxAttempts>] [--pre-script <path>]
   pi-gateway cron list [--json]
   pi-gateway cron pause <name>
   pi-gateway cron resume <name>

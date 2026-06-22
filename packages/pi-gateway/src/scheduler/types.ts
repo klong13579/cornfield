@@ -34,6 +34,12 @@ export interface ScheduledTask {
 	status: TaskStatus;
 	scheduleType?: "cron" | "interval" | "once";
 	taskType?: "shell" | "agent";
+	/** Override LLM model for agent tasks */
+	model?: string;
+	/** Override LLM provider for agent tasks */
+	provider?: string;
+	/** Restrict agent tools to named toolsets (reduces token use) */
+	enabledToolsets?: string[];
 	timeoutMs?: number;
 	retry?: RetryConfig;
 	skills?: string[];
@@ -64,6 +70,9 @@ export interface TaskFileDefinition {
 	cron: string;
 	command: string;
 	type?: "shell" | "agent";
+	model?: string;
+	provider?: string;
+	enabledToolsets?: string[];
 	timeoutMs?: number;
 	retry?: RetryConfig;
 	skills?: string[];

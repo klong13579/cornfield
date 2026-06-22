@@ -17,7 +17,6 @@ import { appendExecutionLog } from "./execution-log";
 import { executeScheduledCommand } from "./executor";
 import type { SchedulerDbStorage } from "./storage";
 import {
-	formatAgent,
 	formatExecutionRow,
 	formatTaskRow,
 	getGatewayPidPath,
@@ -162,10 +161,15 @@ export async function cronCreate(args: string[], storage: SchedulerDbStorage): P
 	let deliverUser: string | undefined;
 	let accountId: string | undefined;
 	let type: "shell" | "agent" = "shell";
+	let model: string | undefined;
+	let provider: string | undefined;
+	let enabledToolsets: string[] | undefined;
 	let timeoutMs: number | undefined;
 	let skills: string[] | undefined;
 	let retryMaxAttempts: number | undefined;
 	let preScript: string | undefined;
+	let sourceChannel: string | undefined;
+	let sourceUser: string | undefined;
 	const commandParts: string[] = [];
 
 	let i = 0;
@@ -184,6 +188,28 @@ export async function cronCreate(args: string[], storage: SchedulerDbStorage): P
 			i += 2;
 		} else if (args[i] === "--account" && args[i + 1]) {
 			accountId = args[i + 1]!;
+			i += 2;
+		} else if (args[i] === "--model" && args[i + 1]) {
+			model = args[i + 1]!;
+			i += 2;
+		} else if (args[i] === "--provider" && args[i + 1]) {
+			provider = args[i + 1]!;
+			i += 2;
+		} else if (args[i] === "--toolsets" && args[i + 1]) {
+			enabledToolsets = args[i + 1]!.split(",")
+				.map(s => s.trim())
+				.filter(Boolean);
+			if (enabledToolsets.length === 0) {
+				console.error(`Invalid --toolsets: must be a non-empty comma-separated list (got "${args[i + 1]}")`);
+				process.exitCode = 1;
+				return;
+			}
+			i += 2;
+		} else if (args[i] === "--source-channel" && args[i + 1]) {
+			sourceChannel = args[i + 1]!;
+			i += 2;
+		} else if (args[i] === "--source-user" && args[i + 1]) {
+			sourceUser = args[i + 1]!;
 			i += 2;
 		} else if (args[i] === "--timeout-ms" && args[i + 1]) {
 			const v = Number.parseInt(args[i + 1]!, 10);
@@ -226,7 +252,7 @@ export async function cronCreate(args: string[], storage: SchedulerDbStorage): P
 	const command = commandParts.join(" ");
 	if (!schedule || !command) {
 		console.error(
-			"Usage: <schedule> <command...> [--name <name>] [--type shell|agent] [--deliver <channel>] [--deliver-user <id>] [--account <accountId>] [--timeout-ms <ms>] [--skills <s1,s2,...>] [--retry <maxAttempts>] [--pre-script <path>]",
+			"Usage: <schedule> <command...> [--name <name>] [--type shell|agent] [--deliver <channel>] [--deliver-user <id>] [--account <accountId>] [--model <model>] [--provider <provider>] [--toolsets <a,b,c>] [--source-channel <ch>] [--source-user <uid>] [--timeout-ms <ms>] [--skills <s1,s2,...>] [--retry <maxAttempts>] [--pre-script <path>]",
 		);
 		process.exitCode = 1;
 		return;
@@ -247,6 +273,14 @@ export async function cronCreate(args: string[], storage: SchedulerDbStorage): P
 		return;
 	}
 
+	// Auto-fill deliver/deliverUser from source channel/user if not explicitly set
+	if (!deliver && sourceChannel) {
+		deliver = sourceChannel;
+	}
+	if (!deliverUser && sourceUser) {
+		deliverUser = sourceUser;
+	}
+
 	const nextRun =
 		parsed.type === "cron" ? getNextRun(parsed.schedule) : parsed.nextRunAt ? new Date(parsed.nextRunAt) : undefined;
 	storage.addTask({
@@ -255,6 +289,9 @@ export async function cronCreate(args: string[], storage: SchedulerDbStorage): P
 		command,
 		scheduleType: parsed.type,
 		taskType: type,
+		model,
+		provider,
+		enabledToolsets,
 		timeoutMs: timeoutMs ?? (type === "agent" ? 120_000 : 30_000),
 		retry:
 			retryMaxAttempts !== undefined ? { maxAttempts: retryMaxAttempts, backoffMs: [1000, 5000, 30000] } : undefined,
@@ -276,7 +313,10 @@ export async function cronCreate(args: string[], storage: SchedulerDbStorage): P
 	console.log(
 		`  Type: ${parsed.type} | Schedule: ${parsed.schedule} | Next: ${nextRun ? nextRun.toLocaleString() : "—"}`,
 	);
-	if (deliver) console.log(`  Delivery: ${deliver}`);
+	if (deliver) console.log(`  Delivery: ${deliver}${deliverUser ? ` (user: ${deliverUser})` : ""}`);
+	if (model) console.log(`  Model: ${model}`);
+	if (provider) console.log(`  Provider: ${provider}`);
+	if (enabledToolsets) console.log(`  Toolsets: ${enabledToolsets.join(", ")}`);
 	if (accountId) console.log(`  Account: ${accountId}`);
 	if (timeoutMs !== undefined) console.log(`  Timeout: ${timeoutMs}ms`);
 	if (skills) console.log(`  Skills: ${skills.join(", ")}`);
@@ -297,9 +337,24 @@ export async function cronList(storage: SchedulerDbStorage, json: boolean): Prom
 	// Header is constructed to match the formatTaskRow column widths exactly:
 	//   19+1+7+1+12+1+11+1+9+1+19+1+29+1+21+1+8 = 143 chars
 	// Use padEnd chain so it stays in sync with the row format.
-	const HEADER = "NAME".padEnd(19) + " " + "TYPE".padEnd(7) + " " + "AGENT".padEnd(12) + " " +
-		"STATUS".padEnd(11) + " " + "SCHED".padEnd(9) + " " + "CRON".padEnd(19) + " " +
-		"CHANNEL".padEnd(29) + " " + "NEXT RUN".padEnd(21) + " " + "LAST RUN";
+	const HEADER =
+		"NAME".padEnd(19) +
+		" " +
+		"TYPE".padEnd(7) +
+		" " +
+		"AGENT".padEnd(12) +
+		" " +
+		"STATUS".padEnd(11) +
+		" " +
+		"SCHED".padEnd(9) +
+		" " +
+		"CRON".padEnd(19) +
+		" " +
+		"CHANNEL".padEnd(29) +
+		" " +
+		"NEXT RUN".padEnd(21) +
+		" " +
+		"LAST RUN";
 	console.log(HEADER);
 	console.log("─".repeat(HEADER.length));
 	for (const task of tasks) console.log(formatTaskRow(task));
@@ -741,15 +796,8 @@ export async function cronReconcile(args: string[], storage: SchedulerDbStorage)
 	const nameColW = Math.max(4, ...rows.map(r => r.task.name.length));
 	const typeColW = Math.max(4, ...rows.map(r => (r.task.taskType ?? "shell").length));
 	const suggColW = Math.max(9, ...rows.map(r => (r.suggestion?.accountId ?? "—").length));
-	const reasonColW = Math.max(6, ...rows.map(r => (r.suggestion?.reason ?? "no match").length));
-	const header =
-		"NAME".padEnd(nameColW) +
-		"  " +
-		"TYPE".padEnd(typeColW) +
-		"  " +
-		"SUGGEST".padEnd(suggColW) +
-		"  " +
-		"REASON";
+	const _reasonColW = Math.max(6, ...rows.map(r => (r.suggestion?.reason ?? "no match").length));
+	const header = `${"NAME".padEnd(nameColW)}  ${"TYPE".padEnd(typeColW)}  ${"SUGGEST".padEnd(suggColW)}  REASON`;
 	console.log(header);
 	console.log("─".repeat(header.length));
 	for (const { task, suggestion } of rows) {
@@ -765,9 +813,7 @@ export async function cronReconcile(args: string[], storage: SchedulerDbStorage)
 	}
 	console.log("");
 	const matched = rows.filter(r => r.suggestion).length;
-	console.log(
-		`${matched} of ${rows.length} unbound task${rows.length === 1 ? "" : "s"} have a suggestion.`,
-	);
+	console.log(`${matched} of ${rows.length} unbound task${rows.length === 1 ? "" : "s"} have a suggestion.`);
 	if (!apply) {
 		console.log("Re-run with --apply to write the bindings.");
 		return;
