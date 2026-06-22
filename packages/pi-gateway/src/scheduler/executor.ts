@@ -15,6 +15,32 @@ export interface ExecutionResult {
 
 const SCRIPT_TIMEOUT_MS = 120_000;
 const SILENT_MARKER = "[SILENT]";
+/** Default inactivity budget for cron agent tasks when task.timeoutMs is not set.
+ * Matches Hermes's HERMES_CRON_TIMEOUT default of 600s. */
+const DEFAULT_INACTIVITY_MS = 5 * 60 * 1000;
+/** Hard cap for inactivity: a task can't ask for more than 30 min of idle. */
+const MAX_INACTIVITY_MS = 30 * 60 * 1000;
+
+/**
+ * Compute the inactivity budget for a warm-bridge cron prompt.
+ *
+ * The warm bridge uses two timers: a wall-clock `timeoutMs` (the absolute
+ * upper bound) and an `inactivityMs` (resets on every session event, so a
+ * slow-but-active prompt can run for the full wall clock).
+ *
+ * Rules:
+ *   - If `timeoutMs` is set, inactivity budget is `min(timeoutMs, DEFAULT)` so
+ *     a tight wall-clock task also has a tight inactivity window.
+ *   - If `timeoutMs` is unset, use the default 5 min (matches Hermes's
+ *     HERMES_CRON_TIMEOUT default).
+ *   - Never exceed MAX_INACTIVITY_MS (30 min).
+ */
+export function computeInactivityBudgetMs(timeoutMs: number | undefined): number {
+	if (timeoutMs !== undefined && timeoutMs > 0) {
+		return Math.min(timeoutMs, DEFAULT_INACTIVITY_MS, MAX_INACTIVITY_MS);
+	}
+	return Math.min(DEFAULT_INACTIVITY_MS, MAX_INACTIVITY_MS);
+}
 
 export interface ExecutionOptions {
 	taskType?: "shell" | "agent";

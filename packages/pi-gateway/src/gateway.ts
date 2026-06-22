@@ -20,7 +20,7 @@ import { getDataDir, getDingTalkConfig, getEnabledChannels } from "./config";
 import { findAgentSessionPath } from "./scheduler";
 import { SchedulerEngine } from "./scheduler/engine";
 import { appendExecutionLog } from "./scheduler/execution-log";
-import { executeScheduledCommand } from "./scheduler/executor";
+import { computeInactivityBudgetMs, executeScheduledCommand } from "./scheduler/executor";
 import { SchedulerFileStore } from "./scheduler/file-store";
 import { createCronTaskFromMessage } from "./scheduler/from-message";
 import { SchedulerDbStorage } from "./scheduler/storage";
@@ -1069,6 +1069,16 @@ export class Gateway {
 					const response = await bridge.executePrompt(task.command, {
 						timeoutMs: task.timeoutMs,
 						sessionPath: cronSessionPath,
+						// Inactivity budget: the prompt can run for the full
+						// wall-clock timeout, but if no session event arrives
+						// for this many ms (e.g. RPC stuck waiting on a slow
+						// model call, hung tool, or dropped stream), the
+						// watchdog aborts the prompt and surfaces a tagged
+						// error. Default 5 min — matches Hermes's
+						// HERMES_CRON_TIMEOUT. Falls back to the wall-clock
+						// budget when smaller so a slow task with active
+						// events still gets the full window.
+						inactivityMs: computeInactivityBudgetMs(task.timeoutMs),
 					});
 					output = response;
 					exitCode = 0;

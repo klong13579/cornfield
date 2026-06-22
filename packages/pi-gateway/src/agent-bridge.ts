@@ -101,6 +101,44 @@ interface AgentEvent {
 		content?: Array<{ type: string; text?: string }>;
 	};
 	text?: string;
+	/** For `message_update` events: the streaming sub-event from the agent
+	 * loop. Carries incremental deltas (text/thinking/toolcall) plus lifecycle
+	 * markers. Bridge consumers that want streaming chrome subscribe via
+	 * `ForwardStreamHandlers` instead of parsing this shape directly. */
+	assistantMessageEvent?: {
+		type: string;
+		delta?: string;
+		contentIndex?: number;
+		[key: string]: unknown;
+	};
+}
+
+/**
+ * Streaming callbacks fired by `AgentBridge.forwardWithMeta` as RPC events
+ * arrive during a prompt run. Handlers are called synchronously on the
+ * bridge's event-loop turn, so consumers should avoid blocking work in the
+ * handler. The bridge does not await handlers — exceptions are logged and
+ * the run continues.
+ *
+ * Use this when the caller wants to surface incremental progress (e.g.
+ * streaming the answer text into a DingTalk AI Card as it arrives). The
+ * full `AgentResponseMeta` is still returned at run end for callers that
+ * also need a final reply.
+ */
+export interface ForwardStreamHandlers {
+	/** Fired on every `text_delta` for the assistant text block. `cumulative`
+	 * is the concatenated delta string since the prompt started. */
+	onTextDelta?: (delta: string, cumulative: string) => void;
+	/** Fired on every `thinking_delta` for the assistant thinking block. */
+	onThinkingDelta?: (delta: string) => void;
+	/** Fired when the assistant `message_end` event arrives. The full
+	 * assistant message is available on the meta returned by `forwardWithMeta`
+	 * — this just signals the message is complete. */
+	onAssistantMessageEnd?: () => void;
+	/** Fired on `agent_end`. After this, the bridge will resolve
+	 * `forwardWithMeta` with the final meta shortly (or it may already be
+	 * resolved by the time the handler runs). */
+	onAgentEnd?: () => void;
 }
 
 /** Pending prompt state */
@@ -110,6 +148,17 @@ interface PendingPrompt {
 	reject: (error: Error) => void;
 	events: AgentEvent[];
 	timeout: NodeJS.Timeout;
+	/** Streaming callbacks for this prompt. Set by `forwardWithMeta` when
+	 * the caller passes `handlers`; left undefined for fire-and-wait callers. */
+	handlers?: ForwardStreamHandlers;
+	/** Cumulative text concatenated from `text_delta` events on this prompt.
+	 * Updated as deltas arrive so `onTextDelta` can report the full string. */
+	textCumulative?: string;
+	/** ms-since-epoch of the last event received from the RPC process for this prompt.
+	 * Used to enforce `executePrompt({ inactivityMs })`. Bumped on every session
+	 * event routed to this prompt (see the `pending.events.push(parsed)` site in
+	 * the session-event branch of the event reader). */
+	lastActivityAt: number;
 }
 
 interface PendingCommand {
@@ -133,9 +182,9 @@ export class AgentBridge {
 	/** Counter for generating unique prompt IDs */
 	#promptIdCounter = 0;
 	#commandIdCounter = 0;
-	/** stderr reader (kept alive to prevent hanging pipe) */
+	// biome-ignore lint/correctness/noUnusedPrivateClassMembers: referenced in stop() and #spawnAndWaitReady for stream-reader liveness
 	#stderrReader?: Promise<void>;
-	/** stdout reader (kept alive to process events) */
+	// biome-ignore lint/correctness/noUnusedPrivateClassMembers: referenced in stop() and #spawnAndWaitReady for stream-reader liveness
 	#stdoutReader?: Promise<void>;
 	#crashCount = 0;
 	#crashTimestamps: number[] = [];
@@ -257,8 +306,18 @@ export class AgentBridge {
 	 * crash-recovery paths, returns a populated meta with `isFallback: true`
 	 * and a localized `text` so the caller's user-facing reply still works
 	 * (the caller can choose to suppress status-line chrome via `isFallback`).
+	 *
+	 * When `handlers` is provided, the bridge fires `onTextDelta` /
+	 * `onThinkingDelta` / `onAssistantMessageEnd` / `onAgentEnd` as the
+	 * corresponding RPC events arrive. The full `AgentResponseMeta` is
+	 * still returned at run end — handlers are for incremental UI, not a
+	 * replacement for the meta.
 	 */
-	async forwardWithMeta(msg: InboundMessage, session: SessionRecord): Promise<AgentResponseMeta | null> {
+	async forwardWithMeta(
+		msg: InboundMessage,
+		session: SessionRecord,
+		handlers?: ForwardStreamHandlers,
+	): Promise<AgentResponseMeta | null> {
 		const text = this.#extractText(msg);
 		if (!text.trim()) {
 			logger.debug("Empty message, skipping agent");
@@ -296,7 +355,7 @@ export class AgentBridge {
 				if (session.ompSessionPath) {
 					await this.#switchSession(session.ompSessionPath);
 				}
-				const events = await this.#promptAndWait(text, timeoutMs);
+				const events = await this.#promptAndWait(text, timeoutMs, handlers);
 				const rawResponse = this.#extractAssistantText(events);
 
 				if (!rawResponse) {
@@ -346,7 +405,7 @@ export class AgentBridge {
 	 */
 	async executePrompt(
 		prompt: string,
-		options?: { timeoutMs?: number; sessionPath?: string },
+		options?: { timeoutMs?: number; sessionPath?: string; inactivityMs?: number },
 	): Promise<string> {
 		if (!prompt.trim()) {
 			throw new Error("Empty prompt");
@@ -362,6 +421,9 @@ export class AgentBridge {
 			}
 
 			const timeoutMs = options?.timeoutMs ?? this.#options.timeoutMs ?? 120_000;
+			// Capture inactivityMs in a stable local; the watchdog closure
+			// (setInterval) escapes the if-block below and TS loses the narrowing.
+			const inactivityBudgetMs = options?.inactivityMs ?? 0;
 			const sessionPath = options?.sessionPath;
 			const previousSessionPath = this.#activeSessionPath;
 
@@ -374,9 +436,63 @@ export class AgentBridge {
 				}
 			}
 
+			// Per-prompt inactivity watchdog. Wakes up every 500ms and checks
+			// the prompt's `lastActivityAt` (bumped on every session event in the
+			// reader). On inactivity limit exceeded, sends an abort so the RPC
+			// process tries to cancel cleanly, then throws a tagged error.
+			// Scoped to this executePrompt call: cleared in `finally`.
+			//
+			// NB: the watchdog must NOT call `this.abort()` because `abort()`
+			// re-acquires `#runExclusive` and the lock is already held by this
+			// `executePrompt` — it would deadlock. Instead we inline the abort
+			// sequence (send abort command + resolve the active prompt as
+			// aborted) using private members. Those private methods don't take
+			// the lock, so it's safe to call them from the timer thread.
+			let inactivityReason: { idleMs: number; lastEventAt: number } | null = null;
+			let watchdog: NodeJS.Timeout | null = null;
+			if (inactivityBudgetMs > 0) {
+				const POLL_MS = 500;
+				let abortInflight: Promise<void> | null = null;
+				watchdog = setInterval(() => {
+					if (inactivityReason) return; // already triggered
+					const activeId = this.#activePromptId;
+					if (!activeId) return;
+					const active = this.#pendingPrompts.get(activeId);
+					if (!active) return;
+					const idleMs = Date.now() - active.lastActivityAt;
+					if (idleMs < inactivityBudgetMs) return;
+					inactivityReason = { idleMs, lastEventAt: active.lastActivityAt };
+					if (abortInflight) return;
+					abortInflight = (async () => {
+						try {
+							if (this.isRunning) {
+								await this.#sendCommandAndWait("abort", {}, 30_000);
+							}
+						} catch (err) {
+							logger.warn("Inactivity watchdog abort command failed", {
+								error: err instanceof Error ? err.message : String(err),
+							});
+						} finally {
+							this.#resolveActivePromptAsAborted();
+						}
+					})();
+				}, POLL_MS);
+			}
+
 			try {
 				const events = await this.#promptAndWait(prompt, timeoutMs);
 				const response = this.#extractAssistantText(events);
+
+				// inactivityReason is mutated by the watchdog's setInterval callback.
+				// TS narrows the synchronous read to the declared initial value
+				// (`null`), so `if (reason)` becomes `never` for the truthy branch.
+				// We use a typed object lookup instead of relying on narrowing.
+				const idleInfo = inactivityReason as { idleMs: number; lastEventAt: number } | null;
+				if (idleInfo !== null) {
+					throw new Error(
+						`Agent cron prompt inactive for ${Math.round(idleInfo.idleMs)}ms (limit ${inactivityBudgetMs}ms)`,
+					);
+				}
 
 				if (!response) {
 					throw new Error("Agent returned empty response");
@@ -385,6 +501,7 @@ export class AgentBridge {
 				this.#recordPromptSuccess();
 				return response.trim();
 			} finally {
+				if (watchdog) clearInterval(watchdog);
 				// Restore the session that was active before this cron call so the
 				// next IM message on this bridge lands back in its own session.
 				// Only restore when (a) caller asked for a session switch and
@@ -650,7 +767,7 @@ export class AgentBridge {
 						cancelled: true,
 						timedOut: true,
 					};
-					this.#writeToStdin(JSON.stringify(response) + "\n");
+					this.#writeToStdin(`${JSON.stringify(response)}\n`);
 				}
 				// Fire-and-forget methods (notify, setWidget, setStatus, etc.) are ignored
 				return;
@@ -668,7 +785,7 @@ export class AgentBridge {
 					},
 					isError: true,
 				};
-				this.#writeToStdin(JSON.stringify(result) + "\n");
+				this.#writeToStdin(`${JSON.stringify(result)}\n`);
 				return;
 			}
 
@@ -685,6 +802,7 @@ export class AgentBridge {
 					const pending = this.#pendingPrompts.get(cmdId);
 					if (pending) {
 						pending.events.push(parsed);
+						pending.lastActivityAt = Date.now();
 						this.#activePromptId = cmdId;
 					}
 					return;
@@ -718,6 +836,15 @@ export class AgentBridge {
 				const pending = this.#pendingPrompts.get(this.#activePromptId);
 				if (pending) {
 					pending.events.push(parsed);
+					pending.lastActivityAt = Date.now();
+
+					// Fire streaming handlers. Handlers are synchronous; we
+					// never await them. Exceptions are logged and the run
+					// continues — a misbehaving handler must not break the
+					// bridge's event pump.
+					if (pending.handlers) {
+						this.#fireStreamHandler(pending, parsed);
+					}
 
 					// agent_end event means the current agent turn is complete
 					if (parsed.type === "agent_end") {
@@ -730,6 +857,31 @@ export class AgentBridge {
 			}
 		} catch {
 			// Non-JSON line — ignore
+		}
+	}
+
+	#fireStreamHandler(pending: PendingPrompt, event: AgentEvent): void {
+		const handlers = pending.handlers;
+		if (!handlers) return;
+		try {
+			if (event.type === "message_update") {
+				const ame = event.assistantMessageEvent;
+				if (!ame) return;
+				if (ame.type === "text_delta" && typeof ame.delta === "string") {
+					pending.textCumulative = (pending.textCumulative ?? "") + ame.delta;
+					handlers.onTextDelta?.(ame.delta, pending.textCumulative);
+				} else if (ame.type === "thinking_delta" && typeof ame.delta === "string") {
+					handlers.onThinkingDelta?.(ame.delta);
+				}
+			} else if (event.type === "message_end" && event.message?.role === "assistant") {
+				handlers.onAssistantMessageEnd?.();
+			} else if (event.type === "agent_end") {
+				handlers.onAgentEnd?.();
+			}
+		} catch (err) {
+			logger.warn("AgentBridge stream handler threw", {
+				error: err instanceof Error ? err.message : String(err),
+			});
 		}
 	}
 
@@ -780,7 +932,7 @@ export class AgentBridge {
 		this.#pendingCommands.set(commandId, { command, resolve, reject, timeout });
 
 		try {
-			this.#writeToStdin(JSON.stringify({ type: command, id: commandId, ...payload }) + "\n");
+			this.#writeToStdin(`${JSON.stringify({ type: command, id: commandId, ...payload })}\n`);
 		} catch (err) {
 			clearTimeout(timeout);
 			this.#pendingCommands.delete(commandId);
@@ -790,7 +942,11 @@ export class AgentBridge {
 		return promise;
 	}
 
-	async #promptAndWait(message: string, timeoutMs: number): Promise<AgentEvent[]> {
+	async #promptAndWait(
+		message: string,
+		timeoutMs: number,
+		handlers?: ForwardStreamHandlers,
+	): Promise<AgentEvent[]> {
 		const promptId = `p_${++this.#promptIdCounter}`;
 
 		const { promise, resolve, reject } = Promise.withResolvers<AgentEvent[]>();
@@ -806,7 +962,9 @@ export class AgentBridge {
 			reject,
 			events: [],
 			timeout,
+			lastActivityAt: Date.now(),
 		};
+		if (handlers) pending.handlers = handlers;
 
 		this.#pendingPrompts.set(promptId, pending);
 
