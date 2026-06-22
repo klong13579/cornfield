@@ -1,9 +1,9 @@
 # Gateway V1 实施计划
 
-> 版本: 2.0
-> 日期: 2026-06-17
-> 状态: 基于当前代码的 Gap 分析与重排实施计划
-> 配套文档: [gateway-design-v1.md](./gateway-design-v1.md)
+> 版本: 2.1
+> 日期: 2026-06-22
+> 状态: 跟对 warm-bridge cron 复用、AgentBridge.executePrompt API、inactivity watchdog、交付重试后的代码状态
+> 配套文档: [gateway-design-v1.md](./gateway-design-v1.md)(v1.1)
 
 ---
 
