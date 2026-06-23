@@ -1210,8 +1210,12 @@ export class Gateway {
 			}
 		}
 
-		// Fall back to subprocess execution
-		if (!output && !stderr) {
+		// Fall back to subprocess execution. The guard checks `!output`
+		// only — the catch block above sets `stderr` to the error message,
+		// so `!stderr` would always be false and the fallback would never
+		// run. `!output` correctly identifies "warm bridge produced no
+		// result" (either it wasn't used, or it failed).
+		if (!output) {
 			const result = await executeScheduledCommand(task.command, {
 				taskType: task.taskType,
 				timeoutMs: task.timeoutMs,

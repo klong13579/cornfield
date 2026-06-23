@@ -525,6 +525,43 @@ Registration-based features (commands, tools, extensions, flags, MCP, skills) pu
 2. **Assert registration metadata, not just handler presence.** `expect(cmd.getArgumentCompletions).toBeDefined()` + call it with a prefix and verify the returned items.
 3. **One minimal test per consumer layer.** If the feature adds a new optional field to a registration API, write a test that reads it back. The regression pattern is: mock was narrow → new field lost → TUI/help/diagnostic broken.
 
+### Robustness & Fault-Tolerance Testing
+
+The existing rules above cover unit-level contract testing. This subsection covers the **orchestration layer** — code that coordinates multiple components, handles failures, falls back, retries, or recovers. These paths are where silent dead code, swallowed errors, and bypassed fallbacks hide.
+
+Reference template: `packages/pi-gateway/test/cron-warm-bridge-fallback.test.ts` (a cron warm-bridge fallback that was dead code because the guard `!output && !stderr` was always false — the catch block set `stderr` to the error message).
+
+**1. Exercise real orchestration paths, not manually wired components.**
+
+If code has a private method like `#onCronTrigger`, `#handleError`, or `#onMessage` that coordinates multiple components, a test that manually wires those components together and calls them individually tests a *different* code path. The real path — including error handling, guards, fallbacks, and finally blocks — is skipped. MUST instantiate the real orchestrator (e.g., `new Gateway(config)`) and trigger it through its public surface (e.g., schedule a task, send a webhook).
+
+**2. Fault injection: inject the failure, verify the recovery.**
+
+For every error-handling or fallback branch, write a test that injects the fault condition and verifies the fallback *actually fires and produces the correct result*. A log message saying "falling back" is not evidence — assert the final observable outcome (execution status, output content, state transition).
+
+Pattern: use a fake binary or `spyOn` to make the primary path fail, then assert the fallback path's output is what reaches the user/system.
+
+**3. Assert observable outcomes, not intermediate signals.**
+
+- BAD: `expect(logger.warn).toHaveBeenCalledWith("falling back")` — the code logged the intent but may not have executed it.
+- BAD: `expect(catchBlock).toHaveBeenCalled()` — the catch ran, but the guard after it may have skipped the fallback.
+- GOOD: `expect(execution.status).toBe("success")` + `expect(execution.output).toContain("FALLBACK-OK")` — the fallback's output reached the final state.
+
+Assert the state the user or downstream system actually observes: DB records, response bodies, process exit codes, message delivery status. Logs, internal flags, and intermediate variable assignments are not observable outcomes.
+
+**4. Verify cycle: fail-before, pass-after, no-regression.**
+
+When writing a test for a bug fix:
+1. Run the test against the **unfixed** code — it MUST fail. If it passes, the test does not cover the bug.
+2. Apply the fix — the test MUST pass.
+3. Run existing tests in the same area — they MUST still pass (no regression).
+
+If step 1 passes (test green on buggy code), the test is asserting the wrong thing. Re-examine whether you're testing the real code path and the right observable outcome.
+
+**5. Testability friction is a code smell.**
+
+If writing a fault-injection test requires excessive workarounds — spying on `os.homedir()` because paths are hardcoded, avoiding channel connections because they have no timeout override, working around private methods with no test seam — that friction indicates a design problem. Note it in the test comments and surface it as a follow-up. Testable code has injectable paths; untestable code hides bugs.
+
 ## Interactive Testing
 
 After implementing a new feature or tool, **MUST** use tmux to start omp and test the feature in an interactive session.
