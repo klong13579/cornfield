@@ -56,6 +56,8 @@ export interface ScheduledTask {
 	deliver?: string;
 	/** User ID for proactive result delivery via the deliver channel */
 	deliverUser?: string;
+	/** Last delivery error message (null/undefined when last delivery succeeded) */
+	lastDeliveryError?: string;
 	/**
 	 * Channel account that owns the agent context for this task.
 	 * Resolved at execute time via `gateway.json:channels.<id>.accounts[<accountId>].agentDir`
@@ -357,7 +359,11 @@ export function formatTaskRow(task: ScheduledTask): string {
 	const agent = formatAgent(task.accountId);
 	const name = truncateName(task.name, 20);
 	const model = task.model ?? "—";
-	const lastStatus = task.lastRunAt ? (task.failCount > 0 && task.consecutiveFailures > 0 ? "fail" : "ok") : "—";
+	const execFailed = task.failCount > 0 && task.consecutiveFailures > 0;
+	const deliverFailed = !!task.lastDeliveryError;
+	const lastStatus = task.lastRunAt
+		? execFailed ? "fail" : deliverFailed ? "deliv!" : "ok"
+		: "—";
 	const deliveryFailures = formatDeliveryFailureCount(task.id);
 	return `${name.padEnd(21)} ${typeLabel.padEnd(6)} ${agent.padEnd(12)} ${task.status.padEnd(8)} ${task.cron.padEnd(16)} ${truncateName(model, 14).padEnd(15)} ${channel.padEnd(22)} ${lastStatus.padEnd(8)} ${deliveryFailures.padEnd(10)} ${next.padEnd(21)}`;
 }

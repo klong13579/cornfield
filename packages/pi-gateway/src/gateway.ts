@@ -1205,7 +1205,7 @@ export class Gateway {
 		// Deliver result to user if configured. The delivery path is awaited
 		// (not fire-and-forget) so we can: (1) report the failure in the
 		// task's exit code, (2) retry once after 5s for transient channel
-		// issues, and (3) write a persistent entry to the global
+		// issues, (3) write a persistent entry to the global
 		// delivery-failure log so operators can see which task results
 		// never made it to the channel even after a gateway restart.
 		if (task.deliver && task.deliverUser) {
@@ -1213,6 +1213,9 @@ export class Gateway {
 			const summary = `${prefix} Task "${task.name}" completed (exit ${exitCode}, ${durationMs}ms)\n\n${output.slice(0, 2000)}`;
 			const { ok, attempts, reason } = await deliverWithRetry(task.deliver, summary, { userId: task.deliverUser });
 			if (!ok) {
+				if (this.#schedulerStorage) {
+					this.#schedulerStorage.updateTask(task.id, { lastDeliveryError: reason });
+				}
 				appendDeliveryFailureLog({
 					ts: Date.now(),
 					taskId: task.id,
@@ -1234,6 +1237,11 @@ export class Gateway {
 					attempts,
 					reason,
 				});
+			} else {
+				// Clear delivery error on success so stale errors don't linger
+				if (this.#schedulerStorage) {
+					this.#schedulerStorage.updateTask(task.id, { lastDeliveryError: undefined });
+				}
 			}
 		}
 

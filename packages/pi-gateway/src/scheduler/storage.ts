@@ -43,6 +43,7 @@ type TaskRow = {
 	fail_count: number;
 	deliver: string | null;
 	deliver_user: string | null;
+	last_delivery_error: string | null;
 	account_id: string | null;
 };
 
@@ -86,6 +87,7 @@ const TASK_UPDATE_FIELDS = new Set<string>([
 	"failCount",
 	"deliver",
 	"deliverUser",
+	"lastDeliveryError",
 	"accountId",
 ]);
 
@@ -131,6 +133,7 @@ function toTask(row: TaskRow): ScheduledTask {
 		deliver: row.deliver ?? undefined,
 		deliverUser: row.deliver_user ?? undefined,
 		accountId: row.account_id ?? undefined,
+		lastDeliveryError: row.last_delivery_error ?? undefined,
 	};
 }
 
@@ -214,8 +217,8 @@ export class SchedulerDbStorage implements SchedulerStorage {
 				model, provider, enabled_toolsets, timeout_ms,
 				retry_config, skills_config, pre_script, consecutive_failures,
 				created_at, updated_at, last_run_at, next_run_at,
-				run_count, fail_count, deliver, deliver_user, account_id
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				run_count, fail_count, deliver, deliver_user, last_delivery_error, account_id
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`);
 
 		this.#getTaskStmt = this.#db.prepare("SELECT * FROM tasks WHERE id = ?");
@@ -308,7 +311,9 @@ export class SchedulerDbStorage implements SchedulerStorage {
 		if (!hasPreScript) this.#db.exec("ALTER TABLE tasks ADD COLUMN pre_script TEXT;");
 		if (!hasConsecutiveFails)
 			this.#db.exec("ALTER TABLE tasks ADD COLUMN consecutive_failures INTEGER NOT NULL DEFAULT 0;");
-		if (!hasDeliver) this.#db.exec("ALTER TABLE tasks ADD COLUMN deliver TEXT;");
+	const hasLastDeliveryError = columns.some(c => c.name === "last_delivery_error");
+	if (!hasLastDeliveryError) this.#db.exec("ALTER TABLE tasks ADD COLUMN last_delivery_error TEXT;");
+	if (!hasDeliver) this.#db.exec("ALTER TABLE tasks ADD COLUMN deliver TEXT;");
 		this.#db.exec("CREATE INDEX IF NOT EXISTS idx_executions_task_id ON executions(task_id)");
 		this.#db.exec("CREATE INDEX IF NOT EXISTS idx_executions_started_at ON executions(started_at DESC)");
 	}
@@ -342,6 +347,7 @@ export class SchedulerDbStorage implements SchedulerStorage {
 			task.deliver ?? null,
 			task.deliverUser ?? null,
 			task.accountId ?? null,
+			task.lastDeliveryError ?? null,
 		);
 		return this.getTask(id)!;
 	}
