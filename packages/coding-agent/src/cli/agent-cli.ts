@@ -23,6 +23,12 @@ import {
 	SKELETON_FILES,
 	unregisterAgent,
 } from "@oh-my-pi/pi-coding-agent/skeleton";
+import {
+	MECE_FILES,
+	runMeceChecks,
+	runMeceRepairs,
+	type MeceContext,
+} from "./mece-rules";
 
 // ────────────────────────────────────────────────────────────────────────────
 // init
@@ -404,18 +410,25 @@ async function countFilesWithExt(dir: string, exts: string[]): Promise<number> {
 export interface ValidateArgs {
 	agentDir: string;
 	json?: boolean;
+	fix?: boolean;
 }
 
 export interface ValidateIssue {
 	level: "error" | "warning";
 	file: string;
 	message: string;
+	rule?: string;
+	repairable?: boolean;
 }
 
 export interface ValidateResult {
 	agentDir: string;
 	issues: ValidateIssue[];
 	valid: boolean;
+	mece?: {
+		violations: import("./mece-rules").MeceViolation[];
+		repaired: import("./mece-rules").MeceRepair[];
+	};
 }
 
 const ALWAYS_ON: ReadonlyArray<string> = [
@@ -505,10 +518,55 @@ export async function runAgentValidate(args: ValidateArgs): Promise<ValidateResu
 		}
 	}
 
+	// 6. MECE validation
+	const meceCtx: MeceContext = {
+		files: new Map(),
+		agentDir,
+	};
+	for (const rel of MECE_FILES) {
+		const filePath = path.join(agentDir, rel);
+		try {
+			const content = await Bun.file(filePath).text();
+			meceCtx.files.set(rel, content);
+		} catch {
+			// File missing — already flagged by checks 1-3
+		}
+	}
+
+	const meceViolations = await runMeceChecks(meceCtx);
+	let meceRepaired: import("./mece-rules").MeceRepair[] = [];
+
+	if (args.fix && meceViolations.some(v => v.repairable)) {
+		meceRepaired = runMeceRepairs(meceCtx, meceViolations);
+		// Write repaired files back to disk
+		for (const repair of meceRepaired) {
+			for (const change of repair.changes) {
+				const filePath = path.join(agentDir, change.file);
+				await Bun.write(filePath, change.newContent);
+			}
+		}
+	}
+
+	// Convert MECE violations to issues (skip repaired ones)
+	for (const v of meceViolations) {
+		if (args.fix && v.repairable) continue;
+		issues.push({
+			level: v.rule === "skills-path-format" ? "error" : "warning",
+			file: v.file,
+			message: v.message,
+			rule: v.rule,
+			repairable: v.repairable,
+		});
+	}
+
 	return {
 		agentDir,
 		issues,
 		valid: !issues.some(i => i.level === "error"),
+		mece: {
+			violations: meceViolations,
+			repaired: meceRepaired,
+		},
 	};
 }
 
@@ -684,18 +742,34 @@ export function renderShow(detail: AgentDetail, json: boolean): string {
 
 export function renderValidate(result: ValidateResult, json: boolean): string {
 	if (json) return JSON.stringify(result, null, 2);
-	if (result.issues.length === 0) return `✓ ${result.agentDir} — valid (no issues)`;
 	const lines: string[] = [];
-	for (const issue of result.issues) {
-		const tag = issue.level === "error" ? "✗" : "!";
-		lines.push(`${tag} ${issue.file} — ${issue.message}`);
+
+	// Issues
+	if (result.issues.length === 0) {
+		lines.push(`✓ ${result.agentDir} — valid (no issues)`);
+	} else {
+		for (const issue of result.issues) {
+			const tag = issue.level === "error" ? "✗" : "!";
+			const repair = issue.repairable ? " [auto-repairable]" : "";
+			lines.push(`${tag} ${issue.file} — ${issue.message}${repair}`);
+		}
+		lines.push("");
+		lines.push(
+			result.valid
+				? "→ Valid (warnings only)"
+				: `→ Invalid: ${result.issues.filter(i => i.level === "error").length} error(s)`,
+		);
 	}
-	lines.push("");
-	lines.push(
-		result.valid
-			? "→ Valid (warnings only)"
-			: `→ Invalid: ${result.issues.filter(i => i.level === "error").length} error(s)`,
-	);
+
+	// MECE repair summary
+	if (result.mece?.repaired && result.mece.repaired.length > 0) {
+		lines.push("");
+		lines.push("MECE auto-repairs applied:");
+		for (const repair of result.mece.repaired) {
+			lines.push(`  + ${repair.summary}`);
+		}
+	}
+
 	return lines.join("\n");
 }
 

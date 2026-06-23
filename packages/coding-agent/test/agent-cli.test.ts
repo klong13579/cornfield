@@ -241,6 +241,8 @@ describe("runAgentShow", () => {
 describe("runAgentValidate", () => {
 	test("passes for a fully initialized agentDir", async () => {
 		await runAgentInit({ name: "alpha", dir: tmpDir });
+		// Fix skeleton's skills path format (<name>.md → <name>/SKILL.md) before validating
+		await runAgentValidate({ agentDir: path.join(tmpDir, "alpha"), fix: true });
 		const result = await runAgentValidate({ agentDir: path.join(tmpDir, "alpha") });
 		expect(result.valid).toBe(true);
 		expect(result.issues.filter(i => i.level === "error")).toEqual([]);
@@ -288,13 +290,135 @@ describe("runAgentValidate", () => {
 
 	test("warns on missing recommended runtime files", async () => {
 		await runAgentInit({ name: "alpha", dir: tmpDir });
+		// Fix skeleton skills path first
+		await runAgentValidate({ agentDir: path.join(tmpDir, "alpha"), fix: true });
 		await fs.unlink(path.join(tmpDir, "alpha", "prompt-includes.json"));
 		await fs.unlink(path.join(tmpDir, "alpha", ".gitignore"));
 		await fs.unlink(path.join(tmpDir, "alpha", ".omp", "SYSTEM.md"));
 		const result = await runAgentValidate({ agentDir: path.join(tmpDir, "alpha") });
 		expect(result.valid).toBe(true); // warnings don't invalidate
-		const warnings = result.issues.filter(i => i.level === "warning");
+		const warnings = result.issues.filter(i => i.level === "warning" && !i.rule);
 		expect(warnings.map(i => i.file).sort()).toEqual([".gitignore", ".omp/SYSTEM.md", "prompt-includes.json"]);
+	});
+});
+
+describe("runAgentValidate — MECE rules", () => {
+	async function initAgent(name: string = "mece-test"): Promise<string> {
+		await runAgentInit({ name, dir: tmpDir });
+		return path.join(tmpDir, name);
+	}
+
+	test("R1: detects and repairs skeleton placeholders", async () => {
+		const dir = await initAgent();
+		await Bun.write(path.join(dir, "TODO.md"), "# TODO\n\n- [ ] 任务 1\n- [ ] 任务 2\n");
+		const result = await runAgentValidate({ agentDir: dir });
+		const violation = result.mece?.violations.find(v => v.rule === "no-skeleton-placeholder");
+		expect(violation).toBeTruthy();
+		// Fix
+		const fixed = await runAgentValidate({ agentDir: dir, fix: true });
+		expect(fixed.mece?.repaired.length).toBeGreaterThan(0);
+		const todoAfter = await Bun.file(path.join(dir, "TODO.md")).text();
+		expect(todoAfter).not.toContain("任务 1");
+	});
+
+	test("R2: detects and repairs tool list in mission.md", async () => {
+		const dir = await initAgent();
+		await Bun.write(path.join(dir, "mission.md"), "# Bot\n\n## 工具\n\n- 使用 `read` 读取文件\n- 使用 `bash` 运行命令\n");
+		const result = await runAgentValidate({ agentDir: dir });
+		const violation = result.mece?.violations.find(v => v.rule === "no-tool-list-in-mission");
+		expect(violation).toBeTruthy();
+		// Fix
+		await runAgentValidate({ agentDir: dir, fix: true });
+		const missionAfter = await Bun.file(path.join(dir, "mission.md")).text();
+		expect(missionAfter).not.toMatch(/使用 `read`/);
+		expect(missionAfter).toMatch(/TOOLS\.md/);
+	});
+
+	test("R3: detects and repairs safety constraint duplication", async () => {
+		const dir = await initAgent();
+		const agentsContent = await Bun.file(path.join(dir, "AGENTS.md")).text();
+		// Extract a MUST NOT line from the hard-constraints section
+		const agentsLines = agentsContent.split("\n");
+		let inHard = false;
+		let mustNotLine: string | undefined;
+		for (const line of agentsLines) {
+			if (/##\s*Global hard constraints/i.test(line)) { inHard = true; continue; }
+			if (inHard && /^##\s/.test(line)) { inHard = false; }
+			if (inHard && /^-\s*MUST\s+NOT/i.test(line)) { mustNotLine = line; break; }
+		}
+		expect(mustNotLine).toBeTruthy();
+		// Add the same line to SYSTEM.md
+		await Bun.write(path.join(dir, ".omp", "SYSTEM.md"), `# System\n\n## 安全\n\n${mustNotLine}\n`);
+		const result = await runAgentValidate({ agentDir: dir });
+		const violation = result.mece?.violations.find(v => v.rule === "no-safety-duplication");
+		expect(violation).toBeTruthy();
+		// Fix
+		await runAgentValidate({ agentDir: dir, fix: true });
+		const systemAfter = await Bun.file(path.join(dir, ".omp", "SYSTEM.md")).text();
+		// The duplicated line should be gone, but a reference should be added
+		expect(systemAfter).toMatch(/AGENTS\.md/);
+	});
+
+	test("R4: detects and repairs space URLs in mission.md", async () => {
+		const dir = await initAgent();
+		await Bun.write(path.join(dir, "mission.md"), "# Bot\n\n知识库: https://alidocs.dingtalk.com/i/spaces/abc\n");
+		const result = await runAgentValidate({ agentDir: dir });
+		const violation = result.mece?.violations.find(v => v.rule === "no-space-urls-in-mission");
+		expect(violation).toBeTruthy();
+		// Fix
+		await runAgentValidate({ agentDir: dir, fix: true });
+		const missionAfter = await Bun.file(path.join(dir, "mission.md")).text();
+		expect(missionAfter).not.toMatch(/alidocs\.dingtalk\.com/);
+	});
+
+	test("R5: detects and repairs dws commands in TOOLS.md", async () => {
+		const dir = await initAgent();
+		await Bun.write(path.join(dir, "TOOLS.md"), "# TOOLS\n\n## dws\n\n- `dws doc list --workspace <id>` — list docs\n- MUST 通过 bash 调用\n");
+		const result = await runAgentValidate({ agentDir: dir });
+		const violation = result.mece?.violations.find(v => v.rule === "no-dws-commands-in-tools");
+		expect(violation).toBeTruthy();
+		// Fix
+		await runAgentValidate({ agentDir: dir, fix: true });
+		const toolsAfter = await Bun.file(path.join(dir, "TOOLS.md")).text();
+		expect(toolsAfter).not.toMatch(/dws doc list/);
+		expect(toolsAfter).toMatch(/MUST/);  // constraint preserved
+	});
+
+	test("R6: detects and repairs skills path format", async () => {
+		const dir = await initAgent();
+		const agents = await Bun.file(path.join(dir, "AGENTS.md")).text();
+		const oldAgents = agents.replace(".omp/skills/<name>/SKILL.md", ".omp/skills/<name>.md");
+		await Bun.write(path.join(dir, "AGENTS.md"), oldAgents);
+		const result = await runAgentValidate({ agentDir: dir });
+		const violation = result.mece?.violations.find(v => v.rule === "skills-path-format");
+		expect(violation).toBeTruthy();
+		// Fix
+		await runAgentValidate({ agentDir: dir, fix: true });
+		const agentsAfter = await Bun.file(path.join(dir, "AGENTS.md")).text();
+		expect(agentsAfter).toMatch(/<name>\/SKILL\.md/);
+		expect(agentsAfter).not.toMatch(/<name>\.md/);
+	});
+
+	test("R7: warns on filemap inaccuracy (not repairable)", async () => {
+		const dir = await initAgent();
+		const agents = await Bun.file(path.join(dir, "AGENTS.md")).text();
+		// Add a fake entry to the File Map
+		const withFake = agents.replace("| `sessions/*.jsonl`", "| `nonexistent/fake.md`          | FAKE                             | fake                                                                 |\n| `sessions/*.jsonl`");
+		await Bun.write(path.join(dir, "AGENTS.md"), withFake);
+		const result = await runAgentValidate({ agentDir: dir });
+		const violation = result.mece?.violations.find(v => v.rule === "filemap-accuracy" && v.message.includes("nonexistent/fake.md"));
+		expect(violation).toBeTruthy();
+		expect(violation?.repairable).toBe(false);
+	});
+
+	test("--fix leaves non-repairable violations as warnings", async () => {
+		const dir = await initAgent();
+		const agents = await Bun.file(path.join(dir, "AGENTS.md")).text();
+		const withFake = agents.replace("| `sessions/*.jsonl`", "| `nonexistent/fake.md`          | FAKE                             | fake                                                                 |\n| `sessions/*.jsonl`");
+		await Bun.write(path.join(dir, "AGENTS.md"), withFake);
+		const result = await runAgentValidate({ agentDir: dir, fix: true });
+		const warning = result.issues.find(i => i.rule === "filemap-accuracy");
+		expect(warning).toBeTruthy();
 	});
 });
 
