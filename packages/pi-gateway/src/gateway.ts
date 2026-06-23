@@ -140,10 +140,15 @@ async function readPidFile(pidPath: string): Promise<number | null> {
 	return null;
 }
 
-/** Kill orphaned omp --mode rpc processes (PPID=1) left from hard kills */
-async function killOrphanRpcProcesses(): Promise<void> {
+/** Kill orphaned omp --mode rpc processes (PPID=1) left from hard kills.
+ *
+ * Matches on the full command line (`args`) to ensure only `--mode rpc`
+ * processes are killed — not interactive omp sessions, not omp processes
+ * started by other gateways or users.
+ */
+export async function killOrphanRpcProcesses(): Promise<void> {
 	try {
-		const result = Bun.spawnSync(["ps", "-eo", "pid,ppid,comm"]);
+		const result = Bun.spawnSync(["ps", "-eo", "pid,ppid,args"]);
 		if (result.exitCode !== 0) return;
 		const lines = result.stdout.toString().trim().split("\n");
 		for (const line of lines) {
@@ -151,7 +156,8 @@ async function killOrphanRpcProcesses(): Promise<void> {
 			if (parts.length < 3) continue;
 			const pid = parseInt(parts[0], 10);
 			const ppid = parseInt(parts[1], 10);
-			if (!Number.isNaN(pid) && !Number.isNaN(ppid) && ppid === 1 && parts[2] === "omp") {
+			const args = parts.slice(2).join(" ");
+			if (!Number.isNaN(pid) && !Number.isNaN(ppid) && ppid === 1 && args.includes("omp") && args.includes("--mode rpc")) {
 				process.kill(pid, "SIGKILL");
 			}
 		}
@@ -1477,22 +1483,60 @@ export class Gateway {
 		// HMAC verification on top of this; Phase 2c territory.)
 		const info = this.#actionRegistry.lookup(event.cardInstanceId);
 		if (!info) {
+			// Fallback for the schema's static btn_stop button: the
+			// action menu fires even for cards we don't have a
+			// registry entry for (e.g. the long-task watcher never
+			// fired so we never patched the registry with the
+			// toolName). Treat any btn_stop click as a stop request
+			// and try to abort the most recent session on the user
+			// who clicked. The user's intent is unambiguous: stop
+			// the work.
+			if (event.actionIds.includes("btn_stop")) {
+				logger.warn("[Gateway] btn_stop on unknown card — aborting by user", {
+					cardInstanceId: event.cardInstanceId,
+					clickedBy: event.userId,
+				});
+				if (this.#sessionManager) {
+					try {
+						await this.#sessionManager.abortByUser(event.userId);
+					} catch (err) {
+						logger.error("[Gateway] btn_stop fallback abort failed", {
+							error: err instanceof Error ? err.message : String(err),
+						});
+					}
+				}
+				return;
+			}
 			logger.warn("[Gateway] card action for unknown / expired card", {
 				cardInstanceId: event.cardInstanceId,
 				actionType: event.params.type,
+				actionIds: event.actionIds,
 				userId: event.userId,
 			});
 			return;
 		}
 
-		const actionType = event.params.type;
-		if (actionType === "stop") {
+		// Resolve action: stop can arrive via two shapes
+		//   1. `params.type === "stop"` — our own btns[N] data, used when
+		//      the schema's ButtonGroup is bound to blockList[N].btns
+		//   2. `actionIds.includes("btn_stop")` — the schema's static
+		//      top-right "中止" button (its onTap is dtActionSheet ->
+		//      dtSendOutData with actionType 0 and actionId btn_stop,
+		//      params = {action: "true"}). This is the only actually-
+		//      clickable stop affordance in OpenClaw's 675cde2f schema;
+		//      blockList[N].btns renders a fallback "当前客户端环境不
+		//      支持按钮组组件" message with no button. Treat any
+		//      btn_stop click as a stop request.
+		const isStop =
+			event.params.type === "stop" || event.actionIds.includes("btn_stop");
+		if (isStop) {
 			logger.warn("[Gateway] card stop action — aborting bridge", {
 				cardInstanceId: event.cardInstanceId,
 				accountId: info.accountId,
 				sessionId: info.sessionId,
 				toolName: info.toolName,
 				clickedBy: event.userId,
+				matchedBy: event.params.type === "stop" ? "params.type" : "actionIds.btn_stop",
 			});
 			if (!this.#sessionManager) {
 				logger.warn("[Gateway] sessionManager not initialized; cannot abort");
@@ -1517,7 +1561,7 @@ export class Gateway {
 		// Unknown action type — log and ignore. Future action types
 		// (retry, copy, view-detail, etc.) plug in here.
 		logger.warn("[Gateway] unhandled card action type", {
-			actionType,
+			actionType: event.params.type,
 			cardInstanceId: event.cardInstanceId,
 			actionIds: event.actionIds,
 			params: event.params,
