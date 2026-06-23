@@ -11,7 +11,7 @@
 
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { buildAgentSessionPath, ensureAgentDir, resolveAgentDir } from "@oh-my-pi/pi-coding-agent/skeleton";
+import { buildAgentSessionPath, ensureAgentDir, registerAgent, resolveAgentDir } from "@oh-my-pi/pi-coding-agent/skeleton";
 import { isEnoent, logger } from "@oh-my-pi/pi-utils";
 import { AgentBridge, type AgentBridgeOptions } from "./agent-bridge";
 import { DingTalkChannel } from "./channels/dingtalk";
@@ -600,6 +600,14 @@ export class Gateway {
 					logger.error("Failed to initialize account agentDir", { accountId, agentDir, error: String(err) });
 					continue;
 				}
+			// Register so `omp agent list` / `show` can discover gateway-created
+			// agentDirs (mirrors `omp agent init`). Non-fatal: a failure here only
+			// affects list visibility, not gateway operation.
+			try {
+				await registerAgent(accountId, agentDir);
+			} catch (err) {
+				logger.warn("Failed to register agentDir", { accountId, agentDir, error: String(err) });
+			}
 
 				// Create per-account agent bridge with account-specific config
 				// Model is loaded from agentDir/.omp/config.yml by omp itself
@@ -645,6 +653,14 @@ export class Gateway {
 		} catch (err) {
 			logger.error("Failed to initialize account agentDir", { accountId, agentDir, error: String(err) });
 			return;
+		}
+		// Register so `omp agent list` / `show` can discover gateway-created
+		// agentDirs (mirrors `omp agent init`). Non-fatal: a failure here only
+		// affects list visibility, not gateway operation.
+		try {
+			await registerAgent(accountId, agentDir);
+		} catch (err) {
+			logger.warn("Failed to register agentDir", { accountId, agentDir, error: String(err) });
 		}
 
 		const bridge = new AgentBridge(createAccountBridgeOptions(config.agent, account, agentDir));

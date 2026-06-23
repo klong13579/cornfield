@@ -218,7 +218,7 @@ export class SchedulerDbStorage implements SchedulerStorage {
 				retry_config, skills_config, pre_script, consecutive_failures,
 				created_at, updated_at, last_run_at, next_run_at,
 				run_count, fail_count, deliver, deliver_user, last_delivery_error, account_id
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`);
 
 		this.#getTaskStmt = this.#db.prepare("SELECT * FROM tasks WHERE id = ?");
