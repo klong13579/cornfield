@@ -505,9 +505,21 @@ const noDeprecatedAgentDir: MeceRule = {
 		// Fix AGENTS.md references
 		const agents = getFile(ctx, "AGENTS.md");
 		if (agents && DEPRECATED_AGENT_PATH_RE.test(agents)) {
-			const fixed = agents
-				.replace(/\.agent\/SYSTEM\.md/g, ".omp/SYSTEM.md")
-				.replace(/\.agent\//g, ".omp/");
+			// Line-by-line: .agent/SYSTEM.md → .omp/SYSTEM.md (valid mapping),
+			// other .agent/ paths (prompts/, rules/) are deleted — new design has no equivalent.
+			const lines = linesOf(agents);
+			const fixed = lines
+				.map(line => {
+					if (/\.agent\/SYSTEM\.md/.test(line)) {
+						return line.replace(/\.agent\/SYSTEM\.md/g, ".omp/SYSTEM.md");
+					}
+					if (DEPRECATED_AGENT_PATH_RE.test(line)) {
+						return null; // delete line
+					}
+					return line;
+				})
+				.filter((line): line is string => line !== null)
+				.join("\n");
 			changes.push({ file: "AGENTS.md", newContent: fixed });
 		}
 

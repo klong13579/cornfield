@@ -445,6 +445,29 @@ describe("runAgentValidate — MECE rules", () => {
 		const reResult = await runAgentValidate({ agentDir: dir });
 		expect(reResult.valid).toBe(true);
 	});
+
+	test("R8: deletes .agent/prompts/ rows instead of replacing with .omp/prompts/", async () => {
+		const dir = await initAgent();
+		await fs.mkdir(path.join(dir, ".agent"), { recursive: true });
+		await Bun.write(path.join(dir, ".agent", "SYSTEM.md"), "old");
+		// Add .agent/SYSTEM.md + .agent/prompts/ to AGENTS.md
+		const agents = await Bun.file(path.join(dir, "AGENTS.md")).text();
+		const withDeprecated = agents
+			.replace(".omp/SYSTEM.md", ".agent/SYSTEM.md")
+			.replace("| `sessions/*.jsonl`", "| `.agent/prompts/` | BEHAVIOR | templates |\n| `sessions/*.jsonl`");
+		await Bun.write(path.join(dir, "AGENTS.md"), withDeprecated);
+		// Fix
+		await runAgentValidate({ agentDir: dir, fix: true });
+		const agentsAfter = await Bun.file(path.join(dir, "AGENTS.md")).text();
+		// SYSTEM.md path should be replaced
+		expect(agentsAfter).toMatch(/\.omp\/SYSTEM\.md/);
+		// prompts/ row should be deleted, not replaced
+		expect(agentsAfter).not.toMatch(/\.agent\//);
+		expect(agentsAfter).not.toMatch(/\.omp\/prompts/);
+		// Re-validate — should be valid
+		const reResult = await runAgentValidate({ agentDir: dir });
+		expect(reResult.valid).toBe(true);
+	});
 });
 
 describe("omp agent register / unregister / reconcile", () => {
