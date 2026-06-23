@@ -4,7 +4,7 @@
 import { logger } from "@oh-my-pi/pi-utils";
 import { Cron } from "croner";
 import type { EngineOptions, ScheduledTask, SchedulerStorage } from "./types";
-import { getNextRun, parseSchedule } from "./types";
+import { getNextRun, getNextRuns, parseSchedule } from "./types";
 
 const MAX_RETRY_DELAY_MS = 300_000; // 5 min cap
 
@@ -15,14 +15,37 @@ function getRetryDelay(backoffMs: number[], attemptIndex: number): number {
 	return Math.min(backoffMs[backoffMs.length - 1]! * 2, MAX_RETRY_DELAY_MS);
 }
 
-function getNextRunAt(task: ScheduledTask): number | undefined {
+const MIN_GRACE_SEC = 120;
+const MAX_GRACE_SEC = 7200;
+
+function computeGraceSeconds(task: ScheduledTask): number {
 	const parsed = parseSchedule(task.cron);
 	const scheduleType = task.scheduleType ?? parsed.type ?? "cron";
+
 	if (scheduleType === "interval" && parsed.intervalMs) {
-		return Date.now() + parsed.intervalMs;
+		return Math.min(MAX_GRACE_SEC, Math.max(MIN_GRACE_SEC, Math.floor(parsed.intervalMs / 2000)));
+	}
+	if (scheduleType === "cron") {
+		const runs = getNextRuns(task.cron, 2);
+		if (runs.length >= 2) {
+			const gapSec = Math.floor((runs[1]!.getTime() - runs[0]!.getTime()) / 1000 / 2);
+			return Math.min(MAX_GRACE_SEC, Math.max(MIN_GRACE_SEC, gapSec));
+		}
+	}
+	return MIN_GRACE_SEC;
+}
+
+function advanceNextRun(task: ScheduledTask): number | undefined {
+	const parsed = parseSchedule(task.cron);
+	const scheduleType = task.scheduleType ?? parsed.type ?? "cron";
+
+	if (scheduleType === "interval" && parsed.intervalMs) {
+		// Base on last scheduled run to prevent drift
+		const base = task.nextRunAt ?? Date.now();
+		return base + parsed.intervalMs;
 	}
 	if (scheduleType === "once") {
-		return undefined;
+		return undefined; // one-shot: no next run
 	}
 	const nextRun = getNextRun(task.cron);
 	return nextRun?.getTime();
@@ -203,6 +226,29 @@ export class SchedulerEngine {
 		const task = this.#taskMap.get(taskId);
 		if (!task || !this.#running) return;
 
+		// Grace window: if task is overdue beyond the grace period, skip execution
+		// and advance to next run. Prevents backlog explosion after gateway restart.
+		if (task.nextRunAt) {
+			const overdueSec = (Date.now() - task.nextRunAt) / 1000;
+			const graceSec = computeGraceSeconds(task);
+			if (overdueSec > graceSec) {
+				const nextRunAt = advanceNextRun(task);
+				this.#storage.updateTask(task.id, { nextRunAt });
+				logger.warn("Task skipped due to grace window", {
+					taskId: task.id,
+					taskName: task.name,
+					overdueSec: Math.round(overdueSec),
+					graceSec,
+				});
+				return;
+			}
+		}
+
+		// At-most-once: advance next_run BEFORE execution.
+		// If the process crashes mid-execution, the job won't re-fire on restart.
+		const nextRunAt = advanceNextRun(task);
+		this.#storage.updateTask(task.id, { nextRunAt });
+
 		const retryConfig = task.retry;
 		const maxAttempts = retryConfig?.maxAttempts ?? 0;
 		const backoffMs = retryConfig?.backoffMs ?? [10_000, 30_000, 60_000];
@@ -246,14 +292,12 @@ export class SchedulerEngine {
 		}
 
 		const currentTask = this.#storage.getTask(task.id);
-		const nextRunAt = getNextRunAt(task);
 
 		if (succeeded) {
 			this.#storage.updateTask(task.id, {
 				lastRunAt: Date.now(),
 				runCount: (currentTask?.runCount ?? 0) + 1,
 				consecutiveFailures: 0,
-				nextRunAt,
 			});
 		} else {
 			this.#storage.updateTask(task.id, {
@@ -261,7 +305,6 @@ export class SchedulerEngine {
 				runCount: (currentTask?.runCount ?? 0) + 1,
 				failCount: (currentTask?.failCount ?? 0) + 1,
 				consecutiveFailures: (currentTask?.consecutiveFailures ?? 0) + 1,
-				nextRunAt,
 			});
 			if (lastError) {
 				logger.error("Task failed after all retries", {

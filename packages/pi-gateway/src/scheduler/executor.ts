@@ -81,7 +81,7 @@ const CRON_INJECTION_PATTERNS: InjectionPattern[] = [
 	{ pattern: /rm\s+-rf\s+\//i, id: "destructive_root_rm" },
 ];
 
-function scanCronPrompt(prompt: string): string | null {
+export function scanCronPrompt(prompt: string): string | null {
 	for (const entry of CRON_INJECTION_PATTERNS) {
 		if (entry.pattern.test(prompt)) {
 			return entry.id;

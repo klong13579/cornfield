@@ -14,7 +14,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { appendExecutionLog } from "./execution-log";
-import { executeScheduledCommand } from "./executor";
+import { executeScheduledCommand, scanCronPrompt } from "./executor";
 import type { SchedulerDbStorage } from "./storage";
 import {
 	formatExecutionRow,
@@ -265,6 +265,16 @@ export async function cronCreate(args: string[], storage: SchedulerDbStorage): P
 		console.error(`Invalid schedule: ${parsed.error}`);
 		process.exitCode = 1;
 		return;
+	}
+
+	// Injection scan for agent task prompts
+	if (type === "agent") {
+		const blocked = scanCronPrompt(command);
+		if (blocked) {
+			console.error(`[BLOCKED] Task prompt matches threat pattern '${blocked}'.`);
+			process.exitCode = 1;
+			return;
+		}
 	}
 
 	if (storage.getTaskByName(name)) {
