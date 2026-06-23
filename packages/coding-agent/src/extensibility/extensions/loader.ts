@@ -167,7 +167,7 @@ class ConcreteExtensionAPI implements ExtensionAPI, IExtensionRuntime {
 		options: { description?: string; type: "boolean" | "string"; default?: boolean | string },
 	): void {
 		this.extension.flags.set(name, { name, extensionPath: this.extension.path, ...options });
-		if (options.default !== undefined) {
+		if (options.default !== undefined && !this.runtime.flagValues.has(name)) {
 			this.runtime.flagValues.set(name, options.default);
 		}
 	}

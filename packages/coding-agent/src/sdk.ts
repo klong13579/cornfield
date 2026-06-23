@@ -1130,6 +1130,10 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		let extensionsResult: LoadExtensionsResult;
 		// Build config-based flags to set before extensions load
 		const extensionInitialFlags: Record<string, boolean | string> = {};
+		const selfEvolutionEnabled = settings.get("selfEvolution.enabled");
+		if (selfEvolutionEnabled !== undefined) {
+			extensionInitialFlags["self-evolution"] = selfEvolutionEnabled;
+		}
 		const nudgeContextInjection = settings.get("selfEvolution.nudgeContextInjection");
 		if (nudgeContextInjection !== undefined) {
 			extensionInitialFlags["self-evolution-enable-nudge-context-injection"] = nudgeContextInjection;
@@ -1253,23 +1257,9 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		}
 
 		let extensionRunner: ExtensionRunner | undefined;
+		// Config-based flags were already set via extensionInitialFlags before
+		// factories ran (loader.ts). No re-assignment needed here.
 		if (extensionsResult.extensions.length > 0) {
-			// Set config-based flag values BEFORE extension factories run
-			const nudgeContextInjection = settings.get("selfEvolution.nudgeContextInjection");
-			if (nudgeContextInjection !== undefined) {
-				extensionsResult.runtime.flagValues.set(
-					"self-evolution-enable-nudge-context-injection",
-					nudgeContextInjection,
-				);
-			}
-			const enableNudgeUI = settings.get("selfEvolution.enableNudgeUI");
-			if (enableNudgeUI !== undefined) {
-				extensionsResult.runtime.flagValues.set("self-evolution-enable-nudge-ui", enableNudgeUI);
-			}
-			const showStuckWarning = settings.get("selfEvolution.showStuckWarning");
-			if (showStuckWarning !== undefined) {
-				extensionsResult.runtime.flagValues.set("self-evolution-enable-stuck-warning", showStuckWarning);
-			}
 			extensionRunner = new ExtensionRunner(
 				extensionsResult.extensions,
 				extensionsResult.runtime,

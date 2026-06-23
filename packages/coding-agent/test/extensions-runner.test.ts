@@ -345,6 +345,38 @@ describe("ExtensionRunner", () => {
 			// The flag values are stored in the shared runtime
 			expect(result.runtime.flagValues.get("--test-flag")).toBe(true);
 		});
+
+		it("registerFlag default does not override pre-set flagValues (config gate)", async () => {
+			const extCode = `
+				export default function(pi) {
+					pi.registerFlag("self-evolution", {
+						type: "boolean",
+						default: true,
+						description: "Enable self-evolution",
+					});
+				}
+			`;
+			fs.writeFileSync(path.join(extensionsDir, "gate.ts"), extCode);
+
+			// Simulate config.yml setting selfEvolution.enabled = false BEFORE factory runs
+			const result = await discoverAndLoadExtensions(
+				[],
+				tempDir.path(),
+				undefined,
+				[],
+				{ "self-evolution": false },
+			);
+			const runner = new ExtensionRunner(
+				result.extensions,
+				result.runtime,
+				tempDir.path(),
+				sessionManager,
+				modelRegistry,
+			);
+
+			// The pre-set false must survive registerFlag's default: true
+			expect(runner.getFlagValues().get("self-evolution")).toBe(false);
+		});
 	});
 
 	describe("before_provider_request chaining", () => {
