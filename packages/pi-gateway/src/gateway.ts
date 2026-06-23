@@ -1201,15 +1201,23 @@ export class Gateway {
 					// Restore disabled toolsets
 					try {
 						await bridge.setDisabledToolsets([]);
-					} catch {
-						// Best-effort
+					} catch (restoreErr) {
+						logger.error("Failed to restore disabled toolsets after cron task — bridge may have stale toolset restrictions", {
+							taskName: task.name,
+							error: restoreErr instanceof Error ? restoreErr.message : String(restoreErr),
+						});
 					}
 					// Restore original model after execution
 					if (originalModel?.model) {
 						try {
 							await bridge.setModel(originalModel.provider ?? "", originalModel.model);
-						} catch {
-							// Best-effort — bridge will use the overridden model until next channel message
+						} catch (restoreErr) {
+							logger.error("Failed to restore original model after cron task — bridge will use the cron task's model until next /model command", {
+								taskName: task.name,
+								cronModel: task.model,
+								originalModel: originalModel.model,
+								error: restoreErr instanceof Error ? restoreErr.message : String(restoreErr),
+							});
 						}
 					}
 				}
