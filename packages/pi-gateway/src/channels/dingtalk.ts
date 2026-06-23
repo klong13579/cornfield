@@ -71,6 +71,14 @@ const TIMEOUT_THRESHOLD = 20_000;
 const BASE_BACKOFF_DELAY = 1_000;
 /** Max backoff delay (ms) for reconnect */
 const MAX_BACKOFF_DELAY = 30_000;
+/** Cap on reconnect attempts before the channel gives up. Backoff
+ *  doubles each failure up to MAX_BACKOFF_DELAY, so 50 attempts spans
+ *  ~25 minutes. After that we stop trying — a persistent failure
+ *  usually means credentials are wrong or the account was revoked,
+ *  in which case reconnecting every 30s just spams the log without
+ *  any realistic chance of succeeding. Operators can re-enable the
+ *  channel via `omp gateway reload` or a process restart. */
+const MAX_RECONNECT_ATTEMPTS = 50;
 /** Message processing keepalive interval (ms) — refresh lastSocketAvailableTime */
 const PROCESSING_KEEPALIVE_INTERVAL = 15_000;
 /** Dedup cache TTL (ms) */
@@ -570,7 +578,6 @@ export class DingTalkChannel extends BaseChannel {
 						buildStopBlock({
 							toolName: evt.toolName,
 							elapsedMs: evt.elapsedMs,
-							requestPath: "/dingtalk/action",
 							sessionId: _session.id,
 						}),
 					);
@@ -780,6 +787,11 @@ export class DingTalkChannel extends BaseChannel {
 		// ActionRegistry, which looks up the card and calls bridge.abort()
 		// (or other action types in the future).
 		this.#client.registerCallbackListener(TOPIC_CARD, (msg: DWClientDownStream) => {
+			logger.debug("[DingTalk] TOPIC_CARD callback received", {
+				accountId: this.#accountId,
+				headers: msg.headers,
+				preview: typeof msg.data === "string" ? msg.data.slice(0, 500) : "(non-string)",
+			});
 			void this.#handleCardCallback(msg);
 		});
 
@@ -813,6 +825,31 @@ export class DingTalkChannel extends BaseChannel {
 			this.#connectionFailed = true;
 			this.#connected = false;
 			logger.error("[DingTalk] Failed to connect", { accountId: this.#accountId, error: String(err) });
+
+			// Clean up everything we set up before the failed connect:
+			// without this, the dedup setInterval keeps running, the
+			// DWClient holds internal timers / WS state, and any SDK
+			// `error` / `disconnect` event that fires later will hit
+			// handlers on a half-initialised channel. None of that is
+			// catastrophic on its own, but it leaks per failed account
+			// (and in the long run produces confusing log lines).
+			if (this.#dedupCleanupTimer) {
+				clearInterval(this.#dedupCleanupTimer);
+				this.#dedupCleanupTimer = null;
+			}
+			if (this.#client) {
+				try {
+					// Best-effort: drop the SDK's listeners and the client
+					// itself. We don't `disconnect()` because the WS may
+					// never have opened; removing listeners + nulling the
+					// reference is enough for GC.
+					(this.#client as any).removeAllListeners?.();
+				} catch {
+					// ignore — we're already in a failure path
+				}
+				this.#client = null;
+			}
+
 			throw err;
 		}
 	}
@@ -997,6 +1034,22 @@ export class DingTalkChannel extends BaseChannel {
 	async #doReconnect(immediate = false): Promise<void> {
 		if (this.#isReconnecting || this.#isStopped) return;
 
+		// Hard cap: after MAX_RECONNECT_ATTEMPTS failures, give up and
+		// leave the channel disconnected. The heartbeat timer will
+		// keep firing but early-returns here, so it's a no-op. A
+		// reload or process restart is required to retry — a
+		// persistent failure usually means credentials are wrong.
+		if (this.#reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+			logger.error("[DingTalk] reconnect exhausted; channel left disconnected", {
+				accountId: this.#accountId,
+				attempts: this.#reconnectAttempts,
+				max: MAX_RECONNECT_ATTEMPTS,
+			});
+			this.#connected = false;
+			this.#connectionFailed = true;
+			return;
+		}
+
 		this.#isReconnecting = true;
 
 		if (!immediate && this.#reconnectAttempts > 0) {
@@ -1131,6 +1184,22 @@ export class DingTalkChannel extends BaseChannel {
 		}
 	}
 
+	/**
+	 * Test seam: expose `#checkPermission` so unit tests can verify
+	 * the permission policy logic (open / allowlist / closed, DM / group)
+	 * without spinning up the full Stream SDK.
+	 */
+	__testCheckPermission(msg: InboundMessage): boolean {
+		return this.#checkPermission(msg);
+	}
+
+	/**
+	 * Test seam: set config without connecting, for permission tests.
+	 */
+	__testSetConfig(config: DingTalkConfig): void {
+		this.#config = config;
+	}
+
 	// ═══════════════════════════════════════════════════════════════════
 	// Permission Policy Check
 	// ═══════════════════════════════════════════════════════════════════
@@ -1148,7 +1217,7 @@ export class DingTalkChannel extends BaseChannel {
 			if (config.allowedUsers && config.allowedUsers.length > 0) {
 				return config.allowedUsers.includes(msg.userId);
 			}
-			return true; // no allowlist configured = open
+			return false; // empty allowlist = deny all (fail-closed)
 		}
 
 		// Group policy
@@ -1159,7 +1228,7 @@ export class DingTalkChannel extends BaseChannel {
 		if (config.allowedGroups && config.allowedGroups.length > 0) {
 			return config.allowedGroups.includes(msg.conversationId);
 		}
-		return true; // no allowlist configured = open
+		return false; // empty allowlist = deny all (fail-closed)
 	}
 
 	// ═══════════════════════════════════════════════════════════════════
