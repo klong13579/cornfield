@@ -58,11 +58,14 @@ export class SchedulerEngine {
 	readonly #intervals = new Map<string, NodeJS.Timeout>();
 	readonly #timeouts = new Map<string, NodeJS.Timeout>();
 	readonly #taskMap = new Map<string, ScheduledTask>();
+	readonly #maxConcurrentRuns: number;
+	#runningCount = 0;
 	#running = false;
 
 	constructor(options: EngineOptions) {
 		this.#storage = options.storage;
 		this.#onTrigger = options.onTrigger;
+		this.#maxConcurrentRuns = options.config?.maxConcurrentRuns ?? 3;
 	}
 
 	start(): void {
@@ -226,6 +229,19 @@ export class SchedulerEngine {
 		const task = this.#taskMap.get(taskId);
 		if (!task || !this.#running) return;
 
+		// Concurrency limit: skip if too many tasks are already running.
+		// This prevents interval tasks from piling up when execution is
+		// slower than the interval period.
+		if (this.#runningCount >= this.#maxConcurrentRuns) {
+			logger.warn("Task skipped due to concurrency limit", {
+				taskId: task.id,
+				taskName: task.name,
+				runningCount: this.#runningCount,
+				maxConcurrentRuns: this.#maxConcurrentRuns,
+			});
+			return;
+		}
+
 		// Grace window: if task is overdue beyond the grace period, skip execution
 		// and advance to next run. Prevents backlog explosion after gateway restart.
 		if (task.nextRunAt) {
@@ -244,92 +260,97 @@ export class SchedulerEngine {
 			}
 		}
 
-		// At-most-once: advance next_run BEFORE execution.
-		// If the process crashes mid-execution, the job won't re-fire on restart.
-		const nextRunAt = advanceNextRun(task);
-		this.#storage.updateTask(task.id, { nextRunAt });
+		this.#runningCount++;
+		try {
+			// At-most-once: advance next_run BEFORE execution.
+			// If the process crashes mid-execution, the job won't re-fire on restart.
+			const nextRunAt = advanceNextRun(task);
+			this.#storage.updateTask(task.id, { nextRunAt });
 
-		const retryConfig = task.retry;
-		const maxAttempts = retryConfig?.maxAttempts ?? 0;
-		const backoffMs = retryConfig?.backoffMs ?? [10_000, 30_000, 60_000];
+			const retryConfig = task.retry;
+			const maxAttempts = retryConfig?.maxAttempts ?? 0;
+			const backoffMs = retryConfig?.backoffMs ?? [10_000, 30_000, 60_000];
 
-		let lastError: Error | undefined;
-		let succeeded = false;
+			let lastError: Error | undefined;
+			let succeeded = false;
 
-		for (let attempt = 0; attempt <= maxAttempts; attempt++) {
-			if (attempt > 0) {
-				const delay = getRetryDelay(backoffMs, attempt - 1);
-				logger.debug("Retrying task", { taskId, attempt, delayMs: delay });
-				await Bun.sleep(delay);
-			}
+			for (let attempt = 0; attempt <= maxAttempts; attempt++) {
+				if (attempt > 0) {
+					const delay = getRetryDelay(backoffMs, attempt - 1);
+					logger.debug("Retrying task", { taskId, attempt, delayMs: delay });
+					await Bun.sleep(delay);
+				}
 
-			const exec = this.#storage.recordExecution({
-				taskId: task.id,
-				startedAt: Date.now(),
-				status: "running",
-			});
-
-			try {
-				await this.#onTrigger(task, exec.id);
-				this.#storage.updateExecution(exec.id, {
-					status: "success",
-					endedAt: Date.now(),
-				});
-				succeeded = true;
-				break;
-			} catch (error) {
-				lastError = error instanceof Error ? error : new Error(String(error));
-				this.#storage.updateExecution(exec.id, {
-					status: "failure",
-					endedAt: Date.now(),
-				});
-				logger.warn("Task attempt failed", {
-					taskId,
-					attempt,
-					error: lastError.message,
-				});
-			}
-		}
-
-		const currentTask = this.#storage.getTask(task.id);
-
-		if (succeeded) {
-			const newRunCount = (currentTask?.runCount ?? 0) + 1;
-			const newRepeatCompleted = (currentTask?.repeatCompleted ?? 0) + 1;
-			const repeatExhausted = (currentTask?.repeatCount ?? undefined) !== undefined && newRepeatCompleted >= (currentTask?.repeatCount ?? Infinity);
-
-			this.#storage.updateTask(task.id, {
-				lastRunAt: Date.now(),
-				runCount: newRunCount,
-				repeatCompleted: newRepeatCompleted,
-				consecutiveFailures: 0,
-				// Auto-disable when repeat count is exhausted
-				...(repeatExhausted ? { status: "disabled" } : {}),
-			});
-
-			if (repeatExhausted) {
-				this.unschedule(task.id);
-				logger.info("Task auto-disabled after exhausting repeat count", {
+				const exec = this.#storage.recordExecution({
 					taskId: task.id,
-					taskName: task.name,
-					repeatCount: currentTask?.repeatCount,
+					startedAt: Date.now(),
+					status: "running",
 				});
+
+				try {
+					await this.#onTrigger(task, exec.id);
+					this.#storage.updateExecution(exec.id, {
+						status: "success",
+						endedAt: Date.now(),
+					});
+					succeeded = true;
+					break;
+				} catch (error) {
+					lastError = error instanceof Error ? error : new Error(String(error));
+					this.#storage.updateExecution(exec.id, {
+						status: "failure",
+						endedAt: Date.now(),
+					});
+					logger.warn("Task attempt failed", {
+						taskId,
+						attempt,
+						error: lastError.message,
+					});
+				}
 			}
-		} else {
-			this.#storage.updateTask(task.id, {
-				lastRunAt: Date.now(),
-				runCount: (currentTask?.runCount ?? 0) + 1,
-				failCount: (currentTask?.failCount ?? 0) + 1,
-				consecutiveFailures: (currentTask?.consecutiveFailures ?? 0) + 1,
-			});
-			if (lastError) {
-				logger.error("Task failed after all retries", {
-					taskId,
-					task: task.name,
-					maxAttempts,
-					error: lastError.message,
+
+			const currentTask = this.#storage.getTask(task.id);
+
+			if (succeeded) {
+				const newRunCount = (currentTask?.runCount ?? 0) + 1;
+				const newRepeatCompleted = (currentTask?.repeatCompleted ?? 0) + 1;
+				const repeatExhausted = (currentTask?.repeatCount ?? undefined) !== undefined && newRepeatCompleted >= (currentTask?.repeatCount ?? Infinity);
+
+				this.#storage.updateTask(task.id, {
+					lastRunAt: Date.now(),
+					runCount: newRunCount,
+					repeatCompleted: newRepeatCompleted,
+					consecutiveFailures: 0,
+					// Auto-disable when repeat count is exhausted
+					...(repeatExhausted ? { status: "disabled" } : {}),
 				});
+
+				if (repeatExhausted) {
+					this.unschedule(task.id);
+					logger.info("Task auto-disabled after exhausting repeat count", {
+						taskId: task.id,
+						taskName: task.name,
+						repeatCount: currentTask?.repeatCount,
+					});
+				}
+			} else {
+				this.#storage.updateTask(task.id, {
+					lastRunAt: Date.now(),
+					runCount: (currentTask?.runCount ?? 0) + 1,
+					failCount: (currentTask?.failCount ?? 0) + 1,
+					consecutiveFailures: (currentTask?.consecutiveFailures ?? 0) + 1,
+				});
+				if (lastError) {
+					logger.error("Task failed after all retries", {
+						taskId,
+						task: task.name,
+						maxAttempts,
+						error: lastError.message,
+					});
+				}
 			}
+		} finally {
+			this.#runningCount--;
 		}
 	}
 }
