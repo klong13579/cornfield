@@ -241,8 +241,6 @@ describe("runAgentShow", () => {
 describe("runAgentValidate", () => {
 	test("passes for a fully initialized agentDir", async () => {
 		await runAgentInit({ name: "alpha", dir: tmpDir });
-		// Fix skeleton's skills path format (<name>.md → <name>/SKILL.md) before validating
-		await runAgentValidate({ agentDir: path.join(tmpDir, "alpha"), fix: true });
 		const result = await runAgentValidate({ agentDir: path.join(tmpDir, "alpha") });
 		expect(result.valid).toBe(true);
 		expect(result.issues.filter(i => i.level === "error")).toEqual([]);
@@ -290,8 +288,6 @@ describe("runAgentValidate", () => {
 
 	test("warns on missing recommended runtime files", async () => {
 		await runAgentInit({ name: "alpha", dir: tmpDir });
-		// Fix skeleton skills path first
-		await runAgentValidate({ agentDir: path.join(tmpDir, "alpha"), fix: true });
 		await fs.unlink(path.join(tmpDir, "alpha", "prompt-includes.json"));
 		await fs.unlink(path.join(tmpDir, "alpha", ".gitignore"));
 		await fs.unlink(path.join(tmpDir, "alpha", ".omp", "SYSTEM.md"));
@@ -419,6 +415,35 @@ describe("runAgentValidate — MECE rules", () => {
 		const result = await runAgentValidate({ agentDir: dir, fix: true });
 		const warning = result.issues.find(i => i.rule === "filemap-accuracy");
 		expect(warning).toBeTruthy();
+	});
+
+	test("R8: detects and repairs deprecated .agent/ directory", async () => {
+		const dir = await initAgent();
+		// Create .agent/ directory with SYSTEM.md
+		await fs.mkdir(path.join(dir, ".agent"), { recursive: true });
+		await Bun.write(path.join(dir, ".agent", "SYSTEM.md"), "old system prompt");
+		// Add .agent/ reference to AGENTS.md File Map
+		const agents = await Bun.file(path.join(dir, "AGENTS.md")).text();
+		const withDeprecated = agents.replace(".omp/SYSTEM.md", ".agent/SYSTEM.md");
+		await Bun.write(path.join(dir, "AGENTS.md"), withDeprecated);
+		// Validate — should detect
+		const result = await runAgentValidate({ agentDir: dir });
+		const dirViolation = result.mece?.violations.find(v => v.rule === "no-deprecated-agent-dir" && v.file === ".agent/");
+		expect(dirViolation).toBeTruthy();
+		const refViolation = result.mece?.violations.find(v => v.rule === "no-deprecated-agent-dir" && v.file === "AGENTS.md");
+		expect(refViolation).toBeTruthy();
+		expect(result.valid).toBe(false); // error
+		// Fix
+		await runAgentValidate({ agentDir: dir, fix: true });
+		// .agent/ directory should be deleted
+		await expect(fs.access(path.join(dir, ".agent"))).rejects.toThrow();
+		// AGENTS.md should reference .omp/SYSTEM.md not .agent/SYSTEM.md
+		const agentsAfter = await Bun.file(path.join(dir, "AGENTS.md")).text();
+		expect(agentsAfter).not.toMatch(/\.agent\//);
+		expect(agentsAfter).toMatch(/\.omp\/SYSTEM\.md/);
+		// Re-validate — should be valid
+		const reResult = await runAgentValidate({ agentDir: dir });
+		expect(reResult.valid).toBe(true);
 	});
 });
 

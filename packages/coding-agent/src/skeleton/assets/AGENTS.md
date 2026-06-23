@@ -21,8 +21,7 @@
 | `prompt-includes.json`               | RUNTIME (injection manifest)     | read at startup                                                      |
 | `.omp/config.yml`                    | RUNTIME (model/role/theme)       | read at startup (hard dependency)                                    |
 | `.omp/SYSTEM.md`                    | RUNTIME (gateway system prompt)  | overrides OMP built-in prompt — gateway agent baseline                |
-| `.omp/skills/<name>.md`              | BEHAVIOR (on-demand)             | via `skill://<name>` URI                                             |
-| `knowledge/faq.md`                   | CONTEXT (on-demand)              | read by agent (user-created)                                         |
+| `.omp/skills/<name>/SKILL.md`       | BEHAVIOR (on-demand)             | via `skill://<name>` URI                                             |
 | `knowledge/handbook/*`               | CONTEXT (on-demand)              | read by agent (user-created)                                         |
 | `cron/tasks/*.prompt.md`             | BEHAVIOR (scheduled)             | cron trigger                                                         |
 | `sessions/*.jsonl`                   | RUNTIME (gitignored)             | session history                                                      |

@@ -544,6 +544,14 @@ export async function runAgentValidate(args: ValidateArgs): Promise<ValidateResu
 				const filePath = path.join(agentDir, change.file);
 				await Bun.write(filePath, change.newContent);
 			}
+			// Execute filesystem operations (e.g., delete deprecated dirs)
+			if (repair.fsOps) {
+				for (const op of repair.fsOps) {
+					if (op.type === "rmdir") {
+						await fs.rm(path.join(agentDir, op.path), { recursive: true, force: true });
+					}
+				}
+			}
 		}
 	}
 
@@ -551,7 +559,7 @@ export async function runAgentValidate(args: ValidateArgs): Promise<ValidateResu
 	for (const v of meceViolations) {
 		if (args.fix && v.repairable) continue;
 		issues.push({
-			level: v.rule === "skills-path-format" ? "error" : "warning",
+			level: v.rule === "skills-path-format" || v.rule === "no-deprecated-agent-dir" ? "error" : "warning",
 			file: v.file,
 			message: v.message,
 			rule: v.rule,

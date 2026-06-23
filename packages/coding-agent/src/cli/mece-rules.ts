@@ -35,6 +35,8 @@ export interface MeceViolation {
 
 export interface MeceRepair {
 	changes: { file: string; newContent: string }[];
+	/** Filesystem operations to perform after content changes (e.g., delete deprecated dirs) */
+	fsOps?: { type: "rmdir"; path: string }[];
 	summary: string;
 }
 
@@ -453,6 +455,75 @@ const filemapAccuracy: MeceRule = {
 };
 
 // ────────────────────────────────────────────────────────────────────────────
+// R8: no-deprecated-agent-dir
+// ────────────────────────────────────────────────────────────────────────────
+
+const DEPRECATED_AGENT_PATH_RE = /\.agent\//;
+
+const noDeprecatedAgentDir: MeceRule = {
+	id: "no-deprecated-agent-dir",
+	severity: "error",
+	description: "No .agent/ directory should exist (deprecated, replaced by .omp/)",
+	async check(ctx) {
+		const violations: MeceViolation[] = [];
+
+		// Check 1: .agent/ directory exists on disk
+		const agentDirPath = path.join(ctx.agentDir, ".agent");
+		try {
+			await fs.access(agentDirPath);
+			violations.push({
+				rule: this.id,
+				file: ".agent/",
+				message: "Deprecated .agent/ directory exists (should be .omp/)",
+				repairable: true,
+			});
+		} catch {
+			// .agent/ doesn't exist — good
+		}
+
+		// Check 2: AGENTS.md references .agent/ paths
+		const agents = getFile(ctx, "AGENTS.md");
+		if (agents) {
+			const matches = findLines(agents, line => DEPRECATED_AGENT_PATH_RE.test(line));
+			for (const m of matches) {
+				violations.push({
+					rule: this.id,
+					file: "AGENTS.md",
+					line: m.line,
+					message: `References deprecated .agent/ path: "${m.content.trim().slice(0, 60)}"`,
+					repairable: true,
+				});
+			}
+		}
+
+		return violations;
+	},
+	repair(ctx) {
+		const changes: { file: string; newContent: string }[] = [];
+		const fsOps: { type: "rmdir"; path: string }[] = [];
+
+		// Fix AGENTS.md references
+		const agents = getFile(ctx, "AGENTS.md");
+		if (agents && DEPRECATED_AGENT_PATH_RE.test(agents)) {
+			const fixed = agents
+				.replace(/\.agent\/SYSTEM\.md/g, ".omp/SYSTEM.md")
+				.replace(/\.agent\//g, ".omp/");
+			changes.push({ file: "AGENTS.md", newContent: fixed });
+		}
+
+		// Delete .agent/ directory
+		fsOps.push({ type: "rmdir", path: ".agent" });
+
+		return {
+			changes,
+			fsOps,
+			summary: "Removed deprecated .agent/ directory and fixed AGENTS.md references",
+		};
+	},
+};
+
+
+// ────────────────────────────────────────────────────────────────────────────
 // Rule registry
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -464,6 +535,7 @@ export const MECE_RULES: MeceRule[] = [
 	noDwsCommandsInTools,
 	skillsPathFormat,
 	filemapAccuracy,
+	noDeprecatedAgentDir,
 ];
 
 /** Files that MECE rules need to read (rel paths from agentDir root). */
