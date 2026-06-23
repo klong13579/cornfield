@@ -290,10 +290,11 @@ describe("runAgentValidate", () => {
 		await runAgentInit({ name: "alpha", dir: tmpDir });
 		await fs.unlink(path.join(tmpDir, "alpha", "prompt-includes.json"));
 		await fs.unlink(path.join(tmpDir, "alpha", ".gitignore"));
+		await fs.unlink(path.join(tmpDir, "alpha", ".omp", "SYSTEM.md"));
 		const result = await runAgentValidate({ agentDir: path.join(tmpDir, "alpha") });
 		expect(result.valid).toBe(true); // warnings don't invalidate
 		const warnings = result.issues.filter(i => i.level === "warning");
-		expect(warnings.map(i => i.file).sort()).toEqual([".gitignore", "prompt-includes.json"]);
+		expect(warnings.map(i => i.file).sort()).toEqual([".gitignore", ".omp/SYSTEM.md", "prompt-includes.json"]);
 	});
 });
 

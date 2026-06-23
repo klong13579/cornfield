@@ -10,9 +10,6 @@
 export const SKELETON_DIRS: readonly string[] = [
 	".omp",
 	".omp/skills",
-	".agent",
-	".agent/prompts",
-	".agent/rules",
 	"knowledge",
 	"knowledge/handbook",
 	"cron",

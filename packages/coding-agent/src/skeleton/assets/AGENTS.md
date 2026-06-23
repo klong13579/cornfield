@@ -38,7 +38,6 @@
 - `prompt-includes.json` — change which files are injected as always-on.
 - `.omp/config.yml` — change `modelRoles.default` to switch the active model.
 - `.omp/SYSTEM.md` — gateway agent system prompt baseline; edit to customize behavior. Leave empty to fall back to OMP's built-in prompt.
-- `.agent/SYSTEM.md` (deprecated) — no longer created by skeleton. Existing files with default comment content are auto-removed by `ensureAgentDir`.
 
 ## Global hard constraints
 

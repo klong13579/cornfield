@@ -10,6 +10,9 @@
 
 - **Gateway agent system prompt in skeleton**: New `.omp/SYSTEM.md` skeleton asset provides a gateway-oriented system prompt baseline (enterprise assistant role, tool discipline, completion discipline, safety/authorization, IM communication, identity/memory) that replaces the built-in coding-engineer prompt when `omp --mode rpc` starts in a gateway agentDir. The `.agent/SYSTEM.md` skeleton asset is cleared to empty (deprecated) to prevent placeholder-comment pollution of the custom system prompt template. Skeleton `.gitignore` updated from `.omp/` to `.omp/*` with negation patterns for `config.yml` and `SYSTEM.md` so these skeleton assets are trackable in version control.
 
+### Removed
+
+- **`.agent/` directory from agentDir skeleton**: The skeleton no longer creates `.agent/`, `.agent/prompts/`, `.agent/rules/` directories or the `.agent/SYSTEM.md` file. All capabilities (skills, rules, prompts, commands, SYSTEM.md, AGENTS.md) are fully covered by the `.omp/` directory via the native OMP provider (priority 100). The `agents` discovery provider (`discovery/agents.ts`) is retained for compatibility with user-supplied `.agent/` directories from external tools, but the skeleton itself no longer seeds an empty `.agent/` tree. The legacy `.agent/SYSTEM.md` cleanup in `ensureAgentDir` is preserved to auto-remove files from previously deployed skeletons.
 ### Changed
 
 - **Deprecated `omp agents setup`**: Removed the legacy `setup` subcommand from `omp agents` (plural) and its `#handleSetup` method. This was a pre-skeleton gateway bootstrap that generated an incompatible directory layout. Use `omp agent init` (singular) instead, which uses the canonical skeleton template.

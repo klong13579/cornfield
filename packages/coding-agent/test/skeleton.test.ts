@@ -34,11 +34,7 @@ const REQUIRED_FILES = [
 	// runtime
 	".omp/config.yml",
 	".omp/SYSTEM.md",
-	".agent/SYSTEM.md",
-	// .agent/SYSTEM.md is deprecated (kept empty); .omp/SYSTEM.md is the override location
 	".omp/skills/.gitkeep",
-	".agent/prompts/.gitkeep",
-	".agent/rules/.gitkeep",
 	"knowledge/handbook/.gitkeep",
 	"sessions/.gitkeep",
 	"cron/tasks/.gitkeep",
@@ -49,7 +45,16 @@ const REQUIRED_FILES = [
  * Per design §6.3 principle 5, optional / user-created directories must not be created
  * by the skeleton and must not raise errors when missing.
  */
-const FORBIDDEN_PATHS = ["scripts", "scripts/.gitkeep", "external", "external/.gitkeep"];
+const FORBIDDEN_PATHS = [
+	"scripts",
+	"scripts/.gitkeep",
+	"external",
+	"external/.gitkeep",
+	".agent",
+	".agent/SYSTEM.md",
+	".agent/prompts",
+	".agent/rules",
+];
 
 describe("skeleton", () => {
 	let tmpDir: string;
@@ -152,12 +157,6 @@ describe("skeleton", () => {
 		expect(content).toContain("Gateway Agent");
 		expect(content).toContain("工具纪律");
 		expect(content).toContain("安全与授权");
-	});
-
-	test(".agent/SYSTEM.md is empty (deprecated)", async () => {
-		await ensureAgentDir(tmpDir);
-		const content = await Bun.file(path.join(tmpDir, ".agent/SYSTEM.md")).text();
-		expect(content.trim()).toBe("");
 	});
 
 	test(".omp/config.yml contains modelRoles default and theme", async () => {

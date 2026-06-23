@@ -428,7 +428,7 @@ const ALWAYS_ON: ReadonlyArray<string> = [
 
 const RUNTIME_HARD_DEPS: ReadonlyArray<string> = [".omp/config.yml"];
 
-const RUNTIME_RECOMMENDED: ReadonlyArray<string> = ["prompt-includes.json", ".gitignore"];
+const RUNTIME_RECOMMENDED: ReadonlyArray<string> = ["prompt-includes.json", ".gitignore", ".omp/SYSTEM.md"];
 
 export async function runAgentValidate(args: ValidateArgs): Promise<ValidateResult> {
 	const agentDir = path.resolve(args.agentDir);

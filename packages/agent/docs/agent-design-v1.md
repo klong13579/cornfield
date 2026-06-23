@@ -53,11 +53,6 @@
 │   └── skills/                        ← [BEHAVIOR] 项目级 skills（on-demand，OMP 原生路径）
 │       └── <skill-name>.md
 │
-├── .agent/                            ← [auxiliary] agents provider 加载路径
-│   ├── SYSTEM.md                      ← [RUNTIME] 已弃用（保留空文件）；system prompt 覆盖移至 .omp/SYSTEM.md
-│   ├── prompts/                       ← [BEHAVIOR/可选] 可复用 prompt 模板
-│   └── rules/                         ← [CONSTRAINTS/可选] 行为规则
-│
 ├── knowledge/                         ← [CONTEXT] 静态知识库
 │   ├── external-workspaces.md         ← [ALWAYS-ON] 外部数据源映射
 │   ├── faq.md                         ← [ON-DEMAND] 高频问题
