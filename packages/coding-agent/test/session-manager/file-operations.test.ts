@@ -257,7 +257,7 @@ describe("SessionManager temp cwd session dirs", () => {
 				getSessionsDir(),
 				`-${path.relative(os.homedir(), fs.realpathSync(aliasedCwd)).replace(/[/\\:]/g, "-")}`,
 			);
-			expect(path.dirname(sessionFile)).toBe(expectedDir);
+			expect(sessionFile.startsWith(expectedDir + path.sep)).toBe(true);
 		} finally {
 			fs.rmSync(aliasRoot, { recursive: true, force: true });
 			fs.rmSync(realProjectDir, { recursive: true, force: true });
@@ -272,7 +272,7 @@ describe("SessionManager temp cwd session dirs", () => {
 		const sessionFile = session.getSessionFile();
 		if (!sessionFile) throw new Error("Expected session file path");
 
-		expect(path.dirname(sessionFile)).toBe(path.join(getSessionsDir(), expectedTempSessionDirName(tempCwd)));
+		expect(sessionFile.startsWith(path.join(getSessionsDir(), expectedTempSessionDirName(tempCwd)) + path.sep)).toBe(true);
 	});
 
 	it("migrates legacy temp-root absolute session dirs to -tmp prefixes", () => {
@@ -290,7 +290,7 @@ describe("SessionManager temp cwd session dirs", () => {
 
 		const expectedDir = path.join(getSessionsDir(), expectedTempSessionDirName(tempCwd));
 		expect(fs.existsSync(legacyDir)).toBe(false);
-		expect(path.dirname(sessionFile)).toBe(expectedDir);
+		expect(sessionFile.startsWith(expectedDir + path.sep)).toBe(true);
 		expect(fs.existsSync(path.join(expectedDir, "carried.jsonl"))).toBe(true);
 	});
 });
@@ -462,6 +462,106 @@ describe("SessionManager legacy session migration persistence", () => {
 		} finally {
 			await resumed.close();
 			await session.close();
+		}
+	});
+});
+
+
+describe("SessionManager.list with hierarchical by-date layout", () => {
+	let tempDir: string;
+	let sessionDir: string;
+
+	beforeEach(() => {
+		tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "omp-session-bydate-test-"));
+		sessionDir = path.join(tempDir, "sessions");
+		fs.mkdirSync(sessionDir, { recursive: true });
+	});
+
+	afterEach(() => {
+		fs.rmSync(tempDir, { recursive: true, force: true });
+	});
+
+	function writeHierarchicalSession(date: string, time: string, id: string): string {
+		const dir = path.join(sessionDir, "by-date", date);
+		fs.mkdirSync(dir, { recursive: true });
+		const file = path.join(dir, `${time}__${id.slice(-8)}.jsonl`);
+		fs.writeFileSync(
+			file,
+			`${[
+				JSON.stringify({ type: "session", id, timestamp: `${date}T00:00:00Z`, cwd: tempDir }),
+				JSON.stringify({
+					type: "message",
+					id: "msg-1",
+					parentId: null,
+					timestamp: `${date}T00:00:01Z`,
+					message: { role: "user", content: "hello", timestamp: 1 },
+				}),
+			].join("\n")}\n`,
+		);
+		return file;
+	}
+
+	it("SessionManager.list finds sessions written to by-date/<YYYY-MM-DD>/", async () => {
+		const file = writeHierarchicalSession("2026-06-23", "120000", "019eeddd-aaaa-7000-bbbb-cccccccccccc");
+
+		const sessions = await SessionManager.list(tempDir, sessionDir);
+
+		expect(sessions).toHaveLength(1);
+		expect(sessions[0]!.path).toBe(file);
+		expect(sessions[0]!.id).toBe("019eeddd-aaaa-7000-bbbb-cccccccccccc");
+	});
+
+	it("SessionManager.list merges by-date sessions with legacy flat files", async () => {
+		// Legacy flat file at sessionDir root
+		const legacyFile = path.join(sessionDir, "2026-06-01T00-00-00-000Z_old12345.jsonl");
+		fs.writeFileSync(
+			legacyFile,
+			`${[
+				JSON.stringify({ type: "session", id: "old12345", timestamp: "2026-06-01T00:00:00Z", cwd: tempDir }),
+				JSON.stringify({ type: "message", id: "msg-1", parentId: null, timestamp: "2026-06-01T00:00:01Z", message: { role: "user", content: "old", timestamp: 1 } }),
+			].join("\n")}\n`,
+		);
+
+		// New hierarchical file
+		writeHierarchicalSession("2026-06-23", "120000", "new1234567");
+
+		const sessions = await SessionManager.list(tempDir, sessionDir);
+		expect(sessions).toHaveLength(2);
+		const ids = sessions.map(s => s.id).sort();
+		expect(ids).toEqual(["new1234567", "old12345"].sort());
+	});
+
+	it("SessionManager.listAll finds sessions across all project subdirs", async () => {
+		// Simulate two projects, each with a by-date session
+		const projectA = path.join(sessionDir, "-project-a");
+		const projectB = path.join(sessionDir, "-project-b");
+		for (const [proj, id] of [[projectA, "aaa11111"], [projectB, "bbb22222"]] as const) {
+			const dir = path.join(proj, "by-date", "2026-06-23");
+			fs.mkdirSync(dir, { recursive: true });
+			fs.writeFileSync(
+				path.join(dir, `120000__${id}.jsonl`),
+				`${[
+					JSON.stringify({ type: "session", id, timestamp: "2026-06-23T00:00:00Z", cwd: proj }),
+					JSON.stringify({ type: "message", id: "msg-1", parentId: null, timestamp: "2026-06-23T00:00:01Z", message: { role: "user", content: "hi", timestamp: 1 } }),
+				].join("\n")}\n`,
+			);
+		}
+
+		// listAll reads from the agent sessions root, not an arbitrary dir.
+		// We point setAgentDir at tempDir so sessions/ is the root.
+		const originalAgentDir = process.env.PI_CODING_AGENT_DIR;
+		setAgentDir(tempDir);
+		try {
+			const sessions = await SessionManager.listAll();
+			expect(sessions).toHaveLength(2);
+			expect(sessions.map(s => s.id).sort()).toEqual(["aaa11111", "bbb22222"].sort());
+		} finally {
+			if (originalAgentDir) {
+				setAgentDir(originalAgentDir);
+			} else {
+				setAgentDir(path.join(getConfigRootDir(), "agent"));
+				delete process.env.PI_CODING_AGENT_DIR;
+			}
 		}
 	});
 });

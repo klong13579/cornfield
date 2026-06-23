@@ -935,6 +935,37 @@ function extractFirstUserPrompt(entries: Array<Record<string, unknown>>): string
 }
 
 /**
+ * Gather every `.jsonl` file under `sessionDir`, merging the hierarchical
+ * `by-date/<YYYY-MM-DD>/` tree with any legacy flat files left at the root by
+ * older versions. Deduplicates by path. Non-session files (artifacts lacking
+ * a session header) are filtered out later during parse.
+ */
+function listSessionFilePaths(sessionDir: string, storage: SessionStorage): string[] {
+	const seen = new Set<string>();
+	const files: string[] = [];
+
+	// New hierarchical layout
+	for (const f of storage.listFilesSyncRecursive(sessionDir, "*.jsonl")) {
+		if (!seen.has(f)) {
+			seen.add(f);
+			files.push(f);
+		}
+	}
+
+	// Legacy flat files (older versions) — include only those not already seen
+	// via the recursive walk. Also tolerates flat files pre-dating by-date/.
+	try {
+		for (const flat of storage.listFilesSync(sessionDir, "*.jsonl")) {
+			if (!seen.has(flat)) files.push(flat);
+		}
+	} catch {
+		// sessionDir may not exist
+	}
+
+	return files;
+}
+
+/**
  * Reads all session files from the directory and returns them sorted by mtime (newest first).
  * Uses low-level file I/O to efficiently read only the first 4KB of each file
  * to extract the JSON header and first user message without loading entire session logs into memory.
@@ -944,24 +975,7 @@ function extractFirstUserPrompt(entries: Array<Record<string, unknown>>): string
  * are merged into a single mtime-sorted result.
  */
 async function getSortedSessions(sessionDir: string, storage: SessionStorage): Promise<RecentSessionInfo[]> {
-	const seen = new Set<string>();
-	const files: string[] = [];
-
-	// New hierarchical layout
-	for (const f of storage.listFilesSyncRecursive(sessionDir, "*.jsonl")) {
-		seen.add(f);
-		files.push(f);
-	}
-
-	// Legacy flat files (older versions) — include only those not already seen
-	// via the recursive walk. Also tolerate flat files pre-dating by-date/.
-	try {
-		for (const flat of storage.listFilesSync(sessionDir, "*.jsonl")) {
-			if (!seen.has(flat)) files.push(flat);
-		}
-	} catch {
-		// sessionDir may not exist
-	}
+	const files = listSessionFilePaths(sessionDir, storage);
 
 	const sessions: RecentSessionInfo[] = [];
 	await Promise.all(
@@ -2982,7 +2996,7 @@ export class SessionManager {
 	): Promise<SessionInfo[]> {
 		const dir = sessionDir ?? SessionManager.getDefaultSessionDir(cwd, undefined, storage);
 		try {
-			const files = storage.listFilesSync(dir, "*.jsonl");
+			const files = listSessionFilePaths(dir, storage);
 			return await collectSessionsFromFiles(files, storage);
 		} catch {
 			return [];
@@ -2995,9 +3009,14 @@ export class SessionManager {
 	static async listAll(storage: SessionStorage = new FileSessionStorage()): Promise<SessionInfo[]> {
 		const sessionsRoot = path.join(getDefaultAgentDir(), "sessions");
 		try {
-			const files = await Array.fromAsync(new Bun.Glob("*/*.jsonl").scan(sessionsRoot), name =>
-				path.join(sessionsRoot, name),
-			);
+			const files: string[] = [];
+			// Each project is a cwd-encoded subdirectory; sessions live under
+			// by-date/<YYYY-MM-DD>/ within it (plus legacy flat files at the root).
+			for (const entry of fs.readdirSync(sessionsRoot, { withFileTypes: true })) {
+				if (!entry.isDirectory()) continue;
+				const projectDir = path.join(sessionsRoot, entry.name);
+				files.push(...listSessionFilePaths(projectDir, storage));
+			}
 			return await collectSessionsFromFiles(files, storage);
 		} catch {
 			return [];
