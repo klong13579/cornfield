@@ -52,6 +52,40 @@ const CIRCUIT_FAILURE_THRESHOLD = 10;
 const CIRCUIT_COOLDOWN_MS = 30_000;
 const CIRCUIT_OPEN_MESSAGE = "系统繁忙，请稍后再试。";
 
+/**
+ * Default long-task threshold (3 min). Overridable via env var for
+ * testing — e.g. `DINGTALK_LONG_TASK_THRESHOLD_MS=30000 omp gateway start`
+ * fires the watcher 30 s into a tool call instead of 3 min. Set to 0
+ * to disable the watcher entirely.
+ */
+const DEFAULT_LONG_TASK_THRESHOLD_MS = 180_000;
+/**
+ * Default progress-ping interval (5 min). After the threshold fires,
+ * `onLongTask` re-fires every N ms until the tool returns or the
+ * prompt ends. Overridable via `DINGTALK_LONG_TASK_PROGRESS_PING_MS`.
+ */
+const DEFAULT_LONG_TASK_PROGRESS_PING_MS = 300_000;
+
+/** Resolved once at module load — env reads are stable for the
+ * process lifetime (gateway is a daemon; restarts reload). */
+function readEnvInt(name: string, fallback: number): number {
+	const raw = process.env[name];
+	if (raw === undefined || raw === "") return fallback;
+	const parsed = Number.parseInt(raw, 10);
+	if (Number.isNaN(parsed) || parsed < 0) {
+		logger.warn(`[AgentBridge] Invalid ${name}=${raw}, using default ${fallback}`);
+		return fallback;
+	}
+	return parsed;
+}
+const LONG_TASK_THRESHOLD_MS = readEnvInt("DINGTALK_LONG_TASK_THRESHOLD_MS", DEFAULT_LONG_TASK_THRESHOLD_MS);
+const LONG_TASK_PROGRESS_PING_MS = readEnvInt("DINGTALK_LONG_TASK_PROGRESS_PING_MS", DEFAULT_LONG_TASK_PROGRESS_PING_MS);
+
+/** Exported for test introspection — production code should consume
+ * `LONG_TASK_THRESHOLD_MS` / `LONG_TASK_PROGRESS_PING_MS` directly. */
+export const __TEST_LONG_TASK_THRESHOLD_MS = LONG_TASK_THRESHOLD_MS;
+export const __TEST_LONG_TASK_PROGRESS_PING_MS = LONG_TASK_PROGRESS_PING_MS;
+
 export type AgentBridgeLifecycleState = "stopped" | "starting" | "idle" | "busy" | "restarting" | "degraded" | "error";
 
 export interface AgentBridgeSnapshot {
@@ -86,6 +120,15 @@ export interface AgentBridgeOptions {
 	maxCrashRetries?: number;
 	/** Base delay for crash recovery backoff in ms (default: 1000) */
 	crashBackoffMs?: number;
+	/** How long a single tool call can run before the bridge fires
+	 * `onLongTask` with `threshold: true` (default: 180000 = 3 min,
+	 * overridable via `DINGTALK_LONG_TASK_THRESHOLD_MS` env var).
+	 * Set to 0 to disable the watcher. */
+	longTaskThresholdMs?: number;
+	/** Interval between subsequent `onLongTask` fires after the threshold
+	 * is reached (default: 300000 = 5 min, overridable via
+	 * `DINGTALK_LONG_TASK_PROGRESS_PING_MS` env var). */
+	progressPingIntervalMs?: number;
 }
 
 /** Inline-shape RPC event (subset of @oh-my-pi/pi-agent AgentEvent). */
@@ -149,6 +192,20 @@ export interface ForwardStreamHandlers {
 	 * `forwardWithMeta` with the final meta shortly (or it may already be
 	 * resolved by the time the handler runs). */
 	onAgentEnd?: () => void;
+	/** Fired when a tool call has been running longer than the bridge's
+	 * `longTaskThresholdMs`. The first fire happens once at the threshold;
+	 * subsequent fires are spaced by `progressPingIntervalMs` while the
+	 * tool is still pending. Stops firing when the matching `onToolResult`
+	 * arrives or the prompt ends. Used by the AI Card path to surface a
+	 * "still working" affordance on long-running tools. */
+	onLongTask?: (event: {
+		toolCallId: string;
+		toolName: string;
+		elapsedMs: number;
+		/** True for the first fire (right at the threshold); false for
+		 * subsequent interval pings. */
+		threshold: boolean;
+	}) => void;
 }
 
 /** Pending prompt state */
@@ -178,6 +235,21 @@ interface PendingCommand {
 	timeout: NodeJS.Timeout;
 }
 
+/** Per-tool-call long-task watcher. Created in `onToolCall`; cleared on
+ * the matching `onToolResult` or on prompt end. Fires `onLongTask` at
+ * the threshold (once) and on the interval (subsequent pings). */
+interface LongTaskWatcher {
+	toolName: string;
+	startedAt: number;
+	/** Fires once at `thresholdMs` to emit the first `onLongTask`. */
+	thresholdTimer: NodeJS.Timeout;
+	/** Repeating timer for pings after the threshold. */
+	pingInterval: NodeJS.Timeout | null;
+	/** Set to true after the first fire so subsequent pings report
+	 * `threshold: false`. */
+	thresholdFired: boolean;
+}
+
 export class AgentBridge {
 	#proc: { pid: number; kill: () => void } | null = null;
 	#stdinWriter?: { write: (data: Uint8Array) => void };
@@ -205,9 +277,20 @@ export class AgentBridge {
 	#options: AgentBridgeOptions;
 	#reconnectGuard = false;
 	#lastError: string | undefined;
+	/** Per-prompt long-task watcher state. Maps promptId -> (toolCallId ->
+	 * watcher). Created when `onToolCall` fires; cleared on the matching
+	 * `onToolResult` or on prompt end. */
+	#longTaskWatchers = new Map<string, Map<string, LongTaskWatcher>>();
 
 	constructor(options: AgentBridgeOptions = {}) {
 		this.#options = options;
+		const thresholdMs = options.longTaskThresholdMs ?? LONG_TASK_THRESHOLD_MS;
+		const pingMs = options.progressPingIntervalMs ?? LONG_TASK_PROGRESS_PING_MS;
+		logger.debug("[AgentBridge] long-task watcher configured", {
+			thresholdMs,
+			pingMs,
+			disabled: thresholdMs <= 0,
+		});
 	}
 
 	// ═══════════════════════════════════════════════════════════════
@@ -249,6 +332,102 @@ export class AgentBridge {
 			pending.reject(error);
 		}
 		this.#pendingCommands.clear();
+		this.#clearAllLongTaskWatchersForAllPrompts();
+	}
+
+	// ───────────────────────────────────────────────────────────────
+	// Long-task watcher
+	// ───────────────────────────────────────────────────────────────
+
+	/** Start watching a tool call for long-task threshold. Called from
+	 * `#fireStreamHandler` when `onToolCall` fires. No-op if the watcher
+	 * is disabled (`longTaskThresholdMs === 0`) or the prompt has no
+	 * `onLongTask` handler. */
+	#startLongTaskWatcher(promptId: string, toolCallId: string, toolName: string): void {
+		const thresholdMs = this.#options.longTaskThresholdMs ?? LONG_TASK_THRESHOLD_MS;
+		if (thresholdMs <= 0) return;
+		const pending = this.#pendingPrompts.get(promptId);
+		if (!pending?.handlers?.onLongTask) return;
+		// Idempotent: if a watcher for this tool call already exists, don't
+		// schedule a second one. The same id can come up if the bridge ever
+		// re-emits (it shouldn't, but the watcher's state is per-call).
+		let perPrompt = this.#longTaskWatchers.get(promptId);
+		if (!perPrompt) {
+			perPrompt = new Map();
+			this.#longTaskWatchers.set(promptId, perPrompt);
+		}
+		if (perPrompt.has(toolCallId)) return;
+
+		const pingMs = this.#options.progressPingIntervalMs ?? LONG_TASK_PROGRESS_PING_MS;
+		const startedAt = Date.now();
+		const watcher: LongTaskWatcher = {
+			toolName,
+			startedAt,
+			thresholdTimer: undefined as unknown as NodeJS.Timeout,
+			pingInterval: null,
+			thresholdFired: false,
+		};
+
+		const fire = (threshold: boolean): void => {
+			try {
+				pending.handlers?.onLongTask?.({
+					toolCallId,
+					toolName,
+					elapsedMs: Date.now() - startedAt,
+					threshold,
+				});
+			} catch (err) {
+				logger.warn("AgentBridge onLongTask handler threw", {
+					error: err instanceof Error ? err.message : String(err),
+				});
+			}
+		};
+
+		watcher.thresholdTimer = setTimeout(() => {
+			watcher.thresholdFired = true;
+			fire(true);
+			// Subsequent pings
+			watcher.pingInterval = setInterval(() => {
+				fire(false);
+			}, pingMs);
+		}, thresholdMs);
+
+		perPrompt.set(toolCallId, watcher);
+	}
+
+	/** Clear the watcher for one tool call (called from `onToolResult`). */
+	#clearLongTaskWatcher(promptId: string, toolCallId: string): void {
+		const perPrompt = this.#longTaskWatchers.get(promptId);
+		if (!perPrompt) return;
+		const watcher = perPrompt.get(toolCallId);
+		if (!watcher) return;
+		clearTimeout(watcher.thresholdTimer);
+		if (watcher.pingInterval) clearInterval(watcher.pingInterval);
+		perPrompt.delete(toolCallId);
+		if (perPrompt.size === 0) this.#longTaskWatchers.delete(promptId);
+	}
+
+	/** Clear all watchers for one prompt (called from `agent_end`). */
+	#clearAllLongTaskWatchers(promptId: string): void {
+		const perPrompt = this.#longTaskWatchers.get(promptId);
+		if (!perPrompt) return;
+		for (const watcher of perPrompt.values()) {
+			clearTimeout(watcher.thresholdTimer);
+			if (watcher.pingInterval) clearInterval(watcher.pingInterval);
+		}
+		this.#longTaskWatchers.delete(promptId);
+	}
+
+	/** Clear every watcher's timers (called from `stop()`). Keeps the map
+	 * empty — stop is a hard reset, not a partial clear. */
+	#clearAllLongTaskWatchersForAllPrompts(): void {
+		for (const perPrompt of this.#longTaskWatchers.values()) {
+			for (const watcher of perPrompt.values()) {
+				clearTimeout(watcher.thresholdTimer);
+				if (watcher.pingInterval) clearInterval(watcher.pingInterval);
+			}
+		}
+		this.#longTaskWatchers.clear();
 	}
 
 	get isRunning(): boolean {
@@ -887,10 +1066,10 @@ export class AgentBridge {
 					// (matching @oh-my-pi/pi-ai AssistantMessageEvent). The
 					// bridge's inline `ame` shape is `Record<string, unknown>`
 					// so we read via the literal key.
-					const tc = (ame as { toolCall?: { id?: string; name?: string; arguments?: unknown } })
-						.toolCall;
+					const tc = (ame as { toolCall?: { id?: string; name?: string; arguments?: unknown } }).toolCall;
 					if (tc && typeof tc.id === "string" && typeof tc.name === "string") {
 						handlers.onToolCall?.({ id: tc.id, name: tc.name, args: tc.arguments ?? null });
+						this.#startLongTaskWatcher(pending.promptId, tc.id, tc.name);
 					}
 				}
 			} else if (event.type === "message_end" && event.message) {
@@ -921,9 +1100,11 @@ export class AgentBridge {
 							isError: tr.isError === true,
 							contentText,
 						});
+						this.#clearLongTaskWatcher(pending.promptId, tr.toolCallId);
 					}
 				}
 			} else if (event.type === "agent_end") {
+				this.#clearAllLongTaskWatchers(pending.promptId);
 				handlers.onAgentEnd?.();
 			}
 		} catch (err) {
@@ -1222,19 +1403,29 @@ export class AgentBridge {
 		});
 	}
 
-	/**
-	 * Get the agent's current session state via RPC.
-	 * Returns model, thinkingLevel, isStreaming, and other state fields.
-	 * Requires the agent process to be running.
-	 */
-	async getState(): Promise<AgentEvent> {
-		return this.#runExclusive(async () => {
-			if (!this.isRunning) {
-				throw new Error("Agent process not running");
-			}
-			return await this.#sendCommandAndWait("get_state", {}, 30_000);
-		});
-	}
+/**
+ * Get the agent's current session state via RPC.
+ * Returns model, thinkingLevel, isStreaming, and other state fields.
+ * Requires the agent process to be running.
+ */
+async getState(): Promise<AgentEvent> {
+	return this.#runExclusive(async () => {
+		if (!this.isRunning) {
+			throw new Error("Agent process not running");
+		}
+		return await this.#sendCommandAndWait("get_state", {}, 30_000);
+	});
+}
+
+/**
+ * Temporarily disable tool toolsets. Used by cron to prevent the agent from
+ * creating sub-tasks, sending messages, or asking clarifying questions.
+ * Pass empty array to restore all tools.
+ */
+async setDisabledToolsets(toolsets: string[]): Promise<void> {
+	if (!this.isRunning) return;
+	await this.#sendCommandAndWait("set_disabled_toolsets", { toolsets }, 30_000);
+}
 }
 
 // ═════════════════════════════════════════════════════════════════════

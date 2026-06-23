@@ -65,7 +65,17 @@ export type RpcCommand =
 	| { id?: string; type: "set_session_name"; name: string }
 
 	// Messages
-	| { id?: string; type: "get_messages" };
+	| { id?: string; type: "get_messages" }
+
+	// Tool control
+	| { id?: string; type: "set_disabled_toolsets"; toolsets: string[] };
+
+export interface RpcSetDisabledToolsetsResponse extends RpcResponse {
+	type: "response";
+	command: "set_disabled_toolsets";
+	success: true;
+	data: { disabled: string[] };
+}
 
 // ============================================================================
 // RPC State
@@ -158,6 +168,9 @@ export type RpcResponse =
 
 	// Bash
 	| { id?: string; type: "response"; command: "bash"; success: true; data: BashResult }
+
+	// Tool control
+	| RpcSetDisabledToolsetsResponse
 	| { id?: string; type: "response"; command: "abort_bash"; success: true }
 
 	// Session

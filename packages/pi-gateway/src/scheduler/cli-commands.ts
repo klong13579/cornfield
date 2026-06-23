@@ -267,6 +267,18 @@ export async function cronCreate(args: string[], storage: SchedulerDbStorage): P
 		return;
 	}
 
+	// accountId is required — cron tasks must be bound to a channel account
+	// to reuse the already-warm AgentBridge instead of spawning omp --print.
+	if (!accountId) {
+		console.error(
+			"--account <accountId> is required for cron create. " +
+				"Tasks must be bound to a channel account (e.g. hr, ops) to reuse " +
+				"the existing agent bridge. Run 'cron list' to see available accounts.",
+		);
+		process.exitCode = 1;
+		return;
+	}
+
 	// Injection scan for agent task prompts
 	if (type === "agent") {
 		const blocked = scanCronPrompt(command);

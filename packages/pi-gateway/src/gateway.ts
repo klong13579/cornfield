@@ -1115,6 +1115,13 @@ export class Gateway {
 					sessionPath: cronSessionPath,
 				});
 
+				// Lock down toolset: cron agents must not create sub-tasks or send messages
+				try {
+					await bridge.setDisabledToolsets(["cronjob", "messaging"]);
+				} catch {
+					// Best-effort — if the RPC doesn't support this command yet, continue
+				}
+
 				// Switch model if the task specifies a different one
 				let originalModel: { provider?: string; model?: string } | undefined;
 				if (task.model) {
@@ -1163,6 +1170,12 @@ export class Gateway {
 					});
 					// Fall through to executeScheduledCommand fallback below
 				} finally {
+					// Restore disabled toolsets
+					try {
+						await bridge.setDisabledToolsets([]);
+					} catch {
+						// Best-effort
+					}
 					// Restore original model after execution
 					if (originalModel?.model) {
 						try {

@@ -640,6 +640,22 @@ export async function runRpcMode(session: AgentSession): Promise<never> {
 			}
 
 			// =================================================================
+			// Tool Control
+			// =================================================================
+
+			case "set_disabled_toolsets": {
+				const allTools = session.getAllToolNames();
+				const disabled = new Set((command as { toolsets?: string[] }).toolsets ?? []);
+				const enabled = allTools.filter(name => !disabled.has(name));
+				// Preserve auto-QA tool
+				if (disabled.has("report_tool_issue")) {
+					enabled.push("report_tool_issue");
+				}
+				await session.setActiveToolsByName(enabled);
+				return success(id, "set_disabled_toolsets", { disabled: Array.from(disabled) });
+			}
+
+			// =================================================================
 			// Queue Modes
 			// =================================================================
 
