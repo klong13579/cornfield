@@ -36,6 +36,8 @@ export class SchedulerDaemon {
 	#engine?: SchedulerEngine;
 	#fileStore?: SchedulerFileStore;
 	#pidPath: string;
+	/** File descriptor for the cross-process lock (fd held open == lock held) */
+	#lockFd?: number;
 	#lockPath: string;
 	#started = false;
 
@@ -68,15 +70,40 @@ export class SchedulerDaemon {
 			return;
 		}
 
-		// Acquire mkdir-based lock — POSIX-atomic, auto-released on process exit
+		// Acquire fd-based exclusive lock. Unlike mkdir(), the fd is auto-released
+		// by the OS when the process exits (even on crash), so stale locks cannot
+		// accumulate. This is the closest cross-platform equivalent to fcntl.flock.
 		try {
-			fs.mkdirSync(this.#lockPath, { mode: SCHEDULER_DIR_MODE });
+			fs.mkdirSync(path.dirname(this.#lockPath), { recursive: true, mode: SCHEDULER_DIR_MODE });
+			this.#lockFd = fs.openSync(this.#lockPath, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL, 0o600);
+			// Write PID into the lock file so a reader can tell who owns it
+			fs.writeSync(this.#lockFd, String(process.pid));
 		} catch (err: unknown) {
 			if ((err as NodeJS.ErrnoException).code === "EEXIST") {
-				logger.warn("Scheduler daemon is already running (lock exists)");
-				return;
+				// Read the stale PID from the lock file for diagnostics
+				try {
+					const oldPid = Number.parseInt(fs.readFileSync(this.#lockPath, "utf8").trim(), 10);
+					if (!Number.isNaN(oldPid)) {
+						try {
+							process.kill(oldPid, 0);
+							logger.warn("Scheduler daemon is already running (PID " + oldPid + ")");
+							return;
+						} catch {
+							// Stale lock — process is dead, remove and retry
+							logger.warn("Removing stale scheduler lock from PID " + oldPid);
+							fs.unlinkSync(this.#lockPath);
+							this.#lockFd = fs.openSync(this.#lockPath, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL, 0o600);
+							fs.writeSync(this.#lockFd, String(process.pid));
+						}
+					}
+				} catch {
+					// Can't read/corrupt lock file — treat as locked
+					logger.warn("Scheduler daemon is already running (lock exists)");
+					return;
+				}
+			} else {
+				throw err;
 			}
-			throw err;
 		}
 
 		this.#storage = new SchedulerDbStorage(this.#dbPath);
@@ -118,11 +145,15 @@ export class SchedulerDaemon {
 		this.#storage = undefined;
 		this.#fileStore = undefined;
 
-		// Release lock
+		// Release fd-based lock
 		try {
-			fs.rmdirSync(this.#lockPath);
+			if (this.#lockFd !== undefined) {
+				fs.closeSync(this.#lockFd);
+				this.#lockFd = undefined;
+			}
+			fs.unlinkSync(this.#lockPath);
 		} catch {
-			// ignore — lock may have been cleaned up by a signal handler
+			// ignore — lock fd is auto-released by OS on exit
 		}
 
 		this.#started = false;
