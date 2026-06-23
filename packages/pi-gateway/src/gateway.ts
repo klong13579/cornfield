@@ -17,6 +17,7 @@ import { AgentBridge, type AgentBridgeOptions } from "./agent-bridge";
 import { DingTalkChannel } from "./channels/dingtalk";
 import { ChannelRegistry } from "./channels/registry";
 import { getDataDir, getDingTalkConfig, getEnabledChannels } from "./config";
+import type { Channel } from "./types";
 import { findAgentSessionPath } from "./scheduler";
 import { SchedulerEngine } from "./scheduler/engine";
 import { appendDeliveryFailureLog, appendExecutionLog } from "./scheduler/execution-log";
@@ -45,6 +46,18 @@ function formatModelNumber(n: number): string {
 	if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
 	if (n >= 1_000) return `${(n / 1_000).toFixed(0)}k`;
 	return String(n);
+}
+
+/**
+ * Build the registry key for a channel lookup. Multi-account mode
+ * keys channels as `<channelId>:<accountId>` (see `registerDingTalk`
+ * and the matching `sendMessage` path in `ChannelRegistry`); single-
+ * account mode uses just `<channelId>`. The inbound message's
+ * `accountId` is set by `parseRobotMessage` to the channel instance's
+ * `accountId` at inbound time, so multi-account inbound always has it.
+ */
+export function buildChannelKey(channelId: string, accountId?: string): string {
+	return accountId ? `${channelId}:${accountId}` : channelId;
 }
 export function createAccountBridgeOptions(
 	agentConfig: GatewayConfig["agent"],
@@ -1304,7 +1317,7 @@ export class Gateway {
 	 * haven't implemented `formatReply` get the plain-text fallback.
 	 */
 	async #sendFormattedAgentResponse(msg: InboundMessage, meta: AgentResponseMeta, accountId: string): Promise<void> {
-		const channel = this.#registry.get(msg.channelId);
+		const channel = this.#registry.get(buildChannelKey(msg.channelId, msg.accountId));
 		const context: ReplyFormatterContext = {
 			accountId,
 			agentName: this.#resolveAgentName(accountId),
@@ -1345,7 +1358,7 @@ export class Gateway {
 		msg: InboundMessage,
 		session: SessionRecord,
 		accountId: string,
-		channel: import("./channels/registry").Channel | undefined,
+		channel: Channel | undefined,
 	): Promise<boolean> {
 		if (!channel?.streamCard) return false;
 		if (!this.#sessionManager) return false;
@@ -1667,7 +1680,7 @@ ${table}
 			// content / tool summary / status line) on agent_end. If the
 			// channel doesn't support cards or card creation fails, the
 			// v1 markdown path runs instead.
-			const channel = this.#registry.getChannel(msg.channelId);
+			const channel = this.#registry.get(buildChannelKey(msg.channelId, msg.accountId));
 			const usedCard = await this.#tryStreamAgentResponse(msg, session, accountId, channel);
 			if (!usedCard) {
 				await this.#sendAgentResponseViaV1Markdown(msg, session, accountId);
