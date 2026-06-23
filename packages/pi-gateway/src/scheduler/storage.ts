@@ -41,6 +41,8 @@ type TaskRow = {
 	next_run_at: number | null;
 	run_count: number;
 	fail_count: number;
+	repeat_count: number | null;
+	repeat_completed: number | null;
 	deliver: string | null;
 	deliver_user: string | null;
 	last_delivery_error: string | null;
@@ -85,6 +87,8 @@ const TASK_UPDATE_FIELDS = new Set<string>([
 	"nextRunAt",
 	"runCount",
 	"failCount",
+	"repeatCount",
+	"repeatCompleted",
 	"deliver",
 	"deliverUser",
 	"lastDeliveryError",
@@ -130,10 +134,12 @@ function toTask(row: TaskRow): ScheduledTask {
 		nextRunAt: row.next_run_at ?? undefined,
 		runCount: row.run_count,
 		failCount: row.fail_count,
+		repeatCount: row.repeat_count ?? undefined,
+		repeatCompleted: row.repeat_completed ?? undefined,
 		deliver: row.deliver ?? undefined,
 		deliverUser: row.deliver_user ?? undefined,
-		accountId: row.account_id ?? undefined,
 		lastDeliveryError: row.last_delivery_error ?? undefined,
+		accountId: row.account_id ?? undefined,
 	};
 }
 
@@ -217,8 +223,9 @@ export class SchedulerDbStorage implements SchedulerStorage {
 				model, provider, enabled_toolsets, timeout_ms,
 				retry_config, skills_config, pre_script, consecutive_failures,
 				created_at, updated_at, last_run_at, next_run_at,
-				run_count, fail_count, deliver, deliver_user, last_delivery_error, account_id
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				run_count, fail_count, repeat_count, repeat_completed,
+				deliver, deliver_user, last_delivery_error, account_id
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`);
 
 		this.#getTaskStmt = this.#db.prepare("SELECT * FROM tasks WHERE id = ?");
@@ -311,6 +318,10 @@ export class SchedulerDbStorage implements SchedulerStorage {
 		if (!hasPreScript) this.#db.exec("ALTER TABLE tasks ADD COLUMN pre_script TEXT;");
 		if (!hasConsecutiveFails)
 			this.#db.exec("ALTER TABLE tasks ADD COLUMN consecutive_failures INTEGER NOT NULL DEFAULT 0;");
+	const hasRepeatCount = columns.some(c => c.name === "repeat_count");
+	const hasRepeatCompleted = columns.some(c => c.name === "repeat_completed");
+	if (!hasRepeatCount) this.#db.exec("ALTER TABLE tasks ADD COLUMN repeat_count INTEGER;");
+	if (!hasRepeatCompleted) this.#db.exec("ALTER TABLE tasks ADD COLUMN repeat_completed INTEGER;");
 	const hasLastDeliveryError = columns.some(c => c.name === "last_delivery_error");
 	if (!hasLastDeliveryError) this.#db.exec("ALTER TABLE tasks ADD COLUMN last_delivery_error TEXT;");
 	if (!hasDeliver) this.#db.exec("ALTER TABLE tasks ADD COLUMN deliver TEXT;");
@@ -344,6 +355,8 @@ export class SchedulerDbStorage implements SchedulerStorage {
 			task.nextRunAt ?? null,
 			task.runCount ?? 0,
 			task.failCount ?? 0,
+			task.repeatCount ?? null,
+			task.repeatCompleted ?? null,
 			task.deliver ?? null,
 			task.deliverUser ?? null,
 			task.accountId ?? null,

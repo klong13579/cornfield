@@ -41,6 +41,10 @@ export interface ScheduledTask {
 	provider?: string;
 	/** Restrict agent tools to named toolsets (reduces token use) */
 	enabledToolsets?: string[];
+	/** Total number of runs before auto-disable. null = unlimited (default). */
+	repeatCount?: number;
+	/** Number of runs completed so far. Incremented each execution. */
+	repeatCompleted?: number;
 	timeoutMs?: number;
 	retry?: RetryConfig;
 	skills?: string[];
@@ -76,6 +80,7 @@ export interface TaskFileDefinition {
 	model?: string;
 	provider?: string;
 	enabledToolsets?: string[];
+	repeatCount?: number;
 	timeoutMs?: number;
 	retry?: RetryConfig;
 	skills?: string[];
@@ -365,7 +370,10 @@ export function formatTaskRow(task: ScheduledTask): string {
 		? execFailed ? "fail" : deliverFailed ? "deliv!" : "ok"
 		: "—";
 	const deliveryFailures = formatDeliveryFailureCount(task.id);
-	return `${name.padEnd(21)} ${typeLabel.padEnd(6)} ${agent.padEnd(12)} ${task.status.padEnd(8)} ${task.cron.padEnd(16)} ${truncateName(model, 14).padEnd(15)} ${channel.padEnd(22)} ${lastStatus.padEnd(8)} ${deliveryFailures.padEnd(10)} ${next.padEnd(21)}`;
+	const repeatDisplay = task.repeatCount
+		? `${Math.min(task.repeatCompleted ?? 0, task.repeatCount)}/${task.repeatCount}`
+		: "—";
+	return `${name.padEnd(21)} ${typeLabel.padEnd(6)} ${agent.padEnd(12)} ${task.status.padEnd(8)} ${task.cron.padEnd(16)} ${truncateName(model, 14).padEnd(15)} ${repeatDisplay.padEnd(7)} ${channel.padEnd(20)} ${lastStatus.padEnd(8)} ${deliveryFailures.padEnd(8)} ${next.padEnd(21)}`;
 }
 
 /**

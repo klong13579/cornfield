@@ -294,11 +294,27 @@ export class SchedulerEngine {
 		const currentTask = this.#storage.getTask(task.id);
 
 		if (succeeded) {
+			const newRunCount = (currentTask?.runCount ?? 0) + 1;
+			const newRepeatCompleted = (currentTask?.repeatCompleted ?? 0) + 1;
+			const repeatExhausted = (currentTask?.repeatCount ?? undefined) !== undefined && newRepeatCompleted >= (currentTask?.repeatCount ?? Infinity);
+
 			this.#storage.updateTask(task.id, {
 				lastRunAt: Date.now(),
-				runCount: (currentTask?.runCount ?? 0) + 1,
+				runCount: newRunCount,
+				repeatCompleted: newRepeatCompleted,
 				consecutiveFailures: 0,
+				// Auto-disable when repeat count is exhausted
+				...(repeatExhausted ? { status: "disabled" } : {}),
 			});
+
+			if (repeatExhausted) {
+				this.unschedule(task.id);
+				logger.info("Task auto-disabled after exhausting repeat count", {
+					taskId: task.id,
+					taskName: task.name,
+					repeatCount: currentTask?.repeatCount,
+				});
+			}
 		} else {
 			this.#storage.updateTask(task.id, {
 				lastRunAt: Date.now(),

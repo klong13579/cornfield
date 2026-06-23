@@ -170,6 +170,7 @@ export async function cronCreate(args: string[], storage: SchedulerDbStorage): P
 	let preScript: string | undefined;
 	let sourceChannel: string | undefined;
 	let sourceUser: string | undefined;
+	let repeatCount: number | undefined;
 	const commandParts: string[] = [];
 
 	let i = 0;
@@ -204,6 +205,15 @@ export async function cronCreate(args: string[], storage: SchedulerDbStorage): P
 				process.exitCode = 1;
 				return;
 			}
+			i += 2;
+		} else if (args[i] === "--repeat" && args[i + 1]) {
+			const v = Number.parseInt(args[i + 1]!, 10);
+			if (!Number.isFinite(v) || v < 1) {
+				console.error(`Invalid --repeat: must be a positive integer (got "${args[i + 1]}")`);
+				process.exitCode = 1;
+				return;
+			}
+			repeatCount = v;
 			i += 2;
 		} else if (args[i] === "--source-channel" && args[i + 1]) {
 			sourceChannel = args[i + 1]!;
@@ -322,6 +332,8 @@ export async function cronCreate(args: string[], storage: SchedulerDbStorage): P
 		deliver,
 		deliverUser,
 		accountId,
+		repeatCount,
+		repeatCompleted: 0,
 		status: "active",
 		createdAt: Date.now(),
 		updatedAt: Date.now(),
@@ -356,7 +368,7 @@ export async function cronList(storage: SchedulerDbStorage, json: boolean): Prom
 		console.log("No scheduled tasks.");
 		return;
 	}
-	// Column widths: 21+1+6+1+12+1+8+1+16+1+15+1+22+1+8+1+10+1+21 = 147 chars
+	// Column widths: 21+1+6+1+12+1+8+1+16+1+15+1+7+1+20+1+8+1+8+1+21 = 148 chars
 	const HEADER =
 		"NAME".padEnd(21) +
 		" " +
@@ -370,11 +382,13 @@ export async function cronList(storage: SchedulerDbStorage, json: boolean): Prom
 		" " +
 		"MODEL".padEnd(15) +
 		" " +
-		"CHANNEL".padEnd(22) +
+		"REPEAT".padEnd(7) +
+		" " +
+		"CHANNEL".padEnd(20) +
 		" " +
 		"LAST".padEnd(8) +
 		" " +
-		"DELIVERY".padEnd(10) +
+		"DELIV".padEnd(8) +
 		" " +
 		"NEXT RUN".padEnd(21);
 	console.log(HEADER);
