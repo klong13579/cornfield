@@ -38,7 +38,18 @@ const logFormat = winston.format.combine(
 	}),
 );
 
-/** Size-based rotating file transport */
+/** Size-based rotating file transport. The `auditFile` is keyed by
+ *  `process.pid` so concurrent omp instances (gateway + per-account
+ *  RPC children, multiple test runs) do not contend on a single
+ *  hash-named audit file. Sharing that file across processes is a
+ *  known winston-daily-rotate-file deadlock: the transport silently
+ *  stops writing log entries while still holding the file handle.
+ *  See: https://github.com/winstonjs/winston-daily-rotate-file/issues/245
+ *
+ *  We also wire an `error` handler that pipes transport-level
+ *  failures to stderr — without it, a broken transport just stops
+ *  writing and the operator has no signal.
+ */
 const fileTransport = new DailyRotateFile({
 	dirname: ensureLogsDir(),
 	filename: "omp.%DATE%.log",
@@ -46,6 +57,15 @@ const fileTransport = new DailyRotateFile({
 	maxSize: "10m",
 	maxFiles: 5,
 	zippedArchive: true,
+	auditFile: `${ensureLogsDir()}/.omp-audit-${process.pid}.json`,
+});
+fileTransport.on("error", err => {
+	// Best-effort stderr fallback so a broken transport is visible.
+	try {
+		process.stderr.write(`[logger] transport error: ${err.stack || err.message}\n`);
+	} catch {
+		// Last-resort swallow
+	}
 });
 
 /** Console transport for terminal output */

@@ -225,7 +225,7 @@ export class SchedulerDbStorage implements SchedulerStorage {
 				created_at, updated_at, last_run_at, next_run_at,
 				run_count, fail_count, repeat_count, repeat_completed,
 				deliver, deliver_user, last_delivery_error, account_id
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`);
 
 		this.#getTaskStmt = this.#db.prepare("SELECT * FROM tasks WHERE id = ?");
@@ -359,8 +359,8 @@ export class SchedulerDbStorage implements SchedulerStorage {
 			task.repeatCompleted ?? null,
 			task.deliver ?? null,
 			task.deliverUser ?? null,
-			task.accountId ?? null,
 			task.lastDeliveryError ?? null,
+			task.accountId ?? null,
 		);
 		return this.getTask(id)!;
 	}

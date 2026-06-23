@@ -62,7 +62,19 @@ const BlockType = {
 	THINK: 1,
 	TOOL: 2,
 	IMAGE: 3,
+	/** Stop / abort block (type 4). The OpenClaw schema's ButtonGroup
+	 * component is bound to `blockList[N].type === 4 && blockList[N].btns`;
+	 * blocks of this type render their `btns` array as interactive
+	 * controls. Used by the v3 long-task watcher to surface an abort
+	 * affordance while a tool is still running. The action callback
+	 * URL is configured by the gateway (Phase 2b: HTTP endpoint). */
+	STOP: 4,
 } as const;
+
+/** Block-type constants exposed for downstream consumers (e.g. the
+ * channel's `onLongTask` handler checks `block.type === BlockType.STOP`
+ * to update the most recent stop block on a progress ping). */
+export { BlockType };
 
 type BlockTypeValue = (typeof BlockType)[keyof typeof BlockType];
 
@@ -78,6 +90,28 @@ export interface CardBlock {
 	text: string;
 	markdown: string;
 	mediaId?: string;
+	/** Interactive buttons rendered by the schema's ButtonGroup component.
+	 * Only blocks with `type === BlockType.STOP` (4) currently have the
+	 * ButtonGroup bound to them; the schema is permissive and other
+	 * block types can also carry `btns` if a future schema version
+	 * changes the binding. */
+	btns?: CardButton[];
+}
+
+/** A single interactive button inside a `CardBlock.btns` array. The
+ * OpenClaw schema's ButtonGroup renders these as clickable controls.
+ * `actionType` mirrors the schema's actionType taxonomy:
+ *   - `request`  — POST to `requestPath` with `params` as form data
+ *   - `url`      — open `url` in a new view
+ *   - `copy`     — copy a value to clipboard
+ * The gateway currently only emits `request` buttons; the other types
+ * are reserved for future use. */
+export interface CardButton {
+	text: string;
+	actionType: "request" | "url" | "copy";
+	requestPath?: string;
+	params?: Record<string, string>;
+	url?: string;
 }
 
 /** The full card data body written to `cardData.cardParamMap`. */
@@ -351,6 +385,47 @@ export function buildImageBlock(mediaId: string, caption: string): CardBlock {
 		text: caption,
 		markdown: caption ? `# ${caption}` : "",
 		mediaId,
+	};
+}
+
+/**
+ * Build a stop / abort block (type 4). The schema's ButtonGroup
+ * component is bound to `blockList[N].type === 4 && blockList[N].btns`,
+ * so this block renders its `btns` array as interactive controls.
+ *
+ * The gateway pushes one of these when the long-task watcher detects
+ * a tool that has been running longer than `longTaskThresholdMs`. The
+ * `requestPath` should be the gateway's action callback URL (set in
+ * Phase 2b). Until the HTTP endpoint is wired, the button is visible
+ * in the card but clicking it will fail at the DingTalk API level
+ * (no callback URL registered) — acceptable for the v1 rollout.
+ */
+export function buildStopBlock(opts: {
+	toolName: string;
+	elapsedMs: number;
+	requestPath: string;
+	sessionId: string;
+	buttonText?: string;
+}): CardBlock {
+	const buttonText = opts.buttonText ?? "停止";
+	const elapsedMin = Math.floor(opts.elapsedMs / 60_000);
+	const body = `⏳ **${opts.toolName}** 已运行 ${elapsedMin} 分钟。点击下方按钮中止。`;
+	return {
+		type: BlockType.STOP,
+		text: body,
+		markdown: body,
+		btns: [
+			{
+				text: buttonText,
+				actionType: "request",
+				requestPath: opts.requestPath,
+				params: {
+					type: "stop",
+					sessionId: opts.sessionId,
+					toolName: opts.toolName,
+				},
+			},
+		],
 	};
 }
 

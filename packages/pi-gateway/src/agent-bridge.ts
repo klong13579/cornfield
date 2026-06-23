@@ -345,9 +345,21 @@ export class AgentBridge {
 	 * `onLongTask` handler. */
 	#startLongTaskWatcher(promptId: string, toolCallId: string, toolName: string): void {
 		const thresholdMs = this.#options.longTaskThresholdMs ?? LONG_TASK_THRESHOLD_MS;
-		if (thresholdMs <= 0) return;
+		if (thresholdMs <= 0) {
+			logger.debug("[AgentBridge] long-task watcher disabled (threshold=0)", { promptId, toolCallId });
+			return;
+		}
 		const pending = this.#pendingPrompts.get(promptId);
-		if (!pending?.handlers?.onLongTask) return;
+		if (!pending?.handlers?.onLongTask) {
+			logger.debug("[AgentBridge] long-task watcher skipped: no onLongTask handler", {
+				promptId,
+				toolCallId,
+				hasPending: !!pending,
+				hasHandlers: !!pending?.handlers,
+				hasOnLongTask: !!pending?.handlers?.onLongTask,
+			});
+			return;
+		}
 		// Idempotent: if a watcher for this tool call already exists, don't
 		// schedule a second one. The same id can come up if the bridge ever
 		// re-emits (it shouldn't, but the watcher's state is per-call).
@@ -385,9 +397,20 @@ export class AgentBridge {
 
 		watcher.thresholdTimer = setTimeout(() => {
 			watcher.thresholdFired = true;
+			logger.debug("[AgentBridge] long-task watcher FIRED threshold", {
+				toolCallId,
+				toolName,
+				elapsedMs: Date.now() - startedAt,
+				thresholdMs,
+			});
 			fire(true);
 			// Subsequent pings
 			watcher.pingInterval = setInterval(() => {
+				logger.debug("[AgentBridge] long-task watcher PING", {
+					toolCallId,
+					toolName,
+					elapsedMs: Date.now() - startedAt,
+				});
 				fire(false);
 			}, pingMs);
 		}, thresholdMs);
@@ -1068,6 +1091,11 @@ export class AgentBridge {
 					// so we read via the literal key.
 					const tc = (ame as { toolCall?: { id?: string; name?: string; arguments?: unknown } }).toolCall;
 					if (tc && typeof tc.id === "string" && typeof tc.name === "string") {
+						logger.debug("[AgentBridge] toolcall_end — starting long-task watcher", {
+							toolCallId: tc.id,
+							toolName: tc.name,
+							hasOnLongTask: typeof handlers.onLongTask === "function",
+						});
 						handlers.onToolCall?.({ id: tc.id, name: tc.name, args: tc.arguments ?? null });
 						this.#startLongTaskWatcher(pending.promptId, tc.id, tc.name);
 					}

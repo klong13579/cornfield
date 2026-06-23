@@ -71,6 +71,6 @@ export {
 	stopService,
 	uninstallService,
 } from "./service-installer";
-export { SQLiteSessionStore } from "./session-store";
 export { SessionManager } from "./session-manager";
+export { SQLiteSessionStore } from "./session-store";
 export type * from "./types";

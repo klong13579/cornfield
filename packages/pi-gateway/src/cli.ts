@@ -89,6 +89,23 @@ async function cmdStart(_configPath?: string): Promise<void> {
 		await gateway.reload(nextConfig);
 	});
 
+	// A single async failure inside any channel / SDK callback / cron
+	// tick must not bring down the whole gateway. Without these
+	// handlers, a rejected promise from a DingTalk SDK `error` event
+	// or a thrown exception inside a streaming handler would silently
+	// terminate the process and take every connected channel (hr,
+	// opencode, …) with it. Log and keep running.
+	process.on("unhandledRejection", (reason, promise) => {
+		logger.error("unhandledRejection in gateway process", {
+			reason: reason instanceof Error ? reason.stack || reason.message : String(reason),
+		});
+	});
+	process.on("uncaughtException", err => {
+		logger.error("uncaughtException in gateway process", {
+			error: err.stack || err.message,
+		});
+	});
+
 	await gateway.start();
 
 	// Non-interactive daemon mode (stdin not a TTY)

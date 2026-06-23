@@ -4,11 +4,11 @@
  * Tests: message parsing, dedup, permission policies, AI Card, config validation.
  */
 
-import * as fs from "node:fs/promises";
 import { describe, expect, spyOn, test } from "bun:test";
+import * as fs from "node:fs/promises";
+import { DingTalkChannel, parseRobotMessage } from "../src/channels/dingtalk";
 import { fixNewlines } from "../src/channels/dingtalk-card";
 import { getDingTalkConfig, loadConfig } from "../src/config";
-import { DingTalkChannel, parseRobotMessage } from "../src/channels/dingtalk";
 import type { DingTalkRawMessage } from "../src/types";
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -188,8 +188,8 @@ describe("config validation", () => {
 						appKey: "primary_key",
 						appSecret: "primary_secret",
 						accounts: {
-							"bot1": { appKey: "bot1_key", appSecret: "bot1_secret", agentDir: "/tmp/bot1" },
-							"bot2": { appKey: "bot2_key", appSecret: "bot2_secret", agentDir: "/tmp/bot2" },
+							bot1: { appKey: "bot1_key", appSecret: "bot1_secret", agentDir: "/tmp/bot1" },
+							bot2: { appKey: "bot2_key", appSecret: "bot2_secret", agentDir: "/tmp/bot2" },
 						},
 					},
 				},
@@ -271,7 +271,6 @@ describe("AI Card markdown formatting", () => {
 // ═══════════════════════════════════════════════════════════════════════
 
 describe("message dedup", () => {
-
 	test("checkAndMarkDingtalkMessage returns true for duplicate", () => {
 		// We need to test through Duck Typing since checkAndMarkDingtalkMessage
 		// is module-scoped, not exported. Let's verify via the channel behavior

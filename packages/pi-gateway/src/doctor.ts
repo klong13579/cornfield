@@ -21,10 +21,9 @@
 
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { checkCredentials } from "./credential-resolver";
 import { getDataDir, validateConfig } from "./config";
+import { checkCredentials } from "./credential-resolver";
 import { getGatewayStatus, PID_FILE, STATUS_FILE } from "./gateway";
-import { getServiceStatus } from "./service-installer";
 import {
 	getGatewayPidPath,
 	getSchedulerDbPath,
@@ -34,6 +33,7 @@ import {
 	SchedulerDbStorage,
 	validateCron,
 } from "./scheduler";
+import { getServiceStatus } from "./service-installer";
 import type { GatewayConfig } from "./types";
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -140,7 +140,7 @@ async function checkConfig(configPath?: string): Promise<{ section: Section; con
 		];
 		for (const [id, acct] of entries) {
 			const secret = acct.appSecret;
-			if (secret && secret.startsWith("$")) {
+			if (secret?.startsWith("$")) {
 				const envName = secret.slice(1);
 				if (!process.env[envName]) {
 					findings.push(
@@ -221,9 +221,7 @@ function checkChannelsAndBridges(status: Awaited<ReturnType<typeof getGatewaySta
 				: "";
 			channelFindings.push(ok(`${acc.accountId}: connected${meta}`));
 		} else {
-			const reason = h?.connectionFailed
-				? "connection failed (check appKey/appSecret)"
-				: "disconnected";
+			const reason = h?.connectionFailed ? "connection failed (check appKey/appSecret)" : "disconnected";
 			const detail = h ? `reconnectAttempts=${h.reconnectAttempts}` : undefined;
 			channelFindings.push(error(`${acc.accountId}: ${reason}`, detail));
 		}
@@ -266,9 +264,7 @@ function checkChannelsAndBridges(status: Awaited<ReturnType<typeof getGatewaySta
 		if (q.depth >= MAX_DEPTH) {
 			queueFindings.push(error(`${q.accountId}: queue FULL (${q.depth}/${MAX_DEPTH})`));
 		} else if (q.depth > 0 && q.oldestAgeMs > STALE_AGE_MS) {
-			queueFindings.push(
-				warn(`${q.accountId}: ${q.depth} queued, oldest ${Math.round(q.oldestAgeMs / 1000)}s old`),
-			);
+			queueFindings.push(warn(`${q.accountId}: ${q.depth} queued, oldest ${Math.round(q.oldestAgeMs / 1000)}s old`));
 		} else if (q.depth > 0) {
 			queueFindings.push(ok(`${q.accountId}: ${q.depth}/${MAX_DEPTH} queued`));
 		} else {
@@ -331,9 +327,7 @@ function checkScheduler(schedulerDbPath: string): Section {
 			findings.push(
 				warn(
 					`${stuck.length} execution(s) stuck in "running" state`,
-					stuck
-						.map(e => `  ${e.taskName}: started ${Math.round((now - e.startedAt) / 60000)}m ago`)
-						.join("\n"),
+					stuck.map(e => `  ${e.taskName}: started ${Math.round((now - e.startedAt) / 60000)}m ago`).join("\n"),
 					async () => {
 						// Open a fresh handle for the repair (the check's handle is closed in finally).
 						const repairDb = new SchedulerDbStorage(dbPathForFix);
@@ -457,9 +451,7 @@ async function checkService(): Promise<Section> {
 	if (svc.running) {
 		findings.push(ok(`Running${svc.pid ? ` (pid ${svc.pid})` : ""}`));
 	} else {
-		findings.push(
-			error("Service installed but not running", "Run `pi-gateway service start`."),
-		);
+		findings.push(error("Service installed but not running", "Run `pi-gateway service start`."));
 	}
 	return { name: "SERVICE", findings };
 }
@@ -485,10 +477,7 @@ async function safeRead(p: string): Promise<string | null> {
  *   so the real scheduler check (and its `--fix` repair closure) can be exercised
  *   in isolation without touching the operator's data.
  */
-export async function runDoctor(
-	configPath?: string,
-	opts?: { schedulerDbPath?: string },
-): Promise<DoctorReport> {
+export async function runDoctor(configPath?: string, opts?: { schedulerDbPath?: string }): Promise<DoctorReport> {
 	const { section: configSection, config } = await checkConfig(configPath);
 	const status = await getGatewayStatus(config);
 
@@ -500,14 +489,7 @@ export async function runDoctor(
 	const cbq = checkChannelsAndBridges(status);
 	const schedSection = checkScheduler(opts?.schedulerDbPath ?? getSchedulerDbPath());
 
-	const sections: Section[] = [
-		configSection,
-		credSection,
-		...cbq,
-		schedSection,
-		stateSection,
-		serviceSection,
-	];
+	const sections: Section[] = [configSection, credSection, ...cbq, schedSection, stateSection, serviceSection];
 
 	return { sections, generatedAt: Date.now() };
 }

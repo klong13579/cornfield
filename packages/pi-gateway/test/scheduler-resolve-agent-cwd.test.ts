@@ -46,9 +46,7 @@ describe("resolveAgentCwd", () => {
 	});
 
 	it("returns undefined when the accounts map is undefined", () => {
-		expect(
-			resolveAgentCwd("hr", { channels: { dingtalk: {} } } as unknown as Cfg),
-		).toBeUndefined();
+		expect(resolveAgentCwd("hr", { channels: { dingtalk: {} } } as unknown as Cfg)).toBeUndefined();
 	});
 
 	it("does not silently coerce an empty-string agentDir into a cwd", () => {

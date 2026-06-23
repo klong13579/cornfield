@@ -252,9 +252,7 @@ export function getDingTalkConfig(config: GatewayConfig): DingTalkConfig | null 
 	}
 }
 
-export function getEnabledChannels(
-	config: GatewayConfig,
-): Array<{ id: string; config: ChannelConfig }> {
+export function getEnabledChannels(config: GatewayConfig): Array<{ id: string; config: ChannelConfig }> {
 	const result: Array<{ id: string; config: ChannelConfig }> = [];
 
 	for (const [id, raw] of Object.entries(config.channels)) {

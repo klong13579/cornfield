@@ -158,55 +158,34 @@ describe("contract: filename grammar", () => {
 describe("regression Bug A: walker descends into project subdirs", () => {
 	it("finds files in a project subdir named like '-Desktop-Narwal-oh-my-pi'", () => {
 		const t = 1_700_000_000_000;
-		const file = touch(
-			"-Desktop-Narwal-oh-my-pi/by-date/2023-11-14/120000__12345678.jsonl",
-			t,
-		);
+		const file = touch("-Desktop-Narwal-oh-my-pi/by-date/2023-11-14/120000__12345678.jsonl", t);
 		expect(find(t - 100, t + 100)).toBe(file);
 	});
 
 	it("finds files across multiple project subdirs, picking the right one", () => {
 		const t = 1_700_000_000_000;
-		const projA = touch(
-			"-project-A/by-date/2023-11-14/120000__aaaaaaaa.jsonl",
-			t - 10_000,
-		);
-		const projB = touch(
-			"-project-B/by-date/2023-11-14/120000__bbbbbbbb.jsonl",
-			t,
-		);
+		const _projA = touch("-project-A/by-date/2023-11-14/120000__aaaaaaaa.jsonl", t - 10_000);
+		const projB = touch("-project-B/by-date/2023-11-14/120000__bbbbbbbb.jsonl", t);
 		expect(find(t - 100, t + 100)).toBe(projB);
 	});
 
 	it("finds files at the third level (by-date/yyyy-mm-dd/)", () => {
 		// The walker must descend through: sessionsRoot → project → by-date → yyyy-mm-dd
 		const t = 1_700_000_000_000;
-		const file = touch(
-			"-p/by-date/2023-11-14/120000__12345678.jsonl",
-			t,
-		);
+		const file = touch("-p/by-date/2023-11-14/120000__12345678.jsonl", t);
 		expect(find(t - 100, t + 100)).toBe(file);
 	});
 
 	it("walks even when the project subdir name is unusual (e.g. starts with a hyphen)", () => {
 		const t = 1_700_000_000_000;
-		const file = touch(
-			"-weird--name--/by-date/2023-11-14/120000__12345678.jsonl",
-			t,
-		);
+		const file = touch("-weird--name--/by-date/2023-11-14/120000__12345678.jsonl", t);
 		expect(find(t - 100, t + 100)).toBe(file);
 	});
 
 	it("does not descend into hidden directories (e.g. .DS_Store, .git)", () => {
 		const t = 1_700_000_000_000;
-		touch(
-			"-p/.git/by-date/2023-11-14/120000__12345678.jsonl",
-			t,
-		);
-		touch(
-			"-p/.DS_Store/by-date/2023-11-14/120000__12345678.jsonl",
-			t,
-		);
+		touch("-p/.git/by-date/2023-11-14/120000__12345678.jsonl", t);
+		touch("-p/.DS_Store/by-date/2023-11-14/120000__12345678.jsonl", t);
 		expect(find(t - 100, t + 100)).toBeUndefined();
 	});
 });
@@ -234,14 +213,8 @@ describe("regression Bug C: most recent mtime wins", () => {
 
 	it("two in-window files: the one with larger mtime wins", () => {
 		const t = 1_700_000_000_000;
-		const older = touch(
-			"-p/by-date/2023-11-14/100000__11111111.jsonl",
-			t - 1_000,
-		);
-		const newer = touch(
-			"-p/by-date/2023-11-14/120000__22222222.jsonl",
-			t,
-		);
+		const older = touch("-p/by-date/2023-11-14/100000__11111111.jsonl", t - 1_000);
+		const newer = touch("-p/by-date/2023-11-14/120000__22222222.jsonl", t);
 		expect(find(t - 5_000, t + 5_000)).toBe(newer);
 		// Sanity: the older file IS in the window, just not the best
 		expect(older).toBeDefined();
@@ -321,14 +294,8 @@ describe("contract: realistic mixed tree", () => {
 		// Decoys: many files in many projects, various dates
 		touch("-other/2023-11-13T08-00-00-000Z_019ee0c7-7493-7000-93bf-1d5bb8c75295.jsonl", t - 100_000);
 		touch("-other/2023-11-14T08-00-00-000Z_019ee0c7-7493-7000-93bf-1d5bb8c75295.jsonl", t - 50_000);
-		touch(
-			"-p/by-date/2023-11-13/120000__11111111.jsonl",
-			t - 200_000,
-		);
-		const target = touch(
-			"-p/by-date/2023-11-14/120000__22222222.jsonl",
-			t,
-		);
+		touch("-p/by-date/2023-11-13/120000__11111111.jsonl", t - 200_000);
+		const target = touch("-p/by-date/2023-11-14/120000__22222222.jsonl", t);
 		expect(find(t - 5_000, t + 100)).toBe(target);
 	});
 
@@ -341,10 +308,7 @@ describe("contract: realistic mixed tree", () => {
 			const t0 = t - 60_000 - i * 1000;
 			touch(`${proj}/by-date/${day}/120000__${i.toString(16).padStart(8, "0")}.jsonl`, t0);
 		}
-		const target = touch(
-			"-p/by-date/2023-11-14/120000__12345678.jsonl",
-			t,
-		);
+		const target = touch("-p/by-date/2023-11-14/120000__12345678.jsonl", t);
 		const t0 = performance.now();
 		const result = find(t - 5_000, t + 100);
 		const elapsed = performance.now() - t0;

@@ -6,7 +6,7 @@
  * 2. It sends a ready signal
  * 3. It can process a simple prompt and return a response
  */
-import { describe, test, expect } from "bun:test";
+import { describe, expect, test } from "bun:test";
 
 const RPC_READY = '"type":"ready"';
 

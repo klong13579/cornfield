@@ -13,8 +13,9 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { buildAgentSessionPath, ensureAgentDir, registerAgent, resolveAgentDir } from "@oh-my-pi/pi-coding-agent/skeleton";
 import { isEnoent, logger } from "@oh-my-pi/pi-utils";
+import { ActionRegistry } from "./action-registry";
 import { AgentBridge, type AgentBridgeOptions } from "./agent-bridge";
-import { DingTalkChannel } from "./channels/dingtalk";
+import { DingTalkChannel, type DingTalkCardActionEvent } from "./channels/dingtalk";
 import { ChannelRegistry } from "./channels/registry";
 import { getDataDir, getDingTalkConfig, getEnabledChannels } from "./config";
 import type { Channel } from "./types";
@@ -496,6 +497,16 @@ export class Gateway {
 	#schedulerStorage?: SchedulerDbStorage;
 	#schedulerFileStore?: SchedulerFileStore;
 	#watchInterval?: NodeJS.Timeout;
+	/**
+	 * Maps DingTalk AI Card instance IDs to the session / bridge that
+	 * owns the card, so a TOPIC_CARD action callback (user clicked a
+	 * button) can be routed back to the right bridge. Populated by
+	 * the channel's `streamCard` (via the `registerCardAction` context
+	 * callback) and consulted by `#handleCardAction`. Entries auto-expire
+	 * after 30 min so a stale card action can't accidentally abort a
+	 * fresh prompt.
+	 */
+	#actionRegistry = new ActionRegistry();
 
 	constructor(config: GatewayConfig) {
 		this.#config = config;
@@ -558,6 +569,12 @@ export class Gateway {
 
 		// Start cron scheduler
 		await this.#startScheduler();
+
+		// Prune expired card-action entries every 5 min so the registry
+		// doesn't grow unbounded. The registry is bounded by the rate
+		// of new cards (~1 per inbound message) so a 5 min cadence is
+		// plenty.
+		setInterval(() => this.#actionRegistry.expire(), 5 * 60_000).unref?.();
 
 		this.#running = true;
 		logger.debug("Gateway started");
@@ -631,6 +648,10 @@ export class Gateway {
 					},
 					`dingtalk:${accountId}`,
 				);
+				// Route card action callbacks (TOPIC_CARD) back to the
+				// gateway's ActionRegistry, which looks up the card by
+				// instance id and calls the right bridge's abort().
+				channel.setCardActionHandler(event => this.#handleCardAction(event));
 				logger.debug("Registered DingTalk account channel", { accountId });
 			}
 			return;
@@ -638,6 +659,7 @@ export class Gateway {
 
 		// Single-account mode (use legacy appKey/appSecret from config)
 		const channel = new DingTalkChannel();
+		channel.setCardActionHandler(event => this.#handleCardAction(event));
 		this.#registry.register(channel, rawConfig);
 	}
 
@@ -1404,6 +1426,17 @@ export class Gateway {
 			accountId,
 			agentName: this.#resolveAgentName(accountId),
 			dapiCalls: 0,
+			// When the channel creates a card with an interactive stop
+			// block, it calls this so a later TOPIC_CARD action callback
+			// can be routed back to the right session. Re-registering on
+			// the same cardInstanceId with a richer toolName (when the
+			// watcher fires) is idempotent — the registry keeps the
+			// first `createdAt` and overwrites the rest.
+			registerCardAction: info => this.#actionRegistry.register(info.cardInstanceId, {
+				accountId: info.accountId,
+				sessionId: info.sessionId,
+				toolName: info.toolName,
+			}),
 		};
 
 		const submit = (handlers?: ForwardStreamHandlers): Promise<AgentResponseMeta | null> =>
@@ -1430,6 +1463,63 @@ export class Gateway {
 	 * Card path is unavailable (channel doesn't support cards, card
 	 * creation failed, or the card stream threw).
 	 */
+	async #handleCardAction(event: DingTalkCardActionEvent): Promise<void> {
+		// The Stream-mode action callback doesn't carry HMAC headers
+		// (those are HTTP-only) but it does ride over the same
+		// authenticated WebSocket the channel's Stream SDK established
+		// with appKey/appSecret. The SDK rejects connections that fail
+		// authentication, so an action arriving on TOPIC_CARD is
+		// already authenticated. (HTTP-mode action callbacks would add
+		// HMAC verification on top of this; Phase 2c territory.)
+		const info = this.#actionRegistry.lookup(event.cardInstanceId);
+		if (!info) {
+			logger.warn("[Gateway] card action for unknown / expired card", {
+				cardInstanceId: event.cardInstanceId,
+				actionType: event.params.type,
+				userId: event.userId,
+			});
+			return;
+		}
+
+		const actionType = event.params.type;
+		if (actionType === "stop") {
+			logger.warn("[Gateway] card stop action — aborting bridge", {
+				cardInstanceId: event.cardInstanceId,
+				accountId: info.accountId,
+				sessionId: info.sessionId,
+				toolName: info.toolName,
+				clickedBy: event.userId,
+			});
+			if (!this.#sessionManager) {
+				logger.warn("[Gateway] sessionManager not initialized; cannot abort");
+				return;
+			}
+			try {
+				const aborted = await this.#sessionManager.abort(info.accountId);
+				if (!aborted) {
+					logger.debug("[Gateway] abort() returned false (no active prompt)", {
+						accountId: info.accountId,
+					});
+				}
+			} catch (err) {
+				logger.error("[Gateway] bridge abort failed", {
+					accountId: info.accountId,
+					error: err instanceof Error ? err.message : String(err),
+				});
+			}
+			return;
+		}
+
+		// Unknown action type — log and ignore. Future action types
+		// (retry, copy, view-detail, etc.) plug in here.
+		logger.warn("[Gateway] unhandled card action type", {
+			actionType,
+			cardInstanceId: event.cardInstanceId,
+			actionIds: event.actionIds,
+			params: event.params,
+		});
+	}
+
 	async #sendAgentResponseViaV1Markdown(
 		msg: InboundMessage,
 		session: SessionRecord,

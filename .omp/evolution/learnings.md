@@ -1,0 +1,1108 @@
+# Learnings (V3)
+
+Active and pinned rules extracted from sessions. Regenerated after each archived session.
+
+- **fact** (session_llm, conf 5): 在 OMP agentDir 架构中，mission.md 定义 agent 身份（per-agentDir），user.md 定义用户身份（用户级 ~/.omp/agent/user.md），两者是正交维度，必须分文件维护以避免概念漂移。
+  - id: `lrn_1ppglnzls19z6` | injected 248, helped 51
+- **fact** (session_llm, conf 5): user.md 放在用户级目录 ~/.omp/agent/user.md，代表用户身份（姓名/角色/时区/偏好）；mission.md 代表 agent 身份，两者正交，不混在一个文件里。
+  - id: `lrn_2o8yps7g7umrj` | injected 233, helped 68
+- **preference** (session_llm, conf 5): 对定时任务/cron 等涉及实际执行的功能，必须构建真实的冒烟测试（如实际跑 agent cron、真实发钉钉消息），不能只依赖单元测试；用户明确认为单元测试每次都通过没有价值，且不怕浪费 token。
+  - id: `lrn_2lzidkl97mapc` | injected 216, helped 66
+- **preference** (session_llm, conf 5): 用户希望所有 agent 都能通过 user.md 知道用户是谁，并支持通过 identity 工具自动更新用户信息（update_persona 时按键合并，不产生重复条目）。
+  - id: `lrn_3lyd298083fby` | injected 233, helped 52
+- **preference** (session_llm, conf 5): Gateway相关的实现（包括cron模块）应统一在pi-gateway package中，避免重复实现和漂移
+  - id: `lrn_2u438ptdgkk0f` | injected 283, helped 80
+- **preference** (session_llm, conf 5): Gateway 相关的实现（包括 cron 模块）应当统一在 pi-gateway 包内，避免跨包重复和功能漂移
+  - id: `lrn_1ji3otdnbrgpv` | injected 267, helped 63
+- **fact** (session_llm, conf 5): coding-agent/src/commands/gateway.ts#handleCron 与 pi-gateway/src/cli.ts#cmdCron 是两份独立的重复实现，操作同一个 SQLite 数据库但行为不一致。
+  - id: `lrn_3ujxl4fyu3mwb` | injected 281, helped 51
+- **fact** (session_llm, conf 5): Cron 模块在 coding-agent/src/commands/gateway.ts#handleCron 与 pi-gateway/src/cli.ts#cmdCron 有两套独立的实现，操作同一个 SQLite 库但支持的特性不一致（如 run 是否写 JSONL 日志、关联 session 等），导致运行时 bug
+  - id: `lrn_1i82k2t4g5cfs` | injected 275, helped 54
+- **preference** (session_llm, conf 4): 创建的 agent 需要具备自我认知能力，能知道自己的身份，效果类似 Hermes 创建的 agent
+  - id: `lrn_377jmui8q3al3` | injected 0, helped 0
+- **fact** (session_llm, conf 4): agentdir 下有一个完整的 prompt 文件目录树，文件是一起拼接使用的
+  - id: `lrn_2sujl08j7oj75` | injected 0, helped 0
+- **fact** (session_llm, conf 4): omp gateway agent 的 system prompt 保存在 agentdir 的 system.md 中，默认为空；Hermes 的 system prompt 在 agent/system_prompt.py 的 build_system_prompt_parts() 中组装，采用三层结构包含 HERMES_AGENT_HELP_GUIDANCE。
+  - id: `lrn_3q9mnyn20tb2c` | injected 0, helped 0
+- **preference** (user_explicit, conf 4): 必须绑定 accountId， 否则不能创建成功
+  - id: `lrn_3mzviakrdcnhs` | injected 0, helped 0
+- **fact** (session_llm, conf 5): omp 记载的应该是 mission.md，而不是 soul.md。
+  - id: `lrn_1chvv9xo4fx6a` | injected 0, helped 0
+- **preference** (session_llm, conf 4): 保持中立，不要做出没有根据的断言或错误猜测。
+  - id: `lrn_1hoi3rnc7gv8l` | injected 0, helped 0
+- **fact** (session_llm, conf 4): 创建出来的 skill 存储到 agent 里面（项目级）
+  - id: `lrn_3snof2jm8qjml` | injected 0, helped 0
+- **fact** (session_llm, conf 4): hermes 通过多条独立消息返回任务进度和结果（包含 terminal 输出、迭代状态、最终总结等），每条消息是单独的消息而非合并输出
+  - id: `lrn_1xjyd7toafqqh` | injected 0, helped 0
+- **preference** (user_explicit, conf 4): 你应该能看到回复给我的内容，你自己判断一下
+  - id: `lrn_a8ac34z67nxc` | injected 0, helped 0
+- **fact** (session_llm, conf 4): 钉钉消息接入 omp gateway 时会显示"思考中"表情并回复带思考动效的消息;龙哥 bot(后端为 openclaw)的回复可视化效果优于 omp gateway,可作为视觉/动效参考。
+  - id: `lrn_1g9oingenyxna` | injected 0, helped 0
+- **procedure** (session_llm, conf 4): 当改动太大时，使用 tmux 构建真实测试闭环
+  - id: `lrn_1wrhyjdhpm4fv` | injected 0, helped 0
+- **preference** (session_llm, conf 5): 当执行代码修改时，不要编写或生成测试用例。
+  - id: `lrn_17wfoa7q615fi` | injected 0, helped 0
+- **preference** (session_llm, conf 4): 用户要求目标闭环必须是真实、可验证的完成，不能仅声称完成而未实质达成目标
+  - id: `lrn_2srapug421wa9` | injected 0, helped 0
+- **fact** (session_llm, conf 4): 项目使用 omp 命令行工具管理模型，通过 omp --list-models 列出可用模型；channel 背后的 agent 可切换用户当前执行的模型
+  - id: `lrn_1rm01nek6jwrz` | injected 0, helped 0
+- **fact** (session_llm, conf 4): agentdir skeleton assert 命令和 agent init 命令被一起修改了
+  - id: `lrn_n48bluf484eu` | injected 0, helped 0
+- **fact** (session_llm, conf 4): agents setup 已废弃，不再使用。
+  - id: `lrn_awj2slpemgou` | injected 0, helped 0
+- **fact** (session_llm, conf 5): Hermes 仓库路径：/Users/sz-0203015357/Desktop/Narwal/hermes-agent
+  - id: `lrn_13bw0b4owbv0b` | injected 0, helped 0
+- **fact** (session_llm, conf 4): 在 oh-my-pi 项目中，gateway.json 的 account 配置包含 agentdir，agentdir 包含 agent 配置信息和 cron 文件夹，cron 隐式绑定到 agent；当前 cron list 不显示与 agent / channel account 的绑定关系，用户要求显示出来。
+  - id: `lrn_5bff2bic6nkl` | injected 0, helped 0
+- **preference** (session_llm, conf 4): 面对新设计问题（如 session log 命名、cron 实现方案）时，用户希望先上网调研业界做法（如 hermes agent 等）再给出建议，而不是直接拍方案。
+  - id: `lrn_1x9j5gcm94e6s` | injected 0, helped 0
+- **fact** (session_llm, conf 5): Gateway 层的 cron 模块实现已统一在 pi-gateway package 中（含调度引擎、执行记录、CLI子命令），不再分散在 coding-agent 中。
+  - id: `lrn_3o8wdhfda04s8` | injected 68, helped 2
+- **preference** (session_llm, conf 4): Smoke-test agent cron jobs in real runs rather than relying on unit tests; do not avoid running them due to token cost concerns.
+  - id: `lrn_1ybiqg0w5xkqq` | injected 0, helped 0
+- **preference** (session_llm, conf 4): Gateway session log filenames should be human-readable, not opaque strings of symbols.
+  - id: `lrn_ts61n9q7go9a` | injected 0, helped 0
+- **fact** (session_llm, conf 4): In the OMP architecture, gateway.json account entries contain agentdir, and each agentdir holds the agent's config plus its cron folder — so cron-to-agent binding is implicit via agentdir, while cron-to-channel-account binding is not currently surfaced in `cron list`.
+  - id: `lrn_2s2cviyk3zs99` | injected 0, helped 0
+- **fact** (session_llm, conf 4): 用户关注具身机器人产品、VLA/WMA等操作模型算法、agent技术、agent harness技术、agent原生、skill等领域
+  - id: `lrn_1ag7vmpth7re9` | injected 0, helped 0
+- **fact** (session_llm, conf 4): user.md 存储用户身份（姓名/角色/时区/沟通风格/显式偏好），与 mission.md（agent 身份）分离，避免将用户身份混入 agent 身份叙事导致 MECE 违规。
+  - id: `lrn_9g4crd2b8l4w` | injected 0, helped 0
+- **fact** (session_llm, conf 4): user.md 放在用户级目录 `~/.omp/agent/user.md`，跨所有 agent 共享；用户身份与 agent 人格正交，同一用户可用 N 个不同 mission 的 agent。
+  - id: `lrn_f57ws4jfauds` | injected 0, helped 0
+- **fact** (session_llm, conf 5): user.md 存储用户身份信息，放在用户级目录 (~/.omp/agent/user.md)，与 mission.md（agent 身份）正交分离
+  - id: `lrn_333mpcnm2vb4f` | injected 15, helped 0
+- **fact** (session_llm, conf 5): user.md 放在用户级目录 ~/.omp/agent/user.md，跨所有 agent 共享，而非 per-agentDir 级别。
+  - id: `lrn_j38bvbyl5lzp` | injected 20, helped 0
+- **fact** (session_llm, conf 4): identity 工具（whoisme/whoRu/update_persona）是 user.md 的读写接口，update_persona 按键合并而非追加
+  - id: `lrn_29qsfu9faghow` | injected 0, helped 0
+- **fact** (session_llm, conf 4): user.md 存放在用户级目录 ~/.omp/agent/user.md，定义用户身份（姓名/角色/时区/偏好），与 mission.md（agent 身份，per-agentDir）是正交维度，不可混在同一文件。
+  - id: `lrn_d6xws6baqu92` | injected 0, helped 0
+- **fact** (session_llm, conf 4): identity 工具是 user.md 的读写入口（whoisme/whoRu/update_persona 三个 action），与 user.md 存储层共同构成一个完整特性；system-prompt.md 和 identity.md prompt 文件中已有引用。
+  - id: `lrn_2qsl9c3z9cvw4` | injected 0, helped 0
+- **fact** (session_llm, conf 4): user.md 是人写声明式用户身份（姓名/角色/时区/常驻指令）；write_memory(target:user) 是 agent 学习的行为偏好，两者边界不可混用
+  - id: `lrn_2219jgcx15m1x` | injected 0, helped 0
+- **fact** (session_llm, conf 4): identity 工具是 user.md 的读写入口，update_persona 动作按 bullet key 合并而非追加，确保不产生重复键。
+  - id: `lrn_25arh2o05yhhq` | injected 0, helped 0
+- **fact** (session_llm, conf 5): Gateway相关实现应统一在pi-gateway package内，避免编码助手和pi-gateway重复实现cron等模块
+  - id: `lrn_3cxx9ycrjnivf` | injected 23, helped 0
+- **fact** (session_llm, conf 5): mission.md 定义 agent 身份（角色/能力/行为准则），user.md 定义用户身份（姓名/角色/时区/偏好），两者是正交维度，不可混在同一文件。
+  - id: `lrn_3nfhflv2tw2m3` | injected 5, helped 0
+- **fact** (session_llm, conf 4): user.md 是人写的声明式用户身份；write_memory(target:user) 是 agent 学习的行为偏好，两者分工不同不可混用。
+  - id: `lrn_183091t2un6gh` | injected 0, helped 0
+- **fact** (session_llm, conf 5): 模型提供者配置位于~/.omp/agent/models.yml，alibaba-coding-plan section包含6个模型，TUI中显示为大写tab名ALIBABA-CODING-PLAN
+  - id: `lrn_1uncm0ysz159p` | injected 8, helped 0
+- **preference** (session_llm, conf 5): Gateway 相关的实现都应该统一在 pi-gateway package 中，避免重复实现。
+  - id: `lrn_14eqkgj4tc7un` | injected 8, helped 0
+- **fact** (session_llm, conf 5): agentdir 设计应区分 mission.md（任务/agent 信息）和 user.md（用户身份信息），user.md 用于存储关于用户本人的信息。
+  - id: `lrn_18pxh0eh4zpsu` | injected 0, helped 0
+- **preference** (session_llm, conf 4): user.md 应实现为用户级配置，跨项目和 agent 共享，因为用户身份信息不随单个任务变化。
+  - id: `lrn_2c5hzd5z9suf` | injected 0, helped 0
+- **preference** (user_explicit, conf 5): 我叫测试用户，是 oh-my-pi 项目的工程师，时区 Asia/Shanghai，偏好中文回复
+  - id: `lrn_1bvzhsnfnbsoc` | injected 4, helped 0
+- **preference** (session_llm, conf 5): 比起单元测试，优先做冒烟测试（smoke test）来验证功能；用户认为总是通过的单元测试没有实际价值。
+  - id: `lrn_7c4spbsp0tj7` | injected 2, helped 0
+- **preference** (session_llm, conf 5): gateway相关的实现应统一在pi-gateway package内，避免与coding-agent重复。
+  - id: `lrn_2wg055he3zf8l` | injected 9, helped 0
+- **preference** (session_llm, conf 5): 添加新的channel（如新的钉钉机器人）应不重启gateway，不影响其他正在运行的channel。
+  - id: `lrn_38nnl45swr1xt` | injected 9, helped 0
+- **preference** (session_llm, conf 5): send命令应不依赖先收到消息即可直接发送。
+  - id: `lrn_2p92fjdptc60u` | injected 9, helped 0
+- **preference** (session_llm, conf 5): Gateway相关的实现都统一在 pi-gateway package 内，避免 coding-agent 中重复的 cron 命令实现。
+  - id: `lrn_1prn0jb65zqqc` | injected 6, helped 0
+- **preference** (session_llm, conf 4): 对于 agent cron 类任务要实际跑起来验证，不要因为担心浪费 token 而跳过执行。
+  - id: `lrn_3jfkfv6tskn36` | injected 0, helped 0
+- **procedure** (session_llm, conf 4): 遇到命名规范、架构设计等问题时，先上网参考同类项目（如 hermes agent、其他开源实现）的做法再给建议，而不是凭空设计。
+  - id: `lrn_3db7hlwvnaj52` | injected 0, helped 0
+- **fact** (session_llm, conf 4): alibaba-coding-plan 的模型配置在 ~/.omp/agent/models.yml 中存在，但 TUI 界面中 tab 名显示为大写 'ALIBABA-CODING-PLAN'，可能导致用户误以为模型丢失。
+  - id: `lrn_1l2yzc6k8m1cx` | injected 0, helped 0
+- **preference** (session_llm, conf 5): 需要运行 agent cron 任务时不要担心消耗 token，直接跑
+  - id: `lrn_33vfx7fxr4re` | injected 3, helped 0
+- **preference** (session_llm, conf 4): 单元测试每次都通过、形同虚设，对当前项目没有价值，不要花时间在无意义的单测上
+  - id: `lrn_19mi5gphd1muw` | injected 0, helped 0
+- **fact** (session_llm, conf 4): 用户使用钉钉作为日常工作 IM 平台，gateway 需要对接钉钉机器人
+  - id: `lrn_b1sgvb9ydb98` | injected 0, helped 0
+- **preference** (session_llm, conf 5): Gateway-related implementations should be consolidated into the pi-gateway package.
+  - id: `lrn_2f7mv2hsz685z` | injected 1, helped 0
+- **fact** (session_llm, conf 5): The cron module has two independent, diverging implementations at coding-agent/src/commands/gateway.ts#handleCron and pi-gateway/src/cli.ts#cmdCron.
+  - id: `lrn_3i9f96uvqxy0e` | injected 1, helped 0
+- **preference** (session_llm, conf 5): Gateway 相关实现（包括 cron 模块）应统一放在 pi-gateway package 中，避免 coding-agent 和 pi-gateway 出现重复的 cmdCron 实现并各自漂移。
+  - id: `lrn_u41cqewpk3u` | injected 1, helped 0
+- **fact** (session_llm, conf 5): ~/.omp/agent/models.yml 中 alibaba-coding-plan 的 6 个模型（qwen3.6-flash/plus, deepseek-v4-pro/flash, glm-5.1, MiniMax-M2.5）实际存在且可加载，但 TUI 中对应 tab 名是大写 ALIBABA-CODING-PLAN，且 omp --list-models 输出完全正常。
+  - id: `lrn_1u4ih99miihjs` | injected 1, helped 0
+- **fact** (session_llm, conf 4): Adding a new channel to the gateway currently requires editing gateway.json and restarting the gateway, which disrupts other active channels.
+  - id: `lrn_2jfott98uovp2` | injected 0, helped 0
+- **preference** (session_llm, conf 4): 发送消息功能应支持不依赖先收到一条消息而直接发送。
+  - id: `lrn_g8nyu5ocs4wm` | injected 0, helped 0
+- **preference** (session_llm, conf 4): 跑 agent cron 时不要怕浪费 token，该跑就跑，不需要刻意节省 token 消耗
+  - id: `lrn_931zde6jnf0s` | injected 0, helped 0
+- **preference** (session_llm, conf 4): 单元测试如果每次都通过，对我们没什么用；应优先做冒烟测试 / 集成测试等更能暴露问题的方式
+  - id: `lrn_y1lud6t1z05b` | injected 0, helped 0
+- **preference** (session_llm, conf 5): User wants all gateway-related implementations unified in the pi-gateway package; duplicate commands should be consolidated there.
+  - id: `lrn_21eot0drnib3u` | injected 3, helped 0
+- **fact** (session_llm, conf 5): The cron command has duplicate implementations: coding-agent/src/commands/gateway.ts#handleCron and pi-gateway/src/cli.ts#cmdCron, which have diverged in supported flags and behavior.
+  - id: `lrn_1d4z8p73xma2u` | injected 3, helped 0
+- **preference** (session_llm, conf 5): 希望 gateway 相关的所有实现（包括 cron 命令）统一在 pi-gateway package 中，避免重复代码。
+  - id: `lrn_3ucc1gjl3sbsf` | injected 43, helped 2
+- **fact** (session_llm, conf 5): coding-agent/src/commands/gateway.ts#handleCron 与 pi-gateway/src/cli.ts#cmdCron 是重复的 cron 命令实现，且 handleCron 更完整（支持更多 flag、记录 JSONL 日志、关联 agent session），cmdCron 已漂移且功能较少。
+  - id: `lrn_u8twtolfgj4x` | injected 36, helped 0
+- **preference** (session_llm, conf 5): All gateway-related implementations should be unified in the pi-gateway package.
+  - id: `lrn_132q178pl0tbi` | injected 17, helped 0
+- **fact** (session_llm, conf 5): Cron模块存在严重运行时bug：定时任务执行失败被错误记录为success，导致retry和失败统计失效，需修复
+  - id: `lrn_36hz03h8cpmyp` | injected 6, helped 0
+- **preference** (session_llm, conf 5): Gateway 相关的所有实现都应该统一在 pi-gateway package 中，避免代码重复和实现漂移。
+  - id: `lrn_3bvaawapoh0b7` | injected 3, helped 0
+- **preference** (session_llm, conf 5): Unify all gateway-related implementations into the pi-gateway package. Any functionality currently duplicated between coding-agent and pi-gateway should be consolidated under pi-gateway.
+  - id: `lrn_1h9a73v548vi` | injected 1, helped 0
+- **fact** (session_llm, conf 5): coding-agent/src/commands/gateway.ts#handleCron and pi-gateway/src/cli.ts#cmdCron are duplicate implementations that handle the same subcommands but have diverged in behavior (e.g., run logs, session linking).
+  - id: `lrn_3v4s8ia4sn7ay` | injected 36, helped 0
+- **preference** (session_llm, conf 4): gateway session log 的命名应当是人类可读的格式，而不是一串不可理解的符号；需要时可以参考其他人的方案
+  - id: `lrn_15j1humfu5tuz` | injected 0, helped 0
+- **fact** (session_llm, conf 4): 用户使用钉钉(DingTalk)作为主要的即时通讯/机器人平台
+  - id: `lrn_2tfauw54ucwg6` | injected 0, helped 0
+- **fact** (session_llm, conf 5): cron 模块存在两套重复实现：coding-agent/src/commands/gateway.ts 中的 handleCron 和 pi-gateway/src/cli.ts 中的 cmdCron，功能集不同且已各自漂移。
+  - id: `lrn_13cpau17e5iqz` | injected 19, helped 0
+- **preference** (session_llm, conf 5): All gateway-related implementations should be unified in pi-gateway package, moving code out of coding-agent.
+  - id: `lrn_7klyk89x5b57` | injected 1, helped 0
+- **preference** (session_llm, conf 5): Gateway 相关的代码和实现应该统一放在 pi-gateway package 中，避免在 coding-agent 中重复维护。
+  - id: `lrn_37ujue94832og` | injected 1, helped 0
+- **fact** (session_llm, conf 4): 添加新的 gateway channel 需要修改 gateway.json 并重启 gateway，这会中断所有正在运行的 channel。
+  - id: `lrn_251w06p4s7jxk` | injected 0, helped 0
+- **preference** (session_llm, conf 5): gateway相关实现应统一在 pi-gateway package 中，避免在 coding-agent 中存在重复实现。
+  - id: `lrn_u1ksc7pyv0d9` | injected 1, helped 0
+- **fact** (session_llm, conf 5): User uses DingTalk (钉钉) as their primary communication channel; the gateway supports multiple DingTalk robot accounts.
+  - id: `lrn_1gpkhdcpgv27w` | injected 1, helped 0
+- **fact** (session_llm, conf 4): HR agent workspace is at /Users/sz-0203015357/Desktop/Narwal/OMP-workspace-test/hr3 (company: 米克元子, robotics/embodied AI).
+  - id: `lrn_287ldlc0iqvhc` | injected 0, helped 0
+- **fact** (session_llm, conf 5): Cron 任务的执行记录（含状态、输出、时间）持久化在 pi-gateway 的 SQLite 数据库的 executions 表中，可通过 gateway cron logs 或直接查询数据库查看。
+  - id: `lrn_38dsokxsbnp8o` | injected 1, helped 0
+- **procedure** (session_llm, conf 4): 在重构 gateway 相关模块后，应逐一验证所有子命令（create/list/pause/resume/run/remove/status/diagnose/logs）的行为是否正常，避免因合并导致功能遗漏。
+  - id: `lrn_ds3wjr0ts3yq` | injected 0, helped 0
+- **preference** (session_llm, conf 5): 所有 gateway 相关的代码应统一放在 pi-gateway 包中，避免跨包重复实现。
+  - id: `lrn_245z11s8rfco7` | injected 14, helped 0
+- **preference** (session_llm, conf 5): Gateway 相关的实现应该统一在 pi-gateway package 中，避免重复代码和功能漂移。
+  - id: `lrn_39ejsoah1408c` | injected 3, helped 0
+- **fact** (session_llm, conf 4): 当前添加新 channel（如钉钉机器人）需要修改 gateway.json 并重启 gateway，会导致其他正在运行的 channel 中断。
+  - id: `lrn_2lxsahwhfq5rp` | injected 0, helped 0
+- **preference** (session_llm, conf 5): Gateway 相关的实现（包括 cron 模块）统一在 pi-gateway package 中，避免 coding-agent 中的重复实现。
+  - id: `lrn_1oqewxl8ky03x` | injected 5, helped 0
+- **preference** (session_llm, conf 5): Gateway相关的实现（包括cron模块）应统一在pi-gateway package中，避免重复实现于coding-agent的commands/gateway.ts。
+  - id: `lrn_189vv7g83d4hb` | injected 2, helped 0
+- **preference** (session_llm, conf 5): Gateway-related implementations should be unified under the pi-gateway package; avoid duplicate cron command surfaces.
+  - id: `lrn_3ngykn936l817` | injected 27, helped 0
+- **fact** (session_llm, conf 5): Cron模块存在两个独立实现：coding-agent/commands/gateway.ts中的#handleCron和pi-gateway/src/cli.ts中的cmdCron，操作同一SQLite但功能漂移，需要合并。
+  - id: `lrn_33z9gwug6g7c8` | injected 0, helped 0
+- **fact** (session_llm, conf 5): The alibaba-coding-plan model section exists in ~/.omp/agent/models.yml (line 646) with 6 models (qwen3.6-flash, qwen3.6-plus, deepseek-v4-pro, deepseek-v4-flash, glm-5.1, MiniMax-M2.5) and appears under an uppercase tab 'ALIBABA-CODING-PLAN' in the /model TUI dialog.
+  - id: `lrn_21fsn6j2n6d3r` | injected 21, helped 0
+- **preference** (session_llm, conf 5): Gateway 相关的实现（包括 cron 定时任务）必须统一在 pi-gateway 包中，不允许在 coding-agent 或其他包里重复实现。
+  - id: `lrn_xl0l54nbgvcp` | injected 1, helped 0
+- **fact** (session_llm, conf 5): 目前存在两份独立的 cron 实现：coding-agent/src/commands/gateway.ts#handleCron 和 pi-gateway/src/cli.ts#cmdCron，它们操作同一个 SQLite 数据库但功能已漂移（后者只支持 --name/--type/--deliver 三个 flag）。
+  - id: `lrn_1zj9zfdx0xdj6` | injected 1, helped 0
+- **preference** (session_llm, conf 5): gateway cron 相关命令和实现应统一在 pi-gateway package 中，避免在 coding-agent 中重复实现。
+  - id: `lrn_8sjgyky9okao` | injected 1, helped 0
+- **fact** (session_llm, conf 4): Cron 模块中 onTrigger 内部捕获异常后不抛出，导致引擎总是将 execution status 覆盖为 success，即使任务失败。
+  - id: `lrn_3ivlfixe9mqjo` | injected 0, helped 0
+- **fact** (session_llm, conf 5): Cron 模块存在两份重复实现：coding-agent/src/commands/gateway.ts#handleCron 和 pi-gateway/src/cli.ts#cmdCron，且功能已漂移，前者更完整。
+  - id: `lrn_10r7kp6cven2f` | injected 21, helped 1
+- **preference** (session_llm, conf 5): Gateway 相关的 cron 实现统一放在 pi-gateway package 内，避免重复的独立实现。
+  - id: `lrn_tsvrij1vyl6p` | injected 7, helped 1
+- **preference** (session_llm, conf 5): Gateway-related implementations should be unified inside the pi-gateway package; avoid duplicating functionality across packages like coding-agent.
+  - id: `lrn_kfyhunyx6y3u` | injected 1, helped 0
+- **preference** (session_llm, conf 5): 用户倾向于通过真实集成测试验证功能，必要时 mock 外部服务消息，但不满足于纯静态检查。
+  - id: `lrn_3jwy8v8g4d49i` | injected 77, helped 0
+- **preference** (session_llm, conf 5): 用户要求 gateway 相关的实现（包括 cron 模块）统一在 pi-gateway package 中，避免重复。
+  - id: `lrn_2w9jc4j0eszrd` | injected 1, helped 0
+- **fact** (session_llm, conf 5): alibaba-coding-plan 模型已在 ~/.omp/agent/models.yml 中定义（6个模型），--list-models 输出正常；交互 /model 需切换到 'ALIBABA-CODING-PLAN' 标签页才能看到。
+  - id: `lrn_28yskad0duxj0` | injected 5, helped 0
+- **preference** (session_llm, conf 5): Gateway-related implementation should be consolidated in the pi-gateway package, not spread across the coding-agent package. Duplicate cron implementations (coding-agent's handleCron and pi-gateway's cmdCron) must be unified in pi-gateway.
+  - id: `lrn_du72xc71lta8` | injected 4, helped 0
+- **fact** (session_llm, conf 5): gateway 模块的实施计划文档需要基于设计文档做 gap 分析，并包含优先级和并行开发策略。
+  - id: `lrn_1vidz7wyeirv8` | injected 90, helped 4
+- **procedure** (session_llm, conf 5): gateway 模块的集成测试需要 mock DingTalk 消息来验证已开发功能。
+  - id: `lrn_3itqxrw0zmn0v` | injected 74, helped 3
+- **preference** (session_llm, conf 5): Gateway 相关的实现都统一在 pi-gateway package 中，不要分散在 coding-agent 和其他位置。
+  - id: `lrn_3dkoslk701xdy` | injected 2, helped 0
+- **fact** (session_llm, conf 5): alibaba-coding-plan 的 6 个模型在 ~/.omp/agent/models.yml 第 646 行配置齐全，omp 交互启动后 /model 可见，但 tab 名显示为大写 ALIBABA-CODING-PLAN。
+  - id: `lrn_1do3hw2g9s0in` | injected 2, helped 0
+- **preference** (session_llm, conf 5): Gateway 相关的所有实现（包括 cron 模块）应统一放在 pi-gateway package 中，不应分散在 coding-agent 等其他包。
+  - id: `lrn_3nzt9ajmwq2gd` | injected 1, helped 0
+- **fact** (session_llm, conf 5): ~/.omp/agent/models.yml 文件有 716 行，默认读文件工具只显示前 500 行，因此 alibaba-coding-plan 配置（在第 646 行）会被误认为不存在。
+  - id: `lrn_270h8hauveuvf` | injected 1, helped 0
+- **preference** (session_llm, conf 5): 在执行任何代码或文件结构变更前，必须先输出分析结果，等用户确认后才执行（用户多次说"先不执行，先给我你的分析结果"）
+  - id: `lrn_2nl622ywc0hlr` | injected 46, helped 0
+- **preference** (session_llm, conf 5): 用户要求先输出分析结果再执行：面对结构优化/重构类任务时，遵循"先不执行，先给出分析结果"的工作流，等用户确认后再动手
+  - id: `lrn_2n9yweutbnqym` | injected 33, helped 0
+- **preference** (session_llm, conf 5): 设计文档只保留最终落地的设计，不要记录历史变化和中间迭代过程
+  - id: `lrn_1mwem6rt11rqp` | injected 33, helped 0
+- **fact** (session_llm, conf 5): Agent 的 agentDir 骨架（mission.md / AGENTS.md / TOOLS.md / TODO.md / prompt-includes.json / .omp/config.yml / .agent/SYSTEM.md / knowledge/external-workspaces.md / .gitignore 等）目前定义在 `packages/pi-gateway/src/setup.ts` 的代码常量 `AGENT_SKELETON_FILES` (L9-184) / `AGENT_SKELETON_DIRS` (L186) / `AGENT_SKELETON_DIR_KEEPERS` (L198) 中，不是文件系统里的独立模板目录
+  - id: `lrn_3hpzm8tye14lr` | injected 25, helped 0
+- **fact** (session_llm, conf 5): 按 `packages/agent/docs/agent-design-v1.md` §1 的边界划分：Agent 进程 = `omp --mode rpc` 子进程；Agent 进程的调用方（spawn 机制、RPC 协议、IM 消息处理）是网关职责，但 agentDir 的文件系统布局属于 Agent 进程自身的职责，不应放在 pi-gateway 包里
+  - id: `lrn_1itegnap7ahtq` | injected 25, helped 1
+- **procedure** (session_llm, conf 4): pi-gateway 的 AgentBridge/Gateway 改造应先补可靠性闭环，如 SessionManager、状态外显、受控 abort，再考虑完整 RPC 命令面。
+  - id: `lrn_4ko4nd68wzwh` | injected 0, helped 0
+- **procedure** (session_llm, conf 4): AgentBridge/OMP 新功能需要补充真实 LLM/OMP 集成测试覆盖，而不只依赖单元测试或 mock。
+  - id: `lrn_al77jun7ra6f` | injected 0, helped 0
+- **preference** (session_llm, conf 5): gateway-design 和 agent-design 是两个并行独立的设计模块：gateway-design 文档可以引用 agent-design，但 agent-design 文档不应该引用 gateway-design 文档；两份设计文档不应重复对方的 agentDir 结构描述，agentDir 内容以 agent-design 为唯一权威来源
+  - id: `lrn_3hd6wmql2u705` | injected 3, helped 1
+- **preference** (session_llm, conf 5): 设计文档（如 agent-design-v1.md、gateway-design-v1.md）只记录最终落地的设计，不记录历史变更过程；agentDir skeleton 必须与实际 omp-atomix 目录结构完全一致（不能多出 .omp 等不存在的子目录，也不能漏掉真实存在的子目录）
+  - id: `lrn_1y88k2844o86i` | injected 3, helped 1
+- **preference** (session_llm, conf 4): 在 pi-gateway/AgentBridge 相关功能中，用户希望为新功能补充真实 LLM/OMP 集成测试，而不只依赖 mock 测试。
+  - id: `lrn_un3mf3cvva8p` | injected 0, helped 0
+- **preference** (session_llm, conf 4): agentDir 下的 prompt/agent 配置文件应按 MECE 原则分布，每个文件职责单一、不重复；工具相关的硬约束（如 URL 访问必须用 putter 等）必须显式写入 TOOLS.md，单纯描述原则不够，agent 会绕过软约束
+  - id: `lrn_fxjgw2m0e1gf` | injected 0, helped 0
+- **preference** (session_llm, conf 5): 设计文档只记录最终确定的设计方案，不记录演进过程、历史变更、被否决的方案或重复的内容；删除已被新版本或新结构替代的旧设计文档（如 docs/钉钉+OMP-agent-team-设计方案-V1.1.md）。
+  - id: `lrn_2qfchujacyjya` | injected 1, helped 0
+- **preference** (session_llm, conf 5): 设计文档之间应通过交叉引用而非复制内容来保持单一信息源，模块边界清晰：例如 gateway 文档应引用 agent-design 文档，agent-design 不应反向引用 gateway；agentdir skeleton 等子模块内容应直接引用 agent-design 而非在 gateway 文档中重新列出。
+  - id: `lrn_3r00lipeqcggy` | injected 1, helped 0
+- **procedure** (session_llm, conf 4): agentdir 中的 TOOLS.md 需要为工具访问方式添加硬约束（例如对 GitLab 等特定资源使用专用客户端而非通用 putter/HTTP 工具），明确禁止不符合预期的访问方式，避免 agent 在没有约束时选择错误的工具组合。
+  - id: `lrn_3ct0vjglraq4y` | injected 0, helped 0
+- **procedure** (session_llm, conf 5): 相关设计文档之间使用交叉引用（cross-reference）而不是内容复制：gateway-design 应引用 agent-design；agent-design 作为独立模块不应包含 gateway 相关内容，反之亦然
+  - id: `lrn_3ijsp9tg7hdqr` | injected 4, helped 0
+- **preference** (session_llm, conf 5): 用户希望在要求 review 代码时不要修改文件，只提供诊断结果。
+  - id: `lrn_2njyvsu5fgmjb` | injected 31, helped 0
+- **procedure** (session_llm, conf 4): 在 pi-gateway 的 OMP RPC 扩展中，先做 SessionManager、AgentBridge 状态外显、受控 abort、最小流式状态和只读模型/推理查询，不优先做完整 RPC 命令面。
+  - id: `lrn_1fpp2jswiphjt` | injected 0, helped 0
+- **preference** (session_llm, conf 4): 涉及未实现 RPC 命令时，用户希望先给出分析结果并确认后再执行实现。
+  - id: `lrn_2myguqz2rbpcn` | injected 0, helped 0
+- **preference** (session_llm, conf 5): 对 prompt 文件、agent 目录结构等设计决策，必须先按 MECE 原则（各司其职、无重复无缺失）分析现状，并对比行业做法（Anthropic、OpenClaw、Hermes 等）再给方案
+  - id: `lrn_3ncv45779zrdd` | injected 13, helped 0
+- **fact** (session_llm, conf 5): 当前 agent-bridge 主通路基于 omp --mode rpc，但只接入了 RPC 能力的一个子集。
+  - id: `lrn_2paxbfib7rl0s` | injected 5, helped 0
+- **preference** (session_llm, conf 5): 用户偏好先分析并给出建议，明确说“先不执行”时不要改代码或执行实现。
+  - id: `lrn_1iulznf0un1yf` | injected 5, helped 0
+- **procedure** (session_llm, conf 4): 更新 gateway-implementation-v1.md 时应优先说明 omp -p 与 omp --mode rpc 的区别，并标注 Gateway 主链路继续使用 RPC。
+  - id: `lrn_3cxp9xtusa4fr` | injected 0, helped 0
+- **fact** (session_llm, conf 5): 当前项目的 packages/pi-gateway/src/agent-bridge.ts 主通路基于 omp --mode rpc，通过 stdin/stdout JSON line 与 OMP RPC 通信。
+  - id: `lrn_2o21hf5xrjr4t` | injected 3, helped 0
+- **preference** (session_llm, conf 5): 用户希望在要求代码 review 时，先只给诊断结果，不要直接修改代码。
+  - id: `lrn_2pea8ykh9n34` | injected 62, helped 0
+- **fact** (session_llm, conf 4): AgentBridge 目前只接入 OMP RPC 的子集，主要包括 prompt、switch_session、ready、response、message_end、agent_end、extension_ui_request 和 host_tool_call。
+  - id: `lrn_24hxk305dt48t` | injected 0, helped 0
+- **preference** (session_llm, conf 4): 用户在要求分析未实现的 RPC 命令时明确希望先给出分析结果，不要立即执行实现或修改。
+  - id: `lrn_1msei7lxx9w44` | injected 0, helped 0
+- **preference** (session_llm, conf 5): 用户希望代码审查时先只给诊断结果，不要直接修改代码，除非后续明确要求开始编码。
+  - id: `lrn_31omdgqsboajh` | injected 47, helped 0
+- **preference** (session_llm, conf 4): 更新设计文档时优先"写新文档、不破坏旧文档"，删除/覆盖前要确认是否被其他文档引用（用户原话："先不破坏当前的设计文档"）
+  - id: `lrn_21d4m64a5lec7` | injected 0, helped 0
+- **preference** (session_llm, conf 5): 做代码 review 时，用户希望先以软件专家视角给出诊断结果，不要直接修改代码。
+  - id: `lrn_khnsdvsstsg8` | injected 40, helped 0
+- **preference** (session_llm, conf 5): When the user says '先不执行，先给我你的分析结果' or similar, output only analysis/recommendations and wait for explicit confirmation before making changes — do not execute file modifications in the same turn.
+  - id: `lrn_3g47nkk2fzeni` | injected 1, helped 0
+- **preference** (session_llm, conf 4): 在进行重大设计决策或代码变更之前，先列出关键决策点并与我确认，不要直接执行。
+  - id: `lrn_2270w818230dw` | injected 0, helped 0
+- **preference** (session_llm, conf 4): 执行任何代码变更、文件操作之前，必须先与用户讨论确认方案，获得明确同意后再动手（用户的原话："先别执行，先和我探讨"）
+  - id: `lrn_nmrtgs9eb6ct` | injected 0, helped 0
+- **preference** (session_llm, conf 4): For design document evolution, write new content into a new document rather than mutating the current design doc — user stated '把这部分写成一个新的文档，先不破坏当前的设计文档'.
+  - id: `lrn_14xcnr0e310rb` | injected 0, helped 0
+- **procedure** (session_llm, conf 4): When reorganizing agent prompt/configuration files (AGENTS.md, SYSTEM.md, mission.md, TOOLS.md, identity, etc.), apply MECE principle, compare with industry references (Anthropic, OpenClaw, Hermes), and explicitly place hard constraints (e.g., 'use putter for URL access', 'no direct GitLab calls') in TOOLS.md/AGENTS.md rather than leaving them implicit.
+  - id: `lrn_2ae9o9xybss7p` | injected 0, helped 0
+- **procedure** (session_llm, conf 5): 在 gateway 模块开发中，真实集成测试需要 mock DingTalk 消息，并运行真实 OMP/LLM 测试来发现问题。
+  - id: `lrn_29heos93ilylu` | injected 13, helped 0
+- **procedure** (session_llm, conf 4): 验证 gateway 的热更新模型和 session 日志功能时，需要运行真实 OMP/LLM 测试来找 bug。
+  - id: `lrn_5lklpgiucqbm` | injected 0, helped 0
+- **preference** (session_llm, conf 4): 用户偏好根据设计文档进行 gap 分析，并将实施计划重写为包含优先级和并行开发策略的文档。
+  - id: `lrn_ml9hpiivkxst` | injected 0, helped 0
+- **procedure** (session_llm, conf 4): gateway 模块功能完成后需要构建真实集成测试，并 mock DingTalk 消息来验证开发功能。
+  - id: `lrn_3t65865xcxhbg` | injected 0, helped 0
+- **preference** (session_llm, conf 4): 在进行重构或文件结构优化任务时，用户希望先给出分析结果（不要直接执行修改），等待确认后再操作
+  - id: `lrn_13juf1pjxteq4` | injected 0, helped 0
+- **preference** (session_llm, conf 4): 补充或扩展设计内容时，用户偏好新建独立文档而非修改现有的设计文档，以保留历史版本可追溯
+  - id: `lrn_2vd8ikw0fklvr` | injected 0, helped 0
+- **fact** (session_llm, conf 4): OMP agentdir 的 prompt 文件组织遵循 MECE 原则（互斥且穷尽），各文件职能清晰分离，例如 IDENTITY 合并为单文件、TOOLS.md 承载硬约束规则、AGENTS.md 承载 agent 行为规则
+  - id: `lrn_o7wlslrgpldx` | injected 0, helped 0
+- **preference** (session_llm, conf 4): 用户倾向于按实施计划持续推进编码，并优先处理高优先级剩余项。
+  - id: `lrn_josrgu24oi2b` | injected 0, helped 0
+- **fact** (session_llm, conf 5): gateway 模块的实施计划文档位于 packages/pi-gateway/docs/gateway-implementation-v1.md。
+  - id: `lrn_vcfi2ed5tflx` | injected 61, helped 1
+- **preference** (session_llm, conf 5): 用户希望在代码 review 任务中先只给诊断结果，不要擅自修改代码。
+  - id: `lrn_3304o53l8h0by` | injected 3, helped 0
+- **preference** (session_llm, conf 5): 用户在要求代码 review 时可能明确要求只给诊断结果、不修改代码，应严格遵守只读审查边界。
+  - id: `lrn_1p5dog4dmy1nu` | injected 14, helped 0
+- **fact** (session_llm, conf 4): 当前项目关注 packages/pi-gateway/gateway 模块，包含 DingTalk 通道、LLM/OMP、session、状态与配置热加载等能力。
+  - id: `lrn_1mioqq2iah5xf` | injected 0, helped 0
+- **preference** (session_llm, conf 5): 用户在请求代码 review 时可能明确要求只给诊断结果、不修改代码，需严格遵守只读审查范围。
+  - id: `lrn_4eiz1p4lntvv` | injected 3, helped 0
+- **fact** (session_llm, conf 5): gateway 模块位于项目路径 packages/pi-gateway，包含核心入口、DingTalk 通道、AgentBridge、session store、CLI/config/scheduler 等部分。
+  - id: `lrn_34izwuzvhy980` | injected 11, helped 0
+- **procedure** (session_llm, conf 4): 在 gateway 模块开发中，实施计划应基于设计文档做 gap 分析，并包含优先级、并行开发策略和验收测试矩阵。
+  - id: `lrn_2qznx6l5052m` | injected 0, helped 0
+- **preference** (session_llm, conf 5): 用户在代码 review 请求中可能明确要求只给诊断结果、不修改文件，应严格遵守只读约束。
+  - id: `lrn_1xcs8xdowdlpj` | injected 8, helped 0
+- **preference** (session_llm, conf 4): 用户偏好根据设计文档做 gap 分析并产出带优先级和并行开发策略的实施计划。
+  - id: `lrn_2g9eaugugoiel` | injected 0, helped 0
+- **preference** (session_llm, conf 5): 在执行设计、重组或重构类任务时，先输出分析结果和方案让用户 review，确认后再执行；用户多次明确说"先不执行，先给我你的分析结果"。
+  - id: `lrn_3p7uecicgdzs` | injected 1, helped 0
+- **preference** (session_llm, conf 4): 做 prompt 文件分布或类似模块化设计时，需遵循 MECE 原则（各司其职、无重复无缺失），并与行业方案（anthropic、openclaw、hermes agent 等）做对比后再定方案。
+  - id: `lrn_2zy97i9n5mfux` | injected 0, helped 0
+- **fact** (session_llm, conf 4): omp-atomix 项目中，omp 在项目内启动时会生成 evolution 文件夹，对应的是 memory.md（持久化记忆）。
+  - id: `lrn_88y1c8dywpsd` | injected 0, helped 0
+- **preference** (session_llm, conf 5): 用户在请求代码 review 时可能明确要求只给诊断结果、不修改代码，后续应严格遵守该边界。
+  - id: `lrn_16idn9nknbrza` | injected 6, helped 0
+- **procedure** (session_llm, conf 4): gateway 模块实施计划需要基于设计文档做 gap 分析，并包含优先级和并行开发策略。
+  - id: `lrn_2zzxfj9gbvlds` | injected 0, helped 0
+- **preference** (session_llm, conf 5): 用户在代码评审任务中偏好先只读诊断，不要修改代码，除非后续明确要求开始编码。
+  - id: `lrn_36odvbun3cvtc` | injected 3, helped 0
+- **preference** (session_llm, conf 4): 用户希望根据设计文档进行实现差距分析，并将实施计划重写为包含优先级和并行开发策略的文档。
+  - id: `lrn_106gib07k1p1u` | injected 0, helped 0
+- **procedure** (session_llm, conf 4): 在 gateway 模块开发中，实施前需根据设计文档做 gap 分析，并维护带优先级和并行开发策略的实施计划。
+  - id: `lrn_h64plvhl9swy` | injected 0, helped 0
+- **fact** (session_llm, conf 4): gateway 模块涉及 pi-gateway CLI/status、DingTalk 通道、AgentBridge、session store、配置热加载和真实集成测试等能力。
+  - id: `lrn_15e2e051zku3i` | injected 0, helped 0
+- **procedure** (session_llm, conf 4): gateway 模块的实施计划需要根据设计文档做 gap 分析，并包含优先级与并行开发策略。
+  - id: `lrn_9qtvwk4m82bh` | injected 0, helped 0
+- **fact** (session_llm, conf 4): gateway 模块需要支持 mock DingTalk 消息的真实集成测试来验证已开发功能。
+  - id: `lrn_bcs8upj04w4` | injected 0, helped 0
+- **preference** (session_llm, conf 4): 用户希望实施计划文档包含优先级划分和并行开发策略。
+  - id: `lrn_2ni4frlxtyiwo` | injected 0, helped 0
+- **fact** (session_llm, conf 4): 当前项目包含 gateway/pi-gateway 模块，需要支持 DingTalk 消息 mock 与真实集成测试。
+  - id: `lrn_qef6fqpamj78` | injected 0, helped 0
+- **preference** (session_llm, conf 5): When reviewing design documents, file structures, or architectures, the user wants explicit redundancy detection (重复) and gap analysis (缺失), not just a description of what each piece does.
+  - id: `lrn_t4jbwe87k5s2` | injected 8, helped 0
+- **preference** (session_llm, conf 5): 用户希望代码 review 时可以只给诊断结果，不直接修改代码。
+  - id: `lrn_v50izeh1t0c0` | injected 3, helped 0
+- **fact** (session_llm, conf 5): 当前关注的项目模块是 packages/pi-gateway，即 gateway 模块。
+  - id: `lrn_8xfz3kv0rik2` | injected 3, helped 0
+- **preference** (session_llm, conf 5): 用户希望在要求 review 代码时只给出诊断结果，不要修改代码。
+  - id: `lrn_1gnzl5dj2his0` | injected 14, helped 0
+- **fact** (session_llm, conf 5): 当前关注的项目区域是 gateway 模块，路径在 packages/pi-gateway。
+  - id: `lrn_x5uypxyq45gf` | injected 22, helped 1
+- **preference** (session_llm, conf 4): 用户接受按实施计划逐步编码推进，并希望阶段性了解已实现项和剩余任务。
+  - id: `lrn_1i460n0617ah1` | injected 0, helped 0
+- **preference** (session_llm, conf 4): 用户倾向于使用中文沟通，代码审查、诊断结果和实施进展应优先用中文回复。
+  - id: `lrn_1ht3qri3qfw8n` | injected 0, helped 0
+- **preference** (session_llm, conf 4): 进行代码 review 时，用户偏好先不修改代码，只输出诊断结果，除非另有要求。
+  - id: `lrn_ejbalr40kuzh` | injected 0, helped 0
+- **preference** (session_llm, conf 5): 用户希望代码 review 时先不修改文件，只提供诊断结果。
+  - id: `lrn_2389ae9ldu07p` | injected 19, helped 0
+- **preference** (session_llm, conf 4): For refactoring or restructuring work, the user prefers a non-destructive approach: write the new structure as a separate document first, discuss it, and only migrate content and remove the old version after consensus is reached.
+  - id: `lrn_2tdul95o01tdy` | injected 0, helped 0
+- **fact** (session_llm, conf 4): OMP project integrates with DingTalk via a pi-gateway package; agents deployed through DingTalk load their identity and config from an agentDir directory containing mission.md, profile.yaml, .agent/AGENTS.md, .agent/SYSTEM.md, and .omp/config.yml, with model roles defined in ~/.omp/agent/config.yml.
+  - id: `lrn_20ynta8nbcgdj` | injected 0, helped 0
+- **preference** (session_llm, conf 4): 当需要补充设计内容时，优先创建新文档而不是修改/破坏已有的设计文档（用户原话：'先不破坏当前的设计文档'）
+  - id: `lrn_295vzw7hapzkj` | injected 0, helped 0
+- **procedure** (session_llm, conf 4): omp-atomix 骨架设计：root 放置 AGENTS.md + prompt-includes.json；mission.md 维护路径映射；knowledge/ 下只保留 external-workspaces.md；.agent/AGENTS.md 是否保留需进一步讨论
+  - id: `lrn_2par2i4wmc9lx` | injected 0, helped 0
+- **fact** (session_llm, conf 4): 用户工作目录为 /Users/sz-0203015357/Desktop/Narwal/OMP-workspace-test/omp-atomix，配置为 opencode 机器人的 agentDir。
+  - id: `lrn_390oajg5crzvq` | injected 0, helped 0
+- **preference** (session_llm, conf 4): 做代码 review 时，用户希望先不修改代码，只输出诊断结果，除非后续明确要求编码。
+  - id: `lrn_3i3z2cz34rsn0` | injected 0, helped 0
+- **preference** (session_llm, conf 4): 推进实现时，用户希望定期说明当前已实现内容、剩余待实现内容，并优先继续高优先级任务。
+  - id: `lrn_3rkwqcl8jd98s` | injected 0, helped 0
+- **procedure** (session_llm, conf 4): gateway 模块后续实现应优先推进高优先级剩余项，并在需要时列出已实现与待实现任务。
+  - id: `lrn_246jl9gbaanr2` | injected 0, helped 0
+- **preference** (session_llm, conf 5): 用户在代码 review 任务中希望先只给诊断结果，不要直接修改代码，除非后续明确要求开始编码。
+  - id: `lrn_20e7b7w82sabq` | injected 2, helped 0
+- **preference** (session_llm, conf 5): 代码审查阶段只给诊断结果，不要修改代码，除非用户后续明确要求开始编码。
+  - id: `lrn_3682kieyhstbc` | injected 1, helped 0
+- **preference** (session_llm, conf 4): 用户希望实施计划文档包含 gap 分析、优先级划分和并行开发策略。
+  - id: `lrn_um5wd8n7bn17` | injected 0, helped 0
+- **preference** (session_llm, conf 4): 用户偏好使用中文交流，尤其是在代码审查、实施计划和开发进度沟通中。
+  - id: `lrn_2arslgx9v3vt3` | injected 0, helped 0
+- **procedure** (session_llm, conf 4): gateway 模块实施计划应根据设计文档做当前实现的 gap 分析，并包含优先级和并行开发策略。
+  - id: `lrn_xh5bwxaygsme` | injected 0, helped 0
+- **preference** (session_llm, conf 4): 用户偏好根据设计文档做 gap 分析并重写实施计划文档，计划需包含优先级和并行开发策略。
+  - id: `lrn_2aqrfq3sihldb` | injected 0, helped 0
+- **procedure** (session_llm, conf 4): 在 gateway 模块实施前，应先根据设计文档做当前实现的 gap 分析，并重写带优先级和并行开发策略的实施计划。
+  - id: `lrn_2alrvi7ualb47` | injected 0, helped 0
+- **preference** (session_llm, conf 5): 修改设计方案前必须先获得用户同意，先给出建议供讨论确认后再实际修改
+  - id: `lrn_2x572z65xtjz8` | injected 31, helped 0
+- **fact** (session_llm, conf 5): 设计目标文档（gateway-design）不能包含代码，代码实现细节只放在实施计划文档中
+  - id: `lrn_2pfq8pl57oq5y` | injected 31, helped 0
+- **preference** (session_llm, conf 5): 设计和实现方案修改前必须先与用户确认并获得许可，不要直接修改，先给出建议供讨论
+  - id: `lrn_1wzmihsdnkwq8` | injected 26, helped 0
+- **fact** (session_llm, conf 4): OMP 项目通过 pi-gateway 包集成钉钉，agent 通过 agentDir 下的 .omp/config.yml 加载配置，gateway.json 中 channels.dingtalk.accounts.<accountId> 绑定 appKey/appSecret/robotCode/agentDir。
+  - id: `lrn_2gi3vkh6qhlod` | injected 0, helped 0
+- **preference** (session_llm, conf 4): 新增设计内容时优先创建新文档，不直接修改现有设计文档以避免破坏当前设计（'先不破坏当前的设计文档'）。
+  - id: `lrn_2z9aiqz7nm3iz` | injected 0, helped 0
+- **preference** (session_llm, conf 4): 用户偏好按实施计划推进编码，并在阶段性完成后说明当前已实现内容和剩余待实现项。
+  - id: `lrn_2eo2503n7xwks` | injected 0, helped 0
+- **preference** (session_llm, conf 4): 用户偏好基于设计文档对当前实现做 gap 分析，并将实施计划重写为带优先级和并行开发策略的文档。
+  - id: `lrn_32zdpj0f0cmxa` | injected 0, helped 0
+- **preference** (session_llm, conf 4): 用户倾向于先根据设计文档做 gap 分析并更新实施计划，再按照优先级继续编码实现。
+  - id: `lrn_2ncv3sn3jx8qs` | injected 0, helped 0
+- **preference** (session_llm, conf 5): 用户在要求 review 或诊断代码时，明确希望只给诊断结果，不要修改代码。
+  - id: `lrn_2qx73f41u5qln` | injected 3, helped 0
+- **preference** (session_llm, conf 5): When adding new requirements or scope to design documents, create a new document instead of modifying the existing one, to preserve the current design doc intact (先不破坏当前的设计文档).
+  - id: `lrn_3b1ydve18baox` | injected 1, helped 0
+- **fact** (session_llm, conf 5): gateway 模块位于 packages/pi-gateway，并有设计文档和实施计划文档用于 gap 分析与开发推进。
+  - id: `lrn_3ewh74pfi01pe` | injected 1, helped 0
+- **preference** (session_llm, conf 4): 用户倾向于按实施计划的优先级推进开发，并优先处理高优先级剩余项。
+  - id: `lrn_q1etqoxmxs3g` | injected 0, helped 0
+- **fact** (session_llm, conf 4): docs/钉钉+dws-测试方案.md references docs/钉钉+OMP-agent-team-设计方案-V1.1.md as 适用方案 (applicable plan), so changes to one design doc must consider cross-references in related docs.
+  - id: `lrn_1u9abk4bzlfl4` | injected 0, helped 0
+- **preference** (session_llm, conf 5): 用户在代码 review 请求中明确要求只给诊断结果、不修改代码时，应保持只读并避免改动文件。
+  - id: `lrn_2n577sm2i93og` | injected 14, helped 0
+- **preference** (session_llm, conf 5): 设计方案修改前必须先与用户确认并获得同意，不能直接修改设计方案
+  - id: `lrn_2ufu3eoeu5eie` | injected 14, helped 0
+- **procedure** (session_llm, conf 4): 对 gateway 模块做实现 gap 分析时，需要依据设计文档重写实施计划，并包含优先级和并行开发策略。
+  - id: `lrn_1op464q4kh9dt` | injected 0, helped 0
+- **preference** (session_llm, conf 4): 用户偏好直接执行操作（如直接写配置文件），而非冗长解释后再征求确认
+  - id: `lrn_amj4s9z0uffr` | injected 0, helped 0
+- **procedure** (session_llm, conf 4): 配置模型前先发探测请求验证真实路由和可用性，再据此写配置
+  - id: `lrn_38cdfe1iranuj` | injected 0, helped 0
+- **preference** (session_llm, conf 4): 用户在代码审查任务中可能要求只给诊断结果且不修改文件，应严格遵守只读 review 边界。
+  - id: `lrn_bg4qojg5ix9y` | injected 0, helped 0
+- **procedure** (session_llm, conf 4): gateway 模块实施计划需要根据设计文档做 gap 分析，并包含优先级、并行开发策略、验收测试矩阵和风险缓解。
+  - id: `lrn_7gikblkkyxad` | injected 0, helped 0
+- **preference** (session_llm, conf 4): Before writing or trusting model/API configurations, empirically verify actual routing and behavior with probe requests rather than relying on documented aliases or catalog descriptors alone.
+  - id: `lrn_14j87u0i9g4m4` | injected 0, helped 0
+- **procedure** (session_llm, conf 4): Before writing configuration, investigate how the consuming system actually resolves and uses each config field (resolver/registry/selection logic in source), not just the schema definition.
+  - id: `lrn_f0thqihl8v6o` | injected 0, helped 0
+- **preference** (session_llm, conf 4): 用户倾向于中文沟通，并希望代码审查和实施计划包含专家视角、gap 分析、优先级和并行开发策略。
+  - id: `lrn_1h80piwq78n2w` | injected 0, helped 0
+- **preference** (session_llm, conf 5): 用户希望代码 review 时先只给诊断结果，不要擅自修改文件，除非后续明确要求开始编码。
+  - id: `lrn_ry1xlxii3k3a` | injected 5, helped 0
+- **preference** (session_llm, conf 4): 用户在代码 review 场景中可能要求只给诊断结果、不修改代码，需严格遵守只读范围。
+  - id: `lrn_2s2iyg57xy6d` | injected 0, helped 0
+- **preference** (session_llm, conf 4): 用户希望根据设计文档进行当前实现的 gap 分析，并产出带优先级和并行开发策略的新实施计划。
+  - id: `lrn_n18s0jq27qvf` | injected 0, helped 0
+- **preference** (session_llm, conf 4): 用户在代码 review 任务中明确要求不修改代码，只提供诊断结果。
+  - id: `lrn_1gpnqspe9qp0a` | injected 0, helped 0
+- **procedure** (session_llm, conf 4): gateway 模块当前实施计划要求按 P0、P1-A、P1-B、P1-C、P1-D、P2、P3、P4 的优先级推进，并考虑并行开发策略。
+  - id: `lrn_p1seh612anlt` | injected 0, helped 0
+- **procedure** (session_llm, conf 4): 在 gateway 模块实现前，应先根据设计文档做 gap 分析并重写实施计划，计划需包含优先级和并行开发策略。
+  - id: `lrn_2mmmjqnlm2fdu` | injected 0, helped 0
+- **preference** (session_llm, conf 5): 设计目标文档不能包含代码，代码只能出现在实施计划文档中
+  - id: `lrn_30tfmuoh5fjic` | injected 1, helped 0
+- **fact** (session_llm, conf 4): 每个 agent 默认需要具备外部知识库（external knowledge base）的设定
+  - id: `lrn_qhm6knm7qxbo` | injected 0, helped 0
+- **preference** (session_llm, conf 4): 用户希望代码审查时以软件专家视角进行，并输出结构化的诊断结论。
+  - id: `lrn_txw8yjlbrmht` | injected 0, helped 0
+- **procedure** (session_llm, conf 5): 设计文档分为两份：目标设计文档（不含代码）专注于想达成什么，实施文档承接差距分析与实施计划
+  - id: `lrn_1h9jmyv4t0ynt` | injected 3, helped 0
+- **fact** (session_llm, conf 5): 每个钉钉机器人背后对应一个 agent，是 1:1 的对应关系，agent 可作为网关内嵌进程或长期独立服务
+  - id: `lrn_2us8n5pxkjxh7` | injected 3, helped 0
+- **preference** (session_llm, conf 5): 用户在要求代码 review 时可能明确要求只给诊断结果、不修改文件，应严格保持只读检查。
+  - id: `lrn_179vm61zbglp4` | injected 3, helped 0
+- **preference** (session_llm, conf 4): 用户接受先根据设计文档做 gap 分析并重写实施计划，再按计划分阶段编码的工作流。
+  - id: `lrn_3gfkg4p4xdhuh` | injected 0, helped 0
+- **preference** (session_llm, conf 5): 修改设计方案前必须先和用户讨论确认，获得明确同意后才能实际修改文件，不要未经确认就改动设计文档
+  - id: `lrn_ir856citt136` | injected 5, helped 0
+- **preference** (session_llm, conf 5): 设计方案的修改需要先与用户确认并获得许可后才能实际修改，不要直接动手改
+  - id: `lrn_3vnb827tom69l` | injected 4, helped 0
+- **fact** (session_llm, conf 5): 每个钉钉机器人背后对应一个 agent，关系为一对一，agent 不一定放在 gateway 目录下
+  - id: `lrn_31otqw5go0x9v` | injected 4, helped 1
+- **preference** (session_llm, conf 5): 用户在请求代码审查时可能明确要求只给诊断结果、不修改文件，需严格遵守只读审查边界。
+  - id: `lrn_2iajimewlbiuz` | injected 2, helped 0
+- **preference** (session_llm, conf 4): 用户希望在代码审查任务中先只给诊断结果，未经明确要求不要修改代码。
+  - id: `lrn_2s24mroe1r5l5` | injected 0, helped 0
+- **procedure** (session_llm, conf 4): gateway 模块实施计划文档位于 packages/pi-gateway/docs/gateway-implementation-v1.md，已按设计文档和当前实现 gap 分析重写为带优先级与并行开发策略的计划。
+  - id: `lrn_c2o91yvxmu8a` | injected 0, helped 0
+- **preference** (session_llm, conf 4): 用户接受按实施计划分阶段编码，并在适当节点提交代码后继续后续实现。
+  - id: `lrn_3it5ze7iboxe8` | injected 0, helped 0
+- **preference** (session_llm, conf 5): 用户在请求代码 review 时偏好先只给诊断结果，不要擅自修改代码。
+  - id: `lrn_3qazsnetjunr6` | injected 1, helped 0
+- **fact** (session_llm, conf 4): 当前项目包含 packages/pi-gateway 网关模块，并有实施计划文档 packages/pi-gateway/docs/gateway-implementation-v1.md。
+  - id: `lrn_30il7s4p6zyn7` | injected 0, helped 0
+- **procedure** (session_llm, conf 4): 在 gateway 模块实施变更时，先做诊断和实施计划，再按计划分阶段编码、验证并提交。
+  - id: `lrn_1nuf2z1ujhoop` | injected 0, helped 0
+- **procedure** (session_llm, conf 5): 设计文档分为两个独立文件：目标设计文档（不含代码）专注目标层面，实施计划文档专注 gap 分析与实施层面
+  - id: `lrn_1eqzpflbsifby` | injected 1, helped 0
+- **fact** (session_llm, conf 5): OMP gateway 项目的设计文档分为两个独立文档：目标设计文档（专注目标层面，不包含代码）和差距分析与实施计划文档（专注实施层面）
+  - id: `lrn_2yk4z7ajx9rxw` | injected 1, helped 0
+- **fact** (session_llm, conf 5): 每个 DingTalk 机器人背后对应一个 agent（一对一关系），agent 短期生命周期由网关拥有，长期可作为独立服务运行
+  - id: `lrn_32sihjaa23ijv` | injected 1, helped 0
+- **preference** (session_llm, conf 5): 用户在要求代码 review 时偏好只读诊断结果，明确要求“不修改”时不要改动文件。
+  - id: `lrn_18qjcilpbcddj` | injected 1, helped 0
+- **preference** (session_llm, conf 4): 用户希望按实施计划推进编码，并在阶段性完成后继续后续实现。
+  - id: `lrn_3obviefpebvvv` | injected 0, helped 0
+- **preference** (session_llm, conf 4): 设计新方案时需参考 openclaw、hermes 等外部最佳实践，并明确列出具体引用来源供用户判断
+  - id: `lrn_qjc9xhmh1zgj` | injected 0, helped 0
+- **procedure** (session_llm, conf 4): 在根据设计文档做 gap 分析后，应重写实施计划文档，并包含优先级和并行开发策略。
+  - id: `lrn_3ixzmdm8j0w9s` | injected 0, helped 0
+- **fact** (session_llm, conf 5): 每个钉钉机器人对应一个Agent，Agent与钉钉机器人是1对1关系。
+  - id: `lrn_3476f59jrk22k` | injected 26, helped 0
+- **preference** (session_llm, conf 5): 发送给钉钉的消息内容必须过滤掉 thinking/think 标签的思考过程，只返回最终回复内容
+  - id: `lrn_14zjdttfm4xq3` | injected 18, helped 0
+- **fact** (session_llm, conf 5): 每个钉钉机器人背后必须对应一个 agent，agent 的生命周期短期由网关拥有，长期可以是独立服务，粒度为一对一
+  - id: `lrn_32ulfs2u35bc3` | injected 18, helped 0
+- **preference** (session_llm, conf 5): 设计方案的修改需要先与用户讨论确认，获得同意后才能实际修改，不要自行直接修改设计文档
+  - id: `lrn_10b9shdl6u70f` | injected 2, helped 0
+- **preference** (session_llm, conf 5): 设计文档应拆分为两份：目标设计文档（不含代码，专注目标层面）和差距分析与实施计划文档（专注实施层面）
+  - id: `lrn_3nngjqprifewq` | injected 2, helped 0
+- **preference** (session_llm, conf 5): 设计变更需要先和用户讨论并获得明确同意后才能修改设计方案，不要直接动手改
+  - id: `lrn_211go2lfcxfu1` | injected 2, helped 0
+- **preference** (session_llm, conf 5): 设计文档应拆分为两个独立文档：目标设计文档（不含代码）专注目标层面，差距分析与实施计划文档专注实施层面
+  - id: `lrn_2qv9p17u8rwq5` | injected 2, helped 0
+- **fact** (session_llm, conf 5): 每个钉钉机器人channel对应一个独立的agent，agentdir目录必须包含cron、prompts、日志等子目录，并且日志应保存在agentdir内。
+  - id: `lrn_3d0rf5i2jkufj` | injected 33, helped 3
+- **preference** (session_llm, conf 4): 定时任务日志使用日志文件格式而非数据库格式，Agent 的执行记录应保存在 Agent 自身的 agentdir 目录内
+  - id: `lrn_1r3dm9sa7nltb` | injected 0, helped 0
+- **preference** (session_llm, conf 4): 每个钉钉机器人背后对应一个 agent，agent 的执行日志和会话记录应保存在该 agent 的 agentdir 目录内，定时任务日志使用文本日志格式而非数据库格式
+  - id: `lrn_v9777xqdydh` | injected 0, helped 0
+- **preference** (session_llm, conf 5): 用户在要求代码 review 时可能明确要求“只给诊断结果、不修改代码”，应严格保持只读并输出诊断。
+  - id: `lrn_3no7ikh9b680e` | injected 2, helped 0
+- **preference** (session_llm, conf 5): 设计方案修改前必须先与用户讨论确认，获得明确同意后才能实际修改设计文档
+  - id: `lrn_1kunozqx2k8pn` | injected 2, helped 0
+- **preference** (session_llm, conf 4): Agent 的执行记录和对话日志应保存在 agent 自己的 agentdir 目录内，而不是集中存储在共享数据库中
+  - id: `lrn_3ochu7eujm8cn` | injected 0, helped 0
+- **fact** (session_llm, conf 4): 每个钉钉机器人背后对应一个独立的 agent，形成 1:1 的对应关系
+  - id: `lrn_2xrh1snhlyoz4` | injected 0, helped 0
+- **procedure** (session_llm, conf 4): 在该项目的 gateway 模块编码前，应先按设计文档做 gap 分析并维护带优先级和并行开发策略的实施计划。
+  - id: `lrn_cw8cg4j32cws` | injected 0, helped 0
+- **fact** (session_llm, conf 4): gateway 模块当前重点改造方向包括多账号路由、agentDir/session 隔离、AgentBridge session RPC 串行化和 SessionManager 背压。
+  - id: `lrn_xlmbroijw56q` | injected 0, helped 0
+- **preference** (session_llm, conf 5): 用户在代码 review 场景中可能只需要诊断结果，并明确要求不修改代码时必须保持只读。
+  - id: `lrn_1juawh9erwoj2` | injected 1, helped 0
+- **fact** (session_llm, conf 5): 当前项目中存在 gateway 模块，路径为 packages/pi-gateway。
+  - id: `lrn_1nt1jpi58s9x3` | injected 1, helped 0
+- **preference** (session_llm, conf 4): 用户希望针对设计文档做代码实现的 gap 分析，并重写实施计划文档时包含优先级和并行开发策略。
+  - id: `lrn_1rr9uazfu041h` | injected 0, helped 0
+- **preference** (session_llm, conf 5): 设计方案的修改需要先经过讨论并获得用户明确同意后才能执行，不要自行修改设计文档
+  - id: `lrn_1qsmuvzpbzru1` | injected 1, helped 0
+- **fact** (session_llm, conf 5): 每个钉钉机器人对应一个 agent（1:1 关系），agent 的执行记录和对话日志应保存在该 agent 的 agentdir 目录中
+  - id: `lrn_265crotw47bfr` | injected 1, helped 0
+- **preference** (session_llm, conf 5): 在实际修改任何代码或配置之前，先与用户讨论并确认修改方案，获得用户同意后再执行
+  - id: `lrn_29ir5y9so5qw2` | injected 1, helped 0
+- **preference** (session_llm, conf 5): 提出修改建议时应逐条说明每条建议对用户的具体帮助是什么，由用户逐条决定是否采纳
+  - id: `lrn_2czk6rn54g129` | injected 1, helped 0
+- **procedure** (session_llm, conf 4): 设计方案文档分为两个：设计目标文档（不含代码，专注目标层面）和差距分析与实施计划文档（专注实施层面）
+  - id: `lrn_2lha5ejycy8di` | injected 0, helped 0
+- **preference** (session_llm, conf 4): 设计目标文档不能包含代码片段，保持纯设计描述；定时任务日志使用日志文件格式而非数据库格式
+  - id: `lrn_6mp6ib445gey` | injected 0, helped 0
+- **preference** (session_llm, conf 5): 用户用中文沟通，所有回复必须使用中文（包括设计文档、命令说明、日志解读等）
+  - id: `lrn_23x56ei804xjj` | injected 10, helped 0
+- **preference** (session_llm, conf 5): 设计目标文档不能包含代码，设计目标文档与实施计划文档应分开维护
+  - id: `lrn_evnv3w0ih1w` | injected 1, helped 0
+- **fact** (session_llm, conf 5): 项目中每个钉钉机器人对应一个 agent，是一对一关系；agent 的生命周期短期由网关拥有，长期可以是独立服务
+  - id: `lrn_23pg4mx0b42u1` | injected 1, helped 0
+- **preference** (session_llm, conf 5): 修改设计方案前必须先获得用户同意，不能直接修改设计文档，需要充分对比分析后给出建议供用户决策
+  - id: `lrn_1poyni2qxmowv` | injected 1, helped 0
+- **preference** (session_llm, conf 5): 设计方案修改前必须获得用户明确同意，不要擅自修改设计方案或实施计划
+  - id: `lrn_3hhz13nut3nto` | injected 2, helped 0
+- **preference** (session_llm, conf 5): 设计目标文档不包含代码，专注在目标层面；实施计划单独成文，专注在如何做
+  - id: `lrn_22a6f3fax1g4v` | injected 2, helped 0
+- **fact** (session_llm, conf 5): prompt-includes.json 必须放在 <agentDir>/.omp/prompt-includes.json，当前设计不支持外部化
+  - id: `lrn_kiq5ncub9syp` | injected 37, helped 1
+- **preference** (session_llm, conf 4): 提出建议时需逐条说明每条建议对用户的帮助和价值，由用户决定是否采纳
+  - id: `lrn_1vnpp9iznhiuj` | injected 0, helped 0
+- **preference** (session_llm, conf 5): 用户要求代码 review 时只给诊断结果，不要修改代码，除非后续明确要求开始编码。
+  - id: `lrn_2bvefulnj6u0j` | injected 1, helped 0
+- **procedure** (session_llm, conf 5): gateway 模块实施计划文档位于 packages/pi-gateway/docs/gateway-implementation-v1.md，更新计划时需基于设计文档与当前代码实现做 gap 分析。
+  - id: `lrn_g2zzu2mykjer` | injected 1, helped 0
+- **preference** (session_llm, conf 4): 用户在代码审查类请求中可能要求只给诊断结果、不要修改代码，必须严格遵守只读边界。
+  - id: `lrn_2w1xezzfpqqjh` | injected 0, helped 0
+- **fact** (session_llm, conf 4): gateway 模块的 P0/P1 修复重点包括 TypeScript 构建错误、多账号路由隔离、agentDir/session 隔离以及 AgentBridge session RPC 串行化。
+  - id: `lrn_72cztsepzlg0` | injected 0, helped 0
+- **procedure** (session_llm, conf 5): 设计文档必须先与用户讨论并获得用户明确同意后才能修改代码或实施方案；用户多次强调"需要我同意才能修改设计方案"，不应主动把设计建议直接落地为代码改动
+  - id: `lrn_2fxztbekk7q4r` | injected 6, helped 0
+- **preference** (session_llm, conf 5): 用户在代码 review 任务中明确要求只给诊断结果，不修改代码。
+  - id: `lrn_1cbdclopktcax` | injected 1, helped 0
+- **preference** (session_llm, conf 4): 用户希望根据设计文档做实现 gap 分析，并重写实施计划时包含优先级和并行开发策略。
+  - id: `lrn_26yyz470ci6q7` | injected 0, helped 0
+- **procedure** (session_llm, conf 5): 架构设计拆分为两份独立文档：一份是设计目标文档（专注目标层面、想做成什么样子、不含代码），另一份是差距分析与实施计划文档（专注实施层面、如何做）；评审时分别讨论
+  - id: `lrn_1rk71m2z3us78` | injected 5, helped 0
+- **preference** (session_llm, conf 4): 进行代码 review 时，用户可能偏好先只给诊断结果，不直接修改代码，除非明确要求修改。
+  - id: `lrn_15u5an4f9ho71` | injected 0, helped 0
+- **preference** (session_llm, conf 4): 重写或生成实施计划文档时，用户希望包含优先级划分和并行开发策略。
+  - id: `lrn_1bmyrbezb5cme` | injected 0, helped 0
+- **preference** (session_llm, conf 5): 设计文档应拆分为两份：设计目标文档（专注目标层面，不含代码）+ 差距分析与实施计划文档（专注实施层面）
+  - id: `lrn_3kkp1z91j0bf4` | injected 4, helped 0
+- **preference** (session_llm, conf 5): 每个DingTalk机器人应对应一个独立agent，agent粒度为一对一，生命周期短期由网关管理但长期可独立服务。
+  - id: `lrn_3oslzgfd5rdd3` | injected 35, helped 3
+- **preference** (session_llm, conf 5): Gateway 的模型配置优先使用数据库读取，而非环境变量。
+  - id: `lrn_1l48ink3u9rc2` | injected 35, helped 5
+- **preference** (session_llm, conf 5): 修改设计方案前必须先征得用户同意：先充分讨论、对比业界最佳实践并给出详细分析供用户决策，用户同意后才能修改实现
+  - id: `lrn_128vhmjzre6j2` | injected 3, helped 0
+- **fact** (session_llm, conf 5): 本项目架构决策：每个 DingTalk 机器人背后对应一个独立 Agent（一对一粒度），Agent 短期由网关拥有、长期可作为独立服务运行
+  - id: `lrn_rnzu9xusq4oo` | injected 3, helped 0
+- **fact** (session_llm, conf 5): .omp/config.yml 是硬依赖，runtime 初始化时必须提供，缺失会报错
+  - id: `lrn_51bhce84qfr` | injected 26, helped 3
+- **preference** (session_llm, conf 4): 设计文档分两份：设计目标文档（专注目标层面，不含代码）和差距分析与实施计划文档（专注实施层面），分别维护
+  - id: `lrn_2tcn4ggxgo48y` | injected 0, helped 0
+- **fact** (session_llm, conf 5): 用户明确要求将设计目标与实施计划分离成两个独立文档：gateway-design-v1.md专注于目标，gateway-implementation-v1.md专注于差距分析与实施计划。
+  - id: `lrn_29xzutszfs7h` | injected 3, helped 0
+- **fact** (session_llm, conf 5): 模型配置优先从数据库读取而非环境变量（用户明确选择方案 B）
+  - id: `lrn_2va58m2h6jenj` | injected 2, helped 0
+- **fact** (session_llm, conf 4): DingTalk 机器人配置使用 Stream 模式，心跳间隔 10 秒、超时 20 秒
+  - id: `lrn_3cbzm69kx5ypd` | injected 0, helped 0
+- **preference** (session_llm, conf 4): 重大架构或设计变更前必须先对比行业参考实现（如 hermes、openclaw）并获得用户批准
+  - id: `lrn_1tn7sork6x46k` | injected 0, helped 0
+- **fact** (session_llm, conf 5): 用户同意将钉钉机器人凭证配置格式从列表改为以robotCode为key的map结构，避免重复配置。
+  - id: `lrn_cni2raq7233f` | injected 1, helped 0
+- **preference** (session_llm, conf 4): 设计讨论流程应为：先充分对比参考方案（如hermes、openclaw）并给出分析建议，用户同意后才修改设计方案，不可直接修改。
+  - id: `lrn_1ndbm14w0mdau` | injected 0, helped 0
+- **preference** (session_llm, conf 5): Agent的执行记录（含对话日志、cron任务执行日志）应保存在agentdir目录内，且使用日志格式，不使用数据库。
+  - id: `lrn_1y2vgn0zf1tqk` | injected 2, helped 0
+- **fact** (session_llm, conf 5): 同一钉钉机器人被多个用户使用时，通过对话人的ID进行session区分。
+  - id: `lrn_19ypm7gsuucu3` | injected 2, helped 0
+- **preference** (session_llm, conf 4): 用户希望代码审查任务默认只给诊断结果，不直接修改代码或文件。
+  - id: `lrn_3olfcmriol5rx` | injected 0, helped 0
+- **procedure** (session_llm, conf 5): Gateway 应提供 start、stop、status、setup 等子命令，并支持 systemd/launchd 守护进程模式以保证系统常驻。
+  - id: `lrn_32a805gczu7vp` | injected 7, helped 2
+- **fact** (session_llm, conf 5): Gateway module is located at packages/pi-gateway in this project.
+  - id: `lrn_jq9jam1qmvro` | injected 1, helped 0
+- **fact** (session_llm, conf 5): Gateway 模块位于项目的 packages/pi-gateway 目录。
+  - id: `lrn_1135hak0o90sz` | injected 1, helped 0
+- **fact** (session_llm, conf 4): Gateway 模块位于 packages/pi-gateway，相关代码审查应优先限定在该包内。
+  - id: `lrn_3betwvx8gta9t` | injected 0, helped 0
+- **preference** (session_llm, conf 5): 设计目标文档不应包含任何代码片段，应专注于目标层面。
+  - id: `lrn_m0bidlh4b8mo` | injected 24, helped 0
+- **preference** (session_llm, conf 5): 设计文档应当拆分为两个独立文档：设计目标文档（仅描述目标，不包含代码）和差距分析与实施计划文档（聚焦实施细节与计划）。
+  - id: `lrn_1enu3eb1hilnp` | injected 6, helped 0
+- **fact** (session_llm, conf 5): gateway.json 的 model 字段是可选的，仅用于覆盖 omp 配置，无需必须存在
+  - id: `lrn_1303w39fkce4b` | injected 11, helped 0
+- **fact** (session_llm, conf 5): .omp/config.yml 是 agentDir 的硬依赖且由 omp 首次启动时自动生成，gateway 不应自行写入。
+  - id: `lrn_17p8amem2pbmb` | injected 6, helped 0
+- **fact** (session_llm, conf 5): 每个钉钉机器人（account）必须对应一个独立的 agent，agent 粒度为 1:1，不同机器人可配置不同模型和 cron 任务
+  - id: `lrn_1m8lnwckt7dvd` | injected 2, helped 0
+- **preference** (session_llm, conf 4): 当数据库可用时，模型配置优先从数据库读取，而不是直接使用环境变量
+  - id: `lrn_4fatt7s5t9d8` | injected 0, helped 0
+- **procedure** (session_llm, conf 4): agentdir 目录结构必须包含 cron 文件夹，且 gateway 在配置新 account 时应自动创建 agentdir 的完整骨架（prompt, cron, 外部知识库等）
+  - id: `lrn_2m3u45iaj8zfq` | injected 0, helped 0
+- **fact** (session_llm, conf 5): gateway.json 中的 model 字段是可选覆盖；若缺失，omp 直接使用 .omp/config.yml 中的模型配置。
+  - id: `lrn_3hmivtltzz4m2` | injected 4, helped 0
+- **fact** (session_llm, conf 4): .omp/config.yml 是 agentDir 初始化的硬运行时依赖，缺失会导致错误。
+  - id: `lrn_tkaj5b0jpz0g` | injected 0, helped 0
+- **preference** (session_llm, conf 5): 修改设计文档或关键方案前必须先获得我的明确许可，不能擅自修改。
+  - id: `lrn_3oqjpkapmx9q` | injected 5, helped 0
+- **preference** (session_llm, conf 5): 回复钉钉消息时必须去除思考过程（think 标签），隐藏内部推理
+  - id: `lrn_3vxvrp5cmov7e` | injected 30, helped 0
+- **fact** (session_llm, conf 4): agentDir 初始化时必须包含 mission.md 和 .omp/config.yml（硬依赖），prompt-includes.json 必须放在 agentDir/.omp/ 目录，路径硬编码不支持外部化。
+  - id: `lrn_18r7l9bkpmk67` | injected 0, helped 0
+- **fact** (session_llm, conf 4): gateway.json 中的 model 字段是可选的 override，非必需；省略时 omp 直接使用 .omp/config.yml 中的模型配置。
+  - id: `lrn_1jtrsajhgo796` | injected 0, helped 0
+- **fact** (session_llm, conf 4): 每个 agent 默认应包含外部知识库设定（EXTERNAL_WORKSPACES.md 等）。
+  - id: `lrn_1gh41ysbyc46h` | injected 0, helped 0
+- **preference** (session_llm, conf 4): 设计目标文档不能包含代码实现细节，应专注于目标层面。
+  - id: `lrn_1r4mtnie7cdxv` | injected 0, helped 0
+- **preference** (session_llm, conf 5): 在修改设计方案前，应先充分参考相关最佳实践（如 openclaw、hermes），提供对比分析，并获得用户同意后才可修改。
+  - id: `lrn_gxpv1x4tig9a` | injected 7, helped 0
+- **preference** (session_llm, conf 5): Agent execution logs should be stored in log format (not database) and be co-located with the agent's directory (agentdir).
+  - id: `lrn_32geimt4eq93p` | injected 68, helped 0
+- **fact** (session_llm, conf 5): 模型配置采用 provider/model 格式（如 narwal-plan/minimax-3），优先从数据库读取模型配置（在环境变量之后）。
+  - id: `lrn_1hfnmta2xgk2g` | injected 32, helped 1
+- **fact** (session_llm, conf 5): 模型配置读取优先级应使用数据库优先，而非环境变量。
+  - id: `lrn_7h9h88vnjen5` | injected 7, helped 0
+- **preference** (session_llm, conf 4): 每个 DingTalk 机器人应对应一个独立的 agent 目录，并默认包含外部知识库设定
+  - id: `lrn_31nc5oty8l4gj` | injected 0, helped 0
+- **fact** (session_llm, conf 4): agentdir 目录结构包含 cron 文件夹、prompt 文件、外部知识库（knowledge 文件夹），不包含 agent.db 和 keybindings.json
+  - id: `lrn_1xtuj2lmn9xff` | injected 0, helped 0
+- **procedure** (session_llm, conf 4): cron 执行日志应保存为纯文本日志格式而非数据库格式，日志文件保存在 agentdir 的 cron 目录下
+  - id: `lrn_3kk8k6su3ij6o` | injected 0, helped 0
+- **fact** (session_llm, conf 4): Agent 的生命周期短期由网关管理，长期可以独立为服务；一个 Agent 对应一个 DingTalk 机器人。
+  - id: `lrn_3moj6dvpupydn` | injected 0, helped 0
+- **procedure** (session_llm, conf 4): agent的执行记录（日志）应保存在agentdir目录下（日志文件格式），包括cron定时任务日志保存在agentdir/crons/中。
+  - id: `lrn_2enqkohr59ur8` | injected 0, helped 0
+- **preference** (session_llm, conf 5): 回复给用户（如钉钉）的消息中不能包含 thinking/think 标签或思考过程，必须清理后发送简洁回复。
+  - id: `lrn_3v5vqp5n3cx0x` | injected 16, helped 0
+- **fact** (session_llm, conf 5): 用户指定使用 opencode 机器人（dingnubwjpndghf8sox8）进行钉钉消息收发测试。
+  - id: `lrn_3cheedsvyrsoc` | injected 13, helped 0
+- **preference** (session_llm, conf 5): 先充分讨论并确认设计方案，达成一致后再进行编码实施。设计目标文档不应包含代码。
+  - id: `lrn_c5mut4dk96oi` | injected 10, helped 0
+- **preference** (session_llm, conf 5): 用户要求gateway增加stop命令，status输出包含更详细状态，日志文件统一保存到log文件夹内，且定时任务日志使用日志格式而非数据库格式。
+  - id: `lrn_ehrbtu692wu9` | injected 6, helped 0
+- **preference** (session_llm, conf 5): 架构设计文档应拆分为两份：一份是设计目标文档（专注目标层、想设计成什么样子，不含代码），另一份是差距分析与实施计划文档（专注实施层、如何做）。
+  - id: `lrn_1ofonie4dnzzn` | injected 111, helped 0
+- **fact** (session_llm, conf 4): 用户要求每个DingTalk机器人（channel）对应一个agent，agent范围粒度为一对一，agentdir目录需包含cron文件夹、prompt文件、外部知识库（EXTERNAL_WORKSPACES.md）等，且agent的执行记录保存在agentdir内。
+  - id: `lrn_2spmbi5iglzsr` | injected 0, helped 0
+- **fact** (session_llm, conf 5): 每个钉钉机器人对应一个 agent，不同的 agent 可以配置不同的模型；cron 任务也可以配置不同的模型。
+  - id: `lrn_57v71kj8kufl` | injected 4, helped 1
+- **preference** (session_llm, conf 4): 与钉钉消息通信的日志需要单独保存，并且使用文件日志格式而非数据库；每个 agent 的目录应包含日志文件夹。
+  - id: `lrn_3tohsosdwydbi` | injected 0, helped 0
+- **fact** (session_llm, conf 5): 用户确认钉钉 Stream 模式消息链路已通，要求先提交该部分代码。
+  - id: `lrn_btwotsu4hi2c` | injected 3, helped 0
+- **preference** (session_llm, conf 5): 每个钉钉机器人对应一个独立的agent，agent与机器人一对一映射，agent生命周期短期由网关管理，长期可独立运行。
+  - id: `lrn_2guoxcct8btdp` | injected 15, helped 0
+- **preference** (session_llm, conf 4): 用户希望每个钉钉机器人背后对应一个独立的 agent，agent 的设计需纳入 gateway 方案中。
+  - id: `lrn_24vaj7smqdlaf` | injected 0, helped 0
+- **preference** (session_llm, conf 5): 模型的配置（如模型名称）优先从数据库读取，而非环境变量，仅在数据库没有时才回退到环境变量。
+  - id: `lrn_3bg0hvl557u3c` | injected 3, helped 0
+- **preference** (session_llm, conf 5): gateway 的日志文件应统一保存在 log/ 目录下，而非其他位置（如 .gateway-data/）。
+  - id: `lrn_397kvfn6tdj9q` | injected 3, helped 0
+- **preference** (session_llm, conf 5): Each DingTalk robot (channel) must correspond to exactly one agent (1-to-1 mapping), and agent configuration is self-contained in an agentdir directory.
+  - id: `lrn_3ann4u54v2406` | injected 9, helped 0
+- **preference** (session_llm, conf 5): Design documents must be split into a design goals document (no code, high-level) and a gap analysis/implementation plan document (specific steps).
+  - id: `lrn_1wfm4s43pxo6d` | injected 9, helped 0
+- **fact** (session_llm, conf 5): 每个 DingTalk 机器人背后对应一个独立的 agent，agent 生命周期短期由网关托管，长期可演变为独立服务
+  - id: `lrn_28ze7glhpybpf` | injected 2, helped 0
+- **preference** (session_llm, conf 4): 模型配置优先级：数据库读取优先于环境变量
+  - id: `lrn_1rg7l7a9qj1hy` | injected 0, helped 0
+- **preference** (session_llm, conf 5): 模型配置优先从数据库读取，而非环境变量。
+  - id: `lrn_2gz616dj3essr` | injected 4, helped 0
+- **fact** (session_llm, conf 5): 每个钉钉机器人对应一个 agent，agent 粒度为一对一。
+  - id: `lrn_2q170z8p7pzrh` | injected 4, helped 0
+- **fact** (session_llm, conf 4): agentdir 目录结构应包含 cron/、prompts/、skills/、tools.md、knowledge/，不包含 agent.db 和 keybindings.json。
+  - id: `lrn_26h2ik12qauxp` | injected 0, helped 0
+- **fact** (session_llm, conf 5): Model configuration should use environment variables (`NARWAL_PLAN_API_KEY`-style) rather than a database, per user's explicit choice (option B).
+  - id: `lrn_3osyw106o5lj9` | injected 3, helped 0
+- **fact** (session_llm, conf 5): agentdir 文件系统结构必须包含 cron/ 文件夹、prompt 文件夹、skills 文件夹、tools.md，日志使用日志格式保存到 agentdir 中，不使用数据库格式
+  - id: `lrn_2t0fivzb0oiq` | injected 16, helped 0
+- **procedure** (session_llm, conf 4): Agent 目录（agentdir）包含 cron 文件夹（任务日志使用日志文件而非 database）、prompt 文件、skills 文件夹、tools.md（可选）及默认外部知识库配置；不包含 agent.db 和 keybindings.json。
+  - id: `lrn_1d3ygy66mornj` | injected 0, helped 0
+- **preference** (session_llm, conf 5): Gateway 的模型配置优先从数据库读取，而不是环境变量，以确保配置持久化和一致性。
+  - id: `lrn_1wusqaonrfycd` | injected 7, helped 0
+- **fact** (session_llm, conf 5): gateway.json 配置中，accounts 使用 map 结构（key 为 account ID），而非数组。
+  - id: `lrn_3w0mjjjxdm7k7` | injected 7, helped 0
+- **preference** (session_llm, conf 5): 在修改设计方案前，须先对比参考最佳实践（如hermes agent、openclaw）并获得用户许可。
+  - id: `lrn_1agnsm7fx519p` | injected 6, helped 0
+- **fact** (session_llm, conf 5): Project DingTalk robot 'opencode' has robotCode 'dingnubwjpndghf8sox8' and appSecret 'MYNRQZK3F9ChR2kV5DzqwI7jZvY0Mog3WQHqEbx2fkveqzeEbka6DlNdIG6VOejq'.
+  - id: `lrn_35quowrd2ko1q` | injected 72, helped 0
+- **preference** (session_llm, conf 5): 用户希望 agent 扮演资深技术架构师角色，在做方案设计时要参考业界最佳实践和开源项目（如 openclaw、hermes agent）做对比分析，并逐条说明每条建议的价值，等用户决定是否采纳。
+  - id: `lrn_1bicyjrrag3dt` | injected 82, helped 1
+- **preference** (session_llm, conf 4): 默认每个agent应有外部知识库设定，且agent的执行记录（日志）应保存在agent自己的目录中，使用日志格式而非数据库格式。
+  - id: `lrn_4q37mmmixtp5` | injected 0, helped 0
+- **preference** (session_llm, conf 4): 设计文档应分为两个独立文件：设计目标文档（不含代码，专注目标）和差距分析与实施计划文档（专注实施步骤）。
+  - id: `lrn_1lfrcmrxqiifv` | injected 0, helped 0
+- **procedure** (session_llm, conf 5): cron 任务的执行记录应使用文本日志格式，而非 SQLite 数据库（execution.db）。
+  - id: `lrn_x399xvyxa6y8` | injected 1, helped 0
+- **fact** (session_llm, conf 5): 系统设计中，每个钉钉机器人对应一个 account（每个 account 有专用 agentdir），agentdir 包含 cron、prompt、session、logs 等子目录，用于隔离对话日志与任务。
+  - id: `lrn_60xyd1gkax4r` | injected 4, helped 0
+- **preference** (session_llm, conf 5): 每个钉钉机器人应对应一个独立的agent，agent与channel一对一，agent生命周期由网关管理但可独立为服务。
+  - id: `lrn_3p0sxr9txujrz` | injected 3, helped 0
+- **fact** (session_llm, conf 5): gateway配置文件使用map格式支持多账号，每个账号对应一个钉钉机器人，每个agent的模型可独立配置。
+  - id: `lrn_p093g6t5y4rn` | injected 3, helped 0
+- **preference** (session_llm, conf 4): agent目录结构应包含prompt、cron、external_knowledge等子目录，不使用数据库存储执行日志，改用普通日志文件。
+  - id: `lrn_330a50hlmxhkl` | injected 0, helped 0
+- **preference** (session_llm, conf 5): Agent 的执行记录（包括 cron 定时任务日志）应保存在 agentdir 目录下，使用日志文件而非数据库格式。
+  - id: `lrn_1neovqrqvkcmp` | injected 1, helped 0
+- **preference** (session_llm, conf 5): 每个 agent 默认应有外部知识库设定（EXTERNAL_WORKSPACES.md 等文件）。
+  - id: `lrn_cdytspssthsh` | injected 1, helped 0
+- **fact** (session_llm, conf 5): gateway.json 配置文件中 robotCode 应使用 map 形式，将 robotCode 映射到 account 配置，而非数组
+  - id: `lrn_3hoedvivakmdw` | injected 2, helped 0
+- **preference** (session_llm, conf 5): 每个钉钉机器人对应一个独立的 agent，agent 拥有独立的 agentdir 配置目录（包含提示词、技能、工具、日志和定时任务）
+  - id: `lrn_311yzg74yg0i6` | injected 2, helped 0
+- **preference** (session_llm, conf 5): 给出方案建议或参考对比时，必须明确列出参考了哪些最佳实践/系统/资料（如 openclaw、hermes、业界方案等），并说明对比分析；用户曾明确追问"你参考了哪一些最佳实践"，缺失来源的建议不被接受。
+  - id: `lrn_1lkocu5kpxg0h` | injected 69, helped 0
+- **fact** (session_llm, conf 5): Each DingTalk robot (channel) corresponds to one agent, and an agent can have multiple cron tasks (one-to-many relationship).
+  - id: `lrn_13osgv4lkd7pp` | injected 23, helped 0
+- **preference** (session_llm, conf 5): gateway 启动的 omp 进程（含 rpc 模式）必须确保能正确获取环境变量（如 NARWAL_PLAN_API_KEY），不应依赖特定启动方式。
+  - id: `lrn_30lkv6jrqe3j9` | injected 8, helped 0
+- **procedure** (session_llm, conf 5): 设计文档应拆分为两个文件：设计目标文档（专注目标，不含代码）和差距分析与实施计划文档（专注实施步骤）
+  - id: `lrn_1yuduttejak6v` | injected 7, helped 0
+- **fact** (session_llm, conf 4): 每个钉钉机器人对应一个agent，agentdir目录应包含cron文件夹、prompt文件，且对话日志保存在agentdir内
+  - id: `lrn_dpkult5cg7vr` | injected 0, helped 0
+- **preference** (session_llm, conf 4): 钉钉消息回复不应包含模型thinking过程，且应处理长文本截断以完整返回给用户
+  - id: `lrn_28i18uimd7xjn` | injected 0, helped 0
+- **fact** (session_llm, conf 5): 每个钉钉机器人对应一个独立的 agent，agent 拥有自己的目录（agentdir），包含 cron 任务、prompt 文件、外部知识库等结构。
+  - id: `lrn_3j8vj9wczucis` | injected 1, helped 0
+- **preference** (session_llm, conf 4): Agent 的执行记录日志改为纯文本格式，存储在 agentdir 目录下，不再使用 execution.db 数据库。
+  - id: `lrn_1fx0brkghn3b0` | injected 0, helped 0
+- **fact** (session_llm, conf 5): 对话日志和 Agent 执行记录应保存在每个 Agent 的 agentdir 目录下，而非 session 文件
+  - id: `lrn_2lzg4o2s0tact` | injected 3, helped 0
+- **preference** (session_llm, conf 5): 每个钉钉机器人（Channel）对应一个独立 Agent，Agent 配置目录应包含 cron/、prompts/ 等子目录
+  - id: `lrn_3erqn818yfz5q` | injected 3, helped 0
+- **preference** (session_llm, conf 4): 每个 Agent 默认应包含外部知识库文件（EXTERNAL_WORKSPACES.md）
+  - id: `lrn_23k7qrpbqolt` | injected 0, helped 0
+- **fact** (session_llm, conf 5): Model configuration for a channel/agent uses the format 'provider/model-id' (e.g., narwal-plan/minimax-3).
+  - id: `lrn_31fe3va120et8` | injected 12, helped 0
+- **fact** (session_llm, conf 5): 每个钉钉机器人对应一个Agent，Agent不归属于Gateway目录，是独立概念；Agent生命周期短期由网关管理，长期可作为独立服务。
+  - id: `lrn_27zfogtlzgikz` | injected 3, helped 0
+- **procedure** (session_llm, conf 4): Agent目录结构必须包含cron文件夹、外部知识库配置、prompt文件（system.md, action.md, tools.md），会话日志保存在agentdir内且使用日志格式而非数据库。
+  - id: `lrn_18ejvq0on009s` | injected 0, helped 0
+- **preference** (session_llm, conf 5): 对设计文档的修改建议必须先逐条讨论、获得用户明确同意后才能修改设计方案，不要直接动手改
+  - id: `lrn_3eshnz5pfhmmb` | injected 64, helped 0
+- **preference** (session_llm, conf 4): 每个 agent 应默认关联一个外部知识库（ExternalWorkspace），用于检索增强生成。
+  - id: `lrn_34e8j10li2fc0` | injected 0, helped 0
+- **preference** (session_llm, conf 4): Agent 的执行记录（包括 cron 任务日志）应以日志文件格式保存，而非数据库，并存储在 agentdir 内。
+  - id: `lrn_3961os2mpn8rw` | injected 0, helped 0
+- **fact** (session_llm, conf 4): Agent 目录（agentdir）应包含 cron、prompts、skills、tools、external workspace 等子目录，用于组织 agent 的配置和数据。
+  - id: `lrn_2all5m74pcskc` | injected 0, helped 0
+- **preference** (session_llm, conf 5): 修改设计方案前必须经过明确同意，尤其是参考外部最佳实践后需提供详细对比分析并由用户决定是否采纳。
+  - id: `lrn_1sk08e7d9bx1f` | injected 27, helped 0
+- **preference** (session_llm, conf 5): 在进行架构/设计方案修改时，必须先提出建议并获得用户明确同意后才能执行，不要先修改再讨论。
+  - id: `lrn_2ukj4r8h6ginl` | injected 17, helped 0
+- **procedure** (session_llm, conf 5): --list-models should only output models that are actually verified usable (via dynamic API discovery of GET /v1/models), not all bundled models for a provider. If a provider's dynamic model discovery fails or the cache is stale, that provider's models should be excluded entirely rather than falling back to the bundled list.
+  - id: `lrn_1ahq3s7ysrgvb` | injected 8, helped 0
+- **preference** (session_llm, conf 4): When listing models, do not show duplicate Canonical models and Provider models sections in the same output. Prefer a single deduplicated view (canonical by default, with a flag to expand provider-level detail).
+  - id: `lrn_2e4xbh7biwyw6` | injected 0, helped 0
+- **preference** (session_llm, conf 5): 引用外部最佳实践（openclaw、hermes agent 等）时必须明确命名出处并给出详细对比分析，不能含糊带过。
+  - id: `lrn_3ecj3w3icdxgd` | injected 9, helped 0
+- **preference** (session_llm, conf 4): --list-models 应该只列出 API discovery 验证过的实际可用模型，而不是仅仅列出已配置 auth 的 provider 下的所有 bundled 模型
+  - id: `lrn_2pk9ssnxlj5md` | injected 0, helped 0
+- **preference** (session_llm, conf 4): 架构设计文档应拆分为两份：设计目标文档（专注想设计成什么样子，不包含代码）和差距分析与实施计划文档（专注如何落地）。
+  - id: `lrn_32hvatjkznvrf` | injected 0, helped 0
+- **preference** (session_llm, conf 5): Before modifying design documents, the user must approve changes after a comparison with reference architectures (e.g., hermes, openclaw).
+  - id: `lrn_3s71phjkqs15g` | injected 8, helped 0
+- **fact** (session_llm, conf 5): Each DingTalk robot corresponds to a single agent; agent scope is one-to-one; agent lifecycle can be short-term (owned by gateway) or independent.
+  - id: `lrn_254es1svmbml5` | injected 8, helped 0
+- **preference** (session_llm, conf 4): omp --list-models 命令应该只列出实际可用的模型（即通过 provider API discovery 验证过的），而不是仅凭 auth 配置就认为可用的所有模型；已过期/失效的 provider 及其下模型应从列表中过滤掉。
+  - id: `lrn_bojv35503j1g` | injected 0, helped 0
+- **procedure** (session_llm, conf 4): To set up a new DingTalk channel, configure gateway.json with robotCode and appSecret, then start pi-gateway to establish Stream connection and verify heartbeat.
+  - id: `lrn_2nic5cx13dzfd` | injected 0, helped 0
+- **preference** (session_llm, conf 5): 用户偏好先充分讨论设计方案（包括目标、架构、数据流、目录结构等）并达成一致，再开始实施；设计目标文档应专注目标层面，不包含代码。
+  - id: `lrn_1b43zlugi25nz` | injected 2, helped 0
+- **fact** (agent_written, conf 5): User 彭梦龙 (Peng Menglong) is from **Narwal (云鲸)** — the company that operates `coder.narwal.com` (the AI coding gateway exposed as the `narwal-plan` provider in `~/.omp/agent/models.yml`). Do NOT confuse with Dreame/追觅 — competitor analysis files about Dreame in `~/Desktop/Narwal/` are reference material only, not user identity.
+  - id: `lrn_265fhb6y25l81` | injected 1, helped 0
+- **fact** (agent_written, conf 5): `narwal-plan` is the **Narwal (云鲸) AI coding gateway** — a per-user OMP provider, not part of the public OMP model catalog. baseUrl `https://coder.narwal.com/v1`, OpenAI-compatible. Credentials live in env vars `NARWAL_PLAN_API_KEY` (and `~/.zshrc` `NARWAL_BASE_URL` / `NARWAL_API_KEY`). The full allowlist of model ids is maintained by the user in `~/.omp/agent/models.yml` under the `providers.narwal-plan` key.
+
+The sibling provider `alibaba-coding-plan` (DashScope `https://dashscope.aliyuncs.com/compatible-mode/v1`, key `ALIBABA_API_KEY`) is a smaller curated subset.
+
+When the user mentions `narwal-plan` having new/changed models, read `~/.omp/agent/models.yml` directly — that file is the source of truth, NOT `packages/ai/src/models.json`. File header comment in `models.yml` still says `narwal-coding-plan` (stale typo) — the actual provider key is `narwal-plan`.
+  - id: `lrn_2w2yklpwtgd01` | injected 1, helped 0
+- **preference** (session_llm, conf 5): 默认每个 agent 应包含外部知识库的设定，所有 agent 应默认具备外部知识库配置入口（如 external_knowledge/目录或配置项）
+  - id: `lrn_3zp9mryd280f` | injected 3, helped 0
+- **preference** (session_llm, conf 5): 设计文档应拆分为两个独立文档：设计目标文档（专注目标、不包含代码）和差距分析与实施计划文档（专注实施层面）
+  - id: `lrn_3ikbwej4ibv3x` | injected 3, helped 0
+- **fact** (session_llm, conf 5): Agent 的执行记录（包含 cron 执行日志）应保存在 agentdir 目录内，使用日志文件格式而非数据库格式，确保执行记录跟随 agent 自身
+  - id: `lrn_2z9hu7ypv349y` | injected 3, helped 0
+- **preference** (session_llm, conf 5): 设计方案需要先充分讨论并得到用户许可后才能修改，参考 openclaw 和 hermes agent 的最佳实践进行对比分析。
+  - id: `lrn_li9wxp8ycw41` | injected 3, helped 0
+- **preference** (session_llm, conf 5): 设计文档应分为两个独立文档：设计目标文档（只含目标，无代码）和差距分析与实施计划文档。
+  - id: `lrn_urhe9zmznf4j` | injected 1, helped 0
+- **fact** (session_llm, conf 5): 每个DingTalk机器人对应一个agent，agent目录包含cron、prompt等配置，不包含agent.db或keybindings.json。
+  - id: `lrn_3vl9wr5a0iizn` | injected 1, helped 0
+- **procedure** (session_llm, conf 4): Gateway采用事件驱动架构，通过omp --mode rpc模式与agent进程通信，支持多账号隔离和心跳保活。
+  - id: `lrn_3b1hlv55w9opt` | injected 0, helped 0
+- **preference** (session_llm, conf 5): 在修改任何设计文档或方案前必须先与用户充分讨论，征得用户明确同意后才能改动，不能自作主张推进修改。
+  - id: `lrn_2tsv8u8rkrsgo` | injected 15, helped 0
+- **fact** (session_llm, conf 5): Agent设计约束：每个钉钉机器人对应一个Agent，Agent生命周期短期由网关拥有、长期可独立为服务，Agent范围粒度为一对一
+  - id: `lrn_1yls2vgpc0lxw` | injected 1, helped 0
+- **preference** (session_llm, conf 4): 日志和执行记录应该跟随Agent，保存在Agent目录中，而不是全局session文件
+  - id: `lrn_39cz86j5o3xv5` | injected 0, helped 0
+- **preference** (session_llm, conf 4): 默认每个Agent应有外部知识库设定（EXTERNAL_WORKSPACES.md）
+  - id: `lrn_zxyferhxsc4b` | injected 0, helped 0
+- **fact** (session_llm, conf 5): 用户的核心需求是：每个 DingTalk 机器人对应一个 agent，agent 拥有自己的 agentdir 目录（包含 cron、prompts、外部知识库等），agent 生命周期短期由 gateway 管理，长期可独立为服务。
+  - id: `lrn_9949ou875e9p` | injected 1, helped 0
+- **preference** (session_llm, conf 5): 用户要求所有设计方案和代码的修改都必须先获得用户许可才能执行
+  - id: `lrn_rcwqxn39ihs` | injected 5, helped 0
+- **fact** (session_llm, conf 5): 每个钉钉机器人都对应一个agent，agent生命周期短期由网关拥有，长期可独立为服务，范围粒度一对一。
+  - id: `lrn_1pnefx68tkuoz` | injected 1, helped 0
+- **preference** (session_llm, conf 5): 设计目标文档不应包含代码，应专注于设计目标层面。
+  - id: `lrn_35r36i4l3lpyy` | injected 1, helped 0
+- **preference** (session_llm, conf 4): agentdir目录结构应包含cron文件夹、prompt文件、EXTERNAL_WORKSPACES.md、skills文件夹、tools.md，不应包含agent.db和keybindings.json。
+  - id: `lrn_3768a839zaf9r` | injected 0, helped 0
+- **fact** (session_llm, conf 5): opencode 钉钉机器人的 appSecret 是 MYNRQZK3F9ChRk2V5DzqwI7jZvY0Mog3WQHqEbx2fkveqzeEbka6DlNdIG6VOejq（robotCode: dingnubwjpndghf8sox8）
+  - id: `lrn_1hi4q1y157esx` | injected 4, helped 0
+- **preference** (session_llm, conf 5): 默认情况下`--list-models`只列出实际可用的模型（如去重后的canonical models），不要显示provider级别的所有原始实例
+  - id: `lrn_3gqsb670sq4i5` | injected 1, helped 0
+- **fact** (session_llm, conf 4): `omp --list-models`默认列出所有provider下的原始模型实例，包含大量不能用的旧版本和重复条目
+  - id: `lrn_2sgpso8i6kqx3` | injected 0, helped 0
+- **preference** (session_llm, conf 5): 设计/架构变更必须先充分讨论、逐条说明理由，征得用户明确同意后才能修改方案或代码；用户多次强调"先别修改设计方案"、"需要我同意才能修改设计方案"、"采纳"后才推进。
+  - id: `lrn_1cahdtrfnvpcv` | injected 9, helped 0
+- **fact** (session_llm, conf 4): `omp --list-models` 命令列出的許多模型在當前環境中實際上是不可用的。
+  - id: `lrn_1tzmq7k04fqm6` | injected 0, helped 0
+- **fact** (session_llm, conf 4): 每个钉钉机器人背后都应对应一个独立的 agent，agent 的设计是系统核心组成部分
+  - id: `lrn_1361iv0rts49y` | injected 0, helped 0
+- **preference** (session_llm, conf 5): 每个钉钉机器人应配置一个专属 Agent，Agent 的配置（prompt 等）和对话日志保存在 agentdir 目录中。Agent 的生命周期短期由网关管理，长期可独立为服务。
+  - id: `lrn_r5lqrsa41ega` | injected 4, helped 0
+- **fact** (session_llm, conf 5): 每个 DingTalk channel 对应一个 agent，agent 生命周期短期由 gateway 拥有，长期可独立服务；agentdir 应包含 cron、prompt、外部知识库等文件结构。
+  - id: `lrn_16zslqkf8an5u` | injected 1, helped 0
+- **preference** (session_llm, conf 4): DingTalk 消息通信日志必须持久化保存，便于调试和追踪。
+  - id: `lrn_uool1w1hnue8` | injected 0, helped 0
+- **preference** (session_llm, conf 5): 每个钉钉机器人背后都应对应一个 agent；agent 的设计需纳入 gateway 架构。
+  - id: `lrn_3rm5edfmyocxo` | injected 1, helped 0
+- **fact** (session_llm, conf 4): Agent 的生命周期短期由网关管理，长期可以演进为独立服务；agent 的范围粒度为一对一。
+  - id: `lrn_bgnpobgq3i6q` | injected 0, helped 0
+- **preference** (session_llm, conf 4): 设计方案应拆分为两个文档：设计目标文档（不含代码）和差距分析与实施计划文档。
+  - id: `lrn_1764lyoft60wd` | injected 0, helped 0
+- **preference** (session_llm, conf 5): 在架构设计讨论中，不要直接修改设计方案；先充分参考外部最佳实践（如 openclaw、hermes 等），给出对比分析和建议，等待用户明确同意后才能修改设计文档。
+  - id: `lrn_2lfz2nsa7aozg` | injected 10, helped 0
+- **fact** (session_llm, conf 4): 每个钉钉机器人对应一个 agent，agent 范围一对一，agentdir 包含 cron 文件夹、prompt 文件，对话日志保存在 agentdir 内
+  - id: `lrn_1h8o3c5wwoh6z` | injected 0, helped 0
+- **preference** (session_llm, conf 4): 设计目标文档与实施文档分离，目标文档不应包含代码，专注于目标描述
+  - id: `lrn_2582u8ymksi2s` | injected 0, helped 0
+- **fact** (session_llm, conf 4): agent 生命周期短期由网关管理（注册/销毁），长期可独立为服务运行
+  - id: `lrn_2ivydfxh6qbuu` | injected 0, helped 0
+- **fact** (session_llm, conf 4): DingTalk 通道产生的所有消息日志（包含收发内容）必须记录到文件系统中。
+  - id: `lrn_lh0con5jervf` | injected 0, helped 0
+- **fact** (session_llm, conf 4): 配置文件中的机器人账号配置被明确同意改为 map 结构（#1），每个账号包含 channel、agent 等配置项。
+  - id: `lrn_2lqdnpg1xlob0` | injected 0, helped 0
+- **procedure** (session_llm, conf 5): 架构类工作产出拆分为两份文档：一份是设计目标文档（专注"想设计成什么样子"，不包含代码）；另一份是差距分析与实施计划文档（专注"如何做"，承接 gap 与具体落地步骤）。最终文档应清除旧方案描述，只保留最新版本。
+  - id: `lrn_2j4zfjb8wpo3c` | injected 2, helped 0
+- **preference** (session_llm, conf 5): 设计文档应拆分为两份：一份专注设计目标（不含代码），一份专注差距分析与实施计划（gap + 实施步骤），不要混在一起。
+  - id: `lrn_23x5t9x0j311c` | injected 2, helped 0
+- **preference** (session_llm, conf 5): 对设计文档做修改前，先逐条列出修改建议与采纳理由与用户讨论，得到用户明确同意后才能合入，不要直接修改设计方案。
+  - id: `lrn_39uz2zee83vvy` | injected 2, helped 0
+- **preference** (session_llm, conf 5): 对设计方案的修改必须先提交建议、获得用户明确同意后才能执行， 不允许直接修改设计文档。 用户多次强调 '先别修改设计方案，给我建议，需要我同意才能修改'。
+  - id: `lrn_3a0z6echyuu4f` | injected 11, helped 0
+- **preference** (session_llm, conf 4): 做架构/方案 review 时，需要明确列出参考了哪些最佳实践（开源项目、行业标准等），并给出对比分析和采纳建议，让用户决定是否采纳。
+  - id: `lrn_3v2mexr9o451d` | injected 0, helped 0
+- **preference** (session_llm, conf 5): 设计文档必须拆分为两份独立文档：一份是设计目标文档（专注"想设计成什么样子"，目标层面，不允许包含代码）；另一份是差距分析与实施计划文档（专注"如何做"，实施层面）。
+  - id: `lrn_1ql3rd5xz0elv` | injected 4, helped 0
+- **preference** (session_llm, conf 5): 进行方案设计时，需要逐条与用户讨论每条建议的价值，得到用户明确同意后才能修改设计文档；不要自动采纳建议直接修改方案。
+  - id: `lrn_1z2zftr9n1z0u` | injected 4, helped 0
+- **preference** (session_llm, conf 5): 在修改设计文档前必须先充分讨论、给出对比分析与建议，等用户明确同意后才能落笔修改，不要直接改动方案文档。
+  - id: `lrn_35igzmux8tzw0` | injected 2, helped 0
+- **procedure** (session_llm, conf 5): 架构设计文档分为两份独立文件：gateway-design-v*.md（设计目标文档，只描述目标与取舍，不含代码）与 gateway-implementation-v*.md（差距分析与实施计划文档，专注 How）。
+  - id: `lrn_1n9vf0mlwezp8` | injected 2, helped 0
+- **fact** (session_llm, conf 4): Gateway 架构核心关系：一个 DingTalk 机器人（account）对应一个 agent（各自独立的 agentdir、模型与权限策略），agent 可挂载多个 cron 任务；多用户通过同一 channel 通讯时按发送者 userId 区分 session。
+  - id: `lrn_2bccp42khzqss` | injected 0, helped 0
+- **fact** (session_llm, conf 5): 项目设计文档拆分为两份： gateway-design-v1.md 专注设计目标（不包含代码）， gateway-implementation-v1.md 专注差距分析与实施计划。 修改建议逐条讨论，用户明确采纳后才合入。
+  - id: `lrn_yag7vew2k3xr` | injected 7, helped 0
+- **preference** (session_llm, conf 5): 用户请求架构 review 或设计建议时， 必须参考业界最佳实践（openclaw、hermes agent 等同类系统）并给出详细的对比分析， 列出具体参考来源和取舍建议， 不能凭空给出建议。
+  - id: `lrn_ui3z5cylz08x` | injected 7, helped 0
+- **preference** (session_llm, conf 4): 做架构设计时应参考业界已有的开源系统（如 openclaw、hermes agent 等），给出详细的对比分析和采纳建议，由用户决定是否采纳，而不是直接套用。
+  - id: `lrn_1d2pw7d9263iy` | injected 0, helped 0
+- **procedure** (session_llm, conf 4): 讨论设计修改建议时，务必逐条分别列出每条建议的目的和对用户的帮助，让用户逐条决定是否采纳，而不是一次性给出合并后的方案。
+  - id: `lrn_7xv0axvuz85y` | injected 0, helped 0
+- **preference** (session_llm, conf 5): 设计文档体系拆分为两个独立文档：设计目标文档（专注目标层、想设计成什么样子，不含代码）+ 差距分析与实施计划文档（专注实施层、如何做）
+  - id: `lrn_7diz7ltyb91c` | injected 5, helped 0
+- **preference** (session_llm, conf 5): 在修改设计文档前需要用户明确同意，先充分对比已有系统（如 openclaw、hermes）再给出建议，让用户决定是否采纳
+  - id: `lrn_3i6co06alyobz` | injected 3, helped 0
+- **preference** (session_llm, conf 5): 设计文档与实施文档分离：gateway-design-v1.md 专注设计目标（不包含代码），gateway-implementation-v1.md 专注差距分析与实施计划
+  - id: `lrn_18dro1bax4bql` | injected 3, helped 0
+- **preference** (session_llm, conf 5): 修改设计文档前必须先和用户充分讨论方案并获得明确同意，逐条说明每条建议的价值，不能直接动手改文档
+  - id: `lrn_6kkgcpt924ar` | injected 7, helped 0
+- **procedure** (session_llm, conf 4): 讨论设计文档时逐条说明每条建议对用户的帮助，让用户决定是否合入，不一次性批量修改
+  - id: `lrn_2iztk96ytpwn3` | injected 0, helped 0
+- **preference** (session_llm, conf 5): 对现有方案做优化或重写时，不要保留对旧方案的描述，只呈现最终方案
+  - id: `lrn_36zxlt6m76ute` | injected 2, helped 0
+- **preference** (session_llm, conf 5): 目标/设计文档不能包含代码，只描述目标、架构和方案；代码示例单独放实现文档
+  - id: `lrn_twbo58513bxa` | injected 12, helped 0
+- **preference** (session_llm, conf 5): 提供设计建议时必须明确说明参考了哪些最佳实践/现有系统（如 hermes、openclaw），并给出详细对比分析，不能只给结论不交代参考来源
+  - id: `lrn_23by6gf1bjlaj` | injected 2, helped 0
+- **preference** (session_llm, conf 5): 设计目标文档（design goals doc）不能包含代码，只描述目标层面「想设计成什么样子」
+  - id: `lrn_5844rm6k2inu` | injected 2, helped 0
+- **procedure** (session_llm, conf 5): 整体设计必须拆分为两份文档：1) 设计目标文档（专注目标层面）；2) 差距分析与实施计划文档（专注实施层面「如何做」）
+  - id: `lrn_3ce8ms2gzkzbz` | injected 2, helped 0
+- **preference** (session_llm, conf 5): 修改设计方案前必须先充分对比相关系统的设计理念（如 hermes、openclaw 等最佳实践），给出对比分析和具体建议，等用户明确同意后才能落笔修改
+  - id: `lrn_3g92ygydy4zhi` | injected 2, helped 0
+- **fact** (session_llm, conf 5): DingTalk 机器人配置为 Stream 模式（由用户明确指定），使用自定义心跳和重连机制。
+  - id: `lrn_3syxl6mq1ofbv` | injected 43, helped 0
+- **preference** (session_llm, conf 5): 在实施前必须先讨论并确认方案设计，用户明确说"咱们先重点把方案商量好"，不要直接动手改代码
+  - id: `lrn_2lhmq0sl12sv8` | injected 6, helped 0
+- **preference** (session_llm, conf 5): 设计目标文档（design goal document）不能包含代码，只专注描述目标和方向；实现/代码细节放在独立的实施方案文档里
+  - id: `lrn_3vc494f24qprd` | injected 3, helped 0
+- **preference** (session_llm, conf 5): 大型设计任务拆分为两个文档：1) 设计目标文档（目标层，想做成什么样）；2) 差距分析与实施计划文档（实施层，如何做）
+  - id: `lrn_3cwa3nsig4fi` | injected 3, helped 0
+- **preference** (session_llm, conf 5): 修改设计文档前必须先给出修改建议并等待用户明确同意（'需要我同意才能修改设计方案'），不要在讨论阶段直接改文档
+  - id: `lrn_1dt9ubyvdjaln` | injected 1, helped 0
+- **preference** (session_llm, conf 5): 设计文档拆分为两份：一份是设计目标文档（专注目标层面，不能包含代码），一份是差距分析与实施计划文档（专注实施层面）
+  - id: `lrn_3uic2eqjz9jxq` | injected 1, helped 0
+- **preference** (session_llm, conf 5): 设计建议需逐条编号（例如 1-9）逐条讨论，每条说明该建议对用户的帮助，由用户逐条采纳/拒绝，而不是整批一起决定
+  - id: `lrn_ihwlttrnm23v` | injected 1, helped 0
+- **preference** (session_llm, conf 5): 修改设计文档前必须先给出修改建议并取得用户明确同意，逐条说明每条建议的价值，同意后才能落笔；引用外部最佳实践（hermes、openclaw 等）时要给出详细对比分析
+  - id: `lrn_2eu7q6rexwq6x` | injected 2, helped 0
+- **preference** (session_llm, conf 5): Gateway 的 cmdStart 应支持 daemon 模式：当 stdin 非 TTY 时自动跳过 readline，直接进入后台运行，避免依赖交互式终端
+  - id: `lrn_2izsgx51gkze7` | injected 67, helped 1
+- **preference** (session_llm, conf 5): 目标是构建多 Agent 系统，每个 Agent 有独立 workspace、memory 和 cron 定时任务，参考 OpenClaw 的 job → agentId 绑定模型
+  - id: `lrn_2paad8e44xa8d` | injected 67, helped 2
+- **preference** (session_llm, conf 5): 将设计拆分为两个独立文档：设计目标文档（专注目标层面，不包含代码，描述要设计成什么样子）和差距分析与实施计划文档（专注实施层面，描述如何做）
+  - id: `lrn_6ram54qpwmh` | injected 2, helped 0
+- **preference** (session_llm, conf 5): 不要未经用户同意就修改设计方案；应先充分调研、对比其他系统的设计理念（如 hermes agent、openclaw），给出带依据的建议，让用户决定后再修改
+  - id: `lrn_3732ethfviqg2` | injected 2, helped 0
+- **fact** (session_llm, conf 5): OMP Gateway 的 CLI 存在多个语法和架构缺陷：cli.ts 的 switch 语句和 cmdStart 函数缺少闭合括号，service install 生成的 plist 多传了 'run' 参数，cmdStart 在非 TTY 环境下 readline 立即触发 close 导致 gateway 无法后台运行
+  - id: `lrn_qfh51e66wu25` | injected 69, helped 3
+- **preference** (session_llm, conf 4): 在进行架构设计 review 或提出方案调整时，必须明确说明参考了哪些最佳实践或已有系统设计，并给出对比分析，让用户基于充分信息做决定
+  - id: `lrn_12ow8dk39kuv4` | injected 0, helped 0
+- **preference** (session_llm, conf 5): 设计文档必须拆分为两个：设计目标文档（专注目标层面，不能包含代码）+ 差距分析与实施计划文档（专注实施层面）
+  - id: `lrn_2d5qwgx82i6h7` | injected 1, helped 0
+- **preference** (session_llm, conf 5): 做方案设计 review 时必须显式参考业界最佳实践（openclaw、hermes agent 等），给出详细对比分析，并列出多条候选建议让用户逐条确认采纳，未获用户同意不得修改设计文档
+  - id: `lrn_1zptqb7rx3zzx` | injected 1, helped 0
+- **preference** (session_llm, conf 5): 设计文档应拆分为两份：一份设计目标文档（专注目标层面，想设计成什么样），一份差距分析与实施计划文档（专注实施层面，如何做）
+  - id: `lrn_1uxsct74tv99u` | injected 2, helped 0
+- **preference** (session_llm, conf 5): 修改设计方案前必须先充分对比现有方案/最佳实践，给出建议并等用户明确同意后才能改动，不允许未讨论就动设计
+  - id: `lrn_c2atcg0rck2d` | injected 2, helped 0
+- **fact** (session_llm, conf 5): OMP 启动时自动读取并加载 ~/.cursor/mcp.json 中的 MCP 服务器配置
+  - id: `lrn_hmuebv87mqhj` | injected 75, helped 2
+- **fact** (session_llm, conf 5): pi-gateway uses DingTalk Stream mode with custom heartbeat (10s ping, 20s timeout) and exponential backoff reconnect with jitter (1s-30s).
+  - id: `lrn_3a49d61tsqylv` | injected 21, helped 0
+- **fact** (session_llm, conf 5): roboomp <omp@can.ac> 是OMP项目的自动化机器人账户，用于自动格式化和补丁提交，非人类。
+  - id: `lrn_rpaywdr0jd0k` | injected 13, helped 0
+- **preference** (session_llm, conf 5): 设计文档修改前必须先与用户讨论并获得明确同意，未经批准不要直接修改设计方案（'需要我同意才能修改设计方案'）
+  - id: `lrn_24emx1d6t29vy` | injected 1, helped 0
+- **preference** (session_llm, conf 4): 方案设计阶段遵循讨论优先原则：先充分讨论设计目标与方案并达成共识，再进入实施（'咱们先重点把方案商量好'）
+  - id: `lrn_3vetz9vxs5zs3` | injected 0, helped 0
+- **preference** (session_llm, conf 4): 整体设计拆分为两个独立文档：设计目标文档（专注目标层，'想设计成什么样子'）和差距分析与实施计划文档（专注实施层，'如何做'）
+  - id: `lrn_3ixicizv8mfot` | injected 0, helped 0
+- **preference** (session_llm, conf 5): OMP不应加载~/.cursor/mcp.json中的MCP服务器配置
+  - id: `lrn_1z8jfz43o1jav` | injected 77, helped 2
+- **fact** (session_llm, conf 5): 在OMP项目中，commit 27f4965e0删除了shouldBypassAutocompleteOnEscape回调，导致autocomplete弹窗打开时按ESC仅关闭弹窗而不会取消正在进行的任务，这是ESC取消失效的根因。该提交由项目自动化机器人roboomp提交。
+  - id: `lrn_3s20lczkgdsfv` | injected 0, helped 0
+- **fact** (session_llm, conf 5): roboomp <omp@can.ac>是OMP项目独有的自动化机器人账户，非GitHub平台标准机器人，用于自动格式化和补丁提交，域名can.ac为项目主开发者个人域名。
+  - id: `lrn_q7hff61yedqy` | injected 0, helped 0
+- **fact** (session_llm, conf 4): ESC取消任务在autocomplete弹出时失效，根因是commit 27f4965e0删除了shouldBypassAutocompleteOnEscape回调。
+  - id: `lrn_1lia46m410iod` | injected 0, helped 0
+- **fact** (session_llm, conf 4): OMP项目的自动化机器人roboomp主要执行`bun run fix`自动格式化和`fix(...)`补丁提交。
+  - id: `lrn_39vklph4rvtqx` | injected 0, helped 0
+- **fact** (session_llm, conf 4): 每个 account 的 agentdir 配置应包含对话日志，日志保存在 agentdir 目录中
+  - id: `lrn_nqxog7qzfne` | injected 0, helped 0
+- **fact** (session_llm, conf 4): 一个 channel 对应一个 agent，一个 agent 可对应多个 cron 任务，channel 通过钉钉会话区分用户 session
+  - id: `lrn_3obxat0tl2c8x` | injected 0, helped 0
+- **fact** (session_llm, conf 4): 完整钉钉消息收发测试需要启动 pi-gateway 并在钉钉中给机器人发消息，仅单元测试无法验证端到端链路
+  - id: `lrn_1cb11hwkjr7ky` | injected 0, helped 0
+- **fact** (session_llm, conf 5): 在input-controller.ts的onEscape函数中，之前处理BTW取消后立即返回，导致主任务无法被取消。修复方法是移除该返回语句。
+  - id: `lrn_2taibxjqkya58` | injected 5, helped 0
+- **preference** (session_llm, conf 4): 用户期望按下ESC取消任务时，立即停止所有正在进行的操作（包括BTW请求、流式输出、压缩、重试），并立即清除加载动画，不能有任何延迟。
+  - id: `lrn_2omvju0s0hitr` | injected 0, helped 0
+- **preference** (session_llm, conf 5): Log all DingTalk message communication (incoming and outgoing) for debugging purposes.
+  - id: `lrn_12vjv6w95bui4` | injected 3, helped 0
+- **fact** (session_llm, conf 4): pi-gateway supports multiple DingTalk robots; each can be configured with different appKey/appSecret and model, and multiple users communicate with the same robot via session differentiation by user ID.
+  - id: `lrn_1incvq116co59` | injected 0, helped 0
+- **fact** (session_llm, conf 5): 本项目使用的 DingTalk 机器人是 opencode，robotCode=dingnubwjpndghf8sox8，appSecret 已在对话中提供。
+  - id: `lrn_27lhj7fqtayby` | injected 13, helped 0
+- **fact** (session_llm, conf 5): 在DingTalk集成中，多账号指多个不同的钉钉机器人，每个机器人由robotCode和appSecret标识，可以独立配置对应的模型（agent）。
+  - id: `lrn_25yl3xt1l4ljh` | injected 1, helped 0
+- **fact** (session_llm, conf 5): 多个用户与同一个DingTalk机器人的会话通过用户的senderId（用户ID）区分，每个用户有自己的session上下文。
+  - id: `lrn_30oiso7zqa3sp` | injected 1, helped 0
+- **procedure** (session_llm, conf 4): 测试完整DingTalk链路需先启动pi-gateway（pm2 start），然后在钉钉中@机器人发消息，查看网关日志确认收发。
+  - id: `lrn_1l61mmyqw4xm1` | injected 0, helped 0
+- **fact** (session_llm, conf 5): opencode 机器人（robotCode: dingnubwjpndghf8sox8）用于测试钉钉消息收发，需在 gateway.json 中配置其 appKey 和 appSecret。
+  - id: `lrn_1fb36rjs1q4e9` | injected 8, helped 0
+- **fact** (session_llm, conf 4): 在 Gateway Model 中，channel 与 agent 是 1:1 关系，agent 与 cron 是 1:N 关系。
+  - id: `lrn_2r8j6ry3cqi4e` | injected 0, helped 0
+- **fact** (session_llm, conf 5): OMP 会从 ~/.cursor/mcp.json 读取并加载 Cursor 的 MCP 服务器配置，导致启动时报错
+  - id: `lrn_1cor1s3e6jgki` | injected 43, helped 2
+- **preference** (session_llm, conf 5): When designing new features or commands, follow this sequence: (1) first research industry best practices online, (2) then help the user structure/clarify their requirements, (3) then read the current project codebase, (4) then produce the design plan. Do not jump straight into the project before aligning on requirements and external references.
+  - id: `lrn_pgr0vou74v8u` | injected 11, helped 0
+- **preference** (session_llm, conf 4): When testing DingTalk robot messaging, always verify actual message delivery to the user's DingTalk app (not just internal pipeline tests).
+  - id: `lrn_3uicq9zgnch0h` | injected 0, helped 0
+- **procedure** (session_llm, conf 5): 实现 models.yml 优先级的具体方法：先应用 models.yml 配置到 builtInModels，再加载 cachedDiscoveries 时过滤掉与 models.yml 冲突的模型
+  - id: `lrn_22yppii53d79v` | injected 63, helped 1
+- **preference** (session_llm, conf 4): When the user says they can't clearly articulate a design goal, proactively read the project codebase to reconstruct what they likely mean, then confirm understanding before proposing solutions. The user values exploration-and-confirmation over assumption-based proposals.
+  - id: `lrn_p48260e0glr1` | injected 0, helped 0
+- **fact** (agent_written, conf 5): User's "OMP Agent Team Workspace" pattern (single-agent focus as of 2026-06-15): a specialized expert agent's full operating environment is a project-rooted directory containing 8 file classes + 1 directory convention. The reference implementation lives at `/Users/sz-0203015357/Desktop/Narwal/OMP-workspace-test/omp-atomix/`. Although the workspace shows 2 priority agents (algorithm + structure), the user is currently focused on the SINGLE-AGENT case (algorithm agent specifically) and explicitly defers multi-agent design. When designing `omp expert`-style scaffolding, always model the single expert agent first, not the team. Key files in a single-expert workspace: `agents/<role>/{config.yaml, README.md, prompts/, workflows/, weekly-reports/}` + `cron/<role-task>.json5 + .prompt.md` + `shared/models/*.yaml` (cross-agent data contracts) + `.omp/skills/<name>/SKILL.md + schema.md` + `.omp/evolution/{evolution.db, system-diagnosis.md}` + `knowledge/.snapshots/` + profile/mission/AGENTS/TOOLS at root. The proactive pattern is cron-driven: `cron/*.json5` runs `omp --print "<cmd>"` on schedule, LLM reads `<name>.prompt.md` for full SOP, optionally delivers to DingTalk via `dws ding message send` (NOT `dws chat message send`). User's preferred IM bridge is `dws` (custom DingTalk CLI), NOT `pi-gateway`'s DingTalk config — the two are different layers. `pi-gateway` is the runtime daemon that schedules `omp --print` invocations.
+  - id: `lrn_1a66xhrpfi7rf` | injected 3, helped 0
+- **fact** (session_llm, conf 5): The finalized plan for OMP-DingTalk robot communication pathway is at local://OMP_DINGTALK_PATHWAY.md and must be executed step by step with verification before proceeding.
+  - id: `lrn_2zsifm1m7rqrw` | injected 6, helped 0
+- **fact** (session_llm, conf 5): The `@dingtalk-real-ai/dingtalk-connector` package is hard-coupled to OpenClaw runtime (OpenClawPluginApi, ChannelPlugin, registerChannel) and cannot be used as a standalone library outside OpenClaw.
+  - id: `lrn_3mxbr45zptgvo` | injected 4, helped 0
+- **fact** (session_llm, conf 5): In this project, agents are defined as markdown files with YAML frontmatter (fields: name, description, tools, spawns, model, thinkingLevel, blocking, output), discovered from ~/.omp/agent/agents/ (global) or ./.omp/agents/ (project-level).
+  - id: `lrn_2bnyu5i0v3jvc` | injected 2, helped 0
+- **fact** (session_llm, conf 5): `omp agents unpack` only exports already-bundled agent templates (designer/explore/init/library etc.) to the agents directory; it does not create new agents. `omp agents setup` scaffolds a pi-gateway workspace (DingTalk integration), not an agent. There is no `omp agents create` command.
+  - id: `lrn_16cjifwey53om` | injected 2, helped 0
+- **fact** (session_llm, conf 4): The project has a two-layer agent architecture: `packages/agent` (@oh-my-pi/pi-agent-core) provides a stateless, event-driven LLM loop via `agentLoop`/`agentLoopContinue` (in agent-loop.ts), and `packages/coding-agent` composes it into the `omp` CLI tool.
+  - id: `lrn_1p41tudinn06p` | injected 0, helped 0
+- **preference** (session_llm, conf 5): When integrating DingTalk with OMP, install the connector package only as a reference to extract validated patterns (heartbeat, message dedup, long-task keepalive, AI card streaming, rich media, multi-agent routing) and implement them natively in pi-gateway.
+  - id: `lrn_n8ygmbmag6c6` | injected 2, helped 0
+- **preference** (session_llm, conf 5): 模型加载时 models.yml 配置应始终优先于 models.db 缓存，避免缓存的旧配置覆盖用户自定义配置
+  - id: `lrn_23vr9tf8ans12` | injected 44, helped 1
+- **fact** (session_llm, conf 4): For DingTalk ↔ OMP message pathway integration, use @dingtalk-real-ai/dingtalk-connector package rather than building from scratch on the existing pi-gateway DingTalk channel.
+  - id: `lrn_i0evuqf8bv0u` | injected 0, helped 0
+- **fact** (session_llm, conf 5): 当前 pi-gateway 没有 agent 抽象层，只有全局 gateway；scheduler 与 gateway 紧耦合，不支持 per-agent 的定时任务隔离
+  - id: `lrn_1o6gbs5hwf6hc` | injected 3, helped 0
+- **fact** (session_llm, conf 5): 当前 pi-gateway 的 scheduler 是嵌入在 gateway 进程内部的，gateway 崩溃会导致 scheduler 一起死，且 scheduler 用短进程 (omp --print)，gateway 用长连接 (omp --mode rpc)，两者机制不一致
+  - id: `lrn_3rp35fwoo17y4` | injected 2, helped 0
+- **preference** (session_llm, conf 5): 用户希望构建多 agent 系统，每个 agent 有独立 workspace、memory、cron 定时任务，参考 OpenClaw 的 per-agent isolated session 和 job → agentId 绑定模式
+  - id: `lrn_1xs02v2nf47a0` | injected 2, helped 0
+- **skill_hint** (session_llm, conf 4): CLI 的 cmdStart 如果要同时支持交互式前台和后台 daemon 模式，应检测 !process.stdin.isTTY 来自动跳过 readline，直接进入守护进程逻辑
+  - id: `lrn_3j0vcagfzzsrs` | injected 0, helped 0
+- **fact** (session_llm, conf 5): gateway 的 cmdStart 是纯交互式前台模式（readline），stdin 被 detached 时会立即触发 rl.on('close') 导致 gateway 退出，非 TTY 环境需要显式跳过 readline 进入 daemon 模式
+  - id: `lrn_160nfwl8iebhe` | injected 1, helped 0
+- **preference** (session_llm, conf 5): 系统架构目标是多 agent 架构：每个 agent 有独立 cron 定时任务、独立 workspace、独立 session，参考 OpenClaw 的实现思路
+  - id: `lrn_27dvyh88tld4y` | injected 1, helped 0
+- **fact** (session_llm, conf 5): launchd plist 或 systemd service 文件中，如果 CLI 用 process.execPath run path/to/cli.ts start 这种写法，parseArgs 直接取 argv[0] 会导致 command 为 run 而非 start，必须只传 start 参数
+  - id: `lrn_1po4hs77u4m44` | injected 1, helped 0
+- **preference** (session_llm, conf 5): 在提交代码前，用 nohup 或 tmux 测试一遍非交互式运行，避免只在前台 readline 交互下验证后部署才发现 daemon 模式问题
+  - id: `lrn_vkll7wj9nq20` | injected 1, helped 0
+- **skill_hint** (session_llm, conf 5): CLI 程序如果依赖 readline 交互，daemon 化时需要检测 stdin 是否为 TTY：!process.stdin.isTTY 时跳过 readline，直接进入后台运行模式
+  - id: `lrn_3ng1qpanepg23` | injected 1, helped 0
+- **fact** (session_llm, conf 5): Nudge 有两个独立的控制开关：nudgeContextInjection 控制上下文注入，enableNudgeUI 控制 UI 通知，两者互不影响
+  - id: `lrn_3aliwg7ep2ez` | injected 5, helped 0
+- **procedure** (session_llm, conf 5): 禁用 OMP 加载 Cursor MCP 配置的方法：在 ~/.omp/agent/config.yml 的 disabledProviders 中添加 cursor
+  - id: `lrn_1wnl48qicl92g` | injected 5, helped 0
+- **preference** (session_llm, conf 5): 修改模型加载以 models.yml 为主，不要以 model.db 里面的信息为主
+  - id: `lrn_2yf7sdbauql1y` | injected 32, helped 1
+- **skill_hint** (session_llm, conf 4): 修复 MCP 报错时，可通过 ~/.omp/agent/config.yml 的 disabledProviders 配置来禁用 OMP 加载外部 MCP 配置源
+  - id: `lrn_2dlzdyji7vyrz` | injected 0, helped 0
+- **fact** (session_llm, conf 5): OMP默认会读取~/.cursor/mcp.json并尝试启动其中配置的所有MCP服务器
+  - id: `lrn_towibvhsqeu4` | injected 5, helped 0
+- **preference** (session_llm, conf 5): 用户已明确禁用 Nudge 提示，若会话中出现相关提示需彻底移除
+  - id: `lrn_1mi4k9w8vsq9l` | injected 2, helped 0
+- **fact** (session_llm, conf 5): OMP 会自动读取 ~/.cursor/mcp.json 并尝试启动其中的 MCP 服务器，导致启动报错
+  - id: `lrn_1ujbjv45vzjxb` | injected 2, helped 0
+- **preference** (session_llm, conf 5): 模型加载优先级：models.yml 配置应始终优先于 models.db 缓存，确保用户自定义配置不被旧缓存覆盖
+  - id: `lrn_24f4oravle15v` | injected 33, helped 1
+- **preference** (session_llm, conf 4): 在 OMP 中优先通过 disabledProviders 禁用 cursor 整体加载，而非逐个禁用 server
+  - id: `lrn_13i7up5lrit8k` | injected 0, helped 0
+- **preference** (session_llm, conf 5): OMP 不应加载 ~/.cursor/mcp.json 中的 MCP 配置，应在 OMP 配置中使用 disabledProviders: [cursor] 禁用
+  - id: `lrn_1e59l63rma4vm` | injected 1, helped 0
+- **fact** (session_llm, conf 5): OMP 会自动读取 ~/.cursor/mcp.json 并尝试启动其中配置的所有 MCP 服务器
+  - id: `lrn_1lonwdt4hamcf` | injected 1, helped 0
+- **procedure** (session_llm, conf 4): 修复 OMP 启动时的 MCP 报错：先诊断报错来源（检查 disabledServers 和 disabledProviders），再针对性禁用问题服务器或整个配置源
+  - id: `lrn_3ngaxlipdgzop` | injected 0, helped 0
+- **procedure** (session_llm, conf 4): 在~/.omp/agent/config.yml中添加disabledProviders:-cursor可阻止OMP加载Cursor的MCP配置
+  - id: `lrn_2pi9yfwsyvqn0` | injected 2, helped 0
+
+_Candidate pool: 0 | Archived: 0_

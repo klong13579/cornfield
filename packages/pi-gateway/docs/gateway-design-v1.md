@@ -1,8 +1,8 @@
 # Gateway V1 架构设计
 
-> 版本: 1.1
-> 日期: 2026-06-22
-> 状态: 修订(反映 warm-bridge cron 复用、inactivity watchdog、交付重试、`AgentBridge.executePrompt` API)
+> 版本: 1.2
+> 日期: 2026-06-23
+> 状态: 修订(反映 skeleton 统一、cron 安全增强(repeatCount/at-most-once/grace window/fd-lock)、AI Card v3(blockList)、agentDir 注册、long task watcher)
 
 ---
 
@@ -561,59 +561,51 @@ provider API key，注入为环境变量传给子进程。
 ```
 <agentDir>/                          ← Agent 工作目录(一个账号 = 一个目录)
 │
-├── profile.yaml                       ← 领域画像:身份/公司/知识域/skills(可选)
-│                                           omp 自动加载为 system prompt 附加上下文
+├── AGENTS.md                        ← Manifest + 全局硬约束
+│                                       提取 MUST/NOT → <hard-constraints>
 │
 ├── mission.md                       ← 【核心】系统提示词 / 角色定义
 │                                       决定了机器人的"人格"
-│                                       omp --mode rpc 启动时读取并注入 system prompt
+│                                       omp 启动时读取并注入 system prompt
 │
-├── .agent/                          ← omp 探索系统自动发现的配置
-│   ├── skills/                      ← 技能定义(可选)
-│   │   └── gitlab-auth.md
-│   ├── prompts/                     ← 可复用的 prompt 模板
-│   │   └── audit.md                 ←   例如:审计专用 prompt
-│   ├── rules/                       ← 行为规则(ROLE.md 格式)
-│   │   └── security.md             ←   机器人行为约束
-│   ├── SYSTEM.md                    ← 自定义 system prompt(替代内置模板)
-│   └── AGENTS.md                    ← 上下文指令文件(含工具使用引导)
+├── TOOLS.md                         ← 工具用法 + co-located MUST/MUST NOT
+│
+├── TODO.md                          ← 当前任务状态
+│
+├── prompt-includes.json             ← 显式声明 always-on 文件注入列表
+│                                       (AGENTS.md, mission.md, TOOLS.md, TODO.md,
+│                                        knowledge/external-workspaces.md)
 │
 ├── .omp/
 │   ├── config.yml                   ← omp 配置(模型、工具、主题等)
-│   └── prompt-includes.json         ←(可选)声明自动注入的辅助文件列表
-│                                       例如:{"files":["TOOLS.md"]}
+│   ├── SYSTEM.md                    ← Gateway agent 基线 system prompt
+│   ├── evolution/                   ← 自我进化数据(可选, gitignored)
+│   └── skills/                      ← 技能定义(可选)
+│       └── <skill-name>.md
 │
 ├── sessions/                        ← 该机器人的对话记录
-│   ├── cid_safeConvId1.jsonl        ← 用户A 的对话历史
-│   ├── cid_safeConvId2.jsonl        ← 用户B 的对话历史
-│   └── cid_safeConvId3.jsonl        ← 开发群的对话历史
+│   ├── cid_<safeConvId>.jsonl       ← 用户 的对话历史
+│   ├── cron_<taskId>.jsonl          ← cron 任务 session(§7.4)
+│   └── ...
 │
 ├── cron/                            ← 该机器人的定时任务
 │   ├── tasks/                       ← .json5 任务定义文件
 │   │   ├── daily-report.json5
 │   │   └── health-check.json5
-│   ├── tasks/*.prompt.md            ←(可选)agent 类型任务的 prompt 说明
 │   └── logs/                        ←(自动)cron 任务运行日志(.log)
 │
-├── scripts/                         ←(可选)cron 任务使用的 helper 脚本
-│   ├── gitlab_auth.py
-│   └── report-gen.ts
-│
-├── external/                        ← 可选:外部数据源/知识库映射
-│   ├── dingtalk-workspaces.yaml     ←   钉钉知识库空间列表
-│   ├── local-repos.yaml             ←   本地仓库路径映射
-│   └── gitlab-projects.yaml         ←   GitLab 项目映射
-│
 ├── knowledge/                       ← 可选:静态知识库(FAQ/手册)
+│   ├── external-workspaces.md       ← 外部数据源映射(always-on)
 │   ├── faq.md                       ← 常见问题
 │   ├── handbook/                    ← 手册
 │   │   └── server-restart.md
-│   ├── external-workspaces.md       ← 外部数据源映射
 │   └── .gitkeep
 │
-├── evolution/                       ←(V2)自我进化数据
-│   └── evolution.db
-│
+├── scripts/                         ←(可选)cron 任务使用的 helper 脚本
+├── external/                        ← 可选:外部数据源 YAML
+├── weekly-reports/                  ← 周报快照(项目专属)
+├── examples/                        ← 数据示例
+├── docs/                            ← 设计文档(仅供人读)
 └── .gitignore
 ```
 
@@ -621,20 +613,27 @@ provider API key，注入为环境变量传给子进程。
 
 | 路径 | 创建者 | 说明 |
 |---|---|---|
+| AGENTS.md | skeleton | Manifest + 全局硬约束 |
 | mission.md | skeleton | 核心人格 |
-| profile.yaml | skeleton | 领域画像 |
-| .agent/SYSTEM.md, AGENTS.md | skeleton | omp 框架钩子 |
-| .agent/rules/security.md | skeleton | 行为规则示例 |
-| .agent/skills/*, prompts/* | 用户 | 技能和 prompt 模板 |
-| .omp/config.yml | skeleton | runtime 硬依赖 |
-| .omp/prompt-includes.json | skeleton | 文件注入声明 |
-| knowledge/* | skeleton (§6.5) | 静态知识库 |
-| sessions/*.jsonl | omp 运行时 | 对话记录 |
+| TOOLS.md | skeleton | 工具用法 + must/must not |
+| TODO.md | skeleton | 当前任务占位 |
+| prompt-includes.json | skeleton | always-on 文件注入清单 |
+| .omp/config.yml | skeleton | runtime 硬依赖(modelRoles) |
+| .omp/SYSTEM.md | skeleton | Gateway agent 基线 system prompt |
+| .omp/evolution/ | 运行时 | 自我进化数据(gitignored) |
+| .omp/skills/ | 用户 | 按需技能 |
+| knowledge/external-workspaces.md | skeleton | 外部数据源映射 |
+| knowledge/faq.md | 用户 | 常见问题 |
+| knowledge/handbook/ | 用户 | 操作手册 |
+| sessions/*.jsonl | omp 运行时 | 对话记录(gitignored) |
 | cron/tasks/*.json5 | 用户 | 定时任务定义 |
-| cron/logs/*.log | omp 运行时 | 执行日志 |
+| cron/logs/*.log | 运行时 | 执行日志(gitignored) |
 | scripts/ | 用户 | helper 脚本 |
 | external/ | 用户 | 外部数据源映射 |
-| evolution/ | V2 | 自我进化数据 |
+| weekly-reports/ | 用户 | 周报快照 |
+| examples/ | 用户 | 数据示例 |
+| docs/ | 用户 | 设计文档 |
+| .gitignore | skeleton | Git 忽略规则 |
 
 
 ### 6.1a 文件系统设计说明
@@ -654,9 +653,8 @@ agentDir 文件系统的设计遵循五个原则:
   以 agentDir 根为原点,距离根越近的文件越核心(人格定义),距离越远的越基础设施(运行时数据):
 
 ```
-<agentDir>/          ← 人格核心(mission.md, profile.yaml)
-  ├── .agent/        ← 行为配置(技能/规则/上下文)
-  ├── .omp/          ← 运行时配置(模型/工具/注入清单)
+ <agentDir>/          ← 人格核心(AGENTS.md, mission.md, TOOLS.md)
+  ├── .omp/          ← 运行时配置 + 系统 prompt 覆盖(模型/工具/SYSTEM.md/注入清单)
   ├── sessions/      ← 运行时数据(对话历史)
   ├── cron/          ← 定时任务(调度元数据)
   ├── knowledge/     ← 参考知识
@@ -665,7 +663,7 @@ agentDir 文件系统的设计遵循五个原则:
 
 **4. 内容优先于目录。**
 
-  只定义目录结构,不预定义用户内容文件名(除 mission.md 外)。omp 框架钩子文件(`.agent/SYSTEM.md`、`.agent/AGENTS.md`、`.omp/config.yml`)在 skeleton 中创建为占位模板;用户内容文件(`.agent/prompts/*`、`knowledge/*`、`external/*`)由 agent 创建者决定。结构提供组织框架,不约束内容。
+  只定义目录结构,不预定义用户内容文件名(除 5 个 always-on 外)。omp 框架钩子文件(`.omp/config.yml`、`.omp/SYSTEM.md`、root `AGENTS.md`)在 skeleton 中创建为占位模板;用户内容文件(`knowledge/*`、`external/*`)由 agent 创建者决定。结构提供组织框架,不约束内容。
 
 **5. 可选文件不报错。**
 
@@ -675,54 +673,56 @@ agentDir 文件系统的设计遵循五个原则:
 
 ### 6.1b agentDir 自动创建
 
-**行为：** Gateway 启动时，若 account 的 agentDir 不存在，自动创建完整 skeleton。
+**行为：** Gateway 启动时，若 account 的 agentDir 不存在，调用 `@oh-my-pi/pi-coding-agent/skeleton` 的 `ensureAgentDir()` 自动创建完整 skeleton。Gateway 不再自维护 skeleton 逻辑。
 
-**创建内容：**
+**创建内容（由 coding-agent skeleton 模块负责）：**
 
 ```
 <agentDir>/
-├── mission.md              ← 默认人格模板
-├── profile.yaml            ← 领域画像模板
-├── .agent/                 ← omp 探索系统配置目录
-│   ├── SYSTEM.md           ← 自定义 system prompt 占位模板
-│   ├── AGENTS.md           ← 上下文指令占位模板
-│   ├── skills/             ← 技能定义（空目录）
-│   ├── prompts/            ← prompt 模板（空目录）
-│   └── rules/              ← 行为规则（空目录）
-├── .omp/                   ← runtime 硬依赖（§6.1a #5）
-│   ├── config.yml          ← 默认 modelRoles 配置
-│   └── prompt-includes.json ← 空文件列表
-├── sessions/               ← 对话记录目录
-├── cron/                   ← 定时任务
-│   ├── tasks/              ← 任务定义（空目录）
-│   └── logs/               ← 运行日志（空目录）
-├── knowledge/              ← 静态知识库（§6.5）
-│   ├── faq.md
-│   ├── external-workspaces.md
-│   ├── handbook/
-│   └── .gitkeep
-└── .gitignore              ← Git 忽略规则
+├── AGENTS.md                ← Manifest + 全局硬约束
+├── mission.md               ← 默认人格模板
+├── TOOLS.md                 ← 工具用法
+├── TODO.md                  ← 当前任务占位
+├── prompt-includes.json     ← always-on 文件注入声明（5 文件）
+├── .omp/
+│   ├── config.yml           ← 默认 modelRoles 配置
+│   ├── SYSTEM.md            ← Gateway agent 基线 system prompt
+│   └── skills/              ← 技能定义（空目录）
+├── knowledge/
+│   ├── external-workspaces.md ← 外部数据源映射
+│   ├── faq.md               ← 常见问题（空模板）
+│   └── handbook/            ← 操作手册（空目录）
+├── cron/
+│   ├── tasks/               ← 任务定义（空目录）
+│   └── logs/                ← 运行日志（空目录）
+├── sessions/                ← 对话记录目录
+└── .gitignore               ← Git 忽略规则
 ```
 
 **规则：**
 
 1. 仅当 `mission.md` 不存在时触发全量创建。已初始化的目录（mission.md 存在）执行 additive 更新：补充缺失的 skeleton 文件，不覆盖已有内容。
 2. `mission.md` 写入通用助手占位模板，包含身份、能力、行为准则、工具使用引导，明确标注需用户编辑。
-3. 所有目录（`.agent/`、`.agent/skills/`、`.agent/prompts/`、`.agent/rules/`、`.omp/`、`sessions/`、`cron/`、`cron/tasks/`、`cron/logs/`、`knowledge/`、`knowledge/handbook/`）创建为空目录。`scripts/` 和 `external/` 为用户按需创建的目录，skeleton 不预创建。
-4. `.omp/config.yml` 作为 runtime 硬依赖（§6.1a #5）在 skeleton 中创建，含默认 `modelRoles` 配置。`.omp/prompt-includes.json` 同步创建为空列表 `{"files":[]}`。
+3. 所有目录（`.omp/`、`.omp/skills/`、`knowledge/`、`knowledge/handbook/`、`cron/`、`cron/tasks/`、`cron/logs/`、`sessions/`）创建为带 `.gitkeep` 的空目录。`scripts/`、`external/`、`weekly-reports/`、`examples/`、`docs/` 为用户按需创建的目录，skeleton 不预创建。
+4. `.omp/config.yml` 作为 runtime 硬依赖在 skeleton 中创建，含默认 `modelRoles` 配置。`.omp/SYSTEM.md` 作为 gateway agent system prompt 基线（非空独占模板）同步创建。
 5. 创建过程中任何 I/O 失败视为该 account 启动失败，错误信息明确指示路径和故障原因。
 6. additive 更新不覆盖任何已存在文件的内容。
-7. `.gitignore` 写入默认内容，忽略运行时数据和敏感文件：
+7. `.gitignore` 写入默认内容，忽略运行时数据，保留配置文件：
 
    ```gitignore
    sessions/
    cron/logs/
-   evolution/
-   .omp/
+   .omp/evolution/
+   .omp/*
+   !.omp/config.yml
+   !.omp/SYSTEM.md
    *.log
+   *.bak
    ```
 
-**设计理由：** 降低新账号的配置门槛。用户只需在 gateway.json 声明 `appKey/appSecret`，agentDir 自动就绪。mission.md 占位文件保证 omp 启动时不报错，同时引导用户定义角色。
+**设计理由：** 降低新账号的配置门槛。用户只需在 gateway.json 声明 `appKey/appSecret`，agentDir 自动就绪。mission.md 占位文件保证 omp 启动时不报错，同时引导用户定义角色。Gateway 不再重复维护 skeleton 逻辑——所有 skeleton 创建统一走 `@oh-my-pi/pi-coding-agent/skeleton`。
+
+**AgentDir 注册：** Gateway 在创建/ensure agentDir 后调用 `registerAgent(accountId, agentDir)` 将路径写入 `~/.omp/agent/registry.json`，使 `omp agent list` 能发现 gateway 创建的 agentDirs。注册失败非致命(仅 warn 日志)。
 
 ### 6.2 mission.md
 
@@ -840,15 +840,17 @@ Hermes Agent 是一个参考实现，其 `~/.hermes/` 目录结构与本设计�
 Agent 启动时:
   1. 读取 .omp/config.yml        ← 模型、工具配置
   2. 读取 mission.md              ← 写入 system prompt
-  2.5 读取 profile.yaml           ← 领域画像，追加到 system prompt 附加上下文
-  3. omp 发现系统自动扫描:
-     - .agent/skills/            ← 技能（注册到 omp 技能系统）
-     - .agent/prompts/           ← prompt 模板（注册到 omp prompt 系统）
-     - .agent/rules/             ← 行为规则（注册到 omp rule 系统）
-     - .agent/SYSTEM.md          ← 自定义 system prompt（覆盖内置模板）
-     - .agent/AGENTS.md          ← 上下文指令（注入到 system prompt）
-  4. 读取 .omp/prompt-includes.json  ← 声明自动注入的文件列表
-  5. cron 引擎扫描 cron/tasks/       ← 注册定时任务
+  3. OMP 原生 discovery 扫 root AGENTS.md  ← Manifest 触发器
+     ├── 提取 MUST NOT / NEVER 行 → <hard-constraints>
+     └── 剩余内容 → <context>
+  4. 读取 root prompt-includes.json  ← 注入 always-on 文件
+     ├── AGENTS.md
+     ├── mission.md
+     ├── TOOLS.md
+     ├── TODO.md
+     └── knowledge/external-workspaces.md
+  5. 读取 .omp/SYSTEM.md         ← 覆盖 OMP 内置 system prompt（gateway agent 基线）
+  6. cron 引擎扫描 cron/tasks/       ← 注册定时任务
 
 Agent 接收消息时:
   1. 从 agentDir/sessions/ 读取或创建 session 文件
@@ -983,7 +985,53 @@ CREATE TABLE sessions (
 
 **Delivery 重试与持久化:** 任务结果经 `deliverWithRetry` 发送到 `task.deliver` 通道,首次失败 5s 后重试 1 次,二次失败追加到 `~/.omp/gateway-data/scheduler/logs/delivery-failures.jsonl`(taskId / taskName / channel / userId / reason / attempts / exitCode)。任务本身的 exit code 不被交付失败污染。
 
+**Delivery 失败可观测:** `cron list` 命令新增 DELIVERY 列,显示每个任务最近 24h 内的交付失败次数。0 = 绿色 ✓,1+ = 红色 "× N"。交付失败数与执行失败数分开追踪(`lastDeliveryError` 字段),执行成功但交付失败不会导致重试执行。
+
 ---
+
+### 7.5 Cron 任务字段与安全机制
+
+**任务字段（TaskFileDefinition）：**
+
+```json5
+{
+  name: "daily-report",
+  description: "每日销售报告",
+  cron: "0 9 * * *",
+  command: "请生成昨天的销售报告摘要",
+  type: "agent",         // "agent" | "shell"
+  accountId: "ops",      // agent 任务必填;shell 任务可选(仅用于显示)
+  model: "narwal-plan/qwen3-coder-plus",  // 可选:覆盖默认模型
+  provider: "narwal-plan",
+  enabledToolsets: ["read", "search", "bash"],  // 工具隔离
+  repeatCount: 10,       // 执行 10 次后自动禁用(null = 无限)
+  timeoutMs: 300000,
+  retry: { maxAttempts: 2, backoffMs: [10000, 30000] },
+  skills: [],
+  preScript: "",
+  deliver: "dingtalk",
+  deliverUser: "staff001"  // 主动推送到指定用户
+}
+```
+
+**新增字段说明：**
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `repeatCount` | number | 总执行次数上限,达到后自动禁用任务 |
+| `repeatCompleted` | number (运行时) | 已执行次数,运行时自动累加 |
+| `enabledToolsets` | string[] | cron agent 任务工具隔离列表。Agent 进程中注入 `enabledToolsets` 参数,限制模型可调用的工具集,减少 token 消耗 |
+| `deliverUser` | string | 主动推送目标用户 ID(对应`deliver`通道)。Gateway 通过 `channels.<id>.sendMessage(userId, text)` 将 cron 结果推送给指定用户 |
+| `lastDeliveryError` | string (运行时) | 上次交付失败的错误信息,用于区分执行失败与交付失败 |
+
+**安全性约束：**
+
+- **`accountId` 对 agent 任务为必填:** 无 `accountId` 的 agent 任务无法使用 warm bridge,只能走 fallback `omp --print` 路径。Gateway 启动时扫描所有旧任务,`cron reconcile` 命令可批量补填缺失的 accountId。
+- **工具隔离:** Agent 进程收到 `enabledToolsets` 后,只在指定工具集内推理。当前硬编码为 `["read", "search", "bash", "write", "edit", "find", "replace", "todo_write", "web_search"]`,向 agent prompt 注入 [CRON-CONTEXT] 前缀声明工具限制。
+- **At-most-once 语义:** Engine 在触发执行前先将 `nextRunAt` 推进到下一次(而不是执行后再设)。若执行中进程崩溃,重启后不会重放已推进的任务。
+- **Grace Window:** 任务超过 nextRunAt 的宽限期后跳过本次执行。宽限期 = 两次 cron 间隔的一半(最短 2min,最长 2h)。防止网关重启后任务积压爆炸。
+- **FD 级排他锁:** Scheduler daemon 使用文件描述符级别排他锁(`flock(LOCK_EX)`)替代之前的 `mkdir` 锁,崩溃时由 OS 自动释放,不会留下残留锁文件。
+- **执行记录清洗:** `delivery-failures.jsonl` 记录全局交付失败;成功后会清除任务的 `lastDeliveryError`。
 
 ## 8. RPC 协议
 
@@ -1083,6 +1131,32 @@ reply: string | OutboundMessage
   ↓  DingTalkChannel.sendMessage
      └── AI Card（若配置）
          └── dingtalk-card.ts 流式更新
+
+**AI Card 流式更新（v3 — OpenClaw blockList schema）：**
+
+Gateway 在 Agent 响应过程中通过 `ForwardStreamHandlers` 收集流式事件,分阶段渲染 DingTalk AI Card:
+
+```
+prompt 开始
+  ↓
+创建卡片 (PROCESSING → INPUTING)  ← 首次 text_delta 到达后切换
+  ↓
+text_delta 流 → 追加到卡片正文块
+  ↓
+tool_use 事件 → card blockList.blocks[] 追加 tool/think 块
+  │  ├─ tool block:  显示工具调用名称和参数预览
+  │  └─ think block: 显示模型思考过程
+  ↓
+tool_result 事件 → 更新对应 tool 块状态
+  ↓
+agent_end → 卡片切换到 FINISHED,不可再编辑
+```
+
+**Card 状态机:** `PROCESSING` → `INPUTING` → `FINISHED`。状态切换失败时降级普通文本回复,不阻塞主链路。`INPUTING` 状态的首次失败不会永久跳过重试。
+
+**blockList schema:** 使用 OpenClaw 兼容的 `msgmenu` 卡片格式,支持文字段落、思维链、工具调用等块类型。
+
+**Long Task 进度通知:** AgentBridge 对超过阈值的 tool call(默认 3min)通过 `onLongTask` handler 发送进度 ping。AI Card 路径消费该事件展示"工具执行中..."卡片,并在后续 ping 中更新时间戳。
 ```
 
 **字段映射：**
@@ -1118,8 +1192,12 @@ reply: string | OutboundMessage
 └── agents/                         ← 所有 agent 的工作目录
     ├── ops/                        ← 运维机器人
     │   ├── mission.md              ← 人格
-    │   ├── .agent/                 ← omp 可发现的配置
-    │   ├── .omp/config.yml         ← 模型/工具
+    │   ├── AGENTS.md               ← Manifest + 硬约束
+    │   ├── TOOLS.md                ← 工具用法
+    │   ├── .omp/
+    │   │   ├── config.yml          ← 模型/工具
+    │   │   ├── SYSTEM.md           ← Gateway agent 基线 system prompt
+    │   │   └── skills/             ← 技能
     │   ├── sessions/               ← 对话记录(IM session + cron session 共用)
     │   │   ├── cid_*.jsonl         ← IM 会话历史
     │   │   └── cron_*.jsonl        ← cron 任务专用 session(§7.4)
@@ -1147,7 +1225,7 @@ reply: string | OutboundMessage
 |DingTalkChannel|`connect()`, `disconnect()`, `isConnected()`, `sendMessage()`, `onMessage()`|Channel 接口,所有 IM 平台一致|
 |Gateway|`start()`, `stop()`, `handleInboundMessage()`, `sendDirectMessage()`|编排层,不直接暴露给外部|
 |SessionManager|`enqueue()`, `enqueueWithMeta()`, `dequeue()`, `getQueueDepth()`|入队处理、状态查询、清理(后两个方法返回完整 meta 用于 dingtalk-formatter)|
-|AgentBridge|`forward()`, `forwardWithMeta()`, `executePrompt()`, `switchSession()`, `setModel()`, `getState()`, `getSnapshot()`, `abort()`|Agent 进程管理、session 切换、prompt 发送、共用入口(IM + cron)|
+|AgentBridge|`forward()`, `forwardWithMeta()`, `executePrompt()`, `switchSession()`, `setModel()`, `getState()`, `getSnapshot()`, `abort()`|Agent 进程管理、session 切换、prompt 发送、共用入口(IM + cron)、long task watcher(> 3min 工具调用自动通知 onLongTask)|
 |SchedulerEngine|`tick()`, `onCronTrigger()`, `reconcile()`, `cronRun()`|cron 调度:tick 拉取到期任务、onCronTrigger 处理 warm path、cronRun 手动触发|
 
 **设计原则:** 各组件只暴露 `async` 方法，不暴露内部状态(黑盒)。`SessionManager` 不感知 IM 协议，`AgentBridge` 不感知会话隔离粒度。

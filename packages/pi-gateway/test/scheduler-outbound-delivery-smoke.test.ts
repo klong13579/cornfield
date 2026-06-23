@@ -43,15 +43,7 @@ function cleanup() {
 }
 
 function cleanupExecutionLog(slug: string) {
-	const logDir = path.join(
-		os.homedir(),
-		".omp",
-		"gateway-data",
-		"scheduler",
-		"logs",
-		"by-task",
-		slug,
-	);
+	const logDir = path.join(os.homedir(), ".omp", "gateway-data", "scheduler", "logs", "by-task", slug);
 	try {
 		fs.rmSync(logDir, { recursive: true, force: true });
 	} catch {
@@ -163,9 +155,7 @@ describe("cron task outbound delivery smoke test", () => {
 
 			// (2) Message-send request was made to the DingTalk oToMessages
 			// batchSend endpoint with the access token in the header.
-			const sendCall = fetchCalls.find(
-				c => c.url.includes("oToMessages") || c.url.includes("batchSend"),
-			);
+			const sendCall = fetchCalls.find(c => c.url.includes("oToMessages") || c.url.includes("batchSend"));
 			expect(sendCall).toBeDefined();
 			expect(sendCall?.headers["x-acs-dingtalk-access-token"]).toBe("fake-token-smoke-test");
 
@@ -194,9 +184,7 @@ describe("cron task outbound delivery smoke test", () => {
 		const hr = accounts.hr;
 		const opencode = accounts.opencode;
 		if (!hr || !opencode) {
-			console.log(
-				"[skip] gateway.json missing `hr` or `opencode` account; cannot run independence smoke test",
-			);
+			console.log("[skip] gateway.json missing `hr` or `opencode` account; cannot run independence smoke test");
 			return;
 		}
 
@@ -231,9 +219,7 @@ describe("cron task outbound delivery smoke test", () => {
 			expect(oauthBody?.appKey).toBe(opencode.appKey);
 			expect(oauthBody?.appKey).not.toBe(hr.appKey);
 
-			const sendCall = fetchCalls.find(
-				c => c.url.includes("oToMessages") || c.url.includes("batchSend"),
-			);
+			const sendCall = fetchCalls.find(c => c.url.includes("oToMessages") || c.url.includes("batchSend"));
 			expect(sendCall).toBeDefined();
 			const sendBody = sendCall?.body as { robotCode?: string } | null;
 			// robotCode follows the deliver account, not the running account.
@@ -268,9 +254,7 @@ describe("cron task outbound delivery smoke test", () => {
 		try {
 			await cronRun("_t_smoke_nodeliver", storage);
 
-			const dingTalkCalls = fetchCalls.filter(
-				c => c.url.includes("dingtalk.com") || c.url.includes("accessToken"),
-			);
+			const dingTalkCalls = fetchCalls.filter(c => c.url.includes("dingtalk.com") || c.url.includes("accessToken"));
 			expect(dingTalkCalls.length).toBe(0);
 		} finally {
 			const task = storage.getTaskByName("_t_smoke_nodeliver");

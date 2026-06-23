@@ -447,6 +447,8 @@ interface CustomModelsResult {
 	keylessProviders?: Set<string>;
 	discoverableProviders?: DiscoveryProviderConfig[];
 	configuredProviders?: Set<string>;
+	/** When non-empty, models for each provider are restricted to these ids (discovery/cached extras dropped). */
+	explicitProviderModelIds?: Map<string, Set<string>>;
 	equivalence?: ModelEquivalenceConfig;
 	error?: ConfigError;
 	found: boolean;
@@ -793,6 +795,8 @@ export class ModelRegistry {
 	#lastDiscoveryWarnings: Map<string, string> = new Map();
 	/** Per-provider set of model IDs confirmed by dynamic discovery. */
 	#discoveredModelIds: Map<string, Set<string>> = new Map();
+	/** When non-empty, models for each provider are restricted to these ids (discovery/cached extras dropped). */
+	#explicitProviderModelIds: Map<string, Set<string>> = new Map();
 	// Runtime extension model overlays — persist across refresh() cycles so that
 	// models registered by extensions survive the model selector's offline reload.
 	#runtimeModelOverlays: CustomModelOverlay[] = [];
@@ -893,6 +897,7 @@ export class ModelRegistry {
 			keylessProviders = new Set(),
 			discoverableProviders = [],
 			configuredProviders = new Set(),
+			explicitProviderModelIds = new Map(),
 			equivalence,
 			error: configError,
 		} = this.#loadCustomModels();
@@ -903,6 +908,7 @@ export class ModelRegistry {
 		this.#providerOverrides = overrides;
 		this.#modelOverrides = modelOverrides;
 		this.#equivalenceConfig = equivalence;
+		this.#explicitProviderModelIds = explicitProviderModelIds;
 
 		this.#addImplicitDiscoverableProviders(configuredProviders);
 		const builtInModels = this.#applyHardcodedModelPolicies(this.#loadBuiltInModels(overrides));
@@ -916,7 +922,7 @@ export class ModelRegistry {
 		// Merge runtime extension models so they survive refresh() cycles
 		const combined = this.#mergeCustomModels(resolvedDefaults, this.#runtimeModelOverlays);
 		const withModelOverrides = this.#applyModelOverrides(combined, this.#modelOverrides);
-		this.#models = this.#pruneAlibabaCodingPlanCatalog(this.#applyRuntimeProviderOverrides(withModelOverrides));
+		this.#models = this.#applyExplicitProviderAllowlist(this.#pruneAlibabaCodingPlanCatalog(this.#applyRuntimeProviderOverrides(withModelOverrides)));
 		this.#rebuildCanonicalIndex();
 	}
 
@@ -962,6 +968,20 @@ export class ModelRegistry {
 			}
 		}
 		return merged;
+	}
+
+	/** Drops discovery/cached extras when models.yml defines an explicit non-empty `models` list for that provider. */
+	#applyExplicitProviderAllowlist(models: Model<Api>[]): Model<Api>[] {
+		if (this.#explicitProviderModelIds.size === 0) {
+			return models;
+		}
+		return models.filter(m => {
+			const allowed = this.#explicitProviderModelIds.get(m.provider);
+			if (!allowed) {
+				return true;
+			}
+			return allowed.has(m.id);
+		});
 	}
 
 	/** Merge custom models with built-in, replacing by provider+id match */
@@ -1093,6 +1113,7 @@ export class ModelRegistry {
 				keylessProviders: new Set(),
 				discoverableProviders: [],
 				configuredProviders: new Set(),
+				explicitProviderModelIds: new Map(),
 				error,
 				found: true,
 			};
@@ -1104,6 +1125,7 @@ export class ModelRegistry {
 				keylessProviders: new Set(),
 				discoverableProviders: [],
 				configuredProviders: new Set(),
+				explicitProviderModelIds: new Map(),
 				found: false,
 			};
 		}
@@ -1114,6 +1136,7 @@ export class ModelRegistry {
 		const discoverableProviders: DiscoveryProviderConfig[] = [];
 		const providerEntries = Object.entries(value.providers ?? {});
 		const configuredProviders = new Set(Object.keys(value.providers ?? {}));
+		const explicitProviderModelIds = new Map<string, Set<string>>();
 
 		for (const [providerName, providerConfig] of providerEntries) {
 			// Always set overrides when baseUrl/headers/apiKey/compat are present
@@ -1156,6 +1179,14 @@ export class ModelRegistry {
 				}
 				allModelOverrides.set(providerName, perModel);
 			}
+
+			const customDefs = providerConfig.models ?? [];
+			if (customDefs.length > 0) {
+				explicitProviderModelIds.set(
+					providerName,
+					new Set(customDefs.map(def => def.id).filter(id => typeof id === "string" && id.length > 0)),
+				);
+			}
 		}
 
 		return {
@@ -1165,6 +1196,7 @@ export class ModelRegistry {
 			keylessProviders,
 			discoverableProviders,
 			configuredProviders,
+			explicitProviderModelIds,
 			equivalence: value.equivalence,
 			found: true,
 		};
@@ -1218,7 +1250,7 @@ export class ModelRegistry {
 		// Merge runtime extension models so they survive online discovery completion
 		const combined = this.#mergeCustomModels(withConfigModels, this.#runtimeModelOverlays);
 		const withModelOverrides = this.#applyModelOverrides(combined, this.#modelOverrides);
-		this.#models = this.#pruneAlibabaCodingPlanCatalog(this.#applyRuntimeProviderOverrides(withModelOverrides));
+		this.#models = this.#applyExplicitProviderAllowlist(this.#pruneAlibabaCodingPlanCatalog(this.#applyRuntimeProviderOverrides(withModelOverrides)));
 		this.#rebuildCanonicalIndex();
 	}
 

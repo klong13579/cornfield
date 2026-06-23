@@ -83,9 +83,9 @@ export class SQLiteSessionStore implements SessionStore {
 		`);
 	}
 	#migrateLegacySchema(): void {
-		const existing = this.#db.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'sessions'").get() as
-			| { name: string }
-			| null;
+		const existing = this.#db
+			.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'sessions'")
+			.get() as { name: string } | null;
 		if (!existing) {
 			this.#db.exec(SCHEMA);
 			return;
@@ -128,7 +128,6 @@ export class SQLiteSessionStore implements SessionStore {
 			DROP TABLE sessions_legacy;
 		`);
 	}
-
 
 	async getSession(channelId: string, accountId: string, conversationId: string): Promise<SessionRecord | null> {
 		return this.#getSessionByConv.get(channelId, accountId, conversationId) ?? null;

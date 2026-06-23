@@ -11,14 +11,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { validateConfig } from "../src/config";
-import {
-	applyFixes,
-	countBySeverity,
-	type DoctorReport,
-	renderJson,
-	renderText,
-	runDoctor,
-} from "../src/doctor";
+import { applyFixes, countBySeverity, type DoctorReport, renderJson, renderText, runDoctor } from "../src/doctor";
 import { SchedulerDbStorage } from "../src/scheduler";
 
 describe("validateConfig (non-swallowing)", () => {
@@ -83,7 +76,16 @@ describe("runDoctor end-to-end", () => {
 		expect(config!.findings.some(f => f.severity === "error")).toBe(true);
 		// All standard sections are always present.
 		const names = report.sections.map(s => s.name);
-		for (const n of ["CONFIG", "CREDENTIALS", "CHANNELS", "BRIDGES", "QUEUES", "SCHEDULER", "STATE FILES", "SERVICE"]) {
+		for (const n of [
+			"CONFIG",
+			"CREDENTIALS",
+			"CHANNELS",
+			"BRIDGES",
+			"QUEUES",
+			"SCHEDULER",
+			"STATE FILES",
+			"SERVICE",
+		]) {
 			expect(names).toContain(n);
 		}
 	});
@@ -113,9 +115,9 @@ describe("runDoctor end-to-end", () => {
 		delete process.env.DOCTOR_TEST_UNSET_SECRET;
 		const report = await runDoctor(p);
 		const config = report.sections.find(s => s.name === "CONFIG")!;
-		expect(
-			config.findings.some(f => f.severity === "error" && f.message.includes("DOCTOR_TEST_UNSET_SECRET")),
-		).toBe(true);
+		expect(config.findings.some(f => f.severity === "error" && f.message.includes("DOCTOR_TEST_UNSET_SECRET"))).toBe(
+			true,
+		);
 	});
 
 	test("renderText and renderJson agree on severity counts", async () => {
@@ -269,7 +271,7 @@ describe("runDoctor --fix autonomously repairs (real fix closure, real DB)", () 
 		const verify = new SchedulerDbStorage(dbPath);
 		try {
 			expect(verify.getRunningExecutions().length).toBe(0);
-			const row = verify.getExecutions((verify.getTaskByName("e2e-stuck"))!.id, 10).find(e => e.id === execId);
+			const row = verify.getExecutions(verify.getTaskByName("e2e-stuck")!.id, 10).find(e => e.id === execId);
 			expect(row?.status).toBe("failure");
 			expect(row?.stderr).toContain("doctor --fix");
 		} finally {

@@ -6,7 +6,7 @@
  * 2. 通过 AgentBridge.forward() 模拟
  * 3. 模拟 InboundMessage
  */
-import { describe, test, expect } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { AgentBridge } from "../src/agent-bridge";
 import type { InboundMessage } from "../src/types";
 

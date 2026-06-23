@@ -1,8 +1,8 @@
 # Gateway V1 实施计划
 
-> 版本: 2.1
-> 日期: 2026-06-22
-> 状态: 跟对 warm-bridge cron 复用、AgentBridge.executePrompt API、inactivity watchdog、交付重试后的代码状态
+> 版本: 2.2
+> 日期: 2026-06-23
+> 状态: 反映 fix(multi-account channel lookup)、cron at-most-once/grace window/fd-lock/repeatCount/delivery tracking、AI Card v3(blockList)、agentDir 注册、doctor 命令后的代码状态
 > 配套文档: [gateway-design-v1.md](./gateway-design-v1.md)(v1.1)
 
 ---

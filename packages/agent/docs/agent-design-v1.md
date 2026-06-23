@@ -121,11 +121,9 @@ Agent 进程启动 (cwd = agentDir)
   │         ├── TODO.md
   │         └── knowledge/external-workspaces.md
   │
-  ├── 5. OMP 扫描 .agent/ + .omp/SYSTEM.md
+  ├── 5. OMP 扫描 .omp/SYSTEM.md + skills/
   │     ├── .omp/SYSTEM.md → 覆盖 OMP 内置 system prompt（gateway agent 基线）
-  │     ├── skills/        → 注册到 omp skill 系统
-  │     ├── prompts/       → 注册到 omp prompt 系统
-  │     └── rules/         → 行为规则
+  │     └── .omp/skills/   → 注册到 omp skill 系统
   │
   ├── 6. Cron 引擎扫 cron/tasks/*.json5
   │     └── 注册定时任务
@@ -135,7 +133,7 @@ Agent 进程启动 (cwd = agentDir)
 
 **关键点：**
 - **Step 3-4 是核心**：AGENTS.md 是 manifest 触发器，prompt-includes.json 加载其他 4 个 always-on
-- **Step 5 的 .agent/ 扫描是 auxiliary**，主路径在 Step 3-4
+- **Step 5 的 .omp/SYSTEM.md 是 auxiliary**，主路径在 Step 3-4
 - **mission.md 与 AGENTS.md 都有 identity 内容**，但 mission.md 是 IDENTITY 层（narrative），AGENTS.md 是 MANIFEST 层（操作性硬约束）
 
 ---
@@ -148,7 +146,7 @@ Agent 进程启动 (cwd = agentDir)
 | **MANIFEST** | `AGENTS.md` (前半) | 加载哪些文件 + File Map + 更新指南 |
 | **CONSTRAINTS** | `AGENTS.md` (后半) + `TOOLS.md` (co-located) | 行为硬约束 + 工具级规则 |
 | **CONTEXT** | `TOOLS.md`, `knowledge/*`, `TODO.md` | 工具用法 / 数据源 / FAQ / 任务 |
-| **BEHAVIOR** | `.omp/skills/`, `.agent/prompts/`, `cron/*.prompt.md` | 一次性 procedure |
+| **BEHAVIOR** | `.omp/skills/`, `cron/*.prompt.md` | 一次性 procedure |
 | **RUNTIME** | `.omp/config.yml`, `prompt-includes.json`, `cron/*.json5` | 配置 / 调度元数据 / 注入清单 |
 
 **MECE 5 原则：**
@@ -173,9 +171,6 @@ Agent 进程启动 (cwd = agentDir)
 | `.omp/evolution/` | 运行时 | Evolution 数据（gitignored） |
 | `.omp/skills/` | 用户 | on-demand 技能 |
 | `.omp/SYSTEM.md` | skeleton | 覆盖 OMP 内置 system prompt（gateway agent 基线） |
-| `.agent/SYSTEM.md` | skeleton | 已弃用（保留空文件）；覆盖移至 `.omp/SYSTEM.md` |
-| `.agent/prompts/` | 用户 | 可复用 prompt 模板 |
-| `.agent/rules/` | 用户 | 可选行为规则 |
 | `knowledge/external-workspaces.md` | **skeleton（手动）** | 外部数据源映射 |
 | `knowledge/faq.md` | 用户 | 高频问题（按需） |
 | `knowledge/handbook/` | 用户 | 操作手册（按需） |
@@ -191,9 +186,10 @@ Agent 进程启动 (cwd = agentDir)
 | `.gitignore` | skeleton | Git 忽略规则 |
 
 > **Skeleton 源**：`packages/coding-agent/src/skeleton/`（`@oh-my-pi/pi-coding-agent/skeleton`）
+> - 创建目录列表：`src/skeleton/dirs.ts`（当前：`.omp`、`.omp/skills`、`knowledge`、`knowledge/handbook`、`cron`、`cron/tasks`、`cron/logs`、`sessions`）
 > - 资产文件：`src/skeleton/assets/`（bun 静态 import，非运行时读取）
 > - 入口函数：`ensureAgentDir(agentDir)` / `resolveAgentDir(accountId, explicitDir?)` / `buildAgentSessionPath(agentDir, conversationId)`
-> - 调用方：`pi-gateway`（账户安装 / 启动时 ensure）、`omp agent init`（未来 CLI）
+> - 调用方：`pi-gateway`（账户安装 / 启动时 ensure）、`omp agent init`（CLI）
 
 ---
 
@@ -210,17 +206,16 @@ agentDir 的创建由调用方负责（典型场景：网关启动时为每个 a
 
 ### 6.2 推荐的 CLI 命令
 
-> Gateway auto-create 解决了启动时的 skeleton 问题，**缺少手动管理工具**。
-> 以下为提议的命令集，**供未来实现参考**。
+> Gateway auto-create 解决了启动时的 skeleton 问题。以下为已实现的命令集。
 
-| 命令 | 作用 | 优先级 |
+| 命令 | 作用 | 状态 |
 |---|---|---|
-| `omp agent init <name>` | 从模板创建新 agentDir（独立于 Gateway） | **高** |
-| `omp agent clone <source> <target>` | 从现有 agent 克隆（含配置但脱敏） | **高** |
-| `omp agent list` | 列出已配置 agent | 中 |
-| `omp agent show <name>` | 显示 agent 摘要（mission / AGENTS / skills 概览） | 中 |
-| `omp agent validate <agentDir>` | 校验 agentDir 结构完整性 | 中 |
-| `omp agent migrate <agentDir>` | 应用 schema 迁移 | 低 |
+| `omp agent init <name>` | 从模板创建新 agentDir（独立于 Gateway） | **已实现** |
+| `omp agent list` | 列出已配置 agent（含 gateway 注册的 agentDirs） | **已实现** |
+| `omp agent validate <agentDir>` | 校验 agentDir 结构完整性 | **已实现** |
+| `omp agent clone <source> <target>` | 从现有 agent 克隆 | 待实现 |
+| `omp agent show <name>` | 显示 agent 摘要 | 待实现 |
+| `omp agent migrate <agentDir>` | 应用 schema 迁移 | 低优先级 |
 
 **`omp agent init` 工作流：**
 
@@ -275,8 +270,7 @@ agentDir 文件系统的设计遵循五个原则：
 
    ```
    <agentDir>/      ← 人格核心 (AGENTS.md, mission.md, TOOLS.md)
-     ├── .agent/    ← 行为配置 (rules / prompts / system prompt)
-     ├── .omp/      ← 运行时配置 (modelRoles / skills / evolution)
+     ├── .omp/      ← 运行时配置 + 系统 prompt 覆盖 (modelRoles / skills / evolution / SYSTEM.md)
      ├── sessions/  ← 运行时数据 (对话历史)
      ├── cron/      ← 定时任务 (调度元数据)
      ├── knowledge/ ← 参考知识
@@ -284,7 +278,7 @@ agentDir 文件系统的设计遵循五个原则：
    ```
 
 4. **内容优先于目录。**
-   只定义目录结构，不预定义用户内容文件名（除 5 个 always-on 外）。omp 框架钩子文件（`.agent/SYSTEM.md`、`.omp/config.yml`、root `AGENTS.md`）在 skeleton 中创建为占位模板；用户内容文件（`.agent/prompts/*`、`knowledge/*`、`external/*`）由 agent 创建者决定。结构提供组织框架，不约束内容。
+   只定义目录结构，不预定义用户内容文件名（除 5 个 always-on 外）。omp 框架钩子文件（`.omp/config.yml`、`.omp/SYSTEM.md`、root `AGENTS.md`）在 skeleton 中创建为占位模板；用户内容文件（`knowledge/*`、`external/*`）由 agent 创建者决定。结构提供组织框架，不约束内容。
 
 5. **可选文件不报错。**
    结构图中标注"可选"的文件在缺失时不应产生任何错误或警告。只有 5 个 always-on 文件（`AGENTS.md`、`mission.md`、`TOOLS.md`、`TODO.md`、`knowledge/external-workspaces.md`）和 `.omp/config.yml` 是 runtime 硬依赖。

@@ -7,10 +7,11 @@
  * 2. Read agent.db auth_credentials for stored API keys
  * 3. Return env vars to set for the spawned process
  */
-import * as path from "node:path";
-import * as os from "node:os";
-import * as fs from "node:fs";
+
 import { Database } from "bun:sqlite";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { logger } from "@oh-my-pi/pi-utils";
 
 const { readFileSync } = fs;
@@ -115,7 +116,7 @@ function readProviderApiKeyRefs(modelsPath: string): Record<string, string> {
 
 		for (const line of lines) {
 			// Provider header: two-space prefix, alphanumeric name with hyphens
-			const providerMatch = line.match(/^  ([a-zA-Z0-9_-]+):$/);
+			const providerMatch = line.match(/^ {2}([a-zA-Z0-9_-]+):$/);
 			if (providerMatch) {
 				currentProvider = providerMatch[1];
 				// Providers section header? Skip.
@@ -127,14 +128,14 @@ function readProviderApiKeyRefs(modelsPath: string): Record<string, string> {
 
 			if (currentProvider) {
 				// apiKey: ENV_VAR_NAME
-				const apiKeyMatch = line.match(/^    apiKey:\s*['"]?([A-Za-z_][A-Za-z0-9_]*)['"]?\s*$/);
+				const apiKeyMatch = line.match(/^ {4}apiKey:\s*['"]?([A-Za-z_][A-Za-z0-9_]*)['"]?\s*$/);
 				if (apiKeyMatch) {
 					result[currentProvider] = apiKeyMatch[1];
 					currentProvider = null;
 					continue;
 				}
 				// Indented content that's not apiKey? Different field, keep parsing.
-				if (line.match(/^    /)) continue;
+				if (line.match(/^ {4}/)) continue;
 
 				// Non-indented or different indentation = end of provider block
 				if (line.trim() && !line.match(/^ {2,4}/)) currentProvider = null;

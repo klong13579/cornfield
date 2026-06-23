@@ -3,9 +3,8 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { SchedulerEngine } from "../src/scheduler/engine";
-import { SchedulerDbStorage } from "../src/scheduler/storage";
 import { SchedulerFileStore } from "../src/scheduler/file-store";
-import type { ScheduledTask } from "../src/scheduler/types";
+import { SchedulerDbStorage } from "../src/scheduler/storage";
 
 let testDir: string;
 let dbPath: string;

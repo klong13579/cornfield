@@ -120,12 +120,7 @@ describe("parseCronIntent", () => {
 
 describe("createCronTaskFromMessage (smoke test)", () => {
 	it("creates a task file in <agentDir>/cron/tasks/ and inserts into the global DB", () => {
-		const outcome = createCronTaskFromMessage(
-			"/cron create 0 8 * * * -- echo good morning",
-			"hr",
-			config,
-			storage,
-		);
+		const outcome = createCronTaskFromMessage("/cron create 0 8 * * * -- echo good morning", "hr", config, storage);
 
 		expect(outcome.ok).toBe(true);
 		if (!outcome.ok) return;
@@ -182,12 +177,7 @@ describe("createCronTaskFromMessage (smoke test)", () => {
 	});
 
 	it("does not create anything for a non-cron message (returns not-cron-intent)", () => {
-		const outcome = createCronTaskFromMessage(
-			"hey what's the weather?",
-			"hr",
-			config,
-			storage,
-		);
+		const outcome = createCronTaskFromMessage("hey what's the weather?", "hr", config, storage);
 
 		expect(outcome.ok).toBe(false);
 		if (outcome.ok) return;
@@ -208,12 +198,7 @@ describe("createCronTaskFromMessage (smoke test)", () => {
 				},
 			},
 		};
-		const outcome = createCronTaskFromMessage(
-			"/cron create 0 8 * * * -- echo hi",
-			"hr",
-			cfgNoDir,
-			storage,
-		);
+		const outcome = createCronTaskFromMessage("/cron create 0 8 * * * -- echo hi", "hr", cfgNoDir, storage);
 
 		expect(outcome.ok).toBe(false);
 		if (outcome.ok) return;
@@ -221,12 +206,7 @@ describe("createCronTaskFromMessage (smoke test)", () => {
 	});
 
 	it("returns no-account-id when accountId is undefined", () => {
-		const outcome = createCronTaskFromMessage(
-			"/cron create 0 8 * * * echo hi",
-			undefined,
-			config,
-			storage,
-		);
+		const outcome = createCronTaskFromMessage("/cron create 0 8 * * * echo hi", undefined, config, storage);
 
 		expect(outcome.ok).toBe(false);
 		if (outcome.ok) return;

@@ -19,21 +19,9 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { logger } from "@oh-my-pi/pi-utils";
-import { DWClient, type DWClientDownStream, TOPIC_ROBOT } from "dingtalk-stream";
-import {
-	buildAnswerBlock,
-	buildImageBlock,
-	buildThinkBlock,
-	buildToolBlock,
-	type CardBlock,
-} from "./dingtalk-card";
-import {
-	createAICardForTarget,
-	failAICard,
-	finishAICard,
-	patchAICardBlocks,
-	streamAICard,
-} from "./dingtalk-card";
+import { DWClient, type DWClientDownStream, TOPIC_CARD, TOPIC_ROBOT } from "dingtalk-stream";
+import { buildAnswerBlock, buildImageBlock, buildStopBlock, buildThinkBlock, buildToolBlock, type CardBlock, BlockType } from "./dingtalk-card";
+import { createAICardForTarget, failAICard, finishAICard, patchAICardBlocks, streamAICard } from "./dingtalk-card";
 import { uploadMedia } from "./dingtalk-media";
 import { formatDingTalkChrome, formatDingTalkReply } from "./dingtalk-formatter";
 import type {
@@ -56,6 +44,20 @@ import { BaseChannel } from "./base";
 const CARD_STREAM_THROTTLE_MS = 1_000;
 /** Throttle window for incremental blockList patches (think / tool / image). */
 const CARD_BLOCK_PATCH_THROTTLE_MS = 800;
+
+/**
+ * Event the channel emits when the user clicks a button on an AI Card.
+ * Routed by the gateway's ActionRegistry to the matching session's
+ * bridge (e.g. for `type=stop` actions).
+ */
+export interface DingTalkCardActionEvent {
+	cardInstanceId: string;
+	actionIds: string[];
+	params: Record<string, string>;
+	/** User that clicked. Useful for audit / authorization. */
+	userId: string;
+	corpId: string;
+}
 
 // ═══════════════════════════════════════════════════════════════════════
 // Constants
@@ -313,6 +315,8 @@ export class DingTalkChannel extends BaseChannel {
 	#connected = false;
 	#connectionFailed = false;
 	#accountId = "__default__";
+	/** Handler invoked when a card action callback arrives via TOPIC_CARD. */
+	#cardActionHandler: ((event: DingTalkCardActionEvent) => Promise<void>) | null = null;
 
 	/** Set the account ID for multi-account routing */
 	setAccountId(accountId: string): void {
@@ -322,6 +326,29 @@ export class DingTalkChannel extends BaseChannel {
 	/** Get the account ID */
 	getAccountId(): string {
 		return this.#accountId;
+	}
+
+	/**
+	 * Set the handler for AI Card action callbacks. The gateway
+	 * installs this so the channel's TOPIC_CARD listener can route
+	 * button clicks back to the right session / bridge. Called once
+	 * during gateway startup; the handler is stable for the channel's
+	 * lifetime.
+	 */
+	setCardActionHandler(handler: (event: DingTalkCardActionEvent) => Promise<void>): void {
+		this.#cardActionHandler = handler;
+	}
+
+	/**
+	 * Test seam: expose `#handleCardCallback` so unit tests can
+	 * drive the card action parsing path without spinning up the
+	 * full Stream SDK. Production code should rely on the SDK to
+	 * call `#handleCardCallback` via `registerCallbackListener`.
+	 * Returns a promise that resolves when the handler finishes
+	 * (or the callback is silently dropped).
+	 */
+	__testHandleCardCallback(msg: DWClientDownStream): Promise<void> {
+		return this.#handleCardCallback(msg);
 	}
 
 	/**
@@ -341,11 +368,7 @@ export class DingTalkChannel extends BaseChannel {
 	 * a single text blob. The gateway calls this after every agent run when
 	 * the channel opts in via the `Channel.formatReply?` method.
 	 */
-	formatReply(
-		meta: AgentResponseMeta,
-		inbound: InboundMessage,
-		context: ReplyFormatterContext,
-	): OutboundMessage {
+	formatReply(meta: AgentResponseMeta, inbound: InboundMessage, context: ReplyFormatterContext): OutboundMessage {
 		const { markdown, truncated } = formatDingTalkReply({
 			meta,
 			inbound,
@@ -444,6 +467,19 @@ export class DingTalkChannel extends BaseChannel {
 			return null;
 		}
 
+		// Pre-register the card with the gateway's ActionRegistry. The
+		// registration is gated on `registerCardAction` (set by the
+		// gateway when it builds the context). We register the card
+		// eagerly so that a TOPIC_CARD callback for a stop button (pushed
+		// later by onLongTask) can be routed back. The `toolName` field
+		// is unknown at create-time and is patched in when the stop
+		// block is pushed below.
+		context.registerCardAction?.({
+			cardInstanceId: card.cardInstanceId,
+			accountId: this.#accountId,
+			sessionId: inbound.conversationId,
+		});
+
 		// Block builder state. Blocks are emitted in two phases:
 		//   1. mid-stream incremental patch (think / tool / image appear
 		//      as the agent produces them — throttled)
@@ -506,9 +542,7 @@ export class DingTalkChannel extends BaseChannel {
 					// tool_result without a matching toolcall_end is unusual
 					// (it can happen if the bridge dropped a delta) — still
 					// emit a block with the name we have, for visibility.
-					blocks.push(
-						buildToolBlock({ name: result.name, args: null }, result.contentText, result.isError),
-					);
+					blocks.push(buildToolBlock({ name: result.name, args: null }, result.contentText, result.isError));
 				} else {
 					blocks.push(buildToolBlock(pending, result.contentText, result.isError));
 				}
@@ -523,6 +557,53 @@ export class DingTalkChannel extends BaseChannel {
 				if (thinkingText.trim()) {
 					blocks.push(buildThinkBlock(thinkingText));
 					thinkingText = "";
+				}
+			},
+			onLongTask: evt => {
+				// Long-running tool: surface a stop block with an abort
+				// button. Only push on the threshold fire (not on every
+				// ping) so we don't spam the blockList with duplicates.
+				// On ping events, append a progress line to the existing
+				// stop block (or the most recent think block) instead.
+				if (evt.threshold) {
+					blocks.push(
+						buildStopBlock({
+							toolName: evt.toolName,
+							elapsedMs: evt.elapsedMs,
+							requestPath: "/dingtalk/action",
+							sessionId: _session.id,
+						}),
+					);
+					scheduleBlockPatch();
+					// Patch the registry entry with the toolName now that
+					// we know which tool is hanging. The base registration
+					// (without toolName) is already in place from the
+					// create-time call; this re-registers with the richer
+					// info so audit logs / future action types can see it.
+					context.registerCardAction?.({
+						cardInstanceId: card.cardInstanceId,
+						accountId: this.#accountId,
+						sessionId: inbound.conversationId,
+						toolName: evt.toolName,
+					});
+				} else {
+					// Pings just update the last stop block's text with
+					// the latest elapsed time, or append a progress line
+					// to the think block if no stop block exists.
+					const last = blocks[blocks.length - 1];
+					if (last && last.type === BlockType.STOP) {
+						const elapsedMin = Math.floor(evt.elapsedMs / 60_000);
+						const body = `⏳ **${evt.toolName}** 已运行 ${elapsedMin} 分钟。点击下方按钮中止。`;
+						last.text = body;
+						last.markdown = body;
+					} else {
+						// No stop block to update (we missed the threshold
+						// somehow) — fall back to a progress line on the
+						// last think block.
+						const elapsedMin = Math.floor(evt.elapsedMs / 60_000);
+						thinkingText += `\n⏳ ${evt.toolName} 仍运行中 (${elapsedMin} min)`;
+					}
+					scheduleBlockPatch();
 				}
 			},
 		};
@@ -587,7 +668,7 @@ export class DingTalkChannel extends BaseChannel {
 			quoteContent: chrome.quoteContent ?? quoteText,
 			statusLine: chrome.statusLine ?? "",
 			copyContent: chrome.copyContent,
-			hasAction: false,
+			hasAction: blocks.some(b => b.btns && b.btns.length > 0),
 			version: 1 as const,
 		};
 
@@ -669,7 +750,7 @@ export class DingTalkChannel extends BaseChannel {
 			clientSecret: this.#config.appSecret,
 			ua: "pi-gateway/0.1.0",
 			debug: false,
-			autoReconnect: false,  // pi-gateway has its own #doReconnect logic
+			autoReconnect: false, // pi-gateway has its own #doReconnect logic
 		});
 
 		// Connection lifecycle
@@ -690,6 +771,16 @@ export class DingTalkChannel extends BaseChannel {
 		// Register robot message listener
 		this.#client.registerCallbackListener(TOPIC_ROBOT, (msg: DWClientDownStream) => {
 			void this.#handleMessage(msg);
+		});
+
+		// Register AI Card action callback listener. When the user clicks
+		// a button on a card we created, DingTalk pushes a callback over
+		// the same Stream WebSocket on /v1.0/card/instances/callback.
+		// The handler routes the action back to the gateway's
+		// ActionRegistry, which looks up the card and calls bridge.abort()
+		// (or other action types in the future).
+		this.#client.registerCallbackListener(TOPIC_CARD, (msg: DWClientDownStream) => {
+			void this.#handleCardCallback(msg);
 		});
 
 		// Start dedup cleanup timer
@@ -871,7 +962,9 @@ export class DingTalkChannel extends BaseChannel {
 				if (typeof data !== "string") return;
 				const msg = JSON.parse(data);
 				if (msg.type === "SYSTEM" && msg.headers?.topic === "disconnect") {
-					logger.debug("[DingTalk] Server disconnect topic received, reconnecting", { accountId: this.#accountId });
+					logger.debug("[DingTalk] Server disconnect topic received, reconnecting", {
+						accountId: this.#accountId,
+					});
 					if (!this.#isStopped && !this.#isReconnecting) {
 						void this.#doReconnect(true);
 					}
@@ -908,7 +1001,11 @@ export class DingTalkChannel extends BaseChannel {
 
 		if (!immediate && this.#reconnectAttempts > 0) {
 			const delay = this.#calculateBackoffDelay(this.#reconnectAttempts);
-			logger.debug("[DingTalk] Reconnecting", { accountId: this.#accountId, attempt: this.#reconnectAttempts + 1, delayMs: Math.round(delay) });
+			logger.debug("[DingTalk] Reconnecting", {
+				accountId: this.#accountId,
+				attempt: this.#reconnectAttempts + 1,
+				delayMs: Math.round(delay),
+			});
 			await Bun.sleep(delay);
 		}
 
@@ -949,7 +1046,11 @@ export class DingTalkChannel extends BaseChannel {
 			logger.debug("[DingTalk] Reconnect successful", { accountId: this.#accountId });
 		} catch (err) {
 			this.#reconnectAttempts++;
-			logger.error("[DingTalk] Reconnect failed", { accountId: this.#accountId, attempt: this.#reconnectAttempts, error: String(err) });
+			logger.error("[DingTalk] Reconnect failed", {
+				accountId: this.#accountId,
+				attempt: this.#reconnectAttempts,
+				error: String(err),
+			});
 		} finally {
 			this.#isReconnecting = false;
 		}
@@ -1065,11 +1166,84 @@ export class DingTalkChannel extends BaseChannel {
 	// Message Handling
 	// ═══════════════════════════════════════════════════════════════════
 
+	/**
+	 * Handle a DingTalk AI Card action callback (TOPIC_CARD).
+	 *
+	 * The body shape is:
+	 *   { type: "actionCallback", outTrackId, corpId, userId,
+	 *     content: "{...cardPrivateData JSON...}" }
+	 *
+	 * `outTrackId` is the cardInstanceId we generated at create-time,
+	 * so the gateway's ActionRegistry can look up the session / bridge
+	 * that owns the card. `content.cardPrivateData.params` carries the
+	 * `btns[N].params` we set in `buildStopBlock` (e.g. `type=stop`,
+	 * `sessionId`, `toolName`).
+	 */
+	async #handleCardCallback(msg: DWClientDownStream): Promise<void> {
+		if (!this.#cardActionHandler) {
+			logger.debug("[DingTalk] card action arrived but no handler installed", {
+				accountId: this.#accountId,
+			});
+			return;
+		}
+		const raw = typeof msg.data === "string" ? msg.data : JSON.stringify(msg.data);
+		let body: {
+			outTrackId?: string;
+			corpId?: string;
+			userId?: string;
+			content?: string;
+		};
+		try {
+			body = JSON.parse(raw) as typeof body;
+		} catch (err) {
+			logger.warn("[DingTalk] card callback body not JSON", {
+				accountId: this.#accountId,
+				error: err instanceof Error ? err.message : String(err),
+				preview: raw.slice(0, 200),
+			});
+			return;
+		}
+		if (!body.outTrackId || !body.content) {
+			logger.warn("[DingTalk] card callback missing outTrackId or content", {
+				accountId: this.#accountId,
+				body,
+			});
+			return;
+		}
+		let privateData: { cardPrivateData?: { actionIds?: string[]; params?: Record<string, string> } };
+		try {
+			privateData = JSON.parse(body.content);
+		} catch (err) {
+			logger.warn("[DingTalk] card callback content not JSON", {
+				accountId: this.#accountId,
+				error: err instanceof Error ? err.message : String(err),
+				preview: body.content.slice(0, 200),
+			});
+			return;
+		}
+		const cpd = privateData.cardPrivateData ?? {};
+		const event: DingTalkCardActionEvent = {
+			cardInstanceId: body.outTrackId,
+			actionIds: cpd.actionIds ?? [],
+			params: cpd.params ?? {},
+			userId: body.userId ?? "",
+			corpId: body.corpId ?? "",
+		};
+		try {
+			await this.#cardActionHandler(event);
+		} catch (err) {
+			logger.error("[DingTalk] card action handler threw", {
+				accountId: this.#accountId,
+				cardInstanceId: event.cardInstanceId,
+				error: err instanceof Error ? err.message : String(err),
+			});
+		}
+	}
+
 	async #handleMessage(msg: DWClientDownStream): Promise<void> {
 		this.#receivedCount++;
 		const { headers, data: rawData } = msg;
 		const messageId = headers.messageId;
-
 		// Acknowledge immediately
 		if (messageId) {
 			this.#client?.socketCallBackResponse(messageId, { success: true });
@@ -1201,7 +1375,10 @@ async function writeDataUriToTempFile(dataUri: string, mimeType: string): Promis
 	const safeExt = ext.replace(/[^a-zA-Z0-9]/g, "");
 	try {
 		const bytes = Buffer.from(base64, "base64");
-		const tmpPath = path.join(os.tmpdir(), `omp-card-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${safeExt}`);
+		const tmpPath = path.join(
+			os.tmpdir(),
+			`omp-card-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${safeExt}`,
+		);
 		await fs.promises.writeFile(tmpPath, bytes);
 		return tmpPath;
 	} catch (err) {

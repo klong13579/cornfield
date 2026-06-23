@@ -118,9 +118,7 @@ export interface Channel {
 		inbound: InboundMessage,
 		session: import("./types").SessionRecord,
 		context: ReplyFormatterContext,
-		submit: (
-			handlers?: import("./types").ForwardStreamHandlers,
-		) => Promise<AgentResponseMeta | null>,
+		submit: (handlers?: import("./types").ForwardStreamHandlers) => Promise<AgentResponseMeta | null>,
 	): Promise<OutboundMessage | null>;
 }
 
@@ -128,6 +126,21 @@ export interface Channel {
  * Context passed to a channel's `formatReply`. Captures the per-account
  * display details that don't live on the `AgentResponseMeta` itself.
  */
+/**
+ * Callback the channel invokes when a DingTalk AI Card is created with
+ * interactive blocks. The gateway uses this to register the card in
+ * its `ActionRegistry` so that a subsequent TOPIC_CARD callback
+ * (user clicked a button) can be routed back to the right session /
+ * bridge for the `stop` action. Optional — channels that don't need
+ * action routing (e.g. read-only card schema) can omit it.
+ */
+export type RegisterCardActionFn = (info: {
+	cardInstanceId: string;
+	accountId: string;
+	sessionId: string;
+	toolName?: string;
+}) => void;
+
 export interface ReplyFormatterContext {
 	/** Account id for the inbound message (used as a fallback "agent" label). */
 	accountId: string;
@@ -139,6 +152,13 @@ export interface ReplyFormatterContext {
 	 * a placeholder.
 	 */
 	dapiCalls: number;
+	/**
+	 * Optional: invoked by the channel when a card with an interactive
+	 * `btns` array is created. The gateway registers the card here so a
+	 * later TOPIC_CARD action callback can be routed back. See
+	 * `ActionRegistry` for the lookup side.
+	 */
+	registerCardAction?: RegisterCardActionFn;
 }
 
 // ═════════════════════════════════════════════════════════════════════════

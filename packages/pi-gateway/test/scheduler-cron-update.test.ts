@@ -174,10 +174,7 @@ describe("cronUpdate", () => {
 		seedTask("multi");
 		const before = Date.now();
 
-		await cronUpdate(
-			["multi", "--account", "hr", "--deliver", "dingtalk:hr", "--timeout-ms", "60000"],
-			storage,
-		);
+		await cronUpdate(["multi", "--account", "hr", "--deliver", "dingtalk:hr", "--timeout-ms", "60000"], storage);
 
 		const task = storage.getTaskByName("multi");
 		expect(task?.accountId).toBe("hr");

@@ -8,8 +8,10 @@
  */
 import { describe, expect, test } from "bun:test";
 import {
+	BlockType,
 	buildAnswerBlock,
 	buildImageBlock,
+	buildStopBlock,
 	buildThinkBlock,
 	buildToolBlock,
 	cardParamMapFromData,
@@ -81,6 +83,78 @@ describe("buildImageBlock", () => {
 		const block = buildImageBlock("@lALPDfmVR_test", "");
 		expect(block.type).toBe(3);
 		expect(block.mediaId).toBe("@lALPDfmVR_test");
+	});
+});
+
+describe("buildStopBlock", () => {
+	test("emits type-4 block with single stop button carrying request params", () => {
+		const block = buildStopBlock({
+			toolName: "bash",
+			elapsedMs: 240_000, // 4 min
+			requestPath: "/dingtalk/action",
+			sessionId: "sess-123",
+		});
+		expect(block.type).toBe(BlockType.STOP);
+		expect(block.type).toBe(4);
+		expect(block.btns).toBeDefined();
+		expect(block.btns).toHaveLength(1);
+		const btn = block.btns?.[0];
+		expect(btn?.text).toBe("停止");
+		expect(btn?.actionType).toBe("request");
+		expect(btn?.requestPath).toBe("/dingtalk/action");
+		expect(btn?.params).toEqual({
+			type: "stop",
+			sessionId: "sess-123",
+			toolName: "bash",
+		});
+		// The body text should mention the tool name and the elapsed
+		// time so the user can see why the stop button is there.
+		expect(block.text).toContain("bash");
+		expect(block.text).toContain("4");
+	});
+
+	test("accepts a custom button text", () => {
+		const block = buildStopBlock({
+			toolName: "browser",
+			elapsedMs: 60_000,
+			requestPath: "/dingtalk/action",
+			sessionId: "sess-1",
+			buttonText: "中止任务",
+		});
+		expect(block.btns?.[0]?.text).toBe("中止任务");
+	});
+
+	test("rounds elapsed time down to whole minutes", () => {
+		const block = buildStopBlock({
+			toolName: "bash",
+			elapsedMs: 4 * 60_000 + 30_000, // 4.5 min
+			requestPath: "/dingtalk/action",
+			sessionId: "sess-1",
+		});
+		expect(block.text).toContain("4"); // not 5
+	});
+});
+
+describe("CardBlock btns serialization", () => {
+	test("cardParamMapFromData preserves btns inside blockList", () => {
+		const blockList = [
+			{
+				type: BlockType.STOP,
+				text: "long tool",
+				markdown: "long tool",
+				btns: [{ text: "停止", actionType: "request" as const, requestPath: "/dingtalk/action" }],
+			},
+		];
+		const map = cardParamMapFromData(
+			{ content: "", blockList, quoteContent: "", statusLine: "", copyContent: "", hasAction: true, version: 1 },
+			"3",
+		);
+		const parsed = JSON.parse(map.blockList);
+		expect(parsed).toHaveLength(1);
+		expect(parsed[0].btns).toEqual([
+			{ text: "停止", actionType: "request", requestPath: "/dingtalk/action" },
+		]);
+		expect(JSON.parse(map.hasAction)).toBe(true);
 	});
 });
 
