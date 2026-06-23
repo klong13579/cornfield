@@ -269,6 +269,32 @@ describe("DingTalk AI Card lifecycle (v2 reply path)", () => {
 			c => c.method === "PUT" && c.path === "/v1.0/card/instances" && (c.body as any)?.cardData?.cardParamMap?.flowStatus === "3",
 		);
 		expect(finishPut, "FINISHED transition PUT should hit /v1.0/card/instances").toBeTruthy();
+
+		// v3 schema assertion: the FINISHED PUT should include the full
+		// structured cardData — content, blockList, quoteContent,
+		// statusLine, copy_content, hasAction, version — keyed under
+		// cardParamMap. The blockList is a JSON-stringified array; the
+		// v1 chrome fields are also JSON-stringified primitives.
+		const finishedMap = (finishPut as any)?.body?.cardData?.cardParamMap;
+		expect(finishedMap, "FINISHED body must carry cardParamMap").toBeTruthy();
+		expect(typeof finishedMap?.content).toBe("string");
+		expect(finishedMap?.content).toContain("Hello world!");
+		expect(typeof finishedMap?.blockList).toBe("string");
+		const blockList = JSON.parse(finishedMap.blockList);
+		expect(Array.isArray(blockList)).toBe(true);
+		// Answer block is the last entry; type 0, contains the answer text.
+		const answerBlock = blockList.find((b: { type: number }) => b.type === 0);
+		expect(answerBlock, "blockList must contain an answer block (type 0)").toBeTruthy();
+		expect(answerBlock.markdown).toContain("Hello world!");
+		// quoteContent + statusLine are top-level fields in v3 (not
+		// inside the markdown body).
+		expect(finishedMap?.quoteContent).toContain("summarize");
+		expect(finishedMap?.statusLine).toContain("claude-sonnet-4-5");
+		expect(finishedMap?.statusLine).toContain("ops-bot");
+		// copy_content + hasAction + version are also v3 keys.
+		expect(finishedMap?.copy_content).toContain("Hello world!");
+		expect(JSON.parse(finishedMap?.hasAction)).toBe(false);
+		expect(JSON.parse(finishedMap?.version)).toBe(1);
 	});
 
 	test("streamCard returns null when card creation fails (gateway falls back to v1)", async () => {

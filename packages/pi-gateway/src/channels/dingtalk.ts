@@ -16,15 +16,26 @@
  */
 
 import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { logger } from "@oh-my-pi/pi-utils";
 import { DWClient, type DWClientDownStream, TOPIC_ROBOT } from "dingtalk-stream";
+import {
+	buildAnswerBlock,
+	buildImageBlock,
+	buildThinkBlock,
+	buildToolBlock,
+	type CardBlock,
+} from "./dingtalk-card";
 import {
 	createAICardForTarget,
 	failAICard,
 	finishAICard,
+	patchAICardBlocks,
 	streamAICard,
 } from "./dingtalk-card";
-import { formatDingTalkReply } from "./dingtalk-formatter";
+import { uploadMedia } from "./dingtalk-media";
+import { formatDingTalkChrome, formatDingTalkReply } from "./dingtalk-formatter";
 import type {
 	AgentResponseMeta,
 	ChannelConfig,
@@ -43,6 +54,8 @@ import { BaseChannel } from "./base";
 
 /** Throttle window for streaming the assistant text into the AI Card. */
 const CARD_STREAM_THROTTLE_MS = 1_000;
+/** Throttle window for incremental blockList patches (think / tool / image). */
+const CARD_BLOCK_PATCH_THROTTLE_MS = 800;
 
 // ═══════════════════════════════════════════════════════════════════════
 // Constants
@@ -386,11 +399,43 @@ export class DingTalkChannel extends BaseChannel {
 			return null;
 		}
 
+		const config = this.#config;
 		const target = inbound.isGroup
 			? ({ type: "group", openConversationId: inbound.conversationId } as const)
 			: ({ type: "user", userId: inbound.userId } as const);
 
-		const card = await createAICardForTarget(this.#config, target);
+		// Pre-compute chrome for create-time and finish-time. We need
+		// the inbound's quoteContent visible from the moment the card
+		// is delivered (so users in a busy group see what the card is
+		// replying to before the answer starts streaming in). The
+		// placeholder meta is shaped to satisfy `AgentResponseMeta` even
+		// though we only consume `quoteContent` here — the rest of the
+		// fields are filled by `formatDingTalkChrome` at finish time
+		// from the real run meta.
+		const quoteText =
+			formatDingTalkChrome({
+				meta: {
+					text: "",
+					rawText: "",
+					model: null,
+					provider: null,
+					usage: null,
+					agentDurationMs: null,
+					taskDurationMs: 0,
+					effort: null,
+					toolCalls: [],
+					toolResults: [],
+					error: null,
+					aborted: false,
+					isFallback: true,
+				},
+				inbound,
+				agentName: context.agentName,
+				accountId: context.accountId,
+				dapiCalls: 0,
+			}).quoteContent ?? "";
+
+		const card = await createAICardForTarget(config, target, { quoteContent: quoteText });
 		if (!card) {
 			logger.warn("[DingTalk] AI Card creation failed, gateway will fall back to v1 markdown", {
 				accountId: this.#accountId,
@@ -399,17 +444,26 @@ export class DingTalkChannel extends BaseChannel {
 			return null;
 		}
 
-		// Throttle state: track the latest cumulative text and the
-		// pending flush timer. We replace (not append) the buffered text
-		// on every delta because the bridge's `cumulative` argument is
-		// already the full running total.
-		let bufferedText = "";
-		let flushTimer: ReturnType<typeof setTimeout> | null = null;
+		// Block builder state. Blocks are emitted in two phases:
+		//   1. mid-stream incremental patch (think / tool / image appear
+		//      as the agent produces them — throttled)
+		//   2. final flush (answer block + chrome fields) on agent_end
+		const blocks: CardBlock[] = [];
+		let contentText = "";
+		let thinkingText = "";
+		/** toolName / args keyed by id; values from onToolCall. */
+		const pendingTools = new Map<string, { name: string; args: unknown }>();
+		/** tmp dir for image data URIs that need to be uploaded. */
+		const tmpFiles: string[] = [];
 
-		const flushBuffered = (): void => {
-			flushTimer = null;
-			if (!bufferedText) return;
-			void streamAICard(card, bufferedText, false, this.#config ?? undefined).catch(err => {
+		// Throttle timers.
+		let textFlushTimer: ReturnType<typeof setTimeout> | null = null;
+		let blockPatchTimer: ReturnType<typeof setTimeout> | null = null;
+
+		const flushText = (): void => {
+			textFlushTimer = null;
+			if (!contentText) return;
+			void streamAICard(card, contentText, blocks, config).catch(err => {
 				logger.warn("[DingTalk] streamAICard failed (mid-stream)", {
 					accountId: this.#accountId,
 					conversationId: inbound.conversationId,
@@ -418,31 +472,104 @@ export class DingTalkChannel extends BaseChannel {
 			});
 		};
 
+		const flushBlocks = (): void => {
+			blockPatchTimer = null;
+			void patchAICardBlocks(card, { content: contentText, blockList: blocks }, config).catch(err => {
+				logger.warn("[DingTalk] patchAICardBlocks failed", {
+					accountId: this.#accountId,
+					conversationId: inbound.conversationId,
+					error: err instanceof Error ? err.message : String(err),
+				});
+			});
+		};
+
+		const scheduleBlockPatch = (): void => {
+			if (blockPatchTimer) return;
+			blockPatchTimer = setTimeout(flushBlocks, CARD_BLOCK_PATCH_THROTTLE_MS);
+		};
+
 		const handlers: ForwardStreamHandlers = {
 			onTextDelta: (_delta, cumulative) => {
-				bufferedText = cumulative;
-				if (flushTimer) return;
-				flushTimer = setTimeout(flushBuffered, CARD_STREAM_THROTTLE_MS);
+				contentText = cumulative;
+				if (textFlushTimer) return;
+				textFlushTimer = setTimeout(flushText, CARD_STREAM_THROTTLE_MS);
+			},
+			onThinkingDelta: delta => {
+				thinkingText += delta;
+			},
+			onToolCall: call => {
+				pendingTools.set(call.id, { name: call.name, args: call.args });
+			},
+			onToolResult: result => {
+				const pending = pendingTools.get(result.id);
+				if (!pending) {
+					// tool_result without a matching toolcall_end is unusual
+					// (it can happen if the bridge dropped a delta) — still
+					// emit a block with the name we have, for visibility.
+					blocks.push(
+						buildToolBlock({ name: result.name, args: null }, result.contentText, result.isError),
+					);
+				} else {
+					blocks.push(buildToolBlock(pending, result.contentText, result.isError));
+				}
+				pendingTools.delete(result.id);
+				scheduleBlockPatch();
+			},
+			onAssistantMessageEnd: () => {
+				// Flush the thinking buffer as a think block. The text
+				// itself is in contentText; the answer block is built at
+				// onAgentEnd so we can include the final content (after
+				// any post-message-end edits the model performs).
+				if (thinkingText.trim()) {
+					blocks.push(buildThinkBlock(thinkingText));
+					thinkingText = "";
+				}
 			},
 		};
 
 		const meta = await submit(handlers);
 
-		// Always cancel the pending flush so we don't double-stream
-		// before the final finish call.
-		if (flushTimer) {
-			clearTimeout(flushTimer);
-			flushTimer = null;
+		// Always cancel pending flushes so we don't double-stream before
+		// the final finish call.
+		if (textFlushTimer) {
+			clearTimeout(textFlushTimer);
+			textFlushTimer = null;
+		}
+		if (blockPatchTimer) {
+			clearTimeout(blockPatchTimer);
+			blockPatchTimer = null;
 		}
 
 		if (meta === null) {
-			// Queue full / submit rejected — mark the card as failed so
-			// the user doesn't see a stuck PROCESSING card.
-			await failAICard(card, "系统繁忙，请稍后重试。", this.#config ?? undefined);
+			await failAICard(card, "系统繁忙，请稍后重试。", config);
+			await cleanupTmpFiles(tmpFiles);
 			return null;
 		}
 
-		const { markdown } = formatDingTalkReply({
+		// Image upload pipeline: scan the assistant's final text for
+		// data URI images, upload each one, and replace with a mediaId
+		// reference. This is the v3 image-block path; tool results that
+		// return images are not yet auto-uploaded (they would need
+		// binary content in onToolResult, which the bridge currently
+		// surfaces only as `contentText`).
+		const dataUris = extractDataUriImages(meta.text);
+		for (const match of dataUris) {
+			const tmp = await writeDataUriToTempFile(match.dataUri, match.mimeType);
+			if (!tmp) continue;
+			tmpFiles.push(tmp);
+			const upload = await uploadMedia(tmp, "image", config);
+			if (!upload) {
+				logger.warn("[DingTalk] image upload failed; skipping image block", {
+					accountId: this.#accountId,
+					conversationId: inbound.conversationId,
+				});
+				continue;
+			}
+			blocks.push(buildImageBlock(upload.mediaId, match.alt));
+		}
+
+		// Build the answer block from the sanitized final text.
+		const chrome = formatDingTalkChrome({
 			meta,
 			inbound,
 			agentName: context.agentName,
@@ -450,16 +577,47 @@ export class DingTalkChannel extends BaseChannel {
 			dapiCalls: context.dapiCalls,
 		});
 
+		if (chrome.answerText) {
+			blocks.push(buildAnswerBlock(chrome.answerText));
+		}
+
+		const cardData = {
+			content: chrome.answerText,
+			blockList: blocks,
+			quoteContent: chrome.quoteContent ?? quoteText,
+			statusLine: chrome.statusLine ?? "",
+			copyContent: chrome.copyContent,
+			hasAction: false,
+			version: 1 as const,
+		};
+
 		try {
-			await finishAICard(card, markdown, this.#config ?? undefined);
+			await finishAICard(card, cardData, config);
 		} catch (err) {
 			logger.warn("[DingTalk] finishAICard failed, falling back to v1 markdown", {
 				accountId: this.#accountId,
 				conversationId: inbound.conversationId,
 				error: err instanceof Error ? err.message : String(err),
 			});
+			await cleanupTmpFiles(tmpFiles);
 			return null;
 		}
+
+		await cleanupTmpFiles(tmpFiles);
+
+		// The card itself is the user-visible reply. We still return a
+		// markdown OutboundMessage for the gateway's own bookkeeping /
+		// tests; the v1 chrome is the most complete representation of
+		// the response in a single string. Channels that send via the
+		// card and ignore the OutboundMessage (DingTalk) will simply
+		// drop it on the floor — the card is already delivered.
+		const { markdown } = formatDingTalkReply({
+			meta,
+			inbound,
+			agentName: context.agentName,
+			accountId: context.accountId,
+			dapiCalls: context.dapiCalls,
+		});
 
 		const outbound: OutboundMessage = {
 			channelId: this.id,
@@ -992,4 +1150,74 @@ export class DingTalkChannel extends BaseChannel {
 	#parseRobotMessage(raw: DingTalkRawMessage, messageId?: string): InboundMessage | null {
 		return parseRobotMessage(raw, this.id, this.#accountId, messageId);
 	}
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Data URI image helpers (v3 image block pipeline)
+// ═══════════════════════════════════════════════════════════════════════
+
+/** A single data URI image found in assistant text. */
+interface ExtractedImage {
+	/** The full data URI as it appeared in the markdown. */
+	dataUri: string;
+	/** "image/png", "image/jpeg", etc. */
+	mimeType: string;
+	/** Raw base64 payload (no MIME prefix). */
+	base64: string;
+	/** alt text from the markdown image (the `[alt]` part). */
+	alt: string;
+}
+
+const DATA_URI_IMAGE_RE = /!\[([^\]]*)\]\(data:([a-zA-Z0-9./+-]+);base64,([A-Za-z0-9+/=]+)\)/g;
+
+/**
+ * Scan assistant text for markdown data-URI images. Returns one entry
+ * per match. Only `data:<mime>;base64,...` is supported — remote
+ * `https://...` images are left untouched (DingTalk can fetch them
+ * natively; the channel doesn't need to upload them).
+ */
+export function extractDataUriImages(text: string): ExtractedImage[] {
+	const out: ExtractedImage[] = [];
+	for (const match of text.matchAll(DATA_URI_IMAGE_RE)) {
+		out.push({
+			dataUri: match[0],
+			mimeType: match[2],
+			base64: match[3],
+			alt: match[1] ?? "",
+		});
+	}
+	return out;
+}
+
+/**
+ * Decode a base64 data URI to a temp file on disk. Returns the path
+ * (caller must `cleanupTmpFiles` it) or null on failure.
+ */
+async function writeDataUriToTempFile(dataUri: string, mimeType: string): Promise<string | null> {
+	const match = DATA_URI_IMAGE_RE.exec(dataUri);
+	if (!match) return null;
+	const base64 = match[3];
+	const ext = mimeType.split("/")[1] ?? "bin";
+	const safeExt = ext.replace(/[^a-zA-Z0-9]/g, "");
+	try {
+		const bytes = Buffer.from(base64, "base64");
+		const tmpPath = path.join(os.tmpdir(), `omp-card-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${safeExt}`);
+		await fs.promises.writeFile(tmpPath, bytes);
+		return tmpPath;
+	} catch (err) {
+		logger.warn("[DingTalk] data URI decode failed", { mimeType, error: String(err) });
+		return null;
+	}
+}
+
+async function cleanupTmpFiles(paths: string[]): Promise<void> {
+	await Promise.all(
+		paths.map(async p => {
+			try {
+				await fs.promises.unlink(p);
+			} catch {
+				// best effort
+			}
+		}),
+	);
 }

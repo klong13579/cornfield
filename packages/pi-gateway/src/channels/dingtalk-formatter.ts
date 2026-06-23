@@ -50,6 +50,64 @@ export interface DingTalkFormatterOutput {
 }
 
 /**
+ * Structured chrome for the AI Card v3 path. Each field is a top-level
+ * `cardParamMap` entry in the OpenClaw schema (`675cde2f-...`) rather
+ * than an embedded line in the markdown body.
+ *
+ * - `quoteContent`: the inbound message shown at the top of the card.
+ * - `statusLine`: the footer line (model · effort · taskTime · tokens · dapi · agent).
+ * - `copyContent`: the string copied to clipboard when the user taps "copy".
+ *   Defaults to the sanitized answer text.
+ * - `toolSummary` / `answerText`: kept for the card's `blockList` builder.
+ *   The markdown is the same as v1; the v3 card module re-derives blocks
+ *   from the raw agent events (think / tool / image) plus the final
+ *   `answerText`.
+ */
+export interface DingTalkChrome {
+	quoteContent: string | null;
+	statusLine: string | null;
+	copyContent: string;
+	toolSummary: string | null;
+	answerText: string;
+	/** True for the localized-fallback branch — no chrome at all. */
+	isFallback: boolean;
+}
+
+/**
+ * Extract the chrome components separately so the v3 card module can
+ * place them in top-level `cardParamMap` fields (`quoteContent`,
+ * `statusLine`, `copy_content`) and skip re-implementing the markdown
+ * assembly logic.
+ *
+ * For the fallback branch, every chrome field is null / empty — the
+ * card just shows the localized error text in the answer block.
+ */
+export function formatDingTalkChrome(ctx: DingTalkFormatterContext): DingTalkChrome {
+	const { meta, inbound, agentName, accountId, dapiCalls } = ctx;
+	const answerText = sanitizeMarkdown(meta.text);
+
+	if (meta.isFallback) {
+		return {
+			quoteContent: null,
+			statusLine: null,
+			copyContent: "",
+			toolSummary: null,
+			answerText,
+			isFallback: true,
+		};
+	}
+
+	return {
+		quoteContent: formatQuoteContent(inbound),
+		statusLine: formatStatusLine(meta, agentName, accountId, dapiCalls),
+		copyContent: answerText,
+		toolSummary: formatToolSummary(meta),
+		answerText,
+		isFallback: false,
+	};
+}
+
+/**
  * Render the agent response + chrome into a single markdown message.
  *
  * For `meta.isFallback` (circuit open, recovery, error), returns just the

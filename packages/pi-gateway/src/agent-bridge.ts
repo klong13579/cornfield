@@ -131,6 +131,16 @@ export interface ForwardStreamHandlers {
 	onTextDelta?: (delta: string, cumulative: string) => void;
 	/** Fired on every `thinking_delta` for the assistant thinking block. */
 	onThinkingDelta?: (delta: string) => void;
+	/** Fired when an assistant tool call completes (on `toolcall_end`). The
+	 * bridge tracks tool calls / results internally for the final
+	 * `AgentResponseMeta`; this handler exists so streaming consumers can
+	 * pair the call with its result in real time. */
+	onToolCall?: (call: { id: string; name: string; args: unknown }) => void;
+	/** Fired on a user-side `message_end` whose `role === "toolResult"`.
+	 * Pairs with a prior `onToolCall` via `id`. `contentText` is the joined
+	 * `text` content (other content shapes are not currently extracted —
+	 * tool results with images / files do not produce text). */
+	onToolResult?: (result: { id: string; name: string; isError: boolean; contentText: string }) => void;
 	/** Fired when the assistant `message_end` event arrives. The full
 	 * assistant message is available on the meta returned by `forwardWithMeta`
 	 * — this just signals the message is complete. */
@@ -872,9 +882,47 @@ export class AgentBridge {
 					handlers.onTextDelta?.(ame.delta, pending.textCumulative);
 				} else if (ame.type === "thinking_delta" && typeof ame.delta === "string") {
 					handlers.onThinkingDelta?.(ame.delta);
+				} else if (ame.type === "toolcall_end") {
+					// toolcall_end carries the final ToolCall on `ame.toolCall`
+					// (matching @oh-my-pi/pi-ai AssistantMessageEvent). The
+					// bridge's inline `ame` shape is `Record<string, unknown>`
+					// so we read via the literal key.
+					const tc = (ame as { toolCall?: { id?: string; name?: string; arguments?: unknown } })
+						.toolCall;
+					if (tc && typeof tc.id === "string" && typeof tc.name === "string") {
+						handlers.onToolCall?.({ id: tc.id, name: tc.name, args: tc.arguments ?? null });
+					}
 				}
-			} else if (event.type === "message_end" && event.message?.role === "assistant") {
-				handlers.onAssistantMessageEnd?.();
+			} else if (event.type === "message_end" && event.message) {
+				const role = event.message.role;
+				if (role === "assistant") {
+					handlers.onAssistantMessageEnd?.();
+				} else if (role === "toolResult") {
+					// message_end for tool results carries the full
+					// ToolResultMessage inline. The bridge's local
+					// `AgentEvent.message` shape only captures the
+					// `role` + `content` text, so cast to the richer
+					// shape at the boundary (same pattern as
+					// `#buildMetaFromEvents`).
+					const tr = event.message as unknown as {
+						toolCallId?: string;
+						toolName?: string;
+						isError?: boolean;
+						content?: Array<{ type: string; text?: string }>;
+					};
+					if (typeof tr.toolCallId === "string") {
+						const contentText = (tr.content ?? [])
+							.filter(c => c.type === "text" && typeof c.text === "string")
+							.map(c => c.text ?? "")
+							.join("\n");
+						handlers.onToolResult?.({
+							id: tr.toolCallId,
+							name: typeof tr.toolName === "string" ? tr.toolName : "tool",
+							isError: tr.isError === true,
+							contentText,
+						});
+					}
+				}
 			} else if (event.type === "agent_end") {
 				handlers.onAgentEnd?.();
 			}

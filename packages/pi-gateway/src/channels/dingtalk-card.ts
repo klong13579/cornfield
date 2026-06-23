@@ -1,10 +1,31 @@
 /**
  * AI Card streaming for DingTalk.
  *
- * Supports creating AI Cards, streaming incremental content updates,
- * and finalizing with status transitions: PROCESSING -> INPUTING (token streaming) -> FINISHED/FAILED.
+ * v3 — OpenClaw blockList schema (`675cde2f-f526-40cb-b828-f5b2b57b8b77.schema`).
+ * The card body is a structured object with top-level fields:
  *
- * Features:
+ *   {
+ *     content: <streaming markdown answer, raw>,
+ *     blockList: [ { type, text, markdown, mediaId? }, ... ],
+ *     quoteContent: <inbound message body>,
+ *     statusLine: <model · effort · taskTime · tokens · dapi · agent>,
+ *     copy_content: <clipboard text>,
+ *     hasAction: false,
+ *     version: 1
+ *   }
+ *
+ * Block types follow the OpenClaw convention:
+ *   0 = answer  (the main markdown body, type 0 / type 5 for headings)
+ *   1 = think   (gray font, level2 token)
+ *   2 = tool    (Exec: prefix, gray font)
+ *   3 = image   (DingTalk mediaId, caption)
+ *
+ * Lifecycle: card is created in PROCESSING state, transitions to INPUTING
+ * on the first streaming update, blockList is patched incrementally
+ * (throttled) and the final flush on `finishAICard` switches to FINISHED
+ * with the full blockList + chrome.
+ *
+ * Operational features:
  * - Global token bucket rate limiter (20 req/s, shared across sessions)
  * - 403 QpsLimit auto-backoff with retry
  * - Markdown formatting fixes for DingTalk rendering
@@ -17,7 +38,14 @@ import type { DingTalkConfig } from "../types";
 // Constants
 // ═══════════════════════════════════════════════════════════════════════
 
-const AI_CARD_TEMPLATE_ID = "02fcf2f4-5e02-4a85-b672-46d1f715543e.schema";
+/**
+ * OpenClaw v2 blockList template. Users who need to override the
+ * template (e.g. their DingTalk tenant has a different schema) can set
+ * `DINGTALK_CARD_TEMPLATE_ID` in the env to point at their own schema.
+ */
+const DEFAULT_AI_CARD_TEMPLATE_ID = "675cde2f-f526-40cb-b828-f5b2b57b8b77.schema";
+const AI_CARD_TEMPLATE_ID = process.env.DINGTALK_CARD_TEMPLATE_ID ?? DEFAULT_AI_CARD_TEMPLATE_ID;
+
 const CARD_API_MAX_QPS = 20;
 const QPS_BACKOFF_MS = 2_000;
 
@@ -29,9 +57,46 @@ const AICardStatus = {
 	FAILED: "5",
 } as const;
 
+const BlockType = {
+	ANSWER: 0,
+	THINK: 1,
+	TOOL: 2,
+	IMAGE: 3,
+} as const;
+
+type BlockTypeValue = (typeof BlockType)[keyof typeof BlockType];
+
 // ═══════════════════════════════════════════════════════════════════════
 // Types
 // ═══════════════════════════════════════════════════════════════════════
+
+/** A single entry in `cardData.blockList`. The OpenClaw schema renders
+ * each block according to its `type`; `text` / `markdown` are the
+ * alternate text representations (one of them is usually empty). */
+export interface CardBlock {
+	type: BlockTypeValue;
+	text: string;
+	markdown: string;
+	mediaId?: string;
+}
+
+/** The full card data body written to `cardData.cardParamMap`. */
+export interface CardData {
+	/** The streaming answer text (raw, without chrome). */
+	content: string;
+	/** Structured blocks rendered in the card body. */
+	blockList: CardBlock[];
+	/** Original triggering message (top of card). */
+	quoteContent: string;
+	/** Footer status line (model · effort · taskTime · tokens · dapi · agent). */
+	statusLine: string;
+	/** String copied to clipboard when the user taps "copy". */
+	copyContent: string;
+	/** Whether the card exposes interactive action buttons. */
+	hasAction: boolean;
+	/** Schema version. */
+	version: 1;
+}
 
 export interface AICardInstance {
 	cardInstanceId: string;
@@ -41,6 +106,14 @@ export interface AICardInstance {
 }
 
 export type AICardTarget = { type: "user"; userId: string } | { type: "group"; openConversationId: string };
+
+/** Optional initial chrome written at card creation time (PROCESSING state). */
+export interface CreateCardOptions {
+	/** Original triggering message (top of card). Empty string for none. */
+	quoteContent?: string;
+	/** Footer status line. Empty string for none. */
+	statusLine?: string;
+}
 
 // ═══════════════════════════════════════════════════════════════════════
 // Global Token Bucket Rate Limiter
@@ -232,6 +305,67 @@ function normalizeForCard(content: string): string {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
+// Block Builders
+// ═══════════════════════════════════════════════════════════════════════
+
+/**
+ * Build an answer block (type 0). The OpenClaw schema renders the
+ * `markdown` field as the main body; `text` is the plain-text fallback.
+ */
+export function buildAnswerBlock(text: string): CardBlock {
+	const normalized = normalizeForCard(text);
+	return { type: BlockType.ANSWER, text: text.trim(), markdown: normalized };
+}
+
+/**
+ * Build a think block (type 1). Wraps the raw thinking in a gray
+ * font tag so the schema renders it as a secondary style.
+ */
+export function buildThinkBlock(thinking: string): CardBlock {
+	const trimmed = thinking.trim();
+	const wrapped = `> <font sizeToken=common_h5_text_style__font_size colorTokenV2=common_level2_base_color>${trimmed}</font>`;
+	return { type: BlockType.THINK, text: trimmed, markdown: wrapped };
+}
+
+/**
+ * Build a tool block (type 2). The text follows the OpenClaw
+ * `Exec: <name>(<args preview>)` convention; the markdown uses the
+ * gray font tag.
+ */
+export function buildToolBlock(call: { name: string; args: unknown }, resultText: string, isError: boolean): CardBlock {
+	const argsPreview = formatToolArgs(call.args);
+	const execLabel = isError ? `Exec: ${call.name}(${argsPreview}) — error` : `Exec: ${call.name}(${argsPreview})`;
+	const body = resultText || execLabel;
+	const wrapped = `> <font sizeToken=common_h5_text_style__font_size colorTokenV2=common_level2_base_color>${body}</font>`;
+	return { type: BlockType.TOOL, text: ` ${execLabel}\n${body}`, markdown: wrapped };
+}
+
+/**
+ * Build an image block (type 3). Requires an already-uploaded DingTalk
+ * mediaId; the channel layer is responsible for `uploadMedia` before
+ * the block is appended to `blockList`.
+ */
+export function buildImageBlock(mediaId: string, caption: string): CardBlock {
+	return {
+		type: BlockType.IMAGE,
+		text: caption,
+		markdown: caption ? `# ${caption}` : "",
+		mediaId,
+	};
+}
+
+function formatToolArgs(args: unknown): string {
+	if (args == null) return "";
+	if (typeof args === "string") return args.length > 60 ? `${args.slice(0, 60)}…` : args;
+	try {
+		const json = JSON.stringify(args);
+		return json.length > 60 ? `${json.slice(0, 60)}…` : json;
+	} catch {
+		return String(args);
+	}
+}
+
+// ═══════════════════════════════════════════════════════════════════════
 // Token Management
 // ═══════════════════════════════════════════════════════════════════════
 
@@ -292,12 +426,51 @@ function buildDeliverBody(cardInstanceId: string, target: AICardTarget, robotCod
 }
 
 // ═══════════════════════════════════════════════════════════════════════
+// cardParamMap helpers
+// ═══════════════════════════════════════════════════════════════════════
+
+export function cardParamMapFromData(data: Partial<CardData>, flowStatus: string): Record<string, string> {
+	return {
+		flowStatus,
+		content: data.content ?? "",
+		blockList: JSON.stringify(data.blockList ?? []),
+		quoteContent: data.quoteContent ?? "",
+		statusLine: data.statusLine ?? "",
+		copy_content: data.copyContent ?? "",
+		hasAction: JSON.stringify(data.hasAction ?? false),
+		version: JSON.stringify(data.version ?? 1),
+		config: JSON.stringify({ autoLayout: true }),
+	};
+}
+
+export function cardParamMapForStreamStart(content: string, blockList: CardBlock[]): Record<string, string> {
+	return {
+		flowStatus: AICardStatus.INPUTING,
+		content: normalizeForCard(content),
+		blockList: JSON.stringify(blockList),
+		quoteContent: "",
+		statusLine: "",
+		copy_content: "",
+		hasAction: JSON.stringify(false),
+		version: JSON.stringify(1),
+		config: JSON.stringify({ autoLayout: true }),
+	};
+}
+
+// ═══════════════════════════════════════════════════════════════════════
 // AI Card API
 // ═══════════════════════════════════════════════════════════════════════
 
+/**
+ * Create a card instance and deliver it to `target`. The card starts
+ * in PROCESSING state with the chrome fields already populated
+ * (quoteContent / statusLine show up immediately at the top / bottom
+ * of the card body even before any answer text arrives).
+ */
 export async function createAICardForTarget(
 	config: DingTalkConfig,
 	target: AICardTarget,
+	options: CreateCardOptions = {},
 ): Promise<AICardInstance | null> {
 	const targetDesc = target.type === "group" ? `group ${target.openConversationId}` : `user ${target.userId}`;
 
@@ -305,7 +478,17 @@ export async function createAICardForTarget(
 		const token = await getAccessToken(config);
 		const cardInstanceId = `card_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 
-		logger.debug("[AICard] Creating card", { target: targetDesc, cardInstanceId });
+		logger.debug("[AICard] Creating card", { target: targetDesc, cardInstanceId, templateId: AI_CARD_TEMPLATE_ID });
+
+		const initialData: Partial<CardData> = {
+			content: "",
+			blockList: [],
+			quoteContent: options.quoteContent ?? "",
+			statusLine: options.statusLine ?? "",
+			copyContent: "",
+			hasAction: false,
+			version: 1,
+		};
 
 		// 1. Create card instance
 		const createResp = await fetch(`${DINGTALK_API}/v1.0/card/instances`, {
@@ -317,11 +500,7 @@ export async function createAICardForTarget(
 			body: JSON.stringify({
 				cardTemplateId: AI_CARD_TEMPLATE_ID,
 				outTrackId: cardInstanceId,
-				cardData: {
-					cardParamMap: {
-						config: JSON.stringify({ autoLayout: true }),
-					},
-				},
+				cardData: { cardParamMap: cardParamMapFromData(initialData, AICardStatus.PROCESSING) },
 				callbackType: "STREAM",
 				imGroupOpenSpaceModel: { supportForward: true },
 				imRobotOpenSpaceModel: { supportForward: true },
@@ -365,10 +544,21 @@ export async function createAICardForTarget(
 	}
 }
 
+/**
+ * Stream a content update into the card. Switches the card from
+ * PROCESSING to INPUTING on the first call (the `msgContent` -> `content`
+ * rename is the schema v2 switch). Subsequent calls just update the
+ * `content` field via the streaming endpoint.
+ *
+ * `blockList` is included in every call so the schema can render new
+ * blocks as they appear. The streaming endpoint does not patch
+ * blockList — only `content` — so a `blockList` change is a no-op here;
+ * the channel must call `patchAICardBlocks` for blockList updates.
+ */
 export async function streamAICard(
 	card: AICardInstance,
 	content: string,
-	finished: boolean = false,
+	_blockList: CardBlock[] = [],
 	config?: DingTalkConfig,
 ): Promise<void> {
 	if (!card) {
@@ -385,15 +575,7 @@ export async function streamAICard(
 
 		const statusBody = {
 			outTrackId: card.cardInstanceId,
-			cardData: {
-				cardParamMap: {
-					flowStatus: AICardStatus.INPUTING,
-					msgContent: normalizeForCard(content),
-					staticMsgContent: "",
-					sys_full_json_obj: JSON.stringify({ order: ["msgContent"] }),
-					config: JSON.stringify({ autoLayout: true }),
-				},
-			},
+			cardData: { cardParamMap: cardParamMapForStreamStart(content, _blockList) },
 		};
 
 		try {
@@ -407,7 +589,6 @@ export async function streamAICard(
 			});
 
 			if (!resp.ok && resp.status === 403) {
-				// QPS retry
 				cardRateLimiter.triggerBackoff();
 				await cardRateLimiter.waitForToken();
 				const retryResp = await fetch(`${DINGTALK_API}/v1.0/card/instances`, {
@@ -433,15 +614,15 @@ export async function streamAICard(
 	}
 
 	const fixedContent = normalizeForCard(content);
-	const streamContent = finished ? fixedContent : fixedContent.replace(/\n+$/, "");
+	const streamContent = fixedContent.replace(/\n+$/, "");
 
 	const body = {
 		outTrackId: card.cardInstanceId,
 		guid: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-		key: "msgContent",
+		key: "content",
 		content: streamContent,
 		isFull: true,
-		isFinalize: finished,
+		isFinalize: false,
 		isError: false,
 	};
 
@@ -484,27 +665,85 @@ export async function streamAICard(
 	}
 }
 
-export async function finishAICard(card: AICardInstance, content: string, config?: DingTalkConfig): Promise<void> {
+/**
+ * Patch the card's `blockList` (and any other cardData field) while
+ * the card is still in INPUTING state. Use this for incremental block
+ * pushes (think / tool / image) before the final flush.
+ */
+export async function patchAICardBlocks(
+	card: AICardInstance,
+	data: Partial<CardData>,
+	config?: DingTalkConfig,
+): Promise<void> {
+	if (!card) return;
+	if (config) {
+		await ensureValidToken(card, config);
+	}
+
+	const body = {
+		outTrackId: card.cardInstanceId,
+		cardData: { cardParamMap: cardParamMapFromData(data, AICardStatus.INPUTING) },
+		cardUpdateOptions: { updateCardDataByKey: true },
+	};
+
+	await cardRateLimiter.waitForToken();
+
+	try {
+		const resp = await fetch(`${DINGTALK_API}/v1.0/card/instances`, {
+			method: "PUT",
+			headers: {
+				"x-acs-dingtalk-access-token": card.accessToken,
+				"Content-Type": "application/json",
+			},
+			body: JSON.stringify(body),
+		});
+
+		if (!resp.ok && resp.status === 403) {
+			cardRateLimiter.triggerBackoff();
+			await cardRateLimiter.waitForToken();
+			const retryResp = await fetch(`${DINGTALK_API}/v1.0/card/instances`, {
+				method: "PUT",
+				headers: {
+					"x-acs-dingtalk-access-token": card.accessToken,
+					"Content-Type": "application/json",
+				},
+				body: JSON.stringify(body),
+			});
+			if (!retryResp.ok) {
+				logger.error("[AICard] block patch retry failed", { status: retryResp.status });
+			}
+		} else if (!resp.ok) {
+			const text = await resp.text();
+			logger.warn("[AICard] block patch failed", { status: resp.status, body: text });
+		}
+	} catch (err) {
+		if (isQpsLimitError(err)) {
+			cardRateLimiter.triggerBackoff();
+		}
+		logger.error("[AICard] block patch error", { error: String(err) });
+	}
+}
+
+/**
+ * Flush the final content + blockList + chrome to the card and switch
+ * to FINISHED state. Called once on `agent_end`.
+ */
+export async function finishAICard(card: AICardInstance, data: CardData, config?: DingTalkConfig): Promise<void> {
 	if (!card) return;
 
 	if (config) {
 		await ensureValidToken(card, config);
 	}
 
-	const fixedContent = normalizeForCard(content);
-	await streamAICard(card, fixedContent, true, config);
+	// First make sure the streaming endpoint has the final content
+	// (in case the last text_delta was already flushed but the
+	// finishAICard arrived before the next throttle tick).
+	const fixedContent = normalizeForCard(data.content);
+	await streamAICard(card, fixedContent, data.blockList, config);
 
 	const body = {
 		outTrackId: card.cardInstanceId,
-		cardData: {
-			cardParamMap: {
-				flowStatus: AICardStatus.FINISHED,
-				msgContent: fixedContent,
-				staticMsgContent: "",
-				sys_full_json_obj: JSON.stringify({ order: ["msgContent"] }),
-				config: JSON.stringify({ autoLayout: true }),
-			},
-		},
+		cardData: { cardParamMap: cardParamMapFromData({ ...data, content: fixedContent }, AICardStatus.FINISHED) },
 		cardUpdateOptions: { updateCardDataByKey: true },
 	};
 
@@ -558,6 +797,13 @@ export async function failAICard(card: AICardInstance, content: string, config?:
 			cardParamMap: {
 				flowStatus: AICardStatus.FAILED,
 				cardErrorMessage: fixedContent,
+				content: "",
+				blockList: JSON.stringify([]),
+				quoteContent: "",
+				statusLine: "",
+				copy_content: "",
+				hasAction: JSON.stringify(false),
+				version: JSON.stringify(1),
 				config: JSON.stringify({ autoLayout: true }),
 			},
 		},
