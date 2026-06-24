@@ -196,6 +196,8 @@ export const SETTINGS_SCHEMA = {
 	// General settings (no UI)
 	// ────────────────────────────────────────────────────────────────────────
 	lastChangelogVersion: { type: "string", default: undefined },
+	lastUpdateCheck: { type: "number", default: 0 },
+	latestVersion: { type: "string", default: undefined },
 
 	autoResume: {
 		type: "boolean",

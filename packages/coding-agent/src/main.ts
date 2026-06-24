@@ -51,16 +51,39 @@ import type { LspStartupServerInfo } from "./tools";
 import { getChangelogPath, getNewEntries, parseChangelog } from "./utils/changelog";
 import type { EventBus } from "./utils/event-bus";
 
+const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const UPDATE_CHECK_TIMEOUT_MS = 8_000; // 8 seconds — npm registry can take 6s from CN
+
 async function checkForNewVersion(currentVersion: string): Promise<string | undefined> {
 	if (!settings.get("startup.checkUpdate")) {
 		return;
 	}
+
+	// Use cached result if checked recently — avoids a 6s npm registry fetch on every launch.
+	const lastCheck = settings.get("lastUpdateCheck");
+	if (lastCheck > 0 && Date.now() - lastCheck < UPDATE_CHECK_INTERVAL_MS) {
+		const cached = settings.get("latestVersion");
+		if (cached && Bun.semver.order(cached, currentVersion) > 0) {
+			return cached;
+		}
+		return undefined;
+	}
+
 	try {
-		const response = await fetch("https://registry.npmjs.org/@oh-my-pi/pi-coding-agent/latest");
+		const controller = new AbortController();
+		const timeout = setTimeout(() => controller.abort(), UPDATE_CHECK_TIMEOUT_MS);
+		const response = await fetch("https://registry.npmjs.org/@oh-my-pi/pi-coding-agent/latest", {
+			signal: controller.signal,
+		});
+		clearTimeout(timeout);
 		if (!response.ok) return undefined;
 
 		const data = (await response.json()) as { version?: string };
 		const latestVersion = data.version;
+		settings.set("lastUpdateCheck", Date.now());
+		if (latestVersion) {
+			settings.set("latestVersion", latestVersion);
+		}
 
 		if (latestVersion && Bun.semver.order(latestVersion, currentVersion) > 0) {
 			return latestVersion;
@@ -68,6 +91,8 @@ async function checkForNewVersion(currentVersion: string): Promise<string | unde
 
 		return undefined;
 	} catch {
+		// Record the attempt even on failure so we don't retry every launch.
+		settings.set("lastUpdateCheck", Date.now());
 		return undefined;
 	}
 }

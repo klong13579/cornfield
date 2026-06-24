@@ -922,7 +922,9 @@ export class ModelRegistry {
 		// Merge runtime extension models so they survive refresh() cycles
 		const combined = this.#mergeCustomModels(resolvedDefaults, this.#runtimeModelOverlays);
 		const withModelOverrides = this.#applyModelOverrides(combined, this.#modelOverrides);
-		this.#models = this.#applyExplicitProviderAllowlist(this.#pruneAlibabaCodingPlanCatalog(this.#applyRuntimeProviderOverrides(withModelOverrides)));
+		this.#models = this.#applyExplicitProviderAllowlist(
+			this.#pruneAlibabaCodingPlanCatalog(this.#applyRuntimeProviderOverrides(withModelOverrides)),
+		);
 		this.#rebuildCanonicalIndex();
 	}
 
@@ -1250,7 +1252,9 @@ export class ModelRegistry {
 		// Merge runtime extension models so they survive online discovery completion
 		const combined = this.#mergeCustomModels(withConfigModels, this.#runtimeModelOverlays);
 		const withModelOverrides = this.#applyModelOverrides(combined, this.#modelOverrides);
-		this.#models = this.#applyExplicitProviderAllowlist(this.#pruneAlibabaCodingPlanCatalog(this.#applyRuntimeProviderOverrides(withModelOverrides)));
+		this.#models = this.#applyExplicitProviderAllowlist(
+			this.#pruneAlibabaCodingPlanCatalog(this.#applyRuntimeProviderOverrides(withModelOverrides)),
+		);
 		this.#rebuildCanonicalIndex();
 	}
 
@@ -1350,7 +1354,7 @@ export class ModelRegistry {
 			return;
 		}
 		this.#lastDiscoveryWarnings.set(providerConfig.provider, error);
-		logger.warn("model discovery failed for provider", {
+		logger.debug("model discovery failed for provider", {
 			provider: providerConfig.provider,
 			url: providerConfig.baseUrl,
 			error,
