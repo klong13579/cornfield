@@ -4,7 +4,16 @@ import * as path from "node:path";
 import { Readability } from "@mozilla/readability";
 import type { AgentTool, AgentToolContext, AgentToolResult, AgentToolUpdateCallback } from "@oh-my-pi/pi-agent-core";
 import { StringEnum } from "@oh-my-pi/pi-ai";
-import { $which, getPuppeteerDir, logger, prompt, Snowflake, untilAborted } from "@oh-my-pi/pi-utils";
+import {
+	$which,
+	getAgentDir,
+	getPuppeteerDir,
+	isEnoent,
+	logger,
+	prompt,
+	Snowflake,
+	untilAborted,
+} from "@oh-my-pi/pi-utils";
 import { type Static, Type } from "@sinclair/typebox";
 import { type HTMLElement, parseHTML } from "linkedom";
 import type {
@@ -721,6 +730,88 @@ function formatEvaluateResult(value: unknown): string {
 }
 
 /**
+ * --- Browser state persistence (cookies + localStorage) ---
+ *
+ * Saves login state to ~/.omp/agent/browser-state.json so that sites
+ * logged in during a previous browser session remain logged in when
+ * a new Chromium instance is launched. Cookies are restored eagerly
+ * via CDP on browser start; localStorage is injected lazily on first
+ * navigation to each origin (CDP has no bulk localStorage API).
+ */
+const BROWSER_STATE_FILE = path.join(getAgentDir(), "browser-state.json");
+
+export interface PersistedCookie {
+	name: string;
+	value: string;
+	domain: string;
+	path: string;
+	expires: number;
+	httpOnly: boolean;
+	secure: boolean;
+	sameSite: string;
+}
+
+export interface BrowserState {
+	version: 1;
+	cookies: PersistedCookie[];
+	localStorage: Record<string, Record<string, string>>;
+	updatedAt: string;
+}
+
+export const EMPTY_BROWSER_STATE: BrowserState = {
+	version: 1,
+	cookies: [],
+	localStorage: {},
+	updatedAt: "",
+};
+
+async function loadBrowserState(): Promise<BrowserState | null> {
+	try {
+		return (await Bun.file(BROWSER_STATE_FILE).json()) as BrowserState;
+	} catch (err) {
+		if (isEnoent(err)) return null;
+		logger.warn("Failed to load browser state", {
+			error: err instanceof Error ? err.message : String(err),
+		});
+		return null;
+	}
+}
+
+async function saveBrowserState(state: BrowserState): Promise<void> {
+	await Bun.write(BROWSER_STATE_FILE, JSON.stringify(state));
+}
+
+/**
+ * Merge newly-exported cookies and localStorage for one origin into an
+ * existing state snapshot. Cookies are deduplicated by name+domain+path;
+ * localStorage is merged per-origin (new keys overwrite, old keys survive).
+ */
+export function mergeBrowserState(
+	existing: BrowserState,
+	cookies: PersistedCookie[],
+	origin: string,
+	localStorageData: Record<string, string>,
+): BrowserState {
+	const cookieMap = new Map<string, PersistedCookie>();
+	for (const c of existing.cookies) {
+		cookieMap.set(`${c.name}|${c.domain}|${c.path}`, c);
+	}
+	for (const c of cookies) {
+		cookieMap.set(`${c.name}|${c.domain}|${c.path}`, c);
+	}
+	const mergedLocalStorage = { ...existing.localStorage };
+	if (Object.keys(localStorageData).length > 0) {
+		mergedLocalStorage[origin] = { ...mergedLocalStorage[origin], ...localStorageData };
+	}
+	return {
+		version: 1,
+		cookies: Array.from(cookieMap.values()),
+		localStorage: mergedLocalStorage,
+		updatedAt: new Date().toISOString(),
+	};
+}
+
+/**
  * Puppeteer tool for headless browser automation.
  */
 export class BrowserTool implements AgentTool<typeof browserSchema, BrowserToolDetails> {
@@ -737,13 +828,168 @@ export class BrowserTool implements AgentTool<typeof browserSchema, BrowserToolD
 	#elementIdCounter = 0;
 	readonly #elementCache = new Map<number, ElementHandle>();
 	readonly #patchedClients = new WeakSet<object>();
+	#stateExportTimer: NodeJS.Timeout | null = null;
+	readonly #pendingLocalStorage = new Map<string, Record<string, string>>();
 
 	constructor(private readonly session: ToolSession) {
 		this.description = prompt.render(browserDescription, {});
 	}
 
+	/**
+	 * Restore persisted cookies (eagerly, via CDP) and queue localStorage
+	 * for lazy injection on first navigation to each origin.
+	 */
+	async #restoreState(page: Page): Promise<void> {
+		if (!this.session.settings.get("browser.persistState")) return;
+		const state = await loadBrowserState();
+		if (!state) return;
+
+		if (state.cookies.length > 0) {
+			const client = resolvePageClient(page);
+			if (client) {
+				try {
+					await client.send("Network.setCookies", {
+						cookies: state.cookies.map(c => ({
+							name: c.name,
+							value: c.value,
+							domain: c.domain,
+							path: c.path,
+							expires: c.expires,
+							httpOnly: c.httpOnly,
+							secure: c.secure,
+							sameSite: c.sameSite,
+						})),
+					});
+				} catch (err) {
+					logger.warn("Failed to restore browser cookies", {
+						error: err instanceof Error ? err.message : String(err),
+					});
+				}
+			}
+		}
+
+		for (const [origin, data] of Object.entries(state.localStorage)) {
+			this.#pendingLocalStorage.set(origin, data);
+		}
+	}
+
+	/**
+	 * Attach a framenavigated listener that injects pending localStorage
+	 * for the navigated origin and schedules a debounced state export.
+	 */
+	#attachStateSync(page: Page): void {
+		if (!this.session.settings.get("browser.persistState")) return;
+		page.on("framenavigated", frame => {
+			if (frame !== page.mainFrame()) return;
+			this.#injectPendingLocalStorage(page).catch(err => {
+				logger.debug("localStorage injection failed", {
+					error: err instanceof Error ? err.message : String(err),
+				});
+			});
+			this.#scheduleStateExport(page);
+		});
+	}
+
+	/**
+	 * Inject persisted localStorage for the current page origin, then
+	 * remove it from the pending queue (only injected once per origin).
+	 */
+	async #injectPendingLocalStorage(page: Page): Promise<void> {
+		const origin = (await page.evaluate(() => location.origin)) as string;
+		const data = this.#pendingLocalStorage.get(origin);
+		if (!data) return;
+		await page.evaluate((entries: [string, string][]) => {
+			for (const [key, value] of entries) {
+				localStorage.setItem(key, value);
+			}
+		}, Object.entries(data));
+		this.#pendingLocalStorage.delete(origin);
+	}
+
+	/**
+	 * Debounce state export to avoid writing on every rapid navigation.
+	 */
+	#scheduleStateExport(page: Page): void {
+		if (this.#stateExportTimer) {
+			clearTimeout(this.#stateExportTimer);
+		}
+		this.#stateExportTimer = setTimeout(() => {
+			this.#stateExportTimer = null;
+			this.#exportState(page).catch(err => {
+				logger.debug("Scheduled browser state export failed", {
+					error: err instanceof Error ? err.message : String(err),
+				});
+			});
+		}, 500);
+	}
+
+	/**
+	 * Export current cookies (via CDP) and localStorage (via evaluate) for
+	 * the active page, merge into the persisted state file, and save.
+	 */
+	async #exportState(page: Page): Promise<void> {
+		const existing = (await loadBrowserState()) ?? EMPTY_BROWSER_STATE;
+
+		// --- Cookies (browser-wide via CDP) ---
+		let cookies: PersistedCookie[] = [];
+		const client = resolvePageClient(page);
+		if (client) {
+			try {
+				const result = (await client.send("Network.getCookies")) as {
+					cookies: Array<Record<string, unknown>>;
+				};
+				cookies = result.cookies.map(c => ({
+					name: String(c.name ?? ""),
+					value: String(c.value ?? ""),
+					domain: String(c.domain ?? ""),
+					path: String(c.path ?? "/"),
+					expires: typeof c.expires === "number" ? c.expires : -1,
+					httpOnly: Boolean(c.httpOnly),
+					secure: Boolean(c.secure),
+					sameSite: String(c.sameSite ?? "Lax"),
+				}));
+			} catch (err) {
+				logger.debug("Failed to export browser cookies", {
+					error: err instanceof Error ? err.message : String(err),
+				});
+			}
+		}
+
+		// --- localStorage (current origin only) ---
+		let origin = "";
+		let localStorageData: Record<string, string> = {};
+		try {
+			const result = (await page.evaluate(() => {
+				const entries: Record<string, string> = {};
+				for (let i = 0; i < localStorage.length; i++) {
+					const key = localStorage.key(i);
+					if (key) entries[key] = localStorage.getItem(key) ?? "";
+				}
+				return { origin: location.origin, data: entries };
+			})) as { origin: string; data: Record<string, string> };
+			origin = result.origin;
+			localStorageData = result.data;
+		} catch (err) {
+			logger.debug("Failed to export localStorage", {
+				error: err instanceof Error ? err.message : String(err),
+			});
+		}
+
+		const merged = mergeBrowserState(existing, cookies, origin, localStorageData);
+		await saveBrowserState(merged);
+	}
+
 	async #closeBrowser(): Promise<void> {
 		await this.#clearElementCache();
+		// Final state flush before closing — captures login state from the
+		// current session so it survives into the next browser launch.
+		if (this.#page && !this.#page.isClosed() && this.session.settings.get("browser.persistState")) {
+			if (this.#stateExportTimer) {
+				clearTimeout(this.#stateExportTimer);
+				this.#stateExportTimer = null;
+			}
+			await this.#exportState(this.#page).catch(() => {});
+		}
 		if (this.#page && !this.#page.isClosed()) {
 			await this.#page.close();
 		}
@@ -802,6 +1048,8 @@ export class BrowserTool implements AgentTool<typeof browserSchema, BrowserToolD
 		});
 		this.#page = await this.#browser.newPage();
 		await this.#applyStealthPatches(this.#page);
+		await this.#restoreState(this.#page);
+		this.#attachStateSync(this.#page);
 		if (this.#currentHeadless || params?.viewport) {
 			await this.#applyViewport(this.#page, params?.viewport);
 		}
@@ -821,6 +1069,7 @@ export class BrowserTool implements AgentTool<typeof browserSchema, BrowserToolD
 		}
 		this.#page = await this.#browser.newPage();
 		await this.#applyStealthPatches(this.#page);
+		this.#attachStateSync(this.#page);
 		if (this.#currentHeadless || params?.viewport) {
 			await this.#applyViewport(this.#page, params?.viewport);
 		}

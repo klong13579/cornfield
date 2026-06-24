@@ -933,6 +933,15 @@ export const SETTINGS_SCHEMA = {
 	"memories.summaryInjectionTokenLimit": { type: "number", default: 5000 },
 
 	// Self Evolution
+	"selfEvolution.enabled": {
+		type: "boolean",
+		default: true,
+		ui: {
+			tab: "context",
+			label: "Self-Evolution",
+			description: "Enable the self-evolution learning and context injection system",
+		},
+	},
 	"selfEvolution.nudgeContextInjection": {
 		type: "boolean",
 		default: true,
@@ -1444,6 +1453,16 @@ export const SETTINGS_SCHEMA = {
 			label: "Screenshot directory",
 			description:
 				"Directory to save screenshots. If unset, screenshots go to a temp file. Supports ~. Examples: ~/Downloads, ~/Desktop, /sdcard/Download (Android)",
+		},
+	},
+	"browser.persistState": {
+		type: "boolean",
+		default: true,
+		ui: {
+			tab: "tools",
+			label: "Persist login state",
+			description:
+				"Automatically save and restore cookies/localStorage across browser sessions so logged-in sites stay logged in",
 		},
 	},
 
