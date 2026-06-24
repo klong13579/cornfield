@@ -27,14 +27,28 @@ import { Args, Command, Flags, renderCommandHelp } from "@oh-my-pi/pi-utils/cli"
 import { logger } from "@oh-my-pi/pi-utils";
 import { initTheme } from "../modes/theme/theme";
 
-const ACTIONS = ["start", "stop", "status", "doctor", "config", "cron", "send", "service", "setup", "help"];
+const ACTIONS = [
+	"start",
+	"stop",
+	"status",
+	"reload",
+	"doctor",
+	"config",
+	"cron",
+	"send",
+	"service",
+	"setup",
+	"test-longtask",
+	"help",
+];
 
 export default class Gateway extends Command {
-		static description = "Unified gateway: IM channels, cron scheduler, agent bridge";
+	static description = "Unified gateway: IM channels, cron scheduler, agent bridge";
 	static strict = false;
 	static args = {
 		action: Args.string({
-			description: "Gateway action: start | stop | status | doctor | config | cron | send | service | help",
+			description:
+			"Gateway action: start | stop | status | doctor | reload | config | cron | send | service | test-longtask | help",
 			required: false,
 			options: ACTIONS,
 		}),
@@ -52,6 +66,7 @@ export default class Gateway extends Command {
 		"  omp gateway start --config /path/gw.json  Start with custom config",
 		"  omp gateway stop                         Stop gateway (via PID file)",
 		"  omp gateway status                       Show running status & PID",
+		"  omp gateway reload                        Reload config without restart (SIGHUP)",
 		"  omp gateway doctor                       Run health checks (config, creds, channels, scheduler)",
 		"  omp gateway doctor --fix                 Apply safe fixes (clear stale state, fail orphaned execs)",
 		"",
@@ -154,12 +169,16 @@ export default class Gateway extends Command {
 					if (status.accounts && status.accounts.length > 0) {
 						console.log("  Accounts:");
 						for (const acct of status.accounts) {
-							console.log(`    ${acct.accountId}: bridge ${acct.bridgeRunning ? "running" : "stopped"}` +
-								(acct.bridgeState ? ` [${acct.bridgeState}]` : ""));
+							console.log(
+								`    ${acct.accountId}: bridge ${acct.bridgeRunning ? "running" : "stopped"}` +
+									(acct.bridgeState ? ` [${acct.bridgeState}]` : ""),
+							);
 						}
 					}
 					if (status.scheduler) {
-						console.log(`  Scheduler: ${status.scheduler.running ? "running" : "stopped"} (${status.scheduler.taskCount} tasks)`);
+						console.log(
+							`  Scheduler: ${status.scheduler.running ? "running" : "stopped"} (${status.scheduler.taskCount} tasks)`,
+						);
 					}
 				} else if (status.stalePidFile) {
 					console.log(`  (stale PID file removed)`);
@@ -168,9 +187,21 @@ export default class Gateway extends Command {
 				const channels = Object.keys(config.channels ?? {});
 				if (channels.length > 0) {
 					console.log(`  Configured channels: ${channels.join(", ")}`);
-				}
-				break;
 			}
+			break;
+		}
+		case "reload": {
+			// SIGHUP-based reload crashes the bun process (Bun async signal handler bug).
+			// Restart the service instead — launchd KeepAlive handles the gap.
+			const { stopService, startService } = await import(
+				"@oh-my-pi/pi-gateway/src/service-installer"
+			);
+			await stopService();
+			await Bun.sleep(1000);
+			await startService();
+			console.log("Gateway restarted with updated config.");
+			break;
+		}
 			case "doctor": {
 				const argv = process.argv.slice(process.argv.indexOf("doctor") + 1);
 				const { runDoctor, renderText, renderJson, applyFixes, countBySeverity } = await import(
@@ -240,6 +271,52 @@ export default class Gateway extends Command {
 				await this.#handleService();
 				break;
 			}
+			case "test-longtask": {
+				const argv = process.argv.slice(process.argv.indexOf("test-longtask") + 1);
+				const accountId = argv[0];
+				const rest = argv.slice(1);
+				const { runLongTaskTest } = await import("@oh-my-pi/pi-gateway/src/test-longtask");
+				let holdMs = 35_000;
+				let userId = "601590212";
+				let simulateStop = false;
+				for (let i = 0; i < rest.length; i++) {
+					const tok = rest[i];
+					if (tok === "--hold-ms" && rest[i + 1]) {
+						holdMs = Number(rest[i + 1]);
+						i++;
+					} else if (tok === "--user-id" && rest[i + 1]) {
+						userId = rest[i + 1]!;
+						i++;
+					} else if (tok === "--simulate-stop") {
+						simulateStop = true;
+					}
+				}
+				if (!accountId) {
+					console.error(
+						"Usage: omp gateway test-longtask <accountId> [--hold-ms N] [--user-id <id>] [--simulate-stop]",
+					);
+					process.exitCode = 1;
+					break;
+				}
+				if (!Number.isFinite(holdMs) || holdMs <= 0) {
+					console.error(`--hold-ms must be a positive number; got ${holdMs}`);
+					process.exitCode = 1;
+					break;
+				}
+				const result = await runLongTaskTest({ accountId, holdMs, userId, simulateStopClick: simulateStop });
+				if (!result.success) {
+					console.error(`[test-longtask] FAILED: ${result.error ?? "unknown error"}`);
+					process.exitCode = 1;
+					break;
+				}
+				console.log(`[test-longtask] card delivered: ${result.cardInstanceId}`);
+				console.log(`[test-longtask] watcher fired: ${result.watcherFired} (events=${result.watcherEvents})`);
+				if (simulateStop) {
+					console.log(`[test-longtask] stop action handled: ${result.stopActionHandled}`);
+					console.log(`[test-longtask] bridge.abort() returned: ${result.aborted}`);
+				}
+				break;
+			}
 			case "setup": {
 				// Delegate to pi-gateway CLI install
 				const { $ } = await import("bun");
@@ -266,7 +343,18 @@ export default class Gateway extends Command {
 		const argv = process.argv.slice(process.argv.indexOf("cron") + 1);
 		const action = argv[0] ?? "help";
 
-		const { SchedulerDbStorage, getSchedulerDbPath, cronCreate, cronList, cronSetStatus, cronRun, cronRemove, cronStatus, cronDiagnose, cronLogs } = await import("@oh-my-pi/pi-gateway/src/scheduler");
+		const {
+			SchedulerDbStorage,
+			getSchedulerDbPath,
+			cronCreate,
+			cronList,
+			cronSetStatus,
+			cronRun,
+			cronRemove,
+			cronStatus,
+			cronDiagnose,
+			cronLogs,
+		} = await import("@oh-my-pi/pi-gateway/src/scheduler");
 
 		const storage = new SchedulerDbStorage(getSchedulerDbPath());
 

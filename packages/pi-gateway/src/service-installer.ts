@@ -70,6 +70,21 @@ export function getServicePaths() {
 // Config Generation
 // ═══════════════════════════════════════════════════════════════════════
 
+/**
+ * Resolve the runtime binary path for the service.
+ *
+ * When running inside the compiled omp binary (PI_COMPILED=true),
+ * process.execPath is the compiled binary, not bun. The compiled binary
+ * bundles coding-agent's full initialization (model discovery, MCP loading)
+ * which blocks gateway startup. Use bun directly for the service.
+ */
+function getRuntimePath(): string {
+	if (process.env.PI_COMPILED === "true") {
+		return Bun.which("bun") ?? process.execPath;
+	}
+	return process.execPath;
+}
+
 function generateLaunchdPlist(cliPath: string, logPath: string): string {
 	return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -78,8 +93,7 @@ function generateLaunchdPlist(cliPath: string, logPath: string): string {
 	<key>Label</key>
 	<string>${SERVICE_NAME}</string>
 	<key>ProgramArguments</key>
-	<array>
-		<string>${process.execPath}</string>
+		<string>${getRuntimePath()}</string>
 		<string>${cliPath}</string>
 		<string>start</string>
 	</array>
@@ -111,7 +125,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=${process.execPath} ${cliPath} start
+ExecStart=${getRuntimePath()} ${cliPath} start
 Restart=on-failure
 RestartSec=5
 StandardOutput=append:${logPath}

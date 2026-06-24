@@ -85,8 +85,14 @@ async function cmdStart(_configPath?: string): Promise<void> {
 	process.on("SIGTERM", shutdown);
 	process.on("SIGHUP", async () => {
 		logger.debug("Reloading gateway config...");
-		const nextConfig = await loadConfig(_configPath);
-		await gateway.reload(nextConfig);
+		try {
+			const nextConfig = await loadConfig(_configPath);
+			await gateway.reload(nextConfig);
+		} catch (err) {
+			logger.error("Failed to reload gateway config", {
+				error: err instanceof Error ? err.message : String(err),
+			});
+		}
 	});
 
 	// A single async failure inside any channel / SDK callback / cron
