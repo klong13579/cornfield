@@ -1,7 +1,7 @@
 /**
  * Tests for the agentDir skeleton module.
  *
- * Verifies the contract documented in `packages/agent/docs/agent-design-v1.md` §2 and §6.1:
+ * Verifies the contract documented in `packages/coding-agent/docs/agent-design-v1.md` §2 and §6.1:
  *   - All required skeleton files are created on first run.
  *   - The skeleton is idempotent (re-running on an initialized dir is a no-op).
  *   - Missing files are added additively when `mission.md` already exists.
@@ -19,7 +19,7 @@ import { buildAgentSessionPath, ensureAgentDir, resolveAgentDir } from "../src/s
 
 /**
  * Files the skeleton must create on first run. Mirrors the layout in
- * `packages/agent/docs/agent-design-v1.md` §2.
+ * `packages/coding-agent/docs/agent-design-v1.md` §2.
  */
 const REQUIRED_FILES = [
 	// 5 always-on at root

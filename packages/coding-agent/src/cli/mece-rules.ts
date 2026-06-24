@@ -264,10 +264,7 @@ const noSafetyDuplication: MeceRule = {
 		let newContent = filtered.join("\n");
 		if (!hasRef) {
 			// Insert reference after the 安全与授权 heading
-			newContent = newContent.replace(
-				/(##\s*安全[^\n]*)/,
-				"$1\n\n> 硬约束见 `AGENTS.md`，此处不重复。",
-			);
+			newContent = newContent.replace(/(##\s*安全[^\n]*)/, "$1\n\n> 硬约束见 `AGENTS.md`，此处不重复。");
 		}
 		newContent = newContent.replace(/\n{3,}/g, "\n\n").replace(/\s+$/g, "\n");
 		return {
@@ -354,10 +351,7 @@ const noDwsCommandsInTools: MeceRule = {
 		// Add reference if not present
 		if (!/skill:\/\/dws/i.test(newContent)) {
 			// Insert after the dws section heading
-			newContent = newContent.replace(
-				/(###\s*`dws`[^\n]*)/,
-				"$1\n\n- 完整命令速查见 `skill://dws`。",
-			);
+			newContent = newContent.replace(/(###\s*`dws`[^\n]*)/, "$1\n\n- 完整命令速查见 `skill://dws`。");
 		}
 		newContent = newContent.replace(/\n{3,}/g, "\n\n").replace(/\s+$/g, "\n");
 		return {
@@ -534,7 +528,6 @@ const noDeprecatedAgentDir: MeceRule = {
 	},
 };
 
-
 // ────────────────────────────────────────────────────────────────────────────
 // Rule registry
 // ────────────────────────────────────────────────────────────────────────────
@@ -578,10 +571,7 @@ export async function runMeceChecks(ctx: MeceContext): Promise<MeceViolation[]> 
 	return allViolations;
 }
 
-export function runMeceRepairs(
-	ctx: MeceContext,
-	violations: MeceViolation[],
-): MeceRepair[] {
+export function runMeceRepairs(ctx: MeceContext, violations: MeceViolation[]): MeceRepair[] {
 	const repairs: MeceRepair[] = [];
 	const repairableViolations = violations.filter(v => v.repairable);
 	if (repairableViolations.length === 0) return repairs;

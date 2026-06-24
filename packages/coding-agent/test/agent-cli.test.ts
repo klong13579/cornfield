@@ -319,7 +319,10 @@ describe("runAgentValidate — MECE rules", () => {
 
 	test("R2: detects and repairs tool list in mission.md", async () => {
 		const dir = await initAgent();
-		await Bun.write(path.join(dir, "mission.md"), "# Bot\n\n## 工具\n\n- 使用 `read` 读取文件\n- 使用 `bash` 运行命令\n");
+		await Bun.write(
+			path.join(dir, "mission.md"),
+			"# Bot\n\n## 工具\n\n- 使用 `read` 读取文件\n- 使用 `bash` 运行命令\n",
+		);
 		const result = await runAgentValidate({ agentDir: dir });
 		const violation = result.mece?.violations.find(v => v.rule === "no-tool-list-in-mission");
 		expect(violation).toBeTruthy();
@@ -338,9 +341,17 @@ describe("runAgentValidate — MECE rules", () => {
 		let inHard = false;
 		let mustNotLine: string | undefined;
 		for (const line of agentsLines) {
-			if (/##\s*Global hard constraints/i.test(line)) { inHard = true; continue; }
-			if (inHard && /^##\s/.test(line)) { inHard = false; }
-			if (inHard && /^-\s*MUST\s+NOT/i.test(line)) { mustNotLine = line; break; }
+			if (/##\s*Global hard constraints/i.test(line)) {
+				inHard = true;
+				continue;
+			}
+			if (inHard && /^##\s/.test(line)) {
+				inHard = false;
+			}
+			if (inHard && /^-\s*MUST\s+NOT/i.test(line)) {
+				mustNotLine = line;
+				break;
+			}
 		}
 		expect(mustNotLine).toBeTruthy();
 		// Add the same line to SYSTEM.md
@@ -369,7 +380,10 @@ describe("runAgentValidate — MECE rules", () => {
 
 	test("R5: detects and repairs dws commands in TOOLS.md", async () => {
 		const dir = await initAgent();
-		await Bun.write(path.join(dir, "TOOLS.md"), "# TOOLS\n\n## dws\n\n- `dws doc list --workspace <id>` — list docs\n- MUST 通过 bash 调用\n");
+		await Bun.write(
+			path.join(dir, "TOOLS.md"),
+			"# TOOLS\n\n## dws\n\n- `dws doc list --workspace <id>` — list docs\n- MUST 通过 bash 调用\n",
+		);
 		const result = await runAgentValidate({ agentDir: dir });
 		const violation = result.mece?.violations.find(v => v.rule === "no-dws-commands-in-tools");
 		expect(violation).toBeTruthy();
@@ -377,7 +391,7 @@ describe("runAgentValidate — MECE rules", () => {
 		await runAgentValidate({ agentDir: dir, fix: true });
 		const toolsAfter = await Bun.file(path.join(dir, "TOOLS.md")).text();
 		expect(toolsAfter).not.toMatch(/dws doc list/);
-		expect(toolsAfter).toMatch(/MUST/);  // constraint preserved
+		expect(toolsAfter).toMatch(/MUST/); // constraint preserved
 	});
 
 	test("R6: detects and repairs skills path format", async () => {
@@ -399,10 +413,15 @@ describe("runAgentValidate — MECE rules", () => {
 		const dir = await initAgent();
 		const agents = await Bun.file(path.join(dir, "AGENTS.md")).text();
 		// Add a fake entry to the File Map
-		const withFake = agents.replace("| `sessions/*.jsonl`", "| `nonexistent/fake.md`          | FAKE                             | fake                                                                 |\n| `sessions/*.jsonl`");
+		const withFake = agents.replace(
+			"| `sessions/*.jsonl`",
+			"| `nonexistent/fake.md`          | FAKE                             | fake                                                                 |\n| `sessions/*.jsonl`",
+		);
 		await Bun.write(path.join(dir, "AGENTS.md"), withFake);
 		const result = await runAgentValidate({ agentDir: dir });
-		const violation = result.mece?.violations.find(v => v.rule === "filemap-accuracy" && v.message.includes("nonexistent/fake.md"));
+		const violation = result.mece?.violations.find(
+			v => v.rule === "filemap-accuracy" && v.message.includes("nonexistent/fake.md"),
+		);
 		expect(violation).toBeTruthy();
 		expect(violation?.repairable).toBe(false);
 	});
@@ -410,7 +429,10 @@ describe("runAgentValidate — MECE rules", () => {
 	test("--fix leaves non-repairable violations as warnings", async () => {
 		const dir = await initAgent();
 		const agents = await Bun.file(path.join(dir, "AGENTS.md")).text();
-		const withFake = agents.replace("| `sessions/*.jsonl`", "| `nonexistent/fake.md`          | FAKE                             | fake                                                                 |\n| `sessions/*.jsonl`");
+		const withFake = agents.replace(
+			"| `sessions/*.jsonl`",
+			"| `nonexistent/fake.md`          | FAKE                             | fake                                                                 |\n| `sessions/*.jsonl`",
+		);
 		await Bun.write(path.join(dir, "AGENTS.md"), withFake);
 		const result = await runAgentValidate({ agentDir: dir, fix: true });
 		const warning = result.issues.find(i => i.rule === "filemap-accuracy");
@@ -428,9 +450,13 @@ describe("runAgentValidate — MECE rules", () => {
 		await Bun.write(path.join(dir, "AGENTS.md"), withDeprecated);
 		// Validate — should detect
 		const result = await runAgentValidate({ agentDir: dir });
-		const dirViolation = result.mece?.violations.find(v => v.rule === "no-deprecated-agent-dir" && v.file === ".agent/");
+		const dirViolation = result.mece?.violations.find(
+			v => v.rule === "no-deprecated-agent-dir" && v.file === ".agent/",
+		);
 		expect(dirViolation).toBeTruthy();
-		const refViolation = result.mece?.violations.find(v => v.rule === "no-deprecated-agent-dir" && v.file === "AGENTS.md");
+		const refViolation = result.mece?.violations.find(
+			v => v.rule === "no-deprecated-agent-dir" && v.file === "AGENTS.md",
+		);
 		expect(refViolation).toBeTruthy();
 		expect(result.valid).toBe(false); // error
 		// Fix
@@ -520,4 +546,31 @@ describe("omp agent register / unregister / reconcile", () => {
 		expect(result.pruned).toContain("dead");
 		expect(result.pruned).not.toContain("alive");
 	});
+});
+
+
+// ────────────────────────────────────────────────────────────────────────────
+// semantic audit (--semantic flag)
+// ────────────────────────────────────────────────────────────────────────────
+
+describe("runAgentValidate — semantic flag", () => {
+	test("does not run semantic audit when flag is not set", async () => {
+		await runAgentInit({ name: "alpha", dir: tmpDir });
+		const result = await runAgentValidate({ agentDir: path.join(tmpDir, "alpha") });
+		expect(result.semantic).toBeUndefined();
+	});
+
+	test("gracefully degrades when semantic flag is set but no model/apikey available", async () => {
+		await runAgentInit({ name: "beta", dir: tmpDir });
+		const result = await runAgentValidate({
+			agentDir: path.join(tmpDir, "beta"),
+			semantic: true,
+		});
+		// Should not crash — either errors out gracefully or returns empty violations
+		expect(result.semantic).toBeDefined();
+		// Issues should not contain semantic violations if the audit couldn't run
+		if (result.semantic?.error) {
+			expect(result.semantic.violations).toEqual([]);
+		}
+	}, 30000); // extended timeout for model registry refresh
 });

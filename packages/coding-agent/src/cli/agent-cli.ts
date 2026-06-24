@@ -5,7 +5,7 @@
  * standing up the CLI parser. The Command class in `../commands/agent.ts`
  * is a thin dispatcher that calls these.
  *
- * Subcommands (per `packages/agent/docs/agent-design-v1.md` §6.2):
+ * Subcommands (per `packages/coding-agent/docs/agent-design-v1.md` §6.2):
  *   - init <name>     create a new agentDir
  *   - list            list agentDirs under ~/.omp/agents/
  *   - show <name>     print identity / tools / skills / cron summary
@@ -23,12 +23,8 @@ import {
 	SKELETON_FILES,
 	unregisterAgent,
 } from "@oh-my-pi/pi-coding-agent/skeleton";
-import {
-	MECE_FILES,
-	runMeceChecks,
-	runMeceRepairs,
-	type MeceContext,
-} from "./mece-rules";
+import { MECE_FILES, runMeceChecks, runMeceRepairs, type MeceContext } from "./mece-rules";
+import { runSemanticAudit, type SemanticViolation } from "./semantic-audit";
 
 // ────────────────────────────────────────────────────────────────────────────
 // init
@@ -411,6 +407,7 @@ export interface ValidateArgs {
 	agentDir: string;
 	json?: boolean;
 	fix?: boolean;
+	semantic?: boolean;
 }
 
 export interface ValidateIssue {
@@ -428,6 +425,11 @@ export interface ValidateResult {
 	mece?: {
 		violations: import("./mece-rules").MeceViolation[];
 		repaired: import("./mece-rules").MeceRepair[];
+	};
+	semantic?: {
+		violations: SemanticViolation[];
+		model?: string;
+		error?: string;
 	};
 }
 
@@ -567,6 +569,24 @@ export async function runAgentValidate(args: ValidateArgs): Promise<ValidateResu
 		});
 	}
 
+	// 7. Semantic MECE audit (opt-in via --semantic)
+	let semanticResult: ValidateResult["semantic"];
+	if (args.semantic) {
+		semanticResult = await runSemanticPhase(agentDir, meceCtx);
+		// Merge semantic violations into issues as warnings
+		for (const sv of semanticResult.violations) {
+			issues.push({
+				level: sv.severity,
+				file: sv.files.join(", ") || "(multiple)",
+				message: sv.message,
+				rule: `semantic:${sv.rule}`,
+				repairable: false,
+			});
+		}
+	} else {
+		semanticResult = undefined;
+	}
+
 	return {
 		agentDir,
 		issues,
@@ -575,8 +595,112 @@ export async function runAgentValidate(args: ValidateArgs): Promise<ValidateResu
 			violations: meceViolations,
 			repaired: meceRepaired,
 		},
+		...(semanticResult ? { semantic: semanticResult } : {}),
 	};
 }
+
+
+// ────────────────────────────────────────────────────────────────────────────
+// semantic audit helper
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Resolve model + apiKey from agentDir's .omp/config.yml, then run semantic audit.
+ * Falls back to global Settings default model if agentDir config is missing.
+ * Returns { violations: [] } with error set if model/apiKey unavailable.
+ */
+async function runSemanticPhase(
+	agentDir: string,
+	meceCtx: MeceContext,
+): Promise<{ violations: SemanticViolation[]; model?: string; error?: string }> {
+	// Wrap in a timeout to avoid hanging on model discovery in restricted environments
+	const TIMEOUT_MS = 120000; // 2 min — LLM semantic audit can take a while
+	const timeoutPromise = new Promise<{ violations: SemanticViolation[]; error: string }>((resolve) =>
+		setTimeout(() => resolve({ violations: [], error: "Semantic audit timed out" }), TIMEOUT_MS),
+	);
+	const workPromise = runSemanticPhaseInner(agentDir, meceCtx);
+	return Promise.race([workPromise, timeoutPromise]);
+}
+
+async function runSemanticPhaseInner(
+	agentDir: string,
+	meceCtx: MeceContext,
+): Promise<{ violations: SemanticViolation[]; model?: string; error?: string }> {
+	try {
+		// Read agentDir's .omp/config.yml for modelRoles.default
+		const configPath = path.join(agentDir, ".omp", "config.yml");
+		let modelRoleStr: string | undefined;
+		try {
+			const configText = await Bun.file(configPath).text();
+			if (typeof Bun.YAML?.parse === "function") {
+				const parsed = Bun.YAML.parse(configText) as Record<string, unknown>;
+				const roles = parsed?.modelRoles as Record<string, string> | undefined;
+				modelRoleStr = roles?.default ?? roles?.smol;
+			}
+		} catch {
+			// Config read failed — fall back to global
+		}
+
+		// Use global Settings + ModelRegistry to resolve the model
+		const { Settings } = await import("../config/settings");
+		const { ModelRegistry } = await import("../config/model-registry");
+		const { resolveRoleSelection } = await import("../config/model-resolver");
+		const { discoverAuthStorage } = await import("../sdk");
+
+		const settings = await Settings.init();
+		const authStorage = await discoverAuthStorage();
+		const modelRegistry = new ModelRegistry(authStorage);
+		// Use offline-first refresh to avoid long network timeouts in CI/test
+		// environments. If cached models exist, they'll be used; otherwise falls back.
+		try {
+			await modelRegistry.refresh("offline");
+		} catch {
+			// Offline refresh failed — try online-if-uncached with a timeout
+			await Promise.race([
+				modelRegistry.refresh("online-if-uncached"),
+				new Promise<void>(resolve => setTimeout(resolve, 15000)),
+			]).catch(() => {});
+		}
+
+		// If agentDir config specifies a model, override the default role
+		if (modelRoleStr) {
+			settings.setModelRole("default", modelRoleStr);
+		}
+
+		const available = modelRegistry.getAvailable();
+		const resolved = resolveRoleSelection(
+			["default", "smol", ...MODEL_ROLE_IDS_FALLBACK],
+			settings,
+			available,
+			modelRegistry,
+		);
+
+		if (!resolved?.model) {
+			return { violations: [], error: "No model available for semantic audit" };
+		}
+
+		const apiKey = await modelRegistry.getApiKey(resolved.model);
+		if (!apiKey) {
+			return { violations: [], error: `No API key for model ${resolved.model.provider}/${resolved.model.id}` };
+		}
+
+		const violations = await runSemanticAudit(meceCtx, {
+			model: resolved.model,
+			apiKey,
+			thinkingLevel: resolved.thinkingLevel,
+		});
+
+		return {
+			violations,
+			model: `${resolved.model.provider}/${resolved.model.id}`,
+		};
+	} catch (err) {
+		const msg = err instanceof Error ? err.message : String(err);
+		return { violations: [], error: msg };
+	}
+}
+
+const MODEL_ROLE_IDS_FALLBACK = ["default", "smol", "slow", "vision", "plan", "designer", "commit", "task"] as const;
 
 // ────────────────────────────────────────────────────────────────────────────
 // register / unregister / reconcile
@@ -775,6 +899,27 @@ export function renderValidate(result: ValidateResult, json: boolean): string {
 		lines.push("MECE auto-repairs applied:");
 		for (const repair of result.mece.repaired) {
 			lines.push(`  + ${repair.summary}`);
+		}
+	}
+
+	// Semantic violations are already in issues, but add a summary
+	if (result.semantic) {
+		lines.push("");
+		if (result.semantic.error) {
+			lines.push(`Semantic audit: skipped (${result.semantic.error})`);
+		} else {
+			const count = result.semantic.violations.length;
+			const modelTag = result.semantic.model ? ` (model: ${result.semantic.model})` : "";
+			lines.push(`Semantic audit: ${count} violation${count === 1 ? "" : "s"} found${modelTag}`);
+			for (const sv of result.semantic.violations) {
+				lines.push(`  [${sv.rule}] ${sv.message}`);
+				if (sv.files.length > 0) {
+					lines.push(`    files: ${sv.files.join(", ")}`);
+				}
+				if (sv.suggestion) {
+					lines.push(`    fix: ${sv.suggestion}`);
+				}
+			}
 		}
 	}
 

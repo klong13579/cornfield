@@ -4,7 +4,7 @@
  * Each asset is statically imported via Bun's `with { type: "text" }` so the content
  * is bundled at build time — no runtime file reads, no string-literal duplication.
  *
- * Asset layout mirrors the agentDir layout per `packages/agent/docs/agent-design-v1.md` §2:
+ * Asset layout mirrors the agentDir layout per `packages/coding-agent/docs/agent-design-v1.md` §2:
  *   - 5 always-on files at root: AGENTS.md, mission.md, TOOLS.md, TODO.md, knowledge/external-workspaces.md
  *   - runtime files: prompt-includes.json, .gitignore, .omp/config.yml, .omp/SYSTEM.md
  */

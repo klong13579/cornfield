@@ -60,8 +60,7 @@
 │
 ├── cron/                              ← [BEHAVIOR+RUNTIME] 定时任务
 │   ├── tasks/
-│   │   ├── <id>.json5                 ← [RUNTIME] 调度元数据
-│   │   └── <id>.prompt.md             ← [BEHAVIOR] 任务 prompt
+│   │   └── <id>.json5                 ← [RUNTIME] 调度元数据 + prompt（command 字段；不再使用 .prompt.md 配对）
 │   └── logs/                          ← [RUNTIME] 执行日志（gitignored）
 │
 ├── scripts/                           ← 工具脚本（gitlab_auth.py 等）
@@ -81,7 +80,7 @@
 | **always-on (5)** | `AGENTS.md`, `mission.md`, `TOOLS.md`, `TODO.md`, `knowledge/external-workspaces.md` | OMP 原生 discovery → `prompt-includes.json` → 注入 `<context>` |
 | **on-demand (skill)** | `.omp/skills/<name>.md` | `skill://<name>` URI 触发 |
 | **on-demand (read)** | `knowledge/faq.md`, `knowledge/handbook/*` | agent 主动 `read` |
-| **on-demand (run)** | `cron/tasks/*.prompt.md` | 定时调度触发 |
+| **on-demand (run)** | `cron/tasks/*.json5` (command 字段) | 定时调度触发 |
 
 ### 2.2 默认 `.gitignore`
 
@@ -146,7 +145,7 @@ Agent 进程启动 (cwd = agentDir)
 | **MANIFEST** | `AGENTS.md` (前半) | 加载哪些文件 + File Map + 更新指南 |
 | **CONSTRAINTS** | `AGENTS.md` (后半) + `TOOLS.md` (co-located) | 行为硬约束 + 工具级规则 |
 | **CONTEXT** | `TOOLS.md`, `knowledge/*`, `TODO.md` | 工具用法 / 数据源 / FAQ / 任务 |
-| **BEHAVIOR** | `.omp/skills/`, `cron/*.prompt.md` | 一次性 procedure |
+| **BEHAVIOR** | `.omp/skills/` | 一次性 procedure |
 | **RUNTIME** | `.omp/config.yml`, `prompt-includes.json`, `cron/*.json5` | 配置 / 调度元数据 / 注入清单 |
 
 **MECE 5 原则：**
@@ -174,8 +173,7 @@ Agent 进程启动 (cwd = agentDir)
 | `knowledge/external-workspaces.md` | **skeleton（手动）** | 外部数据源映射 |
 | `knowledge/faq.md` | 用户 | 高频问题（按需） |
 | `knowledge/handbook/` | 用户 | 操作手册（按需） |
-| `cron/tasks/*.json5` | 用户 | 定时任务定义 |
-| `cron/tasks/*.prompt.md` | 用户 | 任务 prompt |
+| `cron/tasks/*.json5` | 用户 | 定时任务定义（含 prompt） |
 | `cron/logs/*.log` | 运行时 | 执行日志（gitignored） |
 | `scripts/` | 用户 | helper 脚本 |
 | `external/` | 用户 | 外部数据源 YAML |

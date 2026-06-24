@@ -23,7 +23,7 @@
 | `.omp/SYSTEM.md`                    | RUNTIME (gateway system prompt)  | overrides OMP built-in prompt — gateway agent baseline                |
 | `.omp/skills/<name>/SKILL.md`       | BEHAVIOR (on-demand)             | via `skill://<name>` URI                                             |
 | `knowledge/handbook/*`               | CONTEXT (on-demand)              | read by agent (user-created)                                         |
-| `cron/tasks/*.prompt.md`             | BEHAVIOR (scheduled)             | cron trigger                                                         |
+| `cron/tasks/*.json5`                | RUNTIME (schedule + prompt)      | cron trigger (prompt in `command` field; no .prompt.md pair)         |
 | `sessions/*.jsonl`                   | RUNTIME (gitignored)             | session history                                                      |
 
 > Optional files (not in skeleton): `scripts/`, `external/`, `weekly-reports/`, `examples/`, `docs/`.
