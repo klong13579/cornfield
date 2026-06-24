@@ -66,10 +66,14 @@ export class SchedulerFileStore {
 				model?: string;
 				provider?: string;
 				enabledToolsets?: string[];
+				repeatCount?: number;
 				timeoutMs?: number;
 				retry?: import("./types").RetryConfig;
 				skills?: string[];
 				preScript?: string;
+				agentDir?: string;
+				delivery?: import("./types").TaskFileDefinition["delivery"];
+				accountId?: string;
 				deliver?: string;
 				deliverUser?: string;
 			};
@@ -91,6 +95,9 @@ export class SchedulerFileStore {
 				retry: data.retry,
 				skills: data.skills,
 				preScript: data.preScript,
+				agentDir: data.agentDir,
+				delivery: data.delivery,
+				accountId: data.accountId,
 				deliver: data.deliver,
 				deliverUser: data.deliverUser,
 			};
@@ -150,6 +157,9 @@ export class SchedulerFileStore {
 						retry: def.retry,
 						skills: def.skills,
 						preScript: def.preScript,
+						agentDir: def.agentDir,
+						delivery: def.delivery,
+						accountId: def.accountId,
 						deliver: def.deliver,
 						deliverUser: def.deliverUser,
 						consecutiveFailures: 0,
@@ -172,6 +182,9 @@ export class SchedulerFileStore {
 				const providerChanged = existing.provider !== (def.provider ?? undefined);
 				const deliverChanged = existing.deliver !== (def.deliver ?? undefined);
 				const deliverUserChanged = existing.deliverUser !== (def.deliverUser ?? undefined);
+				const agentDirChanged = existing.agentDir !== (def.agentDir ?? undefined);
+				const deliveryChanged = JSON.stringify(existing.delivery ?? null) !== JSON.stringify(def.delivery ?? null);
+				const accountIdChanged = existing.accountId !== (def.accountId ?? undefined);
 				if (
 					cronChanged ||
 					commandChanged ||
@@ -179,7 +192,10 @@ export class SchedulerFileStore {
 					modelChanged ||
 					providerChanged ||
 					deliverChanged ||
-					deliverUserChanged
+					deliverUserChanged ||
+					agentDirChanged ||
+					deliveryChanged ||
+					accountIdChanged
 				) {
 					try {
 						this.#storage.updateTask(existing.id, {
@@ -194,6 +210,9 @@ export class SchedulerFileStore {
 							retry: def.retry,
 							skills: def.skills,
 							preScript: def.preScript,
+							agentDir: def.agentDir,
+							delivery: def.delivery,
+							accountId: def.accountId,
 							deliver: def.deliver,
 							deliverUser: def.deliverUser,
 						});

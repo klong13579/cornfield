@@ -11,7 +11,12 @@
 
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { buildAgentSessionPath, ensureAgentDir, registerAgent, resolveAgentDir } from "@oh-my-pi/pi-coding-agent/skeleton";
+import {
+	buildAgentSessionPath,
+	ensureAgentDir,
+	registerAgent,
+	resolveAgentDir,
+} from "@oh-my-pi/pi-coding-agent/skeleton";
 import { isEnoent, logger } from "@oh-my-pi/pi-utils";
 import { ActionRegistry } from "./action-registry";
 import { AgentBridge, type AgentBridgeOptions } from "./agent-bridge";
@@ -19,10 +24,9 @@ import { DingTalkChannel, type DingTalkCardActionEvent } from "./channels/dingta
 import { ChannelRegistry } from "./channels/registry";
 import { getDataDir, getDingTalkConfig, getEnabledChannels } from "./config";
 import type { Channel } from "./types";
-import { findAgentSessionPath } from "./scheduler";
+import { CronService } from "./scheduler/cron-service";
 import { SchedulerEngine } from "./scheduler/engine";
-import { appendDeliveryFailureLog, appendExecutionLog } from "./scheduler/execution-log";
-import { computeInactivityBudgetMs, executeScheduledCommand } from "./scheduler/executor";
+import { computeInactivityBudgetMs } from "./scheduler/executor";
 import { SchedulerFileStore } from "./scheduler/file-store";
 import { createCronTaskFromMessage } from "./scheduler/from-message";
 import { SchedulerDbStorage } from "./scheduler/storage";
@@ -157,7 +161,13 @@ export async function killOrphanRpcProcesses(): Promise<void> {
 			const pid = parseInt(parts[0], 10);
 			const ppid = parseInt(parts[1], 10);
 			const args = parts.slice(2).join(" ");
-			if (!Number.isNaN(pid) && !Number.isNaN(ppid) && ppid === 1 && args.includes("omp") && args.includes("--mode rpc")) {
+			if (
+				!Number.isNaN(pid) &&
+				!Number.isNaN(ppid) &&
+				ppid === 1 &&
+				args.includes("omp") &&
+				args.includes("--mode rpc")
+			) {
 				process.kill(pid, "SIGKILL");
 			}
 		}
@@ -252,241 +262,12 @@ async function checkPidFile(dataDir: string, pidFile: string): Promise<boolean> 
 }
 
 // ---------------------------------------------------------------------------
-// Send a message through a channel
-// ---------------------------------------------------------------------------
+// Channel message delivery is now handled by DingTalkChannel.sendMessage
+// (three routes: sessionWebhook, OAuth DM, OAuth group) and CronService
+// via the injected deliver function. The old sendToChannel / sendViaOAuth /
+// sendViaWebhook / deliverWithRetry / getDingTalkToken functions have been
+// removed as part of the cron-gateway decoupling.
 
-/**
- * Send a message to a DingTalk channel.
- *
- * Two modes:
- * 1. Webhook (no options): uses stored session webhook from a prior inbound message.
- * 2. OAuth API (with userId or conversationId): obtains an OAuth token from
- *    DingTalk using the account's appKey/appSecret and sends proactively.
- *
- * Channel format: `dingtalk:<accountId>` (e.g. `dingtalk:hr`, `dingtalk:test`)
- *
- * @returns true on success, false on failure
- */
-export async function sendToChannel(
-	channelArg: string,
-	message: string,
-	options?: { userId?: string; conversationId?: string },
-): Promise<boolean> {
-	const parts = channelArg.split(":");
-	const channelId = parts[0]!;
-	const accountId = parts.slice(1).join(":") || "__default__";
-
-	// If target info provided, use OAuth API (proactive send)
-	if (options?.userId || options?.conversationId) {
-		return sendViaOAuth(channelId, accountId, message, options);
-	}
-
-	// Otherwise, try webhook from stored session
-	return sendViaWebhook(channelId, accountId, message);
-}
-
-/**
- * Deliver a message with one retry after 5s for transient channel failures.
- *
- * Returns ok=true if either attempt succeeds, ok=false with the last error
- * reason and total attempts otherwise. The retry targets the common
- * "channel is restarting / network blip / rate limit window" cases — a
- * persistent 4xx error (auth failure, invalid target) will fail both
- * attempts and we report it back to the caller.
- */
-async function deliverWithRetry(
-	channelArg: string,
-	message: string,
-	options: { userId?: string; conversationId?: string },
-): Promise<{ ok: boolean; attempts: number; reason: string }> {
-	const first = await sendToChannel(channelArg, message, options).catch((err): boolean => {
-		logger.warn("Delivery attempt threw", { error: String(err) });
-		return false;
-	});
-	if (first) return { ok: true, attempts: 1, reason: "" };
-	await Bun.sleep(5_000);
-	const second = await sendToChannel(channelArg, message, options).catch((err): boolean => {
-		logger.warn("Delivery retry threw", { error: String(err) });
-		return false;
-	});
-	if (second) return { ok: true, attempts: 2, reason: "" };
-	return {
-		ok: false,
-		attempts: 2,
-		reason: `sendToChannel returned false for ${channelArg} after 2 attempts`,
-	};
-}
-
-async function sendViaWebhook(channelId: string, accountId: string, message: string): Promise<boolean> {
-	const dataDir = getDataDir();
-	const store = new SQLiteSessionStore(path.join(dataDir, "sessions.db"));
-
-	try {
-		const sessions = await store.getActiveSessions(channelId);
-		const matched = sessions
-			.filter(s => s.accountId === accountId && s.sessionWebhook)
-			.sort((a, b) => b.updatedAt - a.updatedAt);
-
-		if (matched.length === 0) {
-			console.error(`No active session with webhook for "${channelId}:${accountId}".`);
-			console.error("Either send a message to the bot first, or specify --user / --conversation.");
-			return false;
-		}
-
-		const session = matched[0]!;
-		console.log(`Sending to ${channelId}:${accountId} (conversation: ${session.conversationId})...`);
-
-		const res = await fetch(session.sessionWebhook!, {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({
-				msgtype: "text",
-				text: { content: message },
-				conversationId: session.conversationId,
-			}),
-		});
-
-		if (res.ok) {
-			console.log("Message sent.");
-			return true;
-		}
-
-		const errText = await res.text();
-		console.error(`Send failed (${res.status}): ${errText}`);
-		return false;
-	} finally {
-		store.close();
-	}
-}
-
-async function getDingTalkToken(appKey: string, appSecret: string): Promise<string | undefined> {
-	try {
-		const res = await fetch("https://api.dingtalk.com/v1.0/oauth2/accessToken", {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ appKey, appSecret }),
-		});
-		if (!res.ok) {
-			const err = await res.text();
-			console.error(`Failed to get DingTalk token: ${res.status} ${err}`);
-			return undefined;
-		}
-		const data = (await res.json()) as { accessToken?: string };
-		return data.accessToken;
-	} catch (err) {
-		console.error("Failed to get DingTalk token:", String(err));
-		return undefined;
-	}
-}
-
-async function sendViaOAuth(
-	channelId: string,
-	accountId: string,
-	message: string,
-	options: { userId?: string; conversationId?: string },
-): Promise<boolean> {
-	// Load config to get app credentials
-	const { loadConfig } = await import("./config");
-	const config = await loadConfig();
-	const dtConfig = config.channels.dingtalk as
-		| {
-				accounts?: Record<string, { appKey: string; appSecret: string; robotCode?: string }>;
-				appKey?: string;
-				appSecret?: string;
-				robotCode?: string;
-		  }
-		| undefined;
-
-	if (!dtConfig) {
-		console.error("DingTalk not configured.");
-		return false;
-	}
-
-	// Resolve account credentials
-	let appKey: string | undefined;
-	let appSecret: string | undefined;
-	let robotCode: string | undefined;
-
-	if (dtConfig.accounts?.[accountId]) {
-		const acct = dtConfig.accounts[accountId]!;
-		appKey = acct.appKey;
-		appSecret = acct.appSecret;
-		robotCode = acct.robotCode ?? acct.appKey;
-	} else {
-		appKey = dtConfig.appKey;
-		appSecret = dtConfig.appSecret;
-		robotCode = dtConfig.robotCode ?? dtConfig.appKey;
-	}
-
-	if (!appKey || !appSecret) {
-		console.error(`No credentials found for account "${accountId}".`);
-		return false;
-	}
-
-	// Resolve secret references (e.g. $ALIBABA_API_KEY)
-	if (appSecret.startsWith("$")) {
-		const envVal = Bun.env[appSecret.slice(1)];
-		if (envVal) appSecret = envVal;
-	}
-
-	console.log("Getting DingTalk access token...");
-	const token = await getDingTalkToken(appKey, appSecret);
-	if (!token) return false;
-
-	const msgParam = JSON.stringify({ content: message });
-
-	if (options.userId) {
-		// Send to single chat
-		console.log(`Sending to user "${options.userId}" via ${channelId}:${accountId}...`);
-		const res = await fetch("https://api.dingtalk.com/v1.0/robot/oToMessages/batchSend", {
-			method: "POST",
-			headers: {
-				"Content-Type": "application/json",
-				"x-acs-dingtalk-access-token": token,
-			},
-			body: JSON.stringify({
-				robotCode,
-				userIds: [options.userId],
-				msgKey: "sampleText",
-				msgParam,
-			}),
-		});
-		if (res.ok) {
-			console.log("Message sent.");
-			return true;
-		}
-		const err = await res.text();
-		console.error(`Send failed (${res.status}): ${err}`);
-		return false;
-	}
-
-	if (options.conversationId) {
-		// Send to group
-		console.log(`Sending to conversation "${options.conversationId}"...`);
-		const res = await fetch("https://api.dingtalk.com/v1.0/robot/groupMessages/send", {
-			method: "POST",
-			headers: {
-				"Content-Type": "application/json",
-				"x-acs-dingtalk-access-token": token,
-			},
-			body: JSON.stringify({
-				robotCode,
-				openConversationId: options.conversationId,
-				msgKey: "sampleText",
-				msgParam,
-			}),
-		});
-		if (res.ok) {
-			console.log("Message sent.");
-			return true;
-		}
-		const err = await res.text();
-		console.error(`Send failed (${res.status}): ${err}`);
-		return false;
-	}
-
-	return false;
-}
 
 export class Gateway {
 	#config: GatewayConfig;
@@ -502,6 +283,7 @@ export class Gateway {
 	#schedulerEngine?: SchedulerEngine;
 	#schedulerStorage?: SchedulerDbStorage;
 	#schedulerFileStore?: SchedulerFileStore;
+	#cronService?: CronService;
 	#watchInterval?: NodeJS.Timeout;
 	/**
 	 * Maps DingTalk AI Card instance IDs to the session / bridge that
@@ -623,14 +405,14 @@ export class Gateway {
 					logger.error("Failed to initialize account agentDir", { accountId, agentDir, error: String(err) });
 					continue;
 				}
-			// Register so `omp agent list` / `show` can discover gateway-created
-			// agentDirs (mirrors `omp agent init`). Non-fatal: a failure here only
-			// affects list visibility, not gateway operation.
-			try {
-				await registerAgent(accountId, agentDir);
-			} catch (err) {
-				logger.warn("Failed to register agentDir", { accountId, agentDir, error: String(err) });
-			}
+				// Register so `omp agent list` / `show` can discover gateway-created
+				// agentDirs (mirrors `omp agent init`). Non-fatal: a failure here only
+				// affects list visibility, not gateway operation.
+				try {
+					await registerAgent(accountId, agentDir);
+				} catch (err) {
+					logger.warn("Failed to register agentDir", { accountId, agentDir, error: String(err) });
+				}
 
 				// Create per-account agent bridge with account-specific config
 				// Model is loaded from agentDir/.omp/config.yml by omp itself
@@ -1030,9 +812,28 @@ export class Gateway {
 			logger.debug("File store initial sync", syncResult);
 		}
 
+		// Construct CronService with injected executeAgent + deliver
+		const ompBinary = this.#config.agent?.ompPath ?? "omp";
+		this.#cronService = new CronService({
+			storage: this.#schedulerStorage,
+			ompBinary,
+			log: {
+				debug: (msg: string, ctx?: unknown) => logger.debug(msg, ctx as Record<string, unknown>),
+				info: (msg: string, ctx?: unknown) => logger.debug(msg, ctx as Record<string, unknown>),
+				warn: (msg: string, ctx?: unknown) => logger.warn(msg, ctx as Record<string, unknown>),
+				error: (msg: string, ctx?: unknown) => logger.error(msg, ctx as Record<string, unknown>),
+			},
+			executeAgent: async (params) => {
+				return await this.#executeCronAgent(params);
+			},
+			deliver: async (params) => {
+				return await this.#deliverCronResult(params);
+			},
+		});
+
 		this.#schedulerEngine = new SchedulerEngine({
 			storage: this.#schedulerStorage,
-			onTrigger: this.#onCronTrigger.bind(this),
+			onTrigger: this.#cronService.onTrigger.bind(this.#cronService),
 			config: {
 				...DEFAULT_SCHEDULER_CONFIG,
 				maxConcurrentRuns: cronConfig.maxConcurrentRuns ?? 3,
@@ -1074,258 +875,157 @@ export class Gateway {
 		this.#schedulerFileStore = undefined;
 	}
 
-	async #onCronTrigger(task: ScheduledTask, executionId: string): Promise<void> {
-		if (!this.#schedulerStorage) return;
+/**
+ * Execute a cron agent task via warm bridge (AgentBridge).
+ *
+ * This is the gateway's implementation of CronDeps.executeAgent.
+ * It handles:
+ * - Finding the warm bridge by agentDir (with accountId fallback)
+ * - setDisabledToolsets(['cronjob', 'messaging']) before execution
+ * - Model switch/restore if task specifies a different model
+ * - executePrompt with timeout + inactivity budget
+ * - finally: restore toolsets + model
+ *
+ * Returns { output, error } — on failure, error is set and output is empty,
+ * so CronService falls back to executeScheduledCommand (cold subprocess).
+ */
+	async #executeCronAgent(params: {
+		agentDir: string;
+		prompt: string;
+		timeoutMs?: number;
+		signal?: AbortSignal;
+		disabledToolsets?: string[];
+		model?: string;
+		provider?: string;
+	}): Promise<{ output: string; error?: string }> {
+		// Resolve the bridge: try agentDir → accountAgentDirs reverse lookup,
+		// then fall back to accountId if the task still uses deprecated field.
+		const bridge = this.#getBridgeByAgentDir(params.agentDir);
+		if (!bridge) {
+			return { output: "", error: `No warm bridge found for agentDir: ${params.agentDir}` };
+		}
 
-		const startedAt = Date.now();
-		const ompBinary = this.#config.agent?.ompPath ?? "omp";
-		const isAgent = task.taskType === "agent";
+		const cronSessionPath = buildAgentSessionPath(params.agentDir, `cron_${Date.now()}`);
 
-		// Resolve the agentDir once for this task. It's used in two places:
-		//   1. The warm-bridge path: build a per-task session file under
-		//      <agentDir>/sessions/, so cron state never mixes with IM sessions.
-		//   2. The fallback path: pass as Bun.spawn cwd so `omp -p` finds
-		//      the right `.omp/config.yml` for this account.
-		// When the task has no accountId, or the account is not in this
-		// gateway's in-memory config (e.g. the account was removed during a
-		// SIGHUP reload, or it was never a per-account bridge to begin with),
-		// both paths fall back gracefully — the warm path skips session
-		// switching, the fallback path runs in the gateway's cwd.
-		const agentDir = task.accountId ? this.#accountAgentDirs.get(task.accountId) : undefined;
-		const cronSessionPath =
-			agentDir && task.accountId ? buildAgentSessionPath(agentDir, `cron_${task.id}`) : undefined;
+		// Lock down toolset: cron agents must not create sub-tasks or send messages
+		try {
+			await bridge.setDisabledToolsets(params.disabledToolsets ?? []);
+		} catch {
+			// Best-effort — if the RPC doesn't support this command yet, continue
+		}
 
-		// Surface — at warn level, not info — the limitations of the warm
-		// bridge path so operators see them in logs instead of discovering
-		// that task.skills silently does nothing. The fallback path
-		// (omp -p) does honour these; the warm path cannot because the
-		// long-running bridge has no shell to run preScripts and no
-		// per-task skills loading beyond what the agentDir already provides.
-		if (isAgent && task.accountId && this.getAccountBridge(task.accountId)) {
-			if (task.skills?.length) {
-				logger.warn("Cron task has skills set but warm-bridge path cannot override per-task skills", {
-					taskName: task.name,
-					skills: task.skills,
-					note: "fall back to omp -p (remove --account, or set the skill at agentDir level) to honour skills",
-				});
-			}
-			if (task.preScript) {
-				logger.warn("Cron task has preScript set but warm-bridge path cannot run it", {
-					taskName: task.name,
-					preScript: task.preScript,
-					note: "fall back to omp -p (remove --account) to honour preScript",
+		// Switch model if the task specifies a different one
+		let originalModel: { provider?: string; model?: string } | undefined;
+		if (params.model) {
+			try {
+				const state = await bridge.getState();
+				const d = state.data as Record<string, unknown> | undefined;
+				if (d?.model) {
+					originalModel = {
+						provider: typeof d.provider === "string" ? d.provider : undefined,
+						model: typeof d.model === "string" ? d.model : undefined,
+					};
+				}
+				await bridge.setModel(params.provider ?? "", params.model);
+			} catch (switchErr) {
+				logger.warn("Failed to switch model for cron task, continuing with current model", {
+					error: String(switchErr),
 				});
 			}
 		}
 
-		// Soft recursion guard: prepend a cron-context prefix to the prompt
-		// so the agent knows it's running as a scheduled task. The prefix
-		// asks the agent to avoid spawning other cron jobs or sending
-		// unprompted messages to other channels — this is the OMP
-		// analog of Hermes's `disabled_toolsets=["cronjob","messaging",
-		// "clarify"]`, achievable without forcing `--tools` restrictions
-		// that would break legitimate bash-heavy cron work.
-		const cronContextPrefix = `[CRON-CONTEXT] You are running as a scheduled task named "${task.name}" (id: ${task.id}, account: ${task.accountId ?? "default"}). Do not create new cron jobs or schedule follow-on tasks. Do not send messages to other channels. Complete the task below and stop. The deliver channel is preconfigured; the gateway will handle delivery.\n\n`;
-
-		let exitCode = 0;
-		let output = "";
-		let stderr = "";
-		let timedOut = false;
-
-		// Try to reuse an already-warm AgentBridge for agent tasks with accountId
-		if (isAgent && task.accountId) {
-			const bridge = this.getAccountBridge(task.accountId);
-			if (bridge) {
-				logger.debug("Reusing AgentBridge for cron task", {
-					taskName: task.name,
-					accountId: task.accountId,
-					modelOverride: task.model ?? null,
-					sessionPath: cronSessionPath,
-				});
-
-				// Lock down toolset: cron agents must not create sub-tasks or send messages
-				try {
-					await bridge.setDisabledToolsets(["cronjob", "messaging"]);
-				} catch {
-					// Best-effort — if the RPC doesn't support this command yet, continue
-				}
-
-				// Switch model if the task specifies a different one
-				let originalModel: { provider?: string; model?: string } | undefined;
-				if (task.model) {
-					try {
-						const state = await bridge.getState();
-						const d = state.data as Record<string, unknown> | undefined;
-						if (d?.model) {
-							originalModel = {
-								provider: typeof d.provider === "string" ? d.provider : undefined,
-								model: typeof d.model === "string" ? d.model : undefined,
-							};
-						}
-						await bridge.setModel(task.provider ?? "", task.model);
-					} catch (switchErr) {
-						logger.warn("Failed to switch model for cron task, continuing with current model", {
-							taskName: task.name,
-							error: String(switchErr),
-						});
-					}
-				}
-
-				try {
-					const response = await bridge.executePrompt(cronContextPrefix + task.command, {
-						timeoutMs: task.timeoutMs,
-						sessionPath: cronSessionPath,
-						// Inactivity budget: the prompt can run for the full
-						// wall-clock timeout, but if no session event arrives
-						// for this many ms (e.g. RPC stuck waiting on a slow
-						// model call, hung tool, or dropped stream), the
-						// watchdog aborts the prompt and surfaces a tagged
-						// error. Default 5 min — matches Hermes's
-						// HERMES_CRON_TIMEOUT. Falls back to the wall-clock
-						// budget when smaller so a slow task with active
-						// events still gets the full window.
-						inactivityMs: computeInactivityBudgetMs(task.timeoutMs),
-					});
-					output = response;
-					exitCode = 0;
-				} catch (err) {
-					output = "";
-					stderr = err instanceof Error ? err.message : String(err);
-					exitCode = 1;
-					logger.warn("AgentBridge cron task failed, falling back to omp --print", {
-						taskName: task.name,
-						error: stderr,
-					});
-					// Fall through to executeScheduledCommand fallback below
-				} finally {
-					// Restore disabled toolsets
-					try {
-						await bridge.setDisabledToolsets([]);
-					} catch (restoreErr) {
-						logger.error("Failed to restore disabled toolsets after cron task — bridge may have stale toolset restrictions", {
-							taskName: task.name,
-							error: restoreErr instanceof Error ? restoreErr.message : String(restoreErr),
-						});
-					}
-					// Restore original model after execution
-					if (originalModel?.model) {
-						try {
-							await bridge.setModel(originalModel.provider ?? "", originalModel.model);
-						} catch (restoreErr) {
-							logger.error("Failed to restore original model after cron task — bridge will use the cron task's model until next /model command", {
-								taskName: task.name,
-								cronModel: task.model,
-								originalModel: originalModel.model,
-								error: restoreErr instanceof Error ? restoreErr.message : String(restoreErr),
-							});
-						}
-					}
-				}
-			}
-		}
-
-		// Fall back to subprocess execution. The guard checks `!output`
-		// only — the catch block above sets `stderr` to the error message,
-		// so `!stderr` would always be false and the fallback would never
-		// run. `!output` correctly identifies "warm bridge produced no
-		// result" (either it wasn't used, or it failed).
-		if (!output) {
-			const result = await executeScheduledCommand(task.command, {
-				taskType: task.taskType,
-				timeoutMs: task.timeoutMs,
-				ompBinary,
-				skills: task.skills,
-				preScript: task.preScript,
-				cwd: agentDir,
-				promptPrefix: isAgent ? cronContextPrefix : undefined,
+		try {
+			const response = await bridge.executePrompt(params.prompt, {
+				timeoutMs: params.timeoutMs,
+				sessionPath: cronSessionPath,
+				inactivityMs: computeInactivityBudgetMs(params.timeoutMs),
 			});
-			exitCode = result.exitCode;
-			output = result.output;
-			stderr = result.stderr;
-			timedOut = result.timedOut;
-		}
-		const endedAt = Date.now();
-		const durationMs = endedAt - startedAt;
-
-		// Link agent session trace for agent tasks
-		const agentSessionPath = task.taskType === "agent" ? findAgentSessionPath(startedAt, endedAt) : undefined;
-
-		// Record the execution result with full metadata
-		this.#schedulerStorage.updateExecution(executionId, {
-			status: exitCode === 0 ? "success" : "failure",
-			exitCode,
-			output: timedOut ? `[TIMED OUT after ${task.timeoutMs ?? 30_000}ms]\n${output}` : output,
-			stderr: timedOut ? `[TIMED OUT]\n${stderr}` : stderr,
-			endedAt,
-			...(agentSessionPath ? { agentSessionPath } : {}),
-		});
-
-		// Write full stdout/stderr to JSONL log
-		appendExecutionLog(task.name, {
-			id: executionId,
-			ts: endedAt,
-			exitCode,
-			status: exitCode === 0 ? "success" : "failure",
-			durationMs,
-			output,
-			stderr,
-		});
-
-		// Deliver result to user if configured. The delivery path is awaited
-		// (not fire-and-forget) so we can: (1) report the failure in the
-		// task's exit code, (2) retry once after 5s for transient channel
-		// issues, (3) write a persistent entry to the global
-		// delivery-failure log so operators can see which task results
-		// never made it to the channel even after a gateway restart.
-		if (task.deliver && task.deliverUser) {
-			const prefix = exitCode === 0 ? "✅" : timedOut ? "⏰" : "❌";
-			const summary = `${prefix} Task "${task.name}" completed (exit ${exitCode}, ${durationMs}ms)\n\n${output.slice(0, 2000)}`;
-			const { ok, attempts, reason } = await deliverWithRetry(task.deliver, summary, { userId: task.deliverUser });
-			if (!ok) {
-				if (this.#schedulerStorage) {
-					this.#schedulerStorage.updateTask(task.id, { lastDeliveryError: reason });
-				}
-				appendDeliveryFailureLog({
-					ts: Date.now(),
-					taskId: task.id,
-					taskName: task.name,
-					channel: task.deliver,
-					userId: task.deliverUser,
-					reason,
-					attempts,
-					exitCode,
-				});
-				// Don't override the task's own exit code with a delivery
-				// failure — the task itself may have succeeded. Just log
-				// loudly so the engine's metrics show this as a warning.
-				logger.error("Cron result delivery failed", {
-					taskId: task.id,
-					taskName: task.name,
-					channel: task.deliver,
-					userId: task.deliverUser,
-					attempts,
-					reason,
-				});
-			} else {
-				// Clear delivery error on success so stale errors don't linger
-				if (this.#schedulerStorage) {
-					this.#schedulerStorage.updateTask(task.id, { lastDeliveryError: undefined });
+			return { output: response };
+		} catch (err) {
+			return { output: "", error: err instanceof Error ? err.message : String(err) };
+		} finally {
+			// Restore disabled toolsets
+			try {
+				await bridge.setDisabledToolsets([]);
+			} catch (restoreErr) {
+				logger.error(
+					"Failed to restore disabled toolsets after cron task — bridge may have stale toolset restrictions",
+					{ error: restoreErr instanceof Error ? restoreErr.message : String(restoreErr) },
+				);
+			}
+			// Restore original model after execution
+			if (originalModel?.model) {
+				try {
+					await bridge.setModel(originalModel.provider ?? "", originalModel.model);
+				} catch (restoreErr) {
+					logger.error(
+						"Failed to restore original model after cron task — bridge will use the cron task's model until next /model command",
+						{ cronModel: params.model, originalModel: originalModel.model, error: restoreErr instanceof Error ? restoreErr.message : String(restoreErr) },
+					);
 				}
 			}
 		}
+	}
 
-		// Throw on failure so the engine's retry loop and statistics work.
-		// The engine will overwrite status to "failure" again in its catch
-		// block — that's harmless because the richer metadata is preserved.
-		if (exitCode !== 0 || timedOut) {
-			const msg = timedOut
-				? `Task "${task.name}" timed out after ${task.timeoutMs ?? 30_000}ms`
-				: `Task "${task.name}" failed (exit ${exitCode})`;
-			logger.warn(msg, { taskId: task.id, exitCode, timedOut });
-			throw new Error(msg);
+	/**
+	 * Find a warm AgentBridge by agentDir path.
+	 *
+	 * Reverse-looks-up the #accountAgentDirs map to find which accountId
+	 * maps to the given agentDir, then returns the corresponding bridge.
+	 * Falls back to the default bridge in single-account mode.
+	 */
+	#getBridgeByAgentDir(agentDir: string): AgentBridge | undefined {
+		for (const [acctId, dir] of this.#accountAgentDirs) {
+			if (dir === agentDir) {
+				return this.getAccountBridge(acctId);
+			}
 		}
+		// Single-account mode: use default bridge if running
+		if (this.#accountBridges.size === 0 && this.#bridge.isRunning) {
+			return this.#bridge;
+		}
+		return undefined;
+	}
 
-		logger.debug("Cron task succeeded", { taskId: task.id, taskName: task.name });
+	/**
+	 * Deliver a cron result to a channel via ChannelRegistry.
+	 *
+	 * This is the gateway's implementation of CronDeps.deliver.
+	 * It constructs an OutboundMessage and sends it through the channel
+	 * registry, with one retry after 5s for transient failures.
+	 */
+	async #deliverCronResult(params: {
+		channel: string;
+		accountId?: string;
+		toUserId?: string;
+		toConversationId?: string;
+		text: string;
+	}): Promise<{ ok: boolean; error?: string }> {
+		const msg: OutboundMessage = {
+			channelId: params.channel,
+			conversationId: params.toConversationId ?? `cron:${Date.now()}`,
+			content: { type: "text", text: params.text },
+			accountId: params.accountId,
+			toUserId: params.toUserId,
+		};
+
+		// Retry once after 5s for transient channel failures
+		const maxAttempts = 2;
+		const retryDelayMs = 5_000;
+
+		for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+			try {
+				await this.#registry.sendMessage(msg);
+				return { ok: true };
+			} catch (err) {
+				if (attempt < maxAttempts) {
+					await Bun.sleep(retryDelayMs);
+					continue;
+				}
+				return { ok: false, error: err instanceof Error ? err.message : String(err) };
+			}
+		}
+		return { ok: false, error: "unreachable" };
 	}
 
 	// ═══════════════════════════════════════════════════════════════════
@@ -1450,11 +1150,12 @@ export class Gateway {
 			// the same cardInstanceId with a richer toolName (when the
 			// watcher fires) is idempotent — the registry keeps the
 			// first `createdAt` and overwrites the rest.
-			registerCardAction: info => this.#actionRegistry.register(info.cardInstanceId, {
-				accountId: info.accountId,
-				sessionId: info.sessionId,
-				toolName: info.toolName,
-			}),
+			registerCardAction: info =>
+				this.#actionRegistry.register(info.cardInstanceId, {
+					accountId: info.accountId,
+					sessionId: info.sessionId,
+					toolName: info.toolName,
+				}),
 		};
 
 		const submit = (handlers?: ForwardStreamHandlers): Promise<AgentResponseMeta | null> =>
@@ -1535,8 +1236,7 @@ export class Gateway {
 		//      blockList[N].btns renders a fallback "当前客户端环境不
 		//      支持按钮组组件" message with no button. Treat any
 		//      btn_stop click as a stop request.
-		const isStop =
-			event.params.type === "stop" || event.actionIds.includes("btn_stop");
+		const isStop = event.params.type === "stop" || event.actionIds.includes("btn_stop");
 		if (isStop) {
 			logger.warn("[Gateway] card stop action — aborting bridge", {
 				cardInstanceId: event.cardInstanceId,
@@ -1939,7 +1639,10 @@ ${table}
 				error: { reason: "db-failed", detail: "scheduler storage not initialised" },
 			};
 		}
-		return createCronTaskFromMessage(text, msg.accountId ?? accountId, this.#config, this.#schedulerStorage);
+		// Resolve agentDir from the message's account
+		const acctId = msg.accountId ?? accountId;
+		const agentDir = this.#accountAgentDirs.get(acctId);
+		return createCronTaskFromMessage(text, agentDir, this.#schedulerStorage);
 	}
 
 	/**

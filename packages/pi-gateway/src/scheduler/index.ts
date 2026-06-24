@@ -1,4 +1,17 @@
 export {
+	type CronDeps,
+	type CronLogger,
+	type CronServiceDeps,
+	type CronTriggerResult,
+	type DeliverFn,
+	type ExecuteAgentFn,
+	CronService,
+	buildCronContextPrefix,
+	buildDeliverySummary,
+	resolveAgentDir,
+	resolveDelivery,
+} from "./cron-service";
+export {
 	cronCreate,
 	cronDiagnose,
 	cronList,

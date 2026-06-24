@@ -14,14 +14,13 @@
  *   /cron create "0 8 * * *" echo good morning
  *
  * Extracted from `Gateway.#handleInboundMessage` so the create
- * logic can be unit-tested with a fixture config and a temp
+ * logic can be unit-tested with a temp
  * agentDir, without spinning up a real Gateway or a real DingTalk
  * stream.
  */
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { resolveAgentCwd } from "./cli-commands";
 import type { SchedulerDbStorage } from "./storage";
 
 export interface CronIntent {
@@ -67,14 +66,7 @@ export interface CreateFromMessageResult {
 }
 
 export interface CreateFromMessageError {
-	reason:
-		| "not-cron-intent"
-		| "no-account-id"
-		| "no-agent-dir"
-		| "missing-schedule"
-		| "missing-command"
-		| "write-failed"
-		| "db-failed";
+	reason: "not-cron-intent" | "no-agent-dir" | "missing-schedule" | "missing-command" | "write-failed" | "db-failed";
 	detail?: string;
 }
 
@@ -103,30 +95,19 @@ export type CreateFromMessageOutcome =
  */
 export function createCronTaskFromMessage(
 	text: string,
-	accountId: string | undefined,
-	config: Parameters<typeof resolveAgentCwd>[1],
+	agentDir: string | undefined,
 	storage: SchedulerDbStorage,
-	/** Channel platform for auto-fill deliver (e.g. "dingtalk") */
+	/** Channel platform for auto-fill deliver/delivery (e.g. "dingtalk") */
 	sourceChannel?: string,
-	/** User ID for auto-fill deliverUser */
+	/** User ID for auto-fill deliverUser / delivery.toUserId */
 	sourceUser?: string,
 ): CreateFromMessageOutcome {
-	if (!accountId) {
-		return { ok: false, error: { reason: "no-account-id" } };
+	if (!agentDir) {
+		return { ok: false, error: { reason: "no-agent-dir" } };
 	}
 	const intent = parseCronIntent(text);
 	if (!intent) {
 		return { ok: false, error: { reason: "not-cron-intent" } };
-	}
-	const agentDir = resolveAgentCwd(accountId, config);
-	if (!agentDir) {
-		return {
-			ok: false,
-			error: {
-				reason: "no-agent-dir",
-				detail: `No agentDir for account "${accountId}" in gateway config`,
-			},
-		};
 	}
 
 	const name = `msg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
@@ -161,6 +142,8 @@ export function createCronTaskFromMessage(
 			command: intent.command,
 			taskType: intent.type,
 			timeoutMs: fileContent.timeoutMs,
+			agentDir,
+			delivery: sourceChannel ? { channel: sourceChannel, toUserId: sourceUser, mode: "announce" } : undefined,
 			deliver: sourceChannel,
 			deliverUser: sourceUser,
 			status: "active",

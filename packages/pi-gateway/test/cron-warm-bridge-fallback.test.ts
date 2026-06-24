@@ -126,6 +126,7 @@ describe("cron warm-bridge fallback contract", () => {
 			status: "active",
 			scheduleType: "interval",
 			taskType: "agent",
+			agentDir: tmpHome,
 			accountId: "test",
 			timeoutMs: 3_000,
 			createdAt: Date.now(),

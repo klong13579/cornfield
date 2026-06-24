@@ -132,7 +132,7 @@ export interface DeliveryFailureEntry {
 	taskId: string;
 	taskName: string;
 	channel: string;
-	userId: string;
+	userId?: string;
 	reason: string;
 	attempts: number;
 	exitCode: number;

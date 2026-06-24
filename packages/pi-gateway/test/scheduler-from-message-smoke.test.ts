@@ -4,9 +4,9 @@
  * Closes the inbound half of the user's two-part smoke-test ask.
  * Flow under test:
  *   1. Construct a message that starts with `/cron create`.
- *   2. Call createCronTaskFromMessage with a fixture config and a
- *      temp agentDir (so the test is self-contained; the real
- *      gateway.json is not touched).
+ *   2. Call createCronTaskFromMessage with a temp agentDir
+ *      (so the test is self-contained; the real gateway.json
+ *      is not touched).
  *   3. Verify the task file lands at <agentDir>/cron/tasks/<name>.json5
  *      with the right JSON5 shape.
  *   4. Verify the task is also in the global scheduler DB so the
@@ -27,19 +27,10 @@ import { SchedulerDbStorage } from "../src/scheduler/storage";
 
 let testDir: string;
 let agentDir: string;
+let opencodeAgentDir: string;
 let dbPath: string;
 let storage: SchedulerDbStorage;
 
-const config = {
-	channels: {
-		dingtalk: {
-			accounts: {
-				hr: { agentDir: "" }, // filled in beforeEach
-				opencode: { agentDir: "" }, // filled in beforeEach
-			},
-		},
-	},
-};
 
 function cleanup() {
 	try {
@@ -55,11 +46,9 @@ beforeEach(() => {
 	fs.mkdirSync(agentDir, { recursive: true });
 	dbPath = path.join(testDir, "scheduler.db");
 	storage = new SchedulerDbStorage(dbPath);
-	// Patch the fixture config to point at the temp agentDir.
 	// Use a name that doesn't share a prefix with `agent` so
 	// substring-based path checks (e.g. `includes(agentDir)`) work.
-	config.channels.dingtalk.accounts.hr.agentDir = agentDir;
-	config.channels.dingtalk.accounts.opencode.agentDir = path.join(testDir, "secondary-agent");
+	opencodeAgentDir = path.join(testDir, "secondary-agent");
 });
 
 afterEach(() => {
@@ -120,7 +109,7 @@ describe("parseCronIntent", () => {
 
 describe("createCronTaskFromMessage (smoke test)", () => {
 	it("creates a task file in <agentDir>/cron/tasks/ and inserts into the global DB", () => {
-		const outcome = createCronTaskFromMessage("/cron create 0 8 * * * -- echo good morning", "hr", config, storage);
+		const outcome = createCronTaskFromMessage("/cron create 0 8 * * * -- echo good morning", agentDir, storage);
 
 		expect(outcome.ok).toBe(true);
 		if (!outcome.ok) return;
@@ -152,16 +141,13 @@ describe("createCronTaskFromMessage (smoke test)", () => {
 		fs.rmSync(r.filePath, { force: true });
 	});
 
-	it("writes into the agentDir of the account named in the message's accountId", () => {
-		// Two different accounts, two different agentDirs. The
-		// task file must land in the account's own dir, not the
-		// other account's.
-		const opencodeAgentDir = config.channels.dingtalk.accounts.opencode.agentDir!;
+	it("writes into the agentDir passed to the call, not some other dir", () => {
+		// Two different agentDirs. The task file must land in the
+		// dir passed to the call, not the other one.
 
 		const outcome = createCronTaskFromMessage(
 			"/cron create */5 * * * * -- echo from opencode",
-			"opencode",
-			config,
+			opencodeAgentDir,
 			storage,
 		);
 
@@ -177,7 +163,7 @@ describe("createCronTaskFromMessage (smoke test)", () => {
 	});
 
 	it("does not create anything for a non-cron message (returns not-cron-intent)", () => {
-		const outcome = createCronTaskFromMessage("hey what's the weather?", "hr", config, storage);
+		const outcome = createCronTaskFromMessage("hey what's the weather?", agentDir, storage);
 
 		expect(outcome.ok).toBe(false);
 		if (outcome.ok) return;
@@ -188,29 +174,12 @@ describe("createCronTaskFromMessage (smoke test)", () => {
 		expect(storage.listTasks().length).toBe(0);
 	});
 
-	it("returns no-agent-dir when the account has no agentDir in config", () => {
-		const cfgNoDir = {
-			channels: {
-				dingtalk: {
-					accounts: {
-						hr: { agentDir: undefined as unknown as string },
-					},
-				},
-			},
-		};
-		const outcome = createCronTaskFromMessage("/cron create 0 8 * * * -- echo hi", "hr", cfgNoDir, storage);
+	it("returns no-agent-dir when agentDir is undefined", () => {
+		const outcome = createCronTaskFromMessage("/cron create 0 8 * * * -- echo hi", undefined, storage);
 
 		expect(outcome.ok).toBe(false);
 		if (outcome.ok) return;
 		expect(outcome.error.reason).toBe("no-agent-dir");
-	});
-
-	it("returns no-account-id when accountId is undefined", () => {
-		const outcome = createCronTaskFromMessage("/cron create 0 8 * * * echo hi", undefined, config, storage);
-
-		expect(outcome.ok).toBe(false);
-		if (outcome.ok) return;
-		expect(outcome.error.reason).toBe("no-account-id");
 	});
 
 	it("rolls back the file when the DB insert fails", () => {
@@ -229,8 +198,7 @@ describe("createCronTaskFromMessage (smoke test)", () => {
 
 		const outcome = createCronTaskFromMessage(
 			"/cron create 0 8 * * * -- echo will_fail",
-			"hr",
-			config,
+			agentDir,
 			failingStorage,
 		);
 

@@ -312,6 +312,49 @@ async function cmdReload(_configPath?: string): Promise<void> {
 	console.log(`Gateway reload signalled (PID ${status.pid}).`);
 }
 
+async function cmdTestLongtask(accountId: string | undefined, args: string[]): Promise<void> {
+	if (!accountId) {
+		console.error("Usage: omp gateway test-longtask <accountId> [--hold-ms N] [--user-id <id>] [--simulate-stop]");
+		process.exitCode = 1;
+		return;
+	}
+
+	let holdMs = 35_000;
+	let userId = "601590212";
+	let simulateStop = false;
+	for (let i = 0; i < args.length; i++) {
+		const tok = args[i];
+		if (tok === "--hold-ms" && args[i + 1]) {
+			holdMs = Number(args[i + 1]);
+			i++;
+		} else if (tok === "--user-id" && args[i + 1]) {
+			userId = args[i + 1]!;
+			i++;
+		} else if (tok === "--simulate-stop") {
+			simulateStop = true;
+		}
+	}
+	if (!Number.isFinite(holdMs) || holdMs <= 0) {
+		console.error(`--hold-ms must be a positive number; got ${holdMs}`);
+		process.exitCode = 1;
+		return;
+	}
+
+	const { runLongTaskTest } = await import("./test-longtask");
+	const result = await runLongTaskTest({ accountId, holdMs, userId, simulateStopClick: simulateStop });
+	if (!result.success) {
+		console.error(`[test-longtask] FAILED: ${result.error ?? "unknown error"}`);
+		process.exitCode = 1;
+		return;
+	}
+	console.log(`[test-longtask] card delivered: ${result.cardInstanceId}`);
+	console.log(`[test-longtask] watcher fired: ${result.watcherFired} (events=${result.watcherEvents})`);
+	if (simulateStop) {
+		console.log(`[test-longtask] stop action handled: ${result.stopActionHandled}`);
+		console.log(`[test-longtask] bridge.abort() returned: ${result.aborted}`);
+	}
+}
+
 async function cmdConfig(_configPath?: string): Promise<void> {
 	const cfgPath = _configPath ?? getConfigPath();
 	const config = await loadConfig(_configPath);
@@ -357,9 +400,52 @@ async function cmdSend(channelArg: string | undefined, args: string[]): Promise<
 		return;
 	}
 
-	const { sendToChannel } = await import("./gateway");
-	const ok = await sendToChannel(channel, message, { userId, conversationId });
-	if (!ok) process.exitCode = 1;
+	const { loadConfig } = await import("./config");
+	const { DingTalkChannel } = await import("./channels/dingtalk");
+	const config = await loadConfig();
+
+	const parts = channel.split(":");
+	const channelId = parts[0]!;
+	const accountId = parts.slice(1).join(":") || "__default__";
+
+	const dtConfig = config.channels?.dingtalk as
+		| {
+				accounts?: Record<string, { appKey: string; appSecret: string; robotCode?: string }>;
+				appKey?: string;
+				appSecret?: string;
+				robotCode?: string;
+		  }
+		| undefined;
+
+	if (!dtConfig) {
+		console.error("DingTalk not configured.");
+		process.exitCode = 1;
+		return;
+	}
+
+	const accountConfig = dtConfig.accounts?.[accountId];
+	const ch = new DingTalkChannel();
+	ch.setConfig({
+		...dtConfig,
+		appKey: accountConfig?.appKey ?? dtConfig.appKey!,
+		appSecret: accountConfig?.appSecret ?? dtConfig.appSecret!,
+		robotCode: accountConfig?.robotCode ?? dtConfig.robotCode,
+	} as any);
+	ch.setAccountId(accountId);
+
+	try {
+		await ch.sendMessage({
+			channelId,
+			conversationId: conversationId ?? `send:${Date.now()}`,
+			content: { type: "text", text: message },
+			accountId,
+			toUserId: userId,
+		});
+		console.log("Message sent.");
+	} catch (err) {
+		console.error(`Send failed: ${err instanceof Error ? err.message : String(err)}`);
+		process.exitCode = 1;
+	}
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -690,6 +776,9 @@ void (async () => {
 		case "service":
 			await cmdService(subcommand);
 			break;
+		case "test-longtask":
+			await cmdTestLongtask(subcommand, args);
+			break;
 		case "help":
 		case "--help":
 		case "-h":
@@ -723,7 +812,14 @@ Usage:
   pi-gateway service uninstall                     Remove system service
   pi-gateway service start                         Start system service
   pi-gateway service stop                          Stop system service
-  pi-gateway service status                        Show service status
+  pi-gateway service status                        View service status
+
+  pi-gateway test-longtask <accountId> [--hold-ms N] [--user-id <id>] [--simulate-stop]
+                                            End-to-end long-task watcher test: bypasses the LLM
+                                            with a fake RPC binary, delivers a real card with a
+                                            stop block to the given DingTalk user, and (with
+                                            --simulate-stop) fires a synthetic TOPIC_CARD stop
+                                            click to verify the full click → abort chain.
 
   pi-gateway help                                  Show this help
 

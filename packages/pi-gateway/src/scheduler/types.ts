@@ -56,19 +56,24 @@ export interface ScheduledTask {
 	nextRunAt?: number;
 	runCount: number;
 	failCount: number;
-	/** Channel ID for result delivery (e.g. "dingtalk") */
-	deliver?: string;
-	/** User ID for proactive result delivery via the deliver channel */
-	deliverUser?: string;
+	/** Agent execution directory (replaces accountId for execution routing) */
+	agentDir?: string;
+	/** Delivery configuration (replaces deliver + deliverUser) */
+	delivery?: {
+		channel: string;
+		accountId?: string;
+		toUserId?: string;
+		toConversationId?: string;
+		mode: "announce" | "none";
+	};
 	/** Last delivery error message (null/undefined when last delivery succeeded) */
 	lastDeliveryError?: string;
-	/**
-	 * Channel account that owns the agent context for this task.
-	 * Resolved at execute time via `gateway.json:channels.<id>.accounts[<accountId>].agentDir`
-	 * and used as the Bun.spawn cwd for `agent` tasks. `shell` tasks ignore it
-	 * at runtime but still display it in the cron list to show ownership.
-	 */
+	/** @deprecated Use agentDir instead */
 	accountId?: string;
+	/** @deprecated Use delivery.channel instead */
+	deliver?: string;
+	/** @deprecated Use delivery.toUserId instead */
+	deliverUser?: string;
 }
 
 export interface TaskFileDefinition {
@@ -85,9 +90,22 @@ export interface TaskFileDefinition {
 	retry?: RetryConfig;
 	skills?: string[];
 	preScript?: string;
-	deliver?: string;
-	deliverUser?: string;
+	/** Agent execution directory (replaces accountId for execution routing) */
+	agentDir?: string;
+	/** Delivery configuration (replaces deliver + deliverUser) */
+	delivery?: {
+		channel: string;
+		accountId?: string;
+		toUserId?: string;
+		toConversationId?: string;
+		mode: "announce" | "none";
+	};
+	/** @deprecated Use agentDir instead */
 	accountId?: string;
+	/** @deprecated Use delivery.channel instead */
+	deliver?: string;
+	/** @deprecated Use delivery.toUserId instead */
+	deliverUser?: string;
 }
 
 export interface TaskExecution {
@@ -360,15 +378,13 @@ export async function waitForDaemonStart(pidPath: string, timeoutMs = 5000): Pro
 export function formatTaskRow(task: ScheduledTask): string {
 	const next = task.status === "active" && task.nextRunAt ? new Date(task.nextRunAt).toLocaleString() : "—";
 	const typeLabel = task.taskType === "agent" ? "agent" : "shell";
-	const channel = formatChannel(task.deliver);
-	const agent = formatAgent(task.accountId);
+	const channel = formatChannel(task.delivery?.channel ?? task.deliver);
+	const agent = formatAgent(task.agentDir ?? task.accountId);
 	const name = truncateName(task.name, 20);
 	const model = task.model ?? "—";
 	const execFailed = task.failCount > 0 && task.consecutiveFailures > 0;
 	const deliverFailed = !!task.lastDeliveryError;
-	const lastStatus = task.lastRunAt
-		? execFailed ? "fail" : deliverFailed ? "deliv!" : "ok"
-		: "—";
+	const lastStatus = task.lastRunAt ? (execFailed ? "fail" : deliverFailed ? "deliv!" : "ok") : "—";
 	const deliveryFailures = formatDeliveryFailureCount(task.id);
 	const repeatDisplay = task.repeatCount
 		? `${Math.min(task.repeatCompleted ?? 0, task.repeatCount)}/${task.repeatCount}`
@@ -422,20 +438,19 @@ export function formatChannel(deliver: string | undefined): string {
 }
 
 /**
- * Render the owning channel account as a single human-readable cell.
+ * Render the owning agent directory as a single human-readable cell.
  *
- *   accountId="hr"          → "hr"
- *   accountId="ops/hr"      → "ops/hr"
- *   accountId undefined     → "—"
+ *   agentDir="~/.omp/agents/hr"  → "hr"
+ *   agentDir undefined            → "—"
  *
- * The cell shows the account key (not the channel prefix); the cron
- * list already has a CHANNEL column for that. Long account keys are
+ * Shows the last path segment of the agent directory. Long paths are
  * truncated with an ellipsis using the shared `truncateName` helper
  * to keep the column width stable.
  */
-export function formatAgent(accountId: string | undefined, max = 12): string {
-	if (!accountId) return "—";
-	return truncateName(accountId, max);
+export function formatAgent(agentDir: string | undefined, max = 12): string {
+	if (!agentDir) return "—";
+	const label = agentDir.split("/").pop() ?? agentDir;
+	return truncateName(label, max);
 }
 
 export function formatExecutionRow(exec: TaskExecution): string {

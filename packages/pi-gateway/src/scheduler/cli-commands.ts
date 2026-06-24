@@ -160,6 +160,7 @@ export async function cronCreate(args: string[], storage: SchedulerDbStorage): P
 	let deliver: string | undefined;
 	let deliverUser: string | undefined;
 	let accountId: string | undefined;
+	let agentDir: string | undefined;
 	let type: "shell" | "agent" = "shell";
 	let model: string | undefined;
 	let provider: string | undefined;
@@ -190,8 +191,10 @@ export async function cronCreate(args: string[], storage: SchedulerDbStorage): P
 		} else if (args[i] === "--account" && args[i + 1]) {
 			accountId = args[i + 1]!;
 			i += 2;
+		} else if (args[i] === "--agent-dir" && args[i + 1]) {
+			agentDir = args[i + 1]!;
+			i += 2;
 		} else if (args[i] === "--model" && args[i + 1]) {
-			model = args[i + 1]!;
 			i += 2;
 		} else if (args[i] === "--provider" && args[i + 1]) {
 			provider = args[i + 1]!;
@@ -262,7 +265,7 @@ export async function cronCreate(args: string[], storage: SchedulerDbStorage): P
 	const command = commandParts.join(" ");
 	if (!schedule || !command) {
 		console.error(
-			"Usage: <schedule> <command...> [--name <name>] [--type shell|agent] [--deliver <channel>] [--deliver-user <id>] [--account <accountId>] [--model <model>] [--provider <provider>] [--toolsets <a,b,c>] [--source-channel <ch>] [--source-user <uid>] [--timeout-ms <ms>] [--skills <s1,s2,...>] [--retry <maxAttempts>] [--pre-script <path>]",
+			"Usage: <schedule> <command...> [--name <name>] [--type shell|agent] [--deliver <channel>] [--deliver-user <id>] [--account <accountId>] [--agent-dir <path>] [--model <model>] [--provider <provider>] [--toolsets <a,b,c>] [--source-channel <ch>] [--source-user <uid>] [--timeout-ms <ms>] [--skills <s1,s2,...>] [--retry <maxAttempts>] [--pre-script <path>]",
 		);
 		process.exitCode = 1;
 		return;
@@ -277,13 +280,35 @@ export async function cronCreate(args: string[], storage: SchedulerDbStorage): P
 		return;
 	}
 
-	// accountId is required — cron tasks must be bound to a channel account
-	// to reuse the already-warm AgentBridge instead of spawning omp --print.
-	if (!accountId) {
+	// agentDir resolves where the spawned omp process runs (its cwd). It
+	// is set directly via --agent-dir, or resolved from --account via
+	// gateway.json. For agent tasks an agentDir is required so omp finds
+	// the right .omp/config.yml; shell tasks may run without one (the
+	// gateway cwd is used).
+	if (!agentDir && accountId) {
+		try {
+			const { loadConfig } = await import("../config");
+			const cfg = await loadConfig();
+			agentDir = resolveAgentCwd(accountId, cfg);
+			if (!agentDir) {
+				console.error(
+					`--account "${accountId}" has no agentDir in gateway.json. ` +
+						"Pass --agent-dir <path> directly, or fix the account binding.",
+				);
+				process.exitCode = 1;
+				return;
+			}
+		} catch (err) {
+			console.error(`Failed to load gateway.json to resolve --account: ${err}`);
+			process.exitCode = 1;
+			return;
+		}
+	}
+
+	if (type === "agent" && !agentDir) {
 		console.error(
-			"--account <accountId> is required for cron create. " +
-				"Tasks must be bound to a channel account (e.g. hr, ops) to reuse " +
-				"the existing agent bridge. Run 'cron list' to see available accounts.",
+			"Agent tasks require --agent-dir (or --account with an agentDir in gateway.json) " +
+				"so omp runs in the correct project. Shell tasks may omit it.",
 		);
 		process.exitCode = 1;
 		return;
@@ -332,6 +357,8 @@ export async function cronCreate(args: string[], storage: SchedulerDbStorage): P
 		deliver,
 		deliverUser,
 		accountId,
+		agentDir,
+		delivery: deliver ? { channel: deliver, toUserId: deliverUser, mode: "announce" } : undefined,
 		repeatCount,
 		repeatCompleted: 0,
 		status: "active",
@@ -351,7 +378,8 @@ export async function cronCreate(args: string[], storage: SchedulerDbStorage): P
 	if (model) console.log(`  Model: ${model}`);
 	if (provider) console.log(`  Provider: ${provider}`);
 	if (enabledToolsets) console.log(`  Toolsets: ${enabledToolsets.join(", ")}`);
-	if (accountId) console.log(`  Account: ${accountId}`);
+	if (agentDir) console.log(`  AgentDir: ${agentDir}`);
+	else if (accountId) console.log(`  Account: ${accountId}`);
 	if (timeoutMs !== undefined) console.log(`  Timeout: ${timeoutMs}ms`);
 	if (skills) console.log(`  Skills: ${skills.join(", ")}`);
 	if (retryMaxAttempts !== undefined) console.log(`  Retry: max ${retryMaxAttempts} attempts (backoff 1s/5s/30s)`);
@@ -505,12 +533,55 @@ export async function cronUpdate(args: string[], storage: SchedulerDbStorage): P
 		}
 	}
 
-	if (accountState.tag === "set") updates.accountId = accountState.value;
-	else if (accountState.tag === "clear") updates.accountId = undefined;
-	if (deliverState.tag === "set") updates.deliver = deliverState.value;
-	else if (deliverState.tag === "clear") updates.deliver = undefined;
-	if (deliverUserState.tag === "set") updates.deliverUser = deliverUserState.value;
-	else if (deliverUserState.tag === "clear") updates.deliverUser = undefined;
+	// --account resolves to agentDir (the new execution-routing field).
+	// We still write accountId for backward-compat reads, but agentDir is
+	// what cronRun actually uses as the spawn cwd.
+	if (accountState.tag === "set") {
+		try {
+			const { loadConfig } = await import("../config");
+			const cfg = await loadConfig();
+			const resolved = resolveAgentCwd(accountState.value, cfg);
+			if (!resolved) {
+				console.error(
+					`--account "${accountState.value}" has no agentDir in gateway.json. ` +
+						"Pass --agent-dir <path> directly, or fix the account binding.",
+				);
+				process.exitCode = 1;
+				return;
+			}
+			updates.accountId = accountState.value;
+			updates.agentDir = resolved;
+		} catch (err) {
+			console.error(`Failed to load gateway.json to resolve --account: ${err}`);
+			process.exitCode = 1;
+			return;
+		}
+	} else if (accountState.tag === "clear") {
+		updates.accountId = undefined;
+		updates.agentDir = undefined;
+	}
+
+	// --deliver / --deliver-user write the structured `delivery` object.
+	// Recompute it from the effective channel/user after applying the
+	// requested set/clear so the delivery_* columns stay in sync with the
+	// legacy deliver/deliver_user columns.
+	if (deliverState.tag !== "none" || deliverUserState.tag !== "none") {
+		const effChannel =
+			deliverState.tag === "set" ? deliverState.value
+			: deliverState.tag === "clear" ? undefined
+			: task.delivery?.channel ?? task.deliver;
+		const effUser =
+			deliverUserState.tag === "set" ? deliverUserState.value
+			: deliverUserState.tag === "clear" ? undefined
+			: task.delivery?.toUserId ?? task.deliverUser;
+		if (deliverState.tag === "set") updates.deliver = deliverState.value;
+		else if (deliverState.tag === "clear") updates.deliver = undefined;
+		if (deliverUserState.tag === "set") updates.deliverUser = deliverUserState.value;
+		else if (deliverUserState.tag === "clear") updates.deliverUser = undefined;
+		updates.delivery = effChannel
+			? { channel: effChannel, toUserId: effUser, mode: "announce" }
+			: undefined;
+	}
 	if (timeoutMs !== undefined) updates.timeoutMs = timeoutMs;
 
 	if (Object.keys(updates).length === 0) {
@@ -574,13 +645,12 @@ export async function cronRun(name: string, storage: SchedulerDbStorage): Promis
 	const startedAt = Date.now();
 	const exec = storage.recordExecution({ taskId: task.id, startedAt, status: "running" });
 	try {
-		// Resolve the task's accountId to an agentDir from gateway.json. The
-		// agentDir becomes the Bun.spawn cwd so omp finds the right
-		// `.omp/config.yml` for this account. Falls back to the gateway's
-		// cwd if the accountId is unset or the account is not in config
-		// (with a warning) so a missing entry doesn't break execution.
-		let cwd: string | undefined;
-		if (task.accountId) {
+		// Resolve the spawn cwd. Prefer the new `agentDir` field directly;
+		// fall back to resolving a legacy `accountId` via gateway.json. When
+		// neither yields a path, leave cwd unset so executeScheduledCommand
+		// uses the gateway cwd (shell tasks often don't need an agentDir).
+		let cwd: string | undefined = task.agentDir;
+		if (!cwd && task.accountId) {
 			try {
 				const { loadConfig } = await import("../config");
 				const cfg = await loadConfig();
@@ -633,17 +703,11 @@ export async function cronRun(name: string, storage: SchedulerDbStorage): Promis
 			stderr,
 		});
 
-		// Deliver result to user if configured
-		if (task.deliver && task.deliverUser) {
-			const prefix = exitCode === 0 ? "✅" : "❌";
-			const summary = `${prefix} Task "${task.name}" completed (exit ${exitCode}, ${durationMs}ms)\n\n${output.slice(0, 2000)}`;
-			const { sendToChannel } = await import("../gateway");
-			try {
-				await sendToChannel(task.deliver, summary, { userId: task.deliverUser });
-			} catch (err) {
-				console.error(`[warn] Failed to deliver result: ${err}`);
-			}
-		}
+	// Manual `omp cron run` skips channel delivery — the scheduled path
+	// through CronService owns delivery. Here we just print the captured
+	// output to stdout/stderr so the operator sees what ran.
+	if (output) console.log(output);
+	if (stderr) console.error(stderr);
 
 		if (agentSessionPath) {
 			console.log(`[trace] agent session: ${agentSessionPath}`);

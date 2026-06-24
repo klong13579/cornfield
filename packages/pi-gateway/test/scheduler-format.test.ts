@@ -69,36 +69,39 @@ describe("formatChannel", () => {
 });
 
 describe("formatAgent", () => {
-	it("returns em-dash when accountId is unset", () => {
+	it("returns em-dash when agentDir is unset", () => {
 		expect(formatAgent(undefined)).toBe("—");
 	});
 
-	it("returns em-dash when accountId is the empty string (DB default)", () => {
+	it("returns em-dash when agentDir is the empty string", () => {
 		expect(formatAgent("")).toBe("—");
 	});
 
-	it("returns the accountId as-is when it fits the column", () => {
-		expect(formatAgent("hr")).toBe("hr");
-		expect(formatAgent("ops/hr")).toBe("ops/hr");
+	it("extracts the last path segment as the agent label", () => {
+		expect(formatAgent("~/.omp/agents/hr")).toBe("hr");
 	});
 
-	it("truncates with an ellipsis when accountId exceeds the default max (12)", () => {
-		// accountId "way-too-long-account-id" is 23 chars, well over 12.
-		const cell = formatAgent("way-too-long-account-id");
+	it("extracts the last segment of a nested agent path", () => {
+		expect(formatAgent("~/.omp/agents/ops/hr")).toBe("hr");
+	});
+
+	it("truncates the label with an ellipsis when it exceeds the default max (12)", () => {
+		// last segment "way-too-long-account-id" is 23 chars, well over 12.
+		const cell = formatAgent("~/.omp/agents/way-too-long-account-id");
 		expect(cell.length).toBe(12);
 		expect(cell.endsWith("\u2026")).toBe(true);
 	});
 
 	it("respects a custom max width", () => {
 		// truncateName contract: first (max-1) chars + "…". For max=4
-		// and "ops/hr" (6 chars), it returns "ops" + "…" = "ops…".
-		expect(formatAgent("ops/hr", 4)).toBe("ops…");
+		// and last segment "ops-team" (8 chars), it returns "ops" + "…" = "ops…".
+		expect(formatAgent("~/.omp/agents/ops-team", 4)).toBe("ops…");
 	});
 
-	it("returns the accountId as-is when it equals the max", () => {
-		// "opencode-account" is 15 chars, exactly max=15.
+	it("returns the label as-is when it equals the max", () => {
+		// "aaaaaaaaaaaaaaa" is 15 chars, exactly max=15.
 		const id = "a".repeat(15);
-		expect(formatAgent(id, 15)).toBe(id);
+		expect(formatAgent(`~/.omp/agents/${id}`, 15)).toBe(id);
 	});
 });
 
@@ -116,11 +119,16 @@ describe("formatTaskRow column layout", () => {
 			makeTask({ accountId: "hr" }),
 			makeTask({ accountId: "ops/hr" }),
 			makeTask({ accountId: "way-too-long-account-id" }),
+			makeTask({ agentDir: "~/.omp/agents/hr" }),
+			makeTask({ agentDir: "~/.omp/agents/ops/hr" }),
+			makeTask({ agentDir: "~/.omp/agents/way-too-long-account-id" }),
+			makeTask({ delivery: { channel: "dingtalk:hr", mode: "announce" } }),
+			makeTask({ delivery: { channel: "dingtalk:user:601590212", mode: "announce" } }),
 		];
 		// Columns: NAME(21) TYPE(6) AGENT(12) STATUS(8) CRON(16)
-		//          MODEL(15) CHANNEL(22) LAST(8) DELIVERY(10) NEXT RUN(21)
-		// Total width: 21+1+6+1+12+1+8+1+16+1+15+1+22+1+8+1+10+1+21 = 148 chars
-		const widths = [21, 6, 12, 8, 16, 15, 22, 8, 10] as const;
+		//          MODEL(15) REPEAT(7) CHANNEL(20) LAST(8) DELIV(8) NEXT RUN(21)
+		// Total width: 21+1+6+1+12+1+8+1+16+1+15+1+7+1+20+1+8+1+8+1+21 = 152 chars
+		const widths = [21, 6, 12, 8, 16, 15, 7, 20, 8, 8] as const;
 		const splitByWidth = (row: string): string[] => {
 			const out: string[] = [];
 			let pos = 0;
@@ -133,9 +141,9 @@ describe("formatTaskRow column layout", () => {
 		};
 		const counts = variants.map(t => splitByWidth(formatTaskRow(t)).length);
 		// All rows should have the same field count. 10 fixed columns +
-		// unpadded NEXT RUN tail = 10 fields.
+		// unpadded NEXT RUN tail = 11 fields.
 		expect(new Set(counts).size).toBe(1);
-		expect(counts[0]).toBe(10);
+		expect(counts[0]).toBe(11);
 	});
 
 	it("includes the deliver value in the rendered row", () => {
@@ -156,8 +164,8 @@ describe("formatTaskRow column layout", () => {
 
 	it("truncates over-long names with an ellipsis instead of overflowing the next column", () => {
 		const row = formatTaskRow(makeTask({ name: "this-name-is-way-longer-than-eighteen-chars" }));
-		// Truncation keeps the field count stable across all 10 columns.
-		const widths = [21, 6, 12, 8, 16, 15, 22, 8, 10] as const;
+		// Truncation keeps the field count stable across all 10 fixed columns.
+		const widths = [21, 6, 12, 8, 16, 15, 7, 20, 8, 8] as const;
 		const splitByWidth = (row: string): string[] => {
 			const out: string[] = [];
 			let pos = 0;
@@ -168,17 +176,16 @@ describe("formatTaskRow column layout", () => {
 			out.push(row.slice(pos));
 			return out;
 		};
-		expect(splitByWidth(row).length).toBe(10);
+		expect(splitByWidth(row).length).toBe(11);
 		// The truncated name contains an ellipsis.
 		expect(row).toContain("\u2026");
 		// And the original full name is NOT in the row (it was truncated).
 		expect(row).not.toContain("eighteen-chars");
 	});
-
 	it("renders rows that match the table header width", () => {
 		// Regression: the table header in cronList is built as
 		// NAME(21) TYPE(6) AGENT(12) STATUS(8) CRON(16) MODEL(15)
-		// CHANNEL(22) LAST(8) DELIVERY(10) NEXT RUN(21) = 147 chars.
+		// REPEAT(7) CHANNEL(20) LAST(8) DELIV(8) NEXT RUN(21) = 152 chars.
 		// formatTaskRow produces the same fixed prefix and appends
 		// an unpadded NEXT RUN value. The header underline must equal
 		// the header line length; rows extend past it for long
@@ -197,24 +204,26 @@ describe("formatTaskRow column layout", () => {
 			" " +
 			"MODEL".padEnd(15) +
 			" " +
-			"CHANNEL".padEnd(22) +
+			"REPEAT".padEnd(7) +
+			" " +
+			"CHANNEL".padEnd(20) +
 			" " +
 			"LAST".padEnd(8) +
 			" " +
-			"DELIVERY".padEnd(10) +
+			"DELIV".padEnd(8) +
 			" " +
 			"NEXT RUN".padEnd(21);
-		expect(header.length).toBe(148);
+		expect(header.length).toBe(152);
 		// For a task with no lastRunAt and no last failures, the
-		// rendered row has the same length as the header (DELIVERY
+		// rendered row has the same length as the header (DELIV
 		// column is "✓" — a single char; everything else is padded
 		// to column width). Verify both line lengths match.
 		const row = formatTaskRow(makeTask({ name: "x" }));
-		expect(row.length).toBe(148);
+		expect(row.length).toBe(152);
 	});
 
-	it("renders the accountId in the row when set", () => {
-		const row = formatTaskRow(makeTask({ name: "x", accountId: "hr" }));
+	it("renders the agentDir label in the row when set", () => {
+		const row = formatTaskRow(makeTask({ name: "x", agentDir: "~/.omp/agents/hr" }));
 		expect(row).toContain("hr");
 	});
 

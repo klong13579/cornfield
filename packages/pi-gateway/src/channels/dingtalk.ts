@@ -20,7 +20,15 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { logger } from "@oh-my-pi/pi-utils";
 import { DWClient, type DWClientDownStream, TOPIC_CARD, TOPIC_ROBOT } from "dingtalk-stream";
-import { buildAnswerBlock, buildImageBlock, buildStopBlock, buildThinkBlock, buildToolBlock, type CardBlock, BlockType } from "./dingtalk-card";
+import {
+	buildAnswerBlock,
+	buildImageBlock,
+	buildStopBlock,
+	buildThinkBlock,
+	buildToolBlock,
+	type CardBlock,
+	BlockType,
+} from "./dingtalk-card";
 import { createAICardForTarget, failAICard, finishAICard, patchAICardBlocks, streamAICard } from "./dingtalk-card";
 import { uploadMedia } from "./dingtalk-media";
 import { formatDingTalkChrome, formatDingTalkReply } from "./dingtalk-formatter";
@@ -325,6 +333,8 @@ export class DingTalkChannel extends BaseChannel {
 	#accountId = "__default__";
 	/** Handler invoked when a card action callback arrives via TOPIC_CARD. */
 	#cardActionHandler: ((event: DingTalkCardActionEvent) => Promise<void>) | null = null;
+	/** OAuth token cache for proactive message sending (DM + group push). */
+	#tokenCache: { token: string; expiresAt: number } | null = null;
 
 	/** Set the account ID for multi-account routing */
 	setAccountId(accountId: string): void {
@@ -669,13 +679,20 @@ export class DingTalkChannel extends BaseChannel {
 			blocks.push(buildAnswerBlock(chrome.answerText));
 		}
 
+		// Strip stop blocks from the final card: the run is over (normal
+		// completion, timeout, or abort), so the stop affordance is no
+		// longer actionable. Leaving it shows a dead button that returns
+		// "no active prompt" when clicked, and the elapsed time is stale.
+		// The tool summary in the status line already records what ran.
+		const finalBlocks = blocks.filter(b => b.type !== BlockType.STOP);
+
 		const cardData = {
 			content: chrome.answerText,
-			blockList: blocks,
+			blockList: finalBlocks,
 			quoteContent: chrome.quoteContent ?? quoteText,
 			statusLine: chrome.statusLine ?? "",
 			copyContent: chrome.copyContent,
-			hasAction: blocks.some(b => b.btns && b.btns.length > 0),
+			hasAction: false,
 			version: 1 as const,
 		};
 
@@ -787,11 +804,6 @@ export class DingTalkChannel extends BaseChannel {
 		// ActionRegistry, which looks up the card and calls bridge.abort()
 		// (or other action types in the future).
 		this.#client.registerCallbackListener(TOPIC_CARD, (msg: DWClientDownStream) => {
-			logger.debug("[DingTalk] TOPIC_CARD callback received", {
-				accountId: this.#accountId,
-				headers: msg.headers,
-				preview: typeof msg.data === "string" ? msg.data.slice(0, 500) : "(non-string)",
-			});
 			void this.#handleCardCallback(msg);
 		});
 
@@ -898,10 +910,6 @@ export class DingTalkChannel extends BaseChannel {
 	}
 
 	async sendMessage(msg: OutboundMessage): Promise<void> {
-		if (!msg.sessionWebhook) {
-			throw new Error("[DingTalk] sendMessage failed: missing sessionWebhook");
-		}
-
 		const text =
 			msg.content.type === "markdown"
 				? msg.content.markdown
@@ -911,33 +919,164 @@ export class DingTalkChannel extends BaseChannel {
 
 		logger.debug("[DingTalk] sending message", { text: text.slice(0, 500), type: msg.content.type });
 
-		try {
-			const body =
-				msg.content.type === "markdown"
-					? { msgtype: "markdown", markdown: { title: "消息", text }, conversationId: msg.conversationId }
-					: {
-							msgtype: "text",
-							text: { content: text },
-							conversationId: msg.conversationId,
-							atUser: msg.mentions ? { dingtalkIds: msg.mentions } : undefined,
-						};
+		// Route 1: sessionWebhook — interactive reply (existing path)
+		if (msg.sessionWebhook) {
+			try {
+				const body =
+					msg.content.type === "markdown"
+						? { msgtype: "markdown", markdown: { title: "消息", text }, conversationId: msg.conversationId }
+						: {
+								msgtype: "text",
+								text: { content: text },
+								conversationId: msg.conversationId,
+								atUser: msg.mentions ? { dingtalkIds: msg.mentions } : undefined,
+							};
 
-			const res = await fetch(msg.sessionWebhook, {
+				const res = await fetch(msg.sessionWebhook, {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify(body),
+				});
+
+				if (!res.ok) {
+					const errText = await res.text();
+					logger.error("[DingTalk] send failed", { status: res.status, body: errText });
+					throw new Error(`[DingTalk] send failed: ${res.status} ${errText}`);
+				}
+				logger.debug("[DingTalk] message sent via webhook", { conversationId: msg.conversationId });
+			} catch (err) {
+				logger.error("[DingTalk] send error", { error: String(err) });
+				throw err;
+			}
+			return;
+		}
+
+		// Route 2: OAuth DM — proactive push to individual user (cron delivery)
+		if (msg.accountId && msg.toUserId) {
+			await this.#sendViaOAuthDM(msg.toUserId, text);
+			return;
+		}
+
+		// Route 3: OAuth group — proactive push to conversation (cron delivery)
+		if (msg.accountId && msg.conversationId) {
+			await this.#sendViaOAuthGroup(msg.conversationId, text);
+			return;
+		}
+
+		throw new Error(
+			"[DingTalk] sendMessage failed: no delivery route (missing sessionWebhook or accountId+toUserId or accountId+conversationId)",
+		);
+	}
+
+	/**
+	 * Get an OAuth access token for proactive message sending, with caching.
+	 * Token TTL is taken from DingTalk's expireIn response minus a 60s safety margin.
+	 */
+	async #getOAuthToken(): Promise<string> {
+		const now = Date.now();
+		if (this.#tokenCache && this.#tokenCache.expiresAt > now) {
+			return this.#tokenCache.token;
+		}
+
+		if (!this.#config?.appKey || !this.#config?.appSecret) {
+			throw new Error("[DingTalk] cannot get OAuth token: missing appKey/appSecret in channel config");
+		}
+
+		let appSecret = this.#config.appSecret;
+		if (appSecret.startsWith("$")) {
+			const envVal = Bun.env[appSecret.slice(1)];
+			if (envVal) appSecret = envVal;
+		}
+
+		try {
+			const res = await fetch("https://api.dingtalk.com/v1.0/oauth2/accessToken", {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify(body),
+				body: JSON.stringify({ appKey: this.#config.appKey, appSecret }),
 			});
-
 			if (!res.ok) {
-				const errText = await res.text();
-				logger.error("[DingTalk] send failed", { status: res.status, body: errText });
-				throw new Error(`[DingTalk] send failed: ${res.status} ${errText}`);
+				const err = await res.text();
+				throw new Error(`[DingTalk] failed to get OAuth token: ${res.status} ${err}`);
 			}
-			logger.debug("[DingTalk] message sent", { conversationId: msg.conversationId });
+			const data = (await res.json()) as { accessToken?: string; expireIn?: number };
+			if (!data.accessToken) {
+				throw new Error("[DingTalk] OAuth response missing accessToken");
+			}
+			const expireIn = data.expireIn ?? 7200;
+			this.#tokenCache = {
+				token: data.accessToken,
+				expiresAt: now + (expireIn - 60) * 1000,
+			};
+			return data.accessToken;
 		} catch (err) {
-			logger.error("[DingTalk] send error", { error: String(err) });
+			this.#tokenCache = null;
 			throw err;
 		}
+	}
+
+	/** Resolve robotCode from channel config (fallback to appKey). */
+	#getRobotCode(): string {
+		return this.#config?.robotCode ?? this.#config?.appKey ?? "";
+	}
+
+	/** Send a proactive DM via OAuth API. */
+		async #sendViaOAuthDM(userId: string, text: string): Promise<void> {
+		const token = await this.#getOAuthToken();
+		const robotCode = this.#getRobotCode();
+		const msgParam = JSON.stringify({ content: text });
+
+		logger.debug("[DingTalk] sending DM via OAuth", { userId, accountId: this.#accountId });
+
+		const res = await fetch("https://api.dingtalk.com/v1.0/robot/oToMessages/batchSend", {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+				"x-acs-dingtalk-access-token": token,
+			},
+			body: JSON.stringify({
+				robotCode,
+				userIds: [userId],
+				msgKey: "sampleText",
+				msgParam,
+			}),
+		});
+
+		if (!res.ok) {
+			const err = await res.text();
+			logger.error("[DingTalk] OAuth DM send failed", { status: res.status, body: err });
+			throw new Error(`[DingTalk] OAuth DM send failed: ${res.status} ${err}`);
+		}
+		logger.debug("[DingTalk] DM sent via OAuth", { userId, accountId: this.#accountId });
+	}
+
+	/** Send a proactive group message via OAuth API. */
+		async #sendViaOAuthGroup(conversationId: string, text: string): Promise<void> {
+		const token = await this.#getOAuthToken();
+		const robotCode = this.#getRobotCode();
+		const msgParam = JSON.stringify({ content: text });
+
+		logger.debug("[DingTalk] sending group message via OAuth", { conversationId, accountId: this.#accountId });
+
+		const res = await fetch("https://api.dingtalk.com/v1.0/robot/groupMessages/send", {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+				"x-acs-dingtalk-access-token": token,
+			},
+			body: JSON.stringify({
+				robotCode,
+				openConversationId: conversationId,
+				msgKey: "sampleText",
+				msgParam,
+			}),
+		});
+
+		if (!res.ok) {
+			const err = await res.text();
+			logger.error("[DingTalk] OAuth group send failed", { status: res.status, body: err });
+			throw new Error(`[DingTalk] OAuth group send failed: ${res.status} ${err}`);
+		}
+		logger.debug("[DingTalk] group message sent via OAuth", { conversationId, accountId: this.#accountId });
 	}
 
 	// ═══════════════════════════════════════════════════════════════════

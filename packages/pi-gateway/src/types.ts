@@ -46,6 +46,8 @@ export interface OutboundMessage {
 	sessionWebhook?: string;
 	/** Account identifier for account-specific outbound routing */
 	accountId?: string;
+	/** Proactive push target user ID (used for OAuth DM when no sessionWebhook) */
+	toUserId?: string;
 }
 
 // ═══════════════════════════════════════════════════════════════════════

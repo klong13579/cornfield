@@ -47,6 +47,12 @@ type TaskRow = {
 	deliver_user: string | null;
 	last_delivery_error: string | null;
 	account_id: string | null;
+	agent_dir: string | null;
+	delivery_channel: string | null;
+	delivery_account_id: string | null;
+	delivery_to_user_id: string | null;
+	delivery_to_conversation_id: string | null;
+	delivery_mode: string | null;
 };
 
 type ExecutionRow = {
@@ -93,6 +99,12 @@ const TASK_UPDATE_FIELDS = new Set<string>([
 	"deliverUser",
 	"lastDeliveryError",
 	"accountId",
+	"agentDir",
+	"deliveryChannel",
+	"deliveryAccountId",
+	"deliveryToUserId",
+	"deliveryToConversationId",
+	"deliveryMode",
 ]);
 
 const EXECUTION_UPDATE_FIELDS = new Set<string>([
@@ -111,6 +123,30 @@ const EXECUTION_UPDATE_FIELDS = new Set<string>([
 // ---------------------------------------------------------------------------
 
 function toTask(row: TaskRow): ScheduledTask {
+	// agentDir: prefer the new column, fall back to legacy account_id for
+	// rows written before the agentDir migration.
+	const agentDir = row.agent_dir ?? row.account_id ?? undefined;
+
+	// delivery: prefer the new structured column group. For rows written
+	// before the delivery migration, reconstruct from legacy deliver /
+	// deliver_user so old tasks keep firing to their configured channel.
+	let delivery: ScheduledTask["delivery"];
+	if (row.delivery_channel) {
+		delivery = {
+			channel: row.delivery_channel,
+			accountId: row.delivery_account_id ?? undefined,
+			toUserId: row.delivery_to_user_id ?? undefined,
+			toConversationId: row.delivery_to_conversation_id ?? undefined,
+			mode: (row.delivery_mode as "announce" | "none") ?? "announce",
+		};
+	} else if (row.deliver) {
+		delivery = {
+			channel: row.deliver,
+			toUserId: row.deliver_user ?? undefined,
+			mode: "announce",
+		};
+	}
+
 	return {
 		id: row.id,
 		name: row.name,
@@ -136,6 +172,9 @@ function toTask(row: TaskRow): ScheduledTask {
 		failCount: row.fail_count,
 		repeatCount: row.repeat_count ?? undefined,
 		repeatCompleted: row.repeat_completed ?? undefined,
+		agentDir,
+		delivery,
+		// Legacy fields preserved for backward-compat reads.
 		deliver: row.deliver ?? undefined,
 		deliverUser: row.deliver_user ?? undefined,
 		lastDeliveryError: row.last_delivery_error ?? undefined,
@@ -224,8 +263,10 @@ export class SchedulerDbStorage implements SchedulerStorage {
 				retry_config, skills_config, pre_script, consecutive_failures,
 				created_at, updated_at, last_run_at, next_run_at,
 				run_count, fail_count, repeat_count, repeat_completed,
-				deliver, deliver_user, last_delivery_error, account_id
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				deliver, deliver_user, last_delivery_error, account_id,
+				agent_dir, delivery_channel, delivery_account_id,
+				delivery_to_user_id, delivery_to_conversation_id, delivery_mode
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`);
 
 		this.#getTaskStmt = this.#db.prepare("SELECT * FROM tasks WHERE id = ?");
@@ -318,13 +359,27 @@ export class SchedulerDbStorage implements SchedulerStorage {
 		if (!hasPreScript) this.#db.exec("ALTER TABLE tasks ADD COLUMN pre_script TEXT;");
 		if (!hasConsecutiveFails)
 			this.#db.exec("ALTER TABLE tasks ADD COLUMN consecutive_failures INTEGER NOT NULL DEFAULT 0;");
-	const hasRepeatCount = columns.some(c => c.name === "repeat_count");
-	const hasRepeatCompleted = columns.some(c => c.name === "repeat_completed");
-	if (!hasRepeatCount) this.#db.exec("ALTER TABLE tasks ADD COLUMN repeat_count INTEGER;");
-	if (!hasRepeatCompleted) this.#db.exec("ALTER TABLE tasks ADD COLUMN repeat_completed INTEGER;");
-	const hasLastDeliveryError = columns.some(c => c.name === "last_delivery_error");
-	if (!hasLastDeliveryError) this.#db.exec("ALTER TABLE tasks ADD COLUMN last_delivery_error TEXT;");
-	if (!hasDeliver) this.#db.exec("ALTER TABLE tasks ADD COLUMN deliver TEXT;");
+		const hasRepeatCount = columns.some(c => c.name === "repeat_count");
+		const hasRepeatCompleted = columns.some(c => c.name === "repeat_completed");
+		if (!hasRepeatCount) this.#db.exec("ALTER TABLE tasks ADD COLUMN repeat_count INTEGER;");
+		if (!hasRepeatCompleted) this.#db.exec("ALTER TABLE tasks ADD COLUMN repeat_completed INTEGER;");
+		const hasLastDeliveryError = columns.some(c => c.name === "last_delivery_error");
+		if (!hasLastDeliveryError) this.#db.exec("ALTER TABLE tasks ADD COLUMN last_delivery_error TEXT;");
+		if (!hasDeliver) this.#db.exec("ALTER TABLE tasks ADD COLUMN deliver TEXT;");
+
+		// agentDir + delivery migration (replaces accountId / deliver / deliver_user)
+		const hasAgentDir = columns.some(c => c.name === "agent_dir");
+		const hasDeliveryChannel = columns.some(c => c.name === "delivery_channel");
+		const hasDeliveryAccountId = columns.some(c => c.name === "delivery_account_id");
+		const hasDeliveryToUserId = columns.some(c => c.name === "delivery_to_user_id");
+		const hasDeliveryToConversationId = columns.some(c => c.name === "delivery_to_conversation_id");
+		const hasDeliveryMode = columns.some(c => c.name === "delivery_mode");
+		if (!hasAgentDir) this.#db.exec("ALTER TABLE tasks ADD COLUMN agent_dir TEXT;");
+		if (!hasDeliveryChannel) this.#db.exec("ALTER TABLE tasks ADD COLUMN delivery_channel TEXT;");
+		if (!hasDeliveryAccountId) this.#db.exec("ALTER TABLE tasks ADD COLUMN delivery_account_id TEXT;");
+		if (!hasDeliveryToUserId) this.#db.exec("ALTER TABLE tasks ADD COLUMN delivery_to_user_id TEXT;");
+		if (!hasDeliveryToConversationId) this.#db.exec("ALTER TABLE tasks ADD COLUMN delivery_to_conversation_id TEXT;");
+		if (!hasDeliveryMode) this.#db.exec("ALTER TABLE tasks ADD COLUMN delivery_mode TEXT;");
 		this.#db.exec("CREATE INDEX IF NOT EXISTS idx_executions_task_id ON executions(task_id)");
 		this.#db.exec("CREATE INDEX IF NOT EXISTS idx_executions_started_at ON executions(started_at DESC)");
 	}
@@ -361,6 +416,12 @@ export class SchedulerDbStorage implements SchedulerStorage {
 			task.deliverUser ?? null,
 			task.lastDeliveryError ?? null,
 			task.accountId ?? null,
+			task.agentDir ?? null,
+			task.delivery?.channel ?? null,
+			task.delivery?.accountId ?? null,
+			task.delivery?.toUserId ?? null,
+			task.delivery?.toConversationId ?? null,
+			task.delivery?.mode ?? null,
 		);
 		return this.getTask(id)!;
 	}
@@ -381,7 +442,21 @@ export class SchedulerDbStorage implements SchedulerStorage {
 	}
 
 	updateTask(id: string, updates: Partial<ScheduledTask>): void {
-		const built = buildDynamicUpdate(updates, TASK_UPDATE_FIELDS, { updatedAt: Date.now() });
+		// Flatten the `delivery` object into the 5 snake_case delivery_* columns.
+		// buildDynamicUpdate only handles scalar fields, so a structured `delivery`
+		// would otherwise be dropped (or stored as "[object Object]").
+		const flattened: Record<string, unknown> = { ...updates };
+		if (updates.delivery !== undefined) {
+			const d = updates.delivery;
+			flattened.deliveryChannel = d?.channel ?? null;
+			flattened.deliveryAccountId = d?.accountId ?? null;
+			flattened.deliveryToUserId = d?.toUserId ?? null;
+			flattened.deliveryToConversationId = d?.toConversationId ?? null;
+			flattened.deliveryMode = d?.mode ?? null;
+			delete flattened.delivery;
+		}
+
+		const built = buildDynamicUpdate(flattened, TASK_UPDATE_FIELDS, { updatedAt: Date.now() });
 		if (!built) return;
 
 		const sql = `UPDATE tasks SET ${built.sql} WHERE id = ?`;
