@@ -25,13 +25,29 @@ import {
 } from "../src/cli/agent-cli";
 
 let tmpDir: string;
+const savedHome = process.env.HOME;
+let isolatedHome: string;
 
 beforeEach(async () => {
 	tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-agent-test-"));
+	// Isolate HOME for every test in this file. The agent registry lives at
+	// `~/.omp/agent/registry.json` and several test paths (runAgentInit,
+	// runAgentReconcile's auto-register) call registerAgent as a side effect.
+	// Without isolation, `bun test` writes to the user's real registry and
+	// leaves dead entries pointing at temp dirs that the OS later cleans —
+	// surfacing as "zombie agents" in `omp agent list`.
+	isolatedHome = await fs.mkdtemp(path.join(os.tmpdir(), "omp-registry-iso-"));
+	process.env.HOME = isolatedHome;
 });
 
 afterEach(async () => {
 	await fs.rm(tmpDir, { recursive: true, force: true });
+	// Restore FIRST so we never rm the real home, then clean the isolated one.
+	process.env.HOME = savedHome;
+	if (isolatedHome) {
+		await fs.rm(isolatedHome, { recursive: true, force: true });
+		isolatedHome = "";
+	}
 });
 
 async function writeFile(rel: string, content: string): Promise<void> {
@@ -497,20 +513,8 @@ describe("runAgentValidate — MECE rules", () => {
 });
 
 describe("omp agent register / unregister / reconcile", () => {
-	const savedHome = process.env.HOME;
-	let isolatedHome: string;
-
-	beforeEach(async () => {
-		// isolate HOME so the real registry is never touched
-		isolatedHome = await fs.mkdtemp(path.join(os.tmpdir(), "omp-registry-iso-"));
-		process.env.HOME = isolatedHome;
-	});
-
-	afterEach(async () => {
-		// restore FIRST so we never rm the real home, then clean the isolated one
-		process.env.HOME = savedHome;
-		if (isolatedHome) await fs.rm(isolatedHome, { recursive: true, force: true });
-	});
+	// HOME isolation is provided by the file-level beforeEach/afterEach so
+	// every test in this file is sandboxed.
 
 	test("register adds an existing agentDir", async () => {
 		const liveDir = await fs.mkdtemp(path.join(os.tmpdir(), "live-"));
@@ -535,6 +539,54 @@ describe("omp agent register / unregister / reconcile", () => {
 		expect(result.removed).toBe(false);
 	});
 
+	test("unregister without --delete-files leaves the agentDir intact", async () => {
+		const liveDir = await fs.mkdtemp(path.join(os.tmpdir(), "live-"));
+		await Bun.write(path.join(liveDir, "marker.txt"), "x");
+		await runAgentRegister({ name: "kept", dir: liveDir });
+		const result = await runAgentUnregister({ name: "kept" });
+		expect(result.removed).toBe(true);
+		expect(result.deletedFiles).toBeUndefined();
+		expect(result.deleteFiles).toBeUndefined();
+		// agentDir on disk must still exist with its content
+		const content = await Bun.file(path.join(liveDir, "marker.txt")).text();
+		expect(content).toBe("x");
+	});
+
+	test("--delete-files removes the agentDir on disk", async () => {
+		const liveDir = await fs.mkdtemp(path.join(os.tmpdir(), "live-"));
+		await Bun.write(path.join(liveDir, "marker.txt"), "x");
+		await runAgentRegister({ name: "doomed", dir: liveDir });
+		const result = await runAgentUnregister({ name: "doomed", deleteFiles: true });
+		expect(result.removed).toBe(true);
+		expect(result.deleteFiles).toBe(true);
+		expect(result.deletedFiles).toBe(true);
+		expect(result.agentDir).toBe(liveDir);
+		// Directory should be gone
+		await expect(fs.access(liveDir)).rejects.toThrow();
+	});
+
+	test("--delete-files with a missing agentDir just unregisters and reports nothing-to-delete", async () => {
+		const { registerAgent } = await import("../src/skeleton/registry");
+		await registerAgent("ghost", "/nonexistent/never/was");
+		const result = await runAgentUnregister({ name: "ghost", deleteFiles: true });
+		expect(result.removed).toBe(true);
+		expect(result.deleteFiles).toBe(true);
+		expect(result.deletedFiles).toBe(false);
+		expect(result.agentDir).toBe("/nonexistent/never/was");
+	});
+
+	test("--delete-files refuses to wipe filesystem root even if a corrupt registry points there", async () => {
+		const { registerAgent } = await import("../src/skeleton/registry");
+		await registerAgent("root", "/");
+		await expect(runAgentUnregister({ name: "root", deleteFiles: true })).rejects.toThrow(/Refusing/);
+		// Throw happened BEFORE unregister, so the registry entry is preserved.
+		const { findAgent } = await import("../src/skeleton/registry");
+		const entry = await findAgent("root");
+		expect(entry?.path).toBe("/");
+		// Clean up so the afterEach isolation sees a consistent registry.
+		await runAgentUnregister({ name: "root" });
+	});
+
 	test("reconcile prunes stale entries and reports them", async () => {
 		const liveDir = await fs.mkdtemp(path.join(os.tmpdir(), "live-"));
 		// Use the low-level registerAgent to add a "dead" entry pointing at a
@@ -546,8 +598,30 @@ describe("omp agent register / unregister / reconcile", () => {
 		expect(result.pruned).toContain("dead");
 		expect(result.pruned).not.toContain("alive");
 	});
-});
 
+	test("reconcile auto-registers agentDirs in the default location not in the registry", async () => {
+		// Simulate a legacy agentDir (created before the registry existed) by
+		// dropping it directly into the default location under the isolated HOME.
+		const defaultRoot = path.join(isolatedHome, ".omp", "agents");
+		const legacyDir = path.join(defaultRoot, "legacy-bot");
+		await fs.mkdir(legacyDir, { recursive: true });
+		// Sanity: the registry file is at ~/.omp/agent/registry.json under isolatedHome,
+		// which the afterEach hook will clean up.
+		const result = await runAgentReconcile();
+		expect(result.registered).toContain("legacy-bot");
+		const { findAgent } = await import("../src/skeleton/registry");
+		const entry = await findAgent("legacy-bot");
+		expect(entry?.path).toBe(legacyDir);
+	});
+
+	test("reconcile is idempotent: re-running after a clean registry is a no-op", async () => {
+		const result = await runAgentReconcile();
+		expect(result.pruned).toEqual([]);
+		expect(result.registered).toEqual([]);
+		const second = await runAgentReconcile();
+		expect(second).toEqual(result);
+	});
+});
 
 // ────────────────────────────────────────────────────────────────────────────
 // semantic audit (--semantic flag)

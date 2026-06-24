@@ -154,11 +154,17 @@ export abstract class Command {
 		const argDefs = (Cmd.args ?? {}) as Record<string, ArgDescriptor>;
 		const strict = Cmd.strict !== false;
 
-		// Build node:util parseArgs options from flag descriptors
+		// Build node:util parseArgs options from flag descriptors.
+		// Flags declared in camelCase (e.g. `deleteFiles`) are also registered
+		// under their kebab-case form (`--delete-files`) so users can write the
+		// conventional CLI spelling. Both spellings share the same option
+		// object, so nodeParseArgs populates whichever key the user typed.
 		const options: Record<
 			string,
 			{ type: "string" | "boolean"; short?: string; multiple?: boolean; default?: string | boolean }
 		> = {};
+		const camelToKebab = (name: string): string =>
+			name.replace(/[A-Z]/g, (c, idx) => (idx === 0 ? c.toLowerCase() : `-${c.toLowerCase()}`));
 		for (const [name, desc] of Object.entries(flagDefs)) {
 			const opt: (typeof options)[string] = {
 				type: desc.kind === "boolean" ? "boolean" : "string",
@@ -169,6 +175,8 @@ export abstract class Command {
 				opt.default = desc.kind === "boolean" ? Boolean(desc.default) : String(desc.default);
 			}
 			options[name] = opt;
+			const kebab = camelToKebab(name);
+			if (kebab !== name) options[kebab] = opt;
 		}
 
 		// strict=false when command declares args (positionals must pass through)
@@ -183,7 +191,9 @@ export abstract class Command {
 		// Convert raw values to proper types and validate
 		const flags: Record<string, unknown> = {};
 		for (const [name, desc] of Object.entries(flagDefs)) {
-			const raw = rawValues[name];
+			// Read either the camelCase or kebab-case spelling the user typed.
+			const kebab = camelToKebab(name);
+			const raw = rawValues[name] ?? rawValues[kebab];
 			if (desc.kind === "integer") {
 				if (raw === undefined || typeof raw === "boolean") {
 					flags[name] = desc.default ?? undefined;
@@ -309,13 +319,18 @@ function renderCommandBody(lines: string[], Cmd: CommandCtor): void {
 	}
 
 	// Flags
+	const camelToKebabForHelp = (name: string): string =>
+		name.replace(/[A-Z]/g, (c, idx) => (idx === 0 ? c.toLowerCase() : `-${c.toLowerCase()}`));
 	const flagEntries = Object.entries(flagDefs);
 	if (flagEntries.length > 0) {
 		lines.push("FLAGS");
 		const formatted: [string, string][] = [];
 		for (const [name, desc] of flagEntries) {
 			const charPart = desc.char ? `-${desc.char}, ` : "    ";
-			const namePart = `--${name}`;
+			// Display the kebab-case form when it differs from the key, so
+			// the help text matches the conventional CLI spelling.
+			const displayName = name.includes("-") ? name : camelToKebabForHelp(name);
+			const namePart = `--${displayName}`;
 			const typePart = desc.kind === "boolean" ? "" : desc.kind === "integer" ? "=<int>" : "=<value>";
 			formatted.push([`  ${charPart}${namePart}${typePart}`, desc.description ?? ""]);
 		}

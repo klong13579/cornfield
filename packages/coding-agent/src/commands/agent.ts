@@ -64,6 +64,7 @@ export default class Agent extends Command {
 		force: Flags.boolean({ description: "Allow overwriting an existing agentDir (init)" }),
 		fix: Flags.boolean({ description: "Auto-repair MECE violations (validate)" }),
 		semantic: Flags.boolean({ description: "Run LLM-based semantic MECE audit (validate)" }),
+		deleteFiles: Flags.boolean({ description: "Also rm -rf the agentDir on disk (unregister). Off by default." }),
 		json: Flags.boolean({ description: "Output JSON" }),
 	};
 
@@ -92,6 +93,7 @@ export default class Agent extends Command {
 		"  omp agent register hr3 --dir /path/to/hr3       Add an existing agentDir to ~/.omp/agent/registry.json",
 		"  omp agent register hr3 /path/to/hr3              Positional shortcut for --dir",
 		"  omp agent unregister hr3                          Remove hr3 from the registry (does not delete files)",
+		"  omp agent unregister hr3 --delete-files           Also rm -rf the agentDir on disk",
 		"  omp agent reconcile                               Prune stale entries; re-register any in default location",
 		"",
 	];
@@ -201,11 +203,15 @@ export default class Agent extends Command {
 			}
 			case "unregister": {
 				if (!name) {
-					console.error("Usage: omp agent unregister <name>");
+					console.error("Usage: omp agent unregister <name> [--delete-files]");
 					process.exitCode = 1;
 					return;
 				}
-				const result = await runAgentUnregister({ name, json: flags.json as boolean | undefined });
+				const result = await runAgentUnregister({
+					name,
+					deleteFiles: flags.deleteFiles as boolean | undefined,
+					json: flags.json as boolean | undefined,
+				});
 				console.log(renderUnregister(result, Boolean(flags.json)));
 				return;
 			}

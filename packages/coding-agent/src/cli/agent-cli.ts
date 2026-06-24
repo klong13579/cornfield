@@ -17,6 +17,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import {
 	ensureAgentDir,
+	findAgent,
 	pruneStaleEntries,
 	registerAgent,
 	resolveAgentDir,
@@ -745,17 +746,53 @@ export async function runAgentRegister(args: RegisterArgs): Promise<RegisterResu
 
 export interface UnregisterArgs {
 	name: string;
+	/** Also rm -rf the agentDir directory on disk. Off by default. */
+	deleteFiles?: boolean;
 	json?: boolean;
 }
 
 export interface UnregisterResult {
 	name: string;
 	removed: boolean;
+	/** agentDir path that was registered (when the entry existed). */
+	agentDir?: string;
+	/** Echo of the --delete-files flag, for renderer transparency. */
+	deleteFiles?: boolean;
+	/** True if --delete-files actually deleted a directory from disk. */
+	deletedFiles?: boolean;
 }
 
 export async function runAgentUnregister(args: UnregisterArgs): Promise<UnregisterResult> {
+	// Look up first so we still know the path after unregisterAgent wipes the entry.
+	const entry = await findAgent(args.name);
+
+	let deletedFiles: boolean | undefined;
+	if (args.deleteFiles && entry) {
+		// Safety: never wipe filesystem root, even if a corrupt registry points there.
+		// Run the safety check + rm BEFORE unregisterAgent so a throw leaves the
+		// registry entry intact — the user can retry or re-register.
+		if (entry.path === "/" || entry.path === "") {
+			throw new Error(
+				`Refusing to --delete-files a path of "${entry.path}". Check the registry entry for "${args.name}".`,
+			);
+		}
+		const stat = await fs.stat(entry.path).catch(() => null);
+		if (stat?.isDirectory()) {
+			await fs.rm(entry.path, { recursive: true, force: true });
+			deletedFiles = true;
+		} else {
+			deletedFiles = false;
+		}
+	}
+
 	const removed = await unregisterAgent(args.name);
-	return { name: args.name, removed };
+
+	return {
+		name: args.name,
+		removed,
+		...(entry ? { agentDir: entry.path } : {}),
+		...(args.deleteFiles ? { deleteFiles: true, deletedFiles: deletedFiles ?? false } : {}),
+	};
 }
 
 export interface ReconcileArgs {
@@ -936,9 +973,15 @@ export function renderRegister(result: RegisterResult, json: boolean): string {
 
 export function renderUnregister(result: UnregisterResult, json: boolean): string {
 	if (json) return JSON.stringify(result, null, 2);
-	return result.removed
-		? `✓ Unregistered ${result.name} (agentDir on disk is untouched)`
-		: `! ${result.name} was not in the registry`;
+	if (!result.removed) return `! ${result.name} was not in the registry`;
+	const where = result.agentDir ? `: ${result.agentDir}` : "";
+	if (result.deletedFiles) return `✓ Unregistered ${result.name}; deleted agentDir${where}`;
+	if (result.deleteFiles) {
+		return result.agentDir
+			? `✓ Unregistered ${result.name}; --delete-files had nothing to delete at ${result.agentDir}`
+			: `✓ Unregistered ${result.name}; --delete-files had nothing to delete (no agentDir path)`;
+	}
+	return `✓ Unregistered ${result.name} (agentDir on disk is untouched${where})`;
 }
 
 export function renderReconcile(result: ReconcileResult, json: boolean): string {
