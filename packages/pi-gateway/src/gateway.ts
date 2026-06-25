@@ -539,36 +539,56 @@ export class Gateway {
 
 		logger.debug("Stopping gateway...");
 
-		await this.#registry.disconnectAll();
-		this.#stopScheduler();
+		const warnings: string[] = [];
 
+		// Phase 1: disconnect channels (5s grace)
+		await Promise.race([
+			this.#registry.disconnectAll().catch(err => {
+				warnings.push(`channels: ${err instanceof Error ? err.message : String(err)}`);
+			}),
+			Bun.sleep(5_000).then(() => { warnings.push("channels: timeout after 5s"); }),
+		]);
+
+		// Phase 2: stop scheduler + health interval (5s grace)
+		this.#stopScheduler();
 		if (this.#healthInterval) {
 			clearInterval(this.#healthInterval);
 			this.#healthInterval = undefined;
 		}
 
-		const drained = await this.#sessionManager?.waitForAllDrained(30_000);
+		// Phase 3: drain session queues (15s grace)
+		const drained = await Promise.race([
+			(this.#sessionManager?.waitForAllDrained(15_000) ?? Promise.resolve(true)),
+			Bun.sleep(15_000).then(() => false),
+		]);
 		if (drained === false) {
+			warnings.push("session-queues: timeout after 15s");
 			logger.warn("Gateway shutdown timed out waiting for session queues", {
 				queues: this.#sessionManager?.getQueueStats() ?? [],
 			});
 		}
 
-		// Stop all per-account bridges
-		for (const bridge of this.#accountBridges.values()) {
-			bridge.stop();
-		}
+		// Phase 4: stop all bridges (5s grace)
+		await Promise.race([
+			Promise.all([
+				...Array.from(this.#accountBridges.values()).map(b => { try { b.stop(); } catch {} }),
+				(() => { try { this.#bridge.stop(); } catch {} })(),
+			]).then(() => {}),
+			Bun.sleep(5_000).then(() => { warnings.push("bridges: timeout after 5s"); }),
+		]);
+
 		this.#accountBridges.clear();
-
-		// Stop default bridge
-		this.#bridge.stop();
-
 		this.#accountAgentDirs.clear();
 		this.#sessionManager = undefined;
 		this.#store?.close();
 		this.#store = null;
 		this.#running = false;
-		logger.debug("Gateway stopped");
+
+		if (warnings.length > 0) {
+			logger.warn("Gateway stopped with warnings", { warnings });
+		} else {
+			logger.debug("Gateway stopped");
+		}
 
 		// Remove PID file
 		try {
@@ -577,6 +597,7 @@ export class Gateway {
 			/* non-fatal */
 		}
 	}
+
 
 	/**
 	 * Periodic health check: if a bridge's circuit breaker has been open
