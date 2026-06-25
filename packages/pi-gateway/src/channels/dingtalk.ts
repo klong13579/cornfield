@@ -546,6 +546,13 @@ export class DingTalkChannel extends BaseChannel {
 
 		const flushBlocks = (): void => {
 			blockPatchTimer = null;
+			logger.debug("[DingTalk] patchAICardBlocks", {
+				accountId: this.#accountId,
+				conversationId: inbound.conversationId,
+				blockCount: blocks.length,
+				blockTypes: blocks.map(b => b.type),
+				blockTexts: blocks.map(b => b.text?.slice(0, 80)),
+			});
 			void patchAICardBlocks(currentCard, { content: segmentText, blockList: blocks }, config).catch(err => {
 				logger.warn("[DingTalk] patchAICardBlocks failed", {
 					accountId: this.#accountId,
@@ -650,6 +657,14 @@ export class DingTalkChannel extends BaseChannel {
 				pendingTools.set(call.id, { name: call.name, args: call.args });
 			},
 			onToolResult: result => {
+				logger.debug("[DingTalk] onToolResult", {
+					accountId: this.#accountId,
+					toolName: result.name,
+					toolId: result.id,
+					pendingSegmentBreak,
+					segmentBusy,
+					hasPending: pendingTools.has(result.id),
+				});
 				// If a segment break is pending (onAssistantMessageEnd
 				// fired but no onTextDelta came — e.g. agent only
 				// produced thinking text), trigger the split here.
