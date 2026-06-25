@@ -38,20 +38,10 @@ describe("extractLocalFileVideos", () => {
 	});
 
 	test("matches .mov, .webm, .avi, .mkv extensions", () => {
-		const text = [
-			"![a](/tmp/a.mov)",
-			"![b](/tmp/b.webm)",
-			"![c](/tmp/c.avi)",
-			"![d](/tmp/d.mkv)",
-		].join("\n");
+		const text = ["![a](/tmp/a.mov)", "![b](/tmp/b.webm)", "![c](/tmp/c.avi)", "![d](/tmp/d.mkv)"].join("\n");
 		const result = extractLocalFileVideos(text);
 		expect(result).toHaveLength(4);
-		expect(result.map(v => v.path)).toEqual([
-			"/tmp/a.mov",
-			"/tmp/b.webm",
-			"/tmp/c.avi",
-			"/tmp/d.mkv",
-		]);
+		expect(result.map(v => v.path)).toEqual(["/tmp/a.mov", "/tmp/b.webm", "/tmp/c.avi", "/tmp/d.mkv"]);
 	});
 
 	test("does NOT match image extensions (png, jpg, etc.)", () => {
@@ -143,10 +133,7 @@ describe("stripVideoDirectives", () => {
 
 describe("video/image pipeline non-interference", () => {
 	test("stripping videos first prevents image extractor from grabbing video URLs", () => {
-		const text = [
-			"![image](https://example.com/pic.png)",
-			"![video](https://example.com/clip.mp4)",
-		].join("\n");
+		const text = ["![image](https://example.com/pic.png)", "![video](https://example.com/clip.mp4)"].join("\n");
 
 		// Step 1: strip videos (as streamCard does before image extraction)
 		const textWithoutVideos = stripVideoDirectives(text);

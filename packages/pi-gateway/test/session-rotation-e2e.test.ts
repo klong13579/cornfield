@@ -154,7 +154,10 @@ describe("session rotation e2e", () => {
 		expect(meta1!.text).toContain("hello world");
 
 		// Verify: jsonl file was created
-		const file1Exists = await fs.access(sessionPath).then(() => true).catch(() => false);
+		const file1Exists = await fs
+			.access(sessionPath)
+			.then(() => true)
+			.catch(() => false);
 		expect(file1Exists).toBe(true);
 
 		// Read the session ID from the file
@@ -170,17 +173,27 @@ describe("session rotation e2e", () => {
 
 		// Check rotation should trigger
 		const config = { resetPolicy: "both", idleTimeoutMinutes: 240, dailyResetHour: 2 };
-		const shouldRotate = (Date.now() - fiveHoursAgo) > config.idleTimeoutMinutes * 60_000;
+		const shouldRotate = Date.now() - fiveHoursAgo > config.idleTimeoutMinutes * 60_000;
 		expect(shouldRotate).toBe(true);
 
 		// ── Step 3: Perform rotation (mirrors Gateway.#resetSession) ──
 		// 3a. Archive old jsonl file (rename with timestamp suffix)
-		const ts = new Date().toISOString().replace(/[-:T]/g, "").slice(0, 14).replace(/(\d{8})(\d{6})/, "$1_$2");
+		const ts = new Date()
+			.toISOString()
+			.replace(/[-:T]/g, "")
+			.slice(0, 14)
+			.replace(/(\d{8})(\d{6})/, "$1_$2");
 		const archivePath = sessionPath.replace(/\.jsonl$/, `.${ts}.jsonl`);
 		await fs.rename(sessionPath, archivePath);
-		const fileArchived = await fs.access(sessionPath).then(() => false).catch(() => true);
+		const fileArchived = await fs
+			.access(sessionPath)
+			.then(() => false)
+			.catch(() => true);
 		expect(fileArchived).toBe(true);
-		const archiveExists = await fs.access(archivePath).then(() => true).catch(() => false);
+		const archiveExists = await fs
+			.access(archivePath)
+			.then(() => true)
+			.catch(() => false);
 		expect(archiveExists).toBe(true);
 		console.log("  [step 3] old session file archived to:", path.basename(archivePath));
 
@@ -204,7 +217,10 @@ describe("session rotation e2e", () => {
 		expect(meta2).not.toBeNull();
 
 		// Verify: jsonl file was recreated (by fake RPC mimicking omp behavior)
-		const file2Exists = await fs.access(sessionPath).then(() => true).catch(() => false);
+		const file2Exists = await fs
+			.access(sessionPath)
+			.then(() => true)
+			.catch(() => false);
 		expect(file2Exists).toBe(true);
 
 		// Read the new session ID

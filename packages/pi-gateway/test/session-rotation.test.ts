@@ -102,27 +102,27 @@ describe("session rotation", () => {
 		if (resetPolicy === "daily" || resetPolicy === "both") {
 			const today = new Date(now);
 			const todayReset = new Date(today.getFullYear(), today.getMonth(), today.getDate(), dailyResetHour, 0, 0, 0);
-			const boundary = now < todayReset.getTime()
-				? todayReset.getTime() - 86_400_000
-				: todayReset.getTime();
+			const boundary = now < todayReset.getTime() ? todayReset.getTime() - 86_400_000 : todayReset.getTime();
 			if (updatedAt < boundary) return true;
 		}
 
 		return false;
 	}
 
-	async function resetSession(
-		session: SessionRecord,
-		accountId: string,
-	): Promise<SessionRecord> {
+	async function resetSession(session: SessionRecord, accountId: string): Promise<SessionRecord> {
 		// 1. Archive old jsonl (rename with timestamp suffix)
 		if (session.ompSessionPath) {
 			try {
 				const dot = session.ompSessionPath.lastIndexOf(".");
-				const ts = new Date().toISOString().replace(/[-:T]/g, "").slice(0, 14).replace(/(\d{8})(\d{6})/, "$1_$2");
-				const archivePath = dot === -1
-					? `${session.ompSessionPath}.${ts}`
-					: `${session.ompSessionPath.slice(0, dot)}.${ts}${session.ompSessionPath.slice(dot)}`;
+				const ts = new Date()
+					.toISOString()
+					.replace(/[-:T]/g, "")
+					.slice(0, 14)
+					.replace(/(\d{8})(\d{6})/, "$1_$2");
+				const archivePath =
+					dot === -1
+						? `${session.ompSessionPath}.${ts}`
+						: `${session.ompSessionPath.slice(0, dot)}.${ts}${session.ompSessionPath.slice(dot)}`;
 				await fs.rename(session.ompSessionPath, archivePath);
 			} catch (err) {
 				if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
@@ -143,7 +143,10 @@ describe("session rotation", () => {
 		const fiveHoursAgo = Date.now() - 5 * 60 * 60_000;
 		sessionPath = buildAgentSessionPath(agentDir, "test-conv");
 		await fs.mkdir(path.dirname(sessionPath), { recursive: true });
-		await Bun.write(sessionPath, JSON.stringify({ type: "session", id: "old", timestamp: new Date(fiveHoursAgo).toISOString() }) + "\n");
+		await Bun.write(
+			sessionPath,
+			JSON.stringify({ type: "session", id: "old", timestamp: new Date(fiveHoursAgo).toISOString() }) + "\n",
+		);
 
 		const session = await store.createSession({
 			channelId: "dingtalk",
@@ -160,13 +163,23 @@ describe("session rotation", () => {
 		expect(shouldResetSession(session, config)).toBe(true);
 
 		// Verify old file exists before reset
-		expect(await fs.access(sessionPath).then(() => true).catch(() => false)).toBe(true);
+		expect(
+			await fs
+				.access(sessionPath)
+				.then(() => true)
+				.catch(() => false),
+		).toBe(true);
 
 		// Perform reset
 		const newSession = await resetSession(session, "ops");
 
 		// Original path should be vacant (file was archived/renamed)
-		expect(await fs.access(sessionPath).then(() => true).catch(() => false)).toBe(false);
+		expect(
+			await fs
+				.access(sessionPath)
+				.then(() => true)
+				.catch(() => false),
+		).toBe(false);
 
 		// Archived file should exist in the same directory
 		const dir = path.dirname(sessionPath);
@@ -260,13 +273,23 @@ describe("session rotation", () => {
 		});
 
 		// File exists
-		expect(await fs.access(sessionPath).then(() => true).catch(() => false)).toBe(true);
+		expect(
+			await fs
+				.access(sessionPath)
+				.then(() => true)
+				.catch(() => false),
+		).toBe(true);
 
 		// Reset
 		const newSession = await resetSession(session, "ops");
 
 		// Original path vacant (archived), archived file exists
-		expect(await fs.access(sessionPath).then(() => true).catch(() => false)).toBe(false);
+		expect(
+			await fs
+				.access(sessionPath)
+				.then(() => true)
+				.catch(() => false),
+		).toBe(false);
 		const dir = path.dirname(sessionPath);
 		const files = await fs.readdir(dir);
 		expect(files.filter(f => f.startsWith("test-conv5.") && f !== "test-conv5.jsonl").length).toBe(1);

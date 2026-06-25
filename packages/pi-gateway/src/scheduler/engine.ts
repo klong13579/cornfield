@@ -329,7 +329,7 @@ export class SchedulerEngine {
 
 				if (repeatExhausted) {
 					this.unschedule(task.id);
-				logger.debug("Task auto-disabled after exhausting repeat count", {
+					logger.debug("Task auto-disabled after exhausting repeat count", {
 						taskId: task.id,
 						taskName: task.name,
 						repeatCount: currentTask?.repeatCount,

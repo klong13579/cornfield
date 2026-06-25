@@ -25,9 +25,9 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import {
-	AgentBridge,
 	__TEST_LONG_TASK_PROGRESS_PING_MS,
 	__TEST_LONG_TASK_THRESHOLD_MS,
+	AgentBridge,
 	type ForwardStreamHandlers,
 } from "../src/agent-bridge";
 import type { InboundMessage, SessionRecord } from "../src/types";

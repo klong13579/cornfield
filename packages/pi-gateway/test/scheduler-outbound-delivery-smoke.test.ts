@@ -24,7 +24,7 @@ import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { CronService, type CronLogger, type DeliverFn } from "../src/scheduler/cron-service";
+import { type CronLogger, CronService, type DeliverFn } from "../src/scheduler/cron-service";
 import { SchedulerDbStorage } from "../src/scheduler/storage";
 
 let testDir: string;

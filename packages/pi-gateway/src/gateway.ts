@@ -20,11 +20,10 @@ import {
 import { isEnoent, logger } from "@oh-my-pi/pi-utils";
 import { ActionRegistry } from "./action-registry";
 import { AgentBridge, type AgentBridgeOptions } from "./agent-bridge";
-import { DingTalkChannel, type DingTalkCardActionEvent } from "./channels/dingtalk";
+import { type DingTalkCardActionEvent, DingTalkChannel } from "./channels/dingtalk";
 import { ChannelRegistry } from "./channels/registry";
 import { getDataDir, getDingTalkConfig, getEnabledChannels } from "./config";
-import type { Channel } from "./types";
-import { type MatchableModel, extractModelSwitchArg, fuzzyMatchModel } from "./model-switch";
+import { extractModelSwitchArg, fuzzyMatchModel, type MatchableModel } from "./model-switch";
 import { CronService } from "./scheduler/cron-service";
 import { SchedulerEngine } from "./scheduler/engine";
 import { computeInactivityBudgetMs } from "./scheduler/executor";
@@ -37,6 +36,7 @@ import { type BridgeStat, type QueueStat, SessionManager } from "./session-manag
 import { SQLiteSessionStore } from "./session-store";
 import type {
 	AgentResponseMeta,
+	Channel,
 	ChannelHealth,
 	DingtalkAccountConfig,
 	ForwardStreamHandlers,
@@ -268,7 +268,6 @@ async function checkPidFile(dataDir: string, pidFile: string): Promise<boolean> 
 // via the injected deliver function. The old sendToChannel / sendViaOAuth /
 // sendViaWebhook / deliverWithRetry / getDingTalkToken functions have been
 // removed as part of the cron-gateway decoupling.
-
 
 export class Gateway {
 	#config: GatewayConfig;
@@ -824,10 +823,10 @@ export class Gateway {
 				warn: (msg: string, ctx?: unknown) => logger.warn(msg, ctx as Record<string, unknown>),
 				error: (msg: string, ctx?: unknown) => logger.error(msg, ctx as Record<string, unknown>),
 			},
-			executeAgent: async (params) => {
+			executeAgent: async params => {
 				return await this.#executeCronAgent(params);
 			},
-			deliver: async (params) => {
+			deliver: async params => {
 				return await this.#deliverCronResult(params);
 			},
 		});
@@ -876,20 +875,20 @@ export class Gateway {
 		this.#schedulerFileStore = undefined;
 	}
 
-/**
- * Execute a cron agent task via warm bridge (AgentBridge).
- *
- * This is the gateway's implementation of CronDeps.executeAgent.
- * It handles:
- * - Finding the warm bridge by agentDir (with accountId fallback)
- * - setDisabledToolsets(['cronjob', 'messaging']) before execution
- * - Model switch/restore if task specifies a different model
- * - executePrompt with timeout + inactivity budget
- * - finally: restore toolsets + model
- *
- * Returns { output, error } — on failure, error is set and output is empty,
- * so CronService falls back to executeScheduledCommand (cold subprocess).
- */
+	/**
+	 * Execute a cron agent task via warm bridge (AgentBridge).
+	 *
+	 * This is the gateway's implementation of CronDeps.executeAgent.
+	 * It handles:
+	 * - Finding the warm bridge by agentDir (with accountId fallback)
+	 * - setDisabledToolsets(['cronjob', 'messaging']) before execution
+	 * - Model switch/restore if task specifies a different model
+	 * - executePrompt with timeout + inactivity budget
+	 * - finally: restore toolsets + model
+	 *
+	 * Returns { output, error } — on failure, error is set and output is empty,
+	 * so CronService falls back to executeScheduledCommand (cold subprocess).
+	 */
 	async #executeCronAgent(params: {
 		agentDir: string;
 		prompt: string;
@@ -961,7 +960,11 @@ export class Gateway {
 				} catch (restoreErr) {
 					logger.error(
 						"Failed to restore original model after cron task — bridge will use the cron task's model until next /model command",
-						{ cronModel: params.model, originalModel: originalModel.model, error: restoreErr instanceof Error ? restoreErr.message : String(restoreErr) },
+						{
+							cronModel: params.model,
+							originalModel: originalModel.model,
+							error: restoreErr instanceof Error ? restoreErr.message : String(restoreErr),
+						},
 					);
 				}
 			}
@@ -1329,16 +1332,16 @@ export class Gateway {
 		provider: string,
 		modelId: string,
 	): Promise<boolean> {
-	try {
-		const response = await bridge.setModel(provider, modelId);
-		logger.info("NL model switch response", {
-			requestedProvider: provider,
-			requestedModelId: modelId,
-			success: response.success,
-			responseData: response.data,
-			error: (response as Record<string, unknown>).error,
-		});
-		if (!response.success) {
+		try {
+			const response = await bridge.setModel(provider, modelId);
+			logger.info("NL model switch response", {
+				requestedProvider: provider,
+				requestedModelId: modelId,
+				success: response.success,
+				responseData: response.data,
+				error: (response as Record<string, unknown>).error,
+			});
+			if (!response.success) {
 				await this.#sendAgentResponse(msg, `切换模型失败: ${response.error ?? "未知错误"}`);
 				return true;
 			}
@@ -1687,9 +1690,7 @@ ${table}
 			const today = new Date(now);
 			const todayReset = new Date(today.getFullYear(), today.getMonth(), today.getDate(), resetHour, 0, 0, 0);
 			// If we haven't passed today's reset hour yet, the boundary is yesterday's
-			const boundary = now < todayReset.getTime()
-				? todayReset.getTime() - 86_400_000
-				: todayReset.getTime();
+			const boundary = now < todayReset.getTime() ? todayReset.getTime() - 86_400_000 : todayReset.getTime();
 			if (updatedAt < boundary) return true;
 		}
 
@@ -1704,11 +1705,7 @@ ${table}
 	 *
 	 * Returns the new SessionRecord.
 	 */
-	async #resetSession(
-		session: SessionRecord,
-		accountId: string,
-		msg: InboundMessage,
-	): Promise<SessionRecord> {
+	async #resetSession(session: SessionRecord, accountId: string, msg: InboundMessage): Promise<SessionRecord> {
 		logger.warn("Session rotation triggered", {
 			channelId: session.channelId,
 			conversationId: session.conversationId,
@@ -1753,9 +1750,7 @@ ${table}
 
 		// 4. Reset the bridge so the next forward re-switches to the
 		//    (now deleted) file — omp will start a fresh session at that path.
-		const bridge = accountId === "__default__"
-			? this.#bridge
-			: this.#accountBridges.get(accountId);
+		const bridge = accountId === "__default__" ? this.#bridge : this.#accountBridges.get(accountId);
 		bridge?.resetActiveSession();
 
 		// 5. Inject system note into the message so the agent knows
@@ -1785,12 +1780,15 @@ ${table}
 	 * before the .jsonl extension: `cid_xxx.jsonl` → `cid_xxx.20260624_140000.jsonl`.
 	 */
 	#archiveSessionPath(sessionPath: string): string {
-		const ts = new Date().toISOString().replace(/[-:T]/g, "").slice(0, 14).replace(/(\d{8})(\d{6})/, "$1_$2");
+		const ts = new Date()
+			.toISOString()
+			.replace(/[-:T]/g, "")
+			.slice(0, 14)
+			.replace(/(\d{8})(\d{6})/, "$1_$2");
 		const dot = sessionPath.lastIndexOf(".");
 		if (dot === -1) return `${sessionPath}.${ts}`;
 		return `${sessionPath.slice(0, dot)}.${ts}${sessionPath.slice(dot)}`;
 	}
-
 
 	async #migrateSessionPath(fromPath: string, toPath: string): Promise<void> {
 		if (fromPath === toPath) return;

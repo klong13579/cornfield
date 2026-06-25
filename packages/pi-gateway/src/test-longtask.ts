@@ -27,8 +27,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { AgentBridge, type ForwardStreamHandlers } from "./agent-bridge";
 import { DingTalkChannel } from "./channels/dingtalk";
-import type { DingTalkConfig } from "./types";
-import type { InboundMessage, SessionRecord } from "./types";
+import type { DingTalkConfig, InboundMessage, SessionRecord } from "./types";
 
 /** Per-account DingTalk config in gateway.json. */
 interface AccountEntry {

@@ -31,7 +31,6 @@ let opencodeAgentDir: string;
 let dbPath: string;
 let storage: SchedulerDbStorage;
 
-
 function cleanup() {
 	try {
 		if (testDir) fs.rmSync(testDir, { recursive: true, force: true });
@@ -196,11 +195,7 @@ describe("createCronTaskFromMessage (smoke test)", () => {
 			},
 		} as unknown as SchedulerDbStorage;
 
-		const outcome = createCronTaskFromMessage(
-			"/cron create 0 8 * * * -- echo will_fail",
-			agentDir,
-			failingStorage,
-		);
+		const outcome = createCronTaskFromMessage("/cron create 0 8 * * * -- echo will_fail", agentDir, failingStorage);
 
 		expect(outcome.ok).toBe(false);
 		if (outcome.ok) return;

@@ -567,20 +567,22 @@ export async function cronUpdate(args: string[], storage: SchedulerDbStorage): P
 	// legacy deliver/deliver_user columns.
 	if (deliverState.tag !== "none" || deliverUserState.tag !== "none") {
 		const effChannel =
-			deliverState.tag === "set" ? deliverState.value
-			: deliverState.tag === "clear" ? undefined
-			: task.delivery?.channel ?? task.deliver;
+			deliverState.tag === "set"
+				? deliverState.value
+				: deliverState.tag === "clear"
+					? undefined
+					: (task.delivery?.channel ?? task.deliver);
 		const effUser =
-			deliverUserState.tag === "set" ? deliverUserState.value
-			: deliverUserState.tag === "clear" ? undefined
-			: task.delivery?.toUserId ?? task.deliverUser;
+			deliverUserState.tag === "set"
+				? deliverUserState.value
+				: deliverUserState.tag === "clear"
+					? undefined
+					: (task.delivery?.toUserId ?? task.deliverUser);
 		if (deliverState.tag === "set") updates.deliver = deliverState.value;
 		else if (deliverState.tag === "clear") updates.deliver = undefined;
 		if (deliverUserState.tag === "set") updates.deliverUser = deliverUserState.value;
 		else if (deliverUserState.tag === "clear") updates.deliverUser = undefined;
-		updates.delivery = effChannel
-			? { channel: effChannel, toUserId: effUser, mode: "announce" }
-			: undefined;
+		updates.delivery = effChannel ? { channel: effChannel, toUserId: effUser, mode: "announce" } : undefined;
 	}
 	if (timeoutMs !== undefined) updates.timeoutMs = timeoutMs;
 
@@ -703,11 +705,11 @@ export async function cronRun(name: string, storage: SchedulerDbStorage): Promis
 			stderr,
 		});
 
-	// Manual `omp cron run` skips channel delivery — the scheduled path
-	// through CronService owns delivery. Here we just print the captured
-	// output to stdout/stderr so the operator sees what ran.
-	if (output) console.log(output);
-	if (stderr) console.error(stderr);
+		// Manual `omp cron run` skips channel delivery — the scheduled path
+		// through CronService owns delivery. Here we just print the captured
+		// output to stdout/stderr so the operator sees what ran.
+		if (output) console.log(output);
+		if (stderr) console.error(stderr);
 
 		if (agentSessionPath) {
 			console.log(`[trace] agent session: ${agentSessionPath}`);

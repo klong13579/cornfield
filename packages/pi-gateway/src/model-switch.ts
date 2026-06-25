@@ -41,15 +41,11 @@ export function extractModelSwitchArg(text: string): string | null {
 
 	// Chinese patterns
 	const zhMatch =
-		trimmed.match(/^切换?模型?到\s*(.+)$/i) ??
-		trimmed.match(/^换成\s*(.+)$/) ??
-		trimmed.match(/^切到\s*(.+)$/);
+		trimmed.match(/^切换?模型?到\s*(.+)$/i) ?? trimmed.match(/^换成\s*(.+)$/) ?? trimmed.match(/^切到\s*(.+)$/);
 	if (zhMatch?.[1]) return zhMatch[1].trim();
 
 	// English patterns
-	const enMatch =
-		trimmed.match(/^switch\s+model\s+to\s+(.+)$/i) ??
-		trimmed.match(/^change\s+model\s+to\s+(.+)$/i);
+	const enMatch = trimmed.match(/^switch\s+model\s+to\s+(.+)$/i) ?? trimmed.match(/^change\s+model\s+to\s+(.+)$/i);
 	if (enMatch?.[1]) return enMatch[1].trim();
 
 	return null;
@@ -67,19 +63,13 @@ export function extractModelSwitchArg(text: string): string | null {
  *
  * Returns the first match, or null if nothing matched.
  */
-export function fuzzyMatchModel(
-	models: MatchableModel[],
-	query: string,
-	currentProvider?: string,
-): ModelMatch | null {
+export function fuzzyMatchModel(models: MatchableModel[], query: string, currentProvider?: string): ModelMatch | null {
 	const q = query.toLowerCase().trim();
 
 	// 1. Exact "provider/id"
 	if (q.includes("/")) {
 		const [p, m] = q.split("/", 2);
-		const exact = models.find(
-			mdl => mdl.provider.toLowerCase() === p && mdl.id.toLowerCase() === m,
-		);
+		const exact = models.find(mdl => mdl.provider.toLowerCase() === p && mdl.id.toLowerCase() === m);
 		if (exact) return { provider: exact.provider, id: exact.id };
 	}
 
@@ -93,12 +83,7 @@ export function fuzzyMatchModel(
 		const substring = models.find(mdl => {
 			const mid = mdl.id.toLowerCase();
 			const mnorm = mid.replace(/[-_.]/g, "");
-			return (
-				mid.includes(q) ||
-				q.includes(mid) ||
-				mnorm.includes(normalized) ||
-				normalized.includes(mnorm)
-			);
+			return mid.includes(q) || q.includes(mid) || mnorm.includes(normalized) || normalized.includes(mnorm);
 		});
 		if (substring) return { provider: substring.provider, id: substring.id };
 	}

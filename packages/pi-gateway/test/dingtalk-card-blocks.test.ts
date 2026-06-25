@@ -14,8 +14,8 @@ import {
 	buildStopBlock,
 	buildThinkBlock,
 	buildToolBlock,
-	cardParamMapFromData,
 	cardParamMapForStreamStart,
+	cardParamMapFromData,
 } from "../src/channels/dingtalk-card";
 
 describe("buildAnswerBlock", () => {

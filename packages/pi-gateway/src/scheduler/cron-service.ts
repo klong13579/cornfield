@@ -22,31 +22,27 @@ export interface CronLogger {
 }
 
 /** Execute an agent prompt and return the result. */
-export interface ExecuteAgentFn {
-	(params: {
-		agentDir: string;
-		prompt: string;
-		timeoutMs?: number;
-		signal?: AbortSignal;
-		/** Toolsets to disable during execution (e.g. ['cronjob', 'messaging']) */
-		disabledToolsets?: string[];
-		/** Per-task model override */
-		model?: string;
-		/** Per-task provider override */
-		provider?: string;
-	}): Promise<{ output: string; error?: string }>;
-}
+export type ExecuteAgentFn = (params: {
+	agentDir: string;
+	prompt: string;
+	timeoutMs?: number;
+	signal?: AbortSignal;
+	/** Toolsets to disable during execution (e.g. ['cronjob', 'messaging']) */
+	disabledToolsets?: string[];
+	/** Per-task model override */
+	model?: string;
+	/** Per-task provider override */
+	provider?: string;
+}) => Promise<{ output: string; error?: string }>;
 
 /** Deliver a result to a channel (internally handles retry). */
-export interface DeliverFn {
-	(params: {
-		channel: string;
-		accountId?: string;
-		toUserId?: string;
-		toConversationId?: string;
-		text: string;
-	}): Promise<{ ok: boolean; error?: string }>;
-}
+export type DeliverFn = (params: {
+	channel: string;
+	accountId?: string;
+	toUserId?: string;
+	toConversationId?: string;
+	text: string;
+}) => Promise<{ ok: boolean; error?: string }>;
 
 /** Dependencies injected by the gateway. */
 export interface CronDeps {
@@ -69,9 +65,7 @@ export interface CronTriggerResult {
  * cron task and should not create new cron jobs or send messages.
  */
 export function buildCronContextPrefix(task: ScheduledTask): string {
-	const agentLabel = task.agentDir
-		? task.agentDir.split("/").pop() ?? task.agentDir
-		: task.accountId ?? "default";
+	const agentLabel = task.agentDir ? (task.agentDir.split("/").pop() ?? task.agentDir) : (task.accountId ?? "default");
 	return `[CRON-CONTEXT] You are running as a scheduled task (cron). Do not create new cron jobs or send messages. Agent: ${agentLabel}.\n\n`;
 }
 
@@ -109,13 +103,15 @@ export function resolveAgentDir(task: ScheduledTask): string | undefined {
  * During the migration period, tasks may still have `deliver` + `deliverUser`
  * instead of the structured `delivery` object.
  */
-export function resolveDelivery(task: ScheduledTask): {
-	channel: string;
-	accountId?: string;
-	toUserId?: string;
-	toConversationId?: string;
-	mode: "announce" | "none";
-} | undefined {
+export function resolveDelivery(task: ScheduledTask):
+	| {
+			channel: string;
+			accountId?: string;
+			toUserId?: string;
+			toConversationId?: string;
+			mode: "announce" | "none";
+	  }
+	| undefined {
 	if (task.delivery) {
 		return task.delivery;
 	}
@@ -129,8 +125,6 @@ export function resolveDelivery(task: ScheduledTask): {
 	}
 	return undefined;
 }
-
-
 
 /** Additional dependencies for CronService beyond the injected interfaces. */
 export interface CronServiceDeps extends CronDeps {
@@ -223,9 +217,8 @@ export class CronService {
 		const durationMs = endedAt - startedAt;
 
 		// Link agent session trace for agent tasks
-		const agentSessionPath = task.taskType === "agent"
-			? await findAgentSessionPathForCron(startedAt, endedAt)
-			: undefined;
+		const agentSessionPath =
+			task.taskType === "agent" ? await findAgentSessionPathForCron(startedAt, endedAt) : undefined;
 
 		// Record the execution result
 		storage.updateExecution(executionId, {

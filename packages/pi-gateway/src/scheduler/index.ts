@@ -1,17 +1,4 @@
 export {
-	type CronDeps,
-	type CronLogger,
-	type CronServiceDeps,
-	type CronTriggerResult,
-	type DeliverFn,
-	type ExecuteAgentFn,
-	CronService,
-	buildCronContextPrefix,
-	buildDeliverySummary,
-	resolveAgentDir,
-	resolveDelivery,
-} from "./cron-service";
-export {
 	cronCreate,
 	cronDiagnose,
 	cronList,
@@ -26,6 +13,19 @@ export {
 	resolveAgentCwd,
 	suggestAccountBinding,
 } from "./cli-commands";
+export {
+	buildCronContextPrefix,
+	buildDeliverySummary,
+	type CronDeps,
+	type CronLogger,
+	CronService,
+	type CronServiceDeps,
+	type CronTriggerResult,
+	type DeliverFn,
+	type ExecuteAgentFn,
+	resolveAgentDir,
+	resolveDelivery,
+} from "./cron-service";
 export { SchedulerDaemon } from "./daemon";
 export { SchedulerEngine } from "./engine";
 export type { DeliveryFailureEntry, ExecutionLogEntry } from "./execution-log";

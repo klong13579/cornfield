@@ -14,7 +14,7 @@
  * skip the WebSocket connect step.
  */
 import { beforeEach, describe, expect, test } from "bun:test";
-import { DingTalkChannel, type DingTalkCardActionEvent } from "../src/channels/dingtalk";
+import { type DingTalkCardActionEvent, DingTalkChannel } from "../src/channels/dingtalk";
 import type { DingTalkConfig } from "../src/types";
 
 /** Subset of the Stream SDK's DWClientDownStream the channel reads. */
