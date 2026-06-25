@@ -32,14 +32,24 @@ interface AccountQueueState {
 	oldestQueuedAt?: number;
 }
 
+interface UserAccountEntry {
+	accountId: string;
+	recordedAt: number;
+}
+
 const DEFAULT_MAX_QUEUE_DEPTH = 100;
 const QUEUE_FULL_MESSAGE = "系统繁忙，请稍后重试。";
+/** Entries older than this are pruned from the user→account map. */
+const USER_ACCOUNT_TTL_MS = 60 * 60_000;
 
 export class SessionManager {
 	readonly #bridges: Map<string, AgentBridge>;
 	readonly #defaultBridge?: AgentBridge;
 	readonly #maxQueueDepth: number;
 	readonly #queues = new Map<string, AccountQueueState>();
+	/** Maps userId → { accountId, recordedAt } for abortByUser routing. */
+	readonly #userToAccount = new Map<string, UserAccountEntry>();
+
 
 	constructor(options: SessionManagerOptions) {
 		this.#bridges = options.bridges;
@@ -88,6 +98,10 @@ export class SessionManager {
 		state.depth++;
 		state.oldestQueuedAt ??= Date.now();
 
+		// Record userId → accountId so abortByUser can route precisely.
+		this.#userToAccount.set(msg.userId, { accountId, recordedAt: Date.now() });
+
+
 		const previous = state.tail;
 		const { promise: current, resolve } = Promise.withResolvers<void>();
 		state.tail = previous.catch(() => {}).then(() => current);
@@ -119,19 +133,37 @@ export class SessionManager {
 	 * a fallback when a card-action click arrives for a cardInstanceId
 	 * the registry doesn't know about (e.g. the schema's static
 	 * `btn_stop` button fires from a card we never registered because
-	 * the long-task watcher never ran for that tool). Pick the account
-	 * that has the most recent activity for this user; if no account
-	 * has seen them, fall back to the default bridge.
+	 * the long-task watcher never ran for that tool).
+	 *
+	 * Routes via the userId→accountId map populated in `enqueueWithMeta`.
+	 * Falls back to the default bridge (single-account mode) or, if no
+	 * map entry exists and there's no default, tries every account.
 	 */
 	async abortByUser(userId: string): Promise<boolean> {
-		// We don't track user→account directly, so the safest
-		// fallback is: if a default bridge exists, abort it; the
-		// single-account case is the common one. Multi-account
-		// deployments should always go through the registry.
+		// Prune stale entries on every call (cheap: the map is bounded by
+		// the number of distinct users, typically < 100).
+		this.#pruneUserAccounts();
+
+		const entry = this.#userToAccount.get(userId);
+		if (entry) {
+			try {
+				const bridge = entry.accountId === "__default__"
+					? this.#defaultBridge
+					: this.#bridges.get(entry.accountId);
+				if (bridge) {
+					return await bridge.abort();
+				}
+			} catch {
+				// fall through to broader strategies
+			}
+		}
+
+		// No map entry — single-account fallback
 		if (this.#defaultBridge) {
 			return await this.#defaultBridge.abort();
 		}
-		// No default — try every account; return true if any aborted.
+
+		// Last resort: try every account; return true if any aborted.
 		let any = false;
 		for (const bridge of this.#bridges.values()) {
 			try {
@@ -143,6 +175,16 @@ export class SessionManager {
 		}
 		return any;
 	}
+
+	#pruneUserAccounts(): void {
+		const now = Date.now();
+		for (const [userId, entry] of this.#userToAccount) {
+			if (now - entry.recordedAt > USER_ACCOUNT_TTL_MS) {
+				this.#userToAccount.delete(userId);
+			}
+		}
+	}
+
 
 	getQueueStats(): QueueStat[] {
 		const now = Date.now();

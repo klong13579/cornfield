@@ -282,4 +282,34 @@ describe("SessionManager", () => {
 
 		expect(manager.getBridgeStats()).toMatchObject([{ accountId: "ops", state: "idle", running: true }]);
 	});
+
+	test("abortByUser routes precisely via user→account map", async () => {
+		const ops = new FakeBridge(50); // busy
+		const hr = new FakeBridge(50); // busy
+		const manager = new SessionManager({
+			bridges: new Map([
+				["ops", asBridge(ops)],
+				["hr", asBridge(hr)],
+			]),
+		});
+
+		// User alice sends to hr; user bob sends to ops.
+		const hrMsg = { ...makeMessage("hr", "a", "1"), userId: "alice" };
+		const opsMsg = { ...makeMessage("ops", "b", "2"), userId: "bob" };
+		const hrPending = manager.enqueueWithMeta(hrMsg, makeSession("hr", "a"));
+		const opsPending = manager.enqueueWithMeta(opsMsg, makeSession("ops", "b"));
+		await Bun.sleep(10);
+
+		// Alice clicks stop → should only abort hr, not ops.
+		expect(await manager.abortByUser("alice")).toBe(true);
+		expect(hr.abortCalls).toBe(1);
+		expect(ops.abortCalls).toBe(0);
+
+		// Bob clicks stop → should only abort ops.
+		expect(await manager.abortByUser("bob")).toBe(true);
+		expect(ops.abortCalls).toBe(1);
+		expect(hr.abortCalls).toBe(1); // unchanged from alice's abort
+
+		await Promise.all([hrPending, opsPending]);
+	});
 });

@@ -700,6 +700,7 @@ export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}):
 	const environment = await logger.time("getEnvironmentInfo", getEnvironmentInfo);
 	const neverRules = extractNeverRules(contextFiles.map(f => f.content).join("\n\n"));
 	const promptContextFiles = prepareContextFilesForPrompt(contextFiles);
+	const hasMissionMd = contextFiles.some(f => f.path.endsWith("mission.md"));
 	const reportToolIssueToolName = toolPromptNames.get("report_tool_issue") ?? "report_tool_issue";
 	const data = {
 		systemPromptCustomization: effectiveSystemPromptCustomization,
@@ -726,6 +727,7 @@ export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}):
 		eagerTasks,
 		secretsEnabled,
 		userProfile,
+		hasMissionMd,
 	};
 	let rendered = prompt.render(resolvedCustomPrompt ? customSystemPromptTemplate : systemPromptTemplate, data);
 
