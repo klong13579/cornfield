@@ -645,7 +645,29 @@ export class Gateway {
 			...Array.from(this.#accountBridges.entries()).map(([id, b]) => checkOne(id, b)),
 			this.#bridge.isRunning ? checkOne("__default__", this.#bridge) : Promise.resolve(),
 		]);
+
+		// Check channels for stale sockets: connected but no socket activity
+		// for more than 10 minutes. The channel's own reconnect logic handles
+		// disconnections; this catches 'connected but silent' states.
+		const STALE_SOCKET_THRESHOLD_MS = 10 * 60_000;
+		for (const channel of this.#registry.getAll()) {
+			const health = channel.getHealth?.();
+			if (!health || !health.connected) continue;
+
+			const lastActivity = health.lastSocketAvailableAt || health.connectionEstablishedAt;
+			if (lastActivity === 0) continue; // never connected, skip
+
+			if (now - lastActivity > STALE_SOCKET_THRESHOLD_MS) {
+				logger.warn("Channel stale socket detected", {
+					channelId: channel.id,
+					lastActivityMs: now - lastActivity,
+					reconnectAttempts: health.reconnectAttempts,
+					receivedCount: health.receivedCount,
+				});
+			}
+		}
 	}
+
 
 	async reload(config: GatewayConfig): Promise<void> {
 		// Snapshot old config for diff
