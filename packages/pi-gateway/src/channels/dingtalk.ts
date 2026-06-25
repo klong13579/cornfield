@@ -830,10 +830,10 @@ export class DingTalkChannel extends BaseChannel {
 		}
 
 		// Image upload pipeline: scan the last segment's text for
-		// data URI images AND local file references, upload each one
-		// to DingTalk, and emit a type-3 image block per upload. The
-		// raw image markdown is then stripped from the answer text so
-		// the card body doesn't render broken image placeholders.
+		// data URI images, local file references, AND remote URL images,
+		// upload each one to DingTalk, and emit a type-3 image block per
+		// upload. The raw image markdown is then stripped from the answer
+		// text so the card body doesn't render broken image placeholders.
 		//
 		// We scan segmentText (last segment only) not meta.text
 		// (full cumulative) because earlier segments were already
@@ -876,7 +876,24 @@ export class DingTalkChannel extends BaseChannel {
 			blocks.push(buildImageBlock(upload.mediaId, match.alt));
 		}
 
-		// Strip all image markdown (data URI + local file) from the
+		const remoteUrls = extractRemoteUrlImages(segmentText);
+		for (const match of remoteUrls) {
+			const tmp = await downloadRemoteUrlToTempFile(match.url);
+			if (!tmp) continue;
+			tmpFiles.push(tmp);
+			const upload = await uploadMedia(tmp, "image", config);
+			if (!upload) {
+				logger.warn("[DingTalk] remote URL image upload failed; skipping image block", {
+					url: match.url.slice(0, 200),
+					accountId: this.#accountId,
+					conversationId: inbound.conversationId,
+				});
+				continue;
+			}
+			blocks.push(buildImageBlock(upload.mediaId, match.alt));
+		}
+
+		// Strip all image markdown (data URI + local file + remote URL) from the
 		// answer text so the card body shows only text — images are
 		// delivered as type-3 blocks above.
 		const strippedSegText = stripImageDirectives(segmentText);
@@ -1768,9 +1785,7 @@ const DATA_URI_IMAGE_RE = /!\[([^\]]*)\]\(data:([a-zA-Z0-9./+-]+);base64,([A-Za-
 
 /**
  * Scan assistant text for markdown data-URI images. Returns one entry
- * per match. Only `data:<mime>;base64,...` is supported — remote
- * `https://...` images are left untouched (DingTalk can fetch them
- * natively; the channel doesn't need to upload them).
+ * per match. Only `data:<mime>;base64,...` is supported.
  */
 export function extractDataUriImages(text: string): ExtractedImage[] {
 	const out: ExtractedImage[] = [];
@@ -1817,14 +1832,47 @@ export function extractLocalFileImages(text: string): LocalFileImage[] {
 	return out;
 }
 
+/** A remote URL image referenced by `![alt](https://...)` or `![alt](http://...)`. */
+interface RemoteUrlImage {
+	/** The original markdown image token as it appeared in text. */
+	raw: string;
+	/** The full HTTP(S) URL. */
+	url: string;
+	/** alt text from the markdown image. */
+	alt: string;
+}
+
 /**
- * Strip both data-URI and local-file image markdown from answer text
- * so the card body doesn't render broken image placeholders. The
- * actual images are delivered as type-3 image blocks via uploadMedia.
+ * Match `![alt](https://...)` and `![alt](http://...)`.
+ * Query strings (e.g. `?Expires=...&Signature=...`) are included.
+ * Data URIs and local file paths are excluded.
+ */
+const REMOTE_URL_IMAGE_RE = /!\[([^\]]*)\]\((https?:\/\/[^)]+)\)/gi;
+
+/**
+ * Scan assistant text for markdown images pointing to remote HTTP(S) URLs.
+ * DingTalk cards cannot render remote URLs natively — they must be
+ * downloaded and uploaded as mediaId. Data URIs and local files are
+ * handled by their own extractors.
+ */
+export function extractRemoteUrlImages(text: string): RemoteUrlImage[] {
+	const out: RemoteUrlImage[] = [];
+	for (const match of text.matchAll(REMOTE_URL_IMAGE_RE)) {
+		out.push({ raw: match[0], url: match[2], alt: match[1] ?? "" });
+	}
+	return out;
+}
+
+/**
+ * Strip all image markdown (data URI + local file + remote URL) from
+ * answer text so the card body doesn't render broken image
+ * placeholders. The actual images are delivered as type-3 blocks
+ * via uploadMedia.
  */
 export function stripImageDirectives(text: string): string {
 	let stripped = text.replace(DATA_URI_IMAGE_RE, "");
 	stripped = stripped.replace(LOCAL_FILE_IMAGE_RE, "");
+	stripped = stripped.replace(REMOTE_URL_IMAGE_RE, "");
 	// Collapse 3+ blank lines left by removed images into a single paragraph break
 	return stripped.replace(/\n{3,}/g, "\n\n").trim();
 }
@@ -1863,4 +1911,43 @@ async function cleanupTmpFiles(paths: string[]): Promise<void> {
 			}
 		}),
 	);
+}
+
+/**
+ * Download a remote HTTP(S) image to a temp file on disk.
+ * Returns the path (caller must `cleanupTmpFiles` it) or null on failure.
+ * The file extension is derived from the Content-Type header, falling
+ * back to the URL path extension, then to `.bin`.
+ */
+async function downloadRemoteUrlToTempFile(url: string): Promise<string | null> {
+	try {
+		const resp = await fetch(url, { method: "GET" });
+		if (!resp.ok) {
+			logger.warn("[DingTalk] remote image download failed", {
+				status: resp.status,
+				url: url.slice(0, 200),
+			});
+			return null;
+		}
+
+		const contentType = resp.headers.get("content-type") ?? "image/jpeg";
+		const ext =
+			contentType
+				.split("/")
+				.pop()
+				?.replace(/[^a-zA-Z0-9]/g, "") || "jpg";
+		const buffer = await resp.arrayBuffer();
+		const tmpPath = path.join(
+			os.tmpdir(),
+			`omp-card-remote-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`,
+		);
+		await fs.promises.writeFile(tmpPath, Buffer.from(buffer));
+		return tmpPath;
+	} catch (err) {
+		logger.warn("[DingTalk] remote image download error", {
+			url: url.slice(0, 200),
+			error: String(err),
+		});
+		return null;
+	}
 }
