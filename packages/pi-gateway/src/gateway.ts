@@ -24,6 +24,7 @@ import { DingTalkChannel, type DingTalkCardActionEvent } from "./channels/dingta
 import { ChannelRegistry } from "./channels/registry";
 import { getDataDir, getDingTalkConfig, getEnabledChannels } from "./config";
 import type { Channel } from "./types";
+import { type MatchableModel, extractModelSwitchArg, fuzzyMatchModel } from "./model-switch";
 import { CronService } from "./scheduler/cron-service";
 import { SchedulerEngine } from "./scheduler/engine";
 import { computeInactivityBudgetMs } from "./scheduler/executor";
@@ -1314,6 +1315,96 @@ export class Gateway {
 		return accountId;
 	}
 
+	// ─────────────────────────────────────────────────────────────────────────
+	// Model switch — shared by /model slash command and NL interception
+	// ─────────────────────────────────────────────────────────────────────────
+
+	/**
+	 * Switch the bridge's active model and reply to the user.
+	 * Returns true if the switch was handled (success or error reply sent).
+	 */
+	async #switchModelAndReply(
+		bridge: AgentBridge,
+		msg: InboundMessage,
+		provider: string,
+		modelId: string,
+	): Promise<boolean> {
+	try {
+		const response = await bridge.setModel(provider, modelId);
+		logger.info("NL model switch response", {
+			requestedProvider: provider,
+			requestedModelId: modelId,
+			success: response.success,
+			responseData: response.data,
+			error: (response as Record<string, unknown>).error,
+		});
+		if (!response.success) {
+				await this.#sendAgentResponse(msg, `切换模型失败: ${response.error ?? "未知错误"}`);
+				return true;
+			}
+			const model = response.data as { provider: string; id: string } | undefined;
+			const modelStr = model ? `${model.provider}/${model.id}` : `${provider}/${modelId}`;
+			await this.#sendAgentResponse(msg, `已切换到模型: ${modelStr}`);
+			return true;
+		} catch (err) {
+			logger.error("Failed to switch model", {
+				provider,
+				modelId,
+				error: err instanceof Error ? err.message : String(err),
+			});
+			await this.#sendAgentResponse(msg, `切换模型失败: ${err instanceof Error ? err.message : String(err)}`);
+			return true;
+		}
+	}
+
+	// ═══════════════════════════════════════════════════════════════════
+	// Natural-Language Model Switch Interception
+	// ═══════════════════════════════════════════════════════════════════
+
+	/**
+	 * Intercept natural-language model switch requests (e.g. "切换模型到
+	 * kimi-k2.6") before forwarding to the agent. Fuzzy-matches the model
+	 * name and calls bridge.setModel() directly — no LLM round-trip.
+	 * Returns true if handled, false to let the normal agent path proceed.
+	 */
+	async #tryNaturalLanguageModelSwitch(msg: InboundMessage, accountId: string): Promise<boolean> {
+		const text = this.#extractMessageText(msg);
+		const modelArg = extractModelSwitchArg(text);
+		if (!modelArg) return false;
+
+		const bridge = this.#resolveDirectBridge(accountId === "__default__" ? undefined : accountId);
+		if (!bridge?.isRunning) {
+			await this.#sendAgentResponse(msg, "Agent 未启动，无法切换模型。请稍后再试。");
+			return true;
+		}
+
+		try {
+			const response = await bridge.getAvailableModels();
+			if (!response.data || typeof response.data !== "object") {
+				await this.#sendAgentResponse(msg, "无法获取模型列表。");
+				return true;
+			}
+			const { models } = response.data as { models?: MatchableModel[] };
+			if (!Array.isArray(models) || models.length === 0) {
+				await this.#sendAgentResponse(msg, "当前没有可用模型。");
+				return true;
+			}
+
+			const match = fuzzyMatchModel(models, modelArg);
+			if (!match) {
+				const available = models.map(m => `\`${m.provider}/${m.id}\``).join("、");
+				await this.#sendAgentResponse(msg, `未找到匹配 "${modelArg}" 的模型。可用模型：${available}`);
+				return true;
+			}
+
+			return this.#switchModelAndReply(bridge, msg, match.provider, match.id);
+		} catch (err) {
+			logger.error("NL model switch failed", { error: err instanceof Error ? err.message : String(err) });
+			await this.#sendAgentResponse(msg, `切换模型失败: ${err instanceof Error ? err.message : String(err)}`);
+			return true;
+		}
+	}
+
 	// ═══════════════════════════════════════════════════════════════════
 	// Model Command Interception
 	// ═══════════════════════════════════════════════════════════════════
@@ -1465,25 +1556,7 @@ ${table}
 			return true;
 		}
 
-		try {
-			const response = await bridge.setModel(provider, modelId);
-			if (!response.success) {
-				await this.#sendAgentResponse(msg, `切换模型失败: ${response.error ?? "未知错误"}`);
-				return true;
-			}
-			const model = response.data as { provider: string; id: string } | undefined;
-			const modelStr = model ? `${model.provider}/${model.id}` : `${provider}/${modelId}`;
-			await this.#sendAgentResponse(msg, `已切换到模型: ${modelStr}`);
-			return true;
-		} catch (err) {
-			logger.error("Failed to switch model", {
-				provider,
-				modelId,
-				error: err instanceof Error ? err.message : String(err),
-			});
-			await this.#sendAgentResponse(msg, `切换模型失败: ${err instanceof Error ? err.message : String(err)}`);
-			return true;
-		}
+		return this.#switchModelAndReply(bridge, msg, provider, modelId);
 	}
 
 	async #handleInboundMessage(msg: InboundMessage): Promise<void> {
@@ -1498,6 +1571,7 @@ ${table}
 			const accountId = msg.accountId ?? "__default__";
 			if (await this.#handleAbortMessage(msg, accountId)) return;
 			if (await this.#handleModelCommand(msg, accountId)) return;
+			if (await this.#tryNaturalLanguageModelSwitch(msg, accountId)) return;
 			let session = await this.#store?.getSession(msg.channelId, accountId, msg.conversationId);
 			const now = Date.now();
 

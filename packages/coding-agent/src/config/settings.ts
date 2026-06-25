@@ -17,6 +17,7 @@ import {
 	getAgentDbPath,
 	getAgentDir,
 	getProjectDir,
+	CONFIG_DIR_NAME,
 	isEnoent,
 	logger,
 	procmgr,
@@ -437,18 +438,27 @@ export class Settings {
 	}
 
 	async #loadProjectSettings(): Promise<RawSettings> {
+		let merged: RawSettings = {};
+
+		// Load per-directory .omp/config.yml (project-level override of global config.yml)
+		const projectConfigPath = path.join(this.#cwd, CONFIG_DIR_NAME, "config.yml");
+		const projectConfig = await this.#loadYaml(projectConfigPath);
+		if (Object.keys(projectConfig).length > 0) {
+			merged = this.#deepMerge(merged, projectConfig);
+		}
+
 		try {
 			const result = await loadCapability(settingsCapability.id, { cwd: this.#cwd });
-			let merged: RawSettings = {};
 			for (const item of result.items as SettingsCapabilityItem[]) {
 				if (item.level === "project") {
 					merged = this.#deepMerge(merged, item.data as RawSettings);
 				}
 			}
-			return this.#migrateRawSettings(merged);
 		} catch {
-			return {};
+			// capability loading failed — keep projectConfig-only merge
 		}
+
+		return this.#migrateRawSettings(merged);
 	}
 
 	async #migrateFromLegacy(): Promise<void> {

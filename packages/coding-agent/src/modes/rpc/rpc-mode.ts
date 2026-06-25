@@ -10,7 +10,7 @@
  * - Events: AgentSessionEvent objects streamed as they occur
  * - Extension UI: Extension UI requests are emitted, client responds with extension_ui_response
  */
-import { $env, readJsonl, Snowflake } from "@oh-my-pi/pi-utils";
+import { $env, logger, readJsonl, Snowflake } from "@oh-my-pi/pi-utils";
 import type {
 	ExtensionUIContext,
 	ExtensionUIDialogOptions,
@@ -511,12 +511,16 @@ export async function runRpcMode(session: AgentSession): Promise<never> {
 			// Prompting
 			// =================================================================
 
-			case "prompt": {
-				// Don't await - events will stream
-				// Extension commands are executed immediately, file prompt templates are expanded
-				// If streaming and streamingBehavior specified, queues via steer/followUp
-				session
-					.prompt(command.message, {
+		case "prompt": {
+			logger.info("RPC prompt received", {
+				currentModel: session.model ? `${session.model.provider}/${session.model.id}` : "none",
+				messagePreview: command.message?.slice(0, 50),
+			});
+			// Don't await - events will stream
+			// Extension commands are executed immediately, file prompt templates are expanded
+			// If streaming and streamingBehavior specified, queues via steer/followUp
+			session
+				.prompt(command.message, {
 						images: command.images,
 						streamingBehavior: command.streamingBehavior,
 					})
@@ -599,15 +603,26 @@ export async function runRpcMode(session: AgentSession): Promise<never> {
 			// Model
 			// =================================================================
 
-			case "set_model": {
-				const models = session.getAvailableModels();
-				const model = models.find(m => m.provider === command.provider && m.id === command.modelId);
-				if (!model) {
-					return error(id, "set_model", `Model not found: ${command.provider}/${command.modelId}`);
-				}
-				await session.setModel(model);
-				return success(id, "set_model", model);
+		case "set_model": {
+			const models = session.getAvailableModels();
+			const model = models.find(m => m.provider === command.provider && m.id === command.modelId);
+			logger.info("RPC set_model received", {
+				requestedProvider: command.provider,
+				requestedModelId: command.modelId,
+				found: !!model,
+				availableCount: models.length,
+				availableSamples: models.slice(0, 5).map(m => `${m.provider}/${m.id}`),
+				currentModelBefore: session.model ? `${session.model.provider}/${session.model.id}` : "none",
+			});
+			if (!model) {
+				return error(id, "set_model", `Model not found: ${command.provider}/${command.modelId}`);
 			}
+			await session.setModel(model);
+			logger.info("RPC set_model done", {
+				modelAfter: session.model ? `${session.model.provider}/${session.model.id}` : "none",
+			});
+			return success(id, "set_model", model);
+		}
 
 			case "cycle_model": {
 				const result = await session.cycleModel();

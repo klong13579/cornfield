@@ -25,6 +25,7 @@ export enum Reason {
 const callbackList: ((reason: Reason) => Promise<void> | void)[] = [];
 // Tracks cleanup run state (to prevent recursion/reentry issues)
 let cleanupStage: "idle" | "running" | "complete" = "idle";
+let cleanupPromise: Promise<void> | null = null;
 
 /**
  * Internal: runs all registered cleanup callbacks for the given reason.
@@ -38,8 +39,10 @@ function runCleanup(reason: Reason): Promise<void> {
 			cleanupStage = "running";
 			break;
 		case "running":
-			logger.error("Cleanup invoked recursively", { stack: new Error().stack });
-			return Promise.resolve();
+			// Reentrancy: signal handler fires while cleanup from a previous
+			// signal/exception is still in-flight. Return the existing promise
+			// instead of starting a parallel cleanup or logging a scary error.
+			return cleanupPromise ?? Promise.resolve();
 		case "complete":
 			return Promise.resolve();
 	}
@@ -51,7 +54,7 @@ function runCleanup(reason: Reason): Promise<void> {
 		return Promise.try(() => callback(reason));
 	});
 
-	return Promise.allSettled(promises).then(results => {
+	cleanupPromise = Promise.allSettled(promises).then(results => {
 		for (const result of results) {
 			if (result.status === "rejected") {
 				const err = result.reason instanceof Error ? result.reason : new Error(String(result.reason));
@@ -60,6 +63,8 @@ function runCleanup(reason: Reason): Promise<void> {
 		}
 		cleanupStage = "complete";
 	});
+
+	return cleanupPromise;
 }
 
 // Register signal and error event handlers to trigger cleanup before exit.

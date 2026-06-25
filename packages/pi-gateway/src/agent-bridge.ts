@@ -276,6 +276,8 @@ export class AgentBridge {
 	#abortRequested = false;
 	#activeSessionPath: string | undefined;
 	#operationTail: Promise<void> = Promise.resolve();
+	/** Model set via setModel() that must be re-applied after switchSession restores session context. */
+	#pendingModelOverride: { provider: string; modelId: string } | undefined;
 	/** Counter for generating unique prompt IDs */
 	#promptIdCounter = 0;
 	#commandIdCounter = 0;
@@ -579,9 +581,19 @@ export class AgentBridge {
 			const timeoutMs = this.#options.timeoutMs ?? 120_000;
 
 			try {
-				if (session.ompSessionPath) {
-					await this.#switchSession(session.ompSessionPath);
-				}
+			if (session.ompSessionPath) {
+				await this.#switchSession(session.ompSessionPath);
+			}
+			// switchSession restores session context (including model) from
+			// the session file, which overwrites any model set via setModel().
+			// Re-apply the pending override so the user's model choice survives.
+			if (this.#pendingModelOverride) {
+				await this.#sendCommandAndWait(
+					"set_model",
+					{ provider: this.#pendingModelOverride.provider, modelId: this.#pendingModelOverride.modelId },
+					30_000,
+				);
+			}
 				const events = await this.#promptAndWait(text, timeoutMs, handlers);
 				// The active prompt's `aborted` flag was set by
 				// `#resolveActivePromptAsAborted` before the await chain
@@ -1505,7 +1517,11 @@ export class AgentBridge {
 			if (!this.isRunning) {
 				throw new Error("Agent process not running");
 			}
-			return await this.#sendCommandAndWait("set_model", { provider, modelId }, 30_000);
+			const response = await this.#sendCommandAndWait("set_model", { provider, modelId }, 30_000);
+			if (response.success) {
+				this.#pendingModelOverride = { provider, modelId };
+			}
+			return response;
 		});
 	}
 
