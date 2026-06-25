@@ -16,8 +16,9 @@
  */
 
 import type { AssistantMessage, ImageContent, ToolCall, ToolResultMessage, Usage } from "@oh-my-pi/pi-ai";
-import { logger } from "@oh-my-pi/pi-utils";
+import { isEnoent, logger } from "@oh-my-pi/pi-utils";
 import type { FileSink } from "bun";
+import * as path from "node:path";
 import { extractPdfText } from "./channels/dingtalk-media";
 import { resolveCredentialEnvVars } from "./credential-resolver";
 import type {
@@ -324,6 +325,56 @@ export class AgentBridge {
 
 	async start(): Promise<void> {
 		await this.#spawnAndWaitReady();
+		this.#runBootCheck();
+	}
+
+
+	/**
+	 * Fire-and-forget: if a BOOT.md file exists in the agent's working
+	 * directory, send its content as a prompt to the agent after startup.
+	 * The agent runs the boot instructions (e.g. check notifications, report
+	 * status) without blocking gateway startup or inbound message processing.
+	 *
+	 * Errors and empty responses are logged but never thrown — boot is
+	 * best-effort and must not break the bridge.
+	 */
+	#runBootCheck(): void {
+		const cwd = this.#options.cwd;
+		if (!cwd) return;
+		const bootPath = path.join(cwd, "BOOT.md");
+
+		Bun.file(bootPath)
+			.text()
+			.then(content => {
+				const trimmed = content.trim();
+				if (!trimmed) {
+					logger.debug("[AgentBridge] BOOT.md is empty, skipping", { bootPath });
+					return;
+				}
+				logger.info("[AgentBridge] Running BOOT.md self-check", { bootPath, length: trimmed.length });
+				this.executePrompt(trimmed, { timeoutMs: 60_000 })
+					.then(result => {
+						logger.info("[AgentBridge] BOOT.md completed", {
+							bootPath,
+							preview: result.slice(0, 200),
+						});
+					})
+					.catch(err => {
+						logger.warn("[AgentBridge] BOOT.md execution failed", {
+							bootPath,
+							error: err instanceof Error ? err.message : String(err),
+						});
+					});
+			})
+			.catch(err => {
+				if (!isEnoent(err)) {
+					logger.warn("[AgentBridge] Failed to read BOOT.md", {
+						bootPath,
+						error: err instanceof Error ? err.message : String(err),
+					});
+				}
+				// ENOENT is expected — most agents don't have BOOT.md.
+			});
 	}
 
 	stop(): void {

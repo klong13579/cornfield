@@ -509,4 +509,41 @@ describe("AgentBridge.executePrompt inactivity timeout", () => {
 			await fake.cleanup();
 		}
 	});
+
+	test("runs BOOT.md self-check on start when the file exists", async () => {
+		const fake = await createFakeRpcBinary();
+		const bootDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-boot-"));
+		await Bun.write(path.join(bootDir, "BOOT.md"), "Check today's tasks and report status.");
+		const bridge = new AgentBridge({ ompPath: fake.path, timeoutMs: 2_000, cwd: bootDir });
+		try {
+			await bridge.start();
+			// BOOT.md runs fire-and-forget; give it time to execute.
+			await Bun.sleep(200);
+			// The fake RPC echoes the prompt back; verify BOOT.md content was prompted.
+			// We can't directly observe the prompt, but the bridge should still
+			// be running and responsive to normal messages.
+			expect(bridge.isRunning).toBe(true);
+			const response = await bridge.forward(
+				makeMessage("hello", "conv-boot"),
+				makeSession("/tmp/boot-session.jsonl", "conv-boot"),
+			);
+			expect(response).toContain("/tmp/boot-session.jsonl :: hello");
+		} finally {
+			bridge.stop();
+			await fake.cleanup();
+			await fs.rm(bootDir, { recursive: true, force: true });
+		}
+	});
+
+	test("starts normally when BOOT.md is absent", async () => {
+		const fake = await createFakeRpcBinary();
+		const bridge = new AgentBridge({ ompPath: fake.path, timeoutMs: 2_000 });
+		try {
+			await bridge.start();
+			expect(bridge.isRunning).toBe(true);
+		} finally {
+			bridge.stop();
+			await fake.cleanup();
+		}
+	});
 });
