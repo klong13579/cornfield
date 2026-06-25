@@ -19,8 +19,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { AgentBridge } from "../src/agent-bridge";
 import { DingTalkChannel } from "../src/channels/dingtalk";
-import type { DingTalkConfig } from "../src/types";
-import type { InboundMessage, SessionRecord } from "../src/types";
+import type { DingTalkConfig, InboundMessage, SessionRecord } from "../src/types";
 
 // Fake RPC that emits two text deltas (so the throttle actually buffers
 // them) plus a thinking delta, then the final assistant message and
@@ -266,7 +265,10 @@ describe("DingTalk AI Card lifecycle (v2 reply path)", () => {
 		expect(paths).toContain("POST /v1.0/card/instances/deliver");
 		expect(paths.filter(p => p.startsWith("PUT /v1.0/card/streaming")).length).toBeGreaterThanOrEqual(1);
 		const finishPut = card.calls.find(
-			c => c.method === "PUT" && c.path === "/v1.0/card/instances" && (c.body as any)?.cardData?.cardParamMap?.flowStatus === "3",
+			c =>
+				c.method === "PUT" &&
+				c.path === "/v1.0/card/instances" &&
+				(c.body as any)?.cardData?.cardParamMap?.flowStatus === "3",
 		);
 		expect(finishPut, "FINISHED transition PUT should hit /v1.0/card/instances").toBeTruthy();
 
@@ -320,8 +322,9 @@ describe("DingTalk AI Card lifecycle (v2 reply path)", () => {
 
 			const inbound = makeMessage("hi", "conv-card-2");
 			const session = makeSession("/tmp/card-2.jsonl", "conv-card-2");
-			const submit = (handlers?: Parameters<typeof channel.streamCard>[3]): ReturnType<typeof bridge.forwardWithMeta> =>
-				bridge.forwardWithMeta(inbound, session, handlers);
+			const submit = (
+				handlers?: Parameters<typeof channel.streamCard>[3],
+			): ReturnType<typeof bridge.forwardWithMeta> => bridge.forwardWithMeta(inbound, session, handlers);
 
 			const outbound = await channel.streamCard(
 				inbound,
@@ -333,6 +336,100 @@ describe("DingTalk AI Card lifecycle (v2 reply path)", () => {
 		} finally {
 			restore();
 			broken.stop(true);
+		}
+	});
+
+	// Multi-card segment test: fake RPC emits two assistant messages
+	// separated by a tool call boundary. The gateway should create
+	// two separate cards — one per segment.
+	const MULTI_SEGMENT_RPC = `#!/usr/bin/env bun
+process.stdout.write(JSON.stringify({ type: "ready" }) + "\\n");
+let buffer = "";
+function emit(value) { process.stdout.write(JSON.stringify(value) + "\\n"); }
+for await (const chunk of Bun.stdin.stream()) {
+  buffer += new TextDecoder().decode(chunk);
+  let idx = buffer.indexOf("\\n");
+  while (idx !== -1) {
+    const line = buffer.slice(0, idx).trim();
+    buffer = buffer.slice(idx + 1);
+    if (!line) { idx = buffer.indexOf("\\n"); continue; }
+    const frame = JSON.parse(line);
+    if (frame.type === "switch_session") {
+      emit({ type: "response", id: frame.id, command: "switch_session", success: true, data: { cancelled: false } });
+    } else if (frame.type === "prompt") {
+      emit({ type: "response", id: frame.id, command: "prompt", success: true });
+      // Segment 1: text before tool call
+      emit({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "Let me check.", contentIndex: 0 }, message: { role: "assistant", content: [] } });
+      emit({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "Let me check." }], model: "test-model", provider: "test", usage: { input: 5, output: 2, cacheRead: 0, cacheWrite: 0, totalTokens: 7 }, duration: 50 } });
+      // Tool call boundary
+      emit({ type: "message_update", assistantMessageEvent: { type: "toolcall_end", toolCallId: "tc1", toolName: "search", arguments: { query: "test" } }, message: { role: "assistant", content: [] } });
+      emit({ type: "message_end", message: { role: "toolResult", toolCallId: "tc1", toolName: "search", content: [{ type: "text", text: "result data" }] } });
+      // Segment 2: text after tool call
+      emit({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "Found it!", contentIndex: 0 }, message: { role: "assistant", content: [] } });
+      emit({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "Found it!" }], model: "test-model", provider: "test", usage: { input: 5, output: 2, cacheRead: 0, cacheWrite: 0, totalTokens: 7 }, duration: 50 } });
+      emit({ type: "agent_end" });
+    } else if (frame.type === "abort") {
+      emit({ type: "response", id: frame.id, command: "abort", success: true });
+    }
+    idx = buffer.indexOf("\\n");
+  }
+}
+`;
+
+	test("streamCard splits into multiple cards on tool boundary", async () => {
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-gateway-seg-rpc-"));
+		const scriptPath = path.join(dir, "fake-seg-rpc");
+		await Bun.write(scriptPath, MULTI_SEGMENT_RPC);
+		await fs.chmod(scriptPath, 0o755);
+		try {
+			const segBridge = new AgentBridge({ ompPath: scriptPath, timeoutMs: 5_000 });
+			await segBridge.start();
+
+			const channel = new DingTalkChannel();
+			channel.setAccountId("ops");
+			channel.setConfig(makeDingTalkConfig(card.port));
+
+			const inbound = makeMessage("check and report", "conv-seg-1");
+			const session = makeSession("/tmp/seg-1.jsonl", "conv-seg-1");
+
+			const submit = (
+				handlers?: Parameters<typeof channel.streamCard>[3],
+			): ReturnType<typeof segBridge.forwardWithMeta> => segBridge.forwardWithMeta(inbound, session, handlers);
+
+			const outbound = await channel.streamCard(
+				inbound,
+				session,
+				{ accountId: "ops", agentName: "ops-bot", dapiCalls: 0 },
+				submit,
+			);
+
+			expect(outbound).not.toBeNull();
+
+			// Two cards → two POST /v1.0/card/instances (create) calls
+			const creates = card.calls.filter(c => c.method === "POST" && c.path === "/v1.0/card/instances");
+			expect(creates.length).toBe(2);
+
+			// Two cards → two FINISHED transitions (flowStatus === "3")
+			const finishes = card.calls.filter(
+				c =>
+					c.method === "PUT" &&
+					c.path === "/v1.0/card/instances" &&
+					(c.body as any)?.cardData?.cardParamMap?.flowStatus === "3",
+			);
+			expect(finishes.length).toBe(2);
+
+			// First card should contain "Let me check."
+			const firstFinishMap = (finishes[0] as any)?.body?.cardData?.cardParamMap;
+			expect(firstFinishMap?.content).toContain("Let me check");
+			expect(firstFinishMap?.content).not.toContain("Found it");
+
+			// Second card should contain "Found it!"
+			const secondFinishMap = (finishes[1] as any)?.body?.cardData?.cardParamMap;
+			expect(secondFinishMap?.content).toContain("Found it");
+
+			segBridge.stop();
+		} finally {
+			await fs.rm(dir, { recursive: true, force: true });
 		}
 	});
 });

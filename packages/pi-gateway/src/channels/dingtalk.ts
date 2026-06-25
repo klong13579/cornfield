@@ -20,18 +20,6 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { logger } from "@oh-my-pi/pi-utils";
 import { DWClient, type DWClientDownStream, TOPIC_CARD, TOPIC_ROBOT } from "dingtalk-stream";
-import {
-	buildAnswerBlock,
-	buildImageBlock,
-	buildStopBlock,
-	buildThinkBlock,
-	buildToolBlock,
-	type CardBlock,
-	BlockType,
-} from "./dingtalk-card";
-import { createAICardForTarget, failAICard, finishAICard, patchAICardBlocks, streamAICard } from "./dingtalk-card";
-import { uploadMedia } from "./dingtalk-media";
-import { formatDingTalkChrome, formatDingTalkReply } from "./dingtalk-formatter";
 import type {
 	AgentResponseMeta,
 	ChannelConfig,
@@ -44,8 +32,26 @@ import type {
 	ReplyFormatterContext,
 	SessionRecord,
 } from "../types";
+import {
+	type AICardInstance,
+	BlockType,
+	buildAnswerBlock,
+	buildImageBlock,
+	buildStopBlock,
+	buildThinkBlock,
+	buildToolBlock,
+	type CardBlock,
+	createAICardForTarget,
+	failAICard,
+	finishAICard,
+	patchAICardBlocks,
+	streamAICard,
+} from "./dingtalk-card";
+import { formatDingTalkChrome, formatDingTalkReply } from "./dingtalk-formatter";
+import { uploadMedia } from "./dingtalk-media";
 
 type PermissionPolicy = "open" | "allowlist" | "closed";
+
 import { BaseChannel } from "./base";
 
 /** Throttle window for streaming the assistant text into the AI Card. */
@@ -502,9 +508,21 @@ export class DingTalkChannel extends BaseChannel {
 		//   1. mid-stream incremental patch (think / tool / image appear
 		//      as the agent produces them — throttled)
 		//   2. final flush (answer block + chrome fields) on agent_end
+		//
+		// Multi-card segment splitting (Hermes-style): each assistant
+		// message that precedes a tool-call boundary becomes its own
+		// finalized card. When onAssistantMessageEnd fires, we mark a
+		// pending segment break. The next onTextDelta finalizes the old
+		// card (FINISHED) and creates a fresh card for the new text.
+		// The last card is finalized with full chrome on agent_end.
+		let currentCard = card;
+		const cards: AICardInstance[] = [card];
 		const blocks: CardBlock[] = [];
 		let contentText = "";
+		let segmentText = "";
 		let thinkingText = "";
+		let pendingSegmentBreak = false;
+		let segmentBusy = false;
 		/** toolName / args keyed by id; values from onToolCall. */
 		const pendingTools = new Map<string, { name: string; args: unknown }>();
 		/** tmp dir for image data URIs that need to be uploaded. */
@@ -516,8 +534,8 @@ export class DingTalkChannel extends BaseChannel {
 
 		const flushText = (): void => {
 			textFlushTimer = null;
-			if (!contentText) return;
-			void streamAICard(card, contentText, blocks, config).catch(err => {
+			if (!segmentText) return;
+			void streamAICard(currentCard, segmentText, blocks, config).catch(err => {
 				logger.warn("[DingTalk] streamAICard failed (mid-stream)", {
 					accountId: this.#accountId,
 					conversationId: inbound.conversationId,
@@ -528,7 +546,7 @@ export class DingTalkChannel extends BaseChannel {
 
 		const flushBlocks = (): void => {
 			blockPatchTimer = null;
-			void patchAICardBlocks(card, { content: contentText, blockList: blocks }, config).catch(err => {
+			void patchAICardBlocks(currentCard, { content: segmentText, blockList: blocks }, config).catch(err => {
 				logger.warn("[DingTalk] patchAICardBlocks failed", {
 					accountId: this.#accountId,
 					conversationId: inbound.conversationId,
@@ -543,8 +561,85 @@ export class DingTalkChannel extends BaseChannel {
 		};
 
 		const handlers: ForwardStreamHandlers = {
-			onTextDelta: (_delta, cumulative) => {
+			onTextDelta: (delta, cumulative) => {
 				contentText = cumulative;
+				// If a segment break is pending (onAssistantMessageEnd fired
+				// and this is the first text of the next assistant message),
+				// finalize the old card and start a fresh one. The split is
+				// async but we can't await here (sync handler). Instead,
+				// we synchronously reset segment state and fire off the
+				// async finish+create. A `segmentBusy` flag prevents
+				// streaming until the new card is ready.
+				if (pendingSegmentBreak) {
+					pendingSegmentBreak = false;
+					if (segmentText.trim()) {
+						// Capture the old card + segment data synchronously,
+						// then reset state for the new segment.
+						const oldCard = currentCard;
+						const oldText = segmentText;
+						const oldBlocks = blocks.filter(b => b.type !== BlockType.STOP);
+						// Reset per-segment state immediately so the new
+						// delta accumulates into a fresh segment.
+						blocks.length = 0;
+						segmentText = "";
+						thinkingText = "";
+						pendingTools.clear();
+						segmentBusy = true;
+
+						// Async: finalize old card, create new card.
+						void (async () => {
+							if (oldText.trim()) {
+								const segAnswer = buildAnswerBlock(oldText);
+								try {
+									await finishAICard(
+										oldCard,
+										{
+											content: oldText,
+											blockList: [...oldBlocks, segAnswer],
+											quoteContent: quoteText,
+											statusLine: "",
+											copyContent: oldText,
+											hasAction: false,
+											version: 1 as const,
+										},
+										config,
+									);
+								} catch (err) {
+									logger.warn("[DingTalk] segment finishAICard failed", {
+										accountId: this.#accountId,
+										conversationId: inbound.conversationId,
+										error: err instanceof Error ? err.message : String(err),
+									});
+								}
+							}
+
+							const nextCard = await createAICardForTarget(config, target, { quoteContent: quoteText });
+							if (nextCard) {
+								context.registerCardAction?.({
+									cardInstanceId: nextCard.cardInstanceId,
+									accountId: this.#accountId,
+									sessionId: inbound.conversationId,
+								});
+								currentCard = nextCard;
+								cards.push(nextCard);
+							} else {
+								logger.warn("[DingTalk] segment card creation failed, reusing old card", {
+									accountId: this.#accountId,
+									conversationId: inbound.conversationId,
+								});
+							}
+							segmentBusy = false;
+							// Flush any buffered text now that the new card is ready.
+							if (segmentText) {
+								void streamAICard(currentCard, segmentText, blocks, config).catch(() => {});
+							}
+						})();
+					}
+				}
+				segmentText += delta;
+				// Don't schedule streaming while a segment split is in flight —
+				// the text will be flushed when the new card is ready.
+				if (segmentBusy) return;
 				if (textFlushTimer) return;
 				textFlushTimer = setTimeout(flushText, CARD_STREAM_THROTTLE_MS);
 			},
@@ -568,14 +663,17 @@ export class DingTalkChannel extends BaseChannel {
 				scheduleBlockPatch();
 			},
 			onAssistantMessageEnd: () => {
-				// Flush the thinking buffer as a think block. The text
-				// itself is in contentText; the answer block is built at
-				// onAgentEnd so we can include the final content (after
-				// any post-message-end edits the model performs).
+				// Flush the thinking buffer as a think block.
 				if (thinkingText.trim()) {
 					blocks.push(buildThinkBlock(thinkingText));
 					thinkingText = "";
 				}
+				// Mark a pending segment break. The actual card split
+				// happens when the next onTextDelta arrives (so we know
+				// there IS more text). If onAgentEnd follows directly,
+				// no new card is created — the current card gets the
+				// final chrome as normal.
+				pendingSegmentBreak = true;
 			},
 			onLongTask: evt => {
 				// Long-running tool: surface a stop block with an abort
@@ -598,7 +696,7 @@ export class DingTalkChannel extends BaseChannel {
 					// create-time call; this re-registers with the richer
 					// info so audit logs / future action types can see it.
 					context.registerCardAction?.({
-						cardInstanceId: card.cardInstanceId,
+						cardInstanceId: currentCard.cardInstanceId,
 						accountId: this.#accountId,
 						sessionId: inbound.conversationId,
 						toolName: evt.toolName,
@@ -627,6 +725,14 @@ export class DingTalkChannel extends BaseChannel {
 
 		const meta = await submit(handlers);
 
+		// Wait for any in-flight segment split to complete before
+		// finalizing the last card.
+		if (segmentBusy) {
+			for (let i = 0; i < 200 && segmentBusy; i++) {
+				await Bun.sleep(50);
+			}
+		}
+
 		// Always cancel pending flushes so we don't double-stream before
 		// the final finish call.
 		if (textFlushTimer) {
@@ -639,26 +745,21 @@ export class DingTalkChannel extends BaseChannel {
 		}
 
 		if (meta === null) {
-			await failAICard(card, "系统繁忙，请稍后重试。", config);
+			await failAICard(currentCard, "系统繁忙，请稍后重试。", config);
 			await cleanupTmpFiles(tmpFiles);
 			return null;
 		}
 
-		// Image upload pipeline: scan the assistant's final text for
+		// Image upload pipeline: scan the last segment's text for
 		// data URI images AND local file references, upload each one
 		// to DingTalk, and emit a type-3 image block per upload. The
 		// raw image markdown is then stripped from the answer text so
 		// the card body doesn't render broken image placeholders.
 		//
-		// Supported syntax:
-		//   ![alt](data:image/png;base64,...)   — inline base64
-		//   ![alt](file:///abs/path.png)         — file URI scheme
-		//   ![alt](/abs/path.png)                — absolute path
-		//
-		// Tool results that return images are not yet auto-uploaded
-		// (they would need binary content in onToolResult, which the
-		// bridge currently surfaces only as `contentText`).
-		const dataUris = extractDataUriImages(meta.text);
+		// We scan segmentText (last segment only) not meta.text
+		// (full cumulative) because earlier segments were already
+		// finalized in their own cards.
+		const dataUris = extractDataUriImages(segmentText);
 		for (const match of dataUris) {
 			const tmp = await writeDataUriToTempFile(match.dataUri, match.mimeType);
 			if (!tmp) continue;
@@ -674,7 +775,7 @@ export class DingTalkChannel extends BaseChannel {
 			blocks.push(buildImageBlock(upload.mediaId, match.alt));
 		}
 
-		const localFiles = extractLocalFileImages(meta.text);
+		const localFiles = extractLocalFileImages(segmentText);
 		for (const match of localFiles) {
 			try {
 				await fs.promises.access(match.path);
@@ -699,10 +800,10 @@ export class DingTalkChannel extends BaseChannel {
 		// Strip all image markdown (data URI + local file) from the
 		// answer text so the card body shows only text — images are
 		// delivered as type-3 blocks above.
-		const strippedText = stripImageDirectives(meta.text);
-		const strippedMeta: AgentResponseMeta = { ...meta, text: strippedText, rawText: strippedText };
+		const strippedSegText = stripImageDirectives(segmentText);
+		const segMeta: AgentResponseMeta = { ...meta, text: strippedSegText, rawText: strippedSegText };
 		const chrome = formatDingTalkChrome({
-			meta: strippedMeta,
+			meta: segMeta,
 			inbound,
 			agentName: context.agentName,
 			accountId: context.accountId,
@@ -731,7 +832,7 @@ export class DingTalkChannel extends BaseChannel {
 		};
 
 		try {
-			await finishAICard(card, cardData, config);
+			await finishAICard(currentCard, cardData, config);
 		} catch (err) {
 			logger.warn("[DingTalk] finishAICard failed, falling back to v1 markdown", {
 				accountId: this.#accountId,
@@ -1054,7 +1155,7 @@ export class DingTalkChannel extends BaseChannel {
 	}
 
 	/** Send a proactive DM via OAuth API. */
-		async #sendViaOAuthDM(userId: string, text: string): Promise<void> {
+	async #sendViaOAuthDM(userId: string, text: string): Promise<void> {
 		const token = await this.#getOAuthToken();
 		const robotCode = this.#getRobotCode();
 		const msgParam = JSON.stringify({ content: text });
@@ -1084,7 +1185,7 @@ export class DingTalkChannel extends BaseChannel {
 	}
 
 	/** Send a proactive group message via OAuth API. */
-		async #sendViaOAuthGroup(conversationId: string, text: string): Promise<void> {
+	async #sendViaOAuthGroup(conversationId: string, text: string): Promise<void> {
 		const token = await this.#getOAuthToken();
 		const robotCode = this.#getRobotCode();
 		const msgParam = JSON.stringify({ content: text });
