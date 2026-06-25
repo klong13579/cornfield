@@ -37,7 +37,6 @@ export interface InboundAttachment {
 	size: number;
 }
 
-
 export interface InboundMessage {
 	channelId: string;
 	userId: string;

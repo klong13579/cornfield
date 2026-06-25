@@ -18,8 +18,8 @@
 import type { AssistantMessage, ImageContent, ToolCall, ToolResultMessage, Usage } from "@oh-my-pi/pi-ai";
 import { logger } from "@oh-my-pi/pi-utils";
 import type { FileSink } from "bun";
-import { resolveCredentialEnvVars } from "./credential-resolver";
 import { extractPdfText } from "./channels/dingtalk-media";
+import { resolveCredentialEnvVars } from "./credential-resolver";
 import type {
 	AgentResponseMeta,
 	AgentResponseToolCall,
@@ -589,19 +589,19 @@ export class AgentBridge {
 			const timeoutMs = this.#options.timeoutMs ?? 120_000;
 
 			try {
-			if (session.ompSessionPath) {
-				await this.#switchSession(session.ompSessionPath);
-			}
-			// switchSession restores session context (including model) from
-			// the session file, which overwrites any model set via setModel().
-			// Re-apply the pending override so the user's model choice survives.
-			if (this.#pendingModelOverride) {
-				await this.#sendCommandAndWait(
-					"set_model",
-					{ provider: this.#pendingModelOverride.provider, modelId: this.#pendingModelOverride.modelId },
-					30_000,
-				);
-			}
+				if (session.ompSessionPath) {
+					await this.#switchSession(session.ompSessionPath);
+				}
+				// switchSession restores session context (including model) from
+				// the session file, which overwrites any model set via setModel().
+				// Re-apply the pending override so the user's model choice survives.
+				if (this.#pendingModelOverride) {
+					await this.#sendCommandAndWait(
+						"set_model",
+						{ provider: this.#pendingModelOverride.provider, modelId: this.#pendingModelOverride.modelId },
+						30_000,
+					);
+				}
 				const events = await this.#promptAndWait(text, timeoutMs, handlers, images);
 				// The active prompt's `aborted` flag was set by
 				// `#resolveActivePromptAsAborted` before the await chain
@@ -1283,7 +1283,12 @@ export class AgentBridge {
 		return promise;
 	}
 
-	async #promptAndWait(message: string, timeoutMs: number, handlers?: ForwardStreamHandlers, images?: ImageContent[]): Promise<AgentEvent[]> {
+	async #promptAndWait(
+		message: string,
+		timeoutMs: number,
+		handlers?: ForwardStreamHandlers,
+		images?: ImageContent[],
+	): Promise<AgentEvent[]> {
 		const promptId = `p_${++this.#promptIdCounter}`;
 
 		const { promise, resolve, reject } = Promise.withResolvers<AgentEvent[]>();
@@ -1506,20 +1511,43 @@ ${pdfText.slice(0, 10000)}`);
 
 		// If we extracted text from PDFs, include it in the prompt
 		if (attachmentTexts.length > 0) {
-			const baseText = msg.content.type === "text"
-				? msg.content.text
-				: msg.content.type === "markdown"
-					? msg.content.markdown
-					: msg.content.type === "voice" && msg.content.text
-						? msg.content.text
-						: "";
+			const baseText =
+				msg.content.type === "text"
+					? msg.content.text
+					: msg.content.type === "markdown"
+						? msg.content.markdown
+						: msg.content.type === "voice" && msg.content.text
+							? msg.content.text
+							: "";
 			return { text: [baseText, ...attachmentTexts].filter(Boolean).join("\n\n"), images };
 		}
-
 
 		if (msg.content.type === "text") return { text: msg.content.text, images };
 		if (msg.content.type === "markdown") return { text: msg.content.markdown, images };
 		if (msg.content.type === "voice" && msg.content.text) return { text: msg.content.text, images };
+
+		// Video: frames may have been extracted by the gateway media layer
+		// (ffmpeg key-frame extraction). If we got image attachments, they're
+		// video frames — pass them to the agent with a descriptive label.
+		// DingTalk sends videos as msgtype="file" with video extensions.
+		const VIDEO_EXTENSIONS = [".mp4", ".mov", ".avi", ".mkv", ".webm", ".flv", ".wmv"];
+		const contentFilename = (msg.content as any).filename as string | undefined;
+		const isVideoByName =
+			contentFilename && VIDEO_EXTENSIONS.some(ext => contentFilename.toLowerCase().endsWith(ext));
+		if (msg.content.type === "video" || (msg.content.type === "file" && isVideoByName)) {
+			const name = contentFilename ?? "video";
+			const size = msg.content.size ? formatBytes(msg.content.size) : "unknown size";
+			if (images.length > 0) {
+				return {
+					text: `[用户发送了视频文件: ${name} (${size})。已从视频中提取 ${images.length} 个关键帧，请基于这些帧分析视频内容。]`,
+					images,
+				};
+			}
+			return {
+				text: `[用户发送了视频文件: ${name} (${size})。视频帧提取失败，你无法查看视频内容。如果需要分析，请让用户截取关键帧图片重发。]`,
+				images,
+			};
+		}
 
 		// For image/file/video without ASR text, describe the attachment
 		if (msg.attachments && msg.attachments.length > 0) {
@@ -1543,7 +1571,6 @@ ${pdfText.slice(0, 10000)}`);
 		});
 		return { text: "[non-text message]", images };
 	}
-
 
 	#formatResponse(text: string): string {
 		// Strip think blocks from model response
