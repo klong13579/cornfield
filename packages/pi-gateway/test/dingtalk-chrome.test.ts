@@ -2,7 +2,7 @@
  * v3 chrome extractor (formatDingTalkChrome) + image data URI extractor.
  */
 import { describe, expect, test } from "bun:test";
-import { extractDataUriImages } from "../src/channels/dingtalk";
+import { extractDataUriImages, extractLocalFileImages, stripImageDirectives } from "../src/channels/dingtalk";
 import { formatDingTalkChrome, formatDingTalkReply } from "../src/channels/dingtalk-formatter";
 import type { AgentResponseMeta, InboundMessage } from "../src/types";
 
@@ -123,6 +123,86 @@ describe("extractDataUriImages", () => {
 		const text = "![](data:image/png;base64,AAA)";
 		const out = extractDataUriImages(text);
 		expect(out[0]?.alt).toBe("");
+	});
+});
+
+describe("extractLocalFileImages", () => {
+	test("finds absolute path image", () => {
+		const text = "before ![arch](/tmp/diagram.png) after";
+		const out = extractLocalFileImages(text);
+		expect(out).toHaveLength(1);
+		expect(out[0]?.path).toBe("/tmp/diagram.png");
+		expect(out[0]?.alt).toBe("arch");
+	});
+
+	test("finds file:// URI image", () => {
+		const text = "![img](file:///Users/x/y.jpeg)";
+		const out = extractLocalFileImages(text);
+		expect(out).toHaveLength(1);
+		expect(out[0]?.path).toBe("/Users/x/y.jpeg");
+	});
+
+	test("ignores remote https URLs", () => {
+		const text = "![remote](https://example.com/foo.png)";
+		expect(extractLocalFileImages(text)).toEqual([]);
+	});
+
+	test("ignores relative paths", () => {
+		const text = "![rel](assets/foo.png)";
+		expect(extractLocalFileImages(text)).toEqual([]);
+	});
+
+	test("ignores paths without image extensions", () => {
+		const text = "![doc](/tmp/readme.md)";
+		expect(extractLocalFileImages(text)).toEqual([]);
+	});
+
+	test("finds multiple local images", () => {
+		const text = "![a](/tmp/a.png) and ![b](file:///tmp/b.jpg)";
+		const out = extractLocalFileImages(text);
+		expect(out).toHaveLength(2);
+		expect(out[0]?.path).toBe("/tmp/a.png");
+		expect(out[1]?.path).toBe("/tmp/b.jpg");
+	});
+
+	test("decodes percent-encoded file:// URIs", () => {
+		const text = "![img](file:///tmp/my%20file.png)";
+		const out = extractLocalFileImages(text);
+		expect(out[0]?.path).toBe("/tmp/my file.png");
+	});
+});
+
+describe("stripImageDirectives", () => {
+	test("strips data URI images from text", () => {
+		const text = "before ![shot](data:image/png;base64,AAA) after";
+		expect(stripImageDirectives(text)).toBe("before  after");
+	});
+
+	test("strips local file images from text", () => {
+		const text = "Here is the diagram:\n![arch](/tmp/diagram.png)\nDone.";
+		expect(stripImageDirectives(text)).toBe("Here is the diagram:\n\nDone.");
+	});
+
+	test("strips both data URI and local file images together", () => {
+		const text = "![a](data:image/png;base64,AAA)\n![b](/tmp/b.png)";
+		const result = stripImageDirectives(text);
+		expect(result).not.toContain("data:image");
+		expect(result).not.toContain("/tmp/b.png");
+	});
+
+	test("leaves remote URLs intact", () => {
+		const text = "![remote](https://example.com/x.png) stays";
+		expect(stripImageDirectives(text)).toBe("![remote](https://example.com/x.png) stays");
+	});
+
+	test("collapses excessive blank lines after stripping", () => {
+		const text = "a\n\n\n![img](/tmp/x.png)\n\n\nb";
+		expect(stripImageDirectives(text)).toBe("a\n\nb");
+	});
+
+	test("returns empty string when text is only images", () => {
+		const text = "![only](/tmp/x.png)";
+		expect(stripImageDirectives(text)).toBe("");
 	});
 });
 

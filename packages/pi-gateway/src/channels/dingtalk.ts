@@ -645,11 +645,19 @@ export class DingTalkChannel extends BaseChannel {
 		}
 
 		// Image upload pipeline: scan the assistant's final text for
-		// data URI images, upload each one, and replace with a mediaId
-		// reference. This is the v3 image-block path; tool results that
-		// return images are not yet auto-uploaded (they would need
-		// binary content in onToolResult, which the bridge currently
-		// surfaces only as `contentText`).
+		// data URI images AND local file references, upload each one
+		// to DingTalk, and emit a type-3 image block per upload. The
+		// raw image markdown is then stripped from the answer text so
+		// the card body doesn't render broken image placeholders.
+		//
+		// Supported syntax:
+		//   ![alt](data:image/png;base64,...)   — inline base64
+		//   ![alt](file:///abs/path.png)         — file URI scheme
+		//   ![alt](/abs/path.png)                — absolute path
+		//
+		// Tool results that return images are not yet auto-uploaded
+		// (they would need binary content in onToolResult, which the
+		// bridge currently surfaces only as `contentText`).
 		const dataUris = extractDataUriImages(meta.text);
 		for (const match of dataUris) {
 			const tmp = await writeDataUriToTempFile(match.dataUri, match.mimeType);
@@ -666,9 +674,35 @@ export class DingTalkChannel extends BaseChannel {
 			blocks.push(buildImageBlock(upload.mediaId, match.alt));
 		}
 
-		// Build the answer block from the sanitized final text.
+		const localFiles = extractLocalFileImages(meta.text);
+		for (const match of localFiles) {
+			try {
+				await fs.promises.access(match.path);
+			} catch {
+				logger.warn("[DingTalk] local image file not found, skipping", {
+					path: match.path,
+					accountId: this.#accountId,
+				});
+				continue;
+			}
+			const upload = await uploadMedia(match.path, "image", config);
+			if (!upload) {
+				logger.warn("[DingTalk] local image upload failed; skipping image block", {
+					path: match.path,
+					accountId: this.#accountId,
+				});
+				continue;
+			}
+			blocks.push(buildImageBlock(upload.mediaId, match.alt));
+		}
+
+		// Strip all image markdown (data URI + local file) from the
+		// answer text so the card body shows only text — images are
+		// delivered as type-3 blocks above.
+		const strippedText = stripImageDirectives(meta.text);
+		const strippedMeta: AgentResponseMeta = { ...meta, text: strippedText, rawText: strippedText };
 		const chrome = formatDingTalkChrome({
-			meta,
+			meta: strippedMeta,
 			inbound,
 			agentName: context.agentName,
 			accountId: context.accountId,
@@ -1569,6 +1603,50 @@ export function extractDataUriImages(text: string): ExtractedImage[] {
 		});
 	}
 	return out;
+}
+
+/** A local file image referenced by `![alt](file:///path)` or `![alt](/abs/path)`. */
+interface LocalFileImage {
+	/** The original markdown image token as it appeared in text. */
+	raw: string;
+	/** Absolute filesystem path to the image. */
+	path: string;
+	/** alt text from the markdown image. */
+	alt: string;
+}
+
+/**
+ * Match `![alt](file:///path)` and `![alt](/abs/path)` but NOT
+ * `https://...` / `http://...` / relative paths. Path must end with
+ * a known image extension so we don't try to upload arbitrary files.
+ */
+const LOCAL_FILE_IMAGE_RE = /!\[([^\]]*)\]\((file:\/\/[^)]+|\/[^)]+\.(?:png|jpe?g|gif|webp|bmp|svg))\)/gi;
+
+/**
+ * Scan assistant text for markdown images pointing to local files.
+ * Matches `![alt](file:///abs/path.png)` and `![alt](/abs/path.png)`.
+ * Remote URLs and relative paths are ignored.
+ */
+export function extractLocalFileImages(text: string): LocalFileImage[] {
+	const out: LocalFileImage[] = [];
+	for (const match of text.matchAll(LOCAL_FILE_IMAGE_RE)) {
+		const rawUrl = match[2];
+		const filePath = rawUrl.startsWith("file://") ? decodeURIComponent(rawUrl.slice("file://".length)) : rawUrl;
+		out.push({ raw: match[0], path: filePath, alt: match[1] ?? "" });
+	}
+	return out;
+}
+
+/**
+ * Strip both data-URI and local-file image markdown from answer text
+ * so the card body doesn't render broken image placeholders. The
+ * actual images are delivered as type-3 image blocks via uploadMedia.
+ */
+export function stripImageDirectives(text: string): string {
+	let stripped = text.replace(DATA_URI_IMAGE_RE, "");
+	stripped = stripped.replace(LOCAL_FILE_IMAGE_RE, "");
+	// Collapse 3+ blank lines left by removed images into a single paragraph break
+	return stripped.replace(/\n{3,}/g, "\n\n").trim();
 }
 
 /**
