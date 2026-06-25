@@ -673,30 +673,27 @@ export class Gateway {
 		// Snapshot old config for diff
 		const oldDtConfig = getDingTalkConfig(this.#config);
 		const oldAccounts = oldDtConfig?.accounts ? new Map(Object.entries(oldDtConfig.accounts)) : new Map();
+		const oldCronConfig = this.#config.cron;
 
-		this.#config = config;
-
-		// Reload scheduler config without full restart
-		this.#stopScheduler();
-		await this.#startScheduler();
-
-		// Diff DingTalk accounts: add, remove, or update per-account channels
 		const newDtConfig = getDingTalkConfig(config);
 		const newAccounts = newDtConfig?.accounts ? new Map(Object.entries(newDtConfig.accounts)) : new Map();
+		const newCronConfig = config.cron;
 
-		// Remove accounts no longer in config
+		// Build reload plan: what actually changed?
+		const plan = {
+			cronChanged: JSON.stringify(oldCronConfig) !== JSON.stringify(newCronConfig),
+			accountsToAdd: [] as string[],
+			accountsToRemove: [] as string[],
+			accountsToUpdate: [] as string[],
+		};
+
 		for (const [accountId] of oldAccounts) {
-			if (!newAccounts.has(accountId)) {
-				this.#removeAccount(accountId);
-			}
+			if (!newAccounts.has(accountId)) plan.accountsToRemove.push(accountId);
 		}
-
-		// Add or update accounts
 		for (const [accountId, account] of newAccounts) {
 			if (!oldAccounts.has(accountId)) {
-				await this.#addAccount(accountId, account, config);
+				plan.accountsToAdd.push(accountId);
 			} else {
-				// Account exists — update bridge options if changed
 				const oldAccount = oldAccounts.get(accountId)!;
 				if (
 					oldAccount.appKey !== account.appKey ||
@@ -704,30 +701,52 @@ export class Gateway {
 					oldAccount.robotCode !== account.robotCode ||
 					oldAccount.agentDir !== account.agentDir
 				) {
-					this.#removeAccount(accountId);
-					await this.#addAccount(accountId, account, config);
+					plan.accountsToUpdate.push(accountId);
 				}
 			}
 		}
 
-		// Rebuild SessionManager with updated bridges
-		const hasDingTalkAccounts = newAccounts.size > 0;
-		if (hasDingTalkAccounts) {
-			if (!hasDingTalkAccounts) {
-				this.#bridge.stop();
-			}
+		const hasChanges = plan.cronChanged || plan.accountsToAdd.length > 0 || plan.accountsToRemove.length > 0 || plan.accountsToUpdate.length > 0;
+		this.#config = config;
+		if (!hasChanges) {
+			logger.debug("Gateway config reloaded (no changes detected)");
+			await this.#writeStatusFile();
+			return;
 		}
 
-		// Refresh session manager with current bridges
-		this.#sessionManager = new SessionManager({
-			bridges: this.#accountBridges,
-			defaultBridge: hasDingTalkAccounts ? undefined : this.#bridge,
-		});
+		logger.debug("Gateway config reload plan", plan);
+
+		// Execute plan: only restart what changed
+		if (plan.cronChanged) {
+			this.#stopScheduler();
+			await this.#startScheduler();
+		}
+
+		for (const accountId of plan.accountsToRemove) {
+			this.#removeAccount(accountId);
+		}
+		for (const accountId of plan.accountsToAdd) {
+			await this.#addAccount(accountId, newAccounts.get(accountId)!, config);
+		}
+		for (const accountId of plan.accountsToUpdate) {
+			this.#removeAccount(accountId);
+			await this.#addAccount(accountId, newAccounts.get(accountId)!, config);
+		}
+
+		// Only rebuild SessionManager if bridges changed
+		if (plan.accountsToAdd.length > 0 || plan.accountsToRemove.length > 0 || plan.accountsToUpdate.length > 0) {
+			const hasDingTalkAccounts = newAccounts.size > 0;
+			this.#sessionManager = new SessionManager({
+				bridges: this.#accountBridges,
+				defaultBridge: hasDingTalkAccounts ? undefined : this.#bridge,
+			});
+		}
 
 		await this.#writeStatusFile();
 
 		logger.debug("Gateway config reloaded");
 	}
+
 
 	get isRunning(): boolean {
 		return this.#running;
