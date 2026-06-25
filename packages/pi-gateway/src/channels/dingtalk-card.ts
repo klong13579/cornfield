@@ -101,14 +101,21 @@ export interface CardBlock {
 /** A single interactive button inside a `CardBlock.btns` array. The
  * OpenClaw schema's ButtonGroup renders these as clickable controls.
  * `actionType` mirrors the schema's actionType taxonomy:
- *   - `request`  — POST to `requestPath` with `params` as form data
- *   - `url`      — open `url` in a new view
- *   - `copy`     — copy a value to clipboard
- * The gateway currently only emits `request` buttons; the other types
- * are reserved for future use. */
+ *   - `call_back` — Stream mode: DingTalk delivers the click over the
+ *     same authenticated WebSocket the SDK established, on the
+ *     /v1.0/card/instances/callback topic (TOPIC_CARD). The body
+ *     carries `outTrackId` + `cardPrivateData.params`. No HTTP
+ *     callback URL is required.
+ *   - `request`   — HTTP mode: DingTalk POSTs the click to a registered
+ *     HTTP callback URL. NOT used by the gateway (we don't run an
+ *     HTTP server); kept in the type for forward-compat / schema
+ *     overrides.
+ *   - `url`       — open `url` in a new view
+ *   - `copy`      — copy a value to clipboard
+ * The gateway currently only emits `call_back` buttons. */
 export interface CardButton {
 	text: string;
-	actionType: "request" | "url" | "copy";
+	actionType: "call_back" | "request" | "url" | "copy";
 	requestPath?: string;
 	params?: Record<string, string>;
 	url?: string;
@@ -366,9 +373,40 @@ export function buildThinkBlock(thinking: string): CardBlock {
  * `Exec: <name>(<args preview>)` convention; the markdown uses the
  * gray font tag.
  */
+const TOOL_EMOJIS: Record<string, string> = {
+	bash: "⚙️",
+	read: "📄",
+	edit: "✏️",
+	write: "📝",
+	search: "🔍",
+	find: "📁",
+	lsp: "🔗",
+	ast_grep: "🔍",
+	ast_edit: "✏️",
+	grep: "🔍",
+	dws: "📚",
+	mcp: "🔌",
+	web_search: "🌐",
+	puppeteer: "🖱️",
+	python: "🐍",
+	task: "👥",
+	debug: "🐛",
+	notebook: "📓",
+	recipe: "📦",
+};
+
+function getToolEmoji(name: string): string {
+	// Match prefix for dws subcommands (dws doc search, dws chat send, etc.)
+	if (name.startsWith("dws")) return "📚";
+	return TOOL_EMOJIS[name] ?? "🔧";
+}
+
 export function buildToolBlock(call: { name: string; args: unknown }, resultText: string, isError: boolean): CardBlock {
 	const argsPreview = formatToolArgs(call.args);
-	const execLabel = isError ? `Exec: ${call.name}(${argsPreview}) — error` : `Exec: ${call.name}(${argsPreview})`;
+	const emoji = getToolEmoji(call.name);
+	const execLabel = isError
+		? `${emoji} ${call.name}(${argsPreview}) — error`
+		: `${emoji} ${call.name}(${argsPreview})`;
 	const body = resultText || execLabel;
 	const wrapped = `> <font sizeToken=common_h5_text_style__font_size colorTokenV2=common_level2_base_color>${body}</font>`;
 	return { type: BlockType.TOOL, text: ` ${execLabel}\n${body}`, markdown: wrapped };
@@ -403,7 +441,11 @@ export function buildImageBlock(mediaId: string, caption: string): CardBlock {
 export function buildStopBlock(opts: {
 	toolName: string;
 	elapsedMs: number;
-	requestPath: string;
+	/** Kept in the signature for back-compat with any caller that
+	 *  passes a requestPath; the stop button always uses
+	 *  `actionType: "call_back"` (Stream mode) so the value is
+	 *  ignored. Marked optional so existing call sites compile. */
+	requestPath?: string;
 	sessionId: string;
 	buttonText?: string;
 }): CardBlock {
@@ -417,8 +459,15 @@ export function buildStopBlock(opts: {
 		btns: [
 			{
 				text: buttonText,
-				actionType: "request",
-				requestPath: opts.requestPath,
+				// Stream-mode callback: DingTalk delivers the click over
+				// the WebSocket on /v1.0/card/instances/callback. The
+				// channel's TOPIC_CARD listener picks it up, parses
+				// outTrackId + cardPrivateData.params, and routes to
+				// the gateway's ActionRegistry → bridge.abort().
+				// Do NOT use `actionType: "request"` here — that mode
+				// requires an HTTP callback URL, which the gateway
+				// doesn't run.
+				actionType: "call_back",
 				params: {
 					type: "stop",
 					sessionId: opts.sessionId,
@@ -512,7 +561,14 @@ export function cardParamMapFromData(data: Partial<CardData>, flowStatus: string
 		quoteContent: data.quoteContent ?? "",
 		statusLine: data.statusLine ?? "",
 		copy_content: data.copyContent ?? "",
-		hasAction: JSON.stringify(data.hasAction ?? false),
+		// Default to true: OpenClaw's 675cde2f schema gates the top
+		// stop button (the red "中止" affordance) on `isTrue(hasAction)`.
+		// Without this, the user sees only our type-4 block which the
+		// schema renders as the fallback text "当前客户端环境不支
+		// 持按钮组组件" with no clickable button. Only the explicit
+		// `failAICard` path overrides this to hide the stop button
+		// when the card has errored.
+		hasAction: JSON.stringify(data.hasAction ?? true),
 		version: JSON.stringify(data.version ?? 1),
 		config: JSON.stringify({ autoLayout: true }),
 	};
@@ -526,7 +582,14 @@ export function cardParamMapForStreamStart(content: string, blockList: CardBlock
 		quoteContent: "",
 		statusLine: "",
 		copy_content: "",
-		hasAction: JSON.stringify(false),
+		// Keep hasAction: true on transition to INPUTING. OpenClaw's
+		// schema's top stop button (the red "中止" affordance) is
+		// gated on `isTrue(hasAction)` and only renders when this
+		// flag is true. Setting it false here was a bug — it hid
+		// the only working stop button the schema offers, leaving
+		// users with just our type-4 block which the schema renders
+		// as the fallback text "当前客户端环境不支持按钮组组件".
+		hasAction: JSON.stringify(true),
 		version: JSON.stringify(1),
 		config: JSON.stringify({ autoLayout: true }),
 	};
@@ -561,25 +624,35 @@ export async function createAICardForTarget(
 			quoteContent: options.quoteContent ?? "",
 			statusLine: options.statusLine ?? "",
 			copyContent: "",
-			hasAction: false,
+			// OpenClaw's 675cde2f schema gates the top stop button on
+			// `hasAction: true` (visibility = isTrue(hasAction) on the
+			// header's right column). Setting it false here hides the
+			// ONLY actually-clickable stop affordance in this schema —
+			// type-4 blocks in `blockList` are rendered as a fallback
+			// "当前客户端环境不支持按钮组组件" message with no button.
+			// Always expose the stop button so the user can interrupt
+			// the agent at any time, not just after the long-task
+			// watcher has fired.
+			hasAction: true,
 			version: 1,
 		};
 
 		// 1. Create card instance
+		const createBody = {
+			cardTemplateId: AI_CARD_TEMPLATE_ID,
+			outTrackId: cardInstanceId,
+			cardData: { cardParamMap: cardParamMapFromData(initialData, AICardStatus.PROCESSING) },
+			callbackType: "STREAM",
+			imGroupOpenSpaceModel: { supportForward: true },
+			imRobotOpenSpaceModel: { supportForward: true },
+		};
 		const createResp = await fetch(`${DINGTALK_API}/v1.0/card/instances`, {
 			method: "POST",
 			headers: {
 				"x-acs-dingtalk-access-token": token,
 				"Content-Type": "application/json",
 			},
-			body: JSON.stringify({
-				cardTemplateId: AI_CARD_TEMPLATE_ID,
-				outTrackId: cardInstanceId,
-				cardData: { cardParamMap: cardParamMapFromData(initialData, AICardStatus.PROCESSING) },
-				callbackType: "STREAM",
-				imGroupOpenSpaceModel: { supportForward: true },
-				imRobotOpenSpaceModel: { supportForward: true },
-			}),
+			body: JSON.stringify(createBody),
 		});
 
 		if (!createResp.ok) {

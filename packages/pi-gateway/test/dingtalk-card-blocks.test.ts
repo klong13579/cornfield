@@ -49,10 +49,10 @@ describe("buildThinkBlock", () => {
 });
 
 describe("buildToolBlock", () => {
-	test("emits Exec: <name>(<args>) prefix and gray font tag", () => {
+	test("emits emoji <name>(<args>) prefix and gray font tag", () => {
 		const block = buildToolBlock({ name: "read", args: { path: "/tmp/x" } }, "file contents", false);
 		expect(block.type).toBe(2);
-		expect(block.text).toContain("Exec: read");
+		expect(block.text).toContain("📄 read");
 		expect(block.text).toContain("file contents");
 		expect(block.markdown).toContain("common_level2_base_color");
 	});
@@ -60,7 +60,7 @@ describe("buildToolBlock", () => {
 	test("flags isError in the prefix and replaces body when result is empty", () => {
 		const block = buildToolBlock({ name: "bash", args: "rm -rf /" }, "", true);
 		expect(block.text).toContain("— error");
-		expect(block.text).toContain("Exec: bash(rm -rf /)");
+		expect(block.text).toContain("⚙️ bash(rm -rf /)");
 	});
 
 	test("truncates long args preview to 60 chars", () => {
@@ -87,11 +87,10 @@ describe("buildImageBlock", () => {
 });
 
 describe("buildStopBlock", () => {
-	test("emits type-4 block with single stop button carrying request params", () => {
+	test("emits type-4 block with a single call_back stop button (Stream mode)", () => {
 		const block = buildStopBlock({
 			toolName: "bash",
 			elapsedMs: 240_000, // 4 min
-			requestPath: "/dingtalk/action",
 			sessionId: "sess-123",
 		});
 		expect(block.type).toBe(BlockType.STOP);
@@ -100,8 +99,11 @@ describe("buildStopBlock", () => {
 		expect(block.btns).toHaveLength(1);
 		const btn = block.btns?.[0];
 		expect(btn?.text).toBe("停止");
-		expect(btn?.actionType).toBe("request");
-		expect(btn?.requestPath).toBe("/dingtalk/action");
+		// Stream-mode callback: DingTalk delivers the click over the
+		// WebSocket on /v1.0/card/instances/callback. The actionType
+		// `request` would route to an HTTP endpoint we don't run.
+		expect(btn?.actionType).toBe("call_back");
+		expect(btn?.requestPath).toBeUndefined();
 		expect(btn?.params).toEqual({
 			type: "stop",
 			sessionId: "sess-123",
@@ -151,9 +153,7 @@ describe("CardBlock btns serialization", () => {
 		);
 		const parsed = JSON.parse(map.blockList);
 		expect(parsed).toHaveLength(1);
-		expect(parsed[0].btns).toEqual([
-			{ text: "停止", actionType: "request", requestPath: "/dingtalk/action" },
-		]);
+		expect(parsed[0].btns).toEqual([{ text: "停止", actionType: "request", requestPath: "/dingtalk/action" }]);
 		expect(JSON.parse(map.hasAction)).toBe(true);
 	});
 });
@@ -177,9 +177,7 @@ describe("cardParamMapFromData", () => {
 		expect(map.quoteContent).toBe("triggering message");
 		expect(map.statusLine).toBe("model · agent");
 		expect(map.copy_content).toBe("answer text");
-		expect(JSON.parse(map.blockList)).toEqual([
-			{ type: 0, text: "answer text", markdown: "answer text" },
-		]);
+		expect(JSON.parse(map.blockList)).toEqual([{ type: 0, text: "answer text", markdown: "answer text" }]);
 		expect(JSON.parse(map.hasAction)).toBe(false);
 		expect(JSON.parse(map.version)).toBe(1);
 	});
@@ -196,13 +194,9 @@ describe("cardParamMapFromData", () => {
 
 describe("cardParamMapForStreamStart", () => {
 	test("uses INPUTING status and includes content + blockList", () => {
-		const map = cardParamMapForStreamStart("hello", [
-			{ type: 0, text: "hello", markdown: "hello" },
-		]);
+		const map = cardParamMapForStreamStart("hello", [{ type: 0, text: "hello", markdown: "hello" }]);
 		expect(map.flowStatus).toBe("2");
 		expect(map.content).toBe("hello");
-		expect(JSON.parse(map.blockList)).toEqual([
-			{ type: 0, text: "hello", markdown: "hello" },
-		]);
+		expect(JSON.parse(map.blockList)).toEqual([{ type: 0, text: "hello", markdown: "hello" }]);
 	});
 });
