@@ -315,13 +315,11 @@ describe("AgentBridge image attachment forwarding", () => {
 
 			const log = await fake.readLog();
 			expect(log).toHaveLength(1);
-			// Non-image attachments should NOT produce ImageContent
 			expect(log[0].imageCount).toBe(0);
 			expect(log[0].images).toBeNull();
-			// But the message should describe the attachment
-			expect(log[0].message).toContain("file");
+			// PDF attachment should be described (fake 8-byte buffer has no extractable text)
+			expect(log[0].message).toContain("PDF");
 			expect(log[0].message).toContain("report.pdf");
-			expect(log[0].message).toContain("application/pdf");
 		} finally {
 			bridge.stop();
 			await fake.cleanup();

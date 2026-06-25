@@ -50,6 +50,16 @@ import {
 	streamAICard,
 } from "./dingtalk-card";
 import { formatDingTalkChrome, formatDingTalkReply } from "./dingtalk-formatter";
+import {
+	classifyFile,
+	extractExtension,
+	type FileKind,
+	isFileSizeAllowed,
+	type DingTalkMediaType,
+	mediaTypeForKind,
+	unsupportedFallbackMarkdown,
+	warnUnsupportedFile,
+} from "./dingtalk-files";
 import { uploadMedia } from "./dingtalk-media";
 
 type PermissionPolicy = "open" | "allowlist" | "closed";

@@ -9,6 +9,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import * as zlib from "node:zlib";
 import { logger } from "@oh-my-pi/pi-utils";
 import type { DingTalkConfig } from "../types";
 import type { InboundAttachment } from "../types";
@@ -109,6 +110,67 @@ function resolveMimeType(buffer: Uint8Array, declared: string | undefined): stri
 	if (sniffed) return sniffed;
 	if (declared && declared !== "application/octet-stream") return declared;
 	return declared ?? "application/octet-stream";
+}
+/**
+ * Extract text content from a PDF buffer.
+ *
+ * Handles both uncompressed and FlateDecode-compressed streams.
+ * Extracts text from Tj and TJ operators inside BT...ET blocks.
+ * Returns empty string for scanned PDFs (image-only) or parse failures.
+ */
+export function extractPdfText(buffer: Uint8Array): string {
+	try {
+		const raw = Buffer.from(buffer).toString("latin1");
+		const texts: string[] = [];
+
+		// Find all stream...endstream blocks
+		const streamRegex = /stream\r?\n([\s\S]*?)endstream/g;
+		let match;
+		while ((match = streamRegex.exec(raw)) !== null) {
+			let streamData = match[1];
+
+			// Try FlateDecode decompression
+			try {
+				const compressed = Buffer.from(streamData, "binary");
+				streamData = zlib.inflateSync(compressed).toString("latin1");
+			} catch {
+				// Not compressed — use as-is
+			}
+
+			// Extract text from Tj operators: (text) Tj
+			const tjRegex = /\(([^)]*)\)\s*Tj/g;
+			let tjMatch;
+			while ((tjMatch = tjRegex.exec(streamData)) !== null) {
+				texts.push(decodePdfString(tjMatch[1]));
+			}
+
+			// Extract text from TJ arrays: [(text1) -10 (text2)] TJ
+			const tjArrayRegex = /\[([^\]]*)\]\s*TJ/g;
+			let tjArrayMatch;
+			while ((tjArrayMatch = tjArrayRegex.exec(streamData)) !== null) {
+				const parts = tjArrayMatch[1].match(/\(([^)]*)\)/g);
+				if (parts) {
+					texts.push(parts.map(p => decodePdfString(p.slice(1, -1))).join(""));
+				}
+			}
+		}
+
+		const result = texts.join(" ").replace(/\s+/g, " ").trim();
+		return result;
+	} catch {
+		return "";
+	}
+}
+
+/** Decode PDF string escapes (e.g. \( \n \\ \r \t). */
+function decodePdfString(s: string): string {
+	return s
+		.replaceAll("\\\\", "\\")
+		.replaceAll("\\(", "(")
+		.replaceAll("\\)", ")")
+		.replaceAll("\\n", "\n")
+		.replaceAll("\\r", "\r")
+		.replaceAll("\\t", "\t");
 }
 
 /**

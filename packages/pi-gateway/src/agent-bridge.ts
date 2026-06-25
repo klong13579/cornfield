@@ -19,6 +19,7 @@ import type { AssistantMessage, ImageContent, ToolCall, ToolResultMessage, Usage
 import { logger } from "@oh-my-pi/pi-utils";
 import type { FileSink } from "bun";
 import { resolveCredentialEnvVars } from "./credential-resolver";
+import { extractPdfText } from "./channels/dingtalk-media";
 import type {
 	AgentResponseMeta,
 	AgentResponseToolCall,
@@ -1480,6 +1481,8 @@ export class AgentBridge {
 		// msgtype="file" — the `kind` will be "file" but mimeType will
 		// be "image/png" etc. Any attachment whose MIME starts with
 		// "image/" is treated as an inline image.
+		// PDF attachments get text extracted and included in the prompt.
+		const attachmentTexts: string[] = [];
 		if (msg.attachments) {
 			for (const att of msg.attachments) {
 				if (att.mimeType.startsWith("image/")) {
@@ -1488,9 +1491,31 @@ export class AgentBridge {
 						data: Buffer.from(att.data).toString("base64"),
 						mimeType: att.mimeType,
 					});
+				} else if (att.mimeType === "application/pdf") {
+					const name = att.filename ?? "document.pdf";
+					const pdfText = extractPdfText(att.data);
+					if (pdfText) {
+						attachmentTexts.push(`[PDF: ${name}]
+${pdfText.slice(0, 10000)}`);
+					} else {
+						attachmentTexts.push(`[PDF: ${name} (${formatBytes(att.size)}) — scanned PDF, no extractable text]`);
+					}
 				}
 			}
 		}
+
+		// If we extracted text from PDFs, include it in the prompt
+		if (attachmentTexts.length > 0) {
+			const baseText = msg.content.type === "text"
+				? msg.content.text
+				: msg.content.type === "markdown"
+					? msg.content.markdown
+					: msg.content.type === "voice" && msg.content.text
+						? msg.content.text
+						: "";
+			return { text: [baseText, ...attachmentTexts].filter(Boolean).join("\n\n"), images };
+		}
+
 
 		if (msg.content.type === "text") return { text: msg.content.text, images };
 		if (msg.content.type === "markdown") return { text: msg.content.markdown, images };
