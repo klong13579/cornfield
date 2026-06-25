@@ -374,6 +374,8 @@ export interface DingtalkAccountConfig {
 	model?: string;
 	/** Optional per-account timeout in ms (overrides agent.timeoutMs) */
 	timeoutMs?: number;
+	/** Tool access policy: deny these tool names for this account's agent. */
+	deniedTools?: string[];
 }
 
 export interface DingTalkConfig extends ChannelConfig {

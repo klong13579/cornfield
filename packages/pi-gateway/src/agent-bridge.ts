@@ -141,6 +141,8 @@ export interface AgentBridgeOptions {
 	 * is reached (default: 300000 = 5 min, overridable via
 	 * `DINGTALK_LONG_TASK_PROGRESS_PING_MS` env var). */
 	progressPingIntervalMs?: number;
+	/** Tool names to deny for this agent. Applied via setDisabledToolsets on start. */
+	deniedTools?: string[];
 }
 
 /** Inline-shape RPC event (subset of @oh-my-pi/pi-agent AgentEvent). */
@@ -325,8 +327,28 @@ export class AgentBridge {
 
 	async start(): Promise<void> {
 		await this.#spawnAndWaitReady();
+		this.#applyDeniedTools();
 		this.#runBootCheck();
 	}
+
+	/**
+	 * Fire-and-forget: apply deniedTools (from agent config) via
+	 * setDisabledToolsets so this agent can't use those tools.
+	 * Errors are logged but never thrown — tool restriction is
+	 * best-effort and must not block startup.
+	 */
+	#applyDeniedTools(): void {
+		const denied = this.#options.deniedTools;
+		if (!denied || denied.length === 0) return;
+
+		this.setDisabledToolsets(denied).catch(err => {
+			logger.warn("[AgentBridge] Failed to apply deniedTools", {
+				denied,
+				error: err instanceof Error ? err.message : String(err),
+			});
+		});
+	}
+
 
 
 	/**

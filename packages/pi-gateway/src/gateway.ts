@@ -75,6 +75,7 @@ export function createAccountBridgeOptions(
 		model: account.model ?? agentConfig?.model,
 		timeoutMs: account.timeoutMs ?? agentConfig?.timeoutMs,
 		cwd: agentDir,
+		deniedTools: account.deniedTools,
 	};
 }
 
