@@ -15,6 +15,7 @@
  * Outbound sends via sessionWebhook HTTP POST (instant, within Stream session lifetime).
  */
 
+import { $ } from "bun";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -34,6 +35,7 @@ import type {
 } from "../types";
 import {
 	type AICardInstance,
+	type AICardTarget,
 	BlockType,
 	buildAnswerBlock,
 	buildImageBlock,
@@ -838,7 +840,23 @@ export class DingTalkChannel extends BaseChannel {
 		// We scan segmentText (last segment only) not meta.text
 		// (full cumulative) because earlier segments were already
 		// finalized in their own cards.
-		const dataUris = extractDataUriImages(segmentText);
+		//
+		// Video pipeline: extract videos from segmentText, upload each,
+		// and send as standalone `sampleVideo` messages after the card.
+		// Videos cannot go into the card blockList (the OpenClaw schema has
+		// no video block type), so they are delivered as separate robot
+		// messages in the same conversation immediately after the card.
+		//
+		// Video markdown is stripped from the text BEFORE image extraction
+		// so that `extractRemoteUrlImages` doesn't pick up video URLs as
+		// broken image blocks.
+		const localVideos = extractLocalFileVideos(segmentText);
+		const remoteVideos = extractRemoteUrlVideos(segmentText);
+
+		// Strip videos from the text used for image extraction + answer.
+		const textWithoutVideos = stripVideoDirectives(segmentText);
+
+		const dataUris = extractDataUriImages(textWithoutVideos);
 		for (const match of dataUris) {
 			const tmp = await writeDataUriToTempFile(match.dataUri, match.mimeType);
 			if (!tmp) continue;
@@ -854,7 +872,7 @@ export class DingTalkChannel extends BaseChannel {
 			blocks.push(buildImageBlock(upload.mediaId, match.alt));
 		}
 
-		const localFiles = extractLocalFileImages(segmentText);
+		const localFiles = extractLocalFileImages(textWithoutVideos);
 		for (const match of localFiles) {
 			try {
 				await fs.promises.access(match.path);
@@ -876,7 +894,7 @@ export class DingTalkChannel extends BaseChannel {
 			blocks.push(buildImageBlock(upload.mediaId, match.alt));
 		}
 
-		const remoteUrls = extractRemoteUrlImages(segmentText);
+		const remoteUrls = extractRemoteUrlImages(textWithoutVideos);
 		for (const match of remoteUrls) {
 			const tmp = await downloadRemoteUrlToTempFile(match.url);
 			if (!tmp) continue;
@@ -895,8 +913,9 @@ export class DingTalkChannel extends BaseChannel {
 
 		// Strip all image markdown (data URI + local file + remote URL) from the
 		// answer text so the card body shows only text — images are
-		// delivered as type-3 blocks above.
-		const strippedSegText = stripImageDirectives(segmentText);
+		// delivered as type-3 blocks above. Video markdown was already
+		// stripped from `textWithoutVideos`.
+		const strippedSegText = stripImageDirectives(textWithoutVideos);
 		const segMeta: AgentResponseMeta = { ...meta, text: strippedSegText, rawText: strippedSegText };
 		const chrome = formatDingTalkChrome({
 			meta: segMeta,
@@ -940,6 +959,38 @@ export class DingTalkChannel extends BaseChannel {
 		}
 
 		await cleanupTmpFiles(tmpFiles);
+
+		// Video pipeline: send each extracted video as a standalone
+		// `sampleVideo` message after the card. Videos were extracted from
+		// `segmentText` above (before image extraction) and their markdown
+		// was stripped from the card body via `textWithoutVideos`.
+		for (const video of localVideos) {
+			try {
+				await fs.promises.access(video.path);
+			} catch {
+				logger.warn("[DingTalk] local video file not found, skipping", {
+					path: video.path,
+					accountId: this.#accountId,
+				});
+				continue;
+			}
+			await this.#sendVideoStandalone(target, video.path, config);
+		}
+
+		const videoTmpFiles: string[] = [];
+		for (const video of remoteVideos) {
+			const tmp = await downloadRemoteUrlToTempFile(video.url);
+			if (!tmp) {
+				logger.warn("[DingTalk] remote video download failed, skipping", {
+					url: video.url.slice(0, 200),
+					accountId: this.#accountId,
+				});
+				continue;
+			}
+			videoTmpFiles.push(tmp);
+			await this.#sendVideoStandalone(target, tmp, config);
+		}
+		await cleanupTmpFiles(videoTmpFiles);
 
 		// The card itself is the user-visible reply. We still return a
 		// markdown OutboundMessage for the gateway's own bookkeeping /
@@ -1309,6 +1360,113 @@ export class DingTalkChannel extends BaseChannel {
 		}
 		logger.debug("[DingTalk] group message sent via OAuth", { conversationId, accountId: this.#accountId });
 	}
+
+	/**
+	 * Send a standalone video message via the DingTalk OAuth API.
+	 *
+	 * Videos cannot be rendered inside the AI Card blockList (the OpenClaw
+	 * schema has no video block type). Instead, after `finishAICard` completes,
+	 * the channel sends each extracted video as a `sampleVideo` robot message
+	 * that appears in the same conversation immediately after the card.
+	 *
+	 * Requires: video file already on disk (local path or downloaded from
+	 * a remote URL). The method uploads the video, extracts a cover frame
+	 * via ffmpeg, gets duration via ffprobe, and sends the `sampleVideo`
+	 * message via `oToMessages/batchSend` (DM) or `groupMessages/send` (group).
+	 */
+	async #sendVideoStandalone(
+		target: AICardTarget,
+		videoPath: string,
+		config: DingTalkConfig,
+	): Promise<void> {
+		const token = await this.#getOAuthToken();
+		const robotCode = this.#getRobotCode();
+		const videoType = getVideoType(videoPath);
+
+		// 1. Upload video → videoMediaId
+		const videoUpload = await uploadMedia(videoPath, "video", config);
+		if (!videoUpload) {
+			logger.warn("[DingTalk] video upload failed; skipping standalone video message", {
+				path: videoPath,
+				accountId: this.#accountId,
+			});
+			return;
+		}
+
+		// 2. Extract cover frame + upload → picMediaId (best-effort)
+		let picMediaId: string | undefined;
+		const coverPath = await extractVideoCoverFrame(videoPath);
+		if (coverPath) {
+			const coverUpload = await uploadMedia(coverPath, "image", config);
+			try { await fs.promises.unlink(coverPath); } catch {}
+			if (coverUpload) {
+				picMediaId = coverUpload.mediaId;
+			}
+		}
+
+		// 3. Get duration (best-effort, 0 if ffprobe unavailable)
+		const duration = await getVideoDuration(videoPath);
+
+		// 4. Build sampleVideo msgParam
+		const msgParam = JSON.stringify({
+			duration: String(duration),
+			videoMediaId: videoUpload.mediaId,
+			videoType,
+			...(picMediaId ? { picMediaId } : {}),
+		});
+
+		logger.debug("[DingTalk] sending standalone video", {
+			videoPath,
+			duration,
+			videoType,
+			hasCover: !!picMediaId,
+			accountId: this.#accountId,
+		});
+
+		// 5. Send via OAuth API (DM or group)
+		let res: Response;
+		if (target.type === "user") {
+			res = await fetch("https://api.dingtalk.com/v1.0/robot/oToMessages/batchSend", {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+					"x-acs-dingtalk-access-token": token,
+				},
+				body: JSON.stringify({
+					robotCode,
+					userIds: [target.userId],
+					msgKey: "sampleVideo",
+					msgParam,
+				}),
+			});
+		} else {
+			res = await fetch("https://api.dingtalk.com/v1.0/robot/groupMessages/send", {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+					"x-acs-dingtalk-access-token": token,
+				},
+				body: JSON.stringify({
+					robotCode,
+					openConversationId: target.openConversationId,
+					msgKey: "sampleVideo",
+					msgParam,
+				}),
+			});
+		}
+
+		if (!res.ok) {
+			const err = await res.text();
+			logger.error("[DingTalk] standalone video send failed", {
+				status: res.status,
+				body: err,
+				accountId: this.#accountId,
+			});
+		} else {
+			logger.debug("[DingTalk] standalone video sent", { accountId: this.#accountId });
+		}
+	}
+
 
 	// ═══════════════════════════════════════════════════════════════════
 	// Heartbeat & Keepalive
@@ -1753,6 +1911,14 @@ export class DingTalkChannel extends BaseChannel {
 				return;
 			}
 
+			// Download media attachments (images/files/videos) before forwarding.
+			// Fail-soft: download errors produce an empty array and the message
+			// still reaches the agent as text.
+			if (this.#config && inbound.content.type !== "text" && inbound.content.type !== "markdown") {
+				const { resolveInboundAttachments } = await import("./dingtalk-media");
+				inbound.attachments = await resolveInboundAttachments(inbound, this.#config);
+			}
+
 			await this.handleInbound(inbound);
 			this.#processedCount++;
 		} finally {
@@ -1950,4 +2116,126 @@ async function downloadRemoteUrlToTempFile(url: string): Promise<string | null> 
 		});
 		return null;
 	}
+}
+
+
+// ════════════════════════════════════════════════════════════════════════
+// Video extraction helpers (standalone video message pipeline)
+// ════════════════════════════════════════════════════════════════════════
+
+/** A local file video referenced by `![alt](file:///path)` or `![alt](/abs/path)`. */
+interface LocalFileVideo {
+	/** The original markdown image token as it appeared in text. */
+	raw: string;
+	/** Absolute filesystem path to the video. */
+	path: string;
+	/** alt text from the markdown image. */
+	alt: string;
+}
+
+/**
+ * Match `![alt](file:///path)` and `![alt](/abs/path)` for video files.
+ * Mirrors LOCAL_FILE_IMAGE_RE but with video extensions.
+ */
+const LOCAL_FILE_VIDEO_RE = /!\[([^\]]*)\]\((file:\/\/[^)]+|\/[^)]+\.(?:mp4|mov|webm|avi|mkv))\)/gi;
+/**
+ * Scan assistant text for markdown videos pointing to local files.
+ * Matches `![alt](file:///abs/path.mp4)` and `![alt](/abs/path.mp4)`.
+ */
+export function extractLocalFileVideos(text: string): LocalFileVideo[] {
+	const out: LocalFileVideo[] = [];
+	for (const match of text.matchAll(LOCAL_FILE_VIDEO_RE)) {
+		const rawUrl = match[2];
+		const filePath = rawUrl.startsWith("file://") ? decodeURIComponent(rawUrl.slice("file://".length)) : rawUrl;
+		out.push({ raw: match[0], path: filePath, alt: match[1] ?? "" });
+	}
+	return out;
+}
+
+/** A remote URL video referenced by `![alt](https://...)`. */
+interface RemoteUrlVideo {
+	/** The original markdown image token as it appeared in text. */
+	raw: string;
+	/** The full HTTP(S) URL. */
+	url: string;
+	/** alt text from the markdown image. */
+	alt: string;
+}
+
+/**
+ * Match `![alt](https://...)` for video files only.
+ * Query strings are included. Non-video URLs are ignored.
+ */
+const REMOTE_URL_VIDEO_RE = /!\[([^\]]*)\]\((https?:\/\/[^)]+\.(?:mp4|mov|webm|avi|mkv)(?:\?[^)]*)?)\)/gi;
+/**
+ * Scan assistant text for markdown videos pointing to remote HTTP(S) URLs.
+ * DingTalk cards cannot render videos in blockList — videos are sent as
+ * standalone `sampleVideo` messages after the card finishes.
+ */
+export function extractRemoteUrlVideos(text: string): RemoteUrlVideo[] {
+	const out: RemoteUrlVideo[] = [];
+	for (const match of text.matchAll(REMOTE_URL_VIDEO_RE)) {
+		out.push({ raw: match[0], url: match[2], alt: match[1] ?? "" });
+	}
+	return out;
+}
+
+/**
+ * Strip all video markdown (local file + remote URL) from answer text
+ * so the card body doesn't render broken video placeholders. The actual
+ * videos are delivered as standalone `sampleVideo` messages.
+ */
+export function stripVideoDirectives(text: string): string {
+	let stripped = text.replace(LOCAL_FILE_VIDEO_RE, "");
+	stripped = stripped.replace(REMOTE_URL_VIDEO_RE, "");
+	return stripped.replace(/\n{3,}/g, "\n\n").trim();
+}
+
+/**
+ * Get video duration in seconds using ffprobe. Returns 0 on failure
+ * (the DingTalk API accepts 0 — the video just won't show a duration badge).
+ */
+async function getVideoDuration(filePath: string): Promise<number> {
+	try {
+		const result = await $`ffprobe -v quiet -show_entries format=duration -of csv=p=0 ${filePath}`.quiet().nothrow();
+		if (result.exitCode === 0) {
+			const parsed = parseFloat(result.text().trim());
+			return Number.isFinite(parsed) ? Math.round(parsed) : 0;
+		}
+	} catch {
+		// ffprobe not available or file unreadable
+	}
+	return 0;
+}
+
+/**
+ * Extract a cover frame from a video at ~1s offset using ffmpeg.
+ * Returns the temp image path (caller must clean up) or null on failure.
+ */
+async function extractVideoCoverFrame(filePath: string): Promise<string | null> {
+	const tmpPath = path.join(
+		os.tmpdir(),
+		`omp-video-cover-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.png`,
+	);
+	try {
+		const result = await $`ffmpeg -y -ss 1 -i ${filePath} -frames:v 1 -f image2 ${tmpPath}`.quiet().nothrow();
+		if (result.exitCode === 0) {
+			// Verify the file was actually written
+			await fs.promises.access(tmpPath);
+			return tmpPath;
+		}
+	} catch {
+		// ffmpeg not available or extraction failed
+	}
+	try { await fs.promises.unlink(tmpPath); } catch {}
+	return null;
+}
+
+/**
+ * Derive the DingTalk videoType from a file path extension.
+ * DingTalk currently only supports "mp4"; non-mp4 files are sent as
+ * mp4 anyway (the API will reject if the container is incompatible).
+ */
+function getVideoType(_filePath: string): string {
+	return "mp4";
 }
