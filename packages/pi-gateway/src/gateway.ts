@@ -285,6 +285,10 @@ export class Gateway {
 	#schedulerFileStore?: SchedulerFileStore;
 	#cronService?: CronService;
 	#watchInterval?: NodeJS.Timeout;
+	/** Periodic health check: restart bridges stuck in circuit-open. */
+	#healthInterval?: NodeJS.Timeout;
+	/** Maps accountId → epoch ms of last circuit-open restart (anti-storm). */
+	#circuitRestartCooldown = new Map<string, number>();
 	/**
 	 * Maps DingTalk AI Card instance IDs to the session / bridge that
 	 * owns the card, so a TOPIC_CARD action callback (user clicked a
@@ -362,7 +366,12 @@ export class Gateway {
 		// doesn't grow unbounded. The registry is bounded by the rate
 		// of new cards (~1 per inbound message) so a 5 min cadence is
 		// plenty.
-		setInterval(() => this.#actionRegistry.expire(), 5 * 60_000).unref?.();
+	setInterval(() => this.#actionRegistry.expire(), 5 * 60_000).unref?.();
+
+		// Health check: every 60s, if a bridge's circuit breaker has been
+		// open for more than 5 minutes, restart it. Prevents a permanently
+		// stuck bridge from silently swallowing all messages.
+		this.#healthInterval = setInterval(() => this.#checkBridgeHealth(), 60_000).unref?.();
 
 		this.#running = true;
 		logger.debug("Gateway started");
@@ -533,6 +542,11 @@ export class Gateway {
 		await this.#registry.disconnectAll();
 		this.#stopScheduler();
 
+		if (this.#healthInterval) {
+			clearInterval(this.#healthInterval);
+			this.#healthInterval = undefined;
+		}
+
 		const drained = await this.#sessionManager?.waitForAllDrained(30_000);
 		if (drained === false) {
 			logger.warn("Gateway shutdown timed out waiting for session queues", {
@@ -562,6 +576,53 @@ export class Gateway {
 		} catch {
 			/* non-fatal */
 		}
+	}
+
+	/**
+	 * Periodic health check: if a bridge's circuit breaker has been open
+	 * for more than CIRCUIT_OPEN_THRESHOLD_MS, restart the bridge to
+	 * recover from a stuck state. A 10-minute cooldown per bridge prevents
+	 * restart storms when the underlying problem persists.
+	 */
+	async #checkBridgeHealth(): Promise<void> {
+		const CIRCUIT_OPEN_THRESHOLD_MS = 5 * 60_000;
+		const RESTART_COOLDOWN_MS = 10 * 60_000;
+		const now = Date.now();
+
+		const checkOne = async (accountId: string, bridge: AgentBridge) => {
+			const snapshot = bridge.getSnapshot();
+			if (snapshot.circuitState !== "open") return;
+
+			const openedAt = snapshot.circuitOpenedAt ?? 0;
+			if (openedAt === 0 || now - openedAt < CIRCUIT_OPEN_THRESHOLD_MS) return;
+
+			// Anti-storm: skip if we restarted this bridge recently.
+			const lastRestart = this.#circuitRestartCooldown.get(accountId) ?? 0;
+			if (now - lastRestart < RESTART_COOLDOWN_MS) return;
+
+			logger.warn("Bridge circuit open too long, restarting", {
+				accountId,
+				circuitOpenedAt: openedAt,
+				openDurationMs: now - openedAt,
+			});
+			this.#circuitRestartCooldown.set(accountId, now);
+
+			try {
+				bridge.stop();
+				await bridge.start();
+				logger.info("Bridge restarted after circuit-open recovery", { accountId });
+			} catch (err) {
+				logger.error("Failed to restart bridge after circuit-open", {
+					accountId,
+					error: err instanceof Error ? err.message : String(err),
+				});
+			}
+		};
+
+		await Promise.all([
+			...Array.from(this.#accountBridges.entries()).map(([id, b]) => checkOne(id, b)),
+			this.#bridge.isRunning ? checkOne("__default__", this.#bridge) : Promise.resolve(),
+		]);
 	}
 
 	async reload(config: GatewayConfig): Promise<void> {
