@@ -43,9 +43,21 @@ function renderTable<T extends Record<string, string>>(rows: T[], headers: T): v
  * Only models confirmed by dynamic discovery are shown. For providers whose
  * discovery fetch failed (e.g. invalid/expired credentials), nothing is shown
  * for that provider.
+ *
+ * When `enabledModelIds` is provided (non-empty), only models whose
+ * `provider/id` appears in the set are listed. This makes --list-models
+ * match the model selector's enabledModels allowlist.
  */
-export async function listModels(modelRegistry: ModelRegistry, searchPattern?: string): Promise<void> {
-	const models = modelRegistry.getVerifiedAvailable();
+export async function listModels(
+	modelRegistry: ModelRegistry,
+	searchPattern?: string,
+	enabledModelIds?: Set<string>,
+): Promise<void> {
+	let models = modelRegistry.getVerifiedAvailable();
+
+	if (enabledModelIds && enabledModelIds.size > 0) {
+		models = models.filter(m => enabledModelIds.has(`${m.provider}/${m.id}`));
+	}
 
 	if (models.length === 0) {
 		writeLine("No models available. Set API keys in environment variables.");

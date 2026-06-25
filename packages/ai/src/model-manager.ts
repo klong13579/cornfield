@@ -6,6 +6,7 @@ import { isRecord } from "./utils";
 
 const DEFAULT_CACHE_TTL_MS = 2 * 60 * 60 * 1000;
 const NON_AUTHORITATIVE_RETRY_MS = 5 * 60 * 1000;
+const DISCOVERY_TIMEOUT_MS = 15_000;
 
 /**
  * Controls when dynamic endpoint models should be fetched.
@@ -145,9 +146,7 @@ export async function resolveProviderModels<TApi extends Api = Api, TModelsDevPa
 		models,
 		stale: !dynamicAuthoritative,
 		dynamicModelIds:
-			shouldFetchFromNetwork && dynamicFetchSucceeded
-				? dynamicModels.map(model => model.id)
-				: undefined,
+			shouldFetchFromNetwork && dynamicFetchSucceeded ? dynamicModels.map(model => model.id) : undefined,
 	};
 }
 
@@ -159,7 +158,10 @@ async function fetchModelsDev<TApi extends Api, TModelsDevPayload>(
 	}
 
 	try {
-		const payload = await options.modelsDev.fetch();
+		const payload = await Promise.race([options.modelsDev.fetch(), Bun.sleep(DISCOVERY_TIMEOUT_MS).then(() => null)]);
+		if (payload === null) {
+			return null;
+		}
 		return normalizeModelList<TApi>(options.modelsDev.map(payload, options.providerId));
 	} catch {
 		return null;
@@ -170,7 +172,7 @@ async function fetchDynamicModels<TApi extends Api>(
 	fetcher: () => Promise<readonly Model<TApi>[] | null>,
 ): Promise<Model<TApi>[] | null> {
 	try {
-		const models = await fetcher();
+		const models = await Promise.race([fetcher(), Bun.sleep(DISCOVERY_TIMEOUT_MS).then(() => null)]);
 		if (models === null) {
 			return null;
 		}

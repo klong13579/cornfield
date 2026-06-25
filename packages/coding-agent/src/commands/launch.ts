@@ -116,6 +116,9 @@ export default class Index extends Command {
 		"list-models": Flags.string({
 			description: "List available models (with optional fuzzy search)",
 		}),
+		all: Flags.boolean({
+			description: "With --list-models: show all available models, ignoring enabledModels filter",
+		}),
 		"no-title": Flags.boolean({
 			description: "Disable title auto-generation",
 		}),

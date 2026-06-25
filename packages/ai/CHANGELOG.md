@@ -9,6 +9,7 @@
 
 ### Fixed
 
+- Model discovery fetches (`fetchDynamicModels`, `fetchModelsDev` in `model-manager.ts`) now have a 15s timeout (`DISCOVERY_TIMEOUT_MS`). Previously, unreachable endpoints (e.g. api.openai.com, models.dev in proxy-restricted regions) caused `Promise.all` to hang indefinitely, blocking `--list-models` and any `online` strategy refresh.
 - MiniMax (DashScope): fixed 400 error when thinking is disabled - now only sends `enable_thinking: true` when thinking is enabled, avoiding the API requirement that this parameter must be true.
 - Alibaba / Bailian Coding Plan: `getApiKey` / `peekApiKey` now prefer `ALIBABA_*` env and models.yml fallback over persisted SQLite `api_key` rows so stale `/login` keys no longer shadow the shell in interactive mode (401 invalid key).
 - Alibaba Coding Plan: send `Authorization: Bearer` for `sk-sp-*` DashScope keys (raw header returned 401); accept `ALIBABA_API_KEY` as fallback when `ALIBABA_CODING_PLAN_API_KEY` is unset.

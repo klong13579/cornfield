@@ -1208,9 +1208,11 @@ export class ModelRegistry {
 		strategy: ModelRefreshStrategy,
 		providerFilter?: ReadonlySet<string>,
 	): Promise<void> {
-		const selectedDiscoverableProviders = providerFilter
-			? this.#discoverableProviders.filter(provider => providerFilter.has(provider.provider))
-			: this.#discoverableProviders;
+		const disabledProviders = getDisabledProviderIdsFromSettings();
+		const selectedDiscoverableProviders = this.#discoverableProviders.filter(provider => {
+			if (disabledProviders.has(provider.provider)) return false;
+			return providerFilter ? providerFilter.has(provider.provider) : true;
+		});
 		const configuredDiscoveriesPromise =
 			selectedDiscoverableProviders.length === 0
 				? Promise.resolve<Model<Api>[]>([])
@@ -1367,8 +1369,12 @@ export class ModelRegistry {
 	): Promise<Model<Api>[]> {
 		// Skip providers already handled by configured discovery (e.g. user-configured ollama with discovery.type)
 		const configuredDiscoveryProviders = new Set(this.#discoverableProviders.map(p => p.provider));
+		const disabledProviders = getDisabledProviderIdsFromSettings();
 		const managerOptions = (await this.#collectBuiltInModelManagerOptions()).filter(opts => {
 			if (configuredDiscoveryProviders.has(opts.providerId)) {
+				return false;
+			}
+			if (disabledProviders.has(opts.providerId)) {
 				return false;
 			}
 			return providerFilter ? providerFilter.has(opts.providerId) : true;

@@ -45,6 +45,7 @@ export interface Args {
 	skills?: string[];
 	noRules?: boolean;
 	listModels?: string | true;
+	listAllModels?: boolean;
 	noTitle?: boolean;
 	messages: string[];
 	fileArgs: string[];
@@ -182,6 +183,8 @@ export function parseArgs(args: string[], extensionFlags?: Map<string, { type: "
 			} else {
 				result.listModels = true;
 			}
+		} else if (arg === "--all" && result.listModels !== undefined) {
+			result.listAllModels = true;
 		} else if (arg.startsWith("@")) {
 			result.fileArgs.push(arg.slice(1)); // Remove @ prefix
 		} else if (arg.startsWith("--") && extensionFlags) {
