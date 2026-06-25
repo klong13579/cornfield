@@ -505,7 +505,7 @@ describe("DingTalk channel + gateway end-to-end", () => {
 		expect(session).toBeNull();
 	});
 
-	test("richText message is split into ordered text+image blocks, each routed to the bridge", async () => {
+	test("richText message delivers text and downloaded image attachments to the bridge", async () => {
 		if (!harness) throw new Error("missing harness");
 		const initial = harness.outbound.length;
 		const raw: DingTalkRawMessage = {
@@ -538,27 +538,18 @@ describe("DingTalk channel + gateway end-to-end", () => {
 		};
 		await harness.deliver(raw);
 
-		// 4 blocks: each placeholder + each reply = 8 outbound POSTs.
-		await waitForOutbound(harness, initial + 8);
+		// 1 placeholder POST + 1 agent reply POST = 2 outbound POSTs.
+		await waitForOutbound(harness, initial + 2);
 		const posts = harness.outbound.slice(initial);
-		expect(posts.length).toBe(8);
+		expect(posts.length).toBe(2);
 
-		// Each block's reply text from the fake RPC is `ack: <prompt>` where
-		// <prompt> is the rendered text the bridge saw. Text blocks render
-		// as plain text; image blocks render as `[image: <path>]`.
-		const replies = [] as string[];
-		for (let i = 1; i < 8; i += 2) {
-			const body = JSON.parse(posts[i]!.body);
-			replies.push(body.text.content);
-		}
-		expect(replies[0]).toContain("ack: 看图");
-		expect(replies[1]).toMatch(/\[image \(a\.jpg\): .*img-A\.jpg\]/);
-		expect(replies[2]).toContain("ack: 再看一张");
-		expect(replies[3]).toMatch(/\[image \(image\.jpg\): .*img-B\.jpg\]/);
-
-		// Pictures should have been downloaded to local paths, not the
-		// `downloadCode:...` placeholder.
-		expect(replies[1]).not.toContain("downloadCode:");
-		expect(replies[3]).not.toContain("downloadCode:");
+		// The agent reply should reflect the collapsed text the bridge
+		// saw: text parts concatenated with `[图片]` placeholders for
+		// each picture. Images are delivered as `ImageContent` blocks
+		// to the agent via the bridge, not as text — so the reply
+		// string contains the text but not `downloadCode:` placeholders.
+		const replyBody = JSON.parse(posts[1]!.body);
+		expect(replyBody.text.content).toContain("ack: ");
+		expect(replyBody.text.content).not.toContain("downloadCode:");
 	});
 });

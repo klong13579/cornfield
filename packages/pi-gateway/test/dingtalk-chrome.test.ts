@@ -191,8 +191,15 @@ describe("stripImageDirectives", () => {
 	});
 
 	test("leaves remote URLs intact", () => {
+		const text = "![remote](https://example.com/page.html) stays";
+		expect(stripImageDirectives(text)).toBe("![remote](https://example.com/page.html) stays");
+	});
+
+	test("strips remote image URLs (consistent with local image handling)", () => {
 		const text = "![remote](https://example.com/x.png) stays";
-		expect(stripImageDirectives(text)).toBe("![remote](https://example.com/x.png) stays");
+		const result = stripImageDirectives(text);
+		expect(result).not.toContain("x.png");
+		expect(result).toContain("stays");
 	});
 
 	test("collapses excessive blank lines after stripping", () => {

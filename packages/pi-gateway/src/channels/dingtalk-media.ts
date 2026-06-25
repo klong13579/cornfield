@@ -11,8 +11,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import * as zlib from "node:zlib";
 import { logger } from "@oh-my-pi/pi-utils";
-import type { DingTalkConfig } from "../types";
-import type { InboundAttachment } from "../types";
+import type { DingTalkConfig, InboundAttachment } from "../types";
 import { getAccessToken } from "./dingtalk-card";
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -24,6 +23,19 @@ const DINGTALK_API = "https://api.dingtalk.com";
 
 /** Maximum inbound attachment size (20 MB). Matches DingTalk's upload limit. */
 const MAX_INBOUND_ATTACHMENT_BYTES = 20 * 1024 * 1024;
+
+/** Maximum video download size (100 MB). Videos are larger than images/files.
+ * and we only need them temporarily for frame extraction before deleting. */
+const MAX_VIDEO_DOWNLOAD_BYTES = 100 * 1024 * 1024;
+
+/** Video file extensions — DingTalk sends videos as msgtype="file". */
+const VIDEO_EXTENSIONS = [".mp4", ".mov", ".avi", ".mkv", ".webm", ".flv", ".wmv"];
+
+/** Maximum number of frames to extract from a video. */
+const MAX_VIDEO_FRAMES = 8;
+
+/** Target width for extracted frames (height auto-scales to preserve aspect ratio). */
+const VIDEO_FRAME_WIDTH = 1024;
 
 // ═══════════════════════════════════════════════════════════════════════
 // MIME Sniffing
@@ -53,8 +65,14 @@ export function sniffMimeFromBytes(buffer: Uint8Array): string | undefined {
 	// WebP: 52 49 46 46 ... 57 45 42 50
 	if (
 		buffer.length >= 12 &&
-		buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46 &&
-		buffer[8] === 0x57 && buffer[9] === 0x45 && buffer[10] === 0x42 && buffer[11] === 0x50
+		buffer[0] === 0x52 &&
+		buffer[1] === 0x49 &&
+		buffer[2] === 0x46 &&
+		buffer[3] === 0x46 &&
+		buffer[8] === 0x57 &&
+		buffer[9] === 0x45 &&
+		buffer[10] === 0x42 &&
+		buffer[11] === 0x50
 	) {
 		return "image/webp";
 	}
@@ -71,10 +89,7 @@ export function sniffMimeFromBytes(buffer: Uint8Array): string | undefined {
 		return "application/zip";
 	}
 	// MP4: 00 00 00 XX 66 74 79 70
-	if (
-		buffer.length >= 8 &&
-		buffer[4] === 0x66 && buffer[5] === 0x74 && buffer[6] === 0x79 && buffer[7] === 0x70
-	) {
+	if (buffer.length >= 8 && buffer[4] === 0x66 && buffer[5] === 0x74 && buffer[6] === 0x79 && buffer[7] === 0x70) {
 		return "video/mp4";
 	}
 	// MP3: FF FB / FF F3 / FF F2 / ID3
@@ -87,8 +102,14 @@ export function sniffMimeFromBytes(buffer: Uint8Array): string | undefined {
 	// WAV: 52 49 46 46 ... 57 41 56 45
 	if (
 		buffer.length >= 12 &&
-		buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46 &&
-		buffer[8] === 0x57 && buffer[9] === 0x41 && buffer[10] === 0x56 && buffer[11] === 0x45
+		buffer[0] === 0x52 &&
+		buffer[1] === 0x49 &&
+		buffer[2] === 0x46 &&
+		buffer[3] === 0x46 &&
+		buffer[8] === 0x57 &&
+		buffer[9] === 0x41 &&
+		buffer[10] === 0x56 &&
+		buffer[11] === 0x45
 	) {
 		return "audio/wav";
 	}
@@ -237,7 +258,10 @@ async function downloadByDingtalkCode(downloadCode: string, config: DingTalkConf
 
 		if (!infoResp.ok) {
 			const errText = await infoResp.text().catch(() => "");
-			logger.warn("[DingTalk Media] Failed to get file info", { status: infoResp.status, body: errText.slice(0, 500) });
+			logger.warn("[DingTalk Media] Failed to get file info", {
+				status: infoResp.status,
+				body: errText.slice(0, 500),
+			});
 			return null;
 		}
 
@@ -326,6 +350,111 @@ export async function downloadMedia(url: string, config: DingTalkConfig): Promis
 	logger.warn("[DingTalk Media] Unknown URL format", { url: url.slice(0, 100) });
 	return null;
 }
+/** Check if a filename has a video extension. */
+function isVideoFile(filename: string | undefined): boolean {
+	return !!filename && VIDEO_EXTENSIONS.some(ext => filename.toLowerCase().endsWith(ext));
+}
+
+/**
+ * Extract key frames from a video file using ffmpeg.
+ *
+ * Downloads the video to a temp file, uses ffprobe to get the duration,
+ * then extracts up to `MAX_VIDEO_FRAMES` evenly-spaced frames as JPEG images
+ * scaled to `VIDEO_FRAME_WIDTH` pixels wide (preserving aspect ratio).
+ *
+ * Returns an array of `InboundAttachment` entries with kind="image" and
+ * mimeType="image/jpeg" — these flow through the existing image pipeline
+ * and reach the agent as inline base64 images.
+ *
+ * Returns an empty array if ffmpeg/ffprobe is unavailable or fails.
+ * The caller falls back to a text-only description in that case.
+ */
+async function extractVideoFrames(
+	videoPath: string,
+	filename: string,
+): Promise<InboundAttachment[]> {
+	// Probe duration with ffprobe
+	let durationSec = 0;
+	try {
+		const probe = Bun.spawnSync([
+			"ffprobe", "-v", "error",
+			"-show_entries", "format=duration",
+			"-of", "csv=p=0",
+			videoPath,
+		]);
+		if (probe.exitCode !== 0) {
+			logger.warn("[DingTalk Media] ffprobe failed", { stderr: probe.stderr.toString().trim() });
+			return [];
+		}
+		durationSec = parseFloat(probe.stdout.toString().trim());
+		if (!Number.isFinite(durationSec) || durationSec <= 0) {
+			logger.warn("[DingTalk Media] ffprobe returned invalid duration", { duration: probe.stdout.toString().trim() });
+			return [];
+		}
+	} catch (err) {
+		logger.warn("[DingTalk Media] ffprobe not available", { error: String(err) });
+		return [];
+	}
+
+	// Calculate frame timestamps: evenly spaced, avoiding the very start/end
+	// (first/last frames are often black or title screens).
+	const frameCount = Math.min(MAX_VIDEO_FRAMES, Math.max(1, Math.ceil(durationSec / 10)));
+	const offset = durationSec / (frameCount + 1);
+	const timestamps: number[] = [];
+	for (let i = 1; i <= frameCount; i++) {
+		timestamps.push(offset * i);
+	}
+
+	const frameDir = fs.mkdtempSync(path.join(os.tmpdir(), "omp-video-frames-"));
+	const frames: InboundAttachment[] = [];
+
+	try {
+		for (let i = 0; i < timestamps.length; i++) {
+			const framePath = path.join(frameDir, `frame_${i}.jpg`);
+			const ffmpeg = Bun.spawnSync([
+				"ffmpeg", "-y",
+				"-ss", timestamps[i].toFixed(2),
+				"-i", videoPath,
+				"-frames:v", "1",
+				"-vf", `scale=${VIDEO_FRAME_WIDTH}:-1`,
+				"-q:v", "2",
+				framePath,
+			]);
+			if (ffmpeg.exitCode !== 0) {
+				logger.warn("[DingTalk Media] ffmpeg frame extraction failed", {
+					frame: i,
+					timestamp: timestamps[i],
+					stderr: ffmpeg.stderr.toString().trim().slice(0, 200),
+				});
+				continue;
+			}
+
+			const data = await fs.promises.readFile(framePath);
+			if (data.byteLength === 0) continue;
+
+			frames.push({
+				kind: "image",
+				data: new Uint8Array(data),
+				mimeType: "image/jpeg",
+				filename: `${filename}_frame${i}.jpg`,
+				size: data.byteLength,
+			});
+		}
+	} finally {
+		// Clean up temp frame directory
+		try { fs.rmSync(frameDir, { recursive: true, force: true }); } catch { /* best effort */ }
+	}
+
+	logger.info("[DingTalk Media] Video frames extracted", {
+		filename,
+		duration: durationSec.toFixed(1),
+		requested: timestamps.length,
+		extracted: frames.length,
+	});
+
+	return frames;
+}
+
 /**
  * Download and resolve all media attachments from an inbound message.
  *
@@ -334,20 +463,47 @@ export async function downloadMedia(url: string, config: DingTalkConfig): Promis
  * Returns an array of `InboundAttachment` with raw bytes, sniffed MIME,
  * and size metadata. Returns an empty array for text-only messages or
  * when downloads fail (fail-soft: the message still reaches the agent as text).
+ *
+ * Video files (detected by extension) are downloaded to a temp file, then
+ * key frames are extracted via ffmpeg and returned as image attachments.
+ * If ffmpeg is unavailable or frame extraction fails, the video is
+ * silently dropped — the bridge layer falls back to a text description.
+ *
+ * `customDownloader` is a test seam: when provided, replaces the default
+ * `downloadOneAttachment` for non-video URLs. Production callers omit it;
+ * integration tests use it to inject a fake downloader that materialises
+ * placeholder files instead of dialing the real DingTalk OAPI.
  */
 export async function resolveInboundAttachments(
 	msg: { content: { type: string; url?: string; filename?: string }; mediaUrls?: string[] },
 	config: DingTalkConfig,
+	customDownloader?: (
+		ref: string,
+		kind: "image" | "voice" | "video" | "file",
+	) => Promise<{ path: string; mimeType: string; originalName: string; size: number } | null>,
 ): Promise<InboundAttachment[]> {
 	const { content } = msg;
 	const results: InboundAttachment[] = [];
 
-	// Collect all URLs to download: primary content URL + any mediaUrls
+	// --- Video: download + extract key frames via ffmpeg ---
+	if (content.url) {
+		const kind = content.type as InboundAttachment["kind"];
+		const filename = content.filename ?? "video";
+		const isVideo = kind === "video" || isVideoFile(content.filename);
+
+		if (isVideo) {
+			const videoFrames = await downloadAndExtractVideoFrames(content.url, filename, config);
+			results.push(...videoFrames);
+			return results;
+		}
+	}
+
+	// --- Non-video: collect all URLs to download ---
 	const urls: Array<{ url: string; kind: InboundAttachment["kind"]; filename?: string }> = [];
 
 	if (content.url) {
 		const kind = content.type as InboundAttachment["kind"];
-		if (kind === "image" || kind === "file" || kind === "video" || kind === "voice") {
+		if (kind === "image" || kind === "file" || kind === "voice") {
 			urls.push({ url: content.url, kind, filename: content.filename });
 		}
 	}
@@ -360,11 +516,82 @@ export async function resolveInboundAttachments(
 	}
 
 	for (const { url, kind, filename } of urls) {
-		const att = await downloadOneAttachment(url, kind, config, filename);
+		const att = customDownloader
+			? await customDownloadOneAttachment(url, kind, filename, customDownloader)
+			: await downloadOneAttachment(url, kind, config, filename);
 		if (att) results.push(att);
 	}
 
 	return results;
+}
+
+/**
+ * Adapter: convert a custom downloader's `DownloadedMedia` shape into the
+ * `InboundAttachment` shape that the rest of the pipeline expects. Used
+ * only when a test seam has injected a `customDownloader`.
+ */
+async function customDownloadOneAttachment(
+	url: string,
+	kind: InboundAttachment["kind"],
+	filename: string | undefined,
+	downloader: (
+		ref: string,
+		kind: "image" | "voice" | "video" | "file",
+	) => Promise<{ path: string; mimeType: string; originalName: string; size: number } | null>,
+): Promise<InboundAttachment | null> {
+	const downloaded = await downloader(url, kind);
+	if (!downloaded) return null;
+	return {
+		kind,
+		path: downloaded.path,
+		mimeType: downloaded.mimeType,
+		filename: filename ?? downloaded.originalName,
+		size: downloaded.size,
+	};
+}
+
+/**
+ * Download a video file, extract key frames with ffmpeg, then delete the video.
+ * Returns image attachments (kind="image", mimeType="image/jpeg").
+ * Returns an empty array if the download fails, the file is too large,
+ * or ffmpeg/ffprobe is unavailable.
+ */
+async function downloadAndExtractVideoFrames(
+	url: string,
+	filename: string,
+	config: DingTalkConfig,
+): Promise<InboundAttachment[]> {
+	let downloaded: DownloadedMedia | null;
+	try {
+		downloaded = await downloadMedia(url, config);
+	} catch (err) {
+		logger.warn("[DingTalk Media] Video download threw", { error: String(err) });
+		return [];
+	}
+
+	if (!downloaded) {
+		logger.warn("[DingTalk Media] Video download returned null", { url: url.slice(0, 100) });
+		return [];
+	}
+
+	// Video gets a larger size limit than regular attachments
+	if (downloaded.size > MAX_VIDEO_DOWNLOAD_BYTES) {
+		logger.warn("[DingTalk Media] Video exceeds size limit, skipping frame extraction", {
+			size: downloaded.size,
+			limit: MAX_VIDEO_DOWNLOAD_BYTES,
+			filename: downloaded.originalName,
+		});
+		cleanupDownloadedMedia(downloaded);
+		return [];
+	}
+
+	try {
+		const frames = await extractVideoFrames(downloaded.path, filename);
+		return frames;
+	} finally {
+		// Always clean up the downloaded video temp file
+		cleanupDownloadedMedia(downloaded);
+	}
 }
 
 /** Download a single attachment URL and convert to InboundAttachment. */
@@ -433,7 +660,6 @@ export function cleanupDownloadedMedia(media: DownloadedMedia): void {
 		// best effort
 	}
 }
-
 
 // ═══════════════════════════════════════════════════════════════════════
 // Media Upload

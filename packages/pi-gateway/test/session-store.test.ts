@@ -23,6 +23,7 @@ describe("SQLiteSessionStore", () => {
 	it("creates and retrieves a session", async () => {
 		const session = await store.createSession({
 			channelId: "dingtalk",
+			accountId: "acc1",
 			userId: "user1",
 			conversationId: "conv1",
 			createdAt: Date.now(),
@@ -33,7 +34,7 @@ describe("SQLiteSessionStore", () => {
 		expect(session.id).toBeDefined();
 		expect(session.channelId).toBe("dingtalk");
 
-		const retrieved = await store.getSession("dingtalk", "conv1");
+		const retrieved = await store.getSession("dingtalk", "acc1", "conv1");
 		expect(retrieved).not.toBeNull();
 		expect(retrieved?.userId).toBe("user1");
 	});

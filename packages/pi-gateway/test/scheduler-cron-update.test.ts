@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -8,6 +8,7 @@ import { SchedulerDbStorage } from "../src/scheduler/storage";
 let testDir: string;
 let dbPath: string;
 let storage: SchedulerDbStorage;
+let homedirSpy: ReturnType<typeof vi.spyOn>;
 
 function cleanup() {
 	try {
@@ -36,10 +37,32 @@ beforeEach(() => {
 	testDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-gateway-cron-update-"));
 	dbPath = path.join(testDir, "scheduler.db");
 	storage = new SchedulerDbStorage(dbPath);
+
+	// The `cronUpdate --account` flow calls `loadConfig()` to resolve
+	// the account's `agentDir` from `~/.omp/gateway.json`. Bun's
+	// `os.homedir()` caches the value at first call, so the only way
+	// to redirect it in tests is `vi.spyOn` (NOT `process.env.HOME`).
+	// Self-contained fake gateway.json makes the test independent of
+	// whichever accounts happen to exist on the host.
+	const ompDir = path.join(testDir, ".omp");
+	fs.mkdirSync(ompDir, { recursive: true });
+	const fakeGateway = {
+		channels: {
+			dingtalk: {
+				accounts: {
+					hr: { agentDir: path.join(testDir, "agents", "hr") },
+					opencode: { agentDir: path.join(testDir, "agents", "opencode") },
+				},
+			},
+		},
+	};
+	Bun.write(path.join(ompDir, "gateway.json"), JSON.stringify(fakeGateway));
+	homedirSpy = vi.spyOn(os, "homedir").mockReturnValue(testDir);
 });
 
 afterEach(() => {
 	storage?.close();
+	homedirSpy?.mockRestore();
 	cleanup();
 });
 

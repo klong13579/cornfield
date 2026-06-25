@@ -384,10 +384,72 @@ export class DingTalkChannel extends BaseChannel {
 	#connected = false;
 	#connectionFailed = false;
 	#accountId = "__default__";
+	/**
+	 * Factory seam: build the DingTalk Stream SDK client. Production
+	 * code uses the real `DWClient`; integration tests override this
+	 * to inject a fake `EventEmitter`-based client that captures
+	 * callbacks without dialing the real DingTalk WebSocket. Marked
+	 * `protected` so subclasses can override it.
+	 */
+	protected createDWClient(_opts: {
+		clientId: string;
+		clientSecret: string;
+		ua?: string;
+		debug?: boolean;
+		autoReconnect?: boolean;
+	}): DWClient {
+		return new DWClient(_opts);
+	}
 	/** Handler invoked when a card action callback arrives via TOPIC_CARD. */
 	#cardActionHandler: ((event: DingTalkCardActionEvent) => Promise<void>) | null = null;
 	/** OAuth token cache for proactive message sending (DM + group push). */
 	#tokenCache: { token: string; expiresAt: number } | null = null;
+	/**
+	 * Test seam: when set, `#handleMessage` uses this directory to
+	 * resolve `downloadCode:...` references to placeholder files
+	 * instead of hitting the real DingTalk OAPI. Production never sets
+	 * this; integration tests use it to exercise the richText +
+	 * image-pipeline path without real DingTalk credentials.
+	 */
+	// biome-ignore lint/correctness/noUnusedPrivateClassMembers: written via setMediaDir, read by test override of createMediaDownloader
+	#mediaDir: string | null = null;
+
+	/**
+	 * Test seam: install a directory used to materialise downloaded
+	 * attachments as placeholder files. Tests call this before
+	 * `connect()` so that richText messages with embedded image
+	 * `downloadCode:...` URLs resolve to local placeholder files and
+	 * the bridge receives the expected number of `ImageContent`
+	 * blocks.
+	 */
+	setMediaDir(dir: string): void {
+		this.#mediaDir = dir;
+	}
+
+	/**
+	 * Factory seam: build a custom attachment downloader. Production
+	 * returns `undefined` (use the default `resolveInboundAttachments`
+	 * flow that hits the real DingTalk OAPI). Tests override this to
+	 * return a function that materialises placeholder files in
+	 * `#mediaDir` instead of dialing OAPI.
+	 *
+	 * Returned function signature matches the test's expectations:
+	 * receives `(ref, kind)`, returns a `DownloadedMedia` shape or
+	 * `null` on failure.
+	 */
+	protected createMediaDownloader():
+		| ((
+				ref: string,
+				kind: "image" | "voice" | "video" | "file",
+		  ) => Promise<{
+				path: string;
+				mimeType: string;
+				originalName: string;
+				size: number;
+		  } | null>)
+		| null {
+		return null;
+	}
 
 	/** Set the account ID for multi-account routing */
 	setAccountId(accountId: string): void {
@@ -1312,7 +1374,10 @@ export class DingTalkChannel extends BaseChannel {
 			);
 		}
 
-		this.#client = new DWClient({
+		// Factory seam: production uses the real SDK client; tests
+		// override `createDWClient` to inject a fake `EventEmitter`-based
+		// client that captures callbacks without dialing DingTalk.
+		this.#client = this.createDWClient({
 			clientId: this.#config.appKey,
 			clientSecret: this.#config.appSecret,
 			ua: "pi-gateway/0.1.0",
@@ -2353,7 +2418,8 @@ export class DingTalkChannel extends BaseChannel {
 					mediaUrlCount: inbound.mediaUrls?.length ?? 0,
 				});
 				const { resolveInboundAttachments } = await import("./dingtalk-media");
-				inbound.attachments = await resolveInboundAttachments(inbound, this.#config);
+				const customDownloader = this.createMediaDownloader() ?? undefined;
+				inbound.attachments = await resolveInboundAttachments(inbound, this.#config, customDownloader);
 				logger.info("[DingTalk] Attachment resolved", {
 					count: inbound.attachments?.length ?? 0,
 					kinds: inbound.attachments?.map(a => a.kind),

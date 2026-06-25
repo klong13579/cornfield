@@ -17,6 +17,8 @@ class FakeChannel implements Channel {
 	};
 	connected = false;
 	sent: OutboundMessage[] = [];
+	// biome-ignore lint/correctness/noUnusedPrivateClassMembers: written by onMessage; tests don't currently invoke it but the field is part of the Channel contract
+	#handler?: (msg: InboundMessage) => Promise<void>;
 
 	constructor(
 		readonly id: string,
