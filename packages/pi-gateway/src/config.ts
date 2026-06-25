@@ -51,7 +51,7 @@ const agentConfigSchema = z.object({
 
 const sessionConfigSchema = z.object({
 	idleTimeoutMinutes: z.number().int().positive().optional(),
-	resetPolicy: z.enum(["none", "daily", "idle"]).optional(),
+	resetPolicy: z.enum(["none", "daily", "idle", "both"]).optional(),
 	dailyResetHour: z.number().int().min(0).max(23).optional(),
 });
 
@@ -88,8 +88,9 @@ const DEFAULT_CONFIG: GatewayConfig = {
 		maxConcurrentSessions: 3,
 	},
 	session: {
-		idleTimeoutMinutes: 60,
-		resetPolicy: "idle",
+		idleTimeoutMinutes: 240,
+		resetPolicy: "both",
+		dailyResetHour: 2,
 	},
 	cron: {
 		enabled: true,

@@ -302,7 +302,7 @@ export interface AgentConfig {
 }
 export interface SessionConfig {
 	idleTimeoutMinutes?: number;
-	resetPolicy?: "none" | "daily" | "idle";
+	resetPolicy?: "none" | "daily" | "idle" | "both";
 	dailyResetHour?: number;
 }
 

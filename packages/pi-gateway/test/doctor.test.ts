@@ -55,7 +55,7 @@ describe("validateConfig (non-swallowing)", () => {
 		if (result.status === "ok") {
 			expect(result.config.agent?.timeoutMs).toBe(300000);
 			// default merged in
-			expect(result.config.session?.idleTimeoutMinutes).toBe(60);
+			expect(result.config.session?.idleTimeoutMinutes).toBe(240);
 		}
 	});
 });

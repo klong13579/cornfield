@@ -758,6 +758,18 @@ export class AgentBridge {
 		}
 	}
 
+	/**
+	 * Clear the cached active session path so the next `forwardWithMeta`
+	 * call re-switches to the session file even if the path hasn't changed.
+	 *
+	 * Used by the gateway after session rotation: the old jsonl file is
+	 * deleted, and the bridge must re-switch so omp loads the (now missing)
+	 * file and starts a fresh session at the same path.
+	 */
+	resetActiveSession(): void {
+		this.#activeSessionPath = undefined;
+	}
+
 	async switchSession(sessionPath: string): Promise<void> {
 		await this.#runExclusive(() => this.#switchSession(sessionPath));
 	}

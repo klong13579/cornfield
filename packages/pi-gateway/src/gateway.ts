@@ -1500,6 +1500,14 @@ ${table}
 			if (await this.#handleModelCommand(msg, accountId)) return;
 			let session = await this.#store?.getSession(msg.channelId, accountId, msg.conversationId);
 			const now = Date.now();
+
+			// Session rotation: check if the existing session has expired
+			// per the configured reset policy (idle timeout / daily boundary).
+			// Must happen BEFORE the session's updatedAt is refreshed below,
+			// otherwise the check always sees "just now" and never triggers.
+			if (session && this.#shouldResetSession(session)) {
+				session = await this.#resetSession(session, accountId, msg);
+			}
 			if (!session && this.#store) {
 				const sessionPath = this.#buildSessionPath(msg.channelId, accountId, msg.conversationId);
 				session = await this.#store.createSession({
@@ -1580,6 +1588,114 @@ ${table}
 		}
 	}
 
+	/**
+	 * Check if a session should be reset based on the configured policy.
+	 *
+	 * - `none`: never reset
+	 * - `idle`: reset after `idleTimeoutMinutes` of inactivity
+	 * - `daily`: reset when `updatedAt` is before today's `dailyResetHour`
+	 * - `both`: whichever triggers first (idle or daily)
+	 */
+	#shouldResetSession(session: SessionRecord): boolean {
+		const policy = this.#config.session?.resetPolicy ?? "both";
+		if (policy === "none") return false;
+
+		const now = Date.now();
+		const updatedAt = session.updatedAt;
+
+		if (policy === "idle" || policy === "both") {
+			const idleMs = (this.#config.session?.idleTimeoutMinutes ?? 240) * 60_000;
+			if (now - updatedAt > idleMs) return true;
+		}
+
+		if (policy === "daily" || policy === "both") {
+			const resetHour = this.#config.session?.dailyResetHour ?? 2;
+			const today = new Date(now);
+			const todayReset = new Date(today.getFullYear(), today.getMonth(), today.getDate(), resetHour, 0, 0, 0);
+			// If we haven't passed today's reset hour yet, the boundary is yesterday's
+			const boundary = now < todayReset.getTime()
+				? todayReset.getTime() - 86_400_000
+				: todayReset.getTime();
+			if (updatedAt < boundary) return true;
+		}
+
+		return false;
+	}
+
+	/**
+	 * Reset a session: delete the old jsonl file, close the old SQLite
+	 * record, create a fresh session, reset the bridge's cached session
+	 * path, and inject a system note into the message so the agent knows
+	 * this is a fresh conversation.
+	 *
+	 * Returns the new SessionRecord.
+	 */
+	async #resetSession(
+		session: SessionRecord,
+		accountId: string,
+		msg: InboundMessage,
+	): Promise<SessionRecord> {
+		logger.warn("Session rotation triggered", {
+			channelId: session.channelId,
+			conversationId: session.conversationId,
+			accountId,
+			updatedAt: new Date(session.updatedAt).toISOString(),
+		});
+
+		// 1. Archive the old jsonl file (rename with timestamp suffix).
+		//    The original path is left vacant so omp creates a fresh session
+		//    file on the next switch_session.  Archived files preserve full
+		//    conversation history for audit / retrieval.
+		if (session.ompSessionPath) {
+			try {
+				const archivePath = this.#archiveSessionPath(session.ompSessionPath);
+				await fs.rename(session.ompSessionPath, archivePath);
+				logger.debug("Archived old session file", { from: session.ompSessionPath, to: archivePath });
+			} catch (err) {
+				if (!isEnoent(err)) {
+					logger.warn("Failed to archive old session file", {
+						path: session.ompSessionPath,
+						error: err instanceof Error ? err.message : String(err),
+					});
+				}
+			}
+		}
+
+		// 2. Refresh the session record in place (same row, fresh timestamp).
+		//    We can't close+create because the UNIQUE(channel_id, account_id,
+		//    conversation_id) constraint would reject the new row.  The SQLite
+		//    record is just metadata — the actual context reset is the archived
+		//    jsonl file + bridge.resetActiveSession().
+		const now = Date.now();
+		await this.#store?.updateSession(session.id, {
+			updatedAt: now,
+			sessionWebhook: msg.sessionWebhook,
+		});
+		const newSession: SessionRecord = {
+			...session,
+			updatedAt: now,
+			sessionWebhook: msg.sessionWebhook,
+		};
+
+		// 4. Reset the bridge so the next forward re-switches to the
+		//    (now deleted) file — omp will start a fresh session at that path.
+		const bridge = accountId === "__default__"
+			? this.#bridge
+			: this.#accountBridges.get(accountId);
+		bridge?.resetActiveSession();
+
+		// 5. Inject system note into the message so the agent knows
+		//    this is a fresh conversation with no prior context.
+		const note = "[System note: This is a fresh conversation with no prior context.]\n\n";
+		if (msg.content.type === "text") {
+			msg.content = { type: "text", text: note + msg.content.text };
+		} else if (msg.content.type === "markdown") {
+			msg.content = { type: "markdown", markdown: note + msg.content.markdown };
+		}
+
+		return newSession;
+	}
+
 	#buildSessionPath(channelId: string, accountId: string, conversationId: string): string {
 		const safeId = conversationId.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64);
 		const agentDir = this.#accountAgentDirs.get(accountId);
@@ -1589,6 +1705,18 @@ ${table}
 		const dataDir = getDataDir(this.#config);
 		return path.join(dataDir, "sessions", channelId, accountId, `${safeId}.jsonl`);
 	}
+
+	/**
+	 * Build an archive path for a session file by inserting a timestamp
+	 * before the .jsonl extension: `cid_xxx.jsonl` → `cid_xxx.20260624_140000.jsonl`.
+	 */
+	#archiveSessionPath(sessionPath: string): string {
+		const ts = new Date().toISOString().replace(/[-:T]/g, "").slice(0, 14).replace(/(\d{8})(\d{6})/, "$1_$2");
+		const dot = sessionPath.lastIndexOf(".");
+		if (dot === -1) return `${sessionPath}.${ts}`;
+		return `${sessionPath.slice(0, dot)}.${ts}${sessionPath.slice(dot)}`;
+	}
+
 
 	async #migrateSessionPath(fromPath: string, toPath: string): Promise<void> {
 		if (fromPath === toPath) return;

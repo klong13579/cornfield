@@ -10,7 +10,7 @@ describe("config", () => {
 		const config = await loadConfig("/nonexistent/path.json");
 		expect(config.channels).toEqual({});
 		expect(config.agent?.ompPath).toBe("omp");
-		expect(config.session?.idleTimeoutMinutes).toBe(60);
+		expect(config.session?.idleTimeoutMinutes).toBe(240);
 	});
 
 	it("resolves config path in home directory", () => {
