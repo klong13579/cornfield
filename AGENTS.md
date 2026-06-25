@@ -93,7 +93,9 @@ Extension products:
 1. **User input** → `modes/interactive-mode.ts` (TUI) or `modes/print-mode.ts` (non-interactive `-p`).
 2. **Agent loop** (`pi-agent-core`): user message → LLM provider (`pi-ai`) → tool calls → tool execution (`coding-agent/src/tools/`) → results back to LLM → repeat until done.
 3. **Tools** are built via `createTools()` (`packages/coding-agent/src/tools/index.ts`) which assembles `BUILTIN_TOOLS` + `HIDDEN_TOOLS` registries, gated by `Settings.isToolAllowed`.
-4. **Sessions** persist as JSONL under `~/.omp/agent/sessions/<cwd-encoded>/by-date/<YYYY-MM-DD>/<HHMMSS>[-<slug>]__<8hex>.jsonl`.
+4. **Sessions** persist as JSONL under `~/.omp/agent/sessions/<cwd-encoded>/by-date/<YYYY-MM-DD>/<HHMMSS>[-<slug>]__<8hex>.jsonl`. This is the CLI agent's session log location.
+   - **Gateway agent sessions live elsewhere**: each gateway agent runs with its own `agentDir` (default `~/.omp/agents/<accountId>/`), and its session files are written under `<agentDir>/sessions/` — IM conversations as `<convId>.jsonl`, cron tasks as `cron_<taskId>.jsonl`. Do not look for gateway agent session logs under `~/.omp/agent/sessions/`.
+   - **Cron execution logs** (separate from agent sessions) are under `~/.omp/gateway-data/scheduler/logs/by-task/<slug>/<YYYY-MM-DD>.jsonl`.
 5. **Self-evolution** hooks into the agent lifecycle via an extension (`sdk.ts` registers it): extracts learnings from session traces, mines skills/conventions, stores in `~/.omp/self-evolution/evolution.db` (SQLite), injects context into future sessions.
 
 ### Native bindings
