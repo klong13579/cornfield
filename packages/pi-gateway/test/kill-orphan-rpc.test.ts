@@ -101,7 +101,7 @@ describe("killOrphanRpcProcesses — target only --mode rpc", () => {
 		await killOrphanRpcProcesses();
 
 		// Only 2001 and 2004 should be killed (PPID=1 + omp + --mode rpc)
-		const killedPids = killSpy.mock.calls.map((c) => c[0]);
+		const killedPids = killSpy.mock.calls.map(c => c[0]);
 		expect(killedPids).toContain(2001);
 		expect(killedPids).toContain(2004);
 		expect(killedPids).not.toContain(2002);

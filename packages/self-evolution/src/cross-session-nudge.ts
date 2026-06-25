@@ -17,12 +17,12 @@ const AUTO_DISMISS_THRESHOLD = 3; // auto-dismiss after 3 deliveries in 30 days
 export class CrossSessionNudgeEngine {
 	#nudgeHistoryStore: NudgeHistoryStore;
 	#episodeStore: EpisodeStore;
-#diagnosisStore?: EpisodeDiagnosisStore;
+	#diagnosisStore?: EpisodeDiagnosisStore;
 
-#lastDeliveredAt = 0;
-#deliveredThisSession = false;
+	#lastDeliveredAt = 0;
+	#deliveredThisSession = false;
 
-constructor(
+	constructor(
 		nudgeHistoryStore: NudgeHistoryStore,
 		episodeStore: EpisodeStore,
 		diagnosisStore?: EpisodeDiagnosisStore,

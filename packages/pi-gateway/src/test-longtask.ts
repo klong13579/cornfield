@@ -59,6 +59,14 @@ export interface LongTaskTestOptions {
 	conversationId?: string;
 	/** Override the gateway config path. Default: ~/.omp/gateway.json. */
 	configPath?: string;
+	/** If true, after the long-task watcher fires the threshold, the
+	 *  test synthesises a TOPIC_CARD stop-click callback and routes it
+	 *  through the channel's `__testHandleCardCallback` test seam. The
+	 *  channel's action handler is wired to the same code path the
+	 *  gateway uses (ActionRegistry lookup → bridge.abort()). This
+	 *  exercises the full stop-button chain end-to-end without needing
+	 *  a human to click a real DingTalk button. */
+	simulateStopClick?: boolean;
 }
 
 export interface LongTaskTestResult {
@@ -66,24 +74,102 @@ export interface LongTaskTestResult {
 	cardInstanceId?: string;
 	watcherFired?: boolean;
 	watcherEvents?: number;
+	/** True if the action handler received the synthetic stop click. */
+	stopActionHandled?: boolean;
+	/** True if `bridge.abort()` returned true (active prompt existed). */
+	aborted?: boolean;
 	error?: string;
 }
 
-/** Build the fake RPC script that simulates a long-running bash tool call. */
+/** Build the fake RPC script that simulates a long-running bash tool call.
+ *
+ * Behaviour:
+ *   - On `prompt`: emit toolcall_start/delta/end for `bash sleep N`,
+ *     then start a setTimeout. The bridge's onLongTask watcher fires
+ *     at its threshold (~5s in tests) and pushes a stop block.
+ *   - On `abort`: clear the setTimeout, emit an interrupted toolResult
+ *     + final text + agent_end, then send the abort response. This
+ *     matches what a real LLM-driven `omp --mode rpc` does on SIGINT
+ *     / abort: the in-flight tool is cancelled, the model gets a
+ *     `isError: true` result, and the run ends.
+ *   - On `setTimeout` (no abort): emit the normal toolResult + final
+ *     text + agent_end.
+ *
+ * The two paths converge on `agent_end` so the bridge's
+ * `forwardWithMeta` always resolves cleanly. */
 function buildFakeRpcScript(holdMs: number): string {
 	const holdMsLiteral = holdMs;
 	return `#!/usr/bin/env bun
 // Synthetic RPC for long-task watcher test.
-// Emits: ready → switch_session response → prompt response → toolcall
-// (held for HOLD_MS) → toolresult → final text → agent_end.
 const HOLD_MS = ${holdMsLiteral};
 process.stdout.write(JSON.stringify({ type: "ready" }) + "\\n");
 
 let buffer = "";
 function emit(value) { process.stdout.write(JSON.stringify(value) + "\\n"); }
+function setBuf(s) { buffer = s; }
+
+let toolTimer = null;
+let toolActive = false;
+let promptResponseId = null;
+
+function finishNormally() {
+  toolActive = false;
+  toolTimer = null;
+  emit({
+    type: "message_end",
+    message: {
+      role: "toolResult",
+      toolCallId: "tc_longtask",
+      toolName: "bash",
+      isError: false,
+      content: [{ type: "text", text: "done after " + HOLD_MS + "ms" }]
+    }
+  });
+  emit({
+    type: "message_update",
+    assistantMessageEvent: { type: "text_delta", delta: "ok", contentIndex: 0 },
+    message: { role: "assistant", content: [] }
+  });
+  emit({
+    type: "message_end",
+    message: {
+      role: "assistant",
+      content: [{ type: "text", text: "ok" }]
+    }
+  });
+  emit({ type: "agent_end" });
+}
+
+function finishByAbort() {
+  if (toolTimer) { clearTimeout(toolTimer); toolTimer = null; }
+  toolActive = false;
+  emit({
+    type: "message_end",
+    message: {
+      role: "toolResult",
+      toolCallId: "tc_longtask",
+      toolName: "bash",
+      isError: true,
+      content: [{ type: "text", text: "[abort] interrupted by user" }]
+    }
+  });
+  emit({
+    type: "message_update",
+    assistantMessageEvent: { type: "text_delta", delta: "aborted", contentIndex: 0 },
+    message: { role: "assistant", content: [] }
+  });
+  emit({
+    type: "message_end",
+    message: {
+      role: "assistant",
+      content: [{ type: "text", text: "aborted by user" }]
+    }
+  });
+  emit({ type: "agent_end" });
+}
 
 for await (const chunk of Bun.stdin.stream()) {
-  buffer += new TextDecoder().decode(chunk);
+  setBuf(buffer + new TextDecoder().decode(chunk));
   let idx = buffer.indexOf("\\n");
   while (idx !== -1) {
     const line = buffer.slice(0, idx).trim();
@@ -93,6 +179,7 @@ for await (const chunk of Bun.stdin.stream()) {
     if (frame.type === "switch_session") {
       emit({ type: "response", id: frame.id, command: "switch_session", success: true, data: { cancelled: false } });
     } else if (frame.type === "prompt") {
+      promptResponseId = frame.id;
       emit({ type: "response", id: frame.id, command: "prompt", success: true });
       emit({
         type: "message_update",
@@ -113,37 +200,17 @@ for await (const chunk of Bun.stdin.stream()) {
         },
         message: { role: "assistant", content: [] }
       });
-      // Hold using real wall clock so the bridge's setTimeout fires.
-      const start = Date.now();
-      while (Date.now() - start < HOLD_MS) { /* spin */ }
-      emit({
-        type: "message_end",
-        message: {
-          role: "toolResult",
-          toolCallId: "tc_longtask",
-          toolName: "bash",
-          isError: false,
-          content: [{ type: "text", text: "done after " + HOLD_MS + "ms" }]
-        }
-      });
-      emit({
-        type: "message_update",
-        assistantMessageEvent: { type: "text_delta", delta: "ok", contentIndex: 0 },
-        message: { role: "assistant", content: [] }
-      });
-      emit({
-        type: "message_end",
-        message: {
-          role: "assistant",
-          content: [
-            { type: "text", text: "ok" },
-            { type: "toolCall", id: "tc_longtask", name: "bash", arguments: { command: "sleep " + Math.ceil(HOLD_MS / 1000) } }
-          ]
-        }
-      });
-      emit({ type: "agent_end" });
+      toolActive = true;
+      toolTimer = setTimeout(finishNormally, HOLD_MS);
     } else if (frame.type === "abort") {
+      // Acknowledge abort FIRST so the bridge's sendCommandAndWait
+      // resolves before we emit the post-abort stream events. The
+      // bridge has its own promise chain and will move on once the
+      // response arrives; emitting the toolResult / agent_end after
+      // the response is safe because the bridge keeps reading from
+      // its reader loop until it sees agent_end (or timeout).
       emit({ type: "response", id: frame.id, command: "abort", success: true });
+      if (toolActive) finishByAbort();
     }
     idx = buffer.indexOf("\\n");
   }
@@ -242,11 +309,54 @@ export async function runLongTaskTest(opts: LongTaskTestOptions): Promise<LongTa
 	};
 
 	// 5. Run the card stream
+	const { ActionRegistry } = await import("./action-registry");
+	const actionRegistry = new ActionRegistry();
+	let observedCardInstanceId: string | null = null;
+	let stopActionHandled = false;
+	let aborted = false;
+	let stopClicked = false;
 	const context = {
 		accountId: opts.accountId,
 		agentName: opts.accountId,
 		dapiCalls: 0,
+		// Mirror the gateway's registerCardAction wiring. The channel
+		// calls this on card create (eager) and again on onLongTask
+		// (with the toolName that the watcher just learned). We capture
+		// the cardInstanceId the first time it lands so the simulated
+		// stop click has the right key.
+		registerCardAction: (info: {
+			cardInstanceId: string;
+			accountId: string;
+			sessionId: string;
+			toolName?: string;
+		}) => {
+			observedCardInstanceId = info.cardInstanceId;
+			actionRegistry.register(info.cardInstanceId, {
+				accountId: info.accountId,
+				sessionId: info.sessionId,
+				toolName: info.toolName,
+			});
+		},
 	};
+
+	// Mirror the gateway's action handler: on a `stop` action, look up
+	// the card in the registry, then ask the bridge to abort. This is
+	// the same chain `#handleCardAction` runs in production — the
+	// only thing the gateway adds on top is the SessionManager hop.
+	channel.setCardActionHandler(async event => {
+		if (event.params.type !== "stop") return;
+		const info = actionRegistry.lookup(event.cardInstanceId);
+		if (!info) return;
+		stopActionHandled = true;
+		console.log(
+			`[long-task test] card stop action received — card=${event.cardInstanceId} tool=${info.toolName} clickedBy=${event.userId}`,
+		);
+		try {
+			aborted = await bridge.abort();
+		} catch (err) {
+			console.log(`[long-task test] bridge.abort() threw: ${err instanceof Error ? err.message : String(err)}`);
+		}
+	});
 
 	// The channel builds its own ForwardStreamHandlers internally
 	// (including onLongTask). It calls `submit(handlers)` to forward
@@ -269,20 +379,68 @@ export async function runLongTaskTest(opts: LongTaskTestOptions): Promise<LongTa
 		return bridge.forwardWithMeta(inbound, session, h);
 	};
 
+	// Fire the simulated stop click ~500ms after the watcher hits its
+	// threshold. This gives the channel time to push the stop block
+	// into the card and re-register the action with the toolName. The
+	// `setInterval` checks every 100ms so the wait is short and
+	// bounded; we cap at holdMs so the test never blocks past the
+	// tool's natural timeout.
+	const stopClickWatcher = setInterval(() => {
+		if (!opts.simulateStopClick) return;
+		if (stopClicked) return;
+		const thresholdFire = longTaskLog.find(e => e.threshold);
+		if (!thresholdFire) return;
+		if (!observedCardInstanceId) return;
+		// Defer one extra tick so the channel's re-register-with-toolName
+		// (which runs synchronously after pushing the stop block) has
+		// landed in the registry before we look it up via the handler.
+		stopClicked = true;
+		setTimeout(() => {
+			const cardInstanceId = observedCardInstanceId!;
+			const toolName = thresholdFire.toolName;
+			const sessionId = inbound.conversationId;
+			console.log(`[long-task test] simulating TOPIC_CARD stop click for card=${cardInstanceId}`);
+			const syntheticMsg = {
+				headers: { messageId: `synthetic-stop-${Date.now()}` },
+				data: JSON.stringify({
+					type: "actionCallback",
+					outTrackId: cardInstanceId,
+					corpId: "test-corp",
+					userId: opts.userId,
+					content: JSON.stringify({
+						cardPrivateData: {
+							actionIds: ["btn_stop"],
+							params: { type: "stop", sessionId, toolName },
+						},
+					}),
+				}),
+			} as unknown as Parameters<typeof channel.__testHandleCardCallback>[0];
+			void channel.__testHandleCardCallback(syntheticMsg);
+		}, 200);
+	}, 100);
+
 	let cardOutbound: { id: string } | null = null;
 	try {
 		const result = await channel.streamCard(inbound, session, context, submit);
 		cardOutbound = result as { id: string } | null;
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
-		// Clean up before failing
+		clearInterval(stopClickWatcher);
 		bridge.stop();
 		await fs.rm(tmpDir, { recursive: true, force: true });
 		return { success: false, error: `streamCard threw: ${message}` };
-	} finally {
-		bridge.stop();
-		await fs.rm(tmpDir, { recursive: true, force: true });
 	}
+	clearInterval(stopClickWatcher);
+
+	// Allow the post-streamCard abort chain to settle: the handler is
+	// async and the bridge.abort() RPC round-trip happens after
+	// streamCard returns. 500ms is plenty for the in-process fake.
+	if (opts.simulateStopClick) {
+		await Bun.sleep(500);
+	}
+
+	bridge.stop();
+	await fs.rm(tmpDir, { recursive: true, force: true });
 
 	// streamCard returns null when card creation failed; that's
 	// distinct from a successful run that produced no stop block.
@@ -300,8 +458,10 @@ export async function runLongTaskTest(opts: LongTaskTestOptions): Promise<LongTa
 
 	return {
 		success: true,
-		cardInstanceId: cardOutbound.id,
+		cardInstanceId: observedCardInstanceId ?? undefined,
 		watcherFired: thresholdFired,
 		watcherEvents: longTaskLog.length,
+		stopActionHandled: opts.simulateStopClick ? stopActionHandled : undefined,
+		aborted: opts.simulateStopClick ? aborted : undefined,
 	};
 }

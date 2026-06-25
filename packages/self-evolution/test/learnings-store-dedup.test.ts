@@ -64,8 +64,14 @@ describe("SqliteLearningStore semantic dedup", () => {
 
 	it("keeps separate entries for different kinds", async () => {
 		const store = createStore();
-		const l1 = makeLearning({ kind: "fact", content: "This is a long fact text about something important in the project" });
-		const l2 = makeLearning({ kind: "preference", content: "This is a long fact text about something important in the project" });
+		const l1 = makeLearning({
+			kind: "fact",
+			content: "This is a long fact text about something important in the project",
+		});
+		const l2 = makeLearning({
+			kind: "preference",
+			content: "This is a long fact text about something important in the project",
+		});
 		await store.insert(l1);
 		await store.insert(l2);
 		const all = await store.listAll();
@@ -74,9 +80,15 @@ describe("SqliteLearningStore semantic dedup", () => {
 
 	it("promotes scope to global when merging", async () => {
 		const store = createStore();
-		const l1 = makeLearning({ content: "This is a global rule that should apply to all projects and sessions", scope: "project" });
+		const l1 = makeLearning({
+			content: "This is a global rule that should apply to all projects and sessions",
+			scope: "project",
+		});
 		await store.insert(l1);
-		const l2 = makeLearning({ content: "This is a global rule that should apply to all projects and sessions", scope: "global" });
+		const l2 = makeLearning({
+			content: "This is a global rule that should apply to all projects and sessions",
+			scope: "global",
+		});
 		await store.insert(l2);
 		const all = await store.listAll();
 		expect(all.length).toBe(1);
@@ -85,9 +97,15 @@ describe("SqliteLearningStore semantic dedup", () => {
 
 	it("promotes lifecycle to active when merging candidate into active", async () => {
 		const store = createStore();
-		const l1 = makeLearning({ content: "Rule X is a very important coding convention for this codebase", lifecycle: "candidate" });
+		const l1 = makeLearning({
+			content: "Rule X is a very important coding convention for this codebase",
+			lifecycle: "candidate",
+		});
 		await store.insert(l1);
-		const l2 = makeLearning({ content: "Rule X is a very important coding convention for this codebase", lifecycle: "active" });
+		const l2 = makeLearning({
+			content: "Rule X is a very important coding convention for this codebase",
+			lifecycle: "active",
+		});
 		await store.insert(l2);
 		const all = await store.listAll();
 		expect(all.length).toBe(1);

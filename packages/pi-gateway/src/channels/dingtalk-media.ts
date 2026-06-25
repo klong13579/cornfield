@@ -267,34 +267,62 @@ export async function downloadMedia(url: string, config: DingTalkConfig): Promis
 /**
  * Download and resolve all media attachments from an inbound message.
  *
- * Returns an array of `InboundAttachment` with raw bytes, sniffed MIME, and
- * size metadata. Returns an empty array for text-only messages or when
- * downloads fail (fail-soft: the message still reaches the agent as text).
+ * Downloads from `content.url` (the primary attachment) and
+ * `msg.mediaUrls` (additional images, e.g. from richText messages).
+ * Returns an array of `InboundAttachment` with raw bytes, sniffed MIME,
+ * and size metadata. Returns an empty array for text-only messages or
+ * when downloads fail (fail-soft: the message still reaches the agent as text).
  */
 export async function resolveInboundAttachments(
-	msg: { content: { type: string; url?: string; filename?: string } },
+	msg: { content: { type: string; url?: string; filename?: string }; mediaUrls?: string[] },
 	config: DingTalkConfig,
 ): Promise<InboundAttachment[]> {
 	const { content } = msg;
-	const url = content.url;
-	if (!url) return [];
+	const results: InboundAttachment[] = [];
 
-	const kind = content.type as InboundAttachment["kind"];
-	if (kind !== "image" && kind !== "file" && kind !== "video" && kind !== "voice") {
-		return [];
+	// Collect all URLs to download: primary content URL + any mediaUrls
+	const urls: Array<{ url: string; kind: InboundAttachment["kind"]; filename?: string }> = [];
+
+	if (content.url) {
+		const kind = content.type as InboundAttachment["kind"];
+		if (kind === "image" || kind === "file" || kind === "video" || kind === "voice") {
+			urls.push({ url: content.url, kind, filename: content.filename });
+		}
 	}
 
+	// Additional media URLs from richText messages
+	if (msg.mediaUrls) {
+		for (const url of msg.mediaUrls) {
+			urls.push({ url, kind: "image" });
+		}
+	}
+
+	for (const { url, kind, filename } of urls) {
+		const att = await downloadOneAttachment(url, kind, config, filename);
+		if (att) results.push(att);
+	}
+
+	return results;
+}
+
+/** Download a single attachment URL and convert to InboundAttachment. */
+async function downloadOneAttachment(
+	url: string,
+	kind: InboundAttachment["kind"],
+	config: DingTalkConfig,
+	filenameOverride?: string,
+): Promise<InboundAttachment | null> {
 	let downloaded: DownloadedMedia | null;
 	try {
 		downloaded = await downloadMedia(url, config);
 	} catch (err) {
 		logger.warn("[DingTalk Media] Attachment download threw", { error: String(err) });
-		return [];
+		return null;
 	}
 
 	if (!downloaded) {
 		logger.warn("[DingTalk Media] Attachment download returned null", { url: url.slice(0, 100) });
-		return [];
+		return null;
 	}
 
 	// Size guard
@@ -305,7 +333,7 @@ export async function resolveInboundAttachments(
 			filename: downloaded.originalName,
 		});
 		cleanupDownloadedMedia(downloaded);
-		return [];
+		return null;
 	}
 
 	// Read file bytes for MIME sniffing
@@ -317,21 +345,19 @@ export async function resolveInboundAttachments(
 			path: downloaded.path,
 			error: String(err),
 		});
-		return [];
+		return null;
 	}
 
 	const mimeType = resolveMimeType(buffer, downloaded.mimeType);
-	const filename = content.filename ?? downloaded.originalName;
+	const filename = filenameOverride ?? downloaded.originalName;
 
-	return [
-		{
-			kind,
-			data: buffer,
-			mimeType,
-			filename,
-			size: buffer.byteLength,
-		},
-	];
+	return {
+		kind,
+		data: buffer,
+		mimeType,
+		filename,
+		size: buffer.byteLength,
+	};
 }
 
 /**

@@ -20,7 +20,7 @@ import { toJsonRpcError } from "../../mcp/types";
 /**
  * HTTP transport for MCP servers.
  * Uses POST for requests, supports SSE responses.
-*/
+ */
 export class HttpTransport implements MCPTransport {
 	#connected = false;
 	#sessionId: string | null = null;
@@ -57,7 +57,7 @@ export class HttpTransport implements MCPTransport {
 	 * Start SSE listener for server-initiated messages.
 	 * Resolves once the SSE connection is established (or fails/unsupported).
 	 * Message reading continues in the background.
-*/
+	 */
 	async startSSEListener(): Promise<void> {
 		if (!this.#connected) return;
 		if (this.#sseConnection) return;
@@ -97,7 +97,7 @@ export class HttpTransport implements MCPTransport {
 			// Connection established — read messages in background.
 			// If the stream ends unexpectedly (server restart, network drop),
 			// fire onClose so the manager can trigger reconnection.
-const signal = this.#sseConnection.signal;
+			const signal = this.#sseConnection.signal;
 			void this.#readSSEStream(response.body!, signal).finally(() => {
 				const wasConnected = this.#connected;
 				this.#sseConnection = null;

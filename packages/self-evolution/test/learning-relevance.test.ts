@@ -57,7 +57,10 @@ describe("checkLearningRelevance", () => {
 	});
 
 	it("procedure: relevant when steps match", () => {
-		const l = makeLearning("procedure", "遇到 alidocs 链接时，先用 dws doc info 获取文档类型。如果是 AI 多维表，使用 dws aitable 命令。");
+		const l = makeLearning(
+			"procedure",
+			"遇到 alidocs 链接时，先用 dws doc info 获取文档类型。如果是 AI 多维表，使用 dws aitable 命令。",
+		);
 		const trace = makeTrace("Check this alidocs link", [
 			{ type: "tool_call", timestamp: 100, toolName: "dws", args: { action: "doc", sub: "info" } },
 			{ type: "tool_call", timestamp: 200, toolName: "dws", args: { action: "aitable" } },

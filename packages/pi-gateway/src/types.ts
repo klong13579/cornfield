@@ -46,6 +46,10 @@ export interface InboundMessage {
 	conversationTitle?: string;
 	isGroup: boolean;
 	content: MessageContent;
+	/** Additional media URLs to download (e.g. images embedded in richText).
+	 * Populated by the parser when a single content.url is insufficient
+	 * (e.g. DingTalk richText with multiple pictures). */
+	mediaUrls?: string[];
 	/** Downloaded media attachments (populated by channel layer after parse). */
 	attachments?: InboundAttachment[];
 	timestamp: Date;

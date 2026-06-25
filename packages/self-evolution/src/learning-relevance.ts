@@ -11,17 +11,101 @@
 import type { Learning, LearningKind, SessionTrace } from "./types";
 
 const STOP_WORDS = new Set([
-	"the","a","an","is","are","was","were","be","been","being",
-	"have","has","had","do","does","did","will","would","could",
-	"should","may","might","must","shall","can","need",
-	"to","of","in","for","on","with","at","by","from","as",
-	"and","but","or","yet","so","if","because","while","where","when",
-	"that","which","who","whom","what","this","these","those",
-	"i","you","he","she","it","we","they","me","him","her","us","them",
-	"my","your","his","its","our","their",
-	"不要","不能","必须","应该","可以","需要","使用","进行",
-	"所有","每个","任何","一些","这些","那些","这个","那个",
-	"用户","遇到","如果","然后","最后","首先","接着",
+	"the",
+	"a",
+	"an",
+	"is",
+	"are",
+	"was",
+	"were",
+	"be",
+	"been",
+	"being",
+	"have",
+	"has",
+	"had",
+	"do",
+	"does",
+	"did",
+	"will",
+	"would",
+	"could",
+	"should",
+	"may",
+	"might",
+	"must",
+	"shall",
+	"can",
+	"need",
+	"to",
+	"of",
+	"in",
+	"for",
+	"on",
+	"with",
+	"at",
+	"by",
+	"from",
+	"as",
+	"and",
+	"but",
+	"or",
+	"yet",
+	"so",
+	"if",
+	"because",
+	"while",
+	"where",
+	"when",
+	"that",
+	"which",
+	"who",
+	"whom",
+	"what",
+	"this",
+	"these",
+	"those",
+	"i",
+	"you",
+	"he",
+	"she",
+	"it",
+	"we",
+	"they",
+	"me",
+	"him",
+	"her",
+	"us",
+	"them",
+	"my",
+	"your",
+	"his",
+	"its",
+	"our",
+	"their",
+	"不要",
+	"不能",
+	"必须",
+	"应该",
+	"可以",
+	"需要",
+	"使用",
+	"进行",
+	"所有",
+	"每个",
+	"任何",
+	"一些",
+	"这些",
+	"那些",
+	"这个",
+	"那个",
+	"用户",
+	"遇到",
+	"如果",
+	"然后",
+	"最后",
+	"首先",
+	"接着",
 ]);
 
 /** Extract English technical terms: tool names, commands, file extensions */
@@ -29,9 +113,9 @@ function extractTerms(text: string): string[] {
 	const lower = text.toLowerCase();
 	// Tool names, commands, paths, URLs
 	const terms = [
-		...lower.match(/\b[a-z][a-z0-9_-]{2,}\b/g) ?? [],
-		...lower.match(/[./~][\w/.-]+/g) ?? [],
-		...lower.match(/[a-z0-9-]+\.[a-z]{2,}/g) ?? [],
+		...(lower.match(/\b[a-z][a-z0-9_-]{2,}\b/g) ?? []),
+		...(lower.match(/[./~][\w/.-]+/g) ?? []),
+		...(lower.match(/[a-z0-9-]+\.[a-z]{2,}/g) ?? []),
 	];
 	return [...new Set(terms)].filter(t => !STOP_WORDS.has(t));
 }
@@ -97,11 +181,11 @@ function scoreProcedureRelevance(learning: Learning, session: string): number {
 		const terms = extractTerms(step);
 		if (terms.length === 0) continue;
 
-const matched = terms.filter(k => session.includes(k));
+		const matched = terms.filter(k => session.includes(k));
 		if (matched.length / terms.length >= 0.3) {
 			matchedSteps++;
-}
-}
+		}
+	}
 
 	return matchedSteps / steps.length;
 }
@@ -135,7 +219,7 @@ function scoreFactRelevance(learning: Learning, session: string): number {
 	if (longest >= 4) return 0.8 + Math.min(0.2, (longest - 4) * 0.05);
 	if (longest === 3) return 0.45;
 	if (longest === 2) return 0.15;
-return 0;
+	return 0;
 }
 function scoreSkillHintRelevance(learning: Learning, session: string): number {
 	const content = learning.content.toLowerCase();

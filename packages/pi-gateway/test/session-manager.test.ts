@@ -176,6 +176,106 @@ describe("SessionManager", () => {
 		await pending;
 	});
 
+	describe("abortByUser fallback", () => {
+		// The OpenClaw 675cde2f schema's btn_stop click fires the
+		// TOPIC_CARD callback even for cards we never registered with
+		// the ActionRegistry. `Gateway.#handleCardAction` falls back
+		// to `SessionManager.abortByUser(userId)` when the registry
+		// lookup misses, so the user still kills the work they meant
+		// to kill. The fallback prefers a `defaultBridge` (the common
+		// single-account deployment); in multi-account mode without a
+		// default it tries every bridge and returns true if any abort
+		// took.
+
+		test("returns true when default bridge has an active prompt", async () => {
+			const ops = new FakeBridge(50);
+			const defaultBridge = new FakeBridge(50);
+			const manager = new SessionManager({
+				bridges: new Map([["ops", asBridge(ops)]]),
+				defaultBridge: asBridge(defaultBridge),
+			});
+			// The defaultBridge is a separate agent from the
+			// accountId-keyed bridges (used as a fallback for
+			// ambiguous lookups). Simulate an in-flight prompt on it
+			// by running forward() directly — that bumps `active` so
+			// the bridge's abort() returns true.
+			const defaultPending = defaultBridge.forward(makeMessage("default", "a", "1"), makeSession("default", "a"));
+			await Bun.sleep(10);
+			expect(await manager.abortByUser("user-1")).toBe(true);
+			expect(defaultBridge.abortCalls).toBe(1);
+			// ops bridge was NOT asked to abort — default bridge wins
+			expect(ops.abortCalls).toBe(0);
+			await defaultPending;
+		});
+
+		test("returns false when default bridge is idle", async () => {
+			const defaultBridge = new FakeBridge(0);
+			const manager = new SessionManager({
+				bridges: new Map(),
+				defaultBridge: asBridge(defaultBridge),
+			});
+			// No active work, default bridge abort returns false
+			expect(await manager.abortByUser("user-1")).toBe(false);
+			expect(defaultBridge.abortCalls).toBe(1);
+		});
+
+		test("in multi-account mode without default, tries every bridge", async () => {
+			const ops = new FakeBridge(0); // idle
+			const hr = new FakeBridge(50); // busy
+			const manager = new SessionManager({
+				bridges: new Map([
+					["ops", asBridge(ops)],
+					["hr", asBridge(hr)],
+				]),
+			});
+			const pending = manager.enqueue(makeMessage("hr", "a", "1"), makeSession("hr", "a"));
+			await Bun.sleep(10);
+			expect(await manager.abortByUser("user-1")).toBe(true);
+			expect(ops.abortCalls).toBe(1);
+			expect(hr.abortCalls).toBe(1);
+			await pending;
+		});
+
+		test("returns false in multi-account mode when all bridges are idle", async () => {
+			const ops = new FakeBridge(0);
+			const hr = new FakeBridge(0);
+			const manager = new SessionManager({
+				bridges: new Map([
+					["ops", asBridge(ops)],
+					["hr", asBridge(hr)],
+				]),
+			});
+			expect(await manager.abortByUser("user-1")).toBe(false);
+			expect(ops.abortCalls).toBe(1);
+			expect(hr.abortCalls).toBe(1);
+		});
+
+		test("continues trying other bridges when one throws", async () => {
+			const ops = new FakeBridge(50);
+			const hr = new FakeBridge(50);
+			// First call to ops abort throws; second call (used by the
+			// fallback loop) returns based on active count.
+			let opsCalls = 0;
+			const originalOpsAbort = ops.abort.bind(ops);
+			ops.abort = () => {
+				opsCalls++;
+				if (opsCalls === 1) throw new Error("synthetic bridge fault");
+				return originalOpsAbort();
+			};
+			const manager = new SessionManager({
+				bridges: new Map([
+					["ops", asBridge(ops)],
+					["hr", asBridge(hr)],
+				]),
+			});
+			const pending = manager.enqueue(makeMessage("hr", "a", "1"), makeSession("hr", "a"));
+			await Bun.sleep(10);
+			// hr is busy, ops throws, fallback should still return true
+			expect(await manager.abortByUser("user-1")).toBe(true);
+			await pending;
+		});
+	});
+
 	test("reports bridge snapshots by account", () => {
 		const ops = new FakeBridge();
 		const manager = new SessionManager({ bridges: new Map([["ops", asBridge(ops)]]) });

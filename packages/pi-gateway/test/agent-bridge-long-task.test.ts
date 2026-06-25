@@ -333,6 +333,133 @@ for await (const chunk of Bun.stdin.stream()) {
 	});
 });
 
+describe("AgentBridge long-task watcher cleanup on prompt termination", () => {
+	let fake: FakeBinary;
+	let bridge: AgentBridge;
+
+	// Fake RPC that emits a tool call then hangs forever — no tool
+	// result, no agent_end. This forces the bridge to terminate via
+	// timeout or abort, which is the path where watchers leaked.
+	const HANG_FOREVER_RPC = `#!/usr/bin/env bun
+	process.stdout.write(JSON.stringify({ type: "ready" }) + "\\n");
+	let buffer = "";
+	function emit(value) { process.stdout.write(JSON.stringify(value) + "\\n"); }
+	for await (const chunk of Bun.stdin.stream()) {
+	  buffer += new TextDecoder().decode(chunk);
+	  let idx = buffer.indexOf("\\n");
+	  while (idx !== -1) {
+	    const line = buffer.slice(0, idx).trim();
+	    buffer = buffer.slice(idx + 1);
+	    if (!line) { idx = buffer.indexOf("\\n"); continue; }
+	    const frame = JSON.parse(line);
+	    if (frame.type === "switch_session") {
+	      emit({ type: "response", id: frame.id, command: "switch_session", success: true, data: { cancelled: false } });
+	    } else if (frame.type === "prompt") {
+	      emit({ type: "response", id: frame.id, command: "prompt", success: true });
+	      emit({
+	        type: "message_update",
+	        assistantMessageEvent: { type: "toolcall_end", contentIndex: 0, toolCall: { id: "tc_hang", name: "bash", arguments: {} } },
+	        message: { role: "assistant", content: [] }
+	      });
+	      // hang forever — no tool result, no agent_end
+	    } else if (frame.type === "abort") {
+	      emit({ type: "response", id: frame.id, command: "abort", success: true });
+	    }
+	    idx = buffer.indexOf("\\n");
+	  }
+	}
+	`;
+
+	beforeEach(async () => {
+		fake = await createFakeRpcBinary(HANG_FOREVER_RPC);
+	});
+
+	afterEach(async () => {
+		if (bridge) bridge.stop();
+		await fake.cleanup();
+	});
+
+	test("watcher is cleared on RPC timeout — no pings after timeout", async () => {
+		bridge = new AgentBridge({
+			ompPath: fake.path,
+			timeoutMs: 300, // short timeout
+			longTaskThresholdMs: 50,
+			progressPingIntervalMs: 30,
+		});
+		await bridge.start();
+
+		const events: Array<{ threshold: boolean; elapsedMs: number }> = [];
+		const handlers: ForwardStreamHandlers = {
+			onLongTask: e => {
+				events.push({ threshold: e.threshold, elapsedMs: e.elapsedMs });
+			},
+		};
+
+		const meta = await bridge.forwardWithMeta(
+			makeMessage("hang", "conv-timeout-1"),
+			makeSession("/tmp/timeout-1.jsonl", "conv-timeout-1"),
+			handlers,
+		);
+		// The timeout produces a fallback meta (not null)
+		expect(meta).not.toBeNull();
+		expect(meta?.isFallback).toBe(true);
+
+		// The threshold should have fired at least once before the timeout
+		const eventsAtTimeout = events.length;
+		expect(eventsAtTimeout).toBeGreaterThanOrEqual(1);
+
+		// Wait well past several ping intervals. If the watcher leaked,
+		// we'd see additional onLongTask fires here.
+		await Bun.sleep(200);
+		expect(events.length).toBe(eventsAtTimeout);
+	});
+
+	test("watcher is cleared on abort — no pings after abort", async () => {
+		bridge = new AgentBridge({
+			ompPath: fake.path,
+			timeoutMs: 30_000, // long timeout — we'll abort before it fires
+			longTaskThresholdMs: 50,
+			progressPingIntervalMs: 30,
+		});
+		await bridge.start();
+
+		const events: Array<{ threshold: boolean; elapsedMs: number }> = [];
+		const handlers: ForwardStreamHandlers = {
+			onLongTask: e => {
+				events.push({ threshold: e.threshold, elapsedMs: e.elapsedMs });
+			},
+		};
+
+		// Drive the prompt in the background (it will hang).
+		const forwardP = bridge.forwardWithMeta(
+			makeMessage("hang", "conv-abort-1"),
+			makeSession("/tmp/abort-1.jsonl", "conv-abort-1"),
+			handlers,
+		);
+
+		// Wait for the threshold to fire, then abort.
+		const pollStart = Date.now();
+		while (Date.now() - pollStart < 5_000) {
+			if (events.length >= 1) break;
+			await Bun.sleep(10);
+		}
+		expect(events.length).toBeGreaterThanOrEqual(1);
+		const eventsAtAbort = events.length;
+
+		const aborted = await bridge.abort();
+		expect(aborted).toBe(true);
+
+		// forwardWithMeta resolves after the abort
+		const meta = await forwardP;
+		expect(meta).not.toBeNull();
+
+		// Wait well past several ping intervals. If the watcher leaked,
+		// we'd see additional onLongTask fires here.
+		await Bun.sleep(200);
+		expect(events.length).toBe(eventsAtAbort);
+	});
+});
+
 describe("AgentBridge long-task env override", () => {
 	// The env vars are read at module load. To test the override we
 	// spawn a fresh bun subprocess with the env set, then import the
@@ -384,7 +511,11 @@ describe("AgentBridge long-task env override", () => {
 			process.stdout.write(JSON.stringify({ threshold: __TEST_LONG_TASK_THRESHOLD_MS, ping: __TEST_LONG_TASK_PROGRESS_PING_MS }) + "\\n");
 		`;
 		const result = Bun.spawnSync(["bun", "-e", script], {
-			env: { ...process.env, DINGTALK_LONG_TASK_THRESHOLD_MS: "not-a-number", DINGTALK_LONG_TASK_PROGRESS_PING_MS: "-5" },
+			env: {
+				...process.env,
+				DINGTALK_LONG_TASK_THRESHOLD_MS: "not-a-number",
+				DINGTALK_LONG_TASK_PROGRESS_PING_MS: "-5",
+			},
 		});
 		expect(result.exitCode).toBe(0);
 		const out = readPayload(result);

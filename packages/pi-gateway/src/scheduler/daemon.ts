@@ -75,7 +75,11 @@ export class SchedulerDaemon {
 		// accumulate. This is the closest cross-platform equivalent to fcntl.flock.
 		try {
 			fs.mkdirSync(path.dirname(this.#lockPath), { recursive: true, mode: SCHEDULER_DIR_MODE });
-			this.#lockFd = fs.openSync(this.#lockPath, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL, 0o600);
+			this.#lockFd = fs.openSync(
+				this.#lockPath,
+				fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL,
+				0o600,
+			);
 			// Write PID into the lock file so a reader can tell who owns it
 			fs.writeSync(this.#lockFd, String(process.pid));
 		} catch (err: unknown) {
@@ -92,7 +96,11 @@ export class SchedulerDaemon {
 							// Stale lock — process is dead, remove and retry
 							logger.warn("Removing stale scheduler lock from PID " + oldPid);
 							fs.unlinkSync(this.#lockPath);
-							this.#lockFd = fs.openSync(this.#lockPath, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL, 0o600);
+							this.#lockFd = fs.openSync(
+								this.#lockPath,
+								fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL,
+								0o600,
+							);
 							fs.writeSync(this.#lockFd, String(process.pid));
 						}
 					}

@@ -21,9 +21,9 @@ export interface ToolStores {
 }
 
 export function registerSelfEvolutionTools(api: ExtensionAPI, stores: ToolStores): void {
-	api.registerTool(new WriteMemoryTool(
-		{ getStore: stores.learningStore, getCwd: stores.getCwd, ensureInit: stores.ensureInit },
-	));
+	api.registerTool(
+		new WriteMemoryTool({ getStore: stores.learningStore, getCwd: stores.getCwd, ensureInit: stores.ensureInit }),
+	);
 
 	api.registerTool({
 		name: "query_episodic_memory",

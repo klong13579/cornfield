@@ -70,10 +70,7 @@ describe("WorkflowMiner", () => {
 		]);
 		const pattern = miner.mine(trace, "exploration");
 		expect(pattern).toBeDefined();
-		expect(pattern!.commandSequence).toEqual([
-			"bash:which",
-			"bash:dws",
-		]);
+		expect(pattern!.commandSequence).toEqual(["bash:which", "bash:dws"]);
 		expect(pattern!.id).toContain("cmd:");
 	});
 

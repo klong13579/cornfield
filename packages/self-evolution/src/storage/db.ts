@@ -50,6 +50,29 @@ export function getEvolutionDb(cwd: string, globalStore?: boolean): Database {
 	return db;
 }
 
+/**
+ * Close and reopen a poisoned DB connection.
+ * Called when a cached connection hits a persistent I/O error (e.g. stale
+ * WAL shared-memory mapping). Closes the old handle, evicts it from the
+ * cache, then creates a fresh connection via getEvolutionDb.
+ */
+export function recreateEvolutionDb(cwd: string, globalStore?: boolean): Database {
+	const dbPath = resolveDbPath(cwd, globalStore);
+
+	const existing = dbCache.get(dbPath);
+	if (existing) {
+		try {
+			existing.db.close();
+		} catch (err) {
+			logger.warn("Failed to close poisoned evolution DB", { path: dbPath, error: String(err) });
+		}
+		dbCache.delete(dbPath);
+	}
+
+	logger.warn("Recreating evolution DB connection after I/O error", { path: dbPath });
+	return getEvolutionDb(cwd, globalStore);
+}
+
 export function closeEvolutionDb(cwd?: string, globalStore?: boolean): void {
 	const dbPath = resolveDbPath(cwd ?? "", globalStore);
 

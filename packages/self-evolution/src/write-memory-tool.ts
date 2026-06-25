@@ -220,6 +220,5 @@ export class WriteMemoryTool implements AgentTool<typeof writeMemorySchema, Writ
 		}
 		// Auto-detect based on target
 		return target === "user" ? "preference" : "fact";
-
 	}
-	}
+}

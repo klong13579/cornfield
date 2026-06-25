@@ -53,7 +53,7 @@ import {
 import { EpisodeRetriever } from "./retrieval";
 import { extractSessionLearnings } from "./session-learner";
 import { SkillPopulationEngine } from "./skill-population-engine";
-import { closeEvolutionDb, getEvolutionDb } from "./storage/db";
+import { closeEvolutionDb, getEvolutionDb, recreateEvolutionDb } from "./storage/db";
 import { SqliteDetailedOutcomeStore } from "./storage/detailed-outcomes";
 import { SqliteEpisodeDiagnosisStore } from "./storage/diagnoses";
 import { SqliteEffectivenessStore } from "./storage/effectiveness";
@@ -330,6 +330,47 @@ export const createSelfEvolutionExtension: ExtensionFactory = api => {
 		memoryDb = evolutionDb;
 	}
 
+	// ── DB connection recovery ──
+	let dbRecoveryCooldown = 0;
+
+	function isDiskIoError(err: unknown): boolean {
+		return String(err).includes("disk I/O error");
+	}
+
+	/**
+	 * Recover from a poisoned SQLite connection by closing the old handle,
+	 * creating a fresh one, and forcing _ensureInit to re-run on the next
+	 * handler invocation (via the `recorder` guard).
+	 *
+	 * A 10s cooldown prevents tight recovery loops if the underlying I/O
+	 * issue persists.
+	 */
+	function _recoverDbConnection(cwd: string): void {
+		const now = Date.now();
+		if (now - dbRecoveryCooldown < 10_000) return;
+		dbRecoveryCooldown = now;
+
+		logger.warn("Self-evolution DB connection poisoned (disk I/O error), recovering", { cwd });
+
+		try {
+			stopSkillsWatcher?.();
+			stopSkillsWatcher = undefined;
+		} catch {
+			// ignore watcher stop failure
+		}
+
+		try {
+			recreateEvolutionDb(cwd, flags.globalStore);
+		} catch (err) {
+			logger.error("Self-evolution DB recreation failed", { error: String(err) });
+			return;
+		}
+
+		// Force re-initialization on next handler call
+		recorder = undefined;
+		benefitAdmissionRefreshed = false;
+	}
+
 	async function _retrieveRelevantSkills(
 		query: string,
 	): Promise<Array<{ name: string; taskPattern: string; approach: string }>> {
@@ -449,6 +490,7 @@ export const createSelfEvolutionExtension: ExtensionFactory = api => {
 				.catch((err: unknown) => logger.warn("episodic record failed", { error: String(err) }));
 		} catch (err) {
 			logger.error("Self-evolution agent_start handler failed", { error: String(err) });
+			if (isDiskIoError(err)) _recoverDbConnection(latestCwd);
 		}
 
 		// Fire-and-forget: ingest completed external traces
@@ -507,6 +549,7 @@ export const createSelfEvolutionExtension: ExtensionFactory = api => {
 			recorder?.onInput(event.text);
 		} catch (err) {
 			logger.error("Self-evolution input handler failed", { error: String(err) });
+			if (isDiskIoError(err)) _recoverDbConnection(latestCwd);
 		}
 	});
 
@@ -531,6 +574,7 @@ export const createSelfEvolutionExtension: ExtensionFactory = api => {
 				.catch((err: unknown) => logger.warn("episodic record failed", { error: String(err) }));
 		} catch (err) {
 			logger.error("Self-evolution tool_execution_start handler failed", { error: String(err) });
+			if (isDiskIoError(err)) _recoverDbConnection(latestCwd);
 		}
 	});
 
@@ -588,6 +632,7 @@ export const createSelfEvolutionExtension: ExtensionFactory = api => {
 			nudgeEffectivenessTracker?.onToolExecution();
 		} catch (err) {
 			logger.error("Self-evolution tool_execution_end handler failed", { error: String(err) });
+			if (isDiskIoError(err)) _recoverDbConnection(latestCwd);
 		}
 	});
 
@@ -596,6 +641,7 @@ export const createSelfEvolutionExtension: ExtensionFactory = api => {
 			recorder?.onMessageEnd(event);
 		} catch (err) {
 			logger.error("Self-evolution message_end handler failed", { error: String(err) });
+			if (isDiskIoError(err)) _recoverDbConnection(latestCwd);
 		}
 	});
 
@@ -658,6 +704,7 @@ export const createSelfEvolutionExtension: ExtensionFactory = api => {
 			}
 		} catch (err) {
 			logger.warn("Pipeline context injection failed", { error: String(err) });
+			if (isDiskIoError(err)) _recoverDbConnection(latestCwd);
 		}
 	});
 
@@ -913,6 +960,7 @@ export const createSelfEvolutionExtension: ExtensionFactory = api => {
 			await episodeStore?.deleteOld(flags.maxEpisodes);
 		} catch (err) {
 			logger.error("Self-evolution agent_end handler failed", { error: String(err) });
+			if (isDiskIoError(err)) _recoverDbConnection(latestCwd);
 		}
 	});
 
@@ -1065,6 +1113,7 @@ export const createSelfEvolutionExtension: ExtensionFactory = api => {
 			};
 		} catch (err) {
 			logger.error("Self-evolution before_agent_start handler failed", { error: String(err) });
+			if (isDiskIoError(err)) _recoverDbConnection(latestCwd);
 		}
 	});
 

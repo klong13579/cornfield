@@ -684,7 +684,9 @@ export class CommandController {
 			this.ctx.chatContainer.addChild(new DynamicBorder());
 			this.ctx.chatContainer.addChild(new Text(theme.bold(theme.fg("accent", "Task Board")), 1, 0));
 			this.ctx.chatContainer.addChild(new Spacer(1));
-			this.ctx.chatContainer.addChild(new Text(`${theme.fg("green", `✓ Topic "${name}" added successfully`)} (ID: ${id})`, 1, 0));
+			this.ctx.chatContainer.addChild(
+				new Text(`${theme.fg("green", `✓ Topic "${name}" added successfully`)} (ID: ${id})`, 1, 0),
+			);
 			this.ctx.chatContainer.addChild(new DynamicBorder());
 			this.ctx.ui.requestRender();
 		} catch (error) {

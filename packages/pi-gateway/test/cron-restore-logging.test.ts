@@ -134,7 +134,7 @@ describe("cron model restore failure logging", () => {
 
 		// Assert: the restore failure was logged, not silently swallowed.
 		const restoreErrors = errorSpy.mock.calls.filter(
-			(call) => typeof call[0] === "string" && call[0].includes("Failed to restore original model"),
+			call => typeof call[0] === "string" && call[0].includes("Failed to restore original model"),
 		);
 		expect(restoreErrors.length).toBeGreaterThan(0);
 	});

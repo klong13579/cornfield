@@ -82,8 +82,9 @@ describe("learning feedback integration — positive correlation", () => {
 	});
 
 	it("procedure: alidocs steps + dws calls = helped", () => {
-		const l = makeLearning("procedure",
-			"遇到 alidocs 链接时，先用 dws doc info 获取文档类型。如果是 AI 多维表，使用 dws aitable 命令。"
+		const l = makeLearning(
+			"procedure",
+			"遇到 alidocs 链接时，先用 dws doc info 获取文档类型。如果是 AI 多维表，使用 dws aitable 命令。",
 		);
 		const trace = makeTrace("Check this alidocs link", [
 			{ type: "tool_call", timestamp: 100, toolName: "dws", args: { action: "doc", sub: "info" } },
@@ -143,8 +144,9 @@ describe("learning feedback integration — negative correlation", () => {
 	});
 
 	it("procedure: alidocs steps + only read tool = skipped", () => {
-		const l = makeLearning("procedure",
-			"遇到 alidocs 链接时，先用 dws doc info 获取文档类型。如果是 AI 多维表，使用 dws aitable 命令。"
+		const l = makeLearning(
+			"procedure",
+			"遇到 alidocs 链接时，先用 dws doc info 获取文档类型。如果是 AI 多维表，使用 dws aitable 命令。",
 		);
 		const trace = makeTrace("Read a local file", [
 			{ type: "tool_call", timestamp: 100, toolName: "read", args: { path: "/foo" } },
@@ -178,9 +180,11 @@ describe("learning feedback integration — negative correlation", () => {
 
 	it("session with errors: relevant learning gets ignored (not helped)", () => {
 		const l = makeLearning("preference", "所有 DingTalk 链接必须使用 dws CLI 工具处理");
-		const trace = makeTrace("Read this DingTalk doc", [
-			{ type: "tool_call", timestamp: 100, toolName: "dws", args: { action: "doc" } },
-		], { errorCount: 1 });
+		const trace = makeTrace(
+			"Read this DingTalk doc",
+			[{ type: "tool_call", timestamp: 100, toolName: "dws", args: { action: "doc" } }],
+			{ errorCount: 1 },
+		);
 		const { helped, ignored, skipped } = simulateFeedback([l], trace);
 		expect(helped).toHaveLength(0);
 		expect(ignored).toContain(l.id);
@@ -216,16 +220,17 @@ describe("learning feedback integration — mixed sessions", () => {
 	});
 
 	it("complex session with partial procedure match: procedure skipped if steps don't match enough", () => {
-		const l = makeLearning("procedure",
-"遇到 alidocs 链接时，先用 dws doc info 获取文档类型。如果是 AI 多维表，使用 aitable 命令。然后 validate 数据格式。再 export 结果。最后 convert 成 csv。"
-);
-// Only 1 of 5 steps match (dws doc info called, but no aitable/validate/export/convert)
-const trace = makeTrace("Check this alidocs link", [
-{ type: "tool_call", timestamp: 100, toolName: "dws", args: { action: "doc", sub: "info" } },
-]);
-const { helped, ignored, skipped } = simulateFeedback([l], trace);
-expect(helped).toHaveLength(0);
-expect(ignored).toHaveLength(0);
+		const l = makeLearning(
+			"procedure",
+			"遇到 alidocs 链接时，先用 dws doc info 获取文档类型。如果是 AI 多维表，使用 aitable 命令。然后 validate 数据格式。再 export 结果。最后 convert 成 csv。",
+		);
+		// Only 1 of 5 steps match (dws doc info called, but no aitable/validate/export/convert)
+		const trace = makeTrace("Check this alidocs link", [
+			{ type: "tool_call", timestamp: 100, toolName: "dws", args: { action: "doc", sub: "info" } },
+		]);
+		const { helped, ignored, skipped } = simulateFeedback([l], trace);
+		expect(helped).toHaveLength(0);
+		expect(ignored).toHaveLength(0);
 		expect(skipped).toContain(l.id);
-});
+	});
 });

@@ -92,6 +92,42 @@ describe("DingTalkChannel card action callback", () => {
 		expect(received[0]?.params.type).toBe("stop");
 	});
 
+	test("parses the OpenClaw 675cde2f schema's btn_stop click shape", async () => {
+		// The schema's static top-right "中止" button fires a
+		// dtActionSheet -> dtSendOutData callback that lands here as
+		// `actionIds: ["btn_stop"]` with `params: {action: "true"}`
+		// (no `type` field). `Gateway.#handleCardAction` recognises
+		// this shape as a stop action even without `params.type`,
+		// so the channel MUST surface both fields correctly to the
+		// installed handler.
+		const frame: CardCallbackFrame = {
+			headers: { messageId: "msg-btn-stop" },
+			data: JSON.stringify({
+				type: "actionCallback",
+				outTrackId: "card_openclaw",
+				corpId: "ding2ed7bb2061fa510a",
+				userIdType: 1,
+				userId: "601590212",
+				spaceType: "im",
+				spaceId: "cidz1b3B6/01GDW+OQU/6RjiWbhu83I6Vlr6WJkl06VJDo=",
+				content: JSON.stringify({
+					cardPrivateData: {
+						actionIds: ["btn_stop"],
+						params: { action: "true" },
+					},
+				}),
+			}),
+		};
+		await channel.__testHandleCardCallback(frame);
+		expect(received).toHaveLength(1);
+		const ev = received[0]!;
+		expect(ev.cardInstanceId).toBe("card_openclaw");
+		expect(ev.actionIds).toEqual(["btn_stop"]);
+		// Note: no `type` field — the handler must check `actionIds`
+		expect(ev.params.type).toBeUndefined();
+		expect(ev.params.action).toBe("true");
+	});
+
 	test("silently drops the callback if no handler is installed", async () => {
 		// New channel without a handler
 		const ch2 = new DingTalkChannel();

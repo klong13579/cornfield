@@ -8,6 +8,8 @@
 - **Unified memory CLI**: `/evolution memory` hub (`search`, `stats`, `report`, `view`, `enqueue`, `refresh-summary`, `clear`); `/memory` remains a compat alias via `evolution-memory.ts`.
 - **Architecture doc**: [docs/omp-evolution-architecture-v3.md](../../docs/omp-evolution-architecture-v3.md) (V3 flows, 1-B migration, Hermes/OpenClaw mapping).
 
+- **DB connection recovery on disk I/O error**: `db.ts` exports `recreateEvolutionDb(cwd, globalStore)` which closes a poisoned SQLite handle, evicts it from the `dbCache`, and opens a fresh connection. `index.ts` detects `disk I/O error` in all handler catch blocks and calls `_recoverDbConnection` — which recreates the DB, stops the skills watcher, and resets the `_ensureInit` guard (`recorder = undefined`) so the next handler invocation re-initializes all stores with the fresh handle. A 10-second cooldown prevents tight recovery loops. Previously, once a cached connection hit a persistent I/O error (e.g. stale WAL shared-memory mapping), the `dbCache` held the dead handle forever and every subsequent write failed for the process's remaining lifetime.
+
 ### Changed
 
 - **Removed V2 dead code**: JSONL `convention-store`, `projection.ts` conventions import/export, `SqliteConventionStore`, convention compliance checker, 4-layer injection formatter path, convention regression replay on `RegressionReplayBackend`; production injection always uses 7-layer formatter.

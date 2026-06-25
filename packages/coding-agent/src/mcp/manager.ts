@@ -705,10 +705,10 @@ export class MCPManager {
 		// Tools stay available (stale) while we establish the new connection.
 		// Fire-and-forget: don't await the close — HttpTransport.close() sends a
 		// DELETE with config.timeout (30s default), and blocking here delays the
-// reconnect loop by that amount on every server restart.
-const reconnectEpoch = this.#epoch;
-	if (oldConnection) {
-		// Detach onClose to prevent re-entrant reconnect from the close itself
+		// reconnect loop by that amount on every server restart.
+		const reconnectEpoch = this.#epoch;
+		if (oldConnection) {
+			// Detach onClose to prevent re-entrant reconnect from the close itself
 			// Detach onClose to prevent re-entrant reconnect from the close itself
 			oldConnection.transport.onClose = undefined;
 			await oldConnection.transport.close().catch(() => {});

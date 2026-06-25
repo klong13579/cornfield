@@ -90,7 +90,7 @@ tmux kill-session -t "$SESSION"
 
 ## 4. Report
 
-`tests_passed: true` only if you ran the scenario, saw success signals, and can say how a regression would break the check.
+`级tests_passed: true` only if you ran the scenario, saw success signals, and can say how a regression would break the check.
 
 Call `yield` with `result.data`: `summary`, `tests_passed`, `validation_methods`, and when useful `user_scenario`, `evidence`, `failures`, `recommendations`. Omit empty optionals. **MUST NOT** put JSON in plain text.
 </procedure>

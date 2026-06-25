@@ -211,6 +211,7 @@ export function parseRobotMessage(
 	messageId?: string,
 ): InboundMessage | null {
 	let content: MessageContent;
+	let richTextMediaUrls: string[] | undefined;
 	const msgtype = raw.msgtype ?? "text";
 
 	switch (msgtype) {
@@ -271,6 +272,50 @@ export function parseRobotMessage(
 			break;
 		}
 
+		case "video": {
+			const vidParsed = parseContentField(raw.content);
+			const downloadCode = vidParsed.downloadCode || "";
+			content = {
+				type: "video",
+				url: downloadCode ? `downloadCode:${downloadCode}` : "",
+				filename: "video.mp4",
+			};
+			break;
+		}
+
+		case "richText": {
+			const rtParsed = parseContentField(raw.content);
+			const parts = Array.isArray(rtParsed.richText) ? rtParsed.richText : [];
+			let rtText = "";
+			const pictureCodes: string[] = [];
+			for (const part of parts) {
+				const p = part as Record<string, unknown>;
+				const pType = typeof p.type === "string" ? p.type : undefined;
+				const pText = typeof p.text === "string" ? p.text : undefined;
+				if ((pType === "text" || pType === undefined) && pText) {
+					rtText += pText;
+				} else if (pType === "at" && typeof p.atName === "string") {
+					rtText += `@${p.atName} `;
+				} else if (pType === "picture") {
+					rtText += "[图片]";
+					if (typeof p.downloadCode === "string" && p.downloadCode.trim()) {
+						pictureCodes.push(p.downloadCode.trim());
+					}
+				}
+			}
+			rtText = rtText.trim();
+			if (!rtText && pictureCodes.length === 0) {
+				logger.debug("[DingTalk] skipping empty richText message", { messageId });
+				return null;
+			}
+			content = { type: "text", text: rtText || "[富文本消息]" };
+			// Stash image downloadCodes as mediaUrls for the channel layer to download.
+			// parseRobotMessage returns InboundMessage, but we can't set mediaUrls here
+			// because it's on the return object — set it below via a closure variable.
+			richTextMediaUrls = pictureCodes.map(c => `downloadCode:${c}`);
+			break;
+		}
+
 		default: {
 			let text = "";
 			if (raw.text?.content) {
@@ -297,6 +342,7 @@ export function parseRobotMessage(
 		conversationTitle: raw.conversationTitle ?? "",
 		isGroup: raw.conversationType === "2",
 		content,
+		mediaUrls: richTextMediaUrls,
 		timestamp: new Date(raw.createAt ?? Date.now()),
 		raw,
 		sessionWebhook: raw.sessionWebhook,
@@ -1901,10 +1947,17 @@ export class DingTalkChannel extends BaseChannel {
 			// Download media attachments (images/files/videos) before forwarding.
 			// Fail-soft: download errors produce an empty array and the message
 			// still reaches the agent as text.
-			if (this.#config && inbound.content.type !== "text" && inbound.content.type !== "markdown") {
+			// Also downloads for richText messages where content.type is "text"
+			// but mediaUrls carries embedded image downloadCodes.
+			const needsDownload =
+				this.#config &&
+				((inbound.content.type !== "text" && inbound.content.type !== "markdown") ||
+					(inbound.mediaUrls && inbound.mediaUrls.length > 0));
+			if (needsDownload) {
 				logger.info("[DingTalk] Downloading attachment", {
 					type: inbound.content.type,
 					url: (inbound.content as any).url?.slice(0, 80),
+					mediaUrlCount: inbound.mediaUrls?.length ?? 0,
 				});
 				const { resolveInboundAttachments } = await import("./dingtalk-media");
 				inbound.attachments = await resolveInboundAttachments(inbound, this.#config);

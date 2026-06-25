@@ -24,7 +24,7 @@ export interface TaskBoard {
 	getByModule(module: string): TaskTopic[];
 	getByTag(tag: string): TaskTopic[];
 	addTopic(topic: TaskTopic): void;
-    load(yamlContent: string, path?: string): void;
-    save(yamlPath: string): Promise<void>;
-    reload(yamlPath: string): Promise<void>;
+	load(yamlContent: string, path?: string): void;
+	save(yamlPath: string): Promise<void>;
+	reload(yamlPath: string): Promise<void>;
 }

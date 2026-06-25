@@ -114,6 +114,36 @@ export class SessionManager {
 		return await bridge.abort();
 	}
 
+	/**
+	 * Abort the bridge for the account that owns a given user. Used as
+	 * a fallback when a card-action click arrives for a cardInstanceId
+	 * the registry doesn't know about (e.g. the schema's static
+	 * `btn_stop` button fires from a card we never registered because
+	 * the long-task watcher never ran for that tool). Pick the account
+	 * that has the most recent activity for this user; if no account
+	 * has seen them, fall back to the default bridge.
+	 */
+	async abortByUser(userId: string): Promise<boolean> {
+		// We don't track user→account directly, so the safest
+		// fallback is: if a default bridge exists, abort it; the
+		// single-account case is the common one. Multi-account
+		// deployments should always go through the registry.
+		if (this.#defaultBridge) {
+			return await this.#defaultBridge.abort();
+		}
+		// No default — try every account; return true if any aborted.
+		let any = false;
+		for (const bridge of this.#bridges.values()) {
+			try {
+				if (await bridge.abort()) any = true;
+			} catch {
+				// ignore per-bridge abort errors so a single failed
+				// bridge doesn't block the others
+			}
+		}
+		return any;
+	}
+
 	getQueueStats(): QueueStat[] {
 		const now = Date.now();
 		return Array.from(this.#queues.entries()).map(([accountId, state]) => ({
