@@ -546,7 +546,7 @@ export class DingTalkChannel extends BaseChannel {
 
 		const flushBlocks = (): void => {
 			blockPatchTimer = null;
-			logger.debug("[DingTalk] patchAICardBlocks", {
+			logger.info("[DingTalk] patchAICardBlocks", {
 				accountId: this.#accountId,
 				conversationId: inbound.conversationId,
 				blockCount: blocks.length,
@@ -657,7 +657,7 @@ export class DingTalkChannel extends BaseChannel {
 				pendingTools.set(call.id, { name: call.name, args: call.args });
 			},
 			onToolResult: result => {
-				logger.debug("[DingTalk] onToolResult", {
+				logger.info("[DingTalk] onToolResult", {
 					accountId: this.#accountId,
 					toolName: result.name,
 					toolId: result.id,

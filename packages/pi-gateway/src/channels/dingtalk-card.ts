@@ -409,7 +409,7 @@ export function buildToolBlock(call: { name: string; args: unknown }, resultText
 		: `${emoji} ${call.name}(${argsPreview})`;
 	const body = resultText || execLabel;
 	const wrapped = `> <font sizeToken=common_h5_text_style__font_size colorTokenV2=common_level2_base_color>${execLabel}\n${body}</font>`;
-	logger.debug("[DingTalk] buildToolBlock", {
+	logger.info("[DingTalk] buildToolBlock", {
 		toolName: call.name,
 		emoji,
 		hasResult: !!resultText,
