@@ -23,8 +23,9 @@
  * correctly in both dev and compiled binary modes.
  */
 
-import { Args, Command, Flags, renderCommandHelp } from "@oh-my-pi/pi-utils/cli";
+import * as path from "node:path";
 import { logger } from "@oh-my-pi/pi-utils";
+import { Args, Command, Flags, renderCommandHelp } from "@oh-my-pi/pi-utils/cli";
 import { initTheme } from "../modes/theme/theme";
 
 const ACTIONS = [
@@ -48,14 +49,14 @@ export default class Gateway extends Command {
 	static args = {
 		action: Args.string({
 			description:
-			"Gateway action: start | stop | status | doctor | reload | config | cron | send | service | test-longtask | help",
+				"Gateway action: start | stop | status | doctor | reload | config | cron | send | service | test-longtask | help",
 			required: false,
 			options: ACTIONS,
 		}),
 	};
 
 	static flags = {
-		foreground: Flags.boolean({ description: "Run in foreground (default)" }),
+		foreground: Flags.boolean({ description: "Run in foreground (used internally for daemon mode)" }),
 		config: Flags.string({ description: "Path to gateway config file (default: ~/.omp/gateway.json)" }),
 	};
 
@@ -109,33 +110,113 @@ export default class Gateway extends Command {
 
 		switch (action) {
 			case "start": {
-				const { Gateway: GW } = await import("@oh-my-pi/pi-gateway/src/gateway");
-				const { loadConfig } = await import("@oh-my-pi/pi-gateway/src/config");
-				const config = await loadConfig(configPath);
-				const gateway = new GW(config);
+				// --foreground: run in foreground (blocking). Used by the daemon child
+				// process and service mode (launchd/systemd). Default path daemonizes.
+				if (flags.foreground) {
+					const { Gateway: GW } = await import("@oh-my-pi/pi-gateway/src/gateway");
+					const { loadConfig } = await import("@oh-my-pi/pi-gateway/src/config");
+					const config = await loadConfig(configPath);
+					const gateway = new GW(config);
 
-				const shutdown = async () => {
-					await gateway.stop();
-					process.exit(0);
-				};
-				process.on("SIGINT", shutdown);
-				process.on("SIGTERM", shutdown);
+					const shutdown = async () => {
+						await gateway.stop();
+						process.exit(0);
+					};
+					process.on("SIGINT", shutdown);
+					process.on("SIGTERM", shutdown);
 
-				// Reload config on SIGHUP without restarting the process
-				process.on("SIGHUP", async () => {
-					logger.debug("Reloading gateway config...");
-					try {
-						const nextConfig = await loadConfig(configPath);
-						await gateway.reload(nextConfig);
-					} catch (err) {
-						logger.error("Failed to reload gateway config", {
-							error: err instanceof Error ? err.message : String(err),
+					// Reload config on SIGHUP without restarting the process
+					process.on("SIGHUP", async () => {
+						logger.debug("Reloading gateway config...");
+						try {
+							const nextConfig = await loadConfig(configPath);
+							await gateway.reload(nextConfig);
+						} catch (err) {
+							logger.error("Failed to reload gateway config", {
+								error: err instanceof Error ? err.message : String(err),
+							});
+						}
+					});
+
+					// Same error-boundary as pi-gateway cli.ts — a single async
+					// rejection must not crash the daemon.
+					process.on("unhandledRejection", reason => {
+						logger.error("unhandledRejection in gateway process", {
+							reason: reason instanceof Error ? reason.stack || reason.message : String(reason),
 						});
-					}
-				});
+					});
+					process.on("uncaughtException", err => {
+						logger.error("uncaughtException in gateway process", {
+							error: err.stack || err.message,
+						});
+					});
 
-				await gateway.start();
-				await new Promise(() => {});
+					await gateway.start();
+					await new Promise(() => {});
+					break;
+				}
+
+				// Default: daemonize — spawn detached child, wait for ready, print status
+				const { getGatewayStatus, PID_FILE } = await import("@oh-my-pi/pi-gateway/src/gateway");
+				const { loadConfig, getDataDir } = await import("@oh-my-pi/pi-gateway/src/config");
+
+				// Already running?
+				const existingStatus = await getGatewayStatus();
+				if (existingStatus.running) {
+					console.log(`Gateway already running (PID ${existingStatus.pid}).`);
+					await this.#printStatus(existingStatus);
+					return;
+				}
+
+
+			// Spawn detached child with --foreground.
+			// In bun dev mode: process.argv[1] is the .ts entry point.
+			// In compiled omp binary: process.argv[1] is absent, use "omp" from PATH.
+			const entry = process.argv[1];
+			const isDevMode = entry && (entry.endsWith(".ts") || entry.endsWith(".js"));
+			const childCmd = isDevMode
+				? [process.execPath, entry, "gateway", "start", "--foreground"]
+				: [process.execPath, "gateway", "start", "--foreground"];
+			if (configPath) childCmd.push("--config", configPath);
+
+			const child = Bun.spawn({
+				cmd: childCmd,
+				stdin: "ignore",
+				stdout: "ignore",
+				stderr: "ignore",
+				detached: true,
+			});
+			child.unref?.();
+
+				// Wait for PID file to appear (up to 15s)
+				const config = await loadConfig(configPath);
+				const pidPath = path.join(getDataDir(config), PID_FILE);
+
+				let ready = false;
+				for (let i = 0; i < 150; i++) {
+					await Bun.sleep(100);
+					try {
+						const pidText = await Bun.file(pidPath).text();
+						const pid = parseInt(pidText.trim(), 10);
+						if (pid > 0) {
+							try {
+								process.kill(pid, 0);
+								ready = true;
+								break;
+							} catch {}
+						}
+					} catch {}
+				}
+
+				if (!ready) {
+					console.error("Gateway failed to start within 15s. Check logs: ~/.omp/logs/omp.*.log");
+					process.exitCode = 1;
+					return;
+				}
+
+				console.log("✅ Gateway started in daemon mode.");
+				const status = await getGatewayStatus();
+				await this.#printStatus(status);
 				break;
 			}
 			case "stop": {
@@ -187,21 +268,19 @@ export default class Gateway extends Command {
 				const channels = Object.keys(config.channels ?? {});
 				if (channels.length > 0) {
 					console.log(`  Configured channels: ${channels.join(", ")}`);
+				}
+				break;
 			}
-			break;
-		}
-		case "reload": {
-			// SIGHUP-based reload crashes the bun process (Bun async signal handler bug).
-			// Restart the service instead — launchd KeepAlive handles the gap.
-			const { stopService, startService } = await import(
-				"@oh-my-pi/pi-gateway/src/service-installer"
-			);
-			await stopService();
-			await Bun.sleep(1000);
-			await startService();
-			console.log("Gateway restarted with updated config.");
-			break;
-		}
+			case "reload": {
+				// SIGHUP-based reload crashes the bun process (Bun async signal handler bug).
+				// Restart the service instead — launchd KeepAlive handles the gap.
+				const { stopService, startService } = await import("@oh-my-pi/pi-gateway/src/service-installer");
+				await stopService();
+				await Bun.sleep(1000);
+				await startService();
+				console.log("Gateway restarted with updated config.");
+				break;
+			}
 			case "doctor": {
 				const argv = process.argv.slice(process.argv.indexOf("doctor") + 1);
 				const { runDoctor, renderText, renderJson, applyFixes, countBySeverity } = await import(
@@ -332,6 +411,41 @@ export default class Gateway extends Command {
 			default:
 				console.error(`Unknown action: ${action}`);
 				process.exitCode = 1;
+		}
+	}
+
+	// Print gateway status (channels, accounts, scheduler) from a GatewayDaemonStatus.
+	async #printStatus(status: {
+		running: boolean;
+		pid?: number;
+		startedAt?: string;
+		channels?: Array<{ id: string; name: string; connected: boolean }>;
+		accounts?: Array<{ accountId: string; bridgeRunning: boolean; bridgeState?: string }>;
+		scheduler?: { running: boolean; taskCount: number };
+	}): Promise<void> {
+		if (status.running) {
+			console.log(`  PID: ${status.pid}`);
+			console.log(`  Started: ${status.startedAt}`);
+			if (status.channels && status.channels.length > 0) {
+				console.log("  Channels:");
+				for (const ch of status.channels) {
+					console.log(`    ${ch.name} (${ch.id}): ${ch.connected ? "connected" : "disconnected"}`);
+				}
+			}
+			if (status.accounts && status.accounts.length > 0) {
+				console.log("  Accounts:");
+				for (const acct of status.accounts) {
+					console.log(
+						`    ${acct.accountId}: bridge ${acct.bridgeRunning ? "running" : "stopped"}` +
+							(acct.bridgeState ? ` [${acct.bridgeState}]` : ""),
+					);
+				}
+			}
+			if (status.scheduler) {
+				console.log(
+					`  Scheduler: ${status.scheduler.running ? "running" : "stopped"} (${status.scheduler.taskCount} tasks)`,
+				);
+			}
 		}
 	}
 

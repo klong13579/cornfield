@@ -96,6 +96,7 @@ function generateLaunchdPlist(cliPath: string, logPath: string): string {
 		<string>${getRuntimePath()}</string>
 		<string>${cliPath}</string>
 		<string>start</string>
+		<string>--foreground</string>
 	</array>
 	<key>RunAtLoad</key>
 	<true/>
@@ -125,7 +126,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=${getRuntimePath()} ${cliPath} start
+ExecStart=${getRuntimePath()} ${cliPath} start --foreground
 Restart=on-failure
 RestartSec=5
 StandardOutput=append:${logPath}

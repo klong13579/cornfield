@@ -4,6 +4,8 @@
 
 ### Added
 
+- **`omp gateway start` now daemonizes by default**: Previously `omp gateway start` ran in the foreground, blocking the terminal and dying on Ctrl+C. Now it spawns a detached background child process (via `--foreground` flag internally), waits for the PID file to appear (up to 15s), prints the gateway status, and returns control to the shell. If the gateway is already running, it prints the existing status without starting a new process. The `--foreground` flag is available for service mode (launchd/systemd) and debugging. The service installer (`service-installer.ts`) was updated to pass `--foreground` in both launchd plist and systemd unit files.
+
 - **`omp agent unregister --delete-files`**: New flag that also `rm -rf`s the agentDir on disk after unregistering it from the registry. The directory path is read from the registry entry before unregister, so the file deletion and the registry removal are coordinated: if `rm` fails or the path is `/`/empty (defensive safety check), the registry entry is preserved and the user can retry. Off by default; the previous registry-only behavior is unchanged when the flag is omitted.
 
 - **`omp agent reconcile` test coverage**: Added two tests for the previously-untested auto-register path: (1) reconcile picks up agentDirs in the default location not yet in the registry; (2) reconcile is idempotent — re-running after a clean registry is a no-op.
