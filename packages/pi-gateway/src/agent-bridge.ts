@@ -15,7 +15,7 @@
  * - Collects all `message_end` events with `role: "assistant"` between prompt and end.
  */
 
-import type { AssistantMessage, ToolCall, ToolResultMessage, Usage } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage, ImageContent, ToolCall, ToolResultMessage, Usage } from "@oh-my-pi/pi-ai";
 import { logger } from "@oh-my-pi/pi-utils";
 import type { FileSink } from "bun";
 import { resolveCredentialEnvVars } from "./credential-resolver";
@@ -23,6 +23,7 @@ import type {
 	AgentResponseMeta,
 	AgentResponseToolCall,
 	AgentResponseToolResult,
+	InboundAttachment,
 	InboundMessage,
 	SessionRecord,
 } from "./types";
@@ -88,6 +89,12 @@ const LONG_TASK_PROGRESS_PING_MS = readEnvInt(
  * `LONG_TASK_THRESHOLD_MS` / `LONG_TASK_PROGRESS_PING_MS` directly. */
 export const __TEST_LONG_TASK_THRESHOLD_MS = LONG_TASK_THRESHOLD_MS;
 export const __TEST_LONG_TASK_PROGRESS_PING_MS = LONG_TASK_PROGRESS_PING_MS;
+
+function formatBytes(bytes: number): string {
+	if (bytes < 1024) return `${bytes} B`;
+	if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+	return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 export type AgentBridgeLifecycleState = "stopped" | "starting" | "idle" | "busy" | "restarting" | "degraded" | "error";
 
@@ -547,7 +554,7 @@ export class AgentBridge {
 		session: SessionRecord,
 		handlers?: ForwardStreamHandlers,
 	): Promise<AgentResponseMeta | null> {
-		const text = this.#extractText(msg);
+		const { text, images } = this.#extractPrompt(msg);
 		if (!text.trim()) {
 			logger.debug("Empty message, skipping agent");
 			return null;
@@ -594,7 +601,7 @@ export class AgentBridge {
 					30_000,
 				);
 			}
-				const events = await this.#promptAndWait(text, timeoutMs, handlers);
+				const events = await this.#promptAndWait(text, timeoutMs, handlers, images);
 				// The active prompt's `aborted` flag was set by
 				// `#resolveActivePromptAsAborted` before the await chain
 				// unblocked. By the time we're back here, the pending
@@ -1275,7 +1282,7 @@ export class AgentBridge {
 		return promise;
 	}
 
-	async #promptAndWait(message: string, timeoutMs: number, handlers?: ForwardStreamHandlers): Promise<AgentEvent[]> {
+	async #promptAndWait(message: string, timeoutMs: number, handlers?: ForwardStreamHandlers, images?: ImageContent[]): Promise<AgentEvent[]> {
 		const promptId = `p_${++this.#promptIdCounter}`;
 
 		const { promise, resolve, reject } = Promise.withResolvers<AgentEvent[]>();
@@ -1308,7 +1315,7 @@ export class AgentBridge {
 		this.#pendingPrompts.set(promptId, pending);
 
 		// Write prompt to stdin with unique id
-		const frame = `${JSON.stringify({ type: "prompt", id: promptId, message })}\n`;
+		const frame = `${JSON.stringify({ type: "prompt", id: promptId, message, ...(images && images.length > 0 ? { images } : {}) })}\n`;
 		if (this.#stdinWriter) {
 			this.#stdinWriter.write(new TextEncoder().encode(frame));
 		} else {
@@ -1465,12 +1472,53 @@ export class AgentBridge {
 		this.#stdinWriter.write(new TextEncoder().encode(data));
 	}
 
-	#extractText(msg: InboundMessage): string {
-		if (msg.content.type === "text") return msg.content.text;
-		if (msg.content.type === "markdown") return msg.content.markdown;
-		if (msg.content.type === "voice" && msg.content.text) return msg.content.text;
-		return "[non-text message]";
+	#extractPrompt(msg: InboundMessage): { text: string; images: ImageContent[] } {
+		const images: ImageContent[] = [];
+
+		// Extract image attachments for vision-capable models.
+		// Use MIME type (not `kind`) because DingTalk sends images as
+		// msgtype="file" — the `kind` will be "file" but mimeType will
+		// be "image/png" etc. Any attachment whose MIME starts with
+		// "image/" is treated as an inline image.
+		if (msg.attachments) {
+			for (const att of msg.attachments) {
+				if (att.mimeType.startsWith("image/")) {
+					images.push({
+						type: "image",
+						data: Buffer.from(att.data).toString("base64"),
+						mimeType: att.mimeType,
+					});
+				}
+			}
+		}
+
+		if (msg.content.type === "text") return { text: msg.content.text, images };
+		if (msg.content.type === "markdown") return { text: msg.content.markdown, images };
+		if (msg.content.type === "voice" && msg.content.text) return { text: msg.content.text, images };
+
+		// For image/file/video without ASR text, describe the attachment
+		if (msg.attachments && msg.attachments.length > 0) {
+			const descriptions = msg.attachments.map(att => {
+				const name = att.filename ?? "file";
+				return `[${att.kind}: ${name} (${att.mimeType}, ${formatBytes(att.size)})]`;
+			});
+			logger.info("[AgentBridge] Non-text message with attachments", {
+				contentType: msg.content.type,
+				attachmentCount: msg.attachments.length,
+				imageCount: images.length,
+				text: descriptions.join("\n"),
+			});
+			return { text: descriptions.join("\n"), images };
+		}
+
+		logger.info("[AgentBridge] Non-text message without attachments — degrading to placeholder", {
+			contentType: msg.content.type,
+			url: (msg.content as any).url?.slice(0, 80),
+			hasAttachments: !!msg.attachments,
+		});
+		return { text: "[non-text message]", images };
 	}
+
 
 	#formatResponse(text: string): string {
 		// Strip think blocks from model response

@@ -186,6 +186,21 @@ function checkAndMarkDingtalkMessage(
 // ═══════════════════════════════════════════════════════════════════════
 
 /**
+ * Normalize DingTalk `content` field to a parsed object.
+ * DingTalk SDK sometimes delivers `content` as a JSON string, sometimes
+ * as an already-parsed object. This helper handles both cases so callers
+ * don't need try/catch around JSON.parse.
+ */
+function parseContentField(content: string | Record<string, unknown> | undefined): Record<string, any> {
+	if (!content) return {};
+	if (typeof content === "string") {
+		try { return JSON.parse(content); } catch { return {}; }
+	}
+	if (typeof content === "object") return content as Record<string, any>;
+	return {};
+}
+
+/**
  * Parse a raw DingTalk robot message into an InboundMessage.
  * Standalone function for testability.
  */
@@ -211,12 +226,8 @@ export function parseRobotMessage(
 
 		case "markdown": {
 			let markdown = "";
-			try {
-				const parsedContent = raw.content ? JSON.parse(raw.content) : {};
-				markdown = parsedContent.text?.trim() || raw.text?.content?.trim() || "";
-			} catch {
-				markdown = raw.content?.trim() || raw.text?.content?.trim() || "";
-			}
+			const mdParsed = parseContentField(raw.content);
+			markdown = mdParsed.text?.trim() || raw.text?.content?.trim() || "";
 			if (!markdown) {
 				logger.debug("[DingTalk] skipping empty markdown message", { messageId });
 				return null;
@@ -226,32 +237,18 @@ export function parseRobotMessage(
 		}
 
 		case "picture": {
-			let pictureUrl = "";
-			let downloadCode = "";
-			try {
-				const parsedContent = raw.content ? JSON.parse(raw.content) : {};
-				pictureUrl = parsedContent.pictureUrl || "";
-				downloadCode = parsedContent.downloadCode || "";
-			} catch {
-				// ignore parse error
-			}
+			const picParsed = parseContentField(raw.content);
+			const pictureUrl = picParsed.pictureUrl || "";
+			const downloadCode = picParsed.downloadCode || "";
 			const url = pictureUrl || (downloadCode ? `downloadCode:${downloadCode}` : "");
 			content = { type: "image", url, filename: "image.jpg" };
 			break;
 		}
 
 		case "audio": {
-			let recognition = "[语音消息]";
-			let downloadCode = "";
-			try {
-				const parsedContent = raw.content ? JSON.parse(raw.content) : {};
-				if (typeof parsedContent === "object") {
-					recognition = (parsedContent as any).recognition || "[语音消息]";
-					downloadCode = (parsedContent as any).downloadCode || "";
-				}
-			} catch {
-				// ignore parse error
-			}
+			const audioParsed = parseContentField(raw.content);
+			const recognition = audioParsed.recognition || "[语音消息]";
+			const downloadCode = audioParsed.downloadCode || "";
 			content = {
 				type: "voice",
 				url: downloadCode ? `downloadCode:${downloadCode}` : "",
@@ -261,17 +258,10 @@ export function parseRobotMessage(
 		}
 
 		case "file": {
-			let fileName = "file";
-			let downloadCode = "";
-			let fileSize = 0;
-			try {
-				const parsedContent = raw.content ? JSON.parse(raw.content) : {};
-				fileName = parsedContent.fileName || "file";
-				downloadCode = parsedContent.downloadCode || "";
-				fileSize = parsedContent.size || 0;
-			} catch {
-				// ignore parse error
-			}
+			const fileParsed = parseContentField(raw.content);
+			const fileName = fileParsed.fileName || "file";
+			const downloadCode = fileParsed.downloadCode || "";
+			const fileSize = fileParsed.size || 0;
 			content = {
 				type: "file",
 				url: downloadCode ? `downloadCode:${downloadCode}` : "",
@@ -286,12 +276,8 @@ export function parseRobotMessage(
 			if (raw.text?.content) {
 				text = raw.text.content.trim();
 			} else if (raw.content) {
-				try {
-					const parsedContent = JSON.parse(raw.content);
-					text = parsedContent.text?.trim() || raw.content.trim();
-				} catch {
-					text = raw.content.trim();
-				}
+				const defParsed = parseContentField(raw.content);
+				text = defParsed.text?.trim() || (typeof raw.content === "string" ? raw.content.trim() : "");
 			}
 			if (!text) {
 				logger.debug("[DingTalk] skipping unsupported message type", { messageId, msgtype });
@@ -1872,13 +1858,14 @@ export class DingTalkChannel extends BaseChannel {
 		this.#startProcessingKeepalive();
 
 		try {
-			logger.debug("[DingTalk] message received", {
-				messageId,
-				msgId: businessMsgId,
-				msgtype: parsed.msgtype,
-				sender: parsed.senderNick,
-				conversationType: parsed.conversationType === "1" ? "DM" : "Group",
-			});
+		logger.info("[DingTalk] message received", {
+			messageId,
+			msgId: businessMsgId,
+			msgtype: parsed.msgtype,
+			sender: parsed.senderNick,
+			conversationType: parsed.conversationType === "1" ? "DM" : "Group",
+			rawContent: typeof parsed.content === "string" ? parsed.content.slice(0, 500) : JSON.stringify(parsed.content)?.slice(0, 500),
+		});
 
 			// Parse inbound message with media support
 			const inbound = this.#parseRobotMessage(parsed, messageId);
@@ -1915,8 +1902,17 @@ export class DingTalkChannel extends BaseChannel {
 			// Fail-soft: download errors produce an empty array and the message
 			// still reaches the agent as text.
 			if (this.#config && inbound.content.type !== "text" && inbound.content.type !== "markdown") {
+				logger.info("[DingTalk] Downloading attachment", {
+					type: inbound.content.type,
+					url: (inbound.content as any).url?.slice(0, 80),
+				});
 				const { resolveInboundAttachments } = await import("./dingtalk-media");
 				inbound.attachments = await resolveInboundAttachments(inbound, this.#config);
+				logger.info("[DingTalk] Attachment resolved", {
+					count: inbound.attachments?.length ?? 0,
+					kinds: inbound.attachments?.map(a => a.kind),
+					mimes: inbound.attachments?.map(a => a.mimeType),
+				});
 			}
 
 			await this.handleInbound(inbound);

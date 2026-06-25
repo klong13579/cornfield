@@ -11,6 +11,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { logger } from "@oh-my-pi/pi-utils";
 import type { DingTalkConfig } from "../types";
+import type { InboundAttachment } from "../types";
 import { getAccessToken } from "./dingtalk-card";
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -19,6 +20,96 @@ import { getAccessToken } from "./dingtalk-card";
 
 const DINGTALK_OAPI = "https://oapi.dingtalk.com";
 const DINGTALK_API = "https://api.dingtalk.com";
+
+/** Maximum inbound attachment size (20 MB). Matches DingTalk's upload limit. */
+const MAX_INBOUND_ATTACHMENT_BYTES = 20 * 1024 * 1024;
+
+// ═══════════════════════════════════════════════════════════════════════
+// MIME Sniffing
+// ═══════════════════════════════════════════════════════════════════════
+
+/**
+ * Sniff MIME type from magic bytes (file header).
+ *
+ * Returns undefined when no known signature matches — callers fall back
+ * to the platform-declared MIME or Content-Type header.
+ */
+export function sniffMimeFromBytes(buffer: Uint8Array): string | undefined {
+	if (buffer.length < 4) return undefined;
+
+	// PNG: 89 50 4E 47
+	if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) {
+		return "image/png";
+	}
+	// JPEG: FF D8 FF
+	if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
+		return "image/jpeg";
+	}
+	// GIF: 47 49 46 38
+	if (buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x38) {
+		return "image/gif";
+	}
+	// WebP: 52 49 46 46 ... 57 45 42 50
+	if (
+		buffer.length >= 12 &&
+		buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46 &&
+		buffer[8] === 0x57 && buffer[9] === 0x45 && buffer[10] === 0x42 && buffer[11] === 0x50
+	) {
+		return "image/webp";
+	}
+	// BMP: 42 4D
+	if (buffer[0] === 0x42 && buffer[1] === 0x4d) {
+		return "image/bmp";
+	}
+	// PDF: 25 50 44 46
+	if (buffer[0] === 0x25 && buffer[1] === 0x50 && buffer[2] === 0x44 && buffer[3] === 0x46) {
+		return "application/pdf";
+	}
+	// ZIP (also OOXML: docx/xlsx/pptx): 50 4B 03 04
+	if (buffer[0] === 0x50 && buffer[1] === 0x4b && buffer[2] === 0x03 && buffer[3] === 0x04) {
+		return "application/zip";
+	}
+	// MP4: 00 00 00 XX 66 74 79 70
+	if (
+		buffer.length >= 8 &&
+		buffer[4] === 0x66 && buffer[5] === 0x74 && buffer[6] === 0x79 && buffer[7] === 0x70
+	) {
+		return "video/mp4";
+	}
+	// MP3: FF FB / FF F3 / FF F2 / ID3
+	if (
+		(buffer[0] === 0xff && (buffer[1] === 0xfb || buffer[1] === 0xf3 || buffer[1] === 0xf2)) ||
+		(buffer[0] === 0x49 && buffer[1] === 0x44 && buffer[2] === 0x33)
+	) {
+		return "audio/mpeg";
+	}
+	// WAV: 52 49 46 46 ... 57 41 56 45
+	if (
+		buffer.length >= 12 &&
+		buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46 &&
+		buffer[8] === 0x57 && buffer[9] === 0x41 && buffer[10] === 0x56 && buffer[11] === 0x45
+	) {
+		return "audio/wav";
+	}
+	// OGG: 4F 67 67 53
+	if (buffer[0] === 0x4f && buffer[1] === 0x67 && buffer[2] === 0x67 && buffer[3] === 0x53) {
+		return "audio/ogg";
+	}
+
+	return undefined;
+}
+
+/**
+ * Resolve the most trustworthy MIME type for a downloaded file.
+ *
+ * Priority: magic-byte sniff > platform-declared > Content-Type header > fallback.
+ */
+function resolveMimeType(buffer: Uint8Array, declared: string | undefined): string {
+	const sniffed = sniffMimeFromBytes(buffer);
+	if (sniffed) return sniffed;
+	if (declared && declared !== "application/octet-stream") return declared;
+	return declared ?? "application/octet-stream";
+}
 
 /**
  * Get OAPI access token (for media download/upload).
@@ -55,43 +146,49 @@ export interface DownloadedMedia {
 
 /**
  * Download a file from DingTalk using downloadCode.
- * Files are stored in a temp directory and cleaned up on process exit.
+ * Uses POST /v1.0/robot/messageFiles/download with { downloadCode, robotCode }
+ * (matching DingTalk's official robot message file download API).
  */
 async function downloadByDingtalkCode(downloadCode: string, config: DingTalkConfig): Promise<DownloadedMedia | null> {
-	const token = await getOapiAccessToken(config);
-	if (!token) {
-		logger.error("[DingTalk Media] No OAPI token available for download");
-		return null;
-	}
-
 	try {
-		// Step 1: Get download URL
-		const infoResp = await fetch(`${DINGTALK_API}/v1.0/robot/messageFiles/${downloadCode}`, {
-			method: "GET",
+		const token = await getAccessToken(config);
+		if (!token) {
+			logger.error("[DingTalk Media] No access token available for download");
+			return null;
+		}
+
+		const robotCode = config.robotCode ?? config.appKey ?? "";
+		if (!robotCode) {
+			logger.error("[DingTalk Media] No robotCode/appKey available for download");
+			return null;
+		}
+
+		// Step 1: Exchange downloadCode for a download URL
+		const infoResp = await fetch(`${DINGTALK_API}/v1.0/robot/messageFiles/download`, {
+			method: "POST",
 			headers: {
-				"x-acs-dingtalk-access-token": await getAccessToken(config),
+				"x-acs-dingtalk-access-token": token,
 				"Content-Type": "application/json",
 			},
+			body: JSON.stringify({ downloadCode, robotCode }),
 		});
 
 		if (!infoResp.ok) {
-			logger.warn("[DingTalk Media] Failed to get file info", { status: infoResp.status });
+			const errText = await infoResp.text().catch(() => "");
+			logger.warn("[DingTalk Media] Failed to get file info", { status: infoResp.status, body: errText.slice(0, 500) });
 			return null;
 		}
 
 		const fileInfo = (await infoResp.json()) as {
 			downloadUrl?: string;
-			fileName?: string;
-			fileSize?: number;
-			mediaType?: string;
 		};
 
 		if (!fileInfo.downloadUrl) {
-			logger.warn("[DingTalk Media] No download URL in file info");
+			logger.warn("[DingTalk Media] No download URL in file info response");
 			return null;
 		}
 
-		// Step 2: Download the file
+		// Step 2: Download the actual file
 		const fileResp = await fetch(fileInfo.downloadUrl, { method: "GET" });
 		if (!fileResp.ok) {
 			logger.warn("[DingTalk Media] File download failed", { status: fileResp.status });
@@ -99,22 +196,22 @@ async function downloadByDingtalkCode(downloadCode: string, config: DingTalkConf
 		}
 
 		const buffer = await fileResp.arrayBuffer();
-		const ext = fileInfo.fileName ? path.extname(fileInfo.fileName) : ".bin";
+		const contentType = fileResp.headers.get("content-type") ?? "application/octet-stream";
 		const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-dingtalk-"));
-		const filePath = path.join(tmpDir, fileInfo.fileName ?? `file${ext}`);
+		const filePath = path.join(tmpDir, `inbound-${Date.now()}`);
 
 		await fs.promises.writeFile(filePath, Buffer.from(buffer));
 
 		logger.debug("[DingTalk Media] Downloaded file", {
-			name: fileInfo.fileName,
 			size: buffer.byteLength,
+			contentType,
 			path: filePath,
 		});
 
 		return {
 			path: filePath,
-			mimeType: fileInfo.mediaType ?? "application/octet-stream",
-			originalName: fileInfo.fileName ?? `file${ext}`,
+			mimeType: contentType,
+			originalName: `inbound-${Date.now()}`,
 			size: buffer.byteLength,
 		};
 	} catch (err) {
@@ -167,6 +264,88 @@ export async function downloadMedia(url: string, config: DingTalkConfig): Promis
 	logger.warn("[DingTalk Media] Unknown URL format", { url: url.slice(0, 100) });
 	return null;
 }
+/**
+ * Download and resolve all media attachments from an inbound message.
+ *
+ * Returns an array of `InboundAttachment` with raw bytes, sniffed MIME, and
+ * size metadata. Returns an empty array for text-only messages or when
+ * downloads fail (fail-soft: the message still reaches the agent as text).
+ */
+export async function resolveInboundAttachments(
+	msg: { content: { type: string; url?: string; filename?: string } },
+	config: DingTalkConfig,
+): Promise<InboundAttachment[]> {
+	const { content } = msg;
+	const url = content.url;
+	if (!url) return [];
+
+	const kind = content.type as InboundAttachment["kind"];
+	if (kind !== "image" && kind !== "file" && kind !== "video" && kind !== "voice") {
+		return [];
+	}
+
+	let downloaded: DownloadedMedia | null;
+	try {
+		downloaded = await downloadMedia(url, config);
+	} catch (err) {
+		logger.warn("[DingTalk Media] Attachment download threw", { error: String(err) });
+		return [];
+	}
+
+	if (!downloaded) {
+		logger.warn("[DingTalk Media] Attachment download returned null", { url: url.slice(0, 100) });
+		return [];
+	}
+
+	// Size guard
+	if (downloaded.size > MAX_INBOUND_ATTACHMENT_BYTES) {
+		logger.warn("[DingTalk Media] Attachment exceeds size limit, dropping", {
+			size: downloaded.size,
+			limit: MAX_INBOUND_ATTACHMENT_BYTES,
+			filename: downloaded.originalName,
+		});
+		cleanupDownloadedMedia(downloaded);
+		return [];
+	}
+
+	// Read file bytes for MIME sniffing
+	let buffer: Uint8Array;
+	try {
+		buffer = await fs.promises.readFile(downloaded.path);
+	} catch (err) {
+		logger.warn("[DingTalk Media] Failed to read downloaded file", {
+			path: downloaded.path,
+			error: String(err),
+		});
+		return [];
+	}
+
+	const mimeType = resolveMimeType(buffer, downloaded.mimeType);
+	const filename = content.filename ?? downloaded.originalName;
+
+	return [
+		{
+			kind,
+			data: buffer,
+			mimeType,
+			filename,
+			size: buffer.byteLength,
+		},
+	];
+}
+
+/**
+ * Clean up a downloaded temp file and its parent directory.
+ */
+export function cleanupDownloadedMedia(media: DownloadedMedia): void {
+	try {
+		const dir = path.dirname(media.path);
+		fs.rmSync(dir, { recursive: true, force: true });
+	} catch {
+		// best effort
+	}
+}
+
 
 // ═══════════════════════════════════════════════════════════════════════
 // Media Upload

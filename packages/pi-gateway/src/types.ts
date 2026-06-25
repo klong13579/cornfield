@@ -17,6 +17,27 @@ export type MessageContent =
 	| { type: "voice"; url: string; duration?: number; text?: string }
 	| { type: "video"; url: string; filename: string; size?: number; duration?: number; videoType?: string };
 
+/**
+ * Downloaded media attachment ready for agent consumption.
+ *
+ * Populated by the channel layer after downloading the raw media from the
+ * platform (e.g. DingTalk downloadCode resolution). The bridge converts
+ * image attachments into `ImageContent[]` for the RPC prompt.
+ */
+export interface InboundAttachment {
+	/** Attachment kind — mirrors the inbound MessageContent type. */
+	kind: "image" | "file" | "voice" | "video";
+	/** Raw file content. */
+	data: Uint8Array;
+	/** Resolved MIME type (sniffed from magic bytes when possible). */
+	mimeType: string;
+	/** Original filename from the platform (if available). */
+	filename?: string;
+	/** File size in bytes. */
+	size: number;
+}
+
+
 export interface InboundMessage {
 	channelId: string;
 	userId: string;
@@ -25,6 +46,8 @@ export interface InboundMessage {
 	conversationTitle?: string;
 	isGroup: boolean;
 	content: MessageContent;
+	/** Downloaded media attachments (populated by channel layer after parse). */
+	attachments?: InboundAttachment[];
 	timestamp: Date;
 	raw?: unknown;
 	/** Webhook URL from DingTalk for reply — set by DingTalk channel */
@@ -362,6 +385,28 @@ export interface DingTalkConfig extends ChannelConfig {
 	groupPolicy?: PermissionPolicy;
 }
 
+/** Parsed content field for non-text DingTalk messages.
+ * DingTalk SDK delivers this as an object (not a JSON string) for
+ * picture/audio/video/file/richText/markdown types. */
+export interface DingTalkRawContent {
+	downloadCode?: string;
+	pictureUrl?: string;
+	fileName?: string;
+	size?: number;
+	recognition?: string;
+	text?: string;
+	spaceId?: string;
+	fileId?: string;
+	biz_custom_action_url?: string;
+	richText?: Array<{
+		type?: string;
+		text?: string;
+		atName?: string;
+		atUserId?: string;
+		downloadCode?: string;
+	}>;
+}
+
 export interface DingTalkRawMessage {
 	conversationId: string;
 	atUsers: Array<{ dingtalkId: string; staffId?: string }>;
@@ -380,7 +425,7 @@ export interface DingTalkRawMessage {
 	isInAtList: boolean;
 	sessionWebhook: string;
 	text?: { content: string };
-	content?: string;
+	content?: DingTalkRawContent | string;
 	msgtype: string;
 	robotCode: string;
 }
