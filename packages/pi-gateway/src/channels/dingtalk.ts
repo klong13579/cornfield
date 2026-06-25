@@ -650,11 +650,75 @@ export class DingTalkChannel extends BaseChannel {
 				pendingTools.set(call.id, { name: call.name, args: call.args });
 			},
 			onToolResult: result => {
+				// If a segment break is pending (onAssistantMessageEnd
+				// fired but no onTextDelta came — e.g. agent only
+				// produced thinking text), trigger the split here.
+				if (pendingSegmentBreak) {
+					pendingSegmentBreak = false;
+					if (segmentText.trim() || blocks.some(b => b.type !== BlockType.STOP)) {
+						// Capture pending tool info before clearing.
+						const pending = pendingTools.get(result.id) ?? { name: result.name, args: null };
+						// Same capture+reset+async-split as onTextDelta path.
+						const oldCard = currentCard;
+						const oldText = segmentText;
+						const oldBlocks = blocks.filter(b => b.type !== BlockType.STOP);
+						blocks.length = 0;
+						segmentText = "";
+						thinkingText = "";
+						pendingTools.clear();
+						segmentBusy = true;
+
+						void (async () => {
+							if (oldText.trim() || oldBlocks.length > 0) {
+								const segAnswer = oldText.trim() ? buildAnswerBlock(oldText) : null;
+								const finalSegBlocks = segAnswer ? [...oldBlocks, segAnswer] : oldBlocks;
+								try {
+									await finishAICard(
+										oldCard,
+										{
+											content: oldText,
+											blockList: finalSegBlocks,
+											quoteContent: quoteText,
+											statusLine: "",
+											copyContent: oldText,
+											hasAction: false,
+											version: 1 as const,
+										},
+										config,
+									);
+								} catch (err) {
+									logger.warn("[DingTalk] segment finishAICard failed (tool boundary)", {
+										accountId: this.#accountId,
+										conversationId: inbound.conversationId,
+										error: err instanceof Error ? err.message : String(err),
+									});
+								}
+							}
+
+							const nextCard = await createAICardForTarget(config, target, { quoteContent: quoteText });
+							if (nextCard) {
+								context.registerCardAction?.({
+									cardInstanceId: nextCard.cardInstanceId,
+									accountId: this.#accountId,
+									sessionId: inbound.conversationId,
+								});
+								currentCard = nextCard;
+								cards.push(nextCard);
+							}
+							segmentBusy = false;
+							// Push the tool result that triggered the split onto
+							// the new card's blocks.
+							blocks.push(buildToolBlock(pending, result.contentText, result.isError));
+							scheduleBlockPatch();
+						})();
+						return;
+					}
+				}
+
+				if (segmentBusy) return;
+
 				const pending = pendingTools.get(result.id);
 				if (!pending) {
-					// tool_result without a matching toolcall_end is unusual
-					// (it can happen if the bridge dropped a delta) — still
-					// emit a block with the name we have, for visibility.
 					blocks.push(buildToolBlock({ name: result.name, args: null }, result.contentText, result.isError));
 				} else {
 					blocks.push(buildToolBlock(pending, result.contentText, result.isError));
