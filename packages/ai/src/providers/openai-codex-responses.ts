@@ -407,6 +407,7 @@ function createRequestSetup(options: OpenAICodexResponsesOptions | undefined): C
 			idleTimeoutMs: getOpenAIStreamIdleTimeoutMs(),
 			errorMessage: "OpenAI Codex SSE stream stalled while waiting for the next event",
 			onIdle: () => requestAbortController.abort(),
+			signal: requestSignal,
 		});
 	return { requestAbortController, requestSignal, wrapCodexSseStream };
 }

@@ -79,7 +79,10 @@ function readEnvInt(name: string, fallback: number): number {
 	return parsed;
 }
 const LONG_TASK_THRESHOLD_MS = readEnvInt("DINGTALK_LONG_TASK_THRESHOLD_MS", DEFAULT_LONG_TASK_THRESHOLD_MS);
-const LONG_TASK_PROGRESS_PING_MS = readEnvInt("DINGTALK_LONG_TASK_PROGRESS_PING_MS", DEFAULT_LONG_TASK_PROGRESS_PING_MS);
+const LONG_TASK_PROGRESS_PING_MS = readEnvInt(
+	"DINGTALK_LONG_TASK_PROGRESS_PING_MS",
+	DEFAULT_LONG_TASK_PROGRESS_PING_MS,
+);
 
 /** Exported for test introspection — production code should consume
  * `LONG_TASK_THRESHOLD_MS` / `LONG_TASK_PROGRESS_PING_MS` directly. */
@@ -221,6 +224,13 @@ interface PendingPrompt {
 	/** Cumulative text concatenated from `text_delta` events on this prompt.
 	 * Updated as deltas arrive so `onTextDelta` can report the full string. */
 	textCumulative?: string;
+	/** Set to true if the prompt was resolved via `#resolveActivePromptAsAborted`
+	 * (i.e. `bridge.abort()` was called, the RPC acknowledged the abort, and
+	 * the active prompt was force-resolved with the appended "（已停止）"
+	 * marker). `forwardWithMeta` reads this after `promptAndWait` resolves
+	 * and passes it to `#buildMetaFromEvents` so the AgentResponseMeta's
+	 * `aborted: true` field correctly reflects the user-initiated abort. */
+	aborted: boolean;
 	/** ms-since-epoch of the last event received from the RPC process for this prompt.
 	 * Used to enforce `executePrompt({ inactivityMs })`. Bumped on every session
 	 * event routed to this prompt (see the `pending.events.push(parsed)` site in
@@ -259,6 +269,11 @@ export class AgentBridge {
 	#pendingCommands = new Map<string, PendingCommand>();
 	/** Currently active prompt ID (for routing session.subscribe events) */
 	#activePromptId: string | undefined;
+	/** Set when `abort()` is called, so `forwardWithMeta` can distinguish an
+	 *  abort-induced empty response (agent had no chance to output before the
+	 *  reader resolved the pending prompt via agent_end) from a genuine empty
+	 *  response. Reset after each `forwardWithMeta` completes. */
+	#abortRequested = false;
 	#activeSessionPath: string | undefined;
 	#operationTail: Promise<void> = Promise.resolve();
 	/** Counter for generating unique prompt IDs */
@@ -568,9 +583,29 @@ export class AgentBridge {
 					await this.#switchSession(session.ompSessionPath);
 				}
 				const events = await this.#promptAndWait(text, timeoutMs, handlers);
+				// The active prompt's `aborted` flag was set by
+				// `#resolveActivePromptAsAborted` before the await chain
+				// unblocked. By the time we're back here, the pending
+				// entry is gone (resolveActivePromptAsAborted deletes it),
+				// so we read the flag from the just-resolved events: the
+				// abort resolver appends a sentinel "（已停止）" assistant
+				// message_end. We could plumb a side-channel, but the
+				// sentinel is one extra branch on a cold path and avoids
+				// reshaping the resolve signature.
+				const aborted = events.some(
+					e =>
+						e.type === "message_end" &&
+						e.message?.role === "assistant" &&
+						Array.isArray(e.message.content) &&
+						e.message.content.some(c => c.type === "text" && c.text === "（已停止）"),
+				);
 				const rawResponse = this.#extractAssistantText(events);
 
 				if (!rawResponse) {
+					if (this.#abortRequested) {
+						logger.debug("Agent returned empty response after abort");
+						return this.#fallbackMeta("（已停止）", startedAt, { aborted: true });
+					}
 					logger.warn("Agent returned empty response");
 					return this.#fallbackMeta("（Agent 未返回内容）", startedAt);
 				}
@@ -582,7 +617,10 @@ export class AgentBridge {
 					preview: formatted.slice(0, 100),
 				});
 				this.#recordPromptSuccess();
-				return this.#buildMetaFromEvents(events, rawText, formatted, startedAt, { isFallback: false });
+				return this.#buildMetaFromEvents(events, rawText, formatted, startedAt, {
+					isFallback: false,
+					aborted,
+				});
 			} catch (err) {
 				this.#recordPromptFailure();
 				if (this.#isCrashError(err)) {
@@ -593,6 +631,8 @@ export class AgentBridge {
 				const message = err instanceof Error ? err.message : String(err);
 				logger.error("Agent bridge failed", { error: message });
 				return this.#fallbackMeta(`系统错误：${message}`, startedAt);
+			} finally {
+				this.#abortRequested = false;
 			}
 		});
 	}
@@ -781,6 +821,7 @@ export class AgentBridge {
 		if (!this.#activePromptId && this.#pendingPrompts.size === 0) {
 			return false;
 		}
+		this.#abortRequested = true;
 		await this.#sendCommandAndWait("abort", {}, 30_000);
 		this.#resolveActivePromptAsAborted();
 		return true;
@@ -1160,6 +1201,17 @@ export class AgentBridge {
 		const pending = this.#pendingPrompts.get(promptId);
 		if (!pending) return;
 		clearTimeout(pending.timeout);
+		// Clear long-task watchers: the abort force-resolves the prompt
+		// without waiting for the RPC's agent_end (which would normally
+		// clear them via the reader loop). Without this, the watcher's
+		// setInterval keeps firing onLongTask pings after the user has
+		// already stopped the run, re-patching a finished card.
+		this.#clearAllLongTaskWatchers(promptId);
+		// Mark the pending prompt as aborted BEFORE resolving so
+		// `forwardWithMeta` can read the flag in the same microtask
+		// the await chain unblocks (the resolve() is sync; the
+		// then-handler that calls buildMetaFromEvents is what reads it).
+		pending.aborted = true;
 		this.#pendingPrompts.delete(promptId);
 		this.#activePromptId = undefined;
 		pending.resolve([
@@ -1217,6 +1269,15 @@ export class AgentBridge {
 		const { promise, resolve, reject } = Promise.withResolvers<AgentEvent[]>();
 
 		const timeout = setTimeout(() => {
+			// Clear long-task watchers BEFORE deleting the pending prompt.
+			// The watcher's `fire()` closure captures `pending` directly, so
+			// even after deletion the setInterval would keep calling the
+			// channel's onLongTask handler — re-patching a card that's
+			// already being finished with the timeout error, and showing a
+			// stale elapsed time (the ping handler's
+			// `blocks[blocks.length-1]` check fails once the error answer
+			// block is appended, so the stop block text is never updated).
+			this.#clearAllLongTaskWatchers(promptId);
 			this.#pendingPrompts.delete(promptId);
 			reject(new Error(`Agent RPC timed out after ${timeoutMs}ms`));
 		}, timeoutMs);
@@ -1227,6 +1288,7 @@ export class AgentBridge {
 			reject,
 			events: [],
 			timeout,
+			aborted: false,
 			lastActivityAt: Date.now(),
 		};
 		if (handlers) pending.handlers = handlers;
@@ -1301,7 +1363,11 @@ export class AgentBridge {
 		};
 	}
 
-	#fallbackMeta(text: string, startedAt: number, error: string | null = null): AgentResponseMeta {
+	#fallbackMeta(
+		text: string,
+		startedAt: number,
+		overrides: { error?: string | null; aborted?: boolean } = {},
+	): AgentResponseMeta {
 		return {
 			text,
 			rawText: text,
@@ -1313,8 +1379,8 @@ export class AgentBridge {
 			effort: null,
 			toolCalls: [],
 			toolResults: [],
-			error,
-			aborted: false,
+			error: overrides.error ?? null,
+			aborted: overrides.aborted ?? false,
 			isFallback: true,
 		};
 	}
@@ -1443,29 +1509,29 @@ export class AgentBridge {
 		});
 	}
 
-/**
- * Get the agent's current session state via RPC.
- * Returns model, thinkingLevel, isStreaming, and other state fields.
- * Requires the agent process to be running.
- */
-async getState(): Promise<AgentEvent> {
-	return this.#runExclusive(async () => {
-		if (!this.isRunning) {
-			throw new Error("Agent process not running");
-		}
-		return await this.#sendCommandAndWait("get_state", {}, 30_000);
-	});
-}
+	/**
+	 * Get the agent's current session state via RPC.
+	 * Returns model, thinkingLevel, isStreaming, and other state fields.
+	 * Requires the agent process to be running.
+	 */
+	async getState(): Promise<AgentEvent> {
+		return this.#runExclusive(async () => {
+			if (!this.isRunning) {
+				throw new Error("Agent process not running");
+			}
+			return await this.#sendCommandAndWait("get_state", {}, 30_000);
+		});
+	}
 
-/**
- * Temporarily disable tool toolsets. Used by cron to prevent the agent from
- * creating sub-tasks, sending messages, or asking clarifying questions.
- * Pass empty array to restore all tools.
- */
-async setDisabledToolsets(toolsets: string[]): Promise<void> {
-	if (!this.isRunning) return;
-	await this.#sendCommandAndWait("set_disabled_toolsets", { toolsets }, 30_000);
-}
+	/**
+	 * Temporarily disable tool toolsets. Used by cron to prevent the agent from
+	 * creating sub-tasks, sending messages, or asking clarifying questions.
+	 * Pass empty array to restore all tools.
+	 */
+	async setDisabledToolsets(toolsets: string[]): Promise<void> {
+		if (!this.isRunning) return;
+		await this.#sendCommandAndWait("set_disabled_toolsets", { toolsets }, 30_000);
+	}
 }
 
 // ═════════════════════════════════════════════════════════════════════

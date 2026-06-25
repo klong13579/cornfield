@@ -59,6 +59,13 @@ export interface IdleTimeoutIteratorOptions {
 	firstItemErrorMessage?: string;
 	onIdle?: () => void;
 	onFirstItemTimeout?: () => void;
+	/**
+	 * Caller abort signal. When aborted, the iterator breaks out immediately even while
+	 * the underlying iterable is blocked awaiting its next item. Without this, a user-
+	 * triggered stop must wait for the idle/first-event timeout (up to 100-120s) before
+	 * the fetch-blocking promise settles, during which the TUI cannot refresh.
+	 */
+	signal?: AbortSignal;
 }
 
 /**
@@ -71,27 +78,31 @@ export async function* iterateWithIdleTimeout<T>(
 	iterable: AsyncIterable<T>,
 	options: IdleTimeoutIteratorOptions,
 ): AsyncGenerator<T> {
+	const iterator = iterable[Symbol.asyncIterator]();
 	let watchdog = options.watchdog;
 	const firstItemTimeoutMs = options.firstItemTimeoutMs ?? options.idleTimeoutMs;
-	if (
-		(firstItemTimeoutMs === undefined || firstItemTimeoutMs <= 0) &&
-		(options.idleTimeoutMs === undefined || options.idleTimeoutMs <= 0)
-	) {
-		for await (const item of iterable) {
-			watchdog && clearTimeout(watchdog);
-			watchdog = undefined;
-			yield item;
-		}
-		return;
-	}
-
-	const iterator = iterable[Symbol.asyncIterator]();
 
 	const withRacy = <T>(promise: Promise<T>) =>
 		promise.then(
 			result => ({ kind: "next" as const, result }),
 			error => ({ kind: "error" as const, error }),
 		);
+
+	const signal = options.signal;
+	const abortPromise = signal
+		? signal.aborted
+			? Promise.resolve<{ kind: "abort" }>({ kind: "abort" })
+			: new Promise<{ kind: "abort" }>(resolve =>
+					signal.addEventListener("abort", () => resolve({ kind: "abort" }), { once: true }),
+				)
+		: null;
+
+	const cleanupIterator = () => {
+		const returnPromise = iterator.return?.();
+		if (returnPromise) {
+			void returnPromise.catch(() => {});
+		}
+	};
 
 	let onFirst: (() => void) | null = () => {
 		watchdog && clearTimeout(watchdog);
@@ -103,7 +114,15 @@ export async function* iterateWithIdleTimeout<T>(
 		const activeTimeoutMs = !onFirst ? options.idleTimeoutMs : firstItemTimeoutMs;
 
 		if (activeTimeoutMs === undefined || activeTimeoutMs <= 0) {
-			const outcome = await nextResultPromise;
+			const racers: Promise<
+				{ kind: "next"; result: IteratorResult<T> } | { kind: "error"; error: unknown } | { kind: "abort" }
+			>[] = [nextResultPromise];
+			if (abortPromise) racers.push(abortPromise);
+			const outcome = await Promise.race(racers);
+			if (outcome.kind === "abort") {
+				cleanupIterator();
+				throw new Error("Request was aborted");
+			}
 			if (outcome.kind === "error") {
 				throw outcome.error;
 			}
@@ -121,17 +140,25 @@ export async function* iterateWithIdleTimeout<T>(
 		const timer = setTimeout(() => resolveTimeout({ kind: "timeout" }), activeTimeoutMs);
 
 		try {
-			const outcome = await Promise.race([nextResultPromise, timeoutPromise]);
+			const racers: Promise<
+				| { kind: "next"; result: IteratorResult<T> }
+				| { kind: "error"; error: unknown }
+				| { kind: "timeout" }
+				| { kind: "abort" }
+			>[] = [nextResultPromise, timeoutPromise];
+			if (abortPromise) racers.push(abortPromise);
+			const outcome = await Promise.race(racers);
+			if (outcome.kind === "abort") {
+				cleanupIterator();
+				throw new Error("Request was aborted");
+			}
 			if (outcome.kind === "timeout") {
 				if (!onFirst) {
 					options.onIdle?.();
 				} else {
 					options.onFirstItemTimeout?.();
 				}
-				const returnPromise = iterator.return?.();
-				if (returnPromise) {
-					void returnPromise.catch(() => {});
-				}
+				cleanupIterator();
 				throw new Error(!onFirst ? options.errorMessage : (options.firstItemErrorMessage ?? options.errorMessage));
 			}
 			watchdog && clearTimeout(watchdog);

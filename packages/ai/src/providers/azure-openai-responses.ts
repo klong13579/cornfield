@@ -150,6 +150,7 @@ export const streamAzureOpenAIResponses: StreamFunction<"azure-openai-responses"
 					idleTimeoutMs,
 					errorMessage: "Azure OpenAI responses stream stalled while waiting for the next event",
 					onIdle: () => requestAbortController.abort(),
+					signal: requestSignal,
 				}),
 				output,
 				stream,

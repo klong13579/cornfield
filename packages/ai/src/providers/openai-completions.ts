@@ -566,6 +566,7 @@ export const streamOpenAICompletions: StreamFunction<"openai-completions"> = (
 				idleTimeoutMs,
 				errorMessage: "OpenAI completions stream stalled while waiting for the next event",
 				onIdle: () => requestAbortController.abort(),
+				signal: requestSignal,
 			})) {
 				if (!chunk || typeof chunk !== "object") continue;
 
