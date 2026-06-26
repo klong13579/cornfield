@@ -23,7 +23,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { getDataDir, validateConfig } from "./config";
 import { checkCredentials } from "./credential-resolver";
-import { getGatewayStatus, PID_FILE, STATUS_FILE } from "./gateway";
+import { getGatewayStatus, PID_FILE, STATUS_FILE } from "./gateway-daemon";
 import {
 	getGatewayPidPath,
 	getSchedulerDbPath,

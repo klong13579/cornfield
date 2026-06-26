@@ -5,7 +5,8 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { createAccountBridgeOptions, Gateway, getGatewayStatus } from "../src/gateway";
+import { getGatewayStatus } from "../src/gateway-daemon";
+import { createAccountBridgeOptions, Gateway } from "../src/gateway";
 
 describe("Gateway status", () => {
 	let tmpDir: string;

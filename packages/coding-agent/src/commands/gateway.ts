@@ -156,7 +156,7 @@ export default class Gateway extends Command {
 				}
 
 				// Default: daemonize — spawn detached child, wait for ready, print status
-				const { getGatewayStatus, PID_FILE } = await import("@oh-my-pi/pi-gateway/src/gateway");
+				const { getGatewayStatus, PID_FILE } = await import("@oh-my-pi/pi-gateway/src/gateway-daemon");
 				const { loadConfig, getDataDir } = await import("@oh-my-pi/pi-gateway/src/config");
 
 				// Already running?
@@ -219,7 +219,7 @@ export default class Gateway extends Command {
 				break;
 			}
 			case "stop": {
-				const { stopGatewayDaemon } = await import("@oh-my-pi/pi-gateway/src/gateway");
+				const { stopGatewayDaemon } = await import("@oh-my-pi/pi-gateway/src/gateway-daemon");
 				const stopped = await stopGatewayDaemon();
 				if (stopped) {
 					console.log("Gateway stopped.");
@@ -229,7 +229,7 @@ export default class Gateway extends Command {
 				break;
 			}
 			case "status": {
-				const { getGatewayStatus } = await import("@oh-my-pi/pi-gateway/src/gateway");
+				const { getGatewayStatus } = await import("@oh-my-pi/pi-gateway/src/gateway-daemon");
 				const { loadConfig, getConfigPath } = await import("@oh-my-pi/pi-gateway/src/config");
 				const config = await loadConfig(configPath);
 				const status = await getGatewayStatus();
