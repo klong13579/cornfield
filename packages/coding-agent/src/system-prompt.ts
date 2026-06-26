@@ -25,6 +25,23 @@ import { type ContextFile, loadCapability, type SystemPrompt as SystemPromptFile
 import { loadSkills, type Skill } from "./extensibility/skills";
 import customSystemPromptTemplate from "./prompts/system/custom-system-prompt.md" with { type: "text" };
 import systemPromptTemplate from "./prompts/system/system-prompt.md" with { type: "text" };
+import preamblePartial from "./prompts/system/_preamble.md" with { type: "text" };
+import workspacePartial from "./prompts/system/_workspace.md" with { type: "text" };
+import identityPartial from "./prompts/system/_identity.md" with { type: "text" };
+import environmentPartial from "./prompts/system/_environment.md" with { type: "text" };
+import contractPartial from "./prompts/system/_contract.md" with { type: "text" };
+import procedurePartial from "./prompts/system/_procedure.md" with { type: "text" };
+import nowPartial from "./prompts/system/_now.md" with { type: "text" };
+
+// Register partials once at module load so the main template can
+// reference them via {{> partialName}}.
+prompt.registerPartial("preamble", prompt.compile(preamblePartial));
+prompt.registerPartial("workspace", prompt.compile(workspacePartial));
+prompt.registerPartial("identity", prompt.compile(identityPartial));
+prompt.registerPartial("environment", prompt.compile(environmentPartial));
+prompt.registerPartial("contract", prompt.compile(contractPartial));
+prompt.registerPartial("procedure", prompt.compile(procedurePartial));
+prompt.registerPartial("now", prompt.compile(nowPartial));
 
 interface AlwaysApplyRule {
 	name: string;
