@@ -23,11 +23,10 @@ import type {
 } from "./types";
 
 /** Interface for the subset of Gateway that ResponseHandler needs. */
-export interface ResponseGatewayDeps {
+	export interface ResponseGatewayDeps {
 	registry: ChannelRegistry;
 	sessionManager: SessionManager | undefined;
 	actionRegistry: ActionRegistry;
-	resolveAgentName(accountId: string): string | null;
 }
 
 export class ResponseHandler {
@@ -110,7 +109,7 @@ export class ResponseHandler {
 		const channel = this.#deps.registry.get(this.#buildChannelKey(msg.channelId, msg.accountId));
 		const context: ReplyFormatterContext = {
 			accountId,
-			agentName: this.#deps.resolveAgentName(accountId),
+			agentName: this.resolveAgentName(accountId),
 			dapiCalls: 0,
 		};
 
@@ -154,7 +153,7 @@ export class ResponseHandler {
 
 		const context: ReplyFormatterContext = {
 			accountId,
-			agentName: this.#deps.resolveAgentName(accountId),
+			agentName: this.resolveAgentName(accountId),
 			dapiCalls: 0,
 			registerCardAction: info =>
 				this.#deps.actionRegistry.register(info.cardInstanceId, {

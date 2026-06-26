@@ -92,9 +92,26 @@ export class Gateway {
 	 */
 	#actionRegistry = new ActionRegistry();
 
-	constructor(config: GatewayConfig) {
+	constructor(config: GatewayConfig, deps?: { bridge?: AgentBridge; store?: SQLiteSessionStore }) {
 		this.#config = config;
-		this.#bridge = new AgentBridge(config.agent ?? {});
+		this.#bridge = deps?.bridge ?? new AgentBridge(config.agent ?? {});
+		this.#store = deps?.store ?? null;
+
+		// Sub-modules are created in dependency order to avoid forward-reference
+		// closures. ResponseHandler is created first because ModelSwitch's
+		// sendAgentResponse callback references it.
+		this.#responseHandler = new ResponseHandler({
+			registry: this.#registry,
+			sessionManager: this.#sessionManager,
+			actionRegistry: this.#actionRegistry,
+		});
+
+		this.#modelSwitch = new ModelSwitch({
+			resolveDirectBridge: id => this.#resolveDirectBridge(id),
+			sendAgentResponse: (msg, text) => this.#responseHandler.sendAgentResponse(msg, text),
+			extractMessageText: msg => msg.content.type === "text" ? msg.content.text : "",
+		});
+
 		this.#cronLifecycle = new CronLifecycle({
 			config,
 			bridge: this.#bridge,
@@ -104,17 +121,7 @@ export class Gateway {
 			getAccountBridge: id => this.getAccountBridge(id),
 			writeStatusFile: () => this.#writeStatusFile(),
 		});
-		this.#modelSwitch = new ModelSwitch({
-			resolveDirectBridge: id => this.#resolveDirectBridge(id),
-			sendAgentResponse: (msg, text) => this.#responseHandler.sendAgentResponse(msg, text),
-			extractMessageText: msg => msg.content.type === "text" ? msg.content.text : "",
-		});
-		this.#responseHandler = new ResponseHandler({
-			registry: this.#registry,
-			sessionManager: this.#sessionManager,
-			actionRegistry: this.#actionRegistry,
-			resolveAgentName: id => this.#responseHandler.resolveAgentName(id),
-		});
+
 		this.#messageHandler = new MessageHandler({
 			config,
 			store: this.#store,
