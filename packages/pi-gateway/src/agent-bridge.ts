@@ -18,6 +18,7 @@
 import type { AssistantMessage, ImageContent, ToolCall, ToolResultMessage, Usage } from "@oh-my-pi/pi-ai";
 import { isEnoent, logger } from "@oh-my-pi/pi-utils";
 import type { FileSink } from "bun";
+import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { extractPdfText } from "./channels/dingtalk-media";
 import { resolveCredentialEnvVars } from "./credential-resolver";
@@ -631,7 +632,7 @@ export class AgentBridge {
 		session: SessionRecord,
 		handlers?: ForwardStreamHandlers,
 	): Promise<AgentResponseMeta | null> {
-		const { text, images } = this.#extractPrompt(msg);
+		const { text, images } = await this.#extractPrompt(msg);
 		if (!text.trim()) {
 			logger.debug("Empty message, skipping agent");
 			return null;
@@ -1554,7 +1555,7 @@ export class AgentBridge {
 		this.#stdinWriter.write(new TextEncoder().encode(data));
 	}
 
-	#extractPrompt(msg: InboundMessage): { text: string; images: ImageContent[] } {
+	async #extractPrompt(msg: InboundMessage): Promise<{ text: string; images: ImageContent[] }> {
 		const images: ImageContent[] = [];
 
 		// Extract image attachments for vision-capable models.
@@ -1563,7 +1564,11 @@ export class AgentBridge {
 		// be "image/png" etc. Any attachment whose MIME starts with
 		// "image/" is treated as an inline image.
 		// PDF attachments get text extracted and included in the prompt.
+		// Non-image/non-PDF attachments get saved to disk so the agent can
+		// read them with the read tool (which supports PPTX/DOCX/XLSX via markit).
 		const attachmentTexts: string[] = [];
+		const cwd = this.#options.cwd ?? process.cwd();
+
 		if (msg.attachments) {
 			for (const att of msg.attachments) {
 				if (att.mimeType.startsWith("image/")) {
@@ -1577,15 +1582,24 @@ export class AgentBridge {
 					const pdfText = extractPdfText(att.data);
 					if (pdfText) {
 						attachmentTexts.push(`[PDF: ${name}]
-${pdfText.slice(0, 10000)}`);
+						${pdfText.slice(0, 10000)}`);
 					} else {
 						attachmentTexts.push(`[PDF: ${name} (${formatBytes(att.size)}) — scanned PDF, no extractable text]`);
+					}
+				} else {
+					// Non-image/non-PDF: save to disk so agent can read with read tool
+					const savedPath = await this.#saveAttachmentToDisk(att, cwd);
+					if (savedPath) {
+						attachmentTexts.push(`[file: ${savedPath} (${att.mimeType}, ${formatBytes(att.size)})]`);
+					} else {
+						const name = att.filename ?? "file";
+						attachmentTexts.push(`[${att.kind}: ${name} (${att.mimeType}, ${formatBytes(att.size)}) — failed to save to disk]`);
 					}
 				}
 			}
 		}
 
-		// If we extracted text from PDFs, include it in the prompt
+		// If we extracted text from PDFs or saved files, include them in the prompt
 		if (attachmentTexts.length > 0) {
 			const baseText =
 				msg.content.type === "text"
@@ -1646,6 +1660,36 @@ ${pdfText.slice(0, 10000)}`);
 			hasAttachments: !!msg.attachments,
 		});
 		return { text: "[non-text message]", images };
+	}
+
+	/**
+	 * Save a non-image/non-PDF attachment to disk so the agent can read it
+	 * with the read tool. Returns the absolute path on success, null on failure.
+	 */
+	async #saveAttachmentToDisk(att: InboundAttachment, cwd: string): Promise<string | null> {
+		const filename = att.filename ?? "attachment";
+		// Sanitize filename: remove path separators and null bytes
+		const safeName = filename.replace(/[/\\\0]/g, "_");
+		const attachmentsDir = path.join(cwd, "attachments");
+
+		try {
+			await fs.mkdir(attachmentsDir, { recursive: true });
+			const filePath = path.join(attachmentsDir, safeName);
+			await fs.writeFile(filePath, att.data);
+			logger.info("[AgentBridge] Attachment saved to disk", {
+				path: filePath,
+				mimeType: att.mimeType,
+				size: att.size,
+			});
+			return filePath;
+		} catch (err) {
+			logger.warn("[AgentBridge] Failed to save attachment to disk", {
+				filename: safeName,
+				mimeType: att.mimeType,
+				error: err instanceof Error ? err.message : String(err),
+			});
+			return null;
+		}
 	}
 
 	#formatResponse(text: string): string {

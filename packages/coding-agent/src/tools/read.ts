@@ -1,4 +1,5 @@
 import { Database } from "bun:sqlite";
+import * as os from "node:os";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import type { AgentTool, AgentToolContext, AgentToolResult, AgentToolUpdateCallback } from "@oh-my-pi/pi-agent-core";
@@ -441,6 +442,73 @@ function parseSqliteSelectorInput(selector: string | undefined): { subPath: stri
 		subPath: selector.slice(0, queryIndex).replace(/^:+/, ""),
 		queryString: selector.slice(queryIndex + 1),
 	};
+}
+
+/**
+ * Extract image references from markdown text and load them as ImageContent.
+ * Images referenced as ![alt](path) are read from disk and converted to base64.
+ * Returns the cleaned markdown text (with image refs replaced by descriptions)
+ * and an array of ImageContent blocks.
+ */
+async function extractImagesFromMarkdown(
+	markdown: string,
+	imageDir: string,
+): Promise<{ text: string; images: ImageContent[] }> {
+	const images: ImageContent[] = [];
+	// Match markdown image references: ![alt](path)
+	const imageRefRe = /!\[([^\]]*)\]\((.+)\)/g;
+	let match: RegExpExecArray | null;
+	const replacements: Array<{ full: string; replacement: string }> = [];
+
+	while ((match = imageRefRe.exec(markdown)) !== null) {
+		const [fullMatch, altText, imgPath] = match;
+		// Only handle local file paths (not URLs or data URIs)
+		if (imgPath.startsWith("http://") || imgPath.startsWith("https://") || imgPath.startsWith("data:")) {
+			continue;
+		}
+
+		// Resolve the image path (markit writes absolute paths)
+		const resolvedPath = path.isAbsolute(imgPath) ? imgPath : path.resolve(imageDir, imgPath);
+
+		try {
+			const imageBuffer = await fs.readFile(resolvedPath);
+			if (imageBuffer.byteLength > MAX_IMAGE_SIZE) {
+				replacements.push({ full: fullMatch, replacement: `[Image: ${altText || "extracted image"} — skipped, too large]` });
+				continue;
+			}
+			// Detect MIME type from file extension
+			const ext = path.extname(resolvedPath).toLowerCase();
+			const mimeMap: Record<string, string> = {
+				".png": "image/png",
+				".jpg": "image/jpeg",
+				".jpeg": "image/jpeg",
+				".gif": "image/gif",
+				".webp": "image/webp",
+				".bmp": "image/bmp",
+			};
+			const mimeType = mimeMap[ext] ?? "image/png";
+			images.push({
+				type: "image",
+				data: imageBuffer.toString("base64"),
+				mimeType,
+			});
+			replacements.push({
+				full: fullMatch,
+				replacement: `[Image: ${altText || "extracted image"} — included as image ${images.length}]`,
+			});
+		} catch {
+			// Image file not found or unreadable — replace with text note
+			replacements.push({ full: fullMatch, replacement: `[Image: ${altText || "extracted image"} — file not found]` });
+		}
+	}
+
+	// Apply replacements
+	let cleanedText = markdown;
+	for (const { full, replacement } of replacements) {
+		cleanedText = cleanedText.replace(full, replacement);
+	}
+
+	return { text: cleanedText, images };
 }
 
 /**
@@ -1087,21 +1155,37 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 			}
 		} else if (shouldConvertWithMarkit) {
 			// Convert document or notebook via markit.
-			const result = await convertFileWithMarkit(absolutePath, signal);
-			if (result.ok) {
-				// Apply truncation to converted content
-				const truncation = truncateHead(result.content);
-				const outputText = truncation.content;
+			// Create a temp dir for extracted images so markit can write them.
+			const safeName = path.basename(absolutePath, ext).replace(/[()]/g, "_");
+			const imageDir = await fs.mkdtemp(
+				path.join(os.tmpdir(), `omp-read-images-${safeName}-`),
+			);
+			try {
+				const result = await convertFileWithMarkit(absolutePath, signal, imageDir);
+				if (result.ok) {
+					// Extract image references from the converted markdown and load them.
+					const { text: markdownText, images: extractedImages } = await extractImagesFromMarkdown(
+						result.content,
+						imageDir,
+					);
 
-				details = { truncation };
-				sourcePath = absolutePath;
-				truncationInfo = { result: truncation, options: { direction: "head", startLine: 1 } };
+					// Apply truncation to converted content
+					const truncation = truncateHead(markdownText);
+					const outputText = truncation.content;
 
-				content = [{ type: "text", text: outputText }];
-			} else if (result.error) {
-				content = [{ type: "text", text: `[Cannot read ${ext} file: ${result.error || "conversion failed"}]` }];
-			} else {
-				content = [{ type: "text", text: `[Cannot read ${ext} file: conversion failed]` }];
+					details = { truncation };
+					sourcePath = absolutePath;
+					truncationInfo = { result: truncation, options: { direction: "head", startLine: 1 } };
+
+					content = [{ type: "text", text: outputText }, ...extractedImages];
+				} else if (result.error) {
+					content = [{ type: "text", text: `[Cannot read ${ext} file: ${result.error || "conversion failed"}]` }];
+				} else {
+					content = [{ type: "text", text: `[Cannot read ${ext} file: conversion failed]` }];
+				}
+			} finally {
+				// Clean up the temp image dir
+				await fs.rm(imageDir, { recursive: true, force: true }).catch(() => {});
 			}
 		} else {
 			// Raw text or line-range mode

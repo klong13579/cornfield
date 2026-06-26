@@ -46,9 +46,14 @@ function finalizeConversion(markdown?: string): MarkitConversionResult {
 	return { content: "", ok: false, error: "Conversion produced no output" };
 }
 
-export async function convertFileWithMarkit(filePath: string, signal?: AbortSignal): Promise<MarkitConversionResult> {
+export async function convertFileWithMarkit(
+	filePath: string,
+	signal?: AbortSignal,
+	imageDir?: string,
+): Promise<MarkitConversionResult> {
 	try {
-		const result = await runMarkitConversion(() => markit.convertFile(filePath), signal);
+		const extra = imageDir ? { imageDir } : undefined;
+		const result = await runMarkitConversion(() => markit.convertFile(filePath, extra), signal);
 		return finalizeConversion(result.markdown);
 	} catch (error) {
 		if (error instanceof ToolAbortError) {
