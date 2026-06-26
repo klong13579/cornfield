@@ -11,7 +11,7 @@
  * regardless of their mode.
  */
 import { afterEach, beforeEach, describe, expect, spyOn, test, vi } from "bun:test";
-import { killOrphanRpcProcesses } from "../src/gateway";
+import { killOrphanRpcProcesses } from "../src/gateway-daemon";
 
 describe("killOrphanRpcProcesses — target only --mode rpc", () => {
 	let killSpy: ReturnType<typeof spyOn>;
