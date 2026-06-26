@@ -36,7 +36,6 @@ const ACTIONS = [
 	"doctor",
 	"config",
 	"cron",
-	"send",
 	"service",
 	"setup",
 	"test-longtask",
@@ -49,7 +48,7 @@ export default class Gateway extends Command {
 	static args = {
 		action: Args.string({
 			description:
-				"Gateway action: start | stop | status | doctor | reload | config | cron | send | service | test-longtask | help",
+				"Gateway action: start | stop | status | doctor | reload | config | cron | service | test-longtask | help",
 			required: false,
 			options: ACTIONS,
 		}),
@@ -313,37 +312,6 @@ export default class Gateway extends Command {
 			}
 			case "cron": {
 				await this.#handleCron();
-				break;
-			}
-			case "send": {
-				const argv = process.argv.slice(process.argv.indexOf("send") + 1);
-				const channel = argv[0];
-				const rest = argv.slice(1);
-
-				// Parse optional --user and --conversation flags
-				let userId: string | undefined;
-				let conversationId: string | undefined;
-				const messageParts: string[] = [];
-				for (let i = 0; i < rest.length; i++) {
-					if (rest[i] === "--user" && rest[i + 1]) {
-						userId = rest[++i]!;
-					} else if (rest[i] === "--conversation" && rest[i + 1]) {
-						conversationId = rest[++i]!;
-					} else {
-						messageParts.push(rest[i]!);
-					}
-				}
-
-				const message = messageParts.join(" ");
-				if (!channel || !message) {
-					console.error("Usage: omp gateway send <channel> <message> [--user <userId>] [--conversation <convId>]");
-					console.error("  Example: omp gateway send dingtalk:hr 'Hello' --user 'manager123'");
-					process.exitCode = 1;
-					break;
-				}
-				const { sendToChannel } = await import("@oh-my-pi/pi-gateway/src/gateway");
-				const ok = await sendToChannel(channel, message, { userId, conversationId });
-				if (!ok) process.exitCode = 1;
 				break;
 			}
 			case "service": {

@@ -369,92 +369,6 @@ async function cmdConfig(_configPath?: string): Promise<void> {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// Send Command
-// ═══════════════════════════════════════════════════════════════════════
-
-async function cmdSend(channelArg: string | undefined, args: string[]): Promise<void> {
-	// Parse optional --user and --conversation flags
-	let userId: string | undefined;
-	let conversationId: string | undefined;
-	let channel: string | undefined;
-	const messageParts: string[] = [];
-
-	let i = 0;
-	const tokens = channelArg ? [channelArg, ...args] : args;
-	while (i < tokens.length) {
-		if (tokens[i] === "--user" && tokens[i + 1]) {
-			userId = tokens[i + 1]!;
-			i += 2;
-		} else if (tokens[i] === "--conversation" && tokens[i + 1]) {
-			conversationId = tokens[i + 1]!;
-			i += 2;
-		} else if (!channel) {
-			channel = tokens[i]!;
-			i++;
-		} else {
-			messageParts.push(tokens[i]!);
-			i++;
-		}
-	}
-
-	const message = messageParts.join(" ");
-	if (!channel || !message) {
-		console.error("Usage: pi-gateway send <channel> <message> [--user <userId>] [--conversation <convId>]");
-		console.error("  Example: pi-gateway send dingtalk:hr 'Hello' --user 'manager123'");
-		console.error("  Example: pi-gateway send dingtalk:hr 'Hello' (uses stored webhook)");
-		process.exitCode = 1;
-		return;
-	}
-
-	const { loadConfig } = await import("./config");
-	const { DingTalkChannel } = await import("./channels/dingtalk");
-	const config = await loadConfig();
-
-	const parts = channel.split(":");
-	const channelId = parts[0]!;
-	const accountId = parts.slice(1).join(":") || "__default__";
-
-	const dtConfig = config.channels?.dingtalk as
-		| {
-				accounts?: Record<string, { appKey: string; appSecret: string; robotCode?: string }>;
-				appKey?: string;
-				appSecret?: string;
-				robotCode?: string;
-		  }
-		| undefined;
-
-	if (!dtConfig) {
-		console.error("DingTalk not configured.");
-		process.exitCode = 1;
-		return;
-	}
-
-	const accountConfig = dtConfig.accounts?.[accountId];
-	const ch = new DingTalkChannel();
-	ch.setConfig({
-		...dtConfig,
-		appKey: accountConfig?.appKey ?? dtConfig.appKey!,
-		appSecret: accountConfig?.appSecret ?? dtConfig.appSecret!,
-		robotCode: accountConfig?.robotCode ?? dtConfig.robotCode,
-	} as any);
-	ch.setAccountId(accountId);
-
-	try {
-		await ch.sendMessage({
-			channelId,
-			conversationId: conversationId ?? `send:${Date.now()}`,
-			content: { type: "text", text: message },
-			accountId,
-			toUserId: userId,
-		});
-		console.log("Message sent.");
-	} catch (err) {
-		console.error(`Send failed: ${err instanceof Error ? err.message : String(err)}`);
-		process.exitCode = 1;
-	}
-}
-
-// ═══════════════════════════════════════════════════════════════════════
 // Cron Commands
 // ═══════════════════════════════════════════════════════════════════════
 
@@ -768,9 +682,6 @@ void (async () => {
 			break;
 		case "config":
 			await cmdConfig(gatewayConfigPath);
-			break;
-		case "send":
-			await cmdSend(subcommand, args);
 			break;
 		case "cron":
 			await cmdCron([subcommand ?? "help", ...args]);
