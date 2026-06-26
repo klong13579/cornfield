@@ -3331,6 +3331,30 @@ export class AgentSession {
 		return this.#skillWarnings;
 	}
 
+	/**
+	 * Reload skills and rebuild the system prompt.
+	 * Called by the skill watcher when SKILL.md files change.
+	 * The `rebuildSystemPrompt` closure (from SDK) captures the `skills`
+	 * variable by reference, so the SDK reassigns it before calling this.
+	 */
+	async reloadSkills(newSkills: Skill[], newWarnings: SkillWarning[]): Promise<void> {
+		this.#skills = newSkills;
+		this.#skillWarnings = newWarnings;
+		if (this.#rebuildSystemPrompt) {
+			const toolNames = this.agent.state.tools.map(t => t.name);
+			const tools = new Map<string, AgentTool>();
+			for (const tool of this.agent.state.tools) {
+				tools.set(tool.name, tool);
+			}
+			this.#baseSystemPrompt = await this.#rebuildSystemPrompt(toolNames, tools);
+			this.agent.setSystemPrompt(this.#baseSystemPrompt);
+			logger.info("System prompt rebuilt after skill reload", {
+				skillCount: newSkills.length,
+				skills: newSkills.map(s => s.name),
+			});
+		}
+	}
+
 	getTodoPhases(): TodoPhase[] {
 		return this.#cloneTodoPhases(this.#todoPhases);
 	}

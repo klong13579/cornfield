@@ -1,3 +1,8 @@
+import * as os from "node:os";
+import * as path from "node:path";
+
+import * as fs from "node:fs/promises";
+
 import {
 	Agent,
 	type AgentEvent,
@@ -17,8 +22,10 @@ import {
 	$flag,
 	getAgentDbPath,
 	getAgentDir,
+	getConfigDirName,
 	getProjectDir,
 	logger,
+	parseFrontmatter,
 	postmortem,
 	prompt,
 	Snowflake,
@@ -97,7 +104,9 @@ import {
 import { AgentSession } from "./session/agent-session";
 import { AuthStorage } from "./session/auth-storage";
 import { convertToLlm } from "./session/messages";
+import { clearCache as clearFsCache } from "./capability/fs";
 import { SessionManager } from "./session/session-manager";
+import { SkillWatcher } from "./session/skill-watcher";
 import { closeAllConnections } from "./ssh/connection-manager";
 import { unmountAll } from "./ssh/sshfs-mount";
 import {
@@ -1678,9 +1687,11 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			sessionFile: sessionManager.getSessionFile() ?? null,
 			status: "running",
 		});
+		let skillWatcher: SkillWatcher | undefined;
 		{
 			const originalDispose = session.dispose.bind(session);
 			session.dispose = async () => {
+				skillWatcher?.close();
 				try {
 					await originalDispose();
 				} finally {
@@ -1805,6 +1816,49 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 					}, debounceMs),
 				);
 			});
+		}
+
+		// Set up skill hot-reload: watch skill directories for SKILL.md changes
+		if (options.skills === undefined) {
+			const skillDirs = new Set<string>();
+			const configName = getConfigDirName();
+
+			// User-level skill directories
+			skillDirs.add(path.join(os.homedir(), configName, "agent", "skills"));
+			skillDirs.add(path.join(os.homedir(), ".agents", "skills"));
+
+			// Project-level skill directories (cwd only)
+			// Native provider: <cwd>/.omp/skills/ — gateway agent skills live here
+			skillDirs.add(path.join(cwd, configName, "skills"));
+			// Agents provider: walk-up .agent/.agents — regular dev sessions
+			skillDirs.add(path.join(cwd, ".agent", "skills"));
+			skillDirs.add(path.join(cwd, ".agents", "skills"));
+
+			// Custom skill directories from settings
+			for (const dir of settings.get("skills.customDirectories") ?? []) {
+				const expanded = dir.startsWith("~") ? path.join(os.homedir(), dir.slice(2)) : dir;
+				skillDirs.add(path.resolve(expanded));
+			}
+
+		skillWatcher = new SkillWatcher({
+			directories: [...skillDirs],
+			onReload: () => {
+				void (async () => {
+				try {
+					// Clear the capability fs cache so discoverSkills reads fresh file content
+					clearFsCache();
+					const reloaded = await discoverSkills(cwd, agentDir, {
+						...settings.getGroup("skills"),
+						disabledExtensions: settings.get("disabledExtensions") ?? [],
+					});
+					skills = reloaded.skills;
+					await session.reloadSkills(reloaded.skills, reloaded.warnings);
+				} catch (error) {
+					logger.warn("Skill hot-reload failed", { error: String(error) });
+				}
+				})();
+			},
+		});
 		}
 
 		logger.time("createAgentSession:return");
