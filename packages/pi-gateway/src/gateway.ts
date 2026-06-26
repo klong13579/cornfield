@@ -372,7 +372,7 @@ export class Gateway {
 		// Health check: every 60s, if a bridge's circuit breaker has been
 		// open for more than 5 minutes, restart it. Prevents a permanently
 		// stuck bridge from silently swallowing all messages.
-		this.#healthInterval = setInterval(() => this.#checkBridgeHealth(), 60_000).unref?.();
+		this.#healthInterval = setInterval(() => this.checkBridgeHealth(), 60_000).unref?.();
 
 		this.#running = true;
 		logger.debug("Gateway started");
@@ -602,13 +602,19 @@ export class Gateway {
 
 	/**
 	 * Periodic health check: if a bridge's circuit breaker has been open
-	 * for more than CIRCUIT_OPEN_THRESHOLD_MS, restart the bridge to
-	 * recover from a stuck state. A 10-minute cooldown per bridge prevents
-	 * restart storms when the underlying problem persists.
+	 * for more than the threshold, restart the bridge to recover from a
+	 * stuck state. A cooldown per bridge prevents restart storms when the
+	 * underlying problem persists.
+	 *
+	 * Exposed as public (not #private) so tests and external health
+	 * monitors can trigger it on demand. Thresholds are overridable via
+	 * GATEWAY_CIRCUIT_OPEN_MS and GATEWAY_CIRCUIT_COOLDOWN_MS env vars.
 	 */
-	async #checkBridgeHealth(): Promise<void> {
-		const CIRCUIT_OPEN_THRESHOLD_MS = 5 * 60_000;
-		const RESTART_COOLDOWN_MS = 10 * 60_000;
+	async checkBridgeHealth(): Promise<void> {
+		const CIRCUIT_OPEN_THRESHOLD_MS =
+			Number(process.env.GATEWAY_CIRCUIT_OPEN_MS) || 5 * 60_000;
+		const RESTART_COOLDOWN_MS =
+			Number(process.env.GATEWAY_CIRCUIT_COOLDOWN_MS) || 10 * 60_000;
 		const now = Date.now();
 
 		const checkOne = async (accountId: string, bridge: AgentBridge) => {
@@ -750,6 +756,11 @@ export class Gateway {
 
 	get isRunning(): boolean {
 		return this.#running;
+	}
+
+	/** Returns the default (non-account) bridge, if any. */
+	getDefaultBridge(): AgentBridge {
+		return this.#bridge;
 	}
 
 	/**
