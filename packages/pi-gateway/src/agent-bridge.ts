@@ -341,12 +341,15 @@ export class AgentBridge {
 		const denied = this.#options.deniedTools;
 		if (!denied || denied.length === 0) return;
 
-		this.setDisabledToolsets(denied).catch(err => {
-			logger.warn("[AgentBridge] Failed to apply deniedTools", {
-				denied,
-				error: err instanceof Error ? err.message : String(err),
+		logger.info("[AgentBridge] Applying deniedTools", { denied });
+		this.setDisabledToolsets(denied)
+			.then(() => { logger.info("[AgentBridge] deniedTools applied", { denied }); })
+			.catch(err => {
+				logger.warn("[AgentBridge] Failed to apply deniedTools", {
+					denied,
+					error: err instanceof Error ? err.message : String(err),
+				});
 			});
-		});
 	}
 
 
