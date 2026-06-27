@@ -686,23 +686,7 @@ export class AgentBridge {
 						30_000,
 					);
 				}
-				const events = await this.#promptAndWait(text, timeoutMs, handlers, images);
-				// The active prompt's `aborted` flag was set by
-				// `#resolveActivePromptAsAborted` before the await chain
-				// unblocked. By the time we're back here, the pending
-				// entry is gone (resolveActivePromptAsAborted deletes it),
-				// so we read the flag from the just-resolved events: the
-				// abort resolver appends a sentinel "（已停止）" assistant
-				// message_end. We could plumb a side-channel, but the
-				// sentinel is one extra branch on a cold path and avoids
-				// reshaping the resolve signature.
-				const aborted = events.some(
-					e =>
-						e.type === "message_end" &&
-						e.message?.role === "assistant" &&
-						Array.isArray(e.message.content) &&
-						e.message.content.some(c => c.type === "text" && c.text === "（已停止）"),
-				);
+				const { events, aborted } = await this.#promptAndWait(text, timeoutMs, handlers, images);
 				const rawResponse = this.#extractAssistantText(events);
 
 				if (!rawResponse) {
@@ -813,12 +797,11 @@ export class AgentBridge {
 			// process tries to cancel cleanly, then throws a tagged error.
 			// Scoped to this executePrompt call: cleared in `finally`.
 			//
-			// NB: the watchdog must NOT call `this.abort()` because `abort()`
-			// re-acquires `#runExclusive` and the lock is already held by this
-			// `executePrompt` — it would deadlock. Instead we inline the abort
-			// sequence (send abort command + resolve the active prompt as
-			// aborted) using private members. Those private methods don't take
-			// the lock, so it's safe to call them from the timer thread.
+			// NB: the watchdog inlines the abort sequence (send abort command +
+			// resolve active prompt) rather than calling `this.abort()` because
+			// `abort()` sets `#abortRequested` which is only read by
+			// `forwardWithMeta` — the cron path doesn't need it. Using the
+			// private methods directly avoids setting a flag that nobody reads.
 			let inactivityReason: { idleMs: number; lastEventAt: number } | null = null;
 			let watchdog: NodeJS.Timeout | null = null;
 			if (inactivityBudgetMs > 0) {
@@ -851,7 +834,7 @@ export class AgentBridge {
 			}
 
 			try {
-				const events = await this.#promptAndWait(prompt, timeoutMs);
+				const { events } = await this.#promptAndWait(prompt, timeoutMs);
 				const response = this.#extractAssistantText(events);
 
 				// inactivityReason is mutated by the watchdog's setInterval callback.
@@ -1245,7 +1228,7 @@ export class AgentBridge {
 						clearTimeout(pending.timeout);
 						this.#pendingPrompts.delete(this.#activePromptId);
 						this.#activePromptId = undefined;
-						pending.resolve(pending.events);
+						pending.resolve({ events: pending.events, aborted: false });
 					}
 				}
 			}
@@ -1336,24 +1319,23 @@ export class AgentBridge {
 		// setInterval keeps firing onLongTask pings after the user has
 		// already stopped the run, re-patching a finished card.
 		this.#clearAllLongTaskWatchers(promptId);
-		// Mark the pending prompt as aborted BEFORE resolving so
-		// `forwardWithMeta` can read the flag in the same microtask
-		// the await chain unblocks (the resolve() is sync; the
-		// then-handler that calls buildMetaFromEvents is what reads it).
-		pending.aborted = true;
+		this.#clearAllLongTaskWatchers(promptId);
 		this.#pendingPrompts.delete(promptId);
 		this.#activePromptId = undefined;
-		pending.resolve([
-			...pending.events,
-			{
-				type: "message_end",
-				message: {
-					role: "assistant",
-					content: [{ type: "text", text: "（已停止）" }],
+		pending.resolve({
+			events: [
+				...pending.events,
+				{
+					type: "message_end",
+					message: {
+						role: "assistant",
+						content: [{ type: "text", text: "（已停止）" }],
+					},
 				},
-			},
-			{ type: "agent_end" },
-		]);
+				{ type: "agent_end" },
+			],
+			aborted: true,
+		});
 	}
 
 	async #runExclusive<T>(operation: () => Promise<T>): Promise<T> {
@@ -1426,7 +1408,6 @@ export class AgentBridge {
 			reject,
 			events: [],
 			timeout,
-			aborted: false,
 			lastActivityAt: Date.now(),
 		};
 		if (handlers) pending.handlers = handlers;
@@ -1753,7 +1734,7 @@ export class AgentBridge {
 
 	#formatResponse(text: string): string {
 		// Strip think blocks from model response
-		const cleaned = text.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+		const cleaned = text.replace(/\s*<think>[\s\S]*?<\/think>/g, "").trim();
 
 		const MAX_LENGTH = 4000;
 		const TRUNCATE_NOTICE = "\n\n...(内容已截断，请使用终端查看完整输出)";
