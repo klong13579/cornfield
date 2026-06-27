@@ -36,6 +36,11 @@ export class ResponseHandler {
 		this.#deps = deps;
 	}
 
+	/** Update the session manager reference after it's created in Gateway.start(). */
+	setSessionManager(sm: SessionManager): void {
+		this.#deps.sessionManager = sm;
+	}
+
 	// ═══════════════════════════════════════════════════════════════════
 	// Abort
 	// ═══════════════════════════════════════════════════════════════════
@@ -259,23 +264,12 @@ export class ResponseHandler {
 		accountId: string,
 		sessionManager: SessionManager | undefined,
 	): Promise<void> {
-		const placeholder: OutboundMessage = {
-			channelId: msg.channelId,
-			conversationId: msg.conversationId,
-			content: { type: "markdown", markdown: "thinking..." },
-			sessionWebhook: msg.sessionWebhook,
-			accountId: msg.accountId,
-		};
-		try {
-			await this.#deps.registry.sendMessage(placeholder);
-		} catch (err) {
-			logger.warn("Failed to send processing placeholder", {
-				accountId,
-				conversationId: msg.conversationId,
-				error: err instanceof Error ? err.message : String(err),
-			});
-		}
-
+		// Run the agent first, then send the response in a single message.
+		// We don't send a "thinking..." placeholder here because DingTalk's
+		// sessionWebhook is single-use — a placeholder would consume the
+		// webhook and the actual response would fail to deliver.
+		// The AI Card path (tryStreamAgentResponse) is preferred for streaming
+		// feedback; this V1 path is the fallback for when cards are unavailable.
 		const meta = await sessionManager?.enqueueWithMeta(msg, session);
 		if (meta) {
 			await this.sendFormattedAgentResponse(msg, meta, accountId);

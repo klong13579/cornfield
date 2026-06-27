@@ -47,19 +47,32 @@ import { MessageHandler } from "./gateway-message";
 export function buildChannelKey(channelId: string, accountId?: string): string {
 	return accountId ? `${channelId}:${accountId}` : channelId;
 }
-export function createAccountBridgeOptions(
-	agentConfig: GatewayConfig["agent"],
-	account: DingtalkAccountConfig,
-	agentDir: string,
-): AgentBridgeOptions {
-	return {
-		...agentConfig,
-		model: account.model ?? agentConfig?.model,
-		timeoutMs: account.timeoutMs ?? agentConfig?.timeoutMs,
-		cwd: agentDir,
-		deniedTools: account.deniedTools,
-	};
-}
+export async function createAccountBridgeOptions(
+		agentConfig: GatewayConfig["agent"],
+		account: DingtalkAccountConfig,
+		agentDir: string,
+	): Promise<AgentBridgeOptions> {
+		// Try to read the model from the agent's settings.json
+		let model = account.model ?? agentConfig?.model;
+		if (!model) {
+			try {
+				const settingsPath = path.join(agentDir, ".omp", "settings.json");
+				const settings = JSON.parse(await Bun.file(settingsPath).text());
+				if (settings.modelRoles?.default) {
+					model = settings.modelRoles.default;
+				}
+			} catch {
+				// settings.json not found or invalid, use default
+			}
+		}
+		return {
+			...agentConfig,
+			model,
+			timeoutMs: account.timeoutMs ?? agentConfig?.timeoutMs,
+			cwd: agentDir,
+			deniedTools: account.deniedTools,
+		};
+	}
 
 
 export class Gateway {
@@ -91,11 +104,22 @@ export class Gateway {
 	 * fresh prompt.
 	 */
 	#actionRegistry = new ActionRegistry();
+	/** Test seam: factory for creating DingTalkChannel instances. */
+	#channelFactory?: (accountId?: string) => DingTalkChannel;
 
-	constructor(config: GatewayConfig, deps?: { bridge?: AgentBridge; store?: SQLiteSessionStore }) {
+	constructor(
+		config: GatewayConfig,
+		deps?: {
+			bridge?: AgentBridge;
+			store?: SQLiteSessionStore;
+			/** Factory seam: override DingTalkChannel creation in tests. */
+			channelFactory?: (accountId?: string) => DingTalkChannel;
+		},
+	) {
 		this.#config = config;
 		this.#bridge = deps?.bridge ?? new AgentBridge(config.agent ?? {});
 		this.#store = deps?.store ?? null;
+		this.#channelFactory = deps?.channelFactory;
 
 		// Sub-modules are created in dependency order to avoid forward-reference
 		// closures. ResponseHandler is created first because ModelSwitch's
@@ -109,7 +133,13 @@ export class Gateway {
 		this.#modelSwitch = new ModelSwitch({
 			resolveDirectBridge: id => this.#resolveDirectBridge(id),
 			sendAgentResponse: (msg, text) => this.#responseHandler.sendAgentResponse(msg, text),
-			extractMessageText: msg => msg.content.type === "text" ? msg.content.text : "",
+			extractMessageText: msg => {
+				const c = msg.content;
+				if (c.type === "text") return c.text;
+				if (c.type === "markdown") return c.markdown;
+				if (c.type === "voice") return c.text ?? "";
+				return "";
+			},
 		});
 
 		this.#cronLifecycle = new CronLifecycle({
@@ -130,6 +160,7 @@ export class Gateway {
 			accountBridges: this.#accountBridges,
 			accountAgentDirs: this.#accountAgentDirs,
 			cronLifecycle: this.#cronLifecycle,
+			sessionManager: undefined,
 			modelSwitch: this.#modelSwitch,
 			responseHandler: this.#responseHandler,
 			extractMessageText: msg => {
@@ -165,6 +196,7 @@ export class Gateway {
 
 		// Initialize session store
 		this.#store = new SQLiteSessionStore(`${dataDir}/sessions.db`);
+		this.#messageHandler.setStore(this.#store);
 
 		// Register channels (handle multi-account DingTalk)
 		const enabled = getEnabledChannels(this.#config);
@@ -193,6 +225,8 @@ export class Gateway {
 			bridges: this.#accountBridges,
 			defaultBridge: hasDingTalkAccounts ? undefined : this.#bridge,
 		});
+		this.#messageHandler.setSessionManager(this.#sessionManager);
+		this.#responseHandler.setSessionManager(this.#sessionManager);
 
 		await this.#registry.connectAll(async msg => this.#messageHandler.handleInboundMessage(msg));
 
@@ -240,7 +274,7 @@ export class Gateway {
 		// Multi-account mode
 		if (dtConfig.accounts && Object.keys(dtConfig.accounts).length > 0) {
 			for (const [accountId, account] of Object.entries(dtConfig.accounts)) {
-				const channel = new DingTalkChannel();
+				const channel = this.#channelFactory?.(accountId) ?? new DingTalkChannel();
 				channel.setAccountId(accountId);
 
 				const agentDir = resolveAgentDir(accountId, account.agentDir);
@@ -262,7 +296,7 @@ export class Gateway {
 
 				// Create per-account agent bridge with account-specific config
 				// Model is loaded from agentDir/.omp/config.yml by omp itself
-				const bridge = new AgentBridge(createAccountBridgeOptions(this.#config.agent, account, agentDir));
+				const bridge = new AgentBridge(await createAccountBridgeOptions(this.#config.agent, account, agentDir));
 				this.#accountBridges.set(accountId, bridge);
 
 				// Start per-account bridge
@@ -292,14 +326,14 @@ export class Gateway {
 		}
 
 		// Single-account mode (use legacy appKey/appSecret from config)
-		const channel = new DingTalkChannel();
+		const channel = this.#channelFactory?.() ?? new DingTalkChannel();
 		channel.setCardActionHandler(event => this.#responseHandler.handleCardAction(event));
 		this.#registry.register(channel, rawConfig);
 	}
 
 	async #addAccount(accountId: string, account: DingtalkAccountConfig, config: GatewayConfig): Promise<void> {
 		const rawConfig = config.channels.dingtalk;
-		const channel = new DingTalkChannel();
+		const channel = this.#channelFactory?.(accountId) ?? new DingTalkChannel();
 		channel.setAccountId(accountId);
 
 		const agentDir = resolveAgentDir(accountId, account.agentDir);
@@ -319,7 +353,7 @@ export class Gateway {
 			logger.warn("Failed to register agentDir", { accountId, agentDir, error: String(err) });
 		}
 
-		const bridge = new AgentBridge(createAccountBridgeOptions(config.agent, account, agentDir));
+		const bridge = new AgentBridge(await createAccountBridgeOptions(config.agent, account, agentDir));
 		this.#accountBridges.set(accountId, bridge);
 		try {
 			await bridge.start();
@@ -582,6 +616,8 @@ export class Gateway {
 				bridges: this.#accountBridges,
 				defaultBridge: hasDingTalkAccounts ? undefined : this.#bridge,
 			});
+			this.#messageHandler.setSessionManager(this.#sessionManager);
+			this.#responseHandler.setSessionManager(this.#sessionManager);
 		}
 
 		await this.#writeStatusFile();

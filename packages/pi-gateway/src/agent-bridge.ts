@@ -226,7 +226,7 @@ export interface ForwardStreamHandlers {
 /** Pending prompt state */
 interface PendingPrompt {
 	promptId: string;
-	resolve: (events: AgentEvent[]) => void;
+	resolve: (result: { events: AgentEvent[]; aborted: boolean }) => void;
 	reject: (error: Error) => void;
 	events: AgentEvent[];
 	timeout: NodeJS.Timeout;
@@ -236,13 +236,6 @@ interface PendingPrompt {
 	/** Cumulative text concatenated from `text_delta` events on this prompt.
 	 * Updated as deltas arrive so `onTextDelta` can report the full string. */
 	textCumulative?: string;
-	/** Set to true if the prompt was resolved via `#resolveActivePromptAsAborted`
-	 * (i.e. `bridge.abort()` was called, the RPC acknowledged the abort, and
-	 * the active prompt was force-resolved with the appended "（已停止）"
-	 * marker). `forwardWithMeta` reads this after `promptAndWait` resolves
-	 * and passes it to `#buildMetaFromEvents` so the AgentResponseMeta's
-	 * `aborted: true` field correctly reflects the user-initiated abort. */
-	aborted: boolean;
 	/** ms-since-epoch of the last event received from the RPC process for this prompt.
 	 * Used to enforce `executePrompt({ inactivityMs })`. Bumped on every session
 	 * event routed to this prompt (see the `pending.events.push(parsed)` site in
@@ -290,6 +283,8 @@ export class AgentBridge {
 	#operationTail: Promise<void> = Promise.resolve();
 	/** Model set via setModel() that must be re-applied after switchSession restores session context. */
 	#pendingModelOverride: { provider: string; modelId: string } | undefined;
+	/** Model from AgentBridgeOptions that must be re-applied after switchSession restores session context. */
+	#configuredModel: { provider: string; modelId: string } | undefined;
 	/** Counter for generating unique prompt IDs */
 	#promptIdCounter = 0;
 	#commandIdCounter = 0;
@@ -313,6 +308,16 @@ export class AgentBridge {
 
 	constructor(options: AgentBridgeOptions = {}) {
 		this.#options = options;
+		// Parse configured model from options (format: "provider/modelId")
+		if (options.model) {
+			const slashIdx = options.model.indexOf("/");
+			if (slashIdx !== -1) {
+				this.#configuredModel = {
+					provider: options.model.substring(0, slashIdx),
+					modelId: options.model.substring(slashIdx + 1),
+				};
+			}
+		}
 		const thresholdMs = options.longTaskThresholdMs ?? LONG_TASK_THRESHOLD_MS;
 		const pingMs = options.progressPingIntervalMs ?? LONG_TASK_PROGRESS_PING_MS;
 		logger.debug("[AgentBridge] long-task watcher configured", {
@@ -671,11 +676,13 @@ export class AgentBridge {
 				}
 				// switchSession restores session context (including model) from
 				// the session file, which overwrites any model set via setModel().
-				// Re-apply the pending override so the user's model choice survives.
-				if (this.#pendingModelOverride) {
+				// Re-apply the pending override (from /model command) or the configured
+				// model (from AgentBridgeOptions) so the correct model survives.
+				const modelToApply = this.#pendingModelOverride ?? this.#configuredModel;
+				if (modelToApply) {
 					await this.#sendCommandAndWait(
 						"set_model",
-						{ provider: this.#pendingModelOverride.provider, modelId: this.#pendingModelOverride.modelId },
+						{ provider: modelToApply.provider, modelId: modelToApply.modelId },
 						30_000,
 					);
 				}
@@ -702,6 +709,12 @@ export class AgentBridge {
 					if (this.#abortRequested) {
 						logger.debug("Agent returned empty response after abort");
 						return this.#fallbackMeta("（已停止）", startedAt, { aborted: true });
+					}
+					// Check for a provider/model error before falling back to a generic message.
+					const agentError = this.#extractAssistantError(events);
+					if (agentError) {
+						logger.warn("Agent returned error", { errorMessage: agentError.errorMessage });
+						return this.#fallbackMeta(`LLM 请求失败：${agentError.errorMessage}`, startedAt);
 					}
 					logger.warn("Agent returned empty response");
 					return this.#fallbackMeta("（Agent 未返回内容）", startedAt);
@@ -779,6 +792,15 @@ export class AgentBridge {
 			if (sessionPath) {
 				try {
 					await this.#switchSession(sessionPath);
+					// Re-apply configured model after switchSession restores session context
+					const modelToApply = this.#pendingModelOverride ?? this.#configuredModel;
+					if (modelToApply) {
+						await this.#sendCommandAndWait(
+							"set_model",
+							{ provider: modelToApply.provider, modelId: modelToApply.modelId },
+							30_000,
+						);
+					}
 				} catch (err) {
 					const message = err instanceof Error ? err.message : String(err);
 					throw new Error(`Failed to switch to cron session: ${message}`);
@@ -860,6 +882,15 @@ export class AgentBridge {
 				if (sessionPath && previousSessionPath && previousSessionPath !== this.#activeSessionPath) {
 					try {
 						await this.#switchSession(previousSessionPath);
+						// Re-apply configured model after switchSession restores session context
+						const modelToApply = this.#pendingModelOverride ?? this.#configuredModel;
+						if (modelToApply) {
+							await this.#sendCommandAndWait(
+								"set_model",
+								{ provider: modelToApply.provider, modelId: modelToApply.modelId },
+								30_000,
+							);
+						}
 					} catch (err) {
 						logger.warn("Failed to restore prior session after cron prompt", {
 							priorSession: previousSessionPath,
@@ -1174,6 +1205,7 @@ export class AgentBridge {
 				if (pendingPrompt) {
 					clearTimeout(pendingPrompt.timeout);
 					this.#pendingPrompts.delete(cmdId);
+					if (this.#activePromptId === cmdId) this.#activePromptId = undefined;
 					pendingPrompt.reject(new Error(parsed.error ?? `RPC command failed: ${command}`));
 					return;
 				}
@@ -1365,10 +1397,13 @@ export class AgentBridge {
 		timeoutMs: number,
 		handlers?: ForwardStreamHandlers,
 		images?: ImageContent[],
-	): Promise<AgentEvent[]> {
+	): Promise<{ events: AgentEvent[]; aborted: boolean }> {
 		const promptId = `p_${++this.#promptIdCounter}`;
 
-		const { promise, resolve, reject } = Promise.withResolvers<AgentEvent[]>();
+		const { promise, resolve, reject } = Promise.withResolvers<{
+			events: AgentEvent[];
+			aborted: boolean;
+		}>();
 
 		const timeout = setTimeout(() => {
 			// Clear long-task watchers BEFORE deleting the pending prompt.
@@ -1381,6 +1416,7 @@ export class AgentBridge {
 			// block is appended, so the stop block text is never updated).
 			this.#clearAllLongTaskWatchers(promptId);
 			this.#pendingPrompts.delete(promptId);
+			if (this.#activePromptId === promptId) this.#activePromptId = undefined;
 			reject(new Error(`Agent RPC timed out after ${timeoutMs}ms`));
 		}, timeoutMs);
 
@@ -1410,12 +1446,35 @@ export class AgentBridge {
 		return promise;
 	}
 
+	/**
+	 * Extract the assistant's response text from the RPC event list.
+	 * Returns `null` if no usable text was found (callers should then
+	 * check for error messages via `#extractAssistantError`).
+	 */
 	#extractAssistantText(events: AgentEvent[]): string | null {
 		const assistantEvents = events.filter(e => e.type === "message_end" && e.message?.role === "assistant");
 		const last = assistantEvents[assistantEvents.length - 1];
 		if (!last?.message?.content) return null;
 		const textContent = last.message.content.find(c => c.type === "text");
 		return textContent?.text ?? null;
+	}
+
+	/**
+	 * Extract the error message from the last assistant event, if any.
+	 * The wire format carries `stopReason` and `errorMessage` on the
+	 * assistant message even when `content` is empty. Returns `null`
+	 * when there is no error.
+	 */
+	#extractAssistantError(events: AgentEvent[]): { stopReason: string; errorMessage: string } | null {
+		const assistantEvents = events.filter(e => e.type === "message_end" && e.message?.role === "assistant");
+		const last = assistantEvents[assistantEvents.length - 1];
+		if (!last?.message) return null;
+		// Cast to access wire-level fields the inline type doesn't carry.
+		const wire = last.message as { stopReason?: string; errorMessage?: string };
+		if (wire.stopReason === "error" && wire.errorMessage) {
+			return { stopReason: wire.stopReason, errorMessage: wire.errorMessage };
+		}
+		return null;
 	}
 
 	/**

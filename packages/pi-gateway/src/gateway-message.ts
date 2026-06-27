@@ -24,6 +24,7 @@ import type {
 	OutboundMessage,
 	SessionRecord,
 } from "./types";
+import type { SessionManager } from "./session-manager";
 
 /** Interface for the subset of Gateway that MessageHandler needs. */
 	export interface MessageGatewayDeps {
@@ -34,6 +35,7 @@ import type {
 	accountBridges: Map<string, AgentBridge>;
 	accountAgentDirs: Map<string, string>;
 	cronLifecycle: CronLifecycle;
+	sessionManager: SessionManager | undefined;
 	modelSwitch: ModelSwitch;
 	responseHandler: ResponseHandler;
 	extractMessageText(msg: InboundMessage): string;
@@ -44,6 +46,16 @@ export class MessageHandler {
 
 	constructor(deps: MessageGatewayDeps) {
 		this.#deps = deps;
+	}
+
+	/** Update the store reference after it's created in Gateway.start(). */
+	setStore(store: SQLiteSessionStore): void {
+		this.#deps.store = store;
+	}
+
+	/** Update the session manager reference after it's created in Gateway.start(). */
+	setSessionManager(sm: SessionManager): void {
+		this.#deps.sessionManager = sm;
 	}
 
 	async handleInboundMessage(msg: InboundMessage): Promise<void> {
@@ -117,11 +129,11 @@ export class MessageHandler {
 				`${msg.channelId}${msg.accountId ? `:${msg.accountId}` : ""}`,
 			);
 			const usedCard = await this.#deps.responseHandler.tryStreamAgentResponse(
-				msg, session, accountId, channel, this.#deps.cronLifecycle as unknown as undefined,
+				msg, session, accountId, channel, this.#deps.sessionManager,
 			);
 			if (!usedCard) {
 				await this.#deps.responseHandler.sendAgentResponseViaV1Markdown(
-					msg, session, accountId, this.#deps.cronLifecycle as unknown as undefined,
+					msg, session, accountId, this.#deps.sessionManager,
 				);
 			}
 
