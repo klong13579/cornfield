@@ -1,6 +1,5 @@
 import * as path from "node:path";
 import {
-	ALIBABA_CODING_PLAN_SELECTOR_MODEL_IDS,
 	type Api,
 	type AssistantMessageEventStream,
 	type Context,
@@ -922,9 +921,7 @@ export class ModelRegistry {
 		// Merge runtime extension models so they survive refresh() cycles
 		const combined = this.#mergeCustomModels(resolvedDefaults, this.#runtimeModelOverlays);
 		const withModelOverrides = this.#applyModelOverrides(combined, this.#modelOverrides);
-		this.#models = this.#applyExplicitProviderAllowlist(
-			this.#pruneAlibabaCodingPlanCatalog(this.#applyRuntimeProviderOverrides(withModelOverrides)),
-		);
+		this.#models = this.#applyExplicitProviderAllowlist(this.#applyRuntimeProviderOverrides(withModelOverrides));
 		this.#rebuildCanonicalIndex();
 	}
 
@@ -945,16 +942,6 @@ export class ModelRegistry {
 				};
 			});
 		});
-	}
-
-	/**
-	 * Bundled `models.json` and DashScope `/models` discovery both over-list Alibaba Coding Plan models.
-	 * Keep only the curated selector set (same allowlist as `alibabaCodingPlanModelManagerOptions`).
-	 */
-	#pruneAlibabaCodingPlanCatalog(models: Model<Api>[]): Model<Api>[] {
-		return models.filter(
-			m => m.provider !== "alibaba-coding-plan" || ALIBABA_CODING_PLAN_SELECTOR_MODEL_IDS.has(m.id),
-		);
 	}
 
 	#mergeResolvedModels(baseModels: Model<Api>[], replacementModels: Model<Api>[]): Model<Api>[] {
@@ -1254,9 +1241,7 @@ export class ModelRegistry {
 		// Merge runtime extension models so they survive online discovery completion
 		const combined = this.#mergeCustomModels(withConfigModels, this.#runtimeModelOverlays);
 		const withModelOverrides = this.#applyModelOverrides(combined, this.#modelOverrides);
-		this.#models = this.#applyExplicitProviderAllowlist(
-			this.#pruneAlibabaCodingPlanCatalog(this.#applyRuntimeProviderOverrides(withModelOverrides)),
-		);
+		this.#models = this.#applyExplicitProviderAllowlist(this.#applyRuntimeProviderOverrides(withModelOverrides));
 		this.#rebuildCanonicalIndex();
 	}
 
@@ -2232,15 +2217,13 @@ export class ModelRegistry {
 			if (config.oauth?.modifyModels) {
 				const credential = this.authStorage.getOAuthCredential(providerName);
 				if (credential) {
-					this.#models = this.#pruneAlibabaCodingPlanCatalog(
-						config.oauth.modifyModels(withRuntimeTransportOverride, credential),
-					);
+					this.#models = config.oauth.modifyModels(withRuntimeTransportOverride, credential);
 					this.#rebuildCanonicalIndex();
 					return;
 				}
 			}
 
-			this.#models = this.#pruneAlibabaCodingPlanCatalog(withRuntimeTransportOverride);
+			this.#models = withRuntimeTransportOverride;
 			this.#rebuildCanonicalIndex();
 			return;
 		}
@@ -2252,12 +2235,10 @@ export class ModelRegistry {
 				transportOverride,
 			);
 			this.#runtimeProviderOverrides.set(providerName, nextRuntimeOverride);
-			this.#models = this.#pruneAlibabaCodingPlanCatalog(
-				this.#models.map(m => {
-					if (m.provider !== providerName) return m;
-					return this.#applyProviderTransportOverride(m, transportOverride);
-				}),
-			);
+			this.#models = this.#models.map(m => {
+				if (m.provider !== providerName) return m;
+				return this.#applyProviderTransportOverride(m, transportOverride);
+			});
 			this.#rebuildCanonicalIndex();
 		}
 	}

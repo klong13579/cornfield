@@ -2,9 +2,14 @@
 
 ## [Unreleased]
 
+### Removed
+
+- Alibaba Coding Plan: removed the six-model curated allowlist (`ALIBABA_CODING_PLAN_SELECTOR_MODEL_IDS` in `provider-models/alibaba-coding-plan-curated.ts`) and the `ModelRegistry.#pruneAlibabaCodingPlanCatalog` filter. The bundled catalog, runtime discovery (`/v1/models`), and `omp --list-models` now expose all DashScope compatible-mode models reachable through the configured `baseUrl` / `apiKey`. Custom model definitions in `models.yml` are no longer silently dropped from the selector when not on the curated set. Treat this as a behavior restoration rather than a feature change — the allowlist was the only per-provider special case in pi-ai (every other provider, e.g. `narwal-plan`, follows the “declare in `models.yml`, see in selector” contract). If a particular model fails at request time (403 / 400001 / capability mismatch), the existing per-call error handling already surfaces the truth to the caller; no upstream filtering was protecting against that.
+- Alibaba Coding Plan: deleted the `alibabaCodingPlanModelManagerOptions` `staticModels` and `fetchDynamicModels` ID filters; both now mirror the bundled catalog / live discovery verbatim and only fold in the bundled reference map for metadata enrichment.
+- Alibaba Coding Plan: deleted `packages/ai/src/provider-models/alibaba-coding-plan-curated.ts` and its regression test `alibaba-coding-plan-curated.test.ts` (size assertion no longer applies).
+
 ### Changed
 
-- Alibaba Coding Plan: limit bundled catalog and runtime discovery to six DashScope compatible-mode models (`qwen3.6-flash`, `qwen3.6-plus`, `deepseek-v4-pro`, `deepseek-v4-flash`, `glm-5.1`, `MiniMax-M2.5`); default model id is now `qwen3.6-plus` (was `qwen3.5-plus`). The coding-agent `ModelRegistry` applies the same allowlist after merging bundled `models.json` and discovery so `omp --list-models` stays aligned with the selector.
 - Alibaba Coding Plan default OpenAI-compat base URL is now `https://dashscope.aliyuncs.com/compatible-mode/v1` (was `https://coding.dashscope.aliyuncs.com/v1`). Override via `models.yml` or discovery config if your account must use the Coding endpoint.
 
 ### Fixed

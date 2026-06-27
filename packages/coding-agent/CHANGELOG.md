@@ -68,6 +68,7 @@
 ### Removed
 
 - Old standalone scheduler files in `packages/coding-agent/src/scheduler/`
+- **Alibaba Coding Plan curated allowlist filter**: Removed `ModelRegistry.#pruneAlibabaCodingPlanCatalog` and its 5 call sites (`#loadModels`, online-discovery refresh, OAuth `modifyModels` path, OAuth non-`modifyModels` path, and provider transport override). Alibaba Coding Plan is no longer special-cased; `omp --list-models` and the model selector now expose every model the registry can resolve for that provider — bundled (`models.json`), runtime-discovered (`/v1/models`), and user-defined (`models.yml`) alike. Mirrors the pi-ai change: `ALIBABA_CODING_PLAN_SELECTOR_MODEL_IDS` and `provider-models/alibaba-coding-plan-curated.ts` deleted, the two ID filters in `alibabaCodingPlanModelManagerOptions` (`staticModels` + `fetchDynamicModels`) removed. Per-call error handling is the only safety net now — a model that fails with 403 / 400001 / capability mismatch will surface that truth to the caller rather than being silently hidden behind an allowlist.
 
 
 ### Breaking Changes
@@ -81,7 +82,6 @@
 
 ### Changed
 
-- Alibaba Coding Plan: after loading bundled models and provider discovery, the model registry keeps only the six curated DashScope models so `omp --list-models` matches the selector allowlist (same ids as `pi-ai`).
 - Status line and footer show the active model as `provider/model-id` (same as CLI selectors), not display name or bare id alone.
 
 ## [14.5.11] - 2026-04-30
