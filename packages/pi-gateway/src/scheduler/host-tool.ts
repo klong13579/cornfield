@@ -17,14 +17,20 @@
  * channel registries — that lookup happens here.
  */
 
-import { Type } from "@sinclair/typebox";
 import { logger } from "@oh-my-pi/pi-utils";
-import type { ChannelRegistry } from "../channels/registry";
-import type { InboundMessage } from "../types";
+import { Type } from "@sinclair/typebox";
 import type { AgentBridge } from "../agent-bridge";
-import type { SchedulerDbStorage } from "./storage";
-import { type CronDeliveryOutput, validateCronDelivery, type ScheduledTask, type TaskExecution } from "./types";
+import type { ChannelRegistry } from "../channels/registry";
 import type { HostToolHandler, HostToolResultBody, RpcHostToolDefinition } from "../host-tool-dispatcher";
+import type { InboundMessage } from "../types";
+import type { SchedulerDbStorage } from "./storage";
+import {
+	type CronDeliveryOutput,
+	parseSchedule,
+	type ScheduledTask,
+	type TaskExecution,
+	validateCronDelivery,
+} from "./types";
 
 /**
  * Context the cron tool needs at call time. Closed over from the
@@ -102,19 +108,19 @@ const CRON_TOOL_DEFINITION: RpcHostToolDefinition = {
 		"**`add` example (DM, agent task, 18:00 daily report):**\n" +
 		"```\n" +
 		"cron.add({\n" +
-		"  action: \"add\",\n" +
-		"  name: \"daily-1800-report\",\n" +
-		"  schedule: \"0 18 * * *\",\n" +
-		"  taskType: \"agent\",\n" +
-		"  agentDir: \"/abs/path/to/agent\",\n" +
-		"  prompt: \"汇总今日面试/候选人进展并发送给当前用户\",\n" +
+		'  action: "add",\n' +
+		'  name: "daily-1800-report",\n' +
+		'  schedule: "0 18 * * *",\n' +
+		'  taskType: "agent",\n' +
+		'  agentDir: "/abs/path/to/agent",\n' +
+		'  prompt: "汇总今日面试/候选人进展并发送给当前用户",\n' +
 		"  // delivery: OMIT in DM — gateway auto-fills from active chat\n" +
 		"})\n" +
 		"```\n\n" +
 		"**`add` rules (mandatory):**\n" +
 		"- In a chat (DM or group) — OMIT the `delivery` field. The gateway auto-infers `{channel, accountId, toUserId}` for DM or `{channel, accountId, toConversationId}` for group from the active conversation. Do NOT read `gateway.json` / `BOOT.md` / call `dws` to look up the sender — let auto-inference handle it.\n" +
-		"- For `taskType: \"agent\"` — `agentDir` is required and `prompt` is the agent's instructions (not `command`).\n" +
-		"- For `taskType: \"shell\"` — `command` is the shell command (not `prompt`).\n" +
+		'- For `taskType: "agent"` — `agentDir` is required and `prompt` is the agent\'s instructions (not `command`).\n' +
+		'- For `taskType: "shell"` — `command` is the shell command (not `prompt`).\n' +
 		"- `name` must be unique; pick a descriptive slug (e.g. `daily-1830-report`, `interview-prep-1h`).\n" +
 		"- `schedule` accepts a cron expression (`0 18 * * *`), an interval (`every 30m`), or a one-shot ISO timestamp.\n" +
 		"- After `add`, the tool returns the persisted task — read it back and report name / schedule / delivery to the user verbatim.\n\n" +
@@ -142,16 +148,7 @@ export function createCronToolDefinitions(ctx: CronToolContext): HostToolHandler
 // ---------------------------------------------------------------------------
 
 interface CronToolArgs {
-	action:
-		| "add"
-		| "list"
-		| "show"
-		| "update"
-		| "remove"
-		| "enable"
-		| "disable"
-		| "run"
-		| "runs";
+	action: "add" | "list" | "show" | "update" | "remove" | "enable" | "disable" | "run" | "runs";
 	[key: string]: unknown;
 }
 
@@ -198,9 +195,21 @@ async function handleAdd(args: CronToolArgs, ctx: CronToolContext): Promise<Host
 	const schedule = stringArg(args, "schedule");
 	if (!schedule) return errResult("add: schedule is required");
 
+	// Parse the schedule up front so we (a) reject invalid input with a
+	// clear error and (b) persist the correct scheduleType. Previously
+	// we hard-coded `scheduleType: "cron"`, which worked only because
+	// the engine re-parses `cron` at trigger time as a fallback
+	// (`engine.ts`: `task.scheduleType ?? parsed.type ?? "cron"`).
+	// Storing the wrong type made `cron.show` lie to the LLM about
+	// what it had just created — e.g. a one-shot `+5m` task showed
+	// `scheduleType: "cron"`.
+	const parsedSchedule = parseSchedule(schedule);
+	if (parsedSchedule.error) {
+		return errResult(`add: invalid schedule ${JSON.stringify(schedule)}: ${parsedSchedule.error}`);
+	}
+
 	const taskType = (stringArg(args, "taskType") ?? "shell") as "shell" | "agent";
-	const command =
-		taskType === "agent" ? stringArg(args, "prompt") : stringArg(args, "command");
+	const command = taskType === "agent" ? stringArg(args, "prompt") : stringArg(args, "command");
 	if (!command) {
 		return errResult(
 			taskType === "agent" ? "add: prompt is required for agent tasks" : "add: command is required for shell tasks",
@@ -225,7 +234,7 @@ async function handleAdd(args: CronToolArgs, ctx: CronToolContext): Promise<Host
 		name,
 		cron: schedule,
 		command,
-		scheduleType: "cron",
+		scheduleType: parsedSchedule.type,
 		taskType,
 		model: stringArg(args, "model"),
 		provider: stringArg(args, "provider"),
@@ -293,7 +302,20 @@ async function handleUpdate(args: CronToolArgs, ctx: CronToolContext): Promise<H
 	if (!task) return errResult("update: task not found (pass name or id)");
 
 	const updates: Partial<ScheduledTask> = { updatedAt: Date.now() };
-	if (args.schedule !== undefined) updates.cron = String(args.schedule);
+	if (args.schedule !== undefined) {
+		const newSchedule = String(args.schedule);
+		// Mirror the validation + type-derivation in `add` so a task whose
+		// schedule is updated from cron to one-shot (or vice versa) stores
+		// the matching `scheduleType`. Without this, a task created with
+		// `0 9 * * *` and later updated to `+5m` would still report
+		// `scheduleType: "cron"` in subsequent `show` calls.
+		const parsed = parseSchedule(newSchedule);
+		if (parsed.error) {
+			return errResult(`update: invalid schedule ${JSON.stringify(newSchedule)}: ${parsed.error}`);
+		}
+		updates.cron = newSchedule;
+		updates.scheduleType = parsed.type;
+	}
 	if (args.command !== undefined) updates.command = String(args.command);
 	if (args.prompt !== undefined) updates.command = String(args.prompt);
 	if (args.model !== undefined) updates.model = stringArg(args, "model");
@@ -312,7 +334,8 @@ async function handleUpdate(args: CronToolArgs, ctx: CronToolContext): Promise<H
 			toUserId: stringArg(args.delivery as Record<string, unknown>, "toUserId") ?? current?.toUserId,
 			toConversationId:
 				stringArg(args.delivery as Record<string, unknown>, "toConversationId") ?? current?.toConversationId,
-			mode: (stringArg(args.delivery as Record<string, unknown>, "mode") as "announce" | "none" | undefined) ??
+			mode:
+				(stringArg(args.delivery as Record<string, unknown>, "mode") as "announce" | "none" | undefined) ??
 				current?.mode ??
 				"announce",
 		};
@@ -395,10 +418,7 @@ function resolveDeliveryForAdd(args: CronToolArgs, ctx: CronToolContext): Delive
 // Helpers
 // ---------------------------------------------------------------------------
 
-function resolveTask(
-	args: CronToolArgs,
-	storage: SchedulerDbStorage,
-): ScheduledTask | undefined {
+function resolveTask(args: CronToolArgs, storage: SchedulerDbStorage): ScheduledTask | undefined {
 	const id = stringArg(args, "id");
 	if (id) return storage.getTask(id);
 	const name = stringArg(args, "name");

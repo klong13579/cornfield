@@ -18,15 +18,16 @@
  * `mock.module()`. The bridge is a thin object that records what
  * `getActiveChatContext()` would return.
  */
+
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import type { AgentBridge } from "../src/agent-bridge";
 import type { ChannelRegistry } from "../src/channels/registry";
-import type { InboundMessage } from "../src/types";
 import { createCronToolDefinitions } from "../src/scheduler/host-tool";
 import { SchedulerDbStorage } from "../src/scheduler/storage";
+import type { InboundMessage } from "../src/types";
 
 const TMP = path.join(os.tmpdir(), `omp-test-cron-${process.pid}-${Date.now()}`);
 
@@ -70,7 +71,10 @@ const GROUP_MSG: InboundMessage = {
 	content: { type: "text", text: "test" },
 };
 
-function asText(body: { content: Array<{ type: string; text: string }>; isError?: boolean }): { text: string; isError: boolean } {
+function asText(body: { content: Array<{ type: string; text: string }>; isError?: boolean }): {
+	text: string;
+	isError: boolean;
+} {
 	return { text: body.content.map(c => c.text).join(""), isError: body.isError === true };
 }
 
@@ -265,5 +269,195 @@ describe("cron host tool — delivery auto-inference", () => {
 		const { text, isError } = asText(result);
 		expect(isError).toBe(true);
 		expect(text).toMatch(/not initialized/);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// scheduleType correctness
+//
+// Bug: the host tool used to hard-code `scheduleType: "cron"` on add, so
+// `cron.show` for a one-shot `+5m` task (or an interval `5m` task) would
+// lie and report `scheduleType: "cron"`. The engine still ran the task
+// correctly because it falls back to `parseSchedule(task.cron)` when
+// `scheduleType` is missing, but the LLM-facing representation was
+// wrong — and any future code that keys off `scheduleType` directly
+// (skipping the re-parse) would have been broken.
+//
+// These tests pin the corrected behavior:
+//   - `+5m`  → scheduleType: "once"
+//   - `5m`   → scheduleType: "interval"
+//   - `0 9 * * *`  → scheduleType: "cron"  (regression)
+//   - invalid input → clear error, no row stored
+//   - update from cron to `+5m` re-derives scheduleType
+// ---------------------------------------------------------------------------
+
+describe("cron host tool — scheduleType derivation", () => {
+	let storage: SchedulerDbStorage;
+	const storages: SchedulerDbStorage[] = [];
+
+	beforeEach(() => {
+		storage = newDb();
+		storages.push(storage);
+	});
+
+	afterEach(() => {
+		for (const s of storages) {
+			try {
+				s["#db"]?.close?.();
+			} catch {}
+		}
+		storages.length = 0;
+		try {
+			fs.rmSync(TMP, { recursive: true, force: true });
+		} catch {}
+	});
+
+	async function addTask(schedule: string, name = "t") {
+		const registry = new StubRegistry();
+		const tools = createCronToolDefinitions({
+			getBridge: () => stubBridge(DM_MSG),
+			registry: registry as unknown as ChannelRegistry,
+			getStorage: () => storage,
+		});
+		const result = await tools[0]!.handle({
+			action: "add",
+			name,
+			schedule,
+			command: "echo x",
+			taskType: "shell",
+		});
+		return asText(result);
+	}
+
+	it("persists scheduleType=once for a relative-time schedule (+5m)", async () => {
+		const { text, isError } = await addTask("+5m", "oneshot-relative");
+		expect(isError).toBe(false);
+		const task = JSON.parse(text);
+		expect(task.scheduleType).toBe("once");
+		expect(task.cron).toBe("+5m");
+	});
+
+	it("persists scheduleType=once for an ISO-timestamp schedule", async () => {
+		const { text, isError } = await addTask("2026-12-31T16:00:00Z", "oneshot-iso");
+		expect(isError).toBe(false);
+		const task = JSON.parse(text);
+		expect(task.scheduleType).toBe("once");
+		expect(task.cron).toBe("2026-12-31T16:00:00Z");
+	});
+
+	it("persists scheduleType=interval for a duration schedule (5m)", async () => {
+		const { text, isError } = await addTask("5m", "interval");
+		expect(isError).toBe(false);
+		const task = JSON.parse(text);
+		expect(task.scheduleType).toBe("interval");
+		expect(task.cron).toBe("5m");
+	});
+
+	it("persists scheduleType=cron for a 5-field cron expression (regression)", async () => {
+		const { text, isError } = await addTask("0 9 * * *", "cron-five");
+		expect(isError).toBe(false);
+		const task = JSON.parse(text);
+		expect(task.scheduleType).toBe("cron");
+	});
+
+	it("persists scheduleType=cron for a 6-field cron expression", async () => {
+		const { text, isError } = await addTask("0 0 9 * * *", "cron-six");
+		expect(isError).toBe(false);
+		const task = JSON.parse(text);
+		expect(task.scheduleType).toBe("cron");
+	});
+
+	it("rejects add with an invalid schedule (no row stored)", async () => {
+		const before = JSON.parse(
+			asText(
+				await (async () => {
+					const registry = new StubRegistry();
+					const tools = createCronToolDefinitions({
+						getBridge: () => stubBridge(DM_MSG),
+						registry: registry as unknown as ChannelRegistry,
+						getStorage: () => storage,
+					});
+					return tools[0]!.handle({ action: "list" });
+				})(),
+			).text,
+		).length;
+
+		const { text, isError } = await addTask("not a cron", "bogus");
+		expect(isError).toBe(true);
+		expect(text).toMatch(/invalid schedule/);
+
+		// Re-list to confirm nothing was stored.
+		const registry = new StubRegistry();
+		const tools = createCronToolDefinitions({
+			getBridge: () => stubBridge(DM_MSG),
+			registry: registry as unknown as ChannelRegistry,
+			getStorage: () => storage,
+		});
+		const after = JSON.parse(asText(await tools[0]!.handle({ action: "list" })).text).length;
+		expect(after).toBe(before);
+	});
+
+	it("update that changes schedule from cron to one-shot re-derives scheduleType", async () => {
+		const registry = new StubRegistry();
+		const tools = createCronToolDefinitions({
+			getBridge: () => stubBridge(DM_MSG),
+			registry: registry as unknown as ChannelRegistry,
+			getStorage: () => storage,
+		});
+
+		// Create as cron
+		const add = await tools[0]!.handle({
+			action: "add",
+			name: "switch",
+			schedule: "0 9 * * *",
+			command: "echo x",
+			taskType: "shell",
+		});
+		expect(JSON.parse(asText(add).text).scheduleType).toBe("cron");
+
+		// Update schedule to a one-shot
+		const update = await tools[0]!.handle({
+			action: "update",
+			name: "switch",
+			schedule: "+10m",
+		});
+		const { text, isError } = asText(update);
+		expect(isError).toBe(false);
+		const task = JSON.parse(text);
+		expect(task.scheduleType).toBe("once");
+		expect(task.cron).toBe("+10m");
+	});
+
+	it("update with an invalid schedule returns an error and leaves the task unchanged", async () => {
+		const registry = new StubRegistry();
+		const tools = createCronToolDefinitions({
+			getBridge: () => stubBridge(DM_MSG),
+			registry: registry as unknown as ChannelRegistry,
+			getStorage: () => storage,
+		});
+
+		const add = await tools[0]!.handle({
+			action: "add",
+			name: "stable",
+			schedule: "0 9 * * *",
+			command: "echo x",
+			taskType: "shell",
+		});
+		const original = JSON.parse(asText(add).text);
+
+		const update = await tools[0]!.handle({
+			action: "update",
+			name: "stable",
+			schedule: "garbage",
+		});
+		const { text, isError } = asText(update);
+		expect(isError).toBe(true);
+		expect(text).toMatch(/invalid schedule/);
+
+		// Task must still be there with original values.
+		const show = await tools[0]!.handle({ action: "show", name: "stable" });
+		const shown = JSON.parse(asText(show).text);
+		expect(shown.cron).toBe(original.cron);
+		expect(shown.scheduleType).toBe(original.scheduleType);
 	});
 });
