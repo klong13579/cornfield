@@ -38,6 +38,33 @@ function renderTable<T extends Record<string, string>>(rows: T[], headers: T): v
 }
 
 /**
+ * Collect verified available models, optionally scoped to an allowlist,
+ * sorted by provider then model id.
+ *
+ * Shared data layer used by both the CLI `--list-models` command and the
+ * LLM `list_models` tool. Callers layer their own search filter and
+ * output formatting on top.
+ */
+export function collectVerifiedModels(
+	modelRegistry: ModelRegistry,
+	enabledModelIds?: Set<string>,
+): Model<Api>[] {
+	let models = modelRegistry.getVerifiedAvailable();
+
+	if (enabledModelIds && enabledModelIds.size > 0) {
+		models = models.filter(m => enabledModelIds.has(`${m.provider}/${m.id}`));
+	}
+
+	models.sort((left, right) => {
+		const providerCmp = left.provider.localeCompare(right.provider);
+		if (providerCmp !== 0) return providerCmp;
+		return left.id.localeCompare(right.id);
+	});
+
+	return models;
+}
+
+/**
  * List available models, optionally filtered by search pattern.
  *
  * Only models confirmed by dynamic discovery are shown. For providers whose
@@ -53,32 +80,21 @@ export async function listModels(
 	searchPattern?: string,
 	enabledModelIds?: Set<string>,
 ): Promise<void> {
-	let models = modelRegistry.getVerifiedAvailable();
-
-	if (enabledModelIds && enabledModelIds.size > 0) {
-		models = models.filter(m => enabledModelIds.has(`${m.provider}/${m.id}`));
-	}
-
-	if (models.length === 0) {
-		writeLine("No models available. Set API keys in environment variables.");
-		return;
-	}
-
-	let filteredModels: Model<Api>[] = models;
-	if (searchPattern) {
-		filteredModels = fuzzyFilter(models, searchPattern, model => `${model.provider} ${model.id}`);
-	}
+	let filteredModels = collectVerifiedModels(modelRegistry, enabledModelIds);
 
 	if (filteredModels.length === 0) {
-		writeLine(`No models matching "${searchPattern}"`);
+		writeLine(enabledModelIds?.size ? "No models available." : "No models available. Set API keys in environment variables.");
 		return;
 	}
 
-	filteredModels.sort((left, right) => {
-		const providerCmp = left.provider.localeCompare(right.provider);
-		if (providerCmp !== 0) return providerCmp;
-		return left.id.localeCompare(right.id);
-	});
+	if (searchPattern) {
+		filteredModels = fuzzyFilter(filteredModels, searchPattern, model => `${model.provider} ${model.id}`);
+		if (filteredModels.length === 0) {
+			writeLine(`No models matching "${searchPattern}"`);
+			return;
+		}
+	}
+
 
 	const providerRows = filteredModels.map(model => ({
 		provider: model.provider,
