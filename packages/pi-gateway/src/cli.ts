@@ -114,6 +114,20 @@ async function cmdStart(_configPath?: string): Promise<void> {
 
 	await gateway.start();
 
+	// Attempt to resume any interrupted conversation from a previous gateway run.
+	// This reads the restart sentinel (if present) and sends a continuation message
+	// to the agent so it can acknowledge the restart and continue where it left off.
+	try {
+		const resumed = await gateway.resumeFromSentinel();
+		if (resumed) {
+			logger.info("Restart recovery completed successfully");
+		}
+	} catch (err) {
+		logger.warn("Restart recovery failed", {
+			error: err instanceof Error ? err.message : String(err),
+		});
+	}
+
 	// Non-interactive daemon mode (stdin not a TTY)
 	if (!process.stdin.isTTY) {
 		console.log("\n✅ Gateway started in daemon mode");
