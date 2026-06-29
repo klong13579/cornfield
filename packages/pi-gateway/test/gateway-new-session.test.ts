@@ -157,6 +157,16 @@ describe("NewSessionHandler", () => {
 			"新会话开始",
 			"session",
 			"",
+			// CJK continuation false-positives — V8's \b treats CJK as
+			// non-word so /\b/ falsely matched these before the fix.
+			"/new主题",
+			"/new主题建议",
+			"/reset会话",
+			"/clear所有",
+			// English letter continuation must not match either.
+			"/newtest",
+			"/resetbar",
+			"/clearup",
 		])("does NOT match %p", text => {
 			const handler = new NewSessionHandler({
 				config: makeConfig(),

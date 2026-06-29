@@ -71,7 +71,9 @@ describe("ListModelsTool", () => {
 		expect(text).toContain("| alibaba-coding-plan | qwen3.6-plus | 1.0M | yes |");
 		expect(text).toContain("| openai | gpt-5 | 400k | - |");
 		expect(text).toContain("current: narwal-plan/minimax-m3");
-		expect(text).toContain("switch_model");
+		expect(text).toContain("/model <provider>/<modelId>");
+		expect(text).toContain("`/model openai/o3`");
+		expect(text).not.toContain("switch_model({query:");
 	});
 
 	it("sorts by provider then model id (deterministic order)", async () => {
@@ -146,11 +148,11 @@ describe("ListModelsTool", () => {
 		await expect(tool.execute("call-9", {})).rejects.toThrow(/当前没有可用的模型/);
 	});
 
-	it("falls back to modelRegistry.getAvailable when getAvailableModels is absent", async () => {
-		const getAvailable = () => MODELS;
+	it("falls back to modelRegistry.getVerifiedAvailable when getAvailableModels is absent", async () => {
+		const getVerifiedAvailable = () => MODELS;
 		const session = makeSession();
 		const { getAvailableModels: _omit, ...rest } = session;
-		rest.modelRegistry = { getAvailable } as unknown as NonNullable<ToolSession["modelRegistry"]>;
+		rest.modelRegistry = { getVerifiedAvailable } as unknown as NonNullable<ToolSession["modelRegistry"]>;
 		const tool = new ListModelsTool(rest);
 		const result = await tool.execute("call-10", {});
 		const text = readText(result);
@@ -162,7 +164,7 @@ describe("ListModelsTool", () => {
 		const result = await tool.execute("call-11", {});
 		const text = readText(result);
 		expect(text).not.toContain("current:");
-		expect(text).toContain("switch_model");
+		expect(text).toContain("/model <provider>/<modelId>");
 	});
 
 	it("includes query in details when filter was applied", async () => {

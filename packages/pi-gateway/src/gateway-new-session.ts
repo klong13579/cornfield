@@ -41,9 +41,17 @@ import type { GatewayConfig, InboundMessage, MessageContent, SessionRecord } fro
  * followed by punctuation, whitespace, or end-of-string.
  */
 const NEW_SESSION_TRIGGERS: readonly RegExp[] = [
-	/^\s*\/new\b/,
-	/^\s*\/reset\b/,
-	/^\s*\/clear\b/,
+	// Use Unicode property escapes (`\p{Script=Han}`) for CJK look-ahead
+	// because V8's `\b` (word boundary) treats CJK chars as non-word, so
+	// `/^\s*\/new\b/` falsely matches `/new主题` (`w` then `主` is a word
+	// boundary in default V8). The correct gate is: NOT followed by an
+	// ASCII letter (so `/newtest` does not match) AND NOT followed by a
+	// Han character (so `/new主题` does not match), but space / digit /
+	// punctuation / EOF are all fine (e.g. `/new` end, `/new test`,
+	// `/new1`, `/new,`).
+	/^\s*\/new(?![a-zA-Z]|\p{Script=Han})/u,
+	/^\s*\/reset(?![a-zA-Z]|\p{Script=Han})/u,
+	/^\s*\/clear(?![a-zA-Z]|\p{Script=Han})/u,
 	/^\s*新会话(?=\s|$|[^\u4e00-\u9fff])/,
 	/^\s*重新开始(?=\s|$|[^\u4e00-\u9fff])/,
 	/^\s*清空对话(?=\s|$|[^\u4e00-\u9fff])/,

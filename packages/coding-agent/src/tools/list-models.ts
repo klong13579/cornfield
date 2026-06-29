@@ -1,6 +1,7 @@
 import type { Model } from "@oh-my-pi/pi-ai";
 import type { AgentTool, AgentToolContext, AgentToolResult, AgentToolUpdateCallback } from "@oh-my-pi/pi-agent-core";
 import { logger, prompt } from "@oh-my-pi/pi-utils";
+import { collectVerifiedModels } from "../cli/list-models";
 import { type Static, Type } from "@sinclair/typebox";
 import listModelsDescription from "../prompts/tools/list-models.md" with { type: "text" };
 import type { ToolSession } from "./index";
@@ -114,7 +115,8 @@ ${rows.join("\n")}`;
 			? `\n\n…仅显示前 ${MAX_ROWS} 条；用 \`list_models({query: "<filter>"})\` 缩小范围。`
 			: "";
 		const currentLine = current ? `\n\ncurrent: ${current}` : "";
-		const hint = "\n\n切换模型: `switch_model({query: \"<provider>/<modelId>\"})`";
+		// User-facing hint: the user types the slash command, not the LLM tool.
+		const hint = "\n\n切换模型: `/model <provider>/<modelId>`（如 `/model openai/o3`）";
 
 		const text = `可用模型 (${countLabel}):\n\n${table}${truncationNotice}${currentLine}${hint}`;
 
@@ -140,7 +142,7 @@ ${rows.join("\n")}`;
 		const fromSession = this.session.getAvailableModels?.();
 		if (fromSession && fromSession.length > 0) return fromSession;
 		const registry = this.session.modelRegistry;
-		return registry ? registry.getAvailable() : [];
+		return registry ? collectVerifiedModels(registry) : [];
 	}
 
 	#filter(models: Model[], query: string): Model[] {

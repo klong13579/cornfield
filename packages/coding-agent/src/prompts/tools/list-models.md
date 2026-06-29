@@ -17,8 +17,7 @@ List all LLM models the current omp session can call.
 
 <boundary>
 - Read-only. Does not modify any state, does not consume any quota.
-- Slash command `/models` / `/list-models` is a fast path handled by the gateway directly (bypasses the LLM); both paths show the same data.
-- Does not include models the session cannot call (e.g. providers with no API key configured).
+- The user-facing hint in the output must point to a slash command the user can actually type (`/model <provider>/<modelId>`), NOT the `switch_model` LLM tool. The user does not call LLM tools; only the agent does. Suggesting `switch_model({query: "..."})` to the user is a bug because there is no UI for them to invoke it. If you also want the LLM to be able to drive a switch from the same answer, do it in the LLM-side reply ("I'll switch to that for you") and call `switch_model` in your own tool call, not in the user-facing hint.
 </boundary>
 
 <output>
