@@ -61,12 +61,34 @@ export interface CronTriggerResult {
 /**
  * Build the cron context prefix injected before the task prompt.
  *
- * This is a soft recursion guard: it tells the agent it's running as a
- * cron task and should not create new cron jobs or send messages.
+ * Three rules, each spelled out so the agent does not have to guess:
+ *   1. Do not invoke the `cron` host tool (cronjob toolset is disabled).
+ *      Prevents accidental recursion — a cron task creating more cron tasks.
+ *   2. Do not call proactive messaging tools (messaging toolset is disabled).
+ *      Tools like `dws chat message send` / `chat_post` would duplicate the
+ *      gateway's automatic delivery. Note: this is about tool *calls*, not
+ *      about whether to write a reply at all — the reply text itself is the
+ *      deliverable.
+ *   3. The reply text IS the delivery. The gateway scans the response body
+ *      and renders it as a DingTalk AI card to the original conversation,
+ *      so the agent should just produce its final answer in the reply body
+ *      and not try to push it anywhere itself. This is true even if the
+ *      task wording says "发给用户" / "send to user" / "notify" / etc.
+ *
+ * If we ever drop the toolsets-level block in `executor.ts`, this prompt
+ * remains the last line of defense — keep it precise.
  */
 export function buildCronContextPrefix(task: ScheduledTask): string {
-	const agentLabel = task.agentDir ? (task.agentDir.split("/").pop() ?? task.agentDir) : (task.accountId ?? "default");
-	return `[CRON-CONTEXT] You are running as a scheduled task (cron). Do not create new cron jobs or send messages. Agent: ${agentLabel}.\n\n`;
+	const agentLabel = task.agentDir
+		? (task.agentDir.split("/").pop() ?? task.agentDir)
+		: (task.accountId ?? "default");
+	return (
+		`[CRON-CONTEXT] You are running as a scheduled task (cron). Agent: ${agentLabel}.\n\n` +
+		"Three rules for this run:\n" +
+		"1. Do NOT call the `cron` host tool (create / list / update / delete scheduled tasks). The `cronjob` toolset is disabled for this run — calling it would either fail or recursively schedule more tasks.\n" +
+		"2. Do NOT call proactive messaging tools (e.g. `dws chat message send`, `chat_post`, anything in the `messaging` toolset). The `messaging` toolset is disabled. These would create duplicate notifications on top of the gateway's own delivery.\n" +
+		"3. Your reply text IS the delivery. The gateway scans the body of your final reply and renders it as a DingTalk AI card to the original conversation. So just write your answer in the reply body and stop — do not call any `send` tool, do not try to push it anywhere. This applies even if the task wording says \"发给用户\" / \"send to user\" / \"notify\" / \"告诉用户\".\n\n"
+	);
 }
 
 /**
@@ -113,12 +135,22 @@ export function resolveDelivery(task: ScheduledTask):
 	  }
 	| undefined {
 	if (task.delivery) {
-		return task.delivery;
+		// Fall back to top-level `accountId` when the structured delivery
+		// was created without one (e.g. legacy `omp gateway cron create
+		// --account <hr> --deliver dingtalk` stores the account on the
+		// task but leaves delivery_account_id null). The registry keys
+		// multi-account channels as `<channel>:<accountId>`, so we need
+		// the suffix to resolve the right DingTalk connection.
+		return {
+			...task.delivery,
+			accountId: task.delivery.accountId ?? task.accountId,
+		};
 	}
 	// Fallback: construct from deprecated fields
 	if (task.deliver) {
 		return {
 			channel: task.deliver,
+			accountId: task.accountId,
 			toUserId: task.deliverUser,
 			mode: "announce",
 		};

@@ -29,6 +29,8 @@ import { MessageHandler } from "./gateway-message";
 import { ModelSwitch } from "./gateway-model-switch";
 import { NewSessionHandler } from "./gateway-new-session";
 import { ResponseHandler } from "./gateway-response";
+import { createCronToolDefinitions } from "./scheduler/host-tool";
+import { HostToolDispatcher } from "./host-tool-dispatcher";
 import { type BridgeStat, type QueueStat, SessionManager } from "./session-manager";
 import { SQLiteSessionStore } from "./session-store";
 import type {
@@ -187,6 +189,7 @@ export async function createAccountBridgeOptions(
 	agentConfig: GatewayConfig["agent"],
 	account: DingtalkAccountConfig,
 	agentDir: string,
+	hostToolDispatcher?: import("./host-tool-dispatcher").HostToolDispatcher,
 ): Promise<AgentBridgeOptions> {
 	// Try to read the model from the agent's settings.json
 	let model = account.model ?? agentConfig?.model;
@@ -207,6 +210,7 @@ export async function createAccountBridgeOptions(
 		timeoutMs: account.timeoutMs ?? agentConfig?.timeoutMs,
 		cwd: agentDir,
 		deniedTools: account.deniedTools,
+		hostToolDispatcher,
 	};
 }
 
@@ -259,7 +263,16 @@ export class Gateway {
 		},
 	) {
 		this.#config = config;
-		this.#bridge = deps?.bridge ?? new AgentBridge(config.agent ?? {});
+		// In single-account mode the default bridge's host tools use
+		// process.cwd() as the agent dir; cron tasks created via the host
+		// tool will fail validation until the user provides an explicit
+		// agentDir via `omp gateway init` or sets one in the bridge
+		// options. Multi-account mode is the supported deployment.
+		const defaultDispatcher = this.#buildHostToolDispatcher(process.cwd(), "__default__");
+		this.#bridge = new AgentBridge({
+			...config.agent,
+			hostToolDispatcher: defaultDispatcher,
+		});
 		this.#store = deps?.store ?? null;
 		this.#channelFactory = deps?.channelFactory;
 
@@ -430,6 +443,27 @@ export class Gateway {
 	}
 
 	/**
+	 * Build a per-bridge HostToolDispatcher wired to the gateway's cron
+	 * scheduler. The dispatcher is created BEFORE the bridge so the
+	 * bridge's constructor can capture it; the bridge reference is
+	 * resolved lazily via `getBridge()` so the cron tool can call
+	 * `getActiveChatContext()` even though the bridge doesn't exist yet
+	 * at dispatcher-construction time. Same pattern for `getStorage()`:
+	 * the scheduler DB is created in `CronLifecycle.start()` (called after
+	 * bridge construction), so the tool reads the storage on each call.
+	 */
+	#buildHostToolDispatcher(_agentDir: string, accountId: string): HostToolDispatcher {
+		const dispatcher = new HostToolDispatcher();
+		const ctx = {
+			getBridge: () => this.#accountBridges.get(accountId) ?? this.#bridge,
+			registry: this.#registry,
+			getStorage: () => this.#cronLifecycle.schedulerStorage,
+		};
+		dispatcher.setTools(createCronToolDefinitions(ctx));
+		return dispatcher;
+	}
+
+	/**
 	 * Register DingTalk channel(s). In multi-account mode, each account gets
 	 * its own DingTalkChannel instance and account-specific AgentBridge.
 	 */
@@ -467,7 +501,8 @@ export class Gateway {
 
 				// Create per-account agent bridge with account-specific config
 				// Model is loaded from agentDir/.omp/config.yml by omp itself
-				const bridge = new AgentBridge(await createAccountBridgeOptions(this.#config.agent, account, agentDir));
+				const dispatcher = this.#buildHostToolDispatcher(agentDir, accountId);
+				const bridge = new AgentBridge(await createAccountBridgeOptions(this.#config.agent, account, agentDir, dispatcher));
 				this.#accountBridges.set(accountId, bridge);
 
 				// Start per-account bridge
@@ -524,7 +559,8 @@ export class Gateway {
 			logger.warn("Failed to register agentDir", { accountId, agentDir, error: String(err) });
 		}
 
-		const bridge = new AgentBridge(await createAccountBridgeOptions(config.agent, account, agentDir));
+		const dispatcher = this.#buildHostToolDispatcher(agentDir, accountId);
+		const bridge = new AgentBridge(await createAccountBridgeOptions(config.agent, account, agentDir, dispatcher));
 		this.#accountBridges.set(accountId, bridge);
 		try {
 			await bridge.start();

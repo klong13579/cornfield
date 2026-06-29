@@ -73,7 +73,11 @@ export class MessageHandler {
 			const now = Date.now();
 
 			if (session && this.#deps.newSessionHandler.shouldRotate(session)) {
-				session = await this.#deps.newSessionHandler.rotate(session, accountId, { injectSystemNote: true, msg });
+				const rotated = await this.#deps.newSessionHandler.rotate(session, accountId, {
+					injectSystemNote: true,
+					msg,
+				});
+				session = rotated.session;
 			}
 			if (!session && this.#deps.store) {
 				const sessionPath = this.#buildSessionPath(msg.channelId, accountId, msg.conversationId);

@@ -94,6 +94,23 @@ interface PendingCommand {
 	timeout: NodeJS.Timeout;
 }
 
+export interface HostToolCallRequest {
+	id: string;
+	toolCallId: string;
+	toolName: string;
+	arguments: Record<string, unknown>;
+}
+
+/** Callback invoked when OMP emits a `host_tool_call` frame. The transport
+ *  does not understand the semantics — it just hands the call to this
+ *  callback and writes whatever `reply(result)` is given back as a
+ *  `host_tool_result` frame. If the callback throws, the transport writes
+ *  an `isError: true` result with the error message. */
+export type HostToolCallHandler = (
+	call: HostToolCallRequest,
+	reply: (body: { content: Array<{ type: "text"; text: string }>; isError?: boolean }) => void,
+) => Promise<void> | void;
+
 export interface RpcTransportOptions {
 	/** Path to omp binary (default: "omp") */
 	ompPath?: string;
@@ -103,6 +120,10 @@ export interface RpcTransportOptions {
 	cwd?: string;
 	/** Timeout in ms to wait for the `ready` signal (default: 30000) */
 	readyTimeoutMs?: number;
+	/** Handler for `host_tool_call` frames from OMP. When unset, the transport
+	 *  falls back to the legacy "reject" behaviour (returns `isError: true`).
+	 *  The bridge wires this to its `HostToolDispatcher`. */
+	hostToolHandler?: HostToolCallHandler;
 }
 
 /**
@@ -125,9 +146,11 @@ export class RpcTransport {
 	// biome-ignore lint/correctness/noUnusedPrivateClassMembers: referenced in stop() and #spawnAndWaitReady for stream-reader liveness
 	#stdoutReader?: Promise<void>;
 	#listeners: EventHandler[] = [];
+	#hostToolHandler: HostToolCallHandler | undefined;
 
 	constructor(options: RpcTransportOptions = {}) {
 		this.#options = options;
+		this.#hostToolHandler = options.hostToolHandler;
 	}
 
 	// ═══════════════════════════════════════════════════════════════
@@ -234,6 +257,18 @@ export class RpcTransport {
 	 */
 	sendFrame(type: string, payload: Record<string, unknown>): void {
 		this.#writeFrame({ type, ...payload });
+	}
+
+	/** Convenience: write a `host_tool_result` frame for a call dispatched
+	 *  via the `hostToolHandler` callback. The bridge uses this so the
+	 *  dispatcher doesn't have to know the wire shape. */
+	sendHostToolResult(id: string, toolUseId: string, content: Array<{ type: "text"; text: string }>, isError: boolean): void {
+		this.#writeFrame({
+			type: "host_tool_result",
+			id,
+			result: { type: "tool_result", tool_use_id: toolUseId, content },
+			isError,
+		});
 	}
 
 	#writeFrame(frame: Record<string, unknown> | RpcExtensionUIResponse | RpcHostToolResult): void {
@@ -422,8 +457,33 @@ export class RpcTransport {
 			return;
 		}
 
-		// host_tool_call: reject immediately — bridge has no host tools
+		// host_tool_call: route to the bridge's HostToolDispatcher when one is
+		// wired in. Otherwise fall back to the legacy reject behaviour (kept
+		// for backward compatibility with bridges that have no host tools).
 		if (parsed.type === "host_tool_call") {
+			const call = parsed as unknown as HostToolCallRequest;
+			const reply = (body: { content: Array<{ type: "text"; text: string }>; isError?: boolean }) => {
+				const result: RpcHostToolResult = {
+					type: "host_tool_result",
+					id: call.id,
+					result: { type: "tool_result", tool_use_id: call.toolCallId, content: body.content },
+					isError: body.isError,
+				};
+				this.#writeFrame(result);
+			};
+			if (this.#hostToolHandler) {
+				Promise.resolve(this.#hostToolHandler(call, reply)).catch(err => {
+					logger.error("[RpcTransport] hostToolHandler threw", {
+						toolName: call.toolName,
+						error: err instanceof Error ? err.message : String(err),
+					});
+					reply({
+						content: [{ type: "text", text: `Host tool error: ${err instanceof Error ? err.message : String(err)}` }],
+						isError: true,
+					});
+				});
+				return;
+			}
 			const result: RpcHostToolResult = {
 				type: "host_tool_result",
 				id: (parsed as unknown as { id: string }).id,

@@ -231,6 +231,10 @@ export class CronLifecycle {
 		toConversationId?: string;
 		text: string;
 	}): Promise<{ ok: boolean; error?: string }> {
+		// The registry's sendMessage builds the lookup key as
+		// `<channelId>:<accountId>` when accountId is set (see
+		// channels/registry.ts#sendMessage), so we pass the bare channel
+		// id here and let the registry do the suffixing.
 		const msg: OutboundMessage = {
 			channelId: params.channel,
 			conversationId: params.toConversationId ?? `cron:${Date.now()}`,

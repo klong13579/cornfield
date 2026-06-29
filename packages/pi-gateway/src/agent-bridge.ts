@@ -82,6 +82,13 @@ export interface AgentBridgeOptions {
 	longTaskThresholdMs?: number;
 	progressPingIntervalMs?: number;
 	deniedTools?: string[];
+	/** Host tool dispatcher wired to the gateway's HostToolDispatcher. When
+	 *  set, the bridge sends `set_host_tools` to OMP on each `ready` event
+	 *  and routes `host_tool_call` frames to the dispatcher. */
+	hostToolDispatcher?: import("./host-tool-dispatcher").HostToolDispatcher;
+	/** Active chat context provider — returns the current InboundMessage
+	 *  (if any) for delivery auto-inference by host tools like cron. */
+	getActiveChatContext?: () => import("./types").InboundMessage | undefined;
 }
 
 /** Re-exported for use by PromptQueue and for backward compatibility. */
@@ -101,6 +108,11 @@ export class AgentBridge {
 	#activeSessionPath: string | undefined;
 	#pendingModelOverride: { provider: string; modelId: string } | undefined;
 	#configuredModel: { provider: string; modelId: string } | undefined;
+	/** Inbound message currently being processed by `forwardWithMeta`. Read
+	 *  by host tools (cron) for delivery auto-inference. Lives on the bridge
+	 *  (not the transport) so it survives across session switches within a
+	 *  single prompt. Cleared in the `forwardWithMeta` finally block. */
+	#activeChatContext: import("./types").InboundMessage | undefined;
 	#crash: CrashRecovery;
 	#circuit: CircuitBreaker;
 	#metaBuilder: ResponseMetaBuilder;
@@ -131,6 +143,24 @@ export class AgentBridge {
 			ompPath: options.ompPath,
 			model: options.model,
 			cwd: options.cwd,
+			hostToolHandler: options.hostToolDispatcher
+				? (call, reply) => {
+						options.hostToolDispatcher!.setWriter((id, body) => {
+							this.#transport.sendHostToolResult(
+								id,
+								body.tool_use_id,
+								body.content,
+								body.isError === true,
+							);
+						});
+						return options.hostToolDispatcher!.handleCall(call).then(() => {
+							// Dispatcher invokes the writer synchronously inside
+							// handleCall. `reply` is unused in the wired path
+							// because the dispatcher owns the outbound frame.
+							void reply;
+						});
+					}
+				: undefined,
 		});
 		this.#queue = new PromptQueue(this.#transport, { thresholdMs, pingMs });
 		this.#extractor = new PromptExtractor(options.cwd ?? process.cwd());
@@ -156,6 +186,10 @@ export class AgentBridge {
 		switch (event.type) {
 			case "ready":
 				this.#crash.setReady(true);
+				// OMP just became ready (or recovered from a crash). Re-register
+				// the host tool set: the subprocess has no memory of the previous
+				// set_host_tools command after a restart.
+				this.#registerHostTools();
 				break;
 			case "command_response":
 				this.#queue.onCommandResponse(event.commandId, event.event);
@@ -244,6 +278,41 @@ export class AgentBridge {
 			});
 	}
 
+	/** Public hook for host tools (cron) to read the active chat context for
+	 *  delivery auto-inference. Returns the InboundMessage currently being
+	 *  processed by `forwardWithMeta`, or undefined outside a prompt. */
+	getActiveChatContext(): import("./types").InboundMessage | undefined {
+		return this.#activeChatContext;
+	}
+
+	#setActiveChatContext(msg: import("./types").InboundMessage): void {
+		this.#activeChatContext = msg;
+	}
+
+	#clearActiveChatContext(): void {
+		this.#activeChatContext = undefined;
+	}
+
+	#registerHostTools(): void {
+		const dispatcher = this.#options.hostToolDispatcher;
+		if (!dispatcher) return;
+		const defs = dispatcher.getToolNames();
+		if (defs.length === 0) return;
+		// We need the full definitions, not just names. The dispatcher exposes
+		// them via setTools() at registration time, so cache them here.
+		const payload = dispatcher.getDefinitions();
+		this.#transport
+			.sendCommand("set_host_tools", { tools: payload }, 30_000)
+			.then(() => {
+				logger.info("[AgentBridge] host tools registered", { names: defs });
+			})
+			.catch(err => {
+				logger.error("[AgentBridge] set_host_tools failed", {
+					error: err instanceof Error ? err.message : String(err),
+				});
+			});
+	}
+
 	stop(): void {
 		this.#crash.reset();
 		this.#reconnectGuard = false;
@@ -324,6 +393,11 @@ export class AgentBridge {
 				logger.warn("Agent bridge circuit is open", { state: this.#circuit.state });
 				return this.#metaBuilder.fallback(CIRCUIT_OPEN_MESSAGE, startedAt);
 			}
+
+			// Record the active chat context for the duration of this prompt
+			// so that cron host-tool calls (D4 auto-inference of delivery)
+			// can read it. Cleared in the finally block below.
+			this.#setActiveChatContext(msg);
 
 			if (!this.isRunning) {
 				logger.warn("Agent bridge not running, attempting restart");
@@ -406,6 +480,7 @@ export class AgentBridge {
 				return this.#metaBuilder.fallback(`系统错误：${message}`, startedAt);
 			} finally {
 				this.#abortRequested = false;
+				this.#clearActiveChatContext();
 			}
 		});
 	}
