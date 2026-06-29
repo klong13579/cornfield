@@ -87,9 +87,14 @@ export default class Gateway extends Command {
 		"  omp gateway cron list                     List all tasks",
 		"  omp gateway cron pause <name>             Pause a task",
 		"  omp gateway cron resume <name>            Resume a task",
-		"  omp gateway cron run <name>               Run a task immediately",
+		"  omp gateway cron run <name>               Run a task now (debug only — skips delivery)",
+		"  omp gateway cron test-run <name>          Trigger through the real scheduler; verifies delivery",
 		"  omp gateway cron remove <name>            Delete a task",
-		"  omp gateway cron logs <name>              View execution logs",
+		"  omp gateway cron update <name> ...        Update task fields in place",
+		"  omp gateway cron reconcile [--apply]      Backfill accountId on legacy unbound tasks",
+		"  omp gateway cron status                   Show scheduler status",
+		"  omp gateway cron diagnose [--json]        Run diagnostics",
+		"  omp gateway cron logs <name> [--json]     View execution logs",
 		"",
 	];
 
@@ -431,6 +436,9 @@ export default class Gateway extends Command {
 			cronList,
 			cronSetStatus,
 			cronRun,
+			cronTestRun,
+			cronUpdate,
+			cronReconcile,
 			cronRemove,
 			cronStatus,
 			cronDiagnose,
@@ -458,8 +466,17 @@ export default class Gateway extends Command {
 				case "run":
 					await cronRun(argv[1], storage);
 					break;
+				case "test-run":
+					await cronTestRun(argv.slice(1), storage);
+					break;
 				case "remove":
 					await cronRemove(argv[1], storage);
+					break;
+				case "update":
+					await cronUpdate(argv.slice(1), storage);
+					break;
+				case "reconcile":
+					await cronReconcile(argv.slice(1), storage);
 					break;
 				case "status":
 					cronStatus();
@@ -473,12 +490,15 @@ export default class Gateway extends Command {
 				default:
 					console.log(`
 Cron management commands:
-  omp gateway cron create <schedule> <command...> [--name <name>] [--type shell|agent] [--deliver <channel>] [--timeout-ms <ms>] [--skills <s1,s2,...>] [--retry <maxAttempts>] [--pre-script <path>]
+  omp gateway cron create <schedule> <command...> [--name <name>] [--type shell|agent] [--deliver <channel>] [--deliver-user <id>] [--model <model>] [--provider <provider>] [--toolsets <a,b,c>] [--repeat <N>] [--source-channel <ch>] [--source-user <uid>] [--timeout-ms <ms>] [--skills <s1,s2,...>] [--retry <maxAttempts>] [--pre-script <path>]
   omp gateway cron list [--json]
   omp gateway cron pause <name>
   omp gateway cron resume <name>
-  omp gateway cron run <name>
+  omp gateway cron run <name>                              Trigger a task now (debug only — skips delivery)
+  omp gateway cron test-run <name> [--in 90s] [--timeout 150s] [--no-restore]    Trigger through the real scheduler (waits + restores); verifies delivery
   omp gateway cron remove <name>
+  omp gateway cron update <name> [--account <id> | --clear-account] [--deliver <channel> | --clear-deliver] [--deliver-user <id> | --clear-deliver-user] [--timeout-ms <ms>]
+  omp gateway cron reconcile [--apply]                      Backfill accountId on legacy unbound tasks (dry run by default)
   omp gateway cron status
   omp gateway cron diagnose [--json]
   omp gateway cron logs <name> [--json]
