@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 export class SQLiteSessionStore implements SessionStore {
 	#db: Database;
 	#getSessionByConv: Statement<SessionRecord, [string, string, string]>;
+	#getSessionByPath: Statement<SessionRecord, [string]>;
 	#insertSession: Statement<
 		void,
 		[string, string, string, string, string, number, number, string | null, string | null, string | null, string]
@@ -57,6 +58,14 @@ export class SQLiteSessionStore implements SessionStore {
 			WHERE channel_id = ? AND account_id = ? AND conversation_id = ? AND status != 'closed'
 		`);
 
+		this.#getSessionByPath = this.#db.prepare<SessionRecord, [string]>(`
+			SELECT id, channel_id as channelId, account_id as accountId, user_id as userId, conversation_id as conversationId,
+			       created_at as createdAt, updated_at as updatedAt,
+			       last_message_id as lastMessageId, omp_session_path as ompSessionPath, session_webhook as sessionWebhook, status
+			FROM sessions
+			WHERE omp_session_path = ? AND status != 'closed'
+			LIMIT 1
+		`);
 		this.#insertSession = this.#db.prepare(`
 			INSERT INTO sessions (id, channel_id, account_id, user_id, conversation_id, created_at, updated_at, last_message_id, omp_session_path, session_webhook, status)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -131,6 +140,10 @@ export class SQLiteSessionStore implements SessionStore {
 
 	async getSession(channelId: string, accountId: string, conversationId: string): Promise<SessionRecord | null> {
 		return this.#getSessionByConv.get(channelId, accountId, conversationId) ?? null;
+	}
+
+	async getSessionByPath(ompSessionPath: string): Promise<SessionRecord | null> {
+		return this.#getSessionByPath.get(ompSessionPath) ?? null;
 	}
 
 	async createSession(session: Omit<SessionRecord, "id">): Promise<SessionRecord> {

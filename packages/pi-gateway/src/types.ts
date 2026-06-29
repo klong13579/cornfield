@@ -307,6 +307,7 @@ export interface SessionRecord {
 
 export interface SessionStore {
 	getSession(channelId: string, accountId: string, conversationId: string): Promise<SessionRecord | null>;
+	getSessionByPath(ompSessionPath: string): Promise<SessionRecord | null>;
 	createSession(session: Omit<SessionRecord, "id">): Promise<SessionRecord>;
 	updateSession(id: string, updates: Partial<SessionRecord>): Promise<void>;
 	closeSession(id: string): Promise<void>;

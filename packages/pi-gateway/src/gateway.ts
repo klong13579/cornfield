@@ -40,7 +40,9 @@ import type {
 	SessionRecord,
 } from "./types";
 import { checkPidFile, PID_FILE, readPidFile, STATUS_FILE } from "./gateway-daemon";
+import { clearRestartSentinel, readRestartSentinel, writeRestartSentinel } from "./restart-sentinel";
 import { ModelSwitch } from "./gateway-model-switch";
+import { NewSessionHandler } from "./gateway-new-session";
 import { ResponseHandler } from "./gateway-response";
 import { MessageHandler } from "./gateway-message";
 
@@ -412,6 +414,12 @@ export class Gateway {
 
 		const warnings: string[] = [];
 
+		// Capture active session info BEFORE drain/shutdown for restart recovery.
+		// If a bridge is currently processing a message, we write a sentinel so the
+		// next gateway startup can resume the conversation.
+		const activeSessionInfo = this.#getActiveSessionInfo();
+
+
 		// Phase 1: disconnect channels (5s grace)
 		await Promise.race([
 			this.#registry.disconnectAll().catch(err => {
@@ -437,6 +445,12 @@ export class Gateway {
 			logger.warn("Gateway shutdown timed out waiting for session queues", {
 				queues: this.#sessionManager?.getQueueStats() ?? [],
 			});
+
+			// Write restart sentinel if drain timed out and there's an active session.
+			// This allows the next gateway startup to resume the interrupted conversation.
+			if (activeSessionInfo) {
+				await writeRestartSentinel(activeSessionInfo, this.#config);
+			}
 		}
 
 		// Phase 4: stop all bridges (5s grace)
@@ -796,6 +810,92 @@ export class Gateway {
 				taskCount: this.#cronLifecycle.activeTaskCount,
 			},
 		};
+	}
+
+
+	/**
+	 * Get info about the currently active session (if any).
+	 *
+	 * Checks each bridge's `activeSessionPath` and looks up the corresponding
+	 * `SessionRecord` from the store. Returns the info needed to write a restart
+	 * sentinel, or `null` if no bridge has an active session.
+	 */
+	#getActiveSessionInfo(): { conversationId: string; accountId: string; ompSessionPath: string } | null {
+		// Check account bridges first, then default bridge
+		const bridgesToCheck = [
+			...Array.from(this.#accountBridges.entries()).map(([accountId, bridge]) => ({ accountId, bridge })),
+			{ accountId: "__default__", bridge: this.#bridge },
+		];
+
+		for (const { accountId, bridge } of bridgesToCheck) {
+			const snapshot = bridge.getSnapshot();
+			const sessionPath = snapshot.activeSessionPath;
+			if (!sessionPath) continue;
+
+			// Derive conversationId from the session path basename.
+			// The session path format is: <agentDir>/sessions/<safeId>.jsonl
+			// where safeId is the sanitized conversationId.
+			const conversationId = path.basename(sessionPath, ".jsonl");
+
+			return {
+				conversationId,
+				accountId,
+				ompSessionPath: sessionPath,
+			};
+		}
+
+		return null;
+	}
+
+
+	/**
+	 * Resume a conversation from a restart sentinel.
+	 *
+	 * Called on gateway startup after channels are connected and bridges are ready.
+	 * Reads the sentinel, finds the appropriate bridge, and sends a continuation
+	 * message to resume the interrupted conversation.
+	 *
+	 * Returns `true` if a sentinel was found and recovery was attempted.
+	 */
+	async resumeFromSentinel(): Promise<boolean> {
+		const sentinel = await readRestartSentinel(this.#config);
+		if (!sentinel) {
+			return false;
+		}
+
+		logger.info("Resuming from restart sentinel", {
+			conversationId: sentinel.conversationId,
+			accountId: sentinel.accountId,
+			ompSessionPath: sentinel.ompSessionPath,
+		});
+
+		// Find the appropriate bridge
+		const bridge = this.#accountBridges.get(sentinel.accountId) ?? this.#bridge;
+
+		try {
+			// Send the continuation message to resume the conversation
+			const response = await bridge.executePrompt(sentinel.continuationMessage, {
+				sessionPath: sentinel.ompSessionPath,
+				timeoutMs: 60_000, // 1 minute timeout for recovery
+			});
+
+			logger.info("Restart recovery completed", {
+				conversationId: sentinel.conversationId,
+				responseLength: response.length,
+			});
+
+			// Clear the sentinel after successful recovery
+			await clearRestartSentinel(this.#config);
+
+			return true;
+		} catch (err) {
+			logger.error("Restart recovery failed", {
+				conversationId: sentinel.conversationId,
+				error: err instanceof Error ? err.message : String(err),
+			});
+			// Don't clear the sentinel — let the next startup retry
+			return false;
+		}
 	}
 
 
