@@ -47,6 +47,7 @@ import {
 	cronRun,
 	cronSetStatus,
 	cronStatus,
+	cronTestRun,
 	cronUpdate,
 	getSchedulerDbPath,
 	SchedulerDbStorage,
@@ -409,6 +410,9 @@ async function cmdCron(args: string[]): Promise<void> {
 			case "run":
 				await cronRun(args[1], storage);
 				break;
+			case "test-run":
+				await cronTestRun(args.slice(1), storage);
+				break;
 			case "remove":
 				await cronRemove(args[1], storage);
 				break;
@@ -435,6 +439,7 @@ Cron management commands:
   pi-gateway cron pause <name>
   pi-gateway cron resume <name>
   pi-gateway cron run <name>
+  pi-gateway cron test-run <name> [--in 90s] [--timeout 150s] [--no-restore]    Trigger through the real scheduler (waits + restores); verifies delivery
   pi-gateway cron remove <name>
   pi-gateway cron update <name> [--account <id> | --clear-account] [--deliver <channel> | --clear-deliver] [--deliver-user <id> | --clear-deliver-user] [--timeout-ms <ms>]
   pi-gateway cron reconcile [--apply]   Backfill accountId on legacy unbound tasks (dry run by default)

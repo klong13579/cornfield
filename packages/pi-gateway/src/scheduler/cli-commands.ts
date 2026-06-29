@@ -11,12 +11,13 @@
  */
 
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
 import { appendExecutionLog } from "./execution-log";
 import { executeScheduledCommand, scanCronPrompt } from "./executor";
+import { findAgentSessionPath } from "../session-paths";
 import type { SchedulerDbStorage } from "./storage";
 import {
+	type TaskExecution,
 	formatExecutionRow,
 	formatTaskRow,
 	getGatewayPidPath,
@@ -56,103 +57,12 @@ export function resolveAgentCwd(
 	return account?.agentDir;
 }
 
-/**
- * Find the OMP agent session JSONL created during a specific time window.
- *
- * OMP writes agent session files to
- *   `~/.omp/agent/sessions/<encoded-cwd>/<timestamp>_<id>.jsonl`
- * where the ISO timestamp prefix is the immutable creation time of the
- * session (e.g. `2026-06-15T09-18-46-865Z_019eca93-...jsonl`).
- *
- * Why filename-based, not mtime: OMP frequently touches mtime on existing
- * session files (compaction, --continue, etc.), so mtime-based filtering
- * produces false positives linking to the wrong (older) session.
- *
- * To stay decoupled from OMP's cwd-encoding scheme, we scan ALL session
- * subdirectories and pick the file whose filename timestamp is closest
- * to (and >= startedAt - tolerance) within the window.
- */
-export function findAgentSessionPath(
-	startedAt: number,
-	endedAt: number,
-	sessionsRoot: string = path.join(os.homedir(), ".omp", "agent", "sessions"),
-): string | undefined {
-	if (!fs.existsSync(sessionsRoot)) return undefined;
-
-	// The order is mtime-first, filename-second:
-	//   - mtime is the only timezone-agnostic truth. The new layout encodes
-	//     HHMMSS in local time; legacy encodes UTC. Parsing either requires
-	//     knowing the writer's TZ. We don't trust filenames for timestamps.
-	//   - Filename regexes are kept as a SANITY filter: a random `notes.jsonl`
-	//     dropped into the session dir must not be considered a session. They
-	//     are NOT used to compute the timestamp, only to accept or reject.
-	//   - Within [startedAt - 5s, endedAt + 5s], the file with the LATEST
-	//     mtime wins. This handles the common case where the agent task
-	//     creates a new session file (its mtime is in the window and is the
-	//     latest) and also the case where a resumed session gets touched
-	//     during the run (its bumped mtime is the latest).
-	//
-	// Layouts we recognise:
-	//   <root>/<project>/by-date/<YYYY-MM-DD>/<HHMMSS>[-<slug>]__<8hex>.jsonl
-	//   <root>/<project>/<YYYY-MM-DD>T<HH-MM-SS-mmm>Z_<uuidv7>.jsonl   (legacy)
-	//
-	// The walker descends into every non-hidden subdirectory at the root
-	// because the cwd-encoded project subdir name is opaque to the gateway.
-	const SESSION_FILE = /^(\d{6})(?:-[a-z0-9-]+)?__[0-9a-f]{8}\.jsonl$/;
-	const LEGACY_SESSION_FILE = /^(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z_/;
-	const toleranceMs = 5_000;
-
-	let bestMatch: { path: string; score: number } | undefined;
-	try {
-		const walk = (dir: string): void => {
-			let entries: fs.Dirent[];
-			try {
-				entries = fs.readdirSync(dir, { withFileTypes: true });
-			} catch {
-				return;
-			}
-			for (const ent of entries) {
-				const full = path.join(dir, ent.name);
-				if (ent.isDirectory()) {
-					if (ent.name.startsWith(".")) continue;
-					walk(full);
-					continue;
-				}
-				if (!ent.isFile() || !ent.name.endsWith(".jsonl")) continue;
-				// Accept any file that matches the new or legacy naming
-				// convention. Both encode a creation timestamp; legacy embeds
-				// UTC in the filename, new layout embeds local time. mtime is
-				// the only timezone-agnostic truth.
-				if (!SESSION_FILE.test(ent.name) && !LEGACY_SESSION_FILE.test(ent.name)) continue;
-
-				let mtimeMs: number;
-				try {
-					mtimeMs = fs.statSync(full).mtimeMs;
-				} catch {
-					continue;
-				}
-				if (mtimeMs < startedAt - toleranceMs) continue;
-				if (mtimeMs > endedAt + toleranceMs) continue;
-
-				// Prefer the most recent file in the window. The agent session
-				// file is created during the cron run, so the latest mtime in
-				// [startedAt, endedAt] is the match. Smaller score = better.
-				const score = endedAt - mtimeMs;
-				if (!bestMatch || score < bestMatch.score) {
-					bestMatch = { path: full, score };
-				}
-			}
-		};
-		walk(sessionsRoot);
-	} catch {
-		return undefined;
-	}
-	return bestMatch?.path;
-}
-
 // ---------------------------------------------------------------------------
 // Cron subcommands
 // ---------------------------------------------------------------------------
+// (findAgentSessionPath has moved to ../session-paths.ts. It now requires an
+// agentDir argument and scopes its search to that agent's `sessions/` tree.
+// The old cross-tree walk over `~/.omp/agent/sessions/` is gone.)
 
 export async function cronCreate(args: string[], storage: SchedulerDbStorage): Promise<void> {
 	let name: string | undefined;
@@ -646,39 +556,44 @@ export async function cronRun(name: string, storage: SchedulerDbStorage): Promis
 	}
 	const startedAt = Date.now();
 	const exec = storage.recordExecution({ taskId: task.id, startedAt, status: "running" });
-	try {
-		// Resolve the spawn cwd. Prefer the new `agentDir` field directly;
-		// fall back to resolving a legacy `accountId` via gateway.json. When
-		// neither yields a path, leave cwd unset so executeScheduledCommand
-		// uses the gateway cwd (shell tasks often don't need an agentDir).
-		let cwd: string | undefined = task.agentDir;
-		if (!cwd && task.accountId) {
-			try {
-				const { loadConfig } = await import("../config");
-				const cfg = await loadConfig();
-				cwd = resolveAgentCwd(task.accountId, cfg);
-				if (!cwd) {
-					console.error(
-						`[warn] Task "${task.name}" is bound to account "${task.accountId}" but it has no agentDir in gateway.json. Falling back to gateway cwd.`,
-					);
-				}
-			} catch (err) {
-				console.error(`[warn] Failed to load gateway.json to resolve accountId: ${err}`);
+	// Resolve the agentDir once so both success and error paths can use it
+	// for session linking. Prefer the new `agentDir` field directly; fall
+	// back to resolving a legacy `accountId` via gateway.json. This is also
+	// the spawn cwd for agent tasks; for shell tasks the agentDir may be
+	// undefined (we still record an execution).
+	let agentDir: string | undefined = task.agentDir;
+	if (!agentDir && task.accountId) {
+		try {
+			const { loadConfig } = await import("../config");
+			const cfg = await loadConfig();
+			agentDir = resolveAgentCwd(task.accountId, cfg);
+			if (!agentDir) {
+				console.error(
+					`[warn] Task "${task.name}" is bound to account "${task.accountId}" but it has no agentDir in gateway.json. Falling back to gateway cwd.`,
+				);
 			}
+		} catch (err) {
+			console.error(`[warn] Failed to load gateway.json to resolve accountId: ${err}`);
 		}
+	}
+	try {
 		const { exitCode, output, stderr } = await executeScheduledCommand(task.command, {
 			taskType: task.taskType,
 			timeoutMs: task.timeoutMs,
 			skills: task.skills,
 			preScript: task.preScript,
-			cwd,
+			cwd: agentDir, // shell tasks without agentDir fall through to gateway cwd
 		});
 		const endedAt = Date.now();
 		const durationMs = endedAt - startedAt;
 		const status = exitCode === 0 ? "success" : "failure";
 
-		// Link agent session trace for agent tasks
-		const agentSessionPath = task.taskType === "agent" ? findAgentSessionPath(startedAt, endedAt) : undefined;
+		// Link agent session trace for agent tasks. Per-agent scope: only
+		// search the agent's own `sessions/` tree.
+		const agentSessionPath =
+			task.taskType === "agent" && agentDir
+				? findAgentSessionPath(agentDir, startedAt, endedAt)
+				: undefined;
 
 		storage.updateExecution(exec.id, {
 			endedAt,
@@ -723,7 +638,10 @@ export async function cronRun(name: string, storage: SchedulerDbStorage): Promis
 		}
 	} catch (err) {
 		const endedAt = Date.now();
-		const agentSessionPath = task.taskType === "agent" ? findAgentSessionPath(startedAt, endedAt) : undefined;
+		const agentSessionPath =
+			task.taskType === "agent" && agentDir
+				? findAgentSessionPath(agentDir, startedAt, endedAt)
+				: undefined;
 		storage.updateExecution(exec.id, {
 			endedAt,
 			exitCode: 1,
@@ -734,6 +652,332 @@ export async function cronRun(name: string, storage: SchedulerDbStorage): Promis
 		if (agentSessionPath) console.log(`[trace] agent session: ${agentSessionPath}`);
 		console.error(`Task "${name}" failed: ${err}`);
 		process.exitCode = 1;
+	}
+}
+
+// ---------------------------------------------------------------------------
+// test-run: temporarily set schedule, wait for scheduled-path trigger, restore
+// ---------------------------------------------------------------------------
+
+/**
+ * Options for `cron test-run`.
+ *
+ * The command takes a snapshot of the task's schedule, rewrites it to a
+ * one-shot that fires shortly, polls the executions table for the new run,
+ * then restores the original schedule. This is the **only** way to verify
+ * a task's end-to-end pipeline (warm bridge → agent → DingTalk delivery)
+ * without waiting for the real cron tick. The CLI `cron run` skips
+ * delivery by design; `test-run` goes through the real scheduler.
+ */
+export interface CronTestRunOptions {
+	/** Trigger delay from now. Default 70_000ms. Anything < 60s may race the
+	 *  gateway's reload tick (default 60s) and end up with a past-dated
+	 *  next_run_at that the engine auto-disables. */
+	inMs?: number;
+	/** Total wait timeout for the new execution. Default 130_000ms. */
+	timeoutMs?: number;
+	/** If true, leave the schedule as `+<delay>` after the run. Default
+	 *  false: always restore. */
+	noRestore?: boolean;
+	/** Override the gateway tick assumption. Tests may pass a smaller
+	 *  value; production should leave it alone. */
+	_gatewayTickMs?: number;
+}
+
+/**
+ * Trigger `<name>` through the real scheduler path and report the
+ * observed run + delivery. The original schedule is restored in
+ * `finally` (unless `--no-restore`).
+ *
+ * Edge cases handled:
+ *   - task not found, or gateway not running → error, no state change
+ *   - SIGINT/SIGTERM mid-wait → restore the snapshot before exiting
+ *   - timeout waiting for trigger → restore the snapshot, exit 1
+ *   - delivery failure (task ran OK, but `task.last_delivery_error`
+ *     populated by `CronService.#onTrigger`) → exit 1 with reason
+ *
+ * Exit codes:
+ *   0  trigger fired, task exited 0, delivery succeeded (or no delivery)
+ *   1  timeout, task not found, task exited non-zero, or delivery failed
+ */
+export async function cronTestRun(
+	args: string[],
+	storage: SchedulerDbStorage,
+): Promise<void> {
+	const name = args[0];
+	if (!name) {
+		console.error("Usage: cron test-run <name> [--in 90s] [--timeout 150s] [--no-restore]");
+		process.exitCode = 1;
+		return;
+	}
+
+	// Parse flags. We accept the three documented flags plus an internal
+	// `_gatewayTickMs` knob for tests that drive a faster tick.
+	//
+	// Default `--in` is 90s, which is 1.5x the default gateway tick
+	// (60s). With `--in = tickMs` the engine has exactly one reload
+	// window to pick up the change before the next_run_at goes past
+	// and gets auto-disabled. 1.5x gives a 50% margin; users with a
+	// non-default `tickIntervalMs` in their gateway config should
+	// pass `--in` ≥ 2 × their tick for absolute reliability.
+	let inMs = 90_000;
+	let timeoutMs = 150_000;
+	let noRestore = false;
+	let gatewayTickMs = 60_000;
+	for (let i = 1; i < args.length; i++) {
+		const a = args[i];
+		if (a === "--no-restore") {
+			noRestore = true;
+		} else if (a === "--in" && args[i + 1]) {
+			inMs = parseDuration(args[i + 1]!);
+			i++;
+		} else if (a === "--timeout" && args[i + 1]) {
+			timeoutMs = parseDuration(args[i + 1]!);
+			i++;
+		} else if (a === "_gatewayTickMs" && args[i + 1]) {
+			gatewayTickMs = parseDuration(args[i + 1]!);
+			i++;
+		} else {
+			console.error(`Unknown flag for cron test-run: ${a}`);
+			process.exitCode = 1;
+			return;
+		}
+	}
+
+	// Safety: warn if user picked a delay that the gateway tick is
+	// likely to outrun. The engine auto-disables a once task whose
+	// next_run_at has already passed when it reloads. With the
+	// default 60s gateway tick, any `--in ≤ 60s` can land on a
+	// tick that races past next_run_at; `--in ≤ 120s` is risky in
+	// roughly half of the possible tick phases.
+	if (inMs < gatewayTickMs) {
+		console.error(
+			`[test-run] WARNING: --in ${inMs}ms is shorter than the gateway tick (${gatewayTickMs}ms). ` +
+				`The scheduler will almost certainly reload AFTER next_run_at and auto-disable the task. ` +
+				`Pick a delay >= ${gatewayTickMs * 2}ms for reliable triggering.`,
+		);
+	} else if (inMs < gatewayTickMs * 2) {
+		console.error(
+			`[test-run] NOTE: --in ${inMs}ms is in the racy zone (between 1x and 2x the ${gatewayTickMs}ms tick). ` +
+				`Works most of the time, but if the trigger doesn't fire within --timeout, try --in ${gatewayTickMs * 2}ms.`,
+		);
+	}
+
+	const task = storage.getTaskByName(name);
+	if (!task) {
+		console.error(`Task "${name}" not found.`);
+		process.exitCode = 1;
+		return;
+	}
+
+	const pidPath = getGatewayPidPath();
+	if (!isDaemonRunning(pidPath)) {
+		console.error(
+			`Gateway is not running. Start it with "omp gateway start" first — test-run waits for the in-process scheduler to pick up the schedule change.`,
+		);
+		process.exitCode = 1;
+		return;
+	}
+
+	// Snapshot. We restore ALL of these on exit (success, error, SIGINT).
+	const snapshot = {
+		cron: task.cron,
+		scheduleType: task.scheduleType,
+		nextRunAt: task.nextRunAt,
+		status: task.status,
+	};
+	const hadDelivery = Boolean(task.delivery ?? task.deliver);
+	const targetTime = Date.now() + inMs;
+	const delaySec = Math.ceil(inMs / 1000);
+	const startedAt = Date.now();
+
+	console.log(`[test-run] Task "${name}" — backing up schedule.`);
+	console.log(`[test-run]   was:  cron=${JSON.stringify(snapshot.cron)} scheduleType=${snapshot.scheduleType ?? "?"} status=${snapshot.status}`);
+	console.log(`[test-run]   next: ${snapshot.nextRunAt ? new Date(snapshot.nextRunAt).toLocaleString() : "(none)"}`);
+	console.log(`[test-run] Setting one-shot trigger in ${inMs}ms (cron=+${delaySec}s, scheduleType=once, nextRunAt=${new Date(targetTime).toLocaleString()})`);
+	console.log(`[test-run] Waiting for the gateway scheduler to pick up the change and fire...`);
+
+	storage.updateTask(task.id, {
+		cron: `+${delaySec}s`,
+		scheduleType: "once",
+		nextRunAt: targetTime,
+		status: "active",
+		updatedAt: Date.now(),
+	});
+
+	const restoreSnapshot = () => {
+		try {
+			storage.updateTask(task.id, {
+				cron: snapshot.cron,
+				scheduleType: snapshot.scheduleType,
+				nextRunAt: snapshot.nextRunAt,
+				status: snapshot.status,
+				updatedAt: Date.now(),
+			});
+		} catch (err) {
+			console.error(
+				`[test-run] FATAL: failed to restore schedule for "${name}". Run \`omp gateway cron update ${name} ...\` manually. error=${err}`,
+			);
+		}
+	};
+	let restored = false;
+	const restoreOnce = () => {
+		if (restored || noRestore) return;
+		restored = true;
+		restoreSnapshot();
+	};
+	// Hook signals so a Ctrl-C in the middle of the wait doesn't leave
+	// the task stuck on +<delay>s.
+	const sigHandler = () => {
+		restoreOnce();
+	};
+	process.once("SIGINT", () => {
+		sigHandler();
+		process.exit(130);
+	});
+	process.once("SIGTERM", () => {
+		sigHandler();
+		process.exit(143);
+	});
+
+	// Snapshot a high-water-mark of `startedAt` we already saw. The
+	// polling loop's `find(e => e.startedAt >= ...)` re-checks each
+	// iteration, so we only need the *time*, not the count: even if
+	// the engine writes 5 more executions, the filter selects the
+	// right one. Counting is fragile when test fixtures pre-seed
+	// rows — the function should never assume the count strictly
+	// increases.
+	const startMark = Date.now();
+	let execution: TaskExecution | undefined;
+	let pollCount = 0;
+	try {
+		const pollIntervalMs = 2_000;
+		while (Date.now() - startMark < timeoutMs) {
+			await Bun.sleep(pollIntervalMs);
+			pollCount++;
+			// Look at the latest few executions; the newest one in
+			// the window is almost always the one we want. We only
+			// accept a TERMINAL execution (`endedAt != null`): the
+			// engine writes a "running" record at trigger time and
+			// updates it to "success"/"failure" when the agent
+			// finishes, and we want the final state (especially for
+			// the delivery verdict, which only writes after the
+			// agent completes).
+			const execs = storage.getExecutions(task.id, 50);
+			const candidate = execs.find(
+				e => e.startedAt >= startMark - 5_000 && e.endedAt != null,
+			);
+			if (candidate) {
+				execution = candidate;
+				break;
+			}
+			// Periodic progress line so an operator can see the
+			// function is still alive and not stuck. Suppressed
+			// before the trigger is reasonably expected (so we
+			// don't spam pre-trigger polls).
+			if (pollCount % 10 === 0) {
+				console.log(
+					`[test-run]   ...still polling (${pollCount} polls, ${Math.round((Date.now() - startMark) / 1000)}s elapsed)`,
+				);
+			}
+		}
+	} finally {
+		restoreOnce();
+	}
+
+	if (!execution) {
+		// Maybe the trigger fired but hasn't finished yet — surface that
+		// to the operator instead of just "timed out".
+		const runningExec = storage
+			.getExecutions(task.id, 50)
+			.find(e => e.startedAt >= startMark - 5_000);
+		if (runningExec) {
+			console.error(
+				`[test-run] Trigger fired (exec ${runningExec.id}) but agent did NOT reach a terminal state within ${timeoutMs}ms.`,
+			);
+			console.error(
+				`[test-run] Check the gateway log (~/.omp/logs/omp.*.log) for the latest activity on this run.`,
+			);
+		} else {
+			console.error(`[test-run] Timed out after ${timeoutMs}ms waiting for trigger.`);
+		}
+		console.error(`[test-run] Schedule ${noRestore ? "NOT " : ""}restored to original.`);
+		process.exitCode = 1;
+		return;
+	}
+
+	const triggerLatencyMs = execution.startedAt - startedAt;
+	console.log(`[test-run] Triggered after ~${Math.max(0, triggerLatencyMs)}ms (poll wait)`);
+	console.log(`  exec id:   ${execution.id}`);
+	console.log(`  status:    ${execution.status}`);
+	console.log(`  exit:      ${execution.exitCode}`);
+	// `durationMs` is not stored on the executions row (see storage.ts
+	// — only the time range is persisted). Compute it from start/end
+	// so the operator gets a useful number.
+	const computedDurMs =
+		execution.endedAt != null ? execution.endedAt - execution.startedAt : undefined;
+	console.log(`  duration:  ${computedDurMs ?? "?"}ms`);
+	if (execution.stderr) {
+		console.log(`  stderr:    ${execution.stderr.slice(0, 500)}`);
+	}
+
+	// Delivery verdict: the scheduler writes `last_delivery_error` on
+	// failure and clears it on success (cron-service.ts). Re-read the
+	// task so we see the post-trigger state.
+	const taskAfter = storage.getTaskByName(name);
+	const deliveryError = taskAfter?.lastDeliveryError ?? null;
+	if (hadDelivery) {
+		if (deliveryError) {
+			console.log(`  deliver:   FAILED — ${deliveryError}`);
+			process.exitCode = 1;
+		} else {
+			console.log(`  deliver:   ok`);
+		}
+	} else {
+		console.log(`  deliver:   n/a (task has no delivery config)`);
+	}
+
+	if (execution.output) {
+		console.log(`  --- output (truncated to 2K) ---`);
+		console.log(execution.output.slice(0, 2000));
+	}
+
+	if (noRestore) {
+		console.log(`[test-run] Schedule NOT restored (--no-restore). Task is now cron='+${delaySec}s' once.`);
+	} else {
+		console.log(`[test-run] Schedule restored to ${JSON.stringify(snapshot.cron)} (next: ${snapshot.nextRunAt ? new Date(snapshot.nextRunAt).toLocaleString() : "(none)"}).`);
+	}
+
+	// Final exit code: 0 if everything is fine, 1 if task or delivery failed.
+	if (process.exitCode === undefined && (execution.status !== "success" || execution.exitCode !== 0)) {
+		process.exitCode = 1;
+	}
+}
+
+/**
+ * Parse a duration string like `1m`, `90s`, `2h`, `500ms` into milliseconds.
+ * Accepts: `<n>ms` | `<n>s` | `<n>m` | `<n>h`. Bare `<n>` is treated as
+ * seconds to match the existing cron `+<n>` one-shot syntax.
+ */
+function parseDuration(input: string): number {
+	const trimmed = input.trim();
+	const m = /^(\d+(?:\.\d+)?)(ms|s|m|h)?$/.exec(trimmed);
+	if (!m) {
+		throw new Error(`Invalid duration: ${input} (use 500ms / 30s / 2m / 1h)`);
+	}
+	const n = Number.parseFloat(m[1]!);
+	const unit = m[2] ?? "s";
+	switch (unit) {
+		case "ms":
+			return Math.round(n);
+		case "s":
+			return Math.round(n * 1000);
+		case "m":
+			return Math.round(n * 60_000);
+		case "h":
+			return Math.round(n * 3_600_000);
+		default:
+			throw new Error(`Invalid duration unit: ${unit}`);
 	}
 }
 

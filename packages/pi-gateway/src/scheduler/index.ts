@@ -8,11 +8,15 @@ export {
 	cronRun,
 	cronSetStatus,
 	cronStatus,
+	cronTestRun,
 	cronUpdate,
-	findAgentSessionPath,
 	resolveAgentCwd,
 	suggestAccountBinding,
 } from "./cli-commands";
+// `findAgentSessionPath` lives in ../session-paths.ts (used to be
+// re-exported from cli-commands but the function was relocated in
+// an earlier refactor; the index entry was missed). Importers
+// should pull it from "..//session-paths" directly.
 export {
 	buildCronContextPrefix,
 	buildDeliverySummary,
