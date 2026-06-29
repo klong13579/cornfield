@@ -92,6 +92,11 @@ export class ResponseHandler {
 			content: { type: "text", text },
 			sessionWebhook: msg.sessionWebhook,
 			accountId: msg.accountId,
+			// Populate `toUserId` from the inbound so the channel can
+			// fall back to OAuth DM (Route 2) when the sessionWebhook has
+			// expired — without this, an expired webhook is a hard failure
+			// even though we know exactly who the user is.
+			toUserId: msg.userId,
 		};
 		try {
 			await this.#deps.registry.sendMessage(outbound);

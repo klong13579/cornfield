@@ -515,6 +515,7 @@ export class DingTalkChannel extends BaseChannel {
 			conversationId: inbound.conversationId,
 			content: { type: "markdown", markdown },
 			accountId: this.#accountId,
+			toUserId: inbound.userId,
 		};
 		if (inbound.sessionWebhook) outbound.sessionWebhook = inbound.sessionWebhook;
 		if (inbound.messageId) outbound.messageId = inbound.messageId;
@@ -1329,6 +1330,7 @@ export class DingTalkChannel extends BaseChannel {
 			conversationId: inbound.conversationId,
 			content: { type: "markdown", markdown },
 			accountId: this.#accountId,
+			toUserId: inbound.userId,
 		};
 		if (inbound.sessionWebhook) outbound.sessionWebhook = inbound.sessionWebhook;
 		if (inbound.messageId) outbound.messageId = inbound.messageId;
@@ -1527,36 +1529,77 @@ export class DingTalkChannel extends BaseChannel {
 
 		logger.debug("[DingTalk] sending message", { text: text.slice(0, 500), type: msg.content.type });
 
-		// Route 1: sessionWebhook — interactive reply (existing path)
-		if (msg.sessionWebhook) {
-			try {
-				const body =
-					msg.content.type === "markdown"
-						? { msgtype: "markdown", markdown: { title: "消息", text }, conversationId: msg.conversationId }
-						: {
-								msgtype: "text",
-								text: { content: text },
-								conversationId: msg.conversationId,
-								atUser: msg.mentions ? { dingtalkIds: msg.mentions } : undefined,
-							};
+		// DingTalk may return HTTP 200 with an `errcode` in the body when a
+		// business-level error occurs (notably `300001 session 不存在` for
+		// expired session webhooks). The HTTP status check alone is not
+		// enough — we must parse the body. `errcode` is omitted on success
+		// (treated as 0). On any non-zero errcode we throw, but fall back
+		// to Route 2/3 below if the caller provided a target user or
+		// conversation — otherwise the user would never see a reply to a
+		// /new issued after a long idle period.
+		const tryRoute1 = async (): Promise<boolean> => {
+			const body =
+				msg.content.type === "markdown"
+					? { msgtype: "markdown", markdown: { title: "消息", text }, conversationId: msg.conversationId }
+					: {
+							msgtype: "text",
+							text: { content: text },
+							conversationId: msg.conversationId,
+							atUser: msg.mentions ? { dingtalkIds: msg.mentions } : undefined,
+						};
 
-				const res = await fetch(msg.sessionWebhook, {
-					method: "POST",
-					headers: { "Content-Type": "application/json" },
-					body: JSON.stringify(body),
+			const res = await fetch(msg.sessionWebhook, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify(body),
+			});
+
+			if (!res.ok) {
+				const errText = await res.text();
+				logger.error("[DingTalk] send failed (HTTP)", {
+					accountId: msg.accountId,
+					conversationId: msg.conversationId,
+					status: res.status,
+					body: errText,
 				});
-
-				if (!res.ok) {
-					const errText = await res.text();
-					logger.error("[DingTalk] send failed", { status: res.status, body: errText });
-					throw new Error(`[DingTalk] send failed: ${res.status} ${errText}`);
-				}
-				logger.debug("[DingTalk] message sent via webhook", { conversationId: msg.conversationId });
-			} catch (err) {
-				logger.error("[DingTalk] send error", { error: String(err) });
-				throw err;
+				throw new Error(`[DingTalk] send failed: ${res.status} ${errText}`);
 			}
-			return;
+
+			let parsed: { errcode?: number; errmsg?: string } | null = null;
+			try {
+				parsed = (await res.json()) as { errcode?: number; errmsg?: string };
+			} catch {
+				// Non-JSON success body — treat as success.
+			}
+
+			const errcode = parsed?.errcode ?? 0;
+			if (errcode !== 0) {
+				logger.warn("[DingTalk] webhook returned business error", {
+					accountId: msg.accountId,
+					conversationId: msg.conversationId,
+					errcode,
+					errmsg: parsed?.errmsg,
+				});
+				return false; // signal "fall back to next route"
+			}
+
+			logger.info("[DingTalk] message sent via webhook", {
+				accountId: msg.accountId,
+				conversationId: msg.conversationId,
+			});
+			return true;
+		};
+
+		// Route 1: sessionWebhook — interactive reply. Try first; on
+		// business errors (expired session) fall through to Route 2/3.
+		if (msg.sessionWebhook) {
+			const ok = await tryRoute1();
+			if (ok) return;
+			logger.debug("[DingTalk] Route 1 (webhook) failed, falling back to OAuth routes", {
+				accountId: msg.accountId,
+				hasToUserId: !!msg.toUserId,
+				hasConversationId: !!msg.conversationId,
+			});
 		}
 
 		// Route 2: OAuth DM — proactive push to individual user (cron delivery)
@@ -1572,7 +1615,7 @@ export class DingTalkChannel extends BaseChannel {
 		}
 
 		throw new Error(
-			"[DingTalk] sendMessage failed: no delivery route (missing sessionWebhook or accountId+toUserId or accountId+conversationId)",
+			"[DingTalk] sendMessage failed: all routes exhausted (webhook failed and no accountId+toUserId or accountId+conversationId for fallback)",
 		);
 	}
 
