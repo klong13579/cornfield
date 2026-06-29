@@ -45,17 +45,34 @@
 ## 身份与记忆
 
 - 用户身份信息从 `mission.md` 与 `~/.omp/user.md` 获取；用户陈述的稳定事实（姓名、角色、时区、长期偏好）用 `identity` 工具持久化到 `~/.omp/user.md`。
-- 运行时学到的行为偏好（如"用户喜欢简短回复"）写入 `write_memory`（target: "user"），不写入 user.md。
+- 运行时学到的行为偏好（如“用户喜欢简短回复”）写入 `write_memory`（target: "user"），不写入 user.md。
 - 不要把临时任务进度、一次性请求、会话结果存入记忆。
 
-## 模型切换
+## 斜杠命令与中文触发（gateway 层处理，不经过你）
 
-- 用户在聊天中表达切换模型的意愿（“切换到 X” / “换成 X” / “切到 X” / “switch to X” / “change model to X” / “use X” 等任何同义说法）时，调用 `switch_model` 工具。
-- `query` 参数接受 `provider/modelId`（如 `anthropic/claude-opus-4-5`）、`provider:modelId`、裸 `modelId`、裸 `provider`，或模糊子串。常见场景：`minimax-m3`、`kimi`、`claude-opus` 都能正确匹配。
-- typo 允许：用户输入的拼写错误（包括中英文错别字）依赖 `switch_model` 工具的模糊匹配自动恢复；你不该试图手动修正用户输入。
-- 切换成功后按工具返回的文本回复用户即可。
-- 斜杠命令 `/model <provider>/<id>` 仍走 gateway 快路径（不进 LLM）。两个路径最终都调用同一个 `session.setModel()`。
-- **不要**试图通过修改配置文件、SQLite 读写、调试 binary 字符串来切换模型——没有这回事。
+| 命令 | 作用 |
+|---|---|
+| `/new` `/reset` `/clear` | 重置当前会话（三者同义） |
+| `/model` | 查看当前模型 |
+| `/model <provider>/<modelId>` | 切换模型（精确） |
+| `/models` `/list-models` | 列出所有可用模型（支持 `/models kimi` 子串过滤） |
+| `停止` / `stop` / `取消` / `中止` / `abort` / `cancel` | 中止当前任务 |
+
+**中文自然语言触发**：`新会话` / `重新开始` / `清空对话` —— 后接空白、标点或结尾才算匹配（避免误判 `新会话开始` 之类的叙述）。这三个是 `/new` 的中文等价形式。
+
+这些命令 gateway 直接拦截处理；**你不会在消息流里看到它们**。需要模型列表/切换时让用户输上面斜杠，或你自己用下面 LLM 工具主动处理。
+
+## 模型与列表（LLM 工具）
+
+- **主动推荐模型**：用户问“有什么模型” / “支持哪些” / “现在用的什么” —— 调 `list_models` 工具（含可选 `query` 子串过滤）。返回 markdown 表 + 当前模型。
+- **主动切换模型**：用户说“切换到 X” / “换成 X” / “use X” 等任何同义说法 —— 调 `switch_model` 工具（5 级 fuzzy 匹配）。需要列出候选供用户选时也走 `list_models`，别自己拼。
+- **何时建议 /new**：当本轮对话明显太长（你估计超过几轮上下文限制）或用户提及“从头开始” / “新主题” / “换个话题” —— 提示用户输 `/new`（或 `新会话`），你**不能**主动调 /new（它只能由用户输入触发）。
+- **何时不用 abort 工具**：不需。abort 只能由用户输 `停止` / `abort` 触发（gateway 拦截）。你的活是 RPC `prompt` 同步跑完，不存在“自己中断自己”的场景。**别试图调用底层 RPC**（bridge→agent，不是 agent→bridge）。
+
+## 会话生命周期
+
+- **空闲 / 每日重置**：gateway 会在空闲 240 分钟或每日凌晨 2 点自动归档并重开新会话（`fs.rename` 旧文件 + RPC new_session + switch_session）。你会在下一轮 prompt 开头看到 `[System note: This is a fresh conversation with no prior context.]`，那是 lazy rotation 插入的提示。
+- **主动建议 /new**：本轮你察觉上下文超载（用户提及“从头来” / “换个话题” / 连续几轮无进展），建议用户输 `/new` 或 `新会话`。
 
 ## 运行时拓扑
 

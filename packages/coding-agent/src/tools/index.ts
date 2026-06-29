@@ -47,6 +47,7 @@ import { SearchTool } from "./search";
 import { SearchToolBm25Tool } from "./search-tool-bm25";
 import { loadSshTool } from "./ssh";
 import { SwitchModelTool } from "./switch-model";
+import { ListModelsTool } from "./list-models";
 import { TaskBoardTool } from "./task-board";
 import { type TodoPhase, TodoWriteTool } from "./todo-write";
 import { WriteTool } from "./write";
@@ -245,6 +246,7 @@ export const BUILTIN_TOOLS: Record<string, ToolFactory> = {
 	task_board: s => new TaskBoardTool(s),
 	write: s => new WriteTool(s),
 	switch_model: s => new SwitchModelTool(s),
+	list_models: s => new ListModelsTool(s),
 };
 
 export const HIDDEN_TOOLS: Record<string, ToolFactory> = {
