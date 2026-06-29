@@ -49,6 +49,17 @@ const AI_CARD_TEMPLATE_ID = process.env.DINGTALK_CARD_TEMPLATE_ID ?? DEFAULT_AI_
 const CARD_API_MAX_QPS = 20;
 const QPS_BACKOFF_MS = 2_000;
 
+/**
+ * HTTP statuses that should trigger a retry on the FINISHED card update.
+ * DingTalk returns 500 + system.busy when overloaded; that path was previously
+ * swallowed and left the card stuck in INPUTING (visible as a spinner).
+ * 429/408/425 are explicit throttling, 5xx are transient backend issues,
+ * 403 covers the QpsLimit case already handled below.
+ */
+const FINISHED_RETRYABLE_STATUSES = new Set([403, 408, 425, 429, 500, 502, 503, 504]);
+const FINISHED_MAX_RETRIES = 3;
+const FINISHED_BASE_BACKOFF_MS = 500;
+
 const AICardStatus = {
 	PROCESSING: "1",
 	INPUTING: "2",
@@ -228,6 +239,10 @@ function isQpsLimitError(err: unknown): boolean {
 	const response = (err as any)?.response;
 	if (response?.status !== 403) return false;
 	return typeof response?.data?.code === "string" && response.data.code.includes("QpsLimit");
+}
+
+function isRetryableStatus(status: number): boolean {
+	return FINISHED_RETRYABLE_STATUSES.has(status);
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -881,6 +896,10 @@ export async function patchAICardBlocks(
 /**
  * Flush the final content + blockList + chrome to the card and switch
  * to FINISHED state. Called once on `agent_end`.
+ *
+ * Throws on permanent failure so the bridge can fall back to v1 markdown
+ * (otherwise the card gets stuck in INPUTING and the user sees a spinner
+ * after a 5xx / system.busy from DingTalk).
  */
 export async function finishAICard(card: AICardInstance, data: CardData, config?: DingTalkConfig): Promise<void> {
 	if (!card) return;
@@ -901,22 +920,13 @@ export async function finishAICard(card: AICardInstance, data: CardData, config?
 		cardUpdateOptions: { updateCardDataByKey: true },
 	};
 
-	await cardRateLimiter.waitForToken();
+	let lastStatus: number | undefined;
+	let lastBody: string | undefined;
 
-	try {
-		const resp = await fetch(`${DINGTALK_API}/v1.0/card/instances`, {
-			method: "PUT",
-			headers: {
-				"x-acs-dingtalk-access-token": card.accessToken,
-				"Content-Type": "application/json",
-			},
-			body: JSON.stringify(body),
-		});
-
-		if (!resp.ok && resp.status === 403) {
-			cardRateLimiter.triggerBackoff();
-			await cardRateLimiter.waitForToken();
-			const retryResp = await fetch(`${DINGTALK_API}/v1.0/card/instances`, {
+	for (let attempt = 0; attempt < FINISHED_MAX_RETRIES; attempt++) {
+		await cardRateLimiter.waitForToken();
+		try {
+			const resp = await fetch(`${DINGTALK_API}/v1.0/card/instances`, {
 				method: "PUT",
 				headers: {
 					"x-acs-dingtalk-access-token": card.accessToken,
@@ -924,16 +934,62 @@ export async function finishAICard(card: AICardInstance, data: CardData, config?
 				},
 				body: JSON.stringify(body),
 			});
-			if (!retryResp.ok) {
-				logger.error("[AICard] FINISHED retry failed", { status: retryResp.status });
+
+			if (resp.ok) return;
+
+			lastStatus = resp.status;
+			lastBody = await resp.text();
+
+			if (!isRetryableStatus(resp.status)) {
+				// Non-retryable (4xx business error) — abort immediately so
+				// the bridge can decide whether to fall back to v1 markdown.
+				logger.error("[AICard] FINISHED non-retryable failure", {
+					status: resp.status,
+					body: lastBody,
+				});
+				throw new Error(`FINISHED non-retryable failure: status=${resp.status} body=${lastBody}`);
 			}
-		} else if (!resp.ok) {
-			const text = await resp.text();
-			logger.warn("[AICard] FINISHED update failed", { status: resp.status, body: text });
+
+			// Retryable: trigger backoff and try again with exponential delay.
+			cardRateLimiter.triggerBackoff();
+			const backoffMs = FINISHED_BASE_BACKOFF_MS * 2 ** attempt; // 500, 1000, 2000
+			logger.warn("[AICard] FINISHED retryable failure, retrying", {
+				status: resp.status,
+				attempt: attempt + 1,
+				maxRetries: FINISHED_MAX_RETRIES,
+				backoffMs,
+				body: lastBody,
+			});
+			if (attempt < FINISHED_MAX_RETRIES - 1) {
+				await Bun.sleep(backoffMs);
+			}
+		} catch (err) {
+			// Network errors and our own thrown non-retryable error propagate
+			// so the bridge fallback path can run.
+			if (err instanceof Error && err.message.startsWith("FINISHED non-retryable failure")) {
+				throw err;
+			}
+			// Treat unknown network errors as retryable up to the cap.
+			if (attempt < FINISHED_MAX_RETRIES - 1) {
+				const backoffMs = FINISHED_BASE_BACKOFF_MS * 2 ** attempt;
+				logger.warn("[AICard] FINISHED network error, retrying", {
+					attempt: attempt + 1,
+					maxRetries: FINISHED_MAX_RETRIES,
+					backoffMs,
+					error: String(err),
+				});
+				cardRateLimiter.triggerBackoff();
+				await Bun.sleep(backoffMs);
+				continue;
+			}
+			throw err;
 		}
-	} catch (err) {
-		logger.error("[AICard] FINISHED error", { error: String(err) });
 	}
+
+	// Exhausted all retries — surface the last status so the bridge can fall back.
+	const msg = `FINISHED update failed after ${FINISHED_MAX_RETRIES} retries: status=${lastStatus} body=${lastBody}`;
+	logger.error("[AICard] " + msg);
+	throw new Error(msg);
 }
 
 export async function failAICard(card: AICardInstance, content: string, config?: DingTalkConfig): Promise<void> {

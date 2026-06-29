@@ -220,10 +220,12 @@ function checkChannelsAndBridges(status: Awaited<ReturnType<typeof getGatewaySta
 			const STALE_THRESHOLD_MS = 10 * 60_000;
 			const lastActivity = h?.lastSocketAvailableAt || h?.connectionEstablishedAt || 0;
 			if (lastActivity > 0 && Date.now() - lastActivity > STALE_THRESHOLD_MS) {
-				channelFindings.push(warn(
-					`${acc.accountId}: stale socket (connected but no activity for ${Math.round((Date.now() - lastActivity) / 60000)}m)`,
-					`recv=${h?.receivedCount}, reconnects=${h?.reconnectAttempts}`,
-				));
+				channelFindings.push(
+					warn(
+						`${acc.accountId}: stale socket (connected but no activity for ${Math.round((Date.now() - lastActivity) / 60000)}m)`,
+						`recv=${h?.receivedCount}, reconnects=${h?.reconnectAttempts}`,
+					),
+				);
 			} else {
 				const meta = h
 					? ` (recv=${h.receivedCount}, processed=${h.processedCount}, reconnects=${h.reconnectAttempts})`
@@ -236,7 +238,6 @@ function checkChannelsAndBridges(status: Awaited<ReturnType<typeof getGatewaySta
 			channelFindings.push(error(`${acc.accountId}: ${reason}`, detail));
 		}
 	}
-
 
 	// Bridges
 	const bridges = status.bridges ?? [];

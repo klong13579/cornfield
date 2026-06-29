@@ -135,12 +135,7 @@ function makeChannelFactory(channels: Map<string, FakeDingTalkChannel>): (accoun
 	};
 }
 
-function makeRobotMessage(
-	accountId: string,
-	conversationId: string,
-	text: string,
-	msgId?: string,
-): DingTalkRawMessage {
+function makeRobotMessage(accountId: string, conversationId: string, text: string, msgId?: string): DingTalkRawMessage {
 	return {
 		conversationId,
 		atUsers: [],
@@ -242,10 +237,7 @@ describe("Gateway message pipeline", () => {
 
 			// Send a DM through the fake DingTalk channel
 			const conversationId = "conv-test-001";
-			await channel.injectDingTalkMessage(
-				makeRobotMessage("hr", conversationId, "hello gateway"),
-				"msg-test-001",
-			);
+			await channel.injectDingTalkMessage(makeRobotMessage("hr", conversationId, "hello gateway"), "msg-test-001");
 
 			// Give the async pipeline a tick to settle
 			await Bun.sleep(500);
@@ -270,7 +262,7 @@ describe("Gateway message pipeline", () => {
 			const sentTexts = channel.sentOutbound
 				.map((m: any) => m?.content)
 				.filter(Boolean)
-				.map((c: any) => (c.type === "text" ? c.text : c.markdown ?? ""))
+				.map((c: any) => (c.type === "text" ? c.text : (c.markdown ?? "")))
 				.join(" ");
 			expect(sentTexts).not.toContain("系统繁忙");
 			expect(sentTexts).not.toContain("Failed to");
@@ -312,10 +304,7 @@ describe("Gateway message pipeline", () => {
 			expect(channel).toBeDefined();
 			if (!channel) throw new Error("channel not created");
 
-			await channel.injectDingTalkMessage(
-				makeRobotMessage("hr", "conv-blocked-001", "hello"),
-				"msg-blocked-001",
-			);
+			await channel.injectDingTalkMessage(makeRobotMessage("hr", "conv-blocked-001", "hello"), "msg-blocked-001");
 
 			await Bun.sleep(200);
 

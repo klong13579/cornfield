@@ -194,10 +194,9 @@ export class CronLifecycle {
 			try {
 				await bridge.setDisabledToolsets([]);
 			} catch (restoreErr) {
-				logger.error(
-					"Failed to restore disabled toolsets after cron task",
-					{ error: restoreErr instanceof Error ? restoreErr.message : String(restoreErr) },
-				);
+				logger.error("Failed to restore disabled toolsets after cron task", {
+					error: restoreErr instanceof Error ? restoreErr.message : String(restoreErr),
+				});
 			}
 			if (originalModel?.model) {
 				try {

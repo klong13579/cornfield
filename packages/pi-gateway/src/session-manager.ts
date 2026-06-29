@@ -50,7 +50,6 @@ export class SessionManager {
 	/** Maps userId → { accountId, recordedAt } for abortByUser routing. */
 	readonly #userToAccount = new Map<string, UserAccountEntry>();
 
-
 	constructor(options: SessionManagerOptions) {
 		this.#bridges = options.bridges;
 		this.#defaultBridge = options.defaultBridge;
@@ -101,7 +100,6 @@ export class SessionManager {
 		// Record userId → accountId so abortByUser can route precisely.
 		this.#userToAccount.set(msg.userId, { accountId, recordedAt: Date.now() });
 
-
 		const previous = state.tail;
 		const { promise: current, resolve } = Promise.withResolvers<void>();
 		state.tail = previous.catch(() => {}).then(() => current);
@@ -147,9 +145,7 @@ export class SessionManager {
 		const entry = this.#userToAccount.get(userId);
 		if (entry) {
 			try {
-				const bridge = entry.accountId === "__default__"
-					? this.#defaultBridge
-					: this.#bridges.get(entry.accountId);
+				const bridge = entry.accountId === "__default__" ? this.#defaultBridge : this.#bridges.get(entry.accountId);
 				if (bridge) {
 					return await bridge.abort();
 				}
@@ -184,7 +180,6 @@ export class SessionManager {
 			}
 		}
 	}
-
 
 	getQueueStats(): QueueStat[] {
 		const now = Date.now();

@@ -600,7 +600,6 @@ export async function runAgentValidate(args: ValidateArgs): Promise<ValidateResu
 	};
 }
 
-
 // ────────────────────────────────────────────────────────────────────────────
 // semantic audit helper
 // ────────────────────────────────────────────────────────────────────────────
@@ -616,7 +615,7 @@ async function runSemanticPhase(
 ): Promise<{ violations: SemanticViolation[]; model?: string; error?: string }> {
 	// Wrap in a timeout to avoid hanging on model discovery in restricted environments
 	const TIMEOUT_MS = 120000; // 2 min — LLM semantic audit can take a while
-	const timeoutPromise = new Promise<{ violations: SemanticViolation[]; error: string }>((resolve) =>
+	const timeoutPromise = new Promise<{ violations: SemanticViolation[]; error: string }>(resolve =>
 		setTimeout(() => resolve({ violations: [], error: "Semantic audit timed out" }), TIMEOUT_MS),
 	);
 	const workPromise = runSemanticPhaseInner(agentDir, meceCtx);

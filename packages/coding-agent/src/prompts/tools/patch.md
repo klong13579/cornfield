@@ -19,7 +19,7 @@ When editing structured blocks (nested braces, tags, indented regions), include 
 dd|<parameters>
 mq|```ts
 tz|// Input is { path: string, edits: Entry[] }. `path` is required and applies to every entry.
-rg|// CRITICAL: `edits` is an ARRAY OF OBJECTS. Each element must be a plain object { ... }.
+rg|// CRITICAL: `edits` is an ARRAY OF OBJECTS. Each element must be a plain object { … }.
 nd|// Do NOT put strings, numbers, or other types in the edits array.
 22rg|type Entry =
 rt|   // Diff is one or more hunks for the top-level path.
@@ -78,7 +78,7 @@ nd|`edit {"path":"src/app.py","edits":["this is wrong"]}`  ❌
 nd|# WRONG — extra field 'old_text' (belongs to replace mode, not patch)
 nd|`edit {"path":"src/app.py","edits":[{"op":"update","old_text":"foo","new_text":"bar"}]}`  ❌
 nd|# WRONG — extra unknown field
-nd|`edit {"path":"src/app.py","edits":[{"op":"update","diff":"...","extraField":123}]}`  ❌
+nd|`edit {"path":"src/app.py","edits":[{"op":"update","diff":"…","extraField":123}]}`  ❌
 nd|# CORRECT — patch mode uses diff hunks only
 nd|`edit {"path":"src/app.py","edits":[{"op":"update","diff":"@@\n-old\n+new\n"}]}`  ✅
 hb|</examples>

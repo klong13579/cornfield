@@ -140,10 +140,7 @@ function buildUserMessage(ctx: MeceContext): string {
  * @returns Array of semantic violations. Empty if no violations found.
  * @throws Error if the LLM call fails or the response cannot be parsed.
  */
-export async function runSemanticAudit(
-	ctx: MeceContext,
-	modelCtx: ModelContext,
-): Promise<SemanticViolation[]> {
+export async function runSemanticAudit(ctx: MeceContext, modelCtx: ModelContext): Promise<SemanticViolation[]> {
 	const userContent = buildUserMessage(ctx);
 
 	const response = await completeSimple(

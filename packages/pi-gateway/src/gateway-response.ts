@@ -23,7 +23,7 @@ import type {
 } from "./types";
 
 /** Interface for the subset of Gateway that ResponseHandler needs. */
-	export interface ResponseGatewayDeps {
+export interface ResponseGatewayDeps {
 	registry: ChannelRegistry;
 	sessionManager: SessionManager | undefined;
 	actionRegistry: ActionRegistry;

@@ -273,7 +273,14 @@ async function updateViaBinaryAt(targetPath: string, expectedVersion: string): P
 	}
 	const fileStream = fs.createWriteStream(tempPath, { mode: 0o755 });
 	await pipeline(response.body, fileStream);
-
+	// Re-sign the binary on macOS to ensure valid signature after download
+	if (process.platform === "darwin") {
+		try {
+			await $`codesign --force --deep --sign - ${tempPath}`.quiet();
+		} catch {
+			// Ignore signing errors - binary might still work
+		}
+	}
 	console.log(chalk.dim("Installing update..."));
 	try {
 		try {

@@ -9,25 +9,20 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { buildAgentSessionPath } from "@oh-my-pi/pi-coding-agent/skeleton";
 import { isEnoent, logger } from "@oh-my-pi/pi-utils";
-import { getDataDir } from "./config";
-import { createCronTaskFromMessage } from "./scheduler/from-message";
-import { SQLiteSessionStore } from "./session-store";
-import type { CronLifecycle } from "./gateway-cron-lifecycle";
-import type { ModelSwitch } from "./gateway-model-switch";
-import type { ResponseHandler } from "./gateway-response";
 import type { AgentBridge } from "./agent-bridge";
 import type { ChannelRegistry } from "./channels/registry";
-import type {
-	GatewayConfig,
-	InboundMessage,
-	MessageContent,
-	OutboundMessage,
-	SessionRecord,
-} from "./types";
+import { getDataDir } from "./config";
+import type { CronLifecycle } from "./gateway-cron-lifecycle";
+import type { ModelSwitch } from "./gateway-model-switch";
+import type { NewSessionHandler } from "./gateway-new-session";
+import type { ResponseHandler } from "./gateway-response";
+import { createCronTaskFromMessage } from "./scheduler/from-message";
 import type { SessionManager } from "./session-manager";
+import type { SQLiteSessionStore } from "./session-store";
+import type { GatewayConfig, InboundMessage, OutboundMessage } from "./types";
 
 /** Interface for the subset of Gateway that MessageHandler needs. */
-	export interface MessageGatewayDeps {
+export interface MessageGatewayDeps {
 	config: GatewayConfig;
 	store: SQLiteSessionStore | null;
 	registry: ChannelRegistry;
@@ -37,6 +32,7 @@ import type { SessionManager } from "./session-manager";
 	cronLifecycle: CronLifecycle;
 	sessionManager: SessionManager | undefined;
 	modelSwitch: ModelSwitch;
+	newSessionHandler: NewSessionHandler;
 	responseHandler: ResponseHandler;
 	extractMessageText(msg: InboundMessage): string;
 }
@@ -69,12 +65,15 @@ export class MessageHandler {
 			const accountId = msg.accountId ?? "__default__";
 			if (await this.#deps.responseHandler.handleAbortMessage(msg, accountId)) return;
 			if (await this.#deps.modelSwitch.handleModelCommand(msg, accountId)) return;
-			if (await this.#deps.modelSwitch.tryNaturalLanguageModelSwitch(msg, accountId)) return;
+			if (await this.#deps.newSessionHandler.handle(msg, accountId)) return;
+			// Natural-language model switch patterns (e.g. "切换模型到 X") are NOT intercepted here;
+			// they fall through to the agent so the LLM can call the `switch_model` tool, fuzzy-match
+			// the user's request, and confirm the switch in the assistant reply.
 			let session = await this.#deps.store?.getSession(msg.channelId, accountId, msg.conversationId);
 			const now = Date.now();
 
-			if (session && this.#shouldResetSession(session)) {
-				session = await this.#resetSession(session, accountId, msg);
+			if (session && this.#deps.newSessionHandler.shouldRotate(session)) {
+				session = await this.#deps.newSessionHandler.rotate(session, accountId, { injectSystemNote: true, msg });
 			}
 			if (!session && this.#deps.store) {
 				const sessionPath = this.#buildSessionPath(msg.channelId, accountId, msg.conversationId);
@@ -125,15 +124,20 @@ export class MessageHandler {
 				return;
 			}
 
-			const channel = this.#deps.registry.get(
-				`${msg.channelId}${msg.accountId ? `:${msg.accountId}` : ""}`,
-			);
+			const channel = this.#deps.registry.get(`${msg.channelId}${msg.accountId ? `:${msg.accountId}` : ""}`);
 			const usedCard = await this.#deps.responseHandler.tryStreamAgentResponse(
-				msg, session, accountId, channel, this.#deps.sessionManager,
+				msg,
+				session,
+				accountId,
+				channel,
+				this.#deps.sessionManager,
 			);
 			if (!usedCard) {
 				await this.#deps.responseHandler.sendAgentResponseViaV1Markdown(
-					msg, session, accountId, this.#deps.sessionManager,
+					msg,
+					session,
+					accountId,
+					this.#deps.sessionManager,
 				);
 			}
 
@@ -147,78 +151,6 @@ export class MessageHandler {
 		}
 	}
 
-	#shouldResetSession(session: SessionRecord): boolean {
-		const policy = this.#deps.config.session?.resetPolicy ?? "both";
-		if (policy === "none") return false;
-
-		const now = Date.now();
-		const updatedAt = session.updatedAt;
-
-		if (policy === "idle" || policy === "both") {
-			const idleMs = (this.#deps.config.session?.idleTimeoutMinutes ?? 240) * 60_000;
-			if (now - updatedAt > idleMs) return true;
-		}
-
-		if (policy === "daily" || policy === "both") {
-			const resetHour = this.#deps.config.session?.dailyResetHour ?? 2;
-			const today = new Date(now);
-			const todayReset = new Date(today.getFullYear(), today.getMonth(), today.getDate(), resetHour, 0, 0, 0);
-			const boundary = now < todayReset.getTime() ? todayReset.getTime() - 86_400_000 : todayReset.getTime();
-			if (updatedAt < boundary) return true;
-		}
-
-		return false;
-	}
-
-	async #resetSession(session: SessionRecord, accountId: string, msg: InboundMessage): Promise<SessionRecord> {
-		logger.warn("Session rotation triggered", {
-			channelId: session.channelId,
-			conversationId: session.conversationId,
-			accountId,
-			updatedAt: new Date(session.updatedAt).toISOString(),
-		});
-
-		if (session.ompSessionPath) {
-			try {
-				const archivePath = this.#archiveSessionPath(session.ompSessionPath);
-				await fs.rename(session.ompSessionPath, archivePath);
-				logger.debug("Archived old session file", { from: session.ompSessionPath, to: archivePath });
-			} catch (err) {
-				if (!isEnoent(err)) {
-					logger.warn("Failed to archive old session file", {
-						path: session.ompSessionPath,
-						error: err instanceof Error ? err.message : String(err),
-					});
-				}
-			}
-		}
-
-		const now = Date.now();
-		await this.#deps.store?.updateSession(session.id, {
-			updatedAt: now,
-			sessionWebhook: msg.sessionWebhook,
-		});
-		const newSession: SessionRecord = {
-			...session,
-			updatedAt: now,
-			sessionWebhook: msg.sessionWebhook,
-		};
-
-		const bridge = accountId === "__default__"
-			? this.#deps.bridge
-			: this.#deps.accountBridges.get(accountId);
-		bridge?.resetActiveSession();
-
-		const note = "[System note: This is a fresh conversation with no prior context.]\n\n";
-		if (msg.content.type === "text") {
-			msg.content = { type: "text", text: note + msg.content.text };
-		} else if (msg.content.type === "markdown") {
-			msg.content = { type: "markdown", markdown: note + msg.content.markdown };
-		}
-
-		return newSession;
-	}
-
 	#buildSessionPath(channelId: string, accountId: string, conversationId: string): string {
 		const safeId = conversationId.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64);
 		const agentDir = this.#deps.accountAgentDirs.get(accountId);
@@ -227,17 +159,6 @@ export class MessageHandler {
 		}
 		const dataDir = getDataDir(this.#deps.config);
 		return path.join(dataDir, "sessions", channelId, accountId, `${safeId}.jsonl`);
-	}
-
-	#archiveSessionPath(sessionPath: string): string {
-		const ts = new Date()
-			.toISOString()
-			.replace(/[-:T]/g, "")
-			.slice(0, 14)
-			.replace(/(\d{8})(\d{6})/, "$1_$2");
-		const dot = sessionPath.lastIndexOf(".");
-		if (dot === -1) return `${sessionPath}.${ts}`;
-		return `${sessionPath.slice(0, dot)}.${ts}${sessionPath.slice(dot)}`;
 	}
 
 	async #migrateSessionPath(fromPath: string, toPath: string): Promise<void> {

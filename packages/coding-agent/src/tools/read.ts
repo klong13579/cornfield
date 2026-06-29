@@ -473,7 +473,10 @@ async function extractImagesFromMarkdown(
 		try {
 			const imageBuffer = await fs.readFile(resolvedPath);
 			if (imageBuffer.byteLength > MAX_IMAGE_SIZE) {
-				replacements.push({ full: fullMatch, replacement: `[Image: ${altText || "extracted image"} — skipped, too large]` });
+				replacements.push({
+					full: fullMatch,
+					replacement: `[Image: ${altText || "extracted image"} — skipped, too large]`,
+				});
 				continue;
 			}
 			// Detect MIME type from file extension
@@ -498,7 +501,10 @@ async function extractImagesFromMarkdown(
 			});
 		} catch {
 			// Image file not found or unreadable — replace with text note
-			replacements.push({ full: fullMatch, replacement: `[Image: ${altText || "extracted image"} — file not found]` });
+			replacements.push({
+				full: fullMatch,
+				replacement: `[Image: ${altText || "extracted image"} — file not found]`,
+			});
 		}
 	}
 
@@ -1157,9 +1163,7 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 			// Convert document or notebook via markit.
 			// Create a temp dir for extracted images so markit can write them.
 			const safeName = path.basename(absolutePath, ext).replace(/[()]/g, "_");
-			const imageDir = await fs.mkdtemp(
-				path.join(os.tmpdir(), `omp-read-images-${safeName}-`),
-			);
+			const imageDir = await fs.mkdtemp(path.join(os.tmpdir(), `omp-read-images-${safeName}-`));
 			try {
 				const result = await convertFileWithMarkit(absolutePath, signal, imageDir);
 				if (result.ok) {

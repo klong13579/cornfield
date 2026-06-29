@@ -24,6 +24,11 @@ import { DingTalkChannel } from "./channels/dingtalk";
 import { ChannelRegistry } from "./channels/registry";
 import { getDataDir, getDingTalkConfig, getEnabledChannels } from "./config";
 import { CronLifecycle } from "./gateway-cron-lifecycle";
+import { checkPidFile, PID_FILE, readPidFile, STATUS_FILE } from "./gateway-daemon";
+import { MessageHandler } from "./gateway-message";
+import { ModelSwitch } from "./gateway-model-switch";
+import { NewSessionHandler } from "./gateway-new-session";
+import { ResponseHandler } from "./gateway-response";
 import { type BridgeStat, type QueueStat, SessionManager } from "./session-manager";
 import { SQLiteSessionStore } from "./session-store";
 import type {
@@ -49,33 +54,161 @@ import { MessageHandler } from "./gateway-message";
 export function buildChannelKey(channelId: string, accountId?: string): string {
 	return accountId ? `${channelId}:${accountId}` : channelId;
 }
-export async function createAccountBridgeOptions(
-		agentConfig: GatewayConfig["agent"],
-		account: DingtalkAccountConfig,
-		agentDir: string,
-	): Promise<AgentBridgeOptions> {
-		// Try to read the model from the agent's settings.json
-		let model = account.model ?? agentConfig?.model;
-		if (!model) {
-			try {
-				const settingsPath = path.join(agentDir, ".omp", "settings.json");
-				const settings = JSON.parse(await Bun.file(settingsPath).text());
-				if (settings.modelRoles?.default) {
-					model = settings.modelRoles.default;
-				}
-			} catch {
-				// settings.json not found or invalid, use default
-			}
-		}
-		return {
-			...agentConfig,
-			model,
-			timeoutMs: account.timeoutMs ?? agentConfig?.timeoutMs,
-			cwd: agentDir,
-			deniedTools: account.deniedTools,
+
+// ═══════════════════════════════════════════════════════════════
+// Test injection helper
+// ═══════════════════════════════════════════════════════════════
+//
+// This module-level function backs the `POST /test/inject` endpoint
+// exposed by `Gateway.#startTestServer`. It is intentionally
+// decoupled from the `Gateway` instance so the implementation can be
+// unit-tested and so future test endpoints (e.g. card action
+// injection) can reuse the same routing logic.
+//
+// `channelFactory` is the same factory seam that `Gateway` uses to
+// instantiate DingTalk channels; we re-derive a channel for the
+// requested accountId so we route into the exact same in-process
+// channel that real DingTalk traffic flows through (not a separate
+// instance). In production this is the live channel; in test
+// drivers the caller can pass a custom factory to intercept.
+async function handleInject(
+	body: {
+		accountId?: string;
+		messageId?: string;
+		raw?: any;
+		skipDedup?: boolean;
+		skipMedia?: boolean;
+		skipPermission?: boolean;
+		captureOutbound?: boolean;
+		awaitMs?: number;
+	},
+	registry: ChannelRegistry,
+	channelFactory: ((accountId?: string) => DingTalkChannel) | undefined,
+): Promise<Response> {
+	if (!body || typeof body !== "object") {
+		return Response.json({ ok: false, reason: "missing_body" }, { status: 400 });
+	}
+	if (!body.accountId || typeof body.accountId !== "string") {
+		return Response.json({ ok: false, reason: "missing_accountId" }, { status: 400 });
+	}
+	if (!body.raw || typeof body.raw !== "object") {
+		return Response.json({ ok: false, reason: "missing_raw" }, { status: 400 });
+	}
+
+	// Look up the LIVE channel the gateway is already running. Creating
+	// a fresh `DingTalkChannel` would not have the registered message
+	// handler, so the message would be dropped at `handleInbound`.
+	const channelKey = buildChannelKey("dingtalk", body.accountId);
+	let channel: DingTalkChannel | undefined = registry.get(channelKey) as DingTalkChannel | undefined;
+	if (!channel && channelFactory) {
+		// Fallback for in-process test drivers that bypass the registry.
+		try {
+			channel = channelFactory(body.accountId);
+		} catch {}
+	}
+	if (!channel) {
+		return Response.json(
+			{ ok: false, reason: "channel_not_found", channelKey },
+			{ status: 404 },
+		);
+	}
+
+	// ── Optional outbound capture ──
+	// Temporarily replace the channel's `sendMessage` so we can return
+	// what the gateway would have sent to DingTalk. Useful for tests
+	// that want to assert on the reply text without actually posting
+	// to DingTalk's API (and the typical test case has a fake
+	// `sessionWebhook` / `conversationId`, which would fail).
+	const captured: OutboundMessage[] = [];
+	let originalSend: typeof channel.sendMessage | null = null;
+	if (body.captureOutbound) {
+		originalSend = channel.sendMessage.bind(channel);
+		(channel as any).sendMessage = async (msg: OutboundMessage) => {
+			captured.push(msg);
+			logger.info("[DingTalk] TEST INJECT captured outbound", {
+				accountId: body.accountId,
+				conversationId: msg.conversationId,
+				msgType: (msg as any).content?.type,
+				preview:
+					(msg as any).content?.text?.slice?.(0, 80) ??
+					(msg as any).content?.markdown?.slice?.(0, 80) ??
+					"",
+			});
 		};
 	}
 
+	const messageId = body.messageId ?? `test-inject-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+	try {
+		const result = await channel.injectTestMessage(body.raw, messageId, {
+			skipDedup: body.skipDedup,
+			skipMediaDownload: body.skipMedia,
+			skipPermission: body.skipPermission,
+		});
+		// For tests that want to wait for the agent to finish streaming
+		// (e.g. /new → agent response → captured reply) before we
+		// return. Defaults to 0: return as soon as handleInbound resolves.
+		if (body.awaitMs && body.awaitMs > 0) {
+			await Bun.sleep(body.awaitMs);
+		}
+		if (!result.ok) {
+			const status = result.reason === "permission_denied" ? 403 : 400;
+			return Response.json(
+				{ ok: false, reason: result.reason, messageId, captured: captured.length },
+				{ status },
+			);
+		}
+		return Response.json({
+			ok: true,
+			messageId,
+			conversationId: result.inbound.conversationId,
+			userId: result.inbound.userId,
+			captured: captured.map(m => ({
+				conversationId: m.conversationId,
+				accountId: m.accountId,
+				contentType: (m as any).content?.type,
+				text: (m as any).content?.text,
+				markdown: (m as any).content?.markdown,
+			})),
+		});
+	} catch (err) {
+		return Response.json(
+			{ ok: false, reason: "injection_failed", error: (err as Error).message, messageId },
+			{ status: 500 },
+		);
+	} finally {
+		// Always restore the original sendMessage so the channel is
+		// not left in a captured state for subsequent real traffic.
+		if (originalSend) {
+			(channel as any).sendMessage = originalSend;
+		}
+	}
+}
+export async function createAccountBridgeOptions(
+	agentConfig: GatewayConfig["agent"],
+	account: DingtalkAccountConfig,
+	agentDir: string,
+): Promise<AgentBridgeOptions> {
+	// Try to read the model from the agent's settings.json
+	let model = account.model ?? agentConfig?.model;
+	if (!model) {
+		try {
+			const settingsPath = path.join(agentDir, ".omp", "settings.json");
+			const settings = JSON.parse(await Bun.file(settingsPath).text());
+			if (settings.modelRoles?.default) {
+				model = settings.modelRoles.default;
+			}
+		} catch {
+			// settings.json not found or invalid, use default
+		}
+	}
+	return {
+		...agentConfig,
+		model,
+		timeoutMs: account.timeoutMs ?? agentConfig?.timeoutMs,
+		cwd: agentDir,
+		deniedTools: account.deniedTools,
+	};
+}
 
 export class Gateway {
 	#config: GatewayConfig;
@@ -90,6 +223,7 @@ export class Gateway {
 	#sessionManager?: SessionManager;
 	#cronLifecycle: CronLifecycle;
 	#modelSwitch: ModelSwitch;
+	#newSessionHandler: NewSessionHandler;
 	#responseHandler: ResponseHandler;
 	#messageHandler: MessageHandler;
 	/** Periodic health check: restart bridges stuck in circuit-open. */
@@ -108,6 +242,12 @@ export class Gateway {
 	#actionRegistry = new ActionRegistry();
 	/** Test seam: factory for creating DingTalkChannel instances. */
 	#channelFactory?: (accountId?: string) => DingTalkChannel;
+	/**
+	 * Test injection HTTP server. Only started when
+	 * `OMP_GATEWAY_TEST_MODE=1` AND this is a non-production build.
+	 * Listens on 127.0.0.1 only. See `injectTestEndpoint`.
+	 */
+	#testServer: { stop: () => void; port: number } | null = null;
 
 	constructor(
 		config: GatewayConfig,
@@ -144,6 +284,20 @@ export class Gateway {
 			},
 		});
 
+		this.#newSessionHandler = new NewSessionHandler({
+			config,
+			store: this.#store,
+			resolveDirectBridge: id => this.#resolveDirectBridge(id),
+			sendAgentResponse: (msg, text) => this.#responseHandler.sendAgentResponse(msg, text),
+			extractMessageText: msg => {
+				const c = msg.content;
+				if (c.type === "text") return c.text;
+				if (c.type === "markdown") return c.markdown;
+				if (c.type === "voice") return c.text ?? "";
+				return "";
+			},
+		});
+
 		this.#cronLifecycle = new CronLifecycle({
 			config,
 			bridge: this.#bridge,
@@ -164,6 +318,7 @@ export class Gateway {
 			cronLifecycle: this.#cronLifecycle,
 			sessionManager: undefined,
 			modelSwitch: this.#modelSwitch,
+			newSessionHandler: this.#newSessionHandler,
 			responseHandler: this.#responseHandler,
 			extractMessageText: msg => {
 				const c = msg.content;
@@ -199,6 +354,7 @@ export class Gateway {
 		// Initialize session store
 		this.#store = new SQLiteSessionStore(`${dataDir}/sessions.db`);
 		this.#messageHandler.setStore(this.#store);
+		this.#newSessionHandler.setStore(this.#store);
 
 		// Register channels (handle multi-account DingTalk)
 		const enabled = getEnabledChannels(this.#config);
@@ -239,7 +395,7 @@ export class Gateway {
 		// doesn't grow unbounded. The registry is bounded by the rate
 		// of new cards (~1 per inbound message) so a 5 min cadence is
 		// plenty.
-	setInterval(() => this.#actionRegistry.expire(), 5 * 60_000).unref?.();
+		setInterval(() => this.#actionRegistry.expire(), 5 * 60_000).unref?.();
 
 		// Health check: every 60s, if a bridge's circuit breaker has been
 		// open for more than 5 minutes, restart it. Prevents a permanently
@@ -258,6 +414,14 @@ export class Gateway {
 		}
 
 		await this.#writeStatusFile();
+
+		// Test injection endpoint: only when explicitly enabled. Lets
+		// integration tests push real `DingTalkRawMessage` payloads
+		// into the running gateway without going through the Stream
+		// SDK. See `injectTestEndpoint` for the API contract.
+		if (process.env.OMP_GATEWAY_TEST_MODE === "1") {
+			await this.#startTestServer();
+		}
 	}
 
 	/** Test seam: access the session manager. */
@@ -430,7 +594,9 @@ export class Gateway {
 			this.#registry.disconnectAll().catch(err => {
 				warnings.push(`channels: ${err instanceof Error ? err.message : String(err)}`);
 			}),
-			Bun.sleep(5_000).then(() => { warnings.push("channels: timeout after 5s"); }),
+			Bun.sleep(5_000).then(() => {
+				warnings.push("channels: timeout after 5s");
+			}),
 		]);
 
 		// Phase 2: stop scheduler + health interval (5s grace)
@@ -463,10 +629,20 @@ export class Gateway {
 		// Phase 4: stop all bridges (5s grace)
 		await Promise.race([
 			Promise.all([
-				...Array.from(this.#accountBridges.values()).map(b => { try { b.stop(); } catch {} }),
-				(() => { try { this.#bridge.stop(); } catch {} })(),
+				...Array.from(this.#accountBridges.values()).map(b => {
+					try {
+						b.stop();
+					} catch {}
+				}),
+				(() => {
+					try {
+						this.#bridge.stop();
+					} catch {}
+				})(),
 			]).then(() => {}),
-			Bun.sleep(5_000).then(() => { warnings.push("bridges: timeout after 5s"); }),
+			Bun.sleep(5_000).then(() => {
+				warnings.push("bridges: timeout after 5s");
+			}),
 		]);
 
 		this.#accountBridges.clear();
@@ -475,6 +651,13 @@ export class Gateway {
 		this.#store?.close();
 		this.#store = null;
 		this.#running = false;
+
+		if (this.#testServer) {
+			try {
+				this.#testServer.stop();
+			} catch {}
+			this.#testServer = null;
+		}
 
 		if (warnings.length > 0) {
 			logger.warn("Gateway stopped with warnings", { warnings });
@@ -490,7 +673,6 @@ export class Gateway {
 		}
 	}
 
-
 	/**
 	 * Periodic health check: if a bridge's circuit breaker has been open
 	 * for more than the threshold, restart the bridge to recover from a
@@ -502,10 +684,8 @@ export class Gateway {
 	 * GATEWAY_CIRCUIT_OPEN_MS and GATEWAY_CIRCUIT_COOLDOWN_MS env vars.
 	 */
 	async checkBridgeHealth(): Promise<void> {
-		const CIRCUIT_OPEN_THRESHOLD_MS =
-			Number(process.env.GATEWAY_CIRCUIT_OPEN_MS) || 5 * 60_000;
-		const RESTART_COOLDOWN_MS =
-			Number(process.env.GATEWAY_CIRCUIT_COOLDOWN_MS) || 10 * 60_000;
+		const CIRCUIT_OPEN_THRESHOLD_MS = Number(process.env.GATEWAY_CIRCUIT_OPEN_MS) || 5 * 60_000;
+		const RESTART_COOLDOWN_MS = Number(process.env.GATEWAY_CIRCUIT_COOLDOWN_MS) || 10 * 60_000;
 		const now = Date.now();
 
 		const checkOne = async (accountId: string, bridge: AgentBridge) => {
@@ -565,7 +745,6 @@ export class Gateway {
 		}
 	}
 
-
 	async reload(config: GatewayConfig): Promise<void> {
 		// Snapshot old config for diff
 		const oldDtConfig = getDingTalkConfig(this.#config);
@@ -603,7 +782,11 @@ export class Gateway {
 			}
 		}
 
-		const hasChanges = plan.cronChanged || plan.accountsToAdd.length > 0 || plan.accountsToRemove.length > 0 || plan.accountsToUpdate.length > 0;
+		const hasChanges =
+			plan.cronChanged ||
+			plan.accountsToAdd.length > 0 ||
+			plan.accountsToRemove.length > 0 ||
+			plan.accountsToUpdate.length > 0;
 		this.#config = config;
 		if (!hasChanges) {
 			logger.debug("Gateway config reloaded (no changes detected)");
@@ -645,7 +828,6 @@ export class Gateway {
 
 		logger.debug("Gateway config reloaded");
 	}
-
 
 	get isRunning(): boolean {
 		return this.#running;
@@ -763,6 +945,75 @@ export class Gateway {
 		} catch {
 			// non-fatal
 		}
+	}
+
+	// ═══════════════════════════════════════════════════════════════
+	// Test injection HTTP server
+	// ═══════════════════════════════════════════════════════════════
+	//
+	// Generic injection endpoint for production-environment
+	// integration tests. When `OMP_GATEWAY_TEST_MODE=1` is set in the
+	// gateway's environment, `start()` spins up a localhost-only HTTP
+	// server that accepts `POST /test/inject` with a real
+	// `DingTalkRawMessage` payload and routes it through the same
+	// channel pipeline that real DingTalk traffic follows.
+	//
+	// API:
+	//   POST /test/inject
+	//   Content-Type: application/json
+	//   {
+	//     "accountId":   "hr",
+	//     "messageId":   "test-msg-001",   // optional; auto-generated
+	//     "skipDedup":   false,             // optional
+	//     "skipMedia":   false,             // optional
+	//     "skipPermission": false,          // optional
+	//     "raw": {
+	//       ...all DingTalkRawMessage fields...
+	//     }
+	//   }
+	//   -> 200 { ok: true, messageId, conversationId, userId }
+	//   -> 4xx { ok: false, reason }
+	//
+	// The endpoint is intended for test drivers (curl, scripts, or
+	// in-process `fetch` from a test runner) that need to verify
+	// gateway behavior end-to-end against a real production daemon.
+	// It is NOT a public API and must be gated by env var.
+	async #startTestServer(): Promise<void> {
+		const port = Number.parseInt(process.env.OMP_GATEWAY_TEST_PORT ?? "7890", 10);
+		const host = "127.0.0.1";
+		// Capture the registry + factory in locals so the fetch handler
+		// (which runs with `this` bound to Bun's Server) can route through
+		// them. We MUST look up the live channel in the registry — creating
+		// a fresh `DingTalkChannel` would yield an un-wired instance with
+		// no `onMessage` handler, so `handleInbound` would drop the message.
+		const registry = this.#registry;
+		const channelFactory = this.#channelFactory;
+		const server = Bun.serve({
+			hostname: host,
+			port,
+			async fetch(req) {
+				const url = new URL(req.url);
+				if (req.method === "GET" && url.pathname === "/test/health") {
+					return Response.json({ ok: true, mode: "test-injection" });
+				}
+				if (req.method === "POST" && url.pathname === "/test/inject") {
+					let body: any;
+					try {
+						body = await req.json();
+					} catch {
+						return Response.json({ ok: false, reason: "invalid_json" }, { status: 400 });
+					}
+					return await handleInject(body, registry, channelFactory);
+				}
+				return Response.json({ ok: false, reason: "not_found" }, { status: 404 });
+			},
+		});
+		this.#testServer = { stop: () => server.stop(), port: server.port ?? port };
+		logger.warn("Test injection HTTP endpoint enabled (NOT for production)", {
+			host,
+			port: server.port,
+			endpoint: "POST /test/inject",
+		});
 	}
 
 	async getStatus(): Promise<{

@@ -1,5 +1,5 @@
 import type { AgentTool } from "@oh-my-pi/pi-agent-core";
-import type { ToolChoice } from "@oh-my-pi/pi-ai";
+import type { Model, ToolChoice } from "@oh-my-pi/pi-ai";
 import { $env, $flag, isBunTestRuntime, logger } from "@oh-my-pi/pi-utils";
 import type { AsyncJobManager } from "../async";
 import type { PromptTemplate } from "../config/prompt-templates";
@@ -46,6 +46,7 @@ import { reportFindingTool } from "./review";
 import { SearchTool } from "./search";
 import { SearchToolBm25Tool } from "./search-tool-bm25";
 import { loadSshTool } from "./ssh";
+import { SwitchModelTool } from "./switch-model";
 import { TaskBoardTool } from "./task-board";
 import { type TodoPhase, TodoWriteTool } from "./todo-write";
 import { WriteTool } from "./write";
@@ -155,6 +156,10 @@ export interface ToolSession {
 	getModelString?: () => string | undefined;
 	/** Get the current session model string, regardless of how it was chosen */
 	getActiveModelString?: () => string | undefined;
+	/** Get all models the session can call (auth-resolved, registry view). */
+	getAvailableModels?: () => Model[];
+	/** Apply a model switch to the active session. Persists when role === "default". */
+	setModel?: (model: Model, role?: "default" | "temporary") => Promise<void>;
 	/** Get actual connected model details (provider, baseUrl, etc) */
 	getActiveModelDetails?: () =>
 		| { provider: string; baseUrl: string; id: string; name: string; api: string }
@@ -239,6 +244,7 @@ export const BUILTIN_TOOLS: Record<string, ToolFactory> = {
 	web_search: s => new WebSearchTool(s),
 	task_board: s => new TaskBoardTool(s),
 	write: s => new WriteTool(s),
+	switch_model: s => new SwitchModelTool(s),
 };
 
 export const HIDDEN_TOOLS: Record<string, ToolFactory> = {
@@ -406,6 +412,7 @@ export async function createTools(session: ToolSession, toolNames?: string[]): P
 		if (name === "ast_edit") return session.settings.get("astEdit.enabled");
 		if (name === "render_mermaid") return session.settings.get("renderMermaid.enabled");
 		if (name === "notebook") return session.settings.get("notebook.enabled");
+		if (name === "switch_model") return session.settings.get("switchModel.enabled");
 		if (name === "inspect_image") return session.settings.get("inspect_image.enabled");
 		if (name === "web_search") return session.settings.get("web_search.enabled");
 		if (name === "search_tool_bm25") return session.settings.get("mcp.discoveryMode");

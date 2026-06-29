@@ -2437,6 +2437,83 @@ export class DingTalkChannel extends BaseChannel {
 	#parseRobotMessage(raw: DingTalkRawMessage, messageId?: string): InboundMessage | null {
 		return parseRobotMessage(raw, this.id, this.#accountId, messageId);
 	}
+
+	// ═══════════════════════════════════════════════════════════════
+	// Test injection seam
+	// ═══════════════════════════════════════════════════════════════
+	//
+	// `injectTestMessage` lets a test driver push a real `DingTalkRawMessage`
+	// into the channel without going through the Stream SDK WebSocket. It
+	// runs the same parse → dedup → permission → media download →
+	// handleInbound path that production traffic follows, but skips the
+	// ACK (no real socket to ACK against) and never touches the network.
+	//
+	// Use this for production-environment integration tests where the
+	// gateway is running as a daemon and we want to simulate a user
+	// message without manually opening DingTalk. Callers are expected to
+	// gate the test HTTP endpoint (see `Gateway.injectTestEndpoint`)
+	// behind `OMP_GATEWAY_TEST_MODE=1`.
+	//
+	// Returns the parsed `InboundMessage` on success so callers can
+	// assert on `conversationId`, `userId`, etc. without re-parsing.
+	/**
+	 * Inject a real `DingTalkRawMessage` into the channel pipeline.
+	 * Skips ACK; preserves dedup. Returns the parsed inbound or a
+	 * `{ ok: false, reason }` shape on failure.
+	 */
+	async injectTestMessage(
+		raw: DingTalkRawMessage,
+		messageId: string,
+		opts: { skipDedup?: boolean; skipMediaDownload?: boolean; skipPermission?: boolean } = {},
+	): Promise<{ ok: true; inbound: InboundMessage } | { ok: false; reason: string }> {
+		const log = logger;
+		log.info("[DingTalk] TEST INJECT", {
+			conversationId: (raw as any).conversationId,
+			senderId: (raw as any).senderId,
+			msgtype: raw.msgtype,
+			preview: typeof raw.text?.content === "string" ? raw.text.content.slice(0, 80) : "<non-text>",
+		});
+
+		// ── dedup: protocol + business, mirroring #handleMessage ──
+		if (!opts.skipDedup) {
+			if (checkAndMarkDingtalkMessage(this.#accountId, messageId, undefined)) {
+				return { ok: false, reason: "duplicate_messageId" };
+			}
+			if (checkAndMarkDingtalkMessage(this.#accountId, undefined, raw.msgId)) {
+				return { ok: false, reason: "duplicate_msgId" };
+			}
+		}
+
+		// ── parse ──
+		const inbound = this.#parseRobotMessage(raw, messageId);
+		if (!inbound) return { ok: false, reason: "parse_failed" };
+
+		// ── permission ──
+		if (!opts.skipPermission && !this.#checkPermission(inbound)) {
+			log.warn("[DingTalk] TEST INJECT blocked by permission policy", {
+				userId: inbound.userId,
+				conversationId: inbound.conversationId,
+			});
+			return { ok: false, reason: "permission_denied" };
+		}
+
+		// ── media download (same trigger as #handleMessage) ──
+		const needsDownload =
+			this.#config &&
+			!opts.skipMediaDownload &&
+			((inbound.content.type !== "text" && inbound.content.type !== "markdown") ||
+				(inbound.mediaUrls && inbound.mediaUrls.length > 0));
+		if (needsDownload && this.#config) {
+			const { resolveInboundAttachments } = await import("./dingtalk-media");
+			const customDownloader = this.createMediaDownloader() ?? undefined;
+			inbound.attachments = await resolveInboundAttachments(inbound, this.#config, customDownloader);
+		}
+
+		// ── run the same final step as #handleMessage ──
+		await this.handleInbound(inbound);
+		this.#processedCount++;
+		return { ok: true, inbound };
+	}
 }
 
 // ═══════════════════════════════════════════════════════════════════════

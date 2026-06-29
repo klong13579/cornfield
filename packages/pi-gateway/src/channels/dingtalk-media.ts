@@ -369,17 +369,18 @@ function isVideoFile(filename: string | undefined): boolean {
  * Returns an empty array if ffmpeg/ffprobe is unavailable or fails.
  * The caller falls back to a text-only description in that case.
  */
-async function extractVideoFrames(
-	videoPath: string,
-	filename: string,
-): Promise<InboundAttachment[]> {
+async function extractVideoFrames(videoPath: string, filename: string): Promise<InboundAttachment[]> {
 	// Probe duration with ffprobe
 	let durationSec = 0;
 	try {
 		const probe = Bun.spawnSync([
-			"ffprobe", "-v", "error",
-			"-show_entries", "format=duration",
-			"-of", "csv=p=0",
+			"ffprobe",
+			"-v",
+			"error",
+			"-show_entries",
+			"format=duration",
+			"-of",
+			"csv=p=0",
 			videoPath,
 		]);
 		if (probe.exitCode !== 0) {
@@ -388,7 +389,9 @@ async function extractVideoFrames(
 		}
 		durationSec = parseFloat(probe.stdout.toString().trim());
 		if (!Number.isFinite(durationSec) || durationSec <= 0) {
-			logger.warn("[DingTalk Media] ffprobe returned invalid duration", { duration: probe.stdout.toString().trim() });
+			logger.warn("[DingTalk Media] ffprobe returned invalid duration", {
+				duration: probe.stdout.toString().trim(),
+			});
 			return [];
 		}
 	} catch (err) {
@@ -412,12 +415,18 @@ async function extractVideoFrames(
 		for (let i = 0; i < timestamps.length; i++) {
 			const framePath = path.join(frameDir, `frame_${i}.jpg`);
 			const ffmpeg = Bun.spawnSync([
-				"ffmpeg", "-y",
-				"-ss", timestamps[i].toFixed(2),
-				"-i", videoPath,
-				"-frames:v", "1",
-				"-vf", `scale=${VIDEO_FRAME_WIDTH}:-1`,
-				"-q:v", "2",
+				"ffmpeg",
+				"-y",
+				"-ss",
+				timestamps[i].toFixed(2),
+				"-i",
+				videoPath,
+				"-frames:v",
+				"1",
+				"-vf",
+				`scale=${VIDEO_FRAME_WIDTH}:-1`,
+				"-q:v",
+				"2",
 				framePath,
 			]);
 			if (ffmpeg.exitCode !== 0) {
@@ -442,7 +451,11 @@ async function extractVideoFrames(
 		}
 	} finally {
 		// Clean up temp frame directory
-		try { fs.rmSync(frameDir, { recursive: true, force: true }); } catch { /* best effort */ }
+		try {
+			fs.rmSync(frameDir, { recursive: true, force: true });
+		} catch {
+			/* best effort */
+		}
 	}
 
 	logger.info("[DingTalk Media] Video frames extracted", {

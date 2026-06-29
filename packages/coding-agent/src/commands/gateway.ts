@@ -167,25 +167,24 @@ export default class Gateway extends Command {
 					return;
 				}
 
+				// Spawn detached child with --foreground.
+				// In bun dev mode: process.argv[1] is the .ts entry point.
+				// In compiled omp binary: process.argv[1] is absent, use "omp" from PATH.
+				const entry = process.argv[1];
+				const isDevMode = entry && (entry.endsWith(".ts") || entry.endsWith(".js"));
+				const childCmd = isDevMode
+					? [process.execPath, entry, "gateway", "start", "--foreground"]
+					: [process.execPath, "gateway", "start", "--foreground"];
+				if (configPath) childCmd.push("--config", configPath);
 
-			// Spawn detached child with --foreground.
-			// In bun dev mode: process.argv[1] is the .ts entry point.
-			// In compiled omp binary: process.argv[1] is absent, use "omp" from PATH.
-			const entry = process.argv[1];
-			const isDevMode = entry && (entry.endsWith(".ts") || entry.endsWith(".js"));
-			const childCmd = isDevMode
-				? [process.execPath, entry, "gateway", "start", "--foreground"]
-				: [process.execPath, "gateway", "start", "--foreground"];
-			if (configPath) childCmd.push("--config", configPath);
-
-			const child = Bun.spawn({
-				cmd: childCmd,
-				stdin: "ignore",
-				stdout: "ignore",
-				stderr: "ignore",
-				detached: true,
-			});
-			child.unref?.();
+				const child = Bun.spawn({
+					cmd: childCmd,
+					stdin: "ignore",
+					stdout: "ignore",
+					stderr: "ignore",
+					detached: true,
+				});
+				child.unref?.();
 
 				// Wait for PID file to appear (up to 15s)
 				const config = await loadConfig(configPath);

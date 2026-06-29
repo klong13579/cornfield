@@ -41,9 +41,7 @@ describe("buildSystemPrompt — mission.md role suppression", () => {
 		const rendered = await buildSystemPrompt({
 			cwd: tmpDir,
 			toolNames: [],
-			contextFiles: [
-				{ path: path.join(tmpDir, "mission.md"), content: "# 助手\n\n你是一个企业内部助手。" },
-			],
+			contextFiles: [{ path: path.join(tmpDir, "mission.md"), content: "# 助手\n\n你是一个企业内部助手。" }],
 		});
 		expect(rendered).toContain("<role>");
 		expect(rendered).toContain("mission.md");

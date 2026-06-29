@@ -966,6 +966,8 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			getSessionSpawns: () => options.spawns ?? "*",
 			getModelString: () => (hasExplicitModel && model ? formatModelString(model) : undefined),
 			getActiveModelString,
+			getAvailableModels: () => session.getAvailableModels(),
+			setModel: (m, role) => session.setModel(m, role ?? "default"),
 			getActiveModelDetails: () => {
 				const activeModel = agent?.state.model ?? model;
 				if (!activeModel) return undefined;
@@ -1840,25 +1842,25 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 				skillDirs.add(path.resolve(expanded));
 			}
 
-		skillWatcher = new SkillWatcher({
-			directories: [...skillDirs],
-			onReload: () => {
-				void (async () => {
-				try {
-					// Clear the capability fs cache so discoverSkills reads fresh file content
-					clearFsCache();
-					const reloaded = await discoverSkills(cwd, agentDir, {
-						...settings.getGroup("skills"),
-						disabledExtensions: settings.get("disabledExtensions") ?? [],
-					});
-					skills = reloaded.skills;
-					await session.reloadSkills(reloaded.skills, reloaded.warnings);
-				} catch (error) {
-					logger.warn("Skill hot-reload failed", { error: String(error) });
-				}
-				})();
-			},
-		});
+			skillWatcher = new SkillWatcher({
+				directories: [...skillDirs],
+				onReload: () => {
+					void (async () => {
+						try {
+							// Clear the capability fs cache so discoverSkills reads fresh file content
+							clearFsCache();
+							const reloaded = await discoverSkills(cwd, agentDir, {
+								...settings.getGroup("skills"),
+								disabledExtensions: settings.get("disabledExtensions") ?? [],
+							});
+							skills = reloaded.skills;
+							await session.reloadSkills(reloaded.skills, reloaded.warnings);
+						} catch (error) {
+							logger.warn("Skill hot-reload failed", { error: String(error) });
+						}
+					})();
+				},
+			});
 		}
 
 		logger.time("createAgentSession:return");

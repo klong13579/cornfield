@@ -1343,6 +1343,17 @@ export const SETTINGS_SCHEMA = {
 		ui: { tab: "tools", label: "Notebook", description: "Enable the notebook tool for notebook editing" },
 	},
 
+	"switchModel.enabled": {
+		type: "boolean",
+		default: true,
+		ui: {
+			tab: "tools",
+			label: "Switch Model",
+			description:
+				"Enable the switch_model tool, allowing the agent to change the LLM used by the current session in response to user requests (e.g. '切换模型到 X')",
+		},
+	},
+
 	"renderMermaid.enabled": {
 		type: "boolean",
 		default: false,

@@ -636,6 +636,27 @@ export class AgentBridge {
 		});
 	}
 
+	/**
+	 * Send RPC `new_session` to the agent to clear its in-memory state
+	 * (messages, context, cache) and generate a fresh sessionId.
+	 *
+	 * After this call, the agent's `getState().sessionId` will differ from
+	 * the previous value. The agent may also start writing to a new file
+	 * path computed via `sessionFilePath()` (the interactive omp convention
+	 * `by-date/<date>/<HHMMSS>__<8hex>.jsonl`), which differs from the
+	 * gateway agent convention `<agentDir>/sessions/<safeConvId>.jsonl`.
+	 * Callers should immediately follow with `switchSession(ompSessionPath)`
+	 * to force the agent back to the gateway-tracked file.
+	 */
+	async newSession(): Promise<AgentEvent> {
+		return this.#queue.runExclusive(async () => {
+			if (!this.isRunning) {
+				throw new Error("Agent process not running");
+			}
+			return await this.#transport.sendCommand("new_session", {}, 30_000);
+		});
+	}
+
 	async setDisabledToolsets(toolsets: string[]): Promise<void> {
 		if (!this.isRunning) return;
 		await this.#transport.sendCommand("set_disabled_toolsets", { toolsets }, 30_000);

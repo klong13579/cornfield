@@ -1,12 +1,14 @@
 /**
- * Model switch / model command handling.
+ * Model switch slash command handling.
  *
- * Handles /model, /models, /list-models slash commands and natural-language
- * model switch interception (e.g. "切换模型到 kimi-k2.6").
+ * Handles /model, /models, /list-models slash commands. Natural-language
+ * model switch patterns (e.g. "切换模型到 kimi-k2.6") are NOT intercepted
+ * here — they fall through to the agent so the LLM can call the
+ * `switch_model` tool, fuzzy-match the user's request, and confirm the
+ * switch in the assistant reply.
  */
 import { logger } from "@oh-my-pi/pi-utils";
-import { AgentBridge } from "./agent-bridge";
-import { extractModelSwitchArg, fuzzyMatchModel, type MatchableModel } from "./model-switch";
+import type { AgentBridge } from "./agent-bridge";
 import type { InboundMessage } from "./types";
 
 function formatModelNumber(n: number): string {
@@ -106,7 +108,10 @@ ${rows.join("\n")}`;
 				return true;
 			} catch (err) {
 				logger.error("Failed to list models", { error: err instanceof Error ? err.message : String(err) });
-				await this.#deps.sendAgentResponse(msg, `获取模型列表失败: ${err instanceof Error ? err.message : String(err)}`);
+				await this.#deps.sendAgentResponse(
+					msg,
+					`获取模型列表失败: ${err instanceof Error ? err.message : String(err)}`,
+				);
 				return true;
 			}
 		}
@@ -130,7 +135,10 @@ ${rows.join("\n")}`;
 				return true;
 			} catch (err) {
 				logger.error("Failed to get current model", { error: err instanceof Error ? err.message : String(err) });
-				await this.#deps.sendAgentResponse(msg, `获取当前模型失败: ${err instanceof Error ? err.message : String(err)}`);
+				await this.#deps.sendAgentResponse(
+					msg,
+					`获取当前模型失败: ${err instanceof Error ? err.message : String(err)}`,
+				);
 				return true;
 			}
 		}
@@ -156,7 +164,10 @@ ${rows.join("\n")}`;
 				provider = stateData?.model?.provider;
 				modelId = modelArg;
 			} catch {
-				await this.#deps.sendAgentResponse(msg, `无法确定当前 provider。请使用完整格式: /model <provider>/<modelId>`);
+				await this.#deps.sendAgentResponse(
+					msg,
+					`无法确定当前 provider。请使用完整格式: /model <provider>/<modelId>`,
+				);
 				return true;
 			}
 		}
@@ -167,44 +178,6 @@ ${rows.join("\n")}`;
 		}
 
 		return this.#switchModelAndReply(bridge, msg, provider, modelId);
-	}
-
-	async tryNaturalLanguageModelSwitch(msg: InboundMessage, accountId: string): Promise<boolean> {
-		const text = this.#deps.extractMessageText(msg);
-		const modelArg = extractModelSwitchArg(text);
-		if (!modelArg) return false;
-
-		const bridge = this.#deps.resolveDirectBridge(accountId === "__default__" ? undefined : accountId);
-		if (!bridge?.isRunning) {
-			await this.#deps.sendAgentResponse(msg, "Agent 未启动，无法切换模型。请稍后再试。");
-			return true;
-		}
-
-		try {
-			const response = await bridge.getAvailableModels();
-			if (!response.data || typeof response.data !== "object") {
-				await this.#deps.sendAgentResponse(msg, "无法获取模型列表。");
-				return true;
-			}
-			const { models } = response.data as { models?: MatchableModel[] };
-			if (!Array.isArray(models) || models.length === 0) {
-				await this.#deps.sendAgentResponse(msg, "当前没有可用模型。");
-				return true;
-			}
-
-			const match = fuzzyMatchModel(models, modelArg);
-			if (!match) {
-				const available = models.map(m => `\`${m.provider}/${m.id}\``).join("、");
-				await this.#deps.sendAgentResponse(msg, `未找到匹配 "${modelArg}" 的模型。可用模型：${available}`);
-				return true;
-			}
-
-			return this.#switchModelAndReply(bridge, msg, match.provider, match.id);
-		} catch (err) {
-			logger.error("NL model switch failed", { error: err instanceof Error ? err.message : String(err) });
-			await this.#deps.sendAgentResponse(msg, `切换模型失败: ${err instanceof Error ? err.message : String(err)}`);
-			return true;
-		}
 	}
 
 	async #switchModelAndReply(

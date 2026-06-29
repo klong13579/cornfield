@@ -272,7 +272,9 @@ describe("SessionManager temp cwd session dirs", () => {
 		const sessionFile = session.getSessionFile();
 		if (!sessionFile) throw new Error("Expected session file path");
 
-		expect(sessionFile.startsWith(path.join(getSessionsDir(), expectedTempSessionDirName(tempCwd)) + path.sep)).toBe(true);
+		expect(sessionFile.startsWith(path.join(getSessionsDir(), expectedTempSessionDirName(tempCwd)) + path.sep)).toBe(
+			true,
+		);
 	});
 
 	it("migrates legacy temp-root absolute session dirs to -tmp prefixes", () => {
@@ -466,7 +468,6 @@ describe("SessionManager legacy session migration persistence", () => {
 	});
 });
 
-
 describe("SessionManager.list with hierarchical by-date layout", () => {
 	let tempDir: string;
 	let sessionDir: string;
@@ -518,7 +519,13 @@ describe("SessionManager.list with hierarchical by-date layout", () => {
 			legacyFile,
 			`${[
 				JSON.stringify({ type: "session", id: "old12345", timestamp: "2026-06-01T00:00:00Z", cwd: tempDir }),
-				JSON.stringify({ type: "message", id: "msg-1", parentId: null, timestamp: "2026-06-01T00:00:01Z", message: { role: "user", content: "old", timestamp: 1 } }),
+				JSON.stringify({
+					type: "message",
+					id: "msg-1",
+					parentId: null,
+					timestamp: "2026-06-01T00:00:01Z",
+					message: { role: "user", content: "old", timestamp: 1 },
+				}),
 			].join("\n")}\n`,
 		);
 
@@ -535,14 +542,23 @@ describe("SessionManager.list with hierarchical by-date layout", () => {
 		// Simulate two projects, each with a by-date session
 		const projectA = path.join(sessionDir, "-project-a");
 		const projectB = path.join(sessionDir, "-project-b");
-		for (const [proj, id] of [[projectA, "aaa11111"], [projectB, "bbb22222"]] as const) {
+		for (const [proj, id] of [
+			[projectA, "aaa11111"],
+			[projectB, "bbb22222"],
+		] as const) {
 			const dir = path.join(proj, "by-date", "2026-06-23");
 			fs.mkdirSync(dir, { recursive: true });
 			fs.writeFileSync(
 				path.join(dir, `120000__${id}.jsonl`),
 				`${[
 					JSON.stringify({ type: "session", id, timestamp: "2026-06-23T00:00:00Z", cwd: proj }),
-					JSON.stringify({ type: "message", id: "msg-1", parentId: null, timestamp: "2026-06-23T00:00:01Z", message: { role: "user", content: "hi", timestamp: 1 } }),
+					JSON.stringify({
+						type: "message",
+						id: "msg-1",
+						parentId: null,
+						timestamp: "2026-06-23T00:00:01Z",
+						message: { role: "user", content: "hi", timestamp: 1 },
+					}),
 				].join("\n")}\n`,
 			);
 		}

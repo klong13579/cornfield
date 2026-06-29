@@ -316,23 +316,22 @@ export async function loadExtensionFromFactory(
  * Load extensions from paths.
  */
 export async function loadExtensions(
-    paths: string[],
-    cwd: string,
-    eventBus?: EventBus,
-    initialFlags?: Record<string, boolean | string>,
+	paths: string[],
+	cwd: string,
+	eventBus?: EventBus,
+	initialFlags?: Record<string, boolean | string>,
 ): Promise<LoadExtensionsResult> {
-    const extensions: Extension[] = [];
-    const errors: Array<{ path: string; error: string }> = [];
-    const resolvedEventBus = eventBus ?? new EventBus();
-    const runtime = new ExtensionRuntime();
+	const extensions: Extension[] = [];
+	const errors: Array<{ path: string; error: string }> = [];
+	const resolvedEventBus = eventBus ?? new EventBus();
+	const runtime = new ExtensionRuntime();
 
-    // Set initial flag values before loading extensions (for config-based flags)
-    if (initialFlags) {
-        for (const [name, value] of Object.entries(initialFlags)) {
-            runtime.flagValues.set(name, value);
-        }
-    }
-
+	// Set initial flag values before loading extensions (for config-based flags)
+	if (initialFlags) {
+		for (const [name, value] of Object.entries(initialFlags)) {
+			runtime.flagValues.set(name, value);
+		}
+	}
 
 	for (const extPath of paths) {
 		const { extension, error } = await loadExtension(extPath, cwd, resolvedEventBus, runtime);
@@ -482,11 +481,11 @@ async function discoverExtensionsInDir(dir: string): Promise<string[]> {
  * Discover and load extensions from standard locations.
  */
 export async function discoverAndLoadExtensions(
-    configuredPaths: string[],
-    cwd: string,
-    eventBus?: EventBus,
-    disabledExtensionIds: string[] = [],
-    initialFlags?: Record<string, boolean | string>,
+	configuredPaths: string[],
+	cwd: string,
+	eventBus?: EventBus,
+	disabledExtensionIds: string[] = [],
+	initialFlags?: Record<string, boolean | string>,
 ): Promise<LoadExtensionsResult> {
 	const allPaths: string[] = [];
 	const seen = new Set<string>();
@@ -547,5 +546,5 @@ export async function discoverAndLoadExtensions(
 
 		addPath(resolved);
 	}
-    return loadExtensions(allPaths, cwd, eventBus, initialFlags);
+	return loadExtensions(allPaths, cwd, eventBus, initialFlags);
 }

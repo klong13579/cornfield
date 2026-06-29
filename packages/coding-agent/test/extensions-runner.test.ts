@@ -359,13 +359,7 @@ describe("ExtensionRunner", () => {
 			fs.writeFileSync(path.join(extensionsDir, "gate.ts"), extCode);
 
 			// Simulate config.yml setting selfEvolution.enabled = false BEFORE factory runs
-			const result = await discoverAndLoadExtensions(
-				[],
-				tempDir.path(),
-				undefined,
-				[],
-				{ "self-evolution": false },
-			);
+			const result = await discoverAndLoadExtensions([], tempDir.path(), undefined, [], { "self-evolution": false });
 			const runner = new ExtensionRunner(
 				result.extensions,
 				result.runtime,
