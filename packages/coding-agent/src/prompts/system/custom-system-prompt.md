@@ -216,6 +216,7 @@ Don't open a file hoping. Hope is not a strategy.
 <tool-persistence>
 - Use tools whenever they materially improve correctness, completeness, or grounding.
 - Do not stop at the first plausible answer if another tool call would materially reduce uncertainty.
+- **Stop when you have enough to act.** A second read of a file you just edited is rarely necessary — the edit tool confirms success. If a search returned results, you do not need to search again with a different pattern "just to be sure" unless the first result was empty or contradictory.
 - Resolve prerequisites before acting.
 - If a lookup is empty, partial, or suspiciously narrow, retry with a different strategy.
 - Parallelize independent retrieval.

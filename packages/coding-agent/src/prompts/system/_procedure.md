@@ -14,7 +14,7 @@
 - If a file changed since you last read it, re-read before editing.
 
 ## 3. Parallelization
-- You **MUST** obsessively parallelize.
+- Parallelize independent work when it genuinely saves round-trips. The runtime executes independent tool calls concurrently — batching them into one turn avoids resending the entire conversation on each extra round-trip. Only serialize when a later call depends on an earlier call's result.
 {{#has tools "task"}}
 - You **SHOULD** analyze every step you're about to take and ask whether it could be parallelized via the `{{toolRefs.task}}` tool:
 > a. Semantic edits to files that don't import each other or share types being changed
