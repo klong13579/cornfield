@@ -736,7 +736,9 @@ Usage:
   pi-gateway cron list [--json]                    List all tasks
   pi-gateway cron pause <name>                     Pause a task
   pi-gateway cron resume <name>                   Resume a task
-  pi-gateway cron run <name>                       Trigger a task now
+  pi-gateway cron run <name>                       Trigger a task now (debug only — skips delivery)
+  pi-gateway cron test-run <name> [--in 90s] [--timeout 150s] [--no-restore]
+                                            Trigger through the real scheduler; verifies delivery
   pi-gateway cron remove <name>                    Delete a task
   pi-gateway cron update <name> [--account <id> | --clear-account] [--deliver <ch> | --clear-deliver] [--deliver-user <id> | --clear-deliver-user] [--timeout-ms <ms>]   Update task fields in place
   pi-gateway cron reconcile [--apply]                  Backfill accountId on legacy unbound tasks (dry run by default)
