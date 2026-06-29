@@ -466,3 +466,68 @@ export function formatNextRuns(task: ScheduledTask, count = 3): string {
 	if (runs.length === 0) return "(invalid cron)";
 	return runs.map(d => d.toLocaleString()).join(", ");
 }
+
+// ---------------------------------------------------------------------------
+// Delivery validation
+// ---------------------------------------------------------------------------
+
+/**
+ * Normalized delivery descriptor produced by {@link validateCronDelivery}.
+ * Shape-compatible with {@link ScheduledTask}'s `delivery` field so the
+ * validated value can be persisted without further translation.
+ */
+export type CronDeliveryOutput = ScheduledTask["delivery"];
+
+export type CronDeliveryValidation =
+	| { ok: true; value: CronDeliveryOutput }
+	| { ok: false; error: string };
+
+/**
+ * Normalize and validate a user-supplied or auto-inferred delivery
+ * descriptor for a scheduled task.
+ *
+ * Rules:
+ *   - `channel` is required and must be a non-empty string.
+ *   - Exactly one of `toUserId` (DM) or `toConversationId` (group)
+ *     must be a non-empty string. Setting both, or neither, is an
+ *     error — the gateway cannot disambiguate a single target.
+ *   - `accountId` is optional.
+ *   - `mode` defaults to `"announce"` when omitted; `"announce"` and
+ *     `"none"` are the only accepted values.
+ *
+ * The host tool's `args.delivery` and the auto-inference `Record<string,
+ * unknown>` both flow through here, so the parameter is intentionally
+ * permissive and field types are checked individually.
+ */
+export function validateCronDelivery(
+	input: Partial<Record<"channel" | "accountId" | "toUserId" | "toConversationId" | "mode", unknown>>,
+): CronDeliveryValidation {
+	const channel = typeof input.channel === "string" ? input.channel.trim() : "";
+	if (channel === "") {
+		return { ok: false, error: "delivery.channel is required and must be a non-empty string" };
+	}
+
+	const toUserId = typeof input.toUserId === "string" && input.toUserId.trim() !== "" ? input.toUserId : undefined;
+	const toConversationId =
+		typeof input.toConversationId === "string" && input.toConversationId.trim() !== ""
+			? input.toConversationId
+			: undefined;
+
+	if ((toUserId === undefined) === (toConversationId === undefined)) {
+		return {
+			ok: false,
+			error: "delivery must specify exactly one of toUserId (DM) or toConversationId (group)",
+		};
+	}
+
+	const accountId = typeof input.accountId === "string" && input.accountId.trim() !== "" ? input.accountId : undefined;
+	const mode = input.mode === "none" ? "none" : "announce";
+
+	const value: CronDeliveryOutput = {
+		channel,
+		...(accountId !== undefined ? { accountId } : {}),
+		...(toUserId !== undefined ? { toUserId } : { toConversationId: toConversationId as string }),
+		mode,
+	};
+	return { ok: true, value };
+}
