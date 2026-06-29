@@ -353,6 +353,8 @@ export interface GatewayConfig {
 	session?: SessionConfig;
 	cron?: CronConfig;
 	dataDir?: string;
+	/** Drain timeout in ms for graceful shutdown (default: 15000). Test seam for faster shutdown. */
+	drainTimeoutMs?: number;
 }
 
 // ═══════════════════════════════════════════════════════════════════════

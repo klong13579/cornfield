@@ -260,6 +260,11 @@ export class Gateway {
 		await this.#writeStatusFile();
 	}
 
+	/** Test seam: access the session manager. */
+	getSessionManager(): SessionManager | undefined {
+		return this.#sessionManager;
+	}
+
 	/**
 	 * Register DingTalk channel(s). In multi-account mode, each account gets
 	 * its own DingTalkChannel instance and account-specific AgentBridge.
@@ -435,15 +440,17 @@ export class Gateway {
 			this.#healthInterval = undefined;
 		}
 
-		// Phase 3: drain session queues (15s grace)
+		// Phase 3: drain session queues (configurable grace, default 15s)
+		const drainTimeoutMs = this.#config.drainTimeoutMs ?? 15_000;
 		const drained = await Promise.race([
-			(this.#sessionManager?.waitForAllDrained(15_000) ?? Promise.resolve(true)),
-			Bun.sleep(15_000).then(() => false),
+			(this.#sessionManager?.waitForAllDrained(drainTimeoutMs) ?? Promise.resolve(true)),
+			Bun.sleep(drainTimeoutMs).then(() => false),
 		]);
 		if (drained === false) {
-			warnings.push("session-queues: timeout after 15s");
+			warnings.push(`session-queues: timeout after ${drainTimeoutMs}ms`);
 			logger.warn("Gateway shutdown timed out waiting for session queues", {
 				queues: this.#sessionManager?.getQueueStats() ?? [],
+				drainTimeoutMs,
 			});
 
 			// Write restart sentinel if drain timed out and there's an active session.

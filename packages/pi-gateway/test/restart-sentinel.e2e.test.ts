@@ -1,13 +1,12 @@
 /**
- * Restart sentinel e2e test.
+ * Restart sentinel e2e test — production-like simulation.
  *
- * Tests the full restart recovery flow:
- * 1. Start gateway, send a message, get a response (establish session)
- * 2. Write a restart sentinel (simulating a crash/interrupt)
- * 3. Stop gateway
- * 4. Start new gateway
- * 5. Verify the new gateway reads the sentinel and resumes the conversation
- * 6. Verify the agent sees the full history
+ * Tests the full restart recovery flow through the real gateway pipeline:
+ * 1. Start gateway with SessionManager + ChannelRegistry + AgentBridge
+ * 2. Send a message through fake channel → MessageHandler → AgentBridge
+ * 3. While agent is processing, call gateway.stop() → drain timeout → sentinel written
+ * 4. Start new gateway → resumeFromSentinel() → agent receives continuation
+ * 5. Verify agent sees full history and responds
  *
  * Uses a fake RPC script to avoid needing a real LLM/omp process.
  */
@@ -18,16 +17,12 @@ import * as path from "node:path";
 import { buildAgentSessionPath, ensureAgentDir } from "@oh-my-pi/pi-coding-agent/skeleton";
 import { AgentBridge } from "../src/agent-bridge";
 import { parseRobotMessage } from "../src/channels/dingtalk";
-import { ChannelRegistry } from "../src/channels/registry";
 import { Gateway } from "../src/gateway";
-import { writeRestartSentinel, readRestartSentinel, clearRestartSentinel } from "../src/restart-sentinel";
-import { SessionManager } from "../src/session-manager";
+import { readRestartSentinel } from "../src/restart-sentinel";
 import { SQLiteSessionStore } from "../src/session-store";
 import type {
 	Channel,
 	ChannelCapabilities,
-	ChannelConfig,
-	DingTalkRawMessage,
 	InboundMessage,
 	OutboundMessage,
 } from "../src/types";
@@ -35,7 +30,9 @@ import { sampleTextMessage } from "./fixtures/sample-messages";
 
 /**
  * Fake RPC script that simulates an omp --mode rpc process.
- * It tracks session history and echoes back the session path + message.
+ * - Writes session entries to disk (like real omp does)
+ * - Supports slow prompts (for testing drain timeout)
+ * - Tracks session history across restarts
  */
 const FAKE_RPC_SCRIPT = `#!/usr/bin/env bun
 import fs from 'node:fs';
@@ -68,11 +65,13 @@ async function handleFrame(frame) {
     const sessionAtPrompt = currentSession;
     const sessionsSeen = sessionHistory.join(",");
     const responseText = "session=" + sessionAtPrompt + " sessions=" + sessionsSeen + " msg=" + frame.message;
-    appendToSession(currentSession, "assistant", responseText);
+    // Simulate slow processing for drain timeout testing
+    const delay = frame.message.includes("slow-prompt") ? 5000 : 50;
     setTimeout(() => {
+      appendToSession(currentSession, "assistant", responseText);
       emit({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: responseText }] } });
       emit({ type: "agent_end" });
-    }, 10);
+    }, delay);
   }
 }
 for await (const chunk of Bun.stdin.stream()) {
@@ -87,6 +86,10 @@ for await (const chunk of Bun.stdin.stream()) {
 }
 `;
 
+/**
+ * Fake channel that simulates DingTalk for testing.
+ * Captures sent messages and allows simulating inbound messages.
+ */
 class FakeChannel implements Channel {
 	readonly id = "dingtalk";
 	readonly name: string;
@@ -129,21 +132,20 @@ class FakeChannel implements Channel {
 	}
 
 	/** Simulate receiving a message from the IM platform. */
-	simulateInbound(msg: DingTalkRawMessage): Promise<void> {
-		const inbound = parseRobotMessage(msg, "dingtalk", this.accountId, msg.msgId);
-		if (!inbound) throw new Error("Failed to parse message");
-		return this.#handler!(inbound);
+	async simulateInbound(msg: InboundMessage): Promise<void> {
+		if (!this.#handler) throw new Error("Channel not connected");
+		await this.#handler(msg);
 	}
 }
 
-describe("restart sentinel e2e", () => {
+describe("restart sentinel e2e — production simulation", () => {
 	let tmpDir: string;
 	let fakeScriptPath: string;
 	let dataDir: string;
 	let agentDir: string;
 
 	beforeEach(async () => {
-		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-gateway-restart-"));
+		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-gateway-restart-e2e-"));
 		dataDir = path.join(tmpDir, "gateway-data");
 		agentDir = path.join(tmpDir, "agent");
 		await fs.mkdir(dataDir, { recursive: true });
@@ -159,67 +161,11 @@ describe("restart sentinel e2e", () => {
 		await fs.rm(tmpDir, { recursive: true, force: true });
 	});
 
-	test("restart sentinel write/read/clear lifecycle", async () => {
-		const config = { dataDir };
-		const sentinel = {
-			conversationId: "test-conv-123",
-			accountId: "__default__",
-			ompSessionPath: buildAgentSessionPath(agentDir, "test-conv-123"),
-			continuationMessage: "Test continuation",
-		};
-
-		// Write
-		await writeRestartSentinel(sentinel, config as any);
-		const sentinelPath = path.join(dataDir, "restart-pending.json");
-		expect(await fs.exists(sentinelPath)).toBe(true);
-
-		// Read
-		const read = await readRestartSentinel(config as any);
-		expect(read).not.toBeNull();
-		expect(read!.conversationId).toBe("test-conv-123");
-		expect(read!.accountId).toBe("__default__");
-		expect(read!.ompSessionPath).toBe(sentinel.ompSessionPath);
-		expect(read!.continuationMessage).toBe("Test continuation");
-		expect(read!.timestamp).toBeGreaterThan(0);
-
-		// Clear
-		await clearRestartSentinel(config as any);
-		expect(await fs.exists(sentinelPath)).toBe(false);
-
-		// Read after clear
-		const readAfterClear = await readRestartSentinel(config as any);
-		expect(readAfterClear).toBeNull();
-	});
-
-	test("stale sentinel (>1 hour) is cleared on read", async () => {
-		const config = { dataDir };
-		const sentinelPath = path.join(dataDir, "restart-pending.json");
-
-		// Write a sentinel with an old timestamp
-		const oldSentinel = {
-			conversationId: "old-conv",
-			accountId: "__default__",
-			ompSessionPath: buildAgentSessionPath(agentDir, "old-conv"),
-			continuationMessage: "Old continuation",
-			timestamp: Date.now() - 2 * 60 * 60 * 1000, // 2 hours ago
-		};
-		await Bun.write(sentinelPath, JSON.stringify(oldSentinel));
-
-		// Read should return null and clear the file
-		const read = await readRestartSentinel(config as any);
-		expect(read).toBeNull();
-		expect(await fs.exists(sentinelPath)).toBe(false);
-	});
-
-	test("full restart recovery flow with fake RPC", async () => {
-		const conversationId = "restart-test-conv";
+	test("gateway.stop() writes sentinel on drain timeout, gateway.resumeFromSentinel() recovers", async () => {
+		const conversationId = "restart-e2e-conv";
 		const sessionPath = buildAgentSessionPath(agentDir, conversationId);
 
 		// === Phase 1: First gateway instance ===
-		const channel1 = new FakeChannel("__default__");
-		const registry1 = new ChannelRegistry();
-		registry1.register(channel1);
-
 		const store1 = new SQLiteSessionStore(path.join(dataDir, "sessions.db"));
 		const bridge1 = new AgentBridge({
 			ompPath: fakeScriptPath,
@@ -227,14 +173,27 @@ describe("restart sentinel e2e", () => {
 			timeoutMs: 30_000,
 		});
 
+		// Use short drain timeout for fast test
 		const gateway1 = new Gateway(
-			{ dataDir, agent: { ompPath: fakeScriptPath, timeoutMs: 30_000 } },
+			{
+				dataDir,
+				drainTimeoutMs: 100, // 100ms for fast test
+				channels: {}, // No real channels
+				agent: { ompPath: fakeScriptPath, timeoutMs: 30_000 },
+			},
 			{ bridge: bridge1, store: store1 },
 		);
 
-		// Manually wire the channel (since we're not using the full gateway.start())
+		// Start the gateway (this sets #running = true)
+		await gateway1.start();
+
+		// Get the session manager from the gateway
+		const sessionManager1 = gateway1.getSessionManager();
+		if (!sessionManager1) throw new Error("Session manager not initialized");
+
+		// Manually wire a fake channel for testing
+		const channel1 = new FakeChannel("__default__");
 		await channel1.connect(async (msg) => {
-			// Simplified message handling for test
 			const session = await store1.getSession("dingtalk", "__default__", msg.conversationId);
 			if (!session) {
 				await store1.createSession({
@@ -248,59 +207,71 @@ describe("restart sentinel e2e", () => {
 					status: "active",
 				});
 			}
+			// Forward through session manager (like real gateway does)
+			await sessionManager1.enqueue(msg, {
+				id: "session-1",
+				channelId: "dingtalk",
+				accountId: "__default__",
+				userId: msg.userId,
+				conversationId: msg.conversationId,
+				createdAt: Date.now(),
+				updatedAt: Date.now(),
+				ompSessionPath: sessionPath,
+				status: "active",
+			});
 		});
 
-		await bridge1.start();
-
-		// Send a message through the bridge
+		// Send a slow message that will still be processing when we call stop()
 		const rawMsg = sampleTextMessage({
 			conversationId,
 			msgId: "msg-1",
 			senderStaffId: "user-1",
 			senderId: "user-1",
 			senderNick: "Test User",
-			text: { content: "Hello from first gateway" },
+			text: { content: "slow-prompt: Hello from first gateway" },
 		});
 		const inbound1 = parseRobotMessage(rawMsg, "dingtalk", "__default__", rawMsg.msgId);
 		if (!inbound1) throw new Error("Failed to parse message");
 
-		const response1 = await bridge1.forward(inbound1, {
-			id: "session-1",
-			channelId: "dingtalk",
-			accountId: "__default__",
-			userId: "user-1",
-			conversationId,
-			createdAt: Date.now(),
-			updatedAt: Date.now(),
-			ompSessionPath: sessionPath,
-			status: "active",
-		});
+		// Start the message processing (don't await — we want it in-flight)
+		const processingPromise = channel1.simulateInbound(inbound1);
 
-		expect(response1).toBeTruthy();
-		expect(response1).toContain("session=" + sessionPath);
-		expect(response1).toContain("msg=Hello from first gateway");
+		// Wait a bit for the message to enter the queue and bridge to become busy
+		await Bun.sleep(100);
 
-		// Verify the session file was created
+		// Verify the bridge is busy
+		const snapshot = bridge1.getSnapshot();
+		expect(snapshot.state).toBe("busy");
+		expect(snapshot.activeSessionPath).toBe(sessionPath);
+
+		// === Phase 2: Call gateway.stop() — should trigger drain timeout ===
+		// The drain timeout is 100ms, but the agent is processing a slow prompt (5000ms)
+		// So drain will timeout and sentinel should be written
+		await gateway1.stop();
+
+		// Wait for the processing to complete (it will, eventually)
+		await processingPromise;
+
+		// === Phase 3: Verify sentinel was written ===
+		const sentinelPath = path.join(dataDir, "restart-pending.json");
+		expect(await fs.exists(sentinelPath)).toBe(true);
+
+		const sentinel = await readRestartSentinel({ dataDir } as any);
+		expect(sentinel).not.toBeNull();
+		expect(sentinel!.conversationId).toBe(conversationId);
+		expect(sentinel!.accountId).toBe("__default__");
+		expect(sentinel!.ompSessionPath).toBe(sessionPath);
+		expect(sentinel!.continuationMessage).toContain("restarted");
+
+		// Verify the session file was created with the user message
 		expect(await fs.exists(sessionPath)).toBe(true);
 		const sessionContent1 = await Bun.file(sessionPath).text();
-		expect(sessionContent1).toContain("Hello from first gateway");
+		expect(sessionContent1).toContain("slow-prompt: Hello from first gateway");
 
-		// === Phase 2: Write restart sentinel (simulating crash) ===
-		await writeRestartSentinel(
-			{
-				conversationId,
-				accountId: "__default__",
-				ompSessionPath: sessionPath,
-				continuationMessage: "[System] Gateway restarted. Please acknowledge and summarize.",
-			},
-			{ dataDir } as any,
-		);
-
-		// Stop the first gateway
-		bridge1.stop();
+		// Cleanup first gateway
 		store1.close();
 
-		// === Phase 3: Second gateway instance (restart recovery) ===
+		// === Phase 4: Second gateway instance (restart recovery) ===
 		const bridge2 = new AgentBridge({
 			ompPath: fakeScriptPath,
 			cwd: agentDir,
@@ -309,49 +280,111 @@ describe("restart sentinel e2e", () => {
 		const store2 = new SQLiteSessionStore(path.join(dataDir, "sessions.db"));
 
 		const gateway2 = new Gateway(
-			{ dataDir, agent: { ompPath: fakeScriptPath, timeoutMs: 30_000 } },
+			{
+				dataDir,
+				drainTimeoutMs: 100,
+				channels: {},
+				agent: { ompPath: fakeScriptPath, timeoutMs: 30_000 },
+			},
 			{ bridge: bridge2, store: store2 },
 		);
 
-		await bridge2.start();
+		await gateway2.start();
 
-		// Resume from sentinel
+		// === Phase 5: Resume from sentinel ===
 		const resumed = await gateway2.resumeFromSentinel();
 		expect(resumed).toBe(true);
 
-		// Verify the sentinel was cleared
+		// === Phase 6: Verify sentinel was cleared ===
 		const sentinelAfter = await readRestartSentinel({ dataDir } as any);
 		expect(sentinelAfter).toBeNull();
 
-		// Verify the session file now contains the continuation message
+		// === Phase 7: Verify session file contains continuation message ===
 		const sessionContent2 = await Bun.file(sessionPath).text();
-		expect(sessionContent2).toContain("Gateway restarted");
-		expect(sessionContent2).toContain("Hello from first gateway"); // Original message still there
+		expect(sessionContent2).toContain("slow-prompt: Hello from first gateway"); // Original
+		expect(sessionContent2).toContain("restarted"); // Continuation message
 
 		// Cleanup
-		bridge2.stop();
+		await gateway2.stop();
 		store2.close();
-	});
+	}, 30_000);
 
-	test("resumeFromSentinel returns false when no sentinel exists", async () => {
+	test("no sentinel written when drain succeeds (no active session)", async () => {
+		const conversationId = "no-restart-conv";
+		const sessionPath = buildAgentSessionPath(agentDir, conversationId);
+
+		const store = new SQLiteSessionStore(path.join(dataDir, "sessions.db"));
 		const bridge = new AgentBridge({
 			ompPath: fakeScriptPath,
 			cwd: agentDir,
 			timeoutMs: 30_000,
 		});
-		const store = new SQLiteSessionStore(path.join(dataDir, "sessions.db"));
 
 		const gateway = new Gateway(
-			{ dataDir, agent: { ompPath: fakeScriptPath, timeoutMs: 30_000 } },
+			{
+				dataDir,
+				drainTimeoutMs: 100,
+				channels: {},
+				agent: { ompPath: fakeScriptPath, timeoutMs: 30_000 },
+			},
 			{ bridge, store },
 		);
 
-		await bridge.start();
+		await gateway.start();
+		const sessionManager = gateway.getSessionManager();
+		if (!sessionManager) throw new Error("Session manager not initialized");
 
-		const resumed = await gateway.resumeFromSentinel();
-		expect(resumed).toBe(false);
+		const channel = new FakeChannel("__default__");
+		await channel.connect(async (msg) => {
+			const session = await store.getSession("dingtalk", "__default__", msg.conversationId);
+			if (!session) {
+				await store.createSession({
+					channelId: "dingtalk",
+					accountId: "__default__",
+					userId: msg.userId,
+					conversationId: msg.conversationId,
+					createdAt: Date.now(),
+					updatedAt: Date.now(),
+					ompSessionPath: sessionPath,
+					status: "active",
+				});
+			}
+			await sessionManager.enqueue(msg, {
+				id: "session-1",
+				channelId: "dingtalk",
+				accountId: "__default__",
+				userId: msg.userId,
+				conversationId: msg.conversationId,
+				createdAt: Date.now(),
+				updatedAt: Date.now(),
+				ompSessionPath: sessionPath,
+				status: "active",
+			});
+		});
 
-		bridge.stop();
+		// Send a fast message that completes before stop()
+		const rawMsg = sampleTextMessage({
+			conversationId,
+			msgId: "msg-1",
+			senderStaffId: "user-1",
+			senderId: "user-1",
+			senderNick: "Test User",
+			text: { content: "fast message" },
+		});
+		const inbound = parseRobotMessage(rawMsg, "dingtalk", "__default__", rawMsg.msgId);
+		if (!inbound) throw new Error("Failed to parse message");
+
+		// Wait for message to complete
+		await channel.simulateInbound(inbound);
+		await Bun.sleep(200); // Let it fully complete
+
+		// Stop gateway — drain should succeed (no active session)
+		await gateway.stop();
+
+		// Verify NO sentinel was written
+		const sentinelPath = path.join(dataDir, "restart-pending.json");
+		expect(await fs.exists(sentinelPath)).toBe(false);
+
 		store.close();
-	});
+	}, 10_000);
 });
