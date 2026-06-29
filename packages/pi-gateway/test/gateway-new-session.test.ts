@@ -248,6 +248,51 @@ describe("NewSessionHandler", () => {
 			}
 		});
 
+		test("/new with missing session file replies without '已归档'", async () => {
+			const convId = "conv-new-missing";
+			const sessionPath = buildAgentSessionPath(agentDir, convId);
+			// NOTE: do NOT create the file
+
+			const now = Date.now();
+			await store.createSession({
+				channelId: "dingtalk:test",
+				accountId: "ops",
+				userId: "user1",
+				conversationId: convId,
+				createdAt: now,
+				updatedAt: now,
+				ompSessionPath: sessionPath,
+				status: "active",
+			});
+
+			const handler = new NewSessionHandler({
+				config: makeConfig(),
+				store,
+				resolveDirectBridge: () => bridge,
+				sendAgentResponse: async (_msg, text) => {
+					replies.push({
+						channelId: "dingtalk:test",
+						conversationId: convId,
+						content: { type: "markdown", markdown: text },
+					});
+				},
+				extractMessageText: m => (m.content.type === "text" ? m.content.text : ""),
+			});
+
+			const handled = await handler.handle(makeInbound("/new", convId), "ops");
+			expect(handled).toBe(true);
+
+			// User received confirmation WITHOUT '已归档'
+			expect(replies.length).toBe(1);
+			const replyContent = replies[0].content;
+			if (replyContent.type === "markdown") {
+				expect(replyContent.markdown).toBe("已开启新会话。");
+				expect(replyContent.markdown).not.toContain("已归档");
+			} else {
+				throw new Error(`unexpected reply type ${(replyContent as { type: string }).type}`);
+			}
+		});
+
 		test("non-matching message returns false and does NOT reply", async () => {
 			const handler = new NewSessionHandler({
 				config: makeConfig(),
@@ -331,11 +376,12 @@ describe("NewSessionHandler", () => {
 			});
 
 			const msg = makeInbound("继续干", convId);
-			const rotated = await handler.rotate(session, "ops", { injectSystemNote: true, msg });
+			const result = await handler.rotate(session, "ops", { injectSystemNote: true, msg });
 
-			expect(rotated.id).toBe(session.id);
-			expect(rotated.ompSessionPath).toBe(sessionPath);
-			expect(rotated.updatedAt).toBeGreaterThan(oldTime);
+			expect(result.session.id).toBe(session.id);
+			expect(result.session.ompSessionPath).toBe(sessionPath);
+			expect(result.session.updatedAt).toBeGreaterThan(oldTime);
+			expect(result.archived).toBe(true);
 
 			// System note should be prepended to the next message
 			if (msg.content.type === "text") {
@@ -426,8 +472,8 @@ describe("NewSessionHandler", () => {
 				extractMessageText: m => (m.content.type === "text" ? m.content.text : ""),
 			});
 
-			const rotated = await handler.rotate(session, "ops");
-			expect(rotated.updatedAt).toBeGreaterThan(oldTime);
+			const result = await handler.rotate(session, "ops");
+			expect(result.session.updatedAt).toBeGreaterThan(oldTime);
 
 			const dir = path.dirname(sessionPath);
 			const baseName = path.basename(sessionPath, ".jsonl");
@@ -463,8 +509,9 @@ describe("NewSessionHandler", () => {
 			});
 
 			// Should not throw
-			const rotated = await handler.rotate(session, "ops");
-			expect(rotated.id).toBe(session.id);
+			const result = await handler.rotate(session, "ops");
+			expect(result.session.id).toBe(session.id);
+			expect(result.archived).toBe(false);
 		});
 	});
 

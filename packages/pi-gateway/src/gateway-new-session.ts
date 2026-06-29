@@ -101,8 +101,11 @@ export class NewSessionHandler {
 		}
 
 		try {
-			await this.rotate(session, accountId);
-			await this.#deps.sendAgentResponse(msg, "已开启新会话。之前的对话已归档。");
+			const { archived } = await this.rotate(session, accountId);
+			const reply = archived
+				? "已开启新会话。之前的对话已归档。"
+				: "已开启新会话。";
+			await this.#deps.sendAgentResponse(msg, reply);
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
 			logger.error("Failed to start new session", { error: message, sessionId: session.id });
@@ -110,7 +113,6 @@ export class NewSessionHandler {
 		}
 		return true;
 	}
-
 	/**
 	 * Whether the session is past the idle/daily reset policy and should
 	 * be rotated before forwarding the next message.
@@ -152,7 +154,7 @@ export class NewSessionHandler {
 		session: SessionRecord,
 		accountId: string,
 		opts: { injectSystemNote?: boolean; msg?: InboundMessage } = {},
-	): Promise<SessionRecord> {
+	): Promise<{ session: SessionRecord; archived: boolean }> {
 		logger.info("Rotating session", {
 			sessionId: session.id,
 			channelId: session.channelId,
@@ -162,13 +164,17 @@ export class NewSessionHandler {
 		});
 
 		// 1. Archive old file (rename with timestamp suffix).
+		let archived = false;
 		if (session.ompSessionPath) {
 			try {
 				const archivePath = this.#archivePath(session.ompSessionPath);
 				await fs.rename(session.ompSessionPath, archivePath);
-				logger.debug("Archived old session file", { from: session.ompSessionPath, to: archivePath });
+				archived = true;
+				logger.info("Archived old session file", { from: session.ompSessionPath, to: archivePath });
 			} catch (err) {
-				if (!isEnoent(err)) {
+				if (isEnoent(err)) {
+					logger.info("Session file already missing, nothing to archive", { path: session.ompSessionPath });
+				} else {
 					logger.warn("Failed to archive old session file", {
 						path: session.ompSessionPath,
 						error: err instanceof Error ? err.message : String(err),
@@ -176,7 +182,6 @@ export class NewSessionHandler {
 				}
 			}
 		}
-
 		// 2. RPC: clear agent in-memory state, then force it back to the
 		//    gateway-tracked file. If the bridge is not running, we still
 		//    rotate at the file + SQLite level — the agent will pick up
@@ -222,7 +227,7 @@ export class NewSessionHandler {
 			prependSystemNote(opts.msg.content, SYSTEM_NOTE);
 		}
 
-		return newSession;
+		return { session: newSession, archived };
 	}
 
 	#archivePath(sessionPath: string): string {
