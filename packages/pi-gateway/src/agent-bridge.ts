@@ -146,12 +146,7 @@ export class AgentBridge {
 			hostToolHandler: options.hostToolDispatcher
 				? (call, reply) => {
 						options.hostToolDispatcher!.setWriter((id, body) => {
-							this.#transport.sendHostToolResult(
-								id,
-								body.tool_use_id,
-								body.content,
-								body.isError === true,
-							);
+							this.#transport.sendHostToolResult(id, body.tool_use_id, body.content, body.isError === true);
 						});
 						return options.hostToolDispatcher!.handleCall(call).then(() => {
 							// Dispatcher invokes the writer synchronously inside
@@ -506,6 +501,11 @@ export class AgentBridge {
 			const inactivityBudgetMs = options?.inactivityMs ?? 0;
 			const sessionPath = options?.sessionPath;
 			const previousSessionPath = this.#activeSessionPath;
+			// N2 contract: if the caller passed a sessionPath, the OMP child
+			// MUST end up writing to that exact path. We track the forced
+			// path here and re-validate after the prompt completes — see
+			// the post-run drift check in the `finally` block below.
+			const forcedSessionPath = sessionPath ? path.resolve(sessionPath) : undefined;
 
 			if (sessionPath) {
 				try {
@@ -573,6 +573,43 @@ export class AgentBridge {
 
 				if (!response) {
 					throw new Error("Agent returned empty response");
+				}
+
+				// N2 enforcement: if the caller forced a sessionPath, the OMP
+				// child's `state.sessionFile` must match. If not, the child
+				// drifted to a different file (e.g. its own by-date default)
+				// and we need to know about it. We log a warning and attempt
+				// a corrective `switch_session` back to the forced path so
+				// subsequent runs/state queries see the right file.
+				//
+				// We use the transport directly (not the public `getState()`
+				// helper) because that helper re-enters the queue's
+				// `runExclusive` and would deadlock — we are already inside
+				// the queue from `executePrompt`'s outer `runExclusive`.
+				if (forcedSessionPath) {
+					try {
+						const reported = await this.#transport.sendCommand("get_state", {}, 5_000);
+						const reportedFile = (reported.data as { sessionFile?: string } | undefined)?.sessionFile;
+						if (reportedFile && path.resolve(reportedFile) !== forcedSessionPath) {
+							logger.warn("[AgentBridge] sessionPath drift", {
+								forced: forcedSessionPath,
+								reported: reportedFile,
+							});
+							try {
+								await this.#switchSession(forcedSessionPath);
+							} catch (switchErr) {
+								logger.error("[AgentBridge] failed to recover from sessionPath drift", {
+									forced: forcedSessionPath,
+									error: switchErr instanceof Error ? switchErr.message : String(switchErr),
+								});
+							}
+						}
+					} catch (stateErr) {
+						// getState failure isn't fatal — we just lose the drift check.
+						logger.debug("[AgentBridge] getState for drift check failed", {
+							error: stateErr instanceof Error ? stateErr.message : String(stateErr),
+						});
+					}
 				}
 
 				this.#circuit.recordSuccess();

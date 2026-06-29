@@ -9,6 +9,7 @@
  * DingTalk OAuth, or any platform-specific details.
  */
 
+import { findAgentSessionPath } from "../session-paths";
 import { appendDeliveryFailureLog, appendExecutionLog } from "./execution-log";
 import { executeScheduledCommand } from "./executor";
 import type { ScheduledTask, SchedulerStorage, TaskExecution } from "./types";
@@ -79,15 +80,13 @@ export interface CronTriggerResult {
  * remains the last line of defense — keep it precise.
  */
 export function buildCronContextPrefix(task: ScheduledTask): string {
-	const agentLabel = task.agentDir
-		? (task.agentDir.split("/").pop() ?? task.agentDir)
-		: (task.accountId ?? "default");
+	const agentLabel = task.agentDir ? (task.agentDir.split("/").pop() ?? task.agentDir) : (task.accountId ?? "default");
 	return (
 		`[CRON-CONTEXT] You are running as a scheduled task (cron). Agent: ${agentLabel}.\n\n` +
 		"Three rules for this run:\n" +
 		"1. Do NOT call the `cron` host tool (create / list / update / delete scheduled tasks). The `cronjob` toolset is disabled for this run — calling it would either fail or recursively schedule more tasks.\n" +
 		"2. Do NOT call proactive messaging tools (e.g. `dws chat message send`, `chat_post`, anything in the `messaging` toolset). The `messaging` toolset is disabled. These would create duplicate notifications on top of the gateway's own delivery.\n" +
-		"3. Your reply text IS the delivery. The gateway scans the body of your final reply and renders it as a DingTalk AI card to the original conversation. So just write your answer in the reply body and stop — do not call any `send` tool, do not try to push it anywhere. This applies even if the task wording says \"发给用户\" / \"send to user\" / \"notify\" / \"告诉用户\".\n\n"
+		'3. Your reply text IS the delivery. The gateway scans the body of your final reply and renders it as a DingTalk AI card to the original conversation. So just write your answer in the reply body and stop — do not call any `send` tool, do not try to push it anywhere. This applies even if the task wording says "发给用户" / "send to user" / "notify" / "告诉用户".\n\n'
 	);
 }
 
@@ -248,9 +247,13 @@ export class CronService {
 		const endedAt = Date.now();
 		const durationMs = endedAt - startedAt;
 
-		// Link agent session trace for agent tasks
+		// Link agent session trace for agent tasks. We use the per-agent
+		// finder from session-paths (single source of truth) rather than
+		// the legacy cross-tree walk. Pass `agentDir` directly when we
+		// have it; fall back to a (deprecated) accountId-based lookup
+		// when the task is unbound to an agentDir.
 		const agentSessionPath =
-			task.taskType === "agent" ? await findAgentSessionPathForCron(startedAt, endedAt) : undefined;
+			task.taskType === "agent" && agentDir ? findAgentSessionPath(agentDir, startedAt, endedAt) : undefined;
 
 		// Record the execution result
 		storage.updateExecution(executionId, {
@@ -322,10 +325,4 @@ export class CronService {
 
 		log.debug("Cron task succeeded", { taskId: task.id, taskName: task.name });
 	}
-}
-
-/** Lazy import to avoid circular dependency with cli-commands. */
-async function findAgentSessionPathForCron(startedAt: number, endedAt: number): Promise<string | undefined> {
-	const { findAgentSessionPath } = await import("./cli-commands");
-	return findAgentSessionPath(startedAt, endedAt);
 }

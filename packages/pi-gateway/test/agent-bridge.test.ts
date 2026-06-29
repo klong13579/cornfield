@@ -221,14 +221,28 @@ function log(entry) {
   }
 }
 process.stdout.write(JSON.stringify({ type: "ready" }) + "\\n");
+let currentSession = "";
 let buffer = "";
 function emit(value) {
   process.stdout.write(JSON.stringify(value) + "\\n");
 }
 async function handleFrame(frame) {
   if (frame.type === "switch_session") {
+    currentSession = frame.sessionPath;
     log({ ts: Date.now(), cmd: "switch_session", session: frame.sessionPath });
     emit({ type: "response", id: frame.id, command: "switch_session", success: true, data: { cancelled: false } });
+    return;
+  }
+  if (frame.type === "get_state") {
+    // N2 contract: bridge polls sessionFile after the prompt to detect drift.
+    log({ ts: Date.now(), cmd: "get_state", session: currentSession });
+    emit({
+      type: "response",
+      id: frame.id,
+      command: "get_state",
+      success: true,
+      data: { sessionFile: currentSession, sessionId: "fake-session-id" },
+    });
     return;
   }
   if (frame.type === "prompt") {
@@ -340,7 +354,12 @@ describe("AgentBridge.executePrompt (cron path)", () => {
 			expect(response).toBe("ack: cron task");
 
 			const log = await fake.readLog();
-			const cmds = log.map(e => `${e.cmd}${e.session ? `:${e.session}` : e.message ? `:${e.message}` : ""}`);
+			// N2 contract: bridge also issues a get_state after the prompt
+			// to detect sessionFile drift. The test's intent is about
+			// switch_session sequencing, so we filter those out.
+			const cmds = log
+				.filter(e => e.cmd !== "get_state")
+				.map(e => `${e.cmd}${e.session ? `:${e.session}` : e.message ? `:${e.message}` : ""}`);
 
 			// Expected order:
 			//   switch_session:/tmp/session-im.jsonl   (from the forward() call)
@@ -372,10 +391,13 @@ describe("AgentBridge.executePrompt (cron path)", () => {
 			await bridge.executePrompt("first task", { sessionPath: "/tmp/cron_task_a.jsonl" });
 
 			const log = await fake.readLog();
-			const cmds = log.map(e => e.cmd);
-			expect(cmds).toEqual(["switch_session", "prompt"]);
-			// No third switch_session
-			expect(cmds.filter(c => c === "switch_session")).toHaveLength(1);
+			// The N2 check issues a get_state, which is expected. The
+			// intent of this test is "no extra switch_session" — filter
+			// get_state and assert on switch_session count.
+			const switchCount = log.filter(e => e.cmd === "switch_session").length;
+			const promptCount = log.filter(e => e.cmd === "prompt").length;
+			expect(switchCount).toBe(1);
+			expect(promptCount).toBe(1);
 		} finally {
 			bridge.stop();
 			await fake.cleanup();

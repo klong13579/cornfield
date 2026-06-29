@@ -6,17 +6,15 @@
  * and delivering results to channels.
  */
 import * as path from "node:path";
-import { buildAgentSessionPath } from "@oh-my-pi/pi-coding-agent/skeleton";
-import { isEnoent, logger } from "@oh-my-pi/pi-utils";
-import { AgentBridge } from "./agent-bridge";
-import { getDataDir } from "./config";
+import { logger } from "@oh-my-pi/pi-utils";
+import type { AgentBridge } from "./agent-bridge";
 import { CronService } from "./scheduler/cron-service";
 import { SchedulerEngine } from "./scheduler/engine";
 import { computeInactivityBudgetMs } from "./scheduler/executor";
 import { SchedulerFileStore } from "./scheduler/file-store";
 import { SchedulerDbStorage } from "./scheduler/storage";
-import type { ScheduledTask } from "./scheduler/types";
 import { DEFAULT_SCHEDULER_CONFIG, getSchedulerDbPath, getSchedulerDir } from "./scheduler/types";
+import { cronSessionPath } from "./session-paths";
 import type { GatewayConfig, OutboundMessage } from "./types";
 
 /** Interface for the subset of Gateway that CronLifecycle needs. */
@@ -149,12 +147,15 @@ export class CronLifecycle {
 		model?: string;
 		provider?: string;
 	}): Promise<{ output: string; error?: string }> {
+		if (!params.agentDir) {
+			throw new Error("executeCronAgent: agentDir required (cron tasks must declare a per-agent sessions root)");
+		}
 		const bridge = this.#getBridgeByAgentDir(params.agentDir);
 		if (!bridge) {
 			return { output: "", error: `No warm bridge found for agentDir: ${params.agentDir}` };
 		}
 
-		const cronSessionPath = buildAgentSessionPath(params.agentDir, `cron_${Date.now()}`);
+		const cronSessionFilePath = cronSessionPath(params.agentDir);
 
 		try {
 			await bridge.setDisabledToolsets(params.disabledToolsets ?? []);
@@ -184,7 +185,7 @@ export class CronLifecycle {
 		try {
 			const response = await bridge.executePrompt(params.prompt, {
 				timeoutMs: params.timeoutMs,
-				sessionPath: cronSessionPath,
+				sessionPath: cronSessionFilePath,
 				inactivityMs: computeInactivityBudgetMs(params.timeoutMs),
 			});
 			return { output: response };

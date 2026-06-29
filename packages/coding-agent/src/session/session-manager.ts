@@ -1726,6 +1726,13 @@ export class SessionManager {
 		this.#persistError = undefined;
 		this.#persistErrorReported = false;
 		this.#sessionFile = path.resolve(sessionFile);
+		// Ensure the parent directory exists before any subsequent write.
+		// Without this, callers (e.g. the gateway cron path) that pass a
+		// path under a fresh `<agentDir>/sessions/...` tree would fail
+		// the first #writeEntriesAtomically with ENOENT instead of
+		// writing the file. The recursive flag matches the lazy-create
+		// behavior of ArtifactManager for sibling artifact dirs.
+		await fs.promises.mkdir(path.dirname(this.#sessionFile), { recursive: true });
 		writeTerminalBreadcrumb(this.cwd, this.#sessionFile);
 		this.#fileEntries = await loadEntriesFromFile(this.#sessionFile, this.storage);
 		if (this.#fileEntries.length > 0) {

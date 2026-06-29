@@ -11,19 +11,18 @@
  */
 
 import * as fs from "node:fs";
-import * as path from "node:path";
+import { findAgentSessionPath } from "../session-paths";
 import { appendExecutionLog } from "./execution-log";
 import { executeScheduledCommand, scanCronPrompt } from "./executor";
-import { findAgentSessionPath } from "../session-paths";
 import type { SchedulerDbStorage } from "./storage";
 import {
-	type TaskExecution,
 	formatExecutionRow,
 	formatTaskRow,
 	getGatewayPidPath,
 	getNextRun,
 	isDaemonRunning,
 	parseSchedule,
+	type TaskExecution,
 } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -591,9 +590,7 @@ export async function cronRun(name: string, storage: SchedulerDbStorage): Promis
 		// Link agent session trace for agent tasks. Per-agent scope: only
 		// search the agent's own `sessions/` tree.
 		const agentSessionPath =
-			task.taskType === "agent" && agentDir
-				? findAgentSessionPath(agentDir, startedAt, endedAt)
-				: undefined;
+			task.taskType === "agent" && agentDir ? findAgentSessionPath(agentDir, startedAt, endedAt) : undefined;
 
 		storage.updateExecution(exec.id, {
 			endedAt,
@@ -639,9 +636,7 @@ export async function cronRun(name: string, storage: SchedulerDbStorage): Promis
 	} catch (err) {
 		const endedAt = Date.now();
 		const agentSessionPath =
-			task.taskType === "agent" && agentDir
-				? findAgentSessionPath(agentDir, startedAt, endedAt)
-				: undefined;
+			task.taskType === "agent" && agentDir ? findAgentSessionPath(agentDir, startedAt, endedAt) : undefined;
 		storage.updateExecution(exec.id, {
 			endedAt,
 			exitCode: 1,
@@ -700,10 +695,7 @@ export interface CronTestRunOptions {
  *   0  trigger fired, task exited 0, delivery succeeded (or no delivery)
  *   1  timeout, task not found, task exited non-zero, or delivery failed
  */
-export async function cronTestRun(
-	args: string[],
-	storage: SchedulerDbStorage,
-): Promise<void> {
+export async function cronTestRun(args: string[], storage: SchedulerDbStorage): Promise<void> {
 	const name = args[0];
 	if (!name) {
 		console.error("Usage: cron test-run <name> [--in 90s] [--timeout 150s] [--no-restore]");
@@ -792,9 +784,13 @@ export async function cronTestRun(
 	const startedAt = Date.now();
 
 	console.log(`[test-run] Task "${name}" — backing up schedule.`);
-	console.log(`[test-run]   was:  cron=${JSON.stringify(snapshot.cron)} scheduleType=${snapshot.scheduleType ?? "?"} status=${snapshot.status}`);
+	console.log(
+		`[test-run]   was:  cron=${JSON.stringify(snapshot.cron)} scheduleType=${snapshot.scheduleType ?? "?"} status=${snapshot.status}`,
+	);
 	console.log(`[test-run]   next: ${snapshot.nextRunAt ? new Date(snapshot.nextRunAt).toLocaleString() : "(none)"}`);
-	console.log(`[test-run] Setting one-shot trigger in ${inMs}ms (cron=+${delaySec}s, scheduleType=once, nextRunAt=${new Date(targetTime).toLocaleString()})`);
+	console.log(
+		`[test-run] Setting one-shot trigger in ${inMs}ms (cron=+${delaySec}s, scheduleType=once, nextRunAt=${new Date(targetTime).toLocaleString()})`,
+	);
 	console.log(`[test-run] Waiting for the gateway scheduler to pick up the change and fire...`);
 
 	storage.updateTask(task.id, {
@@ -864,9 +860,7 @@ export async function cronTestRun(
 			// the delivery verdict, which only writes after the
 			// agent completes).
 			const execs = storage.getExecutions(task.id, 50);
-			const candidate = execs.find(
-				e => e.startedAt >= startMark - 5_000 && e.endedAt != null,
-			);
+			const candidate = execs.find(e => e.startedAt >= startMark - 5_000 && e.endedAt != null);
 			if (candidate) {
 				execution = candidate;
 				break;
@@ -888,16 +882,12 @@ export async function cronTestRun(
 	if (!execution) {
 		// Maybe the trigger fired but hasn't finished yet — surface that
 		// to the operator instead of just "timed out".
-		const runningExec = storage
-			.getExecutions(task.id, 50)
-			.find(e => e.startedAt >= startMark - 5_000);
+		const runningExec = storage.getExecutions(task.id, 50).find(e => e.startedAt >= startMark - 5_000);
 		if (runningExec) {
 			console.error(
 				`[test-run] Trigger fired (exec ${runningExec.id}) but agent did NOT reach a terminal state within ${timeoutMs}ms.`,
 			);
-			console.error(
-				`[test-run] Check the gateway log (~/.omp/logs/omp.*.log) for the latest activity on this run.`,
-			);
+			console.error(`[test-run] Check the gateway log (~/.omp/logs/omp.*.log) for the latest activity on this run.`);
 		} else {
 			console.error(`[test-run] Timed out after ${timeoutMs}ms waiting for trigger.`);
 		}
@@ -914,8 +904,7 @@ export async function cronTestRun(
 	// `durationMs` is not stored on the executions row (see storage.ts
 	// — only the time range is persisted). Compute it from start/end
 	// so the operator gets a useful number.
-	const computedDurMs =
-		execution.endedAt != null ? execution.endedAt - execution.startedAt : undefined;
+	const computedDurMs = execution.endedAt != null ? execution.endedAt - execution.startedAt : undefined;
 	console.log(`  duration:  ${computedDurMs ?? "?"}ms`);
 	if (execution.stderr) {
 		console.log(`  stderr:    ${execution.stderr.slice(0, 500)}`);
@@ -945,7 +934,9 @@ export async function cronTestRun(
 	if (noRestore) {
 		console.log(`[test-run] Schedule NOT restored (--no-restore). Task is now cron='+${delaySec}s' once.`);
 	} else {
-		console.log(`[test-run] Schedule restored to ${JSON.stringify(snapshot.cron)} (next: ${snapshot.nextRunAt ? new Date(snapshot.nextRunAt).toLocaleString() : "(none)"}).`);
+		console.log(
+			`[test-run] Schedule restored to ${JSON.stringify(snapshot.cron)} (next: ${snapshot.nextRunAt ? new Date(snapshot.nextRunAt).toLocaleString() : "(none)"}).`,
+		);
 	}
 
 	// Final exit code: 0 if everything is fine, 1 if task or delivery failed.
