@@ -418,7 +418,37 @@ Q1 定案后还需走清：
 
 后续 `test-run` 加进 host tool 时，`TOOLS.md` 同步加 action 说明；CLI `--help` 同步加；`SYSTEM.md` 不沾 cron。
 
-## 7. 参考
+## 7. Host-Tool 扩展路线图
+
+> 上次修订：2026-06-30。其它 Tier 的详细讨论见上轮 chat。
+
+### 7.1 判断标准（什么时候该加 host tool）
+
+1. **LLM 是主要用户**（不是 operator / CI / 灾难恢复）
+2. **能力在 gateway 侧**（OMP 不知道）—— 否则就是 OMP built-in
+3. **需要 gateway 状态**（channel registry / scheduler DB / session store / bridge pool / DingTalk channel）
+4. **适合 in-band 错误**（不是 stdout 文本 parse）
+
+### 7.2 Tier 1 — 高价值、易加
+
+| 能力 | 理由 | 改动点 |
+|---|---|---|
+| `cron.test-run` | Q1 已在议；LLM 需要验证"任务真的能跑通端到端"才能放心让用户用 | `host-tool.ts` 加 `case "test-run"`；复用 `cli-commands.ts:698` `cronTestRun` 的逻辑；4 个 workspace 的 `TOOLS.md` 同步加 action 说明 |
+| `bridge.status` | LLM 在 30 分钟没回应时想知道是 bridge 卡了还是自己卡了。`agent-bridge.ts:321` `getSnapshot()` 已经算好 circuit/crash/lifecycle/queue 状态，薄薄一层 wrapper 即可 | `host-tool.ts` 加 `createBridgeStatusToolDefinitions(ctx)`，`gateway.ts:#buildHostToolDispatcher` 多调一次 `dispatcher.setTools([...cron, ...bridgeStatus])`；4 个 workspace `TOOLS.md` 加章节 |
+
+### 7.3 Tier 2 / 3（参考）
+
+Tier 2 — 高价值但需独立 design：`agent.delegate`（跨 account 编排）、`session.show` / `list` / `search`（LLM 高频需求 "昨天聊了啥"，要新写读路径）
+
+Tier 3 — 看情况：`channel.send_message`（主动发消息）、`channel.search_contact`（拿 staffId；dws skill 已有等价能力）
+
+故意不声明（gateway 内部 / operator 路径）：PID 文件 / daemon 控制 / 状态文件、circuit breaker 重置、bridge restart / 杀 OMP 子进程、action registry（card 点击 handler）、启动时连接 / 重连 DingTalk
+
+### 7.4 详细讨论
+
+上轮 chat 里有逐项的「理由 / 卡点」表格和「短期 / 中期 / 长期」建议。这里是上轮决定的快照，不是终极设计——走 Tier 1 后根据实际使用再补充。
+
+## 8. 参考
 
 ### 关键文件
 
