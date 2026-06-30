@@ -53,6 +53,8 @@ type TaskRow = {
 	delivery_to_user_id: string | null;
 	delivery_to_conversation_id: string | null;
 	delivery_mode: string | null;
+	created_by_user_id: string | null;
+	created_by_account_id: string | null;
 };
 
 type ExecutionRow = {
@@ -105,6 +107,8 @@ const TASK_UPDATE_FIELDS = new Set<string>([
 	"deliveryToUserId",
 	"deliveryToConversationId",
 	"deliveryMode",
+	"createdByUserId",
+	"createdByAccountId",
 ]);
 
 const EXECUTION_UPDATE_FIELDS = new Set<string>([
@@ -179,6 +183,8 @@ function toTask(row: TaskRow): ScheduledTask {
 		deliverUser: row.deliver_user ?? undefined,
 		lastDeliveryError: row.last_delivery_error ?? undefined,
 		accountId: row.account_id ?? undefined,
+		createdByUserId: row.created_by_user_id ?? undefined,
+		createdByAccountId: row.created_by_account_id ?? undefined,
 	};
 }
 
@@ -265,8 +271,9 @@ export class SchedulerDbStorage implements SchedulerStorage {
 				run_count, fail_count, repeat_count, repeat_completed,
 				deliver, deliver_user, last_delivery_error, account_id,
 				agent_dir, delivery_channel, delivery_account_id,
-				delivery_to_user_id, delivery_to_conversation_id, delivery_mode
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				delivery_to_user_id, delivery_to_conversation_id, delivery_mode,
+				created_by_user_id, created_by_account_id
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`);
 
 		this.#getTaskStmt = this.#db.prepare("SELECT * FROM tasks WHERE id = ?");
@@ -380,6 +387,10 @@ export class SchedulerDbStorage implements SchedulerStorage {
 		if (!hasDeliveryToUserId) this.#db.exec("ALTER TABLE tasks ADD COLUMN delivery_to_user_id TEXT;");
 		if (!hasDeliveryToConversationId) this.#db.exec("ALTER TABLE tasks ADD COLUMN delivery_to_conversation_id TEXT;");
 		if (!hasDeliveryMode) this.#db.exec("ALTER TABLE tasks ADD COLUMN delivery_mode TEXT;");
+		const hasCreatedByUserId = columns.some(c => c.name === "created_by_user_id");
+		const hasCreatedByAccountId = columns.some(c => c.name === "created_by_account_id");
+		if (!hasCreatedByUserId) this.#db.exec("ALTER TABLE tasks ADD COLUMN created_by_user_id TEXT;");
+		if (!hasCreatedByAccountId) this.#db.exec("ALTER TABLE tasks ADD COLUMN created_by_account_id TEXT;");
 		this.#db.exec("CREATE INDEX IF NOT EXISTS idx_executions_task_id ON executions(task_id)");
 		this.#db.exec("CREATE INDEX IF NOT EXISTS idx_executions_started_at ON executions(started_at DESC)");
 	}
@@ -422,6 +433,8 @@ export class SchedulerDbStorage implements SchedulerStorage {
 			task.delivery?.toUserId ?? null,
 			task.delivery?.toConversationId ?? null,
 			task.delivery?.mode ?? null,
+			task.createdByUserId ?? null,
+			task.createdByAccountId ?? null,
 		);
 		return this.getTask(id)!;
 	}

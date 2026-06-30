@@ -458,6 +458,7 @@ export class Gateway {
 			getBridge: () => this.#accountBridges.get(accountId) ?? this.#bridge,
 			registry: this.#registry,
 			getStorage: () => this.#cronLifecycle.schedulerStorage,
+			accountId,
 		};
 		dispatcher.setTools(createCronToolDefinitions(ctx));
 		return dispatcher;

@@ -68,6 +68,23 @@ export interface ScheduledTask {
 	};
 	/** Last delivery error message (null/undefined when last delivery succeeded) */
 	lastDeliveryError?: string;
+	/**
+	 * Audit: DingTalk staffId of the user who created this task via the
+	 * LLM host tool. Stamped at add time from the active chat context.
+	 * Stays undefined for tasks created via the operator CLI or the legacy
+	 * `/cron create` slash path (no chat context). Audit only — the
+	 * agent owns the task, not the creating user; visibility is the
+	 * agent's task list, not filtered by creator.
+	 */
+	createdByUserId?: string;
+	/**
+	 * Audit: accountId of the agent (OMP subprocess) that owned the
+	 * conversation at add time. Always stamped on host-tool adds.
+	 * Redundant with the storage's per-account SQLite (one DB per OMP
+	 * subprocess), but recording it on the row makes the value visible
+	 * to operators inspecting tasks across accounts via the CLI.
+	 */
+	createdByAccountId?: string;
 	/** @deprecated Use agentDir instead */
 	accountId?: string;
 	/** @deprecated Use delivery.channel instead */
@@ -106,6 +123,10 @@ export interface TaskFileDefinition {
 	deliver?: string;
 	/** @deprecated Use delivery.toUserId instead */
 	deliverUser?: string;
+	/** Audit: staffId of the creating user (LLM host tool only). */
+	createdByUserId?: string;
+	/** Audit: accountId of the agent that owned the conversation at add time. */
+	createdByAccountId?: string;
 }
 
 export interface TaskExecution {

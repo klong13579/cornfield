@@ -105,6 +105,7 @@ describe("cron host tool — delivery auto-inference", () => {
 			getBridge: () => stubBridge(DM_MSG),
 			registry: registry as unknown as ChannelRegistry,
 			getStorage: () => storage,
+			accountId: "hr",
 		});
 		const result = await tools[0]!.handle({
 			action: "add",
@@ -131,6 +132,7 @@ describe("cron host tool — delivery auto-inference", () => {
 			getBridge: () => stubBridge(GROUP_MSG),
 			registry: registry as unknown as ChannelRegistry,
 			getStorage: () => storage,
+			accountId: "hr",
 		});
 		const result = await tools[0]!.handle({
 			action: "add",
@@ -157,6 +159,7 @@ describe("cron host tool — delivery auto-inference", () => {
 			getBridge: () => stubBridge(undefined),
 			registry: registry as unknown as ChannelRegistry,
 			getStorage: () => storage,
+			accountId: "hr",
 		});
 		const result = await tools[0]!.handle({
 			action: "add",
@@ -176,6 +179,7 @@ describe("cron host tool — delivery auto-inference", () => {
 			getBridge: () => stubBridge(undefined),
 			registry: registry as unknown as ChannelRegistry,
 			getStorage: () => storage,
+			accountId: "hr",
 		});
 		const result = await tools[0]!.handle({
 			action: "add",
@@ -196,6 +200,7 @@ describe("cron host tool — delivery auto-inference", () => {
 			getBridge: () => stubBridge(DM_MSG),
 			registry: registry as unknown as ChannelRegistry,
 			getStorage: () => storage,
+			accountId: "hr",
 		});
 		// Caller is in DM with hr but wants the cron to deliver to sales.
 		const result = await tools[0]!.handle({
@@ -219,6 +224,7 @@ describe("cron host tool — delivery auto-inference", () => {
 			getBridge: () => stubBridge(undefined),
 			registry: registry as unknown as ChannelRegistry,
 			getStorage: () => storage,
+			accountId: "hr",
 		});
 		const result = await tools[0]!.handle({
 			action: "add",
@@ -239,6 +245,7 @@ describe("cron host tool — delivery auto-inference", () => {
 			getBridge: () => stubBridge(DM_MSG),
 			registry: registry as unknown as ChannelRegistry,
 			getStorage: () => storage,
+			accountId: "hr",
 		});
 		const add = await tools[0]!.handle({
 			action: "add",
@@ -264,6 +271,7 @@ describe("cron host tool — delivery auto-inference", () => {
 			getBridge: () => stubBridge(DM_MSG),
 			registry: registry as unknown as ChannelRegistry,
 			getStorage: () => null,
+			accountId: "hr",
 		});
 		const result = await tools[0]!.handle({ action: "list" });
 		const { text, isError } = asText(result);
@@ -318,6 +326,7 @@ describe("cron host tool — scheduleType derivation", () => {
 			getBridge: () => stubBridge(DM_MSG),
 			registry: registry as unknown as ChannelRegistry,
 			getStorage: () => storage,
+			accountId: "hr",
 		});
 		const result = await tools[0]!.handle({
 			action: "add",
@@ -376,6 +385,8 @@ describe("cron host tool — scheduleType derivation", () => {
 						getBridge: () => stubBridge(DM_MSG),
 						registry: registry as unknown as ChannelRegistry,
 						getStorage: () => storage,
+						accountId: "hr",
+			accountId: "hr",
 					});
 					return tools[0]!.handle({ action: "list" });
 				})(),
@@ -392,6 +403,7 @@ describe("cron host tool — scheduleType derivation", () => {
 			getBridge: () => stubBridge(DM_MSG),
 			registry: registry as unknown as ChannelRegistry,
 			getStorage: () => storage,
+			accountId: "hr",
 		});
 		const after = JSON.parse(asText(await tools[0]!.handle({ action: "list" })).text).length;
 		expect(after).toBe(before);
@@ -403,6 +415,7 @@ describe("cron host tool — scheduleType derivation", () => {
 			getBridge: () => stubBridge(DM_MSG),
 			registry: registry as unknown as ChannelRegistry,
 			getStorage: () => storage,
+			accountId: "hr",
 		});
 
 		// Create as cron
@@ -434,6 +447,7 @@ describe("cron host tool — scheduleType derivation", () => {
 			getBridge: () => stubBridge(DM_MSG),
 			registry: registry as unknown as ChannelRegistry,
 			getStorage: () => storage,
+			accountId: "hr",
 		});
 
 		const add = await tools[0]!.handle({
@@ -459,5 +473,191 @@ describe("cron host tool — scheduleType derivation", () => {
 		const shown = JSON.parse(asText(show).text);
 		expect(shown.cron).toBe(original.cron);
 		expect(shown.scheduleType).toBe(original.scheduleType);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// createdByUserId / createdByAccountId stamping
+//
+// Bug: tasks created via the LLM host tool previously had no record of
+// who created them. Operators inspecting tasks (e.g. "who set up this
+// cron?") had no audit trail. These tests pin the stamping behavior on
+// `add` and the "agent owns the task" semantic: the task list is
+// shared across all users in the same agent.
+//
+//   - DM add: createdByUserId = active chat's userId, createdByAccountId = ctx.accountId
+//   - group add: createdByUserId = active chat's userId, createdByAccountId = ctx.accountId
+//   - no active chat (cron trigger recursion / unit test): createdByUserId undefined,
+//     createdByAccountId still stamped (always know which agent)
+//
+//   - cross-user visibility: user A creates a task; user B in a different
+//     DM with the same agent sees it via `cron.list` (scope = agent, not user)
+//   - cross-context visibility: user A in DM creates a task with delivery.toUserId
+//     = A; user A in a group calls `cron.list` and sees the task (no per-conv
+//     scope; agent owns the task regardless of where it was created or who
+//     is asking)
+// ---------------------------------------------------------------------------
+
+const DM_USER_B: InboundMessage = {
+	channelId: "dingtalk:hr",
+	accountId: "hr",
+	userId: "u456",
+	conversationId: "dm-u456",
+	isGroup: false,
+	content: { type: "text", text: "test" },
+};
+
+describe("cron host tool — createdBy stamping + agent-scope visibility", () => {
+	let storage: SchedulerDbStorage;
+	const storages: SchedulerDbStorage[] = [];
+
+	beforeEach(() => {
+		storage = newDb();
+		storages.push(storage);
+	});
+
+	afterEach(() => {
+		for (const s of storages) {
+			try {
+				s["#db"]?.close?.();
+			} catch {}
+		}
+		storages.length = 0;
+		try {
+			fs.rmSync(TMP, { recursive: true, force: true });
+		} catch {}
+	});
+
+	it("stamps createdByUserId and createdByAccountId on add (DM)", async () => {
+		const registry = new StubRegistry();
+		const tools = createCronToolDefinitions({
+			getBridge: () => stubBridge(DM_MSG),
+			registry: registry as unknown as ChannelRegistry,
+			getStorage: () => storage,
+			accountId: "hr",
+		});
+		const { text, isError } = asText(
+			await tools[0]!.handle({
+				action: "add",
+				name: "audit-me",
+				schedule: "0 9 * * *",
+				command: "echo x",
+				taskType: "shell",
+			}),
+		);
+		expect(isError).toBe(false);
+		const task = JSON.parse(text);
+		expect(task.createdByUserId).toBe("u123");
+		expect(task.createdByAccountId).toBe("hr");
+	});
+
+	it("stamps createdByUserId from group chat (creator, not the group)", async () => {
+		const registry = new StubRegistry();
+		const tools = createCronToolDefinitions({
+			getBridge: () => stubBridge(GROUP_MSG),
+			registry: registry as unknown as ChannelRegistry,
+			getStorage: () => storage,
+			accountId: "hr",
+		});
+		const { text, isError } = asText(
+			await tools[0]!.handle({
+				action: "add",
+				name: "audit-group",
+				schedule: "0 9 * * *",
+				command: "echo x",
+				taskType: "shell",
+			}),
+		);
+		expect(isError).toBe(false);
+		const task = JSON.parse(text);
+		expect(task.createdByUserId).toBe("u123"); // the sender, not the group
+		expect(task.createdByAccountId).toBe("hr");
+	});
+
+	it("leaves createdByUserId undefined when no active chat, still stamps createdByAccountId", async () => {
+		const registry = new StubRegistry();
+		const tools = createCronToolDefinitions({
+			getBridge: () => stubBridge(undefined),
+			registry: registry as unknown as ChannelRegistry,
+			getStorage: () => storage,
+			accountId: "hr",
+		});
+		const { text, isError } = asText(
+			await tools[0]!.handle({
+				action: "add",
+				name: "no-chat",
+				schedule: "0 9 * * *",
+				command: "echo x",
+				taskType: "shell",
+				delivery: { channel: "dingtalk:hr", toUserId: "u1" },
+			}),
+		);
+		expect(isError).toBe(false);
+		const task = JSON.parse(text);
+		expect(task.createdByUserId).toBeUndefined();
+		expect(task.createdByAccountId).toBe("hr");
+	});
+
+	it("scope = agent: user A's task is visible to user B in a different DM", async () => {
+		const registry = new StubRegistry();
+		// User A creates a task via DM_MSG
+		const toolsAsA = createCronToolDefinitions({
+			getBridge: () => stubBridge(DM_MSG),
+			registry: registry as unknown as ChannelRegistry,
+			getStorage: () => storage,
+			accountId: "hr",
+		});
+		const add = await toolsAsA[0]!.handle({
+			action: "add",
+			name: "shared-task",
+			schedule: "0 9 * * *",
+			command: "echo x",
+			taskType: "shell",
+		});
+		expect(asText(add).isError).toBe(false);
+
+		// User B (different userId) lists — must see A's task (agent scope, not user)
+		const toolsAsB = createCronToolDefinitions({
+			getBridge: () => stubBridge(DM_USER_B),
+			registry: registry as unknown as ChannelRegistry,
+			getStorage: () => storage,
+			accountId: "hr",
+		});
+		const list = await toolsAsB[0]!.handle({ action: "list" });
+		const tasks = JSON.parse(asText(list).text);
+		expect(tasks).toHaveLength(1);
+		expect(tasks[0].name).toBe("shared-task");
+		expect(tasks[0].createdByUserId).toBe("u123");
+	});
+
+	it("scope = agent: task created in DM is visible from a group chat on the same agent", async () => {
+		const registry = new StubRegistry();
+		// Create in DM
+		const toolsDM = createCronToolDefinitions({
+			getBridge: () => stubBridge(DM_MSG),
+			registry: registry as unknown as ChannelRegistry,
+			getStorage: () => storage,
+			accountId: "hr",
+		});
+		const add = await toolsDM[0]!.handle({
+			action: "add",
+			name: "cross-context",
+			schedule: "0 9 * * *",
+			command: "echo x",
+			taskType: "shell",
+		});
+		expect(asText(add).isError).toBe(false);
+
+		// List from a group chat on the same agent — must see it (no per-conv scope)
+		const toolsGroup = createCronToolDefinitions({
+			getBridge: () => stubBridge(GROUP_MSG),
+			registry: registry as unknown as ChannelRegistry,
+			getStorage: () => storage,
+			accountId: "hr",
+		});
+		const list = await toolsGroup[0]!.handle({ action: "list" });
+		const tasks = JSON.parse(asText(list).text);
+		expect(tasks).toHaveLength(1);
+		expect(tasks[0].name).toBe("cross-context");
 	});
 });

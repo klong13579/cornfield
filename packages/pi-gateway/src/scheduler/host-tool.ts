@@ -51,6 +51,14 @@ export interface CronToolContext {
 	getBridge: () => import("../agent-bridge").AgentBridge;
 	registry: ChannelRegistry;
 	getStorage: () => import("./storage").SchedulerDbStorage | null;
+	/**
+	 * AccountId of the agent that owns this dispatcher instance. Stamped
+	 * on every `cron.add` so the row's `createdByAccountId` audit field
+	 * records which agent the conversation belonged to at create time.
+	 * Always set: the OMP subprocess is per-accountId, so this is the
+	 * agent's identity for the lifetime of the dispatcher.
+	 */
+	accountId: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -103,7 +111,14 @@ const CRON_TOOL_DEFINITION: RpcHostToolDefinition = {
 	name: "cron",
 	label: "Cron",
 	description:
-		"Manage scheduled tasks (cron / interval / one-shot). Actions: add, list, show, update, remove, enable, disable, runs.\n\n" +
+		"Manage THIS AGENT's scheduled tasks. " +
+		"\"My\" in a cron context refers to the current agent (the OMP subprocess serving this account), not the user asking. " +
+		"All users in the same agent see the same task list; the agent owns its tasks. " +
+		"There is no per-user or per-conversation scope — when the user asks \"我有哪些任务\" / \"what are my tasks\", " +
+		"the answer is the agent's full task list, not just tasks the user created. " +
+		"`createdByUserId` and `createdByAccountId` on each task are audit fields; do not use them to filter by creator. " +
+		"Use `cron.list` to enumerate, then client-side filter by `createdByUserId` only if the user explicitly asks \"which tasks did I create\".\n\n" +
+		"Actions: `add` / `list` / `show` / `update` / `remove` / `enable` / `disable` / `runs`.\n\n" +
 		"**MANDATORY: use this host tool, NOT `bash` + `omp gateway cron ...` CLI.** Calling the CLI from bash bypasses delivery auto-inference and you will fail to set the sender's userId / conversationId correctly. The host tool reads the active chat context and fills delivery in for you. If you find yourself typing `omp gateway cron` in a `bash` call, STOP and use this tool instead.\n\n" +
 		"**`add` example (DM, agent task, 18:00 daily report):**\n" +
 		"```\n" +
@@ -119,12 +134,15 @@ const CRON_TOOL_DEFINITION: RpcHostToolDefinition = {
 		"```\n\n" +
 		"**`add` rules (mandatory):**\n" +
 		"- In a chat (DM or group) — OMIT the `delivery` field. The gateway auto-infers `{channel, accountId, toUserId}` for DM or `{channel, accountId, toConversationId}` for group from the active conversation. Do NOT read `gateway.json` / `BOOT.md` / call `dws` to look up the sender — let auto-inference handle it.\n" +
+		"- To target a SPECIFIC user or conversation (not the active one), pass `delivery` explicitly: `{channel, toUserId}` (DM) or `{channel, toConversationId}` (group). Explicit delivery is preferred when the target differs from the active chat.\n" +
 		'- For `taskType: "agent"` — `agentDir` is required and `prompt` is the agent\'s instructions (not `command`).\n' +
 		'- For `taskType: "shell"` — `command` is the shell command (not `prompt`).\n' +
 		"- `name` must be unique; pick a descriptive slug (e.g. `daily-1830-report`, `interview-prep-1h`).\n" +
 		"- `schedule` accepts a cron expression (`0 18 * * *`), an interval (`every 30m`), or a one-shot ISO timestamp.\n" +
-		"- After `add`, the tool returns the persisted task — read it back and report name / schedule / delivery to the user verbatim.\n\n" +
-		"**`update` / `show` / `remove` / `enable` / `disable` / `runs`** take `id` or `name`. The v2 schema uses `channel` / `toUserId` / `toConversationId` (NOT v1 `deliver` / `deliverUser` / `account`).",
+		"- After `add`, the tool returns the persisted task — read it back and report name / schedule / delivery / `createdByUserId` (creator) to the user verbatim.\n\n" +
+		"**`update` / `show` / `remove` / `enable` / `disable` / `runs`** take `id` or `name`. The v2 schema uses `channel` / `toUserId` / `toConversationId` (NOT v1 `deliver` / `deliverUser` / `account`). " +
+		"Since the agent owns its tasks, `show` / `update` / `remove` work on ANY task in the agent regardless of who created it. " +
+		"`runs` returns the task's execution history (also works on any task in the agent).",
 	parameters: CRON_TOOL_PARAMETERS as unknown as Record<string, unknown>,
 };
 
@@ -230,6 +248,7 @@ async function handleAdd(args: CronToolArgs, ctx: CronToolContext): Promise<Host
 		);
 	}
 
+	const createdByUserId = ctx.getBridge().getActiveChatContext()?.userId;
 	const created = ctx.getStorage()!.addTask({
 		name,
 		cron: schedule,
@@ -252,6 +271,8 @@ async function handleAdd(args: CronToolArgs, ctx: CronToolContext): Promise<Host
 		runCount: 0,
 		failCount: 0,
 		consecutiveFailures: 0,
+		createdByUserId,
+		createdByAccountId: ctx.accountId,
 	});
 	return ok(serializeTask(created));
 }

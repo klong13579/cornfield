@@ -49,6 +49,8 @@ Edit an existing file via `atom` / `hashline` / `patch` mode.
 
 `cron` is an OMP **host tool** registered by the gateway on the `set_host_tools` RPC. The agent calls it as a regular LLM tool, NOT by shelling out to `omp gateway cron ...`.
 
+**Scope = agent (this account).** "My" in a cron context refers to the current agent (= this OMP subprocess / this account), not the user asking. All users in the same agent see the same task list; the agent owns its tasks. There is no per-user or per-conversation scope — `cron.list` returns ALL tasks in this agent, regardless of who created them or which chat is active. Each task records its creator in `createdByUserId` (audit field); if the user asks "which tasks did I create", call `cron.list` then filter the result client-side by `createdByUserId === <current sender staffId>`. See `docs/pi-gateway-cron-host-tool.md` §6.5 for the design rationale.
+
 Actions: `add` / `list` / `show` / `update` / `remove` / `enable` / `disable` / `runs`.
 
 - MUST use the `cron` host tool for any scheduled-task operation. Do NOT run `omp gateway cron create` / `update` / `list` / etc. from `bash` — that's the operator CLI path.
