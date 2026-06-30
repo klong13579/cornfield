@@ -1799,6 +1799,18 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 				notificationDebounceTimers.clear();
 			};
 			postmortem.register("mcp-notification-cleanup", clearDebounceTimers);
+			// Disconnect MCP servers on OMP exit so child stdio processes don't outlive
+			// the parent as orphans. Without this, a clean SIGINT/SIGTERM/SIGHUP relies on
+			// the mcp child noticing its stdin pipe closed; explicit disconnect is faster
+			// and gives pending requests a clean rejection. Only run for managers we own
+			// (i.e. not the one supplied via `options.mcpManager`, which the caller owns).
+			postmortem.register("mcp-disconnect", async () => {
+				try {
+					await mcpManager.disconnectAll();
+				} catch (err) {
+					logger.warn("MCP postmortem disconnect failed", { err });
+				}
+			});
 			mcpManager.setOnResourcesChanged((serverName, uri) => {
 				logger.debug("MCP resources changed", { path: `mcp:${serverName}`, uri });
 				if (!settings.get("mcp.notifications")) return;
