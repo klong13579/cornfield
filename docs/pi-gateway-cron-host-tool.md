@@ -1,6 +1,6 @@
 # pi-gateway Cron 模块与 Host-Tool 机制
 
-> 状态：设计草稿 — Q1 尚未定案。后续 design walk-through 会在本文档追加。
+> 状态：Q1（test-run 暴露形态）已 ship（2026-06-30，见 §7.2）。后续 design walk-through 会继续跟进 Q2-Q5。
 
 ## 0. 导读
 
@@ -89,7 +89,7 @@ pi-gateway 通过两条路径接收 cron 任务创建：
 
 Host-Tool 机制把 gateway 端的本地实现（cron storage、channel registry、活跃聊天上下文）通过 OMP RPC 协议暴露给 LLM，使 LLM 能在 IM 聊天中完成"创建/查询/修改定时任务"等操作。
 
-本文档是 `test-run` 等更多 host-tool 能力的设计起点。`test-run`（触发任务走真实调度路径以验证端到端）在 CLI 侧（`omp gateway cron test-run <name>`）已经完整实现，但尚未暴露为 LLM 可调用的 host tool。
+本文档是 `test-run` 等更多 host-tool 能力的设计起点。`test-run`（触发任务走真实调度路径以验证端到端）在 CLI 侧（`omp gateway cron test-run <name>`）和 LLM `cron` host tool `action: "test-run"` 均已 ship（共享 `test-run.ts:runTestRun` core，2026-06-30）。后续 Q2-Q5（return shape / blocking model / cancel / concurrency）仍在本设计文档的待决列表里。
 
 ## 2. 现状机制
 
@@ -373,12 +373,16 @@ LLM 自动调 `cron.testRun(name)`，handler 走真实调度路径，验证 warm
 
 ### 5.3 后续 design walk-through 待办
 
-Q1 定案后还需走清：
+Q1 已定案（2026-06-30）。Q2-Q5 还未做：
 
 - Q2：返回内容形态（`host_tool_result` 是结构化 JSON 还是自然语言？LLM 如何根据 verdict 生成回复？）
+  - 初步走向：结构化 JSON（当前已 ship）。LLM 根据 `result.kind` 决定语气。后续可考虑 verdict→自然语言的 adapter 层。
 - Q3：阻塞模型（handler 持 LLM turn 60-150s / 立即返回 + scheduler 推回 / 中间状态回流）
+  - 拍板：handler 持 turn（同步），最长 ~120s。LLM 取消时 OMP 丢结果帧，gateway 仍跑完（详见 §7.2）。
 - Q4：取消语义（LLM / 用户中途取消 `test-run` 时如何中断 in-flight 轮询 + 还原快照）
+  - 拍板：schedule 永远还原（finally 不变量）。abort 路径返回 `kind: "aborted"`。后续 wire cancel 帧到 `HostToolDispatcher.handle` 是 cleanup 工作。
 - Q5：并发（同 session 多任务测试 / 同账号多 session 并发 test-run）
+  - 现状：未加锁。理论上同一 task 两次并发 test-run 会互相覆盖 schedule rewrite；需要时加 advisory lock。
 
 ### 5.4 scope 决策（2026-06-30）
 
@@ -478,8 +482,15 @@ openclaw 里几个 openclaw-only 的能力（跟我们当前架构 / scope 决�
 
 | 能力 | 理由 | 改动点 |
 |---|---|---|
-| `cron.test-run` | Q1 已在议；LLM 需要验证"任务真的能跑通端到端"才能放心让用户用 | `host-tool.ts` 加 `case "test-run"`；复用 `cli-commands.ts:698` `cronTestRun` 的逻辑；4 个 workspace 的 `TOOLS.md` 同步加 action 说明 |
+| `cron.test-run` ✅ **已 ship（2026-06-30）** | LLM 需要验证"任务真的能跑通端到端"才能放心让用户用 | `host-tool.ts` 加 `case "test-run"` + `handleTestRun`；抽出 `test-run.ts:runTestRun` 作为 CLI + LLM 共享 core（避免语义 drift）；`gateway.ts` 加 `tickIntervalMs`；`CRON_TOOL_DEFINITION` 补全 description；4 个 workspace `TOOLS.md` 同步加 action 说明 + 同步 `test-run` 预警文案 |
 | `bridge.status` | LLM 在 30 分钟没回应时想知道是 bridge 卡了还是自己卡了。`agent-bridge.ts:321` `getSnapshot()` 已经算好 circuit/crash/lifecycle/queue 状态，薄薄一层 wrapper 即可 | `host-tool.ts` 加 `createBridgeStatusToolDefinitions(ctx)`，`gateway.ts:#buildHostToolDispatcher` 多调一次 `dispatcher.setTools([...cron, ...bridgeStatus])`；4 个 workspace `TOOLS.md` 加章节 |
+
+**test-run 设计决策（拍板）**：
+- **同步长 tool call**（不像 `chat.delegate` 那种 fire-and-forget）。默认 90s inMs + 30s timeoutMs = 120s 总时长。OMP host-tool bridge 不设 client 侧超时，能跑。
+- **AbortSignal：** gateway 侧的 `HostToolDispatcher.handle(args)` 当前不传 AbortSignal — LLM 取消时 OMP 丢掉结果帧，gateway 仍会跑完 polling + 还原 snapshot。`finally` 块保证 schedule 一定被还原（关键不变量）。未来 wire cancel 帧是后续工作。
+- **共享 core：** CLI 和 LLM 都要调同一个 `runTestRun` core — 避免"操作员验证一个东西、agent 验证另一个东西"的语义 drift。CLI 负责 argv 解析 + SIGINT + console 输出 + process.exitCode；core 只负责 schedule-rewrite + poll + restore + 返回结构化结果。
+- **inMs 竞速警告：** core 读 ctx 的 `tickIntervalMs`（从 `config.cron.tickIntervalMs ?? 60_000` 透传），inMs < tick 报 WARNING，< 2x tick 报 NOTE。LLM 无需手动算。
+- **Schedule restore 不变量：** try/finally 保证每个退出路径都还原（成功 / 超时 / task 失败 / delivery 失败 / abort / 异常）。`noRestore: true` 是 escape hatch，明确警告语义。
 
 ### 7.3 Tier 2 / 3（参考）
 
