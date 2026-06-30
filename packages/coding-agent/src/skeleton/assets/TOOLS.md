@@ -79,3 +79,23 @@ No `delivery` field — gateway infers `{channel, accountId, toUserId}` from the
 
 **`test-run` (verification path)**: triggers a task through the REAL scheduler and reports the delivery verdict. Use after `add` / `update` to confirm the task actually works end-to-end (warm bridge → agent run → DingTalk delivery). Default duration: 90s `inMs` (1.5x the 60s gateway tick) + 30s `testTimeoutMs` = 120s total. The original schedule is ALWAYS restored after the run (in `finally`), even on timeout / abort / failure. `result.kind` is one of `success` / `trigger_timeout` / `task_failed` / `delivery_failed` / `aborted`. `isError: true` on the host tool result for non-`success` kinds. Pass `noRestore: true` only for debug — it leaves the schedule on `+<delay>s once`. Do NOT call test-run speculatively; it's a long tool call.
 
+### `bridge.status` (gateway host tool — read-only diagnostic)
+
+`bridge.status` is an OMP **host tool** registered by the gateway on the `set_host_tools` RPC. It returns the AgentBridge's current snapshot (lifecycle state, circuit breaker, crash recovery, queue depth) plus a derived `summary` field. No parameters.
+
+**Scope = this agent's bridge** (the OMP subprocess serving this account). The LLM should call this when:
+- The user reports a message wasn't delivered and the LLM suspects the bridge is the cause
+- The LLM's own tool call returned a "system busy" / "circuit open" error and it needs to know when to retry
+- The LLM needs to confirm the bridge is healthy before promising the user a follow-up
+
+**MUST NOT** call this speculatively — the bridge is healthy most of the time, and polling costs an extra tool round-trip. Only call it when the LLM has a concrete reason to suspect a bridge problem.
+
+**State field is the primary signal**:
+- `idle` — healthy, ready. No action needed.
+- `busy` — processing a prompt (see `activePromptId`). Wait for it to finish.
+- `starting` — bridge spawning OMP; first prompt may take a few seconds.
+- `stopped` — OMP subprocess is down. Tell the user the agent is unavailable.
+- `restarting` — OMP crashed, gateway is restarting with backoff. Brief window of unavailability.
+- `degraded` — circuit breaker open after consecutive failures. New prompts fast-fail until cooldown (default 30s) expires. Read `circuitFailures` and `circuitOpenedAt` to estimate when retries will be accepted.
+- `error` — too many crashes; bridge is suppressed and NOT auto-restarting. Operator (human) must intervene. Tell the user the agent is down and the gateway operator needs to restart it.
+

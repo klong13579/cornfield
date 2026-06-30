@@ -30,6 +30,7 @@ import { ModelSwitch } from "./gateway-model-switch";
 import { NewSessionHandler } from "./gateway-new-session";
 import { ResponseHandler } from "./gateway-response";
 import { createCronToolDefinitions } from "./scheduler/host-tool";
+import { createBridgeStatusToolDefinitions } from "./bridge-status-tool";
 import { HostToolDispatcher } from "./host-tool-dispatcher";
 import { type BridgeStat, type QueueStat, SessionManager } from "./session-manager";
 import { SQLiteSessionStore } from "./session-store";
@@ -467,7 +468,10 @@ export class Gateway {
 			// warning.
 			tickIntervalMs: this.#config.cron?.tickIntervalMs ?? 60_000,
 		};
-		dispatcher.setTools(createCronToolDefinitions(ctx));
+		dispatcher.setTools([
+			...createCronToolDefinitions(ctx),
+			...createBridgeStatusToolDefinitions({ getBridge: ctx.getBridge }),
+		]);
 		return dispatcher;
 	}
 
