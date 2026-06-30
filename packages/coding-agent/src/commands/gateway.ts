@@ -292,13 +292,48 @@ export default class Gateway extends Command {
 				break;
 			}
 			case "reload": {
-				// SIGHUP-based reload crashes the bun process (Bun async signal handler bug).
-				// Restart the service instead — launchd KeepAlive handles the gap.
-				const { stopService, startService } = await import("@oh-my-pi/pi-gateway/src/service-installer");
-				await stopService();
-				await Bun.sleep(1000);
-				await startService();
-				console.log("Gateway restarted with updated config.");
+				// SIGHUP-based reload crashes the bun process when sent from
+				// the same parent (Bun async signal handler bug). We pick a path
+				// based on what's actually running:
+				//
+				//   1. Service installed → stopService / startService (launchd/systemd
+				//      KeepAlive handles the gap).
+				//   2. Service not installed, PID file alive → SIGHUP the running
+				//      gateway. The gateway's SIGHUP handler (set up in the
+				//      `--foreground` path) does an in-process config reload and
+				//      avoids a process restart.
+				//   3. Nothing running → clean error.
+				const { isServiceInstalled, stopService, startService } = await import(
+					"@oh-my-pi/pi-gateway/src/service-installer"
+				);
+				const { getGatewayStatus } = await import("@oh-my-pi/pi-gateway/src/gateway-daemon");
+
+				if (await isServiceInstalled()) {
+					await stopService();
+					await Bun.sleep(1000);
+					await startService();
+					console.log("Gateway restarted via system service.");
+					return;
+				}
+
+				const status = await getGatewayStatus();
+				if (status.running && status.pid) {
+					try {
+						process.kill(status.pid, "SIGHUP");
+						console.log(`Sent SIGHUP to gateway (PID ${status.pid}) — in-process reload.`);
+					} catch (err) {
+						console.error(
+							`Failed to send SIGHUP to gateway (PID ${status.pid}): ${err instanceof Error ? err.message : String(err)}`,
+						);
+						process.exitCode = 1;
+					}
+					return;
+				}
+
+				console.error(
+					"Gateway is not running and not installed as a system service. Use `omp gateway start` first.",
+				);
+				process.exitCode = 1;
 				break;
 			}
 			case "doctor": {

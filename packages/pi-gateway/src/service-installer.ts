@@ -292,6 +292,25 @@ export async function stopService(): Promise<void> {
 /**
  * Get service status.
  */
+/**
+ * Check whether the system service is currently installed.
+ *
+ * Returns true if the plist / unit file exists at the expected path.
+ * Does not call launchctl / systemctl — that requires the service to be
+ * loaded; `getServiceStatus()` is the right call when you need both the
+ * install state AND the run state.
+ */
+export async function isServiceInstalled(): Promise<boolean> {
+	const paths = getServicePaths();
+	try {
+		await fs.access(paths.configPath);
+		return true;
+	} catch (err) {
+		if (isEnoent(err)) return false;
+		throw err;
+	}
+}
+
 export async function getServiceStatus(): Promise<ServiceStatus> {
 	const paths = getServicePaths();
 	const platform = detectPlatform();
