@@ -2,6 +2,82 @@
 
 > 状态：设计草稿 — Q1 尚未定案。后续 design walk-through 会在本文档追加。
 
+## 0. 导读
+
+### 0.1 一句话总览
+
+**OMP 是个完全通用的 agent runner，对 DingTalk / cron / gateway 一无所知；gateway 是 host，OMP 是 subprocess，双方通过一套 RPC 帧协议通信。** Gateway 专属的能力（cron、IM channel、agentDir 路由）都必须"注入"到 OMP 里——这就是 host-tool 机制的全部由来。
+
+### 0.2 角色分工
+
+| 角色 | 知道什么 |
+|---|---|
+| OMP subprocess | 通用 LLM 循环 + 工具调用 + 工具定义。**不知道**有 cron / DingTalk |
+| Gateway (host) | DingTalk 协议、agentDir、channel registry、scheduler、SQLite 存储 |
+| LLM（在 OMP 里） | 看到"工具列表"，调用就是 |
+
+### 0.3 三条 RPC 协议
+
+```
+OMP 启动 → 立刻发 `ready` 给 gateway
+     │
+     ▼
+Gateway 收到 ready ──► 调 set_host_tools RPC
+   payload: { tools: [{name:"cron", description:"...", parameters:{...}}, ...] }
+     │
+     ▼ (OMP 把每个定义包装成 AgentTool 适配器，注册到自己的工具集)
+     │
+LLM 在 tool_use 里调 cron.add({...})
+     │
+     ▼ (OMP 内部 AgentTool 适配器拦截)
+OMP 写出 frame 到 stdout:
+   { type:"host_tool_call", id:"abc123", toolCallId:"...", toolName:"cron", arguments:{...} }
+     │
+     ▼ (gateway 的 transport 解析 frame，丢给 HostToolDispatcher)
+HostToolDispatcher.handleCall()
+     │ 查 #handlers map 找到 cron 的 handler
+     │ 调 handler.handle(args) ── 真正执行 addTask、读 SQLite、写 JSON5
+     ▼
+Gateway 通过 transport 写 frame:
+   { type:"host_tool_result", id:"abc123", result:{type:"tool_result", content:[...] } }
+     │
+     ▼ (OMP 的 RpcHostToolBridge.handleResult 找到 pending call 的 promise)
+OMP 把 result resolve 给 LLM，LLM 看到 tool_result，继续推理
+```
+
+### 0.4 关键文件（按请求流向）
+
+1. **注册工具定义**：`packages/pi-gateway/src/scheduler/host-tool.ts:createCronToolDefinitions()` 返回 `HostToolHandler[]`（definition + handle）
+2. **塞给 dispatcher**：`packages/pi-gateway/src/gateway.ts:#buildHostToolDispatcher` 在 gateway 启动时一次性 `dispatcher.setTools([...cron...])`
+3. **推到 OMP**：`packages/pi-gateway/src/agent-bridge.ts:187` —— 监听 OMP 的 `ready` 事件，每次都重发 `set_host_tools`（OMP 重启后无记忆，必须重发）
+4. **OMP 侧包装**：`packages/coding-agent/src/modes/rpc/host-tools.ts:RpcHostToolAdapter` 把定义包成 `AgentTool`，LLM 看到的就是普通工具
+5. **LLM 真调**：`RpcHostToolAdapter.execute()` → `RpcHostToolBridge.requestExecution()` → 写 `host_tool_call` frame → 等 `host_tool_result` frame
+6. **gateway 派发**：`host-tool-dispatcher.ts:HostToolDispatcher.handleCall()` 按 name 查 handler，调 `handle(args)`
+7. **cron 真干活**：`host-tool.ts:handleCronAction` 按 action 路由到 `handleAdd` / `handleUpdate` / ... → 读写 `SchedulerDbStorage`（SQLite）
+8. **回包**：`RpcHostToolBridge.handleResult()` 找到 pending promise，resolve 给 LLM
+
+### 0.5 为什么 cron 必须在 gateway 侧（不能在 OMP 里）
+
+- **调度循环**：cron 触发是 gateway 的 scheduler（setInterval）的事，OMP 没时钟概念
+- **触发 agent**：cron 触发 `taskType:"agent"` 任务时，gateway 要**起一个全新的 OMP 子进程**（同一个 agentDir 复用）跑那条 prompt —— OMP 自己没法 fork 自己
+- **DingTalk delivery**：channel registry 在 gateway，发送结果要回 IM —— OMP 没 IM 概念
+- **account 隔离**：每个 accountId = 一个 OMP 子进程；cron 任务横跨 account，调度必须在 OMP 之外的 gateway
+
+### 0.6 为什么 LLM 不能用 `bash` 调 `omp gateway cron ...` 代替
+
+- **D4 auto-inference 拿不到**：`resolveDeliveryForAdd()` 读 `bridge.getActiveChatContext()` 自动填 `channel/accountId/toUserId`，CLI 没这个上下文，LLM 只能硬编 `dingtalk:user:<staffId>` —— staffId 是平台内部 ID，LLM 不该知道
+- **Round-trip 浪费**：shell out 起一个独立 OMP 进程跑 CLI 拿结果，再把 stdout parse 回 LLM，绕了一圈
+- **状态不一致**：CLI 的写路径和 host tool 的写路径**共享同一个 SQLite**（`SchedulerDbStorage`），所以技术上一致；但 LLM 串行 prompt 上下文里把 "schedule = 0 18 * * *" 解析错，host tool 会通过 `parseSchedule` 立刻报错返回 `isError:true`，CLI 要靠 exit code 和 stdout 文本 parse
+- **Tool 描述即文档**：cron 工具的 `description` 里写满了 MUST / MUST NOT 规则，LLM 在 system prompt + tool description 双重提示下走对路径；shell + CLI 路径没有任何 in-band 校验
+
+### 0.7 简而言之
+
+- `host-tool` = gateway 把自家能力**声明**给通用 OMP，让 OMP 上的 LLM 当作原生工具调
+- `set_host_tools` = 声明的 wire 格式
+- `host_tool_call` / `host_tool_result` = 调用的往返帧
+- `cron` = gateway 声明的第一个 host tool
+- LLM 看不到"RPC 协议"，看到的只是工具描述和 `tool_use` 块
+
 ## 1. 概述
 
 pi-gateway 通过两条路径接收 cron 任务创建：
