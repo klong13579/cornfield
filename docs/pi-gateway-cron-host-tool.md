@@ -121,6 +121,11 @@ Host-Tool 机制把 gateway 端的本地实现（cron storage、channel registry
 - actions：`add | list | show | update | remove | enable | disable | run | runs`
 - 参数 schema 通过 `@sinclair/typebox` 严格约束
 - `add` 操作的 description 强制要求 LLM **省略** `delivery` 字段，由 gateway 端 auto-infer（见 §2.4）
+- `add` 端在 `SchedulerDbStorage.addTask` 写入时 stamp 2 个 audit 字段：
+  - `createdByUserId = bridge.getActiveChatContext()?.userId`（可选；无 chat context 时为 `undefined`）
+  - `createdByAccountId = ctx.accountId`（永远有；OMP 进程绑定的 accountId）
+- `createdBy*` 是 **audit 字段**，不参与访问控制。**scope = agent**：同一 OMP 进程里的所有用户共享同一个 task list（`StorageDbStorage` 已经是 per-account / per-agent）。`list` / `show` / `update` / `remove` / `runs` 不过滤。LLM 想答"哪些是我创建的"可以调 `list` 后在 result 上 client-side filter `createdByUserId === <current userId>`。
+- 详见 §6.5 跟 openclaw 的对照。
 
 **`run` action 当前是占位符**：
 ```ts
@@ -375,6 +380,17 @@ Q1 定案后还需走清：
 - Q4：取消语义（LLM / 用户中途取消 `test-run` 时如何中断 in-flight 轮询 + 还原快照）
 - Q5：并发（同 session 多任务测试 / 同账号多 session 并发 test-run）
 
+### 5.4 scope 决策（2026-06-30）
+
+Q1 之前先决的 scope 问题，结论：
+
+- **scope = agent**（= OMP 进程 = `SchedulerDbStorage` 所在的 SQLite），不是 user，也不是 conversation
+- `createdByUserId` / `createdByAccountId` 是 audit 字段，**不**控制可见性
+- `list` / `show` / `update` / `remove` / `runs` 不过滤：同一 agent 内的任何 user、任何 conversation 调都能看到/管理该 agent 的全部 task
+- 之前讨论中的 `scope` LLM 参数、跨 scope 写、admin `--all-users` flag、legacy task migration — **全部不实现**
+
+LLM 的 `cron` 工具 description 已写明这一点：「`My` in a cron context refers to the current agent, not the user asking. All users in the same agent see the same task list」。
+
 ## 6. Doc-drift 修复记录
 
 ### 6.1 修复内容
@@ -417,6 +433,35 @@ Q1 定案后还需走清：
 | `omp-sw/.omp/SYSTEM.md` | 替换 v1 cron block → 指针 |
 
 后续 `test-run` 加进 host tool 时，`TOOLS.md` 同步加 action 说明；CLI `--help` 同步加；`SYSTEM.md` 不沾 cron。
+
+### 6.5 跟 openclaw 的对照（2026-06-30 收口）
+
+[openclaw 的 `cron-tool.ts`](https://github.com/openclaw/openclaw/blob/9098e948/src/agents/tools/cron-tool.ts) 是本设计的参考。但我们在 scope 问题上**不需要像 openclaw 那样大动**。
+
+#### openclaw 的问题 & 修复现状
+
+openclaw 的 [issue #26370](https://github.com/openclaw/openclaw/issues/26370) （canonical tracker，🦞 diamond lobster，P1，2026-04 仍 open）报的是 **per-agent 隔离** 缺位：他们的 gateway 进程跑多个 agent，LLM in agent A 能看到/改 agent B 的 task。修了一半：`listPage()` 接受 `agentId` 过滤参数（已 merge），但 `update` / `remove` / `run` 仍按 `id` 操作、**没有 caller ownership 校验**。还有 [#49175](https://github.com/openclaw/openclaw/issues/49175) 跟踪 `cron.runs` all-scope 泄漏 job name。
+
+zard-wang 在 #26370 里描述的"user A 在 wecom 看到 user B 的 task 并误改" 问题，他自己试过 prompt / SKILL.md / 自定义字段过滤全部失败，结论是 "prompt-based filtering is fundamentally unreliable for privacy. This needs a hard constraint at the API level"。
+
+#### 我们的情况
+
+**我们不需要这次修复**。原因：
+
+- 我们是 **OMP-per-accountId** 架构：每个 accountId = 一个 OMP subprocess，cron 存储 (`SchedulerDbStorage`) 是 per-account SQLite。`storage.listTasks()` 返的就是该 account 的全部 task，**进程级隔离已经天然保证** —— 跟 openclaw 一个 gateway 进程跑多 agent 是不同拓扑。
+- **account = agent**。同一 agent 内的多用户共享 task list（这正是用户明确要求的"我 = agent"语义），所以**不需要** per-user / per-conversation 过滤。
+- `createdByUserId` / `createdByAccountId` 是 audit 字段，记"谁创建的"（运维 / 审计用），**不**参与访问控制。
+- `list` / `show` / `update` / `remove` / `runs` 不做任何 scope check；LLM 调任何 action 都是看/管理该 agent 的全部 task。
+
+#### 借监 & 后续可借鉴
+
+openclaw 里几个 openclaw-only 的能力（跟我们当前架构 / scope 决决策不冲突）：
+
+- `includeDisabled` / `enabled: "all|enabled|disabled"` / `scheduleKind` / `lastRunStatus` 过滤：v2 增强
+- `query: string` 全文搜索 / `sortBy / sortDir`：v2 增强
+- `runMode: "due" | "force"`：`run` action 落地时复用
+- `contextMessages: 0-10`：`add` 引用上下文消息
+- `wake: { text, mode: "now" | "next-heartbeat" }`：新加 host tool
 
 ## 7. Host-Tool 扩展路线图
 
