@@ -458,8 +458,8 @@ Cron management commands:
 // ═══════════════════════════════════════════════════════════════════════
 
 async function cmdServiceInstall(): Promise<void> {
-	const cliPath = import.meta.path;
-	await installService(cliPath);
+	// No-arg: dev/prod is detected inside installService from process.argv[1].
+	await installService();
 	console.log("Service installed. Run 'pi-gateway service start' to begin.");
 }
 

@@ -6,6 +6,16 @@
  * - Linux: systemd (user-level service)
  *
  * User-level services do not require sudo.
+ *
+ * Dev / prod detection:
+ *   The plist's `ProgramArguments` is built from `process.execPath` and
+ *   (in dev mode) `process.argv[1]`. Dev mode is detected the same way as
+ *   the daemonize path in `coding-agent/src/commands/gateway.ts`:
+ *     - argv[1] ends with `.ts` or `.js` → dev (we're inside a bun run)
+ *     - otherwise → prod (we're inside the compiled `omp` binary)
+ *   In dev the plist invokes `bun <entry> gateway start --foreground`; in
+ *   prod it invokes `omp gateway start --foreground`. Both end up at the
+ *   same oclif gateway command.
  */
 
 import * as fs from "node:fs/promises";
@@ -71,21 +81,32 @@ export function getServicePaths() {
 // ═══════════════════════════════════════════════════════════════════════
 
 /**
- * Resolve the runtime binary path for the service.
- *
- * When running inside the compiled omp binary (PI_COMPILED=true),
- * process.execPath is the compiled binary, not bun. The compiled binary
- * bundles coding-agent's full initialization (model discovery, MCP loading)
- * which blocks gateway startup. Use bun directly for the service.
+ * True when the current process is running from a .ts/.js entry under bun,
+ * i.e. `bun run packages/coding-agent/src/cli.ts gateway service install`.
+ * False when running from a compiled binary (`omp gateway service install`).
  */
-function getRuntimePath(): string {
-	if (process.env.PI_COMPILED === "true") {
-		return Bun.which("bun") ?? process.execPath;
-	}
-	return process.execPath;
+function detectDevMode(): boolean {
+	const entry = process.argv[1];
+	return !!(entry && (entry.endsWith(".ts") || entry.endsWith(".js")));
 }
 
-function generateLaunchdPlist(cliPath: string, logPath: string): string {
+/**
+ * Build the argv that launchd / systemd should exec.
+ *
+ *   dev: [bun, /abs/path/to/entry.ts, gateway, start, --foreground]
+ *   prod: [/abs/path/to/omp, gateway, start, --foreground]
+ */
+function buildServiceArgv(): string[] {
+	const runtime = process.execPath;
+	if (detectDevMode() && process.argv[1]) {
+		return [runtime, process.argv[1], "gateway", "start", "--foreground"];
+	}
+	return [runtime, "gateway", "start", "--foreground"];
+}
+
+function generateLaunchdPlist(logPath: string): string {
+	const argv = buildServiceArgv();
+	const argTags = argv.map(a => `\t\t<string>${a}</string>`).join("\n");
 	return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -93,10 +114,8 @@ function generateLaunchdPlist(cliPath: string, logPath: string): string {
 	<key>Label</key>
 	<string>${SERVICE_NAME}</string>
 	<key>ProgramArguments</key>
-		<string>${getRuntimePath()}</string>
-		<string>${cliPath}</string>
-		<string>start</string>
-		<string>--foreground</string>
+	<array>
+${argTags}
 	</array>
 	<key>RunAtLoad</key>
 	<true/>
@@ -118,7 +137,9 @@ function generateLaunchdPlist(cliPath: string, logPath: string): string {
 </plist>`;
 }
 
-function generateSystemdService(cliPath: string, logPath: string): string {
+function generateSystemdService(logPath: string): string {
+	const argv = buildServiceArgv();
+	const execStart = argv.map(a => (a.includes(" ") ? `"${a}"` : a)).join(" ");
 	return `[Unit]
 Description=${SERVICE_LABEL}
 After=network-online.target
@@ -126,7 +147,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=${getRuntimePath()} ${cliPath} start --foreground
+ExecStart=${execStart}
 Restart=on-failure
 RestartSec=5
 StandardOutput=append:${logPath}
@@ -152,21 +173,23 @@ export interface ServiceStatus {
 
 /**
  * Install pi-gateway as a system service.
+ *
+ * The plist / unit is built from the current `process.execPath` and
+ * (in dev mode) `process.argv[1]`. See the file header for the dev/prod
+ * detection contract.
  */
-export async function installService(cliPath: string): Promise<void> {
+export async function installService(): Promise<void> {
 	const paths = getServicePaths();
 	const platform = detectPlatform();
 
-	logger.debug("Installing service", { platform, configPath: paths.configPath });
+	logger.debug("Installing service", { platform, configPath: paths.configPath, devMode: detectDevMode() });
 
 	// Ensure log directory exists
 	await fs.mkdir(paths.logDir, { recursive: true });
 
 	// Generate config
 	const config =
-		platform === "darwin"
-			? generateLaunchdPlist(cliPath, paths.logPath)
-			: generateSystemdService(cliPath, paths.logPath);
+		platform === "darwin" ? generateLaunchdPlist(paths.logPath) : generateSystemdService(paths.logPath);
 
 	// Ensure config directory exists
 	await fs.mkdir(paths.configDir, { recursive: true });

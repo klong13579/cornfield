@@ -546,11 +546,10 @@ Cron management commands:
 
 		switch (sub) {
 			case "install": {
-				// Resolve pi-gateway CLI path from the package location
-				const path = require("node:path");
-				const piGatewayPkg = require.resolve("@oh-my-pi/pi-gateway/package.json");
-				const cliPath = path.join(path.dirname(piGatewayPkg), "src", "cli.ts");
-				await installService(cliPath);
+				// No-arg: dev/prod is detected inside installService from process.argv[1].
+				// (Previously this resolved `<pi-gateway>/src/cli.ts` and passed it through,
+				// which only worked in dev mode and broke the compiled-binary install path.)
+				await installService();
 				console.log("Service installed. Run 'omp gateway service start' to begin.");
 				break;
 			}

@@ -191,6 +191,14 @@
 
 - **`initTheme()` call from the gateway oclif command**: The gateway command is non-interactive; it never renders TUI components. `initTheme()` was a leftover from the original TUI-mode command shape, loading theme files and (when enabled) starting a filesystem watcher for the theme directory. The call did no useful work in this command and added startup time.
 
+### Changed
+
+- **`installService()` no longer takes a `cliPath` argument** (`src/service-installer.ts`): The plist / unit is now built from the current `process.execPath` and (in dev mode) `process.argv[1]`. Dev mode is detected the same way as the daemonize path in `coding-agent/src/commands/gateway.ts` (argv[1] ends in `.ts` or `.js`). The old signature forced callers to pre-resolve a path that only made sense in dev mode (`<pi-gateway>/src/cli.ts`) and silently produced a broken plist when invoked from the compiled `omp` binary. Both modes now route to the same oclif gateway command.
+
+### Removed
+
+- **`getRuntimePath()`** (`src/service-installer.ts`): The function did two unrelated things — runtime selection (`process.execPath` vs `Bun.which("bun")` based on `PI_COMPILED`) and conflated entry-file passing through its return value. With the new dev/prod detection on argv[1], the runtime is just `process.execPath` (which is `bun` in dev, the `omp` binary in prod) and the entry file is a separate `process.argv[1]` element.
+
 ## [14.5.12] - 2026-04-30
 
 ### Added
