@@ -172,6 +172,25 @@
 
 - `pi-gateway install` output: the "下一步" hint now lists `omp agent show <accountId>` and `omp agent validate --dir <agentDir>` so users can verify the agentDir created during install. Also fixes a missing path separator in the "编辑 `<agentDir>/.omp/config.yml`" hint that previously rendered as `agentDir.omp/config.yml`.
 
+### Added
+
+- **`runInteractiveSetup()` in `src/setup.ts`**: New module exporting the DingTalk setup wizard as a library function. Replaces the inline wizard previously embedded in `cli.ts#cmdInstall` (and re-implemented via subprocess in `coding-agent/src/commands/gateway.ts#setup`). Returns a discriminated union `{ ok: true, accountId, agentDir, configPath, createdAccount } | { ok: false, reason, message }` so callers can branch on the outcome without parsing stdout. The legacy `pi-gateway install` CLI is now a thin wrapper that delegates to this function; `omp gateway setup` calls it directly — no subprocess spawn.
+- **`--non-interactive` flag on `omp gateway setup`**: When set, the wizard prints a "manually edit the config file" hint and exits non-zero. Useful for CI / scripted deployments. The flag is also accepted (and behaves identically) on the legacy `pi-gateway install` for symmetry.
+- **Contract test `test/setup.test.ts`**: Pins the non-interactive fast-path (3 cases: explicit flag, piped stdin, no side effects on the config file). The interactive path is exercised by manual QA.
+
+### Changed
+
+- **`omp gateway setup` no longer spawns a subprocess**: The oclif `setup` action now imports `runInteractiveSetup` from `@oh-my-pi/pi-gateway/src/setup` and calls it in-process. The previous path resolved the `pi-gateway` package location on disk, constructed a path to its `src/cli.ts`, and ran `bun <cliPath> install` as a subprocess — a brittle setup that depended on `bun` being on PATH at runtime and on the legacy CLI's working directory resolution. The new path is a direct function call.
+- **`pi-gateway install` is now a 7-line wrapper around `runInteractiveSetup`**: The 152-line inline wizard body is gone from `cli.ts`. Any future change to the wizard (prompt ordering, validation, new fields) lands in one place.
+
+### Fixed
+
+- **`omp gateway start --foreground` was missing restart-recovery**: The legacy `pi-gateway start` (in the now-deprecated `cli.ts`) called `gateway.resumeFromSentinel()` after `gateway.start()` to resume any interrupted conversation from a previous gateway run. The oclif rewrite of the gateway command dropped this call. Result: a gateway restart would lose the restart-sentinel recovery path. The call is restored in `coding-agent/src/commands/gateway.ts#start.foreground`, wrapped in `try/catch` with a `logger.warn` on failure (matching the original behavior).
+
+### Removed
+
+- **`initTheme()` call from the gateway oclif command**: The gateway command is non-interactive; it never renders TUI components. `initTheme()` was a leftover from the original TUI-mode command shape, loading theme files and (when enabled) starting a filesystem watcher for the theme directory. The call did no useful work in this command and added startup time.
+
 ## [14.5.12] - 2026-04-30
 
 ### Added

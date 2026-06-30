@@ -26,7 +26,6 @@
 import * as path from "node:path";
 import { logger } from "@oh-my-pi/pi-utils";
 import { Args, Command, Flags, renderCommandHelp } from "@oh-my-pi/pi-utils/cli";
-import { initTheme } from "../modes/theme/theme";
 
 const ACTIONS = [
 	"start",
@@ -57,6 +56,9 @@ export default class Gateway extends Command {
 	static flags = {
 		foreground: Flags.boolean({ description: "Run in foreground (used internally for daemon mode)" }),
 		config: Flags.string({ description: "Path to gateway config file (default: ~/.omp/gateway.json)" }),
+		nonInteractive: Flags.boolean({
+			description: "Skip prompts; for setup action, prints manual-edit instructions and exits",
+		}),
 	};
 
 	static examples = [
@@ -79,6 +81,7 @@ export default class Gateway extends Command {
 		"",
 		"  ======== 配置 ========",
 		"  omp gateway setup                        Interactive DingTalk credential setup",
+		"  omp gateway setup --non-interactive      Print manual-edit instructions and exit (for CI/scripting)",
 		"  omp gateway config                       Print resolved config",
 		"  omp gateway config --config /path/gw.json Print custom config",
 		"",
@@ -100,7 +103,6 @@ export default class Gateway extends Command {
 
 	async run(): Promise<void> {
 		const { args, flags } = await this.parse(Gateway);
-		await initTheme();
 		await this.#runGateway(args.action, flags);
 	}
 
@@ -156,6 +158,21 @@ export default class Gateway extends Command {
 					});
 
 					await gateway.start();
+
+					// Attempt to resume any interrupted conversation from a previous gateway run.
+					// This reads the restart sentinel (if present) and sends a continuation message
+					// to the agent so it can acknowledge the restart and continue where it left off.
+					try {
+						const resumed = await gateway.resumeFromSentinel();
+						if (resumed) {
+							logger.info("Restart recovery completed successfully");
+						}
+					} catch (err) {
+						logger.warn("Restart recovery failed", {
+							error: err instanceof Error ? err.message : String(err),
+						});
+					}
+
 					await new Promise(() => {});
 					break;
 				}
@@ -369,12 +386,20 @@ export default class Gateway extends Command {
 				break;
 			}
 			case "setup": {
-				// Delegate to pi-gateway CLI install
-				const { $ } = await import("bun");
-				const path = require("node:path");
-				const pkg = require.resolve("@oh-my-pi/pi-gateway/package.json");
-				const cliPath = path.join(path.dirname(pkg), "src", "cli.ts");
-				await $`bun ${cliPath} install`.quiet().nothrow();
+				// Direct in-process call into the setup wizard — no subprocess spawn.
+				// The legacy `pi-gateway install` path used `bun <cliPath> install`;
+				// now the wizard lives at `pi-gateway/src/setup.ts` and is invoked
+				// like any other library function.
+				const { runInteractiveSetup } = await import("@oh-my-pi/pi-gateway/src/setup");
+				const result = await runInteractiveSetup({
+					configPath,
+					nonInteractive: Boolean(flags.nonInteractive),
+				});
+				if (!result.ok) {
+					// Non-interactive / missing input / dedup. Already echoed to the user
+					// by the wizard; exit non-zero for scripting.
+					process.exitCode = 1;
+				}
 				break;
 			}
 			case "help":
