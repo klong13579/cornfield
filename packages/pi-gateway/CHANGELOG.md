@@ -199,6 +199,23 @@
 
 - **`getRuntimePath()`** (`src/service-installer.ts`): The function did two unrelated things — runtime selection (`process.execPath` vs `Bun.which("bun")` based on `PI_COMPILED`) and conflated entry-file passing through its return value. With the new dev/prod detection on argv[1], the runtime is just `process.execPath` (which is `bun` in dev, the `omp` binary in prod) and the entry file is a separate `process.argv[1]` element.
 
+### Breaking Changes
+
+- **`pi-gateway` binary is removed**. The `bin` entry is gone from `packages/pi-gateway/package.json`. There is no longer a standalone `pi-gateway` CLI on disk or via `npx`. All gateway operations are reached through the unified `omp` binary:
+  - `pi-gateway start` → `omp gateway start`
+  - `pi-gateway stop` → `omp gateway stop`
+  - `pi-gateway status` → `omp gateway status`
+  - `pi-gateway config` → `omp gateway config`
+  - `pi-gateway reload` → `omp gateway reload`
+  - `pi-gateway doctor` → `omp gateway doctor`
+  - `pi-gateway setup` / `pi-gateway install` → `omp gateway setup`
+  - `pi-gateway cron ...` → `omp gateway cron ...`
+  - `pi-gateway service ...` → `omp gateway service ...`
+  - `pi-gateway test-longtask ...` → `omp gateway test-longtask ...`
+  The `omp` invocation is the single entry point and works in both dev (`bun packages/coding-agent/src/cli.ts gateway ...`) and prod (compiled `omp` binary) modes.
+- **`packages/pi-gateway/src/cli.ts` is deleted**. The 776-line legacy CLI is gone. All command dispatch is handled inline in `coding-agent/src/commands/gateway.ts`. Anyone importing from the deleted file (none in this repo) will need to migrate to the oclif gateway command.
+- **`omp schedule ...` is removed**. The hidden compatibility shim that mapped `omp schedule` actions to `pi-gateway cron` is deleted. Use `omp gateway cron ...` for all schedule operations.
+
 ## [14.5.12] - 2026-04-30
 
 ### Added

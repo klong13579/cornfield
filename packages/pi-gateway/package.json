@@ -1,15 +1,12 @@
 {
   "name": "@oh-my-pi/pi-gateway",
-  "version": "14.5.12",
+  "version": "14.5.13",
   "description": "IM gateway for Oh My Pi — connects AI agents to messaging platforms",
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
-  "bin": {
-    "pi-gateway": "./src/cli.ts"
-  },
   "scripts": {
-    "start": "bun run src/cli.ts start",
+    "start": "bun run ../coding-agent/src/cli.ts gateway start",
     "check": "biome check . && tsgo -p tsconfig.json --noEmit",
     "lint": "biome lint .",
     "fmt": "biome format --write .",
