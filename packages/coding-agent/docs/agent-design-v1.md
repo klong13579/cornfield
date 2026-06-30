@@ -38,6 +38,9 @@
 │
 ├── TOOLS.md                           ← [ALWAYS-ON] 工具用法 + co-located MUST/MUST NOT
 │                                           工具级规则紧贴工具描述
+│                                           默认 skeleton 包含 `cron (gateway host tool)`
+│                                           章节（gateway agents 专用）；非 gateway
+│                                           agent 可删。见 `docs/pi-gateway-cron-host-tool.md` §6
 │
 ├── TODO.md                            ← [ALWAYS-ON] 当前任务状态
 │
