@@ -717,17 +717,6 @@ export const SETTINGS_SCHEMA = {
 		},
 	},
 
-	"ask.timeout": {
-		type: "number",
-		default: 30,
-		ui: {
-			tab: "interaction",
-			label: "Ask Timeout",
-			description: "Auto-select recommended option after timeout (0 to disable)",
-			submenu: true,
-		},
-	},
-
 	"ask.notify": {
 		type: "enum",
 		values: ["on", "off"] as const,

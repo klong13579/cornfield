@@ -239,14 +239,6 @@ const OPTION_PROVIDERS: Partial<Record<SettingPath, OptionProvider>> = {
 		{ value: "15", label: "15 items" },
 		{ value: "20", label: "20 items" },
 	],
-	// Ask timeout
-	"ask.timeout": [
-		{ value: "0", label: "Disabled" },
-		{ value: "15", label: "15 seconds" },
-		{ value: "30", label: "30 seconds" },
-		{ value: "60", label: "60 seconds" },
-		{ value: "120", label: "120 seconds" },
-	],
 	// Global tool timeout ceiling
 	"tools.maxTimeout": [
 		{ value: "0", label: "No limit" },

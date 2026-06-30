@@ -12,7 +12,6 @@
  *   - Users will always be able to select "Other" to provide custom text input
  *   - Use multi: true to allow multiple answers to be selected for a question
  *   - Use recommended: <index> to mark the default option; "(Recommended)" suffix is added automatically
- *   - Questions may time out and auto-select the recommended option (configurable, disabled in plan mode)
  */
 
 import type { AgentTool, AgentToolContext, AgentToolResult, AgentToolUpdateCallback } from "@oh-my-pi/pi-agent-core";
@@ -93,14 +92,6 @@ function addRecommendedSuffix(labels: string[], recommendedIndex?: number): stri
 	});
 }
 
-function getAutoSelectionOnTimeout(optionLabels: string[], recommended?: number): string[] {
-	if (optionLabels.length === 0) return [];
-	if (typeof recommended === "number" && recommended >= 0 && recommended < optionLabels.length) {
-		return [optionLabels[recommended]];
-	}
-	return [optionLabels[0]];
-}
-
 /** Strip "(Recommended)" suffix from a label */
 function stripRecommendedSuffix(label: string): string {
 	return label.endsWith(RECOMMENDED_SUFFIX) ? label.slice(0, -RECOMMENDED_SUFFIX.length) : label;
@@ -113,7 +104,6 @@ function stripRecommendedSuffix(label: string): string {
 interface SelectionResult {
 	selectedOptions: string[];
 	customInput?: string;
-	timedOut: boolean;
 	navigation?: "back" | "forward";
 	cancelled?: boolean;
 }
@@ -125,7 +115,6 @@ interface NavigationControls {
 }
 interface AskSingleQuestionOptions {
 	recommended?: number;
-	timeout?: number;
 	signal?: AbortSignal;
 	initialSelection?: Pick<SelectionResult, "selectedOptions" | "customInput">;
 	navigation?: NavigationControls;
@@ -137,10 +126,8 @@ interface UIContext {
 		options: string[],
 		options_?: {
 			initialIndex?: number;
-			timeout?: number;
 			signal?: AbortSignal;
 			outline?: boolean;
-			onTimeout?: () => void;
 			onLeft?: () => void;
 			onRight?: () => void;
 			helpText?: string;
@@ -161,31 +148,24 @@ async function askSingleQuestion(
 	multi: boolean,
 	options: AskSingleQuestionOptions = {},
 ): Promise<SelectionResult> {
-	const { recommended, timeout, signal, initialSelection, navigation } = options;
+	const { recommended, signal, initialSelection, navigation } = options;
 	const doneLabel = getDoneOptionLabel();
 	let selectedOptions = [...(initialSelection?.selectedOptions ?? [])];
 	let customInput = initialSelection?.customInput;
-	let timedOut = false;
 
 	const selectOption = async (
 		prompt: string,
 		optionsToShow: string[],
 		initialIndex?: number,
-	): Promise<{ choice: string | undefined; timedOut: boolean; navigation?: "back" | "forward" }> => {
-		let timeoutTriggered = false;
-		const onTimeout = () => {
-			timeoutTriggered = true;
-		};
+	): Promise<{ choice: string | undefined; navigation?: "back" | "forward" }> => {
 		let navigationAction: "back" | "forward" | undefined;
 		const helpText = navigation
 			? "up/down navigate  enter select  ←/→ question  esc cancel"
 			: "up/down navigate  enter select  esc cancel";
 		const dialogOptions = {
 			initialIndex,
-			timeout,
 			signal,
 			outline: true,
-			onTimeout,
 			helpText,
 			onLeft: navigation?.allowBack
 				? () => {
@@ -198,14 +178,10 @@ async function askSingleQuestion(
 					}
 				: undefined,
 		};
-		const startMs = Date.now();
 		const choice = signal
 			? await untilAborted(signal, () => ui.select(prompt, optionsToShow, dialogOptions))
 			: await ui.select(prompt, optionsToShow, dialogOptions);
-		if (!timeoutTriggered && choice === undefined && typeof timeout === "number") {
-			timeoutTriggered = Date.now() - startMs >= timeout;
-		}
-		return { choice, timedOut: timeoutTriggered, navigation: navigationAction };
+		return { choice, navigation: navigationAction };
 	};
 
 	const promptForCustomInput = async (): Promise<{ input: string | undefined }> => {
@@ -238,29 +214,21 @@ async function askSingleQuestion(
 			opts.push(OTHER_OPTION);
 
 			const prefix = selected.size > 0 ? `(${selected.size} selected) ` : "";
-			const {
-				choice,
-				timedOut: selectTimedOut,
-				navigation: arrowNavigation,
-			} = await selectOption(`${prefix}${promptWithProgress}`, opts, cursorIndex);
+			const { choice, navigation: arrowNavigation } = await selectOption(
+				`${prefix}${promptWithProgress}`,
+				opts,
+				cursorIndex,
+			);
 
 			if (arrowNavigation) {
-				return { selectedOptions: Array.from(selected), customInput, timedOut, navigation: arrowNavigation };
+				return { selectedOptions: Array.from(selected), customInput, navigation: arrowNavigation };
 			}
 			if (choice === undefined) {
-				if (selectTimedOut) {
-					timedOut = true;
-					break;
-				}
-				return { selectedOptions: Array.from(selected), customInput, timedOut, cancelled: true };
+				return { selectedOptions: Array.from(selected), customInput, cancelled: true };
 			}
 			if (choice === doneLabel) break;
 
 			if (choice === OTHER_OPTION) {
-				if (selectTimedOut) {
-					timedOut = true;
-					break;
-				}
 				const customResult = await promptForCustomInput();
 				if (customResult.input === undefined) {
 					break;
@@ -289,11 +257,6 @@ async function askSingleQuestion(
 					selected.add(opt);
 				}
 			}
-
-			if (selectTimedOut) {
-				timedOut = true;
-				break;
-			}
 		}
 		selectedOptions = Array.from(selected);
 	} else {
@@ -313,43 +276,34 @@ async function askSingleQuestion(
 			initialIndex = Math.max(0, Math.min(initialIndex, maxIndex));
 		}
 
-		const {
-			choice,
-			timedOut: selectTimedOut,
-			navigation: arrowNavigation,
-		} = await selectOption(promptWithProgress, optionsWithNavigation, initialIndex);
-		timedOut = selectTimedOut;
+		const { choice, navigation: arrowNavigation } = await selectOption(
+			promptWithProgress,
+			optionsWithNavigation,
+			initialIndex,
+		);
 
 		if (arrowNavigation) {
-			return { selectedOptions, customInput, timedOut, navigation: arrowNavigation };
+			return { selectedOptions, customInput, navigation: arrowNavigation };
 		}
 		if (choice === undefined) {
-			if (!timedOut) {
-				return { selectedOptions, customInput, timedOut, cancelled: true };
-			}
+			return { selectedOptions, customInput, cancelled: true };
 		} else if (choice === OTHER_OPTION) {
-			if (!selectTimedOut) {
-				const customResult = await promptForCustomInput();
-				if (customResult.input !== undefined) {
-					customInput = customResult.input;
-					selectedOptions = [];
-				}
-				// If editor was dismissed (undefined), keep prior selectedOptions/customInput intact
+			const customResult = await promptForCustomInput();
+			if (customResult.input !== undefined) {
+				customInput = customResult.input;
+				selectedOptions = [];
 			}
+			// If editor was dismissed (undefined), keep prior selectedOptions/customInput intact
 		} else {
 			selectedOptions = [stripRecommendedSuffix(choice)];
 			customInput = undefined;
 		}
 		if (navigation?.allowForward) {
-			return { selectedOptions, customInput, timedOut, navigation: "forward" };
+			return { selectedOptions, customInput, navigation: "forward" };
 		}
 	}
 
-	if (timedOut && selectedOptions.length === 0 && customInput === undefined) {
-		selectedOptions = getAutoSelectionOnTimeout(optionLabels, recommended);
-	}
-
-	return { selectedOptions, customInput, timedOut };
+	return { selectedOptions, customInput };
 }
 
 function formatQuestionResult(result: QuestionResult): string {
@@ -418,13 +372,6 @@ export class AskTool implements AgentTool<typeof askSchema, AskToolDetails> {
 				extensionUi.editor(title, prefill, dialogOptions, editorOptions),
 		};
 
-		// Determine timeout based on settings and plan mode
-		const planModeEnabled = this.session.getPlanModeState?.()?.enabled ?? false;
-		// Settings.get("ask.timeout") returns seconds (0 = disabled), convert to ms
-		const timeoutSeconds = this.session.settings.get("ask.timeout");
-		const settingsTimeout = timeoutSeconds === 0 ? null : timeoutSeconds * 1000;
-		const timeout = planModeEnabled ? null : settingsTimeout;
-
 		// Send notification if waiting and not suppressed
 		this.#sendAskNotification();
 
@@ -441,20 +388,19 @@ export class AskTool implements AgentTool<typeof askSchema, AskToolDetails> {
 		) => {
 			const optionLabels = q.options.map(o => o.label);
 			try {
-				const { selectedOptions, customInput, navigation, cancelled, timedOut } = await askSingleQuestion(
+				const { selectedOptions, customInput, navigation, cancelled } = await askSingleQuestion(
 					ui,
 					q.question,
 					optionLabels,
 					q.multi ?? false,
 					{
 						recommended: q.recommended,
-						timeout: timeout ?? undefined,
 						signal,
 						initialSelection: options?.previous,
 						navigation: options?.navigation,
 					},
 				);
-				return { optionLabels, selectedOptions, customInput, navigation, cancelled, timedOut };
+				return { optionLabels, selectedOptions, customInput, navigation, cancelled };
 			} catch (error) {
 				if (error instanceof Error && error.name === "AbortError") {
 					throw new ToolAbortError("Ask input was cancelled");
@@ -465,9 +411,9 @@ export class AskTool implements AgentTool<typeof askSchema, AskToolDetails> {
 
 		if (params.questions.length === 1) {
 			const [q] = params.questions;
-			const { optionLabels, selectedOptions, customInput, cancelled, timedOut } = await askQuestion(q);
+			const { optionLabels, selectedOptions, customInput, cancelled } = await askQuestion(q);
 
-			if (!timedOut && (cancelled || (selectedOptions.length === 0 && customInput === undefined))) {
+			if (cancelled || (selectedOptions.length === 0 && customInput === undefined)) {
 				context.abort();
 				throw new ToolAbortError("Ask tool was cancelled by the user");
 			}
@@ -516,10 +462,9 @@ export class AskTool implements AgentTool<typeof askSchema, AskToolDetails> {
 				customInput,
 				navigation: navAction,
 				cancelled,
-				timedOut,
 			} = await askQuestion(q, { previous, navigation });
 
-			if (cancelled && !timedOut) {
+			if (cancelled) {
 				context.abort();
 				throw new ToolAbortError("Ask tool was cancelled by the user");
 			}
