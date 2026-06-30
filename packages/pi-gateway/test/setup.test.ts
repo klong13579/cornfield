@@ -10,6 +10,8 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { ZodError } from "zod";
+import { validateAndNormalizeConfig } from "../src/config";
 import { runInteractiveSetup } from "../src/setup";
 
 describe("runInteractiveSetup", () => {
@@ -57,5 +59,41 @@ describe("runInteractiveSetup", () => {
 			.then(() => true)
 			.catch(() => false);
 		expect(exists).toBe(false);
+	});
+});
+
+describe("validateAndNormalizeConfig", () => {
+	it("accepts a well-formed dingtalk config and normalizes cron defaults", () => {
+		const r = validateAndNormalizeConfig({
+			channels: {
+				dingtalk: {
+					enabled: true,
+					accounts: { ops: { appKey: "k1", appSecret: "s1" } },
+				},
+			},
+		});
+		expect(r.channels.dingtalk?.accounts?.ops?.appKey).toBe("k1");
+		expect(r.cron.tickIntervalMs).toBe(60_000);
+	});
+
+	it("rejects an account with a missing appKey (write path is strict)", () => {
+		// This is the data-loss guard: the wizard must not write a config
+		// whose accounts the gateway cannot read. loadConfig remains
+		// lenient on its own; see config.ts comment.
+		expect(() =>
+			validateAndNormalizeConfig({
+				channels: {
+					dingtalk: {
+						accounts: { bad: { appSecret: "x" } },
+					},
+				},
+			}),
+		).toThrow(ZodError);
+	});
+
+	it("accepts an empty config and fills in defaults", () => {
+		const r = validateAndNormalizeConfig({});
+		expect(r.cron.tickIntervalMs).toBe(60_000);
+		expect(r.agent.ompPath).toBeDefined();
 	});
 });

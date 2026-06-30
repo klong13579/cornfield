@@ -297,27 +297,80 @@ export default class Gateway extends Command {
 				// based on what's actually running:
 				//
 				//   1. Service installed → stopService / startService (launchd/systemd
-				//      KeepAlive handles the gap).
+				//      KeepAlive handles the gap). We poll the new PID rather than
+				//      blind-sleeping because launchd's KeepAlive backoff can be
+				//      several seconds.
 				//   2. Service not installed, PID file alive → SIGHUP the running
 				//      gateway. The gateway's SIGHUP handler (set up in the
 				//      `--foreground` path) does an in-process config reload and
-				//      avoids a process restart.
+				//      avoids a process restart. We verify the PID is still
+				//      alive AND is actually our gateway (not a PID-recycled
+				//      unrelated process) by inspecting the command line.
 				//   3. Nothing running → clean error.
-				const { isServiceInstalled, stopService, startService } = await import(
+				const { isServiceInstalled, stopService, startService, getServiceStatus } = await import(
 					"@oh-my-pi/pi-gateway/src/service-installer"
 				);
 				const { getGatewayStatus } = await import("@oh-my-pi/pi-gateway/src/gateway-daemon");
 
 				if (await isServiceInstalled()) {
+					const oldStatus = await getServiceStatus();
+					const oldPid = oldStatus.running ? oldStatus.pid : undefined;
 					await stopService();
-					await Bun.sleep(1000);
+					// Wait until the service is actually stopped. launchd's bootout
+					// returns immediately even though the unload is asynchronous;
+					// a subsequent bootstrap too soon after can hit
+					// "Bootstrap failed: 5: Input/output error".
+					const stopDeadline = Date.now() + 5_000;
+					while (Date.now() < stopDeadline) {
+						const s = await getServiceStatus();
+						if (!s.running) break;
+						await Bun.sleep(100);
+					}
 					await startService();
-					console.log("Gateway restarted via system service.");
+					// Wait for the new PID to appear (up to 10s). launchd's
+					// KeepAlive backoff can be ~5s on macOS.
+					const deadline = Date.now() + 10_000;
+					let newPid: number | undefined;
+					while (Date.now() < deadline) {
+						const next = await getServiceStatus();
+						if (next.running && next.pid && next.pid !== oldPid) {
+							newPid = next.pid;
+							break;
+						}
+						await Bun.sleep(250);
+					}
+					if (newPid) {
+						console.log(`Gateway restarted via system service (new PID ${newPid}).`);
+					} else {
+						console.log("Gateway restart requested; new PID not yet visible (check `omp gateway status`).");
+					}
 					return;
 				}
 
 				const status = await getGatewayStatus();
 				if (status.running && status.pid) {
+					// Verify the PID is actually our gateway — not a recycled PID
+					// owned by some unrelated process. We check both liveness
+					// (process.kill 0) and command-line identity (ps -p ... args).
+					let isOurProcess = false;
+					try {
+						process.kill(status.pid, 0);
+						const ps = Bun.spawnSync(["ps", "-p", String(status.pid), "-o", "args="]);
+						const args = ps.stdout.toString();
+						if (args.includes("gateway") && args.includes("--foreground")) {
+							isOurProcess = true;
+						}
+					} catch {
+						// process is gone or ps failed
+					}
+					if (!isOurProcess) {
+						console.error(
+							`PID ${status.pid} from gateway.pid is no longer our gateway process ` +
+								`(stale PID file or PID was recycled). Refusing to send SIGHUP.`,
+						);
+						process.exitCode = 1;
+						return;
+					}
 					try {
 						process.kill(status.pid, "SIGHUP");
 						console.log(`Sent SIGHUP to gateway (PID ${status.pid}) — in-process reload.`);

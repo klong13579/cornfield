@@ -33,6 +33,7 @@
 ### Removed
 
 - **`.agent/` directory from agentDir skeleton**: The skeleton no longer creates `.agent/`, `.agent/prompts/`, `.agent/rules/` directories or the `.agent/SYSTEM.md` file. All capabilities (skills, rules, prompts, commands, SYSTEM.md, AGENTS.md) are fully covered by the `.omp/` directory via the native OMP provider (priority 100). The `agents` discovery provider (`discovery/agents.ts`) is retained for compatibility with user-supplied `.agent/` directories from external tools, but the skeleton itself no longer seeds an empty `.agent/` tree. The legacy `.agent/SYSTEM.md` cleanup in `ensureAgentDir` is preserved to auto-remove files from previously deployed skeletons.
+- **`omp daemon` command file removed**: Deleted `packages/coding-agent/src/commands/daemon.ts`, the deprecation stub that printed "use omp gateway" and exited 1. The file was not registered in `cli.ts` (so `omp daemon` already returned "command not found" — the only place the message ever appeared was the file itself). A previous CHANGELOG entry claimed `omp daemon` "remains as alias", but that promise was never wired up. To avoid future readers relying on the alias, the stub is deleted entirely. `omp gateway` is the only entry point.
 ### Changed
 
 - **Deprecated `omp agents setup`**: Removed the legacy `setup` subcommand from `omp agents` (plural) and its `#handleSetup` method. This was a pre-skeleton gateway bootstrap that generated an incompatible directory layout. Use `omp agent init` (singular) instead, which uses the canonical skeleton template.

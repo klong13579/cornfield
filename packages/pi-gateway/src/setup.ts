@@ -16,8 +16,9 @@
  */
 
 import { runAgentInit } from "@oh-my-pi/pi-coding-agent/cli/agent-cli";
-import type { DingtalkAccountConfig } from "./types";
-import { getConfigPath, loadConfig } from "./config";
+import { ZodError } from "zod";
+import type { DingTalkConfig, DingtalkAccountConfig, GatewayConfig } from "./types";
+import { getConfigPath, loadConfig, validateAndNormalizeConfig } from "./config";
 
 export interface SetupOptions {
 	configPath?: string;
@@ -34,18 +35,17 @@ export type SetupSkipReason =
 	| "missing-app-key"
 	| "missing-app-secret"
 	| "duplicate-app-key"
+	| "invalid-merged-config"
 	| "error";
 
 export async function runInteractiveSetup(opts: SetupOptions = {}): Promise<SetupResult> {
 	const cfgPath = opts.configPath ?? getConfigPath();
-	let existing: Record<string, unknown>;
+	let existing: GatewayConfig;
 	try {
-		// loadConfig returns GatewayConfig; we re-shape it as a plain object
-		// so we can spread existing fields and overlay the new dingtalk config
-		// without TypeScript narrowing the rest of the shape.
-		existing = (await loadConfig(opts.configPath)) as unknown as Record<string, unknown>;
+		// loadConfig returns GatewayConfig; on missing/parse-error it falls back
+		// to DEFAULT_CONFIG so the wizard always has a base shape to extend.
+		existing = await loadConfig(opts.configPath);
 	} catch (err) {
-		// loadConfig throws on parse error — surface as a structured skip.
 		return {
 			ok: false,
 			reason: "error",
@@ -73,23 +73,22 @@ export async function runInteractiveSetup(opts: SetupOptions = {}): Promise<Setu
 	const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 	const ask = (question: string): Promise<string> => new Promise(resolve => rl.question(question, resolve));
 
-	// Show existing accounts
-	const dtConfig = (existing.channels as Record<string, unknown> | undefined)?.dingtalk as
-		| Record<string, unknown>
-		| undefined;
-	const existingAccounts = dtConfig?.accounts as Record<string, { appKey?: string; model?: string }> | undefined;
-	const hasTopLevel = !!(dtConfig as { appKey?: string } | undefined)?.appKey;
+	// Show existing accounts. `existing.channels.dingtalk` is a typed
+	// DingTalkConfig | undefined — no casts needed.
+	const dtConfig: DingTalkConfig | undefined = existing.channels.dingtalk;
+	const existingAccounts: Record<string, DingtalkAccountConfig> = dtConfig?.accounts ?? {};
+	const hasTopLevel = !!dtConfig?.appKey;
 
 	console.log(`\n已配置的账号:`);
 	if (hasTopLevel) {
-		console.log(`  [单账号] appKey: ${(dtConfig as { appKey: string }).appKey}`);
+		console.log(`  [单账号] appKey: ${dtConfig?.appKey}`);
 	}
-	if (existingAccounts && Object.keys(existingAccounts).length > 0) {
+	if (Object.keys(existingAccounts).length > 0) {
 		for (const [id, acct] of Object.entries(existingAccounts)) {
-			console.log(`  ${id}: appKey=${acct.appKey}, model=${acct.model ?? "(默认)"}`);
+			console.log(`  ${id}: appKey=${acct.appKey}, model=${(acct as { model?: string }).model ?? "(默认)"}`);
 		}
 	}
-	if (!hasTopLevel && (!existingAccounts || Object.keys(existingAccounts).length === 0)) {
+	if (!hasTopLevel && Object.keys(existingAccounts).length === 0) {
 		console.log(`  (无)`);
 	}
 
@@ -111,11 +110,9 @@ export async function runInteractiveSetup(opts: SetupOptions = {}): Promise<Setu
 
 	// Dedup: check if same appKey is already configured
 	const allExistingKeys: string[] = [];
-	if (hasTopLevel) allExistingKeys.push((dtConfig as { appKey: string }).appKey);
-	if (existingAccounts) {
-		for (const acct of Object.values(existingAccounts)) {
-			if (acct.appKey) allExistingKeys.push(acct.appKey);
-		}
+	if (hasTopLevel && dtConfig?.appKey) allExistingKeys.push(dtConfig.appKey);
+	for (const acct of Object.values(existingAccounts)) {
+		if (acct.appKey) allExistingKeys.push(acct.appKey);
 	}
 	if (allExistingKeys.includes(appKey)) {
 		console.log(`\n⚠️ AppKey "${appKey}" 已经配置过了，跳过。`);
@@ -168,11 +165,9 @@ export async function runInteractiveSetup(opts: SetupOptions = {}): Promise<Setu
 		};
 	}
 
-	// Build config. The existing map may have been read through `unknown`
-	// (we only narrowed it to a partial shape for dedup), so widen via
-	// spread + cast for the type-safe assignment below.
-	const existingAccountMap = (existingAccounts ?? {}) as Record<string, DingtalkAccountConfig>;
-	const accounts: Record<string, DingtalkAccountConfig> = { ...existingAccountMap };
+	// Build the new dingtalk channel. Preserve existing policies and ACLs
+	// (allowedUsers / allowedGroups) so the wizard is a no-op for those fields.
+	const accounts: Record<string, DingtalkAccountConfig> = { ...existingAccounts };
 	accounts[accountId] = {
 		appKey,
 		appSecret,
@@ -180,23 +175,48 @@ export async function runInteractiveSetup(opts: SetupOptions = {}): Promise<Setu
 		agentDir,
 	};
 
-	// Config uses accounts map (not top-level appKey/appSecret)
-	const config = {
+	const mergedRaw = {
 		...existing,
 		channels: {
-			...((existing.channels as Record<string, unknown> | undefined) ?? {}),
+			...existing.channels,
 			dingtalk: {
 				enabled: true,
-				dmPolicy: (dtConfig as { dmPolicy?: string } | undefined)?.dmPolicy ?? "open",
-				groupPolicy: (dtConfig as { groupPolicy?: string } | undefined)?.groupPolicy ?? "allowlist",
-				allowedUsers: (dtConfig as { allowedUsers?: unknown[] } | undefined)?.allowedUsers ?? [],
-				allowedGroups: (dtConfig as { allowedGroups?: unknown[] } | undefined)?.allowedGroups ?? [],
+				dmPolicy: dtConfig?.dmPolicy ?? "open",
+				groupPolicy: dtConfig?.groupPolicy ?? "allowlist",
+				allowedUsers: dtConfig?.allowedUsers ?? [],
+				allowedGroups: dtConfig?.allowedGroups ?? [],
 				accounts,
 			},
 		},
 	};
 
-	await Bun.write(cfgPath, JSON.stringify(config, null, 2));
+	// Validate the merged shape against gatewayConfigSchema. If the merged
+	// object fails the schema (e.g. because existing config has fields that
+	// were valid in an older schema version but aren't anymore), we refuse
+	// to write a config that loadConfig() would silently replace with
+	// DEFAULT_CONFIG on the next read — that path is a data-loss footgun.
+	let normalized: GatewayConfig;
+	try {
+		normalized = validateAndNormalizeConfig(mergedRaw);
+	} catch (err) {
+		const issues =
+			err instanceof ZodError
+				? err.issues.map(i => `  - ${i.path.join(".") || "(root)"}: ${i.message}`).join("\n")
+				: (err as Error).message;
+		console.error(`\n❌ 合并后的 config 不通过 schema 校验，拒绝写入 ${cfgPath}:`);
+		console.error(issues);
+		console.error("\n请手动编辑 gateway.json 修复上述问题后再试。");
+		return {
+			ok: false,
+			reason: "invalid-merged-config",
+			message: `Merged config failed schema validation; not written. ${issues}`,
+		};
+	}
+
+	// Write the NORMALIZED form (defaults filled in, fields renamed) rather
+	// than the raw merge — keeps the file consistent with what loadConfig
+	// would have produced from it.
+	await Bun.write(cfgPath, JSON.stringify(normalized, null, 2));
 
 	console.log(`\n✅ 配置已写入 ${cfgPath}`);
 	console.log(`   账号: ${accountId}`);

@@ -33,7 +33,7 @@ const dingtalkAccountConfigSchema = z.object({
 
 const permissionPolicySchema = z.enum(["open", "allowlist", "closed"]).default("allowlist");
 
-const dingtalkConfigSchema = channelConfigSchema.extend({
+export const dingtalkConfigSchema = channelConfigSchema.extend({
 	appKey: z.string().min(1).optional(),
 	appSecret: z.string().min(1).optional(),
 	robotCode: z.string().optional(),
@@ -71,6 +71,15 @@ const cronConfigSchema = z.object({
 });
 
 const gatewayConfigSchema = z.object({
+	// Channels are intentionally typed `z.record(z.string(), z.any())` so that
+	// `loadConfig` can read configs that contain unknown / older channel keys
+	// without dropping user data on parse failure (loadConfig's catch falls
+	// back to DEFAULT_CONFIG — the gateway must still boot). Per-channel
+	// strictness is applied at WRITE time by the setup wizard via
+	// `validateAndNormalizeConfig` (which calls `dingtalkConfigSchema.parse`
+	// separately on the merged payload before saving). Don't tighten this
+	// schema's channel rule without coordinating with loadConfig's error
+	// handling.
 	channels: z.record(z.string(), z.any()).default({}),
 	agent: agentConfigSchema.optional(),
 	session: sessionConfigSchema.optional(),
@@ -142,6 +151,46 @@ export async function loadConfig(configPath?: string): Promise<GatewayConfig> {
 		}
 		return DEFAULT_CONFIG;
 	}
+}
+
+/**
+ * Validate an in-memory config object and return the normalized form.
+ *
+ * Throws ZodError on schema violation — the caller is expected to surface
+ * the issue (e.g. setup wizard: refuse to write a config that the gateway
+ * would refuse to load). The default-merge mirrors {@link loadConfig} so
+ * both paths return the same shape.
+ *
+ * Per-channel strictness (e.g. dingtalk `accounts.<id>.appKey` non-empty) is
+ * applied here even though {@link loadConfig} is intentionally loose on
+ * `channels` — loadConfig must read user-edited configs without dropping
+ * data, but the wizard's WRITE path should refuse to produce invalid
+ * payloads. See the comment on `gatewayConfigSchema.channels` for the
+ * reasoning.
+ *
+ * Exists so callers that build a config programmatically (e.g. the
+ * `omp gateway setup` wizard) can validate before writing to disk.
+ */
+export function validateAndNormalizeConfig(raw: unknown): GatewayConfig {
+	const validated = gatewayConfigSchema.parse(raw);
+
+	// Strict per-channel validation at write time. The top-level
+	// `gatewayConfigSchema` keeps `channels` as `z.any()` for forward
+	// compatibility (loadConfig's read path), but anything we generate
+	// here must be a well-typed DingTalkConfig if it's labeled "dingtalk".
+	const channels = validated.channels as Record<string, unknown> | undefined;
+	const dt = channels?.dingtalk;
+	if (dt !== undefined) {
+		dingtalkConfigSchema.parse(dt);
+	}
+
+	return {
+		...DEFAULT_CONFIG,
+		...validated,
+		agent: { ...DEFAULT_CONFIG.agent, ...validated.agent },
+		session: { ...DEFAULT_CONFIG.session, ...validated.session },
+		cron: { ...DEFAULT_CONFIG.cron, ...validated.cron },
+	};
 }
 
 /**
