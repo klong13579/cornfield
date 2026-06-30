@@ -51,7 +51,7 @@ Edit an existing file via `atom` / `hashline` / `patch` mode.
 
 **Scope = agent (this account).** "My" in a cron context refers to the current agent (= this OMP subprocess / this account), not the user asking. All users in the same agent see the same task list; the agent owns its tasks. There is no per-user or per-conversation scope — `cron.list` returns ALL tasks in this agent, regardless of who created them or which chat is active. Each task records its creator in `createdByUserId` (audit field); if the user asks "which tasks did I create", call `cron.list` then filter the result client-side by `createdByUserId === <current sender staffId>`. See `docs/pi-gateway-cron-host-tool.md` §6.5 for the design rationale.
 
-Actions: `add` / `list` / `show` / `update` / `remove` / `enable` / `disable` / `runs`.
+Actions: `add` / `list` / `show` / `update` / `remove` / `enable` / `disable` / `runs` / `test-run`.
 
 - MUST use the `cron` host tool for any scheduled-task operation. Do NOT run `omp gateway cron create` / `update` / `list` / etc. from `bash` — that's the operator CLI path.
 - MUST omit the `delivery` field on `cron.add` when the user is in a chat. The gateway auto-infers `{channel, accountId, toUserId}` for DM and `{channel, accountId, toConversationId}` for group from the active conversation. Do NOT read `gateway.json` / `BOOT.md` / call `dws` to look up the sender.
@@ -76,4 +76,6 @@ Example `cron.add` call (DM context, daily 18:30 report):
 ```
 
 No `delivery` field — gateway infers `{channel, accountId, toUserId}` from the current DM via `getActiveChatContext()`.
+
+**`test-run` (verification path)**: triggers a task through the REAL scheduler and reports the delivery verdict. Use after `add` / `update` to confirm the task actually works end-to-end (warm bridge → agent run → DingTalk delivery). Default duration: 90s `inMs` (1.5x the 60s gateway tick) + 30s `testTimeoutMs` = 120s total. The original schedule is ALWAYS restored after the run (in `finally`), even on timeout / abort / failure. `result.kind` is one of `success` / `trigger_timeout` / `task_failed` / `delivery_failed` / `aborted`. `isError: true` on the host tool result for non-`success` kinds. Pass `noRestore: true` only for debug — it leaves the schedule on `+<delay>s once`. Do NOT call test-run speculatively; it's a long tool call.
 

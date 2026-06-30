@@ -459,6 +459,13 @@ export class Gateway {
 			registry: this.#registry,
 			getStorage: () => this.#cronLifecycle.schedulerStorage,
 			accountId,
+			// `cron` is optional in GatewayConfig; fall back to the same
+			// 60_000ms default the cronConfigSchema applies. The cron
+			// tool uses this to warn about racy `inMs` values in the
+			// `test-run` action; under-estimating is safe (warns more
+			// often) while over-estimating would silently miss the
+			// warning.
+			tickIntervalMs: this.#config.cron?.tickIntervalMs ?? 60_000,
 		};
 		dispatcher.setTools(createCronToolDefinitions(ctx));
 		return dispatcher;

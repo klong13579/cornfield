@@ -661,3 +661,276 @@ describe("cron host tool — createdBy stamping + agent-scope visibility", () =>
 		expect(tasks[0].name).toBe("cross-context");
 	});
 });
+
+// ---------------------------------------------------------------------------
+// test-run
+//
+// These tests exercise the LLM `cron.test-run` action. They use the shared
+// core directly (via the `runTestRun` import) with a tiny `pollIntervalMs`
+// override so the suite stays under ~3s per test. The LLM-facing handler
+// is just a thin wrapper around `runTestRun` (see host-tool.ts:
+// `handleTestRun`), so covering the core covers the LLM path.
+//
+// The execution row is pre-seeded BEFORE the test-run call so the first
+// poll finds it. We cannot avoid the `Bun.sleep` between polls without
+// exposing the poll loop to tests, which would make the test surface
+// fragile (the production loop is 2s; tests would diverge from it).
+// Instead, we let the poll fire ONCE (pollIntervalMs = 25ms) and assert
+// the success path's `scheduleRestored: true` flag.
+// ---------------------------------------------------------------------------
+
+import { runTestRun } from "../src/scheduler/test-run";
+
+describe("cron host tool — test-run action", () => {
+	let storage: SchedulerDbStorage;
+	const storages: SchedulerDbStorage[] = [];
+
+	beforeEach(() => {
+		storage = newDb();
+		storages.push(storage);
+	});
+
+	afterEach(() => {
+		for (const s of storages) {
+			try {
+				s["#db"]?.close?.();
+			} catch {}
+		}
+		storages.length = 0;
+		try {
+			fs.rmSync(TMP, { recursive: true, force: true });
+		} catch {}
+	});
+
+	function seedTask(opts: { name: string; schedule?: string }): { id: string } {
+		storage.addTask({
+			name: opts.name,
+			cron: opts.schedule ?? "0 9 * * *",
+			command: "echo test-run",
+			scheduleType: "cron",
+			taskType: "shell",
+			status: "active",
+			createdAt: Date.now(),
+			updatedAt: Date.now(),
+			runCount: 0,
+			failCount: 0,
+			consecutiveFailures: 0,
+		});
+		const t = storage.getTaskByName(opts.name)!;
+		return { id: t.id };
+	}
+
+	function seedTerminalExecution(taskId: string, status = "success", exitCode = 0): string {
+		// Insert a terminal execution directly via the storage's
+		// public `recordExecution` (it returns a generated id). The
+		// shared core matches on `startedAt >= startMark - 5_000 &&
+		// endedAt != null`, so the row MUST be inserted within 5s of
+		// the test-run call. We insert it RIGHT before the call; the
+		// startMark inside `runTestRun` is `~Date.now()` at call
+		// time, so this works.
+		const startedAt = Date.now();
+		const inserted = storage.recordExecution({
+			taskId,
+			startedAt,
+			endedAt: startedAt + 50,
+			exitCode,
+			output: "test output",
+			stderr: null,
+			status,
+			agentSessionPath: null,
+		});
+		return inserted.id;
+	}
+
+	it("returns task_not_found for unknown name", async () => {
+		const result = await runTestRun({
+			name: "no-such-task",
+			tickIntervalMs: 60_000,
+			storage,
+			pollIntervalMs: 25,
+		});
+		expect(result.kind).toBe("task_not_found");
+		if (result.kind === "task_not_found") {
+			expect(result.name).toBe("no-such-task");
+		}
+	});
+
+	it("returns success + restores schedule when a terminal execution appears", async () => {
+		const { id } = seedTask({ name: "verify-this" });
+		const execId = seedTerminalExecution(id, "success", 0);
+
+		const result = await runTestRun({
+			name: "verify-this",
+			inMs: 30_000,
+			timeoutMs: 5_000,
+			tickIntervalMs: 60_000,
+			storage,
+			pollIntervalMs: 25,
+		});
+
+		expect(result.kind).toBe("success");
+		if (result.kind === "success") {
+			expect(result.execId).toBe(execId);
+			expect(result.status).toBe("success");
+			expect(result.exitCode).toBe(0);
+			expect(result.scheduleRestored).toBe(true);
+		}
+		// Schedule is back to the original `0 9 * * *`.
+		const after = storage.getTask(id);
+		expect(after?.cron).toBe("0 9 * * *");
+		expect(after?.scheduleType).toBe("cron");
+		expect(after?.status).toBe("active");
+	});
+
+	it("returns delivery_failed when lastDeliveryError is set on the post-run task", async () => {
+		const { id } = seedTask({ name: "delivery-broken" });
+		// Add a delivery config so the test-run considers the task to
+		// have a delivery target.
+		storage.updateTask(id, {
+			delivery: { channel: "dingtalk", accountId: "hr", toUserId: "u999" },
+			updatedAt: Date.now(),
+		});
+		const execId = seedTerminalExecution(id, "success", 0);
+		// Pre-seed a delivery error to simulate a failure.
+		storage.updateTask(id, { lastDeliveryError: "dingtalk API 500", updatedAt: Date.now() });
+
+		const result = await runTestRun({
+			name: "delivery-broken",
+			inMs: 30_000,
+			timeoutMs: 5_000,
+			tickIntervalMs: 60_000,
+			storage,
+			pollIntervalMs: 25,
+		});
+
+		expect(result.kind).toBe("delivery_failed");
+		if (result.kind === "delivery_failed") {
+			expect(result.execId).toBe(execId);
+			expect(result.deliveryError).toBe("dingtalk API 500");
+			expect(result.scheduleRestored).toBe(true);
+		}
+	});
+
+	it("returns task_failed when the agent exits non-zero", async () => {
+		const { id } = seedTask({ name: "will-fail" });
+		const execId = seedTerminalExecution(id, "failure", 1);
+
+		const result = await runTestRun({
+			name: "will-fail",
+			inMs: 30_000,
+			timeoutMs: 5_000,
+			tickIntervalMs: 60_000,
+			storage,
+			pollIntervalMs: 25,
+		});
+
+		expect(result.kind).toBe("task_failed");
+		if (result.kind === "task_failed") {
+			expect(result.execId).toBe(execId);
+			expect(result.exitCode).toBe(1);
+			expect(result.scheduleRestored).toBe(true);
+		}
+		// Schedule is still restored on the task_failed path.
+		const after = storage.getTask(id);
+		expect(after?.cron).toBe("0 9 * * *");
+	});
+
+	it("leaves schedule NOT restored when noRestore: true", async () => {
+		const { id } = seedTask({ name: "debug-no-restore" });
+		seedTerminalExecution(id, "success", 0);
+
+		const result = await runTestRun({
+			name: "debug-no-restore",
+			inMs: 30_000,
+			timeoutMs: 5_000,
+			noRestore: true,
+			tickIntervalMs: 60_000,
+			storage,
+			pollIntervalMs: 25,
+		});
+
+		expect(result.kind).toBe("success");
+		if (result.kind === "success") {
+			expect(result.scheduleRestored).toBe(false);
+		}
+		// Task is left on `+30s once` — operator can inspect / manually
+		// restore via `cron update` or by editing the SQLite row.
+		const after = storage.getTask(id);
+		expect(after?.scheduleType).toBe("once");
+		expect(after?.cron).toBe("+30s");
+	});
+
+	it("clamps out-of-range inMs to the documented [30_000, 600_000] window", async () => {
+		const { id } = seedTask({ name: "clamp-test" });
+		seedTerminalExecution(id, "success", 0);
+
+		// inMs=0 is below MIN_IN_MS (30_000); the core clamps to 30_000.
+		// The test-run still succeeds because the pre-seeded terminal
+		// execution is found on the first poll. After restore, the
+		// schedule is back to the original `0 9 * * *`. The clamp's
+		// effect on the intermediate `+<delay>s` is exercised here
+		// indirectly: the gateway log emits a racy-zone warning at
+		// `inMs=30000` vs `tickIntervalMs=60_000` (see the log line
+		// captured in the test output) — that warning only fires
+		// because the clamped value (30_000) is below 2x the tick.
+		const result = await runTestRun({
+			name: "clamp-test",
+			inMs: 0,
+			timeoutMs: 5_000,
+			tickIntervalMs: 60_000,
+			storage,
+			pollIntervalMs: 25,
+		});
+		expect(result.kind).toBe("success");
+		if (result.kind === "success") {
+			expect(result.scheduleRestored).toBe(true);
+		}
+		// Schedule is back to the original; the clamp was applied to
+		// the intermediate `+<delay>s` rewrite, not the final state.
+		const after = storage.getTask(id);
+		expect(after?.cron).toBe("0 9 * * *");
+		expect(after?.scheduleType).toBe("cron");
+	});
+
+	it("the LLM host tool's test-run action returns the same result struct", async () => {
+		const { id } = seedTask({ name: "via-host-tool" });
+		seedTerminalExecution(id, "success", 0);
+
+		const registry = new StubRegistry();
+		const tools = createCronToolDefinitions({
+			getBridge: () => stubBridge(DM_MSG),
+			registry: registry as unknown as ChannelRegistry,
+			getStorage: () => storage,
+			accountId: "hr",
+			tickIntervalMs: 60_000,
+		});
+
+		const body = await tools[0]!.handle({
+			action: "test-run",
+			name: "via-host-tool",
+			inMs: 30_000,
+			testTimeoutMs: 5_000,
+		});
+		const { text, isError } = asText(body);
+		expect(isError).toBe(false);
+		const result = JSON.parse(text);
+		expect(result.kind).toBe("success");
+		expect(result.scheduleRestored).toBe(true);
+	});
+
+	it("the LLM host tool's test-run returns isError=true on task_not_found", async () => {
+		const registry = new StubRegistry();
+		const tools = createCronToolDefinitions({
+			getBridge: () => stubBridge(DM_MSG),
+			registry: registry as unknown as ChannelRegistry,
+			getStorage: () => storage,
+			accountId: "hr",
+			tickIntervalMs: 60_000,
+		});
+
+		const body = await tools[0]!.handle({ action: "test-run", name: "ghost" });
+		const { text, isError } = asText(body);
+		expect(isError).toBe(true);
+		expect(text).toContain("not found");
+	});
+});

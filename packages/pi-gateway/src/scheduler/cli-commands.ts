@@ -15,6 +15,7 @@ import { findAgentSessionPath } from "../session-paths";
 import { appendExecutionLog } from "./execution-log";
 import { executeScheduledCommand, scanCronPrompt } from "./executor";
 import type { SchedulerDbStorage } from "./storage";
+import { runTestRun, type TestRunHardError, type TestRunResult } from "./test-run";
 import {
 	formatExecutionRow,
 	formatTaskRow,
@@ -22,7 +23,6 @@ import {
 	getNextRun,
 	isDaemonRunning,
 	parseSchedule,
-	type TaskExecution,
 } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -657,19 +657,18 @@ export async function cronRun(name: string, storage: SchedulerDbStorage): Promis
 /**
  * Options for `cron test-run`.
  *
- * The command takes a snapshot of the task's schedule, rewrites it to a
- * one-shot that fires shortly, polls the executions table for the new run,
- * then restores the original schedule. This is the **only** way to verify
- * a task's end-to-end pipeline (warm bridge → agent → DingTalk delivery)
- * without waiting for the real cron tick. The CLI `cron run` skips
- * delivery by design; `test-run` goes through the real scheduler.
+ * The CLI version parses these from argv; the LLM `cron` host tool
+ * action `test-run` accepts the same shape (camelCase). The shared
+ * core lives in `test-run.ts` (`runTestRun`).
  */
 export interface CronTestRunOptions {
-	/** Trigger delay from now. Default 70_000ms. Anything < 60s may race the
+	/** Trigger delay from now. Default 90_000ms. Anything < 60s may race the
 	 *  gateway's reload tick (default 60s) and end up with a past-dated
 	 *  next_run_at that the engine auto-disables. */
 	inMs?: number;
-	/** Total wait timeout for the new execution. Default 130_000ms. */
+	/** How long to wait for the agent run to reach a terminal state
+	 *  after the trigger fires. Default 30_000ms. Total wall-time is
+	 *  `inMs + timeoutMs` (default 120s). */
 	timeoutMs?: number;
 	/** If true, leave the schedule as `+<delay>` after the run. Default
 	 *  false: always restore. */
@@ -680,20 +679,21 @@ export interface CronTestRunOptions {
 }
 
 /**
- * Trigger `<name>` through the real scheduler path and report the
- * observed run + delivery. The original schedule is restored in
- * `finally` (unless `--no-restore`).
+ * CLI front-end for `omp gateway cron test-run <name>`. The core
+ * schedule-rewrite + poll + restore logic lives in `test-run.ts`
+ * (`runTestRun`); this function owns argv parsing, SIGINT/SIGTERM
+ * restore, console output, and process.exitCode translation.
  *
- * Edge cases handled:
- *   - task not found, or gateway not running → error, no state change
- *   - SIGINT/SIGTERM mid-wait → restore the snapshot before exiting
- *   - timeout waiting for trigger → restore the snapshot, exit 1
- *   - delivery failure (task ran OK, but `task.last_delivery_error`
- *     populated by `CronService.#onTrigger`) → exit 1 with reason
+ * The shared core is non-negotiable: the LLM `cron` host tool's
+ * `test-run` action calls the same `runTestRun`. A drift between
+ * CLI and LLM behavior would mean the operator verifies one thing
+ * and the agent verifies another — exactly the kind of split that
+ * hides bugs.
  *
- * Exit codes:
+ * Exit codes (matched to host-tool `isError: true` semantics):
  *   0  trigger fired, task exited 0, delivery succeeded (or no delivery)
  *   1  timeout, task not found, task exited non-zero, or delivery failed
+ *  130 / 143  SIGINT / SIGTERM during wait (schedule restored in handler)
  */
 export async function cronTestRun(args: string[], storage: SchedulerDbStorage): Promise<void> {
 	const name = args[0];
@@ -705,15 +705,8 @@ export async function cronTestRun(args: string[], storage: SchedulerDbStorage): 
 
 	// Parse flags. We accept the three documented flags plus an internal
 	// `_gatewayTickMs` knob for tests that drive a faster tick.
-	//
-	// Default `--in` is 90s, which is 1.5x the default gateway tick
-	// (60s). With `--in = tickMs` the engine has exactly one reload
-	// window to pick up the change before the next_run_at goes past
-	// and gets auto-disabled. 1.5x gives a 50% margin; users with a
-	// non-default `tickIntervalMs` in their gateway config should
-	// pass `--in` ≥ 2 × their tick for absolute reliability.
-	let inMs = 90_000;
-	let timeoutMs = 150_000;
+	let inMs: number | undefined;
+	let timeoutMs: number | undefined;
 	let noRestore = false;
 	let gatewayTickMs = 60_000;
 	for (let i = 1; i < args.length; i++) {
@@ -736,32 +729,28 @@ export async function cronTestRun(args: string[], storage: SchedulerDbStorage): 
 		}
 	}
 
-	// Safety: warn if user picked a delay that the gateway tick is
-	// likely to outrun. The engine auto-disables a once task whose
-	// next_run_at has already passed when it reloads. With the
-	// default 60s gateway tick, any `--in ≤ 60s` can land on a
-	// tick that races past next_run_at; `--in ≤ 120s` is risky in
-	// roughly half of the possible tick phases.
-	if (inMs < gatewayTickMs) {
-		console.error(
-			`[test-run] WARNING: --in ${inMs}ms is shorter than the gateway tick (${gatewayTickMs}ms). ` +
-				`The scheduler will almost certainly reload AFTER next_run_at and auto-disable the task. ` +
-				`Pick a delay >= ${gatewayTickMs * 2}ms for reliable triggering.`,
-		);
-	} else if (inMs < gatewayTickMs * 2) {
-		console.error(
-			`[test-run] NOTE: --in ${inMs}ms is in the racy zone (between 1x and 2x the ${gatewayTickMs}ms tick). ` +
-				`Works most of the time, but if the trigger doesn't fire within --timeout, try --in ${gatewayTickMs * 2}ms.`,
-		);
-	}
+	// AbortController wires the CLI's signal handling into the
+	// AbortSignal that `runTestRun` honors. The handler restores
+	// nothing directly — the shared core's `finally` block does the
+	// restore; the CLI handler just aborts the polling loop and lets
+	// the core return. The shared core then exits with
+	// `kind: "aborted"`.
+	const ac = new AbortController();
+	const onSig = () => ac.abort();
+	process.once("SIGINT", () => {
+		onSig();
+		process.exit(130);
+	});
+	process.once("SIGTERM", () => {
+		onSig();
+		process.exit(143);
+	});
 
-	const task = storage.getTaskByName(name);
-	if (!task) {
-		console.error(`Task "${name}" not found.`);
-		process.exitCode = 1;
-		return;
-	}
-
+	// Fast-fail if the gateway daemon is not running. The shared core
+	// would eventually time out (no scheduler tick to pick up the
+	// schedule change), but the operator gets a clearer error this
+	// way. This check is CLI-only; the LLM host tool assumes the
+	// gateway is running (otherwise the dispatcher wouldn't exist).
 	const pidPath = getGatewayPidPath();
 	if (!isDaemonRunning(pidPath)) {
 		console.error(
@@ -771,178 +760,91 @@ export async function cronTestRun(args: string[], storage: SchedulerDbStorage): 
 		return;
 	}
 
-	// Snapshot. We restore ALL of these on exit (success, error, SIGINT).
-	const snapshot = {
-		cron: task.cron,
-		scheduleType: task.scheduleType,
-		nextRunAt: task.nextRunAt,
-		status: task.status,
-	};
-	const hadDelivery = Boolean(task.delivery ?? task.deliver);
-	const targetTime = Date.now() + inMs;
-	const delaySec = Math.ceil(inMs / 1000);
-	const startedAt = Date.now();
+	console.log(`[test-run] Task "${name}" — preparing test-run (snapshot, rewrite to one-shot, wait, restore).`);
 
-	console.log(`[test-run] Task "${name}" — backing up schedule.`);
-	console.log(
-		`[test-run]   was:  cron=${JSON.stringify(snapshot.cron)} scheduleType=${snapshot.scheduleType ?? "?"} status=${snapshot.status}`,
-	);
-	console.log(`[test-run]   next: ${snapshot.nextRunAt ? new Date(snapshot.nextRunAt).toLocaleString() : "(none)"}`);
-	console.log(
-		`[test-run] Setting one-shot trigger in ${inMs}ms (cron=+${delaySec}s, scheduleType=once, nextRunAt=${new Date(targetTime).toLocaleString()})`,
-	);
-	console.log(`[test-run] Waiting for the gateway scheduler to pick up the change and fire...`);
-
-	storage.updateTask(task.id, {
-		cron: `+${delaySec}s`,
-		scheduleType: "once",
-		nextRunAt: targetTime,
-		status: "active",
-		updatedAt: Date.now(),
+	const result: TestRunResult | TestRunHardError = await runTestRun({
+		name,
+		inMs,
+		timeoutMs,
+		noRestore,
+		tickIntervalMs: gatewayTickMs,
+		signal: ac.signal,
+		storage,
 	});
 
-	const restoreSnapshot = () => {
-		try {
-			storage.updateTask(task.id, {
-				cron: snapshot.cron,
-				scheduleType: snapshot.scheduleType,
-				nextRunAt: snapshot.nextRunAt,
-				status: snapshot.status,
-				updatedAt: Date.now(),
-			});
-		} catch (err) {
-			console.error(
-				`[test-run] FATAL: failed to restore schedule for "${name}". Run \`omp gateway cron update ${name} ...\` manually. error=${err}`,
-			);
-		}
-	};
-	let restored = false;
-	const restoreOnce = () => {
-		if (restored || noRestore) return;
-		restored = true;
-		restoreSnapshot();
-	};
-	// Hook signals so a Ctrl-C in the middle of the wait doesn't leave
-	// the task stuck on +<delay>s.
-	const sigHandler = () => {
-		restoreOnce();
-	};
-	process.once("SIGINT", () => {
-		sigHandler();
-		process.exit(130);
-	});
-	process.once("SIGTERM", () => {
-		sigHandler();
-		process.exit(143);
-	});
-
-	// Snapshot a high-water-mark of `startedAt` we already saw. The
-	// polling loop's `find(e => e.startedAt >= ...)` re-checks each
-	// iteration, so we only need the *time*, not the count: even if
-	// the engine writes 5 more executions, the filter selects the
-	// right one. Counting is fragile when test fixtures pre-seed
-	// rows — the function should never assume the count strictly
-	// increases.
-	const startMark = Date.now();
-	let execution: TaskExecution | undefined;
-	let pollCount = 0;
-	try {
-		const pollIntervalMs = 2_000;
-		while (Date.now() - startMark < timeoutMs) {
-			await Bun.sleep(pollIntervalMs);
-			pollCount++;
-			// Look at the latest few executions; the newest one in
-			// the window is almost always the one we want. We only
-			// accept a TERMINAL execution (`endedAt != null`): the
-			// engine writes a "running" record at trigger time and
-			// updates it to "success"/"failure" when the agent
-			// finishes, and we want the final state (especially for
-			// the delivery verdict, which only writes after the
-			// agent completes).
-			const execs = storage.getExecutions(task.id, 50);
-			const candidate = execs.find(e => e.startedAt >= startMark - 5_000 && e.endedAt != null);
-			if (candidate) {
-				execution = candidate;
-				break;
-			}
-			// Periodic progress line so an operator can see the
-			// function is still alive and not stuck. Suppressed
-			// before the trigger is reasonably expected (so we
-			// don't spam pre-trigger polls).
-			if (pollCount % 10 === 0) {
-				console.log(
-					`[test-run]   ...still polling (${pollCount} polls, ${Math.round((Date.now() - startMark) / 1000)}s elapsed)`,
-				);
-			}
-		}
-	} finally {
-		restoreOnce();
+	if (result.kind === "task_not_found") {
+		console.error(`Task "${name}" not found.`);
+		process.exitCode = 1;
+		return;
 	}
 
-	if (!execution) {
-		// Maybe the trigger fired but hasn't finished yet — surface that
-		// to the operator instead of just "timed out".
-		const runningExec = storage.getExecutions(task.id, 50).find(e => e.startedAt >= startMark - 5_000);
-		if (runningExec) {
+	// Print result in CLI format. We translate the structured
+	// result to the same console layout the operator was getting
+	// before the refactor.
+	if (result.kind === "trigger_timeout") {
+		if (result.sawRunningExec) {
 			console.error(
-				`[test-run] Trigger fired (exec ${runningExec.id}) but agent did NOT reach a terminal state within ${timeoutMs}ms.`,
+				`[test-run] Trigger fired (exec ${result.runningExecId}) but agent did NOT reach a terminal state within the wait window.`,
 			);
 			console.error(`[test-run] Check the gateway log (~/.omp/logs/omp.*.log) for the latest activity on this run.`);
 		} else {
-			console.error(`[test-run] Timed out after ${timeoutMs}ms waiting for trigger.`);
+			console.error(`[test-run] Timed out waiting for trigger.`);
 		}
 		console.error(`[test-run] Schedule ${noRestore ? "NOT " : ""}restored to original.`);
 		process.exitCode = 1;
 		return;
 	}
 
-	const triggerLatencyMs = execution.startedAt - startedAt;
-	console.log(`[test-run] Triggered after ~${Math.max(0, triggerLatencyMs)}ms (poll wait)`);
-	console.log(`  exec id:   ${execution.id}`);
-	console.log(`  status:    ${execution.status}`);
-	console.log(`  exit:      ${execution.exitCode}`);
-	// `durationMs` is not stored on the executions row (see storage.ts
-	// — only the time range is persisted). Compute it from start/end
-	// so the operator gets a useful number.
-	const computedDurMs = execution.endedAt != null ? execution.endedAt - execution.startedAt : undefined;
-	console.log(`  duration:  ${computedDurMs ?? "?"}ms`);
-	if (execution.stderr) {
-		console.log(`  stderr:    ${execution.stderr.slice(0, 500)}`);
+	if (result.kind === "aborted") {
+		console.log(`[test-run] Aborted after ${Math.round(result.waitedMs / 1000)}s; schedule ${result.scheduleRestored ? "" : "NOT "}restored.`);
+		// The signal handler will exit(130/143); we don't set exitCode
+		// here to avoid clobbering the signal-driven exit code.
+		return;
 	}
 
-	// Delivery verdict: the scheduler writes `last_delivery_error` on
-	// failure and clears it on success (cron-service.ts). Re-read the
-	// task so we see the post-trigger state.
-	const taskAfter = storage.getTaskByName(name);
-	const deliveryError = taskAfter?.lastDeliveryError ?? null;
-	if (hadDelivery) {
-		if (deliveryError) {
-			console.log(`  deliver:   FAILED — ${deliveryError}`);
-			process.exitCode = 1;
-		} else {
-			console.log(`  deliver:   ok`);
-		}
+	if (result.kind === "task_failed") {
+		console.log(`  exec id:   ${result.execId}`);
+		console.log(`  status:    ${result.status}`);
+		console.log(`  exit:      ${result.exitCode}`);
+		if (result.stderr) console.log(`  stderr:    ${result.stderr.slice(0, 500)}`);
+		console.log(
+			`[test-run] Schedule ${result.scheduleRestored ? "restored to original." : "NOT restored (--no-restore). Task is now cron='+<delay>s' once."}`,
+		);
+		process.exitCode = 1;
+		return;
+	}
+
+	if (result.kind === "delivery_failed") {
+		console.log(`  exec id:   ${result.execId}`);
+		console.log(`  status:    ${result.status}`);
+		console.log(`  exit:      ${result.exitCode}`);
+		console.log(`  deliver:   FAILED — ${result.deliveryError}`);
+		console.log(
+			`[test-run] Schedule ${result.scheduleRestored ? "restored to original." : "NOT restored (--no-restore). Task is now cron='+<delay>s' once."}`,
+		);
+		process.exitCode = 1;
+		return;
+	}
+
+	// Success
+	console.log(`[test-run] Triggered after ~${result.triggerLatencyMs}ms (poll wait)`);
+	console.log(`  exec id:   ${result.execId}`);
+	console.log(`  status:    ${result.status}`);
+	console.log(`  exit:      ${result.exitCode}`);
+	console.log(`  duration:  ${result.durationMs ?? "?"}ms`);
+	if (result.stderr) console.log(`  stderr:    ${result.stderr.slice(0, 500)}`);
+	if (result.delivery.configured) {
+		console.log(`  deliver:   ${result.delivery.ok ? "ok" : `FAILED — ${result.delivery.error}`}`);
 	} else {
 		console.log(`  deliver:   n/a (task has no delivery config)`);
 	}
-
-	if (execution.output) {
+	if (result.output) {
 		console.log(`  --- output (truncated to 2K) ---`);
-		console.log(execution.output.slice(0, 2000));
+		console.log(result.output.slice(0, 2000));
 	}
-
-	if (noRestore) {
-		console.log(`[test-run] Schedule NOT restored (--no-restore). Task is now cron='+${delaySec}s' once.`);
-	} else {
-		console.log(
-			`[test-run] Schedule restored to ${JSON.stringify(snapshot.cron)} (next: ${snapshot.nextRunAt ? new Date(snapshot.nextRunAt).toLocaleString() : "(none)"}).`,
-		);
-	}
-
-	// Final exit code: 0 if everything is fine, 1 if task or delivery failed.
-	if (process.exitCode === undefined && (execution.status !== "success" || execution.exitCode !== 0)) {
-		process.exitCode = 1;
-	}
+	console.log(
+		`[test-run] Schedule ${result.scheduleRestored ? "restored to original." : "NOT restored (--no-restore). Task is now cron='+<delay>s' once."}`,
+	);
 }
 
 /**

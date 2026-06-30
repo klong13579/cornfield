@@ -24,6 +24,7 @@ import type { ChannelRegistry } from "../channels/registry";
 import type { HostToolHandler, HostToolResultBody, RpcHostToolDefinition } from "../host-tool-dispatcher";
 import type { InboundMessage } from "../types";
 import type { SchedulerDbStorage } from "./storage";
+import { runTestRun, type TestRunHardError, type TestRunResult } from "./test-run";
 import {
 	type CronDeliveryOutput,
 	parseSchedule,
@@ -59,6 +60,14 @@ export interface CronToolContext {
 	 * agent's identity for the lifetime of the dispatcher.
 	 */
 	accountId: string;
+	/**
+	 * Gateway scheduler tick interval in ms (default 60_000). The
+	 * `test-run` action uses this to warn the LLM when its `inMs`
+	 * lands in the racy zone relative to the tick. The gateway passes
+	 * `this.#config.cron.tickIntervalMs` here; the cron tool does
+	 * not need to know about gateway config otherwise.
+	 */
+	tickIntervalMs: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -76,6 +85,7 @@ const CRON_TOOL_PARAMETERS = Type.Object({
 		Type.Literal("disable"),
 		Type.Literal("run"),
 		Type.Literal("runs"),
+		Type.Literal("test-run"),
 	]),
 	name: Type.Optional(Type.String({ description: "Task name (must be unique). Used by add." })),
 	id: Type.Optional(Type.String({ description: "Task id. Used by update / remove / show / run / runs." })),
@@ -105,6 +115,12 @@ const CRON_TOOL_PARAMETERS = Type.Object({
 			mode: Type.Optional(Type.Union([Type.Literal("announce"), Type.Literal("none")])),
 		}),
 	),
+	// test-run-only options
+	inMs: Type.Optional(Type.Number({ description: "test-run only: delay (ms) before one-shot fires. Default 90000." })),
+	testTimeoutMs: Type.Optional(
+		Type.Number({ description: "test-run only: max wait (ms) for agent terminal state after trigger fires. Default 30000." }),
+	),
+	noRestore: Type.Optional(Type.Boolean({ description: "test-run only: keep the schedule as +<delay>s after the run. Default false." })),
 });
 
 const CRON_TOOL_DEFINITION: RpcHostToolDefinition = {
@@ -118,7 +134,7 @@ const CRON_TOOL_DEFINITION: RpcHostToolDefinition = {
 		"the answer is the agent's full task list, not just tasks the user created. " +
 		"`createdByUserId` and `createdByAccountId` on each task are audit fields; do not use them to filter by creator. " +
 		"Use `cron.list` to enumerate, then client-side filter by `createdByUserId` only if the user explicitly asks \"which tasks did I create\".\n\n" +
-		"Actions: `add` / `list` / `show` / `update` / `remove` / `enable` / `disable` / `runs`.\n\n" +
+		"Actions: `add` / `list` / `show` / `update` / `remove` / `enable` / `disable` / `runs` / `test-run`.\n\n" +
 		"**MANDATORY: use this host tool, NOT `bash` + `omp gateway cron ...` CLI.** Calling the CLI from bash bypasses delivery auto-inference and you will fail to set the sender's userId / conversationId correctly. The host tool reads the active chat context and fills delivery in for you. If you find yourself typing `omp gateway cron` in a `bash` call, STOP and use this tool instead.\n\n" +
 		"**`add` example (DM, agent task, 18:00 daily report):**\n" +
 		"```\n" +
@@ -142,7 +158,16 @@ const CRON_TOOL_DEFINITION: RpcHostToolDefinition = {
 		"- After `add`, the tool returns the persisted task — read it back and report name / schedule / delivery / `createdByUserId` (creator) to the user verbatim.\n\n" +
 		"**`update` / `show` / `remove` / `enable` / `disable` / `runs`** take `id` or `name`. The v2 schema uses `channel` / `toUserId` / `toConversationId` (NOT v1 `deliver` / `deliverUser` / `account`). " +
 		"Since the agent owns its tasks, `show` / `update` / `remove` work on ANY task in the agent regardless of who created it. " +
-		"`runs` returns the task's execution history (also works on any task in the agent).",
+		"`runs` returns the task's execution history (also works on any task in the agent).\n\n" +
+		"**`test-run`** triggers a task through the REAL scheduler and reports the delivery verdict. " +
+		"Use this to verify a task's end-to-end pipeline (warm bridge → agent run → DingTalk delivery) without waiting for the actual cron tick. " +
+		"**What test-run does:** snapshots the task's schedule, rewrites it to a one-shot that fires in `inMs` (default 90s = 1.5x the gateway tick), waits up to `inMs + testTimeoutMs` for the trigger to fire AND the agent to reach a terminal state, then RESTORES the original schedule. " +
+		"**Result fields:** `kind` (success / trigger_timeout / task_failed / delivery_failed / aborted), `execId`, `status`, `exitCode`, `durationMs`, `delivery: {configured, ok, error}`, `output` (truncated to 2KB), `scheduleRestored`. " +
+		"**When to use:** the user just added/updated a task and wants to confirm it works end-to-end (including the DingTalk message reaching the chat). " +
+		"**Critical:** test-run is a LONG tool call — default 90s + 30s = 120s. Do NOT call it speculatively. " +
+		"**`inMs` warning:** if `inMs` < 2x the gateway tick (default 120s), the trigger may race; the run still proceeds but the gateway logs a warning. " +
+		"**`noRestore: true`** keeps the schedule as `+<delay>s` after the run (debug escape hatch only). " +
+		"**Cancellation:** if the user aborts mid-wait, the schedule is STILL restored in the background — a test-run never leaves a task stuck on `+<delay>s once`.",
 	parameters: CRON_TOOL_PARAMETERS as unknown as Record<string, unknown>,
 };
 
@@ -166,7 +191,10 @@ export function createCronToolDefinitions(ctx: CronToolContext): HostToolHandler
 // ---------------------------------------------------------------------------
 
 interface CronToolArgs {
-	action: "add" | "list" | "show" | "update" | "remove" | "enable" | "disable" | "run" | "runs";
+	action: "add" | "list" | "show" | "update" | "remove" | "enable" | "disable" | "run" | "runs" | "test-run";
+	inMs?: number;
+	testTimeoutMs?: number;
+	noRestore?: boolean;
 	[key: string]: unknown;
 }
 
@@ -193,6 +221,8 @@ async function handleCronAction(args: CronToolArgs, ctx: CronToolContext): Promi
 				return errResult("'run' via LLM is not yet supported; use `omp gateway cron run <name>` from the CLI");
 			case "runs":
 				return handleRuns(args, storage);
+			case "test-run":
+				return await handleTestRun(args, ctx);
 			default:
 				return errResult(`Unknown action: ${String(args.action)}`);
 		}
@@ -201,6 +231,51 @@ async function handleCronAction(args: CronToolArgs, ctx: CronToolContext): Promi
 		logger.error("[CronTool] action failed", { action: args.action, error: message });
 		return errResult(message);
 	}
+}
+
+// ---------------------------------------------------------------------------
+// test-run
+// ---------------------------------------------------------------------------
+
+async function handleTestRun(args: CronToolArgs, ctx: CronToolContext): Promise<HostToolResultBody> {
+	const storage = ctx.getStorage();
+	if (!storage) return errResult("test-run: cron storage is not initialized (gateway scheduler not started yet)");
+
+	const name = stringArg(args, "name");
+	if (!name) return errResult("test-run: name is required");
+
+	// Note: the gateway's HostToolDispatcher doesn't surface an
+	// AbortSignal to the handler yet (see host-tool-dispatcher.ts:
+	// `HostToolHandler.handle(args)` takes only args). If the LLM
+	// aborts the tool call mid-wait, the gateway continues polling
+	// and the result is dropped on the OMP side. The schedule
+	// restore in `runTestRun`'s `finally` still happens, so this is
+	// safe — just wasteful. Wiring the cancel frame through to the
+	// dispatcher is future work; for now we pass no signal and let
+	// the run complete in the background.
+	const result: TestRunResult | TestRunHardError = await runTestRun({
+		name,
+		inMs: numberArg(args, "inMs"),
+		timeoutMs: numberArg(args, "testTimeoutMs"),
+		noRestore: args.noRestore === true,
+		tickIntervalMs: ctx.tickIntervalMs,
+		storage,
+	});
+
+	if (result.kind === "task_not_found") {
+		return errResult(`test-run: task "${result.name}" not found`);
+	}
+
+	// `isError: true` for non-success kinds so the LLM sees a failed
+	// tool call (matching the CLI's exit-1 semantics). Success returns
+	// the full result struct; the LLM can read the fields verbatim.
+	const isError = result.kind !== "success";
+	return {
+		type: "tool_result",
+		tool_use_id: "",
+		content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+		isError,
+	};
 }
 
 // ---------------------------------------------------------------------------
