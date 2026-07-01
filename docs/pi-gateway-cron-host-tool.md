@@ -1,6 +1,6 @@
 # pi-gateway Cron 模块与 Host-Tool 机制
 
-> 状态：Q1（test-run 暴露形态）已 ship（2026-06-30，见 §7.2）。后续 design walk-through 会继续跟进 Q2-Q5。
+> 状态：Tier 1 两项均已 ship（2026-06-30）——`cron.test-run`（commit ca8c50d8c） + `bridge.status`（commit 计划在本次设计走完后）。Q2-Q5 后续 design walk-through 仍待跟进。
 
 ## 0. 导读
 
@@ -89,7 +89,7 @@ pi-gateway 通过两条路径接收 cron 任务创建：
 
 Host-Tool 机制把 gateway 端的本地实现（cron storage、channel registry、活跃聊天上下文）通过 OMP RPC 协议暴露给 LLM，使 LLM 能在 IM 聊天中完成"创建/查询/修改定时任务"等操作。
 
-本文档是 `test-run` 等更多 host-tool 能力的设计起点。`test-run`（触发任务走真实调度路径以验证端到端）在 CLI 侧（`omp gateway cron test-run <name>`）和 LLM `cron` host tool `action: "test-run"` 均已 ship（共享 `test-run.ts:runTestRun` core，2026-06-30）。后续 Q2-Q5（return shape / blocking model / cancel / concurrency）仍在本设计文档的待决列表里。
+本文档是 `test-run` 等更多 host-tool 能力的设计起点。Tier 1 两项已 ship（2026-06-30）：`test-run`（`cron` tool 的 `action: "test-run"`，CLI + LLM 共享 `test-run.ts:runTestRun` core）+ `bridge.status`（独立 host tool，返回 AgentBridge snapshot + 派生的 `summary`）。后续 Q2-Q5（return shape / blocking model / cancel / concurrency）仍在本设计文档的待决列表里。
 
 ## 2. 现状机制
 
@@ -369,11 +369,11 @@ LLM 自动调 `cron.testRun(name)`，handler 走真实调度路径，验证 warm
 
 **初步推荐：A**。`test-run` 语义上是 `cron` 域内的操作（"测试一个已存在的 cron 任务"），独立 tool 会割裂概念；阻塞时间虽然长，但可以通过让 handler 立刻返回 + scheduler 通过正常 channel delivery 回推结果来缓解（具体策略见后续 design walk-through）。
 
-> 等待用户决策 Q1 后继续。
+> Q1 定案为 A，于 2026-06-30 ship（commit ca8c50d8c）。详见 §7.2。同时 `bridge.status`（Tier 1 另一项）于同日 ship。
 
 ### 5.3 后续 design walk-through 待办
 
-Q1 已定案（2026-06-30）。Q2-Q5 还未做：
+Q1 已定案（2026-06-30）。`bridge.status` 也在同日 ship。Q2-Q5 还未做：
 
 - Q2：返回内容形态（`host_tool_result` 是结构化 JSON 还是自然语言？LLM 如何根据 verdict 生成回复？）
   - 初步走向：结构化 JSON（当前已 ship）。LLM 根据 `result.kind` 决定语气。后续可考虑 verdict→自然语言的 adapter 层。
@@ -483,7 +483,7 @@ openclaw 里几个 openclaw-only 的能力（跟我们当前架构 / scope 决�
 | 能力 | 理由 | 改动点 |
 |---|---|---|
 | `cron.test-run` ✅ **已 ship（2026-06-30）** | LLM 需要验证"任务真的能跑通端到端"才能放心让用户用 | `host-tool.ts` 加 `case "test-run"` + `handleTestRun`；抽出 `test-run.ts:runTestRun` 作为 CLI + LLM 共享 core（避免语义 drift）；`gateway.ts` 加 `tickIntervalMs`；`CRON_TOOL_DEFINITION` 补全 description；4 个 workspace `TOOLS.md` 同步加 action 说明 + 同步 `test-run` 预警文案 |
-| `bridge.status` | LLM 在 30 分钟没回应时想知道是 bridge 卡了还是自己卡了。`agent-bridge.ts:321` `getSnapshot()` 已经算好 circuit/crash/lifecycle/queue 状态，薄薄一层 wrapper 即可 | `host-tool.ts` 加 `createBridgeStatusToolDefinitions(ctx)`，`gateway.ts:#buildHostToolDispatcher` 多调一次 `dispatcher.setTools([...cron, ...bridgeStatus])`；4 个 workspace `TOOLS.md` 加章节 |
+| `bridge.status` ✅ **已 ship（2026-06-30）** | LLM 在 30 分钟没回应时想知道是 bridge 卡了还是自己卡了。`agent-bridge.ts:325` `getSnapshot()` 已经算好 circuit/crash/lifecycle/queue 状态，薄薄一层 wrapper 即可 | 新建 `src/bridge-status-tool.ts`（不在 `scheduler/` 下因为不是 cron 事项）；`gateway.ts:#buildHostToolDispatcher` 多调一次 `dispatcher.setTools([...cron, ...bridgeStatus])`；4 个 workspace + skeleton `TOOLS.md` 加章节 |
 
 **test-run 设计决策（拍板）**：
 - **同步长 tool call**（不像 `chat.delegate` 那种 fire-and-forget）。默认 90s inMs + 30s timeoutMs = 120s 总时长。OMP host-tool bridge 不设 client 侧超时，能跑。
@@ -491,6 +491,13 @@ openclaw 里几个 openclaw-only 的能力（跟我们当前架构 / scope 决�
 - **共享 core：** CLI 和 LLM 都要调同一个 `runTestRun` core — 避免"操作员验证一个东西、agent 验证另一个东西"的语义 drift。CLI 负责 argv 解析 + SIGINT + console 输出 + process.exitCode；core 只负责 schedule-rewrite + poll + restore + 返回结构化结果。
 - **inMs 竞速警告：** core 读 ctx 的 `tickIntervalMs`（从 `config.cron.tickIntervalMs ?? 60_000` 透传），inMs < tick 报 WARNING，< 2x tick 报 NOTE。LLM 无需手动算。
 - **Schedule restore 不变量：** try/finally 保证每个退出路径都还原（成功 / 超时 / task 失败 / delivery 失败 / abort / 异常）。`noRestore: true` 是 escape hatch，明确警告语义。
+
+**bridge.status 设计决策（拍板）**：
+- **独立工具，不挂在 `cron` 下。** bridge 是 gateway 级事项不是 scheduler 事项，名字空间也保持干净。
+- **只读诊断，无参数。** handler 调 `bridge.getSnapshot()` 后返回原 snapshot + 派生的 `summary` 字段。LLM 不必手填参数 — 一个调用就够。
+- **`summary` 是预计算的一句话判断。** 让 LLM 不用每次都解读 7 态 state machine。原 snapshot 完整返回供需要时看 `pid` / `circuitOpenedAt` / `crashCount` 等细节。
+- **8 个 state 都有 actionable 措辞。** `error` 状态明确告诉 LLM 升级给 operator，`degraded` 状态明确告诉 LLM 等待 cooldown，`busy` 状态明确告诉 LLM 不要重复 dispatch。
+- **description 明确禁止 speculative polling。** bridge 健康时是常态，盲调浪费一轮 tool round-trip。只有当 LLM 有具体理由怀疑 bridge 有问题时才调。
 
 ### 7.3 Tier 2 / 3（参考）
 
