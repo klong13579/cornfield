@@ -19,6 +19,7 @@ import { CrashRecovery } from "./crash-recovery";
 import { PromptExtractor } from "./prompt-extractor";
 import { PromptQueue } from "./prompt-queue";
 import { extractAssistantError, extractAssistantText, ResponseMetaBuilder } from "./response-meta";
+import { clearRestartSentinel, writeRestartSentinel } from "./restart-sentinel";
 import type { AgentResponseMeta, InboundMessage, SessionRecord } from "./types";
 
 const CRASH_WINDOW_MS = 10 * 60_000;
@@ -31,6 +32,8 @@ const CIRCUIT_OPEN_MESSAGE = "系统繁忙，请稍后再试。";
 
 const DEFAULT_LONG_TASK_THRESHOLD_MS = 180_000;
 const DEFAULT_LONG_TASK_PROGRESS_PING_MS = 300_000;
+const DEFAULT_STREAMING_WATCHDOG_MS = 90_000;
+const STREAMING_WATCHDOG_POLL_MS = 10_000;
 
 function readEnvInt(name: string, fallback: number): number {
 	const raw = process.env[name];
@@ -89,6 +92,19 @@ export interface AgentBridgeOptions {
 	 *  suppressed event is mirrored to a JSONL file so the death loop
 	 *  survives gateway restarts. See `crash-log.ts`. */
 	crashLog?: import("./crash-log").CrashLog;
+	/** Data dir for the restart sentinel. When set, every active
+	 *  prompt writes a sentinel to `<dataDir>/restart-pending.json`
+	 *  while it runs and clears it on completion — so a SIGKILL or
+	 *  OOM during a long prompt still leaves a recoverable trail.
+	 *  Without this, sentinel-based recovery only fires on graceful
+	 *  shutdown. */
+	dataDir?: string;
+	/** Streaming watchdog in ms — if no session event arrives within
+	 *  this window, the active prompt is force-aborted and the user
+	 *  gets a 'system busy' fallback. Distinguishes 'LLM slow' (rolling
+	 *  prompt-queue timeout) from 'OMP dead mid-stream' (this watchdog).
+	 *  Default 90s; 0 disables. */
+	streamingWatchdogMs?: number;
 	/** Host tool dispatcher wired to the gateway's HostToolDispatcher. When
 	 *  set, the bridge sends `set_host_tools` to OMP on each `ready` event
 	 *  and routes `host_tool_call` frames to the dispatcher. */
@@ -128,11 +144,15 @@ export class AgentBridge {
 	#lastError: string | undefined;
 	#accountId: string;
 	#crashLog: import("./crash-log").CrashLog | undefined;
+	#dataDir: string | undefined;
+	#streamingWatchdogMs: number;
 
 	constructor(options: AgentBridgeOptions = {}) {
 		this.#options = options;
 		this.#accountId = options.accountId ?? "unknown";
 		this.#crashLog = options.crashLog;
+		this.#dataDir = options.dataDir;
+		this.#streamingWatchdogMs = options.streamingWatchdogMs ?? DEFAULT_STREAMING_WATCHDOG_MS;
 		if (options.model) {
 			const slashIdx = options.model.indexOf("/");
 			if (slashIdx !== -1) {
@@ -330,6 +350,43 @@ export class AgentBridge {
 		this.#activeChatContext = undefined;
 	}
 
+	/**
+	 * Write a restart sentinel so a SIGKILL / OOM during this prompt still
+	 * leaves a recoverable trail. Best-effort: failures are logged at warn
+	 * and never thrown, since writing the sentinel is not on the user path.
+	 */
+	#beginActiveSession(conversationId: string, ompSessionPath: string, continuationMessage?: string): void {
+		if (!this.#dataDir) return;
+		if (this.#accountId === "unknown") return;
+		void writeRestartSentinel(
+			{
+				conversationId,
+				accountId: this.#accountId,
+				ompSessionPath,
+				...(continuationMessage ? { continuationMessage } : {}),
+			},
+			{ dataDir: this.#dataDir },
+		).catch(err => {
+			logger.warn("Failed to write active-session sentinel", {
+				accountId: this.#accountId,
+				error: err instanceof Error ? err.message : String(err),
+			});
+		});
+	}
+
+	/** Clear the active-session sentinel. Best-effort, but awaitable so
+	 *  callers that need the on-disk state to match the in-memory state
+	 *  (e.g. tests) can synchronise. */
+	#endActiveSession(): Promise<void> {
+		if (!this.#dataDir) return Promise.resolve();
+		return clearRestartSentinel({ dataDir: this.#dataDir }).catch(err => {
+			logger.warn("Failed to clear active-session sentinel", {
+				accountId: this.#accountId,
+				error: err instanceof Error ? err.message : String(err),
+			});
+		});
+	}
+
 	#registerHostTools(): void {
 		const dispatcher = this.#options.hostToolDispatcher;
 		if (!dispatcher) return;
@@ -436,6 +493,48 @@ export class AgentBridge {
 			// can read it. Cleared in the finally block below.
 			this.#setActiveChatContext(msg);
 
+			// Write a restart sentinel so a SIGKILL mid-prompt leaves a
+			// recoverable trail. Cleared in the finally block.
+			if (session.ompSessionPath) {
+				this.#beginActiveSession(msg.conversationId, session.ompSessionPath);
+			}
+
+			// Streaming watchdog: if no session event arrives within the
+			// configured window, force-abort the prompt. Without this, a
+			// streaming LLM that hangs after the thinking block (e.g. 60s
+			// of silence) holds the entire IM queue hostage behind a
+			// `runExclusive` waiting for an `agent_end` that will never
+			// come. The prompt-queue rolling timeout (60s inactivity) and
+			// the hard cap (5min) handle slow-but-active streams; this
+			// handles "OMP dead mid-stream".
+			let abortedByStreamingWatchdog = false;
+			let streamingWatchdog: NodeJS.Timeout | null = null;
+			if (this.#streamingWatchdogMs > 0) {
+				// Poll at most every 10s, but at least every 1/3 of the
+				// threshold so a short threshold (e.g. tests with 300ms)
+				// still aborts within a few hundred ms rather than
+				// waiting for the next 10s tick.
+				const pollMs = Math.min(
+					STREAMING_WATCHDOG_POLL_MS,
+					Math.max(100, Math.floor(this.#streamingWatchdogMs / 3)),
+				);
+				streamingWatchdog = setInterval(() => {
+					const lastActivityAt = this.#queue.getActiveLastActivityAt();
+					if (lastActivityAt === undefined) return;
+					const idleMs = Date.now() - lastActivityAt;
+					if (idleMs < this.#streamingWatchdogMs) return;
+					if (abortedByStreamingWatchdog) return;
+					abortedByStreamingWatchdog = true;
+					logger.warn("Streaming watchdog: aborting stalled prompt", {
+						accountId: this.#accountId,
+						conversationId: msg.conversationId,
+						idleMs,
+						thresholdMs: this.#streamingWatchdogMs,
+					});
+					this.#queue.resolveActiveAsAborted();
+				}, pollMs);
+			}
+
 			if (!this.isRunning) {
 				logger.warn("Agent bridge not running, attempting restart");
 				try {
@@ -478,6 +577,17 @@ export class AgentBridge {
 				}
 				const { promise } = this.#queue.enqueue(text, timeoutMs, handlers, images);
 				const { events, aborted } = await promise;
+				if (abortedByStreamingWatchdog) {
+					logger.warn("Prompt aborted by streaming watchdog", {
+						accountId: this.#accountId,
+						conversationId: msg.conversationId,
+					});
+					return this.#metaBuilder.fallback(
+						"系统繁忙：LLM 长时间无响应，请重试上一条消息。",
+						startedAt,
+						{ aborted: true },
+					);
+				}
 				const rawResponse = extractAssistantText(events);
 
 				if (!rawResponse) {
@@ -516,8 +626,10 @@ export class AgentBridge {
 				logger.error("Agent bridge failed", { error: message });
 				return this.#metaBuilder.fallback(`系统错误：${message}`, startedAt);
 			} finally {
+				if (streamingWatchdog) clearInterval(streamingWatchdog);
 				this.#abortRequested = false;
 				this.#clearActiveChatContext();
+				await this.#endActiveSession();
 			}
 		});
 	}

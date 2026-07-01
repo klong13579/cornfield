@@ -38,11 +38,29 @@ function getSentinelPath(config?: GatewayConfig): string {
 	return path.join(getDataDir(config), SENTINEL_FILENAME);
 }
 
+/** Resolve the sentinel path from a raw data dir (used by AgentBridge
+ *  which holds a `dataDir` option rather than a full GatewayConfig). */
+export function sentinelPathFor(dataDir: string): string {
+	return path.join(dataDir, SENTINEL_FILENAME);
+}
+
+type SentinelLocation = GatewayConfig | { dataDir: string };
+
+function resolveDataDir(loc: SentinelLocation | undefined): string {
+	if (!loc) return getDataDir();
+	if ("dataDir" in loc) return loc.dataDir;
+	return getDataDir(loc);
+}
+
 /**
  * Write a restart sentinel before gateway shutdown.
  *
  * Called during `gateway.stop()` to capture the currently active session.
  * The sentinel is read on the next startup to resume the conversation.
+ *
+ * Accepts either a `GatewayConfig` (legacy callers) or a `{ dataDir }`
+ * object so modules that only know the data dir (e.g. AgentBridge)
+ * can write the sentinel without importing the full config.
  */
 export async function writeRestartSentinel(
 	params: {
@@ -51,7 +69,7 @@ export async function writeRestartSentinel(
 		ompSessionPath: string;
 		continuationMessage?: string;
 	},
-	config?: GatewayConfig,
+	location?: SentinelLocation,
 ): Promise<void> {
 	const sentinel: RestartSentinel = {
 		conversationId: params.conversationId,
@@ -61,7 +79,7 @@ export async function writeRestartSentinel(
 		timestamp: Date.now(),
 	};
 
-	const sentinelPath = getSentinelPath(config);
+	const sentinelPath = sentinelPathFor(resolveDataDir(location));
 
 	try {
 		await fs.mkdir(path.dirname(sentinelPath), { recursive: true });
@@ -85,22 +103,17 @@ export async function writeRestartSentinel(
  * Returns `null` if no sentinel exists or if it is stale (older than 1 hour).
  * The sentinel is cleared after successful recovery by `clearRestartSentinel()`.
  */
-export async function readRestartSentinel(config?: GatewayConfig): Promise<RestartSentinel | null> {
-	const sentinelPath = getSentinelPath(config);
+export async function readRestartSentinel(location?: SentinelLocation): Promise<RestartSentinel | null> {
+	const sentinelPath = sentinelPathFor(resolveDataDir(location));
 
 	try {
 		const raw = await Bun.file(sentinelPath).text();
 		const sentinel = JSON.parse(raw) as RestartSentinel;
 
 		// Validate required fields
-		if (
-			!sentinel.conversationId ||
-			!sentinel.accountId ||
-			!sentinel.ompSessionPath ||
-			!sentinel.timestamp
-		) {
+		if (!sentinel.conversationId || !sentinel.accountId || !sentinel.ompSessionPath || !sentinel.timestamp) {
 			logger.warn("Restart sentinel is malformed, clearing", { sentinelPath });
-			await clearRestartSentinel(config);
+			await clearRestartSentinel(location);
 			return null;
 		}
 
@@ -113,7 +126,7 @@ export async function readRestartSentinel(config?: GatewayConfig): Promise<Resta
 				ageMs,
 				maxAgeMs: MAX_AGE_MS,
 			});
-			await clearRestartSentinel(config);
+			await clearRestartSentinel(location);
 			return null;
 		}
 
@@ -144,8 +157,8 @@ export async function readRestartSentinel(config?: GatewayConfig): Promise<Resta
  * Called after the gateway has resumed the conversation and the agent has
  * acknowledged the restart. Prevents duplicate recovery on subsequent startups.
  */
-export async function clearRestartSentinel(config?: GatewayConfig): Promise<void> {
-	const sentinelPath = getSentinelPath(config);
+export async function clearRestartSentinel(location?: SentinelLocation): Promise<void> {
+	const sentinelPath = sentinelPathFor(resolveDataDir(location));
 
 	try {
 		await fs.unlink(sentinelPath);
