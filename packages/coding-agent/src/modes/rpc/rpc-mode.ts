@@ -155,6 +155,26 @@ export function requestRpcEditor(
  * Listens for JSON commands on stdin, outputs events and responses on stdout.
  */
 export async function runRpcMode(session: AgentSession): Promise<never> {
+	// Surface unhandled errors as explicit exits so the gateway bridge can
+	// detect OMP death via proc.exited (exit code != 0) rather than guessing
+	// from stdin/stdout silence. Without this, an uncaught exception or
+	// unhandled promise rejection silently kills the subprocess and the
+	// bridge only learns about it on the next transport.start() retry —
+	// which can take 30-60s to surface as a `before ready` crash error.
+	process.on("uncaughtException", err => {
+		logger.error("[rpc-mode] uncaughtException, exiting", {
+			error: err.message,
+			stack: err.stack,
+		});
+		process.exit(1);
+	});
+	process.on("unhandledRejection", reason => {
+		logger.error("[rpc-mode] unhandledRejection, exiting", {
+			reason: reason instanceof Error ? reason.message : String(reason),
+		});
+		process.exit(1);
+	});
+
 	// Signal to RPC clients that the server is ready to accept commands
 	process.stdout.write(`${JSON.stringify({ type: "ready" })}\n`);
 	const output = (obj: RpcResponse | RpcExtensionUIRequest | object) => {

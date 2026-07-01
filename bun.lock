@@ -110,9 +110,6 @@
     "packages/pi-gateway": {
       "name": "@oh-my-pi/pi-gateway",
       "version": "14.5.12",
-      "bin": {
-        "pi-gateway": "./src/cli.ts",
-      },
       "dependencies": {
         "@oh-my-pi/pi-coding-agent": "workspace:*",
         "@oh-my-pi/pi-utils": "catalog:",

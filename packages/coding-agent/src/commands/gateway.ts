@@ -26,6 +26,7 @@
 import * as path from "node:path";
 import { logger } from "@oh-my-pi/pi-utils";
 import { Args, Command, Flags, renderCommandHelp } from "@oh-my-pi/pi-utils/cli";
+import { clearStatusFileSync } from "@oh-my-pi/pi-gateway/src/gateway-daemon";
 
 const ACTIONS = [
 	"start",
@@ -144,6 +145,15 @@ export default class Gateway extends Command {
 						}
 					});
 
+					// Circuit breaker for uncaughtException. A single error is
+					// recoverable, but a sustained storm (e.g. a 3k-retry loop on
+					// a missing module) means the process is wedged — we exit
+					// and let launchd/systemd respawn us cleanly.
+					let uncaughtCount = 0;
+					let lastUncaughtAt = 0;
+					const UNCAUGHT_WINDOW_MS = 60_000;
+					const UNCAUGHT_THRESHOLD = 10;
+
 					// Same error-boundary as pi-gateway cli.ts — a single async
 					// rejection must not crash the daemon.
 					process.on("unhandledRejection", reason => {
@@ -152,9 +162,35 @@ export default class Gateway extends Command {
 						});
 					});
 					process.on("uncaughtException", err => {
+						const now = Date.now();
+						// Count consecutive uncaughtExceptions within a sliding
+						// window. A single error is recoverable; a sustained
+						// storm (e.g. a 3k-retry loop on a missing module) means
+						// the process is wedged and only a restart can recover.
+						// We force `process.exit(1)` so launchd/systemd respawn
+						// the daemon cleanly instead of letting the bad state
+						// persist.
+						if (now - lastUncaughtAt > UNCAUGHT_WINDOW_MS) {
+							uncaughtCount = 0;
+						}
+						uncaughtCount++;
+						lastUncaughtAt = now;
 						logger.error("uncaughtException in gateway process", {
 							error: err.stack || err.message,
+							consecutiveCount: uncaughtCount,
 						});
+						if (uncaughtCount >= UNCAUGHT_THRESHOLD) {
+							logger.error("uncaughtException threshold reached — exiting for supervisor restart", {
+								threshold: UNCAUGHT_THRESHOLD,
+								windowMs: UNCAUGHT_WINDOW_MS,
+							});
+							// Best-effort sync cleanup so the next reader does
+							// not see a snapshot of a dead process. This handler
+							// cannot await — `process.exit(1)` interrupts any
+							// pending microtask. Use the sync unlink.
+							clearStatusFileSync();
+							process.exit(1);
+						}
 					});
 
 					await gateway.start();
@@ -176,8 +212,6 @@ export default class Gateway extends Command {
 					await new Promise(() => {});
 					break;
 				}
-
-				// Default: daemonize — spawn detached child, wait for ready, print status
 				const { getGatewayStatus, PID_FILE } = await import("@oh-my-pi/pi-gateway/src/gateway-daemon");
 				const { loadConfig, getDataDir } = await import("@oh-my-pi/pi-gateway/src/config");
 

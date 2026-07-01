@@ -55,6 +55,7 @@ describe("Gateway status", () => {
 	test("account bridge options prefer account model over global model", async () => {
 		const options = await createAccountBridgeOptions(
 			{ model: "global-model", timeoutMs: 10_000 },
+			"test-account",
 			{ appKey: "app", appSecret: "secret", model: "account-model", timeoutMs: 20_000 },
 			"/tmp/agent",
 		);

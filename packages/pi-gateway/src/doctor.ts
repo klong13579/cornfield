@@ -80,23 +80,30 @@ function error(message: string, detail?: string, fix?: () => Promise<string>): F
 // Individual check sections
 // ───────────────────────────────────────────────────────────────────────────
 
-async function checkConfig(configPath?: string): Promise<{ section: Section; config?: GatewayConfig }> {
+async function checkConfig(
+	configPath: string | undefined,
+	preloadedConfig?: GatewayConfig,
+): Promise<{ section: Section; config?: GatewayConfig }> {
 	const findings: Finding[] = [];
-	const result = await validateConfig(configPath);
+	const result = preloadedConfig
+		? await validateConfig(undefined, preloadedConfig)
+		: configPath
+			? await validateConfig(configPath)
+			: await validateConfig();
 
 	switch (result.status) {
 		case "missing":
 			findings.push(error(`Config file not found: ${result.path}`, "Run `pi-gateway setup` to create one."));
-			return { section: { name: "CONFIG", findings } };
+			return { section: { name: "CONFIG", findings }, config: undefined };
 		case "parse-error":
 			findings.push(error(`Config file is not valid JSON5: ${result.path}`, result.error));
-			return { section: { name: "CONFIG", findings } };
+			return { section: { name: "CONFIG", findings }, config: undefined };
 		case "schema-error":
 			findings.push(error(`Config failed schema validation: ${result.path}`));
 			for (const issue of result.issues) {
 				findings.push(error(`  ${issue.path}: ${issue.message}`));
 			}
-			return { section: { name: "CONFIG", findings } };
+			return { section: { name: "CONFIG", findings }, config: undefined };
 	}
 
 	const config = result.config;
@@ -205,11 +212,27 @@ function checkChannelsAndBridges(status: Awaited<ReturnType<typeof getGatewaySta
 	const bridgeFindings: Finding[] = [];
 	const queueFindings: Finding[] = [];
 
-	const accounts = status.accounts ?? [];
+	// When the gateway is not running, `getGatewayStatus` deliberately
+	// omits runtime fields (accounts, bridges, queues, channels) from the
+	// cached snapshot — that snapshot is from a dead process and iterating
+	// it would silently report ghost health. Surface a single warn per
+	// section and stop.
 	if (!status.running) {
-		channelFindings.push(warn("Gateway not running — channel/bridge/queue health is from the last status file"));
+		const reason = status.stalePidFile
+			? `gateway died (stale PID file cleaned; pidWasAlive=${status.pidWasAlive ?? "?"})`
+			: "gateway not running";
+		const detail = "Start with `omp gateway start` for live channel/bridge/queue health.";
+		channelFindings.push(warn(reason, detail));
+		bridgeFindings.push(warn(reason));
+		queueFindings.push(warn(reason));
+		return [
+			{ name: "CHANNELS", findings: channelFindings },
+			{ name: "BRIDGES", findings: bridgeFindings },
+			{ name: "QUEUES", findings: queueFindings },
+		];
 	}
 
+	const accounts = status.accounts ?? [];
 	if (accounts.length === 0) {
 		channelFindings.push(warn("No account channels reported in status file"));
 	}
@@ -490,7 +513,54 @@ async function safeRead(p: string): Promise<string | null> {
  *   in isolation without touching the operator's data.
  */
 export async function runDoctor(configPath?: string, opts?: { schedulerDbPath?: string }): Promise<DoctorReport> {
-	const { section: configSection, config } = await checkConfig(configPath);
+	// When a path is given, validate the file directly. When it's not,
+	// fall back to the default config path. checkConfig() returns an
+	// in-memory <in-memory> result for callers that have already loaded
+	// a config — runDoctorWithConfig uses that path.
+	if (configPath) {
+		const result = await validateConfig(configPath);
+		if (result.status === "ok") return runDoctorWithConfig(result.config, opts);
+		// Missing / parse-error / schema-error: surface a CONFIG error
+		// section instead of silently falling through to the default
+		// config (which would mask the broken file path).
+		const { section: configSection } = await checkConfig(configPath);
+		return runDoctorWithConfigFromSection(configSection, result, opts);
+	}
+	return runDoctorWithConfig(undefined, opts);
+}
+
+async function runDoctorWithConfigFromSection(
+	configSection: Section,
+	result: ConfigValidation,
+	opts?: { schedulerDbPath?: string },
+): Promise<DoctorReport> {
+	void opts;
+	void result;
+	const status = await getGatewayStatus(undefined);
+	const [credSection, stateSection, serviceSection] = await Promise.all([
+		checkCredentialsSection(undefined),
+		checkStateFiles(undefined, status),
+		checkService(),
+	]);
+	const cbq = checkChannelsAndBridges(status);
+	const schedSection = checkScheduler(getSchedulerDbPath());
+	return {
+		sections: [configSection, credSection, ...cbq, schedSection, stateSection, serviceSection],
+		generatedAt: Date.now(),
+	};
+}
+
+/**
+ * Run the doctor with an already-resolved config. Tests and internal
+ * callers that have a `GatewayConfig` in hand (e.g. for fake data dirs
+ * or alternate scheduler locations) use this directly so they don't
+ * have to materialise a config file on disk.
+ */
+export async function runDoctorWithConfig(
+	config: GatewayConfig | undefined,
+	opts?: { schedulerDbPath?: string },
+): Promise<DoctorReport> {
+	const { section: configSection } = await checkConfig(undefined, config);
 	const status = await getGatewayStatus(config);
 
 	const [credSection, stateSection, serviceSection] = await Promise.all([

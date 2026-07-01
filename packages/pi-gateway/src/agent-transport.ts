@@ -262,7 +262,12 @@ export class RpcTransport {
 	/** Convenience: write a `host_tool_result` frame for a call dispatched
 	 *  via the `hostToolHandler` callback. The bridge uses this so the
 	 *  dispatcher doesn't have to know the wire shape. */
-	sendHostToolResult(id: string, toolUseId: string, content: Array<{ type: "text"; text: string }>, isError: boolean): void {
+	sendHostToolResult(
+		id: string,
+		toolUseId: string,
+		content: Array<{ type: "text"; text: string }>,
+		isError: boolean,
+	): void {
 		this.#writeFrame({
 			type: "host_tool_result",
 			id,
@@ -333,7 +338,7 @@ export class RpcTransport {
 			this.#stdoutReader = this.#startStdoutReader(proc.stdout as ReadableStream<Uint8Array>);
 			this.#stderrReader = this.#drainStderr(proc.stderr as ReadableStream<Uint8Array>);
 
-			const readyTimeoutMs = this.#options.readyTimeoutMs ?? 30_000;
+			const readyTimeoutMs = this.#options.readyTimeoutMs ?? 60_000;
 			const { promise, resolve, reject } = Promise.withResolvers<void>();
 			let settled = false;
 
@@ -355,11 +360,29 @@ export class RpcTransport {
 			}, 50);
 
 			void proc.exited.then(exitCode => {
-				if (settled) return;
-				settled = true;
-				clearTimeout(timeout);
-				clearInterval(checkReady);
-				reject(new Error(`Agent RPC process exited with code ${exitCode} before ready`));
+				if (!settled) {
+					settled = true;
+					clearTimeout(timeout);
+					clearInterval(checkReady);
+					reject(new Error(`Agent RPC process exited with code ${exitCode} before ready`));
+					return;
+				}
+				// Process exited after reaching `ready` — surface this as a
+				// `disconnected` event so the bridge can record a crash and
+				// back off. Without this emit, the transport silently loses
+				// the subprocess and the bridge only learns on its next
+				// `transport.start()` retry, which can take 30+ seconds to
+				// surface as a `before ready` error.
+				const wasReady = this.#ready;
+				this.#ready = false;
+				this.#proc = null;
+				this.#stdinWriter = undefined;
+				this.#emit({
+					type: "disconnected",
+					error: new Error(
+						`Agent RPC process exited with code ${exitCode} after ready (wasReady=${wasReady})`,
+					),
+				});
 			});
 
 			try {
@@ -478,7 +501,9 @@ export class RpcTransport {
 						error: err instanceof Error ? err.message : String(err),
 					});
 					reply({
-						content: [{ type: "text", text: `Host tool error: ${err instanceof Error ? err.message : String(err)}` }],
+						content: [
+							{ type: "text", text: `Host tool error: ${err instanceof Error ? err.message : String(err)}` },
+						],
 						isError: true,
 					});
 				});

@@ -22,6 +22,7 @@ import { ActionRegistry } from "./action-registry";
 import { AgentBridge, type AgentBridgeOptions } from "./agent-bridge";
 import { DingTalkChannel } from "./channels/dingtalk";
 import { ChannelRegistry } from "./channels/registry";
+import { defaultCrashLog } from "./crash-log";
 import { getDataDir, getDingTalkConfig, getEnabledChannels } from "./config";
 import { CronLifecycle } from "./gateway-cron-lifecycle";
 import { checkPidFile, PID_FILE, readPidFile, STATUS_FILE } from "./gateway-daemon";
@@ -110,10 +111,7 @@ async function handleInject(
 		} catch {}
 	}
 	if (!channel) {
-		return Response.json(
-			{ ok: false, reason: "channel_not_found", channelKey },
-			{ status: 404 },
-		);
+		return Response.json({ ok: false, reason: "channel_not_found", channelKey }, { status: 404 });
 	}
 
 	// ── Optional outbound capture ──
@@ -132,10 +130,7 @@ async function handleInject(
 				accountId: body.accountId,
 				conversationId: msg.conversationId,
 				msgType: (msg as any).content?.type,
-				preview:
-					(msg as any).content?.text?.slice?.(0, 80) ??
-					(msg as any).content?.markdown?.slice?.(0, 80) ??
-					"",
+				preview: (msg as any).content?.text?.slice?.(0, 80) ?? (msg as any).content?.markdown?.slice?.(0, 80) ?? "",
 			});
 		};
 	}
@@ -155,10 +150,7 @@ async function handleInject(
 		}
 		if (!result.ok) {
 			const status = result.reason === "permission_denied" ? 403 : 400;
-			return Response.json(
-				{ ok: false, reason: result.reason, messageId, captured: captured.length },
-				{ status },
-			);
+			return Response.json({ ok: false, reason: result.reason, messageId, captured: captured.length }, { status });
 		}
 		return Response.json({
 			ok: true,
@@ -188,6 +180,7 @@ async function handleInject(
 }
 export async function createAccountBridgeOptions(
 	agentConfig: GatewayConfig["agent"],
+	accountId: string,
 	account: DingtalkAccountConfig,
 	agentDir: string,
 	hostToolDispatcher?: import("./host-tool-dispatcher").HostToolDispatcher,
@@ -211,6 +204,12 @@ export async function createAccountBridgeOptions(
 		timeoutMs: account.timeoutMs ?? agentConfig?.timeoutMs,
 		cwd: agentDir,
 		deniedTools: account.deniedTools,
+		accountId,
+		// Each bridge gets a shared crash log sink so per-account crash /
+		// recovery / suppressed events are persisted to disk and survive
+		// gateway restarts. Tests can pass their own `CrashLog` instance
+		// via the 5th argument.
+		crashLog: defaultCrashLog(),
 		hostToolDispatcher,
 	};
 }
@@ -515,7 +514,9 @@ export class Gateway {
 				// Create per-account agent bridge with account-specific config
 				// Model is loaded from agentDir/.omp/config.yml by omp itself
 				const dispatcher = this.#buildHostToolDispatcher(agentDir, accountId);
-				const bridge = new AgentBridge(await createAccountBridgeOptions(this.#config.agent, account, agentDir, dispatcher));
+				const bridge = new AgentBridge(
+					await createAccountBridgeOptions(this.#config.agent, accountId, account, agentDir, dispatcher),
+				);
 				this.#accountBridges.set(accountId, bridge);
 
 				// Start per-account bridge
@@ -574,7 +575,7 @@ export class Gateway {
 		}
 
 		const dispatcher = this.#buildHostToolDispatcher(agentDir, accountId);
-		const bridge = new AgentBridge(await createAccountBridgeOptions(config.agent, account, agentDir, dispatcher));
+		const bridge = new AgentBridge(await createAccountBridgeOptions(config.agent, accountId, account, agentDir, dispatcher));
 		this.#accountBridges.set(accountId, bridge);
 		try {
 			await bridge.start();
@@ -638,7 +639,6 @@ export class Gateway {
 		// next gateway startup can resume the conversation.
 		const activeSessionInfo = this.#getActiveSessionInfo();
 
-
 		// Phase 1: disconnect channels (5s grace)
 		await Promise.race([
 			this.#registry.disconnectAll().catch(err => {
@@ -659,7 +659,7 @@ export class Gateway {
 		// Phase 3: drain session queues (configurable grace, default 15s)
 		const drainTimeoutMs = this.#config.drainTimeoutMs ?? 15_000;
 		const drained = await Promise.race([
-			(this.#sessionManager?.waitForAllDrained(drainTimeoutMs) ?? Promise.resolve(true)),
+			this.#sessionManager?.waitForAllDrained(drainTimeoutMs) ?? Promise.resolve(true),
 			Bun.sleep(drainTimeoutMs).then(() => false),
 		]);
 		if (drained === false) {
@@ -721,6 +721,12 @@ export class Gateway {
 		} catch {
 			/* non-fatal */
 		}
+
+		// Remove status file so readers after a clean stop never see a
+		// snapshot of a dead process. Done after the PID file so a reader
+		// that races us sees `stalePidFile: true` and `running: false`,
+		// not a half-cleared snapshot.
+		await this.#clearStatusFile();
 	}
 
 	/**
@@ -981,6 +987,10 @@ export class Gateway {
 			const status = await this.getStatus();
 			const data = JSON.stringify(
 				{
+					// Self-identify the writer's PID. A reader can compare this
+					// against `process.kill(pid, 0)` to detect a stale snapshot
+					// even if the writer exited before updating the file.
+					pid: process.pid,
 					statusWrittenAt: Date.now(),
 					channels: status.channels,
 					accounts: status.accounts,
@@ -994,6 +1004,24 @@ export class Gateway {
 			await fs.writeFile(statusPath, data);
 		} catch {
 			// non-fatal
+		}
+	}
+
+	/**
+	 * Remove the gateway status file. Called on graceful shutdown so a
+	 * reader after a clean stop never sees a snapshot of a dead process.
+	 * Idempotent and best-effort; a missing file is not an error.
+	 */
+	async #clearStatusFile(): Promise<void> {
+		const statusPath = path.join(getDataDir(this.#config), STATUS_FILE);
+		try {
+			await fs.unlink(statusPath);
+		} catch (err) {
+			if (!isEnoent(err)) {
+				logger.warn("Failed to clear gateway status file", {
+					error: err instanceof Error ? err.message : String(err),
+				});
+			}
 		}
 	}
 
@@ -1120,7 +1148,6 @@ export class Gateway {
 		};
 	}
 
-
 	/**
 	 * Get info about the currently active session (if any).
 	 *
@@ -1154,7 +1181,6 @@ export class Gateway {
 
 		return null;
 	}
-
 
 	/**
 	 * Resume a conversation from a restart sentinel.
@@ -1205,6 +1231,4 @@ export class Gateway {
 			return false;
 		}
 	}
-
-
 }

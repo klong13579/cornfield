@@ -5,6 +5,7 @@
  * and service-installer.ts. They do NOT depend on the Gateway class.
  */
 import * as fs from "node:fs/promises";
+import * as fsSync from "node:fs";
 import * as path from "node:path";
 import { getDataDir } from "./config";
 import type { BridgeStat, QueueStat } from "./session-manager";
@@ -125,14 +126,32 @@ export async function getGatewayStatus(config?: GatewayConfig): Promise<GatewayD
 		const pid = parseInt(pidText.trim(), 10);
 		if (Number.isNaN(pid) || pid <= 0) {
 			await fs.unlink(pidPath).catch(() => {});
-			return { running: false, ...cachedStatus };
+			// Same rationale as the stalePidFile branch above: don't
+			// surface runtime fields from a snapshot taken under a
+			// now-invalid PID file.
+			return {
+				running: false,
+				statusWrittenAt: cachedStatus.statusWrittenAt,
+			};
 		}
 
 		try {
 			process.kill(pid, 0);
 		} catch {
 			await fs.unlink(pidPath).catch(() => {});
-			return { running: false, stalePidFile: true, ...cachedStatus };
+			// PID is dead — the cached status file is a stale snapshot of a
+			// dead process. Do NOT spread its runtime fields (channels,
+			// accounts, bridges, queues, scheduler) into the response: they
+			// would mislead callers into thinking the gateway is still alive
+			// and force them to add their own "is this PID actually alive?"
+			// checks. Surface only enough metadata to diagnose the death.
+			return {
+				running: false,
+				stalePidFile: true,
+				pidWasAlive: pid,
+				stoppedAt: cachedStatus.statusWrittenAt,
+				statusWrittenAt: cachedStatus.statusWrittenAt,
+			};
 		}
 
 		let startedAt: string | undefined;
@@ -146,6 +165,24 @@ export async function getGatewayStatus(config?: GatewayConfig): Promise<GatewayD
 		return { running: true, pid, startedAt, ...cachedStatus };
 	} catch {
 		return { running: false, ...cachedStatus };
+	}
+}
+
+/**
+ * Synchronously remove the gateway status file. Best-effort and idempotent.
+ *
+ * Crash handlers (uncaughtException, last-resort SIGTERM) cannot await
+ * async cleanup — the process is about to exit and pending microtasks
+ * will not complete. Callers run this in a try/catch and then
+ * `process.exit(1)`.
+ */
+export function clearStatusFileSync(config?: GatewayConfig): void {
+	try {
+		const dataDir = getDataDir(config);
+		const statusPath = path.join(dataDir, STATUS_FILE);
+		fsSync.rmSync(statusPath, { force: true });
+	} catch {
+		// best-effort
 	}
 }
 

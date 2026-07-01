@@ -82,6 +82,13 @@ export interface AgentBridgeOptions {
 	longTaskThresholdMs?: number;
 	progressPingIntervalMs?: number;
 	deniedTools?: string[];
+	/** Account identifier — used by the crash log to attribute failures.
+	 *  Falls back to "unknown" when not supplied (single-account mode). */
+	accountId?: string;
+	/** Optional crash log sink. When set, every crash / recovery /
+	 *  suppressed event is mirrored to a JSONL file so the death loop
+	 *  survives gateway restarts. See `crash-log.ts`. */
+	crashLog?: import("./crash-log").CrashLog;
 	/** Host tool dispatcher wired to the gateway's HostToolDispatcher. When
 	 *  set, the bridge sends `set_host_tools` to OMP on each `ready` event
 	 *  and routes `host_tool_call` frames to the dispatcher. */
@@ -119,9 +126,13 @@ export class AgentBridge {
 	#options: AgentBridgeOptions;
 	#reconnectGuard = false;
 	#lastError: string | undefined;
+	#accountId: string;
+	#crashLog: import("./crash-log").CrashLog | undefined;
 
 	constructor(options: AgentBridgeOptions = {}) {
 		this.#options = options;
+		this.#accountId = options.accountId ?? "unknown";
+		this.#crashLog = options.crashLog;
 		if (options.model) {
 			const slashIdx = options.model.indexOf("/");
 			if (slashIdx !== -1) {
@@ -193,10 +204,39 @@ export class AgentBridge {
 				this.#queue.onSessionEvent(event.event);
 				break;
 			case "disconnected":
-				this.#crash.recordCrash();
+				this.#recordCrash(
+					event.error?.message ?? "transport disconnected (no error message)",
+					event.error?.message?.match(/code (-?\d+)/)?.[1]
+						? Number(event.error.message.match(/code (-?\d+)/)?.[1])
+						: undefined,
+				);
 				if (event.error) this.#lastError = event.error.message;
 				break;
 		}
+	}
+
+	/** Wrapper around `CrashRecovery.recordCrash` that also mirrors the
+	 *  event to the persistent crash log. Logs a `suppressed` event when
+	 *  this crash crosses into the suppressed state for the first time
+	 *  in the current window so operators can see exactly when the bridge
+	 *  gave up. */
+	#recordCrash(reason: string, exitCode?: number): void {
+		const wasSuppressed = this.#crash.suppressed;
+		this.#crash.recordCrash();
+		this.#crashLog?.logCrash(this.#accountId, reason, exitCode);
+		if (!wasSuppressed && this.#crash.suppressed) {
+			this.#crashLog?.logSuppressed(this.#accountId, this.#crash.snapshot().windowCount);
+		}
+	}
+
+	/** Wrapper around `CrashRecovery.attemptRecovery` that also logs the
+	 *  attempt outcome to the crash log. */
+	async #attemptRecovery(): Promise<void> {
+		const before = this.#crash.snapshot();
+		await this.#crash.attemptRecovery();
+		const after = this.#crash.snapshot();
+		const success = after.count > before.count && !after.suppressed;
+		this.#crashLog?.logRecovery(this.#accountId, after.count, success);
 	}
 
 	// ═══════════════════════════════════════════════════════════════
@@ -210,7 +250,9 @@ export class AgentBridge {
 		try {
 			await this.#transport.start();
 		} catch (err) {
-			this.#crash.recordCrash();
+			this.#recordCrash(
+				`bridge.start() failed: ${err instanceof Error ? err.message : String(err)}`,
+			);
 			this.#lastError = err instanceof Error ? err.message : String(err);
 			throw err;
 		}
@@ -467,7 +509,7 @@ export class AgentBridge {
 				this.#circuit.recordFailure();
 				if (CrashRecovery.isCrashError(err)) {
 					logger.warn("Agent process crashed, attempting recovery");
-					await this.#crash.attemptRecovery();
+					await this.#attemptRecovery();
 					return this.#metaBuilder.fallback("系统正在恢复中，请稍后再试。", startedAt);
 				}
 				const message = err instanceof Error ? err.message : String(err);
@@ -687,6 +729,12 @@ export class AgentBridge {
 		this.#reconnectGuard = true;
 		try {
 			await this.#transport.start();
+			// A fresh subprocess is a clean slate — circuit failures and crash
+			// timestamps accumulated against the previous process are no
+			// longer relevant. Reset both so the new subprocess gets a fair
+			// chance before the breaker re-opens.
+			this.#circuit.reset();
+			this.#crash.reset();
 			this.#applyDeniedTools();
 		} finally {
 			this.#reconnectGuard = false;

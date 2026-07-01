@@ -28,8 +28,8 @@ export interface CircuitBreakerSnapshot {
 	openedAt?: number;
 }
 
-const DEFAULT_FAILURE_THRESHOLD = 10;
-const DEFAULT_COOLDOWN_MS = 30_000;
+const DEFAULT_FAILURE_THRESHOLD = 20;
+const DEFAULT_COOLDOWN_MS = 60_000;
 
 export class CircuitBreaker {
 	#state: CircuitState = "closed";

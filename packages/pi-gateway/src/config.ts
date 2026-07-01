@@ -209,7 +209,36 @@ export type ConfigValidation =
 	| { status: "schema-error"; path: string; issues: Array<{ path: string; message: string }> }
 	| { status: "ok"; path: string; config: GatewayConfig };
 
-export async function validateConfig(configPath?: string): Promise<ConfigValidation> {
+export async function validateConfig(configPath?: string): Promise<ConfigValidation>;
+export async function validateConfig(
+	_configPath: undefined,
+	preloaded: GatewayConfig,
+): Promise<ConfigValidation>;
+export async function validateConfig(
+	configPath?: string,
+	preloaded?: GatewayConfig,
+): Promise<ConfigValidation> {
+	if (preloaded) {
+		// Caller already has a parsed config (test fixtures, runDoctorWithConfig
+		// when the config was constructed in-memory). Skip filesystem and run
+		// the same schema + defaults merge the on-disk path performs.
+		const result = gatewayConfigSchema.safeParse(preloaded);
+		if (!result.success) {
+			return {
+				status: "schema-error",
+				path: "<in-memory>",
+				issues: result.error.issues.map(i => ({ path: i.path.join(".") || "(root)", message: i.message })),
+			};
+		}
+		const config: GatewayConfig = {
+			...DEFAULT_CONFIG,
+			...result.data,
+			agent: { ...DEFAULT_CONFIG.agent, ...result.data.agent },
+			session: { ...DEFAULT_CONFIG.session, ...result.data.session },
+			cron: { ...DEFAULT_CONFIG.cron, ...result.data.cron },
+		};
+		return { status: "ok", path: "<in-memory>", config };
+	}
 	const filePath = configPath ?? getConfigPath();
 	let raw: string;
 	try {
