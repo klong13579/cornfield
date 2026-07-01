@@ -49,14 +49,30 @@ const logFormat = winston.format.combine(
  *  We also wire an `error` handler that pipes transport-level
  *  failures to stderr — without it, a broken transport just stops
  *  writing and the operator has no signal.
+ *
+ *  `zippedArchive` is intentionally OFF. With it on, every rotation
+ *  spawns an `inp.pipe(gzip).pipe(out)` pipeline. On 0-byte files
+ *  the read stream hits EOF immediately, but the gzip transform and
+ *  write stream never observe the matching `finish` event under Bun,
+ *  so all three streams (and their fds) leak on every rotation.
+ *  Compounded with high log volume (e.g. unhandled exceptions in a
+ *  respawning child), this exhausts fds and balloons RSS within
+ *  minutes. Plain uncompressed rotation is plenty for a debug log
+ *  that the user only inspects post-hoc, and the gzipped retention
+ *  can be re-added at the log-shipper layer if needed.
+ *
+ *  `maxSize` is `100m` (was `10m`) because Bun's stream accounting
+ *  does not always match the on-disk size, and the rotation storm
+ *  we observed fired every few hundred ms at 10m. 100m keeps a
+ *  single session's log in one file in 99% of cases.
  */
 const fileTransport = new DailyRotateFile({
 	dirname: ensureLogsDir(),
 	filename: "omp.%DATE%.log",
 	datePattern: "YYYY-MM-DD",
-	maxSize: "10m",
+	maxSize: "100m",
 	maxFiles: 5,
-	zippedArchive: true,
+	zippedArchive: false,
 	auditFile: `${ensureLogsDir()}/.omp-audit-${process.pid}.json`,
 });
 fileTransport.on("error", err => {

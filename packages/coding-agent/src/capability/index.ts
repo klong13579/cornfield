@@ -224,10 +224,42 @@ function filterProviders<T>(capability: Capability<T>, options: LoadOptions): Pr
 
 /**
  * Load a capability by ID.
+ *
+ * On an unknown capability, we emit a one-shot diagnostic to stderr
+ * with a full stack trace and process context (pid, ppid, OMPCODE,
+ * argv, cwd) BEFORE throwing. The eval'd caller that hits this path
+ * shows up as `at [eval]:N:M` — a frame without a source file —
+ * which is not enough to identify the offending module on its own.
+ * The process context disambiguates main omp from a spawned
+ * subprocess (OMPCODE=1), and the full stack gives Bun's own internal
+ * frame ordering to help locate the eval'd module.
+ *
+ * We intentionally route through `process.stderr.write` rather than
+ * `logger.error` so a respawning child that hits this in a tight
+ * loop cannot amplify itself through the fileTransport's rotation
+ * pipeline (the original memleak chain). The Set is per-PID, so a
+ * second hit with the same capability ID stays silent — the first
+ * one already captured the trace we needed.
  */
+const loggedUnknownCapabilities = new Set<string>();
 export async function loadCapability<T>(capabilityId: string, options: LoadOptions = {}): Promise<CapabilityResult<T>> {
 	const capability = capabilities.get(capabilityId) as Capability<T> | undefined;
 	if (!capability) {
+		if (!loggedUnknownCapabilities.has(capabilityId)) {
+			loggedUnknownCapabilities.add(capabilityId);
+			const stack = new Error(`Unknown capability: "${capabilityId}"`).stack;
+			const ctx = {
+				pid: process.pid,
+				ppid: process.ppid,
+				ompcode: process.env.OMPCODE ?? null,
+				argv: process.argv.slice(0, 4).join(" "),
+				cwd: process.cwd(),
+			};
+			process.stderr.write(
+				`[capability] Unknown capability "${capabilityId}" ctx=${JSON.stringify(ctx)}\n` +
+					`[capability] stack:\n${stack}\n`,
+			);
+		}
 		throw new Error(`Unknown capability: "${capabilityId}"`);
 	}
 

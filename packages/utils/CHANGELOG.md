@@ -8,6 +8,8 @@
 
 ### Fixed
 
+- **Logger rotation fd leak under Bun**: `winston-daily-rotate-file` with `zippedArchive: true` and `maxSize: "10m"` exhausted file descriptors within minutes of a session starting. Each rotation spawned a fresh `inp.pipe(gzip).pipe(out)` pipeline; on the 0-byte files produced under high log volume the gzip transform and write stream never observed `finish` under Bun, so all three streams (and their fds) leaked on every rotation. Combined with the `a558f6538` change that restored `logger.info()`, uncaught exceptions from a respawning child could trigger rotation every few hundred ms and balloon RSS by GBs in seconds. Switched to `zippedArchive: false` and `maxSize: "100m"` so a normal session stays in a single file and the gzip fd leak is removed entirely. Operators that want compressed retention should gzip at the log-shipper layer instead.
+
 - **`runCleanup` reentrancy crash ("Cleanup invoked recursively")**: Signal handlers (SIGINT/SIGTERM/uncaughtException) are async — `await runCleanup()` does not block `process.exit()`. When `process.on("exit")` fired during an in-flight cleanup (cleanupStage still `"running"`), the reentrant `runCleanup` call logged an error and returned `Promise.resolve()`, leaving cleanup callbacks unexecuted and crashing the gateway. Fixed: the `"running"` branch now returns the existing `cleanupPromise` instead of logging an error, so reentrant callers await the same in-flight cleanup. Added `cleanupPromise` field to track the active cleanup promise across reentrancy.
 
 ### Added

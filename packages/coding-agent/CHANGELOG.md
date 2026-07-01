@@ -4,6 +4,10 @@
 
 ### Added
 
+- **`loadCapability` unknown-capability diagnostic** (`src/capability/index.ts:223`): When `loadCapability(id)` is called with an `id` that has no `defineCapability` entry, the function now writes a one-shot diagnostic to **stderr** (NOT through the file logger — that would feed the rotation pipeline on a respawning child) before throwing. The diagnostic includes the capability id, process context (`pid`, `ppid`, `OMPCODE` env, `argv[0..3]`, `cwd`), and a full `Error.stack` so the eval'd caller (`at [eval]:N:M`) can be traced to its source. The trace is emitted at most once per `(pid, capabilityId)` pair, so a child stuck in a respawn loop cannot amplify the noise. Background: an `Unknown capability: "settings"` was observed firing from a child process under `[eval]:3:17` with no source path, but only on the production binary — to land a real fix we need to see the source module on the next reproduction, and the stderr trace is the cheapest way to get it.
+
+### Added (previously)
+
 - **`omp gateway start` now daemonizes by default**: Previously `omp gateway start` ran in the foreground, blocking the terminal and dying on Ctrl+C. Now it spawns a detached background child process (via `--foreground` flag internally), waits for the PID file to appear (up to 15s), prints the gateway status, and returns control to the shell. If the gateway is already running, it prints the existing status without starting a new process. The `--foreground` flag is available for service mode (launchd/systemd) and debugging. The service installer (`service-installer.ts`) was updated to pass `--foreground` in both launchd plist and systemd unit files.
 
 - **`omp agent unregister --delete-files`**: New flag that also `rm -rf`s the agentDir on disk after unregistering it from the registry. The directory path is read from the registry entry before unregister, so the file deletion and the registry removal are coordinated: if `rm` fails or the path is `/`/empty (defensive safety check), the registry entry is preserved and the user can retry. Off by default; the previous registry-only behavior is unchanged when the flag is omitted.
