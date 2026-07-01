@@ -50,6 +50,13 @@ import { alibabaCodingPlanAuthorizationHeader } from "../utils/oauth/alibaba-cod
 import { parseGitHubCopilotApiKey } from "../utils/oauth/github-copilot";
 import { getKimiCommonHeaders } from "../utils/oauth/kimi";
 import { notifyProviderResponse } from "../utils/provider-response";
+import {
+	findFirstTag,
+	getTrailingPartialTag,
+	REASONING_CLOSE_TAGS,
+	REASONING_OPEN_TAGS,
+	shouldParseReasoningTags,
+} from "../utils/reasoning-tags";
 import { callWithCopilotModelRetry, extractHttpStatusFromError } from "../utils/retry";
 import { adaptSchemaForStrict, NO_STRICT } from "../utils/schema";
 import { isForcedToolChoice, mapToOpenAICompletionsToolChoice } from "../utils/tool-choice";
@@ -191,44 +198,6 @@ function isCompiledGrammarTooLargeStrictError(
 		/compiled grammar/i.test(messageParts) &&
 		/too large/i.test(messageParts)
 	);
-}
-
-// LIMITATION: The think tag parser uses naive string matching for <think>/<thinking> tags.
-// If MiniMax models output these literal strings in code blocks, XML examples, or explanations,
-// they will be incorrectly consumed as thinking delimiters, truncating visible output.
-// A streaming parser with arbitrary chunk boundaries cannot reliably detect code block context.
-// This is acceptable because: (1) only enabled for minimax-code providers, (2) MiniMax models
-// use these tags as their actual thinking format, and (3) false positives are rare in practice.
-const MINIMAX_THINK_OPEN_TAGS = ["<think>", "<thinking>"] as const;
-const MINIMAX_THINK_CLOSE_TAGS = ["</think>", "</thinking>"] as const;
-
-function findFirstTag(text: string, tags: readonly string[]): { index: number; tag: string } | undefined {
-	let earliestIndex = Number.POSITIVE_INFINITY;
-	let earliestTag: string | undefined;
-	for (const tag of tags) {
-		const index = text.indexOf(tag);
-		if (index !== -1 && index < earliestIndex) {
-			earliestIndex = index;
-			earliestTag = tag;
-		}
-	}
-	if (!earliestTag) return undefined;
-	return { index: earliestIndex, tag: earliestTag };
-}
-
-function getTrailingPartialTag(text: string, tags: readonly string[]): string {
-	let maxLength = 0;
-	for (const tag of tags) {
-		const maxCandidateLength = Math.min(tag.length - 1, text.length);
-		for (let length = maxCandidateLength; length > 0; length--) {
-			if (text.endsWith(tag.slice(0, length))) {
-				if (length > maxLength) maxLength = length;
-				break;
-			}
-		}
-	}
-	if (maxLength === 0) return "";
-	return text.slice(-maxLength);
 }
 
 // DeepSeek models leak chat-template special tokens (e.g. `<｜tool_calls_begin｜>`,
@@ -420,7 +389,13 @@ export const streamOpenAICompletions: StreamFunction<"openai-completions"> = (
 			if (copilotPremiumRequests !== undefined) output.usage.premiumRequests = copilotPremiumRequests;
 			stream.push({ type: "start", partial: output });
 
-			const parseMiniMaxThinkTags = model.provider === "minimax-code";
+			// Decide whether to parse inline reasoning tags (`<think>...</think>`,
+			// `antml:think`, `mm:think`, etc.) from the text stream. OpenClaw shipped
+			// the same insight (#18053) — a hardcoded provider list misses models
+			// (e.g. MiniMax M3 served via a third-party gateway like narwal-plan).
+			// The full rule lives in `utils/reasoning-tags.ts` so it is testable
+			// and shared with the renderer's defensive strip.
+			const parseMiniMaxThinkTags = shouldParseReasoningTags(model);
 			// NVIDIA NIM and similar OpenAI-compatible hosts return DeepSeek's chat-template
 			// tool-call markers in `delta.content` even though tool calls are also surfaced
 			// structurally. Strip the leaked markers so users don't see raw `<｜...｜>` tokens.
@@ -514,7 +489,7 @@ export const streamOpenAICompletions: StreamFunction<"openai-completions"> = (
 			const flushTaggedTextBuffer = () => {
 				while (taggedTextBuffer.length > 0) {
 					if (insideTaggedThinking) {
-						const closingTag = findFirstTag(taggedTextBuffer, MINIMAX_THINK_CLOSE_TAGS);
+						const closingTag = findFirstTag(taggedTextBuffer, REASONING_CLOSE_TAGS);
 						if (closingTag) {
 							appendThinkingDelta(taggedTextBuffer.slice(0, closingTag.index));
 							taggedTextBuffer = taggedTextBuffer.slice(closingTag.index + closingTag.tag.length);
@@ -522,14 +497,14 @@ export const streamOpenAICompletions: StreamFunction<"openai-completions"> = (
 							continue;
 						}
 
-						const trailingPartialTag = getTrailingPartialTag(taggedTextBuffer, MINIMAX_THINK_CLOSE_TAGS);
+						const trailingPartialTag = getTrailingPartialTag(taggedTextBuffer, REASONING_CLOSE_TAGS);
 						const flushLength = taggedTextBuffer.length - trailingPartialTag.length;
 						appendThinkingDelta(taggedTextBuffer.slice(0, flushLength));
 						taggedTextBuffer = trailingPartialTag;
 						break;
 					}
 
-					const openingTag = findFirstTag(taggedTextBuffer, MINIMAX_THINK_OPEN_TAGS);
+					const openingTag = findFirstTag(taggedTextBuffer, REASONING_OPEN_TAGS);
 					if (openingTag) {
 						appendTextDelta(taggedTextBuffer.slice(0, openingTag.index));
 						taggedTextBuffer = taggedTextBuffer.slice(openingTag.index + openingTag.tag.length);
@@ -537,7 +512,7 @@ export const streamOpenAICompletions: StreamFunction<"openai-completions"> = (
 						continue;
 					}
 
-					const trailingPartialTag = getTrailingPartialTag(taggedTextBuffer, MINIMAX_THINK_OPEN_TAGS);
+					const trailingPartialTag = getTrailingPartialTag(taggedTextBuffer, REASONING_OPEN_TAGS);
 					const flushLength = taggedTextBuffer.length - trailingPartialTag.length;
 					appendTextDelta(taggedTextBuffer.slice(0, flushLength));
 					taggedTextBuffer = trailingPartialTag;

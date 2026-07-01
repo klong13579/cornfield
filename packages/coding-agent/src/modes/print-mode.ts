@@ -6,6 +6,7 @@
  * - `omp --mode json "prompt"` - JSON event stream
  */
 import type { AssistantMessage, ImageContent } from "@oh-my-pi/pi-ai";
+import { stripReasoningTagsFromText } from "@oh-my-pi/pi-ai/utils/reasoning-tags";
 import { sanitizeText } from "@oh-my-pi/pi-natives";
 import { runExtensionCompact, runExtensionSetModel } from "../extensibility/extensions/compact-handler";
 import type { AgentSession } from "../session/agent-session";
@@ -177,7 +178,11 @@ export async function runPrintMode(session: AgentSession, options: PrintModeOpti
 			// Output text content
 			for (const content of assistantMsg.content) {
 				if (content.type === "text") {
-					process.stdout.write(`${sanitizeText(content.text)}\n`);
+					// Same defensive strip as the TUI renderer. The streaming
+					// parser in pi-ai normally moves `<think>...</think>` into
+					// a separate thinking block; this catches leaks so `omp -p`
+					// never prints a raw `<think>` literal to stdout.
+					process.stdout.write(`${sanitizeText(stripReasoningTagsFromText(content.text))}\n`);
 				}
 			}
 		}

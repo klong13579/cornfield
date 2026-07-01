@@ -1,4 +1,5 @@
 import type { AssistantMessage, ImageContent, Usage } from "@oh-my-pi/pi-ai";
+import { stripReasoningTagsFromText } from "@oh-my-pi/pi-ai/utils/reasoning-tags";
 import { Container, Image, ImageProtocol, Markdown, Spacer, TERMINAL, Text } from "@oh-my-pi/pi-tui";
 import { formatNumber } from "@oh-my-pi/pi-utils";
 import { settings } from "../../config/settings";
@@ -102,9 +103,13 @@ export class AssistantMessageComponent extends Container {
 		for (let i = 0; i < message.content.length; i++) {
 			const content = message.content[i];
 			if (content.type === "text" && content.text.trim()) {
-				// Assistant text messages with no background - trim the text
-				// Set paddingY=0 to avoid extra spacing before tool executions
-				this.#contentContainer.addChild(new Markdown(content.text.trim(), 1, 0, getMarkdownTheme()));
+				// Defensive strip: the streaming parser in pi-ai normally moves
+				// reasoning blocks into a separate `thinking` content block. If
+				// a tag ever leaks through (unknown namespace, parser edge case),
+				// scrub it here so the user never sees a raw `<think>` literal.
+				// Code regions are preserved by the stripper.
+				const cleanedText = stripReasoningTagsFromText(content.text);
+				this.#contentContainer.addChild(new Markdown(cleanedText.trim(), 1, 0, getMarkdownTheme()));
 			} else if (content.type === "thinking" && content.thinking.trim()) {
 				// Add spacing only when another visible assistant content block follows.
 				// This avoids a superfluous blank line before separately-rendered tool execution blocks.
