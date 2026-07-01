@@ -57,6 +57,14 @@ providers:
     auth: apiKey
     discovery:
       type: ollama
+    # Drop these model ids from the visible registry. Use this for gateway-catalog
+    # entries that the provider advertises but that are not in your plan, or to keep
+    # a model configured (e.g. via modelOverrides) but hidden from selectors and
+    # `omp --list-models`. Applied after `models:` and `modelOverrides`, so hidden
+    # models can still carry overrides.
+    exclude:
+      - some-legacy-id
+      - some-gateway-alias
     modelOverrides:
       some-model-id:
         name: Renamed model
@@ -311,8 +319,51 @@ Keyless providers:
 
 - `getAll()` returns the loaded model registry (built-in + merged custom + discovered).
 - `getAvailable()` filters to models that are keyless or have resolvable auth.
+- `getVerifiedAvailable()` further filters to models confirmed by dynamic discovery
+  (or returns all available when no discovery is configured for the provider).
 
 So a model can exist in registry but not be selectable until auth is available.
+
+### Per-provider include / exclude (`models:` and `exclude:`)
+
+`models.yml` gives you two per-provider filters that run after the merge, on both
+the initial load and every runtime-discovery refresh:
+
+- `models:` is a hard include list — only these ids end up in the registry for that
+  provider. Useful when you want to override every id's metadata and ignore whatever
+  the gateway / `models.db` cache claims exists.
+- `exclude:` is a hide list — drop these ids from the visible registry. Useful when
+  the gateway advertises a model you cannot actually call (paid plan, deprecated id,
+  or a routing alias you never want users to pick), and you do not want to give up
+  the override / metadata entry that lives next to it. The filter is applied
+  *after* `modelOverrides`, so excluded models still pick up their configured
+  metadata; they just are not exposed via `getAll()` / `getVerifiedAvailable()` /
+  `find()` / `--list-models` / the TUI selector.
+
+Example (paid gateway where several advertised ids are not in the user's plan):
+
+```yaml
+providers:
+  narwal-plan:
+    baseUrl: https://coder.narwal.com/v1
+    apiKey: NARWAL_PLAN_API_KEY
+    api: openai-completions
+    models:
+      - id: gpt-5.4
+        # ... full metadata entry; still gets its modelOverrides applied
+    modelOverrides:
+      gpt-5.4:
+        compat: { supportsDeveloperRole: false }
+    # Hide gateway-catalog entries that the user cannot actually invoke.
+    exclude:
+      - some-deprecated-id
+      - custom-internal-alias
+```
+
+If an id appears in both `models:` and `exclude:`, the exclusion wins — the model
+is dropped from the registry. `find("provider", "excluded-id")` then returns
+`undefined`, and session resolution fails with a meaningful error rather than
+silently using the model.
 
 ## Runtime model resolution
 

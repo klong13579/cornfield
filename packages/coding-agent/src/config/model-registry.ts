@@ -281,6 +281,13 @@ const ProviderConfigSchema = Type.Object({
 	discovery: Type.Optional(ProviderDiscoverySchema),
 	models: Type.Optional(Type.Array(ModelDefinitionSchema)),
 	modelOverrides: Type.Optional(Type.Record(Type.String(), ModelOverrideSchema)),
+	/**
+	 * Per-provider hide list: drop these model ids from the visible registry after
+	 * the merge. Use this for gateway-catalog entries that are advertised but not
+	 * actually in your plan (paid gateways) or that you want to keep configured
+	 * (e.g. for `modelOverrides`) but never show in selectors / `--list-models`.
+	 */
+	exclude: Type.Optional(Type.Array(Type.String({ minLength: 1 }))),
 });
 
 const EquivalenceConfigSchema = Type.Object({
@@ -448,6 +455,8 @@ interface CustomModelsResult {
 	configuredProviders?: Set<string>;
 	/** When non-empty, models for each provider are restricted to these ids (discovery/cached extras dropped). */
 	explicitProviderModelIds?: Map<string, Set<string>>;
+	/** Per-provider hide list: drop these ids from #models after the merge (config-level exclusion). */
+	excludedProviderModelIds?: Map<string, Set<string>>;
 	equivalence?: ModelEquivalenceConfig;
 	error?: ConfigError;
 	found: boolean;
@@ -796,6 +805,8 @@ export class ModelRegistry {
 	#discoveredModelIds: Map<string, Set<string>> = new Map();
 	/** When non-empty, models for each provider are restricted to these ids (discovery/cached extras dropped). */
 	#explicitProviderModelIds: Map<string, Set<string>> = new Map();
+	/** Per-provider hide list: drop these ids from #models after the merge (config-level exclusion). */
+	#excludedProviderModelIds: Map<string, Set<string>> = new Map();
 	// Runtime extension model overlays — persist across refresh() cycles so that
 	// models registered by extensions survive the model selector's offline reload.
 	#runtimeModelOverlays: CustomModelOverlay[] = [];
@@ -897,6 +908,7 @@ export class ModelRegistry {
 			discoverableProviders = [],
 			configuredProviders = new Set(),
 			explicitProviderModelIds = new Map(),
+			excludedProviderModelIds = new Map(),
 			equivalence,
 			error: configError,
 		} = this.#loadCustomModels();
@@ -908,6 +920,7 @@ export class ModelRegistry {
 		this.#modelOverrides = modelOverrides;
 		this.#equivalenceConfig = equivalence;
 		this.#explicitProviderModelIds = explicitProviderModelIds;
+		this.#excludedProviderModelIds = excludedProviderModelIds;
 
 		this.#addImplicitDiscoverableProviders(configuredProviders);
 		const builtInModels = this.#applyHardcodedModelPolicies(this.#loadBuiltInModels(overrides));
@@ -959,17 +972,29 @@ export class ModelRegistry {
 		return merged;
 	}
 
-	/** Drops discovery/cached extras when models.yml defines an explicit non-empty `models` list for that provider. */
+	/**
+	 * Apply per-provider model filtering:
+	 * - If `models:` is declared in `models.yml`, restrict to those ids (drops
+	 *   discovery / cached extras for that provider).
+	 * - If `exclude:` is declared, drop those ids from the visible registry.
+	 *
+	 * `exclude:` is applied *after* `modelOverrides` so users can still
+	 * configure a hidden model (e.g. fix compat) without exposing it in
+	 * selectors or `--list-models`.
+	 */
 	#applyExplicitProviderAllowlist(models: Model<Api>[]): Model<Api>[] {
-		if (this.#explicitProviderModelIds.size === 0) {
+		if (this.#explicitProviderModelIds.size === 0 && this.#excludedProviderModelIds.size === 0) {
 			return models;
 		}
 		return models.filter(m => {
 			const allowed = this.#explicitProviderModelIds.get(m.provider);
-			if (!allowed) {
-				return true;
+			if (allowed && !allowed.has(m.id)) {
+				return false;
 			}
-			return allowed.has(m.id);
+			if (this.#excludedProviderModelIds.get(m.provider)?.has(m.id)) {
+				return false;
+			}
+			return true;
 		});
 	}
 
@@ -1103,6 +1128,7 @@ export class ModelRegistry {
 				discoverableProviders: [],
 				configuredProviders: new Set(),
 				explicitProviderModelIds: new Map(),
+				excludedProviderModelIds: new Map(),
 				error,
 				found: true,
 			};
@@ -1115,6 +1141,7 @@ export class ModelRegistry {
 				discoverableProviders: [],
 				configuredProviders: new Set(),
 				explicitProviderModelIds: new Map(),
+				excludedProviderModelIds: new Map(),
 				found: false,
 			};
 		}
@@ -1126,6 +1153,7 @@ export class ModelRegistry {
 		const providerEntries = Object.entries(value.providers ?? {});
 		const configuredProviders = new Set(Object.keys(value.providers ?? {}));
 		const explicitProviderModelIds = new Map<string, Set<string>>();
+		const excludedProviderModelIds = new Map<string, Set<string>>();
 
 		for (const [providerName, providerConfig] of providerEntries) {
 			// Always set overrides when baseUrl/headers/apiKey/compat are present
@@ -1176,6 +1204,14 @@ export class ModelRegistry {
 					new Set(customDefs.map(def => def.id).filter(id => typeof id === "string" && id.length > 0)),
 				);
 			}
+
+			const excludedIds = providerConfig.exclude ?? [];
+			if (excludedIds.length > 0) {
+				excludedProviderModelIds.set(
+					providerName,
+					new Set(excludedIds.filter(id => typeof id === "string" && id.length > 0)),
+				);
+			}
 		}
 
 		return {
@@ -1186,6 +1222,7 @@ export class ModelRegistry {
 			discoverableProviders,
 			configuredProviders,
 			explicitProviderModelIds,
+			excludedProviderModelIds,
 			equivalence: value.equivalence,
 			found: true,
 		};

@@ -996,6 +996,141 @@ describe("ModelRegistry", () => {
 		});
 	});
 
+	describe("per-provider exclude (config-level hide list)", () => {
+		test("exclude drops the named model from the registry", () => {
+			writeModelsJson({
+				demo: providerConfig("https://demo.example.com/v1", [{ id: "keep-me" }, { id: "drop-me" }]),
+			});
+			// Patch exclude onto the existing config — same file, additional field.
+			const raw = JSON.parse(fs.readFileSync(modelsJsonPath, "utf8")) as {
+				providers: Record<string, Record<string, unknown>>;
+			};
+			raw.providers.demo = { ...raw.providers.demo, exclude: ["drop-me"] };
+			fs.writeFileSync(modelsJsonPath, JSON.stringify(raw));
+
+			const registry = new ModelRegistry(authStorage, modelsJsonPath);
+			const models = getModelsForProvider(registry, "demo");
+
+			expect(models.map(m => m.id).sort()).toEqual(["keep-me"]);
+			expect(registry.find("demo", "drop-me")).toBeUndefined();
+			expect(registry.find("demo", "keep-me")).toBeDefined();
+		});
+
+		test("exclude only affects the named provider; other providers are untouched", () => {
+			const raw = {
+				providers: {
+					demo: {
+						baseUrl: "https://demo.example.com/v1",
+						apiKey: "TEST_KEY",
+						api: "openai-completions",
+						models: [{ id: "keep-me" }, { id: "drop-me" }],
+						exclude: ["drop-me"],
+					},
+					other: {
+						baseUrl: "https://other.example.com/v1",
+						apiKey: "TEST_KEY",
+						api: "openai-completions",
+						models: [{ id: "other-keep" }, { id: "other-also-keep" }],
+					},
+				},
+			};
+			fs.writeFileSync(modelsJsonPath, JSON.stringify(raw));
+
+			const registry = new ModelRegistry(authStorage, modelsJsonPath);
+
+			expect(getModelsForProvider(registry, "demo").map(m => m.id)).toEqual(["keep-me"]);
+			expect(
+				getModelsForProvider(registry, "other")
+					.map(m => m.id)
+					.sort(),
+			).toEqual(["other-also-keep", "other-keep"]);
+		});
+
+		test("exclude wins over `models:` (id in both → dropped)", () => {
+			const raw = {
+				providers: {
+					demo: {
+						baseUrl: "https://demo.example.com/v1",
+						apiKey: "TEST_KEY",
+						api: "openai-completions",
+						models: [{ id: "a" }, { id: "b" }],
+						exclude: ["b"],
+					},
+				},
+			};
+			fs.writeFileSync(modelsJsonPath, JSON.stringify(raw));
+
+			const registry = new ModelRegistry(authStorage, modelsJsonPath);
+			const models = getModelsForProvider(registry, "demo");
+
+			expect(models.map(m => m.id)).toEqual(["a"]);
+			expect(registry.find("demo", "b")).toBeUndefined();
+		});
+
+		test("exclude of an id that does not exist is a silent no-op", () => {
+			const raw = {
+				providers: {
+					demo: {
+						baseUrl: "https://demo.example.com/v1",
+						apiKey: "TEST_KEY",
+						api: "openai-completions",
+						models: [{ id: "a" }],
+						exclude: ["never-existed", "also-never"],
+					},
+				},
+			};
+			fs.writeFileSync(modelsJsonPath, JSON.stringify(raw));
+
+			const registry = new ModelRegistry(authStorage, modelsJsonPath);
+			expect(getModelsForProvider(registry, "demo").map(m => m.id)).toEqual(["a"]);
+		});
+
+		test("getVerifiedAvailable and --list-models output skip excluded models", () => {
+			const raw = {
+				providers: {
+					demo: {
+						baseUrl: "https://demo.example.com/v1",
+						apiKey: "TEST_KEY",
+						api: "openai-completions",
+						models: [{ id: "a" }, { id: "b" }, { id: "c" }],
+						exclude: ["b"],
+					},
+				},
+			};
+			fs.writeFileSync(modelsJsonPath, JSON.stringify(raw));
+
+			const registry = new ModelRegistry(authStorage, modelsJsonPath);
+			const verified = registry.getVerifiedAvailable().filter(m => m.provider === "demo");
+
+			expect(verified.map(m => m.id).sort()).toEqual(["a", "c"]);
+		});
+
+		test("exclude persists across refresh() (re-applied after runtime discovery)", async () => {
+			const raw = {
+				providers: {
+					demo: {
+						baseUrl: "https://demo.example.com/v1",
+						apiKey: "TEST_KEY",
+						api: "openai-completions",
+						models: [{ id: "a" }, { id: "b" }],
+						exclude: ["b"],
+					},
+				},
+			};
+			fs.writeFileSync(modelsJsonPath, JSON.stringify(raw));
+
+			const registry = new ModelRegistry(authStorage, modelsJsonPath);
+			await registry.refresh("offline");
+
+			expect(
+				getModelsForProvider(registry, "demo")
+					.map(m => m.id)
+					.sort(),
+			).toEqual(["a"]);
+			expect(registry.find("demo", "b")).toBeUndefined();
+		});
+	});
+
 	describe("thinking metadata normalization", () => {
 		test("custom models preserve explicit thinking", () => {
 			const thinking: ThinkingConfig = {
