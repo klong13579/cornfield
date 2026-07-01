@@ -385,6 +385,13 @@ export class DingTalkChannel extends BaseChannel {
 	#connectionFailed = false;
 	#accountId = "__default__";
 	/**
+	 * When true, drop thinking/reasoning blocks from the rendered AI
+	 * Card. The omp agent still emits thinking deltas; the channel
+	 * just discards them instead of forwarding to `buildThinkBlock`.
+	 * Set per-account by the gateway from `DingtalkAccountConfig.hideThinkingBlock`.
+	 */
+	#hideThinkingBlock = false;
+	/**
 	 * Factory seam: build the DingTalk Stream SDK client. Production
 	 * code uses the real `DWClient`; integration tests override this
 	 * to inject a fake `EventEmitter`-based client that captures
@@ -493,6 +500,22 @@ export class DingTalkChannel extends BaseChannel {
 	 */
 	setConfig(config: DingTalkConfig): void {
 		this.#config = config;
+	}
+
+	/**
+	 * When `true`, the channel discards thinking/reasoning deltas
+	 * emitted by the agent instead of forwarding them into the AI
+	 * Card via `buildThinkBlock`. The model still thinks; the card
+	 * just doesn't show it. Set by the gateway from
+	 * `DingtalkAccountConfig.hideThinkingBlock` for per-account control.
+	 */
+	setHideThinkingBlock(hide: boolean): void {
+		this.#hideThinkingBlock = hide;
+	}
+
+	/** Test seam: read the current hideThinkingBlock flag. */
+	__testGetHideThinkingBlock(): boolean {
+		return this.#hideThinkingBlock;
 	}
 
 	/**
@@ -761,6 +784,11 @@ export class DingTalkChannel extends BaseChannel {
 				textFlushTimer = setTimeout(flushText, CARD_STREAM_THROTTLE_MS);
 			},
 			onThinkingDelta: delta => {
+				// When the account has `hideThinkingBlock: true`, drop the
+				// delta entirely — the model still thinks, but the card
+				// shows no chain-of-thought. The session JSONL transcript
+				// is unchanged (it's written by omp, not the gateway).
+				if (this.#hideThinkingBlock) return;
 				thinkingText += delta;
 			},
 			onToolCall: call => {

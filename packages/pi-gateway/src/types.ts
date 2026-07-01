@@ -379,6 +379,9 @@ export interface DingtalkAccountConfig {
 	timeoutMs?: number;
 	/** Tool access policy: deny these tool names for this account's agent. */
 	deniedTools?: string[];
+	/** When true, drop thinking/reasoning blocks from the DingTalk AI Card.
+	 *  The omp agent still emits thinking; the channel just doesn't render it. */
+	hideThinkingBlock?: boolean;
 }
 
 export interface DingTalkConfig extends ChannelConfig {

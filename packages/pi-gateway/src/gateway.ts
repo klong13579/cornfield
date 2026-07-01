@@ -493,6 +493,7 @@ export class Gateway {
 			for (const [accountId, account] of Object.entries(dtConfig.accounts)) {
 				const channel = this.#channelFactory?.(accountId) ?? new DingTalkChannel();
 				channel.setAccountId(accountId);
+				channel.setHideThinkingBlock(account.hideThinkingBlock ?? false);
 
 				const agentDir = resolveAgentDir(accountId, account.agentDir);
 				this.#accountAgentDirs.set(accountId, agentDir);
@@ -553,6 +554,7 @@ export class Gateway {
 		const rawConfig = config.channels.dingtalk;
 		const channel = this.#channelFactory?.(accountId) ?? new DingTalkChannel();
 		channel.setAccountId(accountId);
+		channel.setHideThinkingBlock(account.hideThinkingBlock ?? false);
 
 		const agentDir = resolveAgentDir(accountId, account.agentDir);
 		this.#accountAgentDirs.set(accountId, agentDir);
