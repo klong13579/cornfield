@@ -7,6 +7,7 @@
 import * as fs from "node:fs/promises";
 import * as fsSync from "node:fs";
 import * as path from "node:path";
+import { logger } from "@oh-my-pi/pi-utils";
 import { getDataDir } from "./config";
 import type { BridgeStat, QueueStat } from "./session-manager";
 import type { ChannelHealth, GatewayConfig } from "./types";
@@ -76,6 +77,78 @@ export async function killOrphanRpcProcesses(): Promise<void> {
 		}
 	} catch {
 		// Best-effort
+	}
+}
+
+/**
+ * Scan for any remaining gateway processes (those started outside the
+ * PID-file or launchd mechanisms, e.g. the legacy pi-gateway CLI).
+ * Sends SIGTERM, waits 3s, then SIGKILL. Best-effort.
+ *
+ * Matching: process args contain "gateway" AND "start" AND "--foreground".
+ * This covers both `omp gateway start --foreground` and the legacy
+ * `pi-gateway gateway start --foreground` (process.title = "pi-gateway").
+ */
+export async function scanAndKillRemainingGatewayProcesses(): Promise<void> {
+	try {
+		const result = Bun.spawnSync(["ps", "-eo", "pid,args"]);
+		if (result.exitCode !== 0) return;
+		const lines = result.stdout.toString().trim().split("\n");
+		const toKill: number[] = [];
+		for (const line of lines) {
+			const parts = line.trim().split(/\s+/);
+			if (parts.length < 2) continue;
+			const pid = parseInt(parts[0], 10);
+			const args = parts.slice(1).join(" ");
+			if (
+				!Number.isNaN(pid) &&
+				args.includes("gateway") &&
+				args.includes("start") &&
+				args.includes("--foreground")
+			) {
+				toKill.push(pid);
+			}
+		}
+		if (toKill.length === 0) return;
+
+		logger.warn("Found remaining gateway processes, cleaning up", { pids: toKill });
+
+		// SIGTERM
+		for (const pid of toKill) {
+			try {
+				process.kill(pid, "SIGTERM");
+			} catch {
+				// already dead
+			}
+		}
+
+		// Wait up to 3s for graceful shutdown
+		const stillAlive = [...toKill];
+		for (let i = 0; i < 3; i++) {
+			await Bun.sleep(1000);
+			stillAlive.length = 0;
+			for (const pid of toKill) {
+				try {
+					process.kill(pid, 0);
+					stillAlive.push(pid);
+				} catch {
+					// confirmed dead
+				}
+			}
+			if (stillAlive.length === 0) return;
+		}
+
+		// SIGKILL remaining
+		for (const pid of stillAlive) {
+			logger.warn("Force-killing unresponsive gateway process", { pid });
+			try {
+				process.kill(pid, "SIGKILL");
+			} catch {
+				// already dead
+			}
+		}
+	} catch {
+		// best-effort
 	}
 }
 
@@ -235,6 +308,10 @@ export async function stopGatewayDaemon(): Promise<boolean> {
 		} catch {}
 		await killOrphanRpcProcesses();
 		await fs.unlink(pidPath).catch(() => {});
+
+		// Clean up any remaining gateway processes not tracked by PID file
+		await scanAndKillRemainingGatewayProcesses();
+
 		return true;
 	} catch {
 		return false;

@@ -23,6 +23,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { isEnoent, logger } from "@oh-my-pi/pi-utils";
 import { $ } from "bun";
+import { scanAndKillRemainingGatewayProcesses } from "./gateway-daemon";
 
 // ═══════════════════════════════════════════════════════════════════════
 // Constants
@@ -285,6 +286,9 @@ export async function stopService(): Promise<void> {
 	} else {
 		await $`systemctl --user stop ${SERVICE_NAME}.service`.quiet().nothrow();
 	}
+
+	// Clean up any remaining gateway processes not tracked by launchd/systemd
+	await scanAndKillRemainingGatewayProcesses();
 
 	logger.debug("Service stopped");
 }
