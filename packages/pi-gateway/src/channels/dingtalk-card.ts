@@ -416,21 +416,19 @@ function getToolEmoji(name: string): string {
 	return TOOL_EMOJIS[name] ?? "🔧";
 }
 
-export function buildToolBlock(call: { name: string; args: unknown }, resultText: string, isError: boolean): CardBlock {
+export function buildToolBlock(call: { name: string; args: unknown }, _resultText: string, isError: boolean): CardBlock {
 	const argsPreview = formatToolArgs(call.args);
 	const emoji = getToolEmoji(call.name);
 	const execLabel = isError
 		? `${emoji} ${call.name}(${argsPreview}) — error`
 		: `${emoji} ${call.name}(${argsPreview})`;
-	const body = resultText || execLabel;
-	const wrapped = `> <font sizeToken=common_h5_text_style__font_size colorTokenV2=common_level2_base_color>${execLabel}\n${body}</font>`;
+	const wrapped = `> <font sizeToken=common_h5_text_style__font_size colorTokenV2=common_level2_base_color>${execLabel}</font>`;
 	logger.info("[DingTalk] buildToolBlock", {
 		toolName: call.name,
 		emoji,
-		hasResult: !!resultText,
 		isError,
 	});
-	return { type: BlockType.TOOL, text: ` ${execLabel}\n${body}`, markdown: wrapped };
+	return { type: BlockType.TOOL, text: `${execLabel}`, markdown: wrapped };
 }
 
 /**

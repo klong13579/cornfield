@@ -48,16 +48,16 @@ describe("buildThinkBlock", () => {
 	});
 });
 
-describe("buildToolBlock", () => {
-	test("emits emoji <name>(<args>) prefix and gray font tag", () => {
+	describe("buildToolBlock", () => {
+	test("emits emoji <name>(<args>) prefix and gray font tag, no result text", () => {
 		const block = buildToolBlock({ name: "read", args: { path: "/tmp/x" } }, "file contents", false);
 		expect(block.type).toBe(2);
 		expect(block.text).toContain("📄 read");
-		expect(block.text).toContain("file contents");
+		expect(block.text).not.toContain("file contents");
 		expect(block.markdown).toContain("common_level2_base_color");
 	});
 
-	test("flags isError in the prefix and replaces body when result is empty", () => {
+	test("flags isError in the prefix", () => {
 		const block = buildToolBlock({ name: "bash", args: "rm -rf /" }, "", true);
 		expect(block.text).toContain("— error");
 		expect(block.text).toContain("⚙️ bash(rm -rf /)");
@@ -67,7 +67,7 @@ describe("buildToolBlock", () => {
 		const longArgs = "x".repeat(200);
 		const block = buildToolBlock({ name: "echo", args: longArgs }, "out", false);
 		expect(block.text).toContain("…");
-		expect(block.text.length).toBeLessThan(400);
+		expect(block.text.length).toBeLessThan(200);
 	});
 });
 
