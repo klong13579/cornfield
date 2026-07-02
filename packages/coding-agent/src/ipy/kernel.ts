@@ -13,6 +13,23 @@ const TEXT_DECODER = new TextDecoder();
 const TRACE_IPC = $flag("PI_PYTHON_IPC_TRACE");
 const PRELUDE_INTROSPECTION_SNIPPET = "import json\nprint(json.dumps(__omp_prelude_docs__()))";
 
+/**
+ * Detect network-level connection failures (gateway process dead).
+ * The gateway URL is always http://127.0.0.1:{port}, so DNS/TLS errors are impossible;
+ * a fetch failure here means the TCP connection was refused or reset.
+ */
+function isConnectionError(err: unknown): boolean {
+	if (err instanceof TypeError && err.cause instanceof Error) {
+		const cause = err.cause as NodeJS.ErrnoException;
+		if (cause.code === "ECONNREFUSED" || cause.code === "ECONNRESET" || cause.code === "ENETUNREACH" || cause.code === "EHOSTUNREACH") {
+			return true;
+		}
+	}
+	const message = err instanceof Error ? err.message : String(err);
+	// Bun sometimes collapses the error chain into a single message string
+	return message.includes("Unable to connect") || message.includes("ECONNREFUSED");
+}
+
 class SharedGatewayCreateError extends Error {
 	constructor(
 		readonly status: number,
@@ -1045,6 +1062,12 @@ export class PythonKernel {
 			}
 		} catch (err: unknown) {
 			logger.warn("Failed to delete kernel via API", { error: err instanceof Error ? err.message : String(err) });
+			if (isConnectionError(err)) {
+				// Gateway process is dead — the kernel is already garbage-collected by the OS.
+				// Treat as confirmed to free capacity tracking slot.
+				logger.warn("Gateway unreachable; assuming kernel resources already released");
+				confirmed = true;
+			}
 		}
 		this.#shutdownConfirmed = confirmed;
 		this.#disposed = confirmed;
