@@ -24,9 +24,9 @@
  */
 
 import * as path from "node:path";
+import { clearStatusFileSync } from "@oh-my-pi/pi-gateway/src/gateway-daemon";
 import { logger } from "@oh-my-pi/pi-utils";
 import { Args, Command, Flags, renderCommandHelp } from "@oh-my-pi/pi-utils/cli";
-import { clearStatusFileSync } from "@oh-my-pi/pi-gateway/src/gateway-daemon";
 
 const ACTIONS = [
 	"start",
@@ -120,6 +120,7 @@ export default class Gateway extends Command {
 				// --foreground: run in foreground (blocking). Used by the daemon child
 				// process and service mode (launchd/systemd). Default path daemonizes.
 				if (flags.foreground) {
+					process.title = "pi-gateway";
 					const { Gateway: GW } = await import("@oh-my-pi/pi-gateway/src/gateway");
 					const { loadConfig } = await import("@oh-my-pi/pi-gateway/src/config");
 					const config = await loadConfig(configPath);
@@ -235,6 +236,7 @@ export default class Gateway extends Command {
 
 				const child = Bun.spawn({
 					cmd: childCmd,
+					argv0: "pi-gateway",
 					stdin: "ignore",
 					stdout: "ignore",
 					stderr: "ignore",

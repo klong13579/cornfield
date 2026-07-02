@@ -32,6 +32,7 @@ import { NewSessionHandler } from "./gateway-new-session";
 import { ResponseHandler } from "./gateway-response";
 import { createCronToolDefinitions } from "./scheduler/host-tool";
 import { createBridgeStatusToolDefinitions } from "./bridge-status-tool";
+import { createDingtalkAttachmentToolDefinitions } from "./dingtalk-attachment-tool";
 import { HostToolDispatcher } from "./host-tool-dispatcher";
 import { type BridgeStat, type QueueStat, SessionManager } from "./session-manager";
 import { SQLiteSessionStore } from "./session-store";
@@ -470,6 +471,7 @@ export class Gateway {
 		dispatcher.setTools([
 			...createCronToolDefinitions(ctx),
 			...createBridgeStatusToolDefinitions({ getBridge: ctx.getBridge }),
+			...createDingtalkAttachmentToolDefinitions(ctx),
 		]);
 		return dispatcher;
 	}

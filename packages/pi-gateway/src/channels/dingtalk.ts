@@ -1947,6 +1947,29 @@ export class DingTalkChannel extends BaseChannel {
 	 *
 	 * The AI Card has no document block type, so the channel sends
 	 * each extracted document as a `sampleFile` robot message after
+	/**
+	 * Public entry point for sending a file attachment to a DingTalk conversation.
+	 *
+	 * Handles the full lifecycle: upload via uploadMedia('file') then send as
+	 * a sampleFile robot message. Designed to be called by host tools
+	 * (e.g. `dingtalk.attachment`) that resolve the target from active chat
+	 * context.
+	 *
+	 * Supported file types: doc, docx, xls, xlsx, ppt, pptx, zip, pdf, rar.
+	 *
+	 * @param target  — user or group target
+	 * @param filePath — absolute path to the file on disk
+	 * @param originalName — optional display name (defaults to basename of filePath)
+	 */
+	async sendFile(
+		target: AICardTarget,
+		filePath: string,
+		originalName?: string,
+	): Promise<void> {
+		return this.#sendFileStandalone(target, filePath, originalName, this.#config);
+	}
+
+	/**
 	 * `finishAICard` completes. `fileType` is the extension (without
 	 * the dot) — derived from the path; DingTalk docs explicitly
 	 * list xlsx/pdf/zip/rar/doc/docx.

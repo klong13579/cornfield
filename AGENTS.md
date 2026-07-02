@@ -52,6 +52,47 @@ bun generate-models              # = bun --cwd=packages/ai run generate-models
 bun run release                  # bumps versions, finalizes CHANGELOGs, tags, pushes, watches CI
 ```
 
+### Restart gateway (after rebuild or config change)
+
+**Use `omp gateway service` (graceful), not `launchctl kickstart -k` (SIGKILL).**
+
+```bash
+# Graceful restart (preferred — goes through gateway.stop() which writes
+# the restart-sentinel and drains active sessions before exiting):
+omp gateway service stop          # SIGTERM via launchd
+sleep 5                            # let the gateway drain
+omp gateway service start         # launchd starts a new instance
+
+# DO NOT use:
+#   launchctl kickstart -k "gui/$UID/com.narwal.pi-gateway"
+# The `-k` flag is SIGKILL — bypasses gateway.stop() entirely, so
+# the restart-sentinel is never written and any in-flight IM
+# messages in the bridge queue are permanently lost. This is the
+# exact root cause of the "00:20:30 消息丢失" incident in the
+# gateway post-mortem: SIGKILL during a long-running cron test-run
+# erased the active-session sentinel and the user never got a
+# response.
+#
+# If you genuinely need SIGKILL (gateway hung past grace period),
+# run `omp gateway service stop` first and wait — if it doesn't
+# exit within 30s, only THEN escalate to launchctl. The active
+# session sentinel recovery added in commit ea21df4d7 is the
+# safety net for graceful paths; SIGKILL removes that safety net.
+
+# Foreground restart (no launchd — for local dev or detached runs):
+pkill -TERM -f "omp gateway start"  # graceful
+sleep 5
+omp gateway start --foreground &    # background; or run in another shell
+```
+
+**Verify after restart:**
+
+```bash
+cat ~/.omp/gateway-data/gateway.pid        # should show new PID
+cat ~/.omp/gateway-data/gateway.status.json | python3 -m json.tool | head -20
+tail -20 ~/.omp/gateway-data/logs/service.log | grep -E "BOOT|service start"
+```
+
 **Do not run** `bun run dev`, `bun test`, or `bun run check` unless the user instructs. Run only targeted tests for code you changed.
 
 ## Architecture & Data Flow
