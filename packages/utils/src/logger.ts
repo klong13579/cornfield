@@ -6,9 +6,9 @@
  */
 import * as fs from "node:fs";
 import winston from "winston";
-import DailyRotateFile from "winston-daily-rotate-file";
 import { getLogsDir } from "./dirs";
 import { cleanupStaleLogs } from "./log-cleanup";
+import { RotatingFileTransport } from "./rotating-file-transport";
 
 /** Ensure logs directory exists */
 function ensureLogsDir(): string {
@@ -40,42 +40,28 @@ const logFormat = winston.format.combine(
 	}),
 );
 
-/** Size-based rotating file transport. The `auditFile` is keyed by
- *  `process.pid` so concurrent omp instances (gateway + per-account
- *  RPC children, multiple test runs) do not contend on a single
- *  hash-named audit file. Sharing that file across processes is a
- *  known winston-daily-rotate-file deadlock: the transport silently
- *  stops writing log entries while still holding the file handle.
- *  See: https://github.com/winstonjs/winston-daily-rotate-file/issues/245
+/** Bun-native rotating file transport.
  *
- *  We also wire an `error` handler that pipes transport-level
- *  failures to stderr — without it, a broken transport just stops
- *  writing and the operator has no signal.
+ * Replaces winston-daily-rotate-file + file-stream-rotator, which leak file
+ * descriptors under Bun: stream.end() is async and the rotator opens a new
+ * fs.createWriteStream without waiting for the old FD to close. Over a long
+ * session (especially in a tight render loop after an abort) dozens of
+ * orphaned FDs accumulate (observed: 43 zombie FDs after 2h).
  *
- *  `zippedArchive` is intentionally OFF. With it on, every rotation
- *  spawns an `inp.pipe(gzip).pipe(out)` pipeline. On 0-byte files
- *  the read stream hits EOF immediately, but the gzip transform and
- *  write stream never observe the matching `finish` event under Bun,
- *  so all three streams (and their fds) leak on every rotation.
- *  Compounded with high log volume (e.g. unhandled exceptions in a
- *  respawning child), this exhausts fds and balloons RSS within
- *  minutes. Plain uncompressed rotation is plenty for a debug log
- *  that the user only inspects post-hoc, and the gzipped retention
- *  can be re-added at the log-shipper layer if needed.
+ * This transport uses Bun.file().writer() (Bun.FileSink) which provides
+ * synchronous write()/end() with reliable FD lifecycle — no zombie FDs.
  *
- *  `maxSize` is `100m` (was `10m`) because Bun's stream accounting
- *  does not always match the on-disk size, and the rotation storm
- *  we observed fired every few hundred ms at 10m. 100m keeps a
- *  single session's log in one file in 99% of cases.
+ * `maxSize` is `100m` (was `10m`) because Bun's stream accounting does not
+ * always match the on-disk size, and the rotation storm we observed fired
+ * every few hundred ms at 10m. 100m keeps a single session's log in one
+ * file in 99% of cases.
  */
-const fileTransport = new DailyRotateFile({
+const fileTransport = new RotatingFileTransport({
 	dirname: ensureLogsDir(),
 	filename: "omp.%DATE%.log",
 	datePattern: "YYYY-MM-DD",
 	maxSize: "100m",
 	maxFiles: 5,
-	zippedArchive: false,
-	auditFile: `${ensureLogsDir()}/.omp-audit-${process.pid}.json`,
 });
 fileTransport.on("error", err => {
 	// Best-effort stderr fallback so a broken transport is visible.
@@ -84,6 +70,13 @@ fileTransport.on("error", err => {
 	} catch {
 		// Last-resort swallow
 	}
+});
+
+// Ensure the file transport is properly closed on process exit.
+process.on("exit", () => {
+	try {
+		fileTransport.close();
+	} catch {}
 });
 
 /** Console transport for terminal output */

@@ -347,7 +347,14 @@ export class EventController {
 				for (const [toolCallId, component] of this.ctx.pendingTools.entries()) {
 					component.setArgsComplete(toolCallId);
 				}
+			} else {
+				// Abort/error: finalize streaming-args state so spinners stop immediately,
+				// rather than waiting for #handleAgentEnd's dispose() a few ticks later.
+				for (const [, component] of this.ctx.pendingTools.entries()) {
+					component.dispose();
+				}
 			}
+
 			this.#lastAssistantComponent = this.ctx.streamingComponent;
 			this.#lastAssistantComponent.setUsageInfo(event.message.usage);
 			this.ctx.streamingComponent = undefined;
@@ -508,9 +515,25 @@ export class EventController {
 		await this.ctx.flushPendingModelSwitch();
 		for (const toolCallId of Array.from(this.ctx.pendingTools.keys())) {
 			if (!this.#backgroundToolCallIds.has(toolCallId)) {
+				const component = this.ctx.pendingTools.get(toolCallId);
+				component?.dispose();
 				this.ctx.pendingTools.delete(toolCallId);
 			}
 		}
+		// Stop orphaned bash/python execution spinners — their Loader's 80ms setInterval
+		// would keep triggering requestRender indefinitely after an abort.
+		for (const component of this.ctx.pendingBashComponents) {
+			component.dispose();
+		}
+		this.ctx.pendingBashComponents = [];
+		for (const component of this.ctx.pendingPythonComponents) {
+			component.dispose();
+		}
+		this.ctx.pendingPythonComponents = [];
+		// Also dispose the active slash-command components (not in the pending arrays).
+		// If executeBash/executePython's promise hangs after PTY kill, the Loader would spin forever.
+		this.ctx.bashComponent?.dispose();
+		this.ctx.pythonComponent?.dispose();
 		this.#backgroundToolCallIds = new Set(
 			Array.from(this.#backgroundToolCallIds).filter(toolCallId => this.ctx.pendingTools.has(toolCallId)),
 		);

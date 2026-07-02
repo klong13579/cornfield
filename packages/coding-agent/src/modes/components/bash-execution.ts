@@ -256,4 +256,12 @@ export class BashExecutionComponent extends Container {
 	getCommand(): string {
 		return this.command;
 	}
+
+	/**
+	 * Stop the loader spinner. Call when the component is orphaned (e.g. after abort)
+	 * to prevent the 80ms setInterval inside {@link Loader} from indefinitely triggering renders.
+	 */
+	dispose(): void {
+		this.#loader.stop();
+	}
 }

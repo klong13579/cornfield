@@ -60,6 +60,10 @@ export class ReadToolGroupComponent extends Container implements ToolExecutionHa
 		this.#updateDisplay();
 	}
 
+	dispose(): void {
+		// ReadToolGroup has no spinners or timers — no-op.
+	}
+
 	updateArgs(args: ReadRenderArgs, toolCallId?: string): void {
 		if (!toolCallId) return;
 		const rawPath = args.file_path || args.path || "";

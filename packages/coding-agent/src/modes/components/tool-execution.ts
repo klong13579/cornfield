@@ -82,6 +82,8 @@ export interface ToolExecutionHandle {
 	): void;
 	setArgsComplete(toolCallId?: string): void;
 	setExpanded(expanded: boolean): void;
+	/** Stop spinners, timers, and abort in-flight diff previews. Safe to call on disposed/orphaned components. */
+	dispose(): void;
 }
 
 /**
@@ -367,6 +369,11 @@ export class ToolExecutionComponent extends Container {
 		}
 		this.#editDiffAbort?.abort();
 		this.#editDiffAbort = undefined;
+	}
+
+	/** Alias for {@link stopAnimation} to satisfy {@link ToolExecutionHandle.dispose}. */
+	dispose(): void {
+		this.stopAnimation();
 	}
 
 	setExpanded(expanded: boolean): void {

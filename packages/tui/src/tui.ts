@@ -564,6 +564,7 @@ export class TUI extends Container {
 	}
 
 	requestRender(force = false): void {
+		if (this.#stopped) return;
 		if (force) {
 			this.#previousLines = [];
 			this.#previousWidth = -1; // -1 triggers widthChanged, forcing a full clear

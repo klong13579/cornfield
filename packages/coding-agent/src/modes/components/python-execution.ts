@@ -178,4 +178,12 @@ export class PythonExecutionComponent extends Container {
 	getCode(): string {
 		return this.code;
 	}
+
+	/**
+	 * Stop the loader spinner. Call when the component is orphaned (e.g. after abort)
+	 * to prevent the 80ms setInterval inside {@link Loader} from indefinitely triggering renders.
+	 */
+	dispose(): void {
+		this.#loader.stop();
+	}
 }

@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **`requestRender()` post-shutdown guard** (`src/tui.ts`): Added `if (this.#stopped) return;` at the top of `requestRender()` to prevent orphaned spinner intervals from triggering render cycles after the TUI has been stopped. This is the defensive complement to the coding-agent fix that disposes spinner components on agent abort.
 ## [14.5.7] - 2026-04-29
 
 ### Fixed

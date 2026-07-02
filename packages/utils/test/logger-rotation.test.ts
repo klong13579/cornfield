@@ -1,31 +1,27 @@
 /**
  * Regression test for the rotation fd leak in the omp file logger.
  *
- * Background: with `zippedArchive: true` and `maxSize: "10m"`, the
- * `winston-daily-rotate-file` transport leaked fds on every rotation
- * because the `inp.pipe(gzip).pipe(out)` pipeline never observed
- * `finish` on the 0-byte files produced under high log volume. The
- * leak was invisible at low write rates and only manifested under
- * the log volume produced by `a558f6538` (which restored
- * `logger.info()`), where a respawning child could trigger
- * rotation every few hundred ms and exhaust fds within minutes.
+ * Background: `winston-daily-rotate-file` + `file-stream-rotator` leaked fds
+ * on every rotation because `stream.end()` is async under Bun and the rotator
+ * opens a new `fs.createWriteStream` without waiting for the old FD to close.
+ * The new `RotatingFileTransport` uses `Bun.file().writer()` (Bun.FileSink)
+ * which provides synchronous `write()`/`end()` with reliable FD lifecycle.
  *
- * This test exercises the exact configuration the logger uses and
- * asserts that:
+ * This test exercises the new transport and asserts that:
  *   1. No rotation occurs for a normal session's worth of writes.
- *   2. When a rotation does occur, the resulting fds are released
- *      and the process does not retain stale handles to the rotated
- *      files.
+ *   2. When rotation does occur (small maxSize), files are rotated correctly
+ *      and maxFiles retention is enforced.
+ *   3. The transport's `close()` properly flushes and releases the writer.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import winston from "winston";
-import DailyRotateFile from "winston-daily-rotate-file";
+import { RotatingFileTransport } from "../src/rotating-file-transport";
 import { cleanupStaleLogs } from "../src/log-cleanup";
 
-describe("logger file transport", () => {
+describe("RotatingFileTransport", () => {
 	const originalHome = process.env.HOME;
 	const originalPiDir = process.env.PI_CODING_AGENT_DIR;
 	let tmpHome: string;
@@ -42,69 +38,80 @@ describe("logger file transport", () => {
 		fs.rmSync(tmpHome, { recursive: true, force: true });
 	});
 
-	test("mirrors logger.ts transport config", () => {
-		// Pin the values the production logger uses. If you change
-		// one, you must change the other — and you almost certainly
-		// need to update the regression test alongside.
+	test("does not rotate for a normal session's worth of writes", () => {
 		const logsDir = path.join(tmpHome, "logs");
 		fs.mkdirSync(logsDir, { recursive: true });
-		const transport = new DailyRotateFile({
+		const transport = new RotatingFileTransport({
 			dirname: logsDir,
 			filename: "omp.%DATE%.log",
 			datePattern: "YYYY-MM-DD",
 			maxSize: "100m",
 			maxFiles: 5,
-			zippedArchive: false,
-			auditFile: path.join(logsDir, `.omp-audit-${process.pid}.json`),
-		});
-		expect(transport.options.zippedArchive).toBe(false);
-		expect(transport.options.maxSize).toBe("100m");
-	});
-
-	test("does not leak fds under high write volume that triggers rotation", async () => {
-		// Run the same kind of write storm the leaking configuration
-		// saw in production: many small writes, enough total bytes to
-		// cross a rotation boundary once. The assertion is that
-		// after the rotation, no extra rotated files are retained in
-		// the fd table relative to the active file.
-		const logsDir = path.join(tmpHome, "logs");
-		fs.mkdirSync(logsDir, { recursive: true });
-		const transport = new DailyRotateFile({
-			dirname: logsDir,
-			filename: "omp.%DATE%.log",
-			datePattern: "YYYY-MM-DD",
-			maxSize: "100m",
-			maxFiles: 5,
-			zippedArchive: false,
-			auditFile: path.join(logsDir, `.omp-audit-${process.pid}.json`),
 		});
 		const logger = winston.createLogger({ level: "info", transports: [transport] });
 
 		// 50 000 writes of 1 KiB = ~50 MiB. With maxSize=100m, this
-		// should not cross the rotation boundary at all on a single
-		// active file. (The original bug rotated every few hundred ms
-		// at maxSize=10m because Bun stream accounting diverged from
-		// on-disk size — the new config gives ample headroom.)
+		// should not cross the rotation boundary at all.
 		const line = "x".repeat(1024) + "\n";
 		for (let i = 0; i < 50_000; i++) {
 			logger.info(line);
 		}
-
-		await new Promise<void>(resolve => {
-			transport.on("finish", () => resolve());
-			// Give the transport a tick to drain even if no finish
-			// is going to fire for this test (no rotation expected).
-			setTimeout(resolve, 250);
-		});
 		transport.close();
 
-		const files = fs
-			.readdirSync(logsDir)
-			.filter(f => f.startsWith("omp.") && !f.endsWith(".json") && !f.endsWith(".gz"));
-		// Exactly one active file. If zippedArchive is on or maxSize
-		// is misread, we get a rotation storm and a long tail of
-		// .1, .2, ... files even at this volume.
+		const files = fs.readdirSync(logsDir).filter(f => f.startsWith("omp."));
 		expect(files.length).toBe(1);
+	});
+
+	test("rotates when exceeding maxSize and enforces maxFiles retention", () => {
+		const logsDir = path.join(tmpHome, "logs");
+		fs.mkdirSync(logsDir, { recursive: true });
+		const transport = new RotatingFileTransport({
+			dirname: logsDir,
+			filename: "omp.%DATE%.log",
+			datePattern: "YYYY-MM-DD",
+			maxSize: "1k", // 1 KiB — rotate frequently for testing
+			maxFiles: 3,
+		});
+		const logger = winston.createLogger({ level: "info", transports: [transport] });
+
+		// Write 10 KiB in 100-byte lines — should trigger ~10 rotations.
+		const line = "y".repeat(100) + "\n";
+		for (let i = 0; i < 100; i++) {
+			logger.info(line);
+		}
+		transport.close();
+
+		const files = fs.readdirSync(logsDir).filter(f => f.startsWith("omp."));
+		// With maxFiles=3, we keep the active file + .1 + .2 = 3 files max.
+		expect(files.length).toBeLessThanOrEqual(3);
+		// The active file (no .N suffix) must exist.
+		expect(files.some(f => /^omp\.\d{4}-\d{2}-\d{2}\.log$/.test(f))).toBe(true);
+		// Rotated files must have content (no 0-byte files).
+		for (const f of files) {
+			const stat = fs.statSync(path.join(logsDir, f));
+			expect(stat.size).toBeGreaterThan(0);
+		}
+	});
+
+	test("close() flushes pending writes to disk", () => {
+		const logsDir = path.join(tmpHome, "logs");
+		fs.mkdirSync(logsDir, { recursive: true });
+		const transport = new RotatingFileTransport({
+			dirname: logsDir,
+			filename: "omp.%DATE%.log",
+			datePattern: "YYYY-MM-DD",
+			maxSize: "100m",
+			maxFiles: 5,
+		});
+		const logger = winston.createLogger({ level: "info", transports: [transport] });
+
+		logger.info("test message before close");
+		transport.close();
+
+		const files = fs.readdirSync(logsDir).filter(f => f.startsWith("omp."));
+		expect(files.length).toBe(1);
+		const content = fs.readFileSync(path.join(logsDir, files[0]), "utf-8");
+		expect(content).toContain("test message before close");
 	});
 });
 
@@ -116,13 +123,11 @@ describe("cleanupStaleLogs", () => {
 			fs.writeFileSync(`${logsDir}/omp.2026-07-02.log`, "real data\n");
 			// 0-byte rotated file — must be removed
 			fs.writeFileSync(`${logsDir}/omp.2026-07-02.log.1`, "");
-			// Non-zero rotated file — must be kept (transport's
-			// maxFiles policy will retire it on its own schedule)
+			// Non-zero rotated file — must be kept
 			fs.writeFileSync(`${logsDir}/omp.2026-07-02.log.2`, "rotated content\n");
 			// Our own audit file — must be kept
 			fs.writeFileSync(`${logsDir}/.omp-audit-${process.pid}.json`, "{}");
 			// Orphan audit file for a dead PID — must be removed.
-			// macOS default max PID is 99999; 99999999 is unreachable.
 			fs.writeFileSync(`${logsDir}/.omp-audit-99999999.json`, "{}");
 
 			const removed = cleanupStaleLogs(logsDir);
@@ -146,12 +151,7 @@ describe("cleanupStaleLogs", () => {
 			stderr: "ignore",
 		});
 		try {
-			// Our own PID is alive by definition; the audit file
-			// must be kept.
 			fs.writeFileSync(`${logsDir}/.omp-audit-${process.pid}.json`, "{}");
-			// Forge an "alive" sibling PID via a long-lived child
-			// process so we can verify the liveness check actually
-			// runs for PIDs that aren't ours.
 			fs.writeFileSync(`${logsDir}/.omp-audit-${child.pid}.json`, "{}");
 			const removed = cleanupStaleLogs(logsDir);
 			expect(fs.existsSync(`${logsDir}/.omp-audit-${child.pid}.json`)).toBe(true);
