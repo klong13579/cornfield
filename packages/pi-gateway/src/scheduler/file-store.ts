@@ -133,8 +133,19 @@ export class SchedulerFileStore {
 		const result = { added: 0, updated: 0, removed: 0, errors: [] as string[] };
 		if (!this.#dir) return result;
 
-		const fileTasks = this.loadAll();
-		const dbTasks = this.#storage.listTasks();
+		let fileTasks: Map<string, TaskFileDefinition>;
+		let dbTasks: import("./types").ScheduledTask[];
+
+		try {
+			fileTasks = this.loadAll();
+			dbTasks = this.#storage.listTasks();
+		} catch (error) {
+			const msg = error instanceof Error ? error.message : String(error);
+			logger.error("syncToDb: failed to load tasks from file store or SQLite", { error: msg });
+			result.errors.push(msg);
+			return result;
+		}
+
 		const dbByName = new Map(dbTasks.map(t => [t.name, t]));
 
 		// Add or update from files
