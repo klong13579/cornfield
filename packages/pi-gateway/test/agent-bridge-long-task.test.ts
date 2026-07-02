@@ -478,7 +478,7 @@ describe("AgentBridge long-task env override", () => {
 
 	test("DINGTALK_LONG_TASK_THRESHOLD_MS=30000 produces a 30s threshold", () => {
 		const script = `
-			import { __TEST_LONG_TASK_THRESHOLD_MS, __TEST_LONG_TASK_PROGRESS_PING_MS } from "${path.resolve("src/agent-bridge.ts")}";
+			import { __TEST_LONG_TASK_THRESHOLD_MS, __TEST_LONG_TASK_PROGRESS_PING_MS } from "${path.resolve(import.meta.dir, "../src/agent-bridge.ts")}";
 			process.stdout.write(JSON.stringify({ threshold: __TEST_LONG_TASK_THRESHOLD_MS, ping: __TEST_LONG_TASK_PROGRESS_PING_MS }) + "\\n");
 		`;
 		const result = Bun.spawnSync(["bun", "-e", script], {
@@ -493,7 +493,7 @@ describe("AgentBridge long-task env override", () => {
 
 	test("DINGTALK_LONG_TASK_PROGRESS_PING_MS=60000 produces a 60s ping interval", () => {
 		const script = `
-			import { __TEST_LONG_TASK_PROGRESS_PING_MS } from "${path.resolve("src/agent-bridge.ts")}";
+			import { __TEST_LONG_TASK_PROGRESS_PING_MS } from "${path.resolve(import.meta.dir, "../src/agent-bridge.ts")}";
 			process.stdout.write(JSON.stringify({ ping: __TEST_LONG_TASK_PROGRESS_PING_MS }) + "\\n");
 		`;
 		const result = Bun.spawnSync(["bun", "-e", script], {
@@ -507,7 +507,7 @@ describe("AgentBridge long-task env override", () => {
 
 	test("invalid env values fall back to defaults and warn", () => {
 		const script = `
-			import { __TEST_LONG_TASK_THRESHOLD_MS, __TEST_LONG_TASK_PROGRESS_PING_MS } from "${path.resolve("src/agent-bridge.ts")}";
+			import { __TEST_LONG_TASK_THRESHOLD_MS, __TEST_LONG_TASK_PROGRESS_PING_MS } from "${path.resolve(import.meta.dir, "../src/agent-bridge.ts")}";
 			process.stdout.write(JSON.stringify({ threshold: __TEST_LONG_TASK_THRESHOLD_MS, ping: __TEST_LONG_TASK_PROGRESS_PING_MS }) + "\\n");
 		`;
 		const result = Bun.spawnSync(["bun", "-e", script], {

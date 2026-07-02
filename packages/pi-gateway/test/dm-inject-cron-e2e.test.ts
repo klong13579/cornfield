@@ -238,6 +238,16 @@ describe("DM injection → cron host tool → v2 task", () => {
 		savedHome = process.env.HOME;
 		process.env.OMP_GATEWAY_DATA_DIR = path.join(rootDir, ".omp", "gateway-data");
 		await fs.mkdir(process.env.OMP_GATEWAY_DATA_DIR, { recursive: true, mode: 0o700 });
+
+		// Wipe scheduler DB from previous test runs (scheduler always uses
+		// the default path at ~/.omp/gateway-data/ — does not respect
+		// OMP_GATEWAY_DATA_DIR or config.dataDir).
+		try {
+			const sdb = getSchedulerDbPath();
+			await fs.rm(sdb, { force: true });
+			await fs.rm(sdb + "-wal", { force: true });
+			await fs.rm(sdb + "-shm", { force: true });
+		} catch {}
 		savedTestMode = process.env.OMP_GATEWAY_TEST_MODE;
 		savedTestPort = process.env.OMP_GATEWAY_TEST_PORT;
 		process.env.HOME = rootDir;

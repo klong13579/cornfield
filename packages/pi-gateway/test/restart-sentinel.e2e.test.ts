@@ -51,12 +51,28 @@ function appendToSession(sessionPath, role, content) {
   fs.appendFileSync(sessionPath, JSON.stringify(entry) + "\\n");
 }
 async function handleFrame(frame) {
-  if (frame.type === "switch_session") {
+	if (frame.type === "switch_session") {
     currentSession = frame.sessionPath;
     if (!sessionHistory.includes(currentSession)) {
       sessionHistory.push(currentSession);
     }
     emit({ type: "response", id: frame.id, command: "switch_session", success: true, data: { cancelled: false } });
+    return;
+  }
+  if (frame.type === "get_state") {
+    emit({ type: "response", id: frame.id, command: "get_state", success: true, data: { model: "fake", provider: "fake", modelId: "fake" } });
+    return;
+  }
+  if (frame.type === "set_model") {
+    emit({ type: "response", id: frame.id, command: "set_model", success: true });
+    return;
+  }
+  if (frame.type === "set_host_tools") {
+    emit({ type: "response", id: frame.id, command: "set_host_tools", success: true, data: { toolNames: frame.tools ? frame.tools.map(t => t.name) : [] } });
+    return;
+  }
+  if (frame.type === "set_denied_tools") {
+    emit({ type: "response", id: frame.id, command: "set_denied_tools", success: true });
     return;
   }
   if (frame.type === "prompt") {
@@ -167,11 +183,6 @@ describe("restart sentinel e2e — production simulation", () => {
 
 		// === Phase 1: First gateway instance ===
 		const store1 = new SQLiteSessionStore(path.join(dataDir, "sessions.db"));
-		const bridge1 = new AgentBridge({
-			ompPath: fakeScriptPath,
-			cwd: agentDir,
-			timeoutMs: 30_000,
-		});
 
 		// Use short drain timeout for fast test
 		const gateway1 = new Gateway(
@@ -181,7 +192,7 @@ describe("restart sentinel e2e — production simulation", () => {
 				channels: {}, // No real channels
 				agent: { ompPath: fakeScriptPath, timeoutMs: 30_000 },
 			},
-			{ bridge: bridge1, store: store1 },
+			{ store: store1 },
 		);
 
 		// Start the gateway (this sets #running = true)
@@ -240,7 +251,7 @@ describe("restart sentinel e2e — production simulation", () => {
 		await Bun.sleep(100);
 
 		// Verify the bridge is busy
-		const snapshot = bridge1.getSnapshot();
+		const snapshot = gateway1.getDefaultBridge().getSnapshot();
 		expect(snapshot.state).toBe("busy");
 		expect(snapshot.activeSessionPath).toBe(sessionPath);
 
@@ -272,11 +283,6 @@ describe("restart sentinel e2e — production simulation", () => {
 		store1.close();
 
 		// === Phase 4: Second gateway instance (restart recovery) ===
-		const bridge2 = new AgentBridge({
-			ompPath: fakeScriptPath,
-			cwd: agentDir,
-			timeoutMs: 30_000,
-		});
 		const store2 = new SQLiteSessionStore(path.join(dataDir, "sessions.db"));
 
 		const gateway2 = new Gateway(
@@ -286,7 +292,7 @@ describe("restart sentinel e2e — production simulation", () => {
 				channels: {},
 				agent: { ompPath: fakeScriptPath, timeoutMs: 30_000 },
 			},
-			{ bridge: bridge2, store: store2 },
+			{ store: store2 },
 		);
 
 		await gateway2.start();

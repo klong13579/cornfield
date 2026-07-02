@@ -120,7 +120,7 @@ describe("message sending", () => {
 				conversationId: "conv1",
 				content: { type: "text", text: "hello" },
 			}),
-		).rejects.toThrow("missing sessionWebhook");
+		).rejects.toThrow("all routes exhausted");
 	});
 
 	test("throws when DingTalk webhook returns non-2xx", async () => {
