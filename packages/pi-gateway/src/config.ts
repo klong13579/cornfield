@@ -30,6 +30,7 @@ const dingtalkAccountConfigSchema = z.object({
 	timeoutMs: z.number().int().positive().optional(),
 	deniedTools: z.array(z.string()).optional(),
 	hideThinkingBlock: z.boolean().default(false),
+	enabled: z.boolean().default(true),
 });
 
 const permissionPolicySchema = z.enum(["open", "allowlist", "closed"]).default("allowlist");

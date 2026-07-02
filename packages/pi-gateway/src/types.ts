@@ -382,6 +382,8 @@ export interface DingtalkAccountConfig {
 	/** When true, drop thinking/reasoning blocks from the DingTalk AI Card.
 	 *  The omp agent still emits thinking; the channel just doesn't render it. */
 	hideThinkingBlock?: boolean;
+	/** When false, skip account registration and DingTalk connection on startup. */
+	enabled?: boolean;
 }
 
 export interface DingTalkConfig extends ChannelConfig {

@@ -492,6 +492,10 @@ export class Gateway {
 		// Multi-account mode
 		if (dtConfig.accounts && Object.keys(dtConfig.accounts).length > 0) {
 			for (const [accountId, account] of Object.entries(dtConfig.accounts)) {
+				if (!(account.enabled ?? true)) {
+					logger.debug("Skipping disabled DingTalk account", { accountId });
+					continue;
+				}
 				const channel = this.#channelFactory?.(accountId) ?? new DingTalkChannel();
 				channel.setAccountId(accountId);
 				channel.setHideThinkingBlock(account.hideThinkingBlock ?? false);
@@ -554,6 +558,10 @@ export class Gateway {
 	}
 
 	async #addAccount(accountId: string, account: DingtalkAccountConfig, config: GatewayConfig): Promise<void> {
+		if (!(account.enabled ?? true)) {
+			logger.debug("Skipping disabled DingTalk account", { accountId });
+			return;
+		}
 		const rawConfig = config.channels.dingtalk;
 		const channel = this.#channelFactory?.(accountId) ?? new DingTalkChannel();
 		channel.setAccountId(accountId);
@@ -833,7 +841,8 @@ export class Gateway {
 					oldAccount.appKey !== account.appKey ||
 					oldAccount.appSecret !== account.appSecret ||
 					oldAccount.robotCode !== account.robotCode ||
-					oldAccount.agentDir !== account.agentDir
+					oldAccount.agentDir !== account.agentDir ||
+					(oldAccount.enabled ?? true) !== (account.enabled ?? true)
 				) {
 					plan.accountsToUpdate.push(accountId);
 				}
