@@ -185,21 +185,26 @@ export class ProcessTerminal implements Terminal {
 		this.#safeWrite("\x1b[?2031h");
 
 		// Detect terminal closure: when the PTY master fd is closed (terminal
-		// window/tab closed, SSH disconnected), stdin emits 'end'. Without this
-		// handler, omp becomes an orphan process because zsh does not forward
-		// SIGHUP to children unless 'huponexit' is set. We send SIGTERM to self
-		// rather than SIGHUP because Bun has an async-signal bug when a process
-		// sends SIGHUP to itself (see gateway.ts reload comment). SIGTERM is
-		// handled by postmortem.ts which runs the full session teardown
+		// window/tab closed, SSH disconnected), the slave fd becomes unusable.
+		// Without this handler, omp becomes an orphan process because zsh does
+		// not forward SIGHUP to children unless 'huponexit' is set.
+		//
+		// Platform behavior differs:
+		// - Linux: PTY master close → slave gets EOF (read returns 0) → 'end'
+		// - macOS: PTY master close → slave fd revoked → read returns EIO → 'error'
+		//
+		// We listen for both events to cover both platforms. We send SIGTERM to
+		// self rather than SIGHUP because Bun has an async-signal bug when a
+		// process sends SIGHUP to itself (see gateway.ts reload comment). SIGTERM
+		// is handled by postmortem.ts which runs the full session teardown
 		// (session.dispose, saveDraft, MCP disconnect, etc.) before exiting.
 		this.#stdinEndHandler = () => {
 			if (this.#dead) return;
 			this.#dead = true;
-			// Fall through to postmortem's SIGTERM handler — do NOT call
-			// process.exit() directly, that would skip session teardown.
 			process.kill(process.pid, "SIGTERM");
 		};
 		process.stdin.on("end", this.#stdinEndHandler);
+		process.stdin.on("error", this.#stdinEndHandler);
 
 		// Start periodic OSC 11 re-query for terminals without Mode 2031
 		// (Warp, Alacritty, WezTerm, iTerm2). Self-disables once Mode 2031 fires.
@@ -565,6 +570,7 @@ export class ProcessTerminal implements Terminal {
 		this.#inputHandler = undefined;
 		if (this.#stdinEndHandler) {
 			process.stdin.removeListener("end", this.#stdinEndHandler);
+			process.stdin.removeListener("error", this.#stdinEndHandler);
 			this.#stdinEndHandler = undefined;
 		}
 		this.#appearance = undefined;
