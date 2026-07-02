@@ -45,11 +45,47 @@ export type DeliverFn = (params: {
 	text: string;
 }) => Promise<{ ok: boolean; error?: string }>;
 
+/**
+ * Notify the user that a cron run failed in a way that the normal
+ * delivery path would not surface (agent errored out, task timed out,
+ * summary delivery itself failed, etc.). The notification is a short,
+ * high-signal error message — not the full output. Implementations
+ * should retry internally like {@link DeliverFn}; from the caller's
+ * perspective this is best-effort.
+ *
+ * This is the user-facing safety net for "why is my cron task silent":
+ * even when the regular summary delivery is misconfigured or the
+ * task output is empty, the user gets a card saying "task X failed,
+ * check the gateway log". Without this, a delivery-channel mismatch
+ * (e.g. workspace basename ≠ accountId) makes the cron run
+ * indistinguishable from "nothing happened" in the user's IM client.
+ */
+export type NotifyCronFailureFn = (params: {
+	channel: string;
+	accountId?: string;
+	toUserId?: string;
+	toConversationId?: string;
+	taskName: string;
+	taskId: string;
+	reason: string;
+	kind: "executeAgent_failed" | "task_failed" | "task_timed_out" | "delivery_failed";
+	durationMs: number;
+}) => Promise<{ ok: boolean; error?: string }>;
+
+/** Reverse-resolve a task's `agentDir` to the registered channel
+ *  `accountId`. Returns undefined if the agentDir is not mapped to a
+ *  live bridge (e.g. cron test-run during a bridge restart). */
+export type ResolveAccountIdFn = (agentDir: string) => string | undefined;
+
 /** Dependencies injected by the gateway. */
 export interface CronDeps {
 	executeAgent: ExecuteAgentFn;
 	deliver: DeliverFn;
 	log: CronLogger;
+	/** Optional. See {@link ResolveAccountIdFn}. */
+	resolveAccountId?: ResolveAccountIdFn;
+	/** Optional. See {@link NotifyCronFailureFn}. */
+	notifyFailure?: NotifyCronFailureFn;
 }
 
 /** Result of a cron trigger execution. */
@@ -123,33 +159,46 @@ export function resolveAgentDir(task: ScheduledTask): string | undefined {
  *
  * During the migration period, tasks may still have `deliver` + `deliverUser`
  * instead of the structured `delivery` object.
+ *
+ * `resolveAccountId` is an optional gateway-side hook that maps a task's
+ * `agentDir` back to the registered channel `accountId` (e.g. resolving
+ * `/Users/.../OMP-workspace-test/omp-atomix` → `algorithm`). This is the
+ * source of truth — the registry's multi-account channel key is
+ * `<channel>:<accountId>`, and the workspace basename (e.g. `omp-atomix`)
+ * is NOT the accountId. The deprecated `task.accountId` field may hold
+ * a stale workspace name from before the migration; callers should
+ * prefer the agentDir-based lookup.
  */
-export function resolveDelivery(task: ScheduledTask):
-	| {
-			channel: string;
-			accountId?: string;
-			toUserId?: string;
-			toConversationId?: string;
-			mode: "announce" | "none";
-	  }
-	| undefined {
+export function resolveDelivery(
+	task: ScheduledTask,
+	resolveAccountId?: (agentDir: string) => string | undefined,
+): {
+	channel: string;
+	accountId?: string;
+	toUserId?: string;
+	toConversationId?: string;
+	mode: "announce" | "none";
+} | undefined {
 	if (task.delivery) {
-		// Fall back to top-level `accountId` when the structured delivery
-		// was created without one (e.g. legacy `omp gateway cron create
-		// --account <hr> --deliver dingtalk` stores the account on the
-		// task but leaves delivery_account_id null). The registry keys
-		// multi-account channels as `<channel>:<accountId>`, so we need
-		// the suffix to resolve the right DingTalk connection.
+		// Priority: explicit delivery.accountId → reverse-resolved accountId
+		// from agentDir → deprecated task.accountId (last-resort fallback
+		// for tasks written before the agentDir migration).
+		const accountId =
+			task.delivery.accountId ??
+			(task.agentDir ? resolveAccountId?.(task.agentDir) : undefined) ??
+			task.accountId;
 		return {
 			...task.delivery,
-			accountId: task.delivery.accountId ?? task.accountId,
+			accountId,
 		};
 	}
 	// Fallback: construct from deprecated fields
 	if (task.deliver) {
+		const accountId =
+			(task.agentDir ? resolveAccountId?.(task.agentDir) : undefined) ?? task.accountId;
 		return {
 			channel: task.deliver,
-			accountId: task.accountId,
+			accountId,
 			toUserId: task.deliverUser,
 			mode: "announce",
 		};
@@ -186,7 +235,7 @@ export class CronService {
 	}
 
 	async onTrigger(task: ScheduledTask, executionId: string): Promise<void> {
-		const { storage, executeAgent, deliver, log, ompBinary } = this.#deps;
+		const { storage, executeAgent, deliver, log, ompBinary, resolveAccountId, notifyFailure } = this.#deps;
 		const startedAt = Date.now();
 		const isAgent = task.taskType === "agent";
 
@@ -197,6 +246,7 @@ export class CronService {
 		let output = "";
 		let stderr = "";
 		let timedOut = false;
+		let executeAgentFailed: { reason: string } | null = null;
 
 		// Try injected executeAgent (warm bridge path)
 		if (isAgent && agentDir) {
@@ -217,6 +267,7 @@ export class CronService {
 
 			if (result.error && !result.output) {
 				stderr = result.error;
+				executeAgentFailed = { reason: stderr };
 				exitCode = 1;
 				log.warn("executeAgent failed, falling back to omp --print", {
 					taskName: task.name,
@@ -229,19 +280,36 @@ export class CronService {
 
 		// Fallback: cold subprocess execution
 		if (!output) {
-			const execResult = await executeScheduledCommand(task.command, {
-				taskType: task.taskType,
-				timeoutMs: task.timeoutMs,
-				ompBinary,
-				skills: task.skills,
-				preScript: task.preScript,
-				cwd: agentDir,
-				promptPrefix: isAgent ? cronContextPrefix : undefined,
-			});
-			exitCode = execResult.exitCode;
-			output = execResult.output;
-			stderr = execResult.stderr;
-			timedOut = execResult.timedOut;
+			try {
+				const execResult = await executeScheduledCommand(task.command, {
+					taskType: task.taskType,
+					timeoutMs: task.timeoutMs,
+					ompBinary,
+					skills: task.skills,
+					preScript: task.preScript,
+					cwd: agentDir,
+					promptPrefix: isAgent ? cronContextPrefix : undefined,
+				});
+				exitCode = execResult.exitCode;
+				output = execResult.output;
+				stderr = execResult.stderr;
+				timedOut = execResult.timedOut;
+			} catch (fallbackErr) {
+				// The fallback can throw (e.g. posix_spawn ENOENT when
+				// the omp binary is missing, or Bun.spawn unable to
+				// resolve the shell on a stripped-down test environment).
+				// Without this catch, the exception bubbles out of
+				// onTrigger and we skip the failure-card delivery below
+				// — the user sees nothing. Treat the fallback throw as
+				// a hard task failure and continue.
+				stderr = stderr || (fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr));
+				exitCode = exitCode || 1;
+				log.error("Cron fallback execution threw", {
+					taskId: task.id,
+					taskName: task.name,
+					error: stderr,
+				});
+			}
 		}
 
 		const endedAt = Date.now();
@@ -277,7 +345,7 @@ export class CronService {
 		});
 
 		// Deliver result if configured
-		const deliveryConfig = resolveDelivery(task);
+		const deliveryConfig = resolveDelivery(task, resolveAccountId);
 		if (deliveryConfig && deliveryConfig.mode === "announce") {
 			const prefix = exitCode === 0 ? "✅" : timedOut ? "⏰" : "❌";
 			const summary = `${prefix} Task "${task.name}" completed (exit ${exitCode}, ${durationMs}ms)\n\n${output.slice(0, 2000)}`;
@@ -308,6 +376,39 @@ export class CronService {
 					channel: deliveryConfig.channel,
 					error: deliverResult.error,
 				});
+				// Best-effort user-facing notification. Independent of the
+				// summary delivery above so a misconfigured channel
+				// (Unknown channel) doesn't also suppress the
+				// failure card. notifyFailure implementations retry
+				// internally; here we just log the result.
+				if (notifyFailure) {
+					try {
+						const notifyResult = await notifyFailure({
+							channel: deliveryConfig.channel,
+							accountId: deliveryConfig.accountId,
+							toUserId: deliveryConfig.toUserId,
+							toConversationId: deliveryConfig.toConversationId,
+							taskName: task.name,
+							taskId: task.id,
+							reason: deliverResult.error ?? "unknown",
+							kind: "delivery_failed",
+							durationMs,
+						});
+						if (!notifyResult.ok) {
+							log.error("Cron failure notification also failed", {
+								taskId: task.id,
+								taskName: task.name,
+								error: notifyResult.error,
+							});
+						}
+					} catch (notifyErr) {
+						log.error("Cron failure notification threw", {
+							taskId: task.id,
+							taskName: task.name,
+							error: notifyErr instanceof Error ? notifyErr.message : String(notifyErr),
+						});
+					}
+				}
 			} else {
 				// Clear delivery error on success
 				storage.updateTask(task.id, { lastDeliveryError: undefined });
@@ -320,6 +421,43 @@ export class CronService {
 				? `Task "${task.name}" timed out after ${task.timeoutMs ?? 30_000}ms`
 				: `Task "${task.name}" failed (exit ${exitCode})`;
 			log.warn(msg, { taskId: task.id, exitCode, timedOut });
+
+			// User-facing notification: the regular summary above may or
+			// may not have reached the user (if delivery itself
+			// failed, the summary was lost). For pure agent failures
+			// (executeAgent errored) and hard timeouts, send a short
+			// failure card independently of the delivery path. The
+			// notification is best-effort and does not affect the
+			// throw — the engine's retry + stats still run.
+			if (notifyFailure && deliveryConfig?.mode === "announce") {
+				const reason = executeAgentFailed?.reason
+					?? (timedOut ? `任务超时 (${task.timeoutMs ?? 30_000}ms)` : `exit code ${exitCode}`);
+				const kind: "executeAgent_failed" | "task_failed" | "task_timed_out" = timedOut
+					? "task_timed_out"
+					: executeAgentFailed
+						? "executeAgent_failed"
+						: "task_failed";
+				try {
+					await notifyFailure({
+						channel: deliveryConfig.channel,
+						accountId: deliveryConfig.accountId,
+						toUserId: deliveryConfig.toUserId,
+						toConversationId: deliveryConfig.toConversationId,
+						taskName: task.name,
+						taskId: task.id,
+						reason,
+						kind,
+						durationMs,
+					});
+				} catch (notifyErr) {
+					log.error("Cron failure notification threw", {
+						taskId: task.id,
+						taskName: task.name,
+						error: notifyErr instanceof Error ? notifyErr.message : String(notifyErr),
+					});
+				}
+			}
+
 			throw new Error(msg);
 		}
 

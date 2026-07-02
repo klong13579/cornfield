@@ -77,6 +77,43 @@ export class CronLifecycle {
 			deliver: async params => {
 				return await this.#deliverCronResult(params);
 			},
+			// Reverse-resolve a task's agentDir to the registered channel
+			// accountId. Without this, delivery falls back to the
+			// deprecated `task.accountId` (often a workspace basename
+			// like `omp-atomix` rather than the registered account id
+			// `algorithm`), and the registry's `get(<channel>:<id>)`
+			// miss makes the user see no card at all.
+			resolveAccountId: agentDir => {
+				for (const [acctId, dir] of this.#deps.accountAgentDirs) {
+					if (dir === agentDir) return acctId;
+				}
+				return undefined;
+			},
+			// Send a short, high-signal failure card to the user's IM
+			// conversation when the normal summary path is silent
+			// (agent errored, task timed out, or summary delivery
+			// itself failed). Independent of the summary deliver()
+			// so a misconfigured channel doesn't suppress both paths.
+			notifyFailure: async params => {
+				const kindLabel: Record<typeof params.kind, string> = {
+					executeAgent_failed: "OMP 执行失败",
+					task_failed: "任务失败",
+					task_timed_out: "任务超时",
+					delivery_failed: "推送失败",
+				};
+				const text =
+					`❌ 定时任务 "${params.taskName}" ${kindLabel[params.kind]}\n\n` +
+					`原因：${params.reason}\n` +
+					`耗时：${(params.durationMs / 1000).toFixed(1)}s\n\n` +
+					`请检查 gateway 日志或重跑任务。`;
+				return await this.#deliverCronResult({
+					channel: params.channel,
+					accountId: params.accountId,
+					toUserId: params.toUserId,
+					toConversationId: params.toConversationId,
+					text,
+				});
+			},
 		});
 
 		this.#schedulerEngine = new SchedulerEngine({
