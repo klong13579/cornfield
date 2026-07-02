@@ -1,0 +1,30 @@
+disabledProviders: 
+  - cursor
+  - openai
+  - anthropic
+defaultThinkingLevel: high
+hideThinkingBlock: false
+lastChangelogVersion: 14.5.12
+enabledModels: 
+  - narwal-plan/*
+  - narwal-plan/*/*
+  - narwal-plan/Qwen3.6-Flash
+  - narwal-plan/qwen3.5-flash
+  - narwal-plan/Qwen3.7-Plus
+  - alibaba-coding-plan/*
+  - alibaba-coding-plan/*/*
+modelRoles: 
+  default: alibaba-coding-plan/deepseek-v4-flash
+  smol: narwal-plan/qwen3.5-flash
+  slow: narwal-plan/Qwen3.7-Plus
+cycleOrder: 
+  - smol
+  - default
+  - slow
+selfEvolution: 
+  enabled: false
+  nudgeContextInjection: false
+  enableNudgeUI: false
+  showStuckWarning: false
+lastUpdateCheck: 1782919001262
+latestVersion: 16.2.12

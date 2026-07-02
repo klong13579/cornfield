@@ -1,0 +1,1005 @@
+# alibaba-coding-plan：订阅允许的模型清单（与 ~/.zshrc ALIBABA_BASE_URL / ALIBABA_API_KEY 一致）
+# narwal-coding-plan：Narwal AI 网关（与 ~/.zshrc NARWAL_BASE_URL / NARWAL_API_KEY 一致）
+# 仅列出下列模型；旧版发现缓存已由脚本写入 models.db 覆盖为同清单。
+providers:
+  narwal-plan:
+    baseUrl: https://coder.narwal.com/v1
+    apiKey: NARWAL_PLAN_API_KEY
+    api: openai-completions
+    models:
+      - id: deepseek-r1-0528
+        name: DeepSeek R1 0528
+        reasoning: true
+        input: [text]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+        compat:
+          supportsDeveloperRole: false
+      - id: deepseek-v3.1-terminus
+        name: DeepSeek V3.1 Terminus
+        reasoning: true
+        input: [text]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+        compat:
+          supportsDeveloperRole: false
+      - id: deepseek-v3-0324
+        name: DeepSeek V3 0324
+        reasoning: true
+        input: [text]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+        compat:
+          supportsDeveloperRole: false
+      - id: deepseek-v3.2
+        name: DeepSeek V3.2
+        reasoning: true
+        input: [text]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+        compat:
+          supportsDeveloperRole: false
+      - id: deepseek-v4-pro-202606
+        name: DeepSeek V4 Pro 202606
+        reasoning: true
+        input: [text]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+        compat:
+          supportsDeveloperRole: false
+      - id: deepseek-v4-flash-202605
+        name: DeepSeek V4 Flash 202605
+        reasoning: true
+        input: [text]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+        compat:
+          supportsDeveloperRole: false
+      - id: glm-5.1
+        name: GLM 5.1
+        reasoning: true
+        input: [text]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+        compat:
+          supportsDeveloperRole: false
+      - id: glm-5-turbo
+        name: GLM 5 Turbo
+        reasoning: true
+        input: [text]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+        compat:
+          supportsDeveloperRole: false
+      - id: glm-5v-turbo
+        name: GLM 5V Turbo
+        reasoning: true
+        input: [text, image]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+        compat:
+          supportsDeveloperRole: false
+      - id: glm-5.2
+        name: GLM 5.2
+        reasoning: true
+        input: [text]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+        compat:
+          supportsDeveloperRole: false
+      - id: gpt-5.4
+        name: GPT 5.4
+        reasoning: true
+        input: [text, image]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+        compat:
+          supportsDeveloperRole: false
+      - id: gpt-5.4-mini
+        name: GPT 5.4 Mini
+        reasoning: true
+        input: [text, image]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+        compat:
+          supportsDeveloperRole: false
+      - id: gpt-5.5
+        name: GPT 5.5
+        reasoning: true
+        input: [text, image]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+        compat:
+          supportsDeveloperRole: false
+      - id: claude-opus-4.7
+        name: Claude Opus 4.7
+        reasoning: true
+        input: [text, image]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+        compat:
+          supportsDeveloperRole: false
+      - id: claude-opus-4.6
+        name: Claude Opus 4.6
+        reasoning: true
+        input: [text, image]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+        compat:
+          supportsDeveloperRole: false
+      - id: claude-opus-4.8
+        name: Claude Opus 4.8
+        reasoning: true
+        input: [text, image]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+        compat:
+          supportsDeveloperRole: false
+      - id: claude-sonnet-4.6
+        name: Claude Sonnet 4.6
+        reasoning: true
+        input: [text, image]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+        compat:
+          supportsDeveloperRole: false
+      - id: hunyuan-role-latest
+        name: Hunyuan Role Latest
+        reasoning: true
+        input: [text]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+        compat:
+          supportsDeveloperRole: false
+      - id: hunyuan-2.0-instruct-20251111
+        name: Hunyuan 2.0 Instruct 20251111
+        reasoning: true
+        input: [text]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+        compat:
+          supportsDeveloperRole: false
+      - id: hunyuan-2.0-thinking-20251109
+        name: Hunyuan 2.0 Thinking 20251109
+        reasoning: true
+        input: [text]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+        compat:
+          supportsDeveloperRole: false
+      - id: hunyuan-turbos-vision-video-20250728
+        name: Hunyuan Turbos Vision Video 20250728
+        reasoning: true
+        input: [text, image]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+        compat:
+          supportsDeveloperRole: false
+      - id: hy-mt2-pro
+        name: Hy Mt2 Pro
+        reasoning: true
+        input: [text]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+        compat:
+          supportsDeveloperRole: false
+      - id: hy3-preview
+        name: Hy3 Preview
+        reasoning: true
+        input: [text]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+        compat:
+          supportsDeveloperRole: false
+      - id: kimi-k2.5
+        name: Kimi K2.5
+        reasoning: true
+        input: [text, image]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+        compat:
+          supportsDeveloperRole: false
+      - id: minimax-m2.5
+        name: Minimax M2.5
+        reasoning: true
+        input: [text, image]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+        compat:
+          supportsDeveloperRole: false
+      - id: minimax-m2.7
+        name: Minimax M2.7
+        reasoning: true
+        input: [text, image]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+        compat:
+          supportsDeveloperRole: false
+      - id: minimax-m3
+        name: Minimax M3
+        reasoning: true
+        input: [text, image]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+        compat:
+          supportsDeveloperRole: false
+      - id: MiniMax/MiniMax-M3
+        name: Minimax Minimax M3
+        reasoning: true
+        input: [text, image]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+        compat:
+          supportsDeveloperRole: false
+      - id: qwen3.5-flash
+        name: Qwen 3.5 Flash
+        reasoning: true
+        input: [text]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+        compat:
+          supportsDeveloperRole: false
+      - id: qwen3.5-plus
+        name: Qwen 3.5 Plus
+        reasoning: true
+        input: [text, image]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+        compat:
+          supportsDeveloperRole: false
+      - id: Qwen3.6-Flash
+        name: Qwen 3.6 Flash
+        reasoning: true
+        input: [text]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+        compat:
+          supportsDeveloperRole: false
+      - id: Qwen3.7-Max
+        name: Qwen 3.7 Max
+        reasoning: true
+        input: [text, image]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+        compat:
+          supportsDeveloperRole: false
+      - id: Qwen3.7-Plus
+        name: Qwen 3.7 Plus
+        reasoning: true
+        input: [text, image]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+        compat:
+          supportsDeveloperRole: false
+      - id: xiaomi/mimo-v2.5-pro
+        name: Xiaomi Mimo V2.5 Pro
+        reasoning: true
+        input: [text, image]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+        compat:
+          supportsDeveloperRole: false
+      - id: youtu-vita
+        name: Youtu Vita
+        reasoning: true
+        input: [text, image]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+        compat:
+          supportsDeveloperRole: false
+      - id: custom-model-b1-standard
+        name: Custom Model B1 Standard
+        reasoning: true
+        input: [text]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+        compat:
+          supportsDeveloperRole: false
+      - id: custom-model-b3-standard
+        name: Custom Model B3 Standard
+        reasoning: true
+        input: [text]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+        compat:
+          supportsDeveloperRole: false
+      - id: custom-model-b5-standard
+        name: Custom Model B5 Standard
+        reasoning: true
+        input: [text]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+        compat:
+          supportsDeveloperRole: false
+      - id: custom-model-c1
+        name: Custom Model C1
+        reasoning: true
+        input: [text]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+        compat:
+          supportsDeveloperRole: false
+      - id: custom-model-c2-flash
+        name: Custom Model C2 Flash
+        reasoning: true
+        input: [text]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+        compat:
+          supportsDeveloperRole: false
+      - id: qwen3.6-flash
+        name: Qwen 3.6 Flash
+        reasoning: true
+        input: [text]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+        compat:
+          supportsDeveloperRole: false
+      - id: qwen3.6-plus
+        name: Qwen 3.6 Plus
+        reasoning: true
+        input: [text, image]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+        compat:
+          supportsDeveloperRole: false
+      - id: qwen3.7-max
+        name: Qwen 3.7 Max
+        reasoning: true
+        input: [text, image]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+        compat:
+          supportsDeveloperRole: false
+      - id: qwen3.7-plus
+        name: Qwen 3.7 Plus
+        reasoning: true
+        input: [text, image]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+        compat:
+          supportsDeveloperRole: false
+
+  alibaba-coding-plan:
+    baseUrl: https://dashscope.aliyuncs.com/compatible-mode/v1
+    apiKey: ALIBABA_API_KEY
+    api: openai-completions
+    models:
+      - id: qwen3.6-flash
+        name: Qwen 3.6 Flash
+        reasoning: true
+        input: [text]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+      - id: qwen3.6-plus
+        name: Qwen 3.6 Plus
+        reasoning: true
+        input: [text, image]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+      - id: deepseek-v4-pro
+        name: DeepSeek V4 Pro
+        reasoning: true
+        input: [text]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+      - id: deepseek-v4-flash
+        name: DeepSeek V4 Flash
+        reasoning: true
+        input: [text]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+      - id: glm-5.1
+        name: GLM 5.1
+        reasoning: true
+        input: [text]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+      - id: MiniMax-M2.5
+        name: Minimax M2.5
+        reasoning: true
+        input: [text, image]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+      - id: qwen3.7-plus
+        name: Qwen 3.7 Plus
+        reasoning: true
+        input: [text]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+      - id: qwen3.7-max
+        name: Qwen 3.7 Max
+        reasoning: true
+        input: [text]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+      - id: qwen3.5-flash
+        name: Qwen 3.5 Flash
+        reasoning: true
+        input: [text]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+      - id: qwen3.5-plus
+        name: Qwen 3.5 Plus
+        reasoning: true
+        input: [text, image]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+      - id: qwen3.5-omni-plus
+        name: Qwen 3.5 Omni Plus
+        reasoning: true
+        input: [text, image]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+      - id: qwen3-vl-plus
+        name: Qwen 3 Vl Plus
+        reasoning: true
+        input: [text, image]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+      - id: qwen3-vl-flash
+        name: Qwen 3 Vl Flash
+        reasoning: true
+        input: [text, image]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+      - id: qwen3-coder-plus
+        name: Qwen 3 Coder Plus
+        reasoning: true
+        input: [text]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+      - id: qwen3-coder-flash
+        name: Qwen 3 Coder Flash
+        reasoning: true
+        input: [text]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+      - id: qwen3-coder-next
+        name: Qwen 3 Coder Next
+        reasoning: true
+        input: [text]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+      - id: qwen3-coder-480b-a35b-instruct
+        name: Qwen 3 Coder 480B A35B Instruct
+        reasoning: true
+        input: [text]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+      - id: qwen3-max
+        name: Qwen 3 Max
+        reasoning: true
+        input: [text]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+      - id: qwen3-next-80b-a3b-thinking
+        name: Qwen 3 Next 80B A3B Thinking
+        reasoning: true
+        input: [text]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+      - id: qwen3-next-80b-a3b-instruct
+        name: Qwen 3 Next 80B A3B Instruct
+        reasoning: true
+        input: [text]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+      - id: qwen-flash
+        name: Qwen Flash
+        reasoning: true
+        input: [text]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+      - id: deepseek-v3.2
+        name: DeepSeek V3.2
+        reasoning: true
+        input: [text]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+      - id: deepseek-r1
+        name: DeepSeek R1
+        reasoning: true
+        input: [text]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+      - id: glm-5
+        name: GLM 5
+        reasoning: true
+        input: [text]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+      - id: glm-5.2
+        name: GLM 5.2
+        reasoning: true
+        input: [text]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+      - id: ZHIPU/GLM-5
+        name: Zhipu GLM 5
+        reasoning: true
+        input: [text]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+      - id: ZHIPU/GLM-5.1
+        name: Zhipu GLM 5.1
+        reasoning: true
+        input: [text]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+      - id: kimi-k2.5
+        name: Kimi K2.5
+        reasoning: true
+        input: [text, image]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+      - id: kimi-k2.6
+        name: Kimi K2.6
+        reasoning: true
+        input: [text, image]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+      - id: kimi-k2.7-code
+        name: Kimi K2.7 Code
+        reasoning: true
+        input: [text, image]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+      - id: kimi-k2-thinking
+        name: Kimi K2 Thinking
+        reasoning: true
+        input: [text, image]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+      - id: kimi/kimi-k2.7-code
+        name: Kimi Kimi K2.7 Code
+        reasoning: true
+        input: [text, image]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+      - id: kimi/kimi-k2.5
+        name: Kimi Kimi K2.5
+        reasoning: true
+        input: [text, image]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+      - id: kimi/kimi-k2.6
+        name: Kimi Kimi K2.6
+        reasoning: true
+        input: [text, image]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+      - id: MiniMax-M2.1
+        name: Minimax M2.1
+        reasoning: true
+        input: [text, image]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+      - id: MiniMax-M2.7
+        name: Minimax M2.7
+        reasoning: true
+        input: [text, image]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+      - id: MiniMax/MiniMax-M2.1
+        name: Minimax Minimax M2.1
+        reasoning: true
+        input: [text, image]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
+      - id: MiniMax/MiniMax-M2.7
+        name: Minimax Minimax M2.7
+        reasoning: true
+        input: [text, image]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 204800
+        maxTokens: 131072
+        thinking:
+          mode: effort
+          minLevel: minimal
+          maxLevel: high
