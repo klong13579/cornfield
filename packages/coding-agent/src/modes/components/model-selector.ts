@@ -1,3 +1,6 @@
+import * as fs from "node:fs";
+import { homedir } from "node:os";
+import * as path from "node:path";
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import { getSupportedEfforts, type Model, modelsAreEqual } from "@oh-my-pi/pi-ai";
 import {
@@ -26,6 +29,34 @@ function makeInvertedBadge(label: string, color: ThemeColor): string {
 	const fgAnsi = theme.getFgAnsi(color);
 	const bgAnsi = fgAnsi.replace(/\x1b\[38;/g, "\x1b[48;");
 	return `${bgAnsi}\x1b[30m ${label} \x1b[39m\x1b[49m`;
+}
+
+const MODEL_FAILURES_FILE = path.join(homedir(), ".omp/agent/model-failures.json");
+
+function formatModelNumber(n: number): string {
+	if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+	if (n >= 1_000) return `${(n / 1_000).toFixed(0)}k`;
+	return String(n);
+}
+
+function loadModelFailures(): Record<string, number> {
+	try {
+		const content = fs.readFileSync(MODEL_FAILURES_FILE, "utf8");
+		return JSON.parse(content);
+	} catch {
+		return {};
+	}
+}
+
+function formatModelInfoString(model: Model, failures: Record<string, number>): string {
+	const costStr = model.cost ? `$${model.cost.input}/${model.cost.output}` : "$0/0";
+	const ctx = model.contextWindow ? formatModelNumber(model.contextWindow) : "-";
+	const think = model.reasoning ? "reasoning" : "-";
+	const inputTypes = model.input?.join("+") ?? "text";
+	const modelKey = `${model.provider}/${model.id}`;
+	const failCount = failures[modelKey] ?? 0;
+	const failStr = failCount > 0 ? `\xa0err*${failCount}` : "";
+	return `[${costStr} · ${ctx} ctx · ${think} · ${inputTypes}${failStr}]`;
 }
 
 function normalizeSearchText(value: string): string {
@@ -596,6 +627,8 @@ export class ModelSelectorComponent extends Container {
 		const isCanonicalTab = this.#isCanonicalTab();
 		const visibleItems = isCanonicalTab ? this.#filteredCanonicalModels : this.#filteredModels;
 
+		const failures = loadModelFailures();
+
 		const maxVisible = 10;
 		const startIndex = Math.max(
 			0,
@@ -637,30 +670,33 @@ export class ModelSelectorComponent extends Container {
 			}
 			const badgeText = roleBadgeTokens.length > 0 ? ` ${roleBadgeTokens.join(" ")}` : "";
 
+			// Model info string
+			const info = theme.fg("dim", ` ${formatModelInfoString(item.model, failures)}`);
+
 			let line = "";
 			if (isSelected) {
 				const prefix = theme.fg("accent", `${theme.nav.cursor} `);
 				if (isCanonicalTab) {
 					const variants = theme.fg("dim", ` [${canonicalItem?.variantCount ?? 0}]`);
 					const backing = theme.fg("dim", ` -> ${item.model.provider}/${item.model.id}`);
-					line = `${prefix}${theme.fg("accent", item.id)}${variants}${backing}${badgeText}`;
+					line = `${prefix}${theme.fg("accent", item.id)}${variants}${backing}${info}${badgeText}`;
 				} else if (showProvider) {
 					const providerPrefix = theme.fg("dim", `${providerItem?.provider ?? ""}/`);
-					line = `${prefix}${providerPrefix}${theme.fg("accent", providerItem?.id ?? item.id)}${badgeText}`;
+					line = `${prefix}${providerPrefix}${theme.fg("accent", providerItem?.id ?? item.id)}${info}${badgeText}`;
 				} else {
-					line = `${prefix}${theme.fg("accent", item.id)}${badgeText}`;
+					line = `${prefix}${theme.fg("accent", item.id)}${info}${badgeText}`;
 				}
 			} else {
 				const prefix = "  ";
 				if (isCanonicalTab) {
 					const variants = theme.fg("dim", ` [${canonicalItem?.variantCount ?? 0}]`);
 					const backing = theme.fg("dim", ` -> ${item.model.provider}/${item.model.id}`);
-					line = `${prefix}${item.id}${variants}${backing}${badgeText}`;
+					line = `${prefix}${item.id}${variants}${backing}${info}${badgeText}`;
 				} else if (showProvider) {
 					const providerPrefix = theme.fg("dim", `${providerItem?.provider ?? ""}/`);
-					line = `${prefix}${providerPrefix}${providerItem?.id ?? item.id}${badgeText}`;
+					line = `${prefix}${providerPrefix}${providerItem?.id ?? item.id}${info}${badgeText}`;
 				} else {
-					line = `${prefix}${item.id}${badgeText}`;
+					line = `${prefix}${item.id}${info}${badgeText}`;
 				}
 			}
 

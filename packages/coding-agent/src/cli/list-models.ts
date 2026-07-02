@@ -45,10 +45,7 @@ function renderTable<T extends Record<string, string>>(rows: T[], headers: T): v
  * LLM `list_models` tool. Callers layer their own search filter and
  * output formatting on top.
  */
-export function collectVerifiedModels(
-	modelRegistry: ModelRegistry,
-	enabledModelIds?: Set<string>,
-): Model<Api>[] {
+export function collectVerifiedModels(modelRegistry: ModelRegistry, enabledModelIds?: Set<string>): Model<Api>[] {
 	let models = modelRegistry.getVerifiedAvailable();
 
 	if (enabledModelIds && enabledModelIds.size > 0) {
@@ -83,7 +80,9 @@ export async function listModels(
 	let filteredModels = collectVerifiedModels(modelRegistry, enabledModelIds);
 
 	if (filteredModels.length === 0) {
-		writeLine(enabledModelIds?.size ? "No models available." : "No models available. Set API keys in environment variables.");
+		writeLine(
+			enabledModelIds?.size ? "No models available." : "No models available. Set API keys in environment variables.",
+		);
 		return;
 	}
 
@@ -94,7 +93,6 @@ export async function listModels(
 			return;
 		}
 	}
-
 
 	const providerRows = filteredModels.map(model => ({
 		provider: model.provider,

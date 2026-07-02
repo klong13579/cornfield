@@ -87,6 +87,7 @@ export function detectOpenAICompat(model: Model<"openai-completions">, resolvedB
 		isZai ||
 		isKilo ||
 		isQwen ||
+		baseUrl.includes("coder.narwal.com") ||
 		provider === "opencode-zen" ||
 		provider === "opencode-go" ||
 		baseUrl.includes("opencode.ai");

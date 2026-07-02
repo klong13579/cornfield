@@ -108,9 +108,7 @@ export class ListModelsTool implements AgentTool<typeof listModelsSchema, ListMo
 |---|---|---|---|
 ${rows.join("\n")}`;
 
-		const countLabel = query
-			? `${filtered.length}/${models.length}（匹配 "${query}"）`
-			: `${models.length}`;
+		const countLabel = query ? `${filtered.length}/${models.length}（匹配 "${query}"）` : `${models.length}`;
 		const truncationNotice = truncated
 			? `\n\n…仅显示前 ${MAX_ROWS} 条；用 \`list_models({query: "<filter>"})\` 缩小范围。`
 			: "";
