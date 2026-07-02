@@ -23,6 +23,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import winston from "winston";
 import DailyRotateFile from "winston-daily-rotate-file";
+import { cleanupStaleLogs } from "../src/log-cleanup";
 
 describe("logger file transport", () => {
 	const originalHome = process.env.HOME;
@@ -104,5 +105,76 @@ describe("logger file transport", () => {
 		// is misread, we get a rotation storm and a long tail of
 		// .1, .2, ... files even at this volume.
 		expect(files.length).toBe(1);
+	});
+});
+
+describe("cleanupStaleLogs", () => {
+	test("removes 0-byte rotated logs and orphan audit files, keeps the rest", () => {
+		const logsDir = fs.mkdtempSync(path.join(os.tmpdir(), "omp-cleanup-test-"));
+		try {
+			// Active log file (no rotation suffix) — must be kept
+			fs.writeFileSync(`${logsDir}/omp.2026-07-02.log`, "real data\n");
+			// 0-byte rotated file — must be removed
+			fs.writeFileSync(`${logsDir}/omp.2026-07-02.log.1`, "");
+			// Non-zero rotated file — must be kept (transport's
+			// maxFiles policy will retire it on its own schedule)
+			fs.writeFileSync(`${logsDir}/omp.2026-07-02.log.2`, "rotated content\n");
+			// Our own audit file — must be kept
+			fs.writeFileSync(`${logsDir}/.omp-audit-${process.pid}.json`, "{}");
+			// Orphan audit file for a dead PID — must be removed.
+			// macOS default max PID is 99999; 99999999 is unreachable.
+			fs.writeFileSync(`${logsDir}/.omp-audit-99999999.json`, "{}");
+
+			const removed = cleanupStaleLogs(logsDir);
+
+			expect(removed).toBe(2);
+			expect(fs.existsSync(`${logsDir}/omp.2026-07-02.log`)).toBe(true);
+			expect(fs.existsSync(`${logsDir}/omp.2026-07-02.log.1`)).toBe(false);
+			expect(fs.existsSync(`${logsDir}/omp.2026-07-02.log.2`)).toBe(true);
+			expect(fs.existsSync(`${logsDir}/.omp-audit-${process.pid}.json`)).toBe(true);
+			expect(fs.existsSync(`${logsDir}/.omp-audit-99999999.json`)).toBe(false);
+		} finally {
+			fs.rmSync(logsDir, { recursive: true, force: true });
+		}
+	});
+
+	test("does not remove audit files for alive PIDs", async () => {
+		const logsDir = fs.mkdtempSync(path.join(os.tmpdir(), "omp-cleanup-test-"));
+		const child = Bun.spawn({
+			cmd: ["sleep", "10"],
+			stdout: "ignore",
+			stderr: "ignore",
+		});
+		try {
+			// Our own PID is alive by definition; the audit file
+			// must be kept.
+			fs.writeFileSync(`${logsDir}/.omp-audit-${process.pid}.json`, "{}");
+			// Forge an "alive" sibling PID via a long-lived child
+			// process so we can verify the liveness check actually
+			// runs for PIDs that aren't ours.
+			fs.writeFileSync(`${logsDir}/.omp-audit-${child.pid}.json`, "{}");
+			const removed = cleanupStaleLogs(logsDir);
+			expect(fs.existsSync(`${logsDir}/.omp-audit-${child.pid}.json`)).toBe(true);
+			expect(fs.existsSync(`${logsDir}/.omp-audit-${process.pid}.json`)).toBe(true);
+			expect(removed).toBe(0);
+		} finally {
+			child.kill();
+			await child.exited;
+			fs.rmSync(logsDir, { recursive: true, force: true });
+		}
+	});
+
+	test("is idempotent", () => {
+		const logsDir = fs.mkdtempSync(path.join(os.tmpdir(), "omp-cleanup-test-"));
+		try {
+			fs.writeFileSync(`${logsDir}/omp.2026-07-02.log.1`, "");
+			fs.writeFileSync(`${logsDir}/.omp-audit-99999999.json`, "{}");
+			const first = cleanupStaleLogs(logsDir);
+			const second = cleanupStaleLogs(logsDir);
+			expect(first).toBe(2);
+			expect(second).toBe(0);
+		} finally {
+			fs.rmSync(logsDir, { recursive: true, force: true });
+		}
 	});
 });

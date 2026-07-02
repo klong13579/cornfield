@@ -8,6 +8,7 @@ import * as fs from "node:fs";
 import winston from "winston";
 import DailyRotateFile from "winston-daily-rotate-file";
 import { getLogsDir } from "./dirs";
+import { cleanupStaleLogs } from "./log-cleanup";
 
 /** Ensure logs directory exists */
 function ensureLogsDir(): string {
@@ -15,6 +16,7 @@ function ensureLogsDir(): string {
 	if (!fs.existsSync(logsDir)) {
 		fs.mkdirSync(logsDir, { recursive: true });
 	}
+	cleanupStaleLogs(logsDir);
 	return logsDir;
 }
 
