@@ -20,12 +20,7 @@ import { parseRobotMessage } from "../src/channels/dingtalk";
 import { Gateway } from "../src/gateway";
 import { readRestartSentinel } from "../src/restart-sentinel";
 import { SQLiteSessionStore } from "../src/session-store";
-import type {
-	Channel,
-	ChannelCapabilities,
-	InboundMessage,
-	OutboundMessage,
-} from "../src/types";
+import type { Channel, ChannelCapabilities, InboundMessage, OutboundMessage } from "../src/types";
 import { sampleTextMessage } from "./fixtures/sample-messages";
 
 /**
@@ -204,7 +199,7 @@ describe("restart sentinel e2e — production simulation", () => {
 
 		// Manually wire a fake channel for testing
 		const channel1 = new FakeChannel("__default__");
-		await channel1.connect(async (msg) => {
+		await channel1.connect(async msg => {
 			const session = await store1.getSession("dingtalk", "__default__", msg.conversationId);
 			if (!session) {
 				await store1.createSession({
@@ -341,7 +336,7 @@ describe("restart sentinel e2e — production simulation", () => {
 		if (!sessionManager) throw new Error("Session manager not initialized");
 
 		const channel = new FakeChannel("__default__");
-		await channel.connect(async (msg) => {
+		await channel.connect(async msg => {
 			const session = await store.getSession("dingtalk", "__default__", msg.conversationId);
 			if (!session) {
 				await store.createSession({

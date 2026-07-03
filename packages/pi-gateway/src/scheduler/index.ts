@@ -1,5 +1,7 @@
 export {
 	cronCreate,
+	cronDiag,
+	cronDiagSnapshot,
 	cronDiagnose,
 	cronList,
 	cronLogs,

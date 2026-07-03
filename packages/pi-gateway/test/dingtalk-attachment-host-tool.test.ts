@@ -289,11 +289,7 @@ describe("dingtalk.attachment host tool — success path (DM)", () => {
 
 		expect(asText(result).isError).toBe(false);
 		expect(spy).toHaveBeenCalledTimes(1);
-		expect(spy).toHaveBeenCalledWith(
-			{ type: "user", userId: "u123" } satisfies AICardTarget,
-			existing,
-			undefined,
-		);
+		expect(spy).toHaveBeenCalledWith({ type: "user", userId: "u123" } satisfies AICardTarget, existing, undefined);
 	});
 
 	it("passes originalName when provided", async () => {

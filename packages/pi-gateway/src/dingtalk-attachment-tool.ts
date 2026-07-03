@@ -44,8 +44,7 @@ const ATTACHMENT_PARAMETERS = Type.Object({
 	originalName: Type.Optional(
 		Type.String({
 			description:
-				"Optional display name for the file in the chat. " +
-				"If omitted, the basename of `filePath` is used.",
+				"Optional display name for the file in the chat. " + "If omitted, the basename of `filePath` is used.",
 		}),
 	),
 });
@@ -55,12 +54,12 @@ const ATTACHMENT_DEFINITION: RpcHostToolDefinition = {
 	label: "Attachment",
 	description:
 		"Send a local file as a file attachment to the current DingTalk conversation. " +
-		"Call this when the user asks you to send them a file (e.g. \"直接附件发我看看\", " +
-		"\"把这个文件发给我\", \"附件形式发过来\").\n" +
+		'Call this when the user asks you to send them a file (e.g. "直接附件发我看看", ' +
+		'"把这个文件发给我", "附件形式发过来").\n' +
 		"\n" +
 		"**Parameters:**\n" +
-		'  - `filePath` (required): absolute path to the file on disk\n' +
-		'  - `originalName` (optional): display name in the chat\n' +
+		"  - `filePath` (required): absolute path to the file on disk\n" +
+		"  - `originalName` (optional): display name in the chat\n" +
 		"\n" +
 		"**The file is sent to the same conversation the user's last message came from.** " +
 		"There is no need to specify a target conversation — it is auto-detected.\n" +
@@ -87,9 +86,7 @@ export interface DingtalkAttachmentToolContext {
 	accountId: string;
 }
 
-export function createDingtalkAttachmentToolDefinitions(
-	ctx: DingtalkAttachmentToolContext,
-): HostToolHandler[] {
+export function createDingtalkAttachmentToolDefinitions(ctx: DingtalkAttachmentToolContext): HostToolHandler[] {
 	return [
 		{
 			definition: ATTACHMENT_DEFINITION,
@@ -114,9 +111,8 @@ async function handleAttachment(
 		return errResult("Missing required parameter: `filePath` (string, absolute path to the file).");
 	}
 
-	const originalName = typeof args.originalName === "string" && args.originalName.trim()
-		? args.originalName.trim()
-		: undefined;
+	const originalName =
+		typeof args.originalName === "string" && args.originalName.trim() ? args.originalName.trim() : undefined;
 
 	// 2. Verify the file exists
 	try {
@@ -131,8 +127,8 @@ async function handleAttachment(
 	if (!activeContext) {
 		return errResult(
 			"No active conversation found. The attachment tool can only send files " +
-			"to the conversation the user's last message came from. There is no active " +
-			"message context — this may be a cron task or the session was reset.",
+				"to the conversation the user's last message came from. There is no active " +
+				"message context — this may be a cron task or the session was reset.",
 		);
 	}
 
@@ -141,9 +137,7 @@ async function handleAttachment(
 	// Single-account mode: channel registered as `dingtalk` (channel.id)
 	let channel = ctx.registry.get(`dingtalk:${ctx.accountId}`) ?? ctx.registry.get("dingtalk");
 	if (!channel) {
-		return errResult(
-			"DingTalk channel not found. Is the DingTalk channel enabled in the gateway config?",
-		);
+		return errResult("DingTalk channel not found. Is the DingTalk channel enabled in the gateway config?");
 	}
 
 	// 5. Construct the target from active context and send

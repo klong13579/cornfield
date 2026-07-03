@@ -189,8 +189,7 @@ export async function installService(): Promise<void> {
 	await fs.mkdir(paths.logDir, { recursive: true });
 
 	// Generate config
-	const config =
-		platform === "darwin" ? generateLaunchdPlist(paths.logPath) : generateSystemdService(paths.logPath);
+	const config = platform === "darwin" ? generateLaunchdPlist(paths.logPath) : generateSystemdService(paths.logPath);
 
 	// Ensure config directory exists
 	await fs.mkdir(paths.configDir, { recursive: true });

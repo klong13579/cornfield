@@ -386,7 +386,7 @@ describe("cron host tool — scheduleType derivation", () => {
 						registry: registry as unknown as ChannelRegistry,
 						getStorage: () => storage,
 						accountId: "hr",
-			accountId: "hr",
+						accountId: "hr",
 					});
 					return tools[0]!.handle({ action: "list" });
 				})(),

@@ -1961,11 +1961,7 @@ export class DingTalkChannel extends BaseChannel {
 	 * @param filePath — absolute path to the file on disk
 	 * @param originalName — optional display name (defaults to basename of filePath)
 	 */
-	async sendFile(
-		target: AICardTarget,
-		filePath: string,
-		originalName?: string,
-	): Promise<void> {
+	async sendFile(target: AICardTarget, filePath: string, originalName?: string): Promise<void> {
 		return this.#sendFileStandalone(target, filePath, originalName, this.#config);
 	}
 

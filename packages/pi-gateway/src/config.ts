@@ -211,14 +211,8 @@ export type ConfigValidation =
 	| { status: "ok"; path: string; config: GatewayConfig };
 
 export async function validateConfig(configPath?: string): Promise<ConfigValidation>;
-export async function validateConfig(
-	_configPath: undefined,
-	preloaded: GatewayConfig,
-): Promise<ConfigValidation>;
-export async function validateConfig(
-	configPath?: string,
-	preloaded?: GatewayConfig,
-): Promise<ConfigValidation> {
+export async function validateConfig(_configPath: undefined, preloaded: GatewayConfig): Promise<ConfigValidation>;
+export async function validateConfig(configPath?: string, preloaded?: GatewayConfig): Promise<ConfigValidation> {
 	if (preloaded) {
 		// Caller already has a parsed config (test fixtures, runDoctorWithConfig
 		// when the config was constructed in-memory). Skip filesystem and run

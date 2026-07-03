@@ -66,7 +66,10 @@ afterEach(async () => {
 	await fs.rm(tmpDir, { recursive: true, force: true });
 });
 
-async function runScript(scriptPath: string, marker: string): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+async function runScript(
+	scriptPath: string,
+	marker: string,
+): Promise<{ exitCode: number; stdout: string; stderr: string }> {
 	const proc = Bun.spawn([process.execPath, scriptPath, marker], {
 		stdout: "pipe",
 		stderr: "pipe",

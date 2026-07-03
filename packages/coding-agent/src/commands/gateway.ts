@@ -582,6 +582,7 @@ export default class Gateway extends Command {
 			SchedulerDbStorage,
 			getSchedulerDbPath,
 			cronCreate,
+			cronDiagSnapshot,
 			cronList,
 			cronSetStatus,
 			cronRun,
@@ -590,6 +591,7 @@ export default class Gateway extends Command {
 			cronReconcile,
 			cronRemove,
 			cronStatus,
+			cronDiag,
 			cronDiagnose,
 			cronLogs,
 		} = await import("@oh-my-pi/pi-gateway/src/scheduler");
@@ -630,8 +632,14 @@ export default class Gateway extends Command {
 				case "status":
 					cronStatus();
 					break;
+				case "diag":
+					await cronDiag(argv[1], storage, argv.includes("--json"));
+					break;
 				case "diagnose":
 					await cronDiagnose(storage, argv.includes("--json"));
+					break;
+				case "diag-snapshot":
+					console.log(cronDiagSnapshot(storage));
 					break;
 				case "logs":
 					await cronLogs(argv[1], storage, argv.includes("--json"));

@@ -162,26 +162,29 @@ export class PromptQueue {
 		// timeout. Defaults to 60s when not specified (matches the previous
 		// single-timer behaviour for upstream callers that don't opt in).
 		const inactivityMs = opts?.inactivityMs ?? 60_000;
-		const inactivityWatchdog = setInterval(() => {
-			const cur = this.#pendingPrompts.get(promptId);
-			if (!cur) {
-				clearInterval(inactivityWatchdog);
-				return;
-			}
-			const idle = Date.now() - cur.lastActivityAt;
-			if (idle >= inactivityMs) {
-				clearInterval(inactivityWatchdog);
-				clearTimeout(timeout);
-				this.#clearAllLongTaskWatchers(promptId);
-				this.#pendingPrompts.delete(promptId);
-				if (this.#activePromptId === promptId) this.#activePromptId = undefined;
-				reject(
-					new Error(
-						`Agent RPC inactive for ${idle}ms (no session event for ${inactivityMs}ms, hard cap ${timeoutMs}ms)`,
-					),
-				);
-			}
-		}, Math.min(10_000, Math.max(1_000, Math.floor(inactivityMs / 6))));
+		const inactivityWatchdog = setInterval(
+			() => {
+				const cur = this.#pendingPrompts.get(promptId);
+				if (!cur) {
+					clearInterval(inactivityWatchdog);
+					return;
+				}
+				const idle = Date.now() - cur.lastActivityAt;
+				if (idle >= inactivityMs) {
+					clearInterval(inactivityWatchdog);
+					clearTimeout(timeout);
+					this.#clearAllLongTaskWatchers(promptId);
+					this.#pendingPrompts.delete(promptId);
+					if (this.#activePromptId === promptId) this.#activePromptId = undefined;
+					reject(
+						new Error(
+							`Agent RPC inactive for ${idle}ms (no session event for ${inactivityMs}ms, hard cap ${timeoutMs}ms)`,
+						),
+					);
+				}
+			},
+			Math.min(10_000, Math.max(1_000, Math.floor(inactivityMs / 6))),
+		);
 
 		try {
 			this.#transport.sendFrame("prompt", {

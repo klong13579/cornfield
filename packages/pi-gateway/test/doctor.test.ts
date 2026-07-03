@@ -11,7 +11,15 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { validateConfig } from "../src/config";
-import { applyFixes, countBySeverity, type DoctorReport, renderJson, renderText, runDoctor, runDoctorWithConfig } from "../src/doctor";
+import {
+	applyFixes,
+	countBySeverity,
+	type DoctorReport,
+	renderJson,
+	renderText,
+	runDoctor,
+	runDoctorWithConfig,
+} from "../src/doctor";
 import { clearStatusFileSync, getGatewayStatus, PID_FILE, STATUS_FILE } from "../src/gateway-daemon";
 import { SchedulerDbStorage } from "../src/scheduler";
 
