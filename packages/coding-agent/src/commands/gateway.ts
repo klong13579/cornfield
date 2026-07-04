@@ -97,7 +97,8 @@ export default class Gateway extends Command {
 		"  omp gateway cron update <name> ...        Update task fields in place",
 		"  omp gateway cron reconcile [--apply]      Backfill accountId on legacy unbound tasks",
 		"  omp gateway cron status                   Show scheduler status",
-		"  omp gateway cron diagnose [--json]        Run diagnostics",
+		"  omp gateway cron diagnose [--json]        System health (task counts + per-task snapshot)",
+		"  omp gateway cron diagnose <name> [--json]  View JSONL execution diagnostics for a task",
 		"  omp gateway cron logs <name> [--json]     View execution logs",
 		"",
 	];
@@ -582,7 +583,6 @@ export default class Gateway extends Command {
 			SchedulerDbStorage,
 			getSchedulerDbPath,
 			cronCreate,
-			cronDiagSnapshot,
 			cronList,
 			cronSetStatus,
 			cronRun,
@@ -591,7 +591,6 @@ export default class Gateway extends Command {
 			cronReconcile,
 			cronRemove,
 			cronStatus,
-			cronDiag,
 			cronDiagnose,
 			cronLogs,
 		} = await import("@oh-my-pi/pi-gateway/src/scheduler");
@@ -632,14 +631,8 @@ export default class Gateway extends Command {
 				case "status":
 					cronStatus();
 					break;
-				case "diag":
-					await cronDiag(argv[1], storage, argv.includes("--json"));
-					break;
 				case "diagnose":
-					await cronDiagnose(storage, argv.includes("--json"));
-					break;
-				case "diag-snapshot":
-					console.log(cronDiagSnapshot(storage));
+					await cronDiagnose(storage, argv.includes("--json"), argv[1]);
 					break;
 				case "logs":
 					await cronLogs(argv[1], storage, argv.includes("--json"));
@@ -657,7 +650,8 @@ Cron management commands:
   omp gateway cron update <name> [--account <id> | --clear-account] [--deliver <channel> | --clear-deliver] [--deliver-user <id> | --clear-deliver-user] [--timeout-ms <ms>]
   omp gateway cron reconcile [--apply]                      Backfill accountId on legacy unbound tasks (dry run by default)
   omp gateway cron status
-  omp gateway cron diagnose [--json]
+  omp gateway cron diagnose [--json]                        System health (task counts + per-task snapshot)
+  omp gateway cron diagnose <name> [--json]                 View JSONL execution diagnostics for a task
   omp gateway cron logs <name> [--json]
 `);
 					break;

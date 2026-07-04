@@ -12,11 +12,11 @@
 
 import * as fs from "node:fs";
 import { findAgentSessionPath } from "../session-paths";
+import { summarizeCronRunDiagnostics } from "./diagnostics";
 import { appendExecutionLog, getRecentDeliveryFailureCount, readExecutionLog } from "./execution-log";
 import { executeScheduledCommand, scanCronPrompt } from "./executor";
 import type { SchedulerDbStorage } from "./storage";
 import { runTestRun, type TestRunHardError, type TestRunResult } from "./test-run";
-import { summarizeCronRunDiagnostics } from "./diagnostics";
 import {
 	formatExecutionRow,
 	formatTaskRow,
@@ -922,18 +922,145 @@ export function cronStatus(): void {
 	}
 }
 
-export async function cronDiagnose(storage: SchedulerDbStorage, json: boolean): Promise<void> {
+/**
+ * System diagnostics for cron scheduler.
+ *
+ * Without `name`: shows task counts + per-task health snapshot
+ * (merge of old cronDiagnose + cronDiagSnapshot).
+ *
+ * With `name`: shows JSONL execution diagnostics for a specific task
+ * (old cronDiag behavior).
+ */
+export async function cronDiagnose(storage: SchedulerDbStorage, json: boolean, name?: string): Promise<void> {
+	if (name) {
+		// Per-task: show JSONL execution diagnostics
+		const task = storage.getTaskByName(name);
+		if (!task) {
+			console.error(`Task "${name}" not found.`);
+			process.exitCode = 1;
+			return;
+		}
+
+		const logEntries = readExecutionLog(name, 10);
+		if (json) {
+			console.log(JSON.stringify(logEntries, null, 2));
+			return;
+		}
+		if (logEntries.length === 0) {
+			console.log(`No execution logs for task "${name}".`);
+			return;
+		}
+
+		console.log(`Recent execution diagnostics for "${name}":`);
+		console.log("─".repeat(72));
+		console.log("TIME                     STATUS   DURATION    DIAGNOSTICS");
+		console.log("─".repeat(72));
+		for (const entry of logEntries) {
+			const time = new Date(entry.ts).toLocaleString().padEnd(24);
+			const status = entry.status.padEnd(8);
+			const duration = `${(entry.durationMs / 1000).toFixed(1)}s`.padEnd(10);
+			const diag = entry.diagnostics?.summary ?? "—";
+			console.log(`${time} ${status} ${duration} ${diag}`);
+		}
+		return;
+	}
+
+	// System-wide: task counts + per-task health snapshot
 	const tasks = storage.listTasks();
 	const total = tasks.length;
 	const active = tasks.filter(t => t.status === "active").length;
 	const paused = tasks.filter(t => t.status === "paused").length;
 	const disabled = tasks.filter(t => t.status === "disabled").length;
+
 	if (json) {
-		console.log(JSON.stringify({ taskCounts: { total, active, paused, disabled } }, null, 2));
+		// collect per-task health for JSON output
+		const now = Date.now();
+		const dayMs = 24 * 60 * 60 * 1000;
+		const health = tasks.map(task => {
+			let totalRuns = 0;
+			let failCount = 0;
+			let todayFailures = 0;
+			try {
+				const entries = readExecutionLog(task.name, 5);
+				totalRuns = entries.length;
+				for (const entry of entries) {
+					if (entry.status === "failure") {
+						failCount++;
+						if (entry.ts > now - dayMs) todayFailures++;
+					}
+				}
+			} catch {}
+			return {
+				name: task.name,
+				status: task.status,
+				totalRuns,
+				failCount,
+				todayFailures,
+				deliveryFailures: getRecentDeliveryFailureCount(task.id),
+			};
+		});
+		console.log(JSON.stringify({ taskCounts: { total, active, paused, disabled }, health }, null, 2));
 		return;
 	}
-	console.log("## Scheduler Diagnosis");
-	console.log(`Tasks: ${total} total (${active} active, ${paused} paused, ${disabled} disabled)`);
+
+	const lines: string[] = [];
+	lines.push("## Scheduler Diagnosis");
+	lines.push(`Tasks: ${total} total (${active} active, ${paused} paused, ${disabled} disabled)`);
+
+	const activeTasks = tasks.filter(t => t.status === "active");
+	if (activeTasks.length === 0) {
+		lines.push("[cron] No active tasks.");
+		console.log(lines.join("\n"));
+		return;
+	}
+
+	lines.push("");
+	lines.push("Per-task health (recent 5 runs):");
+	lines.push("─".repeat(60));
+
+	const now = Date.now();
+	const dayMs = 24 * 60 * 60 * 1000;
+
+	for (const task of activeTasks) {
+		let totalRuns = 0;
+		let failCount = 0;
+		let todayFailures = 0;
+		let lastDiagSummary: string | undefined;
+
+		try {
+			const entries = readExecutionLog(task.name, 5);
+			totalRuns = entries.length;
+			for (const entry of entries) {
+				if (entry.status === "failure") {
+					failCount++;
+					if (entry.ts > now - dayMs) {
+						todayFailures++;
+					}
+					if (!lastDiagSummary && entry.diagnostics) {
+						lastDiagSummary = summarizeCronRunDiagnostics(entry.diagnostics);
+					}
+				}
+			}
+		} catch {
+			// JSONL may not exist yet
+		}
+
+		const deliveryFailures = getRecentDeliveryFailureCount(task.id);
+
+		if (failCount > 0) {
+			const parts: string[] = [];
+			if (deliveryFailures > 0) parts.push(`${deliveryFailures} delivery fail(s)`);
+			if (lastDiagSummary) parts.push(`diag: ${lastDiagSummary}`);
+			const diagSummary = parts.length > 0 ? parts.join(", ") : "no diagnostics";
+			lines.push(
+				`❌ ${task.name}: ${totalRuns} runs, ${failCount} failures (24h: ${todayFailures}, diag: ${diagSummary})`,
+			);
+		} else {
+			lines.push(`✅ ${task.name}: ${totalRuns} runs, ${failCount} failures`);
+		}
+	}
+
+	console.log(lines.join("\n"));
 }
 
 export async function cronLogs(name: string, storage: SchedulerDbStorage, json: boolean): Promise<void> {
@@ -960,43 +1087,6 @@ export async function cronLogs(name: string, storage: SchedulerDbStorage, json: 
 	console.log("ID                 STATUS   DURATION EXIT");
 	console.log("─".repeat(50));
 	for (const exec of executions) console.log(formatExecutionRow(exec));
-}
-
-/** Show recent JSONL execution diagnostics for a task. */
-export async function cronDiag(name: string, storage: SchedulerDbStorage, json: boolean): Promise<void> {
-	if (!name) {
-		console.error("Usage: cron status <name>");
-		process.exitCode = 1;
-		return;
-	}
-	const task = storage.getTaskByName(name);
-	if (!task) {
-		console.error(`Task "${name}" not found.`);
-		process.exitCode = 1;
-		return;
-	}
-
-	const logEntries = readExecutionLog(name, 10);
-	if (json) {
-		console.log(JSON.stringify(logEntries, null, 2));
-		return;
-	}
-	if (logEntries.length === 0) {
-		console.log(`No execution logs for task "${name}".`);
-		return;
-	}
-
-	console.log(`Recent execution diagnostics for "${name}":`);
-	console.log("─".repeat(72));
-	console.log("TIME                     STATUS   DURATION    DIAGNOSTICS");
-	console.log("─".repeat(72));
-	for (const entry of logEntries) {
-		const time = new Date(entry.ts).toLocaleString().padEnd(24);
-		const status = entry.status.padEnd(8);
-		const duration = `${(entry.durationMs / 1000).toFixed(1)}s`.padEnd(10);
-		const diag = entry.diagnostics?.summary ?? "—";
-		console.log(`${time} ${status} ${duration} ${diag}`);
-	}
 }
 
 // ---------------------------------------------------------------------------
@@ -1119,72 +1209,4 @@ export async function cronReconcile(args: string[], storage: SchedulerDbStorage)
 		applied++;
 	}
 	console.log(`Applied ${applied} update${applied === 1 ? "" : "s"}.`);
-}
-
-// ---------------------------------------------------------------------------
-// Cron diagnostic snapshot — per-active-task health summary
-// ---------------------------------------------------------------------------
-
-/**
- * Produces a compact health summary of all active cron tasks, using
- * recent JSONL execution logs and delivery-failure tracking.
- *
- * Each active task gets one line:
- *   - "✅" if zero failures across its recent 5 runs
- *   - "❌" if any failure, with failure counts and diagnostics
- *
- * Suitable for printing to stdout or sending as a notification.
- */
-export function cronDiagSnapshot(storage: SchedulerDbStorage): string {
-	const tasks = storage.listTasks();
-	const activeTasks = tasks.filter(t => t.status === "active");
-	if (activeTasks.length === 0) {
-		return "[cron] No active tasks.";
-	}
-
-	const now = Date.now();
-	const dayMs = 24 * 60 * 60 * 1000;
-	const lines: string[] = [];
-
-	for (const task of activeTasks) {
-		let totalRuns = 0;
-		let failCount = 0;
-		let todayFailures = 0;
-		let lastDiagSummary: string | undefined;
-
-		try {
-			const entries = readExecutionLog(task.name, 5);
-			totalRuns = entries.length;
-			for (const entry of entries) {
-				if (entry.status === "failure") {
-					failCount++;
-					if (entry.ts > now - dayMs) {
-						todayFailures++;
-					}
-					// Capture diagnostics summary from the most recent failure
-					if (!lastDiagSummary && entry.diagnostics) {
-						lastDiagSummary = summarizeCronRunDiagnostics(entry.diagnostics);
-					}
-				}
-			}
-		} catch {
-			// JSONL may not exist yet for new / never-run tasks
-		}
-
-		const deliveryFailures = getRecentDeliveryFailureCount(task.id);
-
-		if (failCount > 0) {
-			const parts: string[] = [];
-			if (deliveryFailures > 0) parts.push(`${deliveryFailures} delivery fail(s)`);
-			if (lastDiagSummary) parts.push(`diag: ${lastDiagSummary}`);
-			const diagSummary = parts.length > 0 ? parts.join(", ") : "no diagnostics";
-			lines.push(
-				`❌ ${task.name}: ${totalRuns} runs, ${failCount} failures (24h: ${todayFailures}, diag: ${diagSummary})`,
-			);
-		} else {
-			lines.push(`✅ ${task.name}: ${totalRuns} runs, ${failCount} failures (24h: ${todayFailures})`);
-		}
-	}
-
-	return lines.join("\n");
 }
