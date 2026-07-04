@@ -197,6 +197,70 @@ describe("cronTestRun", () => {
 		expect(consoleLogBuf).toContain("deliver:   n/a");
 	});
 
+	// Regression: `hadDelivery` used to be `Boolean(task.delivery ?? task.deliver)`,
+	// which treated a v2 delivery with `mode: "none"` as "delivery attempted"
+	// and reported `delivery.ok: true` despite no push ever happening. The
+	// daily-2000-calendar-push incident (no DingTalk message, but the test-run
+	// reported success) is the canonical case. Now: mode=none surfaces as
+	// `delivery.mode === "none"`, configured: true, and the CLI says "silent".
+	it("reports deliver=silent when delivery is configured but mode=none", { timeout: 30_000 }, async () => {
+		makeGatewayRunning();
+		const task = seedTask({
+			name: "silent-delivery",
+			cron: "0 9 * * *",
+			delivery: { channel: "dingtalk", accountId: "hr", toUserId: "u1", mode: "none" },
+		});
+		storage.recordExecution({
+			taskId: task.id,
+			startedAt: Date.now() + 50,
+			endedAt: Date.now() + 100,
+			exitCode: 0,
+			output: "ran fine",
+			status: "success",
+		});
+		// lastDeliveryError stays null — silent mode never attempts a push,
+		// so no error is recorded either. The old code reported `ok: true`
+		// here and that was the false positive.
+
+		await cronTestRun(["silent-delivery", "--in", "5s", "--timeout", "30s"], storage);
+
+		expect(consoleLogBuf).toContain("deliver:   silent (mode=none");
+		expect(consoleLogBuf).not.toContain("deliver:   ok");
+		expect(process.exitCode).not.toBe(1);
+
+		// Schedule still restored
+		const after = storage.getTaskByName("silent-delivery");
+		expect(after?.cron).toBe("0 9 * * *");
+	});
+
+	// Companion: with mode=none, even an explicit `lastDeliveryError` is NOT
+	// a "delivery_failed" kind — silent mode never tried, so it can't have
+	// failed. (Stale error from a prior real run that was later switched to
+	// mode=none should not poison the new test-run verdict.)
+	it("mode=none never reports delivery_failed even if lastDeliveryError is set", { timeout: 30_000 }, async () => {
+		makeGatewayRunning();
+		const task = seedTask({
+			name: "silent-with-stale-error",
+			cron: "0 9 * * *",
+			delivery: { channel: "dingtalk", accountId: "hr", toUserId: "u1", mode: "none" },
+		});
+		storage.recordExecution({
+			taskId: task.id,
+			startedAt: Date.now() + 50,
+			endedAt: Date.now() + 100,
+			exitCode: 0,
+			output: "ran",
+			status: "success",
+		});
+		storage.updateTask(task.id, { lastDeliveryError: "stale error from prior run" });
+
+		await cronTestRun(["silent-with-stale-error", "--in", "5s", "--timeout", "30s"], storage);
+
+		expect(consoleLogBuf).toContain("deliver:   silent (mode=none");
+		expect(consoleLogBuf).not.toContain("deliver:   FAILED");
+		expect(process.exitCode).not.toBe(1);
+	});
+
 	it("restores schedule on timeout (no execution appeared)", { timeout: 30_000 }, async () => {
 		makeGatewayRunning();
 		seedTask({ name: "times-out", cron: "30 8 * * *" });

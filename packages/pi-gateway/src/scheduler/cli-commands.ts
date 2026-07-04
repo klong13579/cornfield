@@ -15,8 +15,8 @@ import { findAgentSessionPath } from "../session-paths";
 import { summarizeCronRunDiagnostics } from "./diagnostics";
 import { appendExecutionLog, getRecentDeliveryFailureCount, readExecutionLog } from "./execution-log";
 import { executeScheduledCommand, scanCronPrompt } from "./executor";
-import type { SchedulerDbStorage } from "./storage";
 import { runTestRun, type TestRunHardError, type TestRunResult } from "./test-run";
+import type { SchedulerStorage } from "./types";
 import {
 	formatExecutionRow,
 	formatTaskRow,
@@ -64,7 +64,7 @@ export function resolveAgentCwd(
 // agentDir argument and scopes its search to that agent's `sessions/` tree.
 // The old cross-tree walk over `~/.omp/agent/sessions/` is gone.)
 
-export async function cronCreate(args: string[], storage: SchedulerDbStorage): Promise<void> {
+export async function cronCreate(args: string[], storage: SchedulerStorage): Promise<void> {
 	let name: string | undefined;
 	let schedule: string | undefined;
 	let deliver: string | undefined;
@@ -296,7 +296,7 @@ export async function cronCreate(args: string[], storage: SchedulerDbStorage): P
 	if (preScript) console.log(`  Pre-script: ${preScript}`);
 }
 
-export async function cronList(storage: SchedulerDbStorage, json: boolean): Promise<void> {
+export async function cronList(storage: SchedulerStorage, json: boolean): Promise<void> {
 	const tasks = storage.listTasks();
 	if (json) {
 		console.log(JSON.stringify(tasks, null, 2));
@@ -348,7 +348,7 @@ export async function cronList(storage: SchedulerDbStorage, json: boolean): Prom
 	}
 }
 
-export async function cronUpdate(args: string[], storage: SchedulerDbStorage): Promise<void> {
+export async function cronUpdate(args: string[], storage: SchedulerStorage): Promise<void> {
 	if (args.length === 0) {
 		console.error(
 			"Usage: cron update <name> [--account <id> | --clear-account] [--deliver <channel> | --clear-deliver] [--deliver-user <id> | --clear-deliver-user] [--timeout-ms <ms>]",
@@ -535,7 +535,7 @@ export async function cronUpdate(args: string[], storage: SchedulerDbStorage): P
 export async function cronSetStatus(
 	name: string,
 	status: "active" | "disabled",
-	storage: SchedulerDbStorage,
+	storage: SchedulerStorage,
 ): Promise<void> {
 	if (!name) {
 		console.error("Usage: pause|resume <name>");
@@ -556,7 +556,7 @@ export async function cronSetStatus(
 	console.log(`Task "${name}" ${status === "active" ? "resumed" : "paused"}.`);
 }
 
-export async function cronRun(name: string, storage: SchedulerDbStorage): Promise<void> {
+export async function cronRun(name: string, storage: SchedulerStorage): Promise<void> {
 	if (!name) {
 		console.error("Usage: cron run <name>");
 		process.exitCode = 1;
@@ -710,7 +710,7 @@ export interface CronTestRunOptions {
  *   1  timeout, task not found, task exited non-zero, or delivery failed
  *  130 / 143  SIGINT / SIGTERM during wait (schedule restored in handler)
  */
-export async function cronTestRun(args: string[], storage: SchedulerDbStorage): Promise<void> {
+export async function cronTestRun(args: string[], storage: SchedulerStorage): Promise<void> {
 	const name = args[0];
 	if (!name) {
 		console.error("Usage: cron test-run <name> [--in 90s] [--timeout 150s] [--no-restore]");
@@ -851,7 +851,11 @@ export async function cronTestRun(args: string[], storage: SchedulerDbStorage): 
 	console.log(`  duration:  ${result.durationMs ?? "?"}ms`);
 	if (result.stderr) console.log(`  stderr:    ${result.stderr.slice(0, 500)}`);
 	if (result.delivery.configured) {
-		console.log(`  deliver:   ${result.delivery.ok ? "ok" : `FAILED — ${result.delivery.error}`}`);
+		if (result.delivery.mode === "none") {
+			console.log(`  deliver:   silent (mode=none, no push attempted)`);
+		} else {
+			console.log(`  deliver:   ${result.delivery.ok ? "ok" : `FAILED — ${result.delivery.error}`}`);
+		}
 	} else {
 		console.log(`  deliver:   n/a (task has no delivery config)`);
 	}
@@ -891,7 +895,7 @@ function parseDuration(input: string): number {
 	}
 }
 
-export async function cronRemove(name: string, storage: SchedulerDbStorage): Promise<void> {
+export async function cronRemove(name: string, storage: SchedulerStorage): Promise<void> {
 	if (!name) {
 		console.error("Usage: cron remove <name>");
 		process.exitCode = 1;
@@ -931,7 +935,7 @@ export function cronStatus(): void {
  * With `name`: shows JSONL execution diagnostics for a specific task
  * (old cronDiag behavior).
  */
-export async function cronDiagnose(storage: SchedulerDbStorage, json: boolean, name?: string): Promise<void> {
+export async function cronDiagnose(storage: SchedulerStorage, json: boolean, name?: string): Promise<void> {
 	if (name) {
 		// Per-task: show JSONL execution diagnostics
 		const task = storage.getTaskByName(name);
@@ -1063,7 +1067,7 @@ export async function cronDiagnose(storage: SchedulerDbStorage, json: boolean, n
 	console.log(lines.join("\n"));
 }
 
-export async function cronLogs(name: string, storage: SchedulerDbStorage, json: boolean): Promise<void> {
+export async function cronLogs(name: string, storage: SchedulerStorage, json: boolean): Promise<void> {
 	if (!name) {
 		console.error("Usage: cron logs <name>");
 		process.exitCode = 1;
@@ -1137,7 +1141,7 @@ export function suggestAccountBinding(
  * `--apply` to write the bindings. This is the only safe default —
  * silently rewriting storage based on a name match would be a footgun.
  */
-export async function cronReconcile(args: string[], storage: SchedulerDbStorage): Promise<void> {
+export async function cronReconcile(args: string[], storage: SchedulerStorage): Promise<void> {
 	const apply = args.includes("--apply");
 	const unknownFlag = args.find(a => a !== "--apply");
 	if (unknownFlag) {
