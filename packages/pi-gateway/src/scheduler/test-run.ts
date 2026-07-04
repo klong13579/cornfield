@@ -77,6 +77,16 @@ export interface RunTestRunOptions {
 	 * during a 90+ second wait.
 	 */
 	pollIntervalMs?: number;
+	/**
+	 * Optional callback invoked after the test-run writes or restores
+	 * the one-shot schedule in the DB. The gateway passes
+	 * `() => engine.reload()` so the SchedulerEngine picks up the
+	 * changed schedule immediately instead of waiting for the next
+	 * tick (which can be up to 60s away). Without this, the engine's
+	 * in-memory task cache never sees the one-shot and test-run
+	 * always times out.
+	 */
+	reloadScheduler?: () => void;
 }
 
 /** Hard error — task not found, etc. The caller surfaces this to the
@@ -139,8 +149,8 @@ export interface TestRunAborted {
 /** Tagged result union. The caller pattern-matches on `kind`. */
 export type TestRunResult = TestRunSuccess | TestRunSoftError | TestRunAborted;
 
-const DEFAULT_IN_MS = 90_000;
-const DEFAULT_TIMEOUT_MS = 30_000;
+const DEFAULT_IN_MS = 5_000;
+const DEFAULT_TIMEOUT_MS = 10_000;
 // Lower bounds are intentionally tiny (1s) so tests and operator
 // workflows can use short values (e.g. `--in 1s` for a quick
 // verification). The racy-zone warning in `runTestRun` still fires
@@ -232,12 +242,25 @@ export async function runTestRun(opts: RunTestRunOptions): Promise<TestRunResult
 	}
 
 	storage.updateTask(task.id, {
+		// `+${delaySec}s` is a **test-run marker**. The engine sees
+		// this shape (`/^\+\d+s$/`, see `isTestRunSchedule` in
+		// engine.ts) and SKIPS the post-execution `status="disabled"`
+		// auto-disable. That lets this function's `finally` block be
+		// the final word on the task's status — without the skip, the
+		// engine would race the restore below and the task could end
+		// up `disabled` after we report `scheduleRestored: true`.
+		// Do NOT change this format without also updating
+		// `isTestRunSchedule` in engine.ts.
 		cron: `+${delaySec}s`,
 		scheduleType: "once",
 		nextRunAt: targetTime,
 		status: "active",
 		updatedAt: Date.now(),
 	});
+	// Reload the scheduler engine so it picks up the one-shot
+	// schedule. Without this, the engine's in-memory task map never
+	// sees the change and no setTimeout is created.
+	opts.reloadScheduler?.();
 
 	let restored = false;
 	const restoreSnapshot = () => {
@@ -251,6 +274,10 @@ export async function runTestRun(opts: RunTestRunOptions): Promise<TestRunResult
 				updatedAt: Date.now(),
 			});
 			restored = true;
+			// Reload the scheduler engine so it picks up the restored
+			// original schedule. Without this, the engine continues
+			// running the old one-shot timeout or nothing at all.
+			opts.reloadScheduler?.();
 		} catch (err) {
 			logger.error("[test-run] failed to restore schedule", {
 				taskId: task.id,

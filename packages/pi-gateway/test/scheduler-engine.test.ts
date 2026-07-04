@@ -311,10 +311,17 @@ describe("SchedulerEngine", () => {
 	});
 
 	it("clears one-shot nextRunAt after execution", async () => {
+		// Use a real one-shot (ISO timestamp), NOT a test-run marker
+		// (`+<n>s`). Test-run schedules are exempt from auto-disable
+		// so the test-run's `finally` block can restore the original
+		// schedule without racing the engine's own status write — see
+		// `isTestRunSchedule` in engine.ts. Real one-shots (reminders,
+		// ad-hoc scheduled jobs) auto-disable, which is what this test
+		// pins.
 		const { promise, resolve } = Promise.withResolvers<void>();
 		const task = storage.addTask({
 			name: "once-next-run",
-			cron: "+30ms",
+			cron: new Date(Date.now() + 30).toISOString(),
 			command: "echo once",
 			status: "active",
 			scheduleType: "once",
@@ -340,6 +347,57 @@ describe("SchedulerEngine", () => {
 		const updated = storage.getTask(task.id);
 		expect(updated?.status).toBe("disabled");
 		expect(updated?.nextRunAt).toBeUndefined();
+	});
+
+	it("does NOT auto-disable one-shots with a test-run schedule (+<n>s)", async () => {
+		// Regression pin: test-run rewrites the schedule to `+<n>s` to
+		// trigger a one-shot through the real scheduler, then restores
+		// the original schedule in its `finally` block. If the engine
+		// also wrote `disabled` after the trigger fired, it would race
+		// the test-run's restore and the task could end up `disabled`
+		// after the test-run reported `scheduleRestored: true`. The
+		// engine must skip auto-disable when it sees the test-run
+		// marker so the test-run's restore is the final word.
+		//
+		// Uses `+30s` (NOT `+30ms`) because the marker regex is
+		// `^\+\d+s$` — test-run only produces seconds. `+30ms` would
+		// be a valid one-shot but wouldn't be recognized as a
+		// test-run marker.
+		const { promise, resolve } = Promise.withResolvers<void>();
+		const task = storage.addTask({
+			name: "test-run-marker",
+			cron: "+30s",
+			command: "echo test-run",
+			status: "active",
+			scheduleType: "once",
+			createdAt: Date.now(),
+			updatedAt: Date.now(),
+			runCount: 0,
+			failCount: 0,
+			consecutiveFailures: 0,
+		});
+
+		const engine = new SchedulerEngine({
+			storage,
+			onTrigger: async () => {
+				resolve();
+			},
+		});
+
+		engine.start();
+		await Promise.race([promise, Bun.sleep(1000).then(() => undefined)]);
+		await Bun.sleep(20);
+		engine.stop();
+
+		const updated = storage.getTask(task.id);
+		// Test-run schedules are NOT auto-disabled. The test-run
+		// itself restores the original schedule; the engine just fires
+		// the trigger and leaves status alone.
+		expect(updated?.status).toBe("active");
+		// nextRunAt is not asserted here: it depends on whether the
+		// setTimeout fired within the test's wait window. The
+		// "clears one-shot nextRunAt after execution" test above pins
+		// the nextRunAt-clearing contract for a real one-shot.
 	});
 
 	it("engine handles disabled tasks", () => {

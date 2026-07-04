@@ -18,6 +18,24 @@ function getRetryDelay(backoffMs: number[], attemptIndex: number): number {
 const MIN_GRACE_SEC = 120;
 const MAX_GRACE_SEC = 7200;
 
+/**
+ * Test-run schedules use the `+<digits>s` cron form (e.g. `+130s`).
+ * The engine recognizes this marker and SKIPS the post-execution
+ * auto-disable, so the test-run's `finally` block can restore the
+ * original schedule without racing the engine's own status write.
+ *
+ * Real one-shot tasks (user-created reminders, etc.) are NOT marked —
+ * they use ISO timestamps, intervals, or ad-hoc cron expressions —
+ * so they continue to auto-disable after firing.
+ *
+ * The marker is specific: `^\+\d+s$`. Test-run only produces this
+ * shape (`+${delaySec}s`); other call sites (CLI, host tool) don't
+ * generate it.
+ */
+function isTestRunSchedule(cron: string): boolean {
+	return /^\+\d+s$/.test(cron);
+}
+
 function computeGraceSeconds(task: ScheduledTask): number {
 	const parsed = parseSchedule(task.cron);
 	const scheduleType = task.scheduleType ?? parsed.type ?? "cron";
@@ -164,8 +182,17 @@ export class SchedulerEngine {
 				const timeout = setTimeout(async () => {
 					if (!this.#running) return;
 					await this.#handleTrigger(task.id);
-					// Auto-disable one-shot jobs after execution
-					this.#storage.updateTask(task.id, { status: "disabled" });
+					// Auto-disable one-shot jobs after execution — UNLESS
+					// this is a test-run one-shot. Test-runs rewrite the
+					// schedule to `+<n>s` and restore the original in
+					// their `finally` block. If we also wrote `disabled`
+					// here, the engine would race the restore and the
+					// task could end up `disabled` after the test-run
+					// reported `scheduleRestored: true`. See
+					// `isTestRunSchedule` for the marker contract.
+					if (!isTestRunSchedule(task.cron)) {
+						this.#storage.updateTask(task.id, { status: "disabled" });
+					}
 				}, delay);
 				this.#timeouts.set(task.id, timeout);
 				this.#taskMap.set(task.id, task);
