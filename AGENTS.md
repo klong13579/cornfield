@@ -347,6 +347,58 @@ Steps:
 6. Verify the card was delivered (check DingTalk, check logs, or assert on `streamCard` return)
 
 This tests the full gateway pipeline (bridge → streamCard → card creation → API delivery) without LLM variance.
+
+### DingTalk issue reproduction (`scripts/repro-inject.ts`)
+
+For **issue reproduction** (not unit testing) — when the user reports a real DingTalk-side bug and you need to drive the full inbound path (real AgentBridge → real channel → real DM reply to the real DingTalk user) without manually opening DingTalk and typing each time. This is the production-path complement to the fake-RPC pattern above.
+
+**Tool:** `packages/pi-gateway/scripts/repro-inject.ts` — POSTs a synthetic `DingTalkRawMessage` to the gateway's `POST /test/inject` endpoint. The gateway treats it as real, runs it through `channel.injectTestMessage` → the full `#handleMessage` pipeline → real `AgentBridge` → real `DingTalkChannel.sendMessage`. DM reply is sent to the actual DingTalk user (default webhooks expire in ~5 min; falls back to OAuth DM via `senderStaffId`).
+
+**Prereq (one-time per gateway start):** the running gateway must have `OMP_GATEWAY_TEST_MODE=1` and `OMP_GATEWAY_TEST_PORT=7890` set. These env vars are **NOT in the plist's `EnvironmentVariables`** — running `omp gateway service install` will wipe them. For a dev gateway, launch the foreground process with the env inline:
+
+```bash
+# Kill any old gateway first (graceful):
+pkill -TERM -f "omp gateway start" ; sleep 4
+# Start in foreground with test mode enabled:
+OMP_GATEWAY_TEST_MODE=1 OMP_GATEWAY_TEST_PORT=7890 \
+  nohup omp gateway start --foreground > /tmp/gateway-foreground.log 2>&1 &
+# Verify the endpoint is live:
+curl -s http://127.0.0.1:7890/test/health   # → {"ok":true,"mode":"test-injection"}
+# If you see "Gateway already running (PID xxx)" — a stale pid file is blocking startup.
+# Clear it: rm -f ~/.omp/gateway-data/gateway.pid, then re-launch.
+```
+
+**Common flows:**
+
+```bash
+# One-shot grab of a real sessionWebhook from DingTalk (run from a 2nd terminal,
+# the user sends one message to the bot within 30s):
+bun run scripts/repro-inject.ts --account hr --grab-webhook
+
+# Then inject — real reply goes back to the real DingTalk user:
+bun run scripts/repro-inject.ts --account hr --text "帮我看下这个工单"
+
+# End-to-end with --verify: wait for the agent reply to land in DingTalk,
+# tail the session JSONL, confirm the round-trip:
+bun run scripts/repro-inject.ts --account hr --text "试跑 daily-2000-calendar-push" \
+  --verify --verify-timeout 160000
+
+# Cron-task verification: ask the agent to run the `cron` host tool with
+# `action: "test-run"`. Use inMs >= 90000 (1.5x the default 60s gateway tick);
+# values < tick race the scheduler reload. --verify auto-fills --agent-dir
+# from the gateway.json account config.
+```
+
+**State cache:** `~/.omp/repro-state.json` — webhooks keyed by `accountId:conversationId`, ~5 min TTL, plus the `senderStaffId` / `senderNick` of the most recent real user message (cached so the OAuth-DM fallback has a target after the webhook expires). The script's `--list` and `--clear` flags inspect/reset the cache.
+
+**Distinction from "Gateway pipeline testing" (above):** that section is unit-level pipeline tests with a fake RPC script and `captureOutbound: true` (no real sends). This is end-to-end reproduction with real AgentBridge and real DingTalk sends — for when you need to prove the user's bug is reproducible outside the test harness, or for cron-task deliver verification where the only meaningful signal is "did DingTalk receive the message". Full Chinese usage and prereqs are in the script's header comment (`scripts/repro-inject.ts:1-49`).
+
+**Known caveats:**
+- `OMP_GATEWAY_TEST_MODE` env var is wiped by `omp gateway service install` (plist rewrite). Re-set it after every install.
+- `omp gateway service stop` waits for graceful drain. If the gateway is stuck, use `pkill -TERM` (not `kill -9`) — see "Restart gateway" above.
+- The script caches webhooks in `~/.omp/repro-state.json`. If the conversation moves to a different user, `--clear` first.
+- `omp gateway cron test-run` (CLI) and `cron.test-run` (LLM host tool) both share the same `runTestRun` core; see `packages/pi-gateway/src/scheduler/test-run.ts` and `docs/...` for the scheduler-side contract.
+
 ### Running tests
 
 ```bash
