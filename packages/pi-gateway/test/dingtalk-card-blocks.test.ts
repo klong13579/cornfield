@@ -48,7 +48,7 @@ describe("buildThinkBlock", () => {
 	});
 });
 
-	describe("buildToolBlock", () => {
+describe("buildToolBlock", () => {
 	test("emits emoji <name>(<args>) prefix and gray font tag, no result text", () => {
 		const block = buildToolBlock({ name: "read", args: { path: "/tmp/x" } }, "file contents", false);
 		expect(block.type).toBe(2);

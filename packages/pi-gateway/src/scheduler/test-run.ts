@@ -91,9 +91,29 @@ export interface TestRunHardError {
  *  clean success. Returned as part of {@link TestRunResult}; the
  *  schedule IS restored on this path. */
 export type TestRunSoftError =
-	| { kind: "trigger_timeout"; waitedMs: number; sawRunningExec: boolean; runningExecId?: string; scheduleRestored: boolean }
-	| { kind: "task_failed"; execId: string; status: string; exitCode: number; stderr: string | null; scheduleRestored: boolean }
-	| { kind: "delivery_failed"; execId: string; status: string; exitCode: number; deliveryError: string; scheduleRestored: boolean };
+	| {
+			kind: "trigger_timeout";
+			waitedMs: number;
+			sawRunningExec: boolean;
+			runningExecId?: string;
+			scheduleRestored: boolean;
+	  }
+	| {
+			kind: "task_failed";
+			execId: string;
+			status: string;
+			exitCode: number;
+			stderr: string | null;
+			scheduleRestored: boolean;
+	  }
+	| {
+			kind: "delivery_failed";
+			execId: string;
+			status: string;
+			exitCode: number;
+			deliveryError: string;
+			scheduleRestored: boolean;
+	  };
 
 /** Result of a successful trigger + run. */
 export interface TestRunSuccess {
@@ -258,9 +278,7 @@ export async function runTestRun(opts: RunTestRunOptions): Promise<TestRunResult
 			// delivery verdict writes AFTER the agent finishes (see
 			// CronService.#onTrigger), so the agent running is not
 			// enough.
-			const candidate = execs.find(
-				e => e.startedAt >= startMark - TRIGGER_WINDOW_SLACK_MS && e.endedAt != null,
-			);
+			const candidate = execs.find(e => e.startedAt >= startMark - TRIGGER_WINDOW_SLACK_MS && e.endedAt != null);
 			if (candidate) {
 				rawResult = buildResult({
 					storage,
@@ -288,7 +306,12 @@ export async function runTestRun(opts: RunTestRunOptions): Promise<TestRunResult
 						runningExecId: runningExec.id,
 						scheduleRestored: false, // patched in finally
 					}
-				: { kind: "trigger_timeout", waitedMs: Date.now() - startMark, sawRunningExec: false, scheduleRestored: false };
+				: {
+						kind: "trigger_timeout",
+						waitedMs: Date.now() - startMark,
+						sawRunningExec: false,
+						scheduleRestored: false,
+					};
 		}
 	} finally {
 		restoreSnapshot();

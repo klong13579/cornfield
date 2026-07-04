@@ -396,7 +396,7 @@ export async function waitForDaemonStart(pidPath: string, timeoutMs = 5000): Pro
 	return false;
 }
 
-export function formatTaskRow(task: ScheduledTask): string {
+export function formatTaskRow(task: ScheduledTask, diagSummary?: string): string {
 	const next = task.status === "active" && task.nextRunAt ? new Date(task.nextRunAt).toLocaleString() : "—";
 	const typeLabel = task.taskType === "agent" ? "agent" : "shell";
 	const channel = formatChannel(task.delivery?.channel ?? task.deliver);
@@ -410,7 +410,8 @@ export function formatTaskRow(task: ScheduledTask): string {
 	const repeatDisplay = task.repeatCount
 		? `${Math.min(task.repeatCompleted ?? 0, task.repeatCount)}/${task.repeatCount}`
 		: "—";
-	return `${name.padEnd(21)} ${typeLabel.padEnd(6)} ${agent.padEnd(12)} ${task.status.padEnd(8)} ${task.cron.padEnd(16)} ${truncateName(model, 14).padEnd(15)} ${repeatDisplay.padEnd(7)} ${channel.padEnd(20)} ${lastStatus.padEnd(8)} ${deliveryFailures.padEnd(8)} ${next.padEnd(21)}`;
+	const diag = diagSummary ? truncateName(diagSummary, 24) : "—";
+	return `${name.padEnd(21)} ${typeLabel.padEnd(6)} ${agent.padEnd(12)} ${task.status.padEnd(8)} ${task.cron.padEnd(16)} ${truncateName(model, 14).padEnd(15)} ${repeatDisplay.padEnd(7)} ${channel.padEnd(20)} ${lastStatus.padEnd(8)} ${deliveryFailures.padEnd(8)} ${diag.padEnd(25)} ${next.padEnd(21)}`;
 }
 
 /**
@@ -499,9 +500,7 @@ export function formatNextRuns(task: ScheduledTask, count = 3): string {
  */
 export type CronDeliveryOutput = ScheduledTask["delivery"];
 
-export type CronDeliveryValidation =
-	| { ok: true; value: CronDeliveryOutput }
-	| { ok: false; error: string };
+export type CronDeliveryValidation = { ok: true; value: CronDeliveryOutput } | { ok: false; error: string };
 
 /**
  * Normalize and validate a user-supplied or auto-inferred delivery

@@ -19,6 +19,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { logger, slugifySync } from "@oh-my-pi/pi-utils";
 import { pinyin } from "pinyin-pro";
+import type { CronRunDiagnostics } from "./diagnostics";
 
 const DEFAULT_LOG_ROOT = path.join(os.homedir(), ".omp", "gateway-data", "scheduler", "logs");
 
@@ -66,6 +67,8 @@ export interface ExecutionLogEntry {
 	durationMs: number;
 	output: string;
 	stderr: string;
+	/** Structured diagnostics collected during execution. Absent in legacy entries. */
+	diagnostics?: CronRunDiagnostics;
 }
 
 /** YYYY-MM-DD in local time, used as the per-day filename. */

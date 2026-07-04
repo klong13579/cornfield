@@ -585,7 +585,9 @@ export class Gateway {
 		}
 
 		const dispatcher = this.#buildHostToolDispatcher(agentDir, accountId);
-		const bridge = new AgentBridge(await createAccountBridgeOptions(config.agent, accountId, account, agentDir, dispatcher));
+		const bridge = new AgentBridge(
+			await createAccountBridgeOptions(config.agent, accountId, account, agentDir, dispatcher),
+		);
 		this.#accountBridges.set(accountId, bridge);
 		try {
 			await bridge.start();

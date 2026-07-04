@@ -224,7 +224,9 @@ describe("Gateway circuit breaker health check", () => {
 			// Simulate circuit re-opening by sending 10 more failing prompts.
 			// The bridge subprocess may have exited; try to restart it.
 			if (!bridge.isRunning) {
-				try { await bridge.start(); } catch {}
+				try {
+					await bridge.start();
+				} catch {}
 			}
 			for (let i = 0; i < 10; i++) {
 				try {

@@ -270,9 +270,7 @@ export class AgentBridge {
 		try {
 			await this.#transport.start();
 		} catch (err) {
-			this.#recordCrash(
-				`bridge.start() failed: ${err instanceof Error ? err.message : String(err)}`,
-			);
+			this.#recordCrash(`bridge.start() failed: ${err instanceof Error ? err.message : String(err)}`);
 			this.#lastError = err instanceof Error ? err.message : String(err);
 			throw err;
 		}
@@ -582,11 +580,9 @@ export class AgentBridge {
 						accountId: this.#accountId,
 						conversationId: msg.conversationId,
 					});
-					return this.#metaBuilder.fallback(
-						"系统繁忙：LLM 长时间无响应，请重试上一条消息。",
-						startedAt,
-						{ aborted: true },
-					);
+					return this.#metaBuilder.fallback("系统繁忙：LLM 长时间无响应，请重试上一条消息。", startedAt, {
+						aborted: true,
+					});
 				}
 				const rawResponse = extractAssistantText(events);
 

@@ -21,7 +21,12 @@ const PRELUDE_INTROSPECTION_SNIPPET = "import json\nprint(json.dumps(__omp_prelu
 function isConnectionError(err: unknown): boolean {
 	if (err instanceof TypeError && err.cause instanceof Error) {
 		const cause = err.cause as NodeJS.ErrnoException;
-		if (cause.code === "ECONNREFUSED" || cause.code === "ECONNRESET" || cause.code === "ENETUNREACH" || cause.code === "EHOSTUNREACH") {
+		if (
+			cause.code === "ECONNREFUSED" ||
+			cause.code === "ECONNRESET" ||
+			cause.code === "ENETUNREACH" ||
+			cause.code === "EHOSTUNREACH"
+		) {
 			return true;
 		}
 	}

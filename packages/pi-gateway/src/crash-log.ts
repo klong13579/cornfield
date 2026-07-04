@@ -81,7 +81,13 @@ export class CrashLog {
 
 	/** Append a single entry to the JSONL log. Best-effort: errors are
 	 *  logged at warn and never re-thrown. */
-	append(entry: Omit<CrashLogCrash, "ts"> | Omit<CrashLogRecovery, "ts"> | Omit<CrashLogSuppressed, "ts"> | Omit<CrashLogState, "ts">): void {
+	append(
+		entry:
+			| Omit<CrashLogCrash, "ts">
+			| Omit<CrashLogRecovery, "ts">
+			| Omit<CrashLogSuppressed, "ts">
+			| Omit<CrashLogState, "ts">,
+	): void {
 		const line = `${JSON.stringify({ ts: Date.now(), ...entry })}\n`;
 		try {
 			fs.mkdirSync(path.dirname(this.#logPath), { recursive: true });

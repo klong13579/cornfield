@@ -487,7 +487,7 @@ async function printSessionState(label: string, sessionPath: string, convDir: st
 	try {
 		const stat = await fs.stat(sessionPath);
 		const content = await fs.readFile(sessionPath, "utf8");
-		const jsonlLines = content.split("\n").filter((l) => l.trim());
+		const jsonlLines = content.split("\n").filter(l => l.trim());
 		lines.push(`  ${sessionPath}  (${stat.size} bytes, ${jsonlLines.length} JSONL lines)`);
 		for (const ln of jsonlLines) {
 			try {
@@ -509,7 +509,7 @@ async function printSessionState(label: string, sessionPath: string, convDir: st
 		}
 	}
 	const entries = await fs.readdir(convDir).catch(() => [] as string[]);
-	const siblings = entries.filter((e) => e !== path.basename(sessionPath));
+	const siblings = entries.filter(e => e !== path.basename(sessionPath));
 	if (siblings.length > 0) {
 		lines.push(`  Sibling files in ${path.basename(convDir)}/:`);
 		for (const s of siblings) {
@@ -517,7 +517,7 @@ async function printSessionState(label: string, sessionPath: string, convDir: st
 			try {
 				const st = await fs.stat(full);
 				const c = await fs.readFile(full, "utf8");
-				const lc = c.split("\n").filter((l) => l.trim()).length;
+				const lc = c.split("\n").filter(l => l.trim()).length;
 				lines.push(`    ${s}  (${st.size} bytes, ${lc} JSONL lines)`);
 			} catch {
 				lines.push(`    ${s}`);

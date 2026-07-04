@@ -416,7 +416,11 @@ function getToolEmoji(name: string): string {
 	return TOOL_EMOJIS[name] ?? "🔧";
 }
 
-export function buildToolBlock(call: { name: string; args: unknown }, _resultText: string, isError: boolean): CardBlock {
+export function buildToolBlock(
+	call: { name: string; args: unknown },
+	_resultText: string,
+	isError: boolean,
+): CardBlock {
 	const argsPreview = formatToolArgs(call.args);
 	const emoji = getToolEmoji(call.name);
 	const execLabel = isError

@@ -102,9 +102,7 @@ export class NewSessionHandler {
 
 		try {
 			const { archived } = await this.rotate(session, accountId);
-			const reply = archived
-				? "已开启新会话。之前的对话已归档。"
-				: "已开启新会话。";
+			const reply = archived ? "已开启新会话。之前的对话已归档。" : "已开启新会话。";
 			await this.#deps.sendAgentResponse(msg, reply);
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);

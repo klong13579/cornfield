@@ -10,6 +10,7 @@
  */
 
 import { findAgentSessionPath } from "../session-paths";
+import { type CronRunDiagnostics, normalizeCronRunDiagnostics, parseAgentSessionForToolFailures } from "./diagnostics";
 import { appendDeliveryFailureLog, appendExecutionLog } from "./execution-log";
 import { executeScheduledCommand } from "./executor";
 import type { ScheduledTask, SchedulerStorage, TaskExecution } from "./types";
@@ -172,21 +173,21 @@ export function resolveAgentDir(task: ScheduledTask): string | undefined {
 export function resolveDelivery(
 	task: ScheduledTask,
 	resolveAccountId?: (agentDir: string) => string | undefined,
-): {
-	channel: string;
-	accountId?: string;
-	toUserId?: string;
-	toConversationId?: string;
-	mode: "announce" | "none";
-} | undefined {
+):
+	| {
+			channel: string;
+			accountId?: string;
+			toUserId?: string;
+			toConversationId?: string;
+			mode: "announce" | "none";
+	  }
+	| undefined {
 	if (task.delivery) {
 		// Priority: explicit delivery.accountId → reverse-resolved accountId
 		// from agentDir → deprecated task.accountId (last-resort fallback
 		// for tasks written before the agentDir migration).
 		const accountId =
-			task.delivery.accountId ??
-			(task.agentDir ? resolveAccountId?.(task.agentDir) : undefined) ??
-			task.accountId;
+			task.delivery.accountId ?? (task.agentDir ? resolveAccountId?.(task.agentDir) : undefined) ?? task.accountId;
 		return {
 			...task.delivery,
 			accountId,
@@ -194,8 +195,7 @@ export function resolveDelivery(
 	}
 	// Fallback: construct from deprecated fields
 	if (task.deliver) {
-		const accountId =
-			(task.agentDir ? resolveAccountId?.(task.agentDir) : undefined) ?? task.accountId;
+		const accountId = (task.agentDir ? resolveAccountId?.(task.agentDir) : undefined) ?? task.accountId;
 		return {
 			channel: task.deliver,
 			accountId,
@@ -248,8 +248,37 @@ export class CronService {
 		let timedOut = false;
 		let executeAgentFailed: { reason: string } | null = null;
 
+		// Structured diagnostics accumulator (push at collection points,
+		// normalized & flushed to JSONL before the throw/finish).
+		const diagnosticsEntries: CronRunDiagnostics["entries"] = [];
+		const addDiag = (
+			source: CronRunDiagnostics["entries"][number]["source"],
+			severity: CronRunDiagnostics["entries"][number]["severity"],
+			message: string,
+			opts?: { exitCode?: number | null },
+		) => {
+			diagnosticsEntries.push({
+				ts: Date.now(),
+				source,
+				severity,
+				message,
+				...(opts?.exitCode !== undefined ? { exitCode: opts.exitCode } : {}),
+			});
+		};
+
+		// Preflight diagnostics
+		if (!task.command?.trim()) {
+			addDiag("cron-preflight", "warn", "Task has no command configured");
+		}
+		if (isAgent && !agentDir) {
+			addDiag("cron-preflight", "warn", "Agent task has no agentDir - will use shell fallback");
+		}
+
 		// Try injected executeAgent (warm bridge path)
 		if (isAgent && agentDir) {
+			addDiag("cron-setup", "info", `Warm bridge execution (agentDir: ${agentDir.split("/").pop()})`, {
+				exitCode: null,
+			});
 			log.debug("Executing cron task via injected executeAgent", {
 				taskName: task.name,
 				agentDir,
@@ -268,6 +297,7 @@ export class CronService {
 			if (result.error && !result.output) {
 				stderr = result.error;
 				executeAgentFailed = { reason: stderr };
+				addDiag("agent-run", "error", `Agent RPC failed: ${stderr}`);
 				exitCode = 1;
 				log.warn("executeAgent failed, falling back to omp --print", {
 					taskName: task.name,
@@ -280,6 +310,10 @@ export class CronService {
 
 		// Fallback: cold subprocess execution
 		if (!output) {
+			const setupMsg = isAgent
+				? "Falling back to cold subprocess after warm bridge failure"
+				: "Running task via subprocess (no agent bridge)";
+			addDiag("cron-setup", "info", setupMsg);
 			try {
 				const execResult = await executeScheduledCommand(task.command, {
 					taskType: task.taskType,
@@ -294,6 +328,9 @@ export class CronService {
 				output = execResult.output;
 				stderr = execResult.stderr;
 				timedOut = execResult.timedOut;
+				if (timedOut) {
+					addDiag("exec", "error", `Subprocess timed out after ${task.timeoutMs ?? 30_000}ms`, { exitCode });
+				}
 			} catch (fallbackErr) {
 				// The fallback can throw (e.g. posix_spawn ENOENT when
 				// the omp binary is missing, or Bun.spawn unable to
@@ -304,6 +341,7 @@ export class CronService {
 				// a hard task failure and continue.
 				stderr = stderr || (fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr));
 				exitCode = exitCode || 1;
+				addDiag("exec", "error", `Fallback threw: ${stderr}`, { exitCode });
 				log.error("Cron fallback execution threw", {
 					taskId: task.id,
 					taskName: task.name,
@@ -323,6 +361,14 @@ export class CronService {
 		const agentSessionPath =
 			task.taskType === "agent" && agentDir ? findAgentSessionPath(agentDir, startedAt, endedAt) : undefined;
 
+		// Parse agent session for tool failures (if session file exists).
+		const toolDiagnostics = parseAgentSessionForToolFailures(agentSessionPath);
+		if (toolDiagnostics) {
+			for (const entry of toolDiagnostics.entries) {
+				diagnosticsEntries.push(entry);
+			}
+		}
+
 		// Record the execution result
 		storage.updateExecution(executionId, {
 			status: exitCode === 0 ? "success" : "failure",
@@ -331,17 +377,6 @@ export class CronService {
 			stderr: timedOut ? `[TIMED OUT]\n${stderr}` : stderr,
 			endedAt,
 			...(agentSessionPath ? { agentSessionPath } : {}),
-		});
-
-		// Write full stdout/stderr to JSONL log
-		appendExecutionLog(task.name, {
-			id: executionId,
-			ts: endedAt,
-			exitCode,
-			status: exitCode === 0 ? "success" : "failure",
-			durationMs,
-			output,
-			stderr,
 		});
 
 		// Deliver result if configured
@@ -370,6 +405,7 @@ export class CronService {
 					attempts: 0,
 					exitCode,
 				});
+				addDiag("delivery", "error", `Delivery failed: ${deliverResult.error ?? "unknown"}`);
 				log.error("Cron result delivery failed", {
 					taskId: task.id,
 					taskName: task.name,
@@ -415,6 +451,22 @@ export class CronService {
 			}
 		}
 
+		// Write full stdout/stderr to JSONL log with structured diagnostics.
+		// This runs for both success and failure paths BEFORE the throw
+		// so failures also produce a diagnostics trace in JSONL.
+
+		const logDiagnostics = normalizeCronRunDiagnostics({ entries: diagnosticsEntries });
+		appendExecutionLog(task.name, {
+			id: executionId,
+			ts: endedAt,
+			exitCode,
+			status: exitCode === 0 ? "success" : "failure",
+			durationMs,
+			output,
+			stderr,
+			...(logDiagnostics ? { diagnostics: logDiagnostics } : {}),
+		});
+
 		// Throw on failure so the engine's retry loop and statistics work.
 		if (exitCode !== 0 || timedOut) {
 			const msg = timedOut
@@ -430,8 +482,9 @@ export class CronService {
 			// notification is best-effort and does not affect the
 			// throw — the engine's retry + stats still run.
 			if (notifyFailure && deliveryConfig?.mode === "announce") {
-				const reason = executeAgentFailed?.reason
-					?? (timedOut ? `任务超时 (${task.timeoutMs ?? 30_000}ms)` : `exit code ${exitCode}`);
+				const reason =
+					executeAgentFailed?.reason ??
+					(timedOut ? `任务超时 (${task.timeoutMs ?? 30_000}ms)` : `exit code ${exitCode}`);
 				const kind: "executeAgent_failed" | "task_failed" | "task_timed_out" = timedOut
 					? "task_timed_out"
 					: executeAgentFailed

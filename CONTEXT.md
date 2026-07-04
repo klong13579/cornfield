@@ -48,3 +48,26 @@ _Avoid_: Database, cache, state
 ### Natives
 Rust 编写的 N-API cdylib（`crates/pi-natives`），暴露性能敏感的操作给 JS 层：grep、shell（brush）、文本处理、语法高亮、glob、任务管理等。编译为 `pi-natives.{platform}.node`，有 modern（AVX2）和 baseline 两个变体。
 _Avoid_: Native addon, WASM, extension
+
+### CronTask / ScheduledTask
+Gateway 中由调度器按 cron 表达式定时触发的 agent 或 shell 任务。每 CronTask 有唯一 id、cron 表达式、type（agent/shell）、agentDir、timeoutMs、retry 策略等。定义以 JSON5 文件存放在 `cron/tasks/` 下，运行时同步至 SQLite。
+
+### CronExecution
+CronTask 的一次触发执行。有唯一 executionId、startedAt、endedAt、exitCode、status（running/success/failure）。记录在 SQLite scheduler.db 的 executions 表。
+
+### CronRunDiagnostics
+CronExecution 的结构化诊断数据。包含多个 CronRunDiagnosticEntry，每个有 source（cron-preflight / agent-run / tool / exec / delivery）、severity（info/warn/error）、message、可选 toolName/exitCode。上限 10 条，每条 1000 字符，自动脱敏。
+  _Avoid_: log, output, stderr
+
+### CronDeliveryStatus
+CronExecution 的投递结果状态：delivered（成功送达）/ not-delivered（送达失败）/ unknown（未确认）/ not-requested（未配置投递）。
+
+### FailureDestination
+CronTask 可选的独立失败通知目标。与主 delivery 分离，确保投递链自身出问题时用户仍能收到告警。配置在 cron 任务定义的 failureDelivery 字段。
+
+### SchedulerEngine
+CronTask 的调度执行引擎。管理 croner 定时器，处理并发限制、grace window 跳过、重试逻辑、执行记录。在 pi-gateway 内部。
+  _Avoid_: cron service, scheduler daemon
+
+### CronLifecycle
+Gateway 中协调 SchedulerEngine 和 AgentBridge 的胶水层。负责 warm bridge 执行（executeAgent）、冷启动子进程回退（executeScheduledCommand）、投递、失败通知。在 gateway-cron-lifecycle.ts。

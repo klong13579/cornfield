@@ -176,7 +176,10 @@ describe("AgentBridge streaming watchdog", () => {
 		// With watchdog disabled, the prompt will time out via the
 		// 1.5s hard cap on the queue (not the watchdog). The fallback
 		// message reflects a hard-cap timeout, not a busy signal.
-		const reply = await bridge.forward(makeMsg("cid-no-watchdog", "hang please"), makeSession("/tmp/cid-no-watchdog.jsonl"));
+		const reply = await bridge.forward(
+			makeMsg("cid-no-watchdog", "hang please"),
+			makeSession("/tmp/cid-no-watchdog.jsonl"),
+		);
 		expect(reply).toMatch(/超时|未返回内容|系统繁忙|系统错误/);
 		await bridge.stop();
 	});
@@ -223,10 +226,7 @@ describe("AgentBridge active-session sentinel", () => {
 			accountId: "test-acct",
 		});
 		await bridge.start();
-		await bridge.forward(
-			makeMsg("cid-no-data-dir", "slow please"),
-			makeSession("/tmp/no-data-dir-session.jsonl"),
-		);
+		await bridge.forward(makeMsg("cid-no-data-dir", "slow please"), makeSession("/tmp/no-data-dir-session.jsonl"));
 		// Sentinel should not have been written to default dataDir —
 		// we can't easily assert that without polluting the user's
 		// data dir, so just verify the prompt completed normally.

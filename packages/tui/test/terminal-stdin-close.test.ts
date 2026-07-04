@@ -20,10 +20,7 @@ import { describe, expect, it } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-const OMP_BINARY = path.resolve(
-	import.meta.dir,
-	"../../coding-agent/dist/omp",
-);
+const OMP_BINARY = path.resolve(import.meta.dir, "../../coding-agent/dist/omp");
 
 function binaryExists(): boolean {
 	try {
@@ -74,10 +71,7 @@ describe.skipIf(!binaryExists())("omp stdin close → process exit", () => {
 		const exitPromise = proc.exited;
 		const timeoutPromise = Bun.sleep(5000).then(() => "TIMEOUT");
 
-		const result = await Promise.race([
-			exitPromise.then(code => `EXIT:${code}`),
-			timeoutPromise,
-		]);
+		const result = await Promise.race([exitPromise.then(code => `EXIT:${code}`), timeoutPromise]);
 
 		// Clean up if still running
 		if (result === "TIMEOUT") {

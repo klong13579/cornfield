@@ -379,9 +379,7 @@ export class RpcTransport {
 				this.#stdinWriter = undefined;
 				this.#emit({
 					type: "disconnected",
-					error: new Error(
-						`Agent RPC process exited with code ${exitCode} after ready (wasReady=${wasReady})`,
-					),
+					error: new Error(`Agent RPC process exited with code ${exitCode} after ready (wasReady=${wasReady})`),
 				});
 			});
 

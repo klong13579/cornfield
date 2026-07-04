@@ -88,7 +88,11 @@ describe("CrashLog JSONL persistence", () => {
 	});
 
 	test("recent() skips malformed lines", async () => {
-		await fs.writeFile(logPath, `{not json}\n${JSON.stringify({ kind: "crash", ts: Date.now(), accountId: "a", reason: "ok" })}\n`, "utf8");
+		await fs.writeFile(
+			logPath,
+			`{not json}\n${JSON.stringify({ kind: "crash", ts: Date.now(), accountId: "a", reason: "ok" })}\n`,
+			"utf8",
+		);
 		const out = await log.recent("a");
 		expect(out).toHaveLength(1);
 		expect(out[0]!.kind).toBe("crash");

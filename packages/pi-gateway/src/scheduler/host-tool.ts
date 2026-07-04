@@ -23,6 +23,7 @@ import type { AgentBridge } from "../agent-bridge";
 import type { ChannelRegistry } from "../channels/registry";
 import type { HostToolHandler, HostToolResultBody, RpcHostToolDefinition } from "../host-tool-dispatcher";
 import type { InboundMessage } from "../types";
+import { readExecutionLog } from "./execution-log";
 import type { SchedulerDbStorage } from "./storage";
 import { runTestRun, type TestRunHardError, type TestRunResult } from "./test-run";
 import {
@@ -118,9 +119,13 @@ const CRON_TOOL_PARAMETERS = Type.Object({
 	// test-run-only options
 	inMs: Type.Optional(Type.Number({ description: "test-run only: delay (ms) before one-shot fires. Default 90000." })),
 	testTimeoutMs: Type.Optional(
-		Type.Number({ description: "test-run only: max wait (ms) for agent terminal state after trigger fires. Default 30000." }),
+		Type.Number({
+			description: "test-run only: max wait (ms) for agent terminal state after trigger fires. Default 30000.",
+		}),
 	),
-	noRestore: Type.Optional(Type.Boolean({ description: "test-run only: keep the schedule as +<delay>s after the run. Default false." })),
+	noRestore: Type.Optional(
+		Type.Boolean({ description: "test-run only: keep the schedule as +<delay>s after the run. Default false." }),
+	),
 });
 
 const CRON_TOOL_DEFINITION: RpcHostToolDefinition = {
@@ -128,12 +133,12 @@ const CRON_TOOL_DEFINITION: RpcHostToolDefinition = {
 	label: "Cron",
 	description:
 		"Manage THIS AGENT's scheduled tasks. " +
-		"\"My\" in a cron context refers to the current agent (the OMP subprocess serving this account), not the user asking. " +
+		'"My" in a cron context refers to the current agent (the OMP subprocess serving this account), not the user asking. ' +
 		"All users in the same agent see the same task list; the agent owns its tasks. " +
-		"There is no per-user or per-conversation scope — when the user asks \"我有哪些任务\" / \"what are my tasks\", " +
+		'There is no per-user or per-conversation scope — when the user asks "我有哪些任务" / "what are my tasks", ' +
 		"the answer is the agent's full task list, not just tasks the user created. " +
 		"`createdByUserId` and `createdByAccountId` on each task are audit fields; do not use them to filter by creator. " +
-		"Use `cron.list` to enumerate, then client-side filter by `createdByUserId` only if the user explicitly asks \"which tasks did I create\".\n\n" +
+		'Use `cron.list` to enumerate, then client-side filter by `createdByUserId` only if the user explicitly asks "which tasks did I create".\n\n' +
 		"Actions: `add` / `list` / `show` / `update` / `remove` / `enable` / `disable` / `runs` / `test-run`.\n\n" +
 		"**MANDATORY: use this host tool, NOT `bash` + `omp gateway cron ...` CLI.** Calling the CLI from bash bypasses delivery auto-inference and you will fail to set the sender's userId / conversationId correctly. The host tool reads the active chat context and fills delivery in for you. If you find yourself typing `omp gateway cron` in a `bash` call, STOP and use this tool instead.\n\n" +
 		"**`add` example (DM, agent task, 18:00 daily report):**\n" +
@@ -384,7 +389,20 @@ function handleRuns(args: CronToolArgs, storage: SchedulerDbStorage): HostToolRe
 	const task = resolveTask(args, storage);
 	if (!task) return errResult("runs: task not found (pass name or id)");
 	const limit = numberArg(args, "limit") ?? 10;
-	return ok(serializeExecutions(task.id, storage.getExecutions(task.id, limit)));
+	const execs = storage.getExecutions(task.id, limit);
+
+	// Enrich executions with structured diagnostics from JSONL.
+	const logEntries = readExecutionLog(task.name, limit);
+	const logByTs = new Map(logEntries.map(e => [e.ts, e]));
+	const enriched = execs.map(exec => {
+		const match = exec.endedAt ? logByTs.get(exec.endedAt) : undefined;
+		return {
+			...exec,
+			...(match?.diagnostics ? { diagnostics: match.diagnostics } : {}),
+		};
+	});
+
+	return ok({ taskId: task.id, executions: enriched });
 }
 
 // ---------------------------------------------------------------------------

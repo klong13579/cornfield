@@ -186,7 +186,9 @@ function makeChannelFactory(channels: Map<string, FakeDingTalkChannel>): (accoun
 	};
 }
 
-function makeDmMessage(overrides: Partial<DingTalkRawMessage> & { senderId: string; conversationId: string; text: string }): DingTalkRawMessage {
+function makeDmMessage(
+	overrides: Partial<DingTalkRawMessage> & { senderId: string; conversationId: string; text: string },
+): DingTalkRawMessage {
 	return {
 		conversationType: "1", // DM
 		chatbotCorpId: "corp001",
@@ -325,22 +327,24 @@ describe("DM injection → cron host tool → v2 task", () => {
 		// driver's own calls to /test/health and /test/inject) passes through
 		// to the real fetch so we can observe the gateway's behavior.
 		const realFetch = globalThis.fetch;
-		const fetchSpy = spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
-			const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
-			if (url.includes("card/instances")) {
-				return new Response(JSON.stringify({ success: false, errmsg: "simulated" }), {
-					status: 400,
-					headers: { "Content-Type": "application/json" },
-				});
-			}
-			if (url.includes("oauth2/accessToken")) {
-				return new Response(JSON.stringify({ accessToken: "fake-token", expireIn: 7200 }), {
-					headers: { "Content-Type": "application/json" },
-				});
-			}
-			// Pass through: real DingTalk / OMP / test-inject calls hit the wire.
-			return realFetch.call(globalThis, input, init);
-		});
+		const fetchSpy = spyOn(globalThis, "fetch").mockImplementation(
+			async (input: RequestInfo | URL, init?: RequestInit) => {
+				const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+				if (url.includes("card/instances")) {
+					return new Response(JSON.stringify({ success: false, errmsg: "simulated" }), {
+						status: 400,
+						headers: { "Content-Type": "application/json" },
+					});
+				}
+				if (url.includes("oauth2/accessToken")) {
+					return new Response(JSON.stringify({ accessToken: "fake-token", expireIn: 7200 }), {
+						headers: { "Content-Type": "application/json" },
+					});
+				}
+				// Pass through: real DingTalk / OMP / test-inject calls hit the wire.
+				return realFetch.call(globalThis, input, init);
+			},
+		);
 
 		// The fake OMP subprocess reads this to know which agentDir to
 		// attach to the cron tool call (matches the gateway's hr account).
@@ -440,9 +444,7 @@ describe("DM injection → cron host tool → v2 task", () => {
 			// temporarily replaced by `captureOutbound: true` so the test
 			// driver can observe it without standing up a fake DingTalk
 			// webhook. The captured messages land in `injectResult.captured`.
-			const reply = injectResult.captured.find(
-				c => c.contentType === "markdown" || c.contentType === "text",
-			);
+			const reply = injectResult.captured.find(c => c.contentType === "markdown" || c.contentType === "text");
 			expect(reply).toBeDefined();
 			const replyText = reply!.markdown ?? reply!.text ?? "";
 			expect(replyText).toContain("已为你创建");
@@ -485,30 +487,29 @@ describe("DM injection → cron host tool → v2 task", () => {
 		// differs from the DM test, and the group conversation title is
 		// distinct.
 		const groupRpc = path.join(rootDir, "fake-rpc-group");
-		const groupScript = FAKE_RPC_SCRIPT.replace(
-			"name: \"check-mail-daily\"",
-			"name: \"group-daily-summary\"",
-		);
+		const groupScript = FAKE_RPC_SCRIPT.replace('name: "check-mail-daily"', 'name: "group-daily-summary"');
 		await Bun.write(groupRpc, groupScript);
 		await fs.chmod(groupRpc, 0o755);
 		config.agent.ompPath = groupRpc;
 
 		const realFetch2 = globalThis.fetch;
-		const fetchSpy = spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
-			const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
-			if (url.includes("card/instances")) {
-				return new Response(JSON.stringify({ success: false, errmsg: "simulated" }), {
-					status: 400,
-					headers: { "Content-Type": "application/json" },
-				});
-			}
-			if (url.includes("oauth2/accessToken")) {
-				return new Response(JSON.stringify({ accessToken: "fake-token", expireIn: 7200 }), {
-					headers: { "Content-Type": "application/json" },
-				});
-			}
-			return realFetch2.call(globalThis, input, init);
-		});
+		const fetchSpy = spyOn(globalThis, "fetch").mockImplementation(
+			async (input: RequestInfo | URL, init?: RequestInit) => {
+				const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+				if (url.includes("card/instances")) {
+					return new Response(JSON.stringify({ success: false, errmsg: "simulated" }), {
+						status: 400,
+						headers: { "Content-Type": "application/json" },
+					});
+				}
+				if (url.includes("oauth2/accessToken")) {
+					return new Response(JSON.stringify({ accessToken: "fake-token", expireIn: 7200 }), {
+						headers: { "Content-Type": "application/json" },
+					});
+				}
+				return realFetch2.call(globalThis, input, init);
+			},
+		);
 
 		process.env.OMP_TEST_AGENT_DIR = agentDir;
 
