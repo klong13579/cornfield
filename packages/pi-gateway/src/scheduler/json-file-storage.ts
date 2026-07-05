@@ -41,14 +41,16 @@ function defaultJobsPath(): string {
 
 export class JsonFileStorage implements SchedulerStorage {
 	readonly #jobsPath: string;
+	readonly #maxBackups: number;
 	/** In-memory task map: id → task */
 	readonly #tasks = new Map<string, ScheduledTask>();
 	/** In-memory execution map: id → execution (for in-flight "running" records) */
 	readonly #executions = new Map<string, TaskExecution>();
 	#loaded = false;
 
-	constructor(jobsPath?: string) {
+	constructor(jobsPath?: string, maxBackups = 5) {
 		this.#jobsPath = jobsPath ?? defaultJobsPath();
+		this.#maxBackups = maxBackups;
 	}
 
 	// ── Loading / flushing ──────────────────────────────────────────────
@@ -75,8 +77,50 @@ export class JsonFileStorage implements SchedulerStorage {
 		this.#loaded = true;
 	}
 
+	/**
+	 * Rotate backup files: .bak.0 → .bak.1 → … → .bak.N-1, then copy
+	 * the current jobs.json to .bak.0. Only backs up if the file exists
+	 * and is non-empty. No-op when the file doesn't exist (fresh start).
+	 */
+	#rotateBackups(): void {
+		if (this.#maxBackups <= 0) return;
+		try {
+			const stat = fs.statSync(this.#jobsPath);
+			if (!stat.isFile() || stat.size === 0) return;
+		} catch {
+			return; // File doesn't exist yet — nothing to back up
+		}
+
+		// Shift backups: .bak.N-1 → delete, then .bak.N-2 → .bak.N-1, …
+		const lastIdx = this.#maxBackups - 1;
+		const lastBak = `${this.#jobsPath}.bak.${lastIdx}`;
+		try {
+			fs.unlinkSync(lastBak);
+		} catch {
+			// May not exist
+		}
+		for (let i = lastIdx - 1; i >= 0; i--) {
+			const src = `${this.#jobsPath}.bak.${i}`;
+			const dst = `${this.#jobsPath}.bak.${i + 1}`;
+			try {
+				fs.renameSync(src, dst);
+			} catch {
+				// Source doesn't exist — skip
+			}
+		}
+
+		// Copy current file to .bak.0
+		const bak0 = `${this.#jobsPath}.bak.0`;
+		try {
+			fs.copyFileSync(this.#jobsPath, bak0);
+		} catch {
+			// Source vanished between stat and copy — skip
+		}
+	}
+
 	/** Flush the in-memory task map to disk (atomic write). */
 	#flush(): void {
+		this.#rotateBackups();
 		const data: JobsFile = {
 			version: 1,
 			tasks: Array.from(this.#tasks.values()),
