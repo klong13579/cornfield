@@ -54,6 +54,7 @@ export {
 	readDaemonPid,
 	readExecutionLog,
 	SchedulerDaemon,
+	JsonFileStorage,
 	SchedulerDbStorage,
 	SchedulerEngine,
 	SchedulerFileStore,

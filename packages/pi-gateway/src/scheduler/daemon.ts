@@ -11,7 +11,7 @@ import { SchedulerEngine } from "./engine";
 import { appendExecutionLog } from "./execution-log";
 import { executeScheduledCommand } from "./executor";
 import { SchedulerFileStore } from "./file-store";
-import { SchedulerDbStorage } from "./storage";
+import { JsonFileStorage } from "./json-file-storage";
 import type { DaemonOptions, DaemonStatus, ScheduledTask, SchedulerConfig } from "./types";
 import {
 	clearDaemonPid,
@@ -32,7 +32,7 @@ export class SchedulerDaemon {
 	readonly #ompBinary: string;
 	readonly #foreground: boolean;
 	readonly #config: SchedulerConfig;
-	#storage?: SchedulerDbStorage;
+	#storage?: JsonFileStorage;
 	#engine?: SchedulerEngine;
 	#fileStore?: SchedulerFileStore;
 	#pidPath: string;
@@ -90,11 +90,11 @@ export class SchedulerDaemon {
 					if (!Number.isNaN(oldPid)) {
 						try {
 							process.kill(oldPid, 0);
-							logger.warn("Scheduler daemon is already running (PID " + oldPid + ")");
+							logger.warn(`Scheduler daemon is already running (PID ${oldPid})`);
 							return;
 						} catch {
 							// Stale lock — process is dead, remove and retry
-							logger.warn("Removing stale scheduler lock from PID " + oldPid);
+							logger.warn(`Removing stale scheduler lock from PID ${oldPid}`);
 							fs.unlinkSync(this.#lockPath);
 							this.#lockFd = fs.openSync(
 								this.#lockPath,
@@ -114,7 +114,21 @@ export class SchedulerDaemon {
 			}
 		}
 
-		this.#storage = new SchedulerDbStorage(this.#dbPath);
+		this.#storage = new JsonFileStorage();
+		// Migrate from existing SQLite if present
+		try {
+			if (fs.existsSync(this.#dbPath)) {
+				const { migrated, errors } = this.#storage.migrateFromDb(this.#dbPath);
+				if (migrated > 0) {
+					logger.info("Migrated existing SQLite tasks to jobs.json", { migrated });
+				}
+				if (errors.length > 0) {
+					logger.warn("Migration errors", { errors });
+				}
+			}
+		} catch {
+			// No SQLite to migrate — fresh start
+		}
 
 		// Initialize file store and sync to DB
 		this.#fileStore = new SchedulerFileStore(this.#config.taskDir, this.#storage);

@@ -114,26 +114,6 @@ describe("cronUpdate", () => {
 		process.exitCode = exitBefore;
 	});
 
-	it("rejects --deliver combined with --clear-deliver", async () => {
-		seedTask("d-conflict");
-		const exitBefore = process.exitCode;
-
-		await cronUpdate(["d-conflict", "--deliver", "dingtalk:hr", "--clear-deliver"], storage);
-
-		expect(process.exitCode).toBe(1);
-		process.exitCode = exitBefore;
-	});
-
-	it("rejects --deliver-user combined with --clear-deliver-user", async () => {
-		seedTask("du-conflict");
-		const exitBefore = process.exitCode;
-
-		await cronUpdate(["du-conflict", "--deliver-user", "u1", "--clear-deliver-user"], storage);
-
-		expect(process.exitCode).toBe(1);
-		process.exitCode = exitBefore;
-	});
-
 	it("errors when no changes are specified", async () => {
 		seedTask("nochange");
 		const exitBefore = process.exitCode;
@@ -191,42 +171,6 @@ describe("cronUpdate", () => {
 		expect(process.exitCode).toBe(1);
 		expect(storage.getTaskByName("partial")?.accountId).toBe("hr");
 		process.exitCode = exitBefore;
-	});
-
-	it("applies multiple changes in a single call", async () => {
-		seedTask("multi");
-		const before = Date.now();
-
-		await cronUpdate(["multi", "--account", "hr", "--deliver", "dingtalk:hr", "--timeout-ms", "60000"], storage);
-
-		const task = storage.getTaskByName("multi");
-		expect(task?.accountId).toBe("hr");
-		expect(task?.deliver).toBe("dingtalk:hr");
-		expect(task?.timeoutMs).toBe(60_000);
-		// updatedAt should advance.
-		expect(task?.updatedAt).toBeGreaterThanOrEqual(before);
-	});
-
-	it("clears deliver with --clear-deliver (turns column NULL)", async () => {
-		seedTask("deliv-clear");
-		await cronUpdate(["deliv-clear", "--deliver", "dingtalk:hr"], storage);
-		expect(storage.getTaskByName("deliv-clear")?.deliver).toBe("dingtalk:hr");
-
-		await cronUpdate(["deliv-clear", "--clear-deliver"], storage);
-
-		const task = storage.getTaskByName("deliv-clear");
-		// Must be exactly undefined so the formatter renders "—".
-		expect(task?.deliver).toBeUndefined();
-	});
-
-	it("clears deliverUser with --clear-deliver-user", async () => {
-		seedTask("du-clear");
-		await cronUpdate(["du-clear", "--deliver-user", "u1"], storage);
-		expect(storage.getTaskByName("du-clear")?.deliverUser).toBe("u1");
-
-		await cronUpdate(["du-clear", "--clear-deliver-user"], storage);
-
-		expect(storage.getTaskByName("du-clear")?.deliverUser).toBeUndefined();
 	});
 
 	it("does not silently accept --account with an empty value", async () => {

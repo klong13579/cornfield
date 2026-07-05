@@ -46,6 +46,61 @@ export function detectPlatform(): Platform {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
+// Environment persistence
+// ═══════════════════════════════════════════════════════════════════════
+
+/**
+ * Env vars whose current shell value is copied into the launchd plist /
+ * systemd service file at install time, if the variable is set.
+ *
+ * Today this is just the test-injection pair: OMP_GATEWAY_TEST_MODE=1
+ * turns on the POST /test/inject endpoint (see gateway.ts#startTestServer),
+ * and OMP_GATEWAY_TEST_PORT controls which port that endpoint binds to.
+ * Without this list, `omp gateway service install` would silently
+ * discard the operator's test env and the gateway would come up without
+ * the inject endpoint — the original "OMP_GATEWAY_TEST_MODE wiped"
+ * operational pain.
+ *
+ * To add a new persisted var: append it here. The generator below picks
+ * it up automatically; the launchd plist will get a <key>NAME</key>
+ * entry and the systemd unit will get an Environment="NAME=VALUE" line.
+ */
+export const PERSISTED_ENV_VARS = ["OMP_GATEWAY_TEST_MODE", "OMP_GATEWAY_TEST_PORT"] as const;
+
+/** Escape a value for inclusion in a launchd plist XML <string> element. */
+function xmlEscape(value: string): string {
+	return value.replace(/[&<>"']/g, ch => {
+		switch (ch) {
+			case "&":
+				return "&amp;";
+			case "<":
+				return "&lt;";
+			case ">":
+				return "&gt;";
+			case '"':
+				return "&quot;";
+			case "'":
+				return "&apos;";
+			default:
+				return ch;
+		}
+	});
+}
+
+/** Escape a value for inclusion in a systemd `Environment="KEY=VALUE"` line. */
+function systemdEscapeValue(value: string): string {
+	// systemd allows escaping inside double-quoted values: \" \\ \$
+	// We only need to escape " and \ for correctness in our use case
+	// (test mode values are "1" or a port number, but be robust).
+	return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+/** Names of PERSISTED_ENV_VARS that are currently set in `env`. */
+export function getPersistedEnvNames(env: NodeJS.ProcessEnv = process.env): string[] {
+	return PERSISTED_ENV_VARS.filter(name => env[name] !== undefined && env[name] !== "");
+}
+
+// ═══════════════════════════════════════════════════════════════════════
 // Paths
 // ═══════════════════════════════════════════════════════════════════════
 
@@ -105,9 +160,21 @@ function buildServiceArgv(): string[] {
 	return [runtime, "gateway", "start", "--foreground"];
 }
 
-function generateLaunchdPlist(logPath: string): string {
+export function generateLaunchdPlist(logPath: string, env: NodeJS.ProcessEnv = process.env): string {
 	const argv = buildServiceArgv();
 	const argTags = argv.map(a => `\t\t<string>${a}</string>`).join("\n");
+	// Build the operator-persisted env entries (e.g. OMP_GATEWAY_TEST_MODE
+	// for issue reproduction). These only appear when the operator had
+	// them set in their shell at install time; the gateway treats unset
+	// as "feature off", so we never write empty values.
+	const persistedEntries = getPersistedEnvNames(env).map(
+		name => `\t\t<key>${name}</key>\n\t\t<string>${xmlEscape(env[name] ?? "")}</string>`,
+	);
+	const envBlock = [
+		`\t\t<key>PATH</key>`,
+		`\t\t<string>${process.env.HOME}/.bun/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>`,
+		...persistedEntries,
+	].join("\n");
 	return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -131,16 +198,25 @@ ${argTags}
 	<string>${logPath}</string>
 	<key>EnvironmentVariables</key>
 	<dict>
-		<key>PATH</key>
-		<string>${process.env.HOME}/.bun/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+${envBlock}
 	</dict>
 </dict>
 </plist>`;
 }
 
-function generateSystemdService(logPath: string): string {
+export function generateSystemdService(logPath: string, env: NodeJS.ProcessEnv = process.env): string {
 	const argv = buildServiceArgv();
 	const execStart = argv.map(a => (a.includes(" ") ? `"${a}"` : a)).join(" ");
+	// Same persisted-env set as the launchd plist, formatted as systemd
+	// Environment= lines. Only emitted when the operator had them set
+	// in their shell at install time.
+	const persistedLines = getPersistedEnvNames(env).map(
+		name => `Environment="${name}=${systemdEscapeValue(env[name] ?? "")}"`,
+	);
+	const envBlock = [
+		`Environment="PATH=${process.env.HOME}/.bun/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"`,
+		...persistedLines,
+	].join("\n");
 	return `[Unit]
 Description=${SERVICE_LABEL}
 After=network-online.target
@@ -153,7 +229,7 @@ Restart=on-failure
 RestartSec=5
 StandardOutput=append:${logPath}
 StandardError=append:${logPath}
-Environment="PATH=${process.env.HOME}/.bun/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+${envBlock}
 
 [Install]
 WantedBy=default.target`;
@@ -190,6 +266,17 @@ export async function installService(): Promise<void> {
 
 	// Generate config
 	const config = platform === "darwin" ? generateLaunchdPlist(paths.logPath) : generateSystemdService(paths.logPath);
+
+	// Surface which operator-persisted env vars were captured into the
+	// service config. Without this, `omp gateway service install` is
+	// silent about what made it into the plist / unit file, and a
+	// follow-up `omp gateway status` or `/test/inject` 404 leaves the
+	// operator wondering why the test mode env they had in their shell
+	// isn't there.
+	const persisted = getPersistedEnvNames();
+	if (persisted.length > 0) {
+		logger.info("Persisted env into service config", { names: persisted });
+	}
 
 	// Ensure config directory exists
 	await fs.mkdir(paths.configDir, { recursive: true });

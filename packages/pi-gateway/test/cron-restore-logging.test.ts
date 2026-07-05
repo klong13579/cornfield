@@ -20,8 +20,8 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { logger } from "@oh-my-pi/pi-utils";
 import { Gateway } from "../src/gateway";
-import { SchedulerDbStorage } from "../src/scheduler/storage";
-import { getSchedulerDbPath } from "../src/scheduler/types";
+import { JsonFileStorage } from "../src/scheduler/json-file-storage";
+import { setLogRoot } from "../src/scheduler/execution-log";
 import type { GatewayConfig } from "../src/types";
 
 const FAKE_OMP_SCRIPT = `#!/usr/bin/env bun
@@ -68,43 +68,26 @@ if (args[0] === "--mode" && args[1] === "rpc") {
 describe("cron model restore failure logging", () => {
 	let tmpHome: string;
 	let gateway: Gateway;
-	let storage: SchedulerDbStorage;
 	let errorSpy: ReturnType<typeof vi.spyOn>;
 
 	beforeEach(async () => {
 		tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), "pi-gateway-restore-"));
 		vi.spyOn(os, "homedir").mockReturnValue(tmpHome);
 
+		// Ensure log root is inside the temp dir too (module-level DEFAULT_LOG_ROOT
+		// would have been computed with the real homedir at import time).
+		setLogRoot(path.join(tmpHome, ".omp", "gateway-data", "scheduler", "logs"));
+
 		const fakeOmpPath = path.join(tmpHome, "fake-omp");
 		await Bun.write(fakeOmpPath, FAKE_OMP_SCRIPT);
 		await fs.chmod(fakeOmpPath, 0o755);
 
-		const dataDir = path.join(tmpHome, "gateway-data");
-		await fs.mkdir(dataDir, { recursive: true });
-
-		const config: GatewayConfig = {
-			channels: {},
-			agent: { ompPath: fakeOmpPath, timeoutMs: 10_000 },
-			cron: { enabled: true, tickIntervalMs: 500, maxConcurrentRuns: 1 },
-			dataDir,
-		};
-
-		gateway = new Gateway(config);
-		await gateway.start();
-		storage = new SchedulerDbStorage(getSchedulerDbPath());
-
-		errorSpy = vi.spyOn(logger, "error");
-	});
-
-	afterEach(async () => {
-		storage.close();
-		await gateway.stop();
-		vi.restoreAllMocks();
-		await fs.rm(tmpHome, { recursive: true, force: true });
-	});
-
-	test("logs error when model restore fails after cron task", async () => {
-		storage.addTask({
+		// Seed task via JsonFileStorage BEFORE gateway start
+		const schedulerDir = path.join(tmpHome, ".omp", "gateway-data", "scheduler");
+		await fs.mkdir(schedulerDir, { recursive: true });
+		const jobsPath = path.join(schedulerDir, "jobs.json");
+		const seed = new JsonFileStorage(jobsPath);
+		seed.addTask({
 			name: "restore-fail-test",
 			cron: "1s",
 			command: "test prompt",
@@ -121,9 +104,38 @@ describe("cron model restore failure logging", () => {
 			failCount: 0,
 			consecutiveFailures: 0,
 		});
+		seed.close();
+
+		const config: GatewayConfig = {
+			channels: {},
+			agent: { ompPath: fakeOmpPath, timeoutMs: 10_000 },
+			cron: { enabled: true, tickIntervalMs: 500, maxConcurrentRuns: 1 },
+		};
+
+		gateway = new Gateway(config);
+		await gateway.start();
+
+		errorSpy = vi.spyOn(logger, "error");
+
+		// Verify spy works
+		logger.error("TEST_SPY_CHECK", { test: true });
+		errorSpy.mockClear();
+	});
+
+	afterEach(async () => {
+		await gateway.stop();
+		vi.restoreAllMocks();
+		await fs.rm(tmpHome, { recursive: true, force: true });
+	});
+
+	test("logs error when model restore fails after cron task", async () => {
+		const schedulerDir = path.join(tmpHome, ".omp", "gateway-data", "scheduler");
+		const jobsPath = path.join(schedulerDir, "jobs.json");
+		const storage = new JsonFileStorage(jobsPath);
 
 		// Wait for the task to execute and complete
-		for (let i = 0; i < 30; i++) {
+		const deadline = Date.now() + 15_000;
+		while (Date.now() < deadline) {
 			await Bun.sleep(500);
 			const task = storage.getTaskByName("restore-fail-test");
 			if (task) {
@@ -137,5 +149,7 @@ describe("cron model restore failure logging", () => {
 			call => typeof call[0] === "string" && call[0].includes("Failed to restore original model"),
 		);
 		expect(restoreErrors.length).toBeGreaterThan(0);
+
+		storage.close();
 	});
 });

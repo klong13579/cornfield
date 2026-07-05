@@ -126,30 +126,6 @@ describe("cron outbound delivery smoke test", () => {
 		});
 	});
 
-	it("reconstructs the structured `delivery` object from legacy `deliver`/`deliverUser` on read", () => {
-		// A task written with only the deprecated fields (no `delivery`
-		// object) must still surface a usable delivery config so old tasks
-		// keep firing after the migration.
-		addShellTask({
-			name: "_t_smoke_legacy",
-			deliver: "dingtalk:opencode",
-			deliverUser: "u_legacy",
-			accountId: "hr",
-		});
-
-		const read = storage.getTaskByName("_t_smoke_legacy");
-		expect(read).toBeDefined();
-		// agentDir falls back to legacy accountId when agent_dir is unset.
-		expect(read!.agentDir).toBe("hr");
-		expect(read!.delivery).toEqual({
-			channel: "dingtalk:opencode",
-			accountId: undefined,
-			toUserId: "u_legacy",
-			toConversationId: undefined,
-			mode: "announce",
-		});
-	});
-
 	it("CronService.onTrigger forwards the configured channel/accountId/toUserId to `deliver` and includes the task output", async () => {
 		const deliver = mock<DeliverFn>(async () => ({ ok: true }));
 		const service = makeCronService(deliver);

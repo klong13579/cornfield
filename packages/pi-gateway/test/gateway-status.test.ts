@@ -5,8 +5,8 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { getGatewayStatus } from "../src/gateway-daemon";
 import { createAccountBridgeOptions, Gateway } from "../src/gateway";
+import { getGatewayStatus, isGatewayProcess } from "../src/gateway-daemon";
 
 describe("Gateway status", () => {
 	let tmpDir: string;
@@ -63,5 +63,43 @@ describe("Gateway status", () => {
 		expect(options.model).toBe("account-model");
 		expect(options.timeoutMs).toBe(20_000);
 		expect(options.cwd).toBe("/tmp/agent");
+	});
+});
+
+describe("isGatewayProcess", () => {
+	test("returns false for a dead PID", async () => {
+		// PID 1 on macOS is launchd; on Linux it's init. Either way, the
+		// call below uses a PID we know is dead (way above any reasonable
+		// system PID).
+		expect(await isGatewayProcess(999_999_999)).toBe(false);
+	});
+
+	test("returns true for the current test process when launched via gateway --foreground", async () => {
+		// The test runner is launched as `bun test ...` — its argv does NOT
+		// contain both "gateway" and "--foreground", so this should return
+		// false even though the PID is alive. This is exactly the recycled
+		// PID scenario: PID is alive but process is not our gateway.
+		expect(await isGatewayProcess(process.pid)).toBe(false);
+	});
+
+	test("returns true for a process whose argv contains `gateway` and `--foreground`", async () => {
+		// `/usr/bin/yes <args>` is a real execve target: the kernel sees the
+		// full argv, `ps -o args=` reports it verbatim, and `yes` itself just
+		// spams lines forever while ignoring all args. This reproduces the
+		// exact shape a real gateway process has, without needing the
+		// gateway's own setup (DingTalk config, port binding, etc).
+		const child = Bun.spawn({
+			cmd: ["/usr/bin/yes", "gateway", "start", "--foreground"],
+			stdin: "ignore",
+			stdout: "ignore",
+			stderr: "ignore",
+		});
+		try {
+			await Bun.sleep(50);
+			expect(await isGatewayProcess(child.pid)).toBe(true);
+		} finally {
+			child.kill();
+			await child.exited;
+		}
 	});
 });

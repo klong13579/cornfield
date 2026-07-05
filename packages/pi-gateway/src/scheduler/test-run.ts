@@ -30,8 +30,7 @@
  */
 
 import { logger } from "@oh-my-pi/pi-utils";
-import type { SchedulerDbStorage } from "./storage";
-import type { TaskExecution } from "./types";
+import type { SchedulerStorage, TaskExecution } from "./types";
 
 /**
  * Options for the shared test-run core.
@@ -68,7 +67,7 @@ export interface RunTestRunOptions {
 	/** Storage handle. The cron tool resolves this lazily because the
 	 *  scheduler DB is created by `CronLifecycle.start()` after the
 	 *  dispatcher is wired. */
-	storage: SchedulerDbStorage;
+	storage: SchedulerStorage;
 	/**
 	 * Polling interval for execution table reads. Default 2000ms (CLI
 	 * + LLM production path). Tests pass a smaller value (e.g. 25ms)
@@ -133,7 +132,7 @@ export interface TestRunSuccess {
 	exitCode: number;
 	durationMs: number | null;
 	stderr: string | null;
-	delivery: { configured: boolean; ok: boolean; error: string | null };
+	delivery: { configured: boolean; ok: boolean; error: string | null; mode?: "announce" | "none" };
 	output: string | null;
 	scheduleRestored: boolean;
 	triggerLatencyMs: number;
@@ -206,13 +205,50 @@ export async function runTestRun(opts: RunTestRunOptions): Promise<TestRunResult
 	if (!task) return { kind: "task_not_found", name };
 
 	// Snapshot. We restore ALL of these on every exit path.
+	//
+	// Schedule fields (cron, scheduleType, nextRunAt, status): the test-run
+	// rewrites the schedule to a one-shot and back; restore must put the
+	// original schedule back regardless of which path we exited through.
+	//
+	// Stats fields (lastRunAt, runCount, failCount, consecutiveFailures,
+	// repeatCompleted, lastDeliveryError): the engine AND the CronService
+	// write these on every execution — see engine.ts#runTask (success
+	// bumps runCount/lastRunAt/consecutiveFailures=0/repeatCompleted;
+	// failure bumps runCount/failCount/consecutiveFailures/lastRunAt)
+	// and cron-service.ts#onTrigger (lastDeliveryError). Without
+	// snapshotting them, a successful test-run would leave the task
+	// with runCount+1 even though no real run happened, and a delivery
+	// failure during the test would clobber the prior lastDeliveryError.
+	// test-run is a verification path — it must be transparent: the
+	// task's audit counters look exactly the same after as before.
 	const snapshot = {
 		cron: task.cron,
 		scheduleType: task.scheduleType,
 		nextRunAt: task.nextRunAt,
 		status: task.status,
+		lastRunAt: task.lastRunAt,
+		runCount: task.runCount,
+		failCount: task.failCount,
+		consecutiveFailures: task.consecutiveFailures,
+		repeatCompleted: task.repeatCompleted,
+		lastDeliveryError: task.lastDeliveryError,
 	};
-	const hadDelivery = Boolean(task.delivery ?? task.deliver);
+	// Truthful delivery flag. Only count as "delivery attempted" when
+	// the task will actually push. v2 tasks with `mode: "none"` are
+	// silent by config (e.g. daily-2000-calendar-push was once stored
+	// with mode=none; the old `Boolean(task.delivery ?? task.deliver)`
+	// check reported delivery.ok=true despite no push ever happening —
+	// false positive that masked the missing-DingTalk-message bug).
+	// The canonical "will push" check lives in `cron-service.ts` and
+	// uses the same `mode === "announce"` rule — we mirror it.
+	//
+	// `task.delivery` is the only source of truth: `storage.ts`
+	// `rowToTask` reconstructs it from the legacy `deliver` column on
+	// read, so any task with any delivery config has `task.delivery`
+	// populated by the time we see it. The legacy `task.deliver`
+	// field is a read-time back-compat shim and not consulted here.
+	const taskDelivery = task.delivery;
+	const hadDelivery = taskDelivery?.mode === "announce";
 	const targetTime = Date.now() + cappedInMs;
 	const delaySec = Math.ceil(cappedInMs / 1000);
 	const startedAt = Date.now();
@@ -271,6 +307,12 @@ export async function runTestRun(opts: RunTestRunOptions): Promise<TestRunResult
 				scheduleType: snapshot.scheduleType,
 				nextRunAt: snapshot.nextRunAt,
 				status: snapshot.status,
+				lastRunAt: snapshot.lastRunAt,
+				runCount: snapshot.runCount,
+				failCount: snapshot.failCount,
+				consecutiveFailures: snapshot.consecutiveFailures,
+				repeatCompleted: snapshot.repeatCompleted,
+				lastDeliveryError: snapshot.lastDeliveryError,
 				updatedAt: Date.now(),
 			});
 			restored = true;
@@ -311,6 +353,7 @@ export async function runTestRun(opts: RunTestRunOptions): Promise<TestRunResult
 					storage,
 					taskId: task.id,
 					hadDelivery,
+					deliveryMode: taskDelivery?.mode,
 					execution: candidate,
 					startedAt,
 				});
@@ -357,15 +400,16 @@ export async function runTestRun(opts: RunTestRunOptions): Promise<TestRunResult
 }
 
 interface BuildResultArgs {
-	storage: SchedulerDbStorage;
+	storage: SchedulerStorage;
 	taskId: string;
 	hadDelivery: boolean;
+	deliveryMode: "announce" | "none" | undefined;
 	execution: TaskExecution;
 	startedAt: number;
 }
 
 function buildResult(args: BuildResultArgs): TestRunResult {
-	const { storage, taskId, hadDelivery, execution, startedAt } = args;
+	const { storage, taskId, hadDelivery, deliveryMode, execution, startedAt } = args;
 	const triggerLatencyMs = Math.max(0, execution.startedAt - startedAt);
 	const durationMs = execution.endedAt != null ? execution.endedAt - execution.startedAt : null;
 	const stderr = execution.stderr ? execution.stderr.slice(0, 500) : null;
@@ -377,13 +421,27 @@ function buildResult(args: BuildResultArgs): TestRunResult {
 	// us the verdict the LLM/operator needs.
 	const taskAfter = storage.getTask(taskId);
 	const deliveryError = taskAfter?.lastDeliveryError ?? null;
-	const delivery = hadDelivery
-		? { configured: true, ok: deliveryError == null, error: deliveryError }
-		: { configured: false, ok: true, error: null };
+	// Three shapes:
+	//   - silent (v2 mode=none): configured but won't push. Report
+	//     configured=true with mode="none" so the LLM doesn't mistake
+	//     this for "no config" and try to add a delivery.
+	//   - hadDelivery (v2 announce OR legacy): configured and pushed.
+	//     ok tracks the actual verdict; error is the lastDeliveryError
+	//     the cron service wrote.
+	//   - no config: configured=false, ok=true (no failure to report).
+	const delivery =
+		deliveryMode === "none"
+			? { configured: true, ok: true, error: null, mode: "none" as const }
+			: hadDelivery
+				? { configured: true, ok: deliveryError == null, error: deliveryError }
+				: { configured: false, ok: true, error: null };
 
 	// Failure precedence: delivery failure > task failure > success.
 	// Both can technically be true; delivery is the more user-visible
-	// signal because the agent's response didn't reach the user.
+	// signal because the agent's response didn't reach the user. Only
+	// flag delivery_failed when an actual push was attempted
+	// (hadDelivery). Silent mode (hadDelivery=false but configured)
+	// is never delivery_failed — it never tried.
 	if (hadDelivery && deliveryError) {
 		return {
 			kind: "delivery_failed",

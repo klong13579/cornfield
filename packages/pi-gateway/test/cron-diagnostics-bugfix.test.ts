@@ -21,8 +21,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { Gateway } from "../src/gateway";
 import { readExecutionLog } from "../src/scheduler/execution-log";
-import { SchedulerDbStorage } from "../src/scheduler/storage";
-import { getSchedulerDbPath } from "../src/scheduler/types";
+import { JsonFileStorage } from "../src/scheduler/json-file-storage";
 import type { GatewayConfig } from "../src/types";
 
 /**
@@ -72,7 +71,6 @@ if (args[0] === "--mode" && args[1] === "rpc") {
 describe("cron timeout diagnostics bugfix", () => {
 	let tmpHome: string;
 	let gateway: Gateway;
-	let storage: SchedulerDbStorage;
 
 	beforeEach(async () => {
 		tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), "pi-gateway-diag-"));
@@ -82,31 +80,15 @@ describe("cron timeout diagnostics bugfix", () => {
 		await Bun.write(fakeOmpPath, FAKE_OMP_SCRIPT);
 		await fs.chmod(fakeOmpPath, 0o755);
 
-		const dataDir = path.join(tmpHome, "gateway-data");
-		await fs.mkdir(dataDir, { recursive: true });
+		// CronLifecycle uses getGatewayDataDir() which resolves to
+		// os.homedir() + "/.omp/gateway-data". Since os.homedir() is
+		// mocked to tmpHome, seed the jobs.json there.
+		const schedulerDir = path.join(tmpHome, ".omp", "gateway-data", "scheduler");
+		await fs.mkdir(schedulerDir, { recursive: true });
+		const jobsPath = path.join(schedulerDir, "jobs.json");
 
-		const config: GatewayConfig = {
-			channels: {},
-			agent: { ompPath: fakeOmpPath, timeoutMs: 1_000 },
-			cron: { enabled: true, tickIntervalMs: 500, maxConcurrentRuns: 1 },
-			dataDir,
-		};
-
-		gateway = new Gateway(config);
-		await gateway.start();
-		storage = new SchedulerDbStorage(getSchedulerDbPath());
-	});
-
-	afterEach(async () => {
-		storage.close();
-		await gateway.stop();
-		vi.restoreAllMocks();
-		await fs.rm(tmpHome, { recursive: true, force: true });
-	});
-
-	test("JSONL records failure with structured diagnostics when warm bridge and subprocess both fail", async () => {
-		// Create a task that will trigger warm bridge failure and subprocess timeout
-		storage.addTask({
+		const seed = new JsonFileStorage(jobsPath);
+		seed.addTask({
 			name: "timeout-diag-test",
 			cron: "1s",
 			command: "some prompt",
@@ -114,13 +96,38 @@ describe("cron timeout diagnostics bugfix", () => {
 			scheduleType: "interval",
 			taskType: "agent",
 			accountId: "test",
-			timeoutMs: 1_000, // short timeout so the test doesn't wait forever
+			timeoutMs: 1_000,
 			createdAt: Date.now(),
 			updatedAt: Date.now(),
 			runCount: 0,
 			failCount: 0,
 			consecutiveFailures: 0,
 		});
+		seed.close();
+
+		const config: GatewayConfig = {
+			channels: {},
+			agent: { ompPath: fakeOmpPath, timeoutMs: 1_000 },
+			cron: { enabled: true, tickIntervalMs: 500, maxConcurrentRuns: 1 },
+			// dataDir is not set so getGatewayDataDir() controls the path
+		};
+
+		gateway = new Gateway(config);
+		await gateway.start();
+		// Gateway's CronLifecycle.start() creates its own JsonFileStorage
+		// which reads from jobs.json (seeded above).
+	});
+
+	afterEach(async () => {
+		await gateway.stop();
+		vi.restoreAllMocks();
+		await fs.rm(tmpHome, { recursive: true, force: true });
+	});
+
+	test("JSONL records failure with structured diagnostics when warm bridge and subprocess both fail", async () => {
+		const schedulerDir = path.join(tmpHome, ".omp", "gateway-data", "scheduler");
+		const jobsPath = path.join(schedulerDir, "jobs.json");
+		const storage = new JsonFileStorage(jobsPath);
 
 		// Wait for the task to execute and complete (warm bridge failure
 		// is immediate, subprocess timeout is 1s, add margin).
@@ -133,7 +140,7 @@ describe("cron timeout diagnostics bugfix", () => {
 			}
 		}
 
-		// Verify the SQLite execution record shows failure
+		// Verify the execution record shows failure
 		const task = storage.getTaskByName("timeout-diag-test")!;
 		const execs = storage.getExecutions(task.id, 3);
 		const exec = execs[0];
@@ -159,5 +166,7 @@ describe("cron timeout diagnostics bugfix", () => {
 		const execDiag = failedEntry!.diagnostics!.entries.find(e => e.source === "exec");
 		expect(execDiag).toBeDefined();
 		expect(execDiag!.message).toContain("timed out");
+
+		storage.close();
 	});
 });

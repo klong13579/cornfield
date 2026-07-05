@@ -16,6 +16,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { cronTestRun } from "../src/scheduler/cli-commands";
 import { SchedulerDbStorage } from "../src/scheduler/storage";
+import { runTestRun } from "../src/scheduler/test-run";
 import type { ScheduledTask } from "../src/scheduler/types";
 
 let testDir: string;
@@ -197,6 +198,70 @@ describe("cronTestRun", () => {
 		expect(consoleLogBuf).toContain("deliver:   n/a");
 	});
 
+	// Regression: `hadDelivery` used to be `Boolean(task.delivery ?? task.deliver)`,
+	// which treated a v2 delivery with `mode: "none"` as "delivery attempted"
+	// and reported `delivery.ok: true` despite no push ever happening. The
+	// daily-2000-calendar-push incident (no DingTalk message, but the test-run
+	// reported success) is the canonical case. Now: mode=none surfaces as
+	// `delivery.mode === "none"`, configured: true, and the CLI says "silent".
+	it("reports deliver=silent when delivery is configured but mode=none", { timeout: 30_000 }, async () => {
+		makeGatewayRunning();
+		const task = seedTask({
+			name: "silent-delivery",
+			cron: "0 9 * * *",
+			delivery: { channel: "dingtalk", accountId: "hr", toUserId: "u1", mode: "none" },
+		});
+		storage.recordExecution({
+			taskId: task.id,
+			startedAt: Date.now() + 50,
+			endedAt: Date.now() + 100,
+			exitCode: 0,
+			output: "ran fine",
+			status: "success",
+		});
+		// lastDeliveryError stays null — silent mode never attempts a push,
+		// so no error is recorded either. The old code reported `ok: true`
+		// here and that was the false positive.
+
+		await cronTestRun(["silent-delivery", "--in", "5s", "--timeout", "30s"], storage);
+
+		expect(consoleLogBuf).toContain("deliver:   silent (mode=none");
+		expect(consoleLogBuf).not.toContain("deliver:   ok");
+		expect(process.exitCode).not.toBe(1);
+
+		// Schedule still restored
+		const after = storage.getTaskByName("silent-delivery");
+		expect(after?.cron).toBe("0 9 * * *");
+	});
+
+	// Companion: with mode=none, even an explicit `lastDeliveryError` is NOT
+	// a "delivery_failed" kind — silent mode never tried, so it can't have
+	// failed. (Stale error from a prior real run that was later switched to
+	// mode=none should not poison the new test-run verdict.)
+	it("mode=none never reports delivery_failed even if lastDeliveryError is set", { timeout: 30_000 }, async () => {
+		makeGatewayRunning();
+		const task = seedTask({
+			name: "silent-with-stale-error",
+			cron: "0 9 * * *",
+			delivery: { channel: "dingtalk", accountId: "hr", toUserId: "u1", mode: "none" },
+		});
+		storage.recordExecution({
+			taskId: task.id,
+			startedAt: Date.now() + 50,
+			endedAt: Date.now() + 100,
+			exitCode: 0,
+			output: "ran",
+			status: "success",
+		});
+		storage.updateTask(task.id, { lastDeliveryError: "stale error from prior run" });
+
+		await cronTestRun(["silent-with-stale-error", "--in", "5s", "--timeout", "30s"], storage);
+
+		expect(consoleLogBuf).toContain("deliver:   silent (mode=none");
+		expect(consoleLogBuf).not.toContain("deliver:   FAILED");
+		expect(process.exitCode).not.toBe(1);
+	});
+
 	it("restores schedule on timeout (no execution appeared)", { timeout: 30_000 }, async () => {
 		makeGatewayRunning();
 		seedTask({ name: "times-out", cron: "30 8 * * *" });
@@ -263,5 +328,174 @@ describe("cronTestRun", () => {
 		expect(after?.cron).toMatch(/^\+\d+s$/);
 		expect(after?.scheduleType).toBe("once");
 		expect(consoleLogBuf).toContain("Schedule NOT restored");
+	});
+
+	// ─── Stats-restore contract ──────────────────────────────────────────
+	//
+	// The engine and CronService write audit counters (lastRunAt,
+	// runCount, failCount, consecutiveFailures, repeatCompleted,
+	// lastDeliveryError) on every execution. test-run is a verification
+	// path: the operator runs it to check whether the pipeline works,
+	// and the task's on-disk audit counters should look exactly the
+	// same after as before. Without snapshotting these fields, a
+	// successful test-run would leave the task with runCount+1 even
+	// though no real cron tick happened, and a delivery failure during
+	// the test would clobber the prior lastDeliveryError. These two
+	// tests pin both halves of the contract: pre-existing stats stay
+	// untouched, AND a stats bump that happens during the test-run's
+	// wait (the real engine would do this) is rolled back on restore.
+	it("restores pre-existing stats fields unchanged after the trigger fires", { timeout: 30_000 }, async () => {
+		makeGatewayRunning();
+		const pastTime = Date.now() - 86_400_000; // 24h ago — a believable lastRunAt
+		const task = seedTask({
+			name: "with-history",
+			cron: "0 9 * * *",
+			lastRunAt: pastTime,
+			runCount: 5,
+			failCount: 2,
+			consecutiveFailures: 1,
+			repeatCompleted: 1,
+			lastDeliveryError: "stale error from a real run a week ago",
+		});
+		storage.recordExecution({
+			taskId: task.id,
+			startedAt: Date.now() + 50,
+			endedAt: Date.now() + 100,
+			exitCode: 0,
+			output: "ok",
+			status: "success",
+		});
+
+		await cronTestRun(["with-history", "--in", "5s", "--timeout", "30s"], storage);
+
+		const after = storage.getTaskByName("with-history");
+		// Schedule restored (existing contract) — pin to keep the test
+		// honest about what "restored" means.
+		expect(after?.cron).toBe("0 9 * * *");
+		expect(after?.scheduleType).toBe("cron");
+		expect(after?.status).toBe("active");
+		// Stats unchanged — the new contract.
+		expect(after?.lastRunAt).toBe(pastTime);
+		expect(after?.runCount).toBe(5);
+		expect(after?.failCount).toBe(2);
+		expect(after?.consecutiveFailures).toBe(1);
+		expect(after?.repeatCompleted).toBe(1);
+		expect(after?.lastDeliveryError).toBe("stale error from a real run a week ago");
+	});
+
+	it("rolls back a stats bump that happens between snapshot and restore", { timeout: 30_000 }, async () => {
+		// Use `runTestRun` directly so we can pass a `reloadScheduler`
+		// callback. The callback fires AFTER the snapshot and BEFORE the
+		// polling loop, which is exactly the window in which the real
+		// engine would write its success-branch updates (runCount +1,
+		// lastRunAt, consecutiveFailures=0, repeatCompleted). The test-run's
+		// `finally` block must roll this back; without the snapshotting,
+		// the task would look like it had a real run.
+		const task = seedTask({
+			name: "bumped-mid-run",
+			cron: "0 11 * * *",
+			runCount: 0,
+			failCount: 0,
+			consecutiveFailures: 0,
+		});
+		storage.recordExecution({
+			taskId: task.id,
+			startedAt: Date.now() + 50,
+			endedAt: Date.now() + 100,
+			exitCode: 0,
+			output: "ok",
+			status: "success",
+		});
+
+		let bumpedOnce = false;
+
+		await runTestRun({
+			name: "bumped-mid-run",
+			storage,
+			inMs: 5_000,
+			timeoutMs: 5_000,
+			tickIntervalMs: 1_000, // suppress racy-zone warn
+			pollIntervalMs: 25, // keep the test fast
+			reloadScheduler: () => {
+				// The callback fires TWICE in the runTestRun lifecycle:
+				// once after the one-shot schedule is written (simulating
+				// the engine's post-fire reload), and once in `finally`
+				// after the snapshot is restored (telling the engine the
+				// schedule is back to normal). In production the callback
+				// is `() => engine.reload()` — a no-op w.r.t. stats. The
+				// bump here simulates the engine's success-branch write
+				// (`engine.ts#runTask` updates lastRunAt/runCount/...),
+				// which happens between the snapshot and the restore.
+				// Make the bump idempotent so the post-restore callback
+				// doesn't re-bump and undo the restore we're trying to
+				// test.
+				if (bumpedOnce) return;
+				bumpedOnce = true;
+				storage.updateTask(task.id, {
+					lastRunAt: Date.now(),
+					runCount: 1,
+					consecutiveFailures: 0,
+					repeatCompleted: 1,
+				});
+			},
+		});
+
+		const after = storage.getTaskByName("bumped-mid-run");
+		expect(after?.cron).toBe("0 11 * * *");
+		// Snapshot was the pre-bump state. Restore must return to it.
+		expect(after?.lastRunAt).toBeUndefined();
+		expect(after?.runCount).toBe(0);
+		expect(after?.failCount).toBe(0);
+		expect(after?.consecutiveFailures).toBe(0);
+		expect(after?.repeatCompleted).toBeUndefined();
+	});
+
+	it("rolls back a lastDeliveryError clobber that happens between snapshot and restore", { timeout: 30_000 }, async () => {
+		// CronService#onTrigger writes lastDeliveryError on delivery
+		// failure and CLEARS it (undefined → NULL) on success. The
+		// clear is a legitimate state transition for the test-run's
+		// own run, but without snapshotting, it would clobber a
+		// prior real-run delivery error that the operator might
+		// still be investigating. The reloadScheduler callback here
+		// simulates CronService clearing the error after a successful
+		// test-run fire.
+		const task = seedTask({
+			name: "prior-delivery-error",
+			cron: "0 13 * * *",
+			delivery: { channel: "dingtalk", accountId: "hr", toUserId: "u1", mode: "announce" },
+			lastDeliveryError: "real delivery failure from yesterday",
+		});
+		storage.recordExecution({
+			taskId: task.id,
+			startedAt: Date.now() + 50,
+			endedAt: Date.now() + 100,
+			exitCode: 0,
+			output: "ran fine",
+			status: "success",
+		});
+
+		let clobberedOnce = false;
+		await runTestRun({
+			name: "prior-delivery-error",
+			storage,
+			inMs: 5_000,
+			timeoutMs: 5_000,
+			tickIntervalMs: 1_000,
+			pollIntervalMs: 25,
+			reloadScheduler: () => {
+				// Same idempotent pattern as the stats-bump test: the
+				// callback fires after the one-shot write AND after the
+				// restore in `finally`. The CronService's success-path
+				// clear of lastDeliveryError would happen once (when the
+				// one-shot fires and delivery succeeds). The post-restore
+				// callback is a no-op in production, so make it one here.
+				if (clobberedOnce) return;
+				clobberedOnce = true;
+				storage.updateTask(task.id, { lastDeliveryError: undefined });
+			},
+		});
+
+		const after = storage.getTaskByName("prior-delivery-error");
+		expect(after?.lastDeliveryError).toBe("real delivery failure from yesterday");
 	});
 });

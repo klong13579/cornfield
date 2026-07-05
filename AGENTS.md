@@ -6,7 +6,7 @@ Oh My Pi (`omp`) is a Bun-based monorepo that builds a terminal coding agent (`o
 
 |Concern|Tooling|
 |---|---|
-|Runtime|**Bun 1.3.12** (min 1.3.7). Never use Node for dev commands.|
+|Runtime|**Bun 1.3.13** (min 1.3.7). Never use Node for dev commands.|
 |Package manager|Bun workspaces (`bun install`). Lockfile: `bun.lock`.|
 |TypeScript type-check|**tsgo** (`@typescript/native-preview`), NOT `tsc`/`npx tsc`.|
 |TS lint/format|**Biome 2.4.13** (`biome.json`). Tab indent, width 120, double quotes, semicolons, trailing commas all.|
@@ -15,7 +15,7 @@ Oh My Pi (`omp`) is a Bun-based monorepo that builds a terminal coding agent (`o
 |Rust test runner|`cargo nextest` (installed in CI via taiki-e/install-action).|
 |Editor configs|`.vscode/`, `.zed/` present.|
 
-Two `bunfig.toml` exist: root (`linker=hoisted`) and `packages/coding-agent` (`linker=isolated`). Root config loads `.md`/`.py`/`.lark` as text modules.
+Two `bunfig.toml` exist: root (`linker=hoisted`) and `packages/coding-agent` (`linker=isolated`). Root config loads `.md`/`.py`/`.lark` as text modules; coding-agent loads `.md`/`.py` (no `.lark`).
 
 ## Development Commands
 
@@ -239,7 +239,7 @@ import { logger } from "@oh-my-pi/pi-utils";
 logger.error("MCP request failed", { url, method });
 ```
 
-Logs go to `~/.omp/logs/omp.YYYY-MM-DD.log` with automatic rotation.
+Logs go to `~/.omp/logs/omp.YYYY-MM-DD.log` with automatic rotation via a custom `RotatingFileTransport` (replaces `winston-daily-rotate-file` which leaked FDs under Bun).
 
 ### TUI sanitization
 
@@ -417,7 +417,7 @@ Single workflow, triggered on push to `main`, `v*` tags, PRs, and manual dispatc
 
 1. **check** — biome + tsgo (ubuntu, no Rust).
 2. **native** — matrix build of `pi-natives` for 5 OS/arch targets on tags (linux-x64 baseline+modern, linux-arm64, macOS x64/arm64, Windows); just linux-x64 on PRs.
-3. **test** — full `ci:test:full` + `ci:test:smoke`, installs system deps (cairo, pango, fd, ripgrep, imagemagick).
+3. **test** — full `ci:test:full` + `ci:test:smoke`, installs system deps (cairo, pango, libjpeg, libgif, librsvg2, fd, ripgrep, imagemagick).
 4. **install_methods** — binary / source-link / tarball install smoke via `scripts/install-tests/run-ci.sh`.
 5. **release_binary** (tags only) — cross-compile `omp` for 5 targets, smoke-run in isolated HOME.
 6. **release** (tags only) — verify natives, build archives, GitHub Release, npm publish (7 packages in dep order).
@@ -487,7 +487,7 @@ This project is indexed by GitNexus as **oh-my-pi** (37937 symbols, 94845 relati
 - When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `context({name: "symbolName"})`.
 - For security review, `explain({target: "fileOrSymbol"})` lists taint findings (source→sink flows; needs `analyze --pdg`).
 
-## Never Do
+### Never Do
 
 - NEVER edit a function, class, or method without first running `impact` on it.
 - NEVER ignore HIGH or CRITICAL risk warnings from impact analysis.

@@ -19,7 +19,8 @@
  * non-destructive repairs (clear stale PID files, fail orphaned executions).
  */
 
-import * as fs from "node:fs/promises";
+import * as fs from "node:fs";
+import * as fspromises from "node:fs/promises";
 import * as path from "node:path";
 import { getDataDir, validateConfig } from "./config";
 import { checkCredentials } from "./credential-resolver";
@@ -30,7 +31,7 @@ import {
 	getSchedulerDir,
 	getSchedulerPidPath,
 	isDaemonRunning,
-	SchedulerDbStorage,
+	JsonFileStorage,
 	validateCron,
 } from "./scheduler";
 import { getServiceStatus } from "./service-installer";
@@ -317,9 +318,10 @@ function checkChannelsAndBridges(status: Awaited<ReturnType<typeof getGatewaySta
 function checkScheduler(schedulerDbPath: string): Section {
 	const findings: Finding[] = [];
 	const dbPath = schedulerDbPath;
-	let storage: SchedulerDbStorage | undefined;
+	let storage: JsonFileStorage | undefined;
 	try {
-		storage = new SchedulerDbStorage(dbPath);
+		storage = new JsonFileStorage();
+		storage.migrateFromDb(dbPath);
 	} catch (err) {
 		findings.push(error(`Scheduler DB unreadable: ${dbPath}`, err instanceof Error ? err.message : String(err)));
 		return { name: "SCHEDULER", findings };
@@ -351,37 +353,6 @@ function checkScheduler(schedulerDbPath: string): Section {
 			}
 		}
 
-		// Stuck "running" executions — orphaned by a gateway crash. Fixable.
-		const running = storage.getRunningExecutions();
-		const STUCK_MS = 60 * 60_000; // 1h with no end is almost certainly orphaned
-		const now = Date.now();
-		const stuck = running.filter(e => now - e.startedAt > STUCK_MS);
-		if (stuck.length > 0) {
-			const ids = stuck.map(e => e.id);
-			const dbPathForFix = dbPath;
-			findings.push(
-				warn(
-					`${stuck.length} execution(s) stuck in "running" state`,
-					stuck.map(e => `  ${e.taskName}: started ${Math.round((now - e.startedAt) / 60000)}m ago`).join("\n"),
-					async () => {
-						// Open a fresh handle for the repair (the check's handle is closed in finally).
-						const repairDb = new SchedulerDbStorage(dbPathForFix);
-						try {
-							for (const id of ids) {
-								repairDb.updateExecution(id, {
-									status: "failure",
-									endedAt: Date.now(),
-									stderr: "Marked failed by `gateway doctor --fix` (orphaned running execution).",
-								});
-							}
-						} finally {
-							repairDb.close();
-						}
-						return `Marked ${ids.length} stuck execution(s) as failed.`;
-					},
-				),
-			);
-		}
 	} finally {
 		storage.close();
 	}

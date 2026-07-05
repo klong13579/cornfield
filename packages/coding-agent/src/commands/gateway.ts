@@ -347,7 +347,7 @@ export default class Gateway extends Command {
 				const { isServiceInstalled, stopService, startService, getServiceStatus } = await import(
 					"@oh-my-pi/pi-gateway/src/service-installer"
 				);
-				const { getGatewayStatus } = await import("@oh-my-pi/pi-gateway/src/gateway-daemon");
+				const { getGatewayStatus, isGatewayProcess } = await import("@oh-my-pi/pi-gateway/src/gateway-daemon");
 
 				if (await isServiceInstalled()) {
 					const oldStatus = await getServiceStatus();
@@ -387,20 +387,9 @@ export default class Gateway extends Command {
 				const status = await getGatewayStatus();
 				if (status.running && status.pid) {
 					// Verify the PID is actually our gateway — not a recycled PID
-					// owned by some unrelated process. We check both liveness
-					// (process.kill 0) and command-line identity (ps -p ... args).
-					let isOurProcess = false;
-					try {
-						process.kill(status.pid, 0);
-						const ps = Bun.spawnSync(["ps", "-p", String(status.pid), "-o", "args="]);
-						const args = ps.stdout.toString();
-						if (args.includes("gateway") && args.includes("--foreground")) {
-							isOurProcess = true;
-						}
-					} catch {
-						// process is gone or ps failed
-					}
-					if (!isOurProcess) {
+					// owned by some unrelated process. `isGatewayProcess` checks
+					// liveness AND argv identity (gateway + --foreground tokens).
+					if (!(await isGatewayProcess(status.pid))) {
 						console.error(
 							`PID ${status.pid} from gateway.pid is no longer our gateway process ` +
 								`(stale PID file or PID was recycled). Refusing to send SIGHUP.`,
@@ -580,8 +569,7 @@ export default class Gateway extends Command {
 		const action = argv[0] ?? "help";
 
 		const {
-			SchedulerDbStorage,
-			getSchedulerDbPath,
+			JsonFileStorage,
 			cronCreate,
 			cronList,
 			cronSetStatus,
@@ -595,7 +583,21 @@ export default class Gateway extends Command {
 			cronLogs,
 		} = await import("@oh-my-pi/pi-gateway/src/scheduler");
 
-		const storage = new SchedulerDbStorage(getSchedulerDbPath());
+		const storage = new JsonFileStorage();
+		// Migrate from existing SQLite if present
+		try {
+			const { getSchedulerDbPath } = await import("@oh-my-pi/pi-gateway/src/scheduler");
+			const { existsSync } = await import("node:fs");
+			const dbPath = getSchedulerDbPath();
+			if (existsSync(dbPath)) {
+				const { migrated } = storage.migrateFromDb(dbPath);
+				if (migrated > 0) {
+					console.error(`Migrated ${migrated} tasks from SQLite.`);
+				}
+			}
+		} catch {
+			// No SQLite to migrate
+		}
 
 		try {
 			switch (action) {

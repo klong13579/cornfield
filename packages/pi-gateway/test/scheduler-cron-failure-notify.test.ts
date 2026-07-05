@@ -168,26 +168,6 @@ describe("resolveDelivery — agentDir-based accountId lookup", () => {
 		expect(result!.accountId).toBe("explicit-account");
 	});
 
-	it("reverse-resolves accountId for the legacy deliver/deliverUser path too", () => {
-		// Tasks written before the structured `delivery` migration only
-		// have the deprecated `deliver` + `deliverUser` + `accountId`
-		// fields. `accountId` may be the workspace basename (omp-atomix)
-		// not the registered account; resolveAccountId is the source of
-		// truth.
-		const task = makeTask({
-			name: "_t_fail_legacy_resolveAccountId",
-			agentDir: "/Users/test/agent-hr",
-			deliver: "dingtalk",
-			deliverUser: "u_legacy",
-			accountId: "omp-hr-workspace", // intentionally stale
-		});
-		const result = resolveDelivery(task, makeResolveAccountId());
-		expect(result).toBeDefined();
-		expect(result!.channel).toBe("dingtalk");
-		expect(result!.accountId).toBe("hr");
-		expect(result!.toUserId).toBe("u_legacy");
-	});
-
 	it("falls back to deprecated task.accountId only when reverse-lookup misses", () => {
 		// If the agentDir is not mapped (e.g. during a brief bridge
 		// restart window) we still use the deprecated field as a

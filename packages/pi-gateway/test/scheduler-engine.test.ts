@@ -237,48 +237,6 @@ describe("SchedulerEngine", () => {
 		expect(executions[0]!.status).toBe("success");
 	});
 
-	it("engine handles task with deliver field", async () => {
-		const { promise, resolve } = Promise.withResolvers<string>();
-
-		const task = storage.addTask({
-			name: "deliver-test",
-			cron: "100ms",
-			command: "echo deliver-test",
-			status: "active",
-			scheduleType: "interval",
-			taskType: "shell",
-			timeoutMs: 5000,
-			deliver: "dingtalk",
-			createdAt: Date.now(),
-			updatedAt: Date.now(),
-			runCount: 0,
-			failCount: 0,
-			consecutiveFailures: 0,
-		});
-
-		expect(task.deliver).toBe("dingtalk");
-
-		const engine = new SchedulerEngine({
-			storage,
-			onTrigger: async (triggered: ScheduledTask, execId: string) => {
-				expect(triggered.deliver).toBe("dingtalk");
-				storage.updateExecution(execId, {
-					status: "success",
-					exitCode: 0,
-					endedAt: Date.now(),
-				});
-				resolve("ok");
-			},
-		});
-
-		engine.start();
-
-		const result = await Promise.race([promise, Bun.sleep(5000).then(() => "timeout")]);
-		engine.stop();
-
-		expect(result).toBe("ok");
-	});
-
 	it("updates interval nextRunAt after each execution", async () => {
 		const { promise, resolve } = Promise.withResolvers<void>();
 		const task = storage.addTask({

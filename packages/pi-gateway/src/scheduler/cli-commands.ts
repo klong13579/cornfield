@@ -15,8 +15,8 @@ import { findAgentSessionPath } from "../session-paths";
 import { summarizeCronRunDiagnostics } from "./diagnostics";
 import { appendExecutionLog, getRecentDeliveryFailureCount, readExecutionLog } from "./execution-log";
 import { executeScheduledCommand, scanCronPrompt } from "./executor";
-import type { SchedulerDbStorage } from "./storage";
 import { runTestRun, type TestRunHardError, type TestRunResult } from "./test-run";
+import type { SchedulerStorage } from "./types";
 import {
 	formatExecutionRow,
 	formatTaskRow,
@@ -64,11 +64,9 @@ export function resolveAgentCwd(
 // agentDir argument and scopes its search to that agent's `sessions/` tree.
 // The old cross-tree walk over `~/.omp/agent/sessions/` is gone.)
 
-export async function cronCreate(args: string[], storage: SchedulerDbStorage): Promise<void> {
+export async function cronCreate(args: string[], storage: SchedulerStorage): Promise<void> {
 	let name: string | undefined;
 	let schedule: string | undefined;
-	let deliver: string | undefined;
-	let deliverUser: string | undefined;
 	let accountId: string | undefined;
 	let agentDir: string | undefined;
 	let type: "shell" | "agent" = "shell";
@@ -91,12 +89,6 @@ export async function cronCreate(args: string[], storage: SchedulerDbStorage): P
 			i += 2;
 		} else if (args[i] === "--type" && args[i + 1]) {
 			type = args[i + 1] as "shell" | "agent";
-			i += 2;
-		} else if (args[i] === "--deliver" && args[i + 1]) {
-			deliver = args[i + 1];
-			i += 2;
-		} else if (args[i] === "--deliver-user" && args[i + 1]) {
-			deliverUser = args[i + 1]!;
 			i += 2;
 		} else if (args[i] === "--account" && args[i + 1]) {
 			accountId = args[i + 1]!;
@@ -175,7 +167,7 @@ export async function cronCreate(args: string[], storage: SchedulerDbStorage): P
 	const command = commandParts.join(" ");
 	if (!schedule || !command) {
 		console.error(
-			"Usage: <schedule> <command...> [--name <name>] [--type shell|agent] [--deliver <channel>] [--deliver-user <id>] [--account <accountId>] [--agent-dir <path>] [--model <model>] [--provider <provider>] [--toolsets <a,b,c>] [--source-channel <ch>] [--source-user <uid>] [--timeout-ms <ms>] [--skills <s1,s2,...>] [--retry <maxAttempts>] [--pre-script <path>]",
+			"Usage: <schedule> <command...> [--name <name>] [--type shell|agent] [--account <accountId>] [--agent-dir <path>] [--model <model>] [--provider <provider>] [--toolsets <a,b,c>] [--source-channel <ch>] [--source-user <uid>] [--timeout-ms <ms>] [--skills <s1,s2,...>] [--retry <maxAttempts>] [--pre-script <path>]",
 		);
 		process.exitCode = 1;
 		return;
@@ -240,14 +232,6 @@ export async function cronCreate(args: string[], storage: SchedulerDbStorage): P
 		return;
 	}
 
-	// Auto-fill deliver/deliverUser from source channel/user if not explicitly set
-	if (!deliver && sourceChannel) {
-		deliver = sourceChannel;
-	}
-	if (!deliverUser && sourceUser) {
-		deliverUser = sourceUser;
-	}
-
 	const nextRun =
 		parsed.type === "cron" ? getNextRun(parsed.schedule) : parsed.nextRunAt ? new Date(parsed.nextRunAt) : undefined;
 	storage.addTask({
@@ -264,11 +248,9 @@ export async function cronCreate(args: string[], storage: SchedulerDbStorage): P
 			retryMaxAttempts !== undefined ? { maxAttempts: retryMaxAttempts, backoffMs: [1000, 5000, 30000] } : undefined,
 		skills,
 		preScript,
-		deliver,
-		deliverUser,
 		accountId,
 		agentDir,
-		delivery: deliver ? { channel: deliver, toUserId: deliverUser, mode: "announce" } : undefined,
+		delivery: sourceChannel ? { channel: sourceChannel, toUserId: sourceUser, mode: "announce" } : undefined,
 		repeatCount,
 		repeatCompleted: 0,
 		status: "active",
@@ -284,7 +266,7 @@ export async function cronCreate(args: string[], storage: SchedulerDbStorage): P
 	console.log(
 		`  Type: ${parsed.type} | Schedule: ${parsed.schedule} | Next: ${nextRun ? nextRun.toLocaleString() : "—"}`,
 	);
-	if (deliver) console.log(`  Delivery: ${deliver}${deliverUser ? ` (user: ${deliverUser})` : ""}`);
+	if (sourceChannel) console.log(`  Delivery: ${sourceChannel}${sourceUser ? ` (user: ${sourceUser})` : ""}`);
 	if (model) console.log(`  Model: ${model}`);
 	if (provider) console.log(`  Provider: ${provider}`);
 	if (enabledToolsets) console.log(`  Toolsets: ${enabledToolsets.join(", ")}`);
@@ -296,7 +278,7 @@ export async function cronCreate(args: string[], storage: SchedulerDbStorage): P
 	if (preScript) console.log(`  Pre-script: ${preScript}`);
 }
 
-export async function cronList(storage: SchedulerDbStorage, json: boolean): Promise<void> {
+export async function cronList(storage: SchedulerStorage, json: boolean): Promise<void> {
 	const tasks = storage.listTasks();
 	if (json) {
 		console.log(JSON.stringify(tasks, null, 2));
@@ -347,15 +329,13 @@ export async function cronList(storage: SchedulerDbStorage, json: boolean): Prom
 		console.log(formatTaskRow(task, diagSummary));
 	}
 }
-
-export async function cronUpdate(args: string[], storage: SchedulerDbStorage): Promise<void> {
+export async function cronUpdate(args: string[], storage: SchedulerStorage): Promise<void> {
 	if (args.length === 0) {
-		console.error(
-			"Usage: cron update <name> [--account <id> | --clear-account] [--deliver <channel> | --clear-deliver] [--deliver-user <id> | --clear-deliver-user] [--timeout-ms <ms>]",
-		);
+		console.error("Usage: cron update <name> [--account <id> | --clear-account] [--timeout-ms <ms>]");
 		process.exitCode = 1;
 		return;
 	}
+
 	const name = args[0]!;
 	const task = storage.getTaskByName(name);
 	if (!task) {
@@ -365,12 +345,9 @@ export async function cronUpdate(args: string[], storage: SchedulerDbStorage): P
 	}
 
 	type AccountState = { tag: "none" } | { tag: "set"; value: string } | { tag: "clear" };
-	type OptionalStringState = { tag: "none" } | { tag: "set"; value: string } | { tag: "clear" };
 
 	const updates: Partial<typeof task> = {};
 	let accountState: AccountState = { tag: "none" };
-	let deliverState: OptionalStringState = { tag: "none" };
-	let deliverUserState: OptionalStringState = { tag: "none" };
 	let timeoutMs: number | undefined;
 
 	for (let i = 1; i < args.length; i++) {
@@ -396,46 +373,6 @@ export async function cronUpdate(args: string[], storage: SchedulerDbStorage): P
 				return;
 			}
 			accountState = { tag: "clear" };
-		} else if (a === "--deliver") {
-			if (!next) {
-				console.error("--deliver requires a value");
-				process.exitCode = 1;
-				return;
-			}
-			if (deliverState.tag === "clear") {
-				console.error("Cannot combine --deliver and --clear-deliver");
-				process.exitCode = 1;
-				return;
-			}
-			deliverState = { tag: "set", value: next };
-			i++;
-		} else if (a === "--clear-deliver") {
-			if (deliverState.tag === "set") {
-				console.error("Cannot combine --deliver and --clear-deliver");
-				process.exitCode = 1;
-				return;
-			}
-			deliverState = { tag: "clear" };
-		} else if (a === "--deliver-user") {
-			if (!next) {
-				console.error("--deliver-user requires a value");
-				process.exitCode = 1;
-				return;
-			}
-			if (deliverUserState.tag === "clear") {
-				console.error("Cannot combine --deliver-user and --clear-deliver-user");
-				process.exitCode = 1;
-				return;
-			}
-			deliverUserState = { tag: "set", value: next };
-			i++;
-		} else if (a === "--clear-deliver-user") {
-			if (deliverUserState.tag === "set") {
-				console.error("Cannot combine --deliver-user and --clear-deliver-user");
-				process.exitCode = 1;
-				return;
-			}
-			deliverUserState = { tag: "clear" };
 		} else if (a === "--timeout-ms") {
 			if (!next) {
 				console.error("--timeout-ms requires a value");
@@ -485,48 +422,21 @@ export async function cronUpdate(args: string[], storage: SchedulerDbStorage): P
 		updates.agentDir = undefined;
 	}
 
-	// --deliver / --deliver-user write the structured `delivery` object.
-	// Recompute it from the effective channel/user after applying the
-	// requested set/clear so the delivery_* columns stay in sync with the
-	// legacy deliver/deliver_user columns.
-	if (deliverState.tag !== "none" || deliverUserState.tag !== "none") {
-		const effChannel =
-			deliverState.tag === "set"
-				? deliverState.value
-				: deliverState.tag === "clear"
-					? undefined
-					: (task.delivery?.channel ?? task.deliver);
-		const effUser =
-			deliverUserState.tag === "set"
-				? deliverUserState.value
-				: deliverUserState.tag === "clear"
-					? undefined
-					: (task.delivery?.toUserId ?? task.deliverUser);
-		if (deliverState.tag === "set") updates.deliver = deliverState.value;
-		else if (deliverState.tag === "clear") updates.deliver = undefined;
-		if (deliverUserState.tag === "set") updates.deliverUser = deliverUserState.value;
-		else if (deliverUserState.tag === "clear") updates.deliverUser = undefined;
-		updates.delivery = effChannel ? { channel: effChannel, toUserId: effUser, mode: "announce" } : undefined;
-	}
 	if (timeoutMs !== undefined) updates.timeoutMs = timeoutMs;
 
 	if (Object.keys(updates).length === 0) {
-		console.error("No changes specified. Pass at least one of --account, --deliver, --deliver-user, --timeout-ms.");
+		console.error("No changes specified. Pass at least one of --account, --timeout-ms.");
 		process.exitCode = 1;
 		return;
 	}
 
 	// buildDynamicUpdate treats `undefined` as NULL, so --clear-* becomes
-	// the corresponding column = NULL. account_id/deliver/deliver_user are
-	// already in TASK_UPDATE_FIELDS.
+	// the corresponding column = NULL. account_id is already in
+	// TASK_UPDATE_FIELDS.
 	storage.updateTask(task.id, updates);
 	const changes: string[] = [];
 	if (accountState.tag === "set") changes.push(`account: ${accountState.value}`);
 	else if (accountState.tag === "clear") changes.push("account: cleared");
-	if (deliverState.tag === "set") changes.push(`deliver: ${deliverState.value}`);
-	else if (deliverState.tag === "clear") changes.push("deliver: cleared");
-	if (deliverUserState.tag === "set") changes.push(`deliver-user: ${deliverUserState.value}`);
-	else if (deliverUserState.tag === "clear") changes.push("deliver-user: cleared");
 	if (timeoutMs !== undefined) changes.push(`timeout-ms: ${timeoutMs}`);
 	console.log(`Task "${name}" updated.`);
 	for (const c of changes) console.log(`  ${c}`);
@@ -535,7 +445,7 @@ export async function cronUpdate(args: string[], storage: SchedulerDbStorage): P
 export async function cronSetStatus(
 	name: string,
 	status: "active" | "disabled",
-	storage: SchedulerDbStorage,
+	storage: SchedulerStorage,
 ): Promise<void> {
 	if (!name) {
 		console.error("Usage: pause|resume <name>");
@@ -556,7 +466,7 @@ export async function cronSetStatus(
 	console.log(`Task "${name}" ${status === "active" ? "resumed" : "paused"}.`);
 }
 
-export async function cronRun(name: string, storage: SchedulerDbStorage): Promise<void> {
+export async function cronRun(name: string, storage: SchedulerStorage): Promise<void> {
 	if (!name) {
 		console.error("Usage: cron run <name>");
 		process.exitCode = 1;
@@ -710,7 +620,7 @@ export interface CronTestRunOptions {
  *   1  timeout, task not found, task exited non-zero, or delivery failed
  *  130 / 143  SIGINT / SIGTERM during wait (schedule restored in handler)
  */
-export async function cronTestRun(args: string[], storage: SchedulerDbStorage): Promise<void> {
+export async function cronTestRun(args: string[], storage: SchedulerStorage): Promise<void> {
 	const name = args[0];
 	if (!name) {
 		console.error("Usage: cron test-run <name> [--in 90s] [--timeout 150s] [--no-restore]");
@@ -851,7 +761,11 @@ export async function cronTestRun(args: string[], storage: SchedulerDbStorage): 
 	console.log(`  duration:  ${result.durationMs ?? "?"}ms`);
 	if (result.stderr) console.log(`  stderr:    ${result.stderr.slice(0, 500)}`);
 	if (result.delivery.configured) {
-		console.log(`  deliver:   ${result.delivery.ok ? "ok" : `FAILED — ${result.delivery.error}`}`);
+		if (result.delivery.mode === "none") {
+			console.log(`  deliver:   silent (mode=none, no push attempted)`);
+		} else {
+			console.log(`  deliver:   ${result.delivery.ok ? "ok" : `FAILED — ${result.delivery.error}`}`);
+		}
 	} else {
 		console.log(`  deliver:   n/a (task has no delivery config)`);
 	}
@@ -891,7 +805,7 @@ function parseDuration(input: string): number {
 	}
 }
 
-export async function cronRemove(name: string, storage: SchedulerDbStorage): Promise<void> {
+export async function cronRemove(name: string, storage: SchedulerStorage): Promise<void> {
 	if (!name) {
 		console.error("Usage: cron remove <name>");
 		process.exitCode = 1;
@@ -931,7 +845,7 @@ export function cronStatus(): void {
  * With `name`: shows JSONL execution diagnostics for a specific task
  * (old cronDiag behavior).
  */
-export async function cronDiagnose(storage: SchedulerDbStorage, json: boolean, name?: string): Promise<void> {
+export async function cronDiagnose(storage: SchedulerStorage, json: boolean, name?: string): Promise<void> {
 	if (name) {
 		// Per-task: show JSONL execution diagnostics
 		const task = storage.getTaskByName(name);
@@ -1063,7 +977,7 @@ export async function cronDiagnose(storage: SchedulerDbStorage, json: boolean, n
 	console.log(lines.join("\n"));
 }
 
-export async function cronLogs(name: string, storage: SchedulerDbStorage, json: boolean): Promise<void> {
+export async function cronLogs(name: string, storage: SchedulerStorage, json: boolean): Promise<void> {
 	if (!name) {
 		console.error("Usage: cron logs <name>");
 		process.exitCode = 1;
@@ -1137,7 +1051,7 @@ export function suggestAccountBinding(
  * `--apply` to write the bindings. This is the only safe default —
  * silently rewriting storage based on a name match would be a footgun.
  */
-export async function cronReconcile(args: string[], storage: SchedulerDbStorage): Promise<void> {
+export async function cronReconcile(args: string[], storage: SchedulerStorage): Promise<void> {
 	const apply = args.includes("--apply");
 	const unknownFlag = args.find(a => a !== "--apply");
 	if (unknownFlag) {

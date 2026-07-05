@@ -21,10 +21,12 @@ import { logger, slugifySync } from "@oh-my-pi/pi-utils";
 import { pinyin } from "pinyin-pro";
 import type { CronRunDiagnostics } from "./diagnostics";
 
-const DEFAULT_LOG_ROOT = path.join(os.homedir(), ".omp", "gateway-data", "scheduler", "logs");
+function defaultLogRoot(): string {
+	return path.join(os.homedir(), ".omp", "gateway-data", "scheduler", "logs");
+}
 
 /** Active log root; tests can override via {@link setLogRoot}. */
-let activeLogRoot: string = DEFAULT_LOG_ROOT;
+let activeLogRoot: string = defaultLogRoot();
 
 export function getLogRoot(): string {
 	return activeLogRoot;
