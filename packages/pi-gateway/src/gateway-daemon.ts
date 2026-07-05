@@ -4,8 +4,9 @@
  * These are stateless, exported functions consumed by doctor.ts, CLI commands,
  * and service-installer.ts. They do NOT depend on the Gateway class.
  */
-import * as fs from "node:fs/promises";
+
 import * as fsSync from "node:fs";
+import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { logger } from "@oh-my-pi/pi-utils";
 import { getDataDir } from "./config";
@@ -47,6 +48,36 @@ export async function checkPidFile(dataDir: string, pidFile: string): Promise<bo
 		}
 	} catch {}
 	return false;
+}
+
+/**
+ * Verify that `pid` actually belongs to a gateway process. `process.kill(pid, 0)`
+ * only checks that *some* process owns the PID — if the kernel has since
+ * recycled the PID to an unrelated process (very common after a crash + delay),
+ * the liveness check would still pass and the dedup gate would falsely refuse
+ * to start a new gateway.
+ *
+ * Identity is checked via `ps -p <pid> -o args=` and looking for the same
+ * "gateway" + "--foreground" tokens the gateway is started with
+ * (`omp gateway start --foreground` and the dev-mode `bun run cli.ts gateway
+ * start --foreground` both produce these). Best-effort: on a `ps` failure
+ * (e.g. non-POSIX platforms in the future) we return false — that means
+ * "not confirmed our process", which the caller treats as "stale, overwrite".
+ */
+export async function isGatewayProcess(pid: number): Promise<boolean> {
+	try {
+		process.kill(pid, 0);
+	} catch {
+		return false;
+	}
+	try {
+		const result = Bun.spawnSync(["ps", "-p", String(pid), "-o", "args="]);
+		if (result.exitCode !== 0) return false;
+		const args = result.stdout.toString();
+		return args.includes("gateway") && args.includes("--foreground");
+	} catch {
+		return false;
+	}
 }
 
 // ═══════════════════════════════════════════════════════════════════════

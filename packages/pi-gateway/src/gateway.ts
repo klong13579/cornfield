@@ -20,41 +20,31 @@ import {
 import { isEnoent, logger } from "@oh-my-pi/pi-utils";
 import { ActionRegistry } from "./action-registry";
 import { AgentBridge, type AgentBridgeOptions } from "./agent-bridge";
+import { createBridgeStatusToolDefinitions } from "./bridge-status-tool";
 import { DingTalkChannel } from "./channels/dingtalk";
 import { ChannelRegistry } from "./channels/registry";
-import { defaultCrashLog } from "./crash-log";
 import { getDataDir, getDingTalkConfig, getEnabledChannels } from "./config";
+import { defaultCrashLog } from "./crash-log";
+import { createDingtalkAttachmentToolDefinitions } from "./dingtalk-attachment-tool";
 import { CronLifecycle } from "./gateway-cron-lifecycle";
-import { checkPidFile, PID_FILE, readPidFile, STATUS_FILE } from "./gateway-daemon";
+import { checkPidFile, isGatewayProcess, PID_FILE, readPidFile, STATUS_FILE } from "./gateway-daemon";
 import { MessageHandler } from "./gateway-message";
 import { ModelSwitch } from "./gateway-model-switch";
 import { NewSessionHandler } from "./gateway-new-session";
 import { ResponseHandler } from "./gateway-response";
-import { createCronToolDefinitions } from "./scheduler/host-tool";
-import { createBridgeStatusToolDefinitions } from "./bridge-status-tool";
-import { createDingtalkAttachmentToolDefinitions } from "./dingtalk-attachment-tool";
 import { HostToolDispatcher } from "./host-tool-dispatcher";
+import { clearRestartSentinel, readRestartSentinel, writeRestartSentinel } from "./restart-sentinel";
+import { createCronToolDefinitions } from "./scheduler/host-tool";
 import { type BridgeStat, type QueueStat, SessionManager } from "./session-manager";
 import { SQLiteSessionStore } from "./session-store";
 import type {
-	AgentResponseMeta,
-	Channel,
 	ChannelHealth,
 	DingtalkAccountConfig,
-	ForwardStreamHandlers,
 	GatewayConfig,
 	InboundMessage,
-	MessageContent,
 	OutboundMessage,
-	ReplyFormatterContext,
 	SessionRecord,
 } from "./types";
-import { checkPidFile, PID_FILE, readPidFile, STATUS_FILE } from "./gateway-daemon";
-import { clearRestartSentinel, readRestartSentinel, writeRestartSentinel } from "./restart-sentinel";
-import { ModelSwitch } from "./gateway-model-switch";
-import { NewSessionHandler } from "./gateway-new-session";
-import { ResponseHandler } from "./gateway-response";
-import { MessageHandler } from "./gateway-message";
 
 export function buildChannelKey(channelId: string, accountId?: string): string {
 	return accountId ? `${channelId}:${accountId}` : channelId;
@@ -354,12 +344,20 @@ export class Gateway {
 		const dataDir = getDataDir(this.#config);
 		const existingPid = await readPidFile(path.join(dataDir, PID_FILE));
 		if (existingPid) {
-			try {
-				process.kill(existingPid, 0);
+			// Verify the PID is actually our gateway — `process.kill(pid, 0)` only
+			// checks that *some* process owns the PID, so a recycled PID (e.g.
+			// crashed gateway + unrelated process spawned with the same number)
+			// would falsely block startup. `isGatewayProcess` reads the process's
+			// argv and matches the "gateway" + "--foreground" tokens our launcher
+			// always produces.
+			if (await isGatewayProcess(existingPid)) {
 				logger.error(`Gateway already running (PID ${existingPid})`);
 				return;
-			} catch {
-				// Stale PID file — will overwrite
+			}
+			// Stale PID file (process is dead) OR recycled PID (process is alive
+			// but not our gateway) — either way, overwrite below.
+			if (existingPid !== process.pid) {
+				logger.warn(`Stale or recycled gateway.pid (${existingPid}); will overwrite with ${process.pid}`);
 			}
 		}
 
@@ -797,7 +795,7 @@ export class Gateway {
 		const STALE_SOCKET_THRESHOLD_MS = 10 * 60_000;
 		for (const channel of this.#registry.getAll()) {
 			const health = channel.getHealth?.();
-			if (!health || !health.connected) continue;
+			if (!health?.connected) continue;
 
 			const lastActivity = health.lastSocketAvailableAt || health.connectionEstablishedAt;
 			if (lastActivity === 0) continue; // never connected, skip
