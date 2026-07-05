@@ -63,6 +63,14 @@ describe("buildCronContextPrefix", () => {
 		expect(out).not.toContain("Do not create new cron jobs or send messages");
 	});
 
+	it("teaches the agent about [SILENT] to suppress delivery when there's nothing to report", () => {
+		const out = buildCronContextPrefix(baseTask);
+		expect(out).toContain("[SILENT]");
+		expect(out).toContain("nothing new to report");
+		expect(out).toContain("suppresses delivery");
+		expect(out).toContain("Never combine [SILENT] with other content");
+	});
+
 	it("uses agentDir basename when present, falls back to accountId", () => {
 		const withAgentDir: ScheduledTask = { ...baseTask, agentDir: "/var/data/agents/alpha" };
 		expect(buildCronContextPrefix(withAgentDir)).toContain("alpha");

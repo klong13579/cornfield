@@ -12,7 +12,7 @@
 import { findAgentSessionPath } from "../session-paths";
 import { type CronRunDiagnostics, normalizeCronRunDiagnostics, parseAgentSessionForToolFailures } from "./diagnostics";
 import { appendDeliveryFailureLog, appendExecutionLog } from "./execution-log";
-import { executeScheduledCommand } from "./executor";
+import { executeScheduledCommand, SILENT_MARKER } from "./executor";
 import type { ScheduledTask, SchedulerStorage, TaskExecution } from "./types";
 
 /** Logger contract consumed by CronService. */
@@ -99,7 +99,7 @@ export interface CronTriggerResult {
 /**
  * Build the cron context prefix injected before the task prompt.
  *
- * Three rules, each spelled out so the agent does not have to guess:
+ * Four rules, each spelled out so the agent does not have to guess:
  *   1. Do not invoke the `cron` host tool (cronjob toolset is disabled).
  *      Prevents accidental recursion — a cron task creating more cron tasks.
  *   2. Do not call proactive messaging tools (messaging toolset is disabled).
@@ -112,6 +112,11 @@ export interface CronTriggerResult {
  *      so the agent should just produce its final answer in the reply body
  *      and not try to push it anywhere itself. This is true even if the
  *      task wording says "发给用户" / "send to user" / "notify" / etc.
+ *   4. If there is genuinely nothing new to report, respond with exactly
+ *      `[SILENT]` and nothing else. The gateway detects this marker and
+ *      suppresses delivery — no card is sent. Never combine `[SILENT]`
+ *      with other content; either report findings normally, or output
+ *      `[SILENT]` alone.
  *
  * If we ever drop the toolsets-level block in `executor.ts`, this prompt
  * remains the last line of defense — keep it precise.
@@ -120,10 +125,11 @@ export function buildCronContextPrefix(task: ScheduledTask): string {
 	const agentLabel = task.agentDir ? (task.agentDir.split("/").pop() ?? task.agentDir) : (task.accountId ?? "default");
 	return (
 		`[CRON-CONTEXT] You are running as a scheduled task (cron). Agent: ${agentLabel}.\n\n` +
-		"Three rules for this run:\n" +
+		"Four rules for this run:\n" +
 		"1. Do NOT call the `cron` host tool (create / list / update / delete scheduled tasks). The `cronjob` toolset is disabled for this run — calling it would either fail or recursively schedule more tasks.\n" +
 		"2. Do NOT call proactive messaging tools (e.g. `dws chat message send`, `chat_post`, anything in the `messaging` toolset). The `messaging` toolset is disabled. These would create duplicate notifications on top of the gateway's own delivery.\n" +
-		'3. Your reply text IS the delivery. The gateway scans the body of your final reply and renders it as a DingTalk AI card to the original conversation. So just write your answer in the reply body and stop — do not call any `send` tool, do not try to push it anywhere. This applies even if the task wording says "发给用户" / "send to user" / "notify" / "告诉用户".\n\n'
+		'3. Your reply text IS the delivery. The gateway scans the body of your final reply and renders it as a DingTalk AI card to the original conversation. So just write your answer in the reply body and stop — do not call any `send` tool, do not try to push it anywhere. This applies even if the task wording says "发给用户" / "send to user" / "notify" / "告诉用户".\n' +
+		'4. If there is genuinely nothing new to report (no changes, no errors, no notable findings), respond with exactly "[SILENT]" and nothing else. The gateway detects this marker and suppresses delivery — no card is sent to the user. Never combine [SILENT] with other content; either report your findings normally, or output [SILENT] alone.\n\n'
 	);
 }
 
@@ -365,9 +371,19 @@ export class CronService {
 			...(agentSessionPath ? { agentSessionPath } : {}),
 		});
 
-		// Deliver result if configured
+		// If the agent (or pre-script) signaled silence, skip delivery entirely.
+		// The LLM outputs [SILENT] when there's genuinely nothing to report;
+		// the pre-script path uses the same marker. Either way, no card is sent.
+		// Only suppress on success (exit 0) — a non-zero exit with [SILENT] is
+		// likely a malformed response and the user should see it.
+		const isSilent = exitCode === 0 && output.trim() === SILENT_MARKER;
+		if (isSilent) {
+			addDiag("delivery", "info", "Output is [SILENT] — suppressing delivery");
+		}
+
+		// Deliver result if configured (skip when silent)
 		const deliveryConfig = resolveDelivery(task, resolveAccountId);
-		if (deliveryConfig && deliveryConfig.mode === "announce") {
+		if (deliveryConfig && deliveryConfig.mode === "announce" && !isSilent) {
 			const prefix = exitCode === 0 ? "✅" : timedOut ? "⏰" : "❌";
 			const summary = `${prefix} Task "${task.name}" completed (exit ${exitCode}, ${durationMs}ms)\n\n${output.slice(0, 2000)}`;
 

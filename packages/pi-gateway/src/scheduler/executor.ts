@@ -14,7 +14,7 @@ export interface ExecutionResult {
 }
 
 const SCRIPT_TIMEOUT_MS = 120_000;
-const SILENT_MARKER = "[SILENT]";
+export const SILENT_MARKER = "[SILENT]";
 /** Default inactivity budget for cron agent tasks when task.timeoutMs is not set.
  * Matches Hermes's HERMES_CRON_TIMEOUT default of 600s. */
 const DEFAULT_INACTIVITY_MS = 5 * 60 * 1000;

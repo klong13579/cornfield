@@ -13,8 +13,9 @@
  *      the structured `delivery` object on read.
  *   2. CronService.onTrigger delivery routing: with a mocked `deliver`
  *      function, the configured channel/accountId/toUserId are forwarded
- *      correctly, the delivered text contains the task output, and
- *      `deliver` is NOT called when no delivery is configured.
+ *      correctly, the delivered text contains the task output,
+ *      `deliver` is NOT called when no delivery is configured, and
+ *      `deliver` is NOT called when the output is `[SILENT]`.
  *
  * No network and no ~/.omp/gateway.json are required — the injected
  * `deliver` replaces the old real DingTalk OAuth path.
@@ -68,6 +69,7 @@ afterEach(() => {
 	cleanupExecutionLog("_t_smoke_legacy");
 	cleanupExecutionLog("_t_smoke_deliver");
 	cleanupExecutionLog("_t_smoke_nodeliver");
+	cleanupExecutionLog("_t_smoke_silent");
 });
 
 function makeCronService(deliver: DeliverFn): CronService {
@@ -171,6 +173,33 @@ describe("cron outbound delivery smoke test", () => {
 			expect(deliver).not.toHaveBeenCalled();
 		} finally {
 			const t = storage.getTaskByName("_t_smoke_nodeliver");
+			if (t) storage.deleteTask(t.id);
+		}
+	});
+
+	it("CronService.onTrigger does not call `deliver` when the output is [SILENT]", async () => {
+		const deliver = mock<DeliverFn>(async () => ({ ok: true }));
+		const service = makeCronService(deliver);
+
+		const task = addShellTask({
+			name: "_t_smoke_silent",
+			command: "echo '[SILENT]'",
+			agentDir: testDir,
+			delivery: {
+				channel: "dingtalk:hr",
+				accountId: "hr",
+				toUserId: "u_smoke_test",
+				mode: "announce",
+			},
+		});
+
+		const exec = storage.recordExecution({ taskId: task.id, startedAt: Date.now(), status: "running" });
+
+		try {
+			await service.onTrigger(task, exec.id);
+			expect(deliver).not.toHaveBeenCalled();
+		} finally {
+			const t = storage.getTaskByName("_t_smoke_silent");
 			if (t) storage.deleteTask(t.id);
 		}
 	});
