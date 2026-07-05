@@ -205,11 +205,33 @@ export async function runTestRun(opts: RunTestRunOptions): Promise<TestRunResult
 	if (!task) return { kind: "task_not_found", name };
 
 	// Snapshot. We restore ALL of these on every exit path.
+	//
+	// Schedule fields (cron, scheduleType, nextRunAt, status): the test-run
+	// rewrites the schedule to a one-shot and back; restore must put the
+	// original schedule back regardless of which path we exited through.
+	//
+	// Stats fields (lastRunAt, runCount, failCount, consecutiveFailures,
+	// repeatCompleted, lastDeliveryError): the engine AND the CronService
+	// write these on every execution — see engine.ts#runTask (success
+	// bumps runCount/lastRunAt/consecutiveFailures=0/repeatCompleted;
+	// failure bumps runCount/failCount/consecutiveFailures/lastRunAt)
+	// and cron-service.ts#onTrigger (lastDeliveryError). Without
+	// snapshotting them, a successful test-run would leave the task
+	// with runCount+1 even though no real run happened, and a delivery
+	// failure during the test would clobber the prior lastDeliveryError.
+	// test-run is a verification path — it must be transparent: the
+	// task's audit counters look exactly the same after as before.
 	const snapshot = {
 		cron: task.cron,
 		scheduleType: task.scheduleType,
 		nextRunAt: task.nextRunAt,
 		status: task.status,
+		lastRunAt: task.lastRunAt,
+		runCount: task.runCount,
+		failCount: task.failCount,
+		consecutiveFailures: task.consecutiveFailures,
+		repeatCompleted: task.repeatCompleted,
+		lastDeliveryError: task.lastDeliveryError,
 	};
 	// Truthful delivery flag. Only count as "delivery attempted" when
 	// the task will actually push. v2 tasks with `mode: "none"` are
@@ -285,6 +307,12 @@ export async function runTestRun(opts: RunTestRunOptions): Promise<TestRunResult
 				scheduleType: snapshot.scheduleType,
 				nextRunAt: snapshot.nextRunAt,
 				status: snapshot.status,
+				lastRunAt: snapshot.lastRunAt,
+				runCount: snapshot.runCount,
+				failCount: snapshot.failCount,
+				consecutiveFailures: snapshot.consecutiveFailures,
+				repeatCompleted: snapshot.repeatCompleted,
+				lastDeliveryError: snapshot.lastDeliveryError,
 				updatedAt: Date.now(),
 			});
 			restored = true;
