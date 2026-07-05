@@ -19,13 +19,12 @@
 
 import { logger } from "@oh-my-pi/pi-utils";
 import { Type } from "@sinclair/typebox";
-import type { AgentBridge } from "../agent-bridge";
 import type { ChannelRegistry } from "../channels/registry";
 import type { HostToolHandler, HostToolResultBody, RpcHostToolDefinition } from "../host-tool-dispatcher";
 import type { InboundMessage } from "../types";
 import { readExecutionLog } from "./execution-log";
-import type { SchedulerDbStorage } from "./storage";
 import { runTestRun, type TestRunHardError, type TestRunResult } from "./test-run";
+import type { SchedulerStorage } from "./types";
 import {
 	type CronDeliveryOutput,
 	parseSchedule,
@@ -52,7 +51,7 @@ export interface CronToolContext {
 	 *  gateway's start sequence. */
 	getBridge: () => import("../agent-bridge").AgentBridge;
 	registry: ChannelRegistry;
-	getStorage: () => import("./storage").SchedulerDbStorage | null;
+	getStorage: () => import("./types").SchedulerStorage | null;
 	/**
 	 * AccountId of the agent that owns this dispatcher instance. Stamped
 	 * on every `cron.add` so the row's `createdByAccountId` audit field
@@ -361,13 +360,13 @@ async function handleAdd(args: CronToolArgs, ctx: CronToolContext): Promise<Host
 // show / list / remove / enable / disable / runs
 // ---------------------------------------------------------------------------
 
-function handleShow(args: CronToolArgs, storage: SchedulerDbStorage): HostToolResultBody {
+function handleShow(args: CronToolArgs, storage: SchedulerStorage): HostToolResultBody {
 	const task = resolveTask(args, storage);
 	if (!task) return errResult("show: task not found (pass name or id)");
 	return ok(serializeTask(task));
 }
 
-function handleRemove(args: CronToolArgs, storage: SchedulerDbStorage): HostToolResultBody {
+function handleRemove(args: CronToolArgs, storage: SchedulerStorage): HostToolResultBody {
 	const task = resolveTask(args, storage);
 	if (!task) return errResult("remove: task not found (pass name or id)");
 	storage.deleteTask(task.id);
@@ -377,7 +376,7 @@ function handleRemove(args: CronToolArgs, storage: SchedulerDbStorage): HostTool
 function handleSetStatus(
 	args: CronToolArgs,
 	status: "active" | "disabled",
-	storage: SchedulerDbStorage,
+	storage: SchedulerStorage,
 ): HostToolResultBody {
 	const task = resolveTask(args, storage);
 	if (!task) return errResult(`${status}: task not found (pass name or id)`);
@@ -385,7 +384,7 @@ function handleSetStatus(
 	return ok({ id: task.id, name: task.name, status });
 }
 
-function handleRuns(args: CronToolArgs, storage: SchedulerDbStorage): HostToolResultBody {
+function handleRuns(args: CronToolArgs, storage: SchedulerStorage): HostToolResultBody {
 	const task = resolveTask(args, storage);
 	if (!task) return errResult("runs: task not found (pass name or id)");
 	const limit = numberArg(args, "limit") ?? 10;
@@ -532,7 +531,7 @@ function resolveDeliveryForAdd(args: CronToolArgs, ctx: CronToolContext): Delive
 // Helpers
 // ---------------------------------------------------------------------------
 
-function resolveTask(args: CronToolArgs, storage: SchedulerDbStorage): ScheduledTask | undefined {
+function resolveTask(args: CronToolArgs, storage: SchedulerStorage): ScheduledTask | undefined {
 	const id = stringArg(args, "id");
 	if (id) return storage.getTask(id);
 	const name = stringArg(args, "name");
@@ -593,6 +592,6 @@ function serializeTaskList(tasks: ScheduledTask[]): unknown {
 	});
 }
 
-function serializeExecutions(taskId: string, execs: TaskExecution[]): unknown {
+function _serializeExecutions(taskId: string, execs: TaskExecution[]): unknown {
 	return { taskId, executions: execs };
 }

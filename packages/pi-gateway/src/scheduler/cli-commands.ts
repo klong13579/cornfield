@@ -67,8 +67,6 @@ export function resolveAgentCwd(
 export async function cronCreate(args: string[], storage: SchedulerStorage): Promise<void> {
 	let name: string | undefined;
 	let schedule: string | undefined;
-	let deliver: string | undefined;
-	let deliverUser: string | undefined;
 	let accountId: string | undefined;
 	let agentDir: string | undefined;
 	let type: "shell" | "agent" = "shell";
@@ -91,12 +89,6 @@ export async function cronCreate(args: string[], storage: SchedulerStorage): Pro
 			i += 2;
 		} else if (args[i] === "--type" && args[i + 1]) {
 			type = args[i + 1] as "shell" | "agent";
-			i += 2;
-		} else if (args[i] === "--deliver" && args[i + 1]) {
-			deliver = args[i + 1];
-			i += 2;
-		} else if (args[i] === "--deliver-user" && args[i + 1]) {
-			deliverUser = args[i + 1]!;
 			i += 2;
 		} else if (args[i] === "--account" && args[i + 1]) {
 			accountId = args[i + 1]!;
@@ -175,7 +167,7 @@ export async function cronCreate(args: string[], storage: SchedulerStorage): Pro
 	const command = commandParts.join(" ");
 	if (!schedule || !command) {
 		console.error(
-			"Usage: <schedule> <command...> [--name <name>] [--type shell|agent] [--deliver <channel>] [--deliver-user <id>] [--account <accountId>] [--agent-dir <path>] [--model <model>] [--provider <provider>] [--toolsets <a,b,c>] [--source-channel <ch>] [--source-user <uid>] [--timeout-ms <ms>] [--skills <s1,s2,...>] [--retry <maxAttempts>] [--pre-script <path>]",
+			"Usage: <schedule> <command...> [--name <name>] [--type shell|agent] [--account <accountId>] [--agent-dir <path>] [--model <model>] [--provider <provider>] [--toolsets <a,b,c>] [--source-channel <ch>] [--source-user <uid>] [--timeout-ms <ms>] [--skills <s1,s2,...>] [--retry <maxAttempts>] [--pre-script <path>]",
 		);
 		process.exitCode = 1;
 		return;
@@ -240,14 +232,6 @@ export async function cronCreate(args: string[], storage: SchedulerStorage): Pro
 		return;
 	}
 
-	// Auto-fill deliver/deliverUser from source channel/user if not explicitly set
-	if (!deliver && sourceChannel) {
-		deliver = sourceChannel;
-	}
-	if (!deliverUser && sourceUser) {
-		deliverUser = sourceUser;
-	}
-
 	const nextRun =
 		parsed.type === "cron" ? getNextRun(parsed.schedule) : parsed.nextRunAt ? new Date(parsed.nextRunAt) : undefined;
 	storage.addTask({
@@ -264,11 +248,9 @@ export async function cronCreate(args: string[], storage: SchedulerStorage): Pro
 			retryMaxAttempts !== undefined ? { maxAttempts: retryMaxAttempts, backoffMs: [1000, 5000, 30000] } : undefined,
 		skills,
 		preScript,
-		deliver,
-		deliverUser,
 		accountId,
 		agentDir,
-		delivery: deliver ? { channel: deliver, toUserId: deliverUser, mode: "announce" } : undefined,
+		delivery: sourceChannel ? { channel: sourceChannel, toUserId: sourceUser, mode: "announce" } : undefined,
 		repeatCount,
 		repeatCompleted: 0,
 		status: "active",
@@ -284,7 +266,7 @@ export async function cronCreate(args: string[], storage: SchedulerStorage): Pro
 	console.log(
 		`  Type: ${parsed.type} | Schedule: ${parsed.schedule} | Next: ${nextRun ? nextRun.toLocaleString() : "—"}`,
 	);
-	if (deliver) console.log(`  Delivery: ${deliver}${deliverUser ? ` (user: ${deliverUser})` : ""}`);
+	if (sourceChannel) console.log(`  Delivery: ${sourceChannel}${sourceUser ? ` (user: ${sourceUser})` : ""}`);
 	if (model) console.log(`  Model: ${model}`);
 	if (provider) console.log(`  Provider: ${provider}`);
 	if (enabledToolsets) console.log(`  Toolsets: ${enabledToolsets.join(", ")}`);
@@ -347,15 +329,13 @@ export async function cronList(storage: SchedulerStorage, json: boolean): Promis
 		console.log(formatTaskRow(task, diagSummary));
 	}
 }
-
 export async function cronUpdate(args: string[], storage: SchedulerStorage): Promise<void> {
 	if (args.length === 0) {
-		console.error(
-			"Usage: cron update <name> [--account <id> | --clear-account] [--deliver <channel> | --clear-deliver] [--deliver-user <id> | --clear-deliver-user] [--timeout-ms <ms>]",
-		);
+		console.error("Usage: cron update <name> [--account <id> | --clear-account] [--timeout-ms <ms>]");
 		process.exitCode = 1;
 		return;
 	}
+
 	const name = args[0]!;
 	const task = storage.getTaskByName(name);
 	if (!task) {
@@ -365,12 +345,9 @@ export async function cronUpdate(args: string[], storage: SchedulerStorage): Pro
 	}
 
 	type AccountState = { tag: "none" } | { tag: "set"; value: string } | { tag: "clear" };
-	type OptionalStringState = { tag: "none" } | { tag: "set"; value: string } | { tag: "clear" };
 
 	const updates: Partial<typeof task> = {};
 	let accountState: AccountState = { tag: "none" };
-	let deliverState: OptionalStringState = { tag: "none" };
-	let deliverUserState: OptionalStringState = { tag: "none" };
 	let timeoutMs: number | undefined;
 
 	for (let i = 1; i < args.length; i++) {
@@ -396,46 +373,6 @@ export async function cronUpdate(args: string[], storage: SchedulerStorage): Pro
 				return;
 			}
 			accountState = { tag: "clear" };
-		} else if (a === "--deliver") {
-			if (!next) {
-				console.error("--deliver requires a value");
-				process.exitCode = 1;
-				return;
-			}
-			if (deliverState.tag === "clear") {
-				console.error("Cannot combine --deliver and --clear-deliver");
-				process.exitCode = 1;
-				return;
-			}
-			deliverState = { tag: "set", value: next };
-			i++;
-		} else if (a === "--clear-deliver") {
-			if (deliverState.tag === "set") {
-				console.error("Cannot combine --deliver and --clear-deliver");
-				process.exitCode = 1;
-				return;
-			}
-			deliverState = { tag: "clear" };
-		} else if (a === "--deliver-user") {
-			if (!next) {
-				console.error("--deliver-user requires a value");
-				process.exitCode = 1;
-				return;
-			}
-			if (deliverUserState.tag === "clear") {
-				console.error("Cannot combine --deliver-user and --clear-deliver-user");
-				process.exitCode = 1;
-				return;
-			}
-			deliverUserState = { tag: "set", value: next };
-			i++;
-		} else if (a === "--clear-deliver-user") {
-			if (deliverUserState.tag === "set") {
-				console.error("Cannot combine --deliver-user and --clear-deliver-user");
-				process.exitCode = 1;
-				return;
-			}
-			deliverUserState = { tag: "clear" };
 		} else if (a === "--timeout-ms") {
 			if (!next) {
 				console.error("--timeout-ms requires a value");
@@ -485,48 +422,21 @@ export async function cronUpdate(args: string[], storage: SchedulerStorage): Pro
 		updates.agentDir = undefined;
 	}
 
-	// --deliver / --deliver-user write the structured `delivery` object.
-	// Recompute it from the effective channel/user after applying the
-	// requested set/clear so the delivery_* columns stay in sync with the
-	// legacy deliver/deliver_user columns.
-	if (deliverState.tag !== "none" || deliverUserState.tag !== "none") {
-		const effChannel =
-			deliverState.tag === "set"
-				? deliverState.value
-				: deliverState.tag === "clear"
-					? undefined
-					: (task.delivery?.channel ?? task.deliver);
-		const effUser =
-			deliverUserState.tag === "set"
-				? deliverUserState.value
-				: deliverUserState.tag === "clear"
-					? undefined
-					: (task.delivery?.toUserId ?? task.deliverUser);
-		if (deliverState.tag === "set") updates.deliver = deliverState.value;
-		else if (deliverState.tag === "clear") updates.deliver = undefined;
-		if (deliverUserState.tag === "set") updates.deliverUser = deliverUserState.value;
-		else if (deliverUserState.tag === "clear") updates.deliverUser = undefined;
-		updates.delivery = effChannel ? { channel: effChannel, toUserId: effUser, mode: "announce" } : undefined;
-	}
 	if (timeoutMs !== undefined) updates.timeoutMs = timeoutMs;
 
 	if (Object.keys(updates).length === 0) {
-		console.error("No changes specified. Pass at least one of --account, --deliver, --deliver-user, --timeout-ms.");
+		console.error("No changes specified. Pass at least one of --account, --timeout-ms.");
 		process.exitCode = 1;
 		return;
 	}
 
 	// buildDynamicUpdate treats `undefined` as NULL, so --clear-* becomes
-	// the corresponding column = NULL. account_id/deliver/deliver_user are
-	// already in TASK_UPDATE_FIELDS.
+	// the corresponding column = NULL. account_id is already in
+	// TASK_UPDATE_FIELDS.
 	storage.updateTask(task.id, updates);
 	const changes: string[] = [];
 	if (accountState.tag === "set") changes.push(`account: ${accountState.value}`);
 	else if (accountState.tag === "clear") changes.push("account: cleared");
-	if (deliverState.tag === "set") changes.push(`deliver: ${deliverState.value}`);
-	else if (deliverState.tag === "clear") changes.push("deliver: cleared");
-	if (deliverUserState.tag === "set") changes.push(`deliver-user: ${deliverUserState.value}`);
-	else if (deliverUserState.tag === "clear") changes.push("deliver-user: cleared");
 	if (timeoutMs !== undefined) changes.push(`timeout-ms: ${timeoutMs}`);
 	console.log(`Task "${name}" updated.`);
 	for (const c of changes) console.log(`  ${c}`);

@@ -219,7 +219,7 @@ describe("formatTaskRow column layout", () => {
 		// column is "✓" — a single char; everything else is padded
 		// to column width). Verify both line lengths match.
 		const row = formatTaskRow(makeTask({ name: "x" }));
-		expect(row.length).toBe(152);
+		expect(row.length).toBe(178);
 	});
 
 	it("renders the agentDir label in the row when set", () => {

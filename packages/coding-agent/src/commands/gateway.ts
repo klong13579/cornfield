@@ -580,8 +580,7 @@ export default class Gateway extends Command {
 		const action = argv[0] ?? "help";
 
 		const {
-			SchedulerDbStorage,
-			getSchedulerDbPath,
+			JsonFileStorage,
 			cronCreate,
 			cronList,
 			cronSetStatus,
@@ -595,10 +594,24 @@ export default class Gateway extends Command {
 			cronLogs,
 		} = await import("@oh-my-pi/pi-gateway/src/scheduler");
 
-		const storage = new SchedulerDbStorage(getSchedulerDbPath());
-
+		const storage = new JsonFileStorage();
+		// Migrate from existing SQLite if present
 		try {
-			switch (action) {
+			const { getSchedulerDbPath } = await import("@oh-my-pi/pi-gateway/src/scheduler");
+			const { existsSync } = await import("node:fs");
+			const dbPath = getSchedulerDbPath();
+			if (existsSync(dbPath)) {
+				const { migrated } = storage.migrateFromDb(dbPath);
+				if (migrated > 0) {
+					console.error(`Migrated ${migrated} tasks from SQLite.`);
+				}
+			}
+	} catch {
+		// No SQLite to migrate
+	}
+
+	try {
+		switch (action) {
 				case "create":
 					await cronCreate(argv.slice(1), storage);
 					break;

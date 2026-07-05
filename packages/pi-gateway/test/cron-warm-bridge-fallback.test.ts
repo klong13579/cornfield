@@ -14,8 +14,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { Gateway } from "../src/gateway";
-import { SchedulerDbStorage } from "../src/scheduler/storage";
-import { getSchedulerDbPath } from "../src/scheduler/types";
+import { JsonFileStorage } from "../src/scheduler/json-file-storage";
 import type { GatewayConfig } from "../src/types";
 
 /**
@@ -58,9 +57,7 @@ if (args[0] === "--mode" && args[1] === "rpc") {
 
 describe("cron warm-bridge fallback contract", () => {
 	let tmpHome: string;
-	let fakeOmpPath: string;
 	let gateway: Gateway;
-	let storage: SchedulerDbStorage;
 
 	beforeEach(async () => {
 		tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), "pi-gateway-cron-fallback-"));
@@ -69,57 +66,16 @@ describe("cron warm-bridge fallback contract", () => {
 		// it directly to redirect scheduler/session paths to the temp dir.
 		vi.spyOn(os, "homedir").mockReturnValue(tmpHome);
 
-		fakeOmpPath = path.join(tmpHome, "fake-omp");
+		const fakeOmpPath = path.join(tmpHome, "fake-omp");
 		await Bun.write(fakeOmpPath, FAKE_OMP_SCRIPT);
 		await fs.chmod(fakeOmpPath, 0o755);
 
-		// Config: no channels enabled (avoids DingTalk connect timeout),
-		// cron enabled with fast tick. The default bridge starts in
-		// single-account mode; getAccountBridge() falls back to it
-		fakeOmpPath = path.join(tmpHome, "fake-omp");
-		await Bun.write(fakeOmpPath, FAKE_OMP_SCRIPT);
-		await fs.chmod(fakeOmpPath, 0o755);
-
-		const dataDir = path.join(tmpHome, "gateway-data");
-		await fs.mkdir(dataDir, { recursive: true });
-
-		// Config: no channels enabled (avoids DingTalk connect timeout),
-		// cron enabled with fast tick. The default bridge starts in
-		// single-account mode; getAccountBridge() falls back to it
-		// when #accountBridges is empty.
-		const config: GatewayConfig = {
-			channels: {},
-			agent: {
-				ompPath: fakeOmpPath,
-				timeoutMs: 5_000,
-			},
-			cron: {
-				enabled: true,
-				tickIntervalMs: 500,
-				maxConcurrentRuns: 1,
-			},
-			dataDir,
-		};
-
-		gateway = new Gateway(config);
-		await gateway.start();
-
-		// Open a separate storage handle pointing at the same DB
-		// (the gateway created the schema during start()).
-		storage = new SchedulerDbStorage(getSchedulerDbPath());
-	});
-
-	afterEach(async () => {
-		storage.close();
-		await gateway.stop();
-		vi.restoreAllMocks();
-		await fs.rm(tmpHome, { recursive: true, force: true });
-	});
-
-	test("falls back to omp --print when warm-bridge executePrompt fails", async () => {
-		// Arrange: schedule an agent task whose warm-bridge execution will
-		// fail (fake RPC responds with success=false on "prompt").
-		storage.addTask({
+		// Seed task via JsonFileStorage BEFORE gateway start
+		const schedulerDir = path.join(tmpHome, ".omp", "gateway-data", "scheduler");
+		await fs.mkdir(schedulerDir, { recursive: true });
+		const jobsPath = path.join(schedulerDir, "jobs.json");
+		const seed = new JsonFileStorage(jobsPath);
+		seed.addTask({
 			name: "test-fallback",
 			cron: "1s",
 			command: "test prompt",
@@ -135,10 +91,39 @@ describe("cron warm-bridge fallback contract", () => {
 			failCount: 0,
 			consecutiveFailures: 0,
 		});
+		seed.close();
+
+		const config: GatewayConfig = {
+			channels: {},
+			agent: { ompPath: fakeOmpPath, timeoutMs: 5_000 },
+			cron: { enabled: true, tickIntervalMs: 500, maxConcurrentRuns: 1 },
+		};
+
+		gateway = new Gateway(config);
+		await gateway.start();
+
+		// Debug: check if bridge is actually running via cron CLI
+		// (the only public way to check internals)
+		const { execSync } = require('child_process');
+		const running = gateway?.['#cronLifecycle']?.['#schedulerEngine']?.['#running'];
+		// These are private fields, use a cast instead
+		const gw = gateway as unknown as { __cronRunning: boolean; __bridgeRunning: boolean };
+		console.error("DEBUG: need to check bridge and engine state differently");
+	});
+
+	afterEach(async () => {
+		await gateway.stop();
+		vi.restoreAllMocks();
+		await fs.rm(tmpHome, { recursive: true, force: true });
+	});
+
+	test("falls back to omp --print when warm-bridge executePrompt fails", async () => {
+		const schedulerDir = path.join(tmpHome, ".omp", "gateway-data", "scheduler");
+		const jobsPath = path.join(schedulerDir, "jobs.json");
+		const storage = new JsonFileStorage(jobsPath);
 
 		// Act: wait for the scheduler to pick up the task (tick every 500ms)
-		// and for the interval to fire (1s). Poll the DB for a completed
-		// (non-running) execution.
+		// and for the interval to fire (1s). Poll for a completed execution.
 		let execution: { status: string; output: string | undefined } | undefined;
 		for (let i = 0; i < 30; i++) {
 			await Bun.sleep(500);
@@ -153,10 +138,10 @@ describe("cron warm-bridge fallback contract", () => {
 		}
 
 		// Assert: the fallback subprocess ran and the task succeeded.
-		// If the bug exists (fallback never fires), status will be "failure"
-		// and output will not contain "FALLBACK-OK".
 		expect(execution).toBeDefined();
 		expect(execution!.status).toBe("success");
 		expect(execution!.output).toContain("FALLBACK-OK");
+
+		storage.close();
 	});
 });

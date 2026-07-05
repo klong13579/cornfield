@@ -87,10 +87,6 @@ export interface ScheduledTask {
 	createdByAccountId?: string;
 	/** @deprecated Use agentDir instead */
 	accountId?: string;
-	/** @deprecated Use delivery.channel instead */
-	deliver?: string;
-	/** @deprecated Use delivery.toUserId instead */
-	deliverUser?: string;
 }
 
 export interface TaskFileDefinition {
@@ -119,10 +115,6 @@ export interface TaskFileDefinition {
 	};
 	/** @deprecated Use agentDir instead */
 	accountId?: string;
-	/** @deprecated Use delivery.channel instead */
-	deliver?: string;
-	/** @deprecated Use delivery.toUserId instead */
-	deliverUser?: string;
 	/** Audit: staffId of the creating user (LLM host tool only). */
 	createdByUserId?: string;
 	/** Audit: accountId of the agent that owned the conversation at add time. */
@@ -158,6 +150,7 @@ export interface SchedulerStorage {
 	updateExecution(id: string, updates: Partial<TaskExecution>): void;
 	getExecutions(taskId: string, limit?: number): TaskExecution[];
 	pruneExecutions(maxAgeDays?: number, maxCount?: number): number;
+	close(): void;
 }
 
 export interface EngineOptions {
@@ -399,7 +392,7 @@ export async function waitForDaemonStart(pidPath: string, timeoutMs = 5000): Pro
 export function formatTaskRow(task: ScheduledTask, diagSummary?: string): string {
 	const next = task.status === "active" && task.nextRunAt ? new Date(task.nextRunAt).toLocaleString() : "—";
 	const typeLabel = task.taskType === "agent" ? "agent" : "shell";
-	const channel = formatChannel(task.delivery?.channel ?? task.deliver);
+	const channel = formatChannel(task.delivery?.channel);
 	const agent = formatAgent(task.agentDir ?? task.accountId);
 	const name = truncateName(task.name, 20);
 	const model = task.model ?? "—";

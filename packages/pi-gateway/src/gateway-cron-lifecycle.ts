@@ -5,6 +5,7 @@
  * constructing CronService + SchedulerEngine, executing cron agent prompts,
  * and delivering results to channels.
  */
+import * as fs from "node:fs";
 import * as path from "node:path";
 import { logger } from "@oh-my-pi/pi-utils";
 import type { AgentBridge } from "./agent-bridge";
@@ -12,8 +13,9 @@ import { CronService } from "./scheduler/cron-service";
 import { SchedulerEngine } from "./scheduler/engine";
 import { computeInactivityBudgetMs } from "./scheduler/executor";
 import { SchedulerFileStore } from "./scheduler/file-store";
-import { SchedulerDbStorage } from "./scheduler/storage";
-import { DEFAULT_SCHEDULER_CONFIG, getSchedulerDbPath, getSchedulerDir } from "./scheduler/types";
+import { JsonFileStorage } from "./scheduler/json-file-storage";
+import { DEFAULT_SCHEDULER_CONFIG, getSchedulerDir } from "./scheduler/types";
+import type { SchedulerStorage } from "./scheduler/types";
 import { cronSessionPath } from "./session-paths";
 import type { GatewayConfig, OutboundMessage } from "./types";
 
@@ -30,7 +32,7 @@ export interface CronGatewayDeps {
 
 export class CronLifecycle {
 	#deps: CronGatewayDeps;
-	#schedulerStorage: SchedulerDbStorage | null = null;
+	#schedulerStorage: SchedulerStorage | null = null;
 	#schedulerEngine: SchedulerEngine | null = null;
 	#schedulerFileStore: SchedulerFileStore | null = null;
 	#cronService: CronService | null = null;
@@ -51,8 +53,23 @@ export class CronLifecycle {
 			return;
 		}
 
-		const dbPath = getSchedulerDbPath();
-		this.#schedulerStorage = new SchedulerDbStorage(dbPath);
+			this.#schedulerStorage = new JsonFileStorage();
+		// Migrate from existing SQLite if present
+		try {
+			const { getSchedulerDbPath } = await import("./scheduler/types");
+			const dbPath = getSchedulerDbPath();
+			if (fs.existsSync(dbPath)) {
+				const { migrated, errors } = (this.#schedulerStorage as JsonFileStorage).migrateFromDb(dbPath);
+				if (migrated > 0) {
+					logger.info("Migrated existing SQLite tasks to jobs.json", { migrated });
+				}
+				if (errors.length > 0) {
+					logger.warn("Migration errors", { errors });
+				}
+			}
+		} catch {
+			// No SQLite to migrate — fresh start
+		}
 
 		const taskDir = path.join(getSchedulerDir(), "tasks");
 		this.#schedulerFileStore = new SchedulerFileStore(taskDir, this.#schedulerStorage);
@@ -136,7 +153,7 @@ export class CronLifecycle {
 			this.#deps.writeStatusFile();
 			tickCount++;
 			if (tickCount % 10 === 0 && this.#schedulerStorage) {
-				this.#schedulerStorage.pruneExecutions(30, 100);
+				this.#schedulerStorage.pruneExecutions(30);
 			}
 		}, tickMs);
 
@@ -167,7 +184,7 @@ export class CronLifecycle {
 	}
 
 	/** Exposed for cron-from-message: createCronTaskFromMessage needs the storage. */
-	get schedulerStorage(): SchedulerDbStorage | null {
+	get schedulerStorage(): SchedulerStorage | null {
 		return this.#schedulerStorage;
 	}
 

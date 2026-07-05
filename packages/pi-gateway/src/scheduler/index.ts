@@ -53,6 +53,7 @@ export {
 	createCronTaskFromMessage,
 	parseCronIntent,
 } from "./from-message";
+export { JsonFileStorage } from "./json-file-storage";
 export { SchedulerDbStorage } from "./storage";
 export {
 	clearDaemonPid,

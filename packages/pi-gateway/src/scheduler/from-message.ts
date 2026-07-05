@@ -21,7 +21,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { SchedulerDbStorage } from "./storage";
+import type { SchedulerStorage } from "./types";
 
 export interface CronIntent {
 	schedule: string;
@@ -96,10 +96,10 @@ export type CreateFromMessageOutcome =
 export function createCronTaskFromMessage(
 	text: string,
 	agentDir: string | undefined,
-	storage: SchedulerDbStorage,
-	/** Channel platform for auto-fill deliver/delivery (e.g. "dingtalk") */
+	storage: SchedulerStorage,
+	/** Channel platform for auto-fill delivery.channel (e.g. "dingtalk") */
 	sourceChannel?: string,
-	/** User ID for auto-fill deliverUser / delivery.toUserId */
+	/** User ID for auto-fill delivery.toUserId */
 	sourceUser?: string,
 ): CreateFromMessageOutcome {
 	if (!agentDir) {
@@ -144,8 +144,6 @@ export function createCronTaskFromMessage(
 			timeoutMs: fileContent.timeoutMs,
 			agentDir,
 			delivery: sourceChannel ? { channel: sourceChannel, toUserId: sourceUser, mode: "announce" } : undefined,
-			deliver: sourceChannel,
-			deliverUser: sourceUser,
 			status: "active",
 			createdAt: Date.now(),
 			updatedAt: Date.now(),

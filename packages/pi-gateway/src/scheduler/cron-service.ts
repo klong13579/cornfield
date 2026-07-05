@@ -155,11 +155,7 @@ export function resolveAgentDir(task: ScheduledTask): string | undefined {
 }
 
 /**
- * Resolve the effective delivery configuration for a task, with fallback
- * to deprecated deliver/deliverUser fields.
- *
- * During the migration period, tasks may still have `deliver` + `deliverUser`
- * instead of the structured `delivery` object.
+ * Resolve the effective delivery configuration for a task.
  *
  * `resolveAccountId` is an optional gateway-side hook that maps a task's
  * `agentDir` back to the registered channel `accountId` (e.g. resolving
@@ -191,16 +187,6 @@ export function resolveDelivery(
 		return {
 			...task.delivery,
 			accountId,
-		};
-	}
-	// Fallback: construct from deprecated fields
-	if (task.deliver) {
-		const accountId = (task.agentDir ? resolveAccountId?.(task.agentDir) : undefined) ?? task.accountId;
-		return {
-			channel: task.deliver,
-			accountId,
-			toUserId: task.deliverUser,
-			mode: "announce",
 		};
 	}
 	return undefined;

@@ -74,8 +74,6 @@ export class SchedulerFileStore {
 				agentDir?: string;
 				delivery?: import("./types").TaskFileDefinition["delivery"];
 				accountId?: string;
-				deliver?: string;
-				deliverUser?: string;
 			};
 			if (!data.name || !data.cron || !data.command) {
 				logger.warn("Invalid task file, missing required fields", { path: filePath });
@@ -98,8 +96,6 @@ export class SchedulerFileStore {
 				agentDir: data.agentDir,
 				delivery: data.delivery,
 				accountId: data.accountId,
-				deliver: data.deliver,
-				deliverUser: data.deliverUser,
 			};
 		} catch (error) {
 			logger.warn("Failed to read task file", { path: filePath, error: String(error) });
@@ -171,8 +167,6 @@ export class SchedulerFileStore {
 						agentDir: def.agentDir,
 						delivery: def.delivery,
 						accountId: def.accountId,
-						deliver: def.deliver,
-						deliverUser: def.deliverUser,
 						consecutiveFailures: 0,
 						scheduleType: parseSchedule(def.cron).type,
 						status: "active",
@@ -191,8 +185,6 @@ export class SchedulerFileStore {
 				const typeChanged = existing.taskType !== (def.type ?? "shell");
 				const modelChanged = existing.model !== (def.model ?? undefined);
 				const providerChanged = existing.provider !== (def.provider ?? undefined);
-				const deliverChanged = existing.deliver !== (def.deliver ?? undefined);
-				const deliverUserChanged = existing.deliverUser !== (def.deliverUser ?? undefined);
 				const agentDirChanged = existing.agentDir !== (def.agentDir ?? undefined);
 				const deliveryChanged = JSON.stringify(existing.delivery ?? null) !== JSON.stringify(def.delivery ?? null);
 				const accountIdChanged = existing.accountId !== (def.accountId ?? undefined);
@@ -202,8 +194,6 @@ export class SchedulerFileStore {
 					typeChanged ||
 					modelChanged ||
 					providerChanged ||
-					deliverChanged ||
-					deliverUserChanged ||
 					agentDirChanged ||
 					deliveryChanged ||
 					accountIdChanged
@@ -224,8 +214,6 @@ export class SchedulerFileStore {
 							agentDir: def.agentDir,
 							delivery: def.delivery,
 							accountId: def.accountId,
-							deliver: def.deliver,
-							deliverUser: def.deliverUser,
 						});
 						result.updated++;
 					} catch (error) {
