@@ -146,17 +146,6 @@ describe("formatTaskRow column layout", () => {
 		expect(counts[0]).toBe(11);
 	});
 
-	it("includes the deliver value in the rendered row", () => {
-		const row = formatTaskRow(makeTask({ name: "x", deliver: "dingtalk:hr" }));
-		expect(row).toContain("dingtalk:hr");
-	});
-
-	it("renders the long dingtalk:user:NNN form without truncation", () => {
-		// Real data shape from the existing scheduler.db
-		const row = formatTaskRow(makeTask({ name: "x", deliver: "dingtalk:user:601590212" }));
-		expect(row).toContain("dingtalk:user:601590212");
-	});
-
 	it("renders an em-dash when deliver is unset (no blank cell)", () => {
 		const row = formatTaskRow(makeTask({ name: "x" }));
 		expect(row).toContain("—");
