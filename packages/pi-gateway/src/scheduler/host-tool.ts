@@ -289,6 +289,13 @@ async function handleTestRun(args: CronToolArgs, ctx: CronToolContext): Promise<
 async function handleAdd(args: CronToolArgs, ctx: CronToolContext): Promise<HostToolResultBody> {
 	const name = stringArg(args, "name");
 	if (!name) return errResult("add: name is required");
+
+	// Reject duplicate task names
+	const storage = ctx.getStorage();
+	if (storage?.getTaskByName(name)) {
+		return errResult(`add: task "${name}" already exists. Use cron.update to modify it, or choose a different name.`);
+	}
+
 	const schedule = stringArg(args, "schedule");
 	if (!schedule) return errResult("add: schedule is required");
 

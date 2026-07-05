@@ -156,6 +156,10 @@ export class JsonFileStorage implements SchedulerStorage {
 
 	addTask(task: Omit<ScheduledTask, "id">): ScheduledTask {
 		this.#ensureLoaded();
+		// Reject duplicate task names
+		if (this.getTaskByName(task.name)) {
+			throw new Error(`Task "${task.name}" already exists`);
+		}
 		const id = generateTaskId();
 		const now = Date.now();
 		const full: ScheduledTask = {
