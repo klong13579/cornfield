@@ -1,0 +1,369 @@
+#!/usr/bin/env python3
+"""
+Scaffold a SKILL.md from the writing-great-skills template.
+
+Usage:
+  create-skill <name> [options]
+
+Options:
+  --archetype <type>     branch | process | routing | reference | gate | template
+                           Default: process
+  --description "<text>"  Model-facing "When X, do Y. Skip if Z."
+                           Auto-generated placeholder if omitted
+  --user-invoked          Sets disable-model-invocation: true
+  --dir <path>            Output dir (default: ~/.omp/agent/skills)
+  --help                  Show this help
+
+Examples:
+  create-skill code-reviewer --archetype process \
+    --description "Review code when user says review/audit/critique. Skip on typo-only changes."
+  create-skill grill-me --archetype routing --user-invoked
+"""
+
+import argparse
+import os
+import re
+import sys
+from pathlib import Path
+
+
+def parse_args(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        prog="create-skill",
+        description="Scaffold a SKILL.md from the writing-great-skills template.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  create-skill code-reviewer --archetype process \\\n"
+            '    --description "Review code when user asks. Skip on typo-only."\n'
+            "  create-skill grill-me --archetype routing --user-invoked\n"
+        ),
+    )
+    parser.add_argument("name", type=str, help="Skill name (kebab-case)")
+    parser.add_argument(
+        "--archetype",
+        choices=["branch", "process", "routing", "reference", "gate", "template"],
+        default="process",
+        help="Skill archetype (default: process)",
+    )
+    parser.add_argument(
+        "--description", type=str, default=None,
+        help='Model-facing "When X, do Y. Skip if Z."',
+    )
+    parser.add_argument(
+        "--user-invoked", action="store_true",
+        help="Set disable-model-invocation: true",
+    )
+    parser.add_argument(
+        "--dir", type=str, default=None,
+        help="Output dir (default: ~/.omp/agent/skills)",
+    )
+    return parser.parse_args(argv)
+
+
+def validate_name(name: str) -> None:
+    if not re.match(r"^[a-z][a-z0-9-]*$", name):
+        print(
+            f'error: invalid name "{name}" — must be kebab-case: '
+            "lowercase letters, digits, hyphens only.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+
+ARCHETYPE_HINTS: dict[str, str] = {
+    "branch": (
+        "When the user asks to <trigger A>, <trigger B>, or <trigger C>, "
+        "identify the intent type and follow the corresponding branch. "
+        "Skip if <explicit out-of-scope condition>."
+    ),
+    "process": (
+        "When the user <trigger>, follow a strict sequence of steps to "
+        "<what the skill achieves>. Skip if <explicit out-of-scope condition>."
+    ),
+    "routing": "<trigger: this skill does nothing \u2014 it routes to other skills.>",
+    "reference": (
+        "Reference for <domain>. Use when <trigger>. "
+        "<When another skill needs to\u2026>."
+    ),
+    "gate": "<Describe what this gated workflow does.>",
+    "template": (
+        "When the user <trigger>, produce <document kind> using the template. "
+        "Skip if <anti-trigger>."
+    ),
+}
+
+ARCHETYPE_LABELS: dict[str, str] = {
+    "branch": "Branch\uff08\u5206\u652f\uff09",
+    "process": "Process\uff08\u6d41\u7a0b\uff09",
+    "routing": "Routing\uff08\u8def\u7531\uff09",
+    "reference": "Reference\uff08\u53c2\u8003\uff09",
+    "gate": "Gate\uff08\u95e8\uff09",
+    "template": "Template\uff08\u6a21\u677f\uff09",
+}
+
+
+def get_skeleton(name: str, archetype: str) -> str:
+    skeletons: dict[str, str] = {
+        "branch": """# {name}
+
+> <Leading word -- a pretrained concept that anchors this skill. Optional but powerful.>
+
+## Which
+
+Identify the user's intent type from context:
+
+- **type A** -- `<condition>` -> [Branch A](#branch-a)
+- **type B** -- `<condition>` -> [Branch B](#branch-b)
+
+If uncertain, ask one question to disambiguate, then follow the matching branch.
+
+## Branch A
+
+<Brief description of what this branch does>
+
+### Outcome
+
+<Verifiable completion criterion>
+
+### Procedure
+
+1. <Step 1>
+   - <Completion criterion: when to move to next step>
+2. <Step 2>
+
+### Pitfalls
+
+- <Common mistakes>
+- <Anti-patterns>
+
+## Branch B
+
+### Outcome
+### Procedure
+### Pitfalls
+
+## When NOT to use
+
+- <Specific non-matching scenarios>
+- <Boundary with other skills>
+""",
+        "process": """# {name}
+
+> <Leading word -- optional but powerful.>
+
+## Outcome
+
+<Verifiable completion criterion: what is delivered when this skill finishes.>
+
+## Procedure
+
+### Step 1 -- <step name>
+
+<What to do>
+
+Completion criterion: <checkable condition that resists premature completion>.
+
+### Step 2 -- <step name>
+
+<What to do>
+
+Completion criterion: <same>.
+
+### Step 3 -- <step name>
+
+<What to do>
+
+Completion criterion: <same>.
+
+## Verification
+
+- [ ] <Verification item>
+- [ ] Original scenario no longer reproduces (if applicable)
+
+## Pitfalls
+
+- <Common mistakes>
+- <Anti-patterns>
+""",
+        "routing": """# {name}
+
+This is a routing skill. It does no substantive work -- it hands control to other skills.
+
+## Which
+
+- **Scenario A** -> Read `skill://<skill-A>` and follow its instructions.
+- **Scenario B** -> Read `skill://<skill-B>` and follow its instructions.
+- **Scenario C** -> Read `skill://<skill-C>` (compose A + B).
+
+> A routing skill should be 3--10 lines. Beyond 10 lines, there is real work here -- split into Process.
+""",
+        "reference": """# {name}
+
+> <Leading word>
+
+## <Section 1>
+
+<Definitions, rules, facts. Colocation: keep a concept's definition, rules, and caveats under one heading.>
+
+### <Sub-entry>
+
+- <bullet 1>
+- <bullet 2>
+
+## <Section 2>
+
+| Symptom / Condition | Action / Likely Owner |
+|---------------------|-----------------------|
+| <symptom A>         | <action A>            |
+| <symptom B>         | <action B>            |
+
+## Common Misuse
+
+- <Do NOT use for...>
+- <Anti-patterns>
+
+> Each concept has one Single Source of Truth. Do not duplicate definitions across files.
+""",
+        "gate": """# {name}
+
+## <GATE 1>: BLOCKING -- <gate name>
+
+<gate_enforcement>
+STOP. <Non-negotiable rule. Write with MUST / MUST NOT / REQUIRED / FORBIDDEN.>
+</gate_enforcement>
+
+<Specific requirements for this gate>
+
+## <GATE 2>: BLOCKING -- <gate name>
+
+<Same structure>
+
+---
+
+## Main Procedure
+
+(Enter after gates pass. Same structure as Process or Branch.)
+
+### Step 1
+
+<What to do>
+
+### Step 2
+
+<What to do>
+
+## Verification
+
+- [ ] Gate 1 still satisfied
+- [ ] Gate 2 still satisfied
+- [ ] <Other items>
+""",
+        "template": """# {name}
+
+## Procedure
+
+1. <Step 1>
+2. <Step 2>
+3. Produce the output using the template below.
+
+## Template
+
+```markdown
+<template-content>
+
+## <Section 1>
+
+<placeholder description>
+
+## <Section 2>
+
+<placeholder description>
+
+<template-content>
+```
+
+## Fill Rules
+
+- <Placeholder X -> what to write>
+- <Data unavailable -> how to handle>
+""",
+    }
+
+    template = skeletons.get(archetype, "")
+    return template.format(name=name)
+
+
+def main() -> None:
+    args = parse_args(sys.argv[1:])
+    validate_name(args.name)
+
+    desc = args.description
+    archetype = args.archetype
+    user_invoked = args.user_invoked
+    base_dir = Path(args.dir) if args.dir else (
+        Path.home() / ".omp" / "agent" / "skills"
+    )
+
+    skill_dir = base_dir / args.name
+    skill_file = skill_dir / "SKILL.md"
+
+    if skill_file.exists():
+        print(f"error: skill already exists at {skill_file}", file=sys.stderr)
+        sys.exit(1)
+
+    skill_dir.mkdir(parents=True, exist_ok=True)
+
+    # Build frontmatter description
+    if desc and not desc.startswith("<"):
+        frontmatter_desc = desc
+    else:
+        frontmatter_desc = ARCHETYPE_HINTS[archetype]
+
+    # Assemble content
+    lines: list[str] = []
+    lines.append("---")
+    lines.append(f"name: {args.name}")
+    lines.append("description: >-")
+    lines.append(f"  {frontmatter_desc}")
+    if user_invoked:
+        lines.append("disable-model-invocation: true")
+    lines.append("---")
+    lines.append("")
+    lines.append("<!--")
+    lines.append(
+        f"  Generated by skill://writing-great-skills/create-skill "
+        f"-- archetype: {archetype}"
+    )
+    lines.append("  Fill in the placeholders, then run `bun run fmt`.")
+    lines.append(
+        "  Reference: skill://writing-great-skills "
+        "| skill://writing-great-skills/SKILL-TEMPLATE.md"
+    )
+    lines.append("-->")
+    lines.append("")
+    lines.append(get_skeleton(args.name, archetype))
+
+    content = "\n".join(lines)
+    skill_file.write_text(content, encoding="utf-8")
+
+    mode_label = "user-invoked" if user_invoked else "model-invoked"
+    arch_label = ARCHETYPE_LABELS[archetype]
+
+    print(f"Created {mode_label} {arch_label} skill:")
+    print(f"  {skill_file}")
+    print()
+    print("Next steps:")
+    print("  1. Edit the description in frontmatter (trigger phrases + anti-triggers)")
+    print("  2. Fill in the `<placeholders>` in the body")
+    print("  3. Run `bun run fmt`")
+    print("  4. Restart the agent session")
+    print()
+    print("Reference:")
+    print("  skill://writing-great-skills                 -- principles & vocabulary")
+    print("  skill://writing-great-skills/SKILL-TEMPLATE.md  -- full template docs")
+    print("  Script: skill://writing-great-skills/create-skill")
+
+
+if __name__ == "__main__":
+    main()
