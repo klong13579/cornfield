@@ -131,6 +131,13 @@ export class AgentBridge {
 	#activeSessionPath: string | undefined;
 	#pendingModelOverride: { provider: string; modelId: string } | undefined;
 	#configuredModel: { provider: string; modelId: string } | undefined;
+	/** Set when the transport disconnects (crash/exit). The subprocess loses all
+	 *  state on restart — session path, model, host tools — so the next prompt
+	 *  must re-apply the model even if `#switchSession` would early-return.
+	 *  Cleared after `set_model` succeeds. Without this, a crash recovery with
+	 *  no `sessionPath` (e.g. a sessionless cron task) silently runs with the
+	 *  subprocess's default model instead of `#pendingModelOverride`. */
+	#needsModelReapply = false;
 	/** Inbound message currently being processed by `forwardWithMeta`. Read
 	 *  by host tools (cron) for delivery auto-inference. Lives on the bridge
 	 *  (not the transport) so it survives across session switches within a
@@ -224,6 +231,14 @@ export class AgentBridge {
 				this.#queue.onSessionEvent(event.event);
 				break;
 			case "disconnected":
+				// The subprocess is gone — its in-memory state (session, model,
+				// host tools) is lost. Clear the cached session path so the next
+				// `#switchSession` actually sends `switch_session` instead of
+				// early-returning with a stale path. Flag `#needsModelReapply` so
+				// the next prompt re-applies the model even when no sessionPath
+				// is provided (e.g. sessionless cron tasks).
+				this.#activeSessionPath = undefined;
+				this.#needsModelReapply = true;
 				this.#recordCrash(
 					event.error?.message ?? "transport disconnected (no error message)",
 					event.error?.message?.match(/code (-?\d+)/)?.[1]
@@ -556,19 +571,25 @@ export class AgentBridge {
 			const timeoutMs = this.#options.timeoutMs ?? 120_000;
 
 			try {
-				if (session.ompSessionPath) {
-					await this.#switchSession(session.ompSessionPath);
-				}
+				const sessionChanged = session.ompSessionPath ? await this.#switchSession(session.ompSessionPath) : false;
+				// Re-apply the model only when the session actually changed (the
+				// subprocess restores the session's model on switch_session) or
+				// when the transport was restarted (subprocess lost all state).
+				// Without this gate, every IM message redundantly sends set_model,
+				// which pollutes the session JSONL with model_change entries and
+				// churns provider sessions even when nothing changed.
+				const needsModel = sessionChanged || this.#needsModelReapply;
 				const modelToApply = this.#pendingModelOverride ?? this.#configuredModel;
-				if (modelToApply) {
+				if (modelToApply && needsModel) {
 					try {
 						await this.#transport.sendCommand(
 							"set_model",
 							{ provider: modelToApply.provider, modelId: modelToApply.modelId },
 							30_000,
 						);
+						this.#needsModelReapply = false;
 					} catch (err) {
-						logger.warn("Failed to re-apply model after switchSession", {
+						logger.error("Failed to re-apply model after switchSession", {
 							error: err instanceof Error ? err.message : String(err),
 						});
 					}
@@ -657,26 +678,32 @@ export class AgentBridge {
 			// the post-run drift check in the `finally` block below.
 			const forcedSessionPath = sessionPath ? path.resolve(sessionPath) : undefined;
 
+			let sessionChanged = false;
 			if (sessionPath) {
 				try {
-					await this.#switchSession(sessionPath);
-					const modelToApply = this.#pendingModelOverride ?? this.#configuredModel;
-					if (modelToApply) {
-						try {
-							await this.#transport.sendCommand(
-								"set_model",
-								{ provider: modelToApply.provider, modelId: modelToApply.modelId },
-								30_000,
-							);
-						} catch (err) {
-							logger.warn("Failed to re-apply model after switchSession", {
-								error: err instanceof Error ? err.message : String(err),
-							});
-						}
-					}
+					sessionChanged = await this.#switchSession(sessionPath);
 				} catch (err) {
 					const message = err instanceof Error ? err.message : String(err);
 					throw new Error(`Failed to switch to cron session: ${message}`);
+				}
+			}
+			// Re-apply model when the session changed or the transport restarted.
+			// Moved outside the `if (sessionPath)` block so sessionless cron
+			// tasks also get the correct model after a crash recovery.
+			const needsModel = sessionChanged || this.#needsModelReapply;
+			const modelToApply = this.#pendingModelOverride ?? this.#configuredModel;
+			if (modelToApply && needsModel) {
+				try {
+					await this.#transport.sendCommand(
+						"set_model",
+						{ provider: modelToApply.provider, modelId: modelToApply.modelId },
+						30_000,
+					);
+					this.#needsModelReapply = false;
+				} catch (err) {
+					logger.error("Failed to re-apply model for cron prompt", {
+						error: err instanceof Error ? err.message : String(err),
+					});
 				}
 			}
 
@@ -768,19 +795,21 @@ export class AgentBridge {
 				if (watchdog) clearInterval(watchdog);
 				if (sessionPath && previousSessionPath && previousSessionPath !== this.#activeSessionPath) {
 					try {
-						await this.#switchSession(previousSessionPath);
-						const modelToApply = this.#pendingModelOverride ?? this.#configuredModel;
-						if (modelToApply) {
-							try {
-								await this.#transport.sendCommand(
-									"set_model",
-									{ provider: modelToApply.provider, modelId: modelToApply.modelId },
-									30_000,
-								);
-							} catch (err) {
-								logger.warn("Failed to restore model after session restore", {
-									error: err instanceof Error ? err.message : String(err),
-								});
+						const sessionRestored = await this.#switchSession(previousSessionPath);
+						if (sessionRestored) {
+							const modelToApply = this.#pendingModelOverride ?? this.#configuredModel;
+							if (modelToApply) {
+								try {
+									await this.#transport.sendCommand(
+										"set_model",
+										{ provider: modelToApply.provider, modelId: modelToApply.modelId },
+										30_000,
+									);
+								} catch (err) {
+									logger.error("Failed to restore model after session restore", {
+										error: err instanceof Error ? err.message : String(err),
+									});
+								}
 							}
 						}
 					} catch (err) {
@@ -815,8 +844,8 @@ export class AgentBridge {
 		return true;
 	}
 
-	async #switchSession(sessionPath: string): Promise<void> {
-		if (this.#activeSessionPath === sessionPath) return;
+	async #switchSession(sessionPath: string): Promise<boolean> {
+		if (this.#activeSessionPath === sessionPath) return false;
 		const response = await this.#transport.sendCommand("switch_session", { sessionPath }, 30_000);
 		if (
 			response.data &&
@@ -827,6 +856,7 @@ export class AgentBridge {
 			throw new Error(`Switch session cancelled: ${sessionPath}`);
 		}
 		this.#activeSessionPath = sessionPath;
+		return true;
 	}
 
 	async #restartTransport(): Promise<void> {

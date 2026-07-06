@@ -569,3 +569,131 @@ describe("AgentBridge.executePrompt inactivity timeout", () => {
 		}
 	});
 });
+
+describe("AgentBridge model re-application", () => {
+	// Fake RPC that records set_model calls to a temp file so the test can assert counts.
+	function makeTrackingScript(trackerPath: string): string {
+		return `#!/usr/bin/env bun
+process.stdout.write(JSON.stringify({ type: "ready" }) + "\\n");
+let currentSession = "";
+let buffer = "";
+const setModelCalls = [];
+function emit(value) {
+  process.stdout.write(JSON.stringify(value) + "\\n");
+}
+function recordCall() {
+  require("fs").writeFileSync(${JSON.stringify(trackerPath)}, JSON.stringify(setModelCalls));
+}
+async function handleFrame(frame) {
+  if (frame.type === "switch_session") {
+    currentSession = frame.sessionPath;
+    emit({ type: "response", id: frame.id, command: "switch_session", success: true, data: { cancelled: false } });
+    recordCall();
+    return;
+  }
+  if (frame.type === "set_model") {
+    setModelCalls.push({ provider: frame.provider, modelId: frame.modelId });
+    emit({ type: "response", id: frame.id, command: "set_model", success: true, data: { provider: frame.provider, id: frame.modelId } });
+    recordCall();
+    return;
+  }
+  if (frame.type === "prompt") {
+    emit({ type: "response", id: frame.id, command: "prompt", success: true });
+    setTimeout(() => {
+      emit({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: frame.message }] } });
+      emit({ type: "agent_end" });
+    }, 0);
+    return;
+  }
+  if (frame.type === "abort") {
+    emit({ type: "response", id: frame.id, command: "abort", success: true });
+  }
+}
+for await (const chunk of Bun.stdin.stream()) {
+  buffer += new TextDecoder().decode(chunk);
+  let index = buffer.indexOf("\\n");
+  while (index !== -1) {
+    const line = buffer.slice(0, index).trim();
+    buffer = buffer.slice(index + 1);
+    if (line) await handleFrame(JSON.parse(line));
+    index = buffer.indexOf("\\n");
+  }
+}
+`;
+	}
+
+	async function createTrackingRpc(trackerPath: string): Promise<{ path: string; cleanup: () => Promise<void> }> {
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-gateway-rpc-track-"));
+		const scriptPath = path.join(dir, "fake-rpc");
+		await Bun.write(scriptPath, makeTrackingScript(trackerPath));
+		await fs.chmod(scriptPath, 0o755);
+		return {
+			path: scriptPath,
+			cleanup: async () => {
+				await fs.rm(dir, { recursive: true, force: true });
+			},
+		};
+	}
+
+	async function readModelCalls(trackerPath: string): Promise<Array<{ provider: string; modelId: string }>> {
+		try {
+			const raw = await Bun.file(trackerPath).text();
+			return JSON.parse(raw);
+		} catch {
+			return [];
+		}
+	}
+
+	test("does not send set_model on consecutive messages in the same session", async () => {
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-model-track-"));
+		const trackerPath = path.join(dir, "calls.json");
+		const fake = await createTrackingRpc(trackerPath);
+		const bridge = new AgentBridge({ ompPath: fake.path, timeoutMs: 2_000, model: "test-provider/test-model" });
+		try {
+			await bridge.start();
+			const session = makeSession("/tmp/same-session.jsonl", "conv-same");
+
+			await bridge.forward(makeMessage("msg1", "conv-same"), session);
+			await bridge.forward(makeMessage("msg2", "conv-same"), session);
+
+			const calls = await readModelCalls(trackerPath);
+			// First message: set_model fires (session switched from undefined → path).
+			// Second message: set_model should NOT fire (same session, no crash).
+			expect(calls.length).toBe(1);
+			expect(calls[0].provider).toBe("test-provider");
+			expect(calls[0].modelId).toBe("test-model");
+		} finally {
+			bridge.stop();
+			await fake.cleanup();
+			await fs.rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("sends set_model after simulated crash recovery with same session path", async () => {
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-model-crash-"));
+		const trackerPath = path.join(dir, "calls.json");
+		const fake = await createTrackingRpc(trackerPath);
+		const bridge = new AgentBridge({ ompPath: fake.path, timeoutMs: 2_000, model: "test-provider/test-model" });
+		try {
+			await bridge.start();
+			const session = makeSession("/tmp/crash-test-session.jsonl", "conv-crash");
+
+			await bridge.forward(makeMessage("before-crash", "conv-crash"), session);
+
+			// Simulate crash: disconnected event clears #activeSessionPath + sets #needsModelReapply
+			bridge.resetActiveSession();
+
+			const response = await bridge.forward(makeMessage("after-crash", "conv-crash"), session);
+			expect(response).toContain("after-crash");
+
+			const calls = await readModelCalls(trackerPath);
+			// First message: 1 set_model (session switch).
+			// After resetActiveSession: session re-switches → 1 more set_model.
+			expect(calls.length).toBe(2);
+		} finally {
+			bridge.stop();
+			await fake.cleanup();
+			await fs.rm(dir, { recursive: true, force: true });
+		}
+	});
+});
