@@ -1,6 +1,7 @@
 import { type Component, padding, truncateToWidth, visibleWidth } from "@oh-my-pi/pi-tui";
 import { APP_NAME } from "@oh-my-pi/pi-utils";
 import { theme } from "../../modes/theme/theme";
+import type { ParsedTodo } from "./todo";
 
 export interface RecentSession {
 	name: string;
@@ -13,6 +14,11 @@ export interface LspServerInfo {
 	fileTypes: string[];
 }
 
+/** Title rendered for the TODO section in the right column. */
+const TODO_DISPLAY_TITLE = "TODO";
+/** Max open items shown in the right-column TODO section before collapsing to "… + N more". */
+const MAX_TODO_IN_WELCOME = 3;
+
 /**
  * Premium welcome screen with block-based OMP logo and two-column layout.
  */
@@ -21,6 +27,7 @@ export class WelcomeComponent implements Component {
 		private readonly version: string,
 		private modelName: string,
 		private providerName: string,
+		private todo: ParsedTodo | null = null,
 		private recentSessions: RecentSession[] = [],
 		private lspServers: LspServerInfo[] = [],
 	) {}
@@ -117,8 +124,24 @@ export class WelcomeComponent implements Component {
 			}
 		}
 
-		// Right column
+		// Right column: TODO section first (above Tips), then the other panels.
+		const todoLines: string[] = [];
+		if (this.todo && this.todo.open.length > 0) {
+			const items = this.todo.open.slice(0, MAX_TODO_IN_WELCOME);
+			todoLines.push(
+				` ${theme.bold(theme.fg("accent", TODO_DISPLAY_TITLE))} ${theme.fg("dim", `(${this.todo.open.length})`)}`,
+			);
+			for (const text of items) {
+				todoLines.push(` ${theme.fg("muted", theme.checkbox.unchecked)} ${text}`);
+			}
+			const overflow = this.todo.open.length - items.length;
+			if (overflow > 0) {
+				todoLines.push(` ${theme.fg("dim", `… + ${overflow} more`)}`);
+			}
+			todoLines.push(separator);
+		}
 		const rightLines = [
+			...todoLines,
 			` ${theme.bold(theme.fg("accent", "Tips"))}`,
 			` ${theme.fg("dim", "?")}${theme.fg("muted", " for keyboard shortcuts")}`,
 			` ${theme.fg("dim", "#")}${theme.fg("muted", " for prompt actions")}`,

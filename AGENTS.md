@@ -471,6 +471,17 @@ Default: `~/.omp/` (override with `PI_CODING_AGENT_DIR`).
     evolution.db               # SQLite: episodes, skills, workflow patterns, nudges
 ```
 
+## Project TODO
+
+This repository tracks in-flight work in `<projectDir>/TODO.md`, which the
+TUI renders as a panel at the top on startup (always-on via
+`prompt-includes.json`). When the user adds, marks done, or removes a todo
+— triggers include `增加/添加/记录/新增/加 todo`, `add/new/track todo`,
+`完成待办/做完了/done/finish`, `删掉待办/移除待办/remove todo` — load the
+`project-todo` skill for the path resolution, file format, edit rules, and
+standing constraints. Do not write to TODO.md from a hook, cron, or
+background task.
+
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 

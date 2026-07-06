@@ -62,6 +62,7 @@ import type { HookInputComponent } from "./components/hook-input";
 import type { HookSelectorComponent } from "./components/hook-selector";
 import type { PythonExecutionComponent } from "./components/python-execution";
 import { StatusLineComponent } from "./components/status-line";
+import { loadProjectTodo, type ParsedTodo } from "./components/todo";
 import type { ToolExecutionHandle } from "./components/tool-execution";
 import { WelcomeComponent, type LspServerInfo as WelcomeLspServerInfo } from "./components/welcome";
 import { BtwController } from "./controllers/btw-controller";
@@ -370,11 +371,18 @@ export class InteractiveMode implements InteractiveModeContext {
 		}
 
 		if (!startupQuiet) {
-			// Add welcome header
+			// Project TODO — reads <projectDir>/TODO.md (always-on via prompt-includes.json)
+			// and is rendered inside the welcome component's right column (above Tips).
+			const projectTodo: ParsedTodo | null = await logger.time("InteractiveMode.init:projectTodo", () =>
+				loadProjectTodo(),
+			);
+
+			// Add welcome header (with TODO injected as the first right-column section).
 			this.#welcomeComponent = new WelcomeComponent(
 				this.#version,
 				modelName,
 				providerName,
+				projectTodo,
 				recentSessions,
 				this.#getWelcomeLspServers(),
 			);
