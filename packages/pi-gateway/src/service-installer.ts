@@ -50,22 +50,77 @@ export function detectPlatform(): Platform {
 // ═══════════════════════════════════════════════════════════════════════
 
 /**
- * Env vars whose current shell value is copied into the launchd plist /
- * systemd service file at install time, if the variable is set.
+ * Env vars whose values are written into the launchd plist / systemd
+ * service file at install time. The values are resolved in this order:
  *
- * Today this is just the test-injection pair: OMP_GATEWAY_TEST_MODE=1
- * turns on the POST /test/inject endpoint (see gateway.ts#startTestServer),
- * and OMP_GATEWAY_TEST_PORT controls which port that endpoint binds to.
- * Without this list, `omp gateway service install` would silently
- * discard the operator's test env and the gateway would come up without
- * the inject endpoint — the original "OMP_GATEWAY_TEST_MODE wiped"
- * operational pain.
+ *   1. The operator's shell value at install time (explicit override).
+ *      An empty string is treated the same as unset — both fall through
+ *      to step 2 — so a stale `export OMP_GATEWAY_TEST_MODE=` in the
+ *      shell cannot silently disable the test-injection endpoint.
+ *   2. The `PERSISTED_ENV_DEFAULTS` value for the var.
+ *   3. (No default → var is omitted from the config.)
  *
- * To add a new persisted var: append it here. The generator below picks
- * it up automatically; the launchd plist will get a <key>NAME</key>
- * entry and the systemd unit will get an Environment="NAME=VALUE" line.
+ * `OMP_GATEWAY_TEST_MODE=1` turns on the POST /test/inject endpoint
+ * (see gateway.ts#startTestServer), and `OMP_GATEWAY_TEST_PORT`
+ * controls which port that endpoint binds to. These two are defaulted
+ * to "1" / "7890" so the test-injection surface is available out of
+ * the box after `omp gateway service install` — the prior behaviour
+ * (only persist if set in the shell) required every reinstall to
+ * re-source the env, and a missed `export` silently disabled the
+ * endpoint with no signal until the next `curl /test/inject` 404.
+ *
+ * To add a new persisted var: append it here AND add its default to
+ * `PERSISTED_ENV_DEFAULTS` (or omit the default to keep the
+ * "only-if-set" semantics). The generator below picks both up
+ * automatically; the launchd plist will get a <key>NAME</key> entry
+ * and the systemd unit will get an Environment="NAME=VALUE" line.
+ *
+ * Opt-out: set the var to a non-empty value in your shell before
+ * running `service install`, e.g. `export OMP_GATEWAY_TEST_MODE=0`
+ * to keep the endpoint off.
  */
 export const PERSISTED_ENV_VARS = ["OMP_GATEWAY_TEST_MODE", "OMP_GATEWAY_TEST_PORT"] as const;
+
+/**
+ * Default values applied when the operator's shell has not set the
+ * corresponding var. Indexed by `PERSISTED_ENV_VARS` member. Vars
+ * present in `PERSISTED_ENV_VARS` but not in this map retain the
+ * pre-existing "only-if-set" behaviour (no default; unset ⇒ omitted).
+ */
+export const PERSISTED_ENV_DEFAULTS: Partial<Record<(typeof PERSISTED_ENV_VARS)[number], string>> = {
+	OMP_GATEWAY_TEST_MODE: "1",
+	OMP_GATEWAY_TEST_PORT: "7890",
+};
+
+/**
+ * PATH written into the supervised gateway's plist / unit file.
+ *
+ * `~/.local/bin` is listed first so user-installed CLIs (`dws`, `agent`,
+ * `hermes`, `uv`, `cursor`, ...) are visible to the gateway out of the
+ * box — a freshly installed gateway without this entry would have a
+ * `command not found: dws` for any agent tool that shells out to
+ * user-local binaries (the symptom is intermittent, because the agent's
+ * non-interactive bash does NOT source `~/.zshrc`, so the `~/.local/bin`
+ * that the operator's interactive shell has does not propagate).
+ *
+ * Both the launchd plist and the systemd unit pull from this single
+ * helper so the two configs can't drift apart on a future edit. Add
+ * new common dirs here when they show up in install support issues;
+ * do NOT inline a new path in only one of the two templates.
+ */
+export function gatewayServicePath(env: NodeJS.ProcessEnv = process.env): string {
+	const home = env.HOME ?? process.env.HOME ?? "";
+	return [
+		`${home}/.local/bin`,
+		`${home}/.bun/bin`,
+		"/opt/homebrew/bin",
+		"/usr/local/bin",
+		"/usr/bin",
+		"/bin",
+		"/usr/sbin",
+		"/sbin",
+	].join(":");
+}
 
 /** Escape a value for inclusion in a launchd plist XML <string> element. */
 function xmlEscape(value: string): string {
@@ -95,9 +150,31 @@ function systemdEscapeValue(value: string): string {
 	return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
 
-/** Names of PERSISTED_ENV_VARS that are currently set in `env`. */
-export function getPersistedEnvNames(env: NodeJS.ProcessEnv = process.env): string[] {
-	return PERSISTED_ENV_VARS.filter(name => env[name] !== undefined && env[name] !== "");
+/**
+ * Resolve the env entries to write into the plist / unit file.
+ *
+ * For each name in `PERSISTED_ENV_VARS`, in declaration order:
+ *   - If the operator's shell has a non-empty value, use that.
+ *   - Else if `PERSISTED_ENV_DEFAULTS` has an entry, use the default.
+ *   - Else omit the var entirely.
+ *
+ * Returns a `Record<name, value>` so callers don't have to re-look-up
+ * `env[name]` when rendering. Empty-string values are coerced to
+ * "use the default" so a stale `export NAME=` in the shell cannot
+ * silently disable a defaulted feature.
+ */
+export function resolvePersistedEnv(env: NodeJS.ProcessEnv = process.env): Record<string, string> {
+	const out: Record<string, string> = {};
+	for (const name of PERSISTED_ENV_VARS) {
+		const explicit = env[name];
+		if (explicit !== undefined && explicit !== "") {
+			out[name] = explicit;
+		} else {
+			const def = PERSISTED_ENV_DEFAULTS[name];
+			if (def !== undefined) out[name] = def;
+		}
+	}
+	return out;
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -163,16 +240,14 @@ function buildServiceArgv(): string[] {
 export function generateLaunchdPlist(logPath: string, env: NodeJS.ProcessEnv = process.env): string {
 	const argv = buildServiceArgv();
 	const argTags = argv.map(a => `\t\t<string>${a}</string>`).join("\n");
-	// Build the operator-persisted env entries (e.g. OMP_GATEWAY_TEST_MODE
-	// for issue reproduction). These only appear when the operator had
-	// them set in their shell at install time; the gateway treats unset
-	// as "feature off", so we never write empty values.
-	const persistedEntries = getPersistedEnvNames(env).map(
-		name => `\t\t<key>${name}</key>\n\t\t<string>${xmlEscape(env[name] ?? "")}</string>`,
+	// Build the persisted-env entries (defaults applied when the operator
+	// has not set the var in their shell — see `resolvePersistedEnv`).
+	const persistedEntries = Object.entries(resolvePersistedEnv(env)).map(
+		([name, value]) => `\t\t<key>${name}</key>\n\t\t<string>${xmlEscape(value)}</string>`,
 	);
 	const envBlock = [
 		`\t\t<key>PATH</key>`,
-		`\t\t<string>${process.env.HOME}/.bun/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>`,
+		`\t\t<string>${gatewayServicePath(env)}</string>`,
 		...persistedEntries,
 	].join("\n");
 	return `<?xml version="1.0" encoding="UTF-8"?>
@@ -208,15 +283,12 @@ export function generateSystemdService(logPath: string, env: NodeJS.ProcessEnv =
 	const argv = buildServiceArgv();
 	const execStart = argv.map(a => (a.includes(" ") ? `"${a}"` : a)).join(" ");
 	// Same persisted-env set as the launchd plist, formatted as systemd
-	// Environment= lines. Only emitted when the operator had them set
-	// in their shell at install time.
-	const persistedLines = getPersistedEnvNames(env).map(
-		name => `Environment="${name}=${systemdEscapeValue(env[name] ?? "")}"`,
+	// Environment= lines. Defaults are applied here too — see
+	// `resolvePersistedEnv`.
+	const persistedLines = Object.entries(resolvePersistedEnv(env)).map(
+		([name, value]) => `Environment="${name}=${systemdEscapeValue(value)}"`,
 	);
-	const envBlock = [
-		`Environment="PATH=${process.env.HOME}/.bun/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"`,
-		...persistedLines,
-	].join("\n");
+	const envBlock = [`Environment="PATH=${gatewayServicePath(env)}"`, ...persistedLines].join("\n");
 	return `[Unit]
 Description=${SERVICE_LABEL}
 After=network-online.target
@@ -267,15 +339,23 @@ export async function installService(): Promise<void> {
 	// Generate config
 	const config = platform === "darwin" ? generateLaunchdPlist(paths.logPath) : generateSystemdService(paths.logPath);
 
-	// Surface which operator-persisted env vars were captured into the
-	// service config. Without this, `omp gateway service install` is
-	// silent about what made it into the plist / unit file, and a
-	// follow-up `omp gateway status` or `/test/inject` 404 leaves the
-	// operator wondering why the test mode env they had in their shell
-	// isn't there.
-	const persisted = getPersistedEnvNames();
-	if (persisted.length > 0) {
-		logger.info("Persisted env into service config", { names: persisted });
+	// Surface the effective env (defaults + any operator overrides)
+	// that the generator is about to write into the plist / unit file.
+	// Without this, `omp gateway service install` is silent about what
+	// made it into the config, and a follow-up `curl /test/inject` 404
+	// leaves the operator wondering whether the test mode is even on.
+	// The `default` flag on each entry distinguishes operator-supplied
+	// values (false) from those filled in by `PERSISTED_ENV_DEFAULTS`
+	// (true), so the operator can see at a glance which came from
+	// their shell vs. which the installer chose for them.
+	const persisted = resolvePersistedEnv();
+	const persistedSummary = Object.entries(persisted).map(([name, value]) => ({
+		name,
+		value,
+		default: process.env[name] === undefined || process.env[name] === "",
+	}));
+	if (persistedSummary.length > 0) {
+		logger.info("Persisted env into service config", { entries: persistedSummary });
 	}
 
 	// Ensure config directory exists
@@ -337,6 +417,21 @@ export async function uninstallService(): Promise<void> {
 
 /**
  * Start the system service.
+ *
+ * On macOS, `launchctl bootstrap` against an already-loaded service
+ * returns errno 5 (EIO, "Input/output error") rather than the older
+ * "already bootstrapped" string. A naive bootstrap-then-throw on any
+ * non-zero exit therefore fails loudly every time the operator runs
+ * `omp gateway service start` immediately after `omp gateway service
+ * install` (install does its own bootstrap; the subsequent start hits
+ * EIO), even though the service is in fact running. The CLI prints
+ * "Bootstrap failed: 5: Input/output error" and the operator has to
+ * verify by hand that the gateway is actually up.
+ *
+ * `startService` is idempotent: it asks launchd / systemd whether the
+ * service is already running and short-circuits if so. The Linux path
+ * (`systemctl --user start`) is already idempotent; the macOS path now
+ * is too.
  */
 export async function startService(): Promise<void> {
 	const platform = detectPlatform();
@@ -344,12 +439,19 @@ export async function startService(): Promise<void> {
 	if (platform === "darwin") {
 		const paths = getServicePaths();
 		const uid = process.getuid?.() ?? 501;
-		// bootstrap loads + starts the service from plist
+
+		const status = await getServiceStatus();
+		if (status.running) {
+			logger.debug("Service already running, start is a no-op", { pid: status.pid });
+			return;
+		}
+
 		const result = await $`launchctl bootstrap gui/${uid} ${paths.configPath}`.quiet().nothrow();
-		if (result.exitCode !== 0 && !result.stderr.toString().includes("already bootstrapped")) {
+		if (result.exitCode !== 0) {
 			throw new Error(`Failed to start service: ${result.stderr}`);
 		}
 	} else {
+		// systemctl --user start is idempotent — a no-op when already active.
 		const result = await $`systemctl --user start ${SERVICE_NAME}.service`.quiet().nothrow();
 		if (result.exitCode !== 0) {
 			throw new Error(`Failed to start service: ${result.stderr}`);

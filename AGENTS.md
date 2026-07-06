@@ -354,7 +354,7 @@ For **issue reproduction** (not unit testing) — when the user reports a real D
 
 **Tool:** `packages/pi-gateway/scripts/repro-inject.ts` — POSTs a synthetic `DingTalkRawMessage` to the gateway's `POST /test/inject` endpoint. The gateway treats it as real, runs it through `channel.injectTestMessage` → the full `#handleMessage` pipeline → real `AgentBridge` → real `DingTalkChannel.sendMessage`. DM reply is sent to the actual DingTalk user (default webhooks expire in ~5 min; falls back to OAuth DM via `senderStaffId`).
 
-**Prereq (one-time per gateway start):** the running gateway must have `OMP_GATEWAY_TEST_MODE=1` and `OMP_GATEWAY_TEST_PORT=7890` set. These env vars are **NOT in the plist's `EnvironmentVariables`** — running `omp gateway service install` will wipe them. For a dev gateway, launch the foreground process with the env inline:
+**Prereq (one-time per gateway start):** the running gateway needs `OMP_GATEWAY_TEST_MODE=1` and `OMP_GATEWAY_TEST_PORT=7890`. These env vars are now written into the plist by default — a fresh `omp gateway service install` produces a gateway with the test-inject endpoint live on `127.0.0.1:7890` with no extra setup. For an opt-out (gateway without the inject endpoint), `export OMP_GATEWAY_TEST_MODE=0` before running `service install`. For ad-hoc dev runs that bypass the service installer, launch the foreground process with the env inline:
 
 ```bash
 # Kill any old gateway first (graceful):
@@ -394,7 +394,6 @@ bun run scripts/repro-inject.ts --account hr --text "试跑 daily-2000-calendar-
 **Distinction from "Gateway pipeline testing" (above):** that section is unit-level pipeline tests with a fake RPC script and `captureOutbound: true` (no real sends). This is end-to-end reproduction with real AgentBridge and real DingTalk sends — for when you need to prove the user's bug is reproducible outside the test harness, or for cron-task deliver verification where the only meaningful signal is "did DingTalk receive the message". Full Chinese usage and prereqs are in the script's header comment (`scripts/repro-inject.ts:1-49`).
 
 **Known caveats:**
-- `OMP_GATEWAY_TEST_MODE` env var is wiped by `omp gateway service install` (plist rewrite). Re-set it after every install.
 - `omp gateway service stop` waits for graceful drain. If the gateway is stuck, use `pkill -TERM` (not `kill -9`) — see "Restart gateway" above.
 - The script caches webhooks in `~/.omp/repro-state.json`. If the conversation moves to a different user, `--clear` first.
 - `omp gateway cron test-run` (CLI) and `cron.test-run` (LLM host tool) both share the same `runTestRun` core; see `packages/pi-gateway/src/scheduler/test-run.ts` and `docs/...` for the scheduler-side contract.
