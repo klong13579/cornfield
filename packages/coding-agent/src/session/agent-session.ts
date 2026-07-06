@@ -3348,7 +3348,7 @@ export class AgentSession {
 			}
 			this.#baseSystemPrompt = await this.#rebuildSystemPrompt(toolNames, tools);
 			this.agent.setSystemPrompt(this.#baseSystemPrompt);
-			logger.info("System prompt rebuilt after skill reload", {
+			logger.debug("System prompt rebuilt after skill reload", {
 				skillCount: newSkills.length,
 				skills: newSkills.map(s => s.name),
 			});
