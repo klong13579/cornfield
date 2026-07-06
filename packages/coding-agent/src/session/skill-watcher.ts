@@ -95,7 +95,7 @@ export class SkillWatcher {
 		if (this.#timer) clearTimeout(this.#timer);
 		this.#timer = setTimeout(() => {
 			this.#timer = undefined;
-			logger.info("Skill file change detected, triggering reload", { dir });
+			logger.debug("Skill file change detected, triggering reload", { dir });
 			try {
 				this.#callback();
 			} catch (error) {
