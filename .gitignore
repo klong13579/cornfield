@@ -68,3 +68,4 @@ scripts/session-stats/edit-analysis.csv
 .wt/
 .gitnexus
 packages/self-evolution/.omp
+/.claude/
