@@ -48,7 +48,6 @@ import { SearchToolBm25Tool } from "./search-tool-bm25";
 import { loadSshTool } from "./ssh";
 import { SwitchModelTool } from "./switch-model";
 import { ListModelsTool } from "./list-models";
-import { TaskBoardTool } from "./task-board";
 import { type TodoPhase, TodoWriteTool } from "./todo-write";
 import { WriteTool } from "./write";
 import { YieldTool } from "./yield";
@@ -88,7 +87,6 @@ export * from "./resolve";
 export * from "./search";
 export * from "./search-tool-bm25";
 export * from "./ssh";
-export * from "./task-board";
 export * from "./todo-write";
 export * from "./vim";
 export * from "./write";
@@ -243,7 +241,6 @@ export const BUILTIN_TOOLS: Record<string, ToolFactory> = {
 	irc: IrcTool.createIf,
 	todo_write: s => new TodoWriteTool(s),
 	web_search: s => new WebSearchTool(s),
-	task_board: s => new TaskBoardTool(s),
 	write: s => new WriteTool(s),
 	switch_model: s => new SwitchModelTool(s),
 	list_models: s => new ListModelsTool(s),

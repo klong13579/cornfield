@@ -100,6 +100,10 @@
 
 - Status line and footer show the active model as `provider/model-id` (same as CLI selectors), not display name or bare id alone.
 
+### Removed
+
+- **Task board tool, slash command, and module**: removed `task_board` agent tool, `/task-board` slash command, `task-board/` module (board + index + renderer + types), tool prompt, three unit tests, and the related `BUILTIN_TOOLS` registration in `src/tools/index.ts`, `handleTaskBoardCommand` + `#handleTaskBoardAdd` in `src/modes/controllers/command-controller.ts`, the `handleTaskBoardCommand` field on the `InteractiveModeContext` interface in `src/modes/types.ts`, and the `/task-board` entry in `src/slash-commands/builtin-registry.ts`. The two `.omp/skills/{to-issues,to-prd}` skills (whose sole purpose was to publish to the task board) and the `task_board` example reference in `.omp/skills/writing-great-skills/SKILL-TEMPLATE.md` were removed in the same change. The stale `task_board` references in `docs/todo/multi-agent-orchestration-design.md` (the kanban design notes treating it as a starting point) were also cleaned up.
+
 ## [14.5.11] - 2026-04-30
 ### Breaking Changes
 

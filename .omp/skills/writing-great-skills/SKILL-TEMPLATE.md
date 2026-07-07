@@ -15,7 +15,7 @@
 | 由另一个 skill 委派过来，不做自己工作 | **Routing** | `grill-me`（→ `grilling`） |
 | 主体是规则、定义、对照表，无固定步骤 | **Reference** | `domain-modeling`、这个文件本身 |
 | 先做检查清单，通过后才能继续 | **Gate** | `context-mode-ops`（claim verification / TDD / grill-me 三道门） |
-| 每次调用产出固定格式的文档 | **Template** | `to-prd`、`to-issues` |
+| 每次调用产出固定格式的文档 | **Template** | `grill-with-docs`（产出 ADR / glossary） |
 
 > 也可以混合：Process 尾部加 Gates 段落、Branch 每个分支底部套 Template——但守住**一个文件只有一个主线结构**。
 

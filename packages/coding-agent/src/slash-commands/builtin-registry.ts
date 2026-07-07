@@ -356,21 +356,6 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<BuiltinSlashCommandSpec> = [
 		},
 	},
 	{
-		name: "task-board",
-		description: "Show OMP task board (development progress tracking)",
-		subcommands: [
-			{ name: "list", description: "List all topics" },
-			{ name: "add", description: "Add a new topic interactively" },
-			{ name: "show", description: "Show topic details (requires topic ID)" },
-			{ name: "filter", description: "Filter topics by status/module/tag" },
-		],
-		allowArgs: true,
-		handle: async (command, runtime) => {
-			runtime.ctx.editor.setText("");
-			await runtime.ctx.handleTaskBoardCommand(`/${command.name} ${command.args}`);
-		},
-	},
-	{
 		name: "context",
 		description: "Show estimated context usage breakdown",
 		handle: (_command, runtime) => {

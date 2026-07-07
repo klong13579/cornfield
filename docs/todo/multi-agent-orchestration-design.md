@@ -215,7 +215,6 @@
 | `SchedulerEngine` | `pi-gateway/src/scheduler/engine.ts` | Dispatcher 的 tick 基础设施 |
 | `SchedulerDbStorage` | `pi-gateway/src/scheduler/storage.ts` | SQLite 持久化基础 |
 | `runSubprocess` | `coding-agent/src/task/executor.ts` | 一次性 worker spawn 机制 |
-| `task_board` 工具 | `coding-agent/src/tools/task-board.ts` | kanban 工具集的起点（需要大改：YAML → SQLite + 状态机） |
 | `swarm-extension` DAG | `swarm-extension/src/dag.ts` | 任务依赖图（parent→child promotion） |
 | DingTalk account → agentDir 绑定 | `gateway.json` channels 配置 | lane 声明的基础 |
 
@@ -227,7 +226,7 @@
 | **任务状态机** | `triage → todo → ready → running → blocked → done` + 依赖 promotion | 中 |
 | **Dispatcher** | gateway 内嵌，tick 扫 ready → 原子 claim → spawn omp 进程 → PID 监控 → crash reclaim | 高。但 `SchedulerEngine` 的 tick 框架可复用 |
 | **Worker spawn 机制** | `Bun.spawn(["omp", ...])` + `OMP_KANBAN_TASK` 环境变量注入 + `kanban_*` 工具集翻转 | 中。`runSubprocess` 已有 spawn 能力 |
-| **`kanban_*` 工具集** | `kanban_show` / `kanban_list` / `kanban_complete` / `kanban_block` / `kanban_heartbeat` / `kanban_comment` / `kanban_create` / `kanban_link` | 高。现有 `task_board` 只有 list/show/filter/add |
+| **`kanban_*` 工具集** | `kanban_show` / `kanban_list` / `kanban_complete` / `kanban_block` / `kanban_heartbeat` / `kanban_comment` / `kanban_create` / `kanban_link` | 高。需从零起建，无现有工具可复用 |
 | **Lane 声明 + agent.yml** | gateway 配置加 lanes 段 + 每个 agentDir 加 `agent.yml` 能力声明 | 低 |
 | **Goal-mode** | worker prompt 注入 goal + budget 上限 + 自判逻辑 | 中。prompt 工程 + budget 计数器 |
 | **Orchestrator judge** | parent task 的 assignee 在所有 child done 后醒来，评估 + override | 中 |
@@ -349,7 +348,6 @@ P1 和 P2 是必须在设计阶段就回答的——不是"以后优化"，是"�
 | Cron 路径禁用工具 | `packages/pi-gateway/src/gateway.ts:1159` | 禁用 `["cronjob", "messaging"]`，安全措施 |
 | `swarm-extension` | `packages/swarm-extension/` | DAG 编排器，`runSubprocess` + 共享文件系统通信 |
 | `runSubprocess` | `packages/coding-agent/src/task/executor.ts:447` | 实际是 in-process 执行（注释写 "Run a single agent in-process"） |
-| `task_board` 工具 | `packages/coding-agent/src/tools/task-board.ts` | 项目进度跟踪器（YAML），不是 work queue，需大改 |
 | Hermes Kanban 文档 | `https://hermes-agent.nousresearch.com/docs/user-guide/features/kanban` | 直接原型 |
 | Hermes Kanban Tutorial | `https://hermes-agent.nousresearch.com/docs/user-guide/features/kanban-tutorial` | 四种使用场景 |
 | Hermes per-profile cap PR | `https://github.com/NousResearch/hermes-agent/pull/34244` | 并发上限参考 |

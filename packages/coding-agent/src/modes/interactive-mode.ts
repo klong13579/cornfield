@@ -1437,10 +1437,6 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.#commandController.handleToolsCommand();
 	}
 
-	handleTaskBoardCommand(text: string): Promise<void> {
-		return this.#commandController.handleTaskBoardCommand(text);
-	}
-
 	handleContextCommand(): void {
 		this.#commandController.handleContextCommand();
 	}
