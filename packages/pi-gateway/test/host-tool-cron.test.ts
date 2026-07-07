@@ -49,6 +49,7 @@ class StubRegistry {
 function stubBridge(activeChat: InboundMessage | undefined): AgentBridge {
 	return {
 		getActiveChatContext: () => activeChat,
+		getActiveSessionPath: () => undefined,
 	} as unknown as AgentBridge;
 }
 
@@ -385,7 +386,6 @@ describe("cron host tool — scheduleType derivation", () => {
 						getBridge: () => stubBridge(DM_MSG),
 						registry: registry as unknown as ChannelRegistry,
 						getStorage: () => storage,
-						accountId: "hr",
 						accountId: "hr",
 					});
 					return tools[0]!.handle({ action: "list" });
@@ -892,7 +892,7 @@ describe("cron host tool — test-run action", () => {
 		expect(after?.scheduleType).toBe("cron");
 	});
 
-	it("the LLM host tool's test-run action returns the same result struct", async () => {
+	it("the LLM host tool's test-run action returns the fire-and-forget acknowledgement", async () => {
 		const { id } = seedTask({ name: "via-host-tool" });
 		seedTerminalExecution(id, "success", 0);
 
@@ -908,14 +908,24 @@ describe("cron host tool — test-run action", () => {
 		const body = await tools[0]!.handle({
 			action: "test-run",
 			name: "via-host-tool",
-			inMs: 30_000,
+			inMs: 120_000,
 			testTimeoutMs: 5_000,
 		});
 		const { text, isError } = asText(body);
+		// Fire-and-forget: the host tool returns the `started`
+		// acknowledgement (not the eventual `success`); the real
+		// result comes via the cron session's AI Card, not this
+		// `tool_result`. The LLM should not see `isError: true` for
+		// a successfully scheduled test-run.
 		expect(isError).toBe(false);
 		const result = JSON.parse(text);
-		expect(result.kind).toBe("success");
-		expect(result.scheduleRestored).toBe(true);
+		expect(result.kind).toBe("started");
+		// `scheduleRestored` is sync-only (CLI path). The LLM
+		// host-tool's fire-and-forget path does not (and cannot)
+		// synchronously report whether the schedule was later
+		// restored — that's the engine's post-fire responsibility
+		// (engine.ts#restoreTestRunSchedule).
+		expect(result.scheduleRestored).toBeUndefined();
 	});
 
 	it("the LLM host tool's test-run returns isError=true on task_not_found", async () => {

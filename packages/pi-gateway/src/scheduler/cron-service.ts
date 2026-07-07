@@ -19,6 +19,7 @@ import {
 } from "./diagnostics";
 import { appendDeliveryFailureLog, appendExecutionLog } from "./execution-log";
 import { executeScheduledCommand, SILENT_MARKER } from "./executor";
+import { readTestRunMarker } from "./test-run-marker";
 import type { ScheduledTask, SchedulerStorage, TaskExecution } from "./types";
 
 /** Logger contract consumed by CronService. */
@@ -67,6 +68,19 @@ export type DeliverFn = (params: {
 		output: string;
 		error?: string;
 	};
+	/**
+	 * Origin IM session for the LLM `cron.test-run` host tool path.
+	 * Captured at the START of `onTrigger` (before the agent runs) so
+	 * the notifier can push a follow-up prompt to the LLM even if
+	 * the test-run marker has been consumed by orphan recovery
+	 * during a long-running agent execution. See
+	 * `CronLifecycle.notifyOriginSessionIfPending` (B 方案).
+	 *
+	 * `accountId` selects the per-account bridge that the notifier
+	 * dispatches against. Required in multi-account gateways — the
+	 * default `bridge` may not be the one that ran the test-run.
+	 */
+	origin?: { sessionPath: string; accountId: string };
 }) => Promise<{ ok: boolean; error?: string }>;
 
 /**
@@ -435,6 +449,31 @@ export class CronService {
 		const agentDir = resolveAgentDir(task);
 		const cronContextPrefix = buildCronContextPrefixFromStorage(task, storage);
 
+		// B 方案: capture the test-run marker at the START of onTrigger
+		// so we have the origin session path even if orphan recovery
+		// consumes the marker during the long agent run. Reading
+		// happens BEFORE the agent runs, so the race window is closed
+		// for this onTrigger. We pass the captured origin to the
+		// deliver call below; the notifier uses it directly instead
+		// of re-reading the marker (which may be gone by then).
+		// Without this, a long-running agent that takes longer than
+		// the marker's expiresAt causes the orphan recovery to
+		// consume the marker, and the LLM never gets the result
+		// follow-up.
+		//
+		// We also capture `accountId` (resolved from agentDir via
+		// `resolveAccountId`) so the notifier can pick the right
+		// per-account bridge in multi-account gateways. The default
+		// `bridge` may not be the one that ran the test-run.
+		let capturedOrigin: { sessionPath: string; accountId: string } | undefined;
+		if (task.cron && /^\+\d+s$/.test(task.cron)) {
+			const marker = readTestRunMarker(storage.getMarkerBaseDir?.());
+			if (marker?.origin) {
+				const originAccountId = resolveAccountId ? resolveAccountId(agentDir) : undefined;
+				capturedOrigin = { sessionPath: marker.origin.sessionPath, accountId: originAccountId ?? "" };
+			}
+		}
+
 		let exitCode = 0;
 		let output = "";
 		let stderr = "";
@@ -633,6 +672,12 @@ export class CronService {
 						: output,
 					error: stderr || undefined,
 				},
+				// B 方案: forward the captured origin so the notifier
+				// can push a follow-up prompt to the LLM even if the
+				// test-run marker was consumed by orphan recovery
+				// during the long agent run. `undefined` for non-test-run
+				// or pre-B tasks — the notifier silently no-ops.
+				origin: capturedOrigin,
 			});
 
 			if (!deliverResult.ok) {

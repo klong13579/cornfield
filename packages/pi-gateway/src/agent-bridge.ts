@@ -355,6 +355,21 @@ export class AgentBridge {
 		return this.#activeChatContext;
 	}
 
+	/**
+	 * Public hook for host tools (cron) to read the OMP session path
+	 * the bridge is currently operating on. The LLM `cron.test-run`
+	 * host tool uses this to stamp the origin on the test-run marker
+	 * so the post-delivery notifier can push the result back to the
+	 * same session. Returns `undefined` when no prompt is active or
+	 * the active prompt is sessionless (cron path). The value is
+	 * set by `forwardWithMeta` from the SessionRecord passed in by
+	 * the SessionManager; it is the same `ompSessionPath` the
+	 * bridge will write the response to.
+	 */
+	getActiveSessionPath(): string | undefined {
+		return this.#activeSessionPath;
+	}
+
 	#setActiveChatContext(msg: import("./types").InboundMessage): void {
 		this.#activeChatContext = msg;
 	}

@@ -11,6 +11,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { isEnoent, logger } from "@oh-my-pi/pi-utils";
+import { clearTestRunMarker, readTestRunMarker } from "./test-run-marker";
 import { pruneAllLogs, readExecutionLog } from "./execution-log";
 import type { ScheduledTask, SchedulerStorage, TaskExecution } from "./types";
 import { generateExecutionId, generateTaskId, getSchedulerDir } from "./types";
@@ -208,6 +209,101 @@ export class JsonFileStorage implements SchedulerStorage {
 		this.#ensureLoaded();
 		this.#tasks.delete(id);
 		this.#flush();
+	}
+
+	/**
+	 * Consume a leftover test-run restore marker (if any) and apply
+	 * the snapshot to the in-memory task. Called by the gateway on
+	 * startup and on every scheduler tick — both cheap (a single
+	 * `fs.existsSync` per call) and idempotent (no-op if no marker
+	 * or no matching task).
+	 *
+	 * Why this matters: if the test-run process (CLI or LLM) dies
+	 * between writing the marker and clearing it in `finally`, the
+	 * task is left on a one-shot schedule and the in-memory map is
+	 * stale. The next engine tick sees the past-dated `+120s once`
+	 * and auto-disables the task. This method is the safety net:
+	 * the gateway heals the schedule before the engine can break it.
+	 *
+	 * Returns `true` if a marker was consumed (i.e. a restore
+	 * happened), `false` otherwise. Callers can use the return to
+	 * decide whether to reload the engine.
+	 */
+	consumeOrphanTestRunMarker(): boolean {
+		this.#ensureLoaded();
+		const marker = readTestRunMarker(this.getMarkerBaseDir());
+		if (!marker) return false;
+		// Same-process marker is an in-flight test-run, NOT an orphan —
+		// UNLESS it carries an `awaitingFire: true` flag AND its
+		// `expiresAt` deadline has passed. The flag means the host tool
+		// already returned (it's not polling); the deadline means the
+		// engine should have fired the task by now. In that case, the
+		// engine's post-fire restore either already ran (and the marker
+		// should be gone — we wouldn't be here) or never ran (engine
+		// failed to fire; rare but possible after a schedule race or
+		// a gateway restart between marker write and engine reload).
+		// Recovering here is the right move: the task is stuck on
+		// `+<n>s once` with `nextRunAt` in the past, and the engine's
+		// own grace-period logic will disable it on the next tick.
+		//
+		// Cross-process markers (CLI test-run in a separate process, or
+		// a previous gateway instance) are always recoverable —
+		// they're true orphans.
+		const sameProcess = marker.pid === process.pid;
+		const awaitingFireExpired =
+			marker.awaitingFire === true &&
+			marker.expiresAt !== undefined &&
+			Date.now() > marker.expiresAt;
+		if (sameProcess && !awaitingFireExpired) {
+			return false;
+		}
+		const existing = this.#tasks.get(marker.taskId);
+		if (!existing) {
+			// Task was deleted while test-run was in flight. Nothing
+			// to restore; just clear the marker.
+			clearTestRunMarker(this.getMarkerBaseDir());
+			logger.info("[test-run] orphan marker for deleted task; cleared", {
+				taskId: marker.taskId,
+				taskName: marker.taskName,
+			});
+			return false;
+		}
+		const snap = marker.snapshot;
+		this.#tasks.set(marker.taskId, {
+			...existing,
+			cron: snap.cron,
+			scheduleType: snap.scheduleType,
+			nextRunAt: snap.nextRunAt,
+			status: snap.status,
+			lastRunAt: snap.lastRunAt,
+			runCount: snap.runCount,
+			failCount: snap.failCount,
+			consecutiveFailures: snap.consecutiveFailures,
+			repeatCompleted: snap.repeatCompleted,
+			lastDeliveryError: snap.lastDeliveryError,
+			updatedAt: Date.now(),
+		});
+		this.#flush();
+		clearTestRunMarker(this.getMarkerBaseDir());
+		logger.warn("[test-run] recovered orphan marker; restored schedule", {
+			taskId: marker.taskId,
+			taskName: marker.taskName,
+			restoredCron: snap.cron,
+			originalPid: marker.pid,
+		});
+		return true;
+	}
+
+	/**
+	 * Returns the directory containing the test-run restore marker.
+	 * The marker lives next to `jobs.json`; the notifier in
+	 * `CronLifecycle.notifyOriginSessionIfPending` reads from this
+	 * directory. Tests inject a custom `jobsPath` via the
+	 * `JsonFileStorage` constructor to redirect both `jobs.json` and
+	 * the marker into a tempdir.
+	 */
+	getMarkerBaseDir(): string {
+		return path.dirname(this.#jobsPath);
 	}
 
 	// ── Execution operations ────────────────────────────────────────────

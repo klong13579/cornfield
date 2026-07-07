@@ -3,7 +3,7 @@
  * `cron` host tool.
  *
  * A test-run is a **verification path**: it temporarily rewrites a task
- * to a one-shot schedule (e.g. `+90s` once), waits for the gateway
+ * to a one-shot schedule (e.g. `+120s` once), waits for the gateway
  * scheduler to fire it, then restores the original schedule. This is
  * the only way to exercise the **end-to-end pipeline** (warm bridge →
  * agent run → DingTalk delivery) without waiting for the real cron
@@ -31,20 +31,26 @@
 
 import { logger } from "@oh-my-pi/pi-utils";
 import type { SchedulerStorage, TaskExecution } from "./types";
+import {
+	clearTestRunMarker,
+	type TestRunOrigin,
+	type TestRunSnapshot,
+	writeTestRunMarker,
+} from "./test-run-marker";
 
 /**
  * Options for the shared test-run core.
  *
  * `inMs` and `timeoutMs` semantics:
  *   - `inMs` — how long from now until the one-shot fires. Default
- *     90_000ms (1.5x the default 60s gateway tick; reliable in normal
+ *     120_000ms (2x the default 60s gateway tick; reliable in normal
  *     configurations). Anything < 2x the gateway tick is in the
  *     "racy zone" — see {@link TestRunWarning}.
  *   - `timeoutMs` — after the one-shot has fired, how long to wait for
  *     the agent run to reach a terminal state (success / failure with
  *     exit code). Default 30_000ms.
  *   - Total tool call wall-time = inMs + timeoutMs. With defaults:
- *     120s. LLM tool calls can run this long; the OMP host-tool
+ *     150s. LLM tool calls can run this long; the OMP host-tool
  *     bridge imposes no client-side timeout. AbortSignal is honored
  *     on the polling loop and restores the schedule in `finally`.
  *
@@ -53,6 +59,25 @@ import type { SchedulerStorage, TaskExecution } from "./types";
  * configured value. Used to warn when `inMs` lands in the racy zone
  * (< 2x tick). The CLI default is also 60_000; the cron tool threads
  * the gateway's actual config through {@link CronToolContext}.
+ *
+ * `awaitResult` (default `true`) — the CLI keeps the legacy
+ * poll-and-restore behavior. The LLM host tool passes `false`:
+ *   - Snapshots the task, rewrites to one-shot, writes the marker
+ *     (with `awaitingFire: true` and `expiresAt`), reloads the
+ *     scheduler, and returns `{ kind: "started" }` immediately.
+ *   - Does NOT poll, restore, or clear the marker.
+ *   - The engine's post-fire restore (engine.ts#restoreTestRunSchedule)
+ *     picks up the marker after the one-shot fires and applies the
+ *     snapshot back.
+ *   - If the engine never fires (rare: schedule race / gateway restart
+ *     / tick skipped), orphan recovery picks it up after `expiresAt`.
+ *
+ * Why fire-and-forget for the LLM path: the previous sync path
+ * blocked the LLM's `runExclusive` for `inMs + timeoutMs` (default
+ * 150s), during which no session events fired, tripping the
+ * agent-bridge watchdog at 60s and killing the LLM. Fire-and-forget
+ * unblocks the LLM in milliseconds; the actual run + card delivery
+ * proceed through the same pipeline the real cron tick uses.
  */
 export interface RunTestRunOptions {
 	name: string;
@@ -61,6 +86,13 @@ export interface RunTestRunOptions {
 	noRestore?: boolean;
 	/** Gateway scheduler reload interval. Used to flag racy inMs values. */
 	tickIntervalMs: number;
+	/**
+	 * If `false` (LLM host tool path), return `{ kind: "started" }`
+	 * immediately after writing the marker. The schedule rewrite +
+	 * marker are the only mutations. Default `true` (CLI path)
+	 * preserves the poll-and-restore behavior.
+	 */
+	awaitResult?: boolean;
 	/** AbortSignal from the host-tool caller. Polling stops on abort and
 	 *  the schedule snapshot is restored in `finally`. */
 	signal?: AbortSignal;
@@ -86,6 +118,23 @@ export interface RunTestRunOptions {
 	 * always times out.
 	 */
 	reloadScheduler?: () => void;
+	/**
+	 * Override the directory used for the restore marker file. The
+	 * default is the gateway's scheduler dir. Tests pass a tempdir
+	 * so they don't pollute the real `~/.omp/gateway-data/`. Production
+	 * callers leave this alone.
+	 */
+	markerBaseDir?: string;
+	/**
+	 * Origin IM session. When set, written into the marker so the
+	 * post-delivery notifier (`CronLifecycle.#maybeNotifyOriginSession`)
+	 * can push a new prompt to this session after the task completes.
+	 * Only meaningful for the LLM `cron.test-run` host tool path
+	 * (awaitResult=false); CLI callers pass `undefined`. Without an
+	 * origin, the notifier silently no-ops — backward compatible
+	 * with all pre-B markers.
+	 */
+	origin?: TestRunOrigin;
 }
 
 /** Hard error — task not found, etc. The caller surfaces this to the
@@ -94,6 +143,23 @@ export interface RunTestRunOptions {
 export interface TestRunHardError {
 	kind: "task_not_found";
 	name: string;
+}
+
+/**
+ * Fire-and-forget acknowledgement (LLM host tool path with
+ * `awaitResult: false`). The schedule rewrite and marker write
+ * have happened; the engine will fire the task, the cron service
+ * will run it, the card will be delivered, and the engine's
+ * post-fire restore will put the schedule back. The LLM is free
+ * to continue its turn. The user gets the result via the card.
+ */
+export interface TestRunStarted {
+	kind: "started";
+	name: string;
+	inMs: number;
+	timeoutMs: number;
+	expiresAt: number;
+	startedAt: number;
 }
 
 /** Soft error — the trigger fired (or didn't) but the result is not a
@@ -146,15 +212,29 @@ export interface TestRunAborted {
 }
 
 /** Tagged result union. The caller pattern-matches on `kind`. */
-export type TestRunResult = TestRunSuccess | TestRunSoftError | TestRunAborted;
+export type TestRunResult = TestRunSuccess | TestRunSoftError | TestRunAborted | TestRunStarted;
 
-const DEFAULT_IN_MS = 5_000;
-const DEFAULT_TIMEOUT_MS = 10_000;
+// DEFAULT_IN_MS is exported for tests and tooling that want to
+// assert the production default. Runtime callers go through
+// `runTestRun`'s `inMs` parameter (which defaults to this value);
+// the LLM host tool surfaces the value to the model in its
+// parameter description.
+export const DEFAULT_IN_MS = 120_000;
+// DEFAULT_IN_MS = 120s = 2x the default 60s gateway tick. Anything
+// shorter is in the "racy zone" (1x–2x tick) where the engine tick
+// may load the new schedule AFTER next_run_at and auto-disable the
+// task. The LLM host tool and CLI both surface this as the default
+// when the caller does not pass `inMs`; unit tests call runTestRun
+// directly with shorter values and bypass the default.
+const DEFAULT_TIMEOUT_MS = 30_000;
 // Lower bounds are intentionally tiny (1s) so tests and operator
 // workflows can use short values (e.g. `--in 1s` for a quick
 // verification). The racy-zone warning in `runTestRun` still fires
 // for short inMs relative to the gateway tick; the clamp is just a
-// sanity rail against negative / zero / sub-second inputs.
+// sanity rail against negative / zero / sub-second inputs. Hard
+// rejection of sub-tick values happens at the entry points (host
+// tool / CLI) so the LLM/operator gets a clear error rather than
+// a silent 60s wait.
 const MIN_IN_MS = 1_000;
 const MAX_IN_MS = 600_000; // 10 min — keeps total tool call bounded
 const MIN_TIMEOUT_MS = 1_000;
@@ -180,9 +260,12 @@ export async function runTestRun(opts: RunTestRunOptions): Promise<TestRunResult
 		timeoutMs = DEFAULT_TIMEOUT_MS,
 		noRestore = false,
 		tickIntervalMs = DEFAULT_TICK_MS,
+		awaitResult = true,
 		signal,
 		storage,
 		pollIntervalMs = POLL_INTERVAL_MS,
+		markerBaseDir,
+		origin,
 	} = opts;
 
 	// Clamp. The lower bounds are safety rails (don't let the LLM pick
@@ -293,10 +376,69 @@ export async function runTestRun(opts: RunTestRunOptions): Promise<TestRunResult
 		status: "active",
 		updatedAt: Date.now(),
 	});
+
+	// Persist a restore marker BEFORE the schedule mutation takes
+	// effect. The marker is the safety net for crash / SIGKILL paths
+	// where `finally` never runs. Cleared in `finally` after the
+	// successful restore below; orphan markers are picked up by the
+	// gateway on startup / tick.
+	//
+	// For the fire-and-forget path (awaitResult=false), the marker
+	// gets `awaitingFire: true` and an `expiresAt` deadline. The
+	// engine's post-fire restore consumes it after the task fires;
+	// orphan recovery consumes it if the engine never fires before
+	// `expiresAt`.
+	const markerExpiresAt = startedAt + cappedInMs + 90_000;
+	writeTestRunMarker(
+		task,
+		snapshot,
+		startedAt,
+		markerBaseDir,
+		process.pid,
+		awaitResult
+			? origin
+				? { origin }
+				: undefined
+			: {
+					awaitingFire: true,
+					expiresAt: markerExpiresAt,
+					...(origin ? { origin } : {}),
+				},
+	);
+
 	// Reload the scheduler engine so it picks up the one-shot
 	// schedule. Without this, the engine's in-memory task map never
 	// sees the change and no setTimeout is created.
 	opts.reloadScheduler?.();
+
+	// Fire-and-forget fast path (LLM host tool). The schedule is
+	// rewritten, the marker is on disk, the engine has been reloaded
+	// to pick up the one-shot timeout. The LLM gets the result of
+	// this call in milliseconds instead of `inMs + timeoutMs`,
+	// which is what kills the agent-bridge watchdog in the legacy
+	// poll path (60s inactivity while the LLM awaits tool_result).
+	// The cron service will still run the task on the next engine
+	// tick, the card will still be delivered, and the engine's
+	// post-fire restore will put the schedule back. Orphan recovery
+	// is the safety net for the rare case where the engine fails
+	// to fire before `expiresAt`.
+	if (!awaitResult) {
+		logger.info("[test-run] fire-and-forget started", {
+			taskId: task.id,
+			taskName: task.name,
+			inMs: cappedInMs,
+			timeoutMs: cappedTimeoutMs,
+			expiresAt: markerExpiresAt,
+		});
+		return {
+			kind: "started",
+			name: task.name,
+			inMs: cappedInMs,
+			timeoutMs: cappedTimeoutMs,
+			expiresAt: markerExpiresAt,
+			startedAt,
+		};
+	}
 
 	let restored = false;
 	const restoreSnapshot = () => {
@@ -385,6 +527,7 @@ export async function runTestRun(opts: RunTestRunOptions): Promise<TestRunResult
 		}
 	} finally {
 		restoreSnapshot();
+		clearTestRunMarker(markerBaseDir);
 	}
 
 	// Patch `scheduleRestored` on all result kinds with the actual

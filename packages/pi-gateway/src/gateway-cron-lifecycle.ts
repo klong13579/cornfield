@@ -7,7 +7,7 @@
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger, prompt } from "@oh-my-pi/pi-utils";
 import type { AgentBridge } from "./agent-bridge";
 import type { AICardTarget } from "./channels/dingtalk-card";
 import { mirrorDeliveryToSession } from "./scheduler/attach-to-session";
@@ -21,6 +21,7 @@ import type { SchedulerStorage } from "./scheduler/types";
 import { DEFAULT_SCHEDULER_CONFIG, getSchedulerDir } from "./scheduler/types";
 import { cronSessionPath } from "./session-paths";
 import type { DingTalkConfig, GatewayConfig, OutboundMessage } from "./types";
+import testRunCompletionTemplate from "./scheduler/prompts/test-run-completion.md" with { type: "text" };
 
 /** Interface for the subset of Gateway that CronLifecycle needs. */
 export interface CronGatewayDeps {
@@ -170,9 +171,33 @@ export class CronLifecycle {
 
 		this.#schedulerEngine.start();
 
+		// Consume any orphan test-run restore marker from a previous
+		// gateway lifecycle. If the previous gateway (or a CLI test-run)
+		// died between writing the marker and clearing it in `finally`,
+		// the in-memory task map and the on-disk task may both be on
+		// the one-shot schedule. The recovery is idempotent and cheap
+		// (single `fs.existsSync` + no-op if absent). After recovery,
+		// reload the engine so it picks up the restored schedule.
+		if (this.#schedulerStorage) {
+			const recovered = this.#schedulerStorage.consumeOrphanTestRunMarker();
+			if (recovered) {
+				this.#schedulerEngine.reload();
+			}
+		}
+
 		const tickMs = cronConfig.tickIntervalMs ?? 60_000;
 		let tickCount = 0;
 		this.#watchInterval = setInterval(() => {
+			// Check for an orphan test-run marker on every tick. This
+			// is the safety net for cases where the test-run process
+			// (CLI or LLM session) died AFTER writing the marker but
+			// BEFORE its `finally` could clear it. The CLI's own
+			// `process.on("exit")` handler is the primary path; this
+			// tick handler is the belt-and-suspenders for both CLI
+			// and LLM paths when the gateway itself stays alive.
+			if (this.#schedulerStorage?.consumeOrphanTestRunMarker()) {
+				this.#schedulerEngine?.reload();
+			}
 			this.#schedulerFileStore?.syncToDb();
 			this.#schedulerEngine?.reload();
 			this.#deps.writeStatusFile();
@@ -320,6 +345,14 @@ export class CronLifecycle {
 			output: string;
 			error?: string;
 		};
+		/**
+		 * B 方案: origin session path for the LLM `cron.test-run` host
+		 * tool. Captured at the start of `onTrigger` and passed
+		 * through. The notifier uses this directly instead of
+		 * re-reading the marker (which may have been consumed by
+		 * orphan recovery during a long agent run).
+		 */
+		origin?: { sessionPath: string; accountId: string };
 	}): Promise<{ ok: boolean; error?: string }> {
 		// Dispatch by `cron.deliveryMode` (default "card"). The text
 		// path is the legacy fallback; "text" mode skips cards entirely
@@ -329,6 +362,7 @@ export class CronLifecycle {
 		const mode = this.#deps.config.cron?.deliveryMode ?? "card";
 		const card = params.card;
 
+		let result: { ok: boolean; error?: string };
 		if (mode === "card" && card) {
 			const cardResult = await this.#deliverAsCard({
 				card,
@@ -337,21 +371,45 @@ export class CronLifecycle {
 				toUserId: params.toUserId,
 				toConversationId: params.toConversationId,
 			});
-			if (cardResult.ok) return cardResult;
-
-			logger.warn("Cron card delivery failed, falling back to text", {
-				taskId: card.taskId,
-				taskName: card.taskName,
-				error: cardResult.error,
-			});
-			// Fall through to text path below.
+			if (cardResult.ok) {
+				result = cardResult;
+			} else {
+				logger.warn("Cron card delivery failed, falling back to text", {
+					taskId: card.taskId,
+					taskName: card.taskName,
+					error: cardResult.error,
+				});
+				// Fall through to text path below.
+				result = await this.#deliverAsText(params);
+			}
 		} else if (mode === "card" && !card) {
 			logger.debug("Cron card mode requested but no card payload supplied, using text", {
 				taskName: params.text.slice(0, 80),
 			});
+			result = await this.#deliverAsText(params);
+		} else {
+			result = await this.#deliverAsText(params);
 		}
 
-		return await this.#deliverAsText(params);
+		// After the user-facing delivery (card or text), push a new
+		// prompt to the LLM's origin IM session so the LLM sees the
+		// result in its next turn. This is the B 方案 layer on top
+		// of the fire-and-forget host tool: the LLM called
+		// `cron.test-run`, got an immediate `{ kind: "started" }`
+		// acknowledgement, told the user the test-run was scheduled,
+		// and now — after the actual run + card delivery — gets a
+		// follow-up turn with status / duration / preview.
+		//
+		// Best-effort: every failure is log + return. We never block
+		// the cron delivery path on this; the notifier is
+		// fire-and-forget (the `void ... .catch` pattern below).
+		// The notifier does not own the marker — engine post-fire
+		// restore still owns that.
+		if (card) {
+			this.notifyOriginSessionIfPending(card, result.ok, params.origin);
+		}
+
+		return result;
 	}
 
 	/**
@@ -453,6 +511,112 @@ export class CronLifecycle {
 		}
 		return result;
 	}
+
+	/**
+	 * After the user-facing card / text delivery completes, push a new
+	 * prompt to the LLM's origin IM session so the LLM sees the result
+	 * in its next turn. The origin session path is captured at the
+	 * START of `onTrigger` (before the agent runs) and passed in via
+	 * `origin`. We do NOT re-read the marker here — orphan recovery
+	 * may have consumed it during a long agent run.
+	 *
+	 * Best-effort. Three silent-return failure modes:
+	 *   1. No origin supplied — not a test-run, or pre-B legacy.
+	 *      Skip.
+	 *   2. No bridge is running — nothing to dispatch on. Log + skip.
+	 *   3. `bridge.executePrompt` throws — session closed, circuit
+	 *      open, or transport down. Log + skip; never retry.
+	 *
+	 * Fire-and-forget: the call is dispatched but the function does
+	 * NOT await it. Awaiting would block the cron delivery path for
+	 * up to the LLM tool timeout (60s) on every test-run. The
+	 * `runExclusive` queue on the bridge still serializes the call
+	 * against the cron task's own `executePrompt`; we just don't
+	 * wait for the result.
+	 *
+	 * Named without the `#` private-field prefix so tests can access
+	 * it via `(lifecycle as any).notifyOriginSessionIfPending(...)`.
+	 * The method is internal to the gateway lifecycle and not part
+	 * of any public API; tests reach in only to exercise the
+	 * notifier's silent-return paths.
+	 */
+	notifyOriginSessionIfPending(
+		card: {
+			taskName: string;
+			taskId: string;
+			slug: string;
+			status: "success" | "failure" | "timed_out";
+			exitCode: number | undefined;
+			durationMs: number;
+			output: string;
+			error?: string;
+		},
+		cardOk: boolean,
+		origin?: { sessionPath: string; accountId: string },
+	): void {
+		// No origin → not a test-run, or pre-B legacy. Silent return.
+		if (!origin) {
+			return;
+		}
+
+		// Pick the bridge that ran the test-run. Multi-account
+		// gateways have separate bridges per account; the default
+		// `bridge` may not be the one that ran the test-run (and may
+		// not even be running). Use `accountId` to select the right
+		// bridge from the per-account map; fall back to the default
+		// bridge if the per-account one is missing.
+		const bridge = origin.accountId
+			? (this.#deps.getAccountBridge(origin.accountId) ?? this.#deps.bridge)
+			: this.#deps.bridge;
+		if (!bridge.isRunning) {
+			logger.warn("[cron-notify] bridge not running; skipping origin notification", {
+				taskName: card.taskName,
+				accountId: origin.accountId ?? "(default)",
+			});
+			return;
+		}
+
+		const promptText = renderTestRunCompletionPrompt({
+			taskName: card.taskName,
+			status: card.status,
+			exitCode: card.exitCode,
+			durationMs: card.durationMs,
+			output: card.output,
+			error: card.error,
+			cardDelivered: cardOk,
+			recipientUserId: "", // not on the card payload; left blank in v1
+		});
+
+		logger.info("[cron-notify] pushing test-run completion to origin session", {
+			taskName: card.taskName,
+			taskId: card.taskId,
+			originSessionPath: origin.sessionPath,
+			status: card.status,
+		});
+
+		// Fire-and-forget. The bridge's runExclusive serializes the
+		// call against the cron task's own prompt (which is already
+		// done by the time we get here). We attach a catch so a
+		// throw becomes a log line, not a crash.
+		void bridge
+			.executePrompt(promptText, {
+				sessionPath: origin.sessionPath,
+				timeoutMs: 60_000,
+				inactivityMs: 30_000,
+			})
+			.then(() => {
+				logger.info("[cron-notify] pushed to origin session", {
+					taskName: card.taskName,
+				});
+			})
+			.catch((err: unknown) => {
+				const message = err instanceof Error ? err.message : String(err);
+				logger.warn("[cron-notify] executePrompt failed; origin session may be closed or bridge down", {
+					taskName: card.taskName,
+					error: message,
+				});
+			});
+	}
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -509,4 +673,41 @@ function buildCardTarget(params: { toUserId?: string; toConversationId?: string 
 		return { type: "group", openConversationId: params.toConversationId };
 	}
 	return null;
+}
+
+/**
+ * Render the test-run-completion prompt (candidate 2 — summary + card
+ * pointer). Called from `#maybeNotifyOriginSession` after the user-facing
+ * card / text delivery completes. The output becomes a new user
+ * message in the LLM's origin IM session.
+ *
+ * The `outputPreview` is the first 200 chars of the task output, with
+ * newlines collapsed to spaces (so the preview stays on one line in
+ * the rendered prompt). The full output is in the card the user
+ * already received; the preview is a fingerprint the LLM can use to
+ * recognize the run if the user references it.
+ */
+function renderTestRunCompletionPrompt(input: {
+	taskName: string;
+	status: "success" | "failure" | "timed_out";
+	exitCode: number | undefined;
+	durationMs: number;
+	output: string;
+	error: string | undefined;
+	cardDelivered: boolean;
+	recipientUserId: string;
+}): string {
+	const durationSeconds = (input.durationMs / 1000).toFixed(1);
+	const rawPreview = (input.output ?? "").replace(/\s+/g, " ").trim();
+	const outputPreview = rawPreview.length > 200 ? `${rawPreview.slice(0, 200)}…` : rawPreview;
+	return prompt.render(testRunCompletionTemplate, {
+		taskName: input.taskName,
+		status: input.status,
+		exitCode: input.exitCode,
+		durationSeconds,
+		outputPreview: outputPreview || undefined,
+		error: input.error,
+		cardDelivered: input.cardDelivered,
+		recipientUserId: input.recipientUserId || "用户",
+	});
 }

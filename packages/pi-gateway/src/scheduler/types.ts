@@ -211,6 +211,23 @@ export interface SchedulerStorage {
 	listTasks(): ScheduledTask[];
 	updateTask(id: string, updates: Partial<ScheduledTask>): void;
 	deleteTask(id: string): void;
+	/**
+	 * Recover from an orphan test-run restore marker left on disk
+	 * by a dead CLI/LLM process. The marker holds the original task
+	 * snapshot; this method applies it to the in-memory task map and
+	 * deletes the marker. Idempotent — returns false (no-op) when no
+	 * marker exists. Returns true when a marker was consumed.
+	 */
+	consumeOrphanTestRunMarker(): boolean;
+	/**
+	 * Directory where the test-run restore marker file lives. The
+	 * notifier in `CronLifecycle.notifyOriginSessionIfPending` reads
+	 * the marker from this directory (which is the same directory as
+	 * `jobs.json`). Tests inject a custom `jobsPath` so the marker
+	 * is read from a tempdir; production returns the gateway's
+	 * scheduler dir.
+	 */
+	getMarkerBaseDir(): string;
 	recordExecution(exec: Omit<TaskExecution, "id">): TaskExecution;
 	updateExecution(id: string, updates: Partial<TaskExecution>): void;
 	getExecutions(taskId: string, limit?: number): TaskExecution[];

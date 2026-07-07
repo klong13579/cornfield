@@ -116,7 +116,7 @@ const CRON_TOOL_PARAMETERS = Type.Object({
 		}),
 	),
 	// test-run-only options
-	inMs: Type.Optional(Type.Number({ description: "test-run only: delay (ms) before one-shot fires. Default 90000." })),
+	inMs: Type.Optional(Type.Number({ description: "test-run only: delay (ms) before one-shot fires. Default 120000 (2x gateway tick; values < 60000 are rejected — see racy zone below)." })),
 	testTimeoutMs: Type.Optional(
 		Type.Number({
 			description: "test-run only: max wait (ms) for agent terminal state after trigger fires. Default 30000.",
@@ -163,15 +163,22 @@ const CRON_TOOL_DEFINITION: RpcHostToolDefinition = {
 		"**`update` / `show` / `remove` / `enable` / `disable` / `runs`** take `id` or `name`. The v2 schema uses `channel` / `toUserId` / `toConversationId` (NOT v1 `deliver` / `deliverUser` / `account`). " +
 		"Since the agent owns its tasks, `show` / `update` / `remove` work on ANY task in the agent regardless of who created it. " +
 		"`runs` returns the task's execution history (also works on any task in the agent).\n\n" +
-		"**`test-run`** triggers a task through the REAL scheduler and reports the delivery verdict. " +
+		"**`test-run`** triggers a task through the REAL scheduler and reports that the trigger was scheduled. " +
 		"Use this to verify a task's end-to-end pipeline (warm bridge → agent run → DingTalk delivery) without waiting for the actual cron tick. " +
-		"**What test-run does:** snapshots the task's schedule, rewrites it to a one-shot that fires in `inMs` (default 90s = 1.5x the gateway tick), waits up to `inMs + testTimeoutMs` for the trigger to fire AND the agent to reach a terminal state, then RESTORES the original schedule. " +
-		"**Result fields:** `kind` (success / trigger_timeout / task_failed / delivery_failed / aborted), `execId`, `status`, `exitCode`, `durationMs`, `delivery: {configured, ok, error}`, `output` (truncated to 2KB), `scheduleRestored`. " +
-		"**When to use:** the user just added/updated a task and wants to confirm it works end-to-end (including the DingTalk message reaching the chat). " +
-		"**Critical:** test-run is a LONG tool call — default 90s + 30s = 120s. Do NOT call it speculatively. " +
-		"**`inMs` warning:** if `inMs` < 2x the gateway tick (default 120s), the trigger may race; the run still proceeds but the gateway logs a warning. " +
+		"**Async contract (fire-and-forget):** `test-run` returns in milliseconds with `{kind: \"started\", inMs, timeoutMs, expiresAt, startedAt}`. The actual run + card delivery happen in the background on the next engine tick + agent run cycle — the LLM is NOT blocked. " +
+		"**Why async:** the previous sync version blocked the LLM in `runExclusive` for `inMs + timeoutMs` (default 150s) while awaiting `tool_result`. The agent-bridge watchdog trips at 60s of no session events, killing the LLM with \"Agent bridge failed\". Returning immediately keeps the LLM alive. " +
+		"**What happens after the tool returns:** (1) the engine fires the rewritten one-shot at `inMs`; (2) the cron service runs the task (agent or shell) and delivers the card via the active chat's delivery config; (3) the engine's post-fire restore (`engine.ts#restoreTestRunSchedule`) reads the marker, applies the snapshot, and re-schedules the original cron expression. " +
+		"**What the LLM gets back:** just `kind: \"started\"` and the timeline (`inMs`, `expiresAt`). The actual success/failure verdict is delivered to the user as the AI Card (the same card a real cron tick would produce). " +
+		"**Checking the result later:** call `cron.runs` with the task name/id to read the execution history after `expiresAt` (default `inMs + 90s`). " +
+		"**When to use:** the user just added/updated a task and wants to confirm it works end-to-end. " +
+		"**`inMs` minimum:** runtime callers (this tool, the CLI) hard-reject `inMs < 60000` (1x gateway tick). The gateway engine tick reloads schedules from storage; if `inMs` is shorter than one tick, the reload runs AFTER `next_run_at` and the engine auto-disables the task as past-dated. Use `inMs >= 120000` (2x tick) to be safe. " +
 		"**`noRestore: true`** keeps the schedule as `+<delay>s` after the run (debug escape hatch only). " +
-		"**Cancellation:** if the user aborts mid-wait, the schedule is STILL restored in the background — a test-run never leaves a task stuck on `+<delay>s once`.",
+		"**Failure handling:** orphan-recovery safety net on every engine tick — if the engine fails to fire before `expiresAt`, the next tick restores the schedule from the marker and the task is back to its real cron. " +
+		"**CLI parity:** `omp gateway cron test-run <name>` still uses the legacy sync path (polls and reports the run + delivery verdict) — the CLI is operator-facing and the synchronous report is the operator's expectation. The LLM path is the only one that's async.\n\n" +
+	"**Delivery rendering — `cron.deliveryMode` vs `task.delivery.mode` (orthogonal, do not conflate):**\n" +
+		"- `cron.deliveryMode` (gateway config, global) — `card` (default) or `text`. Decides the RENDERING format when a task is delivered. `card` renders the result as a DingTalk AI card with buttons; `text` sends a plain IM message. Operator flips this to fleet-wide toggle card vs text.\n" +
+		"- `task.delivery.mode` (per-task) — `announce` (default) or `none`. Decides WHETHER to deliver at all. `announce` triggers delivery after the run; `none` runs silently (no DingTalk message). Set `none` for tasks whose result is just a side-effect (cleanup, sync).\n" +
+		"- They are independent: `deliveryMode: card` + `task.delivery.mode: announce` → AI card. `deliveryMode: text` + `announce` → plain text. Either combined with `none` → no message at all. Do NOT infer rendering from `task.delivery.mode`: `mode: announce` does not mean \"plain text announce channel\" — it just means \"deliver at all\", and the format follows `cron.deliveryMode`.",
 	parameters: CRON_TOOL_PARAMETERS as unknown as Record<string, unknown>,
 };
 
@@ -257,23 +264,78 @@ async function handleTestRun(args: CronToolArgs, ctx: CronToolContext): Promise<
 	// safe — just wasteful. Wiring the cancel frame through to the
 	// dispatcher is future work; for now we pass no signal and let
 	// the run complete in the background.
+	const inMs = numberArg(args, "inMs");
+	// Hard reject sub-tick inMs at the entry point so the LLM gets
+	// a clear "this won't work" instead of a silent 60–120s wait
+	// that ends in trigger_timeout. The clamp inside `runTestRun`
+	// only warns; here we refuse outright. The threshold is the
+	// gateway's own tick interval (default 60s, but tests may pass
+	// a smaller value) — sub-tick values almost always race the
+	// engine reload past `next_run_at`. Operators who really need
+	// a short inMs for an isolated test can hit the underlying
+	// `runTestRun` directly.
+	const tickMs = ctx.tickIntervalMs;
+	if (inMs !== undefined && inMs < tickMs) {
+		return errResult(
+			`test-run: inMs=${inMs} is below the gateway tick (${tickMs}ms). ` +
+				`Sub-tick values almost always race the engine reload and end in trigger_timeout. ` +
+				`Use inMs >= ${tickMs * 2}ms (2x tick) for reliable triggering.`,
+		);
+	}
+
+	// Origin: stamp the LLM's active IM session on the marker so the
+	// post-delivery notifier (`CronLifecycle.#maybeNotifyOriginSession`)
+	// can push a new prompt back to this session after the task
+	// completes — closing the loop so the LLM sees the result in
+	// its next turn. CLI test-run callers don't have a chat context
+	// and pass nothing; the notifier silently no-ops without origin.
+	//
+	// We only stamp when there is a live chat context AND a session
+	// path. Two ways the path is missing: (a) the host tool was
+	// called from a non-IM context (e.g. a one-off test invocation
+	// without an active prompt), (b) the prompt is sessionless
+	// (cron path — but that would not call this tool, since the
+	// cron path bypasses the LLM entirely). In both cases,
+	// `origin` is undefined and the notifier no-ops.
+	const bridge = ctx.getBridge();
+	const activeSessionPath = bridge.getActiveSessionPath();
+	const origin = activeSessionPath ? { sessionPath: activeSessionPath } : undefined;
+
 	const result: TestRunResult | TestRunHardError = await runTestRun({
 		name,
-		inMs: numberArg(args, "inMs"),
+		inMs,
 		timeoutMs: numberArg(args, "testTimeoutMs"),
 		noRestore: args.noRestore === true,
 		tickIntervalMs: ctx.tickIntervalMs,
+		// Fire-and-forget: the LLM does NOT block on the actual run.
+		// The previous sync path blocked `inMs + timeoutMs` (default
+		// 150s) while the LLM awaited `tool_result`, which tripped the
+		// agent-bridge watchdog at 60s ("no session event for 60s") and
+		// killed the LLM. Returning immediately unblocks the LLM; the
+		// engine's post-fire restore (engine.ts#restoreTestRunSchedule)
+		// heals the schedule after the one-shot actually fires, and
+		// the card delivery uses the same code path as a real cron
+		// tick. The LLM is told the result is "deferred" and the user
+		// gets the card.
+		awaitResult: false,
 		storage,
+		origin,
 	});
 
 	if (result.kind === "task_not_found") {
 		return errResult(`test-run: task "${result.name}" not found`);
 	}
 
-	// `isError: true` for non-success kinds so the LLM sees a failed
-	// tool call (matching the CLI's exit-1 semantics). Success returns
-	// the full result struct; the LLM can read the fields verbatim.
-	const isError = result.kind !== "success";
+	// `isError: true` for non-success, non-started kinds so the LLM
+	// sees a failed tool call. `success` is the happy path; `started`
+	// is the fire-and-forget acknowledgement (a positive result — the
+	// test-run was scheduled, the LLM is unblocked, the actual run
+	// happens in the background). Everything else (task_failed,
+	// delivery_failed, trigger_timeout) is a real error.
+	const isError =
+		result.kind === "task_failed" ||
+		result.kind === "delivery_failed" ||
+		result.kind === "trigger_timeout";
 	return {
 		type: "tool_result",
 		tool_use_id: "",
