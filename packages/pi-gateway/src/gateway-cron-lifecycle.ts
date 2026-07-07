@@ -265,6 +265,17 @@ export class CronLifecycle {
 		agentDir: string;
 		prompt: string;
 		timeoutMs?: number;
+		/**
+		 * Max time to wait for the per-account prompt queue to free up
+		 * (LLM holding the bridge on a previous turn). When exceeded, the
+		 * warm-bridge call throws with a "queue wait timed out" error and
+		 * the cron service falls back to a cold `omp --print` subprocess
+		 * so the scheduled task still runs. Defaults to 5s — short enough
+		 * that a stuck LLM turn doesn't pile a second user-visible wait
+		 * on top of an in-progress turn, long enough to absorb the
+		 * typical tool-execution / response-finalization gap.
+		 */
+		queueTimeoutMs?: number;
 		signal?: AbortSignal;
 		disabledToolsets?: string[];
 		model?: string;
@@ -310,6 +321,7 @@ export class CronLifecycle {
 				timeoutMs: params.timeoutMs,
 				sessionPath: cronSessionFilePath,
 				inactivityMs: computeInactivityBudgetMs(params.timeoutMs),
+				queueTimeoutMs: params.queueTimeoutMs ?? 5_000,
 			});
 			return { output: response };
 		} catch (err) {

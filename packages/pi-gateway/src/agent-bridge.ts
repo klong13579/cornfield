@@ -668,174 +668,192 @@ export class AgentBridge {
 
 	async executePrompt(
 		prompt: string,
-		options?: { timeoutMs?: number; sessionPath?: string; inactivityMs?: number },
+		options?: {
+			timeoutMs?: number;
+			sessionPath?: string;
+			inactivityMs?: number;
+			/**
+			 * Max time to wait for the per-account prompt queue to free up
+			 * (LLM holding the bridge on a previous turn). When exceeded, the
+			 * call throws with a "queue wait timed out" error instead of
+			 * blocking indefinitely. The cron service uses this to fall back
+			 * to a cold `omp --print` subprocess when the warm bridge is
+			 * starved by long LLM turns. Internal callers (BOOT.md,
+			 * restart-sentinel, streaming-sentinel) leave this unset and
+			 * preserve the legacy wait-forever behaviour.
+			 */
+			queueTimeoutMs?: number;
+		},
 	): Promise<string> {
 		if (!prompt.trim()) {
 			throw new Error("Empty prompt");
 		}
 
-		return this.#queue.runExclusive(async () => {
-			if (!this.#circuit.canAttempt()) {
-				throw new Error("Agent bridge circuit is open");
-			}
-
-			if (!this.isRunning) {
-				await this.#restartTransport();
-			}
-
-			const timeoutMs = options?.timeoutMs ?? this.#options.timeoutMs ?? 120_000;
-			const inactivityBudgetMs = options?.inactivityMs ?? 0;
-			const sessionPath = options?.sessionPath;
-			const previousSessionPath = this.#activeSessionPath;
-			// N2 contract: if the caller passed a sessionPath, the OMP child
-			// MUST end up writing to that exact path. We track the forced
-			// path here and re-validate after the prompt completes — see
-			// the post-run drift check in the `finally` block below.
-			const forcedSessionPath = sessionPath ? path.resolve(sessionPath) : undefined;
-
-			let sessionChanged = false;
-			if (sessionPath) {
-				try {
-					sessionChanged = await this.#switchSession(sessionPath);
-				} catch (err) {
-					const message = err instanceof Error ? err.message : String(err);
-					throw new Error(`Failed to switch to cron session: ${message}`);
-				}
-			}
-			// Re-apply model when the session changed or the transport restarted.
-			// Moved outside the `if (sessionPath)` block so sessionless cron
-			// tasks also get the correct model after a crash recovery.
-			const needsModel = sessionChanged || this.#needsModelReapply;
-			const modelToApply = this.#pendingModelOverride ?? this.#configuredModel;
-			if (modelToApply && needsModel) {
-				try {
-					await this.#transport.sendCommand(
-						"set_model",
-						{ provider: modelToApply.provider, modelId: modelToApply.modelId },
-						30_000,
-					);
-					this.#needsModelReapply = false;
-				} catch (err) {
-					logger.error("Failed to re-apply model for cron prompt", {
-						error: err instanceof Error ? err.message : String(err),
-					});
-				}
-			}
-
-			let inactivityReason: { idleMs: number; lastEventAt: number } | null = null;
-			let watchdog: NodeJS.Timeout | null = null;
-			if (inactivityBudgetMs > 0) {
-				const POLL_MS = 500;
-				let abortInflight: Promise<void> | null = null;
-				watchdog = setInterval(() => {
-					if (inactivityReason) return;
-					const lastActivityAt = this.#queue.getActiveLastActivityAt();
-					if (lastActivityAt === undefined) return;
-					const idleMs = Date.now() - lastActivityAt;
-					if (idleMs < inactivityBudgetMs) return;
-					inactivityReason = { idleMs, lastEventAt: lastActivityAt };
-					if (abortInflight) return;
-					abortInflight = (async () => {
-						try {
-							if (this.isRunning) {
-								await this.#transport.sendCommand("abort", {}, 30_000);
-							}
-						} catch (err) {
-							logger.warn("Inactivity watchdog abort command failed", {
-								error: err instanceof Error ? err.message : String(err),
-							});
-						} finally {
-							this.#queue.resolveActiveAsAborted();
-						}
-					})();
-				}, POLL_MS);
-			}
-
-			try {
-				const { promise } = this.#queue.enqueue(prompt, timeoutMs);
-				const { events } = await promise;
-				const response = extractAssistantText(events);
-
-				const idleInfo = inactivityReason as { idleMs: number; lastEventAt: number } | null;
-				if (idleInfo !== null) {
-					throw new Error(
-						`Agent cron prompt inactive for ${Math.round(idleInfo.idleMs)}ms (limit ${inactivityBudgetMs}ms)`,
-					);
+		return this.#queue.runExclusive(
+			async () => {
+				if (!this.#circuit.canAttempt()) {
+					throw new Error("Agent bridge circuit is open");
 				}
 
-				if (!response) {
-					throw new Error("Agent returned empty response");
+				if (!this.isRunning) {
+					await this.#restartTransport();
 				}
 
-				// N2 enforcement: if the caller forced a sessionPath, the OMP
-				// child's `state.sessionFile` must match. If not, the child
-				// drifted to a different file (e.g. its own by-date default)
-				// and we need to know about it. We log a warning and attempt
-				// a corrective `switch_session` back to the forced path so
-				// subsequent runs/state queries see the right file.
-				//
-				// We use the transport directly (not the public `getState()`
-				// helper) because that helper re-enters the queue's
-				// `runExclusive` and would deadlock — we are already inside
-				// the queue from `executePrompt`'s outer `runExclusive`.
-				if (forcedSessionPath) {
+				const timeoutMs = options?.timeoutMs ?? this.#options.timeoutMs ?? 120_000;
+				const inactivityBudgetMs = options?.inactivityMs ?? 0;
+				const sessionPath = options?.sessionPath;
+				const previousSessionPath = this.#activeSessionPath;
+				// N2 contract: if the caller passed a sessionPath, the OMP child
+				// MUST end up writing to that exact path. We track the forced
+				// path here and re-validate after the prompt completes — see
+				// the post-run drift check in the `finally` block below.
+				const forcedSessionPath = sessionPath ? path.resolve(sessionPath) : undefined;
+
+				let sessionChanged = false;
+				if (sessionPath) {
 					try {
-						const reported = await this.#transport.sendCommand("get_state", {}, 5_000);
-						const reportedFile = (reported.data as { sessionFile?: string } | undefined)?.sessionFile;
-						if (reportedFile && path.resolve(reportedFile) !== forcedSessionPath) {
-							logger.warn("[AgentBridge] sessionPath drift", {
-								forced: forcedSessionPath,
-								reported: reportedFile,
-							});
-							try {
-								await this.#switchSession(forcedSessionPath);
-							} catch (switchErr) {
-								logger.error("[AgentBridge] failed to recover from sessionPath drift", {
-									forced: forcedSessionPath,
-									error: switchErr instanceof Error ? switchErr.message : String(switchErr),
-								});
-							}
-						}
-					} catch (stateErr) {
-						// getState failure isn't fatal — we just lose the drift check.
-						logger.debug("[AgentBridge] getState for drift check failed", {
-							error: stateErr instanceof Error ? stateErr.message : String(stateErr),
-						});
+						sessionChanged = await this.#switchSession(sessionPath);
+					} catch (err) {
+						const message = err instanceof Error ? err.message : String(err);
+						throw new Error(`Failed to switch to cron session: ${message}`);
 					}
 				}
-
-				this.#circuit.recordSuccess();
-				return response.trim();
-			} finally {
-				if (watchdog) clearInterval(watchdog);
-				if (sessionPath && previousSessionPath && previousSessionPath !== this.#activeSessionPath) {
+				// Re-apply model when the session changed or the transport restarted.
+				// Moved outside the `if (sessionPath)` block so sessionless cron
+				// tasks also get the correct model after a crash recovery.
+				const needsModel = sessionChanged || this.#needsModelReapply;
+				const modelToApply = this.#pendingModelOverride ?? this.#configuredModel;
+				if (modelToApply && needsModel) {
 					try {
-						const sessionRestored = await this.#switchSession(previousSessionPath);
-						if (sessionRestored) {
-							const modelToApply = this.#pendingModelOverride ?? this.#configuredModel;
-							if (modelToApply) {
-								try {
-									await this.#transport.sendCommand(
-										"set_model",
-										{ provider: modelToApply.provider, modelId: modelToApply.modelId },
-										30_000,
-									);
-								} catch (err) {
-									logger.error("Failed to restore model after session restore", {
-										error: err instanceof Error ? err.message : String(err),
-									});
-								}
-							}
-						}
+						await this.#transport.sendCommand(
+							"set_model",
+							{ provider: modelToApply.provider, modelId: modelToApply.modelId },
+							30_000,
+						);
+						this.#needsModelReapply = false;
 					} catch (err) {
-						logger.warn("Failed to restore prior session after cron prompt", {
-							priorSession: previousSessionPath,
+						logger.error("Failed to re-apply model for cron prompt", {
 							error: err instanceof Error ? err.message : String(err),
 						});
 					}
 				}
-			}
-		});
+
+				let inactivityReason: { idleMs: number; lastEventAt: number } | null = null;
+				let watchdog: NodeJS.Timeout | null = null;
+				if (inactivityBudgetMs > 0) {
+					const POLL_MS = 500;
+					let abortInflight: Promise<void> | null = null;
+					watchdog = setInterval(() => {
+						if (inactivityReason) return;
+						const lastActivityAt = this.#queue.getActiveLastActivityAt();
+						if (lastActivityAt === undefined) return;
+						const idleMs = Date.now() - lastActivityAt;
+						if (idleMs < inactivityBudgetMs) return;
+						inactivityReason = { idleMs, lastEventAt: lastActivityAt };
+						if (abortInflight) return;
+						abortInflight = (async () => {
+							try {
+								if (this.isRunning) {
+									await this.#transport.sendCommand("abort", {}, 30_000);
+								}
+							} catch (err) {
+								logger.warn("Inactivity watchdog abort command failed", {
+									error: err instanceof Error ? err.message : String(err),
+								});
+							} finally {
+								this.#queue.resolveActiveAsAborted();
+							}
+						})();
+					}, POLL_MS);
+				}
+
+				try {
+					const { promise } = this.#queue.enqueue(prompt, timeoutMs);
+					const { events } = await promise;
+					const response = extractAssistantText(events);
+
+					const idleInfo = inactivityReason as { idleMs: number; lastEventAt: number } | null;
+					if (idleInfo !== null) {
+						throw new Error(
+							`Agent cron prompt inactive for ${Math.round(idleInfo.idleMs)}ms (limit ${inactivityBudgetMs}ms)`,
+						);
+					}
+
+					if (!response) {
+						throw new Error("Agent returned empty response");
+					}
+
+					// N2 enforcement: if the caller forced a sessionPath, the OMP
+					// child's `state.sessionFile` must match. If not, the child
+					// drifted to a different file (e.g. its own by-date default)
+					// and we need to know about it. We log a warning and attempt
+					// a corrective `switch_session` back to the forced path so
+					// subsequent runs/state queries see the right file.
+					//
+					// We use the transport directly (not the public `getState()`
+					// helper) because that helper re-enters the queue's
+					// `runExclusive` and would deadlock — we are already inside
+					// the queue from `executePrompt`'s outer `runExclusive`.
+					if (forcedSessionPath) {
+						try {
+							const reported = await this.#transport.sendCommand("get_state", {}, 5_000);
+							const reportedFile = (reported.data as { sessionFile?: string } | undefined)?.sessionFile;
+							if (reportedFile && path.resolve(reportedFile) !== forcedSessionPath) {
+								logger.warn("[AgentBridge] sessionPath drift", {
+									forced: forcedSessionPath,
+									reported: reportedFile,
+								});
+								try {
+									await this.#switchSession(forcedSessionPath);
+								} catch (switchErr) {
+									logger.error("[AgentBridge] failed to recover from sessionPath drift", {
+										forced: forcedSessionPath,
+										error: switchErr instanceof Error ? switchErr.message : String(switchErr),
+									});
+								}
+							}
+						} catch (stateErr) {
+							// getState failure isn't fatal — we just lose the drift check.
+							logger.debug("[AgentBridge] getState for drift check failed", {
+								error: stateErr instanceof Error ? stateErr.message : String(stateErr),
+							});
+						}
+					}
+
+					this.#circuit.recordSuccess();
+					return response.trim();
+				} finally {
+					if (watchdog) clearInterval(watchdog);
+					if (sessionPath && previousSessionPath && previousSessionPath !== this.#activeSessionPath) {
+						try {
+							const sessionRestored = await this.#switchSession(previousSessionPath);
+							if (sessionRestored) {
+								const modelToApply = this.#pendingModelOverride ?? this.#configuredModel;
+								if (modelToApply) {
+									try {
+										await this.#transport.sendCommand(
+											"set_model",
+											{ provider: modelToApply.provider, modelId: modelToApply.modelId },
+											30_000,
+										);
+									} catch (err) {
+										logger.error("Failed to restore model after session restore", {
+											error: err instanceof Error ? err.message : String(err),
+										});
+									}
+								}
+							}
+						} catch (err) {
+							logger.warn("Failed to restore prior session after cron prompt", {
+								priorSession: previousSessionPath,
+								error: err instanceof Error ? err.message : String(err),
+							});
+						}
+					}
+				}
+			},
+			{ queueTimeoutMs: options?.queueTimeoutMs },
+		);
 	}
 
 	resetActiveSession(): void {

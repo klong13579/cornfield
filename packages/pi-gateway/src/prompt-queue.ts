@@ -86,13 +86,46 @@ export class PromptQueue {
 	 * Run an operation under the queue's exclusive lock. Operations are
 	 * serialized via a promise tail — the next operation waits for the
 	 * previous to settle (success or failure) before starting.
+	 *
+	 * `queueTimeoutMs` bounds how long the caller is willing to WAIT for
+	 * the lock. If the previous operation is still running when the
+	 * timeout fires, this call throws and the operation is never invoked.
+	 * The chain still receives a resolved `current` slot (so the next
+	 * caller's `previous` is the running op + a no-op step), preventing
+	 * the chain from deadlocking on callers that bailed out.
+	 *
+	 * Default `queueTimeoutMs = 0` preserves the legacy "wait forever"
+	 * behaviour for callers that don't opt in (LLM streaming sentinels,
+	 * restart-sentinel recovery, BOOT.md self-check — all cold at
+	 * startup with an empty queue).
 	 */
-	async runExclusive<T>(operation: () => Promise<T>): Promise<T> {
+	async runExclusive<T>(operation: () => Promise<T>, opts?: { queueTimeoutMs?: number }): Promise<T> {
 		const previous = this.#operationTail;
 		const { promise: current, resolve } = Promise.withResolvers<void>();
 		this.#operationTail = previous.catch(() => {}).then(() => current);
-		await previous.catch(() => {});
 		try {
+			const queueTimeoutMs = opts?.queueTimeoutMs ?? 0;
+			if (queueTimeoutMs > 0) {
+				let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+				const timeoutPromise = new Promise<never>((_, reject) => {
+					timeoutHandle = setTimeout(
+						() =>
+							reject(
+								new Error(
+									`PromptQueue queue wait timed out after ${queueTimeoutMs}ms (previous operation still running)`,
+								),
+							),
+						queueTimeoutMs,
+					);
+				});
+				try {
+					await Promise.race([previous.catch(() => {}), timeoutPromise]);
+				} finally {
+					if (timeoutHandle) clearTimeout(timeoutHandle);
+				}
+			} else {
+				await previous.catch(() => {});
+			}
 			return await operation();
 		} finally {
 			resolve();
