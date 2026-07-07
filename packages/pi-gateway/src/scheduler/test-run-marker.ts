@@ -270,3 +270,26 @@ export function writeTestRunMarkerRaw(marker: TestRunMarker, baseDir?: string): 
 	fs.writeFileSync(tmpPath, JSON.stringify(marker, null, 2), "utf-8");
 	fs.renameSync(tmpPath, markerPath);
 }
+
+/**
+ * Test-run one-shot shape detector. Test-run rewrites the task's
+ * schedule to a one-shot of the form `+<n>s` (e.g. `+120s`) so the
+ * engine can fire it immediately. Other code paths (cron expressions,
+ * interval shorthand, ISO timestamps) never produce this exact shape.
+ *
+ * Used by:
+ *   - `runTestRun` entry: corruption guard. If a task's current cron
+ *     matches this pattern at runTestRun entry, a previous test-run's
+ *     restore didn't complete (SIGKILL/OOM/etc.) — auto-heal from any
+ *     orphan marker, otherwise disable the task.
+ *   - `engine.ts#scheduleTask`: skip the auto-disable step for
+ *     one-shots (the test-run's own restore owns the final status).
+ *   - `engine.ts#handleTrigger.finally`: detect that a fire just
+ *     completed and the post-fire restore is owed.
+ *
+ * The regex is the contract. Don't change without updating all three
+ * call sites.
+ */
+export function isTestRunSchedule(cron: string): boolean {
+	return /^\+\d+s$/.test(cron);
+}

@@ -11,17 +11,21 @@
  */
 
 import * as fs from "node:fs";
+import * as path from "node:path";
+import { isEnoent } from "@oh-my-pi/pi-utils";
 import { findAgentSessionPath } from "../session-paths";
 import { summarizeCronRunDiagnostics } from "./diagnostics";
 import { appendExecutionLog, getRecentDeliveryFailureCount, readExecutionLog } from "./execution-log";
 import { executeScheduledCommand, scanCronPrompt } from "./executor";
 import { runTestRun, type TestRunHardError, type TestRunResult } from "./test-run";
-import type { SchedulerStorage } from "./types";
+import { clearTestRunMarker, readTestRunMarker } from "./test-run-marker";
+import type { ScheduledTask, SchedulerStorage } from "./types";
 import {
 	formatExecutionRow,
 	formatTaskRow,
 	getGatewayPidPath,
 	getNextRun,
+	getSchedulerDir,
 	isDaemonRunning,
 	parseSchedule,
 } from "./types";
@@ -588,13 +592,14 @@ export async function cronRun(name: string, storage: SchedulerStorage): Promise<
  * core lives in `test-run.ts` (`runTestRun`).
  */
 export interface CronTestRunOptions {
-	/** Trigger delay from now. Default 90_000ms. Anything < 60s may race the
-	 *  gateway's reload tick (default 60s) and end up with a past-dated
-	 *  next_run_at that the engine auto-disables. */
+	/** Trigger delay from now. Default 120_000ms (2x the gateway's
+	 *  60s reload tick; safe in normal configurations). Values < 60_000
+	 *  are rejected at parse time — sub-tick values almost always race
+	 *  the engine reload and end in `trigger_timeout`. */
 	inMs?: number;
 	/** How long to wait for the agent run to reach a terminal state
 	 *  after the trigger fires. Default 30_000ms. Total wall-time is
-	 *  `inMs + timeoutMs` (default 120s). */
+	 *  `inMs + timeoutMs` (default 150s). */
 	timeoutMs?: number;
 	/** If true, leave the schedule as `+<delay>` after the run. Default
 	 *  false: always restore. */
@@ -624,7 +629,7 @@ export interface CronTestRunOptions {
 export async function cronTestRun(args: string[], storage: SchedulerStorage): Promise<void> {
 	const name = args[0];
 	if (!name) {
-		console.error("Usage: cron test-run <name> [--in 90s] [--timeout 150s] [--no-restore]");
+		console.error("Usage: cron test-run <name> [--in 120s] [--timeout 150s] [--no-restore]");
 		process.exitCode = 1;
 		return;
 	}
@@ -655,6 +660,21 @@ export async function cronTestRun(args: string[], storage: SchedulerStorage): Pr
 		}
 	}
 
+	// Hard-reject sub-tick inMs at parse time. Sub-tick values almost
+	// always race the gateway's reload tick and end in trigger_timeout;
+	// the operator gets a clear "won't work" instead of a silent
+	// 60–120s wait. The threshold is the gateway's own tick (the
+	// `--_gatewayTickMs` knob lets tests use a smaller value).
+	if (inMs !== undefined && inMs < gatewayTickMs) {
+		console.error(
+			`cron test-run: --in ${inMs}ms is below the gateway tick (${gatewayTickMs}ms). ` +
+				`Sub-tick values almost always race the engine reload and end in trigger_timeout. ` +
+				`Use --in >= ${gatewayTickMs * 2}ms (2x tick) for reliable triggering.`,
+		);
+		process.exitCode = 1;
+		return;
+	}
+
 	// AbortController wires the CLI's signal handling into the
 	// AbortSignal that `runTestRun` honors. The handler restores
 	// nothing directly — the shared core's `finally` block does the
@@ -663,6 +683,19 @@ export async function cronTestRun(args: string[], storage: SchedulerStorage): Pr
 	// `kind: "aborted"`.
 	const ac = new AbortController();
 	const onSig = () => ac.abort();
+	// Belt-and-suspenders: the `runTestRun` `finally` block is the
+	// primary restore path, but it never runs on SIGKILL / uncaught
+	// native crash / hard process termination. The restore marker
+	// on disk is the safety net — a sync `process.on("exit")` handler
+	// applies it if the CLI is dying while the marker still exists.
+	// `process.on("exit")` only allows sync work, so this writes
+	// directly to jobs.json rather than going through the storage
+	// abstraction. The gateway's own startup / tick handler picks up
+	// the same marker on its end.
+	const onExit = () => {
+		syncRestoreFromMarker();
+	};
+	process.on("exit", onExit);
 	process.once("SIGINT", () => {
 		onSig();
 		process.exit(130);
@@ -700,6 +733,23 @@ export async function cronTestRun(args: string[], storage: SchedulerStorage): Pr
 
 	if (result.kind === "task_not_found") {
 		console.error(`Task "${name}" not found.`);
+		process.exitCode = 1;
+		return;
+	}
+	if (result.kind === "schedule_corrupted") {
+		// Auto-heal failed: no clean source. The task is now
+		// `disabled` in storage. The CLI can't reach the gateway's
+		// in-memory engine to reload it — the gateway's own tick
+		// picks up the change on the next cycle. Print a clear
+		// actionable error so the operator knows what happened
+		// and what to do.
+		console.error(`[test-run] Task "${name}" has a corrupted schedule (cron="${result.currentCron}").`);
+		console.error(
+			`[test-run] A previous test-run's restore didn't complete and no clean source is available. The task has been disabled.`,
+		);
+		console.error(
+			`[test-run] To recover: re-check the schedule with \`cron show ${name}\`, then re-enable with \`cron enable ${name}\`.`,
+		);
 		process.exitCode = 1;
 		return;
 	}
@@ -777,6 +827,75 @@ export async function cronTestRun(args: string[], storage: SchedulerStorage): Pr
 	console.log(
 		`[test-run] Schedule ${result.scheduleRestored ? "restored to original." : "NOT restored (--no-restore). Task is now cron='+<delay>s' once."}`,
 	);
+}
+
+/**
+ * Sync restore from a leftover test-run marker. Called from
+ * `process.on("exit")` in the CLI when the CLI is dying but the
+ * marker on disk still indicates an in-flight test-run. We can't
+ * go through `runTestRun`'s storage abstraction (it may already be
+ * closed), and we can't do async work (exit handlers are sync only),
+ * so we read + write jobs.json directly.
+ *
+ * The gateway's own startup / tick also runs the same restore via
+ * `consumeOrphanTestRunMarker` (in `gateway-cron-lifecycle.ts`),
+ * which IS async. The two paths overlap deliberately — the gateway
+ * handler is the primary safety net, the CLI handler is the
+ * "be a good citizen before exiting" path.
+ */
+function syncRestoreFromMarker(): void {
+	const marker = readTestRunMarker();
+	if (!marker) return;
+	try {
+		const jobsPath = path.join(getSchedulerDir(), "jobs.json");
+		let content: string;
+		try {
+			content = fs.readFileSync(jobsPath, "utf-8");
+		} catch (err) {
+			if (isEnoent(err)) {
+				clearTestRunMarker();
+				return;
+			}
+			throw err;
+		}
+		const data = JSON.parse(content) as { version: 1; tasks: ScheduledTask[]; metadata: { updatedAt: number } };
+		const idx = data.tasks.findIndex(t => t.id === marker.taskId);
+		if (idx < 0) {
+			// Task was deleted while test-run was in flight. Nothing
+			// to restore; just clear the marker.
+			clearTestRunMarker();
+			return;
+		}
+		const snap = marker.snapshot;
+		data.tasks[idx] = {
+			...data.tasks[idx]!,
+			cron: snap.cron,
+			scheduleType: snap.scheduleType,
+			nextRunAt: snap.nextRunAt,
+			status: snap.status,
+			lastRunAt: snap.lastRunAt,
+			runCount: snap.runCount,
+			failCount: snap.failCount,
+			consecutiveFailures: snap.consecutiveFailures,
+			repeatCompleted: snap.repeatCompleted,
+			lastDeliveryError: snap.lastDeliveryError,
+			updatedAt: Date.now(),
+		};
+		data.metadata.updatedAt = Date.now();
+		const tmp = `${jobsPath}.tmp`;
+		fs.writeFileSync(tmp, JSON.stringify(data, null, 2), "utf-8");
+		fs.renameSync(tmp, jobsPath);
+		clearTestRunMarker();
+		// eslint-disable-next-line no-console
+		console.error(
+			`[test-run] Sync-restored schedule from marker on exit: task "${marker.taskName}" -> cron='${snap.cron}'`,
+		);
+	} catch (err) {
+		// Don't throw from an exit handler — it would mask the original
+		// exit code. Just log and let the gateway's tick pick it up.
+		// eslint-disable-next-line no-console
+		console.error(`[test-run] sync restore from marker failed; gateway tick will retry`, String(err));
+	}
 }
 
 /**

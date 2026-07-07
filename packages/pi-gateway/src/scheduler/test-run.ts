@@ -30,13 +30,14 @@
  */
 
 import { logger } from "@oh-my-pi/pi-utils";
-import type { SchedulerStorage, TaskExecution } from "./types";
 import {
 	clearTestRunMarker,
+	isTestRunSchedule,
+	readTestRunMarker,
 	type TestRunOrigin,
-	type TestRunSnapshot,
 	writeTestRunMarker,
 } from "./test-run-marker";
+import type { SchedulerStorage, TaskExecution } from "./types";
 
 /**
  * Options for the shared test-run core.
@@ -135,15 +136,51 @@ export interface RunTestRunOptions {
 	 * with all pre-B markers.
 	 */
 	origin?: TestRunOrigin;
+	/**
+	 * Called after the corruption guard's auto-heal restores a clean
+	 * schedule to storage. The caller's job: reload the gateway's
+	 * in-memory engine so the OLD `+<n>s` `setTimeout` (the one left
+	 * behind by the previous failed test-run) is cleared and the
+	 * engine reschedules on the restored cron expression.
+	 *
+	 * Without this hook the storage heals but the in-memory map
+	 * stays stale; the OLD `setTimeout` fires one more time and
+	 * delivers a "stale" test-run card to the user. With it, the
+	 * engine's `reload()` clears all timeouts/intervals and rebuilds
+	 * the schedule from the now-clean storage.
+	 *
+	 * Optional: tests and the CLI pass `undefined` (the CLI runs in
+	 * a separate process from the gateway's engine; the gateway's
+	 * own tick picks up the change on the next cycle, ≤60s).
+	 */
+	onReload?: () => void;
 }
 
 /** Hard error — task not found, etc. The caller surfaces this to the
  *  user/LLM as a failed tool result. The schedule is NOT touched on
  *  this path. */
-export interface TestRunHardError {
-	kind: "task_not_found";
-	name: string;
-}
+export type TestRunHardError =
+	| { kind: "task_not_found"; name: string }
+	/**
+	 * Corruption detected on entry: the task's current `cron` is
+	 * already a test-run one-shot shape (`+<n>s`), but no test-run
+	 * is in flight from this process. This means a previous
+	 * test-run's `finally` restore never completed (SIGKILL, OOM,
+	 * gateway crash mid-handleTrigger, or a clean-source-less
+	 * SIGKILL during the previous restore). Without this guard the
+	 * next test-run would snapshot the corrupted cron into a new
+	 * marker, the restore would write it back, and the corruption
+	 * self-perpetuates (snowball).
+	 *
+	 * Self-heal logic ran first; if it failed, the task has been
+	 * disabled in storage and the caller is told to fix the task
+	 * manually. `currentCron` is included for diagnostics.
+	 */
+	| {
+			kind: "schedule_corrupted";
+			name: string;
+			currentCron: string;
+	  };
 
 /**
  * Fire-and-forget acknowledgement (LLM host tool path with
@@ -286,6 +323,84 @@ export async function runTestRun(opts: RunTestRunOptions): Promise<TestRunResult
 
 	const task = storage.getTaskByName(name);
 	if (!task) return { kind: "task_not_found", name };
+
+	// Corruption guard. If the task's current `cron` is already a
+	// test-run one-shot shape (`+<n>s`) but no in-flight test-run
+	// from this process owns the marker, the previous test-run's
+	// `finally` restore never completed (SIGKILL, OOM, gateway crash
+	// mid-handleTrigger, or any path that bypasses the `finally`
+	// contract — see `test-run-marker.ts` header for the full list).
+	//
+	// Self-heal: if a marker exists and its `snapshot.cron` is a
+	// clean value (NOT a test-run shape — a real cron expression,
+	// interval, or ISO timestamp), apply the snapshot to storage,
+	// clear the marker, and continue. The caller's `onReload` hook
+	// then rebuilds the in-memory engine schedule so the OLD
+	// `setTimeout` (left behind by the failed previous run) doesn't
+	// fire one more time and deliver a stale card.
+	//
+	// If no clean source exists (no marker, or the marker's
+	// snapshot is also a `+<n>s` shape — meaning a previous test-run
+	// already snapshotted the corruption), disable the task. The
+	// caller surfaces `schedule_corrupted` to the user/LLM as a
+	// clear "fix this manually" error.
+	//
+	// Without this guard, a single SIGKILL during a test-run would
+	// stick the task on `+<n>s` forever: every subsequent test-run
+	// snapshots the corrupted value into a new marker, and the
+	// restore writes it back unchanged. This is the snowball bug.
+	if (isTestRunSchedule(task.cron)) {
+		const marker = readTestRunMarker(markerBaseDir);
+		const markerSnapIsClean = marker !== null && !isTestRunSchedule(marker.snapshot.cron);
+		if (markerSnapIsClean) {
+			const snap = marker.snapshot;
+			storage.updateTask(task.id, {
+				cron: snap.cron,
+				scheduleType: snap.scheduleType,
+				nextRunAt: snap.nextRunAt,
+				status: snap.status,
+				lastRunAt: snap.lastRunAt,
+				runCount: snap.runCount,
+				failCount: snap.failCount,
+				consecutiveFailures: snap.consecutiveFailures,
+				repeatCompleted: snap.repeatCompleted,
+				lastDeliveryError: snap.lastDeliveryError,
+				updatedAt: Date.now(),
+			});
+			clearTestRunMarker(markerBaseDir);
+			logger.info("[test-run] auto-heal: restored corrupted schedule from orphan marker", {
+				taskId: task.id,
+				taskName: task.name,
+				restoredCron: snap.cron,
+			});
+			// Re-load the task so the new test-run snapshots the
+			// restored (clean) schedule, not the stale in-memory
+			// copy of the corrupted one.
+			const reloaded = storage.getTask(task.id);
+			if (!reloaded) return { kind: "task_not_found", name };
+			Object.assign(task, reloaded);
+			// Caller picks up the in-memory reload. Without this
+			// hook the gateway's OLD setTimeout for the previous
+			// (failed) test-run still fires once and delivers a
+			// stale card before its next tick reloads.
+			opts.onReload?.();
+			// Fall through to the normal snapshot/mutate path.
+		} else {
+			storage.updateTask(task.id, { status: "disabled" });
+			logger.error("[test-run] auto-heal FAILED: corrupted schedule with no clean source; task disabled", {
+				taskId: task.id,
+				taskName: task.name,
+				currentCron: task.cron,
+				hasMarker: marker !== null,
+				markerCron: marker?.snapshot.cron,
+			});
+			return {
+				kind: "schedule_corrupted",
+				name: task.name,
+				currentCron: task.cron,
+			};
+		}
+	}
 
 	// Snapshot. We restore ALL of these on every exit path.
 	//

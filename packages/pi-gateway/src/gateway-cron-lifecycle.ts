@@ -17,11 +17,11 @@ import { SchedulerEngine } from "./scheduler/engine";
 import { computeInactivityBudgetMs } from "./scheduler/executor";
 import { SchedulerFileStore } from "./scheduler/file-store";
 import { JsonFileStorage } from "./scheduler/json-file-storage";
+import testRunCompletionTemplate from "./scheduler/prompts/test-run-completion.md" with { type: "text" };
 import type { SchedulerStorage } from "./scheduler/types";
 import { DEFAULT_SCHEDULER_CONFIG, getSchedulerDir } from "./scheduler/types";
 import { cronSessionPath } from "./session-paths";
 import type { DingTalkConfig, GatewayConfig, OutboundMessage } from "./types";
-import testRunCompletionTemplate from "./scheduler/prompts/test-run-completion.md" with { type: "text" };
 
 /** Interface for the subset of Gateway that CronLifecycle needs. */
 export interface CronGatewayDeps {
@@ -236,6 +236,25 @@ export class CronLifecycle {
 	/** Exposed for cron-from-message: createCronTaskFromMessage needs the storage. */
 	get schedulerStorage(): SchedulerStorage | null {
 		return this.#schedulerStorage;
+	}
+
+	/**
+	 * Reload the gateway's in-memory scheduler engine from disk. Used
+	 * by the corruption guard in `runTestRun` (via the host tool's
+	 * `onReload` hook) after a corrupted task's schedule is
+	 * auto-healed. The reload clears all in-memory `setTimeout` /
+	 * `setInterval` / cron jobs and rebuilds them from the now-clean
+	 * `jobs.json`. Without this, the OLD `setTimeout` left behind by
+	 * the previous failed test-run would fire one more time and
+	 * deliver a stale card to the user.
+	 *
+	 * Idempotent; safe to call when the engine is stopped (no-op
+	 * via the `?.`). Used in-process only; the CLI's `runTestRun`
+	 * can't reach the gateway's engine and instead relies on the
+	 * gateway's own tick (≤ 60s) to pick up the change.
+	 */
+	engineReload(): void {
+		this.#schedulerEngine?.reload();
 	}
 
 	// ═══════════════════════════════════════════════════════════════════
@@ -637,7 +656,7 @@ function resolveDingTalkConfig(gatewayConfig: GatewayConfig, accountId: string |
 
 	if (accountId && dt.accounts) {
 		const account = dt.accounts[accountId];
-		if (account && account.appKey && account.appSecret) {
+		if (account?.appKey && account.appSecret) {
 			return {
 				...dt,
 				appKey: account.appKey,

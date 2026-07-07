@@ -68,6 +68,23 @@ export interface CronToolContext {
 	 * not need to know about gateway config otherwise.
 	 */
 	tickIntervalMs: number;
+	/**
+	 * Optional reload hook for the corruption guard in `runTestRun`.
+	 * The gateway wires this to `cronLifecycle.engineReload()` so
+	 * that when the test-run auto-heals a corrupted schedule (e.g.
+	 * left over from a previous test-run's SIGKILL), the gateway's
+	 * in-memory engine is reloaded immediately — the OLD `+<n>s`
+	 * `setTimeout` (still in the in-memory map) is cleared and
+	 * the engine reschedules on the restored cron expression.
+	 *
+	 * Without this hook the storage heals but the in-memory map
+	 * stays stale; the OLD `setTimeout` fires one more time and
+	 * delivers a stale card to the user before the next tick
+	 * reloads. The CLI's runTestRun (separate process) passes
+	 * `undefined`; the gateway's own tick picks up the change
+	 * within ≤ 60s.
+	 */
+	onReload?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -116,7 +133,12 @@ const CRON_TOOL_PARAMETERS = Type.Object({
 		}),
 	),
 	// test-run-only options
-	inMs: Type.Optional(Type.Number({ description: "test-run only: delay (ms) before one-shot fires. Default 120000 (2x gateway tick; values < 60000 are rejected — see racy zone below)." })),
+	inMs: Type.Optional(
+		Type.Number({
+			description:
+				"test-run only: delay (ms) before one-shot fires. Default 120000 (2x gateway tick; values < 60000 are rejected — see racy zone below).",
+		}),
+	),
 	testTimeoutMs: Type.Optional(
 		Type.Number({
 			description: "test-run only: max wait (ms) for agent terminal state after trigger fires. Default 30000.",
@@ -165,20 +187,20 @@ const CRON_TOOL_DEFINITION: RpcHostToolDefinition = {
 		"`runs` returns the task's execution history (also works on any task in the agent).\n\n" +
 		"**`test-run`** triggers a task through the REAL scheduler and reports that the trigger was scheduled. " +
 		"Use this to verify a task's end-to-end pipeline (warm bridge → agent run → DingTalk delivery) without waiting for the actual cron tick. " +
-		"**Async contract (fire-and-forget):** `test-run` returns in milliseconds with `{kind: \"started\", inMs, timeoutMs, expiresAt, startedAt}`. The actual run + card delivery happen in the background on the next engine tick + agent run cycle — the LLM is NOT blocked. " +
-		"**Why async:** the previous sync version blocked the LLM in `runExclusive` for `inMs + timeoutMs` (default 150s) while awaiting `tool_result`. The agent-bridge watchdog trips at 60s of no session events, killing the LLM with \"Agent bridge failed\". Returning immediately keeps the LLM alive. " +
+		'**Async contract (fire-and-forget):** `test-run` returns in milliseconds with `{kind: "started", inMs, timeoutMs, expiresAt, startedAt}`. The actual run + card delivery happen in the background on the next engine tick + agent run cycle — the LLM is NOT blocked. ' +
+		'**Why async:** the previous sync version blocked the LLM in `runExclusive` for `inMs + timeoutMs` (default 150s) while awaiting `tool_result`. The agent-bridge watchdog trips at 60s of no session events, killing the LLM with "Agent bridge failed". Returning immediately keeps the LLM alive. ' +
 		"**What happens after the tool returns:** (1) the engine fires the rewritten one-shot at `inMs`; (2) the cron service runs the task (agent or shell) and delivers the card via the active chat's delivery config; (3) the engine's post-fire restore (`engine.ts#restoreTestRunSchedule`) reads the marker, applies the snapshot, and re-schedules the original cron expression. " +
-		"**What the LLM gets back:** just `kind: \"started\"` and the timeline (`inMs`, `expiresAt`). The actual success/failure verdict is delivered to the user as the AI Card (the same card a real cron tick would produce). " +
+		'**What the LLM gets back:** just `kind: "started"` and the timeline (`inMs`, `expiresAt`). The actual success/failure verdict is delivered to the user as the AI Card (the same card a real cron tick would produce). ' +
 		"**Checking the result later:** call `cron.runs` with the task name/id to read the execution history after `expiresAt` (default `inMs + 90s`). " +
 		"**When to use:** the user just added/updated a task and wants to confirm it works end-to-end. " +
 		"**`inMs` minimum:** runtime callers (this tool, the CLI) hard-reject `inMs < 60000` (1x gateway tick). The gateway engine tick reloads schedules from storage; if `inMs` is shorter than one tick, the reload runs AFTER `next_run_at` and the engine auto-disables the task as past-dated. Use `inMs >= 120000` (2x tick) to be safe. " +
 		"**`noRestore: true`** keeps the schedule as `+<delay>s` after the run (debug escape hatch only). " +
 		"**Failure handling:** orphan-recovery safety net on every engine tick — if the engine fails to fire before `expiresAt`, the next tick restores the schedule from the marker and the task is back to its real cron. " +
 		"**CLI parity:** `omp gateway cron test-run <name>` still uses the legacy sync path (polls and reports the run + delivery verdict) — the CLI is operator-facing and the synchronous report is the operator's expectation. The LLM path is the only one that's async.\n\n" +
-	"**Delivery rendering — `cron.deliveryMode` vs `task.delivery.mode` (orthogonal, do not conflate):**\n" +
+		"**Delivery rendering — `cron.deliveryMode` vs `task.delivery.mode` (orthogonal, do not conflate):**\n" +
 		"- `cron.deliveryMode` (gateway config, global) — `card` (default) or `text`. Decides the RENDERING format when a task is delivered. `card` renders the result as a DingTalk AI card with buttons; `text` sends a plain IM message. Operator flips this to fleet-wide toggle card vs text.\n" +
 		"- `task.delivery.mode` (per-task) — `announce` (default) or `none`. Decides WHETHER to deliver at all. `announce` triggers delivery after the run; `none` runs silently (no DingTalk message). Set `none` for tasks whose result is just a side-effect (cleanup, sync).\n" +
-		"- They are independent: `deliveryMode: card` + `task.delivery.mode: announce` → AI card. `deliveryMode: text` + `announce` → plain text. Either combined with `none` → no message at all. Do NOT infer rendering from `task.delivery.mode`: `mode: announce` does not mean \"plain text announce channel\" — it just means \"deliver at all\", and the format follows `cron.deliveryMode`.",
+		'- They are independent: `deliveryMode: card` + `task.delivery.mode: announce` → AI card. `deliveryMode: text` + `announce` → plain text. Either combined with `none` → no message at all. Do NOT infer rendering from `task.delivery.mode`: `mode: announce` does not mean "plain text announce channel" — it just means "deliver at all", and the format follows `cron.deliveryMode`.',
 	parameters: CRON_TOOL_PARAMETERS as unknown as Record<string, unknown>,
 };
 
@@ -320,10 +342,31 @@ async function handleTestRun(args: CronToolArgs, ctx: CronToolContext): Promise<
 		awaitResult: false,
 		storage,
 		origin,
+		// Pass the gateway's engine-reload hook through so the
+		// corruption guard in `runTestRun` can clear the in-memory
+		// `setTimeout` left over from a previous failed test-run.
+		// Without this, the OLD one-shot fires once after auto-heal
+		// and delivers a stale card.
+		onReload: ctx.onReload,
 	});
 
 	if (result.kind === "task_not_found") {
 		return errResult(`test-run: task "${result.name}" not found`);
+	}
+	if (result.kind === "schedule_corrupted") {
+		// Auto-heal failed: no clean source for the original
+		// schedule (e.g. multiple SIGKILLs in a row each took out
+		// the previous restore). The task is now `disabled` in
+		// storage. Surface a clear, actionable error so the LLM
+		// (or operator on CLI) knows to re-enable the task and
+		// set the schedule back manually. We deliberately do NOT
+		// pretend this is a successful test-run.
+		return errResult(
+			`test-run: task "${result.name}" has a corrupted schedule (cron="${result.currentCron}", ` +
+				`a previous test-run's restore didn't complete and no clean source is available). ` +
+				`The task has been disabled. Re-enable with \`cron enable ${result.name}\` after ` +
+				`re-checking the schedule with \`cron show ${result.name}\`.`,
+		);
 	}
 
 	// `isError: true` for non-success, non-started kinds so the LLM
@@ -333,9 +376,7 @@ async function handleTestRun(args: CronToolArgs, ctx: CronToolContext): Promise<
 	// happens in the background). Everything else (task_failed,
 	// delivery_failed, trigger_timeout) is a real error.
 	const isError =
-		result.kind === "task_failed" ||
-		result.kind === "delivery_failed" ||
-		result.kind === "trigger_timeout";
+		result.kind === "task_failed" || result.kind === "delivery_failed" || result.kind === "trigger_timeout";
 	return {
 		type: "tool_result",
 		tool_use_id: "",

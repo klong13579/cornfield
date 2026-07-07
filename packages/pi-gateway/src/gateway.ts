@@ -465,6 +465,13 @@ export class Gateway {
 			// often) while over-estimating would silently miss the
 			// warning.
 			tickIntervalMs: this.#config.cron?.tickIntervalMs ?? 60_000,
+			// Reload the engine immediately when the corruption
+			// guard in `runTestRun` auto-heals a task's schedule.
+			// Without this, the gateway's in-memory engine keeps
+			// the OLD `setTimeout` (left behind by the previous
+			// failed test-run) and the agent fires one more time
+			// before the next tick reloads.
+			onReload: () => this.#cronLifecycle.engineReload(),
 		};
 		dispatcher.setTools([
 			...createCronToolDefinitions(ctx),

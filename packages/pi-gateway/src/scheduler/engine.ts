@@ -3,6 +3,7 @@
  */
 import { logger } from "@oh-my-pi/pi-utils";
 import { Cron } from "croner";
+import { clearTestRunMarker, readTestRunMarker } from "./test-run-marker";
 import type { EngineOptions, ScheduledTask, SchedulerStorage } from "./types";
 import { getNextRun, getNextRuns, parseSchedule } from "./types";
 
@@ -30,11 +31,11 @@ const MAX_GRACE_SEC = 7200;
  *
  * The marker is specific: `^\+\d+s$`. Test-run only produces this
  * shape (`+${delaySec}s`); other call sites (CLI, host tool) don't
- * generate it.
+ * generate it. The shared implementation lives in `test-run-marker.ts`
+ * so the corruption guard in `runTestRun` can share the same
+ * definition.
  */
-function isTestRunSchedule(cron: string): boolean {
-	return /^\+\d+s$/.test(cron);
-}
+import { isTestRunSchedule } from "./test-run-marker";
 
 function computeGraceSeconds(task: ScheduledTask): number {
 	const parsed = parseSchedule(task.cron);
@@ -380,6 +381,77 @@ export class SchedulerEngine {
 			}
 		} finally {
 			this.#runningCount--;
+			// Test-run post-fire restore. The fire-and-forget host tool
+			// (awaitResult=false) leaves a marker on disk and never polls,
+			// so the schedule stays on `+<delay>s once` until something
+			// restores it. This hook is the "something": after every
+			// trigger (success or failure, before exhaustion too), if the
+			// task's current schedule is the test-run marker (`+<n>s`)
+			// AND a matching restore marker is on disk, apply the
+			// snapshot back and clear the marker. The post-restore engine
+			// reload re-schedules the original cron expression.
+			//
+			// Without this hook, the schedule would stay on one-shot
+			// forever (the host tool's `finally` no longer runs in the
+			// fire-and-forget path) and the task would never fire on its
+			// real cron again.
+			if (isTestRunSchedule(task.cron)) {
+				this.#restoreTestRunSchedule(task);
+			}
 		}
+	}
+
+	/**
+	 * Post-fire restore for a test-run. Reads the on-disk marker; if
+	 * it matches this task, applies the snapshot to the storage and
+	 * clears the marker. Idempotent — a missing marker is a no-op
+	 * (the marker was already consumed by a prior fire, by the
+	 * orphan-recovery tick, or by a CLI process). The `reload()` at
+	 * the end picks up the restored schedule so the engine reschedules
+	 * the task on its real cron expression.
+	 *
+	 * Why same-process safety is fine here: this hook only runs
+	 * AFTER `onTrigger` returned (i.e. the cron service finished the
+	 * task). The fire-and-forget host tool's marker is no longer
+	 * "in-flight" — there's no LLM polling for it. The legacy CLI
+	 * path (`awaitResult=true`) clears the marker in its own
+	 * `finally` before this hook could see it, so cross-pollination
+	 * is impossible.
+	 */
+	#restoreTestRunSchedule(task: ScheduledTask): void {
+		const marker = readTestRunMarker();
+		if (!marker) return;
+		if (marker.taskId !== task.id) {
+			// Marker is for a different task (shouldn't happen, but be
+			// defensive — only consume markers we own).
+			logger.warn("[engine] test-run marker taskId mismatch; leaving marker alone", {
+				expected: task.id,
+				actual: marker.taskId,
+				taskName: task.name,
+			});
+			return;
+		}
+		const snap = marker.snapshot;
+		this.#storage.updateTask(task.id, {
+			cron: snap.cron,
+			scheduleType: snap.scheduleType,
+			nextRunAt: snap.nextRunAt,
+			status: snap.status,
+			lastRunAt: snap.lastRunAt,
+			runCount: snap.runCount,
+			failCount: snap.failCount,
+			consecutiveFailures: snap.consecutiveFailures,
+			repeatCompleted: snap.repeatCompleted,
+			lastDeliveryError: snap.lastDeliveryError,
+			updatedAt: Date.now(),
+		});
+		clearTestRunMarker();
+		this.reload();
+		logger.info("[test-run] post-fire restore", {
+			taskId: task.id,
+			taskName: task.name,
+			restoredCron: snap.cron,
+			restoredScheduleType: snap.scheduleType,
+		});
 	}
 }
