@@ -161,7 +161,7 @@ Gateway 负责调度（ticker），当定时任务到点时，通过 RPC 命令�
 | D6 | 投递复用 gateway 的 DingTalk account 凭证，走 ChannelRegistry | gateway 持有业务 token 是合理设计 |
 | D7 | 投递走 Channel 接口（OpenClaw 模式），不区分回复/推送 | channel 实现自己决定送达方式，cron 不碰平台 API |
 | D8 | cron 代码保留在 `packages/pi-gateway/src/scheduler/`，不独立成包 | 不独立部署 = 不需要独立包 |
-| D9 | `list_scheduled_tasks` 通过 `createAgentSession.customTools` 注入 | cron session 原生可查，不依赖 RPC session 切换 |
+| D9 | `list_scheduled_tasks` 通过 host tool pattern 注册（gateway `HostToolDispatcher` + `set_host_tools` RPC），IM 和 cron session 同可见 | OMP 端零代码变动；不需新 RPC（gateway 无 inbound RPC server）；参考现有 `cron` 工具的注册路径 |
 | D10 | DingTalkChannel.sendMessage 支持三条路由：sessionWebhook（回复）、toUserId（DM 推送）、conversationId（group 推送）| 统一投递路径 |
 | D11 | deliver 重试逻辑归属 CronService 的 deliver 实现 | sendMessage 保持单次调用语义 |
 | D12 | DingTalkChannel 实例内部加 token cache | 当前无缓存每次重新 fetch token（TTL 7200s），高频 cron 任务浪费大量 API 调用 |
@@ -181,10 +181,10 @@ Gateway 负责调度（ticker），当定时任务到点时，通过 RPC 命令�
 
 | 层 | 改动 |
 |---|---|
-| **RPC 协议** | 新增命令 `run_cron_task` + `get_scheduled_tasks` |
+| **RPC 协议** | 新增命令 `run_cron_task`（仅 1 个；`list_scheduled_tasks` 不走 RPC，走 host tool 机制） |
 | **AgentBridge** | 新增 `runCronTask()`，不走 `PromptQueue.runExclusive()` |
 | **CronLifecycle** | `#executeCronAgent()` 改为通过 `bridge.runCronTask()` |
-| **RPC mode** | 新增 `handleRunCronTask` handler：`createAgentSession()` → `processPrompt()` → close |
+| **RPC mode** | 新增 `handleRunCronTask` handler：`createAgentSession({ agentDir, cwd, sessionManager, toolNames })` → `subscribe(text_delta)` 累加 → `session.prompt()` → `session.abort()`(超时) → `session.close()` |
 | **Channel** | DingTalkChannel.sendMessage 支持三条路由 + `#tokenCache` |
 | **Types** | ScheduledTask `agentDir` + `delivery` 拆分；OutboundMessage 加 `toUserId` |
 
@@ -214,10 +214,11 @@ async #executeCronAgent(params) {
     prompt: params.prompt,
     taskId: params.taskId,
     agentDir: params.agentDir,
+    sessionFile: cronSessionPath(params.agentDir),  // gateway 算好后传下去
     timeoutMs: params.timeoutMs,
     model: params.model,
     provider: params.provider,
-    disabledToolsets: params.disabledToolsets,
+    disabledToolNames: params.disabledToolsets ?? ["cronjob", "messaging"],
   });
 }
 ```
@@ -229,10 +230,13 @@ async runCronTask(params: {
   prompt: string;
   taskId: string;
   agentDir: string;
+  /** Cron 专用 session 文件路径（gateway 算好后传过来） */
+  sessionFile: string;
   timeoutMs?: number;
   model?: string;
   provider?: string;
-  disabledToolsets?: string[];
+  /** 要从 OMP 工具集中排除的名字（SDK 只有白名单 toolNames） */
+  disabledToolNames?: string[];
 }): Promise<{ output: string; error?: string }> {
   // 不走 PromptQueue.runExclusive()，直接发 RPC 命令
   return await this.#transport.sendCommand("run_cron_task", params, params.timeoutMs ?? 120_000);
@@ -244,43 +248,101 @@ async runCronTask(params: {
 ```typescript
 // packages/coding-agent/src/modes/rpc/rpc-mode.ts
 
+import { createAgentSession } from "@oh-my-pi/pi-coding-agent/sdk";
+import { SessionManager } from "@oh-my-pi/pi-coding-agent/session";
+import { getModel } from "@oh-my-pi/pi-ai";
+
 async handleRunCronTask(params: {
   prompt: string;
   taskId: string;
   agentDir: string;
+  sessionFile: string;
   timeoutMs?: number;
   model?: string;
   provider?: string;
-  disabledToolsets?: string[];
+  disabledToolNames?: string[];
 }): Promise<{ output: string; error?: string }> {
-  const { createAgentSession } = await import("@oh-my-pi/pi-coding-agent/sdk");
+  const timeoutMs = params.timeoutMs ?? 120_000;
 
-  const { session } = await createAgentSession({
-    agentDir: params.agentDir,
-    hasUI: false,
-    enableLsp: false,
-    enableMCP: false,
-    skipPythonPreflight: true,
-    model: params.model ? { provider: params.provider, id: params.model } : undefined,
-    customTools: [listScheduledTasksTool],
-  });
+  if (!params.agentDir) return { output: "", error: "agentDir required" };
+  if (!params.sessionFile) return { output: "", error: "sessionFile required" };
 
-  const abortController = new AbortController();
-  const timeout = setTimeout(() => abortController.abort(), params.timeoutMs ?? 120_000);
+  // 1. 显式 SessionManager：让 session 落到 cron 专用文件，
+  //    Execution.agentSessionPath 能稳定回填。
+  //    参考 task/executor.ts:953 的 SessionManager.open(sessionFile) 模式。
+  const sessionManager = await SessionManager.open(params.sessionFile);
 
+  // 2. toolNames 白名单（SDK 没有 disabledToolsets 字段；CreateAgentSessionOptions.toolNames
+  //    在 sdk.ts:222 是白名单）。取全量名再过滤。disabledToolNames 默认 ['cronjob', 'messaging']。
+  const excluded = new Set(params.disabledToolNames ?? ["cronjob", "messaging"]);
+  const allToolNames = await this.#getBuiltinToolNames();
+  const toolNames = allToolNames.filter(n => !excluded.has(n));
+
+  let session;
   try {
-    const result = await session.processPrompt(params.prompt, {
-      signal: abortController.signal,
+    const created = await createAgentSession({
+      agentDir: params.agentDir,
+      cwd: params.agentDir,                  // agent 的工作区；不设会落到 gateway cwd（错）
+      sessionManager,                        // 显式 session 文件路径
+      hasUI: false,
+      enableLsp: false,
+      enableMCP: false,
+      skipPythonPreflight: true,
+      toolNames,                             // 白名单替代 disabledToolsets
+      model: params.model ? getModel(params.provider ?? "default", params.model) : undefined,
     });
-    return { output: result.text };
+    session = created.session;
+
+    // 3. 订阅 text_delta 事件累加输出。
+    //    session.prompt() 返回 Promise<void>（见 agent-session.ts:2623），
+    //    文本不在返回值里，在事件流里。这与 TUI / print-mode / task/executor
+    //    三个现有非交互调用方的模式一致。
+    const chunks: string[] = [];
+    const unsubscribe = session.subscribe(event => {
+      if (
+        event.type === "message_update" &&
+        event.assistantMessageEvent?.type === "text_delta" &&
+        typeof event.assistantMessageEvent.delta === "string"
+      ) {
+        chunks.push(event.assistantMessageEvent.delta);
+      }
+    });
+
+    // 4. watchdog 超时：PromptOptions 没有 signal（sdk.ts:278），
+    //    用 setTimeout 调 session.abort()（agent-session.ts:3453）。
+    const watchdog = setTimeout(() => {
+      session!.abort().catch(() => { /* best effort */ });
+    }, timeoutMs);
+
+    try {
+      await session.prompt(params.prompt);
+      return { output: chunks.join("") };
+    } finally {
+      clearTimeout(watchdog);
+      unsubscribe();
+    }
   } catch (err) {
-    return { output: "", error: err instanceof Error ? err.message : String(err) };
+    return {
+      output: "",
+      error: err instanceof Error ? err.message : String(err),
+    };
   } finally {
-    clearTimeout(timeout);
-    await session.close();
+    if (session) {
+      // close 抛错也要吞掉：不能拖挂 RPC 响应路径
+      await session.close().catch(() => { /* best effort */ });
+    }
   }
 }
 ```
+
+**SDK 适配要点（被 A1-A3 反复跳过的几个）**：
+- `createAgentSession` 用 `toolNames` 白名单，**没有** `disabledToolsets` 字段
+- `session.prompt()` 返回 `Promise<void>`，**没有** `result.text`
+- 文本通过订阅 `subscribe()` 收到的 `text_delta` 事件累加
+- `cwd` 不显式传会落到 `getProjectDir()`，对 cron 任务几乎一定是错的
+- `sessionManager` 不显式传会落到默认目录，`agentSessionPath` 关联丢失
+- `PromptOptions` **没有** `signal`；超时用 `setTimeout + session.abort()`
+- `session.close()` 抛错要吞掉，否则 finally 会中断 RPC 响应返回
 
 ### 2.8 数据流（完整路径）
 
@@ -290,18 +352,21 @@ SchedulerEngine tick
     → deps.executeAgent({
         agentDir: task.agentDir,
         prompt: task.command,
-        disabledToolsets: ['cronjob', 'messaging'],
+        sessionFile: cronSessionPath(task.agentDir),
+        disabledToolNames: ['cronjob', 'messaging'],
         model: task.model,
         provider: task.provider,
         timeoutMs: task.timeoutMs,
       })
       → CronLifecycle 实现：
         → getBridgeByAgentDir(agentDir)
-        → bridge.runCronTask({ prompt, taskId, agentDir, timeoutMs, model, provider, disabledToolsets })
+        → bridge.runCronTask({ prompt, taskId, agentDir, sessionFile, timeoutMs, model, provider, disabledToolNames })
           → RPC: sendCommand("run_cron_task", ...)
             → omp 子进程 handleRunCronTask
-              → createAgentSession({ agentDir, hasUI: false, ... })  ← 独立 session
-              → session.processPrompt(prompt)
+              → SessionManager.open(sessionFile)
+              → createAgentSession({ agentDir, cwd, sessionManager, toolNames, ... })
+              → session.subscribe(text_delta) 累加
+              → session.prompt(prompt)
               → session.close()
               → 返回 { output }
       → 结果 string
@@ -353,6 +418,7 @@ export interface CronDeps {
     prompt: string;
     timeoutMs?: number;
     signal?: AbortSignal;
+    /** 要排除的 OMP 工具名（默认 ['cronjob', 'messaging']） */
     disabledToolsets?: string[];
     model?: string;
     provider?: string;
@@ -538,36 +604,92 @@ async #getOAuthToken(): Promise<string> {
 
 | 维度 | 方案 |
 |---|---|
-| 注入方式 | `createAgentSession` 的 `customTools` 参数 |
-| 数据源 | `CronLifecycle.schedulerStorage` |
-| 通信 | RPC 命令 `get_scheduled_tasks` → gateway 返回 |
-| 可见范围 | cron session 和 IM session 均可调用 |
+| 注册位置 | gateway 端 `HostToolDispatcher`（与现有 `cron` 工具同级） |
+| 暴露方式 | gateway 通过 `set_host_tools` RPC 推给 OMP；OMP 在 `host-tools.ts` 包装成 `AgentTool`；IM 和 cron session 同样可见 |
+| 数据源 | `CronLifecycle.schedulerStorage`（gateway 进程内直接读） |
+| 通信 | 不需要新 RPC——`host_tool_call` frame 走的是**已有**的 gateway→OMP 反向通道（现有 `cron` 工具已在用） |
 | 返回格式 | 任务列表 + 最近执行记录 |
 
-### 5.2 工具签名
+**不采用独立 RPC `get_scheduled_tasks` 的原因**：gateway 没有 inbound RPC server（只有 outbound `RpcTransport`），从 OMP 进程侧 `rpcTransport.sendCommand(...)` 调不到 gateway。逆方向通信必须走 host tool frame，host tool 机制就是为这个场景设计的。
+
+### 5.2 工具实现
 
 ```typescript
-const listScheduledTasksTool = {
+// packages/pi-gateway/src/scheduler/host-tool-list-scheduled-tasks.ts (新文件)
+
+import { Type } from "@sinclair/typebox";
+import type {
+  HostToolHandler,
+  RpcHostToolDefinition,
+} from "../host-tool-dispatcher";
+import type { ScheduledTask, SchedulerStorage } from "./types";
+
+const LIST_SCHEDULED_TASKS_PARAMETERS = Type.Object(
+  {},
+  { additionalProperties: false },
+);
+
+export const LIST_SCHEDULED_TASKS_DEFINITION: RpcHostToolDefinition = {
   name: "list_scheduled_tasks",
   label: "查看定时任务",
-  description: "查看当前 agent 配置的所有定时任务及其执行状态、最近结果",
-  parameters: {
-    type: "object",
-    properties: {},
-    additionalProperties: false,
-  },
-  execute: async () => {
-    const result = await rpcTransport.sendCommand("get_scheduled_tasks", {
-      agentDir: currentAgentDir,
-    }, 10_000);
-    return {
-      content: [{
-        type: "text",
-        text: formatTaskList(result.tasks),
-      }],
-    };
-  },
+  description:
+    "查看当前 agent 配置的所有定时任务及其执行状态、最近结果。" +
+    "可被 IM 和 cron session 同样调用。数据来自 gateway 的 schedulerStorage，host tool 模式（参考现有 cron 工具）。",
+  parameters: LIST_SCHEDULED_TASKS_PARAMETERS as unknown as Record<string, unknown>,
 };
+
+export interface ListScheduledTasksContext {
+  /** Lazy getter：schedulerStorage 由 CronLifecycle.start() 启动后才可用 */
+  getStorage: () => SchedulerStorage | null;
+}
+
+export function makeListScheduledTasksHandler(
+  ctx: ListScheduledTasksContext,
+): HostToolHandler {
+  return async (_call, reply) => {
+    try {
+      const storage = ctx.getStorage();
+      if (!storage) {
+        reply({
+          content: [{ type: "text", text: "scheduler storage not initialized" }],
+          isError: true,
+        });
+        return;
+      }
+      const tasks = storage.listTasks();
+      reply({ content: [{ type: "text", text: formatTaskList(tasks) }] });
+    } catch (err) {
+      reply({
+        content: [{
+          type: "text",
+          text: `list_scheduled_tasks failed: ${err instanceof Error ? err.message : String(err)}`,
+        }],
+        isError: true,
+      });
+    }
+  };
+}
+
+function formatTaskList(tasks: ScheduledTask[]): string {
+  // 复用 scheduler/types.ts 的 formatTaskRow 或类似格式化
+  return tasks.map(t =>
+    `${t.name.padEnd(24)} ${t.status.padEnd(8)} ${t.cron.padEnd(16)} next=${t.nextRunAt ?? "—"}`,
+  ).join("\n");
+}
+```
+
+注册点（与 `cron` 工具同位置，在 `CronLifecycle` 启动时调 `hostToolDispatcher.register`）：
+
+```typescript
+// packages/pi-gateway/src/gateway-cron-lifecycle.ts (start() 里)
+
+this.#hostToolDispatcher.register(
+  LIST_SCHEDULED_TASKS_DEFINITION,
+  makeListScheduledTasksHandler({
+    getStorage: () => this.#schedulerStorage,
+  }),
+);
+// OMP 端不需要任何代码变动：set_host_tools frame 是现有机制。
 ```
 
 ### 5.3 返回示例
@@ -609,7 +731,7 @@ const listScheduledTasksTool = {
 |---|---|
 | cron session 不继承 IM 历史 | 独立 session 文件，不 `switch_session` |
 | cron 不污染 memory/skills | `enableLsp: false`, `enableMCP: false` |
-| cron 不软递归调自己 | `disabledToolsets: ["cronjob", "messaging"]` + prompt 规则 |
+| cron 不软递归调自己 | `toolNames` 白名单排除 `cronjob` / `messaging`（SDK 没有 `disabledToolsets` 字段；见 §2.7）+ prompt 规则 |
 | cron 超时兜底 | `AbortController` + `setTimeout` |
 
 ### 6.3 实施风险
@@ -629,29 +751,29 @@ const listScheduledTasksTool = {
 
 | 步骤 | 文件 | 改动 |
 |---|---|---|
-| 1 | `packages/pi-gateway/src/agent-transport.ts` | 定义 `run_cron_task` RPC 命令类型和响应格式 |
-| 2 | `packages/coding-agent/src/modes/rpc/rpc-mode.ts` | 新增 `handleRunCronTask` handler |
+| 1 | `packages/pi-gateway/src/agent-transport.ts` | 定义 `run_cron_task` RPC 命令类型和响应格式；`params` 包含 `sessionFile`、`disabledToolNames` |
+| 2 | `packages/coding-agent/src/modes/rpc/rpc-mode.ts` | 新增 `handleRunCronTask` handler：`SessionManager.open(sessionFile)` → `createAgentSession({ agentDir, cwd: agentDir, sessionManager, toolNames: allTools - disabledToolNames, ... })` → `subscribe(text_delta)` 累加 → `session.prompt()` → `setTimeout + session.abort()` 超时 → `session.close()`。完整代码见 §2.7。 |
 | 3 | `packages/pi-gateway/src/agent-bridge.ts` | 新增 `runCronTask()` 方法 |
-| 4 | `packages/pi-gateway/src/gateway-cron-lifecycle.ts` | `#executeCronAgent()` 改为调 `bridge.runCronTask()` |
+| 4 | `packages/pi-gateway/src/gateway-cron-lifecycle.ts` | `#executeCronAgent()` 改为调 `bridge.runCronTask()`，gateway 端算 `sessionFile = cronSessionPath(agentDir)` 一并传入 |
 | 5 | `packages/pi-gateway/src/gateway.ts` | 删除 `sendToChannel`/`sendViaOAuth`/`sendViaWebhook`/`deliverWithRetry` |
 
-### 7.2 阶段二：`list_scheduled_tasks` 工具
+### 7.2 阶段二：`list_scheduled_tasks` 工具（host tool 模式）
 
 | 步骤 | 文件 | 改动 |
 |---|---|---|
-| 6 | `packages/pi-gateway/src/agent-transport.ts` | 定义 `get_scheduled_tasks` RPC 命令 |
-| 7 | `packages/pi-gateway/src/gateway.ts` 或 `gateway-cron-lifecycle.ts` | 新增 `get_scheduled_tasks` handler，读 `schedulerStorage` |
-| 8 | `packages/pi-gateway/src/gateway-cron-lifecycle.ts` | 在 `#executeCronAgent` 中注入 `listScheduledTasksTool` |
+| 6 | `packages/pi-gateway/src/scheduler/host-tool-list-scheduled-tasks.ts` | 新文件：定义 `LIST_SCHEDULED_TASKS_DEFINITION`（`RpcHostToolDefinition`）+ `makeListScheduledTasksHandler({ getStorage })` 工厂。完整代码见 §5.2。 |
+| 7 | `packages/pi-gateway/src/gateway-cron-lifecycle.ts` | `start()` 里调 `hostToolDispatcher.register(LIST_SCHEDULED_TASKS_DEFINITION, makeListScheduledTasksHandler({ getStorage: () => this.#schedulerStorage }))`。OMP 端**零改动**——`set_host_tools` 推送是现有机制。 |
+| 8 | (验证) | IM session 调 `list_scheduled_tasks` 和 cron session 调同一名字走同一条 host tool path，验证两者都能看到完整任务列表 |
 
 ### 7.3 阶段三：验证 + 数据迁移 + 清理
 
 | 步骤 | 内容 |
 |---|---|
-| 9 | 验证 cron session 和 IM session 在子进程 event loop 上交错运行 |
-| 10 | 验证 `AbortController` 超时能正确终止卡住的 cron session |
-| 11 | 网关启动时的 task 数据迁移（accountId → agentDir + delivery） |
+| 9 | 验证 cron session 和 IM session 在子进程 event loop 上交错运行（双 session 并发 stress test） |
+| 10 | 验证 `setTimeout + session.abort()` watchdog 能正确终止卡住的 cron session；abort 后 `session.close()` 不泄漏 |
+| 11 | 网关启动时的 task 数据迁移（`accountId` → `agentDir` + `delivery`，旧字段运行时兼容读取） |
 | 12 | 标记旧字段 `@deprecated`，后续版本清理 |
-| 13 | 添加 IM session 侧 `list_scheduled_tasks` 支持 |
+| ~~13~~ | ~~添加 IM session 侧 `list_scheduled_tasks` 支持~~ — host tool 模式下自动生效，不需要额外步骤 |
 
 ---
 

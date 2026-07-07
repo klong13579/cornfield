@@ -4,5 +4,5 @@
 
 ## 待办
 
-- [ ] 定时任务输出结果使用 AI card
+- [x] 定时任务输出结果使用 AI card
 - [ ] cron-agent-subprocess-execution
