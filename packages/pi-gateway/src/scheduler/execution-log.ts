@@ -71,6 +71,17 @@ export interface ExecutionLogEntry {
 	stderr: string;
 	/** Structured diagnostics collected during execution. Absent in legacy entries. */
 	diagnostics?: CronRunDiagnostics;
+	/**
+	 * For agent tasks: absolute path to the OMP agent session JSONL that
+	 * contains the full LLM trace (thinking + tool_use + tool_result). Set
+	 * by `CronService.onTrigger` after execution completes. Absent for
+	 * shell tasks or when the session cannot be located. Persisted here
+	 * (not just in the in-memory execution map) so that a gateway restart
+	 * between a failed run and the next scheduled trigger does not lose
+	 * the path — Tier 3 of the cron context prefix needs it to surface
+	 * the failed tool calls to the next run.
+	 */
+	agentSessionPath?: string;
 }
 
 /** YYYY-MM-DD in local time, used as the per-day filename. */

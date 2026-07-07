@@ -345,6 +345,22 @@ export interface CronConfig {
 	tickIntervalMs?: number;
 	maxConcurrentRuns?: number;
 	heartbeat?: HeartbeatConfig;
+	/**
+	 * How cron task results are delivered to the user.
+	 *
+	 *   "card" (default) — render the result as a DingTalk AI Card with
+	 *     full markdown, status header, and a "查看执行日志" action button.
+	 *     Falls back silently to plain text if the card API fails.
+	 *   "text"           — use the legacy plain-text path via sampleText
+	 *     (Route 2/3 in DingTalkChannel.sendMessage). Use this if cards
+	 *     misbehave in your environment; flip back to "card" once fixed.
+	 *
+	 * Kill switch: setting this to "text" instantly reverts ALL cron tasks
+	 * to the legacy text path. Per-task override is not supported in v1;
+	 * the toggle is global by design so an operator can disable cards
+	 * fleet-wide with a single config change.
+	 */
+	deliveryMode?: "card" | "text";
 }
 
 export interface GatewayConfig {

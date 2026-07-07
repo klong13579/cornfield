@@ -255,6 +255,11 @@ export class JsonFileStorage implements SchedulerStorage {
 					output: entry.output,
 					stderr: entry.stderr,
 					status: entry.status,
+					// Persisted in the JSONL log since the agentSessionPath
+					// persistence fix; absent for entries written before
+					// the fix (legacy fallback to no path → Tier 3
+					// silently skipped, which is the safe default).
+					agentSessionPath: entry.agentSessionPath,
 				});
 			}
 		}

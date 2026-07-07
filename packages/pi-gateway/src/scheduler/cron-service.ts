@@ -10,7 +10,13 @@
  */
 
 import { findAgentSessionPath } from "../session-paths";
-import { type CronRunDiagnostics, normalizeCronRunDiagnostics, parseAgentSessionForToolFailures } from "./diagnostics";
+import {
+	type CronRunDiagnostics,
+	formatToolCallSummary,
+	normalizeCronRunDiagnostics,
+	parseAgentSessionForToolCalls,
+	parseAgentSessionForToolFailures,
+} from "./diagnostics";
 import { appendDeliveryFailureLog, appendExecutionLog } from "./execution-log";
 import { executeScheduledCommand, SILENT_MARKER } from "./executor";
 import type { ScheduledTask, SchedulerStorage, TaskExecution } from "./types";
@@ -37,13 +43,30 @@ export type ExecuteAgentFn = (params: {
 	provider?: string;
 }) => Promise<{ output: string; error?: string }>;
 
-/** Deliver a result to a channel (internally handles retry). */
+/** Deliver a result to a channel (internally handles retry).
+ *
+ *  The `text` field is the legacy plain-text summary (used by the
+ *  sampleText path); `card` is the structured deliverable for the
+ *  AI-Card path. Both are always supplied so the gateway can pick
+ *  either at dispatch time without re-fetching task state. The `card`
+ *  is optional because shell-task fallback paths may not have the
+ *  full agent metadata handy. */
 export type DeliverFn = (params: {
 	channel: string;
 	accountId?: string;
 	toUserId?: string;
 	toConversationId?: string;
 	text: string;
+	card?: {
+		taskName: string;
+		taskId: string;
+		slug: string;
+		status: "success" | "failure" | "timed_out";
+		exitCode: number | undefined;
+		durationMs: number;
+		output: string;
+		error?: string;
+	};
 }) => Promise<{ ok: boolean; error?: string }>;
 
 /**
@@ -78,6 +101,29 @@ export type NotifyCronFailureFn = (params: {
  *  live bridge (e.g. cron test-run during a bridge restart). */
 export type ResolveAccountIdFn = (agentDir: string) => string | undefined;
 
+/**
+ * Mirror the cron delivery brief to the user's chat session JSONL so the
+ * user can reply with full context (a+ "continuable jobs" pattern, modeled
+ * on Hermes's `attach_to_session`). Optional; tasks with
+ * `attachToSession: true` trigger this only on successful delivery.
+ *
+ * The function is best-effort: a mirror failure must NOT fail the cron
+ * run. Implementations should resolve the chat session path themselves
+ * (from the delivery params + task.agentDir) and append a user-role
+ * message entry with a labelled prefix so the chat agent recognises it
+ * as a system-injected delivery, not a real user message.
+ */
+export type MirrorToSessionFn = (params: {
+	task: ScheduledTask;
+	brief: string;
+	delivery: {
+		channel: string;
+		accountId?: string;
+		toUserId?: string;
+		toConversationId?: string;
+	};
+}) => Promise<{ ok: boolean; error?: string }>;
+
 /** Dependencies injected by the gateway. */
 export interface CronDeps {
 	executeAgent: ExecuteAgentFn;
@@ -87,6 +133,9 @@ export interface CronDeps {
 	resolveAccountId?: ResolveAccountIdFn;
 	/** Optional. See {@link NotifyCronFailureFn}. */
 	notifyFailure?: NotifyCronFailureFn;
+	/** Optional. See {@link MirrorToSessionFn}. Called after a
+	 *  successful delivery when `task.attachToSession` is true. */
+	mirrorToSession?: MirrorToSessionFn;
 }
 
 /** Result of a cron trigger execution. */
@@ -97,40 +146,192 @@ export interface CronTriggerResult {
 }
 
 /**
+ * Per-task context block injected between the [CRON-CONTEXT] header and
+ * the four rules. All fields are optional; missing fields are omitted.
+ *
+ * Tier 1 (`metaLine`) is always present in storage-backed calls.
+ * Tier 2 (`lastOutput`) is conditional on the task's `injectLastOutput`
+ * config and the last run's status.
+ * Tier 3 (`lastToolCalls`) is conditional on the last run failing AND
+ * a non-zero `injectToolCalls` AND the prior OMP session JSONL being
+ * locatable.
+ */
+export interface PrefixContext {
+	/** Pre-formatted "Last run: ..." line. */
+	metaLine?: string;
+	/** Last run output text, already truncated to fit Tier 2 budget. */
+	lastOutput?: string;
+	/** Last N tool calls, already formatted as one-liners. */
+	lastToolCalls?: string;
+}
+
+/**
+ * Fixed postamble of the cron context prefix. Held in a module constant so
+ * the wording stays byte-equal across calls and tests can match against
+ * it. The four rules are the load-bearing soft recursion guard — if you
+ * edit them, audit the regression test in
+ * `packages/pi-gateway/test/scheduler-cron-context-prefix.test.ts`.
+ */
+const CRON_FOUR_RULES =
+	"Four rules for this run:\n" +
+	"1. Do NOT call the `cron` host tool (create / list / update / delete scheduled tasks). The `cronjob` toolset is disabled for this run — calling it would either fail or recursively schedule more tasks.\n" +
+	"2. Do NOT call proactive messaging tools (e.g. `dws chat message send`, `chat_post`, anything in the `messaging` toolset). The `messaging` toolset is disabled. These would create duplicate notifications on top of the gateway's own delivery.\n" +
+	'3. Your reply text IS the delivery. The gateway renders the body of your final reply as a DingTalk AI card to the original conversation (markdown headings, lists, code blocks, and inline code are all supported — use them). So just write your answer in the reply body and stop — do not call any `send` tool, do not try to push it anywhere. Format with `##` headings, `-` bullets, fenced code blocks, and `` `inline code` `` so the card stays scannable. This applies even if the task wording says "发给用户" / "send to user" / "notify" / "告诉用户".\n' +
+	'4. If there is genuinely nothing new to report (no changes, no errors, no notable findings), respond with exactly "[SILENT]" and nothing else. The gateway detects this marker and suppresses delivery — no card is sent to the user. Never combine [SILENT] with other content; either report your findings normally, or output [SILENT] alone.\n';
+
+/**
  * Build the cron context prefix injected before the task prompt.
  *
- * Four rules, each spelled out so the agent does not have to guess:
- *   1. Do not invoke the `cron` host tool (cronjob toolset is disabled).
- *      Prevents accidental recursion — a cron task creating more cron tasks.
- *   2. Do not call proactive messaging tools (messaging toolset is disabled).
- *      Tools like `dws chat message send` / `chat_post` would duplicate the
- *      gateway's automatic delivery. Note: this is about tool *calls*, not
- *      about whether to write a reply at all — the reply text itself is the
- *      deliverable.
- *   3. The reply text IS the delivery. The gateway scans the response body
- *      and renders it as a DingTalk AI card to the original conversation,
- *      so the agent should just produce its final answer in the reply body
- *      and not try to push it anywhere itself. This is true even if the
- *      task wording says "发给用户" / "send to user" / "notify" / etc.
- *   4. If there is genuinely nothing new to report, respond with exactly
- *      `[SILENT]` and nothing else. The gateway detects this marker and
- *      suppresses delivery — no card is sent. Never combine `[SILENT]`
- *      with other content; either report findings normally, or output
- *      `[SILENT]` alone.
+ * When called with no second argument the output is a header + the four
+ * rules — byte-equivalent to the original single-arg signature. This is
+ * the safe no-I/O path used by tests and the legacy test-run path.
  *
- * If we ever drop the toolsets-level block in `executor.ts`, this prompt
- * remains the last line of defense — keep it precise.
+ * With a {@link PrefixContext}, the function splices in the per-task
+ * history block between the header and the four rules. Callers (the
+ * I/O-doing `buildCronContextPrefixFromStorage`) are responsible for
+ * fetching, formatting, and truncating the context contents.
  */
-export function buildCronContextPrefix(task: ScheduledTask): string {
+export function buildCronContextPrefix(task: ScheduledTask, context: PrefixContext = {}): string {
 	const agentLabel = task.agentDir ? (task.agentDir.split("/").pop() ?? task.agentDir) : (task.accountId ?? "default");
-	return (
-		`[CRON-CONTEXT] You are running as a scheduled task (cron). Agent: ${agentLabel}.\n\n` +
-		"Four rules for this run:\n" +
-		"1. Do NOT call the `cron` host tool (create / list / update / delete scheduled tasks). The `cronjob` toolset is disabled for this run — calling it would either fail or recursively schedule more tasks.\n" +
-		"2. Do NOT call proactive messaging tools (e.g. `dws chat message send`, `chat_post`, anything in the `messaging` toolset). The `messaging` toolset is disabled. These would create duplicate notifications on top of the gateway's own delivery.\n" +
-		'3. Your reply text IS the delivery. The gateway scans the body of your final reply and renders it as a DingTalk AI card to the original conversation. So just write your answer in the reply body and stop — do not call any `send` tool, do not try to push it anywhere. This applies even if the task wording says "发给用户" / "send to user" / "notify" / "告诉用户".\n' +
-		'4. If there is genuinely nothing new to report (no changes, no errors, no notable findings), respond with exactly "[SILENT]" and nothing else. The gateway detects this marker and suppresses delivery — no card is sent to the user. Never combine [SILENT] with other content; either report your findings normally, or output [SILENT] alone.\n\n'
-	);
+	const header =
+		`[CRON-CONTEXT] Task: ${task.name}  Agent: ${agentLabel}\n` +
+		`Schedule: ${task.cron}  Type: ${task.taskType ?? "agent"}\n` +
+		(context.metaLine ? `${context.metaLine}\n` : "");
+
+	const history =
+		(context.lastOutput ? `\nLast run summary:\n${context.lastOutput}\n` : "") +
+		(context.lastToolCalls ? `\nLast run tool calls:\n${context.lastToolCalls}\n` : "");
+
+	return `${header}${history}\n---\n\n${CRON_FOUR_RULES}`;
+}
+
+// ---------------------------------------------------------------------------
+// Storage-backed prefix builder (I/O doing version used by onTrigger)
+// ---------------------------------------------------------------------------
+
+/** Per-field token budget for Tier 2 last-output text. */
+const TIER2_OUTPUT_MAX_CHARS = 6000;
+
+/** Truncate an output string to {@link maxChars} chars with a visible marker. */
+function truncateOutputForContext(output: string, maxChars = TIER2_OUTPUT_MAX_CHARS): string {
+	if (output.length <= maxChars) return output;
+	return `${output.slice(0, maxChars)}\n[...truncated, original was ${output.length} chars]`;
+}
+
+/** Format a millisecond delta as a short human string ("5m ago", "2d ago"). */
+function formatAgo(ts: number, now: number): string {
+	const diff = now - ts;
+	if (diff < 0) return "just now";
+	const s = Math.floor(diff / 1000);
+	if (s < 60) return `${s}s ago`;
+	const m = Math.floor(s / 60);
+	if (m < 60) return `${m}m ago`;
+	const h = Math.floor(m / 60);
+	if (h < 24) return `${h}h ago`;
+	const d = Math.floor(h / 24);
+	return `${d}d ago`;
+}
+
+/** Build the Tier 1 metadata line summarizing the most recent run. */
+function formatLastRunMeta(task: ScheduledTask, lastExec: TaskExecution, now: number): string {
+	const ts = lastExec.endedAt ?? lastExec.startedAt;
+	const when = new Date(ts).toLocaleString();
+	const ago = formatAgo(ts, now);
+	const status = lastExec.status === "success" ? "ok" : lastExec.status;
+	const exit = lastExec.exitCode !== undefined ? `  Exit: ${lastExec.exitCode}` : "";
+	const consec = task.consecutiveFailures > 0 ? `  Consecutive failures: ${task.consecutiveFailures}` : "";
+	const delivery = task.lastDeliveryError ? `  Last delivery error: ${task.lastDeliveryError}` : "";
+	return `Last run: ${when} (${ago})  Status: ${status}${exit}${consec}${delivery}`;
+}
+
+/**
+ * Storage-backed entry point used by `onTrigger` to construct the cron
+ * context prefix with full per-task history.
+ *
+ * Returns the legacy four-rules-only prefix when `storage` is undefined,
+ * which preserves the behavior of older `CronDeps` consumers that don't
+ * inject a storage backend. The function is synchronous because every
+ * dependency it uses (`storage.getExecutions`, `fs.readFileSync`) is
+ * already sync — the cron hot path tolerates the few ms this costs.
+ */
+export function buildCronContextPrefixFromStorage(
+	task: ScheduledTask,
+	storage: SchedulerStorage | undefined,
+	opts?: { nowMs?: () => number },
+): string {
+	if (!storage) {
+		return buildCronContextPrefix(task);
+	}
+
+	const now = opts?.nowMs?.() ?? Date.now();
+	// Engine creates the exec row BEFORE calling onTrigger
+	// (engine.ts#runTask: recordExecution at start, then await onTrigger).
+	// So at onTrigger time, getExecutions(taskId, 1)[0] is the in-flight
+	// run (status="running", endedAt=undefined) — NOT the previous run.
+	// Filter by `endedAt != null` to skip the in-flight row and pick up
+	// the most recent TERMINAL run. Without this, Tier 1 always shows
+	// "Status: running" and Tier 2 always reads the current run's empty
+	// output — which would make a+ useless for real cron triggers.
+	const recent = storage.getExecutions(task.id, 10);
+	const lastExec = recent.find(e => e.endedAt != null);
+
+	if (!lastExec) {
+		return buildCronContextPrefix(task, { metaLine: "No previous runs." });
+	}
+
+	// Tier 1 — always
+	const metaLine = formatLastRunMeta(task, lastExec, now);
+
+	// Tier 2 — conditional on config + last run status
+	const injectLastOutput = task.injectLastOutput ?? "on_failure";
+	const injectFailure = task.injectFailureContext !== false;
+	const isFailure = lastExec.status === "failure";
+	let lastOutput: string | undefined;
+	if (
+		injectFailure &&
+		lastExec.output &&
+		(injectLastOutput === "always" || (isFailure && injectLastOutput !== "never"))
+	) {
+		lastOutput = truncateOutputForContext(lastExec.output);
+	}
+
+	// Tier 3 — conditional on failure + non-zero limit + present session file
+	const injectToolCallsN = task.injectToolCalls ?? 10;
+	let lastToolCalls: string | undefined;
+	if (injectFailure && isFailure && injectToolCallsN > 0 && lastExec.agentSessionPath) {
+		const all = parseAgentSessionForToolCalls(lastExec.agentSessionPath);
+		if (all && all.length > 0) {
+			// Error-priority selection. On failure runs we want the agent
+			// to see every errored call (up to the quota) because those
+			// are the most diagnostic signal; any remaining budget goes
+			// to the most recent successful calls for context. Older
+			// non-error calls are dropped first.
+			//
+			// Examples (limit=10):
+			//   5 errors + 5 successes   → 5 errors + 5 successes (quota full)
+			//   20 errors + 5 successes  → 10 most recent errors
+			//   3 errors + 50 successes  → 3 errors + 7 most recent successes
+			//   0 errors + 10 successes  → 10 most recent successes
+			const errors = all.filter(c => c.isError);
+			const successes = all.filter(c => !c.isError);
+			const errorSlots = Math.min(errors.length, injectToolCallsN);
+			const successSlots = Math.max(0, injectToolCallsN - errorSlots);
+			// Guard against `slice(-0) === slice(0)` returning the full array
+			// when a slot count is zero.
+			const errorSlice = errorSlots > 0 ? errors.slice(-errorSlots) : [];
+			const successSlice = successSlots > 0 ? successes.slice(-successSlots) : [];
+			const selected = [...errorSlice, ...successSlice];
+			const dropped = all.length - selected.length;
+			const droppedErrors = errors.length - errorSlots;
+			const header =
+				dropped > 0
+					? `Last run tool calls (${selected.length} of ${all.length} shown — ${dropped} earlier calls dropped, ${droppedErrors} of them errors):`
+					: `Last run tool calls (${selected.length} calls):`;
+			lastToolCalls = `${header}\n${selected.map(formatToolCallSummary).join("\n")}`;
+		}
+	}
+
+	return buildCronContextPrefix(task, { metaLine, lastOutput, lastToolCalls });
 }
 
 /**
@@ -232,7 +433,7 @@ export class CronService {
 		const isAgent = task.taskType === "agent";
 
 		const agentDir = resolveAgentDir(task);
-		const cronContextPrefix = buildCronContextPrefix(task);
+		const cronContextPrefix = buildCronContextPrefixFromStorage(task, storage);
 
 		let exitCode = 0;
 		let output = "";
@@ -361,6 +562,22 @@ export class CronService {
 			}
 		}
 
+		// DEBUG-ONLY forceFail hook: override the warm bridge / fallback
+		// result to a failure while keeping the real agent session path.
+		// The session path is critical — without it, the next run's
+		// Tier 3 (tool-call recap) silently skips. Only fires when the
+		// task has it set in jobs.json; the field is documented as
+		// debug-only so production task definitions never carry it.
+		// Diagnostics entry explains the override in the JSONL log.
+		if (task.forceFail && exitCode === 0) {
+			exitCode = 1;
+			output = output
+				? `${output}\n\n[forceFail] debug-only override: warm bridge succeeded, recording as failure for Tier 3 e2e testing`
+				: "[forceFail] debug-only override: warm bridge produced no output, recording as failure for Tier 3 e2e testing";
+			addDiag("cron-debug", "warn", "forceFail=true — overriding exit code to 1", { exitCode: 1 });
+			log.warn("Cron task forceFail override", { taskId: task.id, taskName: task.name });
+		}
+
 		// Record the execution result
 		storage.updateExecution(executionId, {
 			status: exitCode === 0 ? "success" : "failure",
@@ -387,12 +604,35 @@ export class CronService {
 			const prefix = exitCode === 0 ? "✅" : timedOut ? "⏰" : "❌";
 			const summary = `${prefix} Task "${task.name}" completed (exit ${exitCode}, ${durationMs}ms)\n\n${output.slice(0, 2000)}`;
 
+			// Structured deliverable for the AI-Card path. The text
+			// path uses `text` (truncated); the card path uses `card`
+			// (full output, structured metadata). Both are passed so
+			// the gateway can dispatch by mode without re-fetching
+			// task state.
+			const cardStatus: "success" | "failure" | "timed_out" = timedOut
+				? "timed_out"
+				: exitCode === 0
+					? "success"
+					: "failure";
+
 			const deliverResult = await deliver({
 				channel: deliveryConfig.channel,
 				accountId: deliveryConfig.accountId,
 				toUserId: deliveryConfig.toUserId,
 				toConversationId: deliveryConfig.toConversationId,
 				text: summary,
+				card: {
+					taskName: task.name,
+					taskId: task.id,
+					slug: task.name,
+					status: cardStatus,
+					exitCode,
+					durationMs,
+					output: timedOut
+						? `[TIMED OUT after ${task.timeoutMs ?? 30_000}ms]\n${output}`
+						: output,
+					error: stderr || undefined,
+				},
 			});
 
 			if (!deliverResult.ok) {
@@ -450,6 +690,40 @@ export class CronService {
 			} else {
 				// Clear delivery error on success
 				storage.updateTask(task.id, { lastDeliveryError: undefined });
+
+				// attach_to_session: mirror the brief to the user's chat
+				// session so a follow-up DM/IM reply lands in a session
+				// that already contains the brief. Best-effort: failure
+				// here is logged but does NOT fail the cron run.
+				if (task.attachToSession && this.#deps.mirrorToSession) {
+					try {
+						const mirrorResult = await this.#deps.mirrorToSession({
+							task,
+							brief: summary,
+							delivery: {
+								channel: deliveryConfig.channel,
+								accountId: deliveryConfig.accountId,
+								toUserId: deliveryConfig.toUserId,
+								toConversationId: deliveryConfig.toConversationId,
+							},
+						});
+						if (!mirrorResult.ok) {
+							log.warn("attach_to_session mirror failed", {
+								taskId: task.id,
+								taskName: task.name,
+								error: mirrorResult.error,
+							});
+						} else {
+							log.debug("attach_to_session mirror ok", { taskId: task.id, taskName: task.name });
+						}
+					} catch (mirrorErr) {
+						log.error("attach_to_session mirror threw", {
+							taskId: task.id,
+							taskName: task.name,
+							error: mirrorErr instanceof Error ? mirrorErr.message : String(mirrorErr),
+						});
+					}
+				}
 			}
 		}
 
@@ -467,6 +741,11 @@ export class CronService {
 			output,
 			stderr,
 			...(logDiagnostics ? { diagnostics: logDiagnostics } : {}),
+			// Persist the agent session path in the JSONL log so a
+			// gateway restart between this run and the next scheduled
+			// trigger does not lose it — Tier 3 of the cron context
+			// prefix needs the path to read the failed tool calls.
+			...(agentSessionPath ? { agentSessionPath } : {}),
 		});
 
 		// Throw on failure so the engine's retry loop and statistics work.

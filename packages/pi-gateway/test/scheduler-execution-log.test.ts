@@ -173,4 +173,39 @@ describe("execution-log (hierarchical layout)", () => {
 			expect(removed).toBe(1);
 		});
 	});
+
+	describe("agentSessionPath round-trip (persistence fix)", () => {
+		// Regression: the field was only in the in-memory execution map
+		// (lost on gateway restart) and not in the JSONL log, so the
+		// next scheduled run's Tier 3 silently skipped when a failure
+		// happened before a restart. Both directions must round-trip.
+
+		it("preserves agentSessionPath on appendExecutionLog → readExecutionLog", () => {
+			const sessionPath = "/Users/test/.omp/agent/omp-atomix/sessions/cron_abc123.jsonl";
+			const entry = makeEntry({
+				ts: new Date("2026-06-19T10:00:00Z").getTime(),
+				exitCode: 1,
+				status: "failure",
+				agentSessionPath: sessionPath,
+			});
+			appendExecutionLog("persistence-test", entry);
+
+			const out = readExecutionLog("persistence-test");
+			expect(out).toHaveLength(1);
+			expect(out[0]?.agentSessionPath).toBe(sessionPath);
+		});
+
+		it("omits agentSessionPath for legacy entries written before the fix", () => {
+			// A legacy line lacks the field — reader must tolerate absence
+			// and not synthesize a value (which would have masked the bug).
+			const legacyEntry = makeEntry({ ts: 1_700_000_000_000 });
+			fs.mkdirSync(path.join(tempRoot, "by-task", "legacy"), { recursive: true });
+			const legacyFile = path.join(tempRoot, "by-task", "legacy", "2026-07-01.jsonl");
+			fs.writeFileSync(legacyFile, `${JSON.stringify(legacyEntry)}\n`);
+
+			const out = readExecutionLog("legacy");
+			expect(out).toHaveLength(1);
+			expect(out[0]?.agentSessionPath).toBeUndefined();
+		});
+	});
 });

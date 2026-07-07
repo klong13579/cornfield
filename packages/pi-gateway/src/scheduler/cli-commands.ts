@@ -540,6 +540,7 @@ export async function cronRun(name: string, storage: SchedulerStorage): Promise<
 			durationMs,
 			output,
 			stderr,
+			...(agentSessionPath ? { agentSessionPath } : {}),
 		});
 
 		// Manual `omp cron run` skips channel delivery — the scheduled path

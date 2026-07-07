@@ -49,6 +49,58 @@ export interface ScheduledTask {
 	retry?: RetryConfig;
 	skills?: string[];
 	preScript?: string;
+	/**
+	 * When to inject the previous run's output text into the cron context prefix
+	 * (Tier 2 of the a+ tiered context).
+	 *  - "always":     every run (good for daily briefs, comparison tasks)
+	 *  - "on_failure": only when last run had status !== "success" (default)
+	 *  - "never":      skip Tier 2 entirely (high-frequency / silent tasks)
+	 */
+	injectLastOutput?: "always" | "on_failure" | "never";
+	/**
+	 * Number of recent tool calls to inject when last run failed (Tier 3).
+	 * 0 disables Tier 3. Default 10. Read from the prior OMP session JSONL via
+	 * `parseAgentSessionForToolCalls(lastExecution.agentSessionPath, N)`.
+	 */
+	injectToolCalls?: number;
+	/**
+	 * Master switch for failure-context injection (Tier 2 on failure + Tier 3).
+	 * When false, no failure history is injected even if other fields would
+	 * trigger. Default true.
+	 */
+	injectFailureContext?: boolean;
+	/**
+	 * DEBUG-ONLY: force this run to be recorded as a failure (exit code 1)
+	 * regardless of the warm bridge or fallback result. The warm bridge
+	 * still runs normally so the agent session is created and tool calls
+	 * are captured — useful for end-to-end verification of Tier 3 (which
+	 * needs a previous failure with a valid `agentSessionPath`). NEVER
+	 * set this in production task definitions; the field exists for
+	 * scheduled-task test harnesses and ad-hoc operator validation.
+	 * Default false.
+	 */
+	forceFail?: boolean;
+	/**
+	 * Mirror the cron delivery brief to the user's chat session JSONL so
+	 * that the user can reply with full context (a+ "continuable jobs"
+	 * pattern, modeled on Hermes's `attach_to_session`). When the user
+	 * later DMs the bot about "today's brief", the chat agent sees the
+	 * brief in its message history instead of starting cold.
+	 *
+	 * - The mirror runs only on successful delivery (`ok: true`).
+	 * - The session file is resolved from `delivery.toConversationId`
+	 *   (group chats work directly); for DMs the gateway falls back to
+	 *   scanning `<agentDir>/sessions/` for the most recent non-cron
+	 *   session (best effort).
+	 * - Best-effort: a mirror failure is logged and does not break the
+	 *   run.
+	 * - Independent of {@link ScheduledTask.injectLastOutput} and
+	 *   {@link ScheduledTask.injectToolCalls} — a+ controls what the
+	 *   CRON AGENT sees, attachToSession controls what the CHAT AGENT
+	 *   sees after delivery.
+	 * Default false.
+	 */
+	attachToSession?: boolean;
 	consecutiveFailures: number;
 	createdAt: number;
 	updatedAt: number;
@@ -103,6 +155,19 @@ export interface TaskFileDefinition {
 	retry?: RetryConfig;
 	skills?: string[];
 	preScript?: string;
+	/**
+	 * See {@link ScheduledTask.injectLastOutput} for semantics. Default
+	 * "on_failure" when omitted.
+	 */
+	injectLastOutput?: "always" | "on_failure" | "never";
+	/** See {@link ScheduledTask.injectToolCalls}. Default 10. */
+	injectToolCalls?: number;
+	/** See {@link ScheduledTask.injectFailureContext}. Default true. */
+	injectFailureContext?: boolean;
+	/** See {@link ScheduledTask.forceFail}. Default false. */
+	forceFail?: boolean;
+	/** See {@link ScheduledTask.attachToSession}. Default false. */
+	attachToSession?: boolean;
 	/** Agent execution directory (replaces accountId for execution routing) */
 	agentDir?: string;
 	/** Delivery configuration (replaces deliver + deliverUser) */

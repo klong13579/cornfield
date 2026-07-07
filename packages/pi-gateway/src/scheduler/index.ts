@@ -19,6 +19,7 @@ export {
 // should pull it from "..//session-paths" directly.
 export {
 	buildCronContextPrefix,
+	buildCronContextPrefixFromStorage,
 	buildDeliverySummary,
 	type CronDeps,
 	type CronLogger,
@@ -27,6 +28,7 @@ export {
 	type CronTriggerResult,
 	type DeliverFn,
 	type ExecuteAgentFn,
+	type PrefixContext,
 	resolveAgentDir,
 	resolveDelivery,
 } from "./cron-service";

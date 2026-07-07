@@ -9,15 +9,18 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { logger } from "@oh-my-pi/pi-utils";
 import type { AgentBridge } from "./agent-bridge";
+import type { AICardTarget } from "./channels/dingtalk-card";
+import { mirrorDeliveryToSession } from "./scheduler/attach-to-session";
+import { type CronCardPayload, deliverCronResultAsCard } from "./scheduler/cron-card-delivery";
 import { CronService } from "./scheduler/cron-service";
 import { SchedulerEngine } from "./scheduler/engine";
 import { computeInactivityBudgetMs } from "./scheduler/executor";
 import { SchedulerFileStore } from "./scheduler/file-store";
 import { JsonFileStorage } from "./scheduler/json-file-storage";
-import { DEFAULT_SCHEDULER_CONFIG, getSchedulerDir } from "./scheduler/types";
 import type { SchedulerStorage } from "./scheduler/types";
+import { DEFAULT_SCHEDULER_CONFIG, getSchedulerDir } from "./scheduler/types";
 import { cronSessionPath } from "./session-paths";
-import type { GatewayConfig, OutboundMessage } from "./types";
+import type { DingTalkConfig, GatewayConfig, OutboundMessage } from "./types";
 
 /** Interface for the subset of Gateway that CronLifecycle needs. */
 export interface CronGatewayDeps {
@@ -53,7 +56,7 @@ export class CronLifecycle {
 			return;
 		}
 
-			this.#schedulerStorage = new JsonFileStorage();
+		this.#schedulerStorage = new JsonFileStorage();
 		// Migrate from existing SQLite if present
 		try {
 			const { getSchedulerDbPath } = await import("./scheduler/types");
@@ -106,6 +109,13 @@ export class CronLifecycle {
 				}
 				return undefined;
 			},
+			// attach_to_session: mirror the cron brief to the user's chat
+			// session JSONL so a follow-up DM/IM reply lands in a session
+			// that already contains the brief. See
+			// `mirrorDeliveryToSession` below for the resolution rules.
+			mirrorToSession: async params => {
+				return await this.#mirrorDeliveryToSession(params);
+			},
 			// Send a short, high-signal failure card to the user's IM
 			// conversation when the normal summary path is silent
 			// (agent errored, task timed out, or summary delivery
@@ -129,6 +139,21 @@ export class CronLifecycle {
 					toUserId: params.toUserId,
 					toConversationId: params.toConversationId,
 					text,
+					// Surface the failure reason as the card body so the
+					// AI Card path also produces a useful notification
+					// (not just the legacy text path). Status is
+					// always "failure" here — the notify path only
+					// fires for non-success cases.
+					card: {
+						taskName: params.taskName,
+						taskId: params.taskId,
+						slug: params.taskName,
+						status: "failure",
+						exitCode: undefined,
+						durationMs: params.durationMs,
+						output: text,
+						error: params.reason,
+					},
 				});
 			},
 		});
@@ -285,6 +310,103 @@ export class CronLifecycle {
 		toUserId?: string;
 		toConversationId?: string;
 		text: string;
+		card?: {
+			taskName: string;
+			taskId: string;
+			slug: string;
+			status: "success" | "failure" | "timed_out";
+			exitCode: number | undefined;
+			durationMs: number;
+			output: string;
+			error?: string;
+		};
+	}): Promise<{ ok: boolean; error?: string }> {
+		// Dispatch by `cron.deliveryMode` (default "card"). The text
+		// path is the legacy fallback; "text" mode skips cards entirely
+		// (kill switch), "card" mode tries the card first and falls
+		// back to text on any card-API failure so the user always
+		// gets a result.
+		const mode = this.#deps.config.cron?.deliveryMode ?? "card";
+		const card = params.card;
+
+		if (mode === "card" && card) {
+			const cardResult = await this.#deliverAsCard({
+				card,
+				channel: params.channel,
+				accountId: params.accountId,
+				toUserId: params.toUserId,
+				toConversationId: params.toConversationId,
+			});
+			if (cardResult.ok) return cardResult;
+
+			logger.warn("Cron card delivery failed, falling back to text", {
+				taskId: card.taskId,
+				taskName: card.taskName,
+				error: cardResult.error,
+			});
+			// Fall through to text path below.
+		} else if (mode === "card" && !card) {
+			logger.debug("Cron card mode requested but no card payload supplied, using text", {
+				taskName: params.text.slice(0, 80),
+			});
+		}
+
+		return await this.#deliverAsText(params);
+	}
+
+	/**
+	 * Card-mode deliver. Resolves the per-account DingTalk config,
+	 * builds an AICardTarget from the cron task's toUserId /
+	 * toConversationId, and calls the AI Card SDK. Returns
+	 * `{ ok: false, error }` on any failure so the caller can fall
+	 * back to the text path.
+	 */
+	async #deliverAsCard(params: {
+		card: CronCardPayload;
+		channel: string;
+		accountId?: string;
+		toUserId?: string;
+		toConversationId?: string;
+	}): Promise<{ ok: boolean; error?: string }> {
+		const dtConfig = resolveDingTalkConfig(this.#deps.config, params.accountId);
+		if (!dtConfig) {
+			return { ok: false, error: "DingTalk config not found for the cron task's accountId" };
+		}
+
+		const target = buildCardTarget(params);
+		if (!target) {
+			return { ok: false, error: "Cannot build AI Card target (need toUserId or toConversationId)" };
+		}
+
+		const payload: CronCardPayload = {
+			taskName: params.card.taskName,
+			taskId: params.card.taskId,
+			slug: params.card.slug,
+			status: params.card.status,
+			exitCode: params.card.exitCode,
+			durationMs: params.card.durationMs,
+			output: params.card.output,
+			error: params.card.error,
+		};
+
+		return await deliverCronResultAsCard({
+			dingtalkConfig: dtConfig,
+			target,
+			card: payload,
+		});
+	}
+
+	/**
+	 * Legacy text-mode deliver. Sends `params.text` via
+	 * ChannelRegistry.sendMessage, which routes to
+	 * DingTalkChannel.sendMessage (sampleText via Route 2/3).
+	 */
+	async #deliverAsText(params: {
+		channel: string;
+		accountId?: string;
+		toUserId?: string;
+		toConversationId?: string;
+		text: string;
 	}): Promise<{ ok: boolean; error?: string }> {
 		// The registry's sendMessage builds the lookup key as
 		// `<channelId>:<accountId>` when accountId is set (see
@@ -315,4 +437,76 @@ export class CronLifecycle {
 		}
 		return { ok: false, error: "unreachable" };
 	}
+
+	// attach_to_session: implementation moved to ./scheduler/attach-to-session.ts
+	async #mirrorDeliveryToSession(params: {
+		task: import("./scheduler/types").ScheduledTask;
+		brief: string;
+		delivery: { channel: string; accountId?: string; toUserId?: string; toConversationId?: string };
+	}): Promise<{ ok: boolean; error?: string }> {
+		const result = await mirrorDeliveryToSession(params);
+		if (result.ok) {
+			logger.debug("attach_to_session: mirrored cron delivery to chat session", {
+				taskName: params.task.name,
+				channel: params.delivery.channel,
+			});
+		}
+		return result;
+	}
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Module-level helpers (no instance state)
+// ═══════════════════════════════════════════════════════════════════════
+
+/**
+ * Resolve the per-account DingTalk config for a cron task. Multi-account
+ * gateways keep credentials under `config.channels.dingtalk.accounts[accountId]`;
+ * single-account gateways keep them at `config.channels.dingtalk.appKey/appSecret`.
+ *
+ * Returns `null` if no usable credentials are found — the caller should
+ * fall back to the text path in that case.
+ */
+function resolveDingTalkConfig(gatewayConfig: GatewayConfig, accountId: string | undefined): DingTalkConfig | null {
+	const dt: DingTalkConfig | undefined = gatewayConfig.channels.dingtalk;
+	if (!dt) return null;
+
+	if (accountId && dt.accounts) {
+		const account = dt.accounts[accountId];
+		if (account && account.appKey && account.appSecret) {
+			return {
+				...dt,
+				appKey: account.appKey,
+				appSecret: account.appSecret,
+				robotCode: account.robotCode ?? dt.robotCode,
+			};
+		}
+	}
+
+	// Single-account / legacy mode: credentials at the top level.
+	if (dt.appKey && dt.appSecret) {
+		return dt;
+	}
+
+	return null;
+}
+
+/**
+ * Build an AICardTarget from the cron task's `toUserId` /
+ * `toConversationId`. The AI Card SDK accepts either a user (DM) or
+ * a group target. Most cron tasks are DMs (`toUserId` is the staff
+ * id of the user who scheduled the task); group delivery is rare and
+ * v1 routes via `toConversationId` as a group openConversationId when
+ * `toUserId` is missing.
+ */
+function buildCardTarget(params: { toUserId?: string; toConversationId?: string }): AICardTarget | null {
+	if (params.toUserId) {
+		return { type: "user", userId: params.toUserId };
+	}
+	if (params.toConversationId) {
+		// Treat as group target when no toUserId. Group openConversationId
+		// format is opaque to us; the SDK will reject malformed values.
+		return { type: "group", openConversationId: params.toConversationId };
+	}
+	return null;
 }

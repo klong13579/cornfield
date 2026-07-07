@@ -24,7 +24,8 @@ export type CronRunDiagnosticSource =
 	| "agent-run" // Agent 执行异常/超时
 	| "tool" // 工具调用失败
 	| "exec" // Subprocess 执行失败
-	| "delivery"; // 结果投递失败
+	| "delivery" // 结果投递失败
+	| "cron-debug"; // 调试用 override（如 forceFail）
 
 export type CronRunDiagnosticSeverity = "info" | "warn" | "error";
 
@@ -314,4 +315,158 @@ export function parseAgentSessionForToolFailures(agentSessionPath: string | unde
 		summary: `${entries.length} tool failure(s)`,
 		entries,
 	});
+}
+
+// ---------------------------------------------------------------------------
+// Agent session parsing — extract last N tool calls (any outcome) for context
+// ---------------------------------------------------------------------------
+
+/**
+ * Compact summary of a single tool call extracted from an OMP agent session
+ * JSONL. Used by the cron context prefix (Tier 3) to give the agent a
+ * view of what it tried last time, especially when last run failed.
+ */
+export interface ToolCallSummary {
+	toolName: string;
+	/** JSON-stringified tool arguments, truncated to 200 chars. Empty string when absent. */
+	argsPreview: string;
+	/** Joined text content + stderr, truncated to 200 chars. */
+	resultPreview: string;
+	isError: boolean;
+	ts: number;
+}
+
+const TOOL_CALL_PREVIEW_MAX_CHARS = 200;
+
+/** Format a {@link ToolCallSummary} as a single-line cron-context entry. */
+export function formatToolCallSummary(s: ToolCallSummary): string {
+	const tag = s.isError ? " [ERROR]" : "";
+	return `[tool: ${s.toolName}] ${s.argsPreview} \u2192 ${JSON.stringify(s.resultPreview)}${tag}`;
+}
+
+function safeJsonStringify(value: unknown): string {
+	if (value === undefined || value === null) return "";
+	try {
+		const s = JSON.stringify(value);
+		return s ?? "";
+	} catch {
+		return String(value);
+	}
+}
+
+function truncatePreview(text: string, max = TOOL_CALL_PREVIEW_MAX_CHARS): string {
+	if (text.length <= max) return text;
+	return `${text.slice(0, max)}\u2026`;
+}
+
+/**
+ * Read an OMP agent session JSONL and return every correlated tool call
+ * (any outcome) as {@link ToolCallSummary} entries, in chronological
+ * order. Returns undefined when the session file is missing, empty, or
+ * unparseable.
+ *
+ * Correlates `tool_execution_start` events (which carry the tool's input
+ * arguments) with `toolResult` messages (which carry the result + error
+ * flag) by `toolCallId`. Tool calls that never received a result (e.g.
+ * the run was killed mid-flight) are dropped — there is no result to
+ * show.
+ *
+ * **Selection / truncation policy is the caller's responsibility.** This
+ * function intentionally returns all correlated calls; the cron context
+ * prefix builder (in `cron-service.ts`) decides which slice to surface
+ * (error-priority selection + count cap) so that the policy stays in one
+ * place. Tests in `scheduler-parse-tool-calls.test.ts` cover the
+ * parsing; tests in `scheduler-cron-context-prefix-from-storage.test.ts`
+ * cover the selection policy.
+ */
+export function parseAgentSessionForToolCalls(agentSessionPath: string | undefined): ToolCallSummary[] | undefined {
+	if (!agentSessionPath) return undefined;
+
+	let content: string;
+	try {
+		content = fs.readFileSync(agentSessionPath, "utf-8");
+	} catch (err) {
+		if (isEnoent(err)) return undefined;
+		throw err;
+	}
+
+	const argsByToolCallId = new Map<string, unknown>();
+	const summaries: ToolCallSummary[] = [];
+
+	for (const line of content.split("\n")) {
+		if (!line.trim()) continue;
+
+		let parsed: Record<string, unknown>;
+		try {
+			parsed = JSON.parse(line) as Record<string, unknown>;
+		} catch {
+			continue;
+		}
+
+		// First pass role: capture tool input args for later correlation.
+		// Two formats are emitted depending on the OMP client version:
+		//   - legacy `tool_execution_start` event with a flat
+		//     { toolCallId, toolName, args } shape
+		//   - current `message` event with role=assistant and
+		//     content[].type=toolCall entries that carry
+		//     { id, name, arguments }
+		// Both carry the same correlation key (toolCallId / id) that the
+		// toolResult message below uses, so we merge them into the same
+		// args map. Without the inline-format branch Tier 3 would
+		// silently return no tool calls on every modern session,
+		// because the assistant emits the tool_use inline rather than
+		// as a separate event.
+		if (parsed.type === "tool_execution_start") {
+			const toolCallId = typeof parsed.toolCallId === "string" ? parsed.toolCallId : undefined;
+			if (toolCallId) argsByToolCallId.set(toolCallId, parsed.args);
+			continue;
+		}
+		if (parsed.type === "message") {
+			const msg = parsed.message as Record<string, unknown> | undefined;
+			if (msg?.role === "assistant" && Array.isArray(msg.content)) {
+				for (const part of msg.content) {
+					if (part && typeof part === "object") {
+						const p = part as Record<string, unknown>;
+						if (p.type === "toolCall" && typeof p.id === "string") {
+							argsByToolCallId.set(p.id, p.arguments);
+						}
+					}
+				}
+			}
+		}
+
+		// Second pass role: collect toolResult messages
+		if (parsed.type !== "message") continue;
+		const msg = parsed.message as Record<string, unknown> | undefined;
+		if (!msg || msg.role !== "toolResult") continue;
+
+		const toolCallId = typeof msg.toolCallId === "string" ? msg.toolCallId : undefined;
+		const toolName = typeof msg.toolName === "string" ? msg.toolName : "unknown";
+		const isError = msg.isError === true;
+
+		const args = toolCallId !== undefined ? argsByToolCallId.get(toolCallId) : undefined;
+		const argsPreview = truncatePreview(safeJsonStringify(args));
+
+		// Build result preview from content text parts + stderr
+		const contentArr = Array.isArray(msg.content) ? msg.content : [];
+		const textParts: string[] = [];
+		for (const part of contentArr) {
+			if (part && typeof part === "object") {
+				const p = part as Record<string, unknown>;
+				if (p.type === "text" && typeof p.text === "string") textParts.push(p.text);
+			}
+		}
+		const details = msg.details as Record<string, unknown> | undefined;
+		if (details && typeof details.stderr === "string" && details.stderr.trim()) {
+			textParts.push(`[stderr] ${details.stderr.trim()}`);
+		}
+		const resultPreview = truncatePreview(textParts.join("\n").trim() || "(no output)");
+
+		const ts = typeof msg.timestamp === "number" ? msg.timestamp : Date.now();
+
+		summaries.push({ toolName, argsPreview, resultPreview, isError, ts });
+	}
+
+	if (summaries.length === 0) return undefined;
+	return summaries;
 }
