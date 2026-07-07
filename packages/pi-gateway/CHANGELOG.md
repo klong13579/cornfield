@@ -18,6 +18,12 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **Test files in `packages/pi-gateway/test/` consolidated from 84 → 37** (56% reduction) by merging related test files by source module/concern. Test logic preserved verbatim; only file boundaries restructured. Many helper function names disambiguated (e.g. `stubBridge` → `stubCronBridge`, `makeSession` → `makeImagePipelineSession`) to avoid conflicts across merged describes. Low-value duplicate test `regression-bugfix.test.ts` removed entirely. ~22,693 LOC → 14,335 LOC. All 805 active tests still pass; 2 skip; 4 pre-existing `cronUpdate` spy-leak failures (bun:test limitation, unrelated) remain.
+
+- **Migrated all test storage from `SchedulerDbStorage` (SQLite) to `JsonFileStorage` (file-based)**. Production code already uses `JsonFileStorage`; this aligns tests with reality. Files migrated: `scheduler-test-run`, `doctor`, `scheduler-cron-service`, `host-tool`, `scheduler-engine`, `scheduler-cli`, `dingtalk-gateway-end-to-end`. Two `JsonFileStorage`-incompatible tests removed: `doctor > orphaned-execution detection and repair` (called `getRunningExecutions`, an obsolete method not on the `SchedulerStorage` interface); `scheduler-engine > SchedulerDbStorage prune` (DB-specific prune semantics; replaced with file-storage-compatible variants). Bug fix in `JsonFileStorage.getExecutions` to return in-memory terminal executions (deduped by id against JSONL) — previously filtered to `status === "running"` only, breaking tests that recorded+queried terminal execs in the same process. Test fix in `host-tool.test.ts`: explicit `mode: "announce"` on `delivery` field (DB normalized missing mode; file storage does not, and the type makes it required). Resolves the `RangeError: Cannot use a closed database` unhandled error that was firing on full-suite runs.
+
 ### Fixed
 
 

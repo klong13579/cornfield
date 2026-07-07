@@ -42,7 +42,7 @@ import type { DWClientDownStream } from "dingtalk-stream";
 import { AgentBridge } from "../src/agent-bridge";
 import { DingTalkChannel } from "../src/channels/dingtalk";
 import { ChannelRegistry } from "../src/channels/registry";
-import { SchedulerDbStorage } from "../src/scheduler/storage";
+import { JsonFileStorage } from "../src/scheduler/json-file-storage";
 import { SessionManager } from "../src/session-manager";
 import { SQLiteSessionStore } from "../src/session-store";
 import type { ChannelConfig, DingTalkConfig, DingTalkRawMessage, InboundMessage } from "../src/types";
@@ -248,7 +248,7 @@ interface Harness {
 	manager: SessionManager;
 	bridge: AgentBridge;
 	agentDir: string;
-	schedulerStorage: SchedulerDbStorage;
+	schedulerStorage: JsonFileStorage;
 	outbound: OutboundCapture[];
 	webhookBase: string;
 	deliver(raw: DingTalkRawMessage, protocolMessageId?: string): Promise<void>;
@@ -354,7 +354,7 @@ async function createHarness(options?: {
 	// `#checkPermission` sees `dmPolicy`/`allowedUsers`/`allowedGroups`.
 	await channel.connect(dtConfig as unknown as ChannelConfig);
 
-	const schedulerStorage = new SchedulerDbStorage(path.join(rootDir, "scheduler.db"));
+	const schedulerStorage = new JsonFileStorage(path.join(rootDir, "jobs.json"));
 
 	const harness: Harness = {
 		rootDir,

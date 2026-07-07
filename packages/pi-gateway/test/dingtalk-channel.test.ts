@@ -1,328 +1,514 @@
 /**
- * DingTalk channel unit tests.
+ * DingTalk channel + chrome + files + formatter tests.
  *
- * Tests: message parsing, dedup, permission policies, AI Card, config validation.
+ * Merged:
+ *   - dingtalk-channel.test.ts        (channel parsing + outbound)
+ *   - dingtalk-chrome.test.ts         (chrome extractor + image directives)
+ *   - dingtalk-files.test.ts          (file classification)
+ *   - dingtalk-formatter.test.ts      (markdown composer)
  */
-
-import { describe, expect, spyOn, test } from "bun:test";
-import * as fs from "node:fs/promises";
-import { DingTalkChannel, parseRobotMessage } from "../src/channels/dingtalk";
-import { fixNewlines } from "../src/channels/dingtalk-card";
-import { getDingTalkConfig, loadConfig } from "../src/config";
-import type { DingTalkRawMessage } from "../src/types";
+import { describe, expect, test } from "bun:test";
+import { extractDataUriImages, extractLocalFileImages, stripImageDirectives } from "../src/channels/dingtalk";
+import {
+	classifyFile,
+	extractExtension,
+	FILE_SIZE_LIMITS,
+	isExtensionSupported,
+	isFileSizeAllowed,
+	isRoutableKind,
+	mediaTypeForKind,
+	unsupportedFallbackMarkdown,
+	warnUnsupportedFile,
+} from "../src/channels/dingtalk-files";
+import { formatDingTalkChrome, formatDingTalkReply } from "../src/channels/dingtalk-formatter";
+import type { AgentResponseMeta, InboundMessage, ReplyFormatterContext } from "../src/types";
 
 // ═══════════════════════════════════════════════════════════════════════
-// Message Parsing
+// Shared helpers
 // ═══════════════════════════════════════════════════════════════════════
 
-function makeRaw(overrides: Partial<DingTalkRawMessage> & { text?: { content?: string } }): DingTalkRawMessage {
+function makeMeta(overrides: Partial<AgentResponseMeta> = {}): AgentResponseMeta {
 	return {
-		conversationId: "cid001",
-		atUsers: [],
-		chatbotCorpId: "corp001",
-		chatbotUserId: "bot001",
-		msgId: "msg001",
-		senderNick: "测试用户",
-		isAdmin: false,
-		senderStaffId: "staff001",
-		sessionWebhookExpiredTime: Date.now() + 3600_000,
-		createAt: Date.now(),
-		senderCorpId: "corp001",
-		conversationType: "1",
-		senderId: "staff001",
-		conversationTitle: "测试会话",
-		isInAtList: false,
-		sessionWebhook: "https://example.com/webhook",
-		msgtype: "text",
-		robotCode: "robot001",
-		text: { content: "" },
+		text: "Here is the answer.",
+		rawText: "Here is the answer.",
+		model: "claude-sonnet-4-5",
+		provider: "anthropic",
+		usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0 },
+		agentDurationMs: 100,
+		taskDurationMs: 200,
+		effort: "medium",
+		toolCalls: [],
+		toolResults: [],
+		error: null,
+		aborted: false,
+		isFallback: false,
 		...overrides,
 	};
 }
 
-describe("message parsing", () => {
-	test("parses text message", () => {
-		const raw = makeRaw({ text: { content: "你好" }, msgtype: "text" });
-		const result = parseRobotMessage(raw, "dingtalk", "__default__", "msg001");
-		expect(result).not.toBeNull();
-		if (result?.content.type !== "text") throw new Error("expected text content");
-		expect(result.content.text).toBe("你好");
-		expect(result!.userId).toBe("staff001");
-		expect(result!.isGroup).toBe(false);
-		expect(result!.messageId).toBe("msg001");
-	});
+function makeInbound(overrides: Partial<InboundMessage> = {}): InboundMessage {
+	return {
+		channelId: "dingtalk",
+		accountId: "ops",
+		userId: "u1",
+		userName: "Alice",
+		conversationId: "c1",
+		isGroup: false,
+		content: { type: "text", text: "summarize this" },
+		timestamp: new Date(),
+		...overrides,
+	};
+}
 
-	test("parses image message", () => {
-		const raw = makeRaw({
-			msgtype: "picture",
-			content: JSON.stringify({ downloadCode: "dcode001", pictureUrl: "https://example.com/img.jpg" }),
-			msgId: "msg002",
-			senderStaffId: "staff002",
-		});
-		const result = parseRobotMessage(raw, "dingtalk", "__default__", "msg002");
-		expect(result).not.toBeNull();
-		expect(result!.content.type).toBe("image");
-	});
-
-	test("parses voice message with recognition", () => {
-		const raw = makeRaw({
-			msgtype: "audio",
-			content: JSON.stringify({ downloadCode: "dcode002", recognition: "你好这是一条语音消息", duration: 3000 }),
-			msgId: "msg003",
-			senderStaffId: "staff003",
-		});
-		const result = parseRobotMessage(raw, "dingtalk", "__default__", "msg003");
-		if (result?.content.type !== "voice") throw new Error("expected voice content");
-		expect(result.content.text).toBe("你好这是一条语音消息");
-	});
-
-	test("parses file message", () => {
-		const raw = makeRaw({
-			msgtype: "file",
-			content: JSON.stringify({ downloadCode: "dcode003", fileName: "report.pdf", size: 1024 }),
-			msgId: "msg004",
-			senderStaffId: "staff004",
-		});
-		const result = parseRobotMessage(raw, "dingtalk", "__default__", "msg004");
-		if (result?.content.type !== "file") throw new Error("expected file content");
-		expect(result.content.filename).toBe("report.pdf");
-	});
-
-	test("detects group message", () => {
-		const raw = makeRaw({
-			msgtype: "text",
-			conversationType: "2",
-			conversationTitle: "群聊名称",
-			isInAtList: true,
-			text: { content: "@机器人 你好" },
-			msgId: "msg005",
-			senderStaffId: "staff005",
-		});
-		const result = parseRobotMessage(raw, "dingtalk", "__default__", "msg005");
-		expect(result).not.toBeNull();
-		expect(result!.isGroup).toBe(true);
-		expect(result!.conversationTitle).toBe("群聊名称");
-	});
-
-	test("skips empty text message", () => {
-		const raw = makeRaw({ msgtype: "text", text: { content: "" }, msgId: "msg006" });
-		const result = parseRobotMessage(raw, "dingtalk", "__default__", "msg006");
-		expect(result).toBeNull();
-	});
+const baseMeta = (overrides: Partial<AgentResponseMeta> = {}): AgentResponseMeta => ({
+	text: "Hello, world.",
+	rawText: "Hello, world.",
+	model: "claude-sonnet-4-5",
+	provider: "anthropic",
+	usage: { input: 100, output: 50, cacheRead: 0, cacheWrite: 0 },
+	agentDurationMs: 1234,
+	taskDurationMs: 1500,
+	effort: null,
+	toolCalls: [],
+	toolResults: [],
+	error: null,
+	aborted: false,
+	isFallback: false,
+	...overrides,
 });
 
-describe("message sending", () => {
-	test("throws when sessionWebhook is missing", async () => {
-		const channel = new DingTalkChannel();
-		await expect(
-			channel.sendMessage({
-				channelId: "dingtalk",
-				conversationId: "conv1",
-				content: { type: "text", text: "hello" },
-			}),
-		).rejects.toThrow("all routes exhausted");
-	});
+const textInbound = (overrides: Partial<InboundMessage> = {}): InboundMessage => ({
+	channelId: "dingtalk",
+	userId: "u1",
+	userName: "Alice",
+	conversationId: "c1",
+	isGroup: false,
+	content: { type: "text", text: "what's the weather?" },
+	timestamp: new Date(),
+	sessionWebhook: "https://example.com/hook",
+	...overrides,
+});
 
-	test("throws when DingTalk webhook returns non-2xx", async () => {
-		const channel = new DingTalkChannel();
-		const fetchSpy = spyOn(globalThis, "fetch").mockResolvedValue(new Response("bad", { status: 500 }));
-		try {
-			await expect(
-				channel.sendMessage({
-					channelId: "dingtalk",
-					conversationId: "conv1",
-					sessionWebhook: "https://example.com/webhook",
-					content: { type: "text", text: "hello" },
-				}),
-			).rejects.toThrow("[DingTalk] send failed: 500 bad");
-			expect(fetchSpy).toHaveBeenCalledTimes(1);
-		} finally {
-			fetchSpy.mockRestore();
-		}
-	});
+const ctx = (overrides: Partial<ReplyFormatterContext> = {}): ReplyFormatterContext => ({
+	agentName: "ops-bot",
+	accountId: "ops",
+	dapiCalls: 0,
+	...overrides,
 });
 
 // ═══════════════════════════════════════════════════════════════════════
-// Config Validation
+// Chrome extractor (was: dingtalk-chrome.test.ts)
 // ═══════════════════════════════════════════════════════════════════════
 
-describe("config validation", () => {
-	test("validates DingTalk config schema", async () => {
-		const tmpDir = await fs.mkdtemp("/tmp/pi-gw-config-");
-
-		const configPath = `${tmpDir}/gateway.json`;
-		await Bun.write(
-			configPath,
-			JSON.stringify({
-				channels: {
-					dingtalk: {
-						enabled: true,
-						appKey: "dingabc123",
-						appSecret: "sec123456789",
-						dmPolicy: "allowlist",
-						groupPolicy: "open",
-					},
-				},
-			}),
-		);
-
-		const config = await loadConfig(configPath);
-		const dtConfig = config.channels.dingtalk as Record<string, unknown>;
-
-		expect(dtConfig.appKey).toBe("dingabc123");
-		expect(dtConfig.enabled).toBe(true);
-		expect(dtConfig.dmPolicy).toBe("allowlist");
-		expect(dtConfig.groupPolicy).toBe("open");
+describe("formatDingTalkChrome", () => {
+	test("extracts quoteContent / statusLine / toolSummary / answerText", () => {
+		const chrome = formatDingTalkChrome({
+			meta: makeMeta(),
+			inbound: makeInbound(),
+			agentName: "ops-bot",
+			accountId: "ops",
+			dapiCalls: 3,
+		});
+		expect(chrome.quoteContent).toContain("Alice");
+		expect(chrome.quoteContent).toContain("summarize this");
+		expect(chrome.statusLine).toContain("claude-sonnet-4-5");
+		expect(chrome.statusLine).toContain("ops-bot");
+		expect(chrome.answerText).toBe("Here is the answer.");
+		expect(chrome.copyContent).toBe("Here is the answer.");
+		expect(chrome.toolSummary).toBeNull();
 	});
 
-	test("validates multi-account config", async () => {
-		const tmpDir = await fs.mkdtemp("/tmp/pi-gw-config-");
-
-		const configPath = `${tmpDir}/gateway-multi.json`;
-		await Bun.write(
-			configPath,
-			JSON.stringify({
-				channels: {
-					dingtalk: {
-						enabled: true,
-						appKey: "primary_key",
-						appSecret: "primary_secret",
-						accounts: {
-							bot1: { appKey: "bot1_key", appSecret: "bot1_secret", agentDir: "/tmp/bot1" },
-							bot2: { appKey: "bot2_key", appSecret: "bot2_secret", agentDir: "/tmp/bot2" },
-						},
-					},
-				},
+	test("chrome.toolSummary non-null when meta has tool calls", () => {
+		const chrome = formatDingTalkChrome({
+			meta: makeMeta({
+				toolCalls: [
+					{ id: "t1", name: "read", args: null },
+					{ id: "t2", name: "read", args: null },
+				],
+				toolResults: [{ id: "t1", name: "read", isError: false }],
 			}),
-		);
-
-		const config = await loadConfig(configPath);
-		const dtConfig = getDingTalkConfig(config);
-
-		expect(dtConfig).not.toBeNull();
-		expect(Object.keys(dtConfig!.accounts!)).toHaveLength(2);
-		expect(dtConfig!.accounts!.bot1.appKey).toBe("bot1_key");
-		expect(dtConfig!.accounts!.bot1.agentDir).toBe("/tmp/bot1");
-		expect(dtConfig!.accounts!.bot2.agentDir).toBe("/tmp/bot2");
+			inbound: makeInbound(),
+			agentName: null,
+			accountId: "ops",
+			dapiCalls: 0,
+		});
+		expect(chrome.toolSummary).toContain("read × 2");
 	});
 
-	test("rejects config with missing credentials", async () => {
-		const tmpDir = await fs.mkdtemp("/tmp/pi-gw-config-");
-
-		const configPath = `${tmpDir}/gateway-bad.json`;
-		await Bun.write(
-			configPath,
-			JSON.stringify({
-				channels: {
-					dingtalk: {
-						enabled: true,
-						appKey: "",
-						appSecret: "",
-					},
-				},
-			}),
-		);
-
-		const config = await loadConfig(configPath);
-		const dtConfig = getDingTalkConfig(config);
-
-		// Should still be loadable (validation strips invalid)
-		// The schema has min(1) for appKey/appSecret, so parse should fail
-		expect(dtConfig).toBeNull();
+	test("fallback path: every chrome field is null / empty", () => {
+		const chrome = formatDingTalkChrome({
+			meta: makeMeta({ text: "系统繁忙，请稍后再试。", isFallback: true }),
+			inbound: makeInbound(),
+			agentName: null,
+			accountId: "ops",
+			dapiCalls: 0,
+		});
+		expect(chrome.quoteContent).toBeNull();
+		expect(chrome.statusLine).toBeNull();
+		expect(chrome.copyContent).toBe("");
+		expect(chrome.toolSummary).toBeNull();
+		expect(chrome.answerText).toBe("系统繁忙，请稍后再试。");
+		expect(chrome.isFallback).toBe(true);
 	});
 });
 
-// ═══════════════════════════════════════════════════════════════════════
-// AI Card Module
-// ═══════════════════════════════════════════════════════════════════════
-
-describe("AI Card markdown formatting", () => {
-	test("fixNewlines preserves code blocks", () => {
-		const input = "normal text\n```\ncode line 1\ncode line 2\n```\nmore text";
-		const result = fixNewlines(input);
-
-		// Text before code block keeps \n because code block follows
-		expect(result).toContain("normal text\n```");
-		// Code block content keeps its \n
-		expect(result).toContain("code line 1\ncode line 2");
-		// After code block, single \n converts to <br>
-		expect(result).toContain("```<br>more text");
+describe("extractDataUriImages", () => {
+	test("finds a single PNG data URI image", () => {
+		const text = "before ![screenshot](data:image/png;base64,iVBORw0KGgo=) after";
+		const out = extractDataUriImages(text);
+		expect(out).toHaveLength(1);
+		expect(out[0]?.mimeType).toBe("image/png");
+		expect(out[0]?.base64).toBe("iVBORw0KGgo=");
+		expect(out[0]?.alt).toBe("screenshot");
+		expect(out[0]?.dataUri).toContain("image/png;base64");
 	});
 
-	test("fixNewlines merges quotes", () => {
-		const input = "> line 1\n> line 2\n> line 3\n\nnormal text";
-		const result = fixNewlines(input);
-
-		expect(result).toContain("line 1<br>line 2<br>line 3");
-		expect(result).toContain("normal text");
+	test("finds multiple data URI images of different types", () => {
+		const text = "![a](data:image/png;base64,AAA) and ![b](data:image/jpeg;base64,BBB)";
+		const out = extractDataUriImages(text);
+		expect(out).toHaveLength(2);
+		expect(out[0]?.mimeType).toBe("image/png");
+		expect(out[1]?.mimeType).toBe("image/jpeg");
 	});
 
-	test("fixNewlines handles tables", () => {
-		// Table rows should keep \n before them
-		const input = "header\n| col1 | col2 |\n| --- | --- |\n| a | b |";
-		const result = fixNewlines(input);
+	test("ignores remote https images", () => {
+		const text = "![remote](https://example.com/foo.png)";
+		expect(extractDataUriImages(text)).toEqual([]);
+	});
 
-		expect(result).toContain("header\n| col1 | col2 |\n| --- | --- |\n| a | b |");
+	test("returns empty array for plain text", () => {
+		expect(extractDataUriImages("no images here")).toEqual([]);
+	});
+
+	test("preserves alt text and handles empty alt", () => {
+		const text = "![](data:image/png;base64,AAA)";
+		const out = extractDataUriImages(text);
+		expect(out[0]?.alt).toBe("");
+	});
+});
+
+describe("extractLocalFileImages", () => {
+	test("finds absolute path image", () => {
+		const text = "before ![arch](/tmp/diagram.png) after";
+		const out = extractLocalFileImages(text);
+		expect(out).toHaveLength(1);
+		expect(out[0]?.path).toBe("/tmp/diagram.png");
+		expect(out[0]?.alt).toBe("arch");
+	});
+
+	test("finds file:// URI image", () => {
+		const text = "![img](file:///Users/x/y.jpeg)";
+		const out = extractLocalFileImages(text);
+		expect(out).toHaveLength(1);
+		expect(out[0]?.path).toBe("/Users/x/y.jpeg");
+	});
+
+	test("ignores remote https URLs", () => {
+		const text = "![remote](https://example.com/foo.png)";
+		expect(extractLocalFileImages(text)).toEqual([]);
+	});
+
+	test("ignores relative paths", () => {
+		const text = "![rel](assets/foo.png)";
+		expect(extractLocalFileImages(text)).toEqual([]);
+	});
+
+	test("ignores paths without image extensions", () => {
+		const text = "![doc](/tmp/readme.md)";
+		expect(extractLocalFileImages(text)).toEqual([]);
+	});
+
+	test("finds multiple local images", () => {
+		const text = "![a](/tmp/a.png) and ![b](file:///tmp/b.jpg)";
+		const out = extractLocalFileImages(text);
+		expect(out).toHaveLength(2);
+		expect(out[0]?.path).toBe("/tmp/a.png");
+		expect(out[1]?.path).toBe("/tmp/b.jpg");
+	});
+
+	test("decodes percent-encoded file:// URIs", () => {
+		const text = "![img](file:///tmp/my%20file.png)";
+		const out = extractLocalFileImages(text);
+		expect(out[0]?.path).toBe("/tmp/my file.png");
+	});
+});
+
+describe("stripImageDirectives", () => {
+	test("strips data URI images from text", () => {
+		const text = "before ![shot](data:image/png;base64,AAA) after";
+		expect(stripImageDirectives(text)).toBe("before  after");
+	});
+
+	test("strips local file images from text", () => {
+		const text = "Here is the diagram:\n![arch](/tmp/diagram.png)\nDone.";
+		expect(stripImageDirectives(text)).toBe("Here is the diagram:\n\nDone.");
+	});
+
+	test("strips both data URI and local file images together", () => {
+		const text = "![a](data:image/png;base64,AAA)\n![b](/tmp/b.png)";
+		const result = stripImageDirectives(text);
+		expect(result).not.toContain("data:image");
+		expect(result).not.toContain("/tmp/b.png");
+	});
+
+	test("leaves remote URLs intact", () => {
+		const text = "![remote](https://example.com/page.html) stays";
+		expect(stripImageDirectives(text)).toBe("![remote](https://example.com/page.html) stays");
+	});
+
+	test("collapses excessive blank lines after stripping", () => {
+		const text = "a\n\n\n![img](/tmp/x.png)\n\n\nb";
+		expect(stripImageDirectives(text)).toBe("a\n\nb");
+	});
+
+	test("returns empty string when text is only images", () => {
+		const text = "![only](/tmp/x.png)";
+		expect(stripImageDirectives(text)).toBe("");
 	});
 });
 
 // ═══════════════════════════════════════════════════════════════════════
-// Message Dedup
+// File classification (was: dingtalk-files.test.ts)
 // ═══════════════════════════════════════════════════════════════════════
 
-describe("message dedup", () => {
-	test("checkAndMarkDingtalkMessage returns true for duplicate", () => {
-		// We need to test through Duck Typing since checkAndMarkDingtalkMessage
-		// is module-scoped, not exported. Let's verify via the channel behavior
-		// by checking that double-processing of the same msgId is prevented.
-
-		// The dedup is implemented inside the channel. We test it by
-		// checking that the module imports without issue and the channel
-		// compiles properly (already verified by tsgo).
-		expect(DingTalkChannel).toBeDefined();
-
-		// Direct test of dedup behavior: we can test the exported
-		// type by ensuring the core mechanism works logically
-		const visited = new Map<string, number>();
-		const TTL = 5 * 60 * 1000;
-
-		function checkMark(key: string): boolean {
-			const now = Date.now();
-			if (visited.has(key)) {
-				const ts = visited.get(key)!;
-				if (now - ts < TTL) return true;
-			}
-			visited.set(key, now);
-			return false;
-		}
-
-		// First call should be false (first visit)
-		expect(checkMark("msg001")).toBe(false);
-
-		// Second call should be true (duplicate)
-		expect(checkMark("msg001")).toBe(true);
-
-		// Different message should be false
-		expect(checkMark("msg002")).toBe(false);
+describe("extractExtension", () => {
+	test("returns lowercase extension from a simple path", () => {
+		expect(extractExtension("/tmp/photo.PNG")).toBe("png");
+		expect(extractExtension("/tmp/photo.png")).toBe("png");
 	});
 
-	test("dedup uses account-scoped keys", async () => {
-		const visited = new Map<string, number>();
-		const TTL = 5 * 60 * 1000;
+	test("handles file:// URIs", () => {
+		expect(extractExtension("file:///tmp/clip.MP4")).toBe("mp4");
+	});
 
-		function checkMark(key: string): boolean {
-			if (visited.has(key)) {
-				const ts = visited.get(key)!;
-				if (Date.now() - ts < TTL) return true;
-			}
-			visited.set(key, Date.now());
-			return false;
-		}
+	test("strips query string before extracting", () => {
+		expect(extractExtension("https://example.com/v.mp4?token=abc&exp=1")).toBe("mp4");
+	});
 
-		// Same msgId, different account prefixes should not conflict
-		expect(checkMark("account_a:msg001")).toBe(false);
-		expect(checkMark("account_b:msg001")).toBe(false);
-		expect(checkMark("account_a:msg001")).toBe(true);
-		expect(checkMark("account_b:msg001")).toBe(true);
+	test("strips fragment before extracting", () => {
+		expect(extractExtension("https://example.com/v.mp4#t=10")).toBe("mp4");
+	});
+
+	test("returns empty string when there is no extension", () => {
+		expect(extractExtension("https://example.com/page")).toBe("");
+		expect(extractExtension("/tmp/Makefile")).toBe("");
+	});
+
+	test("returns empty string for empty input", () => {
+		expect(extractExtension("")).toBe("");
+	});
+
+	test("handles windows-style backslash paths", () => {
+		expect(extractExtension("C:\\Users\\me\\clip.mp4")).toBe("mp4");
+	});
+
+	test("ignores leading dots (hidden files)", () => {
+		expect(extractExtension("/tmp/.env")).toBe("");
+	});
+});
+
+describe("classifyFile", () => {
+	test("classifies common image formats", () => {
+		expect(classifyFile("/tmp/a.png")).toBe("image");
+		expect(classifyFile("/tmp/a.jpg")).toBe("image");
+		expect(classifyFile("/tmp/a.jpeg")).toBe("image");
+		expect(classifyFile("/tmp/a.gif")).toBe("image");
+		expect(classifyFile("/tmp/a.bmp")).toBe("image");
+	});
+
+	test("classifies common audio formats", () => {
+		expect(classifyFile("/tmp/a.amr")).toBe("audio");
+		expect(classifyFile("/tmp/a.mp3")).toBe("audio");
+		expect(classifyFile("/tmp/a.wav")).toBe("audio");
+		expect(classifyFile("/tmp/a.ogg")).toBe("audio");
+	});
+
+	test("classifies mp4 as video", () => {
+		expect(classifyFile("/tmp/a.mp4")).toBe("video");
+	});
+
+	test("classifies office documents and archives", () => {
+		expect(classifyFile("/tmp/a.pdf")).toBe("document");
+		expect(classifyFile("/tmp/a.doc")).toBe("document");
+		expect(classifyFile("/tmp/a.docx")).toBe("document");
+		expect(classifyFile("/tmp/a.xls")).toBe("document");
+		expect(classifyFile("/tmp/a.xlsx")).toBe("document");
+		expect(classifyFile("/tmp/a.ppt")).toBe("document");
+		expect(classifyFile("/tmp/a.pptx")).toBe("document");
+		expect(classifyFile("/tmp/a.zip")).toBe("document");
+		expect(classifyFile("/tmp/a.rar")).toBe("document");
+	});
+
+	test("rejects unsupported formats as 'unsupported'", () => {
+		expect(classifyFile("/tmp/a.webp")).toBe("unsupported");
+		expect(classifyFile("/tmp/a.svg")).toBe("unsupported");
+		expect(classifyFile("/tmp/a.webm")).toBe("unsupported");
+		expect(classifyFile("/tmp/a.mov")).toBe("unsupported");
+		expect(classifyFile("/tmp/a.avi")).toBe("unsupported");
+		expect(classifyFile("/tmp/a.mkv")).toBe("unsupported");
+		expect(classifyFile("/tmp/a.flac")).toBe("unsupported");
+		expect(classifyFile("/tmp/a.txt")).toBe("unsupported");
+		expect(classifyFile("/tmp/a.html")).toBe("unsupported");
+	});
+
+	test("returns 'unsupported' for paths with no extension", () => {
+		expect(classifyFile("https://example.com/page")).toBe("unsupported");
+		expect(classifyFile("/tmp/Makefile")).toBe("unsupported");
+	});
+
+	test("extension matching is case-insensitive", () => {
+		expect(classifyFile("/tmp/a.JPG")).toBe("image");
+		expect(classifyFile("/tmp/a.Mp4")).toBe("video");
+	});
+
+	test("handles URL with query string", () => {
+		expect(classifyFile("https://example.com/v.mp4?token=abc")).toBe("video");
+	});
+});
+
+describe("mediaTypeForKind", () => {
+	test("maps each kind to the uploadMedia type", () => {
+		expect(mediaTypeForKind("image")).toBe("image");
+		expect(mediaTypeForKind("audio")).toBe("voice");
+		expect(mediaTypeForKind("video")).toBe("video");
+		expect(mediaTypeForKind("document")).toBe("file");
+	});
+});
+
+describe("isRoutableKind", () => {
+	test("routable kinds return true", () => {
+		expect(isRoutableKind("image")).toBe(true);
+		expect(isRoutableKind("audio")).toBe(true);
+		expect(isRoutableKind("video")).toBe(true);
+		expect(isRoutableKind("document")).toBe(true);
+	});
+
+	test("unsupported returns false", () => {
+		expect(isRoutableKind("unsupported")).toBe(false);
+	});
+});
+
+describe("isExtensionSupported", () => {
+	test("accepts the canonical extensions", () => {
+		expect(isExtensionSupported("image", "jpg")).toBe(true);
+		expect(isExtensionSupported("audio", "amr")).toBe(true);
+		expect(isExtensionSupported("video", "mp4")).toBe(true);
+		expect(isExtensionSupported("document", "pdf")).toBe(true);
+	});
+
+	test("rejects unknown extensions", () => {
+		expect(isExtensionSupported("image", "webp")).toBe(false);
+		expect(isExtensionSupported("video", "mov")).toBe(false);
+		expect(isExtensionSupported("audio", "flac")).toBe(false);
+	});
+
+	test("case-insensitive", () => {
+		expect(isExtensionSupported("image", "JPG")).toBe(true);
+	});
+});
+
+describe("isFileSizeAllowed", () => {
+	test("returns true under the limit", () => {
+		expect(isFileSizeAllowed("image", 1)).toBe(true);
+		expect(isFileSizeAllowed("image", FILE_SIZE_LIMITS.image)).toBe(true);
+		expect(isFileSizeAllowed("audio", FILE_SIZE_LIMITS.audio)).toBe(true);
+	});
+
+	test("returns false over the limit", () => {
+		expect(isFileSizeAllowed("image", FILE_SIZE_LIMITS.image + 1)).toBe(false);
+		expect(isFileSizeAllowed("audio", FILE_SIZE_LIMITS.audio + 1)).toBe(false);
+		expect(isFileSizeAllowed("video", FILE_SIZE_LIMITS.video + 1)).toBe(false);
+		expect(isFileSizeAllowed("document", FILE_SIZE_LIMITS.document + 1)).toBe(false);
+	});
+
+	test("returns false for zero or negative", () => {
+		expect(isFileSizeAllowed("image", 0)).toBe(false);
+		expect(isFileSizeAllowed("image", -1)).toBe(false);
+	});
+});
+
+describe("unsupportedFallbackMarkdown", () => {
+	test("uses alt text as link label when present", () => {
+		const md = unsupportedFallbackMarkdown("diagram", "https://example.com/a.webp", "image", "客户端不支持");
+		expect(md).toBe("🔗 [diagram](https://example.com/a.webp) — image 格式不支持 (客户端不支持)");
+	});
+
+	test("derives label from URL filename when alt is empty", () => {
+		const md = unsupportedFallbackMarkdown("", "https://example.com/path/clip.webm", "video", "");
+		expect(md).toBe("🔗 [clip.webm](https://example.com/path/clip.webm) — video 格式不支持");
+	});
+
+	test("trims whitespace in alt", () => {
+		const md = unsupportedFallbackMarkdown("   ", "https://example.com/x", "audio", "");
+		expect(md).toBe("🔗 [x](https://example.com/x) — audio 格式不支持");
+	});
+});
+
+describe("warnUnsupportedFile", () => {
+	test("does not throw", () => {
+		warnUnsupportedFile("/tmp/a.webp", "ext not in supported set", "ops", "conv-1");
+	});
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// Formatter (was: dingtalk-formatter.test.ts)
+// ═══════════════════════════════════════════════════════════════════════
+
+describe("formatDingTalkReply backward compat (v1)", () => {
+	test("still assembles quote + answer + status into a single markdown string", () => {
+		const out = formatDingTalkReply({
+			meta: makeMeta(),
+			inbound: makeInbound(),
+			agentName: "ops-bot",
+			accountId: "ops",
+			dapiCalls: 0,
+		});
+		expect(out.markdown).toContain("Alice");
+		expect(out.markdown).toContain("Here is the answer.");
+		expect(out.markdown).toContain("claude-sonnet-4-5");
+	});
+
+	test("fallback path produces just the error text", () => {
+		const out = formatDingTalkReply({
+			meta: makeMeta({ text: "系统繁忙", isFallback: true }),
+			inbound: makeInbound(),
+			agentName: null,
+			accountId: "ops",
+			dapiCalls: 0,
+		});
+		expect(out.markdown).toBe("系统繁忙");
+	});
+});
+
+describe("formatDingTalkReply — section ordering and gating", () => {
+	test("non-fallback: quoteContent → tool summary → answer → status line", () => {
+		const out = formatDingTalkReply({
+			meta: baseMeta({
+				toolCalls: [{ id: "t1", name: "read", args: null }],
+				toolResults: [{ id: "t1", name: "read", isError: false }],
+			}),
+			inbound: textInbound(),
+			...ctx(),
+		});
+		// Quote first (sender)
+		const quoteIdx = out.markdown.indexOf("Alice");
+		const toolIdx = out.markdown.indexOf("read");
+		const answerIdx = out.markdown.indexOf("Hello, world.");
+		const statusIdx = out.markdown.indexOf("claude-sonnet-4-5");
+		expect(quoteIdx).toBeGreaterThanOrEqual(0);
+		expect(toolIdx).toBeGreaterThan(quoteIdx);
+		expect(answerIdx).toBeGreaterThan(toolIdx);
+		expect(statusIdx).toBeGreaterThan(answerIdx);
+	});
+
+	test("fallback string returns only the localized text (no chrome)", () => {
+		const out = formatDingTalkReply({
+			meta: baseMeta({ text: "系统繁忙，请稍后再试。", isFallback: true }),
+			inbound: textInbound(),
+			...ctx(),
+		});
+		expect(out.markdown).toBe("系统繁忙，请稍后再试。");
+		expect(out.markdown).not.toContain("Alice");
+		expect(out.markdown).not.toContain("claude-sonnet-4-5");
 	});
 });

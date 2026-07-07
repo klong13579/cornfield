@@ -329,11 +329,20 @@ export class JsonFileStorage implements SchedulerStorage {
 
 	getExecutions(taskId: string, limit = 50): TaskExecution[] {
 		const results: TaskExecution[] = [];
+		const seenIds = new Set<string>();
 
-		// 1. In-flight running executions
+		// 1. In-memory executions: includes both running (in-flight) and
+		// terminal (not yet flushed to JSONL — e.g. tests that seed
+		// `recordExecution` + `getExecutions` in the same process). The
+		// production path also lands terminal execs in JSONL via
+		// `appendExecutionLog` (called by CronService.#onTrigger after
+		// the agent finishes); that path takes the JSONL branch below.
+		// De-dup by id so the two sources don't double-count after
+		// process restart (when JSONL is the only source).
 		for (const exec of this.#executions.values()) {
-			if (exec.taskId === taskId && exec.status === "running") {
+			if (exec.taskId === taskId) {
 				results.push(exec);
+				seenIds.add(exec.id);
 			}
 		}
 
@@ -342,6 +351,7 @@ export class JsonFileStorage implements SchedulerStorage {
 		if (task) {
 			const logEntries = readExecutionLog(task.name, limit);
 			for (const entry of logEntries) {
+				if (seenIds.has(entry.id)) continue;
 				results.push({
 					id: entry.id,
 					taskId,
@@ -357,6 +367,7 @@ export class JsonFileStorage implements SchedulerStorage {
 					// silently skipped, which is the safe default).
 					agentSessionPath: entry.agentSessionPath,
 				});
+				seenIds.add(entry.id);
 			}
 		}
 

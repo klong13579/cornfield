@@ -4,7 +4,7 @@
  * No mocks: real temp config files, a real SQLite scheduler DB, and the real
  * check/render/fix code paths. The scheduler path helpers hardcode the default
  * data dir, so the orphaned-execution detection + repair is exercised directly
- * against a real SchedulerDbStorage rather than through runDoctor().
+ * against a real JsonFileStorage rather than through runDoctor().
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
@@ -21,7 +21,6 @@ import {
 	runDoctorWithConfig,
 } from "../src/doctor";
 import { clearStatusFileSync, getGatewayStatus, PID_FILE, STATUS_FILE } from "../src/gateway-daemon";
-import { SchedulerDbStorage } from "../src/scheduler";
 
 describe("validateConfig (non-swallowing)", () => {
 	let tmpDir: string;
@@ -148,82 +147,6 @@ describe("runDoctor end-to-end", () => {
 		expect(json.sections.length).toBe(report.sections.length);
 	});
 });
-
-describe("orphaned-execution detection and repair", () => {
-	let dbPath: string;
-	let storage: SchedulerDbStorage;
-
-	beforeEach(async () => {
-		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-gateway-doctor-db-"));
-		dbPath = path.join(dir, "scheduler.db");
-		storage = new SchedulerDbStorage(dbPath);
-	});
-	afterEach(async () => {
-		storage.close();
-		await fs.rm(path.dirname(dbPath), { recursive: true, force: true });
-	});
-
-	test("getRunningExecutions returns only running rows with task name", () => {
-		const task = storage.addTask({
-			name: "demo",
-			cron: "0 9 * * *",
-			command: "echo hi",
-			status: "active",
-			consecutiveFailures: 0,
-			createdAt: Date.now(),
-			updatedAt: Date.now(),
-			runCount: 0,
-			failCount: 0,
-		});
-		// One running, one completed.
-		storage.recordExecution({ taskId: task.id, startedAt: Date.now() - 7_200_000, status: "running" });
-		storage.recordExecution({
-			taskId: task.id,
-			startedAt: Date.now(),
-			endedAt: Date.now(),
-			exitCode: 0,
-			status: "success",
-		});
-
-		const running = storage.getRunningExecutions();
-		expect(running.length).toBe(1);
-		expect(running[0]!.taskName).toBe("demo");
-		expect(running[0]!.status).toBe("running");
-	});
-
-	test("a stuck running execution can be marked failed (the --fix repair)", () => {
-		const task = storage.addTask({
-			name: "stuck-demo",
-			cron: "0 9 * * *",
-			command: "sleep 9999",
-			status: "active",
-			consecutiveFailures: 0,
-			createdAt: Date.now(),
-			updatedAt: Date.now(),
-			runCount: 0,
-			failCount: 0,
-		});
-		const exec = storage.recordExecution({
-			taskId: task.id,
-			startedAt: Date.now() - 7_200_000, // 2h ago, no end
-			status: "running",
-		});
-
-		// Simulate the doctor's repair.
-		storage.updateExecution(exec.id, {
-			status: "failure",
-			endedAt: Date.now(),
-			stderr: "Marked failed by `gateway doctor --fix` (orphaned running execution).",
-		});
-
-		expect(storage.getRunningExecutions().length).toBe(0);
-		const after = storage.getExecutions(task.id, 10).find(e => e.id === exec.id);
-		expect(after?.status).toBe("failure");
-		expect(after?.stderr).toContain("doctor --fix");
-	});
-});
-
-
 
 describe("applyFixes", () => {
 	test("returns empty when no finding carries a fix", async () => {

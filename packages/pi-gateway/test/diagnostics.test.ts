@@ -1,10 +1,25 @@
 /**
- * Unit tests for structured cron diagnostics (diagnostics.ts).
+ * Scheduler diagnostics tests.
  *
- * Tests cover normalization bounds, severity/source coercion,
- * summary extraction, merging, and error-to-diagnostic construction.
+ * `diagnostics.test.ts` covered structured cron diagnostics:
+ *   - normalizeCronRunDiagnostics (bounds, severity/source coercion,
+ *     summary extraction, error-to-diagnostic construction)
+ *   - summarizeCronRunDiagnostics
+ *   - mergeCronRunDiagnostics
+ *   - createDiagnosticFromError
+ *   - parseAgentSessionForToolFailures
+ *
+ * `delivery-failure-log.test.ts` covered appendDeliveryFailureLog
+ * (the on-disk record of cron → channel delivery failures).
+ *
+ * Both are part of the same observability story: why a cron run
+ * failed (diagnostics) and the per-attempt delivery log when a
+ * channel send fails. Co-located here.
  */
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
 import {
 	createDiagnosticFromError,
 	mergeCronRunDiagnostics,
@@ -12,6 +27,7 @@ import {
 	parseAgentSessionForToolFailures,
 	summarizeCronRunDiagnostics,
 } from "../src/scheduler/diagnostics";
+import { appendDeliveryFailureLog, setLogRoot } from "../src/scheduler/execution-log";
 
 // ---------------------------------------------------------------------------
 // normalizeCronRunDiagnostics
@@ -407,3 +423,85 @@ function mkdtemp(): { path: string; [Symbol.dispose](): void } {
 		},
 	};
 }
+
+// ---------------------------------------------------------------------------
+// appendDeliveryFailureLog (cron → channel delivery failure log)
+// ---------------------------------------------------------------------------
+
+describe("appendDeliveryFailureLog", () => {
+	let tmpDir: string;
+
+	beforeEach(async () => {
+		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-gateway-delivery-log-"));
+		setLogRoot(tmpDir);
+	});
+
+	afterEach(async () => {
+		await fs.rm(tmpDir, { recursive: true, force: true });
+	});
+
+	test("writes a single JSONL line to delivery-failures.jsonl", async () => {
+		appendDeliveryFailureLog({
+			ts: 1_700_000_000_000,
+			taskId: "task-1",
+			taskName: "daily-report",
+			channel: "dingtalk:hr",
+			userId: "user-42",
+			reason: "sendToChannel returned false after 2 attempts",
+			attempts: 2,
+			exitCode: 0,
+		});
+
+		const logPath = path.join(tmpDir, "delivery-failures.jsonl");
+		const content = await fs.readFile(logPath, "utf8");
+		const lines = content.trim().split("\n");
+		expect(lines).toHaveLength(1);
+		const entry = JSON.parse(lines[0]!);
+		expect(entry).toEqual({
+			ts: 1_700_000_000_000,
+			taskId: "task-1",
+			taskName: "daily-report",
+			channel: "dingtalk:hr",
+			userId: "user-42",
+			reason: "sendToChannel returned false after 2 attempts",
+			attempts: 2,
+			exitCode: 0,
+		});
+	});
+
+	test("appends multiple entries on successive calls", async () => {
+		for (let i = 0; i < 3; i++) {
+			appendDeliveryFailureLog({
+				ts: 1_700_000_000_000 + i * 1000,
+				taskId: `task-${i}`,
+				taskName: `name-${i}`,
+				channel: "dingtalk:hr",
+				userId: "user-42",
+				reason: "channel down",
+				attempts: 2,
+				exitCode: 1,
+			});
+		}
+		const logPath = path.join(tmpDir, "delivery-failures.jsonl");
+		const content = await fs.readFile(logPath, "utf8");
+		expect(content.trim().split("\n")).toHaveLength(3);
+	});
+
+	test("creates the log root directory if it does not exist", async () => {
+		// Use a nested root that doesn't exist yet.
+		const nestedRoot = path.join(tmpDir, "nested", "logs");
+		setLogRoot(nestedRoot);
+		appendDeliveryFailureLog({
+			ts: 1_700_000_000_000,
+			taskId: "task-x",
+			taskName: "name-x",
+			channel: "dingtalk:hr",
+			userId: "user-1",
+			reason: "ok",
+			attempts: 1,
+			exitCode: 0,
+		});
+		const stat = await fs.stat(path.join(nestedRoot, "delivery-failures.jsonl"));
+		expect(stat.isFile()).toBe(true);
+	});
+});

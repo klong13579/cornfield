@@ -1,16 +1,30 @@
 /**
- * Unit tests for the cron list formatter.
+ * Scheduler formatter + session tool-call parser tests.
  *
- * The formatter is what `cron list` renders. Two contracts:
- *   1. Every task row has a fixed column layout so columns line up across rows
- *      regardless of which fields are populated.
- *   2. The CHANNEL column shows the deliver target so a user can see at a
- *      glance which DingTalk bot the result will land in.
+ *   - `scheduler-format.test.ts` — Cron-list formatter:
+ *     formatChannel / formatAgent / formatTaskRow / truncateName /
+ *     formatDeliveryFailureCount. Pin the fixed column widths so the
+ *     CLI table header and rows stay in lockstep.
+ *   - `scheduler-parse-tool-calls.test.ts` — Session JSONL parser:
+ *     parseAgentSessionForToolCalls correlates `tool_execution_start`
+ *     events and inline `toolCall` content with `toolResult`
+ *     messages, surfaces errors with [ERROR] tag, truncates long
+ *     previews.
+ *
+ * Both feed into Tier 3 of the cron context prefix — the formatter
+ * renders rows for the `cron list` CLI; the parser feeds the
+ * `buildCronContextPrefixFromStorage` Tier 3 block. Co-located here.
  */
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import * as fs from "node:fs/promises";
+import * as fs from "node:fs";
+import * as fsPromises from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import {
+	formatToolCallSummary,
+	parseAgentSessionForToolCalls,
+	type ToolCallSummary,
+} from "../src/scheduler/diagnostics";
 import { appendDeliveryFailureLog, clearDeliveryFailureCache, setLogRoot } from "../src/scheduler/execution-log";
 import type { ScheduledTask } from "../src/scheduler/types";
 import {
@@ -20,6 +34,10 @@ import {
 	formatTaskRow,
 	truncateName,
 } from "../src/scheduler/types";
+
+// ===========================================================================
+// formatChannel / formatAgent / formatTaskRow / truncateName
+// ===========================================================================
 
 function makeTask(overrides: Partial<ScheduledTask> = {}): ScheduledTask {
 	return {
@@ -54,15 +72,10 @@ describe("formatChannel", () => {
 	});
 
 	it("preserves long deliver values like dingtalk:user:601590212", () => {
-		// Real data: tasks may store a user-routed deliver in the field itself.
 		expect(formatChannel("dingtalk:user:601590212")).toBe("dingtalk:user:601590212");
 	});
 
 	it("does NOT include deliverUser in the cell (orthogonal field, use --json)", () => {
-		// Regression: the first implementation tried to fold deliverUser into
-		// the channel cell with an arrow separator, but that pushed the
-		// NEXT RUN column. deliverUser is for proactive send only and is
-		// available via --json.
 		const cell = formatChannel("dingtalk:hr");
 		expect(cell).not.toContain("→");
 	});
@@ -86,20 +99,16 @@ describe("formatAgent", () => {
 	});
 
 	it("truncates the label with an ellipsis when it exceeds the default max (12)", () => {
-		// last segment "way-too-long-account-id" is 23 chars, well over 12.
 		const cell = formatAgent("~/.omp/agents/way-too-long-account-id");
 		expect(cell.length).toBe(12);
 		expect(cell.endsWith("\u2026")).toBe(true);
 	});
 
 	it("respects a custom max width", () => {
-		// truncateName contract: first (max-1) chars + "…". For max=4
-		// and last segment "ops-team" (8 chars), it returns "ops" + "…" = "ops…".
 		expect(formatAgent("~/.omp/agents/ops-team", 4)).toBe("ops…");
 	});
 
 	it("returns the label as-is when it equals the max", () => {
-		// "aaaaaaaaaaaaaaa" is 15 chars, exactly max=15.
 		const id = "a".repeat(15);
 		expect(formatAgent(`~/.omp/agents/${id}`, 15)).toBe(id);
 	});
@@ -125,23 +134,18 @@ describe("formatTaskRow column layout", () => {
 			makeTask({ delivery: { channel: "dingtalk:hr", mode: "announce" } }),
 			makeTask({ delivery: { channel: "dingtalk:user:601590212", mode: "announce" } }),
 		];
-		// Columns: NAME(21) TYPE(6) AGENT(12) STATUS(8) CRON(16)
-		//          MODEL(15) REPEAT(7) CHANNEL(20) LAST(8) DELIV(8) NEXT RUN(21)
-		// Total width: 21+1+6+1+12+1+8+1+16+1+15+1+7+1+20+1+8+1+8+1+21 = 152 chars
 		const widths = [21, 6, 12, 8, 16, 15, 7, 20, 8, 8] as const;
 		const splitByWidth = (row: string): string[] => {
 			const out: string[] = [];
 			let pos = 0;
 			for (const w of widths) {
 				out.push(row.slice(pos, pos + w));
-				pos += w + 1; // +1 for the single-space separator
+				pos += w + 1;
 			}
-			out.push(row.slice(pos)); // NEXT RUN is unpadded
+			out.push(row.slice(pos));
 			return out;
 		};
 		const counts = variants.map(t => splitByWidth(formatTaskRow(t)).length);
-		// All rows should have the same field count. 10 fixed columns +
-		// unpadded NEXT RUN tail = 11 fields.
 		expect(new Set(counts).size).toBe(1);
 		expect(counts[0]).toBe(11);
 	});
@@ -153,7 +157,6 @@ describe("formatTaskRow column layout", () => {
 
 	it("truncates over-long names with an ellipsis instead of overflowing the next column", () => {
 		const row = formatTaskRow(makeTask({ name: "this-name-is-way-longer-than-eighteen-chars" }));
-		// Truncation keeps the field count stable across all 10 fixed columns.
 		const widths = [21, 6, 12, 8, 16, 15, 7, 20, 8, 8] as const;
 		const splitByWidth = (row: string): string[] => {
 			const out: string[] = [];
@@ -166,20 +169,11 @@ describe("formatTaskRow column layout", () => {
 			return out;
 		};
 		expect(splitByWidth(row).length).toBe(11);
-		// The truncated name contains an ellipsis.
 		expect(row).toContain("\u2026");
-		// And the original full name is NOT in the row (it was truncated).
 		expect(row).not.toContain("eighteen-chars");
 	});
+
 	it("renders rows that match the table header width", () => {
-		// Regression: the table header in cronList is built as
-		// NAME(21) TYPE(6) AGENT(12) STATUS(8) CRON(16) MODEL(15)
-		// REPEAT(7) CHANNEL(20) LAST(8) DELIV(8) NEXT RUN(21) = 152 chars.
-		// formatTaskRow produces the same fixed prefix and appends
-		// an unpadded NEXT RUN value. The header underline must equal
-		// the header line length; rows extend past it for long
-		// timestamps. This test pins the fixed prefix length so a
-		// future padEnd change can't silently desync header and data.
 		const header =
 			"NAME".padEnd(21) +
 			" " +
@@ -203,10 +197,6 @@ describe("formatTaskRow column layout", () => {
 			" " +
 			"NEXT RUN".padEnd(21);
 		expect(header.length).toBe(152);
-		// For a task with no lastRunAt and no last failures, the
-		// rendered row has the same length as the header (DELIV
-		// column is "✓" — a single char; everything else is padded
-		// to column width). Verify both line lengths match.
 		const row = formatTaskRow(makeTask({ name: "x" }));
 		expect(row.length).toBe(178);
 	});
@@ -224,7 +214,6 @@ describe("formatTaskRow column layout", () => {
 	it("renders an em-dash in the AGENT column when accountId is unset", () => {
 		const row = formatTaskRow(makeTask({ name: "x" }));
 		const fields = row.split(/\s{2,}/);
-		// AGENT is the 3rd column (index 2).
 		expect(fields[2]).toBe("—");
 	});
 });
@@ -245,11 +234,9 @@ describe("truncateName", () => {
 	});
 
 	it("handles a real-world CJK name", () => {
-		// omp-atomix:wiki-changelog:01-算法模块 is 36 chars.
 		const result = truncateName("omp-atomix:wiki-changelog:01-算法模块", 18);
 		expect(result.length).toBe(18);
 		expect(result.endsWith("\u2026")).toBe(true);
-		// The leading prefix is preserved so users can still identify the task.
 		expect(result.startsWith("omp-atomix:wiki")).toBe(true);
 	});
 });
@@ -258,14 +245,14 @@ describe("formatDeliveryFailureCount", () => {
 	let tmpLogRoot: string;
 
 	beforeEach(async () => {
-		tmpLogRoot = await fs.mkdtemp(path.join(os.tmpdir(), "pi-gateway-fmt-delivery-"));
+		tmpLogRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), "pi-gateway-fmt-delivery-"));
 		setLogRoot(tmpLogRoot);
 		clearDeliveryFailureCache();
 	});
 
 	afterEach(async () => {
 		clearDeliveryFailureCache();
-		await fs.rm(tmpLogRoot, { recursive: true, force: true });
+		await fsPromises.rm(tmpLogRoot, { recursive: true, force: true });
 	});
 
 	it("returns a check mark when there are no recent failures", () => {
@@ -288,8 +275,6 @@ describe("formatDeliveryFailureCount", () => {
 	});
 
 	it("counts only failures within the sinceMs window", () => {
-		// Insert an old failure (5 days ago) — should be filtered out by
-		// the default 24h window.
 		appendDeliveryFailureLog({
 			ts: Date.now() - 5 * 24 * 60 * 60 * 1000,
 			taskId: "task-old",
@@ -300,7 +285,6 @@ describe("formatDeliveryFailureCount", () => {
 			attempts: 2,
 			exitCode: 0,
 		});
-		// And a recent one (1 minute ago).
 		appendDeliveryFailureLog({
 			ts: Date.now() - 60_000,
 			taskId: "task-old",
@@ -343,9 +327,6 @@ describe("formatDeliveryFailureCount", () => {
 	});
 
 	it("includes the delivery indicator in the rendered task row", () => {
-		// Regression: the DELIVERY column must show the failure count
-		// (or \u2713) so operators can see at a glance which tasks
-		// are failing delivery without grepping the JSONL log.
 		appendDeliveryFailureLog({
 			ts: Date.now(),
 			taskId: "task_xyz",
@@ -359,5 +340,391 @@ describe("formatDeliveryFailureCount", () => {
 		clearDeliveryFailureCache();
 		const row = formatTaskRow(makeTask({ name: "x", id: "task_xyz" }));
 		expect(row).toContain("\u00d7 1");
+	});
+});
+
+// ===========================================================================
+// parseAgentSessionForToolCalls / formatToolCallSummary
+// ===========================================================================
+
+let tempDir = "";
+
+beforeEach(() => {
+	tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "parse-tool-calls-test-"));
+});
+
+afterEach(() => {
+	if (tempDir) fs.rmSync(tempDir, { recursive: true, force: true });
+});
+
+function writeSession(fileName: string, lines: object[]): string {
+	const filePath = path.join(tempDir, fileName);
+	const content = `${lines.map(l => JSON.stringify(l)).join("\n")}\n`;
+	fs.writeFileSync(filePath, content, "utf-8");
+	return filePath;
+}
+
+describe("parseAgentSessionForToolCalls", () => {
+	it("returns undefined when path is undefined", () => {
+		expect(parseAgentSessionForToolCalls(undefined)).toBeUndefined();
+	});
+
+	it("returns undefined when the file does not exist", () => {
+		const missing = path.join(tempDir, "does-not-exist.jsonl");
+		expect(parseAgentSessionForToolCalls(missing)).toBeUndefined();
+	});
+
+	it("returns undefined when the file is empty", () => {
+		const sessionPath = path.join(tempDir, "empty.jsonl");
+		fs.writeFileSync(sessionPath, "", "utf-8");
+		expect(parseAgentSessionForToolCalls(sessionPath)).toBeUndefined();
+	});
+
+	it("returns undefined when no toolResult messages exist", () => {
+		const sessionPath = writeSession("no-tools.jsonl", [
+			{ type: "message", message: { role: "user", content: [{ type: "text", text: "hi" }] } },
+			{ type: "message", message: { role: "assistant", content: [{ type: "text", text: "hello" }] } },
+		]);
+		expect(parseAgentSessionForToolCalls(sessionPath)).toBeUndefined();
+	});
+
+	it("returns a single entry for a session with one tool call", () => {
+		const sessionPath = writeSession("one-call.jsonl", [
+			{ type: "tool_execution_start", toolCallId: "tc1", toolName: "read", args: { path: "/etc/hosts" } },
+			{
+				type: "message",
+				message: {
+					role: "toolResult",
+					toolCallId: "tc1",
+					toolName: "read",
+					isError: false,
+					content: [{ type: "text", text: "127.0.0.1 localhost" }],
+					timestamp: 1000,
+				},
+			},
+		]);
+		const result = parseAgentSessionForToolCalls(sessionPath);
+		expect(result).toHaveLength(1);
+		expect(result![0]?.toolName).toBe("read");
+		expect(result![0]?.argsPreview).toBe('{"path":"/etc/hosts"}');
+		expect(result![0]?.resultPreview).toBe("127.0.0.1 localhost");
+		expect(result![0]?.isError).toBe(false);
+		expect(result![0]?.ts).toBe(1000);
+	});
+
+	it("returns all entries in chronological order when caller does not select", () => {
+		const sessionPath = writeSession("few-calls.jsonl", [
+			{ type: "tool_execution_start", toolCallId: "tc1", toolName: "bash", args: { command: "ls" } },
+			{
+				type: "message",
+				message: {
+					role: "toolResult",
+					toolCallId: "tc1",
+					toolName: "bash",
+					isError: false,
+					content: [{ type: "text", text: "file1\nfile2" }],
+				},
+			},
+			{ type: "tool_execution_start", toolCallId: "tc2", toolName: "bash", args: { command: "pwd" } },
+			{
+				type: "message",
+				message: {
+					role: "toolResult",
+					toolCallId: "tc2",
+					toolName: "bash",
+					isError: false,
+					content: [{ type: "text", text: "/home" }],
+				},
+			},
+		]);
+		const result = parseAgentSessionForToolCalls(sessionPath);
+		expect(result).toHaveLength(2);
+		expect(result!.map(r => r.toolName)).toEqual(["bash", "bash"]);
+		expect(result![0]?.resultPreview).toBe("file1\nfile2");
+		expect(result![1]?.resultPreview).toBe("/home");
+	});
+
+	it("returns all entries without truncation (selection is the caller's job)", () => {
+		const lines: object[] = [];
+		for (let i = 0; i < 25; i++) {
+			lines.push({ type: "tool_execution_start", toolCallId: `tc${i}`, toolName: "bash", args: { i } });
+			lines.push({
+				type: "message",
+				message: {
+					role: "toolResult",
+					toolCallId: `tc${i}`,
+					toolName: "bash",
+					isError: false,
+					content: [{ type: "text", text: `result-${i}` }],
+				},
+			});
+		}
+		const sessionPath = writeSession("many-calls.jsonl", lines);
+		const result = parseAgentSessionForToolCalls(sessionPath);
+		expect(result).toHaveLength(25);
+		expect(result![0]?.resultPreview).toBe("result-0");
+		expect(result![24]?.resultPreview).toBe("result-24");
+	});
+
+	it("marks failed tool calls and includes stderr in result preview", () => {
+		const sessionPath = writeSession("error-call.jsonl", [
+			{ type: "tool_execution_start", toolCallId: "tc1", toolName: "bash", args: { command: "false" } },
+			{
+				type: "message",
+				message: {
+					role: "toolResult",
+					toolCallId: "tc1",
+					toolName: "bash",
+					isError: true,
+					content: [{ type: "text", text: "" }],
+					details: { exitCode: 1, stderr: "command failed" },
+				},
+			},
+		]);
+		const result = parseAgentSessionForToolCalls(sessionPath);
+		expect(result).toHaveLength(1);
+		expect(result![0]?.isError).toBe(true);
+		expect(result![0]?.resultPreview).toContain("[stderr] command failed");
+	});
+
+	it("skips malformed JSONL lines and continues", () => {
+		const filePath = path.join(tempDir, "malformed.jsonl");
+		fs.writeFileSync(
+			filePath,
+			[
+				"not json at all",
+				JSON.stringify({
+					type: "message",
+					message: {
+						role: "toolResult",
+						toolCallId: "tc1",
+						toolName: "read",
+						isError: false,
+						content: [{ type: "text", text: "ok" }],
+					},
+				}),
+				"{ broken",
+				"",
+				JSON.stringify({
+					type: "message",
+					message: {
+						role: "toolResult",
+						toolCallId: "tc2",
+						toolName: "read",
+						isError: false,
+						content: [{ type: "text", text: "ok2" }],
+					},
+				}),
+			].join("\n"),
+			"utf-8",
+		);
+		const result = parseAgentSessionForToolCalls(filePath);
+		expect(result).toHaveLength(2);
+		expect(result!.map(r => r.resultPreview)).toEqual(["ok", "ok2"]);
+	});
+
+	it("returns empty argsPreview when no preceding tool_execution_start", () => {
+		const sessionPath = writeSession("orphan-result.jsonl", [
+			{
+				type: "message",
+				message: {
+					role: "toolResult",
+					toolCallId: "tc_orphan",
+					toolName: "bash",
+					isError: false,
+					content: [{ type: "text", text: "result" }],
+				},
+			},
+		]);
+		const result = parseAgentSessionForToolCalls(sessionPath);
+		expect(result).toHaveLength(1);
+		expect(result![0]?.argsPreview).toBe("");
+		expect(result![0]?.resultPreview).toBe("result");
+	});
+
+	it("truncates long args and result previews to ~200 chars", () => {
+		const longText = "x".repeat(500);
+		const sessionPath = writeSession("long.jsonl", [
+			{
+				type: "tool_execution_start",
+				toolCallId: "tc1",
+				toolName: "bash",
+				args: { command: longText },
+			},
+			{
+				type: "message",
+				message: {
+					role: "toolResult",
+					toolCallId: "tc1",
+					toolName: "bash",
+					isError: false,
+					content: [{ type: "text", text: longText }],
+				},
+			},
+		]);
+		const result = parseAgentSessionForToolCalls(sessionPath);
+		expect(result).toHaveLength(1);
+		expect(result![0]?.argsPreview.length).toBeLessThanOrEqual(201);
+		expect(result![0]?.resultPreview.length).toBeLessThanOrEqual(201);
+	});
+
+	it("returns '(no output)' when content is empty and no stderr", () => {
+		const sessionPath = writeSession("empty-result.jsonl", [
+			{ type: "tool_execution_start", toolCallId: "tc1", toolName: "bash", args: {} },
+			{
+				type: "message",
+				message: {
+					role: "toolResult",
+					toolCallId: "tc1",
+					toolName: "bash",
+					isError: false,
+					content: [],
+				},
+			},
+		]);
+		const result = parseAgentSessionForToolCalls(sessionPath);
+		expect(result![0]?.resultPreview).toBe("(no output)");
+	});
+
+	it("correlates inline toolCall (in assistant message) with toolResult by id", () => {
+		const sessionPath = writeSession("inline-format.jsonl", [
+			{
+				type: "message",
+				message: {
+					role: "assistant",
+					content: [
+						{ type: "thinking", thinking: "fetch the date" },
+						{
+							type: "toolCall",
+							id: "call_abc123",
+							name: "bash",
+							arguments: { command: "date +%Y-%m-%d", _i: "get date" },
+						},
+					],
+				},
+			},
+			{
+				type: "message",
+				message: {
+					role: "toolResult",
+					toolCallId: "call_abc123",
+					toolName: "bash",
+					isError: false,
+					content: [{ type: "text", text: "2026-07-07" }],
+				},
+			},
+		]);
+		const result = parseAgentSessionForToolCalls(sessionPath);
+		expect(result).toHaveLength(1);
+		expect(result![0]?.toolName).toBe("bash");
+		expect(result![0]?.argsPreview).toContain("date");
+		expect(result![0]?.resultPreview).toBe("2026-07-07");
+		expect(result![0]?.isError).toBe(false);
+	});
+
+	it("handles a session that mixes legacy and inline tool-call formats", () => {
+		const sessionPath = writeSession("mixed-format.jsonl", [
+			{ type: "tool_execution_start", toolCallId: "tc_legacy", toolName: "read", args: { path: "/etc/hosts" } },
+			{
+				type: "message",
+				message: {
+					role: "toolResult",
+					toolCallId: "tc_legacy",
+					toolName: "read",
+					isError: false,
+					content: [{ type: "text", text: "127.0.0.1 localhost" }],
+				},
+			},
+			{
+				type: "message",
+				message: {
+					role: "assistant",
+					content: [
+						{
+							type: "toolCall",
+							id: "call_inline",
+							name: "bash",
+							arguments: { command: "whoami" },
+						},
+					],
+				},
+			},
+			{
+				type: "message",
+				message: {
+					role: "toolResult",
+					toolCallId: "call_inline",
+					toolName: "bash",
+					isError: false,
+					content: [{ type: "text", text: "root" }],
+				},
+			},
+		]);
+		const result = parseAgentSessionForToolCalls(sessionPath);
+		expect(result).toHaveLength(2);
+		expect(result!.map(r => r.toolName).sort()).toEqual(["bash", "read"]);
+	});
+
+	it("preserves [ERROR] tagging for inline-format failures", () => {
+		const sessionPath = writeSession("inline-error.jsonl", [
+			{
+				type: "message",
+				message: {
+					role: "assistant",
+					content: [
+						{
+							type: "toolCall",
+							id: "call_fail",
+							name: "bash",
+							arguments: { command: "false" },
+						},
+					],
+				},
+			},
+			{
+				type: "message",
+				message: {
+					role: "toolResult",
+					toolCallId: "call_fail",
+					toolName: "bash",
+					isError: true,
+					content: [{ type: "text", text: "command failed" }],
+					details: { stderr: "exit 1" },
+				},
+			},
+		]);
+		const result = parseAgentSessionForToolCalls(sessionPath);
+		expect(result).toHaveLength(1);
+		expect(result![0]?.isError).toBe(true);
+		expect(formatToolCallSummary(result![0]!)).toContain("[ERROR]");
+	});
+});
+
+describe("formatToolCallSummary", () => {
+	it("formats a successful call with tool name, args, and result", () => {
+		const s: ToolCallSummary = {
+			toolName: "read",
+			argsPreview: '{"path":"/etc/hosts"}',
+			resultPreview: "127.0.0.1 localhost",
+			isError: false,
+			ts: 1000,
+		};
+		const out = formatToolCallSummary(s);
+		expect(out).toContain("[tool: read]");
+		expect(out).toContain('{"path":"/etc/hosts"}');
+		expect(out).toContain("127.0.0.1 localhost");
+		expect(out).not.toContain("[ERROR]");
+	});
+
+	it("appends [ERROR] tag for failed calls", () => {
+		const s: ToolCallSummary = {
+			toolName: "bash",
+			argsPreview: '{"command":"false"}',
+			resultPreview: "exit 1",
+			isError: true,
+			ts: 2000,
+		};
+		const out = formatToolCallSummary(s);
+		expect(out).toContain("[ERROR]");
 	});
 });
