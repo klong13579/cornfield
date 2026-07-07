@@ -12,8 +12,8 @@
  *  - rejectAll cleans up both timers
  */
 import { describe, expect, test } from "bun:test";
-import { PromptQueue } from "../src/prompt-queue";
 import type { AgentEvent, RpcTransport, RpcTransportEvent } from "../src/agent-transport";
+import { PromptQueue } from "../src/prompt-queue";
 
 class FakeTransport implements Pick<RpcTransport, "sendFrame"> {
 	frames: Array<{ type: string; payload: Record<string, unknown> }> = [];
