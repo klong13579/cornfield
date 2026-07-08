@@ -196,6 +196,19 @@ Prompt selection:
 - split-turn second pass: `compaction-turn-prefix.md`
 - short UI summary: `compaction-short-summary.md`
 
+#### Update-prompt design (REPLACE not append)
+
+`compaction-update-summary.md` is the prompt used when a prior summary already exists. It is **REPLACE-oriented**, not preserve-and-append:
+
+- Output **MUST** be a single coherent narrative that replaces the prior summary, not a concatenation of new and old.
+- Output length **MUST** stay in the **6,000–8,000 character** band on every compaction. Lengths that grow across compactions (e.g. 6K → 15K → 25K) defeat the purpose of compaction.
+- The current Goal is preserved (or replaced if it has shifted). Unresolved errors, pending user questions, and pending next steps are always preserved.
+- Older completed sub-tasks, superseded decisions, and resolved errors are dropped first when length forces compression.
+
+The system prompt `summarization-system.md` applies the same 6,000–8,000 character cap to both initial and update paths, and explicitly forbids verbatim preservation / duplication of the prior summary.
+
+Regression coverage: `packages/coding-agent/test/compaction-update-prompt.test.ts` asserts the update prompt contains the REPLACE directive, the length cap, and drop guidance; and that `generateSummary` passes the prior summary in `<previous-summary>` tags to the LLM.
+
 Remote summarization modes:
 
 - If `compaction.remoteEndpoint` is set and remote compaction is enabled, local summary generation POSTs:
