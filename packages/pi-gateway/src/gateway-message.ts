@@ -16,6 +16,7 @@ import type { CronLifecycle } from "./gateway-cron-lifecycle";
 import type { ModelSwitch } from "./gateway-model-switch";
 import type { NewSessionHandler } from "./gateway-new-session";
 import type { ResponseHandler } from "./gateway-response";
+import type { SkillCommand } from "./gateway-skills";
 import { createCronTaskFromMessage } from "./scheduler/from-message";
 import type { SessionManager } from "./session-manager";
 import type { SQLiteSessionStore } from "./session-store";
@@ -34,6 +35,7 @@ export interface MessageGatewayDeps {
 	modelSwitch: ModelSwitch;
 	newSessionHandler: NewSessionHandler;
 	responseHandler: ResponseHandler;
+	skillCommand: SkillCommand;
 	extractMessageText(msg: InboundMessage): string;
 }
 
@@ -66,6 +68,7 @@ export class MessageHandler {
 			if (await this.#deps.responseHandler.handleAbortMessage(msg, accountId)) return;
 			if (await this.#deps.modelSwitch.handleModelCommand(msg, accountId)) return;
 			if (await this.#deps.newSessionHandler.handle(msg, accountId)) return;
+			if (await this.#deps.skillCommand.handle(msg, accountId)) return;
 			// Natural-language model switch patterns (e.g. "切换模型到 X") are NOT intercepted here;
 			// they fall through to the agent so the LLM can call the `switch_model` tool, fuzzy-match
 			// the user's request, and confirm the switch in the assistant reply.
@@ -129,6 +132,13 @@ export class MessageHandler {
 			}
 
 			const channel = this.#deps.registry.get(`${msg.channelId}${msg.accountId ? `:${msg.accountId}` : ""}`);
+
+			// If the user just picked a skill via the IM picker, prepend
+			// the skill's content to their message so the agent sees it
+			// as system context for this turn. The pending entry is
+			// one-shot — consumed here, not carried to the next message.
+			await this.#deps.skillCommand.applyPendingSkillContext(msg, accountId, msg.conversationId);
+
 			const usedCard = await this.#deps.responseHandler.tryStreamAgentResponse(
 				msg,
 				session,

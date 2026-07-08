@@ -82,6 +82,10 @@ export interface DingTalkCardActionEvent {
 	/** User that clicked. Useful for audit / authorization. */
 	userId: string;
 	corpId: string;
+	/** The channel id the card belongs to (always "dingtalk" today, but
+	 *  included so downstream handlers can route replies through the
+	 *  correct channel registry entry). */
+	channelId: string;
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -2402,6 +2406,7 @@ export class DingTalkChannel extends BaseChannel {
 			params: cpd.params ?? {},
 			userId: body.userId ?? "",
 			corpId: body.corpId ?? "",
+			channelId: this.id,
 		};
 		try {
 			await this.#cardActionHandler(event);

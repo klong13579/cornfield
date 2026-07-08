@@ -24,6 +24,7 @@ import { createBridgeStatusToolDefinitions } from "./bridge-status-tool";
 import { DingTalkChannel } from "./channels/dingtalk";
 import { ChannelRegistry } from "./channels/registry";
 import { getDataDir, getDingTalkConfig, getEnabledChannels } from "./config";
+import { resolveDisabledExtensions } from "./config-settings";
 import { defaultCrashLog } from "./crash-log";
 import { createDingtalkAttachmentToolDefinitions } from "./dingtalk-attachment-tool";
 import { CronLifecycle } from "./gateway-cron-lifecycle";
@@ -246,6 +247,8 @@ export class Gateway {
 	#testServer: { stop: () => void; port: number } | null = null;
 	#skillCache: SkillCache | null = null;
 	#skillCommand: SkillCommand | null = null;
+	/** Per-account cached disabledExtensions list (read once per account, then memoized). */
+	#disabledExtCache = new Map<string, string[]>();
 
 	constructor(
 		config: GatewayConfig,
@@ -272,8 +275,11 @@ export class Gateway {
 
 		// Skill cache resolves the per-account cwd (= agentDir) so the
 		// picker shows the same project-level skills the agent will see.
+		// `resolveDisabledExtensions` reads user + project config so the
+		// picker's skill list matches the agent's runtime disabled list.
 		this.#skillCache = new SkillCache({
 			resolveCwd: accountId => this.#accountAgentDirs.get(accountId) ?? process.cwd(),
+			resolveDisabledExtensions: accountId => this.#loadDisabledExtensions(accountId),
 		});
 
 		// Sub-modules are created in dependency order to avoid forward-reference
@@ -283,16 +289,10 @@ export class Gateway {
 			registry: this.#registry,
 			sessionManager: this.#sessionManager,
 			actionRegistry: this.#actionRegistry,
-			onSkillCardAction: async (accountId, conversationId, userId, skillName, channelId) => {
-				await this.#skillCommand?.handleCardAction(accountId, conversationId, userId, skillName, channelId);
-			},
 		});
 
 		this.#skillCommand = new SkillCommand({
 			skillCache: this.#skillCache,
-			actionRegistry: this.#actionRegistry,
-			registry: this.#registry,
-			resolvePickerChannel: accountId => this.#registry.get(`dingtalk:${accountId}`) as DingTalkChannel | undefined,
 			sendAgentResponse: (msg, text) => this.#responseHandler.sendAgentResponse(msg, text),
 			extractMessageText: msg => {
 				const c = msg.content;
@@ -510,6 +510,23 @@ export class Gateway {
 	}
 
 	/**
+	 * Resolve the per-account `disabledExtensions` list by reading user-level
+	 * + project-level config for the account's agentDir. Cached in
+	 * `#disabledExtCache` so a session of `/skill` lookups doesn't re-read
+	 * yaml on every call. Drop the entry via `#disabledExtCache.delete(id)`
+	 * when the account is added/removed (we already do that).
+	 */
+	#loadDisabledExtensions(accountId: string): Promise<string[]> {
+		const cached = this.#disabledExtCache.get(accountId);
+		if (cached) return Promise.resolve(cached);
+		const agentDir = this.#accountAgentDirs.get(accountId) ?? process.cwd();
+		return resolveDisabledExtensions(agentDir).then(exts => {
+			this.#disabledExtCache.set(accountId, exts);
+			return exts;
+		});
+	}
+
+	/**
 	 * Register DingTalk channel(s). In multi-account mode, each account gets
 	 * its own DingTalkChannel instance and account-specific AgentBridge.
 	 */
@@ -602,6 +619,9 @@ export class Gateway {
 
 		const agentDir = resolveAgentDir(accountId, account.agentDir);
 		this.#accountAgentDirs.set(accountId, agentDir);
+		// New account → drop any stale disabledExt + skill caches for it.
+		this.#disabledExtCache.delete(accountId);
+		this.#skillCache?.invalidate(accountId);
 		try {
 			await ensureAgentDir(agentDir);
 		} catch (err) {
@@ -669,6 +689,8 @@ export class Gateway {
 		}
 		this.#accountBridges.delete(accountId);
 		this.#accountAgentDirs.delete(accountId);
+		this.#disabledExtCache.delete(accountId);
+		this.#skillCache?.invalidate(accountId);
 		logger.debug("Removed DingTalk account", { accountId });
 	}
 
