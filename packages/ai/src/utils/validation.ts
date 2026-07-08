@@ -640,6 +640,31 @@ function coerceArgsFromErrors(
 
 		// Get the current value at the error location
 		const currentValue = getValueAtPointer(nextArgs, instancePath);
+
+		// Object-wrapper coercion: when the schema expects a string and the LLM
+		// sent an object like {task: "..."} (commonly happens with todo_write
+		// `items` where the model wraps each task content in {task: "..."}),
+		// extract the string field so validation passes. This is the second
+		// half of the LLM-shape error family that preParseJsonStrings catches
+		// for the "stringified-JSON" case — here the LLM didn't stringify,
+		// it just wrapped the string in a single-key object.
+		if (
+			expectedTypes.includes("string") &&
+			typeof currentValue === "object" &&
+			currentValue !== null &&
+			!Array.isArray(currentValue)
+		) {
+			const extracted = extractStringFromWrapperObject(currentValue as Record<string, unknown>);
+			if (extracted !== undefined) {
+				if (!changed) {
+					nextArgs = structuredCloneJSON(nextArgs);
+					changed = true;
+				}
+				nextArgs = setValueAtPointer(nextArgs, instancePath, extracted);
+				continue;
+			}
+		}
+
 		if (typeof currentValue !== "string") continue;
 
 		// Try to parse the string as JSON
@@ -709,6 +734,34 @@ const ajv = new Ajv({
 	logger: false,
 });
 addFormats(ajv);
+
+/**
+ * LLM mistake pattern: when the schema expects a flat `string[]`, the model
+ * sometimes sends an array of single-key objects like
+ * `[{task: "..."}, {task: "..."}]` instead of `["...", "..."]`. The most common
+ * observed case is todo_write `items` (the model treats each task content as
+ * a structured field), but the same shape recurs for any string-typed list.
+ *
+ * Heuristic: prefer well-known content field names in this order —
+ *   task > text > content > name > value > description > label
+ * If none of those are present, fall back to a single non-empty string field
+ * (catches `{foo: "bar"}` with one string). Returns `undefined` if no
+ * extractable string exists, so AJV will still report the original error.
+ */
+const STRING_WRAPPER_PREFERRED_KEYS = ["task", "text", "content", "name", "value", "description", "label"] as const;
+
+function extractStringFromWrapperObject(obj: Record<string, unknown>): string | undefined {
+	for (const key of STRING_WRAPPER_PREFERRED_KEYS) {
+		const v = obj[key];
+		if (typeof v === "string" && v.length > 0) return v;
+	}
+	const stringFields = Object.entries(obj).filter(([, v]) => typeof v === "string" && v.length > 0);
+	if (stringFields.length === 1) {
+		const candidate = stringFields[0]?.[1];
+		if (typeof candidate === "string") return candidate;
+	}
+	return undefined;
+}
 
 // Cache compiled validators by schema object identity to avoid
 // re-compiling the same tool schema on every call.

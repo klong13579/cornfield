@@ -684,6 +684,268 @@ describe("Tool argument coercion", () => {
 	});
 });
 
+describe("Tool argument coercion: object-wrapper into string[]", () => {
+	// Regression: LLM shape error observed 2026-07-08. The model wrapped each
+	// task content in `{task: "..."}` instead of passing a flat string array:
+	//   items: [{task: "Delete prompt-queue-rolling hard cap test", item: {...}}, ...]
+	// instead of
+	//   items: ["Delete prompt-queue-rolling hard cap test", ...]
+	// AJV reported `items/0: must be string` and the call failed. The fix
+	// detects wrapper objects and extracts the string content.
+
+	it("extracts `task` field from object-wrapped string array elements", () => {
+		const tool: Tool = {
+			name: "tw1",
+			description: "",
+			parameters: Type.Object({ items: Type.Array(Type.String()) }),
+		};
+		const toolCall: ToolCall = {
+			type: "toolCall",
+			id: "call-ow-1",
+			name: "tw1",
+			arguments: {
+				items: [
+					{ task: "first task", item: { foo: "bar" } },
+					{ task: "second task", item: { foo: "baz" } },
+				],
+			},
+		};
+		const result = validateToolArguments(tool, toolCall) as { items: string[] };
+		expect(result.items).toEqual(["first task", "second task"]);
+	});
+
+	it("prefers `task` over other common field names", () => {
+		const tool: Tool = {
+			name: "tw2",
+			description: "",
+			parameters: Type.Object({ items: Type.Array(Type.String()) }),
+		};
+		const toolCall: ToolCall = {
+			type: "toolCall",
+			id: "call-ow-2",
+			name: "tw2",
+			arguments: {
+				items: [{ task: "winner", text: "loser", name: "loser", content: "loser" }],
+			},
+		};
+		const result = validateToolArguments(tool, toolCall) as { items: string[] };
+		expect(result.items).toEqual(["winner"]);
+	});
+
+	it("falls back to common content field names in priority order", () => {
+		const tool: Tool = {
+			name: "tw3",
+			description: "",
+			parameters: Type.Object({ items: Type.Array(Type.String()) }),
+		};
+		const cases: Array<{ key: string; expected: string }> = [
+			{ key: "text", expected: "by-text" },
+			{ key: "content", expected: "by-content" },
+			{ key: "name", expected: "by-name" },
+			{ key: "value", expected: "by-value" },
+			{ key: "description", expected: "by-description" },
+			{ key: "label", expected: "by-label" },
+		];
+		for (const c of cases) {
+			const toolCall: ToolCall = {
+				type: "toolCall",
+				id: `call-ow-3-${c.key}`,
+				name: "tw3",
+				arguments: { items: [{ [c.key]: c.expected, noise: "ignored" }] },
+			};
+			const result = validateToolArguments(tool, toolCall) as { items: string[] };
+			expect(result.items).toEqual([c.expected]);
+		}
+	});
+
+	it("falls back to a single non-empty string field when no preferred key is present", () => {
+		const tool: Tool = {
+			name: "tw4",
+			description: "",
+			parameters: Type.Object({ items: Type.Array(Type.String()) }),
+		};
+		const toolCall: ToolCall = {
+			type: "toolCall",
+			id: "call-ow-4",
+			name: "tw4",
+			arguments: { items: [{ bespokeField: "extracted", otherNumber: 42 }] },
+		};
+		const result = validateToolArguments(tool, toolCall) as { items: string[] };
+		expect(result.items).toEqual(["extracted"]);
+	});
+
+	it("does NOT extract when the object has multiple string fields (ambiguous)", () => {
+		const tool: Tool = {
+			name: "tw5",
+			description: "",
+			parameters: Type.Object({ items: Type.Array(Type.String()) }),
+		};
+		const toolCall: ToolCall = {
+			type: "toolCall",
+			id: "call-ow-5",
+			name: "tw5",
+			arguments: { items: [{ foo: "a", bar: "b" }] },
+		};
+		// Two string fields, no preferred key — coercion declines, AJV still fails.
+		expect(() => validateToolArguments(tool, toolCall)).toThrow(/Validation failed/);
+	});
+
+	it("does NOT extract when the object has no string fields at all", () => {
+		const tool: Tool = {
+			name: "tw6",
+			description: "",
+			parameters: Type.Object({ items: Type.Array(Type.String()) }),
+		};
+		const toolCall: ToolCall = {
+			type: "toolCall",
+			id: "call-ow-6",
+			name: "tw6",
+			arguments: { items: [{ count: 42, ok: true }] },
+		};
+		expect(() => validateToolArguments(tool, toolCall)).toThrow(/Validation failed/);
+	});
+
+	it("preserves real string values in the array", () => {
+		const tool: Tool = {
+			name: "tw7",
+			description: "",
+			parameters: Type.Object({ items: Type.Array(Type.String()) }),
+		};
+		const toolCall: ToolCall = {
+			type: "toolCall",
+			id: "call-ow-7",
+			name: "tw7",
+			arguments: { items: ["a", "b", "c"] },
+		};
+		const result = validateToolArguments(tool, toolCall) as { items: string[] };
+		expect(result.items).toEqual(["a", "b", "c"]);
+	});
+
+	it("handles mixed strings and object-wrapped elements", () => {
+		const tool: Tool = {
+			name: "tw8",
+			description: "",
+			parameters: Type.Object({ items: Type.Array(Type.String()) }),
+		};
+		const toolCall: ToolCall = {
+			type: "toolCall",
+			id: "call-ow-8",
+			name: "tw8",
+			arguments: { items: ["plain", { task: "wrapped" }, "another plain"] },
+		};
+		const result = validateToolArguments(tool, toolCall) as { items: string[] };
+		expect(result.items).toEqual(["plain", "wrapped", "another plain"]);
+	});
+
+	it("recovers deeply nested ops[].list[].items[] (the actual todo_write shape)", () => {
+		const tool: Tool = {
+			name: "todo_write",
+			description: "",
+			parameters: Type.Object({
+				ops: Type.Array(
+					Type.Object({
+						op: Type.String(),
+						list: Type.Optional(
+							Type.Array(
+								Type.Object({
+									phase: Type.String(),
+									items: Type.Array(Type.String()),
+								}),
+							),
+						),
+					}),
+				),
+			}),
+		};
+		// This is the exact shape that failed on 2026-07-08.
+		const toolCall: ToolCall = {
+			type: "toolCall",
+			id: "call-ow-9",
+			name: "todo_write",
+			arguments: {
+				ops: [
+					{
+						op: "init",
+						list: [
+							{
+								phase: "Test cleanup",
+								items: [
+									{ task: "Delete prompt-queue-rolling hard cap test" },
+									{ task: "Update scheduler tests referencing hard cap" },
+									{ task: "Update config schema/doctor test fixtures" },
+								],
+							},
+							{
+								phase: "Verification",
+								items: [{ task: "Type check" }, { task: "Run gateway test suite" }, { task: "Commit" }],
+							},
+						],
+					},
+				],
+			},
+		};
+		const result = validateToolArguments(tool, toolCall) as {
+			ops: Array<{
+				op: string;
+				list: Array<{ phase: string; items: string[] }>;
+			}>;
+		};
+		expect(result.ops[0]?.list[0]?.items).toEqual([
+			"Delete prompt-queue-rolling hard cap test",
+			"Update scheduler tests referencing hard cap",
+			"Update config schema/doctor test fixtures",
+		]);
+		expect(result.ops[0]?.list[1]?.items).toEqual(["Type check", "Run gateway test suite", "Commit"]);
+	});
+
+	it("does NOT touch elements in object[] arrays (no false positive)", () => {
+		const tool: Tool = {
+			name: "tw10",
+			description: "",
+			parameters: Type.Object({
+				records: Type.Array(
+					Type.Object({
+						id: Type.String(),
+						name: Type.Optional(Type.String()),
+					}),
+				),
+			}),
+		};
+		// records: [{id: "a", name: "alpha"}] — `name` is a string field on the
+		// object schema. The object-wrapper coercion must NOT promote this
+		// into a string; the schema is Type.Array(Type.Object(...)), not string[].
+		const toolCall: ToolCall = {
+			type: "toolCall",
+			id: "call-ow-10",
+			name: "tw10",
+			arguments: { records: [{ id: "a", name: "alpha" }] },
+		};
+		const result = validateToolArguments(tool, toolCall) as {
+			records: Array<{ id: string; name?: string }>;
+		};
+		expect(result.records).toEqual([{ id: "a", name: "alpha" }]);
+	});
+
+	it("does NOT touch a top-level string field that happens to be an object", () => {
+		// Schema says the field is a string. If the LLM sent an object as the
+		// whole field value (not inside an array), the wrapper heuristic would
+		// also apply. Verify that the same extract works.
+		const tool: Tool = {
+			name: "tw11",
+			description: "",
+			parameters: Type.Object({ label: Type.String() }),
+		};
+		const toolCall: ToolCall = {
+			type: "toolCall",
+			id: "call-ow-11",
+			name: "tw11",
+			arguments: { label: { task: "extracted label" } },
+		};
+		const result = validateToolArguments(tool, toolCall) as { label: string };
+		expect(result.label).toBe("extracted label");
+	});
+});
+
 describe("Tool argument validation: empty-args-with-intent hint", () => {
 	const editTool: Tool = {
 		name: "edit",
