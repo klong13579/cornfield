@@ -21,6 +21,24 @@ import { type ApplyPatchParams, applyPatchSchema, expandApplyPatchToEntries } fr
 import applyPatchGrammar from "./modes/apply-patch.lark" with { type: "text" };
 import { type AtomParams, atomEditParamsSchema, executeAtomSingle } from "./modes/atom";
 import atomGrammar from "./modes/atom.lark" with { type: "text" };
+
+/**
+ * Tool-call integrity contract prepended to every edit-mode description.
+ *
+ * LLMs occasionally emit edit tool calls with only an `_i` intent field and
+ * no actual arguments (e.g. `{"_i": "Update picker card"}`), which fails
+ * validation with "path: must have required property". This preamble makes
+ * the required-fields contract explicit and visible at the top of the
+ * tool description rather than relying on the LLM to infer it from the
+ * schema.
+ */
+const EDIT_TOOL_CONTRACT =
+	"**REQUIRED FIELDS**: Every `edit` tool call MUST include all required arguments " +
+	"for the current mode (e.g. `path` + `edits` in replace/patch mode). " +
+	"The `_i` field is OPTIONAL metadata about your intent — it does NOT replace " +
+	"required fields. A tool call with only `_i` and missing required fields will fail validation. " +
+	"Re-emit the call with the full argument object, not just intent.\n\n" +
+	"Example: {\"path\": \"src/foo.ts\", \"edits\": [{\"old_text\": \"a\", \"new_text\": \"b\"}]}\n\n";
 import {
 	executeHashlineSingle,
 	HashlineMismatchError,
@@ -277,7 +295,7 @@ export class EditTool implements AgentTool<TInput> {
 	}
 
 	get description(): string {
-		return this.#getModeDefinition().description(this.session);
+		return EDIT_TOOL_CONTRACT + this.#getModeDefinition().description(this.session);
 	}
 
 	get parameters(): TInput {
