@@ -448,6 +448,11 @@ export class AgentBridge {
 		return this.#transport.isReady;
 	}
 
+	/** True when a prompt is currently being processed by the OMP subprocess. */
+	get isBusy(): boolean {
+		return this.#queue.hasPendingPrompts();
+	}
+
 	getSnapshot(): AgentBridgeSnapshot {
 		const busy = this.#queue.hasPendingPrompts();
 		const state: AgentBridgeLifecycleState = this.#getLifecycleState(busy);
@@ -863,6 +868,36 @@ export class AgentBridge {
 			},
 			{ queueTimeoutMs: options?.queueTimeoutMs },
 		);
+	}
+
+	/**
+	 * Send a follow-up message to an already-running OMP session.
+	 * The message is queued inside the OMP subprocess and processed
+	 * as a new turn after the current prompt completes. Events from
+	 * the follow-up turn flow through the same transport connection
+	 * to the existing streaming handlers.
+	 *
+	 * Call this instead of a fresh `forwardWithMeta` when a second
+	 * user message arrives while the bridge is busy. No new card is
+	 * created — the follow-up reply appears in the existing card.
+	 */
+	async followUp(msg: InboundMessage): Promise<void> {
+		const { text, images } = await this.#extractor.extract(msg);
+		if (!text.trim()) {
+			logger.debug("[AgentBridge] Empty follow-up message, skipping");
+			return;
+		}
+
+		logger.info("[AgentBridge] Sending follow-up message", {
+			accountId: this.#accountId,
+			conversationId: msg.conversationId,
+			preview: text.slice(0, 80),
+		});
+
+		this.#transport.sendFrame("follow_up", {
+			message: text,
+			...(images && images.length > 0 ? { images } : {}),
+		});
 	}
 
 	resetActiveSession(): void {

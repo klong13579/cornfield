@@ -6,11 +6,11 @@
  * tryStreamAgentResponse, handleCardAction, handleAbortMessage, etc.
  */
 import { isEnoent, logger } from "@oh-my-pi/pi-utils";
+import type { ActionRegistry } from "./action-registry";
 import { AgentBridge } from "./agent-bridge";
 import type { DingTalkCardActionEvent, DingTalkChannel } from "./channels/dingtalk";
-import { ChannelRegistry } from "./channels/registry";
-import { ActionRegistry } from "./action-registry";
-import { SessionManager } from "./session-manager";
+import type { ChannelRegistry } from "./channels/registry";
+import type { SessionManager } from "./session-manager";
 import type {
 	AgentResponseMeta,
 	Channel,
@@ -173,7 +173,14 @@ export class ResponseHandler {
 				}),
 		};
 
-		const submit = (handlers?: ForwardStreamHandlers): Promise<AgentResponseMeta | null> =>
+		// If the bridge is already processing another message, send as
+	// followUp instead of creating a new card. The running session's
+	// streaming handlers receive the follow-up turn's events.
+	if (await sessionManager.tryDispatchAsFollowUp(msg, session)) {
+		return true;
+	}
+
+	const submit = (handlers?: ForwardStreamHandlers): Promise<AgentResponseMeta | null> =>
 			sessionManager.enqueueWithMeta(msg, session, handlers);
 
 		try {
@@ -224,34 +231,34 @@ export class ResponseHandler {
 
 		const isStop = event.params.type === "stop" || event.actionIds.includes("btn_stop");
 		if (isStop) {
-			logger.warn("[Gateway] card stop action — aborting bridge", {
-				cardInstanceId: event.cardInstanceId,
-				accountId: info.accountId,
-				sessionId: info.sessionId,
-				toolName: info.toolName,
-				clickedBy: event.userId,
-			});
-			if (!this.#deps.sessionManager) {
-				logger.warn("[Gateway] sessionManager not initialized; cannot abort");
-				return;
-			}
-			try {
-				const aborted = await this.#deps.sessionManager.abort(info.accountId);
-				if (!aborted) {
-					logger.debug("[Gateway] abort() returned false (no active prompt)", {
-						accountId: info.accountId,
-					});
-				}
-			} catch (err) {
-				logger.error("[Gateway] bridge abort failed", {
-					accountId: info.accountId,
-					error: err instanceof Error ? err.message : String(err),
-				});
-			}
+		logger.warn("[Gateway] card stop action — aborting bridge", {
+			cardInstanceId: event.cardInstanceId,
+			accountId: info.accountId,
+			sessionId: info.sessionId,
+			toolName: info.toolName,
+			clickedBy: event.userId,
+		});
+		if (!this.#deps.sessionManager) {
+			logger.warn("[Gateway] sessionManager not initialized; cannot abort");
 			return;
 		}
+		try {
+			const aborted = await this.#deps.sessionManager.abort(info.accountId);
+			if (!aborted) {
+				logger.debug("[Gateway] abort() returned false (no active prompt)", {
+					accountId: info.accountId,
+				});
+			}
+		} catch (err) {
+			logger.error("[Gateway] bridge abort failed", {
+				accountId: info.accountId,
+				error: err instanceof Error ? err.message : String(err),
+			});
+		}
+		return;
+	}
 
-		logger.warn("[Gateway] unhandled card action type", {
+	logger.warn("[Gateway] unhandled card action type", {
 			actionType: event.params.type,
 			cardInstanceId: event.cardInstanceId,
 			actionIds: event.actionIds,

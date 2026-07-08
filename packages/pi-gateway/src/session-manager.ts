@@ -56,6 +56,28 @@ export class SessionManager {
 		this.#maxQueueDepth = options.maxQueueDepth ?? DEFAULT_MAX_QUEUE_DEPTH;
 	}
 
+	/**
+	 * When the bridge is busy processing another message, send this
+	 * message as a followUp to the running OMP session instead of
+	 * queueing. Returns true if the followUp was sent; false if the
+	 * bridge is idle (caller should proceed with normal enqueue).
+	 *
+	 * The followUp is processed as a new turn after the current prompt
+	 * completes. Events flow through the same transport to the existing
+	 * card — no new card is created.
+	 */
+	async tryDispatchAsFollowUp(msg: InboundMessage, session: SessionRecord): Promise<boolean> {
+		const accountId = session.accountId;
+		const state = this.#getQueue(accountId);
+		if (state.depth === 0) return false;
+
+		const bridge = this.#resolveBridge(accountId);
+		if (!bridge.isRunning) return false;
+
+		await bridge.followUp(msg);
+		return true;
+	}
+
 	async enqueue(msg: InboundMessage, session: SessionRecord): Promise<string | null> {
 		const meta = await this.enqueueWithMeta(msg, session);
 		if (meta === null) return QUEUE_FULL_MESSAGE;
