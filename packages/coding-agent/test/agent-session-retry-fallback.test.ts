@@ -654,6 +654,9 @@ describe("AgentSession retry fallback", () => {
 		const settings = Settings.isolated({
 			"compaction.enabled": false,
 			"retry.baseDelayMs": 5,
+			// Floor below the 200ms retry-after-ms hint in createFallbackAgent so
+			// the test exercises the natural restore-after-cooldown path, not the floor.
+			"retry.fallbackCooldownMs": 100,
 			"retry.fallbackChains": {
 				default: [`${fallbackModel.provider}/${fallbackModel.id}`],
 			},
@@ -713,6 +716,9 @@ describe("AgentSession retry fallback", () => {
 		const settings = Settings.isolated({
 			"compaction.enabled": false,
 			"retry.baseDelayMs": 5,
+			// Floor below the 200ms retry-after-ms hint in createFallbackAgent so
+			// the test exercises the natural restore-after-cooldown path, not the floor.
+			"retry.fallbackCooldownMs": 100,
 			"retry.fallbackChains": {
 				default: [`${fallbackModel.provider}/${fallbackModel.id}`],
 			},

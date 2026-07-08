@@ -565,6 +565,26 @@ export const SETTINGS_SCHEMA = {
 	},
 
 	"retry.baseDelayMs": { type: "number", default: 2000 },
+	"retry.fallbackCooldownMs": {
+		type: "number",
+		default: 60000,
+		ui: {
+			tab: "model",
+			label: "Fallback Cooldown Floor (ms)",
+			description: "Minimum cooldown applied to a failed model in the fallback chain. The cooldown from the error (retry-after-ms or rate-limit reason) is floored at this value. Default 60000.",
+			submenu: true,
+		},
+	},
+	"retry.fallbackFlappingWindowMs": {
+		type: "number",
+		default: 60000,
+		ui: {
+			tab: "model",
+			label: "Fallback Flapping Window (ms)",
+			description: "If the same model fails again within this window, its cooldown is escalated (× 5, floored at 5min) to break primary→fallback→restore→primary loops. Default 60000.",
+			submenu: true,
+		},
+	},
 	"retry.fallbackChains": { type: "record", default: {} as Record<string, string[]> },
 	"retry.fallbackRevertPolicy": {
 		type: "enum",

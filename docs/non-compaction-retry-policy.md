@@ -39,11 +39,44 @@ Current retryable inputs are regex/string-classified:
 - transient transport/envelope failures, including Anthropic stream-envelope failures before `message_start`
 - overloaded/provider-returned-error wording
 - rate limit / usage limit / too many requests
-- HTTP-like server classes: 429, 500, 502, 503, 504
+- HTTP-like server classes: 403, 429, 500, 502, 503, 504
 - service unavailable / server/internal error
 - network/connection/socket failures, refused/closed connections, upstream connect/reset-before-headers, socket hang up, timeout/timed out, fetch failed, terminated, retry delay wording, and unexpected socket close messages
 
 This is string-pattern classification, not typed provider error codes.
+
+### 403 (access denied) handling
+
+403 is included in the retryable list so that a model the account cannot use (e.g. `403 Model access denied`) does not leave the user stuck on a broken model. When a 403 enters the retry path:
+
+- `parseRateLimitReason` classifies it as `ACCESS_DENIED`
+- `calculateRateLimitBackoffMs("ACCESS_DENIED")` returns a 1-hour cooldown
+- The selector is suppressed for 1h, so the restore cycle cannot re-pick the same 403 model within the session
+
+Note: 401 is intentionally not in the retryable list. 401 is "token expired/invalid" and the current session cannot fix that mid-run; re-entering the retry path with the same bad token would just thrash.
+
+### Cooldown escalation (flapping guard)
+
+A plain cooldown from `parseRateLimitReason` (5min for UNKNOWN, 45-75s for MODEL_CAPACITY, 1h for ACCESS_DENIED) is sufficient when errors are spaced apart. When the **same selector** fails repeatedly within a 60s window, the cooldown is too short — the next `#maybeRestoreRetryFallbackPrimary()` cycle picks the same selector and triggers another failure (5 model changes in 5s observed in production session `042253__37002e77`).
+
+`#noteRetryFallbackCooldown` keeps a `Map<selector, lastFailureTimestamp>` and calls `computeRetryFallbackCooldown(...)` from [`../src/session/retry-fallback-cooldown.ts`](../packages/coding-agent/src/session/retry-fallback-cooldown.ts):
+
+- First failure of a selector → use the plain cooldown from `parseRateLimitReason`
+- Repeat failure within the flapping window → `max(baseCooldownMs * 5, 5 * 60 * 1000)`. A 5s base becomes a 5min floor; a 1h ACCESS_DENIED becomes 5h
+- Repeat failure outside the flapping window → treat as cold cache, use the plain cooldown
+
+This breaks the primary → fallback → restore → primary loop without affecting cold-cache behavior.
+
+### User-configurable knobs (settings schema)
+
+Both behaviors are tunable via the `retry` settings group:
+
+| Setting | Default | Effect |
+|---|---|---|
+| `retry.fallbackCooldownMs` | 60000 | Hard floor applied to the final cooldown. The floor is applied **after** the flapping escalation, so a high user floor (e.g. 10 min) survives a flapping episode that would otherwise produce only 5 min. Prevents thrashing when upstream signals a very short `retry-after-ms` (e.g. 200 ms). |
+| `retry.fallbackFlappingWindowMs` | 60000 | Time window for flapping detection. If the same selector fails again within this window, its cooldown is escalated (× 5, floored at 5 min). Set higher to be more permissive; lower to escalate sooner. |
+
+Both default to 60s and are exposed in the model settings tab. `0` or negative values disable the corresponding behavior.
 
 ## Retry lifecycle and state transitions
 
