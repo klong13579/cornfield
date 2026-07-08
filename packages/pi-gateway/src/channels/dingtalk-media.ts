@@ -21,8 +21,14 @@ import { getAccessToken } from "./dingtalk-card";
 const DINGTALK_OAPI = "https://oapi.dingtalk.com";
 const DINGTALK_API = "https://api.dingtalk.com";
 
-/** Maximum inbound attachment size (20 MB). Matches DingTalk's upload limit. */
-const MAX_INBOUND_ATTACHMENT_BYTES = 20 * 1024 * 1024;
+/** Maximum inbound attachment size (100 MB).
+ * Aligned with `MAX_VIDEO_DOWNLOAD_BYTES` — the 20 MB figure that used to
+ * live here was a misread of DingTalk's *upload* (sender-side) limit, not a
+ * download (receiver-side) one. 100 MB comfortably holds typical work
+ * attachments (PPTX decks, code review bundles, recorded screen shares) and
+ * matches the video budget. Anything still over the cap is returned to the
+ * bridge as a `status: "too_large"` stub rather than silently dropped. */
+const MAX_INBOUND_ATTACHMENT_BYTES = 100 * 1024 * 1024;
 
 /** Maximum video download size (100 MB). Videos are larger than images/files.
  * and we only need them temporarily for frame extraction before deleting. */
@@ -192,6 +198,107 @@ function decodePdfString(s: string): string {
 		.replaceAll("\\n", "\n")
 		.replaceAll("\\r", "\r")
 		.replaceAll("\\t", "\t");
+}
+
+/**
+ * OOXML text-extraction helpers.
+ *
+ * PPTX is a zip archive whose slide text lives in `ppt/slides/slideN.xml`
+ * as `<a:t>` runs. We shell out to `unzip` (the same approach as
+ * ffmpeg/ffprobe in this file) to avoid dragging in a zip-parse dep.
+ *
+ * If `unzip` is unavailable (e.g. minimal Alpine CI image) or the buffer
+ * isn't a valid zip, the function returns an empty string — the caller
+ * (`prompt-extractor.classifyAttachment`) will fall back to saving the
+ * raw file to disk, where the agent's own bash tool can extract it.
+ */
+const PPTX_SLIDE_RE = /^ppt\/slides\/slide(\d+)\.xml$/i;
+const A_TEXT_RE = /<a:t(?:\s[^>]*)?>([^<]*)<\/a:t>/g;
+
+function decodeXmlEntities(s: string): string {
+	return s
+		.replaceAll("&amp;", "&")
+		.replaceAll("&lt;", "<")
+		.replaceAll("&gt;", ">")
+		.replaceAll("&quot;", '"')
+		.replaceAll("&apos;", "'");
+}
+
+/**
+ * Extract concatenated slide text from a PPTX buffer.
+ *
+ * Returns text in slide order, each slide prefixed with `[Slide N]`.
+ * Returns empty string on any failure (bad zip, missing `unzip`, no
+ * slides, all slides empty) — never throws.
+ */
+export function extractPptxText(buffer: Uint8Array): string {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-pptx-"));
+	const pptxPath = path.join(dir, "inbound.pptx");
+	try {
+		fs.writeFileSync(pptxPath, Buffer.from(buffer));
+
+		// Step 1: list entries. `unzip -Z1` prints one path per line.
+		const listResult = Bun.spawnSync(["unzip", "-Z1", pptxPath], { stdout: "pipe", stderr: "pipe" });
+		if (listResult.exitCode !== 0) {
+			logger.warn("[DingTalk Media] unzip -Z1 failed for PPTX", {
+				exitCode: listResult.exitCode,
+				stderr: listResult.stderr.toString().trim().slice(0, 200),
+			});
+			return "";
+		}
+		const entries = new TextDecoder().decode(listResult.stdout).split("\n");
+		const slideEntries = entries
+			.map(e => e.trim())
+			.filter(e => PPTX_SLIDE_RE.test(e))
+			.sort((a, b) => {
+				const na = Number(a.match(PPTX_SLIDE_RE)?.[1] ?? 0);
+				const nb = Number(b.match(PPTX_SLIDE_RE)?.[1] ?? 0);
+				return na - nb;
+			});
+
+		if (slideEntries.length === 0) {
+			logger.warn("[DingTalk Media] PPTX has no slide entries", { totalEntries: entries.length });
+			return "";
+		}
+
+		// Step 2: extract each slide and pull <a:t> runs.
+		const slideBlocks: string[] = [];
+		for (const entry of slideEntries) {
+			const slideNum = entry.match(PPTX_SLIDE_RE)?.[1] ?? "?";
+			const extractResult = Bun.spawnSync(["unzip", "-p", pptxPath, entry], {
+				stdout: "pipe",
+				stderr: "pipe",
+			});
+			if (extractResult.exitCode !== 0) {
+				logger.warn("[DingTalk Media] unzip -p failed for slide", {
+					entry,
+					exitCode: extractResult.exitCode,
+				});
+				continue;
+			}
+			const xml = new TextDecoder().decode(extractResult.stdout);
+			const runs: string[] = [];
+			for (const m of xml.matchAll(A_TEXT_RE)) {
+				const raw = m[1];
+				if (!raw) continue;
+				const decoded = decodeXmlEntities(raw).trim();
+				if (decoded) runs.push(decoded);
+			}
+			const slideText = runs.join(" ").replace(/\s+/g, " ").trim();
+			if (slideText) slideBlocks.push(`[Slide ${slideNum}]\n${slideText}`);
+		}
+
+		return slideBlocks.join("\n\n");
+	} catch (err) {
+		logger.warn("[DingTalk Media] extractPptxText threw", { error: String(err) });
+		return "";
+	} finally {
+		try {
+			fs.rmSync(dir, { recursive: true, force: true });
+		} catch {
+			/* best effort */
+		}
+	}
 }
 
 /**
@@ -627,32 +734,58 @@ async function downloadOneAttachment(
 		return null;
 	}
 
-	// Size guard
-	if (downloaded.size > MAX_INBOUND_ATTACHMENT_BYTES) {
-		logger.warn("[DingTalk Media] Attachment exceeds size limit, dropping", {
-			size: downloaded.size,
-			limit: MAX_INBOUND_ATTACHMENT_BYTES,
-			filename: downloaded.originalName,
-		});
-		cleanupDownloadedMedia(downloaded);
-		return null;
-	}
-
-	// Read file bytes for MIME sniffing
-	let buffer: Uint8Array;
 	try {
-		buffer = await fs.promises.readFile(downloaded.path);
+		return await makeInboundAttachment(downloaded, kind, filenameOverride);
 	} catch (err) {
-		logger.warn("[DingTalk Media] Failed to read downloaded file", {
+		logger.warn("[DingTalk Media] Failed to build inbound attachment", {
 			path: downloaded.path,
 			error: String(err),
 		});
 		return null;
+	} finally {
+		// Temp file always cleaned up — bytes are now in memory (or the
+		// too_large stub was returned). Previously this only happened on
+		// the too_large path; the success case leaked the temp dir.
+		cleanupDownloadedMedia(downloaded);
 	}
+}
 
-	const mimeType = resolveMimeType(buffer, downloaded.mimeType);
+/**
+ * Build an `InboundAttachment` from a downloaded `DownloadedMedia`.
+ *
+ * Size guard runs first: if the file exceeds `MAX_INBOUND_ATTACHMENT_BYTES`,
+ * the bytes are intentionally NOT read — the function returns a metadata-only
+ * stub with `status: "too_large"` so the bridge can surface the situation
+ * to the agent (filename + size + mime) instead of silently dropping the
+ * attachment. The temp file is the caller's responsibility to clean up.
+ *
+ * Exported so the too-large path is testable without a real download.
+ */
+export async function makeInboundAttachment(
+	downloaded: DownloadedMedia,
+	kind: InboundAttachment["kind"],
+	filenameOverride?: string,
+): Promise<InboundAttachment> {
 	const filename = filenameOverride ?? downloaded.originalName;
 
+	if (downloaded.size > MAX_INBOUND_ATTACHMENT_BYTES) {
+		logger.warn("[DingTalk Media] Attachment exceeds size limit, returning too_large stub", {
+			size: downloaded.size,
+			limit: MAX_INBOUND_ATTACHMENT_BYTES,
+			filename,
+		});
+		return {
+			kind,
+			data: new Uint8Array(0),
+			mimeType: downloaded.mimeType,
+			filename,
+			size: downloaded.size,
+			status: "too_large",
+		};
+	}
+
+	const buffer = new Uint8Array(await fs.promises.readFile(downloaded.path));
+	const mimeType = resolveMimeType(buffer, downloaded.mimeType);
 	return {
 		kind,
 		data: buffer,

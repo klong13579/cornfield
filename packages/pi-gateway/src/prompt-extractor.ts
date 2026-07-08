@@ -16,11 +16,12 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import type { ImageContent } from "@oh-my-pi/pi-ai";
 import { logger } from "@oh-my-pi/pi-utils";
-import { extractPdfText } from "./channels/dingtalk-media";
+import { extractPdfText, extractPptxText } from "./channels/dingtalk-media";
 import type { InboundAttachment, InboundMessage } from "./types";
 
 const VIDEO_EXTENSIONS = [".mp4", ".mov", ".avi", ".mkv", ".webm", ".flv", ".wmv"];
 const PDF_TEXT_LIMIT = 10_000;
+const PPTX_TEXT_LIMIT = 10_000;
 
 function formatBytes(bytes: number): string {
 	if (bytes < 1024) return `${bytes} B`;
@@ -33,6 +34,21 @@ type AttachmentResult = { images: ImageContent[]; texts: string[] };
 
 /** Classify an attachment into inline images or text labels. */
 async function classifyAttachment(att: InboundAttachment, cwd: string): Promise<AttachmentResult> {
+	// Non-ok status: the bytes weren't retained (or download failed). Surface
+	// metadata-only so the agent at least knows what was sent, instead of
+	// pretending nothing arrived. This is the "too_large" / "download_failed"
+	// path added in `makeInboundAttachment` (dingtalk-media.ts).
+	if (att.status === "too_large" || att.status === "download_failed") {
+		const name = att.filename ?? "file";
+		const reason = att.status === "too_large" ? "exceeds inbound size limit, bytes not retained" : "download failed";
+		return {
+			images: [],
+			texts: [
+				`[file: ${name} (${att.mimeType}, ${formatBytes(att.size)}) — ${reason}; ask the user to re-upload a smaller file or paste the relevant text]`,
+			],
+		};
+	}
+
 	if (att.mimeType.startsWith("image/")) {
 		return {
 			images: [
@@ -55,6 +71,25 @@ async function classifyAttachment(att: InboundAttachment, cwd: string): Promise<
 			images: [],
 			texts: [`[PDF: ${name} (${formatBytes(att.size)}) — scanned PDF, no extractable text]`],
 		};
+	}
+	// PPTX (OOXML). Modern PowerPoint files are zip archives of XML; the
+	// slide text lives in `ppt/slides/slideN.xml` as <a:t> runs. We shell
+	// out to `unzip` to extract it — if `unzip` is unavailable or the file
+	// isn't a valid PPTX, the helper returns "" and we fall through to
+	// save-to-disk so the agent can use its own tools to dig in.
+	if (
+		att.mimeType === "application/vnd.openxmlformats-officedocument.presentationml.presentation" ||
+		(att.filename ?? "").toLowerCase().endsWith(".pptx")
+	) {
+		const name = att.filename ?? "slides.pptx";
+		const pptxText = extractPptxText(att.data);
+		if (pptxText) {
+			return {
+				images: [],
+				texts: [`[PPTX: ${name}]\n${pptxText.slice(0, PPTX_TEXT_LIMIT)}`],
+			};
+		}
+		// extraction returned empty — fall through to save-to-disk
 	}
 	const savedPath = await saveAttachmentToDisk(att, cwd);
 	if (savedPath) {

@@ -14,9 +14,8 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { AgentBridge } from "../src/agent-bridge";
-import { DingTalkChannel } from "../src/channels/dingtalk";
-import { sniffMimeFromBytes } from "../src/channels/dingtalk-media";
 import {
+	DingTalkChannel,
 	extractLocalFileAudios,
 	extractLocalFileDocuments,
 	extractLocalFileImages,
@@ -29,6 +28,8 @@ import {
 	stripNonImageMediaDirectives,
 	stripVideoDirectives,
 } from "../src/channels/dingtalk";
+import type { DownloadedMedia } from "../src/channels/dingtalk-media";
+import { extractPptxText, makeInboundAttachment, sniffMimeFromBytes } from "../src/channels/dingtalk-media";
 import type { DingTalkConfig, InboundAttachment, InboundMessage, SessionRecord } from "../src/types";
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -604,9 +605,8 @@ describe("DingTalkChannel.streamCard media routing pipeline", () => {
 		const inbound = makeMediaMessage("analyze", "conv-media-routing-1");
 		const session = makeMediaSession("/tmp/media-routing-1.jsonl", "conv-media-routing-1");
 
-		const submit = (
-			handlers?: Parameters<typeof channel.streamCard>[3],
-		): ReturnType<typeof bridge.forwardWithMeta> => bridge.forwardWithMeta(inbound, session, handlers);
+		const submit = (handlers?: Parameters<typeof channel.streamCard>[3]): ReturnType<typeof bridge.forwardWithMeta> =>
+			bridge.forwardWithMeta(inbound, session, handlers);
 
 		const outbound = await channel.streamCard(
 			inbound,
@@ -749,9 +749,7 @@ describe("sniffMimeFromBytes", () => {
 	});
 
 	test("detects WebP from magic bytes", () => {
-		const webp = new Uint8Array([
-			0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50,
-		]);
+		const webp = new Uint8Array([0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50]);
 		expect(sniffMimeFromBytes(webp)).toBe("image/webp");
 	});
 
@@ -911,10 +909,7 @@ describe("AgentBridge image attachment forwarding", () => {
 				attachments: [makeImageAttachment()],
 			};
 
-			const result = await bridge.forwardWithMeta(
-				msg,
-				makeImagePipelineSession("/tmp/s.jsonl", "conv-img"),
-			);
+			const result = await bridge.forwardWithMeta(msg, makeImagePipelineSession("/tmp/s.jsonl", "conv-img"));
 			expect(result).not.toBeNull();
 
 			const log = await fake.readLog();
@@ -1023,6 +1018,321 @@ describe("AgentBridge image attachment forwarding", () => {
 			expect(log[0].images).toBeNull();
 			expect(log[0].message).toContain("PDF");
 			expect(log[0].message).toContain("report.pdf");
+		} finally {
+			bridge.stop();
+			await fake.cleanup();
+		}
+	});
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// Inbound size guard (makeInboundAttachment)
+//
+// Verifies the post-download size guard added in the gateway incident
+// where a 37 MB PPTX was silently dropped with no surface to the agent.
+// The agent now sees a `status: "too_large"` stub with metadata so it
+// can ask the user to re-upload.
+// ═══════════════════════════════════════════════════════════════════════
+
+describe("makeInboundAttachment", () => {
+	const LIMIT = 100 * 1024 * 1024; // matches MAX_INBOUND_ATTACHMENT_BYTES
+
+	test("returns too_large stub when size exceeds the cap, with empty data and original size", async () => {
+		const fakeFile = await fs.mkdtemp(path.join(os.tmpdir(), "pi-mia-over-"));
+		const filePath = path.join(fakeFile, "inbound-1");
+		await fs.writeFile(filePath, Buffer.from([0x00, 0x01, 0x02]));
+		try {
+			const downloaded: DownloadedMedia = {
+				path: filePath,
+				mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+				originalName: "inbound-1783503568339",
+				size: LIMIT + 1,
+			};
+			const att = await makeInboundAttachment(downloaded, "file", "庄小平-世界模型.pptx");
+			expect(att.status).toBe("too_large");
+			expect(att.kind).toBe("file");
+			expect(att.data.byteLength).toBe(0);
+			expect(att.size).toBe(LIMIT + 1); // reports real platform size, not the truncated size
+			expect(att.filename).toBe("庄小平-世界模型.pptx"); // filenameOverride wins
+			expect(att.mimeType).toBe("application/vnd.openxmlformats-officedocument.presentationml.presentation");
+		} finally {
+			await fs.rm(fakeFile, { recursive: true, force: true });
+		}
+	});
+
+	test("falls back to downloaded.originalName when no filenameOverride is given", async () => {
+		const fakeFile = await fs.mkdtemp(path.join(os.tmpdir(), "pi-mia-over-2-"));
+		const filePath = path.join(fakeFile, "inbound-2");
+		await fs.writeFile(filePath, Buffer.from([0x00]));
+		try {
+			const downloaded: DownloadedMedia = {
+				path: filePath,
+				mimeType: "application/pdf",
+				originalName: "inbound-99",
+				size: LIMIT + 1024,
+			};
+			const att = await makeInboundAttachment(downloaded, "file");
+			expect(att.status).toBe("too_large");
+			expect(att.filename).toBe("inbound-99");
+		} finally {
+			await fs.rm(fakeFile, { recursive: true, force: true });
+		}
+	});
+
+	test("sniffs MIME from magic bytes and returns full attachment for in-range files", async () => {
+		const fakeFile = await fs.mkdtemp(path.join(os.tmpdir(), "pi-mia-ok-"));
+		const filePath = path.join(fakeFile, "inbound-3.png");
+		// Minimal PNG header
+		const pngBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x00]);
+		await fs.writeFile(filePath, pngBytes);
+		try {
+			const downloaded: DownloadedMedia = {
+				path: filePath,
+				mimeType: "application/octet-stream", // platform-declared is untrustworthy
+				originalName: "inbound-3",
+				size: pngBytes.byteLength,
+			};
+			const att = await makeInboundAttachment(downloaded, "image", "diagram.png");
+			expect(att.status).toBeUndefined(); // success: status stays unset / "ok"
+			expect(att.kind).toBe("image");
+			expect(att.data.byteLength).toBe(pngBytes.byteLength);
+			expect(att.mimeType).toBe("image/png"); // magic-byte sniff wins
+			expect(att.filename).toBe("diagram.png");
+			expect(att.size).toBe(pngBytes.byteLength);
+		} finally {
+			await fs.rm(fakeFile, { recursive: true, force: true });
+		}
+	});
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// PPTX text extraction (extractPptxText)
+//
+// PPTX is a zip archive; slide text lives in `ppt/slides/slideN.xml` as
+// <a:t> runs. Uses the system `unzip` binary — if it's missing the
+// helper returns "" and the prompt-extractor falls back to save-to-disk.
+// ═══════════════════════════════════════════════════════════════════════
+
+async function buildTestPptx(slides: Array<{ num: number; texts: string[] }>): Promise<Uint8Array> {
+	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-pptx-fixture-"));
+	try {
+		const slidesDir = path.join(dir, "ppt", "slides");
+		await fs.mkdir(slidesDir, { recursive: true });
+		for (const s of slides) {
+			const runs = s.texts.map(t => `<a:t>${t}</a:t>`).join("");
+			const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+  <p:cSld><p:spTree>${runs}</p:spTree></p:cSld>
+</p:sld>`;
+			await fs.writeFile(path.join(slidesDir, `slide${s.num}.xml`), xml);
+		}
+		// Build the zip with no compression (-0) — keeps the fixture diffable
+		// and avoids pulling in zlib just for test setup.
+		const zipResult = Bun.spawnSync(["zip", "-0", "-r", "test.pptx", "ppt/"], {
+			cwd: dir,
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		if (zipResult.exitCode !== 0) {
+			throw new Error(`zip failed: ${zipResult.stderr.toString()}`);
+		}
+		const bytes = await fs.readFile(path.join(dir, "test.pptx"));
+		return new Uint8Array(bytes);
+	} finally {
+		await fs.rm(dir, { recursive: true, force: true });
+	}
+}
+
+describe("extractPptxText", () => {
+	test("extracts text from each slide in numerical order with [Slide N] prefix", async () => {
+		const bytes = await buildTestPptx([
+			{ num: 1, texts: ["Hello from slide 1"] },
+			{ num: 2, texts: ["Slide 2 content"] },
+			{ num: 3, texts: ["Final slide", "with two runs"] },
+		]);
+		const result = extractPptxText(bytes);
+		expect(result).toContain("[Slide 1]");
+		expect(result).toContain("Hello from slide 1");
+		expect(result).toContain("[Slide 2]");
+		expect(result).toContain("Slide 2 content");
+		expect(result).toContain("[Slide 3]");
+		expect(result).toContain("Final slide with two runs");
+
+		// slides appear in numerical order
+		const idx1 = result.indexOf("[Slide 1]");
+		const idx2 = result.indexOf("[Slide 2]");
+		const idx3 = result.indexOf("[Slide 3]");
+		expect(idx1).toBeLessThan(idx2);
+		expect(idx2).toBeLessThan(idx3);
+	});
+
+	test("decodes XML entities in slide text", async () => {
+		const bytes = await buildTestPptx([{ num: 1, texts: ["A &amp; B &lt; C &gt; D"] }]);
+		const result = extractPptxText(bytes);
+		expect(result).toContain("A & B < C > D");
+		expect(result).not.toContain("&amp;");
+	});
+
+	test("returns empty string for a buffer that is not a valid zip", () => {
+		const notAZip = new Uint8Array([0x00, 0x01, 0x02, 0x03, 0xff, 0xff]);
+		expect(extractPptxText(notAZip)).toBe("");
+	});
+
+	test("returns empty string when zip has no slide entries", async () => {
+		// A valid zip with a single unrelated entry — extractPptxText only
+		// looks at ppt/slides/slideN.xml, so this should yield "".
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-pptx-empty-"));
+		try {
+			await fs.writeFile(path.join(dir, "readme.txt"), "hi");
+			const zipResult = Bun.spawnSync(["zip", "-0", "test.pptx", "readme.txt"], {
+				cwd: dir,
+				stdout: "pipe",
+				stderr: "pipe",
+			});
+			expect(zipResult.exitCode).toBe(0);
+			const bytes = await fs.readFile(path.join(dir, "test.pptx"));
+			expect(extractPptxText(new Uint8Array(bytes))).toBe("");
+		} finally {
+			await fs.rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("skips slides that contain no <a:t> runs", async () => {
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-pptx-mixed-"));
+		try {
+			const slidesDir = path.join(dir, "ppt", "slides");
+			await fs.mkdir(slidesDir, { recursive: true });
+			await fs.writeFile(
+				path.join(slidesDir, "slide1.xml"),
+				`<?xml version="1.0"?><p:sld><a:t>Real text</a:t></p:sld>`,
+			);
+			await fs.writeFile(
+				path.join(slidesDir, "slide2.xml"),
+				`<?xml version="1.0"?><p:sld><!-- decorative slide, no text --></p:sld>`,
+			);
+			const zipResult = Bun.spawnSync(["zip", "-0", "-r", "test.pptx", "ppt/"], {
+				cwd: dir,
+				stdout: "pipe",
+				stderr: "pipe",
+			});
+			expect(zipResult.exitCode).toBe(0);
+			const bytes = await fs.readFile(path.join(dir, "test.pptx"));
+			const result = extractPptxText(new Uint8Array(bytes));
+			expect(result).toContain("[Slide 1]");
+			expect(result).toContain("Real text");
+			expect(result).not.toContain("[Slide 2]");
+		} finally {
+			await fs.rm(dir, { recursive: true, force: true });
+		}
+	});
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// End-to-end attachment forwarding: too_large stub + PPTX text extraction
+//
+// Same harness as the image forwarding tests, but the attachment is a
+// file with `status: "too_large"` (or a real PPTX). The bridge should
+// produce a prompt that surfaces the situation to the agent instead of
+// the "[non-text message]" placeholder the bug shipped.
+// ═══════════════════════════════════════════════════════════════════════
+
+describe("AgentBridge file attachment forwarding (too_large + PPTX)", () => {
+	test("too_large attachment surfaces a description in the prompt, not [non-text message]", async () => {
+		const fake = await createImageAwareRpc();
+		const bridge = new AgentBridge({ ompPath: fake.path, timeoutMs: 2_000 });
+		try {
+			await bridge.start();
+			const msg: InboundMessage = {
+				channelId: "dingtalk",
+				accountId: "ops",
+				userId: "user1",
+				conversationId: "conv-toolarge",
+				isGroup: false,
+				content: {
+					type: "file",
+					url: "downloadCode:abc",
+					filename: "庄小平-世界模型-算法工程师-转正述职材料(1).pptx",
+					size: 38_765_734,
+				},
+				timestamp: new Date(),
+				attachments: [
+					{
+						kind: "file",
+						data: new Uint8Array(0),
+						mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+						filename: "庄小平-世界模型-算法工程师-转正述职材料(1).pptx",
+						size: 38_765_734,
+						status: "too_large",
+					},
+				],
+			};
+
+			await bridge.forwardWithMeta(msg, makeImagePipelineSession("/tmp/s.jsonl", "conv-toolarge"));
+
+			const log = await fake.readLog();
+			expect(log).toHaveLength(1);
+			expect(log[0].imageCount).toBe(0);
+			expect(log[0].images).toBeNull();
+			const text = log[0].message;
+			// The agent should be told what the file was and why it failed —
+			// not the misleading "[non-text message]" placeholder.
+			expect(text).not.toBe("[non-text message]");
+			expect(text).toContain("庄小平-世界模型");
+			expect(text).toContain(".pptx");
+			expect(text).toContain("37.0 MB"); // formatted size
+			expect(text.toLowerCase()).toContain("exceeds");
+		} finally {
+			bridge.stop();
+			await fake.cleanup();
+		}
+	});
+
+	test("PPTX attachment surfaces extracted slide text in the prompt", async () => {
+		const fake = await createImageAwareRpc();
+		const bridge = new AgentBridge({ ompPath: fake.path, timeoutMs: 5_000 });
+		let bytes: Uint8Array | undefined;
+		try {
+			bytes = await buildTestPptx([
+				{ num: 1, texts: ["Quarterly OKR review — Q3 2026"] },
+				{ num: 2, texts: ["Revenue up 23% YoY", "Headcount +12"] },
+			]);
+			const msg: InboundMessage = {
+				channelId: "dingtalk",
+				accountId: "ops",
+				userId: "user1",
+				conversationId: "conv-pptx",
+				isGroup: false,
+				content: {
+					type: "file",
+					url: "downloadCode:xyz",
+					filename: "okr-q3.pptx",
+					size: bytes.byteLength,
+				},
+				timestamp: new Date(),
+				attachments: [
+					{
+						kind: "file",
+						data: bytes,
+						mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+						filename: "okr-q3.pptx",
+						size: bytes.byteLength,
+					},
+				],
+			};
+
+			await bridge.forwardWithMeta(msg, makeImagePipelineSession("/tmp/s.jsonl", "conv-pptx"));
+
+			const log = await fake.readLog();
+			expect(log).toHaveLength(1);
+			const text = log[0].message;
+			expect(text).toContain("PPTX");
+			expect(text).toContain("okr-q3.pptx");
+			expect(text).toContain("[Slide 1]");
+			expect(text).toContain("Quarterly OKR review");
+			expect(text).toContain("[Slide 2]");
+			expect(text).toContain("Revenue up 23%");
+			expect(text).toContain("Headcount +12");
+			expect(log[0].imageCount).toBe(0);
 		} finally {
 			bridge.stop();
 			await fake.cleanup();

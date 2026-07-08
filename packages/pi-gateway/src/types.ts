@@ -27,14 +27,30 @@ export type MessageContent =
 export interface InboundAttachment {
 	/** Attachment kind — mirrors the inbound MessageContent type. */
 	kind: "image" | "file" | "voice" | "video";
-	/** Raw file content. */
+	/** Raw file content. Empty Uint8Array when `status !== "ok"`. */
 	data: Uint8Array;
-	/** Resolved MIME type (sniffed from magic bytes when possible). */
+	/** Resolved MIME type (sniffed from magic bytes when possible).
+	 *  May be the platform-declared MIME for `status !== "ok"` stubs. */
 	mimeType: string;
 	/** Original filename from the platform (if available). */
 	filename?: string;
-	/** File size in bytes. */
+	/** File size in bytes. Reflects the real on-platform size even when
+	 *  the bytes were not retained (e.g. `status: "too_large"`). */
 	size: number;
+	/**
+	 * Inbound pipeline outcome. Defaults to `"ok"` when omitted by older
+	 * callers — non-`"ok"` values signal the bridge to surface a
+	 * descriptive stub to the agent instead of treating the attachment
+	 * as fully usable.
+	 *
+	 * - `"ok"`              — downloaded and bytes available
+	 * - `"too_large"`       — downloaded then dropped because it exceeded
+	 *                          `MAX_INBOUND_ATTACHMENT_BYTES`; only
+	 *                          metadata (filename, mimeType, size) survives
+	 * - `"download_failed"` — network or platform error during download;
+	 *                          same metadata-only shape as `too_large`
+	 */
+	status?: "ok" | "too_large" | "download_failed";
 }
 
 export interface InboundMessage {
