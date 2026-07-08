@@ -819,9 +819,42 @@ export function validateToolArguments(tool: Tool, toolCall: ToolCall): ToolCall[
 			}
 		: originalArgs;
 
-	const errorMessage = `Validation failed for tool "${
+	let errorMessage = `Validation failed for tool "${
 		toolCall.name
 	}":\n${errors}\n\nReceived arguments:\n${JSON.stringify(receivedArgs, null, 2)}`;
 
+	// Enhanced hint: when the LLM sent an args object that contains ONLY
+	// intent fields (like `_i`) and is missing all required properties, the
+	// standard error doesn't tell the LLM what to fix. Surface a clear hint.
+	const missingRequired = Array.isArray(validate.errors)
+		? validate.errors
+				.filter((err: any) => err.keyword === "required")
+				.map((err: any) => err.params?.missingProperty)
+				.filter((name: unknown): name is string => typeof name === "string")
+		: [];
+	if (
+		missingRequired.length > 0 &&
+		typeof originalArgs === "object" &&
+		originalArgs !== null &&
+		!Array.isArray(originalArgs) &&
+		isIntentOnlyArgs(originalArgs as Record<string, unknown>)
+	) {
+		errorMessage += `\n\nHint: your arguments object only contains intent fields (e.g. _i) ` +
+			`but is missing required properties: ${missingRequired.join(", ")}. ` +
+			`Did you forget to include the actual tool arguments? Re-emit the tool call ` +
+			`with the full argument object (intent fields are optional, not a substitute for args).`;
+	}
+
 	throw new Error(errorMessage);
+}
+
+/**
+ * Returns true when an args object contains ONLY intent fields (keys starting
+ * with `_` like `_i`) and no real arguments. Used to detect the LLM failure
+ * mode where it sends the intent description but forgets the actual tool args.
+ */
+function isIntentOnlyArgs(args: Record<string, unknown>): boolean {
+	const keys = Object.keys(args);
+	if (keys.length === 0) return false;
+	return keys.every(k => k.startsWith("_"));
 }

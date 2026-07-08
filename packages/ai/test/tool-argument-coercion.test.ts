@@ -683,3 +683,104 @@ describe("Tool argument coercion", () => {
 		]);
 	});
 });
+
+describe("Tool argument validation: empty-args-with-intent hint", () => {
+	const editTool: Tool = {
+		name: "edit",
+		description: "",
+		parameters: Type.Object({
+			path: Type.String(),
+			edits: Type.Array(
+				Type.Object({
+					old_text: Type.String(),
+					new_text: Type.String(),
+				}),
+			),
+		}),
+	};
+
+	it("enhances error message when args only contain _i and missing required properties", () => {
+		const toolCall: ToolCall = {
+			type: "toolCall",
+			id: "call-empty-intent",
+			name: "edit",
+			arguments: { _i: "Update picker card content" },
+		};
+
+		expect(() => validateToolArguments(editTool, toolCall)).toThrow(/missing required properties: path, edits/);
+		expect(() => validateToolArguments(editTool, toolCall)).toThrow(/Hint: your arguments object only contains intent fields/);
+		expect(() => validateToolArguments(editTool, toolCall)).toThrow(/Did you forget to include the actual tool arguments/);
+	});
+
+	it("enhances error message for any intent field starting with _", () => {
+		const toolCall: ToolCall = {
+			type: "toolCall",
+			id: "call-intent-underscore",
+			name: "edit",
+			arguments: { _intent: "modify file", _retry: 2 },
+		};
+
+		expect(() => validateToolArguments(editTool, toolCall)).toThrow(/missing required properties/);
+	});
+
+	it("does NOT add hint when args is completely empty", () => {
+		const toolCall: ToolCall = {
+			type: "toolCall",
+			id: "call-truly-empty",
+			name: "edit",
+			arguments: {},
+		};
+
+		// Truly empty (no keys) should produce the standard error without the
+		// intent-field hint, because we can't tell whether the LLM forgot
+		// args entirely vs. sent an empty object intentionally.
+		const error = (() => {
+			try {
+				validateToolArguments(editTool, toolCall);
+				return null;
+			} catch (e) {
+				return e as Error;
+			}
+		})();
+		expect(error).not.toBeNull();
+		expect(error!.message).toMatch(/Validation failed for tool "edit"/);
+		expect(error!.message).not.toMatch(/Hint: your arguments object only contains intent fields/);
+	});
+
+	it("does NOT add hint when args has real properties (just not the right ones)", () => {
+		const toolCall: ToolCall = {
+			type: "toolCall",
+			id: "call-real-prop",
+			name: "edit",
+			arguments: { foo: "bar" }, // has a real prop, just not path/edits
+		};
+
+		const error = (() => {
+			try {
+				validateToolArguments(editTool, toolCall);
+				return null;
+			} catch (e) {
+				return e as Error;
+			}
+		})();
+		expect(error).not.toBeNull();
+		expect(error!.message).not.toMatch(/Hint: your arguments object only contains intent fields/);
+	});
+
+	it("does NOT add hint when all required properties are present (validation passes)", () => {
+		const toolCall: ToolCall = {
+			type: "toolCall",
+			id: "call-valid",
+			name: "edit",
+			arguments: {
+				_i: "legitimate intent",
+				path: "file.txt",
+				edits: [{ old_text: "a", new_text: "b" }],
+			},
+		};
+
+		const result = validateToolArguments(editTool, toolCall);
+		expect(result.path).toBe("file.txt");
+		expect(result.edits).toEqual([{ old_text: "a", new_text: "b" }]);
+	});
+});
