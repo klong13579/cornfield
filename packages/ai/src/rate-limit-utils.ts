@@ -8,6 +8,7 @@ export type RateLimitReason =
 	| "RATE_LIMIT_EXCEEDED"
 	| "MODEL_CAPACITY_EXHAUSTED"
 	| "SERVER_ERROR"
+	| "ACCESS_DENIED"
 	| "UNKNOWN";
 
 const QUOTA_EXHAUSTED_BACKOFF_MS = 30 * 60 * 1000; // 30 min
@@ -15,6 +16,7 @@ const RATE_LIMIT_EXCEEDED_BACKOFF_MS = 30 * 1000; // 30s
 const MODEL_CAPACITY_BASE_MS = 45 * 1000; // 45s base
 const MODEL_CAPACITY_JITTER_MS = 30 * 1000; // ±15s
 const SERVER_ERROR_BACKOFF_MS = 20 * 1000; // 20s
+const ACCESS_DENIED_BACKOFF_MS = 60 * 60 * 1000; // 1 hour — 403/model-not-enabled is persistent
 
 /**
  * Classify a rate-limit error message into a reason category.
@@ -53,6 +55,18 @@ export function parseRateLimitReason(errorMessage: string): RateLimitReason {
 		return "SERVER_ERROR";
 	}
 
+	// 403 / "forbidden" / "access denied" — model exists but the account cannot
+	// use it. Persistent, not transient. Long cooldown so we don't keep retrying
+	// a model that will never succeed for this account.
+	if (
+		lower.includes("403") ||
+		lower.includes("forbidden") ||
+		lower.includes("access denied") ||
+		lower.includes("permission denied")
+	) {
+		return "ACCESS_DENIED";
+	}
+
 	return "UNKNOWN";
 }
 
@@ -70,6 +84,8 @@ export function calculateRateLimitBackoffMs(reason: RateLimitReason): number {
 			return MODEL_CAPACITY_BASE_MS + Math.random() * MODEL_CAPACITY_JITTER_MS;
 		case "SERVER_ERROR":
 			return SERVER_ERROR_BACKOFF_MS;
+		case "ACCESS_DENIED":
+			return ACCESS_DENIED_BACKOFF_MS;
 		default:
 			return QUOTA_EXHAUSTED_BACKOFF_MS; // conservative default
 	}

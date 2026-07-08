@@ -125,6 +125,7 @@ import autoContinuePrompt from "../prompts/system/auto-continue.md" with { type:
 import autoHandoffThresholdFocusPrompt from "../prompts/system/auto-handoff-threshold-focus.md" with { type: "text" };
 import eagerTodoPrompt from "../prompts/system/eager-todo.md" with { type: "text" };
 import handoffDocumentPrompt from "../prompts/system/handoff-document.md" with { type: "text" };
+import { computeRetryFallbackCooldown, RETRY_FALLBACK_FLAPPING_WINDOW_MS } from "./retry-fallback-cooldown";
 import ircIncomingTemplate from "../prompts/system/irc-incoming.md" with { type: "text" };
 import planModeActivePrompt from "../prompts/system/plan-mode-active.md" with { type: "text" };
 import planModeReferencePrompt from "../prompts/system/plan-mode-reference.md" with { type: "text" };
@@ -471,6 +472,10 @@ export class AgentSession {
 	#retryPromise: Promise<void> | undefined = undefined;
 	#retryResolve: (() => void) | undefined = undefined;
 	#activeRetryFallback: ActiveRetryFallbackState | undefined = undefined;
+	// Selector → timestamp of last failure. Used to escalate cooldown when a
+	// selector fails repeatedly (flapping: primary → fallback → restore → primary
+	// → fallback in a few seconds). See retry-fallback-cooldown.ts.
+	#retryFallbackFailureHistory = new Map<string, number>();
 	// Todo completion reminder state
 	#todoReminderCount = 0;
 	#todoPhases: TodoPhase[] = [];
@@ -5371,10 +5376,12 @@ export class AgentSession {
 
 	#isTransientTransportErrorMessage(errorMessage: string): boolean {
 		// Match: overloaded_error, provider returned error, rate limit, 429, 500, 502, 503, 504,
-		// service unavailable, network/connection/socket errors, fetch failed, terminated, retry delay exceeded
+		// service unavailable, network/connection/socket errors, fetch failed, terminated, retry delay exceeded.
+		// 403 is included so model access denied errors enter the retry path, where the
+		// selector is suppressed for 1h (ACCESS_DENIED backoff) and the fallback chain is tried.
 		return (
 			isUnexpectedSocketCloseMessage(errorMessage) ||
-			/overloaded|provider.?returned.?error|rate.?limit|too many requests|429|500|502|503|504|service.?unavailable|server.?error|internal.?error|network.?error|connection.?error|connection.?refused|other side closed|fetch failed|upstream.?connect|reset before headers|socket hang up|timed? out|timeout|terminated|retry delay|stream stall/i.test(
+			/overloaded|provider.?returned.?error|rate.?limit|too many requests|403|429|500|502|503|504|service.?unavailable|server.?error|internal.?error|network.?error|connection.?error|connection.?refused|other side closed|fetch failed|upstream.?connect|reset before headers|socket hang up|timed? out|timeout|terminated|retry delay|stream stall/i.test(
 				errorMessage,
 			)
 		);
@@ -5450,7 +5457,30 @@ export class AgentSession {
 			const reason = parseRateLimitReason(errorMessage);
 			cooldownMs = reason === "UNKNOWN" ? 5 * 60 * 1000 : calculateRateLimitBackoffMs(reason);
 		}
-		this.#modelRegistry.suppressSelector(currentSelector, Date.now() + cooldownMs);
+
+		// User-configured knobs:
+		// - `retry.fallbackFlappingWindowMs`: window for "this selector failed
+		//   recently". The flapping escalation lives in `computeRetryFallbackCooldown`.
+		// - `retry.fallbackCooldownMs`: hard floor applied after the escalation,
+		//   so a high user floor (e.g. 10 min) is not multiplied by flapping.
+		const flappingWindowSetting = this.settings.get("retry.fallbackFlappingWindowMs");
+		const flappingWindowMs =
+			typeof flappingWindowSetting === "number" && flappingWindowSetting > 0
+				? flappingWindowSetting
+				: RETRY_FALLBACK_FLAPPING_WINDOW_MS;
+		const minCooldownMs = this.settings.get("retry.fallbackCooldownMs");
+
+		const now = Date.now();
+		const lastFailure = this.#retryFallbackFailureHistory.get(currentSelector);
+		const finalCooldown = computeRetryFallbackCooldown(
+			cooldownMs,
+			lastFailure,
+			now,
+			flappingWindowMs,
+			typeof minCooldownMs === "number" ? minCooldownMs : undefined,
+		);
+		this.#retryFallbackFailureHistory.set(currentSelector, now);
+		this.#modelRegistry.suppressSelector(currentSelector, now + finalCooldown);
 	}
 
 	#resolveRetryFallbackRole(currentSelector: string): string | undefined {

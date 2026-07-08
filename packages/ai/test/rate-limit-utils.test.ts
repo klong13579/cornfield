@@ -45,6 +45,22 @@ describe("parseRateLimitReason", () => {
 			parseRateLimitReason("Codex error event: The usage limit has been reached (code=usage_limit_reached)"),
 		).toBe("QUOTA_EXHAUSTED");
 	});
+
+	it("classifies 403 as ACCESS_DENIED", () => {
+		expect(parseRateLimitReason("403 Forbidden")).toBe("ACCESS_DENIED");
+	});
+
+	it("classifies 403 with model access denied as ACCESS_DENIED", () => {
+		expect(parseRateLimitReason("narwal-plan 403 Model access denied")).toBe("ACCESS_DENIED");
+	});
+
+	it("classifies 'forbidden' as ACCESS_DENIED", () => {
+		expect(parseRateLimitReason("Forbidden: this model is not available for your account")).toBe("ACCESS_DENIED");
+	});
+
+	it("classifies 'permission denied' as ACCESS_DENIED", () => {
+		expect(parseRateLimitReason("Permission denied for resource")).toBe("ACCESS_DENIED");
+	});
 });
 
 describe("calculateRateLimitBackoffMs", () => {
@@ -70,5 +86,9 @@ describe("calculateRateLimitBackoffMs", () => {
 
 	it("returns conservative fallback for UNKNOWN", () => {
 		expect(calculateRateLimitBackoffMs("UNKNOWN")).toBe(30 * 60 * 1000);
+	});
+
+	it("returns 1 hour for ACCESS_DENIED", () => {
+		expect(calculateRateLimitBackoffMs("ACCESS_DENIED")).toBe(60 * 60 * 1000);
 	});
 });
