@@ -264,7 +264,16 @@ export class CronLifecycle {
 	async #executeCronAgent(params: {
 		agentDir: string;
 		prompt: string;
-		timeoutMs?: number;
+		/**
+		 * Inactivity budget for the cron agent prompt (in ms). Derived from
+		 * the task's `timeoutMs` in jobs.json via `computeInactivityBudgetMs`.
+		 * If the OMP child stops emitting session events for this long, the
+		 * warm-bridge call rejects and the cron service falls back to a
+		 * cold `omp --print` subprocess. There is no wall-clock hard cap
+		 * (removed 2026-07-08): a long-but-active prompt keeps running
+		 * until either the inactivity watchdog fires or `agent_end` arrives.
+		 */
+		inactivityMs?: number;
 		/**
 		 * Max time to wait for the per-account prompt queue to free up
 		 * (LLM holding the bridge on a previous turn). When exceeded, the
@@ -318,9 +327,8 @@ export class CronLifecycle {
 
 		try {
 			const response = await bridge.executePrompt(params.prompt, {
-				timeoutMs: params.timeoutMs,
 				sessionPath: cronSessionFilePath,
-				inactivityMs: computeInactivityBudgetMs(params.timeoutMs),
+				inactivityMs: params.inactivityMs ?? computeInactivityBudgetMs(undefined),
 				queueTimeoutMs: params.queueTimeoutMs ?? 5_000,
 			});
 			return { output: response };
@@ -632,8 +640,7 @@ export class CronLifecycle {
 		void bridge
 			.executePrompt(promptText, {
 				sessionPath: origin.sessionPath,
-				timeoutMs: 60_000,
-				inactivityMs: 30_000,
+				inactivityMs: 60_000,
 			})
 			.then(() => {
 				logger.info("[cron-notify] pushed to origin session", {

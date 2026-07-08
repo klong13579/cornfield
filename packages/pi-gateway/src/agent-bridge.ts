@@ -78,7 +78,6 @@ export interface AgentBridgeSnapshot {
 export interface AgentBridgeOptions {
 	ompPath?: string;
 	model?: string;
-	timeoutMs?: number;
 	cwd?: string;
 	maxCrashRetries?: number;
 	crashBackoffMs?: number;
@@ -324,7 +323,7 @@ export class AgentBridge {
 					return;
 				}
 				logger.info("[AgentBridge] Running BOOT.md self-check", { bootPath, length: trimmed.length });
-				this.executePrompt(trimmed, { timeoutMs: 60_000 })
+				this.executePrompt(trimmed, { inactivityMs: 60_000 })
 					.then(result => {
 						logger.info("[AgentBridge] BOOT.md completed", {
 							bootPath,
@@ -532,9 +531,9 @@ export class AgentBridge {
 			// streaming LLM that hangs after the thinking block (e.g. 60s
 			// of silence) holds the entire IM queue hostage behind a
 			// `runExclusive` waiting for an `agent_end` that will never
-			// come. The prompt-queue rolling timeout (60s inactivity) and
-			// the hard cap (5min) handle slow-but-active streams; this
-			// handles "OMP dead mid-stream".
+			// come. The prompt-queue inactivity watchdog (default 60s)
+			// handles slow-but-active streams; this handles "OMP dead
+			// mid-stream".
 			let abortedByStreamingWatchdog = false;
 			let streamingWatchdog: NodeJS.Timeout | null = null;
 			if (this.#streamingWatchdogMs > 0) {
@@ -583,8 +582,6 @@ export class AgentBridge {
 				sessionPath: session.ompSessionPath,
 			});
 
-			const timeoutMs = this.#options.timeoutMs ?? 120_000;
-
 			try {
 				const sessionChanged = session.ompSessionPath ? await this.#switchSession(session.ompSessionPath) : false;
 				// Re-apply the model only when the session actually changed (the
@@ -609,7 +606,7 @@ export class AgentBridge {
 						});
 					}
 				}
-				const { promise } = this.#queue.enqueue(text, timeoutMs, handlers, images);
+				const { promise } = this.#queue.enqueue(text, handlers, images);
 				const { events, aborted } = await promise;
 				if (abortedByStreamingWatchdog) {
 					logger.warn("Prompt aborted by streaming watchdog", {
@@ -656,6 +653,18 @@ export class AgentBridge {
 				}
 				const message = err instanceof Error ? err.message : String(err);
 				logger.error("Agent bridge failed", { error: message });
+				// Inactivity watchdog rejection ("Agent RPC inactive for Xms ...")
+				// means OMP stopped emitting session events. The agent's turn
+				// has been abandoned — tell the user, don't dump the technical
+				// error. Same shape as the streaming-watchdog fallback at
+				// line 616 so the channel treats them identically.
+				if (/Agent RPC inactive/i.test(message)) {
+					return this.#metaBuilder.fallback(
+						"Agent 长时间未响应（已停掉当前轮次）。请重试上一条消息，或发新消息继续。",
+						startedAt,
+						{ aborted: true },
+					);
+				}
 				return this.#metaBuilder.fallback(`系统错误：${message}`, startedAt);
 			} finally {
 				if (streamingWatchdog) clearInterval(streamingWatchdog);
@@ -669,7 +678,6 @@ export class AgentBridge {
 	async executePrompt(
 		prompt: string,
 		options?: {
-			timeoutMs?: number;
 			sessionPath?: string;
 			inactivityMs?: number;
 			/**
@@ -699,7 +707,6 @@ export class AgentBridge {
 					await this.#restartTransport();
 				}
 
-				const timeoutMs = options?.timeoutMs ?? this.#options.timeoutMs ?? 120_000;
 				const inactivityBudgetMs = options?.inactivityMs ?? 0;
 				const sessionPath = options?.sessionPath;
 				const previousSessionPath = this.#activeSessionPath;
@@ -768,7 +775,9 @@ export class AgentBridge {
 				}
 
 				try {
-					const { promise } = this.#queue.enqueue(prompt, timeoutMs);
+					const { promise } = this.#queue.enqueue(prompt, undefined, undefined, {
+						inactivityMs: inactivityBudgetMs,
+					});
 					const { events } = await promise;
 					const response = extractAssistantText(events);
 

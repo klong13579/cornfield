@@ -110,17 +110,19 @@ async function checkConfig(
 	const config = result.config;
 	findings.push(ok(`${result.path} valid`));
 
-	// agent.timeoutMs — the root cause of the RPC-timeout incident. The default
-	// is 120s; interactive cron-creation can exceed that, so flag when unset.
-	if (config.agent?.timeoutMs == null) {
+	// agent.timeoutMs is no longer enforced as a hard cap (removed 2026-07-08).
+	// The prompt queue now only watches inactivity (default 60s), so a
+	// legitimately long-but-active turn can run for as long as the agent
+	// keeps emitting session events. Kept here as a soft warn so existing
+	// configs that set it don't error, and operators with legacy configs
+	// know the field is now a no-op.
+	if (config.agent?.timeoutMs != null) {
 		findings.push(
 			warn(
-				"agent.timeoutMs not set (defaults to 120000ms)",
-				"Long agent turns (e.g. interactive cron creation) can exceed 120s and surface as an RPC timeout. Consider setting agent.timeoutMs.",
+				`agent.timeoutMs = ${config.agent.timeoutMs}ms (no longer enforced; ignored since 2026-07-08)`,
+				"Prompt queue no longer hard-caps wall-clock duration. The field is harmless but you can safely remove it from gateway.json.",
 			),
 		);
-	} else {
-		findings.push(ok(`agent.timeoutMs = ${config.agent.timeoutMs}ms`));
 	}
 
 	// DingTalk accounts: count + secret-resolution sanity. validateConfig only
@@ -352,7 +354,6 @@ function checkScheduler(schedulerDbPath: string): Section {
 				);
 			}
 		}
-
 	} finally {
 		storage.close();
 	}

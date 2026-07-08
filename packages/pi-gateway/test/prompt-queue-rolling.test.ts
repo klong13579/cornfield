@@ -1,18 +1,21 @@
 /**
- * PromptQueue rolling inactivity timeout.
+ * PromptQueue inactivity watchdog.
  *
- * Plan v2 Fix E: OMP emits session events as it makes progress (token
- * deltas, tool calls, message_end). As long as any event arrives within
- * `inactivityMs`, the prompt is considered alive. The hard `timeoutMs`
- * cap remains as an absolute upper bound. This suite covers:
+ * OMP emits session events as it makes progress (token deltas, tool
+ * calls, message_end). As long as any event arrives within
+ * `inactivityMs`, the prompt is considered alive. Previously the queue
+ * also enforced a wall-clock hard cap (5 min default) regardless of
+ * activity; that cap was removed 2026-07-08 because it killed
+ * legitimate long-but-active turns (e.g. hr-agent update-interview-record
+ * doing 30+ dws lookups). The inactivity watchdog is the only give-up
+ * condition now. This suite covers:
  *  - inactivity watchdog fires after inactivityMs without an event
  *  - watchdog is reset by session_event arrivals
- *  - hard cap fires even if events keep coming
- *  - agent_end resolves cleanly and clears both timers
- *  - rejectAll cleans up both timers
+ *  - agent_end resolves cleanly and clears the watchdog
+ *  - rejectAll cleans up the watchdog
  */
 import { describe, expect, test } from "bun:test";
-import type { AgentEvent, RpcTransport, RpcTransportEvent } from "../src/agent-transport";
+import type { AgentEvent, RpcTransport } from "../src/agent-transport";
 import { PromptQueue } from "../src/prompt-queue";
 
 class FakeTransport implements Pick<RpcTransport, "sendFrame"> {
@@ -28,11 +31,11 @@ function activePromptId(queue: PromptQueue): string {
 	return id;
 }
 
-describe("PromptQueue rolling inactivity timeout", () => {
+describe("PromptQueue inactivity watchdog", () => {
 	test("rejects after inactivityMs with no session event", async () => {
 		const transport = new FakeTransport();
 		const queue = new PromptQueue(transport as unknown as RpcTransport, { thresholdMs: 0, pingMs: 0 });
-		const { promise, promptId } = queue.enqueue("hi", 10_000, undefined, undefined, { inactivityMs: 100 });
+		const { promise, promptId } = queue.enqueue("hi", undefined, undefined, { inactivityMs: 100 });
 		// Simulate the prompt command response (success) so prompt becomes active.
 		queue.onCommandResponse(promptId, {
 			type: "response",
@@ -46,7 +49,7 @@ describe("PromptQueue rolling inactivity timeout", () => {
 	test("session events reset the inactivity watchdog", async () => {
 		const transport = new FakeTransport();
 		const queue = new PromptQueue(transport as unknown as RpcTransport, { thresholdMs: 0, pingMs: 0 });
-		const { promise, promptId } = queue.enqueue("hi", 10_000, undefined, undefined, { inactivityMs: 200 });
+		const { promise, promptId } = queue.enqueue("hi", undefined, undefined, { inactivityMs: 200 });
 		queue.onCommandResponse(promptId, {
 			type: "response",
 			command: "prompt",
@@ -67,7 +70,7 @@ describe("PromptQueue rolling inactivity timeout", () => {
 	test("agent_end resolves the promise cleanly and clears the watchdog", async () => {
 		const transport = new FakeTransport();
 		const queue = new PromptQueue(transport as unknown as RpcTransport, { thresholdMs: 0, pingMs: 0 });
-		const { promise, promptId } = queue.enqueue("hi", 10_000, undefined, undefined, { inactivityMs: 100 });
+		const { promise, promptId } = queue.enqueue("hi", undefined, undefined, { inactivityMs: 100 });
 		queue.onCommandResponse(promptId, {
 			type: "response",
 			command: "prompt",
@@ -83,31 +86,39 @@ describe("PromptQueue rolling inactivity timeout", () => {
 		expect(queue.hasPendingPrompts()).toBe(false);
 	});
 
-	test("hard cap fires even with constant activity", async () => {
+	test("constant activity keeps the prompt alive indefinitely (no hard cap)", async () => {
+		// Regression: previously a wall-clock hard cap (default 5 min, here
+		// forced to 200ms) would reject the prompt even with constant event
+		// arrivals. With the hard cap removed (2026-07-08), the prompt must
+		// stay alive as long as events keep coming.
 		const transport = new FakeTransport();
 		const queue = new PromptQueue(transport as unknown as RpcTransport, { thresholdMs: 0, pingMs: 0 });
-		// inactivityMs (5s) longer than hard cap (200ms) — hard cap should win.
-		const { promise, promptId } = queue.enqueue("hi", 200, undefined, undefined, { inactivityMs: 5_000 });
+		const { promise, promptId } = queue.enqueue("hi", undefined, undefined, { inactivityMs: 5_000 });
 		queue.onCommandResponse(promptId, {
 			type: "response",
 			command: "prompt",
 			success: true,
 		});
-		// Fire events every 30ms to keep the watchdog happy.
+		// Fire events every 30ms for 300ms (10x the previous 200ms hard cap).
 		const interval = setInterval(() => {
 			queue.onSessionEvent({ type: "message_update" });
 		}, 30);
 		try {
-			await expect(promise).rejects.toThrow(/hard cap/);
+			await Bun.sleep(300);
+			expect(queue.hasPendingPrompts()).toBe(true);
 		} finally {
 			clearInterval(interval);
 		}
+		// Resolve cleanly via agent_end so the test doesn't leave a hanging promise.
+		queue.onSessionEvent({ type: "agent_end" });
+		const result = await promise;
+		expect(result.aborted).toBe(false);
 	});
 
-	test("rejectAll cleans up both hard-cap and watchdog timers", async () => {
+	test("rejectAll cleans up the watchdog timer", async () => {
 		const transport = new FakeTransport();
 		const queue = new PromptQueue(transport as unknown as RpcTransport, { thresholdMs: 0, pingMs: 0 });
-		const { promise, promptId } = queue.enqueue("hi", 10_000, undefined, undefined, { inactivityMs: 100 });
+		const { promise, promptId } = queue.enqueue("hi", undefined, undefined, { inactivityMs: 100 });
 		queue.onCommandResponse(promptId, {
 			type: "response",
 			command: "prompt",
@@ -124,7 +135,7 @@ describe("PromptQueue rolling inactivity timeout", () => {
 	test("abort() resolves as aborted and clears the watchdog", async () => {
 		const transport = new FakeTransport();
 		const queue = new PromptQueue(transport as unknown as RpcTransport, { thresholdMs: 0, pingMs: 0 });
-		const { promise, promptId } = queue.enqueue("hi", 10_000, undefined, undefined, { inactivityMs: 200 });
+		const { promise, promptId } = queue.enqueue("hi", undefined, undefined, { inactivityMs: 200 });
 		queue.onCommandResponse(promptId, {
 			type: "response",
 			command: "prompt",
@@ -140,7 +151,7 @@ describe("PromptQueue rolling inactivity timeout", () => {
 	test("prompt command failure rejects the promise and clears timers", async () => {
 		const transport = new FakeTransport();
 		const queue = new PromptQueue(transport as unknown as RpcTransport, { thresholdMs: 0, pingMs: 0 });
-		const { promise, promptId } = queue.enqueue("hi", 10_000, undefined, undefined, { inactivityMs: 500 });
+		const { promise, promptId } = queue.enqueue("hi", undefined, undefined, { inactivityMs: 500 });
 		queue.onCommandResponse(promptId, {
 			type: "response",
 			command: "prompt",

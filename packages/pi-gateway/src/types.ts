@@ -337,7 +337,9 @@ export interface SessionStore {
 export interface AgentConfig {
 	ompPath?: string;
 	model?: string;
-	/** Timeout per agent prompt in ms (default: 300000) */
+	/** @deprecated No longer enforced. Kept for backward compat with existing
+	 *  gateway.json configs. The prompt queue's only give-up condition is now
+	 *  the inactivity watchdog (default 60s). */
 	timeoutMs?: number;
 	maxConcurrentSessions?: number;
 	maxCrashRetries?: number;
@@ -407,7 +409,9 @@ export interface DingtalkAccountConfig {
 	agentDir?: string;
 	/** Optional model override for this account */
 	model?: string;
-	/** Optional per-account timeout in ms (overrides agent.timeoutMs) */
+	/** @deprecated No longer enforced. Kept for backward compat with existing
+	 *  gateway.json configs. The prompt queue's only give-up condition is now
+	 *  the inactivity watchdog (default 60s). */
 	timeoutMs?: number;
 	/** Tool access policy: deny these tool names for this account's agent. */
 	deniedTools?: string[];

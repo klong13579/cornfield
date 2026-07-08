@@ -880,7 +880,7 @@ describe("CronService.onTrigger — notifyFailure on failure paths", () => {
 		const notify = mock<NotifyCronFailureFn>(async () => ({ ok: true }));
 		const executeAgent = mock<ExecuteAgentFn>(async () => ({
 			output: "",
-			error: "Agent RPC timed out after 60000ms (hard cap)",
+			error: "Agent RPC inactive for 60000ms (no session event for 60000ms)",
 		}));
 		const brokenService = new CronService({
 			storage,

@@ -32,11 +32,13 @@ import { MessageHandler } from "./gateway-message";
 import { ModelSwitch } from "./gateway-model-switch";
 import { NewSessionHandler } from "./gateway-new-session";
 import { ResponseHandler } from "./gateway-response";
+import { SkillCommand } from "./gateway-skills";
 import { HostToolDispatcher } from "./host-tool-dispatcher";
 import { clearRestartSentinel, readRestartSentinel, writeRestartSentinel } from "./restart-sentinel";
 import { createCronToolDefinitions } from "./scheduler/host-tool";
 import { type BridgeStat, type QueueStat, SessionManager } from "./session-manager";
 import { SQLiteSessionStore } from "./session-store";
+import { SkillCache } from "./skill-cache";
 import type {
 	ChannelHealth,
 	DingtalkAccountConfig,
@@ -192,7 +194,6 @@ export async function createAccountBridgeOptions(
 	return {
 		...agentConfig,
 		model,
-		timeoutMs: account.timeoutMs ?? agentConfig?.timeoutMs,
 		cwd: agentDir,
 		deniedTools: account.deniedTools,
 		accountId,
@@ -243,6 +244,8 @@ export class Gateway {
 	 * Listens on 127.0.0.1 only. See `injectTestEndpoint`.
 	 */
 	#testServer: { stop: () => void; port: number } | null = null;
+	#skillCache: SkillCache | null = null;
+	#skillCommand: SkillCommand | null = null;
 
 	constructor(
 		config: GatewayConfig,
@@ -267,6 +270,12 @@ export class Gateway {
 		this.#store = deps?.store ?? null;
 		this.#channelFactory = deps?.channelFactory;
 
+		// Skill cache resolves the per-account cwd (= agentDir) so the
+		// picker shows the same project-level skills the agent will see.
+		this.#skillCache = new SkillCache({
+			resolveCwd: accountId => this.#accountAgentDirs.get(accountId) ?? process.cwd(),
+		});
+
 		// Sub-modules are created in dependency order to avoid forward-reference
 		// closures. ResponseHandler is created first because ModelSwitch's
 		// sendAgentResponse callback references it.
@@ -274,6 +283,24 @@ export class Gateway {
 			registry: this.#registry,
 			sessionManager: this.#sessionManager,
 			actionRegistry: this.#actionRegistry,
+			onSkillCardAction: async (accountId, conversationId, userId, skillName, channelId) => {
+				await this.#skillCommand?.handleCardAction(accountId, conversationId, userId, skillName, channelId);
+			},
+		});
+
+		this.#skillCommand = new SkillCommand({
+			skillCache: this.#skillCache,
+			actionRegistry: this.#actionRegistry,
+			registry: this.#registry,
+			resolvePickerChannel: accountId => this.#registry.get(`dingtalk:${accountId}`) as DingTalkChannel | undefined,
+			sendAgentResponse: (msg, text) => this.#responseHandler.sendAgentResponse(msg, text),
+			extractMessageText: msg => {
+				const c = msg.content;
+				if (c.type === "text") return c.text;
+				if (c.type === "markdown") return c.markdown;
+				if (c.type === "voice") return c.text ?? "";
+				return "";
+			},
 		});
 
 		this.#modelSwitch = new ModelSwitch({
@@ -324,6 +351,7 @@ export class Gateway {
 			modelSwitch: this.#modelSwitch,
 			newSessionHandler: this.#newSessionHandler,
 			responseHandler: this.#responseHandler,
+			skillCommand: this.#skillCommand,
 			extractMessageText: msg => {
 				const c = msg.content;
 				if (c.type === "text") return c.text;
@@ -1228,7 +1256,7 @@ export class Gateway {
 			// Send the continuation message to resume the conversation
 			const response = await bridge.executePrompt(sentinel.continuationMessage, {
 				sessionPath: sentinel.ompSessionPath,
-				timeoutMs: 60_000, // 1 minute timeout for recovery
+				inactivityMs: 60_000, // 1 minute inactivity for recovery
 			});
 
 			logger.info("Restart recovery completed", {

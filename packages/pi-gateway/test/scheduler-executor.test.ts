@@ -123,7 +123,7 @@ describe("computeInactivityBudgetMs", () => {
 		expect(computeInactivityBudgetMs(60 * 60 * 1000)).toBe(5 * 60 * 1000);
 	});
 
-	test("never exceeds the hard cap of 30 min", () => {
+	test("never exceeds the inactivity cap of 30 min", () => {
 		// The cap is enforced via the default; sanity-check the constant.
 		expect(computeInactivityBudgetMs(Number.MAX_SAFE_INTEGER)).toBeLessThanOrEqual(30 * 60 * 1000);
 	});

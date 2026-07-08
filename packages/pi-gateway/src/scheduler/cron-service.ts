@@ -18,7 +18,7 @@ import {
 	parseAgentSessionForToolFailures,
 } from "./diagnostics";
 import { appendDeliveryFailureLog, appendExecutionLog } from "./execution-log";
-import { executeScheduledCommand, SILENT_MARKER } from "./executor";
+import { computeInactivityBudgetMs, executeScheduledCommand, SILENT_MARKER } from "./executor";
 import { readTestRunMarker } from "./test-run-marker";
 import type { ScheduledTask, SchedulerStorage, TaskExecution } from "./types";
 
@@ -34,7 +34,13 @@ export interface CronLogger {
 export type ExecuteAgentFn = (params: {
 	agentDir: string;
 	prompt: string;
-	timeoutMs?: number;
+	/**
+	 * Inactivity budget for the warm-bridge prompt (ms). If OMP stops
+	 * emitting session events for this long, the warm-bridge call
+	 * rejects and the cron service falls back to a cold `omp --print`
+	 * subprocess. There is no wall-clock hard cap (removed 2026-07-08).
+	 */
+	inactivityMs?: number;
 	signal?: AbortSignal;
 	/** Toolsets to disable during execution (e.g. ['cronjob', 'messaging']) */
 	disabledToolsets?: string[];
@@ -520,7 +526,7 @@ export class CronService {
 			const result = await executeAgent({
 				agentDir,
 				prompt: cronContextPrefix + task.command,
-				timeoutMs: task.timeoutMs,
+				inactivityMs: computeInactivityBudgetMs(task.timeoutMs),
 				disabledToolsets: ["cronjob", "messaging"],
 				model: task.model,
 				provider: task.provider,
@@ -667,9 +673,7 @@ export class CronService {
 					status: cardStatus,
 					exitCode,
 					durationMs,
-					output: timedOut
-						? `[TIMED OUT after ${task.timeoutMs ?? 30_000}ms]\n${output}`
-						: output,
+					output: timedOut ? `[TIMED OUT after ${task.timeoutMs ?? 30_000}ms]\n${output}` : output,
 					error: stderr || undefined,
 				},
 				// B 方案: forward the captured origin so the notifier

@@ -98,12 +98,27 @@ describe("runDoctor end-to-end", () => {
 		}
 	});
 
-	test("flags unset agent.timeoutMs as a warning", async () => {
+	test("does not warn about unset agent.timeoutMs (field is deprecated since 2026-07-08)", async () => {
 		const p = path.join(tmpDir, "no-timeout.json");
 		await Bun.write(p, JSON.stringify({ channels: {} }));
 		const report = await runDoctor(p);
 		const config = report.sections.find(s => s.name === "CONFIG")!;
-		expect(config.findings.some(f => f.severity === "warn" && f.message.includes("agent.timeoutMs"))).toBe(true);
+		expect(config.findings.some(f => f.severity === "warn" && f.message.includes("agent.timeoutMs"))).toBe(false);
+	});
+
+	test("warns when agent.timeoutMs is set (legacy field, no longer enforced)", async () => {
+		const p = path.join(tmpDir, "with-timeout.json");
+		await Bun.write(p, JSON.stringify({ channels: {}, agent: { timeoutMs: 120000 } }));
+		const report = await runDoctor(p);
+		const config = report.sections.find(s => s.name === "CONFIG")!;
+		expect(
+			config.findings.some(
+				f =>
+					f.severity === "warn" &&
+					f.message.includes("agent.timeoutMs") &&
+					f.message.includes("no longer enforced"),
+			),
+		).toBe(true);
 	});
 
 	test("flags unresolved $ENV appSecret as an error", async () => {

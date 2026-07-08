@@ -40,10 +40,8 @@ interface PendingPrompt {
 	resolve: (result: { events: AgentEvent[]; aborted: boolean }) => void;
 	reject: (error: Error) => void;
 	events: AgentEvent[];
-	timeout: NodeJS.Timeout;
-	/** Rolling inactivity watchdog — see `enqueue`. May be undefined if
-	 *  the prompt was constructed by a caller that did not opt in. */
-	inactivityWatchdog?: NodeJS.Timeout;
+	/** Rolling inactivity watchdog — see `enqueue`. */
+	inactivityWatchdog: NodeJS.Timeout;
 	handlers?: ForwardStreamHandlers;
 	textCumulative?: string;
 	lastActivityAt: number;
@@ -152,7 +150,6 @@ export class PromptQueue {
 	 */
 	enqueue(
 		message: string,
-		timeoutMs: number,
 		handlers?: ForwardStreamHandlers,
 		images?: ImageContent[],
 		opts?: { inactivityMs?: number },
@@ -164,60 +161,51 @@ export class PromptQueue {
 			aborted: boolean;
 		}>();
 
-		// Hard cap: a single prompt may not live longer than `timeoutMs`,
-		// regardless of activity. This is the absolute maximum user wait
-		// (defaults to 5 minutes upstream).
-		const timeout = setTimeout(() => {
-			this.#clearAllLongTaskWatchers(promptId);
-			this.#pendingPrompts.delete(promptId);
-			if (this.#activePromptId === promptId) this.#activePromptId = undefined;
-			reject(new Error(`Agent RPC timed out after ${timeoutMs}ms (hard cap)`));
-		}, timeoutMs);
+		// The only give-up condition: OMP stops emitting session events.
+		// As long as the agent keeps sending events (token deltas, tool
+		// calls, message_end), the prompt is considered alive. A long
+		// but active turn — e.g. 30+ tool calls over several minutes —
+		// is legitimate work, not a hang.
+		//
+		// Previous design also enforced a wall-clock `timeoutMs` (5 min
+		// default) regardless of activity. That cap killed legitimate
+		// multi-step tasks (e.g. hr-agent update-interview-record doing
+		// 30+ dws lookups). Removed 2026-07-08.
+		const inactivityMs = opts?.inactivityMs ?? 60_000;
 
 		const pending: PendingPrompt = {
 			promptId,
 			resolve,
 			reject,
 			events: [],
-			timeout,
+			// Assigned below once the interval is created.
+			inactivityWatchdog: setInterval(() => {}, 0),
 			lastActivityAt: Date.now(),
 		};
-		if (handlers) pending.handlers = handlers;
-
-		this.#pendingPrompts.set(promptId, pending);
-
-		// Rolling inactivity timeout: OMP emits session events (token deltas,
-		// tool calls, message_end) as it makes progress. As long as any event
-		// arrives within `inactivityMs`, the prompt is considered alive and
-		// the hard cap is what bounds it. When the LLM is mid-thought but
-		// actively streaming tokens, the inactivity timer keeps resetting
-		// and the hard cap is what eventually fires — not a 60s false
-		// timeout. Defaults to 60s when not specified (matches the previous
-		// single-timer behaviour for upstream callers that don't opt in).
-		const inactivityMs = opts?.inactivityMs ?? 60_000;
-		const inactivityWatchdog = setInterval(
+		// Replace the throwaway placeholder with the real watchdog.
+		clearInterval(pending.inactivityWatchdog);
+		pending.inactivityWatchdog = setInterval(
 			() => {
 				const cur = this.#pendingPrompts.get(promptId);
 				if (!cur) {
-					clearInterval(inactivityWatchdog);
+					clearInterval(pending.inactivityWatchdog);
 					return;
 				}
 				const idle = Date.now() - cur.lastActivityAt;
 				if (idle >= inactivityMs) {
-					clearInterval(inactivityWatchdog);
-					clearTimeout(timeout);
+					clearInterval(pending.inactivityWatchdog);
 					this.#clearAllLongTaskWatchers(promptId);
 					this.#pendingPrompts.delete(promptId);
 					if (this.#activePromptId === promptId) this.#activePromptId = undefined;
-					reject(
-						new Error(
-							`Agent RPC inactive for ${idle}ms (no session event for ${inactivityMs}ms, hard cap ${timeoutMs}ms)`,
-						),
-					);
+					reject(new Error(`Agent RPC inactive for ${idle}ms (no session event for ${inactivityMs}ms)`));
 				}
 			},
 			Math.min(10_000, Math.max(1_000, Math.floor(inactivityMs / 6))),
 		);
+
+		if (handlers) pending.handlers = handlers;
+
+		this.#pendingPrompts.set(promptId, pending);
 
 		try {
 			this.#transport.sendFrame("prompt", {
@@ -226,8 +214,7 @@ export class PromptQueue {
 				...(images && images.length > 0 ? { images } : {}),
 			});
 		} catch (err) {
-			clearTimeout(timeout);
-			clearInterval(inactivityWatchdog);
+			clearInterval(pending.inactivityWatchdog);
 			this.#pendingPrompts.delete(promptId);
 			const error = err instanceof Error ? err : new Error(String(err));
 			reject(error);
@@ -254,8 +241,7 @@ export class PromptQueue {
 			pending.lastActivityAt = Date.now();
 			this.#activePromptId = commandId;
 		} else {
-			clearTimeout(pending.timeout);
-			if (pending.inactivityWatchdog) clearInterval(pending.inactivityWatchdog);
+			clearInterval(pending.inactivityWatchdog);
 			this.#pendingPrompts.delete(commandId);
 			if (this.#activePromptId === commandId) this.#activePromptId = undefined;
 			pending.reject(new Error(event.error ?? "RPC command failed: prompt"));
@@ -278,8 +264,7 @@ export class PromptQueue {
 		}
 
 		if (event.type === "agent_end") {
-			clearTimeout(pending.timeout);
-			if (pending.inactivityWatchdog) clearInterval(pending.inactivityWatchdog);
+			clearInterval(pending.inactivityWatchdog);
 			this.#pendingPrompts.delete(this.#activePromptId);
 			this.#activePromptId = undefined;
 			pending.resolve({ events: pending.events, aborted: false });
@@ -299,8 +284,7 @@ export class PromptQueue {
 		const promptId = this.#activePromptId;
 		const pending = this.#pendingPrompts.get(promptId);
 		if (!pending) return false;
-		clearTimeout(pending.timeout);
-		if (pending.inactivityWatchdog) clearInterval(pending.inactivityWatchdog);
+		clearInterval(pending.inactivityWatchdog);
 		this.#clearAllLongTaskWatchers(promptId);
 		this.#pendingPrompts.delete(promptId);
 		this.#activePromptId = undefined;
@@ -324,8 +308,7 @@ export class PromptQueue {
 	/** Reject all pending prompts (called from `stop()`). */
 	rejectAll(error: Error): void {
 		for (const pending of this.#pendingPrompts.values()) {
-			clearTimeout(pending.timeout);
-			if (pending.inactivityWatchdog) clearInterval(pending.inactivityWatchdog);
+			clearInterval(pending.inactivityWatchdog);
 			pending.reject(error);
 		}
 		this.#pendingPrompts.clear();
