@@ -657,6 +657,47 @@ function coerceArgsFromErrors(
 	return { value: changed ? nextArgs : args, changed };
 }
 
+/**
+ * Pre-scans tool call arguments and attempts to JSON.parse any string values
+ * that look like JSON arrays or objects. LLMs sometimes serialize array/object
+ * parameters as JSON strings (e.g. `ops="[{...}]"` instead of `ops=[{...}]`).
+ *
+ * This runs BEFORE AJV validation, so it catches these cases proactively
+ * rather than relying on the post-failure coercion loop.
+ *
+ * Only parses strings that start with `[` or `{` and only accepts the result
+ * if it's an array or object. All other types (numbers, booleans, null) are
+ * left untouched — those are handled by coerceArgsFromErrors if needed.
+ */
+function preParseJsonStrings(args: unknown): { value: unknown; changed: boolean } {
+	if (typeof args !== "object" || args === null || Array.isArray(args)) {
+		return { value: args, changed: false };
+	}
+
+	let changed = false;
+	const result: Record<string, unknown> = { ...(args as Record<string, unknown>) };
+
+	for (const [key, value] of Object.entries(result)) {
+		if (typeof value !== "string") continue;
+
+		const trimmed = value.trim();
+		if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) continue;
+
+		try {
+			const parsed = JSON.parse(trimmed) as unknown;
+			if (parsed !== null && typeof parsed === "object") {
+				result[key] = parsed;
+				changed = true;
+			}
+		} catch {
+			// Not valid JSON — leave as-is; coerceArgsFromErrors may still
+			// handle it via tryParseLeadingJsonContainer or healing.
+		}
+	}
+
+	return changed ? { value: result, changed: true } : { value: args, changed: false };
+}
+
 // Create a singleton AJV instance with formats (only if not in browser extension)
 // AJV requires 'unsafe-eval' CSP which is not allowed in Manifest V3
 //
@@ -722,7 +763,25 @@ export function validateToolArguments(tool: Tool, toolCall: ToolCall): ToolCall[
 		changed = true;
 	}
 
-	// Validate after normalization
+	// Pre-scan: auto-parse string values that look like JSON arrays/objects.
+	// LLMs sometimes serialize array/object parameters as JSON strings.
+	// This runs before AJV validation (not after failure), so it proactively
+	// prevents type errors like "ops: must be array" instead of recovering.
+	const preParsed = preParseJsonStrings(normalizedArgs);
+	if (preParsed.changed) {
+		normalizedArgs = preParsed.value;
+		changed = true;
+
+		// Re-normalize: the pre-scan may have parsed string-encoded arrays
+		// or objects, revealing null fields that weren't visible when they
+		// were still strings. Strip those nulls from optional fields now.
+		const postScanNormalization = normalizeOptionalNullsForSchema(tool.parameters, normalizedArgs);
+		if (postScanNormalization.changed) {
+			normalizedArgs = postScanNormalization.value;
+		}
+	}
+
+	// Validate after normalization and pre-scan
 	if (validate(normalizedArgs)) {
 		return normalizedArgs as ToolCall["arguments"];
 	}

@@ -6,3 +6,4 @@
 
 - [x] 定时任务输出结果使用 AI card
 - [ ] cron-agent-subprocess-execution
+- [ ] 测试 todo-write 参数序列化修复

@@ -1,6 +1,8 @@
 Manages a phased task list. Pass `ops`: a flat array of operations.
 The next pending task is auto-promoted to `in_progress` after each completion.
 
+> **IMPORTANT**: `ops` must be a **native JSON array**, NOT a JSON string. Do NOT wrap the array in quotes. For example, pass `ops=[{op:"init",list:[...]}]`, NOT `ops="[{op:\"init\",list:[...]}]"`.
+
 ## Operations
 
 |`op`|Required fields|Effect|
