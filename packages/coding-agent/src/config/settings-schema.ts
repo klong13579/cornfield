@@ -189,6 +189,12 @@ export const DEFAULT_BASH_INTERCEPTOR_RULES: BashInterceptorRule[] = [
 		tool: "write",
 		message: "Use the `write` tool instead of echo/cat redirection. It handles encoding and provides confirmation.",
 	},
+	{
+		pattern: "^\\s*skill(\\s+|$|;|&&|\\|)",
+		tool: "read",
+		message:
+			"There is no `skill` shell command. To load a skill, use the read tool: `read skill://<name>`. To discover skills, use `read ~/.omp/agent/skills/`.",
+	},
 ];
 
 export const SETTINGS_SCHEMA = {
