@@ -1360,7 +1360,8 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		const repeatToolDescriptions = settings.get("repeatToolDescriptions");
 		const eagerTasks = settings.get("task.eager");
 		const intentField = settings.get("tools.intentTracing") || $flag("PI_INTENT_TRACING") ? INTENT_FIELD : undefined;
-		const rebuildSystemPrompt = async (toolNames: string[], tools: Map<string, AgentTool>): Promise<string> => {
+		const rebuildSystemPrompt = async (toolNamesInput: string[], tools: Map<string, AgentTool>): Promise<string> => {
+			const toolNames = [...toolNamesInput].sort();
 			toolContextStore.setToolNames(toolNames);
 			const discoverableMCPTools = mcpDiscoveryEnabled ? collectDiscoverableMCPTools(tools.values()) : [];
 			const discoverableMCPSummary = summarizeDiscoverableMCPTools(discoverableMCPTools);

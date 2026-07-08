@@ -1145,7 +1145,6 @@ export const createSelfEvolutionExtension: ExtensionFactory = api => {
 			workflowMiner = undefined;
 			feedbackTracker = undefined;
 			contextAwareRetriever = undefined;
-			extractor = undefined;
 		} catch (err) {
 			logger.error("Self-evolution session_shutdown handler failed", { error: String(err) });
 		}
