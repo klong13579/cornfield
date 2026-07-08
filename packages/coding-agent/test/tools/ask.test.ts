@@ -757,3 +757,20 @@ describe("AskTool multi-question navigation", () => {
 		expect(editor).toHaveBeenCalledTimes(1);
 	});
 });
+
+describe("AskTool.createIf gate", () => {
+	it("returns null when ask.enabled is false", () => {
+		const session = createSession({ settings: Settings.isolated({ "ask.enabled": false }) });
+		expect(AskTool.createIf(session)).toBeNull();
+	});
+
+	it("returns null when hasUI is false (existing behavior preserved)", () => {
+		const session = createSession({ hasUI: false });
+		expect(AskTool.createIf(session)).toBeNull();
+	});
+
+	it("returns an AskTool when both ask.enabled and hasUI are true (default)", () => {
+		const session = createSession();
+		expect(AskTool.createIf(session)).toBeInstanceOf(AskTool);
+	});
+});

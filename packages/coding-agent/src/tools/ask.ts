@@ -342,7 +342,9 @@ export class AskTool implements AgentTool<typeof askSchema, AskToolDetails> {
 	}
 
 	static createIf(session: ToolSession): AskTool | null {
-		return session.hasUI ? new AskTool(session) : null;
+		if (!session.hasUI) return null;
+		if (!session.settings.get("ask.enabled")) return null;
+		return new AskTool(session);
 	}
 
 	/** Send terminal notification when ask tool is waiting for input */
