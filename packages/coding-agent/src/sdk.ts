@@ -1,13 +1,14 @@
+import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-
-import * as fs from "node:fs/promises";
 
 import {
 	Agent,
 	type AgentEvent,
 	type AgentMessage,
 	type AgentTool,
+	DEFAULT_DOOM_LOOP_CONFIG,
+	type DoomLoopConfig,
 	INTENT_FIELD,
 	type ThinkingLevel,
 } from "@oh-my-pi/pi-agent-core";
@@ -43,6 +44,7 @@ import { loadPromptTemplates as loadPromptTemplatesInternal, type PromptTemplate
 import { Settings, type SkillsSettings } from "./config/settings";
 import { CursorExecHandlers } from "./cursor";
 import "./discovery";
+import { clearCache as clearFsCache } from "./capability/fs";
 import { resolveConfigValue } from "./config/resolve-config-value";
 import { initializeWithSettings } from "./discovery";
 import { TtsrManager } from "./export/ttsr";
@@ -104,7 +106,6 @@ import {
 import { AgentSession } from "./session/agent-session";
 import { AuthStorage } from "./session/auth-storage";
 import { convertToLlm } from "./session/messages";
-import { clearCache as clearFsCache } from "./capability/fs";
 import { SessionManager } from "./session/session-manager";
 import { SkillWatcher } from "./session/skill-watcher";
 import { closeAllConnections } from "./ssh/connection-manager";
@@ -302,6 +303,63 @@ export {
 
 function getDefaultAgentDir(): string {
 	return getAgentDir();
+}
+
+/**
+ * Resolve the streaming doom-loop detector config for the active model.
+ * Returns `undefined` when the detector is disabled, so the agent loop
+ * runs the no-op fast path.
+ *
+ * `maxThinkingCharsByModel` is a substring match against `model.id` (first
+ * match wins), mirroring the `edit.modelVariants` resolution pattern. This is
+ * the per-model override knob the user requested for `minimax-m3`.
+ *
+ * Note: `Settings.getGroup(prefix)` strips the prefix and returns the
+ * remaining suffix verbatim — flat keys, not nested. So we read
+ * `g["doomLoop.enabled"]` rather than `g.doomLoop.enabled` (see
+ * `Settings.getGroup` in `config/settings.ts`).
+ */
+function resolveDoomLoopConfig(model: Model | undefined, settings: Settings): DoomLoopConfig | undefined {
+	if (!model) return undefined;
+	const g = settings.getGroup("streaming") as Record<string, unknown>;
+	if (g["doomLoop.enabled"] === false) return undefined;
+	const perModel = resolvePerModelMaxThinking(
+		model.id,
+		(g["doomLoop.maxThinkingCharsByModel"] as Record<string, number> | undefined) ?? {},
+	);
+	const maxThinkingChars = perModel ?? (g["doomLoop.maxThinkingChars"] as number | undefined) ?? 0;
+	return {
+		enabled: true,
+		thinking: {
+			minChars:
+				(g["doomLoop.thinking.minChars"] as number | undefined) ?? DEFAULT_DOOM_LOOP_CONFIG.thinking.minChars,
+			uniqueRatioThreshold:
+				(g["doomLoop.thinking.uniqueRatio"] as number | undefined) ??
+				DEFAULT_DOOM_LOOP_CONFIG.thinking.uniqueRatioThreshold,
+			minPhraseRepeat:
+				(g["doomLoop.thinking.minPhraseRepeat"] as number | undefined) ??
+				DEFAULT_DOOM_LOOP_CONFIG.thinking.minPhraseRepeat,
+			minPhraseLength:
+				(g["doomLoop.thinking.minPhraseLength"] as number | undefined) ??
+				DEFAULT_DOOM_LOOP_CONFIG.thinking.minPhraseLength,
+		},
+		text: {
+			minChars: (g["doomLoop.text.minChars"] as number | undefined) ?? DEFAULT_DOOM_LOOP_CONFIG.text.minChars,
+			ngramSize: (g["doomLoop.text.ngramSize"] as number | undefined) ?? DEFAULT_DOOM_LOOP_CONFIG.text.ngramSize,
+			minNgramRepeat:
+				(g["doomLoop.text.minNgramRepeat"] as number | undefined) ?? DEFAULT_DOOM_LOOP_CONFIG.text.minNgramRepeat,
+		},
+		maxThinkingChars: maxThinkingChars > 0 ? maxThinkingChars : undefined,
+		maxRetries: (g["doomLoop.maxRetries"] as number | undefined) ?? DEFAULT_DOOM_LOOP_CONFIG.maxRetries ?? 1,
+		retryStreamOptions: DEFAULT_DOOM_LOOP_CONFIG.retryStreamOptions,
+	};
+}
+
+function resolvePerModelMaxThinking(modelId: string, byModel: Record<string, number>): number | undefined {
+	for (const [pattern, value] of Object.entries(byModel)) {
+		if (typeof value === "number" && value >= 0 && modelId.includes(pattern)) return value;
+	}
+	return undefined;
 }
 
 // Discovery Functions
@@ -1630,6 +1688,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			},
 			intentTracing: !!intentField,
 			getToolChoice: () => session?.nextToolChoice(),
+			doomLoop: resolveDoomLoopConfig(model, settings),
 		});
 
 		cursorEventEmitter = event => agent.emitExternalEvent(event);

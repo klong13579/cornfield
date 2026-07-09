@@ -550,6 +550,137 @@ export const SETTINGS_SCHEMA = {
 		},
 	},
 
+	// Doom-loop / repetitive-degeneration detection. Streaming-time guard
+	// against the failure mode documented in Holtzman 2020 ("Curious Case of
+	// Neural Text Degeneration") and Liquid AI 2026 ("Antidoom"). When the
+	// detector fires the agent loop finalizes the in-flight assistant message
+	// with stopReason="length" and a descriptive errorMessage; the session
+	// JSONL still records the partial content for postmortem.
+	"streaming.doomLoop.enabled": {
+		type: "boolean",
+		default: true,
+		ui: {
+			tab: "model",
+			label: "Doom-Loop Detection",
+			description:
+				"Abort assistant messages that collapse into repetitive thinking / text (default true). Disable for replay / benchmark fixtures.",
+		},
+	},
+
+	"streaming.doomLoop.thinking.minChars": {
+		type: "number",
+		default: 5000,
+		ui: {
+			tab: "model",
+			label: "Doom-Loop Thinking minChars",
+			description: "Skip the thinking-block check until cumulative thinking is at least this long.",
+			submenu: true,
+		},
+	},
+
+	"streaming.doomLoop.thinking.uniqueRatio": {
+		type: "number",
+		default: 0.15,
+		ui: {
+			tab: "model",
+			label: "Doom-Loop Thinking Unique Ratio",
+			description:
+				"Fire when unique 4-gram count / total 4-gram count drops below this (0..1). Lower = stricter. The 143736 minimax-m3 case sat near 0.05.",
+			submenu: true,
+		},
+	},
+
+	"streaming.doomLoop.thinking.minPhraseRepeat": {
+		type: "number",
+		default: 200,
+		ui: {
+			tab: "model",
+			label: "Doom-Loop Thinking Phrase Repeat",
+			description: "Fire when any normalized phrase of >= minPhraseLength appears this many times.",
+			submenu: true,
+		},
+	},
+
+	"streaming.doomLoop.thinking.minPhraseLength": {
+		type: "number",
+		default: 20,
+		ui: {
+			tab: "model",
+			label: "Doom-Loop Thinking Phrase Length",
+			description: "Minimum character length for a phrase to count toward the repeat threshold.",
+			submenu: true,
+		},
+	},
+
+	"streaming.doomLoop.text.minChars": {
+		type: "number",
+		default: 500,
+		ui: {
+			tab: "model",
+			label: "Doom-Loop Text minChars",
+			description: "Skip the text-block n-gram check until cumulative text is at least this long.",
+			submenu: true,
+		},
+	},
+
+	"streaming.doomLoop.text.ngramSize": {
+		type: "number",
+		default: 60,
+		ui: {
+			tab: "model",
+			label: "Doom-Loop Text N-gram Size",
+			description: "Character length of the sliding-window n-gram used for the text-block check.",
+			submenu: true,
+		},
+	},
+
+	"streaming.doomLoop.text.minNgramRepeat": {
+		type: "number",
+		default: 4,
+		ui: {
+			tab: "model",
+			label: "Doom-Loop Text N-gram Repeat",
+			description: "Fire when any n-gram of the configured size appears this many times.",
+			submenu: true,
+		},
+	},
+
+	"streaming.doomLoop.maxThinkingChars": {
+		type: "number",
+		default: 16384,
+		ui: {
+			tab: "model",
+			label: "Max Thinking Chars",
+			description:
+				"Hard cap on cumulative thinking content per assistant message. 0 = no cap. Per-model override via maxThinkingCharsByModel.",
+			submenu: true,
+		},
+	},
+
+	"streaming.doomLoop.maxThinkingCharsByModel": {
+		type: "record",
+		default: {} as Record<string, number>,
+		ui: {
+			tab: "model",
+			label: "Max Thinking Chars by Model",
+			description:
+				"Per-model override for maxThinkingChars. Keys are model-id substrings (e.g. 'minimax-m3'); first match wins.",
+			submenu: true,
+		},
+	},
+
+	"streaming.doomLoop.maxRetries": {
+		type: "number",
+		default: 1,
+		ui: {
+			tab: "model",
+			label: "Doom-Loop Retry Attempts",
+			description:
+				"How many times to re-stream the same prompt with thinking disabled when the doom-loop detector fires. 0 = terminate on detection (legacy behavior). 1 = one recovery attempt (default).",
+			submenu: true,
+		},
+	},
+
 	// Retries
 	"retry.enabled": { type: "boolean", default: true },
 
@@ -571,7 +702,8 @@ export const SETTINGS_SCHEMA = {
 		ui: {
 			tab: "model",
 			label: "Fallback Cooldown Floor (ms)",
-			description: "Minimum cooldown applied to a failed model in the fallback chain. The cooldown from the error (retry-after-ms or rate-limit reason) is floored at this value. Default 60000.",
+			description:
+				"Minimum cooldown applied to a failed model in the fallback chain. The cooldown from the error (retry-after-ms or rate-limit reason) is floored at this value. Default 60000.",
 			submenu: true,
 		},
 	},
@@ -581,7 +713,8 @@ export const SETTINGS_SCHEMA = {
 		ui: {
 			tab: "model",
 			label: "Fallback Flapping Window (ms)",
-			description: "If the same model fails again within this window, its cooldown is escalated (× 5, floored at 5min) to break primary→fallback→restore→primary loops. Default 60000.",
+			description:
+				"If the same model fails again within this window, its cooldown is escalated (× 5, floored at 5min) to break primary→fallback→restore→primary loops. Default 60000.",
 			submenu: true,
 		},
 	},
@@ -2179,6 +2312,37 @@ export interface ShellMinimizerSettings {
 	maxCaptureBytes: number;
 }
 
+export interface StreamingDoomLoopThinkingSettings {
+	minChars: number;
+	uniqueRatio: number;
+	minPhraseRepeat: number;
+	minPhraseLength: number;
+}
+
+export interface StreamingDoomLoopTextSettings {
+	minChars: number;
+	ngramSize: number;
+	minNgramRepeat: number;
+}
+
+/**
+ * Flat (not nested) because `Settings.getGroup` strips only the group
+ * prefix and returns the remaining suffix verbatim. The shape mirrors
+ * `CompactionSettings` and other flat groups.
+ */
+export interface StreamingDoomLoopSettings {
+	enabled: boolean;
+	maxThinkingChars: number;
+	maxThinkingCharsByModel: Record<string, number>;
+	maxRetries: number;
+	thinking: StreamingDoomLoopThinkingSettings;
+	text: StreamingDoomLoopTextSettings;
+}
+
+export interface StreamingSettings {
+	doomLoop: StreamingDoomLoopSettings;
+}
+
 /** Map group prefix -> typed settings interface */
 export interface GroupTypeMap {
 	compaction: CompactionSettings;
@@ -2197,6 +2361,7 @@ export interface GroupTypeMap {
 	modelTags: ModelTagsSettings;
 	cycleOrder: string[];
 	shellMinimizer: ShellMinimizerSettings;
+	streaming: StreamingSettings;
 }
 
 export type GroupPrefix = keyof GroupTypeMap;

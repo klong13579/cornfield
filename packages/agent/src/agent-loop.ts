@@ -6,11 +6,13 @@ import {
 	type AssistantMessage,
 	type Context,
 	EventStream,
+	type SimpleStreamOptions,
 	streamSimple,
 	type ToolResultMessage,
 	validateToolArguments,
 } from "@oh-my-pi/pi-ai";
 import { sanitizeText } from "@oh-my-pi/pi-natives";
+import { type DoomVerdict, detectDoomLoop } from "./streaming/doom-loop-detector";
 import type {
 	AgentContext,
 	AgentEvent,
@@ -304,8 +306,31 @@ async function runLoop(
 }
 
 /**
+ * Result of a single stream attempt. The outer retry loop in
+ * `streamAssistantResponse` uses this to decide whether to return the
+ * final message, pop and retry, or propagate an abort.
+ */
+type StreamAttemptResult =
+	| { kind: "clean"; message: AssistantMessage }
+	| { kind: "doom"; message: AssistantMessage; verdict: DoomVerdict }
+	| { kind: "aborted"; message: AssistantMessage };
+
+/**
  * Stream an assistant response from the LLM.
  * This is where AgentMessage[] gets transformed to Message[] for the LLM.
+ *
+ * Wraps `streamAttempt` in a retry loop: when the doom-loop detector
+ * fires, the bad message is finalized with `stopReason: "length"`, the
+ * retry strips it from `context.messages` (so the model does not see the
+ * runaway on the next call), and `streamAttempt` is re-invoked with
+ * `attempt + 1`. The retry's stream options are derived from
+ * `config.doomLoop.retryStreamOptions(model, attempt)` — the default
+ * disables thinking so the recovery re-prompt takes the no-thinking path.
+ *
+ * The doom message is preserved in the agent event stream (via
+ * `message_end` already pushed by `streamAttempt`) and therefore in the
+ * session JSONL for postmortem, but the model only ever sees the final
+ * clean response on the next LLM call.
  */
 async function streamAssistantResponse(
 	context: AgentContext,
@@ -314,6 +339,44 @@ async function streamAssistantResponse(
 	stream: EventStream<AgentEvent, AgentMessage[]>,
 	streamFn?: StreamFn,
 ): Promise<AssistantMessage> {
+	const maxRetries = config.doomLoop?.enabled ? (config.doomLoop.maxRetries ?? 1) : 0;
+
+	for (let attempt = 0; attempt <= maxRetries; attempt++) {
+		const result = await streamAttempt(context, config, signal, stream, streamFn, attempt);
+		if (result.kind === "clean") return result.message;
+		if (result.kind === "aborted") return result.message;
+		// result.kind === "doom"
+		if (attempt >= maxRetries) return result.message;
+		// Strip the doom message from context.messages so the model does
+		// not see the runaway thinking on the next LLM call. The doom
+		// message is already pushed as `message_end` in the event stream,
+		// so the session JSONL preserves it for postmortem even though the
+		// model will never see it again.
+		if (context.messages.length > 0) {
+			context.messages.pop();
+		}
+	}
+
+	// Defensive: the loop always returns via one of the three branches
+	// above on every iteration. If we get here something is wrong with
+	// the loop bounds.
+	throw new Error("streamAssistantResponse: retry loop invariant violated");
+}
+
+/**
+ * One pass through `streamFunction` + doom detection. Returns whether
+ * the attempt produced a clean message, a doom-loop fire, or an abort.
+ * Does NOT pop context.messages on its own — the outer retry loop owns
+ * that.
+ */
+async function streamAttempt(
+	context: AgentContext,
+	config: AgentLoopConfig,
+	signal: AbortSignal | undefined,
+	stream: EventStream<AgentEvent, AgentMessage[]>,
+	streamFn: StreamFn | undefined,
+	attempt: number,
+): Promise<StreamAttemptResult> {
 	// Apply context transform if configured (AgentMessage[] → AgentMessage[])
 	let messages = context.messages;
 	if (config.transformContext) {
@@ -338,12 +401,20 @@ async function streamAssistantResponse(
 		(config.getApiKey ? await config.getApiKey(config.model.provider) : undefined) || config.apiKey;
 
 	const dynamicToolChoice = config.getToolChoice?.();
-	const response = await streamFunction(config.model, llmContext, {
+	const baseStreamOptions: SimpleStreamOptions = {
 		...config,
 		apiKey: resolvedApiKey,
 		toolChoice: dynamicToolChoice ?? config.toolChoice,
 		signal,
-	});
+	};
+	// On retry, apply the doom-loop recovery policy. The default hook
+	// strips `reasoning` (→ thinking disabled at the provider layer) so
+	// the recovery re-prompt takes the no-thinking path.
+	const streamOptions =
+		attempt > 0 && config.doomLoop?.retryStreamOptions
+			? { ...baseStreamOptions, ...(config.doomLoop.retryStreamOptions(config.model, attempt) ?? {}) }
+			: baseStreamOptions;
+	const response = await streamFunction(config.model, llmContext, streamOptions);
 
 	let partialMessage: AssistantMessage | null = null;
 	let addedPartial = false;
@@ -379,7 +450,7 @@ async function streamAssistantResponse(
 				stream.push({ type: "message_start", message: { ...abortedMessage } });
 			}
 			stream.push({ type: "message_end", message: abortedMessage });
-			return abortedMessage;
+			return { kind: "aborted", message: abortedMessage };
 		}
 
 		switch (event.type) {
@@ -403,6 +474,33 @@ async function streamAssistantResponse(
 					partialMessage = event.partial;
 					context.messages[context.messages.length - 1] = partialMessage;
 					config.onAssistantMessageEvent?.(partialMessage, event);
+
+					// Doom-loop detection. Runs after the user-installed
+					// interceptor so callers observe the same event we just
+					// classified. On fire, we finalize the partial, push
+					// `message_end` (so the session log records the failure
+					// mode), and return — the outer retry loop decides
+					// whether to pop-and-retry or give up. The for-await
+					// breaks naturally and the rest of the provider stream
+					// is GC'd.
+					if (config.doomLoop) {
+						const verdict = detectDoomLoop(partialMessage, event, config.doomLoop);
+						if (verdict.kind === "doom") {
+							const abortedMessage: AssistantMessage = {
+								...partialMessage,
+								stopReason: "length",
+								errorMessage: `Doom loop detected (${verdict.where}): ${verdict.reason}`,
+							};
+							if (addedPartial) {
+								context.messages[context.messages.length - 1] = abortedMessage;
+							} else {
+								context.messages.push(abortedMessage);
+							}
+							stream.push({ type: "message_end", message: abortedMessage });
+							return { kind: "doom", message: abortedMessage, verdict };
+						}
+					}
+
 					if (signal?.aborted) {
 						continue;
 					}
@@ -426,12 +524,13 @@ async function streamAssistantResponse(
 					stream.push({ type: "message_start", message: { ...finalMessage } });
 				}
 				stream.push({ type: "message_end", message: finalMessage });
-				return finalMessage;
+				return { kind: "clean", message: finalMessage };
 			}
 		}
 	}
 
-	return await response.result();
+	const finalMessage = await response.result();
+	return { kind: "clean", message: finalMessage };
 }
 
 /**

@@ -14,6 +14,7 @@ import type {
 	ToolResultMessage,
 } from "@oh-my-pi/pi-ai";
 import type { Static, TSchema } from "@sinclair/typebox";
+import type { DoomLoopConfig } from "./streaming/doom-loop-detector";
 
 /** Stream function - can return sync or Promise for async config lookup */
 export type StreamFn = (
@@ -139,6 +140,18 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 	 * Callers may abort synchronously to stop consuming buffered provider events.
 	 */
 	onAssistantMessageEvent?: (message: AssistantMessage, event: AssistantMessageEvent) => void;
+
+	/**
+	 * Optional streaming doom-loop detector. When set and enabled, the agent
+	 * loop inspects each in-flight assistant message and, on detecting the
+	 * repetitive-degeneration pattern documented in the doom-loop literature,
+	 * finalizes the message with `stopReason: "length"` and a descriptive
+	 * `errorMessage` so the session log carries the failure mode explicitly.
+	 *
+	 * See `DoomLoopConfig` for thresholds and the `packages/agent/src/streaming/`
+	 * module for the detection algorithm.
+	 */
+	doomLoop?: DoomLoopConfig;
 
 	/**
 	 * Dynamic tool choice override, resolved per LLM call.

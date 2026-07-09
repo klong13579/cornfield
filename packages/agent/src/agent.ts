@@ -21,6 +21,7 @@ import {
 	type ToolResultMessage,
 } from "@oh-my-pi/pi-ai";
 import { agentLoop, agentLoopContinue } from "./agent-loop";
+import type { DoomLoopConfig } from "./streaming/doom-loop-detector";
 import type {
 	AgentContext,
 	AgentEvent,
@@ -140,6 +141,14 @@ export interface AgentOptions {
 	 * Use this when abort decisions must happen before buffered events continue flowing.
 	 */
 	onAssistantMessageEvent?: (message: AssistantMessage, event: AssistantMessageEvent) => void;
+
+	/**
+	 * Optional streaming doom-loop detector. See `DoomLoopConfig` in
+	 * `packages/agent/src/streaming/doom-loop-detector.ts`. When unset, the
+	 * agent loop runs without the detector — useful for tests, eval
+	 * harnesses, and downstream callers that want to roll their own.
+	 */
+	doomLoop?: DoomLoopConfig;
 	/**
 	 * Custom token budgets for thinking levels (token-based providers only).
 	 */
@@ -250,6 +259,7 @@ export class Agent {
 	#onPayload?: SimpleStreamOptions["onPayload"];
 	#onResponse?: SimpleStreamOptions["onResponse"];
 	#onAssistantMessageEvent?: (message: AssistantMessage, event: AssistantMessageEvent) => void;
+	#doomLoop?: DoomLoopConfig;
 
 	/** Buffered Cursor tool results with text length at time of call (for correct ordering) */
 	#cursorToolResultBuffer: CursorToolResultEntry[] = [];
@@ -288,6 +298,7 @@ export class Agent {
 		this.#intentTracing = opts.intentTracing === true;
 		this.#getToolChoice = opts.getToolChoice;
 		this.#onAssistantMessageEvent = opts.onAssistantMessageEvent;
+		this.#doomLoop = opts.doomLoop;
 	}
 
 	/**
@@ -498,6 +509,25 @@ export class Agent {
 	}
 
 	appendMessage(m: AgentMessage) {
+		// Doom-loop retraction. When the doom-loop detector fires the
+		// agent loop streams a final `message_end` for the doomed message
+		// (so the session JSONL keeps the record), then immediately re-
+		// streams with thinking disabled. The retry's clean response
+		// arrives as the next assistant `message_end`. We want the model
+		// to never see the doom thinking on future turns, so the clean
+		// response REPLACES the doom in `state.messages` rather than
+		// appending. The session log is unaffected because it consumes
+		// events directly and sees both message_ends.
+		const prev = this.#state.messages[this.#state.messages.length - 1];
+		if (
+			prev?.role === "assistant" &&
+			(prev as AssistantMessage).stopReason === "length" &&
+			(prev as AssistantMessage).errorMessage?.startsWith("Doom loop detected") === true &&
+			m.role === "assistant"
+		) {
+			this.#state.messages = [...this.#state.messages.slice(0, -1), m];
+			return;
+		}
 		this.#state.messages = [...this.#state.messages, m];
 	}
 
@@ -783,6 +813,7 @@ export class Agent {
 			transformToolCallArguments: this.#transformToolCallArguments,
 			intentTracing: this.#intentTracing,
 			onAssistantMessageEvent: this.#onAssistantMessageEvent,
+			doomLoop: this.#doomLoop,
 			getToolChoice,
 			getSteeringMessages: async () => {
 				if (skipInitialSteeringPoll) {

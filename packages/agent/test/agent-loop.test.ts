@@ -759,6 +759,179 @@ it("refreshes tools and system prompt between same-turn model calls", async () =
 	expect(callContexts[1]?.tools?.map(tool => tool.name)).toEqual(["alpha", "beta"]);
 });
 
+describe("agentLoop doom-loop detection", () => {
+	/** Reusable stream fixture that emits a degenerate thinking block. */
+	function degenerateThinkingStream(phrase: string, repeats: number) {
+		return () => {
+			const stream = new MockAssistantStream();
+			queueMicrotask(() => {
+				const text = phrase.repeat(repeats);
+				const partial = createAssistantMessage([{ type: "thinking", thinking: text }]);
+				stream.push({ type: "start", contentIndex: undefined, partial });
+				stream.push({
+					type: "thinking_start",
+					contentIndex: 0,
+					partial: { ...partial, content: [{ type: "thinking", thinking: "" }] },
+				});
+				stream.push({
+					type: "thinking_delta",
+					contentIndex: 0,
+					delta: text,
+					partial,
+				});
+				stream.push({ type: "thinking_end", contentIndex: 0, content: text, partial });
+			});
+			return stream;
+		};
+	}
+
+	it("aborts with stopReason=length when thinking collapses", async () => {
+		const context: AgentContext = {
+			systemPrompt: "You are helpful.",
+			messages: [],
+			tools: [],
+		};
+		const userPrompt: AgentMessage = createUserMessage("think about this");
+		const config: AgentLoopConfig = {
+			model: createModel(),
+			convertToLlm: identityConverter,
+			doomLoop: {
+				enabled: true,
+				thinking: { minChars: 100, uniqueRatioThreshold: 0.15, minPhraseRepeat: 5, minPhraseLength: 20 },
+				text: { minChars: 500, ngramSize: 60, minNgramRepeat: 4 },
+			},
+		};
+
+		const streamFn = degenerateThinkingStream("All 78 tests pass. ", 20);
+
+		const events: AgentEvent[] = [];
+		const stream = agentLoop([userPrompt], context, config, undefined, streamFn);
+		for await (const event of stream) {
+			events.push(event);
+		}
+		const messages = await stream.result();
+
+		const assistant = messages.find(m => m.role === "assistant");
+		expect(assistant).toBeDefined();
+		if (assistant && assistant.role === "assistant") {
+			expect(assistant.stopReason).toBe("length");
+			expect(assistant.errorMessage).toMatch(/Doom loop detected/);
+			expect(assistant.errorMessage).toMatch(/thinking/);
+		}
+
+		// agent_end must still fire so the session log records the partial.
+		const eventTypes = events.map(e => e.type);
+		expect(eventTypes).toContain("agent_end");
+	});
+
+	it("does not abort when doomLoop is disabled", async () => {
+		const context: AgentContext = {
+			systemPrompt: "You are helpful.",
+			messages: [],
+			tools: [],
+		};
+		const userPrompt: AgentMessage = createUserMessage("think about this");
+		const config: AgentLoopConfig = {
+			model: createModel(),
+			convertToLlm: identityConverter,
+			// No doomLoop field at all -> detector not wired.
+		};
+
+		// Same degenerate stream plus a final done event so the for-await
+		// can complete; with no detector the loop just runs to completion.
+		const streamFn = () => {
+			const stream = new MockAssistantStream();
+			queueMicrotask(() => {
+				const phrase = "All 78 tests pass. ";
+				const repeats = 20;
+				const text = phrase.repeat(repeats);
+				const partial = createAssistantMessage([{ type: "thinking", thinking: text }]);
+				stream.push({ type: "start", contentIndex: undefined, partial });
+				stream.push({
+					type: "thinking_start",
+					contentIndex: 0,
+					partial: { ...partial, content: [{ type: "thinking", thinking: "" }] },
+				});
+				stream.push({
+					type: "thinking_delta",
+					contentIndex: 0,
+					delta: text,
+					partial,
+				});
+				stream.push({ type: "thinking_end", contentIndex: 0, content: text, partial });
+				stream.push({ type: "done", reason: "stop", message: partial });
+			});
+			return stream;
+		};
+
+		const events: AgentEvent[] = [];
+		const stream = agentLoop([userPrompt], context, config, undefined, streamFn);
+		for await (const event of stream) {
+			events.push(event);
+		}
+		const messages = await stream.result();
+		const assistant = messages.find(m => m.role === "assistant");
+		expect(assistant).toBeDefined();
+		if (assistant && assistant.role === "assistant") {
+			expect(assistant.stopReason).not.toBe("length");
+			expect(assistant.errorMessage ?? "").not.toMatch(/Doom loop detected/);
+		}
+	});
+
+	it("aborts when maxThinkingChars cap is exceeded", async () => {
+		const context: AgentContext = {
+			systemPrompt: "You are helpful.",
+			messages: [],
+			tools: [],
+		};
+		const userPrompt: AgentMessage = createUserMessage("think about this");
+		const config: AgentLoopConfig = {
+			model: createModel(),
+			convertToLlm: identityConverter,
+			doomLoop: {
+				enabled: true,
+				thinking: { minChars: 100, uniqueRatioThreshold: 0.15, minPhraseRepeat: 5, minPhraseLength: 20 },
+				text: { minChars: 500, ngramSize: 60, minNgramRepeat: 4 },
+				maxThinkingChars: 100,
+			},
+		};
+
+		const streamFn = () => {
+			const stream = new MockAssistantStream();
+			queueMicrotask(() => {
+				const text = "x".repeat(500);
+				const partial = createAssistantMessage([{ type: "thinking", thinking: text }]);
+				stream.push({ type: "start", contentIndex: undefined, partial });
+				stream.push({
+					type: "thinking_start",
+					contentIndex: 0,
+					partial: { ...partial, content: [{ type: "thinking", thinking: "" }] },
+				});
+				stream.push({
+					type: "thinking_delta",
+					contentIndex: 0,
+					delta: text,
+					partial,
+				});
+				stream.push({ type: "thinking_end", contentIndex: 0, content: text, partial });
+			});
+			return stream;
+		};
+
+		const stream = agentLoop([userPrompt], context, config, undefined, streamFn);
+		for await (const _ of stream) {
+			// consume
+		}
+		const messages = await stream.result();
+		const assistant = messages.find(m => m.role === "assistant");
+		expect(assistant).toBeDefined();
+		if (assistant && assistant.role === "assistant") {
+			expect(assistant.stopReason).toBe("length");
+			expect(assistant.errorMessage).toContain("thinking_cap");
+		}
+	});
+});
+
 describe("agentLoopContinue with AgentMessage", () => {
 	it("should throw when context has no messages", () => {
 		const context: AgentContext = {
