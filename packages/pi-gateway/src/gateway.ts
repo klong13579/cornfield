@@ -35,6 +35,7 @@ import { NewSessionHandler } from "./gateway-new-session";
 import { ResponseHandler } from "./gateway-response";
 import { SkillCommand } from "./gateway-skills";
 import { HostToolDispatcher } from "./host-tool-dispatcher";
+import { createDingtalkSendMessageToolDefinitions } from "./host-tools/dingtalk-send-message-tool";
 import { clearRestartSentinel, readRestartSentinel, writeRestartSentinel } from "./restart-sentinel";
 import { createCronToolDefinitions } from "./scheduler/host-tool";
 import { type BridgeStat, type QueueStat, SessionManager } from "./session-manager";
@@ -505,6 +506,7 @@ export class Gateway {
 			...createCronToolDefinitions(ctx),
 			...createBridgeStatusToolDefinitions({ getBridge: ctx.getBridge }),
 			...createDingtalkAttachmentToolDefinitions(ctx),
+			...createDingtalkSendMessageToolDefinitions(ctx),
 		]);
 		return dispatcher;
 	}

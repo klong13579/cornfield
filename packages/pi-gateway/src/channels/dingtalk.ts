@@ -731,51 +731,66 @@ export class DingTalkChannel extends BaseChannel {
 						segmentBusy = true;
 
 						// Async: finalize old card, create new card.
+						// The outer try/catch is a final safety net: the inner
+						// finishAICard has its own catch, but createAICardForTarget
+						// (or a future refactor) could throw — and `void () => {}`
+						// does NOT swallow rejections. Without this, a single
+						// malformed card response would convert to unhandledRejection.
 						void (async () => {
-							if (oldText.trim()) {
-								const segAnswer = buildAnswerBlock(oldText);
-								try {
-									await finishAICard(
-										oldCard,
-										{
-											content: oldText,
-											blockList: [...oldBlocks, segAnswer],
-											quoteContent: quoteText,
-											statusLine: "",
-											copyContent: oldText,
-											hasAction: false,
-											version: 1 as const,
-										},
-										config,
-									);
-								} catch (err) {
-									logger.warn("[DingTalk] segment finishAICard failed", {
+							try {
+								if (oldText.trim()) {
+									const segAnswer = buildAnswerBlock(oldText);
+									try {
+										await finishAICard(
+											oldCard,
+											{
+												content: oldText,
+												blockList: [...oldBlocks, segAnswer],
+												quoteContent: quoteText,
+												statusLine: "",
+												copyContent: oldText,
+												hasAction: false,
+												version: 1 as const,
+											},
+											config,
+										);
+									} catch (err) {
+										logger.warn("[DingTalk] segment finishAICard failed", {
+											accountId: this.#accountId,
+											conversationId: inbound.conversationId,
+											error: err instanceof Error ? err.message : String(err),
+										});
+									}
+								}
+
+								const nextCard = await createAICardForTarget(config, target, { quoteContent: quoteText });
+								if (nextCard) {
+									context.registerCardAction?.({
+										cardInstanceId: nextCard.cardInstanceId,
+										accountId: this.#accountId,
+										sessionId: inbound.conversationId,
+									});
+									currentCard = nextCard;
+									cards.push(nextCard);
+								} else {
+									logger.warn("[DingTalk] segment card creation failed, reusing old card", {
 										accountId: this.#accountId,
 										conversationId: inbound.conversationId,
-										error: err instanceof Error ? err.message : String(err),
 									});
 								}
-							}
-
-							const nextCard = await createAICardForTarget(config, target, { quoteContent: quoteText });
-							if (nextCard) {
-								context.registerCardAction?.({
-									cardInstanceId: nextCard.cardInstanceId,
-									accountId: this.#accountId,
-									sessionId: inbound.conversationId,
-								});
-								currentCard = nextCard;
-								cards.push(nextCard);
-							} else {
-								logger.warn("[DingTalk] segment card creation failed, reusing old card", {
+								segmentBusy = false;
+								// Flush any buffered text now that the new card is ready.
+								if (segmentText) {
+									void streamAICard(currentCard, segmentText, blocks, config).catch(() => {});
+								}
+							} catch (err) {
+								logger.error("[DingTalk] segment-split IIFE threw (swallowed)", {
 									accountId: this.#accountId,
 									conversationId: inbound.conversationId,
+									error: err instanceof Error ? err.message : String(err),
+									stack: err instanceof Error ? err.stack : undefined,
 								});
-							}
-							segmentBusy = false;
-							// Flush any buffered text now that the new card is ready.
-							if (segmentText) {
-								void streamAICard(currentCard, segmentText, blocks, config).catch(() => {});
+								segmentBusy = false;
 							}
 						})();
 					}
@@ -826,47 +841,57 @@ export class DingTalkChannel extends BaseChannel {
 						segmentBusy = true;
 
 						void (async () => {
-							if (oldText.trim() || oldBlocks.length > 0) {
-								const segAnswer = oldText.trim() ? buildAnswerBlock(oldText) : null;
-								const finalSegBlocks = segAnswer ? [...oldBlocks, segAnswer] : oldBlocks;
-								try {
-									await finishAICard(
-										oldCard,
-										{
-											content: oldText,
-											blockList: finalSegBlocks,
-											quoteContent: quoteText,
-											statusLine: "",
-											copyContent: oldText,
-											hasAction: false,
-											version: 1 as const,
-										},
-										config,
-									);
-								} catch (err) {
-									logger.warn("[DingTalk] segment finishAICard failed (tool boundary)", {
-										accountId: this.#accountId,
-										conversationId: inbound.conversationId,
-										error: err instanceof Error ? err.message : String(err),
-									});
+							try {
+								if (oldText.trim() || oldBlocks.length > 0) {
+									const segAnswer = oldText.trim() ? buildAnswerBlock(oldText) : null;
+									const finalSegBlocks = segAnswer ? [...oldBlocks, segAnswer] : oldBlocks;
+									try {
+										await finishAICard(
+											oldCard,
+											{
+												content: oldText,
+												blockList: finalSegBlocks,
+												quoteContent: quoteText,
+												statusLine: "",
+												copyContent: oldText,
+												hasAction: false,
+												version: 1 as const,
+											},
+											config,
+										);
+									} catch (err) {
+										logger.warn("[DingTalk] segment finishAICard failed (tool boundary)", {
+											accountId: this.#accountId,
+											conversationId: inbound.conversationId,
+											error: err instanceof Error ? err.message : String(err),
+										});
+									}
 								}
-							}
 
-							const nextCard = await createAICardForTarget(config, target, { quoteContent: quoteText });
-							if (nextCard) {
-								context.registerCardAction?.({
-									cardInstanceId: nextCard.cardInstanceId,
+								const nextCard = await createAICardForTarget(config, target, { quoteContent: quoteText });
+								if (nextCard) {
+									context.registerCardAction?.({
+										cardInstanceId: nextCard.cardInstanceId,
+										accountId: this.#accountId,
+										sessionId: inbound.conversationId,
+									});
+									currentCard = nextCard;
+									cards.push(nextCard);
+								}
+								segmentBusy = false;
+								// Push the tool result that triggered the split onto
+								// the new card's blocks.
+								blocks.push(buildToolBlock(pending, result.contentText, result.isError));
+								scheduleBlockPatch();
+							} catch (err) {
+								logger.error("[DingTalk] segment-split IIFE threw at tool boundary (swallowed)", {
 									accountId: this.#accountId,
-									sessionId: inbound.conversationId,
+									conversationId: inbound.conversationId,
+									error: err instanceof Error ? err.message : String(err),
+									stack: err instanceof Error ? err.stack : undefined,
 								});
-								currentCard = nextCard;
-								cards.push(nextCard);
+								segmentBusy = false;
 							}
-							segmentBusy = false;
-							// Push the tool result that triggered the split onto
-							// the new card's blocks.
-							blocks.push(buildToolBlock(pending, result.contentText, result.isError));
-							scheduleBlockPatch();
 						})();
 						return;
 					}
@@ -1434,9 +1459,20 @@ export class DingTalkChannel extends BaseChannel {
 			logger.error("[DingTalk] Stream error", { accountId: this.#accountId, error: err.message });
 		});
 
-		// Register robot message listener
+		// Register robot message listener.
+		// Both #handleMessage and #handleCardCallback are now internally
+		// try/catched, but the .catch here is a second line of defence:
+		// any future change that re-introduces a rejection must not be
+		// able to kill the gateway via unhandledRejection. The 14:32
+		// incident accumulated rejections because handleMessage had no
+		// outer catch — keep both layers in place.
 		this.#client.registerCallbackListener(TOPIC_ROBOT, (msg: DWClientDownStream) => {
-			void this.#handleMessage(msg);
+			void this.#handleMessage(msg).catch(err => {
+				logger.error("[DingTalk] registerCallbackListener(Robot) leaked rejection", {
+					accountId: this.#accountId,
+					error: err instanceof Error ? err.message : String(err),
+				});
+			});
 		});
 
 		// Register AI Card action callback listener. When the user clicks
@@ -1446,7 +1482,12 @@ export class DingTalkChannel extends BaseChannel {
 		// ActionRegistry, which looks up the card and calls bridge.abort()
 		// (or other action types in the future).
 		this.#client.registerCallbackListener(TOPIC_CARD, (msg: DWClientDownStream) => {
-			void this.#handleCardCallback(msg);
+			void this.#handleCardCallback(msg).catch(err => {
+				logger.error("[DingTalk] registerCallbackListener(Card) leaked rejection", {
+					accountId: this.#accountId,
+					error: err instanceof Error ? err.message : String(err),
+				});
+			});
 		});
 
 		// Start dedup cleanup timer
@@ -1970,6 +2011,14 @@ export class DingTalkChannel extends BaseChannel {
 	}
 
 	/**
+	 * Send a proactive text DM to an arbitrary user via robot OAuth API.
+	 * The message appears in the robot’s single-chat with that user.
+	 */
+	async sendProactiveDM(targetUserId: string, text: string): Promise<void> {
+		return this.#sendViaOAuthDM(targetUserId, text);
+	}
+
+	/**
 	 * `finishAICard` completes. `fileType` is the extension (without
 	 * the dot) — derived from the path; DingTalk docs explicitly
 	 * list xlsx/pdf/zip/rar/doc/docx.
@@ -2070,7 +2119,18 @@ export class DingTalkChannel extends BaseChannel {
 			// Timeout detection
 			if (elapsed > TIMEOUT_THRESHOLD) {
 				logger.debug("[DingTalk] Heartbeat timeout", { elapsedSec: Math.round(elapsed / 1000) });
-				void this.#doReconnect();
+				void this.#doReconnect().catch(err => {
+					// #doReconnect has its own try/catch internally, but a
+					// rejection leaking from the chain (e.g. an awaited
+					// step that the internal try didn't wrap) must not
+					// become an unhandledRejection. The 14:32 incident
+					// accumulated rejections on a network blip; guard
+					// every fire-and-forget entry point.
+					logger.error("[DingTalk] #doReconnect leaked rejection (heartbeat timeout)", {
+						accountId: this.#accountId,
+						error: err instanceof Error ? err.message : String(err),
+					});
+				});
 				return;
 			}
 
@@ -2081,7 +2141,12 @@ export class DingTalkChannel extends BaseChannel {
 			// Give new connections a 15s grace period
 			if (socketState !== 1) {
 				if (timeSinceConnection < 15_000) return;
-				void this.#doReconnect(true);
+				void this.#doReconnect(true).catch(err => {
+					logger.error("[DingTalk] #doReconnect leaked rejection (socket-state)", {
+						accountId: this.#accountId,
+						error: err instanceof Error ? err.message : String(err),
+					});
+				});
 				return;
 			}
 
@@ -2112,7 +2177,12 @@ export class DingTalkChannel extends BaseChannel {
 						accountId: this.#accountId,
 					});
 					if (!this.#isStopped && !this.#isReconnecting) {
-						void this.#doReconnect(true);
+						void this.#doReconnect(true).catch(err => {
+							logger.error("[DingTalk] #doReconnect leaked rejection (server disconnect topic)", {
+								accountId: this.#accountId,
+								error: err instanceof Error ? err.message : String(err),
+							});
+						});
 					}
 				}
 			} catch {
@@ -2126,7 +2196,12 @@ export class DingTalkChannel extends BaseChannel {
 			logger.debug("[DingTalk] WebSocket close", { accountId: this.#accountId, code, reason });
 			this.#connected = false;
 			if (this.#isStopped) return;
-			void this.#doReconnect(true);
+			void this.#doReconnect(true).catch(err => {
+				logger.error("[DingTalk] #doReconnect leaked rejection (ws close)", {
+					accountId: this.#accountId,
+					error: err instanceof Error ? err.message : String(err),
+				});
+			});
 		});
 	}
 
@@ -2524,6 +2599,23 @@ export class DingTalkChannel extends BaseChannel {
 
 			await this.handleInbound(inbound);
 			this.#processedCount++;
+		} catch (err) {
+			// #handleMessage is invoked fire-and-forget via `void this.#handleMessage(msg)`
+			// in `registerCallbackListener` (line 1439). Without this catch, ANY
+			// rejection (e.g. resolveInboundAttachments throwing on a transient OAPI
+			// failure, handleInbound throwing on a malformed response) becomes an
+			// unhandledRejection, which the gateway's uncaughtException handler
+			// counts toward its 10/60s threshold. The 14:32 crash on 2026-07-09
+			// likely accumulated these on a network blip while the user was
+			// pasting multiple files. Swallow + log; the message is dropped but
+			// the channel stays alive.
+			logger.error("[DingTalk] message handling failed (swallowed)", {
+				accountId: this.#accountId,
+				messageId,
+				msgId: businessMsgId,
+				error: err instanceof Error ? err.message : String(err),
+				stack: err instanceof Error ? err.stack : undefined,
+			});
 		} finally {
 			this.#stopProcessingKeepalive();
 		}
