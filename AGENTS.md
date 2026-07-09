@@ -54,41 +54,38 @@ bun run release                  # bumps versions, finalizes CHANGELOGs, tags, p
 
 ### Restart gateway (after rebuild or config change)
 
+The canonical pattern for all gateway lifecycle operations. **Both `AGENTS.md`'s "DingTalk issue reproduction" section and `.omp/skills/repro-inject/SKILL.md` Step 1 point here** — do not duplicate this pattern elsewhere.
+
 **Use `omp gateway service` (graceful), not `launchctl kickstart -k` (SIGKILL).**
 
+#### Service-managed (standard)
+
+A fresh `omp gateway service install` writes `OMP_GATEWAY_TEST_MODE=1` and `OMP_GATEWAY_TEST_PORT=7890` into the plist by default (per `packages/pi-gateway/src/service-installer.ts` `PERSISTED_ENV_DEFAULTS`). Opt out with `export OMP_GATEWAY_TEST_MODE=0` before `service install`.
+
 ```bash
-# Graceful restart (preferred — goes through gateway.stop() which writes
+# One-time setup:
+omp gateway service install
+
+# Restart (graceful — goes through gateway.stop() which writes
 # the restart-sentinel and drains active sessions before exiting):
-omp gateway service stop          # SIGTERM via launchd
-sleep 5                            # let the gateway drain
-omp gateway service start         # launchd starts a new instance
-
-# DO NOT use:
-#   launchctl kickstart -k "gui/$UID/com.narwal.pi-gateway"
-# The `-k` flag is SIGKILL — bypasses gateway.stop() entirely, so
-# the restart-sentinel is never written and any in-flight IM
-# messages in the bridge queue are permanently lost. This is the
-# exact root cause of the "00:20:30 消息丢失" incident in the
-# gateway post-mortem: SIGKILL during a long-running cron test-run
-# erased the active-session sentinel and the user never got a
-# response.
-#
-# If you genuinely need SIGKILL (gateway hung past grace period),
-# run `omp gateway service stop` first and wait — if it doesn't
-# exit within 30s, only THEN escalate to launchctl. The active
-# session sentinel recovery added in commit ea21df4d7 is the
-# safety net for graceful paths; SIGKILL removes that safety net.
-
-# Foreground restart (no launchd — for local dev or detached runs):
-pkill -TERM -f "omp gateway start"  # graceful
+omp gateway service stop
 sleep 5
-omp gateway start --foreground &    # background; or run in another shell
+omp gateway service start
 ```
 
-**Verify after restart:**
+#### Never `launchctl kickstart -k`
+
+SIGKILL bypasses `gateway.stop()`, the restart-sentinel is never written, in-flight IM messages are lost. This is the exact root cause of the "00:20:30 消息丢失" incident in the gateway post-mortem. If `service stop` doesn't exit in 30s, only then escalate to `launchctl bootout` + relaunch. The active session sentinel recovery added in commit ea21df4d7 is the safety net for graceful paths; SIGKILL removes that safety net.
+
+#### Stale pid
+
+`Gateway already running (PID xxx)` means a leftover `~/.omp/gateway-data/gateway.pid`. `rm` it and re-launch. **Do not `kill -9` the listed PID** — the previous run already exited, the listed process is unrelated.
+
+#### Verify after restart
 
 ```bash
-cat ~/.omp/gateway-data/gateway.pid        # should show new PID
+curl -s http://127.0.0.1:7890/test/health   # → {"ok":true,"mode":"test-injection"}
+cat ~/.omp/gateway-data/gateway.pid
 cat ~/.omp/gateway-data/gateway.status.json | python3 -m json.tool | head -20
 tail -20 ~/.omp/gateway-data/logs/service.log | grep -E "BOOT|service start"
 ```
@@ -354,19 +351,7 @@ For **issue reproduction** (not unit testing) — when the user reports a real D
 
 **Tool:** `.omp/skills/repro-inject/repro-inject.ts` — POSTs a synthetic `DingTalkRawMessage` to the gateway's `POST /test/inject` endpoint. The gateway treats it as real, runs it through `channel.injectTestMessage` → the full `#handleMessage` pipeline → real `AgentBridge` → real `DingTalkChannel.sendMessage`. DM reply is sent to the actual DingTalk user (OAuth-DM fallback via `senderStaffId` if the webhook is rejected by DingTalk).
 
-**Prereq (one-time per gateway start):** the running gateway needs `OMP_GATEWAY_TEST_MODE=1` and `OMP_GATEWAY_TEST_PORT=7890`. These env vars are now written into the plist by default — a fresh `omp gateway service install` produces a gateway with the test-inject endpoint live on `127.0.0.1:7890` with no extra setup. For an opt-out (gateway without the inject endpoint), `export OMP_GATEWAY_TEST_MODE=0` before running `service install`. For ad-hoc dev runs that bypass the service installer, launch the foreground process with the env inline:
-
-```bash
-# Kill any old gateway first (graceful):
-pkill -TERM -f "omp gateway start" ; sleep 4
-# Start in foreground with test mode enabled:
-OMP_GATEWAY_TEST_MODE=1 OMP_GATEWAY_TEST_PORT=7890 \
-  nohup omp gateway start --foreground > /tmp/gateway-foreground.log 2>&1 &
-# Verify the endpoint is live:
-curl -s http://127.0.0.1:7890/test/health   # → {"ok":true,"mode":"test-injection"}
-# If you see "Gateway already running (PID xxx)" — a stale pid file is blocking startup.
-# Clear it: rm -f ~/.omp/gateway-data/gateway.pid, then re-launch.
-```
+**Prereq:** the gateway must be running with `OMP_GATEWAY_TEST_MODE=1` and `/test/inject` live. See the **Restart gateway** section above for the canonical start pattern. The same `launchctl kickstart -k` and stale-pid warnings apply.
 
 **Common flows:**
 

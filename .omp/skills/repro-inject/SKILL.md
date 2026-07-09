@@ -28,46 +28,14 @@ A synthetic `DingTalkRawMessage` is delivered to the gateway's `POST /test/injec
 
 ## Procedure
 
-### Step 1 — Bring the gateway test endpoint up
-
-Confirm `OMP_GATEWAY_TEST_MODE=1` is on the running gateway, and `/test/health` answers.
+### Step 1 — Confirm the gateway test endpoint is up
 
 ```bash
-curl http://127.0.0.1:7890/test/health
+curl -s http://127.0.0.1:7890/test/health
 # → {"ok":true,"mode":"test-injection"}
 ```
 
-**If not live**, pick a restart strategy. Both paths are graceful (write restart-sentinel, drain active sessions).
-
-**Service-managed** (preferred, plist has the env):
-
-```bash
-omp gateway service stop
-sleep 5
-omp gateway service start
-curl -s http://127.0.0.1:7890/test/health
-```
-
-**Foreground** (dev, detached, or plist missing the env):
-
-```bash
-pkill -TERM -f "omp gateway start" ; sleep 4
-OMP_GATEWAY_TEST_MODE=1 OMP_GATEWAY_TEST_PORT=7890 \
-  nohup omp gateway start --foreground > /tmp/gateway-foreground.log 2>&1 &
-curl -s http://127.0.0.1:7890/test/health
-```
-
-**Stale pid** — `Gateway already running (PID xxx)` means a leftover `~/.omp/gateway-data/gateway.pid`. `rm` it and re-launch (don't `kill -9` the listed PID, the previous run already exited).
-
-**Verify after restart:**
-
-```bash
-cat ~/.omp/gateway-data/gateway.pid
-cat ~/.omp/gateway-data/gateway.status.json | python3 -m json.tool | head -20
-tail -20 ~/.omp/gateway-data/logs/service.log | grep -E "BOOT|service start"
-```
-
-**Never `launchctl kickstart -k`** — SIGKILL bypasses `gateway.stop()`, the restart-sentinel is never written, in-flight IM messages are lost. If `service stop` doesn't exit in 30s, only then escalate.
+**If not live**, restart the gateway per the [Restart gateway](../../../AGENTS.md#restart-gateway-after-rebuild-or-config-change) section in `AGENTS.md`. The same `launchctl kickstart -k` and stale-pid warnings apply.
 
 Completion criterion: `mode: "test-injection"` is in the `/test/health` response.
 
