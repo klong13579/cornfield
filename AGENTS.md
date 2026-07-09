@@ -348,11 +348,11 @@ Steps:
 
 This tests the full gateway pipeline (bridge → streamCard → card creation → API delivery) without LLM variance.
 
-### DingTalk issue reproduction (`scripts/repro-inject.ts`)
+### DingTalk issue reproduction (`.omp/skills/repro-inject/repro-inject.ts`)
 
 For **issue reproduction** (not unit testing) — when the user reports a real DingTalk-side bug and you need to drive the full inbound path (real AgentBridge → real channel → real DM reply to the real DingTalk user) without manually opening DingTalk and typing each time. This is the production-path complement to the fake-RPC pattern above.
 
-**Tool:** `packages/pi-gateway/scripts/repro-inject.ts` — POSTs a synthetic `DingTalkRawMessage` to the gateway's `POST /test/inject` endpoint. The gateway treats it as real, runs it through `channel.injectTestMessage` → the full `#handleMessage` pipeline → real `AgentBridge` → real `DingTalkChannel.sendMessage`. DM reply is sent to the actual DingTalk user (default webhooks expire in ~5 min; falls back to OAuth DM via `senderStaffId`).
+**Tool:** `.omp/skills/repro-inject/repro-inject.ts` — POSTs a synthetic `DingTalkRawMessage` to the gateway's `POST /test/inject` endpoint. The gateway treats it as real, runs it through `channel.injectTestMessage` → the full `#handleMessage` pipeline → real `AgentBridge` → real `DingTalkChannel.sendMessage`. DM reply is sent to the actual DingTalk user (OAuth-DM fallback via `senderStaffId` if the webhook is rejected by DingTalk).
 
 **Prereq (one-time per gateway start):** the running gateway needs `OMP_GATEWAY_TEST_MODE=1` and `OMP_GATEWAY_TEST_PORT=7890`. These env vars are now written into the plist by default — a fresh `omp gateway service install` produces a gateway with the test-inject endpoint live on `127.0.0.1:7890` with no extra setup. For an opt-out (gateway without the inject endpoint), `export OMP_GATEWAY_TEST_MODE=0` before running `service install`. For ad-hoc dev runs that bypass the service installer, launch the foreground process with the env inline:
 
@@ -371,17 +371,24 @@ curl -s http://127.0.0.1:7890/test/health   # → {"ok":true,"mode":"test-inject
 **Common flows:**
 
 ```bash
-# One-shot grab of a real sessionWebhook from DingTalk (run from a 2nd terminal,
-# the user sends one message to the bot within 30s):
-bun run scripts/repro-inject.ts --account hr --grab-webhook
-
-# Then inject — real reply goes back to the real DingTalk user:
-bun run scripts/repro-inject.ts --account hr --text "帮我看下这个工单"
+# Most common: default reads the most recent active webhook from the gateway's
+# sessions.db (gateway writes session_webhook on every inbound message). No need
+# to ask the user to send a real message first.
+bun run .omp/skills/repro-inject/repro-inject.ts --account hr --text "帮我看下这个工单"
 
 # End-to-end with --verify: wait for the agent reply to land in DingTalk,
 # tail the session JSONL, confirm the round-trip:
-bun run scripts/repro-inject.ts --account hr --text "试跑 daily-2000-calendar-push" \
+bun run .omp/skills/repro-inject/repro-inject.ts --account hr --text "试跑 daily-2000-calendar-push" \
   --verify --verify-timeout 160000
+
+# Cold start (sessions.db is empty for this account, e.g. the user has never
+# talked to this bot, or a fresh DB after a gateway reset). Open DingTalk on a
+# 2nd terminal and send one message within --timeout ms so the script can grab
+# a sessionWebhook from the real WS stream:
+bun run .omp/skills/repro-inject/repro-inject.ts --account hr --text "..." --grab-webhook
+
+# CI / pure-replay: db has no webhook, refuse to grab, exit non-zero:
+bun run .omp/skills/repro-inject/repro-inject.ts --account hr --text "..." --no-grab-fallback
 
 # Cron-task verification: ask the agent to run the `cron` host tool with
 # `action: "test-run"`. Use inMs >= 90000 (1.5x the default 60s gateway tick);
@@ -389,13 +396,27 @@ bun run scripts/repro-inject.ts --account hr --text "试跑 daily-2000-calendar-
 # from the gateway.json account config.
 ```
 
-**State cache:** `~/.omp/repro-state.json` — webhooks keyed by `accountId:conversationId`, ~5 min TTL, plus the `senderStaffId` / `senderNick` of the most recent real user message (cached so the OAuth-DM fallback has a target after the webhook expires). The script's `--list` and `--clear` flags inspect/reset the cache.
+**Webhook source priority** (see `.omp/skills/repro-inject/repro-inject.ts` header for the full contract):
+1. `--webhook <url>` — explicit, one-shot, bypasses everything else
+2. `--grab-webhook` — explicit live grab from DingTalk WS
+3. `~/.omp/gateway-data/sessions.db` — **default**. Filters out test-residue
+   conversation IDs (`repro-`, `-test-`, `-regress`, `e2e-`, `ci-test`) and
+   non-`oapi.dingtalk.com` webhooks, picks the most recently updated active
+   row. Override with `--gateway-data-dir <path>` if your data dir is non-default.
+4. Live grab — **default fallback** when the db has nothing. Disable with
+   `--no-grab-fallback` for CI/pure-replay scenarios.
 
-**Distinction from "Gateway pipeline testing" (above):** that section is unit-level pipeline tests with a fake RPC script and `captureOutbound: true` (no real sends). This is end-to-end reproduction with real AgentBridge and real DingTalk sends — for when you need to prove the user's bug is reproducible outside the test harness, or for cron-task deliver verification where the only meaningful signal is "did DingTalk receive the message". Full Chinese usage and prereqs are in the script's header comment (`scripts/repro-inject.ts:1-49`).
+The "5 min webhook expiry" rule is a soft one — DingTalk's server-side token
+invalidation is more lenient than the docs suggest. A webhook whose
+`sessions.db` `updated_at` is hours old will still 200 OK; the 5 min is just
+a hint, not a hard deadline. `DingTalkChannel.sendMessage` always falls back
+to OAuth DM on `errcode 300001` regardless.
+
+**Distinction from "Gateway pipeline testing" (above):** that section is unit-level pipeline tests with a fake RPC script and `captureOutbound: true` (no real sends). This is end-to-end reproduction with real AgentBridge and real DingTalk sends — for when you need to prove the user's bug is reproducible outside the test harness, or for cron-task deliver verification where the only meaningful signal is "did DingTalk receive the message". Full Chinese usage and prereqs are in the script's header comment (`.omp/skills/repro-inject/repro-inject.ts:1-49`).
 
 **Known caveats:**
 - `omp gateway service stop` waits for graceful drain. If the gateway is stuck, use `pkill -TERM` (not `kill -9`) — see "Restart gateway" above.
-- The script caches webhooks in `~/.omp/repro-state.json`. If the conversation moves to a different user, `--clear` first.
+- The script's local JSON cache at `~/.omp/repro-state.json` is now only populated by the `--grab-webhook` path (5 min TTL, for back-to-back injects on the same freshly-grabbed session). The primary webhook source is `sessions.db`. If a grab went stale, `--clear` empties the cache so the next inject re-grabs.
 - `omp gateway cron test-run` (CLI) and `cron.test-run` (LLM host tool) both share the same `runTestRun` core; see `packages/pi-gateway/src/scheduler/test-run.ts` and `docs/...` for the scheduler-side contract.
 
 ### Running tests
@@ -484,7 +505,7 @@ background task.
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **oh-my-pi** (37937 symbols, 94845 relationships, 234 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **oh-my-pi** (38643 symbols, 96329 relationships, 238 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
 
@@ -497,7 +518,7 @@ This project is indexed by GitNexus as **oh-my-pi** (37937 symbols, 94845 relati
 - When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `context({name: "symbolName"})`.
 - For security review, `explain({target: "fileOrSymbol"})` lists taint findings (source→sink flows; needs `analyze --pdg`).
 
-### Never Do
+## Never Do
 
 - NEVER edit a function, class, or method without first running `impact` on it.
 - NEVER ignore HIGH or CRITICAL risk warnings from impact analysis.
@@ -517,11 +538,11 @@ This project is indexed by GitNexus as **oh-my-pi** (37937 symbols, 94845 relati
 
 | Task | Read this skill file |
 |------|---------------------|
-| Understand architecture / "How does X work?" | `.omp/skills/gitnexus/gitnexus-exploring/SKILL.md` |
-| Blast radius / "What breaks if I change X?" | `.omp/skills/gitnexus/gitnexus-impact-analysis/SKILL.md` |
-| Trace bugs / "Why is X failing?" | `.omp/skills/gitnexus/gitnexus-debugging/SKILL.md` |
-| Rename / extract / split / refactor | `.omp/skills/gitnexus/gitnexus-refactoring/SKILL.md` |
-| Tools, resources, schema reference | `.omp/skills/gitnexus/gitnexus-guide/SKILL.md` |
-| Index, status, clean, wiki CLI commands | `.omp/skills/gitnexus/gitnexus-cli/SKILL.md` |
+| Understand architecture / "How does X work?" | `.claude/skills/gitnexus/gitnexus-exploring/SKILL.md` |
+| Blast radius / "What breaks if I change X?" | `.claude/skills/gitnexus/gitnexus-impact-analysis/SKILL.md` |
+| Trace bugs / "Why is X failing?" | `.claude/skills/gitnexus/gitnexus-debugging/SKILL.md` |
+| Rename / extract / split / refactor | `.claude/skills/gitnexus/gitnexus-refactoring/SKILL.md` |
+| Tools, resources, schema reference | `.claude/skills/gitnexus/gitnexus-guide/SKILL.md` |
+| Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
 
 <!-- gitnexus:end -->
