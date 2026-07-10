@@ -110,21 +110,6 @@ async function checkConfig(
 	const config = result.config;
 	findings.push(ok(`${result.path} valid`));
 
-	// agent.timeoutMs is no longer enforced as a hard cap (removed 2026-07-08).
-	// The prompt queue now only watches inactivity (default 60s), so a
-	// legitimately long-but-active turn can run for as long as the agent
-	// keeps emitting session events. Kept here as a soft warn so existing
-	// configs that set it don't error, and operators with legacy configs
-	// know the field is now a no-op.
-	if (config.agent?.timeoutMs != null) {
-		findings.push(
-			warn(
-				`agent.timeoutMs = ${config.agent.timeoutMs}ms (no longer enforced; ignored since 2026-07-08)`,
-				"Prompt queue no longer hard-caps wall-clock duration. The field is harmless but you can safely remove it from gateway.json.",
-			),
-		);
-	}
-
 	// DingTalk accounts: count + secret-resolution sanity. validateConfig only
 	// checks schema shape; here we report account count and surface $ENV refs
 	// whose env var is missing (which would make getDingTalkConfig return null).

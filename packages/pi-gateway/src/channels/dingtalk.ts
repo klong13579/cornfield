@@ -721,7 +721,13 @@ export class DingTalkChannel extends BaseChannel {
 						// then reset state for the new segment.
 						const oldCard = currentCard;
 						const oldText = segmentText;
-						const oldBlocks = blocks.filter(b => b.type !== BlockType.STOP);
+						// KEEP STOP blocks (don't filter them out). The
+						// onLongTask handler seeds a STOP block with btns
+						// on its freshly-created card; if the next text
+						// delta triggers a segment split, filtering the
+						// STOP would drop the only clickable stop
+						// affordance on that card.
+						const oldBlocks = [...blocks];
 						// Reset per-segment state immediately so the new
 						// delta accumulates into a fresh segment.
 						blocks.length = 0;
@@ -740,6 +746,9 @@ export class DingTalkChannel extends BaseChannel {
 							try {
 								if (oldText.trim()) {
 									const segAnswer = buildAnswerBlock(oldText);
+									const hasBtns = [...oldBlocks, segAnswer].some(
+										b => b.type === BlockType.STOP && Array.isArray(b.btns) && b.btns.length > 0,
+									);
 									try {
 										await finishAICard(
 											oldCard,
@@ -749,7 +758,7 @@ export class DingTalkChannel extends BaseChannel {
 												quoteContent: quoteText,
 												statusLine: "",
 												copyContent: oldText,
-												hasAction: false,
+												hasAction: hasBtns,
 												version: 1 as const,
 											},
 											config,
@@ -833,7 +842,14 @@ export class DingTalkChannel extends BaseChannel {
 						// Same capture+reset+async-split as onTextDelta path.
 						const oldCard = currentCard;
 						const oldText = segmentText;
-						const oldBlocks = blocks.filter(b => b.type !== BlockType.STOP);
+						// KEEP STOP blocks here (don't filter them out). The
+						// onLongTask handler creates a new card whose primary
+						// content is the type-4 stop block with btns[]; filtering
+						// it out drops the btns and the user loses the only
+						// clickable stop affordance. If a future refactor wants
+						// to filter STOP blocks again, it must keep the btns
+						// visible some other way (e.g. set hasAction: true).
+						const oldBlocks = [...blocks];
 						blocks.length = 0;
 						segmentText = "";
 						thinkingText = "";
@@ -845,6 +861,18 @@ export class DingTalkChannel extends BaseChannel {
 								if (oldText.trim() || oldBlocks.length > 0) {
 									const segAnswer = oldText.trim() ? buildAnswerBlock(oldText) : null;
 									const finalSegBlocks = segAnswer ? [...oldBlocks, segAnswer] : oldBlocks;
+									// hasAction must be true when finalSegBlocks
+									// contains a type-4 block with btns, otherwise
+									// the schema downgrades the btns to a "当
+									// 前客户端环境不支持按钮组组件" fallback
+									// message (the top stop button is gated by
+									// hasAction, and the type-4 block btns fall
+									// back to a no-button text block when
+									// hasAction: false). The onLongTask handler
+									// relies on the btns staying clickable.
+									const hasBtns = finalSegBlocks.some(
+										b => b.type === BlockType.STOP && Array.isArray(b.btns) && b.btns.length > 0,
+									);
 									try {
 										await finishAICard(
 											oldCard,
@@ -854,7 +882,7 @@ export class DingTalkChannel extends BaseChannel {
 												quoteContent: quoteText,
 												statusLine: "",
 												copyContent: oldText,
-												hasAction: false,
+												hasAction: hasBtns,
 												version: 1 as const,
 											},
 											config,
@@ -922,50 +950,205 @@ export class DingTalkChannel extends BaseChannel {
 				pendingSegmentBreak = true;
 			},
 			onLongTask: evt => {
-				// Long-running tool: surface a stop block with an abort
-				// button. Only push on the threshold fire (not on every
-				// ping) so we don't spam the blockList with duplicates.
-				// On ping events, append a progress line to the existing
-				// stop block (or the most recent think block) instead.
-				if (evt.threshold) {
-					blocks.push(
-						buildStopBlock({
+				// Multi-card heartbeat (option 2): each long-task event
+				// (threshold + pings) gets its own fresh AI Card. This
+				// sidesteps the unreliable patch protocol on a single
+				// card — every new card is a single CREATE that the
+				// gateway has observed to render reliably.
+				//
+				// UX:
+				//   Card 1: thinking + tool call → finishes when first
+				//           long-task event fires
+				//   Card 2..N-1: ⏳ ping + stop button (one per event)
+				//   Card N (last ping card): final answer + tool result
+				//           on the same card, finished with full chrome
+				//
+				// The previous card is finished with whatever state it
+				// had (stripping any orphan STOP blocks from the old
+				// `blocks` array), then a fresh card is created and
+				// patched once with the ping block + stop button.
+				const totalSec = Math.floor(evt.elapsedMs / 1000);
+				const min = Math.floor(totalSec / 60);
+				const sec = totalSec % 60;
+				const elapsed =
+					min >= 60
+						? `${Math.floor(min / 60)}h${min % 60}m`
+						: `${min}m${sec}s`;
+							const body = `⏳ **${evt.toolName}** 还在跑（已运行 ${elapsed}）。如需中止请点击下方按钮。`;
+
+				// Capture current card state synchronously (handler is
+				// sync; the finish+create runs in an async IIFE so it
+				// can't block the onLongTask invocation).
+				const oldCard = currentCard;
+				const oldText = segmentText;
+				const oldBlocks = [...blocks];
+				// Reset per-segment state so onToolResult / onTextDelta
+				// that arrive during the async split accumulate on the
+				// new card (mirrors the segment-split pattern).
+				blocks.length = 0;
+				segmentText = "";
+				thinkingText = "";
+				pendingTools.clear();
+				segmentBusy = true;
+
+				void (async () => {
+					try {
+						// Finish the previous card with whatever content
+						// it had. KEEP STOP blocks in the final blockList
+						// — they carry the previous long-task event's
+						// "停止" button and must stay clickable after the
+						// card is closed. Stripping them here is the same
+						// bug as the onTextDelta / onToolResult segment
+						// splits had; the OpenClaw 675cde2f schema
+						// additionally needs hasAction: true when type-4
+						// btns are present, otherwise it downgrades them
+						// to a fallback text block.
+						const hadContent =
+							oldText.trim() ||
+							oldBlocks.some(b => b.type !== BlockType.STOP);
+						if (hadContent) {
+							const segAnswer = oldText.trim() ? buildAnswerBlock(oldText) : null;
+							const finalBlocks = segAnswer
+								? [...oldBlocks, segAnswer]
+								: oldBlocks;
+							const hasBtns = finalBlocks.some(
+								b => b.type === BlockType.STOP && Array.isArray(b.btns) && b.btns.length > 0,
+							);
+							try {
+								await finishAICard(
+									oldCard,
+									{
+										content: oldText,
+										blockList: finalBlocks,
+										quoteContent: quoteText,
+										statusLine: "",
+										copyContent: oldText,
+										hasAction: hasBtns,
+										version: 1 as const,
+									},
+									config,
+								);
+							} catch (err) {
+								logger.warn("[DingTalk] onLongTask finishAICard failed", {
+									accountId: this.#accountId,
+									conversationId: inbound.conversationId,
+									error: err instanceof Error ? err.message : String(err),
+								});
+							}
+						}
+
+						// Create a fresh card for this long-task event.
+						// The stop button is bound to this card's
+						// instanceId so a click on any ping card stops
+						// the underlying tool call.
+						const nextCard = await createAICardForTarget(config, target, {
+							quoteContent: quoteText,
+						});
+						if (nextCard) {
+							context.registerCardAction?.({
+								cardInstanceId: nextCard.cardInstanceId,
+								accountId: this.#accountId,
+								sessionId: inbound.conversationId,
+								toolName: evt.toolName,
+							});
+							currentCard = nextCard;
+							cards.push(nextCard);
+
+							// Build a stop block. Use streamAICard below
+							// (not patchAICardBlocks) because the new
+							// card is still in PROCESSING state right
+							// after createAICardForTarget — the schema
+							// requires INPUTING to render type-4 btns
+							// (otherwise it falls back to a "当前客户
+							// 端环境不支持按钮组组件" message with no
+							// buttons). streamAICard's first call
+							// does the PROCESSING→INPUTING switch and
+							// seeds blockList in one /v1.0/card/instance
+							// PUT. patchAICardBlocks is for follow-up
+							// blockList updates on an already-INPUTING
+							// card (matches the old onLongTask flow,
+							// which inherited an INPUTING currentCard
+							// from the prior onAssistantMessageStart).
+							const pingBlock: CardBlock = {
+								type: BlockType.STOP,
+								text: body,
+								markdown: body,
+								btns: [
+									{
+										text: "停止",
+										// Stream-mode callback: DingTalk delivers the click over
+										// the WebSocket on /v1.0/card/instances/callback. The
+										// channel's TOPIC_CARD listener picks it up, parses
+										// outTrackId + cardPrivateData.params, and routes to
+										// the gateway's ActionRegistry → bridge.abort().
+										// Do NOT use `actionType: "request"` here — that mode
+										// requires an HTTP callback URL, which the gateway
+										// doesn't run.
+										actionType: "call_back",
+										params: {
+											type: "stop",
+											sessionId: _session.id,
+											toolName: evt.toolName,
+										},
+									},
+								],
+							};
+							blocks.push(pingBlock);
+							segmentText = body;
+
+							// Single patch on the fresh card. Per
+							// evidence: the first patch on a freshly
+							// created card renders reliably; subsequent
+							// patches on the same card don't. Each
+							// long-task event is its own card, so each
+							// gets exactly one patch.
+							logger.info("[DingTalk] onLongTask stream (new card)", {
+								accountId: this.#accountId,
+								conversationId: inbound.conversationId,
+								cardInstanceId: nextCard.cardInstanceId,
+								toolName: evt.toolName,
+								elapsed,
+								isThreshold: evt.threshold,
+							});
+							// First call also seeds blockList=[pingBlock]
+							// via cardParamMapForStreamStart. Using
+							// streamAICard here (not patchAICardBlocks)
+							// is what makes the type-4 btns render:
+							// patchAICardBlocks on a still-PROCESSING
+							// card silently downgrades btns to a
+							// fallback message.
+							void streamAICard(
+								nextCard,
+								body,
+								[pingBlock],
+								config,
+							).catch(err => {
+								logger.warn("[DingTalk] onLongTask streamAICard (new card) failed", {
+									accountId: this.#accountId,
+									conversationId: inbound.conversationId,
+									cardInstanceId: nextCard.cardInstanceId,
+									error: err instanceof Error ? err.message : String(err),
+								});
+							});
+						} else {
+							logger.warn("[DingTalk] onLongTask createAICardForTarget failed", {
+								accountId: this.#accountId,
+								conversationId: inbound.conversationId,
+								toolName: evt.toolName,
+							});
+						}
+						segmentBusy = false;
+					} catch (err) {
+						logger.error("[DingTalk] onLongTask IIFE threw (swallowed)", {
+							accountId: this.#accountId,
+							conversationId: inbound.conversationId,
 							toolName: evt.toolName,
-							elapsedMs: evt.elapsedMs,
-							sessionId: _session.id,
-						}),
-					);
-					scheduleBlockPatch();
-					// Patch the registry entry with the toolName now that
-					// we know which tool is hanging. The base registration
-					// (without toolName) is already in place from the
-					// create-time call; this re-registers with the richer
-					// info so audit logs / future action types can see it.
-					context.registerCardAction?.({
-						cardInstanceId: currentCard.cardInstanceId,
-						accountId: this.#accountId,
-						sessionId: inbound.conversationId,
-						toolName: evt.toolName,
-					});
-				} else {
-					// Pings just update the last stop block's text with
-					// the latest elapsed time, or append a progress line
-					// to the think block if no stop block exists.
-					const last = blocks[blocks.length - 1];
-					if (last && last.type === BlockType.STOP) {
-						const elapsedMin = Math.floor(evt.elapsedMs / 60_000);
-						const body = `⏳ **${evt.toolName}** 已运行 ${elapsedMin} 分钟。点击下方按钮中止。`;
-						last.text = body;
-						last.markdown = body;
-					} else {
-						// No stop block to update (we missed the threshold
-						// somehow) — fall back to a progress line on the
-						// last think block.
-						const elapsedMin = Math.floor(evt.elapsedMs / 60_000);
-						thinkingText += `\n⏳ ${evt.toolName} 仍运行中 (${elapsedMin} min)`;
+							error: err instanceof Error ? err.message : String(err),
+							stack: err instanceof Error ? err.stack : undefined,
+						});
+						segmentBusy = false;
 					}
-					scheduleBlockPatch();
-				}
+				})();
 			},
 		};
 

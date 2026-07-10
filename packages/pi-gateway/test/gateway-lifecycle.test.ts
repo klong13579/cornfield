@@ -314,14 +314,13 @@ describe("Gateway status", () => {
 
 	test("account bridge options prefer account model over global model", async () => {
 		const options = await createAccountBridgeOptions(
-			{ model: "global-model", timeoutMs: 10_000 },
+			{ model: "global-model" },
 			"test-account",
-			{ appKey: "app", appSecret: "secret", model: "account-model", timeoutMs: 20_000 },
+			{ appKey: "app", appSecret: "secret", model: "account-model" },
 			"/tmp/agent",
 		);
 
 		expect(options.model).toBe("account-model");
-		expect(options.timeoutMs).toBe(20_000);
 		expect(options.cwd).toBe("/tmp/agent");
 	});
 });
@@ -434,7 +433,7 @@ describe("Gateway reload plan", () => {
 		const config = {
 			channels: {},
 			dataDir: tmpDir,
-			agent: { ompPath: fake.path, timeoutMs: 2_000 },
+			agent: { ompPath: fake.path },
 		};
 		const gateway = new Gateway(config);
 		try {
@@ -458,7 +457,7 @@ describe("Gateway reload plan", () => {
 		const config1 = {
 			channels: {},
 			dataDir: tmpDir,
-			agent: { ompPath: fake.path, timeoutMs: 2_000 },
+			agent: { ompPath: fake.path },
 		};
 		const gateway = new Gateway(config1);
 		try {
@@ -492,7 +491,7 @@ describe("Gateway reload plan", () => {
 		const config = {
 			channels: {},
 			dataDir: tmpDir,
-			agent: { ompPath: fake.path, timeoutMs: 2_000 },
+			agent: { ompPath: fake.path },
 		};
 		const gateway = new Gateway(config);
 		try {
@@ -655,7 +654,7 @@ describe("Gateway circuit breaker health check", () => {
 		const gateway = new Gateway({
 			channels: {},
 			dataDir: tmpDir,
-			agent: { ompPath: fake.path, timeoutMs: 2_000 },
+			agent: { ompPath: fake.path },
 		});
 
 		try {
@@ -703,7 +702,7 @@ describe("Gateway circuit breaker health check", () => {
 		const gateway = new Gateway({
 			channels: {},
 			dataDir: tmpDir,
-			agent: { ompPath: fake.path, timeoutMs: 2_000 },
+			agent: { ompPath: fake.path },
 		});
 
 		try {

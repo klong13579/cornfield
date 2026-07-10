@@ -337,13 +337,13 @@ export interface SessionStore {
 export interface AgentConfig {
 	ompPath?: string;
 	model?: string;
-	/** @deprecated No longer enforced. Kept for backward compat with existing
-	 *  gateway.json configs. The prompt queue's only give-up condition is now
-	 *  the inactivity watchdog (default 60s). */
-	timeoutMs?: number;
 	maxConcurrentSessions?: number;
 	maxCrashRetries?: number;
 	crashBackoffMs?: number;
+	/** Long-running tool threshold (ms). See `agentConfigSchema` for semantics. */
+	longTaskThresholdMs?: number;
+	/** Long-running tool progress ping (ms). See `agentConfigSchema` for semantics. */
+	progressPingIntervalMs?: number;
 }
 export interface SessionConfig {
 	idleTimeoutMinutes?: number;
@@ -409,10 +409,6 @@ export interface DingtalkAccountConfig {
 	agentDir?: string;
 	/** Optional model override for this account */
 	model?: string;
-	/** @deprecated No longer enforced. Kept for backward compat with existing
-	 *  gateway.json configs. The prompt queue's only give-up condition is now
-	 *  the inactivity watchdog (default 60s). */
-	timeoutMs?: number;
 	/** Tool access policy: deny these tool names for this account's agent. */
 	deniedTools?: string[];
 	/** When true, drop thinking/reasoning blocks from the DingTalk AI Card.

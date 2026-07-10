@@ -245,6 +245,50 @@ function isRetryableStatus(status: number): boolean {
 	return FINISHED_RETRYABLE_STATUSES.has(status);
 }
 
+/**
+ * Parse a DingTalk API response body for an error code.
+ *
+ * DingTalk sometimes returns HTTP 200 with a body like
+ * `{"code":"system.busy","message":"system.busy","requestid":"..."}` to
+ * signal failure. Callers that only check `resp.ok` will silently treat
+ * these as success — which is the exact bug that hid `system.busy` from
+ * `patchAICardBlocks` / `streamAICard` / `finishAICard` in the 7-10
+ * long-task run (the user saw the bot's streamed text but none of the
+ * blockList patches or the tool result rendered, while the log showed
+ * 3 `patchAICardBlocks` events with zero error entries).
+ *
+ * Returns the parsed error details, or null if the body either is not
+ * JSON or has no `code` field. The success-path responses observed in
+ * the wild (card streaming, card patch, FINISHED switch) return `{}`
+ * with no `code` field, so the absence of `code` is treated as success.
+ *
+ * `code === "ok"` / `code === "0"` are explicitly NOT treated as errors
+ * even if a future DingTalk schema adds a code field to success bodies
+ * (defensive against the inverse case).
+ */
+export function parseDingtalkError(body: string): { code: string; message: string; requestid?: string } | null {
+	try {
+		const json = JSON.parse(body);
+		if (
+			json &&
+			typeof json === "object" &&
+			typeof json.code === "string" &&
+			json.code !== "ok" &&
+			json.code !== "0"
+		) {
+			return {
+				code: json.code,
+				message: typeof json.message === "string" ? json.message : "",
+				requestid: typeof json.requestid === "string" ? json.requestid : undefined,
+			};
+		}
+	} catch {
+		// Body is not JSON — the caller already checked resp.ok, so a
+		// non-JSON 200 is treated as success here.
+	}
+	return null;
+}
+
 // ═══════════════════════════════════════════════════════════════════════
 // Markdown Formatting
 // ═══════════════════════════════════════════════════════════════════════
@@ -683,6 +727,20 @@ export async function createAICardForTarget(
 			logger.error("[AICard] Create instance failed", { status: createResp.status, body: text });
 			return null;
 		}
+		// DingTalk may return HTTP 200 with body {"code":"system.busy",...}
+		// to signal failure. Treat as creation failure so the channel
+		// falls back to v1 markdown instead of returning a phantom
+		// cardInstanceId that every subsequent patch silently no-ops.
+		const createBodyText = await createResp.text();
+		const createError = parseDingtalkError(createBodyText);
+		if (createError) {
+			logger.error("[AICard] Create instance failed (HTTP 200 with error body)", {
+				code: createError.code,
+				message: createError.message,
+				requestid: createError.requestid,
+			});
+			return null;
+		}
 
 		// 2. Deliver card to target
 		const robotCode = config.robotCode ?? config.appKey;
@@ -700,6 +758,19 @@ export async function createAICardForTarget(
 		if (!deliverResp.ok) {
 			const text = await deliverResp.text();
 			logger.error("[AICard] Deliver failed", { status: deliverResp.status, body: text });
+			return null;
+		}
+		// Same body-code check on the deliver endpoint — a 200 with
+		// `code: "invalid.user"` etc. means the card exists server-side
+		// but never reached the user, so the channel must fall back.
+		const deliverBodyText = await deliverResp.text();
+		const deliverError = parseDingtalkError(deliverBodyText);
+		if (deliverError) {
+			logger.error("[AICard] Deliver failed (HTTP 200 with error body)", {
+				code: deliverError.code,
+				message: deliverError.message,
+				requestid: deliverError.requestid,
+			});
 			return null;
 		}
 
@@ -772,10 +843,37 @@ export async function streamAICard(
 				});
 				if (!retryResp.ok) {
 					logger.error("[AICard] INPUTING switch failed after retry", { status: retryResp.status });
+				} else {
+					// Retry succeeded at HTTP level — still must check the
+					// body for an error code (HTTP 200 + {"code":"..."}).
+					const retryText = await retryResp.text();
+					const retryError = parseDingtalkError(retryText);
+					if (retryError) {
+						logger.error("[AICard] INPUTING switch failed (HTTP 200 with error body)", {
+							code: retryError.code,
+							message: retryError.message,
+							requestid: retryError.requestid,
+						});
+					}
 				}
 			} else if (!resp.ok) {
 				const text = await resp.text();
 				logger.error("[AICard] INPUTING switch failed", { status: resp.status, body: text });
+			} else {
+				// HTTP 200 success path — still must check the body. A
+				// 200 + {"code":"system.busy"} leaves the card stuck
+				// in PROCESSING (no INPUTING transition), which the user
+				// sees as a card that never updates. Log and move on;
+				// the next streaming delta will retry the transition.
+				const text = await resp.text();
+				const error = parseDingtalkError(text);
+				if (error) {
+					logger.error("[AICard] INPUTING switch failed (HTTP 200 with error body)", {
+						code: error.code,
+						message: error.message,
+						requestid: error.requestid,
+					});
+				}
 			}
 		} catch (err) {
 			logger.error("[AICard] INPUTING switch error", { error: String(err) });
@@ -823,10 +921,36 @@ export async function streamAICard(
 			});
 			if (!retryResp.ok) {
 				logger.error("[AICard] streaming retry failed", { status: retryResp.status });
+			} else {
+				// Retry succeeded at HTTP level — still must check the
+				// body for an error code.
+				const retryText = await retryResp.text();
+				const retryError = parseDingtalkError(retryText);
+				if (retryError) {
+					logger.warn("[AICard] streaming update failed (HTTP 200 with error body)", {
+						code: retryError.code,
+						message: retryError.message,
+						requestid: retryError.requestid,
+					});
+				}
 			}
 		} else if (!resp.ok) {
 			const text = await resp.text();
 			logger.warn("[AICard] streaming update failed", { status: resp.status, body: text });
+		} else {
+			// HTTP 200 success path — still must check the body. The
+			// streaming endpoint is throttled (one log per delta), so
+			// a silent `system.busy` here would make the user see
+			// stale text until the next delta lands.
+			const text = await resp.text();
+			const error = parseDingtalkError(text);
+			if (error) {
+				logger.warn("[AICard] streaming update failed (HTTP 200 with error body)", {
+					code: error.code,
+					message: error.message,
+					requestid: error.requestid,
+				});
+			}
 		}
 	} catch (err) {
 		if (isQpsLimitError(err)) {
@@ -882,10 +1006,37 @@ export async function patchAICardBlocks(
 			});
 			if (!retryResp.ok) {
 				logger.error("[AICard] block patch retry failed", { status: retryResp.status });
+			} else {
+				// Retry succeeded at HTTP level — still must check the
+				// body for an error code.
+				const retryText = await retryResp.text();
+				const retryError = parseDingtalkError(retryText);
+				if (retryError) {
+					logger.warn("[AICard] block patch failed (HTTP 200 with error body)", {
+						code: retryError.code,
+						message: retryError.message,
+						requestid: retryError.requestid,
+					});
+				}
 			}
 		} else if (!resp.ok) {
 			const text = await resp.text();
 			logger.warn("[AICard] block patch failed", { status: resp.status, body: text });
+		} else {
+			// HTTP 200 success path — still must check the body. The
+			// 7-10 long-task run hit this exact case: 3 patchAICardBlocks
+			// calls all returned HTTP 200 with `{"code":"system.busy",...}`
+			// and were silently dropped, so the user saw the streamed
+			// text but no blockList updates (no ping, no tool result).
+			const text = await resp.text();
+			const error = parseDingtalkError(text);
+			if (error) {
+				logger.warn("[AICard] block patch failed (HTTP 200 with error body)", {
+					code: error.code,
+					message: error.message,
+					requestid: error.requestid,
+				});
+			}
 		}
 	} catch (err) {
 		if (isQpsLimitError(err)) {
@@ -937,33 +1088,62 @@ export async function finishAICard(card: AICardInstance, data: CardData, config?
 				body: JSON.stringify(body),
 			});
 
-			if (resp.ok) return;
+			if (resp.ok) {
+				// HTTP 200 — but DingTalk may still return a body with
+				// `code: "system.busy"` etc. to signal a logical failure.
+				// Without this check the bridge would skip the v1-markdown
+				// fallback and leave the card stuck in INPUTING (visible
+				// as a spinner). Treat body-code errors as transient
+				// (same class as a 5xx) and let the retry loop run.
+				const text = await resp.text();
+				const error = parseDingtalkError(text);
+				if (error) {
+					lastStatus = 200;
+					lastBody = text;
+					const backoffMs = FINISHED_BASE_BACKOFF_MS * 2 ** attempt;
+					logger.warn("[AICard] FINISHED retryable body-code error, retrying", {
+						status: 200,
+						code: error.code,
+						message: error.message,
+						requestid: error.requestid,
+						attempt: attempt + 1,
+						maxRetries: FINISHED_MAX_RETRIES,
+						backoffMs,
+					});
+					cardRateLimiter.triggerBackoff();
+					if (attempt < FINISHED_MAX_RETRIES - 1) {
+						await Bun.sleep(backoffMs);
+					}
+					continue;
+				}
+				return;
+			} else {
+				lastStatus = resp.status;
+				lastBody = await resp.text();
 
-			lastStatus = resp.status;
-			lastBody = await resp.text();
+				if (!isRetryableStatus(resp.status)) {
+					// Non-retryable (4xx business error) — abort immediately so
+					// the bridge can decide whether to fall back to v1 markdown.
+					logger.error("[AICard] FINISHED non-retryable failure", {
+						status: resp.status,
+						body: lastBody,
+					});
+					throw new Error(`FINISHED non-retryable failure: status=${resp.status} body=${lastBody}`);
+				}
 
-			if (!isRetryableStatus(resp.status)) {
-				// Non-retryable (4xx business error) — abort immediately so
-				// the bridge can decide whether to fall back to v1 markdown.
-				logger.error("[AICard] FINISHED non-retryable failure", {
+				// Retryable: trigger backoff and try again with exponential delay.
+				cardRateLimiter.triggerBackoff();
+				const backoffMs = FINISHED_BASE_BACKOFF_MS * 2 ** attempt; // 500, 1000, 2000
+				logger.warn("[AICard] FINISHED retryable failure, retrying", {
 					status: resp.status,
+					attempt: attempt + 1,
+					maxRetries: FINISHED_MAX_RETRIES,
+					backoffMs,
 					body: lastBody,
 				});
-				throw new Error(`FINISHED non-retryable failure: status=${resp.status} body=${lastBody}`);
-			}
-
-			// Retryable: trigger backoff and try again with exponential delay.
-			cardRateLimiter.triggerBackoff();
-			const backoffMs = FINISHED_BASE_BACKOFF_MS * 2 ** attempt; // 500, 1000, 2000
-			logger.warn("[AICard] FINISHED retryable failure, retrying", {
-				status: resp.status,
-				attempt: attempt + 1,
-				maxRetries: FINISHED_MAX_RETRIES,
-				backoffMs,
-				body: lastBody,
-			});
-			if (attempt < FINISHED_MAX_RETRIES - 1) {
-				await Bun.sleep(backoffMs);
+				if (attempt < FINISHED_MAX_RETRIES - 1) {
+					await Bun.sleep(backoffMs);
+				}
 			}
 		} catch (err) {
 			// Network errors and our own thrown non-retryable error propagate

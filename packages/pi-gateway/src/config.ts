@@ -27,10 +27,6 @@ const dingtalkAccountConfigSchema = z.object({
 	appSecret: z.string().min(1),
 	robotCode: z.string().optional(),
 	agentDir: z.string().optional(),
-	/** @deprecated No longer enforced. Kept for backward compat with existing
-	 *  gateway.json configs. The prompt queue's only give-up condition is now
-	 *  the inactivity watchdog (default 60s). */
-	timeoutMs: z.number().int().positive().optional(),
 	deniedTools: z.array(z.string()).optional(),
 	hideThinkingBlock: z.boolean().default(false),
 	enabled: z.boolean().default(true),
@@ -49,13 +45,20 @@ export const dingtalkConfigSchema = channelConfigSchema.extend({
 
 const agentConfigSchema = z.object({
 	ompPath: z.string().optional(),
-	/** @deprecated No longer enforced. Kept for backward compat with existing
-	 *  gateway.json configs. The prompt queue's only give-up condition is now
-	 *  the inactivity watchdog (default 60s). */
-	timeoutMs: z.number().int().positive().optional(),
 	maxConcurrentSessions: z.number().int().positive().optional(),
 	maxCrashRetries: z.number().int().positive().optional(),
 	crashBackoffMs: z.number().int().positive().optional(),
+	/** Long-running tool threshold (ms): first onLongTask fire at this
+	 *  point, plus a "停止" stop button pushed to the DingTalk AI Card.
+	 *  0 disables. Default 50_000 (5x margin over the 10s streaming poll
+	 *  and well below the 120s inactivity default). */
+	longTaskThresholdMs: z.number().int().nonnegative().optional(),
+	/** Long-running tool progress ping (ms): how often the gateway pushes
+	 *  a "⏳ Xm Ys" progress block to the DingTalk card after the
+	 *  threshold fires. Each ping also resets the inactivity watchdog
+	 *  so the prompt isn't killed mid-pip-install. Default 60_000
+	 *  (2x margin over the inactivity watchdog — see prompt-queue.ts). */
+	progressPingIntervalMs: z.number().int().positive().optional(),
 });
 
 const sessionConfigSchema = z.object({

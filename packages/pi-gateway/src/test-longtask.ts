@@ -270,7 +270,6 @@ export async function runLongTaskTest(opts: LongTaskTestOptions): Promise<LongTa
 	// 2. Create the bridge (no real agent, no real session)
 	const bridge = new AgentBridge({
 		ompPath: rpcPath,
-		timeoutMs: 5 * 60_000,
 		// Force a short threshold so we don't have to wait the default 3
 		// min. The watcher should also be tunable via the env var, but
 		// the option takes precedence — set it explicitly so the test

@@ -220,7 +220,7 @@ describe("DingTalkChannel.hideThinkingBlock filter", () => {
 		rpc = await createFakeRpcBinary();
 		card = await startFakeCardServer();
 		restoreFetch = await installCardApiBaseForTest(card.host, card.port);
-		bridge = new AgentBridge({ ompPath: rpc.path, timeoutMs: 5_000 });
+		bridge = new AgentBridge({ ompPath: rpc.path });
 		await bridge.start();
 	});
 

@@ -21,6 +21,8 @@ import {
 	cardParamMapForStreamStart,
 	cardParamMapFromData,
 	finishAICard,
+	patchAICardBlocks,
+	parseDingtalkError,
 } from "../src/channels/dingtalk-card";
 import type { DingTalkConfig } from "../src/types";
 
@@ -203,6 +205,161 @@ describe("cardParamMapForStreamStart", () => {
 		expect(map.flowStatus).toBe("2");
 		expect(map.content).toBe("hello");
 		expect(JSON.parse(map.blockList)).toEqual([{ type: 0, text: "hello", markdown: "hello" }]);
+	});
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// parseDingtalkError
+//
+// Bug fix: DingTalk returns HTTP 200 with body `{"code":"system.busy",...}`
+// to signal failure. The previous code only checked `resp.ok` and silently
+// dropped these — the 7-10 long-task run showed 3 patchAICardBlocks
+// events with zero error logs, leaving the user seeing streamed text but
+// no blockList updates. parseDingtalkError extracts the error code so
+// each card API call can treat 200+error-body as a logical failure.
+// ═══════════════════════════════════════════════════════════════════════
+
+describe("parseDingtalkError", () => {
+	test("returns parsed error for a body with a non-ok code", () => {
+		const err = parseDingtalkError('{"code":"system.busy","message":"system.busy","requestid":"abc-123"}');
+		expect(err).toEqual({ code: "system.busy", message: "system.busy", requestid: "abc-123" });
+	});
+
+	test("returns parsed error for QpsLimit body", () => {
+		const err = parseDingtalkError('{"code":"QpsLimit.exceeded","message":"too many requests"}');
+		expect(err?.code).toBe("QpsLimit.exceeded");
+		expect(err?.message).toBe("too many requests");
+		expect(err?.requestid).toBeUndefined();
+	});
+
+	test("treats code 'ok' as success (returns null)", () => {
+		expect(parseDingtalkError('{"code":"ok","message":"","data":{}}')).toBeNull();
+	});
+
+	test("treats code '0' as success (returns null)", () => {
+		expect(parseDingtalkError('{"code":"0","message":"success"}')).toBeNull();
+	});
+
+	test("treats empty object as success (returns null)", () => {
+		expect(parseDingtalkError("{}")).toBeNull();
+	});
+
+	test("treats non-JSON body as success (returns null)", () => {
+		// Card streaming/patch success bodies are sometimes plain text or
+		// empty. A non-JSON body must not be flagged as an error.
+		expect(parseDingtalkError("")).toBeNull();
+		expect(parseDingtalkError("ok")).toBeNull();
+		expect(parseDingtalkError("<html>...</html>")).toBeNull();
+	});
+
+	test("handles missing message/requestid fields gracefully", () => {
+		const err = parseDingtalkError('{"code":"invalid.param"}');
+		expect(err).toEqual({ code: "invalid.param", message: "", requestid: undefined });
+	});
+
+	test("rejects non-object JSON (array, string, number)", () => {
+		expect(parseDingtalkError('"system.busy"')).toBeNull();
+		expect(parseDingtalkError("123")).toBeNull();
+		expect(parseDingtalkError('["system.busy"]')).toBeNull();
+	});
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// patchAICardBlocks body-code handling
+//
+// Regression for the 7-10 long-task run: patchAICardBlocks was called
+// 3 times, all 3 returned HTTP 200 with `{"code":"system.busy",...}` and
+// the user saw the streamed text but none of the blockList patches. The
+// new behavior must log a warn (so the failure is visible in service.log)
+// but not throw — the next patch tick or the eventual finishAICard will
+// recover, and the bridge's per-card catch handles unrecoverable cases.
+// ═══════════════════════════════════════════════════════════════════════
+
+describe("patchAICardBlocks body-code handling", () => {
+	let realFetch: typeof globalThis.fetch;
+	let restoreFetch: (() => void) | undefined;
+
+	beforeEach(() => {
+		realFetch = globalThis.fetch;
+	});
+
+	afterEach(() => {
+		if (restoreFetch) restoreFetch();
+		globalThis.fetch = realFetch;
+	});
+
+	async function installFetchRewrite(host: string, port: number) {
+		const base = `http://${host}:${port}`;
+		globalThis.fetch = ((input: any, init?: any) => {
+			const url = typeof input === "string" ? input : input.url;
+			if (url.startsWith("https://api.dingtalk.com/")) {
+				const rewritten = base + url.slice("https://api.dingtalk.com".length);
+				return realFetch(rewritten, init);
+			}
+			return realFetch(input, init);
+		}) as typeof globalThis.fetch;
+		restoreFetch = () => {
+			globalThis.fetch = realFetch;
+		};
+	}
+
+	const SAMPLE_CARD: any = {
+		cardInstanceId: "card_patch_test",
+		accessToken: "test-token",
+		inputingStarted: true,
+	};
+
+	test("silently succeeds on HTTP 200 with empty body (no code field)", async () => {
+		let callCount = 0;
+		const fakeServer = await startRetryCardServer(call => {
+			if (call.path === "/v1.0/card/instances" && call.method === "PUT") {
+				callCount++;
+				return new Response("{}", { headers: { "Content-Type": "application/json" } });
+			}
+			return new Response("not found", { status: 404 });
+		});
+		await installFetchRewrite(fakeServer.host, fakeServer.port);
+
+		// Must not throw.
+		await patchAICardBlocks(SAMPLE_CARD, { content: "x", blockList: [] });
+		expect(callCount).toBe(1);
+		fakeServer.stop();
+	});
+
+	test("does not throw on HTTP 200 with system.busy body (the regression)", async () => {
+		// This is the exact failure mode that hid 3 patches on 7-10.
+		// The new behavior logs a warn but does NOT throw, because the
+		// channel's outer catch handles the per-card path. We only
+		// assert here that the function returns (no throw) and that
+		// the request still went out (so subsequent patches can be sent).
+		const fakeServer = await startRetryCardServer(call => {
+			if (call.path === "/v1.0/card/instances" && call.method === "PUT") {
+				return new Response('{"code":"system.busy","message":"system.busy","requestid":"r-1"}', {
+					headers: { "Content-Type": "application/json" },
+				});
+			}
+			return new Response("not found", { status: 404 });
+		});
+		await installFetchRewrite(fakeServer.host, fakeServer.port);
+
+		// The function must NOT throw — the bridge relies on the
+		// per-card swallow so a single failed patch doesn't kill the
+		// whole turn. A 200+system.busy is logged as warn but absorbed.
+		await expect(patchAICardBlocks(SAMPLE_CARD, { content: "x", blockList: [] })).resolves.toBeUndefined();
+		fakeServer.stop();
+	});
+
+	test("still warns on plain HTTP 500 (regression for the !resp.ok path)", async () => {
+		const fakeServer = await startRetryCardServer(call => {
+			if (call.path === "/v1.0/card/instances" && call.method === "PUT") {
+				return new Response('{"code":"system.busy"}', { status: 500 });
+			}
+			return new Response("not found", { status: 404 });
+		});
+		await installFetchRewrite(fakeServer.host, fakeServer.port);
+
+		await expect(patchAICardBlocks(SAMPLE_CARD, { content: "x", blockList: [] })).resolves.toBeUndefined();
+		fakeServer.stop();
 	});
 });
 
@@ -573,5 +730,64 @@ describe("finishAICard retry behavior", () => {
 
 		const finishedCalls = fakeServer.calls.filter(c => c.path === "/v1.0/card/instances" && c.method === "PUT");
 		expect(finishedCalls.length).toBe(2);
+	});
+
+	// Body-code regression: 7-10 long-task run. DingTalk returns HTTP 200
+	// with `{"code":"system.busy",...}` to signal failure; the previous
+	// code treated 200 as success and the card got stuck in INPUTING.
+	// Now body-code errors are treated as transient and routed through
+	// the same retry/backoff path as a 5xx, so the bridge fallback to
+	// v1 markdown still fires when retries are exhausted.
+	test("retries on HTTP 200 with system.busy body, then succeeds", async () => {
+		let attempt = 0;
+		fakeServer = await startRetryCardServer(call => {
+			if (call.path === "/v1.0/card/streaming") {
+				return new Response(JSON.stringify({}), {
+					headers: { "Content-Type": "application/json" },
+				});
+			}
+			if (call.path === "/v1.0/card/instances" && call.method === "PUT") {
+				attempt++;
+				if (attempt <= 2) {
+					return new Response('{"code":"system.busy","message":"system.busy","requestid":"r-1"}', {
+						headers: { "Content-Type": "application/json" },
+					});
+				}
+				return new Response(JSON.stringify({}), {
+					headers: { "Content-Type": "application/json" },
+				});
+			}
+			return new Response("not found", { status: 404 });
+		});
+		await installFetchRewrite(fakeServer.host, fakeServer.port);
+
+		await finishAICard(RETRY_SAMPLE_CARD, RETRY_SAMPLE_CARD_DATA, makeRetryConfig(fakeServer.port));
+
+		const finishedCalls = fakeServer.calls.filter(c => c.path === "/v1.0/card/instances" && c.method === "PUT");
+		expect(finishedCalls.length).toBe(3);
+	});
+
+	test("throws after max retries when HTTP 200 body-code error persists, so bridge fallback fires", async () => {
+		fakeServer = await startRetryCardServer(call => {
+			if (call.path === "/v1.0/card/streaming") {
+				return new Response(JSON.stringify({}), {
+					headers: { "Content-Type": "application/json" },
+				});
+			}
+			if (call.path === "/v1.0/card/instances" && call.method === "PUT") {
+				return new Response('{"code":"system.busy","message":"system.busy"}', {
+					headers: { "Content-Type": "application/json" },
+				});
+			}
+			return new Response("not found", { status: 404 });
+		});
+		await installFetchRewrite(fakeServer.host, fakeServer.port);
+
+		await expect(
+			finishAICard(RETRY_SAMPLE_CARD, RETRY_SAMPLE_CARD_DATA, makeRetryConfig(fakeServer.port)),
+		).rejects.toThrow(/FINISHED update failed after 3 retries: status=200 body=/);
+
+		const finishedCalls = fakeServer.calls.filter(c => c.path === "/v1.0/card/instances" && c.method === "PUT");
+		expect(finishedCalls.length).toBe(3);
 	});
 });

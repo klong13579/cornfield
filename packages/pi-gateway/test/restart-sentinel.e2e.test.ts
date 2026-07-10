@@ -185,7 +185,7 @@ describe("restart sentinel e2e — production simulation", () => {
 				dataDir,
 				drainTimeoutMs: 100, // 100ms for fast test
 				channels: {}, // No real channels
-				agent: { ompPath: fakeScriptPath, timeoutMs: 30_000 },
+				agent: { ompPath: fakeScriptPath },
 			},
 			{ store: store1 },
 		);
@@ -285,7 +285,7 @@ describe("restart sentinel e2e — production simulation", () => {
 				dataDir,
 				drainTimeoutMs: 100,
 				channels: {},
-				agent: { ompPath: fakeScriptPath, timeoutMs: 30_000 },
+				agent: { ompPath: fakeScriptPath },
 			},
 			{ store: store2 },
 		);
@@ -318,7 +318,6 @@ describe("restart sentinel e2e — production simulation", () => {
 		const bridge = new AgentBridge({
 			ompPath: fakeScriptPath,
 			cwd: agentDir,
-			timeoutMs: 30_000,
 		});
 
 		const gateway = new Gateway(
@@ -326,7 +325,7 @@ describe("restart sentinel e2e — production simulation", () => {
 				dataDir,
 				drainTimeoutMs: 100,
 				channels: {},
-				agent: { ompPath: fakeScriptPath, timeoutMs: 30_000 },
+				agent: { ompPath: fakeScriptPath },
 			},
 			{ bridge, store },
 		);

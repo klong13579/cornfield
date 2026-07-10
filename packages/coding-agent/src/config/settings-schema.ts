@@ -913,13 +913,12 @@ export const SETTINGS_SCHEMA = {
 	},
 
 	"stt.modelName": {
-		type: "enum",
-		values: ["tiny", "tiny.en", "base", "base.en", "small", "small.en", "medium", "medium.en", "large"] as const,
-		default: "base.en",
+		type: "string",
+		default: "mlx-community/whisper-large-v3-turbo",
 		ui: {
 			tab: "interaction",
 			label: "Speech Model",
-			description: "Whisper model size (larger = more accurate but slower)",
+			description: "Whisper model (HuggingFace repo ID, e.g. mlx-community/whisper-large-v3-turbo). Larger = more accurate but slower.",
 			submenu: true,
 		},
 	},

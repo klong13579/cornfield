@@ -12,7 +12,6 @@ import { AgentBridge } from "../src/agent-bridge";
 describe("real omp agent model hot-swap", () => {
 	const bridge = new AgentBridge({
 		ompPath: "omp",
-		timeoutMs: 15_000,
 	});
 
 	test("starts real omp agent", async () => {

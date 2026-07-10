@@ -210,7 +210,7 @@ describe("DingTalk AI Card lifecycle (v2 reply path)", () => {
 		rpc = await createFakeRpcBinary();
 		card = await startFakeCardServer();
 		restoreFetch = await installCardApiBaseForTest(card.host, card.port);
-		bridge = new AgentBridge({ ompPath: rpc.path, timeoutMs: 5_000 });
+		bridge = new AgentBridge({ ompPath: rpc.path });
 		await bridge.start();
 	});
 
@@ -382,7 +382,7 @@ for await (const chunk of Bun.stdin.stream()) {
 		await Bun.write(scriptPath, MULTI_SEGMENT_RPC);
 		await fs.chmod(scriptPath, 0o755);
 		try {
-			const segBridge = new AgentBridge({ ompPath: scriptPath, timeoutMs: 5_000 });
+			const segBridge = new AgentBridge({ ompPath: scriptPath });
 			await segBridge.start();
 
 			const channel = new DingTalkChannel();

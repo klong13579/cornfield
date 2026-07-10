@@ -245,7 +245,7 @@ describe("Gateway message pipeline", () => {
 					},
 				},
 			},
-			agent: { ompPath: rpcPath, timeoutMs: 5_000 },
+			agent: { ompPath: rpcPath },
 			session: { resetPolicy: "none" as const },
 			dataDir: rootDir,
 		};
@@ -306,7 +306,7 @@ describe("Gateway message pipeline", () => {
 					},
 				},
 			},
-			agent: { ompPath: rpcPath, timeoutMs: 5_000 },
+			agent: { ompPath: rpcPath },
 			session: { resetPolicy: "none" as const },
 			dataDir: rootDir,
 		};
@@ -373,7 +373,7 @@ describe("Gateway slash command pipeline", () => {
 					},
 				},
 			},
-			agent: { ompPath: rpcPath, timeoutMs: 5_000 },
+			agent: { ompPath: rpcPath },
 			session: { resetPolicy: "none" as const },
 			dataDir: rootDir,
 		};
@@ -488,7 +488,7 @@ describe("Gateway slash command pipeline", () => {
 					},
 				},
 			},
-			agent: { ompPath: rpcPath, timeoutMs: 5_000 },
+			agent: { ompPath: rpcPath },
 			session: { resetPolicy: "none" as const },
 			dataDir: rootDir,
 		};
@@ -544,7 +544,7 @@ describe("Gateway slash command pipeline", () => {
 					},
 				},
 			},
-			agent: { ompPath: rpcPath, timeoutMs: 5_000 },
+			agent: { ompPath: rpcPath },
 			session: { resetPolicy: "none" as const },
 			dataDir: rootDir,
 		};

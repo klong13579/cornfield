@@ -497,8 +497,8 @@ describe("AgentBridge.executePrompt inactivity timeout", () => {
 		// Removed 2026-07-08 along with the hard cap. The previous test verified
 		// that `executePrompt({ timeoutMs: 250 })` would reject via the wall-clock
 		// cap even when no inactivityMs was set. With the hard cap deleted, the
-		// only give-up condition is the inactivity watchdog (default 60s) — a
-		// 60s test is too slow to live in this file. The default-60s behaviour
+		// only give-up condition is the inactivity watchdog (default 120s) — a
+		// 120s test is too slow to live in this file. The default-120s behaviour
 		// is implicitly covered by `inactivityMs` being optional in the type.
 	});
 });

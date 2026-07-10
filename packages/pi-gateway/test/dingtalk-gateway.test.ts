@@ -114,7 +114,7 @@ describe("Bridge → formatter end-to-end (v1 reply path)", () => {
 
 	beforeEach(async () => {
 		fake = await createFakeRpcBinary();
-		bridge = new AgentBridge({ ompPath: fake.path, timeoutMs: 5_000 });
+		bridge = new AgentBridge({ ompPath: fake.path });
 		await bridge.start();
 	});
 
@@ -215,7 +215,7 @@ process.stdin.on("data", chunk => {
 });
 `);
 		try {
-			const emptyBridge = new AgentBridge({ ompPath: empty.path, timeoutMs: 2_000 });
+			const emptyBridge = new AgentBridge({ ompPath: empty.path });
 			await emptyBridge.start();
 			const meta = await emptyBridge.forwardWithMeta(
 				makeMessage("hi", "conv-fail"),

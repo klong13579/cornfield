@@ -114,7 +114,7 @@ describe("NewSessionHandler", () => {
 		await ensureAgentDir(agentDir);
 
 		store = new SQLiteSessionStore(path.join(rootDir, "sessions.db"));
-		bridge = new AgentBridge({ ompPath: rpcPath, cwd: agentDir, timeoutMs: 5_000 });
+		bridge = new AgentBridge({ ompPath: rpcPath, cwd: agentDir });
 		await bridge.start();
 		replies = [];
 	});

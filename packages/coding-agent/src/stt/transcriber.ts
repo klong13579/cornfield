@@ -1,3 +1,6 @@
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { $which, logger } from "@oh-my-pi/pi-utils";
 import transcribeScript from "./transcribe.py" with { type: "text" };
 
@@ -11,8 +14,22 @@ const TRANSCRIBE_TIMEOUT_MS = 120_000;
 
 /**
  * Find a usable Python command.
+ *
+ * Priority:
+ *   1. mlx-whisper dedicated venv at ~/.venvs/mlx-whisper/ (macOS)
+ *   2. System Python (python3 / python / py)
  */
 export function resolvePython(): string | null {
+	// On macOS, prefer the mlx-whisper venv which has Apple Silicon GPU support
+	if (process.platform === "darwin") {
+		const mlxVenvPython = path.join(os.homedir(), ".venvs", "mlx-whisper", "bin", "python3");
+		try {
+			fs.accessSync(mlxVenvPython, fs.constants.X_OK);
+			return mlxVenvPython;
+		} catch {
+			// fall through to system python
+		}
+	}
 	for (const cmd of ["python", "py", "python3"]) {
 		if ($which(cmd)) return cmd;
 	}
@@ -20,7 +37,7 @@ export function resolvePython(): string | null {
 }
 
 /**
- * Transcribe a WAV file using Python openai-whisper.
+ * Transcribe a WAV file using Python mlx-whisper (Apple Silicon) or openai-whisper.
  *
  * Reads the WAV via Python's built-in `wave` module (no ffmpeg needed),
  * resamples to 16 kHz mono, and passes the numpy array directly to whisper.
@@ -36,7 +53,7 @@ export async function transcribe(audioPath: string, options?: TranscribeOptions)
 		throw new Error("Python not found. Install Python 3.8+ from https://python.org");
 	}
 
-	const modelName = options?.modelName ?? "base.en";
+	const modelName = options?.modelName ?? "mlx-community/whisper-large-v3-turbo";
 	const language = options?.language ?? "en";
 
 	logger.debug("Transcribing with Python whisper", { pythonCmd, audioPath, modelName, language });
@@ -77,8 +94,8 @@ export async function transcribe(audioPath: string, options?: TranscribeOptions)
 
 	if (exitCode !== 0) {
 		logger.error("Python whisper transcription failed", { exitCode, stderr: stderr.trim() });
-		if (stderr.includes("No module named 'whisper'")) {
-			throw new Error("openai-whisper not installed. Run: pip install openai-whisper");
+		if (stderr.includes("No module named 'mlx_whisper'")) {
+			throw new Error("mlx-whisper not installed. Run: pip install mlx-whisper");
 		}
 		// Show last line of stderr (the actual error, not the full traceback)
 		const lastLine = stderr.trim().split("\n").pop() ?? "";

@@ -1,7 +1,7 @@
-"""Transcribe a WAV file using openai-whisper.
+"""Transcribe a WAV file using mlx-whisper (Apple Silicon optimized).
 
-Reads WAV directly via Python's wave module (no ffmpeg needed).
-Resamples to 16kHz mono float32 and passes to whisper as a numpy array.
+Reads WAV directly via Python's wave module.
+Resamples to 16kHz mono float32 and passes to mlx_whisper.transcribe().
 
 Usage: python transcribe.py <audio.wav> <model_name> <language>
 Prints transcribed text to stdout.
@@ -11,9 +11,8 @@ import sys
 import wave
 import re
 
-
 import numpy as np
-import whisper
+import mlx_whisper
 
 
 def load_wav(path: str) -> np.ndarray:
@@ -51,18 +50,17 @@ def load_wav(path: str) -> np.ndarray:
 
 def main() -> None:
     if len(sys.argv) < 2:
-        print("Usage: python transcribe.py <audio.wav> <model_name> <language>", file=sys.stderr)
+        print("Usage: python transcribe.py <audio.wav> [model_name] [language]", file=sys.stderr)
         sys.exit(1)
     audio_path = sys.argv[1]
-    model_name = sys.argv[2] if len(sys.argv) > 2 else "base.en"
+    model_name = sys.argv[2] if len(sys.argv) > 2 else "mlx-community/whisper-large-v3-turbo"
     language = sys.argv[3] if len(sys.argv) > 3 else "en"
     if not re.fullmatch(r"[A-Za-z]{2,3}(-[A-Za-z]{2})?", language):
         print(f"Invalid language code: {language}", file=sys.stderr)
         sys.exit(1)
 
     audio = load_wav(audio_path)
-    model = whisper.load_model(model_name)
-    result = model.transcribe(audio, language=language)
+    result = mlx_whisper.transcribe(audio, path_or_hf_repo=model_name, language=language)
     print(result["text"].strip())
 
 

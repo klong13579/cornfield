@@ -390,7 +390,7 @@ describe("session rotation e2e", () => {
 		store = new SQLiteSessionStore(path.join(rootDir, "sessions.db"));
 		agentDir = path.join(rootDir, "agent");
 		await ensureAgentDir(agentDir);
-		bridge = new AgentBridge({ ompPath: rpcPath, cwd: agentDir, timeoutMs: 5_000 });
+		bridge = new AgentBridge({ ompPath: rpcPath, cwd: agentDir });
 		await bridge.start();
 	});
 

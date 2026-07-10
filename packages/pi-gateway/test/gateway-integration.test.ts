@@ -137,7 +137,7 @@ async function createHarness(): Promise<Harness> {
 	for (const accountId of ["ops", "hr"]) {
 		const agentDir = path.join(rootDir, "agents", accountId);
 		await ensureAgentDir(agentDir);
-		const bridge = new AgentBridge({ ompPath: rpcPath, cwd: agentDir, timeoutMs: 2_000 });
+		const bridge = new AgentBridge({ ompPath: rpcPath, cwd: agentDir });
 		await bridge.start();
 		bridges.set(accountId, bridge);
 
@@ -304,7 +304,7 @@ describe("real OMP gateway integration", () => {
 			const model = process.env.PI_GATEWAY_REAL_OMP_MODEL;
 			const prompt = process.env.PI_GATEWAY_REAL_OMP_PROMPT ?? "Reply with exactly: OK";
 			const sessionPath = path.join(tmpDir, "sessions", "real-conv.jsonl");
-			const bridge = new AgentBridge({ ompPath, cwd: tmpDir, model, timeoutMs: 180_000 });
+			const bridge = new AgentBridge({ ompPath, cwd: tmpDir, model });
 
 			try {
 				await ensureAgentDir(tmpDir);
@@ -339,7 +339,7 @@ describe("real OMP gateway integration", () => {
 				process.env.PI_GATEWAY_REAL_OMP_ABORT_PROMPT ??
 				"Write a long numbered list of 200 items, one item per line.";
 			const sessionPath = path.join(tmpDir, "sessions", "real-conv.jsonl");
-			const bridge = new AgentBridge({ ompPath, cwd: tmpDir, model, timeoutMs: 180_000 });
+			const bridge = new AgentBridge({ ompPath, cwd: tmpDir, model });
 
 			try {
 				await ensureAgentDir(tmpDir);

@@ -20,13 +20,13 @@ export async function checkDependencies(): Promise<STTDependencyStatus> {
 
 	let whisperAvailable = false;
 	if (pythonCmd) {
-		const check = Bun.spawnSync([pythonCmd, "-c", "import whisper"], {
+		const check = Bun.spawnSync([pythonCmd, "-c", "import mlx_whisper"], {
 			stdout: "pipe",
 			stderr: "pipe",
 		});
 		whisperAvailable = check.exitCode === 0;
 	}
-	const whisperHint = "Run 'omp setup stt' to auto-install, or: pip install openai-whisper";
+	const whisperHint = "Run 'omp setup stt' to auto-install, or: pip install mlx-whisper";
 
 	return {
 		recorder: { available: recorderTools.length > 0, tool: recorderTools[0] ?? null, installHint: recorderHint },

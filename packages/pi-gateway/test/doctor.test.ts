@@ -45,23 +45,23 @@ describe("validateConfig (non-swallowing)", () => {
 
 	test("reports schema violations with field paths", async () => {
 		const p = path.join(tmpDir, "schema.json");
-		// agent.timeoutMs must be a positive int; -5 violates the schema.
-		await Bun.write(p, JSON.stringify({ channels: {}, agent: { timeoutMs: -5 } }));
+		// agent.maxConcurrentSessions must be a positive int; -1 violates the schema.
+		await Bun.write(p, JSON.stringify({ channels: {}, agent: { maxConcurrentSessions: -1 } }));
 		const result = await validateConfig(p);
 		expect(result.status).toBe("schema-error");
 		if (result.status === "schema-error") {
 			expect(result.issues.length).toBeGreaterThan(0);
-			expect(result.issues.some(i => i.path.includes("timeoutMs"))).toBe(true);
+			expect(result.issues.some(i => i.path.includes("maxConcurrentSessions"))).toBe(true);
 		}
 	});
 
 	test("returns ok with merged defaults for a valid config", async () => {
 		const p = path.join(tmpDir, "good.json");
-		await Bun.write(p, JSON.stringify({ channels: {}, agent: { timeoutMs: 300000 } }));
+		await Bun.write(p, JSON.stringify({ channels: {}, agent: { maxConcurrentSessions: 5 } }));
 		const result = await validateConfig(p);
 		expect(result.status).toBe("ok");
 		if (result.status === "ok") {
-			expect(result.config.agent?.timeoutMs).toBe(300000);
+			expect(result.config.agent?.maxConcurrentSessions).toBe(5);
 			// default merged in
 			expect(result.config.session?.idleTimeoutMinutes).toBe(240);
 		}
@@ -98,29 +98,6 @@ describe("runDoctor end-to-end", () => {
 		}
 	});
 
-	test("does not warn about unset agent.timeoutMs (field is deprecated since 2026-07-08)", async () => {
-		const p = path.join(tmpDir, "no-timeout.json");
-		await Bun.write(p, JSON.stringify({ channels: {} }));
-		const report = await runDoctor(p);
-		const config = report.sections.find(s => s.name === "CONFIG")!;
-		expect(config.findings.some(f => f.severity === "warn" && f.message.includes("agent.timeoutMs"))).toBe(false);
-	});
-
-	test("warns when agent.timeoutMs is set (legacy field, no longer enforced)", async () => {
-		const p = path.join(tmpDir, "with-timeout.json");
-		await Bun.write(p, JSON.stringify({ channels: {}, agent: { timeoutMs: 120000 } }));
-		const report = await runDoctor(p);
-		const config = report.sections.find(s => s.name === "CONFIG")!;
-		expect(
-			config.findings.some(
-				f =>
-					f.severity === "warn" &&
-					f.message.includes("agent.timeoutMs") &&
-					f.message.includes("no longer enforced"),
-			),
-		).toBe(true);
-	});
-
 	test("flags unresolved $ENV appSecret as an error", async () => {
 		const p = path.join(tmpDir, "env-secret.json");
 		await Bun.write(
@@ -132,7 +109,7 @@ describe("runDoctor end-to-end", () => {
 						accounts: { hr: { appKey: "k", appSecret: "$DOCTOR_TEST_UNSET_SECRET" } },
 					},
 				},
-				agent: { timeoutMs: 120000 },
+				agent: { maxConcurrentSessions: 1 },
 			}),
 		);
 		delete process.env.DOCTOR_TEST_UNSET_SECRET;
@@ -145,7 +122,7 @@ describe("runDoctor end-to-end", () => {
 
 	test("renderText and renderJson agree on severity counts", async () => {
 		const p = path.join(tmpDir, "cfg.json");
-		await Bun.write(p, JSON.stringify({ channels: {}, agent: { timeoutMs: 120000 } }));
+		await Bun.write(p, JSON.stringify({ channels: {}, agent: { maxConcurrentSessions: 1 } }));
 		const report = await runDoctor(p);
 		const counts = countBySeverity(report);
 

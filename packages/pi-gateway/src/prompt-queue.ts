@@ -28,7 +28,9 @@ import type { ForwardStreamHandlers } from "./agent-bridge";
 import type { AgentEvent, RpcTransport } from "./agent-transport";
 
 /** Long-task watcher configuration. */
-export interface LongTaskConfig {
+export const DEFAULT_INACTIVITY_MS = 120_000;
+
+interface LongTaskConfig {
 	/** Threshold in ms before the first `onLongTask` fires (0 = disabled). */
 	thresholdMs: number;
 	/** Interval in ms for subsequent `onLongTask` pings. */
@@ -167,11 +169,17 @@ export class PromptQueue {
 		// but active turn — e.g. 30+ tool calls over several minutes —
 		// is legitimate work, not a hang.
 		//
+		// Default 120s: long enough that a 60s progress ping (from the
+		// long-task watcher) can keep the watchdog reset on every
+		// legitimate long tool call (2x margin), short enough that
+		// a true OMP hang is still caught by `streamingWatchdogMs`
+		// (90s default) before this fires.
+		//
 		// Previous design also enforced a wall-clock `timeoutMs` (5 min
 		// default) regardless of activity. That cap killed legitimate
 		// multi-step tasks (e.g. hr-agent update-interview-record doing
 		// 30+ dws lookups). Removed 2026-07-08.
-		const inactivityMs = opts?.inactivityMs ?? 60_000;
+		const inactivityMs = opts?.inactivityMs ?? DEFAULT_INACTIVITY_MS;
 
 		const pending: PendingPrompt = {
 			promptId,
@@ -434,6 +442,15 @@ export class PromptQueue {
 		};
 
 		const fire = (threshold: boolean): void => {
+			// Reset the inactivity watchdog: this long-running tool is
+			// alive and emitting pings, so it shouldn't be misread as an
+			// OMP hang by the `inactivityMs` watchdog. The threshold fire
+			// also resets (not just the periodic pings) so the very first
+			// long-task event already keeps the prompt alive. Without this,
+			// a `pip install`-style 60s+ tool call gets killed the moment
+			// its threshold fires (because lastActivityAt is only updated
+			// by OMP's session events, and the long-tool phase has none).
+			if (pending) pending.lastActivityAt = Date.now();
 			try {
 				pending.handlers?.onLongTask?.({
 					toolCallId,

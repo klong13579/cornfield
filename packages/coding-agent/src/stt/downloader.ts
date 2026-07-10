@@ -45,22 +45,22 @@ async function ensurePythonWhisper(options?: EnsureOptions): Promise<void> {
 		throw new Error("Python not found. Install Python 3.8+ from https://python.org");
 	}
 
-	// Check if whisper module is already importable
-	const check = Bun.spawnSync([pythonCmd, "-c", "import whisper"], {
+	// Check if mlx-whisper module is already importable
+	const check = Bun.spawnSync([pythonCmd, "-c", "import mlx_whisper"], {
 		stdout: "pipe",
 		stderr: "pipe",
 	});
 	if (check.exitCode === 0) return;
 
-	options?.onProgress?.({ stage: "Installing openai-whisper (this may take a few minutes)..." });
-	logger.debug("Installing openai-whisper via pip");
+	options?.onProgress?.({ stage: "Installing mlx-whisper (this may take a few minutes)..." });
+	logger.debug("Installing mlx-whisper via pip");
 
-	const install = await $`${pythonCmd} -m pip install -q openai-whisper`.quiet().nothrow();
+	const install = await $`${pythonCmd} -m pip install -q mlx-whisper`.quiet().nothrow();
 	if (install.exitCode !== 0) {
 		const stderr = install.stderr.toString().trim();
-		throw new Error(`Failed to install openai-whisper: ${stderr.split("\n").pop()}`);
+		throw new Error(`Failed to install mlx-whisper: ${stderr.split("\n").pop()}`);
 	}
-	logger.debug("openai-whisper installed successfully");
+	logger.debug("mlx-whisper installed successfully");
 }
 
 // ── Public API ─────────────────────────────────────────────────────

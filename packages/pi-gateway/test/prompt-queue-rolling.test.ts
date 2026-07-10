@@ -164,4 +164,55 @@ describe("PromptQueue inactivity watchdog", () => {
 		await Bun.sleep(600);
 		expect(queue.hasPendingPrompts()).toBe(false);
 	});
+
+	test("long-task pings update lastActivityAt (7-10 bug fix)", async () => {
+		// 2026-07-10 incident: hr agent ran `pip install mlx-whisper` (62s of
+		// no session events) and the gateway's 60s inactivity watchdog killed
+		// it. The OMP session-event stream produces no events while a bash
+		// subprocess is running, so the inactivity timer was ticking down
+		// to zero during a perfectly legitimate long-running tool. The fix:
+		// the long-task watcher's `fire()` callback updates
+		// `pending.lastActivityAt = Date.now()`, so every ping keeps the
+		// watchdog reset. This test verifies the unit-level behavior —
+		// without the fix, `lastActivityAt` would freeze at the toolcall_end
+		// event and the watchdog would treat the prompt as inactive.
+		const transport = new FakeTransport();
+		const queue = new PromptQueue(transport as unknown as RpcTransport, {
+			thresholdMs: 50,
+			pingMs: 30,
+		});
+		const { promise, promptId } = queue.enqueue(
+			"long bash",
+			{ onLongTask: () => {} }, // handler presence enables the watcher
+			undefined,
+			{ inactivityMs: 5_000 }, // long enough not to fire during the test
+		);
+		queue.onCommandResponse(promptId, { type: "response", command: "prompt", success: true });
+
+		const initialActivity = queue.getActiveLastActivityAt()!;
+		expect(initialActivity).toBeGreaterThan(0);
+
+		// Emit a toolcall_end to start the long-task watcher.
+		queue.onSessionEvent({
+			type: "message_update",
+			assistantMessageEvent: {
+				type: "toolcall_end",
+				contentIndex: 0,
+				toolCall: { id: "tc1", name: "bash", arguments: { command: "sleep 10" } },
+			},
+		});
+
+		// Wait for threshold (50ms) + several pings (30ms each). Without the
+		// fix, lastActivityAt freezes at the toolcall_end time. With the fix,
+		// the pings update lastActivityAt to each fire time, well past 100ms.
+		await Bun.sleep(200);
+
+		const updatedActivity = queue.getActiveLastActivityAt()!;
+		expect(updatedActivity - initialActivity).toBeGreaterThan(100);
+
+		// Resolve cleanly so the test doesn't leave a hanging promise.
+		queue.onSessionEvent({ type: "agent_end" });
+		const result = await promise;
+		expect(result.aborted).toBe(false);
+	});
 });

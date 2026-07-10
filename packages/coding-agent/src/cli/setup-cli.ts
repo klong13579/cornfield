@@ -328,13 +328,13 @@ async function handleSttSetup(flags: { json?: boolean; check?: boolean }): Promi
 	}
 
 	if (!status.whisper.available) {
-		console.log(chalk.dim(`\nInstalling openai-whisper...`));
+		console.log(chalk.dim(`\nInstalling mlx-whisper...`));
 		const { resolvePython } = await import("../stt/transcriber");
 		const pythonCmd = resolvePython()!;
-		const result = await $`${pythonCmd} -m pip install -q openai-whisper`.nothrow();
+		const result = await $`${pythonCmd} -m pip install -q mlx-whisper`.nothrow();
 		if (result.exitCode !== 0) {
-			console.error(chalk.red(`\n${theme.status.error} Failed to install openai-whisper`));
-			console.error(chalk.dim("Try manually: pip install openai-whisper"));
+			console.error(chalk.red(`\n${theme.status.error} Failed to install mlx-whisper`));
+			console.error(chalk.dim("Try manually: pip install mlx-whisper"));
 			process.exit(1);
 		}
 	}
@@ -360,7 +360,7 @@ ${chalk.bold("Usage:")}
 
 ${chalk.bold("Components:")}
   python    Install Jupyter kernel dependencies for Python code execution
-  stt       Install speech-to-text dependencies (openai-whisper, recording tools)
+  stt       Install speech-to-text dependencies (mlx-whisper, recording tools)
             Packages: ${PYTHON_PACKAGES.join(", ")}
 
 ${chalk.bold("Options:")}

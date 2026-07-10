@@ -14,7 +14,7 @@ import { logger } from "@oh-my-pi/pi-utils";
 import { Type } from "@sinclair/typebox";
 import { DingTalkChannel } from "../channels/dingtalk";
 import type { ChannelRegistry } from "../channels/registry";
-import type { HostToolHandler, HostToolResultBody, RpcHostToolDefinition } from "../host-tool-dispatcher";
+import type { HostToolHandler, HostToolResultBody } from "../host-tool-dispatcher";
 
 // ---------------------------------------------------------------------------
 // Parameter schema
@@ -51,18 +51,22 @@ function errResult(reason: string): HostToolResultBody {
 }
 
 // ---------------------------------------------------------------------------
-// Handler
+// Handler (ctx-first signature; the factory below closes over ctx to match
+// the cron/bridge-status/attachment tool shape that HostToolDispatcher.setTools
+// expects).
 // ---------------------------------------------------------------------------
 
-const handleSendMessage: HostToolHandler<DingtalkSendMessageToolContext> = async (ctx, args) => {
+async function handleSendMessage(
+	ctx: DingtalkSendMessageToolContext,
+	args: { targetUserId: string; text: string },
+): Promise<HostToolResultBody> {
 	logger.info("[SendMessage] dingtalk.send_message called", args);
 
 	// --- parameter validation ---
-	const { targetUserId, text } = args as { targetUserId: string; text: string };
-	if (!targetUserId || typeof targetUserId !== "string") {
+	if (!args.targetUserId || typeof args.targetUserId !== "string") {
 		return errResult("Missing or invalid required parameter: targetUserId");
 	}
-	if (!text || typeof text !== "string") {
+	if (!args.text || typeof args.text !== "string") {
 		return errResult("Missing or invalid required parameter: text");
 	}
 
@@ -79,31 +83,32 @@ const handleSendMessage: HostToolHandler<DingtalkSendMessageToolContext> = async
 
 	// --- send ---
 	try {
-		await channel.sendProactiveDM(targetUserId, text);
-		logger.info("[SendMessage] message sent successfully", { targetUserId });
-		return okResult({ sent: true, targetUserId });
+		await channel.sendProactiveDM(args.targetUserId, args.text);
+		logger.info("[SendMessage] message sent successfully", { targetUserId: args.targetUserId });
+		return okResult({ sent: true, targetUserId: args.targetUserId });
 	} catch (err) {
 		const msg = err instanceof Error ? err.message : String(err);
-		logger.error("[SendMessage] failed to send message", { targetUserId, error: msg });
+		logger.error("[SendMessage] failed to send message", { targetUserId: args.targetUserId, error: msg });
 		return errResult(`Failed to send message: ${msg}`);
 	}
-};
+}
 
 // ---------------------------------------------------------------------------
 // Factory
 // ---------------------------------------------------------------------------
 
-export function createDingtalkSendMessageToolDefinitions(ctx: DingtalkSendMessageToolContext): RpcHostToolDefinition[] {
+export function createDingtalkSendMessageToolDefinitions(ctx: DingtalkSendMessageToolContext): HostToolHandler[] {
 	return [
 		{
-			name: "dingtalk.send_message",
-			description:
-				"Send a text message to a DingTalk user via the robot's 1-on-1 chat. " +
-				"The message appears as sent by the PI robot in the target user's robot chat. " +
-				"Use this to proactively notify or communicate with DingTalk users.",
-			parameters: SEND_MESSAGE_PARAMETERS,
-			handler: handleSendMessage,
-			context: ctx,
+			definition: {
+				name: "dingtalk.send_message",
+				description:
+					"Send a text message to a DingTalk user via the robot's 1-on-1 chat. " +
+					"The message appears as sent by the PI robot in the target user's robot chat. " +
+					"Use this to proactively notify or communicate with DingTalk users.",
+				parameters: SEND_MESSAGE_PARAMETERS,
+			},
+			handle: args => handleSendMessage(ctx, args as { targetUserId: string; text: string }),
 		},
 	];
 }

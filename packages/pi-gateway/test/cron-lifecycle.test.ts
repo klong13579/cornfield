@@ -426,7 +426,7 @@ describe("cron timeout diagnostics bugfix", () => {
 
 		const config: GatewayConfig = {
 			channels: {},
-			agent: { ompPath: fakeOmpPath, timeoutMs: 1_000 },
+			agent: { ompPath: fakeOmpPath },
 			cron: { enabled: true, tickIntervalMs: 500, maxConcurrentRuns: 1 },
 		};
 
@@ -500,7 +500,7 @@ describe("cron model restore failure logging", () => {
 
 		const config: GatewayConfig = {
 			channels: {},
-			agent: { ompPath: fakeOmpPath, timeoutMs: 10_000 },
+			agent: { ompPath: fakeOmpPath },
 			cron: { enabled: true, tickIntervalMs: 500, maxConcurrentRuns: 1 },
 		};
 
@@ -563,7 +563,7 @@ describe("cron warm-bridge fallback contract", () => {
 
 		const config: GatewayConfig = {
 			channels: {},
-			agent: { ompPath: fakeOmpPath, timeoutMs: 5_000 },
+			agent: { ompPath: fakeOmpPath },
 			cron: { enabled: true, tickIntervalMs: 500, maxConcurrentRuns: 1 },
 		};
 

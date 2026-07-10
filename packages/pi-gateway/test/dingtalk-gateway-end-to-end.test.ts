@@ -272,7 +272,7 @@ async function createHarness(options?: {
 	const agentDir = path.join(rootDir, "agents", accountId);
 	await ensureAgentDir(agentDir);
 
-	const bridge = new AgentBridge({ ompPath: rpcPath, cwd: agentDir, timeoutMs: 2_000 });
+	const bridge = new AgentBridge({ ompPath: rpcPath, cwd: agentDir });
 	await bridge.start();
 
 	const store = new SQLiteSessionStore(path.join(rootDir, "sessions.db"));

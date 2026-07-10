@@ -104,7 +104,7 @@ describe("DingTalk stop-click end-to-end", () => {
 		await Bun.write(rpcPath, buildHoldRpc(60_000));
 		await fs.chmod(rpcPath, 0o755);
 
-		bridge = new AgentBridge({ ompPath: rpcPath, timeoutMs: 30_000 });
+		bridge = new AgentBridge({ ompPath: rpcPath });
 		await bridge.start();
 
 		channel = new DingTalkChannel();
