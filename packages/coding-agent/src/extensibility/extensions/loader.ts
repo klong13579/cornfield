@@ -4,6 +4,7 @@
 import type * as fs1 from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import { pathToFileURL } from "node:url";
 import type { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { ImageContent, Model, TextContent } from "@oh-my-pi/pi-ai";
 import type { KeyId } from "@oh-my-pi/pi-tui";
@@ -260,6 +261,54 @@ function createExtension(extensionPath: string, resolvedPath: string): Extension
 	};
 }
 
+async function findOwningPackageRoot(resolvedPath: string): Promise<string> {
+	let current = path.dirname(resolvedPath);
+	while (true) {
+		try {
+			const stat = await fs.stat(path.join(current, "package.json"));
+			if (stat.isFile()) return current;
+		} catch (error) {
+			if (!isEnoent(error) && !isEacces(error) && !hasFsCode(error, "EPERM")) throw error;
+		}
+		const parent = path.dirname(current);
+		if (parent === current) return path.dirname(resolvedPath);
+		current = parent;
+	}
+}
+
+async function buildBundledExtensionModule(resolvedPath: string): Promise<string> {
+	const stat = await fs.stat(resolvedPath);
+	const bundleKey = Bun.hash(`${resolvedPath}:${stat.mtimeMs}:${stat.size}`).toString(16);
+	const packageRoot = await findOwningPackageRoot(resolvedPath);
+	const packageName = path.basename(packageRoot);
+	const cacheRoot = path.join(process.cwd(), ".omp", "cache", "extension-bundles", bundleKey);
+	const sourceRoot = path.join(cacheRoot, "source", packageName);
+	const bundleOutdir = path.join(cacheRoot, "bundle");
+	const entryName = path.basename(resolvedPath).replace(/\.[^.]+$/, "");
+	const copiedEntry = path.join(sourceRoot, path.relative(packageRoot, resolvedPath));
+	const outfile = path.join(bundleOutdir, `${entryName}.js`);
+	await fs.cp(packageRoot, sourceRoot, { recursive: true });
+	const result = await Bun.build({
+		entrypoints: [copiedEntry],
+		format: "esm",
+		target: "bun",
+		throw: false,
+		sourcemap: "inline",
+		outdir: bundleOutdir,
+		naming: "[name].js",
+	});
+	if (!result.success) {
+		const details = result.logs.map(log => String(log)).join("\n");
+		throw new Error(details || `Failed to bundle extension ${resolvedPath}`);
+	}
+	return outfile;
+}
+
+async function importExtensionModule(resolvedPath: string): Promise<{ default?: ExtensionFactory }> {
+	const bundledPath = await buildBundledExtensionModule(resolvedPath);
+	return import(pathToFileURL(bundledPath).href) as Promise<{ default?: ExtensionFactory }>;
+}
+
 async function loadExtension(
 	extensionPath: string,
 	cwd: string,
@@ -269,7 +318,7 @@ async function loadExtension(
 	const resolvedPath = resolvePath(extensionPath, cwd);
 
 	try {
-		const module = await import(resolvedPath);
+		const module = await importExtensionModule(resolvedPath);
 		const factory = (module.default ?? module) as ExtensionFactory;
 
 		if (typeof factory !== "function") {

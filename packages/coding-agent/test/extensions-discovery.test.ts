@@ -494,6 +494,33 @@ describe("extensions discovery", () => {
 		expect(result.extensions[0].flags.has("--my-flag")).toBe(true);
 	});
 
+	it("loads source extension with workspace package imports via explicit path", async () => {
+		const explicitPath = path.join(tempDir.path(), "explicit-imports.ts");
+		fs.writeFileSync(
+			explicitPath,
+			[
+				'import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";',
+				'import { prompt } from "@oh-my-pi/pi-utils";',
+				'',
+				'export default function extension(pi: ExtensionAPI): void {',
+				'	const text = prompt.render("hello {{name}}", { name: "world" });',
+				'	pi.registerCommand("imported", {',
+				'		description: text,',
+				'		handler: async () => {},',
+				'	});',
+				'}'
+			].join("\n"),
+		);
+
+		const result = await loadExtensions([explicitPath], tempDir.path());
+
+		expect(filterUserExtensionErrors(result.errors)).toHaveLength(0);
+		const extensions = filterUserExtensions(result.extensions);
+		expect(extensions).toHaveLength(1);
+		expect(extensions[0]?.commands.get("imported")?.description).toBe("hello world");
+	});
+
+
 	it("loadExtensions only loads explicit paths without discovery", async () => {
 		// Create discoverable extensions (would be found by discoverAndLoadExtensions)
 		fs.writeFileSync(path.join(extensionsDir, "discovered.ts"), extensionCodeWithTool("discovered"));
