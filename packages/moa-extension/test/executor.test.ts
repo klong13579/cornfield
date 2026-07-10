@@ -269,4 +269,138 @@ describe("moa extension", () => {
 		});
 		expect(notifications).toHaveLength(0);
 	});
+	it("preserves heterogeneous worker models through /moa run details", async () => {
+		const sentMessages: Array<{ message: unknown; options: unknown }> = [];
+		let command: RegisteredCommand | undefined;
+		const authStorageStub = {
+			setFallbackResolver(): void {},
+			hasAuth: () => false,
+			getApiKey: async () => undefined,
+			getAll: () => ({}),
+			hasOAuth: () => false,
+			peekApiKey: async () => undefined,
+		} as unknown as AuthStorage;
+		const runSubprocessSpy = vi.fn(async (options: Parameters<typeof codingAgent.runSubprocess>[0]) => {
+			if (options.id === "moa-synthesis") {
+				return createSubprocessResult({
+					id: "moa-synthesis",
+					agent: "synthesis",
+					output: "pick the grounded route",
+					modelOverride: options.modelOverride as string | undefined,
+				});
+			}
+			return createSubprocessResult({
+				id: options.id,
+				agent: options.agent.name,
+				output: `${options.agent.name} says go`,
+				modelOverride: options.modelOverride as string | undefined,
+			});
+		});
+		const resolveSettingsSpy = vi.spyOn(await import("../src/settings"), "resolveSettings");
+		resolveSettingsSpy.mockReturnValue(
+			resolveSettings({
+				workers: [
+					{ name: "divergent", role: "Generate options", model: "provider/divergent" },
+					{ name: "grounded", role: "Check realism", model: "provider/grounded" },
+					{ name: "critical", role: "Find failure modes", model: "provider/critical" },
+				],
+				synthesisModel: "provider/synthesis",
+			}),
+		);
+
+		const api = {
+			appendEntry(): void {},
+			exec: async () => ({ code: 0, stderr: "", stdout: "" }),
+			getActiveTools: () => [],
+			getAllTools: () => [],
+			getCommands: () => [],
+			getFlag: () => undefined,
+			on(): void {},
+			pi: {
+				discoverAuthStorage: async () => authStorageStub,
+				getMarkdownTheme: codingAgent.getMarkdownTheme,
+				runSubprocess: runSubprocessSpy,
+				settings: Settings.isolated({}, { cwd: "/tmp/moa-ext-models" }),
+			},
+			registerCommand(name: string, options: Omit<RegisteredCommand, "name">): void {
+				command = { name, ...options };
+			},
+			registerFlag(): void {},
+			registerMessageRenderer: vi.fn(),
+			registerShortcut(): void {},
+			registerTool(): void {},
+			sendMessage(message: unknown, options?: unknown): void {
+				sentMessages.push({ message, options });
+			},
+			sendUserMessage(): void {},
+			setActiveTools: async (): Promise<void> => {},
+			setLabel(): void {},
+		} as unknown as ExtensionAPI;
+		moaExtension(api);
+		if (!command) throw new Error("Expected moa command to register");
+
+		const ctx = {
+			abort(): void {},
+			branch: async () => ({ cancelled: false }),
+			compact: async () => {},
+			cwd: "/tmp/moa-ext-models",
+			getContextUsage: () => undefined,
+			hasPendingMessages: () => false,
+			hasQueuedMessages: () => false,
+			hasUI: false,
+			isIdle: () => true,
+			model: undefined,
+			modelRegistry: {} as ModelRegistry,
+			navigateTree: async () => ({ cancelled: false }),
+			newSession: async () => ({ cancelled: false }),
+			reload: async () => {},
+			sessionManager: { getEntries: () => [], getBranch: () => [], getSessionId: () => "session-1" },
+			shutdown(): void {},
+			switchSession: async () => ({ cancelled: false }),
+			ui: {
+				confirm: async () => false,
+				custom: async () => undefined,
+				editor: async () => undefined,
+				getAllThemes: async () => [],
+				getEditorText: () => "",
+				getTheme: async () => undefined,
+				getToolsExpanded: () => false,
+				input: async () => undefined,
+				notify(): void {},
+				onTerminalInput: () => () => {},
+				pasteToEditor(): void {},
+				select: async () => undefined,
+				setEditorComponent(): void {},
+				setEditorText(): void {},
+				setFooter(): void {},
+				setHeader(): void {},
+				setStatus(): void {},
+				setTheme: async () => ({ success: true }),
+				setTitle(): void {},
+				setToolsExpanded(): void {},
+				setWidget(): void {},
+				setWorkingMessage(): void {},
+				theme: {} as ExtensionCommandContext["ui"]["theme"],
+			},
+			waitForIdle: async () => {},
+		} as unknown as ExtensionCommandContext;
+
+		await command.handler("run Ship the MOA panel", ctx);
+
+		expect(runSubprocessSpy).toHaveBeenCalledTimes(4);
+		expect(runSubprocessSpy.mock.calls[0]?.[0].modelOverride).toBe("provider/divergent");
+		expect(runSubprocessSpy.mock.calls[1]?.[0].modelOverride).toBe("provider/grounded");
+		expect(runSubprocessSpy.mock.calls[2]?.[0].modelOverride).toBe("provider/critical");
+		expect(runSubprocessSpy.mock.calls[3]?.[0].modelOverride).toBe("provider/synthesis");
+		expect(sentMessages[0]?.message).toMatchObject({
+			details: expect.objectContaining({
+				workers: [
+					expect.objectContaining({ name: "divergent", model: "provider/divergent" }),
+					expect.objectContaining({ name: "grounded", model: "provider/grounded" }),
+					expect.objectContaining({ name: "critical", model: "provider/critical" }),
+				],
+			}),
+		});
+	});
+
 });

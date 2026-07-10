@@ -1,5 +1,7 @@
 import type { MoaSettings, MoaWorkerSlot } from "./types";
 
+const RUNTIME_SETTINGS_ENV = "PI_MOA_SETTINGS_JSON";
+
 export const DEFAULT_WORKER_SLOTS: ReadonlyArray<MoaWorkerSlot> = [
 	{ name: "divergent", role: "Generate distinct candidate routes" },
 	{ name: "grounded", role: "Evaluate constraints and implementation realism" },
@@ -38,12 +40,26 @@ export function normalizeWorkerSlots(
 	});
 }
 
+function loadRuntimeSettingsOverrides(): Partial<MoaSettings> {
+	const raw = Bun.env[RUNTIME_SETTINGS_ENV]?.trim();
+	if (!raw) return {};
+	const parsed = Bun.JSON5.parse(raw);
+	if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+		throw new Error(`${RUNTIME_SETTINGS_ENV} must be a JSON5 object`);
+	}
+	return parsed as Partial<MoaSettings>;
+}
+
 export function resolveSettings(overrides: Partial<MoaSettings> = {}): MoaSettings {
-	const workerCount = overrides.workerCount ?? DEFAULT_SETTINGS.workerCount;
+	const mergedOverrides = {
+		...loadRuntimeSettingsOverrides(),
+		...overrides,
+	};
+	const workerCount = mergedOverrides.workerCount ?? DEFAULT_SETTINGS.workerCount;
 	return {
 		...DEFAULT_SETTINGS,
-		...overrides,
+		...mergedOverrides,
 		workerCount,
-		workers: normalizeWorkerSlots(overrides.workers ?? DEFAULT_SETTINGS.workers, workerCount),
+		workers: normalizeWorkerSlots(mergedOverrides.workers ?? DEFAULT_SETTINGS.workers, workerCount),
 	};
 }
