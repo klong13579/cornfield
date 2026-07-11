@@ -240,6 +240,7 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
 	readonly parameters: BashToolSchema;
 	readonly concurrency = "exclusive";
 	readonly strict = true;
+	readonly nonAbortable = true;
 	readonly #asyncEnabled: boolean;
 	readonly #autoBackgroundEnabled: boolean;
 	readonly #autoBackgroundThresholdMs: number;
