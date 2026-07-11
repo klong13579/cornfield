@@ -903,7 +903,7 @@ export const SETTINGS_SCHEMA = {
 
 	"stt.language": {
 		type: "string",
-		default: "en",
+		default: "zh",
 		ui: {
 			tab: "interaction",
 			label: "Speech Language",

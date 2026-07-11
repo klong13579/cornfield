@@ -1,3 +1,4 @@
+import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 
@@ -974,6 +975,133 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<BuiltinSlashCommandSpec> = [
 		name: "quit",
 		description: "Quit the application",
 		handle: shutdownHandler,
+	},
+	{
+		name: "record",
+		description: "Record audio or transcribe a file. /record starts mic, /record <path> transcribes file",
+		subcommands: [
+			{ name: "stop", description: "Stop recording and transcribe" },
+			{ name: "cancel", description: "Cancel recording (discard audio)" },
+		],
+		allowArgs: true,
+		handle: async (command, runtime) => {
+			runtime.ctx.editor.setText("");
+			const args = command.args.trim();
+			if (!args) {
+				// /record — start mic recording
+				await runtime.ctx.listenController.startRecording();
+				return;
+			}
+			if (args === "stop") {
+				await runtime.ctx.listenController.stopRecording();
+				const saved = runtime.ctx.listenController.lastSavedPath;
+				if (saved) {
+					const relative = saved.startsWith(os.homedir())
+						? saved.replace(os.homedir(), "~")
+						: saved;
+					return `我刚刚用录音功能录了一段音频，转写结果已保存到 ${relative}。如果需要我分析、总结或处理这段内容，可以直接告诉我。`;
+				}
+				return;
+			}
+			if (args === "cancel") {
+				await runtime.ctx.listenController.cancelRecording();
+				return;
+			}
+			// /record <path> — transcribe audio file
+			const filePath = args.startsWith("~") ? args.replace("~", os.homedir()) : args;
+			const desc = path.basename(filePath, path.extname(filePath));
+			await runtime.ctx.listenController.transcribeFile(filePath, desc);
+			const savedPath = runtime.ctx.listenController.lastSavedPath;
+			if (savedPath) {
+				const relative = savedPath.startsWith(os.homedir())
+					? savedPath.replace(os.homedir(), "~")
+					: savedPath;
+				return `我刚刚转录了一个音频文件，结果已保存到 ${relative}。如果需要我分析、总结或处理这段内容，可以直接告诉我。`;
+			}
+		},
+	},
+	{
+		name: "listen",
+		description: "Search or export saved recordings",
+		subcommands: [
+			{ name: "search", description: "Search saved recordings by keyword", usage: "<keyword>" },
+			{ name: "export", description: "Export a recording as markdown", usage: "<filename>" },
+			{ name: "list", description: "List all saved recordings" },
+		],
+		allowArgs: true,
+		handle: async (command, runtime) => {
+			runtime.ctx.editor.setText("");
+			const args = command.args.trim().split(/\s+/);
+			const sub = args[0] ?? "list";
+			const rest = args.slice(1).join(" ");
+
+		const { getConfigRootDir } = await import("@oh-my-pi/pi-utils");
+			const base = getConfigRootDir();
+			const listenDir = path.join(base, "listen");
+
+			try {
+				await fs.access(listenDir);
+			} catch {
+				runtime.ctx.showStatus("No recordings yet. Use /record to create one.");
+				return;
+			}
+
+			switch (sub) {
+				case "list": {
+					const files = await fs.readdir(listenDir);
+					const jsonFiles = files.filter((f: string) => f.endsWith(".json")).sort().reverse();
+					if (jsonFiles.length === 0) {
+						runtime.ctx.showStatus("No recordings found.");
+						return;
+					}
+					const list = jsonFiles.slice(0, 20).map((f: string) => `  ${f}`).join("\n");
+					runtime.ctx.showStatus(`Saved recordings (${jsonFiles.length} total):\n${list}`);
+					break;
+				}
+				case "search": {
+					if (!rest) {
+						runtime.ctx.showStatus("Usage: /listen search <keyword>");
+						return;
+					}
+					const files = await fs.readdir(listenDir);
+					const jsonFiles = files.filter((f: string) => f.endsWith(".json"));
+					const results: string[] = [];
+					for (const f of jsonFiles) {
+						try {
+							const content = await fs.readFile(path.join(listenDir, f), "utf-8");
+							if (content.toLowerCase().includes(rest.toLowerCase())) {
+								results.push(f);
+							}
+						} catch {}
+					}
+					if (results.length === 0) {
+						runtime.ctx.showStatus(`No recordings match "${rest}".`);
+					} else {
+						runtime.ctx.showStatus(`Matching recordings (${results.length}):\n${results.map((f: string) => `  ${f}`).join("\n")}`);
+					}
+					break;
+				}
+				case "export": {
+					if (!rest) {
+						runtime.ctx.showStatus("Usage: /listen export <filename>");
+						return;
+					}
+					const target = rest.endsWith(".json") ? rest : `${rest}.json`;
+					const targetPath = path.join(listenDir, target);
+					try {
+						const content = await fs.readFile(targetPath, "utf-8");
+						const data = JSON.parse(content);
+						runtime.ctx.showStatus(`Content: ${data.text?.slice(0, 200) ?? JSON.stringify(data).slice(0, 200)}...`);
+					} catch {
+						runtime.ctx.showStatus(`File not found: ${target}`);
+					}
+					break;
+				}
+				default: {
+					runtime.ctx.showStatus("Usage: /listen [list|search <keyword>|export <filename>]");
+				}
+			}
+		},
 	},
 ];
 

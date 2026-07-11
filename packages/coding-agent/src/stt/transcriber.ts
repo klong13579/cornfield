@@ -54,11 +54,13 @@ export async function transcribe(audioPath: string, options?: TranscribeOptions)
 	}
 
 	const modelName = options?.modelName ?? "mlx-community/whisper-large-v3-turbo";
-	const language = options?.language ?? "en";
+	const language = options?.language;
 
 	logger.debug("Transcribing with Python whisper", { pythonCmd, audioPath, modelName, language });
 
-	const proc = Bun.spawn([pythonCmd, "-c", transcribeScript, audioPath, modelName, language], {
+	const args: string[] = [pythonCmd, "-c", transcribeScript, audioPath, modelName];
+	if (language) args.push(language);
+	const proc = Bun.spawn(args, {
 		stdout: "pipe",
 		stderr: "pipe",
 	});

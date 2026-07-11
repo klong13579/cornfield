@@ -9,7 +9,6 @@ Prints transcribed text to stdout.
 
 import sys
 import wave
-import re
 
 import numpy as np
 import mlx_whisper
@@ -54,13 +53,15 @@ def main() -> None:
         sys.exit(1)
     audio_path = sys.argv[1]
     model_name = sys.argv[2] if len(sys.argv) > 2 else "mlx-community/whisper-large-v3-turbo"
-    language = sys.argv[3] if len(sys.argv) > 3 else "en"
-    if not re.fullmatch(r"[A-Za-z]{2,3}(-[A-Za-z]{2})?", language):
-        print(f"Invalid language code: {language}", file=sys.stderr)
-        sys.exit(1)
+    language = sys.argv[3] if len(sys.argv) > 3 else None
+    if language == "None" or language == "":
+        language = None
 
     audio = load_wav(audio_path)
-    result = mlx_whisper.transcribe(audio, path_or_hf_repo=model_name, language=language)
+    kwargs = {}
+    if language:
+        kwargs["language"] = language
+    result = mlx_whisper.transcribe(audio, path_or_hf_repo=model_name, **kwargs)
     print(result["text"].strip())
 
 

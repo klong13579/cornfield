@@ -25,6 +25,7 @@ import type { PythonExecutionComponent } from "./components/python-execution";
 import type { StatusLineComponent } from "./components/status-line";
 import type { ToolExecutionHandle } from "./components/tool-execution";
 import type { OAuthManualInputManager } from "./oauth-manual-input";
+import type { ListenController } from "../stt/listen-controller";
 import type { Theme } from "./theme/theme";
 
 export type CompactionQueuedMessage = {
@@ -198,6 +199,9 @@ export interface InteractiveModeContext {
 	executeCompaction(customInstructionsOrOptions?: string | CompactOptions, isAuto?: boolean): Promise<void>;
 	openInBrowser(urlOrPath: string): void;
 	refreshSlashCommandState(cwd?: string): Promise<void>;
+
+	// Listen (听记) controller
+	listenController: ListenController;
 
 	// Selector handling
 	showSettingsSelector(): void;

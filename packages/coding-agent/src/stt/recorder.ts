@@ -78,12 +78,13 @@ async function startFFmpegRecording(outputPath: string): Promise<RecordingHandle
 			outputPath,
 		];
 	} else if (process.platform === "darwin") {
+		// macOS avfoundation: :0 = DTAudioPlugin (system audio), :1 = built-in mic
 		args = [
 			"ffmpeg",
 			"-f",
 			"avfoundation",
 			"-i",
-			":0",
+			":1",
 			"-ar",
 			"16000",
 			"-ac",

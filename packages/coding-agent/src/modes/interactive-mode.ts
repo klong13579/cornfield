@@ -45,7 +45,7 @@ import type { AgentSession, AgentSessionEvent } from "../session/agent-session";
 import { HistoryStorage } from "../session/history-storage";
 import type { SessionContext, SessionManager } from "../session/session-manager";
 import { getRecentSessions } from "../session/session-manager";
-import { STTController, type SttState } from "../stt";
+import { STTController, type SttState, ListenController } from "../stt";
 import type { ExitPlanModeDetails, LspStartupServerInfo } from "../tools";
 import { normalizeLocalScheme } from "../tools/path-utils";
 import { formatPhaseDisplayName } from "../tools/todo-write";
@@ -219,6 +219,7 @@ export class InteractiveMode implements InteractiveModeContext {
 	readonly #selectorController: SelectorController;
 	readonly #uiHelpers: UiHelpers;
 	#sttController: STTController | undefined;
+	listenController: ListenController;
 	#voiceAnimationInterval: NodeJS.Timeout | undefined;
 	#voiceHue = 0;
 	#voicePreviousShowHardwareCursor: boolean | null = null;
@@ -324,6 +325,24 @@ export class InteractiveMode implements InteractiveModeContext {
 
 		this.#uiHelpers = new UiHelpers(this);
 		this.#btwController = new BtwController(this);
+		this.listenController = new ListenController({
+			showWarning: (msg: string) => this.showWarning(msg),
+			showStatus: (msg: string) => this.showStatus(msg),
+			onStatusChange: status => {
+				if (status.state === "recording") {
+					const elapsed = status.elapsed ?? 0;
+					const m = Math.floor(elapsed / 60);
+					const s = elapsed % 60;
+					const ts = `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+					this.statusLine.setHookStatus("listening", `${theme.icon.mic} \u5f55\u97f3 ${ts}`);
+				} else if (status.state === "transcribing") {
+					this.statusLine.setHookStatus("listening", "\u8f6c\u5199\u4e2d...");
+				} else if (status.state === "idle") {
+					this.statusLine.setHookStatus("listening", undefined);
+				}
+				this.ui.requestRender();
+			},
+		});
 		this.#extensionUiController = new ExtensionUiController(this);
 		this.#eventController = new EventController(this);
 		this.#commandController = new CommandController(this);
