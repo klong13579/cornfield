@@ -26,6 +26,7 @@ import {
 	visibleWidth,
 } from "@oh-my-pi/pi-tui";
 import { APP_NAME, getProjectDir, hsvToRgb, isEnoent, logger, postmortem, prompt } from "@oh-my-pi/pi-utils";
+import { shutdownSharedGateway } from "../ipy/gateway-coordinator";
 import chalk from "chalk";
 import { KeybindingsManager } from "../config/keybindings";
 import { type Settings, settings } from "../config/settings";
@@ -1204,6 +1205,9 @@ export class InteractiveMode implements InteractiveModeContext {
 
 		// Emit shutdown event to hooks
 		await this.session.dispose();
+
+		// Clean up Python kernel gateway if active
+		await shutdownSharedGateway();
 
 		if (this.isInitialized) {
 			this.ui.requestRender(true);

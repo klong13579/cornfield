@@ -9,6 +9,7 @@ import { filterEnv, resolvePythonRuntime } from "./runtime";
 
 const GATEWAY_DIR_NAME = "python-gateway";
 const GATEWAY_INFO_FILE = "gateway.json";
+const GATEWAY_USERS_FILE = "gateway.users";
 const GATEWAY_LOCK_FILE = "gateway.lock";
 const GATEWAY_STARTUP_TIMEOUT_MS = 30000;
 const GATEWAY_LOCK_TIMEOUT_MS = GATEWAY_STARTUP_TIMEOUT_MS + 5000;
@@ -70,6 +71,10 @@ function getGatewayDir(): string {
 
 function getGatewayInfoPath(): string {
 	return path.join(getGatewayDir(), GATEWAY_INFO_FILE);
+}
+
+function getGatewayUsersPath(): string {
+	return path.join(getGatewayDir(), GATEWAY_USERS_FILE);
 }
 
 function getGatewayLockPath(): string {
@@ -208,6 +213,42 @@ async function clearGatewayInfo(): Promise<void> {
 	}
 }
 
+async function readGatewayUsers(): Promise<number[]> {
+	const usersPath = getGatewayUsersPath();
+	try {
+		const raw = await Bun.file(usersPath).text();
+		const parsed = JSON.parse(raw);
+		if (!Array.isArray(parsed)) return [];
+		return parsed.filter((p): p is number => typeof p === "number" && Number.isFinite(p));
+	} catch {
+		return [];
+	}
+}
+
+async function writeGatewayUsers(users: number[]): Promise<void> {
+	const usersPath = getGatewayUsersPath();
+	const tempPath = `${usersPath}.tmp`;
+	await Bun.write(tempPath, JSON.stringify(users));
+	await fs.promises.rename(tempPath, usersPath);
+}
+
+async function addGatewayUser(): Promise<void> {
+	const users = await readGatewayUsers();
+	if (!users.includes(process.pid)) {
+		users.push(process.pid);
+	}
+	await writeGatewayUsers(users);
+}
+
+async function removeGatewayUser(): Promise<number[]> {
+	const users = await readGatewayUsers();
+	const remaining = users.filter(p => p !== process.pid);
+	if (remaining.length !== users.length) {
+		await writeGatewayUsers(remaining);
+	}
+	return remaining;
+}
+
 async function isGatewayHealthy(url: string): Promise<boolean> {
 	try {
 		const response = await fetch(`${url}/api/kernelspecs`, {
@@ -318,6 +359,7 @@ export async function acquireSharedGateway(cwd: string): Promise<AcquireResult |
 				if (await logger.time("acquireSharedGateway:isAlive", isGatewayAlive, existingInfo)) {
 					localGatewayUrl = existingInfo.url;
 					isCoordinatorInitialized = true;
+					await addGatewayUser();
 					logger.debug("Reusing global Python gateway", { url: existingInfo.url });
 					return { url: existingInfo.url, isShared: true };
 				}
@@ -343,6 +385,7 @@ export async function acquireSharedGateway(cwd: string): Promise<AcquireResult |
 			};
 			await writeGatewayInfo(info);
 			isCoordinatorInitialized = true;
+			await addGatewayUser();
 			logger.debug("Started global Python gateway", { url, pid });
 			return { url, isShared: true };
 		});
@@ -404,6 +447,21 @@ export async function shutdownSharedGateway(): Promise<void> {
 		await withGatewayLock(async () => {
 			const info = await readGatewayInfo();
 			if (!info) return;
+
+			// Remove our PID from the users list
+			const remaining = await removeGatewayUser();
+
+			// Filter out any dead PIDs from remaining users
+			const alive = remaining.filter(p => p !== info.pid && procmgr.isPidRunning(p));
+
+			// Only kill the gateway process if no other process is using it
+			if (alive.length > 0) {
+				logger.debug("Shared gateway still in use, skipping shutdown", {
+					remainingUsers: alive,
+				});
+				return;
+			}
+
 			if (procmgr.isPidRunning(info.pid)) {
 				await killGateway(info.pid, "shutdown");
 			}
