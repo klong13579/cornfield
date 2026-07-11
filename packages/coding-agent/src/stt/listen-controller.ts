@@ -106,7 +106,7 @@ export function buildFilename(description?: string): string {
 			return;
 		}
 		if (detectRecordingTools().length === 0) {
-			this.#showWarning("No recording tool found (ffmpeg or sox required).");
+			this.#showWarning("Audio capture is not available. Try rebuilding with: bun build:native");
 			return;
 		}
 		const id = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;

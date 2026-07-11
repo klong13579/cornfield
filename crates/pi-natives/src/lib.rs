@@ -26,6 +26,7 @@ use mimalloc::MiMalloc;
 static GLOBAL: MiMalloc = MiMalloc;
 
 pub mod appearance;
+pub mod audio;
 pub mod ast;
 pub mod clipboard;
 pub mod fd;

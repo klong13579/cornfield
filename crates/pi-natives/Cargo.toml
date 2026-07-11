@@ -100,6 +100,7 @@ image = { version = "0.25", default-features = false, features = [
 ] }
 webp = "0.3"
 arboard = { version = "3.5.0", features = ["wayland-data-control"] }
+cpal = "0.15"
 icy_sixel = "0.5"
 unicode-segmentation = "1.11"
 unicode-width = "0.2"

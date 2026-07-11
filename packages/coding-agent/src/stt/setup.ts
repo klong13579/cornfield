@@ -1,8 +1,6 @@
 import { detectRecordingTools } from "./recorder";
 import { resolvePython } from "./transcriber";
 
-const isWindows = process.platform === "win32";
-
 export interface STTDependencyStatus {
 	recorder: { available: boolean; tool: string | null; installHint: string };
 	python: { available: boolean; path: string | null; installHint: string };
@@ -11,9 +9,7 @@ export interface STTDependencyStatus {
 
 export async function checkDependencies(): Promise<STTDependencyStatus> {
 	const recorderTools = detectRecordingTools();
-	const recorderHint = isWindows
-		? "PowerShell fallback available. For better quality: install SoX or FFmpeg."
-		: "Install SoX: sudo apt install sox, or FFmpeg: sudo apt install ffmpeg";
+	const recorderHint = "Native audio capture (cpal) is bundled — no external tools needed.";
 
 	const pythonCmd = resolvePython();
 	const pythonHint = "Install Python 3.8+ from https://python.org";

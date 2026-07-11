@@ -122,7 +122,7 @@ describe("ListenController", () => {
 		detectRecordingTools.mockReturnValue([]);
 		await ctrl.startRecording();
 		expect(showWarning).toHaveBeenCalledWith(
-			expect.stringContaining("No recording tool found"),
+			expect.stringContaining("Audio capture is not available"),
 		);
 		expect(ctrl.state).toBe("idle");
 		expect(detectRecordingTools).toHaveBeenCalled();
