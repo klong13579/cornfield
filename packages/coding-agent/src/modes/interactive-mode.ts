@@ -334,7 +334,8 @@ export class InteractiveMode implements InteractiveModeContext {
 					const m = Math.floor(elapsed / 60);
 					const s = elapsed % 60;
 					const ts = `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
-					this.statusLine.setHookStatus("listening", `${theme.icon.mic} \u5f55\u97f3 ${ts}`);
+					const dot = elapsed % 2 === 0 ? "\u{1F7E2}" : "\u26AA";
+					this.statusLine.setHookStatus("listening", `${dot} ${theme.icon.mic} \u5f55\u97f3 ${ts}`);
 				} else if (status.state === "transcribing") {
 					this.statusLine.setHookStatus("listening", "\u8f6c\u5199\u4e2d...");
 				} else if (status.state === "idle") {
