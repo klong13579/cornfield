@@ -7,6 +7,9 @@ Executes bash command in shell session for terminal operations like git, bun, ca
 - PTY mode is opt-in: set `pty: true` only when the command needs a real terminal (e.g. `sudo`, `ssh` requiring user input); default is `false`
 - You **MUST** use `;` only when later commands should run regardless of earlier failures
 - Internal URIs (`skill://`, `agent://`, etc.) are auto-resolved to filesystem paths. Examples: `python skill://my-skill/scripts/init.py` runs the skill script; `skill://<name>/<relative-path>` resolves within the skill directory.
+- For inline Python/JS scripts longer than 3 lines, do a dry-run syntax check before submission:
+  `python3 -c "compile(open('/dev/stdin').read(), '<script>', 'exec')" <<'SYNTAX_CHECK'` or `node --check script.js`.
+  A syntax error wastes a round-trip; find it before you run it.
 {{#if asyncEnabled}}
 - Use `async: true` for long-running commands when you don't need immediate output; the call returns a background job ID and the result is delivered automatically as a follow-up.
 {{/if}}
