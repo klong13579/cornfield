@@ -102,8 +102,34 @@ const CRON_TOOL_PARAMETERS = Type.Object({
 		Type.Literal("disable"),
 		Type.Literal("run"),
 		Type.Literal("runs"),
+		Type.Literal("recent"),
 		Type.Literal("test-run"),
 	]),
+	// recent-only options
+	limit: Type.Optional(
+		Type.Number({
+			description:
+				"recent only: max number of runs to return across all the agent's tasks. Default 5. Use a larger value to backfill context after a long absence.",
+		}),
+	),
+	sinceMs: Type.Optional(
+		Type.Number({
+			description:
+				"recent only: only include runs whose startedAt is >= sinceMs. Useful to scope to a known window (e.g. last 24h = sinceMs=now-86_400_000).",
+		}),
+	),
+	includeOutput: Type.Optional(
+		Type.Boolean({
+			description:
+				"recent only: include a truncated output excerpt for each run. Default true. Set false for metadata-only listings (smaller payload).",
+		}),
+	),
+	outputMaxChars: Type.Optional(
+		Type.Number({
+			description:
+				"recent only: max characters of output to include per run. Default 2000 (matches the AI card delivery cap). Pass 0 for full output (may be large).",
+		}),
+	),
 	name: Type.Optional(Type.String({ description: "Task name (must be unique). Used by add." })),
 	id: Type.Optional(Type.String({ description: "Task id. Used by update / remove / show / run / runs." })),
 	schedule: Type.Optional(
@@ -160,7 +186,7 @@ const CRON_TOOL_DEFINITION: RpcHostToolDefinition = {
 		"the answer is the agent's full task list, not just tasks the user created. " +
 		"`createdByUserId` and `createdByAccountId` on each task are audit fields; do not use them to filter by creator. " +
 		'Use `cron.list` to enumerate, then client-side filter by `createdByUserId` only if the user explicitly asks "which tasks did I create".\n\n' +
-		"Actions: `add` / `list` / `show` / `update` / `remove` / `enable` / `disable` / `runs` / `test-run`.\n\n" +
+		"Actions: `add` / `list` / `show` / `update` / `remove` / `enable` / `disable` / `runs` / `recent` / `test-run`.\n\n" +
 		"**MANDATORY: use this host tool, NOT `bash` + `omp gateway cron ...` CLI.** Calling the CLI from bash bypasses delivery auto-inference and you will fail to set the sender's userId / conversationId correctly. The host tool reads the active chat context and fills delivery in for you. If you find yourself typing `omp gateway cron` in a `bash` call, STOP and use this tool instead.\n\n" +
 		"**`add` example (DM, agent task, 18:00 daily report):**\n" +
 		"```\n" +
@@ -185,6 +211,15 @@ const CRON_TOOL_DEFINITION: RpcHostToolDefinition = {
 		"**`update` / `show` / `remove` / `enable` / `disable` / `runs`** take `id` or `name`. The v2 schema uses `channel` / `toUserId` / `toConversationId` (NOT v1 `deliver` / `deliverUser` / `account`). " +
 		"Since the agent owns its tasks, `show` / `update` / `remove` work on ANY task in the agent regardless of who created it. " +
 		"`runs` returns the task's execution history (also works on any task in the agent).\n\n" +
+		"**`recent`** returns the most recent execution history ACROSS all the agent's tasks, newest first. " +
+		"Each row carries `taskName`, `startedAt` / `endedAt` / `durationMs` / `status` / `exitCode` / `agentSessionPath` " +
+		"and (by default) a `outputExcerpt` of the captured report text truncated to 2000 chars. " +
+		"**Use this when the user references a previous scheduled report** (e.g. '执行上次的建议', 'what did weekly-kb-lint say', " +
+		"'上周 cron 提了几条', 'follow up the last report'). Filters: `name` (single task), `limit` (default 5), " +
+		"`sinceMs` (ms timestamp lower bound), `includeOutput` (default true), `outputMaxChars` (default 2000, pass 0 for full output). " +
+		"After fetching, scan the `outputExcerpt` for structured sections like `## 建议操作` / `## 建议` / `## Next steps` — those are " +
+		"the actionable items the user usually wants you to execute. If the excerpt is truncated, follow up with the `read` tool on " +
+		"`agentSessionPath` for the full LLM trace.\n\n" +
 		"**`test-run`** triggers a task through the REAL scheduler and reports that the trigger was scheduled. " +
 		"Use this to verify a task's end-to-end pipeline (warm bridge → agent run → DingTalk delivery) without waiting for the actual cron tick. " +
 		'**Async contract (fire-and-forget):** `test-run` returns in milliseconds with `{kind: "started", inMs, timeoutMs, expiresAt, startedAt}`. The actual run + card delivery happen in the background on the next engine tick + agent run cycle — the LLM is NOT blocked. ' +
@@ -224,10 +259,26 @@ export function createCronToolDefinitions(ctx: CronToolContext): HostToolHandler
 // ---------------------------------------------------------------------------
 
 interface CronToolArgs {
-	action: "add" | "list" | "show" | "update" | "remove" | "enable" | "disable" | "run" | "runs" | "test-run";
+	action:
+		| "add"
+		| "list"
+		| "show"
+		| "update"
+		| "remove"
+		| "enable"
+		| "disable"
+		| "run"
+		| "runs"
+		| "recent"
+		| "test-run";
 	inMs?: number;
 	testTimeoutMs?: number;
 	noRestore?: boolean;
+	// recent-only
+	limit?: number;
+	sinceMs?: number;
+	includeOutput?: boolean;
+	outputMaxChars?: number;
 	[key: string]: unknown;
 }
 
@@ -254,6 +305,8 @@ async function handleCronAction(args: CronToolArgs, ctx: CronToolContext): Promi
 				return errResult("'run' via LLM is not yet supported; use `omp gateway cron run <name>` from the CLI");
 			case "runs":
 				return handleRuns(args, storage);
+			case "recent":
+				return handleRecent(args, storage);
 			case "test-run":
 				return await handleTestRun(args, ctx);
 			default:
@@ -512,6 +565,86 @@ function handleRuns(args: CronToolArgs, storage: SchedulerStorage): HostToolResu
 	});
 
 	return ok({ taskId: task.id, executions: enriched });
+}
+
+// ---------------------------------------------------------------------------
+// recent — cross-task recent execution history with output excerpts
+// ---------------------------------------------------------------------------
+
+/**
+ * Cross-task recent execution history. Use case: the user is in an IM
+ * chat session and references a previous scheduled report ("执行上次的
+ * 建议", "what did weekly-kb-lint say last week", "上周 cron 提了几条").
+ * The LLM calls this to fetch the most recent outputs across the
+ * agent's tasks so it can act on the report's content.
+ *
+ * Output handling: `executions.output` for agent tasks holds the
+ * captured stdout from `omp --print` — i.e. the report text that was
+ * delivered to the user (possibly truncated to ~2000 chars before the
+ * card render). We re-truncate at the storage boundary with the same
+ * default (2000) so the LLM payload stays bounded. The LLM can:
+ *   - pass `includeOutput: false` for metadata-only listings
+ *   - pass `outputMaxChars: 0` for the full text (may be large)
+ *   - use the returned `agentSessionPath` to `read` the raw OMP
+ *     session JSONL with full LLM trace + tool calls.
+ *
+ * The returned rows are stripped of `stderr` (the LLM does not need
+ * to see cron internal error text) and `command` (no reason to leak
+ * the prompt back to itself).
+ */
+function handleRecent(args: CronToolArgs, storage: SchedulerStorage): HostToolResultBody {
+	const limit = numberArg(args, "limit") ?? 5;
+	const sinceMs = numberArg(args, "sinceMs");
+	const includeOutput = args.includeOutput !== false; // default true
+	const outputMaxChars = numberArg(args, "outputMaxChars") ?? 2000;
+	const taskName = stringArg(args, "name"); // recent accepts name as task filter
+
+	const rows = storage.getRecentExecutions({ limit, sinceMs, taskName });
+
+	const truncatedDefault = 2000;
+	const payload = rows.map(r => {
+		const durationMs = r.endedAt !== undefined ? r.endedAt - r.startedAt : undefined;
+		const entry: Record<string, unknown> = {
+			id: r.id,
+			taskId: r.taskId,
+			taskName: r.taskName,
+			startedAt: r.startedAt,
+			endedAt: r.endedAt,
+			durationMs,
+			status: r.status,
+			exitCode: r.exitCode,
+		};
+		if (r.agentSessionPath) entry.agentSessionPath = r.agentSessionPath;
+
+		if (includeOutput && r.output) {
+			// 0 = full output (no truncation at the tool layer)
+			if (outputMaxChars === 0) {
+				entry.outputExcerpt = r.output;
+			} else {
+				const max = outputMaxChars > 0 ? Math.floor(outputMaxChars) : truncatedDefault;
+				entry.outputExcerpt = truncateMiddle(r.output, max);
+				entry.outputTruncated = r.output.length > max;
+			}
+		}
+		return entry;
+	});
+
+	return ok({ runs: payload, count: payload.length });
+}
+
+/**
+ * Truncate a string in the middle, preserving head and tail. Default
+ * strategy: keep first 60% + ellipsis + last 30%, with a small
+ * marker. This is the right shape for cron reports because the
+ * `## 建议操作` section the LLM usually wants tends to sit at the
+ * very end; head-only truncation would clip it.
+ */
+function truncateMiddle(s: string, maxChars: number): string {
+	if (s.length <= maxChars) return s;
+	if (maxChars < 32) return s.slice(0, maxChars);
+	const headLen = Math.floor(maxChars * 0.6);
+	const tailLen = maxChars - headLen - 16; // 16 = marker length
+	return `${s.slice(0, headLen)}\n\n[...truncated ${s.length - headLen - tailLen} chars...]\n\n${s.slice(s.length - tailLen)}`;
 }
 
 // ---------------------------------------------------------------------------

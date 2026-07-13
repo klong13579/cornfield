@@ -124,8 +124,8 @@ export type ResolveAccountIdFn = (agentDir: string) => string | undefined;
 /**
  * Mirror the cron delivery brief to the user's chat session JSONL so the
  * user can reply with full context (a+ "continuable jobs" pattern, modeled
- * on Hermes's `attach_to_session`). Optional; tasks with
- * `attachToSession: true` trigger this only on successful delivery.
+ * on Hermes's `attach_to_session`). Called after a successful delivery for
+ * every DingTalk task by default; opt out with `task.attachToSession: false`.
  *
  * The function is best-effort: a mirror failure must NOT fail the cron
  * run. Implementations should resolve the chat session path themselves
@@ -154,7 +154,8 @@ export interface CronDeps {
 	/** Optional. See {@link NotifyCronFailureFn}. */
 	notifyFailure?: NotifyCronFailureFn;
 	/** Optional. See {@link MirrorToSessionFn}. Called after a
-	 *  successful delivery when `task.attachToSession` is true. */
+	 *  successful delivery on every DingTalk task by default; opt out
+	 *  per task with `task.attachToSession: false`. */
 	mirrorToSession?: MirrorToSessionFn;
 }
 
@@ -744,7 +745,28 @@ export class CronService {
 				// session so a follow-up DM/IM reply lands in a session
 				// that already contains the brief. Best-effort: failure
 				// here is logged but does NOT fail the cron run.
-				if (task.attachToSession && this.#deps.mirrorToSession) {
+				//
+				// Default ON for DingTalk (`task.attachToSession !== false`):
+				// the whole point of this feature is "the chat LLM has the
+				// last cron brief in context without the user having to
+				// remember to ask for it". An opt-in flag buried in task
+				// config meant most tasks never had it set, so the chat
+				// agent kept starting cold. Set `attachToSession: false`
+				// to opt out per task.
+				//
+				// DingTalk-only by design: the mirror writes to the
+				// user's DingTalk chat session JSONL under
+				// `<agentDir>/sessions/<conversationId>.jsonl`. Other
+				// channels (telegram, slack, …) have no equivalent
+				// session path on the gateway host, so the mirror is
+				// skipped silently for them — the cron `recent` host
+				// tool is the cross-channel fallback for "user asks
+				// about the last report" regardless of channel.
+				if (
+					task.attachToSession !== false &&
+					deliveryConfig.channel === "dingtalk" &&
+					this.#deps.mirrorToSession
+				) {
 					try {
 						const mirrorResult = await this.#deps.mirrorToSession({
 							task,

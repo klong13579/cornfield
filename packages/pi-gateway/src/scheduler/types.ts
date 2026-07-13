@@ -92,13 +92,16 @@ export interface ScheduledTask {
 	 *   (group chats work directly); for DMs the gateway falls back to
 	 *   scanning `<agentDir>/sessions/` for the most recent non-cron
 	 *   session (best effort).
-	 * - Best-effort: a mirror failure is logged and does not break the
-	 *   run.
+	 * - Best-effort: a mirror failure is logged (at warn level) and does
+	 *   not break the run. The first cron run after install typically
+	 *   fails the mirror with "no chat session found" because the user
+	 *   hasn't chatted yet — that warn is expected, not a bug, and
+	 *   clears on the next run after the first user DM.
 	 * - Independent of {@link ScheduledTask.injectLastOutput} and
 	 *   {@link ScheduledTask.injectToolCalls} — a+ controls what the
 	 *   CRON AGENT sees, attachToSession controls what the CHAT AGENT
 	 *   sees after delivery.
-	 * Default false.
+	 * Default true (DingTalk only). Set to `false` to opt out.
 	 */
 	attachToSession?: boolean;
 	consecutiveFailures: number;
@@ -166,7 +169,7 @@ export interface TaskFileDefinition {
 	injectFailureContext?: boolean;
 	/** See {@link ScheduledTask.forceFail}. Default false. */
 	forceFail?: boolean;
-	/** See {@link ScheduledTask.attachToSession}. Default false. */
+	/** See {@link ScheduledTask.attachToSession}. Default true (DingTalk). */
 	attachToSession?: boolean;
 	/** Agent execution directory (replaces accountId for execution routing) */
 	agentDir?: string;
@@ -231,6 +234,32 @@ export interface SchedulerStorage {
 	recordExecution(exec: Omit<TaskExecution, "id">): TaskExecution;
 	updateExecution(id: string, updates: Partial<TaskExecution>): void;
 	getExecutions(taskId: string, limit?: number): TaskExecution[];
+	/**
+	 * Cross-task recent execution history. Used by the `cron.recent` host
+	 * tool action so an LLM in an IM chat session can fetch the most
+	 * recent outputs of the agent's own scheduled tasks on demand.
+	 *
+	 * Unlike {@link getExecutions}, this joins across all tasks owned by
+	 * the storage and stamps each row with `taskName` (since the LLM
+	 * payload must be self-identifying when displayed across tasks).
+	 * Filter by `taskName` to scope to a single task; `sinceMs` bounds
+	 * the time window.
+	 *
+	 * Implementation contract:
+	 *   - Returns rows newest-first (`startedAt DESC`).
+	 *   - Honors `limit` (default 5).
+	 *   - `output` and `agentSessionPath` are returned when present
+	 *     (no truncation at the storage layer — truncation is the LLM
+	 *     tool handler's job).
+	 *   - Pure read: no state change, no error if a task was deleted
+	 *     between record and query (returns the row with the last-known
+	 *     taskName, or "(deleted task)" if missing).
+	 */
+	getRecentExecutions(query?: {
+		limit?: number;
+		taskName?: string;
+		sinceMs?: number;
+	}): Array<TaskExecution & { taskName: string }>;
 	pruneExecutions(maxAgeDays?: number, maxCount?: number): number;
 	close(): void;
 }

@@ -20,6 +20,7 @@ import { runTestRun } from "../src/scheduler/test-run";
 import { clearTestRunMarker, hasTestRunMarker, readTestRunMarker } from "../src/scheduler/test-run-marker";
 import type { ScheduledTask } from "../src/scheduler/types";
 import type { InboundMessage } from "../src/types";
+import { getLogRoot, setLogRoot } from "../src/scheduler/execution-log";
 
 // ===========================================================================
 // bridge.status host tool
@@ -1266,5 +1267,374 @@ describe("runTestRun — fire-and-forget (awaitResult: false)", () => {
 		});
 		expect(result.kind).toBe("task_not_found");
 		expect(hasTestRunMarker(tempDir)).toBe(false);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// recent — cross-task execution history with output excerpts
+// ---------------------------------------------------------------------------
+
+describe("cron host tool — recent action", () => {
+	let storage: JsonFileStorage;
+	const storages: JsonFileStorage[] = [];
+	let savedLogRoot: string;
+	let isolatedLogRoot: string;
+
+	beforeEach(() => {
+		storage = newDb();
+		storages.push(storage);
+		// Isolate the JSONL log directory so this test cannot leak entries
+		// from the global `~/.omp/gateway-data/scheduler/logs/` (which
+		// `readExecutionLog` reads by default). Without this, the
+		// cross-task JSONL walk picks up rows from previous test runs
+		// (or real cron history) and inflates the count.
+		savedLogRoot = getLogRoot();
+		isolatedLogRoot = path.join(TMP, `logs-${Math.random().toString(36).slice(2)}`);
+		setLogRoot(isolatedLogRoot);
+	});
+
+	afterEach(() => {
+		setLogRoot(savedLogRoot);
+		storages.length = 0;
+		try {
+			fs.rmSync(TMP, { recursive: true, force: true });
+		} catch {}
+	});
+
+	function seedExec(
+		taskId: string,
+		opts: {
+			startedAt: number;
+			endedAt?: number;
+			output?: string;
+			status?: "running" | "success" | "failure";
+			agentSessionPath?: string;
+		},
+	) {
+		storage.recordExecution({
+			taskId,
+			startedAt: opts.startedAt,
+			endedAt: opts.endedAt ?? opts.startedAt + 1000,
+			exitCode: opts.status === "failure" ? 1 : 0,
+			output: opts.output,
+			stderr: "",
+			status: opts.status ?? "success",
+			agentSessionPath: opts.agentSessionPath,
+		});
+	}
+
+	function setupTwoTasks() {
+		// Two tasks with execution histories. We seed via storage directly
+		// (not through the host tool) so the test owns the timestamps and
+		// can verify sort/filter deterministically.
+		const taskA = storage.addTask({
+			name: "weekly-kb-lint",
+			cron: "0 10 * * 1",
+			command: "lint kb",
+			scheduleType: "cron",
+			taskType: "agent",
+			status: "active",
+			createdAt: Date.now(),
+			updatedAt: Date.now(),
+			runCount: 0,
+			failCount: 0,
+			consecutiveFailures: 0,
+		});
+		const taskB = storage.addTask({
+			name: "weekly-progress-update",
+			cron: "0 9 * * 1",
+			command: "summarize progress",
+			scheduleType: "cron",
+			taskType: "agent",
+			status: "active",
+			createdAt: Date.now(),
+			updatedAt: Date.now(),
+			runCount: 0,
+			failCount: 0,
+			consecutiveFailures: 0,
+		});
+
+		const t0 = Date.now() - 7 * 24 * 60 * 60 * 1000; // 7 days ago
+		const t1 = Date.now() - 24 * 60 * 60 * 1000; // 1 day ago
+		const t2 = Date.now() - 60 * 60 * 1000; // 1h ago
+		const t3 = Date.now() - 5 * 60 * 1000; // 5min ago
+
+		seedExec(taskA.id, {
+			startedAt: t0,
+			endedAt: t0 + 5000,
+			output: "old kb-lint report, no suggestions",
+			agentSessionPath: "/tmp/sess-A-old.jsonl",
+		});
+		seedExec(taskA.id, {
+			startedAt: t2,
+			endedAt: t2 + 8000,
+			output: "## 建议操作\n- [devops] 行动: 迁移 ES 到 v9",
+			agentSessionPath: "/tmp/sess-A-recent.jsonl",
+		});
+		seedExec(taskB.id, {
+			startedAt: t1,
+			endedAt: t1 + 3000,
+			output: "progress update W29",
+		});
+		seedExec(taskB.id, {
+			startedAt: t3,
+			endedAt: t3 + 2000,
+			output: "progress update W30",
+		});
+		return { taskA, taskB };
+	}
+
+	it("returns executions across all tasks newest-first by default", async () => {
+		setupTwoTasks();
+		const tools = createCronToolDefinitions({
+			getBridge: () => stubCronBridge(DM_MSG),
+			registry: new StubRegistry() as unknown as ChannelRegistry,
+			getStorage: () => storage,
+			accountId: "hr",
+		});
+		const result = await tools[0]!.handle({ action: "recent" });
+		const { text, isError } = asText(result);
+		expect(isError).toBe(false);
+		const payload = JSON.parse(text) as { runs: Array<{ taskName: string; startedAt: number }>; count: number };
+		expect(payload.count).toBe(4);
+		// Newest first: t3 (W30 progress) → t2 (kb-lint recent) → t1 (W29 progress) → t0 (kb-lint old)
+		expect(payload.runs[0]!.taskName).toBe("weekly-progress-update");
+		expect(payload.runs[1]!.taskName).toBe("weekly-kb-lint");
+		expect(payload.runs[2]!.taskName).toBe("weekly-progress-update");
+		expect(payload.runs[3]!.taskName).toBe("weekly-kb-lint");
+		expect(payload.runs[0]!.startedAt).toBeGreaterThan(payload.runs[1]!.startedAt);
+	});
+
+	it("filters by name (single task) when name is passed", async () => {
+		setupTwoTasks();
+		const tools = createCronToolDefinitions({
+			getBridge: () => stubCronBridge(DM_MSG),
+			registry: new StubRegistry() as unknown as ChannelRegistry,
+			getStorage: () => storage,
+			accountId: "hr",
+		});
+		const result = await tools[0]!.handle({
+			action: "recent",
+			name: "weekly-kb-lint",
+		});
+		const payload = JSON.parse(asText(result).text) as { runs: Array<{ taskName: string }>; count: number };
+		expect(payload.count).toBe(2);
+		expect(payload.runs.every(r => r.taskName === "weekly-kb-lint")).toBe(true);
+	});
+
+	it("honors limit", async () => {
+		setupTwoTasks();
+		const tools = createCronToolDefinitions({
+			getBridge: () => stubCronBridge(DM_MSG),
+			registry: new StubRegistry() as unknown as ChannelRegistry,
+			getStorage: () => storage,
+			accountId: "hr",
+		});
+		const result = await tools[0]!.handle({ action: "recent", limit: 2 });
+		const payload = JSON.parse(asText(result).text) as { runs: unknown[]; count: number };
+		expect(payload.count).toBe(2);
+	});
+
+	it("honors sinceMs to bound the time window", async () => {
+		setupTwoTasks();
+		const t1 = Date.now() - 24 * 60 * 60 * 1000; // 1 day ago
+		const tools = createCronToolDefinitions({
+			getBridge: () => stubCronBridge(DM_MSG),
+			registry: new StubRegistry() as unknown as ChannelRegistry,
+			getStorage: () => storage,
+			accountId: "hr",
+		});
+		const result = await tools[0]!.handle({
+			action: "recent",
+			sinceMs: t1 - 1000, // include anything from 1 day ago onward
+		});
+		const payload = JSON.parse(asText(result).text) as { runs: Array<{ startedAt: number }>; count: number };
+		// The 7-days-old kb-lint run is excluded
+		expect(payload.runs.every(r => r.startedAt >= t1 - 1000)).toBe(true);
+		expect(payload.count).toBe(3);
+	});
+
+	it("includes output excerpt by default, truncated to 2000 chars", async () => {
+		setupTwoTasks();
+		const tools = createCronToolDefinitions({
+			getBridge: () => stubCronBridge(DM_MSG),
+			registry: new StubRegistry() as unknown as ChannelRegistry,
+			getStorage: () => storage,
+			accountId: "hr",
+		});
+		const result = await tools[0]!.handle({
+			action: "recent",
+			name: "weekly-kb-lint",
+			limit: 1, // just the most recent kb-lint run
+		});
+		const payload = JSON.parse(asText(result).text) as {
+			runs: Array<{ outputExcerpt?: string; outputTruncated?: boolean }>;
+		};
+		// The most recent kb-lint run has output "## 建议操作\n- [devops] 行动: 迁移 ES 到 v9"
+		expect(payload.runs[0]!.outputExcerpt).toContain("## 建议操作");
+		expect(payload.runs[0]!.outputExcerpt).toContain("迁移 ES 到 v9");
+		expect(payload.runs[0]!.outputTruncated).toBe(false);
+	});
+
+	it("truncates long output via middle-truncation, preserving tail", async () => {
+		const task = storage.addTask({
+			name: "long-task",
+			cron: "0 10 * * *",
+			command: "x",
+			scheduleType: "cron",
+			taskType: "shell",
+			status: "active",
+			createdAt: Date.now(),
+			updatedAt: Date.now(),
+			runCount: 0,
+			failCount: 0,
+			consecutiveFailures: 0,
+		});
+		const tail = "## 建议操作\n- last action that must survive truncation";
+		const longOutput = "A".repeat(3000) + "\n" + tail;
+		seedExec(task.id, {
+			startedAt: Date.now(),
+			output: longOutput,
+		});
+
+		const tools = createCronToolDefinitions({
+			getBridge: () => stubCronBridge(DM_MSG),
+			registry: new StubRegistry() as unknown as ChannelRegistry,
+			getStorage: () => storage,
+			accountId: "hr",
+		});
+		const result = await tools[0]!.handle({
+			action: "recent",
+			outputMaxChars: 200,
+		});
+		const payload = JSON.parse(asText(result).text) as {
+			runs: Array<{ outputExcerpt?: string; outputTruncated?: boolean }>;
+		};
+		const excerpt = payload.runs[0]!.outputExcerpt!;
+		// Truncated flag set
+		expect(payload.runs[0]!.outputTruncated).toBe(true);
+		// Tail survives (the actionable section)
+		expect(excerpt).toContain("## 建议操作");
+		expect(excerpt).toContain("last action that must survive truncation");
+		// Middle-truncation marker present
+		expect(excerpt).toMatch(/\[\.\.\.truncated \d+ chars\.\.\.\]/);
+		// Excerpt is within the requested cap + small marker overhead
+		expect(excerpt.length).toBeLessThan(250);
+	});
+
+	it("outputMaxChars: 0 returns the full output without truncation", async () => {
+		const task = storage.addTask({
+			name: "full-output-task",
+			cron: "0 10 * * *",
+			command: "x",
+			scheduleType: "cron",
+			taskType: "shell",
+			status: "active",
+			createdAt: Date.now(),
+			updatedAt: Date.now(),
+			runCount: 0,
+			failCount: 0,
+			consecutiveFailures: 0,
+		});
+		const fullOutput = "B".repeat(5000) + "END";
+		seedExec(task.id, {
+			startedAt: Date.now(),
+			output: fullOutput,
+		});
+
+		const tools = createCronToolDefinitions({
+			getBridge: () => stubCronBridge(DM_MSG),
+			registry: new StubRegistry() as unknown as ChannelRegistry,
+			getStorage: () => storage,
+			accountId: "hr",
+		});
+		const result = await tools[0]!.handle({
+			action: "recent",
+			outputMaxChars: 0,
+		});
+		const payload = JSON.parse(asText(result).text) as {
+			runs: Array<{ outputExcerpt?: string; outputTruncated?: boolean }>;
+		};
+		expect(payload.runs[0]!.outputExcerpt).toBe(fullOutput);
+		expect(payload.runs[0]!.outputTruncated).toBeUndefined();
+	});
+
+	it("includeOutput: false strips the output excerpt from the payload", async () => {
+		setupTwoTasks();
+		const tools = createCronToolDefinitions({
+			getBridge: () => stubCronBridge(DM_MSG),
+			registry: new StubRegistry() as unknown as ChannelRegistry,
+			getStorage: () => storage,
+			accountId: "hr",
+		});
+		const result = await tools[0]!.handle({
+			action: "recent",
+			includeOutput: false,
+			limit: 1,
+		});
+		const payload = JSON.parse(asText(result).text) as {
+			runs: Array<{ outputExcerpt?: string }>;
+		};
+		expect(payload.runs[0]!.outputExcerpt).toBeUndefined();
+	});
+
+	it("exposes agentSessionPath so the LLM can read the full JSONL if needed", async () => {
+		setupTwoTasks();
+		const tools = createCronToolDefinitions({
+			getBridge: () => stubCronBridge(DM_MSG),
+			registry: new StubRegistry() as unknown as ChannelRegistry,
+			getStorage: () => storage,
+			accountId: "hr",
+		});
+		const result = await tools[0]!.handle({
+			action: "recent",
+			name: "weekly-kb-lint",
+			limit: 1,
+		});
+		const payload = JSON.parse(asText(result).text) as {
+			runs: Array<{ agentSessionPath?: string }>;
+		};
+		expect(payload.runs[0]!.agentSessionPath).toBe("/tmp/sess-A-recent.jsonl");
+	});
+
+	it("returns empty list when no executions exist (no error)", async () => {
+		storage.addTask({
+			name: "empty-task",
+			cron: "0 9 * * *",
+			command: "x",
+			scheduleType: "cron",
+			taskType: "shell",
+			status: "active",
+			createdAt: Date.now(),
+			updatedAt: Date.now(),
+			runCount: 0,
+			failCount: 0,
+			consecutiveFailures: 0,
+		});
+		const tools = createCronToolDefinitions({
+			getBridge: () => stubCronBridge(DM_MSG),
+			registry: new StubRegistry() as unknown as ChannelRegistry,
+			getStorage: () => storage,
+			accountId: "hr",
+		});
+		const result = await tools[0]!.handle({ action: "recent" });
+		const { text, isError } = asText(result);
+		expect(isError).toBe(false);
+		const payload = JSON.parse(text) as { runs: unknown[]; count: number };
+		expect(payload.runs).toEqual([]);
+		expect(payload.count).toBe(0);
+	});
+
+	it("returns error when storage is not yet initialized", async () => {
+		const tools = createCronToolDefinitions({
+			getBridge: () => stubCronBridge(DM_MSG),
+			registry: new StubRegistry() as unknown as ChannelRegistry,
+			getStorage: () => null,
+			accountId: "hr",
+		});
+		const result = await tools[0]!.handle({ action: "recent" });
+		const { text, isError } = asText(result);
+		expect(isError).toBe(true);
+		expect(text).toMatch(/not initialized/);
 	});
 });

@@ -376,6 +376,71 @@ export class JsonFileStorage implements SchedulerStorage {
 		return results.slice(0, limit);
 	}
 
+	/**
+	 * Cross-task recent execution history. Walks every task the storage
+	 * knows about, reads each task's JSONL log via `readExecutionLog`,
+	 * merges with in-memory `#executions` (covers in-flight runs not yet
+	 * flushed to disk), sorts by `startedAt` DESC, and applies the
+	 * optional filters + limit.
+	 *
+	 * Cost: O(T * L) where T is the task count and L is per-task log
+	 * length. We read `limit * 4` log entries per task to keep the merge
+	 * bounded — the LLM only sees the top-N anyway and reading more
+	 * per task would over-walk directories with dense history. The 4×
+	 * multiplier covers the worst case where one task owns all the
+	 * recent runs; in practice it's 1×.
+	 */
+	getRecentExecutions(
+		query: { limit?: number; taskName?: string; sinceMs?: number } = {},
+	): Array<TaskExecution & { taskName: string }> {
+		const safeLimit = Number.isFinite(query.limit) && query.limit! > 0 ? Math.floor(query.limit!) : 5;
+		const perTaskFetch = Math.max(safeLimit * 4, 50);
+		const merged: Array<TaskExecution & { taskName: string }> = [];
+		const seenIds = new Set<string>();
+
+		this.#ensureLoaded();
+		const taskFilter = query.taskName;
+		const sinceMs = typeof query.sinceMs === "number" && Number.isFinite(query.sinceMs) ? query.sinceMs : undefined;
+
+		// 1. In-memory executions (running + same-process terminal).
+		for (const exec of this.#executions.values()) {
+			if (taskFilter) {
+				const t = this.#tasks.get(exec.taskId);
+				if (t?.name !== taskFilter) continue;
+			}
+			if (sinceMs !== undefined && exec.startedAt < sinceMs) continue;
+			const task = this.#tasks.get(exec.taskId);
+			merged.push({ ...exec, taskName: task?.name ?? "(deleted task)" });
+			seenIds.add(exec.id);
+		}
+
+		// 2. JSONL logs (finalized + cross-process).
+		const tasks = taskFilter ? this.listTasks().filter(t => t.name === taskFilter) : this.listTasks();
+		for (const task of tasks) {
+			const entries = readExecutionLog(task.name, perTaskFetch);
+			for (const entry of entries) {
+				if (seenIds.has(entry.id)) continue;
+				if (sinceMs !== undefined && entry.ts - entry.durationMs < sinceMs) continue;
+				merged.push({
+					id: entry.id,
+					taskId: task.id,
+					startedAt: entry.ts - entry.durationMs,
+					endedAt: entry.ts,
+					exitCode: entry.exitCode,
+					output: entry.output,
+					stderr: entry.stderr,
+					status: entry.status,
+					agentSessionPath: entry.agentSessionPath,
+					taskName: task.name,
+				});
+				seenIds.add(entry.id);
+			}
+		}
+
+		merged.sort((a, b) => b.startedAt - a.startedAt);
+		return merged.slice(0, safeLimit);
+	}
+
 	pruneExecutions(maxAgeDays = 30, _maxCount = 100): number {
 		return pruneAllLogs(maxAgeDays);
 	}

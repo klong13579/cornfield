@@ -29,6 +29,7 @@ import {
 	CronService,
 	type DeliverFn,
 	type ExecuteAgentFn,
+	type MirrorToSessionFn,
 	type NotifyCronFailureFn,
 	type ResolveAccountIdFn,
 	resolveDelivery,
@@ -259,6 +260,18 @@ function makeStorageMock(executions: TaskExecution[]): SchedulerStorage {
 		getExecutions: (taskId: string, limit?: number) => {
 			const arr = store.get(taskId) ?? [];
 			return typeof limit === "number" ? arr.slice(0, limit) : arr.slice();
+		},
+		getRecentExecutions: (query: { limit?: number; taskName?: string; sinceMs?: number } = {}) => {
+			const all: Array<TaskExecution & { taskName: string }> = [];
+			for (const arr of store.values()) {
+				for (const e of arr) {
+					if (query.sinceMs !== undefined && e.startedAt < query.sinceMs) continue;
+					all.push({ ...e, taskName: "mock-task" });
+				}
+			}
+			all.sort((a, b) => b.startedAt - a.startedAt);
+			const limit = Number.isFinite(query.limit) && query.limit! > 0 ? Math.floor(query.limit!) : 5;
+			return all.slice(0, limit);
 		},
 		pruneExecutions: () => 0,
 		close: () => {},
@@ -808,6 +821,7 @@ function makeTask(overrides: Partial<ScheduledTask> & { name: string }): Schedul
 		deliver: base.deliver,
 		deliverUser: base.deliverUser,
 		accountId: base.accountId,
+		attachToSession: base.attachToSession,
 	});
 	const stored = storage.getTaskByName(base.name);
 	if (!stored) throw new Error("test setup: task not found after add");
@@ -1385,5 +1399,195 @@ describe("cron outbound delivery smoke test", () => {
 			const t = storage.getTaskByName("_t_smoke_silent");
 			if (t) storage.deleteTask(t.id);
 		}
+	});
+});
+
+// ===========================================================================
+// attachToSession default-on (was: scheduler-attach-to-session-default.test.ts)
+// ===========================================================================
+//
+// The mirror is supposed to be the ROOT-CAUSE fix for "user DMs the bot
+// about the last cron report and the chat LLM has no idea what the report
+// said". An opt-in flag (`attachToSession: true`) buried in task config
+// meant most tasks never had it set, so the chat agent kept starting cold.
+//
+// New contract: mirror runs by default for DingTalk tasks. Set
+// `attachToSession: false` to opt out. Non-DingTalk channels skip the
+// mirror entirely (no warn noise) — the cron `recent` host tool is the
+// cross-channel fallback.
+
+describe("CronService.onTrigger — mirrorToSession default-on", () => {
+	const ORIGINAL_LOG_ROOT = getLogRoot();
+
+	beforeEach(() => {
+		setLogRoot(path.join(testDir, "logs"));
+	});
+
+	afterEach(() => {
+		setLogRoot(ORIGINAL_LOG_ROOT);
+	});
+
+	function makeServiceWithMirror(opts: {
+		deliver: DeliverFn;
+		executeAgent: ExecuteAgentFn;
+		mirror: MirrorToSessionFn;
+	}): CronService {
+		return new CronService({
+			storage,
+			ompBinary: "omp",
+			executeAgent: opts.executeAgent,
+			deliver: opts.deliver,
+			log: noopLogger,
+			mirrorToSession: opts.mirror,
+		});
+	}
+
+	it("calls mirror by default when attachToSession is undefined (DingTalk)", async () => {
+		const deliver = mock<DeliverFn>(async () => ({ ok: true }));
+		const mirror = mock<MirrorToSessionFn>(async () => ({ ok: true }));
+		const service = makeServiceWithMirror({
+			deliver,
+			executeAgent: async () => ({ output: "agent ran fine" }),
+			mirror,
+		});
+
+		const task = makeTask({
+			name: "_t_mirror_default",
+			taskType: "agent",
+			agentDir: testDir,
+			delivery: { channel: "dingtalk", accountId: "test", toUserId: "u_1", mode: "announce" },
+		});
+		// attachToSession intentionally NOT set — default-on contract.
+		const exec = storage.recordExecution({ taskId: task.id, startedAt: Date.now(), status: "running" });
+
+		await service.onTrigger(task, exec.id);
+
+		expect(mirror).toHaveBeenCalledTimes(1);
+		const call = mirror.mock.calls[0]![0];
+		expect(call.task.name).toBe("_t_mirror_default");
+		expect(call.brief).toContain("agent ran fine");
+		expect(call.delivery.channel).toBe("dingtalk");
+	});
+
+	it("calls mirror when attachToSession is explicitly true (DingTalk)", async () => {
+		const deliver = mock<DeliverFn>(async () => ({ ok: true }));
+		const mirror = mock<MirrorToSessionFn>(async () => ({ ok: true }));
+		const service = makeServiceWithMirror({
+			deliver,
+			executeAgent: async () => ({ output: "ok" }),
+			mirror,
+		});
+
+		const task = makeTask({
+			name: "_t_mirror_explicit_true",
+			taskType: "agent",
+			agentDir: testDir,
+			attachToSession: true,
+			delivery: { channel: "dingtalk", accountId: "test", toUserId: "u_1", mode: "announce" },
+		});
+		const exec = storage.recordExecution({ taskId: task.id, startedAt: Date.now(), status: "running" });
+
+		await service.onTrigger(task, exec.id);
+
+		expect(mirror).toHaveBeenCalledTimes(1);
+	});
+
+	it("skips mirror when attachToSession is explicitly false (DingTalk opt-out)", async () => {
+		const deliver = mock<DeliverFn>(async () => ({ ok: true }));
+		const mirror = mock<MirrorToSessionFn>(async () => ({ ok: true }));
+		const service = makeServiceWithMirror({
+			deliver,
+			executeAgent: async () => ({ output: "ok" }),
+			mirror,
+		});
+
+		const task = makeTask({
+			name: "_t_mirror_explicit_false",
+			taskType: "agent",
+			agentDir: testDir,
+			attachToSession: false,
+			delivery: { channel: "dingtalk", accountId: "test", toUserId: "u_1", mode: "announce" },
+		});
+		const exec = storage.recordExecution({ taskId: task.id, startedAt: Date.now(), status: "running" });
+
+		await service.onTrigger(task, exec.id);
+
+		expect(mirror).not.toHaveBeenCalled();
+	});
+
+	it("skips mirror on non-DingTalk channels (no warn noise; cron.recent is the fallback)", async () => {
+		const deliver = mock<DeliverFn>(async () => ({ ok: true }));
+		const mirror = mock<MirrorToSessionFn>(async () => ({ ok: true }));
+		const service = makeServiceWithMirror({
+			deliver,
+			executeAgent: async () => ({ output: "ok" }),
+			mirror,
+		});
+
+		const task = makeTask({
+			name: "_t_mirror_nondingtalk",
+			taskType: "agent",
+			agentDir: testDir,
+			// attachToSession: true would normally trigger, but the
+			// channel gate stops non-DingTalk tasks.
+			attachToSession: true,
+			delivery: { channel: "telegram", accountId: "test", toUserId: "u_1", mode: "announce" },
+		});
+		const exec = storage.recordExecution({ taskId: task.id, startedAt: Date.now(), status: "running" });
+
+		await service.onTrigger(task, exec.id);
+
+		expect(mirror).not.toHaveBeenCalled();
+	});
+
+	it("does not call mirror when delivery fails (mirror is success-path only)", async () => {
+		const deliver = mock<DeliverFn>(async () => ({ ok: false, error: "channel offline" }));
+		const mirror = mock<MirrorToSessionFn>(async () => ({ ok: true }));
+		const service = makeServiceWithMirror({
+			deliver,
+			executeAgent: async () => ({ output: "ok" }),
+			mirror,
+		});
+
+		const task = makeTask({
+			name: "_t_mirror_delivery_failed",
+			taskType: "agent",
+			agentDir: testDir,
+			delivery: { channel: "dingtalk", accountId: "test", toUserId: "u_1", mode: "announce" },
+		});
+		const exec = storage.recordExecution({ taskId: task.id, startedAt: Date.now(), status: "running" });
+
+		try {
+			await service.onTrigger(task, exec.id);
+		} catch {
+			// delivery_failed does not throw — it returns normally and
+			// the failure is recorded. But if the warm bridge also
+			// throws in this fallback test setup, swallow it.
+		}
+
+		expect(mirror).not.toHaveBeenCalled();
+	});
+
+	it("does not call mirror when task is [SILENT] (delivery suppressed, mirror is downstream of delivery)", async () => {
+		const deliver = mock<DeliverFn>(async () => ({ ok: true }));
+		const mirror = mock<MirrorToSessionFn>(async () => ({ ok: true }));
+		const service = makeServiceWithMirror({
+			deliver,
+			executeAgent: async () => ({ output: "[SILENT]" }),
+			mirror,
+		});
+
+		const task = makeTask({
+			name: "_t_mirror_silent",
+			taskType: "agent",
+			agentDir: testDir,
+			delivery: { channel: "dingtalk", accountId: "test", toUserId: "u_1", mode: "announce" },
+		});
+		const exec = storage.recordExecution({ taskId: task.id, startedAt: Date.now(), status: "running" });
+
+		await service.onTrigger(task, exec.id);
+
+		expect(deliver).not.toHaveBeenCalled();
+		expect(mirror).not.toHaveBeenCalled();
 	});
 });

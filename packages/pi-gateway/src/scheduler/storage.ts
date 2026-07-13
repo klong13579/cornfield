@@ -490,6 +490,47 @@ export class SchedulerDbStorage implements SchedulerStorage {
 	}
 
 	/**
+	 * Cross-task recent executions. Builds a parameterized query from
+	 * the optional filters and joins `executions` with `tasks` so each
+	 * row carries the owning task's name. Newest first.
+	 *
+	 * Mirrors the filtering style of `getExecutions` (per-task): the
+	 * storage layer does no truncation — callers decide how much of
+	 * `output` to surface. The LLM host tool handler in `host-tool.ts`
+	 * applies the `outputMaxChars` cap.
+	 */
+	getRecentExecutions(
+		query: { limit?: number; taskName?: string; sinceMs?: number } = {},
+	): Array<TaskExecution & { taskName: string }> {
+		const safeLimit = Number.isFinite(query.limit) && query.limit! > 0 ? Math.floor(query.limit!) : 5;
+		const conds: string[] = [];
+		const params: SQLQueryBindings[] = [];
+		if (query.taskName) {
+			conds.push("t.name = ?");
+			params.push(query.taskName);
+		}
+		if (typeof query.sinceMs === "number" && Number.isFinite(query.sinceMs)) {
+			conds.push("e.started_at >= ?");
+			params.push(query.sinceMs);
+		}
+		const where = conds.length > 0 ? `WHERE ${conds.join(" AND ")}` : "";
+		const sql = `
+			SELECT e.*, t.name AS task_name
+			FROM executions e
+			LEFT JOIN tasks t ON t.id = e.task_id
+			${where}
+			ORDER BY e.started_at DESC
+			LIMIT ?
+		`;
+		params.push(safeLimit);
+		const rows = this.#db.prepare(sql).all(...params) as Array<ExecutionRow & { task_name: string | null }>;
+		return rows.map(r => ({
+			...toExecution(r),
+			taskName: r.task_name ?? "(deleted task)",
+		}));
+	}
+
+	/**
 	 * All executions currently in the `running` state, across every task,
 	 * newest first. Used by `gateway doctor` to detect executions that were
 	 * orphaned by a gateway crash (started but never transitioned to
