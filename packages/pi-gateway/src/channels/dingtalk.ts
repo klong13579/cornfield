@@ -974,7 +974,8 @@ export class DingTalkChannel extends BaseChannel {
 					min >= 60
 						? `${Math.floor(min / 60)}h${min % 60}m`
 						: `${min}m${sec}s`;
-							const body = `⏳ **${evt.toolName}** 还在跑（已运行 ${elapsed}）。如需中止请点击下方按钮。`;
+							const argSummary = formatLongTaskArgs(evt.toolName, evt.toolCallArgs);
+							const body = `⏳ **${evt.toolName}** 还在跑（已运行 ${elapsed}）${argSummary}。如需中止请点击下方按钮。`;
 
 				// Capture current card state synchronously (handler is
 				// sync; the finish+create runs in an async IIFE so it
@@ -3222,6 +3223,42 @@ async function extractVideoCoverFrame(filePath: string): Promise<string | null> 
  */
 function getVideoType(_filePath: string): string {
 	return "mp4";
+}
+
+/**
+ * Build a short human-readable summary of tool call arguments for the
+ * long-task card body. Returns an empty string when args are unavailable.
+ */
+function formatLongTaskArgs(toolName: string, toolCallArgs: unknown): string {
+	if (toolCallArgs == null || typeof toolCallArgs !== "object") return "";
+	const args = toolCallArgs as Record<string, unknown>;
+
+	// Extract the most informative field per tool.
+	let value = "";
+	if (toolName === "read") {
+		value = String(args.path ?? args.file_path ?? "");
+	} else if (toolName === "bash") {
+		const cmd = String(args.command ?? "");
+		// Show just the first meaningful segment (skip env setup boilerplate).
+		const lines = cmd.split("\n");
+		value = lines[lines.length - 1]?.trim() ?? lines[0]?.trim() ?? "";
+	} else {
+		// Generic: show first string-valued entry.
+		for (const key of Object.keys(args)) {
+			const v = args[key];
+			if (typeof v === "string" && v.length > 0) {
+				value = v;
+				break;
+			}
+		}
+	}
+
+	if (!value) return "";
+
+	// Truncate for card body readability (DingTalk cards are narrow).
+	const MAX_LEN = 60;
+	const truncated = value.length > MAX_LEN ? value.slice(0, MAX_LEN) + "…" : value;
+	return ` — ${truncated}`;
 }
 
 // ═══════════════════════════════════════════════════════════════════════

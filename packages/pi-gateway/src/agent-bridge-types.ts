@@ -12,5 +12,5 @@ export interface ForwardStreamHandlers {
 	onToolResult?: (result: { id: string; name: string; isError: boolean; contentText: string }) => void;
 	onAssistantMessageEnd?: () => void;
 	onAgentEnd?: () => void;
-	onLongTask?: (event: { toolCallId: string; toolName: string; elapsedMs: number; threshold: boolean }) => void;
+	onLongTask?: (event: { toolCallId: string; toolName: string; elapsedMs: number; threshold: boolean; toolCallArgs?: unknown }) => void;
 }

@@ -51,6 +51,7 @@ interface PendingPrompt {
 
 interface LongTaskWatcher {
 	toolName: string;
+	toolCallArgs: unknown;
 	startedAt: number;
 	thresholdTimer: NodeJS.Timeout;
 	pingInterval: NodeJS.Timeout | null;
@@ -371,7 +372,7 @@ export class PromptQueue {
 							hasOnLongTask: typeof handlers.onLongTask === "function",
 						});
 						handlers.onToolCall?.({ id: tc.id, name: tc.name, args: tc.arguments ?? null });
-						this.#startLongTaskWatcher(pending.promptId, tc.id, tc.name);
+						this.#startLongTaskWatcher(pending.promptId, tc.id, tc.name, tc.arguments);
 					}
 				}
 			} else if (event.type === "message_end" && event.message) {
@@ -414,7 +415,7 @@ export class PromptQueue {
 	// Long-task watchers
 	// ═══════════════════════════════════════════════════════════════
 
-	#startLongTaskWatcher(promptId: string, toolCallId: string, toolName: string): void {
+	#startLongTaskWatcher(promptId: string, toolCallId: string, toolName: string, toolCallArgs: unknown): void {
 		const thresholdMs = this.#longTaskConfig.thresholdMs;
 		if (thresholdMs <= 0) {
 			logger.debug("[PromptQueue] long-task watcher disabled (threshold=0)", { promptId, toolCallId });
@@ -435,6 +436,7 @@ export class PromptQueue {
 		const startedAt = Date.now();
 		const watcher: LongTaskWatcher = {
 			toolName,
+			toolCallArgs,
 			startedAt,
 			thresholdTimer: undefined as unknown as NodeJS.Timeout,
 			pingInterval: null,
@@ -457,6 +459,7 @@ export class PromptQueue {
 					toolName,
 					elapsedMs: Date.now() - startedAt,
 					threshold,
+					toolCallArgs,
 				});
 			} catch (err) {
 				logger.warn("PromptQueue onLongTask handler threw", {

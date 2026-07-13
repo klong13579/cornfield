@@ -142,7 +142,10 @@ export async function loadPage(url: string, options: LoadPageOptions = {}): Prom
 			}
 
 			return { content, contentType, finalUrl, ok: true, status: response.status };
-		} catch {
+		} catch (_err) {
+			if (requestSignal?.aborted) {
+				throw new ToolAbortError();
+			}
 			if (signal?.aborted) {
 				throw new ToolAbortError();
 			}

@@ -17,7 +17,7 @@ export const handleArxiv: SpecialHandler = async (
 
 		// Extract paper ID from various URL formats
 		// /abs/1234.56789, /pdf/1234.56789, /abs/cs/0123456
-		const match = parsed.pathname.match(/\/(abs|pdf)\/(.+?)(?:\.pdf)?$/);
+		const match = parsed.pathname.match(/\/(abs|pdf|html)\/(.+?)(?:\.pdf)?$/);
 		if (!match) return null;
 
 		const paperId = match[2];

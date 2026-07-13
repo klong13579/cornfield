@@ -27,7 +27,7 @@ export interface PruneResult {
 }
 
 function createPrunedNotice(tokens: number): string {
-	return `[Output truncated - ${tokens} tokens]`;
+	return `[Output truncated - ${tokens} tokens. Consider pagination, export, or narrowing the query.]`;
 }
 
 function getToolResultMessage(entry: SessionEntry): ToolResultMessage | undefined {
