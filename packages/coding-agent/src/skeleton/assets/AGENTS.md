@@ -20,14 +20,32 @@
 | `knowledge/external-workspaces.md`   | CONTEXT (data sources)           | always-on                                                            |
 | `prompt-includes.json`               | RUNTIME (injection manifest)     | read at startup                                                      |
 | `.omp/config.yml`                    | RUNTIME (model/role/theme)       | read at startup (hard dependency)                                    |
-| `.omp/SYSTEM.md`                    | RUNTIME (gateway system prompt)  | overrides OMP built-in prompt — gateway agent baseline                |
-| `.omp/skills/<name>/SKILL.md`       | BEHAVIOR (on-demand)             | via `skill://<name>` URI                                             |
+| `.omp/SYSTEM.md`                     | RUNTIME (gateway system prompt)  | overrides OMP built-in prompt — gateway agent baseline               |
+| `.omp/skills/<name>/SKILL.md`        | BEHAVIOR (on-demand)             | via `skill://<name>` URI                                             |
 | `knowledge/handbook/*`               | CONTEXT (on-demand)              | read by agent (user-created)                                         |
-| `cron/tasks/*.json5`                | RUNTIME (schedule + prompt)      | cron trigger (prompt in `command` field; no .prompt.md pair)         |
+| `cron/tasks/*.json5`                 | RUNTIME (schedule + prompt)      | cron trigger (prompt in `command` field; no .prompt.md pair)         |
 | `sessions/*.jsonl`                   | RUNTIME (gitignored)             | session history                                                      |
 
 > Optional files (not in skeleton): `scripts/`, `external/`, `weekly-reports/`, `examples/`, `docs/`.
 > Per design §6.3 principle 5, missing optional files **must not** raise errors or warnings.
+
+## 文件职责边界（MECE 规则）
+
+> 每个关注点只在一个文件里定义。其他文件如需提及，写引用而非复制内容。
+
+| 关注点 | 唯一定义位置 | 其他文件写法 |
+|--------|-------------|-------------|
+| 身份/角色/职责 | `mission.md` | SYSTEM.md 不重复定义身份 |
+| 工具使用规则（per-tool MUST） | `TOOLS.md` | SYSTEM.md 不列具体工具规则 |
+| 安全硬约束（MUST NOT） | `AGENTS.md` hard-constraints | SYSTEM.md 不重复同等约束 |
+| 工作纪律/风格原则（建议语气） | `.omp/SYSTEM.md` | MUST/NOT 级别的硬约束放 AGENTS.md |
+| 领域知识/研发文档 | `knowledge/handbook/*` | mission.md 只放索引不放内容 |
+| 外部数据源登记 | `knowledge/external-workspaces.md` | mission.md 只引用不重列 |
+| 一次性 procedure / SOP | `.omp/skills/<name>/SKILL.md` | TOOLS.md 只放约束不放命令 |
+| 定时任务 | `cron/tasks/*.json5` | 通过 `cron` host tool 注册 |
+
+修改任何 prompt 文件前 **MUST** 检查：要加的内容是否已在另一个文件里定义。如是，改为引用而非复制内容。
+判定归属时区分：MUST/NOT 级别的硬约束 → AGENTS.md hard-constraints；风格/原则建议 → SYSTEM.md。
 
 ## Update guide
 

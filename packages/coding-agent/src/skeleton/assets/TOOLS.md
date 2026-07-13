@@ -13,20 +13,38 @@ Read a file or URL.
 
 - MUST verify the path is inside `agentDir` unless the user names an explicit external path.
 - MUST NOT read files larger than the configured `read.defaultLimit` without paging.
+- MUST use `read` for office documents (PPT, PPTX, DOC, DOCX, XLS, XLSX, RTF, EPUB) instead of `bash` + Python scripts — `read` converts them to markdown text via markit-ai, preserving structured content.
+- MUST NOT use `bash` `python3 -c "zipfile"` or similar to manually extract text from Office XML — let `read` handle the conversion.
+- **PDF 例外**：OMP `read` 工具缺 mupdf 运行时依赖，无法解析 PDF。使用 `python3` + `fitz` 代替：
+  `python3 -c "import fitz; doc = fitz.open('/tmp/f.pdf'); [print(page.get_text()) for page in doc]"`
 
-### `grep`
+### `search`
 Search text across files.
 
 - MUST narrow by `path` before running on a large repo.
-- MUST prefer `grep` over manual `cat` / `head` / `tail` / `rg` pipelines.
+- MUST prefer `search` over manual `cat` / `head` / `tail` / `rg` pipelines.
+
+### `find`
+Find files by glob pattern.
+
+- MUST use `find` instead of shell globbing (`ls **/*.ts` etc.).
+- MUST narrow results with a specific `pattern` to avoid excessive output.
+
+### `lsp`
+Language Server Protocol: symbol definitions, references, rename, code actions.
+
+- MUST use `lsp` for symbol-aware operations (rename, go-to-definition, find references) instead of text-based search.
+- MUST NOT perform cross-file renames with `sed` or `ast_edit` when `lsp` rename is available.
 
 ### `bash`
 Execute shell commands.
 
-- MUST use `read` / `grep` instead of `cat` / `head` / `tail` for inspection.
+- MUST use `read` / `search` instead of `cat` / `head` / `tail` for inspection.
 - MUST NOT run interactive commands (`vim`, `less`, `ssh` without batch flags).
 - MUST NOT pipe untrusted input to `sh` / `bash`.
 - MUST redirect large output to a file and read it back with `read`.
+- MUST use full, non-truncated `python3 -c 'import json,sys; print(json.load(sys.stdin))'` (or `jq .`) when parsing JSON from stdin. Never rely on the AI Card's preview of a truncated `python3 -c "import sy…"` — the gateway-side rendering clips long arguments and `{}` is what an empty result *and* a parse failure both render to. If you cannot read the full command back, switch to the `read` tool on the JSON file directly.
+- MUST NOT use a `python3 -c` one-liner to look up a known field in a config file when a `read` + `search` would do.
 
 ### `write`
 Create or overwrite a file.
@@ -39,6 +57,18 @@ Edit an existing file via `atom` / `hashline` / `patch` mode.
 
 - MUST read the file first to obtain current anchors.
 - MUST NOT use `sed` / `awk` for structural edits; use `edit` instead.
+
+### `identity`
+Persist stable user facts (name, role, timezone) to `~/.omp/user.md`.
+
+- MUST only persist facts durable across sessions; ephemeral task context belongs in conversation, not user.md.
+- MUST NOT persist one-off requests or guesses.
+
+### `write_memory`
+Persist runtime-learned behavioral preferences (target: "user" or "agent").
+
+- MUST NOT write temporary task progress or session results to memory.
+- MUST distinguish stable facts (use `identity`) from learned preferences (use `write_memory`).
 
 ## Project-specific tools
 
@@ -98,4 +128,3 @@ No `delivery` field — gateway infers `{channel, accountId, toUserId}` from the
 - `restarting` — OMP crashed, gateway is restarting with backoff. Brief window of unavailability.
 - `degraded` — circuit breaker open after consecutive failures. New prompts fast-fail until cooldown (default 30s) expires. Read `circuitFailures` and `circuitOpenedAt` to estimate when retries will be accepted.
 - `error` — too many crashes; bridge is suppressed and NOT auto-restarting. Operator (human) must intervene. Tell the user the agent is down and the gateway operator needs to restart it.
-
