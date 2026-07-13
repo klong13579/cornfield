@@ -5,7 +5,9 @@ import * as path from "node:path";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { EditTool } from "@oh-my-pi/pi-coding-agent/edit";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
+import { BashTool } from "@oh-my-pi/pi-coding-agent/tools/bash";
 import { ReadTool } from "@oh-my-pi/pi-coding-agent/tools/read";
+import { ToolError } from "@oh-my-pi/pi-coding-agent/tools/tool-errors";
 
 function getText(result: { content: Array<{ type: string; text?: string }> }): string {
 	return result.content
@@ -95,5 +97,43 @@ describe("read tool — NOT FOUND error includes find/search hint", () => {
 		await expect(
 			readTool.execute("not-found", { path: path.join(tmpDir, "nonexistent.md") }),
 		).rejects.toThrow(/`find`.*`search`|`search`.*`find`/);
+	});
+});
+
+describe("bash tool — Python syntax pre-check catches errors before execution", () => {
+	let tmpDir: string;
+	let bashTool: BashTool;
+
+	beforeEach(() => {
+		tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "fix-e2e-bash-"));
+		bashTool = new BashTool(createSession(tmpDir));
+	});
+
+	afterEach(() => {
+		fs.rmSync(tmpDir, { recursive: true, force: true });
+	});
+
+	it("rejects inline Python with trailing comma syntax error", async () => {
+		await expect(
+			bashTool.execute("py-syntax", { command: 'python3 -c "import sys,; print(1)"' }),
+		).rejects.toThrow(/Python syntax check failed/);
+	});
+
+	it("rejects inline Python with invalid syntax", async () => {
+		await expect(
+			bashTool.execute("py-syntax-2", { command: 'python3 -c "if True print(1)"' }),
+		).rejects.toThrow(/Python syntax check failed/);
+	});
+
+	it("allows valid Python to run normally", async () => {
+		const result = await bashTool.execute("py-valid", {
+			command: "python3 -c 'import sys; print(\"ok\");'",
+		});
+		expect(getText(result)).toContain("ok");
+	});
+
+	it("allows non-Python commands to run normally", async () => {
+		const result = await bashTool.execute("echo-test", { command: "echo hello" });
+		expect(getText(result)).toContain("hello");
 	});
 });

@@ -1,4 +1,6 @@
 import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import type { AgentTool, AgentToolContext, AgentToolResult, AgentToolUpdateCallback } from "@oh-my-pi/pi-agent-core";
 import type { Component } from "@oh-my-pi/pi-tui";
 import { ImageProtocol, TERMINAL, Text } from "@oh-my-pi/pi-tui";
@@ -29,6 +31,36 @@ export const BASH_DEFAULT_PREVIEW_LINES = 10;
 
 const BASH_ENV_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const DEFAULT_AUTO_BACKGROUND_THRESHOLD_MS = 60_000;
+const PYTHON_INLINE_RE = /^python(?:3)?\s+-c\s+(["'])((?:(?!\1|\\).|\\.)+)\1/s;
+
+/**
+ * Pre-check inline Python scripts for syntax errors before execution.
+ * Prevents wasted round-trips on basic syntax mistakes (e.g. trailing comma).
+ */
+async function checkPythonSyntax(command: string): Promise<void> {
+	const match = command.match(PYTHON_INLINE_RE);
+	if (!match) return;
+	if (!Bun.which("python3")) return;
+	const delimiter = match[1]!;
+	let script = match[2]!;
+	// Unescape shell quoting: for double-quoted strings, " → " and \ → \
+	if (delimiter === '"') {
+		script = script.replaceAll("\\\"", "\"").replaceAll("\\\\", "\\");
+	}
+	const tmpFile = path.join(os.tmpdir(), `omp-pycheck-${Date.now()}.py`);
+	try {
+		await Bun.write(tmpFile, script);
+		const proc = Bun.spawnSync(["python3", "-m", "py_compile", tmpFile], {
+			stdio: ["pipe", "pipe", "pipe"],
+		});
+		if (proc.exitCode !== 0) {
+			const stderr = new TextDecoder().decode(proc.stderr).trim();
+			throw new ToolError(`Python syntax check failed:\n${stderr}\n\nFix the syntax error before re-running.`);
+		}
+	} finally {
+		void fs.promises.rm(tmpFile, { force: true }).catch(() => {});
+	}
+}
 
 async function saveBashOriginalArtifact(session: ToolSession, originalText: string): Promise<string | undefined> {
 	try {
@@ -571,6 +603,9 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
 		const timeoutSec = clampTimeout("bash", requestedTimeoutSec);
 		const timeoutMs = timeoutSec * 1000;
 		const timeoutClampNotice = formatTimeoutClampNotice(requestedTimeoutSec, timeoutSec);
+
+		// Pre-check inline Python scripts for syntax errors
+		await checkPythonSyntax(command);
 
 		if (asyncRequested) {
 			if (!this.session.asyncJobManager) {
