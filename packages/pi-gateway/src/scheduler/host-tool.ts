@@ -182,8 +182,9 @@ const CRON_TOOL_DEFINITION: RpcHostToolDefinition = {
 		"Manage THIS AGENT's scheduled tasks. " +
 		'"My" in a cron context refers to the current agent (the OMP subprocess serving this account), not the user asking. ' +
 		"All users in the same agent see the same task list; the agent owns its tasks. " +
+		"In a multi-account gateway, each agent only sees tasks that belong to its own account. " +
 		'There is no per-user or per-conversation scope — when the user asks "我有哪些任务" / "what are my tasks", ' +
-		"the answer is the agent's full task list, not just tasks the user created. " +
+		"the answer is the agent's full (account-scoped) task list, not just tasks the user created. " +
 		"`createdByUserId` and `createdByAccountId` on each task are audit fields; do not use them to filter by creator. " +
 		'Use `cron.list` to enumerate, then client-side filter by `createdByUserId` only if the user explicitly asks "which tasks did I create".\n\n' +
 		"Actions: `add` / `list` / `show` / `update` / `remove` / `enable` / `disable` / `runs` / `recent` / `test-run`.\n\n" +
@@ -290,23 +291,23 @@ async function handleCronAction(args: CronToolArgs, ctx: CronToolContext): Promi
 			case "add":
 				return await handleAdd(args, ctx);
 			case "list":
-				return ok(serializeTaskList(storage.listTasks()));
+				return ok(serializeTaskList(storage.listTasks(), ctx.accountId));
 			case "show":
-				return handleShow(args, storage);
+				return handleShow(args, storage, ctx.accountId);
 			case "update":
 				return await handleUpdate(args, ctx);
 			case "remove":
-				return handleRemove(args, storage);
+				return handleRemove(args, storage, ctx.accountId);
 			case "enable":
-				return handleSetStatus(args, "active", storage);
+				return handleSetStatus(args, "active", storage, ctx.accountId);
 			case "disable":
-				return handleSetStatus(args, "disabled", storage);
+				return handleSetStatus(args, "disabled", storage, ctx.accountId);
 			case "run":
 				return errResult("'run' via LLM is not yet supported; use `omp gateway cron run <name>` from the CLI");
 			case "runs":
-				return handleRuns(args, storage);
+				return handleRuns(args, storage, ctx.accountId);
 			case "recent":
-				return handleRecent(args, storage);
+				return handleRecent(args, storage, ctx.accountId);
 			case "test-run":
 				return await handleTestRun(args, ctx);
 			default:
@@ -523,14 +524,14 @@ async function handleAdd(args: CronToolArgs, ctx: CronToolContext): Promise<Host
 // show / list / remove / enable / disable / runs
 // ---------------------------------------------------------------------------
 
-function handleShow(args: CronToolArgs, storage: SchedulerStorage): HostToolResultBody {
-	const task = resolveTask(args, storage);
+function handleShow(args: CronToolArgs, storage: SchedulerStorage, accountId?: string): HostToolResultBody {
+	const task = resolveTask(args, storage, accountId);
 	if (!task) return errResult("show: task not found (pass name or id)");
 	return ok(serializeTask(task));
 }
 
-function handleRemove(args: CronToolArgs, storage: SchedulerStorage): HostToolResultBody {
-	const task = resolveTask(args, storage);
+function handleRemove(args: CronToolArgs, storage: SchedulerStorage, accountId?: string): HostToolResultBody {
+	const task = resolveTask(args, storage, accountId);
 	if (!task) return errResult("remove: task not found (pass name or id)");
 	storage.deleteTask(task.id);
 	return ok({ removed: task.id, name: task.name });
@@ -540,15 +541,16 @@ function handleSetStatus(
 	args: CronToolArgs,
 	status: "active" | "disabled",
 	storage: SchedulerStorage,
+	accountId?: string,
 ): HostToolResultBody {
-	const task = resolveTask(args, storage);
+	const task = resolveTask(args, storage, accountId);
 	if (!task) return errResult(`${status}: task not found (pass name or id)`);
 	storage.updateTask(task.id, { status, updatedAt: Date.now() });
 	return ok({ id: task.id, name: task.name, status });
 }
 
-function handleRuns(args: CronToolArgs, storage: SchedulerStorage): HostToolResultBody {
-	const task = resolveTask(args, storage);
+function handleRuns(args: CronToolArgs, storage: SchedulerStorage, accountId?: string): HostToolResultBody {
+	const task = resolveTask(args, storage, accountId);
 	if (!task) return errResult("runs: task not found (pass name or id)");
 	const limit = numberArg(args, "limit") ?? 10;
 	const execs = storage.getExecutions(task.id, limit);
@@ -592,17 +594,35 @@ function handleRuns(args: CronToolArgs, storage: SchedulerStorage): HostToolResu
  * to see cron internal error text) and `command` (no reason to leak
  * the prompt back to itself).
  */
-function handleRecent(args: CronToolArgs, storage: SchedulerStorage): HostToolResultBody {
+function handleRecent(args: CronToolArgs, storage: SchedulerStorage, accountId?: string): HostToolResultBody {
 	const limit = numberArg(args, "limit") ?? 5;
 	const sinceMs = numberArg(args, "sinceMs");
 	const includeOutput = args.includeOutput !== false; // default true
 	const outputMaxChars = numberArg(args, "outputMaxChars") ?? 2000;
 	const taskName = stringArg(args, "name"); // recent accepts name as task filter
 
+	// Build the set of task names visible to this account
+	const accountTaskNames = accountId
+		? new Set(
+				storage
+					.listTasks()
+					.filter(t => taskBelongsToAccount(t, accountId))
+					.map(t => t.name),
+			)
+		: undefined;
+
+	// If the user named a specific task, verify it belongs to this account
+	if (taskName && accountTaskNames && !accountTaskNames.has(taskName)) {
+		return errResult(`recent: task "${taskName}" not found or does not belong to this agent`);
+	}
+
 	const rows = storage.getRecentExecutions({ limit, sinceMs, taskName });
 
+	// Filter by account — only include tasks this account can see
+	const filteredRows = accountTaskNames ? rows.filter(r => accountTaskNames.has(r.taskName)) : rows;
+
 	const truncatedDefault = 2000;
-	const payload = rows.map(r => {
+		const payload = filteredRows.map(r => {
 		const durationMs = r.endedAt !== undefined ? r.endedAt - r.startedAt : undefined;
 		const entry: Record<string, unknown> = {
 			id: r.id,
@@ -774,11 +794,39 @@ function resolveDeliveryForAdd(args: CronToolArgs, ctx: CronToolContext): Delive
 // Helpers
 // ---------------------------------------------------------------------------
 
-function resolveTask(args: CronToolArgs, storage: SchedulerStorage): ScheduledTask | undefined {
+/**
+ * Check whether a scheduled task "belongs to" a given gateway account.
+ *
+ * The criterion:
+ *   - `createdByAccountId` matches (LLM-created tasks always stamp this),
+ *   - OR `delivery.accountId` matches (for tasks with explicit delivery binding).
+ *
+ * Tasks created via the operator CLI without an account binding are visible
+ * to all accounts (neither field set). This ensures infrastructure-level
+ * tasks don't disappear from all agents' views.
+ */
+function taskBelongsToAccount(task: ScheduledTask, accountId: string): boolean {
+	if (task.createdByAccountId === accountId) return true;
+	if (task.delivery?.accountId === accountId) return true;
+	// Deprecated v1 accountId field — only used by CLI-created tasks.
+	if ((task as Record<string, unknown>).accountId === accountId) return true;
+	// Neither field set → operator CLI task, visible to all.
+	if (!task.createdByAccountId && !task.delivery?.accountId && !(task as Record<string, unknown>).accountId) return true;
+	return false;
+}
+function resolveTask(args: CronToolArgs, storage: SchedulerStorage, accountId?: string): ScheduledTask | undefined {
 	const id = stringArg(args, "id");
-	if (id) return storage.getTask(id);
+	if (id) {
+		const task = storage.getTask(id);
+		if (task && accountId && !taskBelongsToAccount(task, accountId)) return undefined;
+		return task;
+	}
 	const name = stringArg(args, "name");
-	if (name) return storage.getTaskByName(name);
+	if (name) {
+		const task = storage.getTaskByName(name);
+		if (task && accountId && !taskBelongsToAccount(task, accountId)) return undefined;
+		return task;
+	}
 	return undefined;
 }
 
@@ -828,8 +876,9 @@ function serializeTask(task: ScheduledTask | undefined): unknown {
 	return rest;
 }
 
-function serializeTaskList(tasks: ScheduledTask[]): unknown {
-	return tasks.map(t => {
+function serializeTaskList(tasks: ScheduledTask[], accountId?: string): unknown {
+	const filtered = accountId ? tasks.filter(t => taskBelongsToAccount(t, accountId)) : tasks;
+	return filtered.map(t => {
 		const { lastDeliveryError: _lastDeliveryError, ...rest } = t;
 		return rest;
 	});
