@@ -165,7 +165,10 @@ export const hashlineEditSchema = Type.Object(
 export const hashlineEditParamsSchema = Type.Object(
 	{
 		path: Type.String({ description: "file path for edits" }),
-		edits: Type.Array(hashlineEditSchema, { description: "edits" }),
+		edits: Type.Union([
+		Type.Array(hashlineEditSchema, { description: "edits" }),
+		hashlineEditSchema,
+	]),
 	},
 	{ additionalProperties: false },
 );

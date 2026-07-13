@@ -1071,7 +1071,7 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 				}
 
 				if (!suffixResolution) {
-					throw new ToolError(`Path '${localReadPath}' not found`);
+					throw new ToolError(`Path '${localReadPath}' not found. Use \`find\` or \`search\` to discover the correct path.`);
 				}
 			} else {
 				throw error;

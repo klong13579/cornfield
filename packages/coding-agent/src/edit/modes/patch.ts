@@ -1592,7 +1592,10 @@ export const patchEditEntrySchema = Type.Object(
 export const patchEditSchema = Type.Object(
 	{
 		path: Type.String({ description: "file path for edits" }),
-		edits: Type.Array(patchEditEntrySchema, { description: "Patch operations", minItems: 1 }),
+		edits: Type.Union([
+			Type.Array(patchEditEntrySchema, { description: "Patch operations", minItems: 1 }),
+			patchEditEntrySchema,
+		]),
 	},
 	{ additionalProperties: false },
 );

@@ -988,7 +988,10 @@ export const replaceEditEntrySchema = Type.Object(
 export const replaceEditSchema = Type.Object(
 	{
 		path: Type.String({ description: "file path for edits" }),
-		edits: Type.Array(replaceEditEntrySchema, { description: "Replacements", minItems: 1 }),
+		edits: Type.Union([
+			Type.Array(replaceEditEntrySchema, { description: "Replacements", minItems: 1 }),
+			replaceEditEntrySchema,
+		]),
 	},
 	{ additionalProperties: false },
 );

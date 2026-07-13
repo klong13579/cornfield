@@ -349,7 +349,8 @@ export class EditTool implements AgentTool<TInput> {
 					onUpdate?: (partialResult: AgentToolResult<EditToolDetails, TInput>) => void,
 				) => {
 					const { edits, path } = params as PatchParams;
-					const runs = (edits as PatchEditEntry[]).map(
+					const normalizedEdits = Array.isArray(edits) ? edits : [edits];
+					const runs = (normalizedEdits as PatchEditEntry[]).map(
 						entry => (br: LspBatchRequest | undefined) =>
 							executePatchSingle({
 								session: tool.session,
@@ -409,10 +410,11 @@ export class EditTool implements AgentTool<TInput> {
 					_onUpdate?: (partialResult: AgentToolResult<EditToolDetails, TInput>) => void,
 				) => {
 					const { edits, path } = params as HashlineParams;
+					const normalizedEdits = Array.isArray(edits) ? edits : [edits];
 					return executeHashlineSingle({
 						session: tool.session,
 						path,
-						edits: edits as HashlineToolEdit[],
+						edits: normalizedEdits as HashlineToolEdit[],
 						signal,
 						batchRequest,
 						writethrough: tool.#writethrough,
@@ -453,7 +455,8 @@ export class EditTool implements AgentTool<TInput> {
 					onUpdate?: (partialResult: AgentToolResult<EditToolDetails, TInput>) => void,
 				) => {
 					const { edits, path } = params as ReplaceParams;
-					const runs = (edits as ReplaceEditEntry[]).map(
+					const normalizedEdits = Array.isArray(edits) ? edits : [edits];
+					const runs = (normalizedEdits as ReplaceEditEntry[]).map(
 						entry => (br: LspBatchRequest | undefined) =>
 							executeReplaceSingle({
 								session: tool.session,
