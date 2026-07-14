@@ -413,4 +413,11 @@ describe("buildSummary / buildTraceDetails (deprecated, kept for back-compat)", 
 		expect(details.archiveBytes).toBe(1024);
 		expect(details.workers).toHaveLength(3);
 	});
+
+	it("buildTraceDetails surfaces result.timings when set", () => {
+		const result = makeResult();
+		result.timings = { discovery: 27_600, ask: 9_000, rewrite: 69_700, workers: 141_600, synthesis: 48_700, total: 296_600 };
+		const details = buildTraceDetails(result, { runId: "moa-z", archiveChunks: 2, archiveBytes: 80_881 });
+		expect(details.timings).toEqual(result.timings);
+	});
 });

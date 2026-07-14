@@ -58,6 +58,7 @@ async function handleRun(args: string, ctx: ExtensionCommandContext, pi: Extensi
 		rewrite: result.rewrite,
 		tco: result.tco,
 		dispatchLog: result.dispatchLog,
+		timings: result.timings,
 	});
 
 	const handoff = buildMoaHandoff({

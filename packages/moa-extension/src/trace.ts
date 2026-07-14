@@ -166,6 +166,10 @@ export function buildMoaArchiveEntries(input: {
 	rewrite?: MoaWorkerResult;
 	tco?: TaskContextObject;
 	dispatchLog?: MoaDispatchLogEntry[];
+	/** Stage wall-clock timings from the executor's StageClock snapshot.
+	 *  Forwarded to the manifest so /moa transcript can show them without
+	 *  re-running the run. */
+	timings?: Record<string, number>;
 }): {
 	manifest: MoaArchiveManifest;
 	chunks: MoaArchiveChunk[];
@@ -194,6 +198,9 @@ export function buildMoaArchiveEntries(input: {
 	};
 	if (input.dispatchLog && input.dispatchLog.length > 0) {
 		manifest.dispatchLog = input.dispatchLog;
+	}
+	if (input.timings && Object.keys(input.timings).length > 0) {
+		manifest.timings = input.timings;
 	}
 	return { manifest, chunks };
 }
@@ -389,5 +396,6 @@ export function buildTraceDetails(
 		runId: archive.runId,
 		archiveChunks: archive.archiveChunks,
 		archiveBytes: archive.archiveBytes,
+		timings: result.timings,
 	};
 }
