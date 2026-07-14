@@ -288,15 +288,14 @@ async function buildBundledExtensionModule(resolvedPath: string): Promise<string
 	const copiedEntry = path.join(sourceRoot, path.relative(packageRoot, resolvedPath));
 	const outfile = path.join(bundleOutdir, `${entryName}.js`);
 	await fs.cp(packageRoot, sourceRoot, { recursive: true });
-	// Externalize @oh-my-pi/* so the bundle does not re-inline native modules
-	// (e.g. pi_natives). Without this, the bundle carries its own __require
-	// with an isolated module cache; the host has already dlopen()-ed
-	// pi_natives once via OMP's static imports, and a second dlopen from the
-	// bundle's __require segfaults at offset 0x8000 inside the .node's NAPI
-	// init (the NAPI env is not safe to re-register against the same process).
-	// With external set, the bundle keeps `import "@oh-my-pi/pi-natives"`
-	// statements; the host's require cache is shared, so the second access
-	// returns the already-loaded bindings instead of re-dlopen-ing the .node.
+	// Externalize @oh-my-pi/pi-natives (the NAPI addon) so the bundle does not
+	// re-inline native modules. The other @oh-my-pi/* workspace packages are
+	// pure-TS and safe to inline; leaving them external forces the bundle to
+	// rely on the host's module cache, which the cache path's parent dir
+	// (cwd/.omp/cache/...) cannot resolve (no node_modules/@oh-my-pi/ there).
+	// Keeping pi-natives external preserves the NAPI-double-dlopen fix: the
+	// bundle keeps `import "@oh-my-pi/pi-natives"` and the host's require
+	// cache returns the already-loaded bindings instead of re-dlopen-ing.
 	const result = await Bun.build({
 		entrypoints: [copiedEntry],
 		format: "esm",
@@ -305,14 +304,7 @@ async function buildBundledExtensionModule(resolvedPath: string): Promise<string
 		sourcemap: "inline",
 		outdir: bundleOutdir,
 		naming: "[name].js",
-		external: [
-			"@oh-my-pi/pi-natives",
-			"@oh-my-pi/pi-coding-agent",
-			"@oh-my-pi/pi-agent-core",
-			"@oh-my-pi/pi-ai",
-			"@oh-my-pi/pi-tui",
-			"@oh-my-pi/pi-utils",
-		],
+		external: ["mupdf"],
 	});
 	if (!result.success) {
 		const details = result.logs.map(log => String(log)).join("\n");
