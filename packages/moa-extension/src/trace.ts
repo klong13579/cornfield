@@ -289,14 +289,19 @@ export function buildMoaHandoff(input: {
 	const sections: string[] = [];
 	if (tcoSummary) sections.push(tcoSummary);
 	sections.push(`### ${input.task.trim() || "(empty task)"}`);
+	// Place synthesis BEFORE worker conclusions so the 8KB handoff cap
+	// preserves the merged answer (which the user and the next LLM turn
+	// both need to see) and only truncates per-worker detail. The full
+	// synthesis + worker transcripts remain in the moa-archive chunks,
+	// retrievable via `/moa transcript <runId>`.
+	if (input.synthesis) {
+		const body = input.synthesis.output.trim() || "(no synthesis output)";
+		sections.push(`### synthesis\n${body}`);
+	}
 	for (const [index, result] of input.workers.entries()) {
 		const status = result.ok ? "ok" : `failed (${result.exitCode ?? "—"})`;
 		const body = result.output.trim() || "(no output)";
 		sections.push(`### worker ${index + 1}: ${result.name} — ${status}\n${body}`);
-	}
-	if (input.synthesis) {
-		const body = input.synthesis.output.trim() || "(no synthesis output)";
-		sections.push(`### synthesis\n${body}`);
 	}
 	const truncated = truncateUtf8(sections.join("\n\n"), input.maxBytes);
 	return `${headline}\n\n${pointer}\n\n## Worker conclusions\n${truncated}`;

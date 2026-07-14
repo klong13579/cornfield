@@ -271,6 +271,33 @@ describe("buildMoaHandoff", () => {
 		expect(handoff).toContain("moa-y");
 		expect(handoff).not.toContain("Worker conclusions");
 	});
+
+	it("places synthesis before workers so the byte cap preserves the merged answer", () => {
+		// 3 workers with large outputs, a synthesis with a clear marker, and a
+		// tight byte cap that forces truncation. Without the reorder, the
+		// synthesis ends up at the tail and gets cut off by truncateUtf8.
+		const synthesisMarker = "SYNTHESIS_HEADLINE_xyz_unique";
+		const handoff = buildMoaHandoff({
+			runId: "moa-z",
+			archiveChunks: 1,
+			archiveBytes: 100,
+			workers: [
+				makeWorker({ name: "divergent", output: "d".repeat(2_000) }),
+				makeWorker({ name: "grounded", output: "g".repeat(2_000) }),
+				makeWorker({ name: "critical", output: "c".repeat(2_000) }),
+			],
+			synthesis: makeWorker({ name: "synthesis", output: `${synthesisMarker}\n${"s".repeat(500)}` }),
+			task: "rank options",
+			maxBytes: 1_500,
+		});
+		const synthesisIdx = handoff.indexOf(synthesisMarker);
+		const firstWorkerIdx = handoff.indexOf("### worker 1:");
+		expect(synthesisIdx).toBeGreaterThan(0);
+		expect(firstWorkerIdx).toBeGreaterThan(0);
+		expect(synthesisIdx).toBeLessThan(firstWorkerIdx);
+		// And the synthesis marker actually survives the truncation.
+		expect(handoff).toContain(synthesisMarker);
+	});
 });
 
 describe("buildDispatchLogFromResults", () => {
