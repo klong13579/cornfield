@@ -354,11 +354,17 @@ async function readSkills(skillsDir: string): Promise<Array<{ name: string; desc
 	}
 	const out: Array<{ name: string; description?: string }> = [];
 	for (const entry of entries) {
-		if (!entry.isFile() && !entry.isSymbolicLink()) continue;
-		if (!entry.name.endsWith(".md")) continue;
-		const skillPath = path.join(skillsDir, entry.name);
-		const desc = await readSkillDescription(skillPath);
-		out.push({ name: entry.name.replace(/\.md$/, ""), ...(desc ? { description: desc } : {}) });
+		if (!entry.isDirectory()) continue;
+		// Scan for SKILL.md inside each subdirectory — mirrors scanSkillsFromDir behavior
+		const skillDir = path.join(skillsDir, entry.name);
+		const skillMdPath = path.join(skillDir, "SKILL.md");
+		try {
+			await fs.access(skillMdPath);
+			const desc = await readSkillDescription(skillMdPath);
+			out.push({ name: entry.name, ...(desc ? { description: desc } : {}) });
+		} catch {
+			// No SKILL.md in this subdirectory — skip
+		}
 	}
 	return out.sort((a, b) => a.name.localeCompare(b.name));
 }
@@ -408,7 +414,6 @@ export interface ValidateArgs {
 	agentDir: string;
 	json?: boolean;
 	fix?: boolean;
-	semantic?: boolean;
 }
 
 export interface ValidateIssue {
@@ -449,6 +454,11 @@ const RUNTIME_RECOMMENDED: ReadonlyArray<string> = ["prompt-includes.json", ".gi
 export async function runAgentValidate(args: ValidateArgs): Promise<ValidateResult> {
 	const agentDir = path.resolve(args.agentDir);
 	const issues: ValidateIssue[] = [];
+
+	// 0. Skeleton repair (--fix only): create missing skeleton directories and content files
+	if (args.fix) {
+		await ensureAgentDir(agentDir);
+	}
 
 	// 1. always-on content files
 	for (const rel of ALWAYS_ON) {
@@ -570,22 +580,18 @@ export async function runAgentValidate(args: ValidateArgs): Promise<ValidateResu
 		});
 	}
 
-	// 7. Semantic MECE audit (opt-in via --semantic)
+	// 7. Semantic MECE audit (always-on via LLM)
 	let semanticResult: ValidateResult["semantic"];
-	if (args.semantic) {
-		semanticResult = await runSemanticPhase(agentDir, meceCtx);
-		// Merge semantic violations into issues as warnings
-		for (const sv of semanticResult.violations) {
-			issues.push({
-				level: sv.severity,
-				file: sv.files.join(", ") || "(multiple)",
-				message: sv.message,
-				rule: `semantic:${sv.rule}`,
-				repairable: false,
-			});
-		}
-	} else {
-		semanticResult = undefined;
+	semanticResult = await runSemanticPhase(agentDir, meceCtx);
+	// Merge semantic violations into issues as warnings
+	for (const sv of semanticResult.violations) {
+		issues.push({
+			level: sv.severity,
+			file: sv.files.join(", ") || "(multiple)",
+			message: sv.message,
+			rule: `semantic:${sv.rule}`,
+			repairable: false,
+		});
 	}
 
 	return {

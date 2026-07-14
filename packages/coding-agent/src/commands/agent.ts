@@ -63,7 +63,7 @@ export default class Agent extends Command {
 		mission: Flags.string({ description: "Path to a custom mission.md (init)" }),
 		force: Flags.boolean({ description: "Allow overwriting an existing agentDir (init)" }),
 		fix: Flags.boolean({ description: "Auto-repair MECE violations (validate)" }),
-		semantic: Flags.boolean({ description: "Run LLM-based semantic MECE audit (validate)" }),
+
 		deleteFiles: Flags.boolean({ description: "Also rm -rf the agentDir on disk (unregister). Off by default." }),
 		json: Flags.boolean({ description: "Output JSON" }),
 	};
@@ -86,8 +86,7 @@ export default class Agent extends Command {
 		"  omp agent validate --dir ~/.omp/agents/hr-bot        Check always-on + runtime hard deps",
 		"  omp agent validate --dir .                            Check current directory",
 		"  omp agent validate --dir ~/.omp/agents/hr-bot --json  Output as JSON",
-		"  omp agent validate --dir . --fix                         Auto-repair MECE violations",
-		"  omp agent validate --dir . --semantic                     Run LLM-based semantic MECE audit",
+		"  omp agent validate --dir . --fix                         Auto-repair MECE violations + skeleton gaps",
 		"",
 		"  ======== 注册表 ========",
 		"  omp agent register hr3 --dir /path/to/hr3       Add an existing agentDir to ~/.omp/agent/registry.json",
@@ -174,7 +173,7 @@ export default class Agent extends Command {
 			}
 			case "validate": {
 				if (!dirResolved) {
-					console.error("Usage: omp agent validate --dir <agentDir> [--fix] [--semantic] [--json]");
+					console.error("Usage: omp agent validate --dir <agentDir> [--fix] [--json]");
 					process.exitCode = 1;
 					return;
 				}
@@ -182,7 +181,6 @@ export default class Agent extends Command {
 					agentDir: dirResolved,
 					json: flags.json as boolean | undefined,
 					fix: flags.fix as boolean | undefined,
-					semantic: flags.semantic as boolean | undefined,
 				});
 				console.log(renderValidate(result, Boolean(flags.json)));
 				process.exitCode = result.valid ? 0 : 1;
