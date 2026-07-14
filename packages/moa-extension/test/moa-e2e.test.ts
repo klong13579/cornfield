@@ -5,6 +5,7 @@ import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import { RpcClient } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-client";
 import { Snowflake } from "@oh-my-pi/pi-utils";
 import { e2eApiKey } from "../../coding-agent/test/utilities";
+import { MOA_ARCHIVE_ENTRY_TYPE } from "../src/types";
 
 interface MoaWorkerTrace {
 	name: string;
@@ -18,6 +19,10 @@ interface MoaTraceDetails {
 	workerCount: number;
 	workers: MoaWorkerTrace[];
 	summary: string;
+	synthesisModel?: string;
+	runId: string;
+	archiveChunks: number;
+	archiveBytes: number;
 }
 
 type MoaResultMessage = Extract<AgentMessage, { role: "custom" }> & {
@@ -25,12 +30,26 @@ type MoaResultMessage = Extract<AgentMessage, { role: "custom" }> & {
 	details?: unknown;
 };
 
+type MoaArchiveMessage = Extract<AgentMessage, { role: "custom" }> & {
+	customType: typeof MOA_ARCHIVE_ENTRY_TYPE;
+	details?: unknown;
+};
+
 const narwalApiKey = e2eApiKey("NARWAL_PLAN_API_KEY");
-const heterogeneousNarwalModels = ["minimax-m3", "kimi-k2.5", "glm-5-turbo"] as const;
-const heterogeneousNarwalSynthesisModel = "qwen3.5-plus";
+/** Cost-aware heterogeneous layout on a single provider (provider/id form). */
+const heterogeneousNarwalModels = [
+	"narwal-plan/minimax-m3",
+	"narwal-plan/kimi-k2.5",
+	"narwal-plan/glm-5-turbo",
+] as const;
+const heterogeneousNarwalSynthesisModel = "narwal-plan/qwen3.5-plus";
 
 function isMoaResultMessage(message: AgentMessage): message is MoaResultMessage {
 	return message.role === "custom" && message.customType === "moa-result";
+}
+
+function isMoaArchiveMessage(message: AgentMessage): message is MoaArchiveMessage {
+	return message.role === "custom" && message.customType === MOA_ARCHIVE_ENTRY_TYPE;
 }
 
 function extractMessageText(message: MoaResultMessage): string {
@@ -51,13 +70,21 @@ function parseMoaDetails(value: unknown): MoaTraceDetails {
 	return value as MoaTraceDetails;
 }
 
-async function waitForMoaResult(client: RpcClient, prompt: string, timeoutMs: number): Promise<MoaResultMessage> {
+async function waitForMoaResult(
+	client: RpcClient,
+	prompt: string,
+	timeoutMs: number,
+): Promise<{ result: MoaResultMessage; allMessages: AgentMessage[] }> {
 	await client.prompt(prompt);
 	const startedAt = Date.now();
 	while (Date.now() - startedAt < timeoutMs) {
 		const messages = await client.getMessages();
 		const result = [...messages].reverse().find(isMoaResultMessage);
-		if (result) return result;
+		if (result) {
+			// Give archive chunks a brief window to land after the handoff.
+			await Bun.sleep(300);
+			return { result, allMessages: await client.getMessages() };
+		}
 		await Bun.sleep(500);
 	}
 	throw new Error(`Timed out waiting for moa-result after ${timeoutMs}ms`);
@@ -79,6 +106,10 @@ function buildMoaSettingsEnv(): string {
 			},
 		],
 		synthesisModel: heterogeneousNarwalSynthesisModel,
+		// RPC has no TUI — keep single-round + ask fallback explicit.
+		maxRounds: 0,
+		askEnabled: true,
+		workerExecutionMode: "subprocess",
 	});
 }
 
@@ -111,7 +142,8 @@ describe.skipIf(!narwalApiKey)("moa extension e2e", () => {
 			},
 			provider: "narwal-plan",
 			model: "minimax-m3",
-			args: ["--extension", path.join(import.meta.dir, "..", "src", "extension.ts"), "--no-color"],
+			// MOA is inline via sdk.ts — do not pass --extension (avoids double registration).
+			args: ["--no-color"],
 		});
 	});
 
@@ -128,17 +160,31 @@ describe.skipIf(!narwalApiKey)("moa extension e2e", () => {
 			"No tools are required; reason from generic product tradeoffs only.",
 		].join(" ");
 
-		const moaResult = await waitForMoaResult(client, `/moa run ${task}`, 240_000);
+		const { result: moaResult, allMessages } = await waitForMoaResult(client, `/moa run ${task}`, 240_000);
 		const resultText = extractMessageText(moaResult);
 		const details = parseMoaDetails(moaResult.details);
 
 		expect(resultText).toContain("∪ moa transcript:");
 		expect(resultText).toContain("## Worker conclusions");
 		expect(resultText).toContain("### synthesis");
+		expect(resultText).toContain("/moa transcript");
+		// Discovery/Ask TCO summary appears in handoff when discovery ran.
+		expect(resultText).toMatch(/\*\*TCO\*\*:|## Worker conclusions/);
+
 		expect(details.task).toBe(task);
 		expect(details.workerCount).toBe(3);
 		expect(details.workers).toHaveLength(3);
 		expect(details.workers.map(worker => worker.model)).toEqual([...heterogeneousNarwalModels]);
+		expect(details.synthesisModel).toBe(heterogeneousNarwalSynthesisModel);
 		expect(details.summary).toContain("## MOA Run");
+		expect(details.runId).toMatch(/^moa-/);
+		expect(details.archiveChunks).toBeGreaterThan(0);
+		expect(details.archiveBytes).toBeGreaterThan(0);
+
+		const archives = allMessages.filter(isMoaArchiveMessage);
+		expect(archives.length).toBeGreaterThanOrEqual(1 + details.archiveChunks);
+		const manifest = archives.find(m => (m.details as { kind?: string } | undefined)?.kind === "manifest");
+		expect(manifest).toBeDefined();
+		expect((manifest!.details as { runId: string }).runId).toBe(details.runId);
 	}, 300_000);
 });
