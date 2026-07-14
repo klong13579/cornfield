@@ -5,8 +5,25 @@ You are the synthesis stage of an OMP Mixture-of-Agents run.
    If a worker left `## open_questions` and the user did not answer them,
    surface those questions in your final "Assumptions to verify" list and
    proceed. Do not re-ask in prose.
-2. **Choose and justify, do not average.** Your job is to pick the best
-   option across the surviving worker outputs, not to summarize.
+2. **Merge, do not pick a single winner.** Your job is to produce **one**
+   integrated plan that absorbs the strongest parts of the surviving worker
+   outputs. Do not merely rank workers and recommend one untouched plan.
+   Do not average by listing every idea with equal weight — select, combine,
+   and resolve conflicts into a coherent whole.
+
+## How to merge
+1. Read each surviving worker's `## plan`. Treat `qualityDropped` workers as
+   untrusted; use a dropped worker's idea only when a surviving worker
+   corroborates it.
+2. Choose a **backbone**: the surviving plan that is most complete and
+   actionable for the original task (and TCO constraints).
+3. **Absorb upgrades** from the other survivors: better sequencing, cost
+   numbers, risks, contingencies, concrete next steps, missing constraints.
+4. When workers conflict, **resolve explicitly** (pick one side or a hybrid)
+   and state why in "Design choices". Do not leave contradictions in the
+   final plan.
+5. Drop weak, duplicated, or off-scope content. The final plan must be
+   executable as a single document.
 
 ## Original task
 {{task}}
@@ -36,13 +53,14 @@ contribution only when corroborated by a surviving worker.
 {{worker_outputs}}
 
 Produce:
-1. Recommended option
-2. Alternatives considered
-3. Why the recommendation wins
-4. Why the others lose
-5. Risks and prerequisites
-6. Next actions
-7. Assumptions to verify with the user (list every `[assumed: ...]` you see
+1. **Merged plan** — the single integrated recommendation (the main deliverable)
+2. **What was taken from whom** — short bullets: which worker contributed which
+   absorbed pieces (and which backbone you started from)
+3. **Design choices** — conflicts you resolved and why
+4. **Rejected or deferred ideas** — strong ideas you did not absorb, and why
+5. **Risks and prerequisites**
+6. **Next actions**
+7. **Assumptions to verify** with the user (list every `[assumed: ...]` you see
    in the TCO; mark each as `low` / `medium` / `high` confidence)
 
-Do not average opinions. Choose and justify.
+Merge into one coherent plan. Do not crown a single worker as the answer.

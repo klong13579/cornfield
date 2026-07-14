@@ -447,13 +447,13 @@ async function runSynthesis(
 		return mapWorkerOutput(
 			result,
 			"synthesis",
-			"Choose and justify the final recommendation",
+			"Merge surviving worker plans into one recommendation",
 			resolvedSynthesisModel ?? plan.synthesisModel,
 		);
 	} catch (error) {
 		return mapExecutionError(
 			"synthesis",
-			"Choose and justify the final recommendation",
+			"Merge surviving worker plans into one recommendation",
 			error,
 			resolvedSynthesisModel ?? plan.synthesisModel,
 		);
