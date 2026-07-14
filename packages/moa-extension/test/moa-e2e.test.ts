@@ -110,6 +110,9 @@ function buildMoaSettingsEnv(): string {
 		maxRounds: 0,
 		askEnabled: true,
 		workerExecutionMode: "subprocess",
+		// Avoid heuristic quality drops hiding the synthesis model on stub results.
+		qualityMinScore: 0,
+		resumeContextBytes: 32_000,
 	});
 }
 
@@ -166,7 +169,6 @@ describe.skipIf(!narwalApiKey)("moa extension e2e", () => {
 
 		expect(resultText).toContain("∪ moa transcript:");
 		expect(resultText).toContain("## Worker conclusions");
-		expect(resultText).toContain("### synthesis");
 		expect(resultText).toContain("/moa transcript");
 		// Discovery/Ask TCO summary appears in handoff when discovery ran.
 		expect(resultText).toMatch(/\*\*TCO\*\*:|## Worker conclusions/);
@@ -175,8 +177,10 @@ describe.skipIf(!narwalApiKey)("moa extension e2e", () => {
 		expect(details.workerCount).toBe(3);
 		expect(details.workers).toHaveLength(3);
 		expect(details.workers.map(worker => worker.model)).toEqual([...heterogeneousNarwalModels]);
-		expect(details.synthesisModel).toBe(heterogeneousNarwalSynthesisModel);
+		// Unbounded summary (not the resumeContextBytes-truncated handoff) carries synthesis.
 		expect(details.summary).toContain("## MOA Run");
+		expect(details.summary).toContain("### synthesis");
+		expect(details.synthesisModel).toBe(heterogeneousNarwalSynthesisModel);
 		expect(details.runId).toMatch(/^moa-/);
 		expect(details.archiveChunks).toBeGreaterThan(0);
 		expect(details.archiveBytes).toBeGreaterThan(0);

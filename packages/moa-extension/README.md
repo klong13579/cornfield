@@ -36,6 +36,15 @@ omp                                    # or: bun --cwd=packages/coding-agent src
 /moa run <task>                        # expect workers + synthesis + [moa] result
 ```
 
+Automated (gated by API keys; skips otherwise):
+
+```bash
+bun test packages/moa-extension/test/moa-e2e.test.ts
+bun test packages/moa-extension/test/moa-e2e-real-config.test.ts
+# Multi-round interactive co-test (session archive / dispatchLog):
+E2E=1 bun run packages/moa-extension/test-mr-e2e-cotest.ts
+```
+
 ## Commands
 
 | Command | Purpose |
