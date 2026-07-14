@@ -5,6 +5,7 @@
 ### Added
 
 - **Stage-test harness**: `bun packages/moa-extension/scripts/stage-test.ts` runs Discovery → Ask → Rewrite → Workers → Synthesis as `--stage all` or per-stage with `--from` artifacts under `tmp/moa-stage/`. Shared runners live in `src/stages.ts`; stdin UI in `src/stage-cli-ui.ts`.
+- **Stage-test CLI unit coverage**: `parseStageTestArgs` / `validateStagePrerequisites` / `planStageSequence` live in `src/stage-test-cli.ts` with deterministic tests; prerequisites fail before creating a run directory or loading models.
 
 ### Fixed
 
