@@ -15,6 +15,9 @@
  *   3. Otherwise the var is omitted.
  */
 import { afterEach, describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
 	gatewayServicePath,
 	generateLaunchdPlist,
@@ -22,6 +25,7 @@ import {
 	PERSISTED_ENV_DEFAULTS,
 	PERSISTED_ENV_VARS,
 	resolvePersistedEnv,
+	resolveStableRuntime,
 } from "../src/service-installer";
 
 describe("resolvePersistedEnv", () => {
@@ -180,6 +184,71 @@ describe("generateLaunchdPlist env persistence", () => {
 		// Each metacharacter must be replaced with the entity reference
 		expect(plist).toContain("a&amp;b&lt;c&gt;&quot;");
 		expect(plist).not.toContain('a&b<c>"');
+	});
+});
+
+describe("resolveStableRuntime", () => {
+	test("returns the candidate path when ~/.local/bin/omp exists and is executable", () => {
+		const home = mkdtempSync(join(tmpdir(), "omp-stable-"));
+		try {
+			const dir = join(home, ".local", "bin");
+			require("node:fs").mkdirSync(dir, { recursive: true });
+			require("node:fs").writeFileSync(join(dir, "omp"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+			expect(resolveStableRuntime(home)).toBe(join(home, ".local", "bin", "omp"));
+		} finally {
+			rmSync(home, { recursive: true, force: true });
+		}
+	});
+
+	test("returns null when ~/.local/bin/omp does not exist", () => {
+		const home = mkdtempSync(join(tmpdir(), "omp-stable-"));
+		try {
+			expect(resolveStableRuntime(home)).toBeNull();
+		} finally {
+			rmSync(home, { recursive: true, force: true });
+		}
+	});
+
+	test("returns null when ~/.local/bin/omp exists but is not executable", () => {
+		const home = mkdtempSync(join(tmpdir(), "omp-stable-"));
+		try {
+			const dir = join(home, ".local", "bin");
+			require("node:fs").mkdirSync(dir, { recursive: true });
+			require("node:fs").writeFileSync(join(dir, "omp"), "not executable\n", { mode: 0o644 });
+			expect(resolveStableRuntime(home)).toBeNull();
+		} finally {
+			rmSync(home, { recursive: true, force: true });
+		}
+	});
+});
+
+describe("generateLaunchdPlist runtime resolution", () => {
+	test("ProgramArguments[0] is the stable runtime when ~/.local/bin/omp exists", () => {
+		const home = mkdtempSync(join(tmpdir(), "omp-stable-"));
+		try {
+			const dir = join(home, ".local", "bin");
+			require("node:fs").mkdirSync(dir, { recursive: true });
+			require("node:fs").writeFileSync(join(dir, "omp"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+			const plist = generateLaunchdPlist("/tmp/log", { HOME: home });
+			// First ProgramArguments entry must be the stable runtime, NOT
+			// whatever process.execPath happens to be in the test env.
+			expect(plist).toContain(`<string>${join(home, ".local", "bin", "omp")}</string>`);
+			expect(plist).not.toContain(`<string>${process.execPath}</string>`);
+		} finally {
+			rmSync(home, { recursive: true, force: true });
+		}
+	});
+
+	test("falls back to dev/prod detection when no stable runtime is present", () => {
+		const home = mkdtempSync(join(tmpdir(), "omp-stable-"));
+		try {
+			const plist = generateLaunchdPlist("/tmp/log", { HOME: home });
+			// No stable runtime → plist must use process.execPath as argv[0],
+			// matching the pre-existing dev/prod behavior.
+			expect(plist).toContain(`<string>${process.execPath}</string>`);
+		} finally {
+			rmSync(home, { recursive: true, force: true });
+		}
 	});
 });
 
