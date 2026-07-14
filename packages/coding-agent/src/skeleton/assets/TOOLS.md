@@ -83,6 +83,24 @@ Persist runtime-learned behavioral preferences (target: "user" or "agent").
 - MUST NOT write temporary task progress or session results to memory.
 - MUST distinguish stable facts (use `identity`) from learned preferences (use `write_memory`).
 
+### `list_models`
+List available LLM models. Read-only.
+
+- MUST NOT attempt to switch models by editing config files or reading/writing SQLite — no such backdoor.
+- MUST use `list_models` (via tool) before `switch_model` when the user isn't sure which model.
+- MUST pass `query` to filter when the user names a partial string (e.g. `list_models({query: "kimi"})`).
+- User-facing hint MUST point to `/model <provider>/<modelId>` slash command, NOT to the tool name.
+- MAY show the current model line alongside results.
+
+### `switch_model`
+Switch the current session model. Takes `query` (5-level fuzzy match) and optional `role` (`"default"` persists, `"temporary"` one-shot).
+
+- MUST NOT try to switch models by editing config files, reading SQLite, or other backdoors.
+- MUST call `list_models` first if the user's query is ambiguous (returns multiple candidates), then re-call `switch_model` with an explicit `provider/modelId`.
+- `role` defaults to `"default"` (persists to settings); `"temporary"` resets on next session start.
+- **Natural language triggers**: user says "用 claude"/"切 minimax"/"换成 kimi" — fuzzy matching auto-resolves intent. Do NOT wait for a fully-qualified name.
+- After success, confirm to the user using the exact format returned by the tool.
+
 ## URL 访问策略
 
 | 场景 | 工具 | 规则 |

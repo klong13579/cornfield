@@ -19,12 +19,13 @@ import {
 	ensureAgentDir,
 	findAgent,
 	pruneStaleEntries,
+	reconcileSkeletonFiles,
 	registerAgent,
 	resolveAgentDir,
 	SKELETON_FILES,
 	unregisterAgent,
 } from "@oh-my-pi/pi-coding-agent/skeleton";
-import { MECE_FILES, runMeceChecks, runMeceRepairs, type MeceContext } from "./mece-rules";
+import { MECE_FILES, type MeceContext, runMeceChecks, runMeceRepairs } from "./mece-rules";
 import { runSemanticAudit, type SemanticViolation } from "./semantic-audit";
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -455,9 +456,10 @@ export async function runAgentValidate(args: ValidateArgs): Promise<ValidateResu
 	const agentDir = path.resolve(args.agentDir);
 	const issues: ValidateIssue[] = [];
 
-	// 0. Skeleton repair (--fix only): create missing skeleton directories and content files
+	// 0. Skeleton repair (--fix only): create missing skeleton dirs/files + reconcile existing
 	if (args.fix) {
 		await ensureAgentDir(agentDir);
+		await reconcileSkeletonFiles(agentDir);
 	}
 
 	// 1. always-on content files

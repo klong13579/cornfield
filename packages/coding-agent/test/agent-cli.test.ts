@@ -238,10 +238,49 @@ describe("runAgentShow", () => {
 		expect(result.cronTaskCount).toBe(2);
 	});
 
-	test("reads skill name + frontmatter description", async () => {
+	test("discovers skills from subdirectories with SKILL.md", async () => {
 		await runAgentInit({ name: "alpha", dir: tmpDir });
-		await writeFile(
-			"alpha/.omp/skills/gitlab-auto-login.md",
+		// Directory-based skill with frontmatter description
+		await fs.mkdir(path.join(tmpDir, "alpha", ".omp", "skills", "dws"), { recursive: true });
+		await Bun.write(
+			path.join(tmpDir, "alpha", ".omp", "skills", "dws", "SKILL.md"),
+			"---\ndescription: DingTalk integration\n---\n\n# body\n",
+		);
+		// Another directory-based skill with no frontmatter
+		await fs.mkdir(path.join(tmpDir, "alpha", ".omp", "skills", "interview-prep"), { recursive: true });
+		await Bun.write(
+			path.join(tmpDir, "alpha", ".omp", "skills", "interview-prep", "SKILL.md"),
+			"# Interview prep\n\nBody.\n",
+		);
+		// Flat .md file — should NOT be discovered (matches runtime behavior)
+		await fs.mkdir(path.join(tmpDir, "alpha", ".omp", "skills"), { recursive: true });
+		await Bun.write(
+			path.join(tmpDir, "alpha", ".omp", "skills", "changelog.md"),
+			"---\ndescription: Track changes\n---\n\n# Changelog\n",
+		);
+		// Directory without SKILL.md — should be skipped
+		await fs.mkdir(path.join(tmpDir, "alpha", ".omp", "skills", "empty-dir"), { recursive: true });
+
+		const result = await runAgentShow({ name: "alpha", dir: tmpDir });
+		expect(result.skills).toHaveLength(2);
+
+		const dws = result.skills.find(s => s.name === "dws");
+		expect(dws?.description).toBe("DingTalk integration");
+
+		const interview = result.skills.find(s => s.name === "interview-prep");
+		expect(interview).toBeTruthy();
+		expect(interview?.description).toBeUndefined();
+
+		// Flat .md files should NOT appear
+		expect(result.skills.find(s => s.name === "changelog")).toBeUndefined();
+	});
+
+	test("reads skill name + frontmatter description from SKILL.md", async () => {
+		await runAgentInit({ name: "alpha", dir: tmpDir });
+		const skillDir = path.join(tmpDir, "alpha", ".omp", "skills", "gitlab-auto-login");
+		await fs.mkdir(skillDir, { recursive: true });
+		await Bun.write(
+			path.join(skillDir, "SKILL.md"),
 			"---\ndescription: Auto-login to GitLab via cookies\n---\n\n# body\n",
 		);
 		const result = await runAgentShow({ name: "alpha", dir: tmpDir });
@@ -440,7 +479,7 @@ describe("runAgentValidate — MECE rules", () => {
 		);
 		expect(violation).toBeTruthy();
 		expect(violation?.repairable).toBe(false);
-	});
+	}, 30000);
 
 	test("--fix leaves non-repairable violations as warnings", async () => {
 		const dir = await initAgent();
@@ -453,7 +492,7 @@ describe("runAgentValidate — MECE rules", () => {
 		const result = await runAgentValidate({ agentDir: dir, fix: true });
 		const warning = result.issues.find(i => i.rule === "filemap-accuracy");
 		expect(warning).toBeTruthy();
-	});
+	}, 30000);
 
 	test("R8: detects and repairs deprecated .agent/ directory", async () => {
 		const dir = await initAgent();

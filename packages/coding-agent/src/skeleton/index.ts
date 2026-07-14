@@ -11,7 +11,7 @@
 
 export { SKELETON_FILES, type SkeletonFile } from "./assets";
 export { SKELETON_DIRS } from "./dirs";
-export { ensureAgentDir } from "./ensure";
+export { ensureAgentDir, reconcileSkeletonFiles } from "./ensure";
 export {
 	findAgent,
 	findStaleEntries,

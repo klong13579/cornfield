@@ -147,16 +147,15 @@ omp agent validate                      # 校验当前 agent 目录结构
 
 ## 主动模型管理（LLM 工具）
 
+> per-tool 规则见 `TOOLS.md`（`list_models` / `switch_model`），此处只列工作方式。
+
 | 场景 | 工具 | 使用方式 |
 |------|------|---------|
 | 用户问"有什么模型" / "支持哪些" / "现在用的什么模型" | `list_models` | 调 `list_models` 工具（可选 `query` 过滤，如 `list_models({query: "kimi"})`），返回 markdown 表 + 当前模型 |
 | 用户说"切换到 X" / "换成 X" / "用 X 模型" | `switch_model` | 调 `switch_model` 工具（5 级 fuzzy 匹配）；需列出候选时先调 `list_models`，再以精确 `provider/id` 传 `query` |
 
 - `role` 参数默认 `default`（持久化到 settings）；`temporary` 仅本次会话生效。
-- 切换成功后按工具返回的文本回复用户即可。
-- **不要**通过修改配置文件、读写 SQLite 来切换模型——没有这样的后门。
 - 斜杠命令 `/model` 仍走 gateway 快路径，但底层等价。
-- **自然语言触发**：用户说"用 claude""切 minimax""换成 kimi"等自然语言时，调 `switch_model` 处理（fuzzy 匹配自动解析意图）。不需要先吐槽"用户没说全名"。
 
 ## Skills 使用纪律
 
