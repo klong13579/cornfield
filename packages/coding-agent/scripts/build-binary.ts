@@ -25,6 +25,9 @@ async function runCommand(command: string[], env: NodeJS.ProcessEnv = Bun.env): 
 async function main(): Promise<void> {
 	await runCommand(["bun", "--cwd=../stats", "scripts/generate-client-bundle.ts", "--generate"]);
 	try {
+		// Rebuild native addon first — ensures AudioCapture and other new
+		// exports are available even when workspace builds run in parallel.
+		await runCommand(["bun", "--cwd=../natives", "run", "build"]);
 		await runCommand(["bun", "--cwd=../natives", "run", "embed:native"]);
 		try {
 			const buildEnv = shouldAdhocSignDarwinBinary() ? { ...Bun.env, BUN_NO_CODESIGN_MACHO_BINARY: "1" } : Bun.env;
