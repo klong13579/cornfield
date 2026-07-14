@@ -13,6 +13,7 @@ import {
 	listMoaArchiveRuns,
 	reconstructMoaArchive,
 } from "./trace";
+import { formatTimingSummary } from "./timing";
 import { MOA_ARCHIVE_ENTRY_TYPE } from "./types";
 
 function usageText(): string {
@@ -217,14 +218,18 @@ async function handleTranscript(args: string, ctx: ExtensionCommandContext, pi: 
 		);
 		return;
 	}
-	const header = [
+	const headerLines = [
 		`# moa run ${result.manifest.runId}`,
 		`- created: ${result.manifest.createdAt}`,
 		`- task: ${result.manifest.task || "(empty)"}`,
 		`- workers: ${result.manifest.completedWorkers}/${result.manifest.workerCount} completed`,
 		`- archive: ${result.manifest.chunks} chunk(s), ${result.manifest.bytes} bytes`,
-		"",
-	].join("\n");
+	];
+	if (result.manifest.timings && Object.keys(result.manifest.timings).length > 0) {
+		headerLines.push("", formatTimingSummary(result.manifest.timings));
+	}
+	headerLines.push("");
+	const header = headerLines.join("\n");
 	pi.sendMessage(
 		{
 			customType: "moa-transcript",
