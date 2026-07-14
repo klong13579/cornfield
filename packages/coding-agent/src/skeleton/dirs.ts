@@ -10,10 +10,13 @@
 export const SKELETON_DIRS: readonly string[] = [
 	".omp",
 	".omp/skills",
+	".omp/skills/lint",
 	"knowledge",
 	"knowledge/handbook",
 	"cron",
 	"cron/tasks",
 	"cron/logs",
 	"sessions",
+	"raw",
+	"wiki",
 ] as const;

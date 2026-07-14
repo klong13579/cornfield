@@ -19,6 +19,7 @@ import promptIncludes from "./assets/prompt-includes.json" with { type: "text" }
 import todo from "./assets/TODO.md" with { type: "text" };
 import tools from "./assets/TOOLS.md" with { type: "text" };
 import user from "./assets/user.md" with { type: "text" };
+import lintSkill from "./assets/.omp/skills/lint/SKILL.md" with { type: "text" };
 
 export interface SkeletonFile {
 	relPath: string;
@@ -52,4 +53,5 @@ export const SKELETON_FILES: readonly SkeletonFile[] = [
 	{ relPath: ".omp/config.yml", content: ompConfig },
 	{ relPath: ".omp/SYSTEM.md", content: ompSystemPrompt },
 	{ relPath: "knowledge/external-workspaces.md", content: externalWorkspaces },
+	{ relPath: ".omp/skills/lint/SKILL.md", content: lintSkill },
 ] as const;

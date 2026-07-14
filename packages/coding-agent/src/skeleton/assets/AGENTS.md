@@ -22,11 +22,14 @@
 | `.omp/config.yml`                    | RUNTIME (model/role/theme)       | read at startup (hard dependency)                                    |
 | `.omp/SYSTEM.md`                     | RUNTIME (gateway system prompt)  | overrides OMP built-in prompt — gateway agent baseline               |
 | `.omp/skills/<name>/SKILL.md`        | BEHAVIOR (on-demand)             | via `skill://<name>` URI                                             |
-| `knowledge/handbook/*`               | CONTEXT (on-demand)              | read by agent (user-created)                                         |
-| `cron/tasks/*.json5`                 | RUNTIME (schedule + prompt)      | cron trigger (prompt in `command` field; no .prompt.md pair)         |
-| `sessions/*.jsonl`                   | RUNTIME (gitignored)             | session history                                                      |
+|| `knowledge/handbook/*`               | CONTEXT (on-demand)              | read by agent (user-created)                                         |
+|| `raw/`                               | CONTEXT (data ingress)           | raw/unstructured data (user-created)                                 |
+|| `wiki/`                              | CONTEXT (structured knowledge)   | curated wiki pages (user-created)                                    |
+|| `cron/tasks/*.json5`                 | RUNTIME (schedule + prompt)      | cron trigger (prompt in `command` field; no .prompt.md pair)         |
+|| `sessions/*.jsonl`                   | RUNTIME (gitignored)             | session history                                                      |
 
 > Optional files (not in skeleton): `scripts/`, `external/`, `weekly-reports/`, `examples/`, `docs/`.
+> `raw/` and `wiki/` are skeleton directories — created by init. Remove from gitignore if you don't need them.
 > Per design §6.3 principle 5, missing optional files **must not** raise errors or warnings.
 
 ## 文件职责边界（MECE 规则）
