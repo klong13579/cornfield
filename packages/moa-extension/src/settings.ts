@@ -63,6 +63,10 @@ export const DEFAULT_SETTINGS: MoaSettings = {
 	maxRounds: 1,
 	maxQuestionsPerRound: 5,
 	qualityMinScore: 40,
+	// 0 = no stagger (default; tests rely on this). Production moa.yml should
+	// set this to ~1500 to spread the burst of MCP / tool calls so 3 concurrent
+	// workers don't trip the same rate limit at the same instant.
+	workerStaggerMs: 0,
 };
 
 export function normalizeWorkerSlots(
@@ -116,6 +120,10 @@ export function resolveSettings(overrides: Partial<MoaSettings> = {}): MoaSettin
 		0,
 		Math.min(100, Math.floor(mergedOverrides.qualityMinScore ?? DEFAULT_SETTINGS.qualityMinScore)),
 	);
+	const workerStaggerMs = Math.max(
+		0,
+		Math.floor(mergedOverrides.workerStaggerMs ?? DEFAULT_SETTINGS.workerStaggerMs),
+	);
 	// Normalize workerExecutionMode: only valid values pass through.
 	const rawMode = mergedOverrides.workerExecutionMode;
 	const workerExecutionMode: "subprocess" | "in-process" =
@@ -131,6 +139,7 @@ export function resolveSettings(overrides: Partial<MoaSettings> = {}): MoaSettin
 		maxRounds,
 		maxQuestionsPerRound,
 		qualityMinScore,
+		workerStaggerMs,
 		workerExecutionMode,
 	};
 }

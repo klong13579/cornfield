@@ -43,6 +43,10 @@ export interface MoaSettings {
 	/** Quality heuristic drop line. 0-100; below ⇒ worker is dropped from
 	 *  synthesis input (raw still kept in archive). */
 	qualityMinScore: number;
+	/** Delay between successive worker starts in a fanout, in ms. Spreads
+	 *  the burst of MCP / tool calls so 3 concurrent workers don't trip the
+	 *  same rate limit at the same instant. Set to 0 to start all in parallel. */
+	workerStaggerMs: number;
 }
 
 export interface MoaPlanWorker {
@@ -250,6 +254,10 @@ export interface MoaTraceDetails {
 	archiveChunks: number;
 	/** Total byte size of the full archive transcript. */
 	archiveBytes: number;
+	/** Wall-clock ms per stage. Mirrors the same field on the archive
+	 *  manifest so subsequent LLM turns can reason about wall-clock
+	 *  distribution without parsing the archive transcript. */
+	timings?: Record<string, number>;
 }
 
 export const MOA_ARCHIVE_ENTRY_TYPE = "moa-archive";
@@ -272,6 +280,10 @@ export interface MoaArchiveManifest {
 	 *  undefined. PR2 multi-round executor populates one entry per worker
 	 *  invocation. Backward compatible — old readers ignore the field. */
 	dispatchLog?: MoaDispatchLogEntry[];
+	/** Wall-clock ms per stage (discovery / ask / rewrite / workers[_rN] /
+	 *  synthesis / total). Populated by executor when `StageClock` is wired;
+	 *  absent in older archives and in test fixtures. */
+	timings?: Record<string, number>;
 }
 
 export interface MoaArchiveChunk {

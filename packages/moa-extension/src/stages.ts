@@ -435,8 +435,12 @@ export async function runWorkerFanout(
 	previousQuestions: ReadonlyArray<string>,
 ): Promise<{ workers: MoaWorkerResult[]; durations: Map<string, number> }> {
 	const startedAt = new Map<string, number>();
+	const staggerMs = Math.max(0, planOptions.settings.workerStaggerMs ?? 0);
 	const settled = await Promise.all(
-		workers.map(async worker => {
+		workers.map(async (worker, index) => {
+			if (staggerMs > 0 && index > 0) {
+				await Bun.sleep(staggerMs * index);
+			}
 			startedAt.set(worker.name, Date.now());
 			return runWorker(
 				worker,
