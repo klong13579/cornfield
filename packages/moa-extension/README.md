@@ -151,3 +151,20 @@ workerExecutionMode: in-process
 - **Recursion guard**: `in-process` workers do not set `PI_MOA_SUBAGENT`. The existing subprocess guard (`process.env.PI_MOA_SUBAGENT === "1"`) still applies to the subprocess path only.
 
 Default remains `subprocess` for full backward compatibility. `in-process` is an opt-in experimental path for reduced memory footprint.
+
+## Stage test harness (local / real LLM)
+
+Diagnose a stuck stage without waiting for full `/moa run` session persistence:
+
+```bash
+# Full smoke (interactive Ask)
+bun packages/moa-extension/scripts/stage-test.ts --stage all --task "你的任务…"
+
+# Single stage (reuse prior artifacts)
+bun packages/moa-extension/scripts/stage-test.ts --stage discovery --task "…"
+bun packages/moa-extension/scripts/stage-test.ts --stage rewrite --from tmp/moa-stage/<id>
+
+# Options: --out tmp/moa-stage --rounds N --continue-on-fail
+```
+
+Reads `~/.omp/agent/moa.yml` (and project `.omp/moa.yml`). Not part of default CI.

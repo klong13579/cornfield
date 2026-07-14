@@ -49,11 +49,8 @@ compaction-results/
 changes/
 __pycache__/
 
-# Scratch files
-syntax.jsonl
-out.jsonl
-out.html
-pi-*.html
+# Scratch / local harness output
+tmp/moa-stage/
 
 # Generated files
 packages/coding-agent/src/internal-urls/docs-index.generated.ts

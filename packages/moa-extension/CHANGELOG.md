@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Stage-test harness**: `bun packages/moa-extension/scripts/stage-test.ts` runs Discovery → Ask → Rewrite → Workers → Synthesis as `--stage all` or per-stage with `--from` artifacts under `tmp/moa-stage/`. Shared runners live in `src/stages.ts`; stdin UI in `src/stage-cli-ui.ts`.
+
+### Fixed
+
+- **TUI status bar (design §7.3)**: `ui.setStatus("moa", …)` now shows `Round N/M · asking question i/n · divergent OK · grounded OK · critical BLOCKED` during multi-round ask; cleared when the run finishes.
+- **Ask actions are answer / skip / stop all**: per-round ask uses `ui.select` for the three actions instead of requiring the user to type `STOP`. Typed `STOP` in freeform input remains a fallback.
+
+- **Multi-round: remove discovery/planning phase split** (align with `docs/moa-multi-round-design.md`): every round emits `plan` + `open_questions` under one schema. Round history only injects previous answers and already-asked questions — no more "Round 1 forbid plan / Round 2 forbid questions" which caused obedient workers to fail the quality check.
+- **All-workers quality-drop is fail-loud**: when every worker is `qualityDropped`, synthesis is **not** spawned; result is `ok: false` with `stderr: "all workers quality-failed"` and `convergenceSignal: "quality_failed"`.
+- **Cross-round question convergence**: `previousQuestionKeys` is threaded into `collectOpenQuestions`; repeating the same question no longer burns `maxRounds`.
+- **Discovery `output_schema` actually reaches workers**: after Discovery, `buildPlan(..., outputSchema)` rebuilds worker prompts; rewrite prompt receives `{{output_schema}}`.
+- **`dispatchLog` wired into archive**: `executePlan` returns per-round entries; `/moa run` passes them to `buildMoaArchiveEntries`.
+
 ### Changed
 
 - **Ships inline with compiled `omp`**: `@oh-my-pi/pi-coding-agent` depends on this package and registers the default factory in `sdk.ts`. No project/user `extensions` path is required; remove any leftover `../moa-extension` entries to avoid double registration. Docs and `templates/project-omp-settings.json` updated accordingly.
@@ -37,7 +52,7 @@
   - **Planner signature** (`src/planner.ts`): `buildPlan` now accepts an optional `outputSchema: MoaOutputSchema` (defaults to `DEFAULT_OUTPUT_SCHEMA`). Worker prompts get the schema rendered into the `## Required output schema` section.
 - **PR2 of multi-round design (`docs/moa-multi-round-design.md`)**:
   - **Multi-round executor loop** (`src/executor.ts`): `executePlan` now wraps the workers+synthesis in a bounded loop (default `maxRounds=3` in TUI, **0 in gateway/cron** — hard-forced by `effectiveMaxRounds` when `hasUI=false`, so the gateway path is byte-identical to single-round). Each round: fan out all 3 workers, parse + score via `applyWorkerParsing`, dedup open_questions, ask the user the top-N via `askQuestionsList`, inject answers into the TCO, then re-check convergence. Synthesis still runs once at the end with the **last round's surviving workers** (dropped workers' raw output is preserved in `result.workers[]` and the `moa-archive` chunk for audit).
-  - **Quality heuristic drives the drop** (`DEFAULT_QUALITY_MIN_SCORE=40`): if a worker misses any required schema section, `scoreWorkerOutput` caps the score at 30 and `applyWorkerParsing` marks `qualityDropped=true`. 3-of-3 dropped ⇒ synthesis still runs (with no surviving-worker preamble) so the user sees a clear failure rather than a silent skip. 0-2 surviving ⇒ synthesis gets partial input.
+  - **Quality heuristic drives the drop** (`DEFAULT_QUALITY_MIN_SCORE=40`): if a worker misses any required schema section, `scoreWorkerOutput` caps the score at 30 and `applyWorkerParsing` marks `qualityDropped=true`. 3-of-3 dropped ⇒ **fail loud** (no synthesis spawn; `stderr: "all workers quality-failed"`). 0-2 surviving ⇒ synthesis gets partial input.
   - **Dynamic schema is now read from Discovery** (`src/tco.ts`): `parseDiscoveryOutput` returns `{ tco, outputSchema }`. Falls back to `DEFAULT_OUTPUT_SCHEMA` when Discovery's payload is missing, empty, or malformed. `normalizeOutputSchema` helper is exported for tests.
   - **Per-round ask with STOP sentinel** (`src/ask-user.ts`): new `askQuestionsList()` accepts `AskQuestionsListItem[]` (key, question, type: freeform|choice, context, suggested_default, options, sourceWorkers). User types `STOP` to abort the loop — `result.stopped=true` propagates, the current round's `convergenceSignal` becomes `user_stop`, and synthesis runs with whatever we have. Non-TUI mode short-circuits to all-skipped with `reason: "non_interactive_fallback"`.
   - **Convergence signals** (`pickConvergenceSignal` in `src/executor.ts`): priority order `all_complete > user_stop > max_rounds > no_new_questions > null`. `all_complete` wins over `max_rounds` so a clean single-round TUI run is reported as "converged" rather than "budget exhausted". `no_new_questions` fires when the round's collected questions are empty AND not all complete.
