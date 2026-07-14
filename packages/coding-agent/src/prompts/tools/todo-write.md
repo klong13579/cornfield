@@ -35,7 +35,7 @@ The next pending task is auto-promoted to `in_progress` after each completion.
 - User provides a set of tasks to complete
 - New instructions arrive mid-task — capture before proceeding
 
-<examples>
+## Examples
 # Initial setup (multi-phase)
 `{"ops":[{"op":"init","list":[{"phase":"Foundation","items":["Scaffold crate","Wire workspace"]},{"phase":"Auth","items":["Port credential store","Wire OAuth providers"]},{"phase":"Verification","items":["Run cargo test"]}]}]}`
 # Initial setup (single phase)
@@ -50,4 +50,3 @@ The next pending task is auto-promoted to `in_progress` after each completion.
 `{"ops":[{"op":"drop","task":"Run cargo test"}]}`
 # Append tasks to a phase
 `{"ops":[{"op":"append","phase":"Auth","items":["Handle retries","Run tests"]}]}`
-</examples>

@@ -665,6 +665,24 @@ function coerceArgsFromErrors(
 			}
 		}
 
+		// Object-to-array coercion: when the schema expects an array and the LLM
+		// sent an object (e.g. items: { task1: "desc1", task2: "desc2" } instead of
+		// items: ["desc1", "desc2"]), extract the values into an array.
+		if (
+			expectedTypes.includes("array") &&
+			typeof currentValue === "object" &&
+			currentValue !== null &&
+			!Array.isArray(currentValue)
+		) {
+			const values = Object.values(currentValue as Record<string, unknown>);
+			if (!changed) {
+				nextArgs = structuredCloneJSON(nextArgs);
+				changed = true;
+			}
+			nextArgs = setValueAtPointer(nextArgs, instancePath, values);
+			continue;
+		}
+
 		if (typeof currentValue !== "string") continue;
 
 		// Try to parse the string as JSON
@@ -677,6 +695,36 @@ function coerceArgsFromErrors(
 			changed = true;
 		}
 		nextArgs = setValueAtPointer(nextArgs, instancePath, result.value);
+	}
+
+	// $‑prefixed key → required property: when the LLM sends an object
+	// with a `$`-prefixed key (like `$text`) instead of the schema's
+	// required property (like `op`), rename the key. This catches the
+	// common LLM error of using intent-field naming conventions for
+	// actual tool arguments.
+	for (const error of errors) {
+		if (error.keyword !== "required") continue;
+
+		const instancePath = error.instancePath ?? "";
+		const missingProperty = (error.params as { missingProperty?: string })?.missingProperty;
+		if (!missingProperty) continue;
+
+		const currentValue = getValueAtPointer(nextArgs, instancePath);
+		if (typeof currentValue !== "object" || currentValue === null || Array.isArray(currentValue)) continue;
+
+		const obj = currentValue as Record<string, unknown>;
+		const dollarKey = Object.keys(obj).find(k => k.startsWith("$"));
+		if (!dollarKey) continue;
+
+		if (!changed) {
+			nextArgs = structuredCloneJSON(nextArgs);
+			changed = true;
+		}
+
+		const repaired = { ...(getValueAtPointer(nextArgs, instancePath) as Record<string, unknown>) };
+		repaired[missingProperty] = repaired[dollarKey];
+		delete repaired[dollarKey];
+		nextArgs = setValueAtPointer(nextArgs, instancePath, repaired);
 	}
 
 	return { value: changed ? nextArgs : args, changed };

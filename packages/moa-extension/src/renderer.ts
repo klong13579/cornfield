@@ -1,6 +1,14 @@
 import type { MessageRenderer } from "@oh-my-pi/pi-coding-agent";
-import { Box, Markdown, Spacer, Text, type Component, type MarkdownTheme } from "@oh-my-pi/pi-tui";
-import { replaceTabs, truncateToWidth } from "@oh-my-pi/pi-tui";
+import {
+	Box,
+	type Component,
+	Markdown,
+	type MarkdownTheme,
+	replaceTabs,
+	Spacer,
+	Text,
+	truncateToWidth,
+} from "@oh-my-pi/pi-tui";
 import type { MoaTraceDetails } from "./types";
 
 function buildCollapsedLine(details: MoaTraceDetails | undefined): string {

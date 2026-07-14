@@ -36,7 +36,9 @@ function isMoaResultMessage(message: AgentMessage): message is MoaResultMessage 
 function extractMessageText(message: MoaResultMessage): string {
 	if (typeof message.content === "string") return message.content;
 	return message.content
-		.filter((block): block is { type: "text"; text: string } => block.type === "text" && typeof block.text === "string")
+		.filter(
+			(block): block is { type: "text"; text: string } => block.type === "text" && typeof block.text === "string",
+		)
 		.map(block => block.text)
 		.join("")
 		.trim();
@@ -61,21 +63,34 @@ async function waitForMoaResult(client: RpcClient, prompt: string, timeoutMs: nu
 	throw new Error(`Timed out waiting for moa-result after ${timeoutMs}ms`);
 }
 
-
 function buildMoaSettingsEnv(): string {
 	return JSON.stringify({
 		workers: [
 			{ name: "divergent", role: "Generate distinct candidate routes", model: heterogeneousNarwalModels[0] },
-			{ name: "grounded", role: "Evaluate constraints and implementation realism", model: heterogeneousNarwalModels[1] },
-			{ name: "critical", role: "Attack weaknesses, edge cases, and failure modes", model: heterogeneousNarwalModels[2] },
+			{
+				name: "grounded",
+				role: "Evaluate constraints and implementation realism",
+				model: heterogeneousNarwalModels[1],
+			},
+			{
+				name: "critical",
+				role: "Attack weaknesses, edge cases, and failure modes",
+				model: heterogeneousNarwalModels[2],
+			},
 		],
 		synthesisModel: heterogeneousNarwalSynthesisModel,
 	});
 }
 
 async function seedIsolatedAgentDir(agentDir: string): Promise<void> {
-	await Bun.write(path.join(agentDir, "config.yml"), await Bun.file(path.join(os.homedir(), ".omp", "agent", "config.yml")).text());
-	await Bun.write(path.join(agentDir, "models.yml"), await Bun.file(path.join(os.homedir(), ".omp", "agent", "models.yml")).text());
+	await Bun.write(
+		path.join(agentDir, "config.yml"),
+		await Bun.file(path.join(os.homedir(), ".omp", "agent", "config.yml")).text(),
+	);
+	await Bun.write(
+		path.join(agentDir, "models.yml"),
+		await Bun.file(path.join(os.homedir(), ".omp", "agent", "models.yml")).text(),
+	);
 }
 
 describe.skipIf(!narwalApiKey)("moa extension e2e", () => {
@@ -104,30 +119,26 @@ describe.skipIf(!narwalApiKey)("moa extension e2e", () => {
 		client.stop();
 	});
 
-	test(
-		"runs /moa through real rpc session and preserves heterogeneous worker models",
-		async () => {
-			await client.start();
+	test("runs /moa through real rpc session and preserves heterogeneous worker models", async () => {
+		await client.start();
 
-			const task = [
-				"Need a concise planning recommendation.",
-				"Choose between launching Feature A this month or Feature B next month.",
-				"No tools are required; reason from generic product tradeoffs only.",
-			].join(" ");
+		const task = [
+			"Need a concise planning recommendation.",
+			"Choose between launching Feature A this month or Feature B next month.",
+			"No tools are required; reason from generic product tradeoffs only.",
+		].join(" ");
 
-			const moaResult = await waitForMoaResult(client, `/moa run ${task}`, 240_000);
-			const resultText = extractMessageText(moaResult);
-			const details = parseMoaDetails(moaResult.details);
+		const moaResult = await waitForMoaResult(client, `/moa run ${task}`, 240_000);
+		const resultText = extractMessageText(moaResult);
+		const details = parseMoaDetails(moaResult.details);
 
-			expect(resultText).toContain("## MOA Run");
-			expect(resultText).toContain("### synthesis");
-			expect(details.task).toBe(task);
-			expect(details.workerCount).toBe(3);
-			expect(details.workers).toHaveLength(3);
-			expect(details.workers.map(worker => worker.model)).toEqual([...heterogeneousNarwalModels]);
-			expect(details.summary).toContain("## MOA Run");
-
-		},
-		300_000,
-	);
+		expect(resultText).toContain("∪ moa transcript:");
+		expect(resultText).toContain("## Worker conclusions");
+		expect(resultText).toContain("### synthesis");
+		expect(details.task).toBe(task);
+		expect(details.workerCount).toBe(3);
+		expect(details.workers).toHaveLength(3);
+		expect(details.workers.map(worker => worker.model)).toEqual([...heterogeneousNarwalModels]);
+		expect(details.summary).toContain("## MOA Run");
+	}, 300_000);
 });

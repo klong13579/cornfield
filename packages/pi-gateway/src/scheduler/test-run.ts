@@ -194,7 +194,8 @@ export interface TestRunStarted {
 	kind: "started";
 	name: string;
 	inMs: number;
-	timeoutMs: number;
+	testTimeoutMs: number;
+	wasClamped: boolean;
 	expiresAt: number;
 	startedAt: number;
 }
@@ -310,7 +311,8 @@ export async function runTestRun(opts: RunTestRunOptions): Promise<TestRunResult
 	// blocking forever.
 	const cappedInMs = Math.min(MAX_IN_MS, Math.max(MIN_IN_MS, inMs));
 	const cappedTimeoutMs = Math.min(MAX_TIMEOUT_MS, Math.max(MIN_TIMEOUT_MS, timeoutMs));
-	if (cappedInMs !== inMs || cappedTimeoutMs !== timeoutMs) {
+	const wasClamped = cappedInMs !== inMs || cappedTimeoutMs !== timeoutMs;
+if (wasClamped) {
 		logger.debug("[test-run] clamping options", {
 			requested: { inMs, timeoutMs },
 			applied: { inMs: cappedInMs, timeoutMs: cappedTimeoutMs },
@@ -543,13 +545,15 @@ export async function runTestRun(opts: RunTestRunOptions): Promise<TestRunResult
 			taskName: task.name,
 			inMs: cappedInMs,
 			timeoutMs: cappedTimeoutMs,
+			wasClamped,
 			expiresAt: markerExpiresAt,
 		});
 		return {
 			kind: "started",
 			name: task.name,
 			inMs: cappedInMs,
-			timeoutMs: cappedTimeoutMs,
+			testTimeoutMs: cappedTimeoutMs,
+			wasClamped,
 			expiresAt: markerExpiresAt,
 			startedAt,
 		};

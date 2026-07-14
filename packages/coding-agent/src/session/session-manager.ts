@@ -2270,13 +2270,19 @@ export class SessionManager {
 		if (!this.persist || !this.#sessionFile) return;
 		if (this.#persistError) throw this.#persistError;
 
-		// Normally we wait for the first assistant message before persisting to avoid
+		// Normally we wait for the first user-visible content before persisting to avoid
 		// creating files for sessions that never produce output. Once ensureOnDisk() has
 		// been called, the session is already on disk and every entry must be flushed.
+		// A display: true custom_message is user-visible (it renders in the TUI), so it
+		// counts the same as an assistant message for the purpose of starting persistence.
 		if (!this.#ensuredOnDisk) {
-			const hasAssistant = this.#fileEntries.some(e => e.type === "message" && e.message.role === "assistant");
-			if (!hasAssistant) {
-				// Mark as not flushed so when assistant arrives, all entries get written.
+			const hasVisibleContent = this.#fileEntries.some(e => {
+				if (e.type === "message" && e.message.role === "assistant") return true;
+				if (e.type === "custom_message" && e.display === true) return true;
+				return false;
+			});
+			if (!hasVisibleContent) {
+				// Mark as not flushed so when visible content arrives, all entries get written.
 				this.#flushed = false;
 				return;
 			}
