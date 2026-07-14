@@ -2,7 +2,7 @@
 
 **作者**: Pi staff engineer
 **日期**: 2026-07-14
-**Status**: 设计已锁定，待实施
+**Status**: 设计已锁定，PR1/PR2 已实施；2026-07-15 回退 phase 分裂并完成合同修复（见 §17）
 **前置文档**: [`docs/moa-input-fulfillment.md`](./moa-input-fulfillment.md) — 单轮 TCO 流水线已上线，本文档是其上的 multi-round 增强
 **关联**: `packages/moa-extension/`
 
@@ -196,8 +196,8 @@ Re-spawn worker 的 prompt 包含：
 
 ### 7.3 TUI UX
 
-- 状态条: `Round 2/3 · asking question 3/5 · divergent OK · grounded OK · critical BLOCKED`
-- Ask 阶段三个按钮：`answer` / `skip` / `stop all`
+- 状态条: `Round 2/3 · asking question 3/5 · divergent OK · grounded OK · critical BLOCKED`（经 `ui.setStatus("moa", …)`）
+- Ask 阶段三个选项（`ui.select`）: `answer` / `skip` / `stop all`；freeform 输入里键入 `STOP` 仍作为 fallback
 - 30s 单题 timeout（沿用 `askTimeoutMs`）
 - 全 stop 后：synthesis 立刻跑，用已有 worker 输出 + 答案 + assumptions
 
@@ -395,5 +395,12 @@ interface MoaSettings {
 - [x] 数据结构 / Settings 扩展定义完成
 - [x] PR1 / PR2 实施计划完成
 - [x] 失败模式 / 决策记录 / 参考完整
-- [ ] PR1 实施（待用户启动）
-- [ ] PR2 实施（待 PR1 验收）
+- [x] PR1 实施（types / parser / prompts / defaultValue / dispatchLog types）
+- [x] PR2 实施（multi-round executor + quality + schema read + askQuestionsList）
+- [x] 2026-07-15：回退未文档化的 discovery/planning phase 分裂，恢复「每轮 plan+questions」；修复 fail-loud / previousQuestions / schema 注入 / dispatchLog 生产接线
+
+---
+
+## 17. 实施偏离修正（2026-07-15）
+
+曾短暂引入 Round1=只问 / Round2+=只写 的 phase 注入，与本文 §4 冲突，且与 `plan` required 的 quality heuristic 自相矛盾。已回退：每轮统一 schema；跨轮仅注入 previous answers + already-asked questions（§7.2）。

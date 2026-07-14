@@ -42,6 +42,7 @@ async function handleRun(args: string, ctx: ExtensionCommandContext, pi: Extensi
 		authStorage,
 		modelRegistry: ctx.modelRegistry,
 		settings: pi.pi.settings,
+		moaSettings: settings,
 		ui: ctx.ui,
 		hasUI: ctx.hasUI,
 	});
@@ -55,6 +56,7 @@ async function handleRun(args: string, ctx: ExtensionCommandContext, pi: Extensi
 		discovery: result.discovery,
 		rewrite: result.rewrite,
 		tco: result.tco,
+		dispatchLog: result.dispatchLog,
 	});
 
 	const handoff = buildMoaHandoff({
@@ -118,12 +120,19 @@ async function handleRun(args: string, ctx: ExtensionCommandContext, pi: Extensi
 async function handleStatus(ctx: ExtensionCommandContext): Promise<void> {
 	const configOverrides = (await loadMoaConfigOverrides(ctx.cwd)).overrides;
 	const settings = resolveSettings(configOverrides);
+	const modeNote =
+		settings.workerExecutionMode === "in-process"
+			? "(in-process: no extensions/MCP/LSP, read-only tools only)"
+			: "";
 	ctx.ui.notify(
 		[
+			`execution mode: ${settings.workerExecutionMode} ${modeNote}`,
 			`workers: ${settings.workerCount}`,
 			`discovery: ${settings.discoveryEnabled ? "on" : "off"}`,
 			`rewrite: ${settings.rewriteEnabled ? "on" : "off"}`,
 			`ask user: ${settings.askEnabled ? "on" : "off"} (max ${settings.maxMissingInputs})`,
+			`max rounds: ${settings.maxRounds} (per-round ask ≤ ${settings.maxQuestionsPerRound})`,
+			`quality min score: ${settings.qualityMinScore}`,
 			`planner tools: ${settings.plannerToolMode}`,
 			`archive chunk bytes: 48_000`,
 		].join("\n"),

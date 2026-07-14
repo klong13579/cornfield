@@ -212,31 +212,36 @@ describe("askMissingInputs", () => {
 // askQuestionsList — per-round ask (PR2)
 // ============================================================================
 
-import { type AskQuestionsListItem, askQuestionsList } from "../src/ask-user";
+import {
+	ASK_ACTION_ANSWER,
+	ASK_ACTION_SKIP,
+	ASK_ACTION_STOP,
+	type AskQuestionsListItem,
+	askQuestionsList,
+} from "../src/ask-user";
 
 function makeItem(key: string, question: string, sourceWorkers: string[] = ["divergent"]): AskQuestionsListItem {
 	return { key, question, type: "freeform", sourceWorkers };
 }
 
-function makeListUI(answers: Array<string | undefined>) {
-	const calls: string[] = [];
+/** Queue values for select() then input() in call order. */
+function makeListUI(selectAnswers: Array<string | undefined>, inputAnswers: Array<string | undefined> = []) {
+	const selectQ = [...selectAnswers];
+	const inputQ = [...inputAnswers];
 	return {
-		calls,
-		select: vi.fn(async (msg: string) => {
-			calls.push(msg);
-			return answers.shift();
-		}),
-		input: vi.fn(async (msg: string) => {
-			calls.push(msg);
-			return answers.shift();
-		}),
+		select: vi.fn(async () => selectQ.shift()),
+		input: vi.fn(async () => inputQ.shift()),
 		notify: vi.fn(),
+		setStatus: vi.fn(),
 	};
 }
 
 describe("askQuestionsList", () => {
-	it("answers, skips, and stops the loop on STOP", async () => {
-		const ui = makeListUI(["answer to first", "", "STOP"]);
+	it("uses answer / skip / stop all actions (design §7.3)", async () => {
+		const ui = makeListUI(
+			[ASK_ACTION_ANSWER, ASK_ACTION_SKIP, ASK_ACTION_STOP],
+			["answer to first"],
+		);
 		const items: AskQuestionsListItem[] = [
 			makeItem("divergent.0", "first?"),
 			makeItem("divergent.1", "second?"),
@@ -245,8 +250,19 @@ describe("askQuestionsList", () => {
 		const result = await askQuestionsList(items, { ui: ui as never, hasUI: true });
 		expect(result.stopped).toBe(true);
 		expect(result.answered.map(a => a.key)).toEqual(["divergent.0"]);
+		expect(result.answered[0]?.answer).toBe("answer to first");
 		expect(result.skipped.map(s => s.key)).toEqual(["divergent.1", "divergent.2"]);
 		expect(result.skipped[1]?.reason).toBe("user_stopped");
+		expect(ui.select).toHaveBeenCalledTimes(3);
+		expect(ui.input).toHaveBeenCalledTimes(1);
+	});
+
+	it("treats typed STOP in freeform input as stop all (fallback)", async () => {
+		const ui = makeListUI([ASK_ACTION_ANSWER], ["STOP"]);
+		const result = await askQuestionsList([makeItem("a", "q?")], { ui: ui as never, hasUI: true });
+		expect(result.stopped).toBe(true);
+		expect(result.answered).toHaveLength(0);
+		expect(result.skipped[0]?.reason).toBe("user_stopped");
 	});
 
 	it("non-interactive fallback returns all skipped, no stop", async () => {
@@ -258,14 +274,27 @@ describe("askQuestionsList", () => {
 		expect(result.skipped.every(s => s.reason === "non_interactive_fallback")).toBe(true);
 	});
 
-	it("asks select when type=choice", async () => {
-		const ui = makeListUI(["choice A", ""]);
+	it("asks select for choice options after answer action", async () => {
+		const ui = makeListUI([ASK_ACTION_ANSWER, "choice A"]);
 		const items: AskQuestionsListItem[] = [
 			{ key: "x", question: "pick one", type: "choice", options: ["choice A", "choice B"], sourceWorkers: ["w"] },
 		];
 		const result = await askQuestionsList(items, { ui: ui as never, hasUI: true });
 		expect(result.answered[0]?.answer).toBe("choice A");
 		expect(ui.input).not.toHaveBeenCalled();
+		expect(ui.select).toHaveBeenCalledTimes(2);
+	});
+
+	it("calls onProgress for each question", async () => {
+		const ui = makeListUI([ASK_ACTION_SKIP, ASK_ACTION_SKIP]);
+		const progress: Array<{ index: number; total: number }> = [];
+		await askQuestionsList([makeItem("a", "x"), makeItem("b", "y")], { ui: ui as never, hasUI: true }, {
+			onProgress: info => progress.push(info),
+		});
+		expect(progress).toEqual([
+			{ index: 1, total: 2 },
+			{ index: 2, total: 2 },
+		]);
 	});
 
 	it("empty items returns zero counts and no stop", async () => {

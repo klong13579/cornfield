@@ -77,7 +77,7 @@ export interface TaskContextObject {
 export const TCO_MAX_MISSING_INPUTS_DEFAULT = 5;
 export const TCO_ASK_TIMEOUT_MS_DEFAULT = 30_000;
 export const TCO_DISCOVERY_TIMEOUT_MS_DEFAULT = 60_000;
-export const TCO_REWRITE_TIMEOUT_MS_DEFAULT = 30_000;
+export const TCO_REWRITE_TIMEOUT_MS_DEFAULT = 120_000;
 
 // ----------------------------------------------------------------------------
 // Discovery output parsing

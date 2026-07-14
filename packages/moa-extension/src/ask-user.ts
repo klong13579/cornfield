@@ -178,12 +178,19 @@ function buildAssumption(m: TcoMissingInput, reason: TcoAssumption["reason"], no
 //
 // Distinct from `askMissingInputs` (pre-ask, bounded TCO.missing_inputs):
 //   - Items come from worker output's open_questions, not from the TCO.
-//   - User can hit "STOP" (typed into the input) to abort the multi-round
-//     loop immediately — synthesis then runs with what we already have.
+//   - Per design §7.3, each question starts with a three-way select:
+//     `answer` / `skip` / `stop all`. Typing STOP in a freeform input is
+//     still accepted as a fallback.
 //   - Caller passes a stable `key` (typically `<round>.<worker>.<idx>`) so
 //     answered / skipped results are traceable back to the source.
 //   - Non-TUI mode short-circuits to "all skipped, non_interactive_fallback".
 // ----------------------------------------------------------------------------
+
+export const ASK_ACTION_ANSWER = "answer";
+export const ASK_ACTION_SKIP = "skip";
+export const ASK_ACTION_STOP = "stop all";
+
+export const ASK_ACTION_OPTIONS = [ASK_ACTION_ANSWER, ASK_ACTION_SKIP, ASK_ACTION_STOP] as const;
 
 export interface AskQuestionsListItem {
 	/** Stable id used to track answer / skip back to the source. */
@@ -222,12 +229,33 @@ export interface AskQuestionsListResult {
 	timedOut: number;
 }
 
+export interface AskQuestionsListOptions extends AskUserOptions {
+	/** Called before each question so the orchestrator can update the status bar. */
+	onProgress?: (info: { index: number; total: number }) => void;
+}
+
 const STOP_SENTINEL = "STOP";
+
+function isStopAction(value: string | undefined): boolean {
+	if (!value) return false;
+	const trimmed = value.trim().toLowerCase();
+	return trimmed === ASK_ACTION_STOP || trimmed.toUpperCase() === STOP_SENTINEL;
+}
+
+function isSkipAction(value: string | undefined): boolean {
+	if (value === undefined) return true;
+	return value.trim().toLowerCase() === ASK_ACTION_SKIP;
+}
+
+function isAnswerAction(value: string | undefined): boolean {
+	if (!value) return false;
+	return value.trim().toLowerCase() === ASK_ACTION_ANSWER;
+}
 
 export async function askQuestionsList(
 	items: AskQuestionsListItem[],
 	ctx: AskUserContext,
-	options: AskUserOptions = {},
+	options: AskQuestionsListOptions = {},
 ): Promise<AskQuestionsListResult> {
 	const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 	const enabled = options.enabled ?? true;
@@ -250,16 +278,16 @@ export async function askQuestionsList(
 	const skipped: AskQuestionsListSkipped[] = [];
 	let stopped = false;
 	let timedOut = 0;
+	const total = items.length;
 
-	for (const m of items) {
-		const header = m.context
-			? `${m.question}\n(${m.context})\n[answer, leave empty to skip, type ${STOP_SENTINEL} to abort all]`
-			: `${m.question}\n[answer, leave empty to skip, type ${STOP_SENTINEL} to abort all]`;
+	for (let i = 0; i < items.length; i++) {
+		const m = items[i]!;
+		options.onProgress?.({ index: i + 1, total });
 
+		const header = m.context ? `${m.question}\n(${m.context})` : m.question;
 		const result = await withTimeout(askQuestionsListOne(m, header, ctx), timeoutMs, m);
 		if (result.kind === "stopped") {
 			stopped = true;
-			// Push the current item as skipped then bail.
 			skipped.push({
 				key: m.key,
 				question: m.question,
@@ -307,20 +335,27 @@ async function askQuestionsListOne(
 	header: string,
 	ctx: AskUserContext,
 ): Promise<AskQuestionsListOneResult> {
+	// Step 1: three-way action select (design §7.3 answer / skip / stop all).
+	const action = await ctx.ui.select(header, [...ASK_ACTION_OPTIONS]);
+	if (isStopAction(action)) return { kind: "stopped" };
+	if (isSkipAction(action)) return { kind: "skipped" };
+	if (!isAnswerAction(action)) return { kind: "skipped" };
+
+	// Step 2: collect the actual answer.
 	if (m.type === "choice") {
 		const options = m.options ?? [];
 		if (options.length === 0) return { kind: "skipped" };
-		const ans = await ctx.ui.select(header, options);
+		const ans = await ctx.ui.select(`${header}\n(pick one)`, options);
 		if (ans === undefined) return { kind: "skipped" };
-		if (ans.trim().toUpperCase() === STOP_SENTINEL) return { kind: "stopped" };
+		if (isStopAction(ans)) return { kind: "stopped" };
 		return { kind: "answered", value: ans };
 	}
-	// freeform
+
 	const placeholder = m.suggested_default ?? "your answer";
-	const ans = await ctx.ui.input(header, placeholder);
+	const ans = await ctx.ui.input(`${header}\n(type answer; empty = skip; ${STOP_SENTINEL} = stop all)`, placeholder);
 	if (ans === undefined) return { kind: "skipped" };
 	const trimmed = ans.trim();
 	if (trimmed === "") return { kind: "skipped" };
-	if (trimmed.toUpperCase() === STOP_SENTINEL) return { kind: "stopped" };
+	if (isStopAction(trimmed)) return { kind: "stopped" };
 	return { kind: "answered", value: trimmed };
 }

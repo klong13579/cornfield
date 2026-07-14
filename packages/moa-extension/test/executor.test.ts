@@ -105,7 +105,7 @@ describe("moa executePlan", () => {
 		expect(firstCall?.cwd).toBe("/tmp/moa");
 		expect(firstCall?.model).toBe("provider/divergent");
 		expect(firstCall?.thinkingLevel).toBe("high");
-		expect(firstCall?.tools).toEqual(["read", "search", "find", "web_search"]);
+		expect(firstCall?.tools).toEqual(["read", "search", "find", "web_search", "ast_grep"]);
 		expect(firstCall?.task).toBe("Design the MOA panel");
 		expect(firstCall?.systemPrompt).toContain("divergent");
 
@@ -116,6 +116,38 @@ describe("moa executePlan", () => {
 		expect(lastCall?.tools).toBe("none");
 		expect(lastCall?.systemPrompt).toContain("## divergent");
 		expect(lastCall?.systemPrompt).toContain("provider/divergent");
+	});
+
+	it("forwards settings.timeoutMs to worker and synthesis engine.execute", async () => {
+		const spy = mockSpawnMoaWorker([
+			input => makeWorkerOutput({ output: conformingOutput(input.model ?? "w1"), model: input.model }),
+			input => makeWorkerOutput({ output: conformingOutput(input.model ?? "w2"), model: input.model }),
+			input => makeWorkerOutput({ output: conformingOutput(input.model ?? "w3"), model: input.model }),
+			input => makeWorkerOutput({ output: "final recommendation", model: input.model }),
+		]);
+		const moaSettings = resolveSettings({
+			discoveryEnabled: false,
+			rewriteEnabled: false,
+			timeoutMs: 123_456,
+			workers: [
+				{ name: "divergent", role: "Generate options", model: "provider/divergent" },
+				{ name: "grounded", role: "Check realism", model: "provider/grounded" },
+				{ name: "critical", role: "Find failure modes", model: "provider/critical" },
+			],
+			synthesisModel: "provider/synthesis",
+		});
+		const plan = buildPlan("timeout wiring", moaSettings);
+		await executePlan(plan, {
+			cwd: "/tmp/moa",
+			authStorage: {} as AuthStorage,
+			modelRegistry: { refresh: async () => {} } as unknown as ModelRegistry,
+			settings: Settings.isolated({}, { cwd: "/tmp/moa" }),
+			moaSettings,
+		});
+		expect(spy).toHaveBeenCalledTimes(4);
+		for (const call of spy.mock.calls) {
+			expect(call[0]?.timeoutMs).toBe(123_456);
+		}
 	});
 
 	it("keeps synthesis running when a worker throws", async () => {
@@ -155,7 +187,7 @@ describe("moa executePlan", () => {
 		const envSeen: Array<Record<string, string> | undefined> = [];
 		const spy = vi.spyOn(subprocess, "spawnMoaWorker").mockImplementation(async input => {
 			envSeen.push(input.env);
-			return makeWorkerOutput({ output: "ok" });
+			return makeWorkerOutput({ output: conformingOutput(input.model ?? "w"), model: input.model });
 		});
 		// Override the env to record what's set; spawnMoaWorker will merge on top of process.env.
 		const originalSpawn = subprocess.spawnMoaWorker;
@@ -443,6 +475,8 @@ describe("moa executePlan — PR2 multi-round", () => {
 			select: vi.fn(async () => undefined as string | undefined),
 			input: vi.fn(async () => undefined as string | undefined),
 			notify: vi.fn(),
+			setStatus: vi.fn(),
+			setWorkingMessage: vi.fn(),
 		};
 	}
 
@@ -469,9 +503,9 @@ describe("moa executePlan — PR2 multi-round", () => {
 		expect(result.askRoundSummaries).toEqual([]);
 	});
 
-	it("multi-round with TUI: re-spawns all 3 workers each round until user STOP", async () => {
-		// Every worker surfaces 1 open question. User keeps skipping with empty input.
-		// Loop should hit maxRounds=3 and stop with `max_rounds` signal.
+	it("multi-round with TUI: same open_questions across rounds → no_new_questions convergence", async () => {
+		// Same question every round. After round 1 ask, previousQuestionKeys
+		// filters it out → round 2 converges with no_new_questions.
 		const openQuestions = `## open_questions\n- what's the budget?`;
 		const workerOutput = (label: string) =>
 			[
@@ -486,17 +520,13 @@ describe("moa executePlan — PR2 multi-round", () => {
 			input => makeWorkerOutput({ output: workerOutput(input.model ?? "w1"), model: input.model }),
 			input => makeWorkerOutput({ output: workerOutput(input.model ?? "w2"), model: input.model }),
 			input => makeWorkerOutput({ output: workerOutput(input.model ?? "w3"), model: input.model }),
-			// Round 2
-			input => makeWorkerOutput({ output: workerOutput(input.model ?? "w1"), model: input.model }),
-			input => makeWorkerOutput({ output: workerOutput(input.model ?? "w2"), model: input.model }),
-			input => makeWorkerOutput({ output: workerOutput(input.model ?? "w3"), model: input.model }),
-			// Round 3
+			// Round 2 — same questions (filtered by previousQuestionKeys)
 			input => makeWorkerOutput({ output: workerOutput(input.model ?? "w1"), model: input.model }),
 			input => makeWorkerOutput({ output: workerOutput(input.model ?? "w2"), model: input.model }),
 			input => makeWorkerOutput({ output: workerOutput(input.model ?? "w3"), model: input.model }),
 			input => makeWorkerOutput({ output: "synth ok", model: input.model }),
 		]);
-		const plan = buildPlan("Multi-round test", buildThreeWorkerSettings());
+		const plan = buildPlan("Multi-round same-Q test", buildThreeWorkerSettings());
 		const result = await executePlan(plan, {
 			cwd: "/tmp/moa",
 			authStorage: {} as AuthStorage,
@@ -506,11 +536,50 @@ describe("moa executePlan — PR2 multi-round", () => {
 			ui: noopUI() as never,
 			hasUI: true,
 		});
-		// 3 rounds × 3 workers + 1 synthesis = 10 spawns
+		// 2 rounds × 3 workers + 1 synthesis = 7
+		expect(spy).toHaveBeenCalledTimes(7);
+		expect(result.rounds).toHaveLength(2);
+		expect(result.rounds?.[1]?.convergenceSignal).toBe("no_new_questions");
+		expect(result.askRoundSummaries).toHaveLength(1);
+	});
+
+	it("multi-round with TUI: distinct questions each round until maxRounds", async () => {
+		const workerOutput = (label: string, question: string) =>
+			[
+				`## plan`,
+				`${label} plan with detail. `.repeat(20),
+				``,
+				`## open_questions`,
+				`- ${question}`,
+				`## assumptions`,
+				`- assumed default`,
+			].join("\n");
+		let call = 0;
+		const spy = vi.spyOn(subprocess, "spawnMoaWorker").mockImplementation(async input => {
+			const idx = call++;
+			// Rounds 1/2/3 → distinct questions so previousQuestions never filters all.
+			const question =
+				idx < 3 ? "what's the budget?" : idx < 6 ? "what's the timeline?" : "what's the team size?";
+			if (idx < 9) {
+				return makeWorkerOutput({ output: workerOutput(input.model ?? `w${idx}`, question), model: input.model });
+			}
+			return makeWorkerOutput({ output: "synth ok", model: input.model });
+		});
+		const plan = buildPlan("Multi-round max test", buildThreeWorkerSettings());
+		const result = await executePlan(plan, {
+			cwd: "/tmp/moa",
+			authStorage: {} as AuthStorage,
+			modelRegistry: { refresh: async () => {} } as unknown as ModelRegistry,
+			settings: Settings.isolated({}, { cwd: "/tmp/moa" }),
+			moaSettings: buildThreeWorkerSettings(),
+			ui: noopUI() as never,
+			hasUI: true,
+		});
+		// 3 rounds × 3 workers + 1 synthesis = 10
 		expect(spy).toHaveBeenCalledTimes(10);
 		expect(result.rounds).toHaveLength(3);
 		expect(result.rounds?.[2]?.convergenceSignal).toBe("max_rounds");
-		expect(result.askRoundSummaries).toHaveLength(2); // rounds 1 and 2 each ask
+		expect(result.askRoundSummaries).toHaveLength(2);
 	});
 
 	it("multi-round converges early when workers drop open_questions", async () => {
@@ -562,7 +631,7 @@ describe("moa executePlan — PR2 multi-round", () => {
 		expect(result.rounds?.[1]?.convergenceSignal).toBe("all_complete");
 	});
 
-	it("user STOP sentinel ends the loop with user_stop signal", async () => {
+	it("user stop-all action ends the loop with user_stop signal", async () => {
 		const workerOutput = (label: string) =>
 			[
 				`## plan`,
@@ -573,8 +642,6 @@ describe("moa executePlan — PR2 multi-round", () => {
 				`## assumptions`,
 				`- assumed default`,
 			].join("\n");
-		// Round 1: 3 workers produce output. Round 1 ask: user types "STOP".
-		// Loop ends with user_stop.
 		const spy = mockSpawnMoaWorker([
 			input => makeWorkerOutput({ output: workerOutput(input.model ?? "w1"), model: input.model }),
 			input => makeWorkerOutput({ output: workerOutput(input.model ?? "w2"), model: input.model }),
@@ -582,7 +649,7 @@ describe("moa executePlan — PR2 multi-round", () => {
 			input => makeWorkerOutput({ output: "synth ok", model: input.model }),
 		]);
 		const ui = noopUI();
-		ui.input.mockResolvedValueOnce("STOP");
+		ui.select.mockResolvedValueOnce("stop all");
 		const plan = buildPlan("Stop test", buildThreeWorkerSettings());
 		const result = await executePlan(plan, {
 			cwd: "/tmp/moa",
@@ -599,13 +666,49 @@ describe("moa executePlan — PR2 multi-round", () => {
 		expect(result.rounds?.[0]?.userStopped).toBe(true);
 	});
 
-	it("all 3 workers quality-dropped → synthesis still runs (no surviving worker preamble)", async () => {
-		// Workers output minimal non-schema content. qualityMinScore=40 ⇒ all dropped.
+	it("updates setStatus with Round · asking · worker OK/BLOCKED during ask", async () => {
+		const workerOutput = (label: string) =>
+			[
+				`## plan`,
+				`${label} plan with detail. `.repeat(20),
+				``,
+				`## open_questions`,
+				`- what's the budget?`,
+				`## assumptions`,
+				`- assumed default`,
+			].join("\n");
 		mockSpawnMoaWorker([
+			input => makeWorkerOutput({ output: workerOutput(input.model ?? "w1"), model: input.model }),
+			input => makeWorkerOutput({ output: workerOutput(input.model ?? "w2"), model: input.model }),
+			input => makeWorkerOutput({ output: workerOutput(input.model ?? "w3"), model: input.model }),
+			input => makeWorkerOutput({ output: workerOutput(input.model ?? "w1"), model: input.model }),
+			input => makeWorkerOutput({ output: workerOutput(input.model ?? "w2"), model: input.model }),
+			input => makeWorkerOutput({ output: workerOutput(input.model ?? "w3"), model: input.model }),
+			input => makeWorkerOutput({ output: "synth ok", model: input.model }),
+		]);
+		const ui = noopUI();
+		ui.select.mockResolvedValue("skip");
+		await executePlan(buildPlan("status bar", buildThreeWorkerSettings()), {
+			cwd: "/tmp/moa",
+			authStorage: {} as AuthStorage,
+			modelRegistry: { refresh: async () => {} } as unknown as ModelRegistry,
+			settings: Settings.isolated({}, { cwd: "/tmp/moa" }),
+			moaSettings: buildThreeWorkerSettings(),
+			ui: ui as never,
+			hasUI: true,
+		});
+		const statusCalls = ui.setStatus.mock.calls.map(c => c[1] as string | undefined).filter(Boolean) as string[];
+		expect(statusCalls.some(s => s.includes("asking question") && s.includes("divergent OK"))).toBe(true);
+		// Cleared at end
+		expect(ui.setStatus.mock.calls.at(-1)?.[1]).toBeUndefined();
+	});
+
+	it("all 3 workers quality-dropped → fail loud, no synthesis spawn", async () => {
+		const spy = mockSpawnMoaWorker([
 			input => makeWorkerOutput({ output: "no schema", model: input.model }),
 			input => makeWorkerOutput({ output: "no schema", model: input.model }),
 			input => makeWorkerOutput({ output: "no schema", model: input.model }),
-			input => makeWorkerOutput({ output: "synth with no survivors", model: input.model }),
+			input => makeWorkerOutput({ output: "should not run", model: input.model }),
 		]);
 		const plan = buildPlan("All dropped test", buildThreeWorkerSettings());
 		const result = await executePlan(plan, {
@@ -615,9 +718,13 @@ describe("moa executePlan — PR2 multi-round", () => {
 			settings: Settings.isolated({}, { cwd: "/tmp/moa" }),
 			moaSettings: buildThreeWorkerSettings(),
 		});
-		// All 3 workers should be qualityDropped.
 		expect(result.workers.every(w => w.qualityDropped === true)).toBe(true);
-		expect(result.synthesis?.ok).toBe(true);
+		expect(result.synthesis?.ok).toBe(false);
+		expect(result.synthesis?.stderr).toBe("all workers quality-failed");
+		expect(result.rounds?.[0]?.convergenceSignal).toBe("quality_failed");
+		// 3 workers only — synthesis must not be spawned
+		expect(spy).toHaveBeenCalledTimes(3);
+		expect(result.dispatchLog).toHaveLength(3);
 	});
 
 	it("hasUI=true with maxRounds=0 falls back to single-round (defensive)", async () => {
@@ -642,20 +749,14 @@ describe("moa executePlan — PR2 multi-round", () => {
 		expect(result.askRoundSummaries).toEqual([]);
 	});
 
-	it("round 1 injects DISCOVERY context; round 2 injects PLANNING context with previous answers", async () => {
-		// Round 1: every worker surfaces 1 open question.
-		// User answers: "深圳, 50人" (scripted).
-		// Round 2: workers converge (no open_questions) ⇒ all_complete.
+	it("round 2 injects previous answers and already-asked questions (no discovery/planning phase)", async () => {
 		const withQuestions = (label: string) =>
 			[
 				`## plan`,
 				`${label} plan with detail. `.repeat(20),
 				``,
 				`## open_questions`,
-				`- question: where is the team?`,
-				`  context: location affects hiring strategy`,
-				`  suggested_default: 深圳`,
-				`  type: freeform`,
+				`- where is the team?`,
 				`## assumptions`,
 				`- assumed default`,
 			].join("\n");
@@ -674,7 +775,6 @@ describe("moa executePlan — PR2 multi-round", () => {
 		vi.spyOn(subprocess, "spawnMoaWorker").mockImplementation(async input => {
 			capturedPrompts.push(input.systemPrompt);
 			const idx = capturedPrompts.length - 1;
-			// Calls 0-2: round 1 (3 workers). 3-5: round 2 (3 workers). 6: synthesis.
 			let output: string;
 			if (idx < 3) output = withQuestions(input.model ?? `w${idx}`);
 			else if (idx < 6) output = withoutQuestions(input.model ?? `w${idx}`);
@@ -683,10 +783,10 @@ describe("moa executePlan — PR2 multi-round", () => {
 		});
 
 		const ui = noopUI();
-		// Script the user answer for the open_questions ask.
+		ui.select.mockResolvedValue("answer");
 		ui.input.mockResolvedValue("深圳, 50人");
 
-		const plan = buildPlan("Round context injection test", buildThreeWorkerSettings());
+		const plan = buildPlan("Round history injection test", buildThreeWorkerSettings());
 		const result = await executePlan(plan, {
 			cwd: "/tmp/moa",
 			authStorage: {} as AuthStorage,
@@ -697,30 +797,132 @@ describe("moa executePlan — PR2 multi-round", () => {
 			hasUI: true,
 		});
 
-		// 2 rounds × 3 workers + 1 synthesis = 7 spawns
 		expect(capturedPrompts).toHaveLength(7);
 		expect(result.rounds).toHaveLength(2);
 		expect(result.rounds?.[1]?.convergenceSignal).toBe("all_complete");
 
-		// Round 1 (calls 0-2): DISCOVERY context, NO plan-allowed, NO previous answers.
+		// Round 1: no prior history → no Round context block / no phase split.
 		for (let i = 0; i < 3; i++) {
 			const p = capturedPrompts[i]!;
-			expect(p).toContain("## Round 1 context: DISCOVERY");
-			expect(p).toContain("DO NOT output a `## plan` section");
-			expect(p).toContain("Output ONLY `## open_questions`");
-			expect(p).not.toContain("## Round 2 context");
-			expect(p).not.toContain("The user's answers to your questions");
+			expect(p).not.toContain("DISCOVERY");
+			expect(p).not.toContain("PLANNING");
+			expect(p).not.toContain("DO NOT output a `## plan` section");
 		}
 
-		// Round 2 (calls 3-5): PLANNING context, with the scripted answer injected,
-		// NO new open_questions allowed, NO DISCOVERY context.
+		// Round 2: history block with answers + already-asked; still allows plan+questions.
 		for (let i = 3; i < 6; i++) {
 			const p = capturedPrompts[i]!;
-			expect(p).toContain("## Round 2 context: PLANNING");
-			expect(p).toContain("DO NOT output a new `## open_questions` section");
-			expect(p).toContain("Output ONLY `## plan`");
+			expect(p).toContain("## Round 2 context");
+			expect(p).toContain("### Previous answers");
 			expect(p).toContain("深圳, 50人");
-			expect(p).not.toContain("## Round 1 context: DISCOVERY");
+			expect(p).toContain("### Questions already asked");
+			expect(p).toContain("where is the team?");
+			expect(p).not.toContain("DO NOT output a new `## open_questions` section");
+			expect(p).not.toContain("DISCOVERY");
 		}
+	});
+
+	it("Discovery output_schema is baked into worker prompts", async () => {
+		const discoveryJson = JSON.stringify({
+			task_understanding: "build a debug plan",
+			known_inputs: [],
+			missing_inputs: [],
+			output_schema: {
+				sections: [
+					{ name: "repro_steps", required: true, type: "markdown" },
+					{ name: "plan", required: true, type: "markdown" },
+					{ name: "open_questions", required: true, type: "list" },
+				],
+			},
+		});
+		const capturedPrompts: string[] = [];
+		vi.spyOn(subprocess, "spawnMoaWorker").mockImplementation(async input => {
+			capturedPrompts.push(input.systemPrompt);
+			const idx = capturedPrompts.length - 1;
+			if (idx === 0) {
+				return makeWorkerOutput({ output: discoveryJson, model: input.model });
+			}
+			if (idx <= 3) {
+				return makeWorkerOutput({
+					output: [
+						`## repro_steps`,
+						`1. reproduce the bug with enough detail for the quality heuristic to pass.`,
+						`## plan`,
+						`${input.model} plan with detail. `.repeat(20),
+						`## open_questions`,
+						``,
+					].join("\n"),
+					model: input.model,
+				});
+			}
+			return makeWorkerOutput({ output: "synth ok", model: input.model });
+		});
+
+		const moaSettings = resolveSettings({
+			discoveryEnabled: true,
+			rewriteEnabled: false,
+			workers: [
+				{ name: "divergent", role: "diverge", model: "provider/divergent" },
+				{ name: "grounded", role: "ground", model: "provider/grounded" },
+				{ name: "critical", role: "critic", model: "provider/critical" },
+			],
+			synthesisModel: "provider/synthesis",
+			maxRounds: 0,
+			askEnabled: false,
+		});
+		const plan = buildPlan("schema injection", moaSettings);
+		const result = await executePlan(plan, {
+			cwd: "/tmp/moa",
+			authStorage: {} as AuthStorage,
+			modelRegistry: { refresh: async () => {} } as unknown as ModelRegistry,
+			settings: Settings.isolated({}, { cwd: "/tmp/moa" }),
+			moaSettings,
+			hasUI: false,
+		});
+
+		expect(result.outputSchema?.sections.some(s => s.name === "repro_steps")).toBe(true);
+		// Worker prompts (calls 1-3) must include Discovery's section.
+		for (let i = 1; i <= 3; i++) {
+			expect(capturedPrompts[i]).toContain("## repro_steps");
+		}
+		expect(result.dispatchLog?.length).toBe(3);
+	});
+
+	it("records stage timings and notifies with durations when hasUI", async () => {
+		mockSpawnMoaWorker([
+			input => makeWorkerOutput({ output: conformingOutput(input.model ?? "w1"), model: input.model }),
+			input => makeWorkerOutput({ output: conformingOutput(input.model ?? "w2"), model: input.model }),
+			input => makeWorkerOutput({ output: conformingOutput(input.model ?? "w3"), model: input.model }),
+			input => makeWorkerOutput({ output: "merged plan", model: input.model }),
+		]);
+		const ui = noopUI();
+		const moaSettings = buildThreeWorkerSettings();
+		const plan = buildPlan("Timing test", moaSettings);
+		const result = await executePlan(plan, {
+			cwd: "/tmp/moa",
+			authStorage: {} as AuthStorage,
+			modelRegistry: { refresh: async () => {} } as unknown as ModelRegistry,
+			settings: Settings.isolated({}, { cwd: "/tmp/moa" }),
+			moaSettings,
+			ui: ui as never,
+			hasUI: true,
+		});
+
+		expect(result.timings).toBeDefined();
+		expect(result.timings?.discovery).toBeGreaterThanOrEqual(0);
+		expect(result.timings?.ask).toBeGreaterThanOrEqual(0);
+		expect(result.timings?.rewrite).toBeGreaterThanOrEqual(0);
+		expect(result.timings?.workers).toBeGreaterThanOrEqual(0);
+		expect(result.timings?.synthesis).toBeGreaterThanOrEqual(0);
+		expect(result.timings?.total).toBeGreaterThanOrEqual(0);
+
+		const notifyMsgs = ui.notify.mock.calls.map(c => String(c[0]));
+		expect(notifyMsgs.some(m => /发现完成.*\d+\.\d+s/.test(m))).toBe(true);
+		expect(notifyMsgs.some(m => /Worker 完成.*\d+\.\d+s/.test(m))).toBe(true);
+		expect(notifyMsgs.some(m => /MOA 完成.*\d+\.\d+s/.test(m))).toBe(true);
+		expect(notifyMsgs.some(m => m.includes("MOA 耗时"))).toBe(true);
+
+		const workingMsgs = ui.setWorkingMessage.mock.calls.map(c => String(c[0]));
+		expect(workingMsgs.some(m => /MOA:.*\d+\.\d+s/.test(m))).toBe(true);
 	});
 });

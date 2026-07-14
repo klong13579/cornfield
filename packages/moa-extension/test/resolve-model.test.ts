@@ -6,10 +6,10 @@ import { buildPlan } from "../src/planner";
 import { DEFAULT_SYNTHESIS_MODEL, DEFAULT_WORKER_MODELS, DEFAULT_WORKER_SLOTS, resolveSettings } from "../src/settings";
 import type { SpawnWorkerInput, WorkerOutput } from "../src/subprocess";
 
-function makeWorkerOutput(): WorkerOutput {
+function makeWorkerOutput(output = "ok"): WorkerOutput {
 	return {
 		ok: true,
-		output: "ok",
+		output,
 		stderr: "",
 		exitCode: 0,
 		aborted: false,
@@ -19,6 +19,19 @@ function makeWorkerOutput(): WorkerOutput {
 		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 1 },
 		durationMs: 1,
 	};
+}
+
+/** Output that passes the default quality heuristic (so synthesis still runs). */
+function conformingWorkerOutput(label: string): string {
+	return [
+		`## plan`,
+		`${label} produced a plan with enough detail to pass the quality heuristic. We considered the tradeoffs, chose one path, and wrote the assumptions explicitly.`,
+		``,
+		`## open_questions`,
+		``,
+		`## assumptions`,
+		`- assumed default`,
+	].join("\n");
 }
 
 function mockRegistryWithModel(provider: string, id: string): ModelRegistry {
@@ -50,7 +63,12 @@ async function captureSpawnInputs(): Promise<{ seen: SpawnWorkerInput[]; restore
 	const realSpy = vi.spyOn(await import("../src/subprocess"), "spawnMoaWorker");
 	realSpy.mockImplementation(async (input: SpawnWorkerInput) => {
 		seen.push(input);
-		return makeWorkerOutput();
+		// Discovery / rewrite use tools=none; return empty JSON so parse falls back.
+		// Workers must emit schema-conforming text or fail-loud skips synthesis.
+		if (input.tools === "none") {
+			return makeWorkerOutput("{}");
+		}
+		return makeWorkerOutput(conformingWorkerOutput(input.model ?? "w"));
 	});
 	return { seen, restore: () => realSpy.mockRestore() };
 }

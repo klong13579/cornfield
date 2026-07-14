@@ -3,7 +3,7 @@ import { DEFAULT_SETTINGS, resolveSettings } from "../src/settings";
 
 describe("DEFAULT_SETTINGS (PR2 multi-round)", () => {
 	it("exposes the design-locked multi-round defaults", () => {
-		expect(DEFAULT_SETTINGS.maxRounds).toBe(3);
+		expect(DEFAULT_SETTINGS.maxRounds).toBe(1);
 		expect(DEFAULT_SETTINGS.maxQuestionsPerRound).toBe(5);
 		expect(DEFAULT_SETTINGS.qualityMinScore).toBe(40);
 	});

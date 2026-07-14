@@ -9,7 +9,7 @@ import {
 	type MoaWorkerSlot,
 } from "./types";
 
-const READ_ONLY_TOOLS = ["read", "search", "find", "web_search"] as const;
+const READ_ONLY_TOOLS = ["read", "search", "find", "web_search", "ast_grep"] as const;
 
 function plannerTools(settings: MoaSettings): readonly string[] | "all" {
 	return settings.plannerToolMode === "all" ? "all" : READ_ONLY_TOOLS;
@@ -21,7 +21,7 @@ function plannerTools(settings: MoaSettings): readonly string[] | "all" {
  * show the item-field shape. Workers see this and know exactly which section
  * names to emit.
  */
-function renderOutputSchemaAsMarkdown(schema: MoaOutputSchema): string {
+export function renderOutputSchemaAsMarkdown(schema: MoaOutputSchema): string {
 	const lines: string[] = [];
 	for (const sec of schema.sections) {
 		const req = sec.required ? "_(required)_" : "_(optional)_";
@@ -74,8 +74,9 @@ function buildWorkerPlans(
  * Build a static plan from the task + settings. Discovery / rewrite
  * execution and TCO injection happen at execution time in `executor.ts`.
  *
- * `outputSchema` defaults to `DEFAULT_OUTPUT_SCHEMA`. PR2 will plumb the
- * Discovery LLM's schema through here; PR1 keeps the hardcoded default.
+ * `outputSchema` defaults to `DEFAULT_OUTPUT_SCHEMA`. After Discovery,
+ * the executor rebinds prompts via `rebindWorkerPrompts` so the
+ * Discovery-driven schema reaches workers without dropping plan slots.
  */
 export function buildPlan(
 	task: string,
@@ -89,4 +90,23 @@ export function buildPlan(
 		synthesisModel: settings.synthesisModel,
 		synthesisThinking: settings.synthesisThinking,
 	};
+}
+
+/**
+ * Re-render worker prompts against a (possibly Discovery-driven) schema
+ * while preserving name / role / model / thinking / tools from the plan.
+ */
+export function rebindWorkerPrompts(
+	workers: ReadonlyArray<MoaPlanWorker>,
+	task: string,
+	schema: MoaOutputSchema,
+): MoaPlanWorker[] {
+	return workers.map(worker => ({
+		...worker,
+		prompt: buildWorkerPrompt(
+			{ name: worker.name, role: worker.role, model: worker.model, thinking: worker.thinking },
+			task,
+			schema,
+		),
+	}));
 }

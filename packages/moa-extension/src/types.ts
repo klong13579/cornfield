@@ -9,7 +9,10 @@ export interface MoaWorkerSlot {
 	thinking?: string;
 }
 
+export type MoaWorkerExecutionMode = "subprocess" | "in-process";
+
 export interface MoaSettings {
+	workerExecutionMode: MoaWorkerExecutionMode;
 	discoveryEnabled: boolean;
 	rewriteEnabled: boolean;
 	workerCount: number;
@@ -142,7 +145,7 @@ export interface MoaDispatchLogEntry {
 	workerName: string;
 	/** Round number 1-based. Single-round runs use round=1. */
 	round: number;
-	/** ISO timestamp of when the worker subprocess was spawned. */
+	/** ISO timestamp of when the worker was dispatched. */
 	startedAt: string;
 	/** Wall-clock duration in milliseconds. */
 	durationMs: number;
@@ -187,7 +190,13 @@ export interface MoaRoundQuestion {
 	sourceWorkers: string[];
 }
 
-export type MoaConvergenceSignal = "no_new_questions" | "user_stop" | "max_rounds" | "all_complete" | null;
+export type MoaConvergenceSignal =
+	| "no_new_questions"
+	| "user_stop"
+	| "max_rounds"
+	| "all_complete"
+	| "quality_failed"
+	| null;
 
 export interface MoaRoundTrace {
 	roundNumber: number;
@@ -216,6 +225,10 @@ export interface MoaExecutionResult {
 	/** Per-round ask summary (separate from the pre-ask `askSummary`).
 	 *  Empty when maxRounds=0. */
 	askRoundSummaries?: MoaAskUserSummary[];
+	/** Per-worker dispatch audit for archive. Empty when no workers ran. */
+	dispatchLog?: MoaDispatchLogEntry[];
+	/** Wall-clock ms per stage (discovery/ask/rewrite/workers[_rN]/synthesis/total). */
+	timings?: Record<string, number>;
 }
 
 /**

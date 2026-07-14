@@ -4,7 +4,7 @@ import {
 	TCO_MAX_MISSING_INPUTS_DEFAULT,
 	TCO_REWRITE_TIMEOUT_MS_DEFAULT,
 } from "./tco";
-import type { MoaSettings, MoaWorkerSlot } from "./types";
+import type { MoaSettings, MoaWorkerExecutionMode, MoaWorkerSlot } from "./types";
 
 const RUNTIME_SETTINGS_ENV = "PI_MOA_SETTINGS_JSON";
 
@@ -43,6 +43,7 @@ export const DEFAULT_WORKER_SLOTS: ReadonlyArray<MoaWorkerSlot> = [
 ];
 
 export const DEFAULT_SETTINGS: MoaSettings = {
+	workerExecutionMode: "subprocess",
 	discoveryEnabled: true,
 	rewriteEnabled: true,
 	workerCount: 3,
@@ -58,8 +59,8 @@ export const DEFAULT_SETTINGS: MoaSettings = {
 	askTimeoutMs: TCO_ASK_TIMEOUT_MS_DEFAULT,
 	askEnabled: true,
 	tcoInjectMaxBytes: 8_000,
-	// Multi-round (PR2). TUI gets 3 rounds; gateway/cron force 0 in executor.
-	maxRounds: 3,
+	// Multi-round (PR2). TUI gets 1 round by default; gateway/cron force 0 in executor.
+	maxRounds: 1,
 	maxQuestionsPerRound: 5,
 	qualityMinScore: 40,
 };
@@ -115,6 +116,13 @@ export function resolveSettings(overrides: Partial<MoaSettings> = {}): MoaSettin
 		0,
 		Math.min(100, Math.floor(mergedOverrides.qualityMinScore ?? DEFAULT_SETTINGS.qualityMinScore)),
 	);
+	// Normalize workerExecutionMode: only valid values pass through.
+	const rawMode = mergedOverrides.workerExecutionMode;
+	const workerExecutionMode: "subprocess" | "in-process" =
+		rawMode === "subprocess" || rawMode === "in-process" ? rawMode : DEFAULT_SETTINGS.workerExecutionMode;
+	if (rawMode !== undefined && rawMode !== "subprocess" && rawMode !== "in-process") {
+		console.warn(`[moa] invalid workerExecutionMode: "${rawMode}"; falling back to "${workerExecutionMode}"`);
+	}
 	return {
 		...DEFAULT_SETTINGS,
 		...mergedOverrides,
@@ -123,5 +131,6 @@ export function resolveSettings(overrides: Partial<MoaSettings> = {}): MoaSettin
 		maxRounds,
 		maxQuestionsPerRound,
 		qualityMinScore,
+		workerExecutionMode,
 	};
 }
