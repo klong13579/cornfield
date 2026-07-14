@@ -6,6 +6,13 @@
 > Per design §4 principle 2: **tool-level rules are co-located with the tool description**.
 > Use `MUST` / `MUST NOT` / `NEVER` in this file — OMP extracts them into `<hard-constraints>`.
 
+## 工具选择原则
+
+1. **专用工具 > 通用工具** — 有专用工具时不要用 bash 调用
+2. **结构化工具 > 文本工具** — `ast_grep` / `lsp` 比 `grep` 更安全
+3. **读取工具 > 修改工具** — 动刀前先充分理解
+4. **即时验证 > 事后调试** — 修改后立即验证
+
 ## OMP 内置工具
 
 ### `read`
@@ -35,6 +42,12 @@ Language Server Protocol: symbol definitions, references, rename, code actions.
 
 - MUST use `lsp` for symbol-aware operations (rename, go-to-definition, find references) instead of text-based search.
 - MUST NOT perform cross-file renames with `sed` or `ast_edit` when `lsp` rename is available.
+
+### `inspect_image`
+Analyze image content via vision model (independent of session model's image support).
+
+- MUST use `inspect_image` when the user asks to understand what's in an image, screenshot, or diagram.
+- MUST NOT attempt to read image content via `python3` + PIL or other manual parsing.
 
 ### `bash`
 Execute shell commands.
@@ -69,6 +82,14 @@ Persist runtime-learned behavioral preferences (target: "user" or "agent").
 
 - MUST NOT write temporary task progress or session results to memory.
 - MUST distinguish stable facts (use `identity`) from learned preferences (use `write_memory`).
+
+## URL 访问策略
+
+| 场景 | 工具 | 规则 |
+|------|------|------|
+| Web 页面（JS 渲染） | `puppeteer` | MUST 用 puppeteer — MUST NOT 用 read 访问 SPA（拿到空 HTML） |
+| JSON API 端点 | `read` / `curl` | MUST 用 read/curl — MUST NOT 用 puppeteer 访问纯 JSON（浪费资源） |
+| 纯文本 URL | `read` | — |
 
 ## Project-specific tools
 
@@ -106,6 +127,8 @@ Example `cron.add` call (DM context, daily 18:30 report):
 ```
 
 No `delivery` field — gateway infers `{channel, accountId, toUserId}` from the current DM via `getActiveChatContext()`.
+
+**Host tool 可用性：** 如果当前会话中 `cron` / `bridge.status` 不可用（工具列表中没有），说明 gateway 未注册 host tool，应告知用户而不是退而用 CLI。这是 gateway 配置问题，不是 LLM 能修复的。
 
 **`test-run` (verification path)**: triggers a task through the REAL scheduler and reports the delivery verdict. Use after `add` / `update` to confirm the task actually works end-to-end (warm bridge → agent run → DingTalk delivery). Default duration: 90s `inMs` (1.5x the 60s gateway tick) + 30s `testTimeoutMs` = 120s total. The original schedule is ALWAYS restored after the run (in `finally`), even on timeout / abort / failure. `result.kind` is one of `success` / `trigger_timeout` / `task_failed` / `delivery_failed` / `aborted`. `isError: true` on the host tool result for non-`success` kinds. Pass `noRestore: true` only for debug — it leaves the schedule on `+<delay>s once`. Do NOT call test-run speculatively; it's a long tool call.
 

@@ -69,3 +69,8 @@
 - MUST NOT execute destructive operations (delete, force-push, drop, format) without explicit user confirmation in the same conversation.
 - MUST NOT exfiltrate data outside `agentDir` unless the user names a specific destination.
 - MUST log every external write (IM message, webhook, git push) to `cron/logs/` or `sessions/`.
+- MUST filter `<think>...</think>` / `<thinking>...</thinking>` / `<tool_call>...</tool_call>` / `<tool_result>...</tool_result>` internal tags from output before sending to DingTalk (gateway renders replies as AI cards; raw internal tags leak to users).
+- MUST NOT leak credentials in prompt outputs, tool results, error messages, or commit messages. Use placeholders (`<credentials>`) or path references (`.gitlab_credentials`) instead.
+- MUST NOT block waiting for user input during cron task execution. On failure, record the error in `cron/logs/` and deliver a failure summary.
+- MUST verify personnel status (在职/离职/转正等) against real-time DingTalk before outputting; local cache is read-only fast-path, not an authority.
+- MUST NOT trust the `Current date` field injected into the system prompt for any date-sensitive decision; MUST run `date` (or `TZ=Asia/Shanghai date`) first to confirm the actual system date, and treat the system prompt value as untrusted metadata.
