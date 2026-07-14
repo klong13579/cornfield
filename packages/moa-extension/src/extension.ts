@@ -1,3 +1,4 @@
+import * as path from "node:path";
 import type { ExtensionAPI, ExtensionCommandContext } from "@oh-my-pi/pi-coding-agent";
 import { executePlan } from "./executor";
 import { loadMoaConfigOverrides } from "./moa-config";
@@ -21,7 +22,7 @@ function usageText(): string {
 		"  /moa run <task>             Run a planning panel",
 		"  /moa status                 Show current defaults",
 		"  /moa transcript [runId]     Show full archived transcript (default: latest)",
-		"  /moa runs                   List archived runs in this session",
+		"  /moa runs                   List archived runs in this workspace (cross-session)",
 		"  /moa help                   Show this help",
 	].join("\n");
 }
@@ -145,15 +146,72 @@ function readEntries(ctx: ExtensionCommandContext): unknown[] {
 	return sm?.getEntries?.() ?? [];
 }
 
+/**
+ * Read moa-archive + moa-result entries from the current session AND every
+ * other session JSONL in the same encoded-cwd directory. Returns entries in
+ * (newest-session-first, in-file-order) sequence.
+ *
+ * Rationale: `/moa runs` and `/moa transcript` previously only saw the
+ * current session's moa-archive, so a run launched in a tmux pane (different
+ * omp instance, different session JSONL) was invisible. Cross-session
+ * aggregation matches the user's mental model — "I ran moa, I should be
+ * able to find it" — and the IO cost is bounded (one workspace's session
+ * files, typically < 1 MB total).
+ */
+async function readAllSessionEntries(ctx: ExtensionCommandContext): Promise<unknown[]> {
+	const currentFile = ctx.sessionManager.getSessionFile();
+	const current = readEntries(ctx);
+	if (!currentFile) return current;
+
+	// currentFile = `<sessionsRoot>/<encodedCwd>/by-date/YYYY-MM-DD/HHMMSS__hash.jsonl`
+	// 3 levels up = `<sessionsRoot>/<encodedCwd>/`
+	const encodedCwdDir = path.dirname(path.dirname(path.dirname(currentFile)));
+
+	let relFiles: string[];
+	try {
+		const glob = new Bun.Glob("**/*.jsonl");
+		const out: string[] = [];
+		for await (const rel of glob.scan({ cwd: encodedCwdDir, onlyFiles: true })) {
+			out.push(rel);
+		}
+		relFiles = out;
+	} catch {
+		return current;
+	}
+	relFiles.sort();
+
+	const other: unknown[] = [];
+	for (const rel of relFiles) {
+		const full = path.join(encodedCwdDir, rel);
+		if (full === currentFile) continue;
+		let text: string;
+		try {
+			text = await Bun.file(full).text();
+		} catch {
+			continue;
+		}
+		for (const line of text.split("\n")) {
+			const trimmed = line.trim();
+			if (!trimmed) continue;
+			try {
+				other.push(JSON.parse(trimmed));
+			} catch {
+				// skip malformed lines from a partially-flushed session file
+			}
+		}
+	}
+	return [...current, ...other];
+}
+
 async function handleTranscript(args: string, ctx: ExtensionCommandContext, pi: ExtensionAPI): Promise<void> {
 	const runId = args.trim() || undefined;
-	const entries = readEntries(ctx);
+	const entries = await readAllSessionEntries(ctx);
 	const result = reconstructMoaArchive(entries, runId);
 	if (!result) {
 		ctx.ui.notify(
 			runId
-				? `No moa archive found for runId "${runId}" in this session.`
-				: "No moa archive found in this session. Run `/moa run <task>` first.",
+				? `No moa archive found for runId "${runId}" in this workspace.`
+				: "No moa archive found in this workspace. Run `/moa run <task>` first.",
 			"error",
 		);
 		return;
@@ -186,10 +244,10 @@ async function handleTranscript(args: string, ctx: ExtensionCommandContext, pi: 
 }
 
 async function handleRuns(ctx: ExtensionCommandContext): Promise<void> {
-	const entries = readEntries(ctx);
+	const entries = await readAllSessionEntries(ctx);
 	const runs = listMoaArchiveRuns(entries);
 	if (runs.length === 0) {
-		ctx.ui.notify("No moa archive runs in this session.", "info");
+		ctx.ui.notify("No moa archive runs in this workspace.", "info");
 		return;
 	}
 	const lines = runs
