@@ -433,15 +433,22 @@ export async function runWorkerFanout(
 	roundNumber: number,
 	previousAnswersText: string,
 	previousQuestions: ReadonlyArray<string>,
-): Promise<{ workers: MoaWorkerResult[]; durations: Map<string, number> }> {
-	const startedAt = new Map<string, number>();
+): Promise<{
+	workers: MoaWorkerResult[];
+	durations: Map<string, number>;
+	startedAts: Map<string, string>;
+}> {
+	const startedAtMs = new Map<string, number>();
+	const startedAtIso = new Map<string, string>();
 	const staggerMs = Math.max(0, planOptions.settings.workerStaggerMs ?? 0);
 	const settled = await Promise.all(
 		workers.map(async (worker, index) => {
 			if (staggerMs > 0 && index > 0) {
 				await Bun.sleep(staggerMs * index);
 			}
-			startedAt.set(worker.name, Date.now());
+			const now = Date.now();
+			startedAtMs.set(worker.name, now);
+			startedAtIso.set(worker.name, new Date(now).toISOString());
 			return runWorker(
 				worker,
 				plan,
@@ -456,10 +463,10 @@ export async function runWorkerFanout(
 	);
 	const durations = new Map<string, number>();
 	for (const w of settled) {
-		const start = startedAt.get(w.name) ?? Date.now();
+		const start = startedAtMs.get(w.name) ?? Date.now();
 		durations.set(w.name, Math.max(0, Date.now() - start));
 	}
-	return { workers: settled, durations };
+	return { workers: settled, durations, startedAts: startedAtIso };
 }
 
 export interface SynthesisStageResult {
@@ -650,13 +657,13 @@ export function appendDispatchEntries(
 	parsed: ReadonlyArray<MoaWorkerResult>,
 	workerDurations: ReadonlyMap<string, number>,
 	roundNumber: number,
-	startedAt: string,
+	workerStartedAts: ReadonlyMap<string, string>,
 ): void {
 	for (const w of parsed) {
 		const entry: MoaDispatchLogEntry = {
 			workerName: w.name,
 			round: roundNumber,
-			startedAt,
+			startedAt: workerStartedAts.get(w.name) ?? "",
 			durationMs: workerDurations.get(w.name) ?? 0,
 			exitCode: w.exitCode,
 			ok: w.ok,
@@ -753,7 +760,7 @@ export async function runWorkersStage(input: {
 	if (effectiveMaxRounds === 0) {
 		const roundStartedAt = new Date().toISOString();
 		const live = hooks.onRoundWorkers?.({ round: 1, maxRounds: 1, baseWorkers });
-		const { workers: roundWorkers, durations } = await runWorkerFanout(
+		const { workers: roundWorkers, durations, startedAts } = await runWorkerFanout(
 			baseWorkers,
 			plan,
 			planOptions,
@@ -768,7 +775,7 @@ export async function runWorkersStage(input: {
 			applyWorkerParsing(w, outputSchema, { minScore: planOptions.settings.qualityMinScore }),
 		);
 		allWorkerInvocations.push(...parsed);
-		appendDispatchEntries(dispatchLog, parsed, durations, 1, roundStartedAt);
+		appendDispatchEntries(dispatchLog, parsed, durations, 1, startedAts);
 		lastRoundSurviving = parsed.filter(w => !w.qualityDropped);
 		const okCount = parsed.filter(w => w.ok).length;
 		notify(
@@ -790,7 +797,7 @@ export async function runWorkersStage(input: {
 			const previousAnswersText = formatPreviousAnswers(currentTco);
 			const previousQuestionsList = [...previousQuestionKeys];
 			const live = hooks.onRoundWorkers?.({ round, maxRounds: effectiveMaxRounds, baseWorkers });
-			const { workers: roundWorkers, durations } = await runWorkerFanout(
+			const { workers: roundWorkers, durations, startedAts } = await runWorkerFanout(
 				baseWorkers,
 				plan,
 				planOptions,
@@ -805,7 +812,7 @@ export async function runWorkersStage(input: {
 				applyWorkerParsing(w, outputSchema, { minScore: planOptions.settings.qualityMinScore }),
 			);
 			allWorkerInvocations.push(...parsed);
-			appendDispatchEntries(dispatchLog, parsed, durations, round, roundStartedAt);
+			appendDispatchEntries(dispatchLog, parsed, durations, round, startedAts);
 
 			const surviving = parsed.filter(w => !w.qualityDropped);
 			lastRoundSurviving = surviving;
