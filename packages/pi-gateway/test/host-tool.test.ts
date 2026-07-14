@@ -1076,7 +1076,8 @@ describe("cron host tool — test-run action", () => {
 		expect(result.kind).toBe("started");
 		expect(result.name).toBe("via-host-tool");
 		expect(result.inMs).toBe(120_000);
-		expect(result.timeoutMs).toBe(5_000);
+		expect(result.testTimeoutMs).toBe(5_000);
+		expect(result.wasClamped).toBe(false);
 		expect(result.expiresAt).toBeGreaterThan(Date.now());
 		expect(typeof result.startedAt).toBe("number");
 		expect(elapsed).toBeLessThan(1_500);
@@ -1183,7 +1184,8 @@ describe("runTestRun — fire-and-forget (awaitResult: false)", () => {
 		if (result.kind === "started") {
 			expect(result.name).toBe("fire-and-forget");
 			expect(result.inMs).toBe(120_000);
-			expect(result.timeoutMs).toBe(30_000);
+			expect(result.testTimeoutMs).toBe(30_000);
+			expect(result.wasClamped).toBe(false);
 			expect(result.expiresAt).toBe(result.startedAt + 120_000 + 90_000);
 		}
 		expect(elapsed).toBeLessThan(1_500);

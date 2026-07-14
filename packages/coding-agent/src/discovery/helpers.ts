@@ -496,6 +496,11 @@ async function readExtensionModuleManifest(
  * Discover extension module entry points in a directory.
  *
  * Discovery rules:
+ * 0. If the directory itself is a manifest-driven extension package
+ *    (has `package.json` with `omp.extensions` or `pi.extensions`),
+ *    use ONLY the manifest-declared paths. Bare `*.ts`/`*.js` files in
+ *    the directory (test scripts, fixtures, build scripts) are not
+ *    treated as extension entry points — the manifest is authoritative.
  * 1. Direct files: `extensions/*.ts` or `*.js` → load
  * 2. Subdirectory with index: `extensions/<ext>/index.ts` or `index.js` → load
  * 3. Subdirectory with package.json: `extensions/<ext>/package.json` with "omp"/"pi" field → load declared paths
@@ -505,6 +510,33 @@ async function readExtensionModuleManifest(
  */
 export async function discoverExtensionModulePaths(_ctx: LoadContext, dir: string): Promise<string[]> {
 	const discovered = new Set<string>();
+
+	// 0. If the dir is a manifest-driven extension package, use ONLY the
+	//    declared entries. Without this gate, a package like `moa-extension/`
+	//    whose `package.json#omp.extensions` declares `./src/extension.ts`
+	//    would also auto-load every top-level `*.ts` it contains — including
+	//    test scripts such as `test-mr-e2e-cotest.ts`, which then get
+	//    `Bun.build`-bundled and fail at runtime with `posix_spawn ENOENT`.
+	const dirManifest = await readExtensionModuleManifest(_ctx, path.join(dir, "package.json"));
+	const dirDeclared =
+		dirManifest?.extensions?.filter((extPath): extPath is string => typeof extPath === "string") ?? [];
+	if (dirDeclared.length > 0) {
+		for (const extPath of dirDeclared) {
+			const resolvedExtPath = path.resolve(dir, extPath);
+			const entries = await readDirEntries(resolvedExtPath);
+			let finalPath = resolvedExtPath;
+			if (entries.length !== 0) {
+				const indexFile = entries.find(
+					e => e.isFile() && (e.name === "index.ts" || e.name === "index.js"),
+				)?.name;
+				if (indexFile) finalPath = path.join(resolvedExtPath, indexFile);
+			}
+			const content = await readFile(finalPath);
+			if (content !== null) discovered.add(finalPath);
+		}
+		return [...discovered];
+	}
+
 	// Find all candidate files in parallel using glob
 	const [directFiles, indexFiles, packageJsonFiles] = await Promise.all([
 		// 1. Direct *.ts or *.js files
