@@ -495,22 +495,9 @@ describe("extensions discovery", () => {
 	});
 
 	it("loads source extension with workspace package imports via explicit path", async () => {
-		const explicitPath = path.join(tempDir.path(), "explicit-imports.ts");
-		fs.writeFileSync(
-			explicitPath,
-			[
-				'import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";',
-				'import { prompt } from "@oh-my-pi/pi-utils";',
-				'',
-				'export default function extension(pi: ExtensionAPI): void {',
-				'	const text = prompt.render("hello {{name}}", { name: "world" });',
-				'	pi.registerCommand("imported", {',
-				'		description: text,',
-				'		handler: async () => {},',
-				'	});',
-				'}'
-			].join("\n"),
-		);
+		// Direct import (no Bun.build cache): entry must live where Bun can resolve
+		// workspace packages — not an isolated temp file outside the monorepo.
+		const explicitPath = path.join(import.meta.dir, "fixtures", "workspace-import-ext.ts");
 
 		const result = await loadExtensions([explicitPath], tempDir.path());
 

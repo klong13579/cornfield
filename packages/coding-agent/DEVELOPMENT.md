@@ -574,10 +574,11 @@ Directory entry resolution:
 
 Module loading:
 
-- `loadExtension(extPath, cwd, eventBus, runtime)` does dynamic `import(resolvedPath)`.
+- `loadExtension(extPath, cwd, eventBus, runtime)` does dynamic `import(pathToFileURL(resolvedPath))` — no Bun.build / `.omp/cache/extension-bundles` middleman.
 - Accepts factory from `module.default ?? module`; must be a function.
 - Runs factory with `ConcreteExtensionAPI`, collecting handlers/tools/commands/flags/shortcuts/renderers.
 - Returns `{ extensions, errors, runtime }` from `loadExtensions`.
+- First-party extensions (autoresearch, self-evolution, swarm, moa) register via `inlineExtensions` in `sdk.ts` and ship inside compiled `omp`.
 
 ### Hook loading (`src/extensibility/hooks/loader.ts`)
 

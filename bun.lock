@@ -63,6 +63,7 @@
       "dependencies": {
         "@agentclientprotocol/sdk": "catalog:",
         "@mozilla/readability": "catalog:",
+        "@oh-my-pi/moa-extension": "workspace:*",
         "@oh-my-pi/omp-stats": "catalog:",
         "@oh-my-pi/pi-agent-core": "catalog:",
         "@oh-my-pi/pi-ai": "catalog:",

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Native loader caches loaded N-API bindings on `Symbol.for("@oh-my-pi/pi-natives.bindings")` so a second evaluation of `native/index.js` (e.g. compiled `omp` + extension bundle) reuses the first `.node` instead of calling `dlopen` again (second `dlopen` segfaults at `0x8000`).
+
 ## [14.5.9] - 2026-04-30
 ### Fixed
 

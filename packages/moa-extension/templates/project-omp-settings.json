@@ -1,5 +1,3 @@
 {
-  "extensions": [
-    "../moa-extension"
-  ]
+	"_comment": "MOA is bundled into omp as an inline extension (like swarm/autoresearch). No extensions path is required for /moa."
 }

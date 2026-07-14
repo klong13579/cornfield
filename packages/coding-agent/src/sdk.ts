@@ -31,6 +31,7 @@ import {
 	prompt,
 	Snowflake,
 } from "@oh-my-pi/pi-utils";
+import moaExtension from "@oh-my-pi/moa-extension";
 import { createSelfEvolutionExtension } from "@oh-my-pi/self-evolution";
 import swarmExtension from "@oh-my-pi/swarm-extension";
 import chalk from "chalk";
@@ -1191,6 +1192,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		inlineExtensions.push(createAutoresearchExtension);
 		inlineExtensions.push(createSelfEvolutionExtension);
 		inlineExtensions.push(swarmExtension);
+		inlineExtensions.push(moaExtension);
 		if (customTools.length > 0) {
 			inlineExtensions.push(createCustomToolsExtension(customTools));
 		}

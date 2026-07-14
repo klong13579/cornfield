@@ -16,7 +16,13 @@ function getNativesDir() {
 	return path.join(os.homedir(), ".omp", "natives");
 }
 const packageJson = require("../package.json");
-const { detectCompiledBinary, getAddonFilenames, resolveLoaderCandidates } = require("./loader-state");
+const {
+	detectCompiledBinary,
+	getAddonFilenames,
+	getCachedNativeBindings,
+	resolveLoaderCandidates,
+	setCachedNativeBindings,
+} = require("./loader-state");
 
 const require_ = createRequire(__filename);
 const platformTag = `${process.platform}-${process.arch}`;
@@ -168,12 +174,16 @@ function maybeExtractEmbeddedAddon(errors) {
 }
 
 function loadNative() {
+	const cached = getCachedNativeBindings();
+	if (cached) return cached;
+
 	const errors = [];
 	const embeddedCandidate = maybeExtractEmbeddedAddon(errors);
 	const runtimeCandidates = embeddedCandidate ? [embeddedCandidate, ...dedupedCandidates] : dedupedCandidates;
 	for (const candidate of runtimeCandidates) {
 		try {
 			const bindings = require_(candidate);
+			setCachedNativeBindings(bindings);
 			return bindings;
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);

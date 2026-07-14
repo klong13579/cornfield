@@ -17,56 +17,31 @@ Implemented v1:
 
 ## Setup
 
-`/moa` is registered as an OMP extension. The extension must be discoverable. Pick **one** of the options below.
+`/moa` ships **inline** with `omp` (same pattern as swarm / autoresearch /
+self-evolution). After `bun --cwd=packages/coding-agent run build`, the
+compiled binary already registers `/moa` — no `extensions` path, no
+`.omp/cache/extension-bundles` build step.
 
-### Option A — Project-level (recommended for repo work)
-
-Create `packages/coding-agent/.omp/settings.json` with the snippet in
-[`templates/project-omp-settings.json`](./templates/project-omp-settings.json):
-
-```json
-{ "extensions": ["../moa-extension"] }
-```
-
-`bun dev` switches cwd to `packages/coding-agent`, so `../moa-extension` resolves to
-the workspace package. The file is NOT gitignored by `.gitignore` (only
-`.omp/plugins/` and `.omp/self-evolution/` are); commit it if you want every
-contributor to get `/moa`, otherwise add it to your local `.git/info/exclude`.
-
-### Option B — User-level (always-on, multi-project)
-
-Create `~/.omp/agent/settings.json` with an absolute path:
-
-```json
-{ "extensions": ["/absolute/path/to/oh-my-pi/packages/moa-extension"] }
-```
-
-The path is resolved against the **active** cwd (`packages/coding-agent` when
-launched via `bun dev`), so relative paths must include the `../moa-extension`
-prefix, not `packages/moa-extension`.
+If your settings still list `../moa-extension` (or an absolute path to this
+package), **remove that entry** so the factory is not loaded twice.
 
 ### Verifying
 
 ```bash
-bun dev                                # cwd becomes packages/coding-agent
+bun --cwd=packages/coding-agent run build
+omp                                    # or: bun --cwd=packages/coding-agent src/cli.ts
 # In the TUI:
-/moa help                              # expect: 3-line usage notification
-/moa status                            # expect: 4-line config dump
-/moa run <task>                        # expect: 3 workers + synthesis + [moa] result
+/moa help                              # expect usage notification
+/moa status                            # expect config dump
+/moa run <task>                        # expect workers + synthesis + [moa] result
 ```
-
-`bun dev --extension packages/moa-extension` from the project root does **not**
-work — the CLI flag is resolved against `packages/coding-agent/` (where `bun
-dev` already `cd`-ed) and ends up at the non-existent path
-`packages/coding-agent/packages/moa-extension`. Use the settings file or pass
-the absolute path to `--extension`.
 
 ## Commands
 
 | Command | Purpose |
 | --- | --- |
 | `/moa run <task>` | Run a 3-worker planning panel + synthesis. Emits a bounded `moa-result` handoff (with TCO summary) and a chunked `moa-archive` of the full transcript (including Discovery + Rewrite + TCO JSON). |
-| `/moa status` | Show current settings (worker count, discovery/rewrite, ask-user enable/max, planner tools, archive chunk bytes). |
+| `/moa status` | Show current settings (worker count, discovery/rewrite, ask-user enable/max, planner tools, execution mode, archive chunk bytes). |
 | `/moa transcript [runId]` | Render the full archived transcript (default: most recent). Output is a `moa-transcript` custom message. |
 | `/moa runs` | List every `moa-archive` run in the current session. |
 | `/moa help` | Show the command summary. |
@@ -150,3 +125,29 @@ The loader walks up from the active cwd to find the project root (the first ance
 Malformed YAML, unknown fields, and unreadable files are tolerated: the loader logs a warning and returns empty overrides. A bad config file never blocks `/moa run`.
 
 If a worker slot has no model binding (e.g. `workerCount: 5` and you only overrode 3 of them), the missing slots fall back to the highest-priority model from the user's `modelRegistry`. The four hard-coded defaults never need registry access.
+
+## Execution mode
+
+MOA supports two worker execution modes, controlled by `workerExecutionMode`:
+
+| Mode | Default | Description |
+| --- | --- | --- |
+| `subprocess` | **yes** | Each worker runs as an `omp --mode json -p --no-session` subprocess. Full tool access, extension support, MCP, LSP. Backward compatible. |
+| `in-process` | no | Workers run in the current process via `createAgentSession()`. No subprocess overhead — lower memory, shares the runtime. **Intentionally conservative**: no extension discovery, no MCP, no LSP, read-only tools only (`read`/`search`/`find`/`web_search`/`ast_grep`). |
+
+### Config (any MOA config source)
+
+```yaml
+workerExecutionMode: in-process
+```
+
+### Differences between modes
+
+- **Tool access**: `in-process` limits workers to `read`, `search`, `find`, and `web_search`. The `plannerToolMode: "all"` setting is ignored in `in-process` mode — workers never get write tools like `write`/`edit`/`bash`.
+- **Extensions / MCP / LSP**: disabled in `in-process`. Workers do not discover or load project extensions, custom commands, or MCP servers.
+- **Session**: `in-process` uses `SessionManager.inMemory()` — no session log is written to disk for worker sessions.
+- **Python**: `in-process` skips Python kernel warmup.
+- **Timeout**: `in-process` uses `AbortController` + `Promise.race`. Unlike subprocess, the worker's execution cannot be forcibly killed — timeout returns `timedOut: true` and signals the abort; resource reclamation is best-effort.
+- **Recursion guard**: `in-process` workers do not set `PI_MOA_SUBAGENT`. The existing subprocess guard (`process.env.PI_MOA_SUBAGENT === "1"`) still applies to the subprocess path only.
+
+Default remains `subprocess` for full backward compatibility. `in-process` is an opt-in experimental path for reduced memory footprint.

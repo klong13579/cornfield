@@ -21,6 +21,30 @@
 const path = require("node:path");
 
 /**
+ * Process-global key for the loaded N-API bindings object.
+ * Shared across every evaluation of this package (compiled binary, workspace
+ * require, and inlined extension bundles) so a second `loadNative()` returns
+ * the first `.node` without calling `dlopen` again — which segfaults at 0x8000.
+ */
+const NATIVE_BINDINGS_SYMBOL = Symbol.for("@oh-my-pi/pi-natives.bindings");
+
+/**
+ * @param {Record<symbol | string, unknown>} [store]
+ * @returns {unknown}
+ */
+function getCachedNativeBindings(store = globalThis) {
+	return store[NATIVE_BINDINGS_SYMBOL];
+}
+
+/**
+ * @param {unknown} bindings
+ * @param {Record<symbol | string, unknown>} [store]
+ */
+function setCachedNativeBindings(bindings, store = globalThis) {
+	store[NATIVE_BINDINGS_SYMBOL] = bindings;
+}
+
+/**
  * @param {{
  *   embeddedAddon: { platformTag: string; version: string; files: unknown[] } | null | undefined;
  *   env: Record<string, string | undefined>;
@@ -80,4 +104,11 @@ function resolveLoaderCandidates({ addonFilenames, isCompiledBinary, nativeDir, 
 	return [...new Set(releaseCandidates)];
 }
 
-module.exports = { detectCompiledBinary, getAddonFilenames, resolveLoaderCandidates };
+module.exports = {
+	NATIVE_BINDINGS_SYMBOL,
+	detectCompiledBinary,
+	getAddonFilenames,
+	getCachedNativeBindings,
+	resolveLoaderCandidates,
+	setCachedNativeBindings,
+};
