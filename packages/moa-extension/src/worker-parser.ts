@@ -15,7 +15,12 @@
  * parser is pure: it returns a new struct, never mutates input.
  */
 
-import type { MoaOutputSchema, MoaOutputSchemaSection, MoaWorkerResult } from "./types";
+import { REFUSAL_PATTERNS, scoreWorkerHeuristicV2 } from "./quality/heuristic";
+import type { MoaQualitySettings } from "./quality/types";
+import { resolveRoleWeights } from "./quality/weights";
+import type { MoaOutputSchema, MoaOutputSchemaSection, MoaWorkerResult, ParsedWorkerOutput } from "./types";
+
+export type { ParsedWorkerOutput } from "./types";
 
 /**
  * Regex for `## <name>` sections.
@@ -29,17 +34,6 @@ import type { MoaOutputSchema, MoaOutputSchemaSection, MoaWorkerResult } from ".
  * correctly parses as `foo: ""`, `bar: <its body>`.
  */
 const SECTION_RE = /##\s+([a-zA-Z][\w-]*)\s*?\n([\s\S]*?)(?=\n##\s+|$)/g;
-
-export interface ParsedWorkerOutput {
-	/** Section name (lowercased) -> raw section text (trimmed). */
-	sections: Record<string, string>;
-	/** Required section names that were not present in the output. */
-	missingRequired: string[];
-	/** Section names present in output that are not in the schema. Informational. */
-	extraSections: string[];
-	/** Any structural parse errors (e.g. malformed section header). */
-	parseErrors: string[];
-}
 
 /**
  * Extract every `## <name>` section from the raw text. Returns a Map of
@@ -96,17 +90,6 @@ export function parseWorkerOutputBySchema(raw: string, schema: MoaOutputSchema):
 // ----------------------------------------------------------------------------
 
 export const DEFAULT_QUALITY_MIN_SCORE = 40;
-
-/** Heuristic: known-bad patterns the worker emits when it's refusing to work. */
-const REFUSAL_PATTERNS = [
-	/请确认/,
-	/as an AI/i,
-	/I cannot/i,
-	/让我先/,
-	/can you (?:please )?confirm/i,
-	/需要(?:您|你)确认/,
-	/需要(?:更多|进一步)信息/,
-];
 
 export interface WorkerQualityBreakdown {
 	score: number;
@@ -172,25 +155,28 @@ function countBulletItems(text: string): number {
 }
 
 /**
- * Convenience: parse + score + apply. Mutates a copy of the worker result
- * with `parsed`, `qualityScore`, `qualityDropped`, `parsedAt`. Returns the
- * mutated copy; the input is not modified.
+ * Sync parse + heuristic v2 score + apply. Returns a copy with `parsed`,
+ * `qualityScore`, `qualityDropped`, `parsedAt`. Uses per-role weights from
+ * `result.name` / `result.role` via `resolveRoleWeights` +
+ * `scoreWorkerHeuristicV2` — no LLM judge.
  *
- * PR1 callers: tests, smoke e2e. PR2 callers: executor after runWorker.
+ * For production pipeline scoring (including optional LLM judge in gray
+ * zone), use async `applyWorkerQuality` from `./quality/apply` instead.
  */
 export function applyWorkerParsing(
 	result: MoaWorkerResult,
 	schema: MoaOutputSchema,
-	options: { minScore?: number; now?: () => Date } = {},
+	options: { minScore?: number; now?: () => Date; quality?: MoaQualitySettings } = {},
 ): MoaWorkerResult {
 	const minScore = options.minScore ?? DEFAULT_QUALITY_MIN_SCORE;
 	const parsed = parseWorkerOutputBySchema(result.output, schema);
-	const breakdown = scoreWorkerOutput(parsed, schema);
+	const weights = resolveRoleWeights(result.name, result.role, options.quality?.roleWeights);
+	const heuristic = scoreWorkerHeuristicV2(parsed, schema, weights);
 	return {
 		...result,
 		parsed: parsed.sections,
-		qualityScore: breakdown.score,
-		qualityDropped: breakdown.score < minScore,
+		qualityScore: heuristic.score,
+		qualityDropped: heuristic.score < minScore,
 		parsedAt: (options.now ?? (() => new Date()))().toISOString(),
 	};
 }

@@ -147,11 +147,17 @@ function scoreWorker(output: ParsedWorkerOutput, schema: OutputSchema): number {
 - 3 worker 全 < 40 → **fail loud**：不跑 synthesis，返回 `MoaExecutionResult` 带 `synthesis = { ok: false, stderr: "all workers quality-failed" }`
 - 0-2 worker 存活 → synthesis 收到部分输入，archive 显式记录
 
-### 6.3 后续升级路径（v2 候选）
+### 6.3 Quality v2（已实施）
 
-- LLM judge 评分（+1 LLM call / worker / round，3-9 个 judge call）
-- Per-role 权重可调（divergent 重 plan 长度，critical 重 assumptions 质量）
-- v1 跑 e2e 后看实际 score 分布再决定是否升级
+Per-role 加权启发式 + 可选 hybrid LLM judge（默认关）已在 **Quality Check v2** 落地。设计见 [`docs/plans/2026-07-15-moa-quality-v2-design.md`](./plans/2026-07-15-moa-quality-v2-design.md)；实施见 [`docs/plans/2026-07-15-moa-quality-v2-implementation.md`](./plans/2026-07-15-moa-quality-v2-implementation.md)。
+
+| 能力 | 状态 |
+|---|---|
+| Per-role 维度权重（divergent / grounded / critical） | ✅ 默认启用 |
+| Hybrid LLM judge（灰区 / willDrop 触发；`enabled: false` 默认） | ✅ 可选 |
+| 契约硬失败（缺 required section）硬封顶 ≤30，judge 不可救回 | ✅ |
+
+§6.1 的 v1 伪代码仍描述 multi-round 初版思路；运行时 scoring 以 v2 模块（`packages/moa-extension/src/quality/`）为准。
 
 ## 7. 多轮循环（解决 C2）
 
@@ -377,10 +383,10 @@ interface MoaSettings {
 | 优先级 | 项目 | 备注 |
 |---|---|---|
 | P1 | Gateway / cron multi-round | 加 `OMP_MOA_GATEWAY_ASK_URL` 让 cron 任务也能 ask 钉钉用户 |
-| P1 | LLM judge 质量评分 | 当前 heuristic 准度有限，跑 e2e 看分布后决定 |
+| ~~P1~~ | ~~LLM judge 质量评分~~ | ✅ 已在 [Quality v2](./plans/2026-07-15-moa-quality-v2-design.md) 以 hybrid judge 实现（默认关） |
 | P2 | Cross-task memory | 答过的题进 user.md / TCO cache，新 task 自动复用 |
 | P2 | "auto-fill from memory" 按钮 | TUI ask 阶段可点"我答过了"，跳过 |
-| P3 | Per-role 权重可调 | divergent 重 plan 长度，critical 重 assumptions |
+| ~~P3~~ | ~~Per-role 权重可调~~ | ✅ 已在 [Quality v2](./plans/2026-07-15-moa-quality-v2-design.md) §5.2 默认权重表实现 |
 | P3 | Worker 模型选择 per round | 后半轮换更便宜的模型 |
 | P3 | 收敛算法升级 | 引入 LLM 评"问题相关性"，避免假收敛 |
 
@@ -398,6 +404,7 @@ interface MoaSettings {
 - [x] PR1 实施（types / parser / prompts / defaultValue / dispatchLog types）
 - [x] PR2 实施（multi-round executor + quality + schema read + askQuestionsList）
 - [x] 2026-07-15：回退未文档化的 discovery/planning phase 分裂，恢复「每轮 plan+questions」；修复 fail-loud / previousQuestions / schema 注入 / dispatchLog 生产接线
+- [x] 2026-07-15：Quality v2 — per-role 加权启发式 + 可选 hybrid LLM judge（见 [`docs/plans/2026-07-15-moa-quality-v2-design.md`](./plans/2026-07-15-moa-quality-v2-design.md)）
 
 ---
 

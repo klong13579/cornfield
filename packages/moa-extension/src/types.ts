@@ -1,4 +1,8 @@
+import type { MoaQualityMeta, MoaQualitySettings } from "./quality/types";
+
 export type MoaPlannerToolMode = "all" | "read-only";
+
+export type { MoaQualityMeta, MoaQualitySettings };
 
 export type MoaStage = "discovery" | "rewrite" | "worker" | "synthesis";
 
@@ -47,6 +51,8 @@ export interface MoaSettings {
 	 *  the burst of MCP / tool calls so 3 concurrent workers don't trip the
 	 *  same rate limit at the same instant. Set to 0 to start all in parallel. */
 	workerStaggerMs: number;
+	/** Quality v2 settings (heuristic weights + optional LLM judge). */
+	quality: MoaQualitySettings;
 }
 
 export interface MoaPlanWorker {
@@ -93,6 +99,8 @@ export interface MoaWorkerResult {
 	qualityDropped?: boolean;
 	/** ISO timestamp of when the parse happened. */
 	parsedAt?: string;
+	/** Quality v2 audit metadata (heuristic breakdown, judge path, role key). */
+	qualityMeta?: MoaQualityMeta;
 }
 
 // ----------------------------------------------------------------------------
@@ -105,6 +113,18 @@ export interface MoaWorkerResult {
 // ----------------------------------------------------------------------------
 
 export type MoaSectionType = "markdown" | "list";
+
+/** Structural parse of a worker's markdown section output. */
+export interface ParsedWorkerOutput {
+	/** Section name (as in schema) -> raw section text (trimmed). */
+	sections: Record<string, string>;
+	/** Required section names that were not present in the output. */
+	missingRequired: string[];
+	/** Section names present in output that are not in the schema. Informational. */
+	extraSections: string[];
+	/** Any structural parse errors (e.g. malformed section header). */
+	parseErrors: string[];
+}
 
 export interface MoaOutputSchemaSection {
 	/** Section name used in `## <name>` headers. Lowercase, snake_case preferred. */
@@ -163,6 +183,8 @@ export interface MoaDispatchLogEntry {
 	qualityScore?: number;
 	/** Whether the worker was dropped due to quality check. */
 	qualityDropped?: boolean;
+	/** Quality v2 audit metadata copied from the worker result. */
+	qualityMeta?: MoaQualityMeta;
 	/** Retry count (0 = first attempt; ≥1 = transient-failure retry). */
 	retryCount: number;
 }

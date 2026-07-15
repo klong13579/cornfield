@@ -4,6 +4,7 @@ import {
 	TCO_MAX_MISSING_INPUTS_DEFAULT,
 	TCO_REWRITE_TIMEOUT_MS_DEFAULT,
 } from "./tco";
+import type { MoaQualityJudgeSettings, MoaQualitySettings } from "./quality/types";
 import type { MoaSettings, MoaWorkerExecutionMode, MoaWorkerSlot } from "./types";
 
 const RUNTIME_SETTINGS_ENV = "PI_MOA_SETTINGS_JSON";
@@ -23,6 +24,19 @@ export const DEFAULT_WORKER_MODELS = {
 } as const;
 
 export const DEFAULT_SYNTHESIS_MODEL = "narwal-plan/deepseek-v4-pro-202606";
+
+export const DEFAULT_QUALITY_JUDGE: MoaQualityJudgeSettings = {
+	enabled: false,
+	mode: "hybrid",
+	model: "narwal-plan/minimax-m3",
+	grayMargin: 10,
+	timeoutMs: 60_000,
+	onError: "keep_heuristic",
+};
+
+export const DEFAULT_QUALITY_SETTINGS: MoaQualitySettings = {
+	judge: DEFAULT_QUALITY_JUDGE,
+};
 
 export const DEFAULT_WORKER_SLOTS: ReadonlyArray<MoaWorkerSlot> = [
 	{
@@ -67,6 +81,7 @@ export const DEFAULT_SETTINGS: MoaSettings = {
 	// set this to ~1500 to spread the burst of MCP / tool calls so 3 concurrent
 	// workers don't trip the same rate limit at the same instant.
 	workerStaggerMs: 0,
+	quality: DEFAULT_QUALITY_SETTINGS,
 };
 
 export function normalizeWorkerSlots(
@@ -97,6 +112,28 @@ function loadRuntimeSettingsOverrides(): Partial<MoaSettings> {
 		throw new Error(`${RUNTIME_SETTINGS_ENV} must be a JSON5 object`);
 	}
 	return parsed as Partial<MoaSettings>;
+}
+
+function resolveQualitySettings(override: Partial<MoaQualitySettings> | undefined): MoaQualitySettings {
+	const judgeOverride = override?.judge;
+	const rawMode = judgeOverride?.mode;
+	const mode = rawMode === "hybrid" ? "hybrid" : DEFAULT_QUALITY_JUDGE.mode;
+	const grayMargin = Math.max(
+		0,
+		Math.floor(judgeOverride?.grayMargin ?? DEFAULT_QUALITY_JUDGE.grayMargin),
+	);
+	const timeoutMs = Math.max(0, Math.floor(judgeOverride?.timeoutMs ?? DEFAULT_QUALITY_JUDGE.timeoutMs));
+	return {
+		roleWeights: override?.roleWeights ?? DEFAULT_QUALITY_SETTINGS.roleWeights,
+		judge: {
+			enabled: judgeOverride?.enabled ?? DEFAULT_QUALITY_JUDGE.enabled,
+			mode,
+			model: judgeOverride?.model?.trim() || DEFAULT_QUALITY_JUDGE.model,
+			grayMargin,
+			timeoutMs,
+			onError: judgeOverride?.onError === "keep_heuristic" ? "keep_heuristic" : DEFAULT_QUALITY_JUDGE.onError,
+		},
+	};
 }
 
 export function resolveSettings(overrides: Partial<MoaSettings> = {}): MoaSettings {
@@ -141,5 +178,6 @@ export function resolveSettings(overrides: Partial<MoaSettings> = {}): MoaSettin
 		qualityMinScore,
 		workerStaggerMs,
 		workerExecutionMode,
+		quality: resolveQualitySettings(mergedOverrides.quality),
 	};
 }

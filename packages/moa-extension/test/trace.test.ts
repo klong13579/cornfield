@@ -8,10 +8,17 @@ import {
 	buildTraceDetails,
 	chunkUtf8,
 	createMoaRunId,
+	formatDispatchQuality,
 	listMoaArchiveRuns,
 	reconstructMoaArchive,
 } from "../src/trace";
-import type { MoaArchiveChunk, MoaArchiveManifest, MoaExecutionResult, MoaWorkerResult } from "../src/types";
+import type {
+	MoaArchiveChunk,
+	MoaArchiveManifest,
+	MoaExecutionResult,
+	MoaQualityMeta,
+	MoaWorkerResult,
+} from "../src/types";
 import { MOA_ARCHIVE_CHUNK_BYTES } from "../src/types";
 
 function makeWorker(overrides: Partial<MoaWorkerResult> = {}): MoaWorkerResult {
@@ -26,8 +33,23 @@ function makeWorker(overrides: Partial<MoaWorkerResult> = {}): MoaWorkerResult {
 		rewrittenPrompt: overrides.rewrittenPrompt,
 		parsed: overrides.parsed,
 		qualityScore: overrides.qualityScore,
-		qualityDropped: overrides.qualityDropped,
-		parsedAt: overrides.parsedAt,
+	qualityDropped: overrides.qualityDropped,
+	parsedAt: overrides.parsedAt,
+	qualityMeta: overrides.qualityMeta,
+	};
+}
+
+function makeQualityMeta(overrides: Partial<MoaQualityMeta> = {}): MoaQualityMeta {
+	return {
+		version: 2,
+		heuristicScore: overrides.heuristicScore ?? 45,
+		judgeScore: overrides.judgeScore,
+		source: overrides.source ?? "heuristic",
+		roleKey: overrides.roleKey ?? "divergent",
+		contractHardFail: overrides.contractHardFail ?? false,
+		judged: overrides.judged ?? false,
+		judgeError: overrides.judgeError,
+		breakdown: overrides.breakdown,
 	};
 }
 
@@ -316,6 +338,44 @@ describe("buildDispatchLogFromResults", () => {
 		expect(log[1]?.qualityScore).toBe(30);
 		expect(log[1]?.qualityDropped).toBe(true);
 	});
+
+	it("propagates qualityMeta from worker results", () => {
+		const meta = makeQualityMeta({ heuristicScore: 55, source: "heuristic", judged: false });
+		const log = buildDispatchLogFromResults([
+			makeWorker({ name: "divergent", qualityScore: 55, qualityMeta: meta }),
+		]);
+		expect(log[0]?.qualityMeta).toEqual(meta);
+	});
+});
+
+describe("formatDispatchQuality", () => {
+	it("returns plain score when no meta", () => {
+		expect(formatDispatchQuality({ qualityScore: 72 })).toBe("72");
+		expect(formatDispatchQuality({})).toBe("");
+	});
+
+	it("returns simple score for heuristic-only meta", () => {
+		expect(
+			formatDispatchQuality({
+				qualityScore: 45,
+				qualityMeta: makeQualityMeta({ heuristicScore: 45, judged: false }),
+			}),
+		).toBe("45");
+	});
+
+	it("renders heuristic→judge line when judged", () => {
+		expect(
+			formatDispatchQuality({
+				qualityScore: 72,
+				qualityMeta: makeQualityMeta({
+					heuristicScore: 45,
+					judgeScore: 72,
+					source: "judge",
+					judged: true,
+				}),
+			}),
+		).toBe("72 (heuristic=45 → judge=72)");
+	});
 });
 
 describe("buildMoaArchive with dispatchLog", () => {
@@ -335,6 +395,25 @@ describe("buildMoaArchive with dispatchLog", () => {
 		expect(text).toContain("| worker | round |");
 		expect(text).toContain("divergent");
 		expect(text).toContain("grounded");
+	});
+
+	it("renders heuristic→judge quality in dispatch log when meta present", () => {
+		const meta = makeQualityMeta({
+			heuristicScore: 45,
+			judgeScore: 72,
+			source: "judge",
+			judged: true,
+		});
+		const dispatchLog = buildDispatchLogFromResults([
+			makeWorker({ name: "divergent", qualityScore: 72, qualityMeta: meta }),
+		]);
+		const text = buildMoaArchive({
+			runId: "moa-d-judge",
+			task: "t",
+			workers: [makeWorker({ name: "divergent" })],
+			dispatchLog,
+		});
+		expect(text).toContain("72 (heuristic=45 → judge=72)");
 	});
 
 	it("omits Dispatch log section when dispatchLog is empty or undefined", () => {

@@ -9,6 +9,39 @@ describe("DEFAULT_SETTINGS (PR2 multi-round)", () => {
 	});
 });
 
+describe("DEFAULT_SETTINGS — quality v2", () => {
+	it("has judge disabled by default", () => {
+		expect(DEFAULT_SETTINGS.quality.judge.enabled).toBe(false);
+	});
+	it("uses the design-locked judge model", () => {
+		expect(DEFAULT_SETTINGS.quality.judge.model).toBe("narwal-plan/minimax-m3");
+	});
+});
+
+describe("resolveSettings — quality judge clamping", () => {
+	it("clamps negative grayMargin to 0", () => {
+		expect(resolveSettings({ quality: { judge: { grayMargin: -5 } } }).quality.judge.grayMargin).toBe(0);
+	});
+	it("clamps negative timeoutMs to 0", () => {
+		expect(resolveSettings({ quality: { judge: { timeoutMs: -1000 } } }).quality.judge.timeoutMs).toBe(0);
+	});
+	it("falls back unknown judge mode to hybrid", () => {
+		const s = resolveSettings({
+			quality: { judge: { mode: "unknown" as "hybrid" } },
+		});
+		expect(s.quality.judge.mode).toBe("hybrid");
+	});
+	it("partial quality merge keeps judge defaults", () => {
+		const s = resolveSettings({ quality: { judge: { enabled: true } } });
+		expect(s.quality.judge.enabled).toBe(true);
+		expect(s.quality.judge.model).toBe("narwal-plan/minimax-m3");
+		expect(s.quality.judge.grayMargin).toBe(10);
+		expect(s.quality.judge.timeoutMs).toBe(60_000);
+		expect(s.quality.judge.onError).toBe("keep_heuristic");
+		expect(s.quality.judge.mode).toBe("hybrid");
+	});
+});
+
 describe("resolveSettings — multi-round clamping", () => {
 	it("clamps negative maxRounds to 0", () => {
 		expect(resolveSettings({ maxRounds: -2 }).maxRounds).toBe(0);

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "bun:test";
 import type { AuthStorage, ModelRegistry } from "@oh-my-pi/pi-coding-agent";
 import { Settings } from "@oh-my-pi/pi-coding-agent";
 import { buildPlan } from "../src/planner";
+import * as judgeModule from "../src/quality/judge";
 import { resolveSettings } from "../src/settings";
 import {
 	runAskStage,
@@ -40,9 +41,13 @@ function makeWorkerOutput(overrides: Partial<WorkerOutput> = {}): WorkerOutput {
 }
 
 function conformingOutput(label: string): string {
+	const planBody =
+		`${label} produced a plan with enough detail to pass the quality heuristic. ` +
+		"We considered the tradeoffs, chose one path, and wrote the assumptions explicitly. " +
+		"Additional context ensures plan substance exceeds the 200-character threshold for v2 role weights.";
 	return [
 		`## plan`,
-		`${label} produced a plan with enough detail to pass the quality heuristic. We considered the tradeoffs, chose one path, and wrote the assumptions explicitly.`,
+		planBody,
 		``,
 		`## open_questions`,
 		``,
@@ -50,6 +55,17 @@ function conformingOutput(label: string): string {
 		`- ${label} assumed a sensible default for an unspecified parameter.`,
 	].join("\n");
 }
+
+const LOW_QUALITY_OUTPUT = `## plan
+Short plan with 请确认 here.
+
+## open_questions
+- q1
+- q2
+- q3
+- q4
+- q5
+- q6`;
 
 function baseOptions(moaSettings = resolveSettings({ workerExecutionMode: "subprocess" })) {
 	return {
@@ -199,6 +215,46 @@ describe("runWorkersStage + runSynthesisStage", () => {
 		expect(result.surviving).toHaveLength(3);
 		expect(result.dispatchLog).toHaveLength(3);
 		expect(result.signal).not.toBe("quality_failed");
+	});
+
+	it("wires judgeFn into apply when quality.judge.enabled", async () => {
+		const mockJudgeFn = vi.fn(async () => ({ score: 80 }));
+		const createSpy = vi.spyOn(judgeModule, "createSpawnJudgeFn").mockReturnValue(mockJudgeFn);
+
+		vi.spyOn(subprocess, "spawnMoaWorker").mockResolvedValue(
+			makeWorkerOutput({ output: LOW_QUALITY_OUTPUT, ok: true }),
+		);
+
+		const moaSettings = resolveSettings({
+			discoveryEnabled: false,
+			rewriteEnabled: false,
+			workerExecutionMode: "subprocess",
+			qualityMinScore: 40,
+			quality: { judge: { enabled: true } },
+		});
+		const plan = buildPlan("judge wiring task", moaSettings);
+		const result = await runWorkersStage({
+			plan,
+			baseWorkers: plan.workers,
+			tco: emptyTco(plan.task, "test"),
+			outputSchema: DEFAULT_OUTPUT_SCHEMA,
+			tcoBlock: "",
+			ctx: { task: plan.task, settings: moaSettings },
+			options: baseOptions(moaSettings),
+			effectiveMaxRounds: 0,
+		});
+
+		expect(createSpy).toHaveBeenCalledWith(
+			expect.objectContaining({
+				cwd: "/tmp/moa-stage-test",
+				model: "narwal-plan/minimax-m3",
+				timeoutMs: 60_000,
+			}),
+		);
+		expect(mockJudgeFn).toHaveBeenCalledTimes(3);
+		expect(result.surviving).toHaveLength(3);
+		expect(result.workers.every(w => w.qualityMeta?.judged)).toBe(true);
+		expect(result.workers.every(w => w.qualityMeta?.source === "judge")).toBe(true);
 	});
 
 	it("signals quality_failed when all workers drop", async () => {

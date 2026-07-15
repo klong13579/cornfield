@@ -20,6 +20,8 @@
 
 ### Changed
 
+- MOA quality check v2: per-role heuristic weights; optional hybrid LLM judge (default off, `narwal-plan/minimax-m3`). Archive dispatch log and `/moa status` surface `qualityMeta` (heuristic→judge line when judged).
+
 - **Ships inline with compiled `omp`**: `@oh-my-pi/pi-coding-agent` depends on this package and registers the default factory in `sdk.ts`. No project/user `extensions` path is required; remove any leftover `../moa-extension` entries to avoid double registration. Docs and `templates/project-omp-settings.json` updated accordingly.
 
 ### Added

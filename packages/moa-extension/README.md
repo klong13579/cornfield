@@ -161,6 +161,24 @@ workerExecutionMode: in-process
 
 Default remains `subprocess` for full backward compatibility. `in-process` is an opt-in experimental path for reduced memory footprint.
 
+## Quality v2
+
+Worker outputs are scored before synthesis. **v2** replaces the v1 uniform heuristic with **per-role dimension weights** (`divergent` / `grounded` / `critical`; unknown roles fall back to the v1 table). Each role weights the same five signals differently — e.g. `critical` emphasizes assumptions and contract compliance; `divergent` emphasizes plan substance.
+
+An optional **hybrid LLM judge** is available but **off by default** (`quality.judge.enabled: false`). When enabled, judge runs only in the gray zone (`qualityMinScore` … `qualityMinScore + grayMargin`) or when the heuristic score would drop the worker; it does not run on contract hard failures (missing required sections, capped ≤30). Judge failures fall back to the heuristic score.
+
+```yaml
+qualityMinScore: 40
+quality:
+  judge:
+    enabled: false
+    mode: hybrid
+    model: narwal-plan/minimax-m3
+    grayMargin: 10
+```
+
+Optional `quality.roleWeights` overrides per-role dimension weights. See [`docs/plans/2026-07-15-moa-quality-v2-design.md`](../../docs/plans/2026-07-15-moa-quality-v2-design.md) for the default weight table, judge contract, and archive `qualityMeta` fields.
+
 ## Stage test harness (local / real LLM)
 
 Diagnose a stuck stage without waiting for full `/moa run` session persistence:

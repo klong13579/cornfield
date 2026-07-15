@@ -213,12 +213,12 @@ describe("applyWorkerParsing", () => {
 		expect(result).toEqual(before);
 	});
 
-	it("uses default minScore when not provided (all required, 70 score → not dropped)", () => {
-		// All required present: plan (short) + oq (1 bullet). Score 70, 70 < 40? No → not dropped.
+	it("uses default minScore when not provided (all required, v2 divergent score → not dropped)", () => {
+		// All required present: plan (short) + oq (1 bullet). Divergent v2: 25+0+15+0+20 = 60.
 		const result = makeResult({ output: "## plan\nshort plan\n## open_questions\n- x" });
 		const out = applyWorkerParsing(result, DEFAULT_OUTPUT_SCHEMA);
 		expect(DEFAULT_QUALITY_MIN_SCORE).toBe(40);
-		expect(out.qualityScore).toBe(70);
+		expect(out.qualityScore).toBe(60);
 		expect(out.qualityDropped).toBe(false);
 	});
 

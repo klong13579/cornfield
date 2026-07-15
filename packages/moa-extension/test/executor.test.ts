@@ -33,9 +33,13 @@ function makeWorkerOutput(overrides: Partial<WorkerOutput>): WorkerOutput {
 
 /** Worker output that follows the default MoaOutputSchema contract (PR2). */
 function conformingOutput(label: string): string {
+	const planBody =
+		`${label} produced a plan with enough detail to pass the quality heuristic. ` +
+		"We considered the tradeoffs, chose one path, and wrote the assumptions explicitly. " +
+		"Additional context ensures plan substance exceeds the 200-character threshold for v2 role weights.";
 	return [
 		`## plan`,
-		`${label} produced a plan with enough detail to pass the quality heuristic. We considered the tradeoffs, chose one path, and wrote the assumptions explicitly.`,
+		planBody,
 		``,
 		`## open_questions`,
 		``,

@@ -136,6 +136,8 @@ async function handleStatus(ctx: ExtensionCommandContext): Promise<void> {
 			`ask user: ${settings.askEnabled ? "on" : "off"} (max ${settings.maxMissingInputs})`,
 			`max rounds: ${settings.maxRounds} (per-round ask ≤ ${settings.maxQuestionsPerRound})`,
 			`quality min score: ${settings.qualityMinScore}`,
+			`quality judge: ${settings.quality.judge.enabled ? `hybrid@${settings.quality.judge.model}` : "off"}`,
+			`quality grayMargin: ${settings.quality.judge.grayMargin}`,
 			`planner tools: ${settings.plannerToolMode}`,
 			`archive chunk bytes: 48_000`,
 		].join("\n"),

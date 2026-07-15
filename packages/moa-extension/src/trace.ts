@@ -107,14 +107,27 @@ export function buildMoaArchive(
 		.join("\n\n");
 }
 
+/** Formats the dispatch-log quality cell from score + optional v2 meta. */
+export function formatDispatchQuality(entry: Pick<MoaDispatchLogEntry, "qualityScore" | "qualityMeta">): string {
+	const meta = entry.qualityMeta;
+	if (!meta) {
+		return typeof entry.qualityScore === "number" ? String(entry.qualityScore) : "";
+	}
+	const final = entry.qualityScore ?? meta.heuristicScore;
+	if (meta.judged && meta.judgeScore !== undefined) {
+		return `${final} (heuristic=${meta.heuristicScore} → judge=${meta.judgeScore})`;
+	}
+	return String(final);
+}
+
 function renderDispatchLogSection(entries: MoaDispatchLogEntry[] | undefined): string {
 	if (!entries || entries.length === 0) return "";
 	const lines: string[] = ["## Dispatch log"];
 	lines.push("| worker | round | started | duration_ms | exit | ok | quality | dropped | retry |");
-	lines.push("| --- | ---: | --- | ---: | ---: | :---: | ---: | :---: | ---: |");
+	lines.push("| --- | ---: | --- | ---: | ---: | :---: | --- | :---: | ---: |");
 	for (const e of entries) {
 		const dropped = e.qualityDropped ? "yes" : "";
-		const quality = typeof e.qualityScore === "number" ? String(e.qualityScore) : "";
+		const quality = formatDispatchQuality(e);
 		const round = String(e.round);
 		const started = e.startedAt;
 		const duration = String(e.durationMs);
@@ -151,6 +164,7 @@ export function buildDispatchLogFromResults(
 		if (w.model !== undefined) entry.model = w.model;
 		if (w.qualityScore !== undefined) entry.qualityScore = w.qualityScore;
 		if (w.qualityDropped) entry.qualityDropped = true;
+		if (w.qualityMeta !== undefined) entry.qualityMeta = w.qualityMeta;
 		return entry;
 	});
 }

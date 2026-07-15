@@ -33,7 +33,9 @@ import type {
 } from "./types";
 import { DEFAULT_OUTPUT_SCHEMA } from "./types";
 import { createWorkerEngine, type MoaWorkerEngine, type WorkerEngineSharedContext } from "./worker-engine";
-import { applyWorkerParsing, hasOpenQuestions, parseWorkerOutputBySchema } from "./worker-parser";
+import { applyWorkerQuality } from "./quality/apply";
+import { createSpawnJudgeFn, type JudgeFnArgs, type JudgeResult } from "./quality/judge";
+import { hasOpenQuestions, parseWorkerOutputBySchema } from "./worker-parser";
 
 export interface ExecutePlanOptions {
 	cwd: string;
@@ -104,6 +106,20 @@ export function resolveModel(requested: string | undefined, modelRegistry: Model
 		// Test mocks may not implement getAvailable.
 	}
 	return undefined;
+}
+
+function resolveJudgeFn(
+	planOptions: ResolvedPlanOptions,
+	options: ExecutePlanOptions,
+): ((args: JudgeFnArgs) => Promise<JudgeResult>) | undefined {
+	if (!planOptions.settings.quality.judge.enabled) {
+		return undefined;
+	}
+	return createSpawnJudgeFn({
+		cwd: options.cwd,
+		model: planOptions.settings.quality.judge.model,
+		timeoutMs: planOptions.settings.quality.judge.timeoutMs,
+	});
 }
 
 export function mapWorkerOutput(
@@ -672,6 +688,7 @@ export function appendDispatchEntries(
 		if (w.model !== undefined) entry.model = w.model;
 		if (w.qualityScore !== undefined) entry.qualityScore = w.qualityScore;
 		if (w.qualityDropped) entry.qualityDropped = true;
+		if (w.qualityMeta !== undefined) entry.qualityMeta = w.qualityMeta;
 		dispatchLog.push(entry);
 	}
 }
@@ -736,6 +753,7 @@ export async function runWorkersStage(input: {
 }): Promise<WorkersStageResult> {
 	const started = Date.now();
 	const planOptions = resolveStageOptions(input.ctx, input.options);
+	const judgeFn = resolveJudgeFn(planOptions, input.options);
 	const {
 		plan,
 		baseWorkers,
@@ -771,8 +789,16 @@ export async function runWorkersStage(input: {
 			[],
 		);
 		const workersMs = live?.stop() ?? 0;
-		const parsed = roundWorkers.map(w =>
-			applyWorkerParsing(w, outputSchema, { minScore: planOptions.settings.qualityMinScore }),
+		const parsed = await Promise.all(
+			roundWorkers.map(w =>
+				applyWorkerQuality(w, outputSchema, {
+					minScore: planOptions.settings.qualityMinScore,
+					quality: planOptions.settings.quality,
+					task: plan.task,
+					signal: options.signal,
+					judgeFn,
+				}),
+			),
 		);
 		allWorkerInvocations.push(...parsed);
 		appendDispatchEntries(dispatchLog, parsed, durations, 1, startedAts);
@@ -808,8 +834,16 @@ export async function runWorkersStage(input: {
 				previousQuestionsList,
 			);
 			const workersMs = live?.stop() ?? 0;
-			const parsed = roundWorkers.map(w =>
-				applyWorkerParsing(w, outputSchema, { minScore: planOptions.settings.qualityMinScore }),
+			const parsed = await Promise.all(
+				roundWorkers.map(w =>
+					applyWorkerQuality(w, outputSchema, {
+						minScore: planOptions.settings.qualityMinScore,
+						quality: planOptions.settings.quality,
+						task: plan.task,
+						signal: options.signal,
+						judgeFn,
+					}),
+				),
 			);
 			allWorkerInvocations.push(...parsed);
 			appendDispatchEntries(dispatchLog, parsed, durations, round, startedAts);
