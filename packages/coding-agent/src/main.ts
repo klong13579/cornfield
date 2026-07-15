@@ -683,7 +683,11 @@ export async function runRootCommand(parsed: Args, rawArgs: string[]): Promise<v
 	// Initialize discovery system with settings for provider persistence
 	logger.time("initializeWithSettings");
 	initializeWithSettings(settings);
-	modelRegistry.refreshInBackground();
+	// Await refresh here (not fire-and-forget) so resolveModelScope at line 710
+	// sees the full dynamic-discovery cache (~227 alibaba-coding-plan models),
+	// not just the 9 bundled. Otherwise the /model selector freezes on 27
+	// scopedModels for the whole session.
+	await modelRegistry.refresh("online-if-uncached");
 
 	// Apply model role overrides from CLI args or env vars (ephemeral, not persisted)
 	const smolModel = parsedArgs.smol ?? $env.PI_SMOL_MODEL;
