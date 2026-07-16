@@ -6,6 +6,7 @@ import {
 	createModelManager,
 	DEFAULT_LOCAL_TOKEN,
 	enrichModelThinking,
+	fetchOpenAICompatibleModels,
 	getBundledModels,
 	getBundledProviders,
 	googleAntigravityModelManagerOptions,
@@ -255,7 +256,12 @@ const ModelOverrideSchema = Type.Object({
 type ModelOverride = Static<typeof ModelOverrideSchema>;
 
 const ProviderDiscoverySchema = Type.Object({
-	type: Type.Union([Type.Literal("ollama"), Type.Literal("llama.cpp"), Type.Literal("lm-studio")]),
+	type: Type.Union([
+		Type.Literal("ollama"),
+		Type.Literal("llama.cpp"),
+		Type.Literal("lm-studio"),
+		Type.Literal("openai-compatible"),
+	]),
 });
 
 const ProviderAuthSchema = Type.Union([Type.Literal("apiKey"), Type.Literal("none"), Type.Literal("oauth")]);
@@ -1332,6 +1338,8 @@ export class ModelRegistry {
 				return this.#discoverLlamaCppModels(providerConfig);
 			case "lm-studio":
 				return this.#discoverLmStudioModels(providerConfig);
+			case "openai-compatible":
+				return this.#discoverOpenaiCompatibleModels(providerConfig);
 		}
 	}
 
@@ -1690,6 +1698,60 @@ export class ModelRegistry {
 			);
 		}
 		return this.#applyProviderModelOverrides(providerConfig.provider, discovered);
+	}
+
+	async #discoverOpenaiCompatibleModels(providerConfig: DiscoveryProviderConfig): Promise<Model<Api>[]> {
+		const baseUrl = providerConfig.baseUrl;
+		if (!baseUrl) {
+			throw new Error("baseUrl is required for openai-compatible discovery");
+		}
+
+		const apiKey = await this.authStorage.getApiKey(providerConfig.provider);
+		const headers = { ...(providerConfig.headers ?? {}) };
+
+		const results = await fetchOpenAICompatibleModels({
+			api: providerConfig.api,
+			provider: providerConfig.provider,
+			baseUrl,
+			apiKey,
+			headers: Object.keys(headers).length > 0 ? headers : undefined,
+			filterModel: (_entry, model) => {
+				// Skip non-text models (image, audio, video generation)
+				const ept = (_entry as Record<string, unknown>).supported_endpoint_types;
+				if (Array.isArray(ept)) {
+					const eptStr = ept.join(",");
+					if (
+						eptStr.includes("image-generation") ||
+						eptStr.includes("audio-speech") ||
+						eptStr.includes("openai-video") ||
+						eptStr.includes("video-generation")
+					) {
+						return false;
+					}
+				}
+				// Skip embedding models
+				if (model.id.toLowerCase().includes("embedding")) {
+					return false;
+				}
+				return true;
+			},
+			mapModel: (entry, defaults) => {
+				const raw = entry as Record<string, unknown>;
+				const contextWindow = raw.context_window ?? raw.context_length;
+				const maxTokens = raw.max_tokens ?? raw.max_output_tokens;
+				return {
+					...defaults,
+					contextWindow: typeof contextWindow === "number" ? contextWindow : 128000,
+					maxTokens: typeof maxTokens === "number" ? maxTokens : 8192,
+				};
+			},
+		});
+
+		if (results === null) {
+			return [];
+		}
+
+		return this.#applyProviderModelOverrides(providerConfig.provider, results);
 	}
 
 	#normalizeLlamaCppBaseUrl(baseUrl?: string): string {
