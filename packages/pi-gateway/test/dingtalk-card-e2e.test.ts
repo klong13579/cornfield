@@ -13,7 +13,7 @@
  * delivered → first streamAICard with INPUTING transition → at least
  * one streaming PUT → finishAICard with FINISHED transition.
  */
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -336,6 +336,94 @@ describe("DingTalk AI Card lifecycle (v2 reply path)", () => {
 		} finally {
 			restore();
 			broken.stop(true);
+		}
+	});
+
+	test("streamCard returns outbound when FINISHED fails after agent ran (no v1 re-run)", async () => {
+		// Regression: 2026-07-15/16 algorithm DM — finishAICard hit DingTalk
+		// `system.busy` after stream/patch already delivered the full answer.
+		// Returning null made MessageHandler call sendAgentResponseViaV1Markdown
+		// which enqueueWithMeta'd the same prompt a second time (~76s / ~2.5min).
+		// Collapse FINISHED / deferred-retry sleeps (1s→8s + 5s) so the test
+		// stays under the default timeout.
+		const sleepSpy = spyOn(Bun, "sleep").mockResolvedValue(undefined as never);
+		const busy = Bun.serve({
+			port: 0,
+			async fetch(req) {
+				const url = new URL(req.url);
+				const body = req.method === "GET" ? null : await req.json().catch(() => null);
+
+				if (url.pathname === "/v1.0/oauth2/accessToken") {
+					return new Response(JSON.stringify({ accessToken: "t", expireIn: 7200 }), {
+						headers: { "Content-Type": "application/json" },
+					});
+				}
+				if (url.pathname === "/v1.0/card/instances" && req.method === "POST") {
+					return new Response(JSON.stringify({ cardInstanceId: "ignored-on-create" }), {
+						headers: { "Content-Type": "application/json" },
+					});
+				}
+				if (url.pathname === "/v1.0/card/instances/deliver") {
+					return new Response(JSON.stringify({}), { headers: { "Content-Type": "application/json" } });
+				}
+				if (url.pathname === "/v1.0/card/streaming" && req.method === "PUT") {
+					return new Response(JSON.stringify({}), { headers: { "Content-Type": "application/json" } });
+				}
+				if (url.pathname === "/v1.0/card/instances" && req.method === "PUT") {
+					const flowStatus = (body as { cardData?: { cardParamMap?: { flowStatus?: string } } })?.cardData
+						?.cardParamMap?.flowStatus;
+					if (flowStatus === "3") {
+						// Match production: HTTP 500 + system.busy on FINISHED.
+						return new Response(
+							JSON.stringify({
+								requestid: "test-busy",
+								code: "system.busy",
+								message: "system.busy",
+							}),
+							{ status: 500, headers: { "Content-Type": "application/json" } },
+						);
+					}
+					return new Response(JSON.stringify({}), { headers: { "Content-Type": "application/json" } });
+				}
+				return new Response("not found", { status: 404 });
+			},
+		});
+		const restore = await installCardApiBaseForTest(busy.hostname, busy.port);
+		try {
+			const channel = new DingTalkChannel();
+			channel.setAccountId("ops");
+			channel.setConfig(makeDingTalkConfig(busy.port));
+
+			const inbound = makeMessage("stereopolicy 精读一下", "conv-finish-busy");
+			const session = makeSession("/tmp/card-finish-busy.jsonl", "conv-finish-busy");
+			let submitCalls = 0;
+			const submit = (
+				handlers?: Parameters<typeof channel.streamCard>[3],
+			): ReturnType<typeof bridge.forwardWithMeta> => {
+				submitCalls++;
+				return bridge.forwardWithMeta(inbound, session, handlers);
+			};
+
+			const outbound = await channel.streamCard(
+				inbound,
+				session,
+				{ accountId: "ops", agentName: "ops-bot", dapiCalls: 0 },
+				submit,
+			);
+
+			// Agent already ran once via submit — must NOT signal "card unavailable"
+			// (null), or MessageHandler will re-enqueue the same prompt on v1 path.
+			expect(outbound).not.toBeNull();
+			expect(outbound?.content.type).toBe("markdown");
+			const md = outbound?.content.type === "markdown" ? outbound.content.markdown : "";
+			expect(md).toContain("Hello world!");
+			expect(submitCalls).toBe(1);
+			// Drain deferred FINISHED retry IIFE before tearing down the fake API.
+			await new Promise<void>(resolve => setTimeout(resolve, 20));
+		} finally {
+			sleepSpy.mockRestore();
+			restore();
+			busy.stop(true);
 		}
 	});
 

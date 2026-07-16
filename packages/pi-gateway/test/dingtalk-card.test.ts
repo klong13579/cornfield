@@ -9,7 +9,7 @@
  * The full e2e card streaming test (dingtalk-card-e2e) stays separate
  * because it needs a live card server + AgentBridge.
  */
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { type DingTalkCardActionEvent, DingTalkChannel } from "../src/channels/dingtalk";
 import {
 	BlockType,
@@ -23,6 +23,7 @@ import {
 	finishAICard,
 	patchAICardBlocks,
 	parseDingtalkError,
+	scheduleDeferredFinishAICard,
 } from "../src/channels/dingtalk-card";
 import type { DingTalkConfig } from "../src/types";
 
@@ -534,8 +535,9 @@ describe("DingTalkChannel card action callback", () => {
 //
 // Bug fix: finishAICard used to give up on the first 500 response,
 // leaving the user's card stuck in INPUTING with a spinner. We now
-// retry transient failures (5xx, 429) up to 3 times; 4xx is still
-// thrown immediately so the bridge can fall back to v1 markdown.
+// retry transient failures (5xx, 429) up to 5 times; 4xx is still
+// thrown immediately. Callers may schedule a deferred FINISHED retry
+// after sync exhaustion — never re-run the agent for status-only fails.
 // ═══════════════════════════════════════════════════════════════════════
 
 interface RetryCardCall {
@@ -605,14 +607,18 @@ describe("finishAICard retry behavior", () => {
 	let realFetch: typeof globalThis.fetch;
 	let restoreFetch: (() => void) | undefined;
 	let fakeServer: Awaited<ReturnType<typeof startRetryCardServer>>;
+	let sleepSpy: ReturnType<typeof spyOn> | undefined;
 
 	beforeEach(() => {
 		realFetch = globalThis.fetch;
+		// Production backoff is 1s→2s→4s→8s; collapse sleeps so unit tests stay fast.
+		sleepSpy = spyOn(Bun, "sleep").mockResolvedValue(undefined as never);
 	});
 
 	afterEach(() => {
 		if (restoreFetch) restoreFetch();
 		globalThis.fetch = realFetch;
+		sleepSpy?.mockRestore();
 		fakeServer?.stop();
 	});
 
@@ -677,10 +683,10 @@ describe("finishAICard retry behavior", () => {
 
 		await expect(
 			finishAICard(RETRY_SAMPLE_CARD, RETRY_SAMPLE_CARD_DATA, makeRetryConfig(fakeServer.port)),
-		).rejects.toThrow(/FINISHED update failed after 3 retries/);
+		).rejects.toThrow(/FINISHED update failed after 5 retries/);
 
 		const finishedCalls = fakeServer.calls.filter(c => c.path === "/v1.0/card/instances" && c.method === "PUT");
-		expect(finishedCalls.length).toBe(3);
+		expect(finishedCalls.length).toBe(5);
 	});
 
 	test("throws immediately on non-retryable 4xx (no retries)", async () => {
@@ -736,8 +742,8 @@ describe("finishAICard retry behavior", () => {
 	// with `{"code":"system.busy",...}` to signal failure; the previous
 	// code treated 200 as success and the card got stuck in INPUTING.
 	// Now body-code errors are treated as transient and routed through
-	// the same retry/backoff path as a 5xx, so the bridge fallback to
-	// v1 markdown still fires when retries are exhausted.
+	// the same retry/backoff path as a 5xx. Callers may then schedule a
+	// deferred FINISHED retry; they must not re-enqueue the agent prompt.
 	test("retries on HTTP 200 with system.busy body, then succeeds", async () => {
 		let attempt = 0;
 		fakeServer = await startRetryCardServer(call => {
@@ -785,9 +791,44 @@ describe("finishAICard retry behavior", () => {
 
 		await expect(
 			finishAICard(RETRY_SAMPLE_CARD, RETRY_SAMPLE_CARD_DATA, makeRetryConfig(fakeServer.port)),
-		).rejects.toThrow(/FINISHED update failed after 3 retries: status=200 body=/);
+		).rejects.toThrow(/FINISHED update failed after 5 retries: status=200 body=/);
 
 		const finishedCalls = fakeServer.calls.filter(c => c.path === "/v1.0/card/instances" && c.method === "PUT");
-		expect(finishedCalls.length).toBe(3);
+		expect(finishedCalls.length).toBe(5);
+	});
+
+	test("scheduleDeferredFinishAICard retries FINISHED after delay without throwing to caller", async () => {
+		let attempt = 0;
+		fakeServer = await startRetryCardServer(call => {
+			if (call.path === "/v1.0/card/streaming") {
+				return new Response(JSON.stringify({}), {
+					headers: { "Content-Type": "application/json" },
+				});
+			}
+			if (call.path === "/v1.0/card/instances" && call.method === "PUT") {
+				attempt++;
+				if (attempt === 1) {
+					return new Response('{"code":"system.busy"}', { status: 500 });
+				}
+				return new Response(JSON.stringify({}), {
+					headers: { "Content-Type": "application/json" },
+				});
+			}
+			return new Response("not found", { status: 404 });
+		});
+		await installFetchRewrite(fakeServer.host, fakeServer.port);
+
+		scheduleDeferredFinishAICard(
+			RETRY_SAMPLE_CARD,
+			RETRY_SAMPLE_CARD_DATA,
+			makeRetryConfig(fakeServer.port),
+			0,
+		);
+		// Wall-clock wait — Bun.sleep is mocked in this describe; setTimeout is not.
+		await new Promise<void>(resolve => setTimeout(resolve, 50));
+
+		const finishedCalls = fakeServer.calls.filter(c => c.path === "/v1.0/card/instances" && c.method === "PUT");
+		expect(finishedCalls.length).toBeGreaterThanOrEqual(2);
+		expect(attempt).toBeGreaterThanOrEqual(2);
 	});
 });

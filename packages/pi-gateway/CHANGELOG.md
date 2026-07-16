@@ -18,7 +18,14 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **`hideThinkingBlock` for DingTalk AI Card now follows agentDir config** (`src/config-settings.ts`, `src/gateway.ts`): Canonical source is `<agentDir>/.omp/config.yml` (same key as the omp TUI), then user-level `~/.omp/agent/config.yml`, then legacy `gateway.json` `accounts.*.hideThinkingBlock`. Accounts that already set `hideThinkingBlock: true` in agentDir (e.g. algorithm/atomix) no longer need a duplicate entry in `gateway.json` for the Card to suppress THINK blocks.
+
 ### Fixed
+
+- **DingTalk AI Card `finishAICard` failure no longer re-runs the same user prompt** (`src/channels/dingtalk.ts`, `src/types.ts`, `src/channels/dingtalk-card.ts`): When the FINISHED status transition failed (DingTalk `500 system.busy` after retries), `streamCard` returned `null`. `MessageHandler` treated that as "card unavailable" and called `sendAgentResponseViaV1Markdown` → `enqueueWithMeta` again with the same inbound text — producing a second agent turn with no second DingTalk inbound (algorithm DM 2026-07-15 ~2.5min / 2026-07-16 ~76s). Root cause: FINISHED is only the card status machine; stream/patch had already delivered the full answer. Fix: after `submit` completes, always return a non-null outbound even when `finishAICard` throws; only pre-submit card creation failure still returns null for true v1 fallback. Regression test in `test/dingtalk-card-e2e.test.ts`.
+- **DingTalk AI Card FINISHED hardening** (`src/channels/dingtalk-card.ts`, `src/channels/dingtalk.ts`): Sync FINISHED retries increased to 5 with 1s exponential base backoff (~1/2/4/8s). After sync exhaustion, `scheduleDeferredFinishAICard` fires one background re-attempt (~5s later) without re-running the agent — reduces cards stuck in INPUTING when DingTalk returns transient `system.busy`.
 
 - **Gateway no longer kills agents during long-running tool calls** (`src/agent-bridge.ts`, `src/prompt-queue.ts`, `src/channels/dingtalk.ts`, `src/config.ts`, `src/types.ts`): The 2026-07-10 06:43 hr-agent `pip install mlx-whisper` incident (62s of no session events → 60s `inactivityMs` watchdog killed the agent) is the root failure mode. Three coordinated changes:
 

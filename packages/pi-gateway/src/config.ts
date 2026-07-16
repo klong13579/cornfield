@@ -28,6 +28,7 @@ const dingtalkAccountConfigSchema = z.object({
 	robotCode: z.string().optional(),
 	agentDir: z.string().optional(),
 	deniedTools: z.array(z.string()).optional(),
+	/** Legacy fallback only — prefer `<agentDir>/.omp/config.yml`. */
 	hideThinkingBlock: z.boolean().default(false),
 	enabled: z.boolean().default(true),
 });

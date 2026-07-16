@@ -57,8 +57,12 @@ const QPS_BACKOFF_MS = 2_000;
  * 403 covers the QpsLimit case already handled below.
  */
 const FINISHED_RETRYABLE_STATUSES = new Set([403, 408, 425, 429, 500, 502, 503, 504]);
-const FINISHED_MAX_RETRIES = 3;
-const FINISHED_BASE_BACKOFF_MS = 500;
+/** Sync attempts before `finishAICard` throws (caller may schedule a deferred retry). */
+const FINISHED_MAX_RETRIES = 5;
+/** Exponential base: 1s → 2s → 4s → 8s between attempts (~15s worst-case sync wait). */
+const FINISHED_BASE_BACKOFF_MS = 1_000;
+/** After sync retries exhaust, wait this long then try FINISHED once more in the background. */
+const FINISHED_DEFERRED_RETRY_MS = 5_000;
 
 const AICardStatus = {
 	PROCESSING: "1",
@@ -1050,9 +1054,12 @@ export async function patchAICardBlocks(
  * Flush the final content + blockList + chrome to the card and switch
  * to FINISHED state. Called once on `agent_end`.
  *
- * Throws on permanent failure so the bridge can fall back to v1 markdown
- * (otherwise the card gets stuck in INPUTING and the user sees a spinner
- * after a 5xx / system.busy from DingTalk).
+ * Throws on permanent failure so the caller can log and decide next steps.
+ * Callers that already ran the agent via `submit` must NOT treat this throw
+ * as "card unavailable" and re-enqueue the same prompt — stream/patch usually
+ * already delivered the answer; FINISHED is only the status transition.
+ * (Returning null from `streamCard` after this throw historically caused
+ * MessageHandler to double-run the agent on DingTalk `system.busy`.)
  */
 export async function finishAICard(card: AICardInstance, data: CardData, config?: DingTalkConfig): Promise<void> {
 	if (!card) return;
@@ -1091,10 +1098,9 @@ export async function finishAICard(card: AICardInstance, data: CardData, config?
 			if (resp.ok) {
 				// HTTP 200 — but DingTalk may still return a body with
 				// `code: "system.busy"` etc. to signal a logical failure.
-				// Without this check the bridge would skip the v1-markdown
-				// fallback and leave the card stuck in INPUTING (visible
-				// as a spinner). Treat body-code errors as transient
-				// (same class as a 5xx) and let the retry loop run.
+				// Treat body-code errors as transient (same class as a 5xx)
+				// and let the retry loop run so the card can still reach
+				// FINISHED when the platform recovers.
 				const text = await resp.text();
 				const error = parseDingtalkError(text);
 				if (error) {
@@ -1133,7 +1139,7 @@ export async function finishAICard(card: AICardInstance, data: CardData, config?
 
 				// Retryable: trigger backoff and try again with exponential delay.
 				cardRateLimiter.triggerBackoff();
-				const backoffMs = FINISHED_BASE_BACKOFF_MS * 2 ** attempt; // 500, 1000, 2000
+				const backoffMs = FINISHED_BASE_BACKOFF_MS * 2 ** attempt; // 1s, 2s, 4s, 8s
 				logger.warn("[AICard] FINISHED retryable failure, retrying", {
 					status: resp.status,
 					attempt: attempt + 1,
@@ -1168,10 +1174,41 @@ export async function finishAICard(card: AICardInstance, data: CardData, config?
 		}
 	}
 
-	// Exhausted all retries — surface the last status so the bridge can fall back.
+	// Exhausted all retries — surface the last status so the caller can log and
+	// optionally schedule `scheduleDeferredFinishAICard` (do not re-run the agent).
 	const msg = `FINISHED update failed after ${FINISHED_MAX_RETRIES} retries: status=${lastStatus} body=${lastBody}`;
 	logger.error("[AICard] " + msg);
 	throw new Error(msg);
+}
+
+/**
+ * After sync `finishAICard` retries exhaust, fire one delayed background
+ * re-attempt of the FINISHED status transition. Never blocks the reply path
+ * and never re-runs the agent — content was usually already streamed/patched.
+ */
+export function scheduleDeferredFinishAICard(
+	card: AICardInstance,
+	data: CardData,
+	config?: DingTalkConfig,
+	delayMs: number = FINISHED_DEFERRED_RETRY_MS,
+): void {
+	if (!card) return;
+	void (async () => {
+		try {
+			await Bun.sleep(delayMs);
+			await finishAICard(card, data, config);
+			logger.info("[AICard] deferred FINISHED retry succeeded", {
+				cardInstanceId: card.cardInstanceId,
+				delayMs,
+			});
+		} catch (err) {
+			logger.warn("[AICard] deferred FINISHED retry failed", {
+				cardInstanceId: card.cardInstanceId,
+				delayMs,
+				error: err instanceof Error ? err.message : String(err),
+			});
+		}
+	})();
 }
 
 export async function failAICard(card: AICardInstance, content: string, config?: DingTalkConfig): Promise<void> {

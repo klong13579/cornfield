@@ -12,7 +12,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import { resolveDisabledExtensions } from "../src/config-settings";
+import { resolveDisabledExtensions, resolveHideThinkingBlock } from "../src/config-settings";
 
 let homeDir: string;
 let agentDir: string;
@@ -101,5 +101,45 @@ describe("resolveDisabledExtensions", () => {
 		await writeUserConfig("- just a list\n- not a mapping\n");
 		const result = await resolveDisabledExtensions(agentDir);
 		expect(result).toEqual([]);
+	});
+});
+
+describe("resolveHideThinkingBlock", () => {
+	test("returns gateway fallback when no config files exist", async () => {
+		expect(await resolveHideThinkingBlock(agentDir)).toBe(false);
+		expect(await resolveHideThinkingBlock(agentDir, true)).toBe(true);
+		expect(await resolveHideThinkingBlock(agentDir, false)).toBe(false);
+	});
+
+	test("agentDir/.omp/config.yml is canonical when the key is present", async () => {
+		await writeProjectConfig("hideThinkingBlock: true\n");
+		expect(await resolveHideThinkingBlock(agentDir, false)).toBe(true);
+	});
+
+	test("agentDir false wins over gateway fallback true", async () => {
+		await writeProjectConfig("hideThinkingBlock: false\n");
+		expect(await resolveHideThinkingBlock(agentDir, true)).toBe(false);
+	});
+
+	test("falls back to user-level ~/.omp/agent/config.yml when project omits the key", async () => {
+		await writeUserConfig("hideThinkingBlock: true\n");
+		await writeProjectConfig("defaultThinkingLevel: medium\n");
+		expect(await resolveHideThinkingBlock(agentDir, false)).toBe(true);
+	});
+
+	test("project overrides user when both set the key", async () => {
+		await writeUserConfig("hideThinkingBlock: true\n");
+		await writeProjectConfig("hideThinkingBlock: false\n");
+		expect(await resolveHideThinkingBlock(agentDir, true)).toBe(false);
+	});
+
+	test("ignores non-boolean values and uses gateway fallback", async () => {
+		await writeProjectConfig("hideThinkingBlock: yes\n");
+		expect(await resolveHideThinkingBlock(agentDir, true)).toBe(true);
+	});
+
+	test("tolerates malformed yaml without throwing", async () => {
+		await writeProjectConfig("hideThinkingBlock: [broken\n");
+		expect(await resolveHideThinkingBlock(agentDir, false)).toBe(false);
 	});
 });

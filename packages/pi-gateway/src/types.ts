@@ -148,8 +148,12 @@ export interface Channel {
 	 * PROCESSING state immediately, content streams in via
 	 * `onTextDelta` → INPUTING with throttled updates, and the run finishes
 	 * with FINISHED on `agent_end`. Returns null when the platform
-	 * doesn't support cards or card creation failed — the gateway falls
-	 * back to `formatReply` (or plain text) in that case.
+	 * doesn't support cards or card creation failed *before* `submit`
+	 * ran — the gateway then falls back to v1 markdown which re-runs
+	 * the agent. If `submit` already completed, must return a non-null
+	 * outbound even when the FINISHED status transition fails (stream/
+	 * patch usually already delivered the body); returning null would
+	 * double-enqueue the same prompt.
 	 *
 	 * `submit` is a thin wrapper around `SessionManager.enqueueWithMeta`
 	 * pre-bound to this conversation; pass `handlers` to subscribe to
@@ -411,8 +415,13 @@ export interface DingtalkAccountConfig {
 	model?: string;
 	/** Tool access policy: deny these tool names for this account's agent. */
 	deniedTools?: string[];
-	/** When true, drop thinking/reasoning blocks from the DingTalk AI Card.
-	 *  The omp agent still emits thinking; the channel just doesn't render it. */
+	/**
+	 * Legacy fallback: drop thinking/reasoning blocks from the DingTalk AI Card.
+	 * Prefer `<agentDir>/.omp/config.yml` `hideThinkingBlock` (same key as the
+	 * omp TUI). Gateway resolves agentDir first, then user-level config, then
+	 * this field. The omp agent still emits thinking over RPC; the channel
+	 * just doesn't render it when resolved true.
+	 */
 	hideThinkingBlock?: boolean;
 	/** When false, skip account registration and DingTalk connection on startup. */
 	enabled?: boolean;

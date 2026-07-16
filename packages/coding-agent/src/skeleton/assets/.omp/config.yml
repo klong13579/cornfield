@@ -7,7 +7,7 @@ modelRoles:
   smol: narwal-plan/minimax-m3       # 轻量任务（文本处理、简单问题）
   slow: narwal-plan/glm-5.2          # 复杂任务（代码生成、深入分析）
 
-hideThinkingBlock: true                 # 是否隐藏思考块（gateway 场景推荐 true）
+hideThinkingBlock: true                 # 隐藏思考块（TUI + 钉钉 AI Card 共用；gateway 以本文件为准）
 defaultThinkingLevel: medium            # 思维链深度（low / medium / high）
 
 # theme: dark                          # 主题（dark / light）

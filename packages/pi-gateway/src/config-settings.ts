@@ -1,35 +1,35 @@
 /**
- * Read coding-agent config files for the gateway's SkillCache.
+ * Read coding-agent config files for the gateway (SkillCache + channel UX).
  *
  * The coding-agent's `Settings` class is a global singleton tied to a single
  * cwd/agentDir. The gateway runs multiple accounts in one process, each with
  * its own agentDir, so we can't use `Settings.init()` directly. This module
  * reads the relevant fields out of the same yaml files (`<home>/.omp/agent/config.yml`
  * + `<agentDir>/.omp/config.yml`) and merges them with the same precedence
- * the agent runtime applies: project-level entries are appended after
- * user-level entries (so a project can extend the global disable list).
+ * the agent runtime applies.
  *
- * The merge is intentionally simple — same key, both kept, dedup. We don't
- * try to mirror every edge of the SettingsManager merge logic; the goal is
- * to make `disabledExtensions` actually flow into the gateway's SkillCache.
+ * - `disabledExtensions`: project entries are appended after user-level
+ *   (union / dedup) so a project can extend the global disable list.
+ * - `hideThinkingBlock`: `<agentDir>/.omp/config.yml` is canonical (same
+ *   key the omp TUI reads). User-level config is fallback; `gateway.json`
+ *   account field is last resort only.
  */
 import * as os from "node:os";
 import * as path from "node:path";
 import { isEnoent, logger } from "@oh-my-pi/pi-utils";
 
-/** Read a single YAML config file and extract a string-array field.
- *  Returns [] on ENOENT, parse error, or missing/wrong-shape field. */
-async function readStringArrayField(file: string, field: string): Promise<string[]> {
+/** Read + parse a YAML config file. Returns null on ENOENT / parse / non-object. */
+async function readConfigObject(file: string): Promise<Record<string, unknown> | null> {
 	let content: string;
 	try {
 		content = await Bun.file(file).text();
 	} catch (err) {
-		if (isEnoent(err)) return [];
+		if (isEnoent(err)) return null;
 		logger.warn("[config-settings] failed to read config file", {
 			file,
 			error: err instanceof Error ? err.message : String(err),
 		});
-		return [];
+		return null;
 	}
 	let data: unknown;
 	try {
@@ -39,12 +39,37 @@ async function readStringArrayField(file: string, field: string): Promise<string
 			file,
 			error: err instanceof Error ? err.message : String(err),
 		});
-		return [];
+		return null;
 	}
-	if (!data || typeof data !== "object") return [];
-	const ext = (data as Record<string, unknown>)[field];
+	if (!data || typeof data !== "object" || Array.isArray(data)) return null;
+	return data as Record<string, unknown>;
+}
+
+/** Read a single YAML config file and extract a string-array field.
+ *  Returns [] on ENOENT, parse error, or missing/wrong-shape field. */
+async function readStringArrayField(file: string, field: string): Promise<string[]> {
+	const data = await readConfigObject(file);
+	if (!data) return [];
+	const ext = data[field];
 	if (!Array.isArray(ext)) return [];
 	return ext.filter((x): x is string => typeof x === "string");
+}
+
+/** Read a boolean field. Returns `undefined` when missing or wrong type. */
+async function readBooleanField(file: string, field: string): Promise<boolean | undefined> {
+	const data = await readConfigObject(file);
+	if (!data) return undefined;
+	const value = data[field];
+	return typeof value === "boolean" ? value : undefined;
+}
+
+function configPaths(agentDir: string): { userFile: string; projectFile: string } {
+	const configDirName = process.env.PI_CONFIG_DIR ?? ".omp";
+	const userConfigRoot = path.isAbsolute(configDirName) ? configDirName : path.join(os.homedir(), configDirName);
+	return {
+		userFile: path.join(userConfigRoot, "agent", "config.yml"),
+		projectFile: path.join(agentDir, ".omp", "config.yml"),
+	};
 }
 
 /** Merge two string arrays, dedup-preserving order (first occurrence wins). */
@@ -76,13 +101,7 @@ function dedupeConcat(a: string[], b: string[]): string[] {
  * Returns deduped union. Empty array if neither file has the field.
  */
 export async function resolveDisabledExtensions(agentDir: string): Promise<string[]> {
-	// The user-level config path uses `process.env.PI_CONFIG_DIR ?? ~/.omp`
-	// the same way `getAgentDir()` in @oh-my-pi/pi-utils does, so a test
-	// override of PI_CONFIG_DIR is honored here too.
-	const configDirName = process.env.PI_CONFIG_DIR ?? ".omp";
-	const userConfigRoot = path.isAbsolute(configDirName) ? configDirName : path.join(os.homedir(), configDirName);
-	const userFile = path.join(userConfigRoot, "agent", "config.yml");
-	const projectFile = path.join(agentDir, ".omp", "config.yml");
+	const { userFile, projectFile } = configPaths(agentDir);
 
 	const [userExt, projectExt] = await Promise.all([
 		readStringArrayField(userFile, "disabledExtensions"),
@@ -98,4 +117,33 @@ export async function resolveDisabledExtensions(agentDir: string): Promise<strin
 		merged: merged.length,
 	});
 	return merged;
+}
+
+/**
+ * Resolve whether the DingTalk AI Card should drop thinking blocks.
+ *
+ * Precedence (first defined boolean wins):
+ *   1. `<agentDir>/.omp/config.yml` — canonical (same as omp TUI)
+ *   2. `<home>/.omp/agent/config.yml` — user-level fallback
+ *   3. `gatewayFallback` — legacy `gateway.json` `accounts.*.hideThinkingBlock`
+ *   4. `false`
+ */
+export async function resolveHideThinkingBlock(
+	agentDir: string,
+	gatewayFallback: boolean = false,
+): Promise<boolean> {
+	const { userFile, projectFile } = configPaths(agentDir);
+	const [projectValue, userValue] = await Promise.all([
+		readBooleanField(projectFile, "hideThinkingBlock"),
+		readBooleanField(userFile, "hideThinkingBlock"),
+	]);
+	const resolved = projectValue ?? userValue ?? gatewayFallback;
+	logger.debug("[config-settings] resolved hideThinkingBlock", {
+		agentDir,
+		project: projectValue,
+		user: userValue,
+		gatewayFallback,
+		resolved,
+	});
+	return resolved;
 }

@@ -24,7 +24,7 @@ import { createBridgeStatusToolDefinitions } from "./bridge-status-tool";
 import { DingTalkChannel } from "./channels/dingtalk";
 import { ChannelRegistry } from "./channels/registry";
 import { getDataDir, getDingTalkConfig, getEnabledChannels } from "./config";
-import { resolveDisabledExtensions } from "./config-settings";
+import { resolveDisabledExtensions, resolveHideThinkingBlock } from "./config-settings";
 import { defaultCrashLog } from "./crash-log";
 import { createDingtalkAttachmentToolDefinitions } from "./dingtalk-attachment-tool";
 import { CronLifecycle } from "./gateway-cron-lifecycle";
@@ -550,7 +550,6 @@ export class Gateway {
 				}
 				const channel = this.#channelFactory?.(accountId) ?? new DingTalkChannel();
 				channel.setAccountId(accountId);
-				channel.setHideThinkingBlock(account.hideThinkingBlock ?? false);
 
 				const agentDir = resolveAgentDir(accountId, account.agentDir);
 				this.#accountAgentDirs.set(accountId, agentDir);
@@ -568,6 +567,12 @@ export class Gateway {
 				} catch (err) {
 					logger.warn("Failed to register agentDir", { accountId, agentDir, error: String(err) });
 				}
+
+				// Card think filter: agentDir/.omp/config.yml is canonical
+				// (same key as omp TUI); gateway.json is legacy fallback only.
+				channel.setHideThinkingBlock(
+					await resolveHideThinkingBlock(agentDir, account.hideThinkingBlock ?? false),
+				);
 
 				// Create per-account agent bridge with account-specific config
 				// Model is loaded from agentDir/.omp/config.yml by omp itself
@@ -617,7 +622,6 @@ export class Gateway {
 		const rawConfig = config.channels.dingtalk;
 		const channel = this.#channelFactory?.(accountId) ?? new DingTalkChannel();
 		channel.setAccountId(accountId);
-		channel.setHideThinkingBlock(account.hideThinkingBlock ?? false);
 
 		const agentDir = resolveAgentDir(accountId, account.agentDir);
 		this.#accountAgentDirs.set(accountId, agentDir);
@@ -638,6 +642,8 @@ export class Gateway {
 		} catch (err) {
 			logger.warn("Failed to register agentDir", { accountId, agentDir, error: String(err) });
 		}
+
+		channel.setHideThinkingBlock(await resolveHideThinkingBlock(agentDir, account.hideThinkingBlock ?? false));
 
 		const dispatcher = this.#buildHostToolDispatcher(agentDir, accountId);
 		const bridge = new AgentBridge(

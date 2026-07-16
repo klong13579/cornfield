@@ -47,6 +47,7 @@ import {
 	failAICard,
 	finishAICard,
 	patchAICardBlocks,
+	scheduleDeferredFinishAICard,
 	streamAICard,
 } from "./dingtalk-card";
 import {
@@ -392,7 +393,8 @@ export class DingTalkChannel extends BaseChannel {
 	 * When true, drop thinking/reasoning blocks from the rendered AI
 	 * Card. The omp agent still emits thinking deltas; the channel
 	 * just discards them instead of forwarding to `buildThinkBlock`.
-	 * Set per-account by the gateway from `DingtalkAccountConfig.hideThinkingBlock`.
+	 * Set by the gateway via `resolveHideThinkingBlock` — agentDir
+	 * `.omp/config.yml` is canonical; `gateway.json` is legacy fallback.
 	 */
 	#hideThinkingBlock = false;
 	/**
@@ -511,7 +513,8 @@ export class DingTalkChannel extends BaseChannel {
 	 * emitted by the agent instead of forwarding them into the AI
 	 * Card via `buildThinkBlock`. The model still thinks; the card
 	 * just doesn't show it. Set by the gateway from
-	 * `DingtalkAccountConfig.hideThinkingBlock` for per-account control.
+	 * Prefer resolving via `resolveHideThinkingBlock(agentDir)` so the
+	 * value matches `<agentDir>/.omp/config.yml`.
 	 */
 	setHideThinkingBlock(hide: boolean): void {
 		this.#hideThinkingBlock = hide;
@@ -1511,18 +1514,25 @@ export class DingTalkChannel extends BaseChannel {
 		try {
 			await finishAICard(currentCard, cardData, config);
 		} catch (err) {
-			logger.warn("[DingTalk] finishAICard failed, falling back to v1 markdown", {
+			// Agent already completed via `submit`. Stream/patch usually
+			// already delivered the full answer — FINISHED is only the
+			// status transition. Returning null here used to make
+			// MessageHandler treat the card path as unused and call
+			// sendAgentResponseViaV1Markdown → enqueueWithMeta again
+			// (2026-07-15/16 algorithm DM double-prompt regression).
+			logger.warn("[DingTalk] finishAICard failed after agent completed; not re-running prompt", {
 				accountId: this.#accountId,
 				conversationId: inbound.conversationId,
 				error: err instanceof Error ? err.message : String(err),
 			});
-			await cleanupTmpFiles(imageTmpFiles);
-			await cleanupTmpFiles(standaloneTmpFiles);
-			return null;
+			// Platform overload (`system.busy`) often clears within seconds —
+			// one deferred FINISHED attempt, still without re-running the agent.
+			scheduleDeferredFinishAICard(currentCard, cardData, config);
 		}
 
 		// Image-only temp files are no longer needed once the card is
-		// finalized — the bytes have already been uploaded to DingTalk.
+		// finalized (or abandoned after a FINISHED failure) — the bytes
+		// have already been uploaded to DingTalk when streaming succeeded.
 		await cleanupTmpFiles(imageTmpFiles);
 
 		// 6. Dispatch all standalone media (videos, audios, documents) in
@@ -1531,6 +1541,9 @@ export class DingTalkChannel extends BaseChannel {
 		//    a video immediately after an image is queued here. Within the
 		//    queue, we dispatch in declared order so the conversation
 		//    timeline matches the order of the agent's reply.
+		//    Still attempt dispatch after FINISHED failure — the agent
+		//    turn succeeded; attachments should not be dropped solely
+		//    because the card status transition failed.
 		for (const item of standaloneQueue) {
 			if (item.kind === "video") {
 				await this.#sendVideoStandalone(target, item.path, config);
@@ -1552,12 +1565,16 @@ export class DingTalkChannel extends BaseChannel {
 		// standalone send both happened above.
 		await cleanupTmpFiles(standaloneTmpFiles);
 
-		// The card itself is the user-visible reply. We still return a
+		// The card itself is the user-visible reply (even when FINISHED
+		// failed — stream/patch already wrote the body). We still return a
 		// markdown OutboundMessage for the gateway's own bookkeeping /
 		// tests; the v1 chrome is the most complete representation of
 		// the response in a single string. Channels that send via the
 		// card and ignore the OutboundMessage (DingTalk) will simply
 		// drop it on the floor — the card is already delivered.
+		// Non-null return is load-bearing: MessageHandler only falls back
+		// to sendAgentResponseViaV1Markdown (which re-runs the agent)
+		// when streamCard returns null.
 		const { markdown } = formatDingTalkReply({
 			meta,
 			inbound,
