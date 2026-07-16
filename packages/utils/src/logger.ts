@@ -9,6 +9,13 @@ import winston from "winston";
 import { getLogsDir } from "./dirs";
 import { cleanupStaleLogs } from "./log-cleanup";
 import { RotatingFileTransport } from "./rotating-file-transport";
+import { installStdioErrorGuards } from "./stdio-guard";
+
+// Broken TTY writes emit `error` on stdout/stderr. Without a listener those
+// become uncaughtException → postmortem logs again → EIO storm (14GB heap).
+// Install as early as the logger loads (nearly every omp process).
+installStdioErrorGuards(process.stdout);
+installStdioErrorGuards(process.stderr);
 
 /** Ensure logs directory exists */
 function ensureLogsDir(): string {
@@ -83,6 +90,11 @@ process.on("exit", () => {
 const consoleTransport = new winston.transports.Console({
 	format: winston.format.combine(winston.format.colorize(), winston.format.simple()),
 	silent: process.env.PI_LOG_SILENT === "true",
+});
+consoleTransport.on("error", () => {
+	// Console write failed (typically dead TTY). Silence further console
+	// output so winston does not keep retrying into the same broken stream.
+	consoleTransport.silent = true;
 });
 
 /** Whether console transport is enabled (default: true) */

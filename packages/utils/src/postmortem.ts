@@ -8,6 +8,7 @@
 import inspector from "node:inspector";
 import { isMainThread } from "node:worker_threads";
 import { logger } from ".";
+import { createFatalHandler } from "./stdio-guard";
 
 // Cleanup reasons, in order of priority/meaning.
 export enum Reason {
@@ -72,14 +73,29 @@ function runCleanup(reason: Reason): Promise<void> {
 // Worker thread: exit only (workers use self.addEventListener for exceptions)
 let inspectorOpened = false;
 
-function formatFatalError(label: string, err: Error): string {
-	const name = err.name || "Error";
-	const message = err.message || "(no message)";
-	const stack = err.stack || "";
-	const stackLines = stack.split("\n").slice(1);
-	const formattedStack = stackLines.length > 0 ? `\n${stackLines.join("\n")}` : "";
-	return `\n[${label}] ${name}: ${message}${formattedStack}\n`;
-}
+const safeWriteStderr = (text: string): void => {
+	try {
+		process.stderr.write(text);
+	} catch {
+		// Broken TTY — ignore
+	}
+};
+
+const handleUncaughtException = createFatalHandler({
+	writeStderr: safeWriteStderr,
+	logError: (message, context) => logger.error(message, context),
+	runCleanup: () => runCleanup(Reason.UNCAUGHT_EXCEPTION),
+	exit: code => process.exit(code),
+	logMessage: "Uncaught exception",
+});
+
+const handleUnhandledRejection = createFatalHandler({
+	writeStderr: safeWriteStderr,
+	logError: (message, context) => logger.error(message, context),
+	runCleanup: () => runCleanup(Reason.UNHANDLED_REJECTION),
+	exit: code => process.exit(code),
+	logMessage: "Unhandled rejection",
+});
 
 if (isMainThread) {
 	process
@@ -92,20 +108,14 @@ if (isMainThread) {
 			inspectorOpened = true;
 			inspector.open(undefined, undefined, false);
 			const url = inspector.url();
-			process.stderr.write(`Inspector opened: ${url}\n`);
+			safeWriteStderr(`Inspector opened: ${url}\n`);
 		})
-		.on("uncaughtException", async err => {
-			process.stderr.write(formatFatalError("Uncaught Exception", err));
-			logger.error("Uncaught exception", { err, stack: err.stack });
-			await runCleanup(Reason.UNCAUGHT_EXCEPTION);
-			process.exit(1);
+		.on("uncaughtException", err => {
+			void handleUncaughtException("Uncaught Exception", err);
 		})
-		.on("unhandledRejection", async reason => {
+		.on("unhandledRejection", reason => {
 			const err = reason instanceof Error ? reason : new Error(String(reason));
-			process.stderr.write(formatFatalError("Unhandled Rejection", err));
-			logger.error("Unhandled rejection", { err, stack: err.stack });
-			await runCleanup(Reason.UNHANDLED_REJECTION);
-			process.exit(1);
+			void handleUnhandledRejection("Unhandled Rejection", err);
 		})
 		.on("exit", async () => {
 			void runCleanup(Reason.EXIT); // fire and forget (exit imminent)
