@@ -14,10 +14,10 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import {
+	CONFIG_DIR_NAME,
 	getAgentDbPath,
 	getAgentDir,
 	getProjectDir,
-	CONFIG_DIR_NAME,
 	isEnoent,
 	logger,
 	procmgr,
@@ -375,6 +375,43 @@ export class Settings {
 	 */
 	getModelRoles(): ReadOnlyDict<string> {
 		return this.get("modelRoles");
+	}
+
+	/**
+	 * Get the list of pinned model keys ("provider/modelId").
+	 * Persisted in config.yml under the `pinned` key.
+	 */
+	getPinned(): string[] {
+		const value = this.get("pinned");
+		return Array.isArray(value) ? value.filter((k): k is string => typeof k === "string") : [];
+	}
+
+	/**
+	 * Replace the pinned model list.
+	 */
+	setPinned(pinned: string[]): void {
+		this.set("pinned", pinned);
+	}
+
+	/**
+	 * Toggle a model's pinned state. Returns true if it is now pinned.
+	 */
+	togglePinned(modelKey: string): boolean {
+		const current = this.getPinned();
+		const idx = current.indexOf(modelKey);
+		if (idx >= 0) {
+			this.setPinned(current.filter(k => k !== modelKey));
+			return false;
+		}
+		this.setPinned([...current, modelKey]);
+		return true;
+	}
+
+	/**
+	 * Check if a model is pinned.
+	 */
+	isPinned(modelKey: string): boolean {
+		return this.getPinned().includes(modelKey);
 	}
 
 	/*

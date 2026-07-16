@@ -37,8 +37,13 @@ export interface JsonRpcResponse<T = unknown> {
 	};
 }
 
+const RETRY_429_MAX_ATTEMPTS = 3;
+const RETRY_429_BACKOFF_MS = [1_000, 2_000, 4_000];
+
 /**
  * Call an MCP server with JSON-RPC 2.0 over HTTPS.
+ *
+ * Retries on 429 Too Many Requests with exponential backoff.
  *
  * @param url - Full MCP server URL (including any query parameters)
  * @param method - JSON-RPC method name (e.g., "tools/list", "tools/call")
@@ -46,6 +51,30 @@ export interface JsonRpcResponse<T = unknown> {
  * @returns Parsed JSON-RPC response
  */
 export async function callMCP<T = unknown>(
+	url: string,
+	method: string,
+	params?: Record<string, unknown>,
+): Promise<JsonRpcResponse<T>> {
+	let lastError: Error | undefined;
+	for (let attempt = 0; attempt < RETRY_429_MAX_ATTEMPTS; attempt++) {
+		try {
+			return await callMCPOnce(url, method, params);
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			if (msg.includes("429") && attempt < RETRY_429_MAX_ATTEMPTS - 1) {
+				const delay = RETRY_429_BACKOFF_MS[attempt] ?? 4_000;
+				logger.warn("MCP 429 rate limit, retrying in " + delay + "ms", { attempt, url, method });
+				await new Promise(r => setTimeout(r, delay));
+				continue;
+			}
+			lastError = err instanceof Error ? err : new Error(String(err));
+			break;
+		}
+	}
+	throw lastError ?? new Error("MCP request failed");
+}
+
+async function callMCPOnce<T = unknown>(
 	url: string,
 	method: string,
 	params?: Record<string, unknown>,

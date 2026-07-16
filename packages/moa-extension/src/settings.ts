@@ -19,8 +19,8 @@ const RUNTIME_SETTINGS_ENV = "PI_MOA_SETTINGS_JSON";
  */
 export const DEFAULT_WORKER_MODELS = {
 	divergent: "narwal-plan/qwen3.5-flash",
-	grounded: "alibaba-coding-plan/deepseek-v4-pro",
-	critical: "alibaba-coding-plan/kimi-k2.6",
+	grounded: "alibaba-coding-plan/qwen3.6-plus",
+	critical: "alibaba-coding-plan/kimi-k2.5",
 } as const;
 
 export const DEFAULT_SYNTHESIS_MODEL = "narwal-plan/deepseek-v4-pro-202606";

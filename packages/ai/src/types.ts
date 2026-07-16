@@ -672,4 +672,9 @@ export interface Model<TApi extends Api = any> {
 	 * `options.isOAuth = true` for the underlying provider call.
 	 */
 	isOAuth?: boolean;
+	/**
+	 * Functional category for the model selector UI. Drives emoji prefix and group
+	 * classification. Optional for backward compat — not all providers set it.
+	 */
+	category?: "chat" | "coding" | "reasoning" | "vision" | "asr" | "tts" | "image" | "video" | "embedding";
 }

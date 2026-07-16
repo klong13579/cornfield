@@ -3,6 +3,7 @@
  * `executePlan` orchestrates these; the stage-test CLI calls them directly.
  */
 import type { AuthStorage, ExtensionUIContext, ModelRegistry, Settings } from "@oh-my-pi/pi-coding-agent";
+import { parseModelPattern } from "@oh-my-pi/pi-coding-agent/config/model-resolver";
 import { prompt } from "@oh-my-pi/pi-utils";
 import { type AskQuestionsListItem, type AskUserContext, askMissingInputs, askQuestionsList } from "./ask-user";
 import discoveryPromptTemplate from "./prompts/discovery.md" with { type: "text" };
@@ -93,7 +94,31 @@ export function resolveStageOptions(ctx: StageContext, options: ExecutePlanOptio
 }
 
 export function resolveModel(requested: string | undefined, modelRegistry: ModelRegistry): string | undefined {
-	if (requested && requested.trim().length > 0) return requested;
+	const trimmed = requested?.trim();
+	if (trimmed) {
+		// Canonicalize when the registry knows the model. Unknown strings are
+		// passed through so subprocess `omp --model` can still resolve aliases;
+		// in-process fails later with a clear "model not found" stderr if the
+		// pattern does not resolve inside createAgentSession.
+		try {
+			const getAll = (modelRegistry as { getAll?: () => unknown }).getAll;
+			if (typeof getAll === "function") {
+				const all = getAll.call(modelRegistry);
+				if (Array.isArray(all) && all.length > 0) {
+					const { model } = parseModelPattern(trimmed, all as never, {}, { modelRegistry });
+					if (model && typeof model.provider === "string" && typeof model.id === "string") {
+						return `${model.provider}/${model.id}`;
+					}
+					console.warn(
+						`[moa] model "${trimmed}" not found in registry (in-process will fail; subprocess may still fall back)`,
+					);
+				}
+			}
+		} catch {
+			// Test mocks may not implement getAll / parseModelPattern.
+		}
+		return trimmed;
+	}
 	try {
 		const available = modelRegistry.getAvailable();
 		if (Array.isArray(available) && available.length > 0) {

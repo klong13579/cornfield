@@ -121,4 +121,35 @@ describe("Settings", () => {
 			expect(savedSettings.defaultThinkingLevel).toBe(Effort.High);
 		});
 	});
+
+	describe("pinned model list", () => {
+		it("defaults to empty", () => {
+			const settings = Settings.isolated();
+			expect(settings.getPinned()).toEqual([]);
+			expect(settings.isPinned("alibaba-coding-plan/qwen3-coder-plus")).toBe(false);
+		});
+
+		it("togglePinned adds and removes", () => {
+			const settings = Settings.isolated();
+			expect(settings.togglePinned("alibaba-coding-plan/qwen3-coder-plus")).toBe(true);
+			expect(settings.getPinned()).toEqual(["alibaba-coding-plan/qwen3-coder-plus"]);
+			expect(settings.isPinned("alibaba-coding-plan/qwen3-coder-plus")).toBe(true);
+
+			expect(settings.togglePinned("alibaba-coding-plan/qwen3.6-plus")).toBe(true);
+			expect(settings.getPinned()).toEqual([
+				"alibaba-coding-plan/qwen3-coder-plus",
+				"alibaba-coding-plan/qwen3.6-plus",
+			]);
+
+			// toggling existing key removes it
+			expect(settings.togglePinned("alibaba-coding-plan/qwen3-coder-plus")).toBe(false);
+			expect(settings.getPinned()).toEqual(["alibaba-coding-plan/qwen3.6-plus"]);
+		});
+
+		it("setPinned replaces list", () => {
+			const settings = Settings.isolated();
+			settings.setPinned(["anthropic/claude-opus-4-5"]);
+			expect(settings.getPinned()).toEqual(["anthropic/claude-opus-4-5"]);
+		});
+	});
 });

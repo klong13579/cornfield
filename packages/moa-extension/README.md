@@ -80,11 +80,11 @@ The whole point of MOA is that different workers use different models so they cr
 | Role | Model | Family |
 | --- | --- | --- |
 | `divergent` (广度) | `narwal-plan/qwen3.5-flash` | Qwen |
-| `grounded` (实操) | `alibaba-coding-plan/deepseek-v4-pro` | DeepSeek |
-| `critical` (锐利) | `alibaba-coding-plan/kimi-k2.6` | Kimi |
+| `grounded` (实操) | `alibaba-coding-plan/qwen3.6-plus` | Qwen (Alibaba) |
+| `critical` (锐利) | `alibaba-coding-plan/kimi-k2.5` | Kimi |
 | `synthesis` (高阶) | `narwal-plan/deepseek-v4-pro-202606` | DeepSeek (V4 Pro 202606) |
 
-Three different model families for the workers (diversity > strength, per the [Together MoA paper, 2024](https://arxiv.org/abs/2406.04692)) plus a fourth family member tuned for synthesis. Smoke-tested against the live `narwal-plan` and `alibaba-coding-plan` endpoints; all four return 200 OK with `stopReason=stop`.
+Three different model families for the workers (diversity > strength, per the [Together MoA paper, 2024](https://arxiv.org/abs/2406.04692)) plus a higher-order synthesis model. Defaults use model IDs that exist in the current registry (`alibaba-coding-plan` has no `deepseek-v4-*` / `kimi-k2.6` — those were removed).
 
 ### Overriding
 

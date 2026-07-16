@@ -22,10 +22,12 @@ Produce 3 worker-specific system prompts that:
    embed the `## Hard rules` block from the **Reference: Worker hard
    rules** section below verbatim into each generated worker prompt,
    AND the `## Required output schema` section listing the expected
-   `## <name>` headers from the schema block above. The orchestrator
-   parses worker output by section name, so the section names must be
-   preserved verbatim. Do NOT rewrite or omit the tool policy — it must
-   appear unchanged in every worker prompt.
+   `## <name>` headers from the schema block above. Also embed a short
+   **Example valid output** showing literal `## plan` / `## open_questions`
+   / `## assumptions` headers (not `## Step 1` or Chinese title substitutes).
+   The orchestrator parses worker output by section name, so the section
+   names must be preserved verbatim. Do NOT rewrite or omit the tool
+   policy — it must appear unchanged in every worker prompt.
 4. **Force the worker to proceed**: explicitly tell the worker that any
    `[assumed: ...]` lines in the TCO are working assumptions, not
    questions to ask the user. The worker MUST produce a complete answer.

@@ -27,13 +27,29 @@ export declare class AudioCapture {
   /**
    * Stop recording and return the captured audio as a WAV buffer.
    *
-   * Returns the WAV bytes as a `Buffer` (Uint8Array). Call
+   * Returns the WAV bytes as a `Buffer` (`Uint8Array`). Call
    * `Bun.write(path, buffer)` in JS to persist to disk.
    *
    * # Errors
    * Returns an error if no recording is active.
    */
   stop(): Buffer
+  /**
+   * Current RMS audio level, in the i16 range [0, 32767].
+   *
+   * Updated continuously by the audio thread. Returns 0 when not
+   * recording. Use this for live level meters and VAD (voice activity
+   * detection).
+   */
+  getLevel(): number
+  /**
+   * Peak RMS audio level seen since `start()`, in the i16 range [0, 32767].
+   *
+   * Monotonically non-decreasing during a recording session. Use this
+   * to detect "did the user actually speak" after stop (analogous to
+   * Hermes' peak-RMS silence gate).
+   */
+  getPeak(): number
 }
 
 /**

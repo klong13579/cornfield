@@ -9,6 +9,8 @@
 
 ### Fixed
 
+- **In-process "No model selected" on stale model ids**: default worker models updated to IDs that exist in the registry (`alibaba-coding-plan/qwen3.6-plus`, `alibaba-coding-plan/kimi-k2.5`); in-process engine returns a clear stderr when `createAgentSession` leaves `model` unset (typical cause: `moa.yml` pointing at removed `alibaba-coding-plan/deepseek-v4-*` / `kimi-k2.6`).
+- **Freeform worker output hard-failed quality at ≤30**: when workers omit every required schema header (`## plan` / `## open_questions`) but still emit substance, the parser now soft-recovers (body → primary markdown section + empty other required sections) so scoring can judge content. Prompt example blocks added so rewrite/workers prefer exact headers.
 - **TUI status bar (design §7.3)**: `ui.setStatus("moa", …)` now shows `Round N/M · asking question i/n · divergent OK · grounded OK · critical BLOCKED` during multi-round ask; cleared when the run finishes.
 - **Ask actions are answer / skip / stop all**: per-round ask uses `ui.select` for the three actions instead of requiring the user to type `STOP`. Typed `STOP` in freeform input remains a fallback.
 

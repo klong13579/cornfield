@@ -66,6 +66,27 @@ This is the plan.
 		expect(parsed.extraSections).toEqual([]);
 	});
 
+	it("soft-recovers freeform body when all required schema headers are missing", () => {
+		const raw = [
+			"## Step 1: 复述理解",
+			"",
+			"A ".repeat(120) + "concrete design with enough substance for quality scoring.",
+			"",
+			"## 设计概要",
+			"More freeform notes.",
+		].join("\n");
+		const parsed = parseWorkerOutputBySchema(raw, DEFAULT_OUTPUT_SCHEMA);
+		expect(parsed.missingRequired).toEqual([]);
+		expect(parsed.sections.plan).toContain("Step 1");
+		expect(parsed.sections.open_questions).toBe("");
+	});
+
+	it("does not soft-recover when only some required headers are present", () => {
+		const raw = "## open_questions\n- x";
+		const parsed = parseWorkerOutputBySchema(raw, DEFAULT_OUTPUT_SCHEMA);
+		expect(parsed.missingRequired).toEqual(["plan"]);
+	});
+
 	it("first occurrence wins on duplicate headers", () => {
 		const raw = "## plan\nfirst\n\n## plan\nsecond";
 		const parsed = parseWorkerOutputBySchema(raw, DEFAULT_OUTPUT_SCHEMA);

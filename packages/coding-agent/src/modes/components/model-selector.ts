@@ -129,6 +129,54 @@ const CANONICAL_TAB = "CANONICAL";
 /** Providers hidden from the interactive model selector. */
 const BLOCKED_PROVIDERS = new Set(["ollama", "llama.cpp", "lm-studio"]);
 
+// ---------------------------------------------------------------------------
+// Group definitions (UX spec: 5 functional groups + All)
+// ---------------------------------------------------------------------------
+
+type GroupCategory = "chat" | "coding" | "reasoning" | "vision" | "asr" | "tts" | "image" | "video" | "embedding";
+
+interface Group {
+	/** Stable id used for the group tab label. */
+	id: string;
+	/** Display label. */
+	label: string;
+	/** Categories that belong to this group. Empty array = "All" (no filter). */
+	categories: GroupCategory[];
+}
+
+const ALL_GROUP: Group = { id: "all", label: "All", categories: [] };
+
+const FUNCTIONAL_GROUPS: Group[] = [
+	{ id: "main", label: "\u4e3b\u529b", categories: ["chat", "coding"] },
+	{ id: "reasoning", label: "Reasoning", categories: ["reasoning"] },
+	{ id: "vision", label: "Vision", categories: ["vision"] },
+	{ id: "tts", label: "TTS", categories: ["tts"] },
+	{ id: "asr", label: "ASR", categories: ["asr"] },
+	{ id: "embedding", label: "Embedding", categories: ["embedding"] },
+	{ id: "more", label: "More", categories: ["image", "video"] },
+];
+
+/** Emoji prefix per category. Falls back to empty string when category is unknown. */
+const CATEGORY_EMOJI: Record<GroupCategory, string> = {
+	chat: "💬",
+	coding: "💻",
+	reasoning: "🧠",
+	vision: "👁",
+	asr: "🎤",
+	tts: "🔊",
+	image: "🎨",
+	video: "🎬",
+	embedding: "🔢",
+};
+
+function emojiForCategory(model: Model): string {
+	const cat = model.category as GroupCategory | undefined;
+	return cat ? CATEGORY_EMOJI[cat] : "";
+}
+
+/** 3-layer state machine. ALL/CANONICAL skip the group layer. */
+type SelectorLayer = "provider" | "group" | "list";
+
 /**
  * Component that renders a model selector with provider tabs and context menu.
  * - Tab/Arrow Left/Right: Switch between provider tabs
@@ -140,12 +188,15 @@ export class ModelSelectorComponent extends Container {
 	#searchInput: Input;
 	#headerContainer: Container;
 	#tabBar: TabBar | null = null;
+	#groupTabBar: TabBar | null = null;
 	#listContainer: Container;
 	#menuContainer: Container;
 	#allModels: ModelItem[] = [];
 	#filteredModels: ModelItem[] = [];
 	#canonicalModels: CanonicalModelItem[] = [];
 	#filteredCanonicalModels: CanonicalModelItem[] = [];
+	/** Visible list combining pinned section + group-filtered items. */
+	#visibleItems: (ModelItem | CanonicalModelItem)[] = [];
 	#selectedIndex: number = 0;
 	#roles = {} as Record<string, RoleAssignment | undefined>;
 	#settings = null as unknown as Settings;
@@ -162,6 +213,13 @@ export class ModelSelectorComponent extends Container {
 	// Tab state
 	#providers: string[] = [ALL_TAB];
 	#activeTabIndex: number = 0;
+	/** Groups derived for the current provider (empty on ALL/CANONICAL). */
+	#groups: Group[] = [];
+	#activeGroupIndex: number = 0;
+	/** Current focus layer in the 3-layer state machine. */
+	#layer: SelectorLayer = "provider";
+	/** Items currently in the pinned section (cross-group, scoped to current provider). */
+	#pinnedItems: ModelItem[] = [];
 
 	// Context menu state
 	#isMenuOpen: boolean = false;
@@ -268,6 +326,27 @@ export class ModelSelectorComponent extends Container {
 				role,
 			};
 		});
+	}
+
+	/**
+	 * Returns the canonical model key for the currently selected list item,
+	 * or undefined if the selection is not a pinnable model (e.g. canonical tab).
+	 */
+	#getSelectedModelKey(): string | undefined {
+		if (this.#isCanonicalTab()) return undefined;
+		const item = this.#visibleItems[this.#selectedIndex] as ModelItem | undefined;
+		if (!item || item.kind !== "provider") return undefined;
+		return `${item.provider}/${item.id}`;
+	}
+
+	/**
+	 * Returns the Pin/Unpin menu label for the current selection, or null when
+	 * the selection is not pinnable.
+	 */
+	#getPinMenuLabel(): string | null {
+		const key = this.#getSelectedModelKey();
+		if (!key) return null;
+		return this.#settings.isPinned(key) ? "Unpin from top" : "Pin to top";
 	}
 
 	#loadRoleModels(): void {
@@ -463,6 +542,7 @@ export class ModelSelectorComponent extends Container {
 		this.#canonicalModels = canonicalModels;
 		this.#filteredCanonicalModels = canonicalModels;
 		this.#selectedIndex = Math.min(this.#selectedIndex, Math.max(0, models.length - 1));
+		this.#refreshGroupsAndList();
 	}
 
 	#buildProviderTabs(): void {
@@ -476,6 +556,57 @@ export class ModelSelectorComponent extends Container {
 		}
 		const sortedProviders = Array.from(providerSet).sort();
 		this.#providers = [ALL_TAB, CANONICAL_TAB, ...sortedProviders];
+	}
+
+	/**
+	 * Compute the group tabs available for the current provider.
+	 * Returns empty array on ALL/CANONICAL (no group layer there).
+	 * The "All" pseudo-group is always present alongside functional groups.
+	 */
+	#computeGroups(): Group[] {
+		const activeProvider = this.#getActiveProvider();
+		if (activeProvider === ALL_TAB || activeProvider === CANONICAL_TAB) {
+			return [];
+		}
+		const scopedItems = this.#allModels.filter(m => m.provider.toUpperCase() === activeProvider);
+		const presentCategories = new Set<GroupCategory>();
+		for (const item of scopedItems) {
+			const cat = item.model.category as GroupCategory | undefined;
+			if (cat) presentCategories.add(cat);
+		}
+		// Always show "All" as the last group; only include functional groups that have at least one model.
+		const present: Group[] = [];
+		for (const g of FUNCTIONAL_GROUPS) {
+			if (g.categories.some(c => presentCategories.has(c))) {
+				present.push(g);
+			}
+		}
+		present.push(ALL_GROUP);
+		return present;
+	}
+
+	/**
+	 * Pinned models scoped to the current provider (or all if on ALL/CANONICAL).
+	 * Order matches the user's pinned order from settings.
+	 */
+	#computePinnedItems(): ModelItem[] {
+		const pinnedKeys = this.#settings.getPinned();
+		if (pinnedKeys.length === 0) return [];
+		const activeProvider = this.#getActiveProvider();
+		const byKey = new Map<string, ModelItem>();
+		for (const item of this.#allModels) {
+			byKey.set(`${item.provider}/${item.id}`, item);
+		}
+		const out: ModelItem[] = [];
+		for (const key of pinnedKeys) {
+			const item = byKey.get(key);
+			if (!item) continue;
+			if (activeProvider !== ALL_TAB && activeProvider !== CANONICAL_TAB) {
+				if (item.provider.toUpperCase() !== activeProvider) continue;
+			}
+			out.push(item);
+		}
+		return out;
 	}
 
 	async #refreshSelectedProvider(): Promise<void> {
@@ -499,7 +630,17 @@ export class ModelSelectorComponent extends Container {
 		tabBar.onTabChange = (_tab, index) => {
 			this.#activeTabIndex = index;
 			this.#selectedIndex = 0;
+			this.#layer = "provider";
+			this.#activeGroupIndex = 0;
+			// Rebuild both the provider tab bar AND the group tab bar for the
+			// new provider. The group bar is only attached to the header inside
+			// #updateTabBar; without this call it would stay empty on providers
+			// entered after initial mount.
+			this.#updateTabBar();
 			this.#applyTabFilter();
+			this.#refreshGroupsAndList();
+			this.#updateList();
+			this.#tui.requestRender();
 			void this.#refreshSelectedProvider().catch(error => {
 				this.#errorMessage = error instanceof Error ? error.message : String(error);
 				this.#updateList();
@@ -508,6 +649,63 @@ export class ModelSelectorComponent extends Container {
 		};
 		this.#tabBar = tabBar;
 		this.#headerContainer.addChild(tabBar);
+
+		// Recompute groups for the new provider and render a second tab bar.
+		this.#groups = this.#computeGroups();
+		if (this.#activeGroupIndex >= this.#groups.length) {
+			this.#activeGroupIndex = 0;
+		}
+		if (this.#groups.length > 0) {
+			const groupTabs: Tab[] = this.#groups.map(g => ({ id: g.id, label: g.label }));
+			const groupBar = new TabBar("Groups", groupTabs, getTabBarTheme(), this.#activeGroupIndex);
+			groupBar.onTabChange = (_tab, index) => {
+				this.#activeGroupIndex = index;
+				this.#selectedIndex = 0;
+				this.#rebuildVisibleItems();
+				this.#updateList();
+				this.#tui.requestRender();
+			};
+			this.#groupTabBar = groupBar;
+			this.#headerContainer.addChild(new Spacer(1));
+			this.#headerContainer.addChild(groupBar);
+		} else {
+			this.#groupTabBar = null;
+		}
+	}
+
+	/** Recompute groups + pinned + visible items after provider or model list change. */
+	#refreshGroupsAndList(): void {
+		this.#groups = this.#computeGroups();
+		if (this.#activeGroupIndex >= this.#groups.length) {
+			this.#activeGroupIndex = 0;
+		}
+		this.#rebuildVisibleItems();
+	}
+
+	/**
+	 * Build the list shown in the list layer:
+	 * pinned section (if any) + group-filtered models.
+	 * When on ALL/CANONICAL or no group is active, just the filtered models.
+	 */
+	#rebuildVisibleItems(): void {
+		const isCanonical = this.#isCanonicalTab();
+		this.#pinnedItems = isCanonical ? [] : this.#computePinnedItems();
+		if (isCanonical) {
+			this.#visibleItems = this.#filteredCanonicalModels;
+			return;
+		}
+		const group = this.#groups[this.#activeGroupIndex];
+		const pinnedKeys = new Set(this.#pinnedItems.map(i => `${i.model.provider}/${i.model.id}`));
+		const groupFiltered =
+			group && group.categories.length > 0
+				? this.#filteredModels.filter(m => {
+						const cat = m.model.category as GroupCategory | undefined;
+						if (cat === undefined || !group.categories.includes(cat)) return false;
+						// Exclude items already in the pinned section.
+						return !pinnedKeys.has(`${m.model.provider}/${m.model.id}`);
+					})
+				: this.#filteredModels.filter(m => !pinnedKeys.has(`${m.model.provider}/${m.model.id}`));
+		this.#visibleItems = [...this.#pinnedItems, ...groupFiltered];
 	}
 
 	#getActiveProvider(): string {
@@ -576,6 +774,7 @@ export class ModelSelectorComponent extends Container {
 
 		const visibleCount = isCanonicalTab ? this.#filteredCanonicalModels.length : this.#filteredModels.length;
 		this.#selectedIndex = Math.min(this.#selectedIndex, Math.max(0, visibleCount - 1));
+		this.#rebuildVisibleItems();
 		this.#updateList();
 	}
 
@@ -625,7 +824,8 @@ export class ModelSelectorComponent extends Container {
 	#updateList(): void {
 		this.#listContainer.clear();
 		const isCanonicalTab = this.#isCanonicalTab();
-		const visibleItems = isCanonicalTab ? this.#filteredCanonicalModels : this.#filteredModels;
+		const visibleItems = this.#visibleItems;
+		const pinnedCount = isCanonicalTab ? 0 : this.#pinnedItems.length;
 
 		const failures = loadModelFailures();
 
@@ -638,6 +838,11 @@ export class ModelSelectorComponent extends Container {
 
 		const activeProvider = this.#getActiveProvider();
 		const showProvider = activeProvider === ALL_TAB;
+
+		// Pinned section header (rendered only when pinned items exist and are visible in the current window)
+		if (pinnedCount > 0 && startIndex < pinnedCount) {
+			this.#listContainer.addChild(new Text(theme.fg("accent", theme.bold("  \ud83d\udccc Pinned")), 0, 0));
+		}
 
 		// Show visible slice of filtered models
 		for (let i = startIndex; i < endIndex; i++) {
@@ -674,29 +879,31 @@ export class ModelSelectorComponent extends Container {
 			const info = theme.fg("dim", ` ${formatModelInfoString(item.model, failures)}`);
 
 			let line = "";
+			const emoji = emojiForCategory(item.model);
+			const idWithEmoji = emoji ? `${emoji} ${item.id}` : item.id;
 			if (isSelected) {
 				const prefix = theme.fg("accent", `${theme.nav.cursor} `);
 				if (isCanonicalTab) {
 					const variants = theme.fg("dim", ` [${canonicalItem?.variantCount ?? 0}]`);
 					const backing = theme.fg("dim", ` -> ${item.model.provider}/${item.model.id}`);
-					line = `${prefix}${theme.fg("accent", item.id)}${variants}${backing}${info}${badgeText}`;
+					line = `${prefix}${theme.fg("accent", idWithEmoji)}${variants}${backing}${info}${badgeText}`;
 				} else if (showProvider) {
 					const providerPrefix = theme.fg("dim", `${providerItem?.provider ?? ""}/`);
-					line = `${prefix}${providerPrefix}${theme.fg("accent", providerItem?.id ?? item.id)}${info}${badgeText}`;
+					line = `${prefix}${providerPrefix}${theme.fg("accent", providerItem?.id ?? idWithEmoji)}${info}${badgeText}`;
 				} else {
-					line = `${prefix}${theme.fg("accent", item.id)}${info}${badgeText}`;
+					line = `${prefix}${theme.fg("accent", idWithEmoji)}${info}${badgeText}`;
 				}
 			} else {
 				const prefix = "  ";
 				if (isCanonicalTab) {
 					const variants = theme.fg("dim", ` [${canonicalItem?.variantCount ?? 0}]`);
 					const backing = theme.fg("dim", ` -> ${item.model.provider}/${item.model.id}`);
-					line = `${prefix}${item.id}${variants}${backing}${info}${badgeText}`;
+					line = `${prefix}${idWithEmoji}${variants}${backing}${info}${badgeText}`;
 				} else if (showProvider) {
 					const providerPrefix = theme.fg("dim", `${providerItem?.provider ?? ""}/`);
-					line = `${prefix}${providerPrefix}${providerItem?.id ?? item.id}${info}${badgeText}`;
+					line = `${prefix}${providerPrefix}${providerItem?.id ?? idWithEmoji}${info}${badgeText}`;
 				} else {
-					line = `${prefix}${item.id}${info}${badgeText}`;
+					line = `${prefix}${idWithEmoji}${info}${badgeText}`;
 				}
 			}
 
@@ -718,18 +925,6 @@ export class ModelSelectorComponent extends Container {
 		} else if (visibleItems.length === 0) {
 			const statusMessage = this.#getProviderEmptyStateMessage();
 			this.#listContainer.addChild(new Text(theme.fg("muted", statusMessage ?? "  No matching models"), 0, 0));
-		} else {
-			const selected = visibleItems[this.#selectedIndex];
-			if (!selected) {
-				return;
-			}
-			this.#listContainer.addChild(new Spacer(1));
-			const suffix = isCanonicalTab
-				? ` (${selected.model.provider}/${selected.model.id}, ${(selected as CanonicalModelItem).variantCount} variants)`
-				: "";
-			this.#listContainer.addChild(
-				new Text(theme.fg("muted", `  Model Name: ${selected.model.name}${suffix}`), 0, 0),
-			);
 		}
 	}
 	#getThinkingLevelsForModel(model: Model): ReadonlyArray<ThinkingLevel> {
@@ -748,9 +943,7 @@ export class ModelSelectorComponent extends Container {
 	}
 
 	#getSelectedItem(): ModelItem | CanonicalModelItem | undefined {
-		return this.#isCanonicalTab()
-			? this.#filteredCanonicalModels[this.#selectedIndex]
-			: this.#filteredModels[this.#selectedIndex];
+		return this.#visibleItems[this.#selectedIndex];
 	}
 
 	#openMenu(): void {
@@ -778,16 +971,28 @@ export class ModelSelectorComponent extends Container {
 
 		const showingThinking = this.#menuStep === "thinking" && this.#menuSelectedRole !== null;
 		const thinkingOptions = showingThinking ? this.#getThinkingLevelsForModel(selectedItem.model) : [];
+		const pinLabel = showingThinking ? null : this.#getPinMenuLabel();
+		const roleActionsForRender = showingThinking
+			? []
+			: this.#menuRoleActions.map((action, index) => ({ ...action, _renderIndex: pinLabel ? index + 1 : index }));
 		const optionLines = showingThinking
 			? thinkingOptions.map((thinkingLevel, index) => {
 					const prefix = index === this.#menuSelectedIndex ? `  ${theme.nav.cursor} ` : "    ";
 					const label = getThinkingLevelMetadata(thinkingLevel).label;
 					return `${prefix}${label}`;
 				})
-			: this.#menuRoleActions.map((action, index) => {
-					const prefix = index === this.#menuSelectedIndex ? `  ${theme.nav.cursor} ` : "    ";
-					return `${prefix}${action.label}`;
-				});
+			: (() => {
+					const lines: string[] = [];
+					if (pinLabel) {
+						const prefix = this.#menuSelectedIndex === 0 ? `  ${theme.nav.cursor} ` : "    ";
+						lines.push(`${prefix}${pinLabel}`);
+					}
+					for (const action of roleActionsForRender) {
+						const prefix = action._renderIndex === this.#menuSelectedIndex ? `  ${theme.nav.cursor} ` : "    ";
+						lines.push(`${prefix}${action.label}`);
+					}
+					return lines;
+				})();
 
 		const selectedRoleName = this.#menuSelectedRole ? getRoleInfo(this.#menuSelectedRole, this.#settings).name : "";
 		const headerText =
@@ -835,50 +1040,131 @@ export class ModelSelectorComponent extends Container {
 			return;
 		}
 
-		// Tab bar navigation
+		// 3-layer state machine: layer-specific key handling.
+		if (this.#layer === "list") {
+			this.#handleListInput(keyData);
+			return;
+		}
+		if (this.#layer === "group") {
+			this.#handleGroupInput(keyData);
+			return;
+		}
+		// Layer = provider
+		this.#handleProviderInput(keyData);
+	}
+
+	#handleProviderInput(keyData: string): void {
+		// Tab/Right/Shift+Tab/Left cycle provider tabs
 		if (this.#tabBar?.handleInput(keyData)) {
 			return;
 		}
-
-		// Up arrow - navigate list (wrap to bottom when at top)
-		if (matchesKey(keyData, "up")) {
-			const itemCount = this.#isCanonicalTab() ? this.#filteredCanonicalModels.length : this.#filteredModels.length;
-			if (itemCount === 0) return;
-			this.#selectedIndex = this.#selectedIndex === 0 ? itemCount - 1 : this.#selectedIndex - 1;
-			this.#updateList();
-			return;
-		}
-
-		// Down arrow - navigate list (wrap to top when at bottom)
-		if (matchesKey(keyData, "down")) {
-			const itemCount = this.#isCanonicalTab() ? this.#filteredCanonicalModels.length : this.#filteredModels.length;
-			if (itemCount === 0) return;
-			this.#selectedIndex = this.#selectedIndex === itemCount - 1 ? 0 : this.#selectedIndex + 1;
-			this.#updateList();
-			return;
-		}
-
-		// Enter - open context menu or select directly in temporary mode
-		if (matchesKey(keyData, "enter") || matchesKey(keyData, "return") || keyData === "\n") {
-			const selectedItem = this.#getSelectedItem();
-			if (selectedItem) {
-				if (this.#temporaryOnly) {
-					// In temporary mode, skip menu and select directly
-					this.#handleSelect(selectedItem, null);
-				} else {
-					this.#openMenu();
-				}
+		// Down or Enter: advance to next layer (group if available, else list)
+		if (
+			matchesKey(keyData, "down") ||
+			matchesKey(keyData, "enter") ||
+			matchesKey(keyData, "return") ||
+			keyData === "\n"
+		) {
+			if (this.#groups.length > 0) {
+				this.#layer = "group";
+			} else {
+				this.#layer = "list";
+				this.#selectedIndex = 0;
+				this.#updateList();
 			}
+			this.#tui.requestRender();
 			return;
 		}
-
 		// Escape or Ctrl+C - close selector
 		if (getKeybindings().matches(keyData, "tui.select.cancel")) {
 			this.#onCancelCallback();
 			return;
 		}
+		// Anything else: search input
+		this.#searchInput.handleInput(keyData);
+		this.#filterModels(this.#searchInput.getValue());
+	}
 
-		// Pass everything else to search input
+	#handleGroupInput(keyData: string): void {
+		// Tab/Right/Shift+Tab/Left cycle group tabs
+		if (this.#groupTabBar?.handleInput(keyData)) {
+			return;
+		}
+		// Down or Enter: advance to list layer
+		if (
+			matchesKey(keyData, "down") ||
+			matchesKey(keyData, "enter") ||
+			matchesKey(keyData, "return") ||
+			keyData === "\n"
+		) {
+			this.#layer = "list";
+			this.#selectedIndex = 0;
+			this.#updateList();
+			this.#tui.requestRender();
+			return;
+		}
+		// Up: back to provider layer
+		if (matchesKey(keyData, "up")) {
+			this.#layer = "provider";
+			this.#tui.requestRender();
+			return;
+		}
+		// Escape: back to provider layer
+		if (getKeybindings().matches(keyData, "tui.select.cancel")) {
+			this.#layer = "provider";
+			this.#tui.requestRender();
+			return;
+		}
+		// Anything else: search input
+		this.#searchInput.handleInput(keyData);
+		this.#filterModels(this.#searchInput.getValue());
+	}
+
+	#handleListInput(keyData: string): void {
+		// Tab/Right/Shift+Tab/Left cycle group tabs (when a group bar exists).
+		// On ALL/CANONICAL there is no group bar, so fall through to provider.
+		if (this.#groupTabBar && this.#groupTabBar.handleInput(keyData)) {
+			return;
+		}
+		if (!this.#groupTabBar && this.#tabBar?.handleInput(keyData)) {
+			return;
+		}
+		// Up arrow - navigate list (wrap to bottom when at top)
+		if (matchesKey(keyData, "up")) {
+			if (this.#visibleItems.length === 0) return;
+			this.#selectedIndex = this.#selectedIndex === 0 ? this.#visibleItems.length - 1 : this.#selectedIndex - 1;
+			this.#updateList();
+			return;
+		}
+		// Down arrow - navigate list (wrap to top when at bottom)
+		if (matchesKey(keyData, "down")) {
+			if (this.#visibleItems.length === 0) return;
+			this.#selectedIndex = this.#selectedIndex === this.#visibleItems.length - 1 ? 0 : this.#selectedIndex + 1;
+			this.#updateList();
+			return;
+		}
+		// Enter - open context menu or select directly in temporary mode
+		if (matchesKey(keyData, "enter") || matchesKey(keyData, "return") || keyData === "\n") {
+			const selectedItem = this.#visibleItems[this.#selectedIndex];
+			if (!selectedItem) return;
+			if (this.#temporaryOnly) {
+				this.#handleSelect(selectedItem as ModelItem, null);
+			} else {
+				this.#openMenu();
+			}
+			return;
+		}
+		// Escape: back to previous layer (group if available, else provider)
+		if (getKeybindings().matches(keyData, "tui.select.cancel")) {
+			if (this.#groups.length > 0) {
+				this.#layer = "group";
+			} else {
+				this.#layer = "provider";
+			}
+			this.#tui.requestRender();
+			return;
+		}
+		// Anything else: search input
 		this.#searchInput.handleInput(keyData);
 		this.#filterModels(this.#searchInput.getValue());
 	}
@@ -889,7 +1175,7 @@ export class ModelSelectorComponent extends Container {
 		const optionCount =
 			this.#menuStep === "thinking" && this.#menuSelectedRole !== null
 				? this.#getThinkingLevelsForModel(selectedItem.model).length
-				: this.#menuRoleActions.length;
+				: this.#menuRoleActions.length + (this.#getPinMenuLabel() ? 1 : 0);
 		if (optionCount === 0) return;
 
 		if (matchesKey(keyData, "up")) {
@@ -906,7 +1192,18 @@ export class ModelSelectorComponent extends Container {
 
 		if (matchesKey(keyData, "enter") || matchesKey(keyData, "return") || keyData === "\n") {
 			if (this.#menuStep === "role") {
-				const action = this.#menuRoleActions[this.#menuSelectedIndex];
+				const pinLabel = this.#getPinMenuLabel();
+				if (pinLabel && this.#menuSelectedIndex === 0) {
+					const key = this.#getSelectedModelKey();
+					if (key) this.#settings.togglePinned(key);
+					this.#rebuildVisibleItems();
+					this.#closeMenu();
+					this.#updateList();
+					this.#tui.requestRender();
+					return;
+				}
+				const roleIndex = pinLabel ? this.#menuSelectedIndex - 1 : this.#menuSelectedIndex;
+				const action = this.#menuRoleActions[roleIndex];
 				if (!action) return;
 				this.#menuSelectedRole = action.role;
 				this.#menuStep = "thinking";

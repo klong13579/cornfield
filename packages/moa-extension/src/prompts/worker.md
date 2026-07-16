@@ -51,6 +51,23 @@ section drops it from the parse.
 
 {{output_schema}}
 
+## Example valid output (copy this shape — do not invent other headers)
+```markdown
+## plan
+Your concrete design here (architecture, interfaces, tradeoffs). Must be
+substantive (≥ 200 characters). Do NOT use headers like "## Step 1" or
+"## 设计概要" instead of `## plan`.
+
+## open_questions
+- question: Should X be the default? | context: affects Y | suggested_default: yes | type: choice
+
+## assumptions
+- claim: Caller aborts cancel in-flight sleep | basis: TCO / common sense
+```
+
+If you have no questions, still emit `## open_questions` with an empty
+body (or a single bullet). Never omit the header.
+
 ## Reminders
 - Sections listed in the schema above are the **only** way to interact
   with the user / the orchestrator. Do not write "请确认" / "as you
@@ -63,3 +80,6 @@ section drops it from the parse.
 - For list-type sections, use bullet prefixes (`-`) and include the field
   names inline. Example for a `## <list_section>`:
   - <field_1>: <value> | <field_2>: <value> | ...
+- Before finishing, verify your reply starts with the exact headers from
+  the schema (e.g. `## plan` then `## open_questions`). Freeform titles
+  alone are incomplete.

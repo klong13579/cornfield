@@ -238,6 +238,8 @@ export const SETTINGS_SCHEMA = {
 
 	modelRoles: { type: "record", default: EMPTY_STRING_RECORD },
 
+	pinned: { type: "array", default: EMPTY_STRING_ARRAY },
+
 	modelTags: { type: "record", default: EMPTY_MODEL_TAGS_RECORD },
 
 	modelProviderOrder: { type: "array", default: EMPTY_STRING_ARRAY },
@@ -918,8 +920,78 @@ export const SETTINGS_SCHEMA = {
 		ui: {
 			tab: "interaction",
 			label: "Speech Model",
-			description: "Whisper model (HuggingFace repo ID, e.g. mlx-community/whisper-large-v3-turbo). Larger = more accurate but slower.",
+			description:
+				"Whisper model (HuggingFace repo ID, e.g. mlx-community/whisper-large-v3-turbo). Larger = more accurate but slower.",
 			submenu: true,
+		},
+	},
+	"stt.vadEnabled": {
+		type: "boolean",
+		default: true,
+		ui: {
+			tab: "interaction",
+			label: "Voice Activity Detection",
+			description:
+				"Auto-stop recording after sustained silence. Prevents runaway long recordings and lets the user speak naturally without watching a timer.",
+		},
+	},
+	"stt.silenceThreshold": {
+		type: "integer",
+		default: 200,
+		ui: {
+			tab: "interaction",
+			label: "Silence Threshold (RMS)",
+			description:
+				"Audio below this RMS amplitude (0-32767 scale) counts as silence. Lower = more sensitive to quiet speech. 200 matches Hermes Agent's default.",
+		},
+	},
+	"stt.silenceDurationSec": {
+		type: "number",
+		default: 3,
+		ui: {
+			tab: "interaction",
+			label: "Silence Duration (s)",
+			description:
+				"Seconds of continuous silence before VAD auto-stops the recording after speech has been confirmed.",
+		},
+	},
+	"stt.maxRecordingSec": {
+		type: "integer",
+		default: 1800,
+		ui: {
+			tab: "interaction",
+			label: "Max Recording (s)",
+			description:
+				"Safety-net cap on a single recording. Defaults to 30 minutes. VAD normally stops much sooner; this only triggers if the user is in a noisy room or holds the silence indefinitely.",
+		},
+	},
+	"stt.chunkSizeMB": {
+		type: "integer",
+		default: 20,
+		ui: {
+			tab: "interaction",
+			label: "Chunk Size (MB)",
+			description:
+				"WAV files larger than this are split into chunks of this size before transcription. Mirrors OpenClaw's 20MB cap. Lower it if your provider rejects large uploads.",
+		},
+	},
+	"stt.transcribeTimeoutMultiplier": {
+		type: "number",
+		default: 3,
+		ui: {
+			tab: "interaction",
+			label: "Transcribe Timeout × audio length",
+			description:
+				"Transcription timeout = audio duration × this. The previous hard 120s cap was the source of the 'Transcription timed out after 120s' error on recordings above ~40s.",
+		},
+	},
+	"stt.transcribeTimeoutMaxSec": {
+		type: "integer",
+		default: 3600,
+		ui: {
+			tab: "interaction",
+			label: "Transcribe Timeout Max (s)",
+			description: "Hard ceiling on the adaptive transcription timeout. 1h default.",
 		},
 	},
 
@@ -2357,6 +2429,7 @@ export interface GroupTypeMap {
 	thinkingBudgets: ThinkingBudgetsSettings;
 	stt: SttSettings;
 	modelRoles: Record<string, string>;
+	pinned: string[];
 	modelTags: ModelTagsSettings;
 	cycleOrder: string[];
 	shellMinimizer: ShellMinimizerSettings;

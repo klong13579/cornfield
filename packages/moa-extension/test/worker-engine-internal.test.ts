@@ -55,6 +55,8 @@ function makeFakeSession(): FakeSession {
 	const disposeCalls = { count: 0 };
 
 	const session = {
+		// Engine bails with a clear error when createAgentSession leaves model unset.
+		model: { provider: "test", id: "test-model" },
 		subscribe: (fn: (e: { type: string; [k: string]: unknown }) => void) => {
 			subscriber = fn;
 			return () => {
@@ -126,6 +128,18 @@ describe("InProcessWorkerEngine — internal contract", () => {
 	// ------------------------------------------------------------------------
 	// Read-only tool enforcement (Alt 3b core fix)
 	// ------------------------------------------------------------------------
+
+	it("returns clear error when session has no model after createAgentSession", async () => {
+		createSessionSpy.mockResolvedValue({
+			session: { ...fake.session, model: undefined },
+		} as never);
+		const engine = createWorkerEngine("in-process", dummyShared);
+		const result = await engine.execute({ ...baseInput, model: "alibaba-coding-plan/deepseek-v4-flash" });
+		expect(result.ok).toBe(false);
+		expect(result.stderr).toContain("Model not found");
+		expect(result.stderr).toContain("alibaba-coding-plan/deepseek-v4-flash");
+		expect(result.output).toBe("");
+	});
 
 	it("input.tools='all' forces toolNames to IN_PROCESS_TOOLS (read-only)", async () => {
 		const engine = createWorkerEngine("in-process", dummyShared);

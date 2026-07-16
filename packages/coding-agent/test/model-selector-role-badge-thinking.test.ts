@@ -84,7 +84,8 @@ describe("ModelSelector role badge thinking display", () => {
 		expect(rendered).toContain("COMMIT (medium)");
 		expect(rendered).not.toContain("Role Thinking:");
 
-		selector.handleInput("\n");
+		selector.handleInput("\n"); // Provider -> List (no group layer on ALL tab)
+		selector.handleInput("\n"); // List -> open menu
 		installTestTheme();
 		const menuRendered = normalizeRenderedText(selector.render(220).join("\n"));
 		expect(menuRendered).toContain("Set as DEFAULT (Default)");
@@ -119,7 +120,8 @@ describe("ModelSelector role badge thinking display", () => {
 		expect(rendered).toContain("custom-fast (low)");
 		expect(rendered).toContain("SMOL (inherit)");
 
-		selector.handleInput("\n");
+		selector.handleInput("\n"); // Provider -> List (no group layer on ALL tab)
+		selector.handleInput("\n"); // List -> open menu
 		installTestTheme();
 		const menuRendered = normalizeRenderedText(selector.render(220).join("\n"));
 		expect(menuRendered).toContain("Set as custom-fast");

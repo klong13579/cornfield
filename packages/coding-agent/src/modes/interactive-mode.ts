@@ -26,7 +26,6 @@ import {
 	visibleWidth,
 } from "@oh-my-pi/pi-tui";
 import { APP_NAME, getProjectDir, hsvToRgb, isEnoent, logger, postmortem, prompt } from "@oh-my-pi/pi-utils";
-import { shutdownSharedGateway } from "../ipy/gateway-coordinator";
 import chalk from "chalk";
 import { KeybindingsManager } from "../config/keybindings";
 import { type Settings, settings } from "../config/settings";
@@ -39,6 +38,7 @@ import type {
 import type { CompactOptions } from "../extensibility/extensions/types";
 import { BUILTIN_SLASH_COMMANDS, loadSlashCommands } from "../extensibility/slash-commands";
 import { resolveLocalUrlToPath } from "../internal-urls";
+import { shutdownSharedGateway } from "../ipy/gateway-coordinator";
 import { LSP_STARTUP_EVENT_CHANNEL, type LspStartupEvent } from "../lsp/startup-events";
 import { renameApprovedPlanFile } from "../plan-mode/approved-plan";
 import planModeApprovedPrompt from "../prompts/system/plan-mode-approved.md" with { type: "text" };
@@ -46,7 +46,7 @@ import type { AgentSession, AgentSessionEvent } from "../session/agent-session";
 import { HistoryStorage } from "../session/history-storage";
 import type { SessionContext, SessionManager } from "../session/session-manager";
 import { getRecentSessions } from "../session/session-manager";
-import { STTController, type SttState, ListenController } from "../stt";
+import { ListenController, STTController, type SttState } from "../stt";
 import type { ExitPlanModeDetails, LspStartupServerInfo } from "../tools";
 import { normalizeLocalScheme } from "../tools/path-utils";
 import { formatPhaseDisplayName } from "../tools/todo-write";
@@ -336,9 +336,24 @@ export class InteractiveMode implements InteractiveModeContext {
 					const s = elapsed % 60;
 					const ts = `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
 					const dot = elapsed % 2 === 0 ? "\u{1F7E2}" : "\u26AA";
-					this.statusLine.setHookStatus("listening", `${dot} ${theme.icon.mic} \u5f55\u97f3 ${ts}`);
+					const bar = status.levelBar ? ` ${status.levelBar}` : "";
+					this.statusLine.setHookStatus("listening", `${dot} ${theme.icon.mic}${bar} \u5f55\u97f3 ${ts}`);
 				} else if (status.state === "transcribing") {
-					this.statusLine.setHookStatus("listening", "\u8f6c\u5199\u4e2d...");
+					const p = status.progress;
+					const chunkInfo =
+						status.chunkTotal && status.chunkTotal > 1 ? ` (${status.chunkIndex ?? 0}/${status.chunkTotal})` : "";
+					let label: string;
+					if (!p) {
+						label = "\u8f6c\u5199\u4e2d...";
+					} else if (p.stage === "loading-model") {
+						label = `\u8f6c\u5199\u4e2d\u00b7\u52a0\u8f7d\u6a21\u578b${chunkInfo}`;
+					} else if (p.stage === "transcribing") {
+						const pct = p.percent != null ? ` ${Math.round(p.percent)}%` : "";
+						label = `\u8f6c\u5199\u4e2d${pct}${chunkInfo}`;
+					} else {
+						label = `\u8f6c\u5199\u4e2d\u00b7\u5b8c\u6210\u4e2d${chunkInfo}`;
+					}
+					this.statusLine.setHookStatus("listening", label);
 				} else if (status.state === "idle") {
 					this.statusLine.setHookStatus("listening", undefined);
 				}

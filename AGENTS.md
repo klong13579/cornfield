@@ -6,7 +6,7 @@ Oh My Pi (`omp`) is a Bun-based monorepo that builds a terminal coding agent (`o
 
 |Concern|Tooling|
 |---|---|
-|Runtime|**Bun 1.3.13** (min 1.3.7). Never use Node for dev commands.|
+|Runtime|**Bun 1.3.14** (min 1.3.7). Never use Node for dev commands.|
 |Package manager|Bun workspaces (`bun install`). Lockfile: `bun.lock`.|
 |TypeScript type-check|**tsgo** (`@typescript/native-preview`), NOT `tsc`/`npx tsc`.|
 |TS lint/format|**Biome 2.4.13** (`biome.json`). Tab indent, width 120, double quotes, semicolons, trailing commas all.|

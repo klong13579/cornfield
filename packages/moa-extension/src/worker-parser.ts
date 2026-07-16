@@ -64,7 +64,7 @@ export function parseWorkerOutputBySchema(raw: string, schema: MoaOutputSchema):
 	const found = extractSections(raw);
 	const schemaNames = new Set(schema.sections.map(s => s.name.toLowerCase()));
 	const sections: Record<string, string> = {};
-	const missingRequired: string[] = [];
+	let missingRequired: string[] = [];
 	const extraSections: string[] = [];
 	for (const sec of schema.sections) {
 		const text = found.get(sec.name.toLowerCase());
@@ -77,6 +77,35 @@ export function parseWorkerOutputBySchema(raw: string, schema: MoaOutputSchema):
 	for (const name of found.keys()) {
 		if (!schemaNames.has(name)) extraSections.push(name);
 	}
+
+	// Soft recovery: workers often emit freeform markdown (`## Step 1`, Chinese
+	// headings, etc.) and omit the schema's exact `## plan` / `## open_questions`
+	// headers. When *every* required section is missing but there is substance,
+	// treat the full body as the primary markdown section and synthesize empty
+	// bodies for other required sections so quality scoring can judge content
+	// instead of always hard-failing at ≤30. Partial compliance (e.g. only
+	// `## open_questions`) still hard-fails — that is intentional.
+	const required = schema.sections.filter(s => s.required);
+	const body = raw.trim();
+	const matchedSchemaCount = schema.sections.filter(s => found.has(s.name.toLowerCase())).length;
+	// Only when the worker ignored the schema entirely (no schema section
+	// headers at all). Partial output like `## assumptions` alone still
+	// hard-fails missing required sections.
+	if (
+		body.length > 0 &&
+		required.length > 0 &&
+		matchedSchemaCount === 0 &&
+		missingRequired.length === required.length
+	) {
+		const primary = required.find(s => s.type === "markdown") ?? required[0]!;
+		sections[primary.name] = body;
+		for (const sec of required) {
+			if (sec.name === primary.name) continue;
+			sections[sec.name] = "";
+		}
+		missingRequired = [];
+	}
+
 	return { sections, missingRequired, extraSections, parseErrors: [] };
 }
 

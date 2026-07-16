@@ -209,6 +209,29 @@ class InProcessWorkerEngine implements MoaWorkerEngine {
 			});
 			session = created;
 
+			// createAgentSession leaves model unset when modelPattern does not
+			// resolve (no fallback when an explicit pattern was requested). Surface
+			// a clear config error instead of the generic "No model selected" from
+			// AgentSession.prompt — typical cause: stale moa.yml model ids.
+			if (!session.model) {
+				const pattern = input.model?.trim() || "(default)";
+				return {
+					ok: false,
+					output: "",
+					stderr:
+						`Model not found for pattern "${pattern}". ` +
+						`Check moa.yml worker/synthesis model strings against the registry ` +
+						`(e.g. /model list). alibaba-coding-plan currently has no deepseek-v4-* ids.`,
+					exitCode: null,
+					aborted: signal.aborted,
+					timedOut: false,
+					model: input.model,
+					stopReason: "error",
+					usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 0 },
+					durationMs: Date.now() - startTime,
+				};
+			}
+
 			// Connect external timeout/abort to the agent session. Without this,
 			// session.prompt() (full agent loop with tools) ignores the external
 			// AbortController — the worker could hang past its timeout.
