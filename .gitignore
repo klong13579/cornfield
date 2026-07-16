@@ -66,3 +66,7 @@ scripts/session-stats/edit-analysis.csv
 .gitnexus
 packages/self-evolution/.omp
 /.claude/
+
+# SQLite write-ahead-log sidecars (runtime state, not source)
+*.db-shm
+*.db-wal

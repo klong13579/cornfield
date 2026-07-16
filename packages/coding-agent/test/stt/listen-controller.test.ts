@@ -10,14 +10,26 @@
  * `settings.get("stt.modelName")` in stopRecording/transcribeFile.
  */
 import { afterEach, beforeEach, describe, expect, test, vi } from "bun:test";
-import { ListenController, buildFilename } from "@oh-my-pi/pi-coding-agent/stt/listen-controller";
 import * as fsp from "node:fs/promises";
+import { buildFilename, ListenController } from "@oh-my-pi/pi-coding-agent/stt/listen-controller";
 
 // Shared mock instances — hoisted before static imports, shared across tests.
-const detectRecordingTools = vi.fn<string[]>();
-const startRecording = vi.fn<Promise<{ stop: () => Promise<void> }>>();
-const verifyRecordingFile = vi.fn<Promise<number>>();
-const transcribe = vi.fn<Promise<string>>();
+const detectRecordingTools = vi.fn<() => string[]>();
+const startRecording =
+	vi.fn<
+		(
+			outputPath: string,
+			options?: { onLevel?: (rms: number) => void },
+		) => Promise<{ stop: () => Promise<void>; getLevel: () => number; getPeak: () => number }>
+	>();
+const verifyRecordingFile = vi.fn<(filePath: string) => Promise<number>>();
+const transcribe =
+	vi.fn<
+		(
+			audioPath: string,
+			options?: { modelName?: string; language?: string; onProgress?: (p: unknown) => void },
+		) => Promise<string>
+	>();
 
 vi.mock("@oh-my-pi/pi-coding-agent/stt/recorder", () => ({
 	detectRecordingTools,
@@ -61,7 +73,7 @@ describe("buildFilename", () => {
 	});
 
 	test("empty safe description after sanitization still produces valid filename", () => {
-		const name = buildFilename("<>:\"");
+		const name = buildFilename('<>:"');
 		expect(name).toMatch(/^\d{4}-\d{2}-\d{2}-\.json$/);
 	});
 
@@ -121,9 +133,7 @@ describe("ListenController", () => {
 	test("startRecording warns when no recording tools available", async () => {
 		detectRecordingTools.mockReturnValue([]);
 		await ctrl.startRecording();
-		expect(showWarning).toHaveBeenCalledWith(
-			expect.stringContaining("Audio capture is not available"),
-		);
+		expect(showWarning).toHaveBeenCalledWith(expect.stringContaining("Audio capture is not available"));
 		expect(ctrl.state).toBe("idle");
 		expect(detectRecordingTools).toHaveBeenCalled();
 	});
@@ -132,15 +142,17 @@ describe("ListenController", () => {
 
 	test("startRecording warns when already recording", async () => {
 		detectRecordingTools.mockReturnValue(["ffmpeg"]);
-		startRecording.mockResolvedValue({ stop: vi.fn().mockResolvedValue(undefined) });
+		startRecording.mockResolvedValue({
+			stop: vi.fn().mockResolvedValue(undefined),
+			getLevel: () => 0,
+			getPeak: () => 0,
+		});
 
 		await ctrl.startRecording();
 		expect(ctrl.state).toBe("recording");
 
 		await ctrl.startRecording();
-		expect(showWarning).toHaveBeenCalledWith(
-			expect.stringContaining("Already recording"),
-		);
+		expect(showWarning).toHaveBeenCalledWith(expect.stringContaining("Already recording"));
 		expect(ctrl.state).toBe("recording");
 	});
 
@@ -156,7 +168,11 @@ describe("ListenController", () => {
 
 	test("full recording lifecycle", async () => {
 		detectRecordingTools.mockReturnValue(["ffmpeg"]);
-		const fakeHandle = { stop: vi.fn().mockResolvedValue(undefined) };
+		const fakeHandle = {
+			stop: vi.fn().mockResolvedValue(undefined),
+			getLevel: () => 0,
+			getPeak: () => 0,
+		};
 		startRecording.mockResolvedValue(fakeHandle);
 		transcribe.mockResolvedValue("你好 大家好");
 
@@ -172,7 +188,11 @@ describe("ListenController", () => {
 
 	test("state transitions are reported via onStatusChange", async () => {
 		detectRecordingTools.mockReturnValue(["ffmpeg"]);
-		startRecording.mockResolvedValue({ stop: vi.fn().mockResolvedValue(undefined) });
+		startRecording.mockResolvedValue({
+			stop: vi.fn().mockResolvedValue(undefined),
+			getLevel: () => 0,
+			getPeak: () => 0,
+		});
 		transcribe.mockResolvedValue("text");
 
 		await ctrl.startRecording();
@@ -186,7 +206,11 @@ describe("ListenController", () => {
 
 	test("transcribed text is saved as JSON with correct shape", async () => {
 		detectRecordingTools.mockReturnValue(["ffmpeg"]);
-		startRecording.mockResolvedValue({ stop: vi.fn().mockResolvedValue(undefined) });
+		startRecording.mockResolvedValue({
+			stop: vi.fn().mockResolvedValue(undefined),
+			getLevel: () => 0,
+			getPeak: () => 0,
+		});
 		transcribe.mockResolvedValue("这是测试转写文本");
 
 		const fspWriteSpy = vi.spyOn(fsp, "writeFile").mockResolvedValue(undefined);
@@ -210,21 +234,21 @@ describe("ListenController", () => {
 	test("transcribeFile warns when file not found", async () => {
 		vi.spyOn(fsp, "access").mockRejectedValue(new Error("ENOENT"));
 		await ctrl.transcribeFile("/nonexistent/file.wav", "test");
-		expect(showWarning).toHaveBeenCalledWith(
-			expect.stringContaining("File not found"),
-		);
+		expect(showWarning).toHaveBeenCalledWith(expect.stringContaining("File not found"));
 		expect(ctrl.state).toBe("idle");
 	});
 
 	test("transcribeFile warns when currently recording", async () => {
 		detectRecordingTools.mockReturnValue(["ffmpeg"]);
-		startRecording.mockResolvedValue({ stop: vi.fn().mockResolvedValue(undefined) });
+		startRecording.mockResolvedValue({
+			stop: vi.fn().mockResolvedValue(undefined),
+			getLevel: () => 0,
+			getPeak: () => 0,
+		});
 
 		await ctrl.startRecording();
 		await ctrl.transcribeFile("/some/file.wav", "test");
-		expect(showWarning).toHaveBeenCalledWith(
-			expect.stringContaining("Recording in progress"),
-		);
+		expect(showWarning).toHaveBeenCalledWith(expect.stringContaining("Recording in progress"));
 	});
 
 	test("transcribeFile succeeds with valid file path", async () => {
@@ -245,14 +269,16 @@ describe("ListenController", () => {
 
 	test("cancelRecording warns when idle", async () => {
 		await ctrl.cancelRecording();
-		expect(showWarning).toHaveBeenCalledWith(
-			expect.stringContaining("No active recording"),
-		);
+		expect(showWarning).toHaveBeenCalledWith(expect.stringContaining("No active recording"));
 	});
 
 	test("cancelRecording returns to idle and cleans up", async () => {
 		detectRecordingTools.mockReturnValue(["ffmpeg"]);
-		const fakeHandle = { stop: vi.fn().mockResolvedValue(undefined) };
+		const fakeHandle = {
+			stop: vi.fn().mockResolvedValue(undefined),
+			getLevel: () => 0,
+			getPeak: () => 0,
+		};
 		startRecording.mockResolvedValue(fakeHandle);
 
 		await ctrl.startRecording();
@@ -261,9 +287,7 @@ describe("ListenController", () => {
 		await ctrl.cancelRecording();
 		expect(ctrl.state).toBe("idle");
 		expect(fakeHandle.stop).toHaveBeenCalledTimes(1);
-		expect(showStatus).toHaveBeenCalledWith(
-			expect.stringContaining("cancelled"),
-		);
+		expect(showStatus).toHaveBeenCalledWith(expect.stringContaining("cancelled"));
 	});
 
 	// ── elapsed ──
@@ -274,7 +298,11 @@ describe("ListenController", () => {
 
 	test("elapsed becomes defined during recording", async () => {
 		detectRecordingTools.mockReturnValue(["ffmpeg"]);
-		startRecording.mockResolvedValue({ stop: vi.fn().mockResolvedValue(undefined) });
+		startRecording.mockResolvedValue({
+			stop: vi.fn().mockResolvedValue(undefined),
+			getLevel: () => 0,
+			getPeak: () => 0,
+		});
 
 		await ctrl.startRecording();
 		expect(ctrl.elapsed).toBeGreaterThanOrEqual(0);
@@ -284,7 +312,11 @@ describe("ListenController", () => {
 
 	test("dispose cleans up active recording", async () => {
 		detectRecordingTools.mockReturnValue(["ffmpeg"]);
-		startRecording.mockResolvedValue({ stop: vi.fn().mockResolvedValue(undefined) });
+		startRecording.mockResolvedValue({
+			stop: vi.fn().mockResolvedValue(undefined),
+			getLevel: () => 0,
+			getPeak: () => 0,
+		});
 
 		await ctrl.startRecording();
 		ctrl.dispose();
@@ -305,8 +337,6 @@ describe("ListenController", () => {
 
 		await ctrl.startRecording();
 		expect(ctrl.state).toBe("idle");
-		expect(showWarning).toHaveBeenCalledWith(
-			expect.stringContaining("ffmpeg not found"),
-		);
+		expect(showWarning).toHaveBeenCalledWith(expect.stringContaining("ffmpeg not found"));
 	});
 });

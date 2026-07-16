@@ -1,15 +1,17 @@
 //! In-process audio capture via cpal.
 //!
-//! Replaces external-process recording (ffmpeg/sox) with a cross-platform
-//! native input stream. Zero external dependencies — cpal uses CoreAudio
-//! (macOS), ALSA (Linux), or WASAPI (Windows) directly.
+//! Replaces external-process recording (`ffmpeg`/`sox`) with a cross-platform
+//! native input stream. Zero external dependencies — cpal uses `CoreAudio`
+//! (macOS), `ALSA` (Linux), or `WASAPI` (Windows) directly.
 //!
 //! # Safety
 //! The cpal audio callback runs on a real-time audio thread. All shared state
 //! is behind `Arc<Mutex<…>>` — the callback only pushes samples, never
 //! allocates or blocks.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+#![allow(clippy::arc_with_non_send_sync, reason = "callbacks are intentionally FnMut; Arc is the only safe share")]
+
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::{Arc, Mutex};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -35,16 +37,33 @@ pub struct AudioCapture {
 	state: Arc<Mutex<CaptureState>>,
 }
 
+impl Default for AudioCapture {
+	fn default() -> Self {
+		Self::new()
+	}
+}
+
 struct CaptureState {
 	stream: Option<cpal::Stream>,
 	samples: Option<Arc<Mutex<Vec<i16>>>>,
 	running: Option<Arc<AtomicBool>>,
 	sample_rate: u32,
+	// Live audio level metrics, atomically written from the real-time audio
+	// thread and polled from the JS main thread (cheap, lock-free).
+	level_rms: Arc<AtomicI32>,
+	peak_rms: Arc<AtomicI32>,
 }
 
 impl CaptureState {
 	fn idle() -> Self {
-		Self { stream: None, samples: None, running: None, sample_rate: 0 }
+		Self {
+			stream: None,
+			samples: None,
+			running: None,
+			sample_rate: 0,
+			level_rms: Arc::new(AtomicI32::new(0)),
+			peak_rms: Arc::new(AtomicI32::new(0)),
+		}
 	}
 }
 
@@ -95,6 +114,12 @@ impl AudioCapture {
 		let running = Arc::new(AtomicBool::new(true));
 		let samples_cb = Arc::clone(&samples);
 		let running_cb = Arc::clone(&running);
+		let level_cb = Arc::clone(&state.level_rms);
+		let peak_cb = Arc::clone(&state.peak_rms);
+
+		// Reset live levels for the new recording.
+		level_cb.store(0, Ordering::Relaxed);
+		peak_cb.store(0, Ordering::Relaxed);
 
 		let err_fn = move |err| {
 			eprintln!("cpal audio stream error: {err}");
@@ -106,14 +131,31 @@ impl AudioCapture {
 					if !running_cb.load(Ordering::Relaxed) {
 						return;
 					}
-					let mut buf = match samples_cb.lock() {
-						Ok(b) => b,
-						Err(_) => return,
-					};
-					// Convert f32 [−1, 1] → i16 [−32768, 32767]
+					let Ok(mut buf) = samples_cb.lock() else { return };
+					// Compute RMS and peak in f32, scale to i16 range to match
+					// the SILENCE_RMS_THRESHOLD convention used by listen-controller
+					// (Hermes-style: 0-32767 scale).
+					let mut sum_sq: f64 = 0.0;
+					let mut peak: f32 = 0.0;
 					for &sample in data {
+						let abs = sample.abs();
+						if abs > peak {
+							peak = abs;
+						}
+						sum_sq = f64::from(sample).mul_add(f64::from(sample), sum_sq);
+						// Convert f32 [−1, 1] → i16 [−32768, 32767]
 						let scaled = sample * 32767.0_f32;
 						buf.push((scaled as i16).clamp(i16::MIN, i16::MAX));
+					}
+					if !data.is_empty() {
+						let rms = (sum_sq / data.len() as f64).sqrt() * 32767.0;
+						level_cb.store(rms as i32, Ordering::Relaxed);
+						let peak_i = (peak * 32767.0) as i32;
+						// peak only ratchets up; never decreases during a session
+						let prev = peak_cb.load(Ordering::Relaxed);
+						if peak_i > prev {
+							peak_cb.store(peak_i, Ordering::Relaxed);
+						}
 					}
 				}
 			}, err_fn, None)
@@ -133,7 +175,7 @@ impl AudioCapture {
 
 	/// Stop recording and return the captured audio as a WAV buffer.
 	///
-	/// Returns the WAV bytes as a `Buffer` (Uint8Array). Call
+	/// Returns the WAV bytes as a `Buffer` (`Uint8Array`). Call
 	/// `Bun.write(path, buffer)` in JS to persist to disk.
 	///
 	/// # Errors
@@ -178,6 +220,28 @@ impl AudioCapture {
 		log_audio_stats(bytes.len(), &samples, sample_rate);
 
 		Ok(Buffer::from(bytes))
+	}
+
+	/// Current RMS audio level, in the i16 range [0, 32767].
+	///
+	/// Updated continuously by the audio thread. Returns 0 when not
+	/// recording. Use this for live level meters and VAD (voice activity
+	/// detection).
+	#[napi]
+	pub fn get_level(&self) -> i32 {
+		let Ok(state) = self.state.lock() else { return 0 };
+		state.level_rms.load(Ordering::Relaxed)
+	}
+
+	/// Peak RMS audio level seen since `start()`, in the i16 range [0, 32767].
+	///
+	/// Monotonically non-decreasing during a recording session. Use this
+	/// to detect "did the user actually speak" after stop (analogous to
+	/// Hermes' peak-RMS silence gate).
+	#[napi]
+	pub fn get_peak(&self) -> i32 {
+		let Ok(state) = self.state.lock() else { return 0 };
+		state.peak_rms.load(Ordering::Relaxed)
 	}
 }
 
