@@ -112,7 +112,8 @@ export class EventController {
 		return true;
 	}
 	#updateWorkingMessageFromIntent(intent: string | undefined): void {
-		const trimmed = intent?.trim();
+		if (typeof intent !== "string") return;
+		const trimmed = intent.trim();
 		if (!trimmed || trimmed === this.#lastIntent) return;
 		this.#lastIntent = trimmed;
 		this.ctx.setWorkingMessage(`${trimmed} (esc to interrupt)`);

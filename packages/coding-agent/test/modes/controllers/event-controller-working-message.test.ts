@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
+import { INTENT_FIELD } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import { _resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { EventController } from "@oh-my-pi/pi-coding-agent/modes/controllers/event-controller";
@@ -6,10 +7,12 @@ import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/typ
 
 const WAITING_MESSAGE = "Thinking… (esc to interrupt)";
 
-function createAssistantMessage(): AssistantMessage {
+function createAssistantMessage(
+	content: AssistantMessage["content"] = [],
+): AssistantMessage {
 	return {
 		role: "assistant",
-		content: [],
+		content,
 		api: "anthropic-messages",
 		provider: "anthropic",
 		model: "claude-sonnet-4-5",
@@ -27,7 +30,7 @@ function createAssistantMessage(): AssistantMessage {
 }
 
 function createMockToolComponent() {
-	return { updateResult: vi.fn() };
+	return { updateResult: vi.fn(), updateArgs: vi.fn() };
 }
 
 function createContext() {
@@ -42,6 +45,9 @@ function createContext() {
 		chatContainer: { addChild: vi.fn(), removeChild: vi.fn() },
 		setWorkingMessage,
 		pendingTools,
+		streamingComponent: { updateContent: vi.fn() },
+		streamingMessage: undefined,
+		session: { getToolByName: vi.fn() },
 	} as unknown as InteractiveModeContext;
 	return { ctx, setWorkingMessage, pendingTools };
 }
@@ -123,5 +129,71 @@ describe("EventController working message", () => {
 		await controller.handleEvent({ type: "message_start", message: createAssistantMessage() });
 
 		expect(setWorkingMessage).toHaveBeenCalledWith(WAITING_MESSAGE);
+	});
+
+	it("ignores non-string streamed _i intent without throwing", async () => {
+		const { ctx, setWorkingMessage, pendingTools } = createContext();
+		const controller = new EventController(ctx);
+		pendingTools.set("call-a", createMockToolComponent());
+
+		const message = createAssistantMessage([
+			{
+				type: "toolCall",
+				id: "call-a",
+				name: "bash",
+				arguments: { command: "echo a", [INTENT_FIELD]: { nested: "bad" } },
+			},
+		]);
+
+		await expect(
+			controller.handleEvent({
+				type: "message_update",
+				message,
+				assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "" } as never,
+			}),
+		).resolves.toBeUndefined();
+
+		expect(setWorkingMessage).not.toHaveBeenCalled();
+	});
+
+	it("updates working message from a string streamed _i intent", async () => {
+		const { ctx, setWorkingMessage, pendingTools } = createContext();
+		const controller = new EventController(ctx);
+		pendingTools.set("call-a", createMockToolComponent());
+
+		const message = createAssistantMessage([
+			{
+				type: "toolCall",
+				id: "call-a",
+				name: "bash",
+				arguments: { command: "echo a", [INTENT_FIELD]: "  Running echo a  " },
+			},
+		]);
+
+		await controller.handleEvent({
+			type: "message_update",
+			message,
+			assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "" } as never,
+		});
+
+		expect(setWorkingMessage).toHaveBeenCalledWith("Running echo a (esc to interrupt)");
+	});
+
+	it("ignores non-string tool_execution_start intent without throwing", async () => {
+		const { ctx, setWorkingMessage, pendingTools } = createContext();
+		const controller = new EventController(ctx);
+		pendingTools.set("call-a", createMockToolComponent());
+
+		await expect(
+			controller.handleEvent({
+				type: "tool_execution_start",
+				toolCallId: "call-a",
+				toolName: "bash",
+				args: { command: "echo a" },
+				intent: { nested: "bad" } as unknown as string,
+			}),
+		).resolves.toBeUndefined();
+
+		expect(setWorkingMessage).not.toHaveBeenCalled();
 	});
 });
