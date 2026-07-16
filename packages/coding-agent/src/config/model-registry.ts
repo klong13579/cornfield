@@ -646,6 +646,7 @@ type CustomModelOverlay = {
 	reasoning?: boolean;
 	thinking?: ThinkingConfig;
 	input?: ("text" | "image")[];
+	category?: string;
 	cost?: { input: number; output: number; cacheRead: number; cacheWrite: number };
 	contextWindow?: number;
 	maxTokens?: number;
@@ -701,15 +702,25 @@ function buildCustomModelOverlay(
 ): CustomModelOverlay | undefined {
 	const api = modelDef.api ?? providerApi;
 	if (!api) return undefined;
+
+	const input = modelDef.input as ("text" | "image")[] | undefined;
+	const reasoning = modelDef.reasoning;
+	// Infer category for TUI emoji display
+	let category: string | undefined;
+	if (input?.includes("image")) category = "vision";
+	else if (reasoning) category = "reasoning";
+	else category = "chat";
+
 	return {
 		id: modelDef.id,
 		provider: providerName,
 		api,
 		baseUrl: modelDef.baseUrl ?? providerBaseUrl,
 		name: modelDef.name,
-		reasoning: modelDef.reasoning,
+		reasoning,
 		thinking: modelDef.thinking as ThinkingConfig | undefined,
-		input: modelDef.input as ("text" | "image")[] | undefined,
+		input,
+		category,
 		cost: modelDef.cost,
 		contextWindow: modelDef.contextWindow,
 		maxTokens: modelDef.maxTokens,
@@ -726,6 +737,12 @@ function applyStandaloneCustomModelPolicies(model: CustomModelOverlay): CustomMo
 		return model;
 	}
 	return { ...model, contextWindow: 1_000_000 };
+}
+
+function inferCategory(input: Model<Api>["input"] | undefined, reasoning: boolean | undefined): string {
+	if (input?.includes("image")) return "vision";
+	if (reasoning) return "reasoning";
+	return "chat";
 }
 
 function finalizeCustomModel(model: CustomModelOverlay, options: CustomModelBuildOptions): Model<Api> {
@@ -750,6 +767,7 @@ function finalizeCustomModel(model: CustomModelOverlay, options: CustomModelBuil
 		contextPromotionTarget: resolvedModel.contextPromotionTarget,
 		premiumMultiplier: resolvedModel.premiumMultiplier,
 		isOAuth: resolvedModel.isOAuth,
+		category: inferCategory(input, resolvedModel.reasoning),
 	} as Model<Api>);
 }
 
@@ -960,6 +978,17 @@ export class ModelRegistry {
 				merged[existingIndex] = replacementModel;
 			} else {
 				merged.push(replacementModel);
+			}
+		}
+		// Infer category for any model that lacks it (used for TUI emoji display)
+		for (const model of merged) {
+			if (model.category) continue;
+			if (model.input?.includes("image")) {
+				Object.assign(model, { category: "vision" });
+			} else if (model.reasoning) {
+				Object.assign(model, { category: "reasoning" });
+			} else {
+				Object.assign(model, { category: "chat" });
 			}
 		}
 		return merged;

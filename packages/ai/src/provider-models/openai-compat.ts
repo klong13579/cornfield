@@ -958,7 +958,10 @@ export function alibabaCodingPlanModelManagerOptions(
 	const staticModels = getBundledModels("alibaba-coding-plan") as Model<"openai-completions">[];
 	return {
 		providerId: "alibaba-coding-plan",
-		staticModels,
+		staticModels: staticModels.map(m => ({
+			...m,
+			category: inferProbeCategory(m.id),
+		})),
 		fetchDynamicModels: () =>
 			fetchOpenAICompatibleModels({
 				api: "openai-completions",
@@ -967,10 +970,89 @@ export function alibabaCodingPlanModelManagerOptions(
 				apiKey,
 				mapModel: (entry, defaults) => {
 					const reference = references.get(defaults.id);
-					return mapWithBundledReference(entry, defaults, reference);
+					const model = mapWithBundledReference(entry, defaults, reference);
+					Object.assign(model, { category: inferProbeCategory(model.id) });
+					return model;
 				},
 			}),
 	};
+}
+
+const PROBE_TIMEOUT_MS = 3_000;
+
+type ProbeCategory = "chat" | "coding" | "reasoning" | "vision" | "asr" | "tts" | "image" | "video" | "embedding";
+
+function inferProbeCategory(id: string): ProbeCategory {
+	if (/^qwen3-coder/.test(id)) return "coding";
+	if (/^qwen3.*-thinking|^qwq|^qvq|^deepseek-r1/.test(id)) return "reasoning";
+	if (/^qwen.*-vl|^qwen.*-omni/.test(id)) return "vision";
+	if (/^qwen.*-asr|^paraformer|^sense-voice|^whisper/.test(id)) return "asr";
+	if (/^qwen.*-tts|^cosyvoice|^sambert/.test(id)) return "tts";
+	if (/^qwen-image|^wan.*-t2i|^wanx/.test(id)) return "image";
+	if (/^wan.*-t2v/.test(id)) return "video";
+	if (/^text-embedding|^gte.*-rerank|^bge-/.test(id)) return "embedding";
+	return "chat";
+}
+
+const PROBE_CHAT_CATEGORIES = new Set<ProbeCategory>(["chat", "coding", "reasoning", "vision"]);
+
+/**
+ * Verify each model by sending a minimal chat completion request.
+ * Only models that respond 200 are included. Non-chat models (asr, tts,
+ * image, video, embedding) are skipped since they use different endpoints.
+ *
+ * @param getApiKey - async resolver: provider → API key
+ */
+export async function probeAccessibleModels(
+	models: readonly Model<Api>[],
+	getApiKey: (provider: string) => Promise<string | undefined>,
+): Promise<readonly Model<Api>[]> {
+	if (models.length === 0) return models;
+
+	const keys = new Map<string, string | undefined>();
+	await Promise.all([...new Set(models.map(m => m.provider))].map(async p => keys.set(p, await getApiKey(p))));
+
+	const results = await Promise.allSettled(
+		models.map(model => {
+			const apiKey = keys.get(model.provider);
+			if (!apiKey) return false;
+			const category = inferProbeCategory(model.id);
+			if (!PROBE_CHAT_CATEGORIES.has(category)) return false;
+			return probeSingleModel(model.id, model.baseUrl, apiKey);
+		}),
+	);
+
+	return models.filter((_, i) => {
+		const r = results[i];
+		return r.status === "fulfilled" && r.value === true;
+	});
+}
+
+async function probeSingleModel(modelId: string, baseUrl: string, apiKey: string): Promise<boolean> {
+	try {
+		const controller = new AbortController();
+		const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
+		try {
+			const response = await fetch(`${baseUrl}/chat/completions`, {
+				method: "POST",
+				headers: {
+					Authorization: `Bearer ${apiKey}`,
+					"Content-Type": "application/json",
+				},
+				body: JSON.stringify({
+					model: modelId,
+					messages: [{ role: "user", content: "ok" }],
+					max_tokens: 1,
+				}),
+				signal: controller.signal,
+			});
+			return response.ok;
+		} finally {
+			clearTimeout(timer);
+		}
+	} catch {
+		return false;
+	}
 }
 
 // ---------------------------------------------------------------------------

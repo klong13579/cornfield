@@ -611,7 +611,8 @@ export async function runRootCommand(parsed: Args, rawArgs: string[]): Promise<v
 
 	if (parsedArgs.listModels !== undefined) {
 		await logger.time("settings:init:list-models", Settings.init, { cwd: getProjectDir() });
-		await modelRegistry.refresh("online-if-uncached");
+		const refreshStrategy = parsedArgs.listModelsRefresh ? "online" : "online-if-uncached";
+		await modelRegistry.refresh(refreshStrategy);
 		const searchPattern = typeof parsedArgs.listModels === "string" ? parsedArgs.listModels : undefined;
 		let enabledModelIds: Set<string> | undefined;
 		if (!parsedArgs.listAllModels) {
@@ -626,7 +627,7 @@ export async function runRootCommand(parsed: Args, rawArgs: string[]): Promise<v
 				enabledModelIds = new Set(scoped.map(s => `${s.model.provider}/${s.model.id}`));
 			}
 		}
-		await listModels(modelRegistry, searchPattern, enabledModelIds);
+		await listModels(modelRegistry, searchPattern, enabledModelIds, parsedArgs.listModelsProbe);
 		process.exit(0);
 	}
 

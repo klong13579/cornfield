@@ -1,7 +1,7 @@
 /**
  * List available models with optional fuzzy search
  */
-import { type Api, getSupportedEfforts, type Model } from "@oh-my-pi/pi-ai";
+import { type Api, getSupportedEfforts, type Model, probeAccessibleModels } from "@oh-my-pi/pi-ai";
 import { formatNumber } from "@oh-my-pi/pi-utils";
 import type { ModelRegistry } from "../config/model-registry";
 import { fuzzyFilter } from "../utils/fuzzy";
@@ -76,6 +76,7 @@ export async function listModels(
 	modelRegistry: ModelRegistry,
 	searchPattern?: string,
 	enabledModelIds?: Set<string>,
+	probe?: boolean,
 ): Promise<void> {
 	let filteredModels = collectVerifiedModels(modelRegistry, enabledModelIds);
 
@@ -84,6 +85,14 @@ export async function listModels(
 			enabledModelIds?.size ? "No models available." : "No models available. Set API keys in environment variables.",
 		);
 		return;
+	}
+
+	if (probe && filteredModels.length > 0) {
+		const before = filteredModels.length;
+		filteredModels = [...(await probeAccessibleModels(filteredModels, p => modelRegistry.getApiKeyForProvider(p)))];
+		if (filteredModels.length < before) {
+			writeLine(`[probe] ${before} -> ${filteredModels.length} accessible models`);
+		}
 	}
 
 	if (searchPattern) {

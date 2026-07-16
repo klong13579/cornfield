@@ -119,6 +119,12 @@ export default class Index extends Command {
 		all: Flags.boolean({
 			description: "With --list-models: show all available models, ignoring enabledModels filter",
 		}),
+		refresh: Flags.boolean({
+			description: "With --list-models: force online refresh, bypassing cache",
+		}),
+		probe: Flags.boolean({
+			description: "With --list-models: verify each model via chat completion",
+		}),
 		"no-title": Flags.boolean({
 			description: "Disable title auto-generation",
 		}),
