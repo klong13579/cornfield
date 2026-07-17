@@ -1,6 +1,11 @@
 import { mergeMissingInputs } from "./merge-missing";
 import { rebindWorkerPrompts } from "./planner";
 import {
+	enrichSchemaWithSources,
+	renderResearchGuidance,
+	resolveResearchMode,
+} from "./research-mode";
+import {
 	type ExecutePlanOptions,
 	qualityFailedSynthesis,
 	resolvePlanOptions,
@@ -19,6 +24,11 @@ import type { MoaExecutionResult, MoaPlan } from "./types";
 
 export type { ExecutePlanOptions } from "./stages";
 
+type LiveStageHandle = {
+	stop: () => number;
+	updateStatus: (patch: Partial<MoaStatusBarInput>) => void;
+};
+
 function startLiveStage(options: {
 	clock: StageClock;
 	key: string;
@@ -27,13 +37,18 @@ function startLiveStage(options: {
 	statusBase: MoaStatusBarInput;
 	setWorking: (msg: string) => void;
 	setMoaStatus: (text: string | undefined) => void;
-}): { stop: () => number } {
+}): LiveStageHandle {
 	const { clock, key, hasUI, workingBase, statusBase, setWorking, setMoaStatus } = options;
+	const status: MoaStatusBarInput = { ...statusBase };
 	clock.start(key);
 	const tick = () => {
 		const elapsed = clock.elapsedMs(key);
 		setWorking(`${workingBase} ${formatDuration(elapsed)}`);
-		setMoaStatus(formatMoaStatusBar({ ...statusBase, elapsedMs: elapsed }));
+		setMoaStatus(formatMoaStatusBar({ ...status, elapsedMs: elapsed }));
+	};
+	const updateStatus = (patch: Partial<MoaStatusBarInput>) => {
+		Object.assign(status, patch);
+		tick();
 	};
 	tick();
 	let interval: ReturnType<typeof setInterval> | undefined;
@@ -41,6 +56,7 @@ function startLiveStage(options: {
 		interval = setInterval(tick, 500);
 	}
 	return {
+		updateStatus,
 		stop: () => {
 			if (interval !== undefined) clearInterval(interval);
 			return clock.stop(key);
@@ -95,7 +111,10 @@ export async function executePlan(plan: MoaPlan, options: ExecutePlanOptions): P
 	});
 	const discovery = await runDiscoveryStage(stageCtx, options);
 	const discoveryMs = discoveryLive.stop();
-	const { result: discoveryResult, tco, outputSchema } = discovery;
+	const { result: discoveryResult, tco } = discovery;
+	const researchMode = resolveResearchMode(plan.task, planOptions.settings.researchMode);
+	const researchGuidance = renderResearchGuidance(researchMode);
+	const outputSchema = enrichSchemaWithSources(discovery.outputSchema, researchMode);
 	notify(
 		"发现完成 ✓ 识别 " +
 			tco.known_inputs.length +
@@ -137,6 +156,7 @@ export async function executePlan(plan: MoaPlan, options: ExecutePlanOptions): P
 		);
 	}
 
+	const preAskTotal = Math.max(1, tco.missing_inputs.length);
 	const askLive = startLiveStage({
 		clock,
 		key: "ask",
@@ -147,12 +167,16 @@ export async function executePlan(plan: MoaPlan, options: ExecutePlanOptions): P
 			maxRounds: effectiveMaxRounds || 1,
 			phase: "asking",
 			questionIndex: 1,
-			questionTotal: 1,
+			questionTotal: preAskTotal,
 		},
 		setWorking,
 		setMoaStatus,
 	});
-	const ask = await runAskStage(tco, stageCtx, options);
+	const ask = await runAskStage(tco, stageCtx, options, {
+		onProgress: ({ index, total }) => {
+			askLive.updateStatus({ questionIndex: index, questionTotal: total });
+		},
+	});
 	const askMs = askLive.stop();
 	const askSummary = ask.askSummary;
 	if (askSummary.answered > 0) {
@@ -163,7 +187,7 @@ export async function executePlan(plan: MoaPlan, options: ExecutePlanOptions): P
 
 	const schemaAwarePlan: MoaPlan = {
 		...plan,
-		workers: rebindWorkerPrompts(plan.workers, plan.task, outputSchema),
+		workers: rebindWorkerPrompts(plan.workers, plan.task, outputSchema, researchGuidance),
 	};
 
 	let tcoBlock = renderTcoForPrompt(tco, { maxBytes: planOptions.settings.tcoInjectMaxBytes });
@@ -178,7 +202,7 @@ export async function executePlan(plan: MoaPlan, options: ExecutePlanOptions): P
 		setWorking,
 		setMoaStatus,
 	});
-	const rewrite = await runRewriteStage(tco, schemaAwarePlan, stageCtx, options, outputSchema);
+	const rewrite = await runRewriteStage(tco, schemaAwarePlan, stageCtx, options, outputSchema, researchGuidance);
 	const rewriteMs = rewriteLive.stop();
 	const rewriteResult = rewrite.result;
 	const baseWorkers = rewrite.workers.length > 0 ? rewrite.workers : schemaAwarePlan.workers;
@@ -195,6 +219,8 @@ export async function executePlan(plan: MoaPlan, options: ExecutePlanOptions): P
 	} else {
 		notify("改写已禁用，使用默认提示 · " + formatDuration(rewriteMs));
 	}
+
+	let roundAskLive: LiveStageHandle | undefined;
 
 	const workersResult = await runWorkersStage({
 		plan: schemaAwarePlan,
@@ -227,7 +253,7 @@ export async function executePlan(plan: MoaPlan, options: ExecutePlanOptions): P
 				}),
 			onRoundAskStart: ({ round, maxRounds, questionTotal, workerStatus }) => {
 				const roundAskKey = `ask_r${round}`;
-				return startLiveStage({
+				roundAskLive = startLiveStage({
 					clock,
 					key: roundAskKey,
 					hasUI,
@@ -243,19 +269,17 @@ export async function executePlan(plan: MoaPlan, options: ExecutePlanOptions): P
 					setWorking,
 					setMoaStatus,
 				});
+				return roundAskLive;
 			},
 			onAskProgress: ({ round, maxRounds, index, total, workerStatus }) => {
-				setMoaStatus(
-					formatMoaStatusBar({
-						round,
-						maxRounds,
-						phase: "asking",
-						questionIndex: index,
-						questionTotal: total,
-						workers: workerStatus,
-						elapsedMs: clock.elapsedMs(`ask_r${round}`),
-					}),
-				);
+				roundAskLive?.updateStatus({
+					round,
+					maxRounds,
+					phase: "asking",
+					questionIndex: index,
+					questionTotal: total,
+					workers: workerStatus,
+				});
 			},
 		},
 	});
@@ -293,6 +317,7 @@ export async function executePlan(plan: MoaPlan, options: ExecutePlanOptions): P
 			rounds: workersResult.rounds,
 			askRoundSummaries: workersResult.askRoundSummaries,
 			dispatchLog: workersResult.dispatchLog,
+			researchMode,
 		});
 	}
 
@@ -338,5 +363,6 @@ export async function executePlan(plan: MoaPlan, options: ExecutePlanOptions): P
 		rounds: workersResult.rounds,
 		askRoundSummaries: workersResult.askRoundSummaries,
 		dispatchLog: workersResult.dispatchLog,
+		researchMode,
 	});
 }

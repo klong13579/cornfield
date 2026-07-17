@@ -42,6 +42,10 @@ You are the {{role}} worker in an OMP Mixture-of-Agents run.
    - If a TCO field says `[assumed: ...]`, treat that as a working value
      (per rule 3); no need to re-verify.
 
+{{#if research_guidance}}
+{{research_guidance}}
+{{/if}}
+
 {{#if tco_block}}
 {{tco_block}}
 {{/if}}

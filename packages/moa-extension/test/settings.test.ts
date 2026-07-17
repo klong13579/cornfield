@@ -13,6 +13,9 @@ describe("DEFAULT_SETTINGS (PR2 multi-round)", () => {
 		expect(DEFAULT_SETTINGS.inputCollectEnabled).toBe(true);
 		expect(resolveSettings().inputCollectEnabled).toBe(true);
 		expect(resolveSettings({ inputCollectEnabled: false }).inputCollectEnabled).toBe(false);
+		expect(DEFAULT_SETTINGS.researchMode).toBe("auto");
+		expect(resolveSettings().researchMode).toBe("auto");
+		expect(resolveSettings({ researchMode: "required" }).researchMode).toBe("required");
 	});
 });
 

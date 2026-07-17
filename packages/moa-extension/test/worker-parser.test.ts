@@ -80,13 +80,44 @@ This is the plan.
 		].join("\n");
 		const parsed = parseWorkerOutputBySchema(raw, DEFAULT_OUTPUT_SCHEMA);
 		// Dual-channel: content is filled for display/scoring, but contract
-		// failure is not cleared (softRecovered + missingRequired retained).
+		// failure is not cleared (softRecovered + missingRequired retained)
+		// because required open_questions stays empty.
 		expect(parsed.softRecovered).toBe(true);
-		expect(parsed.missingRequired).toEqual(
-			DEFAULT_OUTPUT_SCHEMA.sections.filter(s => s.required).map(s => s.name),
-		);
+		expect(parsed.missingRequired).toEqual(DEFAULT_OUTPUT_SCHEMA.sections.filter(s => s.required).map(s => s.name));
 		expect(parsed.sections.plan).toContain("Step 1");
 		expect(parsed.sections.open_questions).toBe("");
+	});
+
+	it("partitions freeform with code+verify into custom schema and clears softRecovered", () => {
+		const schema: MoaOutputSchema = {
+			sections: [
+				{ name: "plan", required: true, type: "markdown" },
+				{ name: "code_diff", required: true, type: "markdown" },
+				{ name: "verify_steps", required: true, type: "list" },
+			],
+		};
+		const raw = [
+			"最小 Bun.serve 健康检查。零依赖。",
+			"",
+			"```typescript",
+			"const server = Bun.serve({ port: 3000, fetch() { return Response.json({ ok: true }); } });",
+			"```",
+			"",
+			"验证命令",
+			"",
+			"```bash",
+			"curl -s http://localhost:3000/health",
+			"```",
+		].join("\n");
+		const parsed = parseWorkerOutputBySchema(raw, schema);
+		expect(parsed.softRecovered).toBeUndefined();
+		expect(parsed.missingRequired).toEqual([]);
+		expect(parsed.sections.plan).toContain("Bun.serve");
+		expect(parsed.sections.code_diff).toContain("Response.json");
+		expect(parsed.sections.verify_steps).toMatch(/curl/);
+		const heuristic = scoreWorkerHeuristicV2(parsed, schema, DEFAULT_ROLE_WEIGHTS.grounded);
+		expect(heuristic.contractHardFail).toBe(false);
+		expect(heuristic.score).toBeGreaterThan(30);
 	});
 
 	it("soft-recovered freeform cannot fake all_complete convergence", () => {

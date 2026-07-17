@@ -110,7 +110,9 @@ describe("moa executePlan", () => {
 		expect(firstCall?.model).toBe("provider/divergent");
 		expect(firstCall?.thinkingLevel).toBe("high");
 		expect(firstCall?.tools).toEqual(["read", "search", "find", "web_search", "ast_grep"]);
-		expect(firstCall?.task).toBe("Design the MOA panel");
+		expect(firstCall?.task).toContain("Design the MOA panel");
+		expect(firstCall?.task).toContain("## plan");
+		expect(firstCall?.task).toMatch(/FIRST line MUST be exactly `## plan`/);
 		expect(firstCall?.systemPrompt).toContain("divergent");
 
 		// Last call: synthesis, no tools.
@@ -1100,6 +1102,26 @@ describe("moa executePlan — once-right A∪B (P2 gate)", () => {
 		expect(sharedEnv?.roles?.sort()).toEqual(["critical", "divergent", "grounded"]);
 		// Priority: required discovery item ranks first.
 		expect(keys[0]).toBe("goal_scope");
+	});
+
+	it("pre-Ask status bar shows asking question i/n across merged questions", async () => {
+		routeSpawn();
+		const moaSettings = onceRightSettings();
+		const plan = buildPlan("回滚演练", moaSettings);
+		const ui = onceRightUI();
+		await executePlan(plan, {
+			cwd: "/tmp/moa",
+			authStorage: {} as AuthStorage,
+			modelRegistry: { refresh: async () => {} } as unknown as ModelRegistry,
+			settings: Settings.isolated({}, { cwd: "/tmp/moa" }),
+			moaSettings,
+			ui: ui as never,
+			hasUI: true,
+		});
+		const statusCalls = ui.setStatus.mock.calls.map(c => String(c[1]));
+		expect(statusCalls.some(s => /asking question 1\/3/.test(s))).toBe(true);
+		expect(statusCalls.some(s => /asking question 2\/3/.test(s))).toBe(true);
+		expect(statusCalls.some(s => /asking question 3\/3/.test(s))).toBe(true);
 	});
 
 	it("skips the B stage entirely when hasUI=false (no wasted fanout)", async () => {

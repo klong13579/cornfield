@@ -4,6 +4,11 @@ export type MoaPlannerToolMode = "all" | "read-only";
 
 export type { MoaQualityMeta, MoaQualitySettings };
 
+/** Effective research intensity (see `research-mode.ts`). */
+export type ResearchMode = "none" | "encouraged" | "required";
+/** Settings knob; `"auto"` runs the task heuristic. */
+export type MoaResearchModeSetting = ResearchMode | "auto";
+
 export type MoaStage = "discovery" | "rewrite" | "worker" | "synthesis";
 
 export interface MoaWorkerSlot {
@@ -68,6 +73,13 @@ export interface MoaSettings {
 	workerStaggerMs: number;
 	/** Quality v2 settings (heuristic weights + optional LLM judge). */
 	quality: MoaQualitySettings;
+	/**
+	 * Research mode for open / architecture tasks. `"auto"` (default) infers
+	 * from the task text; `"none"` / `"encouraged"` / `"required"` override.
+	 * When non-none, workers get research guidance + a `## sources` schema
+	 * section and soft quality penalties for missing tool-backed URLs.
+	 */
+	researchMode: MoaResearchModeSetting;
 }
 
 export interface MoaPlanWorker {
@@ -304,6 +316,8 @@ export interface MoaExecutionResult {
 	dispatchLog?: MoaDispatchLogEntry[];
 	/** Wall-clock ms per stage (discovery/ask/rewrite/workers[_rN]/synthesis/total). */
 	timings?: Record<string, number>;
+	/** Effective research mode used for this run (after auto-resolve). */
+	researchMode?: ResearchMode;
 }
 
 /**

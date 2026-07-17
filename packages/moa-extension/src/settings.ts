@@ -87,6 +87,7 @@ export const DEFAULT_SETTINGS: MoaSettings = {
 	// workers don't trip the same rate limit at the same instant.
 	workerStaggerMs: 0,
 	quality: DEFAULT_QUALITY_SETTINGS,
+	researchMode: "auto",
 };
 
 export function normalizeWorkerSlots(
@@ -178,6 +179,23 @@ export function resolveSettings(overrides: Partial<MoaSettings> = {}): MoaSettin
 	if (rawMode !== undefined && rawMode !== "subprocess" && rawMode !== "in-process") {
 		console.warn(`[moa] invalid workerExecutionMode: "${rawMode}"; falling back to "${workerExecutionMode}"`);
 	}
+	const rawResearch = mergedOverrides.researchMode;
+	const researchMode =
+		rawResearch === "auto" ||
+		rawResearch === "none" ||
+		rawResearch === "encouraged" ||
+		rawResearch === "required"
+			? rawResearch
+			: DEFAULT_SETTINGS.researchMode;
+	if (
+		rawResearch !== undefined &&
+		rawResearch !== "auto" &&
+		rawResearch !== "none" &&
+		rawResearch !== "encouraged" &&
+		rawResearch !== "required"
+	) {
+		console.warn(`[moa] invalid researchMode: "${String(rawResearch)}"; falling back to "${researchMode}"`);
+	}
 	return {
 		...DEFAULT_SETTINGS,
 		...mergedOverrides,
@@ -191,5 +209,6 @@ export function resolveSettings(overrides: Partial<MoaSettings> = {}): MoaSettin
 		workerStaggerMs,
 		workerExecutionMode,
 		quality: resolveQualitySettings(mergedOverrides.quality),
+		researchMode,
 	};
 }

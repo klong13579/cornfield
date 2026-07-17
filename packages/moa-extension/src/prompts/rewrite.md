@@ -13,6 +13,11 @@ You are the rewrite stage of an OMP Mixture-of-Agents run.
 {{output_schema}}
 {{/if}}
 
+{{#if research_guidance}}
+## Research guidance (embed verbatim in every worker prompt)
+{{research_guidance}}
+{{/if}}
+
 ## Your job
 Produce 3 worker-specific system prompts that:
 1. Include the TCO as a `## Task Context` block at the top.
@@ -27,7 +32,9 @@ Produce 3 worker-specific system prompts that:
    `## Step 1` or Chinese title substitutes). The orchestrator parses
    worker output by section name, so the section names must be preserved
    verbatim. Do NOT rewrite or omit the tool policy — it must appear
-   unchanged in every worker prompt.
+   unchanged in every worker prompt. If a Research guidance block is
+   present above, embed it verbatim as well (do not weaken REQUIRED
+   language into "optional").
 4. **Force the worker to proceed**: explicitly tell the worker that the
    unique Ask is already done (no further user round), and that any
    `[assumed: ...]` lines in the TCO are working assumptions — not

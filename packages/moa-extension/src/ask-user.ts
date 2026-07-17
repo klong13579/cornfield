@@ -29,6 +29,8 @@ export interface AskUserOptions {
 	timeoutMs?: number;
 	/** When false, skip the TUI ask entirely and assume everything. */
 	enabled?: boolean;
+	/** Called before each question so the orchestrator can update the status bar. */
+	onProgress?: (info: { index: number; total: number }) => void;
 }
 
 export interface AskUserResult {
@@ -65,8 +67,11 @@ export async function askMissingInputs(
 	let answered = 0;
 	let assumed = 0;
 	let timedOut = 0;
+	const total = missing.length;
 
-	for (const m of missing) {
+	for (let i = 0; i < missing.length; i++) {
+		const m = missing[i]!;
+		options.onProgress?.({ index: i + 1, total });
 		asked += 1;
 		const result = await withTimeout(askOne(m, ctx), timeoutMs, m);
 		if (result.kind === "answered") {
@@ -229,10 +234,7 @@ export interface AskQuestionsListResult {
 	timedOut: number;
 }
 
-export interface AskQuestionsListOptions extends AskUserOptions {
-	/** Called before each question so the orchestrator can update the status bar. */
-	onProgress?: (info: { index: number; total: number }) => void;
-}
+export type AskQuestionsListOptions = AskUserOptions;
 
 const STOP_SENTINEL = "STOP";
 

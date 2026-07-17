@@ -149,6 +149,20 @@ describe("askMissingInputs", () => {
 		expect(ui.input).not.toHaveBeenCalled();
 	});
 
+	it("calls onProgress for each missing input", async () => {
+		const ui = makeNoopUI();
+		const tco = makeTco([{ key: "a" }, { key: "b" }, { key: "c" }]);
+		const progress: Array<{ index: number; total: number }> = [];
+		await askMissingInputs(tco, { ui: ui as never, hasUI: true }, {
+			onProgress: info => progress.push(info),
+		});
+		expect(progress).toEqual([
+			{ index: 1, total: 3 },
+			{ index: 2, total: 3 },
+			{ index: 3, total: 3 },
+		]);
+	});
+
 	it("records timeout as user_skipped", async () => {
 		const tco = makeTco([{ key: "x" }]);
 		const ui = makeNoopUI();

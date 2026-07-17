@@ -6,13 +6,14 @@ import type { AuthStorage, ExtensionUIContext, ModelRegistry, Settings } from "@
 import { parseModelPattern } from "@oh-my-pi/pi-coding-agent/config/model-resolver";
 import { prompt } from "@oh-my-pi/pi-utils";
 import { type AskQuestionsListItem, type AskUserContext, askMissingInputs, askQuestionsList } from "./ask-user";
-import { renderOutputSchemaAsMarkdown } from "./planner";
+import { buildWorkerTaskMessage, renderOutputSchemaAsMarkdown } from "./planner";
 import discoveryPromptTemplate from "./prompts/discovery.md" with { type: "text" };
 import inputCollectPromptTemplate from "./prompts/input-collect.md" with { type: "text" };
 import rewritePromptTemplate from "./prompts/rewrite.md" with { type: "text" };
 import synthesisPromptTemplate from "./prompts/synthesis.md" with { type: "text" };
 import { applyWorkerQuality } from "./quality/apply";
 import { createSpawnJudgeFn, type JudgeFnArgs, type JudgeResult } from "./quality/judge";
+import { resolveResearchMode } from "./research-mode";
 import { resolveSettings } from "./settings";
 import type { WorkerOutput } from "./subprocess";
 import {
@@ -338,6 +339,10 @@ async function runInputCollectCore(
 	};
 }
 
+export interface AskStageHooks {
+	onProgress?: (info: { index: number; total: number }) => void;
+}
+
 export interface AskStageResult {
 	askSummary: MoaAskUserSummary;
 	tco: TaskContextObject;
@@ -348,10 +353,11 @@ export async function runAskStage(
 	tco: TaskContextObject,
 	ctx: StageContext,
 	options: ExecutePlanOptions,
+	hooks: AskStageHooks = {},
 ): Promise<AskStageResult> {
 	const started = Date.now();
 	const planOptions = resolveStageOptions(ctx, options);
-	const askSummary = await runAskUserCore(tco, planOptions, options);
+	const askSummary = await runAskUserCore(tco, planOptions, options, hooks);
 	return { askSummary, tco, durationMs: Math.max(0, Date.now() - started) };
 }
 
@@ -359,6 +365,7 @@ async function runAskUserCore(
 	tco: TaskContextObject,
 	planOptions: ResolvedPlanOptions,
 	options: ExecutePlanOptions,
+	hooks: AskStageHooks = {},
 ): Promise<MoaAskUserSummary> {
 	const askCtx: AskUserContext = {
 		ui: options.ui ?? createNoopUI(),
@@ -367,6 +374,7 @@ async function runAskUserCore(
 	const result = await askMissingInputs(tco, askCtx, {
 		timeoutMs: planOptions.settings.askTimeoutMs,
 		enabled: planOptions.settings.askEnabled,
+		onProgress: hooks.onProgress,
 	});
 	return {
 		asked: result.asked,
@@ -389,10 +397,11 @@ export async function runRewriteStage(
 	ctx: StageContext,
 	options: ExecutePlanOptions,
 	outputSchema: MoaOutputSchema,
+	researchGuidance = "",
 ): Promise<RewriteStageResult> {
 	const started = Date.now();
 	const planOptions = resolveStageOptions(ctx, options);
-	const core = await runRewriteCore(tco, plan, planOptions, options, outputSchema);
+	const core = await runRewriteCore(tco, plan, planOptions, options, outputSchema, researchGuidance);
 	return { ...core, durationMs: Math.max(0, Date.now() - started) };
 }
 
@@ -402,6 +411,7 @@ async function runRewriteCore(
 	planOptions: ResolvedPlanOptions,
 	options: ExecutePlanOptions,
 	outputSchema: MoaOutputSchema,
+	researchGuidance = "",
 ): Promise<{ result: MoaWorkerResult | undefined; workers: MoaPlanWorker[] }> {
 	if (!planOptions.settings.rewriteEnabled) {
 		return { result: undefined, workers: plan.workers };
@@ -411,6 +421,7 @@ async function runRewriteCore(
 		task: planOptions.task,
 		tco_block: tcoBlock,
 		output_schema: renderOutputSchemaAsMarkdown(outputSchema),
+		research_guidance: researchGuidance || undefined,
 	});
 	const resolvedModel = resolveModel(planOptions.settings.synthesisModel, options.modelRegistry);
 	const workerName = "rewrite";
@@ -504,6 +515,7 @@ async function runWorker(
 	roundNumber: number,
 	previousAnswersText: string,
 	previousQuestions: ReadonlyArray<string>,
+	outputSchema: MoaOutputSchema,
 	onPartial?: (chunk: { name: string; text: string }) => void,
 ): Promise<MoaWorkerResult> {
 	const resolvedModel = resolveModel(worker.model, options.modelRegistry);
@@ -514,7 +526,7 @@ async function runWorker(
 		const result = await planOptions.engine.execute({
 			cwd: options.cwd,
 			systemPrompt: promptText,
-			task: plan.task,
+			task: buildWorkerTaskMessage(plan.task, outputSchema),
 			model: resolvedModel,
 			thinkingLevel: worker.thinking,
 			tools: worker.tools === "all" ? "all" : [...worker.tools],
@@ -552,6 +564,7 @@ export async function runWorkerFanout(
 	roundNumber: number,
 	previousAnswersText: string,
 	previousQuestions: ReadonlyArray<string>,
+	outputSchema: MoaOutputSchema,
 	onPartial?: (chunk: { name: string; text: string }) => void,
 ): Promise<{
 	workers: MoaWorkerResult[];
@@ -578,6 +591,7 @@ export async function runWorkerFanout(
 				roundNumber,
 				previousAnswersText,
 				previousQuestions,
+				outputSchema,
 				onPartial,
 			);
 		}),
@@ -870,6 +884,7 @@ export async function runWorkersStage(input: {
 	const planOptions = resolveStageOptions(input.ctx, input.options);
 	const judgeFn = resolveJudgeFn(planOptions, input.options);
 	const { plan, baseWorkers, outputSchema, options, effectiveMaxRounds, hooks = {} } = input;
+	const researchMode = resolveResearchMode(plan.task, planOptions.settings.researchMode);
 	let tcoBlock = input.tcoBlock;
 	const currentTco = input.tco;
 	const rounds: MoaRoundTrace[] = [];
@@ -890,7 +905,18 @@ export async function runWorkersStage(input: {
 			workers: roundWorkers,
 			durations,
 			startedAts,
-		} = await runWorkerFanout(baseWorkers, plan, planOptions, options, tcoBlock, 1, "", [], hooks.onWorkerPartial);
+		} = await runWorkerFanout(
+			baseWorkers,
+			plan,
+			planOptions,
+			options,
+			tcoBlock,
+			1,
+			"",
+			[],
+			outputSchema,
+			hooks.onWorkerPartial,
+		);
 		const workersMs = live?.stop() ?? 0;
 		const parsed = await Promise.all(
 			roundWorkers.map(w =>
@@ -900,6 +926,7 @@ export async function runWorkersStage(input: {
 					task: plan.task,
 					signal: options.signal,
 					judgeFn,
+					researchMode,
 				}),
 			),
 		);
@@ -939,6 +966,7 @@ export async function runWorkersStage(input: {
 				round,
 				previousAnswersText,
 				previousQuestionsList,
+				outputSchema,
 				hooks.onWorkerPartial,
 			);
 			const workersMs = live?.stop() ?? 0;
@@ -950,6 +978,7 @@ export async function runWorkersStage(input: {
 						task: plan.task,
 						signal: options.signal,
 						judgeFn,
+						researchMode,
 					}),
 				),
 			);

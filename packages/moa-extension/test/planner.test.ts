@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { buildPlan } from "../src/planner";
+import { buildPlan, buildWorkerTaskMessage } from "../src/planner";
 import rewritePromptTemplate from "../src/prompts/rewrite.md" with { type: "text" };
 import workerPromptTemplate from "../src/prompts/worker.md" with { type: "text" };
 import { resolveSettings } from "../src/settings";
@@ -8,15 +8,17 @@ import { DEFAULT_OUTPUT_SCHEMA, type MoaOutputSchema, type MoaSettings } from ".
 const SETTINGS: MoaSettings = resolveSettings({});
 
 describe("buildPlan", () => {
-	it("uses DEFAULT_OUTPUT_SCHEMA when none provided", () => {
-		const plan = buildPlan("design panel", SETTINGS);
+	it("injects research guidance into worker prompts when provided", () => {
+		const plan = buildPlan("architecture tradeoffs", SETTINGS, DEFAULT_OUTPUT_SCHEMA, "## Research guidance\n- use web_search");
 		for (const w of plan.workers) {
-			expect(w.prompt).toContain("## plan");
-			expect(w.prompt).toContain("## open_questions");
-			expect(w.prompt).toContain("## assumptions");
-			expect(w.prompt).toContain("type: markdown");
-			expect(w.prompt).toContain("type: list");
+			expect(w.prompt).toContain("Research guidance");
+			expect(w.prompt).toContain("web_search");
 		}
+	});
+
+	it("omits research guidance block when empty", () => {
+		const plan = buildPlan("fix typo", SETTINGS);
+		expect(plan.workers[0]!.prompt).not.toContain("## Research guidance");
 	});
 
 	it("renders the output schema section in each worker prompt", () => {
@@ -96,12 +98,42 @@ describe("plan-round prompt contract (once-right P3)", () => {
 		);
 	});
 
+	it("rewrite + worker templates carry research_guidance injection points", () => {
+		expect(rewritePromptTemplate).toContain("research_guidance");
+		expect(workerPromptTemplate).toContain("research_guidance");
+	});
+
 	it("built worker prompts carry the once-right Ask-complete contract", () => {
 		const plan = buildPlan("design a rollback drill", SETTINGS);
 		for (const w of plan.workers) {
 			expect(w.prompt).toMatch(/unique Ask|single Ask|Ask (?:is |has )?already|already (?:been )?asked/i);
 			expect(w.prompt).toMatch(/assumptions/i);
 		}
+	});
+});
+
+describe("buildWorkerTaskMessage (schema-forcing user message)", () => {
+	it("embeds the task and forces the first schema header as the first line", () => {
+		const msg = buildWorkerTaskMessage("design a health endpoint", DEFAULT_OUTPUT_SCHEMA);
+		expect(msg).toContain("## Task");
+		expect(msg).toContain("design a health endpoint");
+		expect(msg).toMatch(/FIRST line MUST be exactly `## plan`/);
+		expect(msg).toContain("## open_questions");
+		expect(msg).toContain("## assumptions");
+	});
+
+	it("uses Discovery-driven section names when schema is custom", () => {
+		const schema: MoaOutputSchema = {
+			sections: [
+				{ name: "plan", required: true, type: "markdown" },
+				{ name: "code_diff", required: true, type: "markdown" },
+				{ name: "verify_steps", required: true, type: "list" },
+			],
+		};
+		const msg = buildWorkerTaskMessage("health check", schema);
+		expect(msg).toMatch(/FIRST line MUST be exactly `## plan`/);
+		expect(msg).toContain("## code_diff");
+		expect(msg).toContain("## verify_steps");
 	});
 });
 

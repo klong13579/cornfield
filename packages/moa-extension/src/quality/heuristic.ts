@@ -105,7 +105,7 @@ export function scoreWorkerHeuristicV2(
 	schema: MoaOutputSchema,
 	weights: MoaQualityRoleWeights,
 ): { score: number; contractHardFail: boolean; breakdown: WorkerQualityBreakdownV2 } {
-	const { requiredHits, requiredTotal, hits } = computeHits(parsed, schema);
+	const { hits } = computeHits(parsed, schema);
 
 	const contributions = {
 		required: weights.required * hits.required,
@@ -125,7 +125,13 @@ export function scoreWorkerHeuristicV2(
 	let score = Math.round(raw);
 	// softRecovered fills sections for display but must not clear the contract
 	// hard-fail (empty synthesized open_questions would otherwise look complete).
-	const contractHardFail = Boolean(parsed.softRecovered) || (requiredTotal > 0 && requiredHits < requiredTotal);
+	// `sources` is soft-enforced via research-mode penalty (cap 60 / −10), not
+	// the hard-fail ceiling of 30 — otherwise research-required runs would drop
+	// every worker that forgot a URL.
+	const hardRequired = schema.sections.filter(s => s.required && s.name !== "sources");
+	const hardRequiredHits = hardRequired.filter(s => parsed.sections[s.name] !== undefined).length;
+	const contractHardFail =
+		Boolean(parsed.softRecovered) || (hardRequired.length > 0 && hardRequiredHits < hardRequired.length);
 	if (contractHardFail) {
 		score = Math.min(score, 30);
 	}

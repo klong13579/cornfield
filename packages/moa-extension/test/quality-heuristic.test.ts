@@ -140,4 +140,17 @@ describe("scoreWorkerHeuristicV2 — schema-aware (once-right P3)", () => {
 		// penalize the same section for having ≥5 bullets.
 		expect(result.breakdown.hits.openQuestions).toBe(1);
 	});
+
+	it("missing required sources does not contract-hard-fail (research soft penalty)", () => {
+		const withSources: MoaOutputSchema = {
+			sections: [
+				...DEFAULT_OUTPUT_SCHEMA.sections,
+				{ name: "sources", required: true, type: "list", item: { claim: "string", url: "string" } },
+			],
+		};
+		const parsed = parsedWith("x".repeat(250), "- question: a | context: b", "- claim: y | basis: z");
+		const result = scoreWorkerHeuristicV2(parsed, withSources, DEFAULT_ROLE_WEIGHTS.divergent);
+		expect(result.contractHardFail).toBe(false);
+		expect(result.score).toBeGreaterThan(30);
+	});
 });

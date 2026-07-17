@@ -1,4 +1,6 @@
 import type { MoaOutputSchema, MoaWorkerResult } from "../types";
+import type { ResearchMode } from "../research-mode";
+import { applyResearchSourcesPenalty } from "../research-mode";
 import { DEFAULT_QUALITY_MIN_SCORE, parseWorkerOutputBySchema } from "../worker-parser";
 import { scoreWorkerHeuristicV2 } from "./heuristic";
 import { type JudgeFnArgs, type JudgeResult, shouldJudge } from "./judge";
@@ -25,19 +27,26 @@ export async function applyWorkerQuality(
 		judgeFn?: (args: JudgeFnArgs) => Promise<JudgeResult>;
 		task?: string;
 		signal?: AbortSignal;
+		researchMode?: ResearchMode;
 	},
 ): Promise<MoaWorkerResult> {
 	const minScore = options?.minScore ?? DEFAULT_QUALITY_MIN_SCORE;
 	const quality = options?.quality;
 	const judgeEnabled = resolveJudgeEnabled(quality);
 	const grayMargin = resolveGrayMargin(quality);
+	const researchMode = options?.researchMode ?? "none";
 
 	const parsed = parseWorkerOutputBySchema(result.output, schema);
 	const weights = resolveRoleWeights(result.name, result.role, quality?.roleWeights);
 	const roleKey = resolveRoleKey(result.name, result.role);
 	const heuristic = scoreWorkerHeuristicV2(parsed, schema, weights);
+	const heuristicScore = applyResearchSourcesPenalty(
+		heuristic.score,
+		parsed.sections.sources,
+		researchMode,
+	);
 
-	let finalScore = heuristic.score;
+	let finalScore = heuristicScore;
 	let source: MoaQualityMeta["source"] = "heuristic";
 	let judgeScore: number | undefined;
 	let judged = false;
@@ -46,7 +55,7 @@ export async function applyWorkerQuality(
 	const needsJudge = shouldJudge({
 		enabled: judgeEnabled,
 		contractHardFail: heuristic.contractHardFail,
-		heuristicScore: heuristic.score,
+		heuristicScore,
 		minScore,
 		grayMargin,
 	});
@@ -57,13 +66,13 @@ export async function applyWorkerQuality(
 				result,
 				parsed,
 				schema,
-				heuristicScore: heuristic.score,
+				heuristicScore,
 				roleKey,
 				task: options.task,
 				signal: options.signal,
 			});
 			judgeScore = Math.min(100, Math.max(0, Math.round(judgeResult.score)));
-			finalScore = judgeScore;
+			finalScore = applyResearchSourcesPenalty(judgeScore, parsed.sections.sources, researchMode);
 			source = "judge";
 			judged = true;
 		} catch (err) {
@@ -75,7 +84,7 @@ export async function applyWorkerQuality(
 
 	const qualityMeta: MoaQualityMeta = {
 		version: 2,
-		heuristicScore: heuristic.score,
+		heuristicScore,
 		source,
 		roleKey,
 		contractHardFail: heuristic.contractHardFail,

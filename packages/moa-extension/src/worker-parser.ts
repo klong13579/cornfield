@@ -18,6 +18,7 @@
 import { REFUSAL_PATTERNS, scoreWorkerHeuristicV2 } from "./quality/heuristic";
 import type { MoaQualitySettings } from "./quality/types";
 import { resolveRoleWeights } from "./quality/weights";
+import { applyResearchSourcesPenalty, type ResearchMode } from "./research-mode";
 import type { MoaOutputSchema, MoaOutputSchemaSection, MoaWorkerResult, ParsedWorkerOutput } from "./types";
 
 export type { ParsedWorkerOutput } from "./types";
@@ -64,7 +65,7 @@ export function parseWorkerOutputBySchema(raw: string, schema: MoaOutputSchema):
 	const found = extractSections(raw);
 	const schemaNames = new Set(schema.sections.map(s => s.name.toLowerCase()));
 	const sections: Record<string, string> = {};
-	let missingRequired: string[] = [];
+	const missingRequired: string[] = [];
 	const extraSections: string[] = [];
 	for (const sec of schema.sections) {
 		const text = found.get(sec.name.toLowerCase());
@@ -80,12 +81,12 @@ export function parseWorkerOutputBySchema(raw: string, schema: MoaOutputSchema):
 
 	// Soft recovery (dual-channel): workers often emit freeform markdown
 	// (`## Step 1`, Chinese headings, etc.) and omit the schema's exact
-	// `## plan` / `## open_questions` headers. When *every* required section is
-	// missing but there is substance, fill the primary markdown section (and
-	// empty bodies for other required sections) so digests/scoring can see
-	// content — but keep `missingRequired` and set `softRecovered` so the
-	// contract still hard-fails and convergence cannot treat empty synthesized
-	// open_questions as "all complete". Partial compliance still hard-fails.
+	// headers. When *every* required section is missing but there is substance,
+	// try to partition the body into required slots (prose → primary markdown,
+	// fenced code → code/diff-like markdown, verify bullets → list). If every
+	// required section ends up non-empty, clear softRecovered (contract met via
+	// recovery). Otherwise keep softRecovered + missingRequired so empty
+	// synthesized open_questions cannot fake all_complete.
 	const required = schema.sections.filter(s => s.required);
 	const body = raw.trim();
 	const matchedSchemaCount = schema.sections.filter(s => found.has(s.name.toLowerCase())).length;
@@ -96,17 +97,108 @@ export function parseWorkerOutputBySchema(raw: string, schema: MoaOutputSchema):
 		matchedSchemaCount === 0 &&
 		missingRequired.length === required.length
 	) {
-		const primary = required.find(s => s.type === "markdown") ?? required[0]!;
-		sections[primary.name] = body;
-		for (const sec of required) {
-			if (sec.name === primary.name) continue;
-			sections[sec.name] = "";
+		const partitioned = partitionFreeformIntoSchema(body, required);
+		for (const [name, text] of Object.entries(partitioned)) {
+			sections[name] = text;
 		}
-		softRecovered = true;
-		// Do NOT clear missingRequired — contract remains unsatisfied.
+		const allRequiredFilled = required.every(sec => (sections[sec.name] ?? "").trim().length > 0);
+		if (allRequiredFilled) {
+			missingRequired.length = 0;
+			softRecovered = false;
+		} else {
+			softRecovered = true;
+			// Do NOT clear missingRequired — contract remains unsatisfied.
+		}
 	}
 
 	return { sections, missingRequired, extraSections, parseErrors: [], softRecovered: softRecovered || undefined };
+}
+
+const FENCE_RE = /```[\w+-]*\n([\s\S]*?)```/g;
+
+/**
+ * Heuristic split of freeform worker text into required schema sections.
+ * Used only when zero schema headers matched.
+ */
+export function partitionFreeformIntoSchema(
+	body: string,
+	required: ReadonlyArray<MoaOutputSchemaSection>,
+): Record<string, string> {
+	const out: Record<string, string> = {};
+	for (const sec of required) out[sec.name] = "";
+
+	const fences: string[] = [];
+	const prose = body
+		.replace(FENCE_RE, (_m, code: string) => {
+			fences.push(code.trim());
+			return "\n";
+		})
+		.trim();
+
+	const primary = required.find(s => s.type === "markdown") ?? required[0]!;
+	const codeSec =
+		required.find(
+			s => s.type === "markdown" && s.name !== primary.name && /code|diff|impl|patch|sketch/i.test(s.name),
+		) ?? required.find(s => s.type === "markdown" && s.name !== primary.name);
+	const listSecs = required.filter(s => s.type === "list");
+
+	out[primary.name] = prose || (fences.length === 0 ? body : "");
+
+	if (codeSec && fences.length > 0) {
+		out[codeSec.name] = fences.map(f => "```\n" + f + "\n```").join("\n\n");
+		if (!out[primary.name]?.trim() && prose) out[primary.name] = prose;
+		if (!out[primary.name]?.trim()) {
+			// Code-only freeform: keep a short pointer in the primary section.
+			out[primary.name] = `See \`## ${codeSec.name}\` for the implementation.`;
+		}
+	} else if (fences.length > 0) {
+		const fenceBlock = fences.map(f => "```\n" + f + "\n```").join("\n\n");
+		out[primary.name] = [out[primary.name], fenceBlock].filter(Boolean).join("\n\n");
+	}
+
+	const verifyLines = extractVerifyBullets(body);
+	for (const listSec of listSecs) {
+		if (/question/i.test(listSec.name)) {
+			// Leave empty — residual questions must not be invented; softRecover
+			// stays set when this required list is empty.
+			out[listSec.name] = "";
+			continue;
+		}
+		if (verifyLines.length > 0 && /verif|step|check|test|curl/i.test(listSec.name)) {
+			out[listSec.name] = verifyLines.map(l => (l.startsWith("-") ? l : `- ${l}`)).join("\n");
+		} else if (/assumption/i.test(listSec.name)) {
+			out[listSec.name] = "";
+		} else if (verifyLines.length > 0) {
+			out[listSec.name] = verifyLines.map(l => (l.startsWith("-") ? l : `- ${l}`)).join("\n");
+		} else if ((out[primary.name] ?? "").trim().length > 0 || (codeSec && (out[codeSec.name] ?? "").trim())) {
+			out[listSec.name] = "- covered in plan / code sections";
+		}
+	}
+
+	return out;
+}
+
+function extractVerifyBullets(body: string): string[] {
+	const lines = body.split("\n");
+	const out: string[] = [];
+	let inVerify = false;
+	for (const line of lines) {
+		if (/验证|verify|curl\b|运行|usage|如何启动|test(?:ing)?\b/i.test(line) && !line.trim().startsWith("```")) {
+			inVerify = true;
+		}
+		if (inVerify) {
+			const m = /^\s*(?:[-*+]|\d+\.)\s+(.+)$/.exec(line);
+			if (m) out.push(m[1]!.trim());
+			else if (/^\s*curl\b/i.test(line) || /^\s*bun\b/i.test(line)) out.push(line.trim());
+			else if (line.trim().startsWith("```")) inVerify = false;
+		}
+	}
+	if (out.length === 0) {
+		for (const line of lines) {
+			if (/^\s*curl\b/i.test(line)) out.push(line.trim());
+		}
+	}
+	return out;
 }
 
 // ----------------------------------------------------------------------------
@@ -194,17 +286,24 @@ function countBulletItems(text: string): number {
 export function applyWorkerParsing(
 	result: MoaWorkerResult,
 	schema: MoaOutputSchema,
-	options: { minScore?: number; now?: () => Date; quality?: MoaQualitySettings } = {},
+	options: {
+		minScore?: number;
+		now?: () => Date;
+		quality?: MoaQualitySettings;
+		researchMode?: ResearchMode;
+	} = {},
 ): MoaWorkerResult {
 	const minScore = options.minScore ?? DEFAULT_QUALITY_MIN_SCORE;
+	const researchMode = options.researchMode ?? "none";
 	const parsed = parseWorkerOutputBySchema(result.output, schema);
 	const weights = resolveRoleWeights(result.name, result.role, options.quality?.roleWeights);
 	const heuristic = scoreWorkerHeuristicV2(parsed, schema, weights);
+	const score = applyResearchSourcesPenalty(heuristic.score, parsed.sections.sources, researchMode);
 	return {
 		...result,
 		parsed: parsed.sections,
-		qualityScore: heuristic.score,
-		qualityDropped: heuristic.score < minScore,
+		qualityScore: score,
+		qualityDropped: score < minScore,
 		parsedAt: (options.now ?? (() => new Date()))().toISOString(),
 	};
 }
