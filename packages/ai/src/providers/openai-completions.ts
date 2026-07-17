@@ -951,11 +951,8 @@ function buildParams(
 		// Must explicitly disable since z.ai defaults to thinking enabled
 		Reflect.set(params, "thinking", { type: options?.reasoning ? "enabled" : "disabled" });
 	} else if (supportsReasoningParams && compat.thinkingFormat === "qwen" && model.reasoning) {
-		// Qwen uses top-level enable_thinking: boolean
-		// Only send when enabled - some providers (MiniMax) require it to be true
-		if (options?.reasoning) {
-			Reflect.set(params, "enable_thinking", true);
-		}
+		// Qwen/MiniMax uses top-level enable_thinking: boolean
+		Reflect.set(params, "enable_thinking", !!options?.reasoning);
 	} else if (supportsReasoningParams && compat.thinkingFormat === "qwen-chat-template" && model.reasoning) {
 		// Qwen chat template uses chat_template_kwargs.enable_thinking
 		// Only send when enabled - some providers (MiniMax) require it to be true

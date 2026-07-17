@@ -60,6 +60,7 @@ export function detectOpenAICompat(model: Model<"openai-completions">, resolvedB
 		/(^|\/)anthropic\//i.test(model.id);
 	const isAlibaba = provider === "alibaba-coding-plan" || baseUrl.includes("dashscope");
 	const isQwen = model.id.toLowerCase().includes("qwen");
+	const isMiniMax = /^(?:minimax|antml|mm|minimaxai)[-/]/i.test(model.id);
 	// DeepSeek V4 (and other reasoning-capable DeepSeek models) reject follow-up requests in
 	// thinking mode unless prior assistant tool-call turns include `reasoning_content`. The
 	// upstream model is reachable through many OpenAI-compat hosts (api.deepseek.com, Deepinfra,
@@ -128,7 +129,7 @@ export function detectOpenAICompat(model: Model<"openai-completions">, resolvedB
 			? "zai"
 			: provider === "openrouter" || baseUrl.includes("openrouter.ai")
 				? "openrouter"
-				: isAlibaba || isQwen
+				: isAlibaba || isQwen || isMiniMax
 					? "qwen"
 					: "openai",
 		reasoningContentField: "reasoning_content",
