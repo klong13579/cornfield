@@ -269,20 +269,17 @@ describe("Gateway message pipeline", () => {
 
 			expect(channel.sentOutbound.length).toBeGreaterThanOrEqual(1);
 
-			const first = channel.sentOutbound[0] as Record<string, unknown> | undefined;
-			if (first) {
-				const content = first.content as Record<string, unknown>;
-				if (content.type === "text" || content.type === "markdown") {
-					const text = (content as Record<string, string>)[content.type as string] ?? "";
-					expect(text).toContain("hello gateway");
-				}
-			}
-
+			// The v1 markdown fallback path now sends a best-effort
+			// "⏳ 正在处理…" placeholder via OAuth DM before the real
+			// response (gateway-response.ts:sendAgentResponseViaV1Markdown).
+			// The actual response is therefore not necessarily at index 0 —
+			// search all outbounds for the agent's reply.
 			const sentTexts = channel.sentOutbound
 				.map((m: any) => m?.content)
 				.filter(Boolean)
 				.map((c: any) => (c.type === "text" ? c.text : (c.markdown ?? "")))
 				.join(" ");
+			expect(sentTexts).toContain("hello gateway");
 			expect(sentTexts).not.toContain("系统繁忙");
 			expect(sentTexts).not.toContain("Failed to");
 		} finally {

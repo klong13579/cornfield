@@ -92,6 +92,16 @@ tail -20 ~/.omp/gateway-data/logs/service.log | grep -E "BOOT|service start"
 
 **Do not run** `bun run dev`, `bun test`, or `bun run check` unless the user instructs. Run only targeted tests for code you changed.
 
+### Build & deploy model
+
+`~/.local/bin/omp` is **a compiled Mach-O binary** produced by `bun scripts/build-binary.ts` (in `packages/coding-agent`) + `bun scripts/embed-native.ts`. Source edits to `packages/*/src/**/*.ts` do **not** take effect on the running gateway until:
+
+1. `bun run build` (or `bun run --cwd=packages/coding-agent build`) — produces a new `packages/coding-agent/dist/omp`
+2. `cp packages/coding-agent/dist/omp ~/.local/bin/omp` — replaces the installed binary
+3. `omp gateway service stop && sleep 5 && omp gateway service start` — picks up the new binary
+
+Skipping step 1+2 makes "live test" silently exercise the **old** binary, masking source-level changes. Quick check: `file ~/.local/bin/omp` (should be `Mach-O 64-bit executable arm64`) and `ls -la ~/.local/bin/omp packages/coding-agent/dist/omp` (mtimes should match within the same minute after a build).
+
 ## Architecture & Data Flow
 
 ### Boot sequence (coding-agent)

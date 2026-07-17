@@ -276,12 +276,32 @@ export class ResponseHandler {
 		accountId: string,
 		sessionManager: SessionManager | undefined,
 	): Promise<void> {
-		// Run the agent first, then send the response in a single message.
-		// We don't send a "thinking..." placeholder here because DingTalk's
-		// sessionWebhook is single-use — a placeholder would consume the
-		// webhook and the actual response would fail to deliver.
-		// The AI Card path (tryStreamAgentResponse) is preferred for streaming
-		// feedback; this V1 path is the fallback for when cards are unavailable.
+		// AI Card is the primary surface; this V1 path is the fallback for
+		// when the app lacks `Card.Instance.Write` permission. Without a
+		// placeholder the user stares at a blank 5–30s window while the
+		// agent runs. Send a "⏳ 正在处理…" ping via Route 2 (OAuth DM,
+		// keyed on senderStaffId) so the actual response below can still
+		// use Route 1 (sessionWebhook, single-use). Placeholder is
+		// best-effort: a swallowed failure here must not block the real
+		// response, which is the user-visible contract.
+		if (msg.accountId && msg.userId) {
+			try {
+				await this.#deps.registry.sendMessage({
+					channelId: msg.channelId,
+					conversationId: msg.conversationId,
+					accountId: msg.accountId,
+					toUserId: msg.userId,
+					content: { type: "text", text: "⏳ 正在处理…" },
+				});
+			} catch (err) {
+				logger.warn("[Gateway] v1 placeholder send failed (best-effort)", {
+					accountId,
+					conversationId: msg.conversationId,
+					error: err instanceof Error ? err.message : String(err),
+				});
+			}
+		}
+
 		const meta = await sessionManager?.enqueueWithMeta(msg, session);
 		if (meta) {
 			await this.sendFormattedAgentResponse(msg, meta, accountId);
