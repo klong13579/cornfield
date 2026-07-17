@@ -1,5 +1,10 @@
 Performs string replacements in files with fuzzy whitespace matching.
 
+**Content-based ONLY** — this mode does NOT support line numbers, line ranges, anchors,
+hashes, or any position-based addressing. Edits are identified by **what text to find**
+(`old_text`), not by **where in the file** the text is located. If you need to edit by
+line number, use `bash` with `sed` instead — see the bash-alternatives section below.
+
 <instruction>
 - Params **MUST** be `{ path, edits }`; `path` is required at the top level and applies to every replacement
 - You **MUST** use the smallest `old_text` that uniquely identifies the change
@@ -33,4 +38,8 @@ For position-addressed or pattern-addressed changes, bash more efficient:
 
 Use Replace when _content itself_ identifies location.
 Use bash when _position_ or _pattern_ identifies what to change.
+
+**Important**: The edit tool's replace mode does NOT accept `loc`, `line`, `range`,
+`anchors`, `hashes`, or any position-based fields. These are bash-only patterns.
+Do NOT send `loc` or `range` to the edit tool — only `old_text`/`new_text` pairs work.
 </bash-alternatives>

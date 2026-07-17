@@ -685,16 +685,36 @@ function coerceArgsFromErrors(
 
 		if (typeof currentValue !== "string") continue;
 
-		// Try to parse the string as JSON
+		// Try to parse the string as JSON first
 		const result = tryParseJsonForTypes(currentValue, expectedTypes);
-		if (!result.changed) continue;
-
-		// Clone on first modification (copy-on-write)
-		if (!changed) {
-			nextArgs = structuredCloneJSON(nextArgs);
-			changed = true;
+		if (result.changed) {
+			// Clone on first modification (copy-on-write)
+			if (!changed) {
+				nextArgs = structuredCloneJSON(nextArgs);
+				changed = true;
+			}
+			nextArgs = setValueAtPointer(nextArgs, instancePath, result.value);
+			continue;
 		}
-		nextArgs = setValueAtPointer(nextArgs, instancePath, result.value);
+
+		// String-to-array fallback: when the schema expects an array but the value
+		// is a plain string that doesn't parse as JSON, wrap it as a single-element
+		// array. LLMs sometimes send a single string instead of a string array
+		// (e.g. edit content in hashline mode, or python cell code).
+		if (
+			expectedTypes.includes("array") &&
+			typeof currentValue === "string"
+		) {
+			const wrapped = currentValue.includes("\n")
+				? currentValue.split("\n")
+				: [currentValue];
+			if (!changed) {
+				nextArgs = structuredCloneJSON(nextArgs);
+				changed = true;
+			}
+			nextArgs = setValueAtPointer(nextArgs, instancePath, wrapped);
+			continue;
+		}
 	}
 
 	// $‑prefixed key → required property: when the LLM sends an object
@@ -904,6 +924,66 @@ export function validateToolArguments(tool: Tool, toolCall: ToolCall): ToolCall[
 		}
 	}
 
+	// Post-coercion tool-specific normalization: auto-fill common missing fields.
+	// LLMs sometimes omit optional-but-useful fields like `id` (ask), `title` (python),
+	// or `phase` (todo_write). Fill them in so the tool call succeeds with a reasonable default.
+	const toolName = tool.name;
+	if (typeof normalizedArgs === "object" && normalizedArgs !== null) {
+		const args = normalizedArgs as Record<string, unknown>;
+
+		if (toolName === "ask" && Array.isArray(args.questions)) {
+			for (let i = 0; i < args.questions.length; i++) {
+				const q = args.questions[i];
+				if (typeof q === "object" && q !== null && !("id" in q)) {
+					(q as Record<string, unknown>).id = `q_${Date.now().toString(36)}_${i}`;
+					changed = true;
+				}
+			}
+			if (changed) {
+				const postFill = normalizeOptionalNullsForSchema(tool.parameters, normalizedArgs);
+				if (postFill.changed) normalizedArgs = postFill.value;
+				if (validate(normalizedArgs)) return normalizedArgs as ToolCall["arguments"];
+			}
+		}
+
+		if (toolName === "python" && Array.isArray(args.cells)) {
+			for (let i = 0; i < args.cells.length; i++) {
+				const cell = args.cells[i];
+				if (typeof cell === "object" && cell !== null && !("title" in cell)) {
+					const code = (cell as Record<string, unknown>).code;
+					(cell as Record<string, unknown>).title = typeof code === "string"
+						? code.replace(/\s+/g, " ").slice(0, 50).trim() || `cell_${i}`
+						: `cell_${i}`;
+					changed = true;
+				}
+			}
+			if (changed) {
+				const postFill = normalizeOptionalNullsForSchema(tool.parameters, normalizedArgs);
+				if (postFill.changed) normalizedArgs = postFill.value;
+				if (validate(normalizedArgs)) return normalizedArgs as ToolCall["arguments"];
+			}
+		}
+
+		if (toolName === "todo_write" && Array.isArray(args.ops)) {
+			for (const op of args.ops) {
+				if (typeof op === "object" && op !== null && Array.isArray((op as Record<string, unknown>).list)) {
+					const list = (op as Record<string, unknown>).list as Record<string, unknown>[];
+					for (let i = 0; i < list.length; i++) {
+						if (typeof list[i] === "object" && list[i] !== null && !("phase" in list[i])) {
+							(list[i] as Record<string, unknown>).phase = `Phase ${i + 1}`;
+							changed = true;
+						}
+					}
+				}
+			}
+			if (changed) {
+				const postFill = normalizeOptionalNullsForSchema(tool.parameters, normalizedArgs);
+				if (postFill.changed) normalizedArgs = postFill.value;
+				if (validate(normalizedArgs)) return normalizedArgs as ToolCall["arguments"];
+			}
+		}
+	}
+
 	// Format validation errors nicely
 	const errors =
 		validate.errors
@@ -913,12 +993,11 @@ export function validateToolArguments(tool: Tool, toolCall: ToolCall): ToolCall[
 			})
 			.join("\n") || "Unknown validation error";
 
-	const receivedArgs = changed
-		? {
-				original: originalArgs,
-				normalized: normalizedArgs,
-			}
-		: originalArgs;
+	// Always show the original args — the LLM should see what it actually sent.
+	// The `{original, normalized}` wrapper triggers a cascading failure:
+	// the LLM copies the wrapper as the next tool call, but the wrapper
+	// properties are not valid schema fields (e.g. `additionalProperties: false`).
+	const receivedArgs = originalArgs;
 
 	let errorMessage = `Validation failed for tool "${
 		toolCall.name
