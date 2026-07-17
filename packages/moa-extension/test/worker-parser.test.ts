@@ -1,8 +1,11 @@
 import { describe, expect, it } from "bun:test";
+import { scoreWorkerHeuristicV2 } from "../src/quality/heuristic";
+import { DEFAULT_ROLE_WEIGHTS } from "../src/quality/weights";
 import { DEFAULT_OUTPUT_SCHEMA, type MoaOutputSchema, type MoaWorkerResult } from "../src/types";
 import {
 	applyWorkerParsing,
 	DEFAULT_QUALITY_MIN_SCORE,
+	hasOpenQuestions,
 	parseWorkerOutputBySchema,
 	scoreWorkerOutput,
 } from "../src/worker-parser";
@@ -76,9 +79,38 @@ This is the plan.
 			"More freeform notes.",
 		].join("\n");
 		const parsed = parseWorkerOutputBySchema(raw, DEFAULT_OUTPUT_SCHEMA);
-		expect(parsed.missingRequired).toEqual([]);
+		// Dual-channel: content is filled for display/scoring, but contract
+		// failure is not cleared (softRecovered + missingRequired retained).
+		expect(parsed.softRecovered).toBe(true);
+		expect(parsed.missingRequired).toEqual(
+			DEFAULT_OUTPUT_SCHEMA.sections.filter(s => s.required).map(s => s.name),
+		);
 		expect(parsed.sections.plan).toContain("Step 1");
 		expect(parsed.sections.open_questions).toBe("");
+	});
+
+	it("soft-recovered freeform cannot fake all_complete convergence", () => {
+		const raw = [
+			"## Step 1",
+			"",
+			"A ".repeat(120) + "concrete design with enough substance for quality scoring.",
+		].join("\n");
+		const parsed = parseWorkerOutputBySchema(raw, DEFAULT_OUTPUT_SCHEMA);
+		const heuristic = scoreWorkerHeuristicV2(parsed, DEFAULT_OUTPUT_SCHEMA, DEFAULT_ROLE_WEIGHTS.divergent);
+		expect(parsed.softRecovered).toBe(true);
+		expect(heuristic.contractHardFail).toBe(true);
+		expect(heuristic.score).toBeLessThanOrEqual(30);
+
+		const result: MoaWorkerResult = {
+			name: "divergent",
+			role: "Explore alternatives",
+			ok: true,
+			output: raw,
+			qualityScore: heuristic.score,
+		};
+		// Empty synthesized open_questions must not count as "no questions".
+		expect(hasOpenQuestions(result, DEFAULT_OUTPUT_SCHEMA)).toBe(true);
+		expect(heuristic.score >= 80 && !hasOpenQuestions(result, DEFAULT_OUTPUT_SCHEMA)).toBe(false);
 	});
 
 	it("does not soft-recover when only some required headers are present", () => {

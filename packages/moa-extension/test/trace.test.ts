@@ -33,9 +33,9 @@ function makeWorker(overrides: Partial<MoaWorkerResult> = {}): MoaWorkerResult {
 		rewrittenPrompt: overrides.rewrittenPrompt,
 		parsed: overrides.parsed,
 		qualityScore: overrides.qualityScore,
-	qualityDropped: overrides.qualityDropped,
-	parsedAt: overrides.parsedAt,
-	qualityMeta: overrides.qualityMeta,
+		qualityDropped: overrides.qualityDropped,
+		parsedAt: overrides.parsedAt,
+		qualityMeta: overrides.qualityMeta,
 	};
 }
 
@@ -322,6 +322,117 @@ describe("buildMoaHandoff", () => {
 	});
 });
 
+describe("buildMoaHandoff — assumptions summary (once-right P4)", () => {
+	it("renders a dedicated Assumptions to verify section from tco.assumptions", () => {
+		const handoff = buildMoaHandoff({
+			runId: "moa-assumptions",
+			archiveChunks: 1,
+			archiveBytes: 100,
+			workers: [makeWorker({ output: "plan body" })],
+			synthesis: makeWorker({ name: "synthesis", output: "merged" }),
+			task: "rollback drill",
+			maxBytes: 8_000,
+			tco: {
+				task_understanding: "plan a rollback drill",
+				known_inputs: [],
+				missing_inputs: [],
+				assumptions: [
+					{ key: "target_env", value: "staging", reason: "user_skipped", note: "auto-assumed" },
+					{ key: "window_min", value: 30, reason: "non_interactive_fallback" },
+				],
+			},
+		});
+		expect(handoff).toContain("## Assumptions to verify");
+		expect(handoff).toContain("target_env");
+		expect(handoff).toContain("staging");
+		expect(handoff).toContain("user_skipped");
+		expect(handoff).toContain("window_min");
+	});
+
+	it("keeps Assumptions to verify outside the byte-capped worker block", () => {
+		const handoff = buildMoaHandoff({
+			runId: "moa-assumptions-cap",
+			archiveChunks: 1,
+			archiveBytes: 100,
+			workers: [makeWorker({ output: "x".repeat(5_000) })],
+			task: "big workers",
+			maxBytes: 200,
+			tco: {
+				task_understanding: "t",
+				known_inputs: [],
+				missing_inputs: [],
+				assumptions: [{ key: "must_survive", value: "yes", reason: "user_skipped_required" }],
+			},
+		});
+		expect(handoff).toContain("## Assumptions to verify");
+		expect(handoff).toContain("must_survive");
+		const assumptionsIdx = handoff.indexOf("## Assumptions to verify");
+		const conclusionsIdx = handoff.indexOf("## Worker conclusions");
+		expect(assumptionsIdx).toBeGreaterThan(0);
+		expect(assumptionsIdx).toBeLessThan(conclusionsIdx);
+	});
+
+	it("still surfaces assumptions when maxBytes is 0 (no worker conclusions)", () => {
+		const handoff = buildMoaHandoff({
+			runId: "moa-assumptions-zero",
+			archiveChunks: 0,
+			archiveBytes: 0,
+			workers: [makeWorker()],
+			task: "x",
+			maxBytes: 0,
+			tco: {
+				task_understanding: "t",
+				known_inputs: [],
+				missing_inputs: [],
+				assumptions: [{ key: "budget", value: undefined, reason: "user_skipped" }],
+			},
+		});
+		expect(handoff).toContain("## Assumptions to verify");
+		expect(handoff).toContain("budget");
+		expect(handoff).not.toContain("Worker conclusions");
+	});
+
+	it("omits Assumptions to verify when tco has no assumptions", () => {
+		const handoff = buildMoaHandoff({
+			runId: "moa-no-assumptions",
+			archiveChunks: 1,
+			archiveBytes: 10,
+			workers: [makeWorker()],
+			task: "x",
+			maxBytes: 8_000,
+			tco: {
+				task_understanding: "clear task",
+				known_inputs: [{ key: "weeks", value: 2, source: "user" }],
+				missing_inputs: [],
+				assumptions: [],
+			},
+		});
+		expect(handoff).not.toContain("## Assumptions to verify");
+		expect(handoff).toContain("Known");
+	});
+});
+
+describe("buildTraceDetails — assumptionsSummary (once-right P4)", () => {
+	it("populates assumptionsSummary from result.tco", () => {
+		const result = makeResult();
+		result.tco = {
+			task_understanding: "t",
+			known_inputs: [],
+			missing_inputs: [],
+			assumptions: [{ key: "env", value: "prod", reason: "llm_inferred" }],
+		};
+		const details = buildTraceDetails(result, { runId: "moa-z", archiveChunks: 1, archiveBytes: 10 });
+		expect(details.assumptionsSummary).toBeDefined();
+		expect(details.assumptionsSummary).toContain("env");
+		expect(details.assumptionsSummary).toContain("prod");
+	});
+
+	it("leaves assumptionsSummary undefined when there are no assumptions", () => {
+		const details = buildTraceDetails(makeResult(), { runId: "moa-z", archiveChunks: 0, archiveBytes: 0 });
+		expect(details.assumptionsSummary).toBeUndefined();
+	});
+});
+
 describe("buildDispatchLogFromResults", () => {
 	it("assigns round=1 to every entry", () => {
 		const log = buildDispatchLogFromResults([makeWorker({ name: "divergent" }), makeWorker({ name: "grounded" })]);
@@ -341,9 +452,7 @@ describe("buildDispatchLogFromResults", () => {
 
 	it("propagates qualityMeta from worker results", () => {
 		const meta = makeQualityMeta({ heuristicScore: 55, source: "heuristic", judged: false });
-		const log = buildDispatchLogFromResults([
-			makeWorker({ name: "divergent", qualityScore: 55, qualityMeta: meta }),
-		]);
+		const log = buildDispatchLogFromResults([makeWorker({ name: "divergent", qualityScore: 55, qualityMeta: meta })]);
 		expect(log[0]?.qualityMeta).toEqual(meta);
 	});
 });
@@ -495,7 +604,14 @@ describe("buildSummary / buildTraceDetails (deprecated, kept for back-compat)", 
 
 	it("buildTraceDetails surfaces result.timings when set", () => {
 		const result = makeResult();
-		result.timings = { discovery: 27_600, ask: 9_000, rewrite: 69_700, workers: 141_600, synthesis: 48_700, total: 296_600 };
+		result.timings = {
+			discovery: 27_600,
+			ask: 9_000,
+			rewrite: 69_700,
+			workers: 141_600,
+			synthesis: 48_700,
+			total: 296_600,
+		};
 		const details = buildTraceDetails(result, { runId: "moa-z", archiveChunks: 2, archiveBytes: 80_881 });
 		expect(details.timings).toEqual(result.timings);
 	});

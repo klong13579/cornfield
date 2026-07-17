@@ -1,4 +1,4 @@
-import type { MoaOutputSchema, ParsedWorkerOutput } from "../types";
+import type { MoaOutputSchema, MoaOutputSchemaSection, ParsedWorkerOutput } from "../types";
 import type { MoaQualityRoleWeights, WorkerQualityBreakdownV2 } from "./types";
 
 /** Known-bad patterns the worker emits when it's refusing to work. */
@@ -21,6 +21,41 @@ function countBulletItems(text: string): number {
 	return n;
 }
 
+/**
+ * Primary deliverable section for `planSubstance`: first required markdown
+ * section in schema order, else first required section of any type.
+ * Falls back to `plan` when the schema has no required sections (legacy).
+ */
+export function resolvePrimarySubstanceSection(schema: MoaOutputSchema): MoaOutputSchemaSection | undefined {
+	const required = schema.sections.filter(s => s.required);
+	return required.find(s => s.type === "markdown") ?? required[0] ?? schema.sections.find(s => s.name === "plan");
+}
+
+/**
+ * Question / residual-list section for `openQuestions` credit: prefer a
+ * required list whose name contains "question", else any required list
+ * excluding assumptions and the primary substance section (avoids double-
+ * counting the same list as both planSubstance and openQuestions).
+ * Falls back to the legacy `open_questions` name.
+ */
+export function resolveQuestionsListSection(
+	schema: MoaOutputSchema,
+	primary?: MoaOutputSchemaSection,
+): MoaOutputSchemaSection | undefined {
+	const primaryName = primary?.name;
+	const requiredLists = schema.sections.filter(
+		s => s.required && s.type === "list" && s.name !== primaryName && !/assumption/i.test(s.name),
+	);
+	const byName = requiredLists.find(s => /question/i.test(s.name));
+	if (byName) return byName;
+	if (requiredLists[0]) return requiredLists[0];
+	return schema.sections.find(s => s.name === "open_questions" && s.name !== primaryName);
+}
+
+function resolveAssumptionsSection(schema: MoaOutputSchema): MoaOutputSchemaSection | undefined {
+	return schema.sections.find(s => /assumption/i.test(s.name)) ?? schema.sections.find(s => s.name === "assumptions");
+}
+
 function computeHits(
 	parsed: ParsedWorkerOutput,
 	schema: MoaOutputSchema,
@@ -33,14 +68,18 @@ function computeHits(
 	const requiredTotal = requiredSections.length;
 	const requiredHits = requiredSections.filter(s => parsed.sections[s.name] !== undefined).length;
 
-	const planText = parsed.sections.plan ?? "";
-	const oqText = parsed.sections.open_questions ?? "";
-	const oqCount = oqText ? countBulletItems(oqText) : 0;
-	const assumptionsText = parsed.sections.assumptions ?? "";
+	const primary = resolvePrimarySubstanceSection(schema);
+	const questionsSec = resolveQuestionsListSection(schema, primary);
+	const assumptionsSec = resolveAssumptionsSection(schema);
+
+	const primaryText = primary ? (parsed.sections[primary.name] ?? "") : "";
+	const questionsText = questionsSec ? (parsed.sections[questionsSec.name] ?? "") : "";
+	const assumptionsText = assumptionsSec ? (parsed.sections[assumptionsSec.name] ?? "") : "";
+	const questionCount = questionsText ? countBulletItems(questionsText) : 0;
 
 	const refusalMatches: string[] = [];
 	for (const re of REFUSAL_PATTERNS) {
-		const m = oqText.match(re) ?? planText.match(re);
+		const m = questionsText.match(re) ?? primaryText.match(re);
 		if (m) refusalMatches.push(m[0]);
 	}
 
@@ -51,8 +90,10 @@ function computeHits(
 		requiredTotal,
 		hits: {
 			required: requiredHit,
-			planSubstance: planText.length > 200 ? 1 : 0,
-			openQuestions: oqCount < 5 ? 1 : 0,
+			planSubstance: primaryText.length > 200 ? 1 : 0,
+			// Prefer few residual questions; empty / absent list also counts as ok
+			// when the schema has no questions section at all.
+			openQuestions: questionsSec ? (questionCount < 5 ? 1 : 0) : 1,
 			assumptions: assumptionsText.trim().length > 0 ? 1 : 0,
 			noRefusal: refusalMatches.length === 0 ? 1 : 0,
 		},
@@ -82,7 +123,9 @@ export function scoreWorkerHeuristicV2(
 		contributions.noRefusal;
 
 	let score = Math.round(raw);
-	const contractHardFail = requiredTotal > 0 && requiredHits < requiredTotal;
+	// softRecovered fills sections for display but must not clear the contract
+	// hard-fail (empty synthesized open_questions would otherwise look complete).
+	const contractHardFail = Boolean(parsed.softRecovered) || (requiredTotal > 0 && requiredHits < requiredTotal);
 	if (contractHardFail) {
 		score = Math.min(score, 30);
 	}

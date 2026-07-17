@@ -35,6 +35,12 @@ export interface SpawnWorkerInput {
 	env?: Record<string, string>;
 	/** Per-worker timeout in ms. Default: 10 minutes. */
 	timeoutMs?: number;
+	/**
+	 * Streaming callback (once-right P5). Invoked with the cumulative
+	 * assistant text so far as `message_update` / `message_end` events arrive
+	 * on the JSONL stdout stream. Optional — existing callers unchanged.
+	 */
+	onPartial?: (partial: { text: string }) => void;
 }
 
 export interface WorkerOutput {
@@ -171,6 +177,69 @@ async function readStreamToString(stream: ReadableStream<Uint8Array>): Promise<s
 	return result;
 }
 
+function extractAssistantText(message: unknown): string {
+	if (!isAssistantMessage(message)) return "";
+	return message.content
+		.filter(part => part && part.type === "text" && typeof part.text === "string")
+		.map(part => part.text ?? "")
+		.join("")
+		.trim();
+}
+
+/** Mutable accumulator for streaming JSONL events. */
+export interface WorkerStreamState {
+	text: string;
+}
+
+/**
+ * Apply one parsed JSONL worker event to the stream state. Pure enough for
+ * unit tests: updates `state.text` and invokes `onPartial` when the
+ * cumulative assistant text changes.
+ */
+export function applyWorkerStreamEvent(
+	event: WorkerEvent | { type: string; [key: string]: unknown },
+	state: WorkerStreamState,
+	onPartial?: (text: string) => void,
+): void {
+	if (!onPartial) return;
+	if (event.type === "message_update" || event.type === "message_end") {
+		const text = extractAssistantText((event as { message?: unknown }).message);
+		if (text && text !== state.text) {
+			state.text = text;
+			onPartial(text);
+		}
+	}
+}
+
+/**
+ * Read a stdout stream as UTF-8, invoking `onLine` for each complete line
+ * (streaming). Returns the full concatenated string (same as readStreamToString).
+ */
+async function readStreamLines(stream: ReadableStream<Uint8Array>, onLine: (line: string) => void): Promise<string> {
+	const reader = stream.getReader();
+	const decoder = new TextDecoder();
+	let result = "";
+	let pending = "";
+	for (;;) {
+		const { value, done } = await reader.read();
+		if (done) break;
+		if (!value) continue;
+		const chunk = decoder.decode(value, { stream: true });
+		result += chunk;
+		pending += chunk;
+		for (;;) {
+			const nl = pending.indexOf("\n");
+			if (nl < 0) break;
+			const line = pending.slice(0, nl);
+			pending = pending.slice(nl + 1);
+			onLine(line);
+		}
+	}
+	result += decoder.decode();
+	if (pending.length > 0) onLine(pending);
+	return result;
+}
+
 function extractOutput(events: WorkerEvent[]): {
 	output: string;
 	model?: string;
@@ -293,8 +362,22 @@ export async function spawnMoaWorker(input: SpawnWorkerInput): Promise<WorkerOut
 			else input.signal.addEventListener("abort", onAbort, { once: true });
 		}
 
+		const streamState: WorkerStreamState = { text: "" };
+		const onLine = (line: string) => {
+			const trimmed = line.trim();
+			if (!trimmed || !input.onPartial) return;
+			try {
+				const event = JSON.parse(trimmed) as WorkerEvent;
+				applyWorkerStreamEvent(event, streamState, text => input.onPartial!({ text }));
+			} catch {
+				// Tolerate non-JSONL noise.
+			}
+		};
+
 		const [stdout, stderr, exitCode] = await Promise.all([
-			readStreamToString(proc.stdout as unknown as ReadableStream<Uint8Array>),
+			input.onPartial
+				? readStreamLines(proc.stdout as unknown as ReadableStream<Uint8Array>, onLine)
+				: readStreamToString(proc.stdout as unknown as ReadableStream<Uint8Array>),
 			readStreamToString(proc.stderr as unknown as ReadableStream<Uint8Array>),
 			proc.exited,
 		]);

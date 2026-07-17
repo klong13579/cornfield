@@ -78,19 +78,18 @@ export function parseWorkerOutputBySchema(raw: string, schema: MoaOutputSchema):
 		if (!schemaNames.has(name)) extraSections.push(name);
 	}
 
-	// Soft recovery: workers often emit freeform markdown (`## Step 1`, Chinese
-	// headings, etc.) and omit the schema's exact `## plan` / `## open_questions`
-	// headers. When *every* required section is missing but there is substance,
-	// treat the full body as the primary markdown section and synthesize empty
-	// bodies for other required sections so quality scoring can judge content
-	// instead of always hard-failing at ≤30. Partial compliance (e.g. only
-	// `## open_questions`) still hard-fails — that is intentional.
+	// Soft recovery (dual-channel): workers often emit freeform markdown
+	// (`## Step 1`, Chinese headings, etc.) and omit the schema's exact
+	// `## plan` / `## open_questions` headers. When *every* required section is
+	// missing but there is substance, fill the primary markdown section (and
+	// empty bodies for other required sections) so digests/scoring can see
+	// content — but keep `missingRequired` and set `softRecovered` so the
+	// contract still hard-fails and convergence cannot treat empty synthesized
+	// open_questions as "all complete". Partial compliance still hard-fails.
 	const required = schema.sections.filter(s => s.required);
 	const body = raw.trim();
 	const matchedSchemaCount = schema.sections.filter(s => found.has(s.name.toLowerCase())).length;
-	// Only when the worker ignored the schema entirely (no schema section
-	// headers at all). Partial output like `## assumptions` alone still
-	// hard-fails missing required sections.
+	let softRecovered = false;
 	if (
 		body.length > 0 &&
 		required.length > 0 &&
@@ -103,10 +102,11 @@ export function parseWorkerOutputBySchema(raw: string, schema: MoaOutputSchema):
 			if (sec.name === primary.name) continue;
 			sections[sec.name] = "";
 		}
-		missingRequired = [];
+		softRecovered = true;
+		// Do NOT clear missingRequired — contract remains unsatisfied.
 	}
 
-	return { sections, missingRequired, extraSections, parseErrors: [] };
+	return { sections, missingRequired, extraSections, parseErrors: [], softRecovered: softRecovered || undefined };
 }
 
 // ----------------------------------------------------------------------------
@@ -152,10 +152,9 @@ export function scoreWorkerOutput(parsed: ParsedWorkerOutput, schema: MoaOutputS
 	if (oqCount < 5) score += 20;
 	if (hasAssumptions) score += 10;
 	if (refusalMatches.length === 0) score += 20;
-	// Hard drop: any missing required section caps the score below the
-	// default minScore (40), so a worker that didn't follow the schema
-	// contract is always dropped regardless of other strengths.
-	if (requiredHits < requiredTotal) {
+	// Hard drop: any missing required section (or soft-recovered freeform)
+	// caps the score below the default minScore (40).
+	if (parsed.softRecovered || requiredHits < requiredTotal) {
 		score = Math.min(score, 30);
 	}
 
@@ -214,9 +213,13 @@ export function applyWorkerParsing(
  * Returns true when the worker's parsed output has any non-empty
  * `## open_questions` section. Used by the multi-round convergence
  * check (condition 4: all workers score ≥ 80 AND zero open_questions).
+ *
+ * Soft-recovered freeform synthesizes an empty `open_questions` section;
+ * that must NOT count as "no questions" / all_complete — treat as unresolved.
  */
 export function hasOpenQuestions(result: MoaWorkerResult, schema: MoaOutputSchema): boolean {
 	const parsed = parseWorkerOutputBySchema(result.output, schema);
+	if (parsed.softRecovered) return true;
 	const section = parsed.sections.open_questions;
 	if (!section) return false;
 	return section.trim().length > 0;

@@ -1,17 +1,20 @@
+import { mergeMissingInputs } from "./merge-missing";
 import { rebindWorkerPrompts } from "./planner";
-import { formatMoaStatusBar, type MoaStatusBarInput } from "./status-bar";
 import {
 	type ExecutePlanOptions,
 	qualityFailedSynthesis,
 	resolvePlanOptions,
 	runAskStage,
 	runDiscoveryStage,
+	runInputCollectStage,
 	runRewriteStage,
 	runSynthesisStage,
 	runWorkersStage,
 } from "./stages";
-import { formatDuration, formatTimingSummary, StageClock } from "./timing";
+import { formatMoaStatusBar, type MoaStatusBarInput } from "./status-bar";
+import { createWorkerStreamSink } from "./stream-ui";
 import { renderTcoForPrompt } from "./tco";
+import { formatDuration, formatTimingSummary, StageClock } from "./timing";
 import type { MoaExecutionResult, MoaPlan } from "./types";
 
 export type { ExecutePlanOptions } from "./stages";
@@ -47,7 +50,10 @@ function startLiveStage(options: {
 
 export async function executePlan(plan: MoaPlan, options: ExecutePlanOptions): Promise<MoaExecutionResult> {
 	const planOptions = resolvePlanOptions(plan, options);
-	const effectiveMaxRounds = planOptions.hasUI ? planOptions.settings.maxRounds : 0;
+	// Once-right default: Pre-Ask only. Post-worker Round-Ask requires
+	// postWorkerAskEnabled=true; gateway/cron (hasUI=false) always 0.
+	const effectiveMaxRounds =
+		planOptions.hasUI && planOptions.settings.postWorkerAskEnabled ? planOptions.settings.maxRounds : 0;
 	const stageCtx = { task: plan.task, settings: planOptions.settings };
 
 	const ui = planOptions.hasUI ? options.ui : undefined;
@@ -72,6 +78,12 @@ export async function executePlan(plan: MoaPlan, options: ExecutePlanOptions): P
 	clock.markTotalStart();
 	const hasUI = planOptions.hasUI;
 
+	// Once-right P5: TUI worker streaming sink (setWidget). No-op without UI.
+	const streamSink =
+		hasUI && ui && typeof (ui as { setWidget?: unknown }).setWidget === "function"
+			? createWorkerStreamSink(ui as { setWidget: (k: string, c: string[] | undefined) => void })
+			: undefined;
+
 	const discoveryLive = startLiveStage({
 		clock,
 		key: "discovery",
@@ -93,6 +105,38 @@ export async function executePlan(plan: MoaPlan, options: ExecutePlanOptions): P
 			formatDuration(discoveryMs),
 	);
 
+	// B stage (once-right A∪B): only worth running when we will actually ask
+	// the user (TUI + askEnabled). Merges each worker's `needed_inputs` into
+	// the single pre-Ask so the user is still asked exactly once.
+	const inputCollectActive = hasUI && planOptions.settings.askEnabled && planOptions.settings.inputCollectEnabled;
+	if (inputCollectActive) {
+		const inputCollectLive = startLiveStage({
+			clock,
+			key: "input_collect",
+			hasUI,
+			workingBase: "MOA: 征询阶段 — 收集各角色待确认输入…",
+			statusBase: { round: 1, maxRounds: effectiveMaxRounds || 1, phase: "discovery" },
+			setWorking,
+			setMoaStatus,
+		});
+		const inputCollect = await runInputCollectStage(plan, tco, stageCtx, options);
+		const inputCollectMs = inputCollectLive.stop();
+		const beforeCount = tco.missing_inputs.length;
+		tco.missing_inputs = mergeMissingInputs(tco.missing_inputs, inputCollect.missing, {
+			maxItems: planOptions.settings.maxQuestionsPerRound,
+		});
+		notify(
+			"征询完成 ✓ 角色补充 " +
+				inputCollect.missing.length +
+				" 项，合并后待确认 " +
+				tco.missing_inputs.length +
+				"（原 " +
+				beforeCount +
+				"）· " +
+				formatDuration(inputCollectMs),
+		);
+	}
+
 	const askLive = startLiveStage({
 		clock,
 		key: "ask",
@@ -113,12 +157,7 @@ export async function executePlan(plan: MoaPlan, options: ExecutePlanOptions): P
 	const askSummary = ask.askSummary;
 	if (askSummary.answered > 0) {
 		notify(
-			"已确认 " +
-				askSummary.answered +
-				" 项，" +
-				askSummary.assumed +
-				" 项使用假设值 · " +
-				formatDuration(askMs),
+			"已确认 " + askSummary.answered + " 项，" + askSummary.assumed + " 项使用假设值 · " + formatDuration(askMs),
 		);
 	}
 
@@ -168,6 +207,7 @@ export async function executePlan(plan: MoaPlan, options: ExecutePlanOptions): P
 		effectiveMaxRounds,
 		hooks: {
 			notify,
+			onWorkerPartial: streamSink ? chunk => streamSink.onPartial(chunk) : undefined,
 			formatWorkersDone: (okCount, total, workersMs) =>
 				"Worker 完成 " + okCount + "/" + total + " ✓ · " + formatDuration(workersMs),
 			onRoundWorkers: ({ round, maxRounds, baseWorkers: bw }) =>
@@ -223,10 +263,18 @@ export async function executePlan(plan: MoaPlan, options: ExecutePlanOptions): P
 	tcoBlock = workersResult.tcoBlock;
 	const finalPlan: MoaPlan = { ...schemaAwarePlan, workers: baseWorkers };
 
+	if (streamSink) {
+		for (const worker of workersResult.workers) {
+			const status = !worker.ok ? "failed" : worker.qualityDropped ? "blocked" : "ok";
+			streamSink.markStatus(worker.name, status);
+		}
+	}
+
 	const finishWithTimings = <T extends MoaExecutionResult>(result: T): T => {
 		clock.stopTotal();
 		const timings = clock.snapshot();
 		notify(formatTimingSummary(timings));
+		streamSink?.clear();
 		return { ...result, timings };
 	};
 
@@ -272,6 +320,7 @@ export async function executePlan(plan: MoaPlan, options: ExecutePlanOptions): P
 		stageCtx,
 		options,
 		tcoBlock,
+		workersResult.tco,
 	);
 	const synthesisMs = synthesisLive.stop();
 	clearMoaStatus();

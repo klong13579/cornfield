@@ -1,6 +1,8 @@
 import { describe, expect, it } from "bun:test";
 import { buildPlan } from "../src/planner";
-import { DEFAULT_WORKER_SLOTS, resolveSettings } from "../src/settings";
+import rewritePromptTemplate from "../src/prompts/rewrite.md" with { type: "text" };
+import workerPromptTemplate from "../src/prompts/worker.md" with { type: "text" };
+import { resolveSettings } from "../src/settings";
 import { DEFAULT_OUTPUT_SCHEMA, type MoaOutputSchema, type MoaSettings } from "../src/types";
 
 const SETTINGS: MoaSettings = resolveSettings({});
@@ -46,8 +48,9 @@ describe("buildPlan", () => {
 			expect(w.prompt).toContain("`## test_plan`");
 			expect(w.prompt).toContain("`## risks`");
 			expect(w.prompt).toContain("severity: low|med|high");
-			// Default schema sections should NOT appear when overridden
-			expect(w.prompt).not.toContain("`## open_questions`");
+			// Default schema section names must not be hardcoded into the
+			// Required output schema block when a custom schema is used.
+			expect(w.prompt).not.toMatch(/Required output schema[\s\S]*`## open_questions`/);
 		}
 	});
 
@@ -74,11 +77,39 @@ describe("buildPlan", () => {
 	});
 });
 
+describe("plan-round prompt contract (once-right P3)", () => {
+	it("worker prompt: unique Ask already done; residual uncertainty → assumptions, not another user round", () => {
+		const text = workerPromptTemplate;
+		expect(text).toMatch(/unique Ask|single Ask|唯一.*Ask|Ask (?:is |has )?already|already (?:been )?asked/i);
+		expect(text).toMatch(/assumptions/i);
+		expect(text).toMatch(
+			/do not (?:expect|trigger|wait for)|not (?:another|a second)|no (?:further|second) (?:Ask|round)|禁止.*(?:再问|二次)/i,
+		);
+	});
+
+	it("rewrite prompt embeds the same once-right Ask-complete contract for generated worker prompts", () => {
+		const text = rewritePromptTemplate;
+		expect(text).toMatch(/unique Ask|single Ask|唯一.*Ask|Ask (?:is |has )?already|already (?:been )?asked/i);
+		expect(text).toMatch(/assumptions/i);
+		expect(text).toMatch(
+			/do not (?:expect|trigger|wait for)|not (?:another|a second)|no (?:further|second) (?:Ask|round)|禁止.*(?:再问|二次)/i,
+		);
+	});
+
+	it("built worker prompts carry the once-right Ask-complete contract", () => {
+		const plan = buildPlan("design a rollback drill", SETTINGS);
+		for (const w of plan.workers) {
+			expect(w.prompt).toMatch(/unique Ask|single Ask|Ask (?:is |has )?already|already (?:been )?asked/i);
+			expect(w.prompt).toMatch(/assumptions/i);
+		}
+	});
+});
+
 // Sanity: planner uses the worker slots from settings
 describe("buildPlan integration", () => {
 	it("emits exactly settings.workerCount workers", () => {
 		const plan = buildPlan("x", resolveSettings({ workerCount: 2 }));
 		expect(plan.workers).toHaveLength(2);
-		expect(plan.workers.map(w => w.name)).toEqual(DEFAULT_WORKER_SLOTS.slice(0, 2).map(s => s.name));
+		expect(plan.workers.map(w => w.name)).toEqual(["divergent", "grounded"]);
 	});
 });

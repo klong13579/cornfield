@@ -1,11 +1,18 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, vi } from "bun:test";
+import { logger } from "@oh-my-pi/pi-utils";
 import { DEFAULT_SETTINGS, resolveSettings } from "../src/settings";
+import type { MoaSettings } from "../src/types";
 
 describe("DEFAULT_SETTINGS (PR2 multi-round)", () => {
 	it("exposes the design-locked multi-round defaults", () => {
 		expect(DEFAULT_SETTINGS.maxRounds).toBe(1);
 		expect(DEFAULT_SETTINGS.maxQuestionsPerRound).toBe(5);
 		expect(DEFAULT_SETTINGS.qualityMinScore).toBe(40);
+		expect(DEFAULT_SETTINGS.postWorkerAskEnabled).toBe(false);
+		// Once-right P2: B (input-collect) is on by default for the A∪B single Ask.
+		expect(DEFAULT_SETTINGS.inputCollectEnabled).toBe(true);
+		expect(resolveSettings().inputCollectEnabled).toBe(true);
+		expect(resolveSettings({ inputCollectEnabled: false }).inputCollectEnabled).toBe(false);
 	});
 });
 
@@ -106,6 +113,36 @@ describe("resolveSettings — priority (env > config file > default)", () => {
 			const s = resolveSettings({ synthesisModel: "alibaba-coding-plan/kimi-k2.6" });
 			expect(s.synthesisModel).toBe("alibaba-coding-plan/kimi-k2.6");
 		} finally {
+			setEnv(ORIGINAL_ENV);
+		}
+	});
+	it("ignores malformed runtime JSON5 instead of blocking settings resolution", () => {
+		setEnv("{ invalid");
+		const warn = vi.spyOn(logger, "warn").mockImplementation(() => logger);
+		try {
+			let settings: MoaSettings | undefined;
+			expect(() => {
+				settings = resolveSettings({ maxRounds: 2 });
+			}).not.toThrow();
+			expect(settings?.maxRounds).toBe(2);
+			expect(warn).toHaveBeenCalledTimes(1);
+		} finally {
+			warn.mockRestore();
+			setEnv(ORIGINAL_ENV);
+		}
+	});
+	it("ignores non-object runtime JSON5 instead of blocking settings resolution", () => {
+		setEnv("[1, 2, 3]");
+		const warn = vi.spyOn(logger, "warn").mockImplementation(() => logger);
+		try {
+			let settings: MoaSettings | undefined;
+			expect(() => {
+				settings = resolveSettings({ maxRounds: 2 });
+			}).not.toThrow();
+			expect(settings?.maxRounds).toBe(2);
+			expect(warn).toHaveBeenCalledTimes(1);
+		} finally {
+			warn.mockRestore();
 			setEnv(ORIGINAL_ENV);
 		}
 	});

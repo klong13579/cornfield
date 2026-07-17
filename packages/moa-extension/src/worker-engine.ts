@@ -160,10 +160,20 @@ class InProcessWorkerEngine implements MoaWorkerEngine {
 		};
 
 		const eventFilter = (e: { type: string; [k: string]: unknown }) => {
-			if (e.type === "message_end") {
+			if (e.type === "message_update") {
+				const msg = (e as { message?: AssistantMessage }).message;
+				if (msg && input.onPartial) {
+					const text = extractText(msg);
+					if (text) input.onPartial({ text });
+				}
+			} else if (e.type === "message_end") {
 				const msg = (e as { message?: AssistantMessage }).message;
 				recordAssistant(msg);
 				accumulateUsage(msg);
+				if (msg && input.onPartial) {
+					const text = extractText(msg);
+					if (text) input.onPartial({ text });
+				}
 			} else if (e.type === "agent_end") {
 				// agent_end re-emits the assistant messages already counted in
 				// message_end. The swarm executor uses both events for the same

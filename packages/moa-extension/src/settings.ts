@@ -1,11 +1,12 @@
+import { logger } from "@oh-my-pi/pi-utils";
+import type { MoaQualityJudgeSettings, MoaQualitySettings } from "./quality/types";
 import {
 	TCO_ASK_TIMEOUT_MS_DEFAULT,
 	TCO_DISCOVERY_TIMEOUT_MS_DEFAULT,
 	TCO_MAX_MISSING_INPUTS_DEFAULT,
 	TCO_REWRITE_TIMEOUT_MS_DEFAULT,
 } from "./tco";
-import type { MoaQualityJudgeSettings, MoaQualitySettings } from "./quality/types";
-import type { MoaSettings, MoaWorkerExecutionMode, MoaWorkerSlot } from "./types";
+import type { MoaSettings, MoaWorkerSlot } from "./types";
 
 const RUNTIME_SETTINGS_ENV = "PI_MOA_SETTINGS_JSON";
 
@@ -72,9 +73,13 @@ export const DEFAULT_SETTINGS: MoaSettings = {
 	maxMissingInputs: TCO_MAX_MISSING_INPUTS_DEFAULT,
 	askTimeoutMs: TCO_ASK_TIMEOUT_MS_DEFAULT,
 	askEnabled: true,
+	inputCollectEnabled: true,
 	tcoInjectMaxBytes: 8_000,
-	// Multi-round (PR2). TUI gets 1 round by default; gateway/cron force 0 in executor.
+	// Multi-round (PR2). TUI keeps maxRounds=1 as the documented plan budget;
+	// Round-Ask between worker rounds is opt-in via postWorkerAskEnabled.
+	// Gateway/cron force effective rounds to 0 in executor (hasUI=false).
 	maxRounds: 1,
+	postWorkerAskEnabled: false,
 	maxQuestionsPerRound: 5,
 	qualityMinScore: 40,
 	// 0 = no stagger (default; tests rely on this). Production moa.yml should
@@ -107,21 +112,29 @@ export function normalizeWorkerSlots(
 function loadRuntimeSettingsOverrides(): Partial<MoaSettings> {
 	const raw = Bun.env[RUNTIME_SETTINGS_ENV]?.trim();
 	if (!raw) return {};
-	const parsed = Bun.JSON5.parse(raw);
-	if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-		throw new Error(`${RUNTIME_SETTINGS_ENV} must be a JSON5 object`);
+	try {
+		const parsed = Bun.JSON5.parse(raw);
+		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+			logger.warn("moa runtime settings must be a JSON5 object; ignoring override", {
+				env: RUNTIME_SETTINGS_ENV,
+			});
+			return {};
+		}
+		return parsed as Partial<MoaSettings>;
+	} catch (err) {
+		logger.warn("moa runtime settings parse failed; ignoring override", {
+			env: RUNTIME_SETTINGS_ENV,
+			err: String(err),
+		});
+		return {};
 	}
-	return parsed as Partial<MoaSettings>;
 }
 
 function resolveQualitySettings(override: Partial<MoaQualitySettings> | undefined): MoaQualitySettings {
 	const judgeOverride = override?.judge;
 	const rawMode = judgeOverride?.mode;
 	const mode = rawMode === "hybrid" ? "hybrid" : DEFAULT_QUALITY_JUDGE.mode;
-	const grayMargin = Math.max(
-		0,
-		Math.floor(judgeOverride?.grayMargin ?? DEFAULT_QUALITY_JUDGE.grayMargin),
-	);
+	const grayMargin = Math.max(0, Math.floor(judgeOverride?.grayMargin ?? DEFAULT_QUALITY_JUDGE.grayMargin));
 	const timeoutMs = Math.max(0, Math.floor(judgeOverride?.timeoutMs ?? DEFAULT_QUALITY_JUDGE.timeoutMs));
 	return {
 		roleWeights: override?.roleWeights ?? DEFAULT_QUALITY_SETTINGS.roleWeights,
@@ -157,10 +170,7 @@ export function resolveSettings(overrides: Partial<MoaSettings> = {}): MoaSettin
 		0,
 		Math.min(100, Math.floor(mergedOverrides.qualityMinScore ?? DEFAULT_SETTINGS.qualityMinScore)),
 	);
-	const workerStaggerMs = Math.max(
-		0,
-		Math.floor(mergedOverrides.workerStaggerMs ?? DEFAULT_SETTINGS.workerStaggerMs),
-	);
+	const workerStaggerMs = Math.max(0, Math.floor(mergedOverrides.workerStaggerMs ?? DEFAULT_SETTINGS.workerStaggerMs));
 	// Normalize workerExecutionMode: only valid values pass through.
 	const rawMode = mergedOverrides.workerExecutionMode;
 	const workerExecutionMode: "subprocess" | "in-process" =
@@ -174,6 +184,8 @@ export function resolveSettings(overrides: Partial<MoaSettings> = {}): MoaSettin
 		workerCount,
 		workers: normalizeWorkerSlots(mergedOverrides.workers ?? DEFAULT_SETTINGS.workers, workerCount),
 		maxRounds,
+		postWorkerAskEnabled: mergedOverrides.postWorkerAskEnabled ?? DEFAULT_SETTINGS.postWorkerAskEnabled,
+		inputCollectEnabled: mergedOverrides.inputCollectEnabled ?? DEFAULT_SETTINGS.inputCollectEnabled,
 		maxQuestionsPerRound,
 		qualityMinScore,
 		workerStaggerMs,

@@ -6,18 +6,24 @@ import type { AuthStorage, ExtensionUIContext, ModelRegistry, Settings } from "@
 import { parseModelPattern } from "@oh-my-pi/pi-coding-agent/config/model-resolver";
 import { prompt } from "@oh-my-pi/pi-utils";
 import { type AskQuestionsListItem, type AskUserContext, askMissingInputs, askQuestionsList } from "./ask-user";
+import { renderOutputSchemaAsMarkdown } from "./planner";
 import discoveryPromptTemplate from "./prompts/discovery.md" with { type: "text" };
+import inputCollectPromptTemplate from "./prompts/input-collect.md" with { type: "text" };
 import rewritePromptTemplate from "./prompts/rewrite.md" with { type: "text" };
 import synthesisPromptTemplate from "./prompts/synthesis.md" with { type: "text" };
-import { renderOutputSchemaAsMarkdown } from "./planner";
+import { applyWorkerQuality } from "./quality/apply";
+import { createSpawnJudgeFn, type JudgeFnArgs, type JudgeResult } from "./quality/judge";
 import { resolveSettings } from "./settings";
 import type { WorkerOutput } from "./subprocess";
 import {
 	emptyTco,
+	formatTcoValue,
 	gatherDiscoveryContext,
 	parseDiscoveryOutput,
+	parseNeededInputs,
 	renderTcoForPrompt,
 	type TaskContextObject,
+	type TcoMissingInput,
 	validateTco,
 } from "./tco";
 import type {
@@ -34,8 +40,6 @@ import type {
 } from "./types";
 import { DEFAULT_OUTPUT_SCHEMA } from "./types";
 import { createWorkerEngine, type MoaWorkerEngine, type WorkerEngineSharedContext } from "./worker-engine";
-import { applyWorkerQuality } from "./quality/apply";
-import { createSpawnJudgeFn, type JudgeFnArgs, type JudgeResult } from "./quality/judge";
 import { hasOpenQuestions, parseWorkerOutputBySchema } from "./worker-parser";
 
 export interface ExecutePlanOptions {
@@ -196,10 +200,7 @@ export interface DiscoveryStageResult {
 	durationMs: number;
 }
 
-export async function runDiscoveryStage(
-	ctx: StageContext,
-	options: ExecutePlanOptions,
-): Promise<DiscoveryStageResult> {
+export async function runDiscoveryStage(ctx: StageContext, options: ExecutePlanOptions): Promise<DiscoveryStageResult> {
 	const started = Date.now();
 	const planOptions = resolveStageOptions(ctx, options);
 	const core = await runDiscoveryCore(planOptions, options);
@@ -256,6 +257,85 @@ async function runDiscoveryCore(
 			outputSchema: DEFAULT_OUTPUT_SCHEMA,
 		};
 	}
+}
+
+export interface InputCollectStageResult {
+	/** B-sourced missing inputs, each tagged `source: "worker"` + `roles`. */
+	missing: TcoMissingInput[];
+	/** Per-worker raw results (for archive / audit; not merged into synthesis). */
+	results: MoaWorkerResult[];
+	durationMs: number;
+}
+
+/**
+ * B stage (once-right): lightweight fan-out where each worker reports the
+ * inputs it would otherwise have to guess (`needed_inputs`). Runs BEFORE the
+ * single Ask so its items can be merged (A∪B). Workers are read-only, get no
+ * tools, and are told NOT to produce a plan. Failures are non-fatal — a crashed
+ * worker just contributes no items.
+ */
+export async function runInputCollectStage(
+	plan: MoaPlan,
+	tco: TaskContextObject,
+	ctx: StageContext,
+	options: ExecutePlanOptions,
+): Promise<InputCollectStageResult> {
+	const started = Date.now();
+	const planOptions = resolveStageOptions(ctx, options);
+	const core = await runInputCollectCore(plan, tco, planOptions, options);
+	return { ...core, durationMs: Math.max(0, Date.now() - started) };
+}
+
+async function runInputCollectCore(
+	plan: MoaPlan,
+	tco: TaskContextObject,
+	planOptions: ResolvedPlanOptions,
+	options: ExecutePlanOptions,
+): Promise<{ missing: TcoMissingInput[]; results: MoaWorkerResult[] }> {
+	if (!planOptions.settings.inputCollectEnabled) {
+		return { missing: [], results: [] };
+	}
+	const tcoBlock = renderTcoForPrompt(tco, { maxBytes: planOptions.settings.tcoInjectMaxBytes });
+	const maxItems = Math.max(1, planOptions.settings.maxQuestionsPerRound);
+	const settled = await Promise.all(
+		plan.workers.map(async worker => {
+			const resolvedModel = resolveModel(worker.model, options.modelRegistry);
+			const workerName = `input-collect:${worker.name}`;
+			const systemPrompt = prompt.render(inputCollectPromptTemplate, {
+				role: worker.role,
+				task: plan.task,
+				tco_block: tcoBlock || undefined,
+				max_items: maxItems,
+			});
+			try {
+				const result = await planOptions.engine.execute({
+					cwd: options.cwd,
+					systemPrompt,
+					task: plan.task,
+					model: resolvedModel,
+					tools: "none",
+					timeoutMs: planOptions.settings.discoveryTimeoutMs,
+					signal: options.signal,
+				});
+				const mapped = mapWorkerOutput(result, workerName, worker.role, resolvedModel);
+				const items: TcoMissingInput[] = parseNeededInputs(result.output).map(item => ({
+					...item,
+					source: "worker",
+					roles: [worker.name],
+				}));
+				return { mapped, items };
+			} catch (error) {
+				return {
+					mapped: mapExecutionError(workerName, worker.role, error, resolvedModel),
+					items: [] as TcoMissingInput[],
+				};
+			}
+		}),
+	);
+	return {
+		missing: settled.flatMap(s => s.items),
+		results: settled.map(s => s.mapped),
+	};
 }
 
 export interface AskStageResult {
@@ -393,11 +473,7 @@ function buildRoundHistoryBlock(
 		parts.push(``, `### Previous answers`, previousAnswersText);
 	}
 	if (previousQuestions.length > 0) {
-		parts.push(
-			``,
-			`### Questions already asked (do not repeat)`,
-			...previousQuestions.map(q => `- ${q}`),
-		);
+		parts.push(``, `### Questions already asked (do not repeat)`, ...previousQuestions.map(q => `- ${q}`));
 	}
 	return parts.join("\n");
 }
@@ -428,6 +504,7 @@ async function runWorker(
 	roundNumber: number,
 	previousAnswersText: string,
 	previousQuestions: ReadonlyArray<string>,
+	onPartial?: (chunk: { name: string; text: string }) => void,
 ): Promise<MoaWorkerResult> {
 	const resolvedModel = resolveModel(worker.model, options.modelRegistry);
 	const tcoPlusWorker = prependTco(worker.prompt, tcoBlock);
@@ -443,6 +520,7 @@ async function runWorker(
 			tools: worker.tools === "all" ? "all" : [...worker.tools],
 			signal: options.signal,
 			timeoutMs: planOptions.settings.timeoutMs,
+			onPartial: onPartial ? partial => onPartial({ name: worker.name, text: partial.text }) : undefined,
 		});
 		return mapWorkerOutput(result, worker.name, worker.role, resolvedModel ?? worker.model, worker.rewrittenPrompt);
 	} catch (error) {
@@ -474,6 +552,7 @@ export async function runWorkerFanout(
 	roundNumber: number,
 	previousAnswersText: string,
 	previousQuestions: ReadonlyArray<string>,
+	onPartial?: (chunk: { name: string; text: string }) => void,
 ): Promise<{
 	workers: MoaWorkerResult[];
 	durations: Map<string, number>;
@@ -499,6 +578,7 @@ export async function runWorkerFanout(
 				roundNumber,
 				previousAnswersText,
 				previousQuestions,
+				onPartial,
 			);
 		}),
 	);
@@ -521,10 +601,11 @@ export async function runSynthesisStage(
 	ctx: StageContext,
 	options: ExecutePlanOptions,
 	tcoBlock: string,
+	tco: TaskContextObject,
 ): Promise<SynthesisStageResult> {
 	const started = Date.now();
 	const planOptions = resolveStageOptions(ctx, options);
-	const synthesis = await runSynthesisCore(plan, workers, planOptions, options, tcoBlock);
+	const synthesis = await runSynthesisCore(plan, workers, planOptions, options, tcoBlock, tco);
 	return { synthesis, durationMs: Math.max(0, Date.now() - started) };
 }
 
@@ -534,11 +615,19 @@ async function runSynthesisCore(
 	planOptions: ResolvedPlanOptions,
 	options: ExecutePlanOptions,
 	tcoBlock: string,
+	tco: TaskContextObject,
 ): Promise<MoaWorkerResult> {
 	const workerOutputs = workers.map(buildWorkerDigest).join("\n\n");
-	const assumptionsBlock = planOptions.settings.askEnabled
-		? undefined
-		: "(assumptions were auto-filled; non-interactive run)";
+	const assumptionsBlock =
+		tco.assumptions.length > 0
+			? tco.assumptions
+					.map(assumption => {
+						const value = formatTcoValue(assumption.value);
+						const note = assumption.note ? `; note=${assumption.note}` : "";
+						return `- \`${assumption.key}\` = ${value} (reason=${assumption.reason}${note})`;
+					})
+					.join("\n")
+			: undefined;
 	const systemPrompt = prompt.render(synthesisPromptTemplate, {
 		task: plan.task,
 		tco_block: tcoBlock || undefined,
@@ -546,11 +635,10 @@ async function runSynthesisCore(
 		assumptions_block: assumptionsBlock,
 	});
 	const resolvedSynthesisModel = resolveModel(plan.synthesisModel, options.modelRegistry);
-	const finalPrompt = prependTco(systemPrompt, tcoBlock);
 	try {
 		const result = await planOptions.engine.execute({
 			cwd: options.cwd,
-			systemPrompt: finalPrompt,
+			systemPrompt,
 			task: plan.task,
 			model: resolvedSynthesisModel,
 			thinkingLevel: plan.synthesisThinking,
@@ -731,6 +819,8 @@ export function qualityFailedSynthesis(): MoaWorkerResult {
 
 export interface WorkersStageHooks {
 	notify?: (msg: string, type?: "info" | "warning" | "error") => void;
+	/** Once-right P5: cumulative text deltas from each plan worker. */
+	onWorkerPartial?: (chunk: { name: string; text: string }) => void;
 	onRoundWorkers?: (info: {
 		round: number;
 		maxRounds: number;
@@ -779,14 +869,7 @@ export async function runWorkersStage(input: {
 	const started = Date.now();
 	const planOptions = resolveStageOptions(input.ctx, input.options);
 	const judgeFn = resolveJudgeFn(planOptions, input.options);
-	const {
-		plan,
-		baseWorkers,
-		outputSchema,
-		options,
-		effectiveMaxRounds,
-		hooks = {},
-	} = input;
+	const { plan, baseWorkers, outputSchema, options, effectiveMaxRounds, hooks = {} } = input;
 	let tcoBlock = input.tcoBlock;
 	const currentTco = input.tco;
 	const rounds: MoaRoundTrace[] = [];
@@ -803,16 +886,11 @@ export async function runWorkersStage(input: {
 	if (effectiveMaxRounds === 0) {
 		const roundStartedAt = new Date().toISOString();
 		const live = hooks.onRoundWorkers?.({ round: 1, maxRounds: 1, baseWorkers });
-		const { workers: roundWorkers, durations, startedAts } = await runWorkerFanout(
-			baseWorkers,
-			plan,
-			planOptions,
-			options,
-			tcoBlock,
-			1,
-			"",
-			[],
-		);
+		const {
+			workers: roundWorkers,
+			durations,
+			startedAts,
+		} = await runWorkerFanout(baseWorkers, plan, planOptions, options, tcoBlock, 1, "", [], hooks.onWorkerPartial);
 		const workersMs = live?.stop() ?? 0;
 		const parsed = await Promise.all(
 			roundWorkers.map(w =>
@@ -848,7 +926,11 @@ export async function runWorkersStage(input: {
 			const previousAnswersText = formatPreviousAnswers(currentTco);
 			const previousQuestionsList = [...previousQuestionKeys];
 			const live = hooks.onRoundWorkers?.({ round, maxRounds: effectiveMaxRounds, baseWorkers });
-			const { workers: roundWorkers, durations, startedAts } = await runWorkerFanout(
+			const {
+				workers: roundWorkers,
+				durations,
+				startedAts,
+			} = await runWorkerFanout(
 				baseWorkers,
 				plan,
 				planOptions,
@@ -857,6 +939,7 @@ export async function runWorkersStage(input: {
 				round,
 				previousAnswersText,
 				previousQuestionsList,
+				hooks.onWorkerPartial,
 			);
 			const workersMs = live?.stop() ?? 0;
 			const parsed = await Promise.all(
@@ -978,11 +1061,8 @@ export async function runWorkersStage(input: {
 
 			lastSignal = signal;
 			notify(
-				hooks.formatWorkersDone?.(
-					parsed.filter(w => w.ok).length,
-					baseWorkers.length,
-					workersMs,
-				) ?? `Worker 完成 ${parsed.filter(w => w.ok).length}/${baseWorkers.length} ✓`,
+				hooks.formatWorkersDone?.(parsed.filter(w => w.ok).length, baseWorkers.length, workersMs) ??
+					`Worker 完成 ${parsed.filter(w => w.ok).length}/${baseWorkers.length} ✓`,
 			);
 
 			const roundEndedAt = new Date().toISOString();

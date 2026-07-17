@@ -5,6 +5,7 @@ import { loadMoaConfigOverrides } from "./moa-config";
 import { buildPlan } from "./planner";
 import { createRenderMoaResult } from "./renderer";
 import { resolveSettings } from "./settings";
+import { formatTimingSummary } from "./timing";
 import {
 	buildMoaArchiveEntries,
 	buildMoaHandoff,
@@ -13,7 +14,6 @@ import {
 	listMoaArchiveRuns,
 	reconstructMoaArchive,
 } from "./trace";
-import { formatTimingSummary } from "./timing";
 import { MOA_ARCHIVE_ENTRY_TYPE } from "./types";
 
 function usageText(): string {
@@ -124,9 +124,7 @@ async function handleStatus(ctx: ExtensionCommandContext): Promise<void> {
 	const configOverrides = (await loadMoaConfigOverrides(ctx.cwd)).overrides;
 	const settings = resolveSettings(configOverrides);
 	const modeNote =
-		settings.workerExecutionMode === "in-process"
-			? "(in-process: no extensions/MCP/LSP, read-only tools only)"
-			: "";
+		settings.workerExecutionMode === "in-process" ? "(in-process: no extensions/MCP/LSP, read-only tools only)" : "";
 	ctx.ui.notify(
 		[
 			`execution mode: ${settings.workerExecutionMode} ${modeNote}`,
@@ -134,6 +132,8 @@ async function handleStatus(ctx: ExtensionCommandContext): Promise<void> {
 			`discovery: ${settings.discoveryEnabled ? "on" : "off"}`,
 			`rewrite: ${settings.rewriteEnabled ? "on" : "off"}`,
 			`ask user: ${settings.askEnabled ? "on" : "off"} (max ${settings.maxMissingInputs})`,
+			`input-collect (B): ${settings.inputCollectEnabled ? "on (A∪B single Ask)" : "off (A only)"}`,
+			`post-worker ask: ${settings.postWorkerAskEnabled ? `on (maxRounds=${settings.maxRounds})` : "off (Pre-Ask only)"}`,
 			`max rounds: ${settings.maxRounds} (per-round ask ≤ ${settings.maxQuestionsPerRound})`,
 			`quality min score: ${settings.qualityMinScore}`,
 			`quality judge: ${settings.quality.judge.enabled ? `hybrid@${settings.quality.judge.model}` : "off"}`,

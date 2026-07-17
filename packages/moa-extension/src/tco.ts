@@ -34,7 +34,14 @@ export type TcoAssumptionReason =
 	| "llm_inferred"
 	| "discovery_omitted";
 
-import { DEFAULT_OUTPUT_SCHEMA, type MoaOutputSchema, type MoaOutputSchemaSection, type MoaSectionType } from "./types";
+import {
+	DEFAULT_OUTPUT_SCHEMA,
+	INPUT_COLLECT_SCHEMA,
+	type MoaOutputSchema,
+	type MoaOutputSchemaSection,
+	type MoaSectionType,
+} from "./types";
+import { parseWorkerOutputBySchema } from "./worker-parser";
 
 const VALID_SECTION_TYPES: ReadonlySet<MoaSectionType> = new Set<MoaSectionType>(["markdown", "list"]);
 
@@ -56,6 +63,14 @@ export interface TcoMissingInput {
 	 *  skips the question (or in non-interactive mode), the assumption
 	 *  inherits this value rather than the type's empty fallback. */
 	defaultValue?: unknown;
+	/** Which pre-Ask stage surfaced this input. `discovery` = A (task
+	 *  clarification), `worker` = B (a worker's confirmation checklist). Unset
+	 *  for legacy / single-source TCOs. Set by the merge step. */
+	source?: "discovery" | "worker";
+	/** For B-sourced inputs: worker role names that asked for this input.
+	 *  Accumulated by the merge step; used for A∪B priority (multi-role >
+	 *  single-role). */
+	roles?: string[];
 }
 
 export interface TcoAssumption {
@@ -160,6 +175,83 @@ function normalizeMissingInput(value: unknown): TcoMissingInput | undefined {
 	const defaultValue =
 		value.defaultValue === undefined || value.defaultValue === null ? undefined : value.defaultValue;
 	return { key, question, type, options, required, why_critical, defaultValue };
+}
+
+const MISSING_INPUT_TYPES: ReadonlySet<TcoInputType> = new Set<TcoInputType>([
+	"text",
+	"number",
+	"list",
+	"confirm",
+	"select",
+]);
+
+function coerceMissingType(raw: string | undefined): TcoInputType {
+	const t = raw?.trim().toLowerCase() ?? "";
+	return MISSING_INPUT_TYPES.has(t as TcoInputType) ? (t as TcoInputType) : "text";
+}
+
+function slugifyKey(text: string): string {
+	const slug = text
+		.toLowerCase()
+		.replace(/[^\p{Letter}\p{Number}]+/gu, "_")
+		.replace(/^_+|_+$/g, "")
+		.slice(0, 48);
+	return slug || `input_${text.length}`;
+}
+
+/**
+ * Parse one `needed_inputs` bullet line into a TcoMissingInput. Two shapes are
+ * accepted:
+ *   - labeled: `- key: k; question: q?; type: number; required: true; why: r`
+ *     (fields separated by `;`, each `label: value`; labels case-insensitive)
+ *   - bare:    `- q?` (whole line becomes the question; key is slugged)
+ * Returns undefined for non-bullet or empty lines.
+ */
+function parseNeededInputLine(line: string): TcoMissingInput | undefined {
+	const bullet = line.match(/^\s*(?:[-*+]|\d+\.)\s+(.*)$/);
+	if (!bullet) return undefined;
+	const body = bullet[1]!.trim();
+	if (!body) return undefined;
+	const fields = new Map<string, string>();
+	for (const part of body.split(";")) {
+		const kv = part.match(/^\s*([A-Za-z_][\w]*)\s*[:=]\s*(.*)$/);
+		if (kv) fields.set(kv[1]!.trim().toLowerCase(), kv[2]!.trim());
+	}
+	const question = (fields.get("question") ?? (fields.size === 0 ? body : "")).trim();
+	if (!question) return undefined;
+	const key = slugifyKey(fields.get("key") ?? question);
+	// B cannot supply select `options`; a `select` with no options is silently
+	// skipped by askOne. Downgrade to `text` so the question is actually asked.
+	let type = coerceMissingType(fields.get("type"));
+	if (type === "select") type = "text";
+	const requiredRaw = (fields.get("required") ?? "").toLowerCase();
+	const required = /^(true|yes|1|required)$/.test(requiredRaw);
+	const why_critical = (fields.get("why") ?? fields.get("why_critical") ?? "").trim();
+	return { key, question, type, required, why_critical };
+}
+
+/**
+ * Parse a B-stage (input-collect) worker's raw output into a list of missing
+ * inputs. Extracts the `needed_inputs` section via `INPUT_COLLECT_SCHEMA`, then
+ * parses each bullet line. Tolerant: an empty / absent section yields `[]`,
+ * and a worker that emitted a plan instead of a checklist yields `[]` (its
+ * plan text has no `needed_inputs` list). The caller (`runInputCollectStage`)
+ * tags `source: "worker"` / `roles`.
+ */
+export function parseNeededInputs(raw: string): TcoMissingInput[] {
+	if (!raw?.trim()) return [];
+	const parsed = parseWorkerOutputBySchema(raw, INPUT_COLLECT_SCHEMA);
+	// A soft-recovered freeform body (e.g. a full plan) does not satisfy the
+	// checklist contract — treat it as "no inputs collected".
+	if (parsed.softRecovered) return [];
+	const section = parsed.sections.needed_inputs ?? "";
+	if (!section.trim()) return [];
+	const out: TcoMissingInput[] = [];
+	for (const line of section.split("\n")) {
+		const item = parseNeededInputLine(line);
+		if (item) out.push(item);
+	}
+	return out;
 }
 
 /**
@@ -323,6 +415,11 @@ function formatValue(v: unknown): string {
 	} catch {
 		return "<unserializable>";
 	}
+}
+
+/** Format an arbitrary TCO value safely for prompt rendering. */
+export function formatTcoValue(value: unknown): string {
+	return formatValue(value);
 }
 
 function truncateUtf8ForInjection(s: string, maxBytes: number): string {

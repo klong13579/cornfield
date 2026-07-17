@@ -13,6 +13,7 @@ import * as path from "node:path";
 import { discoverAuthStorage } from "@oh-my-pi/pi-coding-agent";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { mergeMissingInputs } from "../src/merge-missing";
 import { loadMoaConfigOverrides } from "../src/moa-config";
 import { buildPlan, rebindWorkerPrompts } from "../src/planner";
 import { resolveSettings } from "../src/settings";
@@ -22,6 +23,7 @@ import {
 	parseStageTestArgs,
 	planStageSequence,
 	resolveStageTestTask,
+	type StageTestCliArgs,
 	stageTestUsage,
 	validateStagePrerequisites,
 } from "../src/stage-test-cli";
@@ -29,12 +31,13 @@ import {
 	qualityFailedSynthesis,
 	runAskStage,
 	runDiscoveryStage,
+	runInputCollectStage,
 	runRewriteStage,
 	runSynthesisStage,
 	runWorkersStage,
 } from "../src/stages";
+import { emptyTco, renderTcoForPrompt } from "../src/tco";
 import { formatDuration } from "../src/timing";
-import { renderTcoForPrompt } from "../src/tco";
 import { DEFAULT_OUTPUT_SCHEMA } from "../src/types";
 
 function log(msg: string): void {
@@ -43,7 +46,7 @@ function log(msg: string): void {
 
 async function main(): Promise<number> {
 	const cwd = process.cwd();
-	let args;
+	let args: StageTestCliArgs;
 	try {
 		args = parseStageTestArgs(process.argv.slice(2), cwd);
 	} catch (err) {
@@ -77,7 +80,13 @@ async function main(): Promise<number> {
 	const configOverrides = (await loadMoaConfigOverrides(cwd)).overrides;
 	let moaSettings = resolveSettings(configOverrides);
 	if (args.rounds !== undefined && Number.isFinite(args.rounds)) {
-		moaSettings = { ...moaSettings, maxRounds: Math.max(0, Math.floor(args.rounds)) };
+		const rounds = Math.max(0, Math.floor(args.rounds));
+		moaSettings = {
+			...moaSettings,
+			maxRounds: rounds,
+			// --rounds N>0 opts into post-worker Round-Ask for stage-test.
+			postWorkerAskEnabled: rounds > 0 ? true : moaSettings.postWorkerAskEnabled,
+		};
 	}
 
 	const authStorage = await discoverAuthStorage();
@@ -139,6 +148,29 @@ async function main(): Promise<number> {
 			}
 		};
 
+		const runInputCollect = async () => {
+			if (!tco) {
+				throw new Error("input-collect requires tco (run discovery or pass --from)");
+			}
+			if (!(interactive && moaSettings.askEnabled && moaSettings.inputCollectEnabled)) {
+				log("→ input-collect skipped (disabled or non-interactive)");
+				return;
+			}
+			log("→ input-collect (B)…");
+			const result = await runInputCollectStage({ ...planBase, workers }, tco, stageCtx, {
+				...executeOptions,
+				hasUI: true,
+			});
+			const before = tco.missing_inputs.length;
+			tco.missing_inputs = mergeMissingInputs(tco.missing_inputs, result.missing, {
+				maxItems: moaSettings.maxQuestionsPerRound,
+			});
+			tcoBlock = renderTcoForPrompt(tco, { maxBytes: moaSettings.tcoInjectMaxBytes });
+			log(
+				`✓ input-collect ${formatDuration(result.durationMs)} (B=${result.missing.length}, merged ${before}→${tco.missing_inputs.length})`,
+			);
+		};
+
 		const runAsk = async () => {
 			if (!tco) {
 				throw new Error("ask requires tco.json (run discovery or pass --from)");
@@ -181,8 +213,8 @@ async function main(): Promise<number> {
 				workers: rebindWorkerPrompts(workers, planBase.task, outputSchema),
 			};
 			const baseWorkers = workers.length > 0 ? workers : schemaAware.workers;
-			const effectiveMaxRounds = interactive ? moaSettings.maxRounds : 0;
-			log(`→ workers (maxRounds=${effectiveMaxRounds})…`);
+			const effectiveMaxRounds = interactive && moaSettings.postWorkerAskEnabled ? moaSettings.maxRounds : 0;
+			log(`→ workers (maxRounds=${effectiveMaxRounds}, postWorkerAsk=${moaSettings.postWorkerAskEnabled})…`);
 			const result = await runWorkersStage({
 				plan: schemaAware,
 				baseWorkers,
@@ -225,7 +257,14 @@ async function main(): Promise<number> {
 				workers: workers.length > 0 ? workers : planBase.workers,
 			};
 			log("→ synthesis…");
-			const result = await runSynthesisStage(finalPlan, surv, stageCtx, executeOptions, tcoBlock);
+			const result = await runSynthesisStage(
+				finalPlan,
+				surv,
+				stageCtx,
+				executeOptions,
+				tcoBlock,
+				tco ?? emptyTco(task, "stage-test synthesis without TCO artifact"),
+			);
 			durations.synthesis = result.durationMs;
 			synthesis = result.synthesis;
 			log(`✓ synthesis ${formatDuration(result.durationMs)}`);
@@ -247,6 +286,11 @@ async function main(): Promise<number> {
 		for (const name of sequence) {
 			if (name === "ask" && !tco && args.stage === "ask") {
 				stagesToRun.push(runDiscovery);
+			}
+			// Once-right: B (input-collect) runs between discovery and the single
+			// Ask in the full pipeline, mirroring executePlan.
+			if (name === "ask" && args.stage === "all") {
+				stagesToRun.push(runInputCollect);
 			}
 			stagesToRun.push(runners[name]);
 		}

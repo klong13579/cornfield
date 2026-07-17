@@ -278,11 +278,31 @@ export function listMoaArchiveRuns(entries: unknown[]): MoaArchiveManifest[] {
 // =============================================================================
 
 /**
+ * Render `tco.assumptions` as a dedicated "## Assumptions to verify" block
+ * for the moa-result handoff / MoaTraceDetails. Empty when there are none.
+ * Placed outside the byte-capped worker conclusions so skip/infer defaults
+ * always remain visible (once-right P4).
+ */
+export function renderAssumptionsToVerify(tco: TaskContextObject | undefined): string {
+	if (!tco || tco.assumptions.length === 0) return "";
+	const lines = tco.assumptions.map((a: TcoAssumption) => {
+		const note = a.note ? `; note=${a.note}` : "";
+		return `- \`${a.key}\` = ${shortValue(a.value)} (reason=${a.reason}${note})`;
+	});
+	return [`## Assumptions to verify`, ...lines].join("\n");
+}
+
+/**
  * Builds the model-visible handoff stored in custom_message.content.
  *
  * This is deliberately bounded by maxBytes: it is what resumed and subsequent
  * turns see. The full, untruncated sub-agent transcript is archived separately
  * via buildMoaArchiveEntries and is kept out of LLM context.
+ *
+ * Layout (once-right P4):
+ *   headline + archive pointer
+ *   ## Assumptions to verify   ← outside byte cap (always visible when present)
+ *   ## Worker conclusions      ← TCO known/asked + synthesis + workers (capped)
  */
 export function buildMoaHandoff(input: {
 	runId: string;
@@ -302,8 +322,14 @@ export function buildMoaHandoff(input: {
 			? `Full untruncated transcript archived in this pi session (run ${input.runId}, ${input.archiveChunks} chunk(s), ${input.archiveBytes} bytes). Run \`/moa transcript ${input.runId}\` for the complete archive.`
 			: "Worker transcripts are kept out of context.";
 
+	const assumptionsBlock = renderAssumptionsToVerify(input.tco);
+	const headerParts = [headline, "", pointer];
+	if (assumptionsBlock) {
+		headerParts.push("", assumptionsBlock);
+	}
+
 	if (input.maxBytes <= 0 || input.workers.length === 0) {
-		return `${headline}\n\n${pointer}`;
+		return headerParts.join("\n");
 	}
 
 	const tcoSummary = renderTcoSummary(input.tco);
@@ -325,7 +351,7 @@ export function buildMoaHandoff(input: {
 		sections.push(`### worker ${index + 1}: ${result.name} — ${status}\n${body}`);
 	}
 	const truncated = truncateUtf8(sections.join("\n\n"), input.maxBytes);
-	return `${headline}\n\n${pointer}\n\n## Worker conclusions\n${truncated}`;
+	return `${headerParts.join("\n")}\n\n## Worker conclusions\n${truncated}`;
 }
 
 function renderTcoSummary(tco: TaskContextObject | undefined): string {
@@ -343,13 +369,8 @@ function renderTcoSummary(tco: TaskContextObject | undefined): string {
 		const items = tco.missing_inputs.map(m => `${m.key}${m.required ? "*" : ""}`).join(", ");
 		parts.push(`**Asked**: ${items}`);
 	}
-	if (tco.assumptions.length > 0) {
-		const items = tco.assumptions
-			.slice(0, 6)
-			.map((a: TcoAssumption) => `${a.key}=${shortValue(a.value)} (${a.reason})`)
-			.join(", ");
-		parts.push(`**Assumed**: ${items}${tco.assumptions.length > 6 ? "…" : ""}`);
-	}
+	// Assumptions are rendered as a dedicated top-level section via
+	// renderAssumptionsToVerify (outside the byte cap) — not duplicated here.
 	return parts.join("\n");
 }
 
@@ -371,6 +392,10 @@ export function buildSummary(result: MoaExecutionResult): string {
 		`- task: ${result.plan.task}`,
 		`- workers: ${result.workers.filter(worker => worker.ok).length}/${result.workers.length} completed`,
 	];
+	const assumptions = renderAssumptionsToVerify(result.tco);
+	if (assumptions) {
+		lines.push("", assumptions);
+	}
 	if (result.synthesis) {
 		lines.push("", "### synthesis", result.synthesis.output.trim() || "(no synthesis output)");
 	}
@@ -396,6 +421,7 @@ export function buildTraceDetails(
 		archiveBytes: 0,
 	},
 ): MoaTraceDetails {
+	const assumptionsSummary = renderAssumptionsToVerify(result.tco) || undefined;
 	return {
 		task: result.plan.task,
 		workerCount: result.workers.length,
@@ -411,5 +437,6 @@ export function buildTraceDetails(
 		archiveChunks: archive.archiveChunks,
 		archiveBytes: archive.archiveBytes,
 		timings: result.timings,
+		assumptionsSummary,
 	};
 }

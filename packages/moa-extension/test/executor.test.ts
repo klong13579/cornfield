@@ -458,7 +458,7 @@ describe("moa executePlan — PR2 multi-round", () => {
 		vi.restoreAllMocks();
 	});
 
-	function buildThreeWorkerSettings() {
+	function buildThreeWorkerSettings(overrides: Partial<Parameters<typeof resolveSettings>[0]> = {}) {
 		return resolveSettings({
 			discoveryEnabled: false,
 			rewriteEnabled: false,
@@ -471,6 +471,12 @@ describe("moa executePlan — PR2 multi-round", () => {
 			maxRounds: 3,
 			maxQuestionsPerRound: 5,
 			qualityMinScore: 40,
+			// Expert path: enable post-worker Round-Ask for multi-round tests.
+			postWorkerAskEnabled: true,
+			// Isolate worker/round fanout counts from the once-right B stage.
+			// P2 B-stage behavior is covered by dedicated tests below.
+			inputCollectEnabled: false,
+			...overrides,
 		});
 	}
 
@@ -505,6 +511,73 @@ describe("moa executePlan — PR2 multi-round", () => {
 		expect(result.rounds).toHaveLength(1);
 		expect(result.rounds?.[0]?.convergenceSignal).toBe("all_complete");
 		expect(result.askRoundSummaries).toEqual([]);
+	});
+
+	it("default postWorkerAskEnabled=false: open_questions do not trigger Round-Ask", async () => {
+		const workerOutput = (label: string) =>
+			[
+				`## plan`,
+				`${label} plan with detail. `.repeat(20),
+				``,
+				`## open_questions`,
+				`- what's the budget?`,
+				`## assumptions`,
+				`- assumed default`,
+			].join("\n");
+		const spy = mockSpawnMoaWorker([
+			input => makeWorkerOutput({ output: workerOutput(input.model ?? "w1"), model: input.model }),
+			input => makeWorkerOutput({ output: workerOutput(input.model ?? "w2"), model: input.model }),
+			input => makeWorkerOutput({ output: workerOutput(input.model ?? "w3"), model: input.model }),
+			input => makeWorkerOutput({ output: "synth ok", model: input.model }),
+		]);
+		// Explicit defaults: maxRounds can be high, but Round-Ask stays off unless opted in.
+		const moaSettings = buildThreeWorkerSettings({
+			postWorkerAskEnabled: false,
+			maxRounds: 3,
+		});
+		const plan = buildPlan("No post-worker ask by default", moaSettings);
+		const ui = noopUI();
+		const result = await executePlan(plan, {
+			cwd: "/tmp/moa",
+			authStorage: {} as AuthStorage,
+			modelRegistry: { refresh: async () => {} } as unknown as ModelRegistry,
+			settings: Settings.isolated({}, { cwd: "/tmp/moa" }),
+			moaSettings,
+			ui: ui as never,
+			hasUI: true,
+		});
+		// One fanout only (3 workers) + synthesis — no second round Ask.
+		expect(spy).toHaveBeenCalledTimes(4);
+		expect(result.rounds).toHaveLength(1);
+		expect(result.askRoundSummaries).toEqual([]);
+		expect(ui.select).not.toHaveBeenCalled();
+		expect(result.rounds?.[0]?.questionsAsked ?? []).toEqual([]);
+	});
+
+	it("soft-recovered freeform workers cannot converge as all_complete", async () => {
+		const freeform = `## Step 1\n\n${"Detailed implementation route with concrete tradeoffs and sequencing. ".repeat(12)}`;
+		const spy = mockSpawnMoaWorker([
+			input => makeWorkerOutput({ output: freeform, model: input.model }),
+			input => makeWorkerOutput({ output: freeform, model: input.model }),
+			input => makeWorkerOutput({ output: freeform, model: input.model }),
+		]);
+		const moaSettings = buildThreeWorkerSettings();
+		const plan = buildPlan("Soft-recover convergence regression", moaSettings);
+		const result = await executePlan(plan, {
+			cwd: "/tmp/moa",
+			authStorage: {} as AuthStorage,
+			modelRegistry: { refresh: async () => {} } as unknown as ModelRegistry,
+			settings: Settings.isolated({}, { cwd: "/tmp/moa" }),
+			moaSettings,
+			ui: noopUI() as never,
+			hasUI: true,
+		});
+
+		expect(spy).toHaveBeenCalledTimes(3);
+		expect(result.rounds).toHaveLength(1);
+		expect(result.rounds?.[0]?.convergenceSignal).toBe("quality_failed");
+		expect(result.rounds?.[0]?.convergenceSignal).not.toBe("all_complete");
+		expect(result.workers.every(worker => worker.qualityDropped)).toBe(true);
 	});
 
 	it("multi-round with TUI: same open_questions across rounds → no_new_questions convergence", async () => {
@@ -562,8 +635,7 @@ describe("moa executePlan — PR2 multi-round", () => {
 		const spy = vi.spyOn(subprocess, "spawnMoaWorker").mockImplementation(async input => {
 			const idx = call++;
 			// Rounds 1/2/3 → distinct questions so previousQuestions never filters all.
-			const question =
-				idx < 3 ? "what's the budget?" : idx < 6 ? "what's the timeline?" : "what's the team size?";
+			const question = idx < 3 ? "what's the budget?" : idx < 6 ? "what's the timeline?" : "what's the team size?";
 			if (idx < 9) {
 				return makeWorkerOutput({ output: workerOutput(input.model ?? `w${idx}`, question), model: input.model });
 			}
@@ -928,5 +1000,138 @@ describe("moa executePlan — PR2 multi-round", () => {
 
 		const workingMsgs = ui.setWorkingMessage.mock.calls.map(c => String(c[0]));
 		expect(workingMsgs.some(m => /MOA:.*\d+\.\d+s/.test(m))).toBe(true);
+	});
+});
+
+describe("moa executePlan — once-right A∪B (P2 gate)", () => {
+	afterEach(() => vi.restoreAllMocks());
+
+	// Route each spawn to a stage by inspecting its rendered system prompt.
+	function routeSpawn() {
+		return vi.spyOn(subprocess, "spawnMoaWorker").mockImplementation(async input => {
+			const sp = input.systemPrompt ?? "";
+			if (/input-collection/.test(sp)) {
+				// B: every role asks the shared env question (dedupe target);
+				// divergent adds a role-specific one.
+				const lines = [
+					"## needed_inputs",
+					"- key: shared_env; question: 部署到哪个环境？; type: text; required: true; why: b",
+				];
+				if (/diverge/i.test(sp)) {
+					lines.push("- key: rollout_window; question: 回滚窗口(分钟)？; type: number; required: false; why: b2");
+				}
+				return makeWorkerOutput({ output: lines.join("\n"), model: input.model });
+			}
+			if (/A-checklist/.test(sp)) {
+				return makeWorkerOutput({
+					output: JSON.stringify({
+						task_understanding: "rollback drill",
+						known_inputs: [],
+						missing_inputs: [
+							{ key: "goal_scope", question: "演练目标范围？", type: "text", required: true, why_critical: "a" },
+						],
+						assumptions: [],
+					}),
+					model: input.model,
+				});
+			}
+			if (/Worker angle/.test(sp)) {
+				return makeWorkerOutput({ output: conformingOutput(input.model ?? "w"), model: input.model });
+			}
+			return makeWorkerOutput({ output: "synth ok", model: input.model });
+		});
+	}
+
+	function onceRightSettings(overrides: Partial<Parameters<typeof resolveSettings>[0]> = {}) {
+		return resolveSettings({
+			discoveryEnabled: true,
+			rewriteEnabled: false,
+			inputCollectEnabled: true,
+			workers: [
+				{ name: "divergent", role: "diverge", model: "provider/divergent" },
+				{ name: "grounded", role: "ground", model: "provider/grounded" },
+				{ name: "critical", role: "critic", model: "provider/critical" },
+			],
+			synthesisModel: "provider/synthesis",
+			postWorkerAskEnabled: false,
+			maxQuestionsPerRound: 5,
+			...overrides,
+		});
+	}
+
+	function onceRightUI() {
+		return {
+			select: vi.fn(async () => undefined as string | undefined),
+			input: vi.fn(async () => undefined as string | undefined),
+			notify: vi.fn(),
+			setStatus: vi.fn(),
+			setWorkingMessage: vi.fn(),
+		};
+	}
+
+	it("asks the user exactly once with the merged A∪B question set (deduped, ordered, no repeats)", async () => {
+		routeSpawn();
+		const moaSettings = onceRightSettings();
+		const plan = buildPlan("回滚演练", moaSettings);
+		const ui = onceRightUI();
+		const result = await executePlan(plan, {
+			cwd: "/tmp/moa",
+			authStorage: {} as AuthStorage,
+			modelRegistry: { refresh: async () => {} } as unknown as ModelRegistry,
+			settings: Settings.isolated({}, { cwd: "/tmp/moa" }),
+			moaSettings,
+			ui: ui as never,
+			hasUI: true,
+		});
+
+		// Only one Ask: no post-worker Round-Ask.
+		expect(result.rounds).toHaveLength(1);
+		expect(result.askRoundSummaries).toEqual([]);
+
+		const keys = result.tco?.missing_inputs.map(m => m.key) ?? [];
+		// A ∪ B reached the single ask.
+		expect(keys).toContain("goal_scope"); // A
+		expect(keys).toContain("shared_env"); // B (all roles)
+		expect(keys).toContain("rollout_window"); // B (divergent only)
+		// No duplicate keys after merge.
+		expect(new Set(keys).size).toBe(keys.length);
+		// shared_env was asked by all three roles → roles accumulated.
+		const sharedEnv = result.tco?.missing_inputs.find(m => m.key === "shared_env");
+		expect(sharedEnv?.roles?.sort()).toEqual(["critical", "divergent", "grounded"]);
+		// Priority: required discovery item ranks first.
+		expect(keys[0]).toBe("goal_scope");
+	});
+
+	it("skips the B stage entirely when hasUI=false (no wasted fanout)", async () => {
+		const spy = routeSpawn();
+		const moaSettings = onceRightSettings();
+		const plan = buildPlan("回滚演练", moaSettings);
+		await executePlan(plan, {
+			cwd: "/tmp/moa",
+			authStorage: {} as AuthStorage,
+			modelRegistry: { refresh: async () => {} } as unknown as ModelRegistry,
+			settings: Settings.isolated({}, { cwd: "/tmp/moa" }),
+			moaSettings,
+			hasUI: false,
+		});
+		const bCalls = spy.mock.calls.filter(c => /input-collection/.test(String(c[0]?.systemPrompt ?? "")));
+		expect(bCalls).toHaveLength(0);
+	});
+
+	it("skips the B stage when askEnabled=false even with hasUI=true", async () => {
+		const spy = routeSpawn();
+		const moaSettings = onceRightSettings({ askEnabled: false });
+		const plan = buildPlan("回滚演练", moaSettings);
+		await executePlan(plan, {
+			cwd: "/tmp/moa",
+			authStorage: {} as AuthStorage,
+			modelRegistry: { refresh: async () => {} } as unknown as ModelRegistry,
+			settings: Settings.isolated({}, { cwd: "/tmp/moa" }),
+			moaSettings,
+			ui: onceRightUI() as never,
+			hasUI: true,
+		});
+		const bCalls = spy.mock.calls.filter(c => /input-collection/.test(String(c[0]?.systemPrompt ?? "")));
+		expect(bCalls).toHaveLength(0);
 	});
 });

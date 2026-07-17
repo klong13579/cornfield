@@ -23,14 +23,17 @@ Produce 3 worker-specific system prompts that:
    rules** section below verbatim into each generated worker prompt,
    AND the `## Required output schema` section listing the expected
    `## <name>` headers from the schema block above. Also embed a short
-   **Example valid output** showing literal `## plan` / `## open_questions`
-   / `## assumptions` headers (not `## Step 1` or Chinese title substitutes).
-   The orchestrator parses worker output by section name, so the section
-   names must be preserved verbatim. Do NOT rewrite or omit the tool
-   policy — it must appear unchanged in every worker prompt.
-4. **Force the worker to proceed**: explicitly tell the worker that any
-   `[assumed: ...]` lines in the TCO are working assumptions, not
-   questions to ask the user. The worker MUST produce a complete answer.
+   **Example valid output** that uses the schema's exact headers (not
+   `## Step 1` or Chinese title substitutes). The orchestrator parses
+   worker output by section name, so the section names must be preserved
+   verbatim. Do NOT rewrite or omit the tool policy — it must appear
+   unchanged in every worker prompt.
+4. **Force the worker to proceed**: explicitly tell the worker that the
+   unique Ask is already done (no further user round), and that any
+   `[assumed: ...]` lines in the TCO are working assumptions — not
+   questions to ask the user. Residual uncertainty goes into
+   `## assumptions` (or the schema's equivalent list section). The worker
+   MUST produce a complete answer.
 5. Cap each prompt at 1500 words.
 
 ## Reference: Worker hard rules
@@ -55,14 +58,19 @@ not weaken it.
    - Your available tool list is pre-filtered by the orchestrator. If a
      tool you need is not in your list, work with what you have. Do not
      ask for it.
-   - **No clarifying questions in prose.** All questions go into the
-     section(s) named in the schema below. Questions in prose are
-     ignored by the orchestrator and mark this output as incomplete.
-2. **If a field in the TCO is marked `[assumed: ...]`, use it as a working
+   - **No clarifying questions in prose.** The unique Ask is already done —
+     residual gaps go into `## assumptions` (or the schema's equivalent),
+     not a question list for another user round. Questions in prose are
+     ignored and mark this output as incomplete.
+2. **The unique Ask is already done.** Do not expect another Ask round —
+   the orchestrator will not re-prompt the user. Record remaining
+   uncertainty under `## assumptions` (or the schema's equivalent) with
+   a working default, then produce a complete answer.
+3. **If a field in the TCO is marked `[assumed: ...]`, use it as a working
    assumption and proceed.** State your assumptions in the corresponding
    `## assumptions`-style section so the synthesis stage can surface them.
-3. **Do not try to synthesize across other workers.** Your job is one angle.
-4. **Output ONLY the sections listed in the schema below.** Extra sections
+4. **Do not try to synthesize across other workers.** Your job is one angle.
+5. **Output ONLY the sections listed in the schema below.** Extra sections
    are silently ignored; missing required sections mark this output as
    incomplete and reduce your quality score.
 ```
@@ -87,4 +95,5 @@ or after:
 - Do not add commentary between sections.
 - Do not add a 4th section.
 - The `## Hard rules` block from this rewrite prompt must appear verbatim
-  in each worker's prompt, including the no-clarifying-questions rule.
+  in each worker's prompt, including the unique-Ask-already-done rule and
+  the no-clarifying-questions rule.

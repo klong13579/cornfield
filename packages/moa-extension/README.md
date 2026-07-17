@@ -135,6 +135,33 @@ Malformed YAML, unknown fields, and unreadable files are tolerated: the loader l
 
 If a worker slot has no model binding (e.g. `workerCount: 5` and you only overrode 3 of them), the missing slots fall back to the highest-priority model from the user's `modelRegistry`. The four hard-coded defaults never need registry access.
 
+## Ask UX (once-right)
+
+Default path asks the user **exactly once** with a merged A∪B question set
+(Discovery `missing_inputs` **∪** each worker's `needed_inputs` → one Ask round → workers → synthesis):
+
+```text
+Discovery (A) → Input-collect (B) → Merge (A∪B) → Ask ×1 → Rewrite → Workers → Synthesis
+```
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `askEnabled` | `true` | Run the single Pre-Ask (TUI). |
+| `inputCollectEnabled` | `true` | Run the B stage: each worker reports the inputs it would otherwise guess; merged into the single Ask. Only runs when TUI + `askEnabled`. |
+| `maxRounds` | `1` | Documented plan-round budget; Round-Ask between worker rounds is **not** enabled by this alone. |
+| `postWorkerAskEnabled` | `false` | Opt-in: when `true` and TUI, allow worker→Ask→worker loops up to `maxRounds`. |
+| `maxQuestionsPerRound` | `5` | Cap on the merged A∪B question set (and on Round-Ask when enabled). |
+
+The B (input-collect) stage runs a lightweight, read-only, tool-less fan-out where each worker emits only a `## needed_inputs` checklist (never a plan). Items are deduped and prioritized against Discovery's `missing_inputs` (`required > task-clarification > multi-role > single-role`) and capped at `maxQuestionsPerRound`. Set `inputCollectEnabled: false` for the A-only path.
+
+```yaml
+# Opt into post-worker Round-Ask (expert / multi-round):
+postWorkerAskEnabled: true
+maxRounds: 3
+```
+
+Stage-test: `bun packages/moa-extension/scripts/stage-test.ts --rounds 3 ...` sets `maxRounds` and enables `postWorkerAskEnabled`.
+
 ## Execution mode
 
 MOA supports two worker execution modes, controlled by `workerExecutionMode`:

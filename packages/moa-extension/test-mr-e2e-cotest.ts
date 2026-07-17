@@ -67,6 +67,7 @@ const proc = Bun.spawn({
 			],
 			synthesisModel: "narwal-plan/deepseek-v4-pro-202606",
 			maxRounds: 3,
+			postWorkerAskEnabled: true,
 			maxQuestionsPerRound: 5,
 			qualityMinScore: 40,
 			workerExecutionMode: "subprocess",

@@ -36,11 +36,26 @@ export interface MoaSettings {
 	askTimeoutMs: number;
 	/** When false, skip the TUI ask entirely and assume everything. */
 	askEnabled: boolean;
+	/**
+	 * Once-right B stage. When true (default), a lightweight worker fan-out
+	 * runs BEFORE the single Ask to collect each role's `needed_inputs`
+	 * checklist; these are merged (A∪B) into the one user Ask. Only runs when
+	 * `hasUI` and `askEnabled` (no point collecting inputs we won't ask about).
+	 */
+	inputCollectEnabled: boolean;
 	/** Max bytes for TCO block injected into worker/synthesis prompts. */
 	tcoInjectMaxBytes: number;
-	/** Multi-round loop cap. TUI 3 / gateway-cron 0 (forced by executor when
-	 *  hasUI=false — gateway/cron path is hard-required to be single-round). */
+	/** Multi-round loop cap. Only applied when `postWorkerAskEnabled` is true
+	 *  (and hasUI). Default 1 is the plan-round budget documentation value;
+	 *  Round-Ask between worker rounds is opt-in via `postWorkerAskEnabled`.
+	 *  Gateway/cron force effective rounds to 0 when hasUI=false. */
 	maxRounds: number;
+	/**
+	 * When true (opt-in), TUI may run worker→Ask→worker loops up to `maxRounds`.
+	 * Default false: the merged A∪B Pre-Ask is the only user Ask; workers run
+	 * once then synthesis — the once-right single-Ask path.
+	 */
+	postWorkerAskEnabled: boolean;
 	/** Per-round TUI ask cap. Each round surfaces at most this many of the
 	 *  top worker open_questions. */
 	maxQuestionsPerRound: number;
@@ -124,6 +139,14 @@ export interface ParsedWorkerOutput {
 	extraSections: string[];
 	/** Any structural parse errors (e.g. malformed section header). */
 	parseErrors: string[];
+	/**
+	 * True when the parser soft-recovered a freeform body into schema sections
+	 * because *every* required header was missing. Content may be filled for
+	 * display/scoring, but the contract is still considered unsatisfied —
+	 * quality must hard-fail and convergence must not treat empty synthesized
+	 * `open_questions` as "no questions".
+	 */
+	softRecovered?: boolean;
 }
 
 export interface MoaOutputSchemaSection {
@@ -154,6 +177,32 @@ export const DEFAULT_OUTPUT_SCHEMA: MoaOutputSchema = {
 			item: { question: "string", context: "string", suggested_default: "string", type: "freeform|choice" },
 		},
 		{ name: "assumptions", required: false, type: "list", item: { claim: "string", basis: "string" } },
+	],
+};
+
+/**
+ * B-stage (input-collect) schema for the once-right single-Ask pipeline.
+ *
+ * Workers run this BEFORE writing any plan. They emit ONLY a confirmation
+ * checklist — the inputs they would otherwise have to guess. A single required
+ * `needed_inputs` list section; deliberately no `plan` section so a B worker
+ * can never smuggle a full solution into the input-collection round.
+ * (`docs/plans/2026-07-17-moa-once-right-design.md` §4.2 / §7.2.)
+ */
+export const INPUT_COLLECT_SCHEMA: MoaOutputSchema = {
+	sections: [
+		{
+			name: "needed_inputs",
+			required: true,
+			type: "list",
+			item: {
+				key: "snake_case",
+				question: "one-line",
+				type: "text|number|list|confirm",
+				required: "true|false",
+				why: "short reason",
+			},
+		},
 	],
 };
 
@@ -280,6 +329,13 @@ export interface MoaTraceDetails {
 	 *  manifest so subsequent LLM turns can reason about wall-clock
 	 *  distribution without parsing the archive transcript. */
 	timings?: Record<string, number>;
+	/**
+	 * Human-readable "Assumptions to verify" block from `tco.assumptions`
+	 * (once-right P4). Present when the run assumed any skipped / inferred
+	 * inputs. Also embedded in the moa-result handoff content (outside the
+	 * byte-capped worker conclusions).
+	 */
+	assumptionsSummary?: string;
 }
 
 export const MOA_ARCHIVE_ENTRY_TYPE = "moa-archive";
