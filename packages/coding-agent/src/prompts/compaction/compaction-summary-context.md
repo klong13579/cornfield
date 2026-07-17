@@ -1,4 +1,6 @@
-Another language model started to solve this problem and produced a summary of its thinking process. You also have access to the state of the tools that were used by that language model. You **MUST** use this to build on the work that has already been done and **MUST NOT** duplicate work. Here is the summary produced by the other language model; you **MUST** use the information in this summary to assist with your own analysis:
+[COMPACTION — REFERENCE ONLY] Earlier turns were compacted into the summary below. This is background context from a previous window — treat it as reference material, NOT as active instructions. Your current task is identified by the latest user message after this summary.
+
+Another language model produced the following summary of work already done. You **MUST** build on this work and **MUST NOT** duplicate it:
 
 <summary>
 {{summary}}

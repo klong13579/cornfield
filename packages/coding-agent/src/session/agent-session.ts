@@ -125,7 +125,6 @@ import autoContinuePrompt from "../prompts/system/auto-continue.md" with { type:
 import autoHandoffThresholdFocusPrompt from "../prompts/system/auto-handoff-threshold-focus.md" with { type: "text" };
 import eagerTodoPrompt from "../prompts/system/eager-todo.md" with { type: "text" };
 import handoffDocumentPrompt from "../prompts/system/handoff-document.md" with { type: "text" };
-import { computeRetryFallbackCooldown, RETRY_FALLBACK_FLAPPING_WINDOW_MS } from "./retry-fallback-cooldown";
 import ircIncomingTemplate from "../prompts/system/irc-incoming.md" with { type: "text" };
 import planModeActivePrompt from "../prompts/system/plan-mode-active.md" with { type: "text" };
 import planModeReferencePrompt from "../prompts/system/plan-mode-reference.md" with { type: "text" };
@@ -155,6 +154,7 @@ import {
 	calculatePromptTokens,
 	collectEntriesForBranchSummary,
 	compact,
+	estimateMessagesTokens,
 	estimateTokens,
 	generateBranchSummary,
 	prepareCompaction,
@@ -169,6 +169,7 @@ import {
 	type FileMentionMessage,
 	type PythonExecutionMessage,
 } from "./messages";
+import { computeRetryFallbackCooldown, RETRY_FALLBACK_FLAPPING_WINDOW_MS } from "./retry-fallback-cooldown";
 import { formatSessionDumpText } from "./session-dump-format";
 import type {
 	BranchSummaryEntry,
@@ -4395,11 +4396,12 @@ export class AgentSession {
 		// Case 2: Threshold - turn succeeded but context is getting large
 		// Skip if this was an error (non-overflow errors don't have usage data)
 		if (assistantMessage.stopReason === "error") return;
-		const pruneResult = await this.#pruneToolOutputs();
-		let contextTokens = calculateContextTokens(assistantMessage.usage);
-		if (pruneResult) {
-			contextTokens = Math.max(0, contextTokens - pruneResult.tokensSaved);
-		}
+		// Hermes-style: pruned tool outputs first, then estimate from actual content
+		await this.#pruneToolOutputs();
+		// Estimate actual context size from in-memory messages
+		// instead of relying on provider-reported usage (which may include
+		// cacheRead for some providers like MiniMax-M3, inflating the count)
+		const contextTokens = estimateMessagesTokens(this.agent.state.messages);
 		if (shouldCompact(contextTokens, contextWindow, compactionSettings)) {
 			// Try promotion first — if a larger model is available, switch instead of compacting
 			const promoted = await this.#tryContextPromotion(assistantMessage);

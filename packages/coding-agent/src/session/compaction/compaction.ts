@@ -247,6 +247,20 @@ export function resolveThresholdTokens(contextWindow: number, settings: Compacti
 const IMAGE_TOKEN_ESTIMATE = 1200;
 
 /**
+ * Estimate total tokens from an array of agent messages.
+ * Used by the compaction threshold check to determine actual context size.
+ * Does NOT rely on provider-reported usage, which may include cacheRead
+ * values that vary across providers and inflate the count.
+ */
+export function estimateMessagesTokens(messages: AgentMessage[]): number {
+	let total = 0;
+	for (const msg of messages) {
+		total += estimateTokens(msg);
+	}
+	return total;
+}
+
+/**
  * Estimate token count for a message using cl100k_base via the native
  * tokenizer. This is not Claude's first-party tokenizer (Anthropic doesn't
  * publish one) but is within ~5–10% across English/code text.
@@ -306,6 +320,19 @@ export function estimateTokens(message: AgentMessage): number {
 		case "branchSummary":
 		case "compactionSummary": {
 			fragments.push(message.summary);
+			break;
+		}
+		case "developer": {
+			const content = (message as { content: string | Array<{ type: string; text?: string }> }).content;
+			if (typeof content === "string") {
+				fragments.push(content);
+			} else if (Array.isArray(content)) {
+				for (const block of content) {
+					if (block.type === "text" && block.text) {
+						fragments.push(block.text);
+					}
+				}
+			}
 			break;
 		}
 		default:
