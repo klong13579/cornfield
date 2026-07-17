@@ -323,6 +323,40 @@ describe("Agent", () => {
 		]);
 	});
 
+	it("replaces thinking-only recovery attempts in persistent agent state", async () => {
+		let callIndex = 0;
+		const agent = new Agent({
+			initialState: {
+				model: getBundledModel("openai", "gpt-4o-mini"),
+				messages: [],
+			},
+			streamFn: () => {
+				const stream = new MockAssistantStream();
+				queueMicrotask(() => {
+					const message =
+						callIndex === 0
+							? createAssistantMessage([{ type: "thinking", thinking: "Internal answer only." }])
+							: createAssistantMessage([{ type: "text", text: "Visible answer." }]);
+					callIndex += 1;
+					stream.push({ type: "done", reason: "stop", message });
+				});
+				return stream;
+			},
+		});
+
+		await agent.prompt("answer me");
+
+		expect(agent.state.messages).toHaveLength(2);
+		expect(agent.state.messages[0]).toMatchObject({
+			role: "user",
+			content: [{ type: "text", text: "answer me" }],
+		});
+		expect(agent.state.messages[1]).toMatchObject({
+			role: "assistant",
+			content: [{ type: "text", text: "Visible answer." }],
+		});
+	});
+
 	it("forwards sessionId and thinkingBudgets to streamFn options", async () => {
 		let receivedSessionId: string | undefined;
 		let receivedBudgets: ThinkingBudgets | undefined;

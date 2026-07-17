@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Treat assistant turns with no visible text or tool call as incomplete, retrying twice with thinking disabled before allowing the turn to end.
+
 ## [14.5.10] - 2026-04-30
 
 ### Added

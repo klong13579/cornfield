@@ -21,7 +21,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { AgentBridge } from "../src/agent-bridge";
 import { DingTalkChannel } from "../src/channels/dingtalk";
-import type { DingTalkConfig, InboundMessage, SessionRecord } from "../src/types";
+import type { AgentResponseMeta, DingTalkConfig, InboundMessage, SessionRecord } from "../src/types";
 
 // Fake RPC that emits the full event shape that a real
 // `omp --mode rpc` produces for one turn: thinking stream, text stream,
@@ -175,6 +175,24 @@ function makeDingTalkConfig(): DingTalkConfig {
 	};
 }
 
+function makeEmptyMeta(): AgentResponseMeta {
+	return {
+		text: "",
+		rawText: "",
+		model: "test-model",
+		provider: "test",
+		usage: { input: 10, output: 20, cacheRead: 0, cacheWrite: 0 },
+		agentDurationMs: 100,
+		taskDurationMs: 120,
+		effort: "high",
+		toolCalls: [],
+		toolResults: [],
+		error: null,
+		aborted: false,
+		isFallback: false,
+	};
+}
+
 /** Monkey-patch globalThis.fetch to rewrite DingTalk API URLs to the
  *  fake card server. The card module hard-codes its base URL, so the
  *  simplest port-rewrite is a fetch override that returns a real
@@ -323,5 +341,62 @@ describe("DingTalkChannel.hideThinkingBlock filter", () => {
 			}
 		});
 		expect(offending, `Found PUT bodies with THINK blocks: ${JSON.stringify(offending, null, 2)}`).toHaveLength(0);
+	});
+
+	test("promotes thinking to the answer when the final visible text is empty", async () => {
+		const channel = new DingTalkChannel();
+		channel.setAccountId("test");
+		channel.setConfig(makeDingTalkConfig());
+		channel.setHideThinkingBlock(false);
+
+		const inbound = makeMessage("answer me", "conv-thinking-only");
+		const session = makeSession("/tmp/thinking-only.jsonl", inbound.conversationId);
+		const thinkingAnswer = "处理完了。没有先使用 paper-ingest 是判断失误，后续应先按论文读取流程执行。";
+		const meta = makeEmptyMeta();
+
+		const outbound = await channel.streamCard(
+			inbound,
+			session,
+			{ accountId: "test", agentName: "test-bot", dapiCalls: 0 },
+			async handlers => {
+				handlers?.onThinkingDelta?.(thinkingAnswer);
+				handlers?.onAssistantMessageEnd?.();
+				handlers?.onAgentEnd?.();
+				return meta;
+			},
+		);
+
+		const blocks = readFinishedBlockList(card.calls);
+		const answer = blocks.find(block => block.type === 0);
+		expect(answer?.markdown).toContain("处理完了");
+		expect(blocks.some(block => block.type === 1)).toBe(false);
+		expect(outbound?.content).toMatchObject({ type: "markdown", markdown: expect.stringContaining("处理完了") });
+	});
+
+	test("shows an explicit retry message when hidden thinking cannot be promoted", async () => {
+		const channel = new DingTalkChannel();
+		channel.setAccountId("test");
+		channel.setConfig(makeDingTalkConfig());
+		channel.setHideThinkingBlock(true);
+
+		const inbound = makeMessage("answer me", "conv-hidden-thinking-only");
+		const session = makeSession("/tmp/hidden-thinking-only.jsonl", inbound.conversationId);
+
+		await channel.streamCard(
+			inbound,
+			session,
+			{ accountId: "test", agentName: "test-bot", dapiCalls: 0 },
+			async handlers => {
+				handlers?.onThinkingDelta?.("This content must remain hidden.");
+				handlers?.onAssistantMessageEnd?.();
+				handlers?.onAgentEnd?.();
+				return makeEmptyMeta();
+			},
+		);
+
+		const blocks = readFinishedBlockList(card.calls);
+		const answer = blocks.find(block => block.type === 0);
+		expect(answer?.markdown).toContain("本轮未生成可见回复，请重试");
+		expect(blocks.some(block => block.type === 1)).toBe(false);
 	});
 });

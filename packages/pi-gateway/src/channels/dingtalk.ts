@@ -1183,6 +1183,36 @@ export class DingTalkChannel extends BaseChannel {
 			return null;
 		}
 
+		// Delivery safety net: a provider may finish with reasoning/thinking
+		// blocks but no user-visible text. The agent loop retries these turns,
+		// but if recovery is exhausted we must not leave the user staring at
+		// an empty card. When thinking is visible for this account, promote it
+		// to the answer; when hidden (or absent), show an explicit failure.
+		if (!segmentText.trim()) {
+			const thinkingFallback = blocks
+				.filter(block => block.type === BlockType.THINK)
+				.map(block => block.text?.trim() ?? "")
+				.filter(Boolean)
+				.join("\n\n");
+			if (thinkingFallback) {
+				logger.warn("[DingTalk] Promoting thinking-only response to visible answer", {
+					accountId: this.#accountId,
+					conversationId: inbound.conversationId,
+					length: thinkingFallback.length,
+				});
+				segmentText = thinkingFallback;
+				for (let i = blocks.length - 1; i >= 0; i--) {
+					if (blocks[i]?.type === BlockType.THINK) blocks.splice(i, 1);
+				}
+			} else {
+				logger.warn("[DingTalk] Agent completed without visible answer", {
+					accountId: this.#accountId,
+					conversationId: inbound.conversationId,
+				});
+				segmentText = "⚠️ 本轮未生成可见回复，请重试。";
+			}
+		}
+
 		// Media pipeline: route every embedded media token by its
 		// declared kind, deferring anything the AI Card cannot render
 		// inline (videos / audios / documents / unsupported image
@@ -1576,7 +1606,7 @@ export class DingTalkChannel extends BaseChannel {
 		// to sendAgentResponseViaV1Markdown (which re-runs the agent)
 		// when streamCard returns null.
 		const { markdown } = formatDingTalkReply({
-			meta,
+			meta: segMeta,
 			inbound,
 			agentName: context.agentName,
 			accountId: context.accountId,

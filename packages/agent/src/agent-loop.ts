@@ -313,7 +313,17 @@ async function runLoop(
 type StreamAttemptResult =
 	| { kind: "clean"; message: AssistantMessage }
 	| { kind: "doom"; message: AssistantMessage; verdict: DoomVerdict }
+	| { kind: "incomplete"; message: AssistantMessage }
 	| { kind: "aborted"; message: AssistantMessage };
+
+const MAX_INCOMPLETE_TURN_RETRIES = 2;
+
+function isIncompleteAssistantTurn(message: AssistantMessage): boolean {
+	if (message.stopReason !== "stop") return false;
+	const hasVisibleText = message.content.some(block => block.type === "text" && block.text.trim().length > 0);
+	const hasToolCall = message.content.some(block => block.type === "toolCall");
+	return !hasVisibleText && !hasToolCall;
+}
 
 /**
  * Stream an assistant response from the LLM.
@@ -340,27 +350,27 @@ async function streamAssistantResponse(
 	streamFn?: StreamFn,
 ): Promise<AssistantMessage> {
 	const maxRetries = config.doomLoop?.enabled ? (config.doomLoop.maxRetries ?? 1) : 0;
+	let doomAttempt = 0;
+	let incompleteAttempt = 0;
 
-	for (let attempt = 0; attempt <= maxRetries; attempt++) {
-		const result = await streamAttempt(context, config, signal, stream, streamFn, attempt);
+	while (true) {
+		const result = await streamAttempt(context, config, signal, stream, streamFn, doomAttempt, incompleteAttempt > 0);
 		if (result.kind === "clean") return result.message;
 		if (result.kind === "aborted") return result.message;
-		// result.kind === "doom"
-		if (attempt >= maxRetries) return result.message;
-		// Strip the doom message from context.messages so the model does
-		// not see the runaway thinking on the next LLM call. The doom
-		// message is already pushed as `message_end` in the event stream,
-		// so the session JSONL preserves it for postmortem even though the
-		// model will never see it again.
+		if (result.kind === "incomplete") {
+			if (incompleteAttempt >= MAX_INCOMPLETE_TURN_RETRIES) return result.message;
+			incompleteAttempt += 1;
+		} else {
+			if (doomAttempt >= maxRetries) return result.message;
+			doomAttempt += 1;
+		}
+		// Preserve the failed attempt in the event stream/session log, but
+		// remove it from provider context before retrying. Recovery disables
+		// thinking so the model has output budget for user-visible text.
 		if (context.messages.length > 0) {
 			context.messages.pop();
 		}
 	}
-
-	// Defensive: the loop always returns via one of the three branches
-	// above on every iteration. If we get here something is wrong with
-	// the loop bounds.
-	throw new Error("streamAssistantResponse: retry loop invariant violated");
 }
 
 /**
@@ -376,6 +386,7 @@ async function streamAttempt(
 	stream: EventStream<AgentEvent, AgentMessage[]>,
 	streamFn: StreamFn | undefined,
 	attempt: number,
+	recoveringIncompleteTurn: boolean,
 ): Promise<StreamAttemptResult> {
 	// Apply context transform if configured (AgentMessage[] → AgentMessage[])
 	let messages = context.messages;
@@ -410,10 +421,13 @@ async function streamAttempt(
 	// On retry, apply the doom-loop recovery policy. The default hook
 	// strips `reasoning` (→ thinking disabled at the provider layer) so
 	// the recovery re-prompt takes the no-thinking path.
-	const streamOptions =
+	let streamOptions =
 		attempt > 0 && config.doomLoop?.retryStreamOptions
 			? { ...baseStreamOptions, ...(config.doomLoop.retryStreamOptions(config.model, attempt) ?? {}) }
 			: baseStreamOptions;
+	if (recoveringIncompleteTurn) {
+		streamOptions = { ...streamOptions, reasoning: undefined };
+	}
 	const response = await streamFunction(config.model, llmContext, streamOptions);
 
 	let partialMessage: AssistantMessage | null = null;
@@ -515,22 +529,29 @@ async function streamAttempt(
 			case "done":
 			case "error": {
 				const finalMessage = await response.result();
+				const completedMessage = isIncompleteAssistantTurn(finalMessage)
+					? { ...finalMessage, errorMessage: "Incomplete assistant turn: no visible text or tool call" }
+					: finalMessage;
 				if (addedPartial) {
-					context.messages[context.messages.length - 1] = finalMessage;
+					context.messages[context.messages.length - 1] = completedMessage;
 				} else {
-					context.messages.push(finalMessage);
+					context.messages.push(completedMessage);
 				}
 				if (!addedPartial) {
-					stream.push({ type: "message_start", message: { ...finalMessage } });
+					stream.push({ type: "message_start", message: { ...completedMessage } });
 				}
-				stream.push({ type: "message_end", message: finalMessage });
-				return { kind: "clean", message: finalMessage };
+				stream.push({ type: "message_end", message: completedMessage });
+				return isIncompleteAssistantTurn(completedMessage)
+					? { kind: "incomplete", message: completedMessage }
+					: { kind: "clean", message: completedMessage };
 			}
 		}
 	}
 
 	const finalMessage = await response.result();
-	return { kind: "clean", message: finalMessage };
+	return isIncompleteAssistantTurn(finalMessage)
+		? { kind: "incomplete", message: finalMessage }
+		: { kind: "clean", message: finalMessage };
 }
 
 /**

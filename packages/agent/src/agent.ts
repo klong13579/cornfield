@@ -509,20 +509,17 @@ export class Agent {
 	}
 
 	appendMessage(m: AgentMessage) {
-		// Doom-loop retraction. When the doom-loop detector fires the
-		// agent loop streams a final `message_end` for the doomed message
-		// (so the session JSONL keeps the record), then immediately re-
-		// streams with thinking disabled. The retry's clean response
-		// arrives as the next assistant `message_end`. We want the model
-		// to never see the doom thinking on future turns, so the clean
-		// response REPLACES the doom in `state.messages` rather than
-		// appending. The session log is unaffected because it consumes
-		// events directly and sees both message_ends.
+		// Recovery retraction. Doom-loop and incomplete-turn retries emit
+		// their failed `message_end` for session diagnostics, then stream a
+		// replacement assistant response. Keep only the latest attempt in
+		// persistent agent state so future provider contexts never contain
+		// consecutive assistant messages from internal recovery attempts.
 		const prev = this.#state.messages[this.#state.messages.length - 1];
+		const previousError = prev?.role === "assistant" ? (prev as AssistantMessage).errorMessage : undefined;
 		if (
 			prev?.role === "assistant" &&
-			(prev as AssistantMessage).stopReason === "length" &&
-			(prev as AssistantMessage).errorMessage?.startsWith("Doom loop detected") === true &&
+			(previousError?.startsWith("Doom loop detected") === true ||
+				previousError?.startsWith("Incomplete assistant turn") === true) &&
 			m.role === "assistant"
 		) {
 			this.#state.messages = [...this.#state.messages.slice(0, -1), m];

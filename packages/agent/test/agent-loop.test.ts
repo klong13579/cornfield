@@ -759,6 +759,49 @@ it("refreshes tools and system prompt between same-turn model calls", async () =
 	expect(callContexts[1]?.tools?.map(tool => tool.name)).toEqual(["alpha", "beta"]);
 });
 
+describe("agentLoop incomplete-turn recovery", () => {
+	it("retries a thinking-only stop until the model produces visible text", async () => {
+		const context: AgentContext = {
+			systemPrompt: "You are helpful.",
+			messages: [],
+			tools: [],
+		};
+		const config: AgentLoopConfig = {
+			model: createModel(),
+			convertToLlm: identityConverter,
+		};
+
+		const callContexts: Context[] = [];
+		let callIndex = 0;
+		const streamFn = (_model: Model, llmContext: Context) => {
+			callContexts.push(llmContext);
+			const stream = new MockAssistantStream();
+			queueMicrotask(() => {
+				const message =
+					callIndex === 0
+						? createAssistantMessage([{ type: "thinking", thinking: "The complete answer is still internal." }])
+						: createAssistantMessage([{ type: "text", text: "Visible final answer." }]);
+				callIndex += 1;
+				stream.push({ type: "done", reason: "stop", message });
+			});
+			return stream;
+		};
+
+		const stream = agentLoop([createUserMessage("answer me")], context, config, undefined, streamFn);
+		for await (const _event of stream) {
+			// consume
+		}
+		const messages = await stream.result();
+
+		expect(callContexts).toHaveLength(2);
+		expect(messages.at(-1)).toMatchObject({
+			role: "assistant",
+			content: [{ type: "text", text: "Visible final answer." }],
+		});
+		expect(callContexts[1]?.messages).toEqual([expect.objectContaining({ role: "user", content: "answer me" })]);
+	});
+});
+
 describe("agentLoop doom-loop detection", () => {
 	/** Reusable stream fixture that emits a degenerate thinking block. */
 	function degenerateThinkingStream(phrase: string, repeats: number) {
