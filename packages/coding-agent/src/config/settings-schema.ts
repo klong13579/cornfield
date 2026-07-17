@@ -649,7 +649,7 @@ export const SETTINGS_SCHEMA = {
 
 	"streaming.doomLoop.maxThinkingChars": {
 		type: "number",
-		default: 16384,
+		default: 0,
 		ui: {
 			tab: "model",
 			label: "Max Thinking Chars",

@@ -51,7 +51,7 @@ describe("streaming.doomLoop settings end-to-end", () => {
 		expect(g["doomLoop.text.minChars"]).toBe(500);
 		expect(g["doomLoop.text.ngramSize"]).toBe(60);
 		expect(g["doomLoop.text.minNgramRepeat"]).toBe(4);
-		expect(g["doomLoop.maxThinkingChars"]).toBe(16384);
+		expect(g["doomLoop.maxThinkingChars"]).toBe(0);
 		expect(g["doomLoop.maxThinkingCharsByModel"]).toEqual({});
 	});
 

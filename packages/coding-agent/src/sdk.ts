@@ -315,6 +315,11 @@ function getDefaultAgentDir(): string {
  * match wins), mirroring the `edit.modelVariants` resolution pattern. This is
  * the per-model override knob the user requested for `minimax-m3`.
  *
+ * When neither a per-model override (`maxThinkingCharsByModel`) nor an
+ * explicit global `maxThinkingChars` is configured (> 0), the cap is
+ * auto-derived from the model's context window: ~40% of `contextWindow`,
+ * matching the scale of large-context reasoning models (e.g. 1M ctx → 400K).
+ *
  * Note: `Settings.getGroup(prefix)` strips the prefix and returns the
  * remaining suffix verbatim — flat keys, not nested. So we read
  * `g["doomLoop.enabled"]` rather than `g.doomLoop.enabled` (see
@@ -324,11 +329,24 @@ function resolveDoomLoopConfig(model: Model | undefined, settings: Settings): Do
 	if (!model) return undefined;
 	const g = settings.getGroup("streaming") as Record<string, unknown>;
 	if (g["doomLoop.enabled"] === false) return undefined;
+
+	// Priority: per-model override → explicit global config → auto-derive from context window
 	const perModel = resolvePerModelMaxThinking(
 		model.id,
 		(g["doomLoop.maxThinkingCharsByModel"] as Record<string, number> | undefined) ?? {},
 	);
-	const maxThinkingChars = perModel ?? (g["doomLoop.maxThinkingChars"] as number | undefined) ?? 0;
+	const explicitGlobal = g["doomLoop.maxThinkingChars"] as number | undefined;
+	let maxThinkingChars: number;
+	if (perModel !== undefined && perModel > 0) {
+		maxThinkingChars = perModel;
+	} else if (explicitGlobal !== undefined && explicitGlobal > 0) {
+		maxThinkingChars = explicitGlobal;
+	} else {
+		// Auto-derive from context window (40% of token budget).
+		// For reasoning models with large context (e.g. 1M), this gives
+		// ~400K chars — generous enough to never trigger on normal reasoning.
+		maxThinkingChars = Math.max(1, Math.round(model.contextWindow * 0.4));
+	}
 	return {
 		enabled: true,
 		thinking: {
