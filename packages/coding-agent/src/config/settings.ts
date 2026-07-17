@@ -113,6 +113,9 @@ export class Settings {
 	#global: RawSettings = {};
 	/** Project settings from .claude/settings.yml etc */
 	#project: RawSettings = {};
+	/** Whether a project-level .omp/config.yml exists */
+	#hasProjectConfigFile = false;
+
 	/** Runtime overrides (not persisted) */
 	#overrides: RawSettings = {};
 	/** Merged view (global + project + overrides) */
@@ -356,10 +359,22 @@ export class Settings {
 
 	/**
 	 * Set a model role (helper for modelRoles record).
+	 *
+	 * Writes to project level if a project-level .omp/config.yml exists (so reads
+	 * and writes are consistent — project overrides global in the merged view).
+	 * Otherwise writes to global.
 	 */
 	setModelRole(role: ModelRole | string, modelId: string): void {
 		const current = this.get("modelRoles");
-		this.set("modelRoles", { ...current, [role]: modelId });
+		const updated = { ...current, [role]: modelId };
+
+		if (this.#hasProjectConfigFile) {
+			setByPath(this.#project, ["modelRoles"], updated);
+			this.#rebuildMerged();
+			void this.#saveProjectConfig();
+		} else {
+			this.set("modelRoles", updated);
+		}
 	}
 
 	/**
@@ -479,6 +494,7 @@ export class Settings {
 
 		// Load per-directory .omp/config.yml (project-level override of global config.yml)
 		const projectConfigPath = path.join(this.#cwd, CONFIG_DIR_NAME, "config.yml");
+		this.#hasProjectConfigFile = await Bun.file(projectConfigPath).exists().catch(() => false);
 		const projectConfig = await this.#loadYaml(projectConfigPath);
 		if (Object.keys(projectConfig).length > 0) {
 			merged = this.#deepMerge(merged, projectConfig);
@@ -644,6 +660,26 @@ export class Settings {
 		}
 
 		this.#rebuildMerged();
+	}
+
+	/**
+	 * Persist project-level settings to .omp/config.yml.
+	 * Reads the current file first to preserve external changes,
+	 * then applies the in-memory #project snapshot on top.
+	 */
+	async #saveProjectConfig(): Promise<void> {
+		const projectConfigPath = path.join(this.#cwd, CONFIG_DIR_NAME, "config.yml");
+
+		try {
+			// Re-read to preserve external changes
+			const current = await this.#loadYaml(projectConfigPath);
+
+			// Apply our project state on top
+			const merged = this.#deepMerge(current, this.#project);
+			await Bun.write(projectConfigPath, YAML.stringify(merged, null, 2));
+		} catch (error) {
+			logger.warn("Settings: project save failed", { error: String(error) });
+		}
 	}
 
 	// ─────────────────────────────────────────────────────────────────────────
