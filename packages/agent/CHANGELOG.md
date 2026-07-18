@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- Progressless `length` stall circuit breaker in `runLoop`: consecutive assistant turns with `stopReason: "length"` and no `toolCall` increment a per-run counter and stop empty-spinning once the threshold is reached (configurable via `agent.lengthStall`); `length` + toolCall continues as before. See `docs/plans/2026-07-18-length-stall-and-spinner-dispose-design.md`.
 - Treat assistant turns with no visible text or tool call as incomplete, retrying twice with thinking disabled before allowing the turn to end.
 
 ## [14.5.10] - 2026-04-30

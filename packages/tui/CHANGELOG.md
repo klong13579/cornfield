@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- **Dispose-before-clear on Container/Box** (`src/tui.ts`, `src/components/box.ts`): `clear()` / `removeChild()` now call `dispose?.()` on children before dropping them, so Loader and other timer-owning components stop their intervals instead of leaking into the JSC heap after rebuild/handoff. Loader restarts animation when re-added after dispose. See `docs/plans/2026-07-18-length-stall-and-spinner-dispose-design.md`.
 - **`requestRender()` post-shutdown guard** (`src/tui.ts`): Added `if (this.#stopped) return;` at the top of `requestRender()` to prevent orphaned spinner intervals from triggering render cycles after the TUI has been stopped. This is the defensive complement to the coding-agent fix that disposes spinner components on agent abort.
 ## [14.5.7] - 2026-04-29
 
