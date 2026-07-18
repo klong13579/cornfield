@@ -52,6 +52,11 @@ export class Loader extends Text {
 		}
 	}
 
+	/** Idempotent cleanup for Container.clear()/removeChild(). */
+	dispose(): void {
+		this.stop();
+	}
+
 	setMessage(message: string) {
 		this.message = message;
 		this.#updateDisplay();

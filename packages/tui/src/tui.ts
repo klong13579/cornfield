@@ -41,6 +41,13 @@ export interface Component {
 	 * Called when theme changes or when component needs to re-render from scratch.
 	 */
 	invalidate(): void;
+
+	/**
+	 * Optional cleanup when the component is removed from a container.
+	 * Container.clear()/removeChild() call this before dropping the child.
+	 * Should be idempotent.
+	 */
+	dispose?(): void;
 }
 
 /**
@@ -180,11 +187,13 @@ export class Container implements Component {
 	removeChild(component: Component): void {
 		const index = this.children.indexOf(component);
 		if (index !== -1) {
+			component.dispose?.();
 			this.children.splice(index, 1);
 		}
 	}
 
 	clear(): void {
+		for (const child of this.children) child.dispose?.();
 		this.children = [];
 	}
 
