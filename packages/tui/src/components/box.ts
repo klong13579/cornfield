@@ -32,12 +32,14 @@ export class Box implements Component {
 	removeChild(component: Component): void {
 		const index = this.children.indexOf(component);
 		if (index !== -1) {
+			component.dispose?.();
 			this.children.splice(index, 1);
 			this.#invalidateCache();
 		}
 	}
 
 	clear(): void {
+		for (const child of this.children) child.dispose?.();
 		this.children = [];
 		this.#invalidateCache();
 	}

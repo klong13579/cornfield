@@ -196,6 +196,8 @@ export class BashExecutionComponent extends Container {
 		// Loader or status
 		if (this.#status === "running") {
 			this.#contentContainer.addChild(this.#loader);
+			// clear() disposed/stopped the loader — restart the spinner for the rebuild.
+			this.#loader.start();
 		} else {
 			const statusParts: string[] = [];
 

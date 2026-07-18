@@ -90,4 +90,22 @@ describe("Container.dispose-before-clear", () => {
 
 		expect(renderSpy.mock.calls.length).toBe(0);
 	});
+
+	it("restarts Loader timers after clear-then-readd + start (bash/python rebuild path)", async () => {
+		const loader = new Loader(ui, (s) => s, (s) => s, "running");
+		const contentContainer = new Container();
+		contentContainer.addChild(loader);
+
+		// Same pattern as BashExecutionComponent.#updateDisplay while status === "running":
+		// clear (dispose→stop), then re-add the same loader and start() again.
+		contentContainer.clear();
+		contentContainer.addChild(loader);
+		loader.start();
+
+		renderSpy.mockClear();
+		await Bun.sleep(200);
+
+		expect(renderSpy.mock.calls.length).toBeGreaterThan(0);
+		loader.stop();
+	});
 });
