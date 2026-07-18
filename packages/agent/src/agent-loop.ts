@@ -191,6 +191,18 @@ function extractIntent(args: Record<string, unknown>): { intent?: string; stripp
 	return { intent: trimmed.length > 0 ? trimmed : undefined, strippedArgs };
 }
 
+/** Progressless length: truncated turn with no toolCall (think/text-only empty-spin). */
+function isProgresslessLength(message: AssistantMessage): boolean {
+	if (message.stopReason !== "length") return false;
+	return !message.content.some(c => c.type === "toolCall");
+}
+
+/** Clean stop with visible text — clears the length-stall counter. */
+function isProductiveStop(message: AssistantMessage): boolean {
+	if (message.stopReason !== "stop") return false;
+	return message.content.some(c => c.type === "text" && c.text.trim().length > 0);
+}
+
 /**
  * Main loop logic shared by agentLoop and agentLoopContinue.
  */
@@ -205,6 +217,12 @@ async function runLoop(
 	let firstTurn = true;
 	// Check for steering messages at start (user may have typed while waiting)
 	let pendingMessages: AgentMessage[] = (await config.getSteeringMessages?.()) || [];
+
+	// Length-stall fuse: consecutive progressless `length` turns (no toolCall).
+	// Follow-ups may continue the outer loop while stallCount < N; fuse at >= N.
+	const lengthStallEnabled = config.lengthStall?.enabled !== false;
+	const maxConsecutiveLengthStalls = config.lengthStall?.maxConsecutive ?? 3;
+	let stallCount = 0;
 
 	// Outer loop: continues when queued follow-up messages arrive after agent would stop
 	while (true) {
@@ -261,6 +279,14 @@ async function runLoop(
 			const toolCalls = message.content.filter(c => c.type === "toolCall");
 			hasMoreToolCalls = toolCalls.length > 0;
 
+			if (lengthStallEnabled) {
+				if (isProgresslessLength(message)) {
+					stallCount += 1;
+				} else if (hasMoreToolCalls || isProductiveStop(message)) {
+					stallCount = 0;
+				}
+			}
+
 			const toolResults: ToolResultMessage[] = [];
 			if (hasMoreToolCalls) {
 				const executionResult = await executeToolCalls(
@@ -286,10 +312,18 @@ async function runLoop(
 
 			stream.push({ type: "turn_end", message, toolResults });
 
+			// Fuse after N consecutive progressless length turns — do not make an (N+1)th model call.
+			if (lengthStallEnabled && stallCount >= maxConsecutiveLengthStalls) {
+				stream.push({ type: "agent_end", messages: newMessages });
+				stream.end(newMessages);
+				return;
+			}
+
 			pendingMessages = steeringMessagesFromExecution ?? ((await config.getSteeringMessages?.()) || []);
 		}
 
 		// Agent would stop here. Check for follow-up messages.
+		// While stallCount < N, follow-ups MAY continue the outer loop (fuse@N semantics).
 		const followUpMessages = (await config.getFollowUpMessages?.()) || [];
 		if (followUpMessages.length > 0) {
 			// Set as pending so inner loop processes them

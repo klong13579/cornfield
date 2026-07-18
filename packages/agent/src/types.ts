@@ -154,6 +154,17 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 	doomLoop?: DoomLoopConfig;
 
 	/**
+	 * Fuse after N consecutive progressless `length` turns (length + no toolCall)
+	 * so follow-ups cannot empty-spin the same run. Default: enabled, N=3.
+	 * Set `enabled: false` to disable. Follow-ups may still continue the outer
+	 * loop while `stallCount < N`; fuse opens only at `stallCount >= N`.
+	 */
+	lengthStall?: {
+		enabled?: boolean;
+		maxConsecutive?: number;
+	};
+
+	/**
 	 * Dynamic tool choice override, resolved per LLM call.
 	 * When set and returns a value, overrides the static `toolChoice`.
 	 */
