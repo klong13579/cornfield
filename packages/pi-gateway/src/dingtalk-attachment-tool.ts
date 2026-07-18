@@ -135,7 +135,7 @@ async function handleAttachment(
 	// 4. Find the DingTalkChannel for this account
 	// Multi-account mode: channel registered as `dingtalk:{accountId}`
 	// Single-account mode: channel registered as `dingtalk` (channel.id)
-	let channel = ctx.registry.get(`dingtalk:${ctx.accountId}`) ?? ctx.registry.get("dingtalk");
+	const channel = ctx.registry.get(`dingtalk:${ctx.accountId}`) ?? ctx.registry.get("dingtalk");
 	if (!channel) {
 		return errResult("DingTalk channel not found. Is the DingTalk channel enabled in the gateway config?");
 	}

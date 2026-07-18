@@ -14,13 +14,13 @@ import * as path from "node:path";
 import type { AgentBridge, AgentBridgeSnapshot } from "../src/agent-bridge";
 import { createBridgeStatusToolDefinitions } from "../src/bridge-status-tool";
 import type { ChannelRegistry } from "../src/channels/registry";
+import { getLogRoot, setLogRoot } from "../src/scheduler/execution-log";
 import { createCronToolDefinitions } from "../src/scheduler/host-tool";
 import { JsonFileStorage } from "../src/scheduler/json-file-storage";
 import { runTestRun } from "../src/scheduler/test-run";
 import { clearTestRunMarker, hasTestRunMarker, readTestRunMarker } from "../src/scheduler/test-run-marker";
 import type { ScheduledTask } from "../src/scheduler/types";
 import type { InboundMessage } from "../src/types";
-import { getLogRoot, setLogRoot } from "../src/scheduler/execution-log";
 
 // ===========================================================================
 // bridge_status host tool
@@ -1493,7 +1493,7 @@ describe("cron host tool — recent action", () => {
 			consecutiveFailures: 0,
 		});
 		const tail = "## 建议操作\n- last action that must survive truncation";
-		const longOutput = "A".repeat(3000) + "\n" + tail;
+		const longOutput = `${"A".repeat(3000)}\n${tail}`;
 		seedExec(task.id, {
 			startedAt: Date.now(),
 			output: longOutput,
@@ -1538,7 +1538,7 @@ describe("cron host tool — recent action", () => {
 			failCount: 0,
 			consecutiveFailures: 0,
 		});
-		const fullOutput = "B".repeat(5000) + "END";
+		const fullOutput = `${"B".repeat(5000)}END`;
 		seedExec(task.id, {
 			startedAt: Date.now(),
 			output: fullOutput,

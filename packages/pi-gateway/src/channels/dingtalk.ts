@@ -39,7 +39,6 @@ import {
 	BlockType,
 	buildAnswerBlock,
 	buildImageBlock,
-	buildStopBlock,
 	buildThinkBlock,
 	buildToolBlock,
 	type CardBlock,
@@ -973,12 +972,9 @@ export class DingTalkChannel extends BaseChannel {
 				const totalSec = Math.floor(evt.elapsedMs / 1000);
 				const min = Math.floor(totalSec / 60);
 				const sec = totalSec % 60;
-				const elapsed =
-					min >= 60
-						? `${Math.floor(min / 60)}h${min % 60}m`
-						: `${min}m${sec}s`;
-							const argSummary = formatLongTaskArgs(evt.toolName, evt.toolCallArgs);
-							const body = `⏳ **${evt.toolName}** 还在跑（已运行 ${elapsed}）${argSummary}。如需中止请点击下方按钮。`;
+				const elapsed = min >= 60 ? `${Math.floor(min / 60)}h${min % 60}m` : `${min}m${sec}s`;
+				const argSummary = formatLongTaskArgs(evt.toolName, evt.toolCallArgs);
+				const body = `⏳ **${evt.toolName}** 还在跑（已运行 ${elapsed}）${argSummary}。如需中止请点击下方按钮。`;
 
 				// Capture current card state synchronously (handler is
 				// sync; the finish+create runs in an async IIFE so it
@@ -1007,14 +1003,10 @@ export class DingTalkChannel extends BaseChannel {
 						// additionally needs hasAction: true when type-4
 						// btns are present, otherwise it downgrades them
 						// to a fallback text block.
-						const hadContent =
-							oldText.trim() ||
-							oldBlocks.some(b => b.type !== BlockType.STOP);
+						const hadContent = oldText.trim() || oldBlocks.some(b => b.type !== BlockType.STOP);
 						if (hadContent) {
 							const segAnswer = oldText.trim() ? buildAnswerBlock(oldText) : null;
-							const finalBlocks = segAnswer
-								? [...oldBlocks, segAnswer]
-								: oldBlocks;
+							const finalBlocks = segAnswer ? [...oldBlocks, segAnswer] : oldBlocks;
 							const hasBtns = finalBlocks.some(
 								b => b.type === BlockType.STOP && Array.isArray(b.btns) && b.btns.length > 0,
 							);
@@ -1121,12 +1113,7 @@ export class DingTalkChannel extends BaseChannel {
 							// patchAICardBlocks on a still-PROCESSING
 							// card silently downgrades btns to a
 							// fallback message.
-							void streamAICard(
-								nextCard,
-								body,
-								[pingBlock],
-								config,
-							).catch(err => {
+							void streamAICard(nextCard, body, [pingBlock], config).catch(err => {
 								logger.warn("[DingTalk] onLongTask streamAICard (new card) failed", {
 									accountId: this.#accountId,
 									conversationId: inbound.conversationId,
@@ -3304,7 +3291,7 @@ function formatLongTaskArgs(toolName: string, toolCallArgs: unknown): string {
 
 	// Truncate for card body readability (DingTalk cards are narrow).
 	const MAX_LEN = 60;
-	const truncated = value.length > MAX_LEN ? value.slice(0, MAX_LEN) + "…" : value;
+	const truncated = value.length > MAX_LEN ? `${value.slice(0, MAX_LEN)}…` : value;
 	return ` — ${truncated}`;
 }
 
