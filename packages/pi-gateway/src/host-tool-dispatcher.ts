@@ -26,6 +26,31 @@
 import { logger } from "@oh-my-pi/pi-utils";
 
 /**
+ * OpenAI / Anthropic tool-calling schema requires the `name` field to match
+ * `^[a-zA-Z0-9_-]+$` (1-64 chars). Backends that strictly enforce this (e.g.
+ * DeepSeek V4 via OpenAI-compat) return 400 invalid_request_error if a host
+ * tool's name contains `.` / `:` / `/` / spaces / non-ASCII characters.
+ *
+ * The LLM also has to copy-paste this name verbatim into a tool_call, so
+ * simpler character sets reduce copy errors. Host tools MUST be named with
+ * snake_case only.
+ */
+const TOOL_NAME_RE = /^[a-zA-Z0-9_-]{1,64}$/;
+
+export function isValidToolName(name: string): boolean {
+	return TOOL_NAME_RE.test(name);
+}
+
+export function assertValidToolName(name: string): void {
+	if (!TOOL_NAME_RE.test(name)) {
+		throw new Error(
+			`Host tool name "${name}" violates OpenAI tool-calling schema (must match ^[a-zA-Z0-9_-]{1,64}$). ` +
+				`Rename to snake_case before registering.`,
+		);
+	}
+}
+
+/**
  * Mirrors the OMP `RpcHostToolDefinition` shape — see
  * `packages/coding-agent/src/modes/rpc/rpc-types.ts`. We redeclare it here
  * (rather than importing from `@oh-my-pi/pi-coding-agent`) because the
@@ -84,6 +109,13 @@ export class HostToolDispatcher {
 
 	/** Replace the registered tool set. Returns the definitions in registration order. */
 	setTools(tools: HostToolHandler[]): RpcHostToolDefinition[] {
+		// Validate every tool name against the OpenAI tool-calling schema BEFORE
+		// building the dispatch map. Failing here surfaces the bad name at OMP
+		// startup (or first host-tool set), not at first LLM request where it
+		// would surface as an opaque 400 from the upstream provider.
+		for (const t of tools) {
+			assertValidToolName(t.definition.name);
+		}
 		this.#handlers = new Map(tools.map(t => [t.definition.name, t]));
 		this.#registered = tools.map(t => t.definition);
 		return this.#registered;

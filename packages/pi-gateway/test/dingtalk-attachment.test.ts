@@ -1,5 +1,5 @@
 /**
- * dingtalk.attachment host tool — unit tests.
+ * dingtalk_attachment host tool — unit tests.
  *
  * Tests the handler directly (no RPC, no real DingTalk API) by:
  *   - Building the handler via `createDingtalkAttachmentToolDefinitions()`
@@ -87,17 +87,17 @@ afterEach(() => {
 	}
 });
 
-describe("dingtalk.attachment host tool — factory", () => {
+describe("dingtalk_attachment host tool — factory", () => {
 	const registry = new TestRegistry() as unknown as ChannelRegistry;
 
-	it("registers exactly one tool named 'dingtalk.attachment'", () => {
+	it("registers exactly one tool named 'dingtalk_attachment'", () => {
 		const tools = createDingtalkAttachmentToolDefinitions({
 			getBridge: () => stubAttachmentBridge(DM_MSG),
 			registry,
 			accountId: "default",
 		});
 		expect(tools).toHaveLength(1);
-		expect(tools[0]!.definition.name).toBe("dingtalk.attachment");
+		expect(tools[0]!.definition.name).toBe("dingtalk_attachment");
 	});
 
 	it("definition has filePath as a parameter property", () => {
@@ -123,7 +123,7 @@ describe("dingtalk.attachment host tool — factory", () => {
 	});
 });
 
-describe("dingtalk.attachment host tool — parameter validation", () => {
+describe("dingtalk_attachment host tool — parameter validation", () => {
 	const registry = new TestRegistry() as unknown as ChannelRegistry;
 
 	it("returns error when filePath is missing", async () => {
@@ -164,7 +164,7 @@ describe("dingtalk.attachment host tool — parameter validation", () => {
 	});
 });
 
-describe("dingtalk.attachment host tool — file existence", () => {
+describe("dingtalk_attachment host tool — file existence", () => {
 	const registry = new TestRegistry() as unknown as ChannelRegistry;
 
 	it("returns error when file does not exist", async () => {
@@ -192,7 +192,7 @@ describe("dingtalk.attachment host tool — file existence", () => {
 	});
 });
 
-describe("dingtalk.attachment host tool — active chat context", () => {
+describe("dingtalk_attachment host tool — active chat context", () => {
 	const registry = new TestRegistry() as unknown as ChannelRegistry;
 
 	it("returns error when no active conversation exists", async () => {
@@ -209,7 +209,7 @@ describe("dingtalk.attachment host tool — active chat context", () => {
 	});
 });
 
-describe("dingtalk.attachment host tool — channel resolution", () => {
+describe("dingtalk_attachment host tool — channel resolution", () => {
 	it("returns error when dingtalk channel is not in registry", async () => {
 		const existing = tmpFile();
 		const tools = createDingtalkAttachmentToolDefinitions({
@@ -224,7 +224,7 @@ describe("dingtalk.attachment host tool — channel resolution", () => {
 	});
 });
 
-describe("dingtalk.attachment host tool — success path (DM)", () => {
+describe("dingtalk_attachment host tool — success path (DM)", () => {
 	let spy: ReturnType<typeof vi.spyOn>;
 	const registry = new TestRegistry(new DingTalkChannel()) as unknown as ChannelRegistry;
 
@@ -273,7 +273,7 @@ describe("dingtalk.attachment host tool — success path (DM)", () => {
 	});
 });
 
-describe("dingtalk.attachment host tool — success path (group)", () => {
+describe("dingtalk_attachment host tool — success path (group)", () => {
 	let spy: ReturnType<typeof vi.spyOn>;
 	const registry = new TestRegistry(new DingTalkChannel()) as unknown as ChannelRegistry;
 

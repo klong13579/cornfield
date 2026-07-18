@@ -1,5 +1,5 @@
 /**
- * Host tools — `bridge.status` (read-only diagnostic) and `cron`
+ * Host tools — `bridge_status` (read-only diagnostic) and `cron`
  * (delivery auto-inference, channel registry, scheduleType derivation,
  * audit stamping, agent-scope visibility, test-run fire-and-forget).
  *
@@ -23,7 +23,7 @@ import type { InboundMessage } from "../src/types";
 import { getLogRoot, setLogRoot } from "../src/scheduler/execution-log";
 
 // ===========================================================================
-// bridge.status host tool
+// bridge_status host tool
 // ===========================================================================
 
 function stubBridge(snapshot: AgentBridgeSnapshot): AgentBridge {
@@ -54,11 +54,11 @@ function asText(body: { content: Array<{ type: string; text: string }>; isError?
 	return { text: body.content.map(c => c.text).join(""), isError: body.isError === true };
 }
 
-describe("bridge.status host tool — factory", () => {
-	it("registers exactly one tool named 'bridge.status'", () => {
+describe("bridge_status host tool — factory", () => {
+	it("registers exactly one tool named 'bridge_status'", () => {
 		const tools = createBridgeStatusToolDefinitions({ getBridge: () => stubBridge(IDLE_SNAPSHOT) });
 		expect(tools).toHaveLength(1);
-		expect(tools[0]!.definition.name).toBe("bridge.status");
+		expect(tools[0]!.definition.name).toBe("bridge_status");
 	});
 
 	it("definition has empty parameters (no LLM-supplied input)", () => {
@@ -75,7 +75,7 @@ describe("bridge.status host tool — factory", () => {
 	});
 });
 
-describe("bridge.status host tool — bridge not initialized", () => {
+describe("bridge_status host tool — bridge not initialized", () => {
 	it("returns errResult when getBridge() returns null", async () => {
 		const tools = createBridgeStatusToolDefinitions({ getBridge: () => null });
 		const result = await tools[0]!.handle({});
@@ -85,7 +85,7 @@ describe("bridge.status host tool — bridge not initialized", () => {
 	});
 });
 
-describe("bridge.status host tool — each lifecycle state", () => {
+describe("bridge_status host tool — each lifecycle state", () => {
 	const cases: Array<{
 		name: string;
 		snap: AgentBridgeSnapshot;
@@ -211,7 +211,7 @@ describe("bridge.status host tool — each lifecycle state", () => {
 	}
 });
 
-describe("bridge.status host tool — input tolerance", () => {
+describe("bridge_status host tool — input tolerance", () => {
 	it("ignores extra arguments without error", async () => {
 		const tools = createBridgeStatusToolDefinitions({ getBridge: () => stubBridge(IDLE_SNAPSHOT) });
 		const result = await tools[0]!.handle({ junk: "ignored", n: 42 } as unknown as Record<string, unknown>);
@@ -227,7 +227,7 @@ describe("bridge.status host tool — input tolerance", () => {
 	});
 });
 
-describe("bridge.status host tool — summary phrasing", () => {
+describe("bridge_status host tool — summary phrasing", () => {
 	it("idle summary says 'no prompts in flight'", async () => {
 		const tools = createBridgeStatusToolDefinitions({ getBridge: () => stubBridge(IDLE_SNAPSHOT) });
 		const result = await tools[0]!.handle({});

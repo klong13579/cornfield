@@ -146,13 +146,13 @@ Example `cron.add` call (DM context, daily 18:30 report):
 
 No `delivery` field — gateway infers `{channel, accountId, toUserId}` from the current DM via `getActiveChatContext()`.
 
-**Host tool 可用性：** 如果当前会话中 `cron` / `bridge.status` 不可用（工具列表中没有），说明 gateway 未注册 host tool，应告知用户而不是退而用 CLI。这是 gateway 配置问题，不是 LLM 能修复的。
+**Host tool 可用性：** 如果当前会话中 `cron` / `bridge_status` 不可用（工具列表中没有），说明 gateway 未注册 host tool，应告知用户而不是退而用 CLI。这是 gateway 配置问题，不是 LLM 能修复的。
 
 **`test-run` (verification path)**: triggers a task through the REAL scheduler and reports the delivery verdict. Use after `add` / `update` to confirm the task actually works end-to-end (warm bridge → agent run → DingTalk delivery). Default duration: 90s `inMs` (1.5x the 60s gateway tick) + 30s `testTimeoutMs` = 120s total. The original schedule is ALWAYS restored after the run (in `finally`), even on timeout / abort / failure. `result.kind` is one of `success` / `trigger_timeout` / `task_failed` / `delivery_failed` / `aborted`. `isError: true` on the host tool result for non-`success` kinds. Pass `noRestore: true` only for debug — it leaves the schedule on `+<delay>s once`. Do NOT call test-run speculatively; it's a long tool call.
 
-### `bridge.status` (gateway host tool — read-only diagnostic)
+### `bridge_status` (gateway host tool — read-only diagnostic)
 
-`bridge.status` is an OMP **host tool** registered by the gateway on the `set_host_tools` RPC. It returns the AgentBridge's current snapshot (lifecycle state, circuit breaker, crash recovery, queue depth) plus a derived `summary` field. No parameters.
+`bridge_status` is an OMP **host tool** registered by the gateway on the `set_host_tools` RPC. It returns the AgentBridge's current snapshot (lifecycle state, circuit breaker, crash recovery, queue depth) plus a derived `summary` field. No parameters.
 
 **Scope = this agent's bridge** (the OMP subprocess serving this account). The LLM should call this when:
 - The user reports a message wasn't delivered and the LLM suspects the bridge is the cause

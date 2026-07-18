@@ -1,12 +1,12 @@
 /**
- * `dingtalk.attachment` host tool — send a local file as a DingTalk attachment.
+ * `dingtalk_attachment` host tool — send a local file as a DingTalk attachment.
  *
  * When the LLM receives a request like "直接附件发我看看" (send this as an
  * attachment), it can call this tool to upload a local filesystem file and
  * deliver it to the current DingTalk conversation as a `sampleFile` message.
  *
  * **How it works:**
- *   1. The LLM calls `dingtalk.attachment({filePath: "/path/to/file.md"})`.
+ *   1. The LLM calls `dingtalk_attachment({filePath: "/path/to/file.md"})`.
  *   2. The gateway resolves the current conversation from the bridge's
  *      active chat context (the same conversation the user's last message
  *      came from).
@@ -50,7 +50,7 @@ const ATTACHMENT_PARAMETERS = Type.Object({
 });
 
 const ATTACHMENT_DEFINITION: RpcHostToolDefinition = {
-	name: "dingtalk.attachment",
+	name: "dingtalk_attachment",
 	label: "Attachment",
 	description:
 		"Send a local file as a file attachment to the current DingTalk conversation. " +

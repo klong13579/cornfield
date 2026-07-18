@@ -2228,7 +2228,7 @@ export class DingTalkChannel extends BaseChannel {
 	 *
 	 * Handles the full lifecycle: upload via uploadMedia('file') then send as
 	 * a sampleFile robot message. Designed to be called by host tools
-	 * (e.g. `dingtalk.attachment`) that resolve the target from active chat
+	 * (e.g. `dingtalk_attachment`) that resolve the target from active chat
 	 * context.
 	 *
 	 * Supported file types: doc, docx, xls, xlsx, ppt, pptx, zip, pdf, rar.

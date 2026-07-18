@@ -1,7 +1,7 @@
 /**
- * `bridge.status` host tool — read-only diagnostic for the AgentBridge.
+ * `bridge_status` host tool — read-only diagnostic for the AgentBridge.
  *
- * The LLM-facing `bridge.status` tool is registered with the OMP subprocess
+ * The LLM-facing `bridge_status` tool is registered with the OMP subprocess
  * via `set_host_tools` and invoked through the `host_tool_call` frame.
  * The handler reads `AgentBridge.getSnapshot()` (computed in
  * `agent-bridge.ts:325`) and returns it as a structured JSON payload
@@ -41,7 +41,7 @@ import type { HostToolHandler, HostToolResultBody, RpcHostToolDefinition } from 
 const BRIDGE_STATUS_PARAMETERS = Type.Object({});
 
 const BRIDGE_STATUS_DEFINITION: RpcHostToolDefinition = {
-	name: "bridge.status",
+	name: "bridge_status",
 	label: "Bridge Status",
 	description:
 		"Read-only diagnostic for THIS AGENT's AgentBridge (the OMP subprocess serving this account). " +
@@ -75,7 +75,7 @@ const BRIDGE_STATUS_DEFINITION: RpcHostToolDefinition = {
 };
 
 /**
- * Public factory: returns the registered `bridge.status` host tool.
+ * Public factory: returns the registered `bridge_status` host tool.
  * Mirrors the `createCronToolDefinitions` factory in
  * `scheduler/host-tool.ts` so the gateway can wire both tools with
  * the same `dispatcher.setTools([...cron, ...bridgeStatus])` pattern.

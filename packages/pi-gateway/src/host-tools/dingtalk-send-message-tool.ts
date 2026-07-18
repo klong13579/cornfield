@@ -1,8 +1,8 @@
 /**
- * `dingtalk.send_message` host tool — send a text message to a DingTalk user
+ * `dingtalk_send_message` host tool — send a text message to a DingTalk user
  * via the robot's 1-on-1 chat (Phase A).
  *
- * The LLM calls `dingtalk.send_message({targetUserId: "xxx", text: "..."})`.
+ * The LLM calls `dingtalk_send_message({targetUserId: "xxx", text: "..."})`.
  * The gateway resolves the DingTalk channel from the account ID, checks the
  * channel type, and sends the message via `channel.sendProactiveDM()`.
  *
@@ -43,11 +43,20 @@ interface DingtalkSendMessageToolContext {
 // ---------------------------------------------------------------------------
 
 function okResult(data: Record<string, unknown>): HostToolResultBody {
-	return { content: [{ type: "text" as const, text: JSON.stringify(data) }] };
+	return {
+		type: "tool_result",
+		tool_use_id: "",
+		content: [{ type: "text" as const, text: JSON.stringify(data) }],
+	};
 }
 
 function errResult(reason: string): HostToolResultBody {
-	return { content: [{ type: "text" as const, text: JSON.stringify({ error: reason }) }], isError: true };
+	return {
+		type: "tool_result",
+		tool_use_id: "",
+		content: [{ type: "text" as const, text: JSON.stringify({ error: reason }) }],
+		isError: true,
+	};
 }
 
 // ---------------------------------------------------------------------------
@@ -60,7 +69,7 @@ async function handleSendMessage(
 	ctx: DingtalkSendMessageToolContext,
 	args: { targetUserId: string; text: string },
 ): Promise<HostToolResultBody> {
-	logger.info("[SendMessage] dingtalk.send_message called", args);
+	logger.info("[SendMessage] dingtalk_send_message called", args);
 
 	// --- parameter validation ---
 	if (!args.targetUserId || typeof args.targetUserId !== "string") {
@@ -101,7 +110,7 @@ export function createDingtalkSendMessageToolDefinitions(ctx: DingtalkSendMessag
 	return [
 		{
 			definition: {
-				name: "dingtalk.send_message",
+				name: "dingtalk_send_message",
 				description:
 					"Send a text message to a DingTalk user via the robot's 1-on-1 chat. " +
 					"The message appears as sent by the PI robot in the target user's robot chat. " +
