@@ -328,6 +328,25 @@ export interface Learning {
 }
 
 // ============================================================================
+// User Profile (aggregate stats over recent sessions, used by /profile and /evolution fit)
+// ============================================================================
+
+export interface UserProfile {
+	sessionCount: number;
+	avgToolCallsPerSession: number;
+	avgFilesModifiedPerSession: number;
+	errorRate: number;
+	recoveryRate: number;
+	preferredLanguages: string[];
+	toolFrequency: Record<string, number>;
+	intentDistribution: Record<string, number>;
+}
+
+export interface ProfileStore {
+	get(key: string): Promise<UserProfile | null>;
+}
+
+// ============================================================================
 // Regression fixtures (failed-session replay)
 // ============================================================================
 

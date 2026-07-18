@@ -49,7 +49,8 @@ export function parseReplayVerdictFromResponse(text: string): FixtureReplayResul
 	const verdictLine = trimmed
 		.split("\n")
 		.map(l => l.trim())
-		.findLast(l => /^VERDICT:\s*(KEEP|DISCARD)/i.test(l));
+		.reverse()
+		.find(l => /^VERDICT:\s*(KEEP|DISCARD)/i.test(l));
 	if (verdictLine) {
 		const keep = /KEEP/i.test(verdictLine);
 		return {

@@ -5,6 +5,8 @@ import type { Learning } from "./types";
 export interface InjectionFormatOptions {
 	/** Maximum tokens for the injection block. Default: 2000. */
 	maxTokens?: number;
+	/** Pre-formatted memory summary block to prepend to the injection. */
+	memorySummary?: string;
 }
 
 export class InjectionFormatter {

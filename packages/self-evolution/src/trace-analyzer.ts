@@ -168,8 +168,8 @@ export class TraceAnalyzer {
 				redundantSearches: false,
 				slowLoop: false,
 				toolEfficiency: 1.0,
-				dominantErrorTool: null,
-				dominantErrorPattern: null,
+				dominantErrorTool: undefined,
+				dominantErrorPattern: undefined,
 				suggestedAction: "No tool calls in trace — likely system reminder or user abort.",
 			};
 		}

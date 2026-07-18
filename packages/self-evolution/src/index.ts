@@ -90,6 +90,7 @@ export function parseFlags(api: ExtensionAPI): SelfEvolutionFlags {
 		skillThreshold: Number(api.getFlag("self-evolution-skill-threshold") ?? "5"),
 		maxEpisodes: Number(api.getFlag("self-evolution-max-episodes") ?? "100"),
 		enablePromptInjection: api.getFlag("self-evolution-enable-prompt-injection") !== false,
+		enableEpisodeInjection: api.getFlag("self-evolution-enable-episode-injection") !== false,
 		enableNudgeContextInjection: api.getFlag("self-evolution-enable-nudge-context-injection") === true,
 		enableNudgeUI: api.getFlag("self-evolution-enable-nudge-ui") !== false,
 		llmRefinement: api.getFlag("self-evolution-llm-refinement") !== false,
@@ -442,6 +443,9 @@ export const createSelfEvolutionExtension: ExtensionFactory = api => {
 		sessionTraceStore: () => sessionTraceStore!,
 		memoryDb: () => memoryDb,
 		embeddingGenerator: () => undefined,
+		profileStore: () => ({
+			get: async () => null,
+		}),
 	};
 
 	registerSelfEvolutionCommands(api, commandStores);
@@ -536,7 +540,7 @@ export const createSelfEvolutionExtension: ExtensionFactory = api => {
 					},
 				);
 				if (result.ingested > 0 || result.errors.length > 0) {
-					logger.info("External trace ingestion complete", result);
+					logger.info("External trace ingestion complete", { ...result });
 				}
 			} catch (err) {
 				logger.warn("External trace ingestion failed", { error: String(err) });

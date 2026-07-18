@@ -54,9 +54,10 @@ import type {
 	WorkflowPatternStore,
 } from "./storage/types";
 import { syncSkillsToFiles } from "./sync";
-import type { SelfEvolutionFlags } from "./types";
+import type { ProfileStore, SelfEvolutionFlags, UserProfile } from "./types";
+import { createBackgroundLlmAuth } from "./utils/background-llm-auth";
 import { resolveBackgroundModel } from "./utils/background-model";
-import { type BackgroundLlmAuth, callBackgroundLlm } from "./utils/llm";
+import { callBackgroundLlm } from "./utils/llm";
 
 export interface CommandStores {
 	ensureInit(cwd: string): void;
@@ -82,6 +83,7 @@ export interface CommandStores {
 	sessionTraceStore(): SqliteSessionTraceStore;
 	memoryDb(): Database | undefined;
 	embeddingGenerator(): EmbeddingGenerator | undefined;
+	profileStore(): ProfileStore;
 }
 
 function getFitStore(db: () => Database): FitScoreStore {
@@ -478,42 +480,6 @@ async function handleRollback(stores: CommandStores, ctx: any, args: string): Pr
 	}
 }
 
-async function _handleProfile(stores: CommandStores, ctx: any): Promise<void> {
-	try {
-		const profile = await stores.profileStore().get("default");
-		if (!profile) {
-			ctx.ui.notify("No profile data yet. Complete a few sessions first.", "info");
-			return;
-		}
-		const lines: string[] = [];
-		lines.push(
-			`Sessions: ${profile.sessionCount} | Tool calls/session: ${profile.avgToolCallsPerSession.toFixed(1)} | Files/session: ${profile.avgFilesModifiedPerSession.toFixed(1)}`,
-		);
-		lines.push(
-			`Avg tool errors/session: ${profile.errorRate.toFixed(1)} | Recovery rate: ${(profile.recoveryRate * 100).toFixed(0)}%`,
-		);
-		lines.push(`Preferred languages: ${profile.preferredLanguages.join(", ") || "none yet"}`);
-
-		const topTools = Object.entries(profile.toolFrequency)
-			.sort((a, b) => b[1] - a[1])
-			.slice(0, 5)
-			.map(([t, c]) => `${t}(${c})`)
-			.join(", ");
-		if (topTools) lines.push(`Top tools: ${topTools}`);
-
-		const topIntents = Object.entries(profile.intentDistribution)
-			.sort((a, b) => b[1] - a[1])
-			.map(([i, c]) => `${i}(${c})`)
-			.join(", ");
-		if (topIntents) lines.push(`Intent distribution: ${topIntents}`);
-
-		ctx.ui.notify(lines.join("\n"), "info");
-	} catch (err) {
-		logger.error("evolution profile failed", { error: String(err) });
-		ctx.ui.notify("Failed to load profile", "error");
-	}
-}
-
 async function handleWorkflows(stores: CommandStores, ctx: any, args: string): Promise<void> {
 	try {
 		const intentFilter = args.trim();
@@ -556,7 +522,7 @@ async function handleAudit(stores: CommandStores, ctx: any): Promise<void> {
 			const model = resolveBackgroundModel(ctx);
 			if (model) {
 				const reportText = formatAuditReport(report);
-				const auth: BackgroundLlmAuth = { auth: ctx.auth };
+				const auth = createBackgroundLlmAuth(ctx);
 				const response = await callBackgroundLlm(model, auditSystemDiagnosisTemplate, reportText, {
 					auth,
 					maxTokens: 2000,
@@ -1145,7 +1111,7 @@ export function registerModelStatsCommand(api: ExtensionAPI, stores: CommandStor
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Build heuristic mock responses from profile data for fit evaluation. */
-function buildHeuristicResponses(profile?: UserProfile): Map<string, string> {
+function buildHeuristicResponses(profile: UserProfile | null | undefined): Map<string, string> {
 	const responses = new Map<string, string>();
 	const topTools =
 		Object.entries(profile?.toolFrequency ?? {})

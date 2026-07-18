@@ -103,7 +103,11 @@ From unified dir.
 		setAgentDir(tempAgentDir);
 
 		const { resolveGlobalMemoryRoot } = await import("./paths");
-		const legacyDir = path.join(resolveGlobalMemoryRoot(tempAgentDir, tempCwd), "skills", "legacy-skill");
+		const memoryRoot = resolveGlobalMemoryRoot(tempAgentDir, tempCwd);
+		if (!memoryRoot) {
+			throw new Error("Failed to resolve global memory root");
+		}
+		const legacyDir = path.join(memoryRoot, "skills", "legacy-skill");
 		await fs.mkdir(legacyDir, { recursive: true });
 		await Bun.write(path.join(legacyDir, "SKILL.md"), "Legacy playbook content.\n");
 

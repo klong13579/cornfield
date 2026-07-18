@@ -12,6 +12,7 @@ function rowToLearning(row: Record<string, unknown>): Learning {
 		source: row.source as Learning["source"],
 		confidence: Number(row.confidence),
 		lifecycle: row.lifecycle as Learning["lifecycle"],
+		scope: (row.scope as Learning["scope"] | undefined) ?? "global",
 		sessionId: String(row.session_id),
 		createdAt: Number(row.created_at),
 		updatedAt: Number(row.updated_at),

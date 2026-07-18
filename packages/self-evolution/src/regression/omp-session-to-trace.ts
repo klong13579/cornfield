@@ -74,6 +74,7 @@ export function parseOmpSessionJsonlToTrace(jsonlText: string, episode: Episode)
 	let errorCount = 0;
 	let hadRecovery = episode.hadRecovery;
 	let sawError = false;
+	let completedSuccessfully = episode.completedSuccessfully;
 
 	for (const line of lines) {
 		let parsed: SessionHeader | SessionMessageEntry | { type: string };
@@ -177,6 +178,6 @@ export function parseOmpSessionJsonlToTrace(jsonlText: string, episode: Episode)
 		toolCallCount,
 		errorCount,
 		hadRecovery,
-		completedSuccessfully: episode.completedSuccessfully,
+		completedSuccessfully,
 	};
 }
