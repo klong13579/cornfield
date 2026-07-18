@@ -224,6 +224,32 @@ describe("EventController abort spinner cleanup", () => {
 		expect(renderSpy.mock.calls.length).toBe(0);
 	});
 
+	it("disposes pending tools on message_end with length stopReason", async () => {
+		const ctx = createContext(ui);
+		const controller = new EventController(ctx);
+
+		const tool1 = new ToolExecutionComponent("task", {}, {}, undefined, ui, "/tmp", "call-1");
+		ctx.pendingTools.set("call-1", tool1);
+
+		ctx.streamingComponent = {
+			updateContent: vi.fn(),
+			setUsageInfo: vi.fn(),
+		} as any;
+		ctx.session.isTtsrAbortPending = false;
+
+		await controller.handleEvent({
+			type: "message_end",
+			message: createAssistantMessage("length"),
+		});
+
+		// After length finalize, wait 200ms — if spinners are still running,
+		// we'd see 2+ requestRender calls (80ms interval).
+		renderSpy.mockClear();
+		await Bun.sleep(200);
+
+		expect(renderSpy.mock.calls.length).toBe(0);
+	});
+
 	it("does NOT dispose tools on message_end with normal stopReason", async () => {
 		const ctx = createContext(ui);
 		const controller = new EventController(ctx);
