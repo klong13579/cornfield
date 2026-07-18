@@ -3077,13 +3077,28 @@ export class AgentSession {
 
 	/**
 	 * Gate for idle-path follow-up auto-continue. See `#queueFollowUp` for rationale.
+	 *
+	 * Also blocks auto-continue when the last assistant turn was a progressless
+	 * `length` (length + no toolCall) while the length-stall circuit is enabled —
+	 * leave the follow-up queued for the next user prompt / explicit continue so
+	 * async results are not lost but do not start a new empty-spin run.
+	 * In-run follow-up drain (fuse@N) is unchanged in `agent-loop` `runLoop`.
 	 */
 	#canAutoContinueForFollowUp(): boolean {
 		if (this.isStreaming) return false;
 		if (this.isRetrying) return false;
 		const messages = this.agent.state.messages;
 		const last = messages[messages.length - 1];
-		return last?.role === "assistant";
+		if (last?.role !== "assistant") return false;
+		if (this.#shouldDeferFollowUpForLengthStall(last)) return false;
+		return true;
+	}
+
+	/** Progressless length with stall circuit on → defer idle follow-up auto-continue. */
+	#shouldDeferFollowUpForLengthStall(message: AssistantMessage): boolean {
+		if (this.settings.get("agent.lengthStall.enabled") === false) return false;
+		if (message.stopReason !== "length") return false;
+		return !message.content.some(c => c.type === "toolCall");
 	}
 
 	queueDeferredMessage(message: CustomMessage): void {
