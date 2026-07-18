@@ -344,12 +344,16 @@ export class EventController {
 				this.ctx.streamingComponent.updateContent(this.ctx.streamingMessage);
 			}
 
-			if (this.ctx.streamingMessage.stopReason !== "aborted" && this.ctx.streamingMessage.stopReason !== "error") {
+			if (
+				this.ctx.streamingMessage.stopReason !== "aborted" &&
+				this.ctx.streamingMessage.stopReason !== "error" &&
+				this.ctx.streamingMessage.stopReason !== "length"
+			) {
 				for (const [toolCallId, component] of this.ctx.pendingTools.entries()) {
 					component.setArgsComplete(toolCallId);
 				}
 			} else {
-				// Abort/error: finalize streaming-args state so spinners stop immediately,
+				// Abort/error/length: finalize streaming-args state so spinners stop immediately,
 				// rather than waiting for #handleAgentEnd's dispose() a few ticks later.
 				for (const [, component] of this.ctx.pendingTools.entries()) {
 					component.dispose();
