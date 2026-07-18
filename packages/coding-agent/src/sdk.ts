@@ -374,6 +374,27 @@ function resolveDoomLoopConfig(model: Model | undefined, settings: Settings): Do
 	};
 }
 
+/**
+ * Resolve the length-stall circuit config from settings.
+ *
+ * Note: `Settings.getGroup(prefix)` strips the prefix and returns the
+ * remaining suffix verbatim — flat keys, not nested. So we read
+ * `g["lengthStall.enabled"]` rather than `g.lengthStall.enabled`.
+ *
+ * `maxConsecutive` is clamped to ≥ 1 so a misconfigured 0/negative cannot
+ * disable the fuse by accident (use `enabled: false` for that).
+ */
+function resolveLengthStallConfig(settings: Settings): {
+	enabled: boolean;
+	maxConsecutive: number;
+} {
+	const g = settings.getGroup("agent") as Record<string, unknown>;
+	const enabled = g["lengthStall.enabled"] !== false;
+	const rawMax = g["lengthStall.maxConsecutive"] as number | undefined;
+	const maxConsecutive = Math.max(1, rawMax ?? 3);
+	return { enabled, maxConsecutive };
+}
+
 function resolvePerModelMaxThinking(modelId: string, byModel: Record<string, number>): number | undefined {
 	for (const [pattern, value] of Object.entries(byModel)) {
 		if (typeof value === "number" && value >= 0 && modelId.includes(pattern)) return value;
@@ -1709,6 +1730,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			intentTracing: !!intentField,
 			getToolChoice: () => session?.nextToolChoice(),
 			doomLoop: resolveDoomLoopConfig(model, settings),
+			lengthStall: resolveLengthStallConfig(settings),
 		});
 
 		cursorEventEmitter = event => agent.emitExternalEvent(event);

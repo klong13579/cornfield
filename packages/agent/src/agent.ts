@@ -149,6 +149,13 @@ export interface AgentOptions {
 	 * harnesses, and downstream callers that want to roll their own.
 	 */
 	doomLoop?: DoomLoopConfig;
+
+	/**
+	 * Optional length-stall circuit. See `AgentLoopConfig.lengthStall`.
+	 * When unset, the agent loop defaults to enabled with N=3.
+	 */
+	lengthStall?: AgentLoopConfig["lengthStall"];
+
 	/**
 	 * Custom token budgets for thinking levels (token-based providers only).
 	 */
@@ -260,6 +267,7 @@ export class Agent {
 	#onResponse?: SimpleStreamOptions["onResponse"];
 	#onAssistantMessageEvent?: (message: AssistantMessage, event: AssistantMessageEvent) => void;
 	#doomLoop?: DoomLoopConfig;
+	#lengthStall?: AgentLoopConfig["lengthStall"];
 
 	/** Buffered Cursor tool results with text length at time of call (for correct ordering) */
 	#cursorToolResultBuffer: CursorToolResultEntry[] = [];
@@ -299,6 +307,7 @@ export class Agent {
 		this.#getToolChoice = opts.getToolChoice;
 		this.#onAssistantMessageEvent = opts.onAssistantMessageEvent;
 		this.#doomLoop = opts.doomLoop;
+		this.#lengthStall = opts.lengthStall;
 	}
 
 	/**
@@ -811,6 +820,7 @@ export class Agent {
 			intentTracing: this.#intentTracing,
 			onAssistantMessageEvent: this.#onAssistantMessageEvent,
 			doomLoop: this.#doomLoop,
+			lengthStall: this.#lengthStall,
 			getToolChoice,
 			getSteeringMessages: async () => {
 				if (skipInitialSteeringPoll) {

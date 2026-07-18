@@ -683,6 +683,31 @@ export const SETTINGS_SCHEMA = {
 		},
 	},
 
+	// Length-stall circuit: fuse consecutive progressless `length` turns (length +
+	// no toolCall) so async follow-ups cannot empty-spin the same agent run.
+	"agent.lengthStall.enabled": {
+		type: "boolean",
+		default: true,
+		ui: {
+			tab: "model",
+			label: "Length-Stall Circuit",
+			description:
+				"Stop the agent after repeated progressless length turns with no tool calls (default true). Disable for replay / benchmark fixtures.",
+		},
+	},
+
+	"agent.lengthStall.maxConsecutive": {
+		type: "number",
+		default: 3,
+		ui: {
+			tab: "model",
+			label: "Length-Stall Max Consecutive",
+			description:
+				"Fuse after this many consecutive progressless length turns (length + no toolCall). Minimum 1; default 3.",
+			submenu: true,
+		},
+	},
+
 	// Retries
 	"retry.enabled": { type: "boolean", default: true },
 
@@ -2414,6 +2439,15 @@ export interface StreamingSettings {
 	doomLoop: StreamingDoomLoopSettings;
 }
 
+export interface AgentLengthStallSettings {
+	enabled: boolean;
+	maxConsecutive: number;
+}
+
+export interface AgentSettings {
+	lengthStall: AgentLengthStallSettings;
+}
+
 /** Map group prefix -> typed settings interface */
 export interface GroupTypeMap {
 	compaction: CompactionSettings;
@@ -2434,6 +2468,7 @@ export interface GroupTypeMap {
 	cycleOrder: string[];
 	shellMinimizer: ShellMinimizerSettings;
 	streaming: StreamingSettings;
+	agent: AgentSettings;
 }
 
 export type GroupPrefix = keyof GroupTypeMap;
