@@ -1,3 +1,5 @@
+import { createActivityTimeout } from "./activity-timeout";
+import { createWebSearchToolBudget, RESEARCH_SOFT_ABORT_MS } from "./tool-budget";
 import { randomBytes } from "node:crypto";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -36,6 +38,16 @@ export interface SpawnWorkerInput {
 	/** Per-worker timeout in ms. Default: 10 minutes. */
 	timeoutMs?: number;
 	/**
+	 * Idle (no-progress) timeout in ms. Reset on streaming / tool progress.
+	 * 0 or unset = disabled. Only used by engines that support activity tracking.
+	 */
+	idleTimeoutMs?: number;
+	/**
+	 * Soft/hard budget on `web_search` starts (research stage).
+	 * 0 or unset = unlimited. Non-search tools do not count.
+	 */
+	maxToolRounds?: number;
+	/**
 	 * Streaming callback (once-right P5). Invoked with the cumulative
 	 * assistant text so far as `message_update` / `message_end` events arrive
 	 * on the JSONL stdout stream. Optional — existing callers unchanged.
@@ -50,6 +62,10 @@ export interface WorkerOutput {
 	exitCode: number | null;
 	aborted: boolean;
 	timedOut: boolean;
+	/** True when the kill was due to idleTimeoutMs (no progress), not hard timeout. */
+	idleTimedOut?: boolean;
+	/** True when aborted because maxToolRounds was exceeded. */
+	toolBudgetExceeded?: boolean;
 	model?: string;
 	stopReason?: string;
 	usage: {
@@ -330,8 +346,11 @@ export async function spawnMoaWorker(input: SpawnWorkerInput): Promise<WorkerOut
 	const env = buildEnv(input);
 
 	let proc: ReturnType<typeof Bun.spawn> | undefined;
-	let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
 	let timedOut = false;
+	let idleTimedOut = false;
+	let toolBudgetExceeded = false;
+	let activity: ReturnType<typeof createActivityTimeout> | undefined;
+	let toolBudget: ReturnType<typeof createWebSearchToolBudget> | undefined;
 
 	try {
 		proc = Bun.spawn(cmd, {
@@ -341,64 +360,100 @@ export async function spawnMoaWorker(input: SpawnWorkerInput): Promise<WorkerOut
 			stderr: "pipe",
 		});
 
-		timeoutHandle = setTimeout(() => {
-			timedOut = true;
+		const killProc = () => {
 			try {
 				proc?.kill("SIGTERM");
 			} catch {
 				// ignore
 			}
-		}, timeoutMs);
+		};
+
+		activity = createActivityTimeout({
+			timeoutMs,
+			idleTimeoutMs: input.idleTimeoutMs ?? 0,
+			onAbort: () => {
+				timedOut = true;
+				idleTimedOut = activity?.idleTimedOut ?? false;
+				killProc();
+			},
+		});
 
 		if (input.signal) {
-			const onAbort = () => {
-				try {
-					proc?.kill("SIGTERM");
-				} catch {
-					// ignore
-				}
-			};
+			const onAbort = () => killProc();
 			if (input.signal.aborted) onAbort();
 			else input.signal.addEventListener("abort", onAbort, { once: true });
 		}
 
 		const streamState: WorkerStreamState = { text: "" };
+		const maxToolRounds = Math.max(0, Math.floor(input.maxToolRounds ?? 0));
+		toolBudget = createWebSearchToolBudget({
+			maxWebSearches: maxToolRounds,
+			softAbortMs: RESEARCH_SOFT_ABORT_MS,
+			onSoftAbort: () => {
+				toolBudgetExceeded = true;
+				killProc();
+			},
+		});
 		const onLine = (line: string) => {
 			const trimmed = line.trim();
-			if (!trimmed || !input.onPartial) return;
+			if (!trimmed) return;
 			try {
 				const event = JSON.parse(trimmed) as WorkerEvent;
-				applyWorkerStreamEvent(event, streamState, text => input.onPartial!({ text }));
+				activity?.bump();
+				if (event.type === "tool_execution_start") {
+					const toolName = typeof event.toolName === "string" ? event.toolName : "";
+					const decision = toolBudget?.onToolStart(toolName) ?? "ok";
+					if (decision === "soft_trip") {
+						toolBudgetExceeded = true;
+					} else if (decision === "hard_abort") {
+						toolBudgetExceeded = true;
+						killProc();
+					}
+				}
+				if (input.onPartial) {
+					applyWorkerStreamEvent(event, streamState, text => input.onPartial!({ text }));
+				}
 			} catch {
 				// Tolerate non-JSONL noise.
 			}
 		};
 
 		const [stdout, stderr, exitCode] = await Promise.all([
-			input.onPartial
-				? readStreamLines(proc.stdout as unknown as ReadableStream<Uint8Array>, onLine)
-				: readStreamToString(proc.stdout as unknown as ReadableStream<Uint8Array>),
+			readStreamLines(proc.stdout as unknown as ReadableStream<Uint8Array>, onLine),
 			readStreamToString(proc.stderr as unknown as ReadableStream<Uint8Array>),
 			proc.exited,
 		]);
 
 		const events = parseJsonl(stdout);
 		const { output, model, stopReason, usage } = extractOutput(events);
+		let stderrOut = stderr;
+		if (toolBudgetExceeded) {
+			stderrOut = stderrOut.trim()
+				? `${stderrOut.trim()}\n(research web_search budget exceeded after ${maxToolRounds} searches)`
+				: `research web_search budget exceeded after ${maxToolRounds} searches`;
+		} else if (idleTimedOut) {
+			stderrOut = stderrOut.trim()
+				? `${stderrOut.trim()}\n(idle timeout: no progress)`
+				: "idle timeout: no progress";
+		}
 
 		return {
 			ok: exitCode === 0 && output.trim().length > 0,
 			output,
-			stderr,
+			stderr: stderrOut,
 			exitCode,
 			aborted: input.signal?.aborted ?? false,
 			timedOut,
+			idleTimedOut,
+			toolBudgetExceeded,
 			model,
 			stopReason,
 			usage,
 			durationMs: Date.now() - startTime,
 		};
 	} finally {
-		if (timeoutHandle) clearTimeout(timeoutHandle);
+		toolBudget?.dispose();
+		activity?.dispose();
 		await safeUnlink(systemPromptPath);
 		await safeUnlink(taskPath);
 	}

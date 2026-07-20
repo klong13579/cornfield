@@ -83,6 +83,7 @@
 	"scripts": {
 		"install:dev": "bun install && bun --cwd=packages/coding-agent link && bun --cwd=packages/ai link",
 		"dev": "bun --cwd=packages/coding-agent src/cli.ts",
+		"moa:test": "bun packages/moa-extension/scripts/stage-test.ts",
 		"stats": "bun --cwd=packages/coding-agent src/cli.ts stats",
 		"build": "bun run --workspaces --if-present build",
 		"build:native": "bun --cwd=packages/natives run build",

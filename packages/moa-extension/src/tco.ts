@@ -80,17 +80,61 @@ export interface TcoAssumption {
 	note?: string;
 }
 
+/** A single tool-backed external evidence item gathered by the Research stage. */
+export interface ResearchSource {
+	claim: string;
+	url: string;
+	relevance: string;
+	confidence?: "high" | "medium" | "low";
+}
+
+/**
+ * Output of the Research stage (Phase 7). Gathered once (or a few angles) after
+ * the single Ask, then injected into every plan worker so they don't each
+ * re-run the same expensive `web_search` fan-out. See
+ * `docs/plans/2026-07-17-moa-research-stage-design.md` §4.
+ */
+export interface ResearchPack {
+	mode: "encouraged" | "required";
+	/** ISO timestamp. */
+	gathered_at: string;
+	/** The search queries actually issued. */
+	queries: string[];
+	/** External evidence with URLs. */
+	sources: ResearchSource[];
+	/** Repo-local facts discovered while reading the codebase. */
+	repo_facts: string[];
+	/** Things still uncertain after research — flow into assumptions, NOT more search. */
+	gaps: string[];
+	/** How the pack was recovered from the research agent output. */
+	parse_source?: "json" | "markdown" | "salvage";
+}
+
+export type ResearchPackParseSource = "json" | "markdown" | "salvage";
+
+export interface ResearchPackParseResult {
+	pack: ResearchPack | null;
+	source: ResearchPackParseSource | null;
+}
+
 export interface TaskContextObject {
 	task_understanding: string;
+	/** Discovery intent: compare / design / local-impl. Optional for legacy TCOs. */
+	task_intent?: TaskIntent;
 	known_inputs: TcoKnownInput[];
 	missing_inputs: TcoMissingInput[];
 	assumptions: TcoAssumption[];
+	/** Research evidence gathered before Ask when researchMode ≠ none.
+	 *  Absent when researchMode is "none" or the Research stage did not run. */
+	research_pack?: ResearchPack;
 	/** Optional LLM debug info; not surfaced to workers. */
 	debug?: { discovery_model?: string; discovery_duration_ms?: number };
 }
 
+export type TaskIntent = "compare" | "design" | "local-impl";
+
 export const TCO_MAX_MISSING_INPUTS_DEFAULT = 5;
-export const TCO_ASK_TIMEOUT_MS_DEFAULT = 30_000;
+export const TCO_ASK_TIMEOUT_MS_DEFAULT = 300_000;
 export const TCO_DISCOVERY_TIMEOUT_MS_DEFAULT = 60_000;
 export const TCO_REWRITE_TIMEOUT_MS_DEFAULT = 120_000;
 
@@ -255,6 +299,160 @@ export function parseNeededInputs(raw: string): TcoMissingInput[] {
 }
 
 /**
+ * Parse the Research stage's raw output into a `ResearchPack` (Phase 7).
+ * Tolerant: JSON-first (via `extractJsonObject`); if JSON yields no usable
+ * evidence, fall back to markdown `## sources` / `## repo_facts` / `## gaps` /
+ * `## queries` sections. Returns `null` when there is no usable evidence.
+ */
+export function parseResearchPack(raw: string, mode: "encouraged" | "required"): ResearchPack | null {
+	return parseResearchPackDetailed(raw, mode).pack;
+}
+
+/** Same as `parseResearchPack` but also reports whether JSON or markdown won. */
+export function parseResearchPackDetailed(
+	raw: string,
+	mode: "encouraged" | "required",
+): ResearchPackParseResult {
+	const fromJson = parseResearchPackFromJson(raw);
+	if (fromJson) {
+		return {
+			pack: { ...fromJson, mode, gathered_at: new Date().toISOString(), parse_source: "json" },
+			source: "json",
+		};
+	}
+	const fromMd = parseResearchPackFromMarkdown(raw);
+	if (fromMd) {
+		return {
+			pack: { ...fromMd, mode, gathered_at: new Date().toISOString(), parse_source: "markdown" },
+			source: "markdown",
+		};
+	}
+	return { pack: null, source: null };
+}
+
+/**
+ * Last-resort pack when the research agent was interrupted or emitted unparseable
+ * output. Always non-null so TCO still carries a shared evidence stub (gaps + any
+ * URLs scraped from the raw text).
+ */
+export function salvageResearchPack(
+	raw: string,
+	mode: "encouraged" | "required",
+	reason: string,
+): ResearchPack {
+	const sources: ResearchSource[] = [];
+	const seen = new Set<string>();
+	const text = typeof raw === "string" ? raw : "";
+	for (const m of text.matchAll(/https?:\/\/[^\s)\]'">]+/gi)) {
+		const url = m[0]!.replace(/[.,;:]+$/g, "");
+		if (!/^https?:\/\/\S+/i.test(url) || seen.has(url)) continue;
+		seen.add(url);
+		sources.push({
+			claim: "recovered from interrupted research output",
+			url,
+			relevance: "salvage",
+		});
+		if (sources.length >= 20) break;
+	}
+	const gap = reason.trim() || "research interrupted with no usable pack";
+	return {
+		mode,
+		gathered_at: new Date().toISOString(),
+		queries: [],
+		sources,
+		repo_facts: [],
+		gaps: [gap],
+		parse_source: "salvage",
+	};
+}
+
+function normalizeResearchSources(raw: unknown): ResearchSource[] {
+	if (!Array.isArray(raw)) return [];
+	const sources: ResearchSource[] = [];
+	for (const s of raw) {
+		if (!isObject(s)) continue;
+		const url = typeof s.url === "string" ? s.url.trim() : "";
+		if (!/^https?:\/\/\S+/i.test(url)) continue;
+		const claim = typeof s.claim === "string" ? s.claim.trim() : "";
+		const relevance = typeof s.relevance === "string" ? s.relevance.trim() : "";
+		const confidence =
+			s.confidence === "high" || s.confidence === "medium" || s.confidence === "low" ? s.confidence : undefined;
+		sources.push({ claim, url, relevance, confidence });
+	}
+	return sources;
+}
+
+function toStringList(v: unknown): string[] {
+	return Array.isArray(v) ? v.map(x => (typeof x === "string" ? x.trim() : "")).filter(Boolean) : [];
+}
+
+function parseResearchPackFromJson(raw: string): Omit<ResearchPack, "mode" | "gathered_at"> | null {
+	const parsed = extractJsonObject(raw);
+	if (!isObject(parsed)) return null;
+	const queries = toStringList(parsed.queries);
+	const repo_facts = toStringList(parsed.repo_facts);
+	const gaps = toStringList(parsed.gaps);
+	const sources = normalizeResearchSources(parsed.sources);
+	if (sources.length === 0 && repo_facts.length === 0 && gaps.length === 0) return null;
+	return { queries, sources, repo_facts, gaps };
+}
+
+function extractMarkdownSection(raw: string, name: string): string {
+	const re = new RegExp(`(?:^|\\n)##\\s*${name}\\s*\\n([\\s\\S]*?)(?=\\n##\\s+|$)`, "i");
+	const m = re.exec(raw);
+	return m?.[1]?.trim() ?? "";
+}
+
+function parseBulletLines(section: string): string[] {
+	const out: string[] = [];
+	for (const line of section.split("\n")) {
+		const m = /^\s*(?:[-*+]|\d+\.)\s+(.+)$/.exec(line);
+		if (!m) continue;
+		const body = m[1]!.trim();
+		if (body) out.push(body);
+	}
+	return out;
+}
+
+function parseSourceBullet(body: string): ResearchSource | null {
+	// Preferred: claim: … | url: https://… | relevance: …
+	const labeled: Record<string, string> = {};
+	for (const part of body.split("|")) {
+		const kv = /^\s*([a-zA-Z_]+)\s*:\s*(.+?)\s*$/.exec(part.trim());
+		if (kv) labeled[kv[1]!.toLowerCase()] = kv[2]!.trim();
+	}
+	if (labeled.url && /^https?:\/\/\S+/i.test(labeled.url)) {
+		return {
+			claim: labeled.claim ?? "",
+			url: labeled.url,
+			relevance: labeled.relevance ?? "",
+		};
+	}
+	// Fallback: any http(s) URL in the bullet; remainder is claim/relevance.
+	const urlMatch = body.match(/https?:\/\/\S+/i);
+	if (!urlMatch) return null;
+	const url = urlMatch[0]!.replace(/[),.;]+$/, "");
+	if (!/^https?:\/\/\S+/i.test(url)) return null;
+	const claim = body
+		.replace(urlMatch[0]!, "")
+		.replace(/^[\s—\-–|]+|[\s—\-–|]+$/g, "")
+		.trim();
+	return { claim, url, relevance: "" };
+}
+
+function parseResearchPackFromMarkdown(raw: string): Omit<ResearchPack, "mode" | "gathered_at"> | null {
+	if (!raw?.trim()) return null;
+	const sources = parseBulletLines(extractMarkdownSection(raw, "sources"))
+		.map(parseSourceBullet)
+		.filter((s): s is ResearchSource => s !== null);
+	const repo_facts = parseBulletLines(extractMarkdownSection(raw, "repo_facts"));
+	const gaps = parseBulletLines(extractMarkdownSection(raw, "gaps"));
+	const queries = parseBulletLines(extractMarkdownSection(raw, "queries"));
+	if (sources.length === 0 && repo_facts.length === 0 && gaps.length === 0) return null;
+	return { queries, sources, repo_facts, gaps };
+}
+
+/**
  * Parse a Discovery LLM's raw output into a TCO + output_schema. Tolerant:
  * strips markdown fences, clamps missing_inputs to `max`, fills in sensible
  * defaults. Does NOT validate the TCO semantically — see `validateTco` for
@@ -274,6 +472,7 @@ export function parseDiscoveryOutput(
 	const parsed = extractJsonObject(raw);
 	const obj = isObject(parsed) ? parsed : {};
 	const task_understanding = typeof obj.task_understanding === "string" ? obj.task_understanding.trim() : "";
+	const task_intent = normalizeTaskIntent(obj.task_intent);
 	const knownRaw = Array.isArray(obj.known_inputs) ? obj.known_inputs : [];
 	const missingRaw = Array.isArray(obj.missing_inputs) ? obj.missing_inputs : [];
 	const assumptionsRaw = Array.isArray(obj.assumptions) ? obj.assumptions : [];
@@ -294,10 +493,17 @@ export function parseDiscoveryOutput(
 		})
 		.filter((v): v is TcoAssumption => v !== undefined);
 	const outputSchema = normalizeOutputSchema(obj.output_schema, fallbackSchema);
+	const tco: TaskContextObject = { task_understanding, known_inputs, missing_inputs, assumptions };
+	if (task_intent) tco.task_intent = task_intent;
 	return {
-		tco: { task_understanding, known_inputs, missing_inputs, assumptions },
+		tco,
 		outputSchema,
 	};
+}
+
+function normalizeTaskIntent(value: unknown): TaskIntent | undefined {
+	if (value === "compare" || value === "design" || value === "local-impl") return value;
+	return undefined;
 }
 
 /**
@@ -397,6 +603,25 @@ export function renderTcoForPrompt(tco: TaskContextObject, opts: { maxBytes?: nu
 		for (const a of tco.assumptions) {
 			const valueStr = formatValue(a.value);
 			lines.push(`- [assumed: \`${a.key}\` = ${valueStr}]  _reason=${a.reason}_`);
+		}
+	}
+	const pack = tco.research_pack;
+	if (pack) {
+		lines.push("", "### Research evidence (already gathered — do NOT re-search)");
+		if (pack.sources.length > 0) {
+			lines.push("Sources:");
+			for (const s of pack.sources) {
+				const conf = s.confidence ? ` [${s.confidence}]` : "";
+				lines.push(`- ${s.claim} — ${s.url} (${s.relevance})${conf}`);
+			}
+		}
+		if (pack.repo_facts.length > 0) {
+			lines.push("Repo facts:");
+			for (const f of pack.repo_facts) lines.push(`- ${f}`);
+		}
+		if (pack.gaps.length > 0) {
+			lines.push("Open gaps (put in `## assumptions`, do not search again):");
+			for (const g of pack.gaps) lines.push(`- ${g}`);
 		}
 	}
 	const text = lines.join("\n");

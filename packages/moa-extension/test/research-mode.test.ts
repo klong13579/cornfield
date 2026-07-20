@@ -4,6 +4,7 @@ import {
 	enrichSchemaWithSources,
 	inferResearchMode,
 	renderResearchGuidance,
+	resolveWorkerTimeoutMs,
 } from "../src/research-mode";
 import { DEFAULT_OUTPUT_SCHEMA, type MoaOutputSchema } from "../src/types";
 
@@ -14,13 +15,16 @@ describe("inferResearchMode", () => {
 		expect(inferResearchMode("看看竞品和开源方案怎么做")).toBe("required");
 	});
 
+	it("returns required for product comparison / 区别 cues", () => {
+		expect(inferResearchMode("hermes agent 和 workbuddy 的区别是什么？")).toBe("required");
+		expect(inferResearchMode("对比 Cursor 与 Claude Code 的会话压缩策略")).toBe("required");
+		expect(inferResearchMode("Hermes vs WorkBuddy")).toBe("required");
+		expect(inferResearchMode("比起 OpenClaw，omp 的收益是什么")).toBe("required");
+	});
+
 	it("returns encouraged for open architecture / tradeoff tasks", () => {
-		expect(inferResearchMode("为 omp 设计长会话上下文膨胀治理方案，给出可选架构与取舍")).toBe(
-			"encouraged",
-		);
-		expect(inferResearchMode("design an architecture with tradeoffs for session compaction")).toBe(
-			"encouraged",
-		);
+		expect(inferResearchMode("为 omp 设计长会话上下文膨胀治理方案，给出可选架构与取舍")).toBe("encouraged");
+		expect(inferResearchMode("design an architecture with tradeoffs for session compaction")).toBe("encouraged");
 	});
 
 	it("returns none for narrowly constrained implementation tasks", () => {
@@ -38,17 +42,19 @@ describe("renderResearchGuidance", () => {
 		expect(renderResearchGuidance("none")).toBe("");
 	});
 
-	it("encourages tool-backed citations for encouraged", () => {
+	it("tells encouraged workers to build on pre-gathered evidence, not re-search", () => {
 		const text = renderResearchGuidance("encouraged");
-		expect(text).toMatch(/web_search/i);
+		// Phase 7: plan workers must NOT call web_search themselves.
+		expect(text).toMatch(/Research evidence/i);
+		expect(text).toMatch(/do not call `?web_search|disabled for this role/i);
 		expect(text).toMatch(/## sources|sources/i);
-		expect(text).toMatch(/must not|do not cite|from memory|不得.*记忆|Do not invent URLs/i);
+		expect(text).toMatch(/do not invent URLs/i);
 	});
 
-	it("requires at least one web_search for required", () => {
+	it("keeps required strictness while still forbidding self web_search", () => {
 		const text = renderResearchGuidance("required");
-		expect(text).toMatch(/MUST|必须/i);
-		expect(text).toMatch(/web_search/i);
+		expect(text).toMatch(/REQUIRED/i);
+		expect(text).toMatch(/do not call `?web_search|disabled for this role/i);
 		expect(text).toMatch(/## sources|sources/i);
 	});
 });
@@ -102,5 +108,17 @@ describe("applyResearchSourcesPenalty", () => {
 	it("leaves score alone when a URL is present or mode is none", () => {
 		expect(applyResearchSourcesPenalty(90, "- claim: x | url: https://ex.com | relevance: y", "required")).toBe(90);
 		expect(applyResearchSourcesPenalty(90, undefined, "none")).toBe(90);
+	});
+});
+
+describe("resolveWorkerTimeoutMs", () => {
+	it("keeps configured timeout when researchMode is none", () => {
+		expect(resolveWorkerTimeoutMs(300_000, "none")).toBe(300_000);
+	});
+
+	it("raises floor to 10 minutes for encouraged/required research", () => {
+		expect(resolveWorkerTimeoutMs(300_000, "encouraged")).toBe(600_000);
+		expect(resolveWorkerTimeoutMs(300_000, "required")).toBe(600_000);
+		expect(resolveWorkerTimeoutMs(900_000, "required")).toBe(900_000);
 	});
 });

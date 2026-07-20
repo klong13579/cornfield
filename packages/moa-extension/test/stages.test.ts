@@ -5,9 +5,12 @@ import { buildPlan } from "../src/planner";
 import * as judgeModule from "../src/quality/judge";
 import { resolveSettings } from "../src/settings";
 import {
+	buildDegradedSynthesis,
+	restrictPlanWorkerTools,
 	runAskStage,
 	runDiscoveryStage,
 	runInputCollectStage,
+	runResearchStage,
 	runRewriteStage,
 	runSynthesisStage,
 	runWorkersStage,
@@ -15,7 +18,7 @@ import {
 import type { WorkerOutput } from "../src/subprocess";
 import * as subprocess from "../src/subprocess";
 import { emptyTco } from "../src/tco";
-import { DEFAULT_OUTPUT_SCHEMA } from "../src/types";
+import { DEFAULT_OUTPUT_SCHEMA, type MoaWorkerResult } from "../src/types";
 
 function makeWorkerOutput(overrides: Partial<WorkerOutput> = {}): WorkerOutput {
 	return {
@@ -25,6 +28,8 @@ function makeWorkerOutput(overrides: Partial<WorkerOutput> = {}): WorkerOutput {
 		exitCode: overrides.exitCode ?? 0,
 		aborted: overrides.aborted ?? false,
 		timedOut: overrides.timedOut ?? false,
+		idleTimedOut: overrides.idleTimedOut,
+		toolBudgetExceeded: overrides.toolBudgetExceeded,
 		stopReason: overrides.stopReason ?? "stop",
 		usage: overrides.usage ?? {
 			input: 0,
@@ -169,11 +174,143 @@ describe("runInputCollectStage (once-right P2)", () => {
 	});
 });
 
+describe("runResearchStage (Phase 7)", () => {
+	afterEach(() => vi.restoreAllMocks());
+
+	it("returns a parsed research_pack for a required-mode task", async () => {
+		vi.spyOn(subprocess, "spawnMoaWorker").mockResolvedValue(
+			makeWorkerOutput({
+				output: JSON.stringify({
+					queries: ["cursor compaction strategy"],
+					sources: [{ claim: "Cursor summarizes", url: "https://docs.cursor.com/x", relevance: "compaction" }],
+					repo_facts: [],
+					gaps: ["Continue TTL unknown"],
+				}),
+			}),
+		);
+		const moaSettings = resolveSettings({ researchMode: "required", workerExecutionMode: "subprocess" });
+		const tco = emptyTco("对比业界压缩策略", "test");
+		const result = await runResearchStage(
+			tco,
+			{ task: tco.task_understanding, settings: moaSettings },
+			baseOptions(moaSettings),
+		);
+		expect(result.pack).not.toBeNull();
+		expect(result.packSource).toBe("json");
+		expect(result.pack?.mode).toBe("required");
+		expect(result.pack?.sources[0]?.url).toBe("https://docs.cursor.com/x");
+		expect(result.results.length).toBeGreaterThanOrEqual(1);
+		expect(result.durationMs).toBeGreaterThanOrEqual(0);
+	});
+
+	it("no-ops (no spawn, null pack) when researchMode=none", async () => {
+		const spy = vi.spyOn(subprocess, "spawnMoaWorker");
+		const moaSettings = resolveSettings({ researchMode: "none", workerExecutionMode: "subprocess" });
+		const tco = emptyTco("修个 typo", "test");
+		const result = await runResearchStage(
+			tco,
+			{ task: tco.task_understanding, settings: moaSettings },
+			baseOptions(moaSettings),
+		);
+		expect(spy).not.toHaveBeenCalled();
+		expect(result.pack).toBeNull();
+		expect(result.packSource).toBeNull();
+	});
+
+	it("salvages a pack when research aborts empty after tool budget", async () => {
+		vi.spyOn(subprocess, "spawnMoaWorker").mockResolvedValue(
+			makeWorkerOutput({
+				ok: false,
+				output: "",
+				stderr: "Request was aborted\n(research tool budget exceeded after 12 tool calls)",
+				toolBudgetExceeded: true,
+				timedOut: true,
+			}),
+		);
+		const moaSettings = resolveSettings({ researchMode: "required", workerExecutionMode: "subprocess" });
+		const tco = emptyTco("对比业界压缩策略", "test");
+		const result = await runResearchStage(
+			tco,
+			{ task: tco.task_understanding, settings: moaSettings },
+			baseOptions(moaSettings),
+		);
+		expect(result.pack).not.toBeNull();
+		expect(result.packSource).toBe("salvage");
+		expect(result.pack?.parse_source).toBe("salvage");
+		expect(result.pack?.gaps.join(" ")).toMatch(/budget|interrupted|web_search/i);
+	});
+});
+
+describe("buildDegradedSynthesis (Phase 7 — never empty)", () => {
+	it("produces non-empty content from research_pack + assumptions + partial workers", () => {
+		const tco = emptyTco("对比业界压缩策略", "test");
+		tco.research_pack = {
+			mode: "required",
+			gathered_at: "2026-07-17T00:00:00.000Z",
+			queries: ["q"],
+			sources: [{ claim: "Cursor summarizes middle", url: "https://docs.cursor.com/x", relevance: "compaction" }],
+			repo_facts: ["omp uses RotatingFileTransport"],
+			gaps: ["Continue TTL unknown"],
+		};
+		tco.assumptions.push({ key: "budget", value: 3, reason: "user_skipped" });
+		const workers: MoaWorkerResult[] = [
+			{
+				name: "divergent",
+				role: "r",
+				ok: false,
+				output: "## plan\n部分方案草稿…",
+				stderr: "timed out after 300s",
+				exitCode: null,
+			},
+		];
+		const synth = buildDegradedSynthesis(tco, workers);
+		expect(synth.name).toBe("synthesis");
+		expect(synth.ok).toBe(false);
+		// crucially non-empty and actionable
+		expect(synth.output.length).toBeGreaterThan(0);
+		expect(synth.output).toContain("https://docs.cursor.com/x");
+		expect(synth.output).toContain("RotatingFileTransport");
+		expect(synth.output).toContain("Continue TTL unknown");
+		expect(synth.output).toContain("部分方案草稿");
+		expect(synth.output).toMatch(/缩小范围|narrow|重跑|rerun/i);
+	});
+
+	it("still yields content when there is no research_pack but partial worker output exists", () => {
+		const tco = emptyTco("t", "test");
+		const workers: MoaWorkerResult[] = [
+			{ name: "grounded", role: "r", ok: false, output: "## plan\n仅有的半成品", stderr: "", exitCode: null },
+		];
+		const synth = buildDegradedSynthesis(tco, workers);
+		expect(synth.output).toContain("仅有的半成品");
+	});
+});
+
+describe("restrictPlanWorkerTools (Phase 7)", () => {
+	it("removes web_search when research already ran (non-none mode)", () => {
+		const out = restrictPlanWorkerTools(["read", "search", "web_search", "ast_grep"], "required");
+		expect(out).not.toContain("web_search");
+		expect(out).toEqual(["read", "search", "ast_grep"]);
+	});
+	it("leaves tools untouched for none mode", () => {
+		const out = restrictPlanWorkerTools(["read", "web_search"], "none");
+		expect(out).toEqual(["read", "web_search"]);
+	});
+	it("expands 'all' to the read-only set without web_search in research modes", () => {
+		const out = restrictPlanWorkerTools("all", "required");
+		expect(out).not.toBe("all");
+		expect(Array.isArray(out) && !out.includes("web_search")).toBe(true);
+		expect(Array.isArray(out) && out.includes("read")).toBe(true);
+	});
+	it("passes 'all' through unchanged for none mode", () => {
+		expect(restrictPlanWorkerTools("all", "none")).toBe("all");
+	});
+});
+
 describe("runAskStage", () => {
 	afterEach(() => vi.restoreAllMocks());
 
 	it("fills assumptions when hasUI=false", async () => {
-		const moaSettings = resolveSettings({ askEnabled: true, workerExecutionMode: "subprocess" });
+		const moaSettings = resolveSettings({ askEnabled: true, askStrategy: "form", workerExecutionMode: "subprocess" });
 		const tco = emptyTco("ask me", "test");
 		tco.missing_inputs.push({
 			key: "budget",
@@ -186,6 +323,31 @@ describe("runAskStage", () => {
 		expect(result.askSummary.assumed).toBe(1);
 		expect(result.askSummary.answered).toBe(0);
 		expect(tco.assumptions.some(a => a.key === "budget")).toBe(true);
+	});
+
+	it("filters definition-style missing before form ask", async () => {
+		const moaSettings = resolveSettings({ askEnabled: true, askStrategy: "form", workerExecutionMode: "subprocess" });
+		const tco = emptyTco("compare tools", "test");
+		tco.missing_inputs.push(
+			{
+				key: "what_is_x",
+				question: "workbuddy 在本项目具体指什么？",
+				type: "text",
+				required: true,
+				why_critical: "def",
+			},
+			{
+				key: "dims",
+				question: "对比维度？",
+				type: "text",
+				required: true,
+				why_critical: "decision",
+			},
+		);
+		await runAskStage(tco, { task: "compare tools", settings: moaSettings }, baseOptions(moaSettings));
+		expect(tco.missing_inputs.map(m => m.key)).toEqual(["dims"]);
+		expect(tco.assumptions.some(a => a.key === "dims")).toBe(true);
+		expect(tco.assumptions.some(a => a.key === "what_is_x")).toBe(false);
 	});
 });
 
@@ -224,6 +386,33 @@ describe("runRewriteStage", () => {
 		expect(result.workers.find(w => w.name === "divergent")?.prompt).toContain("divergent prompt");
 		expect(result.workers.find(w => w.name === "grounded")?.prompt).toContain("grounded prompt");
 		expect(result.workers.find(w => w.name === "critical")?.prompt).toContain("critical prompt");
+		expect(result.fallbackUsed).toBe(false);
+	});
+
+	it("marks fallbackUsed when output is ok but sections do not match worker names", async () => {
+		vi.spyOn(subprocess, "spawnMoaWorker").mockResolvedValue(
+			makeWorkerOutput({
+				output: "## not_a_worker\nsome freeform rewrite that cannot be applied",
+			}),
+		);
+		const moaSettings = resolveSettings({
+			discoveryEnabled: false,
+			rewriteEnabled: true,
+			workerExecutionMode: "subprocess",
+		});
+		const plan = buildPlan("rewrite fallback", moaSettings);
+		const original = plan.workers.map(w => w.prompt);
+		const result = await runRewriteStage(
+			emptyTco(plan.task, "test"),
+			plan,
+			{ task: plan.task, settings: moaSettings },
+			baseOptions(moaSettings),
+			DEFAULT_OUTPUT_SCHEMA,
+		);
+		expect(result.fallbackUsed).toBe(true);
+		expect(result.result?.ok).toBe(true);
+		expect(result.result?.stderr).toMatch(/fallback|unparsed|original/i);
+		expect(result.workers.map(w => w.prompt)).toEqual(original);
 	});
 });
 

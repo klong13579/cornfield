@@ -1,17 +1,16 @@
 import { mergeMissingInputs } from "./merge-missing";
 import { rebindWorkerPrompts } from "./planner";
+import { enrichSchemaWithSources, renderResearchGuidance, resolveResearchMode } from "./research-mode";
 import {
-	enrichSchemaWithSources,
-	renderResearchGuidance,
-	resolveResearchMode,
-} from "./research-mode";
-import {
+	buildDegradedSynthesis,
 	type ExecutePlanOptions,
+	hasSalvageableMaterial,
 	qualityFailedSynthesis,
 	resolvePlanOptions,
 	runAskStage,
 	runDiscoveryStage,
 	runInputCollectStage,
+	runResearchStage,
 	runRewriteStage,
 	runSynthesisStage,
 	runWorkersStage,
@@ -20,6 +19,7 @@ import { formatMoaStatusBar, type MoaStatusBarInput } from "./status-bar";
 import { createWorkerStreamSink } from "./stream-ui";
 import { renderTcoForPrompt } from "./tco";
 import { formatDuration, formatTimingSummary, StageClock } from "./timing";
+import { formatPreWorkerAskNotify } from "./trace";
 import type { MoaExecutionResult, MoaPlan } from "./types";
 
 export type { ExecutePlanOptions } from "./stages";
@@ -97,7 +97,7 @@ export async function executePlan(plan: MoaPlan, options: ExecutePlanOptions): P
 	// Once-right P5: TUI worker streaming sink (setWidget). No-op without UI.
 	const streamSink =
 		hasUI && ui && typeof (ui as { setWidget?: unknown }).setWidget === "function"
-			? createWorkerStreamSink(ui as { setWidget: (k: string, c: string[] | undefined) => void })
+			? createWorkerStreamSink(ui)
 			: undefined;
 
 	const discoveryLive = startLiveStage({
@@ -156,7 +156,45 @@ export async function executePlan(plan: MoaPlan, options: ExecutePlanOptions): P
 		);
 	}
 
-	const preAskTotal = Math.max(1, tco.missing_inputs.length);
+	// Research stage: run BEFORE Ask when researchMode ≠ none so grill-me can
+	// use the evidence pack (and plan workers share one search). No-op for none.
+	if (researchMode !== "none") {
+		const researchLive = startLiveStage({
+			clock,
+			key: "research",
+			hasUI,
+			workingBase: "MOA: 调研阶段 — 集中检索证据…",
+			statusBase: { round: 1, maxRounds: effectiveMaxRounds || 1, phase: "rewrite" },
+			setWorking,
+			setMoaStatus,
+		});
+		const research = await runResearchStage(tco, stageCtx, options);
+		const researchMs = researchLive.stop();
+		const researchWorker = research.results[0];
+		if (research.pack) {
+			tco.research_pack = research.pack;
+			const parseNote = research.packSource ? ` · parse=${research.packSource}` : "";
+			notify(
+				"调研完成 ✓ 收集 " +
+					research.pack.sources.length +
+					" 条来源，" +
+					research.pack.repo_facts.length +
+					" 条仓库事实，" +
+					research.pack.gaps.length +
+					" 项待假设" +
+					parseNote +
+					" · " +
+					formatDuration(researchMs),
+			);
+		} else {
+			const detail = researchWorker?.stderr?.trim()
+				? `（${researchWorker.stderr.trim().slice(0, 120)}）`
+				: "";
+			notify("调研未产出可用证据，worker 将自行判断" + detail + " · " + formatDuration(researchMs), "warning");
+		}
+	}
+
+	const preAskTotal = Math.max(1, tco.missing_inputs.length || planOptions.settings.grillMaxQuestions);
 	const askLive = startLiveStage({
 		clock,
 		key: "ask",
@@ -179,11 +217,6 @@ export async function executePlan(plan: MoaPlan, options: ExecutePlanOptions): P
 	});
 	const askMs = askLive.stop();
 	const askSummary = ask.askSummary;
-	if (askSummary.answered > 0) {
-		notify(
-			"已确认 " + askSummary.answered + " 项，" + askSummary.assumed + " 项使用假设值 · " + formatDuration(askMs),
-		);
-	}
 
 	const schemaAwarePlan: MoaPlan = {
 		...plan,
@@ -206,7 +239,15 @@ export async function executePlan(plan: MoaPlan, options: ExecutePlanOptions): P
 	const rewriteMs = rewriteLive.stop();
 	const rewriteResult = rewrite.result;
 	const baseWorkers = rewrite.workers.length > 0 ? rewrite.workers : schemaAwarePlan.workers;
-	if (rewriteResult?.ok) {
+	if (rewrite.fallbackUsed && planOptions.settings.rewriteEnabled) {
+		notify(
+			"改写无法解析，已回退到原始 worker 提示" +
+				(rewriteResult?.stderr ? `（${rewriteResult.stderr.slice(0, 120)}）` : "") +
+				" · " +
+				formatDuration(rewriteMs),
+			"warning",
+		);
+	} else if (rewriteResult?.ok) {
 		notify("改写完成 ✓ 已定制 " + baseWorkers.length + " 个 worker 提示 · " + formatDuration(rewriteMs));
 	} else if (rewriteResult && !rewriteResult.ok && planOptions.settings.rewriteEnabled) {
 		notify(
@@ -221,6 +262,11 @@ export async function executePlan(plan: MoaPlan, options: ExecutePlanOptions): P
 	}
 
 	let roundAskLive: LiveStageHandle | undefined;
+
+	if (planOptions.settings.askEnabled && hasUI && askSummary.asked > 0) {
+		const level = askSummary.timedOut > 0 ? "warning" : undefined;
+		notify(`${formatPreWorkerAskNotify(tco, askSummary)} · ${formatDuration(askMs)}`, level);
+	}
 
 	const workersResult = await runWorkersStage({
 		plan: schemaAwarePlan,
@@ -302,8 +348,31 @@ export async function executePlan(plan: MoaPlan, options: ExecutePlanOptions): P
 		return { ...result, timings };
 	};
 
-	if (workersResult.surviving.length === 0) {
+	// Phase 7 resilience: run synthesis when enough workers survived. Below the
+	// threshold we degrade rather than fail empty — as long as we have ANY
+	// usable material (a research_pack or partial worker output), emit a
+	// deterministic degraded report so the user never gets nothing back.
+	const minSurvivors = planOptions.settings.synthesisMinSurvivors;
+	const hasSalvage = hasSalvageableMaterial(workersResult.tco, workersResult.workers);
+	if (workersResult.surviving.length < minSurvivors) {
 		clearMoaStatus();
+		if (hasSalvage) {
+			notify("MOA 降级：存活 worker 不足，输出已收集证据 + 半成品，请缩小范围重跑", "warning");
+			return finishWithTimings({
+				plan: finalPlan,
+				tco: workersResult.tco,
+				askSummary,
+				discovery: discoveryResult,
+				rewrite: rewriteResult,
+				workers: workersResult.workers,
+				synthesis: buildDegradedSynthesis(workersResult.tco, workersResult.workers),
+				outputSchema,
+				rounds: workersResult.rounds,
+				askRoundSummaries: workersResult.askRoundSummaries,
+				dispatchLog: workersResult.dispatchLog,
+				researchMode,
+			});
+		}
 		notify("MOA 失败：全部 worker 未通过质量检查", "error");
 		return finishWithTimings({
 			plan: finalPlan,

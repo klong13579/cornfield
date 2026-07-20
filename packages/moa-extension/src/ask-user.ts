@@ -4,7 +4,7 @@
  * Two paths:
  *   1. TUI mode (hasUI): use `ctx.ui.input()` / `ctx.ui.select()` to ask
  *      one focused question per missing input, sequentially. Each ask has
- *      a per-input timeout (default 30s). On timeout or empty answer, the
+ *      a per-input timeout (default 5 min). On timeout or empty answer, the
  *      input is recorded as an `assumptions` entry with `reason` =
  *      `user_skipped` (or `user_skipped_required` if `required=true`).
  *   2. Non-TUI mode (gateway / cron / batch): skip the ask entirely,
@@ -19,10 +19,20 @@
 
 import type { ExtensionUIContext } from "@oh-my-pi/pi-coding-agent";
 import type { TaskContextObject, TcoAssumption, TcoMissingInput } from "./tco";
+import { TCO_ASK_TIMEOUT_MS_DEFAULT } from "./tco";
 
 export interface AskUserContext {
 	ui: ExtensionUIContext;
 	hasUI: boolean;
+}
+
+export interface AskUserItemEvent {
+	index: number;
+	total: number;
+	key: string;
+	question: string;
+	kind: "answered" | "skipped" | "timeout";
+	value?: string | number | boolean | string[];
 }
 
 export interface AskUserOptions {
@@ -31,6 +41,8 @@ export interface AskUserOptions {
 	enabled?: boolean;
 	/** Called before each question so the orchestrator can update the status bar. */
 	onProgress?: (info: { index: number; total: number }) => void;
+	/** Called after each question resolves (answer / skip / timeout). */
+	onItemComplete?: (event: AskUserItemEvent) => void;
 }
 
 export interface AskUserResult {
@@ -41,7 +53,7 @@ export interface AskUserResult {
 	timedOut: number;
 }
 
-const DEFAULT_TIMEOUT_MS = 30_000;
+const DEFAULT_TIMEOUT_MS = TCO_ASK_TIMEOUT_MS_DEFAULT;
 
 export async function askMissingInputs(
 	tco: TaskContextObject,
@@ -77,13 +89,35 @@ export async function askMissingInputs(
 		if (result.kind === "answered") {
 			answered += 1;
 			tco.known_inputs.push({ key: m.key, value: result.value, source: "user" });
+			options.onItemComplete?.({
+				index: i + 1,
+				total,
+				key: m.key,
+				question: m.question,
+				kind: "answered",
+				value: result.value,
+			});
 		} else if (result.kind === "timeout") {
 			timedOut += 1;
 			assumed += 1;
 			tco.assumptions.push(buildAssumption(m, m.required ? "user_skipped_required" : "user_skipped", "timed out"));
+			options.onItemComplete?.({
+				index: i + 1,
+				total,
+				key: m.key,
+				question: m.question,
+				kind: "timeout",
+			});
 		} else {
 			assumed += 1;
 			tco.assumptions.push(buildAssumption(m, m.required ? "user_skipped_required" : "user_skipped"));
+			options.onItemComplete?.({
+				index: i + 1,
+				total,
+				key: m.key,
+				question: m.question,
+				kind: "skipped",
+			});
 		}
 	}
 	return { tco, asked, answered, assumed, timedOut };

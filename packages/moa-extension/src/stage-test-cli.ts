@@ -3,8 +3,10 @@
  */
 import * as path from "node:path";
 import { requireArtifacts, type LoadedStageRun, type StageName } from "./stage-artifacts";
+import type { MoaResearchModeSetting } from "./types";
 
-const STAGES = new Set<StageName>(["all", "discovery", "ask", "rewrite", "workers", "synthesis"]);
+const STAGES = new Set<StageName>(["all", "discovery", "ask", "research", "rewrite", "workers", "synthesis"]);
+const RESEARCH_MODES = new Set<MoaResearchModeSetting>(["auto", "none", "encouraged", "required"]);
 
 export interface StageTestCliArgs {
 	stage: StageName;
@@ -12,6 +14,7 @@ export interface StageTestCliArgs {
 	from?: string;
 	out: string;
 	rounds?: number;
+	research?: MoaResearchModeSetting;
 	continueOnFail: boolean;
 	help: boolean;
 }
@@ -23,11 +26,12 @@ export function stageTestUsage(): string {
 		"MoA stage-test harness",
 		"",
 		"  bun packages/moa-extension/scripts/stage-test.ts \\",
-		"    --stage all|discovery|ask|rewrite|workers|synthesis \\",
+		"    --stage all|discovery|ask|research|rewrite|workers|synthesis \\",
 		"    --task \"...\" \\",
 		"    [--from tmp/moa-stage/<id>] \\",
 		"    [--out tmp/moa-stage] \\",
 		"    [--rounds N] \\",
+		"    [--research auto|none|encouraged|required] \\",
 		"    [--continue-on-fail]",
 		"",
 		"Artifacts are written under <out>/<timestamp>/.",
@@ -60,6 +64,10 @@ export function parseStageTestArgs(argv: string[], cwd: string = process.cwd()):
 			const n = Number(next());
 			if (!Number.isFinite(n)) throw new Error("Invalid --rounds (expected a number)");
 			out.rounds = n;
+		} else if (a === "--research") {
+			const v = next() as MoaResearchModeSetting;
+			if (!RESEARCH_MODES.has(v)) throw new Error(`Invalid --research: ${v} (auto|none|encouraged|required)`);
+			out.research = v;
 		} else if (a === "--continue-on-fail") out.continueOnFail = true;
 		else throw new Error(`Unknown argument: ${a}`);
 	}
@@ -71,7 +79,8 @@ export function resolveStageTestTask(args: StageTestCliArgs, prior: LoadedStageR
 }
 
 export function planStageSequence(stage: StageName): AtomicStage[] {
-	if (stage === "all") return ["discovery", "ask", "rewrite", "workers", "synthesis"];
+	// Research runs before Ask when researchMode ≠ none (matches executePlan).
+	if (stage === "all") return ["discovery", "research", "ask", "rewrite", "workers", "synthesis"];
 	return [stage];
 }
 
@@ -104,7 +113,7 @@ export function validateStagePrerequisites(input: StagePrerequisiteInput): Stage
 		};
 	}
 
-	const needsTco = stage === "rewrite" || stage === "workers" || stage === "ask";
+	const needsTco = stage === "rewrite" || stage === "workers" || stage === "ask" || stage === "research";
 	if (needsTco && !hasTco) {
 		if (stage === "ask") {
 			// ask may auto-run discovery when no --from; only require artifacts when --from is set
@@ -128,7 +137,9 @@ export function validateStagePrerequisites(input: StagePrerequisiteInput): Stage
 				message:
 					stage === "rewrite"
 						? "rewrite needs --from with tco.json or run discovery first via --stage all"
-						: "workers needs --from with tco.json",
+						: stage === "research"
+							? "research needs --from with tco.json"
+							: "workers needs --from with tco.json",
 			};
 		}
 		if (fromDir) {

@@ -16,6 +16,68 @@ describe("DEFAULT_SETTINGS (PR2 multi-round)", () => {
 		expect(DEFAULT_SETTINGS.researchMode).toBe("auto");
 		expect(resolveSettings().researchMode).toBe("auto");
 		expect(resolveSettings({ researchMode: "required" }).researchMode).toBe("required");
+		expect(DEFAULT_SETTINGS.askStrategy).toBe("grill-me");
+		expect(resolveSettings().askStrategy).toBe("grill-me");
+		expect(resolveSettings({ askStrategy: "form" }).askStrategy).toBe("form");
+		expect(DEFAULT_SETTINGS.grillMaxQuestions).toBe(5);
+		expect(resolveSettings({ maxQuestionsPerRound: 3 }).grillMaxQuestions).toBe(3);
+	});
+});
+
+describe("resolveSettings — staged timeouts (Phase 7)", () => {
+	it("derives per-stage timeouts from timeoutMs when unset", () => {
+		const s = resolveSettings({ timeoutMs: 300_000 });
+		// research gets a 15-min floor for open tasks
+		expect(s.researchTimeoutMs).toBe(900_000);
+		// plan workers get an 8-min floor (was inheriting 5-min timeoutMs and timing out)
+		expect(s.workerTimeoutMs).toBe(480_000);
+		expect(s.synthesisTimeoutMs).toBe(300_000);
+		expect(s.workerIdleTimeoutMs).toBe(120_000);
+		expect(s.synthesisMinSurvivors).toBe(1);
+		expect(s.researchMaxQueries).toBe(6);
+		expect(s.researchMaxToolRounds).toBe(12);
+	});
+
+	it("keeps a higher configured timeoutMs as the research + worker floor", () => {
+		const s = resolveSettings({ timeoutMs: 1_200_000 });
+		expect(s.researchTimeoutMs).toBe(1_200_000);
+		expect(s.workerTimeoutMs).toBe(1_200_000);
+	});
+
+	it("honours explicit per-stage overrides", () => {
+		const s = resolveSettings({
+			timeoutMs: 300_000,
+			researchTimeoutMs: 600_000,
+			workerTimeoutMs: 300_000,
+			synthesisTimeoutMs: 200_000,
+			workerIdleTimeoutMs: 90_000,
+			synthesisMinSurvivors: 2,
+			researchMaxQueries: 4,
+			researchMaxToolRounds: 8,
+		});
+		expect(s.researchTimeoutMs).toBe(600_000);
+		expect(s.workerTimeoutMs).toBe(300_000);
+		expect(s.synthesisTimeoutMs).toBe(200_000);
+		expect(s.workerIdleTimeoutMs).toBe(90_000);
+		expect(s.synthesisMinSurvivors).toBe(2);
+		expect(s.researchMaxQueries).toBe(4);
+		expect(s.researchMaxToolRounds).toBe(8);
+	});
+
+	it("clamps negative / fractional stage timeouts", () => {
+		const s = resolveSettings({
+			workerTimeoutMs: -5,
+			workerIdleTimeoutMs: 12.9,
+			synthesisMinSurvivors: -3,
+			researchMaxQueries: 0,
+			researchMaxToolRounds: -1,
+		});
+		expect(s.workerTimeoutMs).toBe(0);
+		expect(s.workerIdleTimeoutMs).toBe(12);
+		// min survivors floored at 1
+		expect(s.synthesisMinSurvivors).toBe(1);
+		expect(s.researchMaxQueries).toBe(1);
+		expect(s.researchMaxToolRounds).toBe(0);
 	});
 });
 

@@ -88,6 +88,39 @@ describe("askMissingInputs", () => {
 		expect(tco.known_inputs[0]?.source).toBe("user");
 	});
 
+	it("fires onItemComplete for answered and timeout events", async () => {
+		const answeredTco = makeTco([{ key: "a" }]);
+		const ui = makeNoopUI();
+		ui.input.mockResolvedValueOnce("hello");
+		const events: Array<{ key: string; kind: string }> = [];
+		await askMissingInputs(
+			answeredTco,
+			{ ui: ui as never, hasUI: true },
+			{ onItemComplete: e => events.push({ key: e.key, kind: e.kind }) },
+		);
+		expect(events).toEqual([{ key: "a", kind: "answered" }]);
+
+		const timeoutTco = makeTco([{ key: "b" }]);
+		ui.input.mockImplementationOnce(() => new Promise(() => {}));
+		const pending = askMissingInputs(
+			timeoutTco,
+			{ ui: ui as never, hasUI: true },
+			{
+				timeoutMs: 50,
+				onItemComplete: e => events.push({ key: e.key, kind: e.kind }),
+			},
+		);
+		vi.advanceTimersByTime(60);
+		await Promise.resolve();
+		await Promise.resolve();
+		const result = await pending;
+		expect(result.timedOut).toBe(1);
+		expect(events).toEqual([
+			{ key: "a", kind: "answered" },
+			{ key: "b", kind: "timeout" },
+		]);
+	});
+
 	it("parses number type", async () => {
 		const tco = makeTco([{ key: "budget", type: "number" }]);
 		const ui = makeNoopUI();

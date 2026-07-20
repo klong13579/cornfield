@@ -8,7 +8,9 @@ import {
 	type Settings,
 } from "@oh-my-pi/pi-coding-agent";
 import { untilAborted } from "@oh-my-pi/pi-utils";
+import { createActivityTimeout } from "./activity-timeout";
 import { type SpawnWorkerInput, spawnMoaWorker, type WorkerOutput } from "./subprocess";
+import { createWebSearchToolBudget, RESEARCH_SOFT_ABORT_MS } from "./tool-budget";
 import type { MoaWorkerExecutionMode } from "./types";
 
 // ----------------------------------------------------------------------------
@@ -64,7 +66,24 @@ class SubprocessWorkerEngine implements MoaWorkerEngine {
  * `toolNames` so the "in-process = read-only" contract from
  * `extension.ts:status note` holds. Subprocess mode is unchanged.
  */
-const IN_PROCESS_TOOLS = ["read", "search", "find", "web_search", "ast_grep"] as const;
+export const IN_PROCESS_TOOLS = ["read", "search", "find", "web_search", "ast_grep"] as const;
+
+const IN_PROCESS_TOOL_SET: ReadonlySet<string> = new Set(IN_PROCESS_TOOLS);
+
+/**
+ * Resolve the in-process tool allow-list.
+ *
+ * - `"none"` → ephemeral (no tools)
+ * - `"all"` → full `IN_PROCESS_TOOLS` (read-only ceiling)
+ * - explicit list → **intersection** with `IN_PROCESS_TOOLS` (never escalate;
+ *   also never re-add tools the caller deliberately omitted — e.g. Phase 7
+ *   strips `web_search` after the Research stage)
+ */
+export function resolveInProcessToolNames(tools: SpawnWorkerInput["tools"]): string[] {
+	if (tools === "none") return [];
+	if (tools === "all" || tools === undefined) return [...IN_PROCESS_TOOLS];
+	return tools.filter(t => IN_PROCESS_TOOL_SET.has(t));
+}
 
 const DISPOSE_TIMEOUT_MS = 5_000;
 
@@ -79,10 +98,12 @@ class InProcessWorkerEngine implements MoaWorkerEngine {
 		const startTime = Date.now();
 		const timeoutMs = input.timeoutMs ?? 10 * 60_000;
 
-		// Merge external signal with an internal timeout controller.
+		// Merge external signal with hard + idle timeout controllers.
 		const abortController = new AbortController();
 		let timedOut = false;
-		let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+		let idleTimedOut = false;
+		let toolBudgetExceeded = false;
+		let toolBudget: ReturnType<typeof createWebSearchToolBudget> | undefined;
 
 		if (input.signal) {
 			if (input.signal.aborted) {
@@ -92,26 +113,41 @@ class InProcessWorkerEngine implements MoaWorkerEngine {
 			}
 		}
 
-		timeoutHandle = setTimeout(() => {
-			timedOut = true;
-			try {
-				abortController.abort();
-			} catch {
-				// ignore — abort may already be settled
-			}
-		}, timeoutMs);
+		const activity = createActivityTimeout({
+			timeoutMs,
+			idleTimeoutMs: input.idleTimeoutMs ?? 0,
+			onAbort: () => {
+				timedOut = true;
+				idleTimedOut = activity.idleTimedOut;
+				try {
+					abortController.abort();
+				} catch {
+					// ignore — abort may already be settled
+				}
+			},
+		});
 
 		const signal = abortController.signal;
 
-		// Tool set: enforce read-only contract. `tools: "none"` runs an
-		// ephemeral turn with no tools; `tools: "all"` or a custom list both
-		// collapse to the read-only IN_PROCESS_TOOLS. This is the design
-		// intent of the in-process mode (CHANGELOG: "no extensions/MCP/LSP,
-		// read-only tools only"). Subprocess mode is unaffected.
-		// `ast_grep` was added as the first structural-search tool — it is
-		// pure read-only (AST parse + match), no side effects, no network.
-		const ephemeral = input.tools === "none";
-		const toolNames = ephemeral ? [] : [...IN_PROCESS_TOOLS];
+		// Tool set: enforce read-only ceiling via intersection with
+		// IN_PROCESS_TOOLS. Explicit allow-lists are honored (so Phase 7 can
+		// strip web_search); unknown/side-effect tools are never escalated in.
+		// `tools: "none"` runs an ephemeral turn with no tools.
+		const toolNames = resolveInProcessToolNames(input.tools);
+		const ephemeral = toolNames.length === 0;
+		const maxToolRounds = Math.max(0, Math.floor(input.maxToolRounds ?? 0));
+		toolBudget = createWebSearchToolBudget({
+			maxWebSearches: maxToolRounds,
+			softAbortMs: RESEARCH_SOFT_ABORT_MS,
+			onSoftAbort: () => {
+				toolBudgetExceeded = true;
+				try {
+					abortController.abort();
+				} catch {
+					// ignore
+				}
+			},
+		});
 
 		// Settings isolation: not implemented.
 		// The swarm executor isolates settings via `createSubagentSettings`
@@ -160,6 +196,21 @@ class InProcessWorkerEngine implements MoaWorkerEngine {
 		};
 
 		const eventFilter = (e: { type: string; [k: string]: unknown }) => {
+			activity.bump();
+			if (e.type === "tool_execution_start") {
+				const toolName = typeof e.toolName === "string" ? e.toolName : "";
+				const decision = toolBudget?.onToolStart(toolName) ?? "ok";
+				if (decision === "soft_trip") {
+					toolBudgetExceeded = true;
+				} else if (decision === "hard_abort") {
+					toolBudgetExceeded = true;
+					try {
+						abortController.abort();
+					} catch {
+						// ignore
+					}
+				}
+			}
 			if (e.type === "message_update") {
 				const msg = (e as { message?: AssistantMessage }).message;
 				if (msg && input.onPartial) {
@@ -275,14 +326,24 @@ class InProcessWorkerEngine implements MoaWorkerEngine {
 
 			const output = lastAssistant ? extractText(lastAssistant) : "";
 			const exitCode = resolveExitCode(lastStopReason);
+			let stderr = lastErrorMessage ?? "";
+			if (toolBudgetExceeded) {
+				const note = `research web_search budget exceeded after ${maxToolRounds} searches`;
+				stderr = stderr.trim() ? `${stderr.trim()}\n(${note})` : note;
+			} else if (idleTimedOut) {
+				const note = "idle timeout: no progress";
+				stderr = stderr.trim() ? `${stderr.trim()}\n(${note})` : note;
+			}
 
 			return {
 				ok: output.trim().length > 0,
 				output,
-				stderr: lastErrorMessage ?? "",
+				stderr,
 				exitCode,
 				aborted: signal.aborted,
 				timedOut,
+				idleTimedOut,
+				toolBudgetExceeded,
 				model: lastAssistant?.model,
 				stopReason: lastStopReason,
 				usage,
@@ -297,13 +358,16 @@ class InProcessWorkerEngine implements MoaWorkerEngine {
 				exitCode: null,
 				aborted: signal.aborted,
 				timedOut,
+				idleTimedOut,
+				toolBudgetExceeded,
 				model: input.model,
 				stopReason: "error",
 				usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 0 },
 				durationMs: Date.now() - startTime,
 			};
 		} finally {
-			if (timeoutHandle) clearTimeout(timeoutHandle);
+			toolBudget?.dispose();
+			activity.dispose();
 			if (unsubscribe) {
 				try {
 					unsubscribe();

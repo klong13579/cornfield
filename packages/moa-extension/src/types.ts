@@ -9,6 +9,9 @@ export type ResearchMode = "none" | "encouraged" | "required";
 /** Settings knob; `"auto"` runs the task heuristic. */
 export type MoaResearchModeSetting = ResearchMode | "auto";
 
+/** Pre-Ask UI strategy (see `grill-ask.ts` / `runAskStage`). */
+export type MoaAskStrategy = "grill-me" | "form" | "auto";
+
 export type MoaStage = "discovery" | "rewrite" | "worker" | "synthesis";
 
 export interface MoaWorkerSlot {
@@ -29,7 +32,35 @@ export interface MoaSettings {
 	synthesisModel?: string;
 	synthesisThinking?: string;
 	plannerToolMode: MoaPlannerToolMode;
+	/** Base per-stage timeout. Individual stages derive from this when their
+	 *  own knob is unset (see `researchTimeoutMs` / `workerTimeoutMs` / …). */
 	timeoutMs: number;
+	/**
+	 * Phase 7 staged timeouts. The Research stage is the only place allowed to
+	 * do long web_search fan-out, so it gets its own (larger) budget; plan
+	 * workers only write the plan on top of the shared research_pack and use
+	 * `workerTimeoutMs`. All default-derive from `timeoutMs` in `resolveSettings`.
+	 */
+	researchTimeoutMs: number;
+	workerTimeoutMs: number;
+	synthesisTimeoutMs: number;
+	/** Idle (no-progress) cap for a plan worker. A worker that is still
+	 *  streaming tokens / making tool progress is NOT killed by this; only a
+	 *  truly hung call trips it. 0 disables the idle cap. */
+	workerIdleTimeoutMs: number;
+	/**
+	 * Research budget (Phase 7). Soft guidance for the research prompt
+	 * (`max_queries`) and a soft/hard limit on `web_search` starts only
+	 * (`researchMaxToolRounds`, 0 = unlimited). Non-search tools do not count.
+	 * On exceed: soft window to emit the pack, then abort; empty output is
+	 * salvaged into a stub `research_pack` so TCO is never evidence-less.
+	 */
+	researchMaxQueries: number;
+	researchMaxToolRounds: number;
+	/** Minimum surviving (non-dropped) workers required to run synthesis.
+	 *  Below this, the run degrades (research summary) rather than synthesizing
+	 *  from too little. Floored at 1. */
+	synthesisMinSurvivors: number;
 	resumeContextBytes: number;
 	/** TCO fields. See `docs/moa-input-fulfillment.md` for design. */
 	discoveryModel?: string;
@@ -37,10 +68,18 @@ export interface MoaSettings {
 	rewriteTimeoutMs: number;
 	/** Max items in TCO.missing_inputs (3-5 reasonable). */
 	maxMissingInputs: number;
-	/** Per-input ask timeout in TUI mode. */
+	/** Per-input ask timeout in TUI mode (default 5 minutes). */
 	askTimeoutMs: number;
 	/** When false, skip the TUI ask entirely and assume everything. */
 	askEnabled: boolean;
+	/**
+	 * Pre-Ask strategy. `"grill-me"` (default): one question at a time with
+	 * recommended answers. `"form"`: legacy sequential missing_inputs form.
+	 * `"auto"`: grill for compare/design intents, else form.
+	 */
+	askStrategy: MoaAskStrategy;
+	/** Hard cap on grill-me questions per run (default = maxQuestionsPerRound). */
+	grillMaxQuestions: number;
 	/**
 	 * Once-right B stage. When true (default), a lightweight worker fan-out
 	 * runs BEFORE the single Ask to collect each role's `needed_inputs`

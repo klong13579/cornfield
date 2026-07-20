@@ -6,7 +6,7 @@ import {
 	TCO_MAX_MISSING_INPUTS_DEFAULT,
 	TCO_REWRITE_TIMEOUT_MS_DEFAULT,
 } from "./tco";
-import type { MoaSettings, MoaWorkerSlot } from "./types";
+import type { MoaAskStrategy, MoaSettings, MoaWorkerSlot } from "./types";
 
 const RUNTIME_SETTINGS_ENV = "PI_MOA_SETTINGS_JSON";
 
@@ -67,12 +67,23 @@ export const DEFAULT_SETTINGS: MoaSettings = {
 	synthesisThinking: undefined,
 	plannerToolMode: "read-only",
 	timeoutMs: 300_000,
+	// Phase 7 staged timeouts. Defaults derive from timeoutMs in
+	// resolveSettings; these literals are the "timeoutMs=300_000" baseline.
+	researchTimeoutMs: 900_000,
+	workerTimeoutMs: 480_000,
+	synthesisTimeoutMs: 300_000,
+	workerIdleTimeoutMs: 120_000,
+	synthesisMinSurvivors: 1,
+	researchMaxQueries: 6,
+	researchMaxToolRounds: 12,
 	resumeContextBytes: 8_000,
 	discoveryTimeoutMs: TCO_DISCOVERY_TIMEOUT_MS_DEFAULT,
 	rewriteTimeoutMs: TCO_REWRITE_TIMEOUT_MS_DEFAULT,
 	maxMissingInputs: TCO_MAX_MISSING_INPUTS_DEFAULT,
 	askTimeoutMs: TCO_ASK_TIMEOUT_MS_DEFAULT,
 	askEnabled: true,
+	askStrategy: "grill-me",
+	grillMaxQuestions: 5,
 	inputCollectEnabled: true,
 	tcoInjectMaxBytes: 8_000,
 	// Multi-round (PR2). TUI keeps maxRounds=1 as the documented plan budget;
@@ -172,6 +183,38 @@ export function resolveSettings(overrides: Partial<MoaSettings> = {}): MoaSettin
 		Math.min(100, Math.floor(mergedOverrides.qualityMinScore ?? DEFAULT_SETTINGS.qualityMinScore)),
 	);
 	const workerStaggerMs = Math.max(0, Math.floor(mergedOverrides.workerStaggerMs ?? DEFAULT_SETTINGS.workerStaggerMs));
+	// Staged timeouts (Phase 7): default-derive from timeoutMs when unset.
+	const baseTimeoutMs = Math.max(0, Math.floor(mergedOverrides.timeoutMs ?? DEFAULT_SETTINGS.timeoutMs));
+	const RESEARCH_TIMEOUT_FLOOR_MS = 900_000;
+	const WORKER_TIMEOUT_FLOOR_MS = 480_000;
+	const researchTimeoutMs =
+		mergedOverrides.researchTimeoutMs !== undefined
+			? Math.max(0, Math.floor(mergedOverrides.researchTimeoutMs))
+			: Math.max(baseTimeoutMs, RESEARCH_TIMEOUT_FLOOR_MS);
+	const workerTimeoutMs =
+		mergedOverrides.workerTimeoutMs !== undefined
+			? Math.max(0, Math.floor(mergedOverrides.workerTimeoutMs))
+			: Math.max(baseTimeoutMs, WORKER_TIMEOUT_FLOOR_MS);
+	const synthesisTimeoutMs =
+		mergedOverrides.synthesisTimeoutMs !== undefined
+			? Math.max(0, Math.floor(mergedOverrides.synthesisTimeoutMs))
+			: baseTimeoutMs;
+	const workerIdleTimeoutMs = Math.max(
+		0,
+		Math.floor(mergedOverrides.workerIdleTimeoutMs ?? DEFAULT_SETTINGS.workerIdleTimeoutMs),
+	);
+	const synthesisMinSurvivors = Math.max(
+		1,
+		Math.floor(mergedOverrides.synthesisMinSurvivors ?? DEFAULT_SETTINGS.synthesisMinSurvivors),
+	);
+	const researchMaxQueries = Math.max(
+		1,
+		Math.floor(mergedOverrides.researchMaxQueries ?? DEFAULT_SETTINGS.researchMaxQueries),
+	);
+	const researchMaxToolRounds = Math.max(
+		0,
+		Math.floor(mergedOverrides.researchMaxToolRounds ?? DEFAULT_SETTINGS.researchMaxToolRounds),
+	);
 	// Normalize workerExecutionMode: only valid values pass through.
 	const rawMode = mergedOverrides.workerExecutionMode;
 	const workerExecutionMode: "subprocess" | "in-process" =
@@ -181,10 +224,7 @@ export function resolveSettings(overrides: Partial<MoaSettings> = {}): MoaSettin
 	}
 	const rawResearch = mergedOverrides.researchMode;
 	const researchMode =
-		rawResearch === "auto" ||
-		rawResearch === "none" ||
-		rawResearch === "encouraged" ||
-		rawResearch === "required"
+		rawResearch === "auto" || rawResearch === "none" || rawResearch === "encouraged" || rawResearch === "required"
 			? rawResearch
 			: DEFAULT_SETTINGS.researchMode;
 	if (
@@ -196,6 +236,26 @@ export function resolveSettings(overrides: Partial<MoaSettings> = {}): MoaSettin
 	) {
 		console.warn(`[moa] invalid researchMode: "${String(rawResearch)}"; falling back to "${researchMode}"`);
 	}
+	const rawAskStrategy = mergedOverrides.askStrategy;
+	const askStrategy: MoaAskStrategy =
+		rawAskStrategy === "grill-me" || rawAskStrategy === "form" || rawAskStrategy === "auto"
+			? rawAskStrategy
+			: DEFAULT_SETTINGS.askStrategy;
+	if (
+		rawAskStrategy !== undefined &&
+		rawAskStrategy !== "grill-me" &&
+		rawAskStrategy !== "form" &&
+		rawAskStrategy !== "auto"
+	) {
+		console.warn(`[moa] invalid askStrategy: "${String(rawAskStrategy)}"; falling back to "${askStrategy}"`);
+	}
+	const grillMaxQuestions = Math.max(
+		1,
+		Math.floor(
+			mergedOverrides.grillMaxQuestions ??
+				(maxQuestionsPerRound > 0 ? maxQuestionsPerRound : DEFAULT_SETTINGS.grillMaxQuestions),
+		),
+	);
 	return {
 		...DEFAULT_SETTINGS,
 		...mergedOverrides,
@@ -207,8 +267,17 @@ export function resolveSettings(overrides: Partial<MoaSettings> = {}): MoaSettin
 		maxQuestionsPerRound,
 		qualityMinScore,
 		workerStaggerMs,
+		researchTimeoutMs,
+		workerTimeoutMs,
+		synthesisTimeoutMs,
+		workerIdleTimeoutMs,
+		synthesisMinSurvivors,
+		researchMaxQueries,
+		researchMaxToolRounds,
 		workerExecutionMode,
 		quality: resolveQualitySettings(mergedOverrides.quality),
 		researchMode,
+		askStrategy,
+		grillMaxQuestions,
 	};
 }

@@ -7,7 +7,10 @@ import {
 	normalizeOutputSchema,
 	parseDiscoveryOutput,
 	parseNeededInputs,
+	parseResearchPack,
+	parseResearchPackDetailed,
 	renderTcoForPrompt,
+	salvageResearchPack,
 	validateTco,
 } from "../src/tco";
 import { DEFAULT_OUTPUT_SCHEMA, INPUT_COLLECT_SCHEMA } from "../src/types";
@@ -261,6 +264,135 @@ describe("renderTcoForPrompt", () => {
 		const out = renderTcoForPrompt(big, { maxBytes: 200 });
 		expect(Buffer.byteLength(out, "utf8")).toBeLessThanOrEqual(200);
 		expect(out).toContain("truncated");
+	});
+
+	it("renders research_pack sources / repo_facts / gaps (Phase 7)", () => {
+		const { tco } = parseDiscoveryOutput(
+			JSON.stringify({ task_understanding: "compare compaction", known_inputs: [] }),
+		);
+		tco.research_pack = {
+			mode: "required",
+			gathered_at: "2026-07-17T00:00:00.000Z",
+			queries: ["cursor compaction strategy"],
+			sources: [
+				{ claim: "Cursor summarizes middle turns", url: "https://docs.cursor.com/x", relevance: "compaction" },
+			],
+			repo_facts: ["omp uses RotatingFileTransport"],
+			gaps: ["Continue memory TTL unknown"],
+		};
+		const out = renderTcoForPrompt(tco);
+		expect(out).toContain("Research evidence");
+		expect(out).toContain("https://docs.cursor.com/x");
+		expect(out).toContain("Cursor summarizes middle turns");
+		expect(out).toContain("RotatingFileTransport");
+		expect(out).toContain("Continue memory TTL unknown");
+	});
+});
+
+describe("parseResearchPack (Phase 7)", () => {
+	it("parses a JSON research pack and stamps mode + gathered_at", () => {
+		const raw = JSON.stringify({
+			queries: ["cursor compaction"],
+			sources: [{ claim: "c", url: "https://x.com/a", relevance: "r", confidence: "high" }],
+			repo_facts: ["fact"],
+			gaps: ["gap"],
+		});
+		const pack = parseResearchPack(raw, "required");
+		expect(pack).not.toBeNull();
+		expect(pack?.mode).toBe("required");
+		expect(pack?.gathered_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+		expect(pack?.sources).toHaveLength(1);
+		expect(pack?.sources[0]?.url).toBe("https://x.com/a");
+		expect(pack?.queries).toEqual(["cursor compaction"]);
+	});
+
+	it("drops sources without a real http(s) url", () => {
+		const raw = JSON.stringify({
+			sources: [
+				{ claim: "good", url: "https://ok.com", relevance: "r" },
+				{ claim: "bad", url: "not-a-url", relevance: "r" },
+				{ claim: "empty", relevance: "r" },
+			],
+		});
+		const pack = parseResearchPack(raw, "encouraged");
+		expect(pack?.sources.map(s => s.claim)).toEqual(["good"]);
+	});
+
+	it("returns null when there is no usable evidence at all", () => {
+		expect(parseResearchPack("total garbage no json", "required")).toBeNull();
+		expect(
+			parseResearchPack(JSON.stringify({ queries: [], sources: [], repo_facts: [], gaps: [] }), "required"),
+		).toBeNull();
+	});
+
+	it("keeps a repo-only pack (sources empty but repo_facts present)", () => {
+		const pack = parseResearchPack(JSON.stringify({ repo_facts: ["uses Bun"], gaps: [] }), "encouraged");
+		expect(pack).not.toBeNull();
+		expect(pack?.sources).toEqual([]);
+		expect(pack?.repo_facts).toEqual(["uses Bun"]);
+	});
+
+	it("falls back to markdown ## sources / ## repo_facts / ## gaps when JSON is absent", () => {
+		const raw = [
+			"I gathered evidence below.",
+			"",
+			"## sources",
+			"- claim: Cursor summarizes middle turns | url: https://docs.cursor.com/context | relevance: compaction",
+			"- Cursor uses dynamic context — https://docs.cursor.com/context/dynamic (dynamic files)",
+			"- bad: no url here",
+			"",
+			"## repo_facts",
+			"- omp uses RotatingFileTransport in logger",
+			"",
+			"## gaps",
+			"- Continue memory TTL unknown",
+			"",
+			"## queries",
+			"- cursor compaction strategy",
+		].join("\n");
+		const detailed = parseResearchPackDetailed(raw, "required");
+		expect(detailed.pack).not.toBeNull();
+		expect(detailed.source).toBe("markdown");
+		expect(detailed.pack?.parse_source).toBe("markdown");
+		expect(detailed.pack?.mode).toBe("required");
+		expect(detailed.pack?.sources.length).toBeGreaterThanOrEqual(2);
+		expect(detailed.pack?.sources.some(s => s.url.includes("docs.cursor.com"))).toBe(true);
+		expect(detailed.pack?.repo_facts).toEqual(["omp uses RotatingFileTransport in logger"]);
+		expect(detailed.pack?.gaps).toEqual(["Continue memory TTL unknown"]);
+		expect(detailed.pack?.queries).toEqual(["cursor compaction strategy"]);
+	});
+
+	it("prefers JSON when both JSON and markdown sections are present", () => {
+		const raw = [
+			'{"sources":[{"claim":"from json","url":"https://json.example/a","relevance":"r"}],"repo_facts":[],"gaps":[],"queries":[]}',
+			"",
+			"## sources",
+			"- claim: from md | url: https://md.example/b | relevance: r",
+		].join("\n");
+		const detailed = parseResearchPackDetailed(raw, "encouraged");
+		expect(detailed.source).toBe("json");
+		expect(detailed.pack?.parse_source).toBe("json");
+		expect(detailed.pack?.sources.map(s => s.claim)).toEqual(["from json"]);
+	});
+});
+
+describe("salvageResearchPack (soft-stop finalize)", () => {
+	it("always returns a pack with salvage parse_source and reason gap", () => {
+		const pack = salvageResearchPack("", "required", "research interrupted: web_search budget exceeded");
+		expect(pack).not.toBeNull();
+		expect(pack.parse_source).toBe("salvage");
+		expect(pack.mode).toBe("required");
+		expect(pack.gaps[0]).toMatch(/web_search budget exceeded/);
+		expect(pack.sources).toEqual([]);
+	});
+
+	it("recovers http(s) urls from interrupted output into sources", () => {
+		const raw = "Saw https://docs.cursor.com/context and also (https://code.claude.com/docs/en/memory).";
+		const pack = salvageResearchPack(raw, "encouraged", "research interrupted: timeout");
+		expect(pack.sources.length).toBeGreaterThanOrEqual(2);
+		expect(pack.sources.some(s => s.url.includes("docs.cursor.com"))).toBe(true);
+		expect(pack.sources.some(s => s.url.includes("code.claude.com"))).toBe(true);
+		expect(pack.parse_source).toBe("salvage");
 	});
 });
 

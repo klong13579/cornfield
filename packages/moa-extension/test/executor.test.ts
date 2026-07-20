@@ -464,6 +464,8 @@ describe("moa executePlan — PR2 multi-round", () => {
 		return resolveSettings({
 			discoveryEnabled: false,
 			rewriteEnabled: false,
+			// Form Ask avoids grill LLM spawns that would skew fanout counts.
+			askStrategy: "form",
 			workers: [
 				{ name: "divergent", role: "diverge", model: "provider/divergent" },
 				{ name: "grounded", role: "ground", model: "provider/grounded" },
@@ -805,6 +807,77 @@ describe("moa executePlan — PR2 multi-round", () => {
 		expect(result.dispatchLog).toHaveLength(3);
 	});
 
+	it("Phase 7: research stage runs before ask; attaches research_pack, then workers + synthesis", async () => {
+		const researchJson = JSON.stringify({
+			queries: ["cursor compaction"],
+			sources: [{ claim: "Cursor summarizes middle", url: "https://docs.cursor.com/x", relevance: "compaction" }],
+			repo_facts: ["omp uses RotatingFileTransport"],
+			gaps: ["Continue TTL unknown"],
+		});
+		const spy = mockSpawnMoaWorker([
+			() => makeWorkerOutput({ output: researchJson }), // research
+			input => makeWorkerOutput({ output: conformingOutput(input.model ?? "w1"), model: input.model }),
+			input => makeWorkerOutput({ output: conformingOutput(input.model ?? "w2"), model: input.model }),
+			input => makeWorkerOutput({ output: conformingOutput(input.model ?? "w3"), model: input.model }),
+			() => makeWorkerOutput({ output: "synth ok" }), // synthesis
+		]);
+		const ui = noopUI();
+		const moaSettings = buildThreeWorkerSettings({ researchMode: "required", maxRounds: 0 });
+		const plan = buildPlan("Research topology test", moaSettings);
+		const result = await executePlan(plan, {
+			cwd: "/tmp/moa",
+			authStorage: {} as AuthStorage,
+			modelRegistry: { refresh: async () => {} } as unknown as ModelRegistry,
+			settings: Settings.isolated({}, { cwd: "/tmp/moa" }),
+			moaSettings,
+			ui: ui as never,
+			hasUI: true,
+		});
+		expect(result.researchMode).toBe("required");
+		expect(result.tco?.research_pack?.sources?.[0]?.url).toBe("https://docs.cursor.com/x");
+		// research + 3 workers + synthesis = 5 spawns
+		expect(spy).toHaveBeenCalledTimes(5);
+		expect(result.synthesis?.ok).toBe(true);
+		// Research notify precedes Ask (order: 调研 before any 等待用户 / known from timings keys).
+		expect(result.timings?.research).toBeGreaterThanOrEqual(0);
+		expect(result.timings?.ask).toBeGreaterThanOrEqual(0);
+		const notifyMsgs = ui.notify.mock.calls.map(c => String(c[0]));
+		const researchIdx = notifyMsgs.findIndex(m => /调研完成/.test(m));
+		const askRelated = notifyMsgs.findIndex(m => /改写完成|Worker 完成/.test(m));
+		expect(researchIdx).toBeGreaterThanOrEqual(0);
+		expect(askRelated).toBeGreaterThan(researchIdx);
+	});
+
+	it("Phase 7: all workers fail but research_pack exists → degraded (non-empty) synthesis, not empty fail", async () => {
+		const researchJson = JSON.stringify({
+			sources: [{ claim: "evidence", url: "https://x.com/y", relevance: "r" }],
+			repo_facts: ["fact A"],
+			gaps: ["gap B"],
+		});
+		const spy = mockSpawnMoaWorker([
+			() => makeWorkerOutput({ output: researchJson }), // research
+			() => makeWorkerOutput({ output: "", ok: false, timedOut: true, exitCode: null }),
+			() => makeWorkerOutput({ output: "", ok: false, timedOut: true, exitCode: null }),
+			() => makeWorkerOutput({ output: "", ok: false, timedOut: true, exitCode: null }),
+			() => makeWorkerOutput({ output: "should not run" }), // synthesis must NOT spawn
+		]);
+		const moaSettings = buildThreeWorkerSettings({ researchMode: "required", maxRounds: 0 });
+		const plan = buildPlan("Degraded fallback test", moaSettings);
+		const result = await executePlan(plan, {
+			cwd: "/tmp/moa",
+			authStorage: {} as AuthStorage,
+			modelRegistry: { refresh: async () => {} } as unknown as ModelRegistry,
+			settings: Settings.isolated({}, { cwd: "/tmp/moa" }),
+			moaSettings,
+		});
+		// research + 3 workers = 4 spawns; degraded synthesis is deterministic (no spawn)
+		expect(spy).toHaveBeenCalledTimes(4);
+		expect(result.synthesis?.ok).toBe(false);
+		expect(result.synthesis?.output.length).toBeGreaterThan(0);
+		expect(result.synthesis?.output).toContain("https://x.com/y");
+		expect(result.synthesis?.stderr).toContain("degraded");
+	});
+
 	it("hasUI=true with maxRounds=0 falls back to single-round (defensive)", async () => {
 		const spy = mockSpawnMoaWorker([
 			input => makeWorkerOutput({ output: conformingOutput(input.model ?? "w1"), model: input.model }),
@@ -812,7 +885,7 @@ describe("moa executePlan — PR2 multi-round", () => {
 			input => makeWorkerOutput({ output: conformingOutput(input.model ?? "w3"), model: input.model }),
 			input => makeWorkerOutput({ output: "synth ok", model: input.model }),
 		]);
-		const moaSettings = resolveSettings({ ...buildThreeWorkerSettings(), maxRounds: 0 });
+		const moaSettings = resolveSettings({ ...buildThreeWorkerSettings(), maxRounds: 0, askStrategy: "form" });
 		const plan = buildPlan("Single via maxRounds=0", moaSettings);
 		const result = await executePlan(plan, {
 			cwd: "/tmp/moa",
@@ -974,7 +1047,7 @@ describe("moa executePlan — PR2 multi-round", () => {
 			input => makeWorkerOutput({ output: "merged plan", model: input.model }),
 		]);
 		const ui = noopUI();
-		const moaSettings = buildThreeWorkerSettings();
+		const moaSettings = buildThreeWorkerSettings({ askStrategy: "form" });
 		const plan = buildPlan("Timing test", moaSettings);
 		const result = await executePlan(plan, {
 			cwd: "/tmp/moa",
@@ -1049,6 +1122,7 @@ describe("moa executePlan — once-right A∪B (P2 gate)", () => {
 			discoveryEnabled: true,
 			rewriteEnabled: false,
 			inputCollectEnabled: true,
+			askStrategy: "form",
 			workers: [
 				{ name: "divergent", role: "diverge", model: "provider/divergent" },
 				{ name: "grounded", role: "ground", model: "provider/grounded" },

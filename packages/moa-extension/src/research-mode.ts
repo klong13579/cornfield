@@ -1,6 +1,7 @@
 import type { MoaOutputSchema, MoaOutputSchemaSection, MoaResearchModeSetting, ResearchMode } from "./types";
 
 export type { MoaResearchModeSetting, ResearchMode };
+
 const SOURCES_SECTION: MoaOutputSchemaSection = {
 	name: "sources",
 	required: false,
@@ -10,7 +11,7 @@ const SOURCES_SECTION: MoaOutputSchemaSection = {
 
 /** Explicit external-research cues → required. */
 const REQUIRED_CUES =
-	/(?:业界|竞品|论文|开源方案|参考方案|industry\s+(?:practice|best)|best\s+practices|survey\s+(?:the|of)|compare\s+(?:papers|approaches)|research\s+(?:papers|literature)|look\s+up\s+(?:how|what)|调研)/i;
+	/(?:业界|竞品|论文|开源方案|参考方案|区别|对比|相比较|竞品对比|比起|versus|\bvs\.?\b|industry\s+(?:practice|best)|best\s+practices|survey\s+(?:the|of)|compare\s+(?:papers|approaches)|research\s+(?:papers|literature)|look\s+up\s+(?:how|what)|调研)/i;
 
 /** Open architecture / tradeoff cues → encouraged (unless required wins). */
 const ENCOURAGED_CUES =
@@ -40,34 +41,30 @@ export function resolveResearchMode(task: string, setting: MoaResearchModeSettin
 }
 
 /**
- * Prompt block injected into worker / rewrite templates. Empty for `none`.
+ * Prompt block injected into plan-worker / rewrite templates. Empty for `none`.
+ *
+ * Phase 7: a dedicated Research stage runs BEFORE the plan workers and gathers
+ * all external evidence into a `research_pack` (rendered in the injected task
+ * context under `### Research evidence`). Plan workers therefore do NOT call
+ * `web_search` themselves — that tool is stripped from their tool set. This
+ * guidance tells them to build on the provided evidence and cite from it.
  */
 export function renderResearchGuidance(mode: ResearchMode): string {
 	if (mode === "none") return "";
-	if (mode === "required") {
-		return [
-			"## Research guidance (REQUIRED)",
-			"- You MUST call `web_search` at least once before finishing.",
-			"- Emit a `## sources` section with bullets shaped",
-			"  `claim: … | url: https://… | relevance: …`.",
-			"- Do NOT cite URLs from memory — only URLs returned by tools",
-			"  (`web_search` / `read` of fetched pages). Mark unbacked claims",
-			"  `[unverified]`.",
-			"- Prefer tool-backed external evidence for architecture choices;",
-			"  repo-local evidence still belongs in the plan body.",
-		].join("\n");
-	}
+	const strictness = mode === "required" ? "## Research guidance (REQUIRED)" : "## Research guidance (encouraged)";
 	return [
-		"## Research guidance (encouraged)",
-		"- For open / architecture claims, prefer calling `web_search`",
-		"  (or reading fetched pages) before asserting industry practice.",
-		"- When you use external evidence, cite it under `## sources` as",
-		"  `claim: … | url: https://… | relevance: …`.",
-		"- Do not invent URLs from memory. If you cannot verify, tag the",
-		"  claim `[unverified]` and skip a fake source.",
-		"- Role split: divergent → external architectures; grounded → repo",
-		"  constraints first; critical → failure modes (cite when claiming",
-		"  known industry pitfalls).",
+		strictness,
+		"- A separate research stage already gathered evidence for you — see the",
+		"  `### Research evidence` block in the task context above. Build on it.",
+		"- Do NOT call `web_search` yourself (it has been disabled for this role);",
+		"  the evidence has already been collected. You may still `read`/`search`",
+		"  the repo for local facts.",
+		"- Emit a `## sources` section citing the evidence you actually relied on,",
+		"  shaped `claim: … | url: https://… | relevance: …`. Only reuse URLs from",
+		"  the provided research evidence — do NOT invent URLs from memory.",
+		"- If the provided evidence is insufficient for a claim, record the gap in",
+		"  `## assumptions` (do not fabricate a source). Mark unbacked claims",
+		"  `[unverified]`.",
 	].join("\n");
 }
 
@@ -119,4 +116,17 @@ export function applyResearchSourcesPenalty(
 	if (hasToolBackedSources(sourcesText)) return score;
 	if (mode === "required") return Math.min(score, 60);
 	return Math.max(0, score - 10);
+}
+
+/** Research runs often call web_search; raise the floor to 10 minutes. */
+export const RESEARCH_WORKER_TIMEOUT_FLOOR_MS = 600_000;
+
+/**
+ * Effective per-worker timeout. Research modes never go below 10 minutes
+ * unless the user already configured a higher `timeoutMs`.
+ */
+export function resolveWorkerTimeoutMs(configuredTimeoutMs: number, mode: ResearchMode): number {
+	const base = Math.max(0, Math.floor(configuredTimeoutMs));
+	if (mode === "none") return base;
+	return Math.max(base, RESEARCH_WORKER_TIMEOUT_FLOOR_MS);
 }

@@ -9,6 +9,7 @@ import {
 	chunkUtf8,
 	createMoaRunId,
 	formatDispatchQuality,
+	formatPreWorkerAskNotify,
 	listMoaArchiveRuns,
 	reconstructMoaArchive,
 } from "../src/trace";
@@ -408,7 +409,66 @@ describe("buildMoaHandoff — assumptions summary (once-right P4)", () => {
 			},
 		});
 		expect(handoff).not.toContain("## Assumptions to verify");
-		expect(handoff).toContain("Known");
+		expect(handoff).toContain("## Your answers");
+		expect(handoff).toContain("weeks");
+	});
+
+	it("renders Your answers from known_inputs with source=user (outside byte cap)", () => {
+		const handoff = buildMoaHandoff({
+			runId: "moa-answers",
+			archiveChunks: 1,
+			archiveBytes: 100,
+			workers: [makeWorker({ output: "x".repeat(5_000) })],
+			task: "show answers",
+			maxBytes: 200,
+			tco: {
+				task_understanding: "t",
+				known_inputs: [
+					{ key: "from_cwd", value: "repo", source: "cwd" },
+					{ key: "priority_focus", value: "长会话体验", source: "user" },
+					{ key: "max_session_length", value: "我不确定，请自己帮我看看是多少", source: "user" },
+				],
+				missing_inputs: [],
+				assumptions: [],
+			},
+		});
+		expect(handoff).toContain("## Your answers");
+		expect(handoff).toContain("priority_focus");
+		expect(handoff).toContain("长会话体验");
+		expect(handoff).toContain("max_session_length");
+		expect(handoff).toContain("我不确定");
+		// cwd-inferred stays in Known summary, not in Your answers block
+		const answersBlock = handoff.slice(
+			handoff.indexOf("## Your answers"),
+			handoff.indexOf("## Worker conclusions"),
+		);
+		expect(answersBlock).not.toContain("from_cwd");
+		expect(handoff).toContain('**Known**: from_cwd="repo"');
+		const answersIdx = handoff.indexOf("## Your answers");
+		const conclusionsIdx = handoff.indexOf("## Worker conclusions");
+		expect(answersIdx).toBeGreaterThan(0);
+		expect(answersIdx).toBeLessThan(conclusionsIdx);
+	});
+
+	it("formatPreWorkerAskNotify summarizes user answers and assumed defaults", () => {
+		const line = formatPreWorkerAskNotify(
+			{
+				task_understanding: "t",
+				known_inputs: [
+					{ key: "priority_focus", value: "长会话体验", source: "user" },
+					{ key: "from_cwd", value: "repo", source: "cwd" },
+				],
+				missing_inputs: [],
+				assumptions: [
+					{ key: "current_compression_impl", value: "unknown", reason: "user_skipped_required", note: "timed out" },
+				],
+			},
+			{ asked: 4, answered: 1, assumed: 1, timedOut: 1 },
+		);
+		expect(line).toContain("Ask 完成（1 答 / 1 默认）");
+		expect(line).toContain("priority_focus=\"长会话体验\"");
+		expect(line).toContain("current_compression_impl（超时→默认）");
+		expect(line).not.toContain("from_cwd");
 	});
 });
 

@@ -156,12 +156,25 @@ describe("InProcessWorkerEngine — internal contract", () => {
 		expect(result.ok).toBe(true);
 	});
 
-	it("input.tools=['read','bash'] still collapses to IN_PROCESS_TOOLS (no tool-set escalation)", async () => {
+	it("input.tools=['read','bash'] intersects with IN_PROCESS_TOOLS (no escalation; drops bash)", async () => {
 		const engine = createWorkerEngine("in-process", dummyShared);
 		await engine.execute({ ...baseInput, tools: ["read", "bash"] });
 
 		const callArgs = createSessionSpy.mock.calls[0]?.[0] as { toolNames?: string[] };
-		expect(callArgs?.toolNames).toEqual(["read", "search", "find", "web_search", "ast_grep"]);
+		// Phase 7: respect the requested allow-list, but never escalate beyond
+		// the in-process read-only set. bash is dropped; missing tools are not added.
+		expect(callArgs?.toolNames).toEqual(["read"]);
+		expect(callArgs?.toolNames).not.toContain("bash");
+		expect(callArgs?.toolNames).not.toContain("web_search");
+	});
+
+	it("input.tools without web_search keeps it stripped (Phase 7 research ban)", async () => {
+		const engine = createWorkerEngine("in-process", dummyShared);
+		await engine.execute({ ...baseInput, tools: ["read", "search", "find", "ast_grep"] });
+
+		const callArgs = createSessionSpy.mock.calls[0]?.[0] as { toolNames?: string[] };
+		expect(callArgs?.toolNames).toEqual(["read", "search", "find", "ast_grep"]);
+		expect(callArgs?.toolNames).not.toContain("web_search");
 	});
 
 	it("input.tools='none' uses runEphemeralTurn with empty toolNames (no agent loop)", async () => {

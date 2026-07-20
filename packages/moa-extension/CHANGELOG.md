@@ -2,14 +2,32 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **Ask = grill-me + Research→Ask**: Pre-Ask default is `askStrategy: "grill-me"` (one question at a time with recommended answers; `form` / `auto` still available). When `researchMode ≠ none`, **Research runs before Ask** so grill can use `research_pack` (aligned with “search first, then clarify”). Comparison cues (`区别`/`对比`/`vs`/…) now resolve research away from `none`. Definition-style `missing_inputs` are filtered before Ask; Discovery/B prompts ban public-entity definition questions. New `src/grill-ask.ts` + `prompts/grill-ask.md`; settings `grillMaxQuestions`.
+
+- **Worker streaming widget UX**: `moa-workers` now paints via a **theme factory** (multi-line, bypasses string[] 10-line cap). Per-worker preview defaults to **6 lines / 480 chars**; streaming uses warning + spinner + `toolPendingBg`, OK → success/`toolSuccessBg`, BLOCKED → warning, FAILED → error/`toolErrorBg` (aligned with tool execution / async job colors).
+
+- **Phase 7 follow-ups (2–6)**:
+  - `workerTimeoutMs` default floor raised to **8 min** (`max(timeoutMs, 480_000)`) so plan workers stop timing out empty after research.
+  - `workerIdleTimeoutMs` (default 2 min) is now wired through plan workers + research via `createActivityTimeout` — kills only when there is no stream/tool progress (hard wall-clock still uses stage timeouts).
+  - Research observability: notify / stage-test logs include `sources` / `repo_facts` / `gaps` and `parse=json|markdown`; `meta.researchPackSource` persisted.
+  - Rewrite empty/unparsed: `fallbackUsed` audit flag + stderr note + warning notify even when the LLM call itself was `ok`; `meta.rewriteFallbackUsed` persisted.
+  - Research budget: `researchMaxQueries` (default 6, prompt soft cap) + `researchMaxToolRounds` (default 12, **counts `web_search` only**) with soft-stop window then abort; empty/unparsed research always **salvages** a stub pack (`parse_source: salvage`) into TCO.
+
 ### Added
 
+- **Research stage (Phase 7)**: a dedicated Research stage now runs **once** when `researchMode !== "none"` (`Discovery → InputCollect → Research → Ask → Rewrite → Workers → Synthesis`). A single research agent (`web_search` + repo `read`/`search`) gathers evidence into a `research_pack` (`{ queries, sources[{claim,url,relevance,confidence}], repo_facts, gaps }`) attached to the TCO and rendered under `### Research evidence` in every worker/rewrite prompt. Plan workers then build on the shared evidence instead of each re-running the same expensive searches — `web_search` is stripped from plan-worker tool sets in research modes (`restrictPlanWorkerTools`), and `renderResearchGuidance` now tells workers to cite the provided evidence and record gaps in `## assumptions` rather than searching. New prompt `src/prompts/research.md`; tolerant parser `parseResearchPack` (JSON-first, markdown `## sources` / `## repo_facts` / `## gaps` fallback). In-process workers now **intersect** the requested tool list with `IN_PROCESS_TOOLS` (so stripping `web_search` actually sticks; previously `"all"`/any list collapsed back to the full set including `web_search`). Stage-test persists `research.json` for audit. See `docs/plans/2026-07-17-moa-research-stage-design.md`.
+- **Staged timeouts**: `researchTimeoutMs` (default `max(timeoutMs, 15min)` — the only stage allowed long searches), `workerTimeoutMs` (default `max(timeoutMs, 8min)`), `synthesisTimeoutMs` (default = `timeoutMs`), `workerIdleTimeoutMs` (default 2min, wired as idle-kill). Plan workers in research modes no longer inherit the old 10-min floor (research does the searching now).
+- **Never-empty synthesis** (`synthesisMinSurvivors`, default 1): when too few workers survive quality (e.g. all timed out), the run degrades instead of returning an empty failure — a deterministic `buildDegradedSynthesis` emits the collected `research_pack` evidence + partial worker plans + assumptions + a "narrow scope and rerun" note, as long as there is salvageable material (`hasSalvageableMaterial`). With no salvageable material it stays fail-loud (`all workers quality-failed`).
 - **Research mode**: `researchMode: "auto" | "none" | "encouraged" | "required"` (default `auto`). Open / architecture tasks get research guidance in worker+rewrite prompts, an optional/required `## sources` schema section (`claim | url | relevance`), soft quality penalties (required without URL → score cap 60; encouraged → −10), and synthesis preference for tool-backed external citations over memory claims. Narrow implementation tasks stay `none`.
 - **Stage-test harness**: `bun packages/moa-extension/scripts/stage-test.ts` runs Discovery → Ask → Rewrite → Workers → Synthesis as `--stage all` or per-stage with `--from` artifacts under `tmp/moa-stage/`. Shared runners live in `src/stages.ts`; stdin UI in `src/stage-cli-ui.ts`.
 - **Stage-test CLI unit coverage**: `parseStageTestArgs` / `validateStagePrerequisites` / `planStageSequence` live in `src/stage-test-cli.ts` with deterministic tests; prerequisites fail before creating a run directory or loading models.
 
 ### Fixed
 
+- **Ask auto-skip while thinking**: default `askTimeoutMs` raised from 30s → 5 min. After Pre-Ask completes, a single TUI notify summarizes all answers before workers start (no per-question notify). Handoff shows a dedicated `## Your answers` section (outside the byte cap).
+- **Research workers aborting empty**: superseded by the Phase 7 Research stage (see Added). Research now happens once in its own stage with `researchTimeoutMs`; plan workers only write the plan on the shared `research_pack` and use the shorter `workerTimeoutMs`, so they no longer hit `Request was aborted` mid-search. Timed-out workers still annotate stderr with `timed out after Ns`.
 - **Synthesis context contract**: synthesis now renders the real `tco.assumptions` list regardless of `askEnabled` and injects the TCO block exactly once.
 - **Runtime settings resilience**: malformed or non-object `PI_MOA_SETTINGS_JSON` values now log a warning and fall back to file/default settings instead of blocking `/moa run`.
 - **Soft-recover dual-channel**: freeform worker bodies still fill the primary section for display, but `softRecovered` keeps the contract hard-fail (score ≤30) and treats empty synthesized `open_questions` as unresolved — blocks fake `all_complete` convergence.
@@ -18,7 +36,7 @@
 - **TUI status bar (design §7.3)**: `ui.setStatus("moa", …)` now shows `Round N/M · asking question i/n · divergent OK · grounded OK · critical BLOCKED` during multi-round ask; cleared when the run finishes.
 - **Ask actions are answer / skip / stop all**: per-round ask uses `ui.select` for the three actions instead of requiring the user to type `STOP`. Typed `STOP` in freeform input remains a fallback.
 - **Multi-round: remove discovery/planning phase split** (align with `docs/moa-multi-round-design.md`): every round emits `plan` + `open_questions` under one schema. Round history only injects previous answers and already-asked questions — no more "Round 1 forbid plan / Round 2 forbid questions" which caused obedient workers to fail the quality check.
-- **All-workers quality-drop is fail-loud**: when every worker is `qualityDropped`, synthesis is **not** spawned; result is `ok: false` with `stderr: "all workers quality-failed"` and `convergenceSignal: "quality_failed"`.
+- **All-workers quality-drop**: when fewer than `synthesisMinSurvivors` workers survive, the run now degrades to a non-empty report if there is salvageable material (research_pack or a partial `## plan`) — see "Never-empty synthesis" in Added. Only when there is nothing salvageable does it stay fail-loud (`ok: false`, `stderr: "all workers quality-failed"`, `convergenceSignal: "quality_failed"`, no synthesis spawn).
 - **Cross-round question convergence**: `previousQuestionKeys` is threaded into `collectOpenQuestions`; repeating the same question no longer burns `maxRounds`.
 - **Discovery `output_schema` actually reaches workers**: after Discovery, `buildPlan(..., outputSchema)` rebuilds worker prompts; rewrite prompt receives `{{output_schema}}`.
 - **`dispatchLog` wired into archive**: `executePlan` returns per-round entries; `/moa run` passes them to `buildMoaArchiveEntries`.

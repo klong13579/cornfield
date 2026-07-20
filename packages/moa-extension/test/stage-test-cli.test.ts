@@ -43,6 +43,13 @@ describe("parseStageTestArgs", () => {
 		expect(() => parseStageTestArgs(["--stage", "nope"], "/")).toThrow(/Invalid --stage/);
 	});
 
+	it("parses --research and rejects invalid values", () => {
+		expect(parseStageTestArgs(["--task", "x", "--research", "required"], "/").research).toBe("required");
+		expect(parseStageTestArgs(["--task", "x", "--research", "auto"], "/").research).toBe("auto");
+		expect(parseStageTestArgs(["--task", "x"], "/").research).toBeUndefined();
+		expect(() => parseStageTestArgs(["--research", "nope"], "/")).toThrow(/Invalid --research/);
+	});
+
 	it("rejects unknown flag", () => {
 		expect(() => parseStageTestArgs(["--wat"], "/")).toThrow(/Unknown argument/);
 	});
@@ -87,8 +94,15 @@ describe("resolveStageTestTask", () => {
 });
 
 describe("planStageSequence", () => {
-	it("all expands to five stages in order", () => {
-		expect(planStageSequence("all")).toEqual(["discovery", "ask", "rewrite", "workers", "synthesis"]);
+	it("all expands to six stages in order (research before ask)", () => {
+		expect(planStageSequence("all")).toEqual([
+			"discovery",
+			"research",
+			"ask",
+			"rewrite",
+			"workers",
+			"synthesis",
+		]);
 	});
 
 	it("single stage returns itself", () => {

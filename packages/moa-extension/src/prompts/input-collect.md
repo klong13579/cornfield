@@ -45,6 +45,9 @@ Each item is one bullet with `;`-separated `label: value` fields:
 Rules for items:
 - `key`: short snake_case identifier, unique within your list.
 - `question`: answerable in one shot (no open-ended "describe your needs").
+- **Forbidden:** definition / identity questions about public products, OSS
+  projects, or companies (e.g. "X 是什么", "本项目里 X 指什么"). Research
+  owns those. Only ask decision dimensions that change YOUR plan output.
 - `type`: one of `text` / `number` / `list` / `confirm` (do not use `select` —
   you cannot supply the choice options).
 - `required: true` only when you genuinely cannot proceed without it;

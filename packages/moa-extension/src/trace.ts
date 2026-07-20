@@ -1,4 +1,5 @@
 import type { TaskContextObject, TcoAssumption } from "./tco";
+import type { MoaAskUserSummary } from "./types";
 import {
 	MOA_ARCHIVE_CHUNK_BYTES,
 	MOA_ARCHIVE_ENTRY_TYPE,
@@ -278,6 +279,56 @@ export function listMoaArchiveRuns(entries: unknown[]): MoaArchiveManifest[] {
 // =============================================================================
 
 /**
+ * Render user answers (`known_inputs` with `source === "user"`) for the
+ * moa-result handoff. Empty when the user answered nothing.
+ */
+export function renderYourAnswers(tco: TaskContextObject | undefined): string {
+	if (!tco) return "";
+	const answers = tco.known_inputs.filter(k => k.source === "user");
+	if (answers.length === 0) return "";
+	const lines = answers.map(k => `- \`${k.key}\` = ${formatAnswerValue(k.value)}`);
+	return [`## Your answers`, ...lines].join("\n");
+}
+
+function formatAnswerValue(v: unknown): string {
+	if (v === null || v === undefined) return "null";
+	if (typeof v === "string") return `"${v}"`;
+	if (typeof v === "number" || typeof v === "boolean") return String(v);
+	try {
+		return JSON.stringify(v);
+	} catch {
+		return String(v);
+	}
+}
+
+/**
+ * One-line TUI summary after Pre-Ask, shown when workers are about to start
+ * (not per-question during the ask loop).
+ */
+export function formatPreWorkerAskNotify(
+	tco: TaskContextObject,
+	askSummary?: Pick<MoaAskUserSummary, "answered" | "assumed" | "timedOut" | "asked">,
+): string {
+	const userAnswers = tco.known_inputs.filter(k => k.source === "user");
+	const assumedFromAsk = tco.assumptions.filter(
+		a => a.reason === "user_skipped" || a.reason === "user_skipped_required",
+	);
+	const parts: string[] = userAnswers.map(k => `${k.key}=${formatAnswerValue(k.value)}`);
+	for (const a of assumedFromAsk) {
+		const tag = a.note === "timed out" ? "超时→默认" : "跳过→默认";
+		parts.push(`${a.key}（${tag}）`);
+	}
+	if (parts.length === 0) {
+		return askSummary?.asked ? "Ask 完成，启动 worker…" : "启动 worker…";
+	}
+	const stats =
+		askSummary && askSummary.asked > 0
+			? `（${askSummary.answered} 答 / ${askSummary.assumed} 默认）`
+			: "";
+	return `Ask 完成${stats} → 启动 worker：${parts.join("；")}`;
+}
+
+/**
  * Render `tco.assumptions` as a dedicated "## Assumptions to verify" block
  * for the moa-result handoff / MoaTraceDetails. Empty when there are none.
  * Placed outside the byte-capped worker conclusions so skip/infer defaults
@@ -299,8 +350,9 @@ export function renderAssumptionsToVerify(tco: TaskContextObject | undefined): s
  * turns see. The full, untruncated sub-agent transcript is archived separately
  * via buildMoaArchiveEntries and is kept out of LLM context.
  *
- * Layout (once-right P4):
+ * Layout (once-right P4 + answer visibility):
  *   headline + archive pointer
+ *   ## Your answers            ← outside byte cap (user Q&A always visible)
  *   ## Assumptions to verify   ← outside byte cap (always visible when present)
  *   ## Worker conclusions      ← TCO known/asked + synthesis + workers (capped)
  */
@@ -322,8 +374,12 @@ export function buildMoaHandoff(input: {
 			? `Full untruncated transcript archived in this pi session (run ${input.runId}, ${input.archiveChunks} chunk(s), ${input.archiveBytes} bytes). Run \`/moa transcript ${input.runId}\` for the complete archive.`
 			: "Worker transcripts are kept out of context.";
 
+	const answersBlock = renderYourAnswers(input.tco);
 	const assumptionsBlock = renderAssumptionsToVerify(input.tco);
 	const headerParts = [headline, "", pointer];
+	if (answersBlock) {
+		headerParts.push("", answersBlock);
+	}
 	if (assumptionsBlock) {
 		headerParts.push("", assumptionsBlock);
 	}
@@ -359,11 +415,19 @@ function renderTcoSummary(tco: TaskContextObject | undefined): string {
 	const parts: string[] = [];
 	if (tco.task_understanding) parts.push(`**TCO**: ${tco.task_understanding}`);
 	if (tco.known_inputs.length > 0) {
-		const items = tco.known_inputs
-			.slice(0, 6)
-			.map(k => `${k.key}=${shortValue(k.value)}`)
-			.join(", ");
-		parts.push(`**Known**: ${items}${tco.known_inputs.length > 6 ? "…" : ""}`);
+		const userAnswers = tco.known_inputs.filter(k => k.source === "user");
+		const inferred = tco.known_inputs.filter(k => k.source !== "user");
+		if (inferred.length > 0) {
+			const items = inferred
+				.slice(0, 6)
+				.map(k => `${k.key}=${shortValue(k.value)}`)
+				.join(", ");
+			parts.push(`**Known**: ${items}${inferred.length > 6 ? "…" : ""}`);
+		}
+		if (userAnswers.length > 0) {
+			// Full answers live in ## Your answers (outside the byte cap).
+			parts.push(`**Answered**: ${userAnswers.map(k => k.key).join(", ")}`);
+		}
 	}
 	if (tco.missing_inputs.length > 0) {
 		const items = tco.missing_inputs.map(m => `${m.key}${m.required ? "*" : ""}`).join(", ");

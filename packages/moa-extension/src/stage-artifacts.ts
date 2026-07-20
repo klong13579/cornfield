@@ -7,7 +7,7 @@ import { isEnoent } from "@oh-my-pi/pi-utils";
 import type { TaskContextObject } from "./tco";
 import type { MoaOutputSchema, MoaPlanWorker, MoaWorkerResult } from "./types";
 
-export type StageName = "all" | "discovery" | "ask" | "rewrite" | "workers" | "synthesis";
+export type StageName = "all" | "discovery" | "ask" | "research" | "rewrite" | "workers" | "synthesis";
 
 export interface StageRunMeta {
 	stage: StageName;
@@ -20,6 +20,10 @@ export interface StageRunMeta {
 	models?: Record<string, string | undefined>;
 	signal?: string | null;
 	fallback?: boolean;
+	/** How research_pack was parsed (`json` / `markdown` / `salvage`), when research ran. */
+	researchPackSource?: "json" | "markdown" | "salvage" | null;
+	/** Rewrite LLM ok but sections unparsed — original prompts kept. */
+	rewriteFallbackUsed?: boolean;
 }
 
 export interface StageArtifactsPayload {
@@ -28,6 +32,7 @@ export interface StageArtifactsPayload {
 	outputSchema?: MoaOutputSchema;
 	ask?: unknown;
 	discovery?: MoaWorkerResult;
+	research?: MoaWorkerResult;
 	rewrite?: MoaWorkerResult;
 	workers?: MoaPlanWorker[];
 	workerResults?: MoaWorkerResult[];
@@ -44,6 +49,7 @@ export interface LoadedStageRun {
 	outputSchema?: MoaOutputSchema;
 	ask?: unknown;
 	discovery?: MoaWorkerResult;
+	research?: MoaWorkerResult;
 	rewrite?: MoaWorkerResult;
 	workers?: MoaPlanWorker[];
 	workerResults?: MoaWorkerResult[];
@@ -77,6 +83,7 @@ export async function writeStageArtifacts(dir: string, payload: StageArtifactsPa
 	}
 	if (payload.ask !== undefined) await writeJson(path.join(dir, "ask.json"), payload.ask);
 	if (payload.discovery !== undefined) await writeJson(path.join(dir, "discovery.json"), payload.discovery);
+	if (payload.research !== undefined) await writeJson(path.join(dir, "research.json"), payload.research);
 	if (payload.rewrite !== undefined) await writeJson(path.join(dir, "rewrite.json"), payload.rewrite);
 	if (payload.workers !== undefined) await writeJson(path.join(dir, "plan.json"), { workers: payload.workers });
 	if (payload.plan !== undefined) await writeJson(path.join(dir, "plan.json"), payload.plan);
@@ -100,6 +107,7 @@ export async function loadStageRun(dir: string): Promise<LoadedStageRun> {
 	const outputSchema = await readJson<MoaOutputSchema>(path.join(dir, "output_schema.json"));
 	const ask = await readJson(path.join(dir, "ask.json"));
 	const discovery = await readJson<MoaWorkerResult>(path.join(dir, "discovery.json"));
+	const research = await readJson<MoaWorkerResult>(path.join(dir, "research.json"));
 	const rewrite = await readJson<MoaWorkerResult>(path.join(dir, "rewrite.json"));
 	const plan = await readJson<StageArtifactsPayload["plan"] & { workers?: MoaPlanWorker[] }>(
 		path.join(dir, "plan.json"),
@@ -124,6 +132,7 @@ export async function loadStageRun(dir: string): Promise<LoadedStageRun> {
 		outputSchema,
 		ask,
 		discovery,
+		research,
 		rewrite,
 		workers: plan?.workers,
 		plan,
