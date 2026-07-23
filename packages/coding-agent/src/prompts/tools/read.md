@@ -47,6 +47,8 @@ For `.sqlite`, `.sqlite3`, `.db`, `.db3`:
 
 # URLs
 Extracts content from web pages, GitHub issues/PRs, Stack Overflow, Wikipedia, Reddit, NPM, arXiv, RSS/Atom feeds, JSON endpoints, PDFs at URLs, and similar text-based resources. Returns clean reader-mode text/markdown — no browser required. Use `sel="raw"` for untouched HTML; `timeout` to override the default request timeout.
+
+If `read` fails to fetch a URL (timeout, bot wall, JS-rendered page), **do not retry the same URL with `read`** — use the `browser` tool instead. `browser` with `action: "extract_readable"` or `action: "navigate"` + `action: "get_text"` can handle JavaScript-gated pages that `read` cannot.
 </instruction>
 
 <critical>

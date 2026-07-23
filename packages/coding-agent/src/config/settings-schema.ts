@@ -1677,6 +1677,16 @@ export const SETTINGS_SCHEMA = {
 		ui: { tab: "tools", label: "Read URLs", description: "Allow the read tool to fetch and process URLs" },
 	},
 
+	"fetch.blockPrivateUrls": {
+		type: "boolean",
+		default: true,
+		ui: {
+			tab: "tools",
+			label: "Block Private URLs",
+			description: "Block fetch requests to private/internal network addresses (SSRF protection)",
+		},
+	},
+
 	"github.enabled": {
 		type: "boolean",
 		default: false,

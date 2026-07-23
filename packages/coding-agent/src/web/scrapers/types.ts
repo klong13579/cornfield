@@ -4,6 +4,7 @@
 import { ptree } from "@oh-my-pi/pi-utils";
 import TurndownService from "turndown";
 import { gfm } from "turndown-plugin-gfm";
+import * as dns from "node:dns/promises";
 import { ToolAbortError } from "../../tools/tool-errors";
 
 export { formatNumber } from "@oh-my-pi/pi-utils";
@@ -64,6 +65,8 @@ export interface LoadPageOptions {
 	body?: string;
 	maxBytes?: number;
 	signal?: AbortSignal;
+	/** When true (default), blocks requests to private/internal IP addresses (SSRF protection). */
+	blockPrivateUrls?: boolean;
 }
 
 export interface LoadPageResult {
@@ -75,10 +78,132 @@ export interface LoadPageResult {
 }
 
 /**
+ * Always-blocked hostnames — cloud metadata endpoints that have no legitimate
+ * agent fetch target under any configuration.
+ */
+const ALWAYS_BLOCKED_HOSTNAMES = new Set([
+	"metadata.google.internal",
+	"metadata.goog",
+	"metadata.tencentyun.com",
+]);
+
+/**
+ * Check whether a URL targets a private/internal/forbidden network address.
+ *
+ * DNS-resolves the hostname and checks against:
+ * - Always-blocked hostnames (cloud metadata endpoints)
+ * - Private IP ranges (RFC 1918, RFC 6598 CGNAT)
+ * - Loopback, link-local, multicast, reserved addresses
+ *
+ * Returns null if safe, or an error message string if blocked.
+ */
+export async function checkUrlSsrf(url: string): Promise<string | null> {
+	try {
+		const parsed = new URL(url);
+		const hostname = parsed.hostname.toLowerCase();
+
+		if (ALWAYS_BLOCKED_HOSTNAMES.has(hostname)) {
+			return `URL blocked for security: ${hostname} is a cloud metadata endpoint`;
+		}
+
+		// Check if the hostname is already an IP literal
+		const ipMatch = hostname.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+		if (ipMatch) {
+			const ip = hostname;
+			const reason = isPrivateOrBlockedIp(ip);
+			if (reason) {
+				return `URL blocked for security: ${ip} is a ${reason}`;
+			}
+			// Public IP literal — let the request proceed
+			return null;
+		}
+
+		// Resolve the hostname to IP(s)
+		let addresses: string[];
+		try {
+			const resolved = await dns.resolve4(hostname);
+			addresses = resolved;
+		} catch {
+			// Also try AAAA (IPv6) if IPv4 fails
+			try {
+				const resolved = await dns.resolve6(hostname);
+				addresses = resolved;
+			} catch {
+				// DNS resolution failed entirely — let the request proceed
+				// (the fetch itself will fail if the host is truly unreachable)
+				return null;
+			}
+		}
+
+		for (const ip of addresses) {
+			const reason = isPrivateOrBlockedIp(ip);
+			if (reason) {
+				return `URL blocked for security: ${hostname} resolves to ${reason} (${ip})`;
+			}
+		}
+
+		return null;
+	} catch {
+		// URL parsing failed — let the request proceed so the caller sees a normal fetch error
+		return null;
+	}
+}
+
+/**
+ * Check if an IP address is private, loopback, link-local, CGNAT, or multicast.
+ * Returns a human-readable reason string, or null if the IP is publicly routable.
+ */
+function isPrivateOrBlockedIp(ip: string): string | null {
+	if (ip === "127.0.0.1" || ip === "::1" || ip === "0.0.0.0") {
+		return "loopback address";
+	}
+
+	const ipv4 = addressToInt(ip);
+	if (ipv4 === -1) return null; // Not a valid IPv4 address
+
+	if (
+		(ipv4 >= 0x0a000000 && ipv4 <= 0x0affffff) ||   // 10.0.0.0/8
+		(ipv4 >= 0xac100000 && ipv4 <= 0xac1fffff) ||   // 172.16.0.0/12
+		(ipv4 >= 0xc0a80000 && ipv4 <= 0xc0a8ffff) ||   // 192.168.0.0/16
+		(ipv4 >= 0x64400000 && ipv4 <= 0x647fffff) ||   // 100.64.0.0/10 (CGNAT)
+		(ipv4 >= 0xa9fe0000 && ipv4 <= 0xa9feffff) ||   // 169.254.0.0/16 (link-local)
+		(ipv4 >= 0x7f000000 && ipv4 <= 0x7fffffff)      // 127.0.0.0/8 (loopback)
+	) {
+		return "private network address";
+	}
+
+	return null;
+}
+
+function addressToInt(ip: string): number {
+	const parts = ip.split(".");
+	if (parts.length !== 4) return -1;
+	for (const p of parts) {
+		const n = Number.parseInt(p, 10);
+		if (Number.isNaN(n) || n < 0 || n > 255) return -1;
+	}
+	// >>> 0 converts signed int32 to unsigned, making range comparisons correct
+	return (
+		(Number.parseInt(parts[0]!, 10) << 24) |
+		(Number.parseInt(parts[1]!, 10) << 16) |
+		(Number.parseInt(parts[2]!, 10) << 8) |
+		Number.parseInt(parts[3]!, 10)
+	) >>> 0;
+}
+
+/**
  * Fetch a page with timeout and size limit
  */
 export async function loadPage(url: string, options: LoadPageOptions = {}): Promise<LoadPageResult> {
-	const { timeout = 20, headers = {}, maxBytes = MAX_BYTES, signal, method = "GET", body } = options;
+	const { timeout = 20, headers = {}, maxBytes = MAX_BYTES, signal, method = "GET", body, blockPrivateUrls = true } = options;
+
+	// SSRF check — block requests to private/internal IPs before any network call
+	if (blockPrivateUrls) {
+		const ssrfBlocked = await checkUrlSsrf(url);
+		if (ssrfBlocked) {
+			return { content: ssrfBlocked, contentType: "", finalUrl: url, ok: false };
+		}
+	}
 
 	for (let attempt = 0; attempt < USER_AGENTS.length; attempt++) {
 		if (signal?.aborted) {

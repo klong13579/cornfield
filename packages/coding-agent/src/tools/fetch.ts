@@ -737,11 +737,15 @@ async function renderUrl(
 	}
 
 	// Step 2: Fetch page
-	const response = await loadPage(url, { timeout, signal });
+	const blockPrivate = settings.get("fetch.blockPrivateUrls");
+	const response = await loadPage(url, { timeout, signal, blockPrivateUrls: blockPrivate });
 	if (signal?.aborted) {
 		throw new ToolAbortError();
 	}
 	if (!response.ok) {
+		const guidanceNote = response.content?.includes("blocked for security")
+			? response.content
+			: `Failed to fetch URL (HTTP ${response.status || "unknown"}). If the page requires JavaScript or is behind a bot wall, try the browser tool instead.`;
 		return {
 			url,
 			finalUrl: response.finalUrl || url,
@@ -750,7 +754,7 @@ async function renderUrl(
 			content: "",
 			fetchedAt,
 			truncated: false,
-			notes: [response.status ? `Failed to fetch URL (HTTP ${response.status})` : "Failed to fetch URL"],
+			notes: [guidanceNote],
 		};
 	}
 
