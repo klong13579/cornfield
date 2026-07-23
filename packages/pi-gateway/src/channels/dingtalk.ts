@@ -32,6 +32,7 @@ import type {
 	OutboundMessage,
 	ReplyFormatterContext,
 	SessionRecord,
+	ChannelHealth,
 } from "../types";
 import {
 	type AICardInstance,
@@ -1803,11 +1804,25 @@ export class DingTalkChannel extends BaseChannel {
 
 	override isConnected(): boolean {
 		if (this.#connectionFailed) return false;
-		// Check actual WebSocket state instead of relying solely on the #connected flag,
-		// which can be set true by the SDK 'connect' event even when the socket later fails.
+		// Only trust actual WebSocket OPEN state. The SDK may fire a 'connect'
+		// event (which sets #connected = true) when a reconnect attempt starts
+		// but the socket never reaches OPEN — the reconnect catch block resets
+		// #connected but we don't rely on that alone.
 		const socket = (this.#client as any)?.socket;
-		if (socket?.readyState === 1) return true;
-		return this.#connected && socket?.readyState !== 3;
+		return socket?.readyState === 1;
+	}
+
+	override getHealth(): ChannelHealth {
+		return {
+			connected: this.isConnected(),
+			connectionFailed: this.#connectionFailed,
+			socketReadyState: (this.#client as any)?.socket?.readyState,
+			reconnectAttempts: this.#reconnectAttempts,
+			connectionEstablishedAt: this.#connectionEstablishedTime,
+			lastSocketAvailableAt: this.#lastSocketAvailableTime,
+			receivedCount: this.#receivedCount,
+			processedCount: this.#processedCount,
+		};
 	}
 
 	async sendMessage(msg: OutboundMessage): Promise<void> {
@@ -2501,6 +2516,7 @@ export class DingTalkChannel extends BaseChannel {
 			logger.debug("[DingTalk] Reconnect successful", { accountId: this.#accountId });
 		} catch (err) {
 			this.#reconnectAttempts++;
+			this.#connected = false;
 			logger.error("[DingTalk] Reconnect failed", {
 				accountId: this.#accountId,
 				attempt: this.#reconnectAttempts,

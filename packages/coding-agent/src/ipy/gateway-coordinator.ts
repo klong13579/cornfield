@@ -399,6 +399,23 @@ export async function acquireSharedGateway(cwd: string): Promise<AcquireResult |
 
 export async function releaseSharedGateway(): Promise<void> {
 	if (!isCoordinatorInitialized) return;
+	// Per-kernel release: remove our PID from users to prevent bloat.
+	// Does NOT kill the gateway or clear module state — multiple kernels
+	// in the same process share one PID entry, and killing on first
+	// release would break sibling kernels. Gateway lifecycle is managed
+	// at executor shutdown (shutdownSharedGateway) or stale detection
+	// (acquireSharedGateway).
+	try {
+		await withGatewayLock(async () => {
+			const info = await readGatewayInfo();
+			if (!info) return;
+			await removeGatewayUser();
+		});
+	} catch (err) {
+		logger.warn("Failed to release shared gateway", {
+			error: err instanceof Error ? err.message : String(err),
+		});
+	}
 }
 
 export async function getSharedGatewayUrl(): Promise<string | null> {
