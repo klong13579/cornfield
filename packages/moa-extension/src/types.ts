@@ -57,6 +57,16 @@ export interface MoaSettings {
 	 */
 	researchMaxQueries: number;
 	researchMaxToolRounds: number;
+	/**
+	 * Soft-stop Research after this many `web_search` calls even if
+	 * `researchMaxToolRounds` is higher. 0 disables early stop. Default 3.
+	 */
+	researchEarlyStopAt: number;
+	/**
+	 * Optional model for the Research stage. When unset, uses `synthesisModel`.
+	 * Prefer a cheaper/faster model for search+pack assembly.
+	 */
+	researchModel?: string;
 	/** Minimum surviving (non-dropped) workers required to run synthesis.
 	 *  Below this, the run degrades (research summary) rather than synthesizing
 	 *  from too little. Floored at 1. */
@@ -78,7 +88,7 @@ export interface MoaSettings {
 	 * `"auto"`: grill for compare/design intents, else form.
 	 */
 	askStrategy: MoaAskStrategy;
-	/** Hard cap on grill-me questions per run (default = maxQuestionsPerRound). */
+	/** Hard cap on grill-me questions per run (default 3). */
 	grillMaxQuestions: number;
 	/**
 	 * Once-right B stage. When true (default), a lightweight worker fan-out
@@ -167,6 +177,26 @@ export interface MoaWorkerResult {
 	parsedAt?: string;
 	/** Quality v2 audit metadata (heuristic breakdown, judge path, role key). */
 	qualityMeta?: MoaQualityMeta;
+	/** Wall-clock for this worker engine call (ms). */
+	durationMs?: number;
+	/** Provider/agent stop reason when available. */
+	stopReason?: string;
+	timedOut?: boolean;
+	idleTimedOut?: boolean;
+	toolBudgetExceeded?: boolean;
+	aborted?: boolean;
+	usage?: {
+		input: number;
+		output: number;
+		cacheRead: number;
+		cacheWrite: number;
+		cost: number;
+		turns: number;
+	};
+	/** Truncated tool_execution_end dump for audit (empty-timeout diagnosis). */
+	toolTraceText?: string;
+	/** Last streamed partial text when final output is empty / aborted. */
+	streamPreview?: string;
 }
 
 // ----------------------------------------------------------------------------

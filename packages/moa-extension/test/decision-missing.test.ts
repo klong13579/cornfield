@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { filterDecisionMissing, isDefinitionStyleQuestion } from "../src/decision-missing";
+import { filterDecisionMissing, filterMissingAlreadyKnown, isDefinitionStyleQuestion } from "../src/decision-missing";
 import type { TcoMissingInput } from "../src/tco";
 
 describe("isDefinitionStyleQuestion", () => {
@@ -53,5 +53,39 @@ describe("filterDecisionMissing", () => {
 		];
 		const kept = filterDecisionMissing(items);
 		expect(kept.map(i => i.key)).toEqual(["comparison_context"]);
+	});
+});
+
+describe("filterMissingAlreadyKnown (P3)", () => {
+	it("drops missing keys already answered in known_inputs (incl. synonyms)", () => {
+		const missing: TcoMissingInput[] = [
+			{
+				key: "comparison_dims",
+				question: "希望从哪些维度对比？",
+				type: "list",
+				required: true,
+				why_critical: "dims",
+			},
+			{
+				key: "audience",
+				question: "受众是谁？",
+				type: "select",
+				required: false,
+				why_critical: "aud",
+			},
+			{
+				key: "output_format",
+				question: "输出格式？",
+				type: "text",
+				required: false,
+				why_critical: "fmt",
+			},
+		];
+		const known = [
+			{ key: "comparison_dimensions" },
+			{ key: "depth" },
+			{ key: "audience" },
+		];
+		expect(filterMissingAlreadyKnown(missing, known).map(m => m.key)).toEqual(["output_format"]);
 	});
 });

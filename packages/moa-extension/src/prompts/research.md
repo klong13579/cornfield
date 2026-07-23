@@ -31,8 +31,17 @@ expensive searches. You do NOT write a plan.
   immediately**, put remaining uncertainty under `gaps`, and emit the JSON pack
   now. Do not start another `web_search`.
 {{/if}}
-- Stop as soon as the plan workers would have enough to decide. Remaining
-  uncertainty goes under `gaps`, NOT more searching.
+{{#if early_stop_at}}
+- Soft target: after about {{early_stop_at}} solid `web_search` calls with
+  usable URLs, **stop searching and emit the JSON pack immediately**. More
+  searches will be cut off by the orchestrator.
+{{/if}}
+- Prefer **2–4 high-quality sources with real URLs** over exhaustive search.
+- As soon as you have enough for plan workers to decide, emit the pack.
+  Remaining uncertainty goes under `gaps`, NOT more searching.
+- **Compare / vs tasks:** name each comparison target in your queries. Aim for
+  **at least one solid source per named product/tool**. Do not pad the pack with
+  unrelated multi-agent / industry essays that never mention the targets.
 
 ## Output format
 Output ONLY a single JSON object, no prose before or after, no markdown fences:

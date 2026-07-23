@@ -9,8 +9,10 @@ import {
 } from "@oh-my-pi/pi-coding-agent";
 import { untilAborted } from "@oh-my-pi/pi-utils";
 import { createActivityTimeout } from "./activity-timeout";
+import { createBlockRemoteReadExtension } from "./block-remote-read";
 import { type SpawnWorkerInput, spawnMoaWorker, type WorkerOutput } from "./subprocess";
-import { createWebSearchToolBudget, RESEARCH_SOFT_ABORT_MS } from "./tool-budget";
+import { createWebSearchToolBudget, RESEARCH_EARLY_SOFT_ABORT_MS, RESEARCH_ENOUGH_URLS, RESEARCH_SOFT_ABORT_MS } from "./tool-budget";
+import { extractResearchUrls } from "./tco";
 import type { MoaWorkerExecutionMode } from "./types";
 
 // ----------------------------------------------------------------------------
@@ -104,6 +106,8 @@ class InProcessWorkerEngine implements MoaWorkerEngine {
 		let idleTimedOut = false;
 		let toolBudgetExceeded = false;
 		let toolBudget: ReturnType<typeof createWebSearchToolBudget> | undefined;
+		const toolTraceParts: string[] = [];
+		const evidenceUrls = new Set<string>();
 
 		if (input.signal) {
 			if (input.signal.aborted) {
@@ -136,9 +140,13 @@ class InProcessWorkerEngine implements MoaWorkerEngine {
 		const toolNames = resolveInProcessToolNames(input.tools);
 		const ephemeral = toolNames.length === 0;
 		const maxToolRounds = Math.max(0, Math.floor(input.maxToolRounds ?? 0));
+		const earlyStopAt = Math.max(0, Math.floor(input.earlyStopAt ?? 0));
 		toolBudget = createWebSearchToolBudget({
 			maxWebSearches: maxToolRounds,
+			earlyStopAt: earlyStopAt > 0 ? earlyStopAt : undefined,
 			softAbortMs: RESEARCH_SOFT_ABORT_MS,
+			earlySoftAbortMs: input.earlySoftAbortMs ?? RESEARCH_EARLY_SOFT_ABORT_MS,
+			countedTool: input.countAllTools ? "*" : "web_search",
 			onSoftAbort: () => {
 				toolBudgetExceeded = true;
 				try {
@@ -147,6 +155,7 @@ class InProcessWorkerEngine implements MoaWorkerEngine {
 					// ignore
 				}
 			},
+			onWebSearch: input.onWebSearch,
 		});
 
 		// Settings isolation: not implemented.
@@ -211,6 +220,22 @@ class InProcessWorkerEngine implements MoaWorkerEngine {
 					}
 				}
 			}
+			if (e.type === "tool_execution_end") {
+				const toolName = typeof e.toolName === "string" ? e.toolName : "";
+				const resultText = formatInProcessToolResult(e.result);
+				if (resultText) {
+					toolTraceParts.push(`[${toolName}]\n${resultText}`);
+					input.onToolResult?.({ toolName, resultText });
+					// Only web_search evidence counts — plan workers may read docs with URLs.
+					if (toolName.trim() === "web_search") {
+						for (const url of extractResearchUrls(resultText)) evidenceUrls.add(url);
+						if (evidenceUrls.size >= RESEARCH_ENOUGH_URLS) {
+							toolBudget?.signalEnoughEvidence();
+							if (toolBudget?.exceeded) toolBudgetExceeded = true;
+						}
+					}
+				}
+			}
 			if (e.type === "message_update") {
 				const msg = (e as { message?: AssistantMessage }).message;
 				if (msg && input.onPartial) {
@@ -261,6 +286,7 @@ class InProcessWorkerEngine implements MoaWorkerEngine {
 				skipPythonPreflight: true,
 				hasUI: false,
 				toolNames,
+				extensions: input.blockRemoteReads ? [createBlockRemoteReadExtension()] : undefined,
 				// Propagate subagent metadata for session log / agent registry
 				// traceability. In-memory session writes no JSONL, but these
 				// fields still flow into AgentRegistry and event payloads.
@@ -344,6 +370,7 @@ class InProcessWorkerEngine implements MoaWorkerEngine {
 				timedOut,
 				idleTimedOut,
 				toolBudgetExceeded,
+				toolTraceText: toolTraceParts.length > 0 ? toolTraceParts.join("\n\n") : undefined,
 				model: lastAssistant?.model,
 				stopReason: lastStopReason,
 				usage,
@@ -360,6 +387,7 @@ class InProcessWorkerEngine implements MoaWorkerEngine {
 				timedOut,
 				idleTimedOut,
 				toolBudgetExceeded,
+				toolTraceText: toolTraceParts.length > 0 ? toolTraceParts.join("\n\n") : undefined,
 				model: input.model,
 				stopReason: "error",
 				usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 0 },
@@ -393,6 +421,16 @@ class InProcessWorkerEngine implements MoaWorkerEngine {
 // ----------------------------------------------------------------------------
 // Helpers
 // ----------------------------------------------------------------------------
+
+function formatInProcessToolResult(result: unknown): string {
+	if (result == null) return "";
+	if (typeof result === "string") return result.slice(0, 12_000);
+	try {
+		return JSON.stringify(result).slice(0, 12_000);
+	} catch {
+		return String(result).slice(0, 12_000);
+	}
+}
 
 function extractText(message: AssistantMessage): string {
 	return message.content

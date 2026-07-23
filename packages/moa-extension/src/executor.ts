@@ -1,6 +1,7 @@
 import { mergeMissingInputs } from "./merge-missing";
 import { rebindWorkerPrompts } from "./planner";
 import { enrichSchemaWithSources, renderResearchGuidance, resolveResearchMode } from "./research-mode";
+import { shouldSkipInputCollect } from "./skip-input-collect";
 import {
 	buildDegradedSynthesis,
 	type ExecutePlanOptions,
@@ -27,6 +28,7 @@ export type { ExecutePlanOptions } from "./stages";
 type LiveStageHandle = {
 	stop: () => number;
 	updateStatus: (patch: Partial<MoaStatusBarInput>) => void;
+	updateWorkingBase: (base: string) => void;
 };
 
 function startLiveStage(options: {
@@ -38,7 +40,8 @@ function startLiveStage(options: {
 	setWorking: (msg: string) => void;
 	setMoaStatus: (text: string | undefined) => void;
 }): LiveStageHandle {
-	const { clock, key, hasUI, workingBase, statusBase, setWorking, setMoaStatus } = options;
+	const { clock, key, hasUI, statusBase, setWorking, setMoaStatus } = options;
+	let workingBase = options.workingBase;
 	const status: MoaStatusBarInput = { ...statusBase };
 	clock.start(key);
 	const tick = () => {
@@ -50,6 +53,10 @@ function startLiveStage(options: {
 		Object.assign(status, patch);
 		tick();
 	};
+	const updateWorkingBase = (base: string) => {
+		workingBase = base;
+		tick();
+	};
 	tick();
 	let interval: ReturnType<typeof setInterval> | undefined;
 	if (hasUI) {
@@ -57,6 +64,7 @@ function startLiveStage(options: {
 	}
 	return {
 		updateStatus,
+		updateWorkingBase,
 		stop: () => {
 			if (interval !== undefined) clearInterval(interval);
 			return clock.stop(key);
@@ -124,10 +132,14 @@ export async function executePlan(plan: MoaPlan, options: ExecutePlanOptions): P
 			formatDuration(discoveryMs),
 	);
 
-	// B stage (once-right A∪B): only worth running when we will actually ask
-	// the user (TUI + askEnabled). Merges each worker's `needed_inputs` into
-	// the single pre-Ask so the user is still asked exactly once.
-	const inputCollectActive = hasUI && planOptions.settings.askEnabled && planOptions.settings.inputCollectEnabled;
+	// B stage (once-right A∪B): skip for compare tasks (dimensions belong in
+	// grill Ask; per-role checklists add latency without decision value).
+	const skipInputCollect = shouldSkipInputCollect(tco);
+	const inputCollectActive =
+		hasUI && planOptions.settings.askEnabled && planOptions.settings.inputCollectEnabled && !skipInputCollect;
+	if (skipInputCollect && hasUI && planOptions.settings.inputCollectEnabled) {
+		notify("征询跳过（对比题）— 直接进入调研 / Ask");
+	}
 	if (inputCollectActive) {
 		const inputCollectLive = startLiveStage({
 			clock,
@@ -168,7 +180,13 @@ export async function executePlan(plan: MoaPlan, options: ExecutePlanOptions): P
 			setWorking,
 			setMoaStatus,
 		});
-		const research = await runResearchStage(tco, stageCtx, options);
+		const researchMax = planOptions.settings.researchMaxToolRounds;
+		const research = await runResearchStage(tco, stageCtx, options, {
+			onWebSearch: ({ count, max }) => {
+				const cap = max > 0 ? max : researchMax;
+				researchLive.updateWorkingBase(`MOA: 调研阶段 — web_search ${count}/${cap}…`);
+			},
+		});
 		const researchMs = researchLive.stop();
 		const researchWorker = research.results[0];
 		if (research.pack) {

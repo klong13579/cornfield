@@ -94,6 +94,39 @@ export async function writeStageArtifacts(dir: string, payload: StageArtifactsPa
 			dispatchLog: payload.dispatchLog,
 			rounds: payload.rounds,
 		});
+		// Sidecar audit files for timed-out / tool-heavy workers (easier than digging JSON).
+		const auditDir = path.join(dir, "worker-audit");
+		for (const w of payload.workerResults) {
+			const hasAudit =
+				Boolean(w.toolTraceText?.trim()) ||
+				Boolean(w.streamPreview?.trim()) ||
+				w.timedOut === true ||
+				w.idleTimedOut === true ||
+				w.toolBudgetExceeded === true;
+			if (!hasAudit) continue;
+			await Bun.write(
+				path.join(auditDir, `${w.name}.json`),
+				`${JSON.stringify(
+					{
+						name: w.name,
+						model: w.model,
+						ok: w.ok,
+						durationMs: w.durationMs,
+						stopReason: w.stopReason,
+						timedOut: w.timedOut,
+						idleTimedOut: w.idleTimedOut,
+						toolBudgetExceeded: w.toolBudgetExceeded,
+						aborted: w.aborted,
+						usage: w.usage,
+						stderr: w.stderr,
+						streamPreview: w.streamPreview,
+						toolTraceText: w.toolTraceText,
+					},
+					null,
+					2,
+				)}\n`,
+			);
+		}
 	}
 	if (payload.synthesis !== undefined) {
 		await writeJson(path.join(dir, "synthesis.json"), payload.synthesis);

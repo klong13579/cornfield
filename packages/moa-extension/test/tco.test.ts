@@ -2,15 +2,21 @@ import { describe, expect, it } from "bun:test";
 import discoveryPromptTemplate from "../src/prompts/discovery.md" with { type: "text" };
 import inputCollectPromptTemplate from "../src/prompts/input-collect.md" with { type: "text" };
 import {
+	applyPolishedClaims,
 	emptyTco,
+	extractCompareEntities,
 	extractJsonObject,
+	filterResearchPackForTask,
+	finalizeResearchPackFromToolTrace,
 	normalizeOutputSchema,
+	parseClaimPolishResponse,
 	parseDiscoveryOutput,
 	parseNeededInputs,
 	parseResearchPack,
 	parseResearchPackDetailed,
 	renderTcoForPrompt,
 	salvageResearchPack,
+	sanitizeResearchUrl,
 	validateTco,
 } from "../src/tco";
 import { DEFAULT_OUTPUT_SCHEMA, INPUT_COLLECT_SCHEMA } from "../src/types";
@@ -287,6 +293,29 @@ describe("renderTcoForPrompt", () => {
 		expect(out).toContain("RotatingFileTransport");
 		expect(out).toContain("Continue memory TTL unknown");
 	});
+
+	it("caps research_pack sources injected into prompts at 8", () => {
+		const { tco } = parseDiscoveryOutput(
+			JSON.stringify({ task_understanding: "compare", known_inputs: [] }),
+		);
+		tco.research_pack = {
+			mode: "required",
+			gathered_at: "2026-07-17T00:00:00.000Z",
+			queries: [],
+			sources: Array.from({ length: 12 }, (_, i) => ({
+				claim: `c${i}`,
+				url: `https://example.com/p${i}`,
+				relevance: "tool_trace",
+			})),
+			repo_facts: [],
+			gaps: [],
+		};
+		const out = renderTcoForPrompt(tco);
+		expect(out).toContain("https://example.com/p0");
+		expect(out).toContain("https://example.com/p7");
+		expect(out).not.toContain("https://example.com/p8");
+		expect(out).toContain("+4 more sources omitted");
+	});
 });
 
 describe("parseResearchPack (Phase 7)", () => {
@@ -392,7 +421,154 @@ describe("salvageResearchPack (soft-stop finalize)", () => {
 		expect(pack.sources.length).toBeGreaterThanOrEqual(2);
 		expect(pack.sources.some(s => s.url.includes("docs.cursor.com"))).toBe(true);
 		expect(pack.sources.some(s => s.url.includes("code.claude.com"))).toBe(true);
+		expect(pack.parse_source).toBe("tool_trace");
+	});
+
+	it("recovers urls from tool-trace text when assistant output is empty", () => {
+		const toolTrace = `[web_search]\nResults for openclaw:\n- https://github.com/openclaw/openclaw\n- https://docs.openclaw.ai/intro\n`;
+		const pack = salvageResearchPack(`\n${toolTrace}`, "required", "research interrupted: web_search budget exceeded (3)");
+		expect(pack.sources.length).toBeGreaterThanOrEqual(2);
+		expect(pack.sources.some(s => s.url.includes("github.com/openclaw"))).toBe(true);
+		expect(pack.parse_source).toBe("tool_trace");
+	});
+
+	it("sanitizes dirty tool-trace URLs into clean sources (no \\n[N junk)", () => {
+		const dirty = [
+			"https://openclaw.ai/\\n[2",
+			"https://docs.openclaw.ai/\\n[3",
+			"https://www.workbuddy.ai/\\n[2",
+			"http://127.0.0.1:18789/",
+		].join("\n");
+		const pack = finalizeResearchPackFromToolTrace(dirty, "required", "orchestrator finalize");
+		expect(pack.parse_source).toBe("tool_trace");
+		expect(pack.sources.length).toBe(3);
+		for (const s of pack.sources) {
+			expect(s.url).toMatch(/^https:\/\//);
+			expect(s.url).not.toMatch(/\\n|\[\d/);
+			expect(s.claim).not.toMatch(/\\n|\[\d/);
+		}
+		expect(pack.sources.some(s => s.url.includes("127.0.0.1"))).toBe(false);
+	});
+
+	it("strips trailing backticks / %60 and collapses path double-slashes", () => {
+		expect(sanitizeResearchUrl("https://www.anthropic.com/engineering/multi-agent-research-system`")).toBe(
+			"https://www.anthropic.com/engineering/multi-agent-research-system",
+		);
+		expect(sanitizeResearchUrl("https://www.langchain.com/blog/choosing%60")).toBe(
+			"https://www.langchain.com/blog/choosing",
+		);
+		const collapsed = sanitizeResearchUrl("https://workbuddy.dev//");
+		expect(collapsed).toBe("https://workbuddy.dev/");
+	});
+});
+
+describe("finalizeResearchPackFromToolTrace", () => {
+	it("marks parse_source tool_trace and caps sources", () => {
+		const urls = Array.from({ length: 15 }, (_, i) => `https://example.com/p${i}`).join("\n");
+		const pack = finalizeResearchPackFromToolTrace(urls, "required", "orchestrator finalize", { maxSources: 8 });
+		expect(pack.parse_source).toBe("tool_trace");
+		expect(pack.sources).toHaveLength(8);
+		expect(pack.sources[0]?.claim).not.toMatch(/recovered from interrupted/);
+		expect(pack.gaps[0]).toMatch(/orchestrator finalize|finalize/i);
+	});
+
+	it("falls back to salvage label when no urls", () => {
+		const pack = finalizeResearchPackFromToolTrace("no urls here", "encouraged", "empty");
 		expect(pack.parse_source).toBe("salvage");
+		expect(pack.sources).toEqual([]);
+	});
+
+	it("uses web_search title/snippet for claim and relevance (not bare host/path)", () => {
+		const raw = `[web_search]
+[1] Claude Code context window
+    https://code.claude.com/docs/en/context-window
+    Claude Code auto-compacts when the context approaches the token limit.
+[2] Cursor compaction notes
+    https://docs.cursor.com/context
+    Cursor sends SummarizeAction; compaction runs server-side.
+`;
+		const pack = finalizeResearchPackFromToolTrace(raw, "required", "orchestrator finalize");
+		expect(pack.parse_source).toBe("tool_trace");
+		expect(pack.sources.length).toBeGreaterThanOrEqual(2);
+		const claude = pack.sources.find(s => s.url.includes("code.claude.com"));
+		expect(claude?.claim).toMatch(/Claude Code context window|auto-compact/i);
+		expect(claude?.claim).not.toBe("code.claude.com/docs/en/context-window");
+		expect(claude?.relevance).not.toBe("tool_trace");
+		expect(claude?.relevance.length).toBeGreaterThan(10);
+	});
+});
+
+describe("applyPolishedClaims", () => {
+	it("rewrites claim/relevance by URL and leaves unmatched sources alone", () => {
+		const pack = finalizeResearchPackFromToolTrace(
+			"https://code.claude.com/docs/en/context-window\nhttps://docs.cursor.com/context",
+			"required",
+			"gap",
+		);
+		const polished = applyPolishedClaims(pack, [
+			{
+				url: "https://code.claude.com/docs/en/context-window",
+				claim: "Claude Code auto-compacts near the context limit",
+				relevance: "Directly describes compression trigger",
+			},
+		]);
+		const claude = polished.sources.find(s => s.url.includes("code.claude.com"));
+		expect(claude?.claim).toBe("Claude Code auto-compacts near the context limit");
+		expect(claude?.relevance).toBe("Directly describes compression trigger");
+		const cursor = polished.sources.find(s => s.url.includes("docs.cursor.com"));
+		expect(cursor?.claim).toBeTruthy();
+		expect(cursor?.claim).not.toBe("Claude Code auto-compacts near the context limit");
+	});
+
+	it("ignores empty polish claims", () => {
+		const pack = finalizeResearchPackFromToolTrace("https://example.com/a", "required", "gap");
+		const before = pack.sources[0]!.claim;
+		const polished = applyPolishedClaims(pack, [{ url: "https://example.com/a", claim: "  ", relevance: "x" }]);
+		expect(polished.sources[0]?.claim).toBe(before);
+	});
+});
+
+describe("parseClaimPolishResponse", () => {
+	it("parses JSON sources array from model output", () => {
+		const parsed = parseClaimPolishResponse(
+			JSON.stringify({
+				sources: [
+					{
+						url: "https://example.com/a",
+						claim: "Example ships feature X",
+						relevance: "Shows product capability",
+					},
+				],
+			}),
+		);
+		expect(parsed).toHaveLength(1);
+		expect(parsed[0]?.claim).toMatch(/feature X/);
+	});
+});
+
+describe("extractCompareEntities + filterResearchPackForTask (P1)", () => {
+	it("extracts compare entities from Chinese/English task text", () => {
+		expect(extractCompareEntities("hermes agent 和 workbuddy 的区别是什么？")).toEqual(["hermes", "workbuddy"]);
+		expect(extractCompareEntities("对比 Cursor 与 Claude Code 的会话压缩策略")).toEqual(["cursor", "claude"]);
+	});
+
+	it("drops off-topic sources when compare entities are clear", () => {
+		const pack = finalizeResearchPackFromToolTrace(
+			[
+				"https://hermes-agent.nousresearch.com/docs/memory",
+				"https://workbuddy.dev/",
+				"https://docs.openclaw.ai/intro",
+				"https://www.anthropic.com/engineering/multi-agent-research-system",
+				"https://github.com/NousResearch/hermes-agent",
+			].join("\n"),
+			"required",
+			"budget",
+		);
+		const filtered = filterResearchPackForTask(pack, "hermes agent 和 workbuddy 的区别是什么？");
+		expect(filtered.sources.some(s => s.url.includes("openclaw"))).toBe(false);
+		expect(filtered.sources.some(s => s.url.includes("anthropic.com"))).toBe(false);
+		expect(filtered.sources.some(s => /hermes/i.test(s.url) || /hermes/i.test(s.claim))).toBe(true);
+		expect(filtered.sources.some(s => /workbuddy/i.test(s.url) || /workbuddy/i.test(s.claim))).toBe(true);
 	});
 });
 

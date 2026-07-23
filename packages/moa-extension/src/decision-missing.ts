@@ -21,3 +21,31 @@ export function filterDecisionMissing(items: readonly TcoMissingInput[]): TcoMis
 function isDefinitionStyleKey(key: string): boolean {
 	return /(?:_definition|_reference|_identity|what_is_|what_are_|is_what|project_names)/i.test(key);
 }
+
+/** Synonym groups so Ask does not re-ask a fact already in known_inputs. */
+const KNOWN_KEY_ALIASES: ReadonlyArray<ReadonlyArray<string>> = [
+	["comparison_dims", "comparison_dimensions", "dimensions"],
+	["depth", "output_depth"],
+	["audience", "audience_type", "decision_context"],
+	["output_format", "format"],
+];
+
+function canonicalKnownKey(key: string): string {
+	const k = key.trim().toLowerCase();
+	for (const group of KNOWN_KEY_ALIASES) {
+		if (group.includes(k)) return group[0]!;
+	}
+	return k;
+}
+
+/**
+ * Drop missing_inputs whose key (or synonym) is already present in known_inputs.
+ */
+export function filterMissingAlreadyKnown(
+	missing: readonly TcoMissingInput[],
+	known: ReadonlyArray<{ key: string }>,
+): TcoMissingInput[] {
+	if (missing.length === 0 || known.length === 0) return [...missing];
+	const knownCanon = new Set(known.map(k => canonicalKnownKey(k.key)));
+	return missing.filter(m => !knownCanon.has(canonicalKnownKey(m.key)));
+}

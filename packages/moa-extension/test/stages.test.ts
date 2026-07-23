@@ -6,6 +6,8 @@ import * as judgeModule from "../src/quality/judge";
 import { resolveSettings } from "../src/settings";
 import {
 	buildDegradedSynthesis,
+	mapWorkerOutput,
+	resolvePlanWorkerMaxToolRounds,
 	restrictPlanWorkerTools,
 	runAskStage,
 	runDiscoveryStage,
@@ -30,6 +32,7 @@ function makeWorkerOutput(overrides: Partial<WorkerOutput> = {}): WorkerOutput {
 		timedOut: overrides.timedOut ?? false,
 		idleTimedOut: overrides.idleTimedOut,
 		toolBudgetExceeded: overrides.toolBudgetExceeded,
+		toolTraceText: overrides.toolTraceText,
 		stopReason: overrides.stopReason ?? "stop",
 		usage: overrides.usage ?? {
 			input: 0,
@@ -82,6 +85,66 @@ function baseOptions(moaSettings = resolveSettings({ workerExecutionMode: "subpr
 		ui: undefined as undefined,
 	};
 }
+
+describe("mapWorkerOutput (worker audit diagnostics)", () => {
+	it("forwards usage, duration, stopReason, timeout flags, and truncated toolTrace", () => {
+		const longTrace = `[read]\n${"x".repeat(40_000)}`;
+		const mapped = mapWorkerOutput(
+			makeWorkerOutput({
+				ok: false,
+				output: "",
+				stderr: "Request was aborted",
+				timedOut: true,
+				idleTimedOut: false,
+				toolBudgetExceeded: false,
+				aborted: true,
+				stopReason: "aborted",
+				toolTraceText: longTrace,
+				usage: { input: 100, output: 0, cacheRead: 10, cacheWrite: 0, cost: 0.01, turns: 2 },
+				durationMs: 480_123,
+			}),
+			"grounded",
+			"Evaluate constraints",
+			"narwal-plan/deepseek-v4-pro-202606",
+		);
+		expect(mapped.durationMs).toBe(480_123);
+		expect(mapped.stopReason).toBe("aborted");
+		expect(mapped.timedOut).toBe(true);
+		expect(mapped.idleTimedOut).toBe(false);
+		expect(mapped.toolBudgetExceeded).toBe(false);
+		expect(mapped.aborted).toBe(true);
+		expect(mapped.usage).toEqual({
+			input: 100,
+			output: 0,
+			cacheRead: 10,
+			cacheWrite: 0,
+			cost: 0.01,
+			turns: 2,
+		});
+		expect(mapped.toolTraceText).toBeDefined();
+		expect(mapped.toolTraceText!.length).toBeLessThan(longTrace.length);
+		expect(mapped.toolTraceText).toContain("[truncated");
+		expect(mapped.stderr).toMatch(/timed out after 480s/);
+	});
+
+	it("keeps streamPreview when provided for empty timed-out workers", () => {
+		const mapped = mapWorkerOutput(
+			makeWorkerOutput({
+				ok: false,
+				output: "",
+				timedOut: true,
+				durationMs: 1000,
+				stopReason: "aborted",
+			}),
+			"grounded",
+			"role",
+			"m",
+			undefined,
+			{ streamPreview: "partial thinking about workbuddy…" },
+		);
+		expect(mapped.streamPreview).toContain("workbuddy");
+	});
+});
 
 describe("runDiscoveryStage", () => {
 	afterEach(() => {
@@ -239,6 +302,108 @@ describe("runResearchStage (Phase 7)", () => {
 		expect(result.pack?.parse_source).toBe("salvage");
 		expect(result.pack?.gaps.join(" ")).toMatch(/budget|interrupted|web_search/i);
 	});
+
+	it("finalizes tool_trace pack when tool traces have URLs but model output is empty", async () => {
+		vi.spyOn(subprocess, "spawnMoaWorker").mockResolvedValue(
+			makeWorkerOutput({
+				ok: false,
+				output: "",
+				stderr: "research web_search budget exceeded after 3 searches",
+				toolBudgetExceeded: true,
+				toolTraceText:
+					"[web_search]\n- https://github.com/openclaw/openclaw\n- https://docs.openclaw.ai/intro\n- https://workbuddy.dev/",
+			}),
+		);
+		const moaSettings = resolveSettings({ researchMode: "required", workerExecutionMode: "subprocess" });
+		const result = await runResearchStage(
+			emptyTco("对比一下 workbuddy 和 openclaw", "test"),
+			{ task: "对比一下 workbuddy 和 openclaw", settings: moaSettings },
+			baseOptions(moaSettings),
+			{ polishClaims: false },
+		);
+		expect(result.packSource).toBe("tool_trace");
+		expect(result.pack?.parse_source).toBe("tool_trace");
+		expect(result.pack!.sources.length).toBeGreaterThanOrEqual(3);
+		expect(result.pack!.sources.length).toBeLessThanOrEqual(8);
+	});
+
+	it("applies claim polish (C) after tool_trace salvage", async () => {
+		vi.spyOn(subprocess, "spawnMoaWorker").mockResolvedValue(
+			makeWorkerOutput({
+				ok: false,
+				output: "",
+				stderr: "research web_search budget exceeded after 3 searches",
+				toolBudgetExceeded: true,
+				toolTraceText: `[web_search]
+[1] OpenClaw intro
+    https://docs.openclaw.ai/intro
+    OpenClaw is an open agent runtime for local workflows.
+`,
+			}),
+		);
+		const moaSettings = resolveSettings({ researchMode: "required", workerExecutionMode: "subprocess" });
+		const result = await runResearchStage(
+			emptyTco("对比一下 workbuddy 和 openclaw", "test"),
+			{ task: "对比一下 workbuddy 和 openclaw", settings: moaSettings },
+			baseOptions(moaSettings),
+			{
+				polishClaims: async ({ pack }) => ({
+					...pack,
+					sources: pack.sources.map(s =>
+						s.url.includes("docs.openclaw.ai")
+							? {
+									...s,
+									claim: "OpenClaw is an open agent runtime for local workflows",
+									relevance: "Defines OpenClaw product positioning",
+								}
+							: s,
+					),
+				}),
+			},
+		);
+		expect(result.packSource).toBe("tool_trace");
+		const openclaw = result.pack?.sources.find(s => s.url.includes("docs.openclaw.ai"));
+		expect(openclaw?.claim).toBe("OpenClaw is an open agent runtime for local workflows");
+		expect(openclaw?.relevance).toBe("Defines OpenClaw product positioning");
+	});
+
+	it("uses researchModel when set, otherwise synthesisModel", async () => {
+		const spy = vi.spyOn(subprocess, "spawnMoaWorker").mockResolvedValue(
+			makeWorkerOutput({
+				output: JSON.stringify({
+					queries: ["q"],
+					sources: [],
+					repo_facts: [],
+					gaps: [],
+				}),
+			}),
+		);
+		const withResearch = resolveSettings({
+			researchMode: "required",
+			workerExecutionMode: "subprocess",
+			synthesisModel: "provider/heavy-synth",
+			researchModel: "provider/light-research",
+		});
+		await runResearchStage(
+			emptyTco("对比业界压缩策略", "test"),
+			{ task: "对比业界压缩策略", settings: withResearch },
+			baseOptions(withResearch),
+		);
+		expect(spy.mock.calls[0]?.[0]?.model).toBe("provider/light-research");
+
+		spy.mockClear();
+		const withoutResearch = resolveSettings({
+			researchMode: "required",
+			workerExecutionMode: "subprocess",
+			synthesisModel: "provider/heavy-synth",
+		});
+		await runResearchStage(
+			emptyTco("对比业界压缩策略", "test"),
+			{ task: "对比业界压缩策略", settings: withoutResearch },
+			baseOptions(withoutResearch),
+		);
+		expect(spy.mock.calls[0]?.[0]?.model).toBe("provider/heavy-synth");
+	});
 });
 
 describe("buildDegradedSynthesis (Phase 7 — never empty)", () => {
@@ -303,6 +468,23 @@ describe("restrictPlanWorkerTools (Phase 7)", () => {
 	});
 	it("passes 'all' through unchanged for none mode", () => {
 		expect(restrictPlanWorkerTools("all", "none")).toBe("all");
+	});
+
+	it("intersects explicit lists so write/edit/bash cannot sneak in after research (P2)", () => {
+		const out = restrictPlanWorkerTools(["read", "write", "edit", "bash", "search", "web_search"], "required");
+		expect(out).toEqual(["read", "search"]);
+		expect(out).not.toContain("write");
+		expect(out).not.toContain("edit");
+		expect(out).not.toContain("bash");
+	});
+});
+
+describe("resolvePlanWorkerMaxToolRounds (P2)", () => {
+	it("caps compare research workers tighter than design", () => {
+		expect(resolvePlanWorkerMaxToolRounds("compare", "required")).toBe(8);
+		expect(resolvePlanWorkerMaxToolRounds("design", "encouraged")).toBe(12);
+		expect(resolvePlanWorkerMaxToolRounds("local-impl", "none")).toBe(12);
+		expect(resolvePlanWorkerMaxToolRounds("design", "none")).toBe(0);
 	});
 });
 

@@ -168,6 +168,10 @@ export function partitionFreeformIntoSchema(
 			out[listSec.name] = verifyLines.map(l => (l.startsWith("-") ? l : `- ${l}`)).join("\n");
 		} else if (/assumption/i.test(listSec.name)) {
 			out[listSec.name] = "";
+		} else if (/needed_input|missing_input|checklist/i.test(listSec.name)) {
+			// Input-collect checklist: never invent items from a freeform plan.
+			// Leaving empty keeps softRecovered so parseNeededInputs returns [].
+			out[listSec.name] = "";
 		} else if (verifyLines.length > 0) {
 			out[listSec.name] = verifyLines.map(l => (l.startsWith("-") ? l : `- ${l}`)).join("\n");
 		} else if ((out[primary.name] ?? "").trim().length > 0 || (codeSec && (out[codeSec.name] ?? "").trim())) {

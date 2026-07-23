@@ -90,10 +90,12 @@ plan-task schema (plan / open_questions / assumptions).
   comma-separated list, or select-from-options. Do not write
   "describe your needs" style questions.
 - **Never** put public-entity definitions in `missing_inputs` (e.g. "X 是什么",
-  "本项目里 X 指什么", "how is X defined"). Those belong to Research.
+  "本项目里 X 指什么", "how is X defined", "分别是什么", "具体是哪个").
+  Those belong to Research — do not ask the user to define named products/tools.
   For `compare` tasks, assume named products/tools are external unless the
   user explicitly says they are in-repo modules — ask about comparison
-  dimensions, audience, and depth instead.
+  dimensions, audience, and depth instead. Prefer keys like `comparison_dims`,
+  `audience`, `depth` over `*_identity` / `project_names` / definition asks.
 - `options` is required when `type = "select"`, omitted otherwise.
 - `source` is one of the 5 strings above. Pick the strongest source you
   have evidence for; default `llm_inferred` only if no signal exists.

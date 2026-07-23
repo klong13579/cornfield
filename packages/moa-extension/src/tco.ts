@@ -107,10 +107,10 @@ export interface ResearchPack {
 	/** Things still uncertain after research — flow into assumptions, NOT more search. */
 	gaps: string[];
 	/** How the pack was recovered from the research agent output. */
-	parse_source?: "json" | "markdown" | "salvage";
+	parse_source?: "json" | "markdown" | "salvage" | "tool_trace";
 }
 
-export type ResearchPackParseSource = "json" | "markdown" | "salvage";
+export type ResearchPackParseSource = "json" | "markdown" | "salvage" | "tool_trace";
 
 export interface ResearchPackParseResult {
 	pack: ResearchPack | null;
@@ -333,26 +333,159 @@ export function parseResearchPackDetailed(
 /**
  * Last-resort pack when the research agent was interrupted or emitted unparseable
  * output. Always non-null so TCO still carries a shared evidence stub (gaps + any
- * URLs scraped from the raw text).
+ * URLs scraped from the raw text). Prefer `finalizeResearchPackFromToolTrace` when
+ * tool traces are available — it caps sources and labels `tool_trace`.
  */
 export function salvageResearchPack(
 	raw: string,
 	mode: "encouraged" | "required",
 	reason: string,
 ): ResearchPack {
-	const sources: ResearchSource[] = [];
+	return finalizeResearchPackFromToolTrace(raw, mode, reason, { maxSources: 8 });
+}
+
+const DEFAULT_TOOL_TRACE_MAX_SOURCES = 8;
+
+/**
+ * Normalize a scraped URL from tool traces / model output into a usable href.
+ * Strips `\n[2`-style junk, trailing backticks / `%60`, path `//`, rejects loopback.
+ */
+export function sanitizeResearchUrl(raw: string): string | null {
+	let s = raw.trim();
+	if (!s) return null;
+	// Cut at escaped/literal newlines and other scrape debris.
+	const cut = s.search(/\\n|\\r|\n|\r|\\u00/);
+	if (cut >= 0) s = s.slice(0, cut);
+	s = s.replace(/`+/g, "");
+	s = s.replace(/%60/gi, "");
+	s = s.replace(/[.,;:'")\]]+$/g, "");
+	s = s.replace(/\[\d*$/g, "");
+	if (!/^https?:\/\/\S+/i.test(s)) return null;
+	try {
+		const u = new URL(s);
+		if (!u.hostname) return null;
+		if (u.hostname === "127.0.0.1" || u.hostname === "localhost" || u.hostname === "[::1]") return null;
+		u.pathname = u.pathname.replace(/\/{2,}/g, "/");
+		return u.toString();
+	} catch {
+		return null;
+	}
+}
+
+/** One hit parsed from coding-agent `web_search` LLM tool text. */
+export interface WebSearchHit {
+	url: string;
+	title: string;
+	snippet: string;
+}
+
+/**
+ * Parse `[N] Title\\n    url\\n    snippet` blocks from web_search tool traces
+ * (see `packages/coding-agent/src/web/search/index.ts` `formatForLLM`).
+ */
+export function extractWebSearchHits(raw: string): WebSearchHit[] {
+	const text = typeof raw === "string" ? raw : "";
+	const hits: WebSearchHit[] = [];
 	const seen = new Set<string>();
+	const re = /\[(\d+)\]\s+([^\n]+)\n[ \t]+(https?:\/\/\S+)(?:\n[ \t]+([^\n[\]]+))?/g;
+	for (const m of text.matchAll(re)) {
+		const titleRaw = (m[2] ?? "").trim().replace(/\s+\([^)]*\)\s*$/, "").trim();
+		const url = sanitizeResearchUrl(m[3] ?? "");
+		if (!url || seen.has(url)) continue;
+		seen.add(url);
+		const snippet = (m[4] ?? "").trim();
+		hits.push({ url, title: titleRaw, snippet });
+	}
+	return hits;
+}
+
+/** Prefer host diversity when capping recovered URLs. */
+export function extractResearchUrls(raw: string): string[] {
+	const seen = new Set<string>();
+	const urls: string[] = [];
 	const text = typeof raw === "string" ? raw : "";
 	for (const m of text.matchAll(/https?:\/\/[^\s)\]'">]+/gi)) {
-		const url = m[0]!.replace(/[.,;:]+$/g, "");
-		if (!/^https?:\/\/\S+/i.test(url) || seen.has(url)) continue;
-		seen.add(url);
-		sources.push({
-			claim: "recovered from interrupted research output",
-			url,
-			relevance: "salvage",
-		});
-		if (sources.length >= 20) break;
+		const cleaned = sanitizeResearchUrl(m[0]!);
+		if (!cleaned || seen.has(cleaned)) continue;
+		seen.add(cleaned);
+		urls.push(cleaned);
+	}
+	return urls;
+}
+
+function claimFromUrl(url: string): string {
+	try {
+		const u = new URL(url);
+		const path = u.pathname.replace(/\/+$/, "") || "/";
+		const shortPath = path.length > 48 ? `${path.slice(0, 48)}…` : path;
+		return `${u.hostname}${shortPath === "/" ? "" : shortPath}`;
+	} catch {
+		return url.slice(0, 80);
+	}
+}
+
+function claimFromHit(hit: WebSearchHit | undefined, url: string): { claim: string; relevance: string } {
+	if (!hit) {
+		return { claim: claimFromUrl(url), relevance: "tool_trace" };
+	}
+	const title = hit.title.trim();
+	const snippet = hit.snippet.trim();
+	const claim = title || (snippet ? snippet.slice(0, 160) : claimFromUrl(url));
+	const relevance = snippet
+		? snippet.length > 200
+			? `${snippet.slice(0, 199)}…`
+			: snippet
+		: title
+			? "web_search title"
+			: "tool_trace";
+	return { claim, relevance };
+}
+
+/**
+ * Orchestrator-side finalize: build a usable pack from tool traces / raw text.
+ * When URLs exist → `parse_source: "tool_trace"` (capped). Prefers web_search
+ * title/snippet for claim/relevance when present; otherwise host+path fallback.
+ */
+export function finalizeResearchPackFromToolTrace(
+	raw: string,
+	mode: "encouraged" | "required",
+	reason: string,
+	options: { maxSources?: number } = {},
+): ResearchPack {
+	const maxSources = Math.max(1, Math.floor(options.maxSources ?? DEFAULT_TOOL_TRACE_MAX_SOURCES));
+	const hits = extractWebSearchHits(raw);
+	const hitByUrl = new Map(hits.map(h => [h.url, h]));
+	const urls = [...hits.map(h => h.url), ...extractResearchUrls(raw)];
+	const uniqueUrls: string[] = [];
+	const seenUrl = new Set<string>();
+	for (const url of urls) {
+		if (seenUrl.has(url)) continue;
+		seenUrl.add(url);
+		uniqueUrls.push(url);
+	}
+	const sources: ResearchSource[] = [];
+	const hosts = new Set<string>();
+	// Prefer one URL per host first, then fill.
+	for (const pass of [0, 1] as const) {
+		for (const url of uniqueUrls) {
+			if (sources.length >= maxSources) break;
+			let host = "";
+			try {
+				host = new URL(url).hostname;
+			} catch {
+				host = url;
+			}
+			if (pass === 0 && hosts.has(host)) continue;
+			if (pass === 0) hosts.add(host);
+			else if (sources.some(s => s.url === url)) continue;
+			const { claim, relevance } = claimFromHit(hitByUrl.get(url), url);
+			sources.push({
+				claim,
+				url,
+				relevance,
+				confidence: "medium",
+			});
+		}
 	}
 	const gap = reason.trim() || "research interrupted with no usable pack";
 	return {
@@ -362,8 +495,66 @@ export function salvageResearchPack(
 		sources,
 		repo_facts: [],
 		gaps: [gap],
-		parse_source: "salvage",
+		parse_source: sources.length > 0 ? "tool_trace" : "salvage",
 	};
+}
+
+export interface PolishedResearchClaim {
+	url: string;
+	claim: string;
+	relevance?: string;
+}
+
+/** Merge LLM-polished claims onto an existing pack (URL key; empty claims ignored). */
+export function applyPolishedClaims(pack: ResearchPack, polished: PolishedResearchClaim[]): ResearchPack {
+	if (polished.length === 0) return pack;
+	const byUrl = new Map<string, PolishedResearchClaim>();
+	for (const p of polished) {
+		const url = sanitizeResearchUrl(p.url) ?? p.url.trim();
+		if (!url) continue;
+		const claim = typeof p.claim === "string" ? p.claim.trim() : "";
+		if (!claim) continue;
+		byUrl.set(url, {
+			url,
+			claim,
+			relevance: typeof p.relevance === "string" ? p.relevance.trim() : undefined,
+		});
+	}
+	if (byUrl.size === 0) return pack;
+	return {
+		...pack,
+		sources: pack.sources.map(s => {
+			const key = sanitizeResearchUrl(s.url) ?? s.url;
+			const upd = byUrl.get(key) ?? byUrl.get(s.url);
+			if (!upd) return s;
+			return {
+				...s,
+				claim: upd.claim,
+				relevance: upd.relevance || s.relevance,
+			};
+		}),
+	};
+}
+
+/** Parse tools-none claim-polish model JSON into URL-keyed updates. */
+export function parseClaimPolishResponse(raw: string): PolishedResearchClaim[] {
+	const obj = extractJsonObject(raw);
+	if (!obj || typeof obj !== "object") return [];
+	const sources = (obj as { sources?: unknown }).sources;
+	if (!Array.isArray(sources)) return [];
+	const out: PolishedResearchClaim[] = [];
+	for (const s of sources) {
+		if (!s || typeof s !== "object") continue;
+		const url = typeof (s as { url?: unknown }).url === "string" ? (s as { url: string }).url.trim() : "";
+		const claim = typeof (s as { claim?: unknown }).claim === "string" ? (s as { claim: string }).claim.trim() : "";
+		if (!url || !claim) continue;
+		const relevance =
+			typeof (s as { relevance?: unknown }).relevance === "string"
+				? (s as { relevance: string }).relevance.trim()
+				: undefined;
+		out.push({ url, claim, relevance });
+	}
+	return out;
 }
 
 function normalizeResearchSources(raw: unknown): ResearchSource[] {
@@ -371,13 +562,14 @@ function normalizeResearchSources(raw: unknown): ResearchSource[] {
 	const sources: ResearchSource[] = [];
 	for (const s of raw) {
 		if (!isObject(s)) continue;
-		const url = typeof s.url === "string" ? s.url.trim() : "";
-		if (!/^https?:\/\/\S+/i.test(url)) continue;
+		const urlRaw = typeof s.url === "string" ? s.url.trim() : "";
+		const url = sanitizeResearchUrl(urlRaw);
+		if (!url) continue;
 		const claim = typeof s.claim === "string" ? s.claim.trim() : "";
 		const relevance = typeof s.relevance === "string" ? s.relevance.trim() : "";
 		const confidence =
 			s.confidence === "high" || s.confidence === "medium" || s.confidence === "low" ? s.confidence : undefined;
-		sources.push({ claim, url, relevance, confidence });
+		sources.push({ claim: claim || claimFromUrl(url), url, relevance, confidence });
 	}
 	return sources;
 }
@@ -501,6 +693,111 @@ export function parseDiscoveryOutput(
 	};
 }
 
+/**
+ * Pull comparison / product tokens from a task (e.g. "A 和 B", "Cursor vs Claude").
+ * Used to demote off-topic research_pack URLs after salvage.
+ */
+export function extractCompareEntities(task: string): string[] {
+	const text = task.trim();
+	if (!text) return [];
+	const STOP = new Set([
+		"的",
+		"和",
+		"与",
+		"区别",
+		"对比",
+		"什么",
+		"是",
+		"一下",
+		"会话",
+		"压缩",
+		"策略",
+		"收益",
+		"比起",
+		"the",
+		"a",
+		"an",
+		"vs",
+		"versus",
+		"compare",
+		"comparison",
+		"between",
+		"and",
+		"for",
+		"of",
+		"to",
+		"how",
+		"what",
+		"with",
+		"session",
+		"code",
+		"agent",
+		"docs",
+		"api",
+		"cli",
+		"app",
+		"tool",
+		"system",
+		"omp",
+	]);
+	const parts = text.split(/(?:和|与|vs\.?|versus|对比|比起|相比较|\/)/i);
+	const entities: string[] = [];
+	const cjkNoise = /区别|对比|什么|策略|会话|压缩|收益|实现|方案|设计|一下|比起|分别/;
+	for (const part of parts) {
+		const tokens = part.match(/[A-Za-z][A-Za-z0-9._-]{1,}|[\u4e00-\u9fff]{2,8}/g) ?? [];
+		for (const tok of tokens) {
+			const n = tok.toLowerCase();
+			if (n.length < 2 || STOP.has(n)) continue;
+			if (/^[\u4e00-\u9fff]+$/.test(n) && cjkNoise.test(n)) continue;
+			if (!entities.includes(n)) entities.push(n);
+		}
+	}
+	return entities.slice(0, 6);
+}
+
+/**
+ * Prefer research sources that mention compare entities in url/claim/relevance.
+ * When ≥2 entities are detected, drop clearly off-topic URLs (e.g. OpenClaw on a
+ * Hermes vs WorkBuddy task). If nothing matches, leave the pack unchanged.
+ */
+export function filterResearchPackForTask(pack: ResearchPack, task: string): ResearchPack {
+	const entities = extractCompareEntities(task);
+	if (entities.length < 2 || pack.sources.length === 0) return pack;
+
+	const scored = pack.sources.map(s => {
+		const hay = `${s.url}\n${s.claim}\n${s.relevance}`.toLowerCase();
+		const matched = entities.filter(e => hay.includes(e));
+		return { s, score: matched.length, matched };
+	});
+	const onTopic = scored.filter(x => x.score > 0);
+	if (onTopic.length === 0) return pack;
+
+	const picked: ResearchSource[] = [];
+	const used = new Set<string>();
+	for (const e of entities) {
+		const hit = onTopic.find(x => x.matched.includes(e) && !used.has(x.s.url));
+		if (hit) {
+			picked.push(hit.s);
+			used.add(hit.s.url);
+		}
+	}
+	for (const x of [...onTopic].sort((a, b) => b.score - a.score)) {
+		if (used.has(x.s.url)) continue;
+		picked.push(x.s);
+		used.add(x.s.url);
+	}
+
+	const max = Math.min(8, pack.sources.length);
+	const sources = picked.slice(0, max);
+	if (sources.length === 0) return pack;
+	const dropped = pack.sources.length - sources.length;
+	const gaps = [...pack.gaps];
+	if (dropped > 0) {
+		gaps.push(`filtered ${dropped} off-topic research source(s) for entities: ${entities.join(", ")}`);
+	}
+	return { ...pack, sources, gaps };
+}
+
 function normalizeTaskIntent(value: unknown): TaskIntent | undefined {
 	if (value === "compare" || value === "design" || value === "local-impl") return value;
 	return undefined;
@@ -610,9 +907,13 @@ export function renderTcoForPrompt(tco: TaskContextObject, opts: { maxBytes?: nu
 		lines.push("", "### Research evidence (already gathered — do NOT re-search)");
 		if (pack.sources.length > 0) {
 			lines.push("Sources:");
-			for (const s of pack.sources) {
+			const maxInjectSources = 8;
+			for (const s of pack.sources.slice(0, maxInjectSources)) {
 				const conf = s.confidence ? ` [${s.confidence}]` : "";
 				lines.push(`- ${s.claim} — ${s.url} (${s.relevance})${conf}`);
+			}
+			if (pack.sources.length > maxInjectSources) {
+				lines.push(`- … +${pack.sources.length - maxInjectSources} more sources omitted`);
 			}
 		}
 		if (pack.repo_facts.length > 0) {

@@ -98,7 +98,9 @@ async function main(): Promise<number> {
 
 	const authStorage = await discoverAuthStorage();
 	const modelRegistry = new ModelRegistry(authStorage);
-	const settings = Settings.isolated({}, { cwd });
+	// Respect ~/.omp/agent/config.yml (e.g. selfEvolution.enabled=false).
+	// Settings.isolated({}) skips disk and keeps schema defaults.
+	const settings = await Settings.init({ cwd });
 	const ui = createStageCliUI();
 	const interactive = args.stage === "ask" || args.stage === "all" || args.stage === "workers";
 	const executeOptions = {

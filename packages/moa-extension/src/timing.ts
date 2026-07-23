@@ -4,6 +4,8 @@
 
 export type MoaTimingKey =
 	| "discovery"
+	| "input_collect"
+	| "research"
 	| "ask"
 	| "rewrite"
 	| "workers"
@@ -86,15 +88,26 @@ export class StageClock {
 	}
 }
 
-const SUMMARY_ORDER = ["discovery", "ask", "rewrite", "workers", "synthesis", "total"] as const;
+const SUMMARY_ORDER = [
+	"discovery",
+	"input_collect",
+	"research",
+	"ask",
+	"rewrite",
+	"workers",
+	"synthesis",
+	"total",
+] as const;
 
 function padLabel(label: string): string {
-	return label.padEnd(10, " ");
+	return label.padEnd(14, " ");
 }
 
 export function formatTimingSummary(timings: Record<string, number>): string {
 	const lines: string[] = ["MOA 耗时"];
 	for (const key of SUMMARY_ORDER) {
+		// Skip optional pre-Ask stages when they did not run (0 / absent).
+		if ((key === "input_collect" || key === "research") && !(timings[key] > 0)) continue;
 		const ms = timings[key] ?? 0;
 		let line = `  ${padLabel(key)}${formatDuration(ms)}`;
 		if (key === "workers") {

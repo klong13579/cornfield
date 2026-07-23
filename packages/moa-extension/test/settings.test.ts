@@ -19,8 +19,15 @@ describe("DEFAULT_SETTINGS (PR2 multi-round)", () => {
 		expect(DEFAULT_SETTINGS.askStrategy).toBe("grill-me");
 		expect(resolveSettings().askStrategy).toBe("grill-me");
 		expect(resolveSettings({ askStrategy: "form" }).askStrategy).toBe("form");
-		expect(DEFAULT_SETTINGS.grillMaxQuestions).toBe(5);
-		expect(resolveSettings({ maxQuestionsPerRound: 3 }).grillMaxQuestions).toBe(3);
+		expect(DEFAULT_SETTINGS.grillMaxQuestions).toBe(3);
+		expect(resolveSettings().grillMaxQuestions).toBe(3);
+		expect(resolveSettings({ maxQuestionsPerRound: 5 }).grillMaxQuestions).toBe(5);
+		expect(resolveSettings({ grillMaxQuestions: 2 }).grillMaxQuestions).toBe(2);
+		expect(DEFAULT_SETTINGS.researchMaxQueries).toBe(4);
+		expect(DEFAULT_SETTINGS.researchMaxToolRounds).toBe(5);
+		expect(DEFAULT_SETTINGS.researchEarlyStopAt).toBe(3);
+		expect(resolveSettings({ researchModel: "  provider/flash  " }).researchModel).toBe("provider/flash");
+		expect(resolveSettings({ researchModel: "   " }).researchModel).toBeUndefined();
 	});
 });
 
@@ -34,8 +41,9 @@ describe("resolveSettings — staged timeouts (Phase 7)", () => {
 		expect(s.synthesisTimeoutMs).toBe(300_000);
 		expect(s.workerIdleTimeoutMs).toBe(120_000);
 		expect(s.synthesisMinSurvivors).toBe(1);
-		expect(s.researchMaxQueries).toBe(6);
-		expect(s.researchMaxToolRounds).toBe(12);
+		expect(s.researchMaxQueries).toBe(4);
+		expect(s.researchMaxToolRounds).toBe(5);
+		expect(s.researchEarlyStopAt).toBe(3);
 	});
 
 	it("keeps a higher configured timeoutMs as the research + worker floor", () => {

@@ -1,5 +1,6 @@
 import { createActivityTimeout } from "./activity-timeout";
-import { createWebSearchToolBudget, RESEARCH_SOFT_ABORT_MS } from "./tool-budget";
+import { createWebSearchToolBudget, RESEARCH_EARLY_SOFT_ABORT_MS, RESEARCH_ENOUGH_URLS, RESEARCH_SOFT_ABORT_MS } from "./tool-budget";
+import { extractResearchUrls } from "./tco";
 import { randomBytes } from "node:crypto";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -44,15 +45,37 @@ export interface SpawnWorkerInput {
 	idleTimeoutMs?: number;
 	/**
 	 * Soft/hard budget on `web_search` starts (research stage).
-	 * 0 or unset = unlimited. Non-search tools do not count.
+	 * 0 or unset = unlimited. Non-search tools do not count unless
+	 * `countAllTools` is true (plan-worker round caps).
 	 */
 	maxToolRounds?: number;
+	/**
+	 * When true, every tool start counts toward `maxToolRounds` (plan workers).
+	 * Default false → only `web_search` counts (research stage).
+	 */
+	countAllTools?: boolean;
 	/**
 	 * Streaming callback (once-right P5). Invoked with the cumulative
 	 * assistant text so far as `message_update` / `message_end` events arrive
 	 * on the JSONL stdout stream. Optional — existing callers unchanged.
 	 */
 	onPartial?: (partial: { text: string }) => void;
+	/** Research progress: fired on each `web_search` start (`count` / `max`). */
+	onWebSearch?: (info: { count: number; max: number }) => void;
+	/**
+	 * Soft-stop after this many web_search starts (research). When set below
+	 * maxToolRounds, further searches soft-trip then hard-abort.
+	 */
+	earlyStopAt?: number;
+	/** Soft window ms when earlyStopAt trips (defaults to RESEARCH_EARLY_SOFT_ABORT_MS). */
+	earlySoftAbortMs?: number;
+	/** Captures tool result text for research salvage when the model emits no pack. */
+	onToolResult?: (info: { toolName: string; resultText: string }) => void;
+	/**
+	 * When true (plan workers after Research), block `read` of http(s) URLs so
+	 * workers cannot re-fetch pages already covered by research_pack.
+	 */
+	blockRemoteReads?: boolean;
 }
 
 export interface WorkerOutput {
@@ -66,6 +89,8 @@ export interface WorkerOutput {
 	idleTimedOut?: boolean;
 	/** True when aborted because maxToolRounds was exceeded. */
 	toolBudgetExceeded?: boolean;
+	/** Concatenated tool_execution_end payloads (research salvage). */
+	toolTraceText?: string;
 	model?: string;
 	stopReason?: string;
 	usage: {
@@ -107,6 +132,16 @@ interface AgentEndEvent {
 }
 
 type WorkerEvent = { type: string; [key: string]: unknown } | MessageEndEvent | AgentEndEvent;
+
+function formatToolResultText(result: unknown): string {
+	if (result == null) return "";
+	if (typeof result === "string") return result.slice(0, 12_000);
+	try {
+		return JSON.stringify(result).slice(0, 12_000);
+	} catch {
+		return String(result).slice(0, 12_000);
+	}
+}
 
 function isAssistantMessage(value: unknown): value is AssistantLike {
 	if (!value || typeof value !== "object") return false;
@@ -386,13 +421,20 @@ export async function spawnMoaWorker(input: SpawnWorkerInput): Promise<WorkerOut
 
 		const streamState: WorkerStreamState = { text: "" };
 		const maxToolRounds = Math.max(0, Math.floor(input.maxToolRounds ?? 0));
+		const earlyStopAt = Math.max(0, Math.floor(input.earlyStopAt ?? 0));
+		const toolTraceParts: string[] = [];
+		const evidenceUrls = new Set<string>();
 		toolBudget = createWebSearchToolBudget({
 			maxWebSearches: maxToolRounds,
+			earlyStopAt: earlyStopAt > 0 ? earlyStopAt : undefined,
 			softAbortMs: RESEARCH_SOFT_ABORT_MS,
+			earlySoftAbortMs: input.earlySoftAbortMs ?? RESEARCH_EARLY_SOFT_ABORT_MS,
+			countedTool: input.countAllTools ? "*" : "web_search",
 			onSoftAbort: () => {
 				toolBudgetExceeded = true;
 				killProc();
 			},
+			onWebSearch: input.onWebSearch,
 		});
 		const onLine = (line: string) => {
 			const trimmed = line.trim();
@@ -408,6 +450,22 @@ export async function spawnMoaWorker(input: SpawnWorkerInput): Promise<WorkerOut
 					} else if (decision === "hard_abort") {
 						toolBudgetExceeded = true;
 						killProc();
+					}
+				}
+				if (event.type === "tool_execution_end") {
+					const toolName = typeof event.toolName === "string" ? event.toolName : "";
+					const resultText = formatToolResultText((event as { result?: unknown }).result);
+					if (resultText) {
+						toolTraceParts.push(`[${toolName}]\n${resultText}`);
+						input.onToolResult?.({ toolName, resultText });
+						// Only web_search evidence counts — plan workers may read docs with URLs.
+						if (toolName.trim() === "web_search") {
+							for (const url of extractResearchUrls(resultText)) evidenceUrls.add(url);
+							if (evidenceUrls.size >= RESEARCH_ENOUGH_URLS) {
+								toolBudget?.signalEnoughEvidence();
+								if (toolBudget?.exceeded) toolBudgetExceeded = true;
+							}
+						}
 					}
 				}
 				if (input.onPartial) {
@@ -446,6 +504,7 @@ export async function spawnMoaWorker(input: SpawnWorkerInput): Promise<WorkerOut
 			timedOut,
 			idleTimedOut,
 			toolBudgetExceeded,
+			toolTraceText: toolTraceParts.length > 0 ? toolTraceParts.join("\n\n") : undefined,
 			model,
 			stopReason,
 			usage,

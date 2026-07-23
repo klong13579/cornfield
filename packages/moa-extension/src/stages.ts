@@ -12,12 +12,13 @@ import {
 	askMissingInputs,
 	askQuestionsList,
 } from "./ask-user";
-import { filterDecisionMissing } from "./decision-missing";
+import { filterDecisionMissing, filterMissingAlreadyKnown } from "./decision-missing";
 import { parseGrillQuestion, runGrillAsk, type GrillQuestion, type GrillQuestionContext } from "./grill-ask";
 import { buildWorkerTaskMessage, renderOutputSchemaAsMarkdown } from "./planner";
 import discoveryPromptTemplate from "./prompts/discovery.md" with { type: "text" };
 import grillAskPromptTemplate from "./prompts/grill-ask.md" with { type: "text" };
 import inputCollectPromptTemplate from "./prompts/input-collect.md" with { type: "text" };
+import researchClaimPolishPromptTemplate from "./prompts/research-claim-polish.md" with { type: "text" };
 import researchPromptTemplate from "./prompts/research.md" with { type: "text" };
 import rewritePromptTemplate from "./prompts/rewrite.md" with { type: "text" };
 import synthesisPromptTemplate from "./prompts/synthesis.md" with { type: "text" };
@@ -27,9 +28,12 @@ import { type ResearchMode, resolveResearchMode, resolveWorkerTimeoutMs } from "
 import { resolveSettings } from "./settings";
 import type { WorkerOutput } from "./subprocess";
 import {
+	applyPolishedClaims,
 	emptyTco,
+	filterResearchPackForTask,
 	formatTcoValue,
 	gatherDiscoveryContext,
+	parseClaimPolishResponse,
 	parseDiscoveryOutput,
 	parseNeededInputs,
 	parseResearchPackDetailed,
@@ -173,6 +177,7 @@ export function mapWorkerOutput(
 	role: string,
 	model?: string,
 	rewrittenPrompt?: string,
+	extras: { streamPreview?: string } = {},
 ): MoaWorkerResult {
 	let stderr = result.stderr;
 	if (result.timedOut) {
@@ -186,6 +191,8 @@ export function mapWorkerOutput(
 				: "timed out";
 		stderr = stderr.trim() ? `${stderr.trim()}\n(${timeoutNote})` : timeoutNote;
 	}
+	const toolTraceText = truncateWorkerAuditText(result.toolTraceText);
+	const streamPreview = truncateWorkerAuditText(extras.streamPreview, WORKER_STREAM_PREVIEW_MAX_CHARS);
 	return {
 		name,
 		role,
@@ -195,7 +202,27 @@ export function mapWorkerOutput(
 		exitCode: result.exitCode,
 		model,
 		rewrittenPrompt,
+		durationMs: result.durationMs,
+		stopReason: result.stopReason,
+		timedOut: result.timedOut,
+		idleTimedOut: result.idleTimedOut,
+		toolBudgetExceeded: result.toolBudgetExceeded,
+		aborted: result.aborted,
+		usage: result.usage,
+		toolTraceText,
+		streamPreview,
 	};
+}
+
+/** Cap tool traces in workers.json so a hung read loop cannot blow artifact size. */
+const WORKER_TOOL_TRACE_MAX_CHARS = 24_000;
+const WORKER_STREAM_PREVIEW_MAX_CHARS = 4_000;
+
+function truncateWorkerAuditText(text: string | undefined, maxChars = WORKER_TOOL_TRACE_MAX_CHARS): string | undefined {
+	if (!text?.trim()) return undefined;
+	if (text.length <= maxChars) return text;
+	const omitted = text.length - maxChars;
+	return `${text.slice(0, maxChars)}\n\n[truncated ${omitted} chars]`;
 }
 
 export function mapExecutionError(name: string, role: string, error: unknown, model?: string): MoaWorkerResult {
@@ -381,19 +408,38 @@ export const RESEARCH_TOOLS = ["read", "search", "find", "web_search", "ast_grep
 export const PLAN_WORKER_TOOLS_NO_SEARCH = ["read", "search", "find", "ast_grep"] as const;
 
 /**
- * Strip `web_search` from a plan worker's tool list once the Research stage has
- * gathered evidence. Plan workers build on the shared `research_pack` instead of
- * each re-running searches. `none` mode passes through unchanged. `"all"` expands
- * to the read-only set without `web_search` so in-process / subprocess both honor
- * the ban (in-process previously treated `"all"` as the full IN_PROCESS_TOOLS).
+ * Strip `web_search` (and any side-effect tools) from a plan worker's tool list
+ * once the Research stage has gathered evidence. Plan workers build on the shared
+ * `research_pack` instead of each re-running searches. `none` mode passes through
+ * unchanged. `"all"` expands to the read-only set without `web_search`. Explicit
+ * lists are **intersected** with the allow-list so `write`/`edit`/`bash` cannot
+ * sneak through after research.
  */
 export function restrictPlanWorkerTools(
 	tools: readonly string[] | "all",
 	researchMode: ResearchMode,
 ): readonly string[] | "all" {
 	if (researchMode === "none") return tools;
+	const allowed = new Set<string>(PLAN_WORKER_TOOLS_NO_SEARCH);
 	if (tools === "all") return [...PLAN_WORKER_TOOLS_NO_SEARCH];
-	return tools.filter(t => t !== "web_search");
+	return tools.filter(t => allowed.has(t));
+}
+
+/**
+ * Soft/hard tool-call cap for plan workers (counts every tool when >0).
+ * Research compare tasks are tighter; design research looser; local-impl without
+ * research still gets a cap so critical doesn't wander forever. 0 = unlimited.
+ */
+export function resolvePlanWorkerMaxToolRounds(
+	intent: TaskIntent | undefined,
+	researchMode: ResearchMode,
+): number {
+	if (researchMode !== "none") {
+		if (intent === "compare") return 8;
+		return 12;
+	}
+	if (intent === "local-impl") return 12;
+	return 0;
 }
 
 export interface ResearchStageResult {
@@ -404,14 +450,31 @@ export interface ResearchStageResult {
 	durationMs: number;
 }
 
+/** Optional override for claim polish (C). Pass `false` to skip. */
+export type ResearchClaimPolishFn = (input: {
+	task: string;
+	pack: ResearchPack;
+	signal?: AbortSignal;
+}) => Promise<ResearchPack>;
+
+export interface ResearchStageHooks {
+	onWebSearch?: (info: { count: number; max: number }) => void;
+	/** Claim polish after tool_trace salvage. Default: tools-none LLM pass. */
+	polishClaims?: ResearchClaimPolishFn | false;
+}
+
+/** Wall-clock budget for the post-salvage claim polish call (C). */
+const RESEARCH_CLAIM_POLISH_TIMEOUT_MS = 60_000;
+
 export async function runResearchStage(
 	tco: TaskContextObject,
 	ctx: StageContext,
 	options: ExecutePlanOptions,
+	hooks: ResearchStageHooks = {},
 ): Promise<ResearchStageResult> {
 	const started = Date.now();
 	const planOptions = resolveStageOptions(ctx, options);
-	const core = await runResearchCore(tco, planOptions, options);
+	const core = await runResearchCore(tco, planOptions, options, hooks);
 	return { ...core, durationMs: Math.max(0, Date.now() - started) };
 }
 
@@ -419,22 +482,29 @@ async function runResearchCore(
 	tco: TaskContextObject,
 	planOptions: ResolvedPlanOptions,
 	options: ExecutePlanOptions,
+	hooks: ResearchStageHooks = {},
 ): Promise<{ pack: ResearchPack | null; packSource: ResearchPackParseSource | null; results: MoaWorkerResult[] }> {
 	const mode = resolveResearchMode(planOptions.task, planOptions.settings.researchMode);
 	if (mode === "none") return { pack: null, packSource: null, results: [] };
 	const tcoBlock = renderTcoForPrompt(tco, { maxBytes: planOptions.settings.tcoInjectMaxBytes });
 	const maxQueries = planOptions.settings.researchMaxQueries;
 	const maxToolRounds = planOptions.settings.researchMaxToolRounds;
+	const earlyStopAt = planOptions.settings.researchEarlyStopAt;
 	const systemPrompt = prompt.render(researchPromptTemplate, {
 		task: planOptions.task,
 		tco_block: tcoBlock || undefined,
 		max_queries: maxQueries,
 		max_tool_rounds: maxToolRounds > 0 ? maxToolRounds : undefined,
+		early_stop_at: earlyStopAt > 0 ? earlyStopAt : undefined,
 	});
-	// Research uses the strong synthesis model (evidence quality > diversity here).
-	const resolvedModel = resolveModel(planOptions.settings.synthesisModel, options.modelRegistry);
+	// Research uses the strong synthesis model by default; prefer researchModel
+	// when set (cheaper/faster for search + pack assembly).
+	const researchModelHint =
+		planOptions.settings.researchModel?.trim() || planOptions.settings.synthesisModel;
+	const resolvedModel = resolveModel(researchModelHint, options.modelRegistry);
 	const workerName = "research";
 	const workerRole = "Gather external + repo evidence once for all plan workers";
+	const toolTraceParts: string[] = [];
 	try {
 		const result = await planOptions.engine.execute({
 			cwd: options.cwd,
@@ -445,34 +515,97 @@ async function runResearchCore(
 			timeoutMs: planOptions.settings.researchTimeoutMs,
 			idleTimeoutMs: planOptions.settings.workerIdleTimeoutMs,
 			maxToolRounds: maxToolRounds > 0 ? maxToolRounds : undefined,
+			earlyStopAt: earlyStopAt > 0 ? earlyStopAt : undefined,
 			signal: options.signal,
+			onWebSearch: hooks.onWebSearch,
+			onToolResult: ({ toolName, resultText }) => {
+				toolTraceParts.push(`[${toolName}]\n${resultText}`);
+			},
 		});
 		const mapped = mapWorkerOutput(result, workerName, workerRole, resolvedModel);
 		const packMode = mode === "required" ? "required" : "encouraged";
 		const detailed = parseResearchPackDetailed(result.output, packMode);
 		if (detailed.pack) {
-			return { pack: detailed.pack, packSource: detailed.source, results: [mapped] };
+			const filtered = filterResearchPackForTask(detailed.pack, planOptions.task);
+			return { pack: filtered, packSource: detailed.source, results: [mapped] };
 		}
 		// Soft-stop / empty finalize: never leave research with a null pack once
-		// the agent ran — workers need a shared stub (gaps + any recovered URLs).
+		// the agent ran — salvage URLs from model output + tool traces.
 		const reason = result.toolBudgetExceeded
-			? `research interrupted: web_search budget exceeded (${maxToolRounds})`
+			? `research interrupted: web_search budget exceeded (${earlyStopAt > 0 ? earlyStopAt : maxToolRounds})`
 			: result.timedOut || result.idleTimedOut
 				? "research interrupted: timeout"
 				: result.stderr.trim()
 					? `research interrupted: ${result.stderr.trim().slice(0, 200)}`
 					: "research output unparseable or empty";
-		const salvaged = salvageResearchPack(`${result.output}\n${result.stderr}`, packMode, reason);
-		return { pack: salvaged, packSource: "salvage", results: [mapped] };
+		const salvageRaw = [result.output, result.stderr, result.toolTraceText, toolTraceParts.join("\n\n")]
+			.filter(Boolean)
+			.join("\n");
+		const salvaged = salvageResearchPack(salvageRaw, packMode, reason);
+		const polished = await polishSalvagedResearchPack(salvaged, {
+			task: planOptions.task,
+			engine: planOptions.engine,
+			cwd: options.cwd,
+			model: resolvedModel,
+			signal: options.signal,
+			hooks,
+		});
+		const filtered = filterResearchPackForTask(polished, planOptions.task);
+		return { pack: filtered, packSource: filtered.parse_source ?? "salvage", results: [mapped] };
 	} catch (error) {
 		const packMode = mode === "required" ? "required" : "encouraged";
 		const message = error instanceof Error ? error.message : String(error);
 		const salvaged = salvageResearchPack("", packMode, `research interrupted: ${message}`);
 		return {
 			pack: salvaged,
-			packSource: "salvage",
+			packSource: salvaged.parse_source ?? "salvage",
 			results: [mapExecutionError(workerName, workerRole, error, resolvedModel)],
 		};
+	}
+}
+
+async function polishSalvagedResearchPack(
+	pack: ResearchPack,
+	deps: {
+		task: string;
+		engine: MoaWorkerEngine;
+		cwd: string;
+		model: string | undefined;
+		signal?: AbortSignal;
+		hooks: ResearchStageHooks;
+	},
+): Promise<ResearchPack> {
+	if (deps.hooks.polishClaims === false) return pack;
+	if (pack.sources.length === 0) return pack;
+	if (pack.parse_source === "json" || pack.parse_source === "markdown") return pack;
+
+	if (typeof deps.hooks.polishClaims === "function") {
+		try {
+			return await deps.hooks.polishClaims({ task: deps.task, pack, signal: deps.signal });
+		} catch {
+			return pack;
+		}
+	}
+
+	try {
+		const systemPrompt = prompt.render(researchClaimPolishPromptTemplate, {
+			task: deps.task,
+			sources_json: JSON.stringify(pack.sources, null, 2),
+		});
+		const result = await deps.engine.execute({
+			cwd: deps.cwd,
+			systemPrompt,
+			task: "Polish research claims. Reply with JSON only.",
+			model: deps.model,
+			tools: "none",
+			timeoutMs: RESEARCH_CLAIM_POLISH_TIMEOUT_MS,
+			signal: deps.signal,
+		});
+		const updates = parseClaimPolishResponse(result.output);
+		if (updates.length === 0) return pack;
+		return applyPolishedClaims(pack, updates);
+	} catch {
+		return pack;
 	}
 }
 
@@ -510,7 +643,11 @@ async function runAskUserCore(
 		hasUI: planOptions.hasUI,
 	};
 	// Drop definition-style questions before any Ask path (Research owns those).
-	tco.missing_inputs = filterDecisionMissing(tco.missing_inputs);
+	// Also drop keys already present in known_inputs (synonyms included).
+	tco.missing_inputs = filterMissingAlreadyKnown(
+		filterDecisionMissing(tco.missing_inputs),
+		tco.known_inputs,
+	);
 
 	const strategy = resolveEffectiveAskStrategy(planOptions.settings.askStrategy, tco, planOptions.task);
 	if (strategy === "grill-me") {
@@ -788,6 +925,9 @@ async function runWorker(
 			researchMode === "none"
 				? resolveWorkerTimeoutMs(planOptions.settings.timeoutMs, researchMode)
 				: planOptions.settings.workerTimeoutMs;
+		const intent = inferTaskIntentFromText(plan.task);
+		const planWorkerMaxToolRounds = resolvePlanWorkerMaxToolRounds(intent, researchMode);
+		let lastPartial = "";
 		const result = await planOptions.engine.execute({
 			cwd: options.cwd,
 			systemPrompt: promptText,
@@ -798,9 +938,17 @@ async function runWorker(
 			signal: options.signal,
 			timeoutMs: workerTimeoutMs,
 			idleTimeoutMs: planOptions.settings.workerIdleTimeoutMs,
-			onPartial: onPartial ? partial => onPartial({ name: worker.name, text: partial.text }) : undefined,
+			blockRemoteReads: researchMode !== "none",
+			maxToolRounds: planWorkerMaxToolRounds > 0 ? planWorkerMaxToolRounds : undefined,
+			countAllTools: planWorkerMaxToolRounds > 0,
+			onPartial: partial => {
+				lastPartial = partial.text;
+				onPartial?.({ name: worker.name, text: partial.text });
+			},
 		});
-		return mapWorkerOutput(result, worker.name, worker.role, resolvedModel ?? worker.model, worker.rewrittenPrompt);
+		return mapWorkerOutput(result, worker.name, worker.role, resolvedModel ?? worker.model, worker.rewrittenPrompt, {
+			streamPreview: lastPartial,
+		});
 	} catch (error) {
 		return mapExecutionError(worker.name, worker.role, error, resolvedModel ?? worker.model);
 	}

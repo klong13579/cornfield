@@ -49,6 +49,7 @@ describe("renderResearchGuidance", () => {
 		expect(text).toMatch(/do not call `?web_search|disabled for this role/i);
 		expect(text).toMatch(/## sources|sources/i);
 		expect(text).toMatch(/do not invent URLs/i);
+		expect(text).toMatch(/do not `?read`? (remote |https?|URL)|remote URL|http\(s\)/i);
 	});
 
 	it("keeps required strictness while still forbidding self web_search", () => {
@@ -56,6 +57,7 @@ describe("renderResearchGuidance", () => {
 		expect(text).toMatch(/REQUIRED/i);
 		expect(text).toMatch(/do not call `?web_search|disabled for this role/i);
 		expect(text).toMatch(/## sources|sources/i);
+		expect(text).toMatch(/do not `?read`? (remote |https?|URL)|remote URL|http\(s\)/i);
 	});
 });
 

@@ -74,8 +74,9 @@ export const DEFAULT_SETTINGS: MoaSettings = {
 	synthesisTimeoutMs: 300_000,
 	workerIdleTimeoutMs: 120_000,
 	synthesisMinSurvivors: 1,
-	researchMaxQueries: 6,
-	researchMaxToolRounds: 12,
+	researchMaxQueries: 4,
+	researchMaxToolRounds: 5,
+	researchEarlyStopAt: 3,
 	resumeContextBytes: 8_000,
 	discoveryTimeoutMs: TCO_DISCOVERY_TIMEOUT_MS_DEFAULT,
 	rewriteTimeoutMs: TCO_REWRITE_TIMEOUT_MS_DEFAULT,
@@ -83,7 +84,7 @@ export const DEFAULT_SETTINGS: MoaSettings = {
 	askTimeoutMs: TCO_ASK_TIMEOUT_MS_DEFAULT,
 	askEnabled: true,
 	askStrategy: "grill-me",
-	grillMaxQuestions: 5,
+	grillMaxQuestions: 3,
 	inputCollectEnabled: true,
 	tcoInjectMaxBytes: 8_000,
 	// Multi-round (PR2). TUI keeps maxRounds=1 as the documented plan budget;
@@ -215,6 +216,11 @@ export function resolveSettings(overrides: Partial<MoaSettings> = {}): MoaSettin
 		0,
 		Math.floor(mergedOverrides.researchMaxToolRounds ?? DEFAULT_SETTINGS.researchMaxToolRounds),
 	);
+	const researchEarlyStopAt = Math.max(
+		0,
+		Math.floor(mergedOverrides.researchEarlyStopAt ?? DEFAULT_SETTINGS.researchEarlyStopAt),
+	);
+	const researchModel = mergedOverrides.researchModel?.trim() || undefined;
 	// Normalize workerExecutionMode: only valid values pass through.
 	const rawMode = mergedOverrides.workerExecutionMode;
 	const workerExecutionMode: "subprocess" | "in-process" =
@@ -253,7 +259,9 @@ export function resolveSettings(overrides: Partial<MoaSettings> = {}): MoaSettin
 		1,
 		Math.floor(
 			mergedOverrides.grillMaxQuestions ??
-				(maxQuestionsPerRound > 0 ? maxQuestionsPerRound : DEFAULT_SETTINGS.grillMaxQuestions),
+				(mergedOverrides.maxQuestionsPerRound !== undefined
+					? maxQuestionsPerRound
+					: DEFAULT_SETTINGS.grillMaxQuestions),
 		),
 	);
 	return {
@@ -274,6 +282,8 @@ export function resolveSettings(overrides: Partial<MoaSettings> = {}): MoaSettin
 		synthesisMinSurvivors,
 		researchMaxQueries,
 		researchMaxToolRounds,
+		researchEarlyStopAt,
+		researchModel,
 		workerExecutionMode,
 		quality: resolveQualitySettings(mergedOverrides.quality),
 		researchMode,

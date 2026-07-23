@@ -69,6 +69,30 @@ describe("formatTimingSummary", () => {
 		expect(text).toContain("r2 19.2s");
 		expect(text).toContain("total");
 		expect(text).toContain("81.2s");
+		expect(text).not.toContain("research");
+		expect(text).not.toContain("input_collect");
+	});
+
+	it("includes research and input_collect when present, in pipeline order", () => {
+		const text = formatTimingSummary({
+			discovery: 20_000,
+			input_collect: 30_000,
+			research: 842_000,
+			ask: 100_000,
+			rewrite: 90_000,
+			workers: 90_000,
+			synthesis: 60_000,
+			total: 1_200_000,
+		});
+		expect(text).toContain("input_collect");
+		expect(text).toContain("research");
+		expect(text).toContain("842.0s");
+		const idxCollect = text.indexOf("input_collect");
+		const idxResearch = text.indexOf("research");
+		const idxAsk = text.indexOf("ask");
+		expect(idxCollect).toBeGreaterThan(-1);
+		expect(idxResearch).toBeGreaterThan(idxCollect);
+		expect(idxAsk).toBeGreaterThan(idxResearch);
 	});
 
 	it("omits round breakdown when only one workers round", () => {
