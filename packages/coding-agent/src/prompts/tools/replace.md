@@ -6,7 +6,13 @@ hashes, or any position-based addressing. Edits are identified by **what text to
 line number, use `bash` with `sed` instead — see the bash-alternatives section below.
 
 <instruction>
-- Params **MUST** be `{ path, edits }`; `path` is required at the top level and applies to every replacement
+- **REQUIRED**: The call MUST have BOTH `path` (top-level string) AND `edits` (array of objects, or a single object).
+  - ✅ CORRECT: `{"path": "src/foo.ts", "edits": [{"old_text": "a", "new_text": "b"}]}`
+  - ❌ WRONG: `{"path": "src/foo.ts", "edits": [{}]}` (edits entry missing old_text and new_text)
+  - ❌ WRONG: `{"path": "src/foo.ts", "edits": ["old_text"]}` (edits entry is a string, not an object)
+  - ❌ WRONG: `{"edits": [...]}` (missing top-level path)
+  - ❌ WRONG: `{}` (missing both path and edits)
+- Each entry in `edits` MUST be an object with BOTH `old_text` AND `new_text` fields.
 - You **MUST** use the smallest `old_text` that uniquely identifies the change
 - If `old_text` is not unique, you **MUST** expand it with more context or use `all: true` to replace all occurrences
 - You **SHOULD** prefer editing existing files over creating new ones

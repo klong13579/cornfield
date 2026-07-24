@@ -38,7 +38,11 @@ const EDIT_TOOL_CONTRACT =
 	"The `_i` field is OPTIONAL metadata about your intent — it does NOT replace " +
 	"required fields. A tool call with only `_i` and missing required fields will fail validation. " +
 	"Re-emit the call with the full argument object, not just intent.\n\n" +
-	"Example: {\"path\": \"src/foo.ts\", \"edits\": [{\"old_text\": \"a\", \"new_text\": \"b\"}]}\n\n" +
+	"✅ CORRECT: {\"path\": \"src/foo.ts\", \"edits\": [{\"old_text\": \"text to find\", \"new_text\": \"replacement\"}]}\n" +
+	"❌ WRONG: {\"path\": \"src/foo.ts\", \"edits\": [{}]} (edits entry missing old_text and new_text)\n" +
+	"❌ WRONG: {\"path\": \"src/foo.ts\", \"edits\": [\"old_text\"]} (edits entry is a string, not an object)\n" +
+	"❌ WRONG: {\"edits\": [...]} (missing top-level `path`)\n" +
+	"❌ WRONG: {} (missing both path and edits)\n\n" +
 	"**Content-based ONLY**: The replace mode uses `old_text`/`new_text` to find text " +
 	"by its content. It does NOT accept `loc`, `line`, `range`, or any position-based fields. " +
 	"If you need to edit by line number, use `bash` with `sed` instead.\n\n";

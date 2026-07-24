@@ -676,6 +676,44 @@ type FetchRenderResult = RenderResult & {
 // =============================================================================
 
 /**
+ * Try Parallel extract as browser-based fallback after loadPage fails.
+ * Handles JS-rendered pages that raw HTTP fetch cannot parse.
+ */
+async function tryParallelExtract(
+	url: string,
+	timeout: number,
+	signal?: AbortSignal,
+): Promise<FetchRenderResult | null> {
+	if (!(await findParallelApiKey())) return null;
+	try {
+		const parallelSignal = ptree.combineSignals(signal, Math.min(timeout, 10) * 1000);
+		const result = await extractWithParallel([url], {
+			objective: "Extract the main content",
+			excerpts: true,
+			fullContent: true,
+			signal: parallelSignal,
+		});
+		const doc = result.results[0];
+		if (!doc) return null;
+		const content = getParallelExtractContent(doc);
+		if (content.trim().length < 100) return null;
+		return {
+			url,
+			finalUrl: doc.url || url,
+			contentType: "text/plain",
+			method: "parallel-fallback",
+			content,
+			fetchedAt: new Date().toISOString(),
+			truncated: false,
+			notes: ["Loaded via Parallel extract (browser-based rendering)"],
+		};
+	} catch {
+		signal?.throwIfAborted();
+		return null;
+	}
+}
+
+/**
  * Try all special handlers
  */
 async function handleSpecialUrls(
@@ -743,6 +781,11 @@ async function renderUrl(
 		throw new ToolAbortError();
 	}
 	if (!response.ok) {
+		// Step 2.5: Try Parallel extract as browser-based fallback (handles JS-rendered pages)
+		if (!response.content?.includes("blocked for security")) {
+			const parallelFallback = await tryParallelExtract(url, timeout, signal);
+			if (parallelFallback) return parallelFallback;
+		}
 		const guidanceNote = response.content?.includes("blocked for security")
 			? response.content
 			: `Failed to fetch URL (HTTP ${response.status || "unknown"}). If the page requires JavaScript or is behind a bot wall, try the browser tool instead.`;

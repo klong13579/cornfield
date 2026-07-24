@@ -540,6 +540,8 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 	readonly #autoResizeImages: boolean;
 	readonly #defaultLimit: number;
 	readonly #inspectImageEnabled: boolean;
+	/** Deduplicate parallel reads of the same path within the same turn. */
+	readonly #pendingReads = new Map<string, Promise<AgentToolResult<ReadToolDetails>>>();
 
 	constructor(private readonly session: ToolSession) {
 		const displayMode = resolveFileDisplayMode(session);
@@ -995,7 +997,16 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 		if (readPath.startsWith("file://")) {
 			readPath = expandPath(readPath);
 		}
-		const displayMode = resolveFileDisplayMode(this.session);
+
+		// Deduplicate parallel reads of the same path within the same turn.
+		// The LLM often issues multiple concurrent read calls for the same file;
+		// this cache collapses them so only one disk/network read is issued.
+		const cacheKey = `${readPath}::${sel ?? ""}`;
+		const pending = this.#pendingReads.get(cacheKey);
+		if (pending) return pending;
+
+		const promise = (async () => {
+			const displayMode = resolveFileDisplayMode(this.session);
 
 		// Handle internal URLs (agent://, artifact://, memory://, skill://, rule://, local://, mcp://)
 		const internalRouter = this.session.internalRouter;
@@ -1336,6 +1347,10 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 			resultBuilder.truncation(truncationInfo.result, truncationInfo.options);
 		}
 		return resultBuilder.done();
+		})();
+		this.#pendingReads.set(cacheKey, promise);
+		promise.finally(() => this.#pendingReads.delete(cacheKey));
+		return promise;
 	}
 
 	/**

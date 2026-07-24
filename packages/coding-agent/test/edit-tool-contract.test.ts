@@ -94,7 +94,7 @@ describe("EditTool contract — REQUIRED FIELDS preamble (Layer 1, 164e79ddf)", 
 		const tool = new EditTool(createTestSession(os.tmpdir()));
 		// The example was added during the tmux test session; pin it so a future
 		// "let me shorten the contract" cleanup can't silently drop it.
-		expect(tool.description).toContain('Example: {"path":');
+		expect(tool.description).toContain('✅ CORRECT: {"path":');
 		expect(tool.description).toContain('"edits": [');
 	});
 });

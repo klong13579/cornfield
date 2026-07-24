@@ -211,7 +211,8 @@ export async function loadPage(url: string, options: LoadPageOptions = {}): Prom
 		}
 
 		const userAgent = USER_AGENTS[attempt];
-		const requestSignal = ptree.combineSignals(signal, timeout * 1000);
+		const perAttemptTimeout = Math.ceil((timeout * 1000) / USER_AGENTS.length);
+		const requestSignal = ptree.combineSignals(signal, perAttemptTimeout);
 
 		try {
 			const requestInit: RequestInit = {

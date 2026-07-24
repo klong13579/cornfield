@@ -1,6 +1,10 @@
 Searches files using powerful regex matching.
 
 <instruction>
+- **REQUIRED**: Both `pattern` (regex) and `path` (search scope) MUST be provided. A call with only one or neither will fail validation.
+  - ✅ CORRECT: `{"path": "src/", "pattern": "TODO"}`
+  - ❌ WRONG: `{"pattern": "TODO"}` (missing `path`)
+  - ❌ WRONG: `{}` (missing both)
 - Supports full regex syntax (e.g., `log.*Error`, `function\\s+\\w+`); literal braces need escaping (`interface\\{\\}` for `interface{}` in Go)
 - `path` is required and accepts a file, directory, glob, comma-separated path list, or internal URL
 - Cross-line patterns are detected from literal `\n` or escaped `\\n` in `pattern`
