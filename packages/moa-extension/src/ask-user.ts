@@ -18,6 +18,7 @@
  */
 
 import type { ExtensionUIContext } from "@oh-my-pi/pi-coding-agent";
+import { pruneMissingAnsweredKeys } from "./decision-missing";
 import type { TaskContextObject, TcoAssumption, TcoMissingInput } from "./tco";
 import { TCO_ASK_TIMEOUT_MS_DEFAULT } from "./tco";
 
@@ -120,6 +121,7 @@ export async function askMissingInputs(
 			});
 		}
 	}
+	tco.missing_inputs = pruneMissingAnsweredKeys(tco.missing_inputs, tco.known_inputs);
 	return { tco, asked, answered, assumed, timedOut };
 }
 

@@ -756,26 +756,42 @@ export function extractCompareEntities(task: string): string[] {
 }
 
 /**
- * Prefer research sources that mention compare entities in url/claim/relevance.
- * When ≥2 entities are detected, drop clearly off-topic URLs (e.g. OpenClaw on a
- * Hermes vs WorkBuddy task). If nothing matches, leave the pack unchanged.
+ * Prefer research sources whose **URL** mentions compare entities.
+ * Claim/relevance text is only a fallback when *no* URL in the pack matches
+ * any entity (so polished claims that name-drop entities on off-topic hosts
+ * cannot keep OpenClaw-style noise). When ≥2 entities are detected and at
+ * least one URL matches, drop URL-miss sources. If nothing matches, leave
+ * the pack unchanged.
  */
 export function filterResearchPackForTask(pack: ResearchPack, task: string): ResearchPack {
 	const entities = extractCompareEntities(task);
 	if (entities.length < 2 || pack.sources.length === 0) return pack;
 
 	const scored = pack.sources.map(s => {
-		const hay = `${s.url}\n${s.claim}\n${s.relevance}`.toLowerCase();
-		const matched = entities.filter(e => hay.includes(e));
-		return { s, score: matched.length, matched };
+		const urlHay = s.url.toLowerCase();
+		const textHay = `${s.claim}\n${s.relevance}`.toLowerCase();
+		const urlMatched = entities.filter(e => urlHay.includes(e));
+		const textMatched = entities.filter(e => textHay.includes(e));
+		const disclaimer = isOffTopicDisclaimer(textHay);
+		return { s, urlMatched, textMatched, disclaimer, score: urlMatched.length * 2 + textMatched.length };
 	});
-	const onTopic = scored.filter(x => x.score > 0);
+	const anyUrlHit = scored.some(x => x.urlMatched.length > 0);
+	const onTopic = scored.filter(x => {
+		if (x.urlMatched.length > 0) return true;
+		// Text-only keep only when the whole pack has zero URL hits and claim
+		// is not an off-topic disclaimer / speculative "maybe related" note.
+		if (anyUrlHit) return false;
+		return x.textMatched.length > 0 && !x.disclaimer;
+	});
 	if (onTopic.length === 0) return pack;
 
 	const picked: ResearchSource[] = [];
 	const used = new Set<string>();
+	// Prefer one URL-backed source per entity first.
 	for (const e of entities) {
-		const hit = onTopic.find(x => x.matched.includes(e) && !used.has(x.s.url));
+		const hit =
+			onTopic.find(x => x.urlMatched.includes(e) && !used.has(x.s.url)) ??
+			onTopic.find(x => x.textMatched.includes(e) && !used.has(x.s.url));
 		if (hit) {
 			picked.push(hit.s);
 			used.add(hit.s.url);
@@ -796,6 +812,13 @@ export function filterResearchPackForTask(pack: ResearchPack, task: string): Res
 		gaps.push(`filtered ${dropped} off-topic research source(s) for entities: ${entities.join(", ")}`);
 	}
 	return { ...pack, sources, gaps };
+}
+
+/** Claim/relevance that name-drops entities while admitting / hedging off-topic. */
+function isOffTopicDisclaimer(text: string): boolean {
+	return /无法(?:直接)?确认|需确认是否|是否与.+相关|帮助有限|关联有限|无关|不相关|off[- ]?topic|unrelated|not\s+(?:directly\s+)?(?:related|relevant)|little\s+help|limited\s+(?:help|relevance)|maybe\s+related|possibly\s+related/i.test(
+		text,
+	);
 }
 
 function normalizeTaskIntent(value: unknown): TaskIntent | undefined {

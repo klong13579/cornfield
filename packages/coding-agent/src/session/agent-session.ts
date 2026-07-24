@@ -158,6 +158,9 @@ import {
 	estimateTokens,
 	generateBranchSummary,
 	prepareCompaction,
+	type CompactionSettings,
+	resolveKeepRecentTokens,
+	resolveThresholdTokens,
 	shouldCompact,
 } from "./compaction";
 import { DEFAULT_PRUNE_CONFIG, pruneToolOutputs } from "./compaction/pruning";
@@ -459,6 +462,10 @@ export class AgentSession {
 	// Compaction state
 	#compactionAbortController: AbortController | undefined = undefined;
 	#autoCompactionAbortController: AbortController | undefined = undefined;
+
+	readonly #COMPACTION_COOLDOWN_MS = 60_000;
+	#lastCompactionTime = 0;
+	#lastActivityTime = 0;
 
 	// Branch summarization state
 	#branchSummaryAbortController: AbortController | undefined = undefined;
@@ -2627,6 +2634,25 @@ export class AgentSession {
 	 * @throws Error if no model selected or no API key available (when not streaming)
 	 */
 	async prompt(text: string, options?: PromptOptions): Promise<void> {
+		// Idle compaction: check if user has been idle long enough to compact
+		const idleCompactAfter = this.settings.get("compaction.idleCompactAfterSeconds") as number;
+		if (idleCompactAfter > 0) {
+			const idleMs = Date.now() - this.#lastActivityTime;
+			if (idleMs > idleCompactAfter * 1000) {
+				const contextWindow = this.model?.contextWindow ?? 0;
+				if (contextWindow > 0) {
+					const compactionSettings = this.settings.getGroup("compaction");
+					const contextTokens = estimateMessagesTokens(this.agent.state.messages);
+					const thresholdTokens = resolveThresholdTokens(contextWindow, compactionSettings);
+					const keepRecent = resolveKeepRecentTokens(thresholdTokens, compactionSettings);
+					if (contextTokens > keepRecent) {
+						await this.#runAutoCompaction("idle", false);
+					}
+				}
+			}
+		}
+		this.#lastActivityTime = Date.now();
+
 		const expandPromptTemplates = options?.expandPromptTemplates ?? true;
 
 		// Handle extension commands first (execute immediately, even during streaming)
@@ -4365,6 +4391,9 @@ export class AgentSession {
 	 * @param skipAbortedCheck If false, include aborted messages (for pre-prompt check). Default: true
 	 */
 	async #checkCompaction(assistantMessage: AssistantMessage, skipAbortedCheck = true): Promise<void> {
+		// Anti-thrashing: skip if we've compacted recently
+		if (Date.now() - this.#lastCompactionTime < this.#COMPACTION_COOLDOWN_MS) return;
+
 		// Skip if message was aborted (user cancelled) - unless skipAbortedCheck is false
 		if (skipAbortedCheck && assistantMessage.stopReason === "aborted") return;
 		const contextWindow = this.model?.contextWindow ?? 0;
@@ -4402,6 +4431,7 @@ export class AgentSession {
 			const compactionSettings = this.settings.getGroup("compaction");
 			if (compactionSettings.enabled && compactionSettings.strategy !== "off") {
 				await this.#runAutoCompaction("overflow", true);
+				this.#lastCompactionTime = Date.now();
 			}
 			return;
 		}
@@ -4422,6 +4452,7 @@ export class AgentSession {
 			const promoted = await this.#tryContextPromotion(assistantMessage);
 			if (!promoted) {
 				await this.#runAutoCompaction("threshold", false);
+				this.#lastCompactionTime = Date.now();
 			}
 		}
 	}

@@ -486,9 +486,10 @@ export async function spawnMoaWorker(input: SpawnWorkerInput): Promise<WorkerOut
 		const { output, model, stopReason, usage } = extractOutput(events);
 		let stderrOut = stderr;
 		if (toolBudgetExceeded) {
-			stderrOut = stderrOut.trim()
-				? `${stderrOut.trim()}\n(research web_search budget exceeded after ${maxToolRounds} searches)`
+			const note = input.countAllTools
+				? `plan worker tool budget exceeded after ${maxToolRounds} tool calls`
 				: `research web_search budget exceeded after ${maxToolRounds} searches`;
+			stderrOut = stderrOut.trim() ? `${stderrOut.trim()}\n(${note})` : note;
 		} else if (idleTimedOut) {
 			stderrOut = stderrOut.trim()
 				? `${stderrOut.trim()}\n(idle timeout: no progress)`

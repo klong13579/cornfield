@@ -1,5 +1,10 @@
 import { describe, expect, it } from "bun:test";
-import { filterDecisionMissing, filterMissingAlreadyKnown, isDefinitionStyleQuestion } from "../src/decision-missing";
+import {
+	filterDecisionMissing,
+	filterMissingAlreadyKnown,
+	isDefinitionStyleQuestion,
+	pruneMissingAnsweredKeys,
+} from "../src/decision-missing";
 import type { TcoMissingInput } from "../src/tco";
 
 describe("isDefinitionStyleQuestion", () => {
@@ -87,5 +92,56 @@ describe("filterMissingAlreadyKnown (P3)", () => {
 			{ key: "audience" },
 		];
 		expect(filterMissingAlreadyKnown(missing, known).map(m => m.key)).toEqual(["output_format"]);
+	});
+
+	it("treats comparison_depth / comparison_focus as synonyms of depth / dims", () => {
+		const missing: TcoMissingInput[] = [
+			{
+				key: "comparison_depth",
+				question: "对比深度？",
+				type: "select",
+				required: true,
+				why_critical: "d",
+			},
+			{
+				key: "comparison_focus",
+				question: "关注点？",
+				type: "text",
+				required: false,
+				why_critical: "f",
+			},
+			{
+				key: "decision_context",
+				question: "决策场景？",
+				type: "text",
+				required: false,
+				why_critical: "c",
+			},
+		];
+		const known = [{ key: "depth" }, { key: "comparison_dims" }, { key: "audience_type" }];
+		expect(filterMissingAlreadyKnown(missing, known).map(m => m.key)).toEqual([]);
+	});
+});
+
+describe("pruneMissingAnsweredKeys (P3)", () => {
+	it("removes missing entries whose keys were answered into known", () => {
+		const missing: TcoMissingInput[] = [
+			{
+				key: "comparison_depth",
+				question: "深度？",
+				type: "select",
+				required: true,
+				why_critical: "d",
+			},
+			{
+				key: "still_open",
+				question: "还开着？",
+				type: "text",
+				required: false,
+				why_critical: "o",
+			},
+		];
+		const known = [{ key: "comparison_depth" }, { key: "unrelated" }];
+		expect(pruneMissingAnsweredKeys(missing, known).map(m => m.key)).toEqual(["still_open"]);
 	});
 });

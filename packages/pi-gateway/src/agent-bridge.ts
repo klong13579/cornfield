@@ -35,6 +35,9 @@ const DEFAULT_LONG_TASK_PROGRESS_PING_MS = 60_000;
 const DEFAULT_STREAMING_WATCHDOG_MS = 90_000;
 const STREAMING_WATCHDOG_POLL_MS = 10_000;
 
+/** Gateway hygiene: compact session when idle for this long (30 min) */
+const GATEWAY_HYGIENE_IDLE_MS = 30 * 60 * 1000;
+
 function readEnvInt(name: string, fallback: number): number {
 	const raw = process.env[name];
 	if (raw === undefined || raw === "") return fallback;
@@ -611,6 +614,20 @@ export class AgentBridge {
 						});
 					}
 				}
+
+				// Gateway hygiene: if session was idle for >30min, fire-and-forget compaction
+				const idleMs = Date.now() - session.updatedAt;
+				if (idleMs > GATEWAY_HYGIENE_IDLE_MS) {
+					this.#transport.sendCommand("compact", {}, 5_000).catch(err => {
+						logger.debug("Gateway hygiene: idle compaction failed (non-blocking)", {
+							accountId: this.#accountId,
+							conversationId: msg.conversationId,
+							idleMs,
+							error: err instanceof Error ? err.message : String(err),
+						});
+					});
+				}
+
 				const { promise } = this.#queue.enqueue(text, handlers, images);
 				const { events, aborted } = await promise;
 				if (abortedByStreamingWatchdog) {

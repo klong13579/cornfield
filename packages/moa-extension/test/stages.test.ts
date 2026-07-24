@@ -456,18 +456,18 @@ describe("restrictPlanWorkerTools (Phase 7)", () => {
 		expect(out).not.toContain("web_search");
 		expect(out).toEqual(["read", "search", "ast_grep"]);
 	});
-	it("leaves tools untouched for none mode", () => {
-		const out = restrictPlanWorkerTools(["read", "web_search"], "none");
-		expect(out).toEqual(["read", "web_search"]);
+	it("also strips web_search in none mode (Research is the only search stage)", () => {
+		const out = restrictPlanWorkerTools(["read", "web_search", "search"], "none");
+		expect(out).toEqual(["read", "search"]);
+		expect(out).not.toContain("web_search");
 	});
-	it("expands 'all' to the read-only set without web_search in research modes", () => {
+	it("expands 'all' to the read-only set without web_search", () => {
 		const out = restrictPlanWorkerTools("all", "required");
 		expect(out).not.toBe("all");
 		expect(Array.isArray(out) && !out.includes("web_search")).toBe(true);
 		expect(Array.isArray(out) && out.includes("read")).toBe(true);
-	});
-	it("passes 'all' through unchanged for none mode", () => {
-		expect(restrictPlanWorkerTools("all", "none")).toBe("all");
+		const noneAll = restrictPlanWorkerTools("all", "none");
+		expect(Array.isArray(noneAll) && !noneAll.includes("web_search")).toBe(true);
 	});
 
 	it("intersects explicit lists so write/edit/bash cannot sneak in after research (P2)", () => {
@@ -481,7 +481,7 @@ describe("restrictPlanWorkerTools (Phase 7)", () => {
 
 describe("resolvePlanWorkerMaxToolRounds (P2)", () => {
 	it("caps compare research workers tighter than design", () => {
-		expect(resolvePlanWorkerMaxToolRounds("compare", "required")).toBe(8);
+		expect(resolvePlanWorkerMaxToolRounds("compare", "required")).toBe(16);
 		expect(resolvePlanWorkerMaxToolRounds("design", "encouraged")).toBe(12);
 		expect(resolvePlanWorkerMaxToolRounds("local-impl", "none")).toBe(12);
 		expect(resolvePlanWorkerMaxToolRounds("design", "none")).toBe(0);

@@ -132,13 +132,15 @@ export interface CompactionResult<T = unknown> {
 // Types
 // ============================================================================
 
-export interface CompactionSettings {
+	export interface CompactionSettings {
 	enabled: boolean;
 	strategy?: "context-full" | "handoff" | "off";
 	thresholdPercent?: number;
 	thresholdTokens?: number;
 	reserveTokens: number;
 	keepRecentTokens: number;
+	targetRatio?: number;
+	modelThresholds?: Record<string, number>;
 	autoContinue?: boolean;
 	remoteEnabled?: boolean;
 	remoteEndpoint?: string;
@@ -219,7 +221,16 @@ export function shouldCompact(contextTokens: number, contextWindow: number, sett
 	return contextTokens > thresholdTokens;
 }
 
-export function resolveThresholdTokens(contextWindow: number, settings: CompactionSettings): number {
+export function resolveThresholdTokens(contextWindow: number, settings: CompactionSettings, modelId?: string): number {
+	// Model-specific thresholds take highest priority
+	if (modelId && settings.modelThresholds) {
+		const keys = Object.keys(settings.modelThresholds).sort((a, b) => b.length - a.length);
+		const matchedKey = keys.find((key) => modelId.includes(key));
+		if (matchedKey !== undefined) {
+			return Math.floor(contextWindow * settings.modelThresholds[matchedKey]);
+		}
+	}
+
 	// Fixed token limit takes priority over percentage
 	const thresholdTokens = settings.thresholdTokens;
 	if (typeof thresholdTokens === "number" && Number.isFinite(thresholdTokens) && thresholdTokens > 0) {
@@ -234,6 +245,18 @@ export function resolveThresholdTokens(contextWindow: number, settings: Compacti
 	}
 	const clampedThresholdPercent = Math.min(99, Math.max(1, thresholdPercent));
 	return Math.floor(contextWindow * (clampedThresholdPercent / 100));
+}
+
+/**
+ * Resolve the number of recent tokens to keep after compaction.
+ * If keepRecentTokens is explicitly set (> 0) in settings, use that.
+ * Otherwise derive from thresholdTokens and targetRatio.
+ */
+export function resolveKeepRecentTokens(thresholdTokens: number, settings: CompactionSettings): number {
+	if (settings.keepRecentTokens > 0) {
+		return settings.keepRecentTokens;
+	}
+	return Math.floor(thresholdTokens * (settings.targetRatio ?? 0.20));
 }
 
 // ============================================================================

@@ -7,7 +7,15 @@ import { isEnoent } from "@oh-my-pi/pi-utils";
 import type { TaskContextObject } from "./tco";
 import type { MoaOutputSchema, MoaPlanWorker, MoaWorkerResult } from "./types";
 
-export type StageName = "all" | "discovery" | "ask" | "research" | "rewrite" | "workers" | "synthesis";
+export type StageName =
+	| "all"
+	| "discovery"
+	| "ask"
+	| "research"
+	| "rewrite"
+	| "workers"
+	| "synthesis"
+	| "short-probe";
 
 export interface StageRunMeta {
 	stage: StageName;
@@ -20,8 +28,8 @@ export interface StageRunMeta {
 	models?: Record<string, string | undefined>;
 	signal?: string | null;
 	fallback?: boolean;
-	/** How research_pack was parsed (`json` / `markdown` / `salvage`), when research ran. */
-	researchPackSource?: "json" | "markdown" | "salvage" | null;
+	/** How research_pack was parsed (`json` / `markdown` / `salvage` / `tool_trace`), when research ran. */
+	researchPackSource?: "json" | "markdown" | "salvage" | "tool_trace" | null;
 	/** Rewrite LLM ok but sections unparsed — original prompts kept. */
 	rewriteFallbackUsed?: boolean;
 }

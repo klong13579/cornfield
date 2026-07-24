@@ -4,7 +4,7 @@
  */
 
 import type { AskUserContext } from "./ask-user";
-import { filterDecisionMissing, filterMissingAlreadyKnown } from "./decision-missing";
+import { filterDecisionMissing, filterMissingAlreadyKnown, pruneMissingAnsweredKeys } from "./decision-missing";
 import type { TaskContextObject, TcoKnownInput, TcoMissingInput } from "./tco";
 
 export interface GrillQuestion {
@@ -153,8 +153,8 @@ export async function runGrillAsk(
 		options.onTurn?.(turn);
 	}
 
-	// Keep missing_inputs (same as form Ask) for audit / merge introspection;
-	// answers live in known_inputs / assumptions.
+	// Prune answered keys from missing so audit TCO does not keep false gaps.
+	tco.missing_inputs = pruneMissingAnsweredKeys(tco.missing_inputs, tco.known_inputs);
 	return { asked, answered, assumed, turns };
 }
 

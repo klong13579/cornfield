@@ -24,10 +24,12 @@ function isDefinitionStyleKey(key: string): boolean {
 
 /** Synonym groups so Ask does not re-ask a fact already in known_inputs. */
 const KNOWN_KEY_ALIASES: ReadonlyArray<ReadonlyArray<string>> = [
-	["comparison_dims", "comparison_dimensions", "dimensions"],
-	["depth", "output_depth"],
+	["comparison_dims", "comparison_dimensions", "dimensions", "comparison_focus", "focus"],
+	["depth", "output_depth", "comparison_depth"],
 	["audience", "audience_type", "decision_context"],
 	["output_format", "format"],
+	["endpoint_location", "target_package", "host_package"],
+	["response_shape", "response_format"],
 ];
 
 function canonicalKnownKey(key: string): string {
@@ -48,4 +50,15 @@ export function filterMissingAlreadyKnown(
 	if (missing.length === 0 || known.length === 0) return [...missing];
 	const knownCanon = new Set(known.map(k => canonicalKnownKey(k.key)));
 	return missing.filter(m => !knownCanon.has(canonicalKnownKey(m.key)));
+}
+
+/**
+ * After Ask answers land in known_inputs, drop those keys (and synonyms) from
+ * missing_inputs so the TCO audit trail does not look like the gap is still open.
+ */
+export function pruneMissingAnsweredKeys(
+	missing: readonly TcoMissingInput[],
+	known: ReadonlyArray<{ key: string }>,
+): TcoMissingInput[] {
+	return filterMissingAlreadyKnown(missing, known);
 }

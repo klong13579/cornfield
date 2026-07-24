@@ -570,6 +570,46 @@ describe("extractCompareEntities + filterResearchPackForTask (P1)", () => {
 		expect(filtered.sources.some(s => /hermes/i.test(s.url) || /hermes/i.test(s.claim))).toBe(true);
 		expect(filtered.sources.some(s => /workbuddy/i.test(s.url) || /workbuddy/i.test(s.claim))).toBe(true);
 	});
+
+	it("drops off-topic URL even when polished claim name-drops compare entities", () => {
+		const pack = {
+			mode: "required" as const,
+			parse_source: "tool_trace" as const,
+			queries: [] as string[],
+			repo_facts: [] as string[],
+			gaps: [] as string[],
+			sources: [
+				{
+					url: "https://docs.openclaw.ai/",
+					claim: "根据 URL 推测为 OpenClaw 项目的文档站点，但无法直接确认内容与 Hermes Agent 或 WorkBuddy 的关联。",
+					relevance: "可能包含第三方背景信息，但对于直接对比两者帮助有限。",
+					confidence: "low" as const,
+				},
+				{
+					url: "https://github.com/openclaw/openclaw/",
+					claim: "OpenClaw 是一个开源项目，托管在 GitHub 上。",
+					relevance: "可能是 agent 框架或工具链，需确认是否与 Hermes Agent 或 WorkBuddy 相关。",
+					confidence: "low" as const,
+				},
+				{
+					url: "https://www.workbuddy.ai/",
+					claim: "WorkBuddy 的官方网站，展示产品定位。",
+					relevance: "一手产品定义。",
+					confidence: "high" as const,
+				},
+				{
+					url: "https://hermes-agent.nousresearch.com/docs/user-guide/features/kanban",
+					claim: "Hermes Agent 官方文档中关于看板功能的用户指南。",
+					relevance: "功能级对比依据。",
+					confidence: "high" as const,
+				},
+			],
+		};
+		const filtered = filterResearchPackForTask(pack, "hermes agent 和 workbuddy 的区别是什么？");
+		expect(filtered.sources.some(s => s.url.includes("openclaw"))).toBe(false);
+		expect(filtered.sources.some(s => s.url.includes("workbuddy"))).toBe(true);
+		expect(filtered.sources.some(s => /hermes/i.test(s.url))).toBe(true);
+	});
 });
 
 describe("emptyTco", () => {

@@ -38,8 +38,10 @@ describe("inferResearchMode", () => {
 });
 
 describe("renderResearchGuidance", () => {
-	it("returns empty for none", () => {
-		expect(renderResearchGuidance("none")).toBe("");
+	it("returns a short no-web_search note for none mode", () => {
+		const text = renderResearchGuidance("none");
+		expect(text).toContain("web_search");
+		expect(text).toContain("disabled");
 	});
 
 	it("tells encouraged workers to build on pre-gathered evidence, not re-search", () => {

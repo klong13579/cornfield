@@ -408,18 +408,16 @@ export const RESEARCH_TOOLS = ["read", "search", "find", "web_search", "ast_grep
 export const PLAN_WORKER_TOOLS_NO_SEARCH = ["read", "search", "find", "ast_grep"] as const;
 
 /**
- * Strip `web_search` (and any side-effect tools) from a plan worker's tool list
- * once the Research stage has gathered evidence. Plan workers build on the shared
- * `research_pack` instead of each re-running searches. `none` mode passes through
- * unchanged. `"all"` expands to the read-only set without `web_search`. Explicit
- * lists are **intersected** with the allow-list so `write`/`edit`/`bash` cannot
- * sneak through after research.
+ * Strip `web_search` (and any side-effect tools) from a plan worker's tool list.
+ * Research is the only stage allowed long `web_search`; plan workers build on
+ * `research_pack` (or local reads). Explicit lists are **intersected** with the
+ * allow-list so `write`/`edit`/`bash`/`web_search` cannot sneak through.
+ * `"all"` expands to the read-only set without `web_search`.
  */
 export function restrictPlanWorkerTools(
 	tools: readonly string[] | "all",
-	researchMode: ResearchMode,
+	_researchMode: ResearchMode,
 ): readonly string[] | "all" {
-	if (researchMode === "none") return tools;
 	const allowed = new Set<string>(PLAN_WORKER_TOOLS_NO_SEARCH);
 	if (tools === "all") return [...PLAN_WORKER_TOOLS_NO_SEARCH];
 	return tools.filter(t => allowed.has(t));
@@ -427,7 +425,7 @@ export function restrictPlanWorkerTools(
 
 /**
  * Soft/hard tool-call cap for plan workers (counts every tool when >0).
- * Research compare tasks are tighter; design research looser; local-impl without
+ * Research compare tasks are capped; design research looser; local-impl without
  * research still gets a cap so critical doesn't wander forever. 0 = unlimited.
  */
 export function resolvePlanWorkerMaxToolRounds(
@@ -435,7 +433,7 @@ export function resolvePlanWorkerMaxToolRounds(
 	researchMode: ResearchMode,
 ): number {
 	if (researchMode !== "none") {
-		if (intent === "compare") return 8;
+		if (intent === "compare") return 16;
 		return 12;
 	}
 	if (intent === "local-impl") return 12;

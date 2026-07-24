@@ -1107,6 +1107,12 @@ export const SETTINGS_SCHEMA = {
 
 	"compaction.remoteEndpoint": { type: "string", default: undefined },
 
+	"compaction.idleCompactAfterSeconds": { type: "number", default: 0 },
+
+	"compaction.modelThresholds": { type: "record", default: {} },
+
+	"compaction.targetRatio": { type: "number", default: 0.20 },
+
 	// Idle compaction
 	"compaction.idleEnabled": {
 		type: "boolean",

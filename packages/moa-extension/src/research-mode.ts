@@ -50,7 +50,12 @@ export function resolveResearchMode(task: string, setting: MoaResearchModeSettin
  * guidance tells them to build on the provided evidence and cite from it.
  */
 export function renderResearchGuidance(mode: ResearchMode): string {
-	if (mode === "none") return "";
+	if (mode === "none") {
+		return [
+			"## Tooling note",
+			"- Do NOT call `web_search` (disabled for plan workers). Use local `read`/`search`/`find` only.",
+		].join("\n");
+	}
 	const strictness = mode === "required" ? "## Research guidance (REQUIRED)" : "## Research guidance (encouraged)";
 	return [
 		strictness,

@@ -354,7 +354,9 @@ class InProcessWorkerEngine implements MoaWorkerEngine {
 			const exitCode = resolveExitCode(lastStopReason);
 			let stderr = lastErrorMessage ?? "";
 			if (toolBudgetExceeded) {
-				const note = `research web_search budget exceeded after ${maxToolRounds} searches`;
+				const note = input.countAllTools
+					? `plan worker tool budget exceeded after ${maxToolRounds} tool calls`
+					: `research web_search budget exceeded after ${maxToolRounds} searches`;
 				stderr = stderr.trim() ? `${stderr.trim()}\n(${note})` : note;
 			} else if (idleTimedOut) {
 				const note = "idle timeout: no progress";
