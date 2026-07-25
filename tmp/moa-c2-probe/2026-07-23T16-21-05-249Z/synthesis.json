@@ -1,0 +1,23 @@
+{
+  "name": "synthesis",
+  "role": "Merge surviving worker plans into one recommendation",
+  "ok": true,
+  "output": "## 合并对比：WorkBuddy vs OpenClaw\n\n### 核心定位\n\n| | OpenClaw | WorkBuddy |\n|---|---|---|\n| **一句话** | 自托管、开源的多通道 AI Agent 网关，让 AI 通过你已有的聊天工具触达你 | 腾讯出品的办公 AI Agent，多智能体协作完成报告/PPT/表格等办公交付物 |\n| **归属** | OpenClaw Foundation（非营利），MIT 开源 | 腾讯云 / CodeBuddy 产品线，闭源商业产品 |\n| **目标用户** | 开发者、技术团队、想从手机随时访问个人 AI 助手且数据自控的人 | 企业办公用户，侧重腾讯云生态内的中国企业客户 |\n\n两者**不是竞品**。OpenClaw 是 AI Agent 基础设施（怎么让 Agent 接入任意通道），WorkBuddy 是办公场景应用（怎么让 Agent 替人产出办公文档）。一个在基础设施层，一个在应用层。\n\n---\n\n### 多维度对比\n\n| 维度 | OpenClaw | WorkBuddy |\n|---|---|---|\n| **部署** | 自托管，本地/服务器跑 Gateway 进程，Node 24.15+，`npm i -g openclaw` 一条命令 | SaaS 云端，浏览器访问，零部署 [inferred] |\n| **消息通道** | 内置 15+ 通道（iMessage、Telegram、WhatsApp、Discord、Signal、Slack、Google Chat、Matrix、Teams 等），插件体系覆盖 20+ 通道（含飞书、QQ Bot、Zalo 等），社区插件含微信 | 自有界面，不通过第三方 IM [inferred] |\n| **Agent 能力** | 内嵌 agent runtime：tool streaming、multi-agent 路由、按会话/发送者隔离 session、35+ 模型提供商、8 层递进工具权限过滤、三种 sandbox 模式 | 多 Agent 协作分解办公任务，具体架构细节未公开 [inferred] |\n| **工具/技能** | 100+ 内置技能（浏览器自动化、shell、cron、webhooks、web search 10+ 引擎）、ClawHub 插件市场、workflow pipeline | 办公场景工具：报告生成、PPT 制作、表格处理，强调\"产出物可验证\" |\n| **客户端** | CLI + Web Control UI + macOS menu bar + iOS/Android 原生 App | Web 端 [inferred] |\n| **数据主权** | 数据完全在用户机器上 | 数据在腾讯云 |\n| **授权** | MIT 开源，免费（自付 LLM API + 机器成本） | 闭源商业，定价未公开 |\n| **安全/合规** | 通道级 token + allowlist + access groups；agent 级 8 层工具过滤（只收不扩） | 未公开；是否支持私有化部署、数据驻留方案不明 |\n\n---\n\n### 决策矩阵\n\n| 场景 | 推荐 | 理由 |\n|---|---|---|\n| 想把 Agent 接到手机聊天软件（钉钉/微信/Telegram 等），自己管数据 | **OpenClaw** | 目前市面上最完整的开源多通道 Agent 网关，MIT 协议可自由改造 |\n| 在 CodeBuddy/腾讯云生态内做企业工作流自动化，需要 SLA 和售后 | **WorkBuddy** | 腾讯云体系内集成，SaaS 免运维 |\n| 已有 OMP 体系，想补充多通道网关能力 | **OpenClaw**（参考而非替代） | 与 OMP 同属自部署 Agent 网关，其多通道插件体系、沙箱策略、agent 路由模型有直接借鉴价值 |\n| 想给非技术团队用 AI 产出办公文档 | **WorkBuddy** | 开箱即用，无需开发介入 |\n\n---\n\n### 风险\n\n1. **WorkBuddy 信息不透明**（高风险）。官网信息极少，功能边界、技术架构、定价、数据安全承诺均未公开。对企业采购决策是实质性障碍。\n2. **OpenClaw 的长期可持续性**（中风险）。viral 免费工具常面临商业化转型或弃更风险。文档站点分散（docs.openclaw.ai vs docs2.openclaw.ai）暗示产品迭代中的碎片化。\n3. **codebuddy.cn/work 与 workbuddy.ai 的关系不明**（中风险）。可能是独立产品、中国区版本或同一产品不同域名，影响版本一致性判断。\n4. **OpenClaw 生产就绪度待验证**（低风险）。\"100+ skills\" 的实际覆盖面和稳定性需要实际跑起来评估。\n\n---\n\n### 各 Worker 贡献\n\n- **divergent（backbone）**：完整的 8 维对比表 + 消息通道完整列表 + 与中国市场的关联分析。吸收了其关于\"两者解决不同问题\"的核心判断和试用/演示建议。\n- **grounded**：补充了 8 层递进工具过滤、三种 sandbox 模式、ClawHub 插件市场、产出物类型等细节。吸收了\"一个基础设施层一个应用层\"的定位框架。\n- **critical**：补充了风险视角（商业化可持续性、信息缺口针对企业采购的障碍、codebuddy.cn 与 workbuddy.ai 的关系问题）。吸收了其\"红旗\"风险评估。\n\n---\n\n### 设计决策（冲突解决）\n\n- **\"100+ skills\" vs \"25+ tools\" 对比**：grounded 提出与 OMP 的 25+ tools 做重叠度对比，但缺少 WorkBuddy 的工具列表作为参照，移至\"待验证假设\"。\n- **WorkBuddy 是否支持多消息通道**：三者均推断\"不支持\"（基于产品定位），但信息来自 inference 而非一手资料，保留为假设。\n- **排序权重**：divergent 侧重通道覆盖，grounded 侧重安全模型，critical 侧重风险。合并后三者权重均衡。\n\n---\n\n### 假设待验证\n\n| 假设 | 置信度 | 来源 |\n|---|---|---|\n| WorkBuddy 是腾讯云/CodeBuddy 旗下闭源商业产品 | 中 | URL 推断（codebuddy.cn/work、tencentcloud.com/techpedia），三 worker 一致 |\n| WorkBuddy 为 SaaS 模式，不支持自托管 | 中 | 官网为纯前端 SPA，无安装指引 [inferred] |\n| WorkBuddy 不支持通用多消息通道 | 低 | 产品定位推断，无一手资料 |\n| WorkBuddy 主要面向中国企业/腾讯云生态 | 中 | codebuddy.cn 域名 + 腾讯云技术百科收录 |\n| OpenClaw 处于早期阶段，企业级功能待验证 | 中 | 文档分散 + viral 传播属性，无企业客户案例 |\n| WorkBuddy 与 codebuddy.cn 是同一产品的不同域名/版本 | 中 | 域名关联推断 |\n| 用户当前技术栈以 OMP 为主，对比目的是补充/参考 | 高 | user persona（omp_scenario: agent team 管理）|\n\n---\n\n### 下一步行动\n\n1. **补充调研 WorkBuddy**（高优先级）：联系腾讯云售前获取 WorkBuddy 产品白皮书、定价、架构文档；或通过试用账号直接验证功能边界。关键问题：是否支持钉钉/飞书/企业微信集成、是否可私有化部署、多 Agent 路由机制。\n2. **评估 OpenClaw 架构参考价值**：在本地部署 OpenClaw，对比其多通道插件体系、沙箱策略、agent 路由模型与 OMP 现有实现的差异，判断可借鉴点（如多通道接入、模型 failover、插件市场）。\n3. **决策延迟**：在 WorkBuddy 信息补齐前，不做是否采用的决策。OpenClaw 作为技术参考可并行进行，不依赖商业决策。",
+  "stderr": "",
+  "exitCode": 0,
+  "model": "narwal-plan/deepseek-v4-pro-202606",
+  "durationMs": 39369,
+  "stopReason": "stop",
+  "timedOut": false,
+  "idleTimedOut": false,
+  "toolBudgetExceeded": false,
+  "aborted": false,
+  "usage": {
+    "input": 5191,
+    "output": 2016,
+    "cacheRead": 17024,
+    "cacheWrite": 0,
+    "cost": 0.005373925,
+    "turns": 1
+  }
+}

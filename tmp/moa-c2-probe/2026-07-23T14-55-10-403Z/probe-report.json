@@ -1,0 +1,65 @@
+{
+  "caseId": "C2",
+  "task": "对比一下 workbuddy 和 openclaw",
+  "runDir": "/Users/sz-0203015357/Desktop/Narwal/oh-my-pi/tmp/moa-c2-probe/2026-07-23T14-55-10-403Z",
+  "wallMs": 1142995,
+  "ok": true,
+  "timings": {
+    "discovery": 27890,
+    "research": 456569,
+    "ask": 36237,
+    "rewrite": 89428,
+    "workers_r1": 481479,
+    "workers": 481479,
+    "synthesis": 51370,
+    "total": 1142988
+  },
+  "task_intent": "compare",
+  "researchEffective": "required",
+  "researchModel": "narwal-plan/deepseek-v4-flash-202605",
+  "research_pack": {
+    "sources": 20,
+    "repo_facts": 0,
+    "gaps": 1,
+    "parse_source": "salvage",
+    "mode": "required"
+  },
+  "ask": {
+    "asked": 3,
+    "answered": 3,
+    "assumed": 0,
+    "timedOut": 0,
+    "enabled": true
+  },
+  "workers": [
+    {
+      "name": "divergent",
+      "ok": true,
+      "model": "narwal-plan/deepseek-v4-flash-202605",
+      "qualityScore": 85,
+      "qualityDropped": false,
+      "stderr": ""
+    },
+    {
+      "name": "grounded",
+      "ok": false,
+      "model": "narwal-plan/deepseek-v4-pro-202606",
+      "qualityScore": 30,
+      "qualityDropped": true,
+      "stderr": "Request was aborted\n(timed out after 480s)"
+    },
+    {
+      "name": "critical",
+      "ok": true,
+      "model": "alibaba-coding-plan/kimi-k2.5",
+      "qualityScore": 85,
+      "qualityDropped": false,
+      "stderr": "Doom loop detected (text): 60-gram \" | url: tmp/moa-c2-probe/2026-07-23T14-12-22-746Z/synthesis.\" repeated 4×"
+    }
+  ],
+  "synthesisOk": true,
+  "issues": [
+    "P1: research_pack salvaged (parse failed / interrupted)",
+    "P2: research took 457s (>5min)"
+  ]
+}

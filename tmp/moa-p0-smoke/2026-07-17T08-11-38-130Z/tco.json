@@ -1,0 +1,156 @@
+{
+  "task_understanding": "为米克原子（室内家庭服务机器人创业公司，50人团队）设计一个2周的校园招聘执行流程，预算和目标城市待确定。",
+  "known_inputs": [
+    {
+      "key": "duration_days",
+      "value": 14,
+      "source": "user_md",
+      "confidence": 1
+    },
+    {
+      "key": "budget_status",
+      "value": "undetermined",
+      "source": "user_md",
+      "confidence": 1
+    },
+    {
+      "key": "target_cities_status",
+      "value": "undetermined",
+      "source": "user_md",
+      "confidence": 1
+    },
+    {
+      "key": "company_stage",
+      "value": "angel_round_startup",
+      "source": "user_md",
+      "confidence": 1
+    },
+    {
+      "key": "team_size",
+      "value": 50,
+      "source": "user_md",
+      "confidence": 1
+    },
+    {
+      "key": "team_structure",
+      "value": [
+        "世界模型",
+        "行为智能",
+        "软件系统",
+        "机电系统"
+      ],
+      "source": "user_md",
+      "confidence": 1
+    },
+    {
+      "key": "industry",
+      "value": "家庭服务机器人",
+      "source": "user_md",
+      "confidence": 1
+    },
+    {
+      "key": "product_stage",
+      "value": "研发阶段_未量产",
+      "source": "user_md",
+      "confidence": 1
+    }
+  ],
+  "missing_inputs": [
+    {
+      "key": "target_roles",
+      "question": "本次招聘目标岗位和人数？例如：算法工程师5人、嵌入式工程师3人、结构工程师2人",
+      "type": "text",
+      "required": true,
+      "why_critical": "岗位类型和数量决定宣讲重点、面试轮次、评估标准和2周内的日程密度",
+      "defaultValue": "算法工程师3人、嵌入式软件工程师2人、机械结构工程师2人"
+    },
+    {
+      "key": "target_school_tier",
+      "question": "目标学校层次？（多选）A.清北/华五 B.985 C.211 D.普通本科 E.专科",
+      "type": "list",
+      "required": true,
+      "why_critical": "学校层次影响渠道选择（官方校招/实验室直推/猎头）、竞争策略和2周时间分配",
+      "defaultValue": [
+        "B",
+        "C"
+      ]
+    },
+    {
+      "key": "recruitment_format",
+      "question": "招聘形式？（单选）1.纯线下（进校宣讲+现场面试） 2.纯线上（空中宣讲+视频面试） 3.混合（宣讲线下、面试线上）",
+      "type": "select",
+      "options": [
+        "纯线下",
+        "纯线上",
+        "混合"
+      ],
+      "required": true,
+      "why_critical": "纯线下需考虑差旅和场地，纯线上可压缩周期但转化率不同，影响2周流程设计",
+      "defaultValue": "混合"
+    },
+    {
+      "key": "target_cities",
+      "question": "优先目标城市？（多选，建议2-3个）如：北京、上海、深圳、杭州、西安、哈尔滨、武汉",
+      "type": "list",
+      "required": false,
+      "why_critical": "城市决定可选学校池和差旅成本，但可先给框架再定",
+      "defaultValue": [
+        "深圳",
+        "西安",
+        "哈尔滨"
+      ]
+    },
+    {
+      "key": "intake_urgency",
+      "question": "入职时间要求？A.尽快到岗（已毕业） B.2026届秋招提前锁 C.2026届暑期实习转正",
+      "type": "select",
+      "options": [
+        "尽快到岗",
+        "2026届秋招提前锁",
+        "2026届暑期实习转正"
+      ],
+      "required": true,
+      "why_critical": "决定是社招流程还是校招流程，影响offer决策权和培养周期设计",
+      "defaultValue": "2026届秋招提前锁"
+    }
+  ],
+  "assumptions": [
+    {
+      "key": "target_roles",
+      "value": "算法工程师3人、嵌入式软件工程师2人、机械结构工程师2人",
+      "reason": "user_skipped_required",
+      "note": "auto-assumed: 本次招聘目标岗位和人数？例如：算法工程师5人、嵌入式工程师3人、结构工程师2人"
+    },
+    {
+      "key": "target_school_tier",
+      "value": [
+        "B",
+        "C"
+      ],
+      "reason": "user_skipped_required",
+      "note": "auto-assumed: 目标学校层次？（多选）A.清北/华五 B.985 C.211 D.普通本科 E.专科"
+    },
+    {
+      "key": "recruitment_format",
+      "value": "混合",
+      "reason": "user_skipped_required",
+      "note": "auto-assumed: 招聘形式？（单选）1.纯线下（进校宣讲+现场面试） 2.纯线上（空中宣讲+视频面试） 3.混合（宣讲线下、面试线上）"
+    },
+    {
+      "key": "target_cities",
+      "value": [
+        "深圳",
+        "西安",
+        "哈尔滨"
+      ],
+      "reason": "user_skipped",
+      "note": "auto-assumed: 优先目标城市？（多选，建议2-3个）如：北京、上海、深圳、杭州、西安、哈尔滨、武汉"
+    },
+    {
+      "key": "intake_urgency",
+      "value": "2026届秋招提前锁",
+      "reason": "user_skipped_required",
+      "note": "auto-assumed: 入职时间要求？A.尽快到岗（已毕业） B.2026届秋招提前锁 C.2026届暑期实习转正"
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "name": "synthesis",
+  "role": "Merge surviving worker plans into one recommendation",
+  "ok": true,
+  "output": "## 合并对比：Hermes Agent vs WorkBuddy\n\n**一句话定位**：Hermes Agent 是你可以拆开改的引擎（开源 Agent 框架），WorkBuddy 是腾讯云的商业 SaaS 办公 Agent。两者交集很窄，唯一重叠概念是\"多 Agent 协作\"，但实现范式完全不同。\n\n---\n\n### 关键差异\n\n| 维度 | Hermes Agent (NousResearch) | WorkBuddy (腾讯云) |\n|---|---|---|\n| **类型** | 开源框架，自托管 | 商业 SaaS，闭源 |\n| **技术栈** | Python 3.11+，GitHub 可读 | 架构不透明 |\n| **部署** | `pip install` + launchd/systemd 常驻，`~/.hermes/` 本地数据 | 腾讯云托管，企业版声称支持私有化（未从一次源确认） |\n| **渠道** | Telegram / Discord / Slack / Mattermost（adapter 可扩展） | 企微原生、腾讯会议；钉钉支持未确认 |\n| **多 Agent** | Kanban dispatcher + worker lifecycle（LLM-driven，worker 互不可见） | Agent Teams + Dynamic Workflows（配置化 DAG，隔离机制未公开） |\n| **Cron** | 内建 cron scheduler，独立 headless agent | 未确认 |\n| **System Prompt** | 两层分离：缓存层（7 段拼接）+ 临时层（per-message 三段拼接），保证 Anthropic prompt cache 前缀稳定 | 不透明 |\n| **企业功能** | 无原生 RBAC/SSO/审计 | SSO / RBAC / 审计 / 多租户（企业版） |\n| **中国市场** | 无针对性支持 | 腾讯出品，微信生态原生 |\n| **定价** | 免费（仅 LLM API 费） | 个人版免费（受限），企业版按 seat（价格未公开） |\n| **与 OMP 关系** | **OMP 的直接设计参考** — gateway 架构、cron 调度、kanban 模式、prompt 分层均抄自 Hermes | 零代码引用，仅在 MOA 测试文件和计划文档中作为外部对比对象出现 |\n\n---\n\n### 选型指引\n\n- **你已经在用 OMP**：Hermes Agent 是架构参考，不是替代选项。OMP 的 `hermes-gateway-cron-architecture.md`（900 行）是对 Hermes 五模块的逐层拆解，改 gateway/cron/multi-agent 时直接读它就是上游设计文档。WorkBuddy 切不过去——三个 blocker：钉钉集成未确认、企业版定价未公开、架构不可控。\n\n- **你在评估从零选型**（50 人 startup，钉钉为主 IM）：Hermes Agent 给你完全可控的引擎，但需要团队有运维和二次开发能力。WorkBuddy 开箱即用但钉钉支持大概率不存在（腾讯产品优先打通企微），且闭源 = 你改不了任何行为。\n\n- **两者串用**：理论上可以 OMP/Hermes 做研发侧编码 agent + WorkBuddy 做全公司办公 workflow。但 OMP gateway 已经在做 IM 接入 + 定时任务覆盖企业场景，加一个 WorkBuddy 引入系统间切换成本，收益不明确。\n\n---\n\n### 证据质量说明\n\n关于 Hermes Agent 的所有论断均来自一次源（GitHub 源码、官方文档、OMP 仓库自述文档），置信度极高。\n\n关于 WorkBuddy 的功能描述（Agent Teams、Dynamic Workflows、全端覆盖）来自 workbuddy.ai 公开文档，但企业版私有化部署细节、钉钉集成状态、定价未从一次源确认——选型决策需联系腾讯云销售验证这三点。\n\n---\n\n### 采纳来源\n\n- **backbone**: divergent 的对比表格和选型指引结构\n- **grounded**: OMP-Hermes 直接参考关系的具体证据（文档路径 + 行号），\"引擎 vs 车\"的简洁定性，\"WorkBuddy 不是严肃替代选项\"的判断\n- **critical**: WorkBuddy 证据质量警告（采纳但不阻断回答——用户要求概述级深度，现有证据足够支撑定位级对比）\n\n### 驳回\n\n- critical 建议\"不做对比直到补充一次源\"→ 驳回。用户要架构定位概述，现有两名 worker 的研究证据 + OMP 仓库内的 Hermes 设计文档已充分覆盖。\n\n### 待验证假设（需要用户确认的点）\n\n- [medium] WorkBuddy 是否支持钉钉？腾讯产品通常优先企微，对钉钉团队是硬伤\n- [low] WorkBuddy 企业版定价 — 影响自建 vs 购买决策\n- [low] Hermes Agent 是否计划支持钉钉 adapter？当前渠道列表无中国 IM",
+  "stderr": "",
+  "exitCode": 0,
+  "model": "narwal-plan/deepseek-v4-pro-202606",
+  "durationMs": 50162,
+  "stopReason": "stop",
+  "timedOut": false,
+  "idleTimedOut": false,
+  "toolBudgetExceeded": false,
+  "aborted": false,
+  "usage": {
+    "input": 6023,
+    "output": 1458,
+    "cacheRead": 17024,
+    "cacheWrite": 0,
+    "cost": 0.005250385,
+    "turns": 1
+  }
+}

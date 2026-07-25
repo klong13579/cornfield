@@ -1,0 +1,110 @@
+{
+  "caseId": "C1",
+  "task": "hermes agent 和 workbuddy 的区别是什么？",
+  "note": "compare + research required",
+  "runDir": "/Users/sz-0203015357/Desktop/Narwal/oh-my-pi/tmp/moa-real-probe/C1/2026-07-23T19-11-56-849Z",
+  "wallMs": 486278,
+  "ok": true,
+  "timings": {
+    "discovery": 32069,
+    "research": 140474,
+    "ask": 38466,
+    "rewrite": 100431,
+    "workers_r1": 124644,
+    "workers": 124644,
+    "synthesis": 50172,
+    "total": 486268
+  },
+  "researchEffective": "required",
+  "research_pack": {
+    "sources": 8,
+    "repo_facts": 0,
+    "gaps": 1,
+    "parse_source": "tool_trace",
+    "mode": "required",
+    "urls": [
+      "https://github.com/NousResearch/hermes-agent/blob/main/website/docs/developer-guide/prompt-assembly.md",
+      "https://hermes-agent.nousresearch.com/docs/user-guide/features/memory",
+      "https://docs.openclaw.ai/concepts/system-prompt",
+      "https://gist.githubusercontent.com/karpathy/442a6bf555914893e9891c11519de94f/raw/ac46de1ad27f92b28ac95459c782c07f6b8c964a/llm-wiki.md",
+      "https://www.anthropic.com/engineering/multi-agent-research-system%60",
+      "https://www.langchain.com/blog/choosing-the-right-multi-agent-architecture%60",
+      "https://turion.ai/blog/multi-agent-orchestration-infrastructure-production/%60",
+      "https://workbuddy.dev//"
+    ]
+  },
+  "ask": {
+    "asked": 3,
+    "answered": 3,
+    "assumed": 0,
+    "timedOut": 0,
+    "enabled": true
+  },
+  "workers": [
+    {
+      "name": "divergent",
+      "ok": true,
+      "model": "narwal-plan/deepseek-v4-flash-202605",
+      "qualityScore": 85,
+      "qualityDropped": false,
+      "durationMs": 124640,
+      "stopReason": "stop",
+      "timedOut": false,
+      "usage": {
+        "input": 31986,
+        "output": 4246,
+        "cacheRead": 217728,
+        "cacheWrite": 0,
+        "cost": 0.01219876,
+        "turns": 8
+      },
+      "hasToolTrace": true,
+      "hasStreamPreview": true,
+      "stderr": ""
+    },
+    {
+      "name": "grounded",
+      "ok": true,
+      "model": "narwal-plan/deepseek-v4-pro-202606",
+      "qualityScore": 60,
+      "qualityDropped": false,
+      "durationMs": 78011,
+      "stopReason": "stop",
+      "timedOut": false,
+      "usage": {
+        "input": 35872,
+        "output": 3833,
+        "cacheRead": 57344,
+        "cacheWrite": 0,
+        "cost": 0.02352655,
+        "turns": 3
+      },
+      "hasToolTrace": true,
+      "hasStreamPreview": true,
+      "stderr": ""
+    },
+    {
+      "name": "critical",
+      "ok": true,
+      "model": "alibaba-coding-plan/kimi-k2.5",
+      "qualityScore": 100,
+      "qualityDropped": false,
+      "durationMs": 96712,
+      "stopReason": "stop",
+      "timedOut": false,
+      "usage": {
+        "input": 36286,
+        "output": 2988,
+        "cacheRead": 127104,
+        "cacheWrite": 0,
+        "cost": 0.043446,
+        "turns": 6
+      },
+      "hasToolTrace": true,
+      "hasStreamPreview": true,
+      "stderr": ""
+    }
+  ],
+  "synthesisOk": true,
+  "timingSummary": "MOA 耗时\n  discovery     32.1s\n  research      140.5s\n  ask           38.5s\n  rewrite       100.4s\n  workers       124.6s\n  synthesis     50.2s\n  total         486.3s"
+}

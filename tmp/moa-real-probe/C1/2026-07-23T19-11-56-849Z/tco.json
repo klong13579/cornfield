@@ -1,0 +1,144 @@
+{
+  "task_understanding": "用户希望了解 hermes agent 和 workbuddy 两个组件/产品的区别对比",
+  "known_inputs": [
+    {
+      "key": "repo_context",
+      "value": "Oh My Pi (omp) 是一个基于 Bun 的终端编码代理 CLI，包含 gateway、agent core、coding-agent 等多个包",
+      "source": "cwd",
+      "confidence": 0.95
+    },
+    {
+      "key": "gateway_mentioned",
+      "value": "pi-gateway 包处理 IM 通道（DingTalk）、调度器和 agent bridge，文档提及 hermes-gateway-cron-architecture.md",
+      "source": "cwd",
+      "confidence": 0.8
+    },
+    {
+      "key": "user_role",
+      "value": "米克原子 CEO，关注研发管理、agent team 管理，用于管理公司业务",
+      "source": "user_md",
+      "confidence": 0.95
+    },
+    {
+      "key": "comparison_dimensions",
+      "value": "架构定位",
+      "source": "user",
+      "confidence": 1
+    },
+    {
+      "key": "depth",
+      "value": "概述级（1-2句话定位）",
+      "source": "user",
+      "confidence": 1
+    },
+    {
+      "key": "audience",
+      "value": "技术团队",
+      "source": "user",
+      "confidence": 1
+    }
+  ],
+  "missing_inputs": [
+    {
+      "key": "comparison_dims",
+      "question": "希望从哪些维度对比？功能定位、使用场景、交互方式、技术架构、部署方式、目标用户",
+      "type": "list",
+      "required": true,
+      "why_critical": "compare 任务必须明确对比维度，否则 workers 会各自发散",
+      "defaultValue": [
+        "功能定位",
+        "使用场景",
+        "交互方式"
+      ]
+    },
+    {
+      "key": "audience",
+      "question": "这份对比结论主要给谁看？技术团队参考、产品决策、还是对外文档",
+      "type": "select",
+      "options": [
+        "技术团队",
+        "产品决策",
+        "对外文档",
+        "内部对齐"
+      ],
+      "required": false,
+      "why_critical": "影响输出的技术深度和术语程度",
+      "defaultValue": "产品决策"
+    },
+    {
+      "key": "depth",
+      "question": "需要多深？概述级（1-2句话定位）、对比表级（关键维度并排）、还是详细分析（架构图+流程）",
+      "type": "select",
+      "options": [
+        "概述",
+        "对比表",
+        "详细分析"
+      ],
+      "required": true,
+      "why_critical": "决定 worker 的研究投入和输出篇幅",
+      "defaultValue": "对比表"
+    }
+  ],
+  "assumptions": [],
+  "task_intent": "compare",
+  "research_pack": {
+    "mode": "required",
+    "gathered_at": "2026-07-23T19:14:49.787Z",
+    "queries": [],
+    "sources": [
+      {
+        "claim": "github.com/NousResearch/hermes-agent/blob/main/website/doc…",
+        "url": "https://github.com/NousResearch/hermes-agent/blob/main/website/docs/developer-guide/prompt-assembly.md",
+        "relevance": "tool_trace",
+        "confidence": "medium"
+      },
+      {
+        "claim": "hermes-agent.nousresearch.com/docs/user-guide/features/memory",
+        "url": "https://hermes-agent.nousresearch.com/docs/user-guide/features/memory",
+        "relevance": "tool_trace",
+        "confidence": "medium"
+      },
+      {
+        "claim": "docs.openclaw.ai/concepts/system-prompt",
+        "url": "https://docs.openclaw.ai/concepts/system-prompt",
+        "relevance": "tool_trace",
+        "confidence": "medium"
+      },
+      {
+        "claim": "gist.githubusercontent.com/karpathy/442a6bf555914893e9891c11519de94f/raw/a…",
+        "url": "https://gist.githubusercontent.com/karpathy/442a6bf555914893e9891c11519de94f/raw/ac46de1ad27f92b28ac95459c782c07f6b8c964a/llm-wiki.md",
+        "relevance": "tool_trace",
+        "confidence": "medium"
+      },
+      {
+        "claim": "www.anthropic.com/engineering/multi-agent-research-system%60",
+        "url": "https://www.anthropic.com/engineering/multi-agent-research-system%60",
+        "relevance": "tool_trace",
+        "confidence": "medium"
+      },
+      {
+        "claim": "www.langchain.com/blog/choosing-the-right-multi-agent-architectur…",
+        "url": "https://www.langchain.com/blog/choosing-the-right-multi-agent-architecture%60",
+        "relevance": "tool_trace",
+        "confidence": "medium"
+      },
+      {
+        "claim": "turion.ai/blog/multi-agent-orchestration-infrastructure-p…",
+        "url": "https://turion.ai/blog/multi-agent-orchestration-infrastructure-production/%60",
+        "relevance": "tool_trace",
+        "confidence": "medium"
+      },
+      {
+        "claim": "workbuddy.dev",
+        "url": "https://workbuddy.dev//",
+        "relevance": "tool_trace",
+        "confidence": "medium"
+      }
+    ],
+    "repo_facts": [],
+    "gaps": [
+      "research interrupted: web_search budget exceeded (3)"
+    ],
+    "parse_source": "tool_trace"
+  }
+}

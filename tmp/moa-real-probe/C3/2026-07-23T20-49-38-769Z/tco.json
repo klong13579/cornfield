@@ -1,0 +1,170 @@
+{
+  "task_understanding": "对比 Cursor 与 Claude Code 两款 AI 编程助手在会话压缩（context window management / conversation summarization）方面的策略差异，包括技术实现、用户体验和 trade-offs。",
+  "known_inputs": [
+    {
+      "key": "subject_a",
+      "value": "Cursor",
+      "source": "user_md",
+      "confidence": 1
+    },
+    {
+      "key": "subject_b",
+      "value": "Claude Code",
+      "source": "user_md",
+      "confidence": 1
+    },
+    {
+      "key": "comparison_topic",
+      "value": "会话压缩策略",
+      "source": "user_md",
+      "confidence": 1
+    },
+    {
+      "key": "user_language",
+      "value": "中文",
+      "source": "user_md",
+      "confidence": 1
+    },
+    {
+      "key": "user_role",
+      "value": "创业公司 CEO",
+      "source": "user_md",
+      "confidence": 1
+    },
+    {
+      "key": "user_style",
+      "value": "简短、有判断、不报菜名",
+      "source": "user_md",
+      "confidence": 1
+    },
+    {
+      "key": "comparison_dims",
+      "value": "AB",
+      "source": "user",
+      "confidence": 1
+    },
+    {
+      "key": "depth_level",
+      "value": "1",
+      "source": "user",
+      "confidence": 1
+    },
+    {
+      "key": "output_format",
+      "value": "A",
+      "source": "user",
+      "confidence": 1
+    }
+  ],
+  "missing_inputs": [
+    {
+      "key": "comparison_dims",
+      "question": "需要覆盖哪些对比维度？（多选）A) 功能特性 B) 技术实现原理 C) 用户体验/交互设计 D) 性能/压缩率数据 E) 定价策略影响",
+      "type": "list",
+      "required": true,
+      "why_critical": "会话压缩可从多个维度分析，不同维度决定 research 深度和输出结构，无明确维度会导致输出散乱或遗漏用户关心的点。",
+      "defaultValue": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    {
+      "key": "depth_level",
+      "question": "分析深度？1) 表面功能对比 2) 中等（提及关键机制）3) 深入（实现原理、代码级细节）",
+      "type": "select",
+      "options": [
+        "1",
+        "2",
+        "3"
+      ],
+      "required": true,
+      "why_critical": "深度决定 research 工作量和输出详略，CEO 技术背景但需要评估是否要做具体实现 trade-off 分析。",
+      "defaultValue": "2"
+    },
+    {
+      "key": "output_format",
+      "question": "输出格式？A) 对比表格 B) 结构化分析报告 C) 简洁要点列表 D) 决策建议（选哪个/怎么借鉴）",
+      "type": "select",
+      "options": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ],
+      "required": true,
+      "why_critical": "用户风格偏好简短有判断，需确认是信息型输出还是决策型建议，影响最终呈现形式。",
+      "defaultValue": "C"
+    },
+    {
+      "key": "practical_focus",
+      "question": "是否侧重实际使用场景影响（如长会话场景下的具体表现、故障案例）？是/否",
+      "type": "confirm",
+      "required": false,
+      "why_critical": "若用于 OMP 产品借鉴或团队选型，实际场景表现比理论机制更有参考价值。",
+      "defaultValue": true
+    }
+  ],
+  "assumptions": [],
+  "task_intent": "compare",
+  "research_pack": {
+    "mode": "required",
+    "gathered_at": "2026-07-23T20:52:06.120Z",
+    "queries": [],
+    "sources": [
+      {
+        "claim": "Cursor 使用动态上下文发现（Dynamic Context Discovery）来管理会话上下文",
+        "url": "https://cursor.com/blog/dynamic-context-discovery",
+        "relevance": "是本文对比 Cursor 侧的关键资料来源",
+        "confidence": "medium"
+      },
+      {
+        "claim": "Claude Code 通过上下文工程和压缩管道来管理会话上下文",
+        "url": "https://harrisonsec.com/blog/claude-code-context-engineering-compression-pipeline/",
+        "relevance": "描述 Claude Code 压缩管道的整体设计理念",
+        "confidence": "medium"
+      },
+      {
+        "claim": "深入分析了 Claude Code 的上下文压缩（Context Compaction）机制",
+        "url": "https://y-agent.github.io/inside-claude-code/04-context-compaction.html",
+        "relevance": "提供 Claude Code 压缩机制的内部实现细节",
+        "confidence": "medium"
+      },
+      {
+        "claim": "Claude Code 采用四层上下文压缩架构",
+        "url": "https://blog.4sapi.com/blog/claude-code-four-tier-context-compression",
+        "relevance": "介绍 Claude Code 压缩的分层结构",
+        "confidence": "medium"
+      },
+      {
+        "claim": "对 Claude Code 的上下文压缩机制进行了深入剖析",
+        "url": "https://oldeucryptoboi.com/blog/context-compaction-deep-dive/",
+        "relevance": "深度分析压缩策略的工作原理和权衡",
+        "confidence": "medium"
+      },
+      {
+        "claim": "Claude Code 的上下文管理策略有完整的实践指南",
+        "url": "https://wowhow.cloud/blogs/claude-code-context-management-definitive-guide-2026",
+        "relevance": "提供上下文管理策略的全面参考",
+        "confidence": "medium"
+      },
+      {
+        "claim": "Claude Code 源码分析中，上下文压缩是独立章节",
+        "url": "https://deepwiki.com/kejun/claude-code/5.3-context-compaction",
+        "relevance": "从源码角度分析压缩实现",
+        "confidence": "medium"
+      },
+      {
+        "claim": "Claude Code 源码分析文档中定义清晰的上下文管理概念",
+        "url": "https://sanbuphy-claude-code-source-code.mintlify.app/concepts/context-management",
+        "relevance": "从源码层面解释上下文管理模式",
+        "confidence": "medium"
+      }
+    ],
+    "repo_facts": [],
+    "gaps": [
+      "research interrupted: web_search budget exceeded (3)"
+    ],
+    "parse_source": "tool_trace"
+  }
+}

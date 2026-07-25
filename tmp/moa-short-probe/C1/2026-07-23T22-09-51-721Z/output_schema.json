@@ -1,0 +1,39 @@
+{
+  "sections": [
+    {
+      "name": "plan",
+      "required": true,
+      "type": "markdown"
+    },
+    {
+      "name": "open_questions",
+      "required": true,
+      "type": "list",
+      "item": {
+        "question": "string",
+        "context": "string",
+        "suggested_default": "string",
+        "type": "freeform|choice"
+      }
+    },
+    {
+      "name": "assumptions",
+      "required": false,
+      "type": "list",
+      "item": {
+        "claim": "string",
+        "basis": "string"
+      }
+    },
+    {
+      "name": "sources",
+      "required": true,
+      "type": "list",
+      "item": {
+        "claim": "string",
+        "url": "string",
+        "relevance": "string"
+      }
+    }
+  ]
+}

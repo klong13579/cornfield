@@ -1,0 +1,15 @@
+{
+  "stage": "short-probe",
+  "task": "hermes agent 和 workbuddy 的区别是什么？",
+  "ok": true,
+  "startedAt": "2026-07-23T22:09:51.974Z",
+  "endedAt": "2026-07-23T22:14:13.532Z",
+  "durations": {
+    "discovery": 16806,
+    "research": 140227,
+    "ask": 37586,
+    "workers": 66929,
+    "total": 261558
+  },
+  "researchPackSource": "tool_trace"
+}

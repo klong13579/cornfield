@@ -1,0 +1,125 @@
+{
+  "task_understanding": "对比两个知名 AI 编码工具（Cursor IDE 和 Claude Code CLI）在处理长会话时的上下文压缩/截断策略，产出一份可供技术团队参考的分析。",
+  "known_inputs": [
+    {
+      "key": "product_a",
+      "value": "Cursor",
+      "source": "user_md",
+      "confidence": 1
+    },
+    {
+      "key": "product_b",
+      "value": "Claude Code",
+      "source": "user_md",
+      "confidence": 1
+    },
+    {
+      "key": "topic",
+      "value": "会话压缩策略",
+      "source": "user_md",
+      "confidence": 1
+    },
+    {
+      "key": "repo_context",
+      "value": "OMP monorepo, Bun-based coding agent with TUI and gateway features",
+      "source": "cwd",
+      "confidence": 0.9
+    },
+    {
+      "key": "audience",
+      "value": "技术架构组（评估自研方案）",
+      "source": "user",
+      "confidence": 1
+    },
+    {
+      "key": "comparison_dims",
+      "value": "触发机制",
+      "source": "user",
+      "confidence": 1
+    },
+    {
+      "key": "depth",
+      "value": "原理层（逆向/源码分析）",
+      "source": "user",
+      "confidence": 1
+    }
+  ],
+  "missing_inputs": [
+    {
+      "key": "output_format",
+      "question": "期望输出形式？",
+      "type": "select",
+      "options": [
+        "技术报告（带章节）",
+        "对比表格（矩阵式）",
+        "决策备忘录（结论优先）",
+        "代码/配置片段参考"
+      ],
+      "required": false,
+      "why_critical": "格式影响 worker 组织信息的结构和详略取舍。",
+      "defaultValue": "技术报告（带章节）"
+    }
+  ],
+  "assumptions": [],
+  "task_intent": "compare",
+  "research_pack": {
+    "mode": "required",
+    "gathered_at": "2026-07-23T22:05:13.559Z",
+    "queries": [],
+    "sources": [
+      {
+        "claim": "InfoQ reports on Cursor's Dynamic Context Discovery feature: it uses retrieval-augmented generation (RAG) and code graph analysis to prioritize relevant context before token limits are hit.",
+        "url": "https://www.infoq.com/news/2026/01/cursor-dynamic-context-discovery/",
+        "relevance": "工程报道：揭示了 DCD 背后 RAG + 代码图分析的技术组合",
+        "confidence": "medium"
+      },
+      {
+        "claim": "Claude Code's context management uses 'Context Full' compression: when the conversation exceeds the model's window, Claude Code automatically truncates or summarizes the oldest exchanges while keeping the system prompt and recent context intact.",
+        "url": "https://wowhow.cloud/blogs/claude-code-context-management-definitive-guide-2026",
+        "relevance": "Claude Code 的压缩策略：满时截断/摘要最旧对话，类似 Cursor 但具体阈值可能不同",
+        "confidence": "medium"
+      },
+      {
+        "claim": "Cursor's token management allows users to see token usage in real-time, and when the context window fills, it applies a compression algorithm that summarizes older conversation turns while retaining the system prompt and recent turns.",
+        "url": "https://developertoolkit.ai/en/cursor-ide/advanced-techniques/token-management/",
+        "relevance": "具体压缩机制：窗口满时对早期回合做摘要压缩，保留系统提示和最近回合",
+        "confidence": "medium"
+      },
+      {
+        "claim": "Developer community analysis argues Cursor's compression is not a bug but an intentional trade-off: when context overflows, Cursor aggressively summarizes or drops earlier messages, which can cause apparent memory loss but is a designed behavior.",
+        "url": "https://dev.to/arthurpro/cursors-compression-isnt-a-bug-its-how-it-works-2680",
+        "relevance": "社区观点澄清：压缩是有意设计的折衷，不是 bug，解释了记忆丢失的根源",
+        "confidence": "medium"
+      },
+      {
+        "claim": "Practical guide explains how to detect when Cursor's context window is full (e.g., the model stops referencing early instructions), and offers mitigation strategies like splitting tasks and manually purging older messages.",
+        "url": "https://tokenlimits.app/blog/cursor-context-window-full",
+        "relevance": "实操观察：列举上下文窗口满的信号和缓解手段，侧面反映压缩策略的用户影响",
+        "confidence": "medium"
+      },
+      {
+        "claim": "Claude Code's open-source reference documents show context management is based on token counting at the turn level, with configurable limits and a fallback that drops earlier messages when the limit is exceeded.",
+        "url": "https://sanbuphy-claude-code-source-code.mintlify.app/concepts/context-management",
+        "relevance": "源码级说明：按轮次计 token，超限时丢弃早期消息，可配置上限",
+        "confidence": "medium"
+      },
+      {
+        "claim": "SitePoint article explains Claude Code's full context window handling: it maintains a sliding window of recent turns, and when capacity is reached, it compresses preceding content via summarization into a single condensed block.",
+        "url": "https://www.sitepoint.com/claude-code-context-management/",
+        "relevance": "媒体评测：确认 Claude Code 采用滑动窗口 + 摘要压缩的组合策略",
+        "confidence": "medium"
+      },
+      {
+        "claim": "Cursor implements 'Dynamic Context Discovery', which automatically identifies relevant files based on the current editing context and pulls them into the prompt window, reducing manual context selection.",
+        "url": "https://www.engineering.fyi/article/dynamic-context-discovery",
+        "relevance": "核心策略：自动发现相关文件注入上下文，减少手动选择开销",
+        "confidence": "medium"
+      }
+    ],
+    "repo_facts": [],
+    "gaps": [
+      "research interrupted: web_search budget exceeded (3)"
+    ],
+    "parse_source": "tool_trace"
+  }
+}

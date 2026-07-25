@@ -1,0 +1,21 @@
+{
+  "name": "divergent",
+  "model": "narwal-plan/deepseek-v4-flash-202605",
+  "ok": true,
+  "durationMs": 29158,
+  "stopReason": "stop",
+  "timedOut": false,
+  "idleTimedOut": false,
+  "toolBudgetExceeded": false,
+  "aborted": false,
+  "usage": {
+    "input": 5393,
+    "output": 2115,
+    "cacheRead": 15744,
+    "cacheWrite": 0,
+    "cost": 0.0018195400000000001,
+    "turns": 1
+  },
+  "stderr": "",
+  "streamPreview": "## plan\n\n### 发散对比：Hermes Agent vs WorkBuddy\n\n从不同对比框架出发，拆解两者在本质上的区别：\n\n**框架一：哲学归属 — 开源社区 vs 腾讯商业产品**\n- Hermes Agent 由 NousResearch 维护，走开源路线，代码可见、可 Fork、可私有部署。社区驱动功能演进（如 PR #3421 反映的持续开发），生态依赖贡献者。\n- WorkBuddy 是腾讯云旗下 SaaS 产品，商业闭源，功能路线图由腾讯产品团队决定，用户通过订阅获取服务。\n\n**框架二：定义边界 — AI Agent 框架 vs 生产力套件**\n- Hermes Agent 定位是通用 AI Agent 系统，核心是 LLM 驱动的工具调用循环，看板（Kanban）只是其一个 feature。本质是\"让 AI 自主完成任务的基础设施\"。\n- WorkBuddy 定位是面向团队的生产力协作工具，AI 能力是内嵌在产品中的辅助功能（类似 Notion AI 或腾讯智能助手），核心依然是\"人用的管理协作平台\"。\n- 关键发散点：**如果你不需要人用 UI、只要自动化干活的基础设施，Hermes 更接近；如果你需要一整套人的工作流管理（审批、报表、IM 集成），WorkBuddy 更适合。**\n\n**框架三：部署模型的风险谱**\n- Hermes Agent 自托管：数据完全自己控制，适合高合规场景（金融、医疗、内部敏感业务），但你需要自己管部署、运维、可用性。风险在于你的运维能力。\n- WorkBuddy SaaS：腾讯运维，你只管用。合规风险在于数据放在腾讯云上，受腾讯服务条款和国内数据监管约束。风险在于你对平台的控制权为零。\n\n**框架四：用户画像鸿沟**\n- Hermes Agent 用户画像：开发者、AI 研究者、愿意读文档、能写配置、需要定制化的技术团队。进入门槛高。\n- WorkBuddy 用户画像：企业管理者、行政/运营团队、非技术人员、需要 \"开箱即用\" 的团队。进入门槛低。\n- 发散角度：**两者几乎不存在直接竞争关系**，除非某个团队恰好需要 AI Agent 同时又需要 PM 工具，但即便如此，选择也由团队技术能力决定。\n\n**框架五：演进逻辑差异**\n- Hermes Agent 的演进由社区 + 前沿研究驱动，方向可能是更通用的 Agent 协议、更多工具链、跨平台能力。\n- WorkBuddy 的演进由腾讯云产品生态驱动，方向可能是更深度地绑定腾讯生态（企业微信、腾讯会议、腾讯文档），成为 \"腾讯工作台\" 的一环。\n\n**框架六：成本结构天差地别**\n- Hermes Agent：软件免费+自托管算力成本（GPU/API 调用费）。隐性成本：运维人力、自行迭代的时间成本。\n- WorkBuddy：SaaS 订阅费+零运维。隐性成本：数据迁移成本、订阅账单、厂商锁定风险。\n- 发散点：**如果算力规模小（1-2 个 agent），自托管总成本可能高于 SaaS；如果规模大（50+ agent），自托管边际成本更低。**\n\n**框架七：可控性轴**\n- 在\"你可控制什么\"这个维度上，Hermes Agent 在代码、数据、部署层面完全可控。WorkBuddy 几乎零可控。\n- 在\"什么是开箱即用\"这个维度上，WorkBuddy 完胜。Hermes 需要从头搭建。\n- 发散结论：**这不是\"谁更好\"的对比，是\"你选哪端\"的权衡。**\n\n---\n\n**总结发散视角：**\n两者本质上是**不同赛道**的产品，共享\"AI+工作\"这个标签但运作在完全不同层次。Hermes Agent 是**LLM 时代的基础设施层**（类似 Kubernetes for AI agents），WorkBuddy 是**应用层**（类似飞书/Slack + AI 插件）。企业选型时真正对比的不该是 feature list，而是自己当前在哪一层需要能力——是缺一个\"能自动干活的引擎\"还是缺一个\"团队能用的管理平台\"。\n\n## open_questions\n- question: WorkBuddy 内部是否接入了类似 Hermes Agent 的通用 Agent 框架作为底层 AI 引擎？| context: 如果有，则两者的对比需要考虑\"WorkBuddy 前端 + Hermes 类引擎\"的兼容组合场景，而非完全互斥。| suggested_default: 不确定，推测 WorkBuddy 作为腾讯云产品可能接入腾讯混元大模型 API，未必使用开源 Agent 框架。| type: freeform\n- question: Hermes Agent 的看板（Kanban）功能与 WorkBuddy 的全套项目管理能力对标的程度如何？| context: 如果 Hermes Kanban 只是轻量级的任务看板（AI 自动创建+更新卡片），与 WorkBuddy 成熟的项目管理（甘特图、工时、权限、报表）不在一个量级。| suggested_default: 推测 Hermes 的 Kanban 是 AI agent 管理的轻量任务跟踪工具，不构成 WorkBuddy 的直接竞品能力。| type: freeform\n- question: 两个产品在钉钉/企业微信/飞书等 IM 集成能力上的对比？| context: WorkBuddy 作为腾讯产品可能深度绑定企业微信，而 Hermes Agent 可能通过通用 API 或 webhook 接入任意 IM。| suggested_default: 推测 Hermes Agent 不内置 IM 集成但有 webhook；WorkBuddy 深度集成企业微信。| type: freeform\n\n## assumptions\n- claim: Hermes Agent 不自带 OAuth/SSO/权限管理等企业级功能，需要自行集成 | basis: 开源通用 Agent 框架的常规缺陷\n- claim: WorkBuddy 的中文官网（workbuddy.cn）和英文官网（workbuddy.ai）内容可能有差异，国内版可能更强于企业微信集成 | basis: 国内 SaaS 产品的常规区域性差异\n- claim: Hermes Agent 的 Kanban 功能是 AI 管理的任务板，不是完整的项目管理工具 | basis: PR #3421 涉及代码变更但证据链未详细说明看板与 WorkBuddy 项目管理的差距\n- claim: WorkBuddy 使用腾讯混元作为 AI 基座，不依赖外部 LLM API | basis: 腾讯云 SaaS 产品的常规技术栈 [unverified]\n\n## sources\n- claim: Hermes Agent 有活跃的 GitHub PR #3421 | url: https://github.com/NousResearch/hermes-agent/pull/3421 | relevance: 表明 Hermes 是开源社区驱动的持续开发项目\n- claim: Hermes Agent 文档中有看板（Kanban）功能说明 | url: https://hermes-agent.nousresearch.com/docs/user-guide/features/kanban | relevance: 说明 Hermes 具备一定的团队协作导向能力，但看板具体成熟度未知\n- claim: Hermes Agent 在 Mintlify 上有产品介绍页面 | url: https://nousresearch-hermes-agent.mintlify.app/introduction | relevance: 产品定位参考\n- claim: WorkBuddy 拥有英文官网 workbuddy.ai 和中文官网 workbuddy.cn | url: https://www.workbuddy.ai/ | relevance: 同时服务国内外市场，表明其面向 business/corporate 场景\n- claim: WorkBuddy 的中文产品指南通过 CodeBuddy 提供 | url: https://www.codebuddy.cn/docs/workbuddy/From-Beginner-to-Expert-Guide/Product-Guide | relevance: 产品功能广度参考\n- claim: WorkBuddy 作为腾讯云产品提供 SaaS 服务 | url: https://cloud.tencent.com/product/workbuddy | relevance: 部署模型（SaaS）核心证据，与 Hermes 自托管形成根本差异"
+}

@@ -1,0 +1,132 @@
+{
+  "task_understanding": "用户希望对比 workbuddy 和 openclaw 两个产品/工具，需要一份结构化的比较分析来帮助决策。",
+  "known_inputs": [
+    {
+      "key": "repo_context",
+      "value": "oh-my-pi 是一个 Bun-based 的终端编码 agent 项目",
+      "source": "cwd",
+      "confidence": 0.9
+    },
+    {
+      "key": "comparison_dims",
+      "value": "功能特性",
+      "source": "user",
+      "confidence": 1
+    },
+    {
+      "key": "target_audience",
+      "value": "技术决策者",
+      "source": "user",
+      "confidence": 1
+    },
+    {
+      "key": "depth_level",
+      "value": "快速概览（关键差异点）",
+      "source": "user",
+      "confidence": 1
+    }
+  ],
+  "missing_inputs": [
+    {
+      "key": "comparison_dims",
+      "question": "需要对比哪些维度？选项：功能特性、定价模式、性能、生态系统/集成、易用性、开源协议、社区活跃度。可多选。",
+      "type": "list",
+      "required": true,
+      "why_critical": "对比必须有明确的维度，否则输出会过于发散或抓不住重点。",
+      "defaultValue": [
+        "功能特性",
+        "定价模式",
+        "生态系统/集成"
+      ]
+    },
+    {
+      "key": "target_audience",
+      "question": "这份对比主要给谁看的？选项：技术决策者、开发团队、个人开发者、投资者。",
+      "type": "select",
+      "options": [
+        "技术决策者",
+        "开发团队",
+        "个人开发者",
+        "投资者"
+      ],
+      "required": true,
+      "why_critical": "受众决定对比的深度和侧重点（技术细节 vs 商业价值）。",
+      "defaultValue": "技术决策者"
+    },
+    {
+      "key": "depth_level",
+      "question": "对比深度？选项：快速概览（关键差异点）、中等（功能对照表）、深度（架构分析 + 场景建议）。",
+      "type": "select",
+      "options": [
+        "快速概览",
+        "中等",
+        "深度"
+      ],
+      "required": true,
+      "why_critical": "深度决定研究范围和输出长度，影响执行计划。",
+      "defaultValue": "中等"
+    }
+  ],
+  "assumptions": [],
+  "task_intent": "compare",
+  "research_pack": {
+    "mode": "required",
+    "gathered_at": "2026-07-23T15:44:32.114Z",
+    "queries": [],
+    "sources": [
+      {
+        "claim": "github.com/openclaw/openclaw/n[2",
+        "url": "https://github.com/openclaw/openclaw\\n[2",
+        "relevance": "tool_trace",
+        "confidence": "medium"
+      },
+      {
+        "claim": "openclawai.io/solutions/developers/n[3",
+        "url": "https://openclawai.io/solutions/developers\\n[3",
+        "relevance": "tool_trace",
+        "confidence": "medium"
+      },
+      {
+        "claim": "openclaw.ai//n[4",
+        "url": "https://openclaw.ai/\\n[4",
+        "relevance": "tool_trace",
+        "confidence": "medium"
+      },
+      {
+        "claim": "docs.openclaw.ai/tools/acp-agents/n[5",
+        "url": "https://docs.openclaw.ai/tools/acp-agents\\n[5",
+        "relevance": "tool_trace",
+        "confidence": "medium"
+      },
+      {
+        "claim": "www.workbuddy.ai//n[2",
+        "url": "https://www.workbuddy.ai/\\n[2",
+        "relevance": "tool_trace",
+        "confidence": "medium"
+      },
+      {
+        "claim": "www.codebuddy.ai/docs/cli/sdk/n[3",
+        "url": "https://www.codebuddy.ai/docs/cli/sdk\\n[3",
+        "relevance": "tool_trace",
+        "confidence": "medium"
+      },
+      {
+        "claim": "openclaw.org",
+        "url": "https://openclaw.org\\",
+        "relevance": "tool_trace",
+        "confidence": "medium"
+      },
+      {
+        "claim": "127.0.0.1",
+        "url": "http://127.0.0.1:18789/",
+        "relevance": "tool_trace",
+        "confidence": "medium"
+      }
+    ],
+    "repo_facts": [],
+    "gaps": [
+      "research interrupted: web_search budget exceeded (3)"
+    ],
+    "parse_source": "tool_trace"
+  }
+}

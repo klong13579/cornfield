@@ -660,6 +660,7 @@ export class AgentBridge {
 				logger.debug("Agent responded", {
 					responseLength: formatted.length,
 					preview: formatted.slice(0, 100),
+					taskDurationMs: Date.now() - startedAt,
 				});
 				this.#circuit.recordSuccess();
 				return this.#metaBuilder.build(events, rawText, formatted, startedAt, {

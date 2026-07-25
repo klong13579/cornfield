@@ -1,0 +1,157 @@
+{
+  "task_understanding": "用户需要对比 workbuddy 和 openclaw 两个产品/工具，用于技术选型或商业决策参考。",
+  "known_inputs": [
+    {
+      "key": "user_role",
+      "value": "CEO of 米克原子, 研发管理背景, 需要技术铺垫",
+      "source": "user_md",
+      "confidence": 1
+    },
+    {
+      "key": "products_to_compare",
+      "value": [
+        "workbuddy",
+        "openclaw"
+      ],
+      "source": "llm_inferred",
+      "confidence": 0.9
+    },
+    {
+      "key": "local_context",
+      "value": "oh-my-pi AI coding agent monorepo",
+      "source": "cwd",
+      "confidence": 1
+    },
+    {
+      "key": "comparison_dims",
+      "value": "功能特性",
+      "source": "user",
+      "confidence": 1
+    },
+    {
+      "key": "audience",
+      "value": "技术团队选型",
+      "source": "user",
+      "confidence": 1
+    },
+    {
+      "key": "depth",
+      "value": "概览级",
+      "source": "user",
+      "confidence": 1
+    }
+  ],
+  "missing_inputs": [
+    {
+      "key": "comparison_dims",
+      "question": "对比维度：选最关注的 3-5 个（功能特性、架构设计、定价模式、开源程度、社区生态、企业支持、学习曲线）",
+      "type": "list",
+      "required": true,
+      "why_critical": "不同维度会导向完全不同的分析框架和结论",
+      "defaultValue": [
+        "功能特性",
+        "架构设计",
+        "开源程度",
+        "社区生态",
+        "企业支持"
+      ]
+    },
+    {
+      "key": "audience",
+      "question": "这个对比主要是给谁看的？（技术团队选型 / 投融资评估 / 个人学习 / 其他）",
+      "type": "select",
+      "options": [
+        "技术团队选型",
+        "投融资评估",
+        "个人学习",
+        "其他"
+      ],
+      "required": true,
+      "why_critical": "受众决定对比的深度、术语使用和建议倾向性",
+      "defaultValue": "技术团队选型"
+    },
+    {
+      "key": "depth",
+      "question": "需要多深的对比？（概览级 / 技术架构级 / 源码实现级）",
+      "type": "select",
+      "options": [
+        "概览级",
+        "技术架构级",
+        "源码实现级"
+      ],
+      "required": false,
+      "why_critical": "影响信息检索深度和分析粒度",
+      "defaultValue": "技术架构级"
+    },
+    {
+      "key": "decision_context",
+      "question": "有具体的应用场景或决策背景吗？（例如：内部工具选型、竞品分析、技术栈迁移）",
+      "type": "text",
+      "required": false,
+      "why_critical": "帮助对比结论更贴合实际决策需求",
+      "defaultValue": ""
+    }
+  ],
+  "assumptions": [],
+  "task_intent": "compare",
+  "research_pack": {
+    "mode": "required",
+    "gathered_at": "2026-07-23T16:40:51.528Z",
+    "queries": [],
+    "sources": [
+      {
+        "claim": "github.com/RobotBase/robotclaw",
+        "url": "https://github.com/RobotBase/robotclaw",
+        "relevance": "tool_trace",
+        "confidence": "medium"
+      },
+      {
+        "claim": "arxiv.org/abs/2603.26997v1",
+        "url": "https://arxiv.org/abs/2603.26997v1",
+        "relevance": "tool_trace",
+        "confidence": "medium"
+      },
+      {
+        "claim": "openclawembodiment.com",
+        "url": "https://openclawembodiment.com/",
+        "relevance": "tool_trace",
+        "confidence": "medium"
+      },
+      {
+        "claim": "openclaw.ai",
+        "url": "https://openclaw.ai/",
+        "relevance": "tool_trace",
+        "confidence": "medium"
+      },
+      {
+        "claim": "newclawtimes.com/articles/openclaw-agent-robot-arm-code-as-polic…",
+        "url": "https://newclawtimes.com/articles/openclaw-agent-robot-arm-code-as-policy-wired-physical-ai/",
+        "relevance": "tool_trace",
+        "confidence": "medium"
+      },
+      {
+        "claim": "www.openclawrobotics.com",
+        "url": "https://www.openclawrobotics.com/",
+        "relevance": "tool_trace",
+        "confidence": "medium"
+      },
+      {
+        "claim": "docs.openclaw.ai",
+        "url": "https://docs.openclaw.ai/",
+        "relevance": "tool_trace",
+        "confidence": "medium"
+      },
+      {
+        "claim": "www.workbuddy.ai",
+        "url": "https://www.workbuddy.ai/",
+        "relevance": "tool_trace",
+        "confidence": "medium"
+      }
+    ],
+    "repo_facts": [],
+    "gaps": [
+      "research interrupted: web_search budget exceeded (3)"
+    ],
+    "parse_source": "tool_trace"
+  }
+}

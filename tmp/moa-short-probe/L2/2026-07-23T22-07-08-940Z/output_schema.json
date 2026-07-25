@@ -1,0 +1,19 @@
+{
+  "sections": [
+    {
+      "name": "implementation",
+      "type": "markdown",
+      "required": true
+    },
+    {
+      "name": "file_path",
+      "type": "markdown",
+      "required": true
+    },
+    {
+      "name": "code_diff",
+      "type": "markdown",
+      "required": true
+    }
+  ]
+}

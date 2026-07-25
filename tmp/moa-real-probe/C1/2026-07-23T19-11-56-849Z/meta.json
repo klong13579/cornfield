@@ -1,0 +1,18 @@
+{
+  "stage": "all",
+  "task": "hermes agent 和 workbuddy 的区别是什么？",
+  "ok": true,
+  "startedAt": "2026-07-23T19:11:57.233Z",
+  "endedAt": "2026-07-23T19:20:03.513Z",
+  "durations": {
+    "discovery": 32069,
+    "research": 140474,
+    "ask": 38466,
+    "rewrite": 100431,
+    "workers_r1": 124644,
+    "workers": 124644,
+    "synthesis": 50172,
+    "total": 486268
+  },
+  "researchPackSource": "tool_trace"
+}

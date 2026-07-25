@@ -1,0 +1,13 @@
+{
+  "stage": "workers",
+  "task": "\u8bbe\u8ba1\u4e00\u4e2a\u5e26\u6307\u6570\u9000\u907f\u4e0e\u6296\u52a8\u7684 TypeScript HTTP \u5ba2\u6237\u7aef\u91cd\u8bd5\u4e2d\u95f4\u4ef6\uff0c\u9700\u8986\u76d6\u8d85\u65f6\u3001\u53d6\u6d88\u3001\u5e42\u7b49\u8bed\u4e49\u4e0e\u53ef\u89c2\u6d4b\u6027\u6307\u6807\u3002",
+  "ok": false,
+  "startedAt": "2026-07-15T08:17:53.713Z",
+  "endedAt": "2026-07-15T08:22:21.597Z",
+  "durations": {
+    "workers": 267880
+  },
+  "error": "all workers quality-failed",
+  "signal": "quality_failed",
+  "note": "normalized schema-wrapped copies for judge A/B"
+}

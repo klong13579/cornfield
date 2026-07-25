@@ -1,0 +1,18 @@
+{
+  "stage": "all",
+  "task": "对比一下 workbuddy 和 openclaw",
+  "ok": true,
+  "startedAt": "2026-07-23T16:39:25.413Z",
+  "endedAt": "2026-07-23T16:46:38.638Z",
+  "durations": {
+    "discovery": 30793,
+    "research": 55318,
+    "ask": 44151,
+    "rewrite": 93619,
+    "workers_r1": 141687,
+    "workers": 141687,
+    "synthesis": 67645,
+    "total": 433220
+  },
+  "researchPackSource": "tool_trace"
+}

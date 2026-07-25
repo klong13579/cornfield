@@ -1,0 +1,23 @@
+{
+  "name": "synthesis",
+  "role": "Merge surviving worker plans into one recommendation",
+  "ok": true,
+  "output": "<tool_call name=\"read\">\n<parameter name=\"path\">packages/pi-gateway/src/gateway.ts</parameter>\n<parameter name=\"offset\">1140</parameter>\n<parameter name=\"limit\">40</parameter>\n</tool_call>",
+  "stderr": "",
+  "exitCode": 0,
+  "model": "narwal-plan/deepseek-v4-pro-202606",
+  "durationMs": 12496,
+  "stopReason": "stop",
+  "timedOut": false,
+  "idleTimedOut": false,
+  "toolBudgetExceeded": false,
+  "aborted": false,
+  "usage": {
+    "input": 2931,
+    "output": 587,
+    "cacheRead": 17024,
+    "cacheWrite": 0,
+    "cost": 0.003147595,
+    "turns": 1
+  }
+}

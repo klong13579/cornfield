@@ -1,0 +1,21 @@
+{
+  "name": "divergent",
+  "model": "narwal-plan/deepseek-v4-flash-202605",
+  "ok": true,
+  "durationMs": 39073,
+  "stopReason": "stop",
+  "timedOut": false,
+  "idleTimedOut": false,
+  "toolBudgetExceeded": false,
+  "aborted": false,
+  "usage": {
+    "input": 5960,
+    "output": 2314,
+    "cacheRead": 16768,
+    "cacheWrite": 0,
+    "cost": 0.0019853600000000002,
+    "turns": 1
+  },
+  "stderr": "",
+  "streamPreview": "## executive_summary\n\nWorkBuddy 和 OpenClaw 不在同一个赛道——一个是 AI 编程助手/工作流自动化平台（WorkBuddy），另一个是具身智能机器人手臂控制平台（OpenClaw）。直接对标意义不大，但作为机器人创业公司的 CEO，两者互补使用的战略价值远大于二选一。\n\n**核心判断**：不是「二选一」，是「两个都要，但用途完全不同」。WorkBuddy 提升软件研发效率（你团队 50 人里 50% 以上是软件+算法），OpenClaw 是如果你往硬件+具身智能方向走才需要的底层能力。如果短期内不涉及机械臂控制，OpenClaw 与你无关。\n\n---\n\n## side_by_side_comparison\n\n| 维度 | WorkBuddy | OpenClaw |\n|---|---|---|\n| **品类** | AI 编程代理 / 开发者工具 | 具身智能机器人操作系统 / 机械臂控制平台 |\n| **核心价值** | 加速软件研发——理解代码库、生成代码、执行终端命令、管理项目上下文 | 让大模型直接控制机械臂——把自然语言/代码指令映射到物理动作 |\n| **技术栈** | LLM + 代码上下文理解 + 终端/工具调用 + 多文件编辑 | LLM + 具身策略 + 运动学/动力学模型 + 视觉感知 + 实时控制环 |\n| **输入** | 自然语言对话、代码上下文、bash 命令 | 自然语言指令、视觉输入、物理世界反馈 |\n| **输出** | 代码 diff、终端输出、文件编辑 | 机械臂关节角度/轨迹——物理世界动作 |\n| **开源/闭源** | 闭源 SaaS（有 binary 安装，但不是开源） | 推测有开源部分（有 robotclaw GitHub 仓库、arxiv 论文） |\n| **用户** | 软件开发者、工程师 | 机器人研究员、具身智能开发团队、硬件集成商 |\n| **商业模式** | 订阅制（个人/团队/企业） | 推测：开源社区版 + 企业授权/硬件绑定 |\n| **发展阶段** | 较成熟——AI coding agent 已有多款竞品验证市场 | 偏早期——具身智能+LLM 控制处于学术+前沿工程阶段 |\n| **对你当前的价值** | **高**——50 人团队大量软件研发，可以直接提升效率 | **低（除非战略方向包含机械臂）**——如果做的是家清扫地机器人，不涉及机械臂 |\n\n---\n\n## key_differences\n\n- field_name: 问题域 | description: WorkBuddy 解决的是**数字世界**的编码问题；OpenClaw 解决的是**物理世界**的操控问题。两者处理的环境类型完全不同，技术栈几乎没有重叠。\n- field_name: 成熟度 | description: WorkBuddy 所在的 AI coding agent 赛道已有大量商业化实践（Cursor、Copilot、Codex），用户接受度较高；OpenClaw 的「Agent 控制机械臂」仍处于早期验证阶段——arxiv 论文是 2026 年 3 月的，工程化成熟度远不如 coding agent。\n- field_name: 商业模式/定价 | description: WorkBuddy 是标准 SaaS 订阅；OpenClaw 更接近开源+硬件绑定模式（robotclaw GitHub repo 暗示社区驱动，robotics 公司网站暗示企业授权）。\n- field_name: 技术壁垒 | description: OpenClaw 的壁垒在物理世界——运动学、动力学、实时控制、安全约束，这些都是硬件和物理定律决定的，软件层无法绕过；WorkBuddy 壁垒在软件工程上下文理解和工具链集成。\n- field_name: 对你的直接价值 | description: WorkBuddy 可以直接帮你团队提升软件研发产出；OpenClaw 需要你决定是否往「机械臂操控」方向投入——你当前产品是扫地机器人，不涉及抓取/操作，短期无交集。\n- field_name: 潜在互补性 | description: 可以用 WorkBuddy 开发 OpenClaw 上的控制策略代码，或者用 OMP（你自己的 agent harness）做一个更偏你场景的编程代理。两者不冲突。\n\n---\n\n## recommendations\n\n**短期（0-6 个月）**：重心放 WorkBuddy 类工具。你团队 50 人，软件+算法占大半，研发效率是当前最大杠杆。OMP 本身就是 AI coding agent 生态的一员，优先用好它，不急着看 OpenClaw。\n\n**中期（如果战略涉及机械臂控制）**：OpenClaw 的 `code-as-policy` 思路值得关注。它的核心思想——用 LLM 生成的代码作为机器人策略——和你团队的技术基因（感知+规划+软件全栈）匹配。但前提是你得先决定产品路线图里要不要加机械臂能力。扫地机器人不需要机械臂，如果米克原子产品仍聚焦清洁，这条路暂时不用开。\n\n**选型决策**：这不是 `WorkBuddy vs OpenClaw`，是 `WorkBuddy做还是OpenClaw做`。两个都做也不矛盾——用 WorkBuddy/OMP 类的编程代理写代码，做出来的产品如果涉及机械臂再用 OpenClaw。现阶段**不需要做二选一**。\n\n---\n\n## assumptions\n\n- field_name: 产品定位推断 | description: WorkBuddy 被归为 AI coding agent——基于 `workbuddy.ai` 域名和同类定位推断，未深入验证其具体功能列表。[unverified]\n- field_name: OpenClaw 开源状态 | description: robotclaw GitHub 仓库暗示 OpenClaw 有开源组件，但未验证其 license、活跃度、实际可用性。[unverified]\n- field_name: OpenClaw 商业模式 | description: 从 openclawrobotics.com 存在推断有企业版/授权模式，但未验证具体定价和条款。[unverified]\n- field_name: 你的产品路线 | description: 假设米克原子当前产品方向不涉及机械臂操控（扫地/清洁场景），如果实际路线包含抓取/操作类动作，OpenClaw 的 relevance 会显著升高。\n\n---\n\n## sources\n\n- claim: robotclaw 是 OpenClaw 的 GitHub 开源仓库 | url: https://github.com/RobotBase/robotclaw | relevance: 确认 OpenClaw 有开源代码组件，暗示社区/开源模式\n- claim: OpenClaw 有学术论文发表，展示 Agent 控制机械臂的 Code-as-Policy 方法 | url: https://arxiv.org/abs/2603.26997v1 | relevance: 证明 OpenClaw 的技术路线——LLM 生成策略代码驱动物理手臂\n- claim: OpenClaw 定位为具身智能机器人平台，产品/公司网站介绍其能力 | url: https://openclawembodiment.com/ | relevance: 产品定位信息\n- claim: OpenClaw 主站展示其产品和技术方向 | url: https://openclaw.ai/ | relevance: 整体品牌/定位\n- claim: 媒体报道 OpenClaw 的 Agent Robot Arm 和 Code-as-Policy 概念 | url: https://newclawtimes.com/articles/openclaw-agent-robot-arm-code-as-policy-wired-physical-ai/ | relevance: 媒体覆盖，确认产品叙事\n- claim: OpenClaw Robotics 为公司网站，暗示企业级产品存在 | url: https://www.openclawrobotics.com/ | relevance: 商业模式信号\n- claim: OpenClaw 有开发者文档站点 | url: https://docs.openclaw.ai/ | relevance: 说明有一定工程成熟度和开发者生态\n- claim: WorkBuddy 是 AI 编程助手/工作流平台 | url: https://www.workbuddy.ai/ | relevance: WorkBuddy 产品定位确认"
+}

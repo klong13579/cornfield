@@ -1,0 +1,94 @@
+{
+  "caseId": "L2",
+  "task": "写一个最小 GET /health 实现，仅含返回 JSON",
+  "note": "local-impl, research none",
+  "runDir": "/Users/sz-0203015357/Desktop/Narwal/oh-my-pi/tmp/moa-real-probe/L2/2026-07-23T19-27-51-995Z",
+  "wallMs": 312429,
+  "ok": true,
+  "timings": {
+    "discovery": 22824,
+    "input_collect": 37990,
+    "ask": 46262,
+    "rewrite": 58738,
+    "workers_r1": 134096,
+    "workers": 134096,
+    "synthesis": 12503,
+    "total": 312426
+  },
+  "researchEffective": "none",
+  "research_pack": null,
+  "ask": {
+    "asked": 3,
+    "answered": 3,
+    "assumed": 0,
+    "timedOut": 0,
+    "enabled": true
+  },
+  "workers": [
+    {
+      "name": "divergent",
+      "ok": true,
+      "model": "narwal-plan/deepseek-v4-flash-202605",
+      "qualityScore": 90,
+      "qualityDropped": false,
+      "durationMs": 69108,
+      "stopReason": "stop",
+      "timedOut": false,
+      "usage": {
+        "input": 25685,
+        "output": 5346,
+        "cacheRead": 169088,
+        "cacheWrite": 0,
+        "cost": 0.010165419999999998,
+        "turns": 7
+      },
+      "hasToolTrace": true,
+      "hasStreamPreview": true,
+      "stderr": ""
+    },
+    {
+      "name": "grounded",
+      "ok": true,
+      "model": "narwal-plan/deepseek-v4-pro-202606",
+      "qualityScore": 85,
+      "qualityDropped": false,
+      "durationMs": 27119,
+      "stopReason": "stop",
+      "timedOut": false,
+      "usage": {
+        "input": 20912,
+        "output": 1114,
+        "cacheRead": 75264,
+        "cacheWrite": 0,
+        "cost": 0.01608702,
+        "turns": 4
+      },
+      "hasToolTrace": true,
+      "hasStreamPreview": true,
+      "stderr": ""
+    },
+    {
+      "name": "critical",
+      "ok": true,
+      "model": "alibaba-coding-plan/kimi-k2.5",
+      "qualityScore": 70,
+      "qualityDropped": false,
+      "durationMs": 131080,
+      "stopReason": "stop",
+      "timedOut": false,
+      "usage": {
+        "input": 44418,
+        "output": 1865,
+        "cacheRead": 201344,
+        "cacheWrite": 0,
+        "cost": 0.05238020000000001,
+        "turns": 11
+      },
+      "hasToolTrace": true,
+      "hasStreamPreview": true,
+      "stderr": "Doom loop detected (text): 60-gram \"════════════════════════════════════════════════════════════\" repeated 4×"
+    }
+  ],
+  "synthesisOk": true,
+  "timingSummary": "MOA 耗时\n  discovery     22.8s\n  input_collect 38.0s\n  ask           46.3s\n  rewrite       58.7s\n  workers       134.1s\n  synthesis     12.5s\n  total         312.4s"
+}

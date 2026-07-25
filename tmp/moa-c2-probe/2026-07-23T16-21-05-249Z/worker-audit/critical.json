@@ -1,0 +1,21 @@
+{
+  "name": "critical",
+  "model": "alibaba-coding-plan/kimi-k2.5",
+  "ok": true,
+  "durationMs": 39738,
+  "stopReason": "stop",
+  "timedOut": false,
+  "idleTimedOut": false,
+  "toolBudgetExceeded": false,
+  "aborted": false,
+  "usage": {
+    "input": 20714,
+    "output": 1317,
+    "cacheRead": 0,
+    "cacheWrite": 0,
+    "cost": 0.0163794,
+    "turns": 1
+  },
+  "stderr": "",
+  "streamPreview": "## comparison\n\n| 维度 | Workbuddy | OpenClaw |\n|------|-----------|----------|\n| **产品定位** | 企业级 AI 助手/数字员工平台，主打办公场景自动化 | 多 Agent 沙盒工具，主打开发者友好的 AI Agent 构建与测试 |\n| **核心能力** | 办公自动化、任务执行、企业集成 | Multi-Agent 沙盒、代码级 Agent 编排、工具链集成 |\n| **目标用户** | 企业用户、非技术背景的办公人员 | 开发者、技术团队、AI 研究人员 |\n| **部署模式** | SaaS 平台（推断，基于企业级定位） | 开源/免费工具（\"free AI agent tool\" viral 传播） |\n| **技术深度** | 封装度高，强调易用性 | 底层能力暴露，强调可编程性和扩展性 |\n| **生态策略** | 垂直整合（办公场景） | 水平扩展（多 Agent 沙盒基础设施） |\n\n**关键差异**：\n- Workbuddy 是**应用层**产品，解决\"让非技术人员用上 AI\"的问题\n- OpenClaw 是**基础设施层**产品，解决\"让开发者更容易构建 Agent 系统\"的问题\n\n**风险点**：\n- Workbuddy 的官网信息有限，实际功能边界不清；其中国站点 codebuddy.cn 可能暗示区域化版本或独立产品\n- OpenClaw 的\"viral\"属性可能掩盖了实际生产就绪度；文档站点分散（docs.openclaw.ai vs docs2.openclaw.ai）暗示产品迭代中的碎片化\n\n## verdict\n\n**对于创业公司 CEO 的决策建议**：\n\n1. **若你的需求是\"快速让团队用上 AI 提效\"** → Workbuddy 更匹配，但需验证其对中国区支持的实际情况（codebuddy.cn 的存在可能是优势也可能是版本分化风险）\n\n2. **若你的需求是\"构建自有 Agent 能力\"** → OpenClaw 更匹配，但需评估其免费模式的可持续性（viral 工具常面临商业化转型或弃更风险）\n\n3. **关键判断**：两者并非直接竞品。Workbuddy 是**终端应用**（类似智能办公助手），OpenClaw 是**开发工具**（类似 Agent 框架）。你的 50 人团队若需要\"数字员工\"执行任务，应看 Workbuddy；若需要自定义 Agent 工作流，应看 OpenClaw 或评估自建方案（考虑到你当前已有 OMP 基础，OpenClaw 可能是外部参考而非采用对象）。\n\n**红旗**：两者都缺乏清晰的商业化信息（定价、SLA、数据安全承诺），这对企业采购决策是实质性障碍。\n\n## open_questions\n\n- field_name: Workbuddy 的实际客户案例规模与行业分布（验证其\"企业级\"定位真实性）\n- field_name: OpenClaw 的商业模式与团队背景（viral 免费工具的长期可持续性存疑）\n- field_name: codebuddy.cn 与 workbuddy.ai 的关系（独立产品、中国区版本还是同一产品的不同域名）\n- field_name: OpenClaw 多 Agent 沙盒的具体技术架构（是否支持分布式、状态持久化等企业级需求）\n- field_name: 两者数据安全与合规资质（特别是面向中国市场的数据驻留方案）\n\n## assumptions\n\n- field_name: Workbuddy 主要面向中文/亚太市场（基于 codebuddy.cn 和腾讯云文档的强关联信号）\n- field_name: OpenClaw 尚处于早期阶段（文档站点分散、viral 营销属性、缺乏企业级功能描述）\n- field_name: 用户当前技术栈以 OMP（自研 Agent 平台）为主，对比的目的是补充或参考而非替换\n\n## sources\n\n- claim: OpenClaw 定位为\"free AI agent tool\"并在 2026 年初获得 viral 传播 | url: https://www.kdnuggets.com/openclaw-explained-the-free-ai-agent-tool-going-viral-already-in-2026 | relevance: 核心定位与商业模式信号\n- claim: OpenClaw 提供 Multi-Agent Sandbox 工具能力 | url: https://docs2.openclaw.ai/tools/multi-agent-sandbox-tools | relevance: 核心技术能力描述\n- claim: OpenClaw 主文档站点为 docs.openclaw.ai | url: https://docs.openclaw.ai/ | relevance: 产品文档入口\n- claim: Workbuddy 主站为 www.workbuddy.ai | url: https://www.workbuddy.ai/ | relevance: 品牌主入口\n- claim: Workbuddy 关联中国站点 www.codebuddy.cn/work/ | url: https://www.codebuddy.cn/work/ | relevance: 中国市场布局/版本信号\n- claim: 腾讯云技术百科收录 Workbuddy 相关内容 | url: https://www.tencentcloud.com/techpedia/144114?lang=en | relevance: 中国市场存在证据"
+}

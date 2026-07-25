@@ -1,0 +1,84 @@
+{
+  "caseId": "C3",
+  "task": "对比 Cursor 与 Claude Code 的会话压缩策略",
+  "note": "P1: both Cursor + Claude sides",
+  "ok": true,
+  "wallMs": 272371,
+  "durations": {
+    "discovery": 26907,
+    "research": 142310,
+    "ask": 35557,
+    "workers": 67591
+  },
+  "fails": [],
+  "ask": {
+    "asked": 3,
+    "answered": 3,
+    "assumed": 0,
+    "timedOut": 0,
+    "enabled": true
+  },
+  "research_sources": [
+    {
+      "url": "https://www.infoq.com/news/2026/01/cursor-dynamic-context-discovery/",
+      "claim": "InfoQ reports on Cursor's Dynamic Context Discovery feature: it uses retrieval-augmented generation (RAG) and code graph"
+    },
+    {
+      "url": "https://wowhow.cloud/blogs/claude-code-context-management-definitive-guide-2026",
+      "claim": "Claude Code's context management uses 'Context Full' compression: when the conversation exceeds the model's window, Clau"
+    },
+    {
+      "url": "https://developertoolkit.ai/en/cursor-ide/advanced-techniques/token-management/",
+      "claim": "Cursor's token management allows users to see token usage in real-time, and when the context window fills, it applies a "
+    },
+    {
+      "url": "https://dev.to/arthurpro/cursors-compression-isnt-a-bug-its-how-it-works-2680",
+      "claim": "Developer community analysis argues Cursor's compression is not a bug but an intentional trade-off: when context overflo"
+    },
+    {
+      "url": "https://tokenlimits.app/blog/cursor-context-window-full",
+      "claim": "Practical guide explains how to detect when Cursor's context window is full (e.g., the model stops referencing early ins"
+    },
+    {
+      "url": "https://sanbuphy-claude-code-source-code.mintlify.app/concepts/context-management",
+      "claim": "Claude Code's open-source reference documents show context management is based on token counting at the turn level, with"
+    },
+    {
+      "url": "https://www.sitepoint.com/claude-code-context-management/",
+      "claim": "SitePoint article explains Claude Code's full context window handling: it maintains a sliding window of recent turns, an"
+    },
+    {
+      "url": "https://www.engineering.fyi/article/dynamic-context-discovery",
+      "claim": "Cursor implements 'Dynamic Context Discovery', which automatically identifies relevant files based on the current editin"
+    }
+  ],
+  "workers": [
+    {
+      "name": "divergent",
+      "ok": true,
+      "stopReason": "stop",
+      "toolBudgetExceeded": false,
+      "turns": 1,
+      "durationMs": 49586,
+      "stderr": ""
+    },
+    {
+      "name": "grounded",
+      "ok": true,
+      "stopReason": "stop",
+      "toolBudgetExceeded": false,
+      "turns": 4,
+      "durationMs": 66078,
+      "stderr": ""
+    },
+    {
+      "name": "critical",
+      "ok": true,
+      "stopReason": "stop",
+      "toolBudgetExceeded": false,
+      "turns": 1,
+      "durationMs": 48678,
+      "stderr": ""
+    }
+  ]
+}

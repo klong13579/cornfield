@@ -1,0 +1,80 @@
+{
+  "caseId": "C1",
+  "task": "hermes agent 和 workbuddy 的区别是什么？",
+  "note": "P1: no openclaw; both entities in pack",
+  "ok": true,
+  "wallMs": 261558,
+  "durations": {
+    "discovery": 16806,
+    "research": 140227,
+    "ask": 37586,
+    "workers": 66929
+  },
+  "fails": [],
+  "ask": {
+    "asked": 3,
+    "answered": 3,
+    "assumed": 0,
+    "timedOut": 0,
+    "enabled": true
+  },
+  "research_sources": [
+    {
+      "url": "https://github.com/NousResearch/hermes-agent/pull/3421",
+      "claim": "Hermes Agent（NousResearch）在 GitHub 上存在编号为 3421 的 Pull Request，涉及代码变更。"
+    },
+    {
+      "url": "https://www.workbuddy.ai/",
+      "claim": "WorkBuddy 拥有官方英文网站（workbuddy.ai）。"
+    },
+    {
+      "url": "https://hermes-agent.nousresearch.com/docs/user-guide/features/kanban",
+      "claim": "Hermes Agent 的用户文档中包含看板（Kanban）功能说明。"
+    },
+    {
+      "url": "https://cloud.tencent.com/product/workbuddy",
+      "claim": "WorkBuddy 作为腾讯云产品提供 SaaS 服务。"
+    },
+    {
+      "url": "https://www.codebuddy.cn/docs/workbuddy/From-Beginner-to-Expert-Guide/Product-Guide",
+      "claim": "CodeBuddy 网站提供了 WorkBuddy 的产品指南文档。"
+    },
+    {
+      "url": "https://www.workbuddy.cn/",
+      "claim": "WorkBuddy 拥有中文官方网站（workbuddy.cn）。"
+    },
+    {
+      "url": "https://nousresearch-hermes-agent.mintlify.app/introduction",
+      "claim": "Hermes Agent（NousResearch）通过 Mintlify 提供了产品介绍页面。"
+    }
+  ],
+  "workers": [
+    {
+      "name": "divergent",
+      "ok": true,
+      "stopReason": "stop",
+      "toolBudgetExceeded": false,
+      "turns": 1,
+      "durationMs": 29158,
+      "stderr": ""
+    },
+    {
+      "name": "grounded",
+      "ok": true,
+      "stopReason": "stop",
+      "toolBudgetExceeded": false,
+      "turns": 4,
+      "durationMs": 65419,
+      "stderr": ""
+    },
+    {
+      "name": "critical",
+      "ok": true,
+      "stopReason": "stop",
+      "toolBudgetExceeded": false,
+      "turns": 1,
+      "durationMs": 45409,
+      "stderr": ""
+    }
+  ]
+}

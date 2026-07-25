@@ -2653,6 +2653,8 @@ export class AgentSession {
 		}
 		this.#lastActivityTime = Date.now();
 
+		const _promptStart = performance.now();
+
 		const expandPromptTemplates = options?.expandPromptTemplates ?? true;
 
 		// Handle extension commands first (execute immediately, even during streaming)
@@ -2728,6 +2730,12 @@ export class AgentSession {
 		if (!options?.synthetic) {
 			await this.#enforcePlanModeToolDecision();
 		}
+
+		logger.debug("prompt:timing", {
+			totalMs: (performance.now() - _promptStart).toFixed(0),
+			textLength: text.length,
+			synthetic: options?.synthetic ?? false,
+		});
 	}
 
 	async promptCustomMessage<T = unknown>(
@@ -2771,6 +2779,7 @@ export class AgentSession {
 			skipPostPromptRecoveryWait?: boolean;
 		},
 	): Promise<void> {
+		const _entryTime = performance.now();
 		this.#promptInFlightCount++;
 		const generation = this.#promptGeneration;
 		try {
@@ -2882,12 +2891,24 @@ export class AgentSession {
 			}
 
 			const agentPromptOptions = options?.toolChoice ? { toolChoice: options.toolChoice } : undefined;
+			const _agentStart = performance.now();
 			await this.#promptAgentWithIdleRetry(messages, agentPromptOptions);
+			const _agentDuration = performance.now() - _agentStart;
+			logger.debug("prompt:agent_timing", {
+				agentMs: _agentDuration.toFixed(0),
+				messageCount: messages.length,
+				model: this.model ? `${this.model.provider}/${this.model.id}` : "none",
+			});
 			if (!options?.skipPostPromptRecoveryWait) {
 				await this.#waitForPostPromptRecovery();
 			}
 		} finally {
 			this.#promptInFlightCount = Math.max(0, this.#promptInFlightCount - 1);
+			const _totalEntryMs = performance.now() - _entryTime;
+			logger.debug("prompt:promptWithMessage_timing", {
+				totalMs: _totalEntryMs.toFixed(0),
+				textLength: expandedText.length,
+			});
 		}
 	}
 
@@ -5843,7 +5864,13 @@ export class AgentSession {
 		const deadline = Date.now() + 30_000;
 		for (;;) {
 			try {
+				const _llmStart = performance.now();
 				await this.agent.prompt(messages, options);
+				const _llmMs = performance.now() - _llmStart;
+				logger.debug("prompt:llm_timing", {
+					llmMs: _llmMs.toFixed(0),
+					messages: messages.length,
+				});
 				return;
 			} catch (err) {
 				if (!(err instanceof AgentBusyError)) {

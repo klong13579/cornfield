@@ -1,0 +1,110 @@
+{
+  "caseId": "C3",
+  "task": "对比 Cursor 与 Claude Code 的会话压缩策略",
+  "note": "compare compression",
+  "runDir": "/Users/sz-0203015357/Desktop/Narwal/oh-my-pi/tmp/moa-real-probe/C3/2026-07-23T19-20-03-518Z",
+  "wallMs": 468249,
+  "ok": true,
+  "timings": {
+    "discovery": 28953,
+    "research": 124795,
+    "ask": 40082,
+    "rewrite": 6493,
+    "workers_r1": 214617,
+    "workers": 214617,
+    "synthesis": 53293,
+    "total": 468241
+  },
+  "researchEffective": "required",
+  "research_pack": {
+    "sources": 8,
+    "repo_facts": 0,
+    "gaps": 1,
+    "parse_source": "tool_trace",
+    "mode": "required",
+    "urls": [
+      "https://code.claude.com/docs/en/context-window",
+      "https://howaiworks.ai/blog/claude-code-auto-compact-context-management",
+      "https://platform.claude.com/docs/en/build-with-claude/context-windows",
+      "https://codex.danielvaughan.com/2026/04/14/context-compaction-deep-dive-codex-cli-claude-code-opencode/",
+      "https://wowhow.cloud/blogs/claude-code-context-management-definitive-guide-2026",
+      "https://explainx.ai/blog/claude-code-context-window-limit-management-2026",
+      "https://claudefa.st/blog/guide/mechanics/context-management",
+      "https://okhlopkov.com/claude-code-compaction-explained/"
+    ]
+  },
+  "ask": {
+    "asked": 3,
+    "answered": 3,
+    "assumed": 0,
+    "timedOut": 0,
+    "enabled": true
+  },
+  "workers": [
+    {
+      "name": "divergent",
+      "ok": true,
+      "model": "narwal-plan/deepseek-v4-flash-202605",
+      "qualityScore": 75,
+      "qualityDropped": false,
+      "durationMs": 42605,
+      "stopReason": "stop",
+      "timedOut": false,
+      "usage": {
+        "input": 6501,
+        "output": 2524,
+        "cacheRead": 16768,
+        "cacheWrite": 0,
+        "cost": 0.0021199,
+        "turns": 1
+      },
+      "hasToolTrace": false,
+      "hasStreamPreview": true,
+      "stderr": ""
+    },
+    {
+      "name": "grounded",
+      "ok": true,
+      "model": "narwal-plan/deepseek-v4-pro-202606",
+      "qualityScore": 60,
+      "qualityDropped": false,
+      "durationMs": 213096,
+      "stopReason": "stop",
+      "timedOut": false,
+      "usage": {
+        "input": 39543,
+        "output": 7135,
+        "cacheRead": 352000,
+        "cacheWrite": 0,
+        "cost": 0.051568655000000005,
+        "turns": 12
+      },
+      "hasToolTrace": true,
+      "hasStreamPreview": true,
+      "stderr": "Doom loop detected (text): 60-gram \" | url: (本地文件) packages/ai/src/providers/cursor/proto/agent.\" repeated 4×"
+    },
+    {
+      "name": "critical",
+      "ok": true,
+      "model": "alibaba-coding-plan/kimi-k2.5",
+      "qualityScore": 55,
+      "qualityDropped": false,
+      "durationMs": 49536,
+      "stopReason": "stop",
+      "timedOut": false,
+      "usage": {
+        "input": 2307,
+        "output": 2038,
+        "cacheRead": 19200,
+        "cacheWrite": 0,
+        "cost": 0.0094182,
+        "turns": 1
+      },
+      "hasToolTrace": false,
+      "hasStreamPreview": true,
+      "stderr": ""
+    }
+  ],
+  "synthesisOk": true,
+  "timingSummary": "MOA 耗时\n  discovery     29.0s\n  research      124.8s\n  ask           40.1s\n  rewrite       6.5s\n  workers       214.6s\n  synthesis     53.3s\n  total         468.2s"
+}

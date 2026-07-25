@@ -1,0 +1,21 @@
+{
+  "name": "critical",
+  "model": "alibaba-coding-plan/kimi-k2.5",
+  "ok": true,
+  "durationMs": 48678,
+  "stopReason": "stop",
+  "timedOut": false,
+  "idleTimedOut": false,
+  "toolBudgetExceeded": false,
+  "aborted": false,
+  "usage": {
+    "input": 2554,
+    "output": 1912,
+    "cacheRead": 17536,
+    "cacheWrite": 0,
+    "cost": 0.009021999999999999,
+    "turns": 1
+  },
+  "stderr": "",
+  "streamPreview": "## comparison_summary\n\nCursor 与 Claude Code 均采用\"滑动窗口 + 摘要压缩\"的核心架构来应对长会话的 token 限制，但两者的实现策略和权衡存在关键差异。Cursor 通过 Dynamic Context Discovery (DCD) 主动进行 RAG 检索和代码图分析，在窗口耗尽前即尝试优化上下文组成；Claude Code 则依赖被动式触发，在 token 计数超限后执行截断或摘要。两者的共同弱点在于**压缩触发对用户不透明**，且均存在**关键指令被意外丢弃**的风险。Cursor 的激进策略在复杂多文件场景下可能导致早期上下文被过早压缩，而 Claude Code 的固定阈值模式在密集交互场景下响应滞后。\n\n## dimension_analysis\n\n### 1. 触发机制对比\n\n**Cursor: 多层级预防性触发**\n- 基于代码图的主动相关性评分，在 token 接近上限前即调整上下文组成\n- 实时 token 计数可视化，但压缩决策由系统自动完成\n- 弱点：DCD 的相关性判断可能误判早期关键指令的重要性，导致\"记忆丢失\"现象\n\n**Claude Code: 被动阈值触发**\n- 严格的 turn-level token 计数，超限后执行压缩\n- 可配置的限制阈值，但默认行为保守\n- 弱点：阈值到达前的\"静默累积\"阶段用户无感知，可能在关键节点突然被截断\n\n### 2. 压缩策略对比\n\n**Cursor: 激进的摘要算法**\n- 早期对话回合被大幅摘要或完全丢弃\n- 系统提示和最近回合被强制保留\n- 弱点：连续多轮小幅修改后，原始需求描述可能被压缩得面目全非\n\n**Claude Code: 滑动窗口聚合**\n- 超限时将前置内容聚合为单一块状摘要\n- 保留最近 N 轮完整对话\n- 弱点：块状摘要丢失了原始对话的结构化信息，代码片段与解释文本混为一谈\n\n### 3. 故障模式分析\n\n**共同的单点故障：**\n- 系统提示的依赖：两者均依赖系统提示作为\"锚点\"，但系统提示本身也可能被用户的自定义配置稀释\n- 递归摘要的退化：多次压缩后，摘要的摘要可能导致信息失真\n\n**Cursor 特有故障：**\n- RAG 误判：代码图分析可能将早期定义的关键架构决策标记为\"低相关性\"\n- 文件级粒度的粗暴裁剪：在文件粒度的上下文管理中，可能保留文件但丢失关键的修改意图\n\n**Claude Code 特有故障：**\n- 阈值硬边界：密集 short-turn 场景下，可能在同一时刻丢失大量早期上下文\n- 配置过载：可配置性本身成为负担，用户难以选择最佳阈值\n\n### 4. 边缘场景\n\n| 场景 | Cursor 表现 | Claude Code 表现 |\n|------|-------------|------------------|\n| 跨文件重构（>20 文件） | DCD 可能过度聚焦当前文件，丢失全局约束 | 固定窗口可能导致早期文件说明被截断 |\n| 长时调试会话（>2小时） | 早期调试假设和中间结论可能被摘要 | 块状摘要难以追溯具体哪一步引入问题 |\n| 多轮迭代需求变更 | 原始需求可能在第 N 轮后被压缩，导致偏离初衷 | 同样风险，但可配置阈值提供部分缓解 |\n| 代码审查场景（大量负反馈） | 负面反馈可能被标记为低相关性而丢失 | 最近审查意见保留，但历史上下文丢失 |\n\n## findings_table\n\n| 维度 | Cursor | Claude Code | 关键弱点 |\n|------|--------|-------------|----------|\n| **触发机制** | 预防性 DCD + 代码图分析 | 被动 token 阈值 | Cursor: 相关性误判；Claude Code: 滞后响应 |\n| **压缩粒度** | 回合级摘要/丢弃 | 聚合为单一块状摘要 | Cursor: 结构化信息丢失；Claude Code: 块内不可追溯 |\n| **用户可控性** | 低（自动决策） | 中（阈值可配置） | Cursor: 不可干预；Claude Code: 配置复杂 |\n| **系统提示保护** | 强制保留 | 强制保留 | 两者：系统提示可能被用户配置稀释 |\n| **实时可见性** | token 计数可视化 | 基础计数 | 两者：压缩决策逻辑不透明 |\n| **恢复机制** | 无显式恢复 | 无显式恢复 | 两者：一旦压缩不可逆 |\n| **多文件场景** | 主动文件发现 | 被动保留 | Cursor: 可能丢失文件间关联；Claude Code: 可能丢失早期文件 |\n| **长会话稳定性** | 中（依赖 DCD 准确性） | 中（依赖阈值设置） | 两者：>100k token 后稳定性显著下降 |\n\n## implications_for_omp\n\nOMP 作为自研编码 agent 平台，可从两者的故障模式中吸取关键教训：\n\n1. **可观测性优先**：压缩决策必须向用户完全透明，包括\"为何压缩\"、\"保留了什么\"、\"丢弃了什么\"的完整报告\n2. **分层保护机制**：除系统提示外，应允许用户标记关键上下文为\"不可压缩\"，避免早期架构决策丢失\n3. **可逆性设计**：压缩后的内容应写入磁盘或侧边栏，允许用户随时展开查看，而非永久丢失\n4. **领域感知**：作为机器人/嵌入式领域 agent，OMP 应针对长时运行任务（如传感器标定、路径规划）设计专门的上下文保留策略，而非简单套用通用文本压缩\n\n## assumptions\n\n- Cursor 的 DCD 实现细节未公开，基于工程报道推测其技术架构\n- Claude Code 的可配置阈值假设存在于最新版本，早期版本可能固定\n- 两者均假设使用标准上下文窗口（100k-200k token 级别），超大窗口模型可能改变压缩策略\n- 假设用户未主动使用外部记忆扩展插件（如 Cursor 的自定义记忆功能）\n- OMP 的网关多会话场景与单 IDE 会话场景存在差异，压缩策略需分别设计\n\n## sources\n\n- claim: Cursor 使用 RAG + 代码图分析进行 Dynamic Context Discovery | url: https://www.infoq.com/news/2026/01/cursor-dynamic-context-discovery/ | relevance: 核心架构说明\n- claim: Cursor 在上下文窗口满时对早期回合做摘要压缩，保留系统提示和最近回合 | url: https://developertoolkit.ai/en/cursor-ide/advanced-techniques/token-management/ | relevance: 压缩机制细节\n- claim: Cursor 的压缩是有意设计的折衷，可能导致记忆丢失 | url: https://dev.to/arthurpro/cursors-compression-isnt-a-bug-its-how-it-works-2680 | relevance: 故障模式解释\n- claim: Cursor 存在上下文窗口满的信号和缓解手段 | url: https://tokenlimits.app/blog/cursor-context-window-full | relevance: 用户体验影响\n- claim: Claude Code 使用 Context Full 压缩，滑动窗口保留最近上下文 | url: https://wowhow.cloud/blogs/claude-code-context-management-definitive-guide-2026 | relevance: 核心策略对比\n- claim: Claude Code 按轮次计 token，超限时丢弃早期消息 | url: https://sanbuphy-claude-code-source-code.mintlify.app/concepts/context-management | relevance: 实现细节\n- claim: Claude Code 将前置内容压缩为单一块状摘要 | url: https://www.sitepoint.com/claude-code-context-management/ | relevance: 压缩策略细节"
+}

@@ -1,0 +1,226 @@
+{
+  "task": "设计一个带指数退避与抖动的 TypeScript HTTP 客户端重试中间件，需覆盖超时、取消、幂等语义与可观测性指标。",
+  "minScore": 40,
+  "judgeModel": "narwal-plan/minimax-m3",
+  "off": [
+    {
+      "name": "divergent",
+      "qualityScore": 100,
+      "qualityDropped": false,
+      "qualityMeta": {
+        "version": 2,
+        "heuristicScore": 100,
+        "source": "heuristic",
+        "roleKey": "divergent",
+        "contractHardFail": false,
+        "judged": false,
+        "breakdown": {
+          "weights": {
+            "required": 25,
+            "planSubstance": 30,
+            "openQuestions": 15,
+            "assumptions": 10,
+            "noRefusal": 20
+          },
+          "hits": {
+            "required": 1,
+            "planSubstance": 1,
+            "openQuestions": 1,
+            "assumptions": 1,
+            "noRefusal": 1
+          },
+          "contributions": {
+            "required": 25,
+            "planSubstance": 30,
+            "openQuestions": 15,
+            "assumptions": 10,
+            "noRefusal": 20
+          }
+        }
+      }
+    },
+    {
+      "name": "grounded",
+      "qualityScore": 80,
+      "qualityDropped": false,
+      "qualityMeta": {
+        "version": 2,
+        "heuristicScore": 80,
+        "source": "heuristic",
+        "roleKey": "grounded",
+        "contractHardFail": false,
+        "judged": false,
+        "breakdown": {
+          "weights": {
+            "required": 30,
+            "planSubstance": 25,
+            "openQuestions": 20,
+            "assumptions": 15,
+            "noRefusal": 10
+          },
+          "hits": {
+            "required": 1,
+            "planSubstance": 1,
+            "openQuestions": 0,
+            "assumptions": 1,
+            "noRefusal": 1
+          },
+          "contributions": {
+            "required": 30,
+            "planSubstance": 25,
+            "openQuestions": 0,
+            "assumptions": 15,
+            "noRefusal": 10
+          }
+        }
+      }
+    },
+    {
+      "name": "critical",
+      "qualityScore": 40,
+      "qualityDropped": false,
+      "qualityMeta": {
+        "version": 2,
+        "heuristicScore": 40,
+        "source": "heuristic",
+        "roleKey": "critical",
+        "contractHardFail": false,
+        "judged": false,
+        "breakdown": {
+          "weights": {
+            "required": 25,
+            "planSubstance": 15,
+            "openQuestions": 15,
+            "assumptions": 30,
+            "noRefusal": 15
+          },
+          "hits": {
+            "required": 1,
+            "planSubstance": 0,
+            "openQuestions": 0,
+            "assumptions": 0,
+            "noRefusal": 1
+          },
+          "contributions": {
+            "required": 25,
+            "planSubstance": 0,
+            "openQuestions": 0,
+            "assumptions": 0,
+            "noRefusal": 15
+          }
+        }
+      }
+    }
+  ],
+  "on": [
+    {
+      "name": "divergent",
+      "qualityScore": 100,
+      "qualityDropped": false,
+      "qualityMeta": {
+        "version": 2,
+        "heuristicScore": 100,
+        "source": "heuristic",
+        "roleKey": "divergent",
+        "contractHardFail": false,
+        "judged": false,
+        "breakdown": {
+          "weights": {
+            "required": 25,
+            "planSubstance": 30,
+            "openQuestions": 15,
+            "assumptions": 10,
+            "noRefusal": 20
+          },
+          "hits": {
+            "required": 1,
+            "planSubstance": 1,
+            "openQuestions": 1,
+            "assumptions": 1,
+            "noRefusal": 1
+          },
+          "contributions": {
+            "required": 25,
+            "planSubstance": 30,
+            "openQuestions": 15,
+            "assumptions": 10,
+            "noRefusal": 20
+          }
+        }
+      }
+    },
+    {
+      "name": "grounded",
+      "qualityScore": 80,
+      "qualityDropped": false,
+      "qualityMeta": {
+        "version": 2,
+        "heuristicScore": 80,
+        "source": "heuristic",
+        "roleKey": "grounded",
+        "contractHardFail": false,
+        "judged": false,
+        "breakdown": {
+          "weights": {
+            "required": 30,
+            "planSubstance": 25,
+            "openQuestions": 20,
+            "assumptions": 15,
+            "noRefusal": 10
+          },
+          "hits": {
+            "required": 1,
+            "planSubstance": 1,
+            "openQuestions": 0,
+            "assumptions": 1,
+            "noRefusal": 1
+          },
+          "contributions": {
+            "required": 30,
+            "planSubstance": 25,
+            "openQuestions": 0,
+            "assumptions": 15,
+            "noRefusal": 10
+          }
+        }
+      }
+    },
+    {
+      "name": "critical",
+      "qualityScore": 0,
+      "qualityDropped": true,
+      "qualityMeta": {
+        "version": 2,
+        "heuristicScore": 40,
+        "source": "judge",
+        "roleKey": "critical",
+        "contractHardFail": false,
+        "judged": true,
+        "breakdown": {
+          "weights": {
+            "required": 25,
+            "planSubstance": 15,
+            "openQuestions": 15,
+            "assumptions": 30,
+            "noRefusal": 15
+          },
+          "hits": {
+            "required": 1,
+            "planSubstance": 0,
+            "openQuestions": 0,
+            "assumptions": 0,
+            "noRefusal": 1
+          },
+          "contributions": {
+            "required": 25,
+            "planSubstance": 0,
+            "openQuestions": 0,
+            "assumptions": 0,
+            "noRefusal": 15
+          }
+        },
+        "judgeScore": 0
+      }
+    }
+  ]
+}

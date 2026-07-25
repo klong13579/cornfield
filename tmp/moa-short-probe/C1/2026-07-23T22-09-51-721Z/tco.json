@@ -1,0 +1,80 @@
+{
+  "task_understanding": "",
+  "known_inputs": [
+    {
+      "key": "comparison_focus",
+      "value": "技术架构与部署方式",
+      "source": "user",
+      "confidence": 1
+    },
+    {
+      "key": "output_depth",
+      "value": "简要对比表（3-5个维度，一目了然）",
+      "source": "user",
+      "confidence": 1
+    },
+    {
+      "key": "deployment_scope",
+      "value": "仅对比托管模式（开源自托管 vs SaaS）",
+      "source": "user",
+      "confidence": 1
+    }
+  ],
+  "missing_inputs": [],
+  "assumptions": [],
+  "research_pack": {
+    "mode": "required",
+    "gathered_at": "2026-07-23T22:12:14.627Z",
+    "queries": [],
+    "sources": [
+      {
+        "claim": "Hermes Agent（NousResearch）在 GitHub 上存在编号为 3421 的 Pull Request，涉及代码变更。",
+        "url": "https://github.com/NousResearch/hermes-agent/pull/3421",
+        "relevance": "PR 反映了 Hermes Agent 的活跃开发状态和功能演进方向。",
+        "confidence": "medium"
+      },
+      {
+        "claim": "WorkBuddy 拥有官方英文网站（workbuddy.ai）。",
+        "url": "https://www.workbuddy.ai/",
+        "relevance": "官方网站提供了 WorkBuddy 的产品概述和核心能力。",
+        "confidence": "medium"
+      },
+      {
+        "claim": "Hermes Agent 的用户文档中包含看板（Kanban）功能说明。",
+        "url": "https://hermes-agent.nousresearch.com/docs/user-guide/features/kanban",
+        "relevance": "看板是团队协作中的常见功能，可对比 WorkBuddy 是否提供类似能力。",
+        "confidence": "medium"
+      },
+      {
+        "claim": "WorkBuddy 作为腾讯云产品提供 SaaS 服务。",
+        "url": "https://cloud.tencent.com/product/workbuddy",
+        "relevance": "表明 WorkBuddy 的云原生部署模式，与 Hermes Agent 的部署方式形成对比。",
+        "confidence": "medium"
+      },
+      {
+        "claim": "CodeBuddy 网站提供了 WorkBuddy 的产品指南文档。",
+        "url": "https://www.codebuddy.cn/docs/workbuddy/From-Beginner-to-Expert-Guide/Product-Guide",
+        "relevance": "产品指南可帮助理解 WorkBuddy 的功能模块和使用场景。",
+        "confidence": "medium"
+      },
+      {
+        "claim": "WorkBuddy 拥有中文官方网站（workbuddy.cn）。",
+        "url": "https://www.workbuddy.cn/",
+        "relevance": "中文官网可能包含面向国内用户的功能介绍和案例。",
+        "confidence": "medium"
+      },
+      {
+        "claim": "Hermes Agent（NousResearch）通过 Mintlify 提供了产品介绍页面。",
+        "url": "https://nousresearch-hermes-agent.mintlify.app/introduction",
+        "relevance": "介绍页面概括了 Hermes Agent 的核心定位和主要特性。",
+        "confidence": "medium"
+      }
+    ],
+    "repo_facts": [],
+    "gaps": [
+      "research interrupted: web_search budget exceeded (3)",
+      "filtered 1 off-topic research source(s) for entities: hermes, workbuddy"
+    ],
+    "parse_source": "tool_trace"
+  }
+}

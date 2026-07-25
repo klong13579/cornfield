@@ -1,0 +1,103 @@
+{
+  "task_understanding": "在 oh-my-pi 项目中实现一个最小的 GET /health HTTP 端点，返回 JSON 格式健康状态",
+  "known_inputs": [
+    {
+      "key": "project_type",
+      "value": "Bun/TypeScript monorepo with Rust native addons",
+      "source": "cwd",
+      "confidence": 1
+    },
+    {
+      "key": "gateway_package",
+      "value": "pi-gateway",
+      "source": "cwd",
+      "confidence": 1
+    },
+    {
+      "key": "existing_health_endpoint",
+      "value": "/test/health exists at port 7890 returning {\"ok\":true,\"mode\":\"test-injection\"}",
+      "source": "cwd",
+      "confidence": 1
+    },
+    {
+      "key": "runtime",
+      "value": "Bun 1.3.14",
+      "source": "cwd",
+      "confidence": 1
+    },
+    {
+      "key": "endpoint_location",
+      "value": "pi-gateway（复用现有 7890 端口，替换或修改 /test/health）",
+      "source": "user",
+      "confidence": 1
+    },
+    {
+      "key": "response_shape",
+      "value": "极简: {\"status\":\"ok\"}",
+      "source": "user",
+      "confidence": 1
+    }
+  ],
+  "missing_inputs": [
+    {
+      "key": "endpoint_location",
+      "question": "Should the endpoint be added to the pi-gateway HTTP server (default), or elsewhere?",
+      "type": "select",
+      "options": [
+        "pi-gateway",
+        "coding-agent",
+        "新建独立包",
+        "其他"
+      ],
+      "required": true,
+      "why_critical": "决定代码放在哪个目录，影响导入方式和构建配置",
+      "defaultValue": "pi-gateway",
+      "roles": [
+        "grounded"
+      ],
+      "source": "discovery"
+    },
+    {
+      "key": "target_package",
+      "question": "这个 health 端点加在哪个包/服务器上（gateway 已有 7890 端口，还是其他服务）？",
+      "type": "text",
+      "required": true,
+      "why_critical": "不同位置决定我生成的端点注册代码、端口、以及是否要启动新 server 还是复用现有路由",
+      "source": "worker",
+      "roles": [
+        "divergent"
+      ]
+    },
+    {
+      "key": "response_shape",
+      "question": "What JSON content should the /health endpoint return? (e.g., {\"status\":\"ok\"})",
+      "type": "text",
+      "required": true,
+      "why_critical": "Determines the exact response body",
+      "source": "worker",
+      "roles": [
+        "grounded"
+      ]
+    },
+    {
+      "key": "response_format",
+      "question": "JSON 需要包含哪些字段？仅 status 还是需要附加信息（如版本、时间戳）？",
+      "type": "text",
+      "required": false,
+      "why_critical": "影响返回值结构，但不影响核心功能",
+      "defaultValue": "{\"status\":\"ok\"}",
+      "source": "discovery"
+    },
+    {
+      "key": "port_binding",
+      "question": "使用哪个端口？复用 gateway 的 7890 还是独立端口？",
+      "type": "number",
+      "required": false,
+      "why_critical": "避免端口冲突，决定是否需要额外配置",
+      "defaultValue": 7890,
+      "source": "discovery"
+    }
+  ],
+  "assumptions": [],
+  "task_intent": "local-impl"
+}
