@@ -17,4 +17,5 @@ First, identify the user's intent type from context:
 For all intent types:
 - Provide your recommended answer for each question.
 - Ask the questions one at a time, waiting for feedback on each question before continuing. Asking multiple questions at once is bewildering.
-- If a question can be answered by exploring the codebase, explore the codebase instead.
+- If a **fact** can be found by exploring the environment (filesystem, tools, etc.), look it up rather than asking. The **decisions**, though, are yours — put each one to me and wait for my answer.
+- Do not act on it until I confirm we have reached a shared understanding.
