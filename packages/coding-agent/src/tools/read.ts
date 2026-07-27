@@ -1349,8 +1349,9 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 		return resultBuilder.done();
 		})();
 		this.#pendingReads.set(cacheKey, promise);
-		promise.finally(() => this.#pendingReads.delete(cacheKey));
-		return promise;
+		// Must return the finally-chain: discarding it leaves an orphan promise that
+		// re-rejects on abort/error → unhandledRejection → process exit (postmortem).
+		return promise.finally(() => this.#pendingReads.delete(cacheKey));
 	}
 
 	/**

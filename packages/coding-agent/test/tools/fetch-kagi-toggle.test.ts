@@ -5,6 +5,7 @@ import * as path from "node:path";
 import { type SettingPath, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { ReadTool } from "@oh-my-pi/pi-coding-agent/tools/read";
+import { ToolAbortError } from "@oh-my-pi/pi-coding-agent/tools/tool-errors";
 import * as imageResize from "@oh-my-pi/pi-coding-agent/utils/image-resize";
 import * as toolsManager from "@oh-my-pi/pi-coding-agent/utils/tools-manager";
 import * as scrapers from "@oh-my-pi/pi-coding-agent/web/scrapers/types";
@@ -703,5 +704,30 @@ describe("read tool URL handling", () => {
 		expect(pagedText?.text).not.toContain("Line 3");
 		expect(loadPageSpy).not.toHaveBeenCalled();
 		expect(fs.readdirSync(path.join(testDir, "session")).some(file => file.endsWith(".read.log"))).toBe(true);
+	});
+
+	it("does not emit unhandled rejection when a URL read is aborted", async () => {
+		// Regression: #pendingReads used `promise.finally(...); return promise`,
+		// discarding the finally-chain. When the shared read rejected (e.g. esc
+		// abort → ToolAbortError from loadPage), that orphan finally promise
+		// became an unhandledRejection and postmortem exited the process.
+		const unhandled: unknown[] = [];
+		const onUnhandled = (reason: unknown) => {
+			unhandled.push(reason);
+		};
+		process.on("unhandledRejection", onUnhandled);
+
+		try {
+			const session = createSession();
+			const tool = new ReadTool(session);
+			const pageUrl = "https://example.com/abort-pending-finally";
+			vi.spyOn(scrapers, "loadPage").mockRejectedValue(new ToolAbortError());
+
+			await expect(tool.execute("fetch-abort", { path: pageUrl })).rejects.toBeInstanceOf(ToolAbortError);
+			await Bun.sleep(50);
+			expect(unhandled).toEqual([]);
+		} finally {
+			process.removeListener("unhandledRejection", onUnhandled);
+		}
 	});
 });
