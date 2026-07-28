@@ -23,29 +23,63 @@ import { type AtomParams, atomEditParamsSchema, executeAtomSingle } from "./mode
 import atomGrammar from "./modes/atom.lark" with { type: "text" };
 
 /**
- * Tool-call integrity contract prepended to every edit-mode description.
+ * Mode-aware tool-call integrity contract prepended to every edit-mode description.
  *
  * LLMs occasionally emit edit tool calls with only an `_i` intent field and
- * no actual arguments (e.g. `{"_i": "Update picker card"}`), which fails
- * validation with "path: must have required property". This preamble makes
- * the required-fields contract explicit and visible at the top of the
- * tool description rather than relying on the LLM to infer it from the
- * schema.
+ * no actual arguments, which fails validation. This preamble makes the
+ * required-fields contract explicit and mode-specific so the LLM sees the
+ * correct argument format for the active mode.
  */
-const EDIT_TOOL_CONTRACT =
-	"**REQUIRED FIELDS**: Every `edit` tool call MUST include all required arguments " +
-	"for the current mode (e.g. `path` + `edits` in replace/patch mode). " +
-	"The `_i` field is OPTIONAL metadata about your intent — it does NOT replace " +
-	"required fields. A tool call with only `_i` and missing required fields will fail validation. " +
-	"Re-emit the call with the full argument object, not just intent.\n\n" +
-	"✅ CORRECT: {\"path\": \"src/foo.ts\", \"edits\": [{\"old_text\": \"text to find\", \"new_text\": \"replacement\"}]}\n" +
-	"❌ WRONG: {\"path\": \"src/foo.ts\", \"edits\": [{}]} (edits entry missing old_text and new_text)\n" +
-	"❌ WRONG: {\"path\": \"src/foo.ts\", \"edits\": [\"old_text\"]} (edits entry is a string, not an object)\n" +
-	"❌ WRONG: {\"edits\": [...]} (missing top-level `path`)\n" +
-	"❌ WRONG: {} (missing both path and edits)\n\n" +
-	"**Content-based ONLY**: The replace mode uses `old_text`/`new_text` to find text " +
-	"by its content. It does NOT accept `loc`, `line`, `range`, or any position-based fields. " +
-	"If you need to edit by line number, use `bash` with `sed` instead.\n\n";
+function getEditToolContract(mode: EditMode): string {
+	const requiredPreamble =
+		"**REQUIRED FIELDS**: Every `edit` tool call MUST include all required arguments " +
+		"for the current mode (e.g. `path` + `edits`). " +
+		"The `_i` field is OPTIONAL metadata about your intent — it does NOT replace " +
+		"required fields. A tool call with only `_i` and missing required fields will fail validation. " +
+		"Re-emit the call with the full argument object, not just intent.\n\n";
+
+	switch (mode) {
+		case "hashline":
+			return (
+				requiredPreamble +
+				'✅ CORRECT: {"path": "src/foo.ts", "edits": [{"loc": {"range": {"pos": "10sr", "end": "10sr"}}, "content": ["new line"]}]}\n' +
+				'❌ WRONG: {"path": "src/foo.ts", "edits": [{"old_text": "...", "new_text": "..."}]} (hashline uses loc+content from `read` anchors, not old_text/new_text)\n' +
+				'❌ WRONG: {"edits": [...]} (missing top-level `path`)\n' +
+				"❌ WRONG: {} (missing both path and edits)\n\n"
+			);
+		case "replace":
+			return (
+				requiredPreamble +
+				'✅ CORRECT: {"path": "src/foo.ts", "edits": [{"old_text": "text to find", "new_text": "replacement"}]}\n' +
+				'❌ WRONG: {"path": "src/foo.ts", "edits": [{}]} (edits entry missing old_text and new_text)\n' +
+				'❌ WRONG: {"path": "src/foo.ts", "edits": ["old_text"]} (edits entry is a string, not an object)\n' +
+				'❌ WRONG: {"edits": [...]} (missing top-level `path`)\n' +
+				"❌ WRONG: {} (missing both path and edits)\n\n"
+			);
+		case "patch":
+		case "apply_patch":
+			return (
+				requiredPreamble +
+				'✅ CORRECT: {"path": "src/foo.ts", "edits": [{"op": "update", "diff": "@@ ...\\n-old\\n+new\\n"}]}\n' +
+				'❌ WRONG: {"path": "src/foo.ts", "edits": [{"old_text": "...", "new_text": "..."}]} (patch uses op+diff, not old_text/new_text)\n' +
+				'❌ WRONG: {"path": "src/foo.ts", "edits": [{"loc": {...}, "content": [...]}]} (patch uses op+diff, not loc+content)\n' +
+				"❌ WRONG: {} (missing both path and edits)\n\n"
+			);
+		case "atom":
+			return (
+				requiredPreamble +
+				'✅ CORRECT: {"path": "src/foo.ts", "edits": [{"loc": {...}, "content": [...]}]} or vim-style steps\n' +
+				'❌ WRONG: {"edits": [...]} (missing top-level `path`)\n\n'
+			);
+		case "vim":
+			return (
+				requiredPreamble +
+				'✅ CORRECT: {"path": "src/foo.ts", "edits": [{"loc": {...}, "content": [...]}]} or vim-style steps\n' +
+				'❌ WRONG: {"edits": [...]} (missing top-level `path`)\n\n'
+			);
+	}
+}
+
 import {
 	executeHashlineSingle,
 	HashlineMismatchError,
@@ -302,7 +336,7 @@ export class EditTool implements AgentTool<TInput> {
 	}
 
 	get description(): string {
-		return EDIT_TOOL_CONTRACT + this.#getModeDefinition().description(this.session);
+		return getEditToolContract(this.mode) + this.#getModeDefinition().description(this.session);
 	}
 
 	get parameters(): TInput {
