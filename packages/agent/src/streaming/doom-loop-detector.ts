@@ -248,11 +248,44 @@ function checkThinkingDoom(text: string, cfg: ThinkingDoomConfig): DoomVerdict {
 	return { kind: "clean" };
 }
 
+/**
+ * Characters that appear in ASCII diagrams but rarely in natural language.
+ * Monospace box drawing, arrows, and structural markers.
+ */
+const ASCII_DIAGRAM_CHARS = new Set([
+	"+", "-", "|", "/", "\\", "*", "=", "#", ".", "'", "_", ">", "<", "v", "^", "o", "O", "@", "%", "&", "~", "`", ":", "!",
+]);
+
+/**
+ * Fraction of the n-gram that consists of structural diagram characters.
+ * A high ratio suggests the repetition is from an ASCII diagram, not
+ * a text degeneration loop.
+ */
+function structuralCharRatio(s: string): number {
+	if (s.length === 0) return 0;
+	let count = 0;
+	for (const ch of s) {
+		if (ch === " " || ch === "\n" || ch === "\t" || ASCII_DIAGRAM_CHARS.has(ch)) {
+			count++;
+		}
+	}
+	return count / s.length;
+}
+
 function checkTextDoom(text: string, cfg: TextDoomConfig): DoomVerdict {
 	if (text.length < cfg.minChars) return { kind: "clean" };
 
 	const ngram = findRepeatingNgram(text, cfg.ngramSize, cfg.minNgramRepeat);
 	if (ngram) {
+		// ASCII diagrams often contain repetitive structural patterns
+		// (box borders, arrows, separators) that look like degeneration
+		// to the n-gram detector but are semantically meaningful.
+		// Skip the doom verdict when the repeated n-gram is primarily
+		// composed of structural/whitespace characters.
+		if (structuralCharRatio(ngram.ngram) > 0.5) {
+			return { kind: "clean" };
+		}
+
 		const sample = ngram.ngram.length > 100 ? `${ngram.ngram.slice(0, 100)}…` : ngram.ngram;
 		return {
 			kind: "doom",
