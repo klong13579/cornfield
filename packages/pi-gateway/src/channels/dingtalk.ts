@@ -1712,59 +1712,36 @@ export class DingTalkChannel extends BaseChannel {
 		// Start dedup cleanup timer
 		this.#dedupCleanupTimer = setInterval(cleanupProcessedMessages, DEDUP_CLEANUP_INTERVAL);
 
-		try {
-			await this.#client.connect();
-
-			// Verify WebSocket actually reached OPEN state (SDK connect() may not throw on failure)
-			const connected = await this.#waitForSocketOpen(10_000);
-			if (!connected) {
-				throw new Error("Socket did not reach OPEN state within 10s");
-			}
-
-			// Setup socket event listeners after connect (client.socket is created)
-			this.#setupPongListener();
-			this.#setupMessageListener();
-			this.#setupCloseListener();
-
-			this.#lastSocketAvailableTime = Date.now();
-			this.#connectionEstablishedTime = Date.now();
-			this.#reconnectAttempts = 0;
-			this.#connected = true;
-
-			// Start custom heartbeat
-			this.#startKeepAlive();
-
-			logger.debug("[DingTalk] Connected to DingTalk Stream", { accountId: this.#accountId });
-		} catch (err) {
-			this.#connectionFailed = true;
-			this.#connected = false;
-			logger.error("[DingTalk] Failed to connect", { accountId: this.#accountId, error: String(err) });
-
-			// Clean up everything we set up before the failed connect:
-			// without this, the dedup setInterval keeps running, the
-			// DWClient holds internal timers / WS state, and any SDK
-			// `error` / `disconnect` event that fires later will hit
-			// handlers on a half-initialised channel. None of that is
-			// catastrophic on its own, but it leaks per failed account
-			// (and in the long run produces confusing log lines).
-			if (this.#dedupCleanupTimer) {
-				clearInterval(this.#dedupCleanupTimer);
-				this.#dedupCleanupTimer = null;
-			}
-			if (this.#client) {
-				try {
-					// Best-effort: drop the SDK's listeners and the client
-					// itself. We don't `disconnect()` because the WS may
-					// never have opened; removing listeners + nulling the
-					// reference is enough for GC.
-					(this.#client as any).removeAllListeners?.();
-				} catch {
-					// ignore — we're already in a failure path
+		// Retry loop with backoff for initial connection — unified with
+		// #doReconnect via #doSingleConnect (openclaw-aligned pattern).
+		// Both initial and runtime reconnection share the same single-attempt
+		// logic; the only difference is how failures are counted and retried.
+		let attempts = 0;
+		while (!this.#isStopped) {
+			try {
+				await this.#doSingleConnect();
+				logger.debug("[DingTalk] Connected to DingTalk Stream", { accountId: this.#accountId });
+				return;
+			} catch (err) {
+				attempts++;
+				if (attempts >= MAX_RECONNECT_ATTEMPTS) {
+					this.#connectionFailed = true;
+					this.#connected = false;
+					logger.error("[DingTalk] Failed to connect", { accountId: this.#accountId, error: String(err) });
+					if (this.#dedupCleanupTimer) {
+						clearInterval(this.#dedupCleanupTimer);
+						this.#dedupCleanupTimer = null;
+					}
+					throw err;
 				}
-				this.#client = null;
+				const delay = this.#calculateBackoffDelay(attempts - 1);
+				logger.debug("[DingTalk] Connect failed, retrying", {
+					accountId: this.#accountId,
+					attempt: attempts,
+					delayMs: Math.round(delay),
+				});
+				await Bun.sleep(delay);
 			}
-
-			throw err;
 		}
 	}
 
@@ -2448,6 +2425,56 @@ export class DingTalkChannel extends BaseChannel {
 		return Math.min(exponentialDelay + jitter, MAX_BACKOFF_DELAY);
 	}
 
+	/**
+	 * Single connection attempt — no retry. Throws on failure.
+	 *
+	 * Pre-connect: clears stale SDK heartbeat interval, disconnects zombie sockets.
+	 * Post-connect: registers pong/message/close listeners, starts keepalive.
+	 *
+	 * Shared by both initial connect (onConnect's retry loop) and runtime
+	 * reconnect (#doReconnect), following the openclaw ConnectionManager pattern
+	 * where a single attempt method is called from both paths.
+	 */
+	async #doSingleConnect(): Promise<void> {
+		if (!this.#client) {
+			throw new Error("No client to connect");
+		}
+		const clientAny = this.#client as any;
+		// Clear stale SDK heartbeat interval before connecting.
+		// dingtalk-stream has a typo: heartbeatIntervallId (double 'l').
+		// If a previous connect attempt created this interval and it is
+		// still running, it can interfere with the new connection.
+		if (clientAny.heartbeatIntervallId !== undefined) {
+			clearInterval(clientAny.heartbeatIntervallId);
+			clientAny.heartbeatIntervallId = undefined;
+		}
+		// Disconnect zombie socket before reconnecting.
+		// open (1) or closing (3) means the previous connection needs cleanup.
+		const sock = clientAny.socket;
+		if (sock?.readyState === 1 || sock?.readyState === 3) {
+			try {
+				this.#client.disconnect();
+			} catch {
+				// ignore — socket may already be torn down
+			}
+		}
+		await this.#client.connect();
+		// Register socket listeners after connect (client.socket is created)
+		this.#setupPongListener();
+		this.#setupMessageListener();
+		this.#setupCloseListener();
+		const connected = await this.#waitForSocketOpen(10_000);
+		if (!connected) {
+			throw new Error("Socket did not reach OPEN state within 10s");
+		}
+		this.#lastSocketAvailableTime = Date.now();
+		this.#connectionEstablishedTime = Date.now();
+		this.#reconnectAttempts = 0;
+		this.#connectionFailed = false;
+		this.#connected = true;
+		this.#startKeepAlive();
+	}
+
 	async #doReconnect(immediate = false): Promise<void> {
 		if (this.#isReconnecting || this.#isStopped) return;
 
@@ -2479,40 +2506,8 @@ export class DingTalkChannel extends BaseChannel {
 			await Bun.sleep(delay);
 		}
 
-		const client = this.#client;
-		if (!client) {
-			logger.warn("[DingTalk] No client to reconnect with");
-			this.#isReconnecting = false;
-			return;
-		}
-
 		try {
-			const sock = (client as any)?.socket;
-			if (sock?.readyState === 1 || sock?.readyState === 3) {
-				try {
-					client.disconnect();
-				} catch {
-					// ignore disconnect errors during reconnect
-				}
-			}
-
-			await client.connect();
-
-			this.#setupPongListener();
-			this.#setupMessageListener();
-			this.#setupCloseListener();
-
-			const connected = await this.#waitForSocketOpen(10_000);
-			if (!connected) {
-				throw new Error("Socket did not reach OPEN state within 10s");
-			}
-
-			this.#lastSocketAvailableTime = Date.now();
-			this.#connectionEstablishedTime = Date.now();
-			this.#reconnectAttempts = 0;
-			this.#connectionFailed = false;
-			this.#connected = true;
-
+			await this.#doSingleConnect();
 			logger.debug("[DingTalk] Reconnect successful", { accountId: this.#accountId });
 		} catch (err) {
 			this.#reconnectAttempts++;
