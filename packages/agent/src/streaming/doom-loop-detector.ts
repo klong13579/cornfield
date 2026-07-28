@@ -253,9 +253,10 @@ function checkThinkingDoom(text: string, cfg: ThinkingDoomConfig): DoomVerdict {
  * Monospace box drawing, arrows, and structural markers.
  */
 const ASCII_DIAGRAM_CHARS = new Set([
-	// Unambiguous box-drawing and arrow characters.
+	// Unambiguous box-drawing, arrow, and separator characters.
 	// Natural language rarely uses these in repetition.
-	"+", "-", "|", "/", "\\", ">", "<", "v", "^",
+	// `=` covers horizontal rules and section separators (=====).
+	"+", "-", "|", "/", "\\", ">", "<", "v", "^", "=",
 ]);
 
 /**
