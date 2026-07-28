@@ -129,6 +129,13 @@ export interface MoaSettings {
 	 * section and soft quality penalties for missing tool-backed URLs.
 	 */
 	researchMode: MoaResearchModeSetting;
+	/**
+	 * File paths whose contents are pre-read and injected into worker prompts
+	 * so plan workers don't each need to call `read` on the same files.
+	 * Paths are relative to cwd. Empty array (default) = no pre-read.
+	 * Example: ["packages/coding-agent/src/sdk.ts", "packages/coding-agent/src/tools/index.ts"]
+	 */
+	codebaseReads: string[];
 }
 
 export interface MoaPlanWorker {

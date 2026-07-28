@@ -18,6 +18,8 @@ import {
 } from "./stages";
 import { formatMoaStatusBar, type MoaStatusBarInput } from "./status-bar";
 import { createWorkerStreamSink } from "./stream-ui";
+import * as path from "node:path";
+import { isEnoent } from "@oh-my-pi/pi-utils";
 import { renderTcoForPrompt } from "./tco";
 import { formatDuration, formatTimingSummary, StageClock } from "./timing";
 import { formatPreWorkerAskNotify } from "./trace";
@@ -209,6 +211,27 @@ export async function executePlan(plan: MoaPlan, options: ExecutePlanOptions): P
 				? `（${researchWorker.stderr.trim().slice(0, 120)}）`
 				: "";
 			notify("调研未产出可用证据，worker 将自行判断" + detail + " · " + formatDuration(researchMs), "warning");
+		}
+	}
+
+	// Codebase reads: pre-read configured files so plan workers don't each
+	// call `read` on the same files. Injected into TCO as codebase_context.
+	const codebaseReads = planOptions.settings.codebaseReads;
+	if (codebaseReads.length > 0) {
+		const parts: string[] = [];
+		for (const relPath of codebaseReads) {
+			const absPath = path.isAbsolute(relPath) ? relPath : path.join(options.cwd, relPath);
+			try {
+				const content = await Bun.file(absPath).text();
+				parts.push(`### ${relPath}\n\n\`\`\`\n${content}\n\`\`\``);
+			} catch (err) {
+				if (!isEnoent(err)) {
+					notify(`代码文件读取失败: ${relPath}`, "warning");
+				}
+			}
+		}
+		if (parts.length > 0) {
+			tco.codebase_context = parts.join("\n\n");
 		}
 	}
 

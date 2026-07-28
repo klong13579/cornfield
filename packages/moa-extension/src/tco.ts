@@ -127,6 +127,12 @@ export interface TaskContextObject {
 	/** Research evidence gathered before Ask when researchMode ≠ none.
 	 *  Absent when researchMode is "none" or the Research stage did not run. */
 	research_pack?: ResearchPack;
+	/**
+	 * Pre-read codebase file contents injected by the executor.
+	 * Plan workers see this context directly instead of calling `read`.
+	 * Absent when `settings.codebaseReads` is empty or reading fails.
+	 */
+	codebase_context?: string;
 	/** Optional LLM debug info; not surfaced to workers. */
 	debug?: { discovery_model?: string; discovery_duration_ms?: number };
 }
@@ -947,6 +953,9 @@ export function renderTcoForPrompt(tco: TaskContextObject, opts: { maxBytes?: nu
 			lines.push("Open gaps (put in `## assumptions`, do not search again):");
 			for (const g of pack.gaps) lines.push(`- ${g}`);
 		}
+	}
+	if (tco.codebase_context) {
+		lines.push("", "### Codebase context (pre-read — do NOT re-read these files)", "", tco.codebase_context);
 	}
 	const text = lines.join("\n");
 	if (Buffer.byteLength(text, "utf8") <= maxBytes) return text;

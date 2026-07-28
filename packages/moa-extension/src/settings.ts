@@ -100,6 +100,7 @@ export const DEFAULT_SETTINGS: MoaSettings = {
 	workerStaggerMs: 0,
 	quality: DEFAULT_QUALITY_SETTINGS,
 	researchMode: "auto",
+	codebaseReads: [],
 };
 
 export function normalizeWorkerSlots(
