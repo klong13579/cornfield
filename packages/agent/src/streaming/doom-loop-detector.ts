@@ -253,7 +253,9 @@ function checkThinkingDoom(text: string, cfg: ThinkingDoomConfig): DoomVerdict {
  * Monospace box drawing, arrows, and structural markers.
  */
 const ASCII_DIAGRAM_CHARS = new Set([
-	"+", "-", "|", "/", "\\", "*", "=", "#", ".", "'", "_", ">", "<", "v", "^", "o", "O", "@", "%", "&", "~", "`", ":", "!",
+	// Unambiguous box-drawing and arrow characters.
+	// Natural language rarely uses these in repetition.
+	"+", "-", "|", "/", "\\", ">", "<", "v", "^",
 ]);
 
 /**
