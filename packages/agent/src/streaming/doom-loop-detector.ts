@@ -249,30 +249,30 @@ function checkThinkingDoom(text: string, cfg: ThinkingDoomConfig): DoomVerdict {
 }
 
 /**
- * Characters that appear in ASCII diagrams but rarely in natural language.
- * Monospace box drawing, arrows, and structural markers.
+ * Regex matching characters that carry semantic meaning in any language.
+ * Alphanumeric, CJK, Japanese kana, Korean hangul, and common punctuation
+ * that appears in natural language. Everything else (box-drawing, arrows,
+ * structural markers, whitespace) is stripped.
  */
-const ASCII_DIAGRAM_CHARS = new Set([
-	// Unambiguous box-drawing, arrow, and separator characters.
-	// Natural language rarely uses these in repetition.
-	// `=` covers horizontal rules and section separators (=====).
-	"+", "-", "|", "/", "\\", ">", "<", "v", "^", "=",
-]);
+const MEANINGFUL_CHARS = /[a-zA-Z0-9\u00c0-\u024f\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af\u3000-\u303f\uff00-\uffef]/;
 
 /**
- * Fraction of the n-gram that consists of structural diagram characters.
- * A high ratio suggests the repetition is from an ASCII diagram, not
- * a text degeneration loop.
+ * Check if the repeated n-gram carries meaningful semantic content.
+ * Structural repetition (diagrams, separators, tables) has very few
+ * meaningful characters; text degeneration (doom loops) has many.
+ * Returns true when the n-gram is structurally repetitive, not
+ * semantically degenerative.
  */
-function structuralCharRatio(s: string): number {
-	if (s.length === 0) return 0;
-	let count = 0;
-	for (const ch of s) {
-		if (ch === " " || ch === "\n" || ch === "\t" || ASCII_DIAGRAM_CHARS.has(ch)) {
-			count++;
+function isStructuralRepetition(ngram: string): boolean {
+	let meaningfulCount = 0;
+	for (const ch of ngram) {
+		if (MEANINGFUL_CHARS.test(ch)) {
+			meaningfulCount++;
 		}
 	}
-	return count / s.length;
+	// A 60-char n-ram with fewer than 10 meaningful characters
+	// is structural (e.g. "+----------+", "=====", "|   |   |").
+	return meaningfulCount < 10;
 }
 
 function checkTextDoom(text: string, cfg: TextDoomConfig): DoomVerdict {
@@ -280,12 +280,11 @@ function checkTextDoom(text: string, cfg: TextDoomConfig): DoomVerdict {
 
 	const ngram = findRepeatingNgram(text, cfg.ngramSize, cfg.minNgramRepeat);
 	if (ngram) {
-		// ASCII diagrams often contain repetitive structural patterns
-		// (box borders, arrows, separators) that look like degeneration
-		// to the n-gram detector but are semantically meaningful.
-		// Skip the doom verdict when the repeated n-gram is primarily
-		// composed of structural/whitespace characters.
-		if (structuralCharRatio(ngram.ngram) > 0.5) {
+		// Structural repetition (diagrams, separators, tables) repeats
+		// box-drawing characters, not semantic content. Skip the doom
+		// verdict when the repeated n-gram carries little meaning.
+		// This is language-agnostic and doesn't need a curated set.
+		if (isStructuralRepetition(ngram.ngram)) {
 			return { kind: "clean" };
 		}
 
