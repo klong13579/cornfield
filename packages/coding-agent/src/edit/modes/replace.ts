@@ -76,7 +76,7 @@ export class EditMatchError extends Error {
 		readonly path: string,
 		readonly searchText: string,
 		readonly closest: FuzzyMatch | undefined,
-		readonly options: { allowFuzzy: boolean; threshold: number; fuzzyMatches?: number },
+		readonly options: { allowFuzzy: boolean; threshold: number; fuzzyMatches?: number; contextLines?: string },
 	) {
 		super(EditMatchError.formatMessage(path, searchText, closest, options));
 		this.name = "EditMatchError";
@@ -86,7 +86,7 @@ export class EditMatchError extends Error {
 		path: string,
 		searchText: string,
 		closest: FuzzyMatch | undefined,
-		options: { allowFuzzy: boolean; threshold: number; fuzzyMatches?: number },
+		options: { allowFuzzy: boolean; threshold: number; fuzzyMatches?: number; contextLines?: string },
 	): string {
 		if (!closest) {
 			return options.allowFuzzy
@@ -106,7 +106,7 @@ export class EditMatchError extends Error {
 				: `Closest match was below the ${thresholdPercent}% similarity threshold.`
 			: "Fuzzy matching is disabled. Enable 'Edit fuzzy match' in settings to accept high-confidence matches.";
 
-		return [
+		const lines = [
 			options.allowFuzzy
 				? `Could not find a close enough match in ${path}.`
 				: `Could not find the exact text in ${path}.`,
@@ -115,7 +115,15 @@ export class EditMatchError extends Error {
 			`  - ${oldLine}`,
 			`  + ${newLine}`,
 			hint,
-		].join("\n");
+		];
+
+		if (options.contextLines) {
+			lines.push("");
+			lines.push("--- 当前文件内容（匹配位置附近） ---");
+			lines.push(options.contextLines);
+		}
+
+		return lines.join("\n");
 	}
 }
 
@@ -1061,11 +1069,27 @@ export async function executeReplaceSingle(
 			throw new Error(formatOccurrenceError(path, matchOutcome));
 		}
 
-		throw new EditMatchError(path, normalizedOldText, matchOutcome.closest, {
-			allowFuzzy,
-			threshold: fuzzyThreshold,
-			fuzzyMatches: matchOutcome.fuzzyMatches,
-		});
+		if (matchOutcome.closest) {
+			const contentLines = normalizedContent.split('\n');
+			const startLine = matchOutcome.closest.startLine;
+			const contextStart = Math.max(0, startLine - 6);
+			const contextEnd = Math.min(contentLines.length, startLine + 5);
+			const contextLines = contentLines.slice(contextStart, contextEnd);
+			const contextStr = contextLines.map((l, i) => `  ${contextStart + i + 1} | ${l}`).join('\n');
+
+			throw new EditMatchError(path, normalizedOldText, matchOutcome.closest, {
+				allowFuzzy,
+				threshold: fuzzyThreshold,
+				fuzzyMatches: matchOutcome.fuzzyMatches,
+				contextLines: contextStr,
+			});
+		} else {
+			throw new EditMatchError(path, normalizedOldText, matchOutcome.closest, {
+				allowFuzzy,
+				threshold: fuzzyThreshold,
+				fuzzyMatches: matchOutcome.fuzzyMatches,
+			});
+		}
 	}
 
 	if (normalizedContent === result.content) {
