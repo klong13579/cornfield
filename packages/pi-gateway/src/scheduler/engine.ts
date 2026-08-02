@@ -176,6 +176,7 @@ export class SchedulerEngine {
 			this.#intervals.set(task.id, interval);
 			this.#taskMap.set(task.id, task);
 			this.#storage.updateTask(task.id, { nextRunAt: Date.now() + parsed.intervalMs });
+			task.nextRunAt = Date.now() + parsed.intervalMs;
 		} else if (scheduleType === "once") {
 			const target = parsed.nextRunAt ?? task.nextRunAt ?? Date.now();
 			const delay = target - Date.now();
@@ -198,6 +199,7 @@ export class SchedulerEngine {
 				this.#timeouts.set(task.id, timeout);
 				this.#taskMap.set(task.id, task);
 				this.#storage.updateTask(task.id, { nextRunAt: target });
+				task.nextRunAt = target;
 			} else {
 				logger.warn("One-shot task scheduled for the past, disabling", { taskId: task.id });
 				this.#storage.updateTask(task.id, { status: "disabled" });
@@ -214,6 +216,7 @@ export class SchedulerEngine {
 				const nextRun = getNextRun(task.cron);
 				if (nextRun) {
 					this.#storage.updateTask(task.id, { nextRunAt: nextRun.getTime() });
+					task.nextRunAt = nextRun.getTime();
 				}
 			} catch (error) {
 				logger.error("Invalid cron expression for task, disabling", {
@@ -278,6 +281,7 @@ export class SchedulerEngine {
 			if (overdueSec > graceSec) {
 				const nextRunAt = advanceNextRun(task);
 				this.#storage.updateTask(task.id, { nextRunAt });
+				task.nextRunAt = nextRunAt;
 				logger.warn("Task skipped due to grace window", {
 					taskId: task.id,
 					taskName: task.name,
@@ -294,6 +298,7 @@ export class SchedulerEngine {
 			// If the process crashes mid-execution, the job won't re-fire on restart.
 			const nextRunAt = advanceNextRun(task);
 			this.#storage.updateTask(task.id, { nextRunAt });
+			task.nextRunAt = nextRunAt;
 
 			const retryConfig = task.retry;
 			const maxAttempts = retryConfig?.maxAttempts ?? 0;
