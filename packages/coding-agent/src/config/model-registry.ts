@@ -1777,7 +1777,9 @@ export class ModelRegistry {
 		});
 
 		if (results === null) {
-			return [];
+			throw new Error(
+				`Failed to discover models for ${providerConfig.provider}: the provider API at ${baseUrl} returned an error or is unreachable`,
+			);
 		}
 
 		return this.#applyProviderModelOverrides(providerConfig.provider, results);
