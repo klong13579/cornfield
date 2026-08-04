@@ -125,6 +125,7 @@ interface Harness {
 
 interface HarnessOptions {
 	bargeInLevel?: number;
+	bargeInEnabled?: boolean;
 	onConsult?: (task: string) => Promise<string>;
 	/** Server acks session.update with session.updated (default true). */
 	ackConfig?: boolean;
@@ -165,6 +166,7 @@ async function makeHarness(options: HarnessOptions = {}): Promise<Harness> {
 			onTerminal: err => terminals.push(err),
 		},
 		bargeInLevel: options.bargeInLevel,
+		bargeInEnabled: options.bargeInEnabled,
 		onConsult: options.onConsult,
 	});
 	await controller.start();
@@ -271,13 +273,15 @@ describe("LiveSessionController", () => {
 		h.server.send({ type: "response.audio.delta", delta: moderatePcm });
 		await waitForPhase(h, "speaking");
 
-		// One or two loud chunks are not enough (sustain gate) — uplink stays silence.
+		// Fewer than five loud chunks are not enough (sustain gate) — uplink stays silence.
+		h.source.emit(0.5);
+		h.source.emit(0.5);
 		h.source.emit(0.5);
 		h.source.emit(0.5);
 		await Bun.sleep(20);
 		expect(h.server.received.some(m => m.type === "response.cancel")).toBe(false);
 
-		h.source.emit(0.5); // 3rd consecutive loud chunk → barge-in
+		h.source.emit(0.5); // 5th consecutive loud chunk → barge-in
 		await Bun.sleep(20);
 
 		expect(h.server.received.some(m => m.type === "response.cancel")).toBe(true);
@@ -322,6 +326,25 @@ describe("LiveSessionController", () => {
 		expect(h.server.received.some(m => m.type === "response.cancel")).toBe(false);
 		expect(h.phases.at(-1)).toBe("speaking"); // echo ignored: assistant keeps talking
 		expect(h.sinks[0]!.stopped).toBe(false);
+		await h.controller.dispose();
+	});
+
+
+	test("barge-in disabled: loud speech during speaking never interrupts playback", async () => {
+		const h = await makeHarness({ bargeInEnabled: false });
+		servers.push(h.server);
+		h.server.send({ type: "response.audio.delta", delta: moderatePcm });
+		await waitForPhase(h, "speaking");
+
+		// Far above any threshold, sustained — with barge-in off it must be ignored.
+		for (let i = 0; i < 10; i++) h.source.emit(0.9);
+		await Bun.sleep(20);
+
+		expect(h.server.received.some(m => m.type === "response.cancel")).toBe(false);
+		expect(h.phases.at(-1)).toBe("speaking"); // assistant keeps talking
+		const pcm = lastAppendAudio(h.server);
+		expect(pcm).toBeDefined();
+		expect(pcm!.every(b => b === 0)).toBe(true); // uplink stayed silence
 		await h.controller.dispose();
 	});
 

@@ -19,9 +19,9 @@ import type { AgentToolResult } from "../extensibility/extensions/types";
 import consultInstructions from "../prompts/live/consult-instructions.md" with { type: "text" };
 
 /** Tools the voice consult session is allowed to keep. Everything else is dropped. */
-const READONLY_TOOL_WHITELIST = new Set(["read", "search", "find", "ast_grep", "calc", "web_search", "list_models"]);
+const READONLY_TOOL_WHITELIST = new Set(["read", "search", "find", "ast_grep", "calc", "web_search", "list_models", "weather"]);
 
-const DEFAULT_CONSULT_TIMEOUT_MS = 60_000;
+const DEFAULT_CONSULT_TIMEOUT_MS = 120_000;
 
 /** Fixed read-only git commands — covers the "看下 git status" voice case with zero write surface. */
 const GIT_READONLY_COMMANDS = {
@@ -31,6 +31,36 @@ const GIT_READONLY_COMMANDS = {
 } as const;
 
 type GitReadonlyCommand = keyof typeof GIT_READONLY_COMMANDS;
+
+/** Direct weather lookup — keeps the most common voice query to one fast call instead of a search spiral. */
+async function fetchWeather(city: string): Promise<string> {
+	const url = `https://wttr.in/${encodeURIComponent(city)}?format=j1&lang=zh`;
+	const response = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+	if (!response.ok) return `weather lookup failed: HTTP ${response.status}`;
+	const data = (await response.json()) as {
+		current_condition?: Array<{
+			temp_C?: string;
+			FeelsLikeC?: string;
+			humidity?: string;
+			windspeedKmph?: string;
+			winddir16Point?: string;
+			weatherDesc?: Array<{ value?: string }>;
+			lang_zh?: Array<{ value?: string }>;
+		}>;
+		nearest_area?: Array<{ areaName?: Array<{ value?: string }> }>;
+	};
+	const current = data.current_condition?.[0];
+	if (!current) return "weather lookup failed: no current conditions in response";
+	const description = current.lang_zh?.[0]?.value || current.weatherDesc?.[0]?.value || "unknown";
+	const area = data.nearest_area?.[0]?.areaName?.[0]?.value ?? city;
+	return [
+		`城市: ${area}`,
+		`天气: ${description}`,
+		`气温: ${current.temp_C}°C（体感 ${current.FeelsLikeC}°C）`,
+		`湿度: ${current.humidity}%`,
+		`风: ${current.winddir16Point} ${current.windspeedKmph} km/h`,
+	].join("\n");
+}
 
 export interface ConsultEvent {
 	type: string;
@@ -99,6 +129,8 @@ async function defaultSessionFactory(cwd: string | undefined): Promise<ConsultSe
 		enableLsp: false,
 		enableMCP: false,
 		skipPythonPreflight: true,
+		// Voice waits on this session: reasoning latency is pure dead air here.
+		thinkingLevel: "off",
 		customTools: [
 			{
 				name: "git_status",
@@ -121,6 +153,23 @@ async function defaultSessionFactory(cwd: string | undefined): Promise<ConsultSe
 						return { content: [{ type: "text", text }] };
 					} catch (err) {
 						return { content: [{ type: "text", text: `git query failed: ${String(err)}` }] };
+					}
+				},
+			},
+			{
+				name: "weather",
+				label: "Weather (read-only)",
+				description:
+					"Current weather for a city. ALWAYS use this for weather questions — one call returns temperature, conditions, humidity and wind; no web_search or page reads needed.",
+				parameters: Type.Object({
+					city: Type.String({ description: "City name, e.g. Shenzhen or 深圳" }),
+				}),
+				async execute(_toolCallId: string, params: { city: string }): Promise<AgentToolResult> {
+					try {
+						const text = await fetchWeather(params.city);
+						return { content: [{ type: "text", text }] };
+					} catch (err) {
+						return { content: [{ type: "text", text: `weather lookup failed: ${String(err)}` }] };
 					}
 				},
 			},
@@ -166,14 +215,15 @@ export class LiveConsultBridge {
 			}
 		});
 
-		try {
-			await session.sendUserMessage(task);
-		} catch (err) {
+		// sendUserMessage awaits the whole turn; the race above (agent_end vs
+		// timeout) must not be gated behind it, or a slow turn makes the timeout
+		// text unreachable and the voice session stalls in silence.
+		session.sendUserMessage(task).catch(err => {
 			clearTimeout(timer);
 			unsubscribe();
 			logger.warn("voice consult send failed", { error: String(err) });
-			return `（任务发送失败：${err instanceof Error ? err.message : String(err)}）`;
-		}
+			resolve(`（任务发送失败：${err instanceof Error ? err.message : String(err)}）`);
+		});
 		return promise;
 	}
 

@@ -40,9 +40,9 @@ import type { LiveAudioSink, LiveConsultHandler, LivePhase, LiveSessionCallbacks
 
 const DEFAULT_BARGE_IN_LEVEL = 0.04;
 /** Speaker→mic bleed scales with playback loudness; barge-in must clearly exceed it. */
-const BARGE_IN_ECHO_RATIO = 2;
+const BARGE_IN_ECHO_RATIO = 3;
 /** Consecutive over-threshold chunks required before accepting a barge-in. */
-const BARGE_IN_SUSTAIN_CHUNKS = 3;
+const BARGE_IN_SUSTAIN_CHUNKS = 5;
 const CONSULT_TOOL_NAME = "omp_agent_consult";
 /** Silence frames replace mic input while muted/speaking (server_vad clock must keep ticking). */
 const MUTED_CHUNK_MS = 100;
@@ -62,6 +62,7 @@ export class LiveSessionController {
 	readonly #callbacks: LiveSessionCallbacks;
 	readonly #bridge: RealtimeFunctionBridge;
 	readonly #bargeInLevel: number;
+	readonly #bargeInEnabled: boolean;
 	readonly #onConsult: LiveConsultHandler;
 
 	#phase: LivePhase = "connecting";
@@ -92,6 +93,7 @@ export class LiveSessionController {
 		this.#options = options;
 		this.#callbacks = options.callbacks;
 		this.#bargeInLevel = options.bargeInLevel ?? DEFAULT_BARGE_IN_LEVEL;
+		this.#bargeInEnabled = options.bargeInEnabled ?? true;
 		this.#onConsult = options.onConsult ?? (async () => "（语音任务委托尚未接入，请改用文字输入。）");
 		this.#bridge = new RealtimeFunctionBridge(options.transport);
 		this.#bridge.registerTool({
@@ -227,6 +229,9 @@ export class LiveSessionController {
 		// gets silence so speaker bleed can never become a fake user turn. A loud
 		// chunk is treated as real barge-in: cancel playback, reopen the uplink.
 		if (this.#phase === "speaking") {
+			// Barge-in disabled: the uplink stays silence for the whole playback —
+			// no self-interruption, at the cost of not being able to talk over it.
+			if (!this.#bargeInEnabled) return this.#sendSilence();
 			if (this.#inputLevel >= this.#bargeInThreshold()) {
 				this.#bargeInArmed += 1;
 				if (this.#bargeInArmed >= BARGE_IN_SUSTAIN_CHUNKS) {
@@ -260,6 +265,11 @@ export class LiveSessionController {
 	}
 
 	#doBargeIn(): void {
+		logger.info("live barge-in", {
+			inputLevel: this.#inputLevel,
+			outputLevel: this.#outputLevel,
+			threshold: this.#bargeInThreshold(),
+		});
 		this.#options.transport.send({ type: "response.cancel" });
 		this.#sink?.stop();
 		this.#sink = undefined;
@@ -366,6 +376,9 @@ export class LiveSessionController {
 
 	#onSpeechStarted(): void {
 		if (this.#phase === "speaking") {
+			// With barge-in disabled the server can only have heard bleed/noise —
+			// never interrupt playback.
+			if (!this.#bargeInEnabled) return;
 			// With the silence uplink the server only hears real user audio, but
 			// keep the RMS gate as defense in depth against residual bleed.
 			if (this.#inputLevel < this.#bargeInThreshold()) return;

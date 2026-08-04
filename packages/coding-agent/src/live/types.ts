@@ -54,6 +54,8 @@ export interface LiveSessionOptions {
 	onConsult?: LiveConsultHandler;
 	/** Barge-in gate: mic RMS (0..1) required to interrupt playback. Default 0.04. */
 	bargeInLevel?: number;
+	/** Allow barge-in at all (interrupting playback by speaking). Default true. */
+	bargeInEnabled?: boolean;
 }
 
 /** Frozen at P0b exit — P0c (consult bridge) and P0d (VoicePanel) build against these. */

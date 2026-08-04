@@ -132,6 +132,7 @@ export class VoiceModeController {
 				return this.#consultBridge?.consult(task) ?? "（consult 未初始化）";
 			},
 			bargeInLevel: settings.get("voice.bargeInLevel"),
+			bargeInEnabled: settings.get("voice.interrupt"),
 		});
 		this.#session = session;
 
