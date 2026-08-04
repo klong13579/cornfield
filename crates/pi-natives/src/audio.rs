@@ -317,8 +317,14 @@ impl AudioCapture {
 		on_audio: CaptureCallback,
 	) -> Result<Self> {
 		let device = start_capture_device(sample_rate, move |samples| {
+			// Blocking (not NonBlocking): the capture thread is the real-time
+			// audio path. If the JS thread is busy rendering TUI frames or
+			// handling input, dropping chunks makes the user's voice disappear
+			// (level bar stays at zero, server transcribes silence). The capture
+			// thread is the one place in the pipeline where waiting is correct:
+			// every chunk is real audio, late is better than lost.
 			on_audio
-				.call(Ok(Float32Array::new(samples.to_vec())), ThreadsafeFunctionCallMode::NonBlocking);
+				.call(Ok(Float32Array::new(samples.to_vec())), ThreadsafeFunctionCallMode::Blocking);
 		})
 		.map_err(napi::Error::from_reason)?;
 		Ok(Self { device: Mutex::new(Some(device)) })

@@ -12,7 +12,7 @@
 
 import { sanitizeText } from "@oh-my-pi/pi-natives";
 import type { KeyId } from "@oh-my-pi/pi-tui";
-import { type Component, isKeyRelease, matchesKey, parseKittySequence, type TUI, visibleWidth } from "@oh-my-pi/pi-tui";
+import { type Component, matchesKey, type TUI, visibleWidth } from "@oh-my-pi/pi-tui";
 import type { LivePhase } from "../../live/types";
 import { replaceTabs, truncateToWidth } from "../../tools/render-utils";
 import { theme as globalTheme, type Theme, type ThemeColor } from "../theme/theme";
@@ -29,8 +29,6 @@ export interface VoicePanelState {
 	inputLevel: number;
 	/** Speaker RMS 0..1. */
 	outputLevel: number;
-	/** PTT: true while the user is holding the talk key. */
-	recording: boolean;
 	transcript?: VoicePanelTranscript;
 	consultTask?: string;
 	toolLine?: string;
@@ -38,24 +36,14 @@ export interface VoicePanelState {
 }
 
 export interface VoicePanelCallbacks {
-	/** PTT key pressed — open the mic uplink. */
-	onMicDown: () => void;
-	/** PTT key released — close the mic uplink and force a turn commit. */
-	onMicUp: () => void;
 	/** User asked to exit voice mode (e.g. alt+v). */
 	onExit: () => void;
-	/** User asked to toggle mute (e.g. alt+m). */
-	onToggleMute?: () => void;
 }
 
 export interface VoicePanelOptions {
 	tui: TUI;
-	/** PTT key handlers. Required: pass `{}` for tests that don't simulate keys. */
-	callbacks?: Partial<VoicePanelCallbacks>;
-	/** Configured keys that should exit voice mode while the panel is focused. */
+	/** Key(s) that exit voice mode while the panel is focused. */
 	exitKeys?: KeyId[];
-	/** Configured keys that should toggle mute while the panel is focused. */
-	muteKeys?: KeyId[];
 	/** Injected theme (tests); defaults to the global theme instance. */
 	theme?: Theme;
 	/** Force plain-text rendering (no ANSI). Default: NO_COLOR / dumb-terminal detection. */
@@ -106,10 +94,7 @@ function detectPlain(): boolean {
 
 /** A compact, bordered, fixed-structure panel for the live voice session. */
 export class VoicePanel implements Component {
-	// PTT needs the Kitty keyboard protocol's release events (`\x1b[...:3u`)
-	// to know when the user lifts the talk key. By default the TUI filters
-	// them out; this flag opts the panel in.
-	readonly wantsKeyRelease = true;
+	readonly wantsKeyRelease = false;
 
 	readonly #tui: TUI;
 	readonly #theme: Theme;
@@ -117,7 +102,6 @@ export class VoicePanel implements Component {
 	readonly #interruptFlashMs: number;
 	readonly #callbacks: Partial<VoicePanelCallbacks>;
 	readonly #exitKeys: KeyId[];
-	readonly #muteKeys: KeyId[];
 
 	#phase: LivePhase = "connecting";
 	/** What is actually drawn; "interrupted" falls back to "listening" after the flash. */
@@ -126,7 +110,6 @@ export class VoicePanel implements Component {
 	#outputLevel = 0;
 	#displayInput = 0;
 	#displayOutput = 0;
-	#recording = false;
 	#frame = 0;
 	#transcripts: VoicePanelTranscript[] = [];
 	#consultTask = "";
@@ -148,7 +131,6 @@ export class VoicePanel implements Component {
 		this.#interruptFlashMs = options.interruptFlashMs ?? 300;
 		this.#callbacks = options.callbacks ?? {};
 		this.#exitKeys = options.exitKeys ?? [];
-		this.#muteKeys = options.muteKeys ?? [];
 		this.#restartTick();
 	}
 
@@ -162,7 +144,6 @@ export class VoicePanel implements Component {
 		}
 		this.#inputLevel = clampLevel(state.inputLevel);
 		this.#outputLevel = clampLevel(state.outputLevel);
-		if (state.recording !== undefined) this.#recording = state.recording;
 		// Levels rise instantly, decay on ticks (upstream displayLevel pattern).
 		if (this.#inputLevel > this.#displayInput) this.#displayInput = this.#inputLevel;
 		if (this.#outputLevel > this.#displayOutput) this.#displayOutput = this.#outputLevel;
@@ -199,76 +180,17 @@ export class VoicePanel implements Component {
 	}
 
 	/**
-	 * PTT key handling. The TUI already dispatches both press and release events
-	 * here (we opt in via `wantsKeyRelease = true`); we discriminate with the
-	 * Kitty helpers, fall back to a 1.5s auto-stop timer for terminals that
-	 * don't support the protocol.
+	 * Dispatch a key event. Only the configured exit key is honored — the panel
+	 * no longer drives the mic (mic is always-on for the duration of the
+	 * voice session).
 	 */
-	#pttStopTimer: ReturnType<typeof setTimeout> | undefined;
-
-	/**
-	 * True when the input data represents the PTT key (space) being pressed
-	 * in any of the three shapes: a literal " " char, a Kitty press CSI-u, or
-	 * a Kitty repeat. Release events are handled separately because
-	 * `matchesKey` filters out event_type 3, so we compare on parsed codepoint.
-	 */
-	#isPttPress(data: string): boolean {
-		if (data === " ") return true;
-		if (matchesKey(data, "space")) return true; // also covers repeats
-		return false;
-	}
-
-	#isPttRelease(data: string): boolean {
-		if (!isKeyRelease(data)) return false;
-		const parsed = parseKittySequence(data);
-		// Codepoint 32 is space in the Kitty CSI-u encoding.
-		return parsed?.codepoint === 32;
-	}
-
 	handleInput(data: string): void {
 		if (this.#disposed) return;
-		// Configured exit key (default alt+v) — user wants out of voice mode.
 		for (const key of this.#exitKeys) {
 			if (matchesKey(data, key)) {
 				this.#callbacks.onExit?.();
 				return;
 			}
-		}
-		// Configured mute key (default alt+m) — toggle mic mute.
-		for (const key of this.#muteKeys) {
-			if (matchesKey(data, key)) {
-				this.#callbacks.onToggleMute?.();
-				return;
-			}
-		}
-		// PTT release — user lifted the talk key.
-		if (this.#isPttRelease(data)) {
-			this.#cancelPttStop();
-			this.#callbacks.onMicUp?.();
-			return;
-		}
-		// PTT press (or repeat) — open the mic, re-arm the auto-stop safety net.
-		if (this.#isPttPress(data)) {
-			this.#armPttStop();
-			this.#callbacks.onMicDown?.();
-		}
-	}
-
-	#armPttStop(): void {
-		this.#cancelPttStop();
-		// Safety net for terminals that never send release events: cap a single
-		// press to 1.5s of uplink time. The user can press again to extend.
-		this.#pttStopTimer = setTimeout(() => {
-			this.#pttStopTimer = undefined;
-			this.#callbacks.onMicUp?.();
-		}, 1500);
-		this.#pttStopTimer.unref?.();
-	}
-
-	#cancelPttStop(): void {
-		if (this.#pttStopTimer) {
-			clearTimeout(this.#pttStopTimer);
-			this.#pttStopTimer = undefined;
 		}
 	}
 
@@ -399,7 +321,7 @@ export class VoicePanel implements Component {
 				base.push(`s${this.#spinnerIndex()}`);
 				break;
 			case "listening":
-				base.push(`i${this.#quantize(this.#displayInput)}`, `r${this.#recording ? 1 : 0}`);
+				base.push(`i${this.#quantize(this.#displayInput)}`);
 				break;
 			case "speaking": {
 				const wave = this.#displayOutput > LEVEL_EPSILON ? this.#frame % 3 : 0;
@@ -478,11 +400,9 @@ export class VoicePanel implements Component {
 				];
 			}
 			case "listening": {
-				const badge = this.#recording ? "◉ 录音中" : "● 待命 · 按住空格说话";
-				const badgeColor = this.#recording ? "warning" : "accent";
 				return [
-					line(this.#color(badgeColor, this.#levelBar(inner, this.#displayInput))),
-					line(this.#color(badgeColor, badge)),
+					line(this.#color("accent", this.#levelBar(inner, this.#displayInput))),
+					line(this.#color("accent", "● 聆听中")),
 					...this.#transcriptLines(inner, line),
 				];
 			}

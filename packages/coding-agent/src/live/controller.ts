@@ -15,8 +15,9 @@
  * - Echo break: while assistant audio is playing (phase "speaking", including
  *   the post-response.done drain), the uplink sends silence so speaker bleed
  *   can never reach the server as a fake user turn — the root fix for the
- *   self-talking loop. Barge-in is detected CLIENT-side via mic RMS and
- *   reopens the uplink with the loud chunk.
+ *   self-talking loop. Barge-in is detected CLIENT-side: the mic RMS must
+ *   exceed a playback-scaled echo floor (bleed grows with playback loudness)
+ *   for several consecutive chunks before the uplink reopens.
  * - Handshake: session.update is sent only after session.created, and the
  *   uplink stays gated until the server acks with session.updated (or a
  *   timeout fallback for servers that never ack). Config must land before
@@ -38,6 +39,10 @@ import { float32ToPcm16, pcm16ToFloat32, rmsLevel } from "../stt/pcm";
 import type { LiveAudioSink, LiveConsultHandler, LivePhase, LiveSessionCallbacks, LiveSessionOptions } from "./types";
 
 const DEFAULT_BARGE_IN_LEVEL = 0.04;
+/** Speaker→mic bleed scales with playback loudness; barge-in must clearly exceed it. */
+const BARGE_IN_ECHO_RATIO = 2;
+/** Consecutive over-threshold chunks required before accepting a barge-in. */
+const BARGE_IN_SUSTAIN_CHUNKS = 3;
 const CONSULT_TOOL_NAME = "omp_agent_consult";
 /** Silence frames replace mic input while muted/speaking (server_vad clock must keep ticking). */
 const MUTED_CHUNK_MS = 100;
@@ -64,13 +69,6 @@ export class LiveSessionController {
 	/** Playback still draining after response.done — kept so barge-in can stop it. */
 	#drainingSink: LiveAudioSink | undefined;
 	#muted = false;
-	/**
-	 * PTT gate: true only while the user is holding the talk key. When false,
-	 * `#onMicChunk` drops every frame (no uplink, no VAD, no level ticks to the
-	 * server) — the physical break that prevents speaker bleed from looping back
-	 * as a fake user turn. Default off so PTT is the only way to talk.
-	 */
-	#micEnabled = false;
 	#started = false;
 	#disposed = false;
 	#inputLevel = 0;
@@ -87,6 +85,8 @@ export class LiveSessionController {
 	#halted = false;
 	/** Monotonic drain generation — stale sink.end() continuations become no-ops. */
 	#drainGeneration = 0;
+	/** Consecutive loud chunks seen while speaking (barge-in sustain gate). */
+	#bargeInArmed = 0;
 
 	constructor(options: LiveSessionOptions) {
 		this.#options = options;
@@ -155,27 +155,12 @@ export class LiveSessionController {
 	}
 
 	/**
-	 * PTT gate. Press → `true` (mic uplink opens, frames flow to server). Release
-	 * → `false` (frames are dropped again). The PTT key is the only thing that
-	 * touches this; muted/speaking/drain/cooldown/etc. all keep working on top.
-	 */
-	setMicEnabled(enabled: boolean): void {
-		if (this.#disposed) return;
-		this.#micEnabled = enabled;
-	}
-
-	get micEnabled(): boolean {
-		return this.#micEnabled;
-	}
-
-	/**
-	 * Force the server to commit the current audio buffer as a user turn. PTT
-	 * releases always end a turn — server VAD's silence window (800ms default)
-	 * is too slow for "press, talk, release, get response" UX.
+	 * Force the server to commit the current audio buffer as a user turn. Kept
+	 * for callers that want to flush; no-op when the mic gate isn't open (PTT
+	 * is gone — there's no gate anymore, so this just sends the event).
 	 */
 	commitMic(): void {
 		if (this.#disposed) return;
-		if (!this.#micEnabled) return; // nothing buffered to commit
 		try {
 			this.#options.transport.send({ type: "input_audio_buffer.commit" });
 		} catch (err) {
@@ -235,10 +220,6 @@ export class LiveSessionController {
 		this.#inputLevel = clamp01(rmsLevel(samples) / 32768);
 		this.#callbacks.onLevels(this.#inputLevel, this.#outputLevel);
 		if (this.#options.transport.state !== "connected") return;
-		// PTT gate: when the user isn't holding the talk key, no audio reaches the
-		// wire at all. This is the physical break that stops speaker bleed from
-		// ever being transcribed as a user turn.
-		if (!this.#micEnabled) return;
 		// Fatal error state or config still in flight: nothing may hit the wire.
 		if (this.#halted || !this.#configAcked) return;
 		if (this.#muted) return this.#sendSilence();
@@ -246,12 +227,18 @@ export class LiveSessionController {
 		// gets silence so speaker bleed can never become a fake user turn. A loud
 		// chunk is treated as real barge-in: cancel playback, reopen the uplink.
 		if (this.#phase === "speaking") {
-			if (this.#inputLevel >= this.#bargeInLevel) {
-				this.#doBargeIn();
-				return this.#sendPcm(float32ToPcm16(samples));
+			if (this.#inputLevel >= this.#bargeInThreshold()) {
+				this.#bargeInArmed += 1;
+				if (this.#bargeInArmed >= BARGE_IN_SUSTAIN_CHUNKS) {
+					this.#doBargeIn();
+					return this.#sendPcm(float32ToPcm16(samples));
+				}
+				return this.#sendSilence();
 			}
+			this.#bargeInArmed = 0;
 			return this.#sendSilence();
 		}
+		this.#bargeInArmed = 0;
 		this.#sendPcm(float32ToPcm16(samples));
 	}
 
@@ -267,6 +254,11 @@ export class LiveSessionController {
 		this.#sendPcm(createSilenceChunk(MUTED_CHUNK_MS));
 	}
 
+	/** Expected echo floor: bleed ≈ coupling × playback level. Real barge-in must exceed it. */
+	#bargeInThreshold(): number {
+		return Math.max(this.#bargeInLevel, this.#outputLevel * BARGE_IN_ECHO_RATIO);
+	}
+
 	#doBargeIn(): void {
 		this.#options.transport.send({ type: "response.cancel" });
 		this.#sink?.stop();
@@ -276,6 +268,7 @@ export class LiveSessionController {
 		this.#drainingSink = undefined;
 		this.#drainGeneration += 1;
 		this.#outputLevel = 0;
+		this.#bargeInArmed = 0;
 		// Immediate visual feedback — must land within ~100ms of the interruption.
 		this.#setPhase("interrupted");
 		this.#setPhase("listening");
@@ -332,7 +325,8 @@ export class LiveSessionController {
 					if (this.#assistantUtterances.length > 5) this.#assistantUtterances.shift();
 					this.#assistantText = "";
 				}
-				this.#outputLevel = 0;
+				// Keep #outputLevel through the drain: the echo floor must stay high
+				// while the tail is still physically playing (barge-in gate uses it).
 				this.#drainSink();
 				break;
 			case "error":
@@ -374,7 +368,7 @@ export class LiveSessionController {
 		if (this.#phase === "speaking") {
 			// With the silence uplink the server only hears real user audio, but
 			// keep the RMS gate as defense in depth against residual bleed.
-			if (this.#inputLevel < this.#bargeInLevel) return;
+			if (this.#inputLevel < this.#bargeInThreshold()) return;
 			this.#doBargeIn();
 			return;
 		}
@@ -413,6 +407,7 @@ export class LiveSessionController {
 			// the speaking phase so the mic stays muted until it decays.
 			Bun.sleep(ROOM_DECAY_MS).then(() => {
 				if (this.#disposed || generation !== this.#drainGeneration) return;
+				this.#outputLevel = 0;
 				this.#setPhase(this.#muted ? "muted" : "listening");
 			});
 		};

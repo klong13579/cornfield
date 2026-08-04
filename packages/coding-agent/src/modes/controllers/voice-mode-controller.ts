@@ -89,41 +89,8 @@ export class VoiceModeController {
 			throw new Error(`realtime provider "${REALTIME_PROVIDER}" is missing baseUrl or credentials`);
 		}
 
-		this.#panelState = { phase: "connecting", inputLevel: 0, outputLevel: 0, recording: false };
-		// Resolve the configured voice-toggle key(s) so the panel can recognize
-		// them while it owns focus. User may have rebound away from alt+v.
+		this.#panelState = { phase: "connecting", inputLevel: 0, outputLevel: 0 };
 		const exitKeys = this.#ctx.keybindings.getKeys("app.voice.toggle");
-		const muteKeys = this.#ctx.keybindings.getKeys("app.voice.mute");
-		const panelCallbacks: VoicePanelCallbacks = {
-			onMicDown: () => {
-				this.#session?.setMicEnabled(true);
-				this.#pushPanelState({ recording: true });
-			},
-			onMicUp: () => {
-				const session = this.#session;
-				if (!session) return;
-				session.setMicEnabled(false);
-				session.commitMic();
-				this.#pushPanelState({ recording: false });
-			},
-			onToggleMute: () => {
-				const session = this.#session;
-				if (session) session.setMuted(!session.muted);
-			},
-			onExit: () => {
-				void this.stop();
-			},
-		};
-		const panel = new VoicePanel({ tui: this.#ctx.ui, callbacks: panelCallbacks, exitKeys, muteKeys });
-		this.#panel = panel;
-		// Panel sits above the editor (between chat and input). Container has no
-		// insertAt; children is public by design.
-		this.#ctx.editorContainer.children.unshift(panel);
-		// Steal focus so the panel can hear the PTT key (and the user can't type
-		// into the editor while voice is active). alt+v from the panel calls
-		// callbacks.onExit to restore normal text editing.
-		this.#ctx.ui.setFocus(panel);
-		this.#ctx.ui.requestRender();
 
 		const recorder = new LiveTranscriptRecorder(this.#ctx.session);
 		this.#recorder = recorder;
@@ -167,6 +134,19 @@ export class VoiceModeController {
 			bargeInLevel: settings.get("voice.bargeInLevel"),
 		});
 		this.#session = session;
+
+		const panelCallbacks: VoicePanelCallbacks = {
+			onExit: () => {
+				void this.stop();
+			},
+		};
+		const panel = new VoicePanel({ tui: this.#ctx.ui, callbacks: panelCallbacks, exitKeys });
+		this.#panel = panel;
+		// Panel sits above the editor so the user can see the live state. Text
+		// input keeps working while voice runs (the editor is still focused).
+		this.#ctx.editorContainer.children.unshift(panel);
+		this.#ctx.ui.requestRender();
+
 		await session.start();
 	}
 

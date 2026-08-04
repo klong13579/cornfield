@@ -130,12 +130,6 @@ interface HarnessOptions {
 	ackConfig?: boolean;
 	/** Hold sink.end() until releaseEnd() — simulates playback still draining. */
 	holdSinkEnd?: boolean;
-	/**
-	 * Open the mic uplink after the listening phase. Default true — most
-	 * pre-PTT tests expect the mic to be live. PTT tests set this to false and
-	 * drive `controller.setMicEnabled()` explicitly.
-	 */
-	micOpen?: boolean;
 }
 
 async function waitForPhase(h: Pick<Harness, "controller">, want: LivePhase, timeoutMs = 2_000): Promise<void> {
@@ -177,13 +171,12 @@ async function makeHarness(options: HarnessOptions = {}): Promise<Harness> {
 	// Deterministic handshake: config sent on session.created, acked by the
 	// server, uplink gate opens → listening. Skipped for no-ack servers.
 	if (options.ackConfig !== false) await waitForPhase({ controller }, "listening");
-	// PTT default is mic-closed. Most pre-PTT tests want the mic live; PTT tests
-	// opt out and drive the gate themselves.
-	if (options.micOpen !== false) controller.setMicEnabled(true);
 	return { controller, server, source, sinks, phases, transcripts, terminals };
 }
 
 const loudPcm = pcm16ToBase64(new Uint8Array(960).fill(120));
+/** Playback at realistic speech RMS (~0.08); loudPcm's 0.94 puts the echo floor out of reach. */
+const moderatePcm = pcm16ToBase64(new Uint8Array(960).fill(10));
 
 /** Polls until a message of `type` lands on the server (send/receive races are real over WS). */
 async function waitForMessage(server: TestServer, type: string, timeoutMs = 2_000): Promise<Record<string, unknown>> {
@@ -272,13 +265,19 @@ describe("LiveSessionController", () => {
 		await h.controller.dispose();
 	});
 
-	test("client-side barge-in: loud chunk during speaking cancels and reopens uplink", async () => {
+	test("client-side barge-in: sustained loud speech during speaking cancels and reopens uplink", async () => {
 		const h = await makeHarness();
 		servers.push(h.server);
-		h.server.send({ type: "response.audio.delta", delta: loudPcm });
+		h.server.send({ type: "response.audio.delta", delta: moderatePcm });
 		await waitForPhase(h, "speaking");
 
-		h.source.emit(0.5); // loud real speech → client-side barge-in
+		// One or two loud chunks are not enough (sustain gate) — uplink stays silence.
+		h.source.emit(0.5);
+		h.source.emit(0.5);
+		await Bun.sleep(20);
+		expect(h.server.received.some(m => m.type === "response.cancel")).toBe(false);
+
+		h.source.emit(0.5); // 3rd consecutive loud chunk → barge-in
 		await Bun.sleep(20);
 
 		expect(h.server.received.some(m => m.type === "response.cancel")).toBe(true);
@@ -295,7 +294,7 @@ describe("LiveSessionController", () => {
 	test("barge-in: loud speech_started during speaking cancels response and discards sink", async () => {
 		const h = await makeHarness();
 		servers.push(h.server);
-		h.server.send({ type: "response.audio.delta", delta: loudPcm });
+		h.server.send({ type: "response.audio.delta", delta: moderatePcm });
 		await Bun.sleep(20);
 		expect(h.phases.at(-1)).toBe("speaking");
 
@@ -313,7 +312,7 @@ describe("LiveSessionController", () => {
 	test("echo gate: quiet speech_started during speaking is ignored", async () => {
 		const h = await makeHarness();
 		servers.push(h.server);
-		h.server.send({ type: "response.audio.delta", delta: loudPcm });
+		h.server.send({ type: "response.audio.delta", delta: moderatePcm });
 		await Bun.sleep(20);
 
 		h.source.emit(0.001); // speaker bleed, below bargeInLevel
@@ -323,6 +322,45 @@ describe("LiveSessionController", () => {
 		expect(h.server.received.some(m => m.type === "response.cancel")).toBe(false);
 		expect(h.phases.at(-1)).toBe("speaking"); // echo ignored: assistant keeps talking
 		expect(h.sinks[0]!.stopped).toBe(false);
+		await h.controller.dispose();
+	});
+
+	test("self-loop guard: sustained bleed above the fixed floor but below the echo floor never barges in", async () => {
+		const h = await makeHarness();
+		servers.push(h.server);
+		h.server.send({ type: "response.audio.delta", delta: moderatePcm });
+		await waitForPhase(h, "speaking");
+
+		// Speaker bleed: louder than the old fixed threshold (0.04) but below the
+		// playback-scaled echo floor (2 × playback RMS). Sustained — the exact loop trigger.
+		for (let i = 0; i < 10; i++) h.source.emit(0.1);
+		await Bun.sleep(20);
+
+		expect(h.server.received.some(m => m.type === "response.cancel")).toBe(false);
+		expect(h.phases.at(-1)).toBe("speaking");
+		const pcm = lastAppendAudio(h.server);
+		expect(pcm).toBeDefined();
+		expect(pcm!.every(b => b === 0)).toBe(true); // uplink stayed silence
+		await h.controller.dispose();
+	});
+
+	test("drain window: echo floor stays up after response.done until the tail decays", async () => {
+		const h = await makeHarness();
+		servers.push(h.server);
+		h.server.send({ type: "response.audio.delta", delta: moderatePcm });
+		await waitForPhase(h, "speaking");
+		h.server.send({ type: "response.done" });
+		await Bun.sleep(20); // draining: phase still "speaking", tail physically playing
+
+		expect(h.controller.phase).toBe("speaking");
+		// Bleed arriving with the tail: above the fixed floor, below the echo floor.
+		for (let i = 0; i < 5; i++) h.source.emit(0.1);
+		await Bun.sleep(20);
+
+		expect(h.server.received.some(m => m.type === "response.cancel")).toBe(false);
+		const pcm = lastAppendAudio(h.server);
+		expect(pcm).toBeDefined();
+		expect(pcm!.every(b => b === 0)).toBe(true);
 		await h.controller.dispose();
 	});
 
@@ -481,56 +519,6 @@ describe("LiveSessionController", () => {
 		await Bun.sleep(20);
 		expect(h.terminals.length).toBe(1);
 		expect(h.terminals[0]?.message).toContain("inactivity");
-		await h.controller.dispose();
-	});
-
-	test("PTT: mic is gated by default and only opens on setMicEnabled(true)", async () => {
-		const h = await makeHarness({ micOpen: false });
-		servers.push(h.server);
-		expect(h.controller.micEnabled).toBe(false);
-
-		// No PTT key held → mic frames do NOT reach the wire.
-		h.source.emit(0.5);
-		await Bun.sleep(20);
-		expect(h.server.received.some(m => m.type === "input_audio_buffer.append")).toBe(false);
-
-		// Press → frames flow.
-		h.controller.setMicEnabled(true);
-		h.source.emit(0.5);
-		await Bun.sleep(20);
-		expect(h.server.received.some(m => m.type === "input_audio_buffer.append")).toBe(true);
-
-		// Release → frames drop again.
-		h.controller.setMicEnabled(false);
-		const appendsAfter = h.server.received.filter(m => m.type === "input_audio_buffer.append").length;
-		h.source.emit(0.5);
-		await Bun.sleep(20);
-		expect(h.server.received.filter(m => m.type === "input_audio_buffer.append").length).toBe(appendsAfter);
-		await h.controller.dispose();
-	});
-
-	test("PTT: commitMic sends input_audio_buffer.commit after release", async () => {
-		const h = await makeHarness({ micOpen: false });
-		servers.push(h.server);
-		h.controller.setMicEnabled(true);
-		// No commit yet.
-		expect(h.server.received.some(m => m.type === "input_audio_buffer.commit")).toBe(false);
-		// Release without ever opening → no commit (nothing buffered).
-		h.controller.setMicEnabled(true);
-		h.controller.commitMic();
-		await Bun.sleep(20);
-		expect(h.server.received.some(m => m.type === "input_audio_buffer.commit")).toBe(true);
-		await h.controller.dispose();
-	});
-
-	test("PTT: speaker bleed while mic is gated never reaches the server", async () => {
-		const h = await makeHarness({ micOpen: false });
-		servers.push(h.server);
-		// Simulate a loud room — many chunks at full scale, all dropped.
-		for (let i = 0; i < 50; i++) h.source.emit(1.0);
-		await Bun.sleep(40);
-		expect(h.server.received.some(m => m.type === "input_audio_buffer.append")).toBe(false);
-		expect(h.server.received.some(m => m.type === "input_audio_buffer.commit")).toBe(false);
 		await h.controller.dispose();
 	});
 });
