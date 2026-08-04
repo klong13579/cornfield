@@ -92,6 +92,11 @@ export class RealtimeWsTransport {
 	/** Connects and resolves once the server's `session.created` arrives. */
 	async connect(): Promise<void> {
 		if (this.#state === "connected" || this.#state === "connecting") return;
+		// A closed transport is terminal: reconnecting here would resurrect a
+		// socket nobody owns (dispose races) and loop forever.
+		if (this.#state === "closed") {
+			throw new Error("realtime transport is closed, cannot reconnect");
+		}
 		this.#intentionalClose = false;
 		await this.#open();
 	}

@@ -268,6 +268,15 @@ describe("RealtimeWsTransport (local server)", () => {
 		const transport = new RealtimeWsTransport({ baseUrl: "http://127.0.0.1:1", apiKey: "k", model: "m" });
 		expect(() => transport.send({ type: "response.create" })).toThrow(/not connected/);
 	});
+	test("connect refuses after close — no zombie resurrection", async () => {
+		const server = startTestServer({ sessionCreated: true });
+		servers.push(server);
+		const transport = new RealtimeWsTransport({ baseUrl: server.url, apiKey: "k", model: "m" });
+		await transport.connect();
+		await transport.close();
+		await expect(transport.connect()).rejects.toThrow(/closed/);
+		expect(server.connections.length).toBe(1); // no reconnect attempt
+	});
 
 	test("reconnects after unintentional drop", async () => {
 		const server = startTestServer({ sessionCreated: true });

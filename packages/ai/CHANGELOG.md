@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **`RealtimeWsTransport.connect()` rejects after close** (`src/realtime/transport.ts`, `test/realtime-transport.test.ts`): Calling `connect()` after `close()` now throws ("realtime transport is closed, cannot reconnect") instead of silently reopening a zombie socket. Closes the dispose-during-connect race where a quick toggle on/off left a transport reconnecting forever with no controller attached — `connect()` no longer resets `intentionalClose` on a closed transport. 1 new test asserting the throw and that no new connection is attempted.
+
 ### Removed
 
 - Alibaba Coding Plan: removed the six-model curated allowlist (`ALIBABA_CODING_PLAN_SELECTOR_MODEL_IDS` in `provider-models/alibaba-coding-plan-curated.ts`) and the `ModelRegistry.#pruneAlibabaCodingPlanCatalog` filter. The bundled catalog, runtime discovery (`/v1/models`), and `omp --list-models` now expose all DashScope compatible-mode models reachable through the configured `baseUrl` / `apiKey`. Custom model definitions in `models.yml` are no longer silently dropped from the selector when not on the curated set. Treat this as a behavior restoration rather than a feature change — the allowlist was the only per-provider special case in pi-ai (every other provider, e.g. `narwal-plan`, follows the “declare in `models.yml`, see in selector” contract). If a particular model fails at request time (403 / 400001 / capability mismatch), the existing per-call error handling already surfaces the truth to the caller; no upstream filtering was protecting against that.

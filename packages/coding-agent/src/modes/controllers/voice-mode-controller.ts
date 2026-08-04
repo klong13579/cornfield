@@ -16,7 +16,7 @@ import { createNativeAudioSource, createNativeSinkFactory } from "../../live/nat
 import { LiveTranscriptRecorder } from "../../live/transcript-recorder";
 import type { LivePhase, LiveTranscript } from "../../live/types";
 import liveInstructions from "../../prompts/live/live-instructions.md" with { type: "text" };
-import { VoicePanel, type VoicePanelState } from "../components/voice-panel";
+import { VoicePanel, type VoicePanelCallbacks, type VoicePanelState } from "../components/voice-panel";
 import type { InteractiveModeContext } from "../types";
 
 /** P0: narwal-plan is the only bench-verified realtime endpoint. */
@@ -29,7 +29,7 @@ export class VoiceModeController {
 	#session: LiveSessionController | undefined;
 	#consultBridge: LiveConsultBridge | undefined;
 	#recorder: LiveTranscriptRecorder | undefined;
-	#panelState: VoicePanelState = { phase: "connecting", inputLevel: 0, outputLevel: 0 };
+	#panelState: VoicePanelState = { phase: "connecting", inputLevel: 0, outputLevel: 0, recording: false };
 
 	constructor(ctx: InteractiveModeContext) {
 		this.#ctx = ctx;
@@ -70,6 +70,9 @@ export class VoiceModeController {
 			this.#panel = undefined;
 			this.#ctx.ui.requestRender();
 		}
+		// The TUI's focused component is the panel right now; setFocus with the
+		// editor hands control back so the user can keep typing.
+		this.#ctx.ui.setFocus(this.#ctx.editor);
 	}
 
 	async dispose(): Promise<void> {
@@ -86,12 +89,40 @@ export class VoiceModeController {
 			throw new Error(`realtime provider "${REALTIME_PROVIDER}" is missing baseUrl or credentials`);
 		}
 
-		this.#panelState = { phase: "connecting", inputLevel: 0, outputLevel: 0 };
-		const panel = new VoicePanel({ tui: this.#ctx.ui });
+		this.#panelState = { phase: "connecting", inputLevel: 0, outputLevel: 0, recording: false };
+		// Resolve the configured voice-toggle key(s) so the panel can recognize
+		// them while it owns focus. User may have rebound away from alt+v.
+		const exitKeys = this.#ctx.keybindings.getKeys("app.voice.toggle");
+		const muteKeys = this.#ctx.keybindings.getKeys("app.voice.mute");
+		const panelCallbacks: VoicePanelCallbacks = {
+			onMicDown: () => {
+				this.#session?.setMicEnabled(true);
+				this.#pushPanelState({ recording: true });
+			},
+			onMicUp: () => {
+				const session = this.#session;
+				if (!session) return;
+				session.setMicEnabled(false);
+				session.commitMic();
+				this.#pushPanelState({ recording: false });
+			},
+			onToggleMute: () => {
+				const session = this.#session;
+				if (session) session.setMuted(!session.muted);
+			},
+			onExit: () => {
+				void this.stop();
+			},
+		};
+		const panel = new VoicePanel({ tui: this.#ctx.ui, callbacks: panelCallbacks, exitKeys, muteKeys });
 		this.#panel = panel;
 		// Panel sits above the editor (between chat and input). Container has no
 		// insertAt; children is public by design.
 		this.#ctx.editorContainer.children.unshift(panel);
+		// Steal focus so the panel can hear the PTT key (and the user can't type
+		// into the editor while voice is active). alt+v from the panel calls
+		// callbacks.onExit to restore normal text editing.
+		this.#ctx.ui.setFocus(panel);
 		this.#ctx.ui.requestRender();
 
 		const recorder = new LiveTranscriptRecorder(this.#ctx.session);
@@ -116,7 +147,7 @@ export class VoiceModeController {
 				input_audio_transcription: { model: "fun-asr" },
 				turn_detection: {
 					type: "server_vad",
-					threshold: 0.5,
+					threshold: 0.4,
 					silence_duration_ms: settings.get("voice.vadSilenceMs"),
 				},
 			},
@@ -143,7 +174,6 @@ export class VoiceModeController {
 		const error = phase === "error" ? "语音通道异常，按 alt+v 重连" : undefined;
 		this.#pushPanelState({ phase, error });
 	}
-
 	#onTranscript(transcript: LiveTranscript): void {
 		this.#pushPanelState({ transcript });
 		// Only finalized turns land in the shared session history.

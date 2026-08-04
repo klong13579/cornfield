@@ -8,15 +8,23 @@
  *                    ↑           │          │
  *                    └───────────┴── interrupted (barge-in)
  *
- * Key behaviors (all bench-verified against qwen realtime):
- * - The mic streams CONTINUOUSLY, including silence — server_vad's audio clock
- *   only advances with frames, so capture is never paused mid-session. Mute
- *   swaps live chunks for silence frames instead of stopping capture.
- * - Barge-in: `speech_started` while speaking → `response.cancel` + sink.stop()
- *   (client-side discard; qwen sends no reliable truncation event) + an
- *   immediate "interrupted" phase flash, then back to listening.
- * - Echo gate: while speaking, a speech_started below `bargeInLevel` RMS is
- *   treated as speaker bleed and ignored.
+ * Key behaviors (bench-verified against qwen realtime):
+ * - The mic captures CONTINUOUSLY — server_vad's audio clock only advances
+ *   with frames, so capture is never paused mid-session. Mute swaps live
+ *   chunks for silence frames instead of stopping capture.
+ * - Echo break: while assistant audio is playing (phase "speaking", including
+ *   the post-response.done drain), the uplink sends silence so speaker bleed
+ *   can never reach the server as a fake user turn — the root fix for the
+ *   self-talking loop. Barge-in is detected CLIENT-side via mic RMS and
+ *   reopens the uplink with the loud chunk.
+ * - Handshake: session.update is sent only after session.created, and the
+ *   uplink stays gated until the server acks with session.updated (or a
+ *   timeout fallback for servers that never ack). Config must land before
+ *   the first audio frame, or qwen rejects turn_detection and the session
+ *   is permanently broken.
+ * - Error breaker: repeated server errors end the session via onTerminal
+ *   instead of storming forever; the 180s server-side idle timeout ends the
+ *   session cleanly instead of silently resurrecting it in a loop.
  */
 import {
 	base64ToPcm16,
@@ -31,8 +39,14 @@ import type { LiveAudioSink, LiveConsultHandler, LivePhase, LiveSessionCallbacks
 
 const DEFAULT_BARGE_IN_LEVEL = 0.04;
 const CONSULT_TOOL_NAME = "omp_agent_consult";
-/** Silence frames replace mic input while muted (server_vad clock must keep ticking). */
+/** Silence frames replace mic input while muted/speaking (server_vad clock must keep ticking). */
 const MUTED_CHUNK_MS = 100;
+/** Room reverberation window after playback: keep the mic muted for this long. */
+const ROOM_DECAY_MS = 300;
+/** Give up waiting for the session.updated ack and stream anyway (some servers never ack). */
+const CONFIG_ACK_TIMEOUT_MS = 2_000;
+/** Consecutive server errors before the session is declared terminal. */
+const MAX_SERVER_ERRORS = 3;
 
 function clamp01(value: number): number {
 	return Math.min(1, Math.max(0, value));
@@ -47,12 +61,32 @@ export class LiveSessionController {
 
 	#phase: LivePhase = "connecting";
 	#sink: LiveAudioSink | undefined;
+	/** Playback still draining after response.done — kept so barge-in can stop it. */
+	#drainingSink: LiveAudioSink | undefined;
 	#muted = false;
+	/**
+	 * PTT gate: true only while the user is holding the talk key. When false,
+	 * `#onMicChunk` drops every frame (no uplink, no VAD, no level ticks to the
+	 * server) — the physical break that prevents speaker bleed from looping back
+	 * as a fake user turn. Default off so PTT is the only way to talk.
+	 */
+	#micEnabled = false;
 	#started = false;
 	#disposed = false;
 	#inputLevel = 0;
 	#outputLevel = 0;
 	#removeTransportListeners: Array<() => void> = [];
+	#assistantUtterances: string[] = [];
+	#assistantText = "";
+	/** Uplink gate: cleared by the session.updated ack or the ack timeout. */
+	#configAcked = false;
+	#configAckTimer: ReturnType<typeof setTimeout> | undefined;
+	/** Consecutive server errors since the last good config ack. */
+	#errorCount = 0;
+	/** Terminal error state: uplink halted until the session ends. */
+	#halted = false;
+	/** Monotonic drain generation — stale sink.end() continuations become no-ops. */
+	#drainGeneration = 0;
 
 	constructor(options: LiveSessionOptions) {
 		this.#options = options;
@@ -86,6 +120,7 @@ export class LiveSessionController {
 			this.#options.transport.addEventListener(event => this.#onServerEvent(event)),
 			this.#options.transport.addStateListener(state => {
 				if (state === "connected") this.#onTransportConnected();
+				if (state === "reconnecting") this.#setPhase("connecting");
 				if (state === "closed" && !this.#disposed) {
 					this.#callbacks.onTerminal(new Error("realtime connection closed"));
 				}
@@ -99,7 +134,10 @@ export class LiveSessionController {
 		});
 
 		await this.#options.transport.connect();
-		// Mic starts only after the session is live, so no frames hit a dead socket.
+		if (this.#disposed) return;
+		// Capture starts immediately; the UPLINK stays gated until the session
+		// config is acknowledged (see #onMicChunk), so no frame can beat the
+		// turn_detection config to the server.
 		this.#options.source.start(samples => this.#onMicChunk(samples));
 	}
 
@@ -116,24 +154,80 @@ export class LiveSessionController {
 		return this.#muted;
 	}
 
+	/**
+	 * PTT gate. Press → `true` (mic uplink opens, frames flow to server). Release
+	 * → `false` (frames are dropped again). The PTT key is the only thing that
+	 * touches this; muted/speaking/drain/cooldown/etc. all keep working on top.
+	 */
+	setMicEnabled(enabled: boolean): void {
+		if (this.#disposed) return;
+		this.#micEnabled = enabled;
+	}
+
+	get micEnabled(): boolean {
+		return this.#micEnabled;
+	}
+
+	/**
+	 * Force the server to commit the current audio buffer as a user turn. PTT
+	 * releases always end a turn — server VAD's silence window (800ms default)
+	 * is too slow for "press, talk, release, get response" UX.
+	 */
+	commitMic(): void {
+		if (this.#disposed) return;
+		if (!this.#micEnabled) return; // nothing buffered to commit
+		try {
+			this.#options.transport.send({ type: "input_audio_buffer.commit" });
+		} catch (err) {
+			logger.debug("live mic commit failed", { error: String(err) });
+		}
+	}
+
 	async dispose(): Promise<void> {
 		if (this.#disposed) return;
 		this.#disposed = true;
+		this.#cancelConfigAckTimer();
+		this.#drainGeneration += 1;
 		this.#options.source.stop();
 		this.#sink?.stop();
 		this.#sink = undefined;
+		this.#drainingSink?.stop();
+		this.#drainingSink = undefined;
 		this.#bridge.detach();
 		for (const remove of this.#removeTransportListeners) remove();
 		await this.#options.transport.close();
 	}
 
 	#onTransportConnected(): void {
-		// Every (re)connect is a fresh server-side session — config must be resent.
+		// Every (re)connect is a fresh server-side session. Config goes out on
+		// session.created (server ready); the uplink gate opens on the ack.
+		this.#configAcked = false;
+		this.#halted = false;
+		this.#cancelConfigAckTimer();
+		this.#setPhase("connecting");
+	}
+
+	#sendSessionConfig(): void {
 		this.#options.transport.send({
 			type: "session.update",
 			session: { ...this.#options.session, tools: [...this.#bridge.tools], tool_choice: "auto" },
 		});
-		this.#setPhase(this.#muted ? "muted" : "listening");
+		this.#cancelConfigAckTimer();
+		this.#configAckTimer = setTimeout(() => {
+			if (!this.#configAcked) {
+				// Some servers never emit session.updated — proceed optimistically.
+				logger.debug("live session.update ack timeout, opening uplink anyway");
+				this.#configAcked = true;
+				this.#setPhase(this.#muted ? "muted" : "listening");
+			}
+		}, CONFIG_ACK_TIMEOUT_MS);
+	}
+
+	#cancelConfigAckTimer(): void {
+		if (this.#configAckTimer) {
+			clearTimeout(this.#configAckTimer);
+			this.#configAckTimer = undefined;
+		}
 	}
 
 	#onMicChunk(samples: Float32Array): void {
@@ -141,7 +235,27 @@ export class LiveSessionController {
 		this.#inputLevel = clamp01(rmsLevel(samples) / 32768);
 		this.#callbacks.onLevels(this.#inputLevel, this.#outputLevel);
 		if (this.#options.transport.state !== "connected") return;
-		const pcm = this.#muted ? createSilenceChunk(MUTED_CHUNK_MS) : float32ToPcm16(samples);
+		// PTT gate: when the user isn't holding the talk key, no audio reaches the
+		// wire at all. This is the physical break that stops speaker bleed from
+		// ever being transcribed as a user turn.
+		if (!this.#micEnabled) return;
+		// Fatal error state or config still in flight: nothing may hit the wire.
+		if (this.#halted || !this.#configAcked) return;
+		if (this.#muted) return this.#sendSilence();
+		// Echo break: while assistant audio is playing or draining, the server
+		// gets silence so speaker bleed can never become a fake user turn. A loud
+		// chunk is treated as real barge-in: cancel playback, reopen the uplink.
+		if (this.#phase === "speaking") {
+			if (this.#inputLevel >= this.#bargeInLevel) {
+				this.#doBargeIn();
+				return this.#sendPcm(float32ToPcm16(samples));
+			}
+			return this.#sendSilence();
+		}
+		this.#sendPcm(float32ToPcm16(samples));
+	}
+
+	#sendPcm(pcm: Uint8Array): void {
 		try {
 			this.#options.transport.send({ type: "input_audio_buffer.append", audio: pcm16ToBase64(pcm) });
 		} catch (err) {
@@ -149,9 +263,38 @@ export class LiveSessionController {
 		}
 	}
 
+	#sendSilence(): void {
+		this.#sendPcm(createSilenceChunk(MUTED_CHUNK_MS));
+	}
+
+	#doBargeIn(): void {
+		this.#options.transport.send({ type: "response.cancel" });
+		this.#sink?.stop();
+		this.#sink = undefined;
+		// Abort the drain tail too — its audio is still physically playing.
+		this.#drainingSink?.stop();
+		this.#drainingSink = undefined;
+		this.#drainGeneration += 1;
+		this.#outputLevel = 0;
+		// Immediate visual feedback — must land within ~100ms of the interruption.
+		this.#setPhase("interrupted");
+		this.#setPhase("listening");
+	}
+
 	#onServerEvent(event: RealtimeServerEvent): void {
 		if (this.#disposed) return;
 		switch (event.type) {
+			case "session.created":
+				// The server session is ready — only NOW send the config, so
+				// turn_detection can never race a session already processing audio.
+				this.#sendSessionConfig();
+				break;
+			case "session.updated":
+				this.#configAcked = true;
+				this.#cancelConfigAckTimer();
+				this.#errorCount = 0;
+				this.#setPhase(this.#muted ? "muted" : "listening");
+				break;
 			case "input_audio_buffer.speech_started":
 				this.#onSpeechStarted();
 				break;
@@ -162,62 +305,133 @@ export class LiveSessionController {
 				this.#callbacks.onTranscript({ role: "user", text: event.delta, final: false });
 				break;
 			case "conversation.item.input_audio_transcription.completed":
+				// Defense in depth: with the silence uplink the server should never
+				// transcribe speaker bleed, but guard the recording path anyway.
+				if (this.#phase === "speaking" || this.#isEcho(event.transcript)) break;
+				// Drop 1-2 char transcripts before they reach the model. Bleed
+				// fragments ("。", "都", "三") and tail-of-reverb ghosts would
+				// otherwise commit as full user turns and feed the self-loop.
+				if (event.transcript.replace(/\s|\p{P}|\p{S}/gu, "").length < 3) break;
 				this.#callbacks.onTranscript({ role: "user", text: event.transcript, final: true });
 				break;
 			case "response.audio.delta":
 				this.#onAudioDelta(event.delta);
 				break;
 			case "response.audio_transcript.delta":
+				this.#assistantText += event.delta;
 				this.#callbacks.onTranscript({ role: "assistant", text: event.delta, final: false });
 				break;
 			case "response.audio_transcript.done":
+				this.#assistantUtterances.push(event.transcript);
+				if (this.#assistantUtterances.length > 5) this.#assistantUtterances.shift();
 				this.#callbacks.onTranscript({ role: "assistant", text: event.transcript, final: true });
 				break;
 			case "response.done":
-				this.#sink = undefined;
+				if (this.#assistantText) {
+					this.#assistantUtterances.push(this.#assistantText);
+					if (this.#assistantUtterances.length > 5) this.#assistantUtterances.shift();
+					this.#assistantText = "";
+				}
 				this.#outputLevel = 0;
-				this.#setPhase(this.#muted ? "muted" : "listening");
+				this.#drainSink();
 				break;
 			case "error":
-				// Benign race: our response.cancel landed after the response already
-				// finished server-side. Not an error condition for the user.
-				if (/no active response/i.test(event.message)) {
-					logger.debug("live cancel raced a finished response", { message: event.message });
-					break;
-				}
-				logger.warn("live server error", { message: event.message });
-				this.#setPhase("error");
+				this.#onServerError(event.message);
 				break;
 		}
 	}
 
+	#onServerError(message: string): void {
+		// Benign race: our response.cancel landed after the response already
+		// finished server-side. Not an error condition for the user.
+		if (/no active response/i.test(message)) {
+			logger.debug("live cancel raced a finished response", { message });
+			return;
+		}
+		// Server-side idle timeout: the session is gone. Silently resurrecting it
+		// loops forever (180s close → reconnect → 180s close…) and loses context;
+		// end cleanly instead — the user can re-enter with alt+v.
+		if (/no response was generated/i.test(message)) {
+			logger.info("live session closed by server after idle timeout");
+			this.#halted = true;
+			this.#callbacks.onTerminal(new Error("voice session ended after prolonged inactivity"));
+			return;
+		}
+		this.#errorCount += 1;
+		logger.warn("live server error", { message, errorCount: this.#errorCount });
+		if (this.#errorCount >= MAX_SERVER_ERRORS) {
+			this.#halted = true;
+			this.#callbacks.onTerminal(new Error(`voice channel failed: ${message}`));
+			return;
+		}
+		// Stop feeding a broken session: halt the uplink (this is what turned one
+		// config error into a 49-error storm before). Recovery comes from the
+		// transport reconnecting with a fresh server session, or the user re-entering.
+		this.#setPhase("error");
+	}
+
 	#onSpeechStarted(): void {
 		if (this.#phase === "speaking") {
-			// Echo gate: speaker bleed trips server_vad at low RMS; real barge-in is loud.
+			// With the silence uplink the server only hears real user audio, but
+			// keep the RMS gate as defense in depth against residual bleed.
 			if (this.#inputLevel < this.#bargeInLevel) return;
-			this.#options.transport.send({ type: "response.cancel" });
-			this.#sink?.stop();
-			this.#sink = undefined;
-			this.#outputLevel = 0;
-			// Immediate visual feedback — must land within ~100ms of the interruption.
-			this.#setPhase("interrupted");
+			this.#doBargeIn();
+			return;
 		}
 		this.#setPhase("listening");
 	}
 
 	#onAudioDelta(base64: string): void {
-		if (this.#phase !== "speaking") {
+		if (!this.#sink) {
 			this.#sink = this.#options.sinkFactory();
-			this.#setPhase("speaking");
+			// A new response invalidates any in-flight drain continuation.
+			this.#drainGeneration += 1;
 		}
+		if (this.#phase !== "speaking") this.#setPhase("speaking");
 		const samples = pcm16ToFloat32(base64ToPcm16(base64));
 		this.#outputLevel = clamp01(rmsLevel(samples) / 32768);
-		this.#sink?.write(samples);
+		this.#sink.write(samples);
+	}
+
+	#drainSink(): void {
+		const sink = this.#sink;
+		// Next response gets a fresh sink immediately; the old one plays out.
+		this.#sink = undefined;
+		if (!sink) {
+			this.#setPhase(this.#muted ? "muted" : "listening");
+			return;
+		}
+		this.#drainingSink = sink;
+		const generation = ++this.#drainGeneration;
+		// Phase stays "speaking": the uplink keeps sending silence until the
+		// hardware buffer is actually empty, so the mic never hears itself.
+		const done = (): void => {
+			if (this.#drainingSink === sink) this.#drainingSink = undefined;
+			if (this.#disposed || generation !== this.#drainGeneration) return;
+			// Small post-drain cooldown: even after AudioPlayback reports the
+			// last sample played, the room has 100-300ms of reverb left. Hold
+			// the speaking phase so the mic stays muted until it decays.
+			Bun.sleep(ROOM_DECAY_MS).then(() => {
+				if (this.#disposed || generation !== this.#drainGeneration) return;
+				this.#setPhase(this.#muted ? "muted" : "listening");
+			});
+		};
+		sink.end().then(done, done);
 	}
 
 	#setPhase(phase: LivePhase): void {
 		if (this.#phase === phase || this.#disposed) return;
 		this.#phase = phase;
 		this.#callbacks.onPhase(phase);
+	}
+
+	#isEcho(text: string): boolean {
+		if (text.length < 3) return false;
+		// Strip whitespace, punctuation, and symbols so ASR variants (no punctuation)
+		// still match the assistant's original (with punctuation).
+		const norm = text.replace(/[\s\p{P}\p{S}]/gu, "");
+		return this.#assistantUtterances.some(
+			u => u.replace(/[\s\p{P}\p{S}]/gu, "").includes(norm) || norm.includes(u.replace(/[\s\p{P}\p{S}]/gu, "")),
+		);
 	}
 }

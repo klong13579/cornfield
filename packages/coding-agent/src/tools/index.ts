@@ -419,6 +419,7 @@ export async function createTools(session: ToolSession, toolNames?: string[]): P
 		if (name === "browser") return session.settings.get("browser.enabled");
 		if (name === "checkpoint" || name === "rewind") return session.settings.get("checkpoint.enabled");
 		if (name === "irc") return session.settings.get("irc.enabled");
+		if (name === "identity") return session.settings.get("identity.enabled");
 		if (name === "recipe") return session.settings.get("recipe.enabled");
 		if (name === "task") {
 			const maxDepth = session.settings.get("task.maxRecursionDepth") ?? 2;
@@ -440,7 +441,7 @@ export async function createTools(session: ToolSession, toolNames?: string[]): P
 					...(includeYield ? ([["yield", HIDDEN_TOOLS.yield]] as const) : []),
 					...([
 						["exit_plan_mode", HIDDEN_TOOLS.exit_plan_mode],
-						["identity", HIDDEN_TOOLS.identity],
+						...(isToolAllowed("identity") ? [["identity", HIDDEN_TOOLS.identity]] : []),
 					] as const),
 				];
 

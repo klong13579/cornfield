@@ -32,6 +32,7 @@ export function createNativeSinkFactory(): LiveAudioSinkFactory {
 		const playback = new AudioPlayback(REALTIME_SAMPLE_RATE);
 		return {
 			write: samples => playback.write(samples),
+			end: () => playback.end(),
 			stop: () => playback.stop(),
 		};
 	};

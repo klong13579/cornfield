@@ -34,6 +34,8 @@ export interface LiveAudioSource {
 /** Speaker abstraction: production = native AudioPlayback, tests = scripted. */
 export interface LiveAudioSink {
 	write(samples: Float32Array): void;
+	/** Close input and resolve once queued audio has finished playing (drain). */
+	end(): Promise<void>;
 	/** Discard everything queued, immediately. Used by barge-in. */
 	stop(): void;
 }

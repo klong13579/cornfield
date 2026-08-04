@@ -7,7 +7,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import { VoicePanel, type VoicePanelState } from "@oh-my-pi/pi-coding-agent/modes/components/voice-panel";
 import { getThemeByName, type Theme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
-import { type TUI, visibleWidth } from "@oh-my-pi/pi-tui";
+import { setKittyProtocolActive, type TUI, visibleWidth } from "@oh-my-pi/pi-tui";
 
 const WIDTH = 60;
 
@@ -16,7 +16,7 @@ function sleep(ms: number): Promise<void> {
 }
 
 function state(partial: Partial<VoicePanelState> & { phase: VoicePanelState["phase"] }): VoicePanelState {
-	return { inputLevel: 0, outputLevel: 0, ...partial };
+	return { inputLevel: 0, outputLevel: 0, recording: false, ...partial };
 }
 
 describe("VoicePanel", () => {
@@ -68,7 +68,7 @@ describe("VoicePanel", () => {
 			const p = createPanel();
 			p.update(state({ phase: "listening", inputLevel: 0.9 }));
 			const out = render(p);
-			expect(out).toContain("● 聆听中");
+			expect(out).toContain("● 待命");
 			// high RMS must light up the upper glyphs of ▁▂▃▄▅▆▇█
 			expect(out).toMatch(/[▆▇█]/);
 		});
@@ -77,7 +77,7 @@ describe("VoicePanel", () => {
 			const p = createPanel();
 			p.update(state({ phase: "listening", inputLevel: 0 }));
 			const out = render(p);
-			expect(out).toContain("● 聆听中");
+			expect(out).toContain("● 待命");
 			expect(out).toContain("▁");
 			expect(out).not.toMatch(/[▅▆▇█]/);
 		});
@@ -191,6 +191,81 @@ describe("VoicePanel", () => {
 		});
 	});
 
+	describe("PTT key handling", () => {
+		beforeEach(() => {
+			// Enable Kitty protocol so the panel's matchers use the CSI-u path;
+			// otherwise the Rust matcher would take the legacy alt+letter branch
+			// (which is what real terminals do today, and what the test mirrors).
+			setKittyProtocolActive(true);
+		});
+
+		function pttPanel(opts: { exitKeys?: string[]; muteKeys?: string[] } = {}) {
+			const micDown = vi.fn();
+			const micUp = vi.fn();
+			const exit = vi.fn();
+			const toggleMute = vi.fn();
+			const ui = { requestRender: () => renderSpy() } as unknown as TUI;
+			const p = new VoicePanel({
+				tui: ui,
+				theme,
+				plain: false,
+				callbacks: { onMicDown: micDown, onMicUp: micUp, onExit: exit, onToggleMute: toggleMute },
+				exitKeys: (opts.exitKeys ?? ["alt+v"]) as never,
+				muteKeys: (opts.muteKeys ?? ["alt+m"]) as never,
+			});
+			p.update(state({ phase: "listening" }));
+			return { p, micDown, micUp, exit, toggleMute };
+		}
+
+		afterEach(() => {
+			setKittyProtocolActive(false);
+		});
+
+		it("opts into Kitty keyboard release events", () => {
+			const { p } = pttPanel();
+			expect(p.wantsKeyRelease).toBe(true);
+		});
+
+		it("space press fires onMicDown; space release fires onMicUp", () => {
+			const { p, micDown, micUp } = pttPanel();
+			p.handleInput(" ");
+			expect(micDown).toHaveBeenCalledTimes(1);
+			// Kitty CSI-u release: codepoint 32 (space), modifier 1 (none), :3 = release.
+			// Note: `matchesKey` filters out event_type 3, so the panel needs to
+			// fall back to parsing the codepoint directly.
+			p.handleInput("\x1b[32;1:3u");
+			expect(micUp).toHaveBeenCalledTimes(1);
+		});
+
+		it("configured exit key calls onExit", () => {
+			const { p, exit } = pttPanel();
+			// alt+v in CSI-u: codepoint 118 ('v'), modifier 3 (alt).
+			p.handleInput("\x1b[118;3u");
+			expect(exit).toHaveBeenCalledTimes(1);
+		});
+
+		it("configured mute key calls onToggleMute", () => {
+			const { p, toggleMute } = pttPanel();
+			// alt+m in CSI-u: codepoint 109 ('m'), modifier 3 (alt).
+			p.handleInput("\x1b[109;3u");
+			expect(toggleMute).toHaveBeenCalledTimes(1);
+		});
+
+		it("listening phase shows the PTT hint when not recording", () => {
+			const { p } = pttPanel();
+			const out = render(p);
+			expect(out).toContain("待命");
+			expect(out).toContain("按住空格说话");
+		});
+
+		it("listening phase shows the recording badge when recording is true", () => {
+			const { p } = pttPanel();
+			p.update(state({ phase: "listening", recording: true, inputLevel: 0.4 }));
+			const out = render(p);
+			expect(out).toContain("录音中");
+		});
+	});
+
 	describe("animation scheduling", () => {
 		it("interrupted flash falls back to listening within the flash window", async () => {
 			const p = createPanel({ interruptFlashMs: 40 });
@@ -201,7 +276,7 @@ describe("VoicePanel", () => {
 			await sleep(120); // well under the 300ms spec budget
 			const out = render(p);
 			expect(out).not.toContain("已打断");
-			expect(out).toContain("聆听中");
+			expect(out).toContain("待命");
 		});
 
 		it("idle listening produces zero redraws after settle", async () => {
@@ -245,7 +320,7 @@ describe("VoicePanel", () => {
 			p.update(state({ phase: "listening", inputLevel: 0.5 }));
 			const out = render(p);
 			expect(out).not.toContain("\x1b");
-			expect(out).toContain("聆听中");
+			expect(out).toContain("待命");
 
 			p.update(state({ phase: "thinking" }));
 			const thinking = render(p);

@@ -1077,7 +1077,7 @@ export const SETTINGS_SCHEMA = {
 	},
 	"voice.bargeInLevel": {
 		type: "number",
-		default: 0.04,
+		default: 0.05,
 		ui: {
 			tab: "interaction",
 			label: "Barge-in Level",
@@ -1663,6 +1663,15 @@ export const SETTINGS_SCHEMA = {
 		},
 	},
 
+	"identity.enabled": {
+		type: "boolean",
+		default: true,
+		ui: {
+			tab: "tools",
+			label: "Identity",
+			description: "Enable the identity tool for querying and updating user persona",
+		},
+	},
 
 	// Optional tools
 	"notebook.enabled": {
