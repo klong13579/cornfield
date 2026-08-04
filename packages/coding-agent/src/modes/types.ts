@@ -196,6 +196,8 @@ export interface InteractiveModeContext {
 	handleRenameCommand(title: string): Promise<void>;
 	handleMemoryCommand(text: string): Promise<void>;
 	handleSTTToggle(): Promise<void>;
+	handleVoiceToggle(): Promise<void>;
+	handleVoiceMute(): void;
 	executeCompaction(customInstructionsOrOptions?: string | CompactOptions, isAuto?: boolean): Promise<void>;
 	openInBrowser(urlOrPath: string): void;
 	refreshSlashCommandState(cwd?: string): Promise<void>;

@@ -47,6 +47,7 @@ import { HistoryStorage } from "../session/history-storage";
 import type { SessionContext, SessionManager } from "../session/session-manager";
 import { getRecentSessions } from "../session/session-manager";
 import { ListenController, STTController, type SttState } from "../stt";
+import { VoiceModeController } from "./controllers/voice-mode-controller";
 import type { ExitPlanModeDetails, LspStartupServerInfo } from "../tools";
 import { normalizeLocalScheme } from "../tools/path-utils";
 import { formatPhaseDisplayName } from "../tools/todo-write";
@@ -220,6 +221,7 @@ export class InteractiveMode implements InteractiveModeContext {
 	readonly #selectorController: SelectorController;
 	readonly #uiHelpers: UiHelpers;
 	#sttController: STTController | undefined;
+	readonly #voiceModeController = new VoiceModeController(this);
 	listenController: ListenController;
 	#voiceAnimationInterval: NodeJS.Timeout | undefined;
 	#voiceHue = 0;
@@ -1185,6 +1187,7 @@ export class InteractiveMode implements InteractiveModeContext {
 			this.#sttController.dispose();
 			this.#sttController = undefined;
 		}
+		void this.#voiceModeController.dispose();
 		this.#extensionUiController.clearExtensionTerminalInputListeners();
 		this.#extensionUiController.clearHookWidgets();
 		for (const unsubscribe of this.#eventBusUnsubscribers) {
@@ -1511,6 +1514,14 @@ export class InteractiveMode implements InteractiveModeContext {
 
 	handleMemoryCommand(text: string): Promise<void> {
 		return this.#commandController.handleMemoryCommand(text);
+	}
+
+	async handleVoiceToggle(): Promise<void> {
+		await this.#voiceModeController.toggle();
+	}
+
+	handleVoiceMute(): void {
+		this.#voiceModeController.toggleMute();
 	}
 
 	async handleSTTToggle(): Promise<void> {
