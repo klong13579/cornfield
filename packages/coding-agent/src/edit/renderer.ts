@@ -498,7 +498,7 @@ export const editToolRenderer = {
 		}
 
 		const perFileResults = result.details?.perFileResults;
-		const totalFiles = args?.edits ? countEditFiles(args.edits) : 0;
+		const totalFiles = Array.isArray(args?.edits) ? countEditFiles(args.edits) : 0;
 		if (perFileResults && (perFileResults.length > 1 || totalFiles > 1)) {
 			return renderMultiFileResult(perFileResults, totalFiles, options, uiTheme);
 		}
