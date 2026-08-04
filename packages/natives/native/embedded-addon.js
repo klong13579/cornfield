@@ -9,6 +9,7 @@
  * @property {EmbeddedAddonVariant} variant
  * @property {string} filename
  * @property {string} filePath
+ * @property {string} hash
  */
 
 /**

@@ -104,8 +104,33 @@ function resolveLoaderCandidates({ addonFilenames, isCompiledBinary, nativeDir, 
 	return [...new Set(releaseCandidates)];
 }
 
+/**
+ * Decide whether a cached extracted addon can be reused.
+ *
+ * The cache is keyed by CONTENT HASH, not just version: the extracted addon
+ * carries a `.sha256` marker written at extraction time, and the embedded
+ * manifest carries the build-time hash of the embedded file. Same-version
+ * rebuilds with changed addon content used to silently keep serving the
+ * stale extracted addon (2026-08-05: a July-14 addon was served to binaries
+ * rebuilt with a fixed audio capture — mic silently dead in compiled mode).
+ *
+ * @param {{
+ *   exists: boolean;
+ *   marker: string | null | undefined;
+ *   expectedHash: string | null | undefined;
+ * }} input
+ * @returns {"reuse" | "extract"}
+ */
+function decideAddonCacheAction({ exists, marker, expectedHash }) {
+	if (!exists) return "extract";
+	// Legacy manifests carry no hash — keep the old version-keyed behavior.
+	if (!expectedHash) return "reuse";
+	return marker === expectedHash ? "reuse" : "extract";
+}
+
 module.exports = {
 	NATIVE_BINDINGS_SYMBOL,
+	decideAddonCacheAction,
 	detectCompiledBinary,
 	getAddonFilenames,
 	getCachedNativeBindings,
