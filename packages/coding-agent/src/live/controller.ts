@@ -44,6 +44,12 @@ const BARGE_IN_ECHO_RATIO = 3;
 /** Consecutive over-threshold chunks required before accepting a barge-in. */
 const BARGE_IN_SUSTAIN_CHUNKS = 5;
 const CONSULT_TOOL_NAME = "omp_agent_consult";
+/** Design §3.3: wait this long for a consult result before handing the model a filler. */
+const CONSULT_HANDOFF_MS = 3_000;
+const CONSULT_HANDOFF_TEXT =
+	"任务正在后台处理，还需要一点时间。请先告诉用户：正在查，请稍等。结果出来后系统会再次提供给你，届时直接播报结果即可。";
+/** Design §3.6: let the model know its answer was cut short by a barge-in. */
+const INTERRUPTED_NOTE = "（你刚才的语音回答被用户打断了，没说完）";
 /** Silence frames replace mic input while muted/speaking (server_vad clock must keep ticking). */
 const MUTED_CHUNK_MS = 100;
 /** Room reverberation window after playback: keep the mic muted for this long. */
@@ -63,6 +69,7 @@ export class LiveSessionController {
 	readonly #bridge: RealtimeFunctionBridge;
 	readonly #bargeInLevel: number;
 	readonly #bargeInEnabled: boolean;
+	readonly #consultHandoffMs: number;
 	readonly #onConsult: LiveConsultHandler;
 
 	#phase: LivePhase = "connecting";
@@ -94,6 +101,7 @@ export class LiveSessionController {
 		this.#callbacks = options.callbacks;
 		this.#bargeInLevel = options.bargeInLevel ?? DEFAULT_BARGE_IN_LEVEL;
 		this.#bargeInEnabled = options.bargeInEnabled ?? true;
+		this.#consultHandoffMs = options.consultHandoffMs ?? CONSULT_HANDOFF_MS;
 		this.#onConsult = options.onConsult ?? (async () => "（语音任务委托尚未接入，请改用文字输入。）");
 		this.#bridge = new RealtimeFunctionBridge(options.transport);
 		this.#bridge.registerTool({
@@ -132,7 +140,7 @@ export class LiveSessionController {
 		this.#bridge.attach(async call => {
 			const task = JSON.parse(call.arguments) as { task?: string };
 			this.#setPhase("thinking");
-			return this.#onConsult(task.task ?? call.arguments);
+			return this.#consultWithHandoff(task.task ?? call.arguments);
 		});
 
 		await this.#options.transport.connect();
@@ -271,6 +279,12 @@ export class LiveSessionController {
 			threshold: this.#bargeInThreshold(),
 		});
 		this.#options.transport.send({ type: "response.cancel" });
+		// Design §3.6: the model must know its answer was cut short, so the next
+		// turn can continue naturally instead of forgetting mid-sentence.
+		this.#options.transport.send({
+			type: "conversation.item.create",
+			item: { type: "message", role: "user", content: [{ type: "input_text", text: INTERRUPTED_NOTE }] },
+		});
 		this.#sink?.stop();
 		this.#sink = undefined;
 		// Abort the drain tail too — its audio is still physically playing.
@@ -284,6 +298,44 @@ export class LiveSessionController {
 		this.#setPhase("listening");
 	}
 
+
+	/**
+	 * Design §3.3 「thinking 期不断线」: if the consult doesn't produce a result
+	 * within the handoff window, hand the model a filler to say ("正在查，稍等")
+	 * and deliver the real result as a fresh conversation turn when it lands —
+	 * the voice session never stalls in silence behind a slow task.
+	 */
+	async #consultWithHandoff(task: string): Promise<string> {
+		let settled = false;
+		const consult = this.#onConsult(task).then(text => {
+			settled = true;
+			return text;
+		});
+		await Promise.race([consult, Bun.sleep(this.#consultHandoffMs)]);
+		if (settled) return await consult;
+		void consult.then(
+			text => this.#deliverDeferredConsultResult(text),
+			err => this.#deliverDeferredConsultResult(`（后台任务执行失败：${err instanceof Error ? err.message : String(err)}）`),
+		);
+		return CONSULT_HANDOFF_TEXT;
+	}
+
+	#deliverDeferredConsultResult(text: string): void {
+		if (this.#disposed || this.#halted) return;
+		try {
+			this.#options.transport.send({
+				type: "conversation.item.create",
+				item: {
+					type: "message",
+					role: "user",
+					content: [{ type: "input_text", text: `（后台任务已完成，请把下面的结果用口语播报给用户）\n${text}` }],
+				},
+			});
+			this.#options.transport.send({ type: "response.create" });
+		} catch (err) {
+			logger.debug("live deferred consult delivery failed", { error: String(err) });
+		}
+	}
 	#onServerEvent(event: RealtimeServerEvent): void {
 		if (this.#disposed) return;
 		switch (event.type) {

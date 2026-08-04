@@ -56,6 +56,8 @@ export interface LiveSessionOptions {
 	bargeInLevel?: number;
 	/** Allow barge-in at all (interrupting playback by speaking). Default true. */
 	bargeInEnabled?: boolean;
+	/** How long to wait for a consult result before the "please wait" handoff (design §3.3). */
+	consultHandoffMs?: number;
 }
 
 /** Frozen at P0b exit — P0c (consult bridge) and P0d (VoicePanel) build against these. */

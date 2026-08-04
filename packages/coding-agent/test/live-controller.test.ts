@@ -126,6 +126,7 @@ interface Harness {
 interface HarnessOptions {
 	bargeInLevel?: number;
 	bargeInEnabled?: boolean;
+	consultHandoffMs?: number;
 	onConsult?: (task: string) => Promise<string>;
 	/** Server acks session.update with session.updated (default true). */
 	ackConfig?: boolean;
@@ -167,6 +168,7 @@ async function makeHarness(options: HarnessOptions = {}): Promise<Harness> {
 		},
 		bargeInLevel: options.bargeInLevel,
 		bargeInEnabled: options.bargeInEnabled,
+		consultHandoffMs: options.consultHandoffMs,
 		onConsult: options.onConsult,
 	});
 	await controller.start();
@@ -345,6 +347,73 @@ describe("LiveSessionController", () => {
 		const pcm = lastAppendAudio(h.server);
 		expect(pcm).toBeDefined();
 		expect(pcm!.every(b => b === 0)).toBe(true); // uplink stayed silence
+		await h.controller.dispose();
+	});
+
+
+	test("consult fast path: quick result returns directly as function_call_output", async () => {
+		const h = await makeHarness({ onConsult: async () => "结果是 3 条待办", consultHandoffMs: 200 });
+		servers.push(h.server);
+		h.server.send({
+			type: "response.function_call_arguments.done",
+			callId: "c1",
+			name: "omp_agent_consult",
+			arguments: JSON.stringify({ task: "查待办" }),
+		});
+
+		const output = (await waitForMessage(h.server, "conversation.item.create")) as {
+			item: { type: string; output?: string };
+		};
+		expect(output.item.type).toBe("function_call_output");
+		expect(output.item.output).toContain("结果是 3 条待办");
+		await h.controller.dispose();
+	});
+
+	test("consult slow path: handoff filler first, real result delivered as a fresh turn", async () => {
+		const { promise, resolve } = Promise.withResolvers<string>();
+		const h = await makeHarness({ onConsult: () => promise, consultHandoffMs: 50 });
+		servers.push(h.server);
+		h.server.send({
+			type: "response.function_call_arguments.done",
+			callId: "c1",
+			name: "omp_agent_consult",
+			arguments: JSON.stringify({ task: "查天气" }),
+		});
+
+		// The filler goes out fast — the voice session never stalls in silence.
+		const filler = (await waitForMessage(h.server, "conversation.item.create")) as {
+			item: { type: string; output?: string };
+		};
+		expect(filler.item.type).toBe("function_call_output");
+		expect(filler.item.output).toContain("后台处理");
+
+		// When the background consult lands, it becomes a fresh user turn + response.
+		resolve("深圳今天 25 度");
+		await Bun.sleep(80);
+		const items = h.server.received.filter(m => m.type === "conversation.item.create") as Array<{
+			item: Record<string, unknown>;
+		}>;
+		expect(items.length).toBe(2);
+		expect(items[1]!.item.role).toBe("user");
+		expect(JSON.stringify(items[1]!.item.content)).toContain("深圳今天 25 度");
+		expect(h.server.received.filter(m => m.type === "response.create").length).toBeGreaterThanOrEqual(2);
+		await h.controller.dispose();
+	});
+
+	test("barge-in injects the interrupted note so the model can continue naturally", async () => {
+		const h = await makeHarness();
+		servers.push(h.server);
+		h.server.send({ type: "response.audio.delta", delta: moderatePcm });
+		await waitForPhase(h, "speaking");
+
+		for (let i = 0; i < 5; i++) h.source.emit(0.5);
+		await Bun.sleep(20);
+
+		const notes = h.server.received.filter(m => m.type === "conversation.item.create") as Array<{
+			item: Record<string, unknown>;
+		}>;
+		expect(notes.length).toBe(1);
+		expect(JSON.stringify(notes[0]!.item)).toContain("打断了");
 		await h.controller.dispose();
 	});
 
