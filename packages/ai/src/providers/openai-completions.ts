@@ -980,13 +980,23 @@ function buildParams(
 		// Kimi and Qwen 400 with forced tool_choice + thinking enabled. Drop reasoning
 		// for this turn instead of dropping tool_choice; the agent still gets the forced
 		// tool call, just without thinking.
+		//
+		// For backends that default to thinking=enabled (e.g. narwal-plan/qwen3.8-max),
+		// we must explicitly disable thinking — deleting a field that was never set
+		// leaves the server default (thinking=enabled) intact.
 		delete (params as { reasoning_effort?: unknown }).reasoning_effort;
 		delete (params as { reasoning?: unknown }).reasoning;
-		// Qwen uses enable_thinking instead of reasoning_effort:
-		delete (params as { enable_thinking?: unknown }).enable_thinking;
-		delete (params as { chat_template_kwargs?: unknown }).chat_template_kwargs;
+		if (compat.thinkingFormat === "qwen") {
+			Reflect.set(params, "enable_thinking", false);
+		} else if (compat.thinkingFormat === "qwen-chat-template") {
+			Reflect.set(params, "chat_template_kwargs", { enable_thinking: false });
+		} else if (compat.thinkingFormat === "zai") {
+			Reflect.set(params, "thinking", { type: "disabled" });
+		} else {
+			delete (params as { enable_thinking?: unknown }).enable_thinking;
+			delete (params as { chat_template_kwargs?: unknown }).chat_template_kwargs;
+		}
 	}
-
 	// OpenRouter provider routing preferences
 	if (model.baseUrl.includes("openrouter.ai") && compat.openRouterRouting) {
 		Reflect.set(params, "provider", compat.openRouterRouting);
