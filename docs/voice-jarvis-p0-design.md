@@ -277,6 +277,9 @@ VoicePanel 作为 TUI 顶部常驻面板（进入语音模式时挂载，退出�
 2. server_vad 判停**必须在语音流后继续实时发送静音帧**，否则 `speech_stopped` 永不触发（服务端音频时钟靠帧推进）。
 3. 纯 text 模态下工具结果回注后的 follow-up response 无文本增量（verbalization 为空）；text+audio 模态正常。不要用 text-only 联调 consult。
 4. fun-asr 流式转写增量载荷用 `stash`/`text` 字段（非标准 `delta`），final 用标准 `transcript` 字段。
+5. 未见显式 truncation 事件——打断时客户端必须自己清播放缓冲，不能指望服务端通知。
+6. **会话开始后禁止更新 `turn_detection`**（服务端报错 "Cannot update 'turn_detection' after session has started processing audio"）——设计 3.4 的「speaking 期间动态抬 VAD 门限」方案在 qwen 上不可行，已回滚。扬声器回声被 fun-asr 提交为幽灵用户轮的问题，留给 P1 的客户端 VAD / AEC（参考 stt/vad.ts 已有能量 VAD + AudioCapture 实时 RMS）。
+7. barge-in 的 `response.cancel` 可能落在服务端已结束的 response 上（"Conversation has no active response"）——属良性竞态，controller 容忍，不视为错误。
 
 **遗留待验证：**
 1. narwal-plan realtime 连接的并发/时长限制（OpenClaw 的 OpenAI 路线有 8 并发/30min TTL，narwal 侧未知）。
