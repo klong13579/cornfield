@@ -81,6 +81,9 @@ export interface LiveSessionOptions {
 	bargeInEnabled?: boolean;
 	/** How long to wait for a consult result before the "please wait" handoff (design §3.3). */
 	consultHandoffMs?: number;
+	/** Whether a voice confirmation is waiting for the user's answer (P1 gate).
+	 * While pending, 1-2 char transcripts ("确认"/"做"/"好") bypass the noise guard. */
+	isConfirmationPending?: () => boolean;
 }
 
 /** Frozen at P0b exit — P0c (consult bridge) and P0d (VoicePanel) build against these. */

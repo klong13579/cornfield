@@ -159,12 +159,16 @@ export class VoiceGate {
 			const decision = await this.#waitDecision();
 			if (decision !== "unclear") {
 				if (decision === "cancel") {
-					this.#channel.speak("（系统：用户取消了该操作，不会执行。如果用户在等回应，简短告知已取消即可。）");
+					this.#channel.speak(
+						"（系统：用户取消了该操作，不会执行。除非用户主动开口，否则不要说话——安静等待下一句即可。）",
+					);
 				}
 				return decision;
 			}
 		}
-		this.#channel.speak("（系统：没有听清用户的答复，该操作已放弃执行。如果用户在等回应，简短告知即可。）");
+		this.#channel.speak(
+			"（系统：没有听清用户的答复，该操作已放弃执行。除非用户主动开口，否则不要说话——安静等待下一句即可。）",
+		);
 		return "cancel";
 	}
 

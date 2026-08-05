@@ -3,13 +3,14 @@
  * implementing the full ConsultSession interface (no partial mocks).
  */
 import { describe, expect, test } from "bun:test";
-import { LiveConsultBridge, type ConsultEvent, type ConsultSession } from "../src/live/consult-bridge";
+import { type ConsultEvent, type ConsultSession, LiveConsultBridge } from "../src/live/consult-bridge";
 
 class FakeConsultSession implements ConsultSession {
 	sent: string[] = [];
 	listeners: Array<(event: ConsultEvent) => void> = [];
 	toolsSet: string[][] = [];
 	failNextSend: Error | undefined;
+	aborted = 0;
 
 	async sendUserMessage(text: string): Promise<void> {
 		if (this.failNextSend) {
@@ -26,6 +27,11 @@ class FakeConsultSession implements ConsultSession {
 			const i = this.listeners.indexOf(listener);
 			if (i >= 0) this.listeners.splice(i, 1);
 		};
+	}
+
+	abort(): Promise<void> {
+		this.aborted += 1;
+		return Promise.resolve();
 	}
 
 	agent = {
@@ -82,7 +88,10 @@ describe("LiveConsultBridge", () => {
 	test("tool activity lines are forwarded", async () => {
 		const session = new FakeConsultSession();
 		const activity: string[] = [];
-		const bridge = new LiveConsultBridge({ sessionFactory: async () => session, onActivity: line => activity.push(line) });
+		const bridge = new LiveConsultBridge({
+			sessionFactory: async () => session,
+			onActivity: line => activity.push(line),
+		});
 		const pending = bridge.consult("读 TODO.md");
 		await Bun.sleep(10);
 		session.emit({ type: "tool_execution_start", toolName: "read", args: { path: "TODO.md" } });
@@ -139,5 +148,58 @@ describe("LiveConsultBridge", () => {
 		await Bun.sleep(10);
 		session.emit({ type: "agent_end", messages: [{ role: "assistant", content: [] }] });
 		expect(await pending2).toContain("没有产生可播报的结果");
+	});
+
+	// ------------------------------------------------------------- cancel ---
+
+	test("abortCurrent cancels the in-flight consult and suppresses the result", async () => {
+		const session = new FakeConsultSession();
+		const bridge = new LiveConsultBridge({ sessionFactory: async () => session });
+		expect(bridge.busy).toBe(false);
+		expect(bridge.abortCurrent()).toBe(false); // nothing running
+
+		const pending = bridge.consult("查天气");
+		await Bun.sleep(10);
+		expect(bridge.busy).toBe(true);
+
+		expect(bridge.abortCurrent()).toBe(true);
+		expect(session.aborted).toBe(1);
+
+		// The aborted agent_end resolves with the cancellation closure — the
+		// real result (arriving late or not) can never be spoken.
+		session.emit({ type: "agent_end", messages: assistantMessages("迟到的结果") });
+		expect(await pending).toContain("已被用户取消");
+		expect(bridge.busy).toBe(false);
+	});
+
+	test("cancel after timeout delivers the closure to the background path", async () => {
+		const session = new FakeConsultSession();
+		const background: Array<{ task: string; text: string }> = [];
+		const bridge = new LiveConsultBridge({
+			sessionFactory: async () => session,
+			timeoutMs: 30,
+			onBackgroundResult: (task, text) => background.push({ task, text }),
+		});
+
+		const result = await bridge.consult("很慢的查询");
+		expect(result).toContain("超时");
+
+		expect(bridge.abortCurrent()).toBe(true);
+		session.emit({ type: "agent_end", messages: assistantMessages("迟到的结果") });
+		expect(background.length).toBe(1);
+		expect(background[0]!.text).toContain("已被用户取消");
+		expect(background[0]!.text).not.toContain("迟到的结果");
+	});
+
+	test("activity tracks the in-flight consult for status reports", async () => {
+		const session = new FakeConsultSession();
+		const bridge = new LiveConsultBridge({ sessionFactory: async () => session });
+		const pending = bridge.consult("读文件");
+		await Bun.sleep(10);
+		session.emit({ type: "tool_execution_start", toolName: "read", args: { path: "TODO.md" } });
+		expect(bridge.activity).toBe("read: TODO.md");
+		session.emit({ type: "agent_end", messages: assistantMessages("完成") });
+		await pending;
+		expect(bridge.activity).toBeUndefined();
 	});
 });

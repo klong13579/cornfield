@@ -155,6 +155,8 @@ interface HarnessOptions {
 	ackConfig?: boolean;
 	/** Strict narwal mode: reject response.create while a response is in progress. */
 	rejectCreateWhileInProgress?: boolean;
+	/** Gate state probe for the short-transcript noise guard exception. */
+	isConfirmationPending?: () => boolean;
 	/** Hold sink.end() until releaseEnd() — simulates playback still draining. */
 	holdSinkEnd?: boolean;
 }
@@ -204,6 +206,7 @@ async function makeHarness(options: HarnessOptions = {}): Promise<Harness> {
 			onTask: options.onTask,
 			onConfirmDecision: options.onConfirmDecision,
 			onControl: options.onControl,
+			isConfirmationPending: options.isConfirmationPending,
 		});
 	};
 	let controller = buildController();
@@ -884,6 +887,27 @@ describe("LiveSessionController", () => {
 		expect(cancel).toBeGreaterThanOrEqual(0);
 		expect(item).toBeGreaterThan(cancel);
 		expect(create).toBeGreaterThan(item);
+		await h.controller.dispose();
+	});
+
+	test("short transcripts are dropped unless a confirmation is pending", async () => {
+		let confirmPending = false;
+		const h = await makeHarness({ isConfirmationPending: () => confirmPending });
+		servers.push(h.server);
+
+		// 2-char transcript with no confirmation pending: P0 noise guard drops it.
+		h.server.send({ type: "conversation.item.input_audio_transcription.completed", transcript: "确认" });
+		await Bun.sleep(30);
+		expect(h.transcripts.filter(t => t.final && t.role === "user")).toEqual([]);
+
+		// Same transcript while a confirmation is pending: it is a legitimate
+		// answer ("确认"/"做"/"好") and must reach the panel/recorder.
+		confirmPending = true;
+		h.server.send({ type: "conversation.item.input_audio_transcription.completed", transcript: "确认" });
+		await Bun.sleep(30);
+		const finals = h.transcripts.filter(t => t.final && t.role === "user");
+		expect(finals.length).toBe(1);
+		expect(finals[0]!.text).toBe("确认");
 		await h.controller.dispose();
 	});
 });

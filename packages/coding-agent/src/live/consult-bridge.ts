@@ -83,6 +83,7 @@ export interface ConsultEvent {
 export interface ConsultSession {
 	sendUserMessage(text: string): Promise<void>;
 	subscribe(listener: (event: ConsultEvent) => void): () => void;
+	abort(): Promise<void>;
 	agent: {
 		state: { tools: Array<{ name: string }> };
 		setTools(tools: unknown[]): void;
@@ -203,14 +204,43 @@ export class LiveConsultBridge {
 	readonly #options: LiveConsultBridgeOptions;
 	#session: ConsultSession | undefined;
 	#pending: Promise<ConsultSession> | undefined;
+	/** Abort handle for the in-flight consult (undefined when idle). */
+	#activeAbort: (() => Promise<void>) | undefined;
+	#cancelling = false;
+	#activity: string | undefined;
 
 	constructor(options: LiveConsultBridgeOptions = {}) {
 		this.#options = options;
 	}
 
+	/** Whether a consult is currently executing. */
+	get busy(): boolean {
+		return this.#activeAbort !== undefined;
+	}
+
+	/** Last tool activity line of the in-flight consult (status material). */
+	get activity(): string | undefined {
+		return this.#activity;
+	}
+
+	/**
+	 * Cancel the in-flight consult (P1 voice "stop"). The aborted agent_end
+	 * resolves consult() with a cancellation closure instead of the result, so
+	 * the late result can never be spoken after the user cancelled.
+	 */
+	abortCurrent(): boolean {
+		if (!this.#activeAbort) return false;
+		this.#cancelling = true;
+		void this.#activeAbort();
+		return true;
+	}
+
 	async consult(task: string): Promise<string> {
 		const session = await this.#ensureSession();
 		const timeoutMs = this.#options.timeoutMs ?? DEFAULT_CONSULT_TIMEOUT_MS;
+		this.#cancelling = false;
+		this.#activity = undefined;
+		this.#activeAbort = () => session.abort();
 
 		const { promise, resolve } = Promise.withResolvers<string>();
 		let timedOut = false;
@@ -224,12 +254,28 @@ export class LiveConsultBridge {
 
 		const unsubscribe = session.subscribe(event => {
 			if (event.type === "tool_execution_start" && event.toolName) {
-				if (!timedOut) this.#options.onActivity?.(summarizeActivity(event.toolName, event.args));
+				const line = summarizeActivity(event.toolName, event.args);
+				this.#activity = line;
+				if (!timedOut) this.#options.onActivity?.(line);
 				return;
 			}
 			if (event.type === "agent_end") {
 				clearTimeout(timer);
 				unsubscribe();
+				this.#activeAbort = undefined;
+				this.#activity = undefined;
+				const cancelled = this.#cancelling;
+				this.#cancelling = false;
+				if (cancelled) {
+					const closure =
+						"（注意：这个查询已被用户取消，没有结果。如果你还没告诉用户，简短说一句已取消；如果已经说过，不必重复，也不要播报任何结果。）";
+					if (timedOut) {
+						this.#options.onBackgroundResult?.(task, closure);
+						return;
+					}
+					resolve(closure);
+					return;
+				}
 				const text = extractAssistantText(event.messages) || "（任务完成了，但没有产生可播报的结果。）";
 				if (timedOut) {
 					this.#options.onBackgroundResult?.(task, text);
@@ -245,6 +291,9 @@ export class LiveConsultBridge {
 		session.sendUserMessage(task).catch(err => {
 			clearTimeout(timer);
 			unsubscribe();
+			this.#activeAbort = undefined;
+			this.#activity = undefined;
+			this.#cancelling = false;
 			logger.warn("voice consult send failed", { error: String(err) });
 			resolve(`（任务发送失败：${err instanceof Error ? err.message : String(err)}）`);
 		});

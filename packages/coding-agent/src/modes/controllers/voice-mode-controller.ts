@@ -36,6 +36,8 @@ export class VoiceModeController {
 	#taskRouter: LiveTaskRouter | undefined;
 	/** Design §7 dedup: holds finalized user utterances until intent is known. */
 	#turnBuffer: LiveTurnBuffer | undefined;
+	/** Set when a task/confirm intent arrives BEFORE its final transcript (race). */
+	#suppressNextUserTurn = false;
 	#panelState: VoicePanelState = { phase: "connecting", inputLevel: 0, outputLevel: 0 };
 
 	constructor(ctx: InteractiveModeContext) {
@@ -71,6 +73,7 @@ export class VoiceModeController {
 		this.#session = undefined;
 		this.#turnBuffer?.flush();
 		this.#turnBuffer = undefined;
+		this.#suppressNextUserTurn = false;
 		this.#taskRouter?.dispose();
 		this.#taskRouter = undefined;
 		this.#gate?.disarm();
@@ -172,14 +175,31 @@ export class VoiceModeController {
 				if (action === "steer") this.#turnBuffer?.drop();
 				else this.#turnBuffer?.flush();
 				const router = this.#taskRouter;
+				if (action === "status") {
+					if (router?.inFlight) return router.status();
+					if (this.#consultBridge?.busy) {
+						const activity = this.#consultBridge.activity;
+						return activity ? `（正在执行查询：${activity}）` : "（正在查询，还没有中间结果。）";
+					}
+					return "（现在没有在跑的任务或查询。）";
+				}
+				if (action === "cancel") {
+					// Cancel covers BOTH execution paths — a spoken "stop" must kill
+					// whichever is running, consult session included.
+					const consultCancelled = this.#consultBridge?.abortCurrent() ?? false;
+					const wasTask = router?.inFlight ?? false;
+					const taskText = router ? await router.cancel() : "（现在没有在跑的任务或查询。）";
+					if (wasTask && consultCancelled) return "（已停止任务，查询也取消了。）";
+					if (consultCancelled) return "（已取消正在进行的查询。简短告知用户即可。）";
+					return taskText;
+				}
 				if (!router) return "（执行中控制未初始化。）";
-				if (action === "status") return router.status();
-				if (action === "cancel") return router.cancel();
 				if (!text) return "（没有听到具体的补充指示。）";
 				return router.steer(text);
 			},
 			bargeInLevel: settings.get("voice.bargeInLevel"),
 			bargeInEnabled: settings.get("voice.interrupt"),
+			isConfirmationPending: () => this.#gate?.confirmationPending ?? false,
 		});
 		this.#session = session;
 
@@ -227,16 +247,28 @@ export class VoiceModeController {
 		// Finalized user utterance: hold until intent classification resolves.
 		// task utterances are recorded by the main-session injection itself, and
 		// confirmation answers are consumed by the gate (design §7 dedup).
+		if (this.#suppressNextUserTurn) {
+			// The task/confirm intent already arrived before this transcript (race):
+			// the injection is canonical, this record would be a duplicate.
+			this.#suppressNextUserTurn = false;
+			return;
+		}
 		if (this.#gate?.confirmationPending) return;
 		this.#turnBuffer?.hold(transcript.text);
 	}
 
 	/** Design §7: route the held utterance once the realtime model classifies it. */
 	#onLiveIntent(intent: LiveIntent): void {
-		if (intent === "query") this.#turnBuffer?.flush();
+		if (intent === "query") {
+			this.#turnBuffer?.flush();
+			return;
+		}
 		// task: the injected user message is the canonical record; confirm: the
 		// gate consumed the answer — neither may be recorded a second time.
-		else this.#turnBuffer?.drop();
+		if (this.#turnBuffer?.pending) this.#turnBuffer.drop();
+		// The intent function call can beat the final transcript over the wire —
+		// arm the suppress flag so the late-arriving transcript is dropped too.
+		else this.#suppressNextUserTurn = true;
 	}
 
 	/** Design §5: a timed-out consult finished late — speak it if voice is alive, else text. */

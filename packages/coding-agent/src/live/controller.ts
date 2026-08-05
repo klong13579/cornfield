@@ -63,8 +63,14 @@ const CONSULT_HANDOFF_TEXT =
 const INTERRUPTED_NOTE = "（你刚才的语音回答被用户打断了，没说完）";
 /** Silence frames replace mic input while muted/speaking (server_vad clock must keep ticking). */
 const MUTED_CHUNK_MS = 100;
-/** Room reverberation window after playback: keep the mic muted for this long. */
-const ROOM_DECAY_MS = 300;
+/**
+ * Post-playback protection window: the uplink stays gated by the echo floor
+ * for this long after the sink drains. 300ms proved too short — airborne echo
+ * of short replies ("好的，没问题") leaked through as fake user turns and the
+ * model answered itself (P1 acceptance, 2026-08-05). Barge-in still works
+ * inside the window (sustained loud speech breaks through the floor).
+ */
+const ROOM_DECAY_MS = 1_000;
 /** Give up waiting for the session.updated ack and stream anyway (some servers never ack). */
 const CONFIG_ACK_TIMEOUT_MS = 2_000;
 /** Consecutive server errors before the session is declared terminal. */
@@ -510,16 +516,20 @@ export class LiveSessionController {
 			case "conversation.item.input_audio_transcription.delta":
 				this.#callbacks.onTranscript({ role: "user", text: event.delta, final: false });
 				break;
-			case "conversation.item.input_audio_transcription.completed":
+			case "conversation.item.input_audio_transcription.completed": {
 				// Defense in depth: with the silence uplink the server should never
 				// transcribe speaker bleed, but guard the recording path anyway.
 				if (this.#phase === "speaking" || this.#isEcho(event.transcript)) break;
 				// Drop 1-2 char transcripts before they reach the model. Bleed
 				// fragments ("。", "都", "三") and tail-of-reverb ghosts would
 				// otherwise commit as full user turns and feed the self-loop.
-				if (event.transcript.replace(/\s|\p{P}|\p{S}/gu, "").length < 3) break;
+				// Exception: while a confirmation is pending, short answers ("确认",
+				// "做", "好") are legitimate and must reach the panel/recorder.
+				const tooShort = event.transcript.replace(/\s|\p{P}|\p{S}/gu, "").length < 3;
+				if (tooShort && !(this.#options.isConfirmationPending?.() ?? false)) break;
 				this.#callbacks.onTranscript({ role: "user", text: event.transcript, final: true });
 				break;
+			}
 			case "response.audio.delta":
 				this.#onAudioDelta(event.delta);
 				break;
