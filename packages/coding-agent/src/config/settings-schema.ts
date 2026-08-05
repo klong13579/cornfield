@@ -959,12 +959,12 @@ export const SETTINGS_SCHEMA = {
 	},
 	"stt.vadEnabled": {
 		type: "boolean",
-		default: true,
+		default: false,
 		ui: {
 			tab: "interaction",
 			label: "Voice Activity Detection",
 			description:
-				"Auto-stop recording after sustained silence. Prevents runaway long recordings and lets the user speak naturally without watching a timer.",
+				"Auto-stop recording after sustained silence. Off by default: /record keeps recording until you type /record stop. Enable for hands-free auto-stop after the silence duration elapses.",
 		},
 	},
 	"stt.silenceThreshold": {
@@ -989,12 +989,12 @@ export const SETTINGS_SCHEMA = {
 	},
 	"stt.maxRecordingSec": {
 		type: "integer",
-		default: 1800,
+		default: 7200,
 		ui: {
 			tab: "interaction",
 			label: "Max Recording (s)",
 			description:
-				"Safety-net cap on a single recording. Defaults to 30 minutes. VAD normally stops much sooner; this only triggers if the user is in a noisy room or holds the silence indefinitely.",
+				"Safety-net cap on a single recording. Defaults to 2 hours. Only triggers if the user forgets to run /record stop.",
 		},
 	},
 	"stt.chunkSizeMB": {
@@ -1092,6 +1092,27 @@ export const SETTINGS_SCHEMA = {
 			tab: "interaction",
 			label: "Barge-in Level",
 			description: "Mic RMS (0-1) required to interrupt playback; gates out speaker bleed.",
+			submenu: true,
+		},
+	},
+	"voice.vadThreshold": {
+		type: "number",
+		default: 0.5,
+		ui: {
+			tab: "interaction",
+			label: "VAD Threshold",
+			description: "Server-side speech detection threshold (0-1). Raise it if ambient sounds trigger turns.",
+			submenu: true,
+		},
+	},
+	"voice.micNoiseFloor": {
+		type: "number",
+		default: 0.02,
+		ui: {
+			tab: "interaction",
+			label: "Mic Noise Floor",
+			description:
+				"Mic RMS (0-1) below which frames are sent as silence, so ambient rustle never reaches server VAD. 0 disables.",
 			submenu: true,
 		},
 	},

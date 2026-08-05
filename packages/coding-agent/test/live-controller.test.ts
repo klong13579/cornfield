@@ -157,6 +157,8 @@ interface HarnessOptions {
 	rejectCreateWhileInProgress?: boolean;
 	/** Gate state probe for the short-transcript noise guard exception. */
 	isConfirmationPending?: () => boolean;
+	/** Ambient noise gate: sub-floor frames uplink as silence. */
+	micNoiseFloor?: number;
 	/** Hold sink.end() until releaseEnd() — simulates playback still draining. */
 	holdSinkEnd?: boolean;
 }
@@ -207,6 +209,7 @@ async function makeHarness(options: HarnessOptions = {}): Promise<Harness> {
 			onConfirmDecision: options.onConfirmDecision,
 			onControl: options.onControl,
 			isConfirmationPending: options.isConfirmationPending,
+			micNoiseFloor: options.micNoiseFloor,
 		});
 	};
 	let controller = buildController();
@@ -908,6 +911,27 @@ describe("LiveSessionController", () => {
 		const finals = h.transcripts.filter(t => t.final && t.role === "user");
 		expect(finals.length).toBe(1);
 		expect(finals[0]!.text).toBe("确认");
+		await h.controller.dispose();
+	});
+
+	test("mic noise floor uplinks silence for sub-floor frames, real audio above", async () => {
+		const h = await makeHarness({ micNoiseFloor: 0.02 });
+		servers.push(h.server);
+
+		// Ambient rustle below the floor: the server gets silence, so its VAD
+		// can never commit it as a speech candidate (phantom-turn defense).
+		h.source.emit(0.005);
+		await Bun.sleep(20);
+		const silent = lastAppendAudio(h.server);
+		expect(silent).toBeDefined();
+		expect([...silent!].every(b => b === 0)).toBe(true);
+
+		// Real speech above the floor: uplinked verbatim.
+		h.source.emit(0.2);
+		await Bun.sleep(20);
+		const loud = lastAppendAudio(h.server);
+		expect(loud).toBeDefined();
+		expect([...loud!].some(b => b !== 0)).toBe(true);
 		await h.controller.dispose();
 	});
 });

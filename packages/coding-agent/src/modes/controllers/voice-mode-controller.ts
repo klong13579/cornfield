@@ -146,7 +146,7 @@ export class VoiceModeController {
 				input_audio_transcription: { model: "fun-asr" },
 				turn_detection: {
 					type: "server_vad",
-					threshold: 0.4,
+					threshold: settings.get("voice.vadThreshold"),
 					silence_duration_ms: settings.get("voice.vadSilenceMs"),
 				},
 			},
@@ -199,6 +199,7 @@ export class VoiceModeController {
 			},
 			bargeInLevel: settings.get("voice.bargeInLevel"),
 			bargeInEnabled: settings.get("voice.interrupt"),
+			micNoiseFloor: settings.get("voice.micNoiseFloor"),
 			isConfirmationPending: () => this.#gate?.confirmationPending ?? false,
 		});
 		this.#session = session;

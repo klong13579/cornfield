@@ -79,6 +79,8 @@ export interface LiveSessionOptions {
 	bargeInLevel?: number;
 	/** Allow barge-in at all (interrupting playback by speaking). Default true. */
 	bargeInEnabled?: boolean;
+	/** Mic RMS (0-1) below which frames are uplinked as silence (ambient noise gate). 0 disables. */
+	micNoiseFloor?: number;
 	/** How long to wait for a consult result before the "please wait" handoff (design §3.3). */
 	consultHandoffMs?: number;
 	/** Whether a voice confirmation is waiting for the user's answer (P1 gate).

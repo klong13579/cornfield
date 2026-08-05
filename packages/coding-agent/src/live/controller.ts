@@ -86,6 +86,7 @@ export class LiveSessionController {
 	readonly #bridge: RealtimeFunctionBridge;
 	readonly #bargeInLevel: number;
 	readonly #bargeInEnabled: boolean;
+	readonly #micNoiseFloor: number;
 	readonly #consultHandoffMs: number;
 	readonly #onConsult: LiveConsultHandler;
 	readonly #onTask: LiveConsultHandler;
@@ -120,6 +121,7 @@ export class LiveSessionController {
 		this.#callbacks = options.callbacks;
 		this.#bargeInLevel = options.bargeInLevel ?? DEFAULT_BARGE_IN_LEVEL;
 		this.#bargeInEnabled = options.bargeInEnabled ?? true;
+		this.#micNoiseFloor = options.micNoiseFloor ?? 0;
 		this.#consultHandoffMs = options.consultHandoffMs ?? CONSULT_HANDOFF_MS;
 		this.#onConsult = options.onConsult ?? (async () => "（语音任务委托尚未接入，请改用文字输入。）");
 		this.#onTask = options.onTask ?? (async () => "（语音任务派发尚未接入，请改用文字输入。）");
@@ -354,6 +356,12 @@ export class LiveSessionController {
 			return this.#sendSilence();
 		}
 		this.#bargeInArmed = 0;
+		// Ambient noise gate: sub-floor frames become silence so rustle never
+		// reaches server VAD as a speech candidate (phantom-turn defense, P1
+		// acceptance: faint sounds committed as turns → "好的，没问题" replies).
+		if (this.#micNoiseFloor > 0 && this.#inputLevel < this.#micNoiseFloor) {
+			return this.#sendSilence();
+		}
 		this.#sendPcm(float32ToPcm16(samples));
 	}
 
