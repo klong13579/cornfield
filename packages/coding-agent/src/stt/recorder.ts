@@ -1,12 +1,14 @@
 /**
- * Audio recording via native AudioCapture (in-process cpal).
+ * Audio recording via native AudioCapture (in-process miniaudio streaming).
  *
  * Replaces all external-process recorders (ffmpeg/sox/arecord/PowerShell).
+ * The native binding delivers live f32 chunks; we accumulate them and encode
+ * the WAV in JS on stop.
  */
-
 import * as fsp from "node:fs/promises";
 import { AudioCapture } from "@oh-my-pi/pi-natives";
 import { logger } from "@oh-my-pi/pi-utils";
+import { encodeWav, float32ToPcm16, rmsLevel } from "./pcm";
 
 export interface RecordingHandle {
 	stop(): Promise<void>;
@@ -17,7 +19,7 @@ export interface RecordingHandle {
 }
 
 export interface StartRecordingOptions {
-	/** Called at ~20Hz with the current RMS audio level. Optional. */
+	/** Called with the current RMS audio level (0-32767) for every captured chunk. Optional. */
 	onLevel?: (rms: number) => void;
 }
 
@@ -29,7 +31,8 @@ export function detectRecordingTools(): string[] {
 	return ["native"];
 }
 
-const LEVEL_POLL_MS = 50;
+/** Whisper wants 16 kHz; miniaudio resamples internally, so we open the device at the target rate. */
+const STT_SAMPLE_RATE = 16_000;
 
 /**
  * Start recording audio to the given output path via native AudioCapture.
@@ -38,35 +41,47 @@ const LEVEL_POLL_MS = 50;
  * @param options - Optional callbacks for live audio level (used by VAD and the level meter).
  * @returns A handle with `stop()`, `getLevel()`, and `getPeak()` methods.
  */
-export async function startRecording(outputPath: string, options?: StartRecordingOptions): Promise<RecordingHandle> {
-	const capture = new AudioCapture();
-	capture.start(1);
+export function startRecording(outputPath: string, options?: StartRecordingOptions): Promise<RecordingHandle> {
+	const chunks: Float32Array[] = [];
+	let totalSamples = 0;
+	let lastLevel = 0;
+	let peakLevel = 0;
 
-	let pollInterval: ReturnType<typeof setInterval> | null = null;
-	if (options?.onLevel) {
-		const cb = options.onLevel;
-		pollInterval = setInterval(() => {
+	const capture = new AudioCapture(STT_SAMPLE_RATE, (err, samples) => {
+		if (err) {
+			logger.debug("AudioCapture chunk error", { err: String(err) });
+			return;
+		}
+		chunks.push(samples);
+		totalSamples += samples.length;
+		const level = rmsLevel(samples);
+		lastLevel = level;
+		if (level > peakLevel) peakLevel = level;
+		if (options?.onLevel) {
 			try {
-				cb(capture.getLevel());
-			} catch (err) {
-				logger.debug("onLevel callback threw", { err: String(err) });
+				options.onLevel(level);
+			} catch (callbackErr) {
+				logger.debug("onLevel callback threw", { err: String(callbackErr) });
 			}
-		}, LEVEL_POLL_MS);
-	}
+		}
+	});
 
-	return {
+	return Promise.resolve({
 		async stop() {
-			if (pollInterval !== null) {
-				clearInterval(pollInterval);
-				pollInterval = null;
+			capture.stop();
+			const merged = new Float32Array(totalSamples);
+			let offset = 0;
+			for (const chunk of chunks) {
+				merged.set(chunk, offset);
+				offset += chunk.length;
 			}
-			const wavBuffer = capture.stop();
+			const wavBuffer = encodeWav(float32ToPcm16(merged), STT_SAMPLE_RATE);
 			await Bun.write(outputPath, wavBuffer);
 			logger.debug("Audio capture complete", { outputPath, size: wavBuffer.byteLength });
 		},
-		getLevel: () => capture.getLevel(),
-		getPeak: () => capture.getPeak(),
-	};
+		getLevel: () => lastLevel,
+		getPeak: () => peakLevel,
+	});
 }
 
 /**

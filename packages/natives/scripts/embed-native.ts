@@ -1,3 +1,4 @@
+import * as crypto from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 
@@ -17,6 +18,7 @@ const stubContent = `
  * @property {EmbeddedAddonVariant} variant
  * @property {string} filename
  * @property {string} filePath
+ * @property {string} hash
  */
 
 /**
@@ -73,6 +75,13 @@ if (available.length === 0) {
 }
 const packageJson = (await Bun.file(packageJsonPath).json()) as { version: string };
 
+const hashes = await Promise.all(
+	available.map(async candidate => {
+		const buffer = await fs.readFile(path.join(nativeDir, candidate.filename));
+		return crypto.createHash("sha256").update(buffer).digest("hex");
+	}),
+);
+
 const imports = available
 	.map(
 		(candidate, index) =>
@@ -83,7 +92,7 @@ const imports = available
 const files = available
 	.map(
 		(candidate, index) =>
-			`\t\t{ variant: ${JSON.stringify(candidate.variant)}, filename: ${JSON.stringify(candidate.filename)}, filePath: addonPath${index} },`,
+			`\t\t{ variant: ${JSON.stringify(candidate.variant)}, filename: ${JSON.stringify(candidate.filename)}, filePath: addonPath${index}, hash: ${JSON.stringify(hashes[index])} },`,
 	)
 	.join("\n");
 
@@ -98,6 +107,7 @@ const content = `
  * @property {EmbeddedAddonVariant} variant
  * @property {string} filename
  * @property {string} filePath
+ * @property {string} hash
  */
 
 /**

@@ -107,6 +107,12 @@ interface NumberDef {
 	ui?: UiMetadata;
 }
 
+interface IntegerDef {
+	type: "integer";
+	default: number;
+	ui?: UiMetadata;
+}
+
 interface EnumDef<T extends readonly string[]> {
 	type: "enum";
 	values: T;
@@ -130,6 +136,7 @@ type SettingDef =
 	| BooleanDef
 	| StringDef
 	| NumberDef
+	| IntegerDef
 	| EnumDef<readonly string[]>
 	| ArrayDef<unknown>
 	| RecordDef<unknown>;
@@ -1020,6 +1027,65 @@ export const SETTINGS_SCHEMA = {
 		},
 	},
 
+	"voice.enabled": {
+		type: "boolean",
+		default: false,
+		ui: {
+			tab: "interaction",
+			label: "Live Voice (Jarvis)",
+			description: "Enable real-time duplex voice conversation mode (Ctrl+V in the TUI).",
+		},
+	},
+	"voice.model": {
+		type: "string",
+		default: "qwen-audio-3.0-realtime-flash",
+		ui: {
+			tab: "interaction",
+			label: "Voice Realtime Model",
+			description: "Realtime speech model served over the OpenAI-compatible realtime WebSocket endpoint.",
+			submenu: true,
+		},
+	},
+	"voice.voice": {
+		type: "string",
+		default: "longanqian",
+		ui: {
+			tab: "interaction",
+			label: "Voice Speaker",
+			description: "Speaker voice id for the realtime model.",
+			submenu: true,
+		},
+	},
+	"voice.interrupt": {
+		type: "boolean",
+		default: true,
+		ui: {
+			tab: "interaction",
+			label: "Barge-in",
+			description: "Allow interrupting the assistant by speaking while it talks.",
+		},
+	},
+	"voice.vadSilenceMs": {
+		type: "integer",
+		default: 800,
+		ui: {
+			tab: "interaction",
+			label: "VAD Silence (ms)",
+			description: "Server-side VAD silence window before a user turn is committed.",
+			submenu: true,
+		},
+	},
+	"voice.bargeInLevel": {
+		type: "number",
+		default: 0.05,
+		ui: {
+			tab: "interaction",
+			label: "Barge-in Level",
+			description: "Mic RMS (0-1) required to interrupt playback; gates out speaker bleed.",
+			submenu: true,
+		},
+	},
+
 	// ────────────────────────────────────────────────────────────────────────
 	// Context
 	// ────────────────────────────────────────────────────────────────────────
@@ -1594,6 +1660,16 @@ export const SETTINGS_SCHEMA = {
 			tab: "tools",
 			label: "IRC",
 			description: "Enable agent-to-agent IRC messaging via the irc tool",
+		},
+	},
+
+	"identity.enabled": {
+		type: "boolean",
+		default: true,
+		ui: {
+			tab: "tools",
+			label: "Identity",
+			description: "Enable the identity tool for querying and updating user persona",
 		},
 	},
 

@@ -46,6 +46,8 @@ interface AppKeybindings {
 	"app.tree.foldOrUp": true;
 	"app.tree.unfoldOrDown": true;
 	"app.plan.toggle": true;
+	"app.voice.toggle": true;
+	"app.voice.mute": true;
 	"app.history.search": true;
 	"app.stt.toggle": true;
 }
@@ -188,6 +190,14 @@ export const KEYBINDINGS = {
 	"app.stt.toggle": {
 		defaultKeys: "alt+h",
 		description: "Toggle speech-to-text",
+	},
+	"app.voice.toggle": {
+		defaultKeys: "alt+v",
+		description: "Toggle live voice mode (Jarvis)",
+	},
+	"app.voice.mute": {
+		defaultKeys: "alt+m",
+		description: "Mute/unmute microphone in live voice mode",
 	},
 } as const satisfies KeybindingDefinitions;
 

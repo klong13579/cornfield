@@ -17,6 +17,7 @@ function getNativesDir() {
 }
 const packageJson = require("../package.json");
 const {
+	decideAddonCacheAction,
 	detectCompiledBinary,
 	getAddonFilenames,
 	getCachedNativeBindings,
@@ -149,6 +150,7 @@ function maybeExtractEmbeddedAddon(errors) {
 	const selectedEmbeddedFile = selectEmbeddedAddonFile();
 	if (!selectedEmbeddedFile) return null;
 	const targetPath = path.join(versionedDir, selectedEmbeddedFile.filename);
+	const markerPath = `${targetPath}.sha256`;
 
 	try {
 		fs.mkdirSync(versionedDir, { recursive: true });
@@ -158,13 +160,29 @@ function maybeExtractEmbeddedAddon(errors) {
 		return null;
 	}
 
-	if (fs.existsSync(targetPath)) {
+	// Content-hash keyed cache: a same-version rebuild embedding a changed
+	// addon must replace the stale extraction, not silently reuse it.
+	let marker = null;
+	try {
+		marker = fs.readFileSync(markerPath, "utf8").trim();
+	} catch {
+		marker = null;
+	}
+	const action = decideAddonCacheAction({
+		exists: fs.existsSync(targetPath),
+		marker,
+		expectedHash: selectedEmbeddedFile.hash || null,
+	});
+	if (action === "reuse") {
 		return targetPath;
 	}
 
 	try {
 		const buffer = fs.readFileSync(selectedEmbeddedFile.filePath);
 		fs.writeFileSync(targetPath, buffer);
+		if (selectedEmbeddedFile.hash) {
+			fs.writeFileSync(markerPath, selectedEmbeddedFile.hash);
+		}
 		return targetPath;
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
