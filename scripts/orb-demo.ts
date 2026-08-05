@@ -1,16 +1,20 @@
 /**
- * Voice Stage orb — motion design preview.
+ * Voice Stage orb — motion design preview (dual pipeline).
  *
  * Standalone demo of the P0.5 "breathing orb" concept: a large central
  * graphic whose shape, color and motion track the voice state machine
  * (connecting → listening → thinking → speaking → barge-in → idle).
  *
- * Run live:        bun orb-demo.tmp.ts            (full screen, loops)
- * Static preview:  bun orb-demo.tmp.ts --frames   (one frame per state)
+ * Run live:        bun scripts/orb-demo.ts            (auto-detects pipeline)
+ * Static preview:  bun scripts/orb-demo.ts --frames   (one ANSI frame per state)
+ * Force pipeline:  --kitty | --ansi
  *
- * Rendering: half-block (▀) truecolor for the orb body — each character
- * cell is 2 vertical pixels, so the pixel grid is roughly square. Pure
- * ANSI, no deps, works in any truecolor terminal.
+ * Pipelines:
+ *  1. kitty graphics protocol (ghostty/kitty/wezterm): the orb is rasterized
+ *     into a real RGBA image — true anti-aliasing, bloom, particle trails,
+ *     HUD tick ring and arc gauges. Transmitted as raw RGBA (f=32) with
+ *     animation updates (a=f); tmux sessions wrap it in passthrough DCS.
+ *  2. ANSI half-block fallback for every other truecolor terminal.
  */
 
 type RGB = [number, number, number];
@@ -356,13 +360,294 @@ function renderFrame(s: AnimState, cols: number, rows: number): string {
 	return out;
 }
 
+// ── kitty graphics protocol pipeline (ghostty/kitty/wezterm) ───────────────
+//
+// Real image rendering: RGBA raster + raw-pixel transmission (f=32) with
+// in-place animation updates (a=f). The ANSI path above is the fallback.
+
+const IMG_ID = 42;
+const IW = 256;
+const IH = 256;
+const IMG_COLS = 36; // cell footprint the image is scaled to
+const IMG_ROWS = 19;
+
+const pixD = new Float32Array(IW * IH);
+const pixT = new Float32Array(IW * IH);
+for (let y = 0; y < IH; y++) {
+	for (let x = 0; x < IW; x++) {
+		const dx = x - IW / 2;
+		const dy = y - IH / 2;
+		pixD[y * IW + x] = Math.hypot(dx, dy);
+		pixT[y * IW + x] = Math.atan2(dy, dx);
+	}
+}
+
+const WOB_BUCKETS = 512;
+const wobTable = new Float32Array(WOB_BUCKETS);
+const imgBuf = new Uint8ClampedArray(IW * IH * 4);
+const trails: Array<Array<[number, number]>> = [[], [], [], [], []];
+
+function kittyGraphicsSupported(): boolean {
+	if (Bun.argv.includes("--ansi")) return false;
+	if (Bun.argv.includes("--kitty")) return true;
+	const prog = (process.env.TERM_PROGRAM ?? "").toLowerCase();
+	if (prog === "ghostty" || prog === "kitty" || prog === "wezterm") return true;
+	return (process.env.TERM ?? "").includes("kitty");
+}
+
+function blendPx(pidx: number, r: number, g: number, b: number, a: number): void {
+	if (a <= 0) return;
+	if (a > 1) a = 1;
+	const ia = 1 - a;
+	imgBuf[pidx] = imgBuf[pidx] * ia + r * a;
+	imgBuf[pidx + 1] = imgBuf[pidx + 1] * ia + g * a;
+	imgBuf[pidx + 2] = imgBuf[pidx + 2] * ia + b * a;
+	const na = a * 255;
+	if (na > imgBuf[pidx + 3]) imgBuf[pidx + 3] = na;
+}
+
+function renderKittyImage(s: AnimState): void {
+	imgBuf.fill(0);
+	const [hue, sat, lit] = PHASE_HUE[s.phase];
+	const level = Math.max(s.envIn, s.envOut);
+	const core = hslToRgb(hue, sat * 0.7, Math.min(0.92, lit + 0.26));
+	const midc = hslToRgb(hue, sat, lit);
+	const edgec = hslToRgb(hue, sat, Math.max(0.18, lit - 0.28));
+	const gaugeIn = hslToRgb(187, 0.9, 0.62);
+	const gaugeOut = hslToRgb(276, 0.85, 0.66);
+
+	// radius choreography (image pixels)
+	let radius = IW * 0.3;
+	let scale = 1 + 0.02 * Math.sin(s.t * 0.8) + level * 0.16;
+	if (s.phase === "connecting") scale *= easeOutCubic(s.bloom);
+	if (s.phase === "thinking") scale *= 0.92;
+	if (s.phase === "idle") scale *= 1 - 0.55 * easeOutCubic(s.shrink);
+	if (s.phase === "bargein") scale *= 1 - 0.25 * s.flash;
+	radius *= scale;
+
+	const wobbleAmp = 0.012 + level * 0.055 + (s.phase === "speaking" ? 0.02 : 0);
+	for (let b = 0; b < WOB_BUCKETS; b++) {
+		const theta = (b / WOB_BUCKETS) * Math.PI * 2;
+		wobTable[b] =
+			wobbleAmp *
+			(0.5 * Math.sin(3 * theta + s.t * 1.5) +
+				0.3 * Math.sin(5 * theta - s.t * 2.1) +
+				0.2 * Math.sin(7 * theta + s.t * 2.8));
+	}
+
+	const glowW = 10 + level * 22 + (s.phase === "speaking" ? 8 : 0);
+	const cx = IW / 2;
+	const cy = IH / 2;
+	const tickR = IW * 0.465;
+	const gaugeR = IW * 0.415;
+	const scanActive = s.phaseT < 0.45;
+	const scanY = scanActive ? (s.phaseT / 0.45) * IH : -10;
+
+	for (let y = 0; y < IH; y++) {
+		const rowOff = y * IW;
+		for (let x = 0; x < IW; x++) {
+			const idx = rowOff + x;
+			const d = pixD[idx];
+			const theta = pixT[idx];
+			const pidx = idx * 4;
+
+			const bucket = (((theta + Math.PI) / (Math.PI * 2)) * WOB_BUCKETS) | 0;
+			const R = radius * (1 + wobTable[bucket]);
+
+			// orb body with anti-aliased edge + hot center
+			if (d <= R + 1.5) {
+				const k = Math.min(1, d / R);
+				let c: RGB = k < 0.5 ? mix(core, midc, k * 2) : mix(midc, edgec, (k - 0.5) * 2);
+				c = mix(c, [255, 255, 255], Math.pow(1 - k, 2.5) * 0.5);
+				if (s.flash > 0) c = mix(c, [255, 255, 255], s.flash * 0.6);
+				const a = d <= R ? 1 : Math.max(0, (R + 1.5 - d) / 1.5);
+				blendPx(pidx, c[0], c[1], c[2], a);
+			} else if (d <= R + glowW) {
+				// bloom
+				const gk = (d - R) / glowW;
+				const a = Math.pow(1 - gk, 2.4) * (0.3 + level * 0.5);
+				blendPx(pidx, midc[0], midc[1], midc[2], a);
+			}
+
+			// listening ripples
+			if (s.phase === "listening" || s.phase === "bargein") {
+				for (const rr of s.ripples) {
+					const band = Math.abs(d - (R + 8 + rr * 3.2));
+					if (band < 2.2) {
+						blendPx(pidx, midc[0], midc[1], midc[2], (1 - band / 2.2) * Math.max(0, 1 - rr / 26) * 0.5);
+					}
+				}
+			}
+
+			// speaking sonic ring
+			if (s.phase === "speaking") {
+				const band = Math.abs(d - (R + 12 + s.envOut * 10));
+				if (band < 2.5) {
+					blendPx(pidx, midc[0], midc[1], midc[2], (1 - band / 2.5) * (0.35 + s.envOut * 0.5));
+				}
+			}
+
+			// HUD: rotating tick bezel + arc gauges
+			if (s.phase !== "idle" && s.phase !== "connecting") {
+				if (Math.abs(d - tickR) < 2) {
+					const ang = theta + s.t * 0.15;
+					const tickPhase = ((((ang * 24) / Math.PI) % 1) + 1) % 1;
+					if (tickPhase < 0.3) {
+						blendPx(pidx, midc[0], midc[1], midc[2], 0.22 + level * 0.35);
+					}
+				}
+				if (Math.abs(d - gaugeR) < 2.5) {
+					const ath = Math.abs(theta);
+					// input gauge (left arc, cyan): fills outward from horizontal
+					if (ath > Math.PI * 0.55 && (Math.PI - ath) / (Math.PI * 0.45) < s.envIn) {
+						blendPx(pidx, gaugeIn[0], gaugeIn[1], gaugeIn[2], 0.65);
+					}
+					// output gauge (right arc, violet)
+					if (ath < Math.PI * 0.45 && (Math.PI * 0.45 - ath) / (Math.PI * 0.45) < s.envOut) {
+						blendPx(pidx, gaugeOut[0], gaugeOut[1], gaugeOut[2], 0.65);
+					}
+				}
+			}
+
+			// state-entry scanline
+			if (scanActive && Math.abs(y - scanY) < 2.5) {
+				blendPx(pidx, midc[0], midc[1], midc[2], 0.16 * (1 - s.phaseT / 0.45));
+			}
+		}
+	}
+
+	// thinking particles with decaying trails
+	if (s.phase === "thinking") {
+		for (let i = 0; i < s.particles.length; i++) {
+			const ang = s.particles[i];
+			const pr = radius * 1.3 + Math.sin(s.t * 2 + i) * radius * 0.1;
+			trails[i].push([cx + Math.cos(ang) * pr, cy + Math.sin(ang) * pr]);
+			if (trails[i].length > 22) trails[i].shift();
+		}
+	} else {
+		for (const tr of trails) tr.length = 0;
+	}
+	for (const tr of trails) {
+		const n = tr.length;
+		for (let j = 0; j < n; j++) {
+			const [px, py] = tr[j];
+			const age = (n - 1 - j) / 22;
+			const dotR = 3.5 * (1 - age * 0.75);
+			const alpha = (1 - age) * 0.8;
+			const x0 = Math.max(0, Math.floor(px - dotR));
+			const x1 = Math.min(IW - 1, Math.ceil(px + dotR));
+			const y0 = Math.max(0, Math.floor(py - dotR));
+			const y1 = Math.min(IH - 1, Math.ceil(py + dotR));
+			for (let yy = y0; yy <= y1; yy++) {
+				for (let xx = x0; xx <= x1; xx++) {
+					const dd = Math.hypot(xx - px, yy - py);
+					if (dd < dotR) blendPx((yy * IW + xx) * 4, 255, 220, 140, alpha * (1 - dd / dotR));
+				}
+			}
+		}
+	}
+
+	// barge-in glitch: shifted horizontal bands
+	if (s.phase === "bargein" && s.flash > 0.25) {
+		for (let b = 0; b < 4; b++) {
+			const y0 = Math.floor(Math.random() * IH);
+			const h = 3 + Math.floor(Math.random() * 9);
+			const dx = Math.floor((Math.random() - 0.5) * 36);
+			if (dx === 0) continue;
+			for (let y = y0; y < Math.min(IH, y0 + h); y++) {
+				const row = imgBuf.subarray(y * IW * 4, (y + 1) * IW * 4);
+				const copy = new Uint8ClampedArray(row);
+				for (let x = 0; x < IW; x++) {
+					const src = (((x - dx) % IW) + IW) % IW;
+					row[x * 4] = copy[src * 4];
+					row[x * 4 + 1] = copy[src * 4 + 1];
+					row[x * 4 + 2] = copy[src * 4 + 2];
+					row[x * 4 + 3] = copy[src * 4 + 3];
+				}
+			}
+		}
+	}
+}
+
+function emitKittyImage(first: boolean): string {
+	const b64 = Buffer.from(imgBuf).toString("base64");
+	const CHUNK = 4096;
+	let seq = "";
+	for (let i = 0; i < b64.length; i += CHUNK) {
+		const chunk = b64.slice(i, i + CHUNK);
+		const more = i + CHUNK < b64.length ? 1 : 0;
+		let ctrl: string;
+		if (first) {
+			ctrl = i === 0 ? `a=T,f=32,s=${IW},h=${IH},i=${IMG_ID},c=${IMG_COLS},r=${IMG_ROWS},q=2,m=${more}` : `a=T,i=${IMG_ID},m=${more}`;
+		} else {
+			ctrl = i === 0 ? `a=f,i=${IMG_ID},q=2,m=${more}` : `a=f,i=${IMG_ID},m=${more}`;
+		}
+		seq += `\x1bG${ctrl};${chunk}\x1b\\`;
+	}
+	// tmux passthrough: wrap in DCS tmux; with doubled escapes
+	if (process.env.TMUX) seq = `\x1bPtmux;${seq.replace(/\x1b/g, "\x1b\x1b")}\x1b\\`;
+	return seq;
+}
+
+let kittyFirst = true;
+
+function renderKittyFrame(s: AnimState, cols: number, rows: number, imgTop: number, imgLeft: number): string {
+	renderKittyImage(s);
+	const [hue, sat] = PHASE_HUE[s.phase];
+	const bright = hslToRgb(hue, sat, 0.8);
+	const blank = " ".repeat(cols);
+	let out = "\x1b[H\x1b[0m";
+	for (let r = 0; r < rows; r++) out += blank + (r < rows - 1 ? "\r\n" : "");
+
+	const status = `● mic   ◉ aec   qwen-realtime   ${PHASE_LABEL[s.phase]}`;
+	out += `\x1b[1;${Math.floor((cols - status.length) / 2) + 1}H\x1b[38;2;90;100;125m${status}`;
+
+	const waveRow = rows - 4;
+	const waveW = Math.min(cols - 8, 64);
+	const wStart = Math.floor((cols - waveW) / 2);
+	const blocks = "▁▂▃▄▅▆▇█";
+	out += `\x1b[${waveRow + 1};${wStart + 1}H`;
+	const hist = s.levelHist;
+	for (let i = 0; i < waveW; i++) {
+		const v = hist[hist.length - waveW + i] ?? 0;
+		const wc = mix(BG, bright, 0.3 + v * 0.7);
+		out += `\x1b[38;2;${wc[0]};${wc[1]};${wc[2]}m${blocks[Math.min(7, Math.floor(v * 8))]}`;
+	}
+
+	const transcript: Record<Phase, [string, string]> = {
+		connecting: ["", ""],
+		listening: ["你: 帮我看下 TODO 里还有几条待办", ""],
+		thinking: ["你: 帮我看下 TODO 里还有几条待办", "⣿ read: TODO.md"],
+		speaking: ["你: 帮我看下 TODO 里还有几条待办", "助手: 还有三条，分别是…"],
+		bargein: ["你: 等等，先看另一个——", ""],
+		idle: ["", ""],
+	};
+	const [t1, t2] = transcript[s.phase];
+	if (t1) out += `\x1b[${rows - 2};${Math.floor((cols - t1.length) / 2) + 1}H\x1b[38;2;150;160;185m${t1}`;
+	if (t2) out += `\x1b[${rows - 1};${Math.floor((cols - t2.length) / 2) + 1}H\x1b[38;2;${bright[0]};${bright[1]};${bright[2]}m${t2}`;
+
+	if (kittyFirst) out += `\x1b[${imgTop + 1};${imgLeft + 1}H`;
+	out += emitKittyImage(kittyFirst);
+	kittyFirst = false;
+	return out;
+}
+
+
 // ── drivers ─────────────────────────────────────────────────────────────────
 
 async function live(): Promise<void> {
-	const cols = Math.max(56, Math.min(110, (process.stdout.columns ?? 80) - 2));
-	const rows = Math.max(20, Math.min(34, (process.stdout.rows ?? 26) - 2));
+	const termCols = process.stdout.columns ?? 80;
+	const termRows = process.stdout.rows ?? 26;
+	const useKitty = kittyGraphicsSupported() && termCols >= IMG_COLS + 10 && termRows >= IMG_ROWS + 8;
 	process.stdout.write("\x1b[?1049h\x1b[?25l"); // alt screen, hide cursor
-	const restore = () => process.stdout.write("\x1b[?25l\x1b[0m\x1b[?1049l\x1b[?25h");
+	const restore = () => {
+		if (useKitty) {
+			let del = `\x1bGa=d,i=${IMG_ID}\x1b\\`;
+			if (process.env.TMUX) del = `\x1bPtmux;${del.replace(/\x1b/g, "\x1b\x1b")}\x1b\\`;
+			process.stdout.write(del);
+		}
+		process.stdout.write("\x1b[0m\x1b[?1049l\x1b[?25h");
+	};
 	process.on("SIGINT", () => {
 		restore();
 		process.exit(0);
@@ -371,6 +656,17 @@ async function live(): Promise<void> {
 	const s = newState();
 	const FPS = 20;
 	const dt = 1 / FPS;
+	if (useKitty) {
+		const imgLeft = Math.floor((termCols - IMG_COLS) / 2);
+		const imgTop = 2;
+		for (;;) {
+			advance(s, dt);
+			process.stdout.write(renderKittyFrame(s, termCols, termRows, imgTop, imgLeft));
+			await Bun.sleep(dt * 1000);
+		}
+	}
+	const cols = Math.max(56, Math.min(110, termCols - 2));
+	const rows = Math.max(20, Math.min(34, termRows - 2));
 	for (;;) {
 		advance(s, dt);
 		process.stdout.write(renderFrame(s, cols, rows));
