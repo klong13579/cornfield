@@ -121,7 +121,7 @@ realtime session 只注册**一个** function：
 - 回声/自触发：server_vad 模式下扬声器外放会被麦克风拾取误触发打断。P0 两招：
   1. speaking 期间抬 server_vad threshold（`session.update` 动态调，0.5→0.75）；
   2. 本地电平仲裁复用 controller 现有的 `OUTPUT_ECHO_RATIO` 逻辑，speaking 中输入电平未显著超过输出包络则不判打断。
-  - 全量 AEC（回声消除）P1 再评估（CoreAudio voice processing）。
+  - 全量 AEC（回声消除）~~P1 再评估~~ **已交付**：AVAudioEngine voice processing（commit d6b6b761c，`voice.aec` 开关）。
 
 ### 3.5 上下文与会话统一
 
