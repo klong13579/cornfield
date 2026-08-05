@@ -29,6 +29,39 @@ export declare class AudioPlayback {
 }
 
 /**
+ * Duplex voice session over one AVAudioEngine with voice processing:
+ * echo-cancelled mic capture in, assistant playback out (and used as the
+ * AEC reference).
+ */
+export declare class AudioVoiceSession {
+  /**
+   * Build the engine: voice-processed input node + player node feeding
+   * the main mixer. Fails when voice processing is unavailable —
+   * callers fall back to raw capture.
+   */
+  constructor(sampleRate: number)
+  /**
+   * Start the engine and deliver AEC'd mono mic chunks (resampled to
+   * the session rate) to the callback.
+   */
+  startCapture(onAudio: (error: Error | null, samples: Float32Array) => void): void
+  /**
+   * Queue mono f32 playback tagged with a generation (one per response
+   * sink) so `end_playback` can wait per-response.
+   */
+  writePlayback(samples: Float32Array, generation: number): void
+  /** Discard all queued and in-flight playback (barge-in / new response). */
+  clearPlayback(): void
+  /**
+   * Resolve once every chunk up to `generation` has reached the speaker
+   * (or was discarded by `clear_playback`).
+   */
+  endPlayback(generation: number): Promise<void>
+  /** Stop the engine. Idempotent. */
+  stop(): void
+}
+
+/**
  * Long-lived macOS appearance observer.
  *
  * Subscribes to `AppleInterfaceThemeChangedNotification` via

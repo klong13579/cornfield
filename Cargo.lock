@@ -290,6 +290,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "block2"
+version = "0.6.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cdeb9d870516001442e364c5220d3574d2da8dc765554b4a617230d33fa58ef5"
+dependencies = [
+ "objc2",
+]
+
+[[package]]
 name = "bon"
 version = "3.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2268,6 +2277,7 @@ dependencies = [
  "anyhow",
  "arboard",
  "ast-grep-core",
+ "block2",
  "brush-builtins",
  "brush-core",
  "brush-parser",
@@ -2290,6 +2300,7 @@ dependencies = [
  "napi",
  "napi-build",
  "napi-derive",
+ "objc2",
  "os_pipe",
  "parking_lot",
  "phf 0.13.1",
