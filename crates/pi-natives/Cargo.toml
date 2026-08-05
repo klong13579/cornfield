@@ -141,6 +141,8 @@ libc = "0.2"
 # whose bindings are correct for those platforms.
 [target.'cfg(target_os = "macos")'.dependencies]
 maudio = { version = "0.1.6", features = ["generate-bindings"] }
+objc2 = "0.6"
+block2 = "0.6"
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.55"

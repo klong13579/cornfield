@@ -1,10 +1,17 @@
-//! macOS VoiceProcessingIO capture+playback session (hardware AEC).
+//! macOS hardware AEC voice session via AVAudioEngine voice processing.
 //!
-//! One CoreAudio VPIO unit owns both directions: the input bus delivers
-//! echo-cancelled microphone audio — the unit cancels whatever its own output
-//! bus plays — and the output bus renders the assistant's playback, which is
-//! exactly the reference the AEC needs. Raw miniaudio capture/playback cannot
-//! do this: VPIO only cancels audio played through the same unit.
+//! One `AVAudioEngine` owns both directions: the input node runs with
+//! `voiceProcessingEnabled` (Apple's system AEC + AGC + noise suppression —
+//! the same path FaceTime/Zoom use), and the assistant's playback is
+//! scheduled through the SAME engine's player node, which is exactly the
+//! reference the voice processing cancels from the mic. Raw miniaudio
+//! capture/playback cannot do this: the AEC only sees audio played through
+//! its own engine.
+//!
+//! The legacy CoreAudio C API (VoiceProcessingIO AudioUnit) was attempted
+//! first and rejected on macOS 14.1 (`kAudioOutputUnitProperty_SetInputCallback`
+//! fails with -10879 on every scope/element combination) — AVAudioEngine is
+//! the supported modern route.
 //!
 //! Non-macOS platforms expose a stub whose constructor always fails; callers
 //! fall back to the miniaudio path.
@@ -36,502 +43,273 @@ pub use stub::AudioVoiceSession;
 #[cfg(target_os = "macos")]
 mod macos {
 	use std::{
-		ffi::c_void,
-		mem,
+		ffi::{CStr, c_char},
 		sync::{
 			Arc,
-			atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering},
+			atomic::{AtomicBool, AtomicU32, Ordering},
 		},
 	};
 
+	use block2::RcBlock;
 	use napi::{
 		bindgen_prelude::{Float32Array, Result},
 		threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode, UnknownReturnValue},
 	};
 	use napi_derive::napi;
+	use objc2::{class, msg_send, runtime::AnyObject};
 	use parking_lot::Mutex;
 	use tokio::sync::Notify;
 
-	type OsStatus = i32;
-	type Ostype = u32;
-	type AudioUnit = *mut c_void;
-	type AudioComponent = *mut c_void;
-
-	const K_AUDIO_UNIT_TYPE_OUTPUT: Ostype = 0x61756F75; // 'auou'
-	const K_AUDIO_UNIT_SUBTYPE_VOICE_PROCESSING_IO: Ostype = 0x7670696F; // 'vpio'
-	const K_AUDIO_UNIT_MANUFACTURER_APPLE: Ostype = 0x6170706C; // 'appl'
-	const K_AUDIO_FORMAT_LINEAR_PCM: Ostype = 0x6C70636D; // 'lpcm'
-	const K_AUDIO_FORMAT_FLAGS_NATIVE_FLOAT_PACKED: u32 = 0x1 | 0x8; // float | packed
-
-	const K_AUDIO_UNIT_PROPERTY_STREAM_FORMAT: u32 = 8;
-	const K_AUDIO_UNIT_PROPERTY_SET_RENDER_CALLBACK: u32 = 23;
-	const K_AUDIO_OUTPUT_UNIT_PROPERTY_ENABLE_IO: u32 = 2003;
-	const K_AUDIO_OUTPUT_UNIT_PROPERTY_SET_INPUT_CALLBACK: u32 = 2004;
-
-	const K_AUDIO_UNIT_SCOPE_GLOBAL: u32 = 0;
-	/// Client side of the output bus (what our render callback feeds).
-	const K_AUDIO_UNIT_SCOPE_INPUT: u32 = 1;
-	/// Client side of the input bus (what the input callback receives).
-	const K_AUDIO_UNIT_SCOPE_OUTPUT: u32 = 2;
-
-	const OUTPUT_BUS: u32 = 0;
-	const INPUT_BUS: u32 = 1;
-	const MAX_INPUT_FRAMES: usize = 4096;
-
-	#[repr(C)]
-	#[derive(Clone, Copy)]
-	struct AudioComponentDescription {
-		component_type: Ostype,
-		component_sub_type: Ostype,
-		component_manufacturer: Ostype,
-		component_flags: u32,
-		component_flags_mask: u32,
-	}
-
-	#[repr(C)]
-	#[derive(Clone, Copy)]
-	struct AudioStreamBasicDescription {
-		sample_rate: f64,
-		format_id: Ostype,
-		format_flags: u32,
-		bytes_per_packet: u32,
-		frames_per_packet: u32,
-		bytes_per_frame: u32,
-		channels_per_frame: u32,
-		bits_per_channel: u32,
-		reserved: u32,
-	}
-
-	#[repr(C)]
-	struct AudioBuffer {
-		number_channels: u32,
-		data_byte_size: u32,
-		data: *mut c_void,
-	}
-
-	#[repr(C)]
-	struct AudioBufferList {
-		number_buffers: u32,
-		buffers: [AudioBuffer; 1],
-	}
-
-	/// Opaque — only passed through between CoreAudio and the callbacks.
-	#[repr(C)]
-	struct AudioTimeStamp {
-		_private: [u8; 0],
-	}
-
-	type RenderCallback = unsafe extern "C" fn(
-		in_ref_con: *mut c_void,
-		io_action_flags: *mut u32,
-		in_time_stamp: *const AudioTimeStamp,
-		in_bus_number: u32,
-		in_number_frames: u32,
-		io_data: *mut AudioBufferList,
-	) -> OsStatus;
-
-	#[repr(C)]
-	#[derive(Clone, Copy)]
-	struct AurRenderCallbackStruct {
-		input_proc: RenderCallback,
-		input_proc_ref_con: *mut c_void,
-	}
-
-	#[link(name = "AudioToolbox", kind = "framework")]
-	#[link(name = "CoreAudio", kind = "framework")]
-	unsafe extern "C" {
-		fn AudioComponentFindNext(
-			in_component: AudioComponent,
-			in_desc: *const AudioComponentDescription,
-		) -> AudioComponent;
-		fn AudioComponentInstanceNew(in_component: AudioComponent, out_instance: *mut AudioUnit) -> OsStatus;
-		fn AudioComponentInstanceDispose(in_component_instance: AudioUnit) -> OsStatus;
-		fn AudioUnitInitialize(in_unit: AudioUnit) -> OsStatus;
-		fn AudioUnitUninitialize(in_unit: AudioUnit) -> OsStatus;
-		fn AudioUnitSetProperty(
-			in_unit: AudioUnit,
-			in_id: u32,
-			in_scope: u32,
-			in_element: u32,
-			in_data: *const c_void,
-			in_data_size: u32,
-		) -> OsStatus;
-		fn AudioUnitRender(
-			in_unit: AudioUnit,
-			io_action_flags: *mut u32,
-			in_time_stamp: *const AudioTimeStamp,
-			in_bus_number: u32,
-			in_number_frames: u32,
-			io_data: *mut AudioBufferList,
-		) -> OsStatus;
-		fn AudioOutputUnitStart(in_unit: AudioUnit) -> OsStatus;
-		fn AudioOutputUnitStop(in_unit: AudioUnit) -> OsStatus;
-	}
-
 	type CaptureCallback = ThreadsafeFunction<Float32Array, UnknownReturnValue>;
 
-	/// CoreAudio AudioUnit handles are internally synchronized; every use here
-	/// is additionally guarded by our own lock/stop discipline.
+	/// ObjC object handle. AVAudioEngine objects are internally thread-safe;
+	/// every use here is additionally guarded by our own lock/stop discipline.
 	#[derive(Clone, Copy)]
-	struct UnitPtr(*mut c_void);
-	unsafe impl Send for UnitPtr {}
-	unsafe impl Sync for UnitPtr {}
+	struct ObjPtr(*mut AnyObject);
+	unsafe impl Send for ObjPtr {}
+	unsafe impl Sync for ObjPtr {}
 
-	struct CurrentChunk {
-		samples: Vec<f32>,
-		generation: u32,
-		cursor: usize,
+	impl ObjPtr {
+		fn get(self) -> *mut AnyObject {
+			self.0
+		}
 	}
 
-	struct VpioState {
-		unit: AtomicUsize,
+	/// Take ownership of an autoreleased object (+1 retain).
+	unsafe fn retain_obj(ptr: *mut AnyObject) -> ObjPtr {
+		if !ptr.is_null() {
+			let _: () = msg_send![ptr, retain];
+		}
+		ObjPtr(ptr)
+	}
+
+	unsafe fn release_obj(ptr: ObjPtr) {
+		if !ptr.0.is_null() {
+			let _: () = msg_send![ptr.0, release];
+		}
+	}
+
+	unsafe fn nsstring_to_string(obj: *mut AnyObject) -> String {
+		unsafe {
+			if obj.is_null() {
+				return String::new();
+			}
+			let utf8: *const c_char = msg_send![obj, UTF8String];
+			if utf8.is_null() {
+				return String::new();
+			}
+			CStr::from_ptr(utf8).to_string_lossy().into_owned()
+		}
+	}
+
+	unsafe fn error_detail(error: *mut AnyObject) -> String {
+		unsafe {
+			if error.is_null() {
+				return String::from("unknown error");
+			}
+			let description: *mut AnyObject = msg_send![error, localizedDescription];
+			nsstring_to_string(description)
+		}
+	}
+
+	/// Linear-interpolation resampler (voice-grade, any rate → target rate).
+	struct Resampler {
+		ratio: f64,
+		pos: f64,
+	}
+
+	impl Resampler {
+		fn new(source_rate: f64, target_rate: f64) -> Self {
+			Self {
+				ratio: source_rate / target_rate,
+				pos: 0.0,
+			}
+		}
+
+		fn process(&mut self, input: &[f32], out: &mut Vec<f32>) {
+			let mut i = self.pos;
+			let len = input.len() as f64;
+			while i < len {
+				let idx = i as usize;
+				let frac = (i - idx as f64) as f32;
+				let a = input[idx];
+				let b = if idx + 1 < input.len() { input[idx + 1] } else { a };
+				out.push(a + (b - a) * frac);
+				i += self.ratio;
+			}
+			self.pos = i - len;
+		}
+	}
+
+	struct SessionState {
 		capture_cb: Mutex<Option<CaptureCallback>>,
-		playback_rx: flume::Receiver<(Vec<f32>, u32)>,
-		/// Render-callback-side playback position. parking_lot keeps the
-		/// critical section short on the real-time thread.
-		current: Mutex<CurrentChunk>,
-		/// Highest generation fully rendered — `end_playback(gen)` waits on it.
+		/// Created on the first tap callback, when the hardware rate is known.
+		resampler: Mutex<Option<Resampler>>,
+		target_rate: f64,
+		/// Highest generation fully played — `end_playback(gen)` waits on it.
 		consumed_gen: AtomicU32,
+		/// Highest generation ever queued — `clear_playback` advances
+		/// consumed_gen here so discarded generations still resolve.
+		queued_gen: AtomicU32,
 		notify: Notify,
 		stopped: AtomicBool,
 	}
 
-	unsafe fn check(status: OsStatus, what: &str) -> std::result::Result<(), String> {
-		if status == 0 {
-			return Ok(());
-		}
-		Err(format!("{what} failed (OSStatus {status})"))
-	}
-
-	/// Pulls AEC'd mic frames and forwards them to JS.
-	unsafe extern "C" fn input_callback(
-		in_ref_con: *mut c_void,
-		io_action_flags: *mut u32,
-		in_time_stamp: *const AudioTimeStamp,
-		_in_bus_number: u32,
-		in_number_frames: u32,
-		_io_data: *mut AudioBufferList,
-	) -> OsStatus {
+	/// Mono mixdown + resample one tap buffer, then hand it to JS.
+	unsafe fn deliver_capture(state: &Arc<SessionState>, buffer: *mut AnyObject) {
 		unsafe {
-			let state = &*(in_ref_con as *const VpioState);
-			let frames = in_number_frames as usize;
-			if frames == 0 || frames > MAX_INPUT_FRAMES {
-				return 0;
+			if buffer.is_null() || state.stopped.load(Ordering::Acquire) {
+				return;
 			}
-			let mut samples = [0.0f32; MAX_INPUT_FRAMES];
-			let mut list = AudioBufferList {
-				number_buffers: 1,
-				buffers: [AudioBuffer {
-					number_channels: 1,
-					data_byte_size: (frames * 4) as u32,
-					data: samples.as_mut_ptr() as *mut c_void,
-				}],
-			};
-			let status = AudioUnitRender(
-				state.unit.load(Ordering::Acquire) as AudioUnit,
-				io_action_flags,
-				in_time_stamp,
-				_in_bus_number,
-				in_number_frames,
-				&mut list,
-			);
-			if status != 0 {
-				return status;
+			let frame_length: u32 = msg_send![buffer, frameLength];
+			if frame_length == 0 {
+				return;
+			}
+			let format: *mut AnyObject = msg_send![buffer, format];
+			let channels: u32 = msg_send![format, channelCount];
+			let sample_rate: f64 = msg_send![format, sampleRate];
+			let data: *mut *mut f32 = msg_send![buffer, floatChannelData];
+			if data.is_null() || channels == 0 || sample_rate <= 0.0 {
+				return;
+			}
+			let channels = channels as usize;
+			let n = frame_length as usize;
+	
+			let mut mono = vec![0.0f32; n];
+			let scale = 1.0 / channels as f32;
+			for c in 0..channels {
+				let channel = *data.add(c);
+				if channel.is_null() {
+					continue;
+				}
+				for i in 0..n {
+					mono[i] += *channel.add(i) * scale;
+				}
+			}
+	
+			let mut out = Vec::new();
+			{
+				let mut resampler_guard = state.resampler.lock();
+				let resampler = resampler_guard
+					.get_or_insert_with(|| Resampler::new(sample_rate, state.target_rate));
+				out.reserve((n as f64 / resampler.ratio) as usize + 2);
+				resampler.process(&mono, &mut out);
+			}
+			if out.is_empty() {
+				return;
 			}
 			if let Some(cb) = state.capture_cb.lock().as_ref() {
 				// Blocking (matches the raw capture path): every chunk is real
 				// audio; late is better than lost.
-				cb.call(
-					Ok(Float32Array::new(samples[..frames].to_vec())),
-					ThreadsafeFunctionCallMode::Blocking,
-				);
+				cb.call(Ok(Float32Array::new(out)), ThreadsafeFunctionCallMode::Blocking);
 			}
-			0
 		}
 	}
 
-	/// Feeds the assistant's playback to the speaker — VPIO's AEC reference.
-	unsafe extern "C" fn render_callback(
-		in_ref_con: *mut c_void,
-		_io_action_flags: *mut u32,
-		_in_time_stamp: *const AudioTimeStamp,
-		_in_bus_number: u32,
-		in_number_frames: u32,
-		io_data: *mut AudioBufferList,
-	) -> OsStatus {
-		unsafe {
-			let state = &*(in_ref_con as *const VpioState);
-			if state.stopped.load(Ordering::Acquire) {
-				return 0;
-			}
-			let list = &mut *io_data;
-			let frames = in_number_frames as usize;
-			for buffer in list.buffers.iter_mut().take(list.number_buffers as usize) {
-				let capacity = (buffer.data_byte_size / 4) as usize;
-				let out = std::slice::from_raw_parts_mut(buffer.data as *mut f32, capacity.min(frames));
-				let mut current = state.current.lock();
-				let mut offset = 0;
-				while offset < out.len() {
-					if current.cursor == current.samples.len() {
-						match state.playback_rx.try_recv() {
-							Ok((next, generation)) => {
-								current.samples = next;
-								current.generation = generation;
-								current.cursor = 0;
-							},
-							Err(_) => break,
-						}
-					}
-					let count = (current.samples.len() - current.cursor).min(out.len() - offset);
-					out[offset..offset + count]
-						.copy_from_slice(&current.samples[current.cursor..current.cursor + count]);
-					current.cursor += count;
-					offset += count;
-				}
-				out[offset..].fill(0.0);
-				if !current.samples.is_empty() && current.cursor == current.samples.len() {
-					state.consumed_gen.fetch_max(current.generation, Ordering::AcqRel);
-					state.notify.notify_waiters();
-				}
-			}
-			0
-		}
-	}
-
-	/// Duplex voice session over one VoiceProcessingIO unit: echo-cancelled
-	/// mic capture in, assistant playback out (and used as the AEC reference).
+	/// Duplex voice session over one AVAudioEngine with voice processing:
+	/// echo-cancelled mic capture in, assistant playback out (and used as the
+	/// AEC reference).
 	#[napi]
 	pub struct AudioVoiceSession {
-		state: Arc<VpioState>,
-		playback_tx: flume::Sender<(Vec<f32>, u32)>,
-		unit: Mutex<Option<UnitPtr>>,
-		ref_con: usize,
+		engine: ObjPtr,
+		input: ObjPtr,
+		player: ObjPtr,
+		/// Mono f32 at the target rate — the playback (and AEC reference) format.
+		format: ObjPtr,
+		state: Arc<SessionState>,
 	}
 
 	#[napi]
 	impl AudioVoiceSession {
-		/// Create and initialize the VPIO unit at the requested sample rate
-		/// (mono f32 both directions). Fails when the unit is unavailable or
-		/// the rate is rejected — callers fall back to raw capture.
+		/// Build the engine: voice-processed input node + player node feeding
+		/// the main mixer. Fails when voice processing is unavailable —
+		/// callers fall back to raw capture.
 		#[napi(constructor)]
 		pub fn new(sample_rate: u32) -> Result<Self> {
 			unsafe {
-				let desc = AudioComponentDescription {
-					component_type: K_AUDIO_UNIT_TYPE_OUTPUT,
-					component_sub_type: K_AUDIO_UNIT_SUBTYPE_VOICE_PROCESSING_IO,
-					component_manufacturer: K_AUDIO_UNIT_MANUFACTURER_APPLE,
-					component_flags: 0,
-					component_flags_mask: 0,
-				};
-				let component = AudioComponentFindNext(std::ptr::null_mut(), &desc);
-				if component.is_null() {
-					return Err(napi::Error::from_reason("VoiceProcessingIO audio unit not found"));
-				}
-				let mut unit: AudioUnit = std::ptr::null_mut();
-				check(AudioComponentInstanceNew(component, &mut unit), "create VoiceProcessingIO unit")
-					.map_err(napi::Error::from_reason)?;
+				let engine: *mut AnyObject = msg_send![class!(AVAudioEngine), new];
 
-				let set_property = |what: &str,
-				                    id: u32,
-				                    scope: u32,
-				                    element: u32,
-				                    data: *const c_void,
-				                    size: u32| { check(AudioUnitSetProperty(unit, id, scope, element, data, size), what) };
-
-				// Enable input IO. macOS versions disagree about the scope: try
-				// Input, Global, Output in order and keep the statuses so a total
-				// failure is diagnosable. Some versions have input enabled by
-				// default and reject the property outright (-10866) — treat that
-				// as success and let the callback setup verify input availability.
-				let enable_input: u32 = 1;
-				let mut enable_statuses: Vec<(u32, OsStatus)> = Vec::new();
-				let mut enabled = false;
-				for scope in [K_AUDIO_UNIT_SCOPE_INPUT, K_AUDIO_UNIT_SCOPE_GLOBAL, K_AUDIO_UNIT_SCOPE_OUTPUT] {
-					let status = AudioUnitSetProperty(
-						unit,
-						K_AUDIO_OUTPUT_UNIT_PROPERTY_ENABLE_IO,
-						scope,
-						INPUT_BUS,
-						&enable_input as *const u32 as *const c_void,
-						mem::size_of::<u32>() as u32,
-					);
-					enable_statuses.push((scope, status));
-					if status == 0 {
-						enabled = true;
-						break;
-					}
-				}
-				if !enabled {
-					let all_rejected = enable_statuses.iter().all(|(_, s)| *s != 0);
-					let detail = enable_statuses
-						.iter()
-						.map(|(scope, s)| format!("scope {scope}: {s}"))
-						.collect::<Vec<_>>()
-						.join(", ");
-					// -10866 on every scope = property not writable = input already on.
-					if !all_rejected {
-						AudioComponentInstanceDispose(unit);
-						return Err(napi::Error::from_reason(format!("enable VPIO input failed ({detail})")));
-					}
-				}
-
-				let format = AudioStreamBasicDescription {
-					sample_rate: f64::from(sample_rate),
-					format_id: K_AUDIO_FORMAT_LINEAR_PCM,
-					format_flags: K_AUDIO_FORMAT_FLAGS_NATIVE_FLOAT_PACKED,
-					bytes_per_packet: 4,
-					frames_per_packet: 1,
-					bytes_per_frame: 4,
-					channels_per_frame: 1,
-					bits_per_channel: 32,
-					reserved: 0,
-				};
-				let setup_result = set_property(
-					"set VPIO input format",
-					K_AUDIO_UNIT_PROPERTY_STREAM_FORMAT,
-					K_AUDIO_UNIT_SCOPE_OUTPUT,
-					INPUT_BUS,
-					&format as *const AudioStreamBasicDescription as *const c_void,
-					mem::size_of::<AudioStreamBasicDescription>() as u32,
-				)
-				.and_then(|()| {
-					set_property(
-						"set VPIO output format",
-						K_AUDIO_UNIT_PROPERTY_STREAM_FORMAT,
-						K_AUDIO_UNIT_SCOPE_INPUT,
-						OUTPUT_BUS,
-						&format as *const AudioStreamBasicDescription as *const c_void,
-						mem::size_of::<AudioStreamBasicDescription>() as u32,
-					)
-				});
-				if let Err(message) = setup_result {
-					AudioComponentInstanceDispose(unit);
-					return Err(napi::Error::from_reason(message));
-				}
-
-				let (tx, rx) = flume::unbounded();
-				let state = Arc::new(VpioState {
-					unit: AtomicUsize::new(unit as usize),
-					capture_cb: Mutex::new(None),
-					playback_rx: rx,
-					current: Mutex::new(CurrentChunk {
-						samples: Vec::new(),
-						generation: 0,
-						cursor: 0,
-					}),
-					consumed_gen: AtomicU32::new(0),
-					notify: Notify::new(),
-					stopped: AtomicBool::new(false),
-				});
-				let ref_con = Arc::into_raw(Arc::clone(&state)) as *mut c_void;
-
-				let input_cb_struct = AurRenderCallbackStruct {
-					input_proc: input_callback,
-					input_proc_ref_con: ref_con,
-				};
-				let render_cb_struct = AurRenderCallbackStruct {
-					input_proc: render_callback,
-					input_proc_ref_con: ref_con,
-				};
-				// The input-callback (scope, element) pair differs across macOS
-				// versions; sweep the plausible combinations, then retry after
-				// AudioUnitInitialize as a last resort. Every status is kept so a
-				// total failure is diagnosable.
-				let try_input_callback = |scope: u32, element: u32| -> OsStatus {
-					AudioUnitSetProperty(
-						unit,
-						K_AUDIO_OUTPUT_UNIT_PROPERTY_SET_INPUT_CALLBACK,
-						scope,
-						element,
-						&input_cb_struct as *const AurRenderCallbackStruct as *const c_void,
-						mem::size_of::<AurRenderCallbackStruct>() as u32,
-					)
-				};
-				const INPUT_CB_COMBOS: [(u32, u32); 5] = [
-					(K_AUDIO_UNIT_SCOPE_GLOBAL, OUTPUT_BUS),
-					(K_AUDIO_UNIT_SCOPE_GLOBAL, INPUT_BUS),
-					(K_AUDIO_UNIT_SCOPE_INPUT, OUTPUT_BUS),
-					(K_AUDIO_UNIT_SCOPE_INPUT, INPUT_BUS),
-					(K_AUDIO_UNIT_SCOPE_OUTPUT, INPUT_BUS),
+				let format_alloc: *mut AnyObject = msg_send![class!(AVAudioFormat), alloc];
+				let format: *mut AnyObject = msg_send![
+					format_alloc,
+					initStandardFormatWithSampleRate: f64::from(sample_rate),
+					channels: 1u32,
 				];
-				let mut input_cb_statuses: Vec<((u32, u32), OsStatus)> = Vec::new();
-				let mut input_cb_set = false;
-				for combo in INPUT_CB_COMBOS {
-					let status = try_input_callback(combo.0, combo.1);
-					input_cb_statuses.push((combo, status));
-					if status == 0 {
-						input_cb_set = true;
-						break;
-					}
+
+				// Playback graph FIRST: enabling voice processing reconfigures the
+				// engine's IO, and connecting the player afterwards fails the
+				// start with InvalidScope (-10875).
+				let player: *mut AnyObject = msg_send![class!(AVAudioPlayerNode), new];
+				let _: () = msg_send![engine, attachNode: player];
+				let mixer: *mut AnyObject = msg_send![engine, mainMixerNode];
+				let _: () = msg_send![engine, connect: player, to: mixer, format: format];
+
+				let input_raw: *mut AnyObject = msg_send![engine, inputNode];
+				let input = retain_obj(input_raw);
+				let mut vp_error: *mut AnyObject = std::ptr::null_mut();
+				let vp_ok: bool = msg_send![input.get(), setVoiceProcessingEnabled: true, error: &mut vp_error];
+				if !vp_ok {
+					let detail = error_detail(vp_error);
+					release_obj(input);
+					release_obj(ObjPtr(engine));
+					return Err(napi::Error::from_reason(format!(
+						"enable voice processing failed: {detail}"
+					)));
 				}
-
-				let render_result = set_property(
-					"set VPIO render callback",
-					K_AUDIO_UNIT_PROPERTY_SET_RENDER_CALLBACK,
-					K_AUDIO_UNIT_SCOPE_GLOBAL,
-					OUTPUT_BUS,
-					&render_cb_struct as *const AurRenderCallbackStruct as *const c_void,
-					mem::size_of::<AurRenderCallbackStruct>() as u32,
-				);
-
-				let init_result = render_result
-					.and_then(|()| check(AudioUnitInitialize(unit), "initialize VoiceProcessingIO unit"));
-
-				// Last resort: some units accept the input callback only once initialized.
-				let callback_result = if !input_cb_set && init_result.is_ok() {
-					for combo in INPUT_CB_COMBOS {
-						let status = try_input_callback(combo.0, combo.1);
-						input_cb_statuses.push((combo, status));
-						if status == 0 {
-							input_cb_set = true;
-							break;
-						}
-					}
-					if input_cb_set { Ok(()) } else { init_result }
-				} else {
-					init_result
-				};
-				let callback_result = callback_result.and_then(|()| {
-					if input_cb_set {
-						Ok(())
-					} else {
-						let detail = input_cb_statuses
-							.iter()
-							.map(|((scope, element), s)| format!("(scope {scope}, element {element}): {s}"))
-							.collect::<Vec<_>>()
-							.join(", ");
-						Err(format!("set VPIO input callback failed on all combinations ({detail})"))
-					}
-				});
-				if let Err(message) = callback_result {
-					drop(Arc::from_raw(ref_con as *const VpioState));
-					AudioComponentInstanceDispose(unit);
-					return Err(napi::Error::from_reason(message));
-				}
-
 				Ok(Self {
-					state,
-					playback_tx: tx,
-					unit: Mutex::new(Some(UnitPtr(unit))),
-					ref_con: ref_con as usize,
+					engine: ObjPtr(engine),
+					input,
+					player: ObjPtr(player),
+					format: ObjPtr(format),
+					state: Arc::new(SessionState {
+						capture_cb: Mutex::new(None),
+						resampler: Mutex::new(None),
+						target_rate: f64::from(sample_rate),
+						consumed_gen: AtomicU32::new(0),
+						queued_gen: AtomicU32::new(0),
+						notify: Notify::new(),
+						stopped: AtomicBool::new(false),
+					}),
 				})
 			}
 		}
 
-		/// Start the unit and deliver AEC'd mono mic chunks to the callback.
+		/// Start the engine and deliver AEC'd mono mic chunks (resampled to
+		/// the session rate) to the callback.
 		#[napi]
 		pub fn start_capture(
 			&self,
 			#[napi(ts_arg_type = "(error: Error | null, samples: Float32Array) => void")]
 			on_audio: CaptureCallback,
 		) -> Result<()> {
-			*self.state.capture_cb.lock() = Some(on_audio);
-			let UnitPtr(unit) = self
-				.unit
-				.lock()
-				.ok_or_else(|| napi::Error::from_reason("Voice session is closed"))?;
-			unsafe { check(AudioOutputUnitStart(unit), "start VoiceProcessingIO unit") }
-				.map_err(napi::Error::from_reason)
+			unsafe {
+				*self.state.capture_cb.lock() = Some(on_audio);
+
+				let state = Arc::clone(&self.state);
+				let tap_block = RcBlock::new(move |buffer: *mut AnyObject, _when: *mut AnyObject| {
+					deliver_capture(&state, buffer);
+				});
+				let _: () = msg_send![
+					self.input.get(),
+					installTapOnBus: 0u32,
+					bufferSize: 1024u32,
+					format: std::ptr::null_mut::<AnyObject>(),
+					block: &*tap_block
+				];
+
+				let _: () = msg_send![self.engine.get(), prepare];
+				let mut start_error: *mut AnyObject = std::ptr::null_mut();
+				let started: bool = msg_send![self.engine.get(), startAndReturnError: &mut start_error];
+				if !started {
+					let detail = error_detail(start_error);
+					let _: () = msg_send![self.input.get(), removeTapOnBus: 0u32];
+					return Err(napi::Error::from_reason(format!(
+						"start audio engine failed: {detail}"
+					)));
+				}
+				let _: () = msg_send![self.player.get(), play];
+				Ok(())
+			}
 		}
 
 		/// Queue mono f32 playback tagged with a generation (one per response
@@ -544,21 +322,56 @@ mod macos {
 			if self.state.stopped.load(Ordering::Acquire) {
 				return Err(napi::Error::from_reason("Voice session is closed"));
 			}
-			self.playback_tx
-				.send((samples.to_vec(), generation))
-				.map_err(|_| napi::Error::from_reason("Voice session is closed"))
+			unsafe {
+				let buffer_alloc: *mut AnyObject = msg_send![class!(AVAudioPCMBuffer), alloc];
+				let buffer: *mut AnyObject = msg_send![
+					buffer_alloc,
+					initWithPCMFormat: self.format.get(),
+					frameCapacity: samples.len() as u32
+				];
+				let data: *mut *mut f32 = msg_send![buffer, floatChannelData];
+				if data.is_null() {
+					let _: () = msg_send![buffer, release];
+					return Err(napi::Error::from_reason("AVAudioPCMBuffer has no float channel data"));
+				}
+				std::ptr::copy_nonoverlapping(samples.as_ptr(), *data, samples.len());
+				let _: () = msg_send![buffer, setFrameLength: samples.len() as u32];
+
+				self.state.queued_gen.fetch_max(generation, Ordering::AcqRel);
+				let state = Arc::clone(&self.state);
+				let completion = RcBlock::new(move |_reason: isize| {
+					// Fires on playback completion AND on interruption
+					// (clear_playback stops the player) — either way this
+					// generation's buffers are done.
+					state.consumed_gen.fetch_max(generation, Ordering::AcqRel);
+					state.notify.notify_waiters();
+				});
+				let _: () = msg_send![
+					self.player.get(),
+					scheduleBuffer: buffer,
+					completionHandler: &*completion
+				];
+				// The player retained the buffer; drop our init-time reference.
+				let _: () = msg_send![buffer, release];
+				Ok(())
+			}
 		}
 
 		/// Discard all queued and in-flight playback (barge-in / new response).
 		#[napi]
 		pub fn clear_playback(&self) {
-			while self.state.playback_rx.try_recv().is_ok() {}
-			let mut current = self.state.current.lock();
-			current.samples.clear();
-			current.cursor = 0;
+			unsafe {
+				let _: () = msg_send![self.player.get(), stop];
+				// Discarded generations must still resolve their end_playback.
+				let queued = self.state.queued_gen.load(Ordering::Acquire);
+				self.state.consumed_gen.fetch_max(queued, Ordering::AcqRel);
+				self.state.notify.notify_waiters();
+				let _: () = msg_send![self.player.get(), play];
+			}
 		}
 
-		/// Resolve once every chunk up to `generation` has reached the speaker.
+		/// Resolve once every chunk up to `generation` has reached the speaker
+		/// (or was discarded by `clear_playback`).
 		#[napi]
 		pub async fn end_playback(&self, generation: u32) {
 			loop {
@@ -576,20 +389,14 @@ mod macos {
 			}
 		}
 
-		/// Stop the unit and release it. Idempotent.
+		/// Stop the engine. Idempotent.
 		#[napi]
 		pub fn stop(&self) -> Result<()> {
 			self.state.stopped.store(true, Ordering::Release);
-			let Some(UnitPtr(unit)) = self.unit.lock().take() else {
-				return Ok(());
-			};
 			unsafe {
-				// AudioOutputUnitStop guarantees the callbacks have stopped
-				// before returning — only then may the refcon Arc be reclaimed.
-				AudioOutputUnitStop(unit);
-				AudioUnitUninitialize(unit);
-				AudioComponentInstanceDispose(unit);
-				drop(Arc::from_raw(self.ref_con as *const VpioState));
+				let _: () = msg_send![self.input.get(), removeTapOnBus: 0u32];
+				let _: () = msg_send![self.player.get(), stop];
+				let _: () = msg_send![self.engine.get(), stop];
 			}
 			Ok(())
 		}
@@ -598,6 +405,12 @@ mod macos {
 	impl Drop for AudioVoiceSession {
 		fn drop(&mut self) {
 			let _ = self.stop();
+			unsafe {
+				release_obj(self.input);
+				release_obj(self.player);
+				release_obj(self.format);
+				release_obj(self.engine);
+			}
 		}
 	}
 }
@@ -613,14 +426,14 @@ mod tests {
 
 	/// Opt-in hardware test: OMP_NATIVE_VPIO_TEST=1 cargo test.
 	/// Capture delivery needs a JS threadsafe function, so it is exercised by
-	/// the live voice session instead; here we verify the unit lifecycle and
-	/// the playback queue.
+	/// the live voice session instead; here we verify the session lifecycle
+	/// and the playback queue.
 	#[test]
-	fn vpio_session_lifecycle() {
+	fn voice_session_lifecycle() {
 		if env::var_os("OMP_NATIVE_VPIO_TEST").is_none() {
 			return;
 		}
-		let session = AudioVoiceSession::new(24_000).expect("VPIO unit initializes");
+		let session = AudioVoiceSession::new(24_000).expect("voice session initializes");
 		let silence = vec![0.0f32; 240];
 		session
 			.write_playback(napi::bindgen_prelude::Float32Array::new(silence), 1)
