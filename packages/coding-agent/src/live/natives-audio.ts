@@ -2,7 +2,7 @@
  * Native audio bindings for the live voice session (macOS: miniaudio/CoreAudio).
  */
 import { REALTIME_SAMPLE_RATE } from "@oh-my-pi/pi-ai";
-import { AudioCapture, AudioPlayback } from "@oh-my-pi/pi-natives";
+import { AudioCapture, AudioPlayback, AudioVoiceSession } from "@oh-my-pi/pi-natives";
 import { logger } from "@oh-my-pi/pi-utils";
 import type { LiveAudioSinkFactory, LiveAudioSource } from "./types";
 
@@ -35,5 +35,47 @@ export function createNativeSinkFactory(): LiveAudioSinkFactory {
 			end: () => playback.end(),
 			stop: () => playback.stop(),
 		};
+	};
+}
+
+/**
+ * Hardware AEC path (macOS VoiceProcessingIO): one duplex unit owns capture
+ * AND playback, so the assistant's own voice is cancelled from the mic —
+ * barge-in can work without the speaker feeding itself back to the server.
+ * Returns null when unavailable; callers fall back to the raw path.
+ */
+export function createNativeAecAudio(): { source: LiveAudioSource; sinkFactory: LiveAudioSinkFactory } | null {
+	let session: AudioVoiceSession;
+	try {
+		session = new AudioVoiceSession(REALTIME_SAMPLE_RATE);
+	} catch (err) {
+		logger.warn("voice AEC unavailable, falling back to raw capture", { error: String(err) });
+		return null;
+	}
+	let generation = 0;
+	return {
+		source: {
+			start(onChunk) {
+				session.startCapture((err, samples) => {
+					if (err) {
+						logger.debug("live AEC capture chunk error", { error: String(err) });
+						return;
+					}
+					onChunk(samples);
+				});
+			},
+			stop() {
+				session.stop();
+			},
+		},
+		sinkFactory: () => {
+			generation += 1;
+			const gen = generation;
+			return {
+				write: samples => session.writePlayback(samples, gen),
+				end: () => session.endPlayback(gen),
+				stop: () => session.clearPlayback(),
+			};
+		},
 	};
 }

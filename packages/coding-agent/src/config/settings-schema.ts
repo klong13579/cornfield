@@ -1065,6 +1065,16 @@ export const SETTINGS_SCHEMA = {
 			description: "Allow interrupting the assistant by speaking while it talks.",
 		},
 	},
+	"voice.aec": {
+		type: "boolean",
+		default: false,
+		ui: {
+			tab: "interaction",
+			label: "Voice Echo Cancellation (AEC)",
+			description:
+				"Route mic and speaker through one macOS VoiceProcessingIO unit so assistant playback never bleeds into the mic (lets barge-in work without self-interruption). Re-enter voice mode to apply.",
+		},
+	},
 	"voice.vadSilenceMs": {
 		type: "integer",
 		default: 800,

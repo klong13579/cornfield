@@ -12,7 +12,7 @@ import { logger } from "@oh-my-pi/pi-utils";
 import { LiveConsultBridge } from "../../live/consult-bridge";
 import { LiveSessionController } from "../../live/controller";
 import { buildVoiceInstructions } from "../../live/instructions";
-import { createNativeAudioSource, createNativeSinkFactory } from "../../live/natives-audio";
+import { createNativeAecAudio, createNativeAudioSource, createNativeSinkFactory } from "../../live/natives-audio";
 import { LiveTranscriptRecorder, VOICE_MESSAGE_TYPE } from "../../live/transcript-recorder";
 import type { LivePhase, LiveTranscript } from "../../live/types";
 import liveInstructions from "../../prompts/live/live-instructions.md" with { type: "text" };
@@ -101,11 +101,12 @@ export class VoiceModeController {
 			onBackgroundResult: (task, text) => this.#onBackgroundResult(task, text),
 		});
 
+		const aec = settings.get("voice.aec") ? createNativeAecAudio() : null;
 		const transport = new RealtimeWsTransport({ baseUrl, apiKey, model });
 		const session = new LiveSessionController({
 			transport,
-			source: createNativeAudioSource(),
-			sinkFactory: createNativeSinkFactory(),
+			source: aec?.source ?? createNativeAudioSource(),
+			sinkFactory: aec?.sinkFactory ?? createNativeSinkFactory(),
 			session: {
 				modalities: ["text", "audio"],
 				instructions,

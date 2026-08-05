@@ -24,9 +24,9 @@
 use mimalloc::MiMalloc;
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
-
 pub mod appearance;
 pub mod audio;
+pub mod audio_vpio;
 pub mod ast;
 pub mod clipboard;
 pub mod fd;
