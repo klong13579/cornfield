@@ -99,6 +99,23 @@ describe("LiveConsultBridge", () => {
 		expect(result).toContain("超时");
 	});
 
+	test("timed-out task finishing late fires onBackgroundResult (design §5)", async () => {
+		const session = new FakeConsultSession();
+		const background: Array<{ task: string; text: string }> = [];
+		const bridge = new LiveConsultBridge({
+			sessionFactory: async () => session,
+			timeoutMs: 30,
+			onBackgroundResult: (task, text) => background.push({ task, text }),
+		});
+
+		const result = await bridge.consult("很慢的任务");
+		expect(result).toContain("超时");
+
+		// The task finishes after the timeout — the late result must still surface.
+		session.emit({ type: "agent_end", messages: assistantMessages("迟到的结果。") });
+		expect(background).toEqual([{ task: "很慢的任务", text: "迟到的结果。" }]);
+	});
+
 	test("send failure resolves with an error message, not a throw", async () => {
 		const session = new FakeConsultSession();
 		session.failNextSend = new Error("model overloaded");

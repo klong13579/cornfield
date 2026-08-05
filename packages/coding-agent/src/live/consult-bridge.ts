@@ -86,6 +86,8 @@ export interface LiveConsultBridgeOptions {
 	timeoutMs?: number;
 	/** Tool-call activity lines for the TUI thinking state (e.g. "read: TODO.md"). */
 	onActivity?: (line: string) => void;
+	/** Design §5: fires when a timed-out task eventually finishes in the background. */
+	onBackgroundResult?: (task: string, text: string) => void;
 	/** Test seam — production uses the default createAgentSession-backed factory. */
 	sessionFactory?: ConsultSessionFactory;
 }
@@ -197,21 +199,29 @@ export class LiveConsultBridge {
 		const timeoutMs = this.#options.timeoutMs ?? DEFAULT_CONSULT_TIMEOUT_MS;
 
 		const { promise, resolve } = Promise.withResolvers<string>();
+		let timedOut = false;
 		const timer = setTimeout(() => {
-			unsubscribe();
-			resolve("（任务执行超时了，可能需要更长时间。你可以切到文字模式继续，或者让我重试。）");
+			timedOut = true;
+			// Design §5: the task keeps running in the background; the late result
+			// reaches the user via onBackgroundResult (spoken if the voice session
+			// is still alive, otherwise text in the chat stream).
+			resolve("（任务比较重，执行超时了，已转后台继续处理，结果出来后给你。）");
 		}, timeoutMs);
 
 		const unsubscribe = session.subscribe(event => {
 			if (event.type === "tool_execution_start" && event.toolName) {
-				this.#options.onActivity?.(summarizeActivity(event.toolName, event.args));
+				if (!timedOut) this.#options.onActivity?.(summarizeActivity(event.toolName, event.args));
 				return;
 			}
 			if (event.type === "agent_end") {
 				clearTimeout(timer);
 				unsubscribe();
-				const text = extractAssistantText(event.messages);
-				resolve(text || "（任务完成了，但没有产生可播报的结果。）");
+				const text = extractAssistantText(event.messages) || "（任务完成了，但没有产生可播报的结果。）";
+				if (timedOut) {
+					this.#options.onBackgroundResult?.(task, text);
+					return;
+				}
+				resolve(text);
 			}
 		});
 

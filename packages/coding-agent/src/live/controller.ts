@@ -320,8 +320,17 @@ export class LiveSessionController {
 		return CONSULT_HANDOFF_TEXT;
 	}
 
-	#deliverDeferredConsultResult(text: string): void {
-		if (this.#disposed || this.#halted) return;
+	/**
+	 * Deliver a late background result while the voice session is alive
+	 * (design §5). Returns false when the session can't take it — the caller
+	 * then falls back to the text chat stream.
+	 */
+	deliverBackgroundResult(text: string): boolean {
+		return this.#deliverDeferredConsultResult(text);
+	}
+
+	#deliverDeferredConsultResult(text: string): boolean {
+		if (this.#disposed || this.#halted) return false;
 		try {
 			this.#options.transport.send({
 				type: "conversation.item.create",
@@ -332,8 +341,10 @@ export class LiveSessionController {
 				},
 			});
 			this.#options.transport.send({ type: "response.create" });
+			return true;
 		} catch (err) {
 			logger.debug("live deferred consult delivery failed", { error: String(err) });
+			return false;
 		}
 	}
 	#onServerEvent(event: RealtimeServerEvent): void {

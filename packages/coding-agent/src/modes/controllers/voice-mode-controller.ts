@@ -13,7 +13,7 @@ import { LiveConsultBridge } from "../../live/consult-bridge";
 import { LiveSessionController } from "../../live/controller";
 import { buildVoiceInstructions } from "../../live/instructions";
 import { createNativeAudioSource, createNativeSinkFactory } from "../../live/natives-audio";
-import { LiveTranscriptRecorder } from "../../live/transcript-recorder";
+import { LiveTranscriptRecorder, VOICE_MESSAGE_TYPE } from "../../live/transcript-recorder";
 import type { LivePhase, LiveTranscript } from "../../live/types";
 import liveInstructions from "../../prompts/live/live-instructions.md" with { type: "text" };
 import { VoicePanel, type VoicePanelCallbacks, type VoicePanelState } from "../components/voice-panel";
@@ -98,6 +98,7 @@ export class VoiceModeController {
 		this.#consultBridge = new LiveConsultBridge({
 			cwd: this.#ctx.session.sessionManager.getCwd(),
 			onActivity: line => this.#pushPanelState({ toolLine: line }),
+			onBackgroundResult: (task, text) => this.#onBackgroundResult(task, text),
 		});
 
 		const transport = new RealtimeWsTransport({ baseUrl, apiKey, model });
@@ -161,6 +162,14 @@ export class VoiceModeController {
 		if (transcript.final) {
 			this.#recorder?.record(transcript);
 		}
+	}
+
+	/** Design §5: a timed-out consult finished late — speak it if voice is alive, else text. */
+	#onBackgroundResult(task: string, text: string): void {
+		const body = `（后台任务「${task}」的结果）\n${text}`;
+		const spoken = this.#session?.deliverBackgroundResult(body) ?? false;
+		if (spoken) return; // the spoken turn is recorded via the transcript path
+		this.#ctx.session.sessionManager.appendCustomMessageEntry(VOICE_MESSAGE_TYPE, body, true, { role: "assistant", source: "voice-consult" }, "agent");
 	}
 
 	#pushPanelState(partial: Partial<VoicePanelState>): void {
