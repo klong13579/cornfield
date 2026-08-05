@@ -934,4 +934,43 @@ describe("LiveSessionController", () => {
 		expect([...loud!].some(b => b !== 0)).toBe(true);
 		await h.controller.dispose();
 	});
+
+	test("server error count resets on session.updated (reconnect recovery)", async () => {
+		const h = await makeHarness();
+		servers.push(h.server);
+		// Two errors: below the 3-strike breaker.
+		h.server.send({ type: "error", error: { message: "boom 1" } });
+		h.server.send({ type: "error", error: { message: "boom 2" } });
+		await Bun.sleep(30);
+		expect(h.terminals.length).toBe(0);
+
+		// A reconnect ack resets the counter — two more errors must not trip it.
+		h.server.send({ type: "session.updated", session: {} });
+		await Bun.sleep(20);
+		h.server.send({ type: "error", error: { message: "boom 3" } });
+		h.server.send({ type: "error", error: { message: "boom 4" } });
+		await Bun.sleep(30);
+		expect(h.terminals.length).toBe(0);
+		await h.controller.dispose();
+	});
+
+	test("note injection during speaking stops playback and takes the floor", async () => {
+		const h = await makeHarness();
+		servers.push(h.server);
+		h.server.send({ type: "response.audio.delta", delta: moderatePcm });
+		await waitForPhase(h, "speaking");
+
+		// A confirmation request landing mid-playback aborts the audio, drops to
+		// listening, and orders cancel -> item -> create on the wire.
+		expect(h.controller.speakConfirmationNote("（系统：需要确认）")).toBe(true);
+		await Bun.sleep(20);
+		expect(h.sinks[0]!.stopped).toBe(true);
+		expect(h.controller.phase).toBe("listening");
+		const types = h.server.received.map(m => m.type);
+		const cancel = types.lastIndexOf("response.cancel");
+		const create = types.lastIndexOf("response.create");
+		expect(cancel).toBeGreaterThanOrEqual(0);
+		expect(create).toBeGreaterThan(cancel);
+		await h.controller.dispose();
+	});
 });

@@ -46,7 +46,10 @@ function toolCall(toolName: string, input: Record<string, unknown> = {}): ToolCa
 	return { type: "tool_call", toolName, toolCallId: "t1", input };
 }
 
-function makeGate(channel = new FakeChannel(), confirmTimeoutMs = 1_000): { gate: VoiceGate; runner: FakeRunner; channel: FakeChannel } {
+function makeGate(
+	channel = new FakeChannel(),
+	confirmTimeoutMs = 1_000,
+): { gate: VoiceGate; runner: FakeRunner; channel: FakeChannel } {
 	const gate = new VoiceGate({ channel, confirmTimeoutMs });
 	const runner = new FakeRunner();
 	gate.arm(runner);
@@ -207,5 +210,20 @@ describe("VoiceGate", () => {
 		gate.resolveDecision("confirm");
 		expect(await first).toBeUndefined();
 		expect(await second).toBeUndefined();
+	});
+
+	test("endTask during a pending confirmation settles it as cancel (stop mid-confirm)", async () => {
+		const { gate, runner } = makeGate();
+		gate.beginTask();
+		const pending = runner.emitToolCall(toolCall("edit", { path: "a" }));
+		await Bun.sleep(10);
+		expect(gate.confirmationPending).toBe(true);
+
+		// The task was aborted (user said stop) — the pending question must
+		// settle as cancel and the tool must be blocked, never left hanging.
+		gate.endTask();
+		const result = await pending;
+		expect(result?.block).toBe(true);
+		expect(gate.confirmationPending).toBe(false);
 	});
 });
