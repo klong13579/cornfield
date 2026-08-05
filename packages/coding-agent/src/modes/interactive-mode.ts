@@ -47,7 +47,6 @@ import { HistoryStorage } from "../session/history-storage";
 import type { SessionContext, SessionManager } from "../session/session-manager";
 import { getRecentSessions } from "../session/session-manager";
 import { ListenController, STTController, type SttState } from "../stt";
-import { VoiceModeController } from "./controllers/voice-mode-controller";
 import type { ExitPlanModeDetails, LspStartupServerInfo } from "../tools";
 import { normalizeLocalScheme } from "../tools/path-utils";
 import { formatPhaseDisplayName } from "../tools/todo-write";
@@ -76,6 +75,7 @@ import { MCPCommandController } from "./controllers/mcp-command-controller";
 import { SelectorController } from "./controllers/selector-controller";
 import { SSHCommandController } from "./controllers/ssh-command-controller";
 import { TodoCommandController } from "./controllers/todo-command-controller";
+import { VoiceModeController } from "./controllers/voice-mode-controller";
 import { OAuthManualInputManager } from "./oauth-manual-input";
 import { SessionObserverRegistry } from "./session-observer-registry";
 import type { Theme } from "./theme/theme";
@@ -339,7 +339,10 @@ export class InteractiveMode implements InteractiveModeContext {
 					const ts = `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
 					const dot = elapsed % 2 === 0 ? "\u{1F7E2}" : "\u26AA";
 					const bar = status.levelBar ? ` ${status.levelBar}` : "";
-					this.statusLine.setHookStatus("listening", `${dot} ${theme.icon.mic}${bar} \u5f55\u97f3 ${ts}`);
+					this.statusLine.setHookStatus(
+						"listening",
+						`${dot} ${theme.icon.mic}${bar} \u5f55\u97f3 ${ts} \u00b7 /record stop \u7ed3\u675f`,
+					);
 				} else if (status.state === "transcribing") {
 					const p = status.progress;
 					const chunkInfo =

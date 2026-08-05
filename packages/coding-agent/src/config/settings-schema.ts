@@ -1208,7 +1208,7 @@ export const SETTINGS_SCHEMA = {
 
 	"compaction.modelThresholds": { type: "record", default: {} },
 
-	"compaction.targetRatio": { type: "number", default: 0.20 },
+	"compaction.targetRatio": { type: "number", default: 0.2 },
 
 	// Idle compaction
 	"compaction.idleEnabled": {

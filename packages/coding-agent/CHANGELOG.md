@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **`/record` manual-stop default + 2h safety cap** (`src/config/settings-schema.ts`, `src/stt/listen-controller.ts`, `src/modes/interactive-mode.ts`, `test/stt/listen-controller.test.ts`): `stt.vadEnabled` now defaults to `false` — `/record` keeps recording until the user types `/record stop`; silence-based auto-stop is opt-in via the setting. `stt.maxRecordingSec` safety cap raised from 30min to 2h (7200s), and the max-duration message now renders a readable duration (e.g. "2h"). Recording status line adds a `/record stop 结束` hint since manual stop is the primary stop path. Realtime voice (alt+v) server VAD is untouched. 2 new regression tests (default: sustained silence never auto-stops and manual stop works; contrast: enabling VAD restores auto-stop).
+
 ### Added
 
 - **`RealtimeWsTransport.connect()` closed guard** (`src/realtime/transport.ts`, `test/realtime-transport.test.ts`): Calling `connect()` after `close()` now throws instead of silently reopening a zombie socket. Closes the dispose-during-connect race where a quick alt+v double-press left a transport reconnecting forever with no controller attached — `connect()` no longer resets `intentionalClose` on a closed transport. 1 new test asserting the throw and that no new connection is attempted.

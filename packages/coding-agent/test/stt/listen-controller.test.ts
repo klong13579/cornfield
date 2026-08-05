@@ -11,6 +11,7 @@
  */
 import { afterEach, beforeEach, describe, expect, test, vi } from "bun:test";
 import * as fsp from "node:fs/promises";
+import { settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { buildFilename, ListenController } from "@oh-my-pi/pi-coding-agent/stt/listen-controller";
 
 // Shared mock instances — hoisted before static imports, shared across tests.
@@ -339,4 +340,80 @@ describe("ListenController", () => {
 		expect(ctrl.state).toBe("idle");
 		expect(showWarning).toHaveBeenCalledWith(expect.stringContaining("ffmpeg not found"));
 	});
+
+	// ── VAD default behavior ──
+	// Regression guard for the "manual stop only" default: stt.vadEnabled must
+	// stay off so /record keeps recording until the user types /record stop.
+
+	test("VAD off by default — silence after speech does not auto-stop; manual stop works", async () => {
+		detectRecordingTools.mockReturnValue(["ffmpeg"]);
+		vi.spyOn(fsp, "writeFile").mockResolvedValue(undefined);
+		let onLevel: ((rms: number) => void) | undefined;
+		startRecording.mockImplementation(async (_path, opts) => {
+			onLevel = opts?.onLevel;
+			return {
+				stop: vi.fn().mockResolvedValue(undefined),
+				getLevel: () => 0,
+				getPeak: () => 0,
+			};
+		});
+
+		await ctrl.startRecording();
+		expect(ctrl.state).toBe("recording");
+		expect(onLevel).toBeDefined();
+
+		// Speak ~600ms (> minSpeechDurationMs=300ms) so VAD confirms speech.
+		for (let i = 0; i < 6; i++) {
+			onLevel?.(3000);
+			await Bun.sleep(100);
+		}
+		// Sustained silence longer than the default silenceDurationSec (3s).
+		for (let i = 0; i < 34; i++) {
+			onLevel?.(10);
+			await Bun.sleep(100);
+		}
+		// Give any wrongly-triggered async auto-stop time to run.
+		await Bun.sleep(300);
+
+		// Default VAD is disabled: recording must continue until manual stop.
+		expect(ctrl.state).toBe("recording");
+
+		await ctrl.stopRecording();
+		expect(ctrl.state).toBe("idle");
+	}, 15000);
+
+	test("VAD on — silence after speech auto-stops (contrast guard)", async () => {
+		detectRecordingTools.mockReturnValue(["ffmpeg"]);
+		vi.spyOn(fsp, "writeFile").mockResolvedValue(undefined);
+		let onLevel: ((rms: number) => void) | undefined;
+		startRecording.mockImplementation(async (_path, opts) => {
+			onLevel = opts?.onLevel;
+			return {
+				stop: vi.fn().mockResolvedValue(undefined),
+				getLevel: () => 0,
+				getPeak: () => 0,
+			};
+		});
+
+		settings.set("stt.vadEnabled", true);
+		try {
+			await ctrl.startRecording();
+			expect(onLevel).toBeDefined();
+
+			for (let i = 0; i < 6; i++) {
+				onLevel?.(3000);
+				await Bun.sleep(100);
+			}
+			for (let i = 0; i < 34; i++) {
+				onLevel?.(10);
+				await Bun.sleep(100);
+			}
+			await Bun.sleep(300);
+
+			// VAD enabled: sustained silence must leave the recording state.
+			expect(ctrl.state).not.toBe("recording");
+		} finally {
+			settings.set("stt.vadEnabled", false);
+		}
+	}, 15000);
 });

@@ -91,6 +91,15 @@ function readSttNumber(key: string, fallback: number): number {
 	return typeof v === "number" && Number.isFinite(v) ? v : fallback;
 }
 
+/** Format a duration in seconds as a readable label (e.g. 7200 -> "2h"). */
+function formatDuration(totalSec: number): string {
+	const h = Math.floor(totalSec / 3600);
+	const m = Math.floor((totalSec % 3600) / 60);
+	if (h > 0) return m > 0 ? `${h}h ${m}m` : `${h}h`;
+	if (m > 0) return `${m}m`;
+	return `${totalSec}s`;
+}
+
 function renderBarFromRms(samples: readonly number[]): string {
 	const cells = [...samples.slice(-LEVEL_BAR_CELLS)];
 	while (cells.length < LEVEL_BAR_CELLS) cells.unshift(0);
@@ -226,7 +235,7 @@ export class ListenController {
 		if (elapsedMs >= this.#maxRecordingMs) {
 			this.#autoStopTriggered = true;
 			this.#showStatus(
-				`Max recording duration reached (${Math.round(this.#maxRecordingMs / 1000)}s) — auto-stopping.`,
+				`Max recording duration reached (${formatDuration(Math.round(this.#maxRecordingMs / 1000))}) — auto-stopping.`,
 			);
 			void this.stopRecording();
 			return;
