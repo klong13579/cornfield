@@ -569,27 +569,24 @@ function renderKittyImage(s: AnimState): void {
 	}
 }
 
-function emitKittyImage(first: boolean): string {
+function emitKittyImage(): string {
 	const b64 = Buffer.from(imgBuf).toString("base64");
 	const CHUNK = 4096;
 	let seq = "";
 	for (let i = 0; i < b64.length; i += CHUNK) {
 		const chunk = b64.slice(i, i + CHUNK);
 		const more = i + CHUNK < b64.length ? 1 : 0;
-		let ctrl: string;
-		if (first) {
-			ctrl = i === 0 ? `a=T,f=32,s=${IW},h=${IH},i=${IMG_ID},c=${IMG_COLS},r=${IMG_ROWS},q=2,m=${more}` : `a=T,i=${IMG_ID},m=${more}`;
-		} else {
-			ctrl = i === 0 ? `a=f,i=${IMG_ID},q=2,m=${more}` : `a=f,i=${IMG_ID},m=${more}`;
-		}
+		// every frame re-transmits with placement (a=T): tmux pane redraws
+		// destroy image placements, and a=f cannot recreate them — re-placing
+		// each frame makes the render self-healing within one frame.
+		const ctrl =
+			i === 0 ? `a=T,f=32,s=${IW},h=${IH},i=${IMG_ID},c=${IMG_COLS},r=${IMG_ROWS},q=2,m=${more}` : `a=T,i=${IMG_ID},m=${more}`;
 		seq += `\x1b_G${ctrl};${chunk}\x1b\\`;
 	}
 	// tmux passthrough: wrap in DCS tmux; with doubled escapes
 	if (process.env.TMUX) seq = `\x1bPtmux;${seq.replace(/\x1b/g, "\x1b\x1b")}\x1b\\`;
 	return seq;
 }
-
-let kittyFirst = true;
 
 function renderKittyFrame(s: AnimState, cols: number, rows: number, imgTop: number, imgLeft: number): string {
 	renderKittyImage(s);
@@ -626,9 +623,10 @@ function renderKittyFrame(s: AnimState, cols: number, rows: number, imgTop: numb
 	if (t1) out += `\x1b[${rows - 2};${Math.floor((cols - t1.length) / 2) + 1}H\x1b[38;2;150;160;185m${t1}`;
 	if (t2) out += `\x1b[${rows - 1};${Math.floor((cols - t2.length) / 2) + 1}H\x1b[38;2;${bright[0]};${bright[1]};${bright[2]}m${t2}`;
 
-	if (kittyFirst) out += `\x1b[${imgTop + 1};${imgLeft + 1}H`;
-	out += emitKittyImage(kittyFirst);
-	kittyFirst = false;
+	out += `\x1b[${imgTop + 1};${imgLeft + 1}H`;
+	let del = `\x1b_Ga=d,i=${IMG_ID}\x1b\\`;
+	if (process.env.TMUX) del = `\x1bPtmux;${del.replace(/\x1b/g, "\x1b\x1b")}\x1b\\`;
+	out += del + emitKittyImage();
 	return out;
 }
 
