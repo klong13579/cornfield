@@ -38,13 +38,13 @@ const PHASE_LABEL: Record<Phase, string> = {
 	idle: "环境待机",
 };
 const PHASE_HUE: Record<Phase, [number, number, number]> = {
-	// [hue, saturation, lightness]
-	connecting: [222, 0.55, 0.62],
-	listening: [187, 0.9, 0.66],
-	thinking: [40, 0.95, 0.64],
-	speaking: [276, 0.85, 0.68],
+	// [hue, saturation, lightness] — black hole HUD accents
+	connecting: [210, 0.5, 0.68],
+	listening: [32, 0.95, 0.62],
+	thinking: [24, 0.95, 0.6],
+	speaking: [40, 1.0, 0.7],
 	bargein: [0, 0.0, 0.92],
-	idle: [46, 0.6, 0.4],
+	idle: [12, 0.7, 0.42],
 };
 
 // ── color helpers ────────────────────────────────────────────────────────────
@@ -102,7 +102,8 @@ interface AnimState {
 	envIn: number; // mic envelope (fast attack / slow release)
 	envOut: number; // playback envelope
 	ripples: number[]; // expanding ring radii (listening)
-	particles: number[]; // orbit angles (thinking)
+	particles: number[]; // spiral angles (thinking infall)
+	particleR: number[]; // spiral radial factors (diskOuter→horizon)
 	levelHist: number[]; // waveform history
 	bloom: number; // connecting bloom 0→1
 	shrink: number; // idle shrink 0→1
@@ -118,6 +119,7 @@ function newState(): AnimState {
 		envOut: 0,
 		ripples: [],
 		particles: [0, 1.2, 2.5, 3.9, 5.1],
+		particleR: [2.3, 1.9, 1.5, 1.2, 2.1],
 		levelHist: [],
 		bloom: 0,
 		shrink: 0,
@@ -164,7 +166,14 @@ function advance(s: AnimState, dt: number): void {
 	}
 	if (s.phase === "thinking") {
 		for (let i = 0; i < s.particles.length; i++) {
-			s.particles[i] += dt * (1.4 + i * 0.22);
+			const rf = s.particleR[i];
+			// angular speed rises as matter approaches the horizon
+			s.particles[i] += dt * (1.1 + i * 0.18) * (1 + 0.6 / Math.max(0.3, rf));
+			s.particleR[i] = rf - dt * 0.22;
+			if (s.particleR[i] < 1.02) {
+				s.particleR[i] = 2.3;
+				s.particles[i] = Math.random() * Math.PI * 2;
+			}
 		}
 	}
 
@@ -452,119 +461,152 @@ function renderKittyImage(s: AnimState): void {
 	imgBuf.fill(0);
 	const [hue, sat, lit] = PHASE_HUE[s.phase];
 	const level = Math.max(s.envIn, s.envOut);
-	const core = hslToRgb(hue, sat * 0.7, Math.min(0.92, lit + 0.26));
-	const midc = hslToRgb(hue, sat, lit);
-	const edgec = hslToRgb(hue, sat, Math.max(0.18, lit - 0.28));
+	const accent = hslToRgb(hue, sat, Math.min(0.88, lit + 0.3));
 	const gaugeIn = hslToRgb(187, 0.9, 0.62);
 	const gaugeOut = hslToRgb(276, 0.85, 0.66);
+	const dimFactor = s.phase === "idle" ? 1 - 0.6 * easeOutCubic(s.shrink) : 1;
 
-	// radius choreography (image pixels)
-	let radius = IW * 0.3;
-	let scale = 1 + 0.02 * Math.sin(s.t * 0.8) + level * 0.16;
-	if (s.phase === "connecting") scale *= easeOutCubic(s.bloom);
-	if (s.phase === "thinking") scale *= 0.92;
-	if (s.phase === "idle") scale *= 1 - 0.55 * easeOutCubic(s.shrink);
-	if (s.phase === "bargein") scale *= 1 - 0.25 * s.flash;
-	radius *= scale;
-
-	const wobbleAmp = 0.012 + level * 0.055 + (s.phase === "speaking" ? 0.02 : 0);
-	for (let b = 0; b < WOB_BUCKETS; b++) {
-		const theta = (b / WOB_BUCKETS) * Math.PI * 2;
-		wobTable[b] =
-			wobbleAmp *
-			(0.5 * Math.sin(3 * theta + s.t * 1.5) +
-				0.3 * Math.sin(5 * theta - s.t * 2.1) +
-				0.2 * Math.sin(7 * theta + s.t * 2.8));
-	}
-
-	const glowW = 10 + level * 22 + (s.phase === "speaking" ? 8 : 0);
+	const M = Math.min(IW, IH);
 	const cx = IW / 2;
 	const cy = IH / 2;
-	const tickR = IW * 0.465;
-	const gaugeR = IW * 0.415;
-	const scanActive = s.phaseT < 0.45;
-	const scanY = scanActive ? (s.phaseT / 0.45) * IH : -10;
 
-	for (let y = 0; y < IH; y++) {
-		const rowOff = y * IW;
-		for (let x = 0; x < IW; x++) {
-			const idx = rowOff + x;
-			const d = pixD[idx];
-			const theta = pixT[idx];
-			const pidx = idx * 4;
+	// ── geometry choreography ──
+	let Rh = M * 0.15; // event horizon radius
+	let scale = 1 + 0.015 * Math.sin(s.t * 0.7) + level * 0.06;
+	if (s.phase === "connecting") scale *= easeOutCubic(s.bloom);
+	if (s.phase === "idle") scale *= 1 - 0.4 * easeOutCubic(s.shrink);
+	if (s.phase === "bargein") scale *= 1 - 0.15 * s.flash;
+	Rh *= scale;
 
-			const bucket = (((theta + Math.PI) / (Math.PI * 2)) * WOB_BUCKETS) | 0;
-			const R = radius * (1 + wobTable[bucket]);
+	const diskA = Rh * 2.5; // accretion disk semi-major axis
+	const diskB = diskA * 0.32; // tilt squash
+	const diskInner = 1.0;
+	const diskOuter = 2.1;
+	const diskSpeed = s.phase === "listening" ? 2.2 : s.phase === "speaking" ? 1.5 : 0.9;
+	const diskHeat = (0.5 + level * 0.5 + (s.phase === "speaking" ? 0.15 : 0)) * dimFactor;
+	const tickR = M * 0.455;
+	const gaugeR = M * 0.475;
+	const jetLen = M * 0.28;
 
-			// orb body with anti-aliased edge + hot center
-			if (d <= R + 1.5) {
-				const k = Math.min(1, d / R);
-				let c: RGB = k < 0.5 ? mix(core, midc, k * 2) : mix(midc, edgec, (k - 0.5) * 2);
-				c = mix(c, [255, 255, 255], Math.pow(1 - k, 2.5) * 0.5);
-				if (s.flash > 0) c = mix(c, [255, 255, 255], s.flash * 0.6);
-				const a = d <= R ? 1 : Math.max(0, (R + 1.5 - d) / 1.5);
-				blendPx(pidx, c[0], c[1], c[2], a);
-			} else if (d <= R + glowW) {
-				// bloom
-				const gk = (d - R) / glowW;
-				const a = Math.pow(1 - gk, 2.4) * (0.3 + level * 0.5);
-				blendPx(pidx, midc[0], midc[1], midc[2], a);
-			}
+	const hotCore: RGB = [255, 246, 220];
+	const hotMid = hslToRgb(30, 1.0, 0.62);
+	const hotOuter = hslToRgb(8, 0.9, 0.3);
 
-			// listening ripples
-			if (s.phase === "listening" || s.phase === "bargein") {
-				for (const rr of s.ripples) {
-					const band = Math.abs(d - (R + 8 + rr * 3.2));
-					if (band < 2.2) {
-						blendPx(pidx, midc[0], midc[1], midc[2], (1 - band / 2.2) * Math.max(0, 1 - rr / 26) * 0.5);
-					}
-				}
-			}
+	// accretion disk sample at offset (dx,dy): [r,g,b,alpha] or null
+	const diskSample = (dx: number, dy: number): [number, number, number, number] | null => {
+		const re = Math.sqrt((dx / diskA) * (dx / diskA) + (dy / diskB) * (dy / diskB));
+		if (re < diskInner || re > diskOuter) return null;
+		const phi = Math.atan2(dy / diskB, dx / diskA);
+		const t = (re - diskInner) / (diskOuter - diskInner);
+		const c: RGB = t < 0.35 ? mix(hotCore, hotMid, t / 0.35) : mix(hotMid, hotOuter, (t - 0.35) / 0.65);
+		// Doppler beaming: the approaching side (left) burns brighter
+		const doppler = 1 - 0.45 * Math.cos(phi);
+		// rotating hot clumps
+		const clump = 0.72 + 0.28 * Math.sin(3 * phi + s.t * diskSpeed);
+		const edgeFade = Math.min(1, (re - diskInner) / 0.1, (diskOuter - re) / 0.22);
+		const a = Math.min(1, Math.max(0, edgeFade * clump * doppler * diskHeat));
+		if (a <= 0.02) return null;
+		return [c[0], c[1], c[2], a];
+	};
 
-			// speaking sonic ring
-			if (s.phase === "speaking") {
-				const band = Math.abs(d - (R + 12 + s.envOut * 10));
-				if (band < 2.5) {
-					blendPx(pidx, midc[0], midc[1], midc[2], (1 - band / 2.5) * (0.35 + s.envOut * 0.5));
-				}
-			}
+	// disk bounding box (pass clipping)
+	const dbx0 = Math.max(0, Math.floor(cx - diskA * diskOuter));
+	const dbx1 = Math.min(IW, Math.ceil(cx + diskA * diskOuter));
+	const dbyTop = Math.max(0, Math.floor(cy - diskB * diskOuter));
+	const dbyBot = Math.min(IH, Math.ceil(cy + diskB * diskOuter));
 
-			// HUD: rotating tick bezel + arc gauges
-			if (s.phase !== "idle" && s.phase !== "connecting") {
-				if (Math.abs(d - tickR) < 2) {
-					const ang = theta + s.t * 0.15;
-					const tickPhase = ((((ang * 24) / Math.PI) % 1) + 1) % 1;
-					if (tickPhase < 0.3) {
-						blendPx(pidx, midc[0], midc[1], midc[2], 0.22 + level * 0.35);
-					}
-				}
-				if (Math.abs(d - gaugeR) < 2.5) {
-					const ath = Math.abs(theta);
-					// input gauge (left arc, cyan): fills outward from horizontal
-					if (ath > Math.PI * 0.55 && (Math.PI - ath) / (Math.PI * 0.45) < s.envIn) {
-						blendPx(pidx, gaugeIn[0], gaugeIn[1], gaugeIn[2], 0.65);
-					}
-					// output gauge (right arc, violet)
-					if (ath < Math.PI * 0.45 && (Math.PI * 0.45 - ath) / (Math.PI * 0.45) < s.envOut) {
-						blendPx(pidx, gaugeOut[0], gaugeOut[1], gaugeOut[2], 0.65);
-					}
-				}
-			}
+	// PASS 1: accretion disk — back half (behind the hole)
+	for (let y = dbyTop; y <= Math.min(Math.ceil(cy), dbyBot); y++) {
+		for (let x = dbx0; x < dbx1; x++) {
+			const c = diskSample(x - cx, y - cy);
+			if (c) blendPx((y * IW + x) * 4, c[0], c[1], c[2], c[3]);
+		}
+	}
 
-			// state-entry scanline
-			if (scanActive && Math.abs(y - scanY) < 2.5) {
-				blendPx(pidx, midc[0], midc[1], midc[2], 0.16 * (1 - s.phaseT / 0.45));
+	// PASS 2: gravitational lensing halo — bent light hugging the horizon
+	const haloR1 = Rh * 1.04;
+	const haloR0 = Rh * 1.45;
+	const hbx0 = Math.max(0, Math.floor(cx - haloR0));
+	const hbx1 = Math.min(IW, Math.ceil(cx + haloR0));
+	const hby0 = Math.max(0, Math.floor(cy - haloR0));
+	const hby1 = Math.min(IH, Math.ceil(cy + haloR0));
+	for (let y = hby0; y < hby1; y++) {
+		const dy = y - cy;
+		for (let x = hbx0; x < hbx1; x++) {
+			const dx = x - cx;
+			const d = Math.hypot(dx, dy);
+			if (d > haloR1 && d < haloR0) {
+				const fall = 1 - (d - haloR1) / (haloR0 - haloR1);
+				const side = dy < 0 ? 0.55 : 0.3;
+				const a = fall * fall * side * diskHeat;
+				if (a > 0.02) blendPx((y * IW + x) * 4, hotMid[0], hotMid[1], hotMid[2], a);
 			}
 		}
 	}
 
-	// thinking particles with decaying trails
+	// PASS 3: event horizon (opaque black) + photon ring
+	const ebx0 = Math.max(0, Math.floor(cx - Rh - 3));
+	const ebx1 = Math.min(IW, Math.ceil(cx + Rh + 3));
+	const eby0 = Math.max(0, Math.floor(cy - Rh - 3));
+	const eby1 = Math.min(IH, Math.ceil(cy + Rh + 3));
+	for (let y = eby0; y < eby1; y++) {
+		const dy = y - cy;
+		for (let x = ebx0; x < ebx1; x++) {
+			const dx = x - cx;
+			const d = Math.hypot(dx, dy);
+			const pidx = (y * IW + x) * 4;
+			if (d <= Rh) {
+				imgBuf[pidx] = 0;
+				imgBuf[pidx + 1] = 0;
+				imgBuf[pidx + 2] = 0;
+				imgBuf[pidx + 3] = 255;
+			} else if (d <= Rh + 2) {
+				const theta = Math.atan2(dy, dx);
+				const flick = 0.88 + 0.12 * Math.sin(s.t * 6 + theta * 4);
+				const a = Math.min(1, (1 - (d - Rh) / 2) * flick * dimFactor);
+				blendPx(pidx, 255, 240, 210, a);
+			}
+		}
+	}
+
+	// PASS 4: accretion disk — front half (crossing in front of the hole)
+	for (let y = Math.max(Math.ceil(cy) + 1, dbyTop); y < dbyBot; y++) {
+		for (let x = dbx0; x < dbx1; x++) {
+			const c = diskSample(x - cx, y - cy);
+			if (c) blendPx((y * IW + x) * 4, c[0], c[1], c[2], c[3]);
+		}
+	}
+
+	// PASS 5: polar jets (speaking)
+	if (s.envOut > 0.04) {
+		const jetI = s.envOut;
+		const jy0 = Math.max(0, Math.floor(cy - Rh - jetLen));
+		const jy1 = Math.min(IH, Math.ceil(cy + Rh + jetLen));
+		for (let y = jy0; y < jy1; y++) {
+			const dy = y - cy;
+			const ady = Math.abs(dy);
+			if (ady < Rh || ady > Rh + jetLen) continue;
+			const prog = (ady - Rh) / jetLen;
+			const wobble = Math.sin(s.t * 9 + dy * 0.06) * 1.5;
+			const halfW = Rh * 0.22 * (1 - prog * 0.75);
+			const jx0 = Math.max(0, Math.floor(cx - halfW - 3 + wobble));
+			const jx1 = Math.min(IW, Math.ceil(cx + halfW + 3 + wobble));
+			for (let x = jx0; x < jx1; x++) {
+				const dx = x - cx - wobble;
+				if (Math.abs(dx) > halfW) continue;
+				const a = Math.pow(1 - prog, 1.6) * (1 - Math.abs(dx) / halfW) * jetI * 0.9 * dimFactor;
+				if (a > 0.02) blendPx((y * IW + x) * 4, 200, 235, 255, a);
+			}
+		}
+	}
+
+	// PASS 6: infalling matter (thinking) — spirals into the horizon
 	if (s.phase === "thinking") {
 		for (let i = 0; i < s.particles.length; i++) {
 			const ang = s.particles[i];
-			const pr = radius * 1.3 + Math.sin(s.t * 2 + i) * radius * 0.1;
-			trails[i].push([cx + Math.cos(ang) * pr, cy + Math.sin(ang) * pr]);
-			if (trails[i].length > 22) trails[i].shift();
+			const rf = s.particleR[i];
+			trails[i].push([cx + Math.cos(ang) * diskA * rf, cy + Math.sin(ang) * diskB * rf]);
+			if (trails[i].length > 18) trails[i].shift();
 		}
 	} else {
 		for (const tr of trails) tr.length = 0;
@@ -573,9 +615,9 @@ function renderKittyImage(s: AnimState): void {
 		const n = tr.length;
 		for (let j = 0; j < n; j++) {
 			const [px, py] = tr[j];
-			const age = (n - 1 - j) / 22;
-			const dotR = 3.5 * (1 - age * 0.75);
-			const alpha = (1 - age) * 0.8;
+			const age = (n - 1 - j) / 18;
+			const dotR = 2.8 * (1 - age * 0.7);
+			const alpha = (1 - age) * 0.85;
 			const x0 = Math.max(0, Math.floor(px - dotR));
 			const x1 = Math.min(IW - 1, Math.ceil(px + dotR));
 			const y0 = Math.max(0, Math.floor(py - dotR));
@@ -583,13 +625,92 @@ function renderKittyImage(s: AnimState): void {
 			for (let yy = y0; yy <= y1; yy++) {
 				for (let xx = x0; xx <= x1; xx++) {
 					const dd = Math.hypot(xx - px, yy - py);
-					if (dd < dotR) blendPx((yy * IW + xx) * 4, 255, 220, 140, alpha * (1 - dd / dotR));
+					if (dd < dotR) blendPx((yy * IW + xx) * 4, 255, 230, 170, alpha * (1 - dd / dotR));
 				}
 			}
 		}
 	}
 
-	// barge-in glitch: shifted horizontal bands
+	// PASS 7: HUD — tick dial, crosshair, gauges
+	for (let y = 0; y < IH; y++) {
+		const rowOff = y * IW;
+		for (let x = 0; x < IW; x++) {
+			const idx = rowOff + x;
+			const d = pixD[idx];
+			const theta = pixT[idx];
+			const pidx = idx * 4;
+
+			// tick dial (60 minor / 12 major, slow drift)
+			const tickPos = ((theta + s.t * 0.06) * 30) / Math.PI;
+			const tickFrac = ((tickPos % 1) + 1) % 1;
+			if (tickFrac < 0.22) {
+				const tickIdx = Math.floor(((tickPos % 60) + 60) % 60);
+				const major = tickIdx % 5 === 0;
+				const span = major ? 4.5 : 2.2;
+				if (Math.abs(d - tickR) < span) {
+					blendPx(pidx, accent[0], accent[1], accent[2], (major ? 0.55 : 0.26) * dimFactor);
+				}
+			}
+
+			// crosshair ticks (N/E/S/W targeting marks)
+			const Rh2 = Rh * 1.12;
+			if (d > Rh2 + 3 && d < Rh2 + 9) {
+				const angNorm = ((theta % (Math.PI / 2)) + Math.PI / 2) % (Math.PI / 2);
+				const toAxis = Math.min(angNorm, Math.PI / 2 - angNorm);
+				if (toAxis < 0.05) blendPx(pidx, accent[0], accent[1], accent[2], 0.7 * dimFactor);
+			}
+
+			// arc gauges (input left / output right)
+			if (Math.abs(d - gaugeR) < 3 && s.phase !== "idle" && s.phase !== "connecting") {
+				const ath = Math.abs(theta);
+				if (ath > Math.PI * 0.55 && (Math.PI - ath) / (Math.PI * 0.45) < s.envIn) {
+					blendPx(pidx, gaugeIn[0], gaugeIn[1], gaugeIn[2], 0.75);
+				}
+				if (ath < Math.PI * 0.45 && (Math.PI * 0.45 - ath) / (Math.PI * 0.45) < s.envOut) {
+					blendPx(pidx, gaugeOut[0], gaugeOut[1], gaugeOut[2], 0.75);
+				}
+			}
+
+			// state-entry scanline
+			if (s.phaseT < 0.45 && Math.abs(y - (s.phaseT / 0.45) * IH) < 2) {
+				blendPx(pidx, accent[0], accent[1], accent[2], 0.2 * (1 - s.phaseT / 0.45));
+			}
+		}
+	}
+
+	// corner brackets (HUD frame)
+	const m = 6;
+	const bl = M * 0.09;
+	const corners: Array<[number, number, number, number]> = [
+		[m, m, 1, 1],
+		[IW - 1 - m, m, -1, 1],
+		[m, IH - 1 - m, 1, -1],
+		[IW - 1 - m, IH - 1 - m, -1, -1],
+	];
+	for (const [sx, sy, dx, dy] of corners) {
+		for (let i = 0; i < bl; i++) {
+			for (let w = 0; w < 2; w++) {
+				const hx = sx + dx * i;
+				const hy = sy + dy * w;
+				const vx = sx + dx * w;
+				const vy = sy + dy * i;
+				if (hx >= 0 && hx < IW && hy >= 0 && hy < IH) blendPx((hy * IW + hx) * 4, accent[0], accent[1], accent[2], 0.5 * dimFactor);
+				if (vx >= 0 && vx < IW && vy >= 0 && vy < IH) blendPx((vy * IW + vx) * 4, accent[0], accent[1], accent[2], 0.5 * dimFactor);
+			}
+		}
+	}
+
+	// scanline texture (subtle CRT)
+	for (let y = 0; y < IH; y += 4) {
+		for (let x = 0; x < IW; x++) {
+			const pidx = (y * IW + x) * 4;
+			imgBuf[pidx] *= 0.92;
+			imgBuf[pidx + 1] *= 0.92;
+			imgBuf[pidx + 2] *= 0.92;
+		}
+	}
+
+	// barge-in glitch: shifted bands + chromatic split
 	if (s.phase === "bargein" && s.flash > 0.25) {
 		for (let b = 0; b < 4; b++) {
 			const y0 = Math.floor(Math.random() * IH);
@@ -608,30 +729,44 @@ function renderKittyImage(s: AnimState): void {
 				}
 			}
 		}
+		const shift = 3;
+		for (let y = 0; y < IH; y++) {
+			for (let x = IW - 1; x >= shift; x--) {
+				imgBuf[(y * IW + x) * 4] = imgBuf[(y * IW + (x - shift)) * 4];
+			}
+		}
 	}
 }
 
-function emitKittyImage(): string[] {
+function wrapKitty(seq: string): string {
+	return process.env.TMUX ? `\x1bPtmux;${seq.replace(/\x1b/g, "\x1b\x1b")}\x1b\\` : seq;
+}
+
+function emitKittyImage(bufId: number): string[] {
 	const b64 = Buffer.from(imgBuf).toString("base64");
 	const CHUNK = 4096;
 	const seqs: string[] = [];
 	for (let i = 0; i < b64.length; i += CHUNK) {
 		const chunk = b64.slice(i, i + CHUNK);
 		const more = i + CHUNK < b64.length ? 1 : 0;
-		// every frame re-transmits with placement (a=T) so the render self-heals
-		// after tmux pane redraws. Each chunk is a separate write and the caller
-		// paces them: bursting a whole frame in one write overwhelms ghostty's
-		// parser and the image is silently dropped.
-		const ctrl =
-			i === 0 ? `a=T,f=32,s=${IW},v=${IH},i=${IMG_ID},q=2,m=${more}` : `a=T,i=${IMG_ID},m=${more}`;
-		let seq = `\x1b_G${ctrl};${chunk}\x1b\\`;
-		if (process.env.TMUX) seq = `\x1bPtmux;${seq.replace(/\x1b/g, "\x1b\x1b")}\x1b\\`;
-		seqs.push(seq);
+		// fresh image ID per frame + a=T: ghostty ignores re-transmits to an
+		// existing ID, so animation = new ID each frame, delete the previous.
+		// The new frame displays on completion — BEFORE the old one is deleted.
+		const ctrl = i === 0 ? `a=T,f=32,s=${IW},v=${IH},i=${bufId},q=2,m=${more}` : `a=T,i=${bufId},m=${more}`;
+		seqs.push(wrapKitty(`\x1b_G${ctrl};${chunk}\x1b\\`));
 	}
 	return seqs;
 }
 
-function renderKittyFrame(s: AnimState, cols: number, rows: number, imgTop: number, imgLeft: number): { text: string; images: string[] } {
+function renderKittyFrame(
+	s: AnimState,
+	cols: number,
+	rows: number,
+	imgTop: number,
+	imgLeft: number,
+	backId: number,
+	frontId: number,
+): { text: string; images: string[] } {
 	renderKittyImage(s);
 	const [hue, sat] = PHASE_HUE[s.phase];
 	const bright = hslToRgb(hue, sat, 0.8);
@@ -667,10 +802,10 @@ function renderKittyFrame(s: AnimState, cols: number, rows: number, imgTop: numb
 	if (t2) out += `\x1b[${rows - 1};${Math.floor((cols - t2.length) / 2) + 1}H\x1b[38;2;${bright[0]};${bright[1]};${bright[2]}m${t2}`;
 
 	out += `\x1b[${imgTop + 1};${imgLeft + 1}H`;
-	let del = `\x1b_Ga=d,i=${IMG_ID}\x1b\\`;
-	if (process.env.TMUX) del = `\x1bPtmux;${del.replace(/\x1b/g, "\x1b\x1b")}\x1b\\`;
-	out += del;
-	return { text: out, images: emitKittyImage() };
+	const seqs = emitKittyImage(backId);
+	// new frame displayed on last-chunk completion; only then drop the old one
+	if (frontId > 0) seqs.push(wrapKitty(`\x1b_Ga=d,i=${frontId},q=2\x1b\\`));
+	return { text: out, images: seqs };
 }
 
 
@@ -683,9 +818,7 @@ async function live(): Promise<void> {
 	process.stdout.write("\x1b[?1049h\x1b[?25l"); // alt screen, hide cursor
 	const restore = () => {
 		if (useKitty) {
-			let del = `\x1b_Ga=d,i=${IMG_ID}\x1b\\`;
-			if (process.env.TMUX) del = `\x1bPtmux;${del.replace(/\x1b/g, "\x1b\x1b")}\x1b\\`;
-			process.stdout.write(del);
+			process.stdout.write(wrapKitty(`\x1b_Ga=d,d=a,q=2\x1b\\`));
 		}
 		process.stdout.write("\x1b[0m\x1b[?1049l\x1b[?25h");
 	};
@@ -695,7 +828,7 @@ async function live(): Promise<void> {
 	});
 
 	const s = newState();
-	const FPS = 15;
+	const FPS = 12;
 	const dt = 1 / FPS;
 	if (useKitty) {
 		const [cellW, cellH] = await queryCellSize();
@@ -709,7 +842,7 @@ async function live(): Promise<void> {
 			layout.rows = process.stdout.rows ?? 26;
 			const regionRows = Math.max(6, layout.rows - 9);
 			const regionCols = Math.max(12, layout.cols - 2);
-			const MAX_PIX = 320 * 320;
+			const MAX_PIX = 440 * 440;
 			const footPixW = regionCols * cellW;
 			const footPixH = regionRows * cellH;
 			const shrink = Math.min(1, Math.sqrt(MAX_PIX / (footPixW * footPixH)));
@@ -722,16 +855,16 @@ async function live(): Promise<void> {
 			layout.imgTop = 2 + Math.max(0, Math.floor((regionRows - renderedRows) / 2));
 		};
 		relayout();
-		// window resize re-runs the layout; the per-frame delete+place heals the image
 		process.stdout.on("resize", relayout);
+		let frameNo = 0;
 		for (;;) {
 			advance(s, dt);
-			const frame = renderKittyFrame(s, layout.cols, layout.rows, layout.imgTop, layout.imgLeft);
+			const back = IMG_ID + frameNo;
+			const front = frameNo > 0 ? back - 1 : 0;
+			const frame = renderKittyFrame(s, layout.cols, layout.rows, layout.imgTop, layout.imgLeft, back, front);
+			frameNo++;
 			process.stdout.write(frame.text);
-			for (const seq of frame.images) {
-				process.stdout.write(seq);
-				await Bun.sleep(0); // pace: separate syscalls so the terminal parser keeps up
-			}
+			process.stdout.write(frame.images.join(""));
 			await Bun.sleep(dt * 1000);
 		}
 	}
