@@ -366,25 +366,67 @@ function renderFrame(s: AnimState, cols: number, rows: number): string {
 // in-place animation updates (a=f). The ANSI path above is the fallback.
 
 const IMG_ID = 42;
-const IW = 256;
-const IH = 256;
-const IMG_COLS = 36; // cell footprint the image is scaled to
-const IMG_ROWS = 19;
+let IW = 256;
+let IH = 256;
 
-const pixD = new Float32Array(IW * IH);
-const pixT = new Float32Array(IW * IH);
-for (let y = 0; y < IH; y++) {
-	for (let x = 0; x < IW; x++) {
-		const dx = x - IW / 2;
-		const dy = y - IH / 2;
-		pixD[y * IW + x] = Math.hypot(dx, dy);
-		pixT[y * IW + x] = Math.atan2(dy, dx);
+let pixD = new Float32Array(0);
+let pixT = new Float32Array(0);
+
+function initGeometry(w: number, h: number): void {
+	IW = w;
+	IH = h;
+	pixD = new Float32Array(IW * IH);
+	pixT = new Float32Array(IW * IH);
+	for (let y = 0; y < IH; y++) {
+		for (let x = 0; x < IW; x++) {
+			const dx = x - IW / 2;
+			const dy = y - IH / 2;
+			pixD[y * IW + x] = Math.hypot(dx, dy);
+			pixT[y * IW + x] = Math.atan2(dy, dx);
+		}
+	}
+	imgBuf = new Uint8ClampedArray(IW * IH * 4);
+}
+
+// Cell pixel size via CSI 16t (xterm cell-size report). tmux answers for
+// the outer terminal; the response may arrive wrapped in DCS tmux with
+// doubled escapes, so parse the numeric core loosely. Rendering at exact
+// pixel dimensions (no c=/r= scaling) is what keeps the layout honest.
+async function queryCellSize(): Promise<[number, number]> {
+	const FALLBACK: [number, number] = [10, 20];
+	try {
+		// raw mode: the CSI response carries no newline, canonical mode would buffer it
+		const stdin = process.stdin as typeof process.stdin & { setRawMode?: (on: boolean) => void };
+		stdin.setRawMode?.(true);
+		const query = process.env.TMUX ? `\x1bPtmux;\x1b\x1b[16t\x1b\\` : `\x1b[16t`;
+		process.stdout.write(query);
+		const { promise, resolve } = Promise.withResolvers<[number, number]>();
+		const timer = setTimeout(() => resolve(FALLBACK), 800);
+		const reader = Bun.stdin.stream().getReader();
+		let buf = "";
+		while (true) {
+			const { value, done } = await reader.read();
+			if (done) break;
+			buf += typeof value === "string" ? value : new TextDecoder().decode(value);
+			const m = buf.match(/\[6;(\d+);(\d+)t/);
+			if (m) {
+				clearTimeout(timer);
+				resolve([Number(m[2]), Number(m[1])]); // report is height;width
+				break;
+			}
+			if (buf.length > 512) break;
+		}
+		const result = await promise;
+		stdin.setRawMode?.(false);
+		return result;
+	} catch {
+		return FALLBACK;
 	}
 }
 
 const WOB_BUCKETS = 512;
 const wobTable = new Float32Array(WOB_BUCKETS);
-const imgBuf = new Uint8ClampedArray(IW * IH * 4);
+let imgBuf = new Uint8ClampedArray(IW * IH * 4);
 const trails: Array<Array<[number, number]>> = [[], [], [], [], []];
 
 function kittyGraphicsSupported(): boolean {
@@ -569,26 +611,27 @@ function renderKittyImage(s: AnimState): void {
 	}
 }
 
-function emitKittyImage(): string {
+function emitKittyImage(): string[] {
 	const b64 = Buffer.from(imgBuf).toString("base64");
 	const CHUNK = 4096;
-	let seq = "";
+	const seqs: string[] = [];
 	for (let i = 0; i < b64.length; i += CHUNK) {
 		const chunk = b64.slice(i, i + CHUNK);
 		const more = i + CHUNK < b64.length ? 1 : 0;
-		// every frame re-transmits with placement (a=T): tmux pane redraws
-		// destroy image placements, and a=f cannot recreate them — re-placing
-		// each frame makes the render self-healing within one frame.
+		// every frame re-transmits with placement (a=T) so the render self-heals
+		// after tmux pane redraws. Each chunk is a separate write and the caller
+		// paces them: bursting a whole frame in one write overwhelms ghostty's
+		// parser and the image is silently dropped.
 		const ctrl =
-			i === 0 ? `a=T,f=32,s=${IW},h=${IH},i=${IMG_ID},c=${IMG_COLS},r=${IMG_ROWS},q=2,m=${more}` : `a=T,i=${IMG_ID},m=${more}`;
-		seq += `\x1b_G${ctrl};${chunk}\x1b\\`;
+			i === 0 ? `a=T,f=32,s=${IW},v=${IH},i=${IMG_ID},q=2,m=${more}` : `a=T,i=${IMG_ID},m=${more}`;
+		let seq = `\x1b_G${ctrl};${chunk}\x1b\\`;
+		if (process.env.TMUX) seq = `\x1bPtmux;${seq.replace(/\x1b/g, "\x1b\x1b")}\x1b\\`;
+		seqs.push(seq);
 	}
-	// tmux passthrough: wrap in DCS tmux; with doubled escapes
-	if (process.env.TMUX) seq = `\x1bPtmux;${seq.replace(/\x1b/g, "\x1b\x1b")}\x1b\\`;
-	return seq;
+	return seqs;
 }
 
-function renderKittyFrame(s: AnimState, cols: number, rows: number, imgTop: number, imgLeft: number): string {
+function renderKittyFrame(s: AnimState, cols: number, rows: number, imgTop: number, imgLeft: number): { text: string; images: string[] } {
 	renderKittyImage(s);
 	const [hue, sat] = PHASE_HUE[s.phase];
 	const bright = hslToRgb(hue, sat, 0.8);
@@ -626,8 +669,8 @@ function renderKittyFrame(s: AnimState, cols: number, rows: number, imgTop: numb
 	out += `\x1b[${imgTop + 1};${imgLeft + 1}H`;
 	let del = `\x1b_Ga=d,i=${IMG_ID}\x1b\\`;
 	if (process.env.TMUX) del = `\x1bPtmux;${del.replace(/\x1b/g, "\x1b\x1b")}\x1b\\`;
-	out += del + emitKittyImage();
-	return out;
+	out += del;
+	return { text: out, images: emitKittyImage() };
 }
 
 
@@ -636,7 +679,7 @@ function renderKittyFrame(s: AnimState, cols: number, rows: number, imgTop: numb
 async function live(): Promise<void> {
 	const termCols = process.stdout.columns ?? 80;
 	const termRows = process.stdout.rows ?? 26;
-	const useKitty = kittyGraphicsSupported() && termCols >= IMG_COLS + 10 && termRows >= IMG_ROWS + 8;
+	const useKitty = kittyGraphicsSupported() && termCols >= 40 && termRows >= 16;
 	process.stdout.write("\x1b[?1049h\x1b[?25l"); // alt screen, hide cursor
 	const restore = () => {
 		if (useKitty) {
@@ -652,14 +695,43 @@ async function live(): Promise<void> {
 	});
 
 	const s = newState();
-	const FPS = 20;
+	const FPS = 15;
 	const dt = 1 / FPS;
 	if (useKitty) {
-		const imgLeft = Math.floor((termCols - IMG_COLS) / 2);
-		const imgTop = 2;
+		const [cellW, cellH] = await queryCellSize();
+		// Layout contract: rows 0-1 status, rows 2..(rows-8) image region,
+		// bottom 6 rows waveform + transcript. The image is rasterized at exact
+		// pixel size (capped for frame budget) and placed at natural size, so
+		// what is rendered is what appears — no terminal-side scaling guesses.
+		const layout = { cols: 0, rows: 0, imgLeft: 0, imgTop: 0 };
+		const relayout = (): void => {
+			layout.cols = process.stdout.columns ?? 80;
+			layout.rows = process.stdout.rows ?? 26;
+			const regionRows = Math.max(6, layout.rows - 9);
+			const regionCols = Math.max(12, layout.cols - 2);
+			const MAX_PIX = 320 * 320;
+			const footPixW = regionCols * cellW;
+			const footPixH = regionRows * cellH;
+			const shrink = Math.min(1, Math.sqrt(MAX_PIX / (footPixW * footPixH)));
+			const pixW = Math.max(64, Math.round(footPixW * shrink));
+			const pixH = Math.max(64, Math.round(footPixH * shrink));
+			initGeometry(pixW, pixH);
+			const renderedCols = Math.ceil(pixW / cellW);
+			const renderedRows = Math.ceil(pixH / cellH);
+			layout.imgLeft = Math.max(0, Math.floor((layout.cols - renderedCols) / 2));
+			layout.imgTop = 2 + Math.max(0, Math.floor((regionRows - renderedRows) / 2));
+		};
+		relayout();
+		// window resize re-runs the layout; the per-frame delete+place heals the image
+		process.stdout.on("resize", relayout);
 		for (;;) {
 			advance(s, dt);
-			process.stdout.write(renderKittyFrame(s, termCols, termRows, imgTop, imgLeft));
+			const frame = renderKittyFrame(s, layout.cols, layout.rows, layout.imgTop, layout.imgLeft);
+			process.stdout.write(frame.text);
+			for (const seq of frame.images) {
+				process.stdout.write(seq);
+				await Bun.sleep(0); // pace: separate syscalls so the terminal parser keeps up
+			}
 			await Bun.sleep(dt * 1000);
 		}
 	}
