@@ -24,6 +24,8 @@ type ExaSearchParamType = ExaSearchType | "keyword";
 export interface ExaSearchParams {
 	query: string;
 	num_results?: number;
+	/** Abort signal — lets a cancelled agent turn kill the request in flight. */
+	signal?: AbortSignal;
 	type?: ExaSearchParamType;
 	include_domains?: string[];
 	exclude_domains?: string[];
@@ -179,6 +181,7 @@ async function callExaSearch(apiKey: string, params: ExaSearchParams): Promise<E
 			"x-api-key": apiKey,
 		},
 		body: JSON.stringify(body),
+		signal: params.signal,
 	});
 
 	if (!response.ok) {
@@ -190,6 +193,8 @@ async function callExaSearch(apiKey: string, params: ExaSearchParams): Promise<E
 }
 
 async function callExaMcpSearch(params: ExaSearchParams): Promise<ExaSearchResponse> {
+	// Note: the MCP path does not propagate the abort signal (transport-level
+	// limitation); the direct API path above does.
 	const response = await callExaTool("web_search_exa", { ...params }, findApiKey());
 	if (isSearchResponse(response)) {
 		return response as ExaSearchResponse;
@@ -259,6 +264,7 @@ export class ExaProvider extends SearchProvider {
 		return searchExa({
 			query: params.query,
 			num_results: params.numSearchResults ?? params.limit,
+			signal: params.signal,
 		});
 	}
 }

@@ -39,7 +39,6 @@ class FakeConsultSession implements ConsultSession {
 		return this.streaming;
 	}
 
-
 	agent = {
 		state: { tools: [{ name: "read" }, { name: "bash" }] },
 		setTools: (tools: unknown[]): void => {
@@ -247,5 +246,19 @@ describe("LiveConsultBridge", () => {
 
 		freshSession.emit({ type: "agent_end", messages: assistantMessages("结果") });
 		expect(await pending).toBe("结果");
+	});
+
+	test("currentTask tracks the in-flight consult for reconnect announcements", async () => {
+		const session = new FakeConsultSession();
+		const bridge = new LiveConsultBridge({ sessionFactory: async () => session });
+		expect(bridge.currentTask).toBeUndefined();
+
+		const pending = bridge.consult("上网查一下 X");
+		await Bun.sleep(10);
+		expect(bridge.currentTask).toBe("上网查一下 X");
+
+		session.emit({ type: "agent_end", messages: assistantMessages("结果") });
+		await pending;
+		expect(bridge.currentTask).toBeUndefined();
 	});
 });

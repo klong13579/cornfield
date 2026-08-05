@@ -39,6 +39,8 @@ export interface GeminiSearchParams extends GeminiToolParams {
 	query: string;
 	system_prompt?: string;
 	num_results?: number;
+	/** Abort signal — lets a cancelled agent turn kill the request in flight. */
+	signal?: AbortSignal;
 	/** Maximum output tokens. */
 	max_output_tokens?: number;
 	/** Sampling temperature (0–1). Lower = more focused/factual. */
@@ -239,6 +241,7 @@ async function callGeminiSearch(
 	maxOutputTokens?: number,
 	temperature?: number,
 	toolParams: GeminiToolParams = {},
+	signal?: AbortSignal,
 ): Promise<{
 	answer: string;
 	sources: SearchSource[];
@@ -321,8 +324,11 @@ async function callGeminiSearch(
 						...headers,
 					},
 					body: JSON.stringify(requestBody),
+					signal,
 				});
 			} catch (error) {
+				// Never retry an abort — propagate it out of the provider chain.
+				if (signal?.aborted) throw error;
 				if (attempt < MAX_RETRIES) {
 					await Bun.sleep(BASE_DELAY_MS * 2 ** attempt);
 					continue;
@@ -560,6 +566,7 @@ export async function searchGemini(params: GeminiSearchParams): Promise<SearchRe
 			code_execution: params.code_execution,
 			url_context: params.url_context,
 		},
+		params.signal,
 	);
 
 	let sources = result.sources;
@@ -599,6 +606,7 @@ export class GeminiProvider extends SearchProvider {
 			google_search: params.googleSearch,
 			code_execution: params.codeExecution,
 			url_context: params.urlContext,
+			signal: params.signal,
 		});
 	}
 }

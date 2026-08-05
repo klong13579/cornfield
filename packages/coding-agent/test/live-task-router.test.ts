@@ -143,6 +143,20 @@ describe("LiveTaskRouter", () => {
 		expect(session.sent).toEqual([]);
 	});
 
+	test("currentTask tracks the in-flight task for reconnect announcements", async () => {
+		const session = new FakeTaskSession();
+		const router = new LiveTaskRouter({ session, gate: armedGate() });
+		expect(router.currentTask).toBeUndefined();
+
+		const pending = router.dispatch("把 TODO.md 第一条标完成");
+		await Bun.sleep(10);
+		expect(router.currentTask).toBe("把 TODO.md 第一条标完成");
+
+		session.emit({ type: "agent_end", messages: assistantMessages("完成") });
+		await pending;
+		expect(router.currentTask).toBeUndefined();
+	});
+
 	// ---------------------------------------------------------------- P1b ---
 
 	test("status reports: idle, thinking, and current tool activity", async () => {

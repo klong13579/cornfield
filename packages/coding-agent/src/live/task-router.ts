@@ -58,10 +58,22 @@ export class LiveTaskRouter {
 	#disposed = false;
 	/** Last tool activity line — the material for spoken status reports. */
 	#lastActivity: string | undefined;
+	/** The in-flight task text — reconnect state material (undefined when idle). */
+	#currentTask: string | undefined;
 
 	constructor(options: LiveTaskRouterOptions) {
 		this.#options = options;
 		this.#summaryMaxChars = options.summaryMaxChars ?? DEFAULT_SUMMARY_MAX_CHARS;
+	}
+
+	/** Whether a voice task is currently running (the control scope). */
+	get inFlight(): boolean {
+		return this.#options.gate.inFlight;
+	}
+
+	/** The in-flight task text, if any. */
+	get currentTask(): string | undefined {
+		return this.#currentTask;
 	}
 
 	/**
@@ -88,11 +100,13 @@ export class LiveTaskRouter {
 
 		this.#options.gate.beginTask();
 		this.#lastActivity = undefined;
+		this.#currentTask = task;
 		try {
 			// Delivery of the summary is owned by the controller's handoff path
 			// (function_call_output when fast, deferred conversation turn when late).
 			return await this.#run(task);
 		} finally {
+			this.#currentTask = undefined;
 			this.#options.gate.endTask();
 		}
 	}
@@ -100,12 +114,6 @@ export class LiveTaskRouter {
 	dispose(): void {
 		this.#disposed = true;
 	}
-
-	/** Whether a voice task is currently running (the control scope). */
-	get inFlight(): boolean {
-		return this.#options.gate.inFlight;
-	}
-
 	/**
 	 * P1b §6: spoken progress report. Falls back gracefully — no tool events
 	 * yet means the model is still thinking.

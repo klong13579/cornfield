@@ -20,6 +20,8 @@ const DEFAULT_NUM_RESULTS = 10;
 export interface ZaiSearchParams {
 	query: string;
 	num_results?: number;
+	/** Abort signal — lets a cancelled agent turn kill the request in flight. */
+	signal?: AbortSignal;
 }
 
 interface ZaiSearchResult {
@@ -55,7 +57,7 @@ export async function findApiKey(): Promise<string | null> {
 	return findCredential(getEnvApiKey("zai"), "zai");
 }
 
-async function callZaiTool(apiKey: string, args: Record<string, unknown>): Promise<unknown> {
+async function callZaiTool(apiKey: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> {
 	const response = await fetch(ZAI_MCP_URL, {
 		method: "POST",
 		headers: {
@@ -72,6 +74,7 @@ async function callZaiTool(apiKey: string, args: Record<string, unknown>): Promi
 				arguments: args,
 			},
 		}),
+		signal,
 	});
 
 	if (!response.ok) {
@@ -157,8 +160,10 @@ async function callZaiSearch(apiKey: string, params: ZaiSearchParams): Promise<u
 	let lastError: unknown;
 	for (let i = 0; i < attempts.length; i++) {
 		try {
-			return await callZaiTool(apiKey, attempts[i]);
+			return await callZaiTool(apiKey, attempts[i], params.signal);
 		} catch (error) {
+			// Never fall through to the next attempt shape on an abort.
+			if (params.signal?.aborted) throw error;
 			lastError = error;
 			const isLastAttempt = i === attempts.length - 1;
 			if (isLastAttempt) {
@@ -302,6 +307,7 @@ export class ZaiProvider extends SearchProvider {
 		return searchZai({
 			query: params.query,
 			num_results: params.numSearchResults ?? params.limit,
+			signal: params.signal,
 		});
 	}
 }

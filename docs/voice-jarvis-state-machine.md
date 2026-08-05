@@ -146,10 +146,11 @@ final 用户转写 → hold ──intent=query──► flush（recorder 记录�
 | 16 | 并行工具双确认 | #confirmChain 串行，一次只问一个 | ✅ gate 单测 |
 | 17 | 取消状态被后续操作冲掉 | 按 invocation 隔离 | ✅ consult 回归单测 |
 
-## 已知缺口（诚实清单）
+## 已知缺口（诚实清单，2026-08-06 二轮更新）
 
-1. **abort 不能打断运行中的工具**（web_search 实测拖 67s）。当前靠「busy 换新会话」绕过 consult 侧；task 侧 abort 同样受工具拖累——红级 bash 长命令中说「停」，要等命令自己结束。彻底解法：工具级信号响应（另立项）。
-2. **重连后 realtime 上下文丢失**：任务还在跑，但模型「忘了」任务存在；挂起确认必然超时。可做：重连后注入「当前有任务在执行」的状态摘要（未实现）。
-3. **模型合规性只能靠提示词**：假报「已取消」、编造系统状态——提示词已三度加固，剩余靠验收观察。
-4. **面板相位与任务态不同步**：task 执行中相位回落 listening，面板活动行只在 thinking 相位渲染——工作现场以 TUI 聊天流为准（设计如此，但面板体验可再打磨）。
-5. **consult 的 thinkingLevel:"off" 未生效**（provider 层映射问题，实测有 thinking 输出）——只影响 consult 延迟。
+1. ~~abort 不能打断运行中的工具~~ **大部分已修**：web_search 全链接通 AbortSignal（executeSearch 透传 + anthropic/gemini/exa/jina/zai 五个 provider 补接；abort 不再落链到下一个 provider）；bash 本就完善。残留：exa 的 MCP 路径不传信号（传输层限制，已注释）；python 内核/task 子代理的中断属 agent 层通用问题，不在语音范围。
+2. ~~重连后 realtime 上下文丢失~~ **已修**：重连完成（connecting→listening）时若有任务/查询在跑，注入状态摘要（任务文本来自 router/bridge 的 currentTask），模型不再凭空编「还在处理」。残留：重连前挂起的确认必然 15s 超时（新会话没有确认上下文）——可接受。
+3. **模型合规性只能靠提示词**：假报「已取消」、编造系统状态——提示词已四度加固（含「control 返回是唯一权威」「没事不许说已取消」），剩余靠验收观察。
+4. ~~面板相位与任务态不同步~~ **已修**：listening 相位渲染「▸ 执行中」活动行；任务/查询结束后清理活动行。
+5. **consult 的 thinkingLevel:"off" 对 deepseek 系模型不生效**（根因已查实）：`toReasoningEffort("off")` 返回 undefined，与「未设置」不可区分；openai thinkingFormat 分支在 reasoning=undefined 时什么都不发，服务端默认 thinking 开启。qwen/zai 格式不受影响（显式发 enable_thinking:false / thinking.disabled）。候选修复（需对 narwal-plan 端点实测后二选一）：a) openai 格式下显式 off 发 `reasoning_effort: "none"`（codex 传输已有 none 档先例）；b) 按模型族补 enable_thinking。未实测不盲发参数——400 风险大于 thinking 多耗的延迟。
+6. **abort 落在下一个 loop 边界**（不变）：运行中的工具先跑完。web_search 修复后该窗口从「整个请求时长」缩到「信号传播时长」；红级 bash 长命令中说「停」，仍要等命令自己结束。

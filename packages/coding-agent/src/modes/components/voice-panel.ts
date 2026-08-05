@@ -405,11 +405,19 @@ export class VoicePanel implements Component {
 				];
 			}
 			case "listening": {
-				return [
+				const lines = [
 					line(this.#color("accent", this.#levelBar(inner, this.#displayInput))),
 					line(this.#color("accent", "● 聆听中")),
-					...this.#transcriptLines(inner, line),
 				];
+				// A task/consult may still be executing while the phase is back to
+				// listening (post-filler): keep its activity visible.
+				if (this.#toolLine) {
+					lines.push(line(this.#color("dim", truncateToWidth(`▸ 执行中: ${this.#toolLine}`, inner))));
+				} else if (this.#consultTask) {
+					lines.push(line(this.#color("dim", truncateToWidth(`▸ 执行中: ${this.#consultTask}`, inner))));
+				}
+				lines.push(...this.#transcriptLines(inner, line));
+				return lines;
 			}
 			case "thinking": {
 				const badge = `${this.#spinnerFrames()[this.#spinnerIndex()]} 思考中`;

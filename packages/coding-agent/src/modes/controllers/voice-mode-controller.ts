@@ -38,6 +38,9 @@ export class VoiceModeController {
 	#turnBuffer: LiveTurnBuffer | undefined;
 	/** Set when a task/confirm intent arrives BEFORE its final transcript (race). */
 	#suppressNextUserTurn = false;
+	/** Reconnect tracking: announce in-flight state after the channel comes back. */
+	#voiceConnectedOnce = false;
+	#reconnecting = false;
 	#panelState: VoicePanelState = { phase: "connecting", inputLevel: 0, outputLevel: 0 };
 
 	constructor(ctx: InteractiveModeContext) {
@@ -97,6 +100,8 @@ export class VoiceModeController {
 
 	async #start(): Promise<void> {
 		const settings = this.#ctx.settings;
+		this.#voiceConnectedOnce = false;
+		this.#reconnecting = false;
 		const model = settings.get("voice.model") ?? "qwen-audio-3.0-realtime-flash";
 		const registry = this.#ctx.session.modelRegistry;
 		const baseUrl = registry.getProviderBaseUrl(REALTIME_PROVIDER);
@@ -162,11 +167,15 @@ export class VoiceModeController {
 			},
 			onConsult: async task => {
 				this.#pushPanelState({ consultTask: task });
-				return this.#consultBridge?.consult(task) ?? "（consult 未初始化）";
+				const result = (await this.#consultBridge?.consult(task)) ?? "（consult 未初始化）";
+				this.#pushPanelState({ consultTask: "", toolLine: "" });
+				return result;
 			},
 			onTask: async task => {
 				this.#pushPanelState({ consultTask: task });
-				return this.#taskRouter?.dispatch(task) ?? "（任务派发未初始化）";
+				const result = (await this.#taskRouter?.dispatch(task)) ?? "（任务派发未初始化）";
+				this.#pushPanelState({ consultTask: "", toolLine: "" });
+				return result;
 			},
 			onConfirmDecision: decision => this.#gate?.resolveDecision(decision),
 			onControl: async (action, text) => {
@@ -230,6 +239,38 @@ export class VoiceModeController {
 	#onPhase(phase: LivePhase): void {
 		const error = phase === "error" ? "语音通道异常，按 alt+v 重连" : undefined;
 		this.#pushPanelState({ phase, error });
+		// Reconnect tracking: "connecting" after the first connection means the
+		// transport dropped; the next listening/muted marks the fresh server session.
+		if (phase === "connecting" && this.#voiceConnectedOnce) this.#reconnecting = true;
+		if (phase === "listening" || phase === "muted") {
+			if (!this.#voiceConnectedOnce) {
+				this.#voiceConnectedOnce = true;
+			} else if (this.#reconnecting) {
+				this.#reconnecting = false;
+				this.#announceResumedState();
+			}
+		}
+	}
+
+	/**
+	 * After a reconnect the realtime conversation is gone (fresh server session).
+	 * If a task/consult is still executing, tell the model — otherwise it has no
+	 * idea work is in flight and improvises state ("还在处理" phantoms).
+	 */
+	#announceResumedState(): void {
+		const parts: string[] = [];
+		if (this.#taskRouter?.inFlight) {
+			const task = this.#taskRouter.currentTask;
+			parts.push(task ? `任务「${task}」仍在主会话执行中` : "一个任务仍在主会话执行中");
+		}
+		if (this.#consultBridge?.busy) {
+			const query = this.#consultBridge.currentTask;
+			parts.push(query ? `查询「${query}」仍在执行中` : "一个查询仍在执行中");
+		}
+		if (parts.length === 0) return;
+		this.#session?.speakConfirmationNote(
+			`（系统提示：语音通道刚刚重连，之前的对话上下文已丢失。重连前的状态：${parts.join("；")}。它们正常继续，无需重新派发；用户能看到屏幕。除非用户问起，不必主动提及重连。）`,
+		);
 	}
 	#onTranscript(transcript: LiveTranscript): void {
 		this.#pushPanelState({ transcript });

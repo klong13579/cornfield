@@ -214,6 +214,8 @@ export class LiveConsultBridge {
 	/** The in-flight consult invocation (undefined when idle). */
 	#active: ConsultInvocation | undefined;
 	#activity: string | undefined;
+	/** The in-flight consult task text — reconnect state material. */
+	#currentTask: string | undefined;
 
 	constructor(options: LiveConsultBridgeOptions = {}) {
 		this.#options = options;
@@ -227,6 +229,11 @@ export class LiveConsultBridge {
 	/** Last tool activity line of the in-flight consult (status material). */
 	get activity(): string | undefined {
 		return this.#activity;
+	}
+
+	/** The in-flight consult task text, if any. */
+	get currentTask(): string | undefined {
+		return this.#active ? this.#currentTask : undefined;
 	}
 
 	/**
@@ -249,13 +256,14 @@ export class LiveConsultBridge {
 			// A previous turn (usually a cancelled one whose tool is still draining
 			// — abort lands at the next loop boundary) holds the session. Consult
 			// queries are stateless read-only: take a fresh session instead of
-				// queueing behind a corpse and surfacing AgentBusyError to the user.
+			// queueing behind a corpse and surfacing AgentBusyError to the user.
 			logger.info("voice consult session busy, spinning up a fresh one");
 			session = await this.#replaceSession();
 		}
 		const timeoutMs = this.#options.timeoutMs ?? DEFAULT_CONSULT_TIMEOUT_MS;
 		const invocation: ConsultInvocation = { cancelled: false, abort: () => session.abort() };
 		this.#activity = undefined;
+		this.#currentTask = task;
 		this.#active = invocation;
 
 		const { promise, resolve } = Promise.withResolvers<string>();
@@ -272,6 +280,7 @@ export class LiveConsultBridge {
 			if (this.#active === invocation) {
 				this.#active = undefined;
 				this.#activity = undefined;
+				this.#currentTask = undefined;
 			}
 		};
 
