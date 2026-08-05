@@ -582,7 +582,7 @@ function emitKittyImage(first: boolean): string {
 		} else {
 			ctrl = i === 0 ? `a=f,i=${IMG_ID},q=2,m=${more}` : `a=f,i=${IMG_ID},m=${more}`;
 		}
-		seq += `\x1bG${ctrl};${chunk}\x1b\\`;
+		seq += `\x1b_G${ctrl};${chunk}\x1b\\`;
 	}
 	// tmux passthrough: wrap in DCS tmux; with doubled escapes
 	if (process.env.TMUX) seq = `\x1bPtmux;${seq.replace(/\x1b/g, "\x1b\x1b")}\x1b\\`;
@@ -642,7 +642,7 @@ async function live(): Promise<void> {
 	process.stdout.write("\x1b[?1049h\x1b[?25l"); // alt screen, hide cursor
 	const restore = () => {
 		if (useKitty) {
-			let del = `\x1bGa=d,i=${IMG_ID}\x1b\\`;
+			let del = `\x1b_Ga=d,i=${IMG_ID}\x1b\\`;
 			if (process.env.TMUX) del = `\x1bPtmux;${del.replace(/\x1b/g, "\x1b\x1b")}\x1b\\`;
 			process.stdout.write(del);
 		}
