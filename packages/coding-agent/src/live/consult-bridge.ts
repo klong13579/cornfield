@@ -84,6 +84,7 @@ export interface ConsultSession {
 	sendUserMessage(text: string): Promise<void>;
 	subscribe(listener: (event: ConsultEvent) => void): () => void;
 	abort(): Promise<void>;
+	readonly isStreaming: boolean;
 	agent: {
 		state: { tools: Array<{ name: string }> };
 		setTools(tools: unknown[]): void;
@@ -200,13 +201,18 @@ async function defaultSessionFactory(cwd: string | undefined): Promise<ConsultSe
 	return session as unknown as ConsultSession;
 }
 
+/** Per-invocation cancel state — survives later consults starting/failing. */
+interface ConsultInvocation {
+	cancelled: boolean;
+	abort(): Promise<void>;
+}
+
 export class LiveConsultBridge {
 	readonly #options: LiveConsultBridgeOptions;
 	#session: ConsultSession | undefined;
 	#pending: Promise<ConsultSession> | undefined;
-	/** Abort handle for the in-flight consult (undefined when idle). */
-	#activeAbort: (() => Promise<void>) | undefined;
-	#cancelling = false;
+	/** The in-flight consult invocation (undefined when idle). */
+	#active: ConsultInvocation | undefined;
 	#activity: string | undefined;
 
 	constructor(options: LiveConsultBridgeOptions = {}) {
@@ -215,7 +221,7 @@ export class LiveConsultBridge {
 
 	/** Whether a consult is currently executing. */
 	get busy(): boolean {
-		return this.#activeAbort !== undefined;
+		return this.#active !== undefined;
 	}
 
 	/** Last tool activity line of the in-flight consult (status material). */
@@ -226,21 +232,31 @@ export class LiveConsultBridge {
 	/**
 	 * Cancel the in-flight consult (P1 voice "stop"). The aborted agent_end
 	 * resolves consult() with a cancellation closure instead of the result, so
-	 * the late result can never be spoken after the user cancelled.
+	 * the late result can never be spoken after the user cancelled. Note: abort
+	 * lands at the next loop boundary — a running tool (e.g. a slow web_search)
+	 * drains first; the busy-session handling in consult() covers that window.
 	 */
 	abortCurrent(): boolean {
-		if (!this.#activeAbort) return false;
-		this.#cancelling = true;
-		void this.#activeAbort();
+		if (!this.#active) return false;
+		this.#active.cancelled = true;
+		void this.#active.abort();
 		return true;
 	}
 
 	async consult(task: string): Promise<string> {
-		const session = await this.#ensureSession();
+		let session = await this.#ensureSession();
+		if (session.isStreaming) {
+			// A previous turn (usually a cancelled one whose tool is still draining
+			// — abort lands at the next loop boundary) holds the session. Consult
+			// queries are stateless read-only: take a fresh session instead of
+				// queueing behind a corpse and surfacing AgentBusyError to the user.
+			logger.info("voice consult session busy, spinning up a fresh one");
+			session = await this.#replaceSession();
+		}
 		const timeoutMs = this.#options.timeoutMs ?? DEFAULT_CONSULT_TIMEOUT_MS;
-		this.#cancelling = false;
+		const invocation: ConsultInvocation = { cancelled: false, abort: () => session.abort() };
 		this.#activity = undefined;
-		this.#activeAbort = () => session.abort();
+		this.#active = invocation;
 
 		const { promise, resolve } = Promise.withResolvers<string>();
 		let timedOut = false;
@@ -252,21 +268,25 @@ export class LiveConsultBridge {
 			resolve("（任务比较重，执行超时了，已转后台继续处理，结果出来后给你。）");
 		}, timeoutMs);
 
+		const releaseActive = (): void => {
+			if (this.#active === invocation) {
+				this.#active = undefined;
+				this.#activity = undefined;
+			}
+		};
+
 		const unsubscribe = session.subscribe(event => {
 			if (event.type === "tool_execution_start" && event.toolName) {
 				const line = summarizeActivity(event.toolName, event.args);
-				this.#activity = line;
+				if (this.#active === invocation) this.#activity = line;
 				if (!timedOut) this.#options.onActivity?.(line);
 				return;
 			}
 			if (event.type === "agent_end") {
 				clearTimeout(timer);
 				unsubscribe();
-				this.#activeAbort = undefined;
-				this.#activity = undefined;
-				const cancelled = this.#cancelling;
-				this.#cancelling = false;
-				if (cancelled) {
+				releaseActive();
+				if (invocation.cancelled) {
 					const closure =
 						"（注意：这个查询已被用户取消，没有结果。如果你还没告诉用户，简短说一句已取消；如果已经说过，不必重复，也不要播报任何结果。）";
 					if (timedOut) {
@@ -291,9 +311,7 @@ export class LiveConsultBridge {
 		session.sendUserMessage(task).catch(err => {
 			clearTimeout(timer);
 			unsubscribe();
-			this.#activeAbort = undefined;
-			this.#activity = undefined;
-			this.#cancelling = false;
+			releaseActive();
 			logger.warn("voice consult send failed", { error: String(err) });
 			resolve(`（任务发送失败：${err instanceof Error ? err.message : String(err)}）`);
 		});
@@ -303,6 +321,13 @@ export class LiveConsultBridge {
 	async #ensureSession(): Promise<ConsultSession> {
 		if (this.#session) return this.#session;
 		this.#pending ??= (this.#options.sessionFactory ?? (() => defaultSessionFactory(this.#options.cwd)))();
+		this.#session = await this.#pending;
+		return this.#session;
+	}
+
+	/** Drop the busy cached session and create a fresh one. */
+	async #replaceSession(): Promise<ConsultSession> {
+		this.#pending = (this.#options.sessionFactory ?? (() => defaultSessionFactory(this.#options.cwd)))();
 		this.#session = await this.#pending;
 		return this.#session;
 	}

@@ -11,6 +11,7 @@ class FakeConsultSession implements ConsultSession {
 	toolsSet: string[][] = [];
 	failNextSend: Error | undefined;
 	aborted = 0;
+	streaming = false;
 
 	async sendUserMessage(text: string): Promise<void> {
 		if (this.failNextSend) {
@@ -33,6 +34,11 @@ class FakeConsultSession implements ConsultSession {
 		this.aborted += 1;
 		return Promise.resolve();
 	}
+
+	get isStreaming(): boolean {
+		return this.streaming;
+	}
+
 
 	agent = {
 		state: { tools: [{ name: "read" }, { name: "bash" }] },
@@ -201,5 +207,45 @@ describe("LiveConsultBridge", () => {
 		session.emit({ type: "agent_end", messages: assistantMessages("完成") });
 		await pending;
 		expect(bridge.activity).toBeUndefined();
+	});
+
+	test("cancel state survives a later consult's send failure (per-invocation)", async () => {
+		const session = new FakeConsultSession();
+		const bridge = new LiveConsultBridge({ sessionFactory: async () => session });
+		const first = bridge.consult("查询一");
+		await Bun.sleep(10);
+		expect(bridge.abortCurrent()).toBe(true);
+
+		// A second consult attempt fails at send — must not clobber the first
+		// invocation's cancelled state (the 23:53 live-acceptance regression).
+		session.failNextSend = new Error("busy");
+		const second = await bridge.consult("查询二");
+		expect(second).toContain("任务发送失败");
+
+		// The first consult's late agent_end still resolves as cancelled.
+		session.emit({ type: "agent_end", messages: assistantMessages("迟到的结果") });
+		expect(await first).toContain("已被用户取消");
+	});
+
+	test("busy session is replaced with a fresh one instead of erroring", async () => {
+		const oldSession = new FakeConsultSession();
+		oldSession.streaming = true; // a cancelled turn still draining
+		const freshSession = new FakeConsultSession();
+		let created = 0;
+		const bridge = new LiveConsultBridge({
+			sessionFactory: async () => {
+				created += 1;
+				return created === 1 ? oldSession : freshSession;
+			},
+		});
+
+		const pending = bridge.consult("新查询");
+		await Bun.sleep(10);
+		expect(created).toBe(2);
+		expect(oldSession.sent).toEqual([]);
+		expect(freshSession.sent).toEqual(["新查询"]);
+
+		freshSession.emit({ type: "agent_end", messages: assistantMessages("结果") });
+		expect(await pending).toBe("结果");
 	});
 });
