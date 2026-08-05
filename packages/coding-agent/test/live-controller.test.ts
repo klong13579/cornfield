@@ -5,7 +5,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { pcm16ToBase64, RealtimeWsTransport } from "@oh-my-pi/pi-ai";
 import { LiveSessionController } from "../src/live/controller";
-import type { LiveAudioSink, LivePhase, LiveTranscript } from "../src/live/types";
+import type { LiveAudioSink, LiveIntent, LivePhase, LiveTranscript } from "../src/live/types";
 
 // ------------------------------------------------------------ WS server ---
 
@@ -121,6 +121,7 @@ interface Harness {
 	phases: LivePhase[];
 	transcripts: LiveTranscript[];
 	terminals: Array<Error | undefined>;
+	intents: LiveIntent[];
 }
 
 interface HarnessOptions {
@@ -128,6 +129,9 @@ interface HarnessOptions {
 	bargeInEnabled?: boolean;
 	consultHandoffMs?: number;
 	onConsult?: (task: string) => Promise<string>;
+	onTask?: (task: string) => Promise<string>;
+	onConfirmDecision?: (decision: "confirm" | "cancel" | "unclear") => void;
+	onControl?: (action: "status" | "steer" | "cancel", text?: string) => Promise<string>;
 	/** Server acks session.update with session.updated (default true). */
 	ackConfig?: boolean;
 	/** Hold sink.end() until releaseEnd() — simulates playback still draining. */
@@ -150,6 +154,7 @@ async function makeHarness(options: HarnessOptions = {}): Promise<Harness> {
 	const phases: LivePhase[] = [];
 	const transcripts: LiveTranscript[] = [];
 	const terminals: Array<Error | undefined> = [];
+	const intents: LiveIntent[] = [];
 	const transport = new RealtimeWsTransport({ baseUrl: server.url, apiKey: "k", model: "m" });
 	const controller = new LiveSessionController({
 		transport,
@@ -164,18 +169,22 @@ async function makeHarness(options: HarnessOptions = {}): Promise<Harness> {
 			onPhase: p => phases.push(p),
 			onLevels: () => {},
 			onTranscript: t => transcripts.push(t),
+			onIntent: intent => intents.push(intent),
 			onTerminal: err => terminals.push(err),
 		},
 		bargeInLevel: options.bargeInLevel,
 		bargeInEnabled: options.bargeInEnabled,
 		consultHandoffMs: options.consultHandoffMs,
 		onConsult: options.onConsult,
+		onTask: options.onTask,
+		onConfirmDecision: options.onConfirmDecision,
+		onControl: options.onControl,
 	});
 	await controller.start();
 	// Deterministic handshake: config sent on session.created, acked by the
 	// server, uplink gate opens → listening. Skipped for no-ack servers.
 	if (options.ackConfig !== false) await waitForPhase({ controller }, "listening");
-	return { controller, server, source, sinks, phases, transcripts, terminals };
+	return { controller, server, source, sinks, phases, transcripts, terminals, intents };
 }
 
 const loudPcm = pcm16ToBase64(new Uint8Array(960).fill(120));
@@ -331,7 +340,6 @@ describe("LiveSessionController", () => {
 		await h.controller.dispose();
 	});
 
-
 	test("barge-in disabled: loud speech during speaking never interrupts playback", async () => {
 		const h = await makeHarness({ bargeInEnabled: false });
 		servers.push(h.server);
@@ -349,7 +357,6 @@ describe("LiveSessionController", () => {
 		expect(pcm!.every(b => b === 0)).toBe(true); // uplink stayed silence
 		await h.controller.dispose();
 	});
-
 
 	test("consult fast path: quick result returns directly as function_call_output", async () => {
 		const h = await makeHarness({ onConsult: async () => "结果是 3 条待办", consultHandoffMs: 200 });
@@ -611,6 +618,184 @@ describe("LiveSessionController", () => {
 		await Bun.sleep(20);
 		expect(h.terminals.length).toBe(1);
 		expect(h.terminals[0]?.message).toContain("inactivity");
+		await h.controller.dispose();
+	});
+
+	// ---------------------------------------------------------------- P1a ---
+
+	test("session.update registers consult, task, confirm and control functions", async () => {
+		const h = await makeHarness();
+		servers.push(h.server);
+		const sessionUpdate = (await waitForMessage(h.server, "session.update")) as SessionUpdateMsg;
+		const tools = sessionUpdate?.session?.tools ?? [];
+		for (const name of ["omp_agent_consult", "omp_agent_task", "omp_voice_confirm", "omp_agent_control"]) {
+			expect(tools.some(t => t.name === name && t.type === "function")).toBe(true);
+		}
+		await h.controller.dispose();
+	});
+
+	test("task fast path: result returns as function_call_output, intent fires", async () => {
+		const h = await makeHarness({ onTask: async () => "改完了，两处", consultHandoffMs: 200 });
+		servers.push(h.server);
+		h.server.send({
+			type: "response.function_call_arguments.done",
+			callId: "t1",
+			name: "omp_agent_task",
+			arguments: JSON.stringify({ task: "改代码" }),
+		});
+
+		const output = (await waitForMessage(h.server, "conversation.item.create")) as {
+			item: { type: string; output?: string };
+		};
+		expect(output.item.type).toBe("function_call_output");
+		expect(output.item.output).toContain("改完了，两处");
+		expect(h.intents).toContain("task");
+		await h.controller.dispose();
+	});
+
+	test("task slow path: handoff filler first, summary delivered as a deferred task turn", async () => {
+		const { promise, resolve } = Promise.withResolvers<string>();
+		const h = await makeHarness({ onTask: () => promise, consultHandoffMs: 50 });
+		servers.push(h.server);
+		h.server.send({
+			type: "response.function_call_arguments.done",
+			callId: "t1",
+			name: "omp_agent_task",
+			arguments: JSON.stringify({ task: "慢任务" }),
+		});
+
+		const filler = (await waitForMessage(h.server, "conversation.item.create")) as {
+			item: { type: string; output?: string };
+		};
+		expect(filler.item.type).toBe("function_call_output");
+		expect(filler.item.output).toContain("后台处理");
+
+		resolve("任务完成了，测试通过");
+		await Bun.sleep(80);
+		const items = h.server.received.filter(m => m.type === "conversation.item.create") as Array<{
+			item: Record<string, unknown>;
+		}>;
+		expect(items.length).toBe(2);
+		expect(items[1]!.item.role).toBe("user");
+		// Task framing, not the consult "后台任务" framing.
+		expect(JSON.stringify(items[1]!.item.content)).toContain("语音任务已完成");
+		expect(JSON.stringify(items[1]!.item.content)).toContain("任务完成了，测试通过");
+		await h.controller.dispose();
+	});
+
+	test("confirm function forwards a normalized decision", async () => {
+		const decisions: string[] = [];
+		const h = await makeHarness({ onConfirmDecision: decision => decisions.push(decision) });
+		servers.push(h.server);
+		h.server.send({
+			type: "response.function_call_arguments.done",
+			callId: "f1",
+			name: "omp_voice_confirm",
+			arguments: JSON.stringify({ decision: "confirm" }),
+		});
+
+		const output = (await waitForMessage(h.server, "conversation.item.create")) as {
+			item: { type: string; output?: string };
+		};
+		expect(output.item.type).toBe("function_call_output");
+		expect(output.item.output).toContain("已转达");
+		expect(decisions).toEqual(["confirm"]);
+		expect(h.intents).toContain("confirm");
+		await h.controller.dispose();
+	});
+
+	test("invalid confirm decision asks the model to retry without a callback", async () => {
+		const decisions: string[] = [];
+		const h = await makeHarness({ onConfirmDecision: decision => decisions.push(decision) });
+		servers.push(h.server);
+		h.server.send({
+			type: "response.function_call_arguments.done",
+			callId: "f1",
+			name: "omp_voice_confirm",
+			arguments: JSON.stringify({ decision: "yes" }),
+		});
+
+		const output = (await waitForMessage(h.server, "conversation.item.create")) as {
+			item: { type: string; output?: string };
+		};
+		expect(output.item.output).toContain("无法识别");
+		expect(decisions).toEqual([]);
+		await h.controller.dispose();
+	});
+
+	test("speakConfirmationNote injects a note turn; false after dispose", async () => {
+		const h = await makeHarness();
+		servers.push(h.server);
+		expect(h.controller.speakConfirmationNote("（系统：需要确认）")).toBe(true);
+		const item = (await waitForMessage(h.server, "conversation.item.create")) as {
+			item: Record<string, unknown>;
+		};
+		expect(item.item.role).toBe("user");
+		expect(JSON.stringify(item.item.content)).toContain("需要确认");
+		expect(h.server.received.filter(m => m.type === "response.create").length).toBeGreaterThanOrEqual(1);
+
+		await h.controller.dispose();
+		expect(h.controller.speakConfirmationNote("x")).toBe(false);
+	});
+
+	test("control dispatch forwards action and text", async () => {
+		const calls: Array<{ action: string; text?: string }> = [];
+		const h = await makeHarness({
+			onControl: async (action, text) => {
+				calls.push({ action, text });
+				return "（正在执行：read: TODO.md）";
+			},
+		});
+		servers.push(h.server);
+		h.server.send({
+			type: "response.function_call_arguments.done",
+			callId: "s1",
+			name: "omp_agent_control",
+			arguments: JSON.stringify({ action: "status" }),
+		});
+
+		const output = (await waitForMessage(h.server, "conversation.item.create")) as {
+			item: { type: string; output?: string };
+		};
+		expect(output.item.type).toBe("function_call_output");
+		expect(output.item.output).toContain("read: TODO.md");
+		expect(calls).toEqual([{ action: "status", text: undefined }]);
+
+		h.server.send({
+			type: "response.function_call_arguments.done",
+			callId: "s2",
+			name: "omp_agent_control",
+			arguments: JSON.stringify({ action: "steer", text: "先看 src/foo.ts" }),
+		});
+		await Bun.sleep(50);
+		expect(calls).toEqual([
+			{ action: "status", text: undefined },
+			{ action: "steer", text: "先看 src/foo.ts" },
+		]);
+		await h.controller.dispose();
+	});
+
+	test("invalid control action asks the model to retry without a callback", async () => {
+		const calls: string[] = [];
+		const h = await makeHarness({
+			onControl: async action => {
+				calls.push(action);
+				return "x";
+			},
+		});
+		servers.push(h.server);
+		h.server.send({
+			type: "response.function_call_arguments.done",
+			callId: "s1",
+			name: "omp_agent_control",
+			arguments: JSON.stringify({ action: "pause" }),
+		});
+
+		const output = (await waitForMessage(h.server, "conversation.item.create")) as {
+			item: { type: string; output?: string };
+		};
+		expect(output.item.output).toContain("无法识别");
+		expect(calls).toEqual([]);
 		await h.controller.dispose();
 	});
 });

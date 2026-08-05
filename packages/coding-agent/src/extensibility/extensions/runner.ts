@@ -242,6 +242,20 @@ export class ExtensionRunner {
 		return this.extensions.map(e => e.path);
 	}
 
+	/**
+	 * Register an internal (non-file-backed) extension on this runner only.
+	 * Returns a disposer that removes it. Used by the voice confirmation gate,
+	 * which must scope its tool_call handler to this session's tools — unlike
+	 * file-backed extensions, it must not leak into other sessions.
+	 */
+	addInternalExtension(extension: Extension): () => void {
+		this.extensions.push(extension);
+		return () => {
+			const index = this.extensions.indexOf(extension);
+			if (index !== -1) this.extensions.splice(index, 1);
+		};
+	}
+
 	/** Get all registered tools from all extensions. */
 	getAllRegisteredTools(): RegisteredTool[] {
 		const tools: RegisteredTool[] = [];

@@ -13,8 +13,11 @@ import { LiveConsultBridge } from "../../live/consult-bridge";
 import { LiveSessionController } from "../../live/controller";
 import { buildVoiceInstructions } from "../../live/instructions";
 import { createNativeAecAudio, createNativeAudioSource, createNativeSinkFactory } from "../../live/natives-audio";
+import { LiveTaskRouter, type TaskRouterSession } from "../../live/task-router";
 import { LiveTranscriptRecorder, VOICE_MESSAGE_TYPE } from "../../live/transcript-recorder";
-import type { LivePhase, LiveTranscript } from "../../live/types";
+import { LiveTurnBuffer } from "../../live/turn-buffer";
+import type { LiveIntent, LivePhase, LiveTranscript } from "../../live/types";
+import { VoiceGate } from "../../live/voice-gate";
 import liveInstructions from "../../prompts/live/live-instructions.md" with { type: "text" };
 import { VoicePanel, type VoicePanelCallbacks, type VoicePanelState } from "../components/voice-panel";
 import type { InteractiveModeContext } from "../types";
@@ -29,7 +32,11 @@ export class VoiceModeController {
 	#session: LiveSessionController | undefined;
 	#consultBridge: LiveConsultBridge | undefined;
 	#recorder: LiveTranscriptRecorder | undefined;
-	#panelState: VoicePanelState = { phase: "connecting", inputLevel: 0, outputLevel: 0, recording: false };
+	#gate: VoiceGate | undefined;
+	#taskRouter: LiveTaskRouter | undefined;
+	/** Design §7 dedup: holds finalized user utterances until intent is known. */
+	#turnBuffer: LiveTurnBuffer | undefined;
+	#panelState: VoicePanelState = { phase: "connecting", inputLevel: 0, outputLevel: 0 };
 
 	constructor(ctx: InteractiveModeContext) {
 		this.#ctx = ctx;
@@ -62,6 +69,12 @@ export class VoiceModeController {
 	async stop(): Promise<void> {
 		const session = this.#session;
 		this.#session = undefined;
+		this.#turnBuffer?.flush();
+		this.#turnBuffer = undefined;
+		this.#taskRouter?.dispose();
+		this.#taskRouter = undefined;
+		this.#gate?.disarm();
+		this.#gate = undefined;
 		if (session) {
 			await session.dispose().catch(err => logger.debug("voice session dispose failed", { error: String(err) }));
 		}
@@ -94,11 +107,25 @@ export class VoiceModeController {
 
 		const recorder = new LiveTranscriptRecorder(this.#ctx.session);
 		this.#recorder = recorder;
+		this.#turnBuffer = new LiveTurnBuffer(recorder);
 		const instructions = buildVoiceInstructions(liveInstructions, this.#ctx.session.agent.state.messages);
 		this.#consultBridge = new LiveConsultBridge({
 			cwd: this.#ctx.session.sessionManager.getCwd(),
 			onActivity: line => this.#pushPanelState({ toolLine: line }),
 			onBackgroundResult: (task, text) => this.#onBackgroundResult(task, text),
+		});
+
+		// P1: confirmation gate + main-session task router. The gate's channel is
+		// late-bound to the live session controller (created below); it only speaks
+		// during task execution, long after startup.
+		const gate = new VoiceGate({
+			channel: { speak: text => this.#session?.speakConfirmationNote(text) ?? false },
+		});
+		this.#taskRouter = new LiveTaskRouter({
+			session: this.#ctx.session as unknown as TaskRouterSession,
+			gate,
+			isPlanMode: () => this.#ctx.planModeEnabled,
+			onActivity: line => this.#pushPanelState({ toolLine: line }),
 		});
 
 		const aec = settings.get("voice.aec") ? createNativeAecAudio() : null;
@@ -124,6 +151,7 @@ export class VoiceModeController {
 				onPhase: phase => this.#onPhase(phase),
 				onLevels: (input, output) => this.#pushPanelState({ inputLevel: input, outputLevel: output }),
 				onTranscript: transcript => this.#onTranscript(transcript),
+				onIntent: intent => this.#onLiveIntent(intent),
 				onTerminal: error => {
 					if (error) this.#ctx.showError(`Voice session ended: ${error.message}`);
 					void this.stop();
@@ -133,10 +161,35 @@ export class VoiceModeController {
 				this.#pushPanelState({ consultTask: task });
 				return this.#consultBridge?.consult(task) ?? "（consult 未初始化）";
 			},
+			onTask: async task => {
+				this.#pushPanelState({ consultTask: task });
+				return this.#taskRouter?.dispatch(task) ?? "（任务派发未初始化）";
+			},
+			onConfirmDecision: decision => this.#gate?.resolveDecision(decision),
+			onControl: async (action, text) => {
+				// §7 dedup: a steer injection is the utterance's canonical record; a
+				// status/cancel utterance keeps the usual voice recording path.
+				if (action === "steer") this.#turnBuffer?.drop();
+				else this.#turnBuffer?.flush();
+				const router = this.#taskRouter;
+				if (!router) return "（执行中控制未初始化。）";
+				if (action === "status") return router.status();
+				if (action === "cancel") return router.cancel();
+				if (!text) return "（没有听到具体的补充指示。）";
+				return router.steer(text);
+			},
 			bargeInLevel: settings.get("voice.bargeInLevel"),
 			bargeInEnabled: settings.get("voice.interrupt"),
 		});
 		this.#session = session;
+
+		// Arm the gate on the MAIN session's runner only — typed turns and other
+		// sessions never trigger voice confirmations. Without a runner the task path
+		// stays fail-closed (the router refuses dispatch).
+		const extensionRunner = this.#ctx.session.extensionRunner;
+		if (extensionRunner) gate.arm(extensionRunner);
+		else logger.warn("voice task path disabled: no extension runner (fail-closed)");
+		this.#gate = gate;
 
 		const panelCallbacks: VoicePanelCallbacks = {
 			onExit: () => {
@@ -159,10 +212,31 @@ export class VoiceModeController {
 	}
 	#onTranscript(transcript: LiveTranscript): void {
 		this.#pushPanelState({ transcript });
-		// Only finalized turns land in the shared session history.
-		if (transcript.final) {
+		if (!transcript.final) {
+			// First sign of a direct assistant answer flushes the held user utterance.
+			if (transcript.role === "assistant") this.#turnBuffer?.flush();
+			// Partials only reset the recorder's dedup guard.
 			this.#recorder?.record(transcript);
+			return;
 		}
+		if (transcript.role === "assistant") {
+			this.#turnBuffer?.flush();
+			this.#recorder?.record(transcript);
+			return;
+		}
+		// Finalized user utterance: hold until intent classification resolves.
+		// task utterances are recorded by the main-session injection itself, and
+		// confirmation answers are consumed by the gate (design §7 dedup).
+		if (this.#gate?.confirmationPending) return;
+		this.#turnBuffer?.hold(transcript.text);
+	}
+
+	/** Design §7: route the held utterance once the realtime model classifies it. */
+	#onLiveIntent(intent: LiveIntent): void {
+		if (intent === "query") this.#turnBuffer?.flush();
+		// task: the injected user message is the canonical record; confirm: the
+		// gate consumed the answer — neither may be recorded a second time.
+		else this.#turnBuffer?.drop();
 	}
 
 	/** Design §5: a timed-out consult finished late — speak it if voice is alive, else text. */
@@ -170,7 +244,13 @@ export class VoiceModeController {
 		const body = `（后台任务「${task}」的结果）\n${text}`;
 		const spoken = this.#session?.deliverBackgroundResult(body) ?? false;
 		if (spoken) return; // the spoken turn is recorded via the transcript path
-		this.#ctx.session.sessionManager.appendCustomMessageEntry(VOICE_MESSAGE_TYPE, body, true, { role: "assistant", source: "voice-consult" }, "agent");
+		this.#ctx.session.sessionManager.appendCustomMessageEntry(
+			VOICE_MESSAGE_TYPE,
+			body,
+			true,
+			{ role: "assistant", source: "voice-consult" },
+			"agent",
+		);
 	}
 
 	#pushPanelState(partial: Partial<VoicePanelState>): void {

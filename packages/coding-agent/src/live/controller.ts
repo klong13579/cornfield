@@ -36,7 +36,15 @@ import {
 } from "@oh-my-pi/pi-ai";
 import { logger } from "@oh-my-pi/pi-utils";
 import { float32ToPcm16, pcm16ToFloat32, rmsLevel } from "../stt/pcm";
-import type { LiveAudioSink, LiveConsultHandler, LivePhase, LiveSessionCallbacks, LiveSessionOptions } from "./types";
+import type {
+	LiveAudioSink,
+	LiveConsultHandler,
+	LiveControlAction,
+	LivePhase,
+	LiveSessionCallbacks,
+	LiveSessionOptions,
+	VoiceConfirmDecision,
+} from "./types";
 
 const DEFAULT_BARGE_IN_LEVEL = 0.04;
 /** Speaker→mic bleed scales with playback loudness; barge-in must clearly exceed it. */
@@ -44,6 +52,9 @@ const BARGE_IN_ECHO_RATIO = 3;
 /** Consecutive over-threshold chunks required before accepting a barge-in. */
 const BARGE_IN_SUSTAIN_CHUNKS = 5;
 const CONSULT_TOOL_NAME = "omp_agent_consult";
+const TASK_TOOL_NAME = "omp_agent_task";
+const CONFIRM_TOOL_NAME = "omp_voice_confirm";
+const CONTROL_TOOL_NAME = "omp_agent_control";
 /** Design §3.3: wait this long for a consult result before handing the model a filler. */
 const CONSULT_HANDOFF_MS = 3_000;
 const CONSULT_HANDOFF_TEXT =
@@ -71,6 +82,8 @@ export class LiveSessionController {
 	readonly #bargeInEnabled: boolean;
 	readonly #consultHandoffMs: number;
 	readonly #onConsult: LiveConsultHandler;
+	readonly #onTask: LiveConsultHandler;
+	readonly #onControl: (action: LiveControlAction, text?: string) => Promise<string>;
 
 	#phase: LivePhase = "connecting";
 	#sink: LiveAudioSink | undefined;
@@ -103,6 +116,8 @@ export class LiveSessionController {
 		this.#bargeInEnabled = options.bargeInEnabled ?? true;
 		this.#consultHandoffMs = options.consultHandoffMs ?? CONSULT_HANDOFF_MS;
 		this.#onConsult = options.onConsult ?? (async () => "（语音任务委托尚未接入，请改用文字输入。）");
+		this.#onTask = options.onTask ?? (async () => "（语音任务派发尚未接入，请改用文字输入。）");
+		this.#onControl = options.onControl ?? (async () => "（执行中控制尚未接入。）");
 		this.#bridge = new RealtimeFunctionBridge(options.transport);
 		this.#bridge.registerTool({
 			name: CONSULT_TOOL_NAME,
@@ -112,6 +127,52 @@ export class LiveSessionController {
 				type: "object",
 				properties: { task: { type: "string", description: "The user's task, verbatim-enriched." } },
 				required: ["task"],
+			},
+		});
+		this.#bridge.registerTool({
+			name: TASK_TOOL_NAME,
+			description:
+				"Delegate a task that CHANGES files or system state (edit code, create files, run commands, send messages, mark todos done) to the omp main session. Read-only queries go to omp_agent_consult instead.",
+			parameters: {
+				type: "object",
+				properties: { task: { type: "string", description: "The user's task, verbatim-enriched." } },
+				required: ["task"],
+			},
+		});
+		this.#bridge.registerTool({
+			name: CONFIRM_TOOL_NAME,
+			description:
+				"Report the user's spoken answer to a pending operation confirmation. Only use it after the system injected a confirmation request.",
+			parameters: {
+				type: "object",
+				properties: {
+					decision: {
+						type: "string",
+						enum: ["confirm", "cancel", "unclear"],
+						description: "confirm = user agreed, cancel = user refused, unclear = answer not understood",
+					},
+				},
+				required: ["decision"],
+			},
+		});
+		this.#bridge.registerTool({
+			name: CONTROL_TOOL_NAME,
+			description:
+				"Control the task currently running in the main session: status = report progress, steer = pass a course correction to the running task, cancel = stop it. Only use it while a task is executing.",
+			parameters: {
+				type: "object",
+				properties: {
+					action: {
+						type: "string",
+						enum: ["status", "steer", "cancel"],
+						description: "status = 到哪了, steer = 修正方向, cancel = 停",
+					},
+					text: {
+						type: "string",
+						description: "For steer: the course correction, verbatim-enriched.",
+					},
+				},
+				required: ["action"],
 			},
 		});
 	}
@@ -138,9 +199,44 @@ export class LiveSessionController {
 		);
 
 		this.#bridge.attach(async call => {
-			const task = JSON.parse(call.arguments) as { task?: string };
-			this.#setPhase("thinking");
-			return this.#consultWithHandoff(task.task ?? call.arguments);
+			switch (call.name) {
+				case TASK_TOOL_NAME: {
+					const args = JSON.parse(call.arguments) as { task?: string };
+					this.#setPhase("thinking");
+					this.#callbacks.onIntent?.("task");
+					return this.#withHandoff(
+						() => this.#onTask(args.task ?? call.arguments),
+						text => this.deliverTaskSummary(text),
+					);
+				}
+				case CONFIRM_TOOL_NAME: {
+					const args = JSON.parse(call.arguments) as { decision?: string };
+					this.#callbacks.onIntent?.("confirm");
+					const decision = this.#normalizeDecision(args.decision);
+					if (!decision) {
+						return "（无法识别该答复。请以 confirm、cancel 或 unclear 调用 omp_voice_confirm。）";
+					}
+					this.#options.onConfirmDecision?.(decision);
+					return "（用户的答复已转达。）";
+				}
+				case CONTROL_TOOL_NAME: {
+					const args = JSON.parse(call.arguments) as { action?: string; text?: string };
+					const action = this.#normalizeControlAction(args.action);
+					if (!action) {
+						return "（无法识别该控制指令。请以 status、steer 或 cancel 调用 omp_agent_control。）";
+					}
+					return this.#onControl(action, args.text);
+				}
+				default: {
+					const args = JSON.parse(call.arguments) as { task?: string };
+					this.#setPhase("thinking");
+					this.#callbacks.onIntent?.("query");
+					return this.#withHandoff(
+						() => this.#onConsult(args.task ?? call.arguments),
+						text => this.#deliverDeferredConsultResult(text),
+					);
+				}
+			}
 		});
 
 		await this.#options.transport.connect();
@@ -298,26 +394,35 @@ export class LiveSessionController {
 		this.#setPhase("listening");
 	}
 
-
 	/**
-	 * Design §3.3 「thinking 期不断线」: if the consult doesn't produce a result
-	 * within the handoff window, hand the model a filler to say ("正在查，稍等")
-	 * and deliver the real result as a fresh conversation turn when it lands —
-	 * the voice session never stalls in silence behind a slow task.
+	 * Design §3.3 「thinking 期不断线」 (P0 consult, P1 task): if the work doesn't
+	 * produce a result within the handoff window, hand the model a filler to say
+	 * ("正在查，稍等") and deliver the real result as a fresh conversation turn
+	 * when it lands — the voice session never stalls in silence behind slow work.
 	 */
-	async #consultWithHandoff(task: string): Promise<string> {
+	async #withHandoff(run: () => Promise<string>, deliver: (text: string) => boolean): Promise<string> {
 		let settled = false;
-		const consult = this.#onConsult(task).then(text => {
+		const work = run().then(text => {
 			settled = true;
 			return text;
 		});
-		await Promise.race([consult, Bun.sleep(this.#consultHandoffMs)]);
-		if (settled) return await consult;
-		void consult.then(
-			text => this.#deliverDeferredConsultResult(text),
-			err => this.#deliverDeferredConsultResult(`（后台任务执行失败：${err instanceof Error ? err.message : String(err)}）`),
+		await Promise.race([work, Bun.sleep(this.#consultHandoffMs)]);
+		if (settled) return await work;
+		void work.then(
+			text => deliver(text),
+			err => deliver(`（后台任务执行失败：${err instanceof Error ? err.message : String(err)}）`),
 		);
 		return CONSULT_HANDOFF_TEXT;
+	}
+
+	#normalizeDecision(value: string | undefined): VoiceConfirmDecision | undefined {
+		if (value === "confirm" || value === "cancel" || value === "unclear") return value;
+		return undefined;
+	}
+
+	#normalizeControlAction(value: string | undefined): LiveControlAction | undefined {
+		if (value === "status" || value === "steer" || value === "cancel") return value;
+		return undefined;
 	}
 
 	/**
@@ -330,23 +435,44 @@ export class LiveSessionController {
 	}
 
 	#deliverDeferredConsultResult(text: string): boolean {
+		return this.#injectUserNote(`（后台任务已完成，请把下面的结果用口语播报给用户）\n${text}`);
+	}
+
+	/**
+	 * Deliver the spoken summary of a finished voice task as a fresh conversation
+	 * turn (P1 §4): the dispatching function call already resolved with the
+	 * handoff filler, so the result cannot ride its function_call_output.
+	 */
+	deliverTaskSummary(text: string): boolean {
+		return this.#injectUserNote(
+			`（刚才的语音任务已完成，请用一两句话口播执行结果，细节用户可以在屏幕上看到。）\n${text}`,
+		);
+	}
+
+	/**
+	 * Inject instruction text (e.g. a VoiceGate confirmation request) as a fresh
+	 * conversation turn. Returns false when the session can't take it — callers
+	 * fail safe on that.
+	 */
+	speakConfirmationNote(text: string): boolean {
+		return this.#injectUserNote(text);
+	}
+
+	#injectUserNote(text: string): boolean {
 		if (this.#disposed || this.#halted) return false;
 		try {
 			this.#options.transport.send({
 				type: "conversation.item.create",
-				item: {
-					type: "message",
-					role: "user",
-					content: [{ type: "input_text", text: `（后台任务已完成，请把下面的结果用口语播报给用户）\n${text}` }],
-				},
+				item: { type: "message", role: "user", content: [{ type: "input_text", text }] },
 			});
 			this.#options.transport.send({ type: "response.create" });
 			return true;
 		} catch (err) {
-			logger.debug("live deferred consult delivery failed", { error: String(err) });
+			logger.debug("live user note injection failed", { error: String(err) });
 			return false;
 		}
 	}
+
 	#onServerEvent(event: RealtimeServerEvent): void {
 		if (this.#disposed) return;
 		switch (event.type) {

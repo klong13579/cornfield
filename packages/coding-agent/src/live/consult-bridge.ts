@@ -11,15 +11,25 @@
  * Ambient room noise can and does trigger consults (proven in the P0b E2E), so
  * nothing here may be able to mutate anything.
  */
-import { Type } from "@sinclair/typebox";
+
 import { logger } from "@oh-my-pi/pi-utils";
-import { createAgentSession } from "../sdk";
-import type { AgentSession } from "../session/agent-session";
+import { Type } from "@sinclair/typebox";
 import type { AgentToolResult } from "../extensibility/extensions/types";
 import consultInstructions from "../prompts/live/consult-instructions.md" with { type: "text" };
+import { createAgentSession } from "../sdk";
+import type { AgentSession } from "../session/agent-session";
 
 /** Tools the voice consult session is allowed to keep. Everything else is dropped. */
-const READONLY_TOOL_WHITELIST = new Set(["read", "search", "find", "ast_grep", "calc", "web_search", "list_models", "weather"]);
+const READONLY_TOOL_WHITELIST = new Set([
+	"read",
+	"search",
+	"find",
+	"ast_grep",
+	"calc",
+	"web_search",
+	"list_models",
+	"weather",
+]);
 
 const DEFAULT_CONSULT_TIMEOUT_MS = 120_000;
 
@@ -92,7 +102,8 @@ export interface LiveConsultBridgeOptions {
 	sessionFactory?: ConsultSessionFactory;
 }
 
-function extractAssistantText(messages: unknown): string {
+/** Shared with LiveTaskRouter (voice tasks reuse the same extraction). */
+export function extractAssistantText(messages: unknown): string {
 	if (!Array.isArray(messages)) return "";
 	for (let i = messages.length - 1; i >= 0; i--) {
 		const message = messages[i] as { role?: string; content?: unknown };
@@ -113,7 +124,8 @@ function extractAssistantText(messages: unknown): string {
 	return "";
 }
 
-function summarizeActivity(toolName: string, args: unknown): string {
+/** Shared with LiveTaskRouter — one-line tool activity for the panel. */
+export function summarizeActivity(toolName: string, args: unknown): string {
 	if (args && typeof args === "object") {
 		for (const value of Object.values(args as Record<string, unknown>)) {
 			if (typeof value === "string" && value.length > 0) {
@@ -144,8 +156,8 @@ async function defaultSessionFactory(cwd: string | undefined): Promise<ConsultSe
 						description: "status = working tree + branch, diffstat = change summary, log = last 5 commits",
 					}),
 				}),
-			async execute(_toolCallId: string, params: { query: GitReadonlyCommand }): Promise<AgentToolResult> {
-				const command = GIT_READONLY_COMMANDS[params.query] ?? GIT_READONLY_COMMANDS.status;
+				async execute(_toolCallId: string, params: { query: GitReadonlyCommand }): Promise<AgentToolResult> {
+					const command = GIT_READONLY_COMMANDS[params.query] ?? GIT_READONLY_COMMANDS.status;
 					try {
 						const proc = Bun.spawn(["sh", "-c", command], { cwd, stdout: "pipe", stderr: "pipe" });
 						const stdout = await new Response(proc.stdout).text();
@@ -179,7 +191,9 @@ async function defaultSessionFactory(cwd: string | undefined): Promise<ConsultSe
 	});
 	const session = result.session as unknown as AgentSession;
 	// Hard read-only guarantee: drop every tool outside the whitelist.
-	const kept = session.agent.state.tools.filter(tool => READONLY_TOOL_WHITELIST.has(tool.name) || tool.name === "git_status");
+	const kept = session.agent.state.tools.filter(
+		tool => READONLY_TOOL_WHITELIST.has(tool.name) || tool.name === "git_status",
+	);
 	session.agent.setTools(kept);
 	logger.info("voice consult session ready", { tools: kept.map(t => t.name) });
 	return session as unknown as ConsultSession;

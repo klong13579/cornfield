@@ -42,6 +42,8 @@ export interface VoicePanelCallbacks {
 
 export interface VoicePanelOptions {
 	tui: TUI;
+	/** Panel callbacks (currently: exit handling). */
+	callbacks?: VoicePanelCallbacks;
 	/** Key(s) that exit voice mode while the panel is focused. */
 	exitKeys?: KeyId[];
 	/** Injected theme (tests); defaults to the global theme instance. */

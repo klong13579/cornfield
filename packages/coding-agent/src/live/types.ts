@@ -9,6 +9,15 @@ import type { RealtimeSessionConfig, RealtimeWsTransport } from "@oh-my-pi/pi-ai
 
 export type LivePhase = "connecting" | "listening" | "thinking" | "speaking" | "interrupted" | "muted" | "error";
 
+/** Which registered function the realtime model resolved an utterance to. */
+export type LiveIntent = "query" | "task" | "confirm";
+
+/** The user's spoken answer to a pending operation confirmation (omp_voice_confirm). */
+export type VoiceConfirmDecision = "confirm" | "cancel" | "unclear";
+
+/** Mid-task control action resolved from a spoken utterance (omp_agent_control, P1b §6). */
+export type LiveControlAction = "status" | "steer" | "cancel";
+
 export interface LiveTranscript {
 	role: "user" | "assistant";
 	text: string;
@@ -22,6 +31,12 @@ export interface LiveSessionCallbacks {
 	onTranscript(transcript: LiveTranscript): void;
 	/** Terminal stop — the session is over, optionally with a cause. */
 	onTerminal(error?: Error): void;
+	/**
+	 * Intent classification resolved via a function call (P1 steer router).
+	 * Fired before the handler runs — lets the caller route transcript recording:
+	 * "task" utterances are recorded by the main session itself, not the recorder.
+	 */
+	onIntent?(intent: LiveIntent): void;
 }
 
 /** Mic abstraction: production = native AudioCapture, tests = scripted. */
@@ -34,6 +49,8 @@ export interface LiveAudioSource {
 /** Speaker abstraction: production = native AudioPlayback, tests = scripted. */
 export interface LiveAudioSink {
 	write(samples: Float32Array): void;
+	/** Resolve when the queued audio has finished playing (drain). */
+	end(): Promise<void>;
 	/** Discard everything queued, immediately. Used by barge-in. */
 	stop(): void;
 }
@@ -52,6 +69,12 @@ export interface LiveSessionOptions {
 	callbacks: LiveSessionCallbacks;
 	/** Task delegation for `omp_agent_consult`. Default: verbal refusal. */
 	onConsult?: LiveConsultHandler;
+	/** Task delegation for `omp_agent_task` — executes in the MAIN session (P1 §4). */
+	onTask?: LiveConsultHandler;
+	/** The user's spoken answer to a pending confirmation (omp_voice_confirm). */
+	onConfirmDecision?: (decision: VoiceConfirmDecision) => void;
+	/** Mid-task control (omp_agent_control): status / steer / cancel (P1b §6). */
+	onControl?: (action: LiveControlAction, text?: string) => Promise<string>;
 	/** Barge-in gate: mic RMS (0..1) required to interrupt playback. Default 0.04. */
 	bargeInLevel?: number;
 	/** Allow barge-in at all (interrupting playback by speaking). Default true. */
