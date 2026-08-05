@@ -57,8 +57,12 @@ const CONFIRM_TOOL_NAME = "omp_voice_confirm";
 const CONTROL_TOOL_NAME = "omp_agent_control";
 /** Design §3.3: wait this long for a consult result before handing the model a filler. */
 const CONSULT_HANDOFF_MS = 3_000;
-const CONSULT_HANDOFF_TEXT =
-	"任务正在后台处理，还需要一点时间。请先告诉用户：正在查，请稍等。结果出来后系统会再次提供给你，届时直接播报结果即可。";
+/**
+ * Filler spoken while slow work runs. MUST be a pure speakable sentence:
+ * qwen parrots meta-instructions verbatim ("结果出来后系统会再次提供给你…"
+ * was read out loud in P1 acceptance), so no scaffolding text may appear here.
+ */
+const CONSULT_HANDOFF_TEXT = "正在处理，请稍等，结果出来我马上告诉你。";
 /** Design §3.6: let the model know its answer was cut short by a barge-in. */
 const INTERRUPTED_NOTE = "（你刚才的语音回答被用户打断了，没说完）";
 /** Silence frames replace mic input while muted/speaking (server_vad clock must keep ticking). */

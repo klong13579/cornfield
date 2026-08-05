@@ -12,7 +12,7 @@
 
 import { sanitizeText } from "@oh-my-pi/pi-natives";
 import type { KeyId } from "@oh-my-pi/pi-tui";
-import { type Component, matchesKey, type TUI, visibleWidth } from "@oh-my-pi/pi-tui";
+import { type Component, matchesKey, type TUI, visibleWidth, wrapTextWithAnsi } from "@oh-my-pi/pi-tui";
 import type { LivePhase } from "../../live/types";
 import { replaceTabs, truncateToWidth } from "../../tools/render-utils";
 import { theme as globalTheme, type Theme, type ThemeColor } from "../theme/theme";
@@ -54,8 +54,11 @@ export interface VoicePanelOptions {
 	interruptFlashMs?: number;
 }
 
-/** Max transcript lines kept in the scrollback window (spec: 2-4). */
+/** Max transcript entries kept in the scrollback window (spec: 2-4). */
 const TRANSCRIPT_WINDOW = 3;
+/** Max wrapped transcript lines rendered across all entries — full utterances
+ * stay visible (word-wrapped), panel height stays bounded. */
+const TRANSCRIPT_DISPLAY_LINES = 10;
 /** Level bar cell count (spec: 8-12). */
 const BAR_CELLS = 10;
 /** Waveform cell count for the speaking radiating pattern. */
@@ -456,16 +459,25 @@ export class VoicePanel implements Component {
 		}
 	}
 
-	/** partial → dim + cursor, final → full text color (karaoke rule from spec §4.3). */
+	/** partial → dim + cursor, final → full text color (karaoke rule from spec §4.3).
+	 * Utterances are word-wrapped so long requests/answers show in full. */
 	#transcriptLines(inner: number, line: (content: string) => string): string[] {
-		return this.#transcripts.map(entry => {
-			if (entry.final) {
-				return line(this.#color("text", truncateToWidth(entry.text, inner)));
+		const rows: string[] = [];
+		for (const entry of this.#transcripts) {
+			const wrapped = wrapTextWithAnsi(entry.text, inner);
+			const body = wrapped.length > 0 ? wrapped : [""];
+			for (let i = 0; i < body.length; i++) {
+				const segment = truncateToWidth(body[i]!, inner);
+				if (!entry.final && i === body.length - 1) {
+					const cursor = "▌";
+					const clipped = truncateToWidth(segment, Math.max(1, inner - visibleWidth(cursor)));
+					rows.push(line(this.#color("dim", `${clipped}${cursor}`)));
+				} else {
+					rows.push(line(this.#color(entry.final ? "text" : "dim", segment)));
+				}
 			}
-			const cursor = "▌";
-			const text = truncateToWidth(entry.text, Math.max(1, inner - visibleWidth(cursor)));
-			return line(this.#color("dim", `${text}${cursor}`));
-		});
+		}
+		return rows.slice(-TRANSCRIPT_DISPLAY_LINES);
 	}
 
 	/** 8-12 cell RMS level bar; sqrt-scaled, deterministic per (cell, frame). */

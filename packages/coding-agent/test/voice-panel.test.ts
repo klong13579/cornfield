@@ -7,7 +7,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import { VoicePanel, type VoicePanelState } from "@oh-my-pi/pi-coding-agent/modes/components/voice-panel";
 import { getThemeByName, type Theme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
-import { setKittyProtocolActive, type TUI, visibleWidth } from "@oh-my-pi/pi-tui";
+import { type TUI, visibleWidth } from "@oh-my-pi/pi-tui";
 
 const WIDTH = 60;
 
@@ -288,6 +288,26 @@ describe("VoicePanel", () => {
 			const out = render(p);
 			expect(out).not.toContain("\t");
 			expect(out).toContain("第一 段 第二段");
+		});
+
+		it("wraps long utterances so the full content stays visible", () => {
+			const p = createPanel({ plain: true });
+			const tail = "结尾标记XYZ";
+			p.update(
+				state({
+					phase: "listening",
+					transcript: { role: "user", text: `很长的请求${"填充文本".repeat(40)}${tail}`, final: true },
+				}),
+			);
+			const out = render(p);
+			// Single-line truncation would lose the tail; wrapping keeps it.
+			// Join wrapped lines (the marker may straddle a wrap boundary).
+			const joined = out
+				.split("\n")
+				.map(l => l.replaceAll("│", ""))
+				.join("")
+				.replaceAll(/\s+/g, "");
+			expect(joined).toContain(tail);
 		});
 	});
 });

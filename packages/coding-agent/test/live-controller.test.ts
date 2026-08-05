@@ -434,7 +434,7 @@ describe("LiveSessionController", () => {
 			item: { type: string; output?: string };
 		};
 		expect(filler.item.type).toBe("function_call_output");
-		expect(filler.item.output).toContain("后台处理");
+		expect(filler.item.output).toContain("正在处理");
 
 		// When the background consult lands, it becomes a fresh user turn + response.
 		resolve("深圳今天 25 度");
@@ -710,7 +710,7 @@ describe("LiveSessionController", () => {
 			item: { type: string; output?: string };
 		};
 		expect(filler.item.type).toBe("function_call_output");
-		expect(filler.item.output).toContain("后台处理");
+		expect(filler.item.output).toContain("正在处理");
 
 		resolve("任务完成了，测试通过");
 		await Bun.sleep(80);
