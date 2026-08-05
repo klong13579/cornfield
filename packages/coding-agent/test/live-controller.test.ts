@@ -16,8 +16,10 @@ interface TestServer {
 	stop(): void;
 }
 
-function startServer(options: { ackConfig?: boolean } = {}): TestServer {
+function startServer(options: { ackConfig?: boolean; rejectCreateWhileInProgress?: boolean } = {}): TestServer {
 	const ackConfig = options.ackConfig ?? true;
+	const rejectCreate = options.rejectCreateWhileInProgress ?? false;
+	let responseInProgress = false;
 	const received: Array<Record<string, unknown>> = [];
 	let current: { send(data: string): void } | undefined;
 	const server = Bun.serve({
@@ -38,6 +40,23 @@ function startServer(options: { ackConfig?: boolean } = {}): TestServer {
 				// gate waits for this (or its timeout fallback).
 				if (ackConfig && parsed.type === "session.update") {
 					ws.send(JSON.stringify({ type: "session.updated", session: {} }));
+				}
+				// Strict mode mirrors narwal-plan: response.create during an active
+				// response is rejected; response.cancel clears the active state.
+				if (rejectCreate) {
+					if (parsed.type === "response.create") {
+						if (responseInProgress) {
+							ws.send(
+								JSON.stringify({
+									type: "error",
+									error: { message: "Cannot create response while another response is in progress." },
+								}),
+							);
+						} else {
+							responseInProgress = true;
+						}
+					}
+					if (parsed.type === "response.cancel") responseInProgress = false;
 				}
 			},
 			close() {
@@ -134,6 +153,8 @@ interface HarnessOptions {
 	onControl?: (action: "status" | "steer" | "cancel", text?: string) => Promise<string>;
 	/** Server acks session.update with session.updated (default true). */
 	ackConfig?: boolean;
+	/** Strict narwal mode: reject response.create while a response is in progress. */
+	rejectCreateWhileInProgress?: boolean;
 	/** Hold sink.end() until releaseEnd() — simulates playback still draining. */
 	holdSinkEnd?: boolean;
 }
@@ -148,39 +169,54 @@ async function waitForPhase(h: Pick<Harness, "controller">, want: LivePhase, tim
 }
 
 async function makeHarness(options: HarnessOptions = {}): Promise<Harness> {
-	const server = startServer({ ackConfig: options.ackConfig ?? true });
+	const server = startServer({
+		ackConfig: options.ackConfig ?? true,
+		rejectCreateWhileInProgress: options.rejectCreateWhileInProgress,
+	});
 	const source = new ScriptedSource();
 	const sinks: ScriptedSink[] = [];
 	const phases: LivePhase[] = [];
 	const transcripts: LiveTranscript[] = [];
 	const terminals: Array<Error | undefined> = [];
 	const intents: LiveIntent[] = [];
-	const transport = new RealtimeWsTransport({ baseUrl: server.url, apiKey: "k", model: "m" });
-	const controller = new LiveSessionController({
-		transport,
-		source,
-		sinkFactory: () => {
-			const sink = new ScriptedSink(options.holdSinkEnd ?? false);
-			sinks.push(sink);
-			return sink;
-		},
-		session: { modalities: ["text", "audio"] },
-		callbacks: {
-			onPhase: p => phases.push(p),
-			onLevels: () => {},
-			onTranscript: t => transcripts.push(t),
-			onIntent: intent => intents.push(intent),
-			onTerminal: err => terminals.push(err),
-		},
-		bargeInLevel: options.bargeInLevel,
-		bargeInEnabled: options.bargeInEnabled,
-		consultHandoffMs: options.consultHandoffMs,
-		onConsult: options.onConsult,
-		onTask: options.onTask,
-		onConfirmDecision: options.onConfirmDecision,
-		onControl: options.onControl,
-	});
-	await controller.start();
+	const buildController = (): LiveSessionController => {
+		const transport = new RealtimeWsTransport({ baseUrl: server.url, apiKey: "k", model: "m" });
+		return new LiveSessionController({
+			transport,
+			source,
+			sinkFactory: () => {
+				const sink = new ScriptedSink(options.holdSinkEnd ?? false);
+				sinks.push(sink);
+				return sink;
+			},
+			session: { modalities: ["text", "audio"] },
+			callbacks: {
+				onPhase: p => phases.push(p),
+				onLevels: () => {},
+				onTranscript: t => transcripts.push(t),
+				onIntent: intent => intents.push(intent),
+				onTerminal: err => terminals.push(err),
+			},
+			bargeInLevel: options.bargeInLevel,
+			bargeInEnabled: options.bargeInEnabled,
+			consultHandoffMs: options.consultHandoffMs,
+			onConsult: options.onConsult,
+			onTask: options.onTask,
+			onConfirmDecision: options.onConfirmDecision,
+			onControl: options.onControl,
+		});
+	};
+	let controller = buildController();
+	try {
+		await controller.start();
+	} catch {
+		// Infra flake: under load the local WS handshake occasionally dies (1006
+		// racing a previous server's forced stop). Rebuild once against the same
+		// live server before failing the test.
+		await controller.dispose().catch(() => {});
+		controller = buildController();
+		await controller.start();
+	}
 	// Deterministic handshake: config sent on session.created, acked by the
 	// server, uplink gate opens → listening. Skipped for no-ack servers.
 	if (options.ackConfig !== false) await waitForPhase({ controller }, "listening");
@@ -796,6 +832,58 @@ describe("LiveSessionController", () => {
 		};
 		expect(output.item.output).toContain("无法识别");
 		expect(calls).toEqual([]);
+		await h.controller.dispose();
+	});
+
+	// --------------------------------------- response.create collision fix ---
+
+	test("note injection sends response.cancel before response.create", async () => {
+		const h = await makeHarness();
+		servers.push(h.server);
+		expect(h.controller.speakConfirmationNote("（系统：需要确认）")).toBe(true);
+		await Bun.sleep(30);
+		const types = h.server.received.map(m => m.type);
+		const cancel = types.indexOf("response.cancel");
+		const item = types.indexOf("conversation.item.create");
+		const create = types.indexOf("response.create");
+		expect(cancel).toBeGreaterThanOrEqual(0);
+		expect(item).toBeGreaterThan(cancel);
+		expect(create).toBeGreaterThan(item);
+		await h.controller.dispose();
+	});
+
+	test("repeated note injection survives a strict in-progress server (regression)", async () => {
+		// Before the fix, a bare response.create during an active response was
+		// rejected ("Cannot create response while another response is in progress");
+		// three rejections tripped the error breaker and killed the voice session.
+		const h = await makeHarness({ rejectCreateWhileInProgress: true });
+		servers.push(h.server);
+		for (let i = 0; i < 4; i++) {
+			expect(h.controller.speakConfirmationNote(`（系统：确认 ${i}）`)).toBe(true);
+			await Bun.sleep(20);
+		}
+		expect(h.terminals.length).toBe(0);
+		expect(h.controller.phase).not.toBe("error");
+		await h.controller.dispose();
+	});
+
+	test("function output path cancels before creating the verbalization response", async () => {
+		const h = await makeHarness({ onConsult: async () => "结果" });
+		servers.push(h.server);
+		h.server.send({
+			type: "response.function_call_arguments.done",
+			callId: "c1",
+			name: "omp_agent_consult",
+			arguments: JSON.stringify({ task: "x" }),
+		});
+		await waitForMessage(h.server, "response.create");
+		const types = h.server.received.map(m => m.type);
+		const cancel = types.indexOf("response.cancel");
+		const item = types.indexOf("conversation.item.create");
+		const create = types.indexOf("response.create");
+		expect(cancel).toBeGreaterThanOrEqual(0);
+		expect(item).toBeGreaterThan(cancel);
+		expect(create).toBeGreaterThan(item);
 		await h.controller.dispose();
 	});
 });

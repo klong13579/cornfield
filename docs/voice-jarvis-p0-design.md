@@ -280,6 +280,7 @@ VoicePanel 作为 TUI 顶部常驻面板（进入语音模式时挂载，退出�
 5. 未见显式 truncation 事件——打断时客户端必须自己清播放缓冲，不能指望服务端通知。
 6. **会话开始后禁止更新 `turn_detection`**（服务端报错 "Cannot update 'turn_detection' after session has started processing audio"）——设计 3.4 的「speaking 期间动态抬 VAD 门限」方案在 qwen 上不可行，已回滚。扬声器回声被 fun-asr 提交为幽灵用户轮的问题，留给 P1 的客户端 VAD / AEC（参考 stt/vad.ts 已有能量 VAD + AudioCapture 实时 RMS）。
 7. barge-in 的 `response.cancel` 可能落在服务端已结束的 response 上（"Conversation has no active response"）——属良性竞态，controller 容忍，不视为错误。
+8. **服务端正在生成 response 时发 `response.create` 会被拒绝**（"Cannot create response while another response is in progress"），拒绝会计入客户端错误熔断（3 次终止会话）。所有客户端主动的 `response.create`（function 结果回注、延迟消息注入）必须先发 `response.cancel`——无活跃 response 时 cancel 属良性竞态（见 #7）。P1 语音验收实测发现（2026-08-05），已修于 `function-bridge.ts` 与 controller `#injectUserNote`。
 
 **遗留待验证：**
 1. narwal-plan realtime 连接的并发/时长限制（OpenClaw 的 OpenAI 路线有 8 并发/30min TTL，narwal 侧未知）。

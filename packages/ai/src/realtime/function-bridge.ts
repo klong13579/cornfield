@@ -66,6 +66,12 @@ export class RealtimeFunctionBridge {
 				// or it waits forever and the voice loop stalls.
 				output = JSON.stringify({ error: String(err instanceof Error ? err.message : err) });
 			}
+			// Cancel before creating: if a response is still in progress (e.g. a
+			// previous function round's verbalization, or parallel calls in one
+			// response), the bare create is rejected with "Cannot create response
+			// while another response is in progress". Cancel is benign when nothing
+			// is active. Item lands after the cancel so the new response sees it.
+			this.#transport.send({ type: "response.cancel" });
 			this.#transport.send({
 				type: "conversation.item.create",
 				item: { type: "function_call_output", call_id: event.callId, output },

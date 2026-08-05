@@ -461,6 +461,20 @@ export class LiveSessionController {
 	#injectUserNote(text: string): boolean {
 		if (this.#disposed || this.#halted) return false;
 		try {
+			// Never race an in-progress server response — "Cannot create response
+			// while another response is in progress" rejected the create, and three
+			// rejections trip the error breaker. Cancel first (benign when nothing
+			// is active) and take over the floor: stop local playback and drop to
+			// listening so the note's own response owns the speaker next.
+			this.#options.transport.send({ type: "response.cancel" });
+			this.#sink?.stop();
+			this.#sink = undefined;
+			this.#drainingSink?.stop();
+			this.#drainingSink = undefined;
+			this.#drainGeneration += 1;
+			this.#outputLevel = 0;
+			this.#bargeInArmed = 0;
+			this.#setPhase(this.#muted ? "muted" : "listening");
 			this.#options.transport.send({
 				type: "conversation.item.create",
 				item: { type: "message", role: "user", content: [{ type: "input_text", text }] },
