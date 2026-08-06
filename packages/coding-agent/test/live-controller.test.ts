@@ -973,4 +973,22 @@ describe("LiveSessionController", () => {
 		expect(create).toBeGreaterThan(cancel);
 		await h.controller.dispose();
 	});
+
+	test("updateInstructions sends an instructions-only session.update mid-session", async () => {
+		const h = await makeHarness();
+		servers.push(h.server);
+		expect(h.controller.updateInstructions("新的指令")).toBe(true);
+		await Bun.sleep(30);
+
+		const updates = h.server.received.filter(m => m.type === "session.update") as Array<{
+			session: Record<string, unknown>;
+		}>;
+		// First update = full config at handshake; the refresh is the last one.
+		const refresh = updates.at(-1);
+		expect(refresh?.session.instructions).toBe("新的指令");
+		// Must NOT re-send turn_detection — qwen rejects changing it after audio
+		// processing started (P0 pitfall #6).
+		expect("turn_detection" in (refresh?.session ?? {})).toBe(false);
+		await h.controller.dispose();
+	});
 });

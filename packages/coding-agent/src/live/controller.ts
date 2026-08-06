@@ -476,6 +476,23 @@ export class LiveSessionController {
 		return this.#injectUserNote(text);
 	}
 
+	/**
+	 * Refresh the realtime session instructions mid-session (P1 context
+	 * freshness: the voice front-end's summary of the main session goes stale
+	 * as work happens). Sends instructions ONLY — qwen rejects any
+	 * session.update that touches turn_detection after audio processing started.
+	 */
+	updateInstructions(instructions: string): boolean {
+		if (this.#disposed || this.#halted) return false;
+		try {
+			this.#options.transport.send({ type: "session.update", session: { instructions } });
+			return true;
+		} catch (err) {
+			logger.debug("live instructions refresh failed", { error: String(err) });
+			return false;
+		}
+	}
+
 	#injectUserNote(text: string): boolean {
 		if (this.#disposed || this.#halted) return false;
 		try {

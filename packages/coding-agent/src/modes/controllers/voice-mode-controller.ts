@@ -41,6 +41,8 @@ export class VoiceModeController {
 	/** Reconnect tracking: announce in-flight state after the channel comes back. */
 	#voiceConnectedOnce = false;
 	#reconnecting = false;
+	/** Main-session subscription driving the instructions refresh. */
+	#sessionUnsubscribe: (() => void) | undefined;
 	#panelState: VoicePanelState = { phase: "connecting", inputLevel: 0, outputLevel: 0 };
 
 	constructor(ctx: InteractiveModeContext) {
@@ -74,6 +76,8 @@ export class VoiceModeController {
 	async stop(): Promise<void> {
 		const session = this.#session;
 		this.#session = undefined;
+		this.#sessionUnsubscribe?.();
+		this.#sessionUnsubscribe = undefined;
 		this.#turnBuffer?.flush();
 		this.#turnBuffer = undefined;
 		this.#suppressNextUserTurn = false;
@@ -221,6 +225,13 @@ export class VoiceModeController {
 		else logger.warn("voice task path disabled: no extension runner (fail-closed)");
 		this.#gate = gate;
 
+		// Context freshness: every main-session turn (typed or voice task)
+		// refreshes the realtime front-end's summary, so deictic questions
+		// ("刚才那个改对了吗") see recent work instead of the voice-start snapshot.
+		this.#sessionUnsubscribe = this.#ctx.session.subscribe(event => {
+			if (event.type === "agent_end") this.#refreshInstructions();
+		});
+
 		const panelCallbacks: VoicePanelCallbacks = {
 			onExit: () => {
 				void this.stop();
@@ -271,6 +282,12 @@ export class VoiceModeController {
 		this.#session?.speakConfirmationNote(
 			`（系统提示：语音通道刚刚重连，之前的对话上下文已丢失。重连前的状态：${parts.join("；")}。它们正常继续，无需重新派发；用户能看到屏幕。除非用户问起，不必主动提及重连。）`,
 		);
+	}
+
+	/** Rebuild the front-end summary from the live main-session history. */
+	#refreshInstructions(): void {
+		const instructions = buildVoiceInstructions(liveInstructions, this.#ctx.session.agent.state.messages);
+		this.#session?.updateInstructions(instructions);
 	}
 	#onTranscript(transcript: LiveTranscript): void {
 		this.#pushPanelState({ transcript });

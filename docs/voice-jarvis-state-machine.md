@@ -63,6 +63,12 @@ disposed/halted/未 configAck → 丢弃；muted → 静音帧；speaking → �
 
 **意图先于转写到达的竞态**：task/confirm 意图到达时无缓冲 → 置 `#suppressNextUserTurn`，迟到的 final 转写丢弃。
 
+**分类边界（2026-08-06 重定义）**：按**是否依赖上下文**划分，不按读/写——依赖工作区或对话历史的问题（含指代类「这个文件」、验证类「改对了吗」、只读工作区查询）一律走 task 进主会话；自包含纯事实（天气/算术/公开信息搜索）才走 consult。原因：consult 零历史，指代类问题只有在全量历史的主会话才能答对。
+
+**上下文保鲜**：realtime 前端的会话摘要不再是进入语音时的一次性快照——VoiceModeController 订阅主会话 `agent_end`，每轮结束（打字轮或语音任务）调 `updateInstructions` 重建摘要。注意：只发 instructions，不重发 turn_detection（qwen 在音频处理开始后禁止改它，P0 坑 #6）。
+
+**bash 只读绿级**：确认门对静态可判只读的命令（git status/log/diff/show、ls/cat/grep 等，含只读管道）直接放行，工作区查询不必口头确认；含任何链式/重定向/替换操作符的命令不适用。
+
 ### 3.2 consult 桥（每次调用一个 invocation）
 
 ```

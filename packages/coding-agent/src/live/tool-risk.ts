@@ -84,10 +84,55 @@ const DESTRUCTIVE_BASH_PATTERNS: readonly RegExp[] = [
 	/>\s*\/dev\//,
 ];
 
+/**
+ * Commands statically provable read-only — green even through bash, so voice
+ * workspace queries ("还有什么没提交") don't pay a confirmation round. Each
+ * pipe segment must validate; any chaining/redirection/substitution operator
+ * disqualifies the whole command.
+ */
+/** git subcommands that never mutate regardless of flags. */
+const READONLY_GIT_ANY_ARGS = /^git\s+(status|log|diff|show|ls-files|rev-parse|describe)(\s|$)/;
+/** git forms where flags decide read-only-ness — exact segment match only. */
+const READONLY_GIT_EXACT = new Set([
+	"git branch",
+	"git branch -v",
+	"git branch -a",
+	"git branch -r",
+	"git branch --list",
+	"git tag",
+	"git tag -l",
+	"git remote",
+	"git remote -v",
+]);
+/** Plain commands that cannot mutate without redirection (already excluded). */
+const READONLY_SIMPLE_COMMANDS =
+	/^(ls|cat|head|tail|grep|rg|find|wc|stat|file|which|pwd|echo|ps|df|du|env|date|whoami|uname)(\s|$)/;
+
+/** Shell operators that can chain, redirect, or substitute — never statically read-only. */
+const SHELL_OPERATOR_PATTERN = /(\$\(|`|;|&&|\|\||>>?|<)/;
+
+export function isReadonlyShellCommand(command: string): boolean {
+	const trimmed = command.trim();
+	if (!trimmed || SHELL_OPERATOR_PATTERN.test(trimmed)) return false;
+	const segments = trimmed
+		.split("|")
+		.map(segment => segment.trim().replace(/\s+/g, " "))
+		.filter(Boolean);
+	if (segments.length === 0) return false;
+	return segments.every(
+		segment =>
+			READONLY_GIT_ANY_ARGS.test(segment) ||
+			READONLY_GIT_EXACT.has(segment) ||
+			READONLY_SIMPLE_COMMANDS.test(segment),
+	);
+}
+
 export function classifyToolRisk(toolName: string, input: Record<string, unknown>): ToolRiskLevel {
 	if (toolName === "bash") {
 		const command = typeof input.command === "string" ? input.command : "";
-		return DESTRUCTIVE_BASH_PATTERNS.some(pattern => pattern.test(command)) ? "red" : "yellow";
+		if (DESTRUCTIVE_BASH_PATTERNS.some(pattern => pattern.test(command))) return "red";
+		if (isReadonlyShellCommand(command)) return "green";
+		return "yellow";
 	}
 	if (GREEN_TOOLS.has(toolName)) return "green";
 	if (RED_TOOLS.has(toolName)) return "red";
