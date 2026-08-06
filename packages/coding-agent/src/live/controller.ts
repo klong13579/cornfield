@@ -31,6 +31,7 @@ import {
 	base64ToPcm16,
 	createSilenceChunk,
 	pcm16ToBase64,
+	REALTIME_SAMPLE_RATE,
 	RealtimeFunctionBridge,
 	type RealtimeServerEvent,
 } from "@oh-my-pi/pi-ai";
@@ -79,6 +80,12 @@ const ROOM_DECAY_MS = 1_000;
 const CONFIG_ACK_TIMEOUT_MS = 2_000;
 /** Consecutive server errors before the session is declared terminal. */
 const MAX_SERVER_ERRORS = 3;
+/** Client endpointing: RMS level that arms a speech segment. */
+const CLIENT_VAD_START_LEVEL = 0.04;
+/** Client endpointing: shorter segments are noise blips — never committed. */
+const CLIENT_MIN_UTTERANCE_MS = 300;
+/** Client endpointing default silence window before committing a turn. */
+const DEFAULT_CLIENT_SILENCE_MS = 1_200;
 
 function clamp01(value: number): number {
 	return Math.min(1, Math.max(0, value));
@@ -119,6 +126,17 @@ export class LiveSessionController {
 	#drainGeneration = 0;
 	/** Consecutive loud chunks seen while speaking (barge-in sustain gate). */
 	#bargeInArmed = 0;
+	/** Endpointing mode: client = this controller decides turn boundaries. */
+	readonly #endpointing: "client" | "server";
+	readonly #clientSilenceWindowMs: number;
+	/** Client VAD state. */
+	#clientSpeechActive = false;
+	#clientSilenceMs = 0;
+	#clientSpeechMs = 0;
+	/** A response is in flight server-side (response.created → response.done). */
+	#responseInProgress = false;
+	/** User speech ended while a response was in flight — commit once it's done. */
+	#commitQueued = false;
 
 	constructor(options: LiveSessionOptions) {
 		this.#options = options;
@@ -126,6 +144,8 @@ export class LiveSessionController {
 		this.#bargeInLevel = options.bargeInLevel ?? DEFAULT_BARGE_IN_LEVEL;
 		this.#bargeInEnabled = options.bargeInEnabled ?? true;
 		this.#micNoiseFloor = options.micNoiseFloor ?? 0;
+		this.#endpointing = options.endpointing ?? "server";
+		this.#clientSilenceWindowMs = options.clientSilenceMs ?? DEFAULT_CLIENT_SILENCE_MS;
 		this.#consultHandoffMs = options.consultHandoffMs ?? CONSULT_HANDOFF_MS;
 		this.#onConsult = options.onConsult ?? (async () => "（语音任务委托尚未接入，请改用文字输入。）");
 		this.#onTask = options.onTask ?? (async () => "（语音任务派发尚未接入，请改用文字输入。）");
@@ -311,9 +331,13 @@ export class LiveSessionController {
 	}
 
 	#sendSessionConfig(): void {
+		// Client endpointing runs the server with turn_detection null — this
+		// controller commits turns (probe-verified against qwen, 2026-08-06).
+		const session =
+			this.#endpointing === "client" ? { ...this.#options.session, turn_detection: null } : this.#options.session;
 		this.#options.transport.send({
 			type: "session.update",
-			session: { ...this.#options.session, tools: [...this.#bridge.tools], tool_choice: "auto" },
+			session: { ...session, tools: [...this.#bridge.tools], tool_choice: "auto" },
 		});
 		this.#cancelConfigAckTimer();
 		this.#configAckTimer = setTimeout(() => {
@@ -366,6 +390,7 @@ export class LiveSessionController {
 		if (this.#micNoiseFloor > 0 && this.#inputLevel < this.#micNoiseFloor) {
 			return this.#sendSilence();
 		}
+		if (this.#endpointing === "client") this.#trackClientSpeech(samples.length);
 		this.#sendPcm(float32ToPcm16(samples));
 	}
 
@@ -379,6 +404,58 @@ export class LiveSessionController {
 
 	#sendSilence(): void {
 		this.#sendPcm(createSilenceChunk(MUTED_CHUNK_MS));
+	}
+
+	/**
+	 * Client-side endpointing (endpointing: "client"): the server runs with
+	 * turn_detection null, so THIS controller decides turn boundaries. A fixed
+	 * server silence window can't distinguish mid-sentence pauses from the end
+	 * of speech (premature responses); here the window is ours to tune, short
+	 * blips are never committed, and commits never race an in-flight response.
+	 */
+	#trackClientSpeech(frameSamples: number): void {
+		const chunkMs = (frameSamples / REALTIME_SAMPLE_RATE) * 1000;
+		if (this.#inputLevel >= CLIENT_VAD_START_LEVEL) {
+			this.#clientSilenceMs = 0;
+			if (!this.#clientSpeechActive) {
+				this.#clientSpeechActive = true;
+				this.#clientSpeechMs = 0;
+				this.#setPhase("listening");
+			}
+			this.#clientSpeechMs += chunkMs;
+			return;
+		}
+		if (!this.#clientSpeechActive) return;
+		this.#clientSpeechMs += chunkMs;
+		this.#clientSilenceMs += chunkMs;
+		if (this.#clientSilenceMs >= this.#clientSilenceWindowMs) this.#clientEndpoint();
+	}
+
+	#clientEndpoint(): void {
+		this.#clientSpeechActive = false;
+		const durationMs = this.#clientSpeechMs;
+		this.#clientSpeechMs = 0;
+		this.#clientSilenceMs = 0;
+		// Noise blip: too short to be an utterance — never commit it.
+		if (durationMs < CLIENT_MIN_UTTERANCE_MS) return;
+		if (this.#responseInProgress) {
+			// A response is still in flight; commit once it completes, or the
+			// create would collide ("Cannot create response while another…").
+			this.#commitQueued = true;
+			return;
+		}
+		this.#commitAndRespond();
+	}
+
+	#commitAndRespond(): void {
+		try {
+			this.#options.transport.send({ type: "input_audio_buffer.commit" });
+			this.#options.transport.send({ type: "response.create" });
+			this.#responseInProgress = true;
+			this.#setPhase("thinking");
+		} catch (err) {
+			logger.debug("live client endpoint commit failed", { error: String(err) });
+		}
 	}
 
 	/** Expected echo floor: bleed ≈ coupling × playback level. Real barge-in must exceed it. */
@@ -407,6 +484,14 @@ export class LiveSessionController {
 		this.#drainGeneration += 1;
 		this.#outputLevel = 0;
 		this.#bargeInArmed = 0;
+		// Response state reset: the cancel ends the in-flight response; drop any
+		// queued commit — the barge-in utterance gets its own endpoint tracking.
+		this.#responseInProgress = false;
+		this.#commitQueued = false;
+		// The user is speaking right now — re-arm client speech tracking.
+		this.#clientSpeechActive = true;
+		this.#clientSpeechMs = 0;
+		this.#clientSilenceMs = 0;
 		// Immediate visual feedback — must land within ~100ms of the interruption.
 		this.#setPhase("interrupted");
 		this.#setPhase("listening");
@@ -571,7 +656,15 @@ export class LiveSessionController {
 				if (this.#assistantUtterances.length > 5) this.#assistantUtterances.shift();
 				this.#callbacks.onTranscript({ role: "assistant", text: event.transcript, final: true });
 				break;
+			case "response.created":
+				this.#responseInProgress = true;
+				break;
 			case "response.done":
+				this.#responseInProgress = false;
+				if (this.#commitQueued) {
+					this.#commitQueued = false;
+					this.#commitAndRespond();
+				}
 				if (this.#assistantText) {
 					this.#assistantUtterances.push(this.#assistantText);
 					if (this.#assistantUtterances.length > 5) this.#assistantUtterances.shift();

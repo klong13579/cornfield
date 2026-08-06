@@ -159,6 +159,10 @@ interface HarnessOptions {
 	isConfirmationPending?: () => boolean;
 	/** Ambient noise gate: sub-floor frames uplink as silence. */
 	micNoiseFloor?: number;
+	/** Who decides turn boundaries (default server — the harness simulates server VAD). */
+	endpointing?: "client" | "server";
+	/** Client endpointing silence window for tests. */
+	clientSilenceMs?: number;
 	/** Hold sink.end() until releaseEnd() — simulates playback still draining. */
 	holdSinkEnd?: boolean;
 }
@@ -204,6 +208,8 @@ async function makeHarness(options: HarnessOptions = {}): Promise<Harness> {
 			bargeInLevel: options.bargeInLevel,
 			bargeInEnabled: options.bargeInEnabled,
 			consultHandoffMs: options.consultHandoffMs,
+			endpointing: options.endpointing,
+			clientSilenceMs: options.clientSilenceMs,
 			onConsult: options.onConsult,
 			onTask: options.onTask,
 			onConfirmDecision: options.onConfirmDecision,
@@ -989,6 +995,64 @@ describe("LiveSessionController", () => {
 		// Must NOT re-send turn_detection — qwen rejects changing it after audio
 		// processing started (P0 pitfall #6).
 		expect("turn_detection" in (refresh?.session ?? {})).toBe(false);
+		await h.controller.dispose();
+	});
+
+	// -------------------------------------------- client-side endpointing ---
+
+	test("client endpointing sends turn_detection null and commits after the silence window", async () => {
+		const h = await makeHarness({ endpointing: "client", clientSilenceMs: 100 });
+		servers.push(h.server);
+
+		const config = (await waitForMessage(h.server, "session.update")) as { session: Record<string, unknown> };
+		expect(config.session.turn_detection).toBeNull();
+
+		// 400ms of speech (20ms chunks), then 120ms of quiet → endpoint.
+		for (let i = 0; i < 20; i++) h.source.emit(0.2);
+		expect(h.controller.phase).toBe("listening");
+		for (let i = 0; i < 6; i++) h.source.emit(0.001);
+		await Bun.sleep(20);
+
+		const types = h.server.received.map(m => m.type);
+		const commit = types.indexOf("input_audio_buffer.commit");
+		const create = types.lastIndexOf("response.create");
+		expect(commit).toBeGreaterThanOrEqual(0);
+		expect(create).toBeGreaterThan(commit);
+		expect(h.controller.phase).toBe("thinking");
+		await h.controller.dispose();
+	});
+
+	test("client endpointing never commits sub-300ms noise blips", async () => {
+		const h = await makeHarness({ endpointing: "client", clientSilenceMs: 100 });
+		servers.push(h.server);
+
+		// 100ms blip, then quiet past the window — too short to be an utterance.
+		for (let i = 0; i < 5; i++) h.source.emit(0.2);
+		for (let i = 0; i < 8; i++) h.source.emit(0.001);
+		await Bun.sleep(20);
+
+		expect(h.server.received.map(m => m.type)).not.toContain("input_audio_buffer.commit");
+		await h.controller.dispose();
+	});
+
+	test("client endpointing queues the commit while a response is in flight", async () => {
+		const h = await makeHarness({ endpointing: "client", clientSilenceMs: 100 });
+		servers.push(h.server);
+
+		// A response is in flight when the user finishes speaking.
+		h.server.send({ type: "response.created", response: { id: "r1" } });
+		await Bun.sleep(10);
+		for (let i = 0; i < 20; i++) h.source.emit(0.2);
+		for (let i = 0; i < 8; i++) h.source.emit(0.001);
+		await Bun.sleep(20);
+		expect(h.server.received.map(m => m.type)).not.toContain("input_audio_buffer.commit");
+
+		// The response completes → the queued commit fires.
+		h.server.send({ type: "response.done", response: { id: "r1" } });
+		await Bun.sleep(20);
+		const types = h.server.received.map(m => m.type);
+		expect(types).toContain("input_audio_buffer.commit");
+		expect(types.lastIndexOf("response.create")).toBeGreaterThan(types.indexOf("input_audio_buffer.commit"));
 		await h.controller.dispose();
 	});
 });

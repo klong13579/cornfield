@@ -11,7 +11,7 @@ import { RealtimeWsTransport } from "@oh-my-pi/pi-ai";
 import { logger } from "@oh-my-pi/pi-utils";
 import { LiveConsultBridge } from "../../live/consult-bridge";
 import { LiveSessionController } from "../../live/controller";
-import { buildGreetingNote, extractUserName } from "../../live/greeting";
+import { buildGreetingNote, deriveAddressName, extractUserName } from "../../live/greeting";
 import { buildVoiceInstructions } from "../../live/instructions";
 import { createNativeAecAudio, createNativeAudioSource, createNativeSinkFactory } from "../../live/natives-audio";
 import { LiveTaskRouter, type TaskRouterSession } from "../../live/task-router";
@@ -213,6 +213,8 @@ export class VoiceModeController {
 			bargeInLevel: settings.get("voice.bargeInLevel"),
 			bargeInEnabled: settings.get("voice.interrupt"),
 			micNoiseFloor: settings.get("voice.micNoiseFloor"),
+			endpointing: settings.get("voice.endpointing") === "server" ? "server" : "client",
+			clientSilenceMs: settings.get("voice.vadSilenceMs"),
 			isConfirmationPending: () => this.#gate?.confirmationPending ?? false,
 		});
 		this.#session = session;
@@ -295,7 +297,8 @@ export class VoiceModeController {
 	async #greet(): Promise<void> {
 		try {
 			const profile = await loadUserProfile();
-			this.#session?.speakConfirmationNote(buildGreetingNote(extractUserName(profile)));
+			const fullName = extractUserName(profile);
+			this.#session?.speakConfirmationNote(buildGreetingNote(fullName ? deriveAddressName(fullName) : undefined));
 		} catch (err) {
 			logger.debug("voice greeting failed", { error: String(err) });
 		}

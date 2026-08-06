@@ -1082,7 +1082,18 @@ export const SETTINGS_SCHEMA = {
 			tab: "interaction",
 			label: "VAD Silence (ms)",
 			description:
-				"Server-side VAD silence window before a user turn is committed. Lower responds faster but cuts off mid-sentence pauses; 800 was too eager (premature responses).",
+				"Silence window before a spoken turn is committed. With voice.endpointing=client this is the client-side endpointing window; raise it if pauses mid-sentence still cut you off.",
+			submenu: true,
+		},
+	},
+	"voice.endpointing": {
+		type: "string",
+		default: "client",
+		ui: {
+			tab: "interaction",
+			label: "Turn Endpointing",
+			description:
+				"Who decides you finished speaking: client (omp tracks speech, commits turns; tolerant of mid-sentence pauses) or server (realtime server VAD, fixed silence window).",
 			submenu: true,
 		},
 	},

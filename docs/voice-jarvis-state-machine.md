@@ -47,6 +47,10 @@ L4 记录层   LiveTurnBuffer + recorder（话语去重）
 **上行门控**（每个麦克风帧，按顺序）：
 disposed/halted/未 configAck → 丢弃；muted → 静音帧；speaking → 静音帧（除非连续 5 帧超过回声地板 = barge-in）；**低于 `micNoiseFloor`(0.02) → 静音帧**；其余 → 原样上行。
 
+**端点检测（谁判定「说完了」，2026-08-06 新增）**：`voice.endpointing`，默认 **client**。
+- **server 模式**（旧行为）：server_vad 固定静默窗口判停——无法区分句中停顿与说完，抢答问题无解。
+- **client 模式**（默认）：`turn_detection: null`（qwen 已实测接受），控制器自己跟踪语音：RMS ≥ 0.04 起始，静默达到 `voice.vadSilenceMs`（默认 1200ms）判定说完 → `input_audio_buffer.commit` + `response.create`。<300ms 的短促声段是噪声，永不提交；response 在飞时提交排队到 response.done 后（防 create 碰撞）；barge-in 时重置跟踪状态。
+
 **转写守卫**（`transcription.completed`，按顺序）：speaking 相位丢弃 → `#isEcho`（近 5 条助手话语匹配）丢弃 → <3 字丢弃（**确认等待期间豁免**，「确认/做/好」可达）。
 
 ## L3 执行层
