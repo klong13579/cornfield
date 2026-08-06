@@ -93,6 +93,8 @@ export interface LiveSessionOptions {
 	clientSilenceMs?: number;
 	/** No mic chunk for this long fires the capture-stall watchdog. Default 5000ms. */
 	captureStallMs?: number;
+	/** Idle (no commit, no speech) this long → clear the server input buffer. Default 60000ms. */
+	bufferClearMs?: number;
 	/** Capture stalled (mic silent) — show the user a restart hint. */
 	onCaptureStall?: () => void;
 	/** Capture resumed after a stall — clear the hint. */

@@ -166,6 +166,8 @@ interface HarnessOptions {
 	clientSilenceMs?: number;
 	/** Capture-stall watchdog window for tests. */
 	captureStallMs?: number;
+	/** Idle buffer-clear window for tests. */
+	bufferClearMs?: number;
 	onCaptureStall?: () => void;
 	onCaptureResume?: () => void;
 	/** Hold sink.end() until releaseEnd() — simulates playback still draining. */
@@ -217,6 +219,7 @@ async function makeHarness(options: HarnessOptions = {}): Promise<Harness> {
 			endpointing: options.endpointing,
 			clientSilenceMs: options.clientSilenceMs,
 			captureStallMs: options.captureStallMs,
+			bufferClearMs: options.bufferClearMs,
 			onCaptureStall: options.onCaptureStall,
 			onCaptureResume: options.onCaptureResume,
 			onConsult: options.onConsult,
@@ -1161,6 +1164,39 @@ describe("LiveSessionController", () => {
 		h.source.emit(0.01);
 		await Bun.sleep(30);
 		expect(resumed).toBe(1);
+		await h.controller.dispose();
+	});
+
+	test("idle client session clears the input buffer before the 300s limit", async () => {
+		const h = await makeHarness({ endpointing: "client", captureStallMs: 5_000, bufferClearMs: 100 });
+		servers.push(h.server);
+
+		// No speech, no commit: the watchdog clears the idle buffer.
+		await Bun.sleep(250);
+		expect(h.server.received.map(m => m.type)).toContain("input_audio_buffer.clear");
+		await h.controller.dispose();
+	});
+
+	test("buffer overflow errors clear the buffer without striking the breaker", async () => {
+		const h = await makeHarness({ endpointing: "client", clientSilenceMs: 100 });
+		servers.push(h.server);
+
+		// Three overflow errors would halt the session under the normal breaker.
+		for (let i = 0; i < 3; i++) {
+			h.server.send({
+				type: "error",
+				error: { type: "server_error", message: "Input audio buffer exceeded maximum duration (300s)." },
+			});
+		}
+		await Bun.sleep(20);
+		const clears = h.server.received.filter(m => m.type === "input_audio_buffer.clear");
+		expect(clears.length).toBe(3);
+
+		// Session still alive: the next utterance commits normally.
+		for (let i = 0; i < 20; i++) h.source.emit(0.2);
+		for (let i = 0; i < 8; i++) h.source.emit(0.001);
+		await Bun.sleep(20);
+		expect(h.server.received.map(m => m.type)).toContain("input_audio_buffer.commit");
 		await h.controller.dispose();
 	});
 });

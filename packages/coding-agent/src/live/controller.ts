@@ -92,6 +92,8 @@ const DEFAULT_CLIENT_SILENCE_MS = 1_200;
 const RESPONSE_STALE_MS = 60_000;
 /** No mic chunk for this long while active = capture stall (VPIO post-playback quirk). */
 const CAPTURE_STALL_MS = 5_000;
+/** Idle (no commit, no speech) for this long → clear the server input buffer before qwen's 300s limit strikes. */
+const BUFFER_CLEAR_MS = 60_000;
 
 function clamp01(value: number): number {
 	return Math.min(1, Math.max(0, value));
@@ -129,6 +131,11 @@ export class LiveSessionController {
 	#lastMicChunkAt = 0;
 	#captureStallReported = false;
 	readonly #captureStallMs: number;
+	readonly #bufferClearMs: number;
+	#lastCommitAt = 0;
+	#lastCheckWallAt = 0;
+	#audioMsSinceCheck = 0;
+	#captureFloodReported = false;
 	/** Consecutive server errors since the last good config ack. */
 	#errorCount = 0;
 	/** Terminal error state: uplink halted until the session ends. */
@@ -163,6 +170,7 @@ export class LiveSessionController {
 		this.#consultHandoffMs = options.consultHandoffMs ?? CONSULT_HANDOFF_MS;
 		this.#taskHandoffMs = options.taskHandoffMs ?? TASK_HANDOFF_MS;
 		this.#captureStallMs = options.captureStallMs ?? CAPTURE_STALL_MS;
+		this.#bufferClearMs = options.bufferClearMs ?? BUFFER_CLEAR_MS;
 		this.#onConsult = options.onConsult ?? (async () => "（语音任务委托尚未接入，请改用文字输入。）");
 		this.#onTask = options.onTask ?? (async () => "（语音任务派发尚未接入，请改用文字输入。）");
 		this.#onControl = options.onControl ?? (async () => "（执行中控制尚未接入。）");
@@ -307,7 +315,9 @@ export class LiveSessionController {
 		// playback ends. Without this the session just goes deaf — no event, no
 		// error, nothing to diagnose. Now: one warn + a panel hint per episode.
 		this.#lastMicChunkAt = Date.now();
-		const tickMs = Math.min(1_000, Math.max(20, Math.floor(this.#captureStallMs / 5)));
+		this.#lastCommitAt = Date.now();
+		this.#lastCheckWallAt = Date.now();
+		const tickMs = Math.min(1_000, Math.max(20, Math.floor(Math.min(this.#captureStallMs, this.#bufferClearMs) / 5)));
 		this.#captureWatchdog = setInterval(() => this.#checkCaptureStall(), tickMs);
 		this.#captureWatchdog.unref?.();
 	}
@@ -392,8 +402,48 @@ export class LiveSessionController {
 	}
 
 	#checkCaptureStall(): void {
-		if (this.#disposed || this.#captureStallReported) return;
-		const silenceMs = Date.now() - this.#lastMicChunkAt;
+		if (this.#disposed) return;
+		const now = Date.now();
+		// Capture-rate anomaly: audio arriving far faster than real time (the
+		// raw miniaudio path delivered ~8x realtime on 2026-08-06, filling the
+		// server's 300s buffer in 36s). Same user action as a stall: restart.
+		const wallMs = now - this.#lastCheckWallAt;
+		this.#lastCheckWallAt = now;
+		const audioMs = this.#audioMsSinceCheck;
+		this.#audioMsSinceCheck = 0;
+		if (wallMs > 0 && audioMs > 1_000 && audioMs > wallMs * 3) {
+			if (!this.#captureFloodReported) {
+				this.#captureFloodReported = true;
+				logger.warn("live capture rate anomaly — audio faster than realtime", {
+					audioMs,
+					wallMs,
+				});
+				this.#options.onCaptureStall?.();
+			}
+		} else if (this.#captureFloodReported) {
+			this.#captureFloodReported = false;
+			logger.info("live capture rate normalized");
+			this.#options.onCaptureResume?.();
+		}
+		// Idle buffer clear (client endpointing): nothing committed and no
+		// speech active — drop the accumulated silence/noise before it hits the
+		// server's 300s limit. Nothing of value is lost: tracking not armed
+		// means no frame crossed the speech threshold.
+		if (
+			this.#endpointing === "client" &&
+			!this.#clientSpeechActive &&
+			now - this.#lastCommitAt > this.#bufferClearMs
+		) {
+			this.#lastCommitAt = now;
+			try {
+				this.#options.transport.send({ type: "input_audio_buffer.clear" });
+				logger.debug("live input buffer cleared (idle)");
+			} catch (err) {
+				logger.debug("live input buffer clear failed", { error: String(err) });
+			}
+		}
+		if (this.#captureStallReported) return;
+		const silenceMs = now - this.#lastMicChunkAt;
 		if (silenceMs < this.#captureStallMs) return;
 		this.#captureStallReported = true;
 		logger.warn("live capture stalled — no mic chunks", { silenceMs });
@@ -403,6 +453,7 @@ export class LiveSessionController {
 	#onMicChunk(samples: Float32Array): void {
 		if (this.#disposed) return;
 		this.#lastMicChunkAt = Date.now();
+		this.#audioMsSinceCheck += (samples.length / REALTIME_SAMPLE_RATE) * 1000;
 		if (this.#captureStallReported) {
 			this.#captureStallReported = false;
 			logger.info("live capture resumed");
@@ -513,6 +564,7 @@ export class LiveSessionController {
 		try {
 			this.#options.transport.send({ type: "input_audio_buffer.commit" });
 			this.#options.transport.send({ type: "response.create" });
+			this.#lastCommitAt = Date.now();
 			this.#responseInProgress = true;
 			this.#responseStartedAt = Date.now();
 			this.#setPhase("thinking");
@@ -780,6 +832,18 @@ export class LiveSessionController {
 			// Drop (not retry) the queued commit: if the commit itself was rejected
 			// ("buffer too small") an immediate retry would re-strike the breaker.
 			this.#commitQueued = false;
+		}
+		// Buffer overflow is recoverable: clear the accumulated silence and do
+		// NOT strike — a 3-strike halt here killed two sessions on 2026-08-06.
+		if (/exceeded maximum duration|buffer exceeded/i.test(message)) {
+			try {
+				this.#options.transport.send({ type: "input_audio_buffer.clear" });
+			} catch (err) {
+				logger.debug("live input buffer clear failed", { error: String(err) });
+			}
+			this.#lastCommitAt = Date.now();
+			logger.warn("live input buffer overflow — cleared", { message });
+			return;
 		}
 		this.#errorCount += 1;
 		logger.warn("live server error", { message, errorCount: this.#errorCount });
