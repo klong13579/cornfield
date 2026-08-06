@@ -47,9 +47,9 @@ L4 记录层   LiveTurnBuffer + recorder（话语去重）
 **上行门控**（每个麦克风帧，按顺序）：
 disposed/halted/未 configAck → 丢弃；muted → 静音帧；speaking → 静音帧（除非连续 5 帧超过回声地板 = barge-in）；**低于 `micNoiseFloor`(0.02) → 静音帧**；其余 → 原样上行。
 
-**端点检测（谁判定「说完了」，2026-08-06 新增）**：`voice.endpointing`，默认 **client**。
-- **server 模式**（旧行为）：server_vad 固定静默窗口判停——无法区分句中停顿与说完，抢答问题无解。
-- **client 模式**（默认）：`turn_detection: null`（qwen 已实测接受），控制器自己跟踪语音：RMS ≥ 0.04 起始，静默达到 `voice.vadSilenceMs`（默认 1200ms）判定说完 → `input_audio_buffer.commit` + `response.create`。<300ms 的短促声段是噪声，永不提交；response 在飞时提交排队到 response.done 后（防 create 碰撞）；barge-in 时重置跟踪状态。
+**端点检测（谁判定「说完了」）**：`voice.endpointing`，默认 **server**（2026-08-06 验收实锤后回退）。
+- **server 模式**（默认，已验证）：server_vad 固定静默窗口判停。句中停顿偶有抢答，但整体可靠。
+- **client 模式**（opt-in 实验，勿默认开启）：`turn_detection: null`，控制器自己跟踪语音：RMS ≥ 0.04 起始，静默达到 `voice.vadSilenceMs` 判定说完 → commit + response.create。**已知缺陷（2026-08-06 实测）**：固定 0.04 阈值无自适应（环境噪声峰值可达 0.035，语音略低即永不 arm）；任何 ≥ 阈值的噪声尖峰重置静默窗（真实办公环境下端点永远到不了）——表现为播报后第一句话被吞几十秒。修复需自适应噪声基线，不是调参能解决的。
 
 **转写守卫**（`transcription.completed`，按顺序）：speaking 相位丢弃 → `#isEcho`（近 5 条助手话语匹配）丢弃 → <3 字丢弃（**确认等待期间豁免**，「确认/做/好」可达）。
 

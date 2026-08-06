@@ -213,7 +213,10 @@ export class VoiceModeController {
 			bargeInLevel: settings.get("voice.bargeInLevel"),
 			bargeInEnabled: settings.get("voice.interrupt"),
 			micNoiseFloor: settings.get("voice.micNoiseFloor"),
-			endpointing: settings.get("voice.endpointing") === "server" ? "server" : "client",
+			// Fail-safe toward the verified path: anything except an explicit
+			// "client" runs server VAD (client RMS endpointing swallowed
+			// post-playback utterances — 2026-08-06 acceptance, reverted).
+			endpointing: settings.get("voice.endpointing") === "client" ? "client" : "server",
 			clientSilenceMs: settings.get("voice.vadSilenceMs"),
 			onCaptureStall: () =>
 				this.#pushPanelState({ error: "麦克风采集疑似停摆，按 alt+v 退出后重进语音模式" }),

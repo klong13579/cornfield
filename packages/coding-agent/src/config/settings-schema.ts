@@ -1088,12 +1088,12 @@ export const SETTINGS_SCHEMA = {
 	},
 	"voice.endpointing": {
 		type: "string",
-		default: "client",
+		default: "server",
 		ui: {
 			tab: "interaction",
 			label: "Turn Endpointing",
 			description:
-				"Who decides you finished speaking: client (omp tracks speech, commits turns; tolerant of mid-sentence pauses) or server (realtime server VAD, fixed silence window).",
+				"Who decides you finished speaking: server (realtime server VAD — the verified default) or client (omp RMS tracking; opt-in experiment — its fixed 0.04 arm threshold and noise-spike silence resets swallowed post-playback utterances on 2026-08-06).",
 			submenu: true,
 		},
 	},
