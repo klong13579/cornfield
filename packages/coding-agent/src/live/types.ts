@@ -91,6 +91,12 @@ export interface LiveSessionOptions {
 	endpointing?: "client" | "server";
 	/** Client endpointing: silence window (ms) before committing a turn. Default 1200. */
 	clientSilenceMs?: number;
+	/** No mic chunk for this long fires the capture-stall watchdog. Default 5000ms. */
+	captureStallMs?: number;
+	/** Capture stalled (mic silent) — show the user a restart hint. */
+	onCaptureStall?: () => void;
+	/** Capture resumed after a stall — clear the hint. */
+	onCaptureResume?: () => void;
 	/** Whether a voice confirmation is waiting for the user's answer (P1 gate).
 	 * While pending, 1-2 char transcripts ("确认"/"做"/"好") bypass the noise guard. */
 	isConfirmationPending?: () => boolean;

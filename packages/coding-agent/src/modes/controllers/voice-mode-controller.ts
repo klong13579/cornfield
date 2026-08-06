@@ -215,6 +215,9 @@ export class VoiceModeController {
 			micNoiseFloor: settings.get("voice.micNoiseFloor"),
 			endpointing: settings.get("voice.endpointing") === "server" ? "server" : "client",
 			clientSilenceMs: settings.get("voice.vadSilenceMs"),
+			onCaptureStall: () =>
+				this.#pushPanelState({ error: "麦克风采集疑似停摆，按 alt+v 退出后重进语音模式" }),
+			onCaptureResume: () => this.#pushPanelState({ error: undefined }),
 			isConfirmationPending: () => this.#gate?.confirmationPending ?? false,
 		});
 		this.#session = session;

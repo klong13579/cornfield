@@ -90,6 +90,8 @@ const CLIENT_MIN_UTTERANCE_MS = 300;
 const DEFAULT_CLIENT_SILENCE_MS = 1_200;
 /** A response-in-flight flag older than this is presumed lost (missing response.done). */
 const RESPONSE_STALE_MS = 60_000;
+/** No mic chunk for this long while active = capture stall (VPIO post-playback quirk). */
+const CAPTURE_STALL_MS = 5_000;
 
 function clamp01(value: number): number {
 	return Math.min(1, Math.max(0, value));
@@ -122,6 +124,11 @@ export class LiveSessionController {
 	/** Uplink gate: cleared by the session.updated ack or the ack timeout. */
 	#configAcked = false;
 	#configAckTimer: ReturnType<typeof setTimeout> | undefined;
+	/** Capture-stall watchdog state (mic went silent — VPIO can stall after playback). */
+	#captureWatchdog: ReturnType<typeof setInterval> | undefined;
+	#lastMicChunkAt = 0;
+	#captureStallReported = false;
+	readonly #captureStallMs: number;
 	/** Consecutive server errors since the last good config ack. */
 	#errorCount = 0;
 	/** Terminal error state: uplink halted until the session ends. */
@@ -155,6 +162,7 @@ export class LiveSessionController {
 		this.#clientSilenceWindowMs = options.clientSilenceMs ?? DEFAULT_CLIENT_SILENCE_MS;
 		this.#consultHandoffMs = options.consultHandoffMs ?? CONSULT_HANDOFF_MS;
 		this.#taskHandoffMs = options.taskHandoffMs ?? TASK_HANDOFF_MS;
+		this.#captureStallMs = options.captureStallMs ?? CAPTURE_STALL_MS;
 		this.#onConsult = options.onConsult ?? (async () => "（语音任务委托尚未接入，请改用文字输入。）");
 		this.#onTask = options.onTask ?? (async () => "（语音任务派发尚未接入，请改用文字输入。）");
 		this.#onControl = options.onControl ?? (async () => "（执行中控制尚未接入。）");
@@ -295,6 +303,13 @@ export class LiveSessionController {
 		// config is acknowledged (see #onMicChunk), so no frame can beat the
 		// turn_detection config to the server.
 		this.#options.source.start(samples => this.#onMicChunk(samples));
+		// Capture-stall watchdog: VPIO capture can silently stop delivering after
+		// playback ends. Without this the session just goes deaf — no event, no
+		// error, nothing to diagnose. Now: one warn + a panel hint per episode.
+		this.#lastMicChunkAt = Date.now();
+		const tickMs = Math.min(1_000, Math.max(20, Math.floor(this.#captureStallMs / 5)));
+		this.#captureWatchdog = setInterval(() => this.#checkCaptureStall(), tickMs);
+		this.#captureWatchdog.unref?.();
 	}
 
 	/** Toggle mute: mic keeps running (levels + VAD clock), wire gets silence. */
@@ -327,6 +342,7 @@ export class LiveSessionController {
 	async dispose(): Promise<void> {
 		if (this.#disposed) return;
 		this.#disposed = true;
+		if (this.#captureWatchdog) clearInterval(this.#captureWatchdog);
 		this.#cancelConfigAckTimer();
 		this.#drainGeneration += 1;
 		this.#options.source.stop();
@@ -375,8 +391,23 @@ export class LiveSessionController {
 		}
 	}
 
+	#checkCaptureStall(): void {
+		if (this.#disposed || this.#captureStallReported) return;
+		const silenceMs = Date.now() - this.#lastMicChunkAt;
+		if (silenceMs < this.#captureStallMs) return;
+		this.#captureStallReported = true;
+		logger.warn("live capture stalled — no mic chunks", { silenceMs });
+		this.#options.onCaptureStall?.();
+	}
+
 	#onMicChunk(samples: Float32Array): void {
 		if (this.#disposed) return;
+		this.#lastMicChunkAt = Date.now();
+		if (this.#captureStallReported) {
+			this.#captureStallReported = false;
+			logger.info("live capture resumed");
+			this.#options.onCaptureResume?.();
+		}
 		this.#inputLevel = clamp01(rmsLevel(samples) / 32768);
 		this.#callbacks.onLevels(this.#inputLevel, this.#outputLevel);
 		if (this.#options.transport.state !== "connected") return;

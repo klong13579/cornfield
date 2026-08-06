@@ -164,6 +164,10 @@ interface HarnessOptions {
 	endpointing?: "client" | "server";
 	/** Client endpointing silence window for tests. */
 	clientSilenceMs?: number;
+	/** Capture-stall watchdog window for tests. */
+	captureStallMs?: number;
+	onCaptureStall?: () => void;
+	onCaptureResume?: () => void;
 	/** Hold sink.end() until releaseEnd() — simulates playback still draining. */
 	holdSinkEnd?: boolean;
 }
@@ -212,6 +216,9 @@ async function makeHarness(options: HarnessOptions = {}): Promise<Harness> {
 			taskHandoffMs: options.taskHandoffMs,
 			endpointing: options.endpointing,
 			clientSilenceMs: options.clientSilenceMs,
+			captureStallMs: options.captureStallMs,
+			onCaptureStall: options.onCaptureStall,
+			onCaptureResume: options.onCaptureResume,
 			onConsult: options.onConsult,
 			onTask: options.onTask,
 			onConfirmDecision: options.onConfirmDecision,
@@ -1126,6 +1133,34 @@ describe("LiveSessionController", () => {
 		} finally {
 			spy.mockRestore();
 		}
+		await h.controller.dispose();
+	});
+
+	test("capture stall watchdog fires when mic chunks stop, clears on resume", async () => {
+		let stalled = 0;
+		let resumed = 0;
+		const h = await makeHarness({
+			captureStallMs: 100,
+			onCaptureStall: () => stalled++,
+			onCaptureResume: () => resumed++,
+		});
+		servers.push(h.server);
+
+		// Chunks flowing, short gap under the window: no stall.
+		for (let i = 0; i < 5; i++) h.source.emit(0.01);
+		await Bun.sleep(60);
+		expect(stalled).toBe(0);
+
+		// Chunks stop: the watchdog reports one stall episode.
+		await Bun.sleep(200);
+		expect(stalled).toBe(1);
+		await Bun.sleep(100);
+		expect(stalled).toBe(1); // not re-reported while the episode persists
+
+		// Chunks resume: the episode clears.
+		h.source.emit(0.01);
+		await Bun.sleep(30);
+		expect(resumed).toBe(1);
 		await h.controller.dispose();
 	});
 });
