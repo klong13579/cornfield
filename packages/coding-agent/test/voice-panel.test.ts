@@ -309,5 +309,21 @@ describe("VoicePanel", () => {
 				.replaceAll(/\s+/g, "");
 			expect(joined).toContain(tail);
 		});
+
+		it("listening phase shows the running-work activity line (Gap 4)", () => {
+			const p = createPanel({ plain: true });
+			p.update(state({ phase: "listening", toolLine: "bash: bun test" }));
+			const out = render(p);
+			expect(out).toContain("● 聆听中");
+			expect(out).toContain("▸ 执行中: bash: bun test");
+		});
+
+		it("activity line clears when the work finishes", () => {
+			const p = createPanel({ plain: true });
+			p.update(state({ phase: "listening", toolLine: "bash: bun test" }));
+			expect(render(p)).toContain("▸ 执行中");
+			p.update(state({ phase: "listening", toolLine: "", consultTask: "" }));
+			expect(render(p)).not.toContain("▸ 执行中");
+		});
 	});
 });
