@@ -32,6 +32,8 @@ export interface VoiceImmersiveState {
 	consultTask?: string;
 	/** Latest tool activity line (e.g. "read: TODO.md"). */
 	toolLine?: string;
+	/** Live thinking tail of the running task's assistant turn. */
+	thinkingLine?: string;
 	error?: string;
 	/** Channel dropped and is coming back. */
 	reconnecting?: boolean;
@@ -120,6 +122,7 @@ export class VoiceImmersiveView implements Component {
 	#taskTitle = "";
 	#taskStartedAt = 0;
 	#toolLine = "";
+	#thinkingLine = "";
 	#activity: string[] = [];
 	#error = "";
 	#reconnecting = false;
@@ -171,6 +174,7 @@ export class VoiceImmersiveView implements Component {
 			}
 			if (!line) this.#toolLine = "";
 		}
+		if (state.thinkingLine !== undefined) this.#thinkingLine = clean(state.thinkingLine);
 		if (state.error !== undefined) this.#error = clean(state.error);
 		if (state.reconnecting !== undefined) this.#reconnecting = state.reconnecting;
 		this.#requestRender();
@@ -293,6 +297,7 @@ export class VoiceImmersiveView implements Component {
 			this.#transcripts.map(t => `${t.role}:${t.text}:${t.final ? 1 : 0}`).join("|"),
 			this.#taskTitle,
 			this.#toolLine,
+			this.#thinkingLine,
 			this.#activity.join(">"),
 			this.#error,
 			this.#reconnecting ? "r" : "",
@@ -478,6 +483,15 @@ export class VoiceImmersiveView implements Component {
 		if (this.#toolLine) {
 			out.push(indent + this.#rgb(BLUE, `▸ ${truncateToWidth(this.#toolLine, feedW - 2)}`));
 		}
+		if (this.#thinkingLine) {
+			// Live thinking tail — the immersive view replaced the message list,
+			// so this feed is the only place the user can watch the model reason.
+			const wrapped = wrapTextWithAnsi(this.#thinkingLine, Math.max(8, feedW - 6));
+			const tail = wrapped.slice(-3);
+			for (const [i, line] of tail.entries()) {
+				out.push(indent + this.#fg("dim", i === 0 ? `💭 ${line}` : `  ${line}`));
+			}
+		}
 		const done = this.#activity.length;
 		out.push(indent + this.#fg("dim", `${done + (this.#toolLine ? 1 : 0)} 个工具调用 · 已用 ${elapsed}s`));
 		out.push("");
@@ -494,6 +508,8 @@ export class VoiceImmersiveView implements Component {
 		if (this.#taskTitle) out.push(this.#center(width, `任务: ${truncateToWidth(this.#taskTitle, width - 8)}`));
 		if (this.#toolLine)
 			out.push(this.#center(width, this.#fg("dim", `▸ ${truncateToWidth(this.#toolLine, width - 8)}`)));
+		if (this.#thinkingLine)
+			out.push(this.#center(width, this.#fg("dim", `💭 ${truncateToWidth(this.#thinkingLine, width - 8)}`)));
 		out.push("");
 		for (const line of this.#transcriptLines(width)) out.push(this.#center(width, line));
 		while (out.length < rows - 1) out.push("");

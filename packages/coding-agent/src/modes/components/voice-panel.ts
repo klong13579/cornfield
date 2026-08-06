@@ -33,6 +33,8 @@ export interface VoicePanelState {
 	transcript?: VoicePanelTranscript;
 	consultTask?: string;
 	toolLine?: string;
+	/** Live thinking tail of the running task (rendered by the immersive view only). */
+	thinkingLine?: string;
 	error?: string;
 }
 

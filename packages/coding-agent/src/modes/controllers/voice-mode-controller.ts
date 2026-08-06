@@ -24,6 +24,7 @@ import liveInstructions from "../../prompts/live/live-instructions.md" with { ty
 import { loadUserProfile } from "../../system-prompt";
 import { type VoiceImmersiveState, VoiceImmersiveView } from "../components/voice-immersive-view";
 import { VoicePanel, type VoicePanelCallbacks, type VoicePanelState } from "../components/voice-panel";
+import type { AgentSessionEvent } from "../../session/agent-session";
 import type { InteractiveModeContext } from "../types";
 
 /** P0: narwal-plan is the only bench-verified realtime endpoint. */
@@ -50,6 +51,9 @@ export class VoiceModeController {
 	#reconnecting = false;
 	/** Main-session subscription driving the instructions refresh. */
 	#sessionUnsubscribe: (() => void) | undefined;
+	/** Thinking-stream pipe into the immersive view (throttled). */
+	#thinkingBuffer = "";
+	#lastThinkingPushAt = 0;
 	#panelState: VoicePanelState = { phase: "connecting", inputLevel: 0, outputLevel: 0 };
 
 	constructor(ctx: InteractiveModeContext) {
@@ -195,7 +199,7 @@ export class VoiceModeController {
 			onTask: async task => {
 				this.#pushPanelState({ consultTask: task });
 				const result = (await this.#taskRouter?.dispatch(task)) ?? "（任务派发未初始化）";
-				this.#pushPanelState({ consultTask: "", toolLine: "" });
+				this.#pushPanelState({ consultTask: "", toolLine: "", thinkingLine: "" });
 				return result;
 			},
 			onConfirmDecision: decision => this.#gate?.resolveDecision(decision),
@@ -253,7 +257,11 @@ export class VoiceModeController {
 		// refreshes the realtime front-end's summary, so deictic questions
 		// ("刚才那个改对了吗") see recent work instead of the voice-start snapshot.
 		this.#sessionUnsubscribe = this.#ctx.session.subscribe(event => {
-			if (event.type === "agent_end") this.#refreshInstructions();
+			if (event.type === "agent_end") {
+				this.#refreshInstructions();
+				this.#pushThinking("");
+			}
+			this.#feedThinking(event);
 		});
 
 		const callbacks: VoicePanelCallbacks = {
@@ -399,6 +407,31 @@ export class VoiceModeController {
 			{ role: "assistant", source: "voice-consult" },
 			"agent",
 		);
+	}
+
+	/**
+	 * Pipe the main session's thinking stream into the immersive view. The
+	 * immersive layout replaces the normal message list, so without this feed a
+	 * running task's reasoning is invisible (user regression after the
+	 * voice-tui merge). Panel mode keeps the message list — no feed needed.
+	 */
+	#feedThinking(event: AgentSessionEvent): void {
+		if (!this.#immersive || event.type !== "message_update") return;
+		const ev = event.assistantMessageEvent;
+		if (ev.type === "thinking_delta") {
+			this.#thinkingBuffer = `${this.#thinkingBuffer}${ev.delta}`.slice(-1_000);
+			if (Date.now() - this.#lastThinkingPushAt < 200) return;
+			this.#pushThinking(this.#thinkingBuffer);
+		} else if (ev.type === "thinking_end") {
+			this.#pushThinking("");
+		}
+	}
+
+	#pushThinking(text: string): void {
+		if (!this.#immersive) return;
+		this.#lastThinkingPushAt = Date.now();
+		this.#thinkingBuffer = text ? this.#thinkingBuffer : "";
+		this.#pushPanelState({ thinkingLine: text ? text.slice(-240) : "" });
 	}
 
 	#pushPanelState(partial: Partial<VoicePanelState>): void {
