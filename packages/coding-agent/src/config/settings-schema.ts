@@ -1077,11 +1077,12 @@ export const SETTINGS_SCHEMA = {
 	},
 	"voice.vadSilenceMs": {
 		type: "integer",
-		default: 800,
+		default: 1200,
 		ui: {
 			tab: "interaction",
 			label: "VAD Silence (ms)",
-			description: "Server-side VAD silence window before a user turn is committed.",
+			description:
+				"Server-side VAD silence window before a user turn is committed. Lower responds faster but cuts off mid-sentence pauses; 800 was too eager (premature responses).",
 			submenu: true,
 		},
 	},

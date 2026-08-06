@@ -11,6 +11,7 @@ import { RealtimeWsTransport } from "@oh-my-pi/pi-ai";
 import { logger } from "@oh-my-pi/pi-utils";
 import { LiveConsultBridge } from "../../live/consult-bridge";
 import { LiveSessionController } from "../../live/controller";
+import { buildGreetingNote, extractUserName } from "../../live/greeting";
 import { buildVoiceInstructions } from "../../live/instructions";
 import { createNativeAecAudio, createNativeAudioSource, createNativeSinkFactory } from "../../live/natives-audio";
 import { LiveTaskRouter, type TaskRouterSession } from "../../live/task-router";
@@ -19,6 +20,7 @@ import { LiveTurnBuffer } from "../../live/turn-buffer";
 import type { LiveIntent, LivePhase, LiveTranscript } from "../../live/types";
 import { VoiceGate } from "../../live/voice-gate";
 import liveInstructions from "../../prompts/live/live-instructions.md" with { type: "text" };
+import { loadUserProfile } from "../../system-prompt";
 import { VoicePanel, type VoicePanelCallbacks, type VoicePanelState } from "../components/voice-panel";
 import type { InteractiveModeContext } from "../types";
 
@@ -123,7 +125,8 @@ export class VoiceModeController {
 		const instructions = buildVoiceInstructions(liveInstructions, this.#ctx.session.agent.state.messages);
 		this.#consultBridge = new LiveConsultBridge({
 			cwd: this.#ctx.session.sessionManager.getCwd(),
-			onActivity: line => this.#pushPanelState({ toolLine: line }),
+			// No panel activity for consults: the fast lane stays quiet (user
+			// feedback — the log-style lines were noise). Tasks keep their lines.
 			onBackgroundResult: (task, text) => this.#onBackgroundResult(task, text),
 		});
 
@@ -170,10 +173,7 @@ export class VoiceModeController {
 				},
 			},
 			onConsult: async task => {
-				this.#pushPanelState({ consultTask: task });
-				const result = (await this.#consultBridge?.consult(task)) ?? "（consult 未初始化）";
-				this.#pushPanelState({ consultTask: "", toolLine: "" });
-				return result;
+				return (await this.#consultBridge?.consult(task)) ?? "（consult 未初始化）";
 			},
 			onTask: async task => {
 				this.#pushPanelState({ consultTask: task });
@@ -256,6 +256,7 @@ export class VoiceModeController {
 		if (phase === "listening" || phase === "muted") {
 			if (!this.#voiceConnectedOnce) {
 				this.#voiceConnectedOnce = true;
+				void this.#greet();
 			} else if (this.#reconnecting) {
 				this.#reconnecting = false;
 				this.#announceResumedState();
@@ -288,6 +289,16 @@ export class VoiceModeController {
 	#refreshInstructions(): void {
 		const instructions = buildVoiceInstructions(liveInstructions, this.#ctx.session.agent.state.messages);
 		this.#session?.updateInstructions(instructions);
+	}
+
+	/** Voice-start hello: greet the user by name from the declarative persona. */
+	async #greet(): Promise<void> {
+		try {
+			const profile = await loadUserProfile();
+			this.#session?.speakConfirmationNote(buildGreetingNote(extractUserName(profile)));
+		} catch (err) {
+			logger.debug("voice greeting failed", { error: String(err) });
+		}
 	}
 	#onTranscript(transcript: LiveTranscript): void {
 		this.#pushPanelState({ transcript });
