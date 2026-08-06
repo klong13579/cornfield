@@ -56,8 +56,11 @@ const CONSULT_TOOL_NAME = "omp_agent_consult";
 const TASK_TOOL_NAME = "omp_agent_task";
 const CONFIRM_TOOL_NAME = "omp_voice_confirm";
 const CONTROL_TOOL_NAME = "omp_agent_control";
-/** Design §3.3: wait this long for a consult result before handing the model a filler. */
-const CONSULT_HANDOFF_MS = 3_000;
+/** Design §3.3: wait this long for a consult result before handing the model a filler.
+ * 1.5s (was 3s, 2026-08-06): a fresh consult needs session spinup + a full LLM
+ * round — it almost never settles under 3s, so the longer window was ~4.6s of
+ * perceived silence before the 「请稍等」 filler (weather-query acceptance). */
+const CONSULT_HANDOFF_MS = 1_500;
 /** Tasks never settle this fast (main-session LLM round) except instant rejections — a long window is pure latency before the 「请稍等」 filler. */
 const TASK_HANDOFF_MS = 1_000;
 /**
@@ -136,6 +139,11 @@ export class LiveSessionController {
 	#lastCheckWallAt = 0;
 	#audioMsSinceCheck = 0;
 	#captureFloodReported = false;
+	/** Mic heartbeat per watchdog tick: delivered vs dropped chunks + max level. */
+	#chunkCountSinceCheck = 0;
+	#chunkProcessedSinceCheck = 0;
+	#maxLevelSinceCheck = 0;
+	#heartbeatTicks = 0;
 	/** Consecutive server errors since the last good config ack. */
 	#errorCount = 0;
 	/** Terminal error state: uplink halted until the session ends. */
@@ -442,6 +450,26 @@ export class LiveSessionController {
 				logger.debug("live input buffer clear failed", { error: String(err) });
 			}
 		}
+		// Mic heartbeat: one line per ~10s. Distinguishes the three swallow modes
+		// of the 2026-08-06 dead zones: chunks=0 → delivery stopped; chunks>0 +
+		// dropped≈chunks → an early-return gate ate the frames (muted/speaking/
+		// disconnected); chunks>0 + maxLevel<threshold → audio arrives but speech
+		// never crosses the arm level.
+		this.#heartbeatTicks += 1;
+		if (this.#heartbeatTicks >= 10) {
+			this.#heartbeatTicks = 0;
+			logger.info("live mic window", {
+				chunks: this.#chunkCountSinceCheck,
+				dropped: this.#chunkCountSinceCheck - this.#chunkProcessedSinceCheck,
+				maxLevel: Number(this.#maxLevelSinceCheck.toFixed(4)),
+				phase: this.#phase,
+				transport: this.#options.transport.state,
+				muted: this.#muted,
+			});
+		}
+		this.#chunkCountSinceCheck = 0;
+		this.#chunkProcessedSinceCheck = 0;
+		this.#maxLevelSinceCheck = 0;
 		if (this.#captureStallReported) return;
 		const silenceMs = now - this.#lastMicChunkAt;
 		if (silenceMs < this.#captureStallMs) return;
@@ -460,6 +488,8 @@ export class LiveSessionController {
 			this.#options.onCaptureResume?.();
 		}
 		this.#inputLevel = clamp01(rmsLevel(samples) / 32768);
+		this.#chunkCountSinceCheck += 1;
+		if (this.#inputLevel > this.#maxLevelSinceCheck) this.#maxLevelSinceCheck = this.#inputLevel;
 		this.#callbacks.onLevels(this.#inputLevel, this.#outputLevel);
 		if (this.#options.transport.state !== "connected") return;
 		// Fatal error state or config still in flight: nothing may hit the wire.
@@ -491,6 +521,7 @@ export class LiveSessionController {
 			return this.#sendSilence();
 		}
 		if (this.#endpointing === "client") this.#trackClientSpeech(samples.length);
+		this.#chunkProcessedSinceCheck += 1;
 		this.#sendPcm(float32ToPcm16(samples));
 	}
 
@@ -520,6 +551,7 @@ export class LiveSessionController {
 			if (!this.#clientSpeechActive) {
 				this.#clientSpeechActive = true;
 				this.#clientSpeechMs = 0;
+				logger.info("live speech started");
 				this.#setPhase("listening");
 			}
 			this.#clientSpeechMs += chunkMs;
