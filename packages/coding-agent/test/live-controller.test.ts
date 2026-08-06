@@ -147,6 +147,7 @@ interface HarnessOptions {
 	bargeInLevel?: number;
 	bargeInEnabled?: boolean;
 	consultHandoffMs?: number;
+	taskHandoffMs?: number;
 	onConsult?: (task: string) => Promise<string>;
 	onTask?: (task: string) => Promise<string>;
 	onConfirmDecision?: (decision: "confirm" | "cancel" | "unclear") => void;
@@ -208,6 +209,7 @@ async function makeHarness(options: HarnessOptions = {}): Promise<Harness> {
 			bargeInLevel: options.bargeInLevel,
 			bargeInEnabled: options.bargeInEnabled,
 			consultHandoffMs: options.consultHandoffMs,
+			taskHandoffMs: options.taskHandoffMs,
 			endpointing: options.endpointing,
 			clientSilenceMs: options.clientSilenceMs,
 			onConsult: options.onConsult,
@@ -703,7 +705,7 @@ describe("LiveSessionController", () => {
 
 	test("task slow path: handoff filler first, summary delivered as a deferred task turn", async () => {
 		const { promise, resolve } = Promise.withResolvers<string>();
-		const h = await makeHarness({ onTask: () => promise, consultHandoffMs: 50 });
+		const h = await makeHarness({ onTask: () => promise, consultHandoffMs: 50, taskHandoffMs: 50 });
 		servers.push(h.server);
 		h.server.send({
 			type: "response.function_call_arguments.done",
@@ -733,7 +735,10 @@ describe("LiveSessionController", () => {
 
 	test("confirm function forwards a normalized decision", async () => {
 		const decisions: string[] = [];
-		const h = await makeHarness({ onConfirmDecision: decision => decisions.push(decision) });
+		const h = await makeHarness({
+			onConfirmDecision: decision => decisions.push(decision),
+			isConfirmationPending: () => true,
+		});
 		servers.push(h.server);
 		h.server.send({
 			type: "response.function_call_arguments.done",
@@ -754,7 +759,10 @@ describe("LiveSessionController", () => {
 
 	test("invalid confirm decision asks the model to retry without a callback", async () => {
 		const decisions: string[] = [];
-		const h = await makeHarness({ onConfirmDecision: decision => decisions.push(decision) });
+		const h = await makeHarness({
+			onConfirmDecision: decision => decisions.push(decision),
+			isConfirmationPending: () => true,
+		});
 		servers.push(h.server);
 		h.server.send({
 			type: "response.function_call_arguments.done",
@@ -767,6 +775,28 @@ describe("LiveSessionController", () => {
 			item: { type: string; output?: string };
 		};
 		expect(output.item.output).toContain("无法识别");
+		expect(decisions).toEqual([]);
+		await h.controller.dispose();
+	});
+
+	test("confirm with no pending confirmation is rejected (self-confirmation defense)", async () => {
+		const decisions: string[] = [];
+		const h = await makeHarness({
+			onConfirmDecision: decision => decisions.push(decision),
+			isConfirmationPending: () => false,
+		});
+		servers.push(h.server);
+		h.server.send({
+			type: "response.function_call_arguments.done",
+			callId: "f1",
+			name: "omp_voice_confirm",
+			arguments: JSON.stringify({ decision: "confirm" }),
+		});
+
+		const output = (await waitForMessage(h.server, "conversation.item.create")) as {
+			item: { type: string; output?: string };
+		};
+		expect(output.item.output).toContain("没有待确认的操作");
 		expect(decisions).toEqual([]);
 		await h.controller.dispose();
 	});

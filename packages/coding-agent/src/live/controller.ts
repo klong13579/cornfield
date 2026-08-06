@@ -58,6 +58,8 @@ const CONFIRM_TOOL_NAME = "omp_voice_confirm";
 const CONTROL_TOOL_NAME = "omp_agent_control";
 /** Design §3.3: wait this long for a consult result before handing the model a filler. */
 const CONSULT_HANDOFF_MS = 3_000;
+/** Tasks never settle this fast (main-session LLM round) except instant rejections — a long window is pure latency before the 「请稍等」 filler. */
+const TASK_HANDOFF_MS = 1_000;
 /**
  * Filler spoken while slow work runs. MUST be a pure speakable sentence:
  * qwen parrots meta-instructions verbatim ("结果出来后系统会再次提供给你…"
@@ -128,6 +130,7 @@ export class LiveSessionController {
 	#drainGeneration = 0;
 	/** Consecutive loud chunks seen while speaking (barge-in sustain gate). */
 	#bargeInArmed = 0;
+	readonly #taskHandoffMs: number;
 	/** Endpointing mode: client = this controller decides turn boundaries. */
 	readonly #endpointing: "client" | "server";
 	readonly #clientSilenceWindowMs: number;
@@ -151,6 +154,7 @@ export class LiveSessionController {
 		this.#endpointing = options.endpointing ?? "server";
 		this.#clientSilenceWindowMs = options.clientSilenceMs ?? DEFAULT_CLIENT_SILENCE_MS;
 		this.#consultHandoffMs = options.consultHandoffMs ?? CONSULT_HANDOFF_MS;
+		this.#taskHandoffMs = options.taskHandoffMs ?? TASK_HANDOFF_MS;
 		this.#onConsult = options.onConsult ?? (async () => "（语音任务委托尚未接入，请改用文字输入。）");
 		this.#onTask = options.onTask ?? (async () => "（语音任务派发尚未接入，请改用文字输入。）");
 		this.#onControl = options.onControl ?? (async () => "（执行中控制尚未接入。）");
@@ -243,6 +247,7 @@ export class LiveSessionController {
 					return this.#withHandoff(
 						() => this.#onTask(args.task ?? call.arguments),
 						text => this.deliverTaskSummary(text),
+						this.#taskHandoffMs,
 					);
 				}
 				case CONFIRM_TOOL_NAME: {
@@ -251,6 +256,14 @@ export class LiveSessionController {
 					const decision = this.#normalizeDecision(args.decision);
 					if (!decision) {
 						return "（无法识别该答复。请以 confirm、cancel 或 unclear 调用 omp_voice_confirm。）";
+					}
+					// Self-confirmation defense (2026-08-06 acceptance): after any confirmation
+					// exchange the realtime history is saturated with the confirm schema; a
+					// short/ambiguous utterance makes the model self-call this tool with NO
+					// pending confirmation and then announce 「已确认执行」. Forwarding (or
+					// pretending to) reinforces the delusion — reject it outright.
+					if (!(this.#options.isConfirmationPending?.() ?? false)) {
+						return "（当前没有待确认的操作，不需要确认。不要再调用 omp_voice_confirm，直接正常回应用户。）";
 					}
 					this.#options.onConfirmDecision?.(decision);
 					return "（用户的答复已转达。）";
@@ -270,6 +283,7 @@ export class LiveSessionController {
 					return this.#withHandoff(
 						() => this.#onConsult(args.task ?? call.arguments),
 						text => this.#deliverDeferredConsultResult(text),
+						this.#consultHandoffMs,
 					);
 				}
 			}
@@ -522,13 +536,17 @@ export class LiveSessionController {
 	 * ("正在查，稍等") and deliver the real result as a fresh conversation turn
 	 * when it lands — the voice session never stalls in silence behind slow work.
 	 */
-	async #withHandoff(run: () => Promise<string>, deliver: (text: string) => boolean): Promise<string> {
+	async #withHandoff(
+		run: () => Promise<string>,
+		deliver: (text: string) => boolean,
+		handoffMs: number,
+	): Promise<string> {
 		let settled = false;
 		const work = run().then(text => {
 			settled = true;
 			return text;
 		});
-		await Promise.race([work, Bun.sleep(this.#consultHandoffMs)]);
+		await Promise.race([work, Bun.sleep(handoffMs)]);
 		if (settled) return await work;
 		void work.then(
 			text => deliver(text),

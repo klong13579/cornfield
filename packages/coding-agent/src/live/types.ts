@@ -83,6 +83,8 @@ export interface LiveSessionOptions {
 	micNoiseFloor?: number;
 	/** How long to wait for a consult result before the "please wait" handoff (design §3.3). */
 	consultHandoffMs?: number;
+	/** Handoff window for tasks (default 1s): real tasks never settle faster, only instant rejections do. */
+	taskHandoffMs?: number;
 	/** Who decides turn boundaries: "server" (server_vad) or "client" (this controller
 	 * tracks speech and commits turns — the fixed server silence window cuts off
 	 * natural mid-sentence pauses). Default "server" for backward compatibility. */
