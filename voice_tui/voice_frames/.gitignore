@@ -1,0 +1,2 @@
+# Baked ANSI frames — regeneratable via ../render_frames.py
+*.ansi
