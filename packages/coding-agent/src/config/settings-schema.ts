@@ -1036,6 +1036,16 @@ export const SETTINGS_SCHEMA = {
 			description: "Enable real-time duplex voice conversation mode (Ctrl+V in the TUI).",
 		},
 	},
+	"voice.immersive": {
+		type: "boolean",
+		default: true,
+		ui: {
+			tab: "interaction",
+			label: "Voice Immersive View",
+			description:
+				"Switch the TUI into the full-screen voice view (centered light orb) while voice mode is active. Falls back to the compact panel on small terminals or when colors are disabled.",
+		},
+	},
 	"voice.model": {
 		type: "string",
 		default: "qwen-audio-3.0-realtime-flash",

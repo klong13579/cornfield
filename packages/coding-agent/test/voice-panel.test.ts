@@ -204,13 +204,13 @@ describe("VoicePanel", () => {
 			expect(out).toContain("聆听中");
 		});
 
-		it("idle listening produces zero redraws after settle", async () => {
+		it("listening breathes continuously: redraws even without audio input", async () => {
 			const p = createPanel();
 			p.update(state({ phase: "listening", inputLevel: 0, outputLevel: 0 }));
 			await sleep(150); // let any pending ticks fire
 			renderSpy.mockClear();
 			await sleep(250);
-			expect(renderSpy).not.toHaveBeenCalled();
+			expect(renderSpy).toHaveBeenCalled();
 		});
 
 		it("redraws while mic level decays after speech", async () => {
@@ -324,6 +324,62 @@ describe("VoicePanel", () => {
 			expect(render(p)).toContain("▸ 执行中");
 			p.update(state({ phase: "listening", toolLine: "", consultTask: "" }));
 			expect(render(p)).not.toContain("▸ 执行中");
+		});
+	});
+
+	describe("wide layout (layout A with orb)", () => {
+		const WIDE = 100;
+
+		it("renders state title and live HUD in the top border", () => {
+			const p = createPanel();
+			p.update(state({ phase: "listening", inputLevel: 0.4 }));
+			const out = p.render(WIDE).join("\n");
+			expect(out).toContain("voice · 聆听");
+			expect(out).toContain("IN");
+			expect(out).toContain("OUT");
+			expect(out).toContain("● LIVE");
+			expect(out).toContain("40%");
+		});
+
+		it("renders the orb in truecolor next to badge, activity and transcripts", () => {
+			const p = createPanel();
+			p.update(state({ phase: "listening", transcript: { role: "user", text: "帮我跑测试", final: true } }));
+			p.update(state({ phase: "listening", toolLine: "bash: bun test" }));
+			const out = p.render(WIDE).join("\n");
+			expect(out).toContain("\x1b[38;2;");
+			expect(out).toContain("● 聆听中");
+			expect(out).toContain("帮我跑测试");
+			expect(out).toContain("▸ 执行中: bash: bun test");
+		});
+
+		it("keeps every line at exactly the render width", () => {
+			const p = createPanel();
+			p.update(
+				state({
+					phase: "speaking",
+					outputLevel: 0.5,
+					transcript: { role: "assistant", text: "回答内容", final: false },
+				}),
+			);
+			for (const line of p.render(WIDE)) {
+				expect(visibleWidth(line)).toBe(WIDE);
+			}
+		});
+
+		it("falls back to the text layout below the orb width threshold", () => {
+			const p = createPanel();
+			p.update(state({ phase: "listening" }));
+			const out = p.render(60).join("\n");
+			expect(out).not.toContain("voice · 聆听");
+			expect(out).toContain("● 聆听中");
+		});
+
+		it("shows ERROR status in the HUD when the channel failed", () => {
+			const p = createPanel();
+			p.update(state({ phase: "error", error: "provider down" }));
+			const out = p.render(WIDE).join("\n");
+			expect(out).toContain("ERROR");
+			expect(out).toContain("voice · 异常");
 		});
 	});
 });

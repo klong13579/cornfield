@@ -4,6 +4,9 @@
 
 ### Added
 
+- `logger.setConsoleEnabled(enabled)` runtime toggle for the winston Console transport. The interactive TUI silences console logging before taking over the terminal (any stdout/stderr write corrupts the differential render); file logging is unaffected.
+
+
 - `logger.info()` export: winston supports the `info` level but it was not re-exported from the logger module. Callers in `pi-gateway` and `self-evolution` that called `logger.info()` hit a runtime `TypeError` that was silently swallowed, causing DingTalk card tool-result blocks to not render.
 
 ### Fixed

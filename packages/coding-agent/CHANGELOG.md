@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Voice UX redesign: light-orb rendering + immersive view** (`src/modes/components/{voice-orb,voice-immersive-view}.ts`, `src/modes/components/voice-panel.ts`, `src/modes/controllers/voice-mode-controller.ts`, `src/modes/interactive-mode.ts`, `src/config/settings-schema.ts`, `test/voice-{orb,immersive-view,panel}.test.ts`, `docs/voice-ux-orb-redesign.md`): Voice mode gets a procedural light orb (realtime TS port of the voice_tui prototype): one blue orb, always-on signature breath, coverage-graded soft silhouette, transparent embedding (terminal background shows through), explicit `effects` override API. New layout B (default, `voice.immersive: true`): full-viewport voice view — centered HUD (IN/OUT level bars + ● LIVE), big centered orb, task mode shrinks the orb and turns the center into an activity feed (task title + tool lines + elapsed), transcript log at the bottom; the TUI children are swapped on enter and restored on exit. Layout A keeps the welcome page: at ≥70 cols the VoicePanel renders title + HUD in the top border, orb left, info right; below that it falls back to the existing text panel. Interactive mode silences console logging at TUI start via the new `logger.setConsoleEnabled()` (file logging continues) — info logs no longer corrupt the TUI. 47 new tests; 69/69 voice tests pass.
+
 ### Changed
 
 - **`/record` manual-stop default + 2h safety cap** (`src/config/settings-schema.ts`, `src/stt/listen-controller.ts`, `src/modes/interactive-mode.ts`, `test/stt/listen-controller.test.ts`): `stt.vadEnabled` now defaults to `false` — `/record` keeps recording until the user types `/record stop`; silence-based auto-stop is opt-in via the setting. `stt.maxRecordingSec` safety cap raised from 30min to 2h (7200s), and the max-duration message now renders a readable duration (e.g. "2h"). Recording status line adds a `/record stop 结束` hint since manual stop is the primary stop path. Realtime voice (alt+v) server VAD is untouched. 2 new regression tests (default: sustained silence never auto-stops and manual stop works; contrast: enabling VAD restores auto-stop).

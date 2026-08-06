@@ -16,6 +16,7 @@ import { type Component, matchesKey, type TUI, visibleWidth, wrapTextWithAnsi } 
 import type { LivePhase } from "../../live/types";
 import { replaceTabs, truncateToWidth } from "../../tools/render-utils";
 import { theme as globalTheme, type Theme, type ThemeColor } from "../theme/theme";
+import { type OrbPhase, VoiceOrb } from "./voice-orb";
 
 export interface VoicePanelTranscript {
 	role: "user" | "assistant";
@@ -68,6 +69,12 @@ const LEVEL_DECAY = 0.84;
 /** Below this a smoothed level snaps to zero so idle frames settle. */
 const LEVEL_EPSILON = 0.02;
 
+/** Wide layout (layout A) geometry. */
+const ORB_LAYOUT_MIN_WIDTH = 70;
+const ORB_W = 30;
+const ORB_H = 14;
+const ORB_BLUE = "150;235;255";
+
 const LEVEL_GLYPHS = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"] as const;
 const BRAILLE_SPINNER = ["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"] as const;
 const INTERRUPT_HINT = "[ 说话可随时打断 ]";
@@ -107,6 +114,7 @@ export class VoicePanel implements Component {
 	readonly #interruptFlashMs: number;
 	readonly #callbacks: Partial<VoicePanelCallbacks>;
 	readonly #exitKeys: KeyId[];
+	readonly #orb = new VoiceOrb();
 
 	#phase: LivePhase = "connecting";
 	/** What is actually drawn; "interrupted" falls back to "listening" after the flash. */
@@ -205,7 +213,7 @@ export class VoicePanel implements Component {
 		if (this.#cache && this.#cache.width === w && this.#cache.signature === signature) {
 			return this.#cache.lines;
 		}
-		const lines = this.#renderLines(w);
+		const lines = !this.#plain && w >= ORB_LAYOUT_MIN_WIDTH ? this.#renderOrbLayout(w) : this.#renderLines(w);
 		this.#cache = { width: w, signature, lines };
 		return lines;
 	}
@@ -326,11 +334,10 @@ export class VoicePanel implements Component {
 				base.push(`s${this.#spinnerIndex()}`);
 				break;
 			case "listening":
-				base.push(`i${this.#quantize(this.#displayInput)}`);
+				base.push(`i${this.#quantize(this.#displayInput)}`, `f${this.#frame}`);
 				break;
 			case "speaking": {
-				const wave = this.#displayOutput > LEVEL_EPSILON ? this.#frame % 3 : 0;
-				base.push(`o${this.#quantize(this.#displayOutput)}`, `w${wave}`, `t${this.#speakingElapsedSec()}`);
+				base.push(`o${this.#quantize(this.#displayOutput)}`, `t${this.#speakingElapsedSec()}`, `f${this.#frame}`);
 				break;
 			}
 			case "muted":
@@ -388,6 +395,122 @@ export class VoicePanel implements Component {
 		const top = this.#color("border", `╭${"─".repeat(width - 2)}╮`);
 		const bottom = this.#color("border", `╰${"─".repeat(width - 2)}╯`);
 		return [top, ...this.#bodyLines(this.#displayPhase, inner, line, centered), bottom];
+	}
+
+	// ============================================================================
+	// Wide layout (layout A): orb left, info right, HUD in the top border
+	// ============================================================================
+
+	/** True-color helper for the orb HUD (theme-independent color semantics). */
+	#rgb(code: string, text: string): string {
+		return this.#plain ? text : `\x1b[38;2;${code}m${text}\x1b[0m`;
+	}
+
+	#orbStateLabel(): string {
+		switch (this.#displayPhase) {
+			case "connecting":
+				return "连接中";
+			case "listening":
+				return "聆听";
+			case "thinking":
+				return "思考";
+			case "speaking":
+				return "播报";
+			case "interrupted":
+				return "已打断";
+			case "muted":
+				return "已静音";
+			case "error":
+				return "异常";
+		}
+	}
+
+	#hudSegment(): string {
+		const bar = (level: number): string => {
+			const lit = Math.round(level * BAR_CELLS);
+			return this.#rgb(ORB_BLUE, "▓".repeat(lit)) + this.#color("dim", "░".repeat(BAR_CELLS - lit));
+		};
+		const pct = (level: number): string => this.#rgb(ORB_BLUE, `${Math.round(level * 100)}%`);
+		const liveColor = this.#phase === "error" ? "235;120;110" : "120;220;140";
+		const liveLabel = this.#phase === "error" ? "ERROR" : "LIVE";
+		return [
+			`${this.#color("dim", "IN")} ${bar(this.#displayInput)} ${pct(this.#displayInput)}`,
+			`${this.#color("dim", "OUT")} ${bar(this.#displayOutput)} ${pct(this.#displayOutput)}`,
+			this.#rgb(liveColor, `● ${liveLabel}`),
+		].join("  ");
+	}
+
+	#orbBadge(): string {
+		switch (this.#displayPhase) {
+			case "connecting": {
+				const badge = `${this.#spinnerFrames()[this.#spinnerIndex()]} jarvis · 连接中…`;
+				return this.#color("warning", badge);
+			}
+			case "listening":
+				return this.#color("accent", "● 聆听中");
+			case "thinking":
+				return this.#color("warning", `${this.#spinnerFrames()[this.#spinnerIndex()]} 思考中`);
+			case "speaking": {
+				const elapsed = this.#speakingElapsedSec();
+				const stamp = `${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, "0")}`;
+				return this.#color("accent", `◉ 播报中 · ${stamp}`);
+			}
+			case "interrupted":
+				return this.#color("warning", "⚡ 已打断 · 聆听中…");
+			case "muted":
+				return this.#color(this.#frame % 2 === 0 ? "accent" : "dim", "◉ jarvis");
+			case "error":
+				return this.#color("error", `✕ 语音通道异常：${this.#error || "未知原因"}`);
+		}
+	}
+
+	#renderOrbLayout(w: number): string[] {
+		const inner = w - 4;
+		const orbW = Math.min(ORB_W, Math.floor(inner * 0.35));
+		const gap = 3;
+		const textW = inner - orbW - gap;
+		const b = (s: string): string => this.#color("border", s);
+
+		// Top border: state title left, live parameter HUD right.
+		const title = ` voice · ${this.#orbStateLabel()} `;
+		const hud = this.#hudSegment();
+		const gapW = Math.max(1, w - 4 - visibleWidth(title) - visibleWidth(hud));
+		const top = b("╭─") + this.#rgb(ORB_BLUE, title) + b("─".repeat(gapW)) + hud + b("─╮");
+
+		const orbLines = this.#orb.render({
+			width: orbW,
+			height: ORB_H,
+			phase: this.#displayPhase as OrbPhase,
+			frame: this.#frame,
+			inputLevel: this.#displayInput,
+			outputLevel: this.#displayOutput,
+			transparent: true,
+			boost: 2.2,
+		});
+
+		// Right zone: badge, activity, transcripts, hints — budgeted into ORB_H rows.
+		const fixed: string[] = [this.#orbBadge()];
+		if (this.#toolLine) fixed.push(this.#color("dim", `▸ 执行中: ${this.#toolLine}`));
+		else if (this.#consultTask) fixed.push(this.#color("dim", `▸ 执行中: ${this.#consultTask}`));
+		const hints: string[] = [];
+		if (this.#displayPhase === "speaking") hints.push(this.#color("warning", INTERRUPT_HINT));
+		hints.push(this.#color("dim", "alt+m 静音 · alt+v 退出语音"));
+		const transcriptBudget = Math.max(0, ORB_H - fixed.length - hints.length - 1);
+		const transcripts = this.#transcriptContent(textW).slice(-transcriptBudget);
+		const textLines = [...fixed, "", ...transcripts];
+		while (textLines.length < ORB_H - hints.length) textLines.push("");
+		textLines.push(...hints);
+
+		const rows: string[] = [top];
+		for (let i = 0; i < ORB_H; i++) {
+			const text = textLines[i] ?? "";
+			const vis = visibleWidth(text);
+			const clamped = vis > textW ? truncateToWidth(text, textW) : text;
+			const pad = " ".repeat(Math.max(0, textW - Math.min(vis, textW)));
+			rows.push(`${b("│ ")}${orbLines[i] ?? ""}${" ".repeat(gap)}${clamped}${pad}${b(" │")}`);
+		}
+		rows.push(b(`╰${"─".repeat(w - 2)}╯`));
+		return rows;
 	}
 
 	#bodyLines(
@@ -469,23 +592,29 @@ export class VoicePanel implements Component {
 
 	/** partial → dim + cursor, final → full text color (karaoke rule from spec §4.3).
 	 * Utterances are word-wrapped so long requests/answers show in full. */
-	#transcriptLines(inner: number, line: (content: string) => string): string[] {
+	#transcriptContent(maxWidth: number): string[] {
 		const rows: string[] = [];
 		for (const entry of this.#transcripts) {
-			const wrapped = wrapTextWithAnsi(entry.text, inner);
+			const wrapped = wrapTextWithAnsi(entry.text, maxWidth);
 			const body = wrapped.length > 0 ? wrapped : [""];
 			for (let i = 0; i < body.length; i++) {
-				const segment = truncateToWidth(body[i]!, inner);
+				const segment = truncateToWidth(body[i]!, maxWidth);
 				if (!entry.final && i === body.length - 1) {
 					const cursor = "▌";
-					const clipped = truncateToWidth(segment, Math.max(1, inner - visibleWidth(cursor)));
-					rows.push(line(this.#color("dim", `${clipped}${cursor}`)));
+					const clipped = truncateToWidth(segment, Math.max(1, maxWidth - visibleWidth(cursor)));
+					rows.push(this.#color("dim", `${clipped}${cursor}`));
 				} else {
-					rows.push(line(this.#color(entry.final ? "text" : "dim", segment)));
+					rows.push(this.#color(entry.final ? "text" : "dim", segment));
 				}
 			}
 		}
-		return rows.slice(-TRANSCRIPT_DISPLAY_LINES);
+		return rows;
+	}
+
+	#transcriptLines(inner: number, line: (content: string) => string): string[] {
+		return this.#transcriptContent(inner)
+			.slice(-TRANSCRIPT_DISPLAY_LINES)
+			.map(s => line(s));
 	}
 
 	/** 8-12 cell RMS level bar; sqrt-scaled, deterministic per (cell, frame). */

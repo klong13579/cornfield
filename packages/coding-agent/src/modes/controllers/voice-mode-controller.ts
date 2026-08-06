@@ -8,6 +8,7 @@
  * input keeps working while voice runs (design §4.4).
  */
 import { RealtimeWsTransport } from "@oh-my-pi/pi-ai";
+import type { Component } from "@oh-my-pi/pi-tui";
 import { logger } from "@oh-my-pi/pi-utils";
 import { LiveConsultBridge } from "../../live/consult-bridge";
 import { LiveSessionController } from "../../live/controller";
@@ -19,6 +20,7 @@ import { LiveTurnBuffer } from "../../live/turn-buffer";
 import type { LiveIntent, LivePhase, LiveTranscript } from "../../live/types";
 import { VoiceGate } from "../../live/voice-gate";
 import liveInstructions from "../../prompts/live/live-instructions.md" with { type: "text" };
+import { type VoiceImmersiveState, VoiceImmersiveView } from "../components/voice-immersive-view";
 import { VoicePanel, type VoicePanelCallbacks, type VoicePanelState } from "../components/voice-panel";
 import type { InteractiveModeContext } from "../types";
 
@@ -29,6 +31,9 @@ export class VoiceModeController {
 	readonly #ctx: InteractiveModeContext;
 
 	#panel: VoicePanel | undefined;
+	#immersive: VoiceImmersiveView | undefined;
+	/** Normal TUI children snapshot taken when entering the immersive view. */
+	#savedChildren: Component[] | undefined;
 	#session: LiveSessionController | undefined;
 	#consultBridge: LiveConsultBridge | undefined;
 	#recorder: LiveTranscriptRecorder | undefined;
@@ -83,6 +88,18 @@ export class VoiceModeController {
 		this.#gate = undefined;
 		if (session) {
 			await session.dispose().catch(err => logger.debug("voice session dispose failed", { error: String(err) }));
+		}
+		if (this.#immersive) {
+			const ui = this.#ctx.ui;
+			const view = this.#immersive;
+			this.#immersive = undefined;
+			// Restore the normal layout: the snapshot plus anything mounted while
+			// immersive (dialogs, warnings), minus the immersive view itself.
+			const additions = ui.children.filter(c => c !== view && c !== this.#ctx.editorContainer);
+			ui.children = [...(this.#savedChildren ?? []), ...additions];
+			this.#savedChildren = undefined;
+			view.dispose();
+			ui.requestRender(true);
 		}
 		if (this.#panel) {
 			this.#ctx.editorContainer.removeChild(this.#panel);
@@ -221,24 +238,42 @@ export class VoiceModeController {
 		else logger.warn("voice task path disabled: no extension runner (fail-closed)");
 		this.#gate = gate;
 
-		const panelCallbacks: VoicePanelCallbacks = {
+		const callbacks: VoicePanelCallbacks = {
 			onExit: () => {
 				void this.stop();
 			},
 		};
-		const panel = new VoicePanel({ tui: this.#ctx.ui, callbacks: panelCallbacks, exitKeys });
-		this.#panel = panel;
-		// Panel sits above the editor so the user can see the live state. Text
-		// input keeps working while voice runs (the editor is still focused).
-		this.#ctx.editorContainer.children.unshift(panel);
-		this.#ctx.ui.requestRender();
+		const immersive =
+			settings.get("voice.immersive") &&
+			Bun.env.NO_COLOR === undefined &&
+			Bun.env.TERM !== "dumb" &&
+			Bun.env.TERM !== "" &&
+			this.#ctx.ui.terminal.columns >= 60 &&
+			this.#ctx.ui.terminal.rows >= 28;
+		if (immersive) {
+			const view = new VoiceImmersiveView({ tui: this.#ctx.ui, callbacks, exitKeys });
+			this.#immersive = view;
+			// Swap the TUI into the immersive voice view: the view owns the screen,
+			// the editor stays mounted (and focused) at the bottom so text input
+			// keeps working. Children are restored in stop().
+			const ui = this.#ctx.ui;
+			this.#savedChildren = [...ui.children];
+			ui.children = [view, this.#ctx.editorContainer];
+			ui.setFocus(this.#ctx.editor);
+		} else {
+			const panel = new VoicePanel({ tui: this.#ctx.ui, callbacks, exitKeys });
+			this.#panel = panel;
+			// Panel sits above the editor so the user can see the live state. Text
+			// input keeps working while voice runs (the editor is still focused).
+			this.#ctx.editorContainer.children.unshift(panel);
+			this.#ctx.ui.requestRender();
+		}
 
 		await session.start();
 	}
 
 	#onPhase(phase: LivePhase): void {
 		const error = phase === "error" ? "语音通道异常，按 alt+v 重连" : undefined;
-		this.#pushPanelState({ phase, error });
 		// Reconnect tracking: "connecting" after the first connection means the
 		// transport dropped; the next listening/muted marks the fresh server session.
 		if (phase === "connecting" && this.#voiceConnectedOnce) this.#reconnecting = true;
@@ -250,6 +285,9 @@ export class VoiceModeController {
 				this.#announceResumedState();
 			}
 		}
+		// Push AFTER the reconnect flags settle so the immersive HUD shows the
+		// fresh state in the same frame.
+		this.#pushPanelState({ phase, error });
 	}
 
 	/**
@@ -328,8 +366,13 @@ export class VoiceModeController {
 	}
 
 	#pushPanelState(partial: Partial<VoicePanelState>): void {
-		if (!this.#panel) return;
+		if (!this.#panel && !this.#immersive) return;
 		this.#panelState = { ...this.#panelState, ...partial };
-		this.#panel.update(this.#panelState);
+		if (this.#immersive) {
+			const state: VoiceImmersiveState = { ...this.#panelState, reconnecting: this.#reconnecting };
+			this.#immersive.update(state);
+			return;
+		}
+		this.#panel?.update(this.#panelState);
 	}
 }

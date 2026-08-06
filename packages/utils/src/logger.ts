@@ -103,6 +103,15 @@ const consoleEnabled = process.env.PI_LOG_CONSOLE !== "false";
 /** Log level from environment (default: info) */
 const logLevel = process.env.PI_LOG_LEVEL || "info";
 
+/**
+ * Runtime toggle for the console transport. The interactive TUI silences
+ * console logging before taking over the terminal — any stdout/stderr write
+ * corrupts the differential render. File logging is unaffected.
+ */
+export function setConsoleEnabled(enabled: boolean): void {
+	consoleTransport.silent = !enabled;
+}
+
 /** The winston logger instance */
 const winstonLogger = winston.createLogger({
 	level: logLevel,
