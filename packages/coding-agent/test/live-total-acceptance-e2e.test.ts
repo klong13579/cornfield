@@ -69,6 +69,7 @@ class RecordingSink implements LiveAudioSink {
 	write(samples: Float32Array): void {
 		this.samplesWritten += samples.length;
 	}
+	async end(): Promise<void> {}
 	stop(): void {
 		this.stopped = true;
 	}

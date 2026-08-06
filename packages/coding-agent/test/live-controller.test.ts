@@ -2,7 +2,7 @@
  * LiveSessionController tests. Real local WS server (per repo policy), scripted
  * audio source/sink — no hardware, no mocks.
  */
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test, vi } from "bun:test";
 import { pcm16ToBase64, RealtimeWsTransport } from "@oh-my-pi/pi-ai";
 import { LiveSessionController } from "../src/live/controller";
 import type { LiveAudioSink, LiveIntent, LivePhase, LiveTranscript } from "../src/live/types";
@@ -147,6 +147,7 @@ interface HarnessOptions {
 	bargeInLevel?: number;
 	bargeInEnabled?: boolean;
 	consultHandoffMs?: number;
+	taskHandoffMs?: number;
 	onConsult?: (task: string) => Promise<string>;
 	onTask?: (task: string) => Promise<string>;
 	onConfirmDecision?: (decision: "confirm" | "cancel" | "unclear") => void;
@@ -159,6 +160,16 @@ interface HarnessOptions {
 	isConfirmationPending?: () => boolean;
 	/** Ambient noise gate: sub-floor frames uplink as silence. */
 	micNoiseFloor?: number;
+	/** Who decides turn boundaries (default server — the harness simulates server VAD). */
+	endpointing?: "client" | "server";
+	/** Client endpointing silence window for tests. */
+	clientSilenceMs?: number;
+	/** Capture-stall watchdog window for tests. */
+	captureStallMs?: number;
+	/** Idle buffer-clear window for tests. */
+	bufferClearMs?: number;
+	onCaptureStall?: () => void;
+	onCaptureResume?: () => void;
 	/** Hold sink.end() until releaseEnd() — simulates playback still draining. */
 	holdSinkEnd?: boolean;
 }
@@ -204,6 +215,13 @@ async function makeHarness(options: HarnessOptions = {}): Promise<Harness> {
 			bargeInLevel: options.bargeInLevel,
 			bargeInEnabled: options.bargeInEnabled,
 			consultHandoffMs: options.consultHandoffMs,
+			taskHandoffMs: options.taskHandoffMs,
+			endpointing: options.endpointing,
+			clientSilenceMs: options.clientSilenceMs,
+			captureStallMs: options.captureStallMs,
+			bufferClearMs: options.bufferClearMs,
+			onCaptureStall: options.onCaptureStall,
+			onCaptureResume: options.onCaptureResume,
 			onConsult: options.onConsult,
 			onTask: options.onTask,
 			onConfirmDecision: options.onConfirmDecision,
@@ -697,7 +715,7 @@ describe("LiveSessionController", () => {
 
 	test("task slow path: handoff filler first, summary delivered as a deferred task turn", async () => {
 		const { promise, resolve } = Promise.withResolvers<string>();
-		const h = await makeHarness({ onTask: () => promise, consultHandoffMs: 50 });
+		const h = await makeHarness({ onTask: () => promise, consultHandoffMs: 50, taskHandoffMs: 50 });
 		servers.push(h.server);
 		h.server.send({
 			type: "response.function_call_arguments.done",
@@ -727,7 +745,10 @@ describe("LiveSessionController", () => {
 
 	test("confirm function forwards a normalized decision", async () => {
 		const decisions: string[] = [];
-		const h = await makeHarness({ onConfirmDecision: decision => decisions.push(decision) });
+		const h = await makeHarness({
+			onConfirmDecision: decision => decisions.push(decision),
+			isConfirmationPending: () => true,
+		});
 		servers.push(h.server);
 		h.server.send({
 			type: "response.function_call_arguments.done",
@@ -748,7 +769,10 @@ describe("LiveSessionController", () => {
 
 	test("invalid confirm decision asks the model to retry without a callback", async () => {
 		const decisions: string[] = [];
-		const h = await makeHarness({ onConfirmDecision: decision => decisions.push(decision) });
+		const h = await makeHarness({
+			onConfirmDecision: decision => decisions.push(decision),
+			isConfirmationPending: () => true,
+		});
 		servers.push(h.server);
 		h.server.send({
 			type: "response.function_call_arguments.done",
@@ -761,6 +785,28 @@ describe("LiveSessionController", () => {
 			item: { type: string; output?: string };
 		};
 		expect(output.item.output).toContain("无法识别");
+		expect(decisions).toEqual([]);
+		await h.controller.dispose();
+	});
+
+	test("confirm with no pending confirmation is rejected (self-confirmation defense)", async () => {
+		const decisions: string[] = [];
+		const h = await makeHarness({
+			onConfirmDecision: decision => decisions.push(decision),
+			isConfirmationPending: () => false,
+		});
+		servers.push(h.server);
+		h.server.send({
+			type: "response.function_call_arguments.done",
+			callId: "f1",
+			name: "omp_voice_confirm",
+			arguments: JSON.stringify({ decision: "confirm" }),
+		});
+
+		const output = (await waitForMessage(h.server, "conversation.item.create")) as {
+			item: { type: string; output?: string };
+		};
+		expect(output.item.output).toContain("没有待确认的操作");
 		expect(decisions).toEqual([]);
 		await h.controller.dispose();
 	});
@@ -971,6 +1017,186 @@ describe("LiveSessionController", () => {
 		const create = types.lastIndexOf("response.create");
 		expect(cancel).toBeGreaterThanOrEqual(0);
 		expect(create).toBeGreaterThan(cancel);
+		await h.controller.dispose();
+	});
+
+	test("updateInstructions sends an instructions-only session.update mid-session", async () => {
+		const h = await makeHarness();
+		servers.push(h.server);
+		expect(h.controller.updateInstructions("新的指令")).toBe(true);
+		await Bun.sleep(30);
+
+		const updates = h.server.received.filter(m => m.type === "session.update") as Array<{
+			session: Record<string, unknown>;
+		}>;
+		// First update = full config at handshake; the refresh is the last one.
+		const refresh = updates.at(-1);
+		expect(refresh?.session.instructions).toBe("新的指令");
+		// Must NOT re-send turn_detection — qwen rejects changing it after audio
+		// processing started (P0 pitfall #6).
+		expect("turn_detection" in (refresh?.session ?? {})).toBe(false);
+		await h.controller.dispose();
+	});
+
+	// -------------------------------------------- client-side endpointing ---
+
+	test("client endpointing sends turn_detection null and commits after the silence window", async () => {
+		const h = await makeHarness({ endpointing: "client", clientSilenceMs: 100 });
+		servers.push(h.server);
+
+		const config = (await waitForMessage(h.server, "session.update")) as { session: Record<string, unknown> };
+		expect(config.session.turn_detection).toBeNull();
+
+		// 400ms of speech (20ms chunks), then 120ms of quiet → endpoint.
+		for (let i = 0; i < 20; i++) h.source.emit(0.2);
+		expect(h.controller.phase).toBe("listening");
+		for (let i = 0; i < 6; i++) h.source.emit(0.001);
+		await Bun.sleep(20);
+
+		const types = h.server.received.map(m => m.type);
+		const commit = types.indexOf("input_audio_buffer.commit");
+		const create = types.lastIndexOf("response.create");
+		expect(commit).toBeGreaterThanOrEqual(0);
+		expect(create).toBeGreaterThan(commit);
+		expect(h.controller.phase).toBe("thinking");
+		await h.controller.dispose();
+	});
+
+	test("client endpointing never commits sub-300ms noise blips", async () => {
+		const h = await makeHarness({ endpointing: "client", clientSilenceMs: 100 });
+		servers.push(h.server);
+
+		// 100ms blip, then quiet past the window — too short to be an utterance.
+		for (let i = 0; i < 5; i++) h.source.emit(0.2);
+		for (let i = 0; i < 8; i++) h.source.emit(0.001);
+		await Bun.sleep(20);
+
+		expect(h.server.received.map(m => m.type)).not.toContain("input_audio_buffer.commit");
+		await h.controller.dispose();
+	});
+
+	test("client endpointing queues the commit while a response is in flight", async () => {
+		const h = await makeHarness({ endpointing: "client", clientSilenceMs: 100 });
+		servers.push(h.server);
+
+		// A response is in flight when the user finishes speaking.
+		h.server.send({ type: "response.created", response: { id: "r1" } });
+		await Bun.sleep(10);
+		for (let i = 0; i < 20; i++) h.source.emit(0.2);
+		for (let i = 0; i < 8; i++) h.source.emit(0.001);
+		await Bun.sleep(20);
+		expect(h.server.received.map(m => m.type)).not.toContain("input_audio_buffer.commit");
+
+		// The response completes → the queued commit fires.
+		h.server.send({ type: "response.done", response: { id: "r1" } });
+		await Bun.sleep(20);
+		const types = h.server.received.map(m => m.type);
+		expect(types).toContain("input_audio_buffer.commit");
+		expect(types.lastIndexOf("response.create")).toBeGreaterThan(types.indexOf("input_audio_buffer.commit"));
+		await h.controller.dispose();
+	});
+
+	test("server error resets the response flag so the next endpoint commits directly", async () => {
+		const h = await makeHarness({ endpointing: "client", clientSilenceMs: 100 });
+		servers.push(h.server);
+
+		// A response starts, then the server errors without ever sending done.
+		h.server.send({ type: "response.created", response: { id: "r1" } });
+		h.server.send({
+			type: "error",
+			error: { type: "invalid_request_error", message: "Error committing input audio buffer: buffer too small" },
+		});
+		await Bun.sleep(10);
+
+		// The flag must be reset — this endpoint commits instead of queueing forever.
+		for (let i = 0; i < 20; i++) h.source.emit(0.2);
+		for (let i = 0; i < 8; i++) h.source.emit(0.001);
+		await Bun.sleep(20);
+		expect(h.server.received.map(m => m.type)).toContain("input_audio_buffer.commit");
+		await h.controller.dispose();
+	});
+
+	test("stale response flag self-heals after RESPONSE_STALE_MS", async () => {
+		const h = await makeHarness({ endpointing: "client", clientSilenceMs: 100 });
+		servers.push(h.server);
+
+		const realNow = Date.now();
+		let clock = realNow;
+		const spy = vi.spyOn(Date, "now").mockImplementation(() => clock);
+		try {
+			h.server.send({ type: "response.created", response: { id: "r1" } });
+			await Bun.sleep(10);
+
+			// 61s later the flag is stale: the endpoint commits directly.
+			clock = realNow + 61_000;
+			for (let i = 0; i < 20; i++) h.source.emit(0.2);
+			for (let i = 0; i < 8; i++) h.source.emit(0.001);
+			await Bun.sleep(20);
+			expect(h.server.received.map(m => m.type)).toContain("input_audio_buffer.commit");
+		} finally {
+			spy.mockRestore();
+		}
+		await h.controller.dispose();
+	});
+
+	test("capture stall watchdog fires when mic chunks stop, clears on resume", async () => {
+		let stalled = 0;
+		let resumed = 0;
+		const h = await makeHarness({
+			captureStallMs: 100,
+			onCaptureStall: () => stalled++,
+			onCaptureResume: () => resumed++,
+		});
+		servers.push(h.server);
+
+		// Chunks flowing, short gap under the window: no stall.
+		for (let i = 0; i < 5; i++) h.source.emit(0.01);
+		await Bun.sleep(60);
+		expect(stalled).toBe(0);
+
+		// Chunks stop: the watchdog reports one stall episode.
+		await Bun.sleep(200);
+		expect(stalled).toBe(1);
+		await Bun.sleep(100);
+		expect(stalled).toBe(1); // not re-reported while the episode persists
+
+		// Chunks resume: the episode clears.
+		h.source.emit(0.01);
+		await Bun.sleep(30);
+		expect(resumed).toBe(1);
+		await h.controller.dispose();
+	});
+
+	test("idle client session clears the input buffer before the 300s limit", async () => {
+		const h = await makeHarness({ endpointing: "client", captureStallMs: 5_000, bufferClearMs: 100 });
+		servers.push(h.server);
+
+		// No speech, no commit: the watchdog clears the idle buffer.
+		await Bun.sleep(250);
+		expect(h.server.received.map(m => m.type)).toContain("input_audio_buffer.clear");
+		await h.controller.dispose();
+	});
+
+	test("buffer overflow errors clear the buffer without striking the breaker", async () => {
+		const h = await makeHarness({ endpointing: "client", clientSilenceMs: 100 });
+		servers.push(h.server);
+
+		// Three overflow errors would halt the session under the normal breaker.
+		for (let i = 0; i < 3; i++) {
+			h.server.send({
+				type: "error",
+				error: { type: "server_error", message: "Input audio buffer exceeded maximum duration (300s)." },
+			});
+		}
+		await Bun.sleep(20);
+		const clears = h.server.received.filter(m => m.type === "input_audio_buffer.clear");
+		expect(clears.length).toBe(3);
+
+		// Session still alive: the next utterance commits normally.
+		for (let i = 0; i < 20; i++) h.source.emit(0.2);
+		for (let i = 0; i < 8; i++) h.source.emit(0.001);
+		await Bun.sleep(20);
+		expect(h.server.received.map(m => m.type)).toContain("input_audio_buffer.commit");
 		await h.controller.dispose();
 	});
 });

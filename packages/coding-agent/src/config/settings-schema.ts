@@ -1087,11 +1087,23 @@ export const SETTINGS_SCHEMA = {
 	},
 	"voice.vadSilenceMs": {
 		type: "integer",
-		default: 800,
+		default: 1200,
 		ui: {
 			tab: "interaction",
 			label: "VAD Silence (ms)",
-			description: "Server-side VAD silence window before a user turn is committed.",
+			description:
+				"Silence window before a spoken turn is committed. With voice.endpointing=client this is the client-side endpointing window; raise it if pauses mid-sentence still cut you off.",
+			submenu: true,
+		},
+	},
+	"voice.endpointing": {
+		type: "string",
+		default: "server",
+		ui: {
+			tab: "interaction",
+			label: "Turn Endpointing",
+			description:
+				"Who decides you finished speaking: server (realtime server VAD — the verified default) or client (omp RMS tracking; opt-in experiment — its fixed 0.04 arm threshold and noise-spike silence resets swallowed post-playback utterances on 2026-08-06).",
 			submenu: true,
 		},
 	},

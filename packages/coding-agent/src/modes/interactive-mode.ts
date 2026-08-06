@@ -478,10 +478,9 @@ export class InteractiveMode implements InteractiveModeContext {
 		// Load initial todos
 		await this.#loadTodoList();
 
-		// Start the UI. Console logging is silenced from this point on: any
-		// stdout/stderr write corrupts the differential TUI render (file logging
-		// continues).
-		logger.setConsoleEnabled(false);
+		// Start the UI — the TUI owns the terminal from here on: silence the
+		// logger's console transport so log lines stop corrupting the render.
+		logger.silenceConsoleLogging();
 		this.ui.start();
 		pushTerminalTitle();
 		setSessionTerminalTitle(

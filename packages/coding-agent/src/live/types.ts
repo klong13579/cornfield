@@ -83,6 +83,22 @@ export interface LiveSessionOptions {
 	micNoiseFloor?: number;
 	/** How long to wait for a consult result before the "please wait" handoff (design §3.3). */
 	consultHandoffMs?: number;
+	/** Handoff window for tasks (default 1s): real tasks never settle faster, only instant rejections do. */
+	taskHandoffMs?: number;
+	/** Who decides turn boundaries: "server" (server_vad) or "client" (this controller
+	 * tracks speech and commits turns — the fixed server silence window cuts off
+	 * natural mid-sentence pauses). Default "server" for backward compatibility. */
+	endpointing?: "client" | "server";
+	/** Client endpointing: silence window (ms) before committing a turn. Default 1200. */
+	clientSilenceMs?: number;
+	/** No mic chunk for this long fires the capture-stall watchdog. Default 5000ms. */
+	captureStallMs?: number;
+	/** Idle (no commit, no speech) this long → clear the server input buffer. Default 60000ms. */
+	bufferClearMs?: number;
+	/** Capture stalled (mic silent) — show the user a restart hint. */
+	onCaptureStall?: () => void;
+	/** Capture resumed after a stall — clear the hint. */
+	onCaptureResume?: () => void;
 	/** Whether a voice confirmation is waiting for the user's answer (P1 gate).
 	 * While pending, 1-2 char transcripts ("确认"/"做"/"好") bypass the noise guard. */
 	isConfirmationPending?: () => boolean;

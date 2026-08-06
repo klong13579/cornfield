@@ -31,6 +31,7 @@ import {
 	base64ToPcm16,
 	createSilenceChunk,
 	pcm16ToBase64,
+	REALTIME_SAMPLE_RATE,
 	RealtimeFunctionBridge,
 	type RealtimeServerEvent,
 } from "@oh-my-pi/pi-ai";
@@ -55,8 +56,13 @@ const CONSULT_TOOL_NAME = "omp_agent_consult";
 const TASK_TOOL_NAME = "omp_agent_task";
 const CONFIRM_TOOL_NAME = "omp_voice_confirm";
 const CONTROL_TOOL_NAME = "omp_agent_control";
-/** Design §3.3: wait this long for a consult result before handing the model a filler. */
-const CONSULT_HANDOFF_MS = 3_000;
+/** Design §3.3: wait this long for a consult result before handing the model a filler.
+ * 1.5s (was 3s, 2026-08-06): a fresh consult needs session spinup + a full LLM
+ * round — it almost never settles under 3s, so the longer window was ~4.6s of
+ * perceived silence before the 「请稍等」 filler (weather-query acceptance). */
+const CONSULT_HANDOFF_MS = 1_500;
+/** Tasks never settle this fast (main-session LLM round) except instant rejections — a long window is pure latency before the 「请稍等」 filler. */
+const TASK_HANDOFF_MS = 1_000;
 /**
  * Filler spoken while slow work runs. MUST be a pure speakable sentence:
  * qwen parrots meta-instructions verbatim ("结果出来后系统会再次提供给你…"
@@ -79,6 +85,18 @@ const ROOM_DECAY_MS = 1_000;
 const CONFIG_ACK_TIMEOUT_MS = 2_000;
 /** Consecutive server errors before the session is declared terminal. */
 const MAX_SERVER_ERRORS = 3;
+/** Client endpointing: RMS level that arms a speech segment. */
+const CLIENT_VAD_START_LEVEL = 0.04;
+/** Client endpointing: shorter segments are noise blips — never committed. */
+const CLIENT_MIN_UTTERANCE_MS = 300;
+/** Client endpointing default silence window before committing a turn. */
+const DEFAULT_CLIENT_SILENCE_MS = 1_200;
+/** A response-in-flight flag older than this is presumed lost (missing response.done). */
+const RESPONSE_STALE_MS = 60_000;
+/** No mic chunk for this long while active = capture stall (VPIO post-playback quirk). */
+const CAPTURE_STALL_MS = 5_000;
+/** Idle (no commit, no speech) for this long → clear the server input buffer before qwen's 300s limit strikes. */
+const BUFFER_CLEAR_MS = 60_000;
 
 function clamp01(value: number): number {
 	return Math.min(1, Math.max(0, value));
@@ -111,6 +129,21 @@ export class LiveSessionController {
 	/** Uplink gate: cleared by the session.updated ack or the ack timeout. */
 	#configAcked = false;
 	#configAckTimer: ReturnType<typeof setTimeout> | undefined;
+	/** Capture-stall watchdog state (mic went silent — VPIO can stall after playback). */
+	#captureWatchdog: ReturnType<typeof setInterval> | undefined;
+	#lastMicChunkAt = 0;
+	#captureStallReported = false;
+	readonly #captureStallMs: number;
+	readonly #bufferClearMs: number;
+	#lastCommitAt = 0;
+	#lastCheckWallAt = 0;
+	#audioMsSinceCheck = 0;
+	#captureFloodReported = false;
+	/** Mic heartbeat per watchdog tick: delivered vs dropped chunks + max level. */
+	#chunkCountSinceCheck = 0;
+	#chunkProcessedSinceCheck = 0;
+	#maxLevelSinceCheck = 0;
+	#heartbeatTicks = 0;
 	/** Consecutive server errors since the last good config ack. */
 	#errorCount = 0;
 	/** Terminal error state: uplink halted until the session ends. */
@@ -119,6 +152,20 @@ export class LiveSessionController {
 	#drainGeneration = 0;
 	/** Consecutive loud chunks seen while speaking (barge-in sustain gate). */
 	#bargeInArmed = 0;
+	readonly #taskHandoffMs: number;
+	/** Endpointing mode: client = this controller decides turn boundaries. */
+	readonly #endpointing: "client" | "server";
+	readonly #clientSilenceWindowMs: number;
+	/** Client VAD state. */
+	#clientSpeechActive = false;
+	#clientSilenceMs = 0;
+	#clientSpeechMs = 0;
+	/** A response is in flight server-side (response.created → response.done). */
+	#responseInProgress = false;
+	/** When #responseInProgress went true — the stale-flag watchdog. */
+	#responseStartedAt = 0;
+	/** User speech ended while a response was in flight — commit once it's done. */
+	#commitQueued = false;
 
 	constructor(options: LiveSessionOptions) {
 		this.#options = options;
@@ -126,7 +173,12 @@ export class LiveSessionController {
 		this.#bargeInLevel = options.bargeInLevel ?? DEFAULT_BARGE_IN_LEVEL;
 		this.#bargeInEnabled = options.bargeInEnabled ?? true;
 		this.#micNoiseFloor = options.micNoiseFloor ?? 0;
+		this.#endpointing = options.endpointing ?? "server";
+		this.#clientSilenceWindowMs = options.clientSilenceMs ?? DEFAULT_CLIENT_SILENCE_MS;
 		this.#consultHandoffMs = options.consultHandoffMs ?? CONSULT_HANDOFF_MS;
+		this.#taskHandoffMs = options.taskHandoffMs ?? TASK_HANDOFF_MS;
+		this.#captureStallMs = options.captureStallMs ?? CAPTURE_STALL_MS;
+		this.#bufferClearMs = options.bufferClearMs ?? BUFFER_CLEAR_MS;
 		this.#onConsult = options.onConsult ?? (async () => "（语音任务委托尚未接入，请改用文字输入。）");
 		this.#onTask = options.onTask ?? (async () => "（语音任务派发尚未接入，请改用文字输入。）");
 		this.#onControl = options.onControl ?? (async () => "（执行中控制尚未接入。）");
@@ -219,6 +271,7 @@ export class LiveSessionController {
 					return this.#withHandoff(
 						() => this.#onTask(args.task ?? call.arguments),
 						text => this.deliverTaskSummary(text),
+						this.#taskHandoffMs,
 					);
 				}
 				case CONFIRM_TOOL_NAME: {
@@ -227,6 +280,14 @@ export class LiveSessionController {
 					const decision = this.#normalizeDecision(args.decision);
 					if (!decision) {
 						return "（无法识别该答复。请以 confirm、cancel 或 unclear 调用 omp_voice_confirm。）";
+					}
+					// Self-confirmation defense (2026-08-06 acceptance): after any confirmation
+					// exchange the realtime history is saturated with the confirm schema; a
+					// short/ambiguous utterance makes the model self-call this tool with NO
+					// pending confirmation and then announce 「已确认执行」. Forwarding (or
+					// pretending to) reinforces the delusion — reject it outright.
+					if (!(this.#options.isConfirmationPending?.() ?? false)) {
+						return "（当前没有待确认的操作，不需要确认。不要再调用 omp_voice_confirm，直接正常回应用户。）";
 					}
 					this.#options.onConfirmDecision?.(decision);
 					return "（用户的答复已转达。）";
@@ -246,6 +307,7 @@ export class LiveSessionController {
 					return this.#withHandoff(
 						() => this.#onConsult(args.task ?? call.arguments),
 						text => this.#deliverDeferredConsultResult(text),
+						this.#consultHandoffMs,
 					);
 				}
 			}
@@ -257,6 +319,15 @@ export class LiveSessionController {
 		// config is acknowledged (see #onMicChunk), so no frame can beat the
 		// turn_detection config to the server.
 		this.#options.source.start(samples => this.#onMicChunk(samples));
+		// Capture-stall watchdog: VPIO capture can silently stop delivering after
+		// playback ends. Without this the session just goes deaf — no event, no
+		// error, nothing to diagnose. Now: one warn + a panel hint per episode.
+		this.#lastMicChunkAt = Date.now();
+		this.#lastCommitAt = Date.now();
+		this.#lastCheckWallAt = Date.now();
+		const tickMs = Math.min(1_000, Math.max(20, Math.floor(Math.min(this.#captureStallMs, this.#bufferClearMs) / 5)));
+		this.#captureWatchdog = setInterval(() => this.#checkCaptureStall(), tickMs);
+		this.#captureWatchdog.unref?.();
 	}
 
 	/** Toggle mute: mic keeps running (levels + VAD clock), wire gets silence. */
@@ -289,6 +360,7 @@ export class LiveSessionController {
 	async dispose(): Promise<void> {
 		if (this.#disposed) return;
 		this.#disposed = true;
+		if (this.#captureWatchdog) clearInterval(this.#captureWatchdog);
 		this.#cancelConfigAckTimer();
 		this.#drainGeneration += 1;
 		this.#options.source.stop();
@@ -311,9 +383,13 @@ export class LiveSessionController {
 	}
 
 	#sendSessionConfig(): void {
+		// Client endpointing runs the server with turn_detection null — this
+		// controller commits turns (probe-verified against qwen, 2026-08-06).
+		const session =
+			this.#endpointing === "client" ? { ...this.#options.session, turn_detection: null } : this.#options.session;
 		this.#options.transport.send({
 			type: "session.update",
-			session: { ...this.#options.session, tools: [...this.#bridge.tools], tool_choice: "auto" },
+			session: { ...session, tools: [...this.#bridge.tools], tool_choice: "auto" },
 		});
 		this.#cancelConfigAckTimer();
 		this.#configAckTimer = setTimeout(() => {
@@ -333,9 +409,87 @@ export class LiveSessionController {
 		}
 	}
 
+	#checkCaptureStall(): void {
+		if (this.#disposed) return;
+		const now = Date.now();
+		// Capture-rate anomaly: audio arriving far faster than real time (the
+		// raw miniaudio path delivered ~8x realtime on 2026-08-06, filling the
+		// server's 300s buffer in 36s). Same user action as a stall: restart.
+		const wallMs = now - this.#lastCheckWallAt;
+		this.#lastCheckWallAt = now;
+		const audioMs = this.#audioMsSinceCheck;
+		this.#audioMsSinceCheck = 0;
+		if (wallMs > 0 && audioMs > 1_000 && audioMs > wallMs * 3) {
+			if (!this.#captureFloodReported) {
+				this.#captureFloodReported = true;
+				logger.warn("live capture rate anomaly — audio faster than realtime", {
+					audioMs,
+					wallMs,
+				});
+				this.#options.onCaptureStall?.();
+			}
+		} else if (this.#captureFloodReported) {
+			this.#captureFloodReported = false;
+			logger.info("live capture rate normalized");
+			this.#options.onCaptureResume?.();
+		}
+		// Idle buffer clear (client endpointing): nothing committed and no
+		// speech active — drop the accumulated silence/noise before it hits the
+		// server's 300s limit. Nothing of value is lost: tracking not armed
+		// means no frame crossed the speech threshold.
+		if (
+			this.#endpointing === "client" &&
+			!this.#clientSpeechActive &&
+			now - this.#lastCommitAt > this.#bufferClearMs
+		) {
+			this.#lastCommitAt = now;
+			try {
+				this.#options.transport.send({ type: "input_audio_buffer.clear" });
+				logger.debug("live input buffer cleared (idle)");
+			} catch (err) {
+				logger.debug("live input buffer clear failed", { error: String(err) });
+			}
+		}
+		// Mic heartbeat: one line per ~10s. Distinguishes the three swallow modes
+		// of the 2026-08-06 dead zones: chunks=0 → delivery stopped; chunks>0 +
+		// dropped≈chunks → an early-return gate ate the frames (muted/speaking/
+		// disconnected); chunks>0 + maxLevel<threshold → audio arrives but speech
+		// never crosses the arm level.
+		this.#heartbeatTicks += 1;
+		if (this.#heartbeatTicks >= 10) {
+			this.#heartbeatTicks = 0;
+			logger.info("live mic window", {
+				chunks: this.#chunkCountSinceCheck,
+				dropped: this.#chunkCountSinceCheck - this.#chunkProcessedSinceCheck,
+				maxLevel: Number(this.#maxLevelSinceCheck.toFixed(4)),
+				phase: this.#phase,
+				transport: this.#options.transport.state,
+				muted: this.#muted,
+			});
+		}
+		this.#chunkCountSinceCheck = 0;
+		this.#chunkProcessedSinceCheck = 0;
+		this.#maxLevelSinceCheck = 0;
+		if (this.#captureStallReported) return;
+		const silenceMs = now - this.#lastMicChunkAt;
+		if (silenceMs < this.#captureStallMs) return;
+		this.#captureStallReported = true;
+		logger.warn("live capture stalled — no mic chunks", { silenceMs });
+		this.#options.onCaptureStall?.();
+	}
+
 	#onMicChunk(samples: Float32Array): void {
 		if (this.#disposed) return;
+		this.#lastMicChunkAt = Date.now();
+		this.#audioMsSinceCheck += (samples.length / REALTIME_SAMPLE_RATE) * 1000;
+		if (this.#captureStallReported) {
+			this.#captureStallReported = false;
+			logger.info("live capture resumed");
+			this.#options.onCaptureResume?.();
+		}
 		this.#inputLevel = clamp01(rmsLevel(samples) / 32768);
+		this.#chunkCountSinceCheck += 1;
+		if (this.#inputLevel > this.#maxLevelSinceCheck) this.#maxLevelSinceCheck = this.#inputLevel;
 		this.#callbacks.onLevels(this.#inputLevel, this.#outputLevel);
 		if (this.#options.transport.state !== "connected") return;
 		// Fatal error state or config still in flight: nothing may hit the wire.
@@ -366,6 +520,8 @@ export class LiveSessionController {
 		if (this.#micNoiseFloor > 0 && this.#inputLevel < this.#micNoiseFloor) {
 			return this.#sendSilence();
 		}
+		if (this.#endpointing === "client") this.#trackClientSpeech(samples.length);
+		this.#chunkProcessedSinceCheck += 1;
 		this.#sendPcm(float32ToPcm16(samples));
 	}
 
@@ -379,6 +535,74 @@ export class LiveSessionController {
 
 	#sendSilence(): void {
 		this.#sendPcm(createSilenceChunk(MUTED_CHUNK_MS));
+	}
+
+	/**
+	 * Client-side endpointing (endpointing: "client"): the server runs with
+	 * turn_detection null, so THIS controller decides turn boundaries. A fixed
+	 * server silence window can't distinguish mid-sentence pauses from the end
+	 * of speech (premature responses); here the window is ours to tune, short
+	 * blips are never committed, and commits never race an in-flight response.
+	 */
+	#trackClientSpeech(frameSamples: number): void {
+		const chunkMs = (frameSamples / REALTIME_SAMPLE_RATE) * 1000;
+		if (this.#inputLevel >= CLIENT_VAD_START_LEVEL) {
+			this.#clientSilenceMs = 0;
+			if (!this.#clientSpeechActive) {
+				this.#clientSpeechActive = true;
+				this.#clientSpeechMs = 0;
+				logger.info("live speech started");
+				this.#setPhase("listening");
+			}
+			this.#clientSpeechMs += chunkMs;
+			return;
+		}
+		if (!this.#clientSpeechActive) return;
+		this.#clientSpeechMs += chunkMs;
+		this.#clientSilenceMs += chunkMs;
+		if (this.#clientSilenceMs >= this.#clientSilenceWindowMs) this.#clientEndpoint();
+	}
+
+	#clientEndpoint(): void {
+		this.#clientSpeechActive = false;
+		const durationMs = this.#clientSpeechMs;
+		this.#clientSpeechMs = 0;
+		this.#clientSilenceMs = 0;
+		// Noise blip: too short to be an utterance — never commit it.
+		if (durationMs < CLIENT_MIN_UTTERANCE_MS) return;
+		if (this.#responseInProgress) {
+			if (Date.now() - this.#responseStartedAt > RESPONSE_STALE_MS) {
+				// The in-flight flag outlived any plausible response — response.done
+				// was lost (server error without done, half-open WS). Self-heal; worst
+				// case is one create collision, which the error path absorbs.
+				logger.warn("live response flag went stale, resetting", {
+					ageMs: Date.now() - this.#responseStartedAt,
+				});
+				this.#responseInProgress = false;
+				this.#responseStartedAt = 0;
+				this.#commitQueued = false;
+			} else {
+				// A response is still in flight; commit once it completes, or the
+				// create would collide ("Cannot create response while another…").
+				this.#commitQueued = true;
+				logger.info("live commit queued behind in-flight response");
+				return;
+			}
+		}
+		this.#commitAndRespond();
+	}
+
+	#commitAndRespond(): void {
+		try {
+			this.#options.transport.send({ type: "input_audio_buffer.commit" });
+			this.#options.transport.send({ type: "response.create" });
+			this.#lastCommitAt = Date.now();
+			this.#responseInProgress = true;
+			this.#responseStartedAt = Date.now();
+			this.#setPhase("thinking");
+		} catch (err) {
+			logger.debug("live client endpoint commit failed", { error: String(err) });
+		}
 	}
 
 	/** Expected echo floor: bleed ≈ coupling × playback level. Real barge-in must exceed it. */
@@ -407,6 +631,15 @@ export class LiveSessionController {
 		this.#drainGeneration += 1;
 		this.#outputLevel = 0;
 		this.#bargeInArmed = 0;
+		// Response state reset: the cancel ends the in-flight response; drop any
+		// queued commit — the barge-in utterance gets its own endpoint tracking.
+		this.#responseInProgress = false;
+		this.#responseStartedAt = 0;
+		this.#commitQueued = false;
+		// The user is speaking right now — re-arm client speech tracking.
+		this.#clientSpeechActive = true;
+		this.#clientSpeechMs = 0;
+		this.#clientSilenceMs = 0;
 		// Immediate visual feedback — must land within ~100ms of the interruption.
 		this.#setPhase("interrupted");
 		this.#setPhase("listening");
@@ -418,13 +651,17 @@ export class LiveSessionController {
 	 * ("正在查，稍等") and deliver the real result as a fresh conversation turn
 	 * when it lands — the voice session never stalls in silence behind slow work.
 	 */
-	async #withHandoff(run: () => Promise<string>, deliver: (text: string) => boolean): Promise<string> {
+	async #withHandoff(
+		run: () => Promise<string>,
+		deliver: (text: string) => boolean,
+		handoffMs: number,
+	): Promise<string> {
 		let settled = false;
 		const work = run().then(text => {
 			settled = true;
 			return text;
 		});
-		await Promise.race([work, Bun.sleep(this.#consultHandoffMs)]);
+		await Promise.race([work, Bun.sleep(handoffMs)]);
 		if (settled) return await work;
 		void work.then(
 			text => deliver(text),
@@ -474,6 +711,23 @@ export class LiveSessionController {
 	 */
 	speakConfirmationNote(text: string): boolean {
 		return this.#injectUserNote(text);
+	}
+
+	/**
+	 * Refresh the realtime session instructions mid-session (P1 context
+	 * freshness: the voice front-end's summary of the main session goes stale
+	 * as work happens). Sends instructions ONLY — qwen rejects any
+	 * session.update that touches turn_detection after audio processing started.
+	 */
+	updateInstructions(instructions: string): boolean {
+		if (this.#disposed || this.#halted) return false;
+		try {
+			this.#options.transport.send({ type: "session.update", session: { instructions } });
+			return true;
+		} catch (err) {
+			logger.debug("live instructions refresh failed", { error: String(err) });
+			return false;
+		}
 	}
 
 	#injectUserNote(text: string): boolean {
@@ -554,7 +808,20 @@ export class LiveSessionController {
 				if (this.#assistantUtterances.length > 5) this.#assistantUtterances.shift();
 				this.#callbacks.onTranscript({ role: "assistant", text: event.transcript, final: true });
 				break;
-			case "response.done":
+			case "response.created":
+				this.#responseInProgress = true;
+				this.#responseStartedAt = Date.now();
+				logger.info("live response.created", { responseId: event.responseId });
+				break;
+			case "response.done": {
+				this.#responseInProgress = false;
+				this.#responseStartedAt = 0;
+				const rawResponse = event.raw.response as { status?: string } | undefined;
+				logger.info("live response.done", { responseId: event.responseId, status: rawResponse?.status });
+				if (this.#commitQueued) {
+					this.#commitQueued = false;
+					this.#commitAndRespond();
+				}
 				if (this.#assistantText) {
 					this.#assistantUtterances.push(this.#assistantText);
 					if (this.#assistantUtterances.length > 5) this.#assistantUtterances.shift();
@@ -564,6 +831,7 @@ export class LiveSessionController {
 				// while the tail is still physically playing (barge-in gate uses it).
 				this.#drainSink();
 				break;
+			}
 			case "error":
 				this.#onServerError(event.message);
 				break;
@@ -584,6 +852,29 @@ export class LiveSessionController {
 			logger.info("live session closed by server after idle timeout");
 			this.#halted = true;
 			this.#callbacks.onTerminal(new Error("voice session ended after prolonged inactivity"));
+			return;
+		}
+		// A rejected commit/create means the optimistic response-in-flight flag may
+		// never see a response.done — reset it so the next endpoint commits directly.
+		// Exception: "another response is in progress" — some response IS in flight
+		// and its response.done will still arrive (and flush any queued commit).
+		if (!/another response is in progress/i.test(message)) {
+			this.#responseInProgress = false;
+			this.#responseStartedAt = 0;
+			// Drop (not retry) the queued commit: if the commit itself was rejected
+			// ("buffer too small") an immediate retry would re-strike the breaker.
+			this.#commitQueued = false;
+		}
+		// Buffer overflow is recoverable: clear the accumulated silence and do
+		// NOT strike — a 3-strike halt here killed two sessions on 2026-08-06.
+		if (/exceeded maximum duration|buffer exceeded/i.test(message)) {
+			try {
+				this.#options.transport.send({ type: "input_audio_buffer.clear" });
+			} catch (err) {
+				logger.debug("live input buffer clear failed", { error: String(err) });
+			}
+			this.#lastCommitAt = Date.now();
+			logger.warn("live input buffer overflow — cleared", { message });
 			return;
 		}
 		this.#errorCount += 1;
@@ -654,6 +945,7 @@ export class LiveSessionController {
 
 	#setPhase(phase: LivePhase): void {
 		if (this.#phase === phase || this.#disposed) return;
+		logger.info("live phase", { from: this.#phase, to: phase });
 		this.#phase = phase;
 		this.#callbacks.onPhase(phase);
 	}

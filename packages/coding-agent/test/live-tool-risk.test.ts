@@ -29,10 +29,27 @@ describe("classifyToolRisk", () => {
 		expect(classifyToolRisk("brand_new_tool", {})).toBe("red");
 	});
 
-	test("bash is yellow for benign commands", () => {
+	test("bash read-only commands are green (voice workspace queries skip confirmation)", () => {
+		expect(classifyToolRisk("bash", { command: "git status --short" })).toBe("green");
+		expect(classifyToolRisk("bash", { command: "git log --oneline -5" })).toBe("green");
+		expect(classifyToolRisk("bash", { command: "git diff HEAD" })).toBe("green");
+		expect(classifyToolRisk("bash", { command: "git log | head -5" })).toBe("green");
+		expect(classifyToolRisk("bash", { command: "ls -la src" })).toBe("green");
+		expect(classifyToolRisk("bash", { command: "cat TODO.md" })).toBe("green");
+		expect(classifyToolRisk("bash", { command: "ps aux" })).toBe("green");
+	});
+
+	test("bash stays yellow for non-read-only benign commands", () => {
 		expect(classifyToolRisk("bash", { command: "bun test" })).toBe("yellow");
-		expect(classifyToolRisk("bash", { command: "git status --short" })).toBe("yellow");
 		expect(classifyToolRisk("bash", {})).toBe("yellow");
+	});
+
+	test("bash read-only classification is safe against mutating forms", () => {
+		expect(classifyToolRisk("bash", { command: "git branch -d feature" })).toBe("yellow");
+		expect(classifyToolRisk("bash", { command: "git tag v1.0.0" })).toBe("yellow");
+		expect(classifyToolRisk("bash", { command: "echo hi > file.txt" })).toBe("yellow");
+		expect(classifyToolRisk("bash", { command: "cat a && rm b" })).toBe("red");
+		expect(classifyToolRisk("bash", { command: "ls $(rm -rf dist)" })).toBe("red");
 	});
 
 	test("bash escalates to red on destructive patterns", () => {

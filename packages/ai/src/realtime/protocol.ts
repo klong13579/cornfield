@@ -75,6 +75,7 @@ export type RealtimeClientEvent =
 export type RealtimeServerEvent =
 	| { type: "session.created" | "session.updated"; session: RealtimeSessionInfo }
 	| { type: "response.audio.delta"; delta: string }
+	| { type: "response.created"; responseId?: string }
 	| { type: "response.audio_transcript.delta"; delta: string }
 	| { type: "response.audio_transcript.done"; transcript: string }
 	| { type: "response.text.delta"; delta: string }
@@ -154,6 +155,12 @@ export function parseRealtimeServerEvent(raw: unknown): RealtimeServerEvent {
 				type: "response.done",
 				responseId: isRecord(raw.response) ? asString(raw.response.id) : undefined,
 				raw,
+			};
+
+		case "response.created":
+			return {
+				type: "response.created",
+				responseId: isRecord(raw.response) ? asString(raw.response.id) : undefined,
 			};
 
 		case "input_audio_buffer.speech_started":

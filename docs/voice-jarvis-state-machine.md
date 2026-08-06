@@ -47,6 +47,10 @@ L4 记录层   LiveTurnBuffer + recorder（话语去重）
 **上行门控**（每个麦克风帧，按顺序）：
 disposed/halted/未 configAck → 丢弃；muted → 静音帧；speaking → 静音帧（除非连续 5 帧超过回声地板 = barge-in）；**低于 `micNoiseFloor`(0.02) → 静音帧**；其余 → 原样上行。
 
+**端点检测（谁判定「说完了」）**：`voice.endpointing`，默认 **server**（2026-08-06 验收实锤后回退）。
+- **server 模式**（默认，已验证）：server_vad 固定静默窗口判停。句中停顿偶有抢答，但整体可靠。
+- **client 模式**（opt-in 实验，勿默认开启）：`turn_detection: null`，控制器自己跟踪语音：RMS ≥ 0.04 起始，静默达到 `voice.vadSilenceMs` 判定说完 → commit + response.create。**已知缺陷（2026-08-06 实测）**：固定 0.04 阈值无自适应（环境噪声峰值可达 0.035，语音略低即永不 arm）；任何 ≥ 阈值的噪声尖峰重置静默窗（真实办公环境下端点永远到不了）——表现为播报后第一句话被吞几十秒。修复需自适应噪声基线，不是调参能解决的。
+
 **转写守卫**（`transcription.completed`，按顺序）：speaking 相位丢弃 → `#isEcho`（近 5 条助手话语匹配）丢弃 → <3 字丢弃（**确认等待期间豁免**，「确认/做/好」可达）。
 
 ## L3 执行层
@@ -62,6 +66,12 @@ disposed/halted/未 configAck → 丢弃；muted → 静音帧；speaking → �
 | `omp_voice_confirm` | 确认答复 | drop | 确认门 resolveDecision |
 
 **意图先于转写到达的竞态**：task/confirm 意图到达时无缓冲 → 置 `#suppressNextUserTurn`，迟到的 final 转写丢弃。
+
+**分类边界（2026-08-06 重定义）**：按**是否依赖上下文**划分，不按读/写——依赖工作区或对话历史的问题（含指代类「这个文件」、验证类「改对了吗」、只读工作区查询）一律走 task 进主会话；自包含纯事实（天气/算术/公开信息搜索）才走 consult。原因：consult 零历史，指代类问题只有在全量历史的主会话才能答对。
+
+**上下文保鲜**：realtime 前端的会话摘要不再是进入语音时的一次性快照——VoiceModeController 订阅主会话 `agent_end`，每轮结束（打字轮或语音任务）调 `updateInstructions` 重建摘要。注意：只发 instructions，不重发 turn_detection（qwen 在音频处理开始后禁止改它，P0 坑 #6）。
+
+**bash 只读绿级**：确认门对静态可判只读的命令（git status/log/diff/show、ls/cat/grep 等，含只读管道）直接放行，工作区查询不必口头确认；含任何链式/重定向/替换操作符的命令不适用。
 
 ### 3.2 consult 桥（每次调用一个 invocation）
 

@@ -12,6 +12,7 @@ import type { Component } from "@oh-my-pi/pi-tui";
 import { logger } from "@oh-my-pi/pi-utils";
 import { LiveConsultBridge } from "../../live/consult-bridge";
 import { LiveSessionController } from "../../live/controller";
+import { buildGreetingNote, deriveAddressName, extractUserName } from "../../live/greeting";
 import { buildVoiceInstructions } from "../../live/instructions";
 import { createNativeAecAudio, createNativeAudioSource, createNativeSinkFactory } from "../../live/natives-audio";
 import { LiveTaskRouter, type TaskRouterSession } from "../../live/task-router";
@@ -20,6 +21,7 @@ import { LiveTurnBuffer } from "../../live/turn-buffer";
 import type { LiveIntent, LivePhase, LiveTranscript } from "../../live/types";
 import { VoiceGate } from "../../live/voice-gate";
 import liveInstructions from "../../prompts/live/live-instructions.md" with { type: "text" };
+import { loadUserProfile } from "../../system-prompt";
 import { type VoiceImmersiveState, VoiceImmersiveView } from "../components/voice-immersive-view";
 import { VoicePanel, type VoicePanelCallbacks, type VoicePanelState } from "../components/voice-panel";
 import type { InteractiveModeContext } from "../types";
@@ -46,6 +48,8 @@ export class VoiceModeController {
 	/** Reconnect tracking: announce in-flight state after the channel comes back. */
 	#voiceConnectedOnce = false;
 	#reconnecting = false;
+	/** Main-session subscription driving the instructions refresh. */
+	#sessionUnsubscribe: (() => void) | undefined;
 	#panelState: VoicePanelState = { phase: "connecting", inputLevel: 0, outputLevel: 0 };
 
 	constructor(ctx: InteractiveModeContext) {
@@ -79,6 +83,8 @@ export class VoiceModeController {
 	async stop(): Promise<void> {
 		const session = this.#session;
 		this.#session = undefined;
+		this.#sessionUnsubscribe?.();
+		this.#sessionUnsubscribe = undefined;
 		this.#turnBuffer?.flush();
 		this.#turnBuffer = undefined;
 		this.#suppressNextUserTurn = false;
@@ -136,7 +142,8 @@ export class VoiceModeController {
 		const instructions = buildVoiceInstructions(liveInstructions, this.#ctx.session.agent.state.messages);
 		this.#consultBridge = new LiveConsultBridge({
 			cwd: this.#ctx.session.sessionManager.getCwd(),
-			onActivity: line => this.#pushPanelState({ toolLine: line }),
+			// No panel activity for consults: the fast lane stays quiet (user
+			// feedback — the log-style lines were noise). Tasks keep their lines.
 			onBackgroundResult: (task, text) => this.#onBackgroundResult(task, text),
 		});
 
@@ -183,10 +190,7 @@ export class VoiceModeController {
 				},
 			},
 			onConsult: async task => {
-				this.#pushPanelState({ consultTask: task });
-				const result = (await this.#consultBridge?.consult(task)) ?? "（consult 未初始化）";
-				this.#pushPanelState({ consultTask: "", toolLine: "" });
-				return result;
+				return (await this.#consultBridge?.consult(task)) ?? "（consult 未初始化）";
 			},
 			onTask: async task => {
 				this.#pushPanelState({ consultTask: task });
@@ -226,6 +230,13 @@ export class VoiceModeController {
 			bargeInLevel: settings.get("voice.bargeInLevel"),
 			bargeInEnabled: settings.get("voice.interrupt"),
 			micNoiseFloor: settings.get("voice.micNoiseFloor"),
+			// Fail-safe toward the verified path: anything except an explicit
+			// "client" runs server VAD (client RMS endpointing swallowed
+			// post-playback utterances — 2026-08-06 acceptance, reverted).
+			endpointing: settings.get("voice.endpointing") === "client" ? "client" : "server",
+			clientSilenceMs: settings.get("voice.vadSilenceMs"),
+			onCaptureStall: () => this.#pushPanelState({ error: "麦克风采集疑似停摆，按 alt+v 退出后重进语音模式" }),
+			onCaptureResume: () => this.#pushPanelState({ error: undefined }),
 			isConfirmationPending: () => this.#gate?.confirmationPending ?? false,
 		});
 		this.#session = session;
@@ -237,6 +248,13 @@ export class VoiceModeController {
 		if (extensionRunner) gate.arm(extensionRunner);
 		else logger.warn("voice task path disabled: no extension runner (fail-closed)");
 		this.#gate = gate;
+
+		// Context freshness: every main-session turn (typed or voice task)
+		// refreshes the realtime front-end's summary, so deictic questions
+		// ("刚才那个改对了吗") see recent work instead of the voice-start snapshot.
+		this.#sessionUnsubscribe = this.#ctx.session.subscribe(event => {
+			if (event.type === "agent_end") this.#refreshInstructions();
+		});
 
 		const callbacks: VoicePanelCallbacks = {
 			onExit: () => {
@@ -280,6 +298,7 @@ export class VoiceModeController {
 		if (phase === "listening" || phase === "muted") {
 			if (!this.#voiceConnectedOnce) {
 				this.#voiceConnectedOnce = true;
+				void this.#greet();
 			} else if (this.#reconnecting) {
 				this.#reconnecting = false;
 				this.#announceResumedState();
@@ -309,6 +328,23 @@ export class VoiceModeController {
 		this.#session?.speakConfirmationNote(
 			`（系统提示：语音通道刚刚重连，之前的对话上下文已丢失。重连前的状态：${parts.join("；")}。它们正常继续，无需重新派发；用户能看到屏幕。除非用户问起，不必主动提及重连。）`,
 		);
+	}
+
+	/** Rebuild the front-end summary from the live main-session history. */
+	#refreshInstructions(): void {
+		const instructions = buildVoiceInstructions(liveInstructions, this.#ctx.session.agent.state.messages);
+		this.#session?.updateInstructions(instructions);
+	}
+
+	/** Voice-start hello: greet the user by name from the declarative persona. */
+	async #greet(): Promise<void> {
+		try {
+			const profile = await loadUserProfile();
+			const fullName = extractUserName(profile);
+			this.#session?.speakConfirmationNote(buildGreetingNote(fullName ? deriveAddressName(fullName) : undefined));
+		} catch (err) {
+			logger.debug("voice greeting failed", { error: String(err) });
+		}
 	}
 	#onTranscript(transcript: LiveTranscript): void {
 		this.#pushPanelState({ transcript });
