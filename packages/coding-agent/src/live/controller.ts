@@ -86,6 +86,8 @@ const CLIENT_VAD_START_LEVEL = 0.04;
 const CLIENT_MIN_UTTERANCE_MS = 300;
 /** Client endpointing default silence window before committing a turn. */
 const DEFAULT_CLIENT_SILENCE_MS = 1_200;
+/** A response-in-flight flag older than this is presumed lost (missing response.done). */
+const RESPONSE_STALE_MS = 60_000;
 
 function clamp01(value: number): number {
 	return Math.min(1, Math.max(0, value));
@@ -135,6 +137,8 @@ export class LiveSessionController {
 	#clientSpeechMs = 0;
 	/** A response is in flight server-side (response.created → response.done). */
 	#responseInProgress = false;
+	/** When #responseInProgress went true — the stale-flag watchdog. */
+	#responseStartedAt = 0;
 	/** User speech ended while a response was in flight — commit once it's done. */
 	#commitQueued = false;
 
@@ -439,10 +443,23 @@ export class LiveSessionController {
 		// Noise blip: too short to be an utterance — never commit it.
 		if (durationMs < CLIENT_MIN_UTTERANCE_MS) return;
 		if (this.#responseInProgress) {
-			// A response is still in flight; commit once it completes, or the
-			// create would collide ("Cannot create response while another…").
-			this.#commitQueued = true;
-			return;
+			if (Date.now() - this.#responseStartedAt > RESPONSE_STALE_MS) {
+				// The in-flight flag outlived any plausible response — response.done
+				// was lost (server error without done, half-open WS). Self-heal; worst
+				// case is one create collision, which the error path absorbs.
+				logger.warn("live response flag went stale, resetting", {
+					ageMs: Date.now() - this.#responseStartedAt,
+				});
+				this.#responseInProgress = false;
+				this.#responseStartedAt = 0;
+				this.#commitQueued = false;
+			} else {
+				// A response is still in flight; commit once it completes, or the
+				// create would collide ("Cannot create response while another…").
+				this.#commitQueued = true;
+				logger.info("live commit queued behind in-flight response");
+				return;
+			}
 		}
 		this.#commitAndRespond();
 	}
@@ -452,6 +469,7 @@ export class LiveSessionController {
 			this.#options.transport.send({ type: "input_audio_buffer.commit" });
 			this.#options.transport.send({ type: "response.create" });
 			this.#responseInProgress = true;
+			this.#responseStartedAt = Date.now();
 			this.#setPhase("thinking");
 		} catch (err) {
 			logger.debug("live client endpoint commit failed", { error: String(err) });
@@ -487,6 +505,7 @@ export class LiveSessionController {
 		// Response state reset: the cancel ends the in-flight response; drop any
 		// queued commit — the barge-in utterance gets its own endpoint tracking.
 		this.#responseInProgress = false;
+		this.#responseStartedAt = 0;
 		this.#commitQueued = false;
 		// The user is speaking right now — re-arm client speech tracking.
 		this.#clientSpeechActive = true;
@@ -658,9 +677,14 @@ export class LiveSessionController {
 				break;
 			case "response.created":
 				this.#responseInProgress = true;
+				this.#responseStartedAt = Date.now();
+				logger.info("live response.created", { responseId: event.responseId });
 				break;
-			case "response.done":
+			case "response.done": {
 				this.#responseInProgress = false;
+				this.#responseStartedAt = 0;
+				const rawResponse = event.raw.response as { status?: string } | undefined;
+				logger.info("live response.done", { responseId: event.responseId, status: rawResponse?.status });
 				if (this.#commitQueued) {
 					this.#commitQueued = false;
 					this.#commitAndRespond();
@@ -674,6 +698,7 @@ export class LiveSessionController {
 				// while the tail is still physically playing (barge-in gate uses it).
 				this.#drainSink();
 				break;
+			}
 			case "error":
 				this.#onServerError(event.message);
 				break;
@@ -695,6 +720,17 @@ export class LiveSessionController {
 			this.#halted = true;
 			this.#callbacks.onTerminal(new Error("voice session ended after prolonged inactivity"));
 			return;
+		}
+		// A rejected commit/create means the optimistic response-in-flight flag may
+		// never see a response.done — reset it so the next endpoint commits directly.
+		// Exception: "another response is in progress" — some response IS in flight
+		// and its response.done will still arrive (and flush any queued commit).
+		if (!/another response is in progress/i.test(message)) {
+			this.#responseInProgress = false;
+			this.#responseStartedAt = 0;
+			// Drop (not retry) the queued commit: if the commit itself was rejected
+			// ("buffer too small") an immediate retry would re-strike the breaker.
+			this.#commitQueued = false;
 		}
 		this.#errorCount += 1;
 		logger.warn("live server error", { message, errorCount: this.#errorCount });
@@ -764,6 +800,7 @@ export class LiveSessionController {
 
 	#setPhase(phase: LivePhase): void {
 		if (this.#phase === phase || this.#disposed) return;
+		logger.info("live phase", { from: this.#phase, to: phase });
 		this.#phase = phase;
 		this.#callbacks.onPhase(phase);
 	}

@@ -2,7 +2,7 @@
  * LiveSessionController tests. Real local WS server (per repo policy), scripted
  * audio source/sink — no hardware, no mocks.
  */
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test, vi } from "bun:test";
 import { pcm16ToBase64, RealtimeWsTransport } from "@oh-my-pi/pi-ai";
 import { LiveSessionController } from "../src/live/controller";
 import type { LiveAudioSink, LiveIntent, LivePhase, LiveTranscript } from "../src/live/types";
@@ -1053,6 +1053,49 @@ describe("LiveSessionController", () => {
 		const types = h.server.received.map(m => m.type);
 		expect(types).toContain("input_audio_buffer.commit");
 		expect(types.lastIndexOf("response.create")).toBeGreaterThan(types.indexOf("input_audio_buffer.commit"));
+		await h.controller.dispose();
+	});
+
+	test("server error resets the response flag so the next endpoint commits directly", async () => {
+		const h = await makeHarness({ endpointing: "client", clientSilenceMs: 100 });
+		servers.push(h.server);
+
+		// A response starts, then the server errors without ever sending done.
+		h.server.send({ type: "response.created", response: { id: "r1" } });
+		h.server.send({
+			type: "error",
+			error: { type: "invalid_request_error", message: "Error committing input audio buffer: buffer too small" },
+		});
+		await Bun.sleep(10);
+
+		// The flag must be reset — this endpoint commits instead of queueing forever.
+		for (let i = 0; i < 20; i++) h.source.emit(0.2);
+		for (let i = 0; i < 8; i++) h.source.emit(0.001);
+		await Bun.sleep(20);
+		expect(h.server.received.map(m => m.type)).toContain("input_audio_buffer.commit");
+		await h.controller.dispose();
+	});
+
+	test("stale response flag self-heals after RESPONSE_STALE_MS", async () => {
+		const h = await makeHarness({ endpointing: "client", clientSilenceMs: 100 });
+		servers.push(h.server);
+
+		const realNow = Date.now();
+		let clock = realNow;
+		const spy = vi.spyOn(Date, "now").mockImplementation(() => clock);
+		try {
+			h.server.send({ type: "response.created", response: { id: "r1" } });
+			await Bun.sleep(10);
+
+			// 61s later the flag is stale: the endpoint commits directly.
+			clock = realNow + 61_000;
+			for (let i = 0; i < 20; i++) h.source.emit(0.2);
+			for (let i = 0; i < 8; i++) h.source.emit(0.001);
+			await Bun.sleep(20);
+			expect(h.server.received.map(m => m.type)).toContain("input_audio_buffer.commit");
+		} finally {
+			spy.mockRestore();
+		}
 		await h.controller.dispose();
 	});
 });
