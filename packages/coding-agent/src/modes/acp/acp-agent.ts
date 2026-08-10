@@ -37,7 +37,7 @@ import {
 	type SetSessionModeResponse,
 	type Usage,
 } from "@agentclientprotocol/sdk";
-import type { Model } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage, Model } from "@oh-my-pi/pi-ai";
 import { logger, VERSION } from "@oh-my-pi/pi-utils";
 import { disableProvider, enableProvider } from "../../capability";
 import { Settings } from "../../config/settings";
@@ -55,7 +55,7 @@ import {
 	type UsageStatistics,
 } from "../../session/session-manager";
 import { parseThinkingLevel } from "../../thinking";
-import { mapAgentSessionEventToAcpSessionUpdates, mapToolKind } from "./acp-event-mapper";
+import { extractAssistantMessageText, mapAgentSessionEventToAcpSessionUpdates, mapToolKind } from "./acp-event-mapper";
 
 const ACP_MODE_ID = "default";
 const MODE_CONFIG_ID = "mode";
@@ -85,6 +85,9 @@ type ManagedSessionRecord = {
 	mcpManager: MCPManager | undefined;
 	promptTurn: PromptTurnState | undefined;
 	liveMessageIds: WeakMap<object, string>;
+	currentAssistantMessageId: string | undefined;
+	liveMessageId: string | undefined;
+	liveMessageProgress: { textEmitted: boolean } | undefined;
 	extensionsConfigured: boolean;
 };
 
@@ -114,6 +117,30 @@ type MCPSourceMap = {
 };
 
 type CreateAcpSession = (cwd: string) => Promise<AgentSession>;
+
+/**
+ * Slash commands that have a sensible meaning in headless ACP context.
+ *
+ * These are routed in `prompt()` *before* delegating to `session.prompt` so the
+ * command runs synchronously and the response is streamed back as a single
+ * `agent_message_chunk` instead of being treated as free-form user text.
+ *
+ * Built-in commands that depend on TUI state (settings/todo/mcp/move/exit) are
+ * deliberately omitted — they remain TUI-only and are surfaced in help output.
+ */
+type AcpBuiltinCommand = {
+	name: string;
+	description: string;
+	allowArgs: boolean;
+};
+
+const ACP_BUILTIN_COMMANDS: ReadonlyArray<AcpBuiltinCommand> = [
+	{ name: "help", description: "Show ACP-mode command help", allowArgs: false },
+	{ name: "compact", description: "Compact session context (optional guidance)", allowArgs: true },
+	{ name: "model", description: "(ACP) Model switching is not exposed; use TUI or config.yml", allowArgs: true },
+	{ name: "clear", description: "(ACP) Not exposed; start a new Zed thread instead", allowArgs: false },
+	{ name: "exit", description: "(ACP) Not exposed; close the Zed thread to end the session", allowArgs: false },
+];
 
 const acpExtensionUiContext: ExtensionUIContext = {
 	select: async () => undefined,
@@ -352,6 +379,25 @@ export class AcpAgent implements Agent {
 			reject: pendingPrompt.reject,
 		};
 
+		// Route ACP-friendly builtin slash commands (/help, /compact, ...) synchronously
+		// before dispatching to the LLM. Falls through to the normal session.prompt path
+		// for everything else (custom file commands, extension commands, plain text).
+		if (converted.text.startsWith("/")) {
+			const routed = await this.#tryRouteAcpBuiltin(converted.text, record);
+			if (routed) {
+				await this.#emitEndOfTurnUpdates(record);
+				this.#finishPrompt(record, {
+					stopReason: "end_turn",
+					usage: this.#buildTurnUsage(
+						record.promptTurn.usageBaseline,
+						record.session.sessionManager.getUsageStatistics(),
+					),
+					userMessageId: record.promptTurn.userMessageId,
+				});
+				return await pendingPrompt.promise;
+			}
+		}
+
 		record.promptTurn.unsubscribe = record.session.subscribe(event => {
 			void this.#handlePromptEvent(record, event);
 		});
@@ -579,6 +625,9 @@ export class AcpAgent implements Agent {
 			mcpManager: undefined,
 			promptTurn: undefined,
 			liveMessageIds: new WeakMap<object, string>(),
+			currentAssistantMessageId: undefined,
+			liveMessageId: undefined,
+			liveMessageProgress: undefined,
 			extensionsConfigured: false,
 		};
 	}
@@ -627,6 +676,44 @@ export class AcpAgent implements Agent {
 			return;
 		}
 
+		// Track the live assistant message id per turn so streaming deltas share
+		// a stable ACP messageId (Zed merges all chunks into one UI block). The
+		// pi-agent-core message_update spreads a fresh object per delta, so we
+		// keep a separate currentAssistantMessageId and reuse it across WeakMap
+		// misses below.
+		//
+		// Seed lazily: AgentSession.#emitSessionEvent emits message_update
+		// synchronously but gates message_start behind awaited extension hooks,
+		// so the first thinking/text delta of a turn can reach this subscriber
+		// before message_start. Seeding on the first assistant delta (and
+		// refusing to re-seed on a late message_start) keeps every chunk of the
+		// turn on one messageId; otherwise each delta would get its own UUID and
+		// Zed would render each chunk as a separate block.
+		if (event.type === "message_update" && event.message.role === "assistant") {
+			if (!record.currentAssistantMessageId) {
+				const id = crypto.randomUUID();
+				record.currentAssistantMessageId = id;
+				record.liveMessageId = id;
+				record.liveMessageProgress = { textEmitted: false };
+			}
+			if (event.assistantMessageEvent.type === "text_delta" && record.liveMessageProgress) {
+				record.liveMessageProgress.textEmitted = true;
+			}
+		} else if (
+			event.type === "message_start" &&
+			event.message.role === "assistant" &&
+			!record.currentAssistantMessageId
+		) {
+			const id = crypto.randomUUID();
+			record.currentAssistantMessageId = id;
+			record.liveMessageId = id;
+			record.liveMessageProgress = { textEmitted: false };
+		} else if (event.type === "message_end" && event.message.role === "assistant") {
+			record.currentAssistantMessageId = undefined;
+			record.liveMessageId = undefined;
+			record.liveMessageProgress = undefined;
+		}
+
 		for (const notification of mapAgentSessionEventToAcpSessionUpdates(event, record.session.sessionId, {
 			getMessageId: message => this.#getLiveMessageId(record, message),
 		})) {
@@ -634,6 +721,7 @@ export class AcpAgent implements Agent {
 		}
 
 		if (event.type === "agent_end") {
+			await this.#flushMissedFinalAssistantText(record, event);
 			await this.#emitEndOfTurnUpdates(record);
 			this.#finishPrompt(record, {
 				stopReason: promptTurn.cancelRequested ? "cancelled" : "end_turn",
@@ -643,6 +731,44 @@ export class AcpAgent implements Agent {
 		}
 	}
 
+	/**
+	 * Deliver the final visible answer when the assistant `message_end` never
+	 * reached this prompt turn's subscription. Session event handlers are
+	 * fire-and-forget, and `agent_end` can overtake a still-parked `message_end`
+	 * fan-out. Without this flush a client that only received
+	 * `agent_thought_chunk` updates stays stuck on the thinking block (#4902).
+	 * If the live-message progress shows no text was ever delivered, emit the
+	 * last assistant message's text on agent_end so the answer appears.
+	 */
+	async #flushMissedFinalAssistantText(
+		record: ManagedSessionRecord,
+		event: Extract<AgentSessionEvent, { type: "agent_end" }>,
+	): Promise<void> {
+		const progress = record.liveMessageProgress;
+		if (!progress || progress.textEmitted) {
+			return;
+		}
+		const lastAssistant = [...event.messages]
+			.reverse()
+			.find((message): message is AssistantMessage => message.role === "assistant");
+		if (!lastAssistant) {
+			return;
+		}
+		const text = extractAssistantMessageText(lastAssistant);
+		if (text.length === 0) {
+			return;
+		}
+		progress.textEmitted = true;
+		await this.#connection.sessionUpdate({
+			sessionId: record.session.sessionId,
+			update: {
+				sessionUpdate: "agent_message_chunk",
+				content: { type: "text", text },
+				messageId: record.liveMessageId,
+			},
+		});
+	}
+
 	#getLiveMessageId(record: ManagedSessionRecord, message: unknown): string | undefined {
 		if (typeof message !== "object" || message === null) {
 			return undefined;
@@ -650,6 +776,13 @@ export class AcpAgent implements Agent {
 		const existing = record.liveMessageIds.get(message);
 		if (existing) {
 			return existing;
+		}
+		// Fallback: pi-agent-core's message_update emits a fresh message object
+		// per delta, so the WeakMap miss is normal. Reuse the active assistant
+		// message id so all chunks of the same assistant turn share messageId.
+		if (record.currentAssistantMessageId) {
+			record.liveMessageIds.set(message, record.currentAssistantMessageId);
+			return record.currentAssistantMessageId;
 		}
 		const nextMessageId = crypto.randomUUID();
 		record.liveMessageIds.set(message, nextMessageId);
@@ -830,6 +963,18 @@ export class AcpAgent implements Agent {
 			commands.push(command);
 		};
 
+		// ACP builtins first: they are routed in prompt() before session.prompt,
+		// so advertise the same precedence. Zed validates /commands client-side
+		// against this list (message_editor.rs) and rejects unadvertised ones
+		// before they ever reach the agent.
+		for (const command of ACP_BUILTIN_COMMANDS) {
+			appendCommand({
+				name: command.name,
+				description: command.description,
+				...(command.allowArgs ? { input: { hint: "arguments" } } : {}),
+			});
+		}
+
 		for (const command of session.customCommands) {
 			appendCommand({
 				name: command.command.name,
@@ -854,6 +999,71 @@ export class AcpAgent implements Agent {
 		}
 
 		return commands;
+	}
+
+	/**
+	 * Try to route a leading-slash prompt through the ACP-friendly builtin subset.
+	 * Returns true if the command was handled (response streamed to the client).
+	 * Returns false to signal the caller should fall through to `session.prompt`.
+	 */
+	async #tryRouteAcpBuiltin(text: string, record: ManagedSessionRecord): Promise<boolean> {
+		const match = /^\/(\S+)(?:\s+([\s\S]*))?$/.exec(text.trim());
+		if (!match) return false;
+		const name = match[1];
+		if (!name) return false;
+		const args = (match[2] ?? "").trim();
+		const cmd = ACP_BUILTIN_COMMANDS.find(c => c.name === name);
+		if (!cmd) return false;
+
+		const responseText = await this.#executeAcpBuiltin(cmd, args, record);
+		if (responseText === null) return false;
+
+		await this.#connection.sessionUpdate({
+			sessionId: record.session.sessionId,
+			update: {
+				sessionUpdate: "agent_message_chunk",
+				content: { type: "text", text: responseText },
+				messageId: crypto.randomUUID(),
+			},
+		});
+		return true;
+	}
+
+	async #executeAcpBuiltin(
+		cmd: AcpBuiltinCommand,
+		args: string,
+		record: ManagedSessionRecord,
+	): Promise<string | null> {
+		switch (cmd.name) {
+			case "help":
+				return [
+					"Oh My Pi — ACP-mode commands:",
+					"  /help            Show this help",
+					"  /compact [hint]  Compact session context (optional guidance)",
+					"",
+					"Built-ins not available in ACP (use the TUI for these):",
+					"  /settings /model /mcp /move /todo /clear /exit",
+					"",
+					"Custom file-based and extension commands still work via /<name>.",
+				].join("\n");
+			case "compact": {
+				try {
+					const result = await record.session.compact(args || undefined);
+					return `Compacted. Tokens before: ${result.tokensBefore}.\n\n${result.summary}`;
+				} catch (err) {
+					const message = err instanceof Error ? err.message : String(err);
+					return `Compaction failed: ${message}`;
+				}
+			}
+			case "model":
+				return "Model switching is not exposed in ACP. Edit ~/.omp/agent/config.yml or use the TUI.";
+			case "clear":
+				return "Context clearing is not exposed in ACP. Start a new Zed thread to reset.";
+			case "exit":
+				return "Exit is not exposed in ACP. Close the Zed thread to end the session.";
+			default:
+				return null;
+		}
 	}
 
 	#toSessionInfo(session: StoredSessionInfo): SessionInfo {

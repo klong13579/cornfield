@@ -79,6 +79,7 @@ class FakeAgentSession {
 	constructor(
 		cwd: string,
 		private readonly models: Model[] = TEST_MODELS,
+		private readonly emitMode: "first" | "late" | "never" = "first",
 	) {
 		this.sessionManager = SessionManager.create(cwd);
 		this.sessionId = this.sessionManager.getSessionId();
@@ -126,20 +127,36 @@ class FakeAgentSession {
 		this.isStreaming = true;
 		this.sessionManager.appendMessage({ role: "user", content: text, timestamp: Date.now() });
 		const assistantMessage = makeAssistantMessage("pong");
-		for (const listener of this.#listeners) {
-			listener({
+		const emit = (event: AgentSessionEvent) => {
+			for (const listener of [...this.#listeners]) {
+				listener(event);
+			}
+		};
+		const partial = { ...assistantMessage };
+		if (this.emitMode === "first") {
+			emit({ type: "message_start", message: { ...partial } } as AgentSessionEvent);
+		}
+		const thinkingChunks = ["user just said ack - ", "this is a brief acknowledgment. ", "Nothing to do here."];
+		for (const [index, delta] of thinkingChunks.entries()) {
+			if (this.emitMode === "late" && index === 1) {
+				// Realistic race: AgentSession gates message_start behind awaited
+				// extension hooks while message_update deltas emit synchronously.
+				emit({ type: "message_start", message: { ...partial } } as AgentSessionEvent);
+			}
+			emit({
 				type: "message_update",
-				message: assistantMessage,
-				assistantMessageEvent: { type: "text_delta", delta: "pong" },
-			} as AgentSessionEvent);
+				message: { ...partial },
+				assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta },
+			} as unknown as AgentSessionEvent);
 		}
+		emit({
+			type: "message_update",
+			message: { ...partial },
+			assistantMessageEvent: { type: "text_delta", delta: "pong" },
+		} as unknown as AgentSessionEvent);
 		this.sessionManager.appendMessage(assistantMessage);
-		for (const listener of this.#listeners) {
-			listener({
-				type: "agent_end",
-				messages: [assistantMessage],
-			} as AgentSessionEvent);
-		}
+		emit({ type: "message_end", message: assistantMessage } as AgentSessionEvent);
+		emit({ type: "agent_end", messages: [assistantMessage] } as AgentSessionEvent);
 		this.isStreaming = false;
 	}
 
@@ -242,7 +259,7 @@ afterEach(async () => {
 	}
 });
 
-async function createHarness(): Promise<AgentHarness> {
+async function createHarness(emitMode: "first" | "late" | "never" = "first"): Promise<AgentHarness> {
 	const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "omp-acp-test-"));
 	cleanupRoots.push(root);
 	const agentDir = path.join(root, "agent");
@@ -264,10 +281,10 @@ async function createHarness(): Promise<AgentHarness> {
 		closed: Promise.withResolvers<void>().promise,
 	} as unknown as AgentSideConnection;
 
-	const initialSession = new FakeAgentSession(cwdA);
+	const initialSession = new FakeAgentSession(cwdA, TEST_MODELS, emitMode);
 	sessions.push(initialSession);
 	const factory = async (cwd: string): Promise<AgentSession> => {
-		const session = new FakeAgentSession(cwd);
+		const session = new FakeAgentSession(cwd, TEST_MODELS, emitMode);
 		sessions.push(session);
 		return session as unknown as AgentSession;
 	};
@@ -385,6 +402,63 @@ describe("ACP agent", () => {
 				update => typeof getChunkMessageId(update) === "string" && getChunkMessageId(update)!.length > 0,
 			),
 		).toBe(true);
+
+		harness.abortController.abort();
+		await Bun.sleep(0);
+	});
+
+	it("shares one messageId across thinking/text deltas even when message_start is delayed", async () => {
+		for (const emitMode of ["first", "late", "never"] as const) {
+			const harness = await createHarness(emitMode);
+			const session = await harness.agent.newSession({ cwd: harness.cwdA, mcpServers: [] });
+			await harness.agent.prompt({
+				sessionId: session.sessionId,
+				prompt: [{ type: "text", text: "ack" }],
+			} as PromptRequest);
+
+			const chunks = harness.updates.filter(
+				update =>
+					update.sessionId === session.sessionId &&
+					(update.update.sessionUpdate === "agent_message_chunk" ||
+						update.update.sessionUpdate === "agent_thought_chunk"),
+			);
+			expect(chunks.length).toBeGreaterThan(1);
+			const ids = new Set(chunks.map(update => getChunkMessageId(update)));
+			expect(ids.size, `messageId stability with message_start ${emitMode}`).toBe(1);
+
+			harness.abortController.abort();
+			await Bun.sleep(0);
+		}
+	});
+
+	it("advertises ACP builtin slash commands and routes them without an LLM call", async () => {
+		const harness = await createHarness();
+		const session = await harness.agent.newSession({ cwd: harness.cwdA, mcpServers: [] });
+		await Bun.sleep(10); // let the bootstrap setTimeout(0) fire
+
+		const commandUpdate = harness.updates.find(
+			update =>
+				update.sessionId === session.sessionId && update.update.sessionUpdate === "available_commands_update",
+		);
+		expect(commandUpdate).toBeDefined();
+		const names = (
+			(commandUpdate?.update as { availableCommands?: Array<{ name: string }> }).availableCommands ?? []
+		).map(command => command.name);
+		for (const expected of ["help", "compact", "model", "clear", "exit"]) {
+			expect(names).toContain(expected);
+		}
+
+		const updatesBefore = harness.updates.length;
+		await harness.agent.prompt({
+			sessionId: session.sessionId,
+			prompt: [{ type: "text", text: "/model" }],
+		} as PromptRequest);
+		const reply = harness.updates
+			.slice(updatesBefore)
+			.find(update => update.update.sessionUpdate === "agent_message_chunk");
+		expect((reply?.update as { content?: { text?: string } }).content?.text ?? "").toContain(
+			"Model switching is not exposed",
+		);
 
 		harness.abortController.abort();
 		await Bun.sleep(0);

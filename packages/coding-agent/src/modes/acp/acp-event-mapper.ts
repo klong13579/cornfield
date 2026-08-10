@@ -525,6 +525,27 @@ function normalizeText(text: string | undefined): string | undefined {
 	return normalized.length > 0 ? limitText(normalized) : undefined;
 }
 
+export function extractAssistantMessageText(value: unknown): string {
+	if (typeof value !== "object" || value === null || !("content" in value)) {
+		return "";
+	}
+	const message = value as { content?: unknown };
+	if (!Array.isArray(message.content)) {
+		return "";
+	}
+	const parts: string[] = [];
+	for (const block of message.content) {
+		if (typeof block !== "object" || block === null) {
+			continue;
+		}
+		const candidate = block as { type?: unknown; text?: unknown };
+		if (candidate.type === "text" && typeof candidate.text === "string") {
+			parts.push(candidate.text);
+		}
+	}
+	return parts.join("");
+}
+
 function limitText(text: string): string {
 	return text.length > ACP_TEXT_LIMIT ? `${text.slice(0, ACP_TEXT_LIMIT - 1)}…` : text;
 }
