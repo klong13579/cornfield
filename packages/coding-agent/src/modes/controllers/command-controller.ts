@@ -37,6 +37,7 @@ import { resolveToCwd, stripOuterDoubleQuotes } from "../../tools/path-utils";
 import { replaceTabs } from "../../tools/render-utils";
 import { getChangelogPath, parseChangelog } from "../../utils/changelog";
 import { copyToClipboard } from "../../utils/clipboard";
+import { syncSessionTitleToHerdrPane } from "../../utils/herdr-sync";
 import { openPath } from "../../utils/open";
 import { setSessionTerminalTitle } from "../../utils/title-generator";
 
@@ -714,6 +715,7 @@ export class CommandController {
 			}
 			const name = this.ctx.sessionManager.getSessionName()!;
 			setSessionTerminalTitle(name, this.ctx.sessionManager.getCwd(), this.ctx.sessionManager.titleSource);
+			void syncSessionTitleToHerdrPane(name);
 			this.ctx.statusLine.invalidate();
 			this.ctx.updateEditorBorderColor();
 			this.ctx.showStatus(`Session renamed to "${name}".`);
