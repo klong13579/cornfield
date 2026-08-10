@@ -812,6 +812,14 @@ export async function runRootCommand(parsed: Args, rawArgs: string[]): Promise<v
 		}
 	}
 
+	// Headless protocol modes (RPC/ACP) own stdout for JSON-RPC framing — the
+	// logger's console transport writes to stdout by default and must be silenced
+	// before session setup so startup-time warn/info (e.g. Python kernel fallback)
+	// cannot corrupt the protocol stream. File logging is unaffected.
+	if (parsedArgs.mode === "rpc" || parsedArgs.mode === "acp") {
+		logger.silenceConsoleLogging();
+	}
+
 	const { session, setToolUIContext, modelFallbackMessage, lspServers, mcpManager, eventBus } = await logger.time(
 		"createAgentSession",
 		createAgentSession,
