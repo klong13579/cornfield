@@ -13,7 +13,7 @@
 
 import * as path from "node:path";
 import { isEnoent, logger } from "@oh-my-pi/pi-utils";
-import { type AgentEvent, RpcTransport, type RpcTransportEvent } from "./agent-transport";
+import { type AgentEvent, RpcTransport, RpcTransportError, type RpcTransportEvent } from "./agent-transport";
 import { CircuitBreaker, type CircuitState } from "./circuit-breaker";
 import { CrashRecovery } from "./crash-recovery";
 import { PromptExtractor } from "./prompt-extractor";
@@ -246,6 +246,7 @@ export class AgentBridge {
 					event.error?.message?.match(/code (-?\d+)/)?.[1]
 						? Number(event.error.message.match(/code (-?\d+)/)?.[1])
 						: undefined,
+					event.stderrTail,
 				);
 				if (event.error) this.#lastError = event.error.message;
 				break;
@@ -256,11 +257,12 @@ export class AgentBridge {
 	 *  event to the persistent crash log. Logs a `suppressed` event when
 	 *  this crash crosses into the suppressed state for the first time
 	 *  in the current window so operators can see exactly when the bridge
-	 *  gave up. */
-	#recordCrash(reason: string, exitCode?: number): void {
+	 *  gave up. `stderrTail` (child stderr trailing lines) is persisted
+	 *  with the crash entry when the transport captured it. */
+	#recordCrash(reason: string, exitCode?: number, stderrTail?: string): void {
 		const wasSuppressed = this.#crash.suppressed;
 		this.#crash.recordCrash();
-		this.#crashLog?.logCrash(this.#accountId, reason, exitCode);
+		this.#crashLog?.logCrash(this.#accountId, reason, exitCode, stderrTail);
 		if (!wasSuppressed && this.#crash.suppressed) {
 			this.#crashLog?.logSuppressed(this.#accountId, this.#crash.snapshot().windowCount);
 		}
@@ -280,6 +282,23 @@ export class AgentBridge {
 	// Process Lifecycle
 	// ═══════════════════════════════════════════════════════════════
 
+	/**
+	 * Ensure the OMP subprocess is running, restarting it when it is not.
+	 *
+	 * This is the recovery entry point for inbound messages: the
+	 * SessionManager calls it before forwarding, so a crashed bridge is
+	 * brought back on the next message instead of hard-rejecting it (the
+	 * "auto-restart on the next inbound message" contract documented by
+	 * bridge-status-tool). No-op when the subprocess is already alive.
+	 *
+	 * Throws when restart is impossible (repeated-crash suppression) or
+	 * fails — callers surface that as a non-retryable rejection.
+	 */
+	async ensureRunning(): Promise<void> {
+		if (this.isRunning) return;
+		await this.#restartTransport();
+	}
+
 	async start(): Promise<void> {
 		if (this.#crash.suppressed) {
 			throw new Error("Agent bridge is in ERROR state after repeated crashes");
@@ -287,7 +306,12 @@ export class AgentBridge {
 		try {
 			await this.#transport.start();
 		} catch (err) {
-			this.#recordCrash(`bridge.start() failed: ${err instanceof Error ? err.message : String(err)}`);
+			const exitCode = err instanceof Error ? err.message.match(/code (-?\d+)/)?.[1] : undefined;
+			this.#recordCrash(
+				`bridge.start() failed: ${err instanceof Error ? err.message : String(err)}`,
+				exitCode ? Number(exitCode) : undefined,
+				err instanceof RpcTransportError ? err.stderrTail : undefined,
+			);
 			this.#lastError = err instanceof Error ? err.message : String(err);
 			throw err;
 		}
@@ -968,6 +992,12 @@ export class AgentBridge {
 			// chance before the breaker re-opens.
 			this.#circuit.reset();
 			this.#crash.reset();
+			// `crash.reset()` clears the ready flag, but the transport is
+			// already `ready` at this point (start() resolved on the ready
+			// frame) and no further ready event will arrive on this process.
+			// Restore the flag so the lifecycle state reflects reality
+			// (idle, not stuck in `starting`) after a recovery restart.
+			this.#crash.setReady(true);
 			this.#applyDeniedTools();
 		} finally {
 			this.#reconnectGuard = false;

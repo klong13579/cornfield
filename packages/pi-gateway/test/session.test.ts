@@ -75,6 +75,13 @@ class FakeBridge {
 		};
 	}
 
+	/** Recovery contract: bring a stopped bridge back before forwarding.
+	 *  The real bridge restarts the OMP subprocess; the fake just flips
+	 *  its flag so tests can assert the SessionManager called it. */
+	async ensureRunning(): Promise<void> {
+		this.isRunning = true;
+	}
+
 	abort(): Promise<boolean> {
 		this.abortCalls++;
 		return Promise.resolve(this.active > 0);
@@ -201,6 +208,21 @@ describe("SessionManager", () => {
 		expect(ops.abortCalls).toBe(1);
 		expect(hr.abortCalls).toBe(0);
 		await pending;
+	});
+
+	test("recovers a stopped bridge before forwarding instead of rejecting", async () => {
+		const ops = new FakeBridge(0);
+		ops.isRunning = false; // bridge crashed / subprocess down
+		const manager = new SessionManager({ bridges: new Map([["ops", asBridge(ops)]]) });
+
+		const result = await manager.enqueue(makeMessage("ops", "a", "1"), makeSession("ops", "a"));
+
+		// The message must NOT be hard-rejected: the SessionManager calls
+		// ensureRunning() first, the bridge comes back, and the message
+		// goes through the normal forward path.
+		expect(ops.isRunning).toBe(true);
+		expect(result).toBe("ops:a");
+		expect(ops.calls).toEqual(["ops:a:1"]);
 	});
 
 	describe("abortByUser fallback", () => {

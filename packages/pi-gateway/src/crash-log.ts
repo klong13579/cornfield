@@ -23,8 +23,8 @@
  * never escalate into a fresh crash.
  */
 
-import * as fsp from "node:fs/promises";
 import * as fs from "node:fs";
+import * as fsp from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { logger } from "@oh-my-pi/pi-utils";
@@ -41,6 +41,9 @@ export interface CrashLogCrash extends CrashLogEntryBase {
 	kind: "crash";
 	exitCode?: number;
 	reason: string;
+	/** Tail of the crashed subprocess's stderr (Bun panic / native crash
+	 * output), when the transport captured it. Bounded at write time. */
+	stderrTail?: string;
 }
 
 export interface CrashLogRecovery extends CrashLogEntryBase {
@@ -100,9 +103,10 @@ export class CrashLog {
 		}
 	}
 
-	logCrash(accountId: string, reason: string, exitCode?: number): void {
+	logCrash(accountId: string, reason: string, exitCode?: number, stderrTail?: string): void {
 		const entry: Omit<CrashLogCrash, "ts"> = { kind: "crash", accountId, reason };
 		if (exitCode !== undefined) entry.exitCode = exitCode;
+		if (stderrTail) entry.stderrTail = stderrTail.slice(0, 4000);
 		this.append(entry);
 	}
 

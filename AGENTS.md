@@ -96,8 +96,8 @@ tail -20 ~/.omp/gateway-data/logs/service.log | grep -E "BOOT|service start"
 
 `~/.local/bin/omp` is **a compiled Mach-O binary** produced by `bun scripts/build-binary.ts` (in `packages/coding-agent`) + `bun scripts/embed-native.ts`. Source edits to `packages/*/src/**/*.ts` do **not** take effect on the running gateway until:
 
-1. `bun run build` (or `bun run --cwd=packages/coding-agent build`) — produces a new `packages/coding-agent/dist/omp`
-2. `cp packages/coding-agent/dist/omp ~/.local/bin/omp` — replaces the installed binary
+1. `bun run build` (or `bun run --cwd=packages/coding-agent build`) — produces a new `packages/coding-agent/dist/omp` (on macOS the build verifies the signed binary executes; a kernel-rejected signature fails the build)
+2. Atomically replace the installed binary — **`mv` onto a fresh inode, never `cp` over the running binary**: `cp packages/coding-agent/dist/omp /tmp/omp.new && mv /tmp/omp.new ~/.local/bin/omp`. `cp` truncates the same inode the running gateway is mapped from; the kernel's code-signature validation then transiently rejects the new content (`load code signature error 2` → SIGKILL on exec, exit 137), which looks like a broken signature even though `codesign --verify` passes. A fresh inode (mv) or rewriting the file (re-sign/touch) avoids it.
 3. `omp gateway service stop && sleep 5 && omp gateway service start` — picks up the new binary
 
 Skipping step 1+2 makes "live test" silently exercise the **old** binary, masking source-level changes. Quick check: `file ~/.local/bin/omp` (should be `Mach-O 64-bit executable arm64`) and `ls -la ~/.local/bin/omp packages/coding-agent/dist/omp` (mtimes should match within the same minute after a build).

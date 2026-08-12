@@ -62,8 +62,29 @@ export type RpcTransportEvent =
 	 * currently-active prompt by the bridge. */
 	| { type: "session_event"; event: AgentEvent }
 	/** The child process exited (cleanly or via crash). `error` is set when
-	 * the exit was unexpected. */
-	| { type: "disconnected"; error?: Error };
+	 * the exit was unexpected; `stderrTail` carries the last lines the child
+	 * wrote to stderr before dying, so crash diagnostics survive process
+	 * death (the child's own panic output would otherwise be lost). */
+	| { type: "disconnected"; error?: Error; stderrTail?: string };
+
+/**
+ * Error thrown when the child exits before reaching `ready`, carrying the
+ * child's stderr tail. The bridge surfaces it in crash logs so a spawn-time
+ * failure (bad config, missing binary, Bun runtime panic) is diagnosable
+ * instead of reducing to a bare exit code.
+ */
+export class RpcTransportError extends Error {
+	readonly stderrTail?: string;
+	constructor(message: string, stderrTail?: string) {
+		super(message);
+		this.name = "RpcTransportError";
+		this.stderrTail = stderrTail;
+	}
+}
+
+/** Number of trailing stderr lines retained per child process for crash
+ * diagnosis. Bounded so a chatty child can't grow memory unboundedly. */
+const STDERR_TAIL_LINES = 50;
 
 type EventHandler = (event: RpcTransportEvent) => void;
 
@@ -145,6 +166,8 @@ export class RpcTransport {
 	#stderrReader?: Promise<void>;
 	// biome-ignore lint/correctness/noUnusedPrivateClassMembers: referenced in stop() and #spawnAndWaitReady for stream-reader liveness
 	#stdoutReader?: Promise<void>;
+	/** Trailing stderr lines of the current child process (crash diagnosis). */
+	#stderrTail: string[] = [];
 	#listeners: EventHandler[] = [];
 	#hostToolHandler: HostToolCallHandler | undefined;
 
@@ -205,6 +228,7 @@ export class RpcTransport {
 		this.#stdinWriter = undefined;
 		this.#stdoutReader = undefined;
 		this.#stderrReader = undefined;
+		this.#stderrTail = [];
 
 		const error = new Error("RpcTransport stopped");
 		for (const pending of this.#pendingCommands.values()) {
@@ -297,6 +321,7 @@ export class RpcTransport {
 				this.#proc = null;
 			}
 			this.#ready = false;
+			this.#stderrTail = [];
 
 			// Reject any pending commands
 			const error = new Error("RpcTransport restarting");
@@ -360,12 +385,33 @@ export class RpcTransport {
 			}, 50);
 
 			void proc.exited.then(exitCode => {
-				if (!settled) {
+				if (!settled && !this.#ready) {
+					// Genuine spawn failure: the process died before the ready
+					// frame was ever processed (or died without emitting it).
 					settled = true;
 					clearTimeout(timeout);
 					clearInterval(checkReady);
-					reject(new Error(`Agent RPC process exited with code ${exitCode} before ready`));
+					reject(
+						new RpcTransportError(
+							`Agent RPC process exited with code ${exitCode} before ready`,
+							this.#stderrTail.join("\n"),
+						),
+					);
 					return;
+				}
+				if (!settled) {
+					// Race: the ready frame was processed (`#ready` is true) but
+					// the 50ms ready-check interval hadn't resolved yet when the
+					// process died. This is a post-ready crash, not a spawn
+					// failure — resolve start() and surface the death as a
+					// `disconnected` event so the bridge records a crash.
+					// Without this branch, a crash in the first milliseconds
+					// after ready is misreported as "before ready" and the
+					// start() promise hangs (interval + timeout both cleared).
+					settled = true;
+					clearTimeout(timeout);
+					clearInterval(checkReady);
+					resolve();
 				}
 				// Process exited after reaching `ready` — surface this as a
 				// `disconnected` event so the bridge can record a crash and
@@ -380,6 +426,7 @@ export class RpcTransport {
 				this.#emit({
 					type: "disconnected",
 					error: new Error(`Agent RPC process exited with code ${exitCode} after ready (wasReady=${wasReady})`),
+					stderrTail: this.#stderrTail.join("\n"),
 				});
 			});
 
@@ -433,11 +480,26 @@ export class RpcTransport {
 
 	async #drainStderr(stream: ReadableStream<Uint8Array>): Promise<void> {
 		const reader = stream.getReader();
+		const decoder = new TextDecoder();
+		let partial = "";
+		const push = (line: string): void => {
+			const trimmed = line.trim();
+			if (!trimmed) return;
+			this.#stderrTail.push(trimmed);
+			if (this.#stderrTail.length > STDERR_TAIL_LINES) {
+				this.#stderrTail.shift();
+			}
+		};
 		try {
 			while (true) {
-				const { done } = await reader.read();
+				const { done, value } = await reader.read();
 				if (done) break;
+				partial += decoder.decode(value, { stream: true });
+				const lines = partial.split("\n");
+				partial = lines.pop() ?? "";
+				for (const line of lines) push(line);
 			}
+			if (partial.trim()) push(partial);
 		} catch {
 			// ignore stderr errors
 		} finally {

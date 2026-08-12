@@ -129,7 +129,19 @@ export class SessionManager {
 		await previous.catch(() => {});
 		try {
 			const bridge = this.#resolveBridge(accountId);
-			if (!bridge.isRunning) {
+			// Bring a crashed bridge back before forwarding instead of
+			// hard-rejecting the message. The bridge's own restart path
+			// (`forwardWithMeta` → `#restartTransport`) is unreachable while
+			// the transport is down, so restart here; only when the restart
+			// itself fails (e.g. repeated-crash suppression) do we reject.
+			try {
+				await bridge.ensureRunning();
+			} catch (err) {
+				logger.warn("Agent bridge not running and restart failed, rejecting message", {
+					accountId,
+					conversationId: session.conversationId,
+					error: err instanceof Error ? err.message : String(err),
+				});
 				throw new Error(`Agent bridge for account "${accountId}" is not running`);
 			}
 			return await bridge.forwardWithMeta(msg, session, handlers);

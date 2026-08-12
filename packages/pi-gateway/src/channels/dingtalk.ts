@@ -1177,27 +1177,40 @@ export class DingTalkChannel extends BaseChannel {
 		// an empty card. When thinking is visible for this account, promote it
 		// to the answer; when hidden (or absent), show an explicit failure.
 		if (!segmentText.trim()) {
-			const thinkingFallback = blocks
-				.filter(block => block.type === BlockType.THINK)
-				.map(block => block.text?.trim() ?? "")
-				.filter(Boolean)
-				.join("\n\n");
-			if (thinkingFallback) {
-				logger.warn("[DingTalk] Promoting thinking-only response to visible answer", {
+			// When the agent errored out (e.g. 429 quota, 401 auth), the
+			// streaming path produced no text but submit() returned a
+			// fallback meta with the error message. Surface it to the user
+			// instead of the generic "no visible answer" placeholder.
+			if (meta?.isFallback && meta.text) {
+				logger.warn("[DingTalk] Agent returned error, surfacing to user", {
 					accountId: this.#accountId,
 					conversationId: inbound.conversationId,
-					length: thinkingFallback.length,
+					preview: meta.text.slice(0, 100),
 				});
-				segmentText = thinkingFallback;
-				for (let i = blocks.length - 1; i >= 0; i--) {
-					if (blocks[i]?.type === BlockType.THINK) blocks.splice(i, 1);
-				}
+				segmentText = meta.text;
 			} else {
-				logger.warn("[DingTalk] Agent completed without visible answer", {
-					accountId: this.#accountId,
-					conversationId: inbound.conversationId,
-				});
-				segmentText = "⚠️ 本轮未生成可见回复，请重试。";
+				const thinkingFallback = blocks
+					.filter(block => block.type === BlockType.THINK)
+					.map(block => block.text?.trim() ?? "")
+					.filter(Boolean)
+					.join("\n\n");
+				if (thinkingFallback) {
+					logger.warn("[DingTalk] Promoting thinking-only response to visible answer", {
+						accountId: this.#accountId,
+						conversationId: inbound.conversationId,
+						length: thinkingFallback.length,
+					});
+					segmentText = thinkingFallback;
+					for (let i = blocks.length - 1; i >= 0; i--) {
+						if (blocks[i]?.type === BlockType.THINK) blocks.splice(i, 1);
+					}
+				} else {
+					logger.warn("[DingTalk] Agent completed without visible answer", {
+						accountId: this.#accountId,
+						conversationId: inbound.conversationId,
+					});
+					segmentText = "\u26a0\ufe0f \u672c\u8f6e\u672a\u751f\u6210\u53ef\u89c1\u56de\u590d\uff0c\u8bf7\u91cd\u8bd5\u3002";
+				}
 			}
 		}
 

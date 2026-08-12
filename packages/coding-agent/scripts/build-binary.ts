@@ -52,6 +52,24 @@ async function main(): Promise<void> {
 			// Bun 1.3.12 emits a truncated Mach-O signature on darwin builds.
 			if (shouldAdhocSignDarwinBinary()) {
 				await runCommand(["codesign", "--force", "--sign", "-", outputPath]);
+				// Verify the signed binary actually executes. A signature that
+				// passes `codesign --verify` can still be rejected by the kernel
+				// at load time (AMFI "load code signature error 2" → SIGKILL on
+				// exec), which would otherwise surface much later at `omp gateway
+				// service start` with no trace in the build. Executing the
+				// product here turns a broken signature into a failed build.
+				const smoke = Bun.spawn([outputPath, "--version"], {
+					stdout: "inherit",
+					stderr: "inherit",
+				});
+				const smokeExit = await smoke.exited;
+				if (smokeExit !== 0) {
+					throw new Error(
+						`Signed binary failed smoke exec (exit ${smokeExit}). The kernel rejected the adhoc ` +
+							`signature at load time. Re-run: codesign --force -s - ${outputPath} and verify with ` +
+							`${outputPath} --version, then redeploy.`,
+					);
+				}
 			}
 		} finally {
 			await runCommand(["bun", "--cwd=../natives", "run", "embed:native", "--reset"]);
