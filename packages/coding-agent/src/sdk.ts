@@ -48,6 +48,7 @@ import "./discovery";
 import { clearCache as clearFsCache } from "./capability/fs";
 import { resolveConfigValue } from "./config/resolve-config-value";
 import { initializeWithSettings } from "./discovery";
+import { shutdownAll as shutdownLspClients } from "./lsp/client";
 import { TtsrManager } from "./export/ttsr";
 import {
 	type CustomCommandsLoadResult,
@@ -1800,6 +1801,12 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 					await originalDispose();
 				} finally {
 					agentRegistry.unregister(resolvedAgentId);
+					// Shut down LSP clients when session ends to prevent orphaned processes.
+					// shutdownAll is also registered on process.on("beforeExit"/"SIGINT"/"SIGTERM"),
+					// but this covers the case where the process stays alive after session exit.
+					shutdownLspClients().catch(err =>
+						logger.warn("Failed to shut down LSP clients on session dispose", { error: String(err) }),
+					);
 				}
 			};
 		}

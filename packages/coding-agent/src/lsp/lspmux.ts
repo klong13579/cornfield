@@ -45,6 +45,7 @@ interface LspmuxState {
  */
 const DEFAULT_SUPPORTED_SERVERS = new Set([
 	"rust-analyzer",
+	"typescript-language-server",
 	// Other servers can be added after testing with lspmux
 ]);
 
