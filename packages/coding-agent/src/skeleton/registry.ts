@@ -29,7 +29,7 @@ import * as path from "node:path";
 
 const REGISTRY_DIR_NAME = "agent";
 const REGISTRY_FILE_NAME = "registry.json";
-const REGISTRY_VERSION = 1;
+const REGISTRY_VERSION = 2;
 
 /** Resolved at call time so tests can change HOME between calls. Uses process.env.HOME
  *  directly because `os.homedir()` caches its result on the first call. */
@@ -49,6 +49,12 @@ export interface AgentEntry {
 	registeredAt: string;
 	/** Template name used to create the agentDir. Only `default` today. */
 	template: string;
+	/** Cached display name from `.omp/workspace.json` (v2). Optional for v1 entries. */
+	displayName?: string;
+	/** Cached declaration schema version from `.omp/workspace.json` (v2). */
+	workspaceVersion?: number;
+	/** Cached declaration `updatedAt` from `.omp/workspace.json` (v2). */
+	workspaceUpdatedAt?: string;
 }
 
 export interface Registry {
@@ -94,12 +100,36 @@ export async function saveRegistry(reg: Registry): Promise<void> {
 /** Add or update an entry. Returns the new entry. */
 export async function registerAgent(name: string, agentDir: string, template = "default"): Promise<AgentEntry> {
 	const reg = await loadRegistry();
+	const resolved = path.resolve(agentDir);
+	// Best-effort cache fill from the workspace declaration (v2). Read-only:
+	// creating/updating `.omp/workspace.json` is the caller's job (ensureWorkspace),
+	// so the gateway account path stays side-effect free on registration.
+	let displayName: string | undefined;
+	let workspaceVersion: number | undefined;
+	let workspaceUpdatedAt: string | undefined;
+	try {
+		const { loadWorkspace } = await import("./workspace");
+		const decl = await loadWorkspace(resolved);
+		if (decl) {
+			displayName = decl.name;
+			workspaceVersion = decl.schemaVersion;
+			workspaceUpdatedAt = decl.updatedAt;
+		}
+	} catch {
+		// Declarations are optional; fall back to registry-only entry.
+	}
 	const entry: AgentEntry = {
-		path: path.resolve(agentDir),
+		path: resolved,
 		registeredAt: new Date().toISOString(),
 		template,
 	};
+	if (displayName !== undefined) entry.displayName = displayName;
+	if (workspaceVersion !== undefined) entry.workspaceVersion = workspaceVersion;
+	if (workspaceUpdatedAt !== undefined) entry.workspaceUpdatedAt = workspaceUpdatedAt;
 	reg.agents[name] = entry;
+	// Writing v2 entries: bump the file version so legacy v1 registries are
+	// migrated on the next write (their entries are preserved unchanged).
+	reg.version = REGISTRY_VERSION;
 	await saveRegistry(reg);
 	return entry;
 }

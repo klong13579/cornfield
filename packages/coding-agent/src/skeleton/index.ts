@@ -27,3 +27,11 @@ export {
 } from "./registry";
 export { resolveAgentDir } from "./resolve";
 export { buildAgentSessionPath } from "./session";
+export {
+	WORKSPACE_SCHEMA_VERSION,
+	type WorkspaceDeclaration,
+	type WorkspaceKnowledgePaths,
+	ensureWorkspace,
+	loadWorkspace,
+	workspaceFilePath,
+} from "./workspace";

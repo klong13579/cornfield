@@ -101,9 +101,16 @@ export async function runAgentInit(args: InitArgs): Promise<InitResult> {
 	const effectiveCreated = created || (!dirExistedBefore && !created);
 	const filesWritten = effectiveCreated ? SKELETON_FILES.length : 0;
 
+	// Write the workspace declaration (`.omp/workspace.json`) so the agentDir
+	// carries its structured metadata with it (registry stays a thin index).
+	const { ensureWorkspace } = await import("../skeleton/workspace");
+	await ensureWorkspace(agentDir, { name: args.name });
+
 	// Persist the (name, path) mapping so `omp agent list` / `show` can find
 	// this agentDir regardless of where it lives (default `~/.omp/agents/`,
 	// custom `--dir`, nested account id like `ops/hr`).
+	// Runs after ensureWorkspace so the v2 cache fields are filled from the
+	// declaration just written.
 	await registerAgent(args.name, agentDir, args.template ?? "default");
 
 	return { name: args.name, agentDir, created: effectiveCreated, filesWritten };
@@ -747,6 +754,10 @@ export async function runAgentRegister(args: RegisterArgs): Promise<RegisterResu
 	if (!stat.isDirectory()) {
 		throw new Error(`Path is not a directory: ${agentDir}`);
 	}
+	// Backfill the workspace declaration for pre-v2 agentDirs so the metadata
+	// travels with the directory (additive, never overwrites an existing one).
+	const { ensureWorkspace } = await import("../skeleton/workspace");
+	await ensureWorkspace(agentDir, { name: args.name });
 	await registerAgent(args.name, agentDir, "default");
 	return { name: args.name, agentDir, registered: true };
 }
