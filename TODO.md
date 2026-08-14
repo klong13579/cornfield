@@ -3,6 +3,8 @@
 > Current task state. The agent updates this file as work progresses; an empty TODO is a valid state.
 
 ## 待办
+- [ ] omp 添加前端框架
+- [ ] omp2omp 通信机制
 - [ ] 测试一下新的语音交互功能
 - [ ] session 诊断优化：诊断结果 → learning/nudge/regression 三阶段落地
 - [ ] MOA功能，参考 pi-fusion
