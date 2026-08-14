@@ -150,6 +150,10 @@ export class AgentHub extends Container {
 	}
 
 	handleInput(data: string): void {
+		if (matchesKey(data, "escape") || matchesKey(data, "esc")) {
+			this.onClose?.();
+			return;
+		}
 		if (matchesKey(data, "up") || data === "k") {
 			if (this.#selectedIndex > 0) {
 				this.#selectedIndex--;

@@ -78,6 +78,17 @@ describe("AgentHub panel", () => {
 		expect(renderText(hub)).toContain("▸ ▶ alpha");
 	});
 
+	test("esc triggers onClose", () => {
+		register(registry, "alpha");
+		const hub = AgentHub.create(registry);
+		let closed = false;
+		hub.onClose = () => {
+			closed = true;
+		};
+		hub.handleInput("\x1b"); // real terminal ESC sequence
+		expect(closed).toBe(true);
+	});
+
 	test("dispose unsubscribes from registry changes", () => {
 		const hub = AgentHub.create(registry);
 		void hub.dispose();
