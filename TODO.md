@@ -15,6 +15,9 @@
 
 ## 已完成
 
+- [x] MOA功能，参考 pi-fusion
+- [x] cron-agent-subprocess-execution
+- [x] omp 开发听记功能，利用 whisper
 - [x] 定时任务输出结果使用 AI card
 - [x] 增加 whisper 语音转文字功能
 - [x] voice live 实时语音对话（Jarvis）：realtime 传输/状态机/consult 委托/TUI 面板/防自循环与慢任务交接
