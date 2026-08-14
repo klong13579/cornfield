@@ -7,11 +7,8 @@
 - [ ] omp2omp 通信机制
 - [ ] 测试一下新的语音交互功能
 - [ ] session 诊断优化：诊断结果 → learning/nudge/regression 三阶段落地
-- [ ] MOA功能，参考 pi-fusion
 - [ ] omp 本地增加定时器功能
-- [ ] cron-agent-subprocess-execution
 - [ ] 测试 todo-write 参数序列化修复
-- [ ] omp 开发听记功能，利用 whisper
 
 ## 已完成
 
