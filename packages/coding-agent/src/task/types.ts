@@ -260,6 +260,23 @@ export interface SingleResult {
 	outputMeta?: { lineCount: number; charCount: number };
 }
 
+/**
+ * Upper bound for one-line activity labels rendered in agent rosters.
+ */
+export const LABEL_MAX = 80;
+
+/**
+ * Normalize arbitrary text to a single bounded line (control/space runs
+ * collapsed, code-point-aware truncation with ellipsis) so model-derived
+ * intent text can neither break a roster layout nor smuggle terminal escapes.
+ */
+export function oneLineLabel(text: string, max = LABEL_MAX): string {
+	const oneLine = text.replace(/[\p{Cc}\p{Cf}\s]+/gu, " ").trim();
+	const cap = Math.max(1, max);
+	const chars = [...oneLine];
+	return chars.length > cap ? `${chars.slice(0, cap - 1).join("")}…` : oneLine;
+}
+
 /** Tool details for TUI rendering */
 export interface TaskToolDetails {
 	projectAgentsDir: string | null;

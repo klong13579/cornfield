@@ -30,10 +30,12 @@ import { DebugTool } from "./debug";
 import { ExitPlanModeTool } from "./exit-plan-mode";
 import { FindTool } from "./find";
 import { GithubTool } from "./gh";
+import { HubTool } from "./hub";
 import { IdentityTool } from "./identity";
 import { InspectImageTool } from "./inspect-image";
 import { IrcTool } from "./irc";
 import { JobTool } from "./job";
+import { ListModelsTool } from "./list-models";
 import { NotebookTool } from "./notebook";
 import { wrapToolWithMetaNotice } from "./output-meta";
 import { PythonTool } from "./python";
@@ -47,7 +49,6 @@ import { SearchTool } from "./search";
 import { SearchToolBm25Tool } from "./search-tool-bm25";
 import { loadSshTool } from "./ssh";
 import { SwitchModelTool } from "./switch-model";
-import { ListModelsTool } from "./list-models";
 import { type TodoPhase, TodoWriteTool } from "./todo-write";
 import { WriteTool } from "./write";
 import { YieldTool } from "./yield";
@@ -226,6 +227,7 @@ export const BUILTIN_TOOLS: Record<string, ToolFactory> = {
 	ssh: loadSshTool,
 	edit: s => new EditTool(s),
 	github: GithubTool.createIf,
+	hub: HubTool.createIf,
 	find: s => new FindTool(s),
 	search: s => new SearchTool(s),
 	lsp: LspTool.createIf,

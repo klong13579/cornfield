@@ -34,6 +34,7 @@ import { FileSessionStorage } from "../../session/session-storage";
 import { isSearchProviderPreference, setPreferredImageProvider, setPreferredSearchProvider } from "../../tools";
 import { setSessionTerminalTitle } from "../../utils/title-generator";
 import { AgentDashboard } from "../components/agent-dashboard";
+import { AgentHub } from "../components/agent-hub";
 import { AssistantMessageComponent } from "../components/assistant-message";
 import { ExtensionDashboard } from "../components/extensions";
 import { HistorySearchComponent } from "../components/history-search";
@@ -207,6 +208,23 @@ export class SelectorController {
 				this.ctx.ui.requestRender();
 			};
 			return { component: dashboard, focus: dashboard };
+		});
+	}
+
+	/**
+	 * Show the live agent roster (Agent Hub).
+	 */
+	showAgentHub(): void {
+		const hub = AgentHub.create();
+		this.showSelector(done => {
+			hub.onClose = () => {
+				done();
+				this.ctx.ui.requestRender();
+			};
+			hub.onRequestRender = () => {
+				this.ctx.ui.requestRender();
+			};
+			return { component: hub, focus: hub };
 		});
 	}
 

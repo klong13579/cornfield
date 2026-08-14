@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Agent Hub: live roster tool + Alt+A panel** (`src/tools/hub/`, `src/modes/components/agent-hub.ts`, `src/modes/controllers/selector-controller.ts`, `src/config/keybindings.ts`, `src/modes/{interactive-mode,types,input-controller}.ts`, `test/tools/hub.test.ts`, `test/modes/agent-hub.test.ts`): a read-only, work-aware view of every live agent in the process — the `hub` tool (`op: list` / `op: show`) lists peers with status/activity/freshness and dives into one peer's identity/history, and the `Alt+A` panel renders the same roster live (registry-subscribed), sorted busy-first, with per-row detail. Messaging stays in `irc`, async-job control in `job`; killing/reviving remains human-owned. Ported from the upstream hub design (2026-08) with the messaging/job/launch halves intentionally not duplicated.
+- **AgentRegistry upgrade: parked status, activity/heartbeat, history, expected-ref CAS** (`src/registry/agent-registry.ts`, `test/registry/agent-registry.test.ts`): adopted from the upstream mainline — `AgentStatus` gains `parked`, `AgentRef` gains `activity`/`history`, `setStatus`/`attachSession`/`detachSession`/`unregister` take an optional expected ref (tombstone-safe CAS), plus `registerIfAvailable`/`setHistory`/`setActivity` and the `advisor` kind. Local `MAIN_AGENT_ID` (`"0-Main"`) preserved; the registry had no live `setStatus`/`attachSession` callers, so the signature changes are non-breaking.
+- **`oneLineLabel`/`LABEL_MAX` task helpers** (`src/task/types.ts`): control-char-stripping, code-point-safe single-line label normalizer used by the registry activity heartbeat and rosters.
+
 ### Removed
 
 - **Retired the `@oh-my-pi/swarm-extension` package** (`packages/swarm-extension/`, `src/sdk.ts`, `packages/coding-agent/package.json`): the multi-agent YAML DAG orchestrator is removed — its peer dependency drifted from the workspace mainline, it had no test coverage, and its orchestration role is covered by the built-in task/subagent system and the planned kanban design (`docs/todo/multi-agent-orchestration-design.md`). The pure DAG primitives (`buildDependencyGraph` / `detectCycles` / `buildExecutionWaves`) are preserved, genericized, in `src/task/dag.ts` for that future orchestration layer. `sdk.ts` no longer registers the `/swarm` extension on every session.

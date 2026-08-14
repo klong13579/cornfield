@@ -491,6 +491,14 @@
 			"types": "./src/tools/*.ts",
 			"import": "./src/tools/*.ts"
 		},
+		"./tools/hub": {
+			"types": "./src/tools/hub/index.ts",
+			"import": "./src/tools/hub/index.ts"
+		},
+		"./tools/hub/*": {
+			"types": "./src/tools/hub/*.ts",
+			"import": "./src/tools/hub/*.ts"
+		},
 		"./tui": {
 			"types": "./src/tui/index.ts",
 			"import": "./src/tui/index.ts"

@@ -1674,6 +1674,10 @@ export class InteractiveMode implements InteractiveModeContext {
 		void this.#selectorController.showAgentsDashboard();
 	}
 
+	showAgentHub(): void {
+		this.#selectorController.showAgentHub();
+	}
+
 	showModelSelector(options?: { temporaryOnly?: boolean }): void {
 		this.#selectorController.showModelSelector(options);
 	}
