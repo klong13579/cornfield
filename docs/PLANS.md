@@ -21,9 +21,9 @@
 |---|---|
 | Completed | 16 |
 | Partially implemented | 7 |
-| Not started | 2 |
+| Not started | 3 |
 | Unknown | 0 |
-| **Total** | **25** |
+| **Total** | **26** |
 
 All plan files now live under `docs/plans/`. If you write a new one, drop it here and add a row to this index.
 
@@ -33,6 +33,7 @@ All plan files now live under `docs/plans/`. If you write a new one, drop it her
 
 | Path | Title | 提出日 | 备注 |
 |---|---|---|---|
+| `docs/plans/2026-08-14-omp2omp-peers-messaging.md` | omp2omp 通信机制（TUI 实例间消息/状态/等待/回复） | 2026-08-14 | 方案已审批，用户决定暂缓实施。TODO「omp2omp 通信机制」跟踪。 |
 | `docs/plans/2026-07-23-ttft-prompt-cache-skills-lazy.md` | TTFT Optimization: Prompt Build Cache + Skills Lazy Load | 2026-07-23 | 审计时无对应 CHANGELOG。ROI 高（TTFT 直接影响用户体验），候选下一 sprint。 |
 | `docs/plans/2026-08-11-omp-improvement-proma-comparison.md` | omp 改进计划（源自 Proma 对比） | 2026-08-11 | 状态 = 草案。7 项改进：2 P0（权限模型、自动化自迭代）+ 2 P1 + 3 P2。Phase 1 建议先做 #2 自迭代 → #1 权限模型。 |
 
