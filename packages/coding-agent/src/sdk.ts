@@ -1,7 +1,7 @@
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-
+import moaExtension from "@oh-my-pi/moa-extension";
 import {
 	Agent,
 	type AgentEvent,
@@ -31,9 +31,7 @@ import {
 	prompt,
 	Snowflake,
 } from "@oh-my-pi/pi-utils";
-import moaExtension from "@oh-my-pi/moa-extension";
 import { createSelfEvolutionExtension } from "@oh-my-pi/self-evolution";
-import swarmExtension from "@oh-my-pi/swarm-extension";
 import chalk from "chalk";
 import { AsyncJobManager, isBackgroundJobSupportEnabled } from "./async";
 import { createAutoresearchExtension } from "./autoresearch";
@@ -48,7 +46,6 @@ import "./discovery";
 import { clearCache as clearFsCache } from "./capability/fs";
 import { resolveConfigValue } from "./config/resolve-config-value";
 import { initializeWithSettings } from "./discovery";
-import { shutdownAll as shutdownLspClients } from "./lsp/client";
 import { TtsrManager } from "./export/ttsr";
 import {
 	type CustomCommandsLoadResult,
@@ -87,6 +84,7 @@ import {
 	SkillProtocolHandler,
 } from "./internal-urls";
 import { disposeAllKernelSessions, disposeKernelSessionsByOwner } from "./ipy/executor";
+import { shutdownAll as shutdownLspClients } from "./lsp/client";
 import { LSP_STARTUP_EVENT_CHANNEL, type LspStartupEvent } from "./lsp/startup-events";
 import { discoverAndLoadMCPTools, type MCPManager, type MCPToolsLoadResult } from "./mcp";
 import {
@@ -1231,7 +1229,6 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		const inlineExtensions: ExtensionFactory[] = options.extensions ? [...options.extensions] : [];
 		inlineExtensions.push(createAutoresearchExtension);
 		inlineExtensions.push(createSelfEvolutionExtension);
-		inlineExtensions.push(swarmExtension);
 		inlineExtensions.push(moaExtension);
 		if (customTools.length > 0) {
 			inlineExtensions.push(createCustomToolsExtension(customTools));

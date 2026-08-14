@@ -15,7 +15,7 @@
 | 3 | 六层知识边界 | P1 | memories / self-evolution / prompts | 项目地图/工作区规则/协作记忆/Skills/工作台/Context 分开管 |
 | 4 | 记忆治理（邀请制 + 复查节奏） | P1 | self-evolution / memories | 记忆只沉淀已验证知识，不自动扫描、不模糊累积 |
 | 5 | 受管浏览器 | P2 | coding-agent tools | 内置 CDP 受管浏览器 + 用户/Agent tab 隔离 |
-| 6 | 协作真子会话（对抗式审查） | P2 | swarm-extension / cognitive-coordination | 落地"对抗式审查"编排模式 |
+| 6 | 协作真子会话（对抗式审查） | P2 | task/dag + cognitive-coordination | 落地"对抗式审查"编排模式（swarm-extension 已退役，DAG 原语保留在 task/dag.ts） |
 | 7 | 产品化/商业形态 | P2 | 战略层（非代码） | 评估开源 + 商业双轨 |
 
 ---
@@ -132,14 +132,14 @@
 
 ## 6. 协作真子会话（P2）
 
-**现状**：swarm-extension（多 agent 编排）、cognitive-coordination（L4 Synapse，WIP）、moa-extension（多轮 MOA）。无"对抗式审查"这种落地模式。
+**现状**：多 agent 编排原语在 `coding-agent/src/task/`（runSubprocess + dag.ts DAG 波浪，原 swarm-extension 已退役）、cognitive-coordination（L4 Synapse，WIP）、moa-extension（多轮 MOA）。无"对抗式审查"这种落地模式。
 
 **差距（Proma 做法）**：collaboration 真子会话——`delegate_agent`/批量、`wait_for_delegations`（all/any+minCompleted 部分收敛）、**对抗式**（子 Agent 独立审查不修改，父 Agent 逐条评估）、**多样性探索**（多方向并行调研），上限 50、**子会话禁递归**。
 
 **目标行为**：在 swarm-extension 上落地"对抗式审查"模式（父实现 → 独立子会话审查 → 父逐条采纳）。
 
-**方案**：swarm-extension 加 delegation 原语（wait 模式、结果收敛、递归禁令），复用 cognitive-coordination 的上下文隔离。
-**涉及模块**：`swarm-extension`、`cognitive-coordination`
+**方案**：在 task 体系加 delegation 原语（wait 模式、结果收敛、递归禁令），复用 cognitive-coordination 的上下文隔离。
+**涉及模块**：`task/`、`cognitive-coordination`
 **风险/工作量**：中-高。已有基建，缺的是"对抗式"编排协议。
 **验收**：一个实现任务跑通"实现→审查→修订"闭环，审查子会话不写文件。
 

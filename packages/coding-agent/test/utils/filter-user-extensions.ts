@@ -7,7 +7,6 @@ function isExternalUserExtensionPath(extPath: string): boolean {
 	if (extPath.startsWith(userExtensionsDir)) return true;
 	// Leftover settings.json paths into first-party packages (now inlined in sdk.ts).
 	if (extPath.includes(`${path.sep}packages${path.sep}moa-extension${path.sep}`)) return true;
-	if (extPath.includes(`${path.sep}packages${path.sep}swarm-extension${path.sep}`)) return true;
 	return false;
 }
 

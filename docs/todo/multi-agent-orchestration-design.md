@@ -142,7 +142,7 @@
 - 关键教训：教 orchestrator 如何委派、scale effort to query complexity、parallel tool calling、subagent 输出直接写文件系统避免"game of telephone"。
 - 生产挑战：agents are stateful and errors compound、需要 durable execution + checkpoint、rainbow deployments。
 
-### Claude Code（内置 task 工具 / swarm-extension）
+### Claude Code（内置 task 工具）
 
 - `runSubprocess`（`task/executor.ts:447`）名字叫 "subprocess"但实际是 in-process——同一个 Bun 进程内创建 AgentSession，共享 event loop、共享内存。
 - 内置 subagent 是主 agent 的手——匿名、临时、共享一切。
@@ -215,7 +215,7 @@
 | `SchedulerEngine` | `pi-gateway/src/scheduler/engine.ts` | Dispatcher 的 tick 基础设施 |
 | `SchedulerDbStorage` | `pi-gateway/src/scheduler/storage.ts` | SQLite 持久化基础 |
 | `runSubprocess` | `coding-agent/src/task/executor.ts` | 一次性 worker spawn 机制 |
-| `swarm-extension` DAG | `swarm-extension/src/dag.ts` | 任务依赖图（parent→child promotion） |
+| DAG 原语 | `coding-agent/src/task/dag.ts`（原 swarm-extension，2026-08 退役后保留） | 任务依赖图（parent→child promotion） |
 | DingTalk account → agentDir 绑定 | `gateway.json` channels 配置 | lane 声明的基础 |
 
 ### 要造
@@ -346,7 +346,7 @@ P1 和 P2 是必须在设计阶段就回答的——不是"以后优化"，是"�
 | `respondAsBackground` | `packages/coding-agent/src/session/agent-session.ts:6087` | Side-channel turn，不阻塞 recipient 主循环，已解决 in-process IRC 死锁 |
 | `SessionManager` 不变量 | `packages/pi-gateway/src/session-manager.ts:4-7` | "One account bridge processes at most one prompt at a time" |
 | Cron 路径禁用工具 | `packages/pi-gateway/src/gateway.ts:1159` | 禁用 `["cronjob", "messaging"]`，安全措施 |
-| `swarm-extension` | `packages/swarm-extension/` | DAG 编排器，`runSubprocess` + 共享文件系统通信 |
+| DAG 原语 | `packages/coding-agent/src/task/dag.ts` | 依赖图/wave 构建（原 swarm-extension，已退役归档） |
 | `runSubprocess` | `packages/coding-agent/src/task/executor.ts:447` | 实际是 in-process 执行（注释写 "Run a single agent in-process"） |
 | Hermes Kanban 文档 | `https://hermes-agent.nousresearch.com/docs/user-guide/features/kanban` | 直接原型 |
 | Hermes Kanban Tutorial | `https://hermes-agent.nousresearch.com/docs/user-guide/features/kanban-tutorial` | 四种使用场景 |

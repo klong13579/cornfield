@@ -54,7 +54,6 @@
 		"@oh-my-pi/pi-utils": "catalog:",
 		"@oh-my-pi/self-evolution": "catalog:",
 		"@oh-my-pi/moa-extension": "workspace:*",
-		"@oh-my-pi/swarm-extension": "workspace:*",
 		"@puppeteer/browsers": "catalog:",
 		"@sinclair/typebox": "catalog:",
 		"@xterm/headless": "catalog:",

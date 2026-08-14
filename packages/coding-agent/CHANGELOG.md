@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Removed
+
+- **Retired the `@oh-my-pi/swarm-extension` package** (`packages/swarm-extension/`, `src/sdk.ts`, `packages/coding-agent/package.json`): the multi-agent YAML DAG orchestrator is removed — its peer dependency drifted from the workspace mainline, it had no test coverage, and its orchestration role is covered by the built-in task/subagent system and the planned kanban design (`docs/todo/multi-agent-orchestration-design.md`). The pure DAG primitives (`buildDependencyGraph` / `detectCycles` / `buildExecutionWaves`) are preserved, genericized, in `src/task/dag.ts` for that future orchestration layer. `sdk.ts` no longer registers the `/swarm` extension on every session.
+
 ### Added
 
 - **Voice UX redesign: light-orb rendering + immersive view** (`src/modes/components/{voice-orb,voice-immersive-view}.ts`, `src/modes/components/voice-panel.ts`, `src/modes/controllers/voice-mode-controller.ts`, `src/modes/interactive-mode.ts`, `src/config/settings-schema.ts`, `test/voice-{orb,immersive-view,panel}.test.ts`, `docs/voice-ux-orb-redesign.md`): Voice mode gets a procedural light orb (realtime TS port of the voice_tui prototype): one blue orb, always-on signature breath, coverage-graded soft silhouette, transparent embedding (terminal background shows through), explicit `effects` override API. New layout B (default, `voice.immersive: true`): full-viewport voice view — centered HUD (IN/OUT level bars + ● LIVE), big centered orb, task mode shrinks the orb and turns the center into an activity feed (task title + tool lines + elapsed), transcript log at the bottom; the TUI children are swapped on enter and restored on exit. Layout A keeps the welcome page: at ≥70 cols the VoicePanel renders title + HUD in the top border, orb left, info right; below that it falls back to the existing text panel. 47 new tests; 69/69 voice tests pass.
