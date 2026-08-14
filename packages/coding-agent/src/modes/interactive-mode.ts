@@ -329,6 +329,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.#uiHelpers = new UiHelpers(this);
 		this.#btwController = new BtwController(this);
 		this.listenController = new ListenController({
+			modelRegistry: this.session.modelRegistry,
 			showWarning: (msg: string) => this.showWarning(msg),
 			showStatus: (msg: string) => this.showStatus(msg),
 			onStatusChange: status => {
@@ -339,24 +340,26 @@ export class InteractiveMode implements InteractiveModeContext {
 					const ts = `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
 					const dot = elapsed % 2 === 0 ? "\u{1F7E2}" : "\u26AA";
 					const bar = status.levelBar ? ` ${status.levelBar}` : "";
+					const model = this.listenController.getEffectiveModelName();
 					this.statusLine.setHookStatus(
 						"listening",
-						`${dot} ${theme.icon.mic}${bar} \u5f55\u97f3 ${ts} \u00b7 /record stop \u7ed3\u675f`,
+						`${dot} ${theme.icon.mic}${bar} \u5f55\u97f3 ${ts} \u00b7 ${model} \u00b7 /record stop \u7ed3\u675f`,
 					);
 				} else if (status.state === "transcribing") {
 					const p = status.progress;
 					const chunkInfo =
 						status.chunkTotal && status.chunkTotal > 1 ? ` (${status.chunkIndex ?? 0}/${status.chunkTotal})` : "";
+					const model = this.listenController.lastUsedModel ?? this.listenController.getEffectiveModelName();
 					let label: string;
 					if (!p) {
-						label = "\u8f6c\u5199\u4e2d...";
+						label = `\u8f6c\u5199\u4e2d... \u00b7 ${model}`;
 					} else if (p.stage === "loading-model") {
-						label = `\u8f6c\u5199\u4e2d\u00b7\u52a0\u8f7d\u6a21\u578b${chunkInfo}`;
+						label = `\u8f6c\u5199\u4e2d\u00b7\u52a0\u8f7d\u6a21\u578b${chunkInfo} \u00b7 ${model}`;
 					} else if (p.stage === "transcribing") {
 						const pct = p.percent != null ? ` ${Math.round(p.percent)}%` : "";
-						label = `\u8f6c\u5199\u4e2d${pct}${chunkInfo}`;
+						label = `\u8f6c\u5199\u4e2d${pct}${chunkInfo} \u00b7 ${model}`;
 					} else {
-						label = `\u8f6c\u5199\u4e2d\u00b7\u5b8c\u6210\u4e2d${chunkInfo}`;
+						label = `\u8f6c\u5199\u4e2d\u00b7\u5b8c\u6210\u4e2d${chunkInfo} \u00b7 ${model}`;
 					}
 					this.statusLine.setHookStatus("listening", label);
 				} else if (status.state === "idle") {

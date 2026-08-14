@@ -23,6 +23,7 @@ import * as fsp from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { getConfigRootDir, logger } from "@oh-my-pi/pi-utils";
+import type { ModelRegistry } from "../config/model-registry";
 import { settings } from "../config/settings";
 import { cleanupChunks, joinTranscripts, splitWavFile } from "./chunker";
 import { detectRecordingTools, type RecordingHandle, startRecording, verifyRecordingFile } from "./recorder";
@@ -53,6 +54,7 @@ export interface ListenControllerOptions {
 	showWarning(msg: string): void;
 	showStatus(msg: string): void;
 	onStatusChange(status: ListenStatus): void;
+	modelRegistry?: ModelRegistry;
 }
 
 const LEVEL_BAR_CELLS = 7;
@@ -119,8 +121,10 @@ function renderBarFromRms(samples: readonly number[]): string {
 export class ListenController {
 	#state: ListenState = "idle";
 	#recordingHandle: RecordingHandle | null = null;
+	#modelRegistry: ModelRegistry | undefined;
 	#tempFile: string | null = null;
 	#lastSavedPath: string | null = null;
+	#lastUsedModel: string | undefined;
 	#onStatusChange: (status: ListenStatus) => void;
 	#showWarning: (msg: string) => void;
 	#showStatus: (msg: string) => void;
@@ -141,10 +145,30 @@ export class ListenController {
 		return this.#lastSavedPath;
 	}
 
+	/** The model name used in the most recent transcription, if any. */
+	get lastUsedModel(): string | undefined {
+		return this.#lastUsedModel;
+	}
+
+	/**
+	 * Resolve the effective model name from settings, without running
+	 * transcription. Returns the model that WILL be used on the next call.
+	 */
+	getEffectiveModelName(): string {
+		const recordModel = settings.get("record.model") as string | undefined;
+		if (recordModel && !this.#isLocalWhisperModel(recordModel) && this.#modelRegistry) {
+			return this.#shortModelName(recordModel);
+		}
+		// Local whisper path: use record.model if set, else stt.modelName
+		const model = recordModel ?? (settings.get("stt.modelName") as string | undefined) ?? "mlx-community/whisper-large-v3-turbo";
+		return this.#shortModelName(model);
+	}
+
 	constructor(opts: ListenControllerOptions) {
 		this.#showWarning = opts.showWarning;
 		this.#showStatus = opts.showStatus;
 		this.#onStatusChange = opts.onStatusChange;
+		this.#modelRegistry = opts.modelRegistry;
 	}
 
 	get state(): ListenState {
@@ -286,7 +310,7 @@ export class ListenController {
 			this.#setState("idle");
 			return;
 		}
-		try {
+			try {
 			await handle.stop();
 			await verifyRecordingFile(tempFile);
 			this.#setState("transcribing");
@@ -295,7 +319,10 @@ export class ListenController {
 			this.#setState("saving");
 			const savedFile = await this.#saveText(text, description, tempFile);
 			this.#setState("idle");
-			this.#showStatus(savedFile.replace(os.homedir(), "~"));
+			const modelLabel = this.#lastUsedModel ?? "";
+			this.#showStatus(
+				`${savedFile.replace(os.homedir(), "~")} （${modelLabel}）`,
+			);
 		} catch (err) {
 			this.#setState("idle");
 			if (!(err instanceof DOMException && err.name === "AbortError")) {
@@ -324,7 +351,10 @@ export class ListenController {
 			this.#setState("saving");
 			const savedFile = await this.#saveText(text, description ?? path.basename(filePath, path.extname(filePath)));
 			this.#setState("idle");
-			this.#showStatus(savedFile.replace(os.homedir(), "~"));
+			const modelLabel = this.#lastUsedModel ?? "";
+			this.#showStatus(
+				`${savedFile.replace(os.homedir(), "~")} （${modelLabel}）`,
+			);
 		} catch (err) {
 			this.#setState("idle");
 			this.#showWarning(err instanceof Error ? err.message : "Transcription failed");
@@ -355,6 +385,55 @@ export class ListenController {
 	}
 
 	/**
+	 * Decide whether `modelName` is a local whisper model (mlx-community/...)
+	 * vs an API-based model (e.g. qwen-audio-...).
+	 */
+	#isLocalWhisperModel(modelName: string | undefined): boolean {
+		if (!modelName) return true;
+		return modelName.startsWith("mlx-community/");
+	}
+
+	/**
+	 * Transcribe a single audio segment — either via local mlx-whisper or
+	 * the API-based record.model, depending on the configured model name.
+	 *
+	 * Falls back to local whisper when:
+	 * - record.model is not set (uses stt.modelName)
+	 * - modelRegistry is not available (API path unavailable)
+	 * - record.model is a local whisper model ID (mlx-community/...)
+	 */
+	/** Shorten a model name for display: take the last path segment. */
+	#shortModelName(name: string): string {
+		return name.includes("/") ? name.split("/").pop()! : name;
+	}
+
+	async #doTranscribe(
+		audioPath: string,
+		onProgress?: (p: TranscribeProgress) => void,
+	): Promise<string> {
+		const recordModel = settings.get("record.model") as string | undefined;
+		const language = settings.get("stt.language") as string | undefined;
+
+		// Use local whisper when the model is a whisper ID or when the API
+		// path is unavailable (no modelRegistry).
+		if (this.#isLocalWhisperModel(recordModel) || !this.#modelRegistry) {
+			const modelName = recordModel ?? (settings.get("stt.modelName") as string | undefined);
+			this.#lastUsedModel = this.#shortModelName(modelName ?? "whisper");
+			return await transcribe(audioPath, { modelName, language, onProgress });
+		}
+
+		// API-based transcription via the configured record.model
+		this.#lastUsedModel = this.#shortModelName(recordModel);
+		const { transcribeViaApi } = await import("./transcriber");
+		return await transcribeViaApi(audioPath, {
+			modelName: recordModel,
+			language,
+			modelRegistry: this.#modelRegistry,
+			onProgress,
+		});
+	}
+
+	/**
 	 * Transcribe a WAV file. If it exceeds `stt.chunkSizeMB`, split into chunks
 	 * and transcribe serially. Returns the joined transcript.
 	 */
@@ -372,19 +451,11 @@ export class ListenController {
 				audioPath,
 				err: String(err),
 			});
-			return await transcribe(audioPath, {
-				modelName: settings.get("stt.modelName") as string | undefined,
-				language: settings.get("stt.language") as string | undefined,
-				onProgress: p => this.#emit({ progress: p }),
-			});
+			return await this.#doTranscribe(audioPath, p => this.#emit({ progress: p }));
 		}
 
 		if (stat.size <= chunkSizeBytes) {
-			return await transcribe(audioPath, {
-				modelName: settings.get("stt.modelName") as string | undefined,
-				language: settings.get("stt.language") as string | undefined,
-				onProgress: p => this.#emit({ progress: p }),
-			});
+			return await this.#doTranscribe(audioPath, p => this.#emit({ progress: p }));
 		}
 
 		// Oversized file: split and transcribe chunk by chunk.
@@ -404,16 +475,13 @@ export class ListenController {
 					chunkIndex: i + 1,
 					chunkTotal: chunks.length,
 				});
-				const t = await transcribe(chunks[i], {
-					modelName: settings.get("stt.modelName") as string | undefined,
-					language: settings.get("stt.language") as string | undefined,
-					onProgress: p =>
-						this.#emit({
-							progress: p,
-							chunkIndex: i + 1,
-							chunkTotal: chunks.length,
-						}),
-				});
+				const t = await this.#doTranscribe(chunks[i], p =>
+					this.#emit({
+						progress: p,
+						chunkIndex: i + 1,
+						chunkTotal: chunks.length,
+					}),
+				);
 				transcripts.push(t);
 			}
 		} finally {

@@ -1027,6 +1027,19 @@ export const SETTINGS_SCHEMA = {
 		},
 	},
 
+	// Record (audio recording / transcription model)
+	"record.model": {
+		type: "string",
+		default: "qwen-audio-3.0-realtime-flash",
+		ui: {
+			tab: "interaction",
+			label: "Record Model",
+			description:
+				"Model for processing audio recordings. Uses the configured provider's API key. Set to a whisper model (mlx-community/...) to use local mlx-whisper instead.",
+			submenu: true,
+		},
+	},
+
 	"voice.enabled": {
 		type: "boolean",
 		default: false,

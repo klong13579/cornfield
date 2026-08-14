@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { $which, logger } from "@oh-my-pi/pi-utils";
+import type { ModelRegistry } from "../config/model-registry";
 import { settings } from "../config/settings";
 import { readWavInfo } from "./chunker";
 import transcribeScript from "./transcribe.py" with { type: "text" };
@@ -10,6 +11,13 @@ export interface TranscribeOptions {
 	modelName?: string;
 	language?: string;
 	signal?: AbortSignal;
+	onProgress?: (progress: TranscribeProgress) => void;
+}
+
+export interface TranscribeViaApiOptions {
+	modelName?: string;
+	language?: string;
+	modelRegistry?: ModelRegistry;
 	onProgress?: (progress: TranscribeProgress) => void;
 }
 
@@ -196,5 +204,107 @@ export async function transcribe(audioPath: string, options?: TranscribeOptions)
 
 	const text = stdout.trim();
 	logger.debug("Transcription complete", { length: text.length });
+	return text;
+}
+
+/**
+ * Transcribe a WAV file via the OpenAI-compatible audio transcriptions API
+ * (e.g. qwen-audio models served over the configured provider's endpoint).
+ *
+ * Uses the model registry to resolve the provider base URL and API key.
+ */
+export async function transcribeViaApi(
+	audioPath: string,
+	options?: TranscribeViaApiOptions,
+): Promise<string> {
+	const audioFile = Bun.file(audioPath);
+	if (audioFile.size < 100) {
+		throw new Error(`Audio file is empty or too small (${audioFile.size} bytes). Check microphone.`);
+	}
+
+	const modelName = options?.modelName ?? "qwen-audio-3.0-realtime-flash";
+	const language = options?.language;
+	const registry = options?.modelRegistry;
+
+	if (!registry) {
+		throw new Error(
+			"Model registry required for API-based transcription. " +
+				"Set record.model to a local whisper model (mlx-community/...) to use local transcription instead.",
+		);
+	}
+
+	// Find the model in the registry to determine the provider and base URL.
+	const available = registry.getAvailable();
+	const modelEntry = available.find(m => m.id === modelName || `${m.provider}/${m.id}` === modelName);
+	if (!modelEntry) {
+		throw new Error(
+			`Model "${modelName}" not found in the model registry. ` +
+				"Check that the model is configured in your models.yml.",
+		);
+	}
+
+	const provider = modelEntry.provider;
+	const baseUrl = registry.getProviderBaseUrl(provider);
+	if (!baseUrl) {
+		throw new Error(`No base URL configured for provider "${provider}".`);
+	}
+
+	const apiKey = await registry.getApiKeyForProvider(provider);
+	if (!apiKey) {
+		throw new Error(`No API key configured for provider "${provider}".`);
+	}
+
+	// Normalize base URL: strip trailing /v1 or /v1/ if present, then append /v1/audio/transcriptions
+	const normalizedBase = baseUrl.replace(/\/v1\/?$/, "");
+	const transcriptionUrl = `${normalizedBase}/v1/audio/transcriptions`;
+
+	logger.debug("Transcribing via API", {
+		audioPath,
+		modelName,
+		provider,
+		baseUrl,
+		transcriptionUrl,
+		language,
+	});
+
+	const emitProgress = options?.onProgress;
+	emitProgress?.({ stage: "loading-model" });
+
+	// Build the multipart form data
+	const formData = new FormData();
+	formData.append("model", modelName);
+	formData.append("file", audioFile, path.basename(audioPath));
+	if (language) {
+		formData.append("language", language);
+	}
+
+	const response = await fetch(transcriptionUrl, {
+		method: "POST",
+		headers: {
+			Authorization: `Bearer ${apiKey}`,
+			// Content-Type is set automatically by fetch for FormData (multipart/form-data)
+		},
+		body: formData,
+	});
+
+	if (!response.ok) {
+		const errorBody = await response.text().catch(() => "(no body)");
+		throw new Error(
+			`API transcription failed (${response.status}): ${errorBody.slice(0, 500)}`,
+		);
+	}
+
+	emitProgress?.({ stage: "transcribing", percent: 50 });
+
+	const result = (await response.json()) as { text?: string };
+	const text = (result.text ?? "").trim();
+
+	emitProgress?.({ stage: "finalizing", percent: 100 });
+
+	logger.debug("API transcription complete", {
+		length: text.length,
+		provider,
+		modelName,
+	});
 	return text;
 }
