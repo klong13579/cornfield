@@ -57,7 +57,6 @@ const commands: CommandEntry[] = [
 	{ name: "ssh", load: () => import("./commands/ssh").then(m => m.default) },
 	{ name: "stats", load: () => import("./commands/stats").then(m => m.default) },
 	{ name: "update", load: () => import("./commands/update").then(m => m.default) },
-	{ name: "gateway", load: () => import("./commands/gateway").then(m => m.default) },
 	{ name: "search", load: () => import("./commands/web-search").then(m => m.default), aliases: ["q"] },
 ];
 
@@ -80,11 +79,27 @@ function isSubcommand(first: string | undefined): boolean {
 	return commands.some(e => e.name === first || e.aliases?.includes(first));
 }
 
+const GATEWAY_MOVED_MESSAGE = `\nThe gateway daemon is now a separate binary.\n` +
+	`\`omp gateway\` was removed from omp; use \`omp-gateway\` (installed alongside omp):\n` +
+	`\n` +
+	`  omp-gateway start --foreground\n` +
+	`  omp-gateway status\n` +
+	`  omp-gateway service install\n`;
+
 /** Run the CLI with the given argv (no `process.argv` prefix). */
 export function runCli(argv: string[]): Promise<void> {
 	// --help and --version are handled by run() directly, don't rewrite those.
 	// Everything else that isn't a known subcommand routes to "launch".
 	const first = argv[0];
+
+	// `gateway` is a reserved name: it was split out of omp into the standalone
+	// omp-gateway binary. Reject it explicitly instead of silently falling
+	// through to the interactive "launch" mode.
+	if (first === "gateway") {
+		process.stderr.write(`${GATEWAY_MOVED_MESSAGE}\n`);
+		process.exit(1);
+	}
+
 	const runArgv =
 		first === "--help" || first === "-h" || first === "--version" || first === "-v" || first === "help"
 			? argv

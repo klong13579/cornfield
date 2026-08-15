@@ -54,10 +54,10 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { DWClient, type DWClientDownStream, TOPIC_ROBOT } from "dingtalk-stream";
-// Relative path goes 3 levels up (.omp/skills/repro-inject -> oh-my-pi) to reach the pi-gateway package.
+// Relative path goes 3 levels up (.omp/skills/repro-inject -> oh-my-pi) to reach the omp-gateway package.
 // 脚本与 skill 同住 于 .omp/skills/repro-inject/,保留原始 package 依赖而非复制。
-import { getDingTalkConfig, loadConfig } from "../../../packages/pi-gateway/src/config";
-import type { DingTalkRawMessage } from "../../../packages/pi-gateway/src/types";
+import { getDingTalkConfig, loadConfig } from "../../../packages/omp-gateway/src/config";
+import type { DingTalkRawMessage } from "../../../packages/omp-gateway/src/types";
 
 const STATE_PATH = path.join(os.homedir(), ".omp", "repro-state.json");
 const DEFAULT_GATEWAY = "http://127.0.0.1:7890";
@@ -441,7 +441,7 @@ async function grabWebhook(args: CliArgs): Promise<WebhookEntry> {
 	const client = new DWClient({
 		clientId: acct.appKey!,
 		clientSecret: acct.appSecret!,
-		ua: "pi-gateway-repro-inject/0.1",
+		ua: "omp-gateway-repro-inject/0.1",
 		debug: false,
 		autoReconnect: false,
 	});

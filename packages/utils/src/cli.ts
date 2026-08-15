@@ -295,7 +295,7 @@ export function renderCommandHelp(bin: string, id: string, Cmd: CommandCtor): vo
 	const argNames = Object.keys(Cmd.args ?? {});
 	const argStr = argNames.length > 0 ? ` ${argNames.map(n => `[${n.toUpperCase()}]`).join(" ")}` : "";
 	const hasFlags = Object.keys(Cmd.flags ?? {}).length > 0;
-	lines.push(`  $ ${bin} ${id}${argStr}${hasFlags ? " [FLAGS]" : ""}\n`);
+	lines.push(`  $ ${bin}${id ? ` ${id}` : ""}${argStr}${hasFlags ? " [FLAGS]" : ""}\n`);
 	renderCommandBody(lines, Cmd);
 	process.stdout.write(lines.join("\n"));
 }

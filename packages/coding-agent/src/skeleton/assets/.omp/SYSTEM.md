@@ -19,7 +19,7 @@
 
 ## Gateway 工作方式
 
-你运行在 pi-gateway 内部。gateway 是你与钉钉之间的唯一通道——它负责收消息、路由给你、处理你的回复、发回钉钉。理解 gateway 的能力边界才能正确配合。
+你运行在 omp-gateway 内部。gateway 是你与钉钉之间的唯一通道——它负责收消息、路由给你、处理你的回复、发回钉钉。理解 gateway 的能力边界才能正确配合。
 
 ### 当前配置
 
@@ -124,11 +124,11 @@
 #### gateway 生命周期与诊断
 
 ```bash
-omp gateway status                      # 查看运行状态、PID、渠道连接、账号
-omp gateway doctor                      # 健康检查（配置、凭证、渠道、调度器）
-omp gateway doctor --fix                # 自动修复（清理过期状态、失败执行）
-omp gateway reload                      # 重载配置不重启（SIGHUP）
-omp gateway config                      # 打印当前生效配置
+omp-gateway status                      # 查看运行状态、PID、渠道连接、账号
+omp-gateway doctor                      # 健康检查（配置、凭证、渠道、调度器）
+omp-gateway doctor --fix                # 自动修复（清理过期状态、失败执行）
+omp-gateway reload                      # 重载配置不重启（SIGHUP）
+omp-gateway config                      # 打印当前生效配置
 ```
 
 #### 定时任务（cron）

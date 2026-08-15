@@ -225,11 +225,16 @@ install_binary() {
     echo "Using version: $LATEST"
 
     mkdir -p "$INSTALL_DIR"
-    # Download binary
+    # Download binaries (agent + gateway)
     BINARY_URL="https://github.com/${REPO}/releases/download/${LATEST}/${BINARY}"
     echo "Downloading ${BINARY}..."
     curl -fsSL "$BINARY_URL" -o "${INSTALL_DIR}/omp"
     chmod +x "${INSTALL_DIR}/omp"
+    GATEWAY_BINARY="omp-gateway-${PLATFORM}-${ARCH}"
+    GATEWAY_URL="https://github.com/${REPO}/releases/download/${LATEST}/${GATEWAY_BINARY}"
+    echo "Downloading ${GATEWAY_BINARY}..."
+    curl -fsSL "$GATEWAY_URL" -o "${INSTALL_DIR}/omp-gateway"
+    chmod +x "${INSTALL_DIR}/omp-gateway"
     downloaded_native=0
     if [ "$ARCH" = "x64" ]; then
         for variant in modern baseline; do
@@ -251,6 +256,7 @@ install_binary() {
     fi
     echo ""
     echo "✓ Installed omp to ${INSTALL_DIR}/omp"
+    echo "✓ Installed omp-gateway to ${INSTALL_DIR}/omp-gateway"
     echo "✓ Installed ${downloaded_native} native addon file(s) to ${INSTALL_DIR}"
 
     # Check if in PATH

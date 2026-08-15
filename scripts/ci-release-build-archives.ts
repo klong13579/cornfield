@@ -9,6 +9,8 @@ interface ArchiveTarget {
 	binaryName: string;
 	archiveName: string;
 	executableName: string;
+	gatewayBinaryName: string;
+	gatewayExecutableName: string;
 	nativeAddons: string[];
 }
 
@@ -22,6 +24,8 @@ const targets: ArchiveTarget[] = [
 		binaryName: "omp-darwin-arm64",
 		archiveName: "omp-darwin-arm64.tar.gz",
 		executableName: "omp",
+		gatewayBinaryName: "omp-gateway-darwin-arm64",
+		gatewayExecutableName: "omp-gateway",
 		nativeAddons: ["pi_natives.darwin-arm64.node"],
 	},
 	{
@@ -29,6 +33,8 @@ const targets: ArchiveTarget[] = [
 		binaryName: "omp-darwin-x64",
 		archiveName: "omp-darwin-x64.tar.gz",
 		executableName: "omp",
+		gatewayBinaryName: "omp-gateway-darwin-x64",
+		gatewayExecutableName: "omp-gateway",
 		nativeAddons: ["pi_natives.darwin-x64-modern.node", "pi_natives.darwin-x64-baseline.node"],
 	},
 	{
@@ -36,6 +42,8 @@ const targets: ArchiveTarget[] = [
 		binaryName: "omp-linux-x64",
 		archiveName: "omp-linux-x64.tar.gz",
 		executableName: "omp",
+		gatewayBinaryName: "omp-gateway-linux-x64",
+		gatewayExecutableName: "omp-gateway",
 		nativeAddons: ["pi_natives.linux-x64-modern.node", "pi_natives.linux-x64-baseline.node"],
 	},
 	{
@@ -43,6 +51,8 @@ const targets: ArchiveTarget[] = [
 		binaryName: "omp-linux-arm64",
 		archiveName: "omp-linux-arm64.tar.gz",
 		executableName: "omp",
+		gatewayBinaryName: "omp-gateway-linux-arm64",
+		gatewayExecutableName: "omp-gateway",
 		nativeAddons: ["pi_natives.linux-arm64.node"],
 	},
 	{
@@ -50,6 +60,8 @@ const targets: ArchiveTarget[] = [
 		binaryName: "omp-windows-x64.exe",
 		archiveName: "omp-windows-x64.tar.gz",
 		executableName: "omp.exe",
+		gatewayBinaryName: "omp-gateway-windows-x64.exe",
+		gatewayExecutableName: "omp-gateway.exe",
 		nativeAddons: ["pi_natives.win32-x64-modern.node", "pi_natives.win32-x64-baseline.node"],
 	},
 ];
@@ -68,12 +80,17 @@ async function createArchive(target: ArchiveTarget): Promise<void> {
 	await fs.mkdir(stagingDir, { recursive: true });
 
 	await copyRequiredFile(path.join(binariesDir, target.binaryName), path.join(stagingDir, target.executableName));
+	await copyRequiredFile(
+		path.join(binariesDir, target.gatewayBinaryName),
+		path.join(stagingDir, target.gatewayExecutableName),
+	);
 	for (const addonName of target.nativeAddons) {
 		await copyRequiredFile(path.join(binariesDir, addonName), path.join(stagingDir, addonName));
 	}
 
 	if (target.executableName === "omp") {
 		await fs.chmod(path.join(stagingDir, target.executableName), 0o755);
+		await fs.chmod(path.join(stagingDir, target.gatewayExecutableName), 0o755);
 	}
 
 	const archivePath = path.join(binariesDir, target.archiveName);
