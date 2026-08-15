@@ -6,7 +6,8 @@
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "scripts": {
-    "start": "bun run ../coding-agent/src/cli.ts gateway start",
+    "start": "bun run ./src/cli.ts start",
+    "build": "bun scripts/build-binary.ts",
     "check": "biome check . && tsgo -p tsconfig.json --noEmit",
     "lint": "biome lint .",
     "fmt": "biome format --write .",

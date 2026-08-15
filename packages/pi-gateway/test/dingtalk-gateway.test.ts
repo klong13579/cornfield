@@ -21,7 +21,7 @@ import type { InboundMessage, OutboundMessage, SessionRecord } from "../src/type
 // Fake omp --mode rpc that emits a rich AssistantMessage with all the
 // fields the bridge meta extraction looks for.
 const FAKE_RPC_SCRIPT = `#!/usr/bin/env bun
-process.stdout.write(JSON.stringify({ type: "ready" }) + "\\n");
+process.stdout.write(JSON.stringify({ type: "ready", protocol_version: 1 }) + "\\n");
 let buffer = "";
 function emit(value) { process.stdout.write(JSON.stringify(value) + "\\n"); }
 process.stdin.on("data", chunk => {
@@ -194,7 +194,7 @@ describe("Bridge → formatter end-to-end (v1 reply path)", () => {
 		// assistant message_end) — the bridge treats this as "agent did not
 		// return content" and returns a fallback meta (isFallback: true).
 		const empty = await createFakeRpcBinary(`#!/usr/bin/env bun
-process.stdout.write(JSON.stringify({ type: "ready" }) + "\\n");
+process.stdout.write(JSON.stringify({ type: "ready", protocol_version: 1 }) + "\\n");
 let buffer = "";
 process.stdin.on("data", chunk => {
   buffer += chunk.toString("utf8");

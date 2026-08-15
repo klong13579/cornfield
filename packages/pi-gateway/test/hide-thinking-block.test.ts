@@ -29,7 +29,7 @@ import type { AgentResponseMeta, DingTalkConfig, InboundMessage, SessionRecord }
 // deltas so the throttled streamAICard actually buffers, and two
 // thinking deltas to give the filter something to drop.
 const FAKE_RPC_SCRIPT = `#!/usr/bin/env bun
-process.stdout.write(JSON.stringify({ type: "ready" }) + "\\n");
+process.stdout.write(JSON.stringify({ type: "ready", protocol_version: 1 }) + "\\n");
 let buffer = "";
 function emit(value) { process.stdout.write(JSON.stringify(value) + "\\n"); }
 for await (const chunk of Bun.stdin.stream()) {

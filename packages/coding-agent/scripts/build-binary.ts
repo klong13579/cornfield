@@ -1,4 +1,13 @@
 #!/usr/bin/env bun
+/**
+ * Build the `omp` coding-agent binary (packages/coding-agent/dist/omp).
+ *
+ * This is the agent runtime half of the gateway binary split — the gateway
+ * daemon is built separately as `omp-gateway` by
+ * `packages/pi-gateway/scripts/build-binary.ts` (see
+ * docs/gateway-binary-split-plan.md). Agent execution stays here and is
+ * spawned by the gateway via `omp --mode rpc`.
+ */
 
 import * as path from "node:path";
 

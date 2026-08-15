@@ -291,7 +291,7 @@ const FAKE_OMP_HANG_SCRIPT = `#!/usr/bin/env bun
 const args = process.argv.slice(2);
 
 if (args[0] === "--mode" && args[1] === "rpc") {
-  process.stdout.write(JSON.stringify({ type: "ready" }) + "\\n");
+  process.stdout.write(JSON.stringify({ type: "ready", protocol_version: 1 }) + "\\n");
   let buffer = "";
   for await (const chunk of Bun.stdin.stream()) {
     buffer += new TextDecoder().decode(chunk);
@@ -327,7 +327,7 @@ const FAKE_OMP_RESTORE_FAIL_SCRIPT = `#!/usr/bin/env bun
 const args = process.argv.slice(2);
 
 if (args[0] === "--mode" && args[1] === "rpc") {
-  process.stdout.write(JSON.stringify({ type: "ready" }) + "\\n");
+  process.stdout.write(JSON.stringify({ type: "ready", protocol_version: 1 }) + "\\n");
   let setModelCount = 0;
   let buffer = "";
   for await (const chunk of Bun.stdin.stream()) {
@@ -370,7 +370,7 @@ const FAKE_OMP_FALLBACK_SCRIPT = `#!/usr/bin/env bun
 const args = process.argv.slice(2);
 
 if (args[0] === "--mode" && args[1] === "rpc") {
-  process.stdout.write(JSON.stringify({ type: "ready" }) + "\\n");
+  process.stdout.write(JSON.stringify({ type: "ready", protocol_version: 1 }) + "\\n");
   let buffer = "";
   for await (const chunk of Bun.stdin.stream()) {
     buffer += new TextDecoder().decode(chunk);

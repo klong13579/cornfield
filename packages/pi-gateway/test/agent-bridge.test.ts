@@ -69,7 +69,7 @@ function makeSession(sessionPath: string, conversationId: string): SessionRecord
 // ═══════════════════════════════════════════════════════════════════════
 
 const FAKE_RPC_SCRIPT = `#!/usr/bin/env bun
-process.stdout.write(JSON.stringify({ type: "ready" }) + "\\n");
+process.stdout.write(JSON.stringify({ type: "ready", protocol_version: 1 }) + "\\n");
 let currentSession = "";
 let buffer = "";
 function emit(value) {
@@ -235,7 +235,7 @@ function log(entry) {
     fs.appendFileSync(logPath, JSON.stringify(entry) + "\\n");
   }
 }
-process.stdout.write(JSON.stringify({ type: "ready" }) + "\\n");
+process.stdout.write(JSON.stringify({ type: "ready", protocol_version: 1 }) + "\\n");
 let currentSession = "";
 let buffer = "";
 function emit(value) {
@@ -401,7 +401,7 @@ describe("AgentBridge.executePrompt (cron path)", () => {
 // ═══════════════════════════════════════════════════════════════════════
 
 const INACTIVE_FAKE_SCRIPT = `#!/usr/bin/env bun
-process.stdout.write(JSON.stringify({ type: "ready" }) + "\\n");
+process.stdout.write(JSON.stringify({ type: "ready", protocol_version: 1 }) + "\\n");
 let buffer = "";
 function emit(value) {
   process.stdout.write(JSON.stringify(value) + "\\n");
@@ -545,7 +545,7 @@ describe("AgentBridge BOOT.md self-check", () => {
 describe("AgentBridge model re-application", () => {
 	function makeTrackingScript(trackerPath: string): string {
 		return `#!/usr/bin/env bun
-process.stdout.write(JSON.stringify({ type: "ready" }) + "\\n");
+process.stdout.write(JSON.stringify({ type: "ready", protocol_version: 1 }) + "\\n");
 let currentSession = "";
 let buffer = "";
 const setModelCalls = [];
@@ -669,7 +669,7 @@ for await (const chunk of Bun.stdin.stream()) {
 // ═══════════════════════════════════════════════════════════════════════
 
 const STREAMING_RPC_SCRIPT = `#!/usr/bin/env bun
-process.stdout.write(JSON.stringify({ type: "ready" }) + "\\n");
+process.stdout.write(JSON.stringify({ type: "ready", protocol_version: 1 }) + "\\n");
 let buffer = "";
 function emit(value) { process.stdout.write(JSON.stringify(value) + "\\n"); }
 for await (const chunk of Bun.stdin.stream()) {
@@ -781,7 +781,7 @@ describe("AgentBridge.forwardWithMeta (streaming)", () => {
 // ═══════════════════════════════════════════════════════════════════════
 
 const TOOL_RPC_SCRIPT = `#!/usr/bin/env bun
-process.stdout.write(JSON.stringify({ type: "ready" }) + "\\n");
+process.stdout.write(JSON.stringify({ type: "ready", protocol_version: 1 }) + "\\n");
 let buffer = "";
 function emit(value) { process.stdout.write(JSON.stringify(value) + "\\n"); }
 for await (const chunk of Bun.stdin.stream()) {
@@ -910,7 +910,7 @@ describe("AgentBridge.forwardWithMeta (tool events)", () => {
 // ═══════════════════════════════════════════════════════════════════════
 
 const SCRIPT_STREAMING_HANG = `#!/usr/bin/env bun
-process.stdout.write(JSON.stringify({ type: "ready" }) + "\\n");
+process.stdout.write(JSON.stringify({ type: "ready", protocol_version: 1 }) + "\\n");
 let currentSession = "";
 function emit(value) {
   process.stdout.write(JSON.stringify(value) + "\\n");
@@ -1103,7 +1103,7 @@ describe("AgentBridge active-session sentinel", () => {
 
 const SLOW_TOOL_RPC_SCRIPT = `#!/usr/bin/env bun
 const HOLD_MS = 200;
-process.stdout.write(JSON.stringify({ type: "ready" }) + "\\n");
+process.stdout.write(JSON.stringify({ type: "ready", protocol_version: 1 }) + "\\n");
 let buffer = "";
 function emit(value) { process.stdout.write(JSON.stringify(value) + "\\n"); }
 for await (const chunk of Bun.stdin.stream()) {

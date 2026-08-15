@@ -18,6 +18,11 @@
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- **standalone `omp-gateway` binary — gateway daemon split out of `omp`** (`src/cli.ts`, `src/commands/gateway.ts`, `scripts/build-binary.ts`, `src/service-installer.ts`, `src/agent-transport.ts`; plan: docs/gateway-binary-split-plan.md): the gateway now publishes its own binary (`~/.local/bin/omp-gateway`), built from `packages/pi-gateway/src/cli.ts`. All `omp gateway <action>` usages move to `omp-gateway <action>` root subcommands (`start | stop | status | reload | doctor | config | cron | service | setup | test-longtask | help`); `omp gateway *` is deliberately NOT kept as a shim in `omp`. The launchd/systemd plist argv changes to `<omp-gateway> start --foreground` — after upgrading, re-run `omp-gateway service install` and `omp-gateway service stop/start` (old plist keeps running the old `omp` daemon until then). Service name/Label stay `com.narwal.pi-gateway`.
+- **RPC handshake rejects legacy omp** (`src/agent-transport.ts`, `src/modes/...`): the gateway validates the `--mode rpc` ready frame's `protocol_version` (now `1`). A legacy omp binary whose ready frame lacks the field is rejected with an actionable error (`Agent RPC handshake failed … Upgrade omp`); upgrade omp together with omp-gateway (release tooling installs both).
+
 ### Changed
 
 - **`hideThinkingBlock` for DingTalk AI Card now follows agentDir config** (`src/config-settings.ts`, `src/gateway.ts`): Canonical source is `<agentDir>/.omp/config.yml` (same key as the omp TUI), then user-level `~/.omp/agent/config.yml`, then legacy `gateway.json` `accounts.*.hideThinkingBlock`. Accounts that already set `hideThinkingBlock: true` in agentDir (e.g. algorithm/atomix) no longer need a duplicate entry in `gateway.json` for the Card to suppress THINK blocks.

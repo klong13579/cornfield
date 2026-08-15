@@ -26,7 +26,7 @@ import type { DingTalkConfig, InboundMessage, SessionRecord } from "../src/types
 // agent_end. The test asserts that the streaming deltas show up as
 // throttled `streamAICard` calls (not one per delta).
 const FAKE_RPC_SCRIPT = `#!/usr/bin/env bun
-process.stdout.write(JSON.stringify({ type: "ready" }) + "\\n");
+process.stdout.write(JSON.stringify({ type: "ready", protocol_version: 1 }) + "\\n");
 let buffer = "";
 function emit(value) { process.stdout.write(JSON.stringify(value) + "\\n"); }
 for await (const chunk of Bun.stdin.stream()) {
@@ -431,7 +431,7 @@ describe("DingTalk AI Card lifecycle (v2 reply path)", () => {
 	// separated by a tool call boundary. The gateway should create
 	// two separate cards — one per segment.
 	const MULTI_SEGMENT_RPC = `#!/usr/bin/env bun
-process.stdout.write(JSON.stringify({ type: "ready" }) + "\\n");
+process.stdout.write(JSON.stringify({ type: "ready", protocol_version: 1 }) + "\\n");
 let buffer = "";
 function emit(value) { process.stdout.write(JSON.stringify(value) + "\\n"); }
 for await (const chunk of Bun.stdin.stream()) {

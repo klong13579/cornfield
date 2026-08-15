@@ -101,7 +101,7 @@ function buildFakeRpcScript(holdMs: number): string {
 	return `#!/usr/bin/env bun
 // Synthetic RPC for long-task watcher test.
 const HOLD_MS = ${holdMsLiteral};
-process.stdout.write(JSON.stringify({ type: "ready" }) + "\\n");
+process.stdout.write(JSON.stringify({ type: "ready", protocol_version: 1 }) + "\\n");
 
 let buffer = "";
 function emit(value) { process.stdout.write(JSON.stringify(value) + "\\n"); }

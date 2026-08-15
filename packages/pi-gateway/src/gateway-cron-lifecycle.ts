@@ -9,6 +9,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { logger, prompt } from "@oh-my-pi/pi-utils";
 import type { AgentBridge } from "./agent-bridge";
+import { resolveDefaultOmpPath } from "./agent-transport";
 import type { AICardTarget } from "./channels/dingtalk-card";
 import { mirrorDeliveryToSession } from "./scheduler/attach-to-session";
 import { type CronCardPayload, deliverCronResultAsCard } from "./scheduler/cron-card-delivery";
@@ -82,7 +83,7 @@ export class CronLifecycle {
 			logger.debug("File store initial sync", syncResult);
 		}
 
-		const ompBinary = this.#deps.config.agent?.ompPath ?? "omp";
+		const ompBinary = this.#deps.config.agent?.ompPath ?? resolveDefaultOmpPath();
 		this.#cronService = new CronService({
 			storage: this.#schedulerStorage,
 			ompBinary,

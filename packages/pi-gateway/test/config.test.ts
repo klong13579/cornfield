@@ -24,7 +24,9 @@ describe("config", () => {
 	it("returns default config when file does not exist", async () => {
 		const config = await loadConfig("/nonexistent/path.json");
 		expect(config.channels).toEqual({});
-		expect(config.agent?.ompPath).toBe("omp");
+		// No hard-coded ompPath default — unset stays undefined so consumers
+		// resolve it via resolveDefaultOmpPath() (~/.local/bin/omp first).
+		expect(config.agent?.ompPath).toBeUndefined();
 		expect(config.session?.idleTimeoutMinutes).toBe(240);
 	});
 
@@ -161,6 +163,8 @@ describe("validateAndNormalizeConfig", () => {
 	it("accepts an empty config and fills in defaults", () => {
 		const r = validateAndNormalizeConfig({});
 		expect(r.cron.tickIntervalMs).toBe(60_000);
-		expect(r.agent.ompPath).toBeDefined();
+		// ompPath is intentionally unset by default (resolved downstream via
+		// resolveDefaultOmpPath).
+		expect(r.agent.ompPath).toBeUndefined();
 	});
 });

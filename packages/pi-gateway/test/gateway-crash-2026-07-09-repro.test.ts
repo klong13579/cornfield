@@ -76,7 +76,7 @@ afterEach(() => {
  *  Also handles `switch_session` and `set_model` so the bridge's
  *  pre-prompt commands don't hang. */
 const LONG_INACTIVE_SCRIPT = `#!/usr/bin/env bun
-process.stdout.write(JSON.stringify({ type: "ready" }) + "\\n");
+process.stdout.write(JSON.stringify({ type: "ready", protocol_version: 1 }) + "\\n");
 let buffer = "";
 for await (const chunk of Bun.stdin.stream()) {
     buffer += new TextDecoder().decode(chunk);
@@ -105,7 +105,7 @@ for await (const chunk of Bun.stdin.stream()) {
  *  an OMP child crash mid-prompt. The transport's `proc.exited` promise
  *  resolves, which fires the transport's `disconnected` event. */
 const CRASH_MID_PROMPT_SCRIPT = `#!/usr/bin/env bun
-process.stdout.write(JSON.stringify({ type: "ready" }) + "\\n");
+process.stdout.write(JSON.stringify({ type: "ready", protocol_version: 1 }) + "\\n");
 let buffer = "";
 for await (const chunk of Bun.stdin.stream()) {
     buffer += new TextDecoder().decode(chunk);
@@ -132,7 +132,7 @@ for await (const chunk of Bun.stdin.stream()) {
 /** OMP child that emits a normal response — used to test the handler-throw
  *  path (Test 4) where the RPC works fine but a registered handler throws. */
 const NORMAL_RESPONSE_SCRIPT = `#!/usr/bin/env bun
-process.stdout.write(JSON.stringify({ type: "ready" }) + "\\n");
+process.stdout.write(JSON.stringify({ type: "ready", protocol_version: 1 }) + "\\n");
 let buffer = "";
 for await (const chunk of Bun.stdin.stream()) {
     buffer += new TextDecoder().decode(chunk);

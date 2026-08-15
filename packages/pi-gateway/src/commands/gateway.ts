@@ -15,7 +15,7 @@
  * to (and >= startedAt - tolerance) within the window.
  */
 /**
- * Unified Gateway command — started via omp gateway or pi-gateway CLI.
+ * Unified Gateway command — started via the omp-gateway CLI (root subcommands).
  *
  * Manages IM channels, cron scheduler, agent bridge, and heartbeat.
  *
@@ -24,7 +24,7 @@
  */
 
 import * as path from "node:path";
-import { clearStatusFileSync } from "@oh-my-pi/pi-gateway/src/gateway-daemon";
+import { clearStatusFileSync } from "../gateway-daemon";
 import { logger } from "@oh-my-pi/pi-utils";
 import { Args, Command, Flags, renderCommandHelp } from "@oh-my-pi/pi-utils/cli";
 
@@ -65,41 +65,41 @@ export default class Gateway extends Command {
 	static examples = [
 		"",
 		"  ======== 生命周期 ========",
-		"  omp gateway start                        Start gateway (foreground)",
-		"  omp gateway start --config /path/gw.json  Start with custom config",
-		"  omp gateway stop                         Stop gateway (via PID file)",
-		"  omp gateway status                       Show running status & PID",
-		"  omp gateway reload                        Reload config without restart (SIGHUP)",
-		"  omp gateway doctor                       Run health checks (config, creds, channels, scheduler)",
-		"  omp gateway doctor --fix                 Apply safe fixes (clear stale state, fail orphaned execs)",
+		"  omp-gateway start                        Start gateway (foreground)",
+		"  omp-gateway start --config /path/gw.json  Start with custom config",
+		"  omp-gateway stop                         Stop gateway (via PID file)",
+		"  omp-gateway status                       Show running status & PID",
+		"  omp-gateway reload                        Reload config without restart (SIGHUP)",
+		"  omp-gateway doctor                       Run health checks (config, creds, channels, scheduler)",
+		"  omp-gateway doctor --fix                 Apply safe fixes (clear stale state, fail orphaned execs)",
 		"",
 		"  ======== 系统服务 (launchd/systemd) ========",
-		"  omp gateway service install              Install as system daemon",
-		"  omp gateway service uninstall            Remove system daemon",
-		"  omp gateway service start                Start daemon",
-		"  omp gateway service stop                 Stop daemon (no auto-restart)",
-		"  omp gateway service status               Show daemon status",
+		"  omp-gateway service install              Install as system daemon",
+		"  omp-gateway service uninstall            Remove system daemon",
+		"  omp-gateway service start                Start daemon",
+		"  omp-gateway service stop                 Stop daemon (no auto-restart)",
+		"  omp-gateway service status               Show daemon status",
 		"",
 		"  ======== 配置 ========",
-		"  omp gateway setup                        Interactive DingTalk credential setup",
-		"  omp gateway setup --non-interactive      Print manual-edit instructions and exit (for CI/scripting)",
-		"  omp gateway config                       Print resolved config",
-		"  omp gateway config --config /path/gw.json Print custom config",
+		"  omp-gateway setup                        Interactive DingTalk credential setup",
+		"  omp-gateway setup --non-interactive      Print manual-edit instructions and exit (for CI/scripting)",
+		"  omp-gateway config                       Print resolved config",
+		"  omp-gateway config --config /path/gw.json Print custom config",
 		"",
 		"  ======== 定时任务 ========",
-		"  omp gateway cron create '0 9 * * *' 'cmd'  Create cron task",
-		"  omp gateway cron list                     List all tasks",
-		"  omp gateway cron pause <name>             Pause a task",
-		"  omp gateway cron resume <name>            Resume a task",
-		"  omp gateway cron run <name>               Run a task now (debug only — skips delivery)",
-		"  omp gateway cron test-run <name>          Trigger through the real scheduler; verifies delivery",
-		"  omp gateway cron remove <name>            Delete a task",
-		"  omp gateway cron update <name> ...        Update task fields in place",
-		"  omp gateway cron reconcile [--apply]      Backfill accountId on legacy unbound tasks",
-		"  omp gateway cron status                   Show scheduler status",
-		"  omp gateway cron diagnose [--json]        System health (task counts + per-task snapshot)",
-		"  omp gateway cron diagnose <name> [--json]  View JSONL execution diagnostics for a task",
-		"  omp gateway cron logs <name> [--json]     View execution logs",
+		"  omp-gateway cron create '0 9 * * *' 'cmd'  Create cron task",
+		"  omp-gateway cron list                     List all tasks",
+		"  omp-gateway cron pause <name>             Pause a task",
+		"  omp-gateway cron resume <name>            Resume a task",
+		"  omp-gateway cron run <name>               Run a task now (debug only — skips delivery)",
+		"  omp-gateway cron test-run <name>          Trigger through the real scheduler; verifies delivery",
+		"  omp-gateway cron remove <name>            Delete a task",
+		"  omp-gateway cron update <name> ...        Update task fields in place",
+		"  omp-gateway cron reconcile [--apply]      Backfill accountId on legacy unbound tasks",
+		"  omp-gateway cron status                   Show scheduler status",
+		"  omp-gateway cron diagnose [--json]        System health (task counts + per-task snapshot)",
+		"  omp-gateway cron diagnose <name> [--json]  View JSONL execution diagnostics for a task",
+		"  omp-gateway cron logs <name> [--json]     View execution logs",
 		"",
 	];
 
@@ -121,9 +121,9 @@ export default class Gateway extends Command {
 				// --foreground: run in foreground (blocking). Used by the daemon child
 				// process and service mode (launchd/systemd). Default path daemonizes.
 				if (flags.foreground) {
-					process.title = "pi-gateway";
-					const { Gateway: GW } = await import("@oh-my-pi/pi-gateway/src/gateway");
-					const { loadConfig } = await import("@oh-my-pi/pi-gateway/src/config");
+					process.title = "omp-gateway";
+					const { Gateway: GW } = await import("../gateway");
+					const { loadConfig } = await import("../config");
 					const config = await loadConfig(configPath);
 					const gateway = new GW(config);
 
@@ -214,8 +214,8 @@ export default class Gateway extends Command {
 					await new Promise(() => {});
 					break;
 				}
-				const { getGatewayStatus, PID_FILE } = await import("@oh-my-pi/pi-gateway/src/gateway-daemon");
-				const { loadConfig, getDataDir } = await import("@oh-my-pi/pi-gateway/src/config");
+				const { getGatewayStatus, PID_FILE } = await import("../gateway-daemon");
+				const { loadConfig, getDataDir } = await import("../config");
 
 				// Already running?
 				const existingStatus = await getGatewayStatus();
@@ -227,17 +227,17 @@ export default class Gateway extends Command {
 
 				// Spawn detached child with --foreground.
 				// In bun dev mode: process.argv[1] is the .ts entry point.
-				// In compiled omp binary: process.argv[1] is absent, use "omp" from PATH.
+				// In compiled omp-gateway binary: process.argv[1] is the subcommand.
 				const entry = process.argv[1];
 				const isDevMode = entry && (entry.endsWith(".ts") || entry.endsWith(".js"));
 				const childCmd = isDevMode
-					? [process.execPath, entry, "gateway", "start", "--foreground"]
-					: [process.execPath, "gateway", "start", "--foreground"];
+					? [process.execPath, entry, "start", "--foreground"]
+					: [process.execPath, "start", "--foreground"];
 				if (configPath) childCmd.push("--config", configPath);
 
 				const child = Bun.spawn({
 					cmd: childCmd,
-					argv0: "pi-gateway",
+					argv0: "omp-gateway",
 					stdin: "ignore",
 					stdout: "ignore",
 					stderr: "ignore",
@@ -277,7 +277,7 @@ export default class Gateway extends Command {
 				break;
 			}
 			case "stop": {
-				const { stopGatewayDaemon } = await import("@oh-my-pi/pi-gateway/src/gateway-daemon");
+				const { stopGatewayDaemon } = await import("../gateway-daemon");
 				const stopped = await stopGatewayDaemon();
 				if (stopped) {
 					console.log("Gateway stopped.");
@@ -287,8 +287,8 @@ export default class Gateway extends Command {
 				break;
 			}
 			case "status": {
-				const { getGatewayStatus } = await import("@oh-my-pi/pi-gateway/src/gateway-daemon");
-				const { loadConfig, getConfigPath } = await import("@oh-my-pi/pi-gateway/src/config");
+				const { getGatewayStatus } = await import("../gateway-daemon");
+				const { loadConfig, getConfigPath } = await import("../config");
 				const config = await loadConfig(configPath);
 				const status = await getGatewayStatus();
 
@@ -345,9 +345,9 @@ export default class Gateway extends Command {
 				//      unrelated process) by inspecting the command line.
 				//   3. Nothing running → clean error.
 				const { isServiceInstalled, stopService, startService, getServiceStatus } = await import(
-					"@oh-my-pi/pi-gateway/src/service-installer"
+					"../service-installer"
 				);
-				const { getGatewayStatus, isGatewayProcess } = await import("@oh-my-pi/pi-gateway/src/gateway-daemon");
+				const { getGatewayStatus, isGatewayProcess } = await import("../gateway-daemon");
 
 				if (await isServiceInstalled()) {
 					const oldStatus = await getServiceStatus();
@@ -379,7 +379,7 @@ export default class Gateway extends Command {
 					if (newPid) {
 						console.log(`Gateway restarted via system service (new PID ${newPid}).`);
 					} else {
-						console.log("Gateway restart requested; new PID not yet visible (check `omp gateway status`).");
+						console.log("Gateway restart requested; new PID not yet visible (check `omp-gateway status`).");
 					}
 					return;
 				}
@@ -410,7 +410,7 @@ export default class Gateway extends Command {
 				}
 
 				console.error(
-					"Gateway is not running and not installed as a system service. Use `omp gateway start` first.",
+					"Gateway is not running and not installed as a system service. Use `omp-gateway start` first.",
 				);
 				process.exitCode = 1;
 				break;
@@ -418,7 +418,7 @@ export default class Gateway extends Command {
 			case "doctor": {
 				const argv = process.argv.slice(process.argv.indexOf("doctor") + 1);
 				const { runDoctor, renderText, renderJson, applyFixes, countBySeverity } = await import(
-					"@oh-my-pi/pi-gateway/src/doctor"
+					"../doctor"
 				);
 				const json = argv.includes("--json");
 				const doFix = argv.includes("--fix");
@@ -439,7 +439,7 @@ export default class Gateway extends Command {
 				break;
 			}
 			case "config": {
-				const { loadConfig, getConfigPath } = await import("@oh-my-pi/pi-gateway/src/config");
+				const { loadConfig, getConfigPath } = await import("../config");
 				const config = await loadConfig(configPath);
 				console.log(`Config file: ${getConfigPath()}`);
 				console.log(JSON.stringify(config, null, 2));
@@ -457,7 +457,7 @@ export default class Gateway extends Command {
 				const argv = process.argv.slice(process.argv.indexOf("test-longtask") + 1);
 				const accountId = argv[0];
 				const rest = argv.slice(1);
-				const { runLongTaskTest } = await import("@oh-my-pi/pi-gateway/src/test-longtask");
+				const { runLongTaskTest } = await import("../test-longtask");
 				let holdMs = 35_000;
 				let userId = "601590212";
 				let simulateStop = false;
@@ -475,7 +475,7 @@ export default class Gateway extends Command {
 				}
 				if (!accountId) {
 					console.error(
-						"Usage: omp gateway test-longtask <accountId> [--hold-ms N] [--user-id <id>] [--simulate-stop]",
+						"Usage: omp-gateway test-longtask <accountId> [--hold-ms N] [--user-id <id>] [--simulate-stop]",
 					);
 					process.exitCode = 1;
 					break;
@@ -504,7 +504,7 @@ export default class Gateway extends Command {
 				// The legacy `pi-gateway install` path used `bun <cliPath> install`;
 				// now the wizard lives at `pi-gateway/src/setup.ts` and is invoked
 				// like any other library function.
-				const { runInteractiveSetup } = await import("@oh-my-pi/pi-gateway/src/setup");
+				const { runInteractiveSetup } = await import("../setup");
 				const result = await runInteractiveSetup({
 					configPath,
 					nonInteractive: Boolean(flags.nonInteractive),
@@ -581,12 +581,12 @@ export default class Gateway extends Command {
 			cronStatus,
 			cronDiagnose,
 			cronLogs,
-		} = await import("@oh-my-pi/pi-gateway/src/scheduler");
+		} = await import("../scheduler");
 
 		const storage = new JsonFileStorage();
 		// Migrate from existing SQLite if present
 		try {
-			const { getSchedulerDbPath } = await import("@oh-my-pi/pi-gateway/src/scheduler");
+			const { getSchedulerDbPath } = await import("../scheduler");
 			const { existsSync } = await import("node:fs");
 			const dbPath = getSchedulerDbPath();
 			if (existsSync(dbPath)) {
@@ -642,19 +642,19 @@ export default class Gateway extends Command {
 				default:
 					console.log(`
 Cron management commands:
-  omp gateway cron create <schedule> <command...> [--name <name>] [--type shell|agent] [--deliver <channel>] [--deliver-user <id>] [--model <model>] [--provider <provider>] [--toolsets <a,b,c>] [--repeat <N>] [--source-channel <ch>] [--source-user <uid>] [--timeout-ms <ms>] [--skills <s1,s2,...>] [--retry <maxAttempts>] [--pre-script <path>]
-  omp gateway cron list [--json]
-  omp gateway cron pause <name>
-  omp gateway cron resume <name>
-  omp gateway cron run <name>                              Trigger a task now (debug only — skips delivery)
-  omp gateway cron test-run <name> [--in 90s] [--timeout 150s] [--no-restore]    Trigger through the real scheduler (waits + restores); verifies delivery
-  omp gateway cron remove <name>
-  omp gateway cron update <name> [--account <id> | --clear-account] [--deliver <channel> | --clear-deliver] [--deliver-user <id> | --clear-deliver-user] [--timeout-ms <ms>]
-  omp gateway cron reconcile [--apply]                      Backfill accountId on legacy unbound tasks (dry run by default)
-  omp gateway cron status
-  omp gateway cron diagnose [--json]                        System health (task counts + per-task snapshot)
-  omp gateway cron diagnose <name> [--json]                 View JSONL execution diagnostics for a task
-  omp gateway cron logs <name> [--json]
+  omp-gateway cron create <schedule> <command...> [--name <name>] [--type shell|agent] [--deliver <channel>] [--deliver-user <id>] [--model <model>] [--provider <provider>] [--toolsets <a,b,c>] [--repeat <N>] [--source-channel <ch>] [--source-user <uid>] [--timeout-ms <ms>] [--skills <s1,s2,...>] [--retry <maxAttempts>] [--pre-script <path>]
+  omp-gateway cron list [--json]
+  omp-gateway cron pause <name>
+  omp-gateway cron resume <name>
+  omp-gateway cron run <name>                              Trigger a task now (debug only — skips delivery)
+  omp-gateway cron test-run <name> [--in 90s] [--timeout 150s] [--no-restore]    Trigger through the real scheduler (waits + restores); verifies delivery
+  omp-gateway cron remove <name>
+  omp-gateway cron update <name> [--account <id> | --clear-account] [--deliver <channel> | --clear-deliver] [--deliver-user <id> | --clear-deliver-user] [--timeout-ms <ms>]
+  omp-gateway cron reconcile [--apply]                      Backfill accountId on legacy unbound tasks (dry run by default)
+  omp-gateway cron status
+  omp-gateway cron diagnose [--json]                        System health (task counts + per-task snapshot)
+  omp-gateway cron diagnose <name> [--json]                 View JSONL execution diagnostics for a task
+  omp-gateway cron logs <name> [--json]
 `);
 					break;
 			}
@@ -669,7 +669,7 @@ Cron management commands:
 	async #handleService(): Promise<void> {
 		const sub = process.argv[process.argv.indexOf("service") + 1];
 		const { installService, uninstallService, startService, stopService, getServiceStatus } = await import(
-			"@oh-my-pi/pi-gateway/src/service-installer"
+			"../service-installer"
 		);
 
 		switch (sub) {
@@ -678,7 +678,7 @@ Cron management commands:
 				// (Previously this resolved `<pi-gateway>/src/cli.ts` and passed it through,
 				// which only worked in dev mode and broke the compiled-binary install path.)
 				await installService();
-				console.log("Service installed. Run 'omp gateway service start' to begin.");
+				console.log("Service installed. Run 'omp-gateway service start' to begin.");
 				break;
 			}
 			case "uninstall":
@@ -705,11 +705,11 @@ Cron management commands:
 			default:
 				console.log(`
 Service management commands:
-  omp gateway service install     Install as system service
-  omp gateway service uninstall   Remove system service
-  omp gateway service start       Start system service
-  omp gateway service stop        Stop system service
-  omp gateway service status      Show service status
+  omp-gateway service install     Install as system service
+  omp-gateway service uninstall   Remove system service
+  omp-gateway service start       Start system service
+  omp-gateway service stop        Stop system service
+  omp-gateway service status      Show service status
 `);
 		}
 	}

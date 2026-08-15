@@ -1,8 +1,12 @@
 # Gateway 二进制拆分计划
 
-> Status: proposal awaiting approval.
+> Status: approved 2026-08-15 — implementation on feat/gateway-binary-split.
 > Owner: gateway-core
 > Date: 2026-08-13
+>
+> Review amendments (2026-08-15): hard cutover — legacy `omp` is NOT
+> backward-compatible at the RPC handshake, `resolveStableRuntime` has no
+> `omp` fallback. Sections 5.2/5.3/5.4 reflect the approved design.
 
 ## 1. Background
 
@@ -56,40 +60,43 @@
 
 ### 5.2 ompPath 默认值
 
-`packages/pi-gateway/src/agent-transport.ts:137` 当前注释 "default: 'omp'"，逻辑是从 PATH 找 `"omp"`。
+`packages/pi-gateway/src/agent-transport.ts` 当前注释 "default: 'omp'"，逻辑是从 PATH 找 `"omp"`。
 
-拆完后改成：
+拆完后：
 
-```ts
-function resolveDefaultOmpPath(): string {
-  const stable = "~/.local/bin/omp";
-  if (existsSync(stable)) return stable;
-  return "omp"; // PATH fallback
-}
-```
+- `agent-transport.ts` 导出 `resolveDefaultOmpPath()`：`~/.local/bin/omp` 存在且可执行（X_OK）→ 返回它；否则返回 `"omp"`（PATH fallback，dev 环境用）
+- `config.ts` 的 `DEFAULT_CONFIG.agent.ompPath` 硬默认 `"omp"` 删除——未配置时保持 `undefined`，由消费点统一 fallback，避免硬默认遮蔽 stable-path 逻辑
+- 消费点（3 处）全部 `?? resolveDefaultOmpPath()`：`RpcTransport.#spawnAndWaitReady`、`doctor.ts`、`gateway-cron-lifecycle.ts`
 
-约定：`~/.local/bin/omp` 优先。这跟 `scripts/install.sh` 的安装位置对齐。用户在 `gateway.json` 里显式配 `agent.ompPath` 的，保留尊重。
+约定：`~/.local/bin/omp` 优先。这跟 `scripts/install.sh` 的安装位置对齐。用户在 `gateway.json` 里显式配 `agent.ompPath` 的，保留尊重（优先级最高）。
 
 ### 5.3 launchd plist
 
-`packages/pi-gateway/src/service-installer.ts:243-274` 的 `resolveStableRuntime` / `buildServiceArgv` 改写：
+`packages/pi-gateway/src/service-installer.ts` 的 `resolveStableRuntime` / `buildServiceArgv` 改写：
 
-- `resolveStableRuntime()` 优先返回 `~/.local/bin/omp-gateway`，找不到再找 `~/.local/bin/omp`（向后兼容过渡期，但不依赖）
-- `buildServiceArgv()` 默认拼 `[omp-gateway, start, --foreground]`
-- dev mode 检测逻辑不变（仍 `argv[1]` endsWith `.ts`/`.js`）
+- `resolveStableRuntime()` 只认 `~/.local/bin/omp-gateway`（存在且可执行）。**不 fallback 到 `~/.local/bin/omp`**——硬切：`omp` 是 agent runtime，不能当 daemon host。找不到返回 null，走 dev/prod 检测
+- `buildServiceArgv()` 拼 `[omp-gateway, start, --foreground]` / dev `[bun, entry.ts, start, --foreground]` / prod `[binary, start, --foreground]`（root 子命令，无 `gateway` 中间层）
+- dev mode 检测逻辑不变（仍 `argv[1]` endsWith `.ts`/`.js`；prod 时 argv[1] 是子命令名如 `"service"`）
 - 顶部注释从 "omp gateway start --foreground" 全面改成 "omp-gateway start --foreground"
 
 `SERVICE_NAME = "com.narwal.pi-gateway"` 保持不变（plist 文件名兼容，单纯 argv 内容变化）。
 
 ### 5.4 跨进程 RPC 握手
 
-`packages/pi-gateway/src/agent-transport.ts:333-342` 当前 spawn `omp --mode rpc` 后直接等 `{type: "ready"}`。改为：
+`packages/pi-gateway/src/agent-transport.ts` 当前 spawn `omp --mode rpc` 后直接等 `{type: "ready"}`。改为：
 
 1. spawn 后第一个 stdout frame 必须是 `{"type": "ready", "protocol_version": 1, "agent": "omp"}`
-2. `protocol_version` 不匹配 → throw `RpcTransportError`，bridge 走 crash recovery
+2. **硬切（harden 不兼容 legacy）**：`protocol_version` 缺失（旧 omp）或 ≠ 1 → kill 子进程 + `start()` reject `RpcTransportError`，错误信息直接说人话（"Agent RPC handshake failed ... Upgrade omp"），bridge 走 crash recovery（有 maxCrashRetries 上限，不会无限 crash loop）
 3. omp 端在 `--mode rpc` 启动时打印这个 frame，几乎零成本
 
-为什么不加更重的协议版本号：99% 的改 agent 不会动 RPC frame 形状。如果将来 break，bump `protocol_version`，加 warning；这步不必现在做。
+升级顺序无约束（配套发布，正常路径不触发）：
+
+| omp \ omp-gateway | 旧 gateway | 新 gateway |
+|---|---|---|
+| 旧 omp（无 protocol_version） | 照旧 | 握手 reject + 明确升级指引 |
+| 新 omp（v1） | 天然兼容（旧 transport 忽略多余字段） | v1 接受 |
+
+为什么不加更重的协议版本号：99% 的改 agent 不会动 RPC frame 形状。如果将来 break，bump `RPC_PROTOCOL_VERSION`（transport 侧常量，rpc-mode.ts 同值），旧 omp 被直接拒、用户升级 omp 即恢复；这步不必现在做。
 
 ### 5.5 CLI 命令迁移
 
@@ -136,15 +143,14 @@ function resolveDefaultOmpPath(): string {
 
 ### 改动（10）
 
-7. `packages/pi-gateway/src/service-installer.ts` — `resolveStableRuntime` / `buildServiceArgv` 改，注释全面更新
-8. `packages/pi-gateway/src/agent-transport.ts` — 新增 `protocolVersion`、`resolveDefaultOmpPath`、`#spawnAndWaitReady` 解析新字段
-9. `packages/pi-gateway/src/agent-bridge.ts` — `AgentBridgeOptions` 增 `defaultOmpPath`
-10. `packages/pi-gateway/src/cli.ts` — gateway config resolve 路径注入 `defaultOmpPath`
-11. `packages/pi-gateway/src/types.ts` — `GatewayConfig.agent.ompPath` 解析逻辑（如果单独抽出）
-12. `packages/coding-agent/src/modes/rpc/rpc.ts`（或等价文件） — `--mode rpc` ready frame 加 `protocol_version` + `agent`
-13. `packages/coding-agent/scripts/build-binary.ts` — 注释更新
-14. `packages/pi-gateway/src/index.ts` — 架构注释更新
-15. `packages/pi-gateway/src/agent-bridge-types.ts` — 类型增 `ompPath?` 字段
+7. `packages/pi-gateway/src/service-installer.ts` — `resolveStableRuntime`（只认 omp-gateway）/ `buildServiceArgv` 改，注释全面更新
+8. `packages/pi-gateway/src/agent-transport.ts` — 新增 `RPC_PROTOCOL_VERSION`、`resolveDefaultOmpPath`、ready 握手硬校验
+9. `packages/pi-gateway/src/config.ts` — `DEFAULT_CONFIG.agent.ompPath` 硬默认删除（未配置保持 undefined）
+10. `packages/pi-gateway/src/doctor.ts` + `gateway-cron-lifecycle.ts` — `?? resolveDefaultOmpPath()` 统一 fallback（原计划 9/10/11 的 ompPath 解析冗余合并到此处：AgentBridgeOptions.ompPath 已存在，默认在 transport 层解析，不新增 defaultOmpPath 字段）
+11. `packages/coding-agent/src/modes/rpc/rpc-mode.ts` — `--mode rpc` ready frame 加 `protocol_version` + `agent`
+12. `packages/coding-agent/scripts/build-binary.ts` — 注释更新（omp = agent runtime half）
+13. `packages/pi-gateway/src/index.ts` — 架构注释更新
+14. `packages/pi-gateway/package.json` — `build` script（打包 omp-gateway）、`start` 指向自包 cli.ts
 
 ### 文档 / CHANGELOG（5）
 
@@ -193,9 +199,9 @@ function resolveDefaultOmpPath(): string {
 
 ## 8. Risks
 
-1. **`isGatewayProcess()` ps 检测**（`packages/pi-gateway/src/gateway-daemon.ts:67-81`）。新 binary argv 是 `[omp-gateway, start, --foreground]`，"gateway" 子串不在。需要决定：改检测逻辑（`args.includes("omp-gateway")`），还是接受 dev 模式仍检测 "gateway"（dev argv 是 `[bun, entry.ts, gateway, start, --foreground]`，"gateway" 还在）。PR 1 验收时手动验证。
+1. **`isGatewayProcess()` ps 检测**（`packages/pi-gateway/src/gateway-daemon.ts`）。新 binary argv 是 `[omp-gateway, start, --foreground]`，但 `"omp-gateway"`/`"packages/pi-gateway"` 都含 `"gateway"` 子串，现逻辑 `args.includes("gateway") && includes("--foreground")` 对旧 prod / 新 prod / 新 dev 三种 argv 形状全部命中——**实现零改动**，PR 1 补单元测试锁三种形状。
 
-2. **`installService` 的 dev mode 检测**（`service-installer.ts:222-225`）。拆完新 binary argv[1] 是空，但 `process.argv[0]` 是 `omp-gateway`。dev 跑 `bun packages/pi-gateway/src/cli.ts service install` 仍识别为 dev（argv[1] endsWith .ts）；prod 跑 `~/.local/bin/omp-gateway service install` 识别为 prod。两条路径都要测试。
+2. **`installService` 的 dev mode 检测**（`service-installer.ts`）。拆完新 binary argv[1] 是子命令名（"service"/"start"/…），不 endsWith .ts/.js → prod；dev 跑 `bun packages/pi-gateway/src/cli.ts service install` argv[1] endsWith .ts → dev。检测逻辑不变，两条路径都要测试。
 
 3. **`OMP_GATEWAY_TEST_MODE` 注入逻辑**（`service-installer.ts:91`）。plist 字段保留，env 名不变。这条不大，但要写测试覆盖。
 
@@ -205,7 +211,7 @@ function resolveDefaultOmpPath(): string {
 
 6. **install.sh 多平台分发** — release artifact 从 5 个变 10 个，tarball 内文件列表变了。install.sh 的 URL fetch / extract 逻辑跟着改。
 
-7. **e2e 测试需要两个 binary** — `packages/pi-gateway/test/restart-sentinel.e2e.test.ts` 这种依赖真实 omp 二进制的测试，CI 跑前需要 install 步骤或测试 fixture 改 inline build。
+7. **e2e 测试需要两个 binary** — `real-omp-model-hotswap.test.ts`（唯一依赖真实 omp 的测试，ompPath "omp" PATH 查找）拆完行为不变。新增握手互操作验证：fixture helper 指向两个 dev build 产物，CI 前置 build。restart-sentinel.e2e 用的是 fake RPC script，不依赖真实 binary（原计划引用有误）。
 
 8. **gitnexus detect_changes 影响面** — coding-agent cli.ts 减 1 行 + 删 1 个 717 行文件，影响面中等；service-installer.ts 改 argv 生成 + protocol_version handshake 是新代码，风险等级待跑 detect_changes 后定。
 

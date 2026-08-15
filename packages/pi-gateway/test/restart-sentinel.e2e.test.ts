@@ -32,7 +32,7 @@ import { sampleTextMessage } from "./fixtures/sample-messages";
 const FAKE_RPC_SCRIPT = `#!/usr/bin/env bun
 import fs from 'node:fs';
 import path from 'node:path';
-process.stdout.write(JSON.stringify({ type: "ready" }) + "\\n");
+process.stdout.write(JSON.stringify({ type: "ready", protocol_version: 1 }) + "\\n");
 let currentSession = "";
 let sessionHistory = [];
 let buffer = "";

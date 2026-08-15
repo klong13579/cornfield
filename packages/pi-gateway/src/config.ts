@@ -106,7 +106,10 @@ const gatewayConfigSchema = z.object({
 const DEFAULT_CONFIG: GatewayConfig = {
 	channels: {},
 	agent: {
-		ompPath: "omp",
+		// No default `ompPath` on purpose: an unset agent.ompPath surfaces as
+		// `undefined` and consumers resolve it via `resolveDefaultOmpPath()`
+		// (~/.local/bin/omp first, PATH fallback). A hard-coded "omp" default
+		// here would shadow the stable-path logic in the transport.
 		maxConcurrentSessions: 3,
 	},
 	session: {

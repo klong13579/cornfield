@@ -13,7 +13,7 @@ import { AgentBridge } from "../src/agent-bridge";
 import type { InboundMessage, OutboundMessage } from "../src/types";
 
 const FAKE_RPC_SCRIPT = `#!/usr/bin/env bun
-process.stdout.write(JSON.stringify({ type: "ready" }) + "\\n");
+process.stdout.write(JSON.stringify({ type: "ready", protocol_version: 1 }) + "\\n");
 let currentSession = "";
 let currentModel = { provider: "narwal-plan", id: "deepseek-r1" };
 let buffer = "";

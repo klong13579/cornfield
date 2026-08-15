@@ -188,19 +188,31 @@ describe("generateLaunchdPlist env persistence", () => {
 });
 
 describe("resolveStableRuntime", () => {
-	test("returns the candidate path when ~/.local/bin/omp exists and is executable", () => {
+	test("returns the omp-gateway path when ~/.local/bin/omp-gateway exists and is executable", () => {
 		const home = mkdtempSync(join(tmpdir(), "omp-stable-"));
 		try {
 			const dir = join(home, ".local", "bin");
 			require("node:fs").mkdirSync(dir, { recursive: true });
-			require("node:fs").writeFileSync(join(dir, "omp"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
-			expect(resolveStableRuntime(home)).toBe(join(home, ".local", "bin", "omp"));
+			require("node:fs").writeFileSync(join(dir, "omp-gateway"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+			expect(resolveStableRuntime(home)).toBe(join(home, ".local", "bin", "omp-gateway"));
 		} finally {
 			rmSync(home, { recursive: true, force: true });
 		}
 	});
 
-	test("returns null when ~/.local/bin/omp does not exist", () => {
+	test("ignores a plain ~/.local/bin/omp — the agent binary cannot act as the daemon", () => {
+		const home = mkdtempSync(join(tmpdir(), "omp-stable-"));
+		try {
+			const dir = join(home, ".local", "bin");
+			require("node:fs").mkdirSync(dir, { recursive: true });
+			require("node:fs").writeFileSync(join(dir, "omp"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+			expect(resolveStableRuntime(home)).toBeNull();
+		} finally {
+			rmSync(home, { recursive: true, force: true });
+		}
+	});
+
+	test("returns null when ~/.local/bin/omp-gateway does not exist", () => {
 		const home = mkdtempSync(join(tmpdir(), "omp-stable-"));
 		try {
 			expect(resolveStableRuntime(home)).toBeNull();
@@ -209,12 +221,12 @@ describe("resolveStableRuntime", () => {
 		}
 	});
 
-	test("returns null when ~/.local/bin/omp exists but is not executable", () => {
+	test("returns null when ~/.local/bin/omp-gateway exists but is not executable", () => {
 		const home = mkdtempSync(join(tmpdir(), "omp-stable-"));
 		try {
 			const dir = join(home, ".local", "bin");
 			require("node:fs").mkdirSync(dir, { recursive: true });
-			require("node:fs").writeFileSync(join(dir, "omp"), "not executable\n", { mode: 0o644 });
+			require("node:fs").writeFileSync(join(dir, "omp-gateway"), "not executable\n", { mode: 0o644 });
 			expect(resolveStableRuntime(home)).toBeNull();
 		} finally {
 			rmSync(home, { recursive: true, force: true });
@@ -223,17 +235,20 @@ describe("resolveStableRuntime", () => {
 });
 
 describe("generateLaunchdPlist runtime resolution", () => {
-	test("ProgramArguments[0] is the stable runtime when ~/.local/bin/omp exists", () => {
+	test("ProgramArguments: stable runtime + root subcommands when omp-gateway exists", () => {
 		const home = mkdtempSync(join(tmpdir(), "omp-stable-"));
 		try {
 			const dir = join(home, ".local", "bin");
 			require("node:fs").mkdirSync(dir, { recursive: true });
-			require("node:fs").writeFileSync(join(dir, "omp"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+			require("node:fs").writeFileSync(join(dir, "omp-gateway"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
 			const plist = generateLaunchdPlist("/tmp/log", { HOME: home });
 			// First ProgramArguments entry must be the stable runtime, NOT
 			// whatever process.execPath happens to be in the test env.
-			expect(plist).toContain(`<string>${join(home, ".local", "bin", "omp")}</string>`);
+			expect(plist).toContain(`<string>${join(home, ".local", "bin", "omp-gateway")}</string>`);
 			expect(plist).not.toContain(`<string>${process.execPath}</string>`);
+			// Root subcommands — no `gateway` middle layer anymore.
+			expect(plist).toContain("<string>start</string>");
+			expect(plist).not.toContain("<string>gateway</string>");
 		} finally {
 			rmSync(home, { recursive: true, force: true });
 		}
@@ -244,8 +259,11 @@ describe("generateLaunchdPlist runtime resolution", () => {
 		try {
 			const plist = generateLaunchdPlist("/tmp/log", { HOME: home });
 			// No stable runtime → plist must use process.execPath as argv[0],
-			// matching the pre-existing dev/prod behavior.
+			// matching the pre-existing dev/prod behavior. Root subcommands
+			// only — no `gateway` middle layer.
 			expect(plist).toContain(`<string>${process.execPath}</string>`);
+			expect(plist).toContain("<string>start</string>");
+			expect(plist).not.toContain("<string>gateway</string>");
 		} finally {
 			rmSync(home, { recursive: true, force: true });
 		}

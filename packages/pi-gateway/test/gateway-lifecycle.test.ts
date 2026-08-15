@@ -361,6 +361,44 @@ describe("isGatewayProcess", () => {
 			await child.exited;
 		}
 	});
+
+	// Post-split argv shapes (docs/gateway-binary-split-plan.md §5.5): the
+	// daemon is now `omp-gateway start --foreground` (binary) or
+	// `bun .../packages/pi-gateway/src/cli.ts start --foreground` (dev). The
+	// `gateway` substring matcher must stay true for both — "omp-gateway" and
+	// the "pi-gateway" path segment both contain it, so the unchanged
+	// detection keeps working without an explicit argv rewrite.
+	test("returns true for the new binary shape `omp-gateway start --foreground`", async () => {
+		const child = Bun.spawn({
+			cmd: ["/usr/bin/yes", "omp-gateway", "start", "--foreground"],
+			stdin: "ignore",
+			stdout: "ignore",
+			stderr: "ignore",
+		});
+		try {
+			await Bun.sleep(50);
+			expect(await isGatewayProcess(child.pid)).toBe(true);
+		} finally {
+			child.kill();
+			await child.exited;
+		}
+	});
+
+	test("returns true for the new dev shape `bun .../pi-gateway/src/cli.ts start --foreground`", async () => {
+		const child = Bun.spawn({
+			cmd: ["/usr/bin/yes", "bun", "packages/pi-gateway/src/cli.ts", "start", "--foreground"],
+			stdin: "ignore",
+			stdout: "ignore",
+			stderr: "ignore",
+		});
+		try {
+			await Bun.sleep(50);
+			expect(await isGatewayProcess(child.pid)).toBe(true);
+		} finally {
+			child.kill();
+			await child.exited;
+		}
+	});
 });
 
 // ---------------------------------------------------------------------------
@@ -368,7 +406,7 @@ describe("isGatewayProcess", () => {
 // ---------------------------------------------------------------------------
 
 const FAKE_RPC_SCRIPT_RELOAD = `#!/usr/bin/env bun
-process.stdout.write(JSON.stringify({ type: "ready" }) + "\\n");
+process.stdout.write(JSON.stringify({ type: "ready", protocol_version: 1 }) + "\\n");
 let buffer = "";
 function emit(value) {
   process.stdout.write(JSON.stringify(value) + "\\n");
@@ -529,7 +567,7 @@ describe("Gateway reload plan", () => {
 const FAKE_RPC_SCRIPT_HEALTH = `#!/usr/bin/env bun
 process.on("uncaughtException", e => { process.stderr.write("UNCAUGHT:" + (e && e.stack ? e.stack : String(e)) + "\\n"); process.exit(1); });
 process.on("unhandledRejection", (r) => { process.stderr.write("UNHANDLED:" + String(r) + "\\n"); process.exit(1); });
-process.stdout.write(JSON.stringify({ type: "ready" }) + "\\n");
+process.stdout.write(JSON.stringify({ type: "ready", protocol_version: 1 }) + "\\n");
 let currentSession = "";
 let buffer = "";
 function emit(value) {

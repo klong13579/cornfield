@@ -30,7 +30,7 @@ import type { GatewayConfig, InboundMessage, OutboundMessage, SessionRecord } fr
 
 /** Fake RPC: records every command, echoes session state for switch_session. */
 const FAKE_RPC_SCRIPT = `#!/usr/bin/env bun
-process.stdout.write(JSON.stringify({ type: "ready" }) + "\\n");
+process.stdout.write(JSON.stringify({ type: "ready", protocol_version: 1 }) + "\\n");
 const receivedCommands = [];
 let currentSession = "";
 let sessionIdCounter = 0;

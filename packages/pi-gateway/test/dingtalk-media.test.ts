@@ -334,7 +334,7 @@ const REPLY_WITH_MIXED_MEDIA = `Here is the analysis:
 That's the lot.`;
 
 const FAKE_RPC_SCRIPT = `#!/usr/bin/env bun
-process.stdout.write(JSON.stringify({ type: "ready" }) + "\\n");
+process.stdout.write(JSON.stringify({ type: "ready", protocol_version: 1 }) + "\\n");
 const reply = ${JSON.stringify(REPLY_WITH_MIXED_MEDIA)};
 let buffer = "";
 function emit(value) { process.stdout.write(JSON.stringify(value) + "\\n"); }
@@ -793,7 +793,7 @@ const logPath = process.env.IMAGE_RPC_LOG;
 function log(entry) {
   if (logPath) fs.appendFileSync(logPath, JSON.stringify(entry) + "\\n");
 }
-process.stdout.write(JSON.stringify({ type: "ready" }) + "\\n");
+process.stdout.write(JSON.stringify({ type: "ready", protocol_version: 1 }) + "\\n");
 let buffer = "";
 function emit(value) {
   process.stdout.write(JSON.stringify(value) + "\\n");

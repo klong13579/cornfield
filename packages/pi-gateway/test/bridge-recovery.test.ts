@@ -91,10 +91,10 @@ function emit(value) {
   process.stdout.write(JSON.stringify(value) + "\\n");
 }
 if (spawns === 0) {
-  emit({ type: "ready" });
+  emit({ type: "ready", protocol_version: 1 });
   process.exit(5); // after-ready crash, like the 8/10 SIGTRAP
 }
-emit({ type: "ready" });
+emit({ type: "ready", protocol_version: 1 });
 let buffer = "";
 async function handleFrame(frame) {
   if (frame.type === "switch_session") {
@@ -127,7 +127,7 @@ const CRASH_WITH_STDERR_SCRIPT = `#!/usr/bin/env bun
 function emit(value) {
   process.stdout.write(JSON.stringify(value) + "\\n");
 }
-emit({ type: "ready" });
+emit({ type: "ready", protocol_version: 1 });
 process.stderr.write("Bun panic: fake crash trace\\n  at fakeModule (fake:1:1)\\n  at secondFrame (fake:2:2)\\n");
 await Bun.sleep(100);
 process.exit(5);

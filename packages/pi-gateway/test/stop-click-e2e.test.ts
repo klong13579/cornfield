@@ -41,7 +41,7 @@ const HR_CONFIG: DingTalkConfig = {
 function buildHoldRpc(holdMs: number): string {
 	return `#!/usr/bin/env bun
 const HOLD_MS = ${holdMs};
-process.stdout.write(JSON.stringify({ type: "ready" }) + "\\n");
+process.stdout.write(JSON.stringify({ type: "ready", protocol_version: 1 }) + "\\n");
 let buffer = "";
 const emit = (v) => process.stdout.write(JSON.stringify(v) + "\\n");
 let toolActive = false;

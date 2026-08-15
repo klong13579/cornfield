@@ -175,8 +175,11 @@ export async function runRpcMode(session: AgentSession): Promise<never> {
 		process.exit(1);
 	});
 
-	// Signal to RPC clients that the server is ready to accept commands
-	process.stdout.write(`${JSON.stringify({ type: "ready" })}\n`);
+	// Signal to RPC clients that the server is ready to accept commands. The
+	// protocol_version field is the wire handshake the gateway validates
+	// before treating this subprocess as compatible (see RPC_PROTOCOL_VERSION
+	// in packages/pi-gateway/src/agent-transport.ts — keep the value in sync).
+	process.stdout.write(`${JSON.stringify({ type: "ready", protocol_version: 1, agent: "omp" })}\n`);
 	const output = (obj: RpcResponse | RpcExtensionUIRequest | object) => {
 		process.stdout.write(`${JSON.stringify(obj)}\n`);
 	};

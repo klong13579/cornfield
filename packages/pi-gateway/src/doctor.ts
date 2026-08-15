@@ -20,8 +20,8 @@
  */
 
 import * as fs from "node:fs";
-import * as fspromises from "node:fs/promises";
 import * as path from "node:path";
+import { resolveDefaultOmpPath } from "./agent-transport";
 import { getDataDir, validateConfig } from "./config";
 import { checkCredentials } from "./credential-resolver";
 import { getGatewayStatus, PID_FILE, STATUS_FILE } from "./gateway-daemon";
@@ -156,9 +156,9 @@ async function checkCredentialsSection(config?: GatewayConfig): Promise<Section>
 	const findings: Finding[] = [];
 
 	// ompPath binary must exist and be runnable for agent tasks/RPC.
-	const ompPath = config?.agent?.ompPath ?? "omp";
+	const ompPath = config?.agent?.ompPath ?? resolveDefaultOmpPath();
 	if (ompPath === "omp" || !ompPath.includes("/")) {
-		findings.push(ok(`ompPath: "${ompPath}" (resolved from PATH at spawn time)`));
+		findings.push(ok(`ompPath: "${ompPath}" (resolved from PATH)`));
 	} else {
 		try {
 			await fs.access(ompPath, (await import("node:fs")).constants.X_OK);

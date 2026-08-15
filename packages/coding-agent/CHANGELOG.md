@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- **`omp gateway <action>` removed — gateway moved to the standalone `omp-gateway` binary** (`src/cli.ts`): the gateway command is no longer part of `omp`. Use `omp-gateway start|stop|status|reload|doctor|config|cron|service|setup|test-longtask|help` (see docs/gateway-binary-split-plan.md). `omp gateway *` now returns `command not found`. `~/.local/bin/omp` continues to be the agent runtime; the daemon installs at `~/.local/bin/omp-gateway`. Breaking upgrade: re-run `omp-gateway service install` once after installing both binaries.
+
 ### Added
 
 - **Agent Hub: live roster tool + Alt+A panel** (`src/tools/hub/`, `src/modes/components/agent-hub.ts`, `src/modes/controllers/selector-controller.ts`, `src/config/keybindings.ts`, `src/modes/{interactive-mode,types,input-controller}.ts`, `test/tools/hub.test.ts`, `test/modes/agent-hub.test.ts`): a read-only, work-aware view of every live agent in the process — the `hub` tool (`op: list` / `op: show`) lists peers with status/activity/freshness and dives into one peer's identity/history, and the `Alt+A` panel renders the same roster live (registry-subscribed), sorted busy-first, with per-row detail. Messaging stays in `irc`, async-job control in `job`; killing/reviving remains human-owned. Ported from the upstream hub design (2026-08) with the messaging/job/launch halves intentionally not duplicated.

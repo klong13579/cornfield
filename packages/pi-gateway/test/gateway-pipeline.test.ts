@@ -22,7 +22,7 @@ import type { DingTalkRawMessage } from "../src/types";
 // ═══════════════════════════════════════════════════════════════════════
 
 const FAKE_RPC_SCRIPT = `#!/usr/bin/env bun
-process.stdout.write(JSON.stringify({ type: "ready" }) + "\\n");
+process.stdout.write(JSON.stringify({ type: "ready", protocol_version: 1 }) + "\\n");
 let buffer = "";
 function emit(v) { process.stdout.write(JSON.stringify(v) + "\\n"); }
 async function handleFrame(frame) {
@@ -51,7 +51,7 @@ for await (const chunk of Bun.stdin.stream()) {
 `;
 
 const FAKE_SLASH_RPC_SCRIPT = `#!/usr/bin/env bun
-process.stdout.write(JSON.stringify({ type: "ready" }) + "\\n");
+process.stdout.write(JSON.stringify({ type: "ready", protocol_version: 1 }) + "\\n");
 let currentSession = "";
 let sessionIdCounter = 0;
 let buffer = "";

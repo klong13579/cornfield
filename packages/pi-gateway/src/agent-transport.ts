@@ -22,9 +22,51 @@
  * needs from "a thing that talks to a child process" — nothing more.
  */
 
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { logger } from "@oh-my-pi/pi-utils";
 import type { FileSink } from "bun";
 import { resolveCredentialEnvVars } from "./credential-resolver";
+
+/**
+ * Version of the `--mode rpc` wire protocol spoken by the omp agent
+ * subprocess. Bump this when the RPC frame shapes change incompatibly so
+ * the gateway can reject an old omp binary with a clear upgrade error
+ * instead of mis-parsing frames.
+ *
+ * The value must stay in sync with `packages/coding-agent/src/modes/rpc/
+ * rpc-mode.ts` which stamps it into the `ready` frame.
+ */
+export const RPC_PROTOCOL_VERSION = 1;
+
+/**
+ * Resolve the default omp binary path used to spawn `omp --mode rpc` agent
+ * subprocesses.
+ *
+ * Priority:
+ *   1. `~/.local/bin/omp` when present and executable — the canonical install
+ *      location produced by scripts/install.sh. Pinning the stable path here
+ *      (instead of the bare PATH name) makes the gateway's agent child
+ *      independent of the operator's shell PATH, which the daemon does not
+ *      source.
+ *   2. `"omp"` from PATH, for dev setups that have not installed the binary.
+ *
+ * Operators who set `agent.ompPath` explicitly in gateway.json keep their
+ * value — this function only fills the unset case.
+ *
+ * The `home` argument is exposed for hermetic tests; production callers omit
+ * it and the real `os.homedir()` is used.
+ */
+export function resolveDefaultOmpPath(home: string = os.homedir()): string {
+	const stable = path.join(home, ".local", "bin", "omp");
+	try {
+		fs.accessSync(stable, fs.constants.X_OK);
+		return stable;
+	} catch {
+		return "omp";
+	}
+}
 
 /** Inline-shape RPC event (subset of @oh-my-pi/pi-agent AgentEvent). */
 export interface AgentEvent {
@@ -133,7 +175,7 @@ export type HostToolCallHandler = (
 ) => Promise<void> | void;
 
 export interface RpcTransportOptions {
-	/** Path to omp binary (default: "omp") */
+	/** Path to omp binary (default: resolveDefaultOmpPath()) */
 	ompPath?: string;
 	/** Model to pass via `--model` flag on spawn (default: undefined) */
 	model?: string;
@@ -158,6 +200,10 @@ export class RpcTransport {
 	#proc: { pid: number; kill: () => void } | null = null;
 	#stdinWriter?: { write: (data: Uint8Array) => void };
 	#ready = false;
+	/** Set when the `ready` frame arrives with an incompatible (or missing)
+	 *  protocol_version. The child is killed and `start()` rejects with this
+	 *  diagnostic instead of a bare exit code. */
+	#readyFailureReason: string | undefined;
 	#pendingCommands = new Map<string, PendingCommand>();
 	#commandIdCounter = 0;
 	#reconnectGuard = false;
@@ -219,6 +265,7 @@ export class RpcTransport {
 
 	stop(): void {
 		this.#ready = false;
+		this.#readyFailureReason = undefined;
 		this.#reconnectGuard = false;
 
 		if (this.#proc) {
@@ -321,6 +368,7 @@ export class RpcTransport {
 				this.#proc = null;
 			}
 			this.#ready = false;
+			this.#readyFailureReason = undefined;
 			this.#stderrTail = [];
 
 			// Reject any pending commands
@@ -331,7 +379,7 @@ export class RpcTransport {
 			}
 			this.#pendingCommands.clear();
 
-			const ompPath = this.#options.ompPath ?? "omp";
+			const ompPath = this.#options.ompPath ?? resolveDefaultOmpPath();
 			const args = ["--mode", "rpc"];
 			if (this.#options.model) {
 				args.push("--model", this.#options.model);
@@ -393,7 +441,7 @@ export class RpcTransport {
 					clearInterval(checkReady);
 					reject(
 						new RpcTransportError(
-							`Agent RPC process exited with code ${exitCode} before ready`,
+							this.#readyFailureReason ?? `Agent RPC process exited with code ${exitCode} before ready`,
 							this.#stderrTail.join("\n"),
 						),
 					);
@@ -516,8 +564,24 @@ export class RpcTransport {
 			return;
 		}
 
-		// ready signal: mark transport ready, emit to owner
+		// ready signal: verify the protocol handshake, then mark transport
+		// ready and emit to owner.
 		if (parsed.type === "ready") {
+			const version = (parsed as { protocol_version?: unknown }).protocol_version;
+			if (version !== RPC_PROTOCOL_VERSION) {
+				// Hard handshake rejection: the child is a legacy or
+				// version-mismatched omp binary. Kill the child; the exited
+				// handler rejects start() with this diagnostic instead of
+				// leaving a half-ready subprocess or a bare exit code.
+				const why =
+					version === undefined
+						? "ready frame missing protocol_version (legacy omp)"
+						: `protocol_version ${String(version)} != expected ${RPC_PROTOCOL_VERSION}`;
+				this.#readyFailureReason = `Agent RPC handshake failed: ${why}. Upgrade omp (expected protocol_version: ${RPC_PROTOCOL_VERSION}).`;
+				logger.error("[RpcTransport] protocol handshake rejected", { reason: this.#readyFailureReason });
+				this.#proc?.kill();
+				return;
+			}
 			this.#ready = true;
 			this.#emit({ type: "ready" });
 			return;

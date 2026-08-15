@@ -21,7 +21,7 @@ import { RpcTransport, type RpcTransportEvent } from "../src/agent-transport";
 let tmpDir: string;
 
 const SCRIPT_CRASH_AFTER_READY = `#!/usr/bin/env bun
-process.stdout.write(JSON.stringify({ type: "ready" }) + "\\n");
+process.stdout.write(JSON.stringify({ type: "ready", protocol_version: 1 }) + "\\n");
 setTimeout(() => process.exit(7), 50);
 `;
 

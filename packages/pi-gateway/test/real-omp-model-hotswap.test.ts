@@ -5,13 +5,31 @@
  * management RPC commands end-to-end: get_available_models,
  * set_model, get_state. This proves the model hot-swap path
  * works through the actual agent, not just through mocks.
+ *
+ * Since the binary split, this must exercise the NEW omp (which stamps
+ * protocol_version into its ready frame). Resolve the dev build product
+ * (`packages/coding-agent/dist/omp`) and fail fast with build instructions
+ * when it is absent — a PATH lookup would silently pick up a legacy omp
+ * that the gateway's handshake now rejects.
  */
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { describe, expect, test } from "bun:test";
 import { AgentBridge } from "../src/agent-bridge";
 
+/** Dev build product of the omp agent binary (post-split). */
+function resolveDevOmpPath(): string {
+	const candidate = path.join(import.meta.dir, "..", "..", "coding-agent", "dist", "omp");
+	if (fs.existsSync(candidate)) return candidate;
+	throw new Error(
+		`Real-omp test needs the dev build product: ${candidate}. ` +
+			"Run: bun --cwd=packages/coding-agent run build",
+	);
+}
+
 describe("real omp agent model hot-swap", () => {
 	const bridge = new AgentBridge({
-		ompPath: "omp",
+		ompPath: resolveDevOmpPath(),
 	});
 
 	test("starts real omp agent", async () => {
