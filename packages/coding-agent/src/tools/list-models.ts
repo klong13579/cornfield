@@ -12,7 +12,7 @@ import { ToolError } from "./tool-errors";
  * can call.
  *
  * Mirrors the gateway-side `/models` / `/list-models` slash command (see
- * `packages/pi-gateway/src/gateway-model-switch.ts`) but is callable by
+ * `packages/omp-gateway/src/gateway-model-switch.ts`) but is callable by
  * the LLM, not just the user. Used when the LLM needs to proactively
  * surface options to the user (e.g. "what models are available?" /
  * "show me the Claude family") without bouncing the request off a

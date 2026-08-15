@@ -2,7 +2,7 @@
 
 ## 架构决策
 
-**独立包 `packages/pi-gateway/`**，不是 omp 子命令。理由：
+**独立包 `packages/omp-gateway/`**，不是 omp 子命令。理由：
 - 独立守护进程，omp 挂了不影响 IM 连接
 - 可以独立部署、版本管理、依赖隔离
 - 符合 Hermes/OpenClaw 行业标准
@@ -10,11 +10,11 @@
 ## 包结构
 
 ```
-packages/pi-gateway/
+packages/omp-gateway/
   package.json
   src/
     index.ts              # 入口点，启动 gateway
-    cli.ts                # CLI 入口 (pi-gateway start/status/config)
+    cli.ts                # CLI 入口 (omp-gateway start/status/config)
     gateway.ts            # Gateway 核心：管理 channels、sessions、消息路由
     config.ts             # 配置加载 (~/.pi/gateway.json)
     session-store.ts      # SQLite 会话存储 (per-user)
@@ -182,7 +182,7 @@ class DingTalkChannel implements Channel {
 ## 实施阶段
 
 ### Phase 1: 包脚手架
-1. 创建 `packages/pi-gateway/` 目录结构
+1. 创建 `packages/omp-gateway/` 目录结构
 2. package.json, tsconfig.json
 3. 定义核心接口 (Channel, Message, Gateway)
 4. CLI 入口 (start/status/config)

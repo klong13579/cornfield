@@ -40,7 +40,7 @@
 │                                           工具级规则紧贴工具描述
 │                                           默认 skeleton 包含 `cron (gateway host tool)`
 │                                           章节（gateway agents 专用）；非 gateway
-│                                           agent 可删。见 `docs/pi-gateway-cron-host-tool.md` §6
+│                                           agent 可删。见 `docs/omp-gateway-cron-host-tool.md` §6
 │
 ├── TODO.md                            ← [ALWAYS-ON] 当前任务状态
 │
@@ -230,7 +230,7 @@ Agent 进程启动 (cwd = agentDir)
 > - 创建目录列表：`src/skeleton/dirs.ts`（当前：`.omp`、`.omp/skills`、`knowledge`、`knowledge/handbook`、`cron`、`cron/tasks`、`cron/logs`、`sessions`）
 > - 资产文件：`src/skeleton/assets/`（bun 静态 import，非运行时读取）
 > - 入口函数：`ensureAgentDir(agentDir)` / `resolveAgentDir(accountId, explicitDir?)` / `buildAgentSessionPath(agentDir, conversationId)`
-> - 调用方：`pi-gateway`（账户安装 / 启动时 ensure）、`omp agent init`（CLI）
+> - 调用方：`omp-gateway`（账户安装 / 启动时 ensure）、`omp agent init`（CLI）
 
 ---
 

@@ -56,21 +56,21 @@ bun run release                  # bumps versions, finalizes CHANGELOGs, tags, p
 
 The canonical pattern for all gateway lifecycle operations. **Both `AGENTS.md`'s "DingTalk issue reproduction" section and `.omp/skills/repro-inject/SKILL.md` Step 1 point here** — do not duplicate this pattern elsewhere.
 
-**Use `omp gateway service` (graceful), not `launchctl kickstart -k` (SIGKILL).**
+**Use `omp-gateway service` (graceful), not `launchctl kickstart -k` (SIGKILL).**
 
 #### Service-managed (standard)
 
-A fresh `omp gateway service install` writes `OMP_GATEWAY_TEST_MODE=1` and `OMP_GATEWAY_TEST_PORT=7890` into the plist by default (per `packages/pi-gateway/src/service-installer.ts` `PERSISTED_ENV_DEFAULTS`). Opt out with `export OMP_GATEWAY_TEST_MODE=0` before `service install`.
+A fresh `omp-gateway service install` writes `OMP_GATEWAY_TEST_MODE=1` and `OMP_GATEWAY_TEST_PORT=7890` into the plist by default (per `packages/omp-gateway/src/service-installer.ts` `PERSISTED_ENV_DEFAULTS`). Opt out with `export OMP_GATEWAY_TEST_MODE=0` before `service install`.
 
 ```bash
 # One-time setup:
-omp gateway service install
+omp-gateway service install
 
 # Restart (graceful — goes through gateway.stop() which writes
 # the restart-sentinel and drains active sessions before exiting):
-omp gateway service stop
+omp-gateway service stop
 sleep 5
-omp gateway service start
+omp-gateway service start
 ```
 
 #### Never `launchctl kickstart -k`
@@ -98,7 +98,7 @@ tail -20 ~/.omp/gateway-data/logs/service.log | grep -E "BOOT|service start"
 
 1. `bun run build` (or `bun run --cwd=packages/coding-agent build`) — produces a new `packages/coding-agent/dist/omp` (on macOS the build verifies the signed binary executes; a kernel-rejected signature fails the build)
 2. Atomically replace the installed binary — **`mv` onto a fresh inode, never `cp` over the running binary**: `cp packages/coding-agent/dist/omp /tmp/omp.new && mv /tmp/omp.new ~/.local/bin/omp`. `cp` truncates the same inode the running gateway is mapped from; the kernel's code-signature validation then transiently rejects the new content (`load code signature error 2` → SIGKILL on exec, exit 137), which looks like a broken signature even though `codesign --verify` passes. A fresh inode (mv) or rewriting the file (re-sign/touch) avoids it.
-3. `omp gateway service stop && sleep 5 && omp gateway service start` — picks up the new binary
+3. `omp-gateway service stop && sleep 5 && omp-gateway service start` — picks up the new binary
 
 Skipping step 1+2 makes "live test" silently exercise the **old** binary, masking source-level changes. Quick check: `file ~/.local/bin/omp` (should be `Mach-O 64-bit executable arm64`) and `ls -la ~/.local/bin/omp packages/coding-agent/dist/omp` (mtimes should match within the same minute after a build).
 
@@ -130,7 +130,7 @@ coding-agent              ← main CLI: TUI, 25+ tools, slash commands, modes, s
   └─ self-evolution       ← SQLite evolution DB, skill mining, episodic memory, regression replay
 
 Extension products:
-  pi-gateway              ← IM channels (DingTalk), scheduler (cron/interval/one-shot), agent bridge
+  omp-gateway              ← IM channels (DingTalk), scheduler (cron/interval/one-shot), agent bridge
   cognitive-coordination  ← L4 Synapse coordination layer (WIP)
   swarm-extension         ← multi-agent orchestration
   stats (omp-stats)       ← local observability dashboard
@@ -181,7 +181,7 @@ packages/
   natives/                    # N-API package wrapping crates/pi-natives
   utils/src/                  # logger, isEnoent, stream helpers, dirs, env
   self-evolution/src/         # evolution DB, skill extraction, episodic storage, learning admission
-  pi-gateway/src/             # DingTalk channel, scheduler, agent bridge, service installer
+  omp-gateway/src/             # DingTalk channel, scheduler, agent bridge, service installer
   cognitive-coordination/src/ # coordination registry, conflict resolver (WIP)
 
 crates/
@@ -343,7 +343,7 @@ Gateway features (image pipeline, card rendering, streaming) MUST be tested with
 
 Pattern: write a fake `omp --mode rpc` script that emits synthetic agent events (text deltas, tool calls, agent_end), spawn a real `AgentBridge` with the fake script as `ompPath`, call `DingTalkChannel.streamCard` directly. The card is delivered to a real DingTalk user via real API.
 
-Reference implementation: `packages/pi-gateway/src/test-longtask.ts` (long-task watcher test).
+Reference implementation: `packages/omp-gateway/src/test-longtask.ts` (long-task watcher test).
 
 Steps:
 1. Write a fake RPC script that emits the agent response you want to test (e.g. text containing `![](https://...)` for image pipeline)
@@ -410,9 +410,9 @@ to OAuth DM on `errcode 300001` regardless.
 **Distinction from "Gateway pipeline testing" (above):** that section is unit-level pipeline tests with a fake RPC script and `captureOutbound: true` (no real sends). This is end-to-end reproduction with real AgentBridge and real DingTalk sends — for when you need to prove the user's bug is reproducible outside the test harness, or for cron-task deliver verification where the only meaningful signal is "did DingTalk receive the message". Full Chinese usage and prereqs are in the script's header comment (`.omp/skills/repro-inject/repro-inject.ts:1-49`).
 
 **Known caveats:**
-- `omp gateway service stop` waits for graceful drain. If the gateway is stuck, use `pkill -TERM` (not `kill -9`) — see "Restart gateway" above.
+- `omp-gateway service stop` waits for graceful drain. If the gateway is stuck, use `pkill -TERM` (not `kill -9`) — see "Restart gateway" above.
 - The script's local JSON cache at `~/.omp/repro-state.json` is now only populated by the `--grab-webhook` path (5 min TTL, for back-to-back injects on the same freshly-grabbed session). The primary webhook source is `sessions.db`. If a grab went stale, `--clear` empties the cache so the next inject re-grabs.
-- `omp gateway cron test-run` (CLI) and `cron.test-run` (LLM host tool) both share the same `runTestRun` core; see `packages/pi-gateway/src/scheduler/test-run.ts` and `docs/...` for the scheduler-side contract.
+- `omp gateway cron test-run` (CLI) and `cron.test-run` (LLM host tool) both share the same `runTestRun` core; see `packages/omp-gateway/src/scheduler/test-run.ts` and `docs/...` for the scheduler-side contract.
 
 ### Running tests
 
@@ -447,7 +447,7 @@ Single workflow, triggered on push to `main`, `v*` tags, PRs, and manual dispatc
 - **Natives**: `natives-architecture.md`, `natives-binding-contract.md`, `natives-addon-loader-runtime.md`, `natives-build-release-debugging.md`
 - **Architecture deep-dive**: `packages/coding-agent/DEVELOPMENT.md` (~1189 lines) — boot sequence, full `src/` tree, orchestration internals.
 - **Self-evolution**: `omp-evolution-architecture-v{2,2.1,3}.md`, `docs/superpowers/`
-- **Gateway**: `hermes-gateway-cron-architecture.md`, `cron-decoupling-design.md`, `packages/pi-gateway/docs/`
+- **Gateway**: `hermes-gateway-cron-architecture.md`, `cron-decoupling-design.md`, `packages/omp-gateway/docs/`
 - **L4 Synapse**: `l4-evolution-architecture.md` (root, Chinese), `packages/cognitive-coordination/README.md`
 
 ## Changelog & Release

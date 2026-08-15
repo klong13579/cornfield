@@ -13,9 +13,9 @@
 `~/.local/bin/omp` 当前是单一二进制，包含两套逻辑：
 
 - **coding-agent 侧**：交互式 TUI、print mode、`--mode rpc`、25+ 工具、slash commands、self-evolution
-- **pi-gateway 侧**：IM 通道（DingTalk Stream）、cron scheduler、agent bridge、heartbeat、launchd plist
+- **omp-gateway 侧**：IM 通道（DingTalk Stream）、cron scheduler、agent bridge、heartbeat、launchd plist
 
-两者通过 `packages/coding-agent/src/commands/gateway.ts:106-525` 的 10 个 action（start/stop/status/reload/doctor/cron/service/setup/test-longtask/help/config）in-process 调用同一个 binary 内的 `Gateway` 类。gateway 进程本身就是 `omp`（`packages/coding-agent/src/commands/gateway.ts:230-235`，`packages/pi-gateway/src/service-installer.ts:264-274`）。
+两者通过 `packages/coding-agent/src/commands/gateway.ts:106-525` 的 10 个 action（start/stop/status/reload/doctor/cron/service/setup/test-longtask/help/config）in-process 调用同一个 binary 内的 `Gateway` 类。gateway 进程本身就是 `omp`（`packages/coding-agent/src/commands/gateway.ts:230-235`，`packages/omp-gateway/src/service-installer.ts:264-274`）。
 
 后果：改 `packages/coding-agent/src/**` 任意源文件 → `bun run build` 必须重启 gateway 才能生效，因为 gateway 进程就是这同一个 binary。改 DingTalk 适配器也一样要重启 agent session。
 
@@ -26,7 +26,7 @@
 - `~/.local/bin/omp` — coding-agent（TUI / print / rpc mode）
 - `~/.local/bin/omp-gateway` — gateway（IM + cron + agent bridge + service installer）
 
-两者各自独立 build、独立发布。改一个不影响另一个。`omp-gateway` 进程是真正的 daemon host，agent 子进程仍然通过 `Bun.spawn([ompPath, "--mode", "rpc"])` 启动（`packages/pi-gateway/src/agent-transport.ts:333-342`）。
+两者各自独立 build、独立发布。改一个不影响另一个。`omp-gateway` 进程是真正的 daemon host，agent 子进程仍然通过 `Bun.spawn([ompPath, "--mode", "rpc"])` 启动（`packages/omp-gateway/src/agent-transport.ts:333-342`）。
 
 ## 3. Non-goals
 
@@ -53,14 +53,14 @@
 
 ```
 ~/.local/bin/omp            ← packages/coding-agent/src/cli.ts
-~/.local/bin/omp-gateway    ← packages/pi-gateway/src/cli.ts (新建)
+~/.local/bin/omp-gateway    ← packages/omp-gateway/src/cli.ts (新建)
 ```
 
 `omp-gateway` 不嵌入 natives。natives 是给 agent 跑 tool 用的（grep/shell/clipboard/text），由 `omp --mode rpc` 子进程自带的 omp 提供。`omp-gateway` 自己不直接调 native。
 
 ### 5.2 ompPath 默认值
 
-`packages/pi-gateway/src/agent-transport.ts` 当前注释 "default: 'omp'"，逻辑是从 PATH 找 `"omp"`。
+`packages/omp-gateway/src/agent-transport.ts` 当前注释 "default: 'omp'"，逻辑是从 PATH 找 `"omp"`。
 
 拆完后：
 
@@ -72,7 +72,7 @@
 
 ### 5.3 launchd plist
 
-`packages/pi-gateway/src/service-installer.ts` 的 `resolveStableRuntime` / `buildServiceArgv` 改写：
+`packages/omp-gateway/src/service-installer.ts` 的 `resolveStableRuntime` / `buildServiceArgv` 改写：
 
 - `resolveStableRuntime()` 只认 `~/.local/bin/omp-gateway`（存在且可执行）。**不 fallback 到 `~/.local/bin/omp`**——硬切：`omp` 是 agent runtime，不能当 daemon host。找不到返回 null，走 dev/prod 检测
 - `buildServiceArgv()` 拼 `[omp-gateway, start, --foreground]` / dev `[bun, entry.ts, start, --foreground]` / prod `[binary, start, --foreground]`（root 子命令，无 `gateway` 中间层）
@@ -83,7 +83,7 @@
 
 ### 5.4 跨进程 RPC 握手
 
-`packages/pi-gateway/src/agent-transport.ts` 当前 spawn `omp --mode rpc` 后直接等 `{type: "ready"}`。改为：
+`packages/omp-gateway/src/agent-transport.ts` 当前 spawn `omp --mode rpc` 后直接等 `{type: "ready"}`。改为：
 
 1. spawn 后第一个 stdout frame 必须是 `{"type": "ready", "protocol_version": 1, "agent": "omp"}`
 2. **硬切（harden 不兼容 legacy）**：`protocol_version` 缺失（旧 omp）或 ≠ 1 → kill 子进程 + `start()` reject `RpcTransportError`，错误信息直接说人话（"Agent RPC handshake failed ... Upgrade omp"），bridge 走 crash recovery（有 maxCrashRetries 上限，不会无限 crash loop）
@@ -131,10 +131,10 @@
 
 ### 新增（4）
 
-1. `packages/pi-gateway/scripts/build-binary.ts` — 复用 coding-agent 同款 build 流程，entrypoint `packages/pi-gateway/src/cli.ts`，不嵌 natives
-2. `packages/pi-gateway/src/cli.ts` — 命令表 entrypoint，挂 10 个 action
-3. `packages/pi-gateway/src/commands/gateway.ts` — 搬 coding-agent 同名文件过来
-4. `packages/pi-gateway/test/omp-gateway-cli.test.ts` — 新 binary 的 smoke 测试
+1. `packages/omp-gateway/scripts/build-binary.ts` — 复用 coding-agent 同款 build 流程，entrypoint `packages/omp-gateway/src/cli.ts`，不嵌 natives
+2. `packages/omp-gateway/src/cli.ts` — 命令表 entrypoint，挂 10 个 action
+3. `packages/omp-gateway/src/commands/gateway.ts` — 搬 coding-agent 同名文件过来
+4. `packages/omp-gateway/test/omp-gateway-cli.test.ts` — 新 binary 的 smoke 测试
 
 ### 删除（2）
 
@@ -143,20 +143,20 @@
 
 ### 改动（10）
 
-7. `packages/pi-gateway/src/service-installer.ts` — `resolveStableRuntime`（只认 omp-gateway）/ `buildServiceArgv` 改，注释全面更新
-8. `packages/pi-gateway/src/agent-transport.ts` — 新增 `RPC_PROTOCOL_VERSION`、`resolveDefaultOmpPath`、ready 握手硬校验
-9. `packages/pi-gateway/src/config.ts` — `DEFAULT_CONFIG.agent.ompPath` 硬默认删除（未配置保持 undefined）
-10. `packages/pi-gateway/src/doctor.ts` + `gateway-cron-lifecycle.ts` — `?? resolveDefaultOmpPath()` 统一 fallback（原计划 9/10/11 的 ompPath 解析冗余合并到此处：AgentBridgeOptions.ompPath 已存在，默认在 transport 层解析，不新增 defaultOmpPath 字段）
+7. `packages/omp-gateway/src/service-installer.ts` — `resolveStableRuntime`（只认 omp-gateway）/ `buildServiceArgv` 改，注释全面更新
+8. `packages/omp-gateway/src/agent-transport.ts` — 新增 `RPC_PROTOCOL_VERSION`、`resolveDefaultOmpPath`、ready 握手硬校验
+9. `packages/omp-gateway/src/config.ts` — `DEFAULT_CONFIG.agent.ompPath` 硬默认删除（未配置保持 undefined）
+10. `packages/omp-gateway/src/doctor.ts` + `gateway-cron-lifecycle.ts` — `?? resolveDefaultOmpPath()` 统一 fallback（原计划 9/10/11 的 ompPath 解析冗余合并到此处：AgentBridgeOptions.ompPath 已存在，默认在 transport 层解析，不新增 defaultOmpPath 字段）
 11. `packages/coding-agent/src/modes/rpc/rpc-mode.ts` — `--mode rpc` ready frame 加 `protocol_version` + `agent`
 12. `packages/coding-agent/scripts/build-binary.ts` — 注释更新（omp = agent runtime half）
-13. `packages/pi-gateway/src/index.ts` — 架构注释更新
-14. `packages/pi-gateway/package.json` — `build` script（打包 omp-gateway）、`start` 指向自包 cli.ts
+13. `packages/omp-gateway/src/index.ts` — 架构注释更新
+14. `packages/omp-gateway/package.json` — `build` script（打包 omp-gateway）、`start` 指向自包 cli.ts
 
 ### 文档 / CHANGELOG（5）
 
 16. `AGENTS.md` — "Restart gateway" + "Build & deploy model" 段更新
 17. `README.md:1186-1248` — 命令替换
-18. `docs/pi-gateway-cron-host-tool.md` — 命令替换
+18. `docs/omp-gateway-cron-host-tool.md` — 命令替换
 19. `packages/coding-agent/src/skeleton/assets/.omp/SYSTEM.md:127-130` — 命令替换
 20. `packages/*/CHANGELOG.md`（7 个 packages） — 各自加 Breaking Change 条目
 
@@ -179,11 +179,11 @@
 
 - `bun run check:ts` 全绿
 - `bun run test:ts` 全绿（新增 smoke 通过）
-- 本地 build：`bun --cwd=packages/coding-agent run build` + `bun --cwd=packages/pi-gateway run build`
+- 本地 build：`bun --cwd=packages/coding-agent run build` + `bun --cwd=packages/omp-gateway run build`
 - `~/.local/bin/omp-gateway --version` 正常
 - `~/.local/bin/omp-gateway service install` 写出正确 plist（argv 含 `omp-gateway`，不含 `gateway`）
 - 改 `packages/coding-agent/src/...` → 不重启 gateway，新代码生效（重启 omp 即可）
-- 改 `packages/pi-gateway/src/...` → 重启 omp-gateway，agent session 不动
+- 改 `packages/omp-gateway/src/...` → 重启 omp-gateway，agent session 不动
 
 ### PR 2 — release / install / 命令文档迁移
 
@@ -199,9 +199,9 @@
 
 ## 8. Risks
 
-1. **`isGatewayProcess()` ps 检测**（`packages/pi-gateway/src/gateway-daemon.ts`）。新 binary argv 是 `[omp-gateway, start, --foreground]`，但 `"omp-gateway"`/`"packages/pi-gateway"` 都含 `"gateway"` 子串，现逻辑 `args.includes("gateway") && includes("--foreground")` 对旧 prod / 新 prod / 新 dev 三种 argv 形状全部命中——**实现零改动**，PR 1 补单元测试锁三种形状。
+1. **`isGatewayProcess()` ps 检测**（`packages/omp-gateway/src/gateway-daemon.ts`）。新 binary argv 是 `[omp-gateway, start, --foreground]`，但 `"omp-gateway"`/`"packages/omp-gateway"` 都含 `"gateway"` 子串，现逻辑 `args.includes("gateway") && includes("--foreground")` 对旧 prod / 新 prod / 新 dev 三种 argv 形状全部命中——**实现零改动**，PR 1 补单元测试锁三种形状。
 
-2. **`installService` 的 dev mode 检测**（`service-installer.ts`）。拆完新 binary argv[1] 是子命令名（"service"/"start"/…），不 endsWith .ts/.js → prod；dev 跑 `bun packages/pi-gateway/src/cli.ts service install` argv[1] endsWith .ts → dev。检测逻辑不变，两条路径都要测试。
+2. **`installService` 的 dev mode 检测**（`service-installer.ts`）。拆完新 binary argv[1] 是子命令名（"service"/"start"/…），不 endsWith .ts/.js → prod；dev 跑 `bun packages/omp-gateway/src/cli.ts service install` argv[1] endsWith .ts → dev。检测逻辑不变，两条路径都要测试。
 
 3. **`OMP_GATEWAY_TEST_MODE` 注入逻辑**（`service-installer.ts:91`）。plist 字段保留，env 名不变。这条不大，但要写测试覆盖。
 
@@ -226,7 +226,7 @@
 5. `~/.local/bin/omp-gateway service install` 写出的 plist argv 含 `omp-gateway`
 6. `~/.local/bin/omp-gateway service start` 后 `omp-gateway status` 返回 running
 7. 改 coding-agent 源 → 重 build omp → 不重启 omp-gateway，新 omp 生效
-8. 改 pi-gateway 源 → 重 build omp-gateway → 重启 omp-gateway，agent session 不动
+8. 改 omp-gateway 源 → 重 build omp-gateway → 重启 omp-gateway，agent session 不动
 9. CHANGELOG 写明 breaking，README / AGENTS / SYSTEM.md 命令全部替换
 10. `gitnexus detect_changes()` 改动面收敛
 

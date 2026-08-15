@@ -42,7 +42,7 @@ compaction:
 
 **范围**：gateway 模式 only
 
-**改动点**：`packages/pi-gateway/src/agent-bridge.ts`
+**改动点**：`packages/omp-gateway/src/agent-bridge.ts`
 
 ```typescript
 // getOrCreateSession 时检查

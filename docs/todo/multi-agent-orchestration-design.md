@@ -210,10 +210,10 @@
 
 | 零件 | 位置 | 对应角色 |
 |---|---|---|
-| `AgentBridge` warm bridge | `pi-gateway/src/agent-bridge.ts` | Orchestrator 的执行载体 |
-| `SessionManager` | `pi-gateway/src/session-manager.ts` | Orchestrator 的 prompt 串行化 |
-| `SchedulerEngine` | `pi-gateway/src/scheduler/engine.ts` | Dispatcher 的 tick 基础设施 |
-| `SchedulerDbStorage` | `pi-gateway/src/scheduler/storage.ts` | SQLite 持久化基础 |
+| `AgentBridge` warm bridge | `omp-gateway/src/agent-bridge.ts` | Orchestrator 的执行载体 |
+| `SessionManager` | `omp-gateway/src/session-manager.ts` | Orchestrator 的 prompt 串行化 |
+| `SchedulerEngine` | `omp-gateway/src/scheduler/engine.ts` | Dispatcher 的 tick 基础设施 |
+| `SchedulerDbStorage` | `omp-gateway/src/scheduler/storage.ts` | SQLite 持久化基础 |
 | `runSubprocess` | `coding-agent/src/task/executor.ts` | 一次性 worker spawn 机制 |
 | DAG 原语 | `coding-agent/src/task/dag.ts`（原 swarm-extension，2026-08 退役后保留） | 任务依赖图（parent→child promotion） |
 | DingTalk account → agentDir 绑定 | `gateway.json` channels 配置 | lane 声明的基础 |
@@ -344,8 +344,8 @@ P1 和 P2 是必须在设计阶段就回答的——不是"以后优化"，是"�
 |---|---|---|
 | `AgentRegistry` | `packages/coding-agent/src/registry/agent-registry.ts` | 进程全局单例，IRC 路由核心，跨进程通信的阻断点 |
 | `respondAsBackground` | `packages/coding-agent/src/session/agent-session.ts:6087` | Side-channel turn，不阻塞 recipient 主循环，已解决 in-process IRC 死锁 |
-| `SessionManager` 不变量 | `packages/pi-gateway/src/session-manager.ts:4-7` | "One account bridge processes at most one prompt at a time" |
-| Cron 路径禁用工具 | `packages/pi-gateway/src/gateway.ts:1159` | 禁用 `["cronjob", "messaging"]`，安全措施 |
+| `SessionManager` 不变量 | `packages/omp-gateway/src/session-manager.ts:4-7` | "One account bridge processes at most one prompt at a time" |
+| Cron 路径禁用工具 | `packages/omp-gateway/src/gateway.ts:1159` | 禁用 `["cronjob", "messaging"]`，安全措施 |
 | DAG 原语 | `packages/coding-agent/src/task/dag.ts` | 依赖图/wave 构建（原 swarm-extension，已退役归档） |
 | `runSubprocess` | `packages/coding-agent/src/task/executor.ts:447` | 实际是 in-process 执行（注释写 "Run a single agent in-process"） |
 | Hermes Kanban 文档 | `https://hermes-agent.nousresearch.com/docs/user-guide/features/kanban` | 直接原型 |

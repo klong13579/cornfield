@@ -2,7 +2,7 @@
  * Public API for the agentDir skeleton module.
  *
  * Consumed by:
- *   - `pi-gateway` (account install, gateway startup)
+ *   - `omp-gateway` (account install, gateway startup)
  *   - `omp agent init` (future CLI per design §6.2)
  *
  * Asset content lives in `./assets/*.md` etc. and is statically imported via Bun —

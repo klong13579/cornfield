@@ -11,7 +11,7 @@
 | # | 改进项 | 优先级 | 涉及模块 | 一句话 |
 |---|---|---|---|---|
 | 1 | 权限模型（四模式 + 白名单） | P0 | coding-agent / pi-agent-core | 让 agent 在"无人值守"和"用户在场"之间可切换 |
-| 2 | 自动化自迭代（notes.md + 任务改自己） | P0 | pi-gateway scheduler | 定时任务从"定时启动的简短上下文"升级为"能自我优化的数字员工" |
+| 2 | 自动化自迭代（notes.md + 任务改自己） | P0 | omp-gateway scheduler | 定时任务从"定时启动的简短上下文"升级为"能自我优化的数字员工" |
 | 3 | 六层知识边界 | P1 | memories / self-evolution / prompts | 项目地图/工作区规则/协作记忆/Skills/工作台/Context 分开管 |
 | 4 | 记忆治理（邀请制 + 复查节奏） | P1 | self-evolution / memories | 记忆只沉淀已验证知识，不自动扫描、不模糊累积 |
 | 5 | 受管浏览器 | P2 | coding-agent tools | 内置 CDP 受管浏览器 + 用户/Agent tab 隔离 |
@@ -38,7 +38,7 @@
 3. 权限模式成为 session 级状态，`/permission` 命令运行中切换
 4. gateway：权限请求 → DingTalk 交互卡片（确认/拒绝/始终允许）
 
-**涉及模块**：`pi-agent-core`（钩子）、`coding-agent`（命令/UI）、`pi-gateway`（卡片交互）
+**涉及模块**：`pi-agent-core`（钩子）、`coding-agent`（命令/UI）、`omp-gateway`（卡片交互）
 **风险/工作量**：中。核心是 hook 位置与 gateway 回调通道；只读 classifier 的词表要反复校准避免误伤。
 **验收**：无人值守 cron 任务在 auto 模式下不被只读操作打断；bypass 下 `rm -rf` 必须弹确认。
 
@@ -64,7 +64,7 @@
 3. 失败监控升级：现有 cron 失败记录 → 连续失败计数 → 自动暂停 + 通知
 4. 运行记录暴露给 agent（`cron status` 工具已有雏形，补"读取历史运行"）
 
-**涉及模块**：`pi-gateway/src/scheduler`
+**涉及模块**：`omp-gateway/src/scheduler`
 **风险/工作量**：低-中。不动调度核心，加字段与注入。
 **验收**：同一 cron 任务连续两轮运行能读到上一轮笔记；连续 2 次失败自动暂停并通知。
 

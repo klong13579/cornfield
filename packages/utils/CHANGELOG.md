@@ -5,7 +5,7 @@
 ### Added
 
 - `logger.silenceConsoleLogging()`: silences the winston console transport at runtime (file logging unaffected). Called by the coding-agent interactive TUI before taking over the terminal — raw `level: message` console log lines were corrupting the differential renderer (visible as stray 「info: …」 text in the input area).
-- `logger.info()` export: winston supports the `info` level but it was not re-exported from the logger module. Callers in `pi-gateway` and `self-evolution` that called `logger.info()` hit a runtime `TypeError` that was silently swallowed, causing DingTalk card tool-result blocks to not render.
+- `logger.info()` export: winston supports the `info` level but it was not re-exported from the logger module. Callers in `omp-gateway` and `self-evolution` that called `logger.info()` hit a runtime `TypeError` that was silently swallowed, causing DingTalk card tool-result blocks to not render.
 
 ### Fixed
 
