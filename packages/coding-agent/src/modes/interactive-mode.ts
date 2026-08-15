@@ -284,6 +284,15 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.#syncEditorMaxHeight();
 		this.#resizeHandler = () => {
 			this.#syncEditorMaxHeight();
+			// Status line content is cached in editor.#topBorderContent and only rebuilt
+			// via updateEditorTopBorder(). The TUI's resize handler only repaints, so a
+			// pane started narrow (e.g. 53 cols) would keep its startup-width segment
+			// layout (sometimes just "π") forever after being widened. Rebuild here so
+			// the status line follows the current terminal width.
+			if (this.statusLine) {
+				this.updateEditorTopBorder();
+				this.ui.requestRender();
+			}
 		};
 		process.stdout.on("resize", this.#resizeHandler);
 		try {
@@ -1588,8 +1597,7 @@ export class InteractiveMode implements InteractiveModeContext {
 	 * Blinking dot + mic icon + elapsed timer (+ live partial while streaming).
 	 */
 	#updateSttHook(): void {
-		const model =
-			(settings.get("stt.modelName") as string | undefined) ?? "qwen-audio-3.0-realtime-plus";
+		const model = (settings.get("stt.modelName") as string | undefined) ?? "qwen-audio-3.0-realtime-plus";
 		if (this.#sttCurrentState === "recording") {
 			const elapsed = Math.max(0, Math.floor((Date.now() - this.#sttStartedAt) / 1000));
 			const m = Math.floor(elapsed / 60);
