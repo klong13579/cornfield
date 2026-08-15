@@ -14,6 +14,7 @@ interface BinaryTarget {
 const repoRoot = path.join(import.meta.dir, "..");
 const binariesDir = path.join(repoRoot, "packages", "coding-agent", "binaries");
 const entrypoint = "./packages/coding-agent/src/cli.ts";
+const gatewayEntrypoint = "./packages/omp-gateway/src/cli.ts";
 const isDryRun = process.argv.includes("--dry-run");
 const targets: BinaryTarget[] = [
 	{
@@ -142,6 +143,48 @@ async function buildBinary(target: BinaryTarget): Promise<void> {
 	}
 }
 
+async function buildGatewayBinary(target: BinaryTarget): Promise<void> {
+	const gatewayExt = target.platform === "win32" ? ".exe" : "";
+	const gatewayPlatform = target.platform === "win32" ? "windows" : target.platform;
+	const gatewayOutfile = `packages/coding-agent/binaries/omp-gateway-${gatewayPlatform}-${target.arch}${gatewayExt}`;
+	console.log(`Building ${gatewayOutfile}...`);
+	if (isDryRun) {
+		console.log(`DRY RUN bun build --compile --no-compile-autoload-bunfig --no-compile-autoload-dotenv --define process.env.PI_COMPILED="true" --root . --external mupdf --target=${target.target} ${gatewayEntrypoint} --outfile ${gatewayOutfile}`);
+		return;
+	}
+
+	const buildEnv = shouldAdhocSignDarwinBinary(target)
+		? { ...Bun.env, BUN_NO_CODESIGN_MACHO_BINARY: "1" }
+		: Bun.env;
+	await runCommand(
+		[
+			"bun",
+			"build",
+			"--compile",
+			"--no-compile-autoload-bunfig",
+			"--no-compile-autoload-dotenv",
+			"--define",
+			'process.env.PI_COMPILED="true"',
+			"--root",
+			".",
+			"--external",
+			"mupdf",
+			"--target",
+			target.target,
+			gatewayEntrypoint,
+			"--outfile",
+			gatewayOutfile,
+		],
+		repoRoot,
+		buildEnv,
+	);
+
+	// Same Mach-O signature remediation as the omp binary.
+	if (shouldAdhocSignDarwinBinary(target)) {
+		await runCommand(["codesign", "--force", "--sign", "-", path.join(repoRoot, gatewayOutfile)], repoRoot);
+	}
+}
+
 async function generateBundle(): Promise<void> {
 	if (isDryRun) {
 		console.log("DRY RUN bun --cwd=packages/stats scripts/generate-client-bundle.ts --generate");
@@ -184,6 +227,7 @@ async function main(): Promise<void> {
 	try {
 		for (const target of selectedTargets) {
 			await buildBinary(target);
+			await buildGatewayBinary(target);
 		}
 	} finally {
 		await resetArtifacts();
