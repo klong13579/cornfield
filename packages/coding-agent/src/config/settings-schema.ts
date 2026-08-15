@@ -948,12 +948,12 @@ export const SETTINGS_SCHEMA = {
 
 	"stt.modelName": {
 		type: "string",
-		default: "mlx-community/whisper-large-v3-turbo",
+		default: "qwen-audio-3.0-realtime-plus",
 		ui: {
 			tab: "interaction",
 			label: "Speech Model",
 			description:
-				"Whisper model (HuggingFace repo ID, e.g. mlx-community/whisper-large-v3-turbo). Larger = more accurate but slower.",
+				"Transcription model for speech-to-text (alt+h). qwen-audio-3.0-realtime-* transcribes live in the cloud as you speak; mlx-community/... uses local mlx-whisper (batch, requires download).",
 			submenu: true,
 		},
 	},

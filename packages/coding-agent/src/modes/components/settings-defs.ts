@@ -128,6 +128,16 @@ const OPTION_PROVIDERS: Partial<Record<SettingPath, OptionProvider>> = {
 		{ value: "1800", label: "30 minutes" },
 		{ value: "3600", label: "1 hour" },
 	],
+	"stt.language": [
+		{ value: "zh", label: "Chinese (中文)" },
+		{ value: "en", label: "English" },
+		{ value: "yue", label: "Cantonese (粤语)" },
+		{ value: "ja", label: "Japanese (日本語)" },
+		{ value: "ko", label: "Korean (한국어)" },
+		{ value: "es", label: "Spanish" },
+		{ value: "fr", label: "French" },
+		{ value: "de", label: "German" },
+	],
 	// Retry max retries
 	"retry.maxRetries": [
 		{ value: "1", label: "1 retry" },

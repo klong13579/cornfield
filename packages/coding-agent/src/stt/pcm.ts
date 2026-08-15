@@ -38,6 +38,32 @@ export function pcm16ToFloat32(pcm: Uint8Array): Float32Array {
 	return out;
 }
 
+/**
+ * Resample 16-bit PCM audio from one sample rate to another using linear interpolation.
+ *
+ * Used to convert between the recorder's native rate (16kHz) and the realtime
+ * endpoint's expected rate (24kHz). Linear interpolation is adequate for speech
+ * transcription — the quality difference vs polyphase filtering is negligible
+ * for ASR purposes.
+ */
+export function resamplePcm16(input: Uint8Array, fromRate: number, toRate: number): Uint8Array {
+	const inputSamples = new Int16Array(input.buffer, input.byteOffset, input.byteLength / 2);
+	const outputLength = Math.round((inputSamples.length * toRate) / fromRate);
+	const output = new Int16Array(outputLength);
+	const ratio = fromRate / toRate;
+
+	for (let i = 0; i < outputLength; i++) {
+		const pos = i * ratio;
+		const idx = Math.min(Math.floor(pos), inputSamples.length - 2);
+		const frac = pos - idx;
+		const a = inputSamples[idx];
+		const b = inputSamples[idx + 1];
+		output[i] = Math.round(a + (b - a) * frac);
+	}
+
+	return new Uint8Array(output.buffer);
+}
+
 /** Wraps s16 PCM bytes in a canonical 44-byte WAV header (mono). */
 export function encodeWav(pcm: Uint8Array, sampleRate: number): Uint8Array {
 	const byteRate = sampleRate * 2;

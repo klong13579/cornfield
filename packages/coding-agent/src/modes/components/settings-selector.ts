@@ -184,6 +184,8 @@ export interface SettingsRuntimeContext {
 	thinkingLevel: ThinkingLevel | undefined;
 	/** Available themes */
 	availableThemes: string[];
+	/** Candidate models for audio settings (record.model / voice.model / stt.modelName) */
+	audioModelOptions: ReadonlyArray<{ value: string; label: string; description?: string }>;
 	/** Working directory for plugins tab */
 	cwd: string;
 }
@@ -369,6 +371,19 @@ export class SettingsSelectorComponent extends Container {
 			});
 		} else if (def.path === "theme.dark" || def.path === "theme.light") {
 			options = this.context.availableThemes.map(t => ({ value: t, label: t }));
+		} else if (def.path === "record.model" || def.path === "voice.model" || def.path === "stt.modelName") {
+			// Runtime model candidates for the audio/voice settings. Filter per
+			// setting: voice.model is API-only, record.model and stt.modelName
+			// accept both cloud realtime and local whisper models.
+			let all = [...this.context.audioModelOptions];
+			if (def.path === "voice.model") {
+				all = all.filter(o => !o.value.startsWith("mlx-community/"));
+			}
+			options = all;
+			// Always surface the current value (custom provider/modelId entries).
+			if (currentValue && !options.some(o => o.value === currentValue)) {
+				options = [...options, { value: currentValue, label: currentValue }];
+			}
 		}
 
 		// Preview handlers

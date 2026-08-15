@@ -24,6 +24,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { getConfigRootDir, logger } from "@oh-my-pi/pi-utils";
 import type { ModelRegistry } from "../config/model-registry";
+import { parseModelString } from "../config/model-resolver";
 import { settings } from "../config/settings";
 import { cleanupChunks, joinTranscripts, splitWavFile } from "./chunker";
 import { detectRecordingTools, type RecordingHandle, startRecording, verifyRecordingFile } from "./recorder";
@@ -325,6 +326,7 @@ export class ListenController {
 			);
 		} catch (err) {
 			this.#setState("idle");
+			this.#showStatus(""); // Clear the "Transcribing audio..." status
 			if (!(err instanceof DOMException && err.name === "AbortError")) {
 				this.#showWarning(err instanceof Error ? err.message : "Transcription failed");
 			}
@@ -357,6 +359,7 @@ export class ListenController {
 			);
 		} catch (err) {
 			this.#setState("idle");
+			this.#showStatus(""); // Clear the "Transcribing audio file..." status
 			this.#showWarning(err instanceof Error ? err.message : "Transcription failed");
 		} finally {
 			await this.#cleanupTranscriptionArtifacts(null);
@@ -424,11 +427,19 @@ export class ListenController {
 
 		// API-based transcription via the configured record.model
 		this.#lastUsedModel = this.#shortModelName(recordModel);
+		// Parse the model string to extract the provider. If the model is specified
+		// as "provider/modelId" (e.g. "narwal-plan/qwen-audio-3.0-realtime-flash"), use
+		// that provider. Otherwise default to "narwal-plan" — the only bench-verified
+		// realtime/audio transcription endpoint.
+		const parsed = recordModel ? parseModelString(recordModel) : undefined;
+		const provider = parsed?.provider ?? "narwal-plan";
+		const modelId = parsed?.id ?? recordModel;
 		const { transcribeViaApi } = await import("./transcriber");
 		return await transcribeViaApi(audioPath, {
-			modelName: recordModel,
+			modelName: modelId,
 			language,
 			modelRegistry: this.#modelRegistry,
+			provider,
 			onProgress,
 		});
 	}

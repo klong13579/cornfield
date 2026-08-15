@@ -2,9 +2,12 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { $which, logger } from "@oh-my-pi/pi-utils";
+import { buildRealtimeWsUrl, chunkPcm16, pcm16ToBase64, REALTIME_SAMPLE_RATE } from "@oh-my-pi/pi-ai";
 import type { ModelRegistry } from "../config/model-registry";
 import { settings } from "../config/settings";
 import { readWavInfo } from "./chunker";
+import { resamplePcm16 } from "./pcm";
+
 import transcribeScript from "./transcribe.py" with { type: "text" };
 
 export interface TranscribeOptions {
@@ -18,6 +21,8 @@ export interface TranscribeViaApiOptions {
 	modelName?: string;
 	language?: string;
 	modelRegistry?: ModelRegistry;
+	/** Provider name (e.g. "narwal-plan"). When provided, bypasses model-registry lookup. */
+	provider?: string;
 	onProgress?: (progress: TranscribeProgress) => void;
 }
 
@@ -233,17 +238,25 @@ export async function transcribeViaApi(
 		);
 	}
 
-	// Find the model in the registry to determine the provider and base URL.
-	const available = registry.getAvailable();
-	const modelEntry = available.find(m => m.id === modelName || `${m.provider}/${m.id}` === modelName);
-	if (!modelEntry) {
-		throw new Error(
-			`Model "${modelName}" not found in the model registry. ` +
-				"Check that the model is configured in your models.yml.",
+	// Resolve provider: caller can pass it directly, or we look up the model
+	// in the registry. Direct provider is preferred for custom models that
+	// aren't in the bundled registry (e.g. qwen-audio-3.0-realtime-flash).
+	let provider = options?.provider;
+	if (!provider) {
+		const available = registry.getAvailable();
+		const modelEntry = available.find(
+			m => m.id === modelName || `${m.provider}/${m.id}` === modelName,
 		);
+		if (!modelEntry) {
+			throw new Error(
+				`Model "${modelName}" not found in the model registry. ` +
+					"Check that the model is configured in your models.yml, or specify the provider " +
+					"via record.model in 'provider/modelId' format.",
+			);
+		}
+		provider = modelEntry.provider;
 	}
 
-	const provider = modelEntry.provider;
 	const baseUrl = registry.getProviderBaseUrl(provider);
 	if (!baseUrl) {
 		throw new Error(`No base URL configured for provider "${provider}".`);
@@ -254,50 +267,203 @@ export async function transcribeViaApi(
 		throw new Error(`No API key configured for provider "${provider}".`);
 	}
 
-	// Normalize base URL: strip trailing /v1 or /v1/ if present, then append /v1/audio/transcriptions
-	const normalizedBase = baseUrl.replace(/\/v1\/?$/, "");
-	const transcriptionUrl = `${normalizedBase}/v1/audio/transcriptions`;
+	// Keep the base URL as-is (e.g. "https://coder.narwal.com/v1").
+	// buildRealtimeWsUrl handles the /realtime suffix and protocol upgrade.
+	const normalizedBase = baseUrl.replace(/\/?$/, "");
 
-	logger.debug("Transcribing via API", {
+	logger.debug("Transcribing via realtime WebSocket", {
 		audioPath,
 		modelName,
 		provider,
 		baseUrl,
-		transcriptionUrl,
 		language,
 	});
 
 	const emitProgress = options?.onProgress;
 	emitProgress?.({ stage: "loading-model" });
 
-	// Build the multipart form data
-	const formData = new FormData();
-	formData.append("model", modelName);
-	formData.append("file", audioFile, path.basename(audioPath));
-	if (language) {
-		formData.append("language", language);
-	}
-
-	const response = await fetch(transcriptionUrl, {
-		method: "POST",
-		headers: {
-			Authorization: `Bearer ${apiKey}`,
-			// Content-Type is set automatically by fetch for FormData (multipart/form-data)
-		},
-		body: formData,
-	});
-
-	if (!response.ok) {
-		const errorBody = await response.text().catch(() => "(no body)");
+	// ---- Read WAV, extract PCM, resample to 24kHz ----
+	const wavInfo = await readWavInfo(audioPath);
+	if (wavInfo.channels !== 1 || wavInfo.sampleWidth !== 2) {
 		throw new Error(
-			`API transcription failed (${response.status}): ${errorBody.slice(0, 500)}`,
+			`Unsupported WAV format: ${wavInfo.channels}ch ${wavInfo.sampleWidth * 8}bit ` +
+				"(only mono 16-bit PCM is supported)",
 		);
 	}
 
-	emitProgress?.({ stage: "transcribing", percent: 50 });
+	const wavBuf = Buffer.from(await audioFile.arrayBuffer());
+	// Skip the 44-byte RIFF/WAV header to get the raw PCM data.
+	const pcmRaw = new Uint8Array(wavBuf.buffer, wavBuf.byteOffset + 44, wavBuf.byteLength - 44);
 
-	const result = (await response.json()) as { text?: string };
-	const text = (result.text ?? "").trim();
+	// Resample to 24kHz if the recording is at a different rate.
+	// The recorder produces 16kHz; the realtime endpoint expects 24kHz PCM16.
+	let pcm: Uint8Array;
+	if (wavInfo.sampleRate === REALTIME_SAMPLE_RATE) {
+		pcm = pcmRaw;
+	} else {
+		pcm = resamplePcm16(pcmRaw, wavInfo.sampleRate, REALTIME_SAMPLE_RATE);
+	}
+
+	// ---- WebSocket realtime transcription ----
+	const wsUrl = buildRealtimeWsUrl(normalizedBase, modelName);
+
+	// Bun's WebSocket accepts custom headers; the DOM lib type does not.
+	const WebSocketWithHeaders = WebSocket as unknown as {
+		new (url: string, options?: { headers?: Record<string, string> }): WebSocket;
+	};
+
+	const { promise, resolve, reject } = Promise.withResolvers<string>();
+	const ws = new WebSocketWithHeaders(wsUrl, {
+		headers: {
+			Authorization: `Bearer ${apiKey}`,
+			"OpenAI-Beta": "realtime=v1",
+		},
+	});
+
+	// Timeout: 120s for the full transcription
+	const TIMEOUT_MS = 120_000;
+	const timeout = setTimeout(() => {
+		ws.close();
+		reject(new Error(`WebSocket transcription timed out after ${TIMEOUT_MS / 1000}s`));
+	}, TIMEOUT_MS);
+
+	let transcript = "";
+
+	ws.onopen = () => {
+		logger.debug("realtime WS connected");
+	};
+
+	ws.onmessage = (event: MessageEvent) => {
+		if (typeof event.data !== "string") return;
+
+		let msg: Record<string, unknown>;
+		try {
+			msg = JSON.parse(event.data) as Record<string, unknown>;
+		} catch {
+			return;
+		}
+
+		const type = msg.type as string;
+
+		switch (type) {
+			case "session.created": {
+				// Server is ready — configure the session for transcription.
+				ws.send(
+					JSON.stringify({
+						type: "session.update",
+						session: {
+							modalities: ["text"],
+							input_audio_format: "pcm16",
+							input_audio_transcription: { model: "fun-asr" },
+							turn_detection: null,
+						},
+					}),
+				);
+				logger.debug("sent session.update");
+				break;
+			}
+
+			case "session.updated": {
+				// Session configured — start sending audio chunks.
+				emitProgress?.({ stage: "transcribing", percent: 10 });
+
+				// Send audio in 200ms chunks for smooth streaming.
+				const chunks = chunkPcm16(pcm, 200, REALTIME_SAMPLE_RATE);
+				for (const chunk of chunks) {
+					ws.send(
+						JSON.stringify({
+							type: "input_audio_buffer.append",
+							audio: pcm16ToBase64(chunk),
+						}),
+					);
+				}
+				logger.debug("sent audio chunks", { count: chunks.length });
+
+				// Commit the buffer so the server processes the audio.
+				ws.send(JSON.stringify({ type: "input_audio_buffer.commit" }));
+				logger.debug("sent input_audio_buffer.commit");
+				emitProgress?.({ stage: "transcribing", percent: 50 });
+				break;
+			}
+
+			case "conversation.item.created": {
+				// Audio item created on the server — ignore.
+				break;
+			}
+
+			case "conversation.item.input_audio_transcription.delta": {
+				// Streaming partial transcript.
+				const delta = msg.delta as string;
+				if (delta) transcript += delta;
+				break;
+			}
+
+			case "conversation.item.input_audio_transcription.completed": {
+				// Final transcript received.
+				const finalTranscript = msg.transcript as string;
+				if (finalTranscript) {
+					transcript = finalTranscript;
+				} else {
+					transcript = transcript.trim();
+				}
+				clearTimeout(timeout);
+				ws.close();
+				resolve(transcript);
+				break;
+			}
+
+			case "response.done": {
+				// Server finished processing — if we haven't resolved yet, close.
+				// The transcript should have arrived via the completed event.
+				if (!transcript) {
+					const raw = msg.raw as Record<string, unknown> | undefined;
+					const response = raw?.response as Record<string, unknown> | undefined;
+					const output = response?.output as Array<Record<string, unknown>> | undefined;
+					if (output) {
+						for (const item of output) {
+							if (item.type === "input_audio") {
+								const content = item.content as Array<Record<string, unknown>> | undefined;
+								if (content) {
+									for (const c of content) {
+										if (c.type === "input_audio_transcription" && c.transcript) {
+											transcript = c.transcript as string;
+										}
+									}
+								}
+							}
+						}
+					}
+					clearTimeout(timeout);
+					ws.close();
+					resolve(transcript || "");
+				}
+				break;
+			}
+
+			case "error": {
+				const errMsg = msg.message as string ?? JSON.stringify(msg);
+				logger.error("realtime WS error", { message: errMsg });
+				clearTimeout(timeout);
+				ws.close();
+				reject(new Error(`Realtime transcription error: ${errMsg}`));
+				break;
+			}
+		}
+	};
+
+	ws.onerror = (err: Event) => {
+		logger.error("realtime WS onerror", { error: String(err) });
+		clearTimeout(timeout);
+		const errMsg = err instanceof ErrorEvent ? err.message : "WebSocket connection failed";
+		reject(new Error(`Realtime connection error: ${errMsg}`));
+	};
+
+	ws.onclose = () => {
+		logger.debug("realtime WS closed");
+		clearTimeout(timeout);
+	};
+
+	const text = await promise;
 
 	emitProgress?.({ stage: "finalizing", percent: 100 });
 

@@ -6,7 +6,7 @@ import type { Component, OverlayHandle } from "@oh-my-pi/pi-tui";
 import { Input, Loader, Spacer, Text } from "@oh-my-pi/pi-tui";
 import { getAgentDbPath, getConfigDirName, getProjectDir } from "@oh-my-pi/pi-utils";
 import { invalidate as invalidateFsCache } from "../../capability/fs";
-import { getRoleInfo } from "../../config/model-registry";
+import { getRoleInfo, type ModelRegistry } from "../../config/model-registry";
 import { formatModelSelectorValue } from "../../config/model-resolver";
 import { settings } from "../../config/settings";
 import { DebugSelectorComponent } from "../../debug";
@@ -59,6 +59,52 @@ const CALLBACK_SERVER_PROVIDERS = new Set<OAuthProvider>([
 
 const MANUAL_LOGIN_TIP = "Tip: You can complete pairing with /login <redirect URL>.";
 
+/**
+ * Build the candidate model list for the audio/voice settings.
+ *
+ * Static defaults (Qwen Audio realtime + local mlx-whisper) plus any audio-capable
+ * models present in the registry (id/name contains "audio"). The settings tab
+ * filters this per setting (stt.modelName = whisper only, voice.model = API only,
+ * record.model = both).
+ */
+function buildAudioModelOptions(
+	registry: ModelRegistry | undefined,
+): ReadonlyArray<{ value: string; label: string; description?: string }> {
+	const options: Array<{ value: string; label: string; description?: string }> = [
+		{
+			value: "qwen-audio-3.0-realtime-flash",
+			label: "qwen-audio-3.0-realtime-flash",
+			description: "Qwen Audio Realtime · 服务端转录",
+		},
+		{
+			value: "qwen-audio-3.0-realtime-plus",
+			label: "qwen-audio-3.0-realtime-plus",
+			description: "Qwen Audio Realtime · 服务端转录（更强）",
+		},
+		{
+			value: "mlx-community/whisper-large-v3-turbo",
+			label: "mlx-community/whisper-large-v3-turbo",
+			description: "本地 mlx-whisper 转录",
+		},
+	];
+
+	if (registry) {
+		for (const m of registry.getAvailable()) {
+			// Only narwal-plan audio models (the bench-verified realtime endpoint).
+			// Other providers' audio entries are TTS/ASR models without a viable
+			// code path here (e.g. alibaba-coding-plan's MiniMax/speech-*).
+			if (m.provider !== "narwal-plan") continue;
+			if (!/audio/i.test(m.id) && !/audio/i.test(m.name ?? "")) continue;
+			const value = `${m.provider}/${m.id}`;
+			// Skip duplicates of the static candidates (bare id == provider/id).
+			if (options.some(o => o.value === value || o.value === m.id)) continue;
+			options.push({ value, label: value, description: m.name });
+		}
+	}
+
+	return options;
+}
+
 export class SelectorController {
 	constructor(private ctx: InteractiveModeContext) {}
 
@@ -97,6 +143,7 @@ export class SelectorController {
 						availableThinkingLevels: [...this.ctx.session.getAvailableThinkingLevels()],
 						thinkingLevel: this.ctx.session.thinkingLevel,
 						availableThemes,
+						audioModelOptions: buildAudioModelOptions(this.ctx.session.modelRegistry),
 						cwd: getProjectDir(),
 					},
 					{

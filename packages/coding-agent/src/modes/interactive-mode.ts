@@ -221,6 +221,10 @@ export class InteractiveMode implements InteractiveModeContext {
 	readonly #selectorController: SelectorController;
 	readonly #uiHelpers: UiHelpers;
 	#sttController: STTController | undefined;
+	#sttHookTimer: NodeJS.Timeout | undefined;
+	#sttStartedAt = 0;
+	#sttPartial = "";
+	#sttCurrentState: SttState = "idle";
 	readonly #voiceModeController = new VoiceModeController(this);
 	listenController: ListenController;
 	#voiceAnimationInterval: NodeJS.Timeout | undefined;
@@ -1194,6 +1198,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		if (this.#sttController) {
 			this.#sttController.dispose();
 			this.#sttController = undefined;
+			this.#clearSttHook();
 		}
 		void this.#voiceModeController.dispose();
 		this.#extensionUiController.clearExtensionTerminalInputListeners();
@@ -1538,28 +1543,80 @@ export class InteractiveMode implements InteractiveModeContext {
 			return;
 		}
 		if (!this.#sttController) {
-			this.#sttController = new STTController();
+			this.#sttController = new STTController(this.session.modelRegistry);
 		}
 		await this.#sttController.toggle(this.editor, {
 			showWarning: (msg: string) => this.showWarning(msg),
 			showStatus: (msg: string) => this.showStatus(msg),
+			onPartial: (text: string) => {
+				this.#sttPartial = text;
+				if (this.#sttCurrentState === "recording") this.#updateSttHook();
+			},
 			onStateChange: (state: SttState) => {
+				this.#sttCurrentState = state;
 				if (state === "recording") {
+					this.#sttStartedAt = Date.now();
+					this.#sttPartial = "";
+					if (this.#sttHookTimer) clearInterval(this.#sttHookTimer);
+					this.#sttHookTimer = setInterval(() => this.#updateSttHook(), 1000);
+					this.#updateSttHook();
 					this.#voicePreviousShowHardwareCursor = this.ui.getShowHardwareCursor();
 					this.#voicePreviousUseTerminalCursor = this.editor.getUseTerminalCursor();
 					this.ui.setShowHardwareCursor(false);
 					this.editor.setUseTerminalCursor(false);
 					this.#startMicAnimation();
 				} else if (state === "transcribing") {
+					if (this.#sttHookTimer) {
+						clearInterval(this.#sttHookTimer);
+						this.#sttHookTimer = undefined;
+					}
+					this.#updateSttHook();
 					this.#stopMicAnimation();
 					this.#setMicCursor({ r: 200, g: 200, b: 200 });
 				} else {
+					this.#clearSttHook();
 					this.#cleanupMicAnimation();
 				}
 				this.updateEditorTopBorder();
 				this.ui.requestRender();
 			},
 		});
+	}
+
+	/**
+	 * Hook-status-line drive for alt+h STT: /record-style line above the editor.
+	 * Blinking dot + mic icon + elapsed timer (+ live partial while streaming).
+	 */
+	#updateSttHook(): void {
+		const model =
+			(settings.get("stt.modelName") as string | undefined) ?? "qwen-audio-3.0-realtime-plus";
+		if (this.#sttCurrentState === "recording") {
+			const elapsed = Math.max(0, Math.floor((Date.now() - this.#sttStartedAt) / 1000));
+			const m = Math.floor(elapsed / 60);
+			const s = elapsed % 60;
+			const ts = `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+			const dot = elapsed % 2 === 0 ? "\u{1F7E2}" : "\u26AA";
+			const partial = this.#sttPartial.length > 0 ? ` \u00b7 \u8bc6\u522b\u4e2d: ${this.#sttPartial}` : "";
+			this.statusLine.setHookStatus(
+				"stt",
+				`${dot} ${theme.icon.mic} STT \u5f55\u97f3\u4e2d ${ts} \u00b7 ${model}${partial} \u00b7 \u518d\u6309 alt+h \u7ed3\u675f`,
+			);
+		} else if (this.#sttCurrentState === "transcribing") {
+			this.statusLine.setHookStatus("stt", `\u26AA ${theme.icon.mic} STT \u8f6c\u5199\u4e2d \u00b7 ${model}`);
+		} else {
+			this.#clearSttHook();
+		}
+		this.ui.requestRender();
+	}
+
+	#clearSttHook(): void {
+		if (this.#sttHookTimer) {
+			clearInterval(this.#sttHookTimer);
+			this.#sttHookTimer = undefined;
+		}
+		this.#sttPartial = "";
+		this.#sttCurrentState = "idle";
+		this.statusLine.setHookStatus("stt", undefined);
 	}
 
 	#setMicCursor(color: { r: number; g: number; b: number }): void {
