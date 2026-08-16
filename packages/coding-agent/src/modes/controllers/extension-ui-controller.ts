@@ -1,4 +1,4 @@
-import type { Component, OverlayHandle, TUI } from "@oh-my-pi/pi-tui";
+import type { Component, OverlayHandle, OverlayOptions, TUI } from "@oh-my-pi/pi-tui";
 import { Container, Spacer, Text } from "@oh-my-pi/pi-tui";
 import { logger } from "@oh-my-pi/pi-utils";
 import { KeybindingsManager } from "../../config/keybindings";
@@ -99,7 +99,17 @@ export class ExtensionUiController {
 				this.ctx.sessionManager.appendLabelChange(targetId, label);
 			},
 			getActiveTools: () => this.ctx.session.getActiveToolNames(),
-			getAllTools: () => this.ctx.session.getAllToolNames(),
+			getAllTools: () => {
+				const runner = this.ctx.session.extensionRunner;
+				if (!runner) return [];
+				return runner.getAllRegisteredTools().map(tool => ({
+					name: tool.definition.name,
+					description: tool.definition.description,
+					parameters: tool.definition.parameters,
+					promptGuidelines: tool.definition.promptGuidelines,
+					extensionPath: tool.extensionPath,
+				}));
+			},
 			setActiveTools: toolNames => this.ctx.session.setActiveToolsByName(toolNames),
 			setModel: async model => {
 				const key = await this.ctx.session.modelRegistry.getApiKey(model);
@@ -117,9 +127,18 @@ export class ExtensionUiController {
 				})) ?? [],
 			getSessionName: () => this.ctx.sessionManager.getSessionName(),
 			setSessionName: name => this.#updateSessionName(name),
+			unregisterProvider: name => this.ctx.session.modelRegistry.unregisterProvider?.(name),
 		};
 		const contextActions: ExtensionContextActions = {
 			getModel: () => this.ctx.session.model,
+			getScopedModels: () =>
+				(this.ctx.session.scopedModels ?? []).map(scoped => ({
+					model: scoped.model,
+					thinkingLevel: scoped.thinkingLevel,
+					explicitThinkingLevel: false,
+				})),
+			getThinkingLevel: () => this.ctx.session.thinkingLevel,
+			getSignal: () => undefined, // AgentSession does not yet expose the active prompt abort signal
 			isIdle: () => !this.ctx.session.isStreaming,
 			abort: () => this.ctx.session.abort(),
 			hasPendingMessages: () => this.ctx.session.queuedMessageCount > 0,
@@ -240,7 +259,7 @@ export class ExtensionUiController {
 			},
 		};
 
-		extensionRunner.initialize(actions, contextActions, commandActions, uiContext);
+		extensionRunner.initialize(actions, contextActions, commandActions, uiContext, "tui");
 
 		// Subscribe to extension errors
 		extensionRunner.onError((error: ExtensionError) => {
@@ -250,6 +269,7 @@ export class ExtensionUiController {
 		// Emit session_start event
 		await extensionRunner.emit({
 			type: "session_start",
+			reason: "new",
 		});
 	}
 
@@ -349,7 +369,17 @@ export class ExtensionUiController {
 				this.ctx.sessionManager.appendLabelChange(targetId, label);
 			},
 			getActiveTools: () => this.ctx.session.getActiveToolNames(),
-			getAllTools: () => this.ctx.session.getAllToolNames(),
+			getAllTools: () => {
+				const runner = this.ctx.session.extensionRunner;
+				if (!runner) return [];
+				return runner.getAllRegisteredTools().map(tool => ({
+					name: tool.definition.name,
+					description: tool.definition.description,
+					parameters: tool.definition.parameters,
+					promptGuidelines: tool.definition.promptGuidelines,
+					extensionPath: tool.extensionPath,
+				}));
+			},
 			setActiveTools: toolNames => this.ctx.session.setActiveToolsByName(toolNames),
 			setModel: async model => {
 				const key = await this.ctx.session.modelRegistry.getApiKey(model);
@@ -367,9 +397,18 @@ export class ExtensionUiController {
 				})) ?? [],
 			getSessionName: () => this.ctx.sessionManager.getSessionName(),
 			setSessionName: name => this.#updateSessionName(name),
+			unregisterProvider: name => this.ctx.session.modelRegistry.unregisterProvider?.(name),
 		};
 		const contextActions: ExtensionContextActions = {
 			getModel: () => this.ctx.session.model,
+			getScopedModels: () =>
+				(this.ctx.session.scopedModels ?? []).map(scoped => ({
+					model: scoped.model,
+					thinkingLevel: scoped.thinkingLevel,
+					explicitThinkingLevel: false,
+				})),
+			getThinkingLevel: () => this.ctx.session.thinkingLevel,
+			getSignal: () => undefined, // AgentSession does not yet expose the active prompt abort signal
 			isIdle: () => !this.ctx.session.isStreaming,
 			abort: () => this.ctx.session.abort(),
 			hasPendingMessages: () => this.ctx.session.queuedMessageCount > 0,
@@ -489,7 +528,7 @@ export class ExtensionUiController {
 			},
 		};
 
-		extensionRunner.initialize(actions, contextActions, commandActions, uiContext);
+		extensionRunner.initialize(actions, contextActions, commandActions, uiContext, "tui");
 	}
 
 	createBackgroundUiContext(): ExtensionUIContext {
@@ -539,6 +578,7 @@ export class ExtensionUiController {
 				try {
 					await registeredTool.definition.onSession(event, {
 						ui: uiContext,
+						mode: "tui",
 						getContextUsage: () => this.ctx.session.getContextUsage(),
 						compact: instructionsOrOptions => this.#compactSession(instructionsOrOptions),
 						hasUI: !this.ctx.isBackgrounded,
@@ -546,6 +586,12 @@ export class ExtensionUiController {
 						sessionManager: this.ctx.session.sessionManager,
 						modelRegistry: this.ctx.session.modelRegistry,
 						model: this.ctx.session.model,
+						scopedModels: (this.ctx.session.scopedModels ?? []).map(scoped => ({
+							model: scoped.model,
+							thinkingLevel: scoped.thinkingLevel,
+							explicitThinkingLevel: false,
+						})),
+						signal: undefined,
 						isIdle: () => !this.ctx.session.isStreaming,
 						hasPendingMessages: () => this.ctx.session.queuedMessageCount > 0,
 						hasQueuedMessages: () => this.ctx.session.queuedMessageCount > 0,
@@ -783,7 +829,11 @@ export class ExtensionUiController {
 			keybindings: KeybindingsManager,
 			done: (result: T) => void,
 		) => (Component & { dispose?(): void }) | Promise<Component & { dispose?(): void }>,
-		options?: { overlay?: boolean },
+		options?: {
+			overlay?: boolean;
+			overlayOptions?: OverlayOptions | (() => OverlayOptions);
+			onHandle?: (handle: OverlayHandle) => void;
+		},
 	): Promise<T> {
 		const savedText = this.ctx.editor.getText();
 		const keybindings = KeybindingsManager.inMemory();
@@ -816,12 +866,17 @@ export class ExtensionUiController {
 			}
 			component = c;
 			if (options?.overlay) {
-				overlayHandle = this.ctx.ui.showOverlay(component, {
+				const userOverlayOptions =
+					typeof options.overlayOptions === "function" ? options.overlayOptions() : options.overlayOptions;
+				const mergedOverlayOptions: OverlayOptions = {
 					anchor: "bottom-center",
 					width: "100%",
 					maxHeight: "100%",
 					margin: 0,
-				});
+					...userOverlayOptions,
+				};
+				overlayHandle = this.ctx.ui.showOverlay(component, mergedOverlayOptions);
+				options.onHandle?.(overlayHandle);
 				return;
 			}
 			this.ctx.editorContainer.clear();

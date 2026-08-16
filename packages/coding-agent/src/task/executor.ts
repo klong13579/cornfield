@@ -1056,7 +1056,17 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 							session.sessionManager.appendLabelChange(targetId, label);
 						},
 						getActiveTools: () => session.getActiveToolNames(),
-						getAllTools: () => session.getAllToolNames(),
+						getAllTools: () => {
+							const runner = session.extensionRunner;
+							if (!runner) return [];
+							return runner.getAllRegisteredTools().map(tool => ({
+								name: tool.definition.name,
+								description: tool.definition.description,
+								parameters: tool.definition.parameters,
+								promptGuidelines: tool.definition.promptGuidelines,
+								extensionPath: tool.extensionPath,
+							}));
+						},
 						setActiveTools: (toolNames: string[]) =>
 							session.setActiveToolsByName(toolNames.filter(name => !parentOwnedToolNames.has(name))),
 						getCommands: () =>
@@ -1072,9 +1082,18 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 						setSessionName: async name => {
 							await session.sessionManager.setSessionName(name, "user");
 						},
+						unregisterProvider: name => session.modelRegistry.unregisterProvider?.(name),
 					},
 					{
 						getModel: () => session.model,
+						getScopedModels: () =>
+							(session.scopedModels ?? []).map(scoped => ({
+								model: scoped.model,
+								thinkingLevel: scoped.thinkingLevel,
+								explicitThinkingLevel: false,
+							})),
+						getThinkingLevel: () => session.thinkingLevel,
+						getSignal: () => undefined, // AgentSession does not yet expose the active prompt abort signal
 						isIdle: () => !session.isStreaming,
 						abort: () => session.abort(),
 						hasPendingMessages: () => session.queuedMessageCount > 0,
@@ -1083,11 +1102,15 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 						getSystemPrompt: () => session.systemPrompt,
 						compact: instructionsOrOptions => runExtensionCompact(session, instructionsOrOptions),
 					},
+					// No command context (subagents), no UI context
+					undefined,
+					undefined,
+					"print",
 				);
 				extensionRunner.onError(err => {
 					logger.error("Extension error", { path: err.extensionPath, error: err.error });
 				});
-				await extensionRunner.emit({ type: "session_start" });
+				await extensionRunner.emit({ type: "session_start", reason: "new" });
 			}
 
 			const MAX_YIELD_RETRIES = 3;

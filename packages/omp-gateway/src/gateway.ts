@@ -20,6 +20,7 @@ import {
 import { isEnoent, logger } from "@oh-my-pi/pi-utils";
 import { ActionRegistry } from "./action-registry";
 import { AgentBridge, type AgentBridgeOptions } from "./agent-bridge";
+import { IntercomBroker } from "./intercom/broker-server";
 import { createBridgeStatusToolDefinitions } from "./bridge-status-tool";
 import { DingTalkChannel } from "./channels/dingtalk";
 import { ChannelRegistry } from "./channels/registry";
@@ -213,6 +214,8 @@ export class Gateway {
 	#registry = new ChannelRegistry();
 	#store: SQLiteSessionStore | null = null;
 	#running = false;
+	/** In-process intercom broker (agent-to-agent messaging hub). Lives for the gateway lifetime. */
+	#intercomBroker: IntercomBroker | undefined;
 	/** Default agent bridge for single-account mode */
 	#bridge: AgentBridge;
 	/** Per-account agent bridges for multi-agent mode */
@@ -391,6 +394,15 @@ export class Gateway {
 		}
 
 		logger.debug("Starting gateway...");
+
+		// Intercom broker: in-process agent messaging hub, global socket. Started
+		// before channels/bridges so agent sessions can connect as soon as they boot.
+		try {
+			this.#intercomBroker = new IntercomBroker();
+			this.#intercomBroker.start();
+		} catch (err) {
+			logger.error("Failed to start intercom broker", { error: String(err) });
+		}
 
 		// Initialize session store
 		this.#store = new SQLiteSessionStore(`${dataDir}/sessions.db`);
@@ -773,6 +785,8 @@ export class Gateway {
 		this.#accountBridges.clear();
 		this.#accountAgentDirs.clear();
 		this.#sessionManager = undefined;
+		this.#intercomBroker?.stop();
+		this.#intercomBroker = undefined;
 		this.#store?.close();
 		this.#store = null;
 		this.#running = false;

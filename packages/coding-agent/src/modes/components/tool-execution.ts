@@ -18,6 +18,7 @@ import { EDIT_MODE_STRATEGIES, type EditMode, type PerFileDiffPreview } from "..
 import type { Theme } from "../../modes/theme/theme";
 import { theme } from "../../modes/theme/theme";
 import { BASH_DEFAULT_PREVIEW_LINES } from "../../tools/bash";
+import type { ToolRenderContext } from "../../extensibility/extensions/types";
 import {
 	formatArgsInline,
 	JSON_TREE_MAX_DEPTH_COLLAPSED,
@@ -106,6 +107,9 @@ export class ToolExecutionComponent extends Container {
 	#tool?: AgentTool;
 	#ui: TUI;
 	#cwd: string;
+	#toolCallId: string | undefined;
+	#lastRenderedComponent: Component | undefined;
+	#rendererState: Record<string, unknown> = {};
 	#result?: {
 		content: Array<{ type: string; text?: string; data?: string; mimeType?: string }>;
 		isError?: boolean;
@@ -152,6 +156,7 @@ export class ToolExecutionComponent extends Container {
 		this.#tool = tool;
 		this.#ui = ui;
 		this.#cwd = cwd;
+		this.#toolCallId = _toolCallId;
 		this.#args = cloneToolArgs(args);
 
 		this.addChild(new Spacer(1));
@@ -175,8 +180,11 @@ export class ToolExecutionComponent extends Container {
 		this.#schedulePreviewDiff(0);
 	}
 
-	updateArgs(args: any, _toolCallId?: string): void {
+	updateArgs(args: any, toolCallId?: string): void {
 		this.#args = cloneToolArgs(args);
+		if (toolCallId !== undefined) {
+			this.#toolCallId = toolCallId;
+		}
 		this.#updateSpinnerAnimation();
 		this.#schedulePreviewDiff();
 		this.#updateDisplay();
@@ -413,13 +421,36 @@ export class ToolExecutionComponent extends Container {
 			this.#contentBox.setBgFn(inline ? undefined : bgFn);
 			this.#contentBox.clear();
 
+			const toolRenderContext: ToolRenderContext = {
+				args: this.#getCallArgsForRender(),
+				toolCallId: this.#toolCallId ?? "",
+				invalidate: () => this.invalidate(),
+				lastComponent: this.#lastRenderedComponent,
+				state: this.#rendererState,
+				cwd: this.#cwd,
+				executionStarted: this.#result !== undefined || this.#argsComplete,
+				argsComplete: this.#argsComplete,
+				isPartial: this.#isPartial,
+				expanded: this.#expanded,
+				showImages: this.#showImages,
+				isError: this.#result?.isError ?? false,
+			};
+
 			// Render call component
 			const shouldRenderCall = !this.#result || !mergeCallAndResult;
 			if (shouldRenderCall && tool.renderCall) {
 				try {
-					const callComponent = tool.renderCall(this.#getCallArgsForRender(), this.#renderState, theme);
+					const callComponent = (
+						tool.renderCall as (
+							args: unknown,
+							options: { expanded: boolean; isPartial: boolean; spinnerFrame?: number },
+							theme: Theme,
+							context: ToolRenderContext,
+						) => Component
+					)(this.#getCallArgsForRender(), this.#renderState, theme, toolRenderContext);
 					if (callComponent) {
 						this.#contentBox.addChild(ensureInvalidate(callComponent));
+						this.#lastRenderedComponent = callComponent;
 					}
 				} catch (err) {
 					logger.warn("Tool renderer failed", { tool: this.#toolName, error: String(err) });
@@ -438,7 +469,7 @@ export class ToolExecutionComponent extends Container {
 						result: { content: Array<{ type: string; text?: string }>; details?: unknown; isError?: boolean },
 						options: { expanded: boolean; isPartial: boolean; spinnerFrame?: number },
 						theme: Theme,
-						args?: unknown,
+						context: ToolRenderContext,
 					) => Component;
 					const resultComponent = renderResult(
 						{
@@ -448,10 +479,11 @@ export class ToolExecutionComponent extends Container {
 						},
 						this.#renderState,
 						theme,
-						this.#args,
+						toolRenderContext,
 					);
 					if (resultComponent) {
 						this.#contentBox.addChild(ensureInvalidate(resultComponent));
+						this.#lastRenderedComponent = resultComponent;
 					}
 				} catch (err) {
 					logger.warn("Tool renderer failed", { tool: this.#toolName, error: String(err) });

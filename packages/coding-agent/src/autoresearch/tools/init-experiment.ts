@@ -371,7 +371,7 @@ export function createInitExperimentTool(
 				details: { state: cloneExperimentState(state) },
 			};
 		},
-		renderCall(args, _options, theme): Text {
+		renderCall(args, theme, _context): Text {
 			return new Text(renderInitCall(args.name, theme), 0, 0);
 		},
 		renderResult(result): Text {

@@ -381,7 +381,7 @@ export function createRunExperimentTool(
 				details: resultDetails,
 			};
 		},
-		renderCall(args, _options, theme): Text {
+		renderCall(args, theme, _context): Text {
 			const commandPreview = truncateToWidth(replaceTabs(args.command), 100);
 			return new Text(
 				`${theme.fg("toolTitle", theme.bold("run_experiment"))} ${theme.fg("muted", commandPreview)}`,

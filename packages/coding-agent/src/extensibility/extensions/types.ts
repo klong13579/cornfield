@@ -23,11 +23,12 @@ import type {
 	ToolResultMessage,
 } from "@oh-my-pi/pi-ai";
 import type * as piCodingAgent from "@oh-my-pi/pi-coding-agent";
-import type { AutocompleteItem, Component, EditorComponent, EditorTheme, KeyId, TUI } from "@oh-my-pi/pi-tui";
+import type { AutocompleteItem, Component, EditorComponent, EditorTheme, KeyId, OverlayHandle, OverlayOptions, TUI } from "@oh-my-pi/pi-tui";
 import type { Static, TSchema } from "@sinclair/typebox";
 import type { Rule } from "../../capability/rule";
 import type { KeybindingsManager } from "../../config/keybindings";
 import type { ModelRegistry } from "../../config/model-registry";
+import type { ScopedModel } from "../../config/model-resolver";
 import type { EditToolDetails } from "../../edit";
 import type { BashResult } from "../../exec/bash-executor";
 import type { ExecOptions, ExecResult } from "../../exec/exec";
@@ -92,6 +93,16 @@ export type TerminalInputHandler = (data: string) => { consume?: boolean; data?:
 
 export type WidgetPlacement = "aboveEditor" | "belowEditor";
 
+/**
+ * Current run mode of the agent process.
+ *
+ * - "tui": interactive terminal TUI (dialog-capable UI)
+ * - "rpc": JSON-line RPC server over stdio (headless, no TUI)
+ * - "json": print-mode with JSON output (headless)
+ * - "print": plain-text print mode (headless)
+ */
+export type ExtensionMode = "tui" | "rpc" | "json" | "print";
+
 export interface ExtensionWidgetOptions {
 	placement?: WidgetPlacement;
 }
@@ -146,7 +157,13 @@ export interface ExtensionUIContext {
 			keybindings: KeybindingsManager,
 			done: (result: T) => void,
 		) => ExtensionUiComponent | Promise<ExtensionUiComponent>,
-		options?: { overlay?: boolean },
+		options?: {
+			overlay?: boolean;
+			/** Overlay positioning/sizing options. Can be static or a function for dynamic updates. */
+			overlayOptions?: OverlayOptions | (() => OverlayOptions);
+			/** Called with the overlay handle after the overlay is shown. Use to control visibility. */
+			onHandle?: (handle: OverlayHandle) => void;
+		},
 	): Promise<T>;
 
 	/** Set the text in the core input editor. */
@@ -218,6 +235,8 @@ export interface CompactOptions {
 export interface ExtensionContext {
 	/** UI methods for user interaction */
 	ui: ExtensionUIContext;
+	/** Current run mode. Use "tui" to guard terminal-only UI such as custom components. */
+	mode: ExtensionMode;
 	/** Get current context usage for the active model. */
 	getContextUsage(): ContextUsage | undefined;
 	/** Compact the session context (interactive mode shows UI). */
@@ -232,8 +251,14 @@ export interface ExtensionContext {
 	modelRegistry: ModelRegistry;
 	/** Current model (may be undefined) */
 	model: Model | undefined;
+	/** Models scoped to this session (resolved from `--models` / `enabledModels` settings against the available catalogue). Same set the `/scoped-models` command shows. Empty when no scoping is configured (all available models are usable). Read-only snapshot. */
+	scopedModels: readonly ScopedModel[];
+	/** Current thinking level, when provided by the session runtime. */
+	thinkingLevel?: ThinkingLevel;
 	/** Whether the agent is idle (not streaming) */
 	isIdle(): boolean;
+	/** The current abort signal, or undefined when the agent is not streaming. */
+	signal: AbortSignal | undefined;
 	/** Abort the current agent operation */
 	abort(): void;
 	/** Whether there are queued messages waiting */
@@ -293,6 +318,34 @@ export interface ToolRenderResultOptions {
 	spinnerFrame?: number;
 }
 
+/** Context passed to tool renderers. */
+export interface ToolRenderContext<TState = unknown, TArgs = unknown> {
+	/** Current tool call arguments. Shared across call/result renders for the same tool call. */
+	args: TArgs;
+	/** Unique id for this tool execution. Stable across call/result renders for the same tool call. */
+	toolCallId: string;
+	/** Invalidate just this tool execution component for redraw. */
+	invalidate: () => void;
+	/** Previously returned component for this render slot, if any. */
+	lastComponent: Component | undefined;
+	/** Shared renderer state for this tool row. Initialized by the tool-execution component. */
+	state: TState;
+	/** Working directory for this tool execution. */
+	cwd: string;
+	/** Whether the tool execution has started. */
+	executionStarted: boolean;
+	/** Whether the tool call arguments are complete. */
+	argsComplete: boolean;
+	/** Whether the tool result is partial/streaming. */
+	isPartial: boolean;
+	/** Whether the result view is expanded. */
+	expanded: boolean;
+	/** Whether inline images are currently shown in the TUI. */
+	showImages: boolean;
+	/** Whether the current result is an error. */
+	isError: boolean;
+}
+
 /** Session event for tool onSession lifecycle */
 export interface ToolSessionEvent {
 	/** Reason for the session event */
@@ -304,13 +357,17 @@ export interface ToolSessionEvent {
 /**
  * Tool definition for registerTool().
  */
-export interface ToolDefinition<TParams extends TSchema = TSchema, TDetails = unknown> {
+export interface ToolDefinition<TParams extends TSchema = TSchema, TDetails = unknown, TState = unknown> {
 	/** Tool name (used in LLM tool calls) */
 	name: string;
 	/** Human-readable label for UI */
 	label: string;
 	/** Description for LLM */
 	description: string;
+	/** Optional one-line snippet for the Available tools section in the default system prompt. Custom tools are omitted from that section when this is not provided. */
+	promptSnippet?: string;
+	/** Optional guideline bullets appended to the default system prompt Guidelines section when this tool is active. */
+	promptGuidelines?: string[];
 	/** Parameter schema (TypeBox) */
 	parameters: TParams;
 	/** If true, tool is excluded unless explicitly listed in --tools or agent's tools field */
@@ -337,15 +394,36 @@ export interface ToolDefinition<TParams extends TSchema = TSchema, TDetails = un
 	onSession?: (event: ToolSessionEvent, ctx: ExtensionContext) => void | Promise<void>;
 
 	/** Custom rendering for tool call display */
-	renderCall?: (args: Static<TParams>, options: ToolRenderResultOptions, theme: Theme) => Component;
+	renderCall?: (args: Static<TParams>, theme: Theme, context: ToolRenderContext<TState, Static<TParams>>) => Component;
 
 	/** Custom rendering for tool result display */
 	renderResult?: (
 		result: AgentToolResult<TDetails>,
 		options: ToolRenderResultOptions,
 		theme: Theme,
-		args?: Static<TParams>,
+		context: ToolRenderContext<TState, Static<TParams>>,
 	) => Component;
+}
+
+type AnyToolDefinition = ToolDefinition<any, any, any>;
+
+/** Tool info with name, description, parameter schema, prompt guidelines, and source metadata. */
+export type ToolInfo = Pick<ToolDefinition, "name" | "description" | "parameters" | "promptGuidelines"> & {
+	extensionPath?: string;
+};
+
+/**
+ * Preserve parameter inference for standalone tool definitions.
+ *
+ * Use this when assigning a tool to a variable or passing it through arrays such
+ * as custom tool lists, where contextual typing would otherwise widen params to
+ * `unknown`.
+ */
+export function defineTool<TParams extends TSchema, TDetails = unknown, TState = unknown>(
+	tool: ToolDefinition<TParams, TDetails, TState>,
+): ToolDefinition<TParams, TDetails, TState> & AnyToolDefinition {
+	// biome-ignore lint/suspicious/noExplicitAny: intersection with AnyToolDefinition widens to the any-tool shape by design.
+	return tool as ToolDefinition<TParams, TDetails, TState> & AnyToolDefinition;
 }
 
 // ============================================================================
@@ -373,6 +451,10 @@ export interface ResourcesDiscoverResult {
 /** Fired on initial session load */
 export interface SessionStartEvent {
 	type: "session_start";
+	/** Why this session start happened. */
+	reason: "startup" | "reload" | "new" | "resume" | "fork";
+	/** Previously active session file. Present for "new", "resume", and "fork". */
+	previousSessionFile?: string;
 }
 
 /** Fired before switching to another session (can be cancelled) */
@@ -427,6 +509,10 @@ export interface SessionCompactEvent {
 /** Fired on process exit */
 export interface SessionShutdownEvent {
 	type: "session_shutdown";
+	/** Why the extension runtime is being torn down. */
+	reason: "quit" | "reload" | "new" | "resume" | "fork";
+	/** Destination session file when shutting down due to session replacement. */
+	targetSessionFile?: string;
 }
 
 /** Preparation data for tree navigation */
@@ -494,6 +580,8 @@ export interface BeforeAgentStartEvent {
 	prompt: string;
 	images?: ImageContent[];
 	systemPrompt: string;
+	// TODO(feat/port-pi-extension-api): pi adds `systemPromptOptions` here; deferred until the sdk
+	// layer can thread its buildSystemPrompt options through without fabricating a partial snapshot.
 }
 
 /** Fired when an agent loop starts */
@@ -505,6 +593,29 @@ export interface AgentStartEvent {
 export interface AgentEndEvent {
 	type: "agent_end";
 	messages: AgentMessage[];
+}
+
+/** Fired after an agent run has fully settled and no automatic retry, compaction, or queued continuation will run. */
+export interface AgentSettledEvent {
+	type: "agent_settled";
+}
+
+/** Source of a model selection change. */
+export type ModelSelectSource = "set" | "cycle" | "restore";
+
+/** Fired when a new model is selected. */
+export interface ModelSelectEvent {
+	type: "model_select";
+	model: Model;
+	previousModel: Model | undefined;
+	source: ModelSelectSource;
+}
+
+/** Fired when a new thinking level is selected. */
+export interface ThinkingLevelSelectEvent {
+	type: "thinking_level_select";
+	level: ThinkingLevel;
+	previousLevel: ThinkingLevel;
 }
 
 /** Fired at the start of each turn */
@@ -802,7 +913,7 @@ export function isToolCallEventType(toolName: string, event: ToolCallEvent): boo
 }
 
 /** Union of all event types */
-export type ExtensionEvent =
+	export type ExtensionEvent =
 	| ResourcesDiscoverEvent
 	| SessionEvent
 	| ContextEvent
@@ -811,6 +922,7 @@ export type ExtensionEvent =
 	| BeforeAgentStartEvent
 	| AgentStartEvent
 	| AgentEndEvent
+	| AgentSettledEvent
 	| TurnStartEvent
 	| TurnEndEvent
 	| MessageStartEvent
@@ -819,6 +931,8 @@ export type ExtensionEvent =
 	| ToolExecutionStartEvent
 	| ToolExecutionUpdateEvent
 	| ToolExecutionEndEvent
+	| ModelSelectEvent
+	| ThinkingLevelSelectEvent
 	| AutoCompactionStartEvent
 	| AutoCompactionEndEvent
 	| AutoRetryStartEvent
@@ -992,6 +1106,7 @@ export interface ExtensionAPI {
 	on(event: "before_agent_start", handler: ExtensionHandler<BeforeAgentStartEvent, BeforeAgentStartEventResult>): void;
 	on(event: "agent_start", handler: ExtensionHandler<AgentStartEvent>): void;
 	on(event: "agent_end", handler: ExtensionHandler<AgentEndEvent>): void;
+	on(event: "agent_settled", handler: ExtensionHandler<AgentSettledEvent>): void;
 	on(event: "turn_start", handler: ExtensionHandler<TurnStartEvent>): void;
 	on(event: "turn_end", handler: ExtensionHandler<TurnEndEvent>): void;
 	on(event: "message_start", handler: ExtensionHandler<MessageStartEvent>): void;
@@ -1000,6 +1115,8 @@ export interface ExtensionAPI {
 	on(event: "tool_execution_start", handler: ExtensionHandler<ToolExecutionStartEvent>): void;
 	on(event: "tool_execution_update", handler: ExtensionHandler<ToolExecutionUpdateEvent>): void;
 	on(event: "tool_execution_end", handler: ExtensionHandler<ToolExecutionEndEvent>): void;
+	on(event: "model_select", handler: ExtensionHandler<ModelSelectEvent>): void;
+	on(event: "thinking_level_select", handler: ExtensionHandler<ThinkingLevelSelectEvent>): void;
 	on(event: "auto_compaction_start", handler: ExtensionHandler<AutoCompactionStartEvent>): void;
 	on(event: "auto_compaction_end", handler: ExtensionHandler<AutoCompactionEndEvent>): void;
 	on(event: "auto_retry_start", handler: ExtensionHandler<AutoRetryStartEvent>): void;
@@ -1084,7 +1201,7 @@ export interface ExtensionAPI {
 	/** Send a user message to the agent. Always triggers a turn. */
 	sendUserMessage(
 		content: string | (TextContent | ImageContent)[],
-		options?: { deliverAs?: "steer" | "followUp" },
+		options?: { deliverAs?: "steer" | "followUp"; expandPromptTemplates?: boolean },
 	): void;
 
 	/** Append a custom entry to the session for state persistence (not sent to LLM). */
@@ -1097,7 +1214,7 @@ export interface ExtensionAPI {
 	getActiveTools(): string[];
 
 	/** Get all configured tools (built-in + extension tools). */
-	getAllTools(): string[];
+	getAllTools(): ToolInfo[];
 
 	/** Set the active tools by name. */
 	setActiveTools(toolNames: string[]): Promise<void>;
@@ -1119,6 +1236,9 @@ export interface ExtensionAPI {
 
 	/** Set the session name. Persists to the session file. */
 	setSessionName(name: string): Promise<void>;
+
+	/** Unregister a previously registered provider. Removes all models belonging to the named provider and restores any built-in models that were overridden by it. */
+	unregisterProvider(name: string): void;
 
 	// =========================================================================
 	// Provider Registration
@@ -1274,7 +1394,7 @@ export type AppendEntryHandler = <T = unknown>(customType: string, data?: T) => 
 
 export type GetActiveToolsHandler = () => string[];
 
-export type GetAllToolsHandler = () => string[];
+export type GetAllToolsHandler = () => ToolInfo[];
 
 export type GetCommandsHandler = () => SlashCommandInfo[];
 
@@ -1308,11 +1428,16 @@ export interface ExtensionActions {
 	setThinkingLevel: SetThinkingLevelHandler;
 	getSessionName: () => string | undefined;
 	setSessionName: (name: string) => Promise<void>;
+	/** Unregister a previously registered provider. */
+	unregisterProvider: (name: string) => void;
 }
 
 /** Actions for ExtensionContext (ctx.* in event handlers). */
 export interface ExtensionContextActions {
 	getModel: () => Model | undefined;
+	getScopedModels: () => readonly ScopedModel[];
+	getThinkingLevel: () => ThinkingLevel | undefined;
+	getSignal: () => AbortSignal | undefined;
 	isIdle: () => boolean;
 	abort: () => void;
 	hasPendingMessages: () => boolean;

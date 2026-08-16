@@ -451,7 +451,17 @@ export async function runRpcMode(session: AgentSession): Promise<never> {
 					session.sessionManager.appendLabelChange(targetId, label);
 				},
 				getActiveTools: () => session.getActiveToolNames(),
-				getAllTools: () => session.getAllToolNames(),
+				getAllTools: () => {
+					const runner = session.extensionRunner;
+					if (!runner) return [];
+					return runner.getAllRegisteredTools().map(tool => ({
+						name: tool.definition.name,
+						description: tool.definition.description,
+						parameters: tool.definition.parameters,
+						promptGuidelines: tool.definition.promptGuidelines,
+						extensionPath: tool.extensionPath,
+					}));
+				},
 				setActiveTools: (toolNames: string[]) => session.setActiveToolsByName(toolNames),
 				getCommands: () =>
 					session.extensionRunner?.getRegisteredCommands().map(cmd => ({
@@ -466,10 +476,19 @@ export async function runRpcMode(session: AgentSession): Promise<never> {
 				setSessionName: async name => {
 					await session.sessionManager.setSessionName(name, "user");
 				},
+				unregisterProvider: name => session.modelRegistry.unregisterProvider?.(name),
 			},
 			// ExtensionContextActions
 			{
 				getModel: () => session.agent.state.model,
+				getScopedModels: () =>
+					(session.scopedModels ?? []).map(scoped => ({
+						model: scoped.model,
+						thinkingLevel: scoped.thinkingLevel,
+						explicitThinkingLevel: false,
+					})),
+				getThinkingLevel: () => session.thinkingLevel,
+				getSignal: () => undefined, // AgentSession does not yet expose the active prompt abort signal
 				isIdle: () => !session.isStreaming,
 				abort: () => session.abort(),
 				hasPendingMessages: () => session.queuedMessageCount > 0,
@@ -510,6 +529,7 @@ export async function runRpcMode(session: AgentSession): Promise<never> {
 				compact: instructionsOrOptions => runExtensionCompact(session, instructionsOrOptions),
 			},
 			new RpcExtensionUIContext(pendingExtensionRequests, output),
+			"rpc",
 		);
 		extensionRunner.onError(err => {
 			output({ type: "extension_error", extensionPath: err.extensionPath, event: err.event, error: err.error });
@@ -517,6 +537,7 @@ export async function runRpcMode(session: AgentSession): Promise<never> {
 		// Emit session_start event
 		await extensionRunner.emit({
 			type: "session_start",
+			reason: "new",
 		});
 	}
 
@@ -823,7 +844,7 @@ export async function runRpcMode(session: AgentSession): Promise<never> {
 		if (!shutdownState.requested) return;
 
 		if (extensionRunner?.hasHandlers("session_shutdown")) {
-			await extensionRunner.emit({ type: "session_shutdown" });
+			await extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
 		}
 
 		process.exit(0);

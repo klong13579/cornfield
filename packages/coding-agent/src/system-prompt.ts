@@ -556,6 +556,10 @@ export interface BuildSystemPromptOptions {
 	alwaysApplyRules?: AlwaysApplyRule[];
 	/** Whether secret obfuscation is active. When true, explains the redaction format in the prompt. */
 	secretsEnabled?: boolean;
+	/** One-line snippets for extension-provided tools (ToolDefinition.promptSnippet). Rendered under an "Available tools" section. */
+	toolSnippets?: string[];
+	/** Guideline bullets for extension-provided tools (ToolDefinition.promptGuidelines). Rendered under a "Tool Guidelines" section. */
+	toolGuidelines?: string[];
 }
 
 /** Build the system prompt with tools, guidelines, and context */
@@ -581,6 +585,8 @@ export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}):
 		mcpDiscoveryServerSummaries = [],
 		eagerTasks = false,
 		secretsEnabled = false,
+		toolSnippets = [],
+		toolGuidelines = [],
 	} = options;
 	const resolvedCwd = cwd ?? getProjectDir();
 
@@ -743,6 +749,8 @@ export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}):
 		mcpDiscoveryServerSummaries,
 		eagerTasks,
 		secretsEnabled,
+		toolSnippets,
+		toolGuidelines,
 		skills: _filteredSkills,
 		hasMissionMd,
 		userProfile,
