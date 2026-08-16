@@ -36,7 +36,7 @@ function collectToolResults(events: WireEvent[]): AgentResponseToolResult[] {
 	for (const ev of events) {
 		if (ev.type !== "message_end") continue;
 		const msg = ev.message;
-		if (!msg || msg.role !== "toolResult") continue;
+		if (msg?.role !== "toolResult") continue;
 		const tr = msg as ToolResultMessage;
 		out.push({
 			id: tr.toolCallId,

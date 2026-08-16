@@ -26,7 +26,7 @@ describe("requestRpcEditor", () => {
 
 		expect(requests).toHaveLength(1);
 		const request = requests[0];
-		if (!request || request.method !== "editor") {
+		if (request?.method !== "editor") {
 			throw new Error("Expected an editor request");
 		}
 		expect(request.promptStyle).toBe(true);
@@ -62,7 +62,7 @@ describe("requestRpcEditor", () => {
 
 		expect(requests).toHaveLength(1);
 		const request = requests[0];
-		if (!request || request.method !== "editor") {
+		if (request?.method !== "editor") {
 			throw new Error("Expected an editor request");
 		}
 		expect(request.promptStyle).toBe(true);
@@ -72,7 +72,7 @@ describe("requestRpcEditor", () => {
 
 		expect(requests).toHaveLength(2);
 		const cancelRequest = requests[1];
-		if (!cancelRequest || cancelRequest.method !== "cancel") {
+		if (cancelRequest?.method !== "cancel") {
 			throw new Error("Expected a cancel request");
 		}
 		expect(cancelRequest.targetId).toBe(request.id);

@@ -277,7 +277,7 @@ export function parseAgentSessionForToolFailures(agentSessionPath: string | unde
 
 		if (parsed.type !== "message") continue;
 		const msg = parsed.message as Record<string, unknown> | undefined;
-		if (!msg || msg.role !== "toolResult") continue;
+		if (msg?.role !== "toolResult") continue;
 
 		const toolName = typeof msg.toolName === "string" ? msg.toolName : undefined;
 		const isError = msg.isError === true;
@@ -438,7 +438,7 @@ export function parseAgentSessionForToolCalls(agentSessionPath: string | undefin
 		// Second pass role: collect toolResult messages
 		if (parsed.type !== "message") continue;
 		const msg = parsed.message as Record<string, unknown> | undefined;
-		if (!msg || msg.role !== "toolResult") continue;
+		if (msg?.role !== "toolResult") continue;
 
 		const toolCallId = typeof msg.toolCallId === "string" ? msg.toolCallId : undefined;
 		const toolName = typeof msg.toolName === "string" ? msg.toolName : "unknown";

@@ -323,7 +323,7 @@ export class SkillPopulationEngine {
 	 */
 	async graduate(name: string): Promise<boolean> {
 		const record = await this.#store.get(name);
-		if (!record || record.state !== "experimental") return false;
+		if (record?.state !== "experimental") return false;
 
 		const skill = await this.#skillStore.get(name);
 		if (!skill) return false;

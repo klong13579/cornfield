@@ -67,7 +67,7 @@ describe("AuthStorage api-key login replacement", () => {
 		expect(credentials).toHaveLength(1);
 		const [stored] = credentials;
 		expect(stored?.credential.type).toBe("api_key");
-		if (!stored || stored.credential.type !== "api_key") {
+		if (stored?.credential.type !== "api_key") {
 			throw new Error("expected stored api-key credential");
 		}
 		expect(stored.credential.key).toBe("same-kagi-key");
@@ -93,7 +93,7 @@ describe("AuthStorage api-key login replacement", () => {
 		expect(credentials).toHaveLength(1);
 		const [stored] = credentials;
 		expect(stored?.credential.type).toBe("api_key");
-		if (!stored || stored.credential.type !== "api_key") {
+		if (stored?.credential.type !== "api_key") {
 			throw new Error("expected stored api-key credential");
 		}
 		expect(stored.credential.key).toBe("same-ollama-cloud-key");

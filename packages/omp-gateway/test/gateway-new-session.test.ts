@@ -130,25 +130,19 @@ describe("NewSessionHandler", () => {
 	// ───────────────────────────────────────────────────────────────
 
 	describe("isNewSessionCommand", () => {
-		test.each([
-			"/new",
-			"/new session",
-			"  /new  ",
-			"/reset",
-			"/clear",
-			"新会话",
-			"重新开始",
-			"清空对话",
-		])("matches %p", text => {
-			const handler = new NewSessionHandler({
-				config: makeConfig(),
-				store,
-				resolveDirectBridge: () => bridge,
-				sendAgentResponse: async () => {},
-				extractMessageText: m => (m.content.type === "text" ? m.content.text : ""),
-			});
-			expect(handler.isNewSessionCommand(text)).toBe(true);
-		});
+		test.each(["/new", "/new session", "  /new  ", "/reset", "/clear", "新会话", "重新开始", "清空对话"])(
+			"matches %p",
+			text => {
+				const handler = new NewSessionHandler({
+					config: makeConfig(),
+					store,
+					resolveDirectBridge: () => bridge,
+					sendAgentResponse: async () => {},
+					extractMessageText: m => (m.content.type === "text" ? m.content.text : ""),
+				});
+				expect(handler.isNewSessionCommand(text)).toBe(true);
+			},
+		);
 
 		test.each([
 			"hello",

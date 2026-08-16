@@ -31,7 +31,7 @@ function isAssistantMessage(entry: SessionEntry): entry is SessionMessageEntry {
  */
 function extractStats(sessionFile: string, folder: string, entry: SessionMessageEntry): MessageStats | null {
 	const msg = entry.message as AssistantMessage;
-	if (!msg || msg.role !== "assistant") return null;
+	if (msg?.role !== "assistant") return null;
 
 	return {
 		sessionFile,

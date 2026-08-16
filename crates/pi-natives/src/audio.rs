@@ -263,6 +263,9 @@ fn fill_playback(
 		let count = (current.len() - *cursor).min(output.len() - output_offset);
 		let source = &current[*cursor..*cursor + count];
 		let destination = &mut output[output_offset..output_offset + count];
+		// Exact comparison is deliberate: 1.0 is the caller-controlled default
+		// gain; any non-exact value correctly falls into the multiply path.
+		#[allow(clippy::float_cmp, reason = "exact 1.0 is the deliberate copy fast path")]
 		if gain == 1.0 {
 			destination.copy_from_slice(source);
 		} else {

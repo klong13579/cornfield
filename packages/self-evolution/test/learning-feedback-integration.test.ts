@@ -54,7 +54,7 @@ function simulateFeedback(
 
 	const sessionHelped = trace.completedSuccessfully && trace.errorCount === 0;
 	for (const learning of learnings) {
-		const { score, shouldRecord } = checkLearningRelevance(learning, trace);
+		const { shouldRecord } = checkLearningRelevance(learning, trace);
 		if (!shouldRecord) {
 			skipped.push(learning.id);
 			continue;

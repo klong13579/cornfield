@@ -199,7 +199,7 @@ console.log(`runId: ${details?.runId ?? "(missing)"}`);
 console.log(`workers: ${details?.workers?.map(w => `${w.name}/${w.model} ok=${w.ok}`).join(", ") ?? "(none)"}`);
 console.log(`handoff preview:\n${handoff.slice(0, 400)}`);
 
-if (!details?.workers || details.workers.length !== 3) {
+if (details?.workers?.length !== 3) {
 	console.error(`[FAIL] Expected 3 workers in moa-result details, got ${details?.workers?.length ?? 0}`);
 	process.exit(1);
 }

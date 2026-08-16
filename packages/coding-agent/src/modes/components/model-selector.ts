@@ -335,7 +335,7 @@ export class ModelSelectorComponent extends Container {
 	#getSelectedModelKey(): string | undefined {
 		if (this.#isCanonicalTab()) return undefined;
 		const item = this.#visibleItems[this.#selectedIndex] as ModelItem | undefined;
-		if (!item || item.kind !== "provider") return undefined;
+		if (item?.kind !== "provider") return undefined;
 		return `${item.provider}/${item.id}`;
 	}
 

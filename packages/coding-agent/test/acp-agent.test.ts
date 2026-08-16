@@ -442,7 +442,7 @@ describe("ACP agent", () => {
 		);
 		expect(commandUpdate).toBeDefined();
 		const names = (
-			(commandUpdate?.update as { availableCommands?: Array<{ name: string }> }).availableCommands ?? []
+			(commandUpdate!.update as { availableCommands?: Array<{ name: string }> }).availableCommands ?? []
 		).map(command => command.name);
 		for (const expected of ["help", "compact", "model", "clear", "exit"]) {
 			expect(names).toContain(expected);
@@ -456,7 +456,7 @@ describe("ACP agent", () => {
 		const reply = harness.updates
 			.slice(updatesBefore)
 			.find(update => update.update.sessionUpdate === "agent_message_chunk");
-		expect((reply?.update as { content?: { text?: string } }).content?.text ?? "").toContain(
+		expect((reply!.update as { content?: { text?: string } }).content?.text ?? "").toContain(
 			"Model switching is not exposed",
 		);
 

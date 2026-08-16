@@ -1,4 +1,4 @@
-//! macOS hardware AEC voice session via AVAudioEngine voice processing.
+//! macOS hardware AEC voice session via `AVAudioEngine` voice processing.
 //!
 //! One `AVAudioEngine` owns both directions: the input node runs with
 //! `voiceProcessingEnabled` (Apple's system AEC + AGC + noise suppression —
@@ -8,10 +8,10 @@
 //! capture/playback cannot do this: the AEC only sees audio played through
 //! its own engine.
 //!
-//! The legacy CoreAudio C API (VoiceProcessingIO AudioUnit) was attempted
-//! first and rejected on macOS 14.1 (`kAudioOutputUnitProperty_SetInputCallback`
-//! fails with -10879 on every scope/element combination) — AVAudioEngine is
-//! the supported modern route.
+//! The legacy `CoreAudio` C API (`VoiceProcessingIO` `AudioUnit`) was attempted
+//! first and rejected on macOS 14.1
+//! (`kAudioOutputUnitProperty_SetInputCallback` fails with -10879 on every
+//! scope/element combination) — `AVAudioEngine` is the supported modern route.
 //!
 //! Non-macOS platforms expose a stub whose constructor always fails; callers
 //! fall back to the miniaudio path.
@@ -30,9 +30,7 @@ mod stub {
 	impl AudioVoiceSession {
 		#[napi(constructor)]
 		pub fn new(_sample_rate: u32) -> Result<Self> {
-			Err(napi::Error::from_reason(
-				"VoiceProcessingIO AEC is only available on macOS",
-			))
+			Err(napi::Error::from_reason("VoiceProcessingIO AEC is only available on macOS"))
 		}
 	}
 }
@@ -62,15 +60,22 @@ mod macos {
 
 	type CaptureCallback = ThreadsafeFunction<Float32Array, UnknownReturnValue>;
 
-	/// ObjC object handle. AVAudioEngine objects are internally thread-safe;
+	/// `ObjC` object handle. `AVAudioEngine` objects are internally thread-safe;
 	/// every use here is additionally guarded by our own lock/stop discipline.
 	#[derive(Clone, Copy)]
 	struct ObjPtr(*mut AnyObject);
+	// SAFETY: `ObjPtr` is a raw handle to Apple's audio objects, which are
+	// internally thread-safe (documented). All use is serialized by the session's
+	// own lock/stop discipline — the handle is never dereferenced during
+	// teardown — so moving it between threads cannot race with the owner.
 	unsafe impl Send for ObjPtr {}
+	// SAFETY: accesses to the pointed-to objects happen inside callbacks Apple
+	// serializes per engine, and session state is additionally guarded by
+	// `SessionState` locks and atomics; same thread-safe-object argument as Send.
 	unsafe impl Sync for ObjPtr {}
 
 	impl ObjPtr {
-		fn get(self) -> *mut AnyObject {
+		const fn get(self) -> *mut AnyObject {
 			self.0
 		}
 	}
@@ -90,6 +95,10 @@ mod macos {
 	}
 
 	unsafe fn nsstring_to_string(obj: *mut AnyObject) -> String {
+		// SAFETY: caller guarantees `obj` is a valid NSString (null handled just
+		// below). `UTF8String` returns a pointer into the string's own storage,
+		// valid for the object's lifetime; we copy eagerly to an owned String
+		// before returning, so no dangling borrow escapes this call.
 		unsafe {
 			if obj.is_null() {
 				return String::new();
@@ -103,6 +112,10 @@ mod macos {
 	}
 
 	unsafe fn error_detail(error: *mut AnyObject) -> String {
+		// SAFETY: `error` is a valid NSError (or null) supplied by the caller
+		// and kept alive across the call; `localizedDescription` returns an
+		// autoreleased NSString valid in the current autorelease context, and
+		// `nsstring_to_string` copies it out before this function returns.
 		unsafe {
 			if error.is_null() {
 				return String::from("unknown error");
@@ -115,26 +128,34 @@ mod macos {
 	/// Linear-interpolation resampler (voice-grade, any rate → target rate).
 	struct Resampler {
 		ratio: f64,
-		pos: f64,
+		pos:   f64,
 	}
 
 	impl Resampler {
 		fn new(source_rate: f64, target_rate: f64) -> Self {
-			Self {
-				ratio: source_rate / target_rate,
-				pos: 0.0,
-			}
+			Self { ratio: source_rate / target_rate, pos: 0.0 }
 		}
 
 		fn process(&mut self, input: &[f32], out: &mut Vec<f32>) {
 			let mut i = self.pos;
 			let len = input.len() as f64;
+			// Backported from the raw-capture inner loop: float cursor carries
+			// sub-sample position across chunks, so an integer loop cannot
+			// represent the state.
+			#[allow(
+				clippy::while_float,
+				reason = "float cursor keeps sub-sample position across chunks"
+			)]
 			while i < len {
 				let idx = i as usize;
 				let frac = (i - idx as f64) as f32;
 				let a = input[idx];
-				let b = if idx + 1 < input.len() { input[idx + 1] } else { a };
-				out.push(a + (b - a) * frac);
+				let b = if idx + 1 < input.len() {
+					input[idx + 1]
+				} else {
+					a
+				};
+				out.push((b - a).mul_add(frac, a));
 				i += self.ratio;
 			}
 			self.pos = i - len;
@@ -142,21 +163,25 @@ mod macos {
 	}
 
 	struct SessionState {
-		capture_cb: Mutex<Option<CaptureCallback>>,
+		capture_cb:   Mutex<Option<CaptureCallback>>,
 		/// Created on the first tap callback, when the hardware rate is known.
-		resampler: Mutex<Option<Resampler>>,
-		target_rate: f64,
+		resampler:    Mutex<Option<Resampler>>,
+		target_rate:  f64,
 		/// Highest generation fully played — `end_playback(gen)` waits on it.
 		consumed_gen: AtomicU32,
 		/// Highest generation ever queued — `clear_playback` advances
-		/// consumed_gen here so discarded generations still resolve.
-		queued_gen: AtomicU32,
-		notify: Notify,
-		stopped: AtomicBool,
+		/// `consumed_gen` here so discarded generations still resolve.
+		queued_gen:   AtomicU32,
+		notify:       Notify,
+		stopped:      AtomicBool,
 	}
 
 	/// Mono mixdown + resample one tap buffer, then hand it to JS.
 	unsafe fn deliver_capture(state: &Arc<SessionState>, buffer: *mut AnyObject) {
+		// SAFETY: `buffer` is provided by AVAudioEngine's tap callback and stays
+		// valid until that callback returns; `floatChannelData` points into the
+		// buffer's sample storage for `frameLength` frames. All reads happen
+		// inside that window and the pointer never leaves this function.
 		unsafe {
 			if buffer.is_null() || state.stopped.load(Ordering::Acquire) {
 				return;
@@ -174,7 +199,7 @@ mod macos {
 			}
 			let channels = channels as usize;
 			let n = frame_length as usize;
-	
+
 			let mut mono = vec![0.0f32; n];
 			let scale = 1.0 / channels as f32;
 			for c in 0..channels {
@@ -182,11 +207,11 @@ mod macos {
 				if channel.is_null() {
 					continue;
 				}
-				for i in 0..n {
-					mono[i] += *channel.add(i) * scale;
+				for (i, m) in mono.iter_mut().enumerate() {
+					*m = (*channel.add(i)).mul_add(scale, *m);
 				}
 			}
-	
+
 			let mut out = Vec::new();
 			{
 				let mut resampler_guard = state.resampler.lock();
@@ -206,17 +231,17 @@ mod macos {
 		}
 	}
 
-	/// Duplex voice session over one AVAudioEngine with voice processing:
+	/// Duplex voice session over one `AVAudioEngine` with voice processing:
 	/// echo-cancelled mic capture in, assistant playback out (and used as the
 	/// AEC reference).
 	#[napi]
 	pub struct AudioVoiceSession {
 		engine: ObjPtr,
-		input: ObjPtr,
+		input:  ObjPtr,
 		player: ObjPtr,
 		/// Mono f32 at the target rate — the playback (and AEC reference) format.
 		format: ObjPtr,
-		state: Arc<SessionState>,
+		state:  Arc<SessionState>,
 	}
 
 	#[napi]
@@ -226,6 +251,12 @@ mod macos {
 		/// callers fall back to raw capture.
 		#[napi(constructor)]
 		pub fn new(sample_rate: u32) -> Result<Self> {
+			// SAFETY: freshly `new`/`alloc`-created ObjC objects (auto-released or
+			// +1 from `new`) are owned for this scope; `retain_obj` takes ownership
+			// of the input node's +1 reference, and the failure paths release
+			// explicitly so every path hands exactly one reference to each ObjPtr
+			// stored in `Self` (balanced by `Drop`). msg_send calls only touch
+			// objects alive for the whole construction.
 			unsafe {
 				let engine: *mut AnyObject = msg_send![class!(AVAudioEngine), new];
 
@@ -247,7 +278,8 @@ mod macos {
 				let input_raw: *mut AnyObject = msg_send![engine, inputNode];
 				let input = retain_obj(input_raw);
 				let mut vp_error: *mut AnyObject = std::ptr::null_mut();
-				let vp_ok: bool = msg_send![input.get(), setVoiceProcessingEnabled: true, error: &mut vp_error];
+				let vp_ok: bool =
+					msg_send![input.get(), setVoiceProcessingEnabled: true, error: &mut vp_error];
 				if !vp_ok {
 					let detail = error_detail(vp_error);
 					release_obj(input);
@@ -262,13 +294,13 @@ mod macos {
 					player: ObjPtr(player),
 					format: ObjPtr(format),
 					state: Arc::new(SessionState {
-						capture_cb: Mutex::new(None),
-						resampler: Mutex::new(None),
-						target_rate: f64::from(sample_rate),
+						capture_cb:   Mutex::new(None),
+						resampler:    Mutex::new(None),
+						target_rate:  f64::from(sample_rate),
 						consumed_gen: AtomicU32::new(0),
-						queued_gen: AtomicU32::new(0),
-						notify: Notify::new(),
-						stopped: AtomicBool::new(false),
+						queued_gen:   AtomicU32::new(0),
+						notify:       Notify::new(),
+						stopped:      AtomicBool::new(false),
 					}),
 				})
 			}
@@ -282,6 +314,10 @@ mod macos {
 			#[napi(ts_arg_type = "(error: Error | null, samples: Float32Array) => void")]
 			on_audio: CaptureCallback,
 		) -> Result<()> {
+			// SAFETY: `self.input`/`self.engine` ObjPtr handles are owned by `self`
+			// and alive until Drop; the msg_send calls follow Apple's documented
+			// engine-configuration sequence. The tap block captures `state` (Arc),
+			// never `self`, so it cannot access freed session fields after teardown.
 			unsafe {
 				*self.state.capture_cb.lock() = Some(on_audio);
 
@@ -322,6 +358,12 @@ mod macos {
 			if self.state.stopped.load(Ordering::Acquire) {
 				return Err(napi::Error::from_reason("Voice session is closed"));
 			}
+			// SAFETY: `buffer` is freshly alloc/init'd with frameCapacity =
+			// samples.len(), so `floatChannelData` guarantees that many frames of
+			// writable storage; `copy_nonoverlapping` is sound because the source
+			// (napi Float32Array heap) and destination (new PCM buffer) never
+			// alias. The player retains the buffer during scheduling; the later
+			// explicit `release` drops only our init-time reference.
 			unsafe {
 				let buffer_alloc: *mut AnyObject = msg_send![class!(AVAudioPCMBuffer), alloc];
 				let buffer: *mut AnyObject = msg_send![
@@ -337,7 +379,10 @@ mod macos {
 				std::ptr::copy_nonoverlapping(samples.as_ptr(), *data, samples.len());
 				let _: () = msg_send![buffer, setFrameLength: samples.len() as u32];
 
-				self.state.queued_gen.fetch_max(generation, Ordering::AcqRel);
+				self
+					.state
+					.queued_gen
+					.fetch_max(generation, Ordering::AcqRel);
 				let state = Arc::clone(&self.state);
 				let completion = RcBlock::new(move |_reason: isize| {
 					// Fires on playback completion AND on interruption
@@ -360,6 +405,9 @@ mod macos {
 		/// Discard all queued and in-flight playback (barge-in / new response).
 		#[napi]
 		pub fn clear_playback(&self) {
+			// SAFETY: `self.player` is valid for the duration of the call (borrowed
+			// from `&self`); stop/play on AVAudioPlayerNode are documented
+			// thread-safe and transfer no ownership.
 			unsafe {
 				let _: () = msg_send![self.player.get(), stop];
 				// Discarded generations must still resolve their end_playback.
@@ -393,6 +441,9 @@ mod macos {
 		#[napi]
 		pub fn stop(&self) -> Result<()> {
 			self.state.stopped.store(true, Ordering::Release);
+			// SAFETY: same ownership argument as `clear_playback` — the three
+			// handles are borrowed from `&self` and valid for the call, and
+			// removeTap → stop follows Apple's documented engine teardown order.
 			unsafe {
 				let _: () = msg_send![self.input.get(), removeTapOnBus: 0u32];
 				let _: () = msg_send![self.player.get(), stop];
@@ -405,6 +456,10 @@ mod macos {
 	impl Drop for AudioVoiceSession {
 		fn drop(&mut self) {
 			let _ = self.stop();
+			// SAFETY: every `ObjPtr` in the session holds exactly one +1 reference
+			// (from retain_obj/alloc), and `stop()` has already removed the tap and
+			// stopped the engine, so releasing here balances each reference without
+			// racing in-flight callbacks.
 			unsafe {
 				release_obj(self.input);
 				release_obj(self.player);

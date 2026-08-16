@@ -1068,7 +1068,7 @@ describe("CronService.onTrigger — forceFail debug-only override", () => {
 	// `storage` so the other tests in the file still see the
 	// shared JsonFileStorage.
 	async function _withForceFail<T>(overrides: Partial<ScheduledTask>, fn: () => Promise<T>): Promise<T> {
-		const { task, storage: ffStorage } = makeForceTask(overrides);
+		const { storage: ffStorage } = makeForceTask(overrides);
 		const originalStorage = storage;
 		storage = ffStorage as unknown as JsonFileStorage;
 		try {

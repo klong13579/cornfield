@@ -190,14 +190,14 @@ class InProcessWorkerEngine implements MoaWorkerEngine {
 		let lastStopReason: string | undefined;
 
 		const recordAssistant = (msg: AssistantMessage | undefined) => {
-			if (!msg || msg.role !== "assistant") return;
+			if (msg?.role !== "assistant") return;
 			lastAssistant = msg;
 			lastStopReason = msg.stopReason;
 			if (msg.errorMessage) lastErrorMessage = msg.errorMessage;
 		};
 
 		const accumulateUsage = (msg: AssistantMessage | undefined) => {
-			if (!msg || msg.role !== "assistant") return;
+			if (msg?.role !== "assistant") return;
 			usage.turns += 1;
 			const u = msg.usage;
 			if (u) {
