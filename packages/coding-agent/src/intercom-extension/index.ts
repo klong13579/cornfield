@@ -3,7 +3,7 @@ import { StringEnum } from "@oh-my-pi/pi-ai";
 import { getAgentDir, isEnoent } from "@oh-my-pi/pi-utils";
 import { randomUUID } from "crypto";
 import { Type } from "@sinclair/typebox";
-import { Text } from "@oh-my-pi/pi-tui";
+import { Text, type AutocompleteItem } from "@oh-my-pi/pi-tui";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import intercomSkill from "./skills/pi-intercom/SKILL.md" with { type: "text" };
@@ -547,6 +547,58 @@ function getNamePollMs(): number {
 	}
 	return 1000;
 }
+const INTERCOM_ACTIONS: Array<{ name: string; description: string }> = [
+	{ name: "list", description: "List active sessions" },
+	{ name: "list-cwd", description: "List sessions in a directory" },
+	{ name: "send", description: "Send a message" },
+	{ name: "ask", description: "Send and wait for a reply" },
+	{ name: "reply", description: "Reply to a pending ask" },
+	{ name: "pending", description: "List unresolved inbound asks" },
+	{ name: "status", description: "Show connection status" },
+	{ name: "cancel", description: "Request cancellation of a sent message" },
+];
+const INTERCOM_TARGET_ACTIONS = new Set(["send", "ask", "reply"]);
+
+/**
+ * Argument completions for `/intercom`: action name, then session target
+ * (name / id prefix) drawn from the last-known session roster. Pure function
+ * so it can be unit-tested without a live broker.
+ */
+export function buildIntercomCompletions(
+	argumentPrefix: string,
+	knownSessions: SessionInfo[],
+	currentSessionId: string | null,
+): AutocompleteItem[] {
+	const trimmed = argumentPrefix.trimStart();
+	const spaceIdx = trimmed.indexOf(" ");
+	const action = (spaceIdx === -1 ? trimmed : trimmed.slice(0, spaceIdx)).trim().toLowerCase();
+
+	if (spaceIdx === -1) {
+		return INTERCOM_ACTIONS.filter(({ name }) => name.startsWith(trimmed.toLowerCase())).map(({ name, description }) => ({
+			value: name,
+			label: name,
+			description,
+		}));
+	}
+
+	if (!INTERCOM_TARGET_ACTIONS.has(action)) return [];
+	const rest = trimmed.slice(spaceIdx + 1).trimStart();
+	if (!rest) return [];
+	const lower = rest.toLowerCase();
+	return knownSessions
+		.filter(session => session.id !== currentSessionId)
+		.filter(session => {
+			const name = (session.name ?? session.id).toLowerCase();
+			return name.startsWith(lower) || session.id.toLowerCase().startsWith(lower);
+		})
+		.map(session => ({
+			value: session.name ?? session.id,
+			label: `${session.name ?? "(unnamed)"} (${session.id.slice(0, 8)})`,
+			description: session.cwd,
+		}))
+		.slice(0, 20);
+}
+
 /**
  * Idempotently install the bundled intercom SKILL.md into the user-level skills
  * directory so the skill mechanism (`/skill pi-intercom`, discovery) sees it.
@@ -566,9 +618,11 @@ async function ensureIntercomSkillInstalled(): Promise<void> {
 	await Bun.write(path.join(skillDir, "SKILL.md"), intercomSkill);
 }
 
-export default function piIntercomExtension(pi: ExtensionAPI) {
+	export default function piIntercomExtension(pi: ExtensionAPI) {
 	void ensureIntercomSkillInstalled();
 	let client: IntercomClient | null = null;
+	/** Last-known online roster, kept fresh by list / join / leave / presence events; feeds `/intercom` completions. */
+	let knownSessions: SessionInfo[] = [];
 	const config: IntercomConfig = loadConfig();
 	const askTimeoutMs = getAskTimeoutMs();
 	const localExtensions = new Map<
@@ -1155,16 +1209,19 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
 					handleMessageControl(message.control);
 					break;
 				case "session_joined":
+					knownSessions = [...knownSessions.filter(s => s.id !== message.session.id), message.session];
 					for (const namespace of localExtensions.keys()) {
 						emitLocalExtensionEvent(namespace, { type: "session_joined", session: message.session });
 					}
 					break;
 				case "session_left":
+					knownSessions = knownSessions.filter(s => s.id !== message.sessionId);
 					for (const namespace of localExtensions.keys()) {
 						emitLocalExtensionEvent(namespace, { type: "session_left", sessionId: message.sessionId });
 					}
 					break;
 				case "presence_update":
+					knownSessions = [...knownSessions.filter(s => s.id !== message.session.id), message.session];
 					for (const namespace of localExtensions.keys()) {
 						emitLocalExtensionEvent(namespace, { type: "presence_update", session: message.session });
 					}
@@ -2146,6 +2203,7 @@ Usage:
 						try {
 							const mySessionId = connectedClient.sessionId;
 							const sessions = await connectedClient.listSessions();
+							knownSessions = sessions;
 							const currentSession = sessions.find(s => s.id === mySessionId);
 							const otherSessions = sessions.filter(s => s.id !== mySessionId);
 
@@ -2179,6 +2237,7 @@ Usage:
 						try {
 							const mySessionId = connectedClient.sessionId;
 							const sessions = await connectedClient.listSessions();
+							knownSessions = sessions;
 							const currentSession = sessions.find(s => s.id === mySessionId);
 
 							if (!currentSession) {
@@ -2615,6 +2674,7 @@ Usage:
 						try {
 							const mySessionId = connectedClient.sessionId;
 							const sessions = await connectedClient.listSessions();
+							knownSessions = sessions;
 							return {
 								content: [
 									{
@@ -2785,6 +2845,8 @@ Usage:
 
 	pi.registerCommand("intercom", {
 		description: "Open session intercom overlay",
+		getArgumentCompletions: argumentPrefix =>
+			buildIntercomCompletions(argumentPrefix, knownSessions, currentIntercomSessionId ?? currentSessionId),
 		handler: async (_args, ctx) => openIntercomOverlay(ctx),
 	});
 
