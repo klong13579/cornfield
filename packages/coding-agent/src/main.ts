@@ -282,7 +282,7 @@ async function getChangelogForDisplay(parsed: Args): Promise<string | undefined>
 	return undefined;
 }
 
-async function createSessionManager(parsed: Args, cwd: string): Promise<SessionManager | undefined> {
+export async function createSessionManager(parsed: Args, cwd: string): Promise<SessionManager | undefined> {
 	if (parsed.fork) {
 		if (parsed.noSession) {
 			throw new Error("--fork requires session persistence");
@@ -427,7 +427,7 @@ function discoverAppendSystemPromptFile(): string | undefined {
 	return undefined;
 }
 
-async function buildSessionOptions(
+export async function buildSessionOptions(
 	parsed: Args,
 	scopedModels: ScopedModel[],
 	sessionManager: SessionManager | undefined,
