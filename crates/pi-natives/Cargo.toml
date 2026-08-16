@@ -68,7 +68,7 @@ tree-sitter-nix = "0.3"
 tree-sitter-objc = "3.0"
 tree-sitter-ocaml = "0.24.2"
 tree-sitter-odin = "1.3"
-tree-sitter-perl = { version = "0.1.0", package = "tree-sitter-perl-next" }
+tree-sitter-perl = { package = "tree-sitter-perl-next", git = "https://github.com/PRRPCHT/tree-sitter-perl-next", rev = "3fe4ca4deb1296a0bf2bc64665b7d8a85b910d75" }
 tree-sitter-php = "0.24"
 tree-sitter-powershell = "0.26.3"
 tree-sitter-proto = "0.4.0"
