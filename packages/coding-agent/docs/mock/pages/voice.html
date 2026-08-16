@@ -1,0 +1,170 @@
+<!--
+页面名：语音 (Voice)
+功能层级位置：OMP 多端前端 > 语音
+覆盖的协议命令/事件：
+  命令：prompt, steer (语音转文字后发送), set_thinking_level
+  事件：session_snapshot, progress
+-->
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>omp · 语音</title>
+<style>
+  :root {
+    --bg: #0b0e14; --panel: #12161f; --border: #1e2530;
+    --text: #d7dde8; --muted: #7b8698; --accent: #4f8cff;
+    --green: #34d399; --amber: #fbbf24; --red: #f87171;
+    --bg-hover: #1a1f2b; --card-bg: #0d1117; --radius: 8px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: var(--bg); color: var(--text); font: 14px/1.55 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }
+
+  #nav { width: 56px; background: var(--panel); border-right: 1px solid var(--border); display: flex; flex-direction: column; align-items: center; padding: 12px 0; gap: 4px; flex-shrink: 0; }
+  .nav-item { width: 40px; height: 40px; border-radius: var(--radius); display: flex; align-items: center; justify-content: center; font-size: 18px; cursor: pointer; color: var(--muted); transition: all 0.15s; }
+  .nav-item:hover { background: var(--bg-hover); color: var(--text); }
+  .nav-item.active { background: var(--accent); color: #fff; }
+  .nav-spacer { flex: 1; }
+
+  #main { flex: 1; display: flex; flex-direction: column; min-width: 0; overflow-y: auto; }
+  #topbar { display: flex; align-items: center; gap: 14px; padding: 10px 18px; border-bottom: 1px solid var(--border); background: var(--panel); flex-shrink: 0; }
+  .breadcrumb { font-size: 13px; color: var(--muted); }
+  .breadcrumb span { color: var(--text); }
+  .spacer { flex: 1; }
+
+  #content { display: flex; flex: 1; }
+  #main-area { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px; }
+  #sidebar { width: 300px; border-left: 1px solid var(--border); background: var(--panel); overflow-y: auto; padding: 14px; flex-shrink: 0; }
+  .card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 10px; padding: 12px; margin-bottom: 14px; }
+  .card h4 { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 10px; }
+  .kv { display: flex; justify-content: space-between; font-size: 13px; padding: 4px 0; }
+  .kv .k { color: var(--muted); }
+
+  /* 语音录制按钮 */
+  .voice-btn { width: 120px; height: 120px; border-radius: 50%; border: 3px solid var(--accent); background: var(--card-bg); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s; position: relative; }
+  .voice-btn:hover { background: var(--bg-hover); }
+  .voice-btn.recording { border-color: var(--red); animation: pulse 1.5s ease-in-out infinite; }
+  .voice-btn .mic-icon { font-size: 48px; }
+  .voice-btn .wave { position: absolute; inset: -8px; border-radius: 50%; border: 2px solid var(--red); opacity: 0; }
+  .voice-btn.recording .wave { animation: wave-out 1.5s ease-out infinite; }
+  @keyframes pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.05); } }
+  @keyframes wave-out { 0% { transform: scale(1); opacity: 0.6; } 100% { transform: scale(1.4); opacity: 0; } }
+
+  .voice-status { margin-top: 20px; font-size: 15px; color: var(--muted); text-align: center; }
+  .voice-status.recording { color: var(--red); }
+  .voice-transcript { margin-top: 24px; padding: 16px 20px; background: var(--card-bg); border: 1px solid var(--border); border-radius: 10px; min-width: 400px; max-width: 600px; min-height: 60px; font-size: 14px; color: var(--muted); text-align: center; }
+  .voice-transcript.active { color: var(--text); }
+  .voice-actions { display: flex; gap: 12px; margin-top: 16px; }
+  .btn { background: var(--accent); color: #fff; border: none; border-radius: 6px; padding: 8px 20px; font-size: 14px; cursor: pointer; }
+  .btn:hover { opacity: 0.9; }
+  .btn-secondary { background: var(--bg-hover); border: 1px solid var(--border); color: var(--text); }
+
+  /* Toggle */
+  .toggle { width: 42px; height: 24px; border-radius: 12px; background: var(--border); cursor: pointer; position: relative; transition: background 0.2s; flex-shrink: 0; }
+  .toggle.on { background: var(--accent); }
+  .toggle::after { content: ""; width: 18px; height: 18px; border-radius: 50%; background: #fff; position: absolute; top: 3px; left: 3px; transition: left 0.2s; }
+  .toggle.on::after { left: 21px; }
+
+  select { background: var(--card-bg); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; color: var(--text); font-size: 13px; outline: none; width: 100%; }
+  select:focus { border-color: var(--accent); }
+</style>
+</head>
+<body>
+
+<div style="display:flex;height:100vh">
+  <div id="nav">
+    <div class="nav-item" title="会话工作台" onclick="location.href='session-workspace.html'">💬</div>
+    <div class="nav-item" title="Agent 管理" onclick="location.href='agent-list.html'">🤖</div>
+    <div class="nav-item" title="会话记录" onclick="location.href='session-records.html'">📋</div>
+    <div class="nav-item active" title="语音">🎤</div>
+    <div class="nav-item" title="Todo 面板" onclick="location.href='todo-panel.html'">✅</div>
+    <div class="nav-item" title="模型市场" onclick="location.href='model-marketplace.html'">🧠</div>
+    <div class="nav-spacer"></div>
+    <div class="nav-item" title="设置" onclick="location.href='settings.html'">⚙</div>
+  </div>
+
+  <div id="main">
+    <div id="topbar">
+      <div class="breadcrumb">语音 / <span>语音输入</span></div>
+      <div class="spacer"></div>
+    </div>
+
+    <div id="content">
+      <div id="main-area">
+        <div class="voice-btn" id="voiceBtn" onclick="toggleRecording()">
+          <span class="mic-icon">🎤</span>
+          <span class="wave"></span>
+        </div>
+        <div class="voice-status" id="voiceStatus">点击麦克风开始说话</div>
+        <div class="voice-transcript" id="voiceTranscript">等待语音输入…</div>
+        <div class="voice-actions">
+          <button class="btn" id="sendVoiceBtn" onclick="sendVoice()" disabled>发送为指令</button>
+          <button class="btn btn-secondary" onclick="clearVoice()">清除</button>
+        </div>
+      </div>
+
+      <div id="sidebar">
+        <div class="card">
+          <h4>语音输入</h4>
+          <div class="kv"><span class="k">语音识别</span><span style="color:var(--green)">就绪</span></div>
+          <div class="kv"><span class="k">语言</span><span>中文（普通话）</span></div>
+          <div class="kv"><span class="k">自动标点</span><span style="color:var(--green)">开</span></div>
+        </div>
+
+        <div class="card">
+          <h4>语音播报</h4>
+          <div class="kv" style="margin-bottom:8px"><span class="k">Agent 完成时朗读</span><div class="toggle" onclick="this.classList.toggle('on')"></div></div>
+          <div class="kv" style="margin-bottom:8px"><span class="k">朗读速度</span></div>
+          <select><option>正常</option><option>快速</option><option>慢速</option></select>
+          <div class="kv" style="margin-top:8px;margin-bottom:4px"><span class="k">语音角色</span></div>
+          <select><option>默认女声</option><option>默认男声</option><option>温柔女声</option></select>
+          <div class="kv" style="margin-top:8px;margin-bottom:8px"><span class="k">静默时段</span></div>
+          <select><option>永不静默</option><option>22:00-08:00</option><option>自定义</option></select>
+        </div>
+
+        <div class="card">
+          <h4>语音偏好</h4>
+          <div class="kv" style="margin-bottom:8px"><span class="k">语音唤醒</span><div class="toggle" onclick="this.classList.toggle('on')"></div></div>
+          <div class="kv" style="margin-bottom:8px"><span class="k">按键说话</span><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
+          <div class="kv" style="margin-bottom:8px"><span class="k">VAD 自动断句</span><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
+          <div class="kv" style="margin-bottom:4px"><span class="k">VAD 静音阈值</span></div>
+          <select><option>中等</option><option>低</option><option>高</option></select>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+let recording = false;
+function toggleRecording() {
+  recording = !recording;
+  const btn = document.getElementById("voiceBtn");
+  const status = document.getElementById("voiceStatus");
+  const transcript = document.getElementById("voiceTranscript");
+  const sendBtn = document.getElementById("sendVoiceBtn");
+  if (recording) {
+    btn.classList.add("recording");
+    status.classList.add("recording");
+    status.textContent = "正在聆听…";
+    transcript.textContent = "帮我查一下 gateway 为什么在 00:20:30 消息丢失…";
+    transcript.classList.add("active");
+    sendBtn.disabled = false;
+  } else {
+    btn.classList.remove("recording");
+    status.classList.remove("recording");
+    status.textContent = "语音输入已停止";
+  }
+}
+function sendVoice() {
+  alert("语音转文字内容已发送为 prompt 命令");
+}
+function clearVoice() {
+  document.getElementById("voiceTranscript").textContent = "等待语音输入…";
+  document.getElementById("voiceTranscript").classList.remove("active");
+  document.getElementById("sendVoiceBtn").disabled = true;
+}
+</script>
+</body>
+</html>

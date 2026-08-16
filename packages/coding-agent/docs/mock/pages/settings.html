@@ -1,0 +1,265 @@
+<!--
+页面名：设置 (Settings)
+功能层级位置：OMP 多端前端 > 设置
+覆盖的协议命令/事件：
+  命令：hello, set_auto_compaction, set_auto_retry, subscribe, unsubscribe
+  事件：hello_ack, hello_error
+-->
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>omp · 设置</title>
+<style>
+  :root {
+    --bg: #0b0e14; --panel: #12161f; --border: #1e2530;
+    --text: #d7dde8; --muted: #7b8698; --accent: #4f8cff;
+    --green: #34d399; --amber: #fbbf24; --red: #f87171;
+    --bg-hover: #1a1f2b; --card-bg: #0d1117; --radius: 8px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: var(--bg); color: var(--text); font: 14px/1.55 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }
+
+  #nav { width: 56px; background: var(--panel); border-right: 1px solid var(--border); display: flex; flex-direction: column; align-items: center; padding: 12px 0; gap: 4px; flex-shrink: 0; }
+  .nav-item { width: 40px; height: 40px; border-radius: var(--radius); display: flex; align-items: center; justify-content: center; font-size: 18px; cursor: pointer; color: var(--muted); transition: all 0.15s; }
+  .nav-item:hover { background: var(--bg-hover); color: var(--text); }
+  .nav-item.active { background: var(--accent); color: #fff; }
+  .nav-spacer { flex: 1; }
+
+  #main { flex: 1; display: flex; flex-direction: column; min-width: 0; overflow-y: auto; }
+  #topbar { display: flex; align-items: center; gap: 14px; padding: 10px 18px; border-bottom: 1px solid var(--border); background: var(--panel); flex-shrink: 0; }
+  .breadcrumb { font-size: 13px; color: var(--muted); }
+  .breadcrumb span { color: var(--text); }
+  .spacer { flex: 1; }
+
+  #content { padding: 24px; max-width: 700px; }
+  .section { margin-bottom: 32px; }
+  .section h3 { font-size: 16px; margin-bottom: 16px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+  .setting-row { display: flex; align-items: center; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid var(--border); }
+  .setting-label { display: flex; flex-direction: column; gap: 2px; }
+  .setting-label .title { font-size: 14px; }
+  .setting-label .desc { font-size: 12px; color: var(--muted); }
+
+  .toggle { width: 42px; height: 24px; border-radius: 12px; background: var(--border); cursor: pointer; position: relative; transition: background 0.2s; flex-shrink: 0; }
+  .toggle.on { background: var(--accent); }
+  .toggle::after { content: ""; width: 18px; height: 18px; border-radius: 50%; background: #fff; position: absolute; top: 3px; left: 3px; transition: left 0.2s; }
+  .toggle.on::after { left: 21px; }
+
+  select { background: var(--card-bg); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; color: var(--text); font-size: 13px; outline: none; min-width: 160px; }
+  select:focus { border-color: var(--accent); }
+  input[type="text"], input[type="password"] { background: var(--card-bg); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; color: var(--text); font-size: 13px; outline: none; width: 280px; font-family: "SF Mono", Menlo, monospace; }
+  input:focus { border-color: var(--accent); }
+  .btn { background: var(--accent); color: #fff; border: none; border-radius: 6px; padding: 6px 14px; font-size: 13px; cursor: pointer; }
+  .btn:hover { opacity: 0.9; }
+  .btn-sm { padding: 4px 10px; font-size: 12px; }
+  .btn-danger { background: var(--red); }
+
+  .conn-status { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; }
+  .dot.online { background: var(--green); }
+  .dot.offline { background: var(--red); }
+
+  .kbd { font-family: "SF Mono", Menlo, monospace; font-size: 11px; padding: 2px 6px; border-radius: 4px; background: var(--bg-hover); border: 1px solid var(--border); color: var(--text); }
+</style>
+</head>
+<body>
+
+<div style="display:flex;height:100vh">
+  <div id="nav">
+    <div class="nav-item" title="会话工作台" onclick="location.href='session-workspace.html'">💬</div>
+    <div class="nav-item" title="Agent 管理" onclick="location.href='agent-list.html'">🤖</div>
+    <div class="nav-item" title="会话记录" onclick="location.href='session-records.html'">📋</div>
+    <div class="nav-item" title="语音" onclick="location.href='voice.html'">🎤</div>
+    <div class="nav-item" title="Todo 面板" onclick="location.href='todo-panel.html'">✅</div>
+    <div class="nav-item" title="模型市场" onclick="location.href='model-marketplace.html'">🧠</div>
+    <div class="nav-spacer"></div>
+    <div class="nav-item active" title="设置">⚙</div>
+  </div>
+
+  <div id="main">
+    <div id="topbar">
+      <div class="breadcrumb">设置</div>
+      <div class="spacer"></div>
+    </div>
+
+    <div id="content">
+      <!-- 连接 -->
+      <div class="section">
+        <h3>连接</h3>
+        <div class="setting-row">
+          <div class="setting-label">
+            <div class="title">连接状态</div>
+            <div class="desc">与 omp serve 的 WebSocket 连接</div>
+          </div>
+          <div class="conn-status"><span class="dot online"></span>已连接</div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-label">
+            <div class="title">服务地址</div>
+            <div class="desc">omp serve 的 WebSocket URL</div>
+          </div>
+          <input type="text" value="ws://127.0.0.1:7891/ws">
+        </div>
+        <div class="setting-row">
+          <div class="setting-label">
+            <div class="title">Token</div>
+            <div class="desc">握手认证 token</div>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input type="password" value="••••••••••••••••">
+            <button class="btn btn-sm" onclick="alert('已重新连接')">重新连接</button>
+          </div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-label">
+            <div class="title">协议版本</div>
+            <div class="desc">MULTIDEVICE_PROTOCOL_VERSION</div>
+          </div>
+          <span style="font-family:Menlo;font-size:13px">v1</span>
+        </div>
+      </div>
+
+      <!-- 主题 -->
+      <div class="section">
+        <h3>主题</h3>
+        <div class="setting-row">
+          <div class="setting-label">
+            <div class="title">颜色主题</div>
+            <div class="desc">界面配色方案</div>
+          </div>
+          <select>
+            <option>深色</option>
+            <option>浅色</option>
+            <option>跟随系统</option>
+          </select>
+        </div>
+        <div class="setting-row">
+          <div class="setting-label">
+            <div class="title">字体大小</div>
+            <div class="desc">界面文字大小</div>
+          </div>
+          <select>
+            <option>小</option>
+            <option selected>中等</option>
+            <option>大</option>
+          </select>
+        </div>
+        <div class="setting-row">
+          <div class="setting-label">
+            <div class="title">消息密度</div>
+            <div class="desc">转录区消息间距</div>
+          </div>
+          <select>
+            <option>紧凑</option>
+            <option selected>标准</option>
+            <option>舒适</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- 快捷键 -->
+      <div class="section">
+        <h3>快捷键</h3>
+        <div class="setting-row">
+          <div class="setting-label"><div class="title">发送消息</div></div>
+          <span><span class="kbd">Enter</span></span>
+        </div>
+        <div class="setting-row">
+          <div class="setting-label"><div class="title">换行</div></div>
+          <span><span class="kbd">Shift</span> + <span class="kbd">Enter</span></span>
+        </div>
+        <div class="setting-row">
+          <div class="setting-label"><div class="title">中止生成</div></div>
+          <span><span class="kbd">Esc</span></span>
+        </div>
+        <div class="setting-row">
+          <div class="setting-label"><div class="title">切换 Agent</div></div>
+          <span><span class="kbd">Cmd</span> + <span class="kbd">1-9</span></span>
+        </div>
+        <div class="setting-row">
+          <div class="setting-label"><div class="title">模型切换</div></div>
+          <span><span class="kbd">Cmd</span> + <span class="kbd">M</span></span>
+        </div>
+        <div class="setting-row">
+          <div class="setting-label"><div class="title">语音输入</div></div>
+          <span><span class="kbd">Cmd</span> + <span class="kbd">V</span></span>
+        </div>
+      </div>
+
+      <!-- 会话行为 -->
+      <div class="section">
+        <h3>会话行为</h3>
+        <div class="setting-row">
+          <div class="setting-label">
+            <div class="title">自动压缩</div>
+            <div class="desc">上下文接近窗口上限时自动触发压缩</div>
+          </div>
+          <div class="toggle on" onclick="this.classList.toggle('on')"></div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-label">
+            <div class="title">自动重试</div>
+            <div class="desc">工具调用失败时自动重试</div>
+          </div>
+          <div class="toggle on" onclick="this.classList.toggle('on')"></div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-label">
+            <div class="title">草稿自动保留</div>
+            <div class="desc">未发送的输入自动保存</div>
+          </div>
+          <div class="toggle on" onclick="this.classList.toggle('on')"></div>
+        </div>
+      </div>
+
+      <!-- 通知 -->
+      <div class="section">
+        <h3>通知</h3>
+        <div class="setting-row">
+          <div class="setting-label">
+            <div class="title">Agent 完成通知</div>
+            <div class="desc">Agent 完成回复时推送通知</div>
+          </div>
+          <div class="toggle on" onclick="this.classList.toggle('on')"></div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-label">
+            <div class="title">错误通知</div>
+            <div class="desc">工具调用失败或会话出错时推送</div>
+          </div>
+          <div class="toggle on" onclick="this.classList.toggle('on')"></div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-label">
+            <div class="title">定时任务通知</div>
+            <div class="desc">定时任务触发时推送</div>
+          </div>
+          <div class="toggle" onclick="this.classList.toggle('on')"></div>
+        </div>
+      </div>
+
+      <!-- 危险操作 -->
+      <div class="section">
+        <h3>危险操作</h3>
+        <div class="setting-row">
+          <div class="setting-label">
+            <div class="title">清除所有会话记录</div>
+            <div class="desc">删除所有本地会话 JSONL 文件，不可恢复</div>
+          </div>
+          <button class="btn btn-sm btn-danger" onclick="alert('确认清除？')">清除</button>
+        </div>
+        <div class="setting-row">
+          <div class="setting-label">
+            <div class="title">重置所有设置</div>
+            <div class="desc">恢复出厂默认设置</div>
+          </div>
+          <button class="btn btn-sm btn-danger" onclick="alert('确认重置？')">重置</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

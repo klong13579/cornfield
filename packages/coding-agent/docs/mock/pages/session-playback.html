@@ -1,0 +1,212 @@
+<!--
+页面名：会话回放 (Session Playback)
+功能层级位置：OMP 多端前端 > 会话记录 > 单会话详情回放
+覆盖的协议命令/事件：
+  命令：get_snapshot, get_messages, get_branch_messages, get_session_stats
+  事件：session_snapshot
+-->
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>omp · 会话回放</title>
+<style>
+  :root {
+    --bg: #0b0e14; --panel: #12161f; --border: #1e2530;
+    --text: #d7dde8; --muted: #7b8698; --accent: #4f8cff;
+    --green: #34d399; --amber: #fbbf24; --red: #f87171;
+    --user: #1a2230; --assistant: #141a24;
+    --bg-hover: #1a1f2b; --card-bg: #0d1117; --radius: 8px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: var(--bg); color: var(--text); font: 14px/1.55 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }
+
+  #nav { width: 56px; background: var(--panel); border-right: 1px solid var(--border); display: flex; flex-direction: column; align-items: center; padding: 12px 0; gap: 4px; flex-shrink: 0; }
+  .nav-item { width: 40px; height: 40px; border-radius: var(--radius); display: flex; align-items: center; justify-content: center; font-size: 18px; cursor: pointer; color: var(--muted); transition: all 0.15s; }
+  .nav-item:hover { background: var(--bg-hover); color: var(--text); }
+  .nav-item.active { background: var(--accent); color: #fff; }
+  .nav-spacer { flex: 1; }
+
+  #main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  #topbar { display: flex; align-items: center; gap: 14px; padding: 10px 18px; border-bottom: 1px solid var(--border); background: var(--panel); flex-shrink: 0; }
+  .breadcrumb { font-size: 13px; color: var(--muted); }
+  .breadcrumb a { color: var(--accent); text-decoration: none; cursor: pointer; }
+  .breadcrumb span { color: var(--text); }
+  .spacer { flex: 1; }
+  .btn { background: var(--accent); color: #fff; border: none; border-radius: 6px; padding: 6px 14px; font-size: 13px; cursor: pointer; }
+  .btn:hover { opacity: 0.9; }
+  .btn-secondary { background: var(--bg-hover); border: 1px solid var(--border); color: var(--text); }
+
+  #playback-bar { background: var(--panel); border-bottom: 1px solid var(--border); padding: 10px 18px; display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+  .pb-btn { width: 32px; height: 32px; border-radius: 50%; background: var(--bg-hover); border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 14px; color: var(--text); }
+  .pb-btn:hover { background: var(--accent); }
+  .pb-btn.play { background: var(--accent); }
+  .pb-speed { font-size: 12px; color: var(--muted); cursor: pointer; padding: 4px 8px; border-radius: 4px; }
+  .pb-speed:hover { background: var(--bg-hover); }
+  .pb-speed.active { color: var(--accent); }
+  .pb-progress { flex: 1; height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; }
+  .pb-progress > div { height: 100%; background: var(--accent); width: 45%; border-radius: 2px; }
+  .pb-step { font-size: 12px; color: var(--muted); font-family: "SF Mono", Menlo, monospace; }
+
+  #transcript { flex: 1; overflow-y: auto; padding: 20px 22px; }
+  .msg { display: flex; gap: 12px; margin-bottom: 20px; }
+  .avatar { width: 30px; height: 30px; border-radius: var(--radius); display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; flex-shrink: 0; }
+  .avatar.user { background: #233250; color: var(--accent); }
+  .avatar.assistant { background: #1f2937; color: var(--green); }
+  .bubble { flex: 1; min-width: 0; }
+  .bubble .name { font-size: 12px; color: var(--muted); margin-bottom: 4px; display: flex; align-items: center; gap: 8px; }
+  .bubble .content { background: var(--assistant); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
+  .msg.user .content { background: var(--user); }
+  .msg.user .bubble { display: flex; flex-direction: column; align-items: flex-end; }
+  .msg.user .content { max-width: 78%; }
+  p { margin-bottom: 8px; }
+  p:last-child { margin-bottom: 0; }
+  code { background: var(--card-bg); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; font-size: 12.5px; font-family: "SF Mono", Menlo, monospace; }
+  .toolcard { border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: var(--radius); background: var(--card-bg); margin: 10px 0; overflow: hidden; }
+  .toolcard .head { display: flex; align-items: center; gap: 8px; padding: 8px 12px; font-size: 12.5px; border-bottom: 1px solid var(--border); }
+  .toolcard .head .tname { font-family: "SF Mono", Menlo, monospace; color: var(--text); }
+  .toolcard .args { padding: 8px 12px; font-family: "SF Mono", Menlo, monospace; font-size: 12px; color: var(--muted); white-space: pre-wrap; }
+  .toolcard .result { padding: 8px 12px; font-family: "SF Mono", Menlo, monospace; font-size: 12px; color: var(--green); border-top: 1px solid var(--border); white-space: pre-wrap; }
+  .badge { font-size: 10.5px; padding: 1px 7px; border-radius: 10px; border: 1px solid; }
+  .badge.done { color: var(--green); border-color: var(--green); }
+  .badge.fail { color: var(--red); border-color: var(--red); }
+
+  #sidebar { width: 280px; border-left: 1px solid var(--border); background: var(--panel); overflow-y: auto; padding: 14px; flex-shrink: 0; }
+  .card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 10px; padding: 12px; margin-bottom: 14px; }
+  .card h4 { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 10px; }
+  .kv { display: flex; justify-content: space-between; font-size: 13px; padding: 4px 0; }
+  .kv .k { color: var(--muted); }
+  .timeline { position: relative; padding-left: 16px; }
+  .timeline::before { content: ""; position: absolute; left: 4px; top: 4px; bottom: 4px; width: 1px; background: var(--border); }
+  .tl-item { font-size: 12px; padding: 3px 0; color: var(--muted); position: relative; cursor: pointer; }
+  .tl-item::before { content: ""; position: absolute; left: -14px; top: 8px; width: 6px; height: 6px; border-radius: 50%; background: var(--border); }
+  .tl-item:hover { color: var(--text); }
+  .tl-item.active { color: var(--accent); }
+  .tl-item.active::before { background: var(--accent); }
+</style>
+</head>
+<body>
+
+<div style="display:flex;height:100vh">
+  <div id="nav">
+    <div class="nav-item" title="会话工作台" onclick="location.href='session-workspace.html'">💬</div>
+    <div class="nav-item" title="Agent 管理" onclick="location.href='agent-list.html'">🤖</div>
+    <div class="nav-item active" title="会话记录">📋</div>
+    <div class="nav-item" title="语音" onclick="location.href='voice.html'">🎤</div>
+    <div class="nav-item" title="Todo 面板" onclick="location.href='todo-panel.html'">✅</div>
+    <div class="nav-item" title="模型市场" onclick="location.href='model-marketplace.html'">🧠</div>
+    <div class="nav-spacer"></div>
+    <div class="nav-item" title="设置" onclick="location.href='settings.html'">⚙</div>
+  </div>
+
+  <div id="main">
+    <div id="topbar">
+      <div class="breadcrumb"><a href="session-records.html">会话记录</a> / <span>gateway 消息丢失根因分析</span></div>
+      <div class="spacer"></div>
+      <button class="btn btn-secondary" style="padding:4px 10px;font-size:12px" onclick="alert('导出 JSONL')">导出 JSONL</button>
+      <button class="btn btn-secondary" style="padding:4px 10px;font-size:12px" onclick="alert('导出 Markdown')">导出 Markdown</button>
+    </div>
+
+    <div id="playback-bar">
+      <div class="pb-btn" title="上一步">⏮</div>
+      <div class="pb-btn play" title="播放/暂停">▶</div>
+      <div class="pb-btn" title="下一步">⏭</div>
+      <span class="pb-speed active">1x</span>
+      <span class="pb-speed">2x</span>
+      <span class="pb-speed">4x</span>
+      <div class="pb-progress"><div></div></div>
+      <span class="pb-step">Step 12 / 28</span>
+    </div>
+
+    <div id="transcript">
+      <div class="msg user">
+        <div class="bubble">
+          <div class="name">你 · 2026-08-16 14:22:05</div>
+          <div class="content"><p>帮我查一下 gateway 为什么在 00:20:30 消息丢失，然后给个修复方案。</p></div>
+        </div>
+        <div class="avatar user">你</div>
+      </div>
+
+      <div class="msg assistant">
+        <div class="avatar assistant">π</div>
+        <div class="bubble">
+          <div class="name">omp · qwen3.7-max · 2026-08-16 14:22:08</div>
+          <div class="content">
+            <div class="toolcard">
+              <div class="head"><span class="tname">read</span><span class="state"><span class="badge done">完成</span></span></div>
+              <div class="args">~/.omp/gateway-data/logs/service.log</div>
+              <div class="result">00:20:30 [AgentBridge] bridge crashed (SIGKILL) — in-flight message lost</div>
+            </div>
+            <div class="toolcard">
+              <div class="head"><span class="tname">search</span><span class="state"><span class="badge done">完成</span></span></div>
+              <div class="args">pattern: restart-sentinel · path: packages/omp-gateway/src</div>
+              <div class="result">restart-sentinel.ts · 3 matches</div>
+            </div>
+            <p>根因是 <code>service stop</code> 超时后走了 <code>launchctl bootout</code>（SIGKILL），重启哨兵没写入，会话恢复被跳过。</p>
+            <p>修复建议：给 <code>gateway.stop()</code> 加 30s 硬超时，超时后再 escalate，避免直接 SIGKILL 丢消息。</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="msg user">
+        <div class="bubble">
+          <div class="name">你 · 2026-08-16 14:23:15</div>
+          <div class="content"><p>可以，就按这个改。先看看 stop 的实现。</p></div>
+        </div>
+        <div class="avatar user">你</div>
+      </div>
+
+      <div class="msg assistant">
+        <div class="avatar assistant">π</div>
+        <div class="bubble">
+          <div class="name">omp · qwen3.7-max · 2026-08-16 14:23:18</div>
+          <div class="content">
+            <p>好，我先读 <code>gateway-daemon.ts</code> 里 <code>stop()</code> 的当前实现。</p>
+            <div class="toolcard">
+              <div class="head"><span class="tname">read</span><span class="state"><span class="badge done">完成</span></span></div>
+              <div class="args">packages/omp-gateway/src/gateway-daemon.ts</div>
+              <div class="result">async stop(): Promise&lt;void&gt; {
+  this.logger.info("gateway stop requested");
+  await this.bridge?.stop();
+  await this.wsServer?.close();
+  this.logger.info("gateway stopped");
+}</div>
+            </div>
+            <p>当前 <code>stop()</code> 没有超时保护。如果 <code>bridge.stop()</code> 卡住，外部调用者（<code>service stop</code>）超时后走 <code>launchctl bootout</code> 直接 SIGKILL。需要加 Promise.race。</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="sidebar">
+    <div class="card">
+      <h4>会话信息</h4>
+      <div class="kv"><span class="k">会话 ID</span><span style="font-family:Menlo;font-size:11px">01a00b13…bc4981</span></div>
+      <div class="kv"><span class="k">Agent</span><span>研发助手</span></div>
+      <div class="kv"><span class="k">模型</span><span>qwen3.7-max</span></div>
+      <div class="kv"><span class="k">时间</span><span>2026-08-16 14:22</span></div>
+      <div class="kv"><span class="k">消息数</span><span>28</span></div>
+      <div class="kv"><span class="k">状态</span><span style="color:var(--green)">已完成</span></div>
+      <div class="kv"><span class="k">Token 用量</span><span>124K / 200K</span></div>
+    </div>
+
+    <div class="card">
+      <h4>消息时间线</h4>
+      <div class="timeline">
+        <div class="tl-item active">14:22:05 用户消息</div>
+        <div class="tl-item">14:22:08 read 工具调用</div>
+        <div class="tl-item">14:22:12 search 工具调用</div>
+        <div class="tl-item">14:22:18 助手回复</div>
+        <div class="tl-item">14:23:15 用户消息</div>
+        <div class="tl-item">14:23:18 read 工具调用</div>
+        <div class="tl-item">14:23:25 助手回复</div>
+        <div class="tl-item">14:24:00 会话结束</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

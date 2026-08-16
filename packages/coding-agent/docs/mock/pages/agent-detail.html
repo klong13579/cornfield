@@ -1,0 +1,311 @@
+<!--
+页面名：Agent 详情 (Agent Detail)
+功能层级位置：OMP 多端前端 > Agent 管理 > Agent 详情
+覆盖的协议命令/事件：
+  命令：set_model, set_thinking_level, set_host_tools, set_todos, get_snapshot, get_state
+  事件：session_snapshot
+-->
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>omp · Agent 详情</title>
+<style>
+  :root {
+    --bg: #0b0e14; --panel: #12161f; --border: #1e2530;
+    --text: #d7dde8; --muted: #7b8698; --accent: #4f8cff;
+    --green: #34d399; --amber: #fbbf24; --red: #f87171;
+    --bg-hover: #1a1f2b; --bg-active: #1e2530;
+    --card-bg: #0d1117; --radius: 8px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: var(--bg); color: var(--text); font: 14px/1.55 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }
+
+  #nav { width: 56px; background: var(--panel); border-right: 1px solid var(--border); display: flex; flex-direction: column; align-items: center; padding: 12px 0; gap: 4px; flex-shrink: 0; }
+  .nav-item { width: 40px; height: 40px; border-radius: var(--radius); display: flex; align-items: center; justify-content: center; font-size: 18px; cursor: pointer; color: var(--muted); transition: all 0.15s; }
+  .nav-item:hover { background: var(--bg-hover); color: var(--text); }
+  .nav-item.active { background: var(--accent); color: #fff; }
+  .nav-spacer { flex: 1; }
+
+  #main { flex: 1; display: flex; flex-direction: column; min-width: 0; overflow-y: auto; }
+  #topbar { display: flex; align-items: center; gap: 14px; padding: 10px 18px; border-bottom: 1px solid var(--border); background: var(--panel); flex-shrink: 0; }
+  .breadcrumb { font-size: 13px; color: var(--muted); }
+  .breadcrumb a { color: var(--accent); text-decoration: none; cursor: pointer; }
+  .breadcrumb span { color: var(--text); }
+  .spacer { flex: 1; }
+  .btn { background: var(--accent); color: #fff; border: none; border-radius: 6px; padding: 6px 14px; font-size: 13px; cursor: pointer; }
+  .btn:hover { opacity: 0.9; }
+  .btn-sm { padding: 3px 10px; font-size: 12px; }
+  .btn-danger { background: var(--red); }
+  .btn-secondary { background: var(--bg-hover); border: 1px solid var(--border); color: var(--text); }
+
+  #content { padding: 24px; flex: 1; }
+
+  /* Agent 头部 */
+  .agent-header { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; padding-bottom: 20px; border-bottom: 1px solid var(--border); }
+  .agent-avatar-lg { width: 56px; height: 56px; border-radius: var(--radius); background: var(--accent); display: flex; align-items: center; justify-content: center; font-size: 24px; color: #fff; font-weight: 700; }
+  .agent-title h2 { font-size: 20px; font-weight: 600; }
+  .agent-title .sub { font-size: 13px; color: var(--muted); }
+  .status-row { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+  .status-dot { width: 8px; height: 8px; border-radius: 50%; }
+  .status-dot.online { background: var(--green); }
+
+  /* 选项卡 */
+  .tabs { display: flex; gap: 0; margin-bottom: 24px; border-bottom: 1px solid var(--border); }
+  .tab { padding: 10px 20px; font-size: 14px; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.15s; }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
+
+  /* Skills */
+  .skill-list { display: flex; flex-direction: column; gap: 10px; }
+  .skill-item { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; display: flex; align-items: center; gap: 12px; }
+  .skill-icon { font-size: 20px; width: 36px; text-align: center; }
+  .skill-info { flex: 1; }
+  .skill-name { font-size: 14px; font-weight: 600; }
+  .skill-desc { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .skill-meta { font-size: 11px; color: var(--muted); margin-top: 4px; }
+  /* Toggle switch */
+  .toggle { width: 42px; height: 24px; border-radius: 12px; background: var(--border); cursor: pointer; position: relative; transition: background 0.2s; flex-shrink: 0; }
+  .toggle.on { background: var(--accent); }
+  .toggle::after { content: ""; width: 18px; height: 18px; border-radius: 50%; background: #fff; position: absolute; top: 3px; left: 3px; transition: left 0.2s; }
+  .toggle.on::after { left: 21px; }
+
+  /* Cron */
+  .cron-list { display: flex; flex-direction: column; gap: 10px; }
+  .cron-item { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; }
+  .cron-header { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+  .cron-name { font-size: 14px; font-weight: 600; flex: 1; }
+  .cron-schedule { font-family: "SF Mono", Menlo, monospace; font-size: 12px; color: var(--accent); }
+  .cron-desc { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+  .cron-runs { font-size: 11px; color: var(--muted); }
+  .cron-runs .ok { color: var(--green); }
+  .cron-runs .err { color: var(--red); }
+  .cron-actions { display: flex; gap: 6px; margin-top: 8px; }
+
+  .badge { font-size: 10.5px; padding: 1px 7px; border-radius: 10px; border: 1px solid; }
+  .badge.active { color: var(--green); border-color: var(--green); }
+  .badge.paused { color: var(--amber); border-color: var(--amber); }
+
+  /* 模型配置 */
+  .model-config { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .config-card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; }
+  .config-card h4 { font-size: 13px; color: var(--muted); margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.06em; }
+  .select-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+  .select-row label { font-size: 13px; color: var(--muted); width: 80px; flex-shrink: 0; }
+  select { background: var(--card-bg); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; color: var(--text); font-size: 13px; outline: none; flex: 1; }
+  select:focus { border-color: var(--accent); }
+
+  /* 工具开关 */
+  .tool-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+  .tool-item { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; display: flex; align-items: center; gap: 10px; }
+  .tool-item .tool-name { font-size: 13px; flex: 1; }
+
+  /* 空态 */
+  .empty-state { text-align: center; padding: 40px 20px; color: var(--muted); }
+  .empty-state .icon { font-size: 36px; margin-bottom: 12px; }
+</style>
+</head>
+<body>
+
+<div style="display:flex;height:100vh">
+  <div id="nav">
+    <div class="nav-item" title="会话工作台" onclick="location.href='session-workspace.html'">💬</div>
+    <div class="nav-item active" title="Agent 管理">🤖</div>
+    <div class="nav-item" title="会话记录" onclick="location.href='session-records.html'">📋</div>
+    <div class="nav-item" title="语音" onclick="location.href='voice.html'">🎤</div>
+    <div class="nav-item" title="Todo 面板" onclick="location.href='todo-panel.html'">✅</div>
+    <div class="nav-item" title="模型市场" onclick="location.href='model-marketplace.html'">🧠</div>
+    <div class="nav-spacer"></div>
+    <div class="nav-item" title="设置" onclick="location.href='settings.html'">⚙</div>
+  </div>
+
+  <div id="main">
+    <div id="topbar">
+      <div class="breadcrumb"><a href="agent-list.html">Agent 管理</a> / <span>研发助手</span></div>
+      <div class="spacer"></div>
+      <button class="btn btn-secondary btn-sm" onclick="location.href='session-workspace.html'">进入会话</button>
+    </div>
+
+    <div id="content">
+      <div class="agent-header">
+        <div class="agent-avatar-lg">研</div>
+        <div class="agent-title">
+          <h2>研发助手</h2>
+          <div class="sub">代码审查 · 架构设计 · 调试</div>
+        </div>
+        <div class="spacer"></div>
+        <div class="status-row"><span class="status-dot online"></span>运行中</div>
+      </div>
+
+      <div class="tabs">
+        <div class="tab active" onclick="switchTab('skills')">Skills 管理</div>
+        <div class="tab" onclick="switchTab('cron')">定时任务</div>
+        <div class="tab" onclick="switchTab('model')">模型配置</div>
+        <div class="tab" onclick="switchTab('tools')">工具开关</div>
+      </div>
+
+      <!-- Skills 管理 -->
+      <div class="tab-content active" id="tab-skills">
+        <div class="skill-list">
+          <div class="skill-item">
+            <div class="skill-icon">🔍</div>
+            <div class="skill-info">
+              <div class="skill-name">diagnosing-bugs</div>
+              <div class="skill-desc">诊断循环：硬 bug 和性能回归的诊断流程</div>
+              <div class="skill-meta">版本 1.2 · 最后更新 3 天前</div>
+            </div>
+            <div class="toggle on" onclick="this.classList.toggle('on')"></div>
+          </div>
+          <div class="skill-item">
+            <div class="skill-icon">🧪</div>
+            <div class="skill-info">
+              <div class="skill-name">tdd</div>
+              <div class="skill-desc">测试驱动开发，red-green-refactor 流程</div>
+              <div class="skill-meta">版本 2.0 · 最后更新 1 周前</div>
+            </div>
+            <div class="toggle on" onclick="this.classList.toggle('on')"></div>
+          </div>
+          <div class="skill-item">
+            <div class="skill-icon">🏗</div>
+            <div class="skill-info">
+              <div class="skill-name">codebase-design</div>
+              <div class="skill-desc">深度模块设计词汇，接口设计、seam 定位</div>
+              <div class="skill-meta">版本 1.0 · 最后更新 5 天前</div>
+            </div>
+            <div class="toggle on" onclick="this.classList.toggle('on')"></div>
+          </div>
+          <div class="skill-item">
+            <div class="skill-icon">🔄</div>
+            <div class="skill-info">
+              <div class="skill-name">cross-modal-review</div>
+              <div class="skill-desc">第二模型质量门禁，跨模型代码审查</div>
+              <div class="skill-meta">版本 0.25 · 最后更新 2 周前</div>
+            </div>
+            <div class="toggle on" onclick="this.classList.toggle('on')"></div>
+          </div>
+          <div class="skill-item">
+            <div class="skill-icon">📝</div>
+            <div class="skill-info">
+              <div class="skill-name">project-todo</div>
+              <div class="skill-desc">项目任务板维护，TODO.md 增删改查</div>
+              <div class="skill-meta">版本 1.1 · 最后更新 1 周前</div>
+            </div>
+            <div class="toggle" onclick="this.classList.toggle('on')"></div>
+          </div>
+          <div class="skill-item">
+            <div class="skill-icon">📊</div>
+            <div class="skill-info">
+              <div class="skill-name">session-diagnosis-orchestrator</div>
+              <div class="skill-desc">Agent 会话六维度诊断，失败原因分析</div>
+              <div class="skill-meta">版本 1.0 · 最后更新 4 天前</div>
+            </div>
+            <div class="toggle on" onclick="this.classList.toggle('on')"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 定时任务 -->
+      <div class="tab-content" id="tab-cron">
+        <div style="margin-bottom:16px">
+          <button class="btn btn-sm" onclick="alert('新建定时任务流程')">+ 新建定时任务</button>
+        </div>
+        <div class="cron-list">
+          <div class="cron-item">
+            <div class="cron-header">
+              <span class="cron-name">每日代码审查报告</span>
+              <span class="badge active">运行中</span>
+              <span class="cron-schedule">0 9 * * 1-5</span>
+            </div>
+            <div class="cron-desc">每个工作日早上 9 点，扫描昨日提交的 PR，生成代码审查摘要</div>
+            <div class="cron-runs">最近运行：<span class="ok">8/16 09:00 ✓</span> · <span class="ok">8/15 09:00 ✓</span> · <span class="err">8/14 09:00 ✗</span></div>
+            <div class="cron-actions">
+              <button class="btn btn-sm btn-secondary" onclick="alert('已暂停')">暂停</button>
+              <button class="btn btn-sm btn-secondary" onclick="alert('立即运行')">立即运行</button>
+              <button class="btn btn-sm btn-secondary" onclick="alert('查看日志')">日志</button>
+            </div>
+          </div>
+          <div class="cron-item">
+            <div class="cron-header">
+              <span class="cron-name">每周架构健康检查</span>
+              <span class="badge active">运行中</span>
+              <span class="cron-schedule">0 10 * * 1</span>
+            </div>
+            <div class="cron-desc">每周一早上 10 点，全仓库架构扫描，检查循环依赖和设计漂移</div>
+            <div class="cron-runs">最近运行：<span class="ok">8/11 10:00 ✓</span> · <span class="ok">8/4 10:00 ✓</span></div>
+            <div class="cron-actions">
+              <button class="btn btn-sm btn-secondary" onclick="alert('已暂停')">暂停</button>
+              <button class="btn btn-sm btn-secondary" onclick="alert('立即运行')">立即运行</button>
+              <button class="btn btn-sm btn-secondary" onclick="alert('查看日志')">日志</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 模型配置 -->
+      <div class="tab-content" id="tab-model">
+        <div class="model-config">
+          <div class="config-card">
+            <h4>模型选择</h4>
+            <div class="select-row">
+              <label>Provider</label>
+              <select><option>anthropic</option><option>narwal-plan</option></select>
+            </div>
+            <div class="select-row">
+              <label>Model</label>
+              <select><option>claude-opus-4-5</option><option>claude-sonnet-4-5</option></select>
+            </div>
+            <div class="select-row">
+              <label>Thinking</label>
+              <select><option>high</option><option>medium</option><option>low</option><option>off</option></select>
+            </div>
+            <div style="margin-top:12px"><button class="btn btn-sm">保存</button></div>
+          </div>
+          <div class="config-card">
+            <h4>Token 与用量</h4>
+            <div style="font-size:13px;color:var(--muted);margin-bottom:8px">当前上下文窗口：200K tokens</div>
+            <div style="background:var(--border);height:4px;border-radius:2px;margin-bottom:8px"><div style="width:62%;height:100%;background:var(--accent);border-radius:2px"></div></div>
+            <div style="font-size:11px;color:var(--muted)">使用 124K / 200K · 62%</div>
+            <div style="margin-top:12px;font-size:12px;color:var(--muted)">本月用量：1.2M tokens · 预估费用 ¥3.60</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 工具开关 -->
+      <div class="tab-content" id="tab-tools">
+        <div class="tool-grid">
+          <div class="tool-item"><span class="tool-name">read</span><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
+          <div class="tool-item"><span class="tool-name">write</span><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
+          <div class="tool-item"><span class="tool-name">edit</span><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
+          <div class="tool-item"><span class="tool-name">bash</span><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
+          <div class="tool-item"><span class="tool-name">search</span><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
+          <div class="tool-item"><span class="tool-name">find</span><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
+          <div class="tool-item"><span class="tool-name">ast_grep</span><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
+          <div class="tool-item"><span class="tool-name">ast_edit</span><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
+          <div class="tool-item"><span class="tool-name">lsp</span><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
+          <div class="tool-item"><span class="tool-name">python</span><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
+          <div class="tool-item"><span class="tool-name">notebook</span><div class="toggle" onclick="this.classList.toggle('on')"></div></div>
+          <div class="tool-item"><span class="tool-name">debug</span><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
+          <div class="tool-item"><span class="tool-name">task</span><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
+          <div class="tool-item"><span class="tool-name">web_search</span><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
+          <div class="tool-item"><span class="tool-name">puppeteer</span><div class="toggle" onclick="this.classList.toggle('on')"></div></div>
+          <div class="tool-item"><span class="tool-name">todo_write</span><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function switchTab(name) {
+  document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
+  document.querySelectorAll(".tab-content").forEach(c => c.classList.remove("active"));
+  document.querySelector(`.tab[onclick*="${name}"]`).classList.add("active");
+  document.getElementById("tab-" + name).classList.add("active");
+}
+</script>
+</body>
+</html>
