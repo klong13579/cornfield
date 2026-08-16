@@ -20,6 +20,8 @@ web/pc/mobile 通过网络协议连这个宿主。会话的「权威快照 + 增
 
 ## 2. 架构总览
 
+![multidevice-architecture](multidevice-architecture.png)
+
 ```
                  ┌──────────────────────── omp 宿主进程 ─────────────────────────┐
                  │                                                               │
