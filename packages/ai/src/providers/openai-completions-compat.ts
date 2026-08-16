@@ -118,8 +118,16 @@ export function detectOpenAICompat(model: Model<"openai-completions">, resolvedB
 		supportsReasoningEffort: !isGrok && !isZai,
 		reasoningEffortMap,
 		supportsUsageInStreaming: !isCerebras,
-		disableReasoningOnForcedToolChoice: isKimiModel || isAnthropicModel || isQwen,
-		supportsToolChoice: true,
+		disableReasoningOnForcedToolChoice:
+			isKimiModel ||
+			isAnthropicModel ||
+			isQwen ||
+			// DeepSeek V4 (and reasoning-capable DeepSeek models) reject `tool_choice`
+			// outright when `reasoning_effort` is set (400), so drop reasoning instead
+			// when a forced tool call is requested. Matches the built-in deepseek
+			// descriptor's `supportsToolChoice: false` semantics.
+			(isDeepseekFamily && Boolean(model.reasoning)),
+		supportsToolChoice: !(isDeepseekFamily && Boolean(model.reasoning)),
 		maxTokensField: useMaxTokens ? "max_tokens" : "max_completion_tokens",
 		requiresToolResultName: isMistral,
 		requiresAssistantAfterToolResult: false,

@@ -159,6 +159,61 @@ describe("ToolChoiceQueue", () => {
 			expect(rejectCount).toBe(3);
 			expect(q.nextToolChoice()).toBeUndefined();
 		});
+
+		it("maxRejections caps requeues and force-drops a requeue callback", () => {
+			const q = new ToolChoiceQueue();
+			const rejected: RejectInfo[] = [];
+			q.pushOnce(forced, {
+				label: "pending-action:ast_edit",
+				onRejected: info => {
+					rejected.push(info);
+					return "requeue"; // would replay forever without the cap
+				},
+				maxRejections: 2,
+			});
+			// First rejection: count 1/2 → replayed
+			q.nextToolChoice();
+			q.reject("error");
+			expect(rejected).toHaveLength(1);
+			expect(q.nextToolChoice()).toEqual(forced);
+			// Second rejection: count 2/2 → cap hit, forced drop despite "requeue"
+			q.reject("error");
+			expect(rejected).toHaveLength(2);
+			expect(q.nextToolChoice()).toBeUndefined();
+			expect(q.inspect()).toEqual([]);
+		});
+
+		it("maxRejections: 1 drops on the first rejection", () => {
+			const q = new ToolChoiceQueue();
+			q.pushOnce(forced, {
+				label: "pending-action:edit",
+				onRejected: () => "requeue",
+				maxRejections: 1,
+			});
+			q.nextToolChoice();
+			q.reject("aborted");
+			expect(q.nextToolChoice()).toBeUndefined();
+		});
+
+		it("maxRejections only applies to the directive that set it", () => {
+			const q = new ToolChoiceQueue();
+			q.pushOnce(forced, {
+				label: "breaker",
+				onRejected: () => "requeue",
+				maxRejections: 1,
+			});
+			q.pushSequence([forcedRead, forcedRead], {
+				label: "no-breaker",
+				onRejected: () => "requeue",
+			});
+			// breaker: rejected once → dropped (cap hit)
+			q.nextToolChoice();
+			q.reject("aborted");
+			expect(q.nextToolChoice()).toEqual(forcedRead);
+			// no-breaker: requeues indefinitely as before
+			q.reject("aborted");
+			expect(q.nextToolChoice()).toEqual(forcedRead);
+		});
 	});
 
 	describe("removeByLabel", () => {

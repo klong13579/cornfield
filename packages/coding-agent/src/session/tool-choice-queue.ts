@@ -39,6 +39,16 @@ export interface ToolChoiceDirective {
 	/** Stable label for targeted removal and debugging (e.g. "user-force"). */
 	label: string;
 	callbacks: DirectiveCallbacks;
+	/**
+	 * Consecutive-rejection cap for the requeue path. When the in-flight yield has
+	 * been rejected `maxRejections` times (counting replays), a "requeue" outcome
+	 * is forcibly downgraded to "drop" so a provider that rejects the forced
+	 * tool choice cannot lock the session in an infinite replay loop. Default:
+	 * Infinity (preserves the historical replay-forever semantics).
+	 */
+	maxRejections?: number;
+	/** Number of times this directive's yield has been rejected so far. */
+	rejectCount: number;
 }
 
 export interface PushOptions {
@@ -49,6 +59,8 @@ export interface PushOptions {
 	onResolved?: DirectiveCallbacks["onResolved"];
 	onRejected?: DirectiveCallbacks["onRejected"];
 	onInvoked?: DirectiveCallbacks["onInvoked"];
+	/** Consecutive-rejection cap for the requeue path; see ToolChoiceDirective. */
+	maxRejections?: number;
 }
 
 // ── Generators ──────────────────────────────────────────────────────────────
@@ -94,6 +106,8 @@ export class ToolChoiceQueue {
 				onRejected: options?.onRejected,
 				onInvoked: options?.onInvoked,
 			},
+			maxRejections: options?.maxRejections,
+			rejectCount: 0,
 		};
 		if (options?.now) {
 			this.#queue.unshift(directive);
@@ -154,9 +168,19 @@ export class ToolChoiceQueue {
 		});
 
 		if (outcome === "requeue") {
+			const nextRejectCount = inFlight.directive.rejectCount + 1;
+			// Circuit breaker: cap consecutive requeues so a provider that rejects
+			// the forced tool choice (e.g. DeepSeek V4 in thinking mode returns 400
+			// for `tool_choice`) cannot replay the same yield forever, deadlocking
+			// the session. On cap, drop the yield silently — the steering reminder
+			// text is already in the conversation, so the model can still invoke the
+			// tool on its own via ordinary tool calling.
+			if (nextRejectCount >= (inFlight.directive.maxRejections ?? Infinity)) {
+				return;
+			}
 			// Re-queue only the lost yield, not the rest of the sequence. Carry forward
-			// onInvoked and onRejected so the replayed yield still executes correctly
-			// and can requeue itself again if the next turn also aborts.
+			// onInvoked, onRejected, the reject cap, and the running count so the
+			// replayed yield still executes correctly and the breaker keeps counting.
 			this.#queue.unshift({
 				generator: onceGen(inFlight.yielded),
 				label: `${inFlight.directive.label}-requeued`,
@@ -164,6 +188,8 @@ export class ToolChoiceQueue {
 					onInvoked: inFlight.directive.callbacks.onInvoked,
 					onRejected: inFlight.directive.callbacks.onRejected,
 				},
+				maxRejections: inFlight.directive.maxRejections,
+				rejectCount: nextRejectCount,
 			});
 		}
 	}

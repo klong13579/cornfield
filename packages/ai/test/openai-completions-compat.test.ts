@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { getBundledModel } from "../src/models";
 import { convertMessages, detectCompat, streamOpenAICompletions } from "../src/providers/openai-completions";
+import { detectOpenAICompat, resolveOpenAICompat } from "../src/providers/openai-completions-compat";
 import type { AssistantMessage, Context, Model, OpenAICompat } from "../src/types";
 
 const originalFetch = global.fetch;
@@ -514,5 +515,53 @@ describe("NVIDIA NIM DeepSeek special-token stripping", () => {
 			.map(b => (b as { text: string }).text)
 			.join("");
 		expect(text).toBe("keep <\uff5cas-is\uff5c> please");
+	});
+});
+
+describe("DeepSeek family tool_choice compatibility", () => {
+	function model(overrides: Partial<Model<"openai-completions">>): Model<"openai-completions"> {
+		return {
+			...getBundledModel("openai", "gpt-4o-mini"),
+			api: "openai-completions",
+			provider: "narwal-plan",
+			baseUrl: "https://coder.narwal.com/v1",
+			id: "deepseek-v4-flash-202605",
+			...overrides,
+		};
+	}
+
+	it("disables tool_choice for reasoning deepseek models via custom proxies", () => {
+		const compat = detectOpenAICompat(model({ reasoning: true }));
+		expect(compat.supportsToolChoice).toBe(false);
+		expect(compat.disableReasoningOnForcedToolChoice).toBe(true);
+	});
+
+	it("keeps tool_choice for non-reasoning deepseek models", () => {
+		const compat = detectOpenAICompat(model({ reasoning: false }));
+		expect(compat.supportsToolChoice).toBe(true);
+		expect(compat.disableReasoningOnForcedToolChoice).toBe(false);
+	});
+
+	it("keeps tool_choice for non-deepseek models", () => {
+		const compat = detectOpenAICompat(model({ id: "qwen3.5-flash", reasoning: true }));
+		expect(compat.supportsToolChoice).toBe(true);
+		expect(compat.disableReasoningOnForcedToolChoice).toBe(true); // qwen already forced-reasoning-drop
+	});
+
+	it("matches deepseek by model id regardless of provider/baseUrl", () => {
+		const compat = detectOpenAICompat(
+			model({ provider: "openrouter", baseUrl: "https://openrouter.ai/api/v1", reasoning: true }),
+		);
+		expect(compat.supportsToolChoice).toBe(false);
+	});
+
+	it("explicit compat.supportsToolChoice override still wins", () => {
+		const compat = detectOpenAICompat(model({ reasoning: true }));
+		const resolved = resolveOpenAICompat({
+			...model({ reasoning: true }),
+			compat: { supportsToolChoice: true },
+		});
+		expect(compat.supportsToolChoice).toBe(false);
+		expect(resolved.supportsToolChoice).toBe(true);
 	});
 });

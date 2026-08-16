@@ -66,6 +66,11 @@ export function queueResolveHandler(
 		label: `pending-action:${options.sourceToolName}`,
 		now: true,
 		onRejected: () => "requeue",
+		// Circuit breaker: if the forced resolve keeps getting rejected by the
+		// provider (e.g. DeepSeek V4 thinking mode 400s on `tool_choice`), drop the
+		// hard force after 2 attempts and rely on the resolve-reminder steering text
+		// + ordinary tool calling instead of replaying a 400 forever.
+		maxRejections: 2,
 		onInvoked: async (input: unknown) => {
 			const params = input as ResolveParams;
 			const withResolveDetails = (result: AgentToolResult<unknown>): AgentToolResult<ResolveToolDetails> => ({
