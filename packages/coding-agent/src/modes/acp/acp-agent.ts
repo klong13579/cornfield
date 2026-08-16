@@ -1428,7 +1428,17 @@ export class AcpAgent implements Agent {
 					record.session.sessionManager.appendLabelChange(targetId, label);
 				},
 				getActiveTools: () => record.session.getActiveToolNames(),
-				getAllTools: () => record.session.getAllToolNames(),
+				getAllTools: () => {
+					const runner = record.session.extensionRunner;
+					if (!runner) return [];
+					return runner.getAllRegisteredTools().map(tool => ({
+						name: tool.definition.name,
+						description: tool.definition.description,
+						parameters: tool.definition.parameters,
+						promptGuidelines: tool.definition.promptGuidelines,
+						extensionPath: tool.extensionPath,
+					}));
+				},
 				setActiveTools: toolNames => record.session.setActiveToolsByName(toolNames),
 				getCommands: () =>
 					record.session.extensionRunner?.getRegisteredCommands().map(cmd => ({
@@ -1450,9 +1460,18 @@ export class AcpAgent implements Agent {
 				setSessionName: async name => {
 					await record.session.sessionManager.setSessionName(name, "user");
 				},
+				unregisterProvider: name => record.session.modelRegistry.unregisterProvider?.(name),
 			},
 			{
 				getModel: () => record.session.model,
+				getScopedModels: () =>
+					(record.session.scopedModels ?? []).map(scoped => ({
+						model: scoped.model,
+						thinkingLevel: scoped.thinkingLevel,
+						explicitThinkingLevel: false,
+					})),
+				getThinkingLevel: () => record.session.thinkingLevel,
+				getSignal: () => undefined, // AgentSession does not yet expose the active prompt abort signal
 				isIdle: () => !record.session.isStreaming,
 				abort: () => {
 					void record.session.abort();
@@ -1491,8 +1510,9 @@ export class AcpAgent implements Agent {
 				compact: instructionsOrOptions => runExtensionCompact(record.session, instructionsOrOptions),
 			},
 			acpExtensionUiContext,
+			"rpc",
 		);
-		await extensionRunner.emit({ type: "session_start" });
+		await extensionRunner.emit({ type: "session_start", reason: "new" });
 		record.extensionsConfigured = true;
 	}
 

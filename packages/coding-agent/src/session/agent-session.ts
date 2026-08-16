@@ -100,7 +100,7 @@ import type {
 	TurnEndEvent,
 	TurnStartEvent,
 } from "../extensibility/extensions";
-import type { CompactOptions, ContextUsage } from "../extensibility/extensions/types";
+import type { CompactOptions, ContextUsage, ModelSelectSource } from "../extensibility/extensions/types";
 import { ExtensionToolWrapper } from "../extensibility/extensions/wrapper";
 import type { HookCommandContext } from "../extensibility/hooks/types";
 import type { Skill, SkillWarning } from "../extensibility/skills";
@@ -1813,6 +1813,9 @@ export class AgentSession {
 			await this.#extensionRunner.emit({ type: "agent_start" });
 		} else if (event.type === "agent_end") {
 			await this.#extensionRunner.emit({ type: "agent_end", messages: event.messages });
+			// omp semantics: "settled" fires immediately after the agent loop ends.
+			// Automatic retry/compaction (if any) surfaces as its own follow-up events.
+			await this.#extensionRunner.emit({ type: "agent_settled" });
 		} else if (event.type === "turn_start") {
 			const hookEvent: TurnStartEvent = {
 				type: "turn_start",
@@ -1964,7 +1967,7 @@ export class AgentSession {
 		this.#pythonExecutionDisposing = true;
 		try {
 			if (this.#extensionRunner?.hasHandlers("session_shutdown")) {
-				await this.#extensionRunner.emit({ type: "session_shutdown" });
+				await this.#extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
 			}
 		} catch (error) {
 			logger.warn("Failed to emit session_shutdown event", { error: String(error) });
@@ -2950,11 +2953,14 @@ export class AgentSession {
 
 		return {
 			ui: noOpUIContext,
+			mode: "print",
 			hasUI: false,
 			cwd: this.sessionManager.getCwd(),
 			sessionManager: this.sessionManager,
 			modelRegistry: this.#modelRegistry,
 			model: this.model ?? undefined,
+			scopedModels: [],
+			signal: undefined,
 			isIdle: () => !this.isStreaming,
 			abort: () => {
 				void this.abort();
@@ -3871,7 +3877,7 @@ export class AgentSession {
 
 		// Apply model
 		this.#clearActiveRetryFallback();
-		this.#setModelWithProviderSessionReset(next.model);
+		this.#setModelWithProviderSessionReset(next.model, "cycle");
 		this.sessionManager.appendModelChange(`${next.model.provider}/${next.model.id}`);
 		this.settings.setModelRole("default", this.#formatRoleModelValue("default", next.model));
 		this.settings.getStorage()?.recordModelUsage(`${next.model.provider}/${next.model.id}`);
@@ -3902,7 +3908,7 @@ export class AgentSession {
 		}
 
 		this.#clearActiveRetryFallback();
-		this.#setModelWithProviderSessionReset(nextModel);
+		this.#setModelWithProviderSessionReset(nextModel, "cycle");
 		this.sessionManager.appendModelChange(`${nextModel.provider}/${nextModel.id}`);
 		this.settings.setModelRole("default", this.#formatRoleModelValue("default", nextModel));
 		this.settings.getStorage()?.recordModelUsage(`${nextModel.provider}/${nextModel.id}`);
@@ -3931,12 +3937,19 @@ export class AgentSession {
 	setThinkingLevel(level: ThinkingLevel | undefined, persist: boolean = false): void {
 		const effectiveLevel = resolveThinkingLevelForModel(this.model, level);
 		const isChanging = effectiveLevel !== this.#thinkingLevel;
+		const previousLevel = this.#thinkingLevel;
 
 		this.#thinkingLevel = effectiveLevel;
 		this.agent.setThinkingLevel(toReasoningEffort(effectiveLevel));
 
 		if (isChanging) {
 			this.sessionManager.appendThinkingLevelChange(effectiveLevel);
+			// Surface thinking-level changes to extensions (pi-compatible thinking_level_select event).
+			void this.#extensionRunner?.emit({
+				type: "thinking_level_select",
+				level: effectiveLevel ?? ThinkingLevel.Inherit,
+				previousLevel: previousLevel ?? ThinkingLevel.Inherit,
+			}).catch(() => undefined);
 			if (persist && effectiveLevel !== undefined && effectiveLevel !== ThinkingLevel.Off) {
 				this.settings.set("defaultThinkingLevel", effectiveLevel);
 			}
@@ -4760,12 +4773,19 @@ export class AgentSession {
 		return candidate;
 	}
 
-	#setModelWithProviderSessionReset(model: Model): void {
+	#setModelWithProviderSessionReset(model: Model, source: ModelSelectSource = "set"): void {
 		const currentModel = this.model;
 		if (currentModel) {
 			this.#closeProviderSessionsForModelSwitch(currentModel, model);
 		}
 		this.agent.setModel(model);
+		// Surface model changes to extensions (pi-compatible model_select event).
+		void this.#extensionRunner?.emit({
+			type: "model_select",
+			model,
+			previousModel: currentModel,
+			source,
+		}).catch(() => undefined);
 	}
 
 	#closeCodexProviderSessionsForHistoryRewrite(): void {
@@ -5610,7 +5630,7 @@ export class AgentSession {
 		const currentThinkingLevel = this.thinkingLevel;
 		const nextThinkingLevel = selector.thinkingLevel ?? currentThinkingLevel;
 
-		this.#setModelWithProviderSessionReset(candidate);
+		this.#setModelWithProviderSessionReset(candidate, "restore");
 		this.sessionManager.appendModelChange(`${candidate.provider}/${candidate.id}`, "temporary");
 		this.settings.getStorage()?.recordModelUsage(`${candidate.provider}/${candidate.id}`);
 		this.setThinkingLevel(nextThinkingLevel);
@@ -5683,7 +5703,7 @@ export class AgentSession {
 		const currentThinkingLevel = this.thinkingLevel;
 		const thinkingToApply =
 			currentThinkingLevel === lastAppliedFallbackThinkingLevel ? originalThinkingLevel : currentThinkingLevel;
-		this.#setModelWithProviderSessionReset(primaryModel);
+		this.#setModelWithProviderSessionReset(primaryModel, "restore");
 		this.sessionManager.appendModelChange(`${primaryModel.provider}/${primaryModel.id}`, "temporary");
 		this.settings.getStorage()?.recordModelUsage(`${primaryModel.provider}/${primaryModel.id}`);
 		this.setThinkingLevel(thinkingToApply);

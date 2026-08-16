@@ -35,6 +35,7 @@ import { createSelfEvolutionExtension } from "@oh-my-pi/self-evolution";
 import chalk from "chalk";
 import { AsyncJobManager, isBackgroundJobSupportEnabled } from "./async";
 import { createAutoresearchExtension } from "./autoresearch";
+import createIntercomExtension from "./intercom-extension";
 import { loadCapability } from "./capability";
 import { type Rule, ruleCapability } from "./capability/rule";
 import { ModelRegistry } from "./config/model-registry";
@@ -576,7 +577,17 @@ function customToolToDefinition(tool: CustomTool): ToolDefinition {
 		execute: (toolCallId, params, signal, onUpdate, ctx) =>
 			tool.execute(toolCallId, params, onUpdate, createCustomToolContext(ctx), signal),
 		onSession: tool.onSession ? (event, ctx) => tool.onSession?.(event, createCustomToolContext(ctx)) : undefined,
-		renderCall: tool.renderCall,
+		renderCall: tool.renderCall
+			? (args, theme, context): Component => {
+					const component = tool.renderCall!(
+						args,
+						{ expanded: context.expanded, isPartial: context.isPartial },
+						theme,
+					);
+					// Return empty component if undefined to match Component type requirement
+					return component ?? ({ render: () => [] } as unknown as Component);
+				}
+			: undefined,
 		renderResult: tool.renderResult
 			? (result, options, theme): Component => {
 					const component = tool.renderResult?.(
@@ -1228,6 +1239,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 
 		const inlineExtensions: ExtensionFactory[] = options.extensions ? [...options.extensions] : [];
 		inlineExtensions.push(createAutoresearchExtension);
+		inlineExtensions.push(createIntercomExtension);
 		inlineExtensions.push(createSelfEvolutionExtension);
 		inlineExtensions.push(moaExtension);
 		if (customTools.length > 0) {
@@ -1467,6 +1479,11 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			const promptTools = buildSystemPromptToolMetadata(tools, {
 				search_tool_bm25: { description: renderSearchToolBm25Description(discoverableMCPTools) },
 			});
+			// Extension-provided tool snippets/guidelines (ToolDefinition.promptSnippet / promptGuidelines)
+			const extensionToolSnippets = registeredTools
+				.map(tool => tool.definition.promptSnippet)
+				.filter((snippet): snippet is string => typeof snippet === "string" && snippet.trim().length > 0);
+			const extensionToolGuidelines = registeredTools.flatMap(tool => tool.definition.promptGuidelines ?? []);
 			const memoryInstructions = await buildMemoryToolDeveloperInstructions(agentDir, settings);
 
 			// Build combined append prompt: memory instructions + MCP server instructions
@@ -1504,6 +1521,8 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 				mcpDiscoveryServerSummaries: discoverableMCPSummary.servers.map(formatDiscoverableMCPToolServerSummary),
 				eagerTasks,
 				secretsEnabled,
+				toolSnippets: extensionToolSnippets,
+				toolGuidelines: extensionToolGuidelines,
 			});
 
 			if (options.systemPrompt === undefined) {
@@ -1527,6 +1546,8 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 					mcpDiscoveryServerSummaries: discoverableMCPSummary.servers.map(formatDiscoverableMCPToolServerSummary),
 					eagerTasks,
 					secretsEnabled,
+					toolSnippets: extensionToolSnippets,
+					toolGuidelines: extensionToolGuidelines,
 				});
 			}
 			return options.systemPrompt(defaultPrompt);

@@ -664,9 +664,13 @@ describe("ExtensionRunner", () => {
 					setSessionName: async name => {
 						await sessionManager.setSessionName(name);
 					},
+					unregisterProvider: () => {},
 				},
 				{
 					getModel: () => undefined,
+					getScopedModels: () => [],
+					getThinkingLevel: () => undefined,
+					getSignal: () => undefined,
 					isIdle: () => true,
 					abort: () => {},
 					hasPendingMessages: () => false,
@@ -677,7 +681,7 @@ describe("ExtensionRunner", () => {
 				},
 			);
 
-			await runner.emit({ type: "session_start" });
+			await runner.emit({ type: "session_start", reason: "new" });
 
 			expect(sessionManager.getSessionName()).toBe("Named by extension");
 			expect(sessionManager.getHeader()?.title).toBe("Named by extension");

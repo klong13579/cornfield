@@ -7,7 +7,7 @@ import type { Static, TSchema } from "@sinclair/typebox";
 import type { Theme } from "../../modes/theme/theme";
 import { applyToolProxy } from "../tool-proxy";
 import type { ExtensionRunner } from "./runner";
-import type { RegisteredTool, ToolCallEventResult } from "./types";
+import type { RegisteredTool, ToolCallEventResult, ToolRenderContext } from "./types";
 
 /**
  * Adapts a RegisteredTool into an AgentTool.
@@ -19,8 +19,8 @@ export class RegisteredToolAdapter implements AgentTool<any, any, any> {
 	declare label: string;
 	declare strict: boolean;
 
-	renderCall?: (args: any, options: any, theme: any) => any;
-	renderResult?: (result: any, options: any, theme: any, args?: any) => any;
+	renderCall?: (args: any, options: any, theme: any, toolRenderContext?: any) => any;
+	renderResult?: (result: any, options: any, theme: any, toolRenderContext?: any) => any;
 
 	constructor(
 		private registeredTool: RegisteredTool,
@@ -33,18 +33,36 @@ export class RegisteredToolAdapter implements AgentTool<any, any, any> {
 		// enters the custom-renderer path, gets undefined back, and silently
 		// discards tool result text (extensions without renderers show blank).
 		if (registeredTool.definition.renderCall) {
-			this.renderCall = (args: any, options: any, theme: any) =>
-				registeredTool.definition.renderCall!(args, options, theme as Theme);
+			this.renderCall = (args: any, options: any, theme: any, toolRenderContext?: ToolRenderContext<any, any>) =>
+				registeredTool.definition.renderCall!(args, theme as Theme, toolRenderContext ?? this.#fallbackContext(args));
 		}
 		if (registeredTool.definition.renderResult) {
-			this.renderResult = (result: any, options: any, theme: any, args?: any) =>
+			this.renderResult = (result: any, options: any, theme: any, toolRenderContext?: ToolRenderContext<any, any>) =>
 				registeredTool.definition.renderResult!(
 					result,
 					{ expanded: options.expanded, isPartial: options.isPartial, spinnerFrame: options.spinnerFrame },
 					theme as Theme,
-					args,
+					toolRenderContext ?? this.#fallbackContext(undefined),
 				);
 		}
+	}
+
+	/** Minimal context for callers that do not go through ToolExecutionComponent (no stable toolCallId/state available). */
+	#fallbackContext(args: unknown): ToolRenderContext<unknown, unknown> {
+		return {
+			args,
+			toolCallId: "",
+			invalidate: () => {},
+			lastComponent: undefined,
+			state: undefined,
+			cwd: this.runner.createContext().cwd,
+			executionStarted: true,
+			argsComplete: true,
+			isPartial: false,
+			expanded: false,
+			showImages: false,
+			isError: false,
+		};
 	}
 
 	async execute(

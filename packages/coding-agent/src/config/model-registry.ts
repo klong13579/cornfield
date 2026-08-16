@@ -2337,6 +2337,32 @@ export class ModelRegistry {
 	}
 
 	/**
+	 * Unregister a provider previously registered via registerProvider().
+	 *
+	 * Removes all models and transport overrides belonging to the named provider
+	 * and restores any built-in models that were overridden by it. Has no effect
+	 * (other than harmless cleanup) if the provider was never runtime-registered.
+	 */
+	unregisterProvider(providerName: string): void {
+		const sourceId = this.#runtimeProviderSourceByName.get(providerName);
+		if (sourceId) {
+			this.#registeredProviderSources.delete(sourceId);
+			const sourceProviders = this.#runtimeProvidersBySource.get(sourceId);
+			sourceProviders?.delete(providerName);
+			if (sourceProviders && sourceProviders.size === 0) {
+				this.#runtimeProvidersBySource.delete(sourceId);
+			}
+			this.#runtimeProviderSourceByName.delete(providerName);
+		}
+		this.#runtimeModelOverlays = this.#runtimeModelOverlays.filter(m => m.provider !== providerName);
+		this.#runtimeProviderOverrides.delete(providerName);
+		this.#customProviderApiKeys.delete(providerName);
+		this.#runtimeProviderApiKeys.delete(providerName);
+		this.#reloadStaticModels();
+		this.#rebuildCanonicalIndex();
+	}
+
+	/**
 	 * Suppress a specific model selector (e.g., "provider/id") until a specific timestamp.
 	 */
 	suppressSelector(selector: string, untilMs: number): void {

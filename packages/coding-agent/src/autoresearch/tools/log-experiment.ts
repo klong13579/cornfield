@@ -359,11 +359,11 @@ export function createLogExperimentTool(
 				},
 			};
 		},
-		renderCall(args, _options, theme): Text {
+		renderCall(args, theme, _context): Text {
 			const color = args.status === "keep" ? "success" : args.status === "discard" ? "warning" : "error";
 			const description = truncateToWidth(replaceTabs(args.description), 100);
 			return new Text(
-				`${theme.fg("toolTitle", theme.bold("log_experiment"))} ${theme.fg(color, args.status)} ${theme.fg("muted", description)}`,
+				`${theme.fg("toolTitle", theme.bold("log_experiment"))} ${theme.fg(color, description)}`,
 				0,
 				0,
 			);

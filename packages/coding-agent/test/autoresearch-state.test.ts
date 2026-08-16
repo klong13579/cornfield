@@ -862,7 +862,7 @@ describe("autoresearch tool-call guard", () => {
 			cwd: dir,
 		});
 
-		await harness.sessionStartHandler?.({ type: "session_start" } as SessionStartEvent, harness.ctx);
+		await harness.sessionStartHandler?.({ type: "session_start", reason: "new" } as SessionStartEvent, harness.ctx);
 
 		const blockedScope = await harness.toolCallHandler?.(
 			{
@@ -918,7 +918,7 @@ describe("autoresearch tool-call guard", () => {
 			cwd: dir,
 		});
 
-		await harness.sessionStartHandler?.({ type: "session_start" } as SessionStartEvent, harness.ctx);
+		await harness.sessionStartHandler?.({ type: "session_start", reason: "new" } as SessionStartEvent, harness.ctx);
 
 		const blocked = await harness.toolCallHandler?.(
 			{
@@ -952,7 +952,7 @@ describe("autoresearch tool-call guard", () => {
 			cwd: dir,
 		});
 
-		await harness.sessionStartHandler?.({ type: "session_start" } as SessionStartEvent, harness.ctx);
+		await harness.sessionStartHandler?.({ type: "session_start", reason: "new" } as SessionStartEvent, harness.ctx);
 
 		const blocked = await harness.toolCallHandler?.(
 			{
@@ -1002,7 +1002,7 @@ describe("autoresearch auto-resume", () => {
 			cwd: dir,
 		});
 
-		await harness.sessionStartHandler?.({ type: "session_start" } as SessionStartEvent, harness.ctx);
+		await harness.sessionStartHandler?.({ type: "session_start", reason: "new" } as SessionStartEvent, harness.ctx);
 		await harness.agentEndHandler?.({}, harness.ctx);
 
 		expect(harness.sentMessages).toHaveLength(1);
@@ -1030,7 +1030,7 @@ describe("autoresearch auto-resume", () => {
 			cwd: dir,
 		});
 
-		await harness.sessionStartHandler?.({ type: "session_start" } as SessionStartEvent, harness.ctx);
+		await harness.sessionStartHandler?.({ type: "session_start", reason: "new" } as SessionStartEvent, harness.ctx);
 		await harness.agentEndHandler?.({}, harness.ctx);
 
 		expect(harness.sentMessages).toEqual([]);
@@ -1094,7 +1094,7 @@ describe("autoresearch auto-resume", () => {
 			cwd: dir,
 		});
 
-		await harness.sessionStartHandler?.({ type: "session_start" } as SessionStartEvent, harness.ctx);
+		await harness.sessionStartHandler?.({ type: "session_start", reason: "new" } as SessionStartEvent, harness.ctx);
 		const result = await harness.beforeAgentStartHandler?.({ systemPrompt: "BASE" }, harness.ctx);
 		const systemPrompt =
 			typeof result === "object" && result !== null && "systemPrompt" in result
@@ -1118,7 +1118,7 @@ describe("autoresearch lifecycle tool activation", () => {
 		});
 
 		if (!harness.sessionStartHandler) throw new Error("Expected session_start handler");
-		await harness.sessionStartHandler({ type: "session_start" }, harness.ctx);
+		await harness.sessionStartHandler({ type: "session_start", reason: "new" }, harness.ctx);
 
 		expect(harness.setActiveToolsCalls).toEqual([
 			["read", "write", "init_experiment", "run_experiment", "log_experiment"],
@@ -1147,7 +1147,7 @@ describe("autoresearch lifecycle tool activation", () => {
 		});
 
 		if (!harness.sessionStartHandler) throw new Error("Expected session_start handler");
-		await harness.sessionStartHandler({ type: "session_start" }, harness.ctx);
+		await harness.sessionStartHandler({ type: "session_start", reason: "new" }, harness.ctx);
 
 		expect(harness.setActiveToolsCalls).toEqual([]);
 	});

@@ -24,6 +24,7 @@ import type {
 	Extension,
 	ExtensionAPI,
 	ExtensionContext,
+	ToolInfo,
 	ExtensionFactory,
 	ExtensionRuntime as IExtensionRuntime,
 	LoadExtensionsResult,
@@ -69,7 +70,11 @@ export class ExtensionRuntime implements IExtensionRuntime {
 		throw new ExtensionRuntimeNotInitializedError();
 	}
 
-	getAllTools(): string[] {
+	getAllTools(): ToolInfo[] {
+		throw new ExtensionRuntimeNotInitializedError();
+	}
+
+	unregisterProvider(): void {
 		throw new ExtensionRuntimeNotInitializedError();
 	}
 
@@ -208,8 +213,12 @@ class ConcreteExtensionAPI implements ExtensionAPI, IExtensionRuntime {
 		return this.runtime.getActiveTools();
 	}
 
-	getAllTools(): string[] {
+	getAllTools(): ToolInfo[] {
 		return this.runtime.getAllTools();
+	}
+
+	unregisterProvider(name: string): void {
+		this.runtime.unregisterProvider(name);
 	}
 
 	setActiveTools(toolNames: string[]): Promise<void> {

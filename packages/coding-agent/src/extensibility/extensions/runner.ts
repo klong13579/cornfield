@@ -1,11 +1,12 @@
 /**
  * Extension runner - executes extensions and manages their lifecycle.
  */
-import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
+import type { AgentMessage, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { ImageContent, Model, ProviderResponseMetadata } from "@oh-my-pi/pi-ai";
 import type { KeyId } from "@oh-my-pi/pi-tui";
 import { logger } from "@oh-my-pi/pi-utils";
 import type { ModelRegistry } from "../../config/model-registry";
+import type { ScopedModel } from "../../config/model-resolver";
 import { type Theme, theme } from "../../modes/theme/theme";
 import type { SessionManager } from "../../session/session-manager";
 import type {
@@ -27,6 +28,7 @@ import type {
 	ExtensionError,
 	ExtensionEvent,
 	ExtensionFlag,
+	ExtensionMode,
 	ExtensionRuntime,
 	ExtensionShortcut,
 	ExtensionUIContext,
@@ -124,6 +126,7 @@ export async function emitSessionShutdownEvent(extensionRunner: ExtensionRunner 
 	if (extensionRunner?.hasHandlers("session_shutdown")) {
 		await extensionRunner.emit({
 			type: "session_shutdown",
+			reason: "quit",
 		});
 		return true;
 	}
@@ -167,6 +170,9 @@ export class ExtensionRunner {
 	#abortFn: () => void = () => {};
 	#hasPendingMessagesFn: () => boolean = () => false;
 	#getContextUsageFn: () => ContextUsage | undefined = () => undefined;
+	#getScopedModelsFn: () => readonly ScopedModel[] = () => [];
+	#getThinkingLevelFn: () => ThinkingLevel | undefined = () => undefined;
+	#getSignalFn: () => AbortSignal | undefined = () => undefined;
 	#compactFn: (instructionsOrOptions?: string | CompactOptions) => Promise<void> = async () => {};
 	#getSystemPromptFn: () => string = () => "";
 	#newSessionHandler: NewSessionHandler = async () => ({ cancelled: false });
@@ -176,6 +182,7 @@ export class ExtensionRunner {
 	#reloadHandler: () => Promise<void> = async () => {};
 	#shutdownHandler: ShutdownHandler = () => {};
 	#commandDiagnostics: Array<{ type: string; message: string; path: string }> = [];
+	#mode: ExtensionMode = "tui";
 
 	constructor(
 		private readonly extensions: Extension[],
@@ -192,6 +199,7 @@ export class ExtensionRunner {
 		contextActions: ExtensionContextActions,
 		commandContextActions?: ExtensionCommandContextActions,
 		uiContext?: ExtensionUIContext,
+		mode?: ExtensionMode,
 	): void {
 		// Copy actions into the shared runtime (all extension APIs reference this)
 		this.runtime.sendMessage = actions.sendMessage;
@@ -206,6 +214,7 @@ export class ExtensionRunner {
 		this.runtime.setThinkingLevel = actions.setThinkingLevel;
 		this.runtime.getSessionName = actions.getSessionName;
 		this.runtime.setSessionName = actions.setSessionName;
+		this.runtime.unregisterProvider = actions.unregisterProvider;
 
 		// Context actions (required)
 		this.#getModel = contextActions.getModel;
@@ -227,7 +236,14 @@ export class ExtensionRunner {
 			this.#compactFn = commandContextActions.compact;
 		}
 
+		this.#getScopedModelsFn = contextActions.getScopedModels;
+		this.#getThinkingLevelFn = contextActions.getThinkingLevel;
+		this.#getSignalFn = contextActions.getSignal;
+
 		this.#uiContext = uiContext ?? noOpUIContext;
+		if (mode !== undefined) {
+			this.#mode = mode;
+		}
 	}
 
 	getUIContext(): ExtensionUIContext {
@@ -398,16 +414,26 @@ export class ExtensionRunner {
 
 	createContext(): ExtensionContext {
 		const getModel = this.#getModel;
+		const getThinkingLevel = this.#getThinkingLevelFn;
+		const getSignal = this.#getSignalFn;
 		return {
 			ui: this.#uiContext,
+			mode: this.#mode,
 			getContextUsage: () => this.#getContextUsageFn(),
 			compact: instructionsOrOptions => this.#compactFn(instructionsOrOptions),
 			hasUI: this.hasUI(),
 			cwd: this.cwd,
 			sessionManager: this.sessionManager,
 			modelRegistry: this.modelRegistry,
+			scopedModels: this.#getScopedModelsFn(),
+			get thinkingLevel() {
+				return getThinkingLevel();
+			},
 			get model() {
 				return getModel();
+			},
+			get signal() {
+				return getSignal();
 			},
 			isIdle: () => this.#isIdleFn(),
 			abort: () => this.#abortFn(),
