@@ -236,6 +236,11 @@ Don't open a file hoping. Hope is not a strategy.
 
 - 任务推进时同步更新 `TODO.md`，标记完成、添加新待办。
 - 标记一条 TODO 完成后在同一轮继续下一个步骤，不要停下来等确认。
+- 待办行带 `→ topics/<slug>.md` 链接时，该行是一个 **topic**：推进时用
+  `project-todo` skill 的 Update topic 流程同步（状态/nextAction/进度事实
+  + 证据），完成时回填验收情况并置 `status: done`；用户说"继续 <名字>"时
+  从 topic 的 `nextAction` 接着干，不要重头再问。
+- topic 的进度以事实记录为准（时间 + 变更 + 证据），叙述只进批注。
 
 ## 交付纪律
 
