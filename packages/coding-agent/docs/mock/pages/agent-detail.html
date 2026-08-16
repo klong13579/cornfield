@@ -1,9 +1,10 @@
 <!--
-页面名：Agent 详情 (Agent Detail)
+页面名：Agent 详情 (Agent Detail) — V3 (impeccable-guided)
 功能层级位置：OMP 多端前端 > Agent 管理 > Agent 详情
-覆盖的协议命令/事件：
-  命令：set_model, set_thinking_level, set_host_tools, set_todos, get_snapshot, get_state
-  事件：session_snapshot
+路由路径：#/agents/:id
+导航分组：primary(3) · detail
+覆盖协议：set_model, set_thinking_level, set_host_tools, set_todos, get_snapshot, get_state · session_snapshot
+设计参照：Linear（排版层级、表面阶梯）× impeccable craft-floor（无嵌套卡片、无 emoji 图标、无左边条）
 -->
 <!DOCTYPE html>
 <html lang="zh">
@@ -13,263 +14,333 @@
 <title>omp · Agent 详情</title>
 <style>
   :root {
-    --bg: #0b0e14; --panel: #12161f; --border: #1e2530;
-    --text: #d7dde8; --muted: #7b8698; --accent: #4f8cff;
-    --green: #34d399; --amber: #fbbf24; --red: #f87171;
-    --bg-hover: #1a1f2b; --bg-active: #1e2530;
-    --card-bg: #0d1117; --radius: 8px;
+    --canvas: #f7f7f8; --surface: #ffffff; --surface-2: #f0f0f2; --surface-3: #e6e6e9;
+    --hairline: rgba(24,24,27,0.09); --hairline-strong: rgba(24,24,27,0.18);
+    --ink: #18181b; --ink-muted: rgba(24,24,27,0.66); --ink-subtle: rgba(24,24,27,0.5); --ink-faint: rgba(24,24,27,0.34);
+    --accent: #18181b; --accent-hover: #3a3a3f; --accent-dim: rgba(24,24,27,0.08); --on-accent: #fafafa;
+    --success: #189a5c; --warning: #b97c1e; --danger: #d64545;
+    --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Microsoft YaHei", sans-serif;
+    --mono: "SF Mono", ui-monospace, Menlo, monospace;
+    --r-sm: 6px; --r-md: 8px; --r-lg: 12px;
+    --ease: 150ms cubic-bezier(0.25, 0.46, 0.45, 0.94);
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { background: var(--bg); color: var(--text); font: 14px/1.55 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }
+  body { background: var(--canvas); color: var(--ink); font: 400 14px/1.6 var(--font); letter-spacing: -0.05px; -webkit-font-smoothing: antialiased; }
+  ::selection { background: var(--accent-dim); }
+  .icon { width: 18px; height: 18px; stroke: currentColor; stroke-width: 1.5; fill: none; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0; }
 
-  #nav { width: 56px; background: var(--panel); border-right: 1px solid var(--border); display: flex; flex-direction: column; align-items: center; padding: 12px 0; gap: 4px; flex-shrink: 0; }
-  .nav-item { width: 40px; height: 40px; border-radius: var(--radius); display: flex; align-items: center; justify-content: center; font-size: 18px; cursor: pointer; color: var(--muted); transition: all 0.15s; }
-  .nav-item:hover { background: var(--bg-hover); color: var(--text); }
-  .nav-item.active { background: var(--accent); color: #fff; }
+  #nav { width: 60px; background: var(--surface); border-right: 1px solid var(--hairline); display: flex; flex-direction: column; align-items: center; padding: 14px 0; gap: 4px; flex-shrink: 0; }
+  .nav-item { width: 40px; height: 40px; border-radius: var(--r-md); display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--ink-faint); transition: all var(--ease); position: relative; }
+  .nav-item:hover { background: var(--surface-2); color: var(--ink-subtle); }
+  .nav-item.active { background: var(--accent-dim); color: var(--accent-hover); }
+  .nav-item.active::before { content: ""; position: absolute; left: -10px; width: 2px; height: 18px; background: var(--accent); border-radius: 1px; }
   .nav-spacer { flex: 1; }
 
   #main { flex: 1; display: flex; flex-direction: column; min-width: 0; overflow-y: auto; }
-  #topbar { display: flex; align-items: center; gap: 14px; padding: 10px 18px; border-bottom: 1px solid var(--border); background: var(--panel); flex-shrink: 0; }
-  .breadcrumb { font-size: 13px; color: var(--muted); }
-  .breadcrumb a { color: var(--accent); text-decoration: none; cursor: pointer; }
-  .breadcrumb span { color: var(--text); }
+  #topbar { display: flex; align-items: center; gap: 12px; padding: 0 18px; height: 48px; border-bottom: 1px solid var(--hairline); background: var(--surface); flex-shrink: 0; }
+  .breadcrumb { font-size: 13px; color: var(--ink-subtle); display: flex; align-items: center; gap: 8px; }
+  .breadcrumb a { color: var(--accent-hover); text-decoration: none; cursor: pointer; }
+  .breadcrumb a:hover { text-decoration: underline; }
+  .breadcrumb .sep { color: var(--ink-faint); }
+  .breadcrumb span { color: var(--ink); }
   .spacer { flex: 1; }
-  .btn { background: var(--accent); color: #fff; border: none; border-radius: 6px; padding: 6px 14px; font-size: 13px; cursor: pointer; }
-  .btn:hover { opacity: 0.9; }
-  .btn-sm { padding: 3px 10px; font-size: 12px; }
-  .btn-danger { background: var(--red); }
-  .btn-secondary { background: var(--bg-hover); border: 1px solid var(--border); color: var(--text); }
+  .btn { background: var(--accent); color: var(--on-accent); border: none; border-radius: var(--r-md); padding: 7px 14px; font-size: 13px; font-weight: 500; cursor: pointer; transition: background var(--ease); letter-spacing: 0; }
+  .btn:hover { background: var(--accent-hover); }
+  .btn-secondary { background: var(--surface-2); border: 1px solid var(--hairline); color: var(--ink); }
+  .btn-secondary:hover { background: var(--surface-3); border-color: var(--hairline-strong); }
+  .btn-sm { padding: 4px 10px; font-size: 12px; }
 
-  #content { padding: 24px; flex: 1; }
+  #content { padding: 32px 40px 48px; max-width: 860px; }
 
-  /* Agent 头部 */
-  .agent-header { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; padding-bottom: 20px; border-bottom: 1px solid var(--border); }
-  .agent-avatar-lg { width: 56px; height: 56px; border-radius: var(--radius); background: var(--accent); display: flex; align-items: center; justify-content: center; font-size: 24px; color: #fff; font-weight: 700; }
-  .agent-title h2 { font-size: 20px; font-weight: 600; }
-  .agent-title .sub { font-size: 13px; color: var(--muted); }
-  .status-row { display: flex; align-items: center; gap: 8px; font-size: 13px; }
-  .status-dot { width: 8px; height: 8px; border-radius: 50%; }
-  .status-dot.online { background: var(--green); }
+  /* Agent 头部：编辑式排版 */
+  .agent-header { margin-bottom: 32px; }
+  .agent-eyebrow { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ink-subtle); margin-bottom: 10px; }
+  .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--success); box-shadow: 0 0 8px rgba(76,183,130,0.5); }
+  .agent-title-row { display: flex; align-items: baseline; gap: 16px; }
+  .agent-title { font-size: 32px; font-weight: 600; letter-spacing: -0.8px; line-height: 1.2; }
+  .agent-model-tag { font-family: var(--mono); font-size: 12px; color: var(--accent-hover); background: var(--accent-dim); padding: 3px 9px; border-radius: var(--r-sm); letter-spacing: 0; }
+  .agent-sub { font-size: 15px; color: var(--ink-subtle); margin-top: 8px; letter-spacing: -0.1px; }
 
   /* 选项卡 */
-  .tabs { display: flex; gap: 0; margin-bottom: 24px; border-bottom: 1px solid var(--border); }
-  .tab { padding: 10px 20px; font-size: 14px; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.15s; }
-  .tab:hover { color: var(--text); }
-  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
-
+  .tabs { display: flex; gap: 2px; margin-bottom: 28px; border-bottom: 1px solid var(--hairline); }
+  .tab { padding: 9px 16px; font-size: 13px; color: var(--ink-subtle); cursor: pointer; border-bottom: 2px solid transparent; transition: all var(--ease); font-weight: 500; margin-bottom: -1px; }
+  .tab:hover { color: var(--ink); }
+  .tab.active { color: var(--accent-hover); border-bottom-color: var(--accent); }
+  .tab .tab-count { font-size: 11px; color: var(--ink-faint); margin-left: 4px; }
   .tab-content { display: none; }
   .tab-content.active { display: block; }
 
-  /* Skills */
-  .skill-list { display: flex; flex-direction: column; gap: 10px; }
-  .skill-item { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; display: flex; align-items: center; gap: 12px; }
-  .skill-icon { font-size: 20px; width: 36px; text-align: center; }
-  .skill-info { flex: 1; }
-  .skill-name { font-size: 14px; font-weight: 600; }
-  .skill-desc { font-size: 12px; color: var(--muted); margin-top: 2px; }
-  .skill-meta { font-size: 11px; color: var(--muted); margin-top: 4px; }
-  /* Toggle switch */
-  .toggle { width: 42px; height: 24px; border-radius: 12px; background: var(--border); cursor: pointer; position: relative; transition: background 0.2s; flex-shrink: 0; }
-  .toggle.on { background: var(--accent); }
-  .toggle::after { content: ""; width: 18px; height: 18px; border-radius: 50%; background: #fff; position: absolute; top: 3px; left: 3px; transition: left 0.2s; }
-  .toggle.on::after { left: 21px; }
+  /* Skills：行式列表，非卡片 */
+  .skill-row { display: flex; align-items: center; gap: 14px; padding: 14px 4px; border-bottom: 1px solid var(--hairline); transition: background var(--ease); }
+  .skill-row:hover { background: var(--surface); }
+  .skill-row:last-child { border-bottom: none; }
+  .skill-icon { width: 32px; height: 32px; border-radius: var(--r-sm); background: var(--surface-2); border: 1px solid var(--hairline); display: flex; align-items: center; justify-content: center; color: var(--ink-subtle); flex-shrink: 0; }
+  .skill-icon .icon { width: 15px; height: 15px; }
+  .skill-info { flex: 1; min-width: 0; }
+  .skill-name { font-size: 14px; font-weight: 500; font-family: var(--mono); letter-spacing: 0; }
+  .skill-desc { font-size: 12px; color: var(--ink-subtle); margin-top: 1px; }
+  .skill-version { font-size: 11px; color: var(--ink-faint); font-family: var(--mono); letter-spacing: 0; flex-shrink: 0; }
+
+  .toggle { width: 38px; height: 22px; border-radius: 11px; background: var(--surface-3); border: 1px solid var(--hairline-strong); cursor: pointer; position: relative; transition: all 180ms ease; flex-shrink: 0; }
+  .toggle.on { background: var(--accent); border-color: var(--accent); }
+  .toggle::after { content: ""; width: 16px; height: 16px; border-radius: 50%; background: #fff; position: absolute; top: 2px; left: 2px; transition: left 180ms ease; box-shadow: 0 1px 2px rgba(0,0,0,0.2); }
+  .toggle.on::after { left: 19px; }
 
   /* Cron */
-  .cron-list { display: flex; flex-direction: column; gap: 10px; }
-  .cron-item { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; }
-  .cron-header { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
-  .cron-name { font-size: 14px; font-weight: 600; flex: 1; }
-  .cron-schedule { font-family: "SF Mono", Menlo, monospace; font-size: 12px; color: var(--accent); }
-  .cron-desc { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
-  .cron-runs { font-size: 11px; color: var(--muted); }
-  .cron-runs .ok { color: var(--green); }
-  .cron-runs .err { color: var(--red); }
-  .cron-actions { display: flex; gap: 6px; margin-top: 8px; }
+  .cron-row { padding: 16px 4px; border-bottom: 1px solid var(--hairline); }
+  .cron-row:last-child { border-bottom: none; }
+  .cron-top { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+  .cron-name { font-size: 14px; font-weight: 500; }
+  .cron-schedule { font-family: var(--mono); font-size: 11px; color: var(--accent-hover); background: var(--accent-dim); padding: 2px 8px; border-radius: var(--r-sm); letter-spacing: 0; }
+  .cron-desc { font-size: 12px; color: var(--ink-subtle); margin-bottom: 8px; }
+  .cron-runs { display: flex; align-items: center; gap: 10px; font-size: 11px; color: var(--ink-faint); }
+  .run-mark { display: inline-flex; align-items: center; gap: 3px; }
+  .run-mark.ok { color: var(--success); }
+  .run-mark.err { color: var(--danger); }
+  .cron-actions { display: flex; gap: 6px; margin-top: 10px; }
+  .ghost-btn { background: none; border: 1px solid var(--hairline); color: var(--ink-subtle); font-size: 12px; padding: 4px 10px; border-radius: var(--r-sm); cursor: pointer; transition: all var(--ease); }
+  .ghost-btn:hover { background: var(--surface-2); color: var(--ink); border-color: var(--hairline-strong); }
+  .badge { font-size: 10px; padding: 2px 7px; border-radius: 999px; font-weight: 500; letter-spacing: 0.04em; }
+  .badge.active { color: var(--success); background: rgba(76,183,130,0.1); }
+  .badge.paused { color: var(--warning); background: rgba(229,168,59,0.1); }
 
-  .badge { font-size: 10.5px; padding: 1px 7px; border-radius: 10px; border: 1px solid; }
-  .badge.active { color: var(--green); border-color: var(--green); }
-  .badge.paused { color: var(--amber); border-color: var(--amber); }
+  /* 模型配置：无嵌套卡片，直接分区 */
+  .config-section { margin-bottom: 28px; }
+  .config-section h4 { font-size: 11px; color: var(--ink-faint); text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600; margin-bottom: 14px; }
+  .field-row { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; max-width: 420px; }
+  .field-row label { font-size: 13px; color: var(--ink-subtle); width: 90px; flex-shrink: 0; }
+  select { background: var(--surface-2); border: 1px solid var(--hairline); border-radius: var(--r-sm); padding: 7px 10px; color: var(--ink); font-size: 13px; outline: none; flex: 1; transition: border-color var(--ease), box-shadow var(--ease); font-family: inherit; }
+  select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
+  .usage-block { max-width: 420px; }
+  .usage-line { display: flex; justify-content: space-between; font-size: 13px; color: var(--ink-subtle); margin-bottom: 8px; }
+  .usage-line b { color: var(--ink); font-weight: 500; }
+  .bar { height: 3px; background: var(--surface-3); border-radius: 2px; overflow: hidden; margin: 6px 0; }
+  .bar > div { height: 100%; background: var(--accent); border-radius: 2px; }
 
-  /* 模型配置 */
-  .model-config { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-  .config-card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; }
-  .config-card h4 { font-size: 13px; color: var(--muted); margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.06em; }
-  .select-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
-  .select-row label { font-size: 13px; color: var(--muted); width: 80px; flex-shrink: 0; }
-  select { background: var(--card-bg); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; color: var(--text); font-size: 13px; outline: none; flex: 1; }
-  select:focus { border-color: var(--accent); }
+  /* 工具开关：行式 grid */
+  .tool-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 2px; }
+  .tool-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: var(--r-sm); transition: background var(--ease); }
+  .tool-row:hover { background: var(--surface); }
+  .tool-row .tool-name { font-size: 13px; flex: 1; font-family: var(--mono); letter-spacing: 0; color: var(--ink-muted); }
+  .toggle.small { width: 32px; height: 18px; border-radius: 9px; }
+  .toggle.small::after { width: 12px; height: 12px; top: 2px; left: 2px; }
+  .toggle.small.on::after { left: 17px; }
 
-  /* 工具开关 */
-  .tool-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
-  .tool-item { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; display: flex; align-items: center; gap: 10px; }
-  .tool-item .tool-name { font-size: 13px; flex: 1; }
-
-  /* 空态 */
-  .empty-state { text-align: center; padding: 40px 20px; color: var(--muted); }
-  .empty-state .icon { font-size: 36px; margin-bottom: 12px; }
+  /* ── 手机预览 ── */
+  #phonePreviewBtn { position: fixed; top: 14px; right: 16px; z-index: 20; background: var(--surface-2); border: 1px solid var(--hairline); border-radius: var(--r-md); padding: 6px 12px; font-size: 12px; color: var(--ink-muted); cursor: pointer; display: flex; align-items: center; gap: 6px; transition: all var(--ease); }
+  #phonePreviewBtn:hover { border-color: var(--hairline-strong); color: var(--ink); }
+  #phonePreviewBtn .icon { width: 14px; height: 14px; }
+  #phoneOverlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 30; }
+  #phoneOverlay.show { display: block; }
+  #phonePanel { position: fixed; top: 0; right: 0; height: 100vh; width: 420px; background: var(--surface); border-left: 1px solid var(--hairline-strong); box-shadow: -16px 0 48px rgba(0,0,0,0.12); z-index: 31; display: none; flex-direction: column; }
+  #phonePanel.show { display: flex; }
+  .phone-head { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--hairline); }
+  .phone-head .label { font-size: 12px; color: var(--ink-subtle); font-family: var(--mono); letter-spacing: 0; }
+  .phone-close { margin-left: auto; background: none; border: none; color: var(--ink-subtle); cursor: pointer; font-size: 18px; padding: 4px 8px; border-radius: var(--r-sm); }
+  .phone-close:hover { background: var(--surface-2); color: var(--ink); }
+  .phone-body { flex: 1; display: flex; align-items: center; justify-content: center; padding: 24px; overflow: hidden; }
+  .device { width: 375px; height: 100%; max-height: 812px; border-radius: 40px; border: 1px solid var(--hairline-strong); background: var(--canvas); overflow: hidden; display: flex; flex-direction: column; position: relative; box-shadow: 0 24px 64px rgba(0,0,0,0.18); }
+  .device-statusbar { height: 44px; display: flex; align-items: center; justify-content: space-between; padding: 0 24px; font-size: 12px; font-weight: 600; color: var(--ink); flex-shrink: 0; }
+  .device-frame { flex: 1; overflow: hidden; }
+  .device-frame iframe { width: 100%; height: 100%; border: none; }
+  .device-home { height: 20px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .device-home::after { content: ""; width: 120px; height: 4px; border-radius: 2px; background: var(--hairline-strong); }
 </style>
 </head>
 <body>
 
-<div style="display:flex;height:100vh">
-  <div id="nav">
-    <div class="nav-item" title="会话工作台" onclick="location.href='session-workspace.html'">💬</div>
-    <div class="nav-item active" title="Agent 管理">🤖</div>
-    <div class="nav-item" title="会话记录" onclick="location.href='session-records.html'">📋</div>
-    <div class="nav-item" title="语音" onclick="location.href='voice.html'">🎤</div>
-    <div class="nav-item" title="Todo 面板" onclick="location.href='todo-panel.html'">✅</div>
-    <div class="nav-item" title="模型市场" onclick="location.href='model-marketplace.html'">🧠</div>
-    <div class="nav-spacer"></div>
-    <div class="nav-item" title="设置" onclick="location.href='settings.html'">⚙</div>
+<button id="phonePreviewBtn" onclick="togglePhone(true)"><svg class="icon"><use href="#i-phone"/></svg>预览手机</button>
+
+<div id="phoneOverlay" onclick="togglePhone(false)"></div>
+<div id="phonePanel">
+  <div class="phone-head">
+    <span class="label">移动端预览 · 375×812</span>
+    <button class="phone-close" onclick="togglePhone(false)">✕</button>
   </div>
+  <div class="phone-body">
+    <div class="device">
+      <div class="device-statusbar"><span>9:41</span><span>omp</span><span>●●●</span></div>
+      <div class="device-frame"><iframe src="mobile-session.html"></iframe></div>
+      <div class="device-home"></div>
+    </div>
+  </div>
+</div>
+
+
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <symbol id="i-chat" viewBox="0 0 24 24"><path d="M21 12c0 4.4-4 8-9 8-1.2 0-2.4-.2-3.4-.6L3 21l1.7-4.3C3.6 15.4 3 13.8 3 12c0-4.4 4-8 9-8s9 3.6 9 8z"/></symbol>
+    <symbol id="i-bot" viewBox="0 0 24 24"><rect x="4" y="8" width="16" height="12" rx="2"/><path d="M12 8V4M8 4h8"/><circle cx="9" cy="14" r="0.5"/><circle cx="15" cy="14" r="0.5"/><path d="M9 17h6"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+    <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 19v3"/></symbol>
+    <symbol id="i-check-square" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="m8 12 3 3 5-6"/></symbol>
+    <symbol id="i-cpu" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="2"/><rect x="10" y="10" width="4" height="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></symbol>
+    <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 8h10M18 8h2M4 16h2M10 16h10"/><circle cx="16" cy="8" r="2"/><circle cx="8" cy="16" r="2"/></symbol>
+    <symbol id="i-bug" viewBox="0 0 24 24"><rect x="8" y="6" width="8" height="12" rx="4"/><path d="M12 6V4M8 10H4M20 10h-4M8 15H4M20 15h-4M8 20l-2 2M16 20l2 2"/></symbol>
+    <symbol id="i-flask" viewBox="0 0 24 24"><path d="M10 2v6L4 18a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2L14 8V2M8 2h8"/></symbol>
+    <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 2 9 5-9 5-9-5z"/><path d="m3 12 9 5 9-5"/><path d="m3 17 9 5 9-5"/></symbol>
+    <symbol id="i-shuffle" viewBox="0 0 24 24"><path d="M16 3h5v5M21 3l-7 7M8 21H3v-5M3 21l7-7M16 21h5v-5M21 21l-7-7"/></symbol>
+    <symbol id="i-list" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></symbol>
+    <symbol id="i-chart" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 15v3M12 10v8M17 6v12"/></symbol>
+      <symbol id="i-phone" viewBox="0 0 24 24"><rect x="7" y="2" width="10" height="20" rx="2.5"/><path d="M11 18h2"/></symbol>
+    <symbol id="i-home" viewBox="0 0 24 24"><path d="m3 10 9-7 9 7v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 22V12h6v10"/></symbol>
+  </defs>
+</svg>
+
+<div style="display:flex;height:100vh">
+  <nav id="nav"></nav>
 
   <div id="main">
     <div id="topbar">
-      <div class="breadcrumb"><a href="agent-list.html">Agent 管理</a> / <span>研发助手</span></div>
+      <div class="breadcrumb"><a href="agent-list.html">Agent 管理</a><span class="sep">/</span><span>研发助手</span></div>
       <div class="spacer"></div>
       <button class="btn btn-secondary btn-sm" onclick="location.href='session-workspace.html'">进入会话</button>
     </div>
 
     <div id="content">
       <div class="agent-header">
-        <div class="agent-avatar-lg">研</div>
-        <div class="agent-title">
-          <h2>研发助手</h2>
-          <div class="sub">代码审查 · 架构设计 · 调试</div>
+        <div class="agent-eyebrow"><span class="status-dot"></span>运行中 · 12 技能 · 2 定时任务 · 最近活跃 3 分钟前</div>
+        <div class="agent-title-row">
+          <div class="agent-title">研发助手</div>
+          <span class="agent-model-tag">claude-opus-4-5</span>
         </div>
-        <div class="spacer"></div>
-        <div class="status-row"><span class="status-dot online"></span>运行中</div>
+        <div class="agent-sub">代码审查 · 架构设计 · 调试</div>
       </div>
 
       <div class="tabs">
-        <div class="tab active" onclick="switchTab('skills')">Skills 管理</div>
-        <div class="tab" onclick="switchTab('cron')">定时任务</div>
+        <div class="tab active" onclick="switchTab('skills')">Skills<span class="tab-count">12</span></div>
+        <div class="tab" onclick="switchTab('cron')">定时任务<span class="tab-count">2</span></div>
         <div class="tab" onclick="switchTab('model')">模型配置</div>
         <div class="tab" onclick="switchTab('tools')">工具开关</div>
+        <div class="tab" onclick="switchTab('profile')">用户画像</div>
       </div>
 
-      <!-- Skills 管理 -->
+      <!-- Skills -->
       <div class="tab-content active" id="tab-skills">
-        <div class="skill-list">
-          <div class="skill-item">
-            <div class="skill-icon">🔍</div>
-            <div class="skill-info">
-              <div class="skill-name">diagnosing-bugs</div>
-              <div class="skill-desc">诊断循环：硬 bug 和性能回归的诊断流程</div>
-              <div class="skill-meta">版本 1.2 · 最后更新 3 天前</div>
-            </div>
-            <div class="toggle on" onclick="this.classList.toggle('on')"></div>
+        <div class="skill-row">
+          <div class="skill-icon"><svg class="icon"><use href="#i-bug"/></svg></div>
+          <div class="skill-info">
+            <div class="skill-name">diagnosing-bugs</div>
+            <div class="skill-desc">诊断循环：硬 bug 和性能回归的诊断流程</div>
           </div>
-          <div class="skill-item">
-            <div class="skill-icon">🧪</div>
-            <div class="skill-info">
-              <div class="skill-name">tdd</div>
-              <div class="skill-desc">测试驱动开发，red-green-refactor 流程</div>
-              <div class="skill-meta">版本 2.0 · 最后更新 1 周前</div>
-            </div>
-            <div class="toggle on" onclick="this.classList.toggle('on')"></div>
+          <span class="skill-version">v1.2</span>
+          <div class="toggle on" onclick="this.classList.toggle('on')"></div>
+        </div>
+        <div class="skill-row">
+          <div class="skill-icon"><svg class="icon"><use href="#i-flask"/></svg></div>
+          <div class="skill-info">
+            <div class="skill-name">tdd</div>
+            <div class="skill-desc">测试驱动开发，red-green-refactor 流程</div>
           </div>
-          <div class="skill-item">
-            <div class="skill-icon">🏗</div>
-            <div class="skill-info">
-              <div class="skill-name">codebase-design</div>
-              <div class="skill-desc">深度模块设计词汇，接口设计、seam 定位</div>
-              <div class="skill-meta">版本 1.0 · 最后更新 5 天前</div>
-            </div>
-            <div class="toggle on" onclick="this.classList.toggle('on')"></div>
+          <span class="skill-version">v2.0</span>
+          <div class="toggle on" onclick="this.classList.toggle('on')"></div>
+        </div>
+        <div class="skill-row">
+          <div class="skill-icon"><svg class="icon"><use href="#i-layers"/></svg></div>
+          <div class="skill-info">
+            <div class="skill-name">codebase-design</div>
+            <div class="skill-desc">深度模块设计词汇，接口设计、seam 定位</div>
           </div>
-          <div class="skill-item">
-            <div class="skill-icon">🔄</div>
-            <div class="skill-info">
-              <div class="skill-name">cross-modal-review</div>
-              <div class="skill-desc">第二模型质量门禁，跨模型代码审查</div>
-              <div class="skill-meta">版本 0.25 · 最后更新 2 周前</div>
-            </div>
-            <div class="toggle on" onclick="this.classList.toggle('on')"></div>
+          <span class="skill-version">v1.0</span>
+          <div class="toggle on" onclick="this.classList.toggle('on')"></div>
+        </div>
+        <div class="skill-row">
+          <div class="skill-icon"><svg class="icon"><use href="#i-shuffle"/></svg></div>
+          <div class="skill-info">
+            <div class="skill-name">cross-modal-review</div>
+            <div class="skill-desc">第二模型质量门禁，跨模型代码审查</div>
           </div>
-          <div class="skill-item">
-            <div class="skill-icon">📝</div>
-            <div class="skill-info">
-              <div class="skill-name">project-todo</div>
-              <div class="skill-desc">项目任务板维护，TODO.md 增删改查</div>
-              <div class="skill-meta">版本 1.1 · 最后更新 1 周前</div>
-            </div>
-            <div class="toggle" onclick="this.classList.toggle('on')"></div>
+          <span class="skill-version">v0.25</span>
+          <div class="toggle on" onclick="this.classList.toggle('on')"></div>
+        </div>
+        <div class="skill-row">
+          <div class="skill-icon"><svg class="icon"><use href="#i-list"/></svg></div>
+          <div class="skill-info">
+            <div class="skill-name">project-todo</div>
+            <div class="skill-desc">项目任务板维护，TODO.md 增删改查</div>
           </div>
-          <div class="skill-item">
-            <div class="skill-icon">📊</div>
-            <div class="skill-info">
-              <div class="skill-name">session-diagnosis-orchestrator</div>
-              <div class="skill-desc">Agent 会话六维度诊断，失败原因分析</div>
-              <div class="skill-meta">版本 1.0 · 最后更新 4 天前</div>
-            </div>
-            <div class="toggle on" onclick="this.classList.toggle('on')"></div>
+          <span class="skill-version">v1.1</span>
+          <div class="toggle" onclick="this.classList.toggle('on')"></div>
+        </div>
+        <div class="skill-row">
+          <div class="skill-icon"><svg class="icon"><use href="#i-chart"/></svg></div>
+          <div class="skill-info">
+            <div class="skill-name">session-diagnosis-orchestrator</div>
+            <div class="skill-desc">Agent 会话六维度诊断，失败原因分析</div>
           </div>
+          <span class="skill-version">v1.0</span>
+          <div class="toggle on" onclick="this.classList.toggle('on')"></div>
         </div>
       </div>
 
       <!-- 定时任务 -->
       <div class="tab-content" id="tab-cron">
-        <div style="margin-bottom:16px">
+        <div style="margin-bottom:20px">
           <button class="btn btn-sm" onclick="alert('新建定时任务流程')">+ 新建定时任务</button>
         </div>
-        <div class="cron-list">
-          <div class="cron-item">
-            <div class="cron-header">
-              <span class="cron-name">每日代码审查报告</span>
-              <span class="badge active">运行中</span>
-              <span class="cron-schedule">0 9 * * 1-5</span>
-            </div>
-            <div class="cron-desc">每个工作日早上 9 点，扫描昨日提交的 PR，生成代码审查摘要</div>
-            <div class="cron-runs">最近运行：<span class="ok">8/16 09:00 ✓</span> · <span class="ok">8/15 09:00 ✓</span> · <span class="err">8/14 09:00 ✗</span></div>
-            <div class="cron-actions">
-              <button class="btn btn-sm btn-secondary" onclick="alert('已暂停')">暂停</button>
-              <button class="btn btn-sm btn-secondary" onclick="alert('立即运行')">立即运行</button>
-              <button class="btn btn-sm btn-secondary" onclick="alert('查看日志')">日志</button>
-            </div>
+        <div class="cron-row">
+          <div class="cron-top">
+            <span class="cron-name">每日代码审查报告</span>
+            <span class="badge active">运行中</span>
+            <span class="cron-schedule">0 9 * * 1-5</span>
           </div>
-          <div class="cron-item">
-            <div class="cron-header">
-              <span class="cron-name">每周架构健康检查</span>
-              <span class="badge active">运行中</span>
-              <span class="cron-schedule">0 10 * * 1</span>
-            </div>
-            <div class="cron-desc">每周一早上 10 点，全仓库架构扫描，检查循环依赖和设计漂移</div>
-            <div class="cron-runs">最近运行：<span class="ok">8/11 10:00 ✓</span> · <span class="ok">8/4 10:00 ✓</span></div>
-            <div class="cron-actions">
-              <button class="btn btn-sm btn-secondary" onclick="alert('已暂停')">暂停</button>
-              <button class="btn btn-sm btn-secondary" onclick="alert('立即运行')">立即运行</button>
-              <button class="btn btn-sm btn-secondary" onclick="alert('查看日志')">日志</button>
-            </div>
+          <div class="cron-desc">每个工作日早上 9 点，扫描昨日提交的 PR，生成代码审查摘要</div>
+          <div class="cron-runs">
+            <span>最近运行</span>
+            <span class="run-mark ok">✓ 8/16 09:00</span>
+            <span class="run-mark ok">✓ 8/15 09:00</span>
+            <span class="run-mark err">✗ 8/14 09:00</span>
+          </div>
+          <div class="cron-actions">
+            <button class="ghost-btn" onclick="alert('已暂停')">暂停</button>
+            <button class="ghost-btn" onclick="alert('立即运行')">立即运行</button>
+            <button class="ghost-btn" onclick="alert('查看日志')">日志</button>
+          </div>
+        </div>
+        <div class="cron-row">
+          <div class="cron-top">
+            <span class="cron-name">每周架构健康检查</span>
+            <span class="badge active">运行中</span>
+            <span class="cron-schedule">0 10 * * 1</span>
+          </div>
+          <div class="cron-desc">每周一早上 10 点，全仓库架构扫描，检查循环依赖和设计漂移</div>
+          <div class="cron-runs">
+            <span>最近运行</span>
+            <span class="run-mark ok">✓ 8/11 10:00</span>
+            <span class="run-mark ok">✓ 8/4 10:00</span>
+          </div>
+          <div class="cron-actions">
+            <button class="ghost-btn" onclick="alert('已暂停')">暂停</button>
+            <button class="ghost-btn" onclick="alert('立即运行')">立即运行</button>
+            <button class="ghost-btn" onclick="alert('查看日志')">日志</button>
           </div>
         </div>
       </div>
 
       <!-- 模型配置 -->
       <div class="tab-content" id="tab-model">
-        <div class="model-config">
-          <div class="config-card">
-            <h4>模型选择</h4>
-            <div class="select-row">
-              <label>Provider</label>
-              <select><option>anthropic</option><option>narwal-plan</option></select>
-            </div>
-            <div class="select-row">
-              <label>Model</label>
-              <select><option>claude-opus-4-5</option><option>claude-sonnet-4-5</option></select>
-            </div>
-            <div class="select-row">
-              <label>Thinking</label>
-              <select><option>high</option><option>medium</option><option>low</option><option>off</option></select>
-            </div>
-            <div style="margin-top:12px"><button class="btn btn-sm">保存</button></div>
+        <div class="config-section">
+          <h4>模型选择</h4>
+          <div class="field-row">
+            <label>Provider</label>
+            <select><option>anthropic</option><option>narwal-plan</option></select>
           </div>
-          <div class="config-card">
-            <h4>Token 与用量</h4>
-            <div style="font-size:13px;color:var(--muted);margin-bottom:8px">当前上下文窗口：200K tokens</div>
-            <div style="background:var(--border);height:4px;border-radius:2px;margin-bottom:8px"><div style="width:62%;height:100%;background:var(--accent);border-radius:2px"></div></div>
-            <div style="font-size:11px;color:var(--muted)">使用 124K / 200K · 62%</div>
-            <div style="margin-top:12px;font-size:12px;color:var(--muted)">本月用量：1.2M tokens · 预估费用 ¥3.60</div>
+          <div class="field-row">
+            <label>Model</label>
+            <select><option>claude-opus-4-5</option><option>claude-sonnet-4-5</option></select>
+          </div>
+          <div class="field-row">
+            <label>Thinking</label>
+            <select><option>high</option><option>medium</option><option>low</option><option>off</option></select>
+          </div>
+          <div style="margin-top:16px"><button class="btn btn-sm">保存</button></div>
+        </div>
+        <div class="config-section">
+          <h4>Token 与用量</h4>
+          <div class="usage-block">
+            <div class="usage-line"><span>上下文窗口</span><b>124K / 200K</b></div>
+            <div class="bar"><div style="width:62%"></div></div>
+            <div class="usage-line" style="margin-top:12px"><span>本月用量</span><b>1.2M tokens · ¥3.60</b></div>
           </div>
         </div>
       </div>
@@ -277,22 +348,54 @@
       <!-- 工具开关 -->
       <div class="tab-content" id="tab-tools">
         <div class="tool-grid">
-          <div class="tool-item"><span class="tool-name">read</span><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
-          <div class="tool-item"><span class="tool-name">write</span><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
-          <div class="tool-item"><span class="tool-name">edit</span><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
-          <div class="tool-item"><span class="tool-name">bash</span><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
-          <div class="tool-item"><span class="tool-name">search</span><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
-          <div class="tool-item"><span class="tool-name">find</span><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
-          <div class="tool-item"><span class="tool-name">ast_grep</span><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
-          <div class="tool-item"><span class="tool-name">ast_edit</span><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
-          <div class="tool-item"><span class="tool-name">lsp</span><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
-          <div class="tool-item"><span class="tool-name">python</span><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
-          <div class="tool-item"><span class="tool-name">notebook</span><div class="toggle" onclick="this.classList.toggle('on')"></div></div>
-          <div class="tool-item"><span class="tool-name">debug</span><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
-          <div class="tool-item"><span class="tool-name">task</span><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
-          <div class="tool-item"><span class="tool-name">web_search</span><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
-          <div class="tool-item"><span class="tool-name">puppeteer</span><div class="toggle" onclick="this.classList.toggle('on')"></div></div>
-          <div class="tool-item"><span class="tool-name">todo_write</span><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
+          <div class="tool-row"><span class="tool-name">read</span><div class="toggle small on" onclick="this.classList.toggle('on')"></div></div>
+          <div class="tool-row"><span class="tool-name">write</span><div class="toggle small on" onclick="this.classList.toggle('on')"></div></div>
+          <div class="tool-row"><span class="tool-name">edit</span><div class="toggle small on" onclick="this.classList.toggle('on')"></div></div>
+          <div class="tool-row"><span class="tool-name">bash</span><div class="toggle small on" onclick="this.classList.toggle('on')"></div></div>
+          <div class="tool-row"><span class="tool-name">search</span><div class="toggle small on" onclick="this.classList.toggle('on')"></div></div>
+          <div class="tool-row"><span class="tool-name">find</span><div class="toggle small on" onclick="this.classList.toggle('on')"></div></div>
+          <div class="tool-row"><span class="tool-name">ast_grep</span><div class="toggle small on" onclick="this.classList.toggle('on')"></div></div>
+          <div class="tool-row"><span class="tool-name">ast_edit</span><div class="toggle small on" onclick="this.classList.toggle('on')"></div></div>
+          <div class="tool-row"><span class="tool-name">lsp</span><div class="toggle small on" onclick="this.classList.toggle('on')"></div></div>
+          <div class="tool-row"><span class="tool-name">python</span><div class="toggle small on" onclick="this.classList.toggle('on')"></div></div>
+          <div class="tool-row"><span class="tool-name">notebook</span><div class="toggle small" onclick="this.classList.toggle('on')"></div></div>
+          <div class="tool-row"><span class="tool-name">debug</span><div class="toggle small on" onclick="this.classList.toggle('on')"></div></div>
+          <div class="tool-row"><span class="tool-name">task</span><div class="toggle small on" onclick="this.classList.toggle('on')"></div></div>
+          <div class="tool-row"><span class="tool-name">web_search</span><div class="toggle small on" onclick="this.classList.toggle('on')"></div></div>
+          <div class="tool-row"><span class="tool-name">puppeteer</span><div class="toggle small" onclick="this.classList.toggle('on')"></div></div>
+          <div class="tool-row"><span class="tool-name">todo_write</span><div class="toggle small on" onclick="this.classList.toggle('on')"></div></div>
+        </div>
+      </div>
+      <!-- 用户画像 -->
+      <div class="tab-content" id="tab-profile">
+        <div style="margin-bottom:20px">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
+            <div style="width:40px;height:40px;border-radius:10px;background:var(--dingtalk);display:flex;align-items:center;justify-content:center">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="#fff"><path d="M4 9.5c4.5 0 9 .8 13 3.5-1.8 1.2-4 2.3-6.5 2.8.4 1.5 1 3 2 4.2-2.6-.6-5-2-6.8-3.7H4v-2.4h3.2c1-1.2 2.3-2.4 3.8-3-2.2-.7-4.7-1.4-7-1.4z"/></svg>
+            </div>
+            <div>
+              <div style="font-size:15px;font-weight:600">基于钉钉消息的用户建模</div>
+              <div style="font-size:12px;color:var(--ink-subtle);margin-top:2px">来源：钉钉机器人会话 · 128 条消息 · 最近更新 2 小时前</div>
+            </div>
+          </div>
+          <div style="background:var(--surface-2);border:1px solid var(--hairline);border-radius:12px;padding:20px">
+            <div style="font-size:11px;color:var(--ink-faint);text-transform:uppercase;letter-spacing:0.08em;font-weight:600;margin-bottom:12px">关注领域</div>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:20px">
+              <span style="padding:5px 14px;border-radius:999px;background:var(--accent-dim);color:var(--ink);font-size:13px">机器人</span>
+              <span style="padding:5px 14px;border-radius:999px;background:var(--accent-dim);color:var(--ink);font-size:13px">扫地机</span>
+              <span style="padding:5px 14px;border-radius:999px;background:var(--accent-dim);color:var(--ink);font-size:13px">日程</span>
+              <span style="padding:5px 14px;border-radius:999px;background:var(--accent-dim);color:var(--ink);font-size:13px">投融资</span>
+              <span style="padding:5px 14px;border-radius:999px;background:var(--accent-dim);color:var(--ink);font-size:13px">代码审查</span>
+              <span style="padding:5px 14px;border-radius:999px;background:var(--accent-dim);color:var(--ink);font-size:13px">架构设计</span>
+            </div>
+            <div style="font-size:11px;color:var(--ink-faint);text-transform:uppercase;letter-spacing:0.08em;font-weight:600;margin-bottom:8px">摘要</div>
+            <div style="font-size:14px;color:var(--ink);line-height:1.7;margin-bottom:20px;padding:12px 16px;background:var(--surface);border-radius:8px;border-left:2px solid var(--accent)">关注研发效率与商业决策，偏好短句直接沟通。技术背景深厚但不逐行审代码，关注架构方向与 tradeoff。对投融资话题敏感，习惯用数字说话。</div>
+            <div style="display:flex;gap:8px">
+              <button class="btn btn-sm" onclick="alert('重新从钉钉消息建模…')">重新建模</button>
+              <button class="btn btn-sm btn-secondary" onclick="alert('导出画像 JSON')">导出</button>
+              <button class="btn btn-sm" style="background:none;border:1px solid var(--danger);color:var(--danger)" onclick="if(confirm('确认清除用户画像？此操作不可恢复。'))alert('已清除')">清除画像</button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -300,6 +403,24 @@
 </div>
 
 <script>
+  /* ── 应用壳：页面注册表（加页面 = 数组加一项） ── */
+  const NAV = [
+    { id: "home",       icon: "i-home",         label: "Home",      href: "home.html" },
+    { id: "workspace",  icon: "i-chat",         label: "会话工作台",  href: "session-workspace.html" },
+    { id: "agents",     icon: "i-bot",          label: "Agent 管理", href: "agent-list.html" },
+    { id: "records",    icon: "i-clock",        label: "会话记录",    href: "session-records.html" },
+    { id: "voice",      icon: "i-mic",          label: "语音",        href: "voice.html" },
+    { id: "todo",       icon: "i-check-square", label: "Todo 面板",  href: "todo-panel.html" },
+    { id: "models",     icon: "i-cpu",          label: "模型市场",    href: "model-marketplace.html" },
+    { id: "settings",   icon: "i-sliders",      label: "设置",        href: "settings.html", bottom: true },
+  ];
+  const ACTIVE_ID = "agents";
+  document.getElementById("nav").innerHTML = NAV.map(n => `
+    ${n.bottom ? '<div class="nav-spacer"></div>' : ""}
+    <div class="nav-item${n.id === ACTIVE_ID ? " active" : ""}" title="${n.label}" onclick="location.href='${n.href}'">
+      <svg class="icon"><use href="#${n.icon}"/></svg>
+    </div>`).join("");
+
 function switchTab(name) {
   document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
   document.querySelectorAll(".tab-content").forEach(c => c.classList.remove("active"));

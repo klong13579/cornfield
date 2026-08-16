@@ -1,10 +1,8 @@
 <!--
-页面名：移动端会话 (Mobile Session)
+页面名：移动端会话 (Mobile Session) — V3 (impeccable-guided)
 功能层级位置：OMP 多端前端 > 移动端精简视图
-覆盖的协议命令/事件：
-  命令：prompt, steer, abort, get_snapshot, subscribe
-  事件：session_snapshot, progress
-  设计决策：移动端裁剪了右面板（Todo/状态详情缩为可折叠浮层）、模型/thinking 缩为快捷切换条、工具卡默认折叠。触控优先：大按钮、滑动手势、语音输入快捷入口。
+覆盖协议：prompt, steer, abort, get_snapshot, subscribe · session_snapshot, progress
+设计决策：右面板→浮层、模型/thinking→快捷条、工具卡默认折叠、触控 44px、语音快捷入口。
 -->
 <!DOCTYPE html>
 <html lang="zh">
@@ -14,86 +12,95 @@
 <title>omp · 移动端</title>
 <style>
   :root {
-    --bg: #0b0e14; --panel: #12161f; --border: #1e2530;
-    --text: #d7dde8; --muted: #7b8698; --accent: #4f8cff;
-    --green: #34d399; --amber: #fbbf24; --red: #f87171;
-    --user: #1a2230; --assistant: #141a24;
-    --card-bg: #0d1117; --radius: 8px;
+    --canvas: #f7f7f8; --surface: #ffffff; --surface-2: #f0f0f2; --surface-3: #e6e6e9;
+    --hairline: rgba(24,24,27,0.09); --hairline-strong: rgba(24,24,27,0.18);
+    --ink: #18181b; --ink-muted: rgba(24,24,27,0.66); --ink-subtle: rgba(24,24,27,0.5); --ink-faint: rgba(24,24,27,0.34);
+    --accent: #18181b; --accent-hover: #3a3a3f; --accent-dim: rgba(24,24,27,0.08); --on-accent: #fafafa;
+    --success: #189a5c; --warning: #b97c1e; --danger: #d64545;
+    --user-bg: #ececee;
+    --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Microsoft YaHei", sans-serif;
+    --mono: "SF Mono", ui-monospace, Menlo, monospace;
+    --r-sm: 6px; --r-md: 8px; --r-lg: 12px;
+    --ease: 150ms cubic-bezier(0.25, 0.46, 0.45, 0.94);
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { background: var(--bg); color: var(--text); font: 15px/1.55 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; max-width: 430px; margin: 0 auto; height: 100vh; display: flex; flex-direction: column; }
+  body { background: var(--canvas); color: var(--ink); font: 400 15px/1.6 var(--font); letter-spacing: -0.05px; max-width: 430px; margin: 0 auto; height: 100vh; display: flex; flex-direction: column; -webkit-font-smoothing: antialiased; }
+  .icon { width: 18px; height: 18px; stroke: currentColor; stroke-width: 1.5; fill: none; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0; }
 
-  /* 顶栏 */
-  #topbar { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--border); background: var(--panel); flex-shrink: 0; }
-  .conn { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--green); }
-  .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
+  #topbar { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--hairline); background: var(--surface); flex-shrink: 0; }
+  .conn { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--success); }
+  .conn::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--success); box-shadow: 0 0 6px rgba(76,183,130,0.5); }
   .spacer { flex: 1; }
-  .top-btn { background: var(--card-bg); border: 1px solid var(--border); border-radius: 6px; padding: 4px 10px; font-size: 12px; color: var(--text); cursor: pointer; }
-  .top-btn.agent { color: var(--accent); }
+  .top-btn { background: var(--surface-2); border: 1px solid var(--hairline); border-radius: var(--r-sm); padding: 5px 10px; font-size: 12px; color: var(--ink); cursor: pointer; transition: all var(--ease); }
+  .top-btn:hover { border-color: var(--hairline-strong); }
+  .top-btn.agent { color: var(--accent-hover); }
 
-  /* 快捷条 */
-  #quickbar { display: flex; gap: 8px; padding: 8px 14px; background: var(--panel); border-bottom: 1px solid var(--border); overflow-x: auto; flex-shrink: 0; }
-  .quick-chip { background: var(--card-bg); border: 1px solid var(--border); border-radius: 6px; padding: 4px 10px; font-size: 12px; color: var(--muted); white-space: nowrap; cursor: pointer; }
-  .quick-chip b { color: var(--text); font-weight: 500; }
+  #quickbar { display: flex; gap: 8px; padding: 8px 14px; background: var(--surface); border-bottom: 1px solid var(--hairline); overflow-x: auto; flex-shrink: 0; }
+  .quick-chip { background: var(--surface-2); border: 1px solid var(--hairline); border-radius: var(--r-sm); padding: 4px 10px; font-size: 12px; color: var(--ink-subtle); white-space: nowrap; cursor: pointer; }
+  .quick-chip b { color: var(--ink); font-weight: 500; }
 
-  /* 转录 */
-  #transcript { flex: 1; overflow-y: auto; padding: 14px; }
-  .msg { display: flex; gap: 10px; margin-bottom: 16px; }
-  .avatar { width: 28px; height: 28px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; flex-shrink: 0; }
-  .avatar.user { background: #233250; color: var(--accent); }
-  .avatar.assistant { background: #1f2937; color: var(--green); }
+  #transcript { flex: 1; overflow-y: auto; padding: 16px 14px; }
+  .msg { display: flex; gap: 10px; margin-bottom: 20px; }
+  .avatar { width: 24px; height: 24px; border-radius: var(--r-sm); display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 600; flex-shrink: 0; margin-top: 2px; }
+  .avatar.user { background: #dde1ec; color: #3b4666; }
+  .avatar.assistant { background: #d8efe2; color: #127a48; }
   .bubble { flex: 1; min-width: 0; }
-  .bubble .name { font-size: 11px; color: var(--muted); margin-bottom: 3px; }
-  .bubble .content { background: var(--assistant); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; font-size: 14px; }
-  .msg.user .content { background: var(--user); }
+  .bubble .name { font-size: 10px; color: var(--ink-faint); margin-bottom: 3px; }
+  .bubble .content { color: var(--ink-muted); font-size: 14px; }
+  .msg.user .bubble .content { color: var(--ink); background: var(--user-bg); border: 1px solid var(--hairline); border-radius: var(--r-lg); padding: 9px 12px; }
   .msg.user .bubble { display: flex; flex-direction: column; align-items: flex-end; }
-  .msg.user .content { max-width: 85%; }
+  .msg.user .bubble .content { max-width: 85%; }
   p { margin-bottom: 6px; }
   p:last-child { margin-bottom: 0; }
-  code { background: var(--card-bg); border: 1px solid var(--border); border-radius: 4px; padding: 1px 4px; font-size: 12px; font-family: "SF Mono", Menlo, monospace; }
-  .caret { display: inline-block; width: 6px; height: 13px; background: var(--green); vertical-align: -2px; animation: blink 1s step-end infinite; }
-  @keyframes blink { 50% { opacity: 0; } }
+  code { background: var(--surface-2); border: 1px solid var(--hairline); border-radius: 4px; padding: 1px 4px; font-size: 12px; font-family: var(--mono); color: var(--ink); letter-spacing: 0; }
+  .caret { display: inline-block; width: 2px; height: 13px; background: var(--accent-hover); border-radius: 1px; vertical-align: -2px; animation: breathe 1.1s ease-in-out infinite; }
+  @keyframes breathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
 
-  .toolcard { border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 6px; background: var(--card-bg); margin: 8px 0; overflow: hidden; }
-  .toolcard .head { display: flex; align-items: center; gap: 6px; padding: 6px 10px; font-size: 12px; border-bottom: 1px solid var(--border); cursor: pointer; }
-  .toolcard .head .tname { font-family: "SF Mono", Menlo, monospace; color: var(--text); }
-  .toolcard .args { padding: 6px 10px; font-family: "SF Mono", Menlo, monospace; font-size: 11px; color: var(--muted); white-space: pre-wrap; display: none; }
-  .toolcard .args.show { display: block; }
-  .toolcard .result { padding: 6px 10px; font-family: "SF Mono", Menlo, monospace; font-size: 11px; color: var(--green); border-top: 1px solid var(--border); white-space: pre-wrap; display: none; }
-  .toolcard .result.show { display: block; }
-  .badge { font-size: 10px; padding: 1px 6px; border-radius: 8px; border: 1px solid; }
-  .badge.run { color: var(--amber); border-color: var(--amber); }
-  .badge.done { color: var(--green); border-color: var(--green); }
-  .spin { width: 8px; height: 8px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: rot 0.8s linear infinite; }
-  @keyframes rot { to { transform: rotate(360deg); } }
+  .toolcard { border: 1px solid var(--hairline); border-radius: var(--r-sm); background: var(--surface); margin: 8px 0; overflow: hidden; }
+  .toolcard .head { display: flex; align-items: center; gap: 6px; padding: 6px 10px; font-size: 12px; cursor: pointer; }
+  .toolcard .head .tname { font-family: var(--mono); color: var(--ink); font-weight: 500; letter-spacing: 0; }
+  .toolcard .body { display: none; padding: 6px 10px; font-family: var(--mono); font-size: 11px; color: var(--ink-subtle); white-space: pre-wrap; border-top: 1px solid var(--hairline); letter-spacing: 0; }
+  .toolcard .body.show { display: block; }
+  .toolcard .body .result { color: var(--success); }
+  .toolcard .body .result::before { content: "✓ "; font-family: var(--font); }
+  .badge { font-size: 10px; padding: 1px 6px; border-radius: 999px; font-weight: 500; margin-left: auto; }
+  .badge.done { color: var(--success); background: rgba(76,183,130,0.1); }
 
-  /* 输入区 */
-  #inputbar { border-top: 1px solid var(--border); padding: 10px 14px; background: var(--panel); display: flex; gap: 8px; align-items: flex-end; flex-shrink: 0; }
-  #input { flex: 1; background: var(--card-bg); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; color: var(--text); font: inherit; resize: none; outline: none; min-height: 40px; font-size: 14px; }
-  #input:focus { border-color: var(--accent); }
-  .icon-btn { width: 40px; height: 40px; border-radius: 8px; background: var(--card-bg); border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; font-size: 18px; cursor: pointer; color: var(--text); }
-  .icon-btn.send { background: var(--accent); color: #fff; border-color: var(--accent); }
-  .icon-btn.stop { background: var(--red); border-color: var(--red); }
+  #inputbar { border-top: 1px solid var(--hairline); padding: 10px 14px; background: var(--surface); display: flex; gap: 8px; align-items: flex-end; flex-shrink: 0; }
+  #input { flex: 1; background: var(--surface-2); border: 1px solid var(--hairline); border-radius: var(--r-md); padding: 9px 12px; color: var(--ink); font: inherit; resize: none; outline: none; min-height: 42px; font-size: 14px; transition: border-color var(--ease), box-shadow var(--ease); }
+  #input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
+  #input::placeholder { color: var(--ink-faint); }
+  .icon-btn { width: 42px; height: 42px; border-radius: var(--r-md); background: var(--surface-2); border: 1px solid var(--hairline); display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--ink-muted); transition: all var(--ease); flex-shrink: 0; }
+  .icon-btn:hover { border-color: var(--hairline-strong); color: var(--ink); }
+  .icon-btn.send { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+  .icon-btn.stop { background: var(--danger); border-color: var(--danger); color: #fff; }
 
-  /* 浮层面板 */
   .overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 10; }
   .overlay.show { display: flex; align-items: flex-end; }
-  .overlay-panel { width: 100%; max-height: 60vh; background: var(--panel); border-radius: 16px 16px 0 0; padding: 20px; overflow-y: auto; }
-  .overlay-panel h4 { font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 12px; }
+  .overlay-panel { width: 100%; max-height: 60vh; background: var(--surface); border-radius: var(--r-lg) var(--r-lg) 0 0; border-top: 1px solid var(--hairline-strong); padding: 20px; overflow-y: auto; }
+  .overlay-panel h4 { font-size: 10px; color: var(--ink-faint); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 12px; font-weight: 600; }
   .kv { display: flex; justify-content: space-between; font-size: 13px; padding: 4px 0; }
-  .kv .k { color: var(--muted); }
-  .todo { display: flex; gap: 8px; align-items: flex-start; padding: 6px 0; font-size: 13px; }
+  .kv .k { color: var(--ink-subtle); }
+  .todo { display: flex; gap: 8px; align-items: flex-start; padding: 5px 0; font-size: 13px; color: var(--ink-muted); }
   .todo input { margin-top: 3px; accent-color: var(--accent); }
-  .todo.done .t { color: var(--muted); text-decoration: line-through; }
-  .overlay-close { text-align: center; padding: 8px; color: var(--accent); font-size: 14px; cursor: pointer; }
-  .bar { height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; margin: 8px 0 2px; }
-  .bar > div { height: 100%; background: var(--accent); }
+  .todo.done .t { color: var(--ink-faint); text-decoration: line-through; }
+  .overlay-close { text-align: center; padding: 10px; color: var(--accent-hover); font-size: 14px; cursor: pointer; }
+  .bar { height: 3px; background: var(--surface-3); border-radius: 2px; overflow: hidden; margin: 8px 0 4px; }
+  .bar > div { height: 100%; background: var(--accent); border-radius: 2px; }
 </style>
 </head>
 <body>
 
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 19v3"/></symbol>
+    <symbol id="i-send" viewBox="0 0 24 24"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4z"/></symbol>
+    <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></symbol>
+  </defs>
+</svg>
+
 <div id="topbar">
-  <div class="conn"><span class="dot"></span>已连接</div>
+  <div class="conn">已连接</div>
   <div class="spacer"></div>
   <button class="top-btn agent" onclick="location.href='agent-list.html'">研发助手 ▾</button>
   <button class="top-btn" onclick="toggleOverlay()">详情</button>
@@ -102,7 +109,7 @@
 <div id="quickbar">
   <span class="quick-chip">模型 <b>qwen3.7-max</b></span>
   <span class="quick-chip">thinking <b>high</b></span>
-  <span class="quick-chip" onclick="location.href='voice.html'">🎤 语音</span>
+  <span class="quick-chip" onclick="location.href='voice.html'">语音</span>
 </div>
 
 <div id="transcript">
@@ -119,10 +126,10 @@
     <div class="bubble">
       <div class="name">omp · qwen3.7-max</div>
       <div class="content">
-        <div class="toolcard" onclick="this.querySelector('.args').classList.toggle('show');this.querySelector('.result').classList.toggle('show')">
-          <div class="head"><span class="tname">read</span><span style="margin-left:auto"><span class="badge done">完成</span></span></div>
-          <div class="args">~/.omp/gateway-data/logs/service.log</div>
-          <div class="result">00:20:30 [AgentBridge] bridge crashed (SIGKILL)</div>
+        <div class="toolcard" onclick="this.querySelector('.body').classList.toggle('show')">
+          <div class="head"><span class="tname">read</span><span class="badge done">完成</span></div>
+          <div class="body">~/.omp/gateway-data/logs/service.log
+<span class="result">00:20:30 [AgentBridge] bridge crashed (SIGKILL)</span></div>
         </div>
         <p>根因是 SIGKILL 导致哨兵没写入。<span class="caret"></span></p>
       </div>
@@ -131,20 +138,19 @@
 </div>
 
 <div id="inputbar">
-  <button class="icon-btn" onclick="location.href='voice.html'" title="语音输入">🎤</button>
+  <button class="icon-btn" onclick="location.href='voice.html'" title="语音输入"><svg class="icon"><use href="#i-mic"/></svg></button>
   <textarea id="input" rows="1" placeholder="发送消息…">继续</textarea>
-  <button class="icon-btn send" id="sendBtn" onclick="toggleSend()">▶</button>
+  <button class="icon-btn send" id="sendBtn" onclick="toggleSend()"><svg class="icon"><use href="#i-send"/></svg></button>
 </div>
 
-<!-- 浮层面板 -->
 <div class="overlay" id="overlay" onclick="if(event.target===this) toggleOverlay()">
   <div class="overlay-panel">
     <h4>会话状态</h4>
-    <div class="kv"><span class="k">阶段</span><span style="color:var(--amber)">streaming</span></div>
+    <div class="kv"><span class="k">阶段</span><span style="color:var(--warning)">streaming</span></div>
     <div class="kv"><span class="k">模型</span><span>qwen3.7-max</span></div>
     <div class="kv"><span class="k">上下文</span><span>62% · 22 条消息</span></div>
     <div class="bar"><div style="width:62%"></div></div>
-    <h4 style="margin-top:16px">Todo（4）</h4>
+    <h4 style="margin-top:16px">Todo · 4</h4>
     <label class="todo done"><input type="checkbox" checked><span class="t">复现 00:20:30 消息丢失</span></label>
     <label class="todo done"><input type="checkbox" checked><span class="t">确认 SIGKILL 路径</span></label>
     <label class="todo"><input type="checkbox"><span class="t">给 stop 加 30s 超时</span></label>
@@ -159,7 +165,7 @@ let streaming = true;
 function toggleSend() {
   const btn = document.getElementById("sendBtn");
   streaming = !streaming;
-  btn.textContent = streaming ? "■" : "▶";
+  btn.innerHTML = streaming ? '<svg class="icon"><use href="#i-stop"/></svg>' : '<svg class="icon"><use href="#i-send"/></svg>';
   btn.className = streaming ? "icon-btn stop" : "icon-btn send";
 }
 document.getElementById("input").addEventListener("keydown", e => {
