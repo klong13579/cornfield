@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-08-16
+
 ### Fixed
 
 - **`RealtimeWsTransport.connect()` rejects after close** (`src/realtime/transport.ts`, `test/realtime-transport.test.ts`): Calling `connect()` after `close()` now throws ("realtime transport is closed, cannot reconnect") instead of silently reopening a zombie socket. Closes the dispose-during-connect race where a quick toggle on/off left a transport reconnecting forever with no controller attached — `connect()` no longer resets `intentionalClose` on a closed transport. 1 new test asserting the throw and that no new connection is attempted.

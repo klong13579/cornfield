@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-08-16
+
 ### Breaking Changes
 
 - **`omp gateway <action>` removed — gateway moved to the standalone `omp-gateway` binary** (`src/cli.ts`): the gateway command is no longer part of `omp`. Use `omp-gateway start|stop|status|reload|doctor|config|cron|service|setup|test-longtask|help` (see docs/gateway-binary-split-plan.md). `omp gateway *` now returns `command not found`. `~/.local/bin/omp` continues to be the agent runtime; the daemon installs at `~/.local/bin/omp-gateway`. Breaking upgrade: re-run `omp-gateway service install` once after installing both binaries.

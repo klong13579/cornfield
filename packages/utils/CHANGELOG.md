@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-08-16
+
 ### Added
 
 - `logger.silenceConsoleLogging()`: silences the winston console transport at runtime (file logging unaffected). Called by the coding-agent interactive TUI before taking over the terminal — raw `level: message` console log lines were corrupting the differential renderer (visible as stray 「info: …」 text in the input area).

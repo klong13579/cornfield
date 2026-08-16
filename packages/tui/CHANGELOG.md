@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-08-16
+
 ### Fixed
 
 - **Dispose-before-clear on Container/Box** (`src/tui.ts`, `src/components/box.ts`): `clear()` / `removeChild()` now call `dispose?.()` on children before dropping them, so Loader and other timer-owning components stop their intervals instead of leaking into the JSC heap after rebuild/handoff. Loader restarts animation when re-added after dispose. See `docs/plans/2026-07-18-length-stall-and-spinner-dispose-design.md`.

@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-08-16
+
 ### Added
 
 - **Evolution V3 (default)**: `learnings` table + `SessionLearner` (one LLM call per session, ≤3 items), `user_explicit` regex path, injection via `/evolution learnings pin|list|search|archive`, projection `learnings.md`.

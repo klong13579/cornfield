@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-08-16
+
 ### Changed
 
 - **P1–P3 tightening (follow-up)**: Research pack filter prefers **URL entity hits**; when any URL matches, claim text alone cannot keep off-topic hosts (fixes OpenClaw kept via “需确认是否与 Hermes/WorkBuddy 相关”). Plan workers **always** drop `web_search` (not only after Research). Compare plan-worker all-tool cap raised **8→16**. Ask synonym map covers `comparison_depth`/`comparison_focus`; answered keys are **pruned** from `missing_inputs` after grill/form Ask. Tool-budget abort notes distinguish plan-worker vs research. Short probe: `bun packages/moa-extension/scripts/short-probe.ts` (Discovery→Research→Ask→Workers, asserts P1–P3, no Rewrite/Synthesis; guards postmortem `exit(1)` from soft-aborted URL reads).
