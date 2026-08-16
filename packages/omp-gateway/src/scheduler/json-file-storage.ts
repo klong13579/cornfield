@@ -11,8 +11,8 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { isEnoent, logger } from "@oh-my-pi/pi-utils";
-import { clearTestRunMarker, readTestRunMarker } from "./test-run-marker";
 import { pruneAllLogs, readExecutionLog } from "./execution-log";
+import { clearTestRunMarker, readTestRunMarker } from "./test-run-marker";
 import type { ScheduledTask, SchedulerStorage, TaskExecution } from "./types";
 import { generateExecutionId, generateTaskId, getSchedulerDir } from "./types";
 
@@ -48,6 +48,14 @@ export class JsonFileStorage implements SchedulerStorage {
 	/** In-memory execution map: id → execution (for in-flight "running" records) */
 	readonly #executions = new Map<string, TaskExecution>();
 	#loaded = false;
+	/**
+	 * mtime+size of jobs.json at last read. Lets {@link #ensureLoaded}
+	 * detect cross-process writes — the CLI edits jobs.json in a separate
+	 * process while the gateway keeps a long-lived instance — without
+	 * re-reading the file on every access. `null` means "never seen" (or
+	 * the file was missing on the last read).
+	 */
+	#lastStat: { mtimeMs: number; size: number } | null = null;
 
 	constructor(jobsPath?: string, maxBackups = 5) {
 		this.#jobsPath = jobsPath ?? defaultJobsPath();
@@ -56,25 +64,60 @@ export class JsonFileStorage implements SchedulerStorage {
 
 	// ── Loading / flushing ──────────────────────────────────────────────
 
-	/** Ensure tasks are loaded from disk. Idempotent on subsequent calls. */
+	/**
+	 * Ensure tasks are loaded from disk. Idempotent on subsequent calls:
+	 * after the first load it stats jobs.json and only re-reads when the
+	 * file changed (mtime or size) since we last saw it. Without this
+	 * change detection a long-lived gateway instance would never see
+	 * tasks added / removed / edited by the CLI (a separate process), and
+	 * its next `#flush()` would silently overwrite those edits with its
+	 * own stale in-memory copy.
+	 *
+	 * Reload failure (corrupt file) keeps the previous task map instead
+	 * of clearing it — a transient bad write must not wipe the
+	 * scheduler's entire state. The stat is left stale on failure so the
+	 * retry happens on the next access once the file is healthy again.
+	 */
 	#ensureLoaded(): void {
-		if (this.#loaded) return;
-		this.#tasks.clear();
+		// Fast path: loaded before and the file hasn't changed since.
+		// Stats are cheap; this is the per-access cost.
+		if (this.#loaded && this.#lastStat !== null) {
+			try {
+				const stat = fs.statSync(this.#jobsPath);
+				if (stat.mtimeMs === this.#lastStat.mtimeMs && stat.size === this.#lastStat.size) {
+					return;
+				}
+			} catch (err) {
+				if (!isEnoent(err)) throw err;
+				// File deleted out from under us: fall through to reload → empty map.
+			}
+		}
 
+		// First load, file changed, or file vanished → reload from disk.
+		const next = new Map<string, ScheduledTask>();
+		let stat: fs.Stats | null = null;
 		try {
+			stat = fs.statSync(this.#jobsPath);
 			const content = fs.readFileSync(this.#jobsPath, "utf-8");
 			const data = JSON.parse(content) as JobsFile;
 			if (data.version !== 1) {
 				logger.warn("Unknown jobs.json version, may be incompatible", { version: data.version });
 			}
 			for (const task of data.tasks) {
-				this.#tasks.set(task.id, task);
+				next.set(task.id, task);
 			}
 		} catch (err) {
 			if (!isEnoent(err)) {
-				logger.warn("Failed to parse jobs.json, starting fresh", { error: String(err) });
+				logger.warn("Failed to parse jobs.json, keeping current task map", { error: String(err) });
+				return; // keep the previous in-memory tasks and lastStat
 			}
 		}
+
+		this.#tasks.clear();
+		for (const [id, task] of next) {
+			this.#tasks.set(id, task);
+		}
+		this.#lastStat = stat ? { mtimeMs: stat.mtimeMs, size: stat.size } : null;
 		this.#loaded = true;
 	}
 
@@ -143,6 +186,12 @@ export class JsonFileStorage implements SchedulerStorage {
 			fs.closeSync(fd);
 		}
 		fs.renameSync(tmpPath, this.#jobsPath);
+
+		// Record the fresh stat so the next #ensureLoaded() treats our own
+		// write as current instead of re-reading it.
+		const stat = fs.statSync(this.#jobsPath);
+		this.#lastStat = { mtimeMs: stat.mtimeMs, size: stat.size };
+		this.#loaded = true;
 
 		// fsync the directory
 		const dirFd = fs.openSync(dir, "r");
@@ -251,9 +300,7 @@ export class JsonFileStorage implements SchedulerStorage {
 		// they're true orphans.
 		const sameProcess = marker.pid === process.pid;
 		const awaitingFireExpired =
-			marker.awaitingFire === true &&
-			marker.expiresAt !== undefined &&
-			Date.now() > marker.expiresAt;
+			marker.awaitingFire === true && marker.expiresAt !== undefined && Date.now() > marker.expiresAt;
 		if (sameProcess && !awaitingFireExpired) {
 			return false;
 		}
@@ -328,6 +375,7 @@ export class JsonFileStorage implements SchedulerStorage {
 	}
 
 	getExecutions(taskId: string, limit = 50): TaskExecution[] {
+		this.#ensureLoaded();
 		const results: TaskExecution[] = [];
 		const seenIds = new Set<string>();
 
