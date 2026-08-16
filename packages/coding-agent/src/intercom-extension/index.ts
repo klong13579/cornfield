@@ -1,8 +1,12 @@
 import { defineTool, type ExtensionAPI, type ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { StringEnum } from "@oh-my-pi/pi-ai";
+import { getAgentDir, isEnoent } from "@oh-my-pi/pi-utils";
 import { randomUUID } from "crypto";
 import { Type } from "@sinclair/typebox";
 import { Text } from "@oh-my-pi/pi-tui";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
+import intercomSkill from "./skills/pi-intercom/SKILL.md" with { type: "text" };
 import { IntercomClient } from "./broker/client";
 import { SessionListOverlay } from "./ui/session-list";
 import { ComposeOverlay, type ComposeResult } from "./ui/compose";
@@ -543,7 +547,27 @@ function getNamePollMs(): number {
 	}
 	return 1000;
 }
+/**
+ * Idempotently install the bundled intercom SKILL.md into the user-level skills
+ * directory so the skill mechanism (`/skill pi-intercom`, discovery) sees it.
+ * Built from the bundled text module — no external file needed at runtime.
+ */
+async function ensureIntercomSkillInstalled(): Promise<void> {
+	const skillDir = path.join(getAgentDir(), "skills", "pi-intercom");
+	try {
+		const existing = await Bun.file(path.join(skillDir, "SKILL.md")).text();
+		if (existing === intercomSkill) return;
+	} catch (err) {
+		if (!isEnoent(err)) {
+			// Non-ENOENT read failure: fall through and attempt the write anyway.
+		}
+	}
+	await fs.mkdir(skillDir, { recursive: true });
+	await Bun.write(path.join(skillDir, "SKILL.md"), intercomSkill);
+}
+
 export default function piIntercomExtension(pi: ExtensionAPI) {
+	void ensureIntercomSkillInstalled();
 	let client: IntercomClient | null = null;
 	const config: IntercomConfig = loadConfig();
 	const askTimeoutMs = getAskTimeoutMs();
