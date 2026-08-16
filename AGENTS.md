@@ -132,7 +132,6 @@ coding-agent              ← main CLI: TUI, 25+ tools, slash commands, modes, s
 Extension products:
   omp-gateway              ← IM channels (DingTalk), scheduler (cron/interval/one-shot), agent bridge
   cognitive-coordination  ← L4 Synapse coordination layer (WIP)
-  swarm-extension         ← multi-agent orchestration
   stats (omp-stats)       ← local observability dashboard
 ```
 
@@ -310,7 +309,7 @@ Then regenerate: `bun --cwd=packages/ai run generate-models`.
 |`issue-NNN-repro.test.ts`|One-shot regression repro (kept long-term as living regression)|
 |`regression-<topic>.test.ts`|Replay-based regression suite|
 
-Tests live in `packages/*/test/`, except `packages/cognitive-coordination` which colocates tests in `src/`. `packages/swarm-extension` has no tests.
+Tests live in `packages/*/test/`, except `packages/cognitive-coordination` which colocates tests in `src/`.
 
 ### Mocking policy
 
@@ -446,8 +445,8 @@ Single workflow, triggered on push to `main`, `v*` tags, PRs, and manual dispatc
 - **Extensibility**: `extensions.md`, `extension-loading.md`, `hooks.md`, `skills.md`, `marketplace.md`, `mcp-config.md`, `mcp-*.md`
 - **Natives**: `natives-architecture.md`, `natives-binding-contract.md`, `natives-addon-loader-runtime.md`, `natives-build-release-debugging.md`
 - **Architecture deep-dive**: `packages/coding-agent/DEVELOPMENT.md` (~1189 lines) — boot sequence, full `src/` tree, orchestration internals.
-- **Self-evolution**: `omp-evolution-architecture-v{2,2.1,3}.md`, `docs/superpowers/`
-- **Gateway**: `hermes-gateway-cron-architecture.md`, `cron-decoupling-design.md`, `packages/omp-gateway/docs/`
+- **Self-evolution**: `docs/omp-evolution-architecture-v3.md`（v2/v2.1 已归档删除，历史在 `docs/moa-development-history.md` 之外）
+- **Gateway**: `packages/omp-gateway/docs/`（含 `hermes-gateway-cron-architecture.md`、`gateway-design-v1.md` 等 6 篇）
 - **L4 Synapse**: `l4-evolution-architecture.md` (root, Chinese), `packages/cognitive-coordination/README.md`
 
 ## Changelog & Release

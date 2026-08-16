@@ -13,7 +13,7 @@ Covers:
 - Persistence guarantees, failure behavior, truncation/blob externalization
 - Storage abstractions (`FileSessionStorage`, `MemorySessionStorage`) and related utilities
 
-Does not cover `/tree` UI rendering behavior beyond semantics that affect session data.
+Does not cover `/tree` UI rendering behavior beyond semantics that affect session data. The in-memory tree model, leaf movement primitives, `/branch` behavior, labels, and extension/hook touchpoints are covered here (merged from the former `session-tree-design.md`); the operator-facing `/tree` command manual lives in `docs/tree.md`.
 
 ## Implementation Files
 
@@ -366,6 +366,83 @@ The underlying model is append-only tree + mutable leaf pointer:
 - `branchWithSummary()` sets leaf to branch target and appends a `branch_summary` entry.
 
 `getEntries()` returns all non-header entries in insertion order. Existing entries are not deleted in normal operation; rewrites preserve logical history while updating representation (migrations, move, targeted rewrite helpers).
+
+### Runtime tree model (`SessionManager`)
+
+The session is stored as an append-only entry log, but runtime behavior is tree-based. Every non-header entry has `id` and `parentId`; the active position is `leafId`. Branching does **not** rewrite history; it only changes where the leaf points before the next append.
+
+Runtime indices:
+
+- `#byId: Map<string, SessionEntry>` — fast lookup for any entry
+- `#leafId: string | null` — current position in the tree
+- `#labelsById: Map<string, string>` — resolved labels by target entry id
+
+Tree APIs:
+
+- `getBranch(fromId?)` walks parent links to root and returns root→node path
+- `getTree()` returns `SessionTreeNode[]` (`entry`, `children`, `label`): parent links become children arrays, entries with missing parents are treated as roots, children sorted oldest→newest by timestamp
+- `getChildren(parentId)` returns direct children
+- `getLabel(id)` resolves current label from `labelsById`
+
+`getTree()` is a runtime projection; persistence remains append-only JSONL entries.
+
+### Leaf movement primitives
+
+1. `branch(entryId)` — validates entry exists, sets `leafId = entryId`, writes nothing. Cannot target `null`; use `resetLeaf()` for root-before-first-entry state.
+2. `resetLeaf()` — sets `leafId = null`; next append creates a new root entry (`parentId = null`).
+3. `branchWithSummary(branchFromId, summary, details?, fromExtension?)` — accepts `branchFromId: string | null`; sets `leafId`, appends a `branch_summary` entry as child of that leaf. When `branchFromId` is `null`, `fromId` is persisted as the literal `"root"`.
+
+### `/branch` behavior (new session file)
+
+`/branch` creates a new session branch file (or in-memory replacement for non-persistent mode), deliberately different from `/tree` (in-file navigation):
+
+- Branch source must be a **user message**. Selected text is extracted for editor prefill.
+- Root user message (`parentId === null`): start a new session via `newSession({ parentSession: previousSessionFile })`.
+- Otherwise: `createBranchedSession(selectedEntry.parentId)` forks history up to the selected prompt boundary.
+
+`SessionManager.createBranchedSession(leafId)` specifics:
+
+- Builds root→leaf path via `getBranch(leafId)`; throws if missing.
+- Excludes existing `label` entries from the copied path.
+- Rebuilds fresh label entries from resolved `labelsById` for entries that remain in path.
+- Persistent mode: writes new JSONL file and switches manager to it; returns new file path.
+- In-memory mode: replaces in-memory entries; returns `undefined`.
+
+### Labels
+
+Label edits in the tree UI (and `appendLabelChange(targetId, label?)`) write `label` entries on the current leaf chain.
+
+- `labelsById` is updated immediately (set or delete); `label: undefined` clears.
+- Empty label clears the resolved label.
+- Labels are stored as append-only `label` entries; tree nodes display resolved state, not raw label-entry history.
+- `getTree()` resolves the current label onto each returned node.
+
+### Extension and hook touchpoints
+
+Command-time extension API (`ExtensionCommandContext`):
+
+- `branch(entryId)` — create branched session file
+- `navigateTree(targetId, { summarize? })` — move within current tree/file
+
+Events around tree navigation:
+
+- `session_before_tree` — receives `TreePreparation` (`targetId`, `oldLeafId`, `commonAncestorId`, `entriesToSummarize`, `userWantsSummary`); may cancel navigation; may provide a summary payload used instead of the built-in summarizer; receives abort `signal` (Escape cancellation path)
+- `session_tree` — emits `newLeafId`, `oldLeafId`; includes `summaryEntry` when a summary was created; `fromExtension` indicates summary origin
+
+Adjacent lifecycle hooks:
+
+- `session_before_branch` / `session_branch` for the `/branch` flow
+- `session_before_compact`, `session.compacting`, `session_compact` for compaction entries that later affect tree-context reconstruction
+
+### Edge conditions
+
+- `branch()` cannot target `null`; use `resetLeaf()`.
+- `branchWithSummary()` supports `null` target and records `fromId: "root"`.
+- Selecting the current leaf in tree selector is a no-op.
+- Summarization requires an active model; if absent, summarize navigation fails fast.
+- If summarization is aborted, navigation is cancelled and the leaf is unchanged.
+- In-memory sessions never return a branch file path from `createBranchedSession`.
+- Tree context reconstruction includes service-tier and MCP tool-selection state, but those entries do not become LLM messages.
 
 ## Context Reconstruction (`buildSessionContext`)
 

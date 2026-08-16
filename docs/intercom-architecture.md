@@ -1,7 +1,7 @@
 # OMP Intercom —— Agent 进程间通信方案与使用说明
 
 > 状态:已实现并接入生产(gateway 内嵌 broker + omp 内置扩展)
-> 关联:`docs/plans/2026-08-14-omp2omp-peers-messaging.md`(早期方案,已由本实现替代)
+> 历史:早期 omp2omp peers 方案(docs/plans/2026-08-14, 已删)由本实现替代,TODO「omp2omp 通信机制」由此达成
 
 ## 1. 目标
 
