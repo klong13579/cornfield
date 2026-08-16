@@ -581,13 +581,18 @@ export function buildIntercomCompletions(
 		}));
 	}
 
-	if (!INTERCOM_TARGET_ACTIONS.has(action)) return [];
 	const rest = trimmed.slice(spaceIdx + 1).trimStart();
-	if (!rest) return [];
+	if (!rest && !action) {
+		// `/intercom ` with empty argument: offer every action (like `/autoresearch `,
+		// but listing the whole action set instead of nothing).
+		return INTERCOM_ACTIONS.map(({ name, description }) => ({ value: name, label: name, description }));
+	}
+	if (!INTERCOM_TARGET_ACTIONS.has(action)) return [];
 	const lower = rest.toLowerCase();
 	return knownSessions
 		.filter(session => session.id !== currentSessionId)
 		.filter(session => {
+			if (!rest) return true; // empty argument: offer the full roster
 			const name = (session.name ?? session.id).toLowerCase();
 			return name.startsWith(lower) || session.id.toLowerCase().startsWith(lower);
 		})
