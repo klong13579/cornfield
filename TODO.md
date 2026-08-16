@@ -9,6 +9,7 @@
 - [ ] session 诊断优化：诊断结果 → learning/nudge/regression 三阶段落地 → topics/session-diagnosis-loop.md
 - [ ] omp 本地增加定时器功能
 - [ ] 测试 todo-write 参数序列化修复
+- [ ] 独立验证者：执行与验证分离，数字员工结果由独立进程验收 → topics/independent-verifier.md
 
 ## 已完成
 
