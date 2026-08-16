@@ -18,8 +18,8 @@
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
-import Transport from "winston-transport";
 import { MESSAGE } from "triple-beam";
+import Transport from "winston-transport";
 
 export interface RotatingFileTransportOptions extends Transport.TransportStreamOptions {
 	/** Directory for log files. */
@@ -190,7 +190,7 @@ export class RotatingFileTransport extends Transport {
 
 		this.#checkDateRotation();
 
-		const line = info[MESSAGE] + "\n";
+		const line = `${info[MESSAGE]}\n`;
 		const lineBytes = Buffer.byteLength(line, "utf-8");
 
 		// Check size rotation BEFORE writing so we don't exceed the limit.

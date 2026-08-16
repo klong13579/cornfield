@@ -507,7 +507,6 @@ describe("extensions discovery", () => {
 		expect(extensions[0]?.commands.get("imported")?.description).toBe("hello world");
 	});
 
-
 	it("loadExtensions only loads explicit paths without discovery", async () => {
 		// Create discoverable extensions (would be found by discoverAndLoadExtensions)
 		fs.writeFileSync(path.join(extensionsDir, "discovered.ts"), extensionCodeWithTool("discovered"));

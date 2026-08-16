@@ -2,12 +2,7 @@ import { describe, expect, it } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import {
-	loadStageRun,
-	requireArtifacts,
-	writeStageArtifacts,
-	type StageRunMeta,
-} from "../src/stage-artifacts";
+import { loadStageRun, requireArtifacts, type StageRunMeta, writeStageArtifacts } from "../src/stage-artifacts";
 import { emptyTco } from "../src/tco";
 import { DEFAULT_OUTPUT_SCHEMA } from "../src/types";
 

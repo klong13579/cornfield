@@ -1,6 +1,6 @@
-import type { MoaOutputSchema, MoaWorkerResult } from "../types";
 import type { ResearchMode } from "../research-mode";
 import { applyResearchSourcesPenalty } from "../research-mode";
+import type { MoaOutputSchema, MoaWorkerResult } from "../types";
 import { DEFAULT_QUALITY_MIN_SCORE, parseWorkerOutputBySchema } from "../worker-parser";
 import { scoreWorkerHeuristicV2 } from "./heuristic";
 import { type JudgeFnArgs, type JudgeResult, shouldJudge } from "./judge";
@@ -40,11 +40,7 @@ export async function applyWorkerQuality(
 	const weights = resolveRoleWeights(result.name, result.role, quality?.roleWeights);
 	const roleKey = resolveRoleKey(result.name, result.role);
 	const heuristic = scoreWorkerHeuristicV2(parsed, schema, weights);
-	const heuristicScore = applyResearchSourcesPenalty(
-		heuristic.score,
-		parsed.sections.sources,
-		researchMode,
-	);
+	const heuristicScore = applyResearchSourcesPenalty(heuristic.score, parsed.sections.sources, researchMode);
 
 	let finalScore = heuristicScore;
 	let source: MoaQualityMeta["source"] = "heuristic";

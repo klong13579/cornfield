@@ -20,7 +20,6 @@ import {
 import { isEnoent, logger } from "@oh-my-pi/pi-utils";
 import { ActionRegistry } from "./action-registry";
 import { AgentBridge, type AgentBridgeOptions } from "./agent-bridge";
-import { IntercomBroker } from "./intercom/broker-server";
 import { createBridgeStatusToolDefinitions } from "./bridge-status-tool";
 import { DingTalkChannel } from "./channels/dingtalk";
 import { ChannelRegistry } from "./channels/registry";
@@ -37,6 +36,7 @@ import { ResponseHandler } from "./gateway-response";
 import { SkillCommand } from "./gateway-skills";
 import { HostToolDispatcher } from "./host-tool-dispatcher";
 import { createDingtalkSendMessageToolDefinitions } from "./host-tools/dingtalk-send-message-tool";
+import { IntercomBroker } from "./intercom/broker-server";
 import { clearRestartSentinel, readRestartSentinel, writeRestartSentinel } from "./restart-sentinel";
 import { createCronToolDefinitions } from "./scheduler/host-tool";
 import { type BridgeStat, type QueueStat, SessionManager } from "./session-manager";
@@ -582,9 +582,7 @@ export class Gateway {
 
 				// Card think filter: agentDir/.omp/config.yml is canonical
 				// (same key as omp TUI); gateway.json is legacy fallback only.
-				channel.setHideThinkingBlock(
-					await resolveHideThinkingBlock(agentDir, account.hideThinkingBlock ?? false),
-				);
+				channel.setHideThinkingBlock(await resolveHideThinkingBlock(agentDir, account.hideThinkingBlock ?? false));
 
 				// Create per-account agent bridge with account-specific config
 				// Model is loaded from agentDir/.omp/config.yml by omp itself
@@ -770,6 +768,7 @@ export class Gateway {
 					try {
 						b.stop();
 					} catch {}
+					return b;
 				}),
 				(() => {
 					try {

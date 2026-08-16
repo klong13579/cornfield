@@ -13,13 +13,13 @@ import {
 	askQuestionsList,
 } from "./ask-user";
 import { filterDecisionMissing, filterMissingAlreadyKnown } from "./decision-missing";
-import { parseGrillQuestion, runGrillAsk, type GrillQuestion, type GrillQuestionContext } from "./grill-ask";
+import { type GrillQuestion, type GrillQuestionContext, parseGrillQuestion, runGrillAsk } from "./grill-ask";
 import { buildWorkerTaskMessage, renderOutputSchemaAsMarkdown } from "./planner";
 import discoveryPromptTemplate from "./prompts/discovery.md" with { type: "text" };
 import grillAskPromptTemplate from "./prompts/grill-ask.md" with { type: "text" };
 import inputCollectPromptTemplate from "./prompts/input-collect.md" with { type: "text" };
-import researchClaimPolishPromptTemplate from "./prompts/research-claim-polish.md" with { type: "text" };
 import researchPromptTemplate from "./prompts/research.md" with { type: "text" };
+import researchClaimPolishPromptTemplate from "./prompts/research-claim-polish.md" with { type: "text" };
 import rewritePromptTemplate from "./prompts/rewrite.md" with { type: "text" };
 import synthesisPromptTemplate from "./prompts/synthesis.md" with { type: "text" };
 import { applyWorkerQuality } from "./quality/apply";
@@ -428,10 +428,7 @@ export function restrictPlanWorkerTools(
  * Research compare tasks are capped; design research looser; local-impl without
  * research still gets a cap so critical doesn't wander forever. 0 = unlimited.
  */
-export function resolvePlanWorkerMaxToolRounds(
-	intent: TaskIntent | undefined,
-	researchMode: ResearchMode,
-): number {
+export function resolvePlanWorkerMaxToolRounds(intent: TaskIntent | undefined, researchMode: ResearchMode): number {
 	if (researchMode !== "none") {
 		if (intent === "compare") return 16;
 		return 12;
@@ -497,8 +494,7 @@ async function runResearchCore(
 	});
 	// Research uses the strong synthesis model by default; prefer researchModel
 	// when set (cheaper/faster for search + pack assembly).
-	const researchModelHint =
-		planOptions.settings.researchModel?.trim() || planOptions.settings.synthesisModel;
+	const researchModelHint = planOptions.settings.researchModel?.trim() || planOptions.settings.synthesisModel;
 	const resolvedModel = resolveModel(researchModelHint, options.modelRegistry);
 	const workerName = "research";
 	const workerRole = "Gather external + repo evidence once for all plan workers";
@@ -642,10 +638,7 @@ async function runAskUserCore(
 	};
 	// Drop definition-style questions before any Ask path (Research owns those).
 	// Also drop keys already present in known_inputs (synonyms included).
-	tco.missing_inputs = filterMissingAlreadyKnown(
-		filterDecisionMissing(tco.missing_inputs),
-		tco.known_inputs,
-	);
+	tco.missing_inputs = filterMissingAlreadyKnown(filterDecisionMissing(tco.missing_inputs), tco.known_inputs);
 
 	const strategy = resolveEffectiveAskStrategy(planOptions.settings.askStrategy, tco, planOptions.task);
 	if (strategy === "grill-me") {

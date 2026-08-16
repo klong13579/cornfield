@@ -68,9 +68,9 @@ export class WriteMemoryTool implements AgentTool<typeof writeMemorySchema, Writ
 	}
 
 	async execute(
-		toolCallId: string,
+		_toolCallId: string,
 		params: Static<typeof writeMemorySchema>,
-		signal?: AbortSignal,
+		_signal?: AbortSignal,
 	): Promise<AgentToolResult<WriteMemoryToolDetails>> {
 		this.#deps.ensureInit(this.#deps.getCwd());
 		const store = this.#deps.getStore();

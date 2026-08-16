@@ -1,6 +1,6 @@
+import type { KeybindingsManager, Theme } from "@oh-my-pi/pi-coding-agent";
 import type { Component, TUI } from "@oh-my-pi/pi-tui";
 import { Ellipsis, truncateToWidth, visibleWidth } from "@oh-my-pi/pi-tui";
-import type { KeybindingsManager, Theme } from "@oh-my-pi/pi-coding-agent";
 import type { IntercomClient } from "../broker/client";
 import type { SessionInfo } from "../types";
 

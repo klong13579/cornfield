@@ -7,9 +7,7 @@ import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/typ
 
 const WAITING_MESSAGE = "Thinking… (esc to interrupt)";
 
-function createAssistantMessage(
-	content: AssistantMessage["content"] = [],
-): AssistantMessage {
+function createAssistantMessage(content: AssistantMessage["content"] = []): AssistantMessage {
 	return {
 		role: "assistant",
 		content,

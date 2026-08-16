@@ -66,8 +66,8 @@ afterEach(() => {
 	vi.restoreAllMocks();
 });
 
-	const BASE = { baseUrl: "https://coder.narwal.com/v1", apiKey: "test-key" };
-	const FAST_ACK = { configAckTimeoutMs: 200 };
+const BASE = { baseUrl: "https://coder.narwal.com/v1", apiKey: "test-key" };
+const FAST_ACK = { configAckTimeoutMs: 200 };
 
 describe("getTranscriptionKind", () => {
 	test("whisper model ids → local", () => {
@@ -128,7 +128,7 @@ describe("createStreamingTranscriber", () => {
 		expect(settled2).toBe(true);
 	});
 
-test("handshake: session.update config after session.created", async () => {
+	test("handshake: session.update config after session.created", async () => {
 		installFakeWs();
 		const onPartial = vi.fn();
 		const onSegment = vi.fn();

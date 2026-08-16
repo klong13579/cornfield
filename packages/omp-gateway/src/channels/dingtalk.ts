@@ -24,7 +24,9 @@ import { DWClient, type DWClientDownStream, TOPIC_CARD, TOPIC_ROBOT } from "ding
 import type {
 	AgentResponseMeta,
 	ChannelConfig,
+	ChannelHealth,
 	DingTalkConfig,
+	DingTalkRawContent,
 	DingTalkRawMessage,
 	ForwardStreamHandlers,
 	InboundMessage,
@@ -32,7 +34,6 @@ import type {
 	OutboundMessage,
 	ReplyFormatterContext,
 	SessionRecord,
-	ChannelHealth,
 } from "../types";
 import {
 	type AICardInstance,
@@ -76,6 +77,12 @@ const CARD_BLOCK_PATCH_THROTTLE_MS = 800;
  * Routed by the gateway's ActionRegistry to the matching session's
  * bridge (e.g. for `type=stop` actions).
  */
+
+/** Extract the text portion of a DingTalk message body (content may be string or rich object). */
+function rawTextOf(raw: DingTalkRawMessage): string {
+	return typeof raw.text?.content === "string" ? raw.text.content : "";
+}
+
 export interface DingTalkCardActionEvent {
 	cardInstanceId: string;
 	actionIds: string[];
@@ -205,7 +212,9 @@ function checkAndMarkDingtalkMessage(
  * as an already-parsed object. This helper handles both cases so callers
  * don't need try/catch around JSON.parse.
  */
-function parseContentField(content: string | Record<string, unknown> | undefined): Record<string, any> {
+function parseContentField(
+	content: string | Record<string, unknown> | DingTalkRawContent | undefined,
+): Record<string, any> {
 	if (!content) return {};
 	if (typeof content === "string") {
 		try {
@@ -234,7 +243,7 @@ export function parseRobotMessage(
 
 	switch (msgtype) {
 		case "text": {
-			const text = raw.text?.content?.trim() || "";
+			const text = rawTextOf(raw).trim();
 			if (!text) {
 				logger.debug("[DingTalk] skipping empty text message", { messageId });
 				return null;
@@ -246,7 +255,7 @@ export function parseRobotMessage(
 		case "markdown": {
 			let markdown = "";
 			const mdParsed = parseContentField(raw.content);
-			markdown = mdParsed.text?.trim() || raw.text?.content?.trim() || "";
+			markdown = mdParsed.text?.trim() || rawTextOf(raw).trim() || "";
 			if (!markdown) {
 				logger.debug("[DingTalk] skipping empty markdown message", { messageId });
 				return null;
@@ -336,8 +345,8 @@ export function parseRobotMessage(
 
 		default: {
 			let text = "";
-			if (raw.text?.content) {
-				text = raw.text.content.trim();
+			if (rawTextOf(raw)) {
+				text = rawTextOf(raw).trim();
 			} else if (raw.content) {
 				const defParsed = parseContentField(raw.content);
 				text = defParsed.text?.trim() || (typeof raw.content === "string" ? raw.content.trim() : "");
@@ -1209,7 +1218,8 @@ export class DingTalkChannel extends BaseChannel {
 						accountId: this.#accountId,
 						conversationId: inbound.conversationId,
 					});
-					segmentText = "\u26a0\ufe0f \u672c\u8f6e\u672a\u751f\u6210\u53ef\u89c1\u56de\u590d\uff0c\u8bf7\u91cd\u8bd5\u3002";
+					segmentText =
+						"\u26a0\ufe0f \u672c\u8f6e\u672a\u751f\u6210\u53ef\u89c1\u56de\u590d\uff0c\u8bf7\u91cd\u8bd5\u3002";
 				}
 			}
 		}
@@ -1802,7 +1812,7 @@ export class DingTalkChannel extends BaseChannel {
 		return socket?.readyState === 1;
 	}
 
-	override getHealth(): ChannelHealth {
+	getHealth(): ChannelHealth {
 		return {
 			connected: this.isConnected(),
 			connectionFailed: this.#connectionFailed,
@@ -1844,7 +1854,7 @@ export class DingTalkChannel extends BaseChannel {
 							atUser: msg.mentions ? { dingtalkIds: msg.mentions } : undefined,
 						};
 
-			const res = await fetch(msg.sessionWebhook, {
+			const res = await fetch(msg.sessionWebhook!, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify(body),
@@ -2230,7 +2240,7 @@ export class DingTalkChannel extends BaseChannel {
 	 * @param originalName — optional display name (defaults to basename of filePath)
 	 */
 	async sendFile(target: AICardTarget, filePath: string, originalName?: string): Promise<void> {
-		return this.#sendFileStandalone(target, filePath, originalName, this.#config);
+		return this.#sendFileStandalone(target, filePath, originalName, this.#config!);
 	}
 
 	/**
@@ -2831,7 +2841,7 @@ export class DingTalkChannel extends BaseChannel {
 				});
 				const { resolveInboundAttachments } = await import("./dingtalk-media");
 				const customDownloader = this.createMediaDownloader() ?? undefined;
-				inbound.attachments = await resolveInboundAttachments(inbound, this.#config, customDownloader);
+				inbound.attachments = await resolveInboundAttachments(inbound, this.#config!, customDownloader);
 				logger.info("[DingTalk] Attachment resolved", {
 					count: inbound.attachments?.length ?? 0,
 					kinds: inbound.attachments?.map(a => a.kind),
@@ -2935,7 +2945,7 @@ export class DingTalkChannel extends BaseChannel {
 		if (needsDownload && this.#config) {
 			const { resolveInboundAttachments } = await import("./dingtalk-media");
 			const customDownloader = this.createMediaDownloader() ?? undefined;
-			inbound.attachments = await resolveInboundAttachments(inbound, this.#config, customDownloader);
+			inbound.attachments = await resolveInboundAttachments(inbound, this.#config!, customDownloader);
 		}
 
 		// ── run the same final step as #handleMessage ──

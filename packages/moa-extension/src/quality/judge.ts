@@ -78,8 +78,8 @@ export function parseJudgeResponse(text: string): JudgeResult {
 		throw new Error("judge score is not a number");
 	}
 	const rationale =
-		typeof (parsed as { rationale?: unknown }).rationale === "string"
-			? (parsed as { rationale: string }).rationale
+		typeof (parsed as unknown as { rationale?: unknown }).rationale === "string"
+			? (parsed as unknown as { rationale: string }).rationale
 			: undefined;
 	return { score, rationale };
 }

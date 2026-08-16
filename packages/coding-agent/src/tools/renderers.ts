@@ -16,8 +16,8 @@ import { astGrepToolRenderer } from "./ast-grep";
 import { bashToolRenderer } from "./bash";
 import { calculatorToolRenderer } from "./calculator";
 import { debugToolRenderer } from "./debug";
-import { githubToolRenderer } from "./gh-renderer";
 import { findToolRenderer } from "./find";
+import { githubToolRenderer } from "./gh-renderer";
 import { inspectImageToolRenderer } from "./inspect-image-renderer";
 import { jobToolRenderer } from "./job";
 import { notebookToolRenderer } from "./notebook";
@@ -29,7 +29,6 @@ import { searchToolRenderer } from "./search";
 import { searchToolBm25Renderer } from "./search-tool-bm25";
 import { sshToolRenderer } from "./ssh";
 import { todoWriteToolRenderer } from "./todo-write";
-import { writeToolRenderer } from "./write";
 
 type ToolRenderer = {
 	renderCall: (args: unknown, options: RenderResultOptions, theme: Theme) => Component;

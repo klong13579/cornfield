@@ -747,7 +747,7 @@ export async function createAICardForTarget(
 		}
 
 		// 2. Deliver card to target
-		const robotCode = config.robotCode ?? config.appKey;
+		const robotCode = config.robotCode ?? config.appKey ?? "";
 		const deliverBody = buildDeliverBody(cardInstanceId, target, robotCode);
 
 		const deliverResp = await fetch(`${DINGTALK_API}/v1.0/card/instances/deliver`, {
@@ -1177,7 +1177,7 @@ export async function finishAICard(card: AICardInstance, data: CardData, config?
 	// Exhausted all retries — surface the last status so the caller can log and
 	// optionally schedule `scheduleDeferredFinishAICard` (do not re-run the agent).
 	const msg = `FINISHED update failed after ${FINISHED_MAX_RETRIES} retries: status=${lastStatus} body=${lastBody}`;
-	logger.error("[AICard] " + msg);
+	logger.error(`[AICard] ${msg}`);
 	throw new Error(msg);
 }
 

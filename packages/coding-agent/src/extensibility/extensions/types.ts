@@ -23,7 +23,16 @@ import type {
 	ToolResultMessage,
 } from "@oh-my-pi/pi-ai";
 import type * as piCodingAgent from "@oh-my-pi/pi-coding-agent";
-import type { AutocompleteItem, Component, EditorComponent, EditorTheme, KeyId, OverlayHandle, OverlayOptions, TUI } from "@oh-my-pi/pi-tui";
+import type {
+	AutocompleteItem,
+	Component,
+	EditorComponent,
+	EditorTheme,
+	KeyId,
+	OverlayHandle,
+	OverlayOptions,
+	TUI,
+} from "@oh-my-pi/pi-tui";
 import type { Static, TSchema } from "@sinclair/typebox";
 import type { Rule } from "../../capability/rule";
 import type { KeybindingsManager } from "../../config/keybindings";
@@ -422,7 +431,6 @@ export type ToolInfo = Pick<ToolDefinition, "name" | "description" | "parameters
 export function defineTool<TParams extends TSchema, TDetails = unknown, TState = unknown>(
 	tool: ToolDefinition<TParams, TDetails, TState>,
 ): ToolDefinition<TParams, TDetails, TState> & AnyToolDefinition {
-	// biome-ignore lint/suspicious/noExplicitAny: intersection with AnyToolDefinition widens to the any-tool shape by design.
 	return tool as ToolDefinition<TParams, TDetails, TState> & AnyToolDefinition;
 }
 
@@ -913,7 +921,7 @@ export function isToolCallEventType(toolName: string, event: ToolCallEvent): boo
 }
 
 /** Union of all event types */
-	export type ExtensionEvent =
+export type ExtensionEvent =
 	| ResourcesDiscoverEvent
 	| SessionEvent
 	| ContextEvent

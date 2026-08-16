@@ -1,5 +1,5 @@
-import { resolve } from "node:path";
 import { realpathSync } from "node:fs";
+import { resolve } from "node:path";
 
 // Normalize a cwd for same-directory comparison. A raw string match ("a === b")
 // hides genuine same-directory peers when two cwd strings differ only by a

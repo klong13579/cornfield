@@ -9,10 +9,9 @@ import { initSchema } from "../src/storage/db";
 import { SqliteEffectivenessStore } from "../src/storage/effectiveness";
 import { SqliteEpisodeStore } from "../src/storage/episodes";
 import { SqliteIntentStore } from "../src/storage/intents";
-import { SqliteProfileStore } from "../src/storage/profiles";
 import { SqliteSkillEffectivenessStore } from "../src/storage/skill-effectiveness";
-import type { SessionTrace } from "../src/types";
-import { UserProfiler } from "../src/user-profiler";
+import type { ProfileStore, SessionTrace } from "../src/types";
+
 import { WorkflowMiner } from "../src/workflow-miner";
 
 describe("v2 end-to-end", () => {
@@ -36,7 +35,7 @@ describe("v2 end-to-end", () => {
 		// Setup stores
 		const episodeStore = new SqliteEpisodeStore(db);
 		const intentStore = new SqliteIntentStore(db);
-		const profileStore = new SqliteProfileStore(db);
+		const _profileStore = { get: async () => null } as ProfileStore;
 		const effectivenessStore = new SqliteEffectivenessStore(db);
 
 		// Create a trace
@@ -88,14 +87,6 @@ describe("v2 end-to-end", () => {
 			source: intentResult.source,
 		});
 
-		// 4. Update profile
-		const profiler = new UserProfiler();
-		profiler.updateProfile(trace, intentResult.intent);
-		const profile = profiler.getProfile();
-		expect(profile.sessionCount).toBe(1);
-		expect(profile.toolFrequency.read).toBe(1);
-		await profileStore.upsert("default", profile);
-
 		// 5. Mine workflow
 		const miner = new WorkflowMiner();
 		const pattern = miner.mine(trace, intentResult.intent);
@@ -108,7 +99,6 @@ describe("v2 end-to-end", () => {
 			maxEpisodes: 10,
 			llmRerank: false,
 			currentIntent: "refactoring",
-			profile,
 		});
 		expect(results.length).toBeGreaterThan(0);
 		expect(results[0]!.episode.id).toBe(episode.id);

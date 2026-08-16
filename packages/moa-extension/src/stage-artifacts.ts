@@ -7,15 +7,7 @@ import { isEnoent } from "@oh-my-pi/pi-utils";
 import type { TaskContextObject } from "./tco";
 import type { MoaOutputSchema, MoaPlanWorker, MoaWorkerResult } from "./types";
 
-export type StageName =
-	| "all"
-	| "discovery"
-	| "ask"
-	| "research"
-	| "rewrite"
-	| "workers"
-	| "synthesis"
-	| "short-probe";
+export type StageName = "all" | "discovery" | "ask" | "research" | "rewrite" | "workers" | "synthesis" | "short-probe";
 
 export interface StageRunMeta {
 	stage: StageName;

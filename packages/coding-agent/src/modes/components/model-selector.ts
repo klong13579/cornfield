@@ -1123,7 +1123,7 @@ export class ModelSelectorComponent extends Container {
 	#handleListInput(keyData: string): void {
 		// Tab/Right/Shift+Tab/Left cycle group tabs (when a group bar exists).
 		// On ALL/CANONICAL there is no group bar, so fall through to provider.
-		if (this.#groupTabBar && this.#groupTabBar.handleInput(keyData)) {
+		if (this.#groupTabBar?.handleInput(keyData)) {
 			return;
 		}
 		if (!this.#groupTabBar && this.#tabBar?.handleInput(keyData)) {

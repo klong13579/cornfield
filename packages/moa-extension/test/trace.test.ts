@@ -438,10 +438,7 @@ describe("buildMoaHandoff — assumptions summary (once-right P4)", () => {
 		expect(handoff).toContain("max_session_length");
 		expect(handoff).toContain("我不确定");
 		// cwd-inferred stays in Known summary, not in Your answers block
-		const answersBlock = handoff.slice(
-			handoff.indexOf("## Your answers"),
-			handoff.indexOf("## Worker conclusions"),
-		);
+		const answersBlock = handoff.slice(handoff.indexOf("## Your answers"), handoff.indexOf("## Worker conclusions"));
 		expect(answersBlock).not.toContain("from_cwd");
 		expect(handoff).toContain('**Known**: from_cwd="repo"');
 		const answersIdx = handoff.indexOf("## Your answers");
@@ -460,13 +457,18 @@ describe("buildMoaHandoff — assumptions summary (once-right P4)", () => {
 				],
 				missing_inputs: [],
 				assumptions: [
-					{ key: "current_compression_impl", value: "unknown", reason: "user_skipped_required", note: "timed out" },
+					{
+						key: "current_compression_impl",
+						value: "unknown",
+						reason: "user_skipped_required",
+						note: "timed out",
+					},
 				],
 			},
 			{ asked: 4, answered: 1, assumed: 1, timedOut: 1 },
 		);
 		expect(line).toContain("Ask 完成（1 答 / 1 默认）");
-		expect(line).toContain("priority_focus=\"长会话体验\"");
+		expect(line).toContain('priority_focus="长会话体验"');
 		expect(line).toContain("current_compression_impl（超时→默认）");
 		expect(line).not.toContain("from_cwd");
 	});

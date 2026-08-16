@@ -18,8 +18,8 @@
  * The self-evolution pipeline will pick it up on the next omp start.
  */
 import * as fs from "node:fs/promises";
-import * as path from "node:path";
 import * as os from "node:os";
+import * as path from "node:path";
 
 export interface TraceWriter {
 	filePath: string;

@@ -23,8 +23,6 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
-import type { Terminal, TerminalAppearance } from "@oh-my-pi/pi-tui";
-import { TUI, Container } from "@oh-my-pi/pi-tui";
 import { _resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { BashExecutionComponent } from "@oh-my-pi/pi-coding-agent/modes/components/bash-execution";
 import { PythonExecutionComponent } from "@oh-my-pi/pi-coding-agent/modes/components/python-execution";
@@ -32,6 +30,8 @@ import { ToolExecutionComponent } from "@oh-my-pi/pi-coding-agent/modes/componen
 import { EventController } from "@oh-my-pi/pi-coding-agent/modes/controllers/event-controller";
 import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
+import type { Terminal, TerminalAppearance } from "@oh-my-pi/pi-tui";
+import { Container, TUI } from "@oh-my-pi/pi-tui";
 
 /** Minimal Terminal implementation for testing — no real stdin/stdout. */
 class MockTerminal implements Terminal {
@@ -166,7 +166,7 @@ describe("EventController abort spinner cleanup", () => {
 		ctx.pendingTools.set("call-1", tool1);
 		ctx.pendingTools.set("call-2", tool2);
 
-		await controller.handleEvent({ type: "agent_end" });
+		await controller.handleEvent({ type: "agent_end", messages: [] });
 
 		// After agent_end, wait 200ms — if spinners are still running,
 		// we'd see 2+ requestRender calls (80ms interval).
@@ -190,7 +190,7 @@ describe("EventController abort spinner cleanup", () => {
 		ctx.bashComponent = new BashExecutionComponent("active cmd", ui, false);
 		ctx.pythonComponent = new PythonExecutionComponent("x = 1", ui, false);
 
-		await controller.handleEvent({ type: "agent_end" });
+		await controller.handleEvent({ type: "agent_end", messages: [] });
 
 		renderSpy.mockClear();
 		await Bun.sleep(200);
@@ -211,7 +211,7 @@ describe("EventController abort spinner cleanup", () => {
 			updateContent: vi.fn(),
 			setUsageInfo: vi.fn(),
 		} as any;
-		ctx.session.isTtsrAbortPending = false;
+		(ctx.session as { isTtsrAbortPending: boolean }).isTtsrAbortPending = false;
 
 		await controller.handleEvent({
 			type: "message_end",
@@ -235,7 +235,7 @@ describe("EventController abort spinner cleanup", () => {
 			updateContent: vi.fn(),
 			setUsageInfo: vi.fn(),
 		} as any;
-		ctx.session.isTtsrAbortPending = false;
+		(ctx.session as { isTtsrAbortPending: boolean }).isTtsrAbortPending = false;
 
 		await controller.handleEvent({
 			type: "message_end",

@@ -95,14 +95,7 @@ afterEach(() => {
 describe("runTestRun corruption guard", () => {
 	test("auto-heals: clean marker + corrupted task → restores snap, clears marker, fires onReload, proceeds", async () => {
 		const task = seedCorruptedTask("weekly-kb-lint");
-		writeTestRunMarker(
-			task,
-			cleanSnapshot,
-			Date.now() - 200_000,
-			corruptMarkerBaseDir,
-			999_999,
-			undefined,
-		);
+		writeTestRunMarker(task, cleanSnapshot, Date.now() - 200_000, corruptMarkerBaseDir, 999_999, undefined);
 
 		let reloadCount = 0;
 		const result = await runTestRun({

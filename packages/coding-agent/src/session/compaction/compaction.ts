@@ -132,7 +132,7 @@ export interface CompactionResult<T = unknown> {
 // Types
 // ============================================================================
 
-	export interface CompactionSettings {
+export interface CompactionSettings {
 	enabled: boolean;
 	strategy?: "context-full" | "handoff" | "off";
 	thresholdPercent?: number;
@@ -225,7 +225,7 @@ export function resolveThresholdTokens(contextWindow: number, settings: Compacti
 	// Model-specific thresholds take highest priority
 	if (modelId && settings.modelThresholds) {
 		const keys = Object.keys(settings.modelThresholds).sort((a, b) => b.length - a.length);
-		const matchedKey = keys.find((key) => modelId.includes(key));
+		const matchedKey = keys.find(key => modelId.includes(key));
 		if (matchedKey !== undefined) {
 			return Math.floor(contextWindow * settings.modelThresholds[matchedKey]);
 		}
@@ -256,7 +256,7 @@ export function resolveKeepRecentTokens(thresholdTokens: number, settings: Compa
 	if (settings.keepRecentTokens > 0) {
 		return settings.keepRecentTokens;
 	}
-	return Math.floor(thresholdTokens * (settings.targetRatio ?? 0.20));
+	return Math.floor(thresholdTokens * (settings.targetRatio ?? 0.2));
 }
 
 // ============================================================================

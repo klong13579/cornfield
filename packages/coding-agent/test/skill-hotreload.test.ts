@@ -113,7 +113,6 @@ Static skill content.
 					filePath: path.join(skillDir, "SKILL.md"),
 					baseDir: skillDir,
 					source: "native:user",
-					content: "Static skill content.",
 				},
 			],
 		});

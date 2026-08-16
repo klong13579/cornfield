@@ -158,7 +158,6 @@ import {
 	estimateTokens,
 	generateBranchSummary,
 	prepareCompaction,
-	type CompactionSettings,
 	resolveKeepRecentTokens,
 	resolveThresholdTokens,
 	shouldCompact,
@@ -3945,11 +3944,13 @@ export class AgentSession {
 		if (isChanging) {
 			this.sessionManager.appendThinkingLevelChange(effectiveLevel);
 			// Surface thinking-level changes to extensions (pi-compatible thinking_level_select event).
-			void this.#extensionRunner?.emit({
-				type: "thinking_level_select",
-				level: effectiveLevel ?? ThinkingLevel.Inherit,
-				previousLevel: previousLevel ?? ThinkingLevel.Inherit,
-			}).catch(() => undefined);
+			void this.#extensionRunner
+				?.emit({
+					type: "thinking_level_select",
+					level: effectiveLevel ?? ThinkingLevel.Inherit,
+					previousLevel: previousLevel ?? ThinkingLevel.Inherit,
+				})
+				.catch(() => undefined);
 			if (persist && effectiveLevel !== undefined && effectiveLevel !== ThinkingLevel.Off) {
 				this.settings.set("defaultThinkingLevel", effectiveLevel);
 			}
@@ -4780,12 +4781,14 @@ export class AgentSession {
 		}
 		this.agent.setModel(model);
 		// Surface model changes to extensions (pi-compatible model_select event).
-		void this.#extensionRunner?.emit({
-			type: "model_select",
-			model,
-			previousModel: currentModel,
-			source,
-		}).catch(() => undefined);
+		void this.#extensionRunner
+			?.emit({
+				type: "model_select",
+				model,
+				previousModel: currentModel,
+				source,
+			})
+			.catch(() => undefined);
 	}
 
 	#closeCodexProviderSessionsForHistoryRewrite(): void {

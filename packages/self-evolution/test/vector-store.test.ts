@@ -66,9 +66,9 @@ describe("VectorStore", () => {
 			id: "test-1",
 			namespace: "raw_memory",
 			content: "test content",
+			updatedAt: Date.now(),
 			embedding: vec,
 			createdAt: Date.now(),
-			updatedAt: Date.now(),
 		});
 
 		expect(store.count()).toBe(1);

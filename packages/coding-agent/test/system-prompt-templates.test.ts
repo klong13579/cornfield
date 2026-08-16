@@ -290,8 +290,10 @@ describe("system Handlebars prompt templates", () => {
 		const rendered = await buildSystemPrompt({
 			cwd: os.tmpdir(),
 			contextFiles: [{ path: "/tmp/project/AGENTS.md", content: agentsMd }],
-			skills: baseRenderContext.skills as Array<{ name: string; description: string }>,
-			rules: baseRenderContext.rules as Array<{ name: string; description: string; globs: string[] }>,
+			skills: (baseRenderContext.skills ?? []) as unknown as [import("../src/extensibility/skills").Skill],
+			rules: (baseRenderContext.rules ?? []) as unknown as
+				| { name: string; description?: string; path: string; globs?: string[] }[]
+				| undefined,
 			toolNames: baseRenderContext.tools as string[],
 			appendSystemPrompt: "Appendix instructions",
 			alwaysApplyRules: [
@@ -311,8 +313,10 @@ describe("system Handlebars prompt templates", () => {
 		const rendered = await buildSystemPrompt({
 			cwd: os.tmpdir(),
 			contextFiles: [],
-			skills: baseRenderContext.skills as Array<{ name: string; description: string }>,
-			rules: baseRenderContext.rules as Array<{ name: string; description: string; globs: string[] }>,
+			skills: (baseRenderContext.skills ?? []) as unknown as [import("../src/extensibility/skills").Skill],
+			rules: (baseRenderContext.rules ?? []) as unknown as
+				| { name: string; description?: string; path: string; globs?: string[] }[]
+				| undefined,
 			toolNames: baseRenderContext.tools as string[],
 			appendSystemPrompt: "Appendix instructions",
 			alwaysApplyRules: [

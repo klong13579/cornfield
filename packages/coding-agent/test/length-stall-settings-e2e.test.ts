@@ -23,7 +23,7 @@ type AgentGroup = {
 	"lengthStall.maxConsecutive": number;
 };
 
-function asAgent(g: Record<string, unknown>): AgentGroup {
+function asAgent(g: unknown): AgentGroup {
 	return g as unknown as AgentGroup;
 }
 

@@ -35,7 +35,7 @@ type StreamingGroup = {
 	"doomLoop.maxThinkingCharsByModel": Record<string, number>;
 };
 
-function asStreaming(g: Record<string, unknown>): StreamingGroup {
+function asStreaming(g: unknown): StreamingGroup {
 	return g as unknown as StreamingGroup;
 }
 

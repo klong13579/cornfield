@@ -1,3 +1,5 @@
+import * as path from "node:path";
+import { isEnoent } from "@oh-my-pi/pi-utils";
 import { mergeMissingInputs } from "./merge-missing";
 import { rebindWorkerPrompts } from "./planner";
 import { enrichSchemaWithSources, renderResearchGuidance, resolveResearchMode } from "./research-mode";
@@ -18,8 +20,6 @@ import {
 } from "./stages";
 import { formatMoaStatusBar, type MoaStatusBarInput } from "./status-bar";
 import { createWorkerStreamSink } from "./stream-ui";
-import * as path from "node:path";
-import { isEnoent } from "@oh-my-pi/pi-utils";
 import { renderTcoForPrompt } from "./tco";
 import { formatDuration, formatTimingSummary, StageClock } from "./timing";
 import { formatPreWorkerAskNotify } from "./trace";
@@ -207,10 +207,8 @@ export async function executePlan(plan: MoaPlan, options: ExecutePlanOptions): P
 					formatDuration(researchMs),
 			);
 		} else {
-			const detail = researchWorker?.stderr?.trim()
-				? `（${researchWorker.stderr.trim().slice(0, 120)}）`
-				: "";
-			notify("调研未产出可用证据，worker 将自行判断" + detail + " · " + formatDuration(researchMs), "warning");
+			const detail = researchWorker?.stderr?.trim() ? `（${researchWorker.stderr.trim().slice(0, 120)}）` : "";
+			notify(`调研未产出可用证据，worker 将自行判断${detail} · ${formatDuration(researchMs)}`, "warning");
 		}
 	}
 
@@ -289,7 +287,7 @@ export async function executePlan(plan: MoaPlan, options: ExecutePlanOptions): P
 			"warning",
 		);
 	} else if (rewriteResult?.ok) {
-		notify("改写完成 ✓ 已定制 " + baseWorkers.length + " 个 worker 提示 · " + formatDuration(rewriteMs));
+		notify(`改写完成 ✓ 已定制 ${baseWorkers.length} 个 worker 提示 · ${formatDuration(rewriteMs)}`);
 	} else if (rewriteResult && !rewriteResult.ok && planOptions.settings.rewriteEnabled) {
 		notify(
 			"改写跳过（" +
@@ -299,7 +297,7 @@ export async function executePlan(plan: MoaPlan, options: ExecutePlanOptions): P
 			"warning",
 		);
 	} else {
-		notify("改写已禁用，使用默认提示 · " + formatDuration(rewriteMs));
+		notify(`改写已禁用，使用默认提示 · ${formatDuration(rewriteMs)}`);
 	}
 
 	let roundAskLive: LiveStageHandle | undefined;
@@ -322,13 +320,13 @@ export async function executePlan(plan: MoaPlan, options: ExecutePlanOptions): P
 			notify,
 			onWorkerPartial: streamSink ? chunk => streamSink.onPartial(chunk) : undefined,
 			formatWorkersDone: (okCount, total, workersMs) =>
-				"Worker 完成 " + okCount + "/" + total + " ✓ · " + formatDuration(workersMs),
+				`Worker 完成 ${okCount}/${total} ✓ · ${formatDuration(workersMs)}`,
 			onRoundWorkers: ({ round, maxRounds, baseWorkers: bw }) =>
 				startLiveStage({
 					clock,
 					key: `workers_r${round}`,
 					hasUI,
-					workingBase: "MOA: worker 执行中 — " + bw.length + " 个并发…",
+					workingBase: `MOA: worker 执行中 — ${bw.length} 个并发…`,
 					statusBase: {
 						round,
 						maxRounds,
@@ -459,7 +457,7 @@ export async function executePlan(plan: MoaPlan, options: ExecutePlanOptions): P
 	);
 	const synthesisMs = synthesisLive.stop();
 	clearMoaStatus();
-	notify("MOA 完成 ✓ · " + formatDuration(synthesisMs));
+	notify(`MOA 完成 ✓ · ${formatDuration(synthesisMs)}`);
 
 	return finishWithTimings({
 		plan: finalPlan,

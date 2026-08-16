@@ -1,7 +1,7 @@
 /**
  * Quick SSRF check test — run with: bun test packages/coding-agent/test/ssrf-check.test.ts
  */
-import { test, expect } from "bun:test";
+import { expect, test } from "bun:test";
 import { checkUrlSsrf } from "../src/web/scrapers/types";
 
 const testCases = [

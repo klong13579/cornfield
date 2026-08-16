@@ -220,7 +220,7 @@ export function buildMoaArchiveEntries(input: {
 	return { manifest, chunks };
 }
 
-function isArchiveEntry(entry: unknown): entry is MoaArchiveManifest | MoaArchiveChunk {
+function isArchiveEntry(entry: unknown): entry is { details: MoaArchiveManifest | MoaArchiveChunk } {
 	if (!entry || typeof entry !== "object") return false;
 	const candidate = entry as { type?: unknown; customType?: unknown; details?: unknown };
 	if (candidate.type !== "custom_message" || candidate.customType !== MOA_ARCHIVE_ENTRY_TYPE) return false;
@@ -242,7 +242,7 @@ export function reconstructMoaArchive(
 	const chunksByRun = new Map<string, MoaArchiveChunk[]>();
 	for (const entry of entries) {
 		if (!isArchiveEntry(entry)) continue;
-		const data = entry.details as MoaArchiveManifest | MoaArchiveChunk;
+		const data = entry.details;
 		if (data.kind === "manifest") {
 			manifests.push(data);
 		} else {
@@ -265,7 +265,7 @@ export function listMoaArchiveRuns(entries: unknown[]): MoaArchiveManifest[] {
 	const manifests: MoaArchiveManifest[] = [];
 	for (const entry of entries) {
 		if (!isArchiveEntry(entry)) continue;
-		const data = entry.details as MoaArchiveManifest | MoaArchiveChunk;
+		const data = entry.details;
 		if (data.kind === "manifest") manifests.push(data);
 	}
 	return manifests;
@@ -321,10 +321,7 @@ export function formatPreWorkerAskNotify(
 	if (parts.length === 0) {
 		return askSummary?.asked ? "Ask 完成，启动 worker…" : "启动 worker…";
 	}
-	const stats =
-		askSummary && askSummary.asked > 0
-			? `（${askSummary.answered} 答 / ${askSummary.assumed} 默认）`
-			: "";
+	const stats = askSummary && askSummary.asked > 0 ? `（${askSummary.answered} 答 / ${askSummary.assumed} 默认）` : "";
 	return `Ask 完成${stats} → 启动 worker：${parts.join("；")}`;
 }
 

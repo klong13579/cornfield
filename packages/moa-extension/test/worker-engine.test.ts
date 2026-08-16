@@ -1,12 +1,12 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
+import { afterEach, describe, expect, it, vi } from "bun:test";
 import type { AuthStorage, ModelRegistry, Settings } from "@oh-my-pi/pi-coding-agent";
 import * as codingAgent from "@oh-my-pi/pi-coding-agent";
 import { executePlan } from "../src/executor";
+import { buildPlan } from "../src/planner";
 import { resolveSettings } from "../src/settings";
-import { type WorkerOutput } from "../src/subprocess";
+import type { WorkerOutput } from "../src/subprocess";
 import type { MoaWorkerEngine } from "../src/worker-engine";
 import * as workerEngine from "../src/worker-engine";
-import { buildPlan } from "../src/planner";
 
 // ============================================================================
 // Worker engine factory — dispatch test
@@ -135,10 +135,10 @@ describe("executePlan — in-process mode dispatch", () => {
 
 	it("in-process with discovery: discovery engine.execute has tools=none", async () => {
 		const createEngineSpy = vi.spyOn(workerEngine, "createWorkerEngine");
-		let callCount = 0;
+		let _callCount = 0;
 		const fakeEngine: MoaWorkerEngine = {
 			execute: vi.fn(() => {
-				callCount++;
+				_callCount++;
 				return Promise.resolve(makeStubWorkerOutput({ output: conformingOutput("ok"), model: "test/model" }));
 			}),
 		};
@@ -268,9 +268,7 @@ describe("in-process — executor contract equivalence (subprocess vs in-process
 	it("both modes produce the same MoaExecutionResult shape", async () => {
 		// Run the plan through both subprocess and in-process engines.
 		// We mock execute to return identical outputs regardless of mode.
-		const executeStub = vi.fn().mockResolvedValue(
-			makeStubWorkerOutput({ output: conformingOutput("worker") }),
-		);
+		const executeStub = vi.fn().mockResolvedValue(makeStubWorkerOutput({ output: conformingOutput("worker") }));
 
 		const createEngineSpy = vi.spyOn(workerEngine, "createWorkerEngine");
 
@@ -322,7 +320,11 @@ describe("in-process — executor contract equivalence (subprocess vs in-process
 		createEngineSpy.mockReturnValue(successEngine);
 
 		const plan = buildPlan("Exit code test", resolveSettings());
-		const moaSettings = resolveSettings({ workerExecutionMode: "in-process", discoveryEnabled: false, rewriteEnabled: false });
+		const moaSettings = resolveSettings({
+			workerExecutionMode: "in-process",
+			discoveryEnabled: false,
+			rewriteEnabled: false,
+		});
 		const result = await executePlan(plan, {
 			cwd: "/tmp/moa",
 			authStorage: {} as AuthStorage,

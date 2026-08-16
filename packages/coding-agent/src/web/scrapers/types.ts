@@ -1,10 +1,11 @@
 /**
  * Shared types and utilities for web-fetch handlers
  */
+
+import * as dns from "node:dns/promises";
 import { ptree } from "@oh-my-pi/pi-utils";
 import TurndownService from "turndown";
 import { gfm } from "turndown-plugin-gfm";
-import * as dns from "node:dns/promises";
 import { ToolAbortError } from "../../tools/tool-errors";
 
 export { formatNumber } from "@oh-my-pi/pi-utils";
@@ -81,11 +82,7 @@ export interface LoadPageResult {
  * Always-blocked hostnames — cloud metadata endpoints that have no legitimate
  * agent fetch target under any configuration.
  */
-const ALWAYS_BLOCKED_HOSTNAMES = new Set([
-	"metadata.google.internal",
-	"metadata.goog",
-	"metadata.tencentyun.com",
-]);
+const ALWAYS_BLOCKED_HOSTNAMES = new Set(["metadata.google.internal", "metadata.goog", "metadata.tencentyun.com"]);
 
 /**
  * Check whether a URL targets a private/internal/forbidden network address.
@@ -162,12 +159,12 @@ function isPrivateOrBlockedIp(ip: string): string | null {
 	if (ipv4 === -1) return null; // Not a valid IPv4 address
 
 	if (
-		(ipv4 >= 0x0a000000 && ipv4 <= 0x0affffff) ||   // 10.0.0.0/8
-		(ipv4 >= 0xac100000 && ipv4 <= 0xac1fffff) ||   // 172.16.0.0/12
-		(ipv4 >= 0xc0a80000 && ipv4 <= 0xc0a8ffff) ||   // 192.168.0.0/16
-		(ipv4 >= 0x64400000 && ipv4 <= 0x647fffff) ||   // 100.64.0.0/10 (CGNAT)
-		(ipv4 >= 0xa9fe0000 && ipv4 <= 0xa9feffff) ||   // 169.254.0.0/16 (link-local)
-		(ipv4 >= 0x7f000000 && ipv4 <= 0x7fffffff)      // 127.0.0.0/8 (loopback)
+		(ipv4 >= 0x0a000000 && ipv4 <= 0x0affffff) || // 10.0.0.0/8
+		(ipv4 >= 0xac100000 && ipv4 <= 0xac1fffff) || // 172.16.0.0/12
+		(ipv4 >= 0xc0a80000 && ipv4 <= 0xc0a8ffff) || // 192.168.0.0/16
+		(ipv4 >= 0x64400000 && ipv4 <= 0x647fffff) || // 100.64.0.0/10 (CGNAT)
+		(ipv4 >= 0xa9fe0000 && ipv4 <= 0xa9feffff) || // 169.254.0.0/16 (link-local)
+		(ipv4 >= 0x7f000000 && ipv4 <= 0x7fffffff) // 127.0.0.0/8 (loopback)
 	) {
 		return "private network address";
 	}
@@ -184,18 +181,27 @@ function addressToInt(ip: string): number {
 	}
 	// >>> 0 converts signed int32 to unsigned, making range comparisons correct
 	return (
-		(Number.parseInt(parts[0]!, 10) << 24) |
-		(Number.parseInt(parts[1]!, 10) << 16) |
-		(Number.parseInt(parts[2]!, 10) << 8) |
-		Number.parseInt(parts[3]!, 10)
-	) >>> 0;
+		((Number.parseInt(parts[0]!, 10) << 24) |
+			(Number.parseInt(parts[1]!, 10) << 16) |
+			(Number.parseInt(parts[2]!, 10) << 8) |
+			Number.parseInt(parts[3]!, 10)) >>>
+		0
+	);
 }
 
 /**
  * Fetch a page with timeout and size limit
  */
 export async function loadPage(url: string, options: LoadPageOptions = {}): Promise<LoadPageResult> {
-	const { timeout = 20, headers = {}, maxBytes = MAX_BYTES, signal, method = "GET", body, blockPrivateUrls = true } = options;
+	const {
+		timeout = 20,
+		headers = {},
+		maxBytes = MAX_BYTES,
+		signal,
+		method = "GET",
+		body,
+		blockPrivateUrls = true,
+	} = options;
 
 	// SSRF check — block requests to private/internal IPs before any network call
 	if (blockPrivateUrls) {

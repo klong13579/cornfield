@@ -161,7 +161,8 @@ export class ListenController {
 			return this.#shortModelName(recordModel);
 		}
 		// Local whisper path: use record.model if set, else stt.modelName
-		const model = recordModel ?? (settings.get("stt.modelName") as string | undefined) ?? "mlx-community/whisper-large-v3-turbo";
+		const model =
+			recordModel ?? (settings.get("stt.modelName") as string | undefined) ?? "mlx-community/whisper-large-v3-turbo";
 		return this.#shortModelName(model);
 	}
 
@@ -311,7 +312,7 @@ export class ListenController {
 			this.#setState("idle");
 			return;
 		}
-			try {
+		try {
 			await handle.stop();
 			await verifyRecordingFile(tempFile);
 			this.#setState("transcribing");
@@ -321,9 +322,7 @@ export class ListenController {
 			const savedFile = await this.#saveText(text, description, tempFile);
 			this.#setState("idle");
 			const modelLabel = this.#lastUsedModel ?? "";
-			this.#showStatus(
-				`${savedFile.replace(os.homedir(), "~")} （${modelLabel}）`,
-			);
+			this.#showStatus(`${savedFile.replace(os.homedir(), "~")} （${modelLabel}）`);
 		} catch (err) {
 			this.#setState("idle");
 			this.#showStatus(""); // Clear the "Transcribing audio..." status
@@ -354,9 +353,7 @@ export class ListenController {
 			const savedFile = await this.#saveText(text, description ?? path.basename(filePath, path.extname(filePath)));
 			this.#setState("idle");
 			const modelLabel = this.#lastUsedModel ?? "";
-			this.#showStatus(
-				`${savedFile.replace(os.homedir(), "~")} （${modelLabel}）`,
-			);
+			this.#showStatus(`${savedFile.replace(os.homedir(), "~")} （${modelLabel}）`);
 		} catch (err) {
 			this.#setState("idle");
 			this.#showStatus(""); // Clear the "Transcribing audio file..." status
@@ -410,10 +407,7 @@ export class ListenController {
 		return name.includes("/") ? name.split("/").pop()! : name;
 	}
 
-	async #doTranscribe(
-		audioPath: string,
-		onProgress?: (p: TranscribeProgress) => void,
-	): Promise<string> {
+	async #doTranscribe(audioPath: string, onProgress?: (p: TranscribeProgress) => void): Promise<string> {
 		const recordModel = settings.get("record.model") as string | undefined;
 		const language = settings.get("stt.language") as string | undefined;
 
@@ -426,7 +420,9 @@ export class ListenController {
 		}
 
 		// API-based transcription via the configured record.model
-		this.#lastUsedModel = this.#shortModelName(recordModel);
+		// isLocalWhisperModel(undefined) === true guarantees this branch only runs
+		// when recordModel is non-empty (see #isLocalWhisperModel).
+		this.#lastUsedModel = this.#shortModelName(recordModel!);
 		// Parse the model string to extract the provider. If the model is specified
 		// as "provider/modelId" (e.g. "narwal-plan/qwen-audio-3.0-realtime-flash"), use
 		// that provider. Otherwise default to "narwal-plan" — the only bench-verified

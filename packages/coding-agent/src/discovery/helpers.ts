@@ -526,9 +526,7 @@ export async function discoverExtensionModulePaths(_ctx: LoadContext, dir: strin
 			const entries = await readDirEntries(resolvedExtPath);
 			let finalPath = resolvedExtPath;
 			if (entries.length !== 0) {
-				const indexFile = entries.find(
-					e => e.isFile() && (e.name === "index.ts" || e.name === "index.js"),
-				)?.name;
+				const indexFile = entries.find(e => e.isFile() && (e.name === "index.ts" || e.name === "index.js"))?.name;
 				if (indexFile) finalPath = path.join(resolvedExtPath, indexFile);
 			}
 			const content = await readFile(finalPath);

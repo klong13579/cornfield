@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
-import * as os from "node:os";
 import * as fs from "node:fs/promises";
+import * as os from "node:os";
 import * as path from "node:path";
 import type { AgentTool, AgentToolContext, AgentToolResult, AgentToolUpdateCallback } from "@oh-my-pi/pi-agent-core";
 import type { ImageContent, TextContent } from "@oh-my-pi/pi-ai";
@@ -460,7 +460,7 @@ async function extractImagesFromMarkdown(
 	let match: RegExpExecArray | null;
 	const replacements: Array<{ full: string; replacement: string }> = [];
 
-	while ((match = imageRefRe.exec(markdown)) !== null) {
+	for (match = imageRefRe.exec(markdown); match !== null; match = imageRefRe.exec(markdown)) {
 		const [fullMatch, altText, imgPath] = match;
 		// Only handle local file paths (not URLs or data URIs)
 		if (imgPath.startsWith("http://") || imgPath.startsWith("https://") || imgPath.startsWith("data:")) {
@@ -1008,345 +1008,353 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 		const promise = (async () => {
 			const displayMode = resolveFileDisplayMode(this.session);
 
-		// Handle internal URLs (agent://, artifact://, memory://, skill://, rule://, local://, mcp://)
-		const internalRouter = this.session.internalRouter;
-		if (internalRouter?.canHandle(readPath)) {
-			const parsed = parseSel(sel);
-			const { offset, limit } = selToOffsetLimit(parsed);
-			return this.#handleInternalUrl(readPath, offset, limit);
-		}
-
-		const parsedUrlTarget = parseReadUrlTarget(readPath, sel);
-		if (parsedUrlTarget) {
-			if (!this.session.settings.get("fetch.enabled")) {
-				throw new ToolError("URL reads are disabled by settings.");
+			// Handle internal URLs (agent://, artifact://, memory://, skill://, rule://, local://, mcp://)
+			const internalRouter = this.session.internalRouter;
+			if (internalRouter?.canHandle(readPath)) {
+				const parsed = parseSel(sel);
+				const { offset, limit } = selToOffsetLimit(parsed);
+				return this.#handleInternalUrl(readPath, offset, limit);
 			}
-			if (parsedUrlTarget.offset !== undefined || parsedUrlTarget.limit !== undefined) {
-				const cached = await loadReadUrlCacheEntry(
+
+			const parsedUrlTarget = parseReadUrlTarget(readPath, sel);
+			if (parsedUrlTarget) {
+				if (!this.session.settings.get("fetch.enabled")) {
+					throw new ToolError("URL reads are disabled by settings.");
+				}
+				if (parsedUrlTarget.offset !== undefined || parsedUrlTarget.limit !== undefined) {
+					const cached = await loadReadUrlCacheEntry(
+						this.session,
+						{ path: parsedUrlTarget.path, timeout, raw: parsedUrlTarget.raw },
+						signal,
+						{
+							ensureArtifact: true,
+							preferCached: true,
+						},
+					);
+					return this.#buildInMemoryTextResult(cached.output, parsedUrlTarget.offset, parsedUrlTarget.limit, {
+						details: { ...cached.details },
+						sourceUrl: cached.details.finalUrl,
+						entityLabel: "URL output",
+					});
+				}
+				return executeReadUrl(
 					this.session,
 					{ path: parsedUrlTarget.path, timeout, raw: parsedUrlTarget.raw },
 					signal,
-					{
-						ensureArtifact: true,
-						preferCached: true,
-					},
 				);
-				return this.#buildInMemoryTextResult(cached.output, parsedUrlTarget.offset, parsedUrlTarget.limit, {
-					details: { ...cached.details },
-					sourceUrl: cached.details.finalUrl,
-					entityLabel: "URL output",
-				});
 			}
-			return executeReadUrl(this.session, { path: parsedUrlTarget.path, timeout, raw: parsedUrlTarget.raw }, signal);
-		}
 
-		const localReadPath = readPath;
-		const parsed = parseSel(sel);
+			const localReadPath = readPath;
+			const parsed = parseSel(sel);
 
-		const archivePath = await this.#resolveArchiveReadPath(localReadPath, signal);
-		if (archivePath) {
-			const { offset, limit } = selToOffsetLimit(parsed);
-			return this.#readArchive(readPath, offset, limit, archivePath, signal, { raw: parsed.kind === "raw" });
-		}
+			const archivePath = await this.#resolveArchiveReadPath(localReadPath, signal);
+			if (archivePath) {
+				const { offset, limit } = selToOffsetLimit(parsed);
+				return this.#readArchive(readPath, offset, limit, archivePath, signal, { raw: parsed.kind === "raw" });
+			}
 
-		const sqlitePath = await this.#resolveSqliteReadPath(readPath, signal);
-		if (sqlitePath) {
-			return this.#readSqlite(sel, sqlitePath, signal);
-		}
+			const sqlitePath = await this.#resolveSqliteReadPath(readPath, signal);
+			if (sqlitePath) {
+				return this.#readSqlite(sel, sqlitePath, signal);
+			}
 
-		let absolutePath = resolveReadPath(localReadPath, this.session.cwd);
-		let suffixResolution: { from: string; to: string } | undefined;
+			let absolutePath = resolveReadPath(localReadPath, this.session.cwd);
+			let suffixResolution: { from: string; to: string } | undefined;
 
-		let isDirectory = false;
-		let fileSize = 0;
-		try {
-			const stat = await Bun.file(absolutePath).stat();
-			fileSize = stat.size;
-			isDirectory = stat.isDirectory();
-		} catch (error) {
-			if (isNotFoundError(error)) {
-				// Attempt unique suffix resolution before falling back to fuzzy suggestions
-				if (!isRemoteMountPath(absolutePath)) {
-					const suffixMatch = await findUniqueSuffixMatch(localReadPath, this.session.cwd, signal);
-					if (suffixMatch) {
-						try {
-							const retryStat = await Bun.file(suffixMatch.absolutePath).stat();
-							absolutePath = suffixMatch.absolutePath;
-							fileSize = retryStat.size;
-							isDirectory = retryStat.isDirectory();
-							suffixResolution = { from: localReadPath, to: suffixMatch.displayPath };
-						} catch {
-							// Suffix match candidate no longer stats — fall through to error path
+			let isDirectory = false;
+			let fileSize = 0;
+			try {
+				const stat = await Bun.file(absolutePath).stat();
+				fileSize = stat.size;
+				isDirectory = stat.isDirectory();
+			} catch (error) {
+				if (isNotFoundError(error)) {
+					// Attempt unique suffix resolution before falling back to fuzzy suggestions
+					if (!isRemoteMountPath(absolutePath)) {
+						const suffixMatch = await findUniqueSuffixMatch(localReadPath, this.session.cwd, signal);
+						if (suffixMatch) {
+							try {
+								const retryStat = await Bun.file(suffixMatch.absolutePath).stat();
+								absolutePath = suffixMatch.absolutePath;
+								fileSize = retryStat.size;
+								isDirectory = retryStat.isDirectory();
+								suffixResolution = { from: localReadPath, to: suffixMatch.displayPath };
+							} catch {
+								// Suffix match candidate no longer stats — fall through to error path
+							}
 						}
 					}
-				}
 
-				if (!suffixResolution) {
-					throw new ToolError(`Path '${localReadPath}' not found. Use \`find\` or \`search\` to discover the correct path.`);
-				}
-			} else {
-				throw error;
-			}
-		}
-
-		if (isDirectory) {
-			const dirResult = await this.#readDirectory(absolutePath, selToOffsetLimit(parsed).limit, signal);
-			if (suffixResolution) {
-				dirResult.details ??= {};
-				dirResult.details.suffixResolution = suffixResolution;
-			}
-			return dirResult;
-		}
-
-		const imageMetadata = await readImageMetadata(absolutePath);
-		const mimeType = imageMetadata?.mimeType;
-		const ext = path.extname(absolutePath).toLowerCase();
-		const _hasEditTool = this.session.hasEditTool ?? true;
-		const _language = getLanguageFromPath(absolutePath);
-		const shouldConvertWithMarkit = CONVERTIBLE_EXTENSIONS.has(ext) || (ext === ".ipynb" && parsed.kind === "raw");
-		// Read the file based on type
-		let content: Array<TextContent | ImageContent>;
-		let details: ReadToolDetails = {};
-		let sourcePath: string | undefined;
-		let truncationInfo:
-			| { result: TruncationResult; options: { direction: "head"; startLine?: number; totalFileLines?: number } }
-			| undefined;
-
-		if (mimeType) {
-			if (this.#inspectImageEnabled) {
-				const metadata = imageMetadata;
-				const outputMime = metadata?.mimeType ?? mimeType;
-				const outputBytes = fileSize;
-				const metadataLines = [
-					"Image metadata:",
-					`- MIME: ${outputMime}`,
-					`- Bytes: ${outputBytes} (${formatBytes(outputBytes)})`,
-					metadata?.width !== undefined && metadata.height !== undefined
-						? `- Dimensions: ${metadata.width}x${metadata.height}`
-						: "- Dimensions: unknown",
-					metadata?.channels !== undefined ? `- Channels: ${metadata.channels}` : "- Channels: unknown",
-					metadata?.hasAlpha === true
-						? "- Alpha: yes"
-						: metadata?.hasAlpha === false
-							? "- Alpha: no"
-							: "- Alpha: unknown",
-					"",
-					`If you want to analyze the image, call inspect_image with path="${formatPathRelativeToCwd(
-						absolutePath,
-						this.session.cwd,
-					)}" and a question describing what to inspect and the desired output format.`,
-				];
-				content = [{ type: "text", text: metadataLines.join("\n") }];
-				details = {};
-				sourcePath = absolutePath;
-			} else {
-				if (fileSize > MAX_IMAGE_SIZE) {
-					const sizeStr = formatBytes(fileSize);
-					const maxStr = formatBytes(MAX_IMAGE_SIZE);
-					throw new ToolError(`Image file too large: ${sizeStr} exceeds ${maxStr} limit.`);
-				}
-				try {
-					const imageInput = await loadImageInput({
-						path: readPath,
-						cwd: this.session.cwd,
-						autoResize: this.#autoResizeImages,
-						maxBytes: MAX_IMAGE_SIZE,
-						resolvedPath: absolutePath,
-						detectedMimeType: mimeType,
-					});
-					if (!imageInput) {
-						throw new ToolError(`Read image file [${mimeType}] failed: unsupported image format.`);
+					if (!suffixResolution) {
+						throw new ToolError(
+							`Path '${localReadPath}' not found. Use \`find\` or \`search\` to discover the correct path.`,
+						);
 					}
-					content = [
-						{ type: "text", text: imageInput.textNote },
-						{ type: "image", data: imageInput.data, mimeType: imageInput.mimeType },
-					];
-					details = {};
-					sourcePath = imageInput.resolvedPath;
-				} catch (error) {
-					if (error instanceof ImageInputTooLargeError) {
-						throw new ToolError(error.message);
-					}
+				} else {
 					throw error;
 				}
 			}
-		} else if (shouldConvertWithMarkit) {
-			// Convert document or notebook via markit.
-			// Create a temp dir for extracted images so markit can write them.
-			const safeName = path.basename(absolutePath, ext).replace(/[()]/g, "_");
-			const imageDir = await fs.mkdtemp(path.join(os.tmpdir(), `omp-read-images-${safeName}-`));
-			try {
-				const result = await convertFileWithMarkit(absolutePath, signal, imageDir);
-				if (result.ok) {
-					// Extract image references from the converted markdown and load them.
-					const { text: markdownText, images: extractedImages } = await extractImagesFromMarkdown(
-						result.content,
-						imageDir,
-					);
 
-					// Apply truncation to converted content
-					const truncation = truncateHead(markdownText);
-					const outputText = truncation.content;
+			if (isDirectory) {
+				const dirResult = await this.#readDirectory(absolutePath, selToOffsetLimit(parsed).limit, signal);
+				if (suffixResolution) {
+					dirResult.details ??= {};
+					dirResult.details.suffixResolution = suffixResolution;
+				}
+				return dirResult;
+			}
 
+			const imageMetadata = await readImageMetadata(absolutePath);
+			const mimeType = imageMetadata?.mimeType;
+			const ext = path.extname(absolutePath).toLowerCase();
+			const _hasEditTool = this.session.hasEditTool ?? true;
+			const _language = getLanguageFromPath(absolutePath);
+			const shouldConvertWithMarkit = CONVERTIBLE_EXTENSIONS.has(ext) || (ext === ".ipynb" && parsed.kind === "raw");
+			// Read the file based on type
+			let content: Array<TextContent | ImageContent>;
+			let details: ReadToolDetails = {};
+			let sourcePath: string | undefined;
+			let truncationInfo:
+				| { result: TruncationResult; options: { direction: "head"; startLine?: number; totalFileLines?: number } }
+				| undefined;
+
+			if (mimeType) {
+				if (this.#inspectImageEnabled) {
+					const metadata = imageMetadata;
+					const outputMime = metadata?.mimeType ?? mimeType;
+					const outputBytes = fileSize;
+					const metadataLines = [
+						"Image metadata:",
+						`- MIME: ${outputMime}`,
+						`- Bytes: ${outputBytes} (${formatBytes(outputBytes)})`,
+						metadata?.width !== undefined && metadata.height !== undefined
+							? `- Dimensions: ${metadata.width}x${metadata.height}`
+							: "- Dimensions: unknown",
+						metadata?.channels !== undefined ? `- Channels: ${metadata.channels}` : "- Channels: unknown",
+						metadata?.hasAlpha === true
+							? "- Alpha: yes"
+							: metadata?.hasAlpha === false
+								? "- Alpha: no"
+								: "- Alpha: unknown",
+						"",
+						`If you want to analyze the image, call inspect_image with path="${formatPathRelativeToCwd(
+							absolutePath,
+							this.session.cwd,
+						)}" and a question describing what to inspect and the desired output format.`,
+					];
+					content = [{ type: "text", text: metadataLines.join("\n") }];
+					details = {};
+					sourcePath = absolutePath;
+				} else {
+					if (fileSize > MAX_IMAGE_SIZE) {
+						const sizeStr = formatBytes(fileSize);
+						const maxStr = formatBytes(MAX_IMAGE_SIZE);
+						throw new ToolError(`Image file too large: ${sizeStr} exceeds ${maxStr} limit.`);
+					}
+					try {
+						const imageInput = await loadImageInput({
+							path: readPath,
+							cwd: this.session.cwd,
+							autoResize: this.#autoResizeImages,
+							maxBytes: MAX_IMAGE_SIZE,
+							resolvedPath: absolutePath,
+							detectedMimeType: mimeType,
+						});
+						if (!imageInput) {
+							throw new ToolError(`Read image file [${mimeType}] failed: unsupported image format.`);
+						}
+						content = [
+							{ type: "text", text: imageInput.textNote },
+							{ type: "image", data: imageInput.data, mimeType: imageInput.mimeType },
+						];
+						details = {};
+						sourcePath = imageInput.resolvedPath;
+					} catch (error) {
+						if (error instanceof ImageInputTooLargeError) {
+							throw new ToolError(error.message);
+						}
+						throw error;
+					}
+				}
+			} else if (shouldConvertWithMarkit) {
+				// Convert document or notebook via markit.
+				// Create a temp dir for extracted images so markit can write them.
+				const safeName = path.basename(absolutePath, ext).replace(/[()]/g, "_");
+				const imageDir = await fs.mkdtemp(path.join(os.tmpdir(), `omp-read-images-${safeName}-`));
+				try {
+					const result = await convertFileWithMarkit(absolutePath, signal, imageDir);
+					if (result.ok) {
+						// Extract image references from the converted markdown and load them.
+						const { text: markdownText, images: extractedImages } = await extractImagesFromMarkdown(
+							result.content,
+							imageDir,
+						);
+
+						// Apply truncation to converted content
+						const truncation = truncateHead(markdownText);
+						const outputText = truncation.content;
+
+						details = { truncation };
+						sourcePath = absolutePath;
+						truncationInfo = { result: truncation, options: { direction: "head", startLine: 1 } };
+
+						content = [{ type: "text", text: outputText }, ...extractedImages];
+					} else if (result.error) {
+						content = [
+							{ type: "text", text: `[Cannot read ${ext} file: ${result.error || "conversion failed"}]` },
+						];
+					} else {
+						content = [{ type: "text", text: `[Cannot read ${ext} file: conversion failed]` }];
+					}
+				} finally {
+					// Clean up the temp image dir
+					await fs.rm(imageDir, { recursive: true, force: true }).catch(() => {});
+				}
+			} else {
+				// Raw text or line-range mode
+				const { offset, limit } = selToOffsetLimit(parsed);
+				const startLine = offset ? Math.max(0, offset - 1) : 0;
+				const startLineDisplay = startLine + 1;
+
+				const DEFAULT_LIMIT = this.#defaultLimit;
+				const effectiveLimit = limit ?? DEFAULT_LIMIT;
+				const maxLinesToCollect = Math.min(effectiveLimit, DEFAULT_MAX_LINES);
+				const selectedLineLimit = effectiveLimit;
+				// Scale byte budget with line limit so the configured line count actually fits.
+				// Assume ~512 bytes/line average; never go below the shared default.
+				const maxBytesForRead = Math.max(DEFAULT_MAX_BYTES, maxLinesToCollect * 512);
+
+				const streamResult = await streamLinesFromFile(
+					absolutePath,
+					startLine,
+					maxLinesToCollect,
+					maxBytesForRead,
+					selectedLineLimit,
+					signal,
+				);
+
+				const {
+					lines: collectedLines,
+					totalFileLines,
+					collectedBytes,
+					stoppedByByteLimit,
+					firstLinePreview,
+					firstLineByteLength,
+				} = streamResult;
+
+				// Check if offset is out of bounds - return graceful message instead of throwing
+				if (startLine >= totalFileLines) {
+					const suggestion =
+						totalFileLines === 0
+							? "The file is empty."
+							: `Use sel=1 to read from the start, or sel=${totalFileLines} to read the last line.`;
+					return toolResult<ReadToolDetails>({ resolvedPath: absolutePath, suffixResolution })
+						.text(`Line ${startLineDisplay} is beyond end of file (${totalFileLines} lines total). ${suggestion}`)
+						.done();
+				}
+
+				const selectedContent = collectedLines.join("\n");
+				const userLimitedLines = collectedLines.length;
+
+				const totalSelectedLines = totalFileLines - startLine;
+				const totalSelectedBytes = collectedBytes;
+				const wasTruncated = collectedLines.length < totalSelectedLines || stoppedByByteLimit;
+				const firstLineExceedsLimit = firstLineByteLength !== undefined && firstLineByteLength > maxBytesForRead;
+
+				const truncation: TruncationResult = {
+					content: selectedContent,
+					truncated: wasTruncated,
+					truncatedBy: stoppedByByteLimit ? "bytes" : wasTruncated ? "lines" : undefined,
+					totalLines: totalSelectedLines,
+					totalBytes: totalSelectedBytes,
+					outputLines: collectedLines.length,
+					outputBytes: collectedBytes,
+					lastLinePartial: false,
+					firstLineExceedsLimit,
+				};
+
+				const isRawMode = parsed.kind === "raw";
+				const shouldAddHashLines = !isRawMode && displayMode.hashLines;
+				const shouldAddLineNumbers = isRawMode ? false : shouldAddHashLines ? false : displayMode.lineNumbers;
+				let capturedDisplayContent: { text: string; startLine: number } | undefined;
+				const formatText = (text: string, startNum: number): string => {
+					capturedDisplayContent = { text, startLine: startNum };
+					return formatTextWithMode(text, startNum, shouldAddHashLines, shouldAddLineNumbers);
+				};
+
+				let outputText: string;
+
+				if (truncation.firstLineExceedsLimit) {
+					const firstLineBytes = firstLineByteLength ?? 0;
+					const snippet = firstLinePreview ?? { text: "", bytes: 0 };
+
+					if (shouldAddHashLines) {
+						outputText = `[Line ${startLineDisplay} is ${formatBytes(
+							firstLineBytes,
+						)}, exceeds ${formatBytes(maxBytesForRead)} limit. Hashline output requires full lines; cannot compute hashes for a truncated preview.]`;
+					} else {
+						outputText = formatText(snippet.text, startLineDisplay);
+					}
+					if (snippet.text.length === 0) {
+						outputText = `[Line ${startLineDisplay} is ${formatBytes(
+							firstLineBytes,
+						)}, exceeds ${formatBytes(maxBytesForRead)} limit. Unable to display a valid UTF-8 snippet.]`;
+					}
 					details = { truncation };
 					sourcePath = absolutePath;
-					truncationInfo = { result: truncation, options: { direction: "head", startLine: 1 } };
+					truncationInfo = {
+						result: truncation,
+						options: { direction: "head", startLine: startLineDisplay, totalFileLines },
+					};
+				} else if (truncation.truncated) {
+					outputText = formatText(truncation.content, startLineDisplay);
+					details = { truncation };
+					sourcePath = absolutePath;
+					truncationInfo = {
+						result: truncation,
+						options: { direction: "head", startLine: startLineDisplay, totalFileLines },
+					};
+				} else if (startLine + userLimitedLines < totalFileLines) {
+					const remaining = totalFileLines - (startLine + userLimitedLines);
+					const nextOffset = startLine + userLimitedLines + 1;
 
-					content = [{ type: "text", text: outputText }, ...extractedImages];
-				} else if (result.error) {
-					content = [{ type: "text", text: `[Cannot read ${ext} file: ${result.error || "conversion failed"}]` }];
+					outputText = formatText(truncation.content, startLineDisplay);
+					outputText += `\n\n[${remaining} more lines in file. Use sel=${nextOffset} to continue]`;
+					details = {};
+					sourcePath = absolutePath;
 				} else {
-					content = [{ type: "text", text: `[Cannot read ${ext} file: conversion failed]` }];
+					// No truncation, no user limit exceeded
+					outputText = formatText(truncation.content, startLineDisplay);
+					details = {};
+					sourcePath = absolutePath;
 				}
-			} finally {
-				// Clean up the temp image dir
-				await fs.rm(imageDir, { recursive: true, force: true }).catch(() => {});
-			}
-		} else {
-			// Raw text or line-range mode
-			const { offset, limit } = selToOffsetLimit(parsed);
-			const startLine = offset ? Math.max(0, offset - 1) : 0;
-			const startLineDisplay = startLine + 1;
 
-			const DEFAULT_LIMIT = this.#defaultLimit;
-			const effectiveLimit = limit ?? DEFAULT_LIMIT;
-			const maxLinesToCollect = Math.min(effectiveLimit, DEFAULT_MAX_LINES);
-			const selectedLineLimit = effectiveLimit;
-			// Scale byte budget with line limit so the configured line count actually fits.
-			// Assume ~512 bytes/line average; never go below the shared default.
-			const maxBytesForRead = Math.max(DEFAULT_MAX_BYTES, maxLinesToCollect * 512);
+				if (capturedDisplayContent) {
+					details.displayContent = capturedDisplayContent;
+				}
 
-			const streamResult = await streamLinesFromFile(
-				absolutePath,
-				startLine,
-				maxLinesToCollect,
-				maxBytesForRead,
-				selectedLineLimit,
-				signal,
-			);
-
-			const {
-				lines: collectedLines,
-				totalFileLines,
-				collectedBytes,
-				stoppedByByteLimit,
-				firstLinePreview,
-				firstLineByteLength,
-			} = streamResult;
-
-			// Check if offset is out of bounds - return graceful message instead of throwing
-			if (startLine >= totalFileLines) {
-				const suggestion =
-					totalFileLines === 0
-						? "The file is empty."
-						: `Use sel=1 to read from the start, or sel=${totalFileLines} to read the last line.`;
-				return toolResult<ReadToolDetails>({ resolvedPath: absolutePath, suffixResolution })
-					.text(`Line ${startLineDisplay} is beyond end of file (${totalFileLines} lines total). ${suggestion}`)
-					.done();
+				content = [{ type: "text", text: outputText }];
 			}
 
-			const selectedContent = collectedLines.join("\n");
-			const userLimitedLines = collectedLines.length;
-
-			const totalSelectedLines = totalFileLines - startLine;
-			const totalSelectedBytes = collectedBytes;
-			const wasTruncated = collectedLines.length < totalSelectedLines || stoppedByByteLimit;
-			const firstLineExceedsLimit = firstLineByteLength !== undefined && firstLineByteLength > maxBytesForRead;
-
-			const truncation: TruncationResult = {
-				content: selectedContent,
-				truncated: wasTruncated,
-				truncatedBy: stoppedByByteLimit ? "bytes" : wasTruncated ? "lines" : undefined,
-				totalLines: totalSelectedLines,
-				totalBytes: totalSelectedBytes,
-				outputLines: collectedLines.length,
-				outputBytes: collectedBytes,
-				lastLinePartial: false,
-				firstLineExceedsLimit,
-			};
-
-			const isRawMode = parsed.kind === "raw";
-			const shouldAddHashLines = !isRawMode && displayMode.hashLines;
-			const shouldAddLineNumbers = isRawMode ? false : shouldAddHashLines ? false : displayMode.lineNumbers;
-			let capturedDisplayContent: { text: string; startLine: number } | undefined;
-			const formatText = (text: string, startNum: number): string => {
-				capturedDisplayContent = { text, startLine: startNum };
-				return formatTextWithMode(text, startNum, shouldAddHashLines, shouldAddLineNumbers);
-			};
-
-			let outputText: string;
-
-			if (truncation.firstLineExceedsLimit) {
-				const firstLineBytes = firstLineByteLength ?? 0;
-				const snippet = firstLinePreview ?? { text: "", bytes: 0 };
-
-				if (shouldAddHashLines) {
-					outputText = `[Line ${startLineDisplay} is ${formatBytes(
-						firstLineBytes,
-					)}, exceeds ${formatBytes(maxBytesForRead)} limit. Hashline output requires full lines; cannot compute hashes for a truncated preview.]`;
+			if (suffixResolution) {
+				details.suffixResolution = suffixResolution;
+				// Inline resolution notice into first text block so the model sees the actual path
+				const notice = `[Path '${suffixResolution.from}' not found; resolved to '${suffixResolution.to}' via suffix match]`;
+				const firstText = content.find((c): c is TextContent => c.type === "text");
+				if (firstText) {
+					firstText.text = `${notice}\n${firstText.text}`;
 				} else {
-					outputText = formatText(snippet.text, startLineDisplay);
+					content = [{ type: "text", text: notice }, ...content];
 				}
-				if (snippet.text.length === 0) {
-					outputText = `[Line ${startLineDisplay} is ${formatBytes(
-						firstLineBytes,
-					)}, exceeds ${formatBytes(maxBytesForRead)} limit. Unable to display a valid UTF-8 snippet.]`;
-				}
-				details = { truncation };
-				sourcePath = absolutePath;
-				truncationInfo = {
-					result: truncation,
-					options: { direction: "head", startLine: startLineDisplay, totalFileLines },
-				};
-			} else if (truncation.truncated) {
-				outputText = formatText(truncation.content, startLineDisplay);
-				details = { truncation };
-				sourcePath = absolutePath;
-				truncationInfo = {
-					result: truncation,
-					options: { direction: "head", startLine: startLineDisplay, totalFileLines },
-				};
-			} else if (startLine + userLimitedLines < totalFileLines) {
-				const remaining = totalFileLines - (startLine + userLimitedLines);
-				const nextOffset = startLine + userLimitedLines + 1;
-
-				outputText = formatText(truncation.content, startLineDisplay);
-				outputText += `\n\n[${remaining} more lines in file. Use sel=${nextOffset} to continue]`;
-				details = {};
-				sourcePath = absolutePath;
-			} else {
-				// No truncation, no user limit exceeded
-				outputText = formatText(truncation.content, startLineDisplay);
-				details = {};
-				sourcePath = absolutePath;
 			}
-
-			if (capturedDisplayContent) {
-				details.displayContent = capturedDisplayContent;
+			const resultBuilder = toolResult(details).content(content);
+			if (sourcePath) {
+				resultBuilder.sourcePath(sourcePath);
 			}
-
-			content = [{ type: "text", text: outputText }];
-		}
-
-		if (suffixResolution) {
-			details.suffixResolution = suffixResolution;
-			// Inline resolution notice into first text block so the model sees the actual path
-			const notice = `[Path '${suffixResolution.from}' not found; resolved to '${suffixResolution.to}' via suffix match]`;
-			const firstText = content.find((c): c is TextContent => c.type === "text");
-			if (firstText) {
-				firstText.text = `${notice}\n${firstText.text}`;
-			} else {
-				content = [{ type: "text", text: notice }, ...content];
+			if (truncationInfo) {
+				resultBuilder.truncation(truncationInfo.result, truncationInfo.options);
 			}
-		}
-		const resultBuilder = toolResult(details).content(content);
-		if (sourcePath) {
-			resultBuilder.sourcePath(sourcePath);
-		}
-		if (truncationInfo) {
-			resultBuilder.truncation(truncationInfo.result, truncationInfo.options);
-		}
-		return resultBuilder.done();
+			return resultBuilder.done();
 		})();
 		this.#pendingReads.set(cacheKey, promise);
 		// Must return the finally-chain: discarding it leaves an orphan promise that

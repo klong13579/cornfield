@@ -65,10 +65,7 @@ export async function runGrillAsk(
 ): Promise<GrillAskResult> {
 	const enabled = options.enabled !== false;
 	const maxQuestions = Math.max(1, options.maxQuestions ?? DEFAULT_MAX);
-	const seedMissing = filterMissingAlreadyKnown(
-		filterDecisionMissing(tco.missing_inputs),
-		tco.known_inputs,
-	);
+	const seedMissing = filterMissingAlreadyKnown(filterDecisionMissing(tco.missing_inputs), tco.known_inputs);
 	const turns: GrillTurn[] = [];
 	let asked = 0;
 	let answered = 0;
@@ -142,7 +139,12 @@ export async function runGrillAsk(
 
 		const known: TcoKnownInput = {
 			key,
-			value: answer.includes(",") ? answer.split(",").map(s => s.trim()).filter(Boolean) : answer,
+			value: answer.includes(",")
+				? answer
+						.split(",")
+						.map(s => s.trim())
+						.filter(Boolean)
+				: answer,
 			source: "user",
 			confidence: 1,
 		};

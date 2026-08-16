@@ -1,4 +1,3 @@
-import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import moaExtension from "@oh-my-pi/moa-extension";
@@ -26,7 +25,6 @@ import {
 	getConfigDirName,
 	getProjectDir,
 	logger,
-	parseFrontmatter,
 	postmortem,
 	prompt,
 	Snowflake,
@@ -35,7 +33,6 @@ import { createSelfEvolutionExtension } from "@oh-my-pi/self-evolution";
 import chalk from "chalk";
 import { AsyncJobManager, isBackgroundJobSupportEnabled } from "./async";
 import { createAutoresearchExtension } from "./autoresearch";
-import createIntercomExtension from "./intercom-extension";
 import { loadCapability } from "./capability";
 import { type Rule, ruleCapability } from "./capability/rule";
 import { ModelRegistry } from "./config/model-registry";
@@ -43,6 +40,7 @@ import { formatModelString, parseModelPattern, parseModelString, resolveModelRol
 import { loadPromptTemplates as loadPromptTemplatesInternal, type PromptTemplate } from "./config/prompt-templates";
 import { Settings, type SkillsSettings } from "./config/settings";
 import { CursorExecHandlers } from "./cursor";
+import createIntercomExtension from "./intercom-extension";
 import "./discovery";
 import { clearCache as clearFsCache } from "./capability/fs";
 import { resolveConfigValue } from "./config/resolve-config-value";
@@ -327,7 +325,7 @@ function getDefaultAgentDir(): string {
  */
 function resolveDoomLoopConfig(model: Model | undefined, settings: Settings): DoomLoopConfig | undefined {
 	if (!model) return undefined;
-	const g = settings.getGroup("streaming") as Record<string, unknown>;
+	const g = settings.getGroup("streaming") as unknown as Record<string, unknown>;
 	if (g["doomLoop.enabled"] === false) return undefined;
 
 	// Priority: per-model override → explicit global config → auto-derive from context window
@@ -388,7 +386,7 @@ function resolveLengthStallConfig(settings: Settings): {
 	enabled: boolean;
 	maxConsecutive: number;
 } {
-	const g = settings.getGroup("agent") as Record<string, unknown>;
+	const g = settings.getGroup("agent") as unknown as Record<string, unknown>;
 	const enabled = g["lengthStall.enabled"] !== false;
 	const rawMax = g["lengthStall.maxConsecutive"] as number | undefined;
 	const maxConsecutive = Math.max(1, rawMax ?? 3);

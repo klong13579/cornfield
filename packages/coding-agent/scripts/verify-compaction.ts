@@ -10,17 +10,17 @@
  * 5. Per-model threshold overrides
  */
 import {
-	CompactionSettings,
-	resolveThresholdTokens,
-	resolveKeepRecentTokens,
-	shouldCompact,
+	type CompactionSettings,
 	estimateMessagesTokens,
+	resolveKeepRecentTokens,
+	resolveThresholdTokens,
+	shouldCompact,
 } from "@oh-my-pi/pi-coding-agent/session/compaction";
 
 const DEFAULT_SETTINGS: CompactionSettings = {
 	enabled: true,
 	strategy: "context-full",
-	thresholdPercent: -1,  // uses contextWindow - 15%
+	thresholdPercent: -1, // uses contextWindow - 15%
 	thresholdTokens: -1,
 	reserveTokens: 16384,
 	keepRecentTokens: 20000,
@@ -30,17 +30,22 @@ const DEFAULT_SETTINGS: CompactionSettings = {
 
 const OPTIMIZED_SETTINGS: CompactionSettings = {
 	...DEFAULT_SETTINGS,
-	thresholdPercent: 50,  // 50% threshold
-	keepRecentTokens: 0,   // dynamic
-	targetRatio: 0.20,
+	thresholdPercent: 50, // 50% threshold
+	keepRecentTokens: 0, // dynamic
+	targetRatio: 0.2,
 };
 
 let passed = 0;
 let failed = 0;
 
 function assert(condition: boolean, msg: string) {
-	if (condition) { passed++; console.log(`  ✅ ${msg}`); }
-	else { failed++; console.log(`  ❌ ${msg}`); }
+	if (condition) {
+		passed++;
+		console.log(`  ✅ ${msg}`);
+	} else {
+		failed++;
+		console.log(`  ❌ ${msg}`);
+	}
 }
 
 // ─── Test 1: resolveThresholdTokens ───
@@ -63,7 +68,7 @@ assert(largeThreshold === 100_000, `Large (50%): ${largeThreshold} (expected 100
 // Per-model override
 const withModelOverrides: CompactionSettings = {
 	...OPTIMIZED_SETTINGS,
-	modelThresholds: { "deepseek-v4-flash": 0.40, "deepseek-v4": 0.35 },
+	modelThresholds: { "deepseek-v4-flash": 0.4, "deepseek-v4": 0.35 },
 };
 const flashThreshold = resolveThresholdTokens(128_000, withModelOverrides, "deepseek-v4-flash-202605");
 assert(flashThreshold === 51_200, `Per-model (deepseek-v4-flash): ${flashThreshold} (expected 51,200)`);
@@ -93,7 +98,7 @@ const dynamicLarge = resolveKeepRecentTokens(100_000, OPTIMIZED_SETTINGS);
 assert(dynamicLarge === 20_000, `Dynamic large: ${dynamicLarge} (expected 20,000 = 100,000 × 0.20)`);
 
 // Custom targetRatio
-const customRatio = resolveKeepRecentTokens(64_000, { ...OPTIMIZED_SETTINGS, targetRatio: 0.30 });
+const customRatio = resolveKeepRecentTokens(64_000, { ...OPTIMIZED_SETTINGS, targetRatio: 0.3 });
 assert(customRatio === 19_200, `Custom ratio: ${customRatio} (expected 19,200 = 64,000 × 0.30)`);
 
 // ─── Test 3: shouldCompact ───
@@ -102,20 +107,16 @@ console.log("Test 3: shouldCompact");
 console.log("═══════════════════════════════════\n");
 
 // Default: 60K tokens < 108.8K → no
-assert(!shouldCompact(60_000, 128_000, DEFAULT_SETTINGS),
-	`Default 60K < 108.8K → no compact`);
+assert(!shouldCompact(60_000, 128_000, DEFAULT_SETTINGS), `Default 60K < 108.8K → no compact`);
 
 // Default: 110K tokens > 108.8K → yes
-assert(shouldCompact(110_000, 128_000, DEFAULT_SETTINGS),
-	`Default 110K > 108.8K → compact`);
+assert(shouldCompact(110_000, 128_000, DEFAULT_SETTINGS), `Default 110K > 108.8K → compact`);
 
 // Optimized: 50K tokens < 64K → no
-assert(!shouldCompact(50_000, 128_000, OPTIMIZED_SETTINGS),
-	`Optimized 50K < 64K → no compact`);
+assert(!shouldCompact(50_000, 128_000, OPTIMIZED_SETTINGS), `Optimized 50K < 64K → no compact`);
 
 // Optimized: 70K tokens > 64K → yes
-assert(shouldCompact(70_000, 128_000, OPTIMIZED_SETTINGS),
-	`Optimized 70K > 64K → compact`);
+assert(shouldCompact(70_000, 128_000, OPTIMIZED_SETTINGS), `Optimized 70K > 64K → compact`);
 
 // ─── Test 4: estimateMessagesTokens ───
 console.log("\n═══════════════════════════════════");
@@ -130,7 +131,7 @@ const messages = [
 	{ role: "assistant" as const, content: [{ type: "text" as const, text: "Another response" }] },
 ];
 
-const estimated = estimateMessagesTokens(messages);
+const estimated = estimateMessagesTokens(messages as unknown as import("@oh-my-pi/pi-agent-core").AgentMessage[]);
 console.log(`  Estimated tokens: ${estimated}`);
 assert(estimated > 10_000, `Large context: ${estimated} > 10,000`);
 
@@ -139,7 +140,7 @@ const bigMessages = Array.from({ length: 10 }, (_, i) => [
 	{ role: "user" as const, content: [{ type: "text" as const, text: `Block ${i}: ${largeBlock}` }] },
 	{ role: "assistant" as const, content: [{ type: "text" as const, text: `Response ${i}` }] },
 ]).flat();
-const bigEstimated = estimateMessagesTokens(bigMessages);
+const bigEstimated = estimateMessagesTokens(bigMessages as unknown as import("@oh-my-pi/pi-agent-core").AgentMessage[]);
 console.log(`  Very large context: ${bigEstimated} tokens`);
 assert(bigEstimated > 40_000, `Very large: ${bigEstimated} > 40,000`);
 

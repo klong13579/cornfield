@@ -9,7 +9,12 @@ const SETTINGS: MoaSettings = resolveSettings({});
 
 describe("buildPlan", () => {
 	it("injects research guidance into worker prompts when provided", () => {
-		const plan = buildPlan("architecture tradeoffs", SETTINGS, DEFAULT_OUTPUT_SCHEMA, "## Research guidance\n- use web_search");
+		const plan = buildPlan(
+			"architecture tradeoffs",
+			SETTINGS,
+			DEFAULT_OUTPUT_SCHEMA,
+			"## Research guidance\n- use web_search",
+		);
 		for (const w of plan.workers) {
 			expect(w.prompt).toContain("Research guidance");
 			expect(w.prompt).toContain("web_search");

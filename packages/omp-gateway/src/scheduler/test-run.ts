@@ -312,7 +312,7 @@ export async function runTestRun(opts: RunTestRunOptions): Promise<TestRunResult
 	const cappedInMs = Math.min(MAX_IN_MS, Math.max(MIN_IN_MS, inMs));
 	const cappedTimeoutMs = Math.min(MAX_TIMEOUT_MS, Math.max(MIN_TIMEOUT_MS, timeoutMs));
 	const wasClamped = cappedInMs !== inMs || cappedTimeoutMs !== timeoutMs;
-if (wasClamped) {
+	if (wasClamped) {
 		logger.debug("[test-run] clamping options", {
 			requested: { inMs, timeoutMs },
 			applied: { inMs: cappedInMs, timeoutMs: cappedTimeoutMs },
@@ -709,7 +709,7 @@ function buildResult(args: BuildResultArgs): TestRunResult {
 			kind: "delivery_failed",
 			execId: execution.id,
 			status: execution.status,
-			exitCode: execution.exitCode,
+			exitCode: execution.exitCode ?? -1,
 			deliveryError,
 			scheduleRestored: false, // patched in `runTestRun` post-finally
 		};
@@ -719,7 +719,7 @@ function buildResult(args: BuildResultArgs): TestRunResult {
 			kind: "task_failed",
 			execId: execution.id,
 			status: execution.status,
-			exitCode: execution.exitCode,
+			exitCode: execution.exitCode ?? -1,
 			stderr,
 			scheduleRestored: false, // patched in `runTestRun` post-finally
 		};
@@ -728,7 +728,7 @@ function buildResult(args: BuildResultArgs): TestRunResult {
 		kind: "success",
 		execId: execution.id,
 		status: execution.status,
-		exitCode: execution.exitCode,
+		exitCode: execution.exitCode ?? -1,
 		durationMs,
 		stderr,
 		delivery,

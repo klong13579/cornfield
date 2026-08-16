@@ -1,27 +1,15 @@
-import { defineTool, type ExtensionAPI, type ExtensionContext } from "@oh-my-pi/pi-coding-agent";
-import { StringEnum } from "@oh-my-pi/pi-ai";
-import { getAgentDir, isEnoent } from "@oh-my-pi/pi-utils";
-import { randomUUID } from "crypto";
-import { Type } from "@sinclair/typebox";
-import { Text, type AutocompleteItem } from "@oh-my-pi/pi-tui";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import intercomSkill from "./skills/pi-intercom/SKILL.md" with { type: "text" };
+import { resolve as resolvePath } from "node:path";
+import { StringEnum } from "@oh-my-pi/pi-ai";
+import { defineTool, type ExtensionAPI, type ExtensionContext } from "@oh-my-pi/pi-coding-agent";
+import { type AutocompleteItem, Text } from "@oh-my-pi/pi-tui";
+import { getAgentDir, isEnoent } from "@oh-my-pi/pi-utils";
+import { Type } from "@sinclair/typebox";
+import { randomUUID } from "crypto";
 import { IntercomClient } from "./broker/client";
-import { SessionListOverlay } from "./ui/session-list";
-import { ComposeOverlay, type ComposeResult } from "./ui/compose";
-import { InlineMessageComponent } from "./ui/inline-message";
-import { getAskTimeoutMs, loadConfig, type IntercomConfig } from "./config";
-import { EXTENSION_BUS_FEATURE } from "./types";
-import type {
-	Attachment,
-	BrokerMessage,
-	Message,
-	MessageControl,
-	MessageReceiptStatus,
-	SessionInfo,
-	SessionRegistration,
-} from "./types";
+import { getAskTimeoutMs, type IntercomConfig, loadConfig } from "./config";
+import { sameCwd } from "./cwd";
 import {
 	INTERCOM_EXTENSION_REGISTER_EVENT,
 	INTERCOM_EXTENSION_REGISTRY_READY_EVENT,
@@ -31,11 +19,23 @@ import {
 	type IntercomExtensionRegistration,
 	type IntercomExtensionState,
 } from "./extension-api";
-import { ReplyTracker } from "./reply-tracker";
-import { resolve as resolvePath } from "node:path";
-import { sameCwd } from "./cwd";
 import { formatContextUsage } from "./format-context";
-import { openProjectPane, resolveTargetInCwd, waitForProjectSession, type ProjectPaneLaunch } from "./project-agent";
+import { openProjectPane, type ProjectPaneLaunch, resolveTargetInCwd, waitForProjectSession } from "./project-agent";
+import { ReplyTracker } from "./reply-tracker";
+import intercomSkill from "./skills/pi-intercom/SKILL.md" with { type: "text" };
+import type {
+	Attachment,
+	BrokerMessage,
+	Message,
+	MessageControl,
+	MessageReceiptStatus,
+	SessionInfo,
+	SessionRegistration,
+} from "./types";
+import { EXTENSION_BUS_FEATURE } from "./types";
+import { ComposeOverlay, type ComposeResult } from "./ui/compose";
+import { InlineMessageComponent } from "./ui/inline-message";
+import { SessionListOverlay } from "./ui/session-list";
 
 const SUBAGENT_CONTROL_INTERCOM_EVENT = "subagent:control-intercom";
 const SUBAGENT_RESULT_INTERCOM_EVENT = "subagent:result-intercom";
@@ -574,11 +574,13 @@ export function buildIntercomCompletions(
 	const action = (spaceIdx === -1 ? trimmed : trimmed.slice(0, spaceIdx)).trim().toLowerCase();
 
 	if (spaceIdx === -1) {
-		return INTERCOM_ACTIONS.filter(({ name }) => name.startsWith(trimmed.toLowerCase())).map(({ name, description }) => ({
-			value: name,
-			label: name,
-			description,
-		}));
+		return INTERCOM_ACTIONS.filter(({ name }) => name.startsWith(trimmed.toLowerCase())).map(
+			({ name, description }) => ({
+				value: name,
+				label: name,
+				description,
+			}),
+		);
 	}
 
 	const rest = trimmed.slice(spaceIdx + 1).trimStart();
@@ -623,7 +625,7 @@ async function ensureIntercomSkillInstalled(): Promise<void> {
 	await Bun.write(path.join(skillDir, "SKILL.md"), intercomSkill);
 }
 
-	export default function piIntercomExtension(pi: ExtensionAPI) {
+export default function piIntercomExtension(pi: ExtensionAPI) {
 	void ensureIntercomSkillInstalled();
 	let client: IntercomClient | null = null;
 	/** Last-known online roster, kept fresh by list / join / leave / presence events; feeds `/intercom` completions. */
@@ -1283,7 +1285,7 @@ async function ensureIntercomSkillInstalled(): Promise<void> {
 		if (disposed || shuttingDown) {
 			throw new Error("Intercom shutting down");
 		}
-		if (client && client.isConnected()) {
+		if (client?.isConnected()) {
 			return client;
 		}
 		const contextAtStart = getLiveContext();
@@ -2046,10 +2048,10 @@ async function ensureIntercomSkillInstalled(): Promise<void> {
 						reason,
 					);
 					if (typeof interview?.title === "string" && interview.title.trim()) {
-						text += " " + theme.fg("accent", interview.title.trim());
+						text += ` ${theme.fg("accent", interview.title.trim())}`;
 					}
 					if (messagePreview) {
-						text += "\n  " + theme.fg("dim", messagePreview);
+						text += `\n  ${theme.fg("dim", messagePreview)}`;
 					}
 					return new Text(text, 0, 0);
 				},
@@ -2076,8 +2078,7 @@ async function ensureIntercomSkillInstalled(): Promise<void> {
 							: theme.fg("success", "✓ ");
 					text += theme.fg(failed ? "error" : "text", textContent);
 					if (parseWarning) {
-						text +=
-							"\n" + theme.fg("warning", `Structured reply parse issue: ${details.structuredReplyParseError}`);
+						text += `\n${theme.fg("warning", `Structured reply parse issue: ${details.structuredReplyParseError}`)}`;
 					}
 					return new Text(text, 0, 0);
 				},
@@ -2712,13 +2713,13 @@ Usage:
 				let text = theme.fg("toolTitle", theme.bold("intercom "));
 				text += theme.fg(action === "ask" ? "warning" : action === "reply" ? "success" : "accent", action);
 				if (target) {
-					text += " " + theme.fg("muted", "→") + " " + theme.fg("accent", target);
+					text += ` ${theme.fg("muted", "→")} ${theme.fg("accent", target)}`;
 				}
 				if (attachmentCount > 0) {
-					text += " " + theme.fg("dim", `(${attachmentCount} attachment${attachmentCount === 1 ? "" : "s"})`);
+					text += ` ${theme.fg("dim", `(${attachmentCount} attachment${attachmentCount === 1 ? "" : "s"})`)}`;
 				}
 				if (messagePreview) {
-					text += "\n  " + theme.fg("dim", messagePreview);
+					text += `\n  ${theme.fg("dim", messagePreview)}`;
 				}
 				return new Text(text, 0, 0);
 			},
@@ -2736,7 +2737,7 @@ Usage:
 					text += theme.fg("dim", ` (${details.messageId.slice(0, 8)})`);
 				}
 				if (details?.reason && context.expanded) {
-					text += "\n" + theme.fg("dim", `Reason: ${details.reason}`);
+					text += `\n${theme.fg("dim", `Reason: ${details.reason}`)}`;
 				}
 				return new Text(text, 0, 0);
 			},

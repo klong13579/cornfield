@@ -71,7 +71,9 @@ async function main(): Promise<number> {
 
 	console.log(`compare-judge-ab: from=${runDir}`);
 	console.log(`task=${task.slice(0, 120)}`);
-	console.log(`minScore=${minScore} judgeModel=${judgeOnSettings.judge.model} grayMargin=${judgeOnSettings.judge.grayMargin}`);
+	console.log(
+		`minScore=${minScore} judgeModel=${judgeOnSettings.judge.model} grayMargin=${judgeOnSettings.judge.grayMargin}`,
+	);
 	console.log(`workers=${workers.length}\n`);
 
 	const offRows: MoaWorkerResult[] = [];

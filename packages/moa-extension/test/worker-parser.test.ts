@@ -73,7 +73,7 @@ This is the plan.
 		const raw = [
 			"## Step 1: 复述理解",
 			"",
-			"A ".repeat(120) + "concrete design with enough substance for quality scoring.",
+			`${"A ".repeat(120)}concrete design with enough substance for quality scoring.`,
 			"",
 			"## 设计概要",
 			"More freeform notes.",
@@ -124,7 +124,7 @@ This is the plan.
 		const raw = [
 			"## Step 1",
 			"",
-			"A ".repeat(120) + "concrete design with enough substance for quality scoring.",
+			`${"A ".repeat(120)}concrete design with enough substance for quality scoring.`,
 		].join("\n");
 		const parsed = parseWorkerOutputBySchema(raw, DEFAULT_OUTPUT_SCHEMA);
 		const heuristic = scoreWorkerHeuristicV2(parsed, DEFAULT_OUTPUT_SCHEMA, DEFAULT_ROLE_WEIGHTS.divergent);
@@ -137,6 +137,8 @@ This is the plan.
 			role: "Explore alternatives",
 			ok: true,
 			output: raw,
+			stderr: "",
+			exitCode: 0,
 			qualityScore: heuristic.score,
 		};
 		// Empty synthesized open_questions must not count as "no questions".

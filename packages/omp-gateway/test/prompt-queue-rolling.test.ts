@@ -15,7 +15,7 @@
  *  - rejectAll cleans up the watchdog
  */
 import { describe, expect, test } from "bun:test";
-import type { AgentEvent, RpcTransport } from "../src/agent-transport";
+import type { RpcTransport } from "../src/agent-transport";
 import { PromptQueue } from "../src/prompt-queue";
 
 class FakeTransport implements Pick<RpcTransport, "sendFrame"> {

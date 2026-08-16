@@ -124,7 +124,8 @@ describe("createSpawnJudgeFn", () => {
 				timeoutMs: 5000,
 			}),
 		);
-		expect(spawn.mock.calls[0]![0].systemPrompt).toContain("score this worker");
+		const callArgs = (spawn.mock.calls[0] as unknown as Array<{ systemPrompt: string }>)[0]!;
+		expect(callArgs.systemPrompt).toContain("score this worker");
 		expect(out.score).toBe(77);
 		expect(out.rationale).toBe("acceptable");
 	});

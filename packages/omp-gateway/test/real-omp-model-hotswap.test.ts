@@ -12,9 +12,10 @@
  * when it is absent — a PATH lookup would silently pick up a legacy omp
  * that the gateway's handshake now rejects.
  */
+
+import { describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { describe, expect, test } from "bun:test";
 import { AgentBridge } from "../src/agent-bridge";
 
 /** Dev build product of the omp agent binary (post-split). */
@@ -22,8 +23,7 @@ function resolveDevOmpPath(): string {
 	const candidate = path.join(import.meta.dir, "..", "..", "coding-agent", "dist", "omp");
 	if (fs.existsSync(candidate)) return candidate;
 	throw new Error(
-		`Real-omp test needs the dev build product: ${candidate}. ` +
-			"Run: bun --cwd=packages/coding-agent run build",
+		`Real-omp test needs the dev build product: ${candidate}. Run: bun --cwd=packages/coding-agent run build`,
 	);
 }
 

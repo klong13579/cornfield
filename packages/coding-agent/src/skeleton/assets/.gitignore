@@ -1,9 +1,0 @@
-sessions/
-cron/logs/
-.omp/evolution/
-.omp/*
-!.omp/config.yml
-!.omp/SYSTEM.md
-!.omp/skills/
-*.log
-*.bak

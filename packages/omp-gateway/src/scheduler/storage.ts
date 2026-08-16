@@ -5,6 +5,7 @@ import { Database, type SQLQueryBindings, type Statement } from "bun:sqlite";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { logger } from "@oh-my-pi/pi-utils";
+import { clearTestRunMarker, readTestRunMarker } from "./test-run-marker";
 import {
 	generateExecutionId,
 	generateTaskId,
@@ -233,8 +234,10 @@ export class SchedulerDbStorage implements SchedulerStorage {
 	#insertExecutionStmt: Statement;
 	#getExecutionsStmt: Statement;
 
+	#markerBaseDir: string;
 	constructor(dbPath: string = getSchedulerDbPath()) {
 		const dir = path.dirname(dbPath);
+		this.#markerBaseDir = dir;
 		fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
 
 		this.#db = new Database(dbPath);
@@ -456,6 +459,26 @@ export class SchedulerDbStorage implements SchedulerStorage {
 
 	deleteTask(id: string): void {
 		this.#deleteTaskStmt.run(id);
+	}
+
+	/** Directory of the test-run restore marker (same as the DB's parent dir). */
+	getMarkerBaseDir(): string {
+		return this.#markerBaseDir;
+	}
+
+	/**
+	 * Recover an orphan test-run restore marker left by a dead CLI/LLM
+	 * process: re-apply the task snapshot to the DB and clear the marker.
+	 * Idempotent.
+	 */
+	consumeOrphanTestRunMarker(): boolean {
+		const marker = readTestRunMarker(this.#markerBaseDir);
+		if (!marker) return false;
+		if (marker.taskId) {
+			this.updateTask(marker.taskId, { ...marker.snapshot } as Partial<ScheduledTask>);
+		}
+		clearTestRunMarker(this.#markerBaseDir);
+		return true;
 	}
 
 	recordExecution(exec: Omit<TaskExecution, "id">): TaskExecution {

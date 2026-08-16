@@ -2,7 +2,7 @@
  * Pure CLI helpers for the MoA stage-test harness (testable without LLM).
  */
 import * as path from "node:path";
-import { requireArtifacts, type LoadedStageRun, type StageName } from "./stage-artifacts";
+import { type LoadedStageRun, requireArtifacts, type StageName } from "./stage-artifacts";
 import type { MoaResearchModeSetting } from "./types";
 
 const STAGES = new Set<StageName>(["all", "discovery", "ask", "research", "rewrite", "workers", "synthesis"]);
@@ -27,7 +27,7 @@ export function stageTestUsage(): string {
 		"",
 		"  bun packages/moa-extension/scripts/stage-test.ts \\",
 		"    --stage all|discovery|ask|research|rewrite|workers|synthesis \\",
-		"    --task \"...\" \\",
+		'    --task "..." \\',
 		"    [--from tmp/moa-stage/<id>] \\",
 		"    [--out tmp/moa-stage] \\",
 		"    [--rounds N] \\",

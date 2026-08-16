@@ -22,7 +22,7 @@ export const DEFAULT_WORKER_MODELS = {
 	divergent: "narwal-plan/qwen3.5-flash",
 	grounded: "alibaba-coding-plan/qwen3.6-plus",
 	critical: "alibaba-coding-plan/kimi-k2.5",
-} as const;
+};
 
 export const DEFAULT_SYNTHESIS_MODEL = "narwal-plan/deepseek-v4-pro-202606";
 
@@ -163,7 +163,9 @@ function resolveQualitySettings(override: Partial<MoaQualitySettings> | undefine
 	};
 }
 
-export function resolveSettings(overrides: Partial<MoaSettings> = {}): MoaSettings {
+type DeepPartial<T> = { [K in keyof T]?: T[K] extends object ? DeepPartial<T[K]> : T[K] };
+
+export function resolveSettings(overrides: DeepPartial<MoaSettings> = {}): MoaSettings {
 	// Priority: PI_MOA_SETTINGS_JSON env var > moa.yml config file > built-in
 	// defaults. Config-file `overrides` come from `loadMoaConfigOverrides` which
 	// already merges project > global. Env is the most specific one-off override
@@ -265,11 +267,14 @@ export function resolveSettings(overrides: Partial<MoaSettings> = {}): MoaSettin
 					: DEFAULT_SETTINGS.grillMaxQuestions),
 		),
 	);
-	return {
+	const resolved = {
 		...DEFAULT_SETTINGS,
 		...mergedOverrides,
 		workerCount,
-		workers: normalizeWorkerSlots(mergedOverrides.workers ?? DEFAULT_SETTINGS.workers, workerCount),
+		workers: normalizeWorkerSlots(
+			(mergedOverrides.workers as MoaWorkerSlot[] | undefined) ?? DEFAULT_SETTINGS.workers,
+			workerCount,
+		),
 		maxRounds,
 		postWorkerAskEnabled: mergedOverrides.postWorkerAskEnabled ?? DEFAULT_SETTINGS.postWorkerAskEnabled,
 		inputCollectEnabled: mergedOverrides.inputCollectEnabled ?? DEFAULT_SETTINGS.inputCollectEnabled,
@@ -286,9 +291,10 @@ export function resolveSettings(overrides: Partial<MoaSettings> = {}): MoaSettin
 		researchEarlyStopAt,
 		researchModel,
 		workerExecutionMode,
-		quality: resolveQualitySettings(mergedOverrides.quality),
+		quality: resolveQualitySettings(mergedOverrides.quality as Partial<MoaQualitySettings> | undefined),
 		researchMode,
 		askStrategy,
 		grillMaxQuestions,
-	};
+	} as MoaSettings;
+	return resolved;
 }

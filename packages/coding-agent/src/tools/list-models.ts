@@ -1,8 +1,8 @@
-import type { Model } from "@oh-my-pi/pi-ai";
 import type { AgentTool, AgentToolContext, AgentToolResult, AgentToolUpdateCallback } from "@oh-my-pi/pi-agent-core";
+import type { Model } from "@oh-my-pi/pi-ai";
 import { logger, prompt } from "@oh-my-pi/pi-utils";
-import { collectVerifiedModels } from "../cli/list-models";
 import { type Static, Type } from "@sinclair/typebox";
+import { collectVerifiedModels } from "../cli/list-models";
 import listModelsDescription from "../prompts/tools/list-models.md" with { type: "text" };
 import type { ToolSession } from "./index";
 import { ToolError } from "./tool-errors";

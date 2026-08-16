@@ -162,7 +162,7 @@ function makeSession(sessionPath: string, conversationId: string): SessionRecord
 	};
 }
 
-function makeDingTalkConfig(cardServerPort: number): DingTalkConfig {
+function makeDingTalkConfig(_cardServerPort: number): DingTalkConfig {
 	return {
 		enabled: true,
 		appKey: "test-key",

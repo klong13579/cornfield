@@ -114,11 +114,11 @@ describe("buildWorkerStreamLines", () => {
 	});
 
 	it("uses FAILED label for failed slots", () => {
-		const lines = buildWorkerStreamLines(
-			[{ name: "critical", text: "boom", status: "failed" }],
-			plainTheme,
-			{ previewLines: 2, previewChars: 80, spinnerFrame: 0 },
-		);
+		const lines = buildWorkerStreamLines([{ name: "critical", text: "boom", status: "failed" }], plainTheme, {
+			previewLines: 2,
+			previewChars: 80,
+			spinnerFrame: 0,
+		});
 		expect(lines.join("\n")).toMatch(/critical.*FAILED/i);
 	});
 });

@@ -1,4 +1,6 @@
 #!/usr/bin/env bun
+import * as os from "node:os";
+import * as path from "node:path";
 /**
  * Realtime voice sample synthesis — speaks the SAME text with every gateway
  * voice and writes one WAV per voice, so the user can audition and pick.
@@ -28,15 +30,7 @@
  *   -h, --help         Show this help
  */
 import { RealtimeWsTransport } from "@oh-my-pi/pi-ai";
-import {
-	concatPcm,
-	encodeWav,
-	REALTIME_VOICES,
-	resolveRealtimeCredentials,
-	type VoiceInfo,
-} from "./realtime-common";
-import * as os from "node:os";
-import * as path from "node:path";
+import { concatPcm, encodeWav, REALTIME_VOICES, resolveRealtimeCredentials, type VoiceInfo } from "./realtime-common";
 
 const SAMPLE_RATE = 24_000;
 const CHANNELS = 1;
@@ -130,6 +124,7 @@ function parseCliArgs(argv: string[]): SampleOptions {
 				options.pauseMs = Number(next());
 				break;
 			case "--help":
+			// biome-ignore lint/suspicious/noFallthroughSwitchClause: --help and -h share the usage/exit body
 			case "-h":
 				console.log(usage());
 				process.exit(0);
@@ -191,9 +186,11 @@ async function trySynthesize(
 			clearTimeout(timeout);
 			unsubscribe();
 			const pcm = concatPcm(audioParts);
-			resolve(pcm.byteLength > 0
-				? { pcm, error: undefined, serverVoice }
-				: { pcm: undefined, error: serverError ?? "empty audio", serverVoice });
+			resolve(
+				pcm.byteLength > 0
+					? { pcm, error: undefined, serverVoice }
+					: { pcm: undefined, error: serverError ?? "empty audio", serverVoice },
+			);
 		} else if (event.type === "session.updated") {
 			serverVoice = event.session.voice;
 		} else if (event.type === "error") {
@@ -237,9 +234,10 @@ async function main(): Promise<void> {
 	const credentials = await resolveRealtimeCredentials(opts.apiKey, opts.baseUrl);
 	const resolved = { ...opts, ...credentials };
 
-	const voices = opts.voiceFilters.length > 0
-		? REALTIME_VOICES.filter(v => opts.voiceFilters.includes(v.id))
-		: REALTIME_VOICES.filter(v => opts.includeEnglish || v.lang === "zh");
+	const voices =
+		opts.voiceFilters.length > 0
+			? REALTIME_VOICES.filter(v => opts.voiceFilters.includes(v.id))
+			: REALTIME_VOICES.filter(v => opts.includeEnglish || v.lang === "zh");
 	if (voices.length === 0) {
 		console.error(`no matching voices for: ${opts.voiceFilters.join(", ")}`);
 		process.exit(2);
@@ -270,7 +268,7 @@ async function main(): Promise<void> {
 		`# omp realtime voice samples (${new Date().toISOString().slice(0, 10)})`,
 		`# text: ${resolved.text}`,
 		"",
-		"# play all: for f in ~/.omp/voice-samples/*.wav; do afplay \"$f\"; done",
+		'# play all: for f in ~/.omp/voice-samples/*.wav; do afplay "$f"; done',
 		"",
 	];
 	for (const row of summary) {

@@ -270,12 +270,10 @@ export class STTController {
 			this.#segSilenceStartMs = now;
 		} else if (now - this.#segSilenceStartMs >= SEGMENT_SILENCE_MS) {
 			this.#segCommitting = true;
-			void this.#streamingTranscriber
-				?.commit()
-				.finally(() => {
-					this.#segCommitting = false;
-					this.#segSilenceStartMs = 0;
-				});
+			void this.#streamingTranscriber?.commit().finally(() => {
+				this.#segCommitting = false;
+				this.#segSilenceStartMs = 0;
+			});
 		}
 	}
 

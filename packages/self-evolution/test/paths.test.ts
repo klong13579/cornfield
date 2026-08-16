@@ -38,7 +38,7 @@ describe("evolution paths", () => {
 	it("uses global user layout when globalStore is true", () => {
 		tempDir = path.join(os.tmpdir(), `evolution-paths-global-${Date.now()}`);
 		const cwd = path.join(tempDir, "repo");
-		const agentDir = path.join(tempDir, "agent");
+		const _agentDir = path.join(tempDir, "agent");
 		const layout = resolveEvolutionPathLayout(cwd, true);
 
 		expect(layout.scope).toBe("user");

@@ -6,8 +6,8 @@ import { afterEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { SessionManager } from "../src/session/session-manager";
 import { LiveTranscriptRecorder, VOICE_MESSAGE_TYPE } from "../src/live/transcript-recorder";
+import { SessionManager } from "../src/session/session-manager";
 
 let tempDir = "";
 
@@ -31,7 +31,8 @@ describe("voice transcript persistence (real SessionManager)", () => {
 		// 1. In-memory branch carries the voice entries in order.
 		const branch = manager.getBranch();
 		const voiceEntries = branch.filter(
-			entry => entry.type === "custom_message" && (entry as { customType?: string }).customType === VOICE_MESSAGE_TYPE,
+			entry =>
+				entry.type === "custom_message" && (entry as { customType?: string }).customType === VOICE_MESSAGE_TYPE,
 		);
 		expect(voiceEntries.length).toBe(2);
 		// Writes are queued asynchronously; flush before asserting on disk.

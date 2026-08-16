@@ -77,7 +77,12 @@ describe("Container.dispose-before-clear", () => {
 	});
 
 	it("stops Loader timers after clear (rebuildChatFromMessages path)", async () => {
-		const loader = new Loader(ui, (s) => s, (s) => s, "working");
+		const loader = new Loader(
+			ui,
+			s => s,
+			s => s,
+			"working",
+		);
 		const chatContainer = new Container();
 		chatContainer.addChild(loader);
 
@@ -92,7 +97,12 @@ describe("Container.dispose-before-clear", () => {
 	});
 
 	it("restarts Loader timers after clear-then-readd + start (bash/python rebuild path)", async () => {
-		const loader = new Loader(ui, (s) => s, (s) => s, "running");
+		const loader = new Loader(
+			ui,
+			s => s,
+			s => s,
+			"running",
+		);
 		const contentContainer = new Container();
 		contentContainer.addChild(loader);
 

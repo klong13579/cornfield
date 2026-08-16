@@ -1,22 +1,22 @@
-import { describe, expect, it } from "bun:test";
 import { Database } from "bun:sqlite";
+import { describe, expect, it } from "bun:test";
 import { initSchema } from "../src/storage/db";
 import { SqliteLearningStore } from "../src/storage/learnings";
 import type { Learning } from "../src/types";
 
 function makeLearning(overrides: Partial<Learning> = {}): Learning {
 	return {
-		id: "lrn_" + Math.random().toString(36).slice(2),
+		id: `lrn_${Math.random().toString(36).slice(2)}`,
 		cwd: "/test",
 		kind: "fact",
 		content: "default content",
+		updatedAt: Date.now(),
 		source: "session_llm",
 		confidence: 4,
 		lifecycle: "active",
 		scope: "project",
 		sessionId: "sess-1",
 		createdAt: Date.now(),
-		updatedAt: Date.now(),
 		timesInjected: 1,
 		timesHelped: 0,
 		timesIgnored: 0,
@@ -70,6 +70,7 @@ describe("SqliteLearningStore semantic dedup", () => {
 		});
 		const l2 = makeLearning({
 			kind: "preference",
+			scope: "project",
 			content: "This is a long fact text about something important in the project",
 		});
 		await store.insert(l1);

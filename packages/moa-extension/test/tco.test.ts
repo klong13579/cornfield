@@ -218,9 +218,9 @@ describe("validateTco", () => {
 	it("flags missing_inputs length over cap", () => {
 		// parseDiscoveryOutput clamps to its own default cap (5), so build a TCO
 		// manually to push the validator's contract: 6 items, cap=5 → not ok.
-		const tco = emptyTco("x");
+		const tco = emptyTco("x", "");
 		for (let i = 0; i < 6; i++) {
-			tco.missing_inputs.push({ key: `k${i}`, question: "q", type: "text", required: true });
+			tco.missing_inputs.push({ key: `k${i}`, question: "q", type: "text", required: true, why_critical: "" });
 		}
 		const v = validateTco(tco, 5);
 		expect(v.ok).toBe(false);
@@ -295,9 +295,7 @@ describe("renderTcoForPrompt", () => {
 	});
 
 	it("caps research_pack sources injected into prompts at 8", () => {
-		const { tco } = parseDiscoveryOutput(
-			JSON.stringify({ task_understanding: "compare", known_inputs: [] }),
-		);
+		const { tco } = parseDiscoveryOutput(JSON.stringify({ task_understanding: "compare", known_inputs: [] }));
 		tco.research_pack = {
 			mode: "required",
 			gathered_at: "2026-07-17T00:00:00.000Z",
@@ -426,7 +424,11 @@ describe("salvageResearchPack (soft-stop finalize)", () => {
 
 	it("recovers urls from tool-trace text when assistant output is empty", () => {
 		const toolTrace = `[web_search]\nResults for openclaw:\n- https://github.com/openclaw/openclaw\n- https://docs.openclaw.ai/intro\n`;
-		const pack = salvageResearchPack(`\n${toolTrace}`, "required", "research interrupted: web_search budget exceeded (3)");
+		const pack = salvageResearchPack(
+			`\n${toolTrace}`,
+			"required",
+			"research interrupted: web_search budget exceeded (3)",
+		);
 		expect(pack.sources.length).toBeGreaterThanOrEqual(2);
 		expect(pack.sources.some(s => s.url.includes("github.com/openclaw"))).toBe(true);
 		expect(pack.parse_source).toBe("tool_trace");
@@ -573,6 +575,7 @@ describe("extractCompareEntities + filterResearchPackForTask (P1)", () => {
 
 	it("drops off-topic URL even when polished claim name-drops compare entities", () => {
 		const pack = {
+			gathered_at: "",
 			mode: "required" as const,
 			parse_source: "tool_trace" as const,
 			queries: [] as string[],

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import type { Model } from "@oh-my-pi/pi-ai";
+import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { ListModelsTool } from "@oh-my-pi/pi-coding-agent/tools/list-models";
 
@@ -45,6 +46,7 @@ function makeSession(overrides: Partial<ToolSession> = {}): ToolSession {
 		getSessionSpawns: () => "*",
 		getActiveModelString: () => "narwal-plan/minimax-m3",
 		getAvailableModels: () => MODELS,
+		settings: Settings.isolated(),
 		...overrides,
 	};
 }
@@ -104,7 +106,7 @@ describe("ListModelsTool", () => {
 		const result = await tool.execute("call-4", { query: "totally-unknown" });
 		const text = readText(result);
 		expect(text).toContain(`没有匹配 "totally-unknown" 的模型。`);
-		expect(result.details.filtered).toBe(0);
+		expect(result.details!.filtered).toBe(0);
 	});
 
 	it("shows context window in human-readable form (k / M)", async () => {
@@ -170,18 +172,18 @@ describe("ListModelsTool", () => {
 	it("includes query in details when filter was applied", async () => {
 		const tool = new ListModelsTool(makeSession());
 		const result = await tool.execute("call-12", { query: "claude" });
-		expect(result.details.query).toBe("claude");
-		expect(result.details.filtered).toBe(1);
-		expect(result.details.total).toBe(5);
-		expect(result.details.current).toBe("narwal-plan/minimax-m3");
+		expect(result.details!.query).toBe("claude");
+		expect(result.details!.filtered).toBe(1);
+		expect(result.details!.total).toBe(5);
+		expect(result.details!.current).toBe("narwal-plan/minimax-m3");
 	});
 
 	it("reports total + filtered in details even when no query is passed", async () => {
 		const tool = new ListModelsTool(makeSession());
 		const result = await tool.execute("call-13", {});
-		expect(result.details.total).toBe(5);
-		expect(result.details.filtered).toBe(5);
-		expect(result.details.query).toBeUndefined();
+		expect(result.details!.total).toBe(5);
+		expect(result.details!.filtered).toBe(5);
+		expect(result.details!.query).toBeUndefined();
 	});
 
 	it("intent field is set for both empty and filtered queries", () => {

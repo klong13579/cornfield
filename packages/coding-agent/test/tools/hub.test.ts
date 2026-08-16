@@ -50,8 +50,8 @@ describe("HubTool", () => {
 	});
 
 	test("list shows peers with activity and recency sort", async () => {
-		const a = registry.register({ id: "a", displayName: "A", kind: "sub", session: fakeSession });
-		const b = registry.register({ id: "b", displayName: "B", kind: "sub", session: fakeSession });
+		const _a = registry.register({ id: "a", displayName: "A", kind: "sub", session: fakeSession });
+		const _b = registry.register({ id: "b", displayName: "B", kind: "sub", session: fakeSession });
 		registry.setActivity("b", "running the build");
 		// bump a's activity so it becomes most recent
 		await Bun.sleep(2);

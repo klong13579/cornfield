@@ -121,10 +121,7 @@ export function buildWorkerStreamLines(
 	for (const slot of slots) {
 		const meta = statusMeta(slot.status, theme, options.spinnerFrame);
 		const elapsed = formatElapsed(slot.startedAtMs, nowMs);
-		const header = theme.fg(
-			meta.fg,
-			`${meta.icon} ${slot.name}  ${meta.label}${elapsed}`,
-		);
+		const header = theme.fg(meta.fg, `${meta.icon} ${slot.name}  ${meta.label}${elapsed}`);
 		out.push(header);
 		const preview = previewMultilineTail(slot.text, options.previewLines, options.previewChars);
 		if (preview.length === 0 || (preview.length === 1 && !preview[0]?.trim())) {

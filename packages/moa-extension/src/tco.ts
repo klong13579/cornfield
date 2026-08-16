@@ -315,10 +315,7 @@ export function parseResearchPack(raw: string, mode: "encouraged" | "required"):
 }
 
 /** Same as `parseResearchPack` but also reports whether JSON or markdown won. */
-export function parseResearchPackDetailed(
-	raw: string,
-	mode: "encouraged" | "required",
-): ResearchPackParseResult {
+export function parseResearchPackDetailed(raw: string, mode: "encouraged" | "required"): ResearchPackParseResult {
 	const fromJson = parseResearchPackFromJson(raw);
 	if (fromJson) {
 		return {
@@ -342,11 +339,7 @@ export function parseResearchPackDetailed(
  * URLs scraped from the raw text). Prefer `finalizeResearchPackFromToolTrace` when
  * tool traces are available — it caps sources and labels `tool_trace`.
  */
-export function salvageResearchPack(
-	raw: string,
-	mode: "encouraged" | "required",
-	reason: string,
-): ResearchPack {
+export function salvageResearchPack(raw: string, mode: "encouraged" | "required", reason: string): ResearchPack {
 	return finalizeResearchPackFromToolTrace(raw, mode, reason, { maxSources: 8 });
 }
 
@@ -395,7 +388,10 @@ export function extractWebSearchHits(raw: string): WebSearchHit[] {
 	const seen = new Set<string>();
 	const re = /\[(\d+)\]\s+([^\n]+)\n[ \t]+(https?:\/\/\S+)(?:\n[ \t]+([^\n[\]]+))?/g;
 	for (const m of text.matchAll(re)) {
-		const titleRaw = (m[2] ?? "").trim().replace(/\s+\([^)]*\)\s*$/, "").trim();
+		const titleRaw = (m[2] ?? "")
+			.trim()
+			.replace(/\s+\([^)]*\)\s*$/, "")
+			.trim();
 		const url = sanitizeResearchUrl(m[3] ?? "");
 		if (!url || seen.has(url)) continue;
 		seen.add(url);

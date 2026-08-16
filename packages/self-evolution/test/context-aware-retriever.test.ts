@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { ContextAwareRetriever } from "../src/context-aware-retriever";
 import type { EffectivenessStore, EpisodeStore, IntentStore } from "../src/storage/types";
-import type { Episode, EpisodeEffectiveness, UserProfile } from "../src/types";
+import type { Episode, EpisodeEffectiveness, EpisodeIntent, UserProfile } from "../src/types";
 
 class MockEpisodeStore implements EpisodeStore {
 	#episodes: Episode[] = [];
@@ -29,6 +29,7 @@ class MockEpisodeStore implements EpisodeStore {
 }
 
 class MockIntentStore implements IntentStore {
+	getRecent = async (): Promise<EpisodeIntent[]> => [];
 	#intents = new Map<string, { intent: string; confidence: number }[]>();
 
 	setIntents(episodeId: string, intents: { intent: string; confidence: number }[]) {
@@ -96,7 +97,6 @@ function makeEpisode(id: string, prompt: string, toolCallCount: number = 2, over
 function makeProfile(overrides: Partial<UserProfile> = {}): UserProfile {
 	return {
 		toolFrequency: {},
-		toolTransitions: {},
 		intentDistribution: {},
 		avgToolCallsPerSession: 0,
 		avgFilesModifiedPerSession: 0,
@@ -104,7 +104,6 @@ function makeProfile(overrides: Partial<UserProfile> = {}): UserProfile {
 		recoveryRate: 0,
 		preferredLanguages: [],
 		sessionCount: 0,
-		updatedAt: Date.now(),
 		...overrides,
 	};
 }
@@ -191,12 +190,11 @@ describe("ContextAwareRetriever", () => {
 		intentStore.setIntents("ep2", [{ intent: "refactoring", confidence: 80 }]);
 
 		const retriever = new ContextAwareRetriever(episodeStore, intentStore, new MockEffectivenessStore());
-		const profile = makeProfile({ preferredLanguages: ["typescript"] });
+		const _profile = makeProfile({ preferredLanguages: ["typescript"] });
 		const results = await retriever.retrieve("refactor", {
 			maxEpisodes: 10,
 			llmRerank: false,
 			currentIntent: "refactoring",
-			profile,
 		});
 
 		expect(results.length).toBe(2);
@@ -220,13 +218,12 @@ describe("ContextAwareRetriever", () => {
 		intentStore.setIntents("ep2", [{ intent: "exploration", confidence: 60 }]);
 
 		const retriever = new ContextAwareRetriever(episodeStore, intentStore, new MockEffectivenessStore());
-		const profile = makeProfile({
+		const _profile = makeProfile({
 			toolFrequency: { bash: 10, read: 5, find: 1 },
 		});
 		const results = await retriever.retrieve("deploy", {
 			maxEpisodes: 10,
 			llmRerank: false,
-			profile,
 		});
 
 		expect(results.length).toBe(2);
@@ -245,14 +242,13 @@ describe("ContextAwareRetriever", () => {
 		intentStore.setIntents("ep2", [{ intent: "bugfix", confidence: 80 }]);
 
 		const retriever = new ContextAwareRetriever(episodeStore, intentStore, new MockEffectivenessStore());
-		const profile = makeProfile({
+		const _profile = makeProfile({
 			intentDistribution: { refactoring: 5, bugfix: 1 },
 		});
 		// No currentIntent — intent match won't fire, but intent affinity should
 		const results = await retriever.retrieve("work", {
 			maxEpisodes: 10,
 			llmRerank: false,
-			profile,
 		});
 
 		expect(results.length).toBe(2);
@@ -269,14 +265,13 @@ describe("ContextAwareRetriever", () => {
 		intentStore.setIntents("ep1", [{ intent: "refactoring", confidence: 80 }]);
 
 		const retriever = new ContextAwareRetriever(episodeStore, intentStore, new MockEffectivenessStore());
-		const profile = makeProfile({
+		const _profile = makeProfile({
 			intentDistribution: { refactoring: 5 },
 		});
 		const results = await retriever.retrieve("refactor", {
 			maxEpisodes: 10,
 			llmRerank: false,
 			currentIntent: "refactoring",
-			profile,
 		});
 
 		expect(results.length).toBe(1);

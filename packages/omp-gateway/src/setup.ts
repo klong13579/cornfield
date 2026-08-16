@@ -17,8 +17,8 @@
 
 import { runAgentInit } from "@oh-my-pi/pi-coding-agent/cli/agent-cli";
 import { ZodError } from "zod";
-import type { DingTalkConfig, DingtalkAccountConfig, GatewayConfig } from "./types";
 import { getConfigPath, loadConfig, validateAndNormalizeConfig } from "./config";
+import type { DingTalkConfig, DingtalkAccountConfig, GatewayConfig } from "./types";
 
 export interface SetupOptions {
 	configPath?: string;

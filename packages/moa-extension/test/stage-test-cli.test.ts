@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { writeStageArtifacts } from "../src/stage-artifacts";
 import {
 	parseStageTestArgs,
 	planStageSequence,
@@ -9,14 +10,25 @@ import {
 	stageTestUsage,
 	validateStagePrerequisites,
 } from "../src/stage-test-cli";
-import { writeStageArtifacts } from "../src/stage-artifacts";
 import { emptyTco } from "../src/tco";
 import { DEFAULT_OUTPUT_SCHEMA } from "../src/types";
 
 describe("parseStageTestArgs", () => {
 	it("parses full flag set", () => {
 		const args = parseStageTestArgs(
-			["--stage", "rewrite", "--task", "hi", "--from", "tmp/a", "--out", "tmp/b", "--rounds", "2", "--continue-on-fail"],
+			[
+				"--stage",
+				"rewrite",
+				"--task",
+				"hi",
+				"--from",
+				"tmp/a",
+				"--out",
+				"tmp/b",
+				"--rounds",
+				"2",
+				"--continue-on-fail",
+			],
 			"/cwd",
 		);
 		expect(args.stage).toBe("rewrite");
@@ -87,22 +99,13 @@ describe("resolveStageTestTask", () => {
 	});
 
 	it("returns empty when nothing available", () => {
-		expect(resolveStageTestTask({ stage: "all", out: "/o", continueOnFail: false, help: false }, undefined)).toBe(
-			"",
-		);
+		expect(resolveStageTestTask({ stage: "all", out: "/o", continueOnFail: false, help: false }, undefined)).toBe("");
 	});
 });
 
 describe("planStageSequence", () => {
 	it("all expands to six stages in order (research before ask)", () => {
-		expect(planStageSequence("all")).toEqual([
-			"discovery",
-			"research",
-			"ask",
-			"rewrite",
-			"workers",
-			"synthesis",
-		]);
+		expect(planStageSequence("all")).toEqual(["discovery", "research", "ask", "rewrite", "workers", "synthesis"]);
 	});
 
 	it("single stage returns itself", () => {
@@ -112,12 +115,12 @@ describe("planStageSequence", () => {
 
 describe("validateStagePrerequisites", () => {
 	it("discovery/all require a task string", () => {
-		expect(validateStagePrerequisites({ stage: "discovery", task: "", hasTco: false, hasSurviving: false })).toEqual(
-			{ ok: false, exitCode: 2, message: "Missing --task (required for discovery/all)" },
-		);
-		expect(validateStagePrerequisites({ stage: "all", task: "x", hasTco: false, hasSurviving: false }).ok).toBe(
-			true,
-		);
+		expect(validateStagePrerequisites({ stage: "discovery", task: "", hasTco: false, hasSurviving: false })).toEqual({
+			ok: false,
+			exitCode: 2,
+			message: "Missing --task (required for discovery/all)",
+		});
+		expect(validateStagePrerequisites({ stage: "all", task: "x", hasTco: false, hasSurviving: false }).ok).toBe(true);
 	});
 
 	it("rewrite without tco and without --from fails", () => {
@@ -129,6 +132,8 @@ describe("validateStagePrerequisites", () => {
 			hasFrom: false,
 		});
 		expect(r.ok).toBe(false);
+		if (r.ok) throw new Error("expected failure");
+		if (r.ok) throw new Error("expected failure");
 		expect(r.exitCode).toBe(2);
 		expect(r.message).toMatch(/rewrite needs --from/);
 	});
@@ -144,6 +149,8 @@ describe("validateStagePrerequisites", () => {
 			fromDir: dir,
 		});
 		expect(r.ok).toBe(false);
+		if (r.ok) throw new Error("expected failure");
+		if (r.ok) throw new Error("expected failure");
 		expect(r.message).toMatch(/tco\.json/);
 	});
 
@@ -174,6 +181,7 @@ describe("validateStagePrerequisites", () => {
 			hasFrom: false,
 		});
 		expect(r.ok).toBe(false);
+		if (r.ok) throw new Error("expected failure");
 		expect(r.message).toMatch(/workers\.json/);
 	});
 });

@@ -20,13 +20,8 @@ import { enrichSchemaWithSources, renderResearchGuidance, resolveResearchMode } 
 import { resolveSettings } from "../src/settings";
 import { createStageRunDir, writeStageArtifacts } from "../src/stage-artifacts";
 import { createStageCliUI, type StageCliIo } from "../src/stage-cli-ui";
-import {
-	runAskStage,
-	runDiscoveryStage,
-	runResearchStage,
-	runWorkersStage,
-} from "../src/stages";
-import { extractCompareEntities, renderTcoForPrompt, type ResearchPack } from "../src/tco";
+import { runAskStage, runDiscoveryStage, runResearchStage, runWorkersStage } from "../src/stages";
+import { extractCompareEntities, type ResearchPack, renderTcoForPrompt } from "../src/tco";
 import { formatDuration } from "../src/timing";
 import { DEFAULT_OUTPUT_SCHEMA, type MoaWorkerResult } from "../src/types";
 
@@ -207,7 +202,9 @@ async function runOne(caseDef: CaseDef): Promise<{ ok: boolean; runDir: string; 
 	}
 }
 
-async function runOneInner(caseDef: CaseDef): Promise<{ ok: boolean; runDir: string; wallMs: number; fails: AssertFail[] }> {
+async function runOneInner(
+	caseDef: CaseDef,
+): Promise<{ ok: boolean; runDir: string; wallMs: number; fails: AssertFail[] }> {
 	const cwd = process.cwd();
 	const outRoot = path.join(cwd, "tmp/moa-short-probe", caseDef.id);
 	const runDir = createStageRunDir(outRoot);
@@ -258,8 +255,10 @@ async function runOneInner(caseDef: CaseDef): Promise<{ ok: boolean; runDir: str
 	const discovery = await runDiscoveryStage(stageCtx, executeOptions);
 	durations.discovery = discovery.durationMs;
 	let tco = discovery.tco;
-	let outputSchema = enrichSchemaWithSources(discovery.outputSchema ?? DEFAULT_OUTPUT_SCHEMA, effectiveResearch);
-	log(`✓ discovery ${formatDuration(discovery.durationMs)} known=${tco.known_inputs.length} missing=${tco.missing_inputs.length}`);
+	const outputSchema = enrichSchemaWithSources(discovery.outputSchema ?? DEFAULT_OUTPUT_SCHEMA, effectiveResearch);
+	log(
+		`✓ discovery ${formatDuration(discovery.durationMs)} known=${tco.known_inputs.length} missing=${tco.missing_inputs.length}`,
+	);
 
 	const knownBeforeAsk = tco.known_inputs.map(k => k.key);
 
@@ -309,9 +308,7 @@ async function runOneInner(caseDef: CaseDef): Promise<{ ok: boolean; runDir: str
 		effectiveMaxRounds: 0,
 	});
 	durations.workers = workers.durationMs;
-	log(
-		`✓ workers ${formatDuration(workers.durationMs)} ok=${workers.surviving.length}/${workers.workers.length}`,
-	);
+	log(`✓ workers ${formatDuration(workers.durationMs)} ok=${workers.surviving.length}/${workers.workers.length}`);
 	fails.push(...assertWorkers(workers.workers));
 
 	const wallMs = Date.now() - wall0;

@@ -71,11 +71,11 @@ export function createStageCliUI(io: StageCliIo = createDefaultStageCliIo()): Ex
 		},
 		notify,
 		onTerminalInput: () => () => {},
-		setStatus: (_key, text) => {
+		setStatus: (_key: string, text: string) => {
 			if (text) io.write(`[status] ${text}\n`);
 		},
 		setWorking: () => {},
-		setWorkingMessage: msg => {
+		setWorkingMessage: (msg: string) => {
 			if (msg) io.write(`[working] ${msg}\n`);
 		},
 		setEditorText: () => {},

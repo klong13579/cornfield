@@ -505,7 +505,7 @@ async function handleAdd(args: CronToolArgs, ctx: CronToolContext): Promise<Host
 		skills: arrayArg(args, "skills"),
 		preScript: stringArg(args, "preScript"),
 		agentDir,
-		delivery: { ...delivery.value, mode: delivery.value.mode ?? "announce" },
+		delivery: { ...delivery.value!, mode: delivery.value!.mode ?? "announce" },
 		repeatCount: numberArg(args, "repeatCount"),
 		repeatCompleted: 0,
 		status: "active",
@@ -622,7 +622,7 @@ function handleRecent(args: CronToolArgs, storage: SchedulerStorage, accountId?:
 	const filteredRows = accountTaskNames ? rows.filter(r => accountTaskNames.has(r.taskName)) : rows;
 
 	const truncatedDefault = 2000;
-		const payload = filteredRows.map(r => {
+	const payload = filteredRows.map(r => {
 		const durationMs = r.endedAt !== undefined ? r.endedAt - r.startedAt : undefined;
 		const entry: Record<string, unknown> = {
 			id: r.id,
@@ -751,12 +751,12 @@ function resolveDeliveryForAdd(args: CronToolArgs, ctx: CronToolContext): Delive
 		// so fall back to scanning `getAll()` for a channel whose `id`
 		// matches. This keeps the cron tool decoupled from the gateway's
 		// multi-account registration convention.
-		if (!ctx.registry.get(validated.value.channel)) {
-			const matched = ctx.registry.getAll().some(ch => ch.id === validated.value.channel);
+		if (!ctx.registry.get(validated.value!.channel)) {
+			const matched = ctx.registry.getAll().some(ch => ch.id === validated.value!.channel);
 			if (!matched) {
 				return {
 					kind: "error",
-					message: `add: channel "${validated.value.channel}" is not registered in the gateway's ChannelRegistry`,
+					message: `add: channel "${validated.value!.channel}" is not registered in the gateway's ChannelRegistry`,
 				};
 			}
 		}
@@ -778,12 +778,12 @@ function resolveDeliveryForAdd(args: CronToolArgs, ctx: CronToolContext): Delive
 	if (!validated.ok) {
 		return { kind: "error", message: `add: auto-inferred delivery failed validation: ${validated.error}` };
 	}
-	if (!ctx.registry.get(validated.value.channel)) {
-		const matched = ctx.registry.getAll().some(ch => ch.id === validated.value.channel);
+	if (!ctx.registry.get(validated.value!.channel)) {
+		const matched = ctx.registry.getAll().some(ch => ch.id === validated.value!.channel);
 		if (!matched) {
 			return {
 				kind: "error",
-				message: `add: active chat's channel "${validated.value.channel}" is not registered in the gateway's ChannelRegistry`,
+				message: `add: active chat's channel "${validated.value!.channel}" is not registered in the gateway's ChannelRegistry`,
 			};
 		}
 	}
@@ -809,9 +809,10 @@ function taskBelongsToAccount(task: ScheduledTask, accountId: string): boolean {
 	if (task.createdByAccountId === accountId) return true;
 	if (task.delivery?.accountId === accountId) return true;
 	// Deprecated v1 accountId field — only used by CLI-created tasks.
-	if ((task as Record<string, unknown>).accountId === accountId) return true;
+	if ((task as unknown as Record<string, unknown>).accountId === accountId) return true;
 	// Neither field set → operator CLI task, visible to all.
-	if (!task.createdByAccountId && !task.delivery?.accountId && !(task as Record<string, unknown>).accountId) return true;
+	if (!task.createdByAccountId && !task.delivery?.accountId && !(task as unknown as Record<string, unknown>).accountId)
+		return true;
 	return false;
 }
 function resolveTask(args: CronToolArgs, storage: SchedulerStorage, accountId?: string): ScheduledTask | undefined {

@@ -8,9 +8,10 @@
  * rejects any id not in this set, and it is longer than the official
  * Qwen-Audio-Realtime doc list (5 voices).
  */
-import { isEnoent } from "@oh-my-pi/pi-utils";
+
 import * as os from "node:os";
 import * as path from "node:path";
+import { isEnoent } from "@oh-my-pi/pi-utils";
 
 export const DEFAULT_MODEL = "qwen-audio-3.0-realtime-flash";
 export const DEFAULT_BASE_URL = "https://coder.narwal.com/v1";
@@ -76,9 +77,9 @@ export async function resolveRealtimeCredentials(
 	const providerRoot = parsed?.[DEFAULT_PROVIDER];
 	// models.yml wraps providers under a `providers:` key; accept both shapes.
 	const provider =
-		(providerRoot && typeof providerRoot === "object" && !Array.isArray(providerRoot)
+		providerRoot && typeof providerRoot === "object" && !Array.isArray(providerRoot)
 			? (providerRoot as ProviderEntry)
-			: ((parsed?.providers as ProviderEntry | undefined) ?? {}) as ProviderEntry);
+			: (((parsed?.providers as ProviderEntry | undefined) ?? {}) as ProviderEntry);
 	const apiKeyRef = provider.apiKey;
 	// models.yml apiKey is usually an env var NAME; fall back to a literal key.
 	const resolved = apiKeyRef ? (process.env[apiKeyRef] ?? apiKeyRef) : undefined;
@@ -103,12 +104,7 @@ export function concatPcm(parts: string[]): Uint8Array {
 }
 
 /** Encodes raw PCM16 into a RIFF/WAV file. */
-export function encodeWav(
-	pcm: Uint8Array,
-	sampleRate: number,
-	channels: number,
-	bitsPerSample: number,
-): Uint8Array {
+export function encodeWav(pcm: Uint8Array, sampleRate: number, channels: number, bitsPerSample: number): Uint8Array {
 	const dataSize = pcm.length;
 	const buffer = new ArrayBuffer(44 + dataSize);
 	const view = new DataView(buffer);

@@ -188,6 +188,10 @@ export async function scanAndKillRemainingGatewayProcesses(): Promise<void> {
 // ═══════════════════════════════════════════════════════════════════════
 
 export interface GatewayDaemonStatus {
+	/** Whether the last observed PID was alive at stale-pid check time. */
+	pidWasAlive?: number;
+	/** Timestamp when the stale-pid kill was observed. */
+	stoppedAt?: number;
 	running: boolean;
 	pid?: number;
 	startedAt?: string;

@@ -474,7 +474,7 @@ export class VoiceImmersiveView implements Component {
 		const fx = Math.max(4, Math.floor((width - feedW) / 2));
 		const indent = " ".repeat(fx);
 		if (this.#taskTitle) {
-			out.push(indent + `${this.#rgb(BLUE, "任务")} ${truncateToWidth(this.#taskTitle, feedW - 6)}`);
+			out.push(`${indent}${this.#rgb(BLUE, "任务")} ${truncateToWidth(this.#taskTitle, feedW - 6)}`);
 			out.push("");
 		}
 		for (const line of this.#activity) {

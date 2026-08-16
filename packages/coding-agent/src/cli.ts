@@ -79,7 +79,8 @@ function isSubcommand(first: string | undefined): boolean {
 	return commands.some(e => e.name === first || e.aliases?.includes(first));
 }
 
-const GATEWAY_MOVED_MESSAGE = `\nThe gateway daemon is now a separate binary.\n` +
+const GATEWAY_MOVED_MESSAGE =
+	`\nThe gateway daemon is now a separate binary.\n` +
 	`\`omp gateway\` was removed from omp; use \`omp-gateway\` (installed alongside omp):\n` +
 	`\n` +
 	`  omp-gateway start --foreground\n` +

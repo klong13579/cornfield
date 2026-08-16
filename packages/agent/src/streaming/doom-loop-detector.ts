@@ -254,7 +254,8 @@ function checkThinkingDoom(text: string, cfg: ThinkingDoomConfig): DoomVerdict {
  * that appears in natural language. Everything else (box-drawing, arrows,
  * structural markers, whitespace) is stripped.
  */
-const MEANINGFUL_CHARS = /[a-zA-Z0-9\u00c0-\u024f\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af\u3000-\u303f\uff00-\uffef]/;
+const MEANINGFUL_CHARS =
+	/[a-zA-Z0-9\u00c0-\u024f\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af\u3000-\u303f\uff00-\uffef]/;
 
 /**
  * Check if the repeated n-gram carries meaningful semantic content.

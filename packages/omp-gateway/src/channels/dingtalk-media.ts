@@ -152,8 +152,7 @@ export function extractPdfText(buffer: Uint8Array): string {
 
 		// Find all stream...endstream blocks
 		const streamRegex = /stream\r?\n([\s\S]*?)endstream/g;
-		let match;
-		while ((match = streamRegex.exec(raw)) !== null) {
+		for (let match = streamRegex.exec(raw); match !== null; match = streamRegex.exec(raw)) {
 			let streamData = match[1];
 
 			// Try FlateDecode decompression
@@ -166,15 +165,17 @@ export function extractPdfText(buffer: Uint8Array): string {
 
 			// Extract text from Tj operators: (text) Tj
 			const tjRegex = /\(([^)]*)\)\s*Tj/g;
-			let tjMatch;
-			while ((tjMatch = tjRegex.exec(streamData)) !== null) {
+			for (let tjMatch = tjRegex.exec(streamData); tjMatch !== null; tjMatch = tjRegex.exec(streamData)) {
 				texts.push(decodePdfString(tjMatch[1]));
 			}
 
 			// Extract text from TJ arrays: [(text1) -10 (text2)] TJ
 			const tjArrayRegex = /\[([^\]]*)\]\s*TJ/g;
-			let tjArrayMatch;
-			while ((tjArrayMatch = tjArrayRegex.exec(streamData)) !== null) {
+			for (
+				let tjArrayMatch = tjArrayRegex.exec(streamData);
+				tjArrayMatch !== null;
+				tjArrayMatch = tjArrayRegex.exec(streamData)
+			) {
 				const parts = tjArrayMatch[1].match(/\(([^)]*)\)/g);
 				if (parts) {
 					texts.push(parts.map(p => decodePdfString(p.slice(1, -1))).join(""));
@@ -663,7 +664,7 @@ async function customDownloadOneAttachment(
 	if (!downloaded) return null;
 	return {
 		kind,
-		path: downloaded.path,
+		data: await Bun.file(downloaded.path).bytes(),
 		mimeType: downloaded.mimeType,
 		filename: filename ?? downloaded.originalName,
 		size: downloaded.size,

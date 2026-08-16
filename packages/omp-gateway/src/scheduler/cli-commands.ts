@@ -805,6 +805,7 @@ export async function cronTestRun(args: string[], storage: SchedulerStorage): Pr
 	}
 
 	// Success
+	if (result.kind !== "success") return; // started-only: nothing awaited
 	console.log(`[test-run] Triggered after ~${result.triggerLatencyMs}ms (poll wait)`);
 	console.log(`  exec id:   ${result.execId}`);
 	console.log(`  status:    ${result.status}`);

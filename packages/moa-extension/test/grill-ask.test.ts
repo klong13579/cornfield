@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
-import { parseGrillQuestion, runGrillAsk, type GrillQuestion } from "../src/grill-ask";
+import { type GrillQuestion, parseGrillQuestion, runGrillAsk } from "../src/grill-ask";
 import { parseDiscoveryOutput } from "../src/tco";
 
 function makeNoopUI() {

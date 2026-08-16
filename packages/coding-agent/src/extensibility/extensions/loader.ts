@@ -24,13 +24,13 @@ import type {
 	Extension,
 	ExtensionAPI,
 	ExtensionContext,
-	ToolInfo,
 	ExtensionFactory,
 	ExtensionRuntime as IExtensionRuntime,
 	LoadExtensionsResult,
 	MessageRenderer,
 	RegisteredCommand,
 	ToolDefinition,
+	ToolInfo,
 } from "./types";
 
 type HandlerFn = (...args: unknown[]) => Promise<unknown>;

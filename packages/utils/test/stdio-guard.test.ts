@@ -8,12 +8,10 @@ describe("isBrokenStdioError", () => {
 		expect(isBrokenStdioError(Object.assign(new Error("epipe"), { code: "EPIPE" }))).toBe(true);
 		expect(isBrokenStdioError(Object.assign(new Error("enotty"), { code: "ENOTTY" }))).toBe(true);
 		expect(isBrokenStdioError(Object.assign(new Error("badf"), { code: "EBADF" }))).toBe(true);
-		expect(
-			isBrokenStdioError(Object.assign(new Error("destroyed"), { code: "ERR_STREAM_DESTROYED" })),
-		).toBe(true);
-		expect(
-			isBrokenStdioError(Object.assign(new Error("after end"), { code: "ERR_STREAM_WRITE_AFTER_END" })),
-		).toBe(true);
+		expect(isBrokenStdioError(Object.assign(new Error("destroyed"), { code: "ERR_STREAM_DESTROYED" }))).toBe(true);
+		expect(isBrokenStdioError(Object.assign(new Error("after end"), { code: "ERR_STREAM_WRITE_AFTER_END" }))).toBe(
+			true,
+		);
 	});
 
 	test("rejects unrelated errors", () => {

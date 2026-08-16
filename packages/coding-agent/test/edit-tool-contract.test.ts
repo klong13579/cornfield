@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import * as os from "node:os";
+import type { Tool, ToolCall } from "@oh-my-pi/pi-ai/types";
+import { validateToolArguments } from "@oh-my-pi/pi-ai/utils/validation";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { EditTool } from "@oh-my-pi/pi-coding-agent/edit";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { Type } from "@sinclair/typebox";
-import { validateToolArguments } from "@oh-my-pi/pi-ai/utils/validation";
-import type { Tool, ToolCall } from "@oh-my-pi/pi-ai/types";
 
 // ============================================================================
 // Regression test for fp_20260708_empty_args_with_intent (55bdd20d T10):
@@ -28,7 +28,7 @@ import type { Tool, ToolCall } from "@oh-my-pi/pi-ai/types";
 // can be rendered in a unit test without registering runtime helpers. The
 // hashline and atom prompts reference session-specific helpers (e.g. `{{hline}}`)
 // and are exercised end-to-end via the agent loop, not here.
-const TESTABLE_MODES = ["replace", "patch", "apply_patch"] as const;
+const TESTABLE_MODES = ["replace", "patch", "apply_patch"];
 
 const originalEditVariant = Bun.env.PI_EDIT_VARIANT;
 

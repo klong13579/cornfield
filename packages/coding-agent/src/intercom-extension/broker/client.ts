@@ -1,10 +1,6 @@
+import { randomUUID } from "crypto";
 import { EventEmitter } from "events";
 import net from "net";
-import { randomUUID } from "crypto";
-import { writeMessage, createMessageReader } from "./framing";
-import { getBrokerConnectTarget, type BrokerConnectTarget } from "./paths";
-import { isMessage, isMessageControl, isMessageReceipt, isSessionInfo } from "./protocol";
-import { EXTENSION_BUS_FEATURE } from "../types";
 import type {
 	Attachment,
 	BrokerMessage,
@@ -15,6 +11,10 @@ import type {
 	SessionInfo,
 	SessionRegistration,
 } from "../types";
+import { EXTENSION_BUS_FEATURE } from "../types";
+import { createMessageReader, writeMessage } from "./framing";
+import { type BrokerConnectTarget, getBrokerConnectTarget } from "./paths";
+import { isMessage, isMessageControl, isMessageReceipt, isSessionInfo } from "./protocol";
 
 interface SendOptions {
 	text: string;

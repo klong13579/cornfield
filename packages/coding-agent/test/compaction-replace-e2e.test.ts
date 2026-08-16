@@ -20,7 +20,9 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
-import { type AgentMessage } from "@oh-my-pi/pi-agent-core";
+import * as os from "node:os";
+import * as path from "node:path";
+import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import { ModelRegistry } from "../src/config/model-registry";
 import { AuthStorage } from "../src/session/auth-storage";
 import { generateSummary } from "../src/session/compaction/compaction";
@@ -65,7 +67,11 @@ function buildChunk(idx: number, goal: string, decisions: string[], done: string
 	for (let i = 0; i < 5; i++) {
 		out.push(msg(`[chunk ${idx}] User detail ${i}: ${done[i % done.length]}`, "user", idx * 1000 + 2 + i));
 		out.push(
-			msg(`[chunk ${idx}] Assistant response ${i}: noted, will incorporate into plan.`, "assistant", idx * 1000 + 8 + i),
+			msg(
+				`[chunk ${idx}] Assistant response ${i}: noted, will incorporate into plan.`,
+				"assistant",
+				idx * 1000 + 8 + i,
+			),
 		);
 	}
 	return out;
@@ -73,7 +79,7 @@ function buildChunk(idx: number, goal: string, decisions: string[], done: string
 
 function extractGoal(summary: string): string | undefined {
 	// Match the "## Goal" section up to the next "##" header.
-	const match = /## Goal\s*\n([\s\S]*?)(?=\n##\s|\Z)/.exec(summary);
+	const match = /## Goal\s*\n([\s\S]*?)(?=\n##\s|Z)/.exec(summary);
 	return match?.[1]?.trim();
 }
 
@@ -98,7 +104,7 @@ describe.skipIf(!apiKey)("compaction REPLACE behavior (E2E, narwal-plan/minimax-
 	const goal = "refactor the gateway cron service to use sub-agents";
 
 	beforeAll(async () => {
-		authStorage = await AuthStorage.create();
+		authStorage = await AuthStorage.create(path.join(os.tmpdir(), `auth-${Date.now()}.db`));
 		// Override the API key from env (E2E=1 + NARWAL_PLAN_API_KEY).
 		authStorage.setRuntimeApiKey("narwal-plan", apiKey!);
 		modelRegistry = new ModelRegistry(authStorage);
@@ -153,7 +159,9 @@ describe.skipIf(!apiKey)("compaction REPLACE behavior (E2E, narwal-plan/minimax-
 		console.log(`[compaction-e2e] S3 length: ${l3} chars`);
 
 		const ratio31 = l3 / l1;
-		console.log(`[compaction-e2e] S3/S1 ratio: ${ratio31.toFixed(2)}x (bug was 4.1x; fix observed 1.47-2.47x across runs)`);
+		console.log(
+			`[compaction-e2e] S3/S1 ratio: ${ratio31.toFixed(2)}x (bug was 4.1x; fix observed 1.47-2.47x across runs)`,
+		);
 		console.log(`[compaction-e2e] S1 head: ${s1.slice(0, 200)}...`);
 		console.log(`[compaction-e2e] S2 head: ${s2.slice(0, 200)}...`);
 		console.log(`[compaction-e2e] S3 head: ${s3.slice(0, 200)}...`);
@@ -187,8 +195,13 @@ describe.skipIf(!apiKey)("compaction REPLACE behavior (E2E, narwal-plan/minimax-
 		// 1.5x gives room for natural re-wording while catching APPEND which
 		// would push length to ≥ 2x per iteration.
 		const s1GoalLen = s1Goal!.length;
-		expect(s2Goal!.length, `S2's Goal length (${s2Goal!.length}) should be < 1.5x S1's (${s1GoalLen}); APPEND would make it ≥ 2x`).toBeLessThan(s1GoalLen * 1.5);
-		expect(s3Goal!.length, `S3's Goal length (${s3Goal!.length}) should be < 1.5x S1's (${s1GoalLen})`).toBeLessThan(s1GoalLen * 1.5);
+		expect(
+			s2Goal!.length,
+			`S2's Goal length (${s2Goal!.length}) should be < 1.5x S1's (${s1GoalLen}); APPEND would make it ≥ 2x`,
+		).toBeLessThan(s1GoalLen * 1.5);
+		expect(s3Goal!.length, `S3's Goal length (${s3Goal!.length}) should be < 1.5x S1's (${s1GoalLen})`).toBeLessThan(
+			s1GoalLen * 1.5,
+		);
 		// Sanity: each Goal should mention the project topic. The actual Goal
 		// text can vary (model re-words when re-deriving), but the topic must persist.
 		const topicMarker = "sub-agents";

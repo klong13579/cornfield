@@ -20,7 +20,7 @@ const CONFIG_ACK_TIMEOUT_MS = 5_000;
 /** Give up waiting for a committed segment's completed event (silence/quiet servers). */
 const COMMIT_TIMEOUT_MS = 5_000;
 
-	export interface StreamingTranscriberOptions {
+export interface StreamingTranscriberOptions {
 	/** e.g. "https://coder.narwal.com/v1" */
 	baseUrl: string;
 	apiKey: string;
@@ -59,9 +59,7 @@ export interface StreamingTranscriber {
  * this promise resolves (session.update acked), after which `feed()` may be
  * called. Rejects if the WebSocket handshake or session config fails.
  */
-export async function createStreamingTranscriber(
-	options: StreamingTranscriberOptions,
-): Promise<StreamingTranscriber> {
+export async function createStreamingTranscriber(options: StreamingTranscriberOptions): Promise<StreamingTranscriber> {
 	const wsUrl = buildRealtimeWsUrl(options.baseUrl.replace(/\/?$/, ""), options.model);
 
 	// Bun's WebSocket accepts custom headers; the DOM lib type does not.
@@ -150,9 +148,7 @@ export async function createStreamingTranscriber(
 			}
 
 			case "error": {
-				const err = new Error(
-					`Streaming transcription error: ${(msg.message as string) ?? JSON.stringify(msg)}`,
-				);
+				const err = new Error(`Streaming transcription error: ${(msg.message as string) ?? JSON.stringify(msg)}`);
 				logger.error("streaming STT ws error", { message: err.message });
 				options.onError?.(err);
 				break;

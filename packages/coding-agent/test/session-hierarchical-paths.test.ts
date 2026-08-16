@@ -57,7 +57,7 @@ describe("session-paths", () => {
 
 describe("hierarchical session layout (integration)", () => {
 	let tempDir = "";
-	const STORAGE_ROOT = "/sessions";
+	const _STORAGE_ROOT = "/sessions";
 
 	beforeEach(() => {
 		tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "session-hier-test-"));
@@ -71,7 +71,7 @@ describe("hierarchical session layout (integration)", () => {
 		const filePath = sessionFilePath(tempDir, "019ee098-9baf-7000-96ff-2b209e5ea180");
 		const dateDir = path.dirname(filePath);
 		fs.mkdirSync(dateDir, { recursive: true });
-		fs.writeFileSync(filePath, JSON.stringify({ type: "session", id: "x" }) + "\n");
+		fs.writeFileSync(filePath, `${JSON.stringify({ type: "session", id: "x" })}\n`);
 
 		const today = new Date();
 		const expectedDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
@@ -82,12 +82,12 @@ describe("hierarchical session layout (integration)", () => {
 	it("coexists with legacy flat files (read-back scenario)", () => {
 		// Legacy: a flat file at the root, written by older code
 		const legacyFile = path.join(tempDir, "2026-06-15T09-18-46-865Z_019eca93-1234-7000-96ff-aaaaaaaaaaaa.jsonl");
-		fs.writeFileSync(legacyFile, JSON.stringify({ type: "session", id: "legacy" }) + "\n");
+		fs.writeFileSync(legacyFile, `${JSON.stringify({ type: "session", id: "legacy" })}\n`);
 
 		// New: a session in by-date/YYYY-MM-DD/
 		const newFile = sessionFilePath(tempDir, "019ee098-9baf-7000-96ff-2b209e5ea180");
 		fs.mkdirSync(path.dirname(newFile), { recursive: true });
-		fs.writeFileSync(newFile, JSON.stringify({ type: "session", id: "new" }) + "\n");
+		fs.writeFileSync(newFile, `${JSON.stringify({ type: "session", id: "new" })}\n`);
 
 		// Both should be visible
 		expect(fs.existsSync(legacyFile)).toBe(true);

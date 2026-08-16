@@ -89,9 +89,9 @@ describe("heterogeneous default MOA models", () => {
 	});
 
 	it("exports named model constants matching the 3 worker slots", () => {
-		expect(DEFAULT_WORKER_MODELS.divergent).toBe(DEFAULT_WORKER_SLOTS[0]?.model);
-		expect(DEFAULT_WORKER_MODELS.grounded).toBe(DEFAULT_WORKER_SLOTS[1]?.model);
-		expect(DEFAULT_WORKER_MODELS.critical).toBe(DEFAULT_WORKER_SLOTS[2]?.model);
+		expect(DEFAULT_WORKER_MODELS.divergent).toEqual(DEFAULT_WORKER_SLOTS[0]!.model!);
+		expect(DEFAULT_WORKER_MODELS.grounded).toEqual(DEFAULT_WORKER_SLOTS[1]!.model!);
+		expect(DEFAULT_WORKER_MODELS.critical).toEqual(DEFAULT_WORKER_SLOTS[2]!.model!);
 	});
 });
 

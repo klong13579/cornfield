@@ -18,8 +18,8 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import winston from "winston";
-import { RotatingFileTransport } from "../src/rotating-file-transport";
 import { cleanupStaleLogs } from "../src/log-cleanup";
+import { RotatingFileTransport } from "../src/rotating-file-transport";
 
 describe("RotatingFileTransport", () => {
 	const originalHome = process.env.HOME;
@@ -52,7 +52,7 @@ describe("RotatingFileTransport", () => {
 
 		// 50 000 writes of 1 KiB = ~50 MiB. With maxSize=100m, this
 		// should not cross the rotation boundary at all.
-		const line = "x".repeat(1024) + "\n";
+		const line = `${"x".repeat(1024)}\n`;
 		for (let i = 0; i < 50_000; i++) {
 			logger.info(line);
 		}
@@ -75,7 +75,7 @@ describe("RotatingFileTransport", () => {
 		const logger = winston.createLogger({ level: "info", transports: [transport] });
 
 		// Write 10 KiB in 100-byte lines — should trigger ~10 rotations.
-		const line = "y".repeat(100) + "\n";
+		const line = `${"y".repeat(100)}\n`;
 		for (let i = 0; i < 100; i++) {
 			logger.info(line);
 		}

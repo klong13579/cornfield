@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from "child_process";
+import { type ChildProcess, spawn } from "child_process";
 import { realpathSync, statSync } from "fs";
 import { resolve } from "path";
 import { sameCwd } from "./cwd";

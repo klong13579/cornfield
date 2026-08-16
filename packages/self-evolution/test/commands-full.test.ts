@@ -17,16 +17,15 @@ import { SqliteEpisodeStore } from "../src/storage/episodes";
 import { SqliteEvolutionEscalationStore } from "../src/storage/evolution-escalations";
 import { SqliteLearningStore } from "../src/storage/learnings";
 import { SqliteNudgeHistoryStore } from "../src/storage/nudge-history";
-import { SqliteProfileStore } from "../src/storage/profiles";
 import { SqliteRegressionFixtureStore } from "../src/storage/regression-fixtures";
 import { SqliteRegressionTrialStore } from "../src/storage/regression-trials";
 import { SqliteSkillStore, SqliteSkillVersionStore, SqliteStatsStore } from "../src/storage/skills";
 import { SqliteWorkflowPatternStore } from "../src/storage/workflow-patterns";
-import type { EvolvedSkill, SkillVersion } from "../src/types";
+import type { EvolvedSkill, ProfileStore, SkillVersion } from "../src/types";
 
 describe("Self-evolution commands — full coverage", () => {
 	let db: Database;
-	let profileStore: SqliteProfileStore;
+	let profileStore: ProfileStore;
 	let workflowPatternStore: SqliteWorkflowPatternStore;
 	let episodeStore: SqliteEpisodeStore;
 	let skillStore: SqliteSkillStore;
@@ -94,7 +93,7 @@ describe("Self-evolution commands — full coverage", () => {
 	beforeEach(() => {
 		db = new Database(":memory:");
 		initSchema(db);
-		profileStore = new SqliteProfileStore(db);
+		profileStore = { get: async () => null } as ProfileStore;
 		workflowPatternStore = new SqliteWorkflowPatternStore(db);
 		episodeStore = new SqliteEpisodeStore(db);
 		skillStore = new SqliteSkillStore(db);
@@ -772,18 +771,6 @@ describe("Self-evolution commands — full coverage", () => {
 
 		test("CMD-15: generates fit evaluation report", async () => {
 			// Insert a profile so heuristic responses are enriched
-			await profileStore.upsert("default", {
-				toolFrequency: { read: 5, edit: 3, search: 2 },
-				toolTransitions: {},
-				intentDistribution: { refactoring: 2, bugfix: 1 },
-				avgToolCallsPerSession: 4.5,
-				avgFilesModifiedPerSession: 1.2,
-				errorRate: 0.1,
-				recoveryRate: 0.5,
-				preferredLanguages: ["typescript", "rust"],
-				sessionCount: 3,
-				updatedAt: Date.now(),
-			});
 
 			await cmd().handler("fit", makeCtx());
 

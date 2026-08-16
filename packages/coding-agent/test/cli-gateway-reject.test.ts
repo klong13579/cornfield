@@ -13,8 +13,8 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import * as path from "node:path";
 import * as os from "node:os";
+import * as path from "node:path";
 
 const cliPath = path.join(import.meta.dir, "..", "src", "cli.ts");
 

@@ -34,7 +34,7 @@ const DEFAULT_CONTINUATION_MESSAGE =
 	"[System] The gateway was restarted. Your previous conversation was interrupted. " +
 	"Please acknowledge the restart and summarize what you were working on.";
 
-function getSentinelPath(config?: GatewayConfig): string {
+function _getSentinelPath(config?: GatewayConfig): string {
 	return path.join(getDataDir(config), SENTINEL_FILENAME);
 }
 
@@ -48,8 +48,8 @@ type SentinelLocation = GatewayConfig | { dataDir: string };
 
 function resolveDataDir(loc: SentinelLocation | undefined): string {
 	if (!loc) return getDataDir();
-	if ("dataDir" in loc) return loc.dataDir;
-	return getDataDir(loc);
+	if ("dataDir" in loc) return loc.dataDir!;
+	return getDataDir(loc as GatewayConfig);
 }
 
 /**

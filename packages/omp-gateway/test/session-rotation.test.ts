@@ -193,7 +193,7 @@ describe("session rotation algorithm", () => {
 		await fs.mkdir(path.dirname(sessionPath), { recursive: true });
 		await Bun.write(
 			sessionPath,
-			JSON.stringify({ type: "session", id: "old", timestamp: new Date(fiveHoursAgo).toISOString() }) + "\n",
+			`${JSON.stringify({ type: "session", id: "old", timestamp: new Date(fiveHoursAgo).toISOString() })}\n`,
 		);
 
 		const session = await store.createSession({

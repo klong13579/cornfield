@@ -1,7 +1,7 @@
+import type { Theme } from "@oh-my-pi/pi-coding-agent";
 import type { Component } from "@oh-my-pi/pi-tui";
 import { Ellipsis, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@oh-my-pi/pi-tui";
-import type { Theme } from "@oh-my-pi/pi-coding-agent";
-import type { SessionInfo, Message } from "../types";
+import type { Message, SessionInfo } from "../types";
 
 export class InlineMessageComponent implements Component {
 	private from: SessionInfo;

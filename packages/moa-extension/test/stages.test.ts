@@ -216,7 +216,7 @@ describe("runInputCollectStage (once-right P2)", () => {
 		expect(result.missing.length).toBeGreaterThanOrEqual(1);
 		for (const m of result.missing) {
 			expect(m.source).toBe("worker");
-			expect(m.roles && m.roles.length).toBeGreaterThan(0);
+			expect(m.roles?.length).toBeGreaterThan(0);
 		}
 		expect(result.durationMs).toBeGreaterThanOrEqual(0);
 	});

@@ -200,12 +200,10 @@ function serializeSections(parsed: ParsedSections): string {
 		parts.push(`## ${section.name}`);
 		parts.push(section.body);
 	}
-	return (
-		parts
-			.join("\n")
-			.replace(/\n{3,}/g, "\n\n")
-			.trim() + "\n"
-	);
+	return `${parts
+		.join("\n")
+		.replace(/\n{3,}/g, "\n\n")
+		.trim()}\n`;
 }
 
 const EMPTY_TEMPLATE = `# User
@@ -285,7 +283,7 @@ export class IdentityTool implements AgentTool<typeof identitySchema> {
 				content: [
 					{
 						type: "text",
-						text: `No user persona found at ${userPersonaPath()}.\n\n` + EMPTY_TEMPLATE,
+						text: `No user persona found at ${userPersonaPath()}.\n\n${EMPTY_TEMPLATE}`,
 					},
 				],
 			};

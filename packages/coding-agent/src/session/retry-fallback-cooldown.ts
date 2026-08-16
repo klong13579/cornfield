@@ -64,10 +64,7 @@ export function computeRetryFallbackCooldown(
 ): number {
 	let cooldown = baseCooldownMs;
 	if (lastFailureAtMs !== undefined && nowMs - lastFailureAtMs < flappingWindowMs) {
-		cooldown = Math.max(
-			cooldown * RETRY_FALLBACK_ESCALATION_FACTOR,
-			RETRY_FALLBACK_MIN_ESCALATED_COOLDOWN_MS,
-		);
+		cooldown = Math.max(cooldown * RETRY_FALLBACK_ESCALATION_FACTOR, RETRY_FALLBACK_MIN_ESCALATED_COOLDOWN_MS);
 	}
 	if (typeof minCooldownMs === "number" && minCooldownMs > 0) {
 		cooldown = Math.max(cooldown, minCooldownMs);

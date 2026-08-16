@@ -494,7 +494,9 @@ export class Settings {
 
 		// Load per-directory .omp/config.yml (project-level override of global config.yml)
 		const projectConfigPath = path.join(this.#cwd, CONFIG_DIR_NAME, "config.yml");
-		this.#hasProjectConfigFile = await Bun.file(projectConfigPath).exists().catch(() => false);
+		this.#hasProjectConfigFile = await Bun.file(projectConfigPath)
+			.exists()
+			.catch(() => false);
 		const projectConfig = await this.#loadYaml(projectConfigPath);
 		if (Object.keys(projectConfig).length > 0) {
 			merged = this.#deepMerge(merged, projectConfig);

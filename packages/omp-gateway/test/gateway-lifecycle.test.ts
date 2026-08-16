@@ -37,7 +37,7 @@ import type { InboundMessage, SessionRecord } from "../src/types";
 
 describe("killOrphanRpcProcesses — target only --mode rpc", () => {
 	let killSpy: ReturnType<typeof spyOn>;
-	let spawnSpy: ReturnType<typeof spyOn>;
+	let _spawnSpy: ReturnType<typeof spyOn>;
 
 	beforeEach(() => {
 		killSpy = spyOn(process, "kill").mockImplementation(() => true);
@@ -47,7 +47,7 @@ describe("killOrphanRpcProcesses — target only --mode rpc", () => {
 	});
 
 	test("kills omp --mode rpc with PPID=1", async () => {
-		spawnSpy = spyOn(Bun, "spawnSync").mockReturnValue({
+		_spawnSpy = spyOn(Bun, "spawnSync").mockReturnValue({
 			exitCode: 0,
 			stdout: Buffer.from("  PID  PPID COMMAND\n 1001     1 omp --mode rpc\n"),
 			stderr: Buffer.from(""),
@@ -59,7 +59,7 @@ describe("killOrphanRpcProcesses — target only --mode rpc", () => {
 	});
 
 	test("does NOT kill omp interactive session (no --mode rpc)", async () => {
-		spawnSpy = spyOn(Bun, "spawnSync").mockReturnValue({
+		_spawnSpy = spyOn(Bun, "spawnSync").mockReturnValue({
 			exitCode: 0,
 			stdout: Buffer.from("  PID  PPID COMMAND\n 1002     1 omp\n"),
 			stderr: Buffer.from(""),
@@ -71,7 +71,7 @@ describe("killOrphanRpcProcesses — target only --mode rpc", () => {
 	});
 
 	test("does NOT kill omp --print process", async () => {
-		spawnSpy = spyOn(Bun, "spawnSync").mockReturnValue({
+		_spawnSpy = spyOn(Bun, "spawnSync").mockReturnValue({
 			exitCode: 0,
 			stdout: Buffer.from("  PID  PPID COMMAND\n 1003     1 omp --print 'hello'\n"),
 			stderr: Buffer.from(""),
@@ -83,7 +83,7 @@ describe("killOrphanRpcProcesses — target only --mode rpc", () => {
 	});
 
 	test("does NOT kill non-omp process with --mode rpc in args", async () => {
-		spawnSpy = spyOn(Bun, "spawnSync").mockReturnValue({
+		_spawnSpy = spyOn(Bun, "spawnSync").mockReturnValue({
 			exitCode: 0,
 			stdout: Buffer.from("  PID  PPID COMMAND\n 1004     1 some-other-app --mode rpc\n"),
 			stderr: Buffer.from(""),
@@ -95,7 +95,7 @@ describe("killOrphanRpcProcesses — target only --mode rpc", () => {
 	});
 
 	test("does NOT kill omp --mode rpc with non-1 PPID", async () => {
-		spawnSpy = spyOn(Bun, "spawnSync").mockReturnValue({
+		_spawnSpy = spyOn(Bun, "spawnSync").mockReturnValue({
 			exitCode: 0,
 			stdout: Buffer.from("  PID  PPID COMMAND\n 1005  2000 omp --mode rpc\n"),
 			stderr: Buffer.from(""),
@@ -107,7 +107,7 @@ describe("killOrphanRpcProcesses — target only --mode rpc", () => {
 	});
 
 	test("kills multiple omp --mode rpc orphans, skips others", async () => {
-		spawnSpy = spyOn(Bun, "spawnSync").mockReturnValue({
+		_spawnSpy = spyOn(Bun, "spawnSync").mockReturnValue({
 			exitCode: 0,
 			stdout: Buffer.from(
 				"  PID  PPID COMMAND\n" +

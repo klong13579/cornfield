@@ -212,7 +212,7 @@ describe("VoiceImmersiveView", () => {
 				state({
 					phase: "listening",
 					consultTask: "一个非常长的任务标题".repeat(8),
-					toolLine: "bash: " + "x".repeat(200),
+					toolLine: `bash: ${"x".repeat(200)}`,
 					transcript: { role: "user", text: "很长的消息".repeat(30), final: true },
 				}),
 			);

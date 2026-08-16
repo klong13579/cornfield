@@ -422,6 +422,7 @@ export interface ValidateArgs {
 	agentDir: string;
 	json?: boolean;
 	fix?: boolean;
+	semantic?: boolean;
 }
 
 export interface ValidateIssue {

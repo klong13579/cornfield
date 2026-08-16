@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import type { AgentEvent } from "@oh-my-pi/pi-agent-core";
 import { RpcClient } from "@oh-my-pi/pi-coding-agent/modes";
 import { Snowflake } from "@oh-my-pi/pi-utils";
 import { e2eApiKey } from "./utilities";
@@ -114,12 +115,15 @@ describe.skipIf(!e2eApiKey("ANTHROPIC_API_KEY"))("RPC concurrency", () => {
 /**
  * Extract the text content from the last assistant message in event stream.
  */
-function extractLastAssistantText(
-	events: Array<{ type: string; message?: { role?: string; content?: Array<{ type: string; text?: string }> } }>,
-): string {
-	const assistantMessages = events.filter(e => e.type === "message_end" && e.message?.role === "assistant");
+function extractLastAssistantText(events: AgentEvent[]): string {
+	const withMessage = (e: AgentEvent) =>
+		e as AgentEvent & { message?: { role?: string; content?: Array<{ type: string; text?: string }> } };
+	const assistantMessages = events.filter(
+		e => e.type === "message_end" && withMessage(e).message?.role === "assistant",
+	);
 	const last = assistantMessages[assistantMessages.length - 1];
-	if (!last?.message?.content) return "";
-	const textContent = last.message.content.find(c => c.type === "text");
+	const message = last ? withMessage(last).message : undefined;
+	if (!message?.content) return "";
+	const textContent = message.content.find(c => c.type === "text");
 	return textContent?.text ?? "";
 }

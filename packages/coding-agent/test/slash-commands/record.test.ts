@@ -5,11 +5,11 @@
  * listenController methods on InteractiveModeContext.
  */
 import { afterEach, beforeEach, describe, expect, test, vi } from "bun:test";
-import * as path from "node:path";
 import * as os from "node:os";
+import * as path from "node:path";
 import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
-import type { ListenController } from "@oh-my-pi/pi-coding-agent/stt/listen-controller";
 import { executeBuiltinSlashCommand } from "@oh-my-pi/pi-coding-agent/slash-commands/builtin-registry";
+import type { ListenController } from "@oh-my-pi/pi-coding-agent/stt/listen-controller";
 
 function createRuntime() {
 	const listenController = {
@@ -85,38 +85,26 @@ describe("/record slash command", () => {
 	test("/record <filepath> transcribes file with description from basename", async () => {
 		const handled = await executeBuiltinSlashCommand("/record test-interview.wav", h.runtime);
 		expect(handled).toBe(true);
-		expect(h.listenController.transcribeFile).toHaveBeenCalledWith(
-			"test-interview.wav",
-			"test-interview",
-		);
+		expect(h.listenController.transcribeFile).toHaveBeenCalledWith("test-interview.wav", "test-interview");
 	});
 
 	test("/record <filepath> expands ~ to homedir", async () => {
 		const handled = await executeBuiltinSlashCommand("/record ~/audio/test.wav", h.runtime);
 		expect(handled).toBe(true);
 		const expectedPath = path.join(os.homedir(), "audio", "test.wav");
-		expect(h.listenController.transcribeFile).toHaveBeenCalledWith(
-			expectedPath,
-			"test",
-		);
+		expect(h.listenController.transcribeFile).toHaveBeenCalledWith(expectedPath, "test");
 	});
 
 	test("/record with extra whitespace in path is handled", async () => {
 		const handled = await executeBuiltinSlashCommand("/record   /path/to/file.wav", h.runtime);
 		expect(handled).toBe(true);
-		expect(h.listenController.transcribeFile).toHaveBeenCalledWith(
-			"/path/to/file.wav",
-			"file",
-		);
+		expect(h.listenController.transcribeFile).toHaveBeenCalledWith("/path/to/file.wav", "file");
 	});
 
 	test("unknown /record subcommand is treated as filepath", async () => {
 		const handled = await executeBuiltinSlashCommand("/record resume", h.runtime);
 		expect(handled).toBe(true);
-		expect(h.listenController.transcribeFile).toHaveBeenCalledWith(
-			"resume",
-			"resume",
-		);
+		expect(h.listenController.transcribeFile).toHaveBeenCalledWith("resume", "resume");
 	});
 });
 
@@ -143,17 +131,13 @@ describe("/listen slash command", () => {
 	test("/listen search without keyword shows usage", async () => {
 		const handled = await executeBuiltinSlashCommand("/listen search", h.runtime);
 		expect(handled).toBe(true);
-		expect(h.showStatus).toHaveBeenCalledWith(
-			expect.stringContaining("Usage"),
-		);
+		expect(h.showStatus).toHaveBeenCalledWith(expect.stringContaining("Usage"));
 	});
 
 	test("/listen export without filename shows usage", async () => {
 		const handled = await executeBuiltinSlashCommand("/listen export", h.runtime);
 		expect(handled).toBe(true);
-		expect(h.showStatus).toHaveBeenCalledWith(
-			expect.stringContaining("Usage"),
-		);
+		expect(h.showStatus).toHaveBeenCalledWith(expect.stringContaining("Usage"));
 	});
 
 	test("bare /listen without subcommand does not error", async () => {

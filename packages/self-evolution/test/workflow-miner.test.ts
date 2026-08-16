@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { SessionTrace } from "../src/types";
-import { WorkflowMiner, extractCommandName } from "../src/workflow-miner";
+import { extractCommandName, WorkflowMiner } from "../src/workflow-miner";
 
 function makeTrace(entries: Array<{ toolName: string; args?: Record<string, unknown> }>): SessionTrace {
 	return {

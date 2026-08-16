@@ -1,8 +1,8 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { $which, logger } from "@oh-my-pi/pi-utils";
 import { buildRealtimeWsUrl, chunkPcm16, pcm16ToBase64, REALTIME_SAMPLE_RATE } from "@oh-my-pi/pi-ai";
+import { $which, logger } from "@oh-my-pi/pi-utils";
 import type { ModelRegistry } from "../config/model-registry";
 import { settings } from "../config/settings";
 import { readWavInfo } from "./chunker";
@@ -218,10 +218,7 @@ export async function transcribe(audioPath: string, options?: TranscribeOptions)
  *
  * Uses the model registry to resolve the provider base URL and API key.
  */
-export async function transcribeViaApi(
-	audioPath: string,
-	options?: TranscribeViaApiOptions,
-): Promise<string> {
+export async function transcribeViaApi(audioPath: string, options?: TranscribeViaApiOptions): Promise<string> {
 	const audioFile = Bun.file(audioPath);
 	if (audioFile.size < 100) {
 		throw new Error(`Audio file is empty or too small (${audioFile.size} bytes). Check microphone.`);
@@ -244,9 +241,7 @@ export async function transcribeViaApi(
 	let provider = options?.provider;
 	if (!provider) {
 		const available = registry.getAvailable();
-		const modelEntry = available.find(
-			m => m.id === modelName || `${m.provider}/${m.id}` === modelName,
-		);
+		const modelEntry = available.find(m => m.id === modelName || `${m.provider}/${m.id}` === modelName);
 		if (!modelEntry) {
 			throw new Error(
 				`Model "${modelName}" not found in the model registry. ` +
@@ -441,7 +436,7 @@ export async function transcribeViaApi(
 			}
 
 			case "error": {
-				const errMsg = msg.message as string ?? JSON.stringify(msg);
+				const errMsg = (msg.message as string) ?? JSON.stringify(msg);
 				logger.error("realtime WS error", { message: errMsg });
 				clearTimeout(timeout);
 				ws.close();

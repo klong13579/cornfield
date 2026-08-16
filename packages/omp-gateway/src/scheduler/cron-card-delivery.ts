@@ -25,10 +25,18 @@
  * gets a result, just in a coarser format if the card API is down.
  */
 
-import { logger } from "@oh-my-pi/pi-utils";
 import * as os from "node:os";
 import * as path from "node:path";
-import { type AICardInstance, type AICardTarget, BlockType, buildAnswerBlock, createAICardForTarget, finishAICard, type CardBlock } from "../channels/dingtalk-card";
+import { logger } from "@oh-my-pi/pi-utils";
+import {
+	type AICardInstance,
+	type AICardTarget,
+	BlockType,
+	buildAnswerBlock,
+	type CardBlock,
+	createAICardForTarget,
+	finishAICard,
+} from "../channels/dingtalk-card";
 import type { DingTalkConfig } from "../types";
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -95,8 +103,7 @@ function buildBodyText(payload: CronCardPayload): string {
  */
 function buildStatusLine(payload: CronCardPayload): string {
 	const dur = `${(payload.durationMs / 1000).toFixed(1)}s`;
-	const errorSuffix =
-		payload.status === "success" || !payload.error ? "" : ` · ${payload.error.slice(0, 80)}`;
+	const errorSuffix = payload.status === "success" || !payload.error ? "" : ` · ${payload.error.slice(0, 80)}`;
 	return `exit ${payload.exitCode ?? "?"} · ${dur}${errorSuffix}`;
 }
 

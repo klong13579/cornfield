@@ -895,7 +895,9 @@ export class BrowserTool implements AgentTool<typeof browserSchema, BrowserToolD
 	 * remove it from the pending queue (only injected once per origin).
 	 */
 	async #injectPendingLocalStorage(page: Page): Promise<void> {
-		const origin = (await page.evaluate(() => location.origin)) as string;
+		const origin = (await page.evaluate(() => {
+			return (globalThis as { location?: { origin: string } }).location?.origin ?? "";
+		})) as string;
 		const data = this.#pendingLocalStorage.get(origin);
 		if (!data) return;
 		await page.evaluate((entries: [string, string][]) => {
@@ -965,7 +967,8 @@ export class BrowserTool implements AgentTool<typeof browserSchema, BrowserToolD
 					const key = localStorage.key(i);
 					if (key) entries[key] = localStorage.getItem(key) ?? "";
 				}
-				return { origin: location.origin, data: entries };
+				const origin = (globalThis as { location?: { origin: string } }).location?.origin ?? "";
+				return { origin, data: entries };
 			})) as { origin: string; data: Record<string, string> };
 			origin = result.origin;
 			localStorageData = result.data;

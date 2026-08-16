@@ -11,6 +11,7 @@ function learning(overrides: Partial<Learning> = {}): Learning {
 		id: "lrn_test",
 		cwd: "/proj",
 		kind: "preference",
+		scope: "project",
 		content: "Always ask before running destructive commands",
 		source: "session_llm",
 		confidence: 5,

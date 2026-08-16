@@ -1,5 +1,5 @@
-import type { Model } from "@oh-my-pi/pi-ai";
 import type { AgentTool, AgentToolContext, AgentToolResult, AgentToolUpdateCallback } from "@oh-my-pi/pi-agent-core";
+import type { Model } from "@oh-my-pi/pi-ai";
 import { logger, prompt } from "@oh-my-pi/pi-utils";
 import { type Static, Type } from "@sinclair/typebox";
 import switchModelDescription from "../prompts/tools/switch-model.md" with { type: "text" };

@@ -970,8 +970,12 @@ describe("Tool argument validation: empty-args-with-intent hint", () => {
 		};
 
 		expect(() => validateToolArguments(editTool, toolCall)).toThrow(/missing required properties: path, edits/);
-		expect(() => validateToolArguments(editTool, toolCall)).toThrow(/Hint: your arguments object only contains intent fields/);
-		expect(() => validateToolArguments(editTool, toolCall)).toThrow(/Did you forget to include the actual tool arguments/);
+		expect(() => validateToolArguments(editTool, toolCall)).toThrow(
+			/Hint: your arguments object only contains intent fields/,
+		);
+		expect(() => validateToolArguments(editTool, toolCall)).toThrow(
+			/Did you forget to include the actual tool arguments/,
+		);
 	});
 
 	it("enhances error message for any intent field starting with _", () => {

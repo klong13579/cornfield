@@ -46,7 +46,6 @@ import { createReportToolIssueTool, isAutoQaEnabled } from "./report-tool-issue"
 import { ResolveTool } from "./resolve";
 import { reportFindingTool } from "./review";
 import { SearchTool } from "./search";
-import { SearchToolBm25Tool } from "./search-tool-bm25";
 import { loadSshTool } from "./ssh";
 import { SwitchModelTool } from "./switch-model";
 import { type TodoPhase, TodoWriteTool } from "./todo-write";
@@ -435,7 +434,7 @@ export async function createTools(session: ToolSession, toolNames?: string[]): P
 	}
 
 	const filteredRequestedTools = requestedTools?.filter(name => name in allTools && isToolAllowed(name));
-	const baseEntries =
+	const baseEntries = (
 		filteredRequestedTools !== undefined
 			? filteredRequestedTools.filter(name => name !== "resolve").map(name => [name, allTools[name]] as const)
 			: [
@@ -445,7 +444,8 @@ export async function createTools(session: ToolSession, toolNames?: string[]): P
 						["exit_plan_mode", HIDDEN_TOOLS.exit_plan_mode],
 						...(isToolAllowed("identity") ? [["identity", HIDDEN_TOOLS.identity]] : []),
 					] as const),
-				];
+				]
+	) as Array<readonly [string, ToolFactory]>;
 
 	const baseResults = await Promise.all(
 		baseEntries.map(async ([name, factory]) => {

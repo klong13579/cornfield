@@ -27,8 +27,7 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import { type AssistantMessage, getBundledModel, type TextContent } from "@oh-my-pi/pi-ai";
 
-const PROMPT =
-	"为什么一直在重复输出：All 78 channel tests pass. Run biome + related. （请直接回答，不要重复）";
+const PROMPT = "为什么一直在重复输出：All 78 channel tests pass. Run biome + related. （请直接回答，不要重复）";
 
 function extractText(message: AssistantMessage): string {
 	return message.content
@@ -88,9 +87,7 @@ describe("doom-loop recovery: real LLM (143736 prompt)", () => {
 			expect(assistantEnds.length).toBeLessThanOrEqual(2);
 
 			// 3. Final assistant message in state.messages.
-			const finalAssistant = agent.state.messages.find(m => m.role === "assistant") as
-				| AssistantMessage
-				| undefined;
+			const finalAssistant = agent.state.messages.find(m => m.role === "assistant") as AssistantMessage | undefined;
 			expect(finalAssistant).toBeDefined();
 			if (!finalAssistant) return;
 
@@ -120,28 +117,25 @@ describe("doom-loop recovery: real LLM (143736 prompt)", () => {
 				? `recovered (retry succeeded; first was ${firstEnded?.stopReason}${firstEnded?.errorMessage ? ` / ${firstEnded.errorMessage}` : ""})`
 				: `clean (no recovery needed; stopReason=${finalAssistant.stopReason})`;
 
-			// biome-ignore lint/suspicious/noConsoleLog: run-summary for the user
-			console.log(
-				`[real-llm] model=alibaba-coding-plan/glm-4.7 elapsed=${elapsed}ms path=${path}`,
-			);
-			// biome-ignore lint/suspicious/noConsoleLog: run-summary for the user
+			console.log(`[real-llm] model=alibaba-coding-plan/glm-4.7 elapsed=${elapsed}ms path=${path}`);
 			console.log(
 				`[real-llm] finalTextLen=${finalText.length} finalThinkingLen=${finalThinking.length} textEchoes=${textEchoes} thinkingEchoes=${thinkingEchoes}`,
 			);
-			// biome-ignore lint/suspicious/noConsoleLog: run-summary for the user
 			console.log(`[real-llm] finalText=${JSON.stringify(finalText.slice(0, 200))}`);
-			// biome-ignore lint/suspicious/noConsoleLog: diagnostic dump
 			console.log(`[real-llm] event types: ${eventTypes.join(",")}`);
 			for (let i = 0; i < assistantEnds.length; i++) {
 				const ae = assistantEnds[i];
 				const aeText = extractText(ae);
-				const aeThinking = ae.content.filter(c => c.type === "thinking").map(c => (c as { thinking: string }).thinking).join("");
-				// biome-ignore lint/suspicious/noConsoleLog: diagnostic dump
-				console.log(`[real-llm] attempt ${i}: stopReason=${ae.stopReason} textLen=${aeText.length} thinkingLen=${aeThinking.length} err=${ae.errorMessage ?? ""}`);
-				if (aeText) // biome-ignore lint/suspicious/noConsoleLog: diagnostic dump
-				console.log(`[real-llm] attempt ${i} text: ${JSON.stringify(aeText.slice(0, 200))}`);
-				if (aeThinking) // biome-ignore lint/suspicious/noConsoleLog: diagnostic dump
-				console.log(`[real-llm] attempt ${i} thinking[0..200]: ${JSON.stringify(aeThinking.slice(0, 200))}`);
+				const aeThinking = ae.content
+					.filter(c => c.type === "thinking")
+					.map(c => (c as { thinking: string }).thinking)
+					.join("");
+				console.log(
+					`[real-llm] attempt ${i}: stopReason=${ae.stopReason} textLen=${aeText.length} thinkingLen=${aeThinking.length} err=${ae.errorMessage ?? ""}`,
+				);
+				if (aeText) console.log(`[real-llm] attempt ${i} text: ${JSON.stringify(aeText.slice(0, 200))}`);
+				if (aeThinking)
+					console.log(`[real-llm] attempt ${i} thinking[0..200]: ${JSON.stringify(aeThinking.slice(0, 200))}`);
 			}
 		},
 		{ timeout: 90_000 },

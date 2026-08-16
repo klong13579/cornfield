@@ -8,7 +8,6 @@ import * as path from "node:path";
 import type { AgentTool } from "@oh-my-pi/pi-agent-core";
 import {
 	$env,
-	getAgentDir,
 	getConfigRootDir,
 	getGpuCachePath,
 	getProjectDir,
@@ -23,15 +22,15 @@ import { systemPromptCapability } from "./capability/system-prompt";
 import type { SkillsSettings } from "./config/settings";
 import { type ContextFile, loadCapability, type SystemPrompt as SystemPromptFile } from "./discovery";
 import { loadSkills, type Skill } from "./extensibility/skills";
+import contractPartial from "./prompts/system/_contract.md" with { type: "text" };
+import environmentPartial from "./prompts/system/_environment.md" with { type: "text" };
+import identityPartial from "./prompts/system/_identity.md" with { type: "text" };
+import nowPartial from "./prompts/system/_now.md" with { type: "text" };
+import preamblePartial from "./prompts/system/_preamble.md" with { type: "text" };
+import procedurePartial from "./prompts/system/_procedure.md" with { type: "text" };
+import workspacePartial from "./prompts/system/_workspace.md" with { type: "text" };
 import customSystemPromptTemplate from "./prompts/system/custom-system-prompt.md" with { type: "text" };
 import systemPromptTemplate from "./prompts/system/system-prompt.md" with { type: "text" };
-import preamblePartial from "./prompts/system/_preamble.md" with { type: "text" };
-import workspacePartial from "./prompts/system/_workspace.md" with { type: "text" };
-import identityPartial from "./prompts/system/_identity.md" with { type: "text" };
-import environmentPartial from "./prompts/system/_environment.md" with { type: "text" };
-import contractPartial from "./prompts/system/_contract.md" with { type: "text" };
-import procedurePartial from "./prompts/system/_procedure.md" with { type: "text" };
-import nowPartial from "./prompts/system/_now.md" with { type: "text" };
 
 // Register partials once at module load so the main template can
 // reference them via {{> partialName}}.
@@ -100,7 +99,7 @@ function firstNonEmpty(...values: (string | undefined | null)[]): string | null 
 	}
 	return null;
 }
-function isAgentsMdPath(filePath: string): boolean {
+function _isAgentsMdPath(filePath: string): boolean {
 	const normalized = filePath.replace(/\\/g, "/");
 	return normalized.endsWith("/AGENTS.md") || normalized === "AGENTS.md";
 }
@@ -121,7 +120,7 @@ function extractNeverRules(content: string): string[] {
 	return neverRules;
 
 	/** Extract the "Agent 定位" section from AGENTS.md content */
-	function extractAgentRole(agentsMdContent: string): string | null {
+	function _extractAgentRole(agentsMdContent: string): string | null {
 		const lines = agentsMdContent.split("\n");
 		let inAgentRoleSection = false;
 		const sectionLines: string[] = [];

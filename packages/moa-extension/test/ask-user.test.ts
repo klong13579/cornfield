@@ -186,9 +186,13 @@ describe("askMissingInputs", () => {
 		const ui = makeNoopUI();
 		const tco = makeTco([{ key: "a" }, { key: "b" }, { key: "c" }]);
 		const progress: Array<{ index: number; total: number }> = [];
-		await askMissingInputs(tco, { ui: ui as never, hasUI: true }, {
-			onProgress: info => progress.push(info),
-		});
+		await askMissingInputs(
+			tco,
+			{ ui: ui as never, hasUI: true },
+			{
+				onProgress: info => progress.push(info),
+			},
+		);
 		expect(progress).toEqual([
 			{ index: 1, total: 3 },
 			{ index: 2, total: 3 },
@@ -285,10 +289,7 @@ function makeListUI(selectAnswers: Array<string | undefined>, inputAnswers: Arra
 
 describe("askQuestionsList", () => {
 	it("uses answer / skip / stop all actions (design §7.3)", async () => {
-		const ui = makeListUI(
-			[ASK_ACTION_ANSWER, ASK_ACTION_SKIP, ASK_ACTION_STOP],
-			["answer to first"],
-		);
+		const ui = makeListUI([ASK_ACTION_ANSWER, ASK_ACTION_SKIP, ASK_ACTION_STOP], ["answer to first"]);
 		const items: AskQuestionsListItem[] = [
 			makeItem("divergent.0", "first?"),
 			makeItem("divergent.1", "second?"),
@@ -335,9 +336,13 @@ describe("askQuestionsList", () => {
 	it("calls onProgress for each question", async () => {
 		const ui = makeListUI([ASK_ACTION_SKIP, ASK_ACTION_SKIP]);
 		const progress: Array<{ index: number; total: number }> = [];
-		await askQuestionsList([makeItem("a", "x"), makeItem("b", "y")], { ui: ui as never, hasUI: true }, {
-			onProgress: info => progress.push(info),
-		});
+		await askQuestionsList(
+			[makeItem("a", "x"), makeItem("b", "y")],
+			{ ui: ui as never, hasUI: true },
+			{
+				onProgress: info => progress.push(info),
+			},
+		);
 		expect(progress).toEqual([
 			{ index: 1, total: 2 },
 			{ index: 2, total: 2 },

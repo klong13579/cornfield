@@ -21,10 +21,10 @@ import { LiveTurnBuffer } from "../../live/turn-buffer";
 import type { LiveIntent, LivePhase, LiveTranscript } from "../../live/types";
 import { VoiceGate } from "../../live/voice-gate";
 import liveInstructions from "../../prompts/live/live-instructions.md" with { type: "text" };
+import type { AgentSessionEvent } from "../../session/agent-session";
 import { loadUserProfile } from "../../system-prompt";
 import { type VoiceImmersiveState, VoiceImmersiveView } from "../components/voice-immersive-view";
 import { VoicePanel, type VoicePanelCallbacks, type VoicePanelState } from "../components/voice-panel";
-import type { AgentSessionEvent } from "../../session/agent-session";
 import type { InteractiveModeContext } from "../types";
 
 /** P0: narwal-plan is the only bench-verified realtime endpoint. */

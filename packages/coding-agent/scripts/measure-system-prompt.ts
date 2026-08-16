@@ -8,8 +8,8 @@
 import * as os from "node:os";
 import * as path from "node:path";
 import { INTENT_FIELD } from "@oh-my-pi/pi-agent-core";
-import { countTokens } from "@oh-my-pi/pi-natives";
 import { buildSystemPrompt } from "@oh-my-pi/pi-coding-agent/system-prompt";
+import { countTokens } from "@oh-my-pi/pi-natives";
 
 const SAMPLE_NEVER_RULE = "- NEVER commit untracked secrets to the repository";
 const agentsMd = ["# Agents", "", SAMPLE_NEVER_RULE, "- MUST NOT use console.log in coding-agent"].join("\n");
@@ -40,7 +40,9 @@ const minimal = await buildSystemPrompt({
 const full = await buildSystemPrompt({
 	cwd: os.tmpdir(),
 	contextFiles: [{ path: path.join(os.tmpdir(), "AGENTS.md"), content: agentsMd }],
-	skills: [{ name: "system-prompts", description: "Prompt design skill" }],
+	skills: [
+		{ name: "system-prompts", description: "Prompt design skill", filePath: "", baseDir: "", source: "custom" },
+	],
 	rules: [{ name: "rs-no-unwrap", description: "Avoid unwrap", path: "/tmp/rule.md", globs: ["**/*.rs"] }],
 	toolNames: ["read", "search", "find", "edit", "task", "lsp", "bash", "python"],
 	appendSystemPrompt: "Appendix instructions",

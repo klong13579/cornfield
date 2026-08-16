@@ -1067,7 +1067,7 @@ describe("CronService.onTrigger — forceFail debug-only override", () => {
 	// in for the cron service. Saves + restores the module-scope
 	// `storage` so the other tests in the file still see the
 	// shared JsonFileStorage.
-	async function withForceFail<T>(overrides: Partial<ScheduledTask>, fn: () => Promise<T>): Promise<T> {
+	async function _withForceFail<T>(overrides: Partial<ScheduledTask>, fn: () => Promise<T>): Promise<T> {
 		const { task, storage: ffStorage } = makeForceTask(overrides);
 		const originalStorage = storage;
 		storage = ffStorage as unknown as JsonFileStorage;

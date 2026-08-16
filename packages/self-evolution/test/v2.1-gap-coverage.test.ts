@@ -23,6 +23,7 @@ function makeLearning(overrides: Partial<Learning> = {}): Learning {
 		id: overrides.id ?? "learn-1",
 		cwd: overrides.cwd ?? "/proj",
 		kind: overrides.kind ?? "preference",
+		scope: "project",
 		content: overrides.content ?? "Use bun test",
 		source: overrides.source ?? "manual_pin",
 		confidence: overrides.confidence ?? 80,
@@ -269,7 +270,7 @@ describe("InjectionFormatter — 7-layer injection", () => {
 	const formatter = new InjectionFormatter();
 
 	test("7-layer mode produces AGENTS.md as first layer", () => {
-		const result = formatter.formatInjection([], [], undefined, undefined, {
+		const result = formatter.formatInjection([], [], {
 			maxTokens: 2000,
 		});
 		expect(result).toContain("## AGENTS.md");
@@ -279,7 +280,7 @@ describe("InjectionFormatter — 7-layer injection", () => {
 		const learnings = [makeLearning({ content: "Use bun test", confidence: 80 })];
 		const skills = [{ name: "test-skill", taskPattern: "run tests", approach: "use bun test", qualityScore: 75 }];
 
-		const result = formatter.formatInjection([], skills, undefined, undefined, { maxTokens: 2000 }, learnings);
+		const result = formatter.formatInjection([], skills, { maxTokens: 2000 }, learnings);
 
 		expect(result).toContain("## AGENTS.md");
 		expect(result).toContain("## Memory Summary");
@@ -289,9 +290,8 @@ describe("InjectionFormatter — 7-layer injection", () => {
 	});
 
 	test("dynamic token budget for refactoring task type", () => {
-		const result = formatter.formatInjection([], [], undefined, undefined, {
+		const result = formatter.formatInjection([], [], {
 			maxTokens: 1000,
-			taskType: "refactoring",
 		});
 		// Should not crash and should produce output
 		expect(result.length).toBeGreaterThan(0);
@@ -299,9 +299,8 @@ describe("InjectionFormatter — 7-layer injection", () => {
 	});
 
 	test("dynamic token budget for exploration task type", () => {
-		const result = formatter.formatInjection([], [], undefined, undefined, {
+		const result = formatter.formatInjection([], [], {
 			maxTokens: 1000,
-			taskType: "exploration",
 		});
 		expect(result.length).toBeGreaterThan(0);
 		expect(result).toContain("## AGENTS.md");
@@ -314,7 +313,7 @@ describe("InjectionFormatter — 7-layer injection", () => {
 			{ name: "mid", taskPattern: "mid", approach: "mid", qualityScore: 60 },
 		];
 
-		const result = formatter.formatInjection([], skills, undefined, undefined, {
+		const result = formatter.formatInjection([], skills, {
 			maxTokens: 500,
 		});
 
@@ -337,7 +336,7 @@ describe("InjectionFormatter — 7-layer injection", () => {
 			);
 		}
 
-		const result = formatter.formatInjection([], [], undefined, undefined, { maxTokens: 500 }, learnings);
+		const result = formatter.formatInjection([], [], { maxTokens: 500 }, learnings);
 
 		expect(result.length).toBeLessThanOrEqual(2100);
 		expect(result).toContain("... (truncated");

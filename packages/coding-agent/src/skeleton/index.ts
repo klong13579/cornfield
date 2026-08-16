@@ -13,25 +13,25 @@ export { SKELETON_FILES, type SkeletonFile } from "./assets";
 export { SKELETON_DIRS } from "./dirs";
 export { ensureAgentDir, reconcileSkeletonFiles } from "./ensure";
 export {
+	type AgentEntry,
 	findAgent,
 	findStaleEntries,
 	listRegistered,
 	loadRegistry,
 	pruneStaleEntries,
 	REGISTRY_FILE_PATH,
+	type Registry,
 	registerAgent,
 	saveRegistry,
 	unregisterAgent,
-	type AgentEntry,
-	type Registry,
 } from "./registry";
 export { resolveAgentDir } from "./resolve";
 export { buildAgentSessionPath } from "./session";
 export {
+	ensureWorkspace,
+	loadWorkspace,
 	WORKSPACE_SCHEMA_VERSION,
 	type WorkspaceDeclaration,
 	type WorkspaceKnowledgePaths,
-	ensureWorkspace,
-	loadWorkspace,
 	workspaceFilePath,
 } from "./workspace";

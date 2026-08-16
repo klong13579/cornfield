@@ -400,7 +400,10 @@ export const streamOpenAICompletions: StreamFunction<"openai-completions"> = (
 			// tool-call markers in `delta.content` even though tool calls are also surfaced
 			// structurally. Strip the leaked markers so users don't see raw `<｜...｜>` tokens.
 			const stripDeepseekChatTemplateTokens = model.provider === "nvidia" && /deepseek/i.test(model.id);
-			type OpenAIStreamBlock = TextContent | ThinkingContent | (ToolCall & { partialArgs: string; toolCallIndex?: number });
+			type OpenAIStreamBlock =
+				| TextContent
+				| ThinkingContent
+				| (ToolCall & { partialArgs: string; toolCallIndex?: number });
 			let currentBlock: OpenAIStreamBlock | undefined;
 			let currentToolCallIndex: number | undefined;
 			const blockIndex = (block: OpenAIStreamBlock | undefined): number => {
@@ -619,11 +622,8 @@ export const streamOpenAICompletions: StreamFunction<"openai-completions"> = (
 							if (
 								!currentBlock ||
 								currentBlock.type !== "toolCall" ||
-								(toolCall.index !== undefined &&
-									currentToolCallIndex !== toolCall.index) ||
-								(toolCall.index === undefined &&
-									toolCall.id &&
-									currentBlock.id !== toolCall.id)
+								(toolCall.index !== undefined && currentToolCallIndex !== toolCall.index) ||
+								(toolCall.index === undefined && toolCall.id && currentBlock.id !== toolCall.id)
 							) {
 								finishCurrentBlock(currentBlock);
 								currentToolCallIndex = typeof toolCall.index === "number" ? toolCall.index : undefined;

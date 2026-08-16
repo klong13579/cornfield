@@ -1070,12 +1070,12 @@ export async function executeReplaceSingle(
 		}
 
 		if (matchOutcome.closest) {
-			const contentLines = normalizedContent.split('\n');
+			const contentLines = normalizedContent.split("\n");
 			const startLine = matchOutcome.closest.startLine;
 			const contextStart = Math.max(0, startLine - 6);
 			const contextEnd = Math.min(contentLines.length, startLine + 5);
 			const contextLines = contentLines.slice(contextStart, contextEnd);
-			const contextStr = contextLines.map((l, i) => `  ${contextStart + i + 1} | ${l}`).join('\n');
+			const contextStr = contextLines.map((l, i) => `  ${contextStart + i + 1} | ${l}`).join("\n");
 
 			throw new EditMatchError(path, normalizedOldText, matchOutcome.closest, {
 				allowFuzzy,

@@ -193,7 +193,7 @@ ${rows.join("\n")}`;
 				requestedModelId: modelId,
 				success: response.success,
 				responseData: response.data,
-				error: (response as Record<string, unknown>).error,
+				error: (response as unknown as Record<string, unknown>).error,
 			});
 			if (!response.success) {
 				await this.#deps.sendAgentResponse(msg, `切换模型失败: ${response.error ?? "未知错误"}`);

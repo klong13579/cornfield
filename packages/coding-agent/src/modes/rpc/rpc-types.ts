@@ -70,7 +70,8 @@ export type RpcCommand =
 	// Tool control
 	| { id?: string; type: "set_disabled_toolsets"; toolsets: string[] };
 
-export interface RpcSetDisabledToolsetsResponse extends RpcResponse {
+export interface RpcSetDisabledToolsetsResponse {
+	id?: string;
 	type: "response";
 	command: "set_disabled_toolsets";
 	success: true;

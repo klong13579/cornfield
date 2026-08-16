@@ -11,8 +11,13 @@ import { untilAborted } from "@oh-my-pi/pi-utils";
 import { createActivityTimeout } from "./activity-timeout";
 import { createBlockRemoteReadExtension } from "./block-remote-read";
 import { type SpawnWorkerInput, spawnMoaWorker, type WorkerOutput } from "./subprocess";
-import { createWebSearchToolBudget, RESEARCH_EARLY_SOFT_ABORT_MS, RESEARCH_ENOUGH_URLS, RESEARCH_SOFT_ABORT_MS } from "./tool-budget";
 import { extractResearchUrls } from "./tco";
+import {
+	createWebSearchToolBudget,
+	RESEARCH_EARLY_SOFT_ABORT_MS,
+	RESEARCH_ENOUGH_URLS,
+	RESEARCH_SOFT_ABORT_MS,
+} from "./tool-budget";
 import type { MoaWorkerExecutionMode } from "./types";
 
 // ----------------------------------------------------------------------------

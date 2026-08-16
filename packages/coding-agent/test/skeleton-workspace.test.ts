@@ -16,13 +16,8 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import { registerAgent, loadRegistry, saveRegistry } from "../src/skeleton/registry";
-import {
-	ensureWorkspace,
-	loadWorkspace,
-	WORKSPACE_SCHEMA_VERSION,
-	workspaceFilePath,
-} from "../src/skeleton/workspace";
+import { loadRegistry, registerAgent, saveRegistry } from "../src/skeleton/registry";
+import { ensureWorkspace, loadWorkspace, WORKSPACE_SCHEMA_VERSION, workspaceFilePath } from "../src/skeleton/workspace";
 
 const savedHome = process.env.HOME;
 let isolatedHome: string;
@@ -105,7 +100,7 @@ describe("registry v2", () => {
 
 		const reg = await loadRegistry();
 		expect(reg.version).toBe(2);
-		expect(reg.agents["hr"]?.path).toBe(agentDir);
+		expect(reg.agents.hr?.path).toBe(agentDir);
 	});
 
 	test("v1 registries load and legacy entries survive", async () => {
@@ -117,14 +112,14 @@ describe("registry v2", () => {
 		await saveRegistry({ version: 1, agents: { legacy: legacyEntry } });
 
 		const reg = await loadRegistry();
-		expect(reg.agents["legacy"]).toEqual(legacyEntry); // no fields lost
+		expect(reg.agents.legacy).toEqual(legacyEntry); // no fields lost
 
 		// A new registration bumps the file to v2 without touching legacy entries.
 		await registerAgent("hr", agentDir);
 		const after = await loadRegistry();
 		expect(after.version).toBe(2);
-		expect(after.agents["legacy"]).toEqual(legacyEntry);
-		expect(after.agents["hr"]?.path).toBe(agentDir);
+		expect(after.agents.legacy).toEqual(legacyEntry);
+		expect(after.agents.hr?.path).toBe(agentDir);
 	});
 
 	test("gateway-style registration without a declaration stays side-effect free", async () => {

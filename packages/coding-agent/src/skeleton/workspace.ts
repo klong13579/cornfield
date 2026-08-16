@@ -115,7 +115,10 @@ export async function loadWorkspace(agentDir: string): Promise<WorkspaceDeclarat
  * Defaults mirror the default skeleton layout; `projectRoot` defaults to the
  * agentDir itself, which matches the business-agent case (agentDir == project).
  */
-export async function ensureWorkspace(agentDir: string, input: { name: string; id?: string }): Promise<WorkspaceDeclaration> {
+export async function ensureWorkspace(
+	agentDir: string,
+	input: { name: string; id?: string },
+): Promise<WorkspaceDeclaration> {
 	const existing = await loadWorkspace(agentDir);
 	if (existing) return existing;
 

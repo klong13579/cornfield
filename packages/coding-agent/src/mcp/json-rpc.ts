@@ -63,7 +63,7 @@ export async function callMCP<T = unknown>(
 			const msg = err instanceof Error ? err.message : String(err);
 			if (msg.includes("429") && attempt < RETRY_429_MAX_ATTEMPTS - 1) {
 				const delay = RETRY_429_BACKOFF_MS[attempt] ?? 4_000;
-				logger.warn("MCP 429 rate limit, retrying in " + delay + "ms", { attempt, url, method });
+				logger.warn(`MCP 429 rate limit, retrying in ${delay}ms`, { attempt, url, method });
 				await new Promise(r => setTimeout(r, delay));
 				continue;
 			}

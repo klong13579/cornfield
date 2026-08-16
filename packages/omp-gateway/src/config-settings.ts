@@ -128,10 +128,7 @@ export async function resolveDisabledExtensions(agentDir: string): Promise<strin
  *   3. `gatewayFallback` — legacy `gateway.json` `accounts.*.hideThinkingBlock`
  *   4. `false`
  */
-export async function resolveHideThinkingBlock(
-	agentDir: string,
-	gatewayFallback: boolean = false,
-): Promise<boolean> {
+export async function resolveHideThinkingBlock(agentDir: string, gatewayFallback: boolean = false): Promise<boolean> {
 	const { userFile, projectFile } = configPaths(agentDir);
 	const [projectValue, userValue] = await Promise.all([
 		readBooleanField(projectFile, "hideThinkingBlock"),

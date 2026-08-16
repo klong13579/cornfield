@@ -21,8 +21,8 @@ import {
 	cardParamMapForStreamStart,
 	cardParamMapFromData,
 	finishAICard,
-	patchAICardBlocks,
 	parseDingtalkError,
+	patchAICardBlocks,
 	scheduleDeferredFinishAICard,
 } from "../src/channels/dingtalk-card";
 import type { DingTalkConfig } from "../src/types";
@@ -546,9 +546,7 @@ interface RetryCardCall {
 	body: any;
 }
 
-function startRetryCardServer(
-	handler: (call: RetryCardCall, callIndex: number) => Response,
-): Promise<{
+function startRetryCardServer(handler: (call: RetryCardCall, callIndex: number) => Response): Promise<{
 	host: string;
 	port: number;
 	calls: RetryCardCall[];
@@ -818,12 +816,7 @@ describe("finishAICard retry behavior", () => {
 		});
 		await installFetchRewrite(fakeServer.host, fakeServer.port);
 
-		scheduleDeferredFinishAICard(
-			RETRY_SAMPLE_CARD,
-			RETRY_SAMPLE_CARD_DATA,
-			makeRetryConfig(fakeServer.port),
-			0,
-		);
+		scheduleDeferredFinishAICard(RETRY_SAMPLE_CARD, RETRY_SAMPLE_CARD_DATA, makeRetryConfig(fakeServer.port), 0);
 		// Wall-clock wait — Bun.sleep is mocked in this describe; setTimeout is not.
 		await new Promise<void>(resolve => setTimeout(resolve, 50));
 

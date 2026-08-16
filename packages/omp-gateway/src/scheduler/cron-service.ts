@@ -474,9 +474,9 @@ export class CronService {
 		// `bridge` may not be the one that ran the test-run.
 		let capturedOrigin: { sessionPath: string; accountId: string } | undefined;
 		if (task.cron && /^\+\d+s$/.test(task.cron)) {
-			const marker = readTestRunMarker(storage.getMarkerBaseDir?.());
+			const marker = readTestRunMarker(storage.getMarkerBaseDir?.() ?? "");
 			if (marker?.origin) {
-				const originAccountId = resolveAccountId ? resolveAccountId(agentDir) : undefined;
+				const originAccountId = resolveAccountId && agentDir ? resolveAccountId(agentDir) : undefined;
 				capturedOrigin = { sessionPath: marker.origin.sessionPath, accountId: originAccountId ?? "" };
 			}
 		}
@@ -762,11 +762,7 @@ export class CronService {
 				// skipped silently for them — the cron `recent` host
 				// tool is the cross-channel fallback for "user asks
 				// about the last report" regardless of channel.
-				if (
-					task.attachToSession !== false &&
-					deliveryConfig.channel === "dingtalk" &&
-					this.#deps.mirrorToSession
-				) {
+				if (task.attachToSession !== false && deliveryConfig.channel === "dingtalk" && this.#deps.mirrorToSession) {
 					try {
 						const mirrorResult = await this.#deps.mirrorToSession({
 							task,

@@ -28,11 +28,7 @@
  *             2 = probe itself failed (connect/auth/credential lookup).
  */
 import { RealtimeWsTransport } from "@oh-my-pi/pi-ai";
-import {
-	DEFAULT_BASE_URL,
-	DEFAULT_MODEL,
-	resolveRealtimeCredentials,
-} from "./realtime-common";
+import { DEFAULT_BASE_URL, DEFAULT_MODEL, resolveRealtimeCredentials } from "./realtime-common";
 
 const SYSTEM_VOICE = "longanqian";
 const UPDATE_TIMEOUT_MS = 10_000;
@@ -59,8 +55,8 @@ function usage(): string {
 		"Usage: bun run packages/coding-agent/scripts/realtime-voice-probe.ts [options]",
 		"",
 		"Options:",
-		"  --model <id>      Realtime model id (default: " + DEFAULT_MODEL + ")",
-		"  --base-url <url>  Gateway base URL (default: " + DEFAULT_BASE_URL + ")",
+		`  --model <id>      Realtime model id (default: ${DEFAULT_MODEL})`,
+		`  --base-url <url>  Gateway base URL (default: ${DEFAULT_BASE_URL})`,
 		"  --api-key <key>   API key (default: $NARWAL_PLAN_API_KEY, then models.yml)",
 		"  --voice <id>      Extra cloned-voice id to probe (optional)",
 		"  -h, --help        Show this help",
@@ -97,6 +93,7 @@ function parseCliArgs(argv: string[]): ProbeOptions {
 				extraVoice = next();
 				break;
 			case "--help":
+			// biome-ignore lint/suspicious/noFallthroughSwitchClause: --help and -h share the usage/exit body
 			case "-h":
 				console.log(usage());
 				process.exit(0);
@@ -108,18 +105,12 @@ function parseCliArgs(argv: string[]): ProbeOptions {
 	return { model, baseUrl, apiKey: apiKey ?? process.env.NARWAL_PLAN_API_KEY ?? "", extraVoice };
 }
 
-
-
 /**
  * Opens a fresh connection, sends ONE session.update with the given voice,
  * and resolves with the server's response. Rejected/ignored voices surface
  * as `error` events; accepted voices are echoed in `session.updated`.
  */
-async function probeVoice(
-	options: ProbeOptions,
-	voice: string,
-	kind: ProbeResult["kind"],
-): Promise<ProbeResult> {
+async function probeVoice(options: ProbeOptions, voice: string, kind: ProbeResult["kind"]): Promise<ProbeResult> {
 	const transport = new RealtimeWsTransport({
 		baseUrl: options.baseUrl,
 		apiKey: options.apiKey,

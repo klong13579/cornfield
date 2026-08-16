@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import { MemorySessionStorage } from "../src/session/session-storage";
 import { sessionFilePath } from "../src/session/session-paths";
+import { MemorySessionStorage } from "../src/session/session-storage";
 
 describe("listFilesSyncRecursive (MemorySessionStorage)", () => {
 	it("finds files in by-date/<date>/ subdirs", () => {

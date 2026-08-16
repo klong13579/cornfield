@@ -33,8 +33,12 @@ export class RegisteredToolAdapter implements AgentTool<any, any, any> {
 		// enters the custom-renderer path, gets undefined back, and silently
 		// discards tool result text (extensions without renderers show blank).
 		if (registeredTool.definition.renderCall) {
-			this.renderCall = (args: any, options: any, theme: any, toolRenderContext?: ToolRenderContext<any, any>) =>
-				registeredTool.definition.renderCall!(args, theme as Theme, toolRenderContext ?? this.#fallbackContext(args));
+			this.renderCall = (args: any, _options: any, theme: any, toolRenderContext?: ToolRenderContext<any, any>) =>
+				registeredTool.definition.renderCall!(
+					args,
+					theme as Theme,
+					toolRenderContext ?? this.#fallbackContext(args),
+				);
 		}
 		if (registeredTool.definition.renderResult) {
 			this.renderResult = (result: any, options: any, theme: any, toolRenderContext?: ToolRenderContext<any, any>) =>

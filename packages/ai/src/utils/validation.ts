@@ -701,19 +701,13 @@ function coerceArgsFromErrors(
 		// is a plain string that doesn't parse as JSON, wrap it as a single-element
 		// array. LLMs sometimes send a single string instead of a string array
 		// (e.g. edit content in hashline mode, or python cell code).
-		if (
-			expectedTypes.includes("array") &&
-			typeof currentValue === "string"
-		) {
-			const wrapped = currentValue.includes("\n")
-				? currentValue.split("\n")
-				: [currentValue];
+		if (expectedTypes.includes("array") && typeof currentValue === "string") {
+			const wrapped = currentValue.includes("\n") ? currentValue.split("\n") : [currentValue];
 			if (!changed) {
 				nextArgs = structuredCloneJSON(nextArgs);
 				changed = true;
 			}
 			nextArgs = setValueAtPointer(nextArgs, instancePath, wrapped);
-			continue;
 		}
 	}
 
@@ -951,9 +945,8 @@ export function validateToolArguments(tool: Tool, toolCall: ToolCall): ToolCall[
 				const cell = args.cells[i];
 				if (typeof cell === "object" && cell !== null && !("title" in cell)) {
 					const code = (cell as Record<string, unknown>).code;
-					(cell as Record<string, unknown>).title = typeof code === "string"
-						? code.replace(/\s+/g, " ").slice(0, 50).trim() || `cell_${i}`
-						: `cell_${i}`;
+					(cell as Record<string, unknown>).title =
+						typeof code === "string" ? code.replace(/\s+/g, " ").slice(0, 50).trim() || `cell_${i}` : `cell_${i}`;
 					changed = true;
 				}
 			}
@@ -1019,7 +1012,8 @@ export function validateToolArguments(tool: Tool, toolCall: ToolCall): ToolCall[
 		!Array.isArray(originalArgs) &&
 		isIntentOnlyArgs(originalArgs as Record<string, unknown>)
 	) {
-		errorMessage += `\n\nHint: your arguments object only contains intent fields (e.g. _i) ` +
+		errorMessage +=
+			`\n\nHint: your arguments object only contains intent fields (e.g. _i) ` +
 			`but is missing required properties: ${missingRequired.join(", ")}. ` +
 			`Did you forget to include the actual tool arguments? Re-emit the tool call ` +
 			`with the full argument object (intent fields are optional, not a substitute for args).`;

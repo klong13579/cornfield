@@ -70,7 +70,7 @@ describe("UnifiedDedupGate", () => {
 			makeEntry({
 				id: "a",
 				content: "use ast grep for structural search patterns matching code",
-				source: "convention",
+				source: "skill",
 				provenance: "inferred",
 			}),
 			makeEntry({

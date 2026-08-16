@@ -33,8 +33,7 @@ const SCRIPTED_ANSWERS = [
 	"质量底线 = 感知/规划/工业设计 3 个岗不能降；其他 P5/P6 够用",
 ];
 
-const OMP_BIN =
-	process.env.MOA_OMP_BIN ?? path.join(import.meta.dir, "..", "coding-agent", "src", "cli.ts");
+const OMP_BIN = process.env.MOA_OMP_BIN ?? path.join(import.meta.dir, "..", "coding-agent", "src", "cli.ts");
 
 const stamp = Date.now();
 const agentDir = path.join(os.tmpdir(), `omp-moa-cotest-agent-${stamp}`);
@@ -243,7 +242,9 @@ if (rounds.has(2) || round2InHandoffOrArchive) {
 }
 
 if (planHeaders < 1) {
-	console.warn(`[WARN] Few ## plan headers in archive (got ${planHeaders}) — workers may have mostly asked questions.`);
+	console.warn(
+		`[WARN] Few ## plan headers in archive (got ${planHeaders}) — workers may have mostly asked questions.`,
+	);
 }
 
 console.log(`\n[PASS] moa-result + moa-archive persisted; 3 workers recorded.`);

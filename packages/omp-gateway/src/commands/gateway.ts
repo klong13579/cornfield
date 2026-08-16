@@ -24,9 +24,9 @@
  */
 
 import * as path from "node:path";
-import { clearStatusFileSync } from "../gateway-daemon";
 import { logger } from "@oh-my-pi/pi-utils";
 import { Args, Command, Flags, renderCommandHelp } from "@oh-my-pi/pi-utils/cli";
+import { clearStatusFileSync } from "../gateway-daemon";
 
 const ACTIONS = [
 	"start",
@@ -417,9 +417,7 @@ export default class Gateway extends Command {
 			}
 			case "doctor": {
 				const argv = process.argv.slice(process.argv.indexOf("doctor") + 1);
-				const { runDoctor, renderText, renderJson, applyFixes, countBySeverity } = await import(
-					"../doctor"
-				);
+				const { runDoctor, renderText, renderJson, applyFixes, countBySeverity } = await import("../doctor");
 				const json = argv.includes("--json");
 				const doFix = argv.includes("--fix");
 				const report = await runDoctor(configPath);

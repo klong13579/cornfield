@@ -21,6 +21,11 @@ declare module "*.py" {
 	export default content;
 }
 
+declare module "*.gitignore" {
+	const content: string;
+	export default content;
+}
+
 // Lark grammar files imported as text
 declare module "*.lark" {
 	const content: string;

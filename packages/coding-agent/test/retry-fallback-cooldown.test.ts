@@ -1,9 +1,9 @@
 import { describe, expect, it } from "bun:test";
 import {
+	computeRetryFallbackCooldown,
 	RETRY_FALLBACK_ESCALATION_FACTOR,
 	RETRY_FALLBACK_FLAPPING_WINDOW_MS,
 	RETRY_FALLBACK_MIN_ESCALATED_COOLDOWN_MS,
-	computeRetryFallbackCooldown,
 } from "../src/session/retry-fallback-cooldown";
 
 describe("computeRetryFallbackCooldown", () => {
@@ -105,9 +105,7 @@ describe("computeRetryFallbackCooldown", () => {
 			// Flapping produces 5min (from the escalation floor). User sets floor to 10min.
 			// The 10min user floor must NOT be multiplied by the escalation — it should win.
 			const lastFailure = now - 10_000;
-			expect(computeRetryFallbackCooldown(5_000, lastFailure, now, undefined, 10 * 60_000)).toBe(
-				10 * 60_000,
-			);
+			expect(computeRetryFallbackCooldown(5_000, lastFailure, now, undefined, 10 * 60_000)).toBe(10 * 60_000);
 		});
 
 		it("applies the floor on top of the flapping escalation when escalation wins", () => {

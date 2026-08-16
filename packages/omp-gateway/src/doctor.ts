@@ -19,10 +19,10 @@
  * non-destructive repairs (clear stale PID files, fail orphaned executions).
  */
 
-import * as fs from "node:fs";
+import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { resolveDefaultOmpPath } from "./agent-transport";
-import { getDataDir, validateConfig } from "./config";
+import { type ConfigValidation, getDataDir, validateConfig } from "./config";
 import { checkCredentials } from "./credential-resolver";
 import { getGatewayStatus, PID_FILE, STATUS_FILE } from "./gateway-daemon";
 import {
@@ -207,7 +207,7 @@ function checkChannelsAndBridges(status: Awaited<ReturnType<typeof getGatewaySta
 	// section and stop.
 	if (!status.running) {
 		const reason = status.stalePidFile
-			? `gateway died (stale PID file cleaned; pidWasAlive=${status.pidWasAlive ?? "?"})`
+			? `gateway died (stale PID file cleaned; pidFile=${status.pid ?? "?"})`
 			: "gateway not running";
 		const detail = "Start with `omp-gateway start` for live channel/bridge/queue health.";
 		channelFindings.push(warn(reason, detail));

@@ -45,7 +45,7 @@ async function checkPythonSyntax(command: string): Promise<void> {
 	let script = match[2]!;
 	// Unescape shell quoting: for double-quoted strings, " → " and \ → \
 	if (delimiter === '"') {
-		script = script.replaceAll("\\\"", "\"").replaceAll("\\\\", "\\");
+		script = script.replaceAll('\\"', '"').replaceAll("\\\\", "\\");
 	}
 	const tmpFile = path.join(os.tmpdir(), `omp-pycheck-${Date.now()}.py`);
 	try {

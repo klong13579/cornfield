@@ -86,11 +86,7 @@ describe("filterMissingAlreadyKnown (P3)", () => {
 				why_critical: "fmt",
 			},
 		];
-		const known = [
-			{ key: "comparison_dimensions" },
-			{ key: "depth" },
-			{ key: "audience" },
-		];
+		const known = [{ key: "comparison_dimensions" }, { key: "depth" }, { key: "audience" }];
 		expect(filterMissingAlreadyKnown(missing, known).map(m => m.key)).toEqual(["output_format"]);
 	});
 

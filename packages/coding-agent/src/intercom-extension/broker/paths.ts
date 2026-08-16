@@ -1,6 +1,6 @@
 import { chmodSync, mkdirSync, readFileSync } from "fs";
-import { dirname, isAbsolute, join, resolve } from "path";
 import { homedir } from "os";
+import { dirname, isAbsolute, join, resolve } from "path";
 
 export const INTERCOM_DIR_MODE = 0o700;
 export const INTERCOM_RUNTIME_FILE_MODE = 0o600;

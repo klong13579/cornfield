@@ -52,7 +52,10 @@ function mockSpawnMoaWorker(
 	rules: Array<(input: subprocess.SpawnWorkerInput) => WorkerOutput | Promise<WorkerOutput>>,
 ) {
 	return vi.spyOn(subprocess, "spawnMoaWorker").mockImplementation(async input => {
-		const idx = Math.min(subprocess.spawnMoaWorker.mock.calls.length - 1, rules.length - 1);
+		const idx = Math.min(
+			(subprocess.spawnMoaWorker as unknown as { mock: { calls: unknown[] } }).mock.calls.length - 1,
+			rules.length - 1,
+		);
 		return Promise.resolve(rules[idx]!(input));
 	});
 }

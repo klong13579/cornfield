@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { checkLearningRelevance, _testing } from "../src/learning-relevance";
+import { _testing, checkLearningRelevance } from "../src/learning-relevance";
 import type { Learning, SessionTrace } from "../src/types";
 
 function makeLearning(kind: Learning["kind"], content: string): Learning {

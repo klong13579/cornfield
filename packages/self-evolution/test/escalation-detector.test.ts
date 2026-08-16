@@ -25,6 +25,7 @@ function learning(overrides: Partial<Learning> = {}): Learning {
 		id: "l1",
 		cwd: "/p",
 		kind: "procedure",
+		scope: "project",
 		content: "Verify paths exist before calling read; use find when the path is unknown.",
 		source: "session_llm",
 		confidence: 4,

@@ -313,7 +313,7 @@ export function computeJaccardSim(a: string, b: string): number {
 /**
  * Create a ConflictItem from a UnifiedSkill for reuse with conflict-resolver types.
  */
-function createConflictItem(skill: UnifiedSkill): ConflictItem {
+function _createConflictItem(skill: UnifiedSkill): ConflictItem {
 	return { id: skill.id, content: skill.content, provenance: "fallback" as const };
 }
 
@@ -758,7 +758,7 @@ export class Pipeline {
 
 			const parts: string[] = [];
 			let cumulativeChars = 0;
-			const prevLayerWeight = 0;
+			const _prevLayerWeight = 0;
 
 			// Layer 1: AGENTS.md (TOP — always included, even if budget tight)
 			const agentsPct = LAYER_ORDER[0].weight * 100;

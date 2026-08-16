@@ -7,7 +7,6 @@ import { EditTool } from "@oh-my-pi/pi-coding-agent/edit";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { BashTool } from "@oh-my-pi/pi-coding-agent/tools/bash";
 import { ReadTool } from "@oh-my-pi/pi-coding-agent/tools/read";
-import { ToolError } from "@oh-my-pi/pi-coding-agent/tools/tool-errors";
 
 function getText(result: { content: Array<{ type: string; text?: string }> }): string {
 	return result.content
@@ -94,9 +93,9 @@ describe("read tool — NOT FOUND error includes find/search hint", () => {
 	});
 
 	it("includes `find` and `search` in the error for non-existent paths", async () => {
-		await expect(
-			readTool.execute("not-found", { path: path.join(tmpDir, "nonexistent.md") }),
-		).rejects.toThrow(/`find`.*`search`|`search`.*`find`/);
+		await expect(readTool.execute("not-found", { path: path.join(tmpDir, "nonexistent.md") })).rejects.toThrow(
+			/`find`.*`search`|`search`.*`find`/,
+		);
 	});
 });
 
@@ -114,15 +113,15 @@ describe("bash tool — Python syntax pre-check catches errors before execution"
 	});
 
 	it("rejects inline Python with trailing comma syntax error", async () => {
-		await expect(
-			bashTool.execute("py-syntax", { command: 'python3 -c "import sys,; print(1)"' }),
-		).rejects.toThrow(/Python syntax check failed/);
+		await expect(bashTool.execute("py-syntax", { command: 'python3 -c "import sys,; print(1)"' })).rejects.toThrow(
+			/Python syntax check failed/,
+		);
 	});
 
 	it("rejects inline Python with invalid syntax", async () => {
-		await expect(
-			bashTool.execute("py-syntax-2", { command: 'python3 -c "if True print(1)"' }),
-		).rejects.toThrow(/Python syntax check failed/);
+		await expect(bashTool.execute("py-syntax-2", { command: 'python3 -c "if True print(1)"' })).rejects.toThrow(
+			/Python syntax check failed/,
+		);
 	});
 
 	it("allows valid Python to run normally", async () => {

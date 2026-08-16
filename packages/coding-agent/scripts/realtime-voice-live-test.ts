@@ -1,4 +1,6 @@
 #!/usr/bin/env bun
+import * as os from "node:os";
+import * as path from "node:path";
 /**
  * Live-path voice test — sends REAL audio (like a mic) through server_vad and
  * compares the assistant's spoken reply across voices.
@@ -26,8 +28,6 @@
  */
 import { chunkPcm16, createSilenceChunk, pcm16ToBase64, RealtimeWsTransport } from "@oh-my-pi/pi-ai";
 import { concatPcm, encodeWav, resolveRealtimeCredentials } from "./realtime-common";
-import * as os from "node:os";
-import * as path from "node:path";
 
 const INPUT_SAMPLE_RATE = 24_000; // narwal/qwen realtime input is 24kHz PCM16 (bench-verified)
 const CHUNK_MS = 100;
@@ -106,6 +106,7 @@ function parseCliArgs(argv: string[]): LiveTestOptions {
 				options.play = true;
 				break;
 			case "--help":
+			// biome-ignore lint/suspicious/noFallthroughSwitchClause: --help and -h share the usage/exit body
 			case "-h":
 				console.log(usage());
 				process.exit(0);
@@ -124,13 +125,7 @@ function parseCliArgs(argv: string[]): LiveTestOptions {
  */
 async function readInputPcm(wavPath: string): Promise<Uint8Array> {
 	const bytes = new Uint8Array(await Bun.file(wavPath).arrayBuffer());
-	if (
-		bytes.length < 12 ||
-		bytes[0] !== 0x52 ||
-		bytes[1] !== 0x49 ||
-		bytes[2] !== 0x46 ||
-		bytes[3] !== 0x46
-	) {
+	if (bytes.length < 12 || bytes[0] !== 0x52 || bytes[1] !== 0x49 || bytes[2] !== 0x46 || bytes[3] !== 0x46) {
 		throw new Error(`not a RIFF/WAV file: ${wavPath}`);
 	}
 	const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -170,11 +165,7 @@ interface VoiceReply {
 }
 
 /** One voice: connect, stream the question audio, collect the spoken reply. */
-async function runVoice(
-	opts: LiveTestOptions,
-	voiceId: string,
-	input: Uint8Array,
-): Promise<VoiceReply> {
+async function runVoice(opts: LiveTestOptions, voiceId: string, input: Uint8Array): Promise<VoiceReply> {
 	const transport = new RealtimeWsTransport({
 		baseUrl: opts.baseUrl,
 		apiKey: opts.apiKey,
@@ -227,7 +218,11 @@ async function runVoice(
 		}
 		// Keep streaming silence so server_vad's audio clock advances past the
 		// speech tail and `speech_stopped` actually fires (bench finding).
-		for (const chunk of chunkPcm16(createSilenceChunk(TAIL_SILENCE_MS, INPUT_SAMPLE_RATE), CHUNK_MS, INPUT_SAMPLE_RATE)) {
+		for (const chunk of chunkPcm16(
+			createSilenceChunk(TAIL_SILENCE_MS, INPUT_SAMPLE_RATE),
+			CHUNK_MS,
+			INPUT_SAMPLE_RATE,
+		)) {
 			transport.send({ type: "input_audio_buffer.append", audio: pcm16ToBase64(chunk) });
 			await Bun.sleep(30);
 		}

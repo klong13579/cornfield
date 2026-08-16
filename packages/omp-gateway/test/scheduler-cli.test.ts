@@ -479,10 +479,10 @@ beforeEach(() => {
 	origLog = console.log;
 	origErr = console.error;
 	console.log = (...args: unknown[]) => {
-		consoleLogBuf += args.map(a => (typeof a === "string" ? a : JSON.stringify(a))).join(" ") + "\n";
+		consoleLogBuf += `${args.map(a => (typeof a === "string" ? a : JSON.stringify(a))).join(" ")}\n`;
 	};
 	console.error = (...args: unknown[]) => {
-		consoleErrorBuf += args.map(a => (typeof a === "string" ? a : JSON.stringify(a))).join(" ") + "\n";
+		consoleErrorBuf += `${args.map(a => (typeof a === "string" ? a : JSON.stringify(a))).join(" ")}\n`;
 	};
 });
 
@@ -676,7 +676,7 @@ describe("cronTestRun", () => {
 	});
 
 	it("refuses when the gateway is not running", { timeout: 5_000 }, async () => {
-		const task = seedTrTask({ name: "needs-gw", cron: "0 6 * * *" });
+		const _task = seedTrTask({ name: "needs-gw", cron: "0 6 * * *" });
 		const before = storageTr.getTaskByName("needs-gw");
 
 		await cronTestRun(["needs-gw", "--in", "1s", "--timeout", "1s", "_gatewayTickMs", "500ms"], storageTr);

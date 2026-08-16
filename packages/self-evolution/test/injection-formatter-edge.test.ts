@@ -11,13 +11,14 @@ describe("InjectionFormatter edge cases (IF-02, IF-03)", () => {
 			id: `l-${content.slice(0, 8)}`,
 			cwd: "/test",
 			kind: "preference",
+			scope: "project",
 			content,
 			source: "manual_pin",
 			confidence: 80,
+			updatedAt: Date.now(),
 			lifecycle: "active",
 			sessionId: "s1",
 			createdAt: Date.now(),
-			updatedAt: Date.now(),
 			timesInjected: 0,
 			timesHelped: 0,
 			timesIgnored: 0,
@@ -63,35 +64,35 @@ describe("InjectionFormatter edge cases (IF-02, IF-03)", () => {
 			);
 		}
 
-		const result = formatter.formatInjection([], [], undefined, undefined, { maxTokens: 500 }, learnings);
+		const result = formatter.formatInjection([], [], { maxTokens: 500 }, learnings);
 		expect(result.length).toBeLessThanOrEqual(2100);
 		expect(result).toContain("... (truncated");
 	});
 
 	test("IF-02: output is NOT truncated when under budget", () => {
 		const learnings = [makeLearning("Short rule")];
-		const result = formatter.formatInjection([], [], undefined, undefined, { maxTokens: 2000 }, learnings);
+		const result = formatter.formatInjection([], [], { maxTokens: 2000 }, learnings);
 		expect(result.length).toBeLessThan(8000);
 		expect(result).not.toContain("... (truncated");
 	});
 
 	test("IF-03: episode with relevanceScore=30 and helpRate=0.3 is excluded", () => {
 		const episodes = [makeRetrievedEpisode(makeEpisode({ id: "ep-low" }), 30, 0.3)];
-		const result = formatter.formatInjection(episodes, [], undefined, undefined, {}, []);
+		const result = formatter.formatInjection(episodes, [], {}, []);
 		expect(result).not.toContain("ep-low");
 		expect(result).not.toContain("Episodic Context");
 	});
 
 	test("IF-03: episode with relevanceScore=50 and helpRate=0.3 is included (score >= 40)", () => {
 		const episodes = [makeRetrievedEpisode(makeEpisode({ id: "ep-mid", summary: "Mid score episode" }), 50, 0.3)];
-		const result = formatter.formatInjection(episodes, [], undefined, undefined, {}, []);
+		const result = formatter.formatInjection(episodes, [], {}, []);
 		expect(result).toContain("Episodic Context");
 		expect(result).toContain("Mid score episode");
 	});
 
 	test("IF-03: episode with relevanceScore=30 and helpRate=0.6 is included (helpRate > 0.5)", () => {
 		const episodes = [makeRetrievedEpisode(makeEpisode({ id: "ep-help", summary: "Helpful episode" }), 30, 0.6)];
-		const result = formatter.formatInjection(episodes, [], undefined, undefined, {}, []);
+		const result = formatter.formatInjection(episodes, [], {}, []);
 		expect(result).toContain("Episodic Context");
 		expect(result).toContain("Helpful episode");
 	});
@@ -101,7 +102,7 @@ describe("InjectionFormatter edge cases (IF-02, IF-03)", () => {
 			makeRetrievedEpisode(makeEpisode({ id: "ep-bad", summary: "Bad episode" }), 20, 0.1),
 			makeRetrievedEpisode(makeEpisode({ id: "ep-good", summary: "Good episode" }), 80, 0.8),
 		];
-		const result = formatter.formatInjection(episodes, [], undefined, undefined, {}, []);
+		const result = formatter.formatInjection(episodes, [], {}, []);
 		expect(result).toContain("Good episode");
 		expect(result).not.toContain("Bad episode");
 	});

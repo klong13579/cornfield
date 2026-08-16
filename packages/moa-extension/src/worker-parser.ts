@@ -145,14 +145,14 @@ export function partitionFreeformIntoSchema(
 	out[primary.name] = prose || (fences.length === 0 ? body : "");
 
 	if (codeSec && fences.length > 0) {
-		out[codeSec.name] = fences.map(f => "```\n" + f + "\n```").join("\n\n");
+		out[codeSec.name] = fences.map(f => `\`\`\`\n${f}\n\`\`\``).join("\n\n");
 		if (!out[primary.name]?.trim() && prose) out[primary.name] = prose;
 		if (!out[primary.name]?.trim()) {
 			// Code-only freeform: keep a short pointer in the primary section.
 			out[primary.name] = `See \`## ${codeSec.name}\` for the implementation.`;
 		}
 	} else if (fences.length > 0) {
-		const fenceBlock = fences.map(f => "```\n" + f + "\n```").join("\n\n");
+		const fenceBlock = fences.map(f => `\`\`\`\n${f}\n\`\`\``).join("\n\n");
 		out[primary.name] = [out[primary.name], fenceBlock].filter(Boolean).join("\n\n");
 	}
 
