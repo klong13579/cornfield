@@ -138,3 +138,10 @@ OMP 前端
 - [ ] 钉钉建模的「建模数据」具体字段与展示粒度（标签云 vs 结构化画像）
 - [ ] mermaid 渲染体积（完整库 vs 子集）对离线包的影响
 - [ ] Jarvis 语音引擎选型（系统 TTS vs 云端）
+
+## 9. 窗口追加需求（V6，迭代中已确认）
+
+- **亮色主题**：全站 token 白纸底（#f7f7f8 / #ffffff / 墨字 #18181b），语义色加深保证对比度；钉钉蓝 #3296fa 为唯一彩色点缀；README「亮色主题」token 对照。视觉路线不变（单色+语义色/hairline 分隔/SVG 图标）
+- **Agent workspace 分节**：Agent 列表按研发工作区/运营工作区分节 + 顶部 seg 筛选；composer 的 agent 选择器同分组
+- **CODING / WORKER 徽标**：CODING（终端图标+填充徽标，面向研发）、WORKER（公文包图标+描边徽标，面向运营职能），出现在 agent 卡片与 composer 选择器
+- **会话工作台增强**：composer 工具栏、viz 标签页切换、转录区左右拖拽调整宽度（240-520px、双击复位、localStorage 持久化）
