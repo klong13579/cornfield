@@ -1,10 +1,10 @@
 <!--
-页面名：Agent 详情 (Agent Detail) — V3 (impeccable-guided)
+页面名：Agent 详情 (Agent Detail) — V6 图形收敛
 功能层级位置：OMP 多端前端 > Agent 管理 > Agent 详情
 路由路径：#/agents/:id
 导航分组：primary(3) · detail
 覆盖协议：set_model, set_thinking_level, set_host_tools, set_todos, get_snapshot, get_state · session_snapshot
-设计参照：Linear（排版层级、表面阶梯）× impeccable craft-floor（无嵌套卡片、无 emoji 图标、无左边条）
+V6 图形规范：四种原语（8px 状态圆点 / 4px 细进度条 / 文字徽标 / 线性 SVG）；能文字不画图；卡片刻画从简。
 -->
 <!DOCTYPE html>
 <html lang="zh">
@@ -32,7 +32,8 @@
   #nav { width: 60px; background: var(--surface); border-right: 1px solid var(--hairline); display: flex; flex-direction: column; align-items: center; padding: 14px 0; gap: 4px; flex-shrink: 0; }
   .nav-item { width: 40px; height: 40px; border-radius: var(--r-md); display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--ink-faint); transition: all var(--ease); position: relative; }
   .nav-item:hover { background: var(--surface-2); color: var(--ink-subtle); }
-  .nav-item.active { background: var(--accent-dim); color: var(--accent-hover); }
+  .nav-item.active { background: var(--accent-dim); color: var(--ink); }
+  .nav-item.active:hover { background: var(--surface-3); transform: scale(1.05); }
   .nav-item.active::before { content: ""; position: absolute; left: -10px; width: 2px; height: 18px; background: var(--accent); border-radius: 1px; }
   .nav-spacer { flex: 1; }
 
@@ -52,13 +53,20 @@
 
   #content { padding: 32px 40px 48px; max-width: 860px; }
 
-  /* Agent 头部：编辑式排版 */
+  /* Agent 头部：编辑式排版，无装饰图形 */
   .agent-header { margin-bottom: 32px; }
   .agent-eyebrow { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ink-subtle); margin-bottom: 10px; }
-  .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--success); box-shadow: 0 0 8px rgba(76,183,130,0.5); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .dot.online { background: var(--success); }
+  .dot.busy { background: var(--warning); }
+  .dot.offline { background: var(--ink-faint); }
   .agent-title-row { display: flex; align-items: baseline; gap: 16px; }
   .agent-title { font-size: 32px; font-weight: 600; letter-spacing: -0.8px; line-height: 1.2; }
-  .agent-model-tag { font-family: var(--mono); font-size: 12px; color: var(--accent-hover); background: var(--accent-dim); padding: 3px 9px; border-radius: var(--r-sm); letter-spacing: 0; }
+  .badge { display: inline-flex; align-items: center; font-size: 10px; font-weight: 500; letter-spacing: 0.05em; padding: 2px 8px; border-radius: 4px; background: var(--surface-3); color: var(--ink-subtle); font-family: var(--mono); }
+  .badge.model { background: var(--accent-dim); color: var(--ink); font-family: var(--mono); font-size: 12px; padding: 3px 9px; }
+  .badge.dt { background: var(--accent-dim); color: var(--ink); font-family: var(--font); font-weight: 500; letter-spacing: 0; }
+  .badge.active { color: var(--success); background: rgba(24,154,92,0.1); font-family: var(--font); font-weight: 500; letter-spacing: 0; }
+  .badge.paused { color: var(--warning); background: rgba(185,124,30,0.1); font-family: var(--font); font-weight: 500; letter-spacing: 0; }
   .agent-sub { font-size: 15px; color: var(--ink-subtle); margin-top: 8px; letter-spacing: -0.1px; }
 
   /* 选项卡 */
@@ -70,41 +78,34 @@
   .tab-content { display: none; }
   .tab-content.active { display: block; }
 
-  /* Skills：行式列表，非卡片 */
-  .skill-row { display: flex; align-items: center; gap: 14px; padding: 14px 4px; border-bottom: 1px solid var(--hairline); transition: background var(--ease); }
+  /* Skills：纯文字行列表，无图标框 */
+  .skill-row { display: flex; align-items: baseline; gap: 12px; padding: 13px 4px; border-bottom: 1px solid var(--hairline); transition: background var(--ease); }
   .skill-row:hover { background: var(--surface); }
   .skill-row:last-child { border-bottom: none; }
-  .skill-icon { width: 32px; height: 32px; border-radius: var(--r-sm); background: var(--surface-2); border: 1px solid var(--hairline); display: flex; align-items: center; justify-content: center; color: var(--ink-subtle); flex-shrink: 0; }
-  .skill-icon .icon { width: 15px; height: 15px; }
-  .skill-info { flex: 1; min-width: 0; }
-  .skill-name { font-size: 14px; font-weight: 500; font-family: var(--mono); letter-spacing: 0; }
-  .skill-desc { font-size: 12px; color: var(--ink-subtle); margin-top: 1px; }
-  .skill-version { font-size: 11px; color: var(--ink-faint); font-family: var(--mono); letter-spacing: 0; flex-shrink: 0; }
+  .skill-name { font-size: 13px; font-weight: 500; font-family: var(--mono); letter-spacing: 0; color: var(--ink); width: 220px; flex-shrink: 0; }
+  .skill-desc { font-size: 12px; color: var(--ink-subtle); flex: 1; min-width: 0; }
+  .skill-version { font-size: 12px; color: var(--ink-faint); font-family: var(--mono); letter-spacing: 0; flex-shrink: 0; }
 
   .toggle { width: 38px; height: 22px; border-radius: 11px; background: var(--surface-3); border: 1px solid var(--hairline-strong); cursor: pointer; position: relative; transition: all 180ms ease; flex-shrink: 0; }
   .toggle.on { background: var(--accent); border-color: var(--accent); }
   .toggle::after { content: ""; width: 16px; height: 16px; border-radius: 50%; background: #fff; position: absolute; top: 2px; left: 2px; transition: left 180ms ease; box-shadow: 0 1px 2px rgba(0,0,0,0.2); }
   .toggle.on::after { left: 19px; }
 
-  /* Cron */
+  /* Cron：文字为主，✓/✗ 状态文字 */
   .cron-row { padding: 16px 4px; border-bottom: 1px solid var(--hairline); }
   .cron-row:last-child { border-bottom: none; }
   .cron-top { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
   .cron-name { font-size: 14px; font-weight: 500; }
-  .cron-schedule { font-family: var(--mono); font-size: 11px; color: var(--accent-hover); background: var(--accent-dim); padding: 2px 8px; border-radius: var(--r-sm); letter-spacing: 0; }
+  .cron-schedule { font-family: var(--mono); font-size: 12px; color: var(--ink); background: var(--surface-3); padding: 2px 8px; border-radius: var(--r-sm); letter-spacing: 0; }
   .cron-desc { font-size: 12px; color: var(--ink-subtle); margin-bottom: 8px; }
-  .cron-runs { display: flex; align-items: center; gap: 10px; font-size: 11px; color: var(--ink-faint); }
-  .run-mark { display: inline-flex; align-items: center; gap: 3px; }
+  .cron-runs { display: flex; align-items: center; gap: 12px; font-size: 12px; color: var(--ink-faint); }
   .run-mark.ok { color: var(--success); }
   .run-mark.err { color: var(--danger); }
   .cron-actions { display: flex; gap: 6px; margin-top: 10px; }
   .ghost-btn { background: none; border: 1px solid var(--hairline); color: var(--ink-subtle); font-size: 12px; padding: 4px 10px; border-radius: var(--r-sm); cursor: pointer; transition: all var(--ease); }
   .ghost-btn:hover { background: var(--surface-2); color: var(--ink); border-color: var(--hairline-strong); }
-  .badge { font-size: 10px; padding: 2px 7px; border-radius: 999px; font-weight: 500; letter-spacing: 0.04em; }
-  .badge.active { color: var(--success); background: rgba(76,183,130,0.1); }
-  .badge.paused { color: var(--warning); background: rgba(229,168,59,0.1); }
 
-  /* 模型配置：无嵌套卡片，直接分区 */
+  /* 模型配置 */
   .config-section { margin-bottom: 28px; }
   .config-section h4 { font-size: 11px; color: var(--ink-faint); text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600; margin-bottom: 14px; }
   .field-row { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; max-width: 420px; }
@@ -114,10 +115,12 @@
   .usage-block { max-width: 420px; }
   .usage-line { display: flex; justify-content: space-between; font-size: 13px; color: var(--ink-subtle); margin-bottom: 8px; }
   .usage-line b { color: var(--ink); font-weight: 500; }
-  .bar { height: 3px; background: var(--surface-3); border-radius: 2px; overflow: hidden; margin: 6px 0; }
+  .usage-line .sub { font-size: 12px; color: var(--ink-faint); }
+  /* 4px 细进度条：唯一允许的进度图形 */
+  .bar { height: 4px; background: var(--surface-3); border-radius: 2px; overflow: hidden; margin: 6px 0; }
   .bar > div { height: 100%; background: var(--accent); border-radius: 2px; }
 
-  /* 工具开关：行式 grid */
+  /* 工具开关：纯文字行 */
   .tool-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 2px; }
   .tool-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: var(--r-sm); transition: background var(--ease); }
   .tool-row:hover { background: var(--surface); }
@@ -126,8 +129,8 @@
   .toggle.small::after { width: 12px; height: 12px; top: 2px; left: 2px; }
   .toggle.small.on::after { left: 17px; }
 
-  /* ── 手机预览 ── */
-  #phonePreviewBtn { position: fixed; top: 14px; right: 16px; z-index: 20; background: var(--surface-2); border: 1px solid var(--hairline); border-radius: var(--r-md); padding: 6px 12px; font-size: 12px; color: var(--ink-muted); cursor: pointer; display: flex; align-items: center; gap: 6px; transition: all var(--ease); }
+  /* 手机预览 */
+  #phonePreviewBtn { background: var(--surface-2); border: 1px solid var(--hairline); border-radius: var(--r-md); padding: 5px 12px; font-size: 12px; color: var(--ink-muted); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; transition: all var(--ease); height: 30px; flex-shrink: 0; }
   #phonePreviewBtn:hover { border-color: var(--hairline-strong); color: var(--ink); }
   #phonePreviewBtn .icon { width: 14px; height: 14px; }
   #phoneOverlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 30; }
@@ -139,7 +142,7 @@
   .phone-close { margin-left: auto; background: none; border: none; color: var(--ink-subtle); cursor: pointer; font-size: 18px; padding: 4px 8px; border-radius: var(--r-sm); }
   .phone-close:hover { background: var(--surface-2); color: var(--ink); }
   .phone-body { flex: 1; display: flex; align-items: center; justify-content: center; padding: 24px; overflow: hidden; }
-  .device { width: 375px; height: 100%; max-height: 812px; border-radius: 40px; border: 1px solid var(--hairline-strong); background: var(--canvas); overflow: hidden; display: flex; flex-direction: column; position: relative; box-shadow: 0 24px 64px rgba(0,0,0,0.18); }
+  .device { width: 375px; height: 100%; max-height: 812px; border-radius: 40px; border: 1px solid var(--hairline-strong); background: var(--canvas); overflow: hidden; display: flex; flex-direction: column; box-shadow: 0 24px 64px rgba(0,0,0,0.18); }
   .device-statusbar { height: 44px; display: flex; align-items: center; justify-content: space-between; padding: 0 24px; font-size: 12px; font-weight: 600; color: var(--ink); flex-shrink: 0; }
   .device-frame { flex: 1; overflow: hidden; }
   .device-frame iframe { width: 100%; height: 100%; border: none; }
@@ -149,7 +152,20 @@
 </head>
 <body>
 
-<button id="phonePreviewBtn" onclick="togglePhone(true)"><svg class="icon"><use href="#i-phone"/></svg>预览手机</button>
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <symbol id="i-home" viewBox="0 0 24 24"><path d="m3 10 9-7 9 7v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 22V12h6v10"/></symbol>
+    <symbol id="i-chat" viewBox="0 0 24 24"><path d="M21 12c0 4.4-4 8-9 8-1.2 0-2.4-.2-3.4-.6L3 21l1.7-4.3C3.6 15.4 3 13.8 3 12c0-4.4 4-8 9-8s9 3.6 9 8z"/></symbol>
+    <symbol id="i-bot" viewBox="0 0 24 24"><rect x="4" y="8" width="16" height="12" rx="2"/><path d="M12 8V4M8 4h8"/><circle cx="9" cy="14" r="0.5"/><circle cx="15" cy="14" r="0.5"/><path d="M9 17h6"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+    <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 19v3"/></symbol>
+    <symbol id="i-check-square" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="m8 12 3 3 5-6"/></symbol>
+    <symbol id="i-cpu" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="2"/><rect x="10" y="10" width="4" height="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></symbol>
+    <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 8h10M18 8h2M4 16h2M10 16h10"/><circle cx="16" cy="8" r="2"/><circle cx="8" cy="16" r="2"/></symbol>
+    <symbol id="i-phone" viewBox="0 0 24 24"><rect x="7" y="2" width="10" height="20" rx="2.5"/><path d="M11 18h2"/></symbol>
+  </defs>
+</svg>
+
 
 <div id="phoneOverlay" onclick="togglePhone(false)"></div>
 <div id="phonePanel">
@@ -166,27 +182,6 @@
   </div>
 </div>
 
-
-<svg width="0" height="0" style="position:absolute">
-  <defs>
-    <symbol id="i-chat" viewBox="0 0 24 24"><path d="M21 12c0 4.4-4 8-9 8-1.2 0-2.4-.2-3.4-.6L3 21l1.7-4.3C3.6 15.4 3 13.8 3 12c0-4.4 4-8 9-8s9 3.6 9 8z"/></symbol>
-    <symbol id="i-bot" viewBox="0 0 24 24"><rect x="4" y="8" width="16" height="12" rx="2"/><path d="M12 8V4M8 4h8"/><circle cx="9" cy="14" r="0.5"/><circle cx="15" cy="14" r="0.5"/><path d="M9 17h6"/></symbol>
-    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
-    <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 19v3"/></symbol>
-    <symbol id="i-check-square" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="m8 12 3 3 5-6"/></symbol>
-    <symbol id="i-cpu" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="2"/><rect x="10" y="10" width="4" height="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></symbol>
-    <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 8h10M18 8h2M4 16h2M10 16h10"/><circle cx="16" cy="8" r="2"/><circle cx="8" cy="16" r="2"/></symbol>
-    <symbol id="i-bug" viewBox="0 0 24 24"><rect x="8" y="6" width="8" height="12" rx="4"/><path d="M12 6V4M8 10H4M20 10h-4M8 15H4M20 15h-4M8 20l-2 2M16 20l2 2"/></symbol>
-    <symbol id="i-flask" viewBox="0 0 24 24"><path d="M10 2v6L4 18a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2L14 8V2M8 2h8"/></symbol>
-    <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 2 9 5-9 5-9-5z"/><path d="m3 12 9 5 9-5"/><path d="m3 17 9 5 9-5"/></symbol>
-    <symbol id="i-shuffle" viewBox="0 0 24 24"><path d="M16 3h5v5M21 3l-7 7M8 21H3v-5M3 21l7-7M16 21h5v-5M21 21l-7-7"/></symbol>
-    <symbol id="i-list" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></symbol>
-    <symbol id="i-chart" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 15v3M12 10v8M17 6v12"/></symbol>
-      <symbol id="i-phone" viewBox="0 0 24 24"><rect x="7" y="2" width="10" height="20" rx="2.5"/><path d="M11 18h2"/></symbol>
-    <symbol id="i-home" viewBox="0 0 24 24"><path d="m3 10 9-7 9 7v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 22V12h6v10"/></symbol>
-  </defs>
-</svg>
-
 <div style="display:flex;height:100vh">
   <nav id="nav"></nav>
 
@@ -194,15 +189,17 @@
     <div id="topbar">
       <div class="breadcrumb"><a href="agent-list.html">Agent 管理</a><span class="sep">/</span><span>研发助手</span></div>
       <div class="spacer"></div>
+      <button id="phonePreviewBtn" onclick="togglePhone(true)"><svg class="icon"><use href="#i-phone"/></svg>预览手机</button>
       <button class="btn btn-secondary btn-sm" onclick="location.href='session-workspace.html'">进入会话</button>
     </div>
 
     <div id="content">
       <div class="agent-header">
-        <div class="agent-eyebrow"><span class="status-dot"></span>运行中 · 12 技能 · 2 定时任务 · 最近活跃 3 分钟前</div>
+        <div class="agent-eyebrow"><span class="dot online"></span>运行中 · 技能 12 · 定时任务 2 · 最近活跃 3 分钟前 <span class="badge dt">钉钉已绑定</span></div>
         <div class="agent-title-row">
           <div class="agent-title">研发助手</div>
-          <span class="agent-model-tag">claude-opus-4-5</span>
+          <span class="badge model">claude-opus-4-5</span>
+          <span class="badge">CODING</span>
         </div>
         <div class="agent-sub">代码审查 · 架构设计 · 调试</div>
       </div>
@@ -215,62 +212,14 @@
         <div class="tab" onclick="switchTab('profile')">用户画像</div>
       </div>
 
-      <!-- Skills -->
+      <!-- Skills：纯文字行 -->
       <div class="tab-content active" id="tab-skills">
-        <div class="skill-row">
-          <div class="skill-icon"><svg class="icon"><use href="#i-bug"/></svg></div>
-          <div class="skill-info">
-            <div class="skill-name">diagnosing-bugs</div>
-            <div class="skill-desc">诊断循环：硬 bug 和性能回归的诊断流程</div>
-          </div>
-          <span class="skill-version">v1.2</span>
-          <div class="toggle on" onclick="this.classList.toggle('on')"></div>
-        </div>
-        <div class="skill-row">
-          <div class="skill-icon"><svg class="icon"><use href="#i-flask"/></svg></div>
-          <div class="skill-info">
-            <div class="skill-name">tdd</div>
-            <div class="skill-desc">测试驱动开发，red-green-refactor 流程</div>
-          </div>
-          <span class="skill-version">v2.0</span>
-          <div class="toggle on" onclick="this.classList.toggle('on')"></div>
-        </div>
-        <div class="skill-row">
-          <div class="skill-icon"><svg class="icon"><use href="#i-layers"/></svg></div>
-          <div class="skill-info">
-            <div class="skill-name">codebase-design</div>
-            <div class="skill-desc">深度模块设计词汇，接口设计、seam 定位</div>
-          </div>
-          <span class="skill-version">v1.0</span>
-          <div class="toggle on" onclick="this.classList.toggle('on')"></div>
-        </div>
-        <div class="skill-row">
-          <div class="skill-icon"><svg class="icon"><use href="#i-shuffle"/></svg></div>
-          <div class="skill-info">
-            <div class="skill-name">cross-modal-review</div>
-            <div class="skill-desc">第二模型质量门禁，跨模型代码审查</div>
-          </div>
-          <span class="skill-version">v0.25</span>
-          <div class="toggle on" onclick="this.classList.toggle('on')"></div>
-        </div>
-        <div class="skill-row">
-          <div class="skill-icon"><svg class="icon"><use href="#i-list"/></svg></div>
-          <div class="skill-info">
-            <div class="skill-name">project-todo</div>
-            <div class="skill-desc">项目任务板维护，TODO.md 增删改查</div>
-          </div>
-          <span class="skill-version">v1.1</span>
-          <div class="toggle" onclick="this.classList.toggle('on')"></div>
-        </div>
-        <div class="skill-row">
-          <div class="skill-icon"><svg class="icon"><use href="#i-chart"/></svg></div>
-          <div class="skill-info">
-            <div class="skill-name">session-diagnosis-orchestrator</div>
-            <div class="skill-desc">Agent 会话六维度诊断，失败原因分析</div>
-          </div>
-          <span class="skill-version">v1.0</span>
-          <div class="toggle on" onclick="this.classList.toggle('on')"></div>
-        </div>
+        <div class="skill-row"><span class="skill-name">diagnosing-bugs</span><span class="skill-desc">诊断循环：硬 bug 和性能回归的诊断流程</span><span class="skill-version">v1.2</span><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
+        <div class="skill-row"><span class="skill-name">tdd</span><span class="skill-desc">测试驱动开发，red-green-refactor 流程</span><span class="skill-version">v2.0</span><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
+        <div class="skill-row"><span class="skill-name">codebase-design</span><span class="skill-desc">深度模块设计词汇，接口设计、seam 定位</span><span class="skill-version">v1.0</span><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
+        <div class="skill-row"><span class="skill-name">cross-modal-review</span><span class="skill-desc">第二模型质量门禁，跨模型代码审查</span><span class="skill-version">v0.25</span><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
+        <div class="skill-row"><span class="skill-name">project-todo</span><span class="skill-desc">项目任务板维护，TODO.md 增删改查</span><span class="skill-version">v1.1</span><div class="toggle" onclick="this.classList.toggle('on')"></div></div>
+        <div class="skill-row"><span class="skill-name">session-diagnosis-orchestrator</span><span class="skill-desc">Agent 会话六维度诊断，失败原因分析</span><span class="skill-version">v1.0</span><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
       </div>
 
       <!-- 定时任务 -->
@@ -340,7 +289,7 @@
           <div class="usage-block">
             <div class="usage-line"><span>上下文窗口</span><b>124K / 200K</b></div>
             <div class="bar"><div style="width:62%"></div></div>
-            <div class="usage-line" style="margin-top:12px"><span>本月用量</span><b>1.2M tokens · ¥3.60</b></div>
+            <div class="usage-line"><span>本月用量</span><b>1.2M tokens</b><span class="sub">¥3.60</span></div>
           </div>
         </div>
       </div>
@@ -366,35 +315,27 @@
           <div class="tool-row"><span class="tool-name">todo_write</span><div class="toggle small on" onclick="this.classList.toggle('on')"></div></div>
         </div>
       </div>
-      <!-- 用户画像 -->
+
+      <!-- 用户画像：文字为主，无彩色装饰块 -->
       <div class="tab-content" id="tab-profile">
         <div style="margin-bottom:20px">
-          <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
-            <div style="width:40px;height:40px;border-radius:10px;background:var(--dingtalk);display:flex;align-items:center;justify-content:center">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="#fff"><path d="M4 9.5c4.5 0 9 .8 13 3.5-1.8 1.2-4 2.3-6.5 2.8.4 1.5 1 3 2 4.2-2.6-.6-5-2-6.8-3.7H4v-2.4h3.2c1-1.2 2.3-2.4 3.8-3-2.2-.7-4.7-1.4-7-1.4z"/></svg>
-            </div>
-            <div>
-              <div style="font-size:15px;font-weight:600">基于钉钉消息的用户建模</div>
-              <div style="font-size:12px;color:var(--ink-subtle);margin-top:2px">来源：钉钉机器人会话 · 128 条消息 · 最近更新 2 小时前</div>
-            </div>
+          <div style="font-size:15px;font-weight:600;margin-bottom:4px">基于钉钉消息的用户建模</div>
+          <div style="font-size:12px;color:var(--ink-subtle);margin-bottom:16px">来源：钉钉机器人会话 · 128 条消息 · 最近更新 2 小时前</div>
+          <div style="font-size:11px;color:var(--ink-faint);text-transform:uppercase;letter-spacing:0.08em;font-weight:600;margin-bottom:10px">关注领域</div>
+          <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:20px">
+            <span class="badge" style="font-size:12px;padding:4px 12px">机器人</span>
+            <span class="badge" style="font-size:12px;padding:4px 12px">扫地机</span>
+            <span class="badge" style="font-size:12px;padding:4px 12px">日程</span>
+            <span class="badge" style="font-size:12px;padding:4px 12px">投融资</span>
+            <span class="badge" style="font-size:12px;padding:4px 12px">代码审查</span>
+            <span class="badge" style="font-size:12px;padding:4px 12px">架构设计</span>
           </div>
-          <div style="background:var(--surface-2);border:1px solid var(--hairline);border-radius:12px;padding:20px">
-            <div style="font-size:11px;color:var(--ink-faint);text-transform:uppercase;letter-spacing:0.08em;font-weight:600;margin-bottom:12px">关注领域</div>
-            <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:20px">
-              <span style="padding:5px 14px;border-radius:999px;background:var(--accent-dim);color:var(--ink);font-size:13px">机器人</span>
-              <span style="padding:5px 14px;border-radius:999px;background:var(--accent-dim);color:var(--ink);font-size:13px">扫地机</span>
-              <span style="padding:5px 14px;border-radius:999px;background:var(--accent-dim);color:var(--ink);font-size:13px">日程</span>
-              <span style="padding:5px 14px;border-radius:999px;background:var(--accent-dim);color:var(--ink);font-size:13px">投融资</span>
-              <span style="padding:5px 14px;border-radius:999px;background:var(--accent-dim);color:var(--ink);font-size:13px">代码审查</span>
-              <span style="padding:5px 14px;border-radius:999px;background:var(--accent-dim);color:var(--ink);font-size:13px">架构设计</span>
-            </div>
-            <div style="font-size:11px;color:var(--ink-faint);text-transform:uppercase;letter-spacing:0.08em;font-weight:600;margin-bottom:8px">摘要</div>
-            <div style="font-size:14px;color:var(--ink);line-height:1.7;margin-bottom:20px;padding:12px 16px;background:var(--surface);border-radius:8px;border-left:2px solid var(--accent)">关注研发效率与商业决策，偏好短句直接沟通。技术背景深厚但不逐行审代码，关注架构方向与 tradeoff。对投融资话题敏感，习惯用数字说话。</div>
-            <div style="display:flex;gap:8px">
-              <button class="btn btn-sm" onclick="alert('重新从钉钉消息建模…')">重新建模</button>
-              <button class="btn btn-sm btn-secondary" onclick="alert('导出画像 JSON')">导出</button>
-              <button class="btn btn-sm" style="background:none;border:1px solid var(--danger);color:var(--danger)" onclick="if(confirm('确认清除用户画像？此操作不可恢复。'))alert('已清除')">清除画像</button>
-            </div>
+          <div style="font-size:11px;color:var(--ink-faint);text-transform:uppercase;letter-spacing:0.08em;font-weight:600;margin-bottom:8px">摘要</div>
+          <div style="font-size:14px;color:var(--ink);line-height:1.7;margin-bottom:20px;padding:12px 16px;background:var(--surface);border:1px solid var(--hairline);border-radius:8px">关注研发效率与商业决策，偏好短句直接沟通。技术背景深厚但不逐行审代码，关注架构方向与 tradeoff。对投融资话题敏感，习惯用数字说话。</div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-sm" onclick="alert('重新从钉钉消息建模…')">重新建模</button>
+            <button class="btn btn-sm btn-secondary" onclick="alert('导出画像 JSON')">导出</button>
+            <button class="btn btn-sm" style="background:none;border:1px solid var(--danger);color:var(--danger)" onclick="if(confirm('确认清除用户画像？此操作不可恢复。'))alert('已清除')">清除画像</button>
           </div>
         </div>
       </div>
@@ -403,7 +344,7 @@
 </div>
 
 <script>
-  /* ── 应用壳：页面注册表（加页面 = 数组加一项） ── */
+  /* ── 应用壳：页面注册表 ── */
   const NAV = [
     { id: "home",       icon: "i-home",         label: "Home",      href: "home.html" },
     { id: "workspace",  icon: "i-chat",         label: "会话工作台",  href: "session-workspace.html" },

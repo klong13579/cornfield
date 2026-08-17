@@ -31,7 +31,8 @@
   #nav { width: 60px; background: var(--surface); border-right: 1px solid var(--hairline); display: flex; flex-direction: column; align-items: center; padding: 14px 0; gap: 4px; flex-shrink: 0; }
   .nav-item { width: 40px; height: 40px; border-radius: var(--r-md); display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--ink-faint); transition: all var(--ease); position: relative; }
   .nav-item:hover { background: var(--surface-2); color: var(--ink-subtle); }
-  .nav-item.active { background: var(--accent-dim); color: var(--accent-hover); }
+  .nav-item.active { background: var(--accent-dim); color: var(--ink); }
+  .nav-item.active:hover { background: var(--surface-3); transform: scale(1.05); }
   .nav-item.active::before { content: ""; position: absolute; left: -10px; width: 2px; height: 18px; background: var(--accent); border-radius: 1px; }
   .nav-spacer { flex: 1; }
 
@@ -77,7 +78,7 @@
   .pagination span.active { color: var(--accent-hover); background: var(--accent-dim); }
 
   /* ── 手机预览 ── */
-  #phonePreviewBtn { position: fixed; top: 14px; right: 16px; z-index: 20; background: var(--surface-2); border: 1px solid var(--hairline); border-radius: var(--r-md); padding: 6px 12px; font-size: 12px; color: var(--ink-muted); cursor: pointer; display: flex; align-items: center; gap: 6px; transition: all var(--ease); }
+  #phonePreviewBtn { background: var(--surface-2); border: 1px solid var(--hairline); border-radius: var(--r-md); padding: 5px 12px; font-size: 12px; color: var(--ink-muted); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; transition: all var(--ease); height: 30px; flex-shrink: 0; }
   #phonePreviewBtn:hover { border-color: var(--hairline-strong); color: var(--ink); }
   #phonePreviewBtn .icon { width: 14px; height: 14px; }
   #phoneOverlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 30; }
@@ -98,8 +99,6 @@
 </style>
 </head>
 <body>
-
-<button id="phonePreviewBtn" onclick="togglePhone(true)"><svg class="icon"><use href="#i-phone"/></svg>预览手机</button>
 
 <div id="phoneOverlay" onclick="togglePhone(false)"></div>
 <div id="phonePanel">
@@ -138,6 +137,7 @@
     <div id="topbar">
       <div class="breadcrumb">会话记录 / <span>全部</span></div>
       <div class="spacer"></div>
+      <button id="phonePreviewBtn" onclick="togglePhone(true)"><svg class="icon"><use href="#i-phone"/></svg>预览手机</button>
     </div>
 
     <div id="content">

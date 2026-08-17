@@ -33,7 +33,8 @@
   #nav { width: 60px; background: var(--surface); border-right: 1px solid var(--hairline); display: flex; flex-direction: column; align-items: center; padding: 14px 0; gap: 4px; flex-shrink: 0; }
   .nav-item { width: 40px; height: 40px; border-radius: var(--r-md); display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--ink-faint); transition: all var(--ease); position: relative; }
   .nav-item:hover { background: var(--surface-2); color: var(--ink-subtle); }
-  .nav-item.active { background: var(--accent-dim); color: var(--accent-hover); }
+  .nav-item.active { background: var(--accent-dim); color: var(--ink); }
+  .nav-item.active:hover { background: var(--surface-3); transform: scale(1.05); }
   .nav-item.active::before { content: ""; position: absolute; left: -10px; width: 2px; height: 18px; background: var(--accent); border-radius: 1px; }
   .nav-spacer { flex: 1; }
 

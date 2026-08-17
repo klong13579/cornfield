@@ -35,6 +35,7 @@ V5 新增：composer 工具栏（agent 选择 + 钉钉绑定标识 + 附件上�
   .nav-item { width: 40px; height: 40px; border-radius: var(--r-md); display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--ink-faint); transition: all var(--ease); position: relative; }
   .nav-item:hover { background: var(--surface-2); color: var(--ink-subtle); }
   .nav-item.active { background: var(--accent-dim); color: var(--ink); }
+  .nav-item.active:hover { background: var(--surface-3); transform: scale(1.05); }
   .nav-item.active::before { content: ""; position: absolute; left: -10px; width: 2px; height: 18px; background: var(--accent); border-radius: 1px; }
   .nav-spacer { flex: 1; }
 
@@ -52,7 +53,7 @@ V5 新增：composer 工具栏（agent 选择 + 钉钉绑定标识 + 附件上�
   .link:hover { color: var(--ink); text-decoration: underline; }
 
   #transcript { flex: 1; overflow-y: auto; padding: 28px 24px 12px; }
-  .stream { max-width: 680px; margin: 0 auto; }
+  .stream { max-width: 800px; margin: 0 auto; }
   .msg { display: flex; gap: 12px; margin-bottom: 28px; }
   .avatar { width: 26px; height: 26px; border-radius: var(--r-sm); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; flex-shrink: 0; margin-top: 2px; }
   .avatar.user { background: #dde1ec; color: #3b4666; }
@@ -92,28 +93,37 @@ V5 新增：composer 工具栏（agent 选择 + 钉钉绑定标识 + 附件上�
 
   /* ── Composer V5：输入框 + 工具栏两行 ── */
   #composer { border-top: 1px solid var(--hairline); padding: 14px 18px 12px; background: var(--surface); flex-shrink: 0; }
-  .composer-box { max-width: 680px; margin: 0 auto; background: var(--surface-2); border: 1px solid var(--hairline); border-radius: var(--r-lg); transition: border-color var(--ease), box-shadow var(--ease); }
+  .composer-box { max-width: 800px; margin: 0 auto; background: var(--surface-2); border: 1px solid var(--hairline); border-radius: var(--r-lg); transition: border-color var(--ease), box-shadow var(--ease); }
   .composer-box:focus-within { border-color: var(--hairline-strong); box-shadow: 0 0 0 3px var(--accent-dim); }
   #input { width: 100%; background: none; border: none; padding: 12px 14px 6px; color: var(--ink); font: inherit; resize: none; outline: none; min-height: 52px; letter-spacing: -0.05px; }
   #input::placeholder { color: var(--ink-faint); }
-  .composer-bar { display: flex; align-items: center; gap: 6px; padding: 6px 8px; }
+  .composer-bar { display: flex; align-items: center; gap: 8px; padding: 6px 10px; }
+  .cgroup { display: flex; align-items: center; gap: 4px; }
+  .csep { width: 1px; height: 18px; background: var(--hairline); margin: 0 4px; flex-shrink: 0; }
   .cbtn { display: flex; align-items: center; gap: 6px; background: none; border: 1px solid transparent; border-radius: var(--r-md); padding: 5px 8px; font-size: 12px; color: var(--ink-subtle); cursor: pointer; transition: all var(--ease); }
   .cbtn:hover { background: var(--surface-3); color: var(--ink); }
   .cbtn .icon { width: 15px; height: 15px; }
 
-  /* agent 选择器（含钉钉绑定标识） */
+  /* agent 选择器（单色 + 钉钉角标） */
   .agent-picker { display: flex; align-items: center; gap: 8px; background: var(--surface-3); border: 1px solid var(--hairline); border-radius: var(--r-md); padding: 4px 8px 4px 4px; cursor: pointer; transition: border-color var(--ease); position: relative; }
   .agent-picker:hover { border-color: var(--hairline-strong); }
-  .agent-mini { position: relative; width: 24px; height: 24px; border-radius: var(--r-sm); background: #5e6ad2; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 600; color: #fff; }
+  .agent-mini { position: relative; width: 24px; height: 24px; border-radius: var(--r-sm); background: var(--surface-2); border: 1px solid var(--hairline); display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 600; color: var(--ink); }
   .agent-mini .dt-badge { position: absolute; right: -4px; bottom: -4px; width: 12px; height: 12px; border-radius: 4px; background: var(--dingtalk); display: flex; align-items: center; justify-content: center; border: 1.5px solid var(--surface-2); }
   .agent-mini .dt-badge .icon { width: 8px; height: 8px; stroke: #fff; stroke-width: 2; }
   .agent-picker .ap-name { font-size: 12px; color: var(--ink); font-weight: 500; }
-  .agent-picker .ap-type { font-size: 9px; padding: 1px 5px; border-radius: 3px; font-family: var(--mono); letter-spacing: 0.04em; }
-  .ap-type.coding { color: var(--ink); background: var(--accent-dim); }
-  .ap-type.worker { color: var(--ink-subtle); border: 1px solid var(--hairline-strong); }
   .agent-picker .icon.chev { width: 11px; height: 11px; color: var(--ink-faint); }
 
   /* agent 下拉 */
+  .model-picker { position: relative; }
+  .model-picker .icon.chev { width: 11px; height: 11px; color: var(--ink-faint); }
+  .think-chip { font-size: 10px; padding: 1px 6px; border-radius: 4px; background: var(--surface-3); color: var(--ink-subtle); font-family: var(--mono); letter-spacing: 0; }
+  .model-menu { display: none; position: absolute; bottom: calc(100% + 8px); right: 0; background: var(--surface); border: 1px solid var(--hairline-strong); border-radius: var(--r-md); box-shadow: 0 12px 32px rgba(0,0,0,0.14); z-index: 30; min-width: 240px; overflow: hidden; padding: 4px; }
+  .model-menu.show { display: block; }
+  .model-menu-head { padding: 6px 10px 4px; font-size: 10px; color: var(--ink-faint); text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600; }
+  .mm-item { display: flex; align-items: center; gap: 8px; padding: 7px 10px; font-size: 13px; color: var(--ink); cursor: pointer; border-radius: var(--r-sm); font-family: var(--mono); letter-spacing: 0; }
+  .mm-item:hover { background: var(--surface-3); }
+  .mm-item .mm-prov { margin-left: auto; font-size: 10px; color: var(--ink-faint); font-family: var(--font); letter-spacing: 0; }
+
   .agent-menu { display: none; position: absolute; bottom: calc(100% + 8px); left: 0; background: var(--surface-2); border: 1px solid var(--hairline-strong); border-radius: var(--r-md); box-shadow: 0 12px 32px rgba(0,0,0,0.14); z-index: 20; min-width: 260px; overflow: hidden; }
   .agent-menu.show { display: block; }
   .agent-menu-head { padding: 8px 12px; font-size: 10px; color: var(--ink-faint); text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600; border-bottom: 1px solid var(--hairline); }
@@ -129,7 +139,7 @@ V5 新增：composer 工具栏（agent 选择 + 钉钉绑定标识 + 附件上�
   #send:hover { background: var(--accent-hover); }
   #send.stop { background: var(--danger); color: #fff; }
   #send .icon { width: 15px; height: 15px; }
-  .composer-meta { max-width: 680px; margin: 6px auto 0; font-size: 11px; color: var(--ink-faint); display: flex; gap: 14px; }
+  .composer-meta { max-width: 800px; margin: 6px auto 0; font-size: 11px; color: var(--ink-faint); display: flex; gap: 14px; }
   .kbd { font-family: var(--mono); font-size: 10px; padding: 1px 5px; border-radius: 4px; background: var(--surface-2); border: 1px solid var(--hairline); color: var(--ink-subtle); }
 
   /* ── 拖拽分隔条 ── */
@@ -139,19 +149,48 @@ V5 新增：composer 工具栏（agent 选择 + 钉钉绑定标识 + 附件上�
 
   /* ── 右栏（可拖拽宽度 + tab 切换）── */
   #sidebar { width: 300px; min-width: 240px; max-width: 520px; border-left: 1px solid var(--hairline); background: var(--surface); display: flex; flex-direction: column; flex-shrink: 0; }
-  .side-tabs { display: flex; gap: 2px; padding: 10px 12px 0; border-bottom: 1px solid var(--hairline); flex-shrink: 0; }
-  .side-tab { padding: 7px 12px; font-size: 12px; color: var(--ink-subtle); cursor: pointer; border-bottom: 2px solid transparent; transition: all var(--ease); font-weight: 500; margin-bottom: -1px; }
-  .side-tab:hover { color: var(--ink); }
-  .side-tab.active { color: var(--ink); border-bottom-color: var(--accent); }
-  .side-body { flex: 1; overflow-y: auto; padding: 14px; }
-  .side-pane { display: none; flex-direction: column; gap: 16px; }
-  .side-pane.active { display: flex; }
+  /* ── 右栏：单列区块 ── */
+  .side-section { padding: 14px 16px; border-bottom: 1px solid var(--hairline); }
+  .side-section:last-child { border-bottom: none; }
+  .side-sec-head { display: flex; align-items: center; margin-bottom: 10px; }
+  .side-sec-head h3 { font-size: 11px; color: var(--ink-faint); text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600; }
+  .side-sec-head .pv-title { font-size: 11px; color: var(--accent); font-weight: 600; letter-spacing: 0.02em; text-transform: uppercase; flex: 1; }
+  .pv-close { background: none; border: 1px solid var(--hairline); color: var(--ink-subtle); font-size: 12px; width: 22px; height: 22px; border-radius: var(--r-sm); cursor: pointer; line-height: 1; }
+  .pv-close:hover { background: var(--surface-3); color: var(--ink); }
+  /* 概览 */
+  .overview { display: flex; flex-direction: column; gap: 6px; }
+  .ov-row { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+  .ov-k { color: var(--ink-subtle); font-size: 12px; width: 62px; flex-shrink: 0; }
+  .ov-v { color: var(--ink); margin-left: auto; text-align: right; }
+  .ov-v.mono { font-family: var(--mono); font-size: 11px; letter-spacing: 0; }
+  .ov-tag { font-size: 9px; color: var(--ink-faint); font-family: var(--mono); letter-spacing: 0.04em; margin-left: 4px; }
+  /* 上下文 */
+  .ctx-line { display: flex; justify-content: space-between; font-size: 12px; color: var(--ink-subtle); margin-top: 4px; }
+  .ctx-line.sub { color: var(--ink-faint); font-size: 11px; }
+  /* 正在执行 */
+  .exec { display: flex; flex-direction: column; gap: 6px; }
+  .exec-row { display: flex; align-items: center; gap: 8px; font-size: 13px; font-family: var(--mono); letter-spacing: 0; }
+  .exec-name { color: var(--ink); }
+  .exec-dur { margin-left: auto; font-size: 11px; color: var(--ink-faint); }
+  .exec-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .exec-dot.ok { background: var(--success); }
+  .exec-row .spin { border-top-color: var(--warning); }
+  .exec-out { margin-top: 10px; padding: 8px 10px; background: var(--surface-2); border: 1px solid var(--hairline); border-radius: var(--r-sm); font-family: var(--mono); font-size: 11px; color: var(--ink-subtle); line-height: 1.6; letter-spacing: 0; max-height: 76px; overflow: hidden; }
 
   .panel h4 { font-size: 10px; color: var(--ink-faint); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 10px; font-weight: 600; }
   .kv { display: flex; justify-content: space-between; align-items: center; font-size: 13px; padding: 4px 0; }
   .kv .k { color: var(--ink-subtle); }
   .kv .v { color: var(--ink); font-weight: 450; }
   .kv .v.mono { font-family: var(--mono); font-size: 11px; letter-spacing: 0; }
+  /* 状态网格：图标 + 键 + 值三列 */
+  .status-grid { display: flex; flex-direction: column; gap: 2px; margin-bottom: 10px; }
+  .stat-item { display: flex; align-items: center; gap: 8px; padding: 5px 0; font-size: 13px; border-bottom: 1px solid var(--hairline); }
+  .stat-item:last-child { border-bottom: none; }
+  .stat-icon { width: 16px; height: 16px; color: var(--ink-subtle); flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+  .stat-icon .icon { width: 14px; height: 14px; }
+  .stat-k { color: var(--ink-subtle); font-size: 12px; width: 84px; flex-shrink: 0; }
+  .stat-v { color: var(--ink); margin-left: auto; text-align: right; }
+  .stat-v.mono { font-family: var(--mono); font-size: 11px; letter-spacing: 0; }
   .phase { display: inline-flex; align-items: center; gap: 6px; color: var(--warning); font-size: 12px; }
   .phase .spin { width: 8px; height: 8px; border-top-color: var(--warning); }
   .todo { display: flex; gap: 8px; align-items: flex-start; padding: 5px 0; font-size: 13px; color: var(--ink-muted); cursor: pointer; }
@@ -162,10 +201,6 @@ V5 新增：composer 工具栏（agent 选择 + 钉钉绑定标识 + 附件上�
   .bar-label { font-size: 11px; color: var(--ink-faint); }
 
   /* ── 可视化 tab ── */
-  .viz-chart { display: flex; align-items: flex-end; gap: 3px; height: 64px; padding: 8px 0 2px; }
-  .viz-bar { flex: 1; background: var(--surface-3); border-radius: 2px 2px 0 0; min-height: 3px; transition: height 600ms ease; }
-  .viz-bar.hot { background: var(--ink-muted); }
-  .viz-axis { display: flex; justify-content: space-between; font-size: 10px; color: var(--ink-faint); font-family: var(--mono); letter-spacing: 0; margin-top: 4px; }
   .live-tool { display: flex; align-items: center; gap: 8px; padding: 6px 0; font-size: 12px; border-bottom: 1px solid var(--hairline); }
   .live-tool:last-child { border-bottom: none; }
   .live-tool .tname { font-family: var(--mono); color: var(--ink); letter-spacing: 0; }
@@ -173,7 +208,7 @@ V5 新增：composer 工具栏（agent 选择 + 钉钉绑定标识 + 附件上�
   .preview-frame { border: 1px solid var(--hairline); border-radius: var(--r-md); background: var(--canvas); padding: 10px; font-family: var(--mono); font-size: 11px; color: var(--success); letter-spacing: 0; max-height: 120px; overflow: hidden; white-space: pre-wrap; }
 
   /* 手机预览 */
-  #phonePreviewBtn { position: fixed; top: 14px; right: 16px; z-index: 20; background: var(--surface-2); border: 1px solid var(--hairline); border-radius: var(--r-md); padding: 6px 12px; font-size: 12px; color: var(--ink-muted); cursor: pointer; display: flex; align-items: center; gap: 6px; transition: all var(--ease); }
+  #phonePreviewBtn { background: var(--surface-2); border: 1px solid var(--hairline); border-radius: var(--r-md); padding: 5px 12px; font-size: 12px; color: var(--ink-muted); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; transition: all var(--ease); height: 30px; flex-shrink: 0; }
   #phonePreviewBtn:hover { border-color: var(--hairline-strong); color: var(--ink); }
   #phonePreviewBtn .icon { width: 14px; height: 14px; }
   #phoneOverlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 30; }
@@ -191,6 +226,20 @@ V5 新增：composer 工具栏（agent 选择 + 钉钉绑定标识 + 附件上�
   .device-frame iframe { width: 100%; height: 100%; border: none; }
   .device-home { height: 20px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
   .device-home::after { content: ""; width: 120px; height: 4px; border-radius: 2px; background: var(--hairline-strong); }
+
+  /* ── 右侧预览面板 ── */
+  .pv-tpl { display: none; }               /* 转录区隐藏模板 */
+  .preview-panel h4 { display: flex; align-items: center; gap: 8px; }
+  .preview-panel .pv-title { flex: 1; font-family: var(--mono); font-weight: 500; letter-spacing: 0; }
+  .pv-close { background: none; border: 1px solid var(--hairline); color: var(--ink-subtle); font-size: 12px; width: 22px; height: 22px; border-radius: var(--r-sm); cursor: pointer; line-height: 1; }
+  .pv-close:hover { background: var(--surface-3); color: var(--ink); }
+  .pv-frame { width: 100%; border: 1px solid var(--hairline); border-radius: var(--r-md); background: #fff; }
+  .pv-loading { font-size: 12px; color: var(--ink-faint); padding: 20px; text-align: center; }
+  .pv-node text { font-size: 11px; fill: var(--ink); font-family: var(--mono); }
+  .pv-node rect, .pv-node polygon { stroke-width: 1.2px; }
+  .pv-edge { stroke: var(--ink-subtle); stroke-width: 1px; fill: none; }
+  .pv-edge-label { font-size: 10px; fill: var(--ink-faint); font-family: var(--mono); }
+  .pv-note { font-size: 11px; color: var(--ink-faint); margin-top: 8px; }
 </style>
 </head>
 <body>
@@ -207,6 +256,7 @@ V5 新增：composer 工具栏（agent 选择 + 钉钉绑定标识 + 附件上�
     <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 8h10M18 8h2M4 16h2M10 16h10"/><circle cx="16" cy="8" r="2"/><circle cx="8" cy="16" r="2"/></symbol>
     <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 3h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
     <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></symbol>
     <symbol id="i-terminal" viewBox="0 0 24 24"><path d="m5 7 5 5-5 5M12 19h7"/></symbol>
     <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></symbol>
     <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></symbol>
@@ -214,11 +264,16 @@ V5 新增：composer 工具栏（agent 选择 + 钉钉绑定标识 + 附件上�
     <symbol id="i-send" viewBox="0 0 24 24"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4z"/></symbol>
     <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></symbol>
     <symbol id="i-phone" viewBox="0 0 24 24"><rect x="7" y="2" width="10" height="20" rx="2.5"/><path d="M11 18h2"/></symbol>
+    <symbol id="i-activity" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></symbol>
+    <symbol id="i-brain" viewBox="0 0 24 24"><path d="M9.5 2a2.5 2.5 0 0 0-2.4 1.8A3.5 3.5 0 0 0 4 7a3.5 3.5 0 0 0 .6 1.9A3.7 3.7 0 0 0 6 16a3.5 3.5 0 0 0 5 1.5 2.5 2.5 0 0 0 4.5 1.5A3.5 3.5 0 0 0 20 13a3.5 3.5 0 0 0-2.5-3.4V9a3.5 3.5 0 0 0-3.5-3.5A2.5 2.5 0 0 0 9.5 2z"/><path d="M12 8v8M9 10.5v3M15 10.5v3"/></symbol>
+    <symbol id="i-queue" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h9"/></symbol>
+    <symbol id="i-skill" viewBox="0 0 24 24"><path d="M12 2 2 7l10 5 10-5z"/><path d="m2 12 10 5 10-5M2 17l10 5 10-5"/></symbol>
+    <symbol id="i-cal2" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="3"/><path d="M16 2v4M8 2v4M3 10h18"/></symbol>
+    <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M2 12h4M18 12h4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M19.1 4.9l-2.8 2.8M7.7 16.3l-2.8 2.8"/><circle cx="12" cy="12" r="4"/></symbol>
     <symbol id="i-dingtalk" viewBox="0 0 24 24"><path d="M4 9.5c4.5 0 9 .8 13 3.5-1.8 1.2-4 2.3-6.5 2.8.4 1.5 1 3 2 4.2-2.6-.6-5-2-6.8-3.7H4v-2.4h3.2c1-1.2 2.3-2.4 3.8-3-2.2-.7-4.7-1.4-7-1.4z"/></symbol>
   </defs>
 </svg>
 
-<button id="phonePreviewBtn" onclick="togglePhone(true)"><svg class="icon"><use href="#i-phone"/></svg>预览手机</button>
 
 <div id="phoneOverlay" onclick="togglePhone(false)"></div>
 <div id="phonePanel">
@@ -244,6 +299,7 @@ V5 新增：composer 工具栏（agent 选择 + 钉钉绑定标识 + 附件上�
       <div class="topsep"></div>
       <div class="chip"><svg class="icon"><use href="#i-folder"/></svg><b>oh-my-pi</b> · main</div>
       <div class="spacer"></div>
+      <button id="phonePreviewBtn" onclick="togglePhone(true)"><svg class="icon"><use href="#i-phone"/></svg>预览手机</button>
       <span class="link" onclick="alert('compact 命令已发送')">compact</span>
       <span class="link" onclick="alert('new_session 命令已发送')">新会话</span>
     </div>
@@ -306,34 +362,73 @@ V5 新增：composer 工具栏（agent 选择 + 钉钉绑定标识 + 附件上�
             <div class="name">研发助手 · claude-opus-4-5 <span class="done-mark">✓ 已完成</span></div>
             <div class="content">
               <p>修复方案已出，流程如下：</p>
-              <!-- mermaid 预览卡 -->
+              <!-- mermaid 预览卡：点击展开内联 SVG 渲染 -->
               <div class="toolcard">
-                <div class="head"><svg class="icon"><use href="#i-file"/></svg><span class="tname">mermaid</span><span class="state"><span class="badge done">预览</span></span></div>
+                <div class="head"><svg class="icon"><use href="#i-file"/></svg><span class="tname">mermaid</span><button class="cbtn" style="margin-left:auto;border:1px solid var(--hairline);padding:4px 12px" onclick="previewInSide('mermaid')">右侧预览</button></div>
                 <div class="args">graph TD\n  A[service stop] --&gt;|30s timeout| B{graceful?}\n  B --&gt;|yes| C[write sentinel]\n  B --&gt;|no| D[escalate bootout]\n  C --&gt; E[recover sessions]\n  D --&gt; F[message lost]</div>
-                <div style="padding:16px;display:flex;align-items:center;justify-content:center;gap:20px">
-                  <div style="text-align:center"><div style="width:56px;height:56px;border:1.5px solid var(--hairline-strong);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--ink-subtle)">A</div><div style="font-size:10px;color:var(--ink-faint);margin-top:4px">service stop</div></div>
-                  <div style="color:var(--ink-faint)">→</div>
-                  <div style="text-align:center"><div style="width:56px;height:56px;border:1.5px solid var(--accent);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--ink)">B</div><div style="font-size:10px;color:var(--ink-faint);margin-top:4px">graceful?</div></div>
-                  <div style="display:flex;flex-direction:column;gap:8px">
-                    <div style="text-align:center"><div style="width:56px;height:40px;border:1.5px solid var(--success);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--success)">C 写哨兵</div></div>
-                    <div style="text-align:center"><div style="width:56px;height:40px;border:1.5px solid var(--danger);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--danger)">D bootout</div></div>
-                  </div>
+                <div class="pv-tpl" id="pv-mermaid-body">
+                  <svg class="pv-frame" viewBox="0 0 560 190" role="img" aria-label="mermaid 流程图：gateway stop 决策">
+                    <defs>
+                      <marker id="pv-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                        <path d="M0 0 L10 5 L0 10 z" fill="var(--ink-subtle)"/>
+                      </marker>
+                    </defs>
+                    <!-- 边 -->
+                    <path class="pv-edge" marker-end="url(#pv-arrow)" d="M150 70 C 200 70, 200 58, 240 58"/>
+                    <text class="pv-edge-label" x="180" y="64">30s</text>
+                    <path class="pv-edge" marker-end="url(#pv-arrow)" d="M300 70 C 340 70, 340 30, 372 30"/>
+                    <text class="pv-edge-label" x="330" y="44">yes</text>
+                    <path class="pv-edge" marker-end="url(#pv-arrow)" d="M300 74 C 340 74, 340 112, 372 112"/>
+                    <text class="pv-edge-label" x="330" y="96">no</text>
+                    <path class="pv-edge" marker-end="url(#pv-arrow)" d="M432 30 C 470 30, 470 36, 500 36"/>
+                    <path class="pv-edge" marker-end="url(#pv-arrow)" d="M432 112 C 470 112, 470 106, 500 106"/>
+                    <!-- 节点 -->
+                    <g class="pv-node"><rect x="20" y="52" width="130" height="36" rx="6" fill="var(--surface-2)" stroke="var(--ink-subtle)"/><text x="85" y="74" text-anchor="middle">service stop</text></g>
+                    <g class="pv-node"><polygon points="300,30 370,70 300,110 230,70" fill="var(--surface-2)" stroke="var(--accent)"/><text x="300" y="74" text-anchor="middle">graceful?</text></g>
+                    <g class="pv-node"><rect x="372" y="14" width="60" height="32" rx="6" fill="var(--surface-2)" stroke="var(--success)"/><text x="402" y="34" text-anchor="middle">写哨兵</text></g>
+                    <g class="pv-node"><rect x="372" y="96" width="60" height="32" rx="6" fill="var(--surface-2)" stroke="var(--danger)"/><text x="402" y="116" text-anchor="middle">bootout</text></g>
+                    <g class="pv-node"><rect x="500" y="20" width="48" height="32" rx="6" fill="var(--surface-2)" stroke="var(--ink-subtle)"/><text x="524" y="40" text-anchor="middle">恢复</text></g>
+                    <g class="pv-node"><rect x="500" y="90" width="48" height="32" rx="6" fill="var(--surface-2)" stroke="var(--ink-subtle)"/><text x="524" y="110" text-anchor="middle">丢消息</text></g>
+                  </svg>
+                  <div style="font-size:11px;color:var(--ink-faint);margin-top:8px">轻量内联渲染（mock）· 正式版接 mermaid.js</div>
                 </div>
-                <div class="result">正式版接 mermaid 库渲染 · 当前为几何占位</div>
               </div>
               <p>架构图在 <code>docs/gateway-restart-flow.drawio</code>：</p>
-              <!-- drawio 预览卡 -->
+              <!-- drawio 预览卡：点击展开 drawio 画布 -->
               <div class="toolcard">
-                <div class="head"><svg class="icon"><use href="#i-file"/></svg><span class="tname">gateway-restart-flow.drawio</span><span class="state"><span class="badge done">drawio</span></span></div>
-                <div style="padding:16px;display:flex;align-items:center;gap:16px">
-                  <div style="width:48px;height:48px;border:1.5px solid var(--hairline-strong);border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--ink-subtle)" stroke-width="1.5"><rect x="3" y="3" width="8" height="8" rx="1"/><rect x="13" y="13" width="8" height="8" rx="1"/><path d="M7 11v4a2 2 0 0 0 2 2h4"/></svg>
+                <div class="head"><svg class="icon"><use href="#i-file"/></svg><span class="tname">gateway-restart-flow.drawio</span><button class="cbtn" style="margin-left:auto;border:1px solid var(--hairline);padding:4px 12px" onclick="previewInSide('drawio')">右侧预览</button></div>
+                <div style="padding:14px;display:flex;align-items:center;gap:16px">
+                  <div style="width:44px;height:44px;border:1.5px solid var(--hairline-strong);border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--ink-subtle)" stroke-width="1.5"><rect x="3" y="3" width="8" height="8" rx="1"/><rect x="13" y="13" width="8" height="8" rx="1"/><path d="M7 11v4a2 2 0 0 0 2 2h4"/></svg>
                   </div>
                   <div style="flex:1">
                     <div style="font-size:13px;color:var(--ink)">gateway-restart-flow.drawio</div>
                     <div style="font-size:11px;color:var(--ink-faint);margin-top:2px">流程图 · 2.4 KB · 上次修改 8/16</div>
                   </div>
-                  <button class="cbtn" style="border:1px solid var(--hairline);padding:5px 12px" onclick="alert('打开 drawio 查看器')">打开查看</button>
+                </div>
+                <div class="pv-tpl" id="pv-drawio-body">
+                  <svg class="pv-frame" viewBox="0 0 560 150" role="img" aria-label="drawio 文件缩略">
+                    <defs>
+                      <pattern id="pv-grid" width="20" height="20" patternUnits="userSpaceOnUse">
+                        <path d="M20 0H0V20" fill="none" stroke="rgba(24,24,27,0.06)" stroke-width="0.5"/>
+                      </pattern>
+                      <marker id="pv-arrow2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                        <path d="M0 0 L10 5 L0 10 z" fill="var(--ink-subtle)"/>
+                      </marker>
+                    </defs>
+                    <rect width="560" height="150" fill="url(#pv-grid)"/>
+                    <path class="pv-edge" marker-end="url(#pv-arrow2)" d="M150 75 C 210 75, 210 62, 250 62"/>
+                    <text class="pv-edge-label" x="190" y="68">30s</text>
+                    <path class="pv-edge" marker-end="url(#pv-arrow2)" d="M310 75 C 360 75, 360 38, 392 38"/>
+                    <text class="pv-edge-label" x="342" y="50">yes</text>
+                    <path class="pv-edge" marker-end="url(#pv-arrow2)" d="M310 79 C 360 79, 360 112, 392 112"/>
+                    <text class="pv-edge-label" x="342" y="100">no</text>
+                    <g class="pv-node"><rect x="20" y="57" width="130" height="36" rx="6" fill="#fff" stroke="#b0b7c4"/><text x="85" y="79" text-anchor="middle">service stop</text></g>
+                    <g class="pv-node"><polygon points="310,62 380,75 310,88 240,75" fill="#fff" stroke="#3a3a3f"/><text x="310" y="79" text-anchor="middle">graceful?</text></g>
+                    <g class="pv-node"><rect x="392" y="22" width="62" height="32" rx="6" fill="#fff" stroke="#189a5c"/><text x="423" y="42" text-anchor="middle">写哨兵</text></g>
+                    <g class="pv-node"><rect x="392" y="96" width="62" height="32" rx="6" fill="#fff" stroke="#d64545"/><text x="423" y="116" text-anchor="middle">bootout</text></g>
+                  </svg>
+                  <div style="font-size:11px;color:var(--ink-faint);margin-top:8px">drawio 画布示意（mock）· 正式版接 drawio 查看器</div>
                 </div>
               </div>
               <p>参考了上游的哨兵设计：</p>
@@ -349,64 +444,93 @@ V5 新增：composer 工具栏（agent 选择 + 钉钉绑定标识 + 附件上�
                     <div style="font-size:12px;color:var(--ink-subtle);margin-top:2px">Add sentinel-based crash recovery for service restarts. When a graceful stop exceeds 30s, write a sentinel before escalating to SIGKILL so the next launch can recover in-flight sessions.</div>
                     <div style="font-size:11px;color:var(--ink-faint);margin-top:4px">github.com · 2 days ago</div>
                   </div>
-                  <button class="cbtn" style="border:1px solid var(--hairline);padding:5px 12px;flex-shrink:0" onclick="alert('内嵌 iframe 预览')">预览</button>
+                  <button class="cbtn" style="border:1px solid var(--hairline);padding:5px 12px;flex-shrink:0" onclick="previewInSide('web')">右侧预览</button>
+                </div>
+                <div class="pv-tpl" id="pv-web-body">
+                  <div class="pv-loading" id="pv-web-loading">正在加载 https://github.com/oven-sh/bun …</div>
+                  <iframe id="pv-iframe" class="pv-frame" style="display:none;height:260px" title="网页预览"></iframe>
+                  <div style="font-size:11px;color:var(--ink-faint);margin-top:8px">浏览器内 iframe 预览（需联网）· 离线时为占位</div>
                 </div>
               </div>
             </div>
           </div>
         </div>
+        </div>
     </div>
 
-    <!-- Composer V5 -->
+    <!-- Composer（assistant-ui 式：auto-grow 输入 + 底部工具栏） -->
     <div id="composer">
       <div class="composer-box">
-        <textarea id="input" rows="2" placeholder="给 研发助手 发消息…"></textarea>
+        <textarea id="input" rows="1" placeholder="@研发助手 发消息，或直接提问…"></textarea>
         <div class="composer-bar">
-          <!-- Agent 选择器（含钉钉绑定标识 + coding/worker 类型） -->
-          <div class="agent-picker" id="agentPicker" onclick="event.stopPropagation();document.getElementById('agentMenu').classList.toggle('show')">
-            <div class="agent-mini">研<span class="dt-badge"><svg class="icon"><use href="#i-dingtalk"/></svg></span></div>
-            <span class="ap-name" id="apName">研发助手</span>
-            <span class="ap-type coding" id="apType">CODING</span>
-            <svg class="icon chev"><use href="#i-chevron"/></svg>
-          </div>
-          <div class="agent-menu" id="agentMenu">
-            <div class="agent-menu-head">研发工作区</div>
-            <div class="agent-opt current" onclick="pickAgent('研发助手','研','coding',true)">
-              <div class="agent-mini" style="background:#5e6ad2">研<span class="dt-badge"><svg class="icon"><use href="#i-dingtalk"/></svg></span></div>
-              <span class="ao-name">研发助手</span><span class="ap-type coding">CODING</span>
-              <span class="ao-ws">研发工作区</span>
+          <!-- 左组：@Agent + 输入辅助 -->
+          <div class="cgroup">
+            <div class="agent-picker" id="agentPicker" onclick="event.stopPropagation();document.getElementById('agentMenu').classList.toggle('show')">
+              <div class="agent-mini">研<span class="dt-badge"><svg class="icon"><use href="#i-dingtalk"/></svg></span></div>
+              <span class="ap-name" id="apName">@研发助手</span>
+              <svg class="icon chev"><use href="#i-chevron"/></svg>
             </div>
-            <div class="agent-opt" onclick="pickAgent('测试 Agent','测','coding',false)">
-              <div class="agent-mini" style="background:#4a5568">测</div>
-              <span class="ao-name">测试 Agent</span><span class="ap-type coding">CODING</span>
-              <span class="ao-ws">研发工作区</span>
+            <div class="agent-menu" id="agentMenu">
+              <div class="agent-menu-head">研发工作区</div>
+              <div class="agent-opt current" onclick="pickAgent('研发助手','研','coding')">
+                <div class="agent-mini">研<span class="dt-badge"><svg class="icon"><use href="#i-dingtalk"/></svg></span></div>
+                <span class="ao-name">@研发助手</span><span class="ap-type coding">CODING</span>
+                <span class="ao-ws">研发工作区</span>
+              </div>
+              <div class="agent-opt" onclick="pickAgent('测试 Agent','测','coding')">
+                <div class="agent-mini">测</div>
+                <span class="ao-name">@测试 Agent</span><span class="ap-type coding">CODING</span>
+                <span class="ao-ws">研发工作区</span>
+              </div>
+              <div class="agent-menu-head">运营工作区</div>
+              <div class="agent-opt" onclick="pickAgent('运维 Agent','运','worker')">
+                <div class="agent-mini">运<span class="dt-badge"><svg class="icon"><use href="#i-dingtalk"/></svg></span></div>
+                <span class="ao-name">@运维 Agent</span><span class="ap-type worker">WORKER</span>
+                <span class="ao-ws">运营工作区</span>
+              </div>
+              <div class="agent-opt" onclick="pickAgent('HR 助手','HR','worker')">
+                <div class="agent-mini">HR<span class="dt-badge"><svg class="icon"><use href="#i-dingtalk"/></svg></span></div>
+                <span class="ao-name">@HR 助手</span><span class="ap-type worker">WORKER</span>
+                <span class="ao-ws">运营工作区</span>
+              </div>
             </div>
-            <div class="agent-menu-head">运营工作区</div>
-            <div class="agent-opt" onclick="pickAgent('运维 Agent','运','worker',true)">
-              <div class="agent-mini" style="background:#3a7d5d">运<span class="dt-badge"><svg class="icon"><use href="#i-dingtalk"/></svg></span></div>
-              <span class="ao-name">运维 Agent</span><span class="ap-type worker">WORKER</span>
-              <span class="ao-ws">运营工作区</span>
-            </div>
-            <div class="agent-opt" onclick="pickAgent('HR 助手','HR','worker',true)">
-              <div class="agent-mini" style="background:#8a5fb8">HR<span class="dt-badge"><svg class="icon"><use href="#i-dingtalk"/></svg></span></div>
-              <span class="ao-name">HR 助手</span><span class="ap-type worker">WORKER</span>
-              <span class="ao-ws">运营工作区</span>
-            </div>
-          </div>
 
-          <button class="cbtn" title="上传附件" onclick="alert('打开文件选择器（附件将作为 prompt 上下文上传）')"><svg class="icon"><use href="#i-attach"/></svg></button>
-          <button class="cbtn" title="语音输入" onclick="location.href='voice.html'"><svg class="icon"><use href="#i-mic"/></svg></button>
+            <span class="csep"></span>
+            <button class="cbtn" title="上传附件" onclick="alert('打开文件选择器（附件将作为 prompt 上下文上传）')"><svg class="icon"><use href="#i-attach"/></svg><span>附件</span></button>
+            <button class="cbtn" title="语音输入" onclick="location.href='voice.html'"><svg class="icon"><use href="#i-mic"/></svg></button>
+          </div>
 
           <div class="spacer"></div>
 
-          <button class="cbtn" onclick="alert('模型选择：set_model')"><svg class="icon"><use href="#i-cpu"/></svg><b style="font-weight:500;color:var(--ink)">claude-opus-4-5</b></button>
-          <button class="cbtn" onclick="alert('thinking 级别：set_thinking_level')">thinking <b style="font-weight:500;color:var(--ink)">high</b></button>
-          <button id="send" onclick="toggleSend()"><svg class="icon" id="sendIcon"><use href="#i-stop"/></svg></button>
+          <!-- 右组：模型+思维级（单一选择器）+ 发送 -->
+          <div class="cgroup">
+            <span class="csep"></span>
+            <div class="cbtn model-picker" id="modelPicker" onclick="event.stopPropagation();document.getElementById('modelMenu').classList.toggle('show')">
+              <svg class="icon"><use href="#i-cpu"/></svg>
+              <b id="curModel" style="font-weight:500;color:var(--ink);font-size:12px;font-family:var(--mono);letter-spacing:0">claude-opus-4-5</b>
+              <span id="curThink" class="think-chip">high</span>
+              <svg class="icon chev"><use href="#i-chevron"/></svg>
+            </div>
+            <div class="model-menu" id="modelMenu">
+              <div class="model-menu-head">模型</div>
+              <div class="mm-item" onclick="pickModel('claude-opus-4-5')">claude-opus-4-5<span class="mm-prov">anthropic</span></div>
+              <div class="mm-item" onclick="pickModel('claude-sonnet-4-5')">claude-sonnet-4-5<span class="mm-prov">anthropic</span></div>
+              <div class="mm-item" onclick="pickModel('qwen3.7-max')">qwen3.7-max<span class="mm-prov">narwal-plan</span></div>
+              <div class="mm-item" onclick="pickModel('minimax-m3')">minimax-m3<span class="mm-prov">narwal-plan</span></div>
+              <div class="model-menu-head" style="margin-top:6px">思维级别</div>
+              <div class="mm-item" onclick="pickThink('off')">off</div>
+              <div class="mm-item" onclick="pickThink('low')">low</div>
+              <div class="mm-item" onclick="pickThink('medium')">medium</div>
+              <div class="mm-item" onclick="pickThink('high')">high</div>
+            </div>
+            <span class="csep"></span>
+            <button id="send" onclick="toggleSend()"><svg class="icon" id="sendIcon"><use href="#i-stop"/></svg></button>
+          </div>
         </div>
       </div>
       <div class="composer-meta">
         <span><span class="kbd">Enter</span> 发送 · <span class="kbd">Shift+Enter</span> 换行 · <span class="kbd">Esc</span> 中止</span>
-        <span>draft 自动保留</span>
+        <span>draft 自动保留 · 输入自适应增高</span>
       </div>
     </div>
   </div>
@@ -414,69 +538,64 @@ V5 新增：composer 工具栏（agent 选择 + 钉钉绑定标识 + 附件上�
   <!-- 拖拽分隔条 -->
   <div id="splitter" title="拖拽调整面板宽度"></div>
 
-  <!-- 右栏 -->
+  <!-- 右栏：单列四区块（概览 → 上下文 → 执行 → Todo） -->
   <aside id="sidebar">
-    <div class="side-tabs">
-      <div class="side-tab active" onclick="sideTab(this,'pane-status')">状态</div>
-      <div class="side-tab" onclick="sideTab(this,'pane-viz')">可视化</div>
-      <div class="side-tab" onclick="sideTab(this,'pane-todo')">Todo</div>
+    <!-- 内容预览（点击转录卡「右侧预览」触发，默认隐藏且置顶） -->
+    <div class="side-section preview-panel" id="previewPanel" style="display:none">
+      <div class="side-sec-head">
+        <span class="pv-title" id="previewTitle">内容预览</span>
+        <button class="pv-close" onclick="closePreview()" title="关闭预览">✕</button>
+      </div>
+      <div id="previewBody"></div>
     </div>
-    <div class="side-body">
-      <!-- 状态 -->
-      <div class="side-pane active" id="pane-status">
-        <div class="panel">
-          <h4>会话状态</h4>
-          <div class="kv"><span class="k">阶段</span><span class="phase"><span class="spin"></span>streaming</span></div>
-          <div class="kv"><span class="k">Agent</span><span class="v">研发助手 <span style="color:var(--ink-faint);font-size:11px">CODING</span></span></div>
-          <div class="kv"><span class="k">钉钉机器人</span><span class="v" style="color:var(--dingtalk);display:flex;align-items:center;gap:4px"><svg class="icon" style="width:12px;height:12px;stroke:var(--dingtalk)"><use href="#i-dingtalk"/></svg>已绑定</span></div>
-          <div class="kv"><span class="k">模型</span><span class="v">claude-opus-4-5</span></div>
-          <div class="kv"><span class="k">thinking</span><span class="v">high</span></div>
-          <div class="kv"><span class="k">队列</span><span class="v">steer 1 · follow-up 0</span></div>
-          <div class="kv"><span class="k">会话</span><span class="v mono">01a00b13…bc4981</span></div>
-          <div class="bar"><div style="width:62%"></div></div>
-          <div class="bar-label">上下文 62% · 22 条消息</div>
-        </div>
-        <div class="panel">
-          <h4>重试 / 压缩</h4>
-          <div class="kv"><span class="k">auto-retry</span><span class="v" style="color:var(--success)">开</span></div>
-          <div class="kv"><span class="k">auto-compaction</span><span class="v" style="color:var(--success)">开</span></div>
-          <div class="kv"><span class="k">上次压缩</span><span class="v">—</span></div>
-        </div>
-      </div>
 
-      <!-- 可视化 -->
-      <div class="side-pane" id="pane-viz">
-        <div class="panel">
-          <h4>Token 速率 · 实时</h4>
-          <div class="viz-chart" id="vizChart"></div>
-          <div class="viz-axis"><span>-60s</span><span id="vizNow">312 tok/s</span><span>now</span></div>
-        </div>
-        <div class="panel">
-          <h4>活跃工具</h4>
-          <div class="live-tool"><span class="spin" style="width:8px;height:8px"></span><span class="tname">grep</span><span class="tdur">1.2s</span></div>
-          <div class="live-tool"><span style="width:8px;height:8px;border-radius:50%;background:var(--success)"></span><span class="tname">read</span><span class="tdur">0.4s</span></div>
-          <div class="live-tool"><span style="width:8px;height:8px;border-radius:50%;background:var(--success)"></span><span class="tname">search</span><span class="tdur">0.8s</span></div>
-        </div>
-        <div class="panel">
-          <h4>输出预览</h4>
-          <div class="preview-frame" id="liveOut">$ grep -rn "async stop" packages/omp-gateway/src
-src/gateway-daemon.ts:412:  async stop(): Promise&lt;void&gt;
-src/service-installer.ts:88:    async stop()<span class="caret"></span></div>
-        </div>
+    <!-- 1 · 会话概览：这个会话是谁、什么状态 -->
+    <div class="side-section">
+      <div class="side-sec-head"><h3>会话概览</h3></div>
+      <div class="overview">
+        <div class="ov-row"><span class="ov-k">阶段</span><span class="ov-v"><span class="phase"><span class="spin"></span>streaming</span></span></div>
+        <div class="ov-row"><span class="ov-k">Agent</span><span class="ov-v">研发助手 <span class="ov-tag">CODING</span></span></div>
+        <div class="ov-row"><span class="ov-k">模型</span><span class="ov-v">claude-opus-4-5</span></div>
+        <div class="ov-row"><span class="ov-k">thinking</span><span class="ov-v">high</span></div>
+        <div class="ov-row"><span class="ov-k">会话</span><span class="ov-v mono">01a00b13…bc4981</span></div>
       </div>
+    </div>
 
-      <!-- Todo -->
-      <div class="side-pane" id="pane-todo">
-        <div class="panel">
-          <h4>Todo · 4</h4>
-          <label class="todo done"><input type="checkbox" checked><span class="t">复现 00:20:30 消息丢失</span></label>
-          <label class="todo done"><input type="checkbox" checked><span class="t">确认 SIGKILL 路径与哨兵关系</span></label>
-          <label class="todo"><input type="checkbox"><span class="t">给 stop 加 30s 硬超时并写测试</span></label>
-          <label class="todo"><input type="checkbox"><span class="t">回归验证重启恢复</span></label>
-        </div>
+    <!-- 2 · 上下文：窗口用了多少 -->
+    <div class="side-section">
+      <div class="side-sec-head"><h3>上下文</h3></div>
+      <div class="ctx">
+        <div class="bar"><div style="width:62%"></div></div>
+        <div class="ctx-line"><span>124K / 200K tokens</span><span>62%</span></div>
+        <div class="ctx-line sub"><span>22 条消息</span><span>上次压缩 —</span></div>
       </div>
+    </div>
+
+    <!-- 3 · 正在执行：agent 此刻在做什么（实时） -->
+    <div class="side-section">
+      <div class="side-sec-head"><h3>正在执行</h3></div>
+      <div class="exec">
+        <div class="exec-row"><span class="spin" style="width:9px;height:9px"></span><span class="exec-name">grep</span><span class="exec-dur">1.2s</span></div>
+        <div class="exec-row done"><span class="exec-dot ok"></span><span class="exec-name">read</span><span class="exec-dur">0.4s</span></div>
+        <div class="exec-row done"><span class="exec-dot ok"></span><span class="exec-name">search</span><span class="exec-dur">0.8s</span></div>
+      </div>
+      <div class="exec-out">$ grep -rn "async stop" packages/omp-gateway/src
+src/gateway-daemon.ts:412:  async stop(): Promise&lt;void&gt;<span class="caret"></span></div>
+    </div>
+
+    <!-- 4 · 会话 Todo：当前会话任务，全局板见 TODO 面板 -->
+    <div class="side-section">
+      <div class="side-sec-head"><h3>会话 Todo · 4</h3></div>
+      <label class="todo done"><input type="checkbox" checked><span class="t">复现 00:20:30 消息丢失</span></label>
+      <label class="todo done"><input type="checkbox" checked><span class="t">确认 SIGKILL 路径与哨兵关系</span></label>
+      <label class="todo"><input type="checkbox"><span class="t">给 stop 加 30s 硬超时并写测试</span></label>
+      <label class="todo"><input type="checkbox"><span class="t">回归验证重启恢复</span></label>
+      <a href="todo-panel.html" style="display:inline-flex;align-items:center;gap:5px;margin-top:10px;font-size:12px;color:var(--accent);text-decoration:none">查看全局任务板
+        <svg class="icon" style="width:11px;height:11px"><use href="#i-arrow"/></svg>
+      </a>
     </div>
   </aside>
+
 </div>
 
 <script>
@@ -498,7 +617,31 @@ src/service-installer.ts:88:    async stop()<span class="caret"></span></div>
       <svg class="icon"><use href="#${n.icon}"/></svg>
     </div>`).join("");
 
+  /* ── 输入自适应增高（assistant-ui Composer） ── */
+  const inputEl = document.getElementById("input");
+  function autoGrow() {
+    inputEl.style.height = "auto";
+    inputEl.style.height = Math.min(inputEl.scrollHeight, 120) + "px";
+  }
+  inputEl.addEventListener("input", autoGrow);
+
+  /* ── 模型 + 思维级别选择 ── */
+  function pickModel(m) {
+    document.getElementById("curModel").textContent = m;
+    document.getElementById("modelMenu").classList.remove("show");
+  }
+  function pickThink(l) {
+    document.getElementById("curThink").textContent = l;
+    document.getElementById("modelMenu").classList.remove("show");
+  }
+  document.addEventListener("click", e => {
+    if (!e.target.closest("#modelPicker")) {
+      document.getElementById("modelMenu").classList.remove("show");
+    }
+  });
+
   /* ── 发送 / 停止原位替换 ── */
+
   let streaming = true;
   function toggleSend() {
     streaming = !streaming;
@@ -511,13 +654,10 @@ src/service-installer.ts:88:    async stop()<span class="caret"></span></div>
 
   /* ── Agent 选择（含 coding/worker 类型 + 钉钉标识） ── */
   function pickAgent(name, face, type, dingtalk) {
-    document.getElementById("apName").textContent = name;
-    const t = document.getElementById("apType");
-    t.textContent = type.toUpperCase();
-    t.className = "ap-type " + type;
+    document.getElementById("apName").textContent = "@" + name;
     document.querySelector("#agentPicker .agent-mini").innerHTML =
       face + (dingtalk ? '<span class="dt-badge"><svg class="icon"><use href="#i-dingtalk"/></svg></span>' : "");
-    document.getElementById("input").placeholder = "给 " + name + " 发消息…";
+    document.getElementById("input").placeholder = "@" + name + " 发消息，或直接提问…";
     document.getElementById("agentMenu").classList.remove("show");
   }
   document.addEventListener("click", e => {
@@ -525,14 +665,6 @@ src/service-installer.ts:88:    async stop()<span class="caret"></span></div>
       document.getElementById("agentMenu").classList.remove("show");
     }
   });
-
-  /* ── 右栏 tab ── */
-  function sideTab(el, paneId) {
-    document.querySelectorAll(".side-tab").forEach(t => t.classList.remove("active"));
-    document.querySelectorAll(".side-pane").forEach(p => p.classList.remove("active"));
-    el.classList.add("active");
-    document.getElementById(paneId).classList.add("active");
-  }
 
   /* ── 面板拖拽调宽（localStorage 持久化） ── */
   const splitter = document.getElementById("splitter");
@@ -561,26 +693,42 @@ src/service-installer.ts:88:    async stop()<span class="caret"></span></div>
     localStorage.setItem("omp.side.w", 300);
   });
 
-  /* ── 可视化：token 速率实时图（mock 数据流） ── */
-  const chart = document.getElementById("vizChart");
-  const bars = [];
-  for (let i = 0; i < 24; i++) {
-    const b = document.createElement("div");
-    b.className = "viz-bar";
-    chart.appendChild(b);
-    bars.push(b);
+
+
+  /* ── 内容预览：统一在右侧可视化功能区展示 ── */
+  const PV_TITLES = { mermaid: "mermaid · 流程图", drawio: "gateway-restart-flow.drawio", web: "github.com/oven-sh/bun" };
+  function previewInSide(kind) {
+    // 预览面板始终位于右栏顶部，直接显示
+    const panel = document.getElementById("previewPanel");
+    const body = document.getElementById("previewBody");
+    document.getElementById("previewTitle").textContent = PV_TITLES[kind] || "内容预览";
+
+    // 从隐藏模板复制内容（iframe 需克隆后重新绑定 src）
+    const tpl = document.getElementById("pv-" + kind + "-body");
+    const clone = tpl.cloneNode(true);
+    clone.classList.remove("pv-tpl");
+    clone.style.display = "";
+    body.innerHTML = "";
+    body.appendChild(clone);
+
+    if (kind === "web") {
+      const f = body.querySelector("#pv-iframe");
+      f.removeAttribute("src");
+      const loading = body.querySelector("#pv-web-loading");
+      loading.style.display = "";
+      f.style.display = "none";
+      f.setAttribute("src", "https://github.com/oven-sh/bun");
+      f.onload = () => { loading.style.display = "none"; f.style.display = "block"; };
+      f.onerror = () => {
+        loading.textContent = "无法加载（离线或网络受限）· 正式版为浏览器内 iframe 预览";
+      };
+    }
+    panel.style.display = "";
   }
-  let data = Array.from({length: 24}, () => 8 + Math.random() * 30);
-  function renderChart() {
-    const max = Math.max(...data, 1);
-    bars.forEach((b, i) => {
-      b.style.height = (data[i] / max * 100) + "%";
-      b.classList.toggle("hot", i >= bars.length - 3);
-    });
-    document.getElementById("vizNow").textContent = Math.round(data[data.length-1] * 8) + " tok/s";
+  function closePreview() {
+    document.getElementById("previewPanel").style.display = "none";
+    document.getElementById("previewBody").innerHTML = "";
   }
-  renderChart();
-  setInterval(() => { data.shift(); data.push(8 + Math.random() * 34); renderChart(); }, 1500);
 
   /* ── 手机预览 ── */
   function togglePhone(show) {

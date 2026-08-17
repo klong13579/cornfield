@@ -1,8 +1,12 @@
 <!--
-页面名：移动端会话 (Mobile Session) — V3 (impeccable-guided)
+页面名：移动端会话 (Mobile Session) — V6 图形收敛
 功能层级位置：OMP 多端前端 > 移动端精简视图
+路由路径：#/mobile/workspace
+导航分组：mobile（经桌面页「预览手机」访问）
 覆盖协议：prompt, steer, abort, get_snapshot, subscribe · session_snapshot, progress
+覆盖协议（Jarvis 语音）：voice 页 → prompt（语音转文字后发送）
 设计决策：右面板→浮层、模型/thinking→快捷条、工具卡默认折叠、触控 44px、语音快捷入口。
+V6：状态圆点 8px 语义色、徽标文字化、亮色 token。
 -->
 <!DOCTYPE html>
 <html lang="zh">
@@ -29,7 +33,7 @@
 
   #topbar { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--hairline); background: var(--surface); flex-shrink: 0; }
   .conn { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--success); }
-  .conn::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--success); box-shadow: 0 0 6px rgba(76,183,130,0.5); }
+  .conn::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--success); }
   .spacer { flex: 1; }
   .top-btn { background: var(--surface-2); border: 1px solid var(--hairline); border-radius: var(--r-sm); padding: 5px 10px; font-size: 12px; color: var(--ink); cursor: pointer; transition: all var(--ease); }
   .top-btn:hover { border-color: var(--hairline-strong); }
@@ -150,7 +154,7 @@
     <div class="kv"><span class="k">模型</span><span>qwen3.7-max</span></div>
     <div class="kv"><span class="k">上下文</span><span>62% · 22 条消息</span></div>
     <div class="bar"><div style="width:62%"></div></div>
-    <h4 style="margin-top:16px">Todo · 4</h4>
+    <h4 style="margin-top:16px">会话 Todo · 4</h4>
     <label class="todo done"><input type="checkbox" checked><span class="t">复现 00:20:30 消息丢失</span></label>
     <label class="todo done"><input type="checkbox" checked><span class="t">确认 SIGKILL 路径</span></label>
     <label class="todo"><input type="checkbox"><span class="t">给 stop 加 30s 超时</span></label>
