@@ -1,12 +1,34 @@
 import { ChevronDown, Cpu, Mic, Paperclip, Send, Square } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { ContextRing } from "../../components/ContextRing";
 import type { ImageContentDto } from "../../lib/wire-dto";
 import { useSessionStore } from "../../state/session-store";
 import { getUiStore, useUiState } from "../../state/ui-store";
 import { useSession } from "../../state/use-session";
 
 const THINKING_LEVELS = ["off", "low", "medium", "high"];
+
+function statusDot(s: string): string {
+	if (s === "online") return "bg-success";
+	if (s === "busy") return "bg-warning animate-pulse";
+	return "bg-ink-faint";
+}
+
+function statusLabel(s: string): string {
+	switch (s) {
+		case "online":
+			return "运行中";
+		case "busy":
+			return "执行中";
+		case "idle":
+			return "空闲";
+		case "stopped":
+			return "已停用";
+		default:
+			return "状态未知";
+	}
+}
 
 /**
  * 工作台输入区（assistant-ui Composer 就绪前的原生实现，两行：textarea + 工具栏）。
@@ -153,11 +175,22 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 															setShowAgentMenu(false);
 														}}
 													>
-														<span className="flex h-5 w-5 items-center justify-center rounded bg-surface-2 text-[9px] font-semibold">
+														<span className="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-surface-2 text-[9px] font-semibold">
 															{a.face}
 														</span>
-														<span className="text-ink">@{a.name}</span>
-														<span className="ml-auto text-[10px] text-ink-faint">
+														<span className="min-w-0 flex-1">
+															<span className="flex items-center gap-1.5 text-ink">
+																@{a.name}
+																<span
+																	className={`h-1.5 w-1.5 shrink-0 rounded-full ${statusDot(a.status)}`}
+																	title={statusLabel(a.status)}
+																/>
+															</span>
+															<span className="text-[10px] text-ink-faint">
+																{a.skillsCount ?? 0} 技能 · {a.cronCount ?? 0} 定时
+															</span>
+														</span>
+														<span className="ml-auto shrink-0 text-[10px] text-ink-faint">
 															{a.kind === "coding" ? "CODING" : "WORKER"}
 														</span>
 													</button>
@@ -258,6 +291,14 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 
 						<span className="h-[18px] w-px bg-hairline" />
 
+						{view.context && (
+							<ContextRing
+								percent={view.context.percent}
+								usedTokens={view.context.usedTokens}
+								totalTokens={view.context.totalTokens}
+								size={28}
+							/>
+						)}
 						{/* 发送 ↔ 停止 原位替换 */}
 						<button
 							type="button"

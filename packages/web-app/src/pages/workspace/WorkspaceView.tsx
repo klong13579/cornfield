@@ -1,6 +1,7 @@
 import { Folder } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
+import { QueueCard } from "../../components/QueueCard";
 import { useSessionStore } from "../../state/session-store";
 import { getUiStore } from "../../state/ui-store";
 import { useSession } from "../../state/use-session";
@@ -68,6 +69,7 @@ export function WorkspaceView({ compact = false }: { compact?: boolean }): React
 				</header>
 
 				<Transcript />
+				<QueueCard count={view.queued} className="mx-auto mb-1 max-w-[800px]" />
 
 				{/* 输入区：单一实例（CSS 自适应桌面/移动），避免模型列表/草稿逻辑双份执行 */}
 				<ComposerBar autoFocusDraft={draftSeed} />
