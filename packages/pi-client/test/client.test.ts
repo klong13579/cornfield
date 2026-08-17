@@ -365,3 +365,58 @@ describe("PiClient 重连 + 断线在途拒绝", () => {
 		expect(client.status).toBe("closed");
 	});
 });
+
+// ── 回归：默认 clock 在浏览器式严格 this 下不报 Illegal invocation ──
+// fe-dev P3 报雷：旧实现 `this.#clock = options.clock ?? { setTimeout, clearTimeout }` 直接
+// shorthand，方法调用形态下 this = clock 对象 → Chrome/Firefox/Safari 拒
+// (浏览器 setTimeout 必须 this = window)。Bun/Node 不校验所以测不出。
+// 本回归用 mock global setTimeout 模拟严格行为：如果 pi-client 默认 clock 回销了
+// this-binding，真请求返回就会在 setTimeout 那行抛而不是正确为 PiRequestTimeoutError。
+describe("PiClient 默认 clock browser this-binding 回归", () => {
+	test("默认 clock 真发 request timeout，不抛 Illegal invocation", async () => {
+		const realSetTimeout = globalThis.setTimeout;
+		const realClearTimeout = globalThis.clearTimeout;
+		const strictSetTimeout = function (this: unknown, fn: () => void, ms: number): ReturnType<typeof setTimeout> {
+			if (this !== globalThis && this !== undefined) throw new TypeError("Illegal invocation");
+			return realSetTimeout(fn, ms);
+		};
+		const strictClearTimeout = function (this: unknown, h: ReturnType<typeof setTimeout>): void {
+			if (this !== globalThis && this !== undefined) throw new TypeError("Illegal invocation");
+			realClearTimeout(h);
+		};
+		(globalThis as { setTimeout: typeof setTimeout }).setTimeout = strictSetTimeout as unknown as typeof setTimeout;
+		(globalThis as { clearTimeout: typeof clearTimeout }).clearTimeout =
+			strictClearTimeout as unknown as typeof clearTimeout;
+		try {
+			const client = new PiClient({
+				url: "ws://test/ws",
+				token: "tkn",
+				webSocketCtor: FakeWebSocketCtor,
+				requestTimeoutMs: 30,
+			});
+			const p = client.connect();
+			await tick();
+			const ws = FakeWebSocket.all[0];
+			ws.open();
+			ws.recv(
+				JSON.stringify({ type: "hello_ack", connectionId: "c", protocolVersion: MULTIDEVICE_PROTOCOL_VERSION }),
+			);
+			await p;
+
+			// 默认 clock 的 setTimeout 会被调用，旧实现 this=clock → 拒 Illegal invocation。
+			const reqP = client.request({ type: "get_state" });
+			let err: Error | undefined;
+			try {
+				await reqP;
+			} catch (e) {
+				err = e as Error;
+			}
+			// 应当真超时 (PiRequestTimeoutError)，不应当是 Illegal invocation（旧 bug）。
+			expect(err).toBeInstanceOf(PiRequestTimeoutError);
+			client.close();
+		} finally {
+			globalThis.setTimeout = realSetTimeout;
+			globalThis.clearTimeout = realClearTimeout;
+		}
+	});
+});

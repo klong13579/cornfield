@@ -130,7 +130,15 @@ export class PiClient {
 				this.#requestCounter += 1;
 				return `req_${this.#requestCounter}`;
 			});
-		this.#clock = options.clock ?? { setTimeout, clearTimeout };
+		// 默认 clock 必须用符初化一层 arrow wrapper，保证浏览器下 `this` 仍是 window。
+		// 直接存 { setTimeout, clearTimeout } 会在方法调用形态下报 `TypeError: Illegal invocation`
+		// (Chrome/Firefox/Safari 都会拒)。Bun/Node 不校验 this 所以测试没发现——fe-dev P3 雷。
+		this.#clock = options.clock ?? {
+			setTimeout: (fn: () => void, ms: number) => setTimeout(fn, ms),
+			clearTimeout: (h: ReturnType<typeof setTimeout>) => {
+				clearTimeout(h);
+			},
+		};
 	}
 
 	// ── 公开 API ──

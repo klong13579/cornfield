@@ -202,12 +202,12 @@ describe("P2 wire-server 命令面 — 12 条真机 e2e", () => {
 		await sendCommand({ type: "abort" });
 	});
 
-	test("set_host_tools: 显式 not_implemented（需 host_tool_* 双向帧，本迭代未实现）", async () => {
+	test("set_host_tools: 注册成功返回 toolNames（P3 双向帧已实现，host_tool 调用闭环在多 agent e2e 里验）", async () => {
 		const r = await sendCommand({
 			type: "set_host_tools",
 			tools: [{ name: "cron", description: "cron tool", parameters: {} }],
 		});
-		expect(r.ok).toBe(false);
-		expect(String(r.error)).toMatch(/not_implemented.*set_host_tools/);
+		expect(r.ok).toBe(true);
+		expect((r.result as { toolNames: string[] }).toolNames).toEqual(["cron"]);
 	});
 });

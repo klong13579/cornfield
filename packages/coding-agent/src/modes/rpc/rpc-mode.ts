@@ -43,7 +43,7 @@ type RpcOutput = (
 	obj: RpcResponse | RpcExtensionUIRequest | RpcHostToolCallRequest | RpcHostToolCancelRequest | object,
 ) => void;
 
-function normalizeHostToolDefinitions(tools: RpcHostToolDefinition[]): RpcHostToolDefinition[] {
+export function normalizeHostToolDefinitions(tools: RpcHostToolDefinition[]): RpcHostToolDefinition[] {
 	return tools.map((tool, index) => {
 		const name = typeof tool.name === "string" ? tool.name.trim() : "";
 		if (!name) {

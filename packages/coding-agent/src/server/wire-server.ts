@@ -1,77 +1,247 @@
 import { randomUUID } from "node:crypto";
 import { logger } from "@oh-my-pi/pi-utils";
+import type { ClientFrame, ServerFrame, WireCommand, WireServerEvent } from "@oh-my-pi/pi-wire";
+import { MULTIDEVICE_PROTOCOL_VERSION } from "@oh-my-pi/pi-wire";
+import { normalizeHostToolDefinitions } from "../modes/rpc/rpc-mode";
 import type { AgentSession } from "../session/agent-session";
 import type { SessionStore } from "../session/session-store";
 import type { TodoPhase } from "../tools/todo-write";
+import { WireHostToolBridge } from "./host-tool-bridge";
 import {
-	type ClientFrame,
-	MULTIDEVICE_PROTOCOL_VERSION,
-	type ServerFrame,
-	type WireCommand,
-	type WireServerEvent,
-} from "./wire-types";
+	type AgentMeta,
+	type AttachedSession,
+	loadAgentMetas,
+	type SessionFactory,
+	SessionRegistry,
+} from "./session-registry";
 
 export interface WireServerOptions {
 	host: string;
 	port: number;
 	token: string;
-	session: AgentSession;
-	store: SessionStore;
+	/** P1 兼容：serve 启动时自建的会话（cwd 进程），注册为 default agent。 */
+	defaultSession: { session: AgentSession; store: SessionStore };
+	/** lazy attach 注册表 agent 的工厂（serve.ts 装配）。 */
+	sessionFactory: SessionFactory;
 }
 
 interface Connection {
 	connectionId: string;
 	ws: Bun.ServerWebSocket<Connection | undefined>;
+	/** 本连接当前焦点 agent（P1：恒为 default）。 */
+	activeAgentId: string;
+	/** 本连接注册的 host tool bridge（per agent）。发 set_host_tools 的连接 = 执行者。 */
+	hostToolBridges: Map<string, WireHostToolBridge>;
 }
 
 type WireSocket = Bun.ServerWebSocket<Connection | undefined>;
 
+const PROGRESS_EVENT_TYPES = new Set([
+	"message_update",
+	"message_end",
+	"tool_execution_start",
+	"tool_execution_update",
+	"tool_execution_end",
+]);
+
 /**
- * `omp serve` 的 WS 传输层。
+ * `omp serve` 的 WS 传输层（P3 多 Agent 版）。
  *
  * 职责（且仅此）：
- * - 升级 /ws 连接前校验 query token
- * - 握手：hello → hello_ack(connectionId)（版本不符 → hello_error）
- * - request/response 按 request id 关联
- * - 会话事件 → 全连接广播：session_snapshot（权威）+ progress（提示）
- *
- * 命令语义（wire 子集）在 handleCommand 内按 session 方法实现；未实现的
- * 命令显式返回 not_implemented，绝不静默吞掉。
+ * - 升级 /ws 连接前校验 query token；hello → hello_ack
+ * - request/response 按 id 关联；ping → pong（不消耗 session）
+ * - 命令按 command.sessionId ?? conn.activeAgentId 定向 agent（P1：无 sessionId 即 default）
+ * - 事件路由：session_snapshot/progress 只推给 active 在该 agent 上的连接；
+ *   server_snapshot（agent 列表）广播全连接
+ * - host tool：set_host_tools 注册 bridge，call 帧只发给执行者连接；断开全拒
  */
 export async function startWireServer(options: WireServerOptions): Promise<void> {
-	const { token, session, store } = options;
+	const { token, defaultSession } = options;
 	const connections = new Set<Connection>();
+
+	const registry = new SessionRegistry(options.sessionFactory);
+	registry.registerMeta({
+		id: "default",
+		name: "default",
+		agentDir: process.cwd(),
+	});
+	for (const meta of await loadMetasSafe()) registry.registerMeta(meta);
+
+	// default agent 启动即 attached（P1 语义：无 lazy、无 attach 命令也全功能）
+	registry.attachExisting("default", {
+		meta: registry.getMeta("default") as AgentMeta,
+		session: defaultSession.session,
+		store: defaultSession.store,
+	});
 
 	const send = (ws: WireSocket, frame: ServerFrame): void => {
 		ws.send(JSON.stringify(frame));
 	};
 
-	const broadcast = (frame: ServerFrame): void => {
+	const activeAgentIds = (): Set<string> => {
+		const ids = new Set<string>();
+		for (const conn of connections) ids.add(conn.activeAgentId);
+		return ids;
+	};
+
+	const broadcastServerSnapshot = (): void => {
+		const event: WireServerEvent = {
+			type: "server_snapshot",
+			sessions: registry.buildSessionList(activeAgentIds()),
+		};
 		for (const conn of connections) {
-			send(conn.ws, frame);
+			send(conn.ws, { type: "push", event });
 		}
 	};
 
-	const sendSnapshot = (ws: WireSocket): void => {
+	const sendSessionSnapshot = (conn: Connection): void => {
+		const attached = registry.getAttached(conn.activeAgentId);
+		if (!attached) return;
 		const event: WireServerEvent = {
 			type: "session_snapshot",
-			sessionId: session.sessionId,
-			snapshot: store.getSnapshot(),
+			sessionId: conn.activeAgentId,
+			snapshot: attached.store.getSnapshot(),
 		};
-		send(ws, { type: "push", event });
+		send(conn.ws, { type: "push", event });
 	};
 
-	const handleCommand = async (command: WireCommand, reply: (frame: ServerFrame) => void): Promise<void> => {
+	// ── 事件路由：只推给 active 在该 agent 上的连接 ──
+	registry.subscribe(event => {
+		if (event.kind === "snapshot") {
+			for (const conn of connections) {
+				if (conn.activeAgentId !== event.sessionId) continue;
+				const snapshotEvent: WireServerEvent = {
+					type: "session_snapshot",
+					sessionId: event.sessionId,
+					snapshot: event.snapshot,
+				};
+				send(conn.ws, { type: "push", event: snapshotEvent });
+				if (PROGRESS_EVENT_TYPES.has(event.event.type)) {
+					const progressEvent: WireServerEvent = {
+						type: "progress",
+						sessionId: event.sessionId,
+						event: event.event,
+					};
+					send(conn.ws, { type: "push", event: progressEvent });
+				}
+			}
+			return;
+		}
+		// attached / detached → 列表变了，广播
+		broadcastServerSnapshot();
+	});
+
+	/** 命令解析：返回目标 attached session；未 attach / 未注册时报错。 */
+	const resolveTarget = (
+		conn: Connection,
+		command: { sessionId?: string },
+	): { agentId: string; attached: AttachedSession } | { error: string } => {
+		const agentId = command.sessionId ?? conn.activeAgentId;
+		if (!registry.getMeta(agentId)) {
+			return { error: `unknown agent: ${agentId}` };
+		}
+		const attached = registry.getAttached(agentId);
+		if (!attached) {
+			return { error: `agent not attached: ${agentId} (send attach first)` };
+		}
+		return { agentId, attached };
+	};
+
+	const handleCommand = async (
+		conn: Connection,
+		command: WireCommand,
+		reply: (frame: ServerFrame) => void,
+	): Promise<void> => {
 		const done = (result?: unknown): void => reply({ type: "response", id: "", ok: true, result });
 		const fail = (error: string): void => reply({ type: "response", id: "", ok: false, error });
 
 		try {
+			// ── registry 级命令（不定向具体 session）──
 			switch (command.type) {
-				// ─────────────────────────────────────────────────────────────
-				// Prompting (P1)
-				// ─────────────────────────────────────────────────────────────
+				case "list_agents": {
+					done({ agents: registry.buildSessionList(activeAgentIds()) });
+					return;
+				}
+				case "attach": {
+					if (!registry.getMeta(command.sessionId)) {
+						fail(`unknown agent: ${command.sessionId}`);
+						return;
+					}
+					const attached = await registry.attach(command.sessionId);
+					done({ sessionId: command.sessionId, sessionFile: attached.session.sessionFile });
+					// broadcastServerSnapshot 已由 registry attached 事件触发
+					return;
+				}
+				case "detach": {
+					if (command.sessionId === "default") {
+						fail("cannot detach default agent");
+						return;
+					}
+					for (const c of connections) {
+						if (c.activeAgentId === command.sessionId) {
+							fail(`agent is active on a connection: ${command.sessionId} (switch_session first)`);
+							return;
+						}
+					}
+					await registry.detach(command.sessionId);
+					done();
+					return;
+				}
+				case "switch_session": {
+					if (!registry.getMeta(command.sessionId)) {
+						fail(`unknown agent: ${command.sessionId}`);
+						return;
+					}
+					await registry.attach(command.sessionId);
+					conn.activeAgentId = command.sessionId;
+					// 新焦点的快照立即推给本连接（快照权威，客户端零恢复逻辑）
+					sendSessionSnapshot(conn);
+					broadcastServerSnapshot();
+					done({ sessionId: command.sessionId });
+					return;
+				}
+				case "subscribe":
+				case "unsubscribe": {
+					// P1 语义保留：连接级推送（跟随 activeAgentId），无显式订阅表。
+					done();
+					return;
+				}
+				default:
+					break;
+			}
+
+			// ── session 级命令：全部需要已 attach 的目标 ──
+			const target = resolveTarget(conn, command);
+			if ("error" in target) {
+				fail(target.error);
+				return;
+			}
+			const { agentId, attached } = target;
+			const session = attached.session;
+
+			// 状态型命令（不产生 session 事件的 mutation）完成后主动推快照：
+			// set_todos/set_model 等只改 getter，不走事件流，客户端等不到权威更新。
+			// 事件型命令（prompt 等）自然会推，不需要重复。
+			const MUTATING_NO_EVENT = new Set([
+				"set_todos",
+				"set_model",
+				"set_thinking_level",
+				"cycle_thinking_level",
+				"cycle_model",
+				"set_auto_compaction",
+				"set_auto_retry",
+				"abort_retry",
+				"set_session_name",
+				"set_host_tools",
+				"new_session",
+			]);
+			const sessionDone = (result?: unknown): void => {
+				done(result);
+				if (MUTATING_NO_EVENT.has(command.type)) sendSessionSnapshot(conn);
+			};
+			switch (command.type) {
+				// ── Prompting ──
 				case "prompt": {
-					// fire-and-forget：事件流经 store.subscribe 推送，错误回到 response
 					session.prompt(command.message, { images: command.images }).catch((err: Error) => {
 						fail(err.message);
 					});
@@ -94,7 +264,6 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 					break;
 				}
 				case "abort_and_prompt": {
-					// 组合语义与 rpc-mode 完全一致：先 abort，再 fire-and-forget 新 prompt。
 					await session.abort();
 					session.prompt(command.message, { images: command.images }).catch((err: Error) => {
 						fail(err.message);
@@ -103,44 +272,47 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 					break;
 				}
 				case "new_session": {
-					const options = command.parentSession ? { parentSession: command.parentSession } : undefined;
-					const success = await session.newSession(options);
-					done({ cancelled: !success });
+					const opts = command.parentSession ? { parentSession: command.parentSession } : undefined;
+					const success = await session.newSession(opts);
+					sessionDone({ cancelled: !success });
 					break;
 				}
 
-				// ─────────────────────────────────────────────────────────────
-				// State (P1 + P2 补齐)
-				// ─────────────────────────────────────────────────────────────
+				// ── State ──
 				case "get_snapshot": {
-					done({ snapshot: store.getSnapshot() });
+					done({ snapshot: attached.store.getSnapshot() });
 					break;
 				}
 				case "get_state": {
-					done(buildRpcState(session, store));
+					done(buildRpcState(session, attached.store));
 					break;
 				}
 				case "set_todos": {
 					session.setTodoPhases(command.phases as TodoPhase[]);
-					done({ todoPhases: session.getTodoPhases() });
+					sessionDone({ todoPhases: session.getTodoPhases() });
 					break;
 				}
 				case "set_host_tools": {
-					// P2 已知缺口（见 mock/DEV-PLAN.md 与本次交付说明）：
-					// host tools 需要双向 wire 帧（host_tool_call/host_tool_result/
-					// host_tool_update/host_tool_cancel），本迭代未定义这些帧类型也未
-					// 约定客户端 handler，属协议层新增，需与 fe-dev 同步。返回明确的
-					// not_implemented 而非静默接受 tool 声明后无法调用（避免向 LLM 暴露
-					// 不可执行的工具，形成 plausible lie）。
-					fail(
-						"not_implemented: set_host_tools requires bidirectional host_tool_* frames (planned; needs pi-wire协议扩展 + client handler)",
-					);
+					// P3：双向帧已定义（pi-wire HostToolCallPush/...）。本连接成为执行者。
+					const definitions = normalizeHostToolDefinitions(command.tools);
+					let bridge = conn.hostToolBridges.get(agentId);
+					if (!bridge) {
+						bridge = new WireHostToolBridge(agentId);
+						conn.hostToolBridges.set(agentId, bridge);
+					}
+					bridge.bindOutput(push => send(conn.ws, { type: "push", event: push }));
+					await session.refreshRpcHostTools(bridge.setTools(definitions));
+					const changedEvent: WireServerEvent = {
+						type: "host_tools_changed",
+						sessionId: agentId,
+						tools: command.tools,
+					};
+					send(conn.ws, { type: "push", event: changedEvent });
+					sessionDone({ toolNames: definitions.map(tool => tool.name) });
 					break;
 				}
 
-				// ─────────────────────────────────────────────────────────────
-				// Model (P2 补齐)
-				// ─────────────────────────────────────────────────────────────
+				// ── Model ──
 				case "set_model": {
 					const models = session.getAvailableModels();
 					const model = models.find(m => m.provider === command.provider && m.id === command.modelId);
@@ -149,32 +321,33 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 						break;
 					}
 					await session.setModel(model);
-					done(model);
+					sessionDone(model);
 					break;
 				}
 				case "cycle_model": {
 					const result = await session.cycleModel();
-					done(result ?? null);
+					sessionDone(result ?? null);
+					break;
+				}
+				case "get_available_models": {
+					// P3 真实现：返回目标 session 的可用模型全量列表。
+					done({ models: session.getAvailableModels() });
 					break;
 				}
 
-				// ─────────────────────────────────────────────────────────────
-				// Thinking (P1)
-				// ─────────────────────────────────────────────────────────────
+				// ── Thinking ──
 				case "set_thinking_level": {
 					session.setThinkingLevel(command.level);
-					done();
+					sessionDone();
 					break;
 				}
 				case "cycle_thinking_level": {
 					const level = session.cycleThinkingLevel();
-					done(level ? { level } : null);
+					sessionDone(level ? { level } : null);
 					break;
 				}
 
-				// ─────────────────────────────────────────────────────────────
-				// Compaction (P2 补齐)
-				// ─────────────────────────────────────────────────────────────
+				// ── Compaction ──
 				case "compact": {
 					const result = await session.compact(command.customInstructions);
 					done(result);
@@ -182,27 +355,23 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 				}
 				case "set_auto_compaction": {
 					session.setAutoCompactionEnabled(command.enabled);
-					done();
+					sessionDone();
 					break;
 				}
 
-				// ─────────────────────────────────────────────────────────────
-				// Retry (P2 补齐)
-				// ─────────────────────────────────────────────────────────────
+				// ── Retry ──
 				case "set_auto_retry": {
 					session.setAutoRetryEnabled(command.enabled);
-					done();
+					sessionDone();
 					break;
 				}
 				case "abort_retry": {
 					session.abortRetry();
-					done();
+					sessionDone();
 					break;
 				}
 
-				// ─────────────────────────────────────────────────────────────
-				// Session (P2 补齐)
-				// ─────────────────────────────────────────────────────────────
+				// ── Session ──
 				case "set_session_name": {
 					const name = command.name.trim();
 					if (!name) {
@@ -214,7 +383,7 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 						fail("Session name cannot be empty");
 						break;
 					}
-					done();
+					sessionDone();
 					break;
 				}
 				case "get_last_assistant_text": {
@@ -222,17 +391,19 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 					done({ text: text ?? null });
 					break;
 				}
-
-				// ─────────────────────────────────────────────────────────────
-				// wire 扩展 / P1 stub 保留
-				// ─────────────────────────────────────────────────────────────
-				case "subscribe":
-				case "unsubscribe":
-				case "get_available_models":
-					// P1 单会话：连接级推送，无显式订阅表；命令保留以兼容协议面。
-					// get_available_models 属 P3 会话/多 Agent 阶段，本迭代不动。
-					done();
+				case "get_session_stats": {
+					done(session.getSessionStats());
 					break;
+				}
+				case "get_branch_messages": {
+					done({ messages: session.getUserMessagesForBranching() });
+					break;
+				}
+				case "get_messages": {
+					done({ messages: session.messages });
+					break;
+				}
+
 				default:
 					fail(`not_implemented: ${(command as { type: string }).type}`);
 			}
@@ -241,12 +412,33 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 		}
 	};
 
+	const handleHostToolFrame = (conn: Connection, frame: ClientFrame): boolean => {
+		if (frame.type !== "host_tool_result" && frame.type !== "host_tool_update") return false;
+		for (const bridge of conn.hostToolBridges.values()) {
+			if (frame.type === "host_tool_result") {
+				if (bridge.handleResult(frame)) return true;
+			} else if (bridge.handleUpdate(frame)) {
+				return true;
+			}
+		}
+		logger.warn("serve:host-tool-frame-unmatched", { connectionId: conn.connectionId, frameType: frame.type });
+		return true;
+	};
+
 	const handleFrame = (ws: WireSocket, raw: string | Buffer): void => {
 		let frame: ClientFrame;
 		try {
 			frame = JSON.parse(String(raw)) as ClientFrame;
 		} catch {
 			send(ws, { type: "response", id: "", ok: false, error: "invalid_json" });
+			return;
+		}
+
+		const conn = ws.data;
+
+		// ping/pong 在握手前后都可响应（心跳不依赖业务状态）
+		if (frame.type === "ping") {
+			send(ws, { type: "pong", ts: frame.ts });
 			return;
 		}
 
@@ -259,41 +451,45 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 				send(ws, { type: "hello_error", error: "invalid token" });
 				return;
 			}
-			const conn: Connection = { connectionId: randomUUID(), ws };
-			ws.data = conn;
-			connections.add(conn);
+			const connection: Connection = {
+				connectionId: randomUUID(),
+				ws,
+				activeAgentId: "default",
+				hostToolBridges: new Map(),
+			};
+			ws.data = connection;
+			connections.add(connection);
 			send(ws, {
 				type: "hello_ack",
-				connectionId: conn.connectionId,
+				connectionId: connection.connectionId,
 				protocolVersion: MULTIDEVICE_PROTOCOL_VERSION,
 			});
-			sendSnapshot(ws);
+			// 列表 + 当前焦点快照（P1 兼容：客户端仍能只靠 session_snapshot 重建）
+			broadcastServerSnapshot();
+			sendSessionSnapshot(connection);
 			return;
 		}
+
+		if (!conn) {
+			if (frame.type === "host_tool_result" || frame.type === "host_tool_update") {
+				send(ws, { type: "hello_error", error: "hello required before host_tool frames" });
+				return;
+			}
+			send(ws, { type: "hello_error", error: "hello required before request" });
+			return;
+		}
+
+		if (handleHostToolFrame(conn, frame)) return;
 
 		if (frame.type !== "request") {
 			send(ws, { type: "response", id: "", ok: false, error: "expected request frame" });
 			return;
 		}
-		// 握手完成前拒绝一切 request
-		if (!ws.data) {
-			send(ws, { type: "hello_error", error: "hello required before request" });
-			return;
-		}
 		const reply = (f: ServerFrame): void => {
 			send(ws, f.type === "response" ? { ...f, id: frame.id } : f);
 		};
-		void handleCommand(frame.command, reply);
+		void handleCommand(conn, frame.command, reply);
 	};
-
-	const unsubscribe = store.subscribe((snapshot, event) => {
-		const snapshotEvent: WireServerEvent = { type: "session_snapshot", sessionId: session.sessionId, snapshot };
-		broadcast({ type: "push", event: snapshotEvent });
-		if (event.type === "message_update" || event.type === "tool_execution_update") {
-			const progressEvent: WireServerEvent = { type: "progress", sessionId: session.sessionId, event };
-			broadcast({ type: "push", event: progressEvent });
-		}
-	});
 
 	const server = Bun.serve<Connection | undefined>({
 		hostname: options.host,
@@ -313,28 +509,44 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 				handleFrame(ws, raw as string | Buffer);
 			},
 			close(ws) {
-				const conn = ws.data;
-				if (conn) connections.delete(conn);
+				const connection = ws.data;
+				if (!connection) return;
+				connections.delete(connection);
+				// host tool 执行者断开：pending 全拒（fail fast）
+				for (const bridge of connection.hostToolBridges.values()) {
+					bridge.detachOutput(`connection ${connection.connectionId} closed`);
+				}
+				connection.hostToolBridges.clear();
 			},
 		},
 	});
 
 	logger.info("serve:listening", {
 		url: `ws://${options.host}:${options.port}/ws?token=${token}`,
-		sessionId: session.sessionId,
+		sessionId: defaultSession.session.sessionId,
+		agents: registry.listMetas().map(meta => meta.id),
 	});
 
-	const stop = (): void => {
-		unsubscribe();
+	const stop = async (): Promise<void> => {
 		connections.clear();
+		await registry.disposeAll();
 		server.stop();
 		process.exit(0);
 	};
-	process.once("SIGINT", stop);
-	process.once("SIGTERM", stop);
+	process.once("SIGINT", () => void stop());
+	process.once("SIGTERM", () => void stop());
 
 	// 常驻：Bun.serve 维持事件循环；信号到达时走 stop()
 	await new Promise<void>(() => {});
+}
+
+async function loadMetasSafe(): Promise<AgentMeta[]> {
+	try {
+		return await loadAgentMetas();
+	} catch (err) {
+		logger.warn("serve:registry-load-failed", { error: String(err) });
+		return [];
+	}
 }
 
 function buildRpcState(session: AgentSession, store: SessionStore): Record<string, unknown> {
