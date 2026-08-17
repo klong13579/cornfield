@@ -1,7 +1,7 @@
 {
 	"type": "module",
 	"name": "@oh-my-pi/self-evolution",
-	"version": "1.1.0",
+	"version": "0.18.0",
 	"description": "Self-evolution plugin for oh-my-pi: automatic skill extraction and episodic memory",
 	"homepage": "https://github.com/can1357/oh-my-pi",
 	"author": "Can Boluk",
