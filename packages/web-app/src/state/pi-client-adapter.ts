@@ -167,17 +167,18 @@ export class PiClientAdapter implements PiClient {
 		return this.#req({ type: "set_auto_retry", enabled }).then(() => undefined);
 	}
 
-	/** serve 当前为 stub（done() 无 result）→ 兜底列表；P3 真实现返回 {provider,model,thinkingLevel} 后自动接真。 */
+	/** 拉取真实可用模型（serve 返回 { models: Model[] }，Model 带 id/provider；失败时兜底列表）。 */
 	async getAvailableModels(): Promise<ModelInfoDto[]> {
 		try {
 			const result = await this.#req<unknown>({ type: "get_available_models" });
-			const list = result as { provider: string; model: string; thinkingLevel?: string | null }[] | null;
+			const body = result as { models?: { id: string; provider: string; thinking?: unknown }[] } | null;
+			const list = body?.models;
 			if (Array.isArray(list) && list.length > 0) {
 				return list.map(m => ({
-					id: m.model,
+					id: m.id,
 					provider: m.provider,
-					supportsThinking: m.thinkingLevel !== undefined && m.thinkingLevel !== null,
-					description: `thinking: ${m.thinkingLevel ?? "off"}`,
+					supportsThinking: m.thinking !== undefined && m.thinking !== null,
+					description: `provider: ${m.provider}`,
 				}));
 			}
 		} catch (err) {

@@ -26,8 +26,9 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 	const [modelList, setModelList] = useState<Array<{ id: string; provider: string }>>([]);
 	const value = ui.draft || autoFocusDraft;
 
-	// 拉取真实可用模型列表（serve get_available_models；未连接/失败时保持空，UI 显示提示）
+	// 拉取真实可用模型列表（serve get_available_models；连接就绪后重拉，未连接/失败时保持空）
 	useEffect(() => {
+		if (!view.connected) return; // 未连接时跳过，连接后就绪再拉
 		let cancelled = false;
 		void store
 			.getAvailableModels()
@@ -40,7 +41,7 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 		return () => {
 			cancelled = true;
 		};
-	}, [store]);
+	}, [store, view.connected]);
 
 	const active = view.isStreaming || view.phase !== "idle";
 	const agent = view.agents.find(a => a.id === agentId) ?? view.agents[0];
