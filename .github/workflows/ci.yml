@@ -173,9 +173,32 @@ jobs:
       - name: Install method smoke tests
         run: bun run ci:test:install-methods
 
+  check_latest_tag:
+    runs-on: ubuntu-22.04
+    outputs:
+      is_latest: ${{ steps.check.outputs.is_latest }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Compare this tag against the highest version tag
+        id: check
+        run: |
+          if [[ "${{ github.ref_type }}" != "tag" ]]; then
+            echo "is_latest=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          latest="$(git tag --sort=-v:refname | head -n 1)"
+          echo "this=${{ github.ref_name }} latest=$latest"
+          if [[ "$latest" == "${{ github.ref_name }}" ]]; then
+            echo "is_latest=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_latest=false" >> "$GITHUB_OUTPUT"
+          fi
+
   release_binary:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [check, native, test, install_methods]
+    if: startsWith(github.ref, 'refs/tags/v') && needs.check_latest_tag.outputs.is_latest == 'true'
+    needs: [check_latest_tag, check, native, test, install_methods]
     strategy:
       fail-fast: false
       matrix:
