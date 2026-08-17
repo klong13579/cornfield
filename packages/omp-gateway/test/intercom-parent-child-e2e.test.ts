@@ -177,7 +177,11 @@ describeE2E("intercom parent-child closed-loop", () => {
 			for await (const chunk of child.stderr!) childErr += decoder.decode(chunk);
 		})();
 
-		await waitFor("child ready", () => childFrames().some(f => f.type === "ready"), 60_000);
+		// NOTE: do NOT wait for `ready` inside beforeAll — bun:test caps hook
+		// execution at ~5s, and an isolated PI_CODING_AGENT_DIR makes the child
+		// probe local LLM provider endpoints (llama.cpp :8080, lm-studio :1234,
+		// …) on startup, pushing the first ready frame past 5s on a cold box.
+		// The ready wait lives in the first test, which has a 240s budget.
 	});
 
 	afterAll(async () => {
@@ -193,6 +197,7 @@ describeE2E("intercom parent-child closed-loop", () => {
 	});
 
 	test("child registers with parentId and parent sees it", async () => {
+		await waitFor("child ready", () => childFrames().some(f => f.type === "ready"), 120_000);
 		childSessionId = await waitFor(
 			"child registration",
 			async () => {
@@ -240,13 +245,16 @@ describeE2E("intercom parent-child closed-loop", () => {
 		expect(completion.messageId).toBeTruthy();
 	}, 180_000);
 
-	test.skip("round-2 turn mechanics inside bun:test (KNOWN FLAKE — see fn header)", async () => {
-		// See the file header note: the second prompt reliably starts a new turn
-		// when driven from a plain bun script (verified 20+ rounds across binary/
-		// source/env/parent variants) and on production gateway accounts, but is
-		// flaky when the child is spawned from this bun:test beforeAll with an
-		// isolated PI_CODING_AGENT_DIR. Skipped pending root-cause; the mechanic
-		// is pinned by the broker/extension integration tests instead.
+	test("child runs a second task round (round-2 turn mechanics)", async () => {
+		// Regression: the second prompt must start a new turn with the child
+		// already busy-free after round 1 (agent_end count >= 2, numeric answer).
+		// Root cause note: this used to flake because the child's READY frame
+		// was awaited inside beforeAll — bun:test caps hooks at ~5s and an empty
+		// PI_CODING_AGENT_DIR adds local-provider endpoint probes (llama.cpp,
+		// lm-studio, …) on startup, so the child could still be booting when the
+		// hook was killed, leaving the spawn/session in a broken state. Awaiting
+		// ready inside a real test (240s budget) fixed both the ready wait and
+		// this round-2 mechanic.
 		child?.stdin?.write(
 			JSON.stringify({ id: 2, type: "prompt", message: "本轮请直接回答 2+2=？只回答数字。" }) + "\n",
 		);
