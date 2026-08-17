@@ -112,7 +112,17 @@ export type WireExtensionCommand =
 	/** 释放一个已 attached agent 的进程内实例。active session 则 ok:false。 */
 	| { id?: string; type: "detach"; sessionId: string }
 	/** P3 新增：列出所有已注册 agent 的元数据（不触发 attach）。 */
-	| { id?: string; type: "list_agents" };
+	| { id?: string; type: "list_agents" }
+	/**
+	 * P4 新增：历史会话索引（/records 列表页）。扫描 sessions 目录，返回按开始时间
+	 * 倒序的会话元数据列表。不实例化任何 session（纯文件索引）。
+	 *
+	 * - 无 sessionId：扫描全部 agent（default 的全局 sessions 根 + 每个 registry agent 的
+	 *   <agentDir>/sessions/）
+	 * - 有 sessionId：只扫描该 agent（与其它定向命令同语义）
+	 * - limit：返回条数上限（默认 100，最大 500）——按文件 mtime 取最新 N 个再解析
+	 */
+	| { id?: string; type: "list_sessions"; sessionId?: string; limit?: number };
 
 export type WireCommand = MultiplexCommand | WireExtensionCommand;
 

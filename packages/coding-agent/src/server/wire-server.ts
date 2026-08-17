@@ -7,6 +7,7 @@ import type { AgentSession } from "../session/agent-session";
 import type { SessionStore } from "../session/session-store";
 import type { TodoPhase } from "../tools/todo-write";
 import { WireHostToolBridge } from "./host-tool-bridge";
+import { agentSessionsRoot, defaultSessionsRoot, indexSessions } from "./session-index";
 import {
 	type AgentMeta,
 	type AttachedSession,
@@ -204,6 +205,24 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 				case "unsubscribe": {
 					// P1 语义保留：连接级推送（跟随 activeAgentId），无显式订阅表。
 					done();
+					return;
+				}
+				case "list_sessions": {
+					// P4 历史会话索引：纯文件扫描，不触碰 attached session。
+					const metas = command.sessionId
+						? registry.listMetas().filter(m => m.id === command.sessionId)
+						: registry.listMetas();
+					if (command.sessionId && metas.length === 0) {
+						fail(`unknown agent: ${command.sessionId}`);
+						return;
+					}
+					const sources = metas.map(m => ({
+						agentId: m.id,
+						agentName: m.name,
+						sessionsRoot: m.id === "default" ? defaultSessionsRoot() : agentSessionsRoot(m),
+					}));
+					const sessions = await indexSessions(sources, command.limit);
+					done({ sessions });
 					return;
 				}
 				default:
@@ -447,7 +466,8 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 				send(ws, { type: "hello_error", error: `unsupported protocol version ${frame.version}` });
 				return;
 			}
-			if (frame.token !== token) {
+			// token 为空 = 本地免鉴权：hello 帧不校验（与 fetch 层空 token 跳过一致）
+			if (token !== "" && frame.token !== token) {
 				send(ws, { type: "hello_error", error: "invalid token" });
 				return;
 			}
@@ -498,7 +518,8 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 			const url = new URL(req.url);
 			if (url.pathname !== "/ws") return new Response("not found", { status: 404 });
 			// token 为空 = 本地免鉴权（仅绑 127.0.0.1）；非空时 URL query 与 hello 帧都要校验
-			if (token !== "" && url.searchParams.get("token") !== token) return new Response("unauthorized", { status: 401 });
+			if (token !== "" && url.searchParams.get("token") !== token)
+				return new Response("unauthorized", { status: 401 });
 			const upgraded = srv.upgrade(req, { data: undefined });
 			return upgraded ? undefined : new Response("upgrade failed", { status: 400 });
 		},

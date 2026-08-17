@@ -79,6 +79,59 @@ export interface SessionListEntry {
 }
 
 /**
+ * 历史会话索引项（P4 `list_sessions` 命令的返回元素）。
+ *
+ * 由 sessions 目录的 JSONL 文件头（前 4KB：session header + 初始 model_change）
+ * 和尾（末 256KB：最后 timestamp + 最后 assistant stopReason）解析而来，
+ * 不整读大文件。messageCount 为流式字节扫描计数（type:"message" 出现次数），
+ * 含 user/assistant/toolResult 全部消息条目。
+ *
+ * status 推断（最后一个 assistant 消息的 stopReason）：
+ * - completed：stop/endTurn/length（正常收尾，含长度截断）
+ * - aborted：aborted（用户中断）
+ * - error：error（模型/工具报错收尾）
+ * - incomplete：toolUse（以工具调用收尾——进程被杀/未回填）或无任何 assistant 消息
+ * - unknown：尾部解析不出 stopReason（文件头存在但尾部損坏）
+ */
+export type WireSessionStatus = "completed" | "aborted" | "error" | "incomplete" | "unknown";
+
+export interface WireSessionIndexEntry {
+	/** 会话 id（JSONL 头 session.id）。 */
+	sessionId: string;
+	/** 所属 agent 注册名（"default" / registry key）。 */
+	agentId: string;
+	/** 所属 agent 显示名。 */
+	agentName: string;
+	/** 会话标题（header.title；无则 undefined）。 */
+	title?: string;
+	/** 开始时间（header.timestamp，ISO）。 */
+	startTime: string;
+	/** 结束时间（最后一条 entry 的 timestamp，ISO；仅头部时 = startTime）。 */
+	endTime?: string;
+	/** message 条目数（含 user/assistant/toolResult）。 */
+	messageCount: number;
+	/** 全部 entry 行数（含 model_change/custom 等非消息条目）。 */
+	entryCount: number;
+	/** 会话内最后使用的模型（"provider/modelId"；取头尾中最后一次 model_change）。 */
+	model?: string;
+	/** 结束状态推断（见 WireSessionStatus）。 */
+	status: WireSessionStatus;
+	/** JSONL 文件绝对路径。 */
+	sessionFile: string;
+	/** 文件字节大小（列表页展示参考）。 */
+	fileSizeBytes: number;
+}
+
+/**
+ * 关于导出原样 JSONL（任务 B 结论）：
+ * `get_messages` 返回的 AgentMessage[] 与 JSONL message 条目的 payload 完全一致
+ * （同一对象序列化），且每条自带 timestamp/ms + role + content + stopReason——回放
+ * 时间线所需字段齐全。差异仅在信封（type/id/parentId/ISO timestamp）与非消息条目
+ * （model_change/compaction/custom…），对 /records 回放无影响。若未来需要字节级
+ * 原样导出，应加静态文件服务而不是新 wire 命令（web-app 是本地应用）。
+ */
+
+/**
  * host_tool_call — 服务端需要客户端执行一个客户端注册的 tool。
  * 客户端回应 host_tool_result / host_tool_update (上)。
  * `sessionId` 将 call 定位到具体 Agent（多 Agent 时客户端需要分派处理）。
