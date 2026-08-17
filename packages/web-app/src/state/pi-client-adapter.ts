@@ -334,6 +334,19 @@ export class PiClientAdapter implements PiClient {
 		}
 	}
 
+	/**
+	 * serve 重启 / WS 重连后旧快照可能残留（如上传送中相位）导致发送按钮锁死在「停止」。
+	 * 重新 attach 已知会话，强制 serve 广播权威 session_snapshot 覆盖缓存。幂等：已附着则无副作用。
+	 */
+	async #resyncAttached(): Promise<void> {
+		if (!this.#sessionId) return;
+		try {
+			await this.#req({ type: "attach", sessionId: this.#sessionId } as never);
+		} catch {
+			// 会话已不存在（serve 数据重置）等场景：忽略，等下一个 server_snapshot
+		}
+	}
+
 	#handleEvent(event: PiClientEventKind): void {
 		switch (event.type) {
 			case "status":
@@ -350,6 +363,9 @@ export class PiClientAdapter implements PiClient {
 				this.#notifyConnection();
 				// env 环境摘要（serve get_state 已含 env 字段，B1）——异步拉取，到达后经 store 重建视图
 				void this.#refreshEnvironment();
+				// serve 重启 / WS 重连后旧快照可能残留（上传送中相位）锁死发送按钮：
+				// 重新 attach 已附着的会话，强制 serve 推送权威快照覆盖缓存
+				void this.#resyncAttached();
 				break;
 			case "push":
 				this.#handlePush(event.event);
