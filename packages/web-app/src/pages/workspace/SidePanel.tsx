@@ -6,7 +6,7 @@ import { useSession } from "../../state/use-session";
 import { ContentPreview } from "./ContentPreview";
 
 /**
- * 右栏：会话概览 / 上下文 / 正在执行 / 会话 Todo（+ 内容预览置顶）。
+ * 右栏：会话概览 / 上下文 / 会话 Todo（+ 内容预览置顶）。
  * 移动端（<lg）隐藏 —— 走 /m 或 DevicePreview 的浮层形态（P5 完善）。
  */
 export function SidePanel(): React.JSX.Element {
@@ -15,9 +15,6 @@ export function SidePanel(): React.JSX.Element {
 	const ui = useUiState();
 
 	const phaseLabel = view.phase === "idle" ? "idle" : view.phase;
-	// 只显示瞬态正在执行的工具（live 流中 state=run）；activeToolNames 是全量注册集，不是执行态，不在面板展示
-	const runningTools = (view.live?.tools ?? []).filter(t => t.state === "run").map(t => t.name);
-	const activeList = runningTools;
 	const todoTotal = view.todo.reduce((sum, p) => sum + p.tasks.length, 0);
 
 	return (
@@ -37,7 +34,7 @@ export function SidePanel(): React.JSX.Element {
 
 			{view.context && (
 				<section className="border-b border-hairline px-4 py-3.5">
-					<h3 className="mb-2.5 text-[11px] font-semibold tracking-[0.08em] text-ink-faint uppercase">上下文</h3>
+					<h3 className="mb-2.5 text-[11px] font-semibold tracking-[0.08em] text-ink-faint uppercase">上下文</h3>{" "}
 					<div className="h-[3px] overflow-hidden rounded bg-surface-3">
 						<div className="h-full rounded bg-accent" style={{ width: `${view.context.percent}%` }} />
 					</div>
@@ -53,28 +50,6 @@ export function SidePanel(): React.JSX.Element {
 					</div>
 				</section>
 			)}
-
-			<section className="border-b border-hairline px-4 py-3.5">
-				<h3 className="mb-2.5 text-[11px] font-semibold tracking-[0.08em] text-ink-faint uppercase">正在执行</h3>
-				{activeList.length === 0 ? (
-					<div className="text-[12px] text-ink-faint">待命中</div>
-				) : (
-					<div className="flex flex-col gap-1.5">
-						{activeList.map(name => (
-							<div key={`run-${name}`} className="flex items-center gap-2 font-mono text-[13px]">
-								<span className="spin border-t-warning" />
-								<span className="text-ink">{name}</span>
-							</div>
-						))}
-					</div>
-				)}
-				{view.live?.text && (
-					<div className="mt-2.5 max-h-[76px] overflow-hidden rounded border border-hairline bg-surface-2 px-2.5 py-2 font-mono text-[11px] leading-relaxed text-ink-subtle">
-						{view.live.text}
-						{view.live.textStreaming && <span className="caret" />}
-					</div>
-				)}
-			</section>
 
 			<section className="border-b border-hairline px-4 py-3.5">
 				<h3 className="mb-2.5 text-[11px] font-semibold tracking-[0.08em] text-ink-faint uppercase">
