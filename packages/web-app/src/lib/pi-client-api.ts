@@ -1,3 +1,4 @@
+import type { PlaybackEntry } from "./records";
 import type {
 	AgentInfoDto,
 	ConnectionInfoDto,
@@ -58,4 +59,8 @@ export interface PiClient {
 	setHostTools(tools: HostToolDefinitionDto[]): Promise<void>;
 	/** host tool 执行结果回传（host_tool_result client frame；视 pi-client 支持与否）。 */
 	hostToolResult?(id: string, resultText: string, isError?: boolean): void;
+
+	// ── P4 会话记录（serve 已实现 get_messages/get_session_stats）──
+	/** 拉取当前 attached session 的全部消息（get_messages），转播放时间线。 */
+	getMessages(): Promise<PlaybackEntry[]>;
 }

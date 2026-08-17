@@ -1,4 +1,5 @@
 import type { PiClient } from "../lib/pi-client-api";
+import type { PlaybackEntry } from "../lib/records";
 import type {
 	AgentInfoDto,
 	EnvironmentSummaryDto,
@@ -218,6 +219,11 @@ class SessionStore {
 	/** 切换活动会话（switch_session；serve 随后推新 session_snapshot，工作台自动跟随）。 */
 	switchSession(sessionId: string): void {
 		void this.#client.switchSession(sessionId).catch(() => undefined);
+	}
+
+	/** 拉取当前会话消息（get_messages）转播放时间线。 */
+	getMessages(): Promise<PlaybackEntry[]> {
+		return this.#client.getMessages();
 	}
 
 	// ── 帧归约 ──

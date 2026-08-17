@@ -2,6 +2,7 @@ import type { PiClientEventKind } from "@oh-my-pi/pi-client";
 import { PiClient as WirePiClient } from "@oh-my-pi/pi-client";
 import type { WireCommand } from "@oh-my-pi/pi-wire";
 import type { PiClient } from "../lib/pi-client-api";
+import type { PlaybackEntry, PlaybackToolStep } from "../lib/records";
 import type {
 	AgentInfoDto,
 	ConnectionInfoDto,
@@ -215,6 +216,12 @@ export class PiClientAdapter implements PiClient {
 		return this.#req(command).then(() => undefined);
 	}
 
+	/** 拉取当前 attached session 全部消息（get_messages，serve P4 已真实现）。 */
+	async getMessages(): Promise<PlaybackEntry[]> {
+		const result = await this.#req<{ messages?: unknown[] }>({ type: "get_messages" });
+		return toPlaybackEntries(result.messages ?? []);
+	}
+
 	// hostToolResult：pi-client 无裸帧发送 API（host_tool_result 是独立 client frame），
 	// 待 pi-client 补 sendRaw/hostToolResult 后实现（差异清单已反馈 be-dev）。
 
@@ -323,6 +330,81 @@ export class PiClientAdapter implements PiClient {
 			listener({ ...this.#connection });
 		}
 	}
+}
+
+/** AgentMessage（真实快照/get_messages 返回形状）→ 播放时间线条目。 */
+function toPlaybackEntries(messages: unknown[]): PlaybackEntry[] {
+	const result = new Map<string, { isError?: boolean; text: string }>();
+	const entries: PlaybackEntry[] = [];
+
+	for (const raw of messages) {
+		if (!raw || typeof raw !== "object") continue;
+		const msg = raw as {
+			id?: string;
+			role?: string;
+			model?: string;
+			content?: unknown;
+			errorMessage?: string;
+		};
+		const parts = Array.isArray(msg.content)
+			? (msg.content as {
+					type?: string;
+					text?: string;
+					thinking?: string;
+					id?: string;
+					name?: string;
+					content?: unknown;
+					isError?: boolean;
+					arguments?: Record<string, unknown>;
+				}[])
+			: [];
+		if (msg.role !== "user" && msg.role !== "assistant") continue;
+
+		const contentByType = (type: string) => parts.filter(p => p.type === type);
+		const text = [
+			...contentByType("text").map(p => p.text ?? ""),
+			...(msg.errorMessage ? [`✗ Error: ${msg.errorMessage}`] : []),
+		].join("\n\n");
+		const calls = contentByType("toolCall");
+		const toolResults = contentByType("toolResult") as {
+			toolCallId?: string;
+			isError?: boolean;
+			content?: { type: string; text?: string }[];
+		}[];
+		for (const tr of toolResults) {
+			result.set(tr.toolCallId ?? "", {
+				isError: tr.isError,
+				text: (tr.content ?? [])
+					.filter((c): c is { type: "text"; text: string } => c.type === "text")
+					.map(c => c.text)
+					.join("\n"),
+			});
+		}
+		const tools: PlaybackToolStep[] = calls.map(call => {
+			const r = result.get(call.id ?? "");
+			return {
+				name: call.name ?? "tool",
+				argsText: call.arguments ? prettyArgs(call.arguments) : "",
+				state: r?.isError ? "fail" : "done",
+				result: r?.text,
+			};
+		});
+		if (!text && tools.length === 0 && !msg.errorMessage) continue;
+		entries.push({
+			id: msg.id ?? `e${entries.length}`,
+			role: msg.role === "user" ? "user" : "assistant",
+			model: msg.model,
+			text,
+			tools,
+		});
+	}
+	return entries;
+}
+
+function prettyArgs(args: Record<string, unknown>): string {
+	return Object.entries(args)
+		.map(([k, v]) => `${k}: ${typeof v === "string" ? v : JSON.stringify(v)}`)
+		.join(" · ");
 }
 
 /** 注册表 session 项（pi-wire SessionListEntry P3 富化形状）。 */

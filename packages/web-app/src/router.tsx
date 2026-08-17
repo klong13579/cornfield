@@ -15,9 +15,11 @@ import { AgentDetailView } from "./pages/agents/AgentDetailView";
 import { AgentsView } from "./pages/agents/AgentsView";
 import { HomeView } from "./pages/home/HomeView";
 import { ModelsView } from "./pages/models/ModelsView";
-import { PlaceholderView } from "./pages/placeholder/PlaceholderView";
+import { PlaybackView } from "./pages/records/PlaybackView";
+import { RecordsView } from "./pages/records/RecordsView";
 import { SettingsView } from "./pages/settings/SettingsView";
 import { TodoView } from "./pages/todo/TodoView";
+import { VoiceView } from "./pages/voice/VoiceView";
 import { WorkspaceView } from "./pages/workspace/WorkspaceView";
 
 /**
@@ -140,8 +142,9 @@ export const router = createBrowserRouter([
 			{ path: "/workspace", element: <WorkspaceView /> },
 			{ path: "/agents", element: <AgentsView /> },
 			{ path: "/agents/:id", element: <AgentDetailView /> },
-			{ path: "/records", element: <PlaceholderView pageId="records" /> },
-			{ path: "/voice", element: <PlaceholderView pageId="voice" /> },
+			{ path: "/records", element: <RecordsView /> },
+			{ path: "/records/:id", element: <PlaybackView /> },
+			{ path: "/voice", element: <VoiceView /> },
 			{ path: "/todo", element: <TodoView /> },
 			{ path: "/models", element: <ModelsView /> },
 			{ path: "/settings", element: <SettingsView /> },
