@@ -1,8 +1,8 @@
-import { logger } from "@oh-my-pi/pi-utils";
+import * as path from "node:path";
+import { isEnoent, logger } from "@oh-my-pi/pi-utils";
 import { randomUUID } from "crypto";
 import { unlinkSync, writeFileSync } from "fs";
 import net from "net";
-import * as path from "node:path";
 import { getAskTimeoutMs } from "./config";
 import { sameCwd } from "./cwd";
 import { ExtensionStateManager } from "./extension-state";
@@ -92,6 +92,29 @@ interface MailboxMessage {
 	queuedAt: number;
 }
 
+/**
+ * Probe whether a live broker already owns the socket path. A successful
+ * connect means another broker accepts clients here — we MUST NOT unlink or
+ * steal it. ENOENT / ECONNREFUSED / timeout mean the path is stale.
+ */
+function probeBrokerSocket(socketPath: string): Promise<boolean> {
+	return new Promise(resolveProbe => {
+		let settled = false;
+		const socket = net.connect(socketPath);
+		const finish = (live: boolean) => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(probeTimer);
+			socket.destroy();
+			resolveProbe(live);
+		};
+		const probeTimer = setTimeout(() => finish(false), 500);
+		probeTimer.unref?.();
+		socket.once("connect", () => finish(true));
+		socket.once("error", () => finish(false));
+	});
+}
+
 export class IntercomBroker {
 	private sessions = new Map<string, ConnectedSession>();
 	private askEdges = new Map<string, AskEdge>();
@@ -123,47 +146,74 @@ export class IntercomBroker {
 			ensureIntercomRuntimeDir(runtimeDir);
 		}
 		this.extensionStateManager = new ExtensionStateManager(runtimeDir);
-		if (typeof this.listenTarget === "string" && process.platform !== "win32") {
-			try {
-				unlinkSync(this.listenTarget);
-			} catch {
-				// A clean startup has no stale socket to remove.
-			}
-		}
+		// NOTE: stale-socket cleanup happens in start() AFTER a liveness probe —
+		// an unconditional unlink here would delete a live broker's socket file
+		// (its listener keeps running but new clients get ENOENT).
 		this.server = net.createServer(this.handleConnection.bind(this));
 	}
 
-	start(): void {
-		const onListening = () => {
-			if (typeof this.listenTarget === "string") {
-				restrictIntercomRuntimeFile(this.listenTarget);
-			} else {
-				const address = this.server.address();
-				if (!address || typeof address === "string") {
-					throw new Error("Intercom TCP broker started without a TCP address");
+	start(): Promise<void> {
+		return new Promise((resolveListen, rejectListen) => {
+			const onListening = () => {
+				if (typeof this.listenTarget === "string") {
+					restrictIntercomRuntimeFile(this.listenTarget);
+				} else {
+					const address = this.server.address();
+					if (!address || typeof address === "string") {
+						rejectListen(new Error("Intercom TCP broker started without a TCP address"));
+						return;
+					}
+					const endpoint: BrokerConnectTarget = {
+						transport: "tcp",
+						host: this.listenTarget.host,
+						port: address.port,
+						stateId: BROKER_STATE_ID,
+					};
+					writeFileSync(PORT_PATH, `${JSON.stringify(endpoint)}\n`, { mode: INTERCOM_RUNTIME_FILE_MODE });
+					restrictIntercomRuntimeFile(PORT_PATH);
 				}
-				const endpoint: BrokerConnectTarget = {
-					transport: "tcp",
-					host: this.listenTarget.host,
-					port: address.port,
-					stateId: BROKER_STATE_ID,
-				};
-				writeFileSync(PORT_PATH, `${JSON.stringify(endpoint)}\n`, { mode: INTERCOM_RUNTIME_FILE_MODE });
-				restrictIntercomRuntimeFile(PORT_PATH);
-			}
-			logger.info("Intercom broker listening", {
-				target:
-					typeof this.listenTarget === "string"
-						? this.listenTarget
-						: `${this.listenTarget.host}:${this.listenTarget.port}`,
-			});
-		};
+				logger.info("Intercom broker listening", {
+					target:
+						typeof this.listenTarget === "string"
+							? this.listenTarget
+							: `${this.listenTarget.host}:${this.listenTarget.port}`,
+				});
+				resolveListen();
+			};
+			const onListenError = (err: Error) => {
+				rejectListen(err);
+			};
+			this.server.once("error", onListenError);
 
-		if (typeof this.listenTarget === "string") {
-			this.server.listen(this.listenTarget, onListening);
-		} else {
-			this.server.listen({ host: this.listenTarget.host, port: this.listenTarget.port }, onListening);
-		}
+			if (typeof this.listenTarget === "string") {
+				// Unix socket: never clobber a live broker. Probe first — a
+				// successful connect means another broker owns the path (do not
+				// steal it); otherwise unlink the stale socket from a crashed
+				// gateway and take the path.
+				const socketPath = this.listenTarget;
+				void probeBrokerSocket(socketPath).then(live => {
+					if (live) {
+						this.server.off("error", onListenError);
+						rejectListen(
+							new Error(`Intercom broker already running at ${socketPath}. Another broker owns the socket.`),
+						);
+						return;
+					}
+					try {
+						unlinkSync(socketPath);
+					} catch (err) {
+						if (!isEnoent(err)) {
+							this.server.off("error", onListenError);
+							rejectListen(err as Error);
+							return;
+						}
+					}
+					this.server.listen(socketPath, onListening);
+				});
+			} else {
+				this.server.listen({ host: this.listenTarget.host, port: this.listenTarget.port }, onListening);
+			}
+		});
 	}
 
 	private handleConnection(socket: net.Socket): void {

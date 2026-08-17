@@ -70,7 +70,7 @@ describe("intercom parent-child broker edge", () => {
 			intercomDir: path.join(runtimeDir, "intercom"),
 			listenTarget: path.join(runtimeDir, "intercom", "broker.sock"),
 		});
-		broker.start();
+		await broker.start();
 		await Bun.sleep(50);
 
 		parent = new IntercomClient();
@@ -143,7 +143,7 @@ describe("intercom parent-child broker edge", () => {
 		}
 	});
 
-	test("message from parent to child carries no parentId on sender (peer-to-peer rather than parent-forced)", async () => {
+		test("message from parent to child carries no parentId on sender (peer-to-peer rather than parent-forced)", async () => {
 		const received: Array<{ from: { id: string; parentId?: string }; text: string }> = [];
 		const childOf = new IntercomClient();
 		try {
@@ -159,6 +159,49 @@ describe("intercom parent-child broker edge", () => {
 			expect(received[0]?.text).toBe("hello child");
 		} finally {
 			await childOf.disconnect();
+		}
+	});
+
+	test("a second broker on the same socket refuses instead of clobbering the live one", async () => {
+		// Regression: the broker used to unlink its listen target unconditionally
+		// at construction — a second broker instance (e.g. an isolated test)
+		// could delete the PRODUCTION broker's socket file, orphaning its
+		// listener. Now the socket is probed first: a live owner makes start()
+		// reject with a clear error and the first broker keeps serving.
+		const second = new IntercomBroker({
+			intercomDir: path.join(runtimeDir, "intercom-copy"),
+			listenTarget: path.join(runtimeDir, "intercom", "broker.sock"),
+		});
+		await expect(second.start()).rejects.toThrow(/already running/);
+		// The live broker still serves new clients.
+		const probeClient = new IntercomClient();
+		try {
+			await probeClient.connect(registration("probe-after-refusal"), "probe-after-refusal-id");
+			expect(probeClient.sessionId).toBe("probe-after-refusal-id");
+		} finally {
+			await probeClient.disconnect();
+		}
+	});
+
+	test("a stale socket left by a crashed broker is reclaimed", async () => {
+		// A socket file with no live listener (crash without cleanup) must not
+		// block start(): the probe finds nobody, unlinks the stale path, and
+		// listens in its place.
+		const staleDir = path.join(runtimeDir, "intercom-stale");
+		await fs.mkdir(staleDir, { recursive: true });
+		const stalePath = path.join(staleDir, "broker.sock");
+		await Bun.write(stalePath, "");
+
+		const reclaimed = new IntercomBroker({
+			intercomDir: staleDir,
+			listenTarget: stalePath,
+		});
+		await reclaimed.start();
+		try {
+			const stat = await fs.stat(stalePath);
+			expect(stat.isSocket()).toBe(true);
+		} finally {
+			reclaimed.stop();
 		}
 	});
 });

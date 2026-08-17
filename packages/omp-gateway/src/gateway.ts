@@ -400,7 +400,7 @@ export class Gateway {
 		// before channels/bridges so agent sessions can connect as soon as they boot.
 		try {
 			this.#intercomBroker = new IntercomBroker();
-			this.#intercomBroker.start();
+			await this.#intercomBroker.start();
 		} catch (err) {
 			logger.error("Failed to start intercom broker", { error: String(err) });
 		}
