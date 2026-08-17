@@ -3,6 +3,8 @@ import type { BranchPoint, PlaybackEntry, SessionRecordSummary } from "../lib/re
 import type {
 	AgentInfoDto,
 	EnvironmentSummaryDto,
+	HostToolDefinitionDto,
+	ImageContentDto,
 	MessageContentDto,
 	ModelInfoDto,
 	ProgressEventDto,
@@ -170,8 +172,8 @@ class SessionStore {
 		this.#notify();
 	}
 
-	prompt(text: string): void {
-		void this.#run(() => this.#client.prompt(text));
+	prompt(text: string, sessionId?: string, images?: ImageContentDto[]): void {
+		void this.#run(() => this.#client.prompt(text, sessionId, images));
 	}
 
 	abort(): void {
@@ -204,6 +206,19 @@ class SessionStore {
 
 	setAutoRetry(enabled: boolean): void {
 		void this.#client.setAutoRetry(enabled).catch(() => undefined);
+	}
+
+	abortRetry(): void {
+		void this.#run(() => this.#client.abortRetry());
+	}
+
+	/** 前端已注册 host tools（set_host_tools 本地权威态）。 */
+	getHostTools(): HostToolDefinitionDto[] {
+		return this.#client.getHostTools();
+	}
+
+	setHostTools(tools: HostToolDefinitionDto[]): void {
+		void this.#run(() => this.#client.setHostTools(tools));
 	}
 
 	toggleTodo(phaseName: string, index: number): void {
@@ -490,7 +505,7 @@ class SessionStore {
 				activeToolNames: [],
 				queued: 0,
 				todo: [],
-				flags: { autoCompaction: true, autoRetry: true },
+				flags: { autoCompaction: false, autoRetry: false },
 				agents,
 				env,
 			};

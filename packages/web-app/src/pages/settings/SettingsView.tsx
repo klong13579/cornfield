@@ -1,5 +1,7 @@
 import { useState } from "react";
+import { DEFAULT_SERVE_CONFIG } from "../../state/pi-client-adapter";
 import { useSessionStore } from "../../state/session-store";
+import { getUiStore, useUiState } from "../../state/ui-store";
 import { useSession } from "../../state/use-session";
 
 /**
@@ -10,13 +12,14 @@ import { useSession } from "../../state/use-session";
 export function SettingsView(): React.JSX.Element {
 	const view = useSession();
 	const store = useSessionStore();
+	const ui = useUiState();
 	const [wsUrl, setWsUrl] = useState(view.wsUrl);
 	const [token, setToken] = useState("");
 	const [saveError, setSaveError] = useState<string | null>(null);
 	const saveConnection = async (): Promise<void> => {
 		setSaveError(null);
 		try {
-			const url = wsUrl.trim() || "ws://127.0.0.1:7891/ws";
+			const url = wsUrl.trim() || DEFAULT_SERVE_CONFIG.wsUrl;
 			if (!url.startsWith("ws://") && !url.startsWith("wss://")) {
 				setSaveError("WS URL 需以 ws:// 或 wss:// 开头");
 				return;
@@ -26,10 +29,6 @@ export function SettingsView(): React.JSX.Element {
 			setSaveError(err instanceof Error ? err.message : String(err));
 		}
 	};
-	const [notifyAgentDone, setNotifyAgentDone] = useState(true);
-	const [notifyError, setNotifyError] = useState(true);
-	const [notifyCron, setNotifyCron] = useState(false);
-	const [keepDraft, setKeepDraft] = useState(true);
 	const [appKey, setAppKey] = useState("");
 	const [appSecret, setAppSecret] = useState("");
 
@@ -65,7 +64,7 @@ export function SettingsView(): React.JSX.Element {
 									id="conn-wsurl"
 									value={wsUrl}
 									onChange={e => setWsUrl(e.target.value)}
-									placeholder="ws://127.0.0.1:7891/ws"
+									placeholder={DEFAULT_SERVE_CONFIG.wsUrl}
 									className="flex-1 rounded border border-hairline bg-surface-2 px-2.5 py-1.5 font-mono text-[12px] text-ink outline-none focus:border-hairline-strong"
 								/>
 							</div>
@@ -152,9 +151,9 @@ export function SettingsView(): React.JSX.Element {
 						/>
 						<ToggleRow
 							label="草稿保留"
-							desc="输入内容自动持久化，刷新不丢"
-							on={keepDraft}
-							onToggle={setKeepDraft}
+							desc="输入内容自动持久化，刷新不丢（真控制：关闭后草稿不再写入 localStorage）"
+							on={ui.keepDraft}
+							onToggle={v => getUiStore().setKeepDraft(v)}
 						/>
 					</div>
 				</section>
@@ -162,9 +161,27 @@ export function SettingsView(): React.JSX.Element {
 				<section className="mb-9">
 					<GroupTitle title="通知" />
 					<div className="divide-y divide-hairline rounded-lg border border-hairline bg-surface">
-						<ToggleRow label="Agent 完成" desc="" on={notifyAgentDone} onToggle={setNotifyAgentDone} />
-						<ToggleRow label="出错告警" desc="" on={notifyError} onToggle={setNotifyError} />
-						<ToggleRow label="定时任务" desc="" on={notifyCron} onToggle={setNotifyCron} />
+						<ToggleRow
+							label="Agent 完成"
+							desc="通知通道待后端（缺口 B7）"
+							on={false}
+							onToggle={() => undefined}
+							disabled
+						/>
+						<ToggleRow
+							label="出错告警"
+							desc="通知通道待后端（缺口 B7）"
+							on={false}
+							onToggle={() => undefined}
+							disabled
+						/>
+						<ToggleRow
+							label="定时任务"
+							desc="通知通道待后端（缺口 B7）"
+							on={false}
+							onToggle={() => undefined}
+							disabled
+						/>
 					</div>
 				</section>
 
@@ -185,7 +202,8 @@ export function SettingsView(): React.JSX.Element {
 									<input
 										value={appKey}
 										onChange={e => setAppKey(e.target.value)}
-										placeholder="（P3 已决策：配置存本地 gateway.json）"
+										disabled
+										placeholder="（配置存本地 gateway.json，编辑待接入）"
 										className="rounded border border-hairline bg-surface-2 px-2.5 py-1.5 font-mono text-[12px] text-ink outline-none placeholder:text-ink-faint focus:border-hairline-strong"
 									/>
 								</label>
@@ -194,6 +212,7 @@ export function SettingsView(): React.JSX.Element {
 									<input
 										value={appSecret}
 										onChange={e => setAppSecret(e.target.value)}
+										disabled
 										type="password"
 										placeholder="••••••"
 										className="rounded border border-hairline bg-surface-2 px-2.5 py-1.5 font-mono text-[12px] text-ink outline-none placeholder:text-ink-faint focus:border-hairline-strong"
@@ -218,9 +237,11 @@ export function SettingsView(): React.JSX.Element {
 						<button
 							type="button"
 							className="btn btn-danger btn-sm"
+							title="后端暂无会话删除命令：点击仅开启新会话，不会清除历史记录（缺口 B6）"
 							onClick={() => {
-								// 二次确认；实际清空逻辑待真实 session 删除能力（避免 mock 误删）
-								if (window.confirm("清空全部会话记录？此操作不可恢复。")) {
+								if (
+									window.confirm("后端尚无会话删除命令 —— 此操作仅开启新会话，不会清除任何历史记录。继续？")
+								) {
 									store.newSession();
 								}
 							}}
@@ -230,7 +251,8 @@ export function SettingsView(): React.JSX.Element {
 						<button
 							type="button"
 							className="btn btn-secondary btn-sm"
-							onClick={() => window.confirm("重置所有设置？")}
+							disabled
+							title="重置逻辑待定（曾为空动作，已禁用防误导）"
 						>
 							重置设置
 						</button>
@@ -259,17 +281,20 @@ function ToggleRow({
 	desc,
 	on,
 	onToggle,
+	disabled = false,
 }: {
 	label: string;
 	desc: string;
 	on: boolean;
 	onToggle: (v: boolean) => void;
+	disabled?: boolean;
 }): React.JSX.Element {
 	return (
 		<button
 			type="button"
-			className="flex w-full items-center gap-2 px-4 py-2.5 text-left"
+			className="flex w-full items-center gap-2 px-4 py-2.5 text-left disabled:cursor-not-allowed disabled:opacity-60"
 			onClick={() => onToggle(!on)}
+			disabled={disabled}
 		>
 			<span className="min-w-0 flex-1">
 				<span className="block text-[13px] text-ink">{label}</span>

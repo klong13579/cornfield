@@ -7,13 +7,13 @@ import type {
 	AgentInfoDto,
 	ConnectionInfoDto,
 	HostToolDefinitionDto,
+	ImageContentDto,
 	ModelInfoDto,
 	ProgressEventDto,
 	SessionSnapshotDto,
 	TodoPhaseDto,
 	WireServerEventDto,
 } from "../lib/wire-dto";
-import { FALLBACK_MODELS } from "./fallback-models";
 
 /** serve list_sessions 响应条目（WireSessionIndexEntry，字段名以 pi-wire 为准）。 */
 interface WireSessionIndexEntryDto {
@@ -38,7 +38,7 @@ interface WireSessionIndexEntryDto {
  * - pi-client subscribe 推的是包装事件（status/hello_ack/push/error）→ 本层拆包为 wire 帧
  * - serve progress 只转发 message_update / tool_execution_update 两类事件，
  *   tool_execution_update 未归一（真机工具卡三态以快照为准，流式转场待协议扩展）
- * - get_available_models 当前 serve 为 stub（done() 无 result）→ 返回兜底列表，P3 真实现后自动接真
+ * - get_available_models 已接真（serve 返回 Model[]）；失败返回空数组，UI 空态
  */
 
 /** `omp serve` 连接配置（设置页可改，localStorage 持久化）。 */
@@ -142,8 +142,14 @@ export class PiClientAdapter implements PiClient {
 
 	// ── 命令面（拼装 WireCommand）──
 
-	prompt(text: string): Promise<void> {
-		return this.#req({ type: "prompt", message: text }).then(() => undefined);
+	prompt(text: string, sessionId?: string, images?: ImageContentDto[]): Promise<void> {
+		const command = {
+			type: "prompt",
+			message: text,
+			...(sessionId ? { sessionId } : {}),
+			...(images && images.length > 0 ? { images } : {}),
+		} as never;
+		return this.#req(command).then(() => undefined);
 	}
 
 	abort(): Promise<void> {
@@ -180,24 +186,40 @@ export class PiClientAdapter implements PiClient {
 		return this.#req({ type: "set_auto_retry", enabled }).then(() => undefined);
 	}
 
-	/** 拉取真实可用模型（serve 返回 { models: Model[] }，Model 带 id/provider；失败时兜底列表）。 */
+	abortRetry(): Promise<void> {
+		return this.#req({ type: "abort_retry" }).then(() => undefined);
+	}
+
+	/** 前端已注册的 host tools 声明（set_host_tools 后的本地权威态；UI 工具注册 tab 用）。 */
+	#hostTools: HostToolDefinitionDto[] = [];
+
+	getHostTools(): HostToolDefinitionDto[] {
+		return this.#hostTools;
+	}
+
+	setHostTools(tools: HostToolDefinitionDto[]): Promise<void> {
+		this.#hostTools = tools;
+		const command = { type: "set_host_tools", tools } as never;
+		return this.#req(command).then(() => undefined);
+	}
+
+	/**
+	 * 真实模型列表（get_available_models → serve 真 Model[]）。未连接/命令失败返回空数组，
+	 * UI 显示「未连接/不可用」空态；绝不回退内置假数据（HF-1）。
+	 * 映射补齐真实字段：name/reasoning/cost/contextWindow（数字→“200K”格式化，原始值保留供排序）。
+	 */
 	async getAvailableModels(): Promise<ModelInfoDto[]> {
-		try {
-			const result = await this.#req<unknown>({ type: "get_available_models" });
-			const body = result as { models?: { id: string; provider: string; thinking?: unknown }[] } | null;
-			const list = body?.models;
-			if (Array.isArray(list) && list.length > 0) {
-				return list.map(m => ({
-					id: m.id,
-					provider: m.provider,
-					supportsThinking: m.thinking !== undefined && m.thinking !== null,
-					description: `provider: ${m.provider}`,
-				}));
-			}
-		} catch (err) {
-			console.warn("[web-app] get_available_models unavailable, using fallback", err);
-		}
-		return FALLBACK_MODELS;
+		const result = await this.#req<{ models?: ServeModelLike[] | null }>({ type: "get_available_models" });
+		return (result.models ?? []).map(m => ({
+			id: m.id,
+			provider: m.provider,
+			name: m.name ?? m.id,
+			description: m.name ?? m.id,
+			contextWindow: fmtTokens(m.contextWindow),
+			contextWindowTokens: m.contextWindow,
+			price: m.cost ? `$${m.cost.input}/M tokens` : undefined,
+			supportsThinking: m.reasoning === true,
+		}));
 	}
 
 	// ── P3 多 Agent ──
@@ -223,11 +245,6 @@ export class PiClientAdapter implements PiClient {
 
 	switchSession(sessionId: string): Promise<void> {
 		return this.#req({ type: "switch_session", sessionId }).then(() => undefined);
-	}
-
-	setHostTools(tools: HostToolDefinitionDto[]): Promise<void> {
-		const command = { type: "set_host_tools", tools } as never;
-		return this.#req(command).then(() => undefined);
 	}
 
 	/** 拉取当前 attached session 全部消息（get_messages，serve P4 已真实现）。 */
@@ -541,4 +558,21 @@ function normalizeProgress(event: unknown): ProgressEventDto | null {
 
 	// message_end / tool_execution_update：流式结算/部分结果，前端无对应渲染，静默忽略
 	return null;
+}
+
+/** serve get_available_models 返回的 Model 形状（pi-ai Model 的子集映射）。 */
+interface ServeModelLike {
+	id: string;
+	name?: string;
+	provider: string;
+	reasoning?: boolean;
+	contextWindow?: number;
+	cost?: { input: number };
+}
+
+function fmtTokens(n: number | undefined): string | undefined {
+	if (n === undefined) return undefined;
+	if (n >= 1_000_000) return `${n / 1_000_000}M`;
+	if (n >= 1_000) return `${n / 1_000}K`;
+	return String(n);
 }

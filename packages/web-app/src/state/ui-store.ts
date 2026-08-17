@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from "react";
 
 /**
- * UI 偏好 store（zustand 后续接，当前为原生 useSyncExternalStore 实现）。
+ * UI 偏好 store —— 原生 useSyncExternalStore 实现（等价 zustand，手写栈见 FRAMEWORK-MAPPING 差异章节）。
  * 仅存 UI 态（宽度/草稿/预览开关），不进会话权威数据。
  */
 
@@ -15,10 +15,13 @@ export interface UiState {
 	draft: string;
 	phonePreviewOpen: boolean;
 	contentPreview: ContentPreviewState | null;
+	/** 草稿保留开关（设置页真控制；关掉后 setDraft 不再写 localStorage）。 */
+	keepDraft: boolean;
 }
 
 const SIDEBAR_KEY = "omp.side.w";
 const DRAFT_KEY = "omp.workspace.draft";
+const KEEPDRAFT_KEY = "omp.keepDraft";
 
 function loadNumber(key: string, fallback: number): number {
 	try {
@@ -44,6 +47,7 @@ class UiStore {
 		draft: loadString(DRAFT_KEY),
 		phonePreviewOpen: false,
 		contentPreview: null,
+		keepDraft: loadString(KEEPDRAFT_KEY) !== "0",
 	};
 	#listeners = new Set<() => void>();
 
@@ -72,8 +76,18 @@ class UiStore {
 
 	setDraft(draft: string): void {
 		this.#mutate({ draft });
+		if (!this.#state.keepDraft) return; // 草稿保留关闭时只更新内存，不落盘
 		try {
 			localStorage.setItem(DRAFT_KEY, draft);
+		} catch {
+			// localStorage 不可用时仅内存态
+		}
+	}
+
+	setKeepDraft(keep: boolean): void {
+		this.#mutate({ keepDraft: keep });
+		try {
+			localStorage.setItem(KEEPDRAFT_KEY, keep ? "1" : "0");
 		} catch {
 			// 同上
 		}

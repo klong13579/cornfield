@@ -23,8 +23,9 @@ export function ModelsView(): React.JSX.Element {
 	const [filter, setFilter] = useState<Filter>("all");
 
 	useEffect(() => {
+		if (!view.connected) return; // 未连接时跳过，连接后再拉（避免先于 WS open 的一次性失败）
 		void store.fetchModels().then(setModels);
-	}, [store]);
+	}, [store, view.connected]);
 
 	const current = view.model;
 	const currentInfo =
@@ -70,7 +71,6 @@ export function ModelsView(): React.JSX.Element {
 							<div className="mt-3 flex gap-6">
 								<HeroSpec label="上下文" value={currentInfo.contextWindow ?? "—"} />
 								<HeroSpec label="价格" value={currentInfo.price ?? "—"} />
-								<HeroSpec label="延迟" value={currentInfo.latency ?? "—"} />
 							</div>
 							{currentInfo.supportsThinking && (
 								<div className="mt-3 flex gap-1.5">

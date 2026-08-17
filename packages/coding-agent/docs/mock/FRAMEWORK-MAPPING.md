@@ -61,3 +61,28 @@ src/
   state/ connection.ts / ui-store.ts
   lib/ wire-dto.ts            # 协议类型（pi-wire）→ 前端类型适配
 ```
+---
+
+## 十、现状与规划差异（2026-08-18 同步）
+
+> 本映射表规划时假设的技术栈与实际实现存在差异，以下为当前（P4 后）准确状态。
+
+### 技术栈
+
+| 规划（§0） | 实际（packages/web-app/package.json） | 说明 |
+|---|---|---|
+| assistant-ui（Transcript/Composer/markdown） | 手写 `MessageRow` / `ComposerBar` / `MarkdownLite`（markdown 子集：段落/行内 code/fenced block/加粗/链接） | 未引入 assistant-ui。原因：转录流式/工具卡三态与助手微件形态高度定制，手写可控且无版本耦合；代价是富文本能力缺口（表格/嵌套列表/图片渲染需自维护）与加粗级工资 |
+| shadcn/ui（Switch/Select/Tabs/Button） | 手写 CSS 类（`toggle`/`select`/`tab`/`btn`/`chip`/`badge`） | 无障碍基础（键盘/焦点/role）自维护（biome a11y 规则已覆盖大部分） |
+| zustand（状态管理） | 原生 `useSyncExternalStore` store（`state/ui-store.ts` / `session-store.ts`） | 功能等价（订阅/快照/局部更新），无依赖；不引入 zustand 的决策已定 |
+| thinking-orbs | ✅ 已引入 `thinking-orbs@0.3.1`（FR-12 实装） | Orb 组件封装，size 归一 20/64，theme light |
+
+### 组件归属差异
+
+- `ToolCard` 仍内联在 `packages/web-app/src/components/`，未按规划抽到 @oh-my-pi 前端包（无跨包复用需求，未抽）。
+- `ContentPreview`（mermaid/drawio/web 三卡）：当前为死代码（`setContentPreview` 无生产者），本轮清理保留但未接线；真实预览待消息内容块（mermaid 源码/URL）识别接入。
+- 新增 `MobileSideSheet`（移动端右栏浮层）、`DevicePreview` 面板——规划未列，按 FR-8 落地。
+
+### 数据层差异
+
+- `lib/pi-client-api.ts` 是 web-app 内部契约（业务方法层）；`state/pi-client-adapter.ts` 将 `@oh-my-pi/pi-client`（request 命令面）适配到该契约。规划中的 `state/connection.ts` 已并入 adapter/session-store。
+- mock 数据源（fallback-models / MOCK_RECORDS 等）已全部清除，数据来自 serve 真命令；剩余"骨架展示"（skills/cron/画像）标注后端缺口 B3-B7。

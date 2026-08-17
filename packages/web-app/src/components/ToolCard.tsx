@@ -31,7 +31,15 @@ const TOOL_ICONS: Record<string, LucideIcon> = {
 	ast_grep: Search,
 };
 
-export function ToolCard({ tool, className = "" }: { tool: ToolView; className?: string }): React.JSX.Element {
+export function ToolCard({
+	tool,
+	className = "",
+	onRetry,
+}: {
+	tool: ToolView;
+	className?: string;
+	onRetry?: () => void;
+}): React.JSX.Element {
 	// 移动端工具卡默认折叠（FR-8：触控优先，点击展开参数/结果）；桌面默认展开（审计轨迹）。
 	const isMobile = useIsMobile();
 	const [expanded, setExpanded] = useState(!isMobile);
@@ -69,10 +77,10 @@ export function ToolCard({ tool, className = "" }: { tool: ToolView; className?:
 							<button
 								type="button"
 								className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-ink-muted hover:bg-surface-2 hover:text-ink"
-								title="abort_retry（命令面已列，mock 未模拟重试）"
+								title="重试：abort_retry（中止当前失败重试流）"
 								onClick={e => {
 									e.stopPropagation();
-									// TODO: 真实路径 → abort_retry 命令（serve 命令面已列，mock 未模拟重试）
+									onRetry?.();
 								}}
 							>
 								<RefreshCcw size={11} strokeWidth={1.5} />

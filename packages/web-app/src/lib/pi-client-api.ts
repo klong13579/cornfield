@@ -4,6 +4,7 @@ import type {
 	ConnectionInfoDto,
 	EnvironmentSummaryDto,
 	HostToolDefinitionDto,
+	ImageContentDto,
 	ModelInfoDto,
 	SessionSnapshotDto,
 	TodoPhaseDto,
@@ -18,9 +19,7 @@ import type {
  * - `progress` 只做事件通知（subscribe 回调中的 progress 事件，UI 层不得归约为权威状态）
  * - 命令面覆盖 workspace 需要的 12+ 条（prompt/abort/set_model/set_todos/…）
  *
- * 替换点：`state/client.ts` 的 `createClient()` 当前返回 MockPiClient；
- * `@oh-my-pi/pi-client`（be-dev）发布后，仅替换该工厂的实现，
- * 上层组件与 store 不感知差异。
+ * 实现：`state/client.ts` 的 `createClient()` 返回 PiClientAdapter（真 pi-client 适配）。
  */
 export interface PiClient {
 	/** hello 握手建立连接（指数退避重连由实现管理）。 */
@@ -37,8 +36,12 @@ export interface PiClient {
 	subscribeConnection?(listener: (conn: ConnectionInfoDto) => void): () => void;
 
 	// ── 命令面（12 条 workspace 命令子集）──
-	prompt(text: string): Promise<void>;
+	prompt(text: string, sessionId?: string, images?: ImageContentDto[]): Promise<void>;
 	abort(): Promise<void>;
+	/** abort_retry：中止当前重试流。 */
+	abortRetry(): Promise<void>;
+	/** 前端已注册的 host tools（set_host_tools 本地态）。 */
+	getHostTools(): HostToolDefinitionDto[];
 	compact(): Promise<void>;
 	newSession(): Promise<void>;
 	setModel(modelId: string, provider?: string): Promise<void>;

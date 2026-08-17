@@ -6,8 +6,7 @@ import { router } from "./router";
 import { createClient } from "./state/client";
 import { useSessionStore } from "./state/session-store";
 
-// 会话权威 store 初始化：接 mock client；pi-client 就绪后仅替换 createClient()
-//（见 state/client.ts 的替换点注释）。
+// 会话权威 store 初始化：接真 pi-client（PiClientAdapter，见 state/client.ts）。
 const store = useSessionStore();
 store.init(createClient());
 void store.connect();

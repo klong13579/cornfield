@@ -67,7 +67,8 @@ export function WorkspaceView({ compact = false }: { compact?: boolean }): React
 					<span className="h-[18px] w-px bg-hairline" />
 					<button type="button" className="chip">
 						<Folder size={13} strokeWidth={1.5} />
-						<b>{view.env?.repos ?? "oh-my-pi"}</b> · {view.env?.branch ?? "main"}
+						<b>{view.env?.repos ?? "未连接"}</b>
+						{view.env ? ` · ${view.env.branch}` : ""}
 					</button>
 					<span className="flex-1" />
 					<MobileSideSheet />

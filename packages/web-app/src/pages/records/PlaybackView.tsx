@@ -1,13 +1,7 @@
 import { Pause, Play, SkipBack, SkipForward } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import {
-	type BranchPoint,
-	CURRENT_SESSION_ID,
-	MOCK_RECORDS,
-	mockTimeline,
-	type PlaybackEntry,
-} from "../../lib/records";
+import { type BranchPoint, CURRENT_SESSION_ID, type PlaybackEntry } from "../../lib/records";
 import { type PlaybackSpeed, usePlayback } from "../../lib/use-playback";
 import { useSessionStore } from "../../state/session-store";
 
@@ -25,8 +19,8 @@ export function PlaybackView(): React.JSX.Element {
 	const [error, setError] = useState<string | null>(null);
 	const scrollRef = useRef<HTMLDivElement>(null);
 
-	const summary = useMemo(() => (id === CURRENT_SESSION_ID ? undefined : MOCK_RECORDS.find(r => r.id === id)), [id]);
-	const title = id === CURRENT_SESSION_ID ? "当前会话（serve 真数据）" : (summary?.name ?? "未知会话");
+	// 历史会话回放待后端 JSONL 读取命令（list_sessions 已带出 sessionFile），标题暂为会话 id；current 为真数据
+	const title = id === CURRENT_SESSION_ID ? "当前会话（serve 真数据）" : `历史会话 · ${id.slice(0, 12)}`;
 
 	useEffect(() => {
 		let alive = true;
@@ -47,7 +41,8 @@ export function PlaybackView(): React.JSX.Element {
 				})
 				.catch(() => undefined);
 		} else {
-			setTimeline(mockTimeline(id));
+			// 历史会话时间线 JSONL 读取待后端文件命令（list_sessions 已带出 sessionFile），暂为空态
+			setTimeline([]);
 		}
 		return () => {
 			alive = false;
@@ -247,7 +242,9 @@ export function PlaybackView(): React.JSX.Element {
 											</div>
 										))}
 									</div>
-									<div className="mt-1.5 text-[10px] text-ink-faint">branch 命令待 serve 实现（TODO）</div>
+									<div className="mt-1.5 text-[10px] text-ink-faint">
+										branch 跳转待 serve branch 命令（get_branch_messages 候选数据已真）
+									</div>
 								</div>
 							)}
 						</div>

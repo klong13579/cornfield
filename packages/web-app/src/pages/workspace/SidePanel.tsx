@@ -15,6 +15,8 @@ export function SidePanel(): React.JSX.Element {
 	const ui = useUiState();
 
 	const phaseLabel = view.phase === "idle" ? "idle" : view.phase;
+	// W5：真实 agent（快照 sessionId 对应注册表项；未匹配则取列表首个）
+	const activeAgent = view.agents.find(a => a.id === view.sessionId) ?? view.agents[0];
 	const todoTotal = view.todo.reduce((sum, p) => sum + p.tasks.length, 0);
 
 	return (
@@ -25,7 +27,11 @@ export function SidePanel(): React.JSX.Element {
 				<h3 className="mb-2.5 text-[11px] font-semibold tracking-[0.08em] text-ink-faint uppercase">会话概览</h3>
 				<div className="flex flex-col gap-1.5">
 					<OverviewRow k="阶段" v={phaseLabel} active />
-					<OverviewRow k="Agent" v="研发助手" tag="CODING" />
+					<OverviewRow
+						k="Agent"
+						v={activeAgent?.name ?? "未连接"}
+						tag={activeAgent ? (activeAgent.kind === "coding" ? "CODING" : "WORKER") : undefined}
+					/>
 					<OverviewRow k="模型" v={view.model ?? "—"} mono />
 					<OverviewRow k="thinking" v={view.thinkingLevel ?? "off"} mono />
 					<OverviewRow k="会话" v={shortId(view.sessionId)} mono />

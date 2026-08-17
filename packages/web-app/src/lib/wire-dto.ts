@@ -50,7 +50,7 @@ export interface MessageDto {
 	errorMessage?: string;
 }
 
-/** 会话权威快照（对应 SessionSnapshot；context 为可选扩展，mock 提供、真机可能缺失）。 */
+/** 会话权威快照（对应 SessionSnapshot；context 为可选扩展，真机数据可接 get_session_stats）。 */
 export interface SessionSnapshotDto {
 	seq: number;
 	sessionId: string;
@@ -158,12 +158,23 @@ export interface ConnectionInfoDto {
 export interface ModelInfoDto {
 	id: string;
 	provider: string;
+	/** 模型显示名（真实 Model.name）。 */
+	name?: string;
+	/** 展示用上下文窗口（如 “200K”“1M”）。 */
 	contextWindow?: string;
+	/** 原始上下文窗口 token 数（排序用）。 */
+	contextWindowTokens?: number;
+	/** 价格展示（真实 cost 输入价格，$/M tokens）。 */
 	price?: string;
-	latency?: string;
 	description?: string;
 	supportsThinking: boolean;
-	lastRunAt?: number;
+}
+
+/** 图片附件（对应 pi-ai ImageContent：prompt.images 通道，base64 内联）。 */
+export interface ImageContentDto {
+	type: "image";
+	data: string; // base64 编码图片数据
+	mimeType: string; // 如 image/png
 }
 
 /** host tool 声明（对应 WireHostToolDefinition；set_host_tools 入参）。 */

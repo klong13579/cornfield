@@ -2,6 +2,7 @@ import { ArrowRight, Bot, CalendarDays, Cpu, History, Mic } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Orb } from "../../components/Orb";
+import { useSessionStore } from "../../state/session-store";
 import { useSession } from "../../state/use-session";
 
 /**
@@ -35,6 +36,7 @@ function timeGreeting(): string {
 export function HomeView(): React.JSX.Element {
 	const navigate = useNavigate();
 	const view = useSession();
+	const store = useSessionStore();
 	const [query, setQuery] = useState("");
 
 	useEffect(() => {
@@ -63,8 +65,11 @@ export function HomeView(): React.JSX.Element {
 					</div>
 					<div className="mt-2 flex items-center justify-center gap-2 text-[14px] text-ink-subtle">
 						<span className="h-1.5 w-1.5 rounded-full bg-success shadow-[0_0_6px_rgba(76,183,130,0.5)]" />
-						{view.env?.repos ?? "oh-my-pi"} · {view.env?.branch ?? "main"} · {view.env?.activeAgentCount ?? 4}{" "}
-						agent 运行中 · {view.env?.pendingCronCount ?? 2} 定时任务待执行
+						{view.env
+							? `${view.env.repos} · ${view.env.branch} · ${view.env.activeAgentCount} agent 运行中 · ${view.env.pendingCronCount} 定时任务待执行`
+							: view.connected
+								? "本地 serve · 单会话"
+								: "未连接 —— 环境摘要待 serve get_state env 字段"}
 					</div>
 				</div>
 
@@ -123,12 +128,17 @@ export function HomeView(): React.JSX.Element {
 							最近活跃
 						</div>
 						<div className="flex gap-2.5">
+							{/* 最近活跃 agent：点击进入该 agent 会话（attach + switch） */}
 							{recent.map((agent, i) => (
 								<button
 									type="button"
 									key={agent.id}
 									className="flex min-w-[160px] cursor-pointer items-center gap-2.5 rounded-xl border border-hairline bg-surface p-3 text-left transition-all duration-150 hover:-translate-y-px hover:border-hairline-strong"
-									onClick={() => navigate("/agents")}
+									onClick={() => {
+										store.attach(agent.id);
+										store.switchSession(agent.id);
+										navigate("/workspace");
+									}}
 								>
 									<span
 										className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[11px] font-semibold text-white"

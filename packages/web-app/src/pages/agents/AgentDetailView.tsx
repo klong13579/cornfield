@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import type { ModelInfoDto } from "../../lib/wire-dto";
+import type { HostToolDefinitionDto, ModelInfoDto } from "../../lib/wire-dto";
 import { useSessionStore } from "../../state/session-store";
 import { useSession } from "../../state/use-session";
 import { KindBadge } from "./AgentsView";
@@ -21,7 +21,7 @@ const TABS: { id: TabId; label: string; count?: number }[] = [
 	{ id: "profile", label: "用户画像" },
 ];
 
-// TODO(@be-dev): serve get_snapshot 扩展 skills 字段（skill-management.md 3.2）后替换为真实数据
+// 技能列表为骨架展示：数据源待后端 get_snapshot 扩展 skills 字段（缺口 B3）
 const SKILLS = [
 	{ name: "diagnosing-bugs", desc: "诊断循环：硬 bug 和性能回归的诊断流程", version: "v1.2", enabled: true },
 	{ name: "tdd", desc: "测试驱动开发，red-green-refactor 流程", version: "v2.0", enabled: true },
@@ -36,7 +36,7 @@ const SKILLS = [
 	},
 ];
 
-// TODO(@be-dev): cron 数据接口（wire 协议扩展）就绪后替换
+// cron 数据为骨架展示：wire 命令缺口 B4
 const CRONS = [
 	{
 		name: "每日代码审查报告",
@@ -68,24 +68,29 @@ export function AgentDetailView(): React.JSX.Element {
 	const [tab, setTab] = useState<TabId>("skills");
 	const [models, setModels] = useState<ModelInfoDto[]>([]);
 	const [selProvider, setSelProvider] = useState("anthropic");
-	const [tools, setTools] = useState<Record<string, boolean>>({
-		read: true,
-		write: true,
-		edit: true,
-		bash: true,
-		search: true,
-		find: true,
-		ast_grep: true,
-		ast_edit: true,
-		lsp: true,
-		python: true,
-		notebook: false,
-		debug: true,
-		task: true,
-		web_search: true,
-		puppeteer: false,
-		todo_write: true,
-	});
+	// C3：host tool 注册态（set_host_tools 真命令本地权威态；snapshot 无工具开关数据，wire 面未提供）
+	const [hostTools, setHostToolsState] = useState<HostToolDefinitionDto[]>(() => store.getHostTools());
+	const [newHostName, setNewHostName] = useState("");
+	const [newHostDesc, setNewHostDesc] = useState("");
+
+	const registerHostTool = () => {
+		const name = newHostName.trim();
+		if (!name) return;
+		const next = [
+			...hostTools.filter(t => t.name !== name),
+			{ name, description: newHostDesc.trim() || `host tool ${name}`, parameters: {} },
+		];
+		setHostToolsState(next);
+		store.setHostTools(next);
+		setNewHostName("");
+		setNewHostDesc("");
+	};
+
+	const unregisterHostTool = (name: string) => {
+		const next = hostTools.filter(t => t.name !== name);
+		setHostToolsState(next);
+		store.setHostTools(next);
+	};
 
 	useEffect(() => {
 		void store.fetchModels().then(setModels);
@@ -159,8 +164,10 @@ export function AgentDetailView(): React.JSX.Element {
 									className={`toggle shrink-0${skill.enabled ? " on" : ""}`}
 									aria-checked={skill.enabled}
 									role="switch"
+									disabled
+									title="技能启停待 set_skill_enabled 协议（后端缺口 B3）"
 									onClick={() => {
-										/* TODO(@be-dev): set_skill_enabled 协议（skill-management.md 3.2） | 当前仅本地展示态 */
+										/* TODO(后端 B3): set_skill_enabled 协议 */
 									}}
 								/>
 							</div>
@@ -174,14 +181,8 @@ export function AgentDetailView(): React.JSX.Element {
 				{tab === "cron" && (
 					<div>
 						<div className="mb-5">
-							<button
-								type="button"
-								className="btn btn-sm"
-								onClick={() => {
-									/* TODO: cron 新增协议 */
-								}}
-							>
-								+ 新建定时任务（TODO）
+							<button type="button" className="btn btn-sm" disabled title="cron wire 命令待后端（缺口 B4）">
+								+ 新建定时任务（待后端命令）
 							</button>
 						</div>
 						{CRONS.map(cron => (
@@ -203,13 +204,28 @@ export function AgentDetailView(): React.JSX.Element {
 									))}
 								</div>
 								<div className="mt-2.5 flex gap-1.5">
-									<button type="button" className="cbtn shrink-0 border border-hairline">
+									<button
+										type="button"
+										className="cbtn shrink-0 border border-hairline"
+										disabled
+										title="cron wire 命令待后端（缺口 B4）"
+									>
 										暂停
 									</button>
-									<button type="button" className="cbtn shrink-0 border border-hairline">
+									<button
+										type="button"
+										className="cbtn shrink-0 border border-hairline"
+										disabled
+										title="cron wire 命令待后端（缺口 B4）"
+									>
 										立即运行
 									</button>
-									<button type="button" className="cbtn shrink-0 border border-hairline">
+									<button
+										type="button"
+										className="cbtn shrink-0 border border-hairline"
+										disabled
+										title="cron wire 命令待后端（缺口 B4）"
+									>
 										日志
 									</button>
 								</div>
@@ -275,27 +291,48 @@ export function AgentDetailView(): React.JSX.Element {
 
 				{tab === "tools" && (
 					<div>
-						<div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-0.5">
-							{Object.entries(tools).map(([name, on]) => (
-								<div
-									key={name}
-									className="flex items-center gap-2.5 rounded px-2 py-2 transition-colors hover:bg-surface"
-								>
-									<span className="flex-1 font-mono text-[13px] text-ink-muted">{name}</span>
-									<span
-										className={`toggle small shrink-0${on ? " on" : ""}`}
-										role="switch"
-										aria-checked={on}
-										tabIndex={0}
-										onClick={() => setTools(t => ({ ...t, [name]: !t[name] }))}
-										onKeyDown={e => e.key === "Enter" && setTools(t => ({ ...t, [name]: !t[name] }))}
-									/>
-								</div>
-							))}
+						<h4 className="mb-3 text-[11px] font-semibold tracking-[0.08em] text-ink-faint uppercase">
+							host 工具注册（set_host_tools）
+						</h4>
+						{hostTools.length === 0 ? (
+							<div className="rounded-lg border border-dashed border-hairline-strong bg-surface px-4 py-6 text-center text-[12px] text-ink-faint">
+								尚未注册任何 host 工具。host tool 由前端声明（如浏览器/桌面能力），声明后 LLM 可调用，
+								执行结果经 host_tool_result 帧回传（pi-client 裸帧能力待补）。
+							</div>
+						) : (
+							<div className="divide-y divide-hairline rounded-lg border border-hairline bg-surface">
+								{hostTools.map(t => (
+									<div key={t.name} className="flex items-center gap-3 px-4 py-2.5">
+										<span className="min-w-0 flex-1">
+											<span className="block font-mono text-[13px] text-ink">{t.name}</span>
+											<span className="block truncate text-[11px] text-ink-faint">{t.description}</span>
+										</span>
+										<button
+											type="button"
+											className="btn btn-secondary btn-sm shrink-0"
+											onClick={() => unregisterHostTool(t.name)}
+										>
+											移除
+										</button>
+									</div>
+								))}
+							</div>
+						)}
+						<div className="mt-4 flex items-center gap-2">
+							<input
+								value={newHostName}
+								onChange={e => setNewHostName(e.target.value)}
+								placeholder="工具名（如 browser_capture）"
+								className="min-w-0 flex-1 rounded border border-hairline bg-surface-2 px-3 py-2 font-mono text-[12px] text-ink outline-none focus:border-hairline-strong"
+							/>
+							<button type="button" className="btn btn-sm shrink-0" onClick={registerHostTool}>
+								注册
+							</button>
 						</div>
 						<div className="mt-3 text-[11px] text-ink-faint">
-							本地切换演示态 — set_host_tools 协议（host_tool_* 帧）待 fe-dev/be-dev 同步落地后持久化（当前 serve
-							返回 not_implemented）
+							set_host_tools 已实现：注册后 serve 推 host_tool_call 帧 → 前端执行 → host_tool_result
+							回传（pi-client 裸帧发送待补）。session 内置工具开关 wire 面无命令，本 tab 为前端 host tool
+							注册管理。
 						</div>
 					</div>
 				)}
@@ -321,19 +358,29 @@ export function AgentDetailView(): React.JSX.Element {
 							tradeoff。对投融资话题敏感，习惯用数字说话。
 						</div>
 						<div className="flex gap-2">
-							<button type="button" className="btn btn-sm">
+							<button
+								type="button"
+								className="btn btn-sm"
+								disabled
+								title="用户画像只读数据待连接器路径（缺口 B5）"
+							>
 								重新建模
 							</button>
-							<button type="button" className="btn btn-secondary btn-sm">
+							<button
+								type="button"
+								className="btn btn-secondary btn-sm"
+								disabled
+								title="用户画像只读数据待连接器路径（缺口 B5）"
+							>
 								导出画像 JSON
 							</button>
 							<button
 								type="button"
 								className="btn btn-sm border border-danger bg-transparent text-danger hover:bg-danger/10"
+								disabled
+								title="画像清除待 session 删除/画像协议（缺口 B6）"
 								onClick={() => {
-									if (window.confirm("确认清除用户画像？此操作不可恢复。")) {
-										/* TODO: 清除画像协议 */
-									}
+									/* TODO(后端 B6) */
 								}}
 							>
 								清除画像

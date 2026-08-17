@@ -1,6 +1,7 @@
 import { ChevronDown, Cpu, Mic, Paperclip, Send, Square } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import type { ImageContentDto } from "../../lib/wire-dto";
 import { useSessionStore } from "../../state/session-store";
 import { getUiStore, useUiState } from "../../state/ui-store";
 import { useSession } from "../../state/use-session";
@@ -20,11 +21,29 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 	const ui = useUiState();
 	const navigate = useNavigate();
 	const textRef = useRef<HTMLTextAreaElement>(null);
-	const [agentId, setAgentId] = useState(view.agents[0]?.id ?? "dev-assistant");
+	const [agentId, setAgentId] = useState<string | undefined>(view.agents[0]?.id);
 	const [showAgentMenu, setShowAgentMenu] = useState(false);
 	const [showModelMenu, setShowModelMenu] = useState(false);
 	const [modelList, setModelList] = useState<Array<{ id: string; provider: string }>>([]);
 	const value = ui.draft || autoFocusDraft;
+	const [attachments, setAttachments] = useState<ImageContentDto[]>([]);
+	const fileRef = useRef<HTMLInputElement>(null);
+
+	// 附件：文件选择 → base64 读入 → prompt.images 通道（真命令已支持）
+	const onPickImages = (e: React.ChangeEvent<HTMLInputElement>) => {
+		const files = Array.from(e.target.files ?? []);
+		e.target.value = "";
+		for (const file of files) {
+			const reader = new FileReader();
+			reader.onload = () => {
+				const data = String(reader.result ?? "").split(",")[1] ?? "";
+				if (data) {
+					setAttachments(prev => [...prev, { type: "image", data, mimeType: file.type || "image/png" }]);
+				}
+			};
+			reader.readAsDataURL(file);
+		}
+	};
 
 	// 拉取真实可用模型列表（serve get_available_models；连接就绪后重拉，未连接/失败时保持空）
 	useEffect(() => {
@@ -45,6 +64,7 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 
 	const active = view.isStreaming || view.phase !== "idle";
 	const agent = view.agents.find(a => a.id === agentId) ?? view.agents[0];
+	const workspaces = Array.from(new Set(view.agents.map(a => a.workspace).filter(Boolean)));
 
 	useEffect(() => {
 		if (autoFocusDraft) textRef.current?.focus();
@@ -61,7 +81,8 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 		const text = value.trim();
 		if (!text) return;
 		getUiStore().setDraft("");
-		store.prompt(text);
+		store.prompt(text, agentId, attachments.length > 0 ? attachments : undefined);
+		setAttachments([]);
 	};
 
 	const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -113,7 +134,7 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 							</button>
 							{showAgentMenu && (
 								<div className="absolute bottom-[calc(100%+8px)] left-0 z-30 min-w-65 overflow-hidden rounded-md border border-hairline-strong bg-surface shadow-lg">
-									{["研发工作区", "运营工作区"].map(ws => (
+									{workspaces.map(ws => (
 										<div key={ws}>
 											<div className="border-b border-hairline px-3 py-2 text-[10px] font-semibold tracking-[0.08em] text-ink-faint uppercase">
 												{ws}
@@ -127,6 +148,8 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 														className={`flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] transition-colors hover:bg-surface-3 ${a.id === agentId ? "bg-accent-dim" : ""}`}
 														onClick={() => {
 															setAgentId(a.id);
+															store.attach(a.id); // lazy attach（幂等）
+															store.switchSession(a.id); // 切 active：后续 prompt 默认发往该 agent
 															setShowAgentMenu(false);
 														}}
 													>
@@ -146,9 +169,31 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 						</div>
 
 						<span className="h-[18px] w-px bg-hairline" />
-						<button type="button" className="cbtn shrink-0" title="上传附件（P3 接入）" aria-disabled>
+						<input
+							ref={fileRef}
+							type="file"
+							accept="image/*"
+							multiple
+							className="hidden"
+							onChange={onPickImages}
+						/>
+						<button
+							type="button"
+							className="cbtn shrink-0"
+							title={
+								attachments.length > 0
+									? `${attachments.length} 张图片已附加（发送时随指令）`
+									: "添加图片（随指令发送）"
+							}
+							onClick={() => fileRef.current?.click()}
+						>
 							<Paperclip size={15} strokeWidth={1.5} />
 							<span className="hidden sm:inline">附件</span>
+							{attachments.length > 0 && (
+								<span className="rounded bg-accent px-1 font-mono text-[10px] text-on-accent">
+									{attachments.length}
+								</span>
+							)}
 						</button>
 						<button type="button" className="cbtn" title="语音输入" onClick={() => navigate("/voice")}>
 							<Mic size={15} strokeWidth={1.5} />

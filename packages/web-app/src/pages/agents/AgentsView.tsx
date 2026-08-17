@@ -116,7 +116,11 @@ export function AgentsView(): React.JSX.Element {
 										key={agent.id}
 										agent={agent}
 										onOpen={() => navigate(`/agents/${agent.id}`)}
-										onSession={() => navigate("/workspace")}
+										onSession={() => {
+											store.attach(agent.id); // lazy attach（幂等）
+											store.switchSession(agent.id); // 切 active 再进工作台
+											navigate("/workspace");
+										}}
 									/>
 								))}
 							</div>

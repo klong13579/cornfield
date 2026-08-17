@@ -4,8 +4,6 @@ import { useNavigate } from "react-router-dom";
 import {
 	CURRENT_SESSION_ID,
 	downloadJsonl,
-	MOCK_RECORDS,
-	mockTimeline,
 	type RecordStatus,
 	recordStatusLabel,
 	type SessionRecordSummary,
@@ -15,8 +13,8 @@ import { useSession } from "../../state/use-session";
 
 /**
  * 会话记录列表（FR-3）—— 行式列表（15px 名称 + 状态 badge）+ 筛选/搜索 + 操作列。
- * 数据源：mock 骨架（历史会话索引待 be-dev 记录系命令，TODO 标注）+
- * 特殊行「当前会话」（serve get_messages 真数据：名称/消息数来自当前 attached session）。
+ * 数据源：list_sessions 真索引 +
+ * 特殊行「当前会话」（get_messages 真数据）。
  */
 export function RecordsView(): React.JSX.Element {
 	const navigate = useNavigate();
@@ -69,16 +67,13 @@ export function RecordsView(): React.JSX.Element {
 				.then(raw => downloadJsonl(name, raw))
 				.catch(() => undefined);
 		} else {
-			downloadJsonl(name, mockTimeline(row.id));
+			return; // 历史 JSONL 读取待后端文件命令，不做 mock 冒充
 		}
 	};
 
-	const agents = useMemo(() => Array.from(new Set(MOCK_RECORDS.map(r => r.agent))), []);
+	const agents = useMemo(() => Array.from(new Set(serveRows.map(r => r.agent))), [serveRows]);
 
-	const rows: SessionRecordSummary[] = [
-		...(currentSummary ? [currentSummary] : []),
-		...(serveRows.length > 0 ? serveRows : MOCK_RECORDS),
-	];
+	const rows: SessionRecordSummary[] = [...(currentSummary ? [currentSummary] : []), ...serveRows];
 
 	const filtered = rows.filter(row => {
 		if (agentFilter !== "all" && row.agent !== agentFilter) return false;
@@ -190,12 +185,15 @@ export function RecordsView(): React.JSX.Element {
 								</button>
 								<button
 									type="button"
-									className="text-ink-faint transition-colors hover:text-ink"
+									className="text-ink-faint transition-colors hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
 									onClick={e => {
 										e.stopPropagation();
 										handleExport(row);
 									}}
-									title="导出 JSONL"
+									disabled={row.id !== CURRENT_SESSION_ID}
+									title={
+										row.id === CURRENT_SESSION_ID ? "导出当前会话 JSONL" : "历史会话导出待后端 JSONL 读取命令"
+									}
 								>
 									导出
 								</button>

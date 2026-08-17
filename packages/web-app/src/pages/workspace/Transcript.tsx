@@ -4,6 +4,7 @@ import { Orb } from "../../components/Orb";
 import { ThinkingFold } from "../../components/ThinkingFold";
 import { ToolCard } from "../../components/ToolCard";
 import type { TranscriptMessage } from "../../state/session-store";
+import { useSessionStore } from "../../state/session-store";
 import { useSession } from "../../state/use-session";
 
 /**
@@ -45,6 +46,7 @@ export function Transcript(): React.JSX.Element {
 }
 
 function MessageRow({ msg, streaming = false }: { msg: TranscriptMessage; streaming?: boolean }): React.JSX.Element {
+	const sessionStore = useSessionStore();
 	if (msg.role === "user") {
 		return (
 			<div className="flex gap-3">
@@ -79,7 +81,7 @@ function MessageRow({ msg, streaming = false }: { msg: TranscriptMessage; stream
 						</div>
 					)}
 					{msg.tools.map(tool => (
-						<ToolCard key={tool.id} tool={tool} />
+						<ToolCard key={tool.id} tool={tool} onRetry={() => sessionStore.abortRetry()} />
 					))}
 					{msg.error && (
 						<div className="mt-1 rounded-md border border-danger/40 bg-danger/5 px-3 py-2 text-[12.5px] leading-relaxed text-danger">
