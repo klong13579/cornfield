@@ -73,7 +73,8 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 		name: "default",
 		agentDir: process.cwd(),
 	});
-	for (const meta of await loadMetasSafe()) registry.registerMeta(meta);
+	const metas = await loadMetasSafe();
+	for (const meta of metas) registry.registerMeta(meta);
 
 	// default agent 启动即 attached（P1 语义：无 lazy、无 attach 命令也全功能）
 	registry.attachExisting("default", {
@@ -81,6 +82,19 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 		session: defaultSession.session,
 		store: defaultSession.store,
 	});
+
+	// 启动即预挂载所有注册 agent（与 gateway 4 bridge 常驻语义对齐）：
+	// lazy attach 令 agent 在 serve 重启后全部回到"未挂载"，前端反复误读。
+	// 预挂载后列表恒显示空闲/运行中；单个实例化失败仅告警，不阻塞 serve 启动。
+	await Promise.allSettled(
+		metas.map(async meta => {
+			try {
+				await registry.attach(meta.id);
+			} catch (err) {
+				logger.warn("serve:preload attach failed", { agentId: meta.id, error: String(err) });
+			}
+		}),
+	);
 
 	const send = (ws: WireSocket, frame: ServerFrame): void => {
 		ws.send(JSON.stringify(frame));
