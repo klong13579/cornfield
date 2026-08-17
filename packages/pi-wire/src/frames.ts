@@ -79,6 +79,23 @@ export interface SessionListEntry {
 }
 
 /**
+ * P4 环境摘要（`get_state` 响应的 `env` 字段，B1）。
+ *
+ * serve wire 面恒提供 repos/branch/activeAgentCount；`pendingCronCount` 仅 gateway 面
+ * 有数据源，wire 面恒省略（字段可选，客户端按缺省处理）。
+ */
+export interface WireEnvironmentSummary {
+	/** 工作区仓库名（serve 进程 cwd 目录名）。 */
+	repos: string;
+	/** 当前 git 分支；非 git 仓库 / 分离头时为 null。 */
+	branch: string | null;
+	/** 已 attach 的 agent 数（serve 进程内活跃实例）。 */
+	activeAgentCount: number;
+	/** 待执行 cron 任务数——仅 gateway 面提供，wire 面不返回此字段。 */
+	pendingCronCount?: number;
+}
+
+/**
  * 历史会话索引项（P4 `list_sessions` 命令的返回元素）。
  *
  * 由 sessions 目录的 JSONL 文件头（前 4KB：session header + 初始 model_change）

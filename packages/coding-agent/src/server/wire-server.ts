@@ -1,11 +1,13 @@
 import { randomUUID } from "node:crypto";
+import * as path from "node:path";
 import { logger } from "@oh-my-pi/pi-utils";
-import type { ClientFrame, ServerFrame, WireCommand, WireServerEvent } from "@oh-my-pi/pi-wire";
+import type { ClientFrame, ServerFrame, WireCommand, WireEnvironmentSummary, WireServerEvent } from "@oh-my-pi/pi-wire";
 import { MULTIDEVICE_PROTOCOL_VERSION } from "@oh-my-pi/pi-wire";
 import { normalizeHostToolDefinitions } from "../modes/rpc/rpc-mode";
 import type { AgentSession } from "../session/agent-session";
 import type { SessionStore } from "../session/session-store";
 import type { TodoPhase } from "../tools/todo-write";
+import * as git from "../utils/git";
 import { WireHostToolBridge } from "./host-tool-bridge";
 import { agentSessionsRoot, defaultSessionsRoot, indexSessions } from "./session-index";
 import {
@@ -253,6 +255,7 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 				"set_session_name",
 				"set_host_tools",
 				"new_session",
+				"branch",
 			]);
 			const sessionDone = (result?: unknown): void => {
 				done(result);
@@ -303,7 +306,7 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 					break;
 				}
 				case "get_state": {
-					done(buildRpcState(session, attached.store));
+					done(buildRpcState(session, attached.store, await buildEnvironmentSummary(registry)));
 					break;
 				}
 				case "set_todos": {
@@ -412,6 +415,13 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 				}
 				case "get_session_stats": {
 					done(session.getSessionStats());
+					break;
+				}
+				case "branch": {
+					// 语义对齐 rpc-mode：从指定 entry 建 branch 会话，结果带选中文案供编辑器预填。
+					// branch 会替换 session 内容但不保证走事件流 → 加入 MUTATING_NO_EVENT 推权威快照。
+					const result = await session.branch(command.entryId);
+					sessionDone({ text: result.selectedText, cancelled: result.cancelled });
 					break;
 				}
 				case "get_branch_messages": {
@@ -571,7 +581,11 @@ async function loadMetasSafe(): Promise<AgentMeta[]> {
 	}
 }
 
-function buildRpcState(session: AgentSession, store: SessionStore): Record<string, unknown> {
+function buildRpcState(
+	session: AgentSession,
+	store: SessionStore,
+	env: WireEnvironmentSummary,
+): Record<string, unknown> {
 	return {
 		model: session.model,
 		thinkingLevel: session.thinkingLevel,
@@ -588,5 +602,16 @@ function buildRpcState(session: AgentSession, store: SessionStore): Record<strin
 		queuedMessageCount: session.queuedMessageCount,
 		todoPhases: session.getTodoPhases(),
 		snapshotSeq: store.getSnapshot().seq,
+		env,
+	};
+}
+
+/** B1 环境摘要：repos/branch 来自 serve 进程 cwd，agent 数来自注册表；cron 仅 gateway 面。 */
+async function buildEnvironmentSummary(registry: SessionRegistry): Promise<WireEnvironmentSummary> {
+	const cwd = process.cwd();
+	return {
+		repos: path.basename(cwd) || cwd,
+		branch: await git.branch.current(cwd),
+		activeAgentCount: registry.listAttached().length,
 	};
 }

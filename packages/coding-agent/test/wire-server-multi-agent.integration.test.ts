@@ -14,8 +14,13 @@
  *      改用直接校验 host_tools_changed push + 注册回执；调用闭环需 LLM，留 fe 联调）
  *
  * 不发 prompt（不触发计费）。set_todos 等本地命令验证定向路由。
+ *
+ * 另含 B1/B8 回归：get_state env 环境摘要 + branch 命令（预置历史会话文件
+ * --resume，branch 面向真实 user entry，不打 LLM）。
  */
+
 import { expect, test } from "bun:test";
+import { randomUUID } from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -165,6 +170,97 @@ test("serve 多 Agent：注册表 + attach + switch + 隔离 + 心跳", async ()
 
 		connA.close();
 		connB.close();
+	} finally {
+		proc.kill();
+		await proc.exited;
+		process.env.HOME = savedHome;
+		await fs.rm(isolatedHome, { recursive: true, force: true });
+	}
+}, 60_000);
+
+test("serve B1/B8：get_state env 环境摘要 + branch 命令（快照推送）", async () => {
+	const isolatedHome = await fs.mkdtemp(path.join(os.tmpdir(), "omp-serve-b1b8-"));
+	const savedHome = process.env.HOME;
+	process.env.HOME = isolatedHome;
+
+	// 预置含 user message 的历史会话文件——branch 需要真实 user entry，不打 LLM
+	const now = new Date().toISOString();
+	const seedFile = path.join(isolatedHome, "seed-session.jsonl");
+	await Bun.write(
+		seedFile,
+		`${[
+			JSON.stringify({ type: "session", version: 3, id: randomUUID(), timestamp: now, cwd: isolatedHome }),
+			JSON.stringify({
+				type: "model_change",
+				id: "seedmodel",
+				parentId: null,
+				timestamp: now,
+				model: "narwal-plan/deepseek-v4-flash",
+			}),
+			JSON.stringify({
+				type: "message",
+				id: "seed-user-1",
+				parentId: "seedmodel",
+				timestamp: now,
+				message: {
+					role: "user",
+					content: [{ type: "text", text: "branch e2e seed message" }],
+					attribution: "user",
+					timestamp: Date.now(),
+				},
+			}),
+		].join("\n")}\n`,
+	);
+
+	const repoRoot = new URL("../../..", import.meta.url).pathname.replace(/\/$/, "");
+	const cliPath = `${repoRoot}/packages/coding-agent/src/cli.ts`;
+	const port = 56000 + Math.floor(Math.random() * 8000);
+	const proc = Bun.spawn(
+		["bun", cliPath, "serve", "--port", String(port), "--host", "127.0.0.1", "--no-extensions", "--resume", seedFile],
+		{
+			stdout: "pipe",
+			stderr: "pipe",
+			env: { ...process.env, HOME: isolatedHome, PI_NO_TITLE: "1" },
+		},
+	);
+
+	try {
+		const url = await waitForServe(proc);
+		const token = url.match(TOKEN_RE)?.[2] ?? "";
+		const conn = await WireConn.connect(url, token);
+		// hello 自动推送先消费掉（server_snapshot + session_snapshot）
+		await conn.nextPush("server_snapshot");
+		await conn.nextPush("session_snapshot");
+
+		// ── B1：get_state env 摘要（repos/branch/activeAgentCount；pendingCronCount 缺省不崩）──
+		const stateResp = await conn.request({ type: "get_state" });
+		expect(stateResp.ok).toBe(true);
+		const env = (stateResp.result as { env?: Record<string, unknown> }).env;
+		expect(env).toBeDefined();
+		expect(typeof env?.repos).toBe("string");
+		expect((env?.repos as string).length).toBeGreaterThan(0);
+		// branch 字段必须在（非 git 环境可为 null，但键不缺失）
+		expect(Object.hasOwn(env ?? {}, "branch")).toBe(true);
+		expect(env?.activeAgentCount).toBe(1); // 仅 default attached（隔离 HOME 无注册 agent）
+		expect(Object.hasOwn(env ?? {}, "pendingCronCount")).toBe(false); // wire 面无 cron 数据源，省略
+
+		// ── B8：branch 命令（语义对齐 rpc-mode）──
+		const bmResp = await conn.request({ type: "get_branch_messages" });
+		expect(bmResp.ok).toBe(true);
+		const messages = (bmResp.result as { messages: Array<{ entryId: string; text: string }> }).messages;
+		const seed = messages.find(m => m.text.includes("branch e2e seed message"));
+		expect(seed).toBeDefined();
+
+		const branchResp = await conn.request({ type: "branch", entryId: seed?.entryId ?? "" });
+		expect(branchResp.ok).toBe(true);
+		const branchResult = branchResp.result as { text: string; cancelled: boolean };
+		expect(branchResult.cancelled).toBe(false);
+		expect(branchResult.text).toContain("branch e2e seed message");
+
+		// branch 后推权威快照（MUTATING_NO_EVENT）
+		const snap = await conn.nextPush("session_snapshot");
+		expect(snap.event.sessionId).toBe("default");
+		conn.close();
 	} finally {
 		proc.kill();
 		await proc.exited;
