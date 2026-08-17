@@ -1,9 +1,10 @@
-import { Folder } from "lucide-react";
+import { Folder, Menu } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { QueueCard } from "../../components/QueueCard";
+import { DevicePreview } from "../../layout/DevicePreview";
 import { useSessionStore } from "../../state/session-store";
-import { getUiStore } from "../../state/ui-store";
+import { getUiStore, useUiState } from "../../state/ui-store";
 import { useSession } from "../../state/use-session";
 import { ComposerBar } from "./ComposerBar";
 import { RightPanel } from "./RightPanel";
@@ -17,6 +18,7 @@ import { Transcript } from "./Transcript";
 export function WorkspaceView({ compact = false }: { compact?: boolean }): React.JSX.Element {
 	const view = useSession();
 	const store = useSessionStore();
+	const ui = useUiState();
 	const [searchParams] = useSearchParams();
 	const initialQuery = searchParams.get("q") ?? "";
 	const [draftSeed] = useState(initialQuery);
@@ -44,6 +46,14 @@ export function WorkspaceView({ compact = false }: { compact?: boolean }): React
 					</div>
 				)}
 				<header className="flex h-12 shrink-0 items-center gap-3 border-b border-hairline bg-surface px-4.5">
+					<button
+						type="button"
+						className="cbtn shrink-0 lg:hidden"
+						onClick={() => getUiStore().setMobileNav(!ui.mobileNavOpen)}
+						aria-label="切换会话栏"
+					>
+						<Menu size={16} strokeWidth={1.5} />
+					</button>
 					<span className="flex items-center gap-1.5 text-[12px] text-success">
 						<span className={`conn-dot ${view.reconnecting ? "reconnecting" : ""}`} />
 						{view.reconnecting
@@ -76,6 +86,7 @@ export function WorkspaceView({ compact = false }: { compact?: boolean }): React
 				<ComposerBar autoFocusDraft={draftSeed} />
 			</div>
 			{!compact && <RightPanel />}
+			{!compact && <DevicePreview />}
 		</div>
 	);
 }

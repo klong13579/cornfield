@@ -2,6 +2,7 @@ import { Plus, Search, Star } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { SessionRecordSummary } from "../../lib/records";
 import { useSessionStore } from "../../state/session-store";
+import { useUiState } from "../../state/ui-store";
 import { useSession } from "../../state/use-session";
 
 /**
@@ -51,6 +52,7 @@ function isCurrent(row: Row): row is CurrentRow {
 export function SessionSidebar(): React.JSX.Element {
 	const view = useSession();
 	const store = useSessionStore();
+	const ui = useUiState();
 	const [source, setSource] = useState<SourceId>("webui");
 	const [query, setQuery] = useState("");
 	const [sessions, setSessions] = useState<SessionRecordSummary[]>([]);
@@ -120,7 +122,9 @@ export function SessionSidebar(): React.JSX.Element {
 	}, [rows, agentWorkspace]);
 
 	return (
-		<aside className="flex w-[300px] shrink-0 flex-col border-r border-hairline bg-surface">
+		<aside
+			className={`fixed inset-y-0 left-0 z-50 flex w-[300px] flex-col border-r border-hairline bg-surface transition-transform duration-200 lg:static lg:z-auto lg:shrink-0 lg:translate-x-0 ${ui.mobileNavOpen ? "translate-x-0" : "-translate-x-full"}`}
+		>
 			{/* 新会话 */}
 			<div className="px-3 pt-3 pb-2">
 				<button

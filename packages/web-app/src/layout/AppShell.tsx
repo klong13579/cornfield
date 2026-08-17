@@ -2,7 +2,6 @@ import { useLocation } from "react-router-dom";
 import { findPageMeta } from "../router";
 import { AppSidebar } from "./AppSidebar";
 import { AppTopbar } from "./AppTopbar";
-import { DevicePreview } from "./DevicePreview";
 import { PanelHost } from "./PanelHost";
 
 /**
@@ -22,7 +21,6 @@ export function AppShell(): React.JSX.Element {
 					<PanelHost />
 				</main>
 			</div>
-			<DevicePreview />
 		</div>
 	);
 }

@@ -1,5 +1,6 @@
 import { FolderOpen, Image } from "lucide-react";
 import { useState } from "react";
+import { useUiState } from "../../state/ui-store";
 import { useSession } from "../../state/use-session";
 import { FileExplorer } from "./FileExplorer";
 
@@ -20,11 +21,14 @@ const TABS: { id: TabId; label: string }[] = [
 
 export function RightPanel(): React.JSX.Element {
 	const view = useSession();
+	const ui = useUiState();
 	const [tab, setTab] = useState<TabId>("files");
 	const agentId = view.sessionId || view.agents[0]?.id;
 
 	return (
-		<aside className="flex w-[300px] shrink-0 flex-col border-l border-hairline bg-surface">
+		<aside
+			className={`fixed inset-y-0 right-0 z-50 flex w-[300px] flex-col border-l border-hairline bg-surface transition-transform duration-200 lg:static lg:z-auto lg:shrink-0 lg:translate-x-0 ${ui.mobileNavOpen ? "translate-x-0" : "translate-x-full"}`}
+		>
 			{/* 双 tab */}
 			<div className="flex shrink-0 border-b border-hairline px-3 pt-2">
 				{TABS.map(t => (

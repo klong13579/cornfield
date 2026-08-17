@@ -10,6 +10,8 @@ export interface UiState {
 	phonePreviewOpen: boolean;
 	/** 草稿保留开关（设置页真控制；关掉后 setDraft 不再写 localStorage）。 */
 	keepDraft: boolean;
+	/** 移动端左侧会话栏/右栏抽屉开关（<lg 断点）。 */
+	mobileNavOpen: boolean;
 }
 
 const DRAFT_KEY = "omp.workspace.draft";
@@ -28,6 +30,7 @@ class UiStore {
 		draft: loadString(DRAFT_KEY),
 		phonePreviewOpen: false,
 		keepDraft: loadString(KEEPDRAFT_KEY) !== "0",
+		mobileNavOpen: false,
 	};
 	#listeners = new Set<() => void>();
 
@@ -61,6 +64,10 @@ class UiStore {
 
 	setPhonePreview(open: boolean): void {
 		this.#mutate({ phonePreviewOpen: open });
+	}
+
+	setMobileNav(open: boolean): void {
+		this.#mutate({ mobileNavOpen: open });
 	}
 
 	#mutate(patch: Partial<UiState>): void {

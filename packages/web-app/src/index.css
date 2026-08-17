@@ -5,23 +5,24 @@
  * token 一一对应 mock CSS 变量：canvas/surface/ink 三级、hairline 分隔、单色 accent、语义色克制。
  */
 @theme {
-	--color-canvas: #f7f7f8;
+	--color-canvas: #fafafa;
 	--color-surface: #ffffff;
-	--color-surface-2: #f0f0f2;
-	--color-surface-3: #e6e6e9;
-	--color-hairline: rgba(24, 24, 27, 0.09);
-	--color-hairline-strong: rgba(24, 24, 27, 0.18);
+	--color-surface-2: #f4f4f5;
+	--color-surface-3: #e4e4e7;
+	--color-hairline: rgba(24, 24, 27, 0.16);
+	--color-hairline-strong: #e4e4e7;
 	--color-ink: #18181b;
-	--color-ink-muted: rgba(24, 24, 27, 0.66);
+	--color-ink-muted: #52525b;
 	--color-ink-subtle: rgba(24, 24, 27, 0.5);
 	--color-ink-faint: rgba(24, 24, 27, 0.34);
 	--color-accent: #18181b;
-	--color-accent-hover: #3a3a3f;
-	--color-accent-dim: rgba(24, 24, 27, 0.08);
-	--color-on-accent: #fafafa;
+	--color-accent-hover: #3f3f46;
+	--color-accent-dim: rgba(24, 24, 27, 0.07);
+	--color-on-accent: #ffffff;
 	--color-success: #189a5c;
 	--color-warning: #b97c1e;
 	--color-danger: #d64545;
+	--color-info: #0288a8;
 	--color-user-bg: #ececee;
 	--color-dingtalk: #3296fa;
 	--font-sans:
