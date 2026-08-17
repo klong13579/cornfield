@@ -57,7 +57,10 @@ export class SessionStore {
 			phase: this.#phase,
 			retryAttempt: this.#retryAttempt,
 			isCompacting: session.isCompacting,
-			isStreaming: session.isStreaming,
+			// isStreaming 与 phase 联动：phase 归约是事件驱动的权威状态（分布式快照在
+			// #promptInFlightCount 递减前会残留 streaming:true），idle 时强制 false，
+			// 避免前端发送按钮被末段残留快照锁死在「停止」。
+			isStreaming: this.#phase === "idle" ? false : session.isStreaming,
 			autoCompactionEnabled: session.autoCompactionEnabled,
 			autoRetryEnabled: session.autoRetryEnabled,
 		};

@@ -562,6 +562,18 @@ function normalizeProgress(event: unknown): ProgressEventDto | null {
 	if (!event || typeof event !== "object") return null;
 	const raw = event as Record<string, unknown>;
 
+	// 生命周期事件（turn/agent 起止）：serve 白名单已含，前端需透传让 store 归零 isStreaming/相位
+	switch (raw.type) {
+		case "turn_start":
+			return { type: "turn_start" };
+		case "turn_end":
+			return { type: "turn_end" };
+		case "agent_start":
+			return { type: "agent_start" };
+		case "agent_end":
+			return { type: "agent_end" };
+	}
+
 	// 消息增量（thinking/text/toolcall delta）
 	if (raw.type === "message_update") {
 		const a = raw.assistantEvent as { type?: string; contentIndex?: number; delta?: string } | undefined;
@@ -607,6 +619,8 @@ function normalizeProgress(event: unknown): ProgressEventDto | null {
 	return null;
 }
 
+/** 生命周期事件（turn/agent 起止）——透传给 store 的 #applyProgress 以归零 isStreaming/相位。 */
+const LIFECYCLE_EVENTS = new Set(["turn_start", "turn_end", "agent_start", "agent_end"]);
 /** serve get_available_models 返回的 Model 形状（pi-ai Model 的子集映射）。 */
 interface ServeModelLike {
 	id: string;

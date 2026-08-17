@@ -45,6 +45,10 @@ const PROGRESS_EVENT_TYPES = new Set([
 	"tool_execution_start",
 	"tool_execution_update",
 	"tool_execution_end",
+	"turn_start",
+	"turn_end",
+	"agent_start",
+	"agent_end",
 ]);
 
 /**
