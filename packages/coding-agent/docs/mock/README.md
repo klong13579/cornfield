@@ -2,6 +2,8 @@
 
 > 产出日期：2026-08-16 · V3 重设计：2026-08-17
 > 设计依据：`design-brief.md` · `multidevice-host.md` · `wire-types.ts` · `multidevice-ui.html`
+> Skill 管理方案：`skill-management.md`（Agent 详情 Skills tab 增强 / Skills 市场页 / 技能组）
+> 开发计划：`DEV-PLAN.md`（阶段 1-6：pi-wire/pi-client → 命令面补全 → Web 壳 → 多 Agent → 记录/语音 → 移动端）
 > V3 方法：参考 `impeccable`（pbakaus）设计词汇与 `awesome-design-md`（Linear / Raycast）设计系统规范
 
 ---

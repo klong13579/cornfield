@@ -48,7 +48,7 @@ OMP 前端
 ### FR-2 Agent 管理（列表 + 详情）
 - **Agent 列表**：卡片网格（名称/角色/模型/状态/最近活跃/技能数/定时任务数）；筛选（全部/运行中/空闲/已停用）+ 搜索；快捷操作（进入会话/详情/暂停/启用）
 - **Agent 详情**（四个 tab）：
-  - **Skills 管理**：技能列表、启用/停用 toggle、技能描述/版本
+  - **Skills 管理**：技能列表、启用/停用 toggle、技能描述/版本（详见 `skill-management.md`：来源/版本/搜索/更新 dot 为 P3+ 增强，Skills 市场页 `/skills` 为远期插队项）
   - **定时任务管理（cron）**：cron 列表、新增/暂停/删除/立即运行、最近运行记录（成功✓/失败✗）、日志入口
   - **模型配置**：provider/model/thinking 选择、token 用量与费用
   - **工具开关**：按类别 toggle（read/write/bash/search/lsp/python/…）
@@ -123,15 +123,24 @@ OMP 前端
 4. 思考/推理不默认展开（折叠面板，按需）
 5. 视觉系统：深色三层背景 + 单一 accent（#5b8cff）+ 语义色克制；类型层级 11-24px；8px 间距系统；130-150ms 过渡（V3 token 表）
 
-## 7. 里程碑与验收
+## 7. 里程碑与验收（2026-08-17 review 后修订）
 
-| 里程碑 | 内容 | 验收 |
+> 修订原则：**按「命令面闭环」划分，而非按页面划分**。页面是视觉稿，命令是落地的开关——
+> 接口没补，页面就是死的。P1 已实测 wire-server 仅实现 10/29 条命令（prompt/steer/follow_up/abort/get_snapshot/get_state/set_thinking_level 真实现；subscribe/unsubscribe/get_available_models 为 stub），
+> 其余 19 条 not_implemented。多 Agent（switch_session）为架构级缺口，不是接线能补。
+
+| 里程碑 | 范围 | 验收 |
 |---|---|---|
-| M1 | Home + 会话工作台（含 orbs 动效、内容预览）| 浏览器跑通 mock，可交互 |
-| M2 | Agent 管理（skills/cron/钉钉建模）+ 设置 | 建/停 cron、技能开关、画像展示 |
-| M3 | 会话记录回放 + Voice（含 Jarvis 模式）| 回放与语音闭环 |
-| M4 | 移动端 + 手机预览联调 | 375px 视口可用 |
-| M5 | 接入真实 pi-client + Electron/Capacitor 壳 | 真实 serve 端到端 |
+| **P1（已完成）** | `omp serve` 单会话 WS + 权威快照/progress + 10 条核心命令 | ws 连接建立，hello 握手，prompt 消息流式回显 |
+| **P2 · 工作台闭环** | 补齐 workspace 命令面：`set_model / cycle_model / compact / set_todos / set_host_tools / set_auto_compaction / set_auto_retry / abort_retry / abort_and_prompt / new_session / set_session_name / get_last_assistant_text`（12 条）；**pi-client 封装前置**（前端不裸连 WS 帧）；前端 Home/会话工作台/Todo/设置（不含钉钉） | 工作台可切换模型并即时生效、compact 生效、Todo 可写、设置行为开关可调；TUI 与 Web 同会话互操作无状态漂移 |
+| **P3 · 多 Agent 平台** | 多会话架构（server_snapshot 多 Agent + `switch_session` + 每 Agent 独立 session/agentDir）；agent 列表/详情真实读写（skills/cron/模型/工具）；模型市场；钉钉集成命令（AppKey/Secret/绑定 Agent/用户画像） | 一个 serve 管 N 个 AgentSession，列表/详情操作真实落盘；钉钉配置状态真实回显 |
+| **P4 · 记录与语音** | `get_messages / get_session_stats / get_branch_messages / branch` + 会话记录/回放页 + Voice/Jarvis（录音球 + 唤醒 + 播报闭环） | 回放从真实 session JSONL 拉取消息时间线；语音转文字 → prompt → 播报全链路 |
+| **P5 · 移动端 + 壳** | 响应式裁剪（浮层面板/快捷条/折叠工具卡）+ Electron/Capacitor/PWA 壳 | 375px 视口可用，与桌面同协议同数据 |
+
+**风险注记**：
+- P3 多会话架构是最大风险点，建议 P2 期间先做 server 侧多 Agent POC（1 个 serve 管 N 个 AgentSession），再排前端
+- 扩展市场/权限审批两页按业务优先级可插入任意里程碑，不与 P 编号死绑
+- pi-client 不提前到 P2 会导致 P3/P4 前端返工，此为关键路径先后顺序
 
 ## 8. 待确认
 
