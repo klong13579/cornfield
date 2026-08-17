@@ -165,7 +165,7 @@ export function PlaybackView(): React.JSX.Element {
 										<div className="avatar assistant shrink-0">π</div>
 										<div className="min-w-0 flex-1">
 											<div className="mb-1 text-[11px] tracking-[0.02em] text-ink-faint">
-												{entry.model ?? "assistant"}
+												{entry.model ?? "—"}
 											</div>
 											{entry.text && (
 												<div className="leading-relaxed text-ink-muted">

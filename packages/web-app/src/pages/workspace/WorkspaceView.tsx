@@ -67,13 +67,8 @@ export function WorkspaceView({ compact = false }: { compact?: boolean }): React
 
 				<Transcript />
 
-				<div className="hidden md:block">
-					<ComposerBar autoFocusDraft={draftSeed} />
-				</div>
-				{/* 移动端（/m 预览）：输入区同样可用 */}
-				<div className="md:hidden">
-					<ComposerBar autoFocusDraft={draftSeed} />
-				</div>
+				{/* 输入区：单一实例（CSS 自适应桌面/移动），避免模型列表/草稿逻辑双份执行 */}
+				<ComposerBar autoFocusDraft={draftSeed} />
 			</div>
 		</div>
 	);
