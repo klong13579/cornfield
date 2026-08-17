@@ -10,6 +10,7 @@
  */
 
 import * as fs from "node:fs/promises";
+import * as os from "node:os";
 import * as path from "node:path";
 import {
 	buildAgentSessionPath,
@@ -53,6 +54,30 @@ import type {
 
 export function buildChannelKey(channelId: string, accountId?: string): string {
 	return accountId ? `${channelId}:${accountId}` : channelId;
+}
+
+/**
+ * Register a gateway account's agentDir in `~/.omp/agent/registry.json` —
+ * but never pollute the real user registry with test-mode temp dirs
+ * (`pi-gw-pipeline-*` / `pi-gw-slash-*` under `os.tmpdir()`).
+ *
+ * Context: integration/e2e tests (repro-inject, test-longtask) boot a real
+ * gateway with `OMP_GATEWAY_TEST_MODE=1` and temp agentDirs; without this
+ * guard their registerAgent() writes clobbered real account paths, which
+ * `omp serve` later reads → agents pointing at vanished temp dirs.
+ */
+async function registerAccountAgent(
+	accountId: string,
+	agentDir: string,
+	log: typeof logger,
+): Promise<void> {
+	const isTestMode = process.env.OMP_GATEWAY_TEST_MODE === "1";
+	const isTempDir = agentDir.startsWith(os.tmpdir());
+	if (isTestMode && isTempDir) {
+		log.debug("Skipping registerAgent for test-mode temp agentDir", { accountId, agentDir });
+		return;
+	}
+	await registerAgent(accountId, agentDir);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -576,7 +601,7 @@ export class Gateway {
 				// agentDirs (mirrors `omp agent init`). Non-fatal: a failure here only
 				// affects list visibility, not gateway operation.
 				try {
-					await registerAgent(accountId, agentDir);
+					await registerAccountAgent(accountId, agentDir, logger);
 				} catch (err) {
 					logger.warn("Failed to register agentDir", { accountId, agentDir, error: String(err) });
 				}
@@ -649,7 +674,7 @@ export class Gateway {
 		// agentDirs (mirrors `omp agent init`). Non-fatal: a failure here only
 		// affects list visibility, not gateway operation.
 		try {
-			await registerAgent(accountId, agentDir);
+			await registerAccountAgent(accountId, agentDir, logger);
 		} catch (err) {
 			logger.warn("Failed to register agentDir", { accountId, agentDir, error: String(err) });
 		}
