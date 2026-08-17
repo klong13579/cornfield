@@ -66,11 +66,7 @@ export function buildChannelKey(channelId: string, accountId?: string): string {
  * guard their registerAgent() writes clobbered real account paths, which
  * `omp serve` later reads → agents pointing at vanished temp dirs.
  */
-async function registerAccountAgent(
-	accountId: string,
-	agentDir: string,
-	log: typeof logger,
-): Promise<void> {
+async function registerAccountAgent(accountId: string, agentDir: string, log: typeof logger): Promise<void> {
 	const isTestMode = process.env.OMP_GATEWAY_TEST_MODE === "1";
 	const isTempDir = agentDir.startsWith(os.tmpdir());
 	if (isTestMode && isTempDir) {

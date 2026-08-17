@@ -30,7 +30,10 @@ export default class Serve extends Command {
 	static flags = {
 		port: Flags.integer({ description: "WS server port", default: 7891 }),
 		host: Flags.string({ description: "Bind address", default: "127.0.0.1" }),
-		token: Flags.string({ description: "Auth token; empty = local no-auth (default, binds 127.0.0.1 only); pass a value to enable handshake auth" }),
+		token: Flags.string({
+			description:
+				"Auth token; empty = local no-auth (default, binds 127.0.0.1 only); pass a value to enable handshake auth",
+		}),
 		model: Flags.string({ description: "Model to use (fuzzy match); default narwal-plan/deepseek-v4-flash" }),
 		thinking: Flags.string({ description: "Initial thinking level" }),
 		resume: Flags.string({ description: "Resume session (ID prefix or path)" }),
