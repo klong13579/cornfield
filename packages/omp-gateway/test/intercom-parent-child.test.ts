@@ -22,6 +22,7 @@
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
+import net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
 import { IntercomClient } from "../../coding-agent/src/intercom-extension/broker/client";
@@ -143,7 +144,7 @@ describe("intercom parent-child broker edge", () => {
 		}
 	});
 
-		test("message from parent to child carries no parentId on sender (peer-to-peer rather than parent-forced)", async () => {
+	test("message from parent to child carries no parentId on sender (peer-to-peer rather than parent-forced)", async () => {
 		const received: Array<{ from: { id: string; parentId?: string }; text: string }> = [];
 		const childOf = new IntercomClient();
 		try {
@@ -202,6 +203,50 @@ describe("intercom parent-child broker edge", () => {
 			expect(stat.isSocket()).toBe(true);
 		} finally {
 			reclaimed.stop();
+		}
+	});
+
+	test("socket file deleted under a live broker is rebound by the watchdog", async () => {
+		// External deletion of the socket FILE orphanes the listener (new
+		// clients get ENOENT) — the exact production incident. The broker's
+		// socket watchdog must rebind the path and accept new clients again.
+		// The client libs resolve the broker path from PI_CODING_AGENT_DIR, so
+		// this test probes the independent watchdog broker with a raw socket.
+		const watchDir = path.join(runtimeDir, "intercom-watch");
+		await fs.mkdir(watchDir, { recursive: true });
+		const watchPath = path.join(watchDir, "broker.sock");
+		const watched = new IntercomBroker({
+			intercomDir: watchDir,
+			listenTarget: watchPath,
+			socketWatchIntervalMs: 200,
+		});
+		await watched.start();
+
+		const rawConnect = () =>
+			new Promise<string>(resolve => {
+				const socket = net.connect(watchPath);
+				socket.once("connect", () => resolve("ok"));
+				socket.once("error", err => resolve((err as NodeJS.ErrnoException).code ?? "err"));
+			});
+		try {
+			expect(await rawConnect()).toBe("ok");
+			// External actor deletes the socket file while the broker lives.
+			await fs.unlink(watchPath);
+			expect(await rawConnect()).toBe("ENOENT");
+
+			// The watchdog rebinds within a few intervals; the path serves again.
+			const deadline = Date.now() + 5_000;
+			let served = false;
+			while (Date.now() < deadline) {
+				if ((await rawConnect()) === "ok") {
+					served = true;
+					break;
+				}
+				await Bun.sleep(100);
+			}
+			expect(served).toBe(true);
+		} finally {
+			watched.stop();
 		}
 	});
 });

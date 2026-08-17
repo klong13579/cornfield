@@ -1,7 +1,7 @@
 import * as path from "node:path";
 import { isEnoent, logger } from "@oh-my-pi/pi-utils";
 import { randomUUID } from "crypto";
-import { unlinkSync, writeFileSync } from "fs";
+import { statSync, unlinkSync, writeFileSync } from "fs";
 import net from "net";
 import { getAskTimeoutMs } from "./config";
 import { sameCwd } from "./cwd";
@@ -130,12 +130,19 @@ export class IntercomBroker {
 	private nextOwnerOrder = 1;
 	private extensionStateManager: ExtensionStateManager;
 	private readonly listenTarget: BrokerConnectTarget;
+	private readonly socketWatchIntervalMs: number;
+	#socketWatchTimer: NodeJS.Timeout | null = null;
+	#stopped = false;
+	#rebuildingSocket = false;
 
-	constructor(options: { intercomDir?: string; listenTarget?: BrokerConnectTarget } = {}) {
+	constructor(
+		options: { intercomDir?: string; listenTarget?: BrokerConnectTarget; socketWatchIntervalMs?: number } = {},
+	) {
 		// The runtime dir defaults to the module-level intercom dir, but tests
 		// inject an isolated one so the broker never touches ~/.omp/intercom.
 		const runtimeDir = options.intercomDir ?? INTERCOM_DIR;
 		this.listenTarget = options.listenTarget ?? getBrokerListenTarget();
+		this.socketWatchIntervalMs = options.socketWatchIntervalMs ?? 15_000;
 		// The socket must live in an existing directory: ensure the listen
 		// target's own dir (when it is a unix socket path) so hot-swapping
 		// PI_CODING_AGENT_DIR mid-process still works, then the runtime dir
@@ -150,6 +157,81 @@ export class IntercomBroker {
 		// an unconditional unlink here would delete a live broker's socket file
 		// (its listener keeps running but new clients get ENOENT).
 		this.server = net.createServer(this.handleConnection.bind(this));
+	}
+
+	/**
+	 * Watchdog for unix-socket targets: if an external process deletes our
+	 * socket FILE (the listener keeps running but new connections get ENOENT —
+	 * the incident where an old broker unlinked the production socket), rebind
+	 * the path: close, probe (never steal from a live broker), unlink a stale
+	 * file, listen again.
+	 */
+	#startSocketWatch(): void {
+		if (typeof this.listenTarget !== "string" || process.platform === "win32") {
+			return;
+		}
+		this.#stopSocketWatch();
+		this.#socketWatchTimer = setInterval(() => {
+			void this.#checkSocketHealth();
+		}, this.socketWatchIntervalMs);
+		this.#socketWatchTimer.unref?.();
+	}
+
+	#stopSocketWatch(): void {
+		if (this.#socketWatchTimer) {
+			clearInterval(this.#socketWatchTimer);
+			this.#socketWatchTimer = null;
+		}
+	}
+
+	async #checkSocketHealth(): Promise<void> {
+		if (this.#stopped || this.#rebuildingSocket || typeof this.listenTarget !== "string") {
+			return;
+		}
+		const socketPath = this.listenTarget;
+		let stat;
+		try {
+			stat = statSync(socketPath);
+		} catch (err) {
+			if (!isEnoent(err)) return; // transient? leave it; next tick retries
+		}
+		if (stat && stat.isSocket()) {
+			return;
+		}
+		// Socket file is missing or not a socket — external deletion.
+		this.#rebuildingSocket = true;
+		logger.warn("Intercom broker socket file missing; rebinding", { socketPath });
+		try {
+			await new Promise<void>(resolveClose => this.server.close(() => resolveClose()));
+			// No client can be connected while the server is closed; a transient
+			// probe may be nobody → unlink stale file → rebind.
+			const live = await probeBrokerSocket(socketPath);
+			if (live) {
+				logger.warn("Intercom broker socket occupied by another broker; standing down watchdog", { socketPath });
+				return;
+			}
+			try {
+				unlinkSync(socketPath);
+			} catch (err) {
+				if (!isEnoent(err)) throw err;
+			}
+			await new Promise<void>((resolveListen, rejectListen) => {
+				this.server.once("error", rejectListen);
+				this.server.listen(socketPath, () => {
+					this.server.off("error", rejectListen);
+					restrictIntercomRuntimeFile(socketPath);
+					resolveListen();
+				});
+			});
+			logger.info("Intercom broker socket rebound", { socketPath });
+		} catch (err) {
+			logger.error("Intercom broker socket rebind failed", {
+				socketPath,
+				error: err instanceof Error ? err.message : String(err),
+			});
+		} finally {
+			this.#rebuildingSocket = false;
+		}
 	}
 
 	start(): Promise<void> {
@@ -178,6 +260,7 @@ export class IntercomBroker {
 							? this.listenTarget
 							: `${this.listenTarget.host}:${this.listenTarget.port}`,
 				});
+				this.#startSocketWatch();
 				resolveListen();
 			};
 			const onListenError = (err: Error) => {
@@ -1497,6 +1580,8 @@ export class IntercomBroker {
 
 	/** Stop the broker: disconnect all sessions, remove runtime files, close the server. */
 	stop(): void {
+		this.#stopped = true;
+		this.#stopSocketWatch();
 		logger.info("Intercom broker stopping");
 
 		for (const session of this.sessions.values()) {
