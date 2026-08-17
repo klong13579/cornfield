@@ -368,6 +368,8 @@ button {
 	border-top: 1px solid var(--color-hairline);
 	white-space: pre-wrap;
 	letter-spacing: 0;
+	max-height: 220px;
+	overflow-y: auto;
 }
 .toolcard.error {
 	border-color: color-mix(in srgb, var(--color-danger) 40%, transparent);

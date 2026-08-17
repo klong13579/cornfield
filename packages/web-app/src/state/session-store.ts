@@ -6,6 +6,7 @@ import type {
 	HostToolDefinitionDto,
 	ImageContentDto,
 	MessageContentDto,
+	MessageDto,
 	ModelInfoDto,
 	ProgressEventDto,
 	SessionPhaseDto,
@@ -332,7 +333,7 @@ class SessionStore {
 			thinkingLevel: snapshot.thinkingLevel ?? null,
 			sessionId: snapshot.sessionId,
 			sessionName: snapshot.sessionName,
-			messages: snapshot.messages.map(m => this.#toMessage(m)),
+			messages: mergeToolResults(snapshot.messages).map(m => this.#toMessage(m)),
 			isStreaming: snapshot.isStreaming || snapshot.phase === "streaming",
 			activeToolNames: [...snapshot.activeToolNames],
 			queued: snapshot.queuedMessageCount,
@@ -442,7 +443,7 @@ class SessionStore {
 
 	#toMessage(msg: {
 		id: string;
-		role: "user" | "assistant" | "developer";
+		role: "user" | "assistant" | "developer" | "toolResult";
 		model?: string;
 		content: MessageContentDto[];
 		errorMessage?: string;
@@ -545,6 +546,40 @@ class SessionStore {
 			listener();
 		}
 	}
+}
+
+/**
+ * 把快照中独立的 toolResult 顶层消息（role:"toolResult"，content 为 text 全文）挂回对应
+ * toolCallId 的 assistant 消息：serve 快照里工具结果是独立消息，直接渲染会把工具输出全文
+ * 当成一条 assistant 消息铺满屏幕且无 model 标签（显示占位 "assistant"）。
+ * 归并后：独立行不渲染，ToolCard 通过 #toMessage 的 results 读到真实结果。
+ */
+function mergeToolResults(messages: MessageDto[]): MessageDto[] {
+	const resultByCall = new Map<string, Extract<MessageContentDto, { type: "toolResult" }>>();
+	for (const m of messages) {
+		if (m.role !== "toolResult" || !m.toolCallId) continue;
+		resultByCall.set(m.toolCallId, {
+			type: "toolResult",
+			toolCallId: m.toolCallId,
+			isError: m.isError,
+			content: (Array.isArray(m.content) ? m.content : []).filter(
+				(c): c is Extract<MessageContentDto, { type: "text" }> => c.type === "text",
+			),
+		});
+	}
+	if (resultByCall.size === 0) return messages;
+
+	return messages
+		.filter(m => m.role !== "toolResult") // 独立工具结果行不渲染为消息
+		.map(m => {
+			if (m.role !== "assistant" || !Array.isArray(m.content)) return m;
+			const attach = m.content
+				.filter((c): c is Extract<MessageContentDto, { type: "toolCall" }> => c.type === "toolCall")
+				.map(c => resultByCall.get(c.id))
+				.filter((r): r is Extract<MessageContentDto, { type: "toolResult" }> => r !== undefined);
+			if (attach.length === 0) return m;
+			return { ...m, content: [...m.content, ...attach] };
+		});
 }
 
 function ensureLive(view: SessionView, prev: SessionView): TranscriptMessage {

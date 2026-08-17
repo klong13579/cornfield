@@ -43,11 +43,15 @@ export type MessageContentDto =
 
 export interface MessageDto {
 	id: string;
-	role: "user" | "assistant" | "developer";
+	role: "user" | "assistant" | "developer" | "toolResult";
 	model?: string;
 	content: MessageContentDto[];
 	/** 助手出错（空 content + errorMessage），UI 渲染 ✗ Error 而不展示为空回复。 */
 	errorMessage?: string;
+	/** 独立 toolResult 消息：关联的 toolCall id（serve 快照/jsonl 顶层字段）。 */
+	toolCallId?: string;
+	/** 独立 toolResult 消息：该工具调用是否报错。 */
+	isError?: boolean;
 }
 
 /** 会话权威快照（对应 SessionSnapshot；context 为可选扩展，真机数据可接 get_session_stats）。 */
