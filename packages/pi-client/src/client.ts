@@ -60,6 +60,10 @@ export interface PiClientOptions {
 		setTimeout: (fn: () => void, ms: number) => ReturnType<typeof setTimeout>;
 		clearTimeout: (handle: ReturnType<typeof setTimeout>) => void;
 	};
+	/** 心跳间隔 (ms)。>0 启用；默认 30_000。0 = 关闭。 */
+	heartbeatIntervalMs?: number;
+	/** 发 ping 后等待 pong 的超时 (ms)。超时视为死链——主动 close 触发重连。默认 60_000。 */
+	heartbeatTimeoutMs?: number;
 }
 
 type PendingRequest = {
@@ -80,8 +84,8 @@ type PendingRequest = {
  *   - session_snapshot 缓存（权威源），progress 仅通知不归约
  *   - 断线时在途请求立即拒绝 (PiDisconnectedError)——fail fast
  *
- * 设计外部边界：不自动发送商业命令，不代入 hello 外的 frame；不内置长连接 heartbeat
- * （服务器层。 P3 可加上）。
+ * P3：心跳——open 状态下每 heartbeatIntervalMs 发 {type:"ping"}，pong 超过
+ * heartbeatTimeoutMs 未回则主动 close 触发重连（弱网中间代理静默断连的克星）。
  */
 export class PiClient {
 	readonly #url: string;
@@ -95,6 +99,11 @@ export class PiClient {
 	readonly #autoReconnect: boolean;
 	readonly #nextRequestId: () => string;
 	readonly #clock: NonNullable<PiClientOptions["clock"]>;
+	readonly #heartbeatIntervalMs: number;
+	readonly #heartbeatTimeoutMs: number;
+	#heartbeatTimer?: ReturnType<typeof setTimeout>;
+	#pongTimer?: ReturnType<typeof setTimeout>;
+	#lastPingTs?: number;
 
 	#ws?: PiWebSocketLike;
 	#status: PiConnectionStatus = "disconnected";
@@ -139,6 +148,8 @@ export class PiClient {
 				clearTimeout(h);
 			},
 		};
+		this.#heartbeatIntervalMs = options.heartbeatIntervalMs ?? 30_000;
+		this.#heartbeatTimeoutMs = options.heartbeatTimeoutMs ?? 60_000;
 	}
 
 	// ── 公开 API ──
@@ -214,6 +225,7 @@ export class PiClient {
 	/** 手动关闭，不重连。在途请求全部 reject。 */
 	close(reason = "client closed"): void {
 		this.#closedByUser = true;
+		this.#stopHeartbeat();
 		if (this.#reconnectTimer) {
 			this.#clock.clearTimeout(this.#reconnectTimer);
 			this.#reconnectTimer = undefined;
@@ -287,6 +299,70 @@ export class PiClient {
 		});
 	}
 
+	// ── 心跳 ──
+
+	#startHeartbeat(): void {
+		this.#stopHeartbeat();
+		if (this.#heartbeatIntervalMs <= 0) return;
+		this.#scheduleNextPing();
+	}
+
+	#stopHeartbeat(): void {
+		if (this.#heartbeatTimer) {
+			this.#clock.clearTimeout(this.#heartbeatTimer);
+			this.#heartbeatTimer = undefined;
+		}
+		if (this.#pongTimer) {
+			this.#clock.clearTimeout(this.#pongTimer);
+			this.#pongTimer = undefined;
+		}
+		this.#lastPingTs = undefined;
+	}
+
+	#scheduleNextPing(): void {
+		this.#heartbeatTimer = this.#clock.setTimeout(() => {
+			this.#sendPing();
+		}, this.#heartbeatIntervalMs);
+	}
+
+	#sendPing(): void {
+		const ws = this.#ws;
+		if (this.#status !== "open" || !ws) return;
+		this.#lastPingTs = Date.now();
+		try {
+			ws.send(JSON.stringify({ type: "ping", ts: this.#lastPingTs }));
+		} catch {
+			// send 失败说明链路已坏——交给 onClose 走重连
+			return;
+		}
+		// pong 超时：主动断链，触发 handleClose → 重连
+		this.#pongTimer = this.#clock.setTimeout(() => {
+			if (this.#status !== "open") return;
+			this.#emit({
+				type: "error",
+				error: new Error(`heartbeat: no pong within ${this.#heartbeatTimeoutMs}ms, forcing reconnect`),
+			});
+			try {
+				this.#ws?.close();
+			} catch {
+				// 有些实现 close 会抛
+			}
+			// 半开连接可能收不到 close 事件——直接走断链清理路径
+			this.#handleClose();
+		}, this.#heartbeatTimeoutMs);
+		// 收到 pong 后才排下一个 ping（串行心跳，避免堆积）
+	}
+
+	#onPong(): void {
+		if (this.#pongTimer) {
+			this.#clock.clearTimeout(this.#pongTimer);
+			this.#pongTimer = undefined;
+		}
+		if (this.#status === "open") {
+			this.#scheduleNextPing();
+		}
+	}
+
 	#handleServerFrame(
 		raw: string | Buffer | ArrayBuffer,
 		resolveOpen: () => void,
@@ -308,6 +384,7 @@ export class PiClient {
 			case "hello_ack": {
 				this.#reconnectAttempt = 0;
 				this.#setStatus("open");
+				this.#startHeartbeat();
 				this.#emit({ type: "hello_ack", connectionId: frame.connectionId, protocolVersion: frame.protocolVersion });
 				resolveOpen();
 				return;
@@ -335,6 +412,10 @@ export class PiClient {
 				}
 				return;
 			}
+			case "pong": {
+				this.#onPong();
+				return;
+			}
 			case "push": {
 				const event = frame.event;
 				if (event.type === "session_snapshot") {
@@ -350,6 +431,7 @@ export class PiClient {
 	}
 
 	#handleClose(): void {
+		this.#stopHeartbeat();
 		const wasOpen = this.#status === "open" || this.#status === "handshaking";
 		this.#ws = undefined;
 		this.#rejectAllPending(new PiDisconnectedError("WebSocket closed"));

@@ -420,3 +420,103 @@ describe("PiClient 默认 clock browser this-binding 回归", () => {
 		}
 	});
 });
+
+// ── 心跳（P3）：30s ping / 60s pong 超时 / 断链重连 ──
+describe("PiClient heartbeat", () => {
+	async function openClient(overrides: Partial<PiClientOptions> = {}) {
+		const clock = new FakeClock();
+		let counter = 0;
+		const client = new PiClient({
+			url: "ws://test/ws",
+			token: "tkn",
+			webSocketCtor: FakeWebSocketCtor,
+			clock: clock.api,
+			nextRequestId: () => `req_${++counter}`,
+			heartbeatIntervalMs: 30_000,
+			heartbeatTimeoutMs: 60_000,
+			reconnectBaseMs: 100,
+			...overrides,
+		});
+		const p = client.connect();
+		await tick();
+		const ws = FakeWebSocket.all.at(-1) as FakeWebSocket;
+		ws.open();
+		await tick();
+		ws.recv(JSON.stringify({ type: "hello_ack", connectionId: "c", protocolVersion: MULTIDEVICE_PROTOCOL_VERSION }));
+		await p;
+		return { client, clock, ws };
+	}
+
+	test("正常：每 30s 发 ping，收到 pong 后排下一个 ping", async () => {
+		const { client, clock, ws } = await openClient();
+		const sentBefore = ws.sent.length;
+
+		clock.advance(30_000);
+		await tick();
+		const ping = JSON.parse(ws.sent.at(-1) as string);
+		expect(ping.type).toBe("ping");
+		expect(typeof ping.ts).toBe("number");
+
+		// 未到 60s 前不会做任何事
+		clock.advance(59_999);
+		expect(ws.sent.length).toBe(sentBefore + 1); // 仍只有一个 ping
+
+		// 回 pong → 排下一个 ping（再过 30s 又发）
+		ws.recv(JSON.stringify({ type: "pong", ts: ping.ts }));
+		clock.advance(30_000);
+		await tick();
+		expect(JSON.parse(ws.sent.at(-1) as string).type).toBe("ping");
+		client.close();
+	});
+
+	test("超时：ping 后 60s 无 pong → 主动断链 + 进入重连", async () => {
+		const { client, clock } = await openClient();
+		const errors: Error[] = [];
+		client.subscribe(e => {
+			if (e.type === "error") errors.push(e.error);
+		});
+
+		clock.advance(30_000); // 发 ping
+		await tick();
+		clock.advance(60_000); // pong 永远不来
+		await tick();
+
+		expect(errors.some(e => e.message.includes("no pong"))).toBe(true);
+		expect(client.status).toBe("disconnected");
+		// 重连已排（backoff 100ms 后开新 socket）
+		clock.advance(100);
+		await tick();
+		expect(FakeWebSocket.all.length).toBe(2);
+		client.close();
+	});
+
+	test("重连后恢复：新 socket 上心跳重新起算", async () => {
+		const { client, clock } = await openClient();
+
+		// 第一条链路死于 pong 超时
+		clock.advance(30_000);
+		await tick();
+		clock.advance(60_000);
+		await tick();
+		expect(client.status).toBe("disconnected");
+
+		// 重连
+		clock.advance(100);
+		await tick();
+		const ws2 = FakeWebSocket.all.at(-1) as FakeWebSocket;
+		ws2.open();
+		await tick();
+		ws2.recv(
+			JSON.stringify({ type: "hello_ack", connectionId: "c2", protocolVersion: MULTIDEVICE_PROTOCOL_VERSION }),
+		);
+		await tick();
+		expect(client.status).toBe("open");
+
+		// 新链路：30s 后发 ping（说明心跳重新起算了）
+		clock.advance(30_000);
+		await tick();
+		const ping = JSON.parse(ws2.sent.at(-1) as string);
+		expect(ping.type).toBe("ping");
+		client.close();
+	});
+});
