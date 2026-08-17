@@ -1,23 +1,30 @@
-import { useLocation } from "react-router-dom";
+import { useLocation, useOutlet } from "react-router-dom";
 import { findPanelByPath } from "./panel-registry";
 
 /**
- * PanelHost — 根据当前路由渲染对应的 panel。
- * 从 panelRegistry 中查找匹配当前路径的 panel，渲染其 mount() 返回的组件。
- * 无匹配时渲染空状态。
+ * PanelHost — AppShell 的 panel 渲染宿主。
+ *
+ * - 顶层 panel 路径（如 `/workspace`、`/agents`）→ 从 panelRegistry 精确匹配并渲染 mount() 组件。
+ * - 带参子路由（如 `/agents/:id`、`/records/:id`）→ 回退到 react-router 的 Outlet，
+ *   由 route config 渲染子页面（S2c 会把 AgentDetailView 迁为详情弹层，届时该分支收窄）。
  */
 export function PanelHost(): React.JSX.Element {
 	const { pathname } = useLocation();
+	const outlet = useOutlet();
 
 	const panel = findPanelByPath(pathname);
 	if (!panel) {
-		return (
-			<div className="flex h-full items-center justify-center">
-				<div className="text-center text-[13px] text-ink-faint">未找到 panel：{pathname}</div>
-			</div>
-		);
+		return <>{outlet ?? <NotFound pathname={pathname} />}</>;
 	}
 
 	const PanelComponent = panel.mount();
 	return <PanelComponent />;
+}
+
+function NotFound({ pathname }: { pathname: string }): React.JSX.Element {
+	return (
+		<div className="flex h-full items-center justify-center">
+			<div className="text-center text-[13px] text-ink-faint">未找到 panel：{pathname}</div>
+		</div>
+	);
 }

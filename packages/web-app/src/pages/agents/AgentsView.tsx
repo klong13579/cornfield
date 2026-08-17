@@ -1,8 +1,8 @@
 import { Search, Server, TerminalSquare } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import type { AgentInfoDto } from "../../lib/wire-dto";
 import type { GatewayStatusDto } from "../../lib/pi-client-api";
+import type { AgentInfoDto } from "../../lib/wire-dto";
 import { useSessionStore } from "../../state/session-store";
 import { useSession } from "../../state/use-session";
 
@@ -230,9 +230,7 @@ function AgentCard({
 					<div className="mt-0.5 flex items-center gap-1.5 text-[12px] text-ink-subtle">
 						<span className={`h-2 w-2 rounded-full ${dotClass}`} />
 						{statusLabel}
-						{gatewayBridge && (
-							<span className="text-[11px] text-ink-faint">· gateway {gatewayBridge}</span>
-						)}
+						{gatewayBridge && <span className="text-[11px] text-ink-faint">· gateway {gatewayBridge}</span>}
 					</div>
 				</div>
 			</div>
