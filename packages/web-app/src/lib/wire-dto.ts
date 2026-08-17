@@ -1,0 +1,167 @@
+/**
+ * 前端协议 DTO —— 适配层契约。
+ *
+ * 镜像 `packages/coding-agent/src/server/wire-types.ts`（帧模型）与
+ * `packages/coding-agent/src/session/session-snapshot.ts`（权威快照字段）的语义：
+ * - 权威快照（session_snapshot）：可据此完整重建 UI，行为 `进度不得归约为状态`。
+ * - 进度事件（progress）：仅打字机/delta 提示，跨快照即失效。
+ *
+ * 当 `@oh-my-pi/pi-wire` 抽包完成后，本文件只做 pi-wire 类型 → 前端 DTO 的映射，
+ * 不改动上层组件的消费形态。
+ */
+
+// ── 快照 ──
+
+/** 会话运行阶段（镜像 SessionPhase，枚举化 UI 提示，非权威门控）。 */
+export type SessionPhaseDto = "idle" | "streaming" | "compacting" | "retrying" | "executing_tool";
+
+export type TodoStatusDto = "pending" | "in_progress" | "completed" | "abandoned";
+
+export interface TodoItemDto {
+	content: string;
+	status: TodoStatusDto;
+	notes?: string[];
+}
+
+export interface TodoPhaseDto {
+	name: string;
+	tasks: TodoItemDto[];
+}
+
+export interface ModelDto {
+	id: string;
+	provider?: string;
+	name?: string;
+}
+
+/** 消息内容块（镜像 AgentMessage content 的 thinking/text/toolCall/toolResult）。 */
+export type MessageContentDto =
+	| { type: "thinking"; thinking: string }
+	| { type: "text"; text: string }
+	| { type: "toolCall"; id: string; name: string; arguments?: Record<string, unknown>; intent?: string }
+	| { type: "toolResult"; toolCallId?: string; isError?: boolean; content?: { type: "text"; text: string }[] };
+
+export interface MessageDto {
+	id: string;
+	role: "user" | "assistant" | "developer";
+	model?: string;
+	content: MessageContentDto[];
+}
+
+/** 会话权威快照（对应 SessionSnapshot；context 为可选扩展，mock 提供、真机可能缺失）。 */
+export interface SessionSnapshotDto {
+	seq: number;
+	sessionId: string;
+	sessionName?: string;
+	sessionFile?: string;
+	model?: ModelDto;
+	thinkingLevel?: string;
+	messages: MessageDto[];
+	todoPhases: TodoPhaseDto[];
+	activeToolNames: string[];
+	queuedMessageCount: number;
+	phase: SessionPhaseDto;
+	retryAttempt: number;
+	isCompacting: boolean;
+	isStreaming: boolean;
+	autoCompactionEnabled: boolean;
+	autoRetryEnabled: boolean;
+	scopedModels?: { model: ModelDto; thinkingLevel?: string }[];
+	/** 上下文水位（mock 提供；真机接入后走 get_session_stats）。 */
+	context?: { usedTokens: number; totalTokens: number; lastCompaction?: number | null };
+}
+
+// ── server_snapshot（多 Agent 后的列表）──
+
+export type AgentKind = "coding" | "worker";
+export type AgentStatus = "online" | "busy" | "idle" | "stopped";
+
+export interface AgentInfoDto {
+	id: string;
+	name: string;
+	face: string;
+	workspace: string;
+	kind: AgentKind;
+	status: AgentStatus;
+	lastAction?: string;
+	model?: string;
+	skillsCount?: number;
+	cronCount?: number;
+	dingtalkBound?: boolean;
+}
+
+export interface SessionListEntryDto {
+	id: string;
+	name?: string;
+	sessionFile?: string;
+	active: boolean;
+}
+
+// ── 进度事件（progress，非权威）──
+
+export type ProgressEventDto =
+	| { type: "turn_start" }
+	| { type: "turn_end" }
+	| { type: "agent_start" }
+	| { type: "agent_end" }
+	| { type: "message_update"; assistantEvent: { type: "text_delta"; contentIndex: number; delta: string } }
+	| { type: "message_update"; assistantEvent: { type: "thinking_delta"; contentIndex: number; delta: string } }
+	| { type: "message_update"; assistantEvent: { type: "toolcall_delta"; contentIndex: number; delta: string } }
+	| { type: "thinking_start"; contentIndex: number }
+	| { type: "thinking_end"; contentIndex: number }
+	| {
+			type: "tool_execution_start";
+			toolCallId: string;
+			name: string;
+			arguments?: Record<string, unknown>;
+			intent?: string;
+			startedAt: number;
+	  }
+	| {
+			type: "tool_execution_end";
+			toolCallId: string;
+			isError: boolean;
+			resultText?: string;
+			durationMs?: number;
+	  }
+	| { type: "auto_compaction_start"; reason: string; action: string }
+	| { type: "auto_retry_start"; attempt: number; maxAttempts: number; delayMs: number; errorMessage: string }
+	| { type: "todo_reminder" }
+	| { type: "todo_auto_clear" };
+
+// ── 帧 ──
+
+export type WireServerEventDto =
+	| { type: "server_snapshot"; sessions: SessionListEntryDto[] }
+	| { type: "session_snapshot"; sessionId: string; snapshot: SessionSnapshotDto }
+	| { type: "progress"; sessionId: string; event: ProgressEventDto };
+
+export interface ConnectionInfoDto {
+	connected: boolean;
+	reconnecting?: boolean;
+	reconnectAttempts?: number;
+	connectionId?: string;
+	wsUrl: string;
+	protocolVersion: number;
+}
+
+// ── 模型市场 ──
+
+export interface ModelInfoDto {
+	id: string;
+	provider: string;
+	contextWindow?: string;
+	price?: string;
+	latency?: string;
+	description?: string;
+	supportsThinking: boolean;
+	lastRunAt?: number;
+}
+
+/** 连接后返回（hello_ack 内容 + 环境摘要，Home 用）。 */
+export interface EnvironmentSummaryDto {
+	repos: string;
+	branch: string;
+	activeAgentCount: number;
+	pendingCronCount: number;
+}

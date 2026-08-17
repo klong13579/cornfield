@@ -1,0 +1,470 @@
+import type { PiClient } from "../lib/pi-client-api";
+import type {
+	AgentInfoDto,
+	EnvironmentSummaryDto,
+	MessageContentDto,
+	ModelInfoDto,
+	ProgressEventDto,
+	SessionPhaseDto,
+	SessionSnapshotDto,
+	TodoPhaseDto,
+	WireServerEventDto,
+} from "../lib/wire-dto";
+
+/** 渲染层工具卡状态（三态 + 参数/结果）。 */
+export interface ToolView {
+	id: string;
+	name: string;
+	argsText: string;
+	intent?: string;
+	state: "run" | "done" | "fail";
+	result?: string;
+	durationMs?: number;
+}
+
+/** 渲染层消息（由快照权威内容 + progress 瞬态增量归并而成）。 */
+export interface TranscriptMessage {
+	id: string;
+	role: "user" | "assistant";
+	model?: string;
+	/** thinking 全文（瞬态层流式追加；快照到达后以权威内容覆盖）。 */
+	thinking?: string;
+	thinkingStreaming?: boolean;
+	text?: string;
+	textStreaming?: boolean;
+	tools: ToolView[];
+	done: boolean;
+	error?: string;
+}
+
+/** 会话渲染视图 —— useSession() 的稳定快照。 */
+export interface SessionView {
+	connected: boolean;
+	reconnecting: boolean;
+	connectionId?: string;
+	wsUrl: string;
+	protocolVersion: number;
+	phase: SessionPhaseDto;
+	model: string | null;
+	thinkingLevel: string | null;
+	sessionId: string;
+	sessionName?: string;
+	/** 已落库消息。 */
+	messages: TranscriptMessage[];
+	/** 流式中的在途 assistant 消息（progress 瞬态层，快照到达即被权威替换）。 */
+	live?: TranscriptMessage;
+	isStreaming: boolean;
+	activeToolNames: string[];
+	queued: number;
+	todo: TodoPhaseDto[];
+	context?: { usedTokens: number; totalTokens: number; percent: number; lastCompaction: number | null };
+	flags: { autoCompaction: boolean; autoRetry: boolean };
+	agents: AgentInfoDto[];
+	env: EnvironmentSummaryDto | null;
+}
+
+const EMPTY_PHASE: SessionPhaseDto = "idle";
+
+function cloneView(v: SessionView): SessionView {
+	return {
+		...v,
+		messages: v.messages.map(m => ({ ...m, tools: m.tools.map(t => ({ ...t })) })),
+		live: v.live ? { ...v.live, tools: v.live.tools.map(t => ({ ...t })) } : undefined,
+		todo: v.todo.map(p => ({ ...p, tasks: p.tasks.map(t => ({ ...t })) })),
+	};
+}
+
+/**
+ * SessionStore —— 单例。快照权威（缓存）+ progress 瞬态（打字机）两层：
+ * - session_snapshot 到达 → 缓存更新，瞬态层清空，视图整体重建（权威）
+ * - progress 到达 → 仅作用在瞬态层（视图克隆上增量），绝不移入缓存
+ * 与 wire-types.ts「progress 不得归约为状态」语义一致。
+ */
+class SessionStore {
+	#client!: PiClient;
+	#view: SessionView | null = null;
+	#listeners = new Set<() => void>();
+
+	init(client: PiClient): void {
+		this.#client = client;
+		const unsub = client.subscribe(frame => this.#onFrame(frame));
+		this.#view = this.#buildBaseView();
+		this.#notify();
+		// 生命周期与 store 共存；mock 客户端无额外清理（真机换 pi-client 时这里接断线清理）
+		void unsub;
+	}
+
+	connect(): Promise<void> {
+		return this.#client.connect().then(() => {
+			this.#view = this.#buildBaseView();
+			this.#notify();
+		});
+	}
+
+	getSnapshot(): SessionView {
+		if (!this.#view) {
+			this.#view = this.#buildBaseView();
+		}
+		return this.#view;
+	}
+
+	subscribe(listener: () => void): () => void {
+		this.#listeners.add(listener);
+		return () => this.#listeners.delete(listener);
+	}
+
+	// ── 命令透传 ──
+
+	prompt(text: string): void {
+		void this.#client.prompt(text);
+	}
+
+	abort(): void {
+		void this.#client.abort();
+	}
+
+	compact(): void {
+		void this.#client.compact();
+	}
+
+	newSession(): void {
+		void this.#client.newSession();
+	}
+
+	setModel(modelId: string): void {
+		void this.#client.setModel(modelId);
+	}
+
+	setThinkingLevel(level: string): void {
+		void this.#client.setThinkingLevel(level);
+	}
+
+	setTodos(phases: TodoPhaseDto[]): void {
+		void this.#client.setTodos(phases);
+	}
+
+	setAutoCompaction(enabled: boolean): void {
+		void this.#client.setAutoCompaction(enabled);
+	}
+
+	setAutoRetry(enabled: boolean): void {
+		void this.#client.setAutoRetry(enabled);
+	}
+
+	toggleTodo(phaseName: string, index: number): void {
+		const view = this.getSnapshot();
+		const phases = view.todo.map(p => ({ ...p, tasks: p.tasks.map(t => ({ ...t })) }));
+		const phase = phases.find(p => p.name === phaseName);
+		const task = phase?.tasks[index];
+		if (!phase || !task) return;
+		task.status = task.status === "completed" ? "pending" : "completed";
+		void this.#client.setTodos(phases);
+	}
+
+	addTodo(phaseName: string, content: string): void {
+		const view = this.getSnapshot();
+		const phases = view.todo.map(p => ({ ...p, tasks: p.tasks.map(t => ({ ...t })) }));
+		const trimmed = content.trim();
+		if (!trimmed) return;
+		if (view.todo.some(p => p.name === phaseName)) {
+			const phase = phases.find(p => p.name === phaseName);
+			phase?.tasks.push({ content: trimmed, status: "pending" });
+		} else {
+			phases.push({ name: phaseName, tasks: [{ content: trimmed, status: "pending" }] });
+		}
+		void this.#client.setTodos(phases);
+	}
+
+	removeTodo(phaseName: string, index: number): void {
+		const view = this.getSnapshot();
+		const phases = view.todo.map(p => ({ ...p, tasks: p.tasks.map(t => ({ ...t })) }));
+		const phase = phases.find(p => p.name === phaseName);
+		if (!phase) return;
+		phase.tasks.splice(index, 1);
+		void this.#client.setTodos(phases);
+	}
+
+	/** 拉取模型市场数据（get_available_models）；展示层自行持有。 */
+	fetchModels(): Promise<ModelInfoDto[]> {
+		return this.#client.getAvailableModels();
+	}
+
+	// ── 帧归约 ──
+
+	#onFrame(frame: WireServerEventDto): void {
+		switch (frame.type) {
+			case "session_snapshot":
+				this.#applySnapshot(frame.snapshot);
+				break;
+			case "server_snapshot":
+				this.#view = cloneView(this.getSnapshot());
+				this.#notify();
+				break;
+			case "progress":
+				this.#applyProgress(frame.event);
+				break;
+		}
+	}
+
+	#applySnapshot(snapshot: SessionSnapshotDto): void {
+		const prevLive = this.#view?.live;
+		const base = this.#buildBaseView();
+		const view: SessionView = {
+			...base,
+			phase: snapshot.phase,
+			model: snapshot.model?.id ?? null,
+			thinkingLevel: snapshot.thinkingLevel ?? null,
+			sessionId: snapshot.sessionId,
+			sessionName: snapshot.sessionName,
+			messages: snapshot.messages.map(m => this.#toMessage(m)),
+			isStreaming: snapshot.isStreaming || snapshot.phase === "streaming",
+			activeToolNames: [...snapshot.activeToolNames],
+			queued: snapshot.queuedMessageCount,
+			todo: snapshot.todoPhases,
+			context: snapshot.context
+				? {
+						...snapshot.context,
+						percent: ratioPercent(snapshot.context.usedTokens, snapshot.context.totalTokens),
+						lastCompaction: snapshot.context.lastCompaction ?? null,
+					}
+				: undefined,
+			flags: { autoCompaction: snapshot.autoCompactionEnabled, autoRetry: snapshot.autoRetryEnabled },
+		};
+		// 流式期间的里程碑快照（仅相位/工具变更）不含流式消息本体：保留瞬态层累积内容，
+		// 避免已流出的 thinking/文本在每次 publish 后闪没；收尾快照（含完整消息）自然替换。
+		if (view.isStreaming && prevLive && !view.messages.some(m => m.id === prevLive.id) && !view.live) {
+			view.live = prevLive;
+		}
+		this.#view = view;
+		this.#notify();
+	}
+
+	#applyProgress(event: ProgressEventDto): void {
+		const prev = this.getSnapshot();
+		const view = cloneView(prev);
+
+		switch (event.type) {
+			case "turn_start":
+			case "agent_start":
+				view.isStreaming = true;
+				view.phase = "streaming";
+				break;
+			case "turn_end":
+			case "agent_end": {
+				view.isStreaming = false;
+				if (view.phase === "streaming") view.phase = EMPTY_PHASE;
+				if (view.live) {
+					view.live.done = true;
+					view.live.textStreaming = false;
+					view.live.thinkingStreaming = false;
+					const live = view.live;
+					view.live = undefined;
+					view.messages.push(live);
+				}
+				break;
+			}
+			case "thinking_start":
+				view.live = ensureLive(view, prev);
+				view.live.thinking = view.live.thinking ?? "";
+				view.live.thinkingStreaming = true;
+				break;
+			case "thinking_end":
+				if (view.live) view.live.thinkingStreaming = false;
+				break;
+			case "message_update": {
+				view.live = ensureLive(view, prev);
+				const ev = event.assistantEvent;
+				if (ev.type === "thinking_delta") {
+					view.live.thinking = (view.live.thinking ?? "") + ev.delta;
+					view.live.thinkingStreaming = true;
+				} else if (ev.type === "text_delta") {
+					view.live.text = (view.live.text ?? "") + ev.delta;
+					view.live.textStreaming = true;
+				}
+				break;
+			}
+			case "tool_execution_start": {
+				view.live = ensureLive(view, prev);
+				view.live.tools = [
+					...view.live.tools,
+					{
+						id: event.toolCallId,
+						name: event.name,
+						argsText: prettyArgs(event.arguments),
+						intent: event.intent,
+						state: "run",
+					},
+				];
+				view.phase = "executing_tool";
+				break;
+			}
+			case "tool_execution_end": {
+				const tool = view.live?.tools.find(t => t.id === event.toolCallId);
+				if (tool) {
+					tool.state = event.isError ? "fail" : "done";
+					tool.result = event.resultText;
+					tool.durationMs = event.durationMs;
+				}
+				view.phase = "streaming";
+				break;
+			}
+			case "auto_compaction_start":
+				view.phase = "compacting";
+				break;
+			case "auto_retry_start":
+				view.phase = "retrying";
+				break;
+			// todo_reminder / todo_auto_clear —— UI 提示型，暂不消费
+			case "todo_reminder":
+			case "todo_auto_clear":
+				break;
+		}
+
+		this.#view = view;
+		this.#notify();
+	}
+
+	#toMessage(msg: {
+		id: string;
+		role: "user" | "assistant" | "developer";
+		model?: string;
+		content: MessageContentDto[];
+	}): TranscriptMessage {
+		const content = Array.isArray(msg.content) ? msg.content : [];
+		const thinking = content
+			.filter((c): c is Extract<MessageContentDto, { type: "thinking" }> => c.type === "thinking")
+			.map(c => c.thinking)
+			.join("\n");
+		const text = content
+			.filter((c): c is Extract<MessageContentDto, { type: "text" }> => c.type === "text")
+			.map(c => c.text)
+			.join("\n\n");
+		const calls = content.filter((c): c is Extract<MessageContentDto, { type: "toolCall" }> => c.type === "toolCall");
+		const results = new Map(
+			content
+				.filter((c): c is Extract<MessageContentDto, { type: "toolResult" }> => c.type === "toolResult")
+				.map(c => [c.toolCallId, c] as const),
+		);
+		const tools: ToolView[] = calls.map(call => {
+			const result = results.get(call.id);
+			return {
+				id: call.id,
+				name: call.name,
+				argsText: prettyArgs(call.arguments),
+				intent: call.intent,
+				state: result ? (result.isError ? "fail" : "done") : "done",
+				result: result ? textOf(result) : undefined,
+			};
+		});
+		return {
+			id: msg.id,
+			role: msg.role === "user" ? "user" : "assistant",
+			model: msg.model,
+			thinking: thinking || undefined,
+			text: text || undefined,
+			tools,
+			done: msg.role !== "user",
+			error: undefined,
+		};
+	}
+
+	#buildBaseView(): SessionView {
+		const snapshot = this.#client.getSnapshot();
+		const connection = this.#client.getConnection();
+		const agents = this.#client.getServerAgents();
+		const env = this.#client.getEnvironment();
+		if (!snapshot) {
+			return {
+				connected: connection.connected,
+				reconnecting: connection.reconnecting ?? false,
+				connectionId: connection.connectionId,
+				wsUrl: connection.wsUrl,
+				protocolVersion: connection.protocolVersion,
+				phase: EMPTY_PHASE,
+				model: null,
+				thinkingLevel: null,
+				sessionId: "",
+				messages: [],
+				isStreaming: false,
+				activeToolNames: [],
+				queued: 0,
+				todo: [],
+				flags: { autoCompaction: true, autoRetry: true },
+				agents,
+				env,
+			};
+		}
+		return {
+			connected: connection.connected,
+			reconnecting: connection.reconnecting ?? false,
+			connectionId: connection.connectionId,
+			wsUrl: connection.wsUrl,
+			protocolVersion: connection.protocolVersion,
+			phase: snapshot.phase,
+			model: snapshot.model?.id ?? null,
+			thinkingLevel: snapshot.thinkingLevel ?? null,
+			sessionId: snapshot.sessionId,
+			sessionName: snapshot.sessionName,
+			messages: snapshot.messages.map(m => this.#toMessage(m)),
+			isStreaming: snapshot.isStreaming,
+			activeToolNames: [...snapshot.activeToolNames],
+			queued: snapshot.queuedMessageCount,
+			todo: snapshot.todoPhases,
+			context: snapshot.context
+				? {
+						...snapshot.context,
+						percent: ratioPercent(snapshot.context.usedTokens, snapshot.context.totalTokens),
+						lastCompaction: snapshot.context.lastCompaction ?? null,
+					}
+				: undefined,
+			flags: { autoCompaction: snapshot.autoCompactionEnabled, autoRetry: snapshot.autoRetryEnabled },
+			agents,
+			env,
+		};
+	}
+
+	#notify(): void {
+		for (const listener of this.#listeners) {
+			listener();
+		}
+	}
+}
+
+function ensureLive(view: SessionView, prev: SessionView): TranscriptMessage {
+	if (view.live) return view.live;
+	const live: TranscriptMessage = {
+		id: `live-${view.messages.length}`,
+		role: "assistant",
+		model: prev.model ?? undefined,
+		tools: [],
+		done: false,
+	};
+	view.live = live;
+	return live;
+}
+
+function prettyArgs(args: Record<string, unknown> | undefined): string {
+	if (!args) return "";
+	return Object.entries(args)
+		.map(([k, v]) => `${k}: ${typeof v === "string" ? v : JSON.stringify(v)}`)
+		.join(" · ");
+}
+
+function textOf(result: Extract<MessageContentDto, { type: "toolResult" }>): string {
+	const parts = result.content ?? [];
+	return parts
+		.filter((p): p is { type: "text"; text: string } => p.type === "text")
+		.map(p => p.text)
+		.join("\n");
+}
+
+function ratioPercent(used: number, total: number): number {
+	if (total <= 0) return 0;
+	return Math.min(100, Math.round((used / total) * 100));
+}
+
+/** 单例导出。 */
+const store = new SessionStore();
+export function useSessionStore(): SessionStore {
+	return store;
+}

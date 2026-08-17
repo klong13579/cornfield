@@ -1,0 +1,465 @@
+@import "tailwindcss";
+
+/*
+ * V6 亮色 design tokens → Tailwind theme（迁移自 docs/mock/README.md「亮色主题」）
+ * token 一一对应 mock CSS 变量：canvas/surface/ink 三级、hairline 分隔、单色 accent、语义色克制。
+ */
+@theme {
+	--color-canvas: #f7f7f8;
+	--color-surface: #ffffff;
+	--color-surface-2: #f0f0f2;
+	--color-surface-3: #e6e6e9;
+	--color-hairline: rgba(24, 24, 27, 0.09);
+	--color-hairline-strong: rgba(24, 24, 27, 0.18);
+	--color-ink: #18181b;
+	--color-ink-muted: rgba(24, 24, 27, 0.66);
+	--color-ink-subtle: rgba(24, 24, 27, 0.5);
+	--color-ink-faint: rgba(24, 24, 27, 0.34);
+	--color-accent: #18181b;
+	--color-accent-hover: #3a3a3f;
+	--color-accent-dim: rgba(24, 24, 27, 0.08);
+	--color-on-accent: #fafafa;
+	--color-success: #189a5c;
+	--color-warning: #b97c1e;
+	--color-danger: #d64545;
+	--color-user-bg: #ececee;
+	--color-dingtalk: #3296fa;
+	--font-sans:
+		-apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Microsoft YaHei", sans-serif;
+	--font-mono: "SF Mono", ui-monospace, Menlo, monospace;
+	--radius-sm: 6px;
+	--radius-md: 8px;
+	--radius-lg: 12px;
+	--radius-full: 999px;
+	--ease: 150ms cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+/* ── 基础 ── */
+html,
+body,
+#root {
+	height: 100%;
+}
+body {
+	background: var(--color-canvas);
+	color: var(--color-ink);
+	font:
+		400 14px/1.6 var(--font-sans);
+	letter-spacing: -0.05px;
+	-webkit-font-smoothing: antialiased;
+}
+::selection {
+	background: var(--color-accent-dim);
+}
+button {
+	cursor: pointer;
+}
+
+/* ── 动效 ── */
+@keyframes breathe {
+	0%,
+	100% {
+		opacity: 1;
+	}
+	50% {
+		opacity: 0.25;
+	}
+}
+@keyframes rot {
+	to {
+		transform: rotate(360deg);
+	}
+}
+@keyframes rise {
+	from {
+		opacity: 0;
+		transform: translateY(16px);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+@keyframes pulse-dot {
+	0%,
+	100% {
+		opacity: 1;
+	}
+	50% {
+		opacity: 0.35;
+	}
+}
+@media (prefers-reduced-motion: reduce) {
+	*,
+	*::before,
+	*::after {
+		animation-duration: 0.01ms !important;
+		animation-iteration-count: 1 !important;
+		transition-duration: 0.01ms !important;
+	}
+}
+
+/* ── 流式光标（accent 呼吸）── */
+.caret {
+	display: inline-block;
+	width: 2px;
+	height: 15px;
+	background: var(--color-accent);
+	border-radius: 1px;
+	vertical-align: -2px;
+	animation: breathe 1.1s ease-in-out infinite;
+}
+
+/* ── 旋转 spinner ── */
+.spin {
+	width: 10px;
+	height: 10px;
+	border: 1.5px solid var(--color-hairline-strong);
+	border-top-color: var(--color-ink);
+	border-radius: 50%;
+	animation: rot 0.7s linear infinite;
+	flex-shrink: 0;
+}
+
+/* ── pill badge（无边框，语义色透明底，Linear 风格）── */
+.badge {
+	font-size: 10px;
+	padding: 2px 7px;
+	border-radius: 999px;
+	font-weight: 500;
+	letter-spacing: 0.04em;
+	white-space: nowrap;
+}
+.badge.run {
+	color: var(--color-warning);
+	background: rgba(217, 160, 63, 0.1);
+}
+.badge.done {
+	color: var(--color-success);
+	background: rgba(69, 176, 122, 0.1);
+}
+.badge.fail {
+	color: var(--color-danger);
+	background: rgba(224, 93, 93, 0.1);
+}
+
+/* ── 按钮 ── */
+.btn {
+	background: var(--color-accent);
+	color: var(--color-on-accent);
+	border: none;
+	border-radius: 8px;
+	padding: 8px 18px;
+	font-size: 13px;
+	font-weight: 500;
+	transition: background var(--ease);
+}
+.btn:hover {
+	background: var(--color-accent-hover);
+}
+.btn:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+.btn-secondary {
+	background: var(--color-surface-2);
+	border: 1px solid var(--color-hairline);
+	color: var(--color-ink);
+}
+.btn-secondary:hover {
+	background: var(--color-surface-3);
+}
+.btn-danger {
+	background: var(--color-danger);
+	color: #fff;
+}
+.btn-danger:hover {
+	background: color-mix(in srgb, var(--color-danger) 85%, #fff);
+}
+.btn-sm {
+	padding: 5px 12px;
+	font-size: 12px;
+}
+.btn-ghost {
+	background: none;
+	border: none;
+	color: var(--color-ink-muted);
+	font-size: 12px;
+	padding: 4px 8px;
+	border-radius: 6px;
+	transition:
+		background var(--ease),
+		color var(--ease);
+}
+.btn-ghost:hover {
+	background: var(--color-surface-2);
+	color: var(--color-ink);
+}
+
+/* ── chip ── */
+.chip {
+	background: var(--color-surface-2);
+	border: 1px solid var(--color-hairline);
+	border-radius: 6px;
+	padding: 4px 10px;
+	font-size: 12px;
+	color: var(--color-ink-subtle);
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	cursor: pointer;
+	transition:
+		border-color var(--ease),
+		color var(--ease);
+}
+.chip:hover {
+	border-color: var(--color-hairline-strong);
+	color: var(--color-ink-muted);
+}
+.chip b {
+	color: var(--color-ink);
+	font-weight: 500;
+}
+
+/* ── kbd ── */
+.kbd {
+	font-family: var(--font-mono);
+	font-size: 10px;
+	padding: 1px 5px;
+	border-radius: 4px;
+	background: var(--color-surface-2);
+	border: 1px solid var(--color-hairline);
+	color: var(--color-ink-subtle);
+	letter-spacing: 0;
+}
+
+/* ── 侧栏导航项 ── */
+.nav-item {
+	width: 40px;
+	height: 40px;
+	border-radius: 8px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	cursor: pointer;
+	color: var(--color-ink-faint);
+	position: relative;
+	transition: all var(--ease);
+}
+.nav-item:hover {
+	background: var(--color-surface-2);
+	color: var(--color-ink-subtle);
+}
+.nav-item.active {
+	background: var(--color-accent-dim);
+	color: var(--color-ink);
+}
+.nav-item.active:hover {
+	background: var(--color-surface-3);
+	transform: scale(1.05);
+}
+.nav-item.active::before {
+	content: "";
+	position: absolute;
+	left: -10px;
+	width: 2px;
+	height: 18px;
+	background: var(--color-accent);
+	border-radius: 1px;
+}
+
+/* ── toggle（42×24 滑动开关）── */
+.toggle {
+	position: relative;
+	width: 42px;
+	height: 24px;
+	border-radius: 999px;
+	background: var(--color-surface-3);
+	border: 1px solid var(--color-hairline);
+	flex-shrink: 0;
+	transition: background 200ms ease;
+}
+.toggle.on {
+	background: var(--color-accent);
+	border-color: var(--color-accent);
+}
+.toggle::after {
+	content: "";
+	position: absolute;
+	top: 2px;
+	left: 2px;
+	width: 18px;
+	height: 18px;
+	border-radius: 50%;
+	background: #fff;
+	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+	transition: transform 200ms ease;
+}
+.toggle.on::after {
+	transform: translateX(18px);
+}
+
+/* ── 工具卡 ── */
+.toolcard {
+	border: 1px solid var(--color-hairline);
+	border-radius: 8px;
+	background: var(--color-surface);
+	margin: 12px 0;
+	overflow: hidden;
+	transition: border-color var(--ease);
+}
+.toolcard:hover {
+	border-color: var(--color-hairline-strong);
+}
+.toolcard .head {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 7px 12px;
+	font-size: 12px;
+	cursor: pointer;
+	transition: background var(--ease);
+}
+.toolcard .head:hover {
+	background: var(--color-surface-2);
+}
+.toolcard .tname {
+	font-family: var(--font-mono);
+	color: var(--color-ink);
+	font-weight: 500;
+	letter-spacing: 0;
+}
+.toolcard .state {
+	margin-left: auto;
+	display: flex;
+	align-items: center;
+	gap: 6px;
+}
+.toolcard .args {
+	padding: 8px 12px;
+	font-family: var(--font-mono);
+	font-size: 12px;
+	color: var(--color-ink-subtle);
+	white-space: pre-wrap;
+	background: rgba(24, 24, 27, 0.05);
+	border-top: 1px solid var(--color-hairline);
+	letter-spacing: 0;
+	overflow: hidden;
+}
+.toolcard .result {
+	padding: 8px 12px;
+	font-family: var(--font-mono);
+	font-size: 12px;
+	color: var(--color-success);
+	border-top: 1px solid var(--color-hairline);
+	white-space: pre-wrap;
+	letter-spacing: 0;
+}
+.toolcard.error {
+	border-color: color-mix(in srgb, var(--color-danger) 40%, transparent);
+}
+.toolcard.error .result {
+	color: var(--color-danger);
+}
+
+/* ── avatar ── */
+.avatar {
+	width: 26px;
+	height: 26px;
+	border-radius: 6px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	font-size: 11px;
+	font-weight: 600;
+	flex-shrink: 0;
+	margin-top: 2px;
+}
+.avatar.user {
+	background: #dde1ec;
+	color: #3b4666;
+}
+.avatar.assistant {
+	background: #d8efe2;
+	color: #127a48;
+}
+
+/* ── right panel 状态点 ── */
+.exec-dot {
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	flex-shrink: 0;
+}
+.exec-dot.ok {
+	background: var(--color-success);
+}
+.conn-dot {
+	width: 7px;
+	height: 7px;
+	border-radius: 50%;
+	background: var(--color-success);
+	box-shadow: 0 0 8px rgba(69, 176, 122, 0.5);
+	flex-shrink: 0;
+}
+.conn-dot.reconnecting {
+	background: var(--color-warning);
+	box-shadow: 0 0 8px rgba(217, 160, 63, 0.5);
+	animation: pulse-dot 1.2s ease-in-out infinite;
+}
+
+/* ── 通用交互类 ── */
+.rise-in {
+	animation: rise 500ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.cbtn {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	background: none;
+	border: 1px solid transparent;
+	border-radius: 8px;
+	padding: 5px 8px;
+	font-size: 12px;
+	color: var(--color-ink-subtle);
+	cursor: pointer;
+	transition: all var(--ease);
+}
+.cbtn:hover {
+	background: var(--color-surface-3);
+	color: var(--color-ink);
+}
+.link {
+	color: var(--color-ink-muted);
+	font-size: 12px;
+	cursor: pointer;
+	transition: color var(--ease);
+}
+.link:hover {
+	color: var(--color-ink);
+	text-decoration: underline;
+}
+.spin-warn {
+	border-top-color: var(--color-warning);
+}
+.pv-frame {
+	width: 100%;
+	border: 1px solid var(--color-hairline);
+	border-radius: 8px;
+	background: #fff;
+}
+.pv-node text {
+	font-size: 11px;
+	fill: var(--color-ink);
+	font-family: var(--font-mono);
+}
+.pv-edge {
+	stroke: var(--color-ink-subtle);
+	stroke-width: 1px;
+	fill: none;
+}
+.pv-edge-label {
+	font-size: 10px;
+	fill: var(--color-ink-faint);
+	font-family: var(--font-mono);
+}
