@@ -136,7 +136,13 @@ export type WireExtensionCommand =
 	 * gateway 定期写盘）。返回 accounts（bridgeRunning/bridgeState/channelHealth）+
 	 * scheduler/pid；statusWrittenAt 距今超 30s 视为 stale。gateway 未运行返回 ok:false。
 	 */
-	| { id?: string; type: "gateway_status" };
+	| { id?: string; type: "gateway_status" }
+	/**
+	 * W3 D1：只读拉取本地用量统计（@oh-my-pi/omp-stats 聚合，DashboardStats）。
+	 * 与 `omp stats --json` 同源：调用前内部增量同步会话文件，返回整体/按模型/按目录/
+	 * 时间序列聚合。不依赖任何 attached session（不定向）。
+	 */
+	| { id?: string; type: "get_stats" };
 
 export type WireCommand = MultiplexCommand | WireExtensionCommand;
 

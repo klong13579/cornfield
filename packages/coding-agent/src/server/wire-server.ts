@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { getDashboardStats, syncAllSessions } from "@oh-my-pi/omp-stats";
 import { isEnoent, logger } from "@oh-my-pi/pi-utils";
 import type { ClientFrame, ServerFrame, WireCommand, WireEnvironmentSummary, WireServerEvent } from "@oh-my-pi/pi-wire";
 import { MULTIDEVICE_PROTOCOL_VERSION } from "@oh-my-pi/pi-wire";
@@ -301,6 +302,18 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 						return;
 					}
 					done(res.status);
+					return;
+				}
+				case "get_stats": {
+					// W3 D1：与 `omp stats --json` 同源——先增量同步会话文件再读聚合。
+					// 只读转发 stats.db（本地聚合缓存），不触碰任何 attached session。
+					try {
+						await syncAllSessions();
+						const stats = await getDashboardStats();
+						done(stats);
+					} catch (err) {
+						fail(`stats unavailable: ${String(err)}`);
+					}
 					return;
 				}
 				default:

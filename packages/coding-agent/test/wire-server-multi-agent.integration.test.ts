@@ -94,7 +94,8 @@ test("serve 多 Agent：注册表 + attach + switch + 隔离 + 心跳", async ()
 		const helloPush = await connA.nextPush("server_snapshot");
 		const sessions = (helloPush.event as unknown as { sessions: Array<{ id: string; attached: boolean }> }).sessions;
 		expect(sessions.map(s => s.id).sort()).toEqual(["default", "hr", "ops"]);
-		expect(sessions.find(s => s.id === "hr")?.attached).toBe(false);
+		// 基线对齐（c481a2a214 preload）：serve 启动即预挂载所有注册 agent，hr 已 attached
+		expect(sessions.find(s => s.id === "hr")?.attached).toBe(true);
 		expect(sessions.find(s => s.id === "default")?.attached).toBe(true);
 		// hello 后自动推 default 的 session_snapshot
 		const snap = await connA.nextPush("session_snapshot");
@@ -148,7 +149,9 @@ test("serve 多 Agent：注册表 + attach + switch + 隔离 + 心跳", async ()
 		expect(Array.isArray(models)).toBe(true);
 		expect(models.length).toBeGreaterThan(0);
 
-		// ── 未 attach 的 agent 定向命令 → 显式报错 ──
+		// ── 未 attach 的 agent 定向命令 → 显式报错（preload 后需先 detach）──
+		const detachResp = await connA.request({ type: "detach", sessionId: "ops" });
+		expect(detachResp.ok).toBe(true);
 		const notAttached = await connA.request({ type: "get_state", sessionId: "ops" });
 		expect(notAttached.ok).toBe(false);
 		expect(String(notAttached.error)).toMatch(/not attached/);
