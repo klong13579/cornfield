@@ -1,0 +1,221 @@
+/*
+ * R1a/R1b markdown 渲染样式（`.md` 命名空间）。
+ *
+ * 设计原则：
+ * - 全部用 V6 亮色 token（index.css 的 --color-*），不进 Tailwind utility 层。
+ * - highlight.js 的 `.hljs` 自带背景/内边距，会和 preflight 打架——这里把 .hljs
+ *   收敛为"只上色"，背景和内边距由 `.md pre` 统一接管（见下方 preflight 段）。
+ * - KaTeX 的 display 公式可能超宽，允许横向滚动。
+ */
+
+.md {
+	color: var(--color-ink-muted);
+	font-size: 14px;
+	line-height: 1.6;
+	letter-spacing: -0.05px;
+	word-break: break-word;
+	overflow-wrap: break-word;
+}
+
+/* ── 段落与标题 ── */
+.md > :first-child {
+	margin-top: 0;
+}
+.md > :last-child {
+	margin-bottom: 0;
+}
+.md p {
+	margin: 0 0 8px;
+}
+.md h1,
+.md h2,
+.md h3,
+.md h4,
+.md h5,
+.md h6 {
+	margin: 16px 0 6px;
+	color: var(--color-ink);
+	font-weight: 600;
+	letter-spacing: -0.02em;
+	line-height: 1.3;
+}
+.md h1 {
+	font-size: 20px;
+}
+.md h2 {
+	font-size: 17px;
+}
+.md h3 {
+	font-size: 15px;
+}
+.md h4,
+.md h5,
+.md h6 {
+	font-size: 14px;
+}
+
+/* ── 行内强调 ── */
+.md strong {
+	color: var(--color-ink);
+	font-weight: 600;
+}
+.md em {
+	font-style: italic;
+}
+.md del {
+	color: var(--color-ink-subtle);
+	text-decoration: line-through;
+}
+
+/* ── 链接 ── */
+.md a {
+	color: var(--color-ink);
+	text-decoration: underline;
+	text-decoration-color: var(--color-hairline-strong);
+	text-decoration-thickness: 1px;
+	text-underline-offset: 2px;
+	transition: color var(--ease);
+}
+.md a:hover {
+	color: var(--color-accent-hover);
+}
+
+/* ── 行内代码 vs 代码块 ── */
+.md :not(pre) > code {
+	font-family: var(--font-mono);
+	font-size: 12.5px;
+	background: var(--color-surface-2);
+	border: 1px solid var(--color-hairline);
+	border-radius: 4px;
+	padding: 1px 5px;
+	color: var(--color-ink);
+}
+
+/* ── 列表 ── */
+.md ul,
+.md ol {
+	margin: 0 0 8px;
+	padding-left: 20px;
+}
+.md li {
+	margin: 2px 0;
+}
+.md li > p {
+	margin: 0;
+}
+.md ul.contains-task-list {
+	list-style: none;
+	padding-left: 2px;
+}
+.md li.task-list-item {
+	display: flex;
+	align-items: flex-start;
+	gap: 6px;
+}
+.md li.task-list-item input[type="checkbox"] {
+	margin-top: 4px;
+	accent-color: var(--color-accent);
+}
+
+/* ── 引用块 ── */
+.md blockquote {
+	margin: 0 0 8px;
+	padding: 4px 12px;
+	border-left: 2px solid var(--color-hairline-strong);
+	color: var(--color-ink-subtle);
+}
+.md blockquote > :first-child {
+	margin-top: 0;
+}
+.md blockquote > :last-child {
+	margin-bottom: 0;
+}
+
+/* ── 分隔线 ── */
+.md hr {
+	margin: 14px 0;
+	border: none;
+	border-top: 1px solid var(--color-hairline);
+}
+
+/* ── 图片 ── */
+.md img {
+	max-width: 100%;
+	border-radius: var(--radius-md);
+	border: 1px solid var(--color-hairline);
+}
+
+/* ── 表格（GFM） ── */
+.md table {
+	width: 100%;
+	margin: 8px 0;
+	border-collapse: collapse;
+	font-size: 13px;
+	display: block;
+	overflow-x: auto;
+	border: 1px solid var(--color-hairline);
+	border-radius: var(--radius-md);
+}
+.md thead {
+	background: var(--color-surface-2);
+}
+.md th {
+	padding: 6px 10px;
+	text-align: left;
+	color: var(--color-ink);
+	font-weight: 600;
+	white-space: nowrap;
+	border-bottom: 1px solid var(--color-hairline);
+}
+.md td {
+	padding: 6px 10px;
+	text-align: left;
+	border-bottom: 1px solid var(--color-hairline);
+	vertical-align: top;
+}
+.md tbody tr:last-child td {
+	border-bottom: none;
+}
+
+/* ── 代码块容器 ── */
+.md pre {
+	margin: 8px 0;
+	padding: 10px 12px;
+	background: var(--color-surface-2);
+	border: 1px solid var(--color-hairline);
+	border-radius: var(--radius-md);
+	overflow-x: auto;
+	font-family: var(--font-mono);
+	font-size: 12px;
+	line-height: 1.55;
+	letter-spacing: 0;
+	color: var(--color-ink);
+}
+.md pre code {
+	font-family: inherit;
+	font-size: inherit;
+	background: transparent;
+	border: none;
+	padding: 0;
+	color: inherit;
+}
+
+/* ── preflight × highlight.js 收敛 ── */
+/* highlight.js 的 github 主题会给 .hljs 上背景 + 内边距，让它和 pre 容器冲突；
+   这里让 .hljs（及嵌套 span）只负责上色，容器形态归 .md pre。 */
+.md .hljs {
+	background: transparent;
+	padding: 0;
+	display: block;
+}
+
+/* ── KaTeX ── */
+.md .katex-display {
+	margin: 8px 0;
+	padding: 4px 0;
+	overflow-x: auto;
+	overflow-y: hidden;
+}
+.md .katex {
+	font-size: 1.05em;
+}
