@@ -15,10 +15,13 @@
 		"fmt": "biome format --write ."
 	},
 	"dependencies": {
+		"@oh-my-pi/pi-client": "catalog:",
+		"@oh-my-pi/pi-wire": "catalog:",
 		"lucide-react": "catalog:",
 		"react": "catalog:",
 		"react-dom": "catalog:",
-		"react-router-dom": "^7.1.1"
+		"react-router-dom": "^7.1.1",
+		"thinking-orbs": "0.3.1"
 	},
 	"devDependencies": {
 		"@tailwindcss/vite": "^4.2.4",

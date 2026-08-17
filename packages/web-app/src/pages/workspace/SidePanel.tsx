@@ -15,10 +15,11 @@ export function SidePanel(): React.JSX.Element {
 	const ui = useUiState();
 
 	const phaseLabel = view.phase === "idle" ? "idle" : view.phase;
-	const activeList =
-		view.activeToolNames.length > 0
-			? view.activeToolNames
-			: (view.live?.tools.filter(t => t.state === "run").map(t => t.name) ?? []);
+	// serve P1 的 activeToolNames 初始为全量工具集（语义待澄清），idle/待命时只显示瞬态 running 工具
+	const busy = view.isStreaming || view.phase !== "idle";
+	const activeList = busy
+		? view.activeToolNames
+		: (view.live?.tools.filter(t => t.state === "run").map(t => t.name) ?? []);
 	const todoTotal = view.todo.reduce((sum, p) => sum + p.tasks.length, 0);
 
 	return (

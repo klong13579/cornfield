@@ -298,6 +298,20 @@ button {
 .toggle.on::after {
 	transform: translateX(18px);
 }
+.toggle.small {
+	width: 32px;
+	height: 18px;
+	border-radius: 9px;
+}
+.toggle.small::after {
+	width: 12px;
+	height: 12px;
+	top: 2px;
+	left: 2px;
+}
+.toggle.small.on::after {
+	transform: translateX(14px);
+}
 
 /* ── 工具卡 ── */
 .toolcard {

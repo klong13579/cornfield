@@ -27,7 +27,17 @@ export function ModelsView(): React.JSX.Element {
 	}, [store]);
 
 	const current = view.model;
-	const currentInfo = models.find(m => m.id === current);
+	const currentInfo =
+		models.find(m => m.id === current) ??
+		(current
+			? {
+					id: current,
+					provider: current.split("/")[0] ?? "serve",
+					description: "当前会话模型（serve 快照）· get_available_models 真实现后进入列表",
+					supportsThinking:
+						view.thinkingLevel !== undefined && view.thinkingLevel !== null && view.thinkingLevel !== "off",
+				}
+			: undefined);
 
 	const visible = models.filter(m => {
 		switch (filter) {
@@ -126,7 +136,7 @@ export function ModelsView(): React.JSX.Element {
 										type="button"
 										className="btn btn-sm shrink-0"
 										disabled={m.id === current}
-										onClick={() => store.setModel(m.id)}
+										onClick={() => store.setModel(m.id, m.provider)}
 									>
 										{m.id === current ? "使用中" : "使用此模型"}
 									</button>

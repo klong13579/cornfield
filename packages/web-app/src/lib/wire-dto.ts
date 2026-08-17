@@ -46,6 +46,8 @@ export interface MessageDto {
 	role: "user" | "assistant" | "developer";
 	model?: string;
 	content: MessageContentDto[];
+	/** 助手出错（空 content + errorMessage），UI 渲染 ✗ Error 而不展示为空回复。 */
+	errorMessage?: string;
 }
 
 /** 会话权威快照（对应 SessionSnapshot；context 为可选扩展，mock 提供、真机可能缺失）。 */
@@ -87,6 +89,12 @@ export interface AgentInfoDto {
 	model?: string;
 	skillsCount?: number;
 	cronCount?: number;
+	/** 已 lazy attach 到本进程（注册表 attached）。 */
+	attached?: boolean;
+	/** 运行阶段（attached 时有值）。 */
+	phase?: "idle" | "streaming" | "compacting" | "retrying" | "executing_tool";
+	/** agentDir 绝对路径。 */
+	agentDir?: string;
 	dingtalkBound?: boolean;
 }
 
@@ -156,6 +164,15 @@ export interface ModelInfoDto {
 	description?: string;
 	supportsThinking: boolean;
 	lastRunAt?: number;
+}
+
+/** host tool 声明（对应 WireHostToolDefinition；set_host_tools 入参）。 */
+export interface HostToolDefinitionDto {
+	name: string;
+	label?: string;
+	description: string;
+	parameters: Record<string, unknown>;
+	hidden?: boolean;
 }
 
 /** 连接后返回（hello_ack 内容 + 环境摘要，Home 用）。 */

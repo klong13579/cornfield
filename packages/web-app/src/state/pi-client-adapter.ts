@@ -1,0 +1,408 @@
+import type { PiClientEventKind } from "@oh-my-pi/pi-client";
+import { PiClient as WirePiClient } from "@oh-my-pi/pi-client";
+import type { WireCommand } from "@oh-my-pi/pi-wire";
+import type { PiClient } from "../lib/pi-client-api";
+import type {
+	AgentInfoDto,
+	ConnectionInfoDto,
+	HostToolDefinitionDto,
+	ModelInfoDto,
+	ProgressEventDto,
+	SessionSnapshotDto,
+	TodoPhaseDto,
+	WireServerEventDto,
+} from "../lib/wire-dto";
+import { FALLBACK_MODELS } from "./fallback-models";
+
+/**
+ * 真实 `@oh-my-pi/pi-client` 适配器 —— 实现 web-app 内部契约（lib/pi-client-api.ts）。
+ *
+ * 差异映射（pi-client 真实 API vs 本前端契约，完整差异清单见 P3 汇报）：
+ * - pi-client 只提供 `request(WireCommand)` 通用命令面，无业务方法 → 本层按命令拼装
+ * - pi-client 无 getSnapshot/getServerAgents/getEnvironment → 快照走 getCachedSnapshot，
+ *   agents 从 server_snapshot 推送映射（P3 多 Agent 升级后变真），env 暂缺（返回 null）
+ * - pi-client subscribe 推的是包装事件（status/hello_ack/push/error）→ 本层拆包为 wire 帧
+ * - serve progress 只转发 message_update / tool_execution_update 两类事件，
+ *   tool_execution_update 未归一（真机工具卡三态以快照为准，流式转场待协议扩展）
+ * - get_available_models 当前 serve 为 stub（done() 无 result）→ 返回兜底列表，P3 真实现后自动接真
+ */
+
+/** `omp serve` 连接配置（设置页可改，localStorage 持久化）。 */
+export interface ServeConnectionConfig {
+	wsUrl: string;
+	token: string;
+}
+
+const CONN_STORAGE_KEY = "omp.serve.connection";
+
+export const DEFAULT_SERVE_CONFIG: ServeConnectionConfig = {
+	wsUrl: "ws://127.0.0.1:7891/ws",
+	token: "",
+};
+
+export function loadServeConfig(): ServeConnectionConfig {
+	try {
+		const raw = localStorage.getItem(CONN_STORAGE_KEY);
+		if (raw) {
+			const parsed = JSON.parse(raw) as Partial<ServeConnectionConfig>;
+			if (typeof parsed.wsUrl === "string") {
+				return { wsUrl: parsed.wsUrl, token: typeof parsed.token === "string" ? parsed.token : "" };
+			}
+		}
+	} catch {
+		// 配置损坏回默认
+	}
+	return DEFAULT_SERVE_CONFIG;
+}
+
+export function saveServeConfig(config: ServeConnectionConfig): void {
+	try {
+		localStorage.setItem(CONN_STORAGE_KEY, JSON.stringify(config));
+	} catch {
+		// localStorage 不可用时仅内存态
+	}
+}
+
+function toWsUrl(config: ServeConnectionConfig): string {
+	if (!config.token) return config.wsUrl;
+	const sep = config.wsUrl.includes("?") ? "&" : "?";
+	return `${config.wsUrl}${sep}token=${encodeURIComponent(config.token)}`;
+}
+
+export class PiClientAdapter implements PiClient {
+	#client: WirePiClient;
+	#sessionId: string | null = null;
+	#connection: ConnectionInfoDto;
+	#agents: AgentInfoDto[] = [];
+	#listeners = new Set<(frame: WireServerEventDto) => void>();
+	#connListeners = new Set<(conn: ConnectionInfoDto) => void>();
+
+	constructor(config: ServeConnectionConfig = loadServeConfig()) {
+		this.#connection = { connected: false, wsUrl: config.wsUrl, protocolVersion: 1 };
+		this.#client = new WirePiClient({
+			url: toWsUrl(config),
+			token: config.token,
+			autoReconnect: true,
+		});
+		this.#client.subscribe(event => this.#handleEvent(event));
+	}
+
+	async connect(): Promise<ConnectionInfoDto> {
+		await this.#client.connect();
+		return { ...this.#connection };
+	}
+
+	disconnect(): void {
+		this.#client.close("client disconnect");
+	}
+
+	getConnection(): ConnectionInfoDto {
+		return { ...this.#connection };
+	}
+
+	getSnapshot(): SessionSnapshotDto | null {
+		if (!this.#sessionId) return null;
+		const snapshot = this.#client.getCachedSnapshot<unknown>(this.#sessionId);
+		return (snapshot as SessionSnapshotDto) ?? null;
+	}
+
+	getServerAgents(): AgentInfoDto[] {
+		return this.#agents;
+	}
+
+	getEnvironment(): null {
+		// serve 当前无环境摘要命令（mock 扩展）；Home 摘要走默认占位
+		return null;
+	}
+
+	subscribe(listener: (frame: WireServerEventDto) => void): () => void {
+		this.#listeners.add(listener);
+		return () => this.#listeners.delete(listener);
+	}
+
+	/** 连接状态订阅（wire 推送帧之外的状态变化，如断线重连）。 */
+	subscribeConnection(listener: (conn: ConnectionInfoDto) => void): () => void {
+		this.#connListeners.add(listener);
+		return () => this.#connListeners.delete(listener);
+	}
+
+	// ── 命令面（拼装 WireCommand）──
+
+	prompt(text: string): Promise<void> {
+		return this.#req({ type: "prompt", message: text }).then(() => undefined);
+	}
+
+	abort(): Promise<void> {
+		return this.#req({ type: "abort" }).then(() => undefined);
+	}
+
+	compact(): Promise<void> {
+		return this.#req({ type: "compact" }).then(() => undefined);
+	}
+
+	newSession(): Promise<void> {
+		return this.#req({ type: "new_session" }).then(() => undefined);
+	}
+
+	setModel(modelId: string, provider = "custom"): Promise<void> {
+		return this.#req({ type: "set_model", provider, modelId }).then(() => undefined);
+	}
+
+	setThinkingLevel(level: string): Promise<void> {
+		const command = { type: "set_thinking_level", level } as WireCommand;
+		return this.#req(command).then(() => undefined);
+	}
+
+	setTodos(phases: TodoPhaseDto[]): Promise<void> {
+		const command = { type: "set_todos", phases } as WireCommand;
+		return this.#req(command).then(() => undefined);
+	}
+
+	setAutoCompaction(enabled: boolean): Promise<void> {
+		return this.#req({ type: "set_auto_compaction", enabled }).then(() => undefined);
+	}
+
+	setAutoRetry(enabled: boolean): Promise<void> {
+		return this.#req({ type: "set_auto_retry", enabled }).then(() => undefined);
+	}
+
+	/** serve 当前为 stub（done() 无 result）→ 兜底列表；P3 真实现返回 {provider,model,thinkingLevel} 后自动接真。 */
+	async getAvailableModels(): Promise<ModelInfoDto[]> {
+		try {
+			const result = await this.#req<unknown>({ type: "get_available_models" });
+			const list = result as { provider: string; model: string; thinkingLevel?: string | null }[] | null;
+			if (Array.isArray(list) && list.length > 0) {
+				return list.map(m => ({
+					id: m.model,
+					provider: m.provider,
+					supportsThinking: m.thinkingLevel !== undefined && m.thinkingLevel !== null,
+					description: `thinking: ${m.thinkingLevel ?? "off"}`,
+				}));
+			}
+		} catch (err) {
+			console.warn("[web-app] get_available_models unavailable, using fallback", err);
+		}
+		return FALLBACK_MODELS;
+	}
+
+	// ── P3 多 Agent ──
+
+	/** 拉取注册表 agent 元数据（list_agents），不触发 attach。 */
+	async listAgents(): Promise<AgentInfoDto[]> {
+		try {
+			const result = await this.#req<unknown>({ type: "list_agents" });
+			const list = result as SessionEntryLike[] | null;
+			if (Array.isArray(list)) {
+				this.#agents = list.map(mapAgentEntry);
+				return this.#agents;
+			}
+		} catch (err) {
+			console.warn("[web-app] list_agents unavailable", err);
+		}
+		return this.#agents;
+	}
+
+	attach(sessionId: string): Promise<void> {
+		return this.#req({ type: "attach", sessionId }).then(() => undefined);
+	}
+
+	switchSession(sessionId: string): Promise<void> {
+		return this.#req({ type: "switch_session", sessionId }).then(() => undefined);
+	}
+
+	setHostTools(tools: HostToolDefinitionDto[]): Promise<void> {
+		const command = { type: "set_host_tools", tools } as never;
+		return this.#req(command).then(() => undefined);
+	}
+
+	// hostToolResult：pi-client 无裸帧发送 API（host_tool_result 是独立 client frame），
+	// 待 pi-client 补 sendRaw/hostToolResult 后实现（差异清单已反馈 be-dev）。
+
+	// ── 内部 ──
+
+	#req<TResult = unknown>(command: WireCommand): Promise<TResult> {
+		return this.#client.request<TResult>(command).catch((err: unknown) => {
+			console.warn("[web-app] serve command failed", command.type, err);
+			throw err;
+		});
+	}
+
+	#handleEvent(event: PiClientEventKind): void {
+		switch (event.type) {
+			case "status":
+				this.#applyStatus(event.status, event.attempt);
+				break;
+			case "hello_ack":
+				this.#connection = {
+					...this.#connection,
+					connectionId: event.connectionId,
+					protocolVersion: event.protocolVersion,
+					connected: true,
+					reconnecting: false,
+				};
+				this.#notifyConnection();
+				break;
+			case "push":
+				this.#handlePush(event.event);
+				break;
+			case "error":
+				// 传输层错误（重连中属常态），仅记录
+				break;
+		}
+	}
+
+	#applyStatus(status: string, attempt: number | undefined): void {
+		const connected = status === "open";
+		const reconnecting = status === "connecting" && (attempt ?? 0) > 0;
+		if (connected === this.#connection.connected && reconnecting === (this.#connection.reconnecting ?? false)) return;
+		this.#connection = { ...this.#connection, connected, reconnecting };
+		this.#notifyConnection();
+	}
+
+	#handlePush(event: unknown): void {
+		if (!event || typeof event !== "object") return;
+		const raw = event as {
+			type?: string;
+			sessions?: { id: string; name?: string; active: boolean }[];
+			sessionId?: string;
+			snapshot?: unknown;
+			progressEvent?: unknown;
+			event?: unknown;
+		};
+
+		if (raw.type === "server_snapshot") {
+			const sessions = Array.isArray(raw.sessions) ? (raw.sessions as SessionEntryLike[]) : [];
+			this.#agents = sessions.map(mapAgentEntry);
+			this.#emit(raw as unknown as WireServerEventDto);
+			return;
+		}
+
+		if (raw.type === "session_snapshot") {
+			this.#sessionId = raw.sessionId ?? this.#sessionId;
+			this.#emit(raw as unknown as WireServerEventDto);
+			return;
+		}
+
+		if (raw.type === "progress") {
+			const progress = normalizeProgress(raw.event);
+			if (progress) this.#emit({ type: "progress", sessionId: this.#sessionId ?? "", event: progress });
+			return;
+		}
+
+		// host_tool_call：serve 需要前端执行已注册工具 → 归一为工具卡 run 态（回传待 pi-client 裸帧能力）
+		if (raw.type === "host_tool_call") {
+			const call = raw as unknown as {
+				id: string;
+				sessionId: string;
+				toolCallId: string;
+				toolName: string;
+				arguments: Record<string, unknown>;
+			};
+			this.#emit({
+				type: "progress",
+				sessionId: call.sessionId,
+				event: {
+					type: "tool_execution_start",
+					toolCallId: call.toolCallId,
+					name: call.toolName,
+					arguments: call.arguments,
+					startedAt: Date.now(),
+				},
+			});
+		}
+	}
+
+	#emit(frame: WireServerEventDto): void {
+		for (const listener of this.#listeners) {
+			listener(frame);
+		}
+	}
+
+	#notifyConnection(): void {
+		for (const listener of this.#connListeners) {
+			listener({ ...this.#connection });
+		}
+	}
+}
+
+/** 注册表 session 项（pi-wire SessionListEntry P3 富化形状）。 */
+interface SessionEntryLike {
+	id: string;
+	name?: string;
+	sessionFile?: string;
+	active: boolean;
+	role?: string;
+	model?: { provider: string; id: string; name?: string };
+	skillCount?: number;
+	phase?: "idle" | "streaming" | "compacting" | "retrying" | "executing_tool";
+	attached?: boolean;
+	agentDir?: string;
+}
+
+function mapAgentEntry(s: SessionEntryLike, index: number): AgentInfoDto {
+	const busyPhase =
+		s.phase === "streaming" || s.phase === "executing_tool" || s.phase === "compacting" || s.phase === "retrying";
+	return {
+		id: s.id,
+		name: s.name ?? `Agent ${index + 1}`,
+		face: (s.name ?? s.id[0] ?? "A").slice(0, 1),
+		workspace: s.role ?? "默认工作区",
+		kind: "worker",
+		status: busyPhase ? "busy" : s.active ? "online" : s.attached ? "idle" : "stopped",
+		model: s.model?.id,
+		skillsCount: s.skillCount,
+		attached: s.attached,
+		phase: s.phase,
+		agentDir: s.agentDir,
+	};
+}
+
+/** 真实 AgentSessionEvent → 前端 ProgressEventDto（serve 白名单内的增量与工具生命周期事件）。 */
+function normalizeProgress(event: unknown): ProgressEventDto | null {
+	if (!event || typeof event !== "object") return null;
+	const raw = event as Record<string, unknown>;
+
+	// 消息增量（thinking/text/toolcall delta）
+	if (raw.type === "message_update") {
+		const a = raw.assistantEvent as { type?: string; contentIndex?: number; delta?: string } | undefined;
+		if (!a) return null;
+		const base = { contentIndex: a.contentIndex ?? 0, delta: a.delta ?? "" };
+		switch (a.type) {
+			case "thinking_delta":
+				return { type: "message_update", assistantEvent: { type: "thinking_delta", ...base } };
+			case "text_delta":
+				return { type: "message_update", assistantEvent: { type: "text_delta", ...base } };
+			case "toolcall_delta":
+				return { type: "message_update", assistantEvent: { type: "toolcall_delta", ...base } };
+			default:
+				return null;
+		}
+	}
+
+	// 工具生命周期（be-dev hotfix 后 serve 白名单含 start/end → 工具卡三态真 progress）
+	if (raw.type === "tool_execution_start" && typeof raw.toolCallId === "string") {
+		return {
+			type: "tool_execution_start",
+			toolCallId: raw.toolCallId,
+			name: typeof raw.name === "string" ? raw.name : "tool",
+			arguments:
+				typeof raw.arguments === "object" && raw.arguments !== null
+					? (raw.arguments as Record<string, unknown>)
+					: undefined,
+			intent: typeof raw.intent === "string" ? raw.intent : undefined,
+			startedAt: typeof raw.startedAt === "number" ? raw.startedAt : Date.now(),
+		};
+	}
+	if (raw.type === "tool_execution_end" && typeof raw.toolCallId === "string") {
+		return {
+			type: "tool_execution_end",
+			toolCallId: raw.toolCallId,
+			isError: raw.isError === true,
+			resultText: typeof raw.resultText === "string" ? raw.resultText : undefined,
+			durationMs: typeof raw.durationMs === "number" ? raw.durationMs : undefined,
+		};
+	}
+
+	// message_end / tool_execution_update：流式结算/部分结果，前端无对应渲染，静默忽略
+	return null;
+}

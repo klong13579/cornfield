@@ -88,6 +88,19 @@ class SessionStore {
 	init(client: PiClient): void {
 		this.#client = client;
 		const unsub = client.subscribe(frame => this.#onFrame(frame));
+		// 连接状态变化（断线重连等）——真实链路由 adapter 的 subscribeConnection 驱动；mock 忽略
+		if (client.subscribeConnection) {
+			const unsubConn = client.subscribeConnection(conn => {
+				this.#view = cloneView(this.getSnapshot());
+				this.#view.connected = conn.connected;
+				this.#view.reconnecting = conn.reconnecting ?? false;
+				this.#view.connectionId = conn.connectionId;
+				this.#view.protocolVersion = conn.protocolVersion;
+				this.#view.wsUrl = conn.wsUrl;
+				this.#notify();
+				void unsubConn;
+			});
+		}
 		this.#view = this.#buildBaseView();
 		this.#notify();
 		// 生命周期与 store 共存；mock 客户端无额外清理（真机换 pi-client 时这里接断线清理）
@@ -116,39 +129,39 @@ class SessionStore {
 	// ── 命令透传 ──
 
 	prompt(text: string): void {
-		void this.#client.prompt(text);
+		void this.#client.prompt(text).catch(() => undefined);
 	}
 
 	abort(): void {
-		void this.#client.abort();
+		void this.#client.abort().catch(() => undefined);
 	}
 
 	compact(): void {
-		void this.#client.compact();
+		void this.#client.compact().catch(() => undefined);
 	}
 
 	newSession(): void {
-		void this.#client.newSession();
+		void this.#client.newSession().catch(() => undefined);
 	}
 
-	setModel(modelId: string): void {
-		void this.#client.setModel(modelId);
+	setModel(modelId: string, provider?: string): void {
+		void this.#client.setModel(modelId, provider).catch(() => undefined);
 	}
 
 	setThinkingLevel(level: string): void {
-		void this.#client.setThinkingLevel(level);
+		void this.#client.setThinkingLevel(level).catch(() => undefined);
 	}
 
 	setTodos(phases: TodoPhaseDto[]): void {
-		void this.#client.setTodos(phases);
+		void this.#client.setTodos(phases).catch(() => undefined);
 	}
 
 	setAutoCompaction(enabled: boolean): void {
-		void this.#client.setAutoCompaction(enabled);
+		void this.#client.setAutoCompaction(enabled).catch(() => undefined);
 	}
 
 	setAutoRetry(enabled: boolean): void {
-		void this.#client.setAutoRetry(enabled);
+		void this.#client.setAutoRetry(enabled).catch(() => undefined);
 	}
 
 	toggleTodo(phaseName: string, index: number): void {
@@ -158,7 +171,7 @@ class SessionStore {
 		const task = phase?.tasks[index];
 		if (!phase || !task) return;
 		task.status = task.status === "completed" ? "pending" : "completed";
-		void this.#client.setTodos(phases);
+		void this.#client.setTodos(phases).catch(() => undefined);
 	}
 
 	addTodo(phaseName: string, content: string): void {
@@ -172,7 +185,7 @@ class SessionStore {
 		} else {
 			phases.push({ name: phaseName, tasks: [{ content: trimmed, status: "pending" }] });
 		}
-		void this.#client.setTodos(phases);
+		void this.#client.setTodos(phases).catch(() => undefined);
 	}
 
 	removeTodo(phaseName: string, index: number): void {
@@ -181,12 +194,30 @@ class SessionStore {
 		const phase = phases.find(p => p.name === phaseName);
 		if (!phase) return;
 		phase.tasks.splice(index, 1);
-		void this.#client.setTodos(phases);
+		void this.#client.setTodos(phases).catch(() => undefined);
 	}
 
 	/** 拉取模型市场数据（get_available_models）；展示层自行持有。 */
 	fetchModels(): Promise<ModelInfoDto[]> {
 		return this.#client.getAvailableModels();
+	}
+
+	/** 拉取注册表 agent 列表（list_agents）并刷新视图。 */
+	async fetchAgents(): Promise<void> {
+		const agents = await this.#client.listAgents();
+		this.#view = cloneView(this.getSnapshot());
+		this.#view.agents = agents;
+		this.#notify();
+	}
+
+	/** lazy attach 注册表 agent（attach 后 serve 会推该会话快照/进度）。 */
+	attach(sessionId: string): void {
+		void this.#client.attach(sessionId).catch(() => undefined);
+	}
+
+	/** 切换活动会话（switch_session；serve 随后推新 session_snapshot，工作台自动跟随）。 */
+	switchSession(sessionId: string): void {
+		void this.#client.switchSession(sessionId).catch(() => undefined);
 	}
 
 	// ── 帧归约 ──
@@ -197,7 +228,9 @@ class SessionStore {
 				this.#applySnapshot(frame.snapshot);
 				break;
 			case "server_snapshot":
+				// 多 Agent 后 server_snapshot 是 agents 列表权威源 —— 重读映射
 				this.#view = cloneView(this.getSnapshot());
+				this.#view.agents = this.#client.getServerAgents();
 				this.#notify();
 				break;
 			case "progress":
@@ -329,6 +362,7 @@ class SessionStore {
 		role: "user" | "assistant" | "developer";
 		model?: string;
 		content: MessageContentDto[];
+		errorMessage?: string;
 	}): TranscriptMessage {
 		const content = Array.isArray(msg.content) ? msg.content : [];
 		const thinking = content
@@ -364,7 +398,7 @@ class SessionStore {
 			text: text || undefined,
 			tools,
 			done: msg.role !== "user",
-			error: undefined,
+			error: msg.errorMessage,
 		};
 	}
 

@@ -7,7 +7,7 @@ export function AppSidebar(): React.JSX.Element {
 	const bottom = PAGE_META.filter(p => p.group === "bottom").sort((a, b) => a.order - b.order);
 
 	return (
-		<nav className="flex w-[60px] shrink-0 flex-col items-center gap-1 border-r border-hairline bg-surface py-3.5">
+		<nav className="hidden w-[60px] shrink-0 flex-col items-center gap-1 border-r border-hairline bg-surface py-3.5 md:flex">
 			{primary.map(p => (
 				<NavLink
 					key={p.id}

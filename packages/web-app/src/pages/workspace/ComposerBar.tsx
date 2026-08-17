@@ -81,7 +81,7 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 						onKeyDown={onKeyDown}
 						className="min-h-[52px] w-full resize-none border-none bg-transparent px-3.5 pt-3 pb-1.5 font-inherit text-ink outline-none placeholder:text-ink-faint"
 					/>
-					<div className="flex items-center gap-2 px-2.5 pb-1.5">
+					<div className="flex items-center gap-2 overflow-x-auto px-2.5 pb-1.5">
 						{/* Agent 选择器 */}
 						<div className="relative">
 							<button
@@ -136,9 +136,9 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 						</div>
 
 						<span className="h-[18px] w-px bg-hairline" />
-						<button type="button" className="cbtn" title="上传附件（P3 接入）" aria-disabled>
+						<button type="button" className="cbtn shrink-0" title="上传附件（P3 接入）" aria-disabled>
 							<Paperclip size={15} strokeWidth={1.5} />
-							附件
+							<span className="hidden sm:inline">附件</span>
 						</button>
 						<button type="button" className="cbtn" title="语音输入" onClick={() => navigate("/voice")}>
 							<Mic size={15} strokeWidth={1.5} />
@@ -167,7 +167,7 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 											type="button"
 											className={`flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left font-mono text-[13px] transition-colors hover:bg-surface-3 ${m.id === view.model ? "bg-accent-dim" : ""}`}
 											onClick={() => {
-												store.setModel(m.id);
+												store.setModel(m.id, m.provider);
 												setShowModelMenu(false);
 											}}
 										>

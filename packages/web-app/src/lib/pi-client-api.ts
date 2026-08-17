@@ -2,6 +2,7 @@ import type {
 	AgentInfoDto,
 	ConnectionInfoDto,
 	EnvironmentSummaryDto,
+	HostToolDefinitionDto,
 	ModelInfoDto,
 	SessionSnapshotDto,
 	TodoPhaseDto,
@@ -31,16 +32,30 @@ export interface PiClient {
 	getEnvironment(): EnvironmentSummaryDto | null;
 	/** 订阅推送帧（session_snapshot / progress / server_snapshot），返回退订函数。 */
 	subscribe(listener: (frame: WireServerEventDto) => void): () => void;
+	/** 连接状态订阅（可选：适配层提供，mock 可忽略）。 */
+	subscribeConnection?(listener: (conn: ConnectionInfoDto) => void): () => void;
 
 	// ── 命令面（12 条 workspace 命令子集）──
 	prompt(text: string): Promise<void>;
 	abort(): Promise<void>;
 	compact(): Promise<void>;
 	newSession(): Promise<void>;
-	setModel(modelId: string): Promise<void>;
+	setModel(modelId: string, provider?: string): Promise<void>;
 	setThinkingLevel(level: string): Promise<void>;
 	setTodos(phases: TodoPhaseDto[]): Promise<void>;
 	setAutoCompaction(enabled: boolean): Promise<void>;
 	setAutoRetry(enabled: boolean): Promise<void>;
 	getAvailableModels(): Promise<ModelInfoDto[]>;
+
+	// ── P3 多 Agent ──
+	/** 拉取注册表 agent 元数据列表（list_agents，不触发 attach）。 */
+	listAgents(): Promise<AgentInfoDto[]>;
+	/** lazy attach 一个注册表 agent 到本进程（attach）。 */
+	attach(sessionId: string): Promise<void>;
+	/** 切换本连接的活动会话（switch_session；server 随后推新 session_snapshot）。 */
+	switchSession(sessionId: string): Promise<void>;
+	/** 注册 host tool 声明（set_host_tools；双向帧协议见 wire frames）。 */
+	setHostTools(tools: HostToolDefinitionDto[]): Promise<void>;
+	/** host tool 执行结果回传（host_tool_result client frame；视 pi-client 支持与否）。 */
+	hostToolResult?(id: string, resultText: string, isError?: boolean): void;
 }

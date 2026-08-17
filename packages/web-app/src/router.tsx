@@ -11,6 +11,8 @@ import {
 } from "lucide-react";
 import { createBrowserRouter } from "react-router-dom";
 import { AppShell } from "./layout/AppShell";
+import { AgentDetailView } from "./pages/agents/AgentDetailView";
+import { AgentsView } from "./pages/agents/AgentsView";
 import { HomeView } from "./pages/home/HomeView";
 import { ModelsView } from "./pages/models/ModelsView";
 import { PlaceholderView } from "./pages/placeholder/PlaceholderView";
@@ -136,7 +138,8 @@ export const router = createBrowserRouter([
 		children: [
 			{ path: "/", element: <HomeView /> },
 			{ path: "/workspace", element: <WorkspaceView /> },
-			{ path: "/agents", element: <PlaceholderView pageId="agents" /> },
+			{ path: "/agents", element: <AgentsView /> },
+			{ path: "/agents/:id", element: <AgentDetailView /> },
 			{ path: "/records", element: <PlaceholderView pageId="records" /> },
 			{ path: "/voice", element: <PlaceholderView pageId="voice" /> },
 			{ path: "/todo", element: <TodoView /> },

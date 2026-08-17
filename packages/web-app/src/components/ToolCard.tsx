@@ -10,6 +10,7 @@ import {
 	Wrench,
 } from "lucide-react";
 import { useState } from "react";
+import { useIsMobile } from "../lib/use-media-query";
 import type { ToolView } from "../state/session-store";
 
 /**
@@ -31,7 +32,9 @@ const TOOL_ICONS: Record<string, LucideIcon> = {
 };
 
 export function ToolCard({ tool, className = "" }: { tool: ToolView; className?: string }): React.JSX.Element {
-	const [expanded, setExpanded] = useState(true);
+	// 移动端工具卡默认折叠（FR-8：触控优先，点击展开参数/结果）；桌面默认展开（审计轨迹）。
+	const isMobile = useIsMobile();
+	const [expanded, setExpanded] = useState(!isMobile);
 	const Icon = TOOL_ICONS[tool.name] ?? Wrench;
 
 	return (

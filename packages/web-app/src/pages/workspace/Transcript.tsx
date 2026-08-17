@@ -81,7 +81,11 @@ function MessageRow({ msg, streaming = false }: { msg: TranscriptMessage; stream
 					{msg.tools.map(tool => (
 						<ToolCard key={tool.id} tool={tool} />
 					))}
-					{msg.error && <div className="text-danger">{msg.error}</div>}
+					{msg.error && (
+						<div className="mt-1 rounded-md border border-danger/40 bg-danger/5 px-3 py-2 text-[12.5px] leading-relaxed text-danger">
+							✗ Error: {msg.error}
+						</div>
+					)}
 				</div>
 			</div>
 		</div>

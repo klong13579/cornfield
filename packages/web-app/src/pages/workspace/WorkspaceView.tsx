@@ -5,6 +5,7 @@ import { useSessionStore } from "../../state/session-store";
 import { getUiStore, useUiState } from "../../state/ui-store";
 import { useSession } from "../../state/use-session";
 import { ComposerBar } from "./ComposerBar";
+import { MobileSideSheet } from "./MobileSideSheet";
 import { SidePanel } from "./SidePanel";
 import { Transcript } from "./Transcript";
 
@@ -61,6 +62,7 @@ export function WorkspaceView({ compact = false }: { compact?: boolean }): React
 						<b>{view.env?.repos ?? "oh-my-pi"}</b> · {view.env?.branch ?? "main"}
 					</button>
 					<span className="flex-1" />
+					<MobileSideSheet />
 					{!compact && (
 						<>
 							<button type="button" className="link" onClick={() => store.compact()}>
