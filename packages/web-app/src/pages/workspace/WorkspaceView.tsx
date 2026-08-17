@@ -6,6 +6,7 @@ import { useSessionStore } from "../../state/session-store";
 import { getUiStore } from "../../state/ui-store";
 import { useSession } from "../../state/use-session";
 import { ComposerBar } from "./ComposerBar";
+import { RightPanel } from "./RightPanel";
 import { SessionSidebar } from "./SessionSidebar";
 import { Transcript } from "./Transcript";
 
@@ -74,6 +75,7 @@ export function WorkspaceView({ compact = false }: { compact?: boolean }): React
 				{/* 输入区：单一实例（CSS 自适应桌面/移动），避免模型列表/草稿逻辑双份执行 */}
 				<ComposerBar autoFocusDraft={draftSeed} />
 			</div>
+			{!compact && <RightPanel />}
 		</div>
 	);
 }
