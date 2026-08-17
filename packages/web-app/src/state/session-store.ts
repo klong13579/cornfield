@@ -1,4 +1,4 @@
-import type { PiClient } from "../lib/pi-client-api";
+import type { FsEntryDto, PiClient } from "../lib/pi-client-api";
 import type { BranchPoint, PlaybackEntry, SessionRecordSummary } from "../lib/records";
 import type {
 	AgentInfoDto,
@@ -302,6 +302,16 @@ class SessionStore {
 	/** 历史会话索引（list_sessions；未就绪时空数组，调用方回退 mock）。 */
 	listSessions(): Promise<SessionRecordSummary[]> {
 		return this.#client.listSessions();
+	}
+
+	/** 列出 agent workspace 目录（fs_list，代理到 pi-client）。 */
+	fsList(sessionId: string, path?: string): Promise<{ entries: FsEntryDto[] }> {
+		return this.#client.fsList(sessionId, path);
+	}
+
+	/** 读 agent workspace 文件（fs_read，代理到 pi-client）。 */
+	fsRead(sessionId: string, path: string): Promise<{ text: string; truncated: boolean }> {
+		return this.#client.fsRead(sessionId, path);
 	}
 
 	// ── 帧归约 ──

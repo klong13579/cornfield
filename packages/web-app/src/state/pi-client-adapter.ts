@@ -1,7 +1,7 @@
 import type { PiClientEventKind } from "@oh-my-pi/pi-client";
 import { PiClient as WirePiClient } from "@oh-my-pi/pi-client";
 import type { WireCommand } from "@oh-my-pi/pi-wire";
-import type { PiClient } from "../lib/pi-client-api";
+import type { FsEntryDto, PiClient } from "../lib/pi-client-api";
 import type { BranchPoint, PlaybackEntry, PlaybackToolStep, RecordStatus, SessionRecordSummary } from "../lib/records";
 import type {
 	AgentInfoDto,
@@ -300,6 +300,26 @@ export class PiClientAdapter implements PiClient {
 			console.warn("[web-app] list_sessions unavailable, fallback mock", err);
 			return [];
 		}
+	}
+
+	/** 列出 agent workspace 目录（fs_list；name/type/size，目录在前）。 */
+	async fsList(sessionId: string, path?: string): Promise<{ entries: FsEntryDto[] }> {
+		const result = await this.#req<{ entries?: FsEntryDto[] | null }>({
+			type: "fs_list",
+			sessionId,
+			...(path ? { path } : {}),
+		} as never);
+		return { entries: result.entries ?? [] };
+	}
+
+	/** 读 agent workspace 文件（fs_read；>128KB 截断标记）。 */
+	async fsRead(sessionId: string, path: string): Promise<{ text: string; truncated: boolean }> {
+		const result = await this.#req<{ text?: string | null; truncated?: boolean | null }>({
+			type: "fs_read",
+			sessionId,
+			path,
+		} as never);
+		return { text: result.text ?? "", truncated: result.truncated === true };
 	}
 
 	// hostToolResult：pi-client 无裸帧发送 API（host_tool_result 是独立 client frame），

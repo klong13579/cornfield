@@ -11,7 +11,7 @@ import { KindBadge } from "./AgentsView";
  * 模型配置 tab 已接 get_available_models（adapter）+ set_model/set_thinking_level 真实命令。
  */
 
-type TabId = "skills" | "cron" | "model" | "tools" | "profile";
+type TabId = "skills" | "cron" | "model" | "tools" | "profile" | "files" | "prompts";
 
 const TABS: { id: TabId; label: string; count?: number }[] = [
 	{ id: "skills", label: "Skills", count: 6 },
@@ -19,6 +19,8 @@ const TABS: { id: TabId; label: string; count?: number }[] = [
 	{ id: "model", label: "模型配置" },
 	{ id: "tools", label: "工具开关" },
 	{ id: "profile", label: "用户画像" },
+	{ id: "files", label: "文件" },
+	{ id: "prompts", label: "Prompts" },
 ];
 
 // 技能列表为骨架展示：数据源待后端 get_snapshot 扩展 skills 字段（缺口 B3）
@@ -374,20 +376,13 @@ export function AgentDetailView(): React.JSX.Element {
 							>
 								导出画像 JSON
 							</button>
-							<button
-								type="button"
-								className="btn btn-sm border border-danger bg-transparent text-danger hover:bg-danger/10"
-								disabled
-								title="画像清除待 session 删除/画像协议（缺口 B6）"
-								onClick={() => {
-									/* TODO(后端 B6) */
-								}}
-							>
-								清除画像
-							</button>
 						</div>
 					</div>
 				)}
+
+				{tab === "files" && <FileExplorer agentId={id} />}
+
+				{tab === "prompts" && <PromptsView agentId={id} />}
 
 				<div className="mt-6">
 					<Link to="/agents" className="text-[12px] text-ink-muted no-underline hover:text-ink hover:underline">
@@ -412,4 +407,211 @@ function statusText(status?: string): string {
 		default:
 			return "状态未知";
 	}
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// 文件系统 tab（fs_list/fs_read，只读，不必 attach）
+// ─────────────────────────────────────────────────────────────────────
+
+interface FsTreeNode {
+	name: string;
+	type: "dir" | "file";
+	size: number;
+	path: string;
+	children?: FsTreeNode[];
+	loaded?: boolean;
+}
+
+/** 懒加载目录树：点目录展开一级，点文件读内容（fs_read）。 */
+function FileExplorer({ agentId }: { agentId: string }): React.JSX.Element {
+	const store = useSessionStore();
+	const [root, setRoot] = useState<FsTreeNode | null>(null);
+	const [error, setError] = useState<string | null>(null);
+	const [selected, setSelected] = useState<{ path: string; text: string; truncated: boolean } | null>(null);
+
+	const loadDir = async (node: FsTreeNode): Promise<void> => {
+		try {
+			const { entries } = await store.fsList(agentId, node.path);
+			node.children = entries.map(e => ({ ...e, path: node.path ? `${node.path}/${e.name}` : e.name }));
+			node.loaded = true;
+			setRoot(prev => (prev ? { ...prev } : { ...node })); // 首载：root 落地
+		} catch (err) {
+			setError(err instanceof Error ? err.message : String(err));
+		}
+	};
+
+	const readFile = async (node: FsTreeNode): Promise<void> => {
+		try {
+			const result = await store.fsRead(agentId, node.path);
+			setSelected({ path: node.path, text: result.text, truncated: result.truncated });
+			setError(null);
+		} catch (err) {
+			setError(err instanceof Error ? err.message : String(err));
+		}
+	};
+
+	useEffect(() => {
+		void loadDir({ name: "", type: "dir", size: 0, path: "" } as FsTreeNode);
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [agentId]);
+
+	const renderNode = (node: FsTreeNode, depth: number): React.JSX.Element => {
+		const pad = { paddingLeft: `${depth * 16 + 4}px` };
+		if (node.type === "dir") {
+			return (
+				<button
+					key={node.path}
+					type="button"
+					className="flex w-full cursor-pointer items-center gap-1.5 px-1 py-[3px] text-left text-[12.5px] text-ink hover:bg-surface-2"
+					style={pad}
+					onClick={() => {
+						if (!node.loaded) void loadDir(node);
+						else if (node.children) node.children = undefined; // 折叠
+						setRoot(r => (r ? { ...r } : r));
+					}}
+				>
+					<span className="text-ink-faint">{node.children ? "▾" : "▸"}</span>
+					<span className="font-mono">{node.name || "·"}</span>
+				</button>
+			);
+		}
+		return (
+			<button
+				key={node.path}
+				type="button"
+				className="flex w-full cursor-pointer items-center gap-1.5 px-1 py-[3px] text-left text-[12.5px] text-ink-muted hover:bg-surface-2 hover:text-ink"
+				style={pad}
+				onClick={() => void readFile(node)}
+			>
+				<span className="text-ink-faint">·</span>
+				<span className="truncate font-mono">{node.name}</span>
+				<span className="ml-auto shrink-0 pr-2 text-[10px] text-ink-faint">{fmtSize(node.size)}</span>
+			</button>
+		);
+	};
+
+	const renderChildrenAt = (node: FsTreeNode, depth: number): React.JSX.Element[] => {
+		if (!node.children) return [];
+		return node.children.flatMap(c => [
+			renderNode(c, depth),
+			...(c.type === "dir" && c.children ? renderChildrenAt(c, depth + 1) : []),
+		]);
+	};
+
+	const renderChildren = (node: FsTreeNode | null): React.JSX.Element[] => renderChildrenAt(node as FsTreeNode, 1);
+
+	return (
+		<div className="grid min-h-0 grid-cols-[minmax(220px,340px)_1fr] gap-4">
+			<div className="min-h-0 overflow-y-auto rounded-lg border border-hairline bg-surface py-1.5">
+				{error && <div className="px-3 py-2 text-[12px] text-danger">{error}</div>}
+				{root && renderNode(root, 0)}
+				{root?.children && renderChildren(root)}
+				{!root && !error && <div className="px-3 py-2 text-[12px] text-ink-faint">加载中…</div>}
+			</div>
+			<div className="min-h-0 overflow-auto rounded-lg border border-hairline bg-surface px-4 py-3">
+				{selected ? (
+					<>
+						<div className="mb-2 flex items-center gap-2">
+							<span className="truncate font-mono text-[12px] text-ink">{selected.path}</span>
+							{selected.truncated && <span className="badge fail">截断（{FS_MAX_READ_HINT}）</span>}
+						</div>
+						<pre className="max-h-[420px] overflow-auto whitespace-pre-wrap text-[12px] leading-relaxed text-ink-muted">
+							{selected.text}
+						</pre>
+					</>
+				) : (
+					<div className="py-10 text-center text-[12px] text-ink-faint">点击左侧目录展开，点文件查看内容</div>
+				)}
+			</div>
+		</div>
+	);
+}
+
+const FS_MAX_READ_HINT = ">128KB 仅显示前段";
+
+function fmtSize(n: number): string {
+	if (n >= 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)}M`;
+	if (n >= 1024) return `${(n / 1024).toFixed(0)}K`;
+	return String(n);
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Prompts tab：聚合 agent 的各类 prompt 配置源
+// ─────────────────────────────────────────────────────────────────────
+
+interface PromptSource {
+	path: string;
+	title: string;
+	desc: string;
+}
+
+const PROMPT_SOURCES: PromptSource[] = [
+	{ path: "mission.md", title: "mission.md", desc: "agent 使命/人格定义（工作方式与长期目标）" },
+	{ path: "user.md", title: "user.md", desc: "用户身份声明（草稿/权威版本之一）" },
+	{ path: ".omp/SYSTEM.md", title: ".omp/SYSTEM.md", desc: "Gateway Agent 系统提示词（IM 场景纪律）" },
+	{ path: "AGENTS.md", title: "AGENTS.md", desc: "仓库级 agent 指南（项目规则/约定）" },
+	{ path: "AGENTS-personal.md", title: "AGENTS-personal.md", desc: "个人版 agent 指南（若存在）" },
+	{ path: "CONTEXT.md", title: "CONTEXT.md", desc: "长期上下文/背景注入" },
+	{ path: "prompt-includes.json", title: "prompt-includes.json", desc: "系统提示注入清单（插件/技能白名单）" },
+];
+
+function PromptsView({ agentId }: { agentId: string }): React.JSX.Element {
+	const store = useSessionStore();
+	const [selectedPath, setSelectedPath] = useState<string | null>(null);
+	const [content, setContent] = useState<{ text: string; truncated: boolean } | null>(null);
+	const [error, setError] = useState<string | null>(null);
+	const [loading, setLoading] = useState(false);
+
+	const open = async (path: string): Promise<void> => {
+		setSelectedPath(path);
+		setLoading(true);
+		setError(null);
+		// 文件不存在是常态（如 AGENTS-personal.md 可能没有）——失败标记为不可用而非报错
+		try {
+			const result = await store.fsRead(agentId, path);
+			setContent(result);
+		} catch (err) {
+			setError(err instanceof Error ? err.message : String(err));
+			setContent(null);
+		}
+		setLoading(false);
+	};
+
+	return (
+		<div className="grid min-h-0 grid-cols-[minmax(220px,320px)_1fr] gap-4">
+			<div className="rounded-lg border border-hairline bg-surface py-1">
+				{PROMPT_SOURCES.map(s => (
+					<button
+						key={s.path}
+						type="button"
+						className={`flex w-full cursor-pointer flex-col gap-0.5 px-3 py-2.5 text-left transition-colors hover:bg-surface-2 ${selectedPath === s.path ? "bg-accent-dim" : ""}`}
+						onClick={() => void open(s.path)}
+					>
+						<span className="font-mono text-[12.5px] font-medium text-ink">{s.title}</span>
+						<span className="text-[11px] leading-snug text-ink-faint">{s.desc}</span>
+					</button>
+				))}
+			</div>
+			<div className="min-h-0 overflow-auto rounded-lg border border-hairline bg-surface px-4 py-3">
+				{loading && <div className="py-8 text-center text-[12px] text-ink-faint">加载中…</div>}
+				{!loading && selectedPath && content && (
+					<>
+						<div className="mb-2 flex items-center gap-2">
+							<span className="truncate font-mono text-[12px] font-medium text-ink">{selectedPath}</span>
+							{content.truncated && <span className="badge fail">{FS_MAX_READ_HINT}</span>}
+						</div>
+						<pre className="max-h-[420px] overflow-auto whitespace-pre-wrap text-[12px] leading-relaxed text-ink-muted">
+							{content.text}
+						</pre>
+					</>
+				)}
+				{!loading && selectedPath && error && (
+					<div className="py-8 text-center text-[12px] text-ink-faint">该文件不存在或不可读（{error}）</div>
+				)}
+				{!loading && !selectedPath && (
+					<div className="py-10 text-center text-[12px] text-ink-faint">点击左侧浏览 agent 的各份 prompt 配置</div>
+				)}
+			</div>
+		</div>
+	);
 }

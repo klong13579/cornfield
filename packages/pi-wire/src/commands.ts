@@ -122,7 +122,15 @@ export type WireExtensionCommand =
 	 * - 有 sessionId：只扫描该 agent（与其它定向命令同语义）
 	 * - limit：返回条数上限（默认 100，最大 500）——按文件 mtime 取最新 N 个再解析
 	 */
-	| { id?: string; type: "list_sessions"; sessionId?: string; limit?: number };
+	| { id?: string; type: "list_sessions"; sessionId?: string; limit?: number }
+	/**
+	 * 只读列出 agent workspace 目录（Agent 详情页文件系统 tab）。
+	 * path 相对 agentDir；省略 = agentDir 根。返回条目（目录在前，名/类型/大小）。
+	 * 路径约束：必须解析在 agentDir 内（防任意读）；越界 ok:false + error。
+	 */
+	| { id?: string; type: "fs_list"; sessionId?: string; path?: string }
+	/** 只读读一个 workspace 文件（文本，utf-8；> 128KB 截断到 128KB）。路径约束同上。 */
+	| { id?: string; type: "fs_read"; sessionId?: string; path: string };
 
 export type WireCommand = MultiplexCommand | WireExtensionCommand;
 

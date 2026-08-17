@@ -155,7 +155,7 @@ function AgentCard({
 			: agent.status === "busy"
 				? "执行中"
 				: agent.status === "idle"
-					? "休眠"
+					? "空闲"
 					: "未挂载";
 
 	return (

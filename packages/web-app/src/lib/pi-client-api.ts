@@ -11,6 +11,13 @@ import type {
 	WireServerEventDto,
 } from "./wire-dto";
 
+/** fs_list 条目（agent workspace 目录项）。 */
+export interface FsEntryDto {
+	name: string;
+	type: "dir" | "file";
+	size: number;
+}
+
 /**
  * pi-client 接口契约（Web 壳消费的唯一数据面）。
  *
@@ -72,4 +79,10 @@ export interface PiClient {
 	getBranchMessages(): Promise<BranchPoint[]>;
 	/** 历史会话索引（list_sessions；be-dev 就绪后返回真数据，未实现时返回基础查询）。 */
 	listSessions(): Promise<SessionRecordSummary[]>;
+
+	// ── 文件系统（Agent 详情页只读浏览）──
+	/** 列出 agent workspace 目录（fs_list，相对 agentDir；省略 path = 根）。 */
+	fsList(sessionId: string, path?: string): Promise<{ entries: FsEntryDto[] }>;
+	/** 读 agent workspace 文件（fs_read；>128KB 截断并标记 truncated）。 */
+	fsRead(sessionId: string, path: string): Promise<{ text: string; truncated: boolean }>;
 }

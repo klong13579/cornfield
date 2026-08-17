@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
+import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { logger } from "@oh-my-pi/pi-utils";
+import { isEnoent, logger } from "@oh-my-pi/pi-utils";
 import type { ClientFrame, ServerFrame, WireCommand, WireEnvironmentSummary, WireServerEvent } from "@oh-my-pi/pi-wire";
 import { MULTIDEVICE_PROTOCOL_VERSION } from "@oh-my-pi/pi-wire";
 import { normalizeHostToolDefinitions } from "../modes/rpc/rpc-mode";
@@ -229,6 +230,48 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 					}));
 					const sessions = await indexSessions(sources, command.limit);
 					done({ sessions });
+					return;
+				}
+				case "fs_list": {
+					const fsCmd = command as { type: "fs_list"; sessionId?: string; path?: string };
+					const agentId = fsCmd.sessionId ?? conn.activeAgentId;
+					const meta = registry.getMeta(agentId);
+					if (!meta) {
+						fail(`unknown agent: ${agentId}`);
+						return;
+					}
+					const target = resolveFsPath(meta.agentDir, fsCmd.path ?? "");
+					if (!target.ok) {
+						fail(target.error);
+						return;
+					}
+					const entries = await listDirEntries(target.path);
+					if (entries.error) {
+						fail(entries.error);
+						return;
+					}
+					done({ path: fsCmd.path ?? "", entries: entries.items });
+					return;
+				}
+				case "fs_read": {
+					const fsCmd = command as { type: "fs_read"; sessionId?: string; path?: string };
+					const agentId = fsCmd.sessionId ?? conn.activeAgentId;
+					const meta = registry.getMeta(agentId);
+					if (!meta) {
+						fail(`unknown agent: ${agentId}`);
+						return;
+					}
+					const target = resolveFsPath(meta.agentDir, fsCmd.path ?? "");
+					if (!target.ok) {
+						fail(target.error);
+						return;
+					}
+					const content = await readTextFileClipped(target.path);
+					if (content.error) {
+						fail(content.error);
+						return;
+					}
+					done({ path: fsCmd.path ?? "", ...content });
 					return;
 				}
 				default:
@@ -618,4 +661,60 @@ async function buildEnvironmentSummary(registry: SessionRegistry): Promise<WireE
 		branch: await git.branch.current(cwd),
 		activeAgentCount: registry.listAttached().length,
 	};
+}
+
+// ── Agent 详情页文件系统（只读）──
+
+const FS_MAX_READ_BYTES = 128 * 1024;
+
+/** 解析 agentDir 内相对路径；拒绝越界（含 .. 逃逸与符号链接逃逸）。 */
+function resolveFsPath(agentDir: string, rel: string): { ok: true; path: string } | { ok: false; error: string } {
+	const resolved = path.resolve(agentDir, rel);
+	if (resolved !== agentDir && !resolved.startsWith(agentDir + path.sep)) {
+		return { ok: false, error: `path escapes agentDir: ${rel}` };
+	}
+	return { ok: true, path: resolved };
+}
+
+/** 列出目录条目（目录在前，按名排序）。 */
+async function listDirEntries(
+	dir: string,
+): Promise<
+	| { items: { name: string; type: "dir" | "file"; size: number }[]; error?: undefined }
+	| { items?: undefined; error: string }
+> {
+	let entries: string[];
+	try {
+		entries = await fs.readdir(dir);
+	} catch (err) {
+		if (isEnoent(err)) return { error: `no such directory: ${path.basename(dir)}` };
+		throw err;
+	}
+	const items = await Promise.all(
+		entries.map(async name => {
+			const full = path.join(dir, name);
+			const stat = await fs.stat(full).catch(() => null);
+			if (!stat) return { name, type: "file" as const, size: 0 };
+			return { name, type: stat.isDirectory() ? ("dir" as const) : ("file" as const), size: stat.size };
+		}),
+	);
+	items.sort((a, b) => (a.type === b.type ? a.name.localeCompare(b.name) : a.type === "dir" ? -1 : 1));
+	return { items };
+}
+
+/** 读文本文件，> 128KB 截断并标记 truncated。 */
+async function readTextFileClipped(
+	file: string,
+): Promise<
+	{ text: string; truncated: boolean; error?: undefined } | { text?: undefined; truncated?: undefined; error: string }
+> {
+	let text: string;
+	try {
+		text = await Bun.file(file).text();
+	} catch (err) {
+		if (isEnoent(err)) return { error: `no such file: ${path.basename(file)}` };
+		throw err;
+	}
+	if (text.length <= FS_MAX_READ_BYTES) return { text, truncated: false };
+	return { text: text.slice(0, FS_MAX_READ_BYTES), truncated: true };
 }
