@@ -5,8 +5,7 @@ import { findPanelByPath } from "./panel-registry";
  * PanelHost — AppShell 的 panel 渲染宿主。
  *
  * - 顶层 panel 路径（如 `/workspace`、`/agents`）→ 从 panelRegistry 精确匹配并渲染 mount() 组件。
- * - 带参子路由（如 `/agents/:id`、`/records/:id`）→ 回退到 react-router 的 Outlet，
- *   由 route config 渲染子页面（S2c 会把 AgentDetailView 迁为详情弹层，届时该分支收窄）。
+ * - 带参子路由（如 `/records/:id`）→ 回退到 react-router 的 Outlet，由 route config 渲染子页面。
  */
 export function PanelHost(): React.JSX.Element {
 	const { pathname } = useLocation();

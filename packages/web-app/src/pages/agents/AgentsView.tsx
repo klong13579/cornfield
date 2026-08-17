@@ -5,6 +5,7 @@ import type { GatewayStatusDto } from "../../lib/pi-client-api";
 import type { AgentInfoDto } from "../../lib/wire-dto";
 import { useSessionStore } from "../../state/session-store";
 import { useSession } from "../../state/use-session";
+import { AgentDetailView } from "./AgentDetailView";
 
 /**
  * Agent 列表（FR-2）—— 数据源：server_snapshot → adapter 映射（view.agents）。
@@ -19,6 +20,7 @@ export function AgentsView(): React.JSX.Element {
 	const [wsFilter, setWsFilter] = useState<string>("all");
 	const [statusFilter, setStatusFilter] = useState<string>("all");
 	const [query, setQuery] = useState("");
+	const [detailId, setDetailId] = useState<string | null>(null);
 
 	// serve 多 Agent 注册表就绪：挂载时拉一次 list_agents（server_snapshot 推送也会更新）
 	useEffect(() => {
@@ -169,7 +171,7 @@ export function AgentsView(): React.JSX.Element {
 										key={agent.id}
 										agent={agent}
 										gatewayBridge={bridgeState(agent.id)}
-										onOpen={() => navigate(`/agents/${agent.id}`)}
+										onOpen={() => setDetailId(agent.id)}
 										onSession={() => {
 											store.attach(agent.id); // lazy attach（幂等）
 											store.switchSession(agent.id); // 切 active 再进工作台
@@ -182,6 +184,11 @@ export function AgentsView(): React.JSX.Element {
 					);
 				})}
 			</div>
+			{detailId && (
+				<div className="fixed inset-0 z-40 overflow-y-auto bg-canvas">
+					<AgentDetailView agentId={detailId} onClose={() => setDetailId(null)} />
+				</div>
+			)}
 		</div>
 	);
 }

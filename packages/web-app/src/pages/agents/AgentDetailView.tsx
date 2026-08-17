@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
 import type { HostToolDefinitionDto, ModelInfoDto } from "../../lib/wire-dto";
 import { useSessionStore } from "../../state/session-store";
 import { useSession } from "../../state/use-session";
@@ -52,8 +51,7 @@ const CRONS = [
 
 const THINKING_LEVELS = ["off", "low", "medium", "high"];
 
-export function AgentDetailView(): React.JSX.Element {
-	const { id = "" } = useParams();
+export function AgentDetailView({ agentId, onClose }: { agentId: string; onClose: () => void }): React.JSX.Element {
 	const view = useSession();
 	const store = useSessionStore();
 	const [tab, setTab] = useState<TabId>("skills");
@@ -87,7 +85,7 @@ export function AgentDetailView(): React.JSX.Element {
 		void store.fetchModels().then(setModels);
 	}, [store]);
 
-	const agent = view.agents.find(a => a.id === id);
+	const agent = view.agents.find(a => a.id === agentId);
 	const name = agent?.name ?? (view.agents.length === 0 ? "等待 Agent 注册表" : "未知 Agent");
 	const provider = agent?.model?.split("/")[0] ?? (view.model ?? "").split("/")[0] ?? "anthropic";
 	const currentModel = agent?.model ?? view.model ?? "";
@@ -136,7 +134,7 @@ export function AgentDetailView(): React.JSX.Element {
 					))}
 				</div>
 
-				{tab === "skills" && <SkillsView agentId={id} />}
+				{tab === "skills" && <SkillsView agentId={agentId} />}
 
 				{tab === "cron" && (
 					<div>
@@ -297,16 +295,20 @@ export function AgentDetailView(): React.JSX.Element {
 					</div>
 				)}
 
-				{tab === "profile" && <ProfileView agentId={id} />}
+				{tab === "profile" && <ProfileView agentId={agentId} />}
 
-				{tab === "files" && <FileExplorer agentId={id} />}
+				{tab === "files" && <FileExplorer agentId={agentId} />}
 
-				{tab === "prompts" && <PromptsView agentId={id} />}
+				{tab === "prompts" && <PromptsView agentId={agentId} />}
 
 				<div className="mt-6">
-					<Link to="/agents" className="text-[12px] text-ink-muted no-underline hover:text-ink hover:underline">
+					<button
+						type="button"
+						className="text-[12px] text-ink-muted no-underline hover:text-ink hover:underline"
+						onClick={onClose}
+					>
 						← 返回 Agent 列表
-					</Link>
+					</button>
 				</div>
 			</div>
 		</div>
