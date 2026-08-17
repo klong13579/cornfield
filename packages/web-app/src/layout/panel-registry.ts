@@ -47,11 +47,7 @@ export function getPanels(): PanelDef[] {
 	});
 }
 
-/** 根据路径查找对应的 panel */
+/** 根据路径精确查找对应的 panel（不向前缀匹配；子路由由 PanelHost 回退到 Outlet） */
 export function findPanelByPath(path: string): PanelDef | undefined {
-	// 精确匹配优先
-	const exact = Array.from(panelRegistry.values()).find(p => p.path === path);
-	if (exact) return exact;
-	// 其次前缀匹配（子路由 fallback 到父 panel）
-	return Array.from(panelRegistry.values()).find(p => path.startsWith(p.path) && p.path !== "/");
+	return Array.from(panelRegistry.values()).find(p => p.path === path);
 }

@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { createBrowserRouter } from "react-router-dom";
 import { AppShell } from "./layout/AppShell";
+import { registerPanel } from "./layout/panel-registry";
 import { AgentDetailView } from "./pages/agents/AgentDetailView";
 import { AgentsView } from "./pages/agents/AgentsView";
 import { HomeView } from "./pages/home/HomeView";
@@ -22,26 +23,112 @@ import { TodoView } from "./pages/todo/TodoView";
 import { VoiceView } from "./pages/voice/VoiceView";
 import { WorkspaceView } from "./pages/workspace/WorkspaceView";
 
-/**
- * 页面 meta 注册表（页面名/路由/导航分组/覆盖协议）—— 侧栏与面包屑均由此驱动。
- * 加页面 = 数组加一项（侧栏与面包屑均由此驱动）。
- */
+// ── Panel 注册 ────────────────────────────────────────────────────────
+// 每个 panel 注册进全局注册表；AppSidebar 从注册表渲染导航，
+// 路由定义也从注册表生成（保持单源真理）。
+
+/** 注册所有 panel */
+function registerAllPanels(): void {
+	registerPanel({
+		id: "home",
+		title: "Home",
+		icon: House,
+		group: "primary",
+		order: 1,
+		path: "/",
+		mount: () => HomeView,
+	});
+
+	registerPanel({
+		id: "workspace",
+		title: "会话工作台",
+		icon: MessagesSquare,
+		group: "primary",
+		order: 2,
+		path: "/workspace",
+		mount: () => WorkspaceView,
+	});
+
+	registerPanel({
+		id: "agents",
+		title: "Agent 管理",
+		icon: Bot,
+		group: "primary",
+		order: 3,
+		path: "/agents",
+		mount: () => AgentsView,
+	});
+
+	registerPanel({
+		id: "records",
+		title: "会话记录",
+		icon: Clock,
+		group: "primary",
+		order: 4,
+		path: "/records",
+		mount: () => RecordsView,
+	});
+
+	registerPanel({
+		id: "voice",
+		title: "语音",
+		icon: Mic,
+		group: "primary",
+		order: 5,
+		path: "/voice",
+		mount: () => VoiceView,
+	});
+
+	registerPanel({
+		id: "todo",
+		title: "Todo 面板",
+		icon: ListChecks,
+		group: "primary",
+		order: 6,
+		path: "/todo",
+		mount: () => TodoView,
+	});
+
+	registerPanel({
+		id: "models",
+		title: "模型市场",
+		icon: Cpu,
+		group: "primary",
+		order: 7,
+		path: "/models",
+		mount: () => ModelsView,
+	});
+
+	registerPanel({
+		id: "settings",
+		title: "设置",
+		icon: SlidersHorizontal,
+		group: "bottom",
+		order: 1,
+		path: "/settings",
+		mount: () => SettingsView,
+	});
+}
+
+registerAllPanels();
+
+// ── 兼容导出：PageMeta / PAGE_META / findPageMeta ─────────────────────
+// 下游组件（AppTopbar 等）仍依赖这些符号，保持兼容直到迁移完成。
+
+/** @deprecated 使用 panel-registry.ts 中的 PanelDef / getPanels */
 export interface PageMeta {
 	id: string;
 	path: string;
 	name: string;
-	/** 顶栏面包屑末级文案。 */
 	breadcrumb: string;
 	group: "primary" | "bottom";
-	/** primary 导航位次（1 起）。 */
 	order: number;
 	icon: LucideIcon;
-	/** 覆盖协议（requirements 修订的 wire 命令面），作页面角标展示。 */
 	protocol: string[];
-	/** 页面自带顶栏（workspace 有 conn/项目/操作区，不套通用顶栏）。 */
 	customTopbar?: boolean;
 }
 
+/** @deprecated 使用 getPanels() */
 export const PAGE_META: PageMeta[] = [
 	{
 		id: "home",
@@ -51,7 +138,7 @@ export const PAGE_META: PageMeta[] = [
 		group: "primary",
 		order: 1,
 		icon: House,
-		protocol: ["get_state（环境摘要）", "subscribe（活跃 agent 状态）"],
+		protocol: ["get_state", "subscribe"],
 	},
 	{
 		id: "workspace",
@@ -61,10 +148,7 @@ export const PAGE_META: PageMeta[] = [
 		group: "primary",
 		order: 2,
 		icon: MessagesSquare,
-		protocol: [
-			"prompt, steer, follow_up, abort, abort_and_prompt, get_snapshot, set_model, set_thinking_level, compact, set_todos, subscribe",
-			"session_snapshot, progress",
-		],
+		protocol: ["prompt", "subscribe"],
 		customTopbar: true,
 	},
 	{
@@ -75,7 +159,7 @@ export const PAGE_META: PageMeta[] = [
 		group: "primary",
 		order: 3,
 		icon: Bot,
-		protocol: ["get_state, get_available_models, switch_session", "server_snapshot"],
+		protocol: ["get_state", "server_snapshot"],
 	},
 	{
 		id: "records",
@@ -85,7 +169,7 @@ export const PAGE_META: PageMeta[] = [
 		group: "primary",
 		order: 4,
 		icon: Clock,
-		protocol: ["get_messages, get_session_stats, get_branch_messages"],
+		protocol: ["get_messages"],
 	},
 	{
 		id: "voice",
@@ -95,7 +179,7 @@ export const PAGE_META: PageMeta[] = [
 		group: "primary",
 		order: 5,
 		icon: Mic,
-		protocol: ["prompt（语音转文字后发送）", "session_snapshot"],
+		protocol: ["prompt"],
 	},
 	{
 		id: "todo",
@@ -105,7 +189,7 @@ export const PAGE_META: PageMeta[] = [
 		group: "primary",
 		order: 6,
 		icon: ListChecks,
-		protocol: ["set_todos, get_state", "session_snapshot"],
+		protocol: ["set_todos"],
 	},
 	{
 		id: "models",
@@ -115,7 +199,7 @@ export const PAGE_META: PageMeta[] = [
 		group: "primary",
 		order: 7,
 		icon: Cpu,
-		protocol: ["get_available_models, set_model, cycle_model, set_thinking_level", "session_snapshot"],
+		protocol: ["get_available_models"],
 	},
 	{
 		id: "settings",
@@ -125,14 +209,16 @@ export const PAGE_META: PageMeta[] = [
 		group: "bottom",
 		order: 1,
 		icon: SlidersHorizontal,
-		protocol: ["hello, set_auto_compaction, set_auto_retry", "subscribe"],
+		protocol: ["hello", "subscribe"],
 	},
 ];
 
+/** @deprecated 使用 findPanelByPath */
 export function findPageMeta(pathname: string): PageMeta | undefined {
-	// 精确匹配优先，其次前缀（agent-detail 等子路由用父 meta）
 	return PAGE_META.find(p => p.path === pathname) ?? PAGE_META.find(p => pathname.startsWith(p.path));
 }
+
+// ── 路由导出 ──────────────────────────────────────────────────────────
 
 export const router = createBrowserRouter([
 	{
@@ -148,7 +234,7 @@ export const router = createBrowserRouter([
 			{ path: "/todo", element: <TodoView /> },
 			{ path: "/models", element: <ModelsView /> },
 			{ path: "/settings", element: <SettingsView /> },
-			// P5 移动端裁剪：走 workspace 同代码 + responsive breakpoint（DevicePreview iframe 用）
+			// P5 移动端裁剪
 			{ path: "/m", element: <WorkspaceView compact /> },
 		],
 	},
