@@ -11,6 +11,7 @@ import {
 	type SessionRecordSummary,
 } from "../../lib/records";
 import { useSessionStore } from "../../state/session-store";
+import { useSession } from "../../state/use-session";
 
 /**
  * 会话记录列表（FR-3）—— 行式列表（15px 名称 + 状态 badge）+ 筛选/搜索 + 操作列。
@@ -20,6 +21,7 @@ import { useSessionStore } from "../../state/session-store";
 export function RecordsView(): React.JSX.Element {
 	const navigate = useNavigate();
 	const store = useSessionStore();
+	const view = useSession();
 	const [dateFilter, setDateFilter] = useState("all");
 	const [agentFilter, setAgentFilter] = useState("all");
 	const [statusFilter, setStatusFilter] = useState<"all" | RecordStatus>("all");
@@ -29,8 +31,9 @@ export function RecordsView(): React.JSX.Element {
 	// be-dev list_sessions 真索引（就绪前回退 8 行 mock 骨架）
 	const [serveRows, setServeRows] = useState<SessionRecordSummary[]>([]);
 
-	// 当前 attached session 真数据（get_messages 已实现）：行「当前会话」
+	// 当前 attached session 真数据（get_messages 已实现）：行「当前会话」；连接就绪后拉
 	useEffect(() => {
+		if (!view.connected) return;
 		store
 			.getMessages()
 			.then(entries =>
@@ -44,17 +47,18 @@ export function RecordsView(): React.JSX.Element {
 				}),
 			)
 			.catch(() => undefined);
-	}, [store]);
+	}, [store, view.connected]);
 
-	// list_sessions：be-dev 就绪后返回真索引，替换 mock；未实现时空数组回退骨架
+	// list_sessions：连接就绪后拉真索引；未实现/失败时空数组回退骨架
 	useEffect(() => {
+		if (!view.connected) return;
 		store
 			.listSessions()
 			.then(list => {
 				if (list.length > 0) setServeRows(list);
 			})
 			.catch(() => undefined);
-	}, [store]);
+	}, [store, view.connected]);
 
 	const handleExport = (row: SessionRecordSummary) => {
 		const name = `${row.name.replace(/[/\\:]/g, "-")}.jsonl`;

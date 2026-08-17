@@ -2,7 +2,7 @@ import type { PiClientEventKind } from "@oh-my-pi/pi-client";
 import { PiClient as WirePiClient } from "@oh-my-pi/pi-client";
 import type { WireCommand } from "@oh-my-pi/pi-wire";
 import type { PiClient } from "../lib/pi-client-api";
-import type { BranchPoint, PlaybackEntry, PlaybackToolStep, SessionRecordSummary } from "../lib/records";
+import type { BranchPoint, PlaybackEntry, PlaybackToolStep, RecordStatus, SessionRecordSummary } from "../lib/records";
 import type {
 	AgentInfoDto,
 	ConnectionInfoDto,
@@ -14,6 +14,19 @@ import type {
 	WireServerEventDto,
 } from "../lib/wire-dto";
 import { FALLBACK_MODELS } from "./fallback-models";
+
+/** serve list_sessions 响应条目（WireSessionIndexEntry，字段名以 pi-wire 为准）。 */
+interface WireSessionIndexEntryDto {
+	sessionId: string;
+	agentId?: string;
+	agentName?: string;
+	title?: string;
+	startTime: string;
+	endTime?: string;
+	messageCount: number;
+	status?: "completed" | "aborted" | "error" | "incomplete" | "unknown";
+	sessionFile?: string;
+}
 
 /**
  * 真实 `@oh-my-pi/pi-client` 适配器 —— 实现 web-app 内部契约（lib/pi-client-api.ts）。
@@ -241,15 +254,24 @@ export class PiClientAdapter implements PiClient {
 	}
 
 	/**
-	 * 历史会话索引（be-dev list_sessions 命令；未实现时 catch 返回空，调用方回退 mock 骨架）。
-	 * TODO(@be-dev): list_sessions 就绪后返回 {sessions:[{id,name,agent,startedAt,messageCount,status,sessionFile}]}。
+	 * 历史会话索引（serve list_sessions）。
+	 * 后端返回 WireSessionIndexEntry（sessionId/title/startTime/endTime/agentName/status/sessionFile），
+	 * 映射到前端 SessionRecordSummary（id/name/agent/startedAt）。未实现时 catch 返回空，调用方回退 mock。
 	 */
 	async listSessions(): Promise<SessionRecordSummary[]> {
 		try {
-			const result = await this.#req<{ sessions?: SessionRecordSummary[] }>({ type: "list_sessions" });
-			return result.sessions ?? [];
+			const result = await this.#req<{ sessions?: WireSessionIndexEntryDto[] }>({ type: "list_sessions" });
+			return (result.sessions ?? []).map(s => ({
+				id: s.sessionId,
+				name: s.title ?? s.sessionId.slice(0, 8),
+				agent: s.agentName ?? s.agentId ?? "default",
+				startedAt: s.startTime,
+				messageCount: s.messageCount,
+				status: (s.status ?? "unknown") as RecordStatus,
+				sessionFile: s.sessionFile,
+			}));
 		} catch (err) {
-			console.warn("[web-app] list_sessions unavailable (be-dev not ready), fallback mock", err);
+			console.warn("[web-app] list_sessions unavailable, fallback mock", err);
 			return [];
 		}
 	}
