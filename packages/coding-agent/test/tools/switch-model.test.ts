@@ -89,6 +89,42 @@ describe("resolveModel", () => {
 		];
 		expect(resolveModel(models, "narwal-plan/minimax-m3")?.provider).toBe("narwal-plan");
 	});
+
+	it("prefers recommended models within a match tier", () => {
+		// Exact id matches both providers — the recommended one wins.
+		const models = [
+			makeModel({ provider: "narwal-plan", id: "minimax-m3", name: "MiniMax M3" }),
+			makeModel({ provider: "openai", id: "minimax-m3", name: "MiniMax via OpenAI" }),
+		];
+		expect(resolveModel(models, "minimax-m3", ["openai/minimax-m3"])?.provider).toBe("openai");
+		// Without a recommendation the original first-match order stands.
+		expect(resolveModel(models, "minimax-m3")?.provider).toBe("narwal-plan");
+	});
+
+	it("prefers recommended models in fuzzy substring matches", () => {
+		// "claude" matches both claude models — the recommended one wins over first-in-list.
+		const models = [
+			makeModel({ provider: "anthropic", id: "claude-opus-4-5", name: "Claude Opus 4.5" }),
+			makeModel({ provider: "anthropic", id: "claude-haiku-4-5", name: "Claude Haiku 4.5" }),
+		];
+		expect(resolveModel(models, "claude", ["anthropic/claude-haiku-4-5"])?.id).toBe("claude-haiku-4-5");
+	});
+
+	it("prefers recommended models in display-name matches", () => {
+		const models = [
+			makeModel({ provider: "openai", id: "gpt-5", name: "GPT-5" }),
+			makeModel({ provider: "openai", id: "gpt-5-mini", name: "GPT-5 mini" }),
+		];
+		expect(resolveModel(models, "GPT", ["openai/gpt-5-mini"])?.id).toBe("gpt-5-mini");
+	});
+
+	it("falls back to first candidate when the preferred set has no match", () => {
+		const models = [
+			makeModel({ provider: "narwal-plan", id: "minimax-m3" }),
+			makeModel({ provider: "openai", id: "minimax-m3" }),
+		];
+		expect(resolveModel(models, "minimax-m3", ["anthropic/claude-opus-4-5"])?.provider).toBe("narwal-plan");
+	});
 });
 
 function makeSession(overrides: Partial<ToolSession> = {}): ToolSession {
@@ -230,5 +266,24 @@ describe("SwitchModelTool", () => {
 			newModel: "narwal-plan/minimax-m3",
 			role: "default",
 		});
+	});
+
+	it("feeds recommended models from settings into resolution", async () => {
+		const setModel = mock(async () => {});
+		const settings = {
+			get: () => true,
+			getRecommendedModels: () => ["openai/minimax-m3"],
+		} as unknown as ToolSession["settings"];
+		const models = [
+			makeModel({ provider: "narwal-plan", id: "minimax-m3" }),
+			makeModel({ provider: "openai", id: "minimax-m3" }),
+		];
+		const tool = new SwitchModelTool(makeSession({ setModel, settings, getAvailableModels: () => models }));
+		const result = await tool.execute("call-13", { query: "minimax-m3" });
+
+		expect(setModel).toHaveBeenCalledTimes(1);
+		const calledWith = (setModel.mock.calls[0] as unknown[])[0] as Model;
+		expect(calledWith.provider).toBe("openai");
+		expect((result.content[0] as { type: "text"; text: string }).text).toContain("openai/minimax-m3");
 	});
 });

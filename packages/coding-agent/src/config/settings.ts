@@ -429,6 +429,30 @@ export class Settings {
 		return this.getPinned().includes(modelKey);
 	}
 
+	/**
+	 * Get the list of recommended model keys ("provider/modelId").
+	 * Persisted in config.yml under the `recommendedModels` key.
+	 * Recommended models are prioritized when selecting/switching models.
+	 */
+	getRecommendedModels(): string[] {
+		const value = this.get("recommendedModels");
+		return Array.isArray(value) ? value.filter((k): k is string => typeof k === "string") : [];
+	}
+
+	/**
+	 * Replace the recommended model list.
+	 */
+	setRecommendedModels(recommended: string[]): void {
+		this.set("recommendedModels", recommended);
+	}
+
+	/**
+	 * Check if a model is in the recommended list.
+	 */
+	isRecommended(modelKey: string): boolean {
+		return this.getRecommendedModels().includes(modelKey);
+	}
+
 	/*
 	 * Override model roles (helper for modelRoles record).
 	 */

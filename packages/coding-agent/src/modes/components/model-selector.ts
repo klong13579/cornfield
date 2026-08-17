@@ -374,7 +374,10 @@ export class ModelSelectorComponent extends Container {
 	}
 
 	#sortModels(models: ModelItem[]): void {
-		// Sort: tagged models (default/smol/slow/plan) first, then MRU, then alphabetical
+		// Sort: recommended models first (in configured order), then tagged models
+		// (default/smol/slow/plan), then MRU, then alphabetical
+		const recommendedOrder = this.#settings.getRecommendedModels();
+		const recommendedIndex = new Map(recommendedOrder.map((key, i) => [key, i]));
 		const mruOrder = this.#settings.getStorage()?.getModelUsageOrder() ?? [];
 		const mruIndex = new Map(mruOrder.map((key, i) => [key, i]));
 
@@ -386,6 +389,15 @@ export class ModelSelectorComponent extends Container {
 		models.sort((a, b) => {
 			const aKey = a.selector;
 			const bKey = b.selector;
+
+			// Recommended models outrank role bindings and MRU (in configured order).
+			const aRec = recommendedIndex.get(aKey);
+			const bRec = recommendedIndex.get(bKey);
+			if (aRec !== undefined || bRec !== undefined) {
+				const aRecRank = aRec ?? Number.MAX_SAFE_INTEGER;
+				const bRecRank = bRec ?? Number.MAX_SAFE_INTEGER;
+				if (aRecRank !== bRecRank) return aRecRank - bRecRank;
+			}
 
 			const aRank = modelRank(a);
 			const bRank = modelRank(b);
@@ -437,12 +449,23 @@ export class ModelSelectorComponent extends Container {
 	}
 
 	#sortCanonicalModels(models: CanonicalModelItem[]): void {
+		const recommendedOrder = this.#settings.getRecommendedModels();
+		const recommendedIndex = new Map(recommendedOrder.map((key, i) => [key, i]));
 		const mruOrder = this.#settings.getStorage()?.getModelUsageOrder() ?? [];
 		const mruIndex = new Map(mruOrder.map((key, i) => [key, i]));
 
 		const modelRank = (item: CanonicalModelItem) => computeModelRank(item.model, this.#roles);
 
 		models.sort((a, b) => {
+			// Recommended models outrank role bindings and MRU (in configured order).
+			const aRec = recommendedIndex.get(`${a.model.provider}/${a.model.id}`);
+			const bRec = recommendedIndex.get(`${b.model.provider}/${b.model.id}`);
+			if (aRec !== undefined || bRec !== undefined) {
+				const aRecRank = aRec ?? Number.MAX_SAFE_INTEGER;
+				const bRecRank = bRec ?? Number.MAX_SAFE_INTEGER;
+				if (aRecRank !== bRecRank) return aRecRank - bRecRank;
+			}
+
 			const aRank = modelRank(a);
 			const bRank = modelRank(b);
 			if (aRank !== bRank) return aRank - bRank;

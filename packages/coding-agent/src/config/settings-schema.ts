@@ -247,6 +247,11 @@ export const SETTINGS_SCHEMA = {
 
 	pinned: { type: "array", default: EMPTY_STRING_ARRAY },
 
+	// Models prioritized when selecting/switching: configured recommends outrank
+	// role bindings, MRU, and alphabetical order in the model selector and in
+	// fuzzy model resolution (switch_model).
+	recommendedModels: { type: "array", default: EMPTY_STRING_ARRAY },
+
 	modelTags: { type: "record", default: EMPTY_MODEL_TAGS_RECORD },
 
 	modelProviderOrder: { type: "array", default: EMPTY_STRING_ARRAY },
@@ -2622,6 +2627,7 @@ export interface GroupTypeMap {
 	stt: SttSettings;
 	modelRoles: Record<string, string>;
 	pinned: string[];
+	recommendedModels: string[];
 	modelTags: ModelTagsSettings;
 	cycleOrder: string[];
 	shellMinimizer: ShellMinimizerSettings;

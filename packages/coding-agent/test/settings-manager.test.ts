@@ -152,4 +152,21 @@ describe("Settings", () => {
 			expect(settings.getPinned()).toEqual(["anthropic/claude-opus-4-5"]);
 		});
 	});
+
+	describe("recommended model list", () => {
+		it("defaults to empty", () => {
+			const settings = Settings.isolated();
+			expect(settings.getRecommendedModels()).toEqual([]);
+			expect(settings.isRecommended("alibaba-coding-plan/qwen3-coder-plus")).toBe(false);
+		});
+
+		it("setRecommendedModels replaces list and preserves configured order", () => {
+			const settings = Settings.isolated();
+			settings.setRecommendedModels(["anthropic/claude-opus-4-5", "narwal-plan/minimax-m3"]);
+			expect(settings.getRecommendedModels()).toEqual(["anthropic/claude-opus-4-5", "narwal-plan/minimax-m3"]);
+			expect(settings.isRecommended("anthropic/claude-opus-4-5")).toBe(true);
+			expect(settings.isRecommended("narwal-plan/minimax-m3")).toBe(true);
+			expect(settings.isRecommended("alibaba-coding-plan/qwen3-coder-plus")).toBe(false);
+		});
+	});
 });

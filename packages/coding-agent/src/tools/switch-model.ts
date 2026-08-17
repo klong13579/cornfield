@@ -76,7 +76,7 @@ export class SwitchModelTool implements AgentTool<typeof switchModelSchema, Swit
 			);
 		}
 
-		const match = resolveModel(models, params.query);
+		const match = resolveModel(models, params.query, this.session.settings.getRecommendedModels?.());
 		if (!match) {
 			const hint = models
 				.slice(0, 10)
@@ -139,53 +139,71 @@ export class SwitchModelTool implements AgentTool<typeof switchModelSchema, Swit
  *    so `kimi`, `kimi2.6`, `kimi k2.6` all match `kimi-k2.6`
  * 5. Display name substring (case-insensitive)
  *
+ * Within each tier, models from `preferredKeys` ("provider/modelId") are picked
+ * before other candidates while the rest keep their original order — mirroring
+ * the model selector's "recommended models first" sorting. Pass the session's
+ * `recommendedModels` config to honor it during llm-driven switches.
+ *
  * Returns null if nothing matched. Caller surfaces the candidate list on miss.
  */
-export function resolveModel(models: Model[], query: string): Model | null {
+export function resolveModel(models: Model[], query: string, preferredKeys?: readonly string[]): Model | null {
 	const q = query.trim().toLowerCase();
 	if (!q) return null;
+
+	const preferred = new Set(preferredKeys ?? []);
+
+	// Pick from ordered candidates: preferred (recommended) models win; otherwise
+	// the first candidate in original order is returned. Equivalent to the
+	// previous `find` semantics when preferredKeys is empty/undefined.
+	const pick = (candidates: Model[]): Model | null => {
+		if (candidates.length === 0) return null;
+		if (preferred.size === 0) return candidates[0];
+		return candidates.find(m => preferred.has(`${m.provider}/${m.id}`)) ?? candidates[0];
+	};
 
 	// 1. exact provider/id (slash or colon)
 	for (const sep of ["/", ":"]) {
 		if (q.includes(sep)) {
 			const [p, m] = q.split(sep, 2);
-			const exact = models.find(x => x.provider.toLowerCase() === p && x.id.toLowerCase() === m);
-			if (exact) return exact;
+			const hit = pick(models.filter(x => x.provider.toLowerCase() === p && x.id.toLowerCase() === m));
+			if (hit) return hit;
 		}
 	}
 
 	// 2. exact provider (returns first model under that provider)
-	const exactProvider = models.find(x => x.provider.toLowerCase() === q);
-	if (exactProvider) return exactProvider;
+	const provHit = pick(models.filter(x => x.provider.toLowerCase() === q));
+	if (provHit) return provHit;
 
 	// 3. exact id
-	const exactId = models.find(x => x.id.toLowerCase() === q);
-	if (exactId) return exactId;
+	const idHit = pick(models.filter(x => x.id.toLowerCase() === q));
+	if (idHit) return idHit;
 
 	// 4. normalized substring (strip - _ . and spaces)
 	const normalized = q.replace(/[-_.]/g, "").replace(/\s+/g, "");
 	if (normalized) {
-		const sub = models.find(x => {
-			const mid = x.id.toLowerCase();
-			const mprovider = x.provider.toLowerCase();
-			const midNorm = mid.replace(/[-_.]/g, "");
-			const mproviderNorm = mprovider.replace(/[-_.]/g, "");
-			return (
-				mid.includes(q) ||
-				q.includes(mid) ||
-				midNorm.includes(normalized) ||
-				normalized.includes(midNorm) ||
-				mprovider.includes(q) ||
-				q.includes(mprovider) ||
-				mproviderNorm.includes(normalized) ||
-				normalized.includes(mproviderNorm)
-			);
-		});
-		if (sub) return sub;
+		const subHit = pick(
+			models.filter(x => {
+				const mid = x.id.toLowerCase();
+				const mprovider = x.provider.toLowerCase();
+				const midNorm = mid.replace(/[-_.]/g, "");
+				const mproviderNorm = mprovider.replace(/[-_.]/g, "");
+				return (
+					mid.includes(q) ||
+					q.includes(mid) ||
+					midNorm.includes(normalized) ||
+					normalized.includes(midNorm) ||
+					mprovider.includes(q) ||
+					q.includes(mprovider) ||
+					mproviderNorm.includes(normalized) ||
+					normalized.includes(mproviderNorm)
+				);
+			}),
+		);
+		if (subHit) return subHit;
 	}
 
 	// 5. display name
-	const nameHit = models.find(x => x.name?.toLowerCase().includes(q));
+	const nameHit = pick(models.filter(x => x.name?.toLowerCase().includes(q)));
 	if (nameHit) return nameHit;
 
 	return null;
