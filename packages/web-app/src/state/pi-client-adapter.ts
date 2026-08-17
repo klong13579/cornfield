@@ -452,7 +452,24 @@ export class PiClientAdapter implements PiClient {
 
 /** AgentMessage（真实快照/get_messages 返回形状）→ 播放时间线条目。 */
 function toPlaybackEntries(messages: unknown[]): PlaybackEntry[] {
-	const result = new Map<string, { isError?: boolean; text: string }>();
+	// 独立 toolResult 顶层消息（role:"toolResult"，serve 快照/JSONL 形状）→ 按 toolCallId 归并，
+	// 供下面渲染时挂回对应 toolCall（结果在消息自己的 content 内联形状时直接在循环内读取）。
+	const standaloneResults = new Map<string, { isError?: boolean; text: string }>();
+	for (const raw of messages) {
+		if (!raw || typeof raw !== "object") continue;
+		const m = raw as { role?: string; toolCallId?: string; isError?: boolean; content?: unknown };
+		if (m.role !== "toolResult" || !m.toolCallId) continue;
+		const parts = Array.isArray(m.content) ? (m.content as { type?: string; text?: string }[]) : [];
+		standaloneResults.set(m.toolCallId, {
+			isError: m.isError,
+			text: parts
+				.filter((c): c is { type: "text"; text: string } => c.type === "text")
+				.map(c => c.text)
+				.join("\n"),
+		});
+	}
+
+	const result = new Map<string, { isError?: boolean; text: string }>(standaloneResults);
 	const entries: PlaybackEntry[] = [];
 
 	for (const raw of messages) {
@@ -619,8 +636,6 @@ function normalizeProgress(event: unknown): ProgressEventDto | null {
 	return null;
 }
 
-/** 生命周期事件（turn/agent 起止）——透传给 store 的 #applyProgress 以归零 isStreaming/相位。 */
-const LIFECYCLE_EVENTS = new Set(["turn_start", "turn_end", "agent_start", "agent_end"]);
 /** serve get_available_models 返回的 Model 形状（pi-ai Model 的子集映射）。 */
 interface ServeModelLike {
 	id: string;

@@ -26,7 +26,7 @@ export function RecordsView(): React.JSX.Element {
 	const [query, setQuery] = useState("");
 
 	const [currentSummary, setCurrentSummary] = useState<SessionRecordSummary | null>(null);
-	// be-dev list_sessions 真索引（就绪前回退 8 行 mock 骨架）
+	// serve list_sessions 真索引（连接就绪后拉取）
 	const [serveRows, setServeRows] = useState<SessionRecordSummary[]>([]);
 
 	// 当前 attached session 真数据（get_messages 已实现）：行「当前会话」；连接就绪后拉
@@ -47,7 +47,7 @@ export function RecordsView(): React.JSX.Element {
 			.catch(() => undefined);
 	}, [store, view.connected]);
 
-	// list_sessions：连接就绪后拉真索引；未实现/失败时空数组回退骨架
+	// list_sessions：连接就绪后拉真索引；未连接/失败时保持空列表（不造数据）
 	useEffect(() => {
 		if (!view.connected) return;
 		store
@@ -206,8 +206,8 @@ export function RecordsView(): React.JSX.Element {
 				</div>
 
 				<div className="mt-3 text-[11px] text-ink-faint">
-					历史会话索引待 be-dev 记录系命令（get_messages/get_branch_messages 已支持当前会话）；「当前会话」行来自
-					serve 真数据，其余为骨架样例。
+					数据来自 serve list_sessions 真索引；「当前会话」行来自 get_messages
+					真数据。历史会话时间线回放/导出待后端 JSONL 读取命令。
 				</div>
 			</div>
 		</div>
