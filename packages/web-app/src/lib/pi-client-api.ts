@@ -18,6 +18,22 @@ export interface FsEntryDto {
 	size: number;
 }
 
+/** gateway 运行状态（gateway_status 命令转发 gateway.status.json）。 */
+export interface GatewayStatusDto {
+	pid?: number;
+	statusWrittenAt?: number;
+	/** 状态文件是否陈旧（写入距今 > 30s —— gateway 可能已退出）。 */
+	stale: boolean;
+	accounts: {
+		accountId: string;
+		bridgeRunning?: boolean;
+		bridgeState?: string;
+		channelConnected?: boolean;
+		agentDir?: string;
+	}[];
+	scheduler?: { running?: boolean; taskCount?: number } | null;
+}
+
 /**
  * pi-client 接口契约（Web 壳消费的唯一数据面）。
  *
@@ -85,4 +101,6 @@ export interface PiClient {
 	fsList(sessionId: string, path?: string): Promise<{ entries: FsEntryDto[] }>;
 	/** 读 agent workspace 文件（fs_read；>128KB 截断并标记 truncated）。 */
 	fsRead(sessionId: string, path: string): Promise<{ text: string; truncated: boolean }>;
+	/** 本机 gateway 运行状态（gateway_status；未运行/文件缺失抛错）。 */
+	gatewayStatus(): Promise<GatewayStatusDto>;
 }

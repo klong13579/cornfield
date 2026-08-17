@@ -1,7 +1,7 @@
 import type { PiClientEventKind } from "@oh-my-pi/pi-client";
 import { PiClient as WirePiClient } from "@oh-my-pi/pi-client";
 import type { WireCommand } from "@oh-my-pi/pi-wire";
-import type { FsEntryDto, PiClient } from "../lib/pi-client-api";
+import type { FsEntryDto, GatewayStatusDto, PiClient } from "../lib/pi-client-api";
 import type { BranchPoint, PlaybackEntry, PlaybackToolStep, RecordStatus, SessionRecordSummary } from "../lib/records";
 import type {
 	AgentInfoDto,
@@ -320,6 +320,11 @@ export class PiClientAdapter implements PiClient {
 			path,
 		} as never);
 		return { text: result.text ?? "", truncated: result.truncated === true };
+	}
+
+	/** 本机 gateway 运行状态（gateway_status；serve 转发 gateway.status.json）。 */
+	async gatewayStatus(): Promise<GatewayStatusDto> {
+		return this.#req<GatewayStatusDto>({ type: "gateway_status" } as never);
 	}
 
 	// hostToolResult：pi-client 无裸帧发送 API（host_tool_result 是独立 client frame），

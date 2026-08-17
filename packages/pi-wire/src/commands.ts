@@ -130,7 +130,13 @@ export type WireExtensionCommand =
 	 */
 	| { id?: string; type: "fs_list"; sessionId?: string; path?: string }
 	/** 只读读一个 workspace 文件（文本，utf-8；> 128KB 截断到 128KB）。路径约束同上。 */
-	| { id?: string; type: "fs_read"; sessionId?: string; path: string };
+	| { id?: string; type: "fs_read"; sessionId?: string; path: string }
+	/**
+	 * 读取本机 gateway 运行状态（~/.omp/gateway-data/gateway.status.json 只读转发，
+	 * gateway 定期写盘）。返回 accounts（bridgeRunning/bridgeState/channelHealth）+
+	 * scheduler/pid；statusWrittenAt 距今超 30s 视为 stale。gateway 未运行返回 ok:false。
+	 */
+	| { id?: string; type: "gateway_status" };
 
 export type WireCommand = MultiplexCommand | WireExtensionCommand;
 

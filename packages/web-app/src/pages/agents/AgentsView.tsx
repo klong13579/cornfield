@@ -1,7 +1,8 @@
-import { Search, TerminalSquare } from "lucide-react";
+import { Search, Server, TerminalSquare } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { AgentInfoDto } from "../../lib/wire-dto";
+import type { GatewayStatusDto } from "../../lib/pi-client-api";
 import { useSessionStore } from "../../state/session-store";
 import { useSession } from "../../state/use-session";
 
@@ -24,6 +25,35 @@ export function AgentsView(): React.JSX.Element {
 		void store.fetchAgents();
 	}, [store]);
 
+	// gateway 运行状态（gateway_status → gateway.status.json，30s stale 刷新）
+	const [gwStatus, setGwStatus] = useState<GatewayStatusDto | null>(null);
+	const [gwError, setGwError] = useState<string | null>(null);
+	useEffect(() => {
+		let cancelled = false;
+		const load = async (): Promise<void> => {
+			try {
+				const s = await store.gatewayStatus();
+				if (!cancelled) {
+					setGwStatus(s);
+					setGwError(null);
+				}
+			} catch (err) {
+				if (!cancelled) setGwError(err instanceof Error ? err.message : String(err));
+			}
+		};
+		if (view.connected) void load();
+		const t = setInterval(() => {
+			if (view.connected) void load();
+		}, 15_000);
+		return () => {
+			cancelled = true;
+			clearInterval(t);
+		};
+	}, [store, view.connected]);
+
+	const bridgeState = (account: string): string | undefined =>
+		gwStatus?.accounts.find(a => a.accountId === account)?.bridgeState;
+
 	const workspaces = useMemo(() => Array.from(new Set(agents.map(a => a.workspace))), [agents]);
 
 	const filtered = agents.filter(agent => {
@@ -42,6 +72,30 @@ export function AgentsView(): React.JSX.Element {
 					<h1 className="text-[32px] font-semibold tracking-[-0.8px] text-ink">Agent</h1>
 					<span className="text-[13px] text-ink-faint">
 						{workspaces.length} 工作区 · {agents.length} agent · {running} 运行中
+					</span>
+				</div>
+
+				{/* gateway 运行状态条（gateway.status.json 只读转发；与 serve 视角互补） */}
+				<div className="mb-6 flex items-center gap-2.5 rounded-lg border border-hairline bg-surface px-4 py-2.5">
+					<Server size={14} strokeWidth={1.5} className="shrink-0 text-ink-subtle" />
+					<span className="text-[12px] text-ink-subtle">
+						gateway{gwStatus ? ` · pid ${gwStatus.pid ?? "?"}` : ""}
+						{gwStatus?.stale ? " · 状态陈旧" : gwStatus ? " · 运行中" : ""}
+					</span>
+					{gwStatus?.scheduler && (
+						<span className="badge done">调度器 {gwStatus.scheduler.taskCount ?? 0} 任务</span>
+					)}
+					{gwError && <span className="text-[12px] text-ink-faint">（{gwError}）</span>}
+					<span className="ml-auto flex gap-1.5">
+						{(gwStatus?.accounts ?? []).map(a => (
+							<span
+								key={a.accountId}
+								className={`rounded-full px-2 py-0.5 text-[11px] ${a.bridgeState === "idle" ? "bg-surface-3 text-ink-subtle" : a.bridgeRunning ? "bg-accent-dim text-accent" : "bg-danger/10 text-danger"}`}
+								title={`${a.accountId}: bridge=${a.bridgeRunning} state=${a.bridgeState ?? "?"} channel=${a.channelConnected ? "connected" : "offline"}`}
+							>
+								{a.accountId}
+							</span>
+						))}
 					</span>
 				</div>
 
@@ -114,6 +168,7 @@ export function AgentsView(): React.JSX.Element {
 									<AgentCard
 										key={agent.id}
 										agent={agent}
+										gatewayBridge={bridgeState(agent.id)}
 										onOpen={() => navigate(`/agents/${agent.id}`)}
 										onSession={() => {
 											store.attach(agent.id); // lazy attach（幂等）
@@ -133,10 +188,13 @@ export function AgentsView(): React.JSX.Element {
 
 function AgentCard({
 	agent,
+	gatewayBridge,
 	onOpen,
 	onSession,
 }: {
 	agent: AgentInfoDto;
+	/** gateway 侧 bridge 状态（gateway.status.json；无则 undefined）。 */
+	gatewayBridge?: string;
 	onOpen: () => void;
 	onSession: () => void;
 }): React.JSX.Element {
@@ -172,6 +230,9 @@ function AgentCard({
 					<div className="mt-0.5 flex items-center gap-1.5 text-[12px] text-ink-subtle">
 						<span className={`h-2 w-2 rounded-full ${dotClass}`} />
 						{statusLabel}
+						{gatewayBridge && (
+							<span className="text-[11px] text-ink-faint">· gateway {gatewayBridge}</span>
+						)}
 					</div>
 				</div>
 			</div>

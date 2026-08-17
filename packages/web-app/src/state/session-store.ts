@@ -1,4 +1,4 @@
-import type { FsEntryDto, PiClient } from "../lib/pi-client-api";
+import type { FsEntryDto, GatewayStatusDto, PiClient } from "../lib/pi-client-api";
 import type { BranchPoint, PlaybackEntry, SessionRecordSummary } from "../lib/records";
 import type {
 	AgentInfoDto,
@@ -312,6 +312,11 @@ class SessionStore {
 	/** 读 agent workspace 文件（fs_read，代理到 pi-client）。 */
 	fsRead(sessionId: string, path: string): Promise<{ text: string; truncated: boolean }> {
 		return this.#client.fsRead(sessionId, path);
+	}
+
+	/** 本机 gateway 运行状态（gateway_status，代理到 pi-client）。 */
+	gatewayStatus(): Promise<GatewayStatusDto> {
+		return this.#client.gatewayStatus();
 	}
 
 	// ── 帧归约 ──

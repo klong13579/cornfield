@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import * as fs from "node:fs/promises";
+import * as os from "node:os";
 import * as path from "node:path";
 import { isEnoent, logger } from "@oh-my-pi/pi-utils";
 import type { ClientFrame, ServerFrame, WireCommand, WireEnvironmentSummary, WireServerEvent } from "@oh-my-pi/pi-wire";
@@ -27,6 +28,11 @@ export interface WireServerOptions {
 	defaultSession: { session: AgentSession; store: SessionStore };
 	/** lazy attach 注册表 agent 的工厂（serve.ts 装配）。 */
 	sessionFactory: SessionFactory;
+}
+
+/** 用户 HOME（读取 gateway 状态文件用；进程替换时跟随环境）。 */
+function homeDir(): string {
+	return process.env.HOME ?? os.homedir();
 }
 
 interface Connection {
@@ -286,6 +292,15 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 						return;
 					}
 					done({ path: fsCmd.path ?? "", ...content });
+					return;
+				}
+				case "gateway_status": {
+					const res = await readGatewayStatus();
+					if (!res.ok) {
+						fail(res.error);
+						return;
+					}
+					done(res.status);
 					return;
 				}
 				default:
@@ -731,4 +746,75 @@ async function readTextFileClipped(
 	}
 	if (text.length <= FS_MAX_READ_BYTES) return { text, truncated: false };
 	return { text: text.slice(0, FS_MAX_READ_BYTES), truncated: true };
+}
+
+// ── gateway 运行状态（只读转发 gateway.status.json）──
+
+interface GatewayAccountStatus {
+	accountId: string;
+	bridgeRunning?: boolean;
+	bridgeState?: string;
+	channelConnected?: boolean;
+	agentDir?: string;
+}
+
+/**
+ * 读 `~/.omp/gateway-data/gateway.status.json`（gateway 定期写盘）。
+ * 返回 accounts 明细 + stale 标记；文件缺失/失效返回 error（gateway 未运行）。
+ */
+async function readGatewayStatus(): Promise<
+	| {
+			ok: true;
+			status: {
+				pid?: number;
+				statusWrittenAt?: number;
+				stale: boolean;
+				accounts: GatewayAccountStatus[];
+				scheduler?: { running?: boolean; taskCount?: number } | null;
+			};
+	  }
+	| { ok: false; error: string }
+> {
+	const statusPath = path.join(homeDir(), ".omp", "gateway-data", "gateway.status.json");
+	let raw: string;
+	try {
+		raw = await fs.readFile(statusPath, "utf8");
+	} catch (err) {
+		if (isEnoent(err)) return { ok: false, error: "gateway 未运行（无状态文件）" };
+		throw err;
+	}
+	try {
+		const parsed = JSON.parse(raw) as {
+			pid?: number;
+			statusWrittenAt?: number;
+			accounts?: GatewayAccountStatus[];
+			scheduler?: { running?: boolean; taskCount?: number } | null;
+		};
+		// stale 判据：写文件进程（pid）是否还活着。gateway 只在启动/重载时写盘，
+		// 空闲期文件长期不更新 —— 时间阈值会误报；pid 存活即运行中。
+		const pidAlive = parsed.pid != null && isPidAlive(parsed.pid);
+		const stale = !pidAlive;
+		return {
+			ok: true,
+			status: {
+				pid: parsed.pid,
+				statusWrittenAt: parsed.statusWrittenAt,
+				stale,
+				accounts: Array.isArray(parsed.accounts) ? parsed.accounts : [],
+				scheduler: parsed.scheduler ?? null,
+			},
+		};
+	} catch {
+		return { ok: false, error: "gateway 状态文件损坏（非 JSON）" };
+	}
+}
+
+/** pid 是否存活（kill 0 探测；ESRCH=不存在，EPERM=存在）。 */
+function isPidAlive(pid: number): boolean {
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch (err) {
+		return (err as NodeJS.ErrnoException).code === "EPERM";
+	}
 }
