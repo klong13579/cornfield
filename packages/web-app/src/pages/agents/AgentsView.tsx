@@ -7,8 +7,7 @@ import { useSession } from "../../state/use-session";
 
 /**
  * Agent 列表（FR-2）—— 数据源：server_snapshot → adapter 映射（view.agents）。
- * be-dev 多 Agent 注册表（serve 会话注册表 + switch_session）落地前，serve 不推送
- * server_snapshot，本页为空态 + 完整骨架（卡片渲染逻辑已就位，注册表一到即填）。
+ * 数据源：server_snapshot → adapter 映射（view.agents），serve 启动即预挂载全部注册 agent。
  * 交互：状态点 / 工作区分节 / CODING-WORKER 徽标 / 搜索 / 进会话与详情入口。
  */
 export function AgentsView(): React.JSX.Element {

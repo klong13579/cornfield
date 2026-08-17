@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
  * 回放引擎 —— 纯前端驱动消息时间线逐步 reveal。
  * 能力：播放/暂停（发/停计时器）、速度 1x/2x/4x（同比例缩短步间隔）、
  * 快进/快退（±1 step）、进度条（step/总条数）、Step 计数、seek 跳转。
- * 与后端解耦：只消费 entries 数组（mock timeline 或 get_messages 真数据）。
+ * 与后端解耦：只消费 entries 数组（get_messages 真数据）。
  */
 
 export type PlaybackSpeed = 1 | 2 | 4;

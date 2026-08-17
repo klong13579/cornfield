@@ -96,7 +96,7 @@ class SessionStore {
 	init(client: PiClient): void {
 		this.#client = client;
 		const unsub = client.subscribe(frame => this.#onFrame(frame));
-		// 连接状态变化（断线重连等）——真实链路由 adapter 的 subscribeConnection 驱动；mock 忽略
+		// 连接状态变化（断线重连等）——由 adapter 的 subscribeConnection 驱动
 		if (client.subscribeConnection) {
 			const unsubConn = client.subscribeConnection(conn => {
 				this.#view = cloneView(this.getSnapshot());
@@ -112,7 +112,7 @@ class SessionStore {
 		}
 		this.#view = this.#buildBaseView();
 		this.#notify();
-		// 生命周期与 store 共存；mock 客户端无额外清理（真机换 pi-client 时这里接断线清理）
+		// 生命周期与 store 共存
 		void unsub;
 	}
 
@@ -299,7 +299,7 @@ class SessionStore {
 		return this.#client.getBranchMessages();
 	}
 
-	/** 历史会话索引（list_sessions；未就绪时空数组，调用方回退 mock）。 */
+	/** 历史会话索引（list_sessions 真数据；失败时空数组，UI 空态）。 */
 	listSessions(): Promise<SessionRecordSummary[]> {
 		return this.#client.listSessions();
 	}

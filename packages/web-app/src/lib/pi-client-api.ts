@@ -39,7 +39,7 @@ export interface PiClient {
 	getEnvironment(): EnvironmentSummaryDto | null;
 	/** 订阅推送帧（session_snapshot / progress / server_snapshot），返回退订函数。 */
 	subscribe(listener: (frame: WireServerEventDto) => void): () => void;
-	/** 连接状态订阅（可选：适配层提供，mock 可忽略）。 */
+	/** 连接状态订阅（断线重连等）。 */
 	subscribeConnection?(listener: (conn: ConnectionInfoDto) => void): () => void;
 
 	// ── 命令面（12 条 workspace 命令子集）──

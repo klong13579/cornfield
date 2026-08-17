@@ -23,7 +23,7 @@ import { VoiceView } from "./pages/voice/VoiceView";
 import { WorkspaceView } from "./pages/workspace/WorkspaceView";
 
 /**
- * 页面 meta 注册表 —— 由 mock 每页头部注释块映射而来（页面名/路由/导航分组/覆盖协议）。
+ * 页面 meta 注册表（页面名/路由/导航分组/覆盖协议）—— 侧栏与面包屑均由此驱动。
  * 加页面 = 数组加一项（侧栏与面包屑均由此驱动）。
  */
 export interface PageMeta {
@@ -36,7 +36,7 @@ export interface PageMeta {
 	/** primary 导航位次（1 起）。 */
 	order: number;
 	icon: LucideIcon;
-	/** 覆盖协议（mock 注释块原文），作页面角标展示。 */
+	/** 覆盖协议（requirements 修订的 wire 命令面），作页面角标展示。 */
 	protocol: string[];
 	/** 页面自带顶栏（workspace 有 conn/项目/操作区，不套通用顶栏）。 */
 	customTopbar?: boolean;

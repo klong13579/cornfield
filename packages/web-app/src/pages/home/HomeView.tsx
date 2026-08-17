@@ -7,12 +7,11 @@ import { useSession } from "../../state/use-session";
 
 /**
  * Home 欢迎页（FR-9，EmptyState：Greeting → Suggestions → Composer → 最近 Agent）。
- * - 问候语时间感 + 名字（mock 彭梦龙；正式版来自 user profile，pi-client 提供 → TODO）
+ * - 问候语名字：fs_read 当前 agent 的 user.md（declarative persona）解析，不再硬编码
  * - suggestions 错峰入场（120ms + index*70ms）
  * - Composer 直达会话工作台（?q= 带话）
  * - 环境摘要（get_state）+ 最近 agent（server_snapshot 风格）由会话 store 提供
  */
-const MOCK_USER_NAME = "彭梦龙"; // TODO(@be-dev): pi-client user profile 就绪后替换
 
 const SUGGESTIONS = [
 	{ icon: CalendarDays, label: "检查今天的定时任务", to: "/agents" },
@@ -38,6 +37,34 @@ export function HomeView(): React.JSX.Element {
 	const view = useSession();
 	const store = useSessionStore();
 	const [query, setQuery] = useState("");
+	const [userName, setUserName] = useState<string | null>(null);
+
+	useEffect(() => {
+		// 问候名：依次尝试各 agent 的 user.md（declarative persona）解析 name；
+		// default（serve cwd）常无 user.md，fallback 到有声明的 agent（hr/me 等同源）。
+		let cancelled = false;
+		if (view.connected) {
+			const candidates = ["default", ...view.agents.map(a => a.id)];
+			void (async () => {
+				for (const agentId of candidates) {
+					if (cancelled) return;
+					try {
+						const { text } = await store.fsRead(agentId, "user.md");
+						const m = text.match(/^## basics[\s\S]*?\n- name\s*:\s*(.+)$/m);
+						if (m?.[1]?.trim()) {
+							setUserName(m[1].trim());
+							return;
+						}
+					} catch {
+						// 该 agent 无 user.md，试下一个
+					}
+				}
+			})();
+		}
+		return () => {
+			cancelled = true;
+		};
+	}, [store, view.connected, view.agents]);
 
 	useEffect(() => {
 		// Composer 直达工作台；焦点置于主输入
@@ -60,7 +87,8 @@ export function HomeView(): React.JSX.Element {
 					<div className="flex items-center justify-center gap-3.5">
 						<Orb state="breathing" size={56} className="shrink-0" />
 						<h1 className="text-[32px] font-semibold leading-snug tracking-[-0.8px] text-ink">
-							{timeGreeting()}，{MOCK_USER_NAME}
+							{timeGreeting()}
+							{userName ? `，${userName}` : ""}
 						</h1>
 					</div>
 					<div className="mt-2 flex items-center justify-center gap-2 text-[14px] text-ink-subtle">
@@ -68,8 +96,8 @@ export function HomeView(): React.JSX.Element {
 						{view.env
 							? `${view.env.repos} · ${view.env.branch} · ${view.env.activeAgentCount} agent 运行中 · ${view.env.pendingCronCount} 定时任务待执行`
 							: view.connected
-								? "本地 serve · 单会话"
-								: "未连接 —— 环境摘要待 serve get_state env 字段"}
+								? "本地 serve"
+								: "未连接"}
 					</div>
 				</div>
 

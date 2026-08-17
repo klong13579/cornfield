@@ -7,8 +7,7 @@ import { useSessionStore } from "../../state/session-store";
 
 /**
  * 会话回放（FR-3）—— 播放引擎（use-playback）驱动时间线逐步 reveal。
- * 数据源：`/records/current` → serve get_messages 真数据；其余 → 内置样例 timeline
- * （TODO: get_branch_messages / 历史 JSONL 读取命令就绪后替换）。
+ * 数据源：serve get_messages 真数据（当前会话）；历史会话空态待 JSONL 读取命令。
  * 控制：播放/暂停、快进/快退、速度 1x/2x/4x、进度条 + Step 计数、右侧时间线跳转。
  */
 export function PlaybackView(): React.JSX.Element {
@@ -141,10 +140,7 @@ export function PlaybackView(): React.JSX.Element {
 						)}
 						{error && (
 							<div className="rounded-md border border-danger/40 bg-danger/5 px-4 py-3 text-[12.5px] text-danger">
-								✗ {error}。mock 样例仍可回放：
-								<Link to={`/records/rec-gateway`} className="underline">
-									gateway 根因分析
-								</Link>
+								✗ {error}
 							</div>
 						)}
 

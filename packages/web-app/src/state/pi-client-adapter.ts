@@ -282,7 +282,7 @@ export class PiClientAdapter implements PiClient {
 	/**
 	 * 历史会话索引（serve list_sessions）。
 	 * 后端返回 WireSessionIndexEntry（sessionId/title/startTime/endTime/agentName/status/sessionFile），
-	 * 映射到前端 SessionRecordSummary（id/name/agent/startedAt）。未实现时 catch 返回空，调用方回退 mock。
+	 * 映射到前端 SessionRecordSummary（id/name/agent/startedAt）。失败返回空数组，UI 空态。
 	 */
 	async listSessions(): Promise<SessionRecordSummary[]> {
 		try {
@@ -297,7 +297,7 @@ export class PiClientAdapter implements PiClient {
 				sessionFile: s.sessionFile,
 			}));
 		} catch (err) {
-			console.warn("[web-app] list_sessions unavailable, fallback mock", err);
+			console.warn("[web-app] list_sessions unavailable", err);
 			return [];
 		}
 	}

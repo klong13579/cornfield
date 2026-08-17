@@ -6,9 +6,10 @@ import { useSession } from "../../state/use-session";
 import { KindBadge } from "./AgentsView";
 
 /**
- * Agent 详情（FR-2 / mock agent-detail）—— 5 tab：Skills / Cron / 模型 / 工具 / 用户画像。
- * P3 阶段骨架：Skills/Cron/工具/画像为本地 mock 结构（数据源待协议扩展，见 todo 标注）；
- * 模型配置 tab 已接 get_available_models（adapter）+ set_model/set_thinking_level 真实命令。
+ * Agent 详情（FR-2）—— 7 tab：Skills / Cron / 模型 / 工具 / 画像 / 文件 / Prompts。
+ * 数据源：Skills 读 .omp/skills 真实列表（fs_list+SKILL.md）、画像读 mission.md+user.md、
+ * 模型接 get_available_models/set_model 真命令、Cron 待 wire 命令缺口 B4（disabled 占位）、
+ * 画像实时建模待连接器路径（缺口 B5）。
  */
 
 type TabId = "skills" | "cron" | "model" | "tools" | "profile" | "files" | "prompts";
@@ -112,9 +113,7 @@ export function AgentDetailView(): React.JSX.Element {
 						{agent && <KindBadge kind={agent.kind} />}
 					</div>
 					<div className="mt-2 text-[15px] text-ink-subtle">
-						{agent
-							? `${agent.workspace} · 最近活跃 ${agent.lastAction ?? "—"}`
-							: "角色待注册表推送 · 代码审查 · 架构设计 · 调试（骨架描述）"}
+						{agent ? `${agent.workspace} · 最近活跃 ${agent.lastAction ?? "—"}` : "等待 Agent 注册表推送"}
 					</div>
 				</div>
 
@@ -137,7 +136,7 @@ export function AgentDetailView(): React.JSX.Element {
 					))}
 				</div>
 
-				{tab === "skills" && <SkillsView agentId={id} skillsCount={agent?.skillsCount} />}
+				{tab === "skills" && <SkillsView agentId={id} />}
 
 				{tab === "cron" && (
 					<div>
@@ -356,7 +355,7 @@ function parseFrontmatter(text: string): { desc?: string; version?: string; name
 	return out;
 }
 
-function SkillsView({ agentId, skillsCount }: { agentId: string; skillsCount?: number }): React.JSX.Element {
+function SkillsView({ agentId }: { agentId: string }): React.JSX.Element {
 	const store = useSessionStore();
 	const view = useSession();
 	const [skills, setSkills] = useState<SkillInfo[] | null>(null);
@@ -400,7 +399,11 @@ function SkillsView({ agentId, skillsCount }: { agentId: string; skillsCount?: n
 		return <div className="px-1 py-3 text-[12px] text-ink-faint">加载中…</div>;
 	}
 	if (skills.length === 0) {
-		return <div className="px-1 py-8 text-center text-[12px] text-ink-faint">该 agent 没有已安装技能（.omp/skills/ 为空）</div>;
+		return (
+			<div className="px-1 py-8 text-center text-[12px] text-ink-faint">
+				该 agent 没有已安装技能（.omp/skills/ 为空）
+			</div>
+		);
 	}
 
 	return (
@@ -492,8 +495,7 @@ function ProfileView({ agentId }: { agentId: string }): React.JSX.Element {
 				</section>
 			)}
 			<div className="text-[11px] text-ink-faint">
-				画像数据来自 agentDir/user.md + mission.md（fs_read 真读）；钉钉对话实时建模待连接器只读路径（缺口
-				B5）。
+				画像数据来自 agentDir/user.md + mission.md（fs_read 真读）；钉钉对话实时建模待连接器只读路径（缺口 B5）。
 			</div>
 		</div>
 	);

@@ -73,7 +73,7 @@ export interface SessionSnapshotDto {
 	autoCompactionEnabled: boolean;
 	autoRetryEnabled: boolean;
 	scopedModels?: { model: ModelDto; thinkingLevel?: string }[];
-	/** 上下文水位（mock 提供；真机接入后走 get_session_stats）。 */
+	/** 上下文水位（快照 context 提供）。 */
 	context?: { usedTokens: number; totalTokens: number; lastCompaction?: number | null };
 }
 

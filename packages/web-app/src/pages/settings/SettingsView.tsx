@@ -6,7 +6,7 @@ import { useSession } from "../../state/use-session";
 
 /**
  * 设置页（FR-7）—— 连接信息（hello）/ 会话行为开关（set_auto_compaction / set_auto_retry）/
- * 主题 / 快捷键 / 通知 / 钉钉集成（gateway 侧配置，P3 只读占位）/ 危险操作（二次确认）。
+ * 主题 / 快捷键 / 连接配置 / 通知（缺口 B7 disabled）/ 钉钉集成（gateway 读占位）/ 危险操作（二次确认）。
  * 视觉主角：kbd 快捷键表。
  */
 export function SettingsView(): React.JSX.Element {
