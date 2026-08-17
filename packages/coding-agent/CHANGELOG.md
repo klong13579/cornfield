@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Intercom parent-child orchestration (cross-process)** (`src/intercom-extension/index.ts`, `src/intercom-extension/project-agent.ts`, `src/intercom-extension/types.ts`): sessions launched as children of another omp process now register with a `parentId` edge on the broker and gain three behaviours — (1) the parent can query live child state via `intercom({ action: "children" })` (presence-driven, no polling) and every session row shows `child of <parent>`; (2) child sessions auto-report task-round completion to the parent on `agent_end` (structured "Subagent completed its task round." message with run metadata, 5s debounce, best-effort); (3) a child's `ask` with no explicit `to` routes to the parent for judgment, and the existing `contact_supervisor` tool auto-activates because `openProjectPane` now injects `PI_SUBAGENT_ORCHESTRATOR_TARGET/_SESSION_ID/_RUN_ID/_CHILD_AGENT/_CHILD_INDEX` into every spawned child pane. `list` rows and the child table stay warm from `presence_update`/`session_joined`/`session_left` events. Broker contract unchanged for peer sessions (no `parentId` = plain peer). The ask-target routing decision was extracted into a pure, deterministically tested module (`src/intercom-extension/ask-routing.ts`, 11 tests pinning the cwd > explicit-to > parent-precedence matrix). See `docs/intercom-architecture.md`.
+
 ## [0.17.0] - 2026-08-16
 
 ### Breaking Changes

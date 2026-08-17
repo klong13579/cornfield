@@ -53,14 +53,16 @@ omp 会话 A(进程内)           omp 会话 B(进程内)      gateway 账号(�
 | 动作 | 语义 |
 |---|---|
 | `list` / `list-cwd` | 在线会话(id/名字/cwd/模型/状态/上下文占比) |
+| `children` | 本会话的子会话列表(声明了本会话为父的在线会话,含实时状态) |
 | `send` | 单发,可带附件(file/snippet/context),自动推断 pending ask 作为回复 |
-| `ask` | 发送并阻塞等待回复(默认超时 10min,`PI_INTERCOM_ASK_TIMEOUT_MS` 覆盖) |
+| `ask` | 发送并阻塞等待回复(默认超时 10min,`PI_INTERCOM_ASK_TIMEOUT_MS` 覆盖);**子模式下不带 `to` 时默认发给父** |
 | `reply` | 回复当前/指定待回复 ask(自动解析目标,保持线程) |
 | `pending` | 列出未回复的 inbound ask |
 | `status` | 连接状态 |
 | `cancel` | 撤销已发消息(实时会话发控制帧,mailbox 直接删) |
 | presence | 模型/思考中/空闲/工具执行中/tool:xxx,上下文占比随心跳刷新 |
 | mailbox | 目标离线时队列暂存(256 条/24h),按 id 或「显式名字+同 cwd」补投 |
+| 父子边 | 子注册时声明 `parentId`(父的目标名/sessionId),broker 全量广播保留该字段;父侧子表随 presence 事件增量维护 |
 
 协议与隐性行为:replyTo 必须匹配 pending ask(非 ask 的回复会被 broker 拒绝);
 互斥 ask(双方互相等)拒绝;supersede 只能顶替同 sender→receiver 的旧消息。
@@ -71,6 +73,7 @@ omp 会话 A(进程内)           omp 会话 B(进程内)      gateway 账号(�
 
 ```
 intercom({ action: "list" })
+intercom({ action: "children" })                   // 我的子会话列表(监控子 omp 状态)
 intercom({ action: "send", to: "hr", message: "..." })          // 按名字/ID/前缀寻址
 intercom({ action: "ask", to: "finance", message: "..." })      // 阻塞等回复
 intercom({ action: "reply", message: "..." })                   // 回复待处理 ask
@@ -90,7 +93,34 @@ intercom({ action: "send", to: "hr", message: "...", attachments: [{ type: "snip
 
 - **planner-worker**:规划会话 `ask` 给执行会话,阻塞取回决定
 - **跨账号业务 agent**:gateway 账号(如 hr、finance)互发,或 TUI 直接指挥账号
-- **进度汇报**:worker `send` 周期回报,发方不阻塞
+- **主 omp 监控子 omp(父子编排)**:主会话通过 `send ... openProjectPaneIfMissing: true` 拉起
+  子 omp 时,子进程启动注入 `PI_SUBAGENT_ORCHESTRATOR_TARGET` / `_SESSION_ID` / `_RUN_ID` /
+  `_CHILD_AGENT` / `_CHILD_INDEX`,完成三件事:
+  1. 子注册时携带 `parentId`,主会话 `intercom({ action: "children" })` 即可看到全部在线的子
+     (状态/上下文占比随 presence 实时刷新,不轮询);
+  2. 子每完成一个任务回合(`agent_end`)自动向父发送结构化完成报告(5s 防抖,标题
+     「Subagent completed its task round.」+ Run/Agent/Child index),无需子记得主动汇报;
+  3. 子的 `ask` 不带 `to` 时自动路由给父裁决;`contact_supervisor`(need_decision /
+     progress_update / interview_request)因注入的 env 自动激活,父的裁决以 reply 返回。
+  子重启后(重连)parentId 不变,主侧子表自动恢复;父离线时完成报告 best-effort 丢弃,
+  不阻塞子自身流程。
+
+  **gateway 账号当子**:`~/.omp/gateway.json` 的账号配置加 `intercomParent`
+  (父的目标名或 stableId,通常是操作者 TUI 会话的 `/name` 或 `stableId`),该账号
+  的 agent omp 启动时即注入 `PI_SUBAGENT_*` 元数据并注册为父的子——主会话同样
+  `children` 可见、收到自动完成报告、可裁决其 `contact_supervisor` 升级。
+
+```json
+{
+  "accounts": {
+    "hr": {
+      "appKey": "...",
+      "appSecret": "...",
+      "intercomParent": "main"
+    }
+  }
+}
+```
 
 ## 6. 配置
 

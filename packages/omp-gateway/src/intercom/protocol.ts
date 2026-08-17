@@ -146,6 +146,10 @@ export function isSessionInfo(value: unknown): value is SessionInfo {
 		return false;
 	}
 
+	if (value.parentId !== undefined && (typeof value.parentId !== "string" || value.parentId.trim() === "")) {
+		return false;
+	}
+
 	if (value.peerUid !== undefined && typeof value.peerUid !== "number") {
 		return false;
 	}
@@ -185,6 +189,10 @@ export function isSessionRegistration(value: unknown): value is SessionRegistrat
 		return false;
 	}
 	if (value.extensions !== undefined && !Array.isArray(value.extensions)) {
+		return false;
+	}
+
+	if (value.parentId !== undefined && (typeof value.parentId !== "string" || value.parentId.trim() === "")) {
 		return false;
 	}
 

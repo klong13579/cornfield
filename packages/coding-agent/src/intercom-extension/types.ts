@@ -21,6 +21,9 @@ export interface SessionInfo {
 	contextPct?: number;
 	contextTokens?: number;
 	contextWindow?: number;
+	/** Parent session target declared at registration (orchestrator edge): the id,
+	 *  stable id, or name of the session that spawned this one. Optional. */
+	parentId?: string;
 }
 
 export interface Message {

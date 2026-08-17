@@ -7,6 +7,7 @@ import { type AutocompleteItem, Text } from "@oh-my-pi/pi-tui";
 import { getAgentDir, isEnoent } from "@oh-my-pi/pi-utils";
 import { Type } from "@sinclair/typebox";
 import { randomUUID } from "crypto";
+import { resolveAskRouting } from "./ask-routing";
 import { IntercomClient } from "./broker/client";
 import { getAskTimeoutMs, type IntercomConfig, loadConfig } from "./config";
 import { sameCwd } from "./cwd";
@@ -20,7 +21,13 @@ import {
 	type IntercomExtensionState,
 } from "./extension-api";
 import { formatContextUsage } from "./format-context";
-import { openProjectPane, type ProjectPaneLaunch, resolveTargetInCwd, waitForProjectSession } from "./project-agent";
+import {
+	type ChildPaneMetadata,
+	openProjectPane,
+	type ProjectPaneLaunch,
+	resolveTargetInCwd,
+	waitForProjectSession,
+} from "./project-agent";
 import { ReplyTracker } from "./reply-tracker";
 import intercomSkill from "./skills/pi-intercom/SKILL.md" with { type: "text" };
 import type {
@@ -53,6 +60,8 @@ const SUBAGENT_CHILD_AGENT_ENV = "PI_SUBAGENT_CHILD_AGENT";
 const SUBAGENT_CHILD_INDEX_ENV = "PI_SUBAGENT_CHILD_INDEX";
 const SUBAGENT_INTERCOM_SESSION_NAME_ENV = "PI_SUBAGENT_INTERCOM_SESSION_NAME";
 const SUBAGENT_SUPERVISOR_CHANNEL_DIR_ENV = "PI_SUBAGENT_SUPERVISOR_CHANNEL_DIR";
+const SUBAGENT_COMPLETION_REPORT_MIN_INTERVAL_MS = 5_000;
+const SUBAGENT_COMPLETION_REPORT_TEXT = "Task round completed. The child session is idle and available for follow-up.";
 
 interface ChildOrchestratorMetadata {
 	orchestratorTarget: string;
@@ -135,7 +144,7 @@ function readChildOrchestratorMetadata(): ChildOrchestratorMetadata | null {
 	};
 }
 function formatChildOrchestratorMessage(
-	kind: "ask" | "update" | "interview",
+	kind: "ask" | "update" | "interview" | "complete",
 	metadata: ChildOrchestratorMetadata,
 	message: string,
 ): string {
@@ -144,7 +153,9 @@ function formatChildOrchestratorMessage(
 			? "Subagent needs a supervisor decision."
 			: kind === "interview"
 				? "Subagent requests a structured supervisor interview."
-				: "Subagent progress update.";
+				: kind === "complete"
+					? "Subagent completed its task round."
+					: "Subagent progress update.";
 	return [
 		heading,
 		`Run: ${metadata.runId}`,
@@ -497,9 +508,11 @@ function formatSessionLabel(session: SessionInfo, duplicates: Set<string>): stri
 }
 function formatSessionListRow(session: SessionInfo, currentCwd: string, isSelf: boolean, idPrefix: string): string {
 	const name = session.name || "Unnamed session";
-	const tags = [isSelf ? "self" : session.cwd === currentCwd ? "same cwd" : undefined, session.status].filter(
-		(tag): tag is string => Boolean(tag),
-	);
+	const tags = [
+		isSelf ? "self" : session.cwd === currentCwd ? "same cwd" : undefined,
+		session.status,
+		session.parentId ? `child of ${session.parentId}` : undefined,
+	].filter((tag): tag is string => Boolean(tag));
 	const suffix = tags.length ? ` [${tags.join(", ")}]` : "";
 	return `• ${name} (${idPrefix}) — ${session.cwd} (${session.model}${formatContextUsage(session)})${suffix}`;
 }
@@ -661,6 +674,10 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
 	let runtimeGeneration = 0;
 	let agentRunning = false;
 	const activeTools = new Map<string, string>();
+	/** Parent-side: live child sessions (sessions whose parentId matches this session). */
+	const childSessions = new Map<string, SessionInfo>();
+	/** Child-side: last automatic completion report timestamp (debounce). */
+	let lastCompletionReportAt = 0;
 	const replyTracker = new ReplyTracker();
 	const seenInboundMessages = new Map<string, number>();
 	const latestOutboundReceipts = new Map<
@@ -946,6 +963,16 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
 			startedAt: sessionStartedAt,
 			lastActivity: Date.now(),
 			status: currentStatus(),
+			...(childOrchestratorMetadata
+				? {
+						// Register the orchestrator edge so the parent can list and monitor
+						// this session as its child. Prefer the orchestrator session id
+						// (exact, stable-id aware); fall back to the user-supplied target
+						// (name or id) when the id is unknown.
+						parentId:
+							childOrchestratorMetadata.orchestratorSessionId ?? childOrchestratorMetadata.orchestratorTarget,
+					}
+				: {}),
 			...(localExtensions.size > 0
 				? {
 						extensions: currentExtensionCapabilities(),
@@ -1217,18 +1244,25 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
 					break;
 				case "session_joined":
 					knownSessions = [...knownSessions.filter(s => s.id !== message.session.id), message.session];
+					if (sessionIsChildOfThis(message.session)) {
+						childSessions.set(message.session.id, message.session);
+					}
 					for (const namespace of localExtensions.keys()) {
 						emitLocalExtensionEvent(namespace, { type: "session_joined", session: message.session });
 					}
 					break;
 				case "session_left":
 					knownSessions = knownSessions.filter(s => s.id !== message.sessionId);
+					childSessions.delete(message.sessionId);
 					for (const namespace of localExtensions.keys()) {
 						emitLocalExtensionEvent(namespace, { type: "session_left", sessionId: message.sessionId });
 					}
 					break;
 				case "presence_update":
 					knownSessions = [...knownSessions.filter(s => s.id !== message.session.id), message.session];
+					if (sessionIsChildOfThis(message.session)) {
+						childSessions.set(message.session.id, message.session);
+					}
 					for (const namespace of localExtensions.keys()) {
 						emitLocalExtensionEvent(namespace, { type: "presence_update", session: message.session });
 					}
@@ -1320,6 +1354,10 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
 				}
 				client = nextClient;
 				reconnectAttempt = 0;
+				// Prime the parent-side child table right after (re)connecting so a
+				// "children" query is fresh even when children connected before this
+				// session came online or the broker lost presence state.
+				void refreshChildSessions();
 				return nextClient;
 			} catch (error) {
 				if (client === nextClient) {
@@ -1381,10 +1419,137 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
 		}
 		return resolveSessionTarget(activeClient, metadata.orchestratorTarget);
 	}
+	/**
+	 * Parent-side child match: does this peer session declare THIS session as its
+	 * parent? Matches against the session's own id, stable intercom id, and
+	 * visible name — the child registers the parent target it was launched with.
+	 */
+	function sessionIsChildOfThis(session: SessionInfo): boolean {
+		const rawParent = session.parentId;
+		if (typeof rawParent !== "string" || rawParent.trim() === "") {
+			return false;
+		}
+		const lowerParent = rawParent.trim().toLowerCase();
+		const candidates = new Set<string>();
+		for (const target of [currentSessionId, currentIntercomSessionId, pi.getSessionName()]) {
+			if (typeof target === "string" && target.trim() !== "") {
+				candidates.add(target.trim().toLowerCase());
+			}
+		}
+		if (currentSessionId) {
+			candidates.add(buildPresenceIdentity(pi, currentIntercomSessionId ?? currentSessionId).name.toLowerCase());
+		}
+		return candidates.has(lowerParent);
+	}
+	/**
+	 * Parent-side: rebuild the child table from the broker roster. Kept cheap via
+	 * the full list call the extension already makes for presence; children are
+	 * then kept warm from session_joined/presence_update/session_left events.
+	 */
+	async function refreshChildSessions(): Promise<void> {
+		const activeClient = client;
+		const generation = runtimeGeneration;
+		if (!activeClient?.isConnected() || !getLiveContext(runtimeContext, generation)) {
+			return;
+		}
+		try {
+			const sessions = await activeClient.listSessions();
+			if (client !== activeClient || !getLiveContext(runtimeContext, generation)) {
+				return;
+			}
+			knownSessions = sessions;
+			for (const session of sessions) {
+				if (sessionIsChildOfThis(session)) {
+					childSessions.set(session.id, session);
+				}
+			}
+		} catch {
+			// Best-effort: presence events still update the table incrementally.
+		}
+	}
+	/**
+	 * Child-side automatic completion report: after each task round (agent_end),
+	 * notify the parent. Fire-and-forget and debounced so a noisy agent_end
+	 * sequence can never flood the parent or break the child's own turn.
+	 */
+	async function reportSubagentCompletion(): Promise<void> {
+		const metadata = childOrchestratorMetadata;
+		if (!metadata) {
+			return;
+		}
+		const now = Date.now();
+		if (now - lastCompletionReportAt < SUBAGENT_COMPLETION_REPORT_MIN_INTERVAL_MS) {
+			return;
+		}
+		lastCompletionReportAt = now;
+		const generation = runtimeGeneration;
+		const stillLive = () => !runtimeStarted || Boolean(getLiveContext(runtimeContext, generation));
+		if (!stillLive()) {
+			return;
+		}
+		let activeClient: IntercomClient;
+		try {
+			activeClient = await ensureConnected("background");
+		} catch {
+			return;
+		}
+		if (!stillLive()) {
+			return;
+		}
+		let target: string | null;
+		try {
+			target = await resolveSupervisorTarget(activeClient, metadata);
+		} catch {
+			return;
+		}
+		if (!target || currentSessionTargetMatches(metadata.orchestratorTarget, target, activeClient)) {
+			return;
+		}
+		try {
+			const result = await activeClient.send(target, {
+				text: formatChildOrchestratorMessage("complete", metadata, SUBAGENT_COMPLETION_REPORT_TEXT),
+			});
+			if (result.delivered) {
+				pi.appendEntry("intercom_sent", {
+					to: metadata.orchestratorTarget,
+					message: { text: SUBAGENT_COMPLETION_REPORT_TEXT, kind: "complete" },
+					messageId: result.id,
+					timestamp: Date.now(),
+					subagent: {
+						runId: metadata.runId,
+						agent: metadata.agent,
+						index: metadata.index,
+					},
+				});
+			}
+		} catch {
+			// Best-effort: a completion report must never break the child's own turn.
+		}
+	}
+	/**
+	 * Parent-side: metadata injected into every child omp this session spawns via
+	 * a Herdr project pane, so the child registers with this session as parent
+	 * and auto-reports completion. parentTarget is this session's intercom id
+	 * (stable-id aware); the alias name is the human-readable fallback.
+	 */
+	let childPaneLaunchSeq = 0;
+	function buildChildPaneMetadata(): ChildPaneMetadata {
+		const sessionId = currentIntercomSessionId ?? currentSessionId;
+		const name = buildPresenceIdentity(pi, currentIntercomSessionId ?? currentSessionId ?? "unknown").name;
+		childPaneLaunchSeq += 1;
+		return {
+			parentTarget: sessionId ?? name,
+			...(sessionId ? { parentSessionId: sessionId } : {}),
+			runId: randomUUID(),
+			agent: "project-pane",
+			index: String(childPaneLaunchSeq),
+		};
+	}
 	async function resolveCwdDeliveryTarget(
 		activeClient: IntercomClient,
 		options: {
-			to?: string;
+			/** Target name/id filter within the cwd; undefined = the sole peer there. */
+			to: string | undefined;
 			cwd: string;
 			openProjectPaneIfMissing?: boolean;
 			focus?: boolean;
@@ -1419,7 +1584,12 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
 		}
 
 		const beforeSessionIds = new Set(sessions.map(session => session.id));
-		const projectPane = await openProjectPane({ cwd: targetCwd, focus: options.focus, signal: options.signal });
+		const projectPane = await openProjectPane({
+			cwd: targetCwd,
+			focus: options.focus,
+			signal: options.signal,
+			childMetadata: buildChildPaneMetadata(),
+		});
 		const session = await waitForProjectSession(activeClient, {
 			projectRoot: projectPane.projectRoot,
 			currentSessionId,
@@ -1676,6 +1846,11 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
 		agentRunning = false;
 		activeTools.clear();
 		syncPresenceStatus();
+		// Child mode: auto-report task-round completion to the parent. Best-effort
+		// and debounced; the parent sees a structured "Subagent completed its task
+		// round." message with run metadata instead of relying on the child to
+		// remember to call send/contact_supervisor manually.
+		void reportSubagentCompletion();
 	});
 	pi.on("turn_start", (_event, ctx) => {
 		const sessionId = ctx.sessionManager.getSessionId();
@@ -2100,6 +2275,7 @@ sessions share a name.
 Usage:
   intercom({ action: "list" })                    → List active sessions
   intercom({ action: "list-cwd" })                → List sessions in the current working directory
+  intercom({ action: "children" })                → List child sessions (sessions that declared this session as their parent)
   intercom({ action: "list-cwd", cwd: "/path" })  → List sessions in a specific directory
   intercom({ action: "send", to: "name-or-id", message: "..." })  → Send message
   intercom({ action: "send", cwd: "/path", openProjectPaneIfMissing: true, message: "..." }) → Open a visible Herdr project pane when needed, then send
@@ -2109,12 +2285,16 @@ Usage:
   intercom({ action: "pending" })                                      → List unresolved inbound asks
   intercom({ action: "status" })                  → Show connection status`,
 			promptSnippet:
-				"Use to coordinate with other local pi sessions: list peers, send updates, ask for help, or check intercom connectivity.",
+				"Use to coordinate with other local pi sessions: list peers, monitor child sessions, send updates, ask for help, or check intercom connectivity.",
 
 			parameters: Type.Object({
-				action: StringEnum(["list", "list-cwd", "send", "ask", "reply", "pending", "status", "cancel"] as const, {
-					description: "Action: 'list', 'list-cwd', 'send', 'ask', 'reply', 'pending', 'status', or 'cancel'",
-				}),
+				action: StringEnum(
+					["list", "list-cwd", "children", "send", "ask", "reply", "pending", "status", "cancel"] as const,
+					{
+						description:
+							"Action: 'list', 'list-cwd', 'children', 'send', 'ask', 'reply', 'pending', 'status', or 'cancel'",
+					},
+				),
 				to: Type.Optional(
 					Type.String({
 						description:
@@ -2234,6 +2414,51 @@ Usage:
 						} catch (error) {
 							return {
 								content: [{ type: "text", text: `Failed to list sessions: ${getErrorMessage(error)}` }],
+								details: { error: true },
+							};
+						}
+					}
+
+					case "children": {
+						try {
+							const mySessionId = connectedClient.sessionId;
+							const sessions = await connectedClient.listSessions();
+							knownSessions = sessions;
+							const currentSession = sessions.find(s => s.id === mySessionId);
+
+							if (!currentSession) {
+								return {
+									content: [{ type: "text", text: "Current session is missing from intercom session list." }],
+									details: { error: true },
+								};
+							}
+
+							// Refresh the live child table from the broker's full roster, then
+							// keep it warm from presence events (see attachClientHandlers).
+							childSessions.clear();
+							for (const session of sessions) {
+								if (session.id !== mySessionId && sessionIsChildOfThis(session)) {
+									childSessions.set(session.id, session);
+								}
+							}
+
+							const prefixes = sessionIdPrefixes(sessions);
+							const children = Array.from(childSessions.values());
+							const section =
+								children.length === 0
+									? "**Child sessions:**\nNo child sessions connected."
+									: `**Child sessions:**\n${children
+											.map(session =>
+												formatSessionListRow(session, currentSession.cwd, false, prefixes.get(session.id)!),
+											)
+											.join("\n")}`;
+							return {
+								content: [{ type: "text", text: section }],
+								details: {},
+							};
+						} catch (error) {
+							return {
+								content: [{ type: "text", text: `Failed to list child sessions: ${getErrorMessage(error)}` }],
 								details: { error: true },
 							};
 						}
@@ -2438,7 +2663,12 @@ Usage:
 					}
 
 					case "ask": {
-						if ((!to && !cwd) || !message) {
+						// Child mode: an ask with no explicit target goes to the parent for
+						// judgment. Explicit `to`/`cwd` always win. The routing decision is
+						// a pure function (ask-routing.ts) so it is deterministically
+						// testable without a broker round-trip.
+						const routing = resolveAskRouting({ to, cwd, childMetadata: childOrchestratorMetadata });
+						if (routing.mode === "missing" || !message) {
 							return {
 								content: [{ type: "text", text: "Missing 'to' or 'cwd', or missing 'message' parameter" }],
 								details: { error: true },
@@ -2470,31 +2700,58 @@ Usage:
 								};
 							}
 							let target: DeliveryTarget;
-							if (cwd) {
+							if (routing.mode === "cwd") {
 								target = await resolveCwdDeliveryTarget(connectedClient, {
-									to,
-									cwd,
+									to: routing.to,
+									cwd: routing.cwd,
 									openProjectPaneIfMissing,
 									focus,
 									signal: _signal,
 								});
-							} else {
-								const resolved = await resolveSessionTarget(connectedClient, to!);
+							} else if (routing.mode === "parent") {
+								const resolved = await resolveSupervisorTarget(connectedClient, childOrchestratorMetadata!);
 								if (!resolved) {
 									return {
 										content: [
 											{
 												type: "text",
-												text: `Session "${to}" is not currently connected. Blocking asks are not queued; use send for a non-blocking mailbox delivery or retry after the session reconnects.`,
+												text: `Parent "${routing.parentTarget}" is not currently connected. Blocking asks are not queued; use send for a non-blocking mailbox delivery or retry after the parent reconnects.`,
 											},
 										],
 										details: { error: true },
 									};
 								}
-								target = { id: resolved, label: to! };
+								target = { id: resolved, label: routing.parentTarget };
+							} else if (routing.mode === "explicit") {
+								const resolved = await resolveSessionTarget(connectedClient, routing.to);
+								if (!resolved) {
+									return {
+										content: [
+											{
+												type: "text",
+												text: `Session "${routing.to}" is not currently connected. Blocking asks are not queued; use send for a non-blocking mailbox delivery or retry after the session reconnects.`,
+											},
+										],
+										details: { error: true },
+									};
+								}
+								target = { id: resolved, label: routing.to };
+							} else {
+								// Unreachable: 'missing' has returned above and the routing
+								// union has exactly cwd/parent/explicit left — the cwd mode
+								// carries its own non-empty cwd, so no other branch exists.
+								// Kept because TS definite-assignment needs a sink for the
+								// (impossible) all-conditions-false path.
+								throw new Error("Unreachable ask routing mode");
 							}
 							const sendTo = target.id;
-							const targetDisplay = target.projectPane ? target.label : (to ?? target.label);
+							const routingDisplayTarget =
+								routing.mode === "cwd"
+									? routing.to
+									: routing.mode === "explicit"
+										? routing.to
+										: routing.parentTarget;
+							const targetDisplay = target.projectPane ? target.label : (routingDisplayTarget ?? target.label);
 							if (_signal?.aborted) {
 								return {
 									content: [{ type: "text", text: "Cancelled" }],

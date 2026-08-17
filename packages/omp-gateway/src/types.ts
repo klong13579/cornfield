@@ -425,6 +425,12 @@ export interface DingtalkAccountConfig {
 	hideThinkingBlock?: boolean;
 	/** When false, skip account registration and DingTalk connection on startup. */
 	enabled?: boolean;
+	/** Optional intercom parent target (session name or stable id) for this
+	 *  account's agent omp: the account registers as a child of that session
+	 *  on the intercom broker — auto completion reports, ask→parent routing,
+	 *  and contact_supervisor escalation all follow. The parent is typically
+	 *  the operator's TUI session (give it a `/name` or `stableId`). */
+	intercomParent?: string;
 }
 
 export interface DingTalkConfig extends ChannelConfig {

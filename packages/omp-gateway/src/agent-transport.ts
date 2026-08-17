@@ -27,6 +27,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { logger } from "@oh-my-pi/pi-utils";
 import type { FileSink } from "bun";
+import { randomUUID } from "crypto";
 import { resolveCredentialEnvVars } from "./credential-resolver";
 
 /**
@@ -187,6 +188,10 @@ export interface RpcTransportOptions {
 	 *  falls back to the legacy "reject" behaviour (returns `isError: true`).
 	 *  The bridge wires this to its `HostToolDispatcher`. */
 	hostToolHandler?: HostToolCallHandler;
+	/** Intercom parent target (session name or stable id). When set, the
+	 *  spawned omp child gets PI_SUBAGENT_ORCHESTRATOR_* env so it registers
+	 *  as a child of that session on the intercom broker. */
+	intercomParent?: string;
 }
 
 /**
@@ -208,6 +213,8 @@ export class RpcTransport {
 	#commandIdCounter = 0;
 	#reconnectGuard = false;
 	#options: RpcTransportOptions;
+	/** Stable per-transport run id for the intercom child metadata. */
+	#intercomRunId = randomUUID();
 	// biome-ignore lint/correctness/noUnusedPrivateClassMembers: referenced in stop() and #spawnAndWaitReady for stream-reader liveness
 	#stderrReader?: Promise<void>;
 	// biome-ignore lint/correctness/noUnusedPrivateClassMembers: referenced in stop() and #spawnAndWaitReady for stream-reader liveness
@@ -392,7 +399,18 @@ export class RpcTransport {
 				stderr: "pipe",
 				stdin: "pipe",
 				cwd: this.#options.cwd ?? process.cwd(),
-				env: { ...process.env, ...resolveCredentialEnvVars() },
+				env: {
+					...process.env,
+					...resolveCredentialEnvVars(),
+					...(this.#options.intercomParent
+						? {
+								PI_SUBAGENT_ORCHESTRATOR_TARGET: this.#options.intercomParent,
+								PI_SUBAGENT_RUN_ID: this.#intercomRunId,
+								PI_SUBAGENT_CHILD_AGENT: "gateway-account",
+								PI_SUBAGENT_CHILD_INDEX: "0",
+							}
+						: {}),
+				},
 			});
 
 			const stdin = proc.stdin as FileSink;

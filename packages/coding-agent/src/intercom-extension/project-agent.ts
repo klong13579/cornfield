@@ -39,6 +39,36 @@ export interface ProjectPaneLaunch {
 	herdrVersion: string;
 }
 
+/**
+ * Orchestrator metadata passed to a freshly launched child omp via env vars, so
+ * the child registers with the parent edge on the intercom broker, gets the
+ * contact_supervisor tool, and auto-reports task-round completion back.
+ * Mirrors pi-subagents bridge metadata (PI_SUBAGENT_* env vars).
+ */
+export interface ChildPaneMetadata {
+	/** Parent session id or stable id. */
+	parentTarget: string;
+	/** Parent's intercom session id (exact broker address). */
+	parentSessionId?: string;
+	/** Unique run identifier for the spawned child. */
+	runId?: string;
+	/** Agent kind label shown in child reports. */
+	agent?: string;
+	/** Child index within the run. */
+	index?: string;
+}
+
+function buildPaneCommandEnvPrefix(metadata: ChildPaneMetadata): string {
+	const entries: Array<[string, string]> = [
+		["PI_SUBAGENT_ORCHESTRATOR_TARGET", metadata.parentTarget],
+		["PI_SUBAGENT_ORCHESTRATOR_SESSION_ID", metadata.parentSessionId ?? metadata.parentTarget],
+		["PI_SUBAGENT_RUN_ID", metadata.runId ?? "pane-unknown"],
+		["PI_SUBAGENT_CHILD_AGENT", metadata.agent ?? "project-pane"],
+		["PI_SUBAGENT_CHILD_INDEX", metadata.index ?? "0"],
+	];
+	return `${entries.map(([key, value]) => `${key}=${shellQuote(value)}`).join(" ")} `;
+}
+
 export interface ProjectTargetResolution {
 	kind: "found" | "missing";
 	session?: SessionInfo;
@@ -287,6 +317,7 @@ export async function openProjectPane(input: {
 	focus?: boolean;
 	client?: HerdrClient;
 	signal?: AbortSignal;
+	childMetadata?: ChildPaneMetadata;
 }): Promise<ProjectPaneLaunch> {
 	const projectRoot = resolveProjectRoot(input.cwd);
 	const client = input.client ?? createHerdrClient();
@@ -300,7 +331,10 @@ export async function openProjectPane(input: {
 	const paneId = extractPaneId(split.data);
 	if (!paneId) throw new Error("Herdr project pane error (PANE_GONE): pane split returned no pane id.");
 
-	const command = shellQuote(process.env.PI_INTERCOM_PI_BIN?.trim() || process.env.PI_BIN?.trim() || "pi");
+	const bin = process.env.PI_INTERCOM_PI_BIN?.trim() || process.env.PI_BIN?.trim() || "pi";
+	// The pane command runs through the pane's shell: env-var prefixes (POSIX) and
+	// the shell-quoted binary compose into one command string.
+	const command = (input.childMetadata ? buildPaneCommandEnvPrefix(input.childMetadata) : "") + shellQuote(bin);
 	const started = await client.run(["pane", "run", paneId, command], { timeoutMs: 15_000, signal: input.signal });
 	if (started.ok === false) {
 		await client.run(["pane", "close", paneId], { timeoutMs: 5_000 });

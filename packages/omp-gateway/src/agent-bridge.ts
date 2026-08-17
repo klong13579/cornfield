@@ -107,6 +107,10 @@ export interface AgentBridgeOptions {
 	 *  prompt-queue timeout) from 'OMP dead mid-stream' (this watchdog).
 	 *  Default 90s; 0 disables. */
 	streamingWatchdogMs?: number;
+	/** Intercom parent target for this bridge's omp child: when set, the
+	 *  spawned `omp --mode rpc` registers on the intercom broker as a child
+	 *  of that session (auto completion reports, ask→parent routing). */
+	intercomParent?: string;
 	/** Host tool dispatcher wired to the gateway's HostToolDispatcher. When
 	 *  set, the bridge sends `set_host_tools` to OMP on each `ready` event
 	 *  and routes `host_tool_call` frames to the dispatcher. */
@@ -183,6 +187,7 @@ export class AgentBridge {
 			ompPath: options.ompPath,
 			model: options.model,
 			cwd: options.cwd,
+			intercomParent: options.intercomParent,
 			hostToolHandler: options.hostToolDispatcher
 				? (call, reply) => {
 						options.hostToolDispatcher!.setWriter((id, body) => {

@@ -2,6 +2,7 @@ import { logger } from "@oh-my-pi/pi-utils";
 import { randomUUID } from "crypto";
 import { unlinkSync, writeFileSync } from "fs";
 import net from "net";
+import * as path from "node:path";
 import { getAskTimeoutMs } from "./config";
 import { sameCwd } from "./cwd";
 import { ExtensionStateManager } from "./extension-state";
@@ -22,7 +23,6 @@ import type { BrokerMessage, ExtensionCapability, Message, MessageControl, Sessi
 import { EXTENSION_BUS_FEATURE } from "./types";
 
 const INTERCOM_DIR = getIntercomDirPath();
-const LISTEN_TARGET = getBrokerListenTarget();
 const PORT_PATH = getBrokerPortFilePath(INTERCOM_DIR);
 const BROKER_STATE_ID = randomUUID();
 const MAX_SESSIONS = 128;
@@ -106,13 +106,26 @@ export class IntercomBroker {
 	private namespaceOwners = new Map<string, NamespaceOwner>();
 	private nextOwnerOrder = 1;
 	private extensionStateManager: ExtensionStateManager;
+	private readonly listenTarget: BrokerConnectTarget;
 
-	constructor() {
-		ensureIntercomRuntimeDir(INTERCOM_DIR);
-		this.extensionStateManager = new ExtensionStateManager(INTERCOM_DIR);
-		if (typeof LISTEN_TARGET === "string" && process.platform !== "win32") {
+	constructor(options: { intercomDir?: string; listenTarget?: BrokerConnectTarget } = {}) {
+		// The runtime dir defaults to the module-level intercom dir, but tests
+		// inject an isolated one so the broker never touches ~/.omp/intercom.
+		const runtimeDir = options.intercomDir ?? INTERCOM_DIR;
+		this.listenTarget = options.listenTarget ?? getBrokerListenTarget();
+		// The socket must live in an existing directory: ensure the listen
+		// target's own dir (when it is a unix socket path) so hot-swapping
+		// PI_CODING_AGENT_DIR mid-process still works, then the runtime dir
+		// (extension state) which defaults to the module-level intercom dir.
+		if (typeof this.listenTarget === "string") {
+			ensureIntercomRuntimeDir(path.dirname(this.listenTarget));
+		} else {
+			ensureIntercomRuntimeDir(runtimeDir);
+		}
+		this.extensionStateManager = new ExtensionStateManager(runtimeDir);
+		if (typeof this.listenTarget === "string" && process.platform !== "win32") {
 			try {
-				unlinkSync(LISTEN_TARGET);
+				unlinkSync(this.listenTarget);
 			} catch {
 				// A clean startup has no stale socket to remove.
 			}
@@ -122,8 +135,8 @@ export class IntercomBroker {
 
 	start(): void {
 		const onListening = () => {
-			if (typeof LISTEN_TARGET === "string") {
-				restrictIntercomRuntimeFile(LISTEN_TARGET);
+			if (typeof this.listenTarget === "string") {
+				restrictIntercomRuntimeFile(this.listenTarget);
 			} else {
 				const address = this.server.address();
 				if (!address || typeof address === "string") {
@@ -131,7 +144,7 @@ export class IntercomBroker {
 				}
 				const endpoint: BrokerConnectTarget = {
 					transport: "tcp",
-					host: LISTEN_TARGET.host,
+					host: this.listenTarget.host,
 					port: address.port,
 					stateId: BROKER_STATE_ID,
 				};
@@ -139,14 +152,17 @@ export class IntercomBroker {
 				restrictIntercomRuntimeFile(PORT_PATH);
 			}
 			logger.info("Intercom broker listening", {
-				target: typeof LISTEN_TARGET === "string" ? LISTEN_TARGET : `${LISTEN_TARGET.host}:${LISTEN_TARGET.port}`,
+				target:
+					typeof this.listenTarget === "string"
+						? this.listenTarget
+						: `${this.listenTarget.host}:${this.listenTarget.port}`,
 			});
 		};
 
-		if (typeof LISTEN_TARGET === "string") {
-			this.server.listen(LISTEN_TARGET, onListening);
+		if (typeof this.listenTarget === "string") {
+			this.server.listen(this.listenTarget, onListening);
 		} else {
-			this.server.listen({ host: LISTEN_TARGET.host, port: LISTEN_TARGET.port }, onListening);
+			this.server.listen({ host: this.listenTarget.host, port: this.listenTarget.port }, onListening);
 		}
 	}
 
@@ -281,7 +297,7 @@ export class IntercomBroker {
 		}
 
 		const clientMessage = msg as { type: string } & Record<string, unknown>;
-		const requiresEndpointAuth = typeof LISTEN_TARGET !== "string";
+		const requiresEndpointAuth = typeof this.listenTarget !== "string";
 		const hasEndpointAuth = clientMessage.stateId === BROKER_STATE_ID;
 
 		if (clientMessage.type === "health") {
@@ -364,7 +380,8 @@ export class IntercomBroker {
 					startedAt: session.startedAt,
 					lastActivity: session.lastActivity,
 					...(session.status !== undefined ? { status: session.status } : {}),
-					trustedLocal: typeof LISTEN_TARGET === "string" && process.platform !== "win32",
+					...(session.parentId !== undefined ? { parentId: session.parentId } : {}),
+					trustedLocal: typeof this.listenTarget === "string" && process.platform !== "win32",
 				};
 
 				const connectedSession: ConnectedSession = {
@@ -1440,9 +1457,9 @@ export class IntercomBroker {
 		this.messageReceiptRoutes.clear();
 		this.disconnectedSessions.clear();
 		this.mailboxMessages.length = 0;
-		if (typeof LISTEN_TARGET === "string" && process.platform !== "win32") {
+		if (typeof this.listenTarget === "string" && process.platform !== "win32") {
 			try {
-				unlinkSync(LISTEN_TARGET);
+				unlinkSync(this.listenTarget);
 			} catch {
 				// The socket may already be gone if shutdown started after a disconnect.
 			}

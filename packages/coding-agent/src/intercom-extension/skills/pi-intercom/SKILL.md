@@ -74,6 +74,34 @@ intercom({ action: "list" })
 // → Shows all connected sessions with names, cwd, models, and live status (`idle`, `thinking`, `tool:<name>`)
 ```
 
+### Pattern 2b: Parent-Child Orchestration (monitoring children)
+
+When a session declares a parent (a child omp launched via `send`/`ask` with
+`openProjectPaneIfMissing: true` registers automatically as your child, and
+any session launched with `PI_SUBAGENT_ORCHESTRATOR_*` env does too):
+
+```typescript
+intercom({ action: "children" })
+// → Lists only YOUR child sessions with live status — monitor them without
+//    scanning the full roster. Rows show the same presence data as list.
+```
+
+Child sessions behave differently toward you automatically:
+
+- **Completion reports**: a child sends a structured `Subagent completed its
+  task round.` message to you after each task round (run id + agent + child
+  index). Treat it as a status update, not an ask.
+- **Ask without `to`**: a child's `intercom({action:"ask", message:"..."})`
+  with no `to`/`cwd` routes to you by default. Reply the same way you reply
+  to any ask.
+- **Decision escalations**: a child may escalate via `contact_supervisor`
+  with `reason: "need_decision"` / `"interview_request"` / `"progress_update"`
+  — you receive the structured request and decide.
+
+When you spawn a child yourself (the parent side), prefer
+`send`/`ask` with `cwd` + `openProjectPaneIfMissing: true` so the pane
+inherits the parent edge and the child auto-reports back.
+
 ### Pattern 3: Reply Naturally
 
 When responding to an inbound ask, prefer `reply` instead of reconstructing raw IDs:

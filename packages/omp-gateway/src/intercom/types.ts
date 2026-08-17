@@ -21,6 +21,12 @@ export interface SessionInfo {
 	contextPct?: number;
 	contextTokens?: number;
 	contextWindow?: number;
+	/** Parent session target declared at registration — the orchestrator that
+	 *  spawned this session. Holds the parent's session id, stable id, or name as
+	 *  supplied by the child (typically via PI_SUBAGENT_ORCHESTRATOR_* env vars).
+	 *  Parents match children by their own id/name. Optional: peer sessions have
+	 *  no parent. */
+	parentId?: string;
 }
 
 export interface Message {
