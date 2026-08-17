@@ -2,7 +2,7 @@ import type { PiClientEventKind } from "@oh-my-pi/pi-client";
 import { PiClient as WirePiClient } from "@oh-my-pi/pi-client";
 import type { WireCommand } from "@oh-my-pi/pi-wire";
 import type { PiClient } from "../lib/pi-client-api";
-import type { PlaybackEntry, PlaybackToolStep } from "../lib/records";
+import type { BranchPoint, PlaybackEntry, PlaybackToolStep, SessionRecordSummary } from "../lib/records";
 import type {
 	AgentInfoDto,
 	ConnectionInfoDto,
@@ -220,6 +220,37 @@ export class PiClientAdapter implements PiClient {
 	async getMessages(): Promise<PlaybackEntry[]> {
 		const result = await this.#req<{ messages?: unknown[] }>({ type: "get_messages" });
 		return toPlaybackEntries(result.messages ?? []);
+	}
+
+	/** 原始消息 JSON 序列（导出 JSONL 用；与落盘 SessionEntry 格式不一致，导出时标注）。 */
+	async getRawMessages(): Promise<unknown[]> {
+		const result = await this.#req<{ messages?: unknown[] }>({ type: "get_messages" });
+		return result.messages ?? [];
+	}
+
+	/** 分支候选（get_branch_messages：用户消息分支点）。 */
+	async getBranchMessages(): Promise<BranchPoint[]> {
+		try {
+			const result = await this.#req<{ messages?: BranchPoint[] | null }>({ type: "get_branch_messages" });
+			return result.messages ?? [];
+		} catch (err) {
+			console.warn("[web-app] get_branch_messages unavailable", err);
+			return [];
+		}
+	}
+
+	/**
+	 * 历史会话索引（be-dev list_sessions 命令；未实现时 catch 返回空，调用方回退 mock 骨架）。
+	 * TODO(@be-dev): list_sessions 就绪后返回 {sessions:[{id,name,agent,startedAt,messageCount,status,sessionFile}]}。
+	 */
+	async listSessions(): Promise<SessionRecordSummary[]> {
+		try {
+			const result = await this.#req<{ sessions?: SessionRecordSummary[] }>({ type: "list_sessions" });
+			return result.sessions ?? [];
+		} catch (err) {
+			console.warn("[web-app] list_sessions unavailable (be-dev not ready), fallback mock", err);
+			return [];
+		}
 	}
 
 	// hostToolResult：pi-client 无裸帧发送 API（host_tool_result 是独立 client frame），

@@ -213,7 +213,7 @@ export function VoiceView(): React.JSX.Element {
 				</div>
 
 				{/* 模式切换 */}
-				<div className="mb-8 flex w-fit gap-0.5 rounded-md border border-hairline bg-surface-2 p-0.5">
+				<div className="mb-6 flex w-fit gap-0.5 rounded-md border border-hairline bg-surface-2 p-0.5">
 					{(
 						[
 							["basic", "基础语音"],
@@ -231,6 +231,13 @@ export function VoiceView(): React.JSX.Element {
 					))}
 				</div>
 
+				{/* 不支持 Web Speech 时的醒目降级提示（D 增强） */}
+				{!sttSupported && (
+					<div className="mb-6 w-full max-w-[560px] rounded-lg border border-warning/40 bg-warning/5 px-4 py-3 text-[12.5px] leading-relaxed text-ink">
+						<b>语音识别不可用</b> —— 当前浏览器不支持 Web Speech API（建议 Chrome / Edge /
+						Safari）。已切换为手动输入模式：直接在下框输入指令，或改用麦克风录音后自行转写。
+					</div>
+				)}
 				{/* 模式主体 */}
 				{mode === "basic" ? (
 					<div className="flex flex-col items-center gap-6">
@@ -238,7 +245,8 @@ export function VoiceView(): React.JSX.Element {
 						<button
 							type="button"
 							onClick={toggleRecording}
-							className="relative flex h-30 w-30 items-center justify-center rounded-full border border-hairline-strong bg-surface transition-transform active:scale-95"
+							disabled={!sttSupported}
+							className="relative flex h-30 w-30 items-center justify-center rounded-full border border-hairline-strong bg-surface transition-transform active:scale-95 disabled:cursor-not-allowed disabled:opacity-45"
 							aria-label={recording ? "停止录音" : "开始录音"}
 						>
 							{recording && (
@@ -306,6 +314,7 @@ export function VoiceView(): React.JSX.Element {
 										: "btn flex h-14 w-14 items-center justify-center rounded-full"
 								}
 								onClick={toggleRecording}
+								disabled={!sttSupported}
 								aria-label={recording ? "停止" : "按住说话"}
 							>
 								{recording ? <CircleStop size={22} strokeWidth={1.5} /> : <Mic size={22} strokeWidth={1.5} />}

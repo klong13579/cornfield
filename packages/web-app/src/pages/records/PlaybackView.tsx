@@ -1,7 +1,13 @@
 import { Pause, Play, SkipBack, SkipForward } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { CURRENT_SESSION_ID, MOCK_RECORDS, mockTimeline, type PlaybackEntry } from "../../lib/records";
+import {
+	type BranchPoint,
+	CURRENT_SESSION_ID,
+	MOCK_RECORDS,
+	mockTimeline,
+	type PlaybackEntry,
+} from "../../lib/records";
 import { type PlaybackSpeed, usePlayback } from "../../lib/use-playback";
 import { useSessionStore } from "../../state/session-store";
 
@@ -15,6 +21,7 @@ export function PlaybackView(): React.JSX.Element {
 	const { id = "" } = useParams();
 	const store = useSessionStore();
 	const [timeline, setTimeline] = useState<PlaybackEntry[] | null>(null);
+	const [branchPoints, setBranchPoints] = useState<BranchPoint[]>([]);
 	const [error, setError] = useState<string | null>(null);
 	const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -32,6 +39,13 @@ export function PlaybackView(): React.JSX.Element {
 				.catch((err: unknown) => {
 					if (alive) setError(err instanceof Error ? err.message : String(err));
 				});
+			// 分支候选（get_branch_messages 真命令；branch 跳转待 serve 实现）
+			store
+				.getBranchMessages()
+				.then(points => {
+					if (alive) setBranchPoints(points);
+				})
+				.catch(() => undefined);
 		} else {
 			setTimeline(mockTimeline(id));
 		}
@@ -118,6 +132,7 @@ export function PlaybackView(): React.JSX.Element {
 					<div className="mx-auto flex max-w-[760px] flex-col gap-6">
 						<div className="mb-1 flex items-baseline gap-2.5">
 							<h1 className="text-[24px] font-semibold tracking-[-0.6px] text-ink">{title}</h1>
+							{branchPoints.length > 0 && <span className="badge run">分支候选 {branchPoints.length}</span>}
 							<Link
 								to="/records"
 								className="text-[12px] text-ink-muted no-underline hover:text-ink hover:underline"
@@ -219,6 +234,22 @@ export function PlaybackView(): React.JSX.Element {
 									</span>
 								</button>
 							))}
+							{branchPoints.length > 0 && (
+								<div className="mt-4 border-t border-hairline pt-3">
+									<h4 className="mb-2 text-[10px] font-semibold tracking-[0.08em] text-ink-faint uppercase">
+										分支候选（get_branch_messages）
+									</h4>
+									<div className="flex flex-col gap-1.5">
+										{branchPoints.map(p => (
+											<div key={p.entryId} className="rounded-md bg-surface-2 px-2 py-1.5">
+												<div className="truncate font-mono text-[10px] text-ink-faint">{p.entryId}</div>
+												<div className="truncate text-[12px] text-ink-muted">{p.text}</div>
+											</div>
+										))}
+									</div>
+									<div className="mt-1.5 text-[10px] text-ink-faint">branch 命令待 serve 实现（TODO）</div>
+								</div>
+							)}
 						</div>
 					</aside>
 				)}

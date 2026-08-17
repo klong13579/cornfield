@@ -3,7 +3,9 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
 	CURRENT_SESSION_ID,
+	downloadJsonl,
 	MOCK_RECORDS,
+	mockTimeline,
 	type RecordStatus,
 	recordStatusLabel,
 	type SessionRecordSummary,
@@ -24,6 +26,8 @@ export function RecordsView(): React.JSX.Element {
 	const [query, setQuery] = useState("");
 
 	const [currentSummary, setCurrentSummary] = useState<SessionRecordSummary | null>(null);
+	// be-dev list_sessions 真索引（就绪前回退 8 行 mock 骨架）
+	const [serveRows, setServeRows] = useState<SessionRecordSummary[]>([]);
 
 	// 当前 attached session 真数据（get_messages 已实现）：行「当前会话」
 	useEffect(() => {
@@ -42,9 +46,35 @@ export function RecordsView(): React.JSX.Element {
 			.catch(() => undefined);
 	}, [store]);
 
+	// list_sessions：be-dev 就绪后返回真索引，替换 mock；未实现时空数组回退骨架
+	useEffect(() => {
+		store
+			.listSessions()
+			.then(list => {
+				if (list.length > 0) setServeRows(list);
+			})
+			.catch(() => undefined);
+	}, [store]);
+
+	const handleExport = (row: SessionRecordSummary) => {
+		const name = `${row.name.replace(/[/\\:]/g, "-")}.jsonl`;
+		if (row.id === CURRENT_SESSION_ID) {
+			// 原始 serve messages 序列化（与落盘 SessionEntry 包裹格式不一致，见 getRawMessages 注释）
+			store
+				.getRawMessages()
+				.then(raw => downloadJsonl(name, raw))
+				.catch(() => undefined);
+		} else {
+			downloadJsonl(name, mockTimeline(row.id));
+		}
+	};
+
 	const agents = useMemo(() => Array.from(new Set(MOCK_RECORDS.map(r => r.agent))), []);
 
-	const rows: SessionRecordSummary[] = [...(currentSummary ? [currentSummary] : []), ...MOCK_RECORDS];
+	const rows: SessionRecordSummary[] = [
+		...(currentSummary ? [currentSummary] : []),
+		...(serveRows.length > 0 ? serveRows : MOCK_RECORDS),
+	];
 
 	const filtered = rows.filter(row => {
 		if (agentFilter !== "all" && row.agent !== agentFilter) return false;
@@ -159,9 +189,9 @@ export function RecordsView(): React.JSX.Element {
 									className="text-ink-faint transition-colors hover:text-ink"
 									onClick={e => {
 										e.stopPropagation();
-										// TODO: 真 JSONL 导出——serve 历史索引/文件读取命令就绪后从这里拉
+										handleExport(row);
 									}}
-									title="导出 JSONL（待记录系命令）"
+									title="导出 JSONL"
 								>
 									导出
 								</button>

@@ -1,4 +1,4 @@
-import type { PlaybackEntry } from "./records";
+import type { BranchPoint, PlaybackEntry, SessionRecordSummary } from "./records";
 import type {
 	AgentInfoDto,
 	ConnectionInfoDto,
@@ -60,7 +60,13 @@ export interface PiClient {
 	/** host tool 执行结果回传（host_tool_result client frame；视 pi-client 支持与否）。 */
 	hostToolResult?(id: string, resultText: string, isError?: boolean): void;
 
-	// ── P4 会话记录（serve 已实现 get_messages/get_session_stats）──
+	// ── P4 会话记录（serve 已实现 get_messages/get_session_stats/get_branch_messages）──
 	/** 拉取当前 attached session 的全部消息（get_messages），转播放时间线。 */
 	getMessages(): Promise<PlaybackEntry[]>;
+	/** 拉取原始消息 JSON 序列（导出 JSONL 用，不转换）。 */
+	getRawMessages(): Promise<unknown[]>;
+	/** 分支候选（get_branch_messages：用户消息分支点 {entryId,text}）。 */
+	getBranchMessages(): Promise<BranchPoint[]>;
+	/** 历史会话索引（list_sessions；be-dev 就绪后返回真数据，未实现时返回基础查询）。 */
+	listSessions(): Promise<SessionRecordSummary[]>;
 }

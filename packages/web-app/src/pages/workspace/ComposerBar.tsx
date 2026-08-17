@@ -5,14 +5,6 @@ import { useSessionStore } from "../../state/session-store";
 import { getUiStore, useUiState } from "../../state/ui-store";
 import { useSession } from "../../state/use-session";
 
-const MODEL_MENU = [
-	{ id: "claude-opus-4-5", provider: "anthropic" },
-	{ id: "claude-sonnet-4-5", provider: "anthropic" },
-	{ id: "qwen3.7-max", provider: "narwal-plan" },
-	{ id: "minimax-m3", provider: "narwal-plan" },
-	{ id: "gemini-2.5-pro", provider: "google" },
-];
-
 const THINKING_LEVELS = ["off", "low", "medium", "high"];
 
 /**
@@ -31,7 +23,24 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 	const [agentId, setAgentId] = useState(view.agents[0]?.id ?? "dev-assistant");
 	const [showAgentMenu, setShowAgentMenu] = useState(false);
 	const [showModelMenu, setShowModelMenu] = useState(false);
+	const [modelList, setModelList] = useState<Array<{ id: string; provider: string }>>([]);
 	const value = ui.draft || autoFocusDraft;
+
+	// 拉取真实可用模型列表（serve get_available_models；未连接/失败时保持空，UI 显示提示）
+	useEffect(() => {
+		let cancelled = false;
+		void store
+			.getAvailableModels()
+			.then(models => {
+				if (!cancelled && models.length > 0) {
+					setModelList(models.map(m => ({ id: m.id, provider: m.provider ?? "" })));
+				}
+			})
+			.catch(() => undefined);
+		return () => {
+			cancelled = true;
+		};
+	}, [store]);
 
 	const active = view.isStreaming || view.phase !== "idle";
 	const agent = view.agents.find(a => a.id === agentId) ?? view.agents[0];
@@ -161,20 +170,26 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 									<div className="px-2.5 pt-1.5 pb-1 text-[10px] font-semibold tracking-[0.08em] text-ink-faint uppercase">
 										模型
 									</div>
-									{MODEL_MENU.map(m => (
-										<button
-											key={m.id}
-											type="button"
-											className={`flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left font-mono text-[13px] transition-colors hover:bg-surface-3 ${m.id === view.model ? "bg-accent-dim" : ""}`}
-											onClick={() => {
-												store.setModel(m.id, m.provider);
-												setShowModelMenu(false);
-											}}
-										>
-											{m.id}
-											<span className="ml-auto font-sans text-[10px] text-ink-faint">{m.provider}</span>
-										</button>
-									))}
+									{modelList.length === 0 ? (
+										<div className="px-2.5 py-2 text-[12px] text-ink-faint">
+											无可用模型（未连接 / 列表加载中）
+										</div>
+									) : (
+										modelList.map(m => (
+											<button
+												key={`${m.provider}/${m.id}`}
+												type="button"
+												className={`flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left font-mono text-[13px] transition-colors hover:bg-surface-3 ${m.id === view.model ? "bg-accent-dim" : ""}`}
+												onClick={() => {
+													store.setModel(m.id, m.provider);
+													setShowModelMenu(false);
+												}}
+											>
+												{m.id}
+												<span className="ml-auto font-sans text-[10px] text-ink-faint">{m.provider}</span>
+											</button>
+										))
+									)}
 									<div className="mt-1.5 px-2.5 pt-1.5 pb-1 text-[10px] font-semibold tracking-[0.08em] text-ink-faint uppercase">
 										思维级别
 									</div>

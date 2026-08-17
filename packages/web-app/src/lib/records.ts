@@ -43,6 +43,23 @@ export interface RecordTimeline {
 /** 当前 attached session 的特殊 id：回放页走 serve get_messages 真数据。 */
 export const CURRENT_SESSION_ID = "current";
 
+/** 分支候选（get_branch_messages 返回：{entryId,text} 用户消息分支点）。 */
+export interface BranchPoint {
+	entryId: string;
+	text: string;
+}
+
+/** 导出 JSONL：每行一个 JSON 对象，Blob + a[download] 触发下载。 */
+export function downloadJsonl(filename: string, rows: unknown[]): void {
+	const blob = new Blob([rows.map(r => JSON.stringify(r)).join("\n")], { type: "application/x-ndjson" });
+	const url = URL.createObjectURL(blob);
+	const a = document.createElement("a");
+	a.href = url;
+	a.download = filename;
+	a.click();
+	URL.revokeObjectURL(url);
+}
+
 export const MOCK_RECORDS: SessionRecordSummary[] = [
 	{
 		id: "rec-gateway",

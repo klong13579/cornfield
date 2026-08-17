@@ -1,5 +1,5 @@
 import type { PiClient } from "../lib/pi-client-api";
-import type { PlaybackEntry } from "../lib/records";
+import type { BranchPoint, PlaybackEntry, SessionRecordSummary } from "../lib/records";
 import type {
 	AgentInfoDto,
 	EnvironmentSummaryDto,
@@ -244,6 +244,11 @@ class SessionStore {
 		return this.#client.getAvailableModels();
 	}
 
+	/** 别名（ComposerBar 接入真实模型列表）；serve stub 期间由 adapter 回退 fallback。 */
+	getAvailableModels(): Promise<ModelInfoDto[]> {
+		return this.#client.getAvailableModels();
+	}
+
 	/** 拉取注册表 agent 列表（list_agents）并刷新视图。 */
 	async fetchAgents(): Promise<void> {
 		const agents = await this.#client.listAgents();
@@ -265,6 +270,21 @@ class SessionStore {
 	/** 拉取当前会话消息（get_messages）转播放时间线。 */
 	getMessages(): Promise<PlaybackEntry[]> {
 		return this.#client.getMessages();
+	}
+
+	/** 原始消息 JSON 序列（导出 JSONL）。 */
+	getRawMessages(): Promise<unknown[]> {
+		return this.#client.getRawMessages();
+	}
+
+	/** 分支候选（get_branch_messages）。 */
+	getBranchMessages(): Promise<BranchPoint[]> {
+		return this.#client.getBranchMessages();
+	}
+
+	/** 历史会话索引（list_sessions；未就绪时空数组，调用方回退 mock）。 */
+	listSessions(): Promise<SessionRecordSummary[]> {
+		return this.#client.listSessions();
 	}
 
 	// ── 帧归约 ──
