@@ -6,6 +6,7 @@ import type { BranchPoint, PlaybackEntry, PlaybackToolStep, RecordStatus, Sessio
 import type {
 	AgentInfoDto,
 	ConnectionInfoDto,
+	EnvironmentSummaryDto,
 	HostToolDefinitionDto,
 	ImageContentDto,
 	ModelInfoDto,
@@ -14,6 +15,14 @@ import type {
 	TodoPhaseDto,
 	WireServerEventDto,
 } from "../lib/wire-dto";
+
+/** serve get_state env 条目（pi-wire WireEnvironmentSummary；pendingCronCount 为可选缺省）。 */
+interface WireEnvironmentSummaryDto {
+	repos: string;
+	branch: string | null;
+	activeAgentCount: number;
+	pendingCronCount?: number | null;
+}
 
 /** serve list_sessions 响应条目（WireSessionIndexEntry，字段名以 pi-wire 为准）。 */
 interface WireSessionIndexEntryDto {
@@ -88,6 +97,7 @@ export class PiClientAdapter implements PiClient {
 	#sessionId: string | null = null;
 	#connection: ConnectionInfoDto;
 	#agents: AgentInfoDto[] = [];
+	#env: EnvironmentSummaryDto | null = null;
 	#listeners = new Set<(frame: WireServerEventDto) => void>();
 	#connListeners = new Set<(conn: ConnectionInfoDto) => void>();
 
@@ -124,9 +134,8 @@ export class PiClientAdapter implements PiClient {
 		return this.#agents;
 	}
 
-	getEnvironment(): null {
-		// serve 当前无环境摘要命令（mock 扩展）；Home 摘要走默认占位
-		return null;
+	getEnvironment(): EnvironmentSummaryDto | null {
+		return this.#env;
 	}
 
 	subscribe(listener: (frame: WireServerEventDto) => void): () => void {
@@ -305,6 +314,26 @@ export class PiClientAdapter implements PiClient {
 		});
 	}
 
+	/** 拉取环境摘要（get_state → env，serve B1 已实现）。失败保留旧值/置 null，不阻塞连接。 */
+	async #refreshEnvironment(): Promise<void> {
+		try {
+			const result = await this.#req<{ env?: WireEnvironmentSummaryDto | null }>({ type: "get_state" });
+			const env = result.env;
+			if (env) {
+				this.#env = {
+					repos: env.repos,
+					branch: env.branch ?? "",
+					activeAgentCount: env.activeAgentCount,
+					pendingCronCount: env.pendingCronCount ?? 0,
+				};
+				// 经由 store subscriptionConnection 重建视图使 Home/Workspace 拿到新 env
+				this.#notifyConnection();
+			}
+		} catch {
+			// 保留旧值/置 null，不阻塞连接
+		}
+	}
+
 	#handleEvent(event: PiClientEventKind): void {
 		switch (event.type) {
 			case "status":
@@ -319,6 +348,8 @@ export class PiClientAdapter implements PiClient {
 					reconnecting: false,
 				};
 				this.#notifyConnection();
+				// env 环境摘要（serve get_state 已含 env 字段，B1）——异步拉取，到达后经 store 重建视图
+				void this.#refreshEnvironment();
 				break;
 			case "push":
 				this.#handlePush(event.event);

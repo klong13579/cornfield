@@ -104,6 +104,7 @@ class SessionStore {
 				this.#view.connectionId = conn.connectionId;
 				this.#view.protocolVersion = conn.protocolVersion;
 				this.#view.wsUrl = conn.wsUrl;
+				this.#view.env = this.#client.getEnvironment();
 				this.#notify();
 				void unsubConn;
 			});
