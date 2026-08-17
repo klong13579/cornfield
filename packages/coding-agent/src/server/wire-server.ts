@@ -497,7 +497,8 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 		fetch(req, srv) {
 			const url = new URL(req.url);
 			if (url.pathname !== "/ws") return new Response("not found", { status: 404 });
-			if (url.searchParams.get("token") !== token) return new Response("unauthorized", { status: 401 });
+			// token 为空 = 本地免鉴权（仅绑 127.0.0.1）；非空时 URL query 与 hello 帧都要校验
+			if (token !== "" && url.searchParams.get("token") !== token) return new Response("unauthorized", { status: 401 });
 			const upgraded = srv.upgrade(req, { data: undefined });
 			return upgraded ? undefined : new Response("upgrade failed", { status: 400 });
 		},
@@ -522,7 +523,7 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 	});
 
 	logger.info("serve:listening", {
-		url: `ws://${options.host}:${options.port}/ws?token=${token}`,
+		url: token ? `ws://${options.host}:${options.port}/ws?token=${token}` : `ws://${options.host}:${options.port}/ws`,
 		sessionId: defaultSession.session.sessionId,
 		agents: registry.listMetas().map(meta => meta.id),
 	});

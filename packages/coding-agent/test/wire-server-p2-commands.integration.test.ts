@@ -33,10 +33,10 @@ async function waitForServe(proc: ReturnType<typeof Bun.spawn>): Promise<{ url: 
 		const { value, done } = await reader.read();
 		if (done) throw new Error("serve exited before emitting listening url");
 		buf += dec.decode(value);
-		const m = buf.match(/ws:\/\/127\.0\.0\.1:(\d+)\/ws\?token=([a-zA-Z0-9]+)/);
+		const m = buf.match(/ws:\/\/127\.0\.0\.1:(\d+)\/ws(\?token=([a-zA-Z0-9]+))?/);
 		if (m) {
 			reader.releaseLock();
-			return { url: `ws://127.0.0.1:${m[1]}/ws?token=${m[2]}`, token: m[2] };
+			return { url: `ws://127.0.0.1:${m[1]}/ws${m[2] ?? ""}`, token: m[3] ?? "" };
 		}
 	}
 	reader.releaseLock();

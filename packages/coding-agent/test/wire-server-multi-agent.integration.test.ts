@@ -21,7 +21,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { MULTIDEVICE_PROTOCOL_VERSION } from "@oh-my-pi/pi-wire";
 
-const TOKEN_RE = /ws:\/\/127\.0\.0\.1:(\d+)\/ws\?token=([a-zA-Z0-9]+)/;
+const TOKEN_RE = /ws:\/\/127\.0\.0\.1:(\d+)\/ws(\?token=([a-zA-Z0-9]+))?/;
 
 type Frame = { type: string; [k: string]: unknown };
 

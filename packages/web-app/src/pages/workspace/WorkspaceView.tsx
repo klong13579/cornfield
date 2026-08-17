@@ -49,6 +49,14 @@ export function WorkspaceView({ compact = false }: { compact?: boolean }): React
 	return (
 		<div className="flex h-full min-h-0">
 			<div className="flex min-w-0 flex-1 flex-col">
+				{view.commandError && (
+					<div className="flex items-center gap-2 border-b border-danger/40 bg-danger/5 px-4 py-1.5 text-[12px] text-danger">
+						<span className="flex-1 truncate">{view.commandError}</span>
+						<button type="button" className="link" onClick={() => store.clearCommandError()}>
+							清除
+						</button>
+					</div>
+				)}
 				<header className="flex h-12 shrink-0 items-center gap-3 border-b border-hairline bg-surface px-4.5">
 					<span className="flex items-center gap-1.5 text-[12px] text-success">
 						<span className={`conn-dot ${view.reconnecting ? "reconnecting" : ""}`} />

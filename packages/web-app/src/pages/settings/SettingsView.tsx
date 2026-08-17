@@ -10,6 +10,22 @@ import { useSession } from "../../state/use-session";
 export function SettingsView(): React.JSX.Element {
 	const view = useSession();
 	const store = useSessionStore();
+	const [wsUrl, setWsUrl] = useState(view.wsUrl);
+	const [token, setToken] = useState("");
+	const [saveError, setSaveError] = useState<string | null>(null);
+	const saveConnection = async (): Promise<void> => {
+		setSaveError(null);
+		try {
+			const url = wsUrl.trim() || "ws://127.0.0.1:7891/ws";
+			if (!url.startsWith("ws://") && !url.startsWith("wss://")) {
+				setSaveError("WS URL 需以 ws:// 或 wss:// 开头");
+				return;
+			}
+			await store.reconfigure({ wsUrl: url, token: token.trim() });
+		} catch (err) {
+			setSaveError(err instanceof Error ? err.message : String(err));
+		}
+	};
 	const [notifyAgentDone, setNotifyAgentDone] = useState(true);
 	const [notifyError, setNotifyError] = useState(true);
 	const [notifyCron, setNotifyCron] = useState(false);
@@ -34,12 +50,49 @@ export function SettingsView(): React.JSX.Element {
 						<Row k="Connection ID">
 							<span className="font-mono text-[11px] text-ink">{view.connectionId ?? "—"}</span>
 						</Row>
-						<Row k="WS URL">
-							<span className="font-mono text-[11px] text-ink">{view.wsUrl}</span>
-						</Row>
 						<Row k="协议版本">
 							<span className="font-mono text-[11px] text-ink">v{view.protocolVersion}</span>
 						</Row>
+					</div>
+
+					<div className="mt-2 divide-y divide-hairline rounded-lg border border-hairline bg-surface">
+						<div className="px-4 py-2.5">
+							<label className="block text-[12px] text-ink-subtle" htmlFor="conn-wsurl">
+								WS URL
+							</label>
+							<div className="mt-1 flex gap-2">
+								<input
+									id="conn-wsurl"
+									value={wsUrl}
+									onChange={e => setWsUrl(e.target.value)}
+									placeholder="ws://127.0.0.1:7891/ws"
+									className="flex-1 rounded border border-hairline bg-surface-2 px-2.5 py-1.5 font-mono text-[12px] text-ink outline-none focus:border-hairline-strong"
+								/>
+							</div>
+						</div>
+						<div className="px-4 py-2.5">
+							<label className="block text-[12px] text-ink-subtle" htmlFor="conn-token">
+								Token
+							</label>
+							<div className="mt-1 flex gap-2">
+								<input
+									id="conn-token"
+									type="password"
+									value={token}
+									onChange={e => setToken(e.target.value)}
+									placeholder="serve 启动时打印的 token"
+									className="flex-1 rounded border border-hairline bg-surface-2 px-2.5 py-1.5 font-mono text-[12px] text-ink outline-none focus:border-hairline-strong"
+								/>
+								<button
+									type="button"
+									onClick={() => void saveConnection()}
+									className="rounded bg-accent px-3 py-1.5 text-[12px] font-medium text-on-accent hover:bg-accent-hover"
+								>
+									保存并重连
+								</button>
+							</div>
+							{saveError !== null && <div className="mt-1 text-[11px] text-danger">{saveError}</div>}
+						</div>
 					</div>
 				</section>
 

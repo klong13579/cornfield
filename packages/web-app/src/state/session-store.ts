@@ -11,6 +11,8 @@ import type {
 	TodoPhaseDto,
 	WireServerEventDto,
 } from "../lib/wire-dto";
+import { createClient } from "./client";
+import { type ServeConnectionConfig, saveServeConfig } from "./pi-client-adapter";
 
 /** 渲染层工具卡状态（三态 + 参数/结果）。 */
 export interface ToolView {
@@ -62,6 +64,8 @@ export interface SessionView {
 	flags: { autoCompaction: boolean; autoRetry: boolean };
 	agents: AgentInfoDto[];
 	env: EnvironmentSummaryDto | null;
+	/** 最近一次命令失败的可见错误（未连接等），成功或清空后为 undefined。 */
+	commandError?: string;
 }
 
 const EMPTY_PHASE: SessionPhaseDto = "idle";
@@ -115,6 +119,17 @@ class SessionStore {
 		});
 	}
 
+	/** 保存连接配置并用新配置重建客户端（设置页保存/重连用）。 */
+	async reconfigure(config: ServeConnectionConfig): Promise<void> {
+		saveServeConfig(config);
+		this.#client.disconnect();
+		this.#client = createClient();
+		this.init(this.#client);
+		await this.#client.connect();
+		this.#view = this.#buildBaseView();
+		this.#notify();
+	}
+
 	getSnapshot(): SessionView {
 		if (!this.#view) {
 			this.#view = this.#buildBaseView();
@@ -129,20 +144,46 @@ class SessionStore {
 
 	// ── 命令透传 ──
 
+	/** 执行命令；失败（如未连接）时把错误写进 view.commandError，UI 显示提示条。 */
+	async #run<T = void>(fn: () => Promise<T>): Promise<T | undefined> {
+		try {
+			const r = await fn();
+			this.#clearCommandError();
+			return r;
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			this.#view = cloneView(this.getSnapshot());
+			this.#view.commandError = `命令失败（未连接）：${msg}`;
+			this.#notify();
+			return undefined;
+		}
+	}
+
+	clearCommandError(): void {
+		this.#clearCommandError();
+	}
+
+	#clearCommandError(): void {
+		if (!this.#view?.commandError) return;
+		this.#view = cloneView(this.getSnapshot());
+		this.#view.commandError = undefined;
+		this.#notify();
+	}
+
 	prompt(text: string): void {
-		void this.#client.prompt(text).catch(() => undefined);
+		void this.#run(() => this.#client.prompt(text));
 	}
 
 	abort(): void {
-		void this.#client.abort().catch(() => undefined);
+		void this.#run(() => this.#client.abort());
 	}
 
 	compact(): void {
-		void this.#client.compact().catch(() => undefined);
+		void this.#run(() => this.#client.compact());
 	}
 
 	newSession(): void {
-		void this.#client.newSession().catch(() => undefined);
+		void this.#run(() => this.#client.newSession());
 	}
 
 	setModel(modelId: string, provider?: string): void {
