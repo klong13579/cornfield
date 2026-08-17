@@ -2,6 +2,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { $which, isEnoent, logger } from "@oh-my-pi/pi-utils";
 import type { DetectedRunner, RunnerTask, TaskRunner } from "../runner";
+import { probeCommand } from "../runner";
 
 export interface CargoMetadataTarget {
 	kind?: string[];
@@ -95,18 +96,12 @@ export function tasksFromCargoMetadata(metadata: CargoMetadata): RunnerTask[] {
 }
 
 async function readCargoMetadata(cwd: string): Promise<CargoMetadata | null> {
+	const probed = await probeCommand(["cargo", "metadata", "--no-deps", "--format-version=1"], cwd);
+	if (!probed) return null;
 	try {
-		const proc = Bun.spawn(["cargo", "metadata", "--no-deps", "--format-version=1"], {
-			cwd,
-			stdin: "ignore",
-			stdout: "pipe",
-			stderr: "pipe",
-		});
-		const [stdout, exit] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
-		if (exit !== 0) return null;
-		return JSON.parse(stdout) as CargoMetadata;
+		return JSON.parse(probed.stdout) as CargoMetadata;
 	} catch (err) {
-		logger.debug("cargo metadata failed", { error: err instanceof Error ? err.message : String(err) });
+		logger.debug("cargo metadata parse failed", { error: err instanceof Error ? err.message : String(err) });
 		return null;
 	}
 }

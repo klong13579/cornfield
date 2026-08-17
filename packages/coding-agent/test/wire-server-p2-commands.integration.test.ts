@@ -26,7 +26,7 @@ let ctx: E2eContext;
 async function waitForServe(proc: ReturnType<typeof Bun.spawn>): Promise<{ url: string; token: string }> {
 	const deadline = Date.now() + 60_000;
 	// omp 的 logger 用 winston Console（默认 stdout），所以 serve:listening 在 stdout 上。
-	const reader = proc.stdout.getReader();
+	const reader = (proc.stdout as ReadableStream<Uint8Array>).getReader();
 	const dec = new TextDecoder();
 	let buf = "";
 	while (Date.now() < deadline) {
@@ -184,7 +184,7 @@ describe("P2 wire-server 命令面 — 12 条真机 e2e", () => {
 		const r = await sendCommand({ type: "compact" }, 15_000);
 		// 无需断言具体归属，双方都合理：
 		// - 无 model / 无可压缩内容 → ok:false 带错误或 ok:true 带 skipped result
-		expect([true, false]).toContain(r.ok);
+		expect([true, false]).toContain(r.ok as boolean);
 		if (!r.ok) expect(typeof r.error).toBe("string");
 	});
 

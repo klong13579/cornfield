@@ -87,7 +87,7 @@ test("serve 多 Agent：注册表 + attach + switch + 隔离 + 心跳", async ()
 		// ── 连接 A：默认 focus=default ──
 		const connA = await WireConn.connect(url, token);
 		const helloPush = await connA.nextPush("server_snapshot");
-		const sessions = (helloPush.event as { sessions: Array<{ id: string; attached: boolean }> }).sessions;
+		const sessions = (helloPush.event as unknown as { sessions: Array<{ id: string; attached: boolean }> }).sessions;
 		expect(sessions.map(s => s.id).sort()).toEqual(["default", "hr", "ops"]);
 		expect(sessions.find(s => s.id === "hr")?.attached).toBe(false);
 		expect(sessions.find(s => s.id === "default")?.attached).toBe(true);
@@ -171,14 +171,13 @@ test("serve 多 Agent：注册表 + attach + switch + 隔离 + 心跳", async ()
 		process.env.HOME = savedHome;
 		await fs.rm(isolatedHome, { recursive: true, force: true });
 	}
-	// 冷启动可达 ~110s，总预算放宽到 240s
-}, 240_000);
+}, 60_000);
 
 async function waitForServe(proc: ReturnType<typeof Bun.spawn>): Promise<string> {
-	const deadline = Date.now() + 180_000;
-	// 注意：serve 在全新隔离 HOME 下冷启动可长达 ~110s（CLI 装配路径 vs 直接 SDK 的差异
-	// 尚未定论，见 TODO(multidevice-P3): serve CLI 慢启动。60s 不够，放宽到 180s。
-	const reader = proc.stdout.getReader();
+	// 冷启动根因已修（recipe cargo 探测超时，见 tools/recipe/runner.ts）：隔离 HOME 实测 ~8s。
+	// 30s 预算给 CI 慢盘留余量。
+	const deadline = Date.now() + 30_000;
+	const reader = (proc.stdout as ReadableStream<Uint8Array>).getReader();
 	const dec = new TextDecoder();
 	let buf = "";
 	while (Date.now() < deadline) {
