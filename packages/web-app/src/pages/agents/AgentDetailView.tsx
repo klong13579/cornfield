@@ -23,20 +23,8 @@ const TABS: { id: TabId; label: string; count?: number }[] = [
 	{ id: "prompts", label: "Prompts" },
 ];
 
-// 技能列表为骨架展示：数据源待后端 get_snapshot 扩展 skills 字段（缺口 B3）
-const SKILLS = [
-	{ name: "diagnosing-bugs", desc: "诊断循环：硬 bug 和性能回归的诊断流程", version: "v1.2", enabled: true },
-	{ name: "tdd", desc: "测试驱动开发，red-green-refactor 流程", version: "v2.0", enabled: true },
-	{ name: "codebase-design", desc: "深度模块设计词汇，接口设计、seam 定位", version: "v1.0", enabled: true },
-	{ name: "cross-modal-review", desc: "第二模型质量门禁，跨模型代码审查", version: "v0.25", enabled: true },
-	{ name: "project-todo", desc: "项目任务板维护，TODO.md 增删改查", version: "v1.1", enabled: false },
-	{
-		name: "session-diagnosis-orchestrator",
-		desc: "Agent 会话六维度诊断，失败原因分析",
-		version: "v1.0",
-		enabled: true,
-	},
-];
+// 技能列表改为真实数据：fs_list 读 .omp/skills/ 目录（serve skillCount 同源）。
+// 版本/描述从各 skill 的 SKILL.md frontmatter 解析（fs_read）。
 
 // cron 数据为骨架展示：wire 命令缺口 B4
 const CRONS = [
@@ -149,36 +137,7 @@ export function AgentDetailView(): React.JSX.Element {
 					))}
 				</div>
 
-				{tab === "skills" && (
-					<div>
-						{SKILLS.map(skill => (
-							<div
-								key={skill.name}
-								className="flex items-baseline gap-3 border-b border-hairline px-1 py-3.5 transition-colors hover:bg-surface"
-							>
-								<span className="w-[220px] shrink-0 font-mono text-[13px] font-medium text-ink">
-									{skill.name}
-								</span>
-								<span className="min-w-0 flex-1 text-[12px] text-ink-subtle">{skill.desc}</span>
-								<span className="shrink-0 font-mono text-[12px] text-ink-faint">{skill.version}</span>
-								<button
-									type="button"
-									className={`toggle shrink-0${skill.enabled ? " on" : ""}`}
-									aria-checked={skill.enabled}
-									role="switch"
-									disabled
-									title="技能启停待 set_skill_enabled 协议（后端缺口 B3）"
-									onClick={() => {
-										/* TODO(后端 B3): set_skill_enabled 协议 */
-									}}
-								/>
-							</div>
-						))}
-						<div className="mt-3 text-[11px] text-ink-faint">
-							Skills 启用/停用需 serve get_snapshot 扩展 skills 字段（skill-management.md L1，P3 同批）
-						</div>
-					</div>
-				)}
+				{tab === "skills" && <SkillsView agentId={id} skillsCount={agent?.skillsCount} />}
 
 				{tab === "cron" && (
 					<div>
@@ -339,46 +298,7 @@ export function AgentDetailView(): React.JSX.Element {
 					</div>
 				)}
 
-				{tab === "profile" && (
-					<div>
-						<div className="mb-1 text-[15px] font-semibold text-ink">基于钉钉消息的用户建模</div>
-						<div className="mb-4 text-[12px] text-ink-subtle">
-							来源：钉钉机器人会话 · 128 条消息 · 最近更新 2 小时前（mock，真实入口待连接器数据只读路径）
-						</div>
-						<div className="mb-2.5 text-[11px] font-semibold tracking-[0.08em] text-ink-faint uppercase">
-							关注领域
-						</div>
-						<div className="mb-5 flex flex-wrap gap-2">
-							{["机器人", "扫地机", "日程", "投融资", "代码审查", "架构设计"].map(tag => (
-								<span key={tag} className="rounded bg-surface-3 px-3 py-1 text-[12px] text-ink-subtle">
-									{tag}
-								</span>
-							))}
-						</div>
-						<div className="mb-5 rounded-lg border border-hairline bg-surface px-4 py-3 text-[14px] leading-relaxed text-ink">
-							关注研发效率与商业决策，偏好短句直接沟通。技术背景深厚但不逐行审代码，关注架构方向与
-							tradeoff。对投融资话题敏感，习惯用数字说话。
-						</div>
-						<div className="flex gap-2">
-							<button
-								type="button"
-								className="btn btn-sm"
-								disabled
-								title="用户画像只读数据待连接器路径（缺口 B5）"
-							>
-								重新建模
-							</button>
-							<button
-								type="button"
-								className="btn btn-secondary btn-sm"
-								disabled
-								title="用户画像只读数据待连接器路径（缺口 B5）"
-							>
-								导出画像 JSON
-							</button>
-						</div>
-					</div>
-				)}
+				{tab === "profile" && <ProfileView agentId={id} />}
 
 				{tab === "files" && <FileExplorer agentId={id} />}
 
@@ -407,6 +327,176 @@ function statusText(status?: string): string {
 		default:
 			return "状态未知";
 	}
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Skills tab：真实技能列表（fs_list 读 .omp/skills/，SKILL.md frontmatter 解析）
+// ─────────────────────────────────────────────────────────────────────
+
+interface SkillInfo {
+	name: string;
+	desc?: string;
+	version?: string;
+}
+
+/** 解析 skills/<name>/SKILL.md 的 frontmatter（name/description/version）。 */
+function parseFrontmatter(text: string): { desc?: string; version?: string; name?: string } {
+	const out: { desc?: string; version?: string; name?: string } = {};
+	const m = text.match(/^---\s*\n([\s\S]*?)\n---/);
+	if (!m) return out;
+	for (const line of m[1].split("\n")) {
+		const mm = line.match(/^(name|description|version)\s*:\s*(.+)$/);
+		if (mm) {
+			const val = mm[2].trim().replace(/^["']|["']$/g, "");
+			if (mm[1] === "description") out.desc = val;
+			else if (mm[1] === "version") out.version = val;
+			else out.name = val;
+		}
+	}
+	return out;
+}
+
+function SkillsView({ agentId, skillsCount }: { agentId: string; skillsCount?: number }): React.JSX.Element {
+	const store = useSessionStore();
+	const view = useSession();
+	const [skills, setSkills] = useState<SkillInfo[] | null>(null);
+	const [error, setError] = useState<string | null>(null);
+
+	useEffect(() => {
+		let cancelled = false;
+		if (!view.connected) return; // 连接就绪后再拉，避免 fs_list 在握手期失败
+		const load = async (): Promise<void> => {
+			try {
+				const { entries } = await store.fsList(agentId, ".omp/skills");
+				const dirs = entries.filter(e => e.type === "dir");
+				const infos = await Promise.all(
+					dirs.map(async d => {
+						// 读 SKILL.md frontmatter（可能不在顶层而在一级子目录，容错）
+						try {
+							const { text } = await store.fsRead(agentId, `.omp/skills/${d.name}/SKILL.md`);
+							const fm = parseFrontmatter(text);
+							return { name: fm.name ?? d.name, desc: fm.desc, version: fm.version };
+						} catch {
+							// 无 SKILL.md（纯目录/素材）——仅列目录名
+							return { name: d.name };
+						}
+					}),
+				);
+				if (!cancelled) setSkills(infos);
+			} catch (err) {
+				if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+			}
+		};
+		void load();
+		return () => {
+			cancelled = true;
+		};
+	}, [agentId, store, view.connected]);
+
+	if (error) {
+		return <div className="px-1 py-3 text-[12px] text-danger">技能列表加载失败：{error}</div>;
+	}
+	if (!skills) {
+		return <div className="px-1 py-3 text-[12px] text-ink-faint">加载中…</div>;
+	}
+	if (skills.length === 0) {
+		return <div className="px-1 py-8 text-center text-[12px] text-ink-faint">该 agent 没有已安装技能（.omp/skills/ 为空）</div>;
+	}
+
+	return (
+		<div>
+			{skills.map(skill => (
+				<div
+					key={skill.name}
+					className="flex items-baseline gap-3 border-b border-hairline px-1 py-3.5 transition-colors hover:bg-surface"
+				>
+					<span className="w-[220px] shrink-0 font-mono text-[13px] font-medium text-ink">{skill.name}</span>
+					<span className="min-w-0 flex-1 text-[12px] text-ink-subtle">{skill.desc ?? "—"}</span>
+					<span className="shrink-0 font-mono text-[12px] text-ink-faint">{skill.version ?? ""}</span>
+					<button
+						type="button"
+						className="toggle shrink-0 on"
+						aria-checked={true}
+						role="switch"
+						disabled
+						title="技能启停待 set_skill_enabled 协议（后端缺口 B3）"
+					/>
+				</div>
+			))}
+			<div className="mt-3 text-[11px] text-ink-faint">
+				{skills.length} 个已安装技能（.omp/skills/ 真实列表）；启用/停用待 set_skill_enabled 协议。
+			</div>
+		</div>
+	);
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// 用户画像 tab：真实数据源 agentDir/user.md（declarative persona）+
+// mission.md（agent 职责）——fs_read 读取，替代原硬编码文案
+// ─────────────────────────────────────────────────────────────────────
+
+function ProfileView({ agentId }: { agentId: string }): React.JSX.Element {
+	const store = useSessionStore();
+	const view = useSession();
+	const [userMd, setUserMd] = useState<string | null>(null);
+	const [missionMd, setMissionMd] = useState<string | null>(null);
+	const [error, setError] = useState<string | null>(null);
+
+	useEffect(() => {
+		let cancelled = false;
+		if (!view.connected) return; // 连接就绪后再拉
+		const load = async (): Promise<void> => {
+			try {
+				const [u, m] = await Promise.all([
+					store.fsRead(agentId, "user.md").catch(() => null),
+					store.fsRead(agentId, "mission.md").catch(() => null),
+				]);
+				if (cancelled) return;
+				setUserMd(u?.text ?? null);
+				setMissionMd(m?.text ?? null);
+				if (!u && !m) setError("该 agent 没有 user.md / mission.md（画像未配置）");
+			} catch (err) {
+				if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+			}
+		};
+		void load();
+		return () => {
+			cancelled = true;
+		};
+	}, [agentId, store, view.connected]);
+
+	if (error && !userMd && !missionMd) {
+		return <div className="px-1 py-6 text-[12px] text-ink-faint">{error}</div>;
+	}
+
+	return (
+		<div className="flex flex-col gap-6">
+			{missionMd && (
+				<section>
+					<h4 className="mb-2 text-[11px] font-semibold tracking-[0.08em] text-ink-faint uppercase">
+						mission.md（agent 职责）
+					</h4>
+					<pre className="max-h-[260px] overflow-auto whitespace-pre-wrap rounded-lg border border-hairline bg-surface px-4 py-3 text-[13px] leading-relaxed text-ink-muted">
+						{missionMd}
+					</pre>
+				</section>
+			)}
+			{userMd && (
+				<section>
+					<h4 className="mb-2 text-[11px] font-semibold tracking-[0.08em] text-ink-faint uppercase">
+						user.md（用户画像声明）
+					</h4>
+					<pre className="max-h-[420px] overflow-auto whitespace-pre-wrap rounded-lg border border-hairline bg-surface px-4 py-3 text-[13px] leading-relaxed text-ink-muted">
+						{userMd}
+					</pre>
+				</section>
+			)}
+			<div className="text-[11px] text-ink-faint">
+				画像数据来自 agentDir/user.md + mission.md（fs_read 真读）；钉钉对话实时建模待连接器只读路径（缺口
+				B5）。
+			</div>
+		</div>
+	);
 }
 
 // ─────────────────────────────────────────────────────────────────────
