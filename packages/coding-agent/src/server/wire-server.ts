@@ -2,7 +2,14 @@ import { randomUUID } from "node:crypto";
 import { logger } from "@oh-my-pi/pi-utils";
 import type { AgentSession } from "../session/agent-session";
 import type { SessionStore } from "../session/session-store";
-import { type ClientFrame, MULTIDEVICE_PROTOCOL_VERSION, type ServerFrame, type WireCommand, type WireServerEvent } from "./wire-types";
+import type { TodoPhase } from "../tools/todo-write";
+import {
+	type ClientFrame,
+	MULTIDEVICE_PROTOCOL_VERSION,
+	type ServerFrame,
+	type WireCommand,
+	type WireServerEvent,
+} from "./wire-types";
 
 export interface WireServerOptions {
 	host: string;
@@ -60,6 +67,9 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 
 		try {
 			switch (command.type) {
+				// ─────────────────────────────────────────────────────────────
+				// Prompting (P1)
+				// ─────────────────────────────────────────────────────────────
 				case "prompt": {
 					// fire-and-forget：事件流经 store.subscribe 推送，错误回到 response
 					session.prompt(command.message, { images: command.images }).catch((err: Error) => {
@@ -83,6 +93,25 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 					done();
 					break;
 				}
+				case "abort_and_prompt": {
+					// 组合语义与 rpc-mode 完全一致：先 abort，再 fire-and-forget 新 prompt。
+					await session.abort();
+					session.prompt(command.message, { images: command.images }).catch((err: Error) => {
+						fail(err.message);
+					});
+					done();
+					break;
+				}
+				case "new_session": {
+					const options = command.parentSession ? { parentSession: command.parentSession } : undefined;
+					const success = await session.newSession(options);
+					done({ cancelled: !success });
+					break;
+				}
+
+				// ─────────────────────────────────────────────────────────────
+				// State (P1 + P2 补齐)
+				// ─────────────────────────────────────────────────────────────
 				case "get_snapshot": {
 					done({ snapshot: store.getSnapshot() });
 					break;
@@ -91,19 +120,121 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 					done(buildRpcState(session, store));
 					break;
 				}
+				case "set_todos": {
+					session.setTodoPhases(command.phases as TodoPhase[]);
+					done({ todoPhases: session.getTodoPhases() });
+					break;
+				}
+				case "set_host_tools": {
+					// P2 已知缺口（见 mock/DEV-PLAN.md 与本次交付说明）：
+					// host tools 需要双向 wire 帧（host_tool_call/host_tool_result/
+					// host_tool_update/host_tool_cancel），本迭代未定义这些帧类型也未
+					// 约定客户端 handler，属协议层新增，需与 fe-dev 同步。返回明确的
+					// not_implemented 而非静默接受 tool 声明后无法调用（避免向 LLM 暴露
+					// 不可执行的工具，形成 plausible lie）。
+					fail(
+						"not_implemented: set_host_tools requires bidirectional host_tool_* frames (planned; needs pi-wire协议扩展 + client handler)",
+					);
+					break;
+				}
+
+				// ─────────────────────────────────────────────────────────────
+				// Model (P2 补齐)
+				// ─────────────────────────────────────────────────────────────
+				case "set_model": {
+					const models = session.getAvailableModels();
+					const model = models.find(m => m.provider === command.provider && m.id === command.modelId);
+					if (!model) {
+						fail(`Model not found: ${command.provider}/${command.modelId}`);
+						break;
+					}
+					await session.setModel(model);
+					done(model);
+					break;
+				}
+				case "cycle_model": {
+					const result = await session.cycleModel();
+					done(result ?? null);
+					break;
+				}
+
+				// ─────────────────────────────────────────────────────────────
+				// Thinking (P1)
+				// ─────────────────────────────────────────────────────────────
 				case "set_thinking_level": {
 					session.setThinkingLevel(command.level);
 					done();
 					break;
 				}
+				case "cycle_thinking_level": {
+					const level = session.cycleThinkingLevel();
+					done(level ? { level } : null);
+					break;
+				}
+
+				// ─────────────────────────────────────────────────────────────
+				// Compaction (P2 补齐)
+				// ─────────────────────────────────────────────────────────────
+				case "compact": {
+					const result = await session.compact(command.customInstructions);
+					done(result);
+					break;
+				}
+				case "set_auto_compaction": {
+					session.setAutoCompactionEnabled(command.enabled);
+					done();
+					break;
+				}
+
+				// ─────────────────────────────────────────────────────────────
+				// Retry (P2 补齐)
+				// ─────────────────────────────────────────────────────────────
+				case "set_auto_retry": {
+					session.setAutoRetryEnabled(command.enabled);
+					done();
+					break;
+				}
+				case "abort_retry": {
+					session.abortRetry();
+					done();
+					break;
+				}
+
+				// ─────────────────────────────────────────────────────────────
+				// Session (P2 补齐)
+				// ─────────────────────────────────────────────────────────────
+				case "set_session_name": {
+					const name = command.name.trim();
+					if (!name) {
+						fail("Session name cannot be empty");
+						break;
+					}
+					const applied = await session.setSessionName(name, "user");
+					if (!applied) {
+						fail("Session name cannot be empty");
+						break;
+					}
+					done();
+					break;
+				}
+				case "get_last_assistant_text": {
+					const text = session.getLastAssistantText();
+					done({ text: text ?? null });
+					break;
+				}
+
+				// ─────────────────────────────────────────────────────────────
+				// wire 扩展 / P1 stub 保留
+				// ─────────────────────────────────────────────────────────────
 				case "subscribe":
 				case "unsubscribe":
 				case "get_available_models":
 					// P1 单会话：连接级推送，无显式订阅表；命令保留以兼容协议面。
+					// get_available_models 属 P3 会话/多 Agent 阶段，本迭代不动。
 					done();
 					break;
 				default:
-					fail(`not_implemented: ${command.type}`);
+					fail(`not_implemented: ${(command as { type: string }).type}`);
 			}
 		} catch (err) {
 			fail(err instanceof Error ? err.message : String(err));
