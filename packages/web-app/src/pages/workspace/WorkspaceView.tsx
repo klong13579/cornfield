@@ -1,40 +1,22 @@
 import { Folder } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useSessionStore } from "../../state/session-store";
-import { getUiStore, useUiState } from "../../state/ui-store";
+import { getUiStore } from "../../state/ui-store";
 import { useSession } from "../../state/use-session";
 import { ComposerBar } from "./ComposerBar";
-import { MobileSideSheet } from "./MobileSideSheet";
-import { SidePanel } from "./SidePanel";
 import { Transcript } from "./Transcript";
 
 /**
- * 会话工作台（FR-1）：自定义顶栏 + 转录区 + Composer + 拖拽分隔条 + 右栏。
+ * 会话工作台（FR-1）：自定义顶栏 + 转录区 + Composer（右栏已按用户决策移除，对话区占满全宽）。
  * 支持 ?q= 直达（Home Composer 跳转带话）。
  */
 export function WorkspaceView({ compact = false }: { compact?: boolean }): React.JSX.Element {
 	const view = useSession();
 	const store = useSessionStore();
-	const ui = useUiState();
 	const [searchParams] = useSearchParams();
 	const initialQuery = searchParams.get("q") ?? "";
 	const [draftSeed] = useState(initialQuery);
-	const splitterRef = useRef<HTMLHRElement>(null);
-
-	const onSplitterPointerDown = useCallback((e: React.PointerEvent) => {
-		e.preventDefault();
-		splitterRef.current?.setPointerCapture(e.pointerId);
-		const onMove = (ev: PointerEvent) => {
-			getUiStore().setSidebarWidth(window.innerWidth - ev.clientX);
-		};
-		const onUp = () => {
-			window.removeEventListener("pointermove", onMove);
-			window.removeEventListener("pointerup", onUp);
-		};
-		window.addEventListener("pointermove", onMove);
-		window.addEventListener("pointerup", onUp);
-	}, []);
 
 	useEffect(() => {
 		if (!initialQuery) return;
@@ -71,7 +53,6 @@ export function WorkspaceView({ compact = false }: { compact?: boolean }): React
 						{view.env ? ` · ${view.env.branch}` : ""}
 					</button>
 					<span className="flex-1" />
-					<MobileSideSheet />
 					{!compact && (
 						<>
 							<button type="button" className="link" onClick={() => store.compact()}>
@@ -94,33 +75,6 @@ export function WorkspaceView({ compact = false }: { compact?: boolean }): React
 					<ComposerBar autoFocusDraft={draftSeed} />
 				</div>
 			</div>
-
-			{/* 拖拽分隔条（clamp 240-520，双击复位 300，localStorage 持久化） */}
-			{!compact && (
-				<hr
-					ref={splitterRef}
-					aria-orientation="vertical"
-					aria-valuenow={ui.sidebarWidth}
-					aria-valuemin={240}
-					aria-valuemax={520}
-					tabIndex={0}
-					title="拖拽调整面板宽度（←/→ 微调，双击复位）"
-					className="my-0 hidden w-[5px] shrink-0 cursor-col-resize bg-transparent transition-colors duration-150 outline-none hover:bg-accent-dim focus-visible:bg-accent-dim lg:block"
-					onPointerDown={onSplitterPointerDown}
-					onDoubleClick={() => getUiStore().resetSidebarWidth()}
-					onKeyDown={e => {
-						if (e.key === "ArrowLeft") getUiStore().setSidebarWidth(ui.sidebarWidth - 20);
-						if (e.key === "ArrowRight") getUiStore().setSidebarWidth(ui.sidebarWidth + 20);
-					}}
-				/>
-			)}
-
-			{/* 右栏：桌面端固定宽度；移动端隐藏（P5 浮层） */}
-			{!compact && (
-				<div className="hidden min-h-0 lg:block" style={{ width: ui.sidebarWidth, minWidth: 240, maxWidth: 520 }}>
-					<SidePanel />
-				</div>
-			)}
 		</div>
 	);
 }
