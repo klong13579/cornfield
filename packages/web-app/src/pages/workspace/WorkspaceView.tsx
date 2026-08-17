@@ -5,6 +5,7 @@ import { useSessionStore } from "../../state/session-store";
 import { getUiStore } from "../../state/ui-store";
 import { useSession } from "../../state/use-session";
 import { ComposerBar } from "./ComposerBar";
+import { SessionSidebar } from "./SessionSidebar";
 import { Transcript } from "./Transcript";
 
 /**
@@ -30,6 +31,7 @@ export function WorkspaceView({ compact = false }: { compact?: boolean }): React
 
 	return (
 		<div className="flex h-full min-h-0">
+			{!compact && <SessionSidebar />}
 			<div className="flex min-w-0 flex-1 flex-col">
 				{view.commandError && (
 					<div className="flex items-center gap-2 border-b border-danger/40 bg-danger/5 px-4 py-1.5 text-[12px] text-danger">
