@@ -10,6 +10,7 @@
 - [ ] omp 本地增加定时器功能
 - [ ] 测试 todo-write 参数序列化修复
 - [ ] 独立验证者：执行与验证分离，数字员工结果由独立进程验收 → topics/independent-verifier.md
+- [ ] 用 dws CLI 实现 MyContext 业务流原型 → topics/dws-mycontext-prototype.md
 
 ## 已完成
 
