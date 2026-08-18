@@ -1,8 +1,8 @@
 import { useEffect, useRef } from "react";
-import { MarkdownLite } from "../../components/MarkdownLite";
 import { Orb } from "../../components/Orb";
 import { ThinkingFold } from "../../components/ThinkingFold";
 import { ToolCard } from "../../components/ToolCard";
+import { Markdown } from "../../render/Markdown";
 import type { TranscriptMessage } from "../../state/session-store";
 import { useSessionStore } from "../../state/session-store";
 import { useSession } from "../../state/use-session";
@@ -76,7 +76,7 @@ function MessageRow({ msg, streaming = false }: { msg: TranscriptMessage; stream
 					{msg.thinking && <ThinkingFold thinking={msg.thinking} streaming={streaming && msg.thinkingStreaming} />}
 					{msg.text && (
 						<div>
-							<MarkdownLite text={msg.text} className="[&_p]:mb-2 [&_p:last-child]:mb-0" />
+							<Markdown text={msg.text} />
 							{streaming && msg.textStreaming && <span className="caret" />}
 						</div>
 					)}

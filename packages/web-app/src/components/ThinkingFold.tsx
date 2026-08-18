@@ -1,6 +1,6 @@
 import { Brain, ChevronDown, ChevronRight } from "lucide-react";
 import { useState } from "react";
-import { MarkdownLite } from "./MarkdownLite";
+import { Markdown } from "../render/Markdown";
 import { Orb } from "./Orb";
 
 /**
@@ -70,7 +70,7 @@ export function ThinkingFold({
 			</button>
 			{expanded ? (
 				<div className="px-2 pb-1 text-[13px] leading-relaxed text-ink-subtle">
-					<MarkdownLite text={display} />
+					<Markdown text={display} />
 					{showMore && (
 						<div className="pt-1 text-[11px] text-ink-faint">… 超出预览上限，截断显示（完整内容以快照为准）</div>
 					)}
