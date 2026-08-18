@@ -1,5 +1,6 @@
 import mermaid from "mermaid";
 import { useEffect, useRef, useState } from "react";
+import "./lightbox.css";
 import "./mermaid.css";
 import { mountMermaidViewer, type ViewerHandle } from "./mermaid-viewer";
 

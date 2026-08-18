@@ -19,7 +19,7 @@ const TABS: { id: TabId; label: string }[] = [
 	{ id: "artifacts", label: "Artifacts" },
 ];
 
-export function RightPanel(): React.JSX.Element {
+export function RightPanel({ collapsed = false }: { collapsed?: boolean }): React.JSX.Element {
 	const view = useSession();
 	const ui = useUiState();
 	const [tab, setTab] = useState<TabId>("files");
@@ -27,7 +27,7 @@ export function RightPanel(): React.JSX.Element {
 
 	return (
 		<aside
-			className={`fixed inset-y-0 right-0 z-50 flex w-[300px] flex-col border-l border-hairline bg-surface transition-transform duration-200 lg:static lg:z-auto lg:shrink-0 lg:translate-x-0 ${ui.mobileNavOpen ? "translate-x-0" : "translate-x-full"}`}
+			className={`fixed inset-y-0 right-0 z-50 flex w-[300px] flex-col border-l border-hairline bg-surface transition-transform duration-200 lg:static lg:z-auto lg:shrink-0 lg:translate-x-0 ${ui.mobileNavOpen ? "translate-x-0" : "translate-x-full"} ${collapsed ? "lg:hidden" : ""}`}
 		>
 			{/* 双 tab */}
 			<div className="flex shrink-0 border-b border-hairline px-3 pt-2">

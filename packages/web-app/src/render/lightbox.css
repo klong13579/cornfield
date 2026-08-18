@@ -1,0 +1,52 @@
+/*
+ * 全屏 lightbox 浮层（图片 + mermaid 共用，port of hermes img-lightbox）。
+ * scrim 用固定深色，衬托白色内容卡片。从 mermaid.css 抽出：图片 lightbox
+ * （MarkdownImage）不再依赖 mermaid lazy chunk。
+ */
+.img-lightbox {
+	position: fixed;
+	inset: 0;
+	z-index: 9999;
+	background: rgba(0, 0, 0, 0.82);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	cursor: zoom-out;
+	animation: lb-in 0.15s ease;
+}
+@keyframes lb-in {
+	from {
+		opacity: 0;
+	}
+	to {
+		opacity: 1;
+	}
+}
+.img-lightbox-close {
+	position: absolute;
+	top: 16px;
+	right: 20px;
+	width: 36px;
+	height: 36px;
+	border: none;
+	border-radius: 50%;
+	background: rgba(255, 255, 255, 0.12);
+	color: #fff;
+	font-size: 20px;
+	line-height: 1;
+	cursor: pointer;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	transition: background 0.15s;
+}
+.img-lightbox-close:hover {
+	background: rgba(255, 255, 255, 0.22);
+}
+.img-lightbox-media {
+	max-width: 90vw;
+	max-height: 90vh;
+	border-radius: var(--radius-md);
+	background: var(--color-surface);
+	box-shadow: 0 8px 48px rgba(0, 0, 0, 0.6);
+}
