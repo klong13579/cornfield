@@ -249,4 +249,97 @@ describe("intercom parent-child broker edge", () => {
 			watched.stop();
 		}
 	});
+
+	test("a broker refused by a live owner must not unlink the owner's socket on stop", async () => {
+		// The 2026-08-18 production incident: a second broker whose start() was
+		// refused (probe found a live owner) called stop() during teardown, and
+		// its unconditional unlink deleted the owner's socket FILE. The owner's
+		// listener kept running but every new client got ENOENT, and the owner's
+		// watchdog rebind then wedged — outage until manual gateway restart.
+		// stop() may only unlink the path this instance actually bound.
+		const ownerDir = path.join(runtimeDir, "intercom-owner");
+		await fs.mkdir(ownerDir, { recursive: true });
+		const ownerPath = path.join(ownerDir, "broker.sock");
+		const owner = new IntercomBroker({
+			intercomDir: ownerDir,
+			listenTarget: ownerPath,
+		});
+		await owner.start();
+
+		const intruderDir = path.join(runtimeDir, "intercom-intruder");
+		await fs.mkdir(intruderDir, { recursive: true });
+		const intruder = new IntercomBroker({
+			intercomDir: intruderDir,
+			listenTarget: ownerPath, // same path — refused by the live owner
+		});
+		try {
+			await expect(intruder.start()).rejects.toThrow(/already running/);
+			intruder.stop();
+
+			// The owner's socket FILE must survive the intruder's stop()...
+			const stat = await fs.stat(ownerPath);
+			expect(stat.isSocket()).toBe(true);
+			// ...and the owner must still accept connections.
+			await new Promise<void>((resolve, reject) => {
+				const socket = net.connect(ownerPath);
+				socket.once("connect", () => {
+					socket.destroy();
+					resolve();
+				});
+				socket.once("error", reject);
+			});
+		} finally {
+			owner.stop();
+		}
+	});
+
+	test("watchdog rebinds and re-serves while a client is still connected", async () => {
+		// Regression for the 2026-08-18 wedge: Bun's server.close() callback
+		// never fires while a connection is open, so the old rebind awaited
+		// close() forever — silent watchdog death with no success/failure log
+		// and no retry (the #rebuildingSocket guard stayed latched). The fix
+		// destroys existing connections first (clients reconnect to the fresh
+		// path) and bounds every rebind step with a timeout.
+		const watchDir = path.join(runtimeDir, "intercom-watch-live");
+		await fs.mkdir(watchDir, { recursive: true });
+		const watchPath = path.join(watchDir, "broker.sock");
+		const watched = new IntercomBroker({
+			intercomDir: watchDir,
+			listenTarget: watchPath,
+			socketWatchIntervalMs: 200,
+		});
+		await watched.start();
+
+		const rawConnect = () =>
+			new Promise<string>(resolve => {
+				const socket = net.connect(watchPath);
+				socket.once("connect", () => resolve("ok"));
+				socket.once("error", err => resolve((err as NodeJS.ErrnoException).code ?? "err"));
+			});
+		try {
+			// Attach a long-lived client — this is what wedged the old rebind.
+			const persistent = net.connect(watchPath);
+			await new Promise<void>(resolve => persistent.once("connect", () => resolve()));
+			expect(await rawConnect()).toBe("ok");
+
+			// External actor deletes the socket file while the broker lives.
+			await fs.unlink(watchPath);
+			expect(await rawConnect()).toBe("ENOENT");
+
+			// The watchdog must recover even though `persistent` is still open.
+			const deadline = Date.now() + 5_000;
+			let served = false;
+			while (Date.now() < deadline) {
+				if ((await rawConnect()) === "ok") {
+					served = true;
+					break;
+				}
+				await Bun.sleep(100);
+			}
+			expect(served).toBe(true);
+			persistent.destroy();
+		} finally {
+			watched.stop();
+		}
+	});
 });

@@ -399,7 +399,12 @@ export class Gateway {
 		// Intercom broker: in-process agent messaging hub, global socket. Started
 		// before channels/bridges so agent sessions can connect as soon as they boot.
 		try {
-			this.#intercomBroker = new IntercomBroker();
+			const intercomDir = this.#config.intercomDir;
+			// Test instances inject an isolated broker dir so their lifecycle
+			// (start/stop/unlink) never touches the production socket.
+			this.#intercomBroker = intercomDir
+				? new IntercomBroker({ intercomDir, listenTarget: path.join(intercomDir, "broker.sock") })
+				: new IntercomBroker();
 			await this.#intercomBroker.start();
 		} catch (err) {
 			logger.error("Failed to start intercom broker", { error: String(err) });

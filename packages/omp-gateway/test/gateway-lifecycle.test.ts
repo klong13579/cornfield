@@ -281,14 +281,18 @@ describe("Gateway status", () => {
 
 	test("getGatewayStatus reads PID from configured dataDir", async () => {
 		await Bun.write(path.join(tmpDir, "gateway.pid"), String(process.pid));
-		const status = await getGatewayStatus({ channels: {}, dataDir: tmpDir });
+		const status = await getGatewayStatus({
+			channels: {},
+			dataDir: tmpDir,
+			intercomDir: path.join(tmpDir, "intercom"),
+		});
 
 		expect(status.running).toBe(true);
 		expect(status.pid).toBe(process.pid);
 	});
 
 	test("Gateway.getStatus includes account and queue fields", async () => {
-		const gateway = new Gateway({ channels: {}, dataDir: tmpDir });
+		const gateway = new Gateway({ channels: {}, dataDir: tmpDir, intercomDir: path.join(tmpDir, "intercom") });
 		const status = await gateway.getStatus();
 
 		expect(status.running).toBe(false);
@@ -301,7 +305,7 @@ describe("Gateway status", () => {
 		const nextDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-gateway-status-next-"));
 		try {
 			await Bun.write(path.join(nextDir, "gateway.pid"), String(process.pid));
-			const gateway = new Gateway({ channels: {}, dataDir: tmpDir });
+			const gateway = new Gateway({ channels: {}, dataDir: tmpDir, intercomDir: path.join(tmpDir, "intercom") });
 
 			await gateway.reload({ channels: {}, dataDir: nextDir });
 			const status = await gateway.getStatus();
@@ -472,6 +476,7 @@ describe("Gateway reload plan", () => {
 			channels: {},
 			dataDir: tmpDir,
 			agent: { ompPath: fake.path },
+			intercomDir: path.join(tmpDir, "intercom"),
 		};
 		const gateway = new Gateway(config);
 		try {
@@ -496,6 +501,7 @@ describe("Gateway reload plan", () => {
 			channels: {},
 			dataDir: tmpDir,
 			agent: { ompPath: fake.path },
+			intercomDir: path.join(tmpDir, "intercom"),
 		};
 		const gateway = new Gateway(config1);
 		try {
@@ -530,6 +536,7 @@ describe("Gateway reload plan", () => {
 			channels: {},
 			dataDir: tmpDir,
 			agent: { ompPath: fake.path },
+			intercomDir: path.join(tmpDir, "intercom"),
 		};
 		const gateway = new Gateway(config);
 		try {
@@ -693,6 +700,7 @@ describe("Gateway circuit breaker health check", () => {
 			channels: {},
 			dataDir: tmpDir,
 			agent: { ompPath: fake.path },
+			intercomDir: path.join(tmpDir, "intercom"),
 		});
 
 		try {
@@ -741,6 +749,7 @@ describe("Gateway circuit breaker health check", () => {
 			channels: {},
 			dataDir: tmpDir,
 			agent: { ompPath: fake.path },
+			intercomDir: path.join(tmpDir, "intercom"),
 		});
 
 		try {

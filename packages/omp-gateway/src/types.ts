@@ -393,6 +393,13 @@ export interface GatewayConfig {
 	dataDir?: string;
 	/** Drain timeout in ms for graceful shutdown (default: 15000). Test seam for faster shutdown. */
 	drainTimeoutMs?: number;
+	/**
+	 * Isolated intercom broker runtime dir. Test seam: lets a gateway under
+	 * test host its broker on a tmp path instead of the production
+	 * `~/.omp/intercom` (a test broker's stop() used to unlink the production
+	 * socket — the 2026-08-18 incident). Omitted in production.
+	 */
+	intercomDir?: string;
 }
 
 // ═══════════════════════════════════════════════════════════════════════

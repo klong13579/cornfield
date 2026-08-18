@@ -1,17 +1,56 @@
 import type { Socket } from "net";
 
 const MAX_FRAME_BYTES = 1024 * 1024;
+/**
+ * Write-side backpressure guard: a peer that stops reading will otherwise
+ * accumulate unbounded bytes in the socket's write buffer (Bun queues without
+ * limit; observed +45 MiB in probing). Cap the pending write buffer and tear
+ * the connection down past it — a peer this far behind can only recover by
+ * reconnecting.
+ */
+const MAX_PENDING_WRITE_BYTES = 8 * 1024 * 1024;
+
+/**
+ * Serialize a message into a length-prefixed frame, or return null when it
+ * does not fit (JSON.stringify failure, undefined, or payload over
+ * MAX_FRAME_BYTES). Write-side guard: the reader enforces the same 1 MiB cap
+ * on the OTHER side, and delivering an over-limit frame would kill the
+ * recipient's connection. Callers that can reject beforehand (the broker's
+ * send path) should check this before writing.
+ */
+export function serializeMessageToFrame(msg: unknown): Buffer | null {
+	let json: string;
+	try {
+		json = JSON.stringify(msg);
+	} catch {
+		return null;
+	}
+	if (json === undefined) {
+		return null;
+	}
+	const payloadLength = Buffer.byteLength(json, "utf-8");
+	if (payloadLength > MAX_FRAME_BYTES) {
+		return null;
+	}
+	const frame = Buffer.allocUnsafe(4 + payloadLength);
+	frame.writeUInt32BE(payloadLength, 0);
+	frame.write(json, 4, payloadLength, "utf-8");
+	return frame;
+}
 
 /**
  * Write a length-prefixed message to a socket.
  * Format: 4-byte big-endian length + JSON payload
  */
 export function writeMessage(socket: Socket, msg: unknown): void {
-	const json = JSON.stringify(msg);
-	const payloadLength = Buffer.byteLength(json, "utf-8");
-	const frame = Buffer.allocUnsafe(4 + payloadLength);
-	frame.writeUInt32BE(payloadLength, 0);
-	frame.write(json, 4, payloadLength, "utf-8");
+	const frame = serializeMessageToFrame(msg);
+	if (frame === null) {
+		throw new Error("Intercom message does not fit in a 1 MiB frame");
+	}
+	if (socket.writableLength + frame.length > MAX_PENDING_WRITE_BYTES) {
+		socket.destroy(new Error(`Intercom slow consumer: write buffer exceeds ${MAX_PENDING_WRITE_BYTES} bytes`));
+		return;
+	}
 	socket.write(frame);
 }
 

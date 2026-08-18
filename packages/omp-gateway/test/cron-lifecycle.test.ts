@@ -428,6 +428,7 @@ describe("cron timeout diagnostics bugfix", () => {
 			channels: {},
 			agent: { ompPath: fakeOmpPath },
 			cron: { enabled: true, tickIntervalMs: 500, maxConcurrentRuns: 1 },
+			intercomDir: path.join(tmpHome, ".omp", "intercom"),
 		};
 
 		gateway = new Gateway(config);
@@ -502,6 +503,7 @@ describe("cron model restore failure logging", () => {
 			channels: {},
 			agent: { ompPath: fakeOmpPath },
 			cron: { enabled: true, tickIntervalMs: 500, maxConcurrentRuns: 1 },
+			intercomDir: path.join(tmpHome, ".omp", "intercom"),
 		};
 
 		gateway = new Gateway(config);
@@ -565,6 +567,7 @@ describe("cron warm-bridge fallback contract", () => {
 			channels: {},
 			agent: { ompPath: fakeOmpPath },
 			cron: { enabled: true, tickIntervalMs: 500, maxConcurrentRuns: 1 },
+			intercomDir: path.join(tmpHome, ".omp", "intercom"),
 		};
 
 		gateway = new Gateway(config);

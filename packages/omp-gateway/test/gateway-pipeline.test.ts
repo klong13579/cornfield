@@ -248,6 +248,7 @@ describe("Gateway message pipeline", () => {
 			agent: { ompPath: rpcPath },
 			session: { resetPolicy: "none" as const },
 			dataDir: rootDir,
+			intercomDir: path.join(rootDir, "intercom"),
 		};
 
 		const fetchSpy = installFetchSpy();
@@ -306,6 +307,7 @@ describe("Gateway message pipeline", () => {
 			agent: { ompPath: rpcPath },
 			session: { resetPolicy: "none" as const },
 			dataDir: rootDir,
+			intercomDir: path.join(rootDir, "intercom"),
 		};
 
 		const gateway = new Gateway(config, {
@@ -373,6 +375,7 @@ describe("Gateway slash command pipeline", () => {
 			agent: { ompPath: rpcPath },
 			session: { resetPolicy: "none" as const },
 			dataDir: rootDir,
+			intercomDir: path.join(rootDir, "intercom"),
 		};
 
 		const gateway = new Gateway(config, {
@@ -488,6 +491,7 @@ describe("Gateway slash command pipeline", () => {
 			agent: { ompPath: rpcPath },
 			session: { resetPolicy: "none" as const },
 			dataDir: rootDir,
+			intercomDir: path.join(rootDir, "intercom"),
 		};
 
 		const gateway = new Gateway(config, {
@@ -544,6 +548,7 @@ describe("Gateway slash command pipeline", () => {
 			agent: { ompPath: rpcPath },
 			session: { resetPolicy: "none" as const },
 			dataDir: rootDir,
+			intercomDir: path.join(rootDir, "intercom"),
 		};
 
 		const gateway = new Gateway(config, {

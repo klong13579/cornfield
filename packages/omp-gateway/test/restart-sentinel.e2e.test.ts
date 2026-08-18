@@ -186,6 +186,7 @@ describe("restart sentinel e2e — production simulation", () => {
 				drainTimeoutMs: 100, // 100ms for fast test
 				channels: {}, // No real channels
 				agent: { ompPath: fakeScriptPath },
+				intercomDir: path.join(tmpDir, "intercom"),
 			},
 			{ store: store1 },
 		);
@@ -286,6 +287,7 @@ describe("restart sentinel e2e — production simulation", () => {
 				drainTimeoutMs: 100,
 				channels: {},
 				agent: { ompPath: fakeScriptPath },
+				intercomDir: path.join(tmpDir, "intercom"),
 			},
 			{ store: store2 },
 		);
@@ -326,6 +328,7 @@ describe("restart sentinel e2e — production simulation", () => {
 				drainTimeoutMs: 100,
 				channels: {},
 				agent: { ompPath: fakeScriptPath },
+				intercomDir: path.join(tmpDir, "intercom"),
 			},
 			{ bridge, store },
 		);

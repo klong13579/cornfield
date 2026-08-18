@@ -1,12 +1,12 @@
 import * as path from "node:path";
 import { isEnoent, logger } from "@oh-my-pi/pi-utils";
 import { randomUUID } from "crypto";
-import { statSync, unlinkSync, writeFileSync } from "fs";
+import { type Stats, statSync, unlinkSync, writeFileSync } from "fs";
 import net from "net";
 import { getAskTimeoutMs } from "./config";
 import { sameCwd } from "./cwd";
 import { ExtensionStateManager } from "./extension-state";
-import { createMessageReader, writeMessage } from "./framing";
+import { createMessageReader, serializeMessageToFrame, writeMessage } from "./framing";
 import {
 	type BrokerConnectTarget,
 	ensureIntercomRuntimeDir,
@@ -30,6 +30,12 @@ const MAX_UNREGISTERED_CONNECTIONS = 32;
 const REGISTRATION_TIMEOUT_MS = 1000;
 const RATE_LIMIT_CAPACITY = 240;
 const RATE_LIMIT_REFILL_PER_SECOND = 120;
+/**
+ * Consecutive rate-limited frames tolerated before the connection is torn
+ * down. A burst of legitimate sends (e.g. 260 notifications) is throttled with
+ * per-frame `error` acks; only a sustained flood earns a disconnect.
+ */
+const RATE_LIMIT_EJECT_REJECTIONS = 50;
 const PRESENCE_HEARTBEAT_MS = 1000;
 const MAX_EXTENSIONS_PER_SESSION = 32;
 const MAX_EXTENSION_MESSAGE_BYTES = 16 * 1024;
@@ -38,6 +44,8 @@ const MESSAGE_RECEIPT_ROUTE_RETENTION_MS = 60 * 60 * 1000;
 const DISCONNECTED_SESSION_RETENTION_MS = 24 * 60 * 60 * 1000;
 const MAILBOX_MESSAGE_RETENTION_MS = 24 * 60 * 60 * 1000;
 const MAX_MAILBOX_MESSAGES = 256;
+const SOCKET_CLOSE_DRAIN_TIMEOUT_MS = 2_000;
+const SOCKET_LISTEN_TIMEOUT_MS = 5_000;
 
 function serializedPayloadSize(payload: unknown): number | null {
 	try {
@@ -66,6 +74,8 @@ interface ConnectionState {
 	socket: net.Socket;
 	tokens: number;
 	lastRefillAt: number;
+	/** Consecutive rate-limited frames; resets on any accepted frame. */
+	rejections: number;
 }
 
 interface AskEdge {
@@ -115,6 +125,29 @@ function probeBrokerSocket(socketPath: string): Promise<boolean> {
 	});
 }
 
+/**
+ * Race a promise against a timeout so the socket watchdog can never wedge:
+ * every await in the rebind path settles within a bounded window, or rejects
+ * loudly (caught + logged by #checkSocketHealth) and the next watchdog tick
+ * retries.
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number, what: string): Promise<T> {
+	return new Promise<T>((resolve, reject) => {
+		const timer = setTimeout(() => reject(new Error(`${what} timed out after ${ms}ms`)), ms);
+		timer.unref?.();
+		promise.then(
+			value => {
+				clearTimeout(timer);
+				resolve(value);
+			},
+			err => {
+				clearTimeout(timer);
+				reject(err);
+			},
+		);
+	});
+}
+
 export class IntercomBroker {
 	private sessions = new Map<string, ConnectedSession>();
 	private askEdges = new Map<string, AskEdge>();
@@ -134,6 +167,13 @@ export class IntercomBroker {
 	#socketWatchTimer: NodeJS.Timeout | null = null;
 	#stopped = false;
 	#rebuildingSocket = false;
+	/**
+	 * True once start()/rebind actually bound the socket path. stop() may only
+	 * unlink the path when this instance still owns it AND is still listening —
+	 * a broker whose start() was refused by a live owner must never delete the
+	 * owner's socket FILE (the 2026-08-18 production incident).
+	 */
+	#ownedSocket = false;
 
 	constructor(
 		options: { intercomDir?: string; listenTarget?: BrokerConnectTarget; socketWatchIntervalMs?: number } = {},
@@ -189,24 +229,44 @@ export class IntercomBroker {
 			return;
 		}
 		const socketPath = this.listenTarget;
-		let stat;
+		let stat: Stats | undefined;
 		try {
 			stat = statSync(socketPath);
 		} catch (err) {
 			if (!isEnoent(err)) return; // transient? leave it; next tick retries
 		}
-		if (stat && stat.isSocket()) {
+		if (stat?.isSocket()) {
 			return;
 		}
 		// Socket file is missing or not a socket — external deletion.
 		this.#rebuildingSocket = true;
 		logger.warn("Intercom broker socket file missing; rebinding", { socketPath });
 		try {
-			await new Promise<void>(resolveClose => this.server.close(() => resolveClose()));
+			// Rebind deliberately tears down every connection: clients reconnect
+			// to the fresh path. Destroying them first is REQUIRED — Bun's
+			// server.close() callback waits for the connection count to drain and
+			// never fires while a client is connected, which left the rebind
+			// (and the whole watchdog, via #rebuildingSocket) wedged silently
+			// until a manual gateway restart.
+			for (const socket of this.connections) {
+				socket.destroy();
+			}
+			for (const socket of this.unregisteredConnections) {
+				socket.destroy();
+			}
+			await withTimeout(
+				new Promise<void>(resolveClose => this.server.close(() => resolveClose())),
+				SOCKET_CLOSE_DRAIN_TIMEOUT_MS,
+				"Intercom broker socket close",
+			);
+			if (this.#stopped) {
+				return; // gateway shut down mid-rebind; nothing left to rebind
+			}
 			// No client can be connected while the server is closed; a transient
 			// probe may be nobody → unlink stale file → rebind.
 			const live = await probeBrokerSocket(socketPath);
 			if (live) {
+				this.#ownedSocket = false;
 				logger.warn("Intercom broker socket occupied by another broker; standing down watchdog", { socketPath });
 				return;
 			}
@@ -215,14 +275,29 @@ export class IntercomBroker {
 			} catch (err) {
 				if (!isEnoent(err)) throw err;
 			}
-			await new Promise<void>((resolveListen, rejectListen) => {
-				this.server.once("error", rejectListen);
-				this.server.listen(socketPath, () => {
-					this.server.off("error", rejectListen);
-					restrictIntercomRuntimeFile(socketPath);
-					resolveListen();
-				});
-			});
+			await withTimeout(
+				new Promise<void>((resolveListen, rejectListen) => {
+					this.server.once("error", rejectListen);
+					this.server.listen(socketPath, () => {
+						this.server.off("error", rejectListen);
+						if (this.#stopped) {
+							// Shutdown raced the rebind — drop the inode we just bound
+							// so no orphaned listener survives the gateway.
+							try {
+								unlinkSync(socketPath);
+							} catch {
+								// already gone
+							}
+							this.server.close();
+							return;
+						}
+						restrictIntercomRuntimeFile(socketPath);
+						resolveListen();
+					});
+				}),
+				SOCKET_LISTEN_TIMEOUT_MS,
+				"Intercom broker socket listen",
+			);
 			logger.info("Intercom broker socket rebound", { socketPath });
 		} catch (err) {
 			logger.error("Intercom broker socket rebind failed", {
@@ -230,6 +305,11 @@ export class IntercomBroker {
 				error: err instanceof Error ? err.message : String(err),
 			});
 		} finally {
+			// Never wedge the watchdog: a failed rebind is retried on the next
+			// tick; a mid-rebind shutdown is fenced off by #stopped above.
+			// (This was the second half of the 2026-08-18 incident — the await
+			// never settled, so neither the catch nor the finally ran and the
+			// watchdog was dead until a manual gateway restart.)
 			this.#rebuildingSocket = false;
 		}
 	}
@@ -237,7 +317,13 @@ export class IntercomBroker {
 	start(): Promise<void> {
 		return new Promise((resolveListen, rejectListen) => {
 			const onListening = () => {
+				// Drop the start-time error listener: a one-shot listener left
+				// mounted would consume the FIRST later server-level error, which
+				// is the one the watchdog's rebind registers for — swallowing the
+				// rebind's listen error and wedging the rebind (2026-08-18).
+				this.server.off("error", onListenError);
 				if (typeof this.listenTarget === "string") {
+					this.#ownedSocket = true;
 					restrictIntercomRuntimeFile(this.listenTarget);
 				} else {
 					const address = this.server.address();
@@ -329,15 +415,23 @@ export class IntercomBroker {
 			socket,
 			tokens: RATE_LIMIT_CAPACITY,
 			lastRefillAt: Date.now(),
+			rejections: 0,
 		};
 
 		const reader = createMessageReader(
 			msg => {
 				if (!this.consumeToken(connection)) {
-					writeMessage(socket, { type: "error", error: "Intercom broker rate limit exceeded" });
-					socket.destroy(new Error("Intercom broker rate limit exceeded"));
+					// Throttle, do not disconnect: a one-off burst (legitimate batch
+					// sends) gets per-frame error acks, while a sustained flood (the
+					// guard's original intent) is ejected after a rejection streak.
+					connection.rejections += 1;
+					writeMessage(socket, { type: "error", error: "Intercom broker rate limit exceeded; slow down" });
+					if (connection.rejections >= RATE_LIMIT_EJECT_REJECTIONS) {
+						socket.destroy(new Error("Intercom broker rate limit exceeded"));
+					}
 					return;
 				}
+				connection.rejections = 0;
 				this.handleMessage(socket, msg, sessionId, id => {
 					sessionId = id;
 					if (id) {
@@ -348,6 +442,17 @@ export class IntercomBroker {
 				});
 			},
 			error => {
+				// Tell the peer WHY the connection is being torn down before we
+				// destroy it. Bun's destroy() propagation to the remote side is
+				// unreliable (observed: no close/error event for >8s), so a bare
+				// destroy leaves the sender silently hanging on its ack. An error
+				// frame flushes to the OS buffer first and reaches the peer even
+				// when the close never does.
+				try {
+					writeMessage(socket, { type: "error", error: error.message });
+				} catch {
+					// Socket already unusable; destroy below is the only cleanup left.
+				}
 				socket.destroy(error);
 			},
 		);
@@ -713,6 +818,15 @@ export class IntercomBroker {
 						brokerReceivedAt,
 						brokerDeliveredAt: Date.now(),
 					};
+					if (
+						!this.isFrameDeliverable(socket, message, {
+							type: "message",
+							from: fromSession.info,
+							message: deliveredMessage,
+						})
+					) {
+						break;
+					}
 					if (message.supersedes) {
 						const control: MessageControl = {
 							action: "supersede",
@@ -803,6 +917,15 @@ export class IntercomBroker {
 							brokerReceivedAt,
 							brokerDeliveredAt: Date.now(),
 						};
+						if (
+							!this.isFrameDeliverable(socket, message, {
+								type: "message",
+								from: fromSession.info,
+								message: deliveredMessage,
+							})
+						) {
+							break;
+						}
 						writeMessage(liveMailboxTarget.socket, {
 							type: "message",
 							from: fromSession.info,
@@ -814,6 +937,9 @@ export class IntercomBroker {
 							createdAt: brokerReceivedAt,
 						});
 					} else {
+						if (!this.isFrameDeliverable(socket, message, { type: "message", from: fromSession.info, message })) {
+							break;
+						}
 						this.queueMailboxMessage(fromSession.info, target, message, brokerReceivedAt);
 					}
 					if (message.replyTo) {
@@ -1035,6 +1161,47 @@ export class IntercomBroker {
 		}
 	}
 
+	/**
+	 * Pre-flight a message frame before delivery. When the frame does not fit
+	 * in MAX_FRAME_BYTES (the reader cap of every peer), the recipient's
+	 * connection would be torn down by its own frame guard while the sender
+	 * got a delivered ack — the 2026-08-18 boundary finding. Reject with a
+	 * delivery_failed ack instead, and drop the ask edge so the sender is not
+	 * left waiting for a reply that was never delivered.
+	 */
+	private isFrameDeliverable(socket: net.Socket, message: Message, frame: unknown): boolean {
+		if (serializeMessageToFrame(frame) !== null) {
+			return true;
+		}
+		if (message.replyTo) {
+			this.askEdges.delete(message.replyTo);
+		} else if (message.expectsReply) {
+			this.askEdges.delete(message.id);
+		}
+		writeMessage(socket, {
+			type: "delivery_failed",
+			messageId: message.id,
+			reason: "Message exceeds intercom frame limit (1 MiB)",
+		});
+		return false;
+	}
+
+	/**
+	 * Tell the original sender that a queued message was dropped (mailbox
+	 * overflow eviction or 24h expiry). Without this the sender sits on a
+	 * delivered ack for a message that will never arrive.
+	 */
+	private notifyMailboxDropped(entry: MailboxMessage, reason: string): void {
+		const sender = this.sessions.get(entry.from.id);
+		if (sender) {
+			writeMessage(sender.socket, {
+				type: "delivery_failed",
+				messageId: entry.message.id,
+				reason,
+			});
+		}
+	}
+
 	private rememberDisconnectedSession(info: SessionInfo, now = Date.now()): void {
 		this.disconnectedSessions.set(info.id, { info: { ...info }, disconnectedAt: now });
 		this.pruneDisconnectedSessions(now);
@@ -1056,6 +1223,7 @@ export class IntercomBroker {
 					this.askEdges.delete(entry.message.id);
 				}
 				this.messageReceiptRoutes.delete(entry.message.id);
+				this.notifyMailboxDropped(entry, "Mailbox message expired (queued over 24h)");
 				this.mailboxMessages.splice(index, 1);
 			}
 		}
@@ -1075,6 +1243,7 @@ export class IntercomBroker {
 				this.askEdges.delete(evicted.message.id);
 			}
 			this.messageReceiptRoutes.delete(evicted.message.id);
+			this.notifyMailboxDropped(evicted, "Mailbox full; oldest queued message dropped");
 		}
 		this.mailboxMessages.push({
 			from: { ...from },
@@ -1592,7 +1761,18 @@ export class IntercomBroker {
 		this.messageReceiptRoutes.clear();
 		this.disconnectedSessions.clear();
 		this.mailboxMessages.length = 0;
-		if (typeof this.listenTarget === "string" && process.platform !== "win32") {
+		// Only the instance that actually bound the path may unlink it. A broker
+		// whose start() was refused by a live owner (probe said "already
+		// running") must NOT delete the owner's socket FILE — that was the
+		// 2026-08-18 production incident, where a omp-gateway test instance's
+		// stop() wiped the production broker.sock and the production watchdog's
+		// rebind then wedged (see #checkSocketHealth).
+		if (
+			this.server.listening &&
+			this.#ownedSocket &&
+			typeof this.listenTarget === "string" &&
+			process.platform !== "win32"
+		) {
 			try {
 				unlinkSync(this.listenTarget);
 			} catch {
@@ -1604,6 +1784,8 @@ export class IntercomBroker {
 		} catch {
 			// The TCP endpoint file only exists when opt-in TCP transport is active.
 		}
-		this.server.close();
+		if (this.server.listening) {
+			this.server.close();
+		}
 	}
 }
