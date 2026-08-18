@@ -29,7 +29,7 @@ export declare class AudioPlayback {
 }
 
 /**
- * Duplex voice session over one AVAudioEngine with voice processing:
+ * Duplex voice session over one `AVAudioEngine` with voice processing:
  * echo-cancelled mic capture in, assistant playback out (and used as the
  * AEC reference).
  */

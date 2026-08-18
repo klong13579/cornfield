@@ -352,7 +352,9 @@ export class PiClientAdapter implements PiClient {
 
 	/** 排队文本（get_state 的 queued；协议批 B-2，QueueCard 数据源）。 */
 	async fetchQueue(): Promise<{ steering: string[]; followUp: string[] }> {
-		const result = await this.#req<{ queued?: { steering?: string[]; followUp?: string[] } }>({ type: "get_state" } as never);
+		const result = await this.#req<{ queued?: { steering?: string[]; followUp?: string[] } }>({
+			type: "get_state",
+		} as never);
 		return {
 			steering: result.queued?.steering ?? [],
 			followUp: result.queued?.followUp ?? [],
@@ -366,7 +368,9 @@ export class PiClientAdapter implements PiClient {
 
 	/** TUI slash 命令表（list_commands；W1 SlashPalette 真源替换 DEFAULT_COMMANDS）。 */
 	async listCommands(): Promise<{ name: string; description: string }[]> {
-		const result = await this.#req<{ commands?: { name: string; description: string }[] }>({ type: "list_commands" } as never);
+		const result = await this.#req<{ commands?: { name: string; description: string }[] }>({
+			type: "list_commands",
+		} as never);
 		return result.commands ?? [];
 	}
 

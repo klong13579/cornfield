@@ -111,7 +111,7 @@ export interface SessionListEntryDto {
 
 // ── 进度事件（progress，非权威）──
 
-	export type ProgressEventDto =
+export type ProgressEventDto =
 	| { type: "turn_start" }
 	| { type: "turn_end" }
 	| { type: "agent_start" }
