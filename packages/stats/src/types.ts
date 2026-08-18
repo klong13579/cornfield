@@ -161,8 +161,22 @@ export interface CostTimeSeriesPoint {
 	requests: number;
 }
 
+/** 模型单价（美元 / 1M tokens，models.json 目录）。 */
+export interface ModelPriceEntry {
+	provider: string;
+	model: string;
+	price: {
+		input: number;
+		output: number;
+		cacheRead: number;
+		cacheWrite: number;
+	};
+}
+
 /**
  * Overall dashboard stats.
+ * @param sinceMs 可选时间下限（毫秒时间戳）；省略 = 全量聚合。
+ * 时间序列固定窗口不变：timeSeries 24h 小时桶 / modelSeries+performance 14 天 / costSeries 90 天。
  */
 export interface DashboardStats {
 	overall: AggregatedStats;

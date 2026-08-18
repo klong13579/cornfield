@@ -1,4 +1,45 @@
+import { logger } from "@oh-my-pi/pi-utils";
 import { ToolError } from "../tool-errors";
+
+/**
+ * 探测型子命令超时（ms）。runner detect 只是「尽力发现可选任务列表」——真实项目的
+ * `cargo metadata` / `just --dump` / `task --list` 通常 <1s。冷 HOME 下 cargo 首次运行
+ * 要拉 crates.io index（实测 107s），绝不能把 agent 启动阻塞在这种探测上：超时即放弃
+ * 该 runner（用户直接跑 recipe 命令时才真正执行，不受影响）。
+ */
+export const RUNNER_PROBE_TIMEOUT_MS = 5_000;
+
+/**
+ * 带 deadline 的探测命令：超时 kill 并返回 null（不抛——探测失败 = runner 不适用）。
+ */
+export async function probeCommand(
+	command: string[],
+	cwd: string,
+	timeoutMs: number = RUNNER_PROBE_TIMEOUT_MS,
+): Promise<{ stdout: string } | null> {
+	const proc = Bun.spawn(command, {
+		cwd,
+		stdin: "ignore",
+		stdout: "pipe",
+		stderr: "pipe",
+	});
+	const timer = setTimeout(() => {
+		proc.kill();
+	}, timeoutMs);
+	try {
+		const [stdout, exit] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
+		if (exit !== 0) return null;
+		return { stdout };
+	} catch (err) {
+		logger.debug("runner probe command failed", {
+			command: command.join(" "),
+			error: err instanceof Error ? err.message : String(err),
+		});
+		return null;
+	} finally {
+		clearTimeout(timer);
+	}
+}
 
 export interface RunnerTask {
 	name: string;

@@ -14,6 +14,9 @@ import type {
 } from "./types";
 
 type ModelCost = { input: number; output: number; cacheRead: number; cacheWrite: number };
+
+export type { ModelCost };
+
 type UsageCost = Usage["cost"];
 type CostTokens = Pick<Usage, "input" | "output" | "cacheRead" | "cacheWrite">;
 
@@ -100,7 +103,7 @@ function getBundledModelCost(provider: string, modelId: string): ModelCost | nul
 	return model?.cost ?? null;
 }
 
-function getCatalogCost(provider: string, modelId: string): ModelCost | null {
+export function getCatalogCost(provider: string, modelId: string): ModelCost | null {
 	const primaryCost = getBundledModelCost(provider, modelId);
 	if (primaryCost && hasBillableCost(primaryCost)) {
 		return primaryCost;
@@ -311,10 +314,12 @@ function buildAggregatedStats(rows: any[]): AggregatedStats {
 
 /**
  * Get overall aggregated stats.
+ * @param sinceMs 可选时间下限（毫秒时间戳）；省略 = 全量。
  */
-export function getOverallStats(): AggregatedStats {
+export function getOverallStats(sinceMs?: number): AggregatedStats {
 	if (!db) return buildAggregatedStats([]);
 
+	const sinceClause = sinceMs !== undefined ? "WHERE timestamp >= ?" : "";
 	const stmt = db.prepare(`
 		SELECT
 			COUNT(*) as total_requests,
@@ -331,18 +336,21 @@ export function getOverallStats(): AggregatedStats {
 			MIN(timestamp) as first_timestamp,
 			MAX(timestamp) as last_timestamp
 		FROM messages
+		${sinceClause}
 	`);
 
-	const rows = stmt.all();
-	return buildAggregatedStats(rows);
+	const rows = sinceMs !== undefined ? stmt.all(sinceMs) : stmt.all();
+	return buildAggregatedStats(rows as any[]);
 }
 
 /**
  * Get stats grouped by model.
+ * @param sinceMs 可选时间下限（毫秒时间戳）；省略 = 全量。
  */
-export function getStatsByModel(): ModelStats[] {
+export function getStatsByModel(sinceMs?: number): ModelStats[] {
 	if (!db) return [];
 
+	const sinceClause = sinceMs !== undefined ? "WHERE timestamp >= ?" : "";
 	const stmt = db.prepare(`
 		SELECT
 			model,
@@ -361,11 +369,12 @@ export function getStatsByModel(): ModelStats[] {
 			MIN(timestamp) as first_timestamp,
 			MAX(timestamp) as last_timestamp
 		FROM messages
+		${sinceClause}
 		GROUP BY model, provider
 		ORDER BY total_requests DESC
 	`);
 
-	const rows = stmt.all() as any[];
+	const rows = sinceMs !== undefined ? (stmt.all(sinceMs) as any[]) : (stmt.all() as any[]);
 	return rows.map(row => ({
 		model: row.model,
 		provider: row.provider,
@@ -375,10 +384,12 @@ export function getStatsByModel(): ModelStats[] {
 
 /**
  * Get stats grouped by folder.
+ * @param sinceMs 可选时间下限（毫秒时间戳）；省略 = 全量。
  */
-export function getStatsByFolder(): FolderStats[] {
+export function getStatsByFolder(sinceMs?: number): FolderStats[] {
 	if (!db) return [];
 
+	const sinceClause = sinceMs !== undefined ? "WHERE timestamp >= ?" : "";
 	const stmt = db.prepare(`
 		SELECT
 			folder,
@@ -396,11 +407,12 @@ export function getStatsByFolder(): FolderStats[] {
 			MIN(timestamp) as first_timestamp,
 			MAX(timestamp) as last_timestamp
 		FROM messages
+		${sinceClause}
 		GROUP BY folder
 		ORDER BY total_requests DESC
 	`);
 
-	const rows = stmt.all() as any[];
+	const rows = sinceMs !== undefined ? (stmt.all(sinceMs) as any[]) : (stmt.all() as any[]);
 	return rows.map(row => ({
 		folder: row.folder,
 		...buildAggregatedStats([row]),

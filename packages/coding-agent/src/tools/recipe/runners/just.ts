@@ -2,6 +2,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { $which, isEnoent, logger } from "@oh-my-pi/pi-utils";
 import type { DetectedRunner, RunnerTask, TaskRunner } from "../runner";
+import { probeCommand } from "../runner";
 
 interface JustDumpRecipeRaw {
 	name?: string;
@@ -29,16 +30,10 @@ async function hasJustfile(cwd: string): Promise<boolean> {
 }
 
 async function dumpJustTasks(cwd: string): Promise<RunnerTask[] | null> {
+	const probed = await probeCommand(["just", "--dump", "--dump-format=json"], cwd);
+	if (!probed) return null;
 	try {
-		const proc = Bun.spawn(["just", "--dump", "--dump-format=json"], {
-			cwd,
-			stdin: "ignore",
-			stdout: "pipe",
-			stderr: "pipe",
-		});
-		const [stdout, exit] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
-		if (exit !== 0) return null;
-		const dump = JSON.parse(stdout) as JustDump;
+		const dump = JSON.parse(probed.stdout) as JustDump;
 		const tasks: RunnerTask[] = [];
 		for (const recipe of Object.values(dump.recipes ?? {})) {
 			if (!recipe.name || recipe.private) continue;

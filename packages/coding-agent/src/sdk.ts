@@ -6,9 +6,11 @@ import {
 	type AgentEvent,
 	type AgentMessage,
 	type AgentTool,
+	type CanUseToolContext,
 	DEFAULT_DOOM_LOOP_CONFIG,
 	type DoomLoopConfig,
 	INTENT_FIELD,
+	type StreamFn,
 	type ThinkingLevel,
 } from "@oh-my-pi/pi-agent-core";
 import type { Message, Model, SimpleStreamOptions } from "@oh-my-pi/pi-ai";
@@ -247,6 +249,10 @@ export interface CreateAgentSessionOptions {
 
 	/** Whether UI is available (enables interactive tools like ask). Default: false */
 	hasUI?: boolean;
+	/** 工具执行前审批闸门（serve 侧接审批 shell）。未设置 = 不闸门。 */
+	canUseTool?: (ctx: CanUseToolContext) => Promise<boolean> | boolean;
+	/** 自定义 LLM 流（代理/测试注入）。默认 streamSimple。 */
+	streamFn?: StreamFn;
 }
 
 /** Result from createAgentSession */
@@ -1748,6 +1754,8 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			getToolChoice: () => session?.nextToolChoice(),
 			doomLoop: resolveDoomLoopConfig(model, settings),
 			lengthStall: resolveLengthStallConfig(settings),
+			canUseTool: options.canUseTool,
+			streamFn: options.streamFn,
 		});
 
 		cursorEventEmitter = event => agent.emitExternalEvent(event);

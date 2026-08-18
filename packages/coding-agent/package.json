@@ -52,6 +52,7 @@
 		"@oh-my-pi/omp-gateway": "workspace:*",
 		"@oh-my-pi/pi-tui": "catalog:",
 		"@oh-my-pi/pi-utils": "catalog:",
+		"@oh-my-pi/pi-wire": "catalog:",
 		"@oh-my-pi/self-evolution": "catalog:",
 		"@oh-my-pi/moa-extension": "workspace:*",
 		"@puppeteer/browsers": "catalog:",

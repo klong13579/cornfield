@@ -1,0 +1,38 @@
+/* 消息 hover 操作条（V8 .msg-foot/.msg-actions → V6 亮色 token） */
+
+.msg-actions {
+	display: flex;
+	gap: 2px;
+	opacity: 0;
+	transition: opacity 150ms ease;
+}
+
+/* 父层消息行加 msg-row class 即触发显隐；键盘焦点内也露出（无障碍）。 */
+.msg-row:hover .msg-actions,
+.msg-actions:focus-within {
+	opacity: 1;
+}
+
+.mact {
+	width: 24px;
+	height: 24px;
+	border-radius: 5px;
+	display: grid;
+	place-items: center;
+	color: var(--color-ink-subtle);
+	background: none;
+	border: none;
+	cursor: pointer;
+	padding: 0;
+	transition:
+		background var(--ease),
+		color var(--ease);
+}
+.mact:hover:not(:disabled) {
+	color: var(--color-ink);
+	background: var(--color-surface-2);
+}
+.mact:disabled {
+	opacity: 0.4;
+	cursor: not-allowed;
+}

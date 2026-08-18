@@ -2,6 +2,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { $which, isEnoent, logger } from "@oh-my-pi/pi-utils";
 import type { DetectedRunner, RunnerTask, TaskRunner } from "../runner";
+import { probeCommand } from "../runner";
 
 interface TaskListEntry {
 	name?: string;
@@ -28,16 +29,10 @@ async function hasTaskfile(cwd: string): Promise<boolean> {
 }
 
 async function listTaskfileTasks(cwd: string): Promise<RunnerTask[] | null> {
+	const probed = await probeCommand(["task", "--list-all", "--json"], cwd);
+	if (!probed) return null;
 	try {
-		const proc = Bun.spawn(["task", "--list-all", "--json"], {
-			cwd,
-			stdin: "ignore",
-			stdout: "pipe",
-			stderr: "pipe",
-		});
-		const [stdout, exit] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
-		if (exit !== 0) return null;
-		const list = JSON.parse(stdout) as TaskListJson;
+		const list = JSON.parse(probed.stdout) as TaskListJson;
 		const tasks = (list.tasks ?? [])
 			.filter(
 				(task): task is TaskListEntry & { name: string } => typeof task.name === "string" && task.name.length > 0,

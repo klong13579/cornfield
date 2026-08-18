@@ -1,0 +1,954 @@
+<!doctype html>
+<!--
+页面名：V8 — hermes 全功能复刻 mock（按真实功能密度）
+依据：tmp/hermes-webui 源码遍历 + 本机实跑交互验证（docs/hermes-webui-deep-analysis.md §六：180+ 功能点）
+范围：11 rail panel（Chat/Tasks/Kanban/Skills/Memory/Spaces/Profiles/Todos/Insights/Logs/Settings）
+     + 会话列表双源 tab + project 分组 + 更新横幅 + composer 全控件（saved prompts/queue/yolo）
+     + 消息操作条（edit/undo/fork/copy/regenerate/tts）+ 审批卡 + 澄清卡 + queue 卡 + steer 指示
+     + 右栏 Files/Artifacts 双 tab + 设置中心（分区+搜索）+ slash 命令补全演示
+主题：黑白单色（zinc 亮色），布局/交互仍为 hermes 式。交互：rail 切换 / 消息 hover 操作条 / composer 输入 / 命令面板。
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>OMP 多端 · V8 全功能 mock（黑白）</title>
+<style>
+:root {
+	--bg:#FAFAFA;--sidebar:#F4F4F5;--border:#E4E4E7;--border2:rgba(24,24,27,0.16);
+	--text:#18181B;--muted:#52525B;--accent:#18181B;--blue:#2563EB;--code-bg:#F4F4F5;
+	--surface:#EFEFF1;--topbar-bg:rgba(244,244,245,0.98);
+	--input-bg:rgba(0,0,0,0.03);--hover-bg:rgba(0,0,0,0.05);
+	--accent-hover:#3F3F46;--accent-bg:rgba(24,24,27,0.07);--accent-bg-strong:rgba(24,24,27,0.13);--accent-text:#3F3F46;
+	--error:#D64545;--success:#189A5C;--warning:#B97C1E;--info:#0288A8;
+	--radius-md:8px;--radius-card:8px;--radius-lg:12px;--radius-pill:999px;
+	--font-ui:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,system-ui,sans-serif;
+	--font-conversation:Georgia,"Times New Roman",serif;
+	--font-mono:ui-monospace,"SFMono-Regular","SF Mono",Menlo,Consolas,monospace;
+	--msg-rail:30px;--msg-max:780px;--dingtalk:#3296fa;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{font-family:var(--font-ui);font-size:14px;line-height:1.6;color:var(--text);background:var(--bg);-webkit-font-smoothing:antialiased}
+button{font-family:var(--font-ui);color:inherit;background:none;border:none;cursor:pointer}
+input,select,textarea{font-family:var(--font-ui);color:var(--text)}
+svg{display:block}
+::-webkit-scrollbar{width:8px;height:8px}::-webkit-scrollbar-thumb{background:rgba(0,0,0,0.12);border-radius:3px}
+.app-layout{display:flex;height:100vh;overflow:hidden}
+
+/* rail */
+.rail{display:flex;width:48px;flex-shrink:0;flex-direction:column;align-items:center;gap:4px;padding:8px 0;background:var(--sidebar);border-right:1px solid var(--border)}
+.rail-btn{width:36px;height:36px;border-radius:8px;color:var(--muted);display:flex;align-items:center;justify-content:center;position:relative;transition:color .15s,background .15s}
+.rail-btn:hover{color:var(--text);background:var(--hover-bg)}
+.rail-btn.active{color:var(--accent-text);background:var(--accent-bg)}
+.rail-btn.active::before{content:'';position:absolute;left:-6px;top:50%;transform:translateY(-50%);width:3px;height:16px;background:var(--accent);border-radius:0 2px 2px 0}
+.rail-spacer{flex:1;min-height:8px}
+.rail-badge{position:absolute;top:3px;right:3px;min-width:13px;height:13px;padding:0 3px;border-radius:7px;background:var(--error);color:#fff;font-size:9px;font-weight:600;line-height:13px;text-align:center}
+.rail-tip{position:absolute;left:46px;top:50%;transform:translateY(-50%);background:var(--text);color:var(--bg);font-size:11px;padding:4px 8px;border-radius:6px;white-space:nowrap;opacity:0;pointer-events:none;transition:opacity .12s;z-index:90}
+.rail-btn:hover .rail-tip{opacity:1}
+
+/* sidebar */
+.sidebar{width:300px;background:var(--sidebar);border-right:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0}
+.sidebar-section{padding:10px 12px 6px}
+.new-chat-btn{display:flex;align-items:center;gap:8px;width:100%;padding:9px 12px;border:1px solid var(--border2);border-radius:var(--radius-md);background:var(--accent);color:#fff;font-weight:600;font-size:13px}
+.new-chat-btn:hover{opacity:.9}
+.sb-search{display:flex;align-items:center;gap:8px;height:32px;padding:0 10px;background:var(--input-bg);border:1px solid var(--border);border-radius:var(--radius-md);color:var(--muted)}
+.sb-search input{flex:1;border:none;background:none;outline:none;font-size:13px}
+.src-tabs{display:flex;gap:4px;padding:0 12px 6px}
+.src-tab{font-size:11.5px;padding:4px 10px;border-radius:var(--radius-pill);color:var(--muted);border:1px solid var(--border)}
+.src-tab.on{background:var(--accent-bg);color:var(--accent-text);border-color:var(--accent-bg-strong);font-weight:500}
+.session-list{flex:1;overflow-y:auto;padding:4px 8px 8px}
+.session-group-h{padding:10px 12px 4px;font-size:10.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);display:flex;align-items:center;gap:6px}
+.gdot{width:7px;height:7px;border-radius:3px}
+.proj-add{margin-left:auto;font-size:13px;color:var(--muted);padding:0 4px;border-radius:4px}
+.proj-add:hover{background:var(--hover-bg)}
+.session-item{padding:8px;margin-bottom:2px;border-radius:8px;cursor:pointer;font-size:13px;color:var(--muted);transition:background .15s,color .15s;display:flex;align-items:flex-start;gap:8px;min-width:0}
+.session-item:hover{background:var(--hover-bg);color:var(--text)}
+.session-item.active{background:var(--accent-bg);color:var(--text)}
+.session-item.archived{opacity:.55}.session-item.archived .session-title{font-style:italic}
+.session-main{flex:1;min-width:0}
+.session-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text)}
+.session-meta{font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.session-lineage{font-size:9px;background:var(--accent-bg);color:var(--accent-text);border-radius:4px;padding:0 4px;margin-left:4px}
+.session-acts{display:flex;gap:2px;opacity:0;transition:opacity .15s}
+.session-item:hover .session-acts{opacity:1}
+.sact{color:var(--muted);font-size:12px;padding:2px 4px;border-radius:5px}
+.sact:hover{color:var(--accent-text);background:var(--accent-bg)}
+.sact.pinned{opacity:1;color:var(--accent)}
+.sidebar-footer{padding:10px 12px;border-top:1px solid var(--border);display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted)}
+.conn-dot{width:7px;height:7px;border-radius:50%;background:var(--success)}
+.footer-launch{margin-left:auto;display:flex;align-items:center;gap:5px;padding:5px 10px;border:1px solid var(--border2);border-radius:var(--radius-pill);font-size:11px;color:var(--muted)}
+.footer-launch:hover{background:var(--hover-bg)}
+
+/* main + topbar */
+main.main{flex:1;min-width:0;display:flex;flex-direction:column;background:var(--bg);overflow:hidden}
+.topbar{padding:10px 20px;border-bottom:1px solid var(--border);background:var(--topbar-bg);backdrop-filter:blur(12px);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;gap:10px}
+.topbar .burger{display:none}
+.topbar-title{font-size:15px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.topbar-meta{font-size:11px;color:var(--muted);margin-top:2px;opacity:.75}
+.topbar-chips{display:flex;gap:6px;align-items:center;flex-shrink:0}
+.chip{font-size:11px;padding:4px 10px;border-radius:var(--radius-pill);background:rgba(0,0,0,0.03);border:1px solid var(--border2);color:var(--muted);font-weight:500;cursor:pointer}
+.chip:hover{color:var(--accent-text)}
+.mono{font-family:var(--font-mono)}
+
+/* update banner（live 实测）*/
+.update-banner{display:flex;align-items:center;gap:10px;padding:8px 20px;background:var(--accent-bg);border-bottom:1px solid var(--accent-bg-strong);font-size:12.5px;color:var(--accent-text);flex-shrink:0}
+.update-banner a{color:var(--accent-text);font-weight:600;text-decoration:underline;cursor:pointer}
+.update-banner .grow{flex:1}
+
+.panel-view{display:none;flex:1;overflow:hidden;flex-direction:column}
+.panel-view.active{display:flex}
+.panel-body{flex:1;overflow-y:auto;padding:20px}
+.page-title{font-size:20px;font-weight:600}
+.page-sub{font-size:12px;color:var(--muted);margin-top:3px}
+.page-head-row{display:flex;align-items:center;gap:10px;margin-bottom:16px}
+.page-head-row .grow{flex:1}
+.hbtn{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border-radius:8px;font-size:13px;font-weight:500;border:1px solid var(--border2);background:var(--hover-bg);color:var(--muted)}
+.hbtn:hover{background:var(--accent-bg);color:var(--accent-text)}
+.hbtn.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+.hbtn.primary:hover{opacity:.9;background:var(--accent);color:#fff}
+.seg{display:inline-flex;gap:2px;background:var(--input-bg);border:1px solid var(--border);border-radius:8px;padding:2px}
+.seg button{height:26px;padding:0 12px;border-radius:6px;font-size:12px;color:var(--muted)}
+.seg button.on{background:var(--bg);color:var(--text);font-weight:500;box-shadow:0 1px 2px rgba(0,0,0,0.06)}
+.list-card{border:1px solid var(--border);border-radius:var(--radius-card);background:var(--bg);overflow:hidden}
+.lrow{display:flex;align-items:center;gap:12px;padding:11px 16px;border-bottom:1px solid var(--border);font-size:13px}
+.lrow:last-child{border-bottom:none}
+.lrow:hover{background:var(--hover-bg)}
+.lrow .lmain{flex:1;min-width:0}
+.lrow .lname{font-weight:500;display:flex;gap:8px;align-items:center}
+.lrow .lsub{font-size:11.5px;color:var(--muted);margin-top:2px;display:flex;gap:10px;flex-wrap:wrap}
+.lstate{font-size:11px;white-space:nowrap}
+.lstate.ok{color:var(--success)}.lstate.fail{color:var(--error)}
+.row-acts{display:flex;gap:2px}
+.ract{width:26px;height:26px;border-radius:6px;display:grid;place-items:center;color:var(--muted)}
+.ract:hover{background:var(--accent-bg);color:var(--accent-text)}
+.tag{font-size:9px;font-weight:700;letter-spacing:.04em;padding:1.5px 6px;border-radius:var(--radius-pill);text-transform:uppercase}
+.tag.coding{background:var(--accent-bg);color:var(--accent-text)}
+.tag.worker{background:rgba(2,136,168,0.1);color:var(--info)}
+.tag.evolved{background:rgba(61,139,64,0.12);color:var(--success)}
+.switch{position:relative;width:34px;height:19px;border-radius:10px;background:var(--border2);transition:background .15s;flex-shrink:0}
+.switch::after{content:"";position:absolute;top:2px;left:2px;width:15px;height:15px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,0.2);transition:transform .15s}
+.switch.on{background:var(--accent)}.switch.on::after{transform:translateX(15px)}
+.group-h{font-size:10.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:18px 0 8px}
+
+/* messages */
+.messages{flex:1;overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column}
+.msg-col{width:100%;max-width:var(--msg-max);margin:0 auto;padding:8px 20px 150px}
+.msg-row{padding:10px 0}
+.msg-role{font-size:12px;font-weight:500;margin-bottom:8px;display:flex;align-items:center;gap:8px}
+.msg-role.user{color:var(--accent)}.msg-role.assistant{color:var(--accent-text);opacity:.6}
+.role-icon{width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0;background:var(--accent-bg);color:var(--accent-text);border:1px solid var(--accent-bg-strong);position:relative}
+.role-icon.assistant{background:var(--accent-bg-strong)}
+.role-icon .dtb{position:absolute;right:-6px;bottom:-5px;background:var(--dingtalk);color:#fff;font-size:7px;border-radius:3px;padding:0.5px 2.5px}
+.msg-time{font-size:10.5px;color:var(--muted);opacity:.6;margin-left:auto}
+.msg-body{font-family:var(--font-conversation);font-size:14px;line-height:1.75;padding-left:var(--msg-rail);overflow-wrap:anywhere}
+.msg-body p{margin-bottom:10px}.msg-body p:last-child{margin-bottom:0}
+.msg-body code{font-family:var(--font-mono);font-size:12.5px;background:rgba(0,0,0,0.06);color:#3F3F46;border-radius:4px;padding:1px 5px}
+.msg-user-body{font-family:var(--font-ui);font-weight:500}
+/* 消息操作条（ui.js:16936）*/
+.msg-foot{display:flex;align-items:center;gap:4px;padding:4px 0 0 var(--msg-rail)}
+.msg-actions{display:flex;gap:2px;opacity:0;transition:opacity .15s}
+.msg-row:hover .msg-actions{opacity:1}
+.mact{width:24px;height:24px;border-radius:5px;display:grid;place-items:center;color:var(--muted);font-size:11px}
+.mact:hover{color:var(--accent-text);background:var(--accent-bg)}
+.msg-usage{font-size:10.5px;color:var(--muted);opacity:.55;font-family:var(--font-mono);margin-left:auto}
+/* tool-call quiet group */
+.tool-call-group{margin:4px 0 4px var(--msg-rail);border-left:1px solid rgba(0,0,0,0.08)}
+.tcg-head{display:flex;align-items:center;gap:8px;padding:5px 10px;font-size:12px;color:var(--muted);cursor:pointer;border-radius:4px;margin-left:4px}
+.tcg-head:hover{background:var(--hover-bg);color:var(--text)}
+.tcg-head .caret{transition:transform .15s}
+.tool-call-group.open .tcg-head .caret{transform:rotate(90deg)}
+.tcg-err{font-size:10px;color:var(--error);font-weight:600}
+.tcg-body{display:none;padding:2px 0 2px 10px}
+.tool-call-group.open .tcg-body{display:block}
+.tcc-think{font-size:12px;color:var(--muted);line-height:1.6;padding:6px 10px;margin-bottom:4px;background:rgba(0,0,0,0.025);border-radius:6px}
+.tcc-think .lbl{display:block;font-size:10px;font-weight:600;letter-spacing:.06em;opacity:.7;margin-bottom:3px}
+.tool-row{display:flex;align-items:center;gap:8px;padding:4px 10px;font-size:12px;color:var(--muted);border-radius:6px;cursor:pointer}
+.tool-row:hover{background:var(--hover-bg)}
+.tool-row .tname{font-family:var(--font-mono);font-size:11.5px;color:var(--text)}
+.tool-row .ttarget{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:var(--font-mono);font-size:11px;opacity:.7}
+.tstatus{font-size:10px;font-weight:600;flex-shrink:0}
+.tstatus.done{color:var(--success)}.tstatus.fail{color:var(--error)}.tstatus.run{color:var(--warning)}
+/* steer 指示（messages.js steer-indicator）*/
+.steer-indicator{display:flex;align-items:baseline;gap:8px;padding:8px 0 8px var(--msg-rail);opacity:.65;font-style:italic;color:var(--accent-text);font-size:12.5px}
+.steer-badge{font-size:10px;font-weight:600;text-transform:uppercase;color:var(--accent-text);background:var(--accent-bg);border:1px solid var(--accent-bg-strong);border-radius:4px;padding:1px 6px;font-style:normal;flex-shrink:0}
+.compress-divider{display:flex;align-items:center;gap:12px;margin:16px 0 16px var(--msg-rail);color:var(--muted);opacity:.6;font-size:11px;user-select:none}
+.compress-divider::before,.compress-divider::after{content:"";flex:1;height:1px;background:var(--border)}
+/* queue 卡（index.html queue card）*/
+.queue-card{margin:0 20px 6px;max-width:var(--msg-max);margin-left:auto;margin-right:auto;border:1px dashed var(--border2);border-radius:10px;padding:8px 14px;font-size:12px;color:var(--muted);display:flex;align-items:center;gap:8px}
+.queue-card b{color:var(--accent-text)}
+
+/* composer zone + 审批 + 澄清 */
+.composer-zone{position:relative;flex-shrink:0}
+.float-card{position:absolute;left:0;right:0;bottom:-6px;max-width:var(--msg-max);margin:0 auto;padding:0 20px;width:100%;z-index:3}
+.fc-inner{background:var(--surface);backdrop-filter:blur(8px);border:1px solid var(--accent-bg-strong);border-radius:14px;padding:14px 18px;box-shadow:0 8px 24px rgba(0,0,0,0.1);margin-bottom:6px}
+.fc-header{display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:13px;font-weight:600}
+.fc-header.warn{color:var(--warning)}.fc-header.err{color:var(--error)}.fc-header.info{color:var(--info)}
+.fc-cmd{font-family:var(--font-mono);font-size:12px;background:var(--bg);border:1px solid var(--border2);border-radius:8px;padding:8px 10px;margin-bottom:6px}
+.fc-keys{font-size:11.5px;color:var(--muted);margin-bottom:10px}
+.fc-keys code{font-family:var(--font-mono);background:var(--input-bg);padding:1px 5px;border-radius:4px;font-size:11px}
+.fc-btns{display:flex;gap:8px;flex-wrap:wrap}
+.abtn{border-radius:8px;padding:6px 14px;font-size:13px;font-weight:500;border:1px solid var(--border2);background:var(--hover-bg);color:var(--muted)}
+.abtn:hover{background:var(--accent-bg);color:var(--accent-text)}
+.abtn.deny{background:var(--error);color:#fff;border-color:var(--error)}
+.abtn.approve{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:600}
+.abtn.approve:hover,.abtn.deny:hover{opacity:.88}
+.clarify-opt{display:block;width:100%;text-align:left;padding:8px 12px;border:1px solid var(--border2);border-radius:8px;background:var(--bg);font-size:13px;margin-bottom:6px}
+.clarify-opt:hover{border-color:var(--accent);background:var(--accent-bg)}
+.composer-wrap{padding:10px 20px 14px;position:relative;z-index:10}
+.composer-wrap::before{content:"";position:absolute;left:0;right:0;bottom:100%;height:32px;background:linear-gradient(to bottom,transparent,var(--bg));pointer-events:none}
+.composer-box{max-width:clamp(780px,60vw,1100px);margin:0 auto;background:linear-gradient(var(--input-bg),var(--input-bg)),var(--bg);border:1px solid var(--border2);border-radius:16px;display:flex;flex-direction:column;transition:border-color .2s,box-shadow .2s;position:relative;z-index:2}
+.composer-box:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px:var(--accent-bg)}
+.composer-box textarea{width:100%;border:none;outline:none;resize:none;background:none;font-size:14px;line-height:1.55;padding:12px 16px 4px;min-height:24px}
+.composer-footer{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:6px 10px 10px}
+.composer-left{display:flex;align-items:center;gap:4px;min-width:0;flex:1;overflow-x:auto;scrollbar-width:none}
+.composer-left::-webkit-scrollbar{display:none}
+.composer-right{display:flex;gap:8px;align-items:center;flex-shrink:0}
+.cc-btn{width:30px;height:30px;border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--muted)}
+.cc-btn:hover{color:var(--text);background:var(--hover-bg)}
+.cc-chip{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 10px;border-radius:var(--radius-pill);font-size:11.5px;color:var(--muted);white-space:nowrap;border:1px solid transparent}
+.cc-chip:hover{background:var(--hover-bg);color:var(--text)}
+.cc-chip .mono{font-size:11px}
+.sm-avatar{width:16px;height:16px;border-radius:50%;background:var(--accent-bg-strong);color:var(--accent-text);display:grid;place-items:center;font-size:8.5px;font-weight:700}
+.context-ring{position:relative;width:30px;height:30px}
+.context-ring svg{transform:rotate(-90deg)}
+.cr-val{position:absolute;inset:0;display:grid;place-items:center;font-size:8px;font-weight:600;color:var(--muted);font-family:var(--font-mono)}
+.send-btn{width:34px;height:34px;border-radius:50%;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;flex-shrink:0;box-shadow:0 2px 8px var(--accent-bg-strong)}
+.send-btn:hover{background:var(--accent-hover)}
+.composer-hint{text-align:center;font-size:10.5px;color:var(--muted);opacity:.6;margin-top:6px}
+.composer-hint kbd{font-family:var(--font-mono);font-size:9.5px;border:1px solid var(--border);border-radius:3px;padding:0 4px;background:var(--input-bg)}
+/* slash 命令面板（commands.js）*/
+.cmd-palette{position:absolute;bottom:calc(100% - 4px);left:20px;right:20px;max-width:520px;margin:0 auto;background:var(--surface);border:1px solid var(--border2);border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,0.15);padding:6px;z-index:20;display:none}
+.cmd-palette.show{display:block}
+.cmd-item{display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:8px;font-size:13px;cursor:pointer}
+.cmd-item.on{background:var(--accent-bg);color:var(--accent-text)}
+.cmd-item .c-name{font-family:var(--font-mono);font-size:12.5px;font-weight:600}
+.cmd-item .c-desc{color:var(--muted);font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* saved prompts 下拉 */
+.sp-drop{position:absolute;bottom:calc(100% + 2px);left:0;background:var(--surface);border:1px solid var(--border2);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,0.15);padding:4px;min-width:240px;z-index:20;display:none}
+.sp-drop.show{display:block}
+.sp-item{display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:7px;font-size:12.5px;cursor:pointer}
+.sp-item:hover{background:var(--accent-bg)}
+.sp-item .grow{flex:1}
+
+/* 右栏 */
+.rightpanel{width:300px;background:var(--sidebar);border-left:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden;flex-shrink:0}
+.rightpanel.closed{display:none}
+.panel-header{padding:12px 16px;border-bottom:1px solid var(--border);font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;display:flex;align-items:center;gap:6px}
+.panel-header .ph-actions{margin-left:auto;display:flex;gap:4px}
+.ph-ic{color:var(--muted);padding:3px;border-radius:4px}
+.ph-ic:hover{background:var(--hover-bg);color:var(--text)}
+.rp-tabs{display:flex;gap:2px;padding:6px 12px 0;border-bottom:1px solid var(--border)}
+.rp-tab{font-size:12px;color:var(--muted);padding:6px 10px;border-bottom:2px solid transparent}
+.rp-tab.active{color:var(--accent-text);border-bottom-color:var(--accent);font-weight:500}
+.file-tree{flex:1;overflow-y:auto;padding:8px}
+.file-item{display:flex;align-items:center;gap:6px;padding:6px 10px;border-radius:8px;cursor:pointer;font-size:12px;color:var(--muted);min-width:0}
+.file-item:hover{background:var(--hover-bg);color:var(--text)}
+.file-item.active{background:var(--accent-bg);color:var(--accent-text)}
+.file-item .fname{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.file-item.i1{padding-left:22px}.file-item.i2{padding-left:34px}
+.gitb{font-family:var(--font-mono);font-size:10px;font-weight:600;width:14px;text-align:center;border-radius:3px;flex-shrink:0}
+.gitb.m{color:var(--warning);background:rgba(230,138,0,0.12)}
+.gitb.a{color:var(--success);background:rgba(61,139,64,0.12)}
+.preview-area{border-top:1px solid var(--border);height:40%;display:flex;flex-direction:column}
+.preview-path{display:flex;align-items:center;gap:6px;padding:8px 14px;border-bottom:1px solid var(--border);font-family:var(--font-mono);font-size:11px;color:var(--muted)}
+.preview-body{flex:1;overflow:auto;padding:8px 14px;font-family:var(--font-mono);font-size:11px;line-height:1.7}
+.artifact-item{margin:8px;border:1px solid var(--border);border-radius:8px;overflow:hidden;background:var(--bg)}
+.artifact-item img{width:100%;display:block;background:repeating-conic-gradient(#eee 0 25%,#fff 0 50%) 0 0/12px 12px}
+.artifact-item .a-h{padding:6px 10px;font-size:11px;color:var(--muted);display:flex;gap:6px}
+.artifact-item .a-h b{color:var(--text);font-weight:500}
+
+/* agents */
+.ag-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px}
+.ag-card{border:1px solid var(--border);border-radius:var(--radius-card);background:var(--bg);padding:14px;cursor:pointer;transition:border-color .15s}
+.ag-card:hover{border-color:var(--accent)}
+.ag-top{display:flex;gap:10px;align-items:center;margin-bottom:10px}
+.ag-ava{position:relative;width:34px;height:34px;border-radius:50%;background:var(--accent-bg-strong);color:var(--accent-text);display:grid;place-items:center;font-size:13px;font-weight:700;flex-shrink:0}
+.ag-ava .dtb2{position:absolute;right:-3px;bottom:-3px;background:var(--dingtalk);color:#fff;font-size:7.5px;border-radius:4px;padding:1px 3px}
+.ag-name{font-size:14px;font-weight:600;display:flex;gap:7px;align-items:center}
+.ag-sub{font-size:11.5px;color:var(--muted)}
+.ag-stats{font-size:11.5px;color:var(--muted);display:flex;gap:12px}
+.detail-wrap{display:none;flex-direction:column;flex:1;overflow:hidden}
+.detail-wrap.show{display:flex}
+.dt-head{padding:18px 20px 0}
+.dt-title-row{display:flex;align-items:center;gap:12px}
+.dt-name{font-size:20px;font-weight:600;display:flex;gap:10px;align-items:center}
+.dt-sub{font-size:12px;color:var(--muted);margin-top:4px;display:flex;gap:12px;flex-wrap:wrap}
+.dt-actions{margin-left:auto;display:flex;gap:8px}
+.dt-tabs{display:flex;gap:2px;padding:14px 20px 0;border-bottom:1px solid var(--border)}
+.dtab{font-size:13px;color:var(--muted);padding:7px 12px;border-bottom:2px solid transparent}
+.dtab.active{color:var(--accent-text);border-bottom-color:var(--accent);font-weight:500}
+.dt-body{flex:1;overflow-y:auto;padding:18px 20px}
+.dpane{display:none}.dpane.active{display:block}
+.cfg-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;max-width:940px}
+.cfg-card{border:1px solid var(--border);border-radius:var(--radius-card);background:var(--bg)}
+.cfg-h{padding:9px 14px;font-size:10.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--border)}
+.cfg-b{padding:4px 14px}
+.cfg-row{display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px}
+.cfg-row:last-child{border-bottom:none}
+.cfg-row .cl{flex:1;min-width:0}
+.cfg-row .cd{font-size:11.5px;color:var(--muted);margin-top:1px}
+.sel{height:28px;padding:0 8px;border:1px solid var(--border2);border-radius:6px;background:var(--bg);font-size:12.5px;color:var(--muted)}
+.env-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:8px;margin-bottom:14px}
+.env-card{border:1px solid var(--border);border-radius:8px;padding:10px 12px;background:var(--bg)}
+.env-card .ek{font-size:10px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--muted)}
+.env-card .ev{font-family:var(--font-mono);font-size:12px;margin-top:3px}
+
+/* cron 表单（preset + 预览）*/
+.cron-form{border:1px solid var(--accent-bg-strong);border-radius:10px;background:var(--surface);padding:14px 16px;max-width:560px;margin-bottom:16px}
+.cron-form label{font-size:11.5px;font-weight:600;color:var(--muted);display:block;margin:10px 0 4px}
+.cron-form input,.cron-form select{width:100%;height:30px;padding:0 8px;border:1px solid var(--border2);border-radius:6px;background:var(--bg);font-size:12.5px}
+.cron-preview{font-family:var(--font-mono);font-size:11px;color:var(--accent-text);background:var(--accent-bg);border-radius:4px;padding:2px 6px;display:inline-block;margin-left:6px}
+
+/* kanban */
+.kb-board{display:flex;gap:12px;overflow-x:auto;padding-bottom:12px}
+.kb-col{min-width:240px;flex:1;background:var(--surface);border:1px solid var(--border);border-radius:10px;display:flex;flex-direction:column;max-height:60vh}
+.kb-col-h{padding:9px 12px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);border-bottom:1px solid var(--border);display:flex;justify-content:space-between}
+.kb-card{margin:8px;border:1px solid var(--border);border-radius:8px;background:var(--bg);padding:10px 12px;font-size:12.5px;cursor:pointer}
+.kb-card:hover{border-color:var(--accent)}
+.kb-card .kc-meta{font-size:10.5px;color:var(--muted);margin-top:5px;display:flex;gap:8px}
+
+/* memory / insights / logs / todos */
+.mem-tabs{display:flex;gap:4px;margin-bottom:14px;flex-wrap:wrap}
+.mem-tab{font-size:12px;padding:5px 12px;border-radius:var(--radius-pill);border:1px solid var(--border);color:var(--muted)}
+.mem-tab.on{background:var(--accent-bg);color:var(--accent-text);border-color:var(--accent-bg-strong);font-weight:500}
+.mem-content{border:1px solid var(--border);border-radius:10px;background:var(--bg);padding:14px 16px;font-size:13.5px;max-width:760px;min-height:120px;white-space:pre-wrap;line-height:1.7}
+.ins-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
+.ins-card{border:1px solid var(--border);border-radius:10px;background:var(--bg);padding:14px}
+.ins-card h4{font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px}
+.ins-num{font-size:26px;font-weight:700;color:var(--accent-text);font-family:var(--font-mono)}
+.ins-tbl{width:100%;border-collapse:collapse;font-size:11.5px}
+.ins-tbl th{text-align:left;color:var(--muted);font-weight:600;padding:4px 8px;border-bottom:1px solid var(--border)}
+.ins-tbl td{padding:5px 8px;border-bottom:1px solid var(--border)}
+.log-line{font-family:var(--font-mono);font-size:11.5px;padding:3px 0;color:var(--muted)}
+.log-line .lt{opacity:.6;margin-right:8px}
+.log-line.warn{color:var(--warning)}.log-line.err{color:var(--error)}
+.todo-phase{margin-bottom:14px}
+.todo-h{display:flex;align-items:center;gap:10px;font-size:12.5px;font-weight:600;margin-bottom:6px}
+.pbar{flex:1;height:2px;background:var(--border);border-radius:1px;overflow:hidden}
+.pbar i{display:block;height:100%;background:var(--success)}
+.todo-it{display:flex;align-items:center;gap:9px;padding:5px 0;font-size:13px}
+.todo-it .cb{width:15px;height:15px;border:1.5px solid var(--border2);border-radius:4px;flex-shrink:0;display:grid;place-items:center;font-size:9px;color:transparent}
+.todo-it.done{color:var(--muted);text-decoration:line-through;opacity:.65}
+.todo-it.done .cb{background:var(--success);border-color:var(--success);color:#fff}
+
+/* settings 中心（分区 + 搜索）*/
+.set-wrap{display:flex;gap:0;max-width:960px;margin:0 auto;min-height:100%}
+.set-nav{width:180px;flex-shrink:0;border-right:1px solid var(--border);padding:12px 0}
+.set-search{margin:0 12px 10px;display:flex;align-items:center;gap:6px;height:30px;padding:0 8px;border:1px solid var(--border);border-radius:7px;background:var(--input-bg);font-size:12px;color:var(--muted)}
+.set-search input{flex:1;border:none;background:none;outline:none;font-size:12px}
+.set-nav-item{display:flex;align-items:center;gap:8px;padding:7px 14px;font-size:13px;color:var(--muted);border-left:2px solid transparent}
+.set-nav-item.on{color:var(--accent-text);border-left-color:var(--accent);background:var(--accent-bg);font-weight:500}
+.set-body{flex:1;padding:16px 20px;min-width:0}
+.set-pane{display:none}.set-pane.active{display:block}
+
+/* profiles / spaces */
+.prof-row .ag-ava{width:28px;height:28px;font-size:11px}
+
+.mobile-overlay{display:none;position:fixed;inset:0;background:rgba(26,22,16,0.3);z-index:40}
+.mobile-overlay.show{display:block}
+@media (max-width:1023px){.rail{display:none}}
+@media (max-width:900px){
+	.sidebar{position:fixed;left:0;top:0;bottom:0;z-index:50;transform:translateX(-100%);transition:transform .2s;box-shadow:8px 0 24px rgba(0,0,0,0.12)}
+	.sidebar.mobile-open{transform:translateX(0)}
+	.rightpanel{position:fixed;right:0;top:0;bottom:0;z-index:50;width:min(320px,88vw);transform:translateX(100%);transition:transform .2s}
+	.rightpanel.mobile-open{transform:translateX(0)}.rightpanel.closed{display:flex}
+	.topbar .burger{display:flex}
+	.msg-col{padding:8px 14px 140px}.msg-body{padding-left:0}
+	.tool-call-group{margin-left:0}.composer-wrap{padding:8px 10px}
+	.cfg-grid,.set-wrap{flex-direction:column}.set-nav{width:100%;border-right:none;border-bottom:1px solid var(--border)}
+}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<div class="app-layout">
+
+	<nav class="rail">
+		<button class="rail-btn active" data-panel="chat" aria-label="Chat"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><span class="rail-tip">Chat</span></button>
+		<button class="rail-btn" data-panel="agents" aria-label="Spaces"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="6" rx="1"/><rect x="3" y="14" width="18" height="6" rx="1"/></svg><span class="rail-tip">Spaces · Agents</span></button>
+		<button class="rail-btn" data-panel="tasks" aria-label="Tasks"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span class="rail-badge">2</span><span class="rail-tip">Tasks · 2 失败</span></button>
+		<button class="rail-btn" data-panel="kanban" aria-label="Kanban"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><rect x="3" y="5" width="5" height="14" rx="1"/><rect x="10" y="5" width="5" height="9" rx="1"/><rect x="17" y="5" width="5" height="12" rx="1"/></svg><span class="rail-tip">Kanban</span></button>
+		<button class="rail-btn" data-panel="skills" aria-label="Skills"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 2.2 5.3L20 9l-4 4 .9 5.7L12 16l-4.9 2.7L8 13 4 9l5.8-.7z"/></svg><span class="rail-tip">Skills</span></button>
+		<button class="rail-btn" data-panel="memory" aria-label="Memory"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a3 3 0 0 0-3 3 3 3 0 0 0-3 3 3 3 0 0 0-1 5.8A3 3 0 0 0 8 21a3 3 0 0 0 4-1 3 3 0 0 0 4 1 3 3 0 0 0 3-6.2A3 3 0 0 0 18 9a3 3 0 0 0-3-3 3 3 0 0 0-3-3z"/></svg><span class="rail-tip">Memory</span></button>
+		<button class="rail-btn" data-panel="profiles" aria-label="Profiles"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg><span class="rail-tip">Profiles</span></button>
+		<button class="rail-btn" data-panel="todos" aria-label="Todos"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h3v3H4zM4 14h3v3H4zM10 8.5h10M10 15.5h10"/></svg><span class="rail-tip">Todos</span></button>
+		<button class="rail-btn" data-panel="insights" aria-label="Insights"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg><span class="rail-tip">Insights</span></button>
+		<button class="rail-btn" data-panel="logs" aria-label="Logs"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16M4 10h10M4 15h13"/></svg><span class="rail-tip">Logs</span></button>
+		<div class="rail-spacer"></div>
+		<button class="rail-btn" data-panel="settings" aria-label="Settings"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.6-2-3.4-2.4 1a7 7 0 0 0-2-1.2L14 3h-4l-.5 2.6a7 7 0 0 0-2 1.2l-2.4-1-2 3.4 2 1.6A7 7 0 0 0 5 12a7 7 0 0 0 .1 1.2l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 2 1.2L10 21h4l.5-2.6a7 7 0 0 0 2-1.2l2.4 1 2-3.4-2-1.6A7 7 0 0 0 19 12z"/></svg><span class="rail-tip">Settings</span></button>
+	</nav>
+
+	<aside class="sidebar" id="sidebar">
+		<div class="sidebar-section">
+			<button class="new-chat-btn">＋ 新会话</button>
+		</div>
+		<div class="sidebar-section" style="padding-top:0">
+			<div class="sb-search">🔍 <input placeholder="过滤会话…" /></div>
+		</div>
+		<div class="src-tabs">
+			<button class="src-tab on">WebUI 会话 (5)</button>
+			<button class="src-tab">CLI 会话 (20)</button>
+		</div>
+		<div class="session-list">
+			<div class="session-group-h"><span class="gdot" style="background:var(--dingtalk)"></span>研发工作区<span class="proj-add">＋</span></div>
+			<div class="session-item active">
+				<span class="sact pinned">★</span>
+				<div class="session-main">
+					<div class="session-title">multidevice-host 前端重构<span class="session-lineage">⑂ 3</span></div>
+					<div class="session-meta">研发 Agent · 12 分钟前 · 86 条</div>
+				</div>
+				<div class="session-acts"><button class="sact">🗄</button><button class="sact">⋮</button></div>
+			</div>
+			<div class="session-item"><div class="session-main"><div class="session-title">natives AVX2 探针回归</div><div class="session-meta">研发 Agent · 昨天 · 34 条</div></div></div>
+			<div class="session-item archived"><div class="session-main"><div class="session-title">gateway 消息丢失复盘</div><div class="session-meta">8-14 · 归档</div></div></div>
+			<div class="session-group-h"><span class="gdot" style="background:var(--success)"></span>运营工作区<span class="proj-add">＋</span></div>
+			<div class="session-item"><div class="session-main"><div class="session-title">HR Agent · 周报汇总</div><div class="session-meta">cron · 每天 09:00</div></div></div>
+			<div class="session-item"><div class="session-main"><div class="session-title">财务 · 月度费用拉取</div><div class="session-meta">cron · 每周一 08:30</div></div></div>
+		</div>
+		<div class="sidebar-footer"><span class="conn-dot"></span> 已连接 · 5 agents
+			<button class="footer-launch">⌘ OMP WebUI</button>
+		</div>
+	</aside>
+
+	<main class="main">
+		<header class="topbar">
+			<button class="cc-btn burger" id="burger">☰</button>
+			<div class="topbar-info">
+				<div class="topbar-title" id="tbTitle">multidevice-host 前端重构</div>
+				<div class="topbar-meta" id="tbMeta">研发 Agent · deepseek-v4-pro · thinking high · ⎇ multidevice-host</div>
+			</div>
+			<div class="topbar-chips">
+				<button class="chip" id="filesToggle">工作区</button>
+				<button class="chip">⇅ 导出</button>
+			</div>
+		</header>
+
+		<!-- 更新横幅（live 实测）-->
+		<div class="update-banner" id="updateBanner">
+			⬆ agent 有新版本（0.52.1）· <a>What's new</a>
+			<div class="grow"></div>
+			<button class="hbtn" onclick="document.getElementById('updateBanner').remove()">稍后</button>
+			<button class="hbtn primary">立即更新</button>
+		</div>
+
+		<!-- Chat -->
+		<section class="panel-view active" id="panel-chat">
+			<div class="main-view">
+				<div class="messages">
+					<div class="msg-col">
+						<div class="msg-row">
+							<div class="msg-role user"><span class="role-icon">梦</span><span>彭梦龙</span><span class="msg-time">14:32</span></div>
+							<div class="msg-body msg-user-body">把工作台的转录区降噪改掉，参考 hermes 的 Activity 折叠行方案，工具卡不要一级一级全铺开</div>
+							<div class="msg-foot"><span class="msg-actions">
+								<button class="mact" title="编辑后重发">✎</button><button class="mact" title="复制">⧉</button><button class="mact" title="从此处分叉">⑂</button>
+							</span><span class="msg-usage">212 tok</span></div>
+						</div>
+						<div class="msg-row">
+							<div class="msg-role assistant"><span class="role-icon assistant">研<span class="dtb">钉</span></span><span>研发 Agent · deepseek-v4-pro</span><span class="msg-time">14:32</span></div>
+							<div class="tool-call-group open" id="tcg1">
+								<div class="tcg-head" onclick="document.getElementById('tcg1').classList.toggle('open')">
+									<span class="caret">›</span> Activity: 6 tools <span class="tcg-err">1 失败</span>
+								</div>
+								<div class="tcg-body">
+									<div class="tcc-think"><span class="lbl">THINKING</span>用户要转录降噪。先读 Transcript.tsx 确认渲染路径，对照 hermes Activity 规格定接口……</div>
+									<div class="tool-row"><span>📄</span><span class="tname">read</span><span class="ttarget">pages/workspace/Transcript.tsx</span><span class="tstatus done">✓</span></div>
+									<div class="tool-row"><span>🔍</span><span class="tname">search</span><span class="ttarget">"Activity" · src/**</span><span class="tstatus done">✓</span></div>
+									<div class="tool-row"><span>✎</span><span class="tname">edit</span><span class="ttarget">components/ActivityFold.tsx</span><span class="tstatus fail">✗</span></div>
+								</div>
+							</div>
+							<div class="msg-body"><p>改完了。核心变化：每个 assistant turn 只保留一个 <code>Activity: N tools</code> 折叠行，thinking 和全部工具调用收进去；默认折叠，展开状态按 turn 记忆。失败的工具在折叠行露出红标。</p></div>
+							<!-- 消息操作条（hover 显示）-->
+							<div class="msg-foot"><span class="msg-actions">
+								<button class="mact" title="撤销本轮（undo exchange)">↩</button>
+								<button class="mact" title="重新生成">⟳</button>
+								<button class="mact" title="从此处分叉">⑂</button>
+								<button class="mact" title="复制">⧉</button>
+								<button class="mact" title="朗读">🔊</button>
+							</span><span class="msg-usage">1.8k tok · ¥0.002 · 41s</span></div>
+						</div>
+
+						<!-- steer 指示 -->
+						<div class="steer-indicator"><span class="steer-badge">steer</span><span>顺手把审批卡文案也改成中文</span></div>
+
+						<div class="compress-divider">Context auto-compressed · 41k → 12k tokens</div>
+
+						<div class="msg-row">
+							<div class="msg-role assistant"><span class="role-icon assistant">研<span class="dtb">钉</span></span><span>研发 Agent</span><span class="msg-time">14:35</span></div>
+							<div class="msg-body"><p>继续。下一步把审批闸门的 wire 协议命令补进 pi-wire 命令面草稿<span style="color:var(--accent)">▍</span></p></div>
+						</div>
+					</div>
+				</div>
+
+				<!-- queue 卡（排队消息可视化）-->
+				<div class="queue-card">⏳ 排队中 · <b>1 条</b>：把 settings 的搜索也做了<div class="grow" style="flex:1"></div><button class="sact">✕</button></div>
+
+				<div class="composer-zone">
+					<!-- 审批卡 -->
+					<div class="float-card" id="approvalCard">
+						<div class="fc-inner">
+							<div class="fc-header err">⚠ 需要审批 · bash<button class="abtn" style="margin-left:auto;padding:2px 8px" onclick="this.closest('.float-card').style.display='none'">收起</button></div>
+							<div class="fc-cmd">git push origin multidevice-host --force-with-lease</div>
+							<div class="fc-keys">匹配规则 <code>git push --force*</code> · 本会话已放行 2 条</div>
+							<div class="fc-btns"><button class="abtn deny">拒绝</button><button class="abtn">本次放行</button><button class="abtn">本会话放行</button><button class="abtn approve">总是放行</button></div>
+						</div>
+					</div>
+					<!-- 澄清卡 -->
+					<div class="float-card" id="clarifyCard" style="display:none">
+						<div class="fc-inner">
+							<div class="fc-header info">? Agent 澄清 · multidevice-host</div>
+							<div class="fc-keys">要把 mock 里的深色主题一并迁移吗？</div>
+							<div style="max-width:420px">
+								<button class="clarify-opt">只迁亮色（V6 现状）</button>
+								<button class="clarify-opt">亮色 + 深色都迁</button>
+								<button class="clarify-opt">先亮色，深色进 backlog</button>
+							</div>
+						</div>
+					</div>
+
+					<!-- slash 命令面板（输入 / 触发）-->
+					<div class="cmd-palette" id="cmdPalette">
+						<div class="cmd-item on"><span class="c-name">/compact</span><span class="c-desc">手动压缩当前会话上下文</span></div>
+						<div class="cmd-item"><span class="c-name">/undo</span><span class="c-desc">撤销最近一轮对话</span></div>
+						<div class="cmd-item"><span class="c-name">/model</span><span class="c-desc">切换模型</span></div>
+						<div class="cmd-item"><span class="c-name">/yolo</span><span class="c-desc">切换免审批模式（危险）</span></div>
+						<div class="cmd-item"><span class="c-name">/retry</span><span class="c-desc">重试失败的上一轮</span></div>
+						<div class="cmd-item"><span class="c-name">/usage</span><span class="c-desc">查看 token 用量与费用</span></div>
+					</div>
+
+					<div class="composer-wrap">
+						<div class="composer-box">
+							<textarea rows="1" id="msgInput" placeholder="给研发 Agent 发消息…（输入 / 触发命令）"></textarea>
+							<!-- saved prompts 下拉锚点 -->
+							<div style="position:relative">
+								<div class="sp-drop" id="spDrop">
+									<div class="sp-item">📌 每日站会摘要<span class="grow"></span>＋</div>
+									<div class="sp-item">📌 周报草稿（投融资版）<span class="grow"></span>＋</div>
+									<div class="sp-item">📌 会话诊断 6 维<span class="grow"></span>＋</div>
+									<div class="sp-item" style="color:var(--accent-text)">＋ 保存当前输入为新 prompt</div>
+								</div>
+							</div>
+							<div class="composer-footer">
+								<div class="composer-left">
+									<button class="cc-btn" title="附件">📎</button>
+									<button class="cc-btn" title="语音听写">🎙</button>
+									<button class="cc-chip" onclick="toggleDrop('spDrop')" title="Saved prompts">📚</button>
+									<button class="cc-chip"><span class="sm-avatar">研</span>研发 Agent</button>
+									<button class="cc-chip"><span class="mono">deepseek-v4-pro</span></button>
+									<button class="cc-chip">thinking · high</button>
+									<button class="cc-chip" title="免审批模式">yolo ⭕</button>
+								</div>
+								<div class="composer-right">
+									<button class="context-ring" title="上下文 68%">
+										<svg width="30" height="30" viewBox="0 0 30 30"><circle cx="15" cy="15" r="11" fill="none" stroke="rgba(0,0,0,0.08)" stroke-width="3"/><circle cx="15" cy="15" r="11" fill="none" stroke="var(--warning)" stroke-width="3" stroke-linecap="round" stroke-dasharray="69.1 102.1"/></svg>
+										<span class="cr-val">68%</span>
+									</button>
+									<button class="send-btn">↑</button>
+								</div>
+							</div>
+						</div>
+						<div class="composer-hint"><kbd>Enter</kbd> 发送 · <kbd>/</kbd> 命令 · <kbd>⌘K</kbd> 新会话 · <kbd>Esc</kbd> 中止</div>
+					</div>
+				</div>
+			</div>
+		</section>
+
+		<!-- Spaces -->
+		<section class="panel-view" id="panel-agents">
+			<div class="panel-body" id="agList">
+				<div class="page-head-row">
+					<div><div class="page-title">Spaces</div><div class="page-sub">5 个 agent · 每个独立 agentDir 与会话</div></div>
+					<div class="grow"></div>
+					<div class="seg"><button class="on">全部</button><button>研发</button><button>运营</button></div>
+					<button class="hbtn primary">＋ 注册 Agent</button>
+				</div>
+				<div class="group-h">研发工作区</div>
+				<div class="ag-grid" style="margin-bottom:14px">
+					<div class="ag-card" onclick="showAgent()"><div class="ag-top"><div class="ag-ava">研<span class="dtb2">钉</span></div><div><div class="ag-name">研发 Agent <span class="tag coding">CODING</span></div><div class="ag-sub">deepseek-v4-pro · thinking high</div></div></div><div class="ag-stats"><span>3 技能</span><span>2 定时</span><span>86 条消息</span></div></div>
+					<div class="ag-card" onclick="showAgent()"><div class="ag-top"><div class="ag-ava">R</div><div><div class="ag-name">repro-agent <span class="tag coding">CODING</span></div><div class="ag-sub">kimi-k2.6 · thinking off</div></div></div><div class="ag-stats"><span>7 技能</span><span>0 定时</span><span>412 条消息</span></div></div>
+				</div>
+				<div class="group-h">运营工作区</div>
+				<div class="ag-grid">
+					<div class="ag-card" onclick="showAgent()"><div class="ag-top"><div class="ag-ava">H<span class="dtb2">钉</span></div><div><div class="ag-name">HR Agent <span class="tag worker">WORKER</span></div><div class="ag-sub">deepseek-v4-pro · dws 全套</div></div></div><div class="ag-stats"><span>12 技能</span><span>3 定时</span></div></div>
+					<div class="ag-card" onclick="showAgent()"><div class="ag-top"><div class="ag-ava">财<span class="dtb2">钉</span></div><div><div class="ag-name">财务 Agent <span class="tag worker">WORKER</span></div><div class="ag-sub">qwen3-max · 1 个任务失败</div></div></div><div class="ag-stats"><span>5 技能</span><span>2 定时</span></div></div>
+				</div>
+			</div>
+			<div class="detail-wrap" id="agDetail">
+				<div class="dt-head">
+					<div class="dt-title-row">
+						<div class="ag-ava" style="width:42px;height:42px;font-size:16px">研</div>
+						<div><div class="dt-name">研发 Agent <span class="tag coding">CODING</span></div>
+						<div class="dt-sub"><span class="mono">~/.omp/agents/research/</span><span class="mono">deepseek-v4-pro</span><span>本机 serve</span></div></div>
+						<div class="dt-actions"><button class="hbtn" onclick="hideAgent()">← 返回</button><button class="hbtn primary">进入会话</button></div>
+					</div>
+					<div class="dt-tabs">
+						<button class="dtab active" data-dt="ws">工作区</button><button class="dtab" data-dt="cfg">配置</button>
+						<button class="dtab" data-dt="skills">技能</button><button class="dtab" data-dt="cron">定时任务</button><button class="dtab" data-dt="bind">钉钉</button>
+					</div>
+				</div>
+				<div class="dt-body">
+					<div class="dpane active" id="dt-ws">
+						<div class="env-grid">
+							<div class="env-card"><div class="ek">Git 分支</div><div class="ev">multidevice-host M3 A1</div></div>
+							<div class="env-card"><div class="ek">工作目录</div><div class="ev" style="font-size:11px">…/.worktrees/multidevice-host</div></div>
+							<div class="env-card"><div class="ek">运行时</div><div class="ev">Bun 1.3.14 · py3.12</div></div>
+							<div class="env-card"><div class="ek">上下文</div><div class="ev">68% · 41k/60k</div></div>
+						</div>
+						<div class="cfg-grid" style="max-width:1000px">
+							<div><div class="group-h" style="margin-top:0">文件（改动 4）</div>
+								<div class="list-card">
+									<div class="lrow"><div class="lmain"><span class="mono" style="font-size:12px">ActivityFold.tsx</span></div><span class="gitb a">A</span></div>
+									<div class="lrow"><div class="lmain"><span class="mono" style="font-size:12px">Transcript.tsx</span></div><span class="gitb m">M</span></div>
+									<div class="lrow"><div class="lmain"><span class="mono" style="font-size:12px">ToolCard.tsx</span></div><span class="gitb m">M</span></div>
+								</div></div>
+							<div><div class="group-h" style="margin-top:0">最近会话</div>
+								<div class="list-card">
+									<div class="lrow"><div class="lmain"><div class="lname">multidevice-host 前端重构</div><div class="lsub">86 条 · 12 分钟前</div></div><span class="lstate" style="color:var(--warning)">streaming</span></div>
+									<div class="lrow"><div class="lmain"><div class="lname">natives AVX2 探针回归</div><div class="lsub">34 条 · 昨天</div></div><span class="lstate ok">✓</span></div>
+								</div></div>
+						</div>
+					</div>
+					<div class="dpane" id="dt-cfg">
+						<div class="cfg-grid">
+							<div class="cfg-card"><div class="cfg-h">模型与推理</div><div class="cfg-b">
+								<div class="cfg-row"><div class="cl">模型</div><select class="sel"><option>deepseek-v4-pro</option><option>kimi-k2.6</option></select></div>
+								<div class="cfg-row"><div class="cl">Thinking</div><select class="sel"><option>high</option><option>medium</option><option>off</option></select></div>
+								<div class="cfg-row"><div class="cl">辅助模型（压缩/总结）<div class="cd">廉价模型走 compaction</div></div><select class="sel"><option>deepseek-v4-flash</option></select></div>
+								<div class="cfg-row"><div class="cl">自动压缩 / 自动重试</div><div style="display:flex;gap:8px"><div class="switch on" onclick="this.classList.toggle('on')"></div><div class="switch on" onclick="this.classList.toggle('on')"></div></div></div>
+							</div></div>
+							<div class="cfg-card"><div class="cfg-h">工具</div><div class="cfg-b">
+								<div class="cfg-row"><div class="cl">read / write / edit</div><div class="switch on" onclick="this.classList.toggle('on')"></div></div>
+								<div class="cfg-row"><div class="cl">bash（危险命令走审批）</div><div class="switch on" onclick="this.classList.toggle('on')"></div></div>
+								<div class="cfg-row"><div class="cl">python</div><div class="switch on" onclick="this.classList.toggle('on')"></div></div>
+								<div class="cfg-row"><div class="cl">task（子 agent）</div><div class="switch on" onclick="this.classList.toggle('on')"></div></div>
+							</div></div>
+							<div class="cfg-card"><div class="cfg-h">身份</div><div class="cfg-b">
+								<div class="cfg-row"><div class="cl">Agent ID</div><span class="mono" style="font-size:12px;color:var(--muted)">research</span></div>
+								<div class="cfg-row"><div class="cl">agentDir</div><span class="mono" style="font-size:11.5px;color:var(--muted)">~/.omp/agents/research/</span></div>
+							</div></div>
+							<div class="cfg-card"><div class="cfg-h">用量</div><div class="cfg-b">
+								<div class="cfg-row"><div class="cl">本月 tokens / 费用</div><span class="mono" style="font-size:12px;color:var(--muted)">2.4M · ¥186</span></div>
+								<div class="cfg-row"><div class="cl">会话数</div><span class="mono" style="font-size:12px;color:var(--muted)">17</span></div>
+							</div></div>
+						</div>
+					</div>
+					<div class="dpane" id="dt-skills">
+						<div class="list-card" style="max-width:720px">
+							<div class="lrow"><div class="lmain"><div class="lname">repro-inject <span class="tag evolved">EVOLVED</span></div><div class="lsub">v3 · 钉钉链路复现注入</div></div><span class="mono" style="font-size:11px;color:var(--muted)">32 次</span><div class="switch on" onclick="this.classList.toggle('on')"></div></div>
+							<div class="lrow"><div class="lmain"><div class="lname">gateway-cron-ops <span class="tag evolved">EVOLVED</span></div><div class="lsub">v1 · 定时任务运维</div></div><span class="mono" style="font-size:11px;color:var(--muted)">11 次</span><div class="switch on" onclick="this.classList.toggle('on')"></div></div>
+						</div>
+					</div>
+					<div class="dpane" id="dt-cron">
+						<div class="list-card" style="max-width:720px">
+							<div class="lrow"><div class="lmain"><div class="lname">weekly-investor-update-draft</div><div class="lsub"><span class="mono">0 9 * * 1</span><span>邮件 + 钉钉 DM</span></div></div><span class="lstate fail">✗ 凭证过期</span><div class="row-acts"><button class="ract">▶</button><button class="ract">≡</button></div></div>
+						</div>
+					</div>
+					<div class="dpane" id="dt-bind">
+						<div class="cfg-grid">
+							<div class="cfg-card"><div class="cfg-h">绑定状态（只读）</div><div class="cfg-b">
+								<div class="cfg-row"><div class="cl">钉钉机器人<div class="cd">omp-gateway · hr 账号</div></div><span class="lstate ok">● connected</span></div>
+								<div class="cfg-row"><div class="cl">今日消息</div><span class="mono" style="font-size:12px;color:var(--muted)">37 in / 37 out</span></div>
+							</div></div>
+							<div class="cfg-card"><div class="cfg-h">配置入口</div><div class="cfg-b">
+								<div class="cfg-row"><div class="cl">AppKey / Secret<div class="cd">本地 gateway.json 直读</div></div><button class="hbtn">编辑</button></div>
+							</div></div>
+						</div>
+					</div>
+				</div>
+			</div>
+		</section>
+
+		<!-- Tasks（cron 全功能：preset + 预览 + 列表）-->
+		<section class="panel-view" id="panel-tasks">
+			<div class="panel-body">
+				<div class="page-head-row">
+					<div><div class="page-title">Tasks</div><div class="page-sub">7 个定时任务 · 2 个失败 · 完成提醒已开</div></div>
+					<div class="grow"></div>
+					<button class="hbtn primary">＋ 新建任务</button>
+				</div>
+				<div class="cron-form">
+					<div style="font-weight:600;font-size:13px;margin-bottom:4px">新建定时任务</div>
+					<label>名称</label><input value="daily-investor-brief" />
+					<label>调度 preset</label>
+					<select id="cronPreset" onchange="cronPreset()">
+						<option>每小时</option><option selected>每天</option><option>工作日</option><option>每周</option><option>每月</option><option>自定义</option>
+					</select>
+					<label>cron 表达式 <span class="cron-preview" id="cronPrev">0 9 * * *</span></label>
+					<input id="cronExpr" value="0 9 * * *" oninput="document.getElementById('cronPrev').textContent=this.value" />
+					<label>投递</label>
+					<select><option>钉钉群 · 运营日报</option><option>邮件 + 钉钉 DM</option><option>无（静默）</option></select>
+					<div style="margin-top:12px;display:flex;gap:8px"><button class="hbtn primary">创建</button><button class="hbtn">Dry-run 预览</button></div>
+				</div>
+				<div class="list-card" style="max-width:820px">
+					<div class="lrow"><div class="lmain"><div class="lname">daily-2000-calendar-push</div><div class="lsub"><span class="mono">0 20 * * *</span><span>HR Agent</span><span>钉钉群</span></div></div><span class="lstate ok">✓ 20:00 · 4 分钟</span><div class="row-acts"><button class="ract">▶</button><button class="ract">👁</button><button class="ract">≡</button><button class="ract">⏸</button></div></div>
+					<div class="lrow"><div class="lmain"><div class="lname">weekly-investor-update-draft</div><div class="lsub"><span class="mono">0 9 * * 1</span><span>财务 Agent</span><span>邮件 + DM</span></div></div><span class="lstate fail">✗ 08:30 · 凭证过期</span><div class="row-acts"><button class="ract">▶</button><button class="ract">👁</button><button class="ract">≡</button><button class="ract">⏸</button></div></div>
+					<div class="lrow"><div class="lmain"><div class="lname">self-evolution-skill-mining</div><div class="lsub"><span class="mono">0 3 * * *</span><span>本机</span><span>静默</span></div></div><span class="lstate ok">✓ 03:00</span><div class="row-acts"><button class="ract">▶</button><button class="ract">👁</button><button class="ract">≡</button><button class="ract">⏸</button></div></div>
+				</div>
+			</div>
+		</section>
+
+		<!-- Kanban -->
+		<section class="panel-view" id="panel-kanban">
+			<div class="panel-body">
+				<div class="page-head-row">
+					<div><div class="page-title">Kanban</div><div class="page-sub">任务队列 → agent claim → 执行回写</div></div>
+					<div class="grow"></div>
+					<div class="sb-search" style="width:180px">🔍<input placeholder="搜索任务…" /></div>
+					<button class="hbtn">Dry-run</button><button class="hbtn primary">Claim & 运行</button>
+				</div>
+				<div class="kb-board">
+					<div class="kb-col"><div class="kb-col-h"><span>Ready</span><span>4</span></div>
+						<div class="kb-card"><b>调研：竞品扫地机价格带</b><div class="kc-meta"><span>未分配</span><span>P2</span></div></div>
+						<div class="kb-card"><b>整理：供应商清单 v2</b><div class="kc-meta"><span>研发 Agent</span><span>P1</span></div></div>
+					</div>
+					<div class="kb-col"><div class="kb-col-h"><span>In Progress</span><span>1</span></div>
+						<div class="kb-card"><b>multidevice-host 前端重构</b><div class="kc-meta"><span>研发 Agent</span><span>P0</span><span>💬 3</span></div></div>
+					</div>
+					<div class="kb-col"><div class="kb-col-h"><span>Review</span><span>1</span></div>
+						<div class="kb-card"><b>周报汇总 prompt 优化</b><div class="kc-meta"><span>HR Agent</span><span>↳ 2</span></div></div>
+					</div>
+					<div class="kb-col"><div class="kb-col-h"><span>Done</span><span>2</span></div>
+						<div class="kb-card" style="opacity:.6"><b>AVX2 探针回归</b><div class="kc-meta"><span>研发 Agent</span></div></div>
+					</div>
+				</div>
+			</div>
+		</section>
+
+		<!-- Skills -->
+		<section class="panel-view" id="panel-skills">
+			<div class="panel-body">
+				<div class="page-head-row">
+					<div><div class="page-title">Skills</div><div class="page-sub">12 个 · 分类折叠 · 4 个 evolved</div></div>
+					<div class="grow"></div>
+					<div class="sb-search" style="width:200px">🔍<input placeholder="搜索技能…" /></div>
+					<button class="hbtn primary">＋ 新建</button>
+				</div>
+				<div class="list-card" style="max-width:760px">
+					<div class="group-h" style="margin:8px 16px 4px">钉钉运维（3）</div>
+					<div class="lrow"><div class="lmain"><div class="lname">repro-inject <span class="tag evolved">EVOLVED</span></div><div class="lsub">v3 · 复现注入 · 8-15 使用</div></div><span class="mono" style="font-size:11px;color:var(--muted)">32 次</span><div class="row-acts"><button class="ract">✎</button><button class="ract">📄</button></div><div class="switch on" onclick="this.classList.toggle('on')"></div></div>
+					<div class="lrow"><div class="lmain"><div class="lname">gateway-cron-ops <span class="tag evolved">EVOLVED</span></div><div class="lsub">v1 · 定时任务运维</div></div><span class="mono" style="font-size:11px;color:var(--muted)">11 次</span><div class="row-acts"><button class="ract">✎</button><button class="ract">📄</button></div><div class="switch on" onclick="this.classList.toggle('on')"></div></div>
+					<div class="lrow"><div class="lmain"><div class="lname">view-gateway-sessions</div><div class="lsub">v2 · 会话日志定位</div></div><span class="mono" style="font-size:11px;color:var(--muted)">9 次</span><div class="row-acts"><button class="ract">✎</button><button class="ract">📄</button></div><div class="switch on" onclick="this.classList.toggle('on')"></div></div>
+					<div class="group-h" style="margin:8px 16px 4px">诊断（2）</div>
+					<div class="lrow"><div class="lmain"><div class="lname">diagnosing-bugs</div><div class="lsub">v2 · 诊断循环</div></div><span class="mono" style="font-size:11px;color:var(--muted)">7 次</span><div class="row-acts"><button class="ract">✎</button><button class="ract">📄</button></div><div class="switch on" onclick="this.classList.toggle('on')"></div></div>
+					<div class="lrow"><div class="lmain"><div class="lname">session-diagnosis-orchestrator</div><div class="lsub">v2 · 6 维会话诊断</div></div><span class="mono" style="font-size:11px;color:var(--muted)">3 次</span><div class="row-acts"><button class="ract">✎</button><button class="ract">📄</button></div><div class="switch on" onclick="this.classList.toggle('on')"></div></div>
+					<div class="group-h" style="margin:8px 16px 4px">未启用（1）</div>
+					<div class="lrow"><div class="lmain"><div class="lname">browser-skill</div><div class="lsub">v5 · 需 bsk CLI</div></div><span class="mono" style="font-size:11px;color:var(--muted)">0 次</span><div class="row-acts"><button class="ract">✎</button><button class="ract">📄</button></div><div class="switch" onclick="this.classList.toggle('on')"></div></div>
+				</div>
+			</div>
+		</section>
+
+		<!-- Memory（五分区）-->
+		<section class="panel-view" id="panel-memory">
+			<div class="panel-body">
+				<div class="page-head-row"><div><div class="page-title">Memory</div><div class="page-sub">agent 记忆 · 用户画像 · 项目上下文</div></div><div class="grow"></div><button class="hbtn">编辑</button></div>
+				<div class="mem-tabs">
+					<button class="mem-tab on" onclick="memTab(this,'m1')">Agent 笔记</button>
+					<button class="mem-tab" onclick="memTab(this,'m2')">用户画像</button>
+					<button class="mem-tab" onclick="memTab(this,'m3')">项目上下文（只读）</button>
+				</div>
+				<div class="mem-content" id="m1">- 用户偏好短句回复，中英混用
+- 决策三步门：复述→方案→执行验证
+- 2026-08-15：确认 cron 任务走 gateway scheduler，serve 不承担连接器职责</div>
+				<div class="mem-content" id="m2" style="display:none">- 彭梦龙 · 米克原子 CEO
+- 技术背景：大疆/云鲸，感知+终端软件
+- pet peeve：任务不闭环、结果不稳定
+- 语言：中文为主，on the table talking</div>
+				<div class="mem-content" id="m3" style="display:none">AGENTS.md 摘要：Bun monorepo · tsgo/biome · 日志走 logger · prompt 全部静态 md……</div>
+			</div>
+		</section>
+
+		<!-- Profiles -->
+		<section class="panel-view" id="panel-profiles">
+			<div class="panel-body">
+				<div class="page-head-row"><div><div class="page-title">Profiles</div><div class="page-sub">每 profile 独立 agentDir · 模型 · 记忆</div></div><div class="grow"></div><button class="hbtn primary">＋ 新建</button></div>
+				<div class="list-card" style="max-width:680px">
+					<div class="lrow"><div class="ag-ava">研</div><div class="lmain"><div class="lname">research <span class="tag coding">默认</span></div><div class="lsub">deepseek-v4-pro · ~/.omp/agents/research</div></div><button class="hbtn">切换</button></div>
+					<div class="lrow"><div class="ag-ava">H</div><div class="lmain"><div class="lname">hr</div><div class="lsub">deepseek-v4-pro · ~/.omp/agents/hr · dws 全套</div></div><button class="hbtn">切换</button></div>
+					<div class="lrow"><div class="ag-ava">财</div><div class="lmain"><div class="lname">finance</div><div class="lsub">qwen3-max · ~/.omp/agents/fin</div></div><button class="hbtn">切换</button></div>
+				</div>
+			</div>
+		</section>
+
+		<!-- Todos -->
+		<section class="panel-view" id="panel-todos">
+			<div class="panel-body" style="max-width:640px;margin:0 auto;width:100%">
+				<div class="page-head-row"><div><div class="page-title">Todos</div><div class="page-sub">当前会话</div></div></div>
+				<div class="todo-phase"><div class="todo-h">Investigation · 2/2<div class="pbar"><i style="width:100%"></i></div></div>
+					<div class="todo-it done"><span class="cb">✓</span>读 Transcript.tsx 确认渲染路径</div>
+					<div class="todo-it done"><span class="cb">✓</span>对照 hermes Activity 规格定接口</div></div>
+				<div class="todo-phase"><div class="todo-h">Implementation · 1/3<div class="pbar"><i style="width:33%"></i></div></div>
+					<div class="todo-it done"><span class="cb">✓</span>ActivityFold 组件骨架</div>
+					<div class="todo-it"><span class="cb"></span>接入 session-store 工具流</div>
+					<div class="todo-it"><span class="cb"></span>展开态按 turn 持久化</div></div>
+			</div>
+		</section>
+
+		<!-- Insights -->
+		<section class="panel-view" id="panel-insights">
+			<div class="panel-body">
+				<div class="page-head-row">
+					<div><div class="page-title">Insights</div><div class="page-sub">30 天窗口</div></div>
+					<div class="grow"></div>
+					<div class="seg"><button>7 天</button><button class="on">30 天</button><button>90 天</button></div>
+					<button class="hbtn">⟳ 刷新</button>
+				</div>
+				<div class="ins-grid">
+					<div class="ins-card"><h4>会话</h4><div class="ins-num">17</div><div style="font-size:11.5px;color:var(--muted);margin-top:4px">本周 +4 · 平均 38 条/会话</div></div>
+					<div class="ins-card"><h4>Tokens</h4><div class="ins-num">2.4M</div><div style="font-size:11.5px;color:var(--muted);margin-top:4px">本月 · ¥186</div></div>
+					<div class="ins-card"><h4>技能调用</h4><div class="ins-num">63</div><div style="font-size:11.5px;color:var(--muted);margin-top:4px">repro-inject 32 · cron-ops 11</div></div>
+					<div class="ins-card"><h4>Self-evolution</h4><div class="ins-num">4</div><div style="font-size:11.5px;color:var(--muted);margin-top:4px">新技能候选 · 2 待审核</div></div>
+					<div class="ins-card" style="grid-column:1/-1"><h4>模型成本表</h4>
+						<table class="ins-tbl">
+							<tr><th>模型</th><th>Provider</th><th>in / out 每 M</th><th>建议</th></tr>
+							<tr><td class="mono">deepseek-v4-pro</td><td>narwal-plan</td><td>¥1.2 / ¥5</td><td>复杂任务主力</td></tr>
+							<tr><td class="mono">deepseek-v4-flash</td><td>narwal-plan</td><td>¥0.3 / ¥1.2</td><td>压缩/总结辅助模型</td></tr>
+							<tr><td class="mono">kimi-k2.6</td><td>narwal-plan</td><td>¥0.8 / ¥3</td><td>长上下文检索</td></tr>
+							<tr><td class="mono">claude-sonnet-4.6</td><td>anthropic</td><td>¥16 / ¥60</td><td>高价值编码任务</td></tr>
+						</table>
+					</div>
+				</div>
+			</div>
+		</section>
+
+		<!-- Logs -->
+		<section class="panel-view" id="panel-logs">
+			<div class="panel-body">
+				<div class="page-head-row"><div><div class="page-title">Logs</div><div class="page-sub">serve · 结构化 JSON · 实时</div></div><div class="grow"></div><div class="seg"><button class="on">全部</button><button>warn</button><button>error</button></div></div>
+				<div style="max-width:860px">
+					<div class="log-line"><span class="lt">14:32:01</span>info · ws connected · c8f2 · agents 5</div>
+					<div class="log-line"><span class="lt">14:32:18</span>info · prompt · research · 214 tok</div>
+					<div class="log-line warn"><span class="lt">14:33:40</span>warn · tool edit ENOENT · retry scheduled</div>
+					<div class="log-line"><span class="lt">14:34:02</span>info · approval requested · bash git push --force-with-lease</div>
+					<div class="log-line err"><span class="lt">14:36:11</span>error · cron weekly-investor · quota_exhausted</div>
+				</div>
+			</div>
+		</section>
+
+		<!-- Settings（分区 + 搜索）-->
+		<section class="panel-view" id="panel-settings">
+			<div class="set-wrap" style="flex:1">
+				<div class="set-nav">
+					<div class="set-search">🔍<input placeholder="搜索设置…" /></div>
+					<button class="set-nav-item on" data-st="conv">会话</button>
+					<button class="set-nav-item" data-st="pref">偏好</button>
+					<button class="set-nav-item" data-st="app">外观</button>
+					<button class="set-nav-item" data-st="prov">Providers</button>
+					<button class="set-nav-item" data-st="sys">系统</button>
+					<button class="set-nav-item" data-st="help">帮助 / 快捷键</button>
+				</div>
+				<div class="set-body">
+					<div class="set-pane active" id="st-conv">
+						<div class="cfg-card"><div class="cfg-h">会话行为</div><div class="cfg-b">
+							<div class="cfg-row"><div class="cl">草稿保留<div class="cd">切会话不丢输入</div></div><div class="switch on" onclick="this.classList.toggle('on')"></div></div>
+							<div class="cfg-row"><div class="cl">Activity 默认展开</div><div class="switch" onclick="this.classList.toggle('on')"></div></div>
+							<div class="cfg-row"><div class="cl">自动压缩阈值</div><select class="sel"><option>85%</option><option>70%</option></select></div>
+							<div class="cfg-row"><div class="cl">yolo 免审批<div class="cd">危险：跳过所有审批</div></div><div class="switch" onclick="this.classList.toggle('on')"></div></div>
+						</div></div>
+					</div>
+					<div class="set-pane" id="st-pref">
+						<div class="cfg-card"><div class="cfg-h">界面自定义</div><div class="cfg-b">
+							<div class="cfg-row"><div class="cl">侧栏 tab 显隐 / 排序<div class="cd">拖拽调整 11 个 panel</div></div><button class="hbtn">编辑</button></div>
+							<div class="cfg-row"><div class="cl">composer 控件排序</div><button class="hbtn">编辑</button></div>
+							<div class="cfg-row"><div class="cl">语言</div><select class="sel"><option>中文</option><option>English</option></select></div>
+						</div></div>
+					</div>
+					<div class="set-pane" id="st-app">
+						<div class="cfg-card"><div class="cfg-h">外观</div><div class="cfg-b">
+							<div class="cfg-row"><div class="cl">主题</div><div class="seg"><button class="on">浅色</button><button>跟随系统</button></div></div>
+							<div class="cfg-row"><div class="cl">字号</div><div class="seg"><button>小</button><button class="on">默认</button><button>大</button></div></div>
+							<div class="cfg-row"><div class="cl">对话字体<div class="cd">Georgia 衬线（hermes 式）</div></div><div class="switch on" onclick="this.classList.toggle('on')"></div></div>
+						</div></div>
+					</div>
+					<div class="set-pane" id="st-prov">
+						<div class="cfg-card" style="margin-bottom:12px"><div class="cfg-h">Provider 配额与费用</div><div class="cfg-b">
+							<div class="cfg-row"><div class="cl">narwal-plan<div class="cd">本月 ¥186 / 配额 ¥500</div></div><span class="lstate ok">37%</span></div>
+							<div class="cfg-row"><div class="cl">anthropic<div class="cd">本月 ¥42</div></div><span class="lstate ok">8%</span></div>
+						</div></div>
+						<div class="cfg-card"><div class="cfg-h">API Keys / OAuth</div><div class="cfg-b">
+							<div class="cfg-row"><div class="cl">narwal-plan</div><button class="hbtn">已连接 · 管理</button></div>
+							<div class="cfg-row"><div class="cl">anthropic</div><button class="hbtn">OAuth 连接</button></div>
+							<div class="cfg-row"><div class="cl">自托管<div class="cd">ollama :11434 / lmstudio :1234</div></div><button class="hbtn">添加</button></div>
+						</div></div>
+					</div>
+					<div class="set-pane" id="st-sys">
+						<div class="cfg-card"><div class="cfg-h">系统</div><div class="cfg-b">
+							<div class="cfg-row"><div class="cl">WebSocket<div class="cd mono" style="font-family:var(--font-mono)">ws://127.0.0.1:7891 · v1</div></div><span class="lstate ok">● 已连接</span></div>
+							<div class="cfg-row"><div class="cl">agent 更新检查</div><div class="switch on" onclick="this.classList.toggle('on')"></div></div>
+							<div class="cfg-row"><div class="cl">诊断数据导出</div><button class="hbtn">导出</button></div>
+						</div></div>
+					</div>
+					<div class="set-pane" id="st-help">
+						<div class="cfg-card"><div class="cfg-h">快捷键</div><div class="cfg-b">
+							<div class="cfg-row"><div class="cl">发送 / 换行 / 中止</div><span class="mono" style="font-size:11.5px;color:var(--muted)">Enter · Shift+Enter · Esc</span></div>
+							<div class="cfg-row"><div class="cl">新会话 / 命令</div><span class="mono" style="font-size:11.5px;color:var(--muted)">⌘K · /</span></div>
+							<div class="cfg-row"><div class="cl">切换会话搜索</div><span class="mono" style="font-size:11.5px;color:var(--muted)">⌘P</span></div>
+						</div></div>
+					</div>
+				</div>
+			</div>
+		</section>
+	</main>
+
+	<!-- 右栏：Files / Artifacts 双 tab（live 实测）-->
+	<aside class="rightpanel" id="rightpanel">
+		<div class="panel-header">工作区 · multidevice-host
+			<div class="ph-actions"><button class="ph-ic">⊕ 文件</button><button class="ph-ic">⬆ 上传</button><button class="ph-ic" id="rpClose">✕</button></div>
+		</div>
+		<div class="rp-tabs"><button class="rp-tab active" data-rt="files" onclick="rpTab(this)">Files</button><button class="rp-tab" data-rt="arts" onclick="rpTab(this)">Artifacts 2</button></div>
+		<div id="rt-files" style="display:flex;flex:1;flex-direction:column;min-height:0">
+			<div class="file-tree">
+				<div class="file-item"><span class="fname">📦 packages</span></div>
+				<div class="file-item i1"><span class="fname">web-app</span></div>
+				<div class="file-item i2"><span class="fname">ActivityFold.tsx</span><span class="gitb a">A</span></div>
+				<div class="file-item i2 active"><span class="fname">Transcript.tsx</span><span class="gitb m">M</span></div>
+				<div class="file-item i2"><span class="fname">ToolCard.tsx</span><span class="gitb m">M</span></div>
+				<div class="file-item i1"><span class="fname">pi-wire</span></div>
+			</div>
+			<div class="preview-area">
+				<div class="preview-path">Transcript.tsx · 95 行 · M</div>
+				<div class="preview-body">{msg.thinking && (&lt;ThinkingFold/&gt;)}<br>{msg.text && &lt;MarkdownLite/&gt;}<br>{msg.tools.map(t =&gt; &lt;ToolCard/&gt;)}<br>/* V8: 收进 ActivityFold */</div>
+			</div>
+		</div>
+		<div id="rt-arts" style="display:none;flex:1;overflow-y:auto">
+			<div class="artifact-item"><div style="height:80px;display:grid;place-items:center;background:var(--accent-bg);color:var(--accent-text);font-size:22px">📊</div><div class="a-h"><b>token-usage.csv</b><span>14:32</span></div></div>
+			<div class="artifact-item"><div style="height:80px;display:grid;place-items:center;background:rgba(2,136,168,0.1);color:var(--info);font-size:22px">🖼</div><div class="a-h"><b>arch-diagram.png</b><span>13:04</span></div></div>
+		</div>
+	</aside>
+</div>
+
+<div class="mobile-overlay" id="overlay"></div>
+
+<script>
+const TB={chat:['multidevice-host 前端重构','研发 Agent · deepseek-v4-pro · thinking high · ⎇ multidevice-host'],agents:['Spaces','5 个 agent'],tasks:['Tasks','7 个定时任务 · 2 失败'],kanban:['Kanban','任务队列 → agent 消化'],skills:['Skills','12 个 · 4 evolved'],memory:['Memory','五分区'],profiles:['Profiles','3 个 profile'],todos:['Todos','当前会话'],insights:['Insights','30 天窗口'],logs:['Logs','结构化日志'],settings:['Settings','设置中心']};
+document.querySelectorAll('.rail-btn[data-panel]').forEach(b=>b.addEventListener('click',()=>{
+	document.querySelectorAll('.rail-btn').forEach(x=>x.classList.remove('active'));b.classList.add('active');
+	document.querySelectorAll('.panel-view').forEach(p=>p.classList.remove('active'));
+	document.getElementById('panel-'+b.dataset.panel)?.classList.add('active');
+	document.getElementById('tbTitle').textContent=TB[b.dataset.panel][0];document.getElementById('tbMeta').textContent=TB[b.dataset.panel][1];closeMobile();
+}));
+function toggleDrop(id){const e=document.getElementById(id);e.classList.toggle('show')}
+// slash 面板：输入 / 触发
+const mi=document.getElementById('msgInput'),cp=document.getElementById('cmdPalette');
+mi.addEventListener('input',()=>{cp.classList.toggle('show',mi.value.startsWith('/'))});
+document.querySelectorAll('.cmd-item').forEach(i=>i.addEventListener('click',()=>{cp.classList.remove('show')}));
+document.addEventListener('click',e=>{if(!e.target.closest('.composer-wrap'))cp.classList.remove('show');if(!e.target.closest('.sp-drop')&&!e.target.closest('.cc-chip'))document.getElementById('spDrop').classList.remove('show')});
+// agents 详情
+function showAgent(){document.getElementById('agList').style.display='none';document.getElementById('agDetail').classList.add('show');document.getElementById('tbTitle').textContent='研发 Agent · 详情'}
+function hideAgent(){document.getElementById('agDetail').classList.remove('show');document.getElementById('agList').style.display='block';document.getElementById('tbTitle').textContent='Spaces'}
+document.querySelectorAll('.dtab').forEach(t=>t.addEventListener('click',()=>{document.querySelectorAll('.dtab').forEach(x=>x.classList.remove('active'));t.classList.add('active');document.querySelectorAll('.dpane').forEach(p=>p.classList.remove('active'));document.getElementById('dt-'+t.dataset.dt)?.classList.add('active')}));
+// memory tabs
+function memTab(btn,id){document.querySelectorAll('.mem-tab').forEach(x=>x.classList.remove('on'));btn.classList.add('on');['m1','m2','m3'].forEach(x=>document.getElementById(x).style.display=x===id?'':'none')}
+// settings nav
+document.querySelectorAll('.set-nav-item').forEach(n=>n.addEventListener('click',()=>{document.querySelectorAll('.set-nav-item').forEach(x=>x.classList.remove('on'));n.classList.add('on');document.querySelectorAll('.set-pane').forEach(p=>p.classList.remove('active'));document.getElementById('st-'+n.dataset.st)?.classList.add('active')}));
+// right panel tabs
+function rpTab(btn){document.querySelectorAll('.rp-tab').forEach(x=>x.classList.remove('active'));btn.classList.add('active');document.getElementById('rt-files').style.display=btn.dataset.rt==='files'?'flex':'none';document.getElementById('rt-arts').style.display=btn.dataset.rt==='arts'?'block':'none'}
+const rp=document.getElementById('rightpanel'),overlay=document.getElementById('overlay');
+document.getElementById('filesToggle').addEventListener('click',()=>{if(window.innerWidth<=900){rp.classList.add('mobile-open');overlay.classList.add('show')}else rp.classList.toggle('closed')});
+document.getElementById('rpClose').addEventListener('click',()=>{rp.classList.remove('mobile-open');rp.classList.add('closed');overlay.classList.remove('show')});
+const sidebar=document.getElementById('sidebar');
+document.getElementById('burger').addEventListener('click',()=>{sidebar.classList.add('mobile-open');overlay.classList.add('show')});
+function closeMobile(){sidebar.classList.remove('mobile-open');rp.classList.remove('mobile-open');overlay.classList.remove('show')}
+overlay.addEventListener('click',closeMobile);
+</script>
+</body>
+</html>

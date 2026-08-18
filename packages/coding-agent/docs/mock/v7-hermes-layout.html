@@ -1,0 +1,1009 @@
+<!doctype html>
+<!--
+页面名：V7 — hermes 布局参考版（rev2：全页面覆盖 + Agent 详情）
+功能层级位置：OMP 多端前端 > 全局布局重构提案
+设计依据：hermes-webui（rail panel IA / composer 中枢 / demand-driven 右栏 / Activity 折叠行 / 审批卡 / context 环）
+         + OMP V6 亮色 token（docs/mock/README.md 第八节）
+rev2 变更（用户反馈）：
+  1. 补 Agents panel：列表（工作区分节）+ Agent 详情（工作区显示页 + 配置页）
+  2. 现有 web-app 功能一个不丢：Home / 工作台 / Agents(含详情) / 记录 / 语音 / Todo / 模型 / 定时 / 技能 / 设置
+  3. CSS 主题、字体沿用 V6 亮色 token，未引入 hermes 视觉
+查看：浏览器直接打开。左上 rail 切 panel；Agents 列表点卡片进详情；详情内 tab 切换；
+     右上「文件」开合右栏；缩到 <900px 看移动端。
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>OMP 多端 · V7 mock rev2（hermes 布局参考）</title>
+<style>
+/* ── V6 亮色 token（沿用，未改）────────────────────────────── */
+:root {
+	--canvas: #f7f7f8;
+	--surface: #ffffff;
+	--surface-2: #f0f0f2;
+	--surface-3: #e6e6e9;
+	--hairline: rgba(24, 24, 27, 0.09);
+	--hairline-strong: rgba(24, 24, 27, 0.18);
+	--ink: #18181b;
+	--ink-muted: rgba(24, 24, 27, 0.66);
+	--ink-subtle: rgba(24, 24, 27, 0.5);
+	--ink-faint: rgba(24, 24, 27, 0.34);
+	--accent: #18181b;
+	--accent-hover: #3a3a3f;
+	--on-accent: #fafafa;
+	--accent-dim: rgba(24, 24, 27, 0.08);
+	--success: #189a5c;
+	--warning: #b97c1e;
+	--danger: #d64545;
+	--dingtalk: #3296fa;
+	--font: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+	--mono: "SF Mono", Menlo, Consolas, monospace;
+	--radius-sm: 6px;
+	--radius-md: 8px;
+	--radius-lg: 12px;
+	--ease: 130ms ease;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+body { font-family: var(--font); font-size: 14px; color: var(--ink); background: var(--canvas); -webkit-font-smoothing: antialiased; }
+button { font: inherit; color: inherit; background: none; border: none; cursor: pointer; }
+svg { display: block; }
+input, select { font: inherit; color: inherit; }
+
+/* ── 应用骨架 ─────────────────────────────────────────────── */
+.app { display: grid; grid-template-columns: 56px 280px 1fr auto; height: 100vh; overflow: hidden; }
+
+/* ── 1. rail（hermes panel 模型；tab 可隐藏/排序——localStorage，此处静态）── */
+.rail { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 12px 0; background: var(--surface); border-right: 1px solid var(--hairline); }
+.rail-btn { position: relative; width: 40px; height: 40px; border-radius: var(--radius-md); display: grid; place-items: center; color: var(--ink-subtle); transition: background var(--ease), color var(--ease); }
+.rail-btn:hover { background: var(--surface-3); color: var(--ink); }
+.rail-btn.active { background: var(--accent); color: var(--on-accent); }
+.rail-btn .rail-badge { position: absolute; top: 5px; right: 5px; min-width: 14px; height: 14px; padding: 0 3px; border-radius: 7px; background: var(--danger); color: #fff; font-size: 9.5px; font-weight: 600; line-height: 14px; text-align: center; }
+.rail-spacer { flex: 1; }
+.rail-brand { width: 32px; height: 32px; margin-bottom: 10px; border-radius: var(--radius-md); background: var(--accent); color: var(--on-accent); display: grid; place-items: center; font-weight: 700; font-size: 13px; }
+.rail-tip { position: absolute; left: 52px; top: 50%; transform: translateY(-50%); background: var(--ink); color: var(--on-accent); font-size: 11.5px; padding: 4px 8px; border-radius: var(--radius-sm); white-space: nowrap; opacity: 0; pointer-events: none; transition: opacity var(--ease); z-index: 60; }
+.rail-btn:hover .rail-tip { opacity: 1; }
+
+/* ── 2. 侧栏：agent 头 + 会话列表（pin/分组/搜索）──────────── */
+.sidebar { display: flex; flex-direction: column; background: var(--surface); border-right: 1px solid var(--hairline); overflow: hidden; }
+.sb-head { padding: 14px 14px 10px; }
+.sb-search { display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 10px; background: var(--surface-2); border: 1px solid var(--hairline); border-radius: var(--radius-md); color: var(--ink-faint); font-size: 13px; }
+.sb-search input { flex: 1; border: none; background: none; outline: none; font: inherit; color: var(--ink); }
+.sb-agent-card { margin: 0 14px 10px; padding: 10px 12px; border: 1px solid var(--hairline); border-radius: var(--radius-md); display: flex; align-items: center; gap: 10px; cursor: pointer; transition: border-color var(--ease); }
+.sb-agent-card:hover { border-color: var(--hairline-strong); }
+.sb-avatar { position: relative; width: 32px; height: 32px; border-radius: 8px; background: linear-gradient(135deg, #dce4f5, #c9d9f0); display: grid; place-items: center; font-size: 13px; font-weight: 600; color: #3d5a8a; flex-shrink: 0; }
+.sb-avatar.g2 { background: linear-gradient(135deg, #d8f0e2, #c2e6d2); color: #1e7a4c; }
+.sb-avatar.g3 { background: linear-gradient(135deg, #f5e8d8, #ecd5b8); color: #96601e; }
+.sb-avatar .dt { position: absolute; right: -4px; bottom: -4px; width: 15px; height: 15px; border-radius: 4px; background: var(--dingtalk); border: 2px solid var(--surface); display: grid; place-items: center; color: #fff; font-size: 8px; font-weight: 700; }
+.sb-agent-meta { min-width: 0; flex: 1; }
+.sb-agent-name { font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
+.tag { font-size: 9px; font-weight: 600; letter-spacing: 0.04em; padding: 1.5px 5px; border-radius: 5px; }
+.tag.coding { background: var(--accent-dim); color: var(--ink-muted); }
+.tag.worker { background: rgba(50, 150, 250, 0.12); color: #1a6fc4; }
+.tag.evolved { background: rgba(24, 154, 92, 0.1); color: var(--success); }
+.sb-agent-sub { font-size: 11px; color: var(--ink-faint); margin-top: 2px; }
+.sb-conn { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--ink-subtle); }
+.dot { width: 7px; height: 7px; border-radius: 50%; }
+.dot.on { background: var(--success); box-shadow: 0 0 0 3px rgba(24, 154, 92, 0.14); }
+.dot.busy { background: var(--warning); box-shadow: 0 0 0 3px rgba(185, 124, 30, 0.14); }
+.sb-list { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
+.sb-group-label { font-size: 10.5px; font-weight: 600; letter-spacing: 0.06em; color: var(--ink-faint); text-transform: uppercase; padding: 12px 8px 5px; display: flex; align-items: center; gap: 6px; }
+.sb-group-label .gdot { width: 8px; height: 8px; border-radius: 3px; }
+.sess { display: flex; align-items: center; gap: 8px; padding: 8px 10px; margin-bottom: 1px; border-radius: var(--radius-md); cursor: pointer; transition: background var(--ease); }
+.sess:hover { background: var(--surface-2); }
+.sess.active { background: var(--accent-dim); }
+.sess-title { flex: 1; min-width: 0; }
+.sess-name { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sess-meta { font-size: 11px; color: var(--ink-faint); margin-top: 1px; }
+.sess .ic { color: var(--ink-faint); opacity: 0; transition: opacity var(--ease); }
+.sess:hover .ic { opacity: 1; }
+.sess .ic.pinned { opacity: 1; color: var(--ink-subtle); }
+.sb-foot { padding: 10px 14px; border-top: 1px solid var(--hairline); display: flex; gap: 8px; align-items: center; font-size: 12px; color: var(--ink-subtle); }
+
+/* ── 3. 主区 ──────────────────────────────────────────────── */
+.main { display: flex; flex-direction: column; overflow: hidden; background: var(--canvas); }
+.topbar { height: 48px; flex-shrink: 0; display: flex; align-items: center; gap: 10px; padding: 0 16px; border-bottom: 1px solid var(--hairline); background: var(--surface); }
+.topbar .burger { display: none; }
+.crumb { font-size: 13px; color: var(--ink-subtle); display: flex; gap: 6px; align-items: center; min-width: 0; }
+.crumb b { color: var(--ink); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chip { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border: 1px solid var(--hairline); border-radius: var(--radius-md); background: var(--surface); font-size: 12px; color: var(--ink-muted); cursor: pointer; transition: border-color var(--ease); }
+.chip:hover { border-color: var(--hairline-strong); }
+.chip .mono { font-family: var(--mono); font-size: 11.5px; }
+.topbar .grow { flex: 1; }
+
+.panel-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+.panel { display: none; flex: 1; flex-direction: column; overflow: hidden; }
+.panel.active { display: flex; }
+
+/* ── 通用页面元素 ─────────────────────────────────────────── */
+.page { padding: 32px 36px; overflow-y: auto; flex: 1; }
+.page.narrow { max-width: 860px; margin: 0 auto; width: 100%; }
+.page-head { display: flex; align-items: flex-start; margin-bottom: 22px; gap: 12px; }
+.page-title { font-size: 24px; font-weight: 600; letter-spacing: -0.6px; }
+.page-sub { font-size: 13px; color: var(--ink-subtle); margin-top: 4px; }
+.page-head .grow { flex: 1; }
+.row-list { border: 1px solid var(--hairline); border-radius: var(--radius-lg); background: var(--surface); overflow: hidden; }
+.row { display: flex; align-items: center; gap: 14px; padding: 13px 18px; border-bottom: 1px solid var(--hairline); }
+.row:last-child { border-bottom: none; }
+.row:hover { background: var(--surface-2); }
+.row .r-main { flex: 1; min-width: 0; }
+.row .r-name { font-size: 13.5px; font-weight: 500; display: flex; gap: 8px; align-items: center; }
+.row .r-sub { font-size: 12px; color: var(--ink-subtle); margin-top: 3px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.row .r-sched { font-family: var(--mono); font-size: 12px; color: var(--ink-muted); }
+.r-last { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; white-space: nowrap; }
+.r-last.ok { color: var(--success); }
+.r-last.fail { color: var(--danger); }
+.row-actions { display: flex; gap: 4px; }
+.icon-btn { width: 28px; height: 28px; border-radius: var(--radius-sm); display: grid; place-items: center; color: var(--ink-faint); transition: all var(--ease); }
+.icon-btn:hover { background: var(--surface-3); color: var(--ink); }
+.btn { height: 32px; padding: 0 14px; border-radius: var(--radius-md); font-size: 12.5px; font-weight: 500; display: inline-flex; align-items: center; gap: 6px; transition: background var(--ease), border-color var(--ease); white-space: nowrap; }
+.btn.primary { background: var(--accent); color: var(--on-accent); }
+.btn.primary:hover { background: var(--accent-hover); }
+.btn.danger { background: var(--danger); color: #fff; }
+.btn.ghost { border: 1px solid var(--hairline-strong); background: var(--surface); color: var(--ink-muted); }
+.btn.ghost:hover { background: var(--surface-2); }
+.pill { font-size: 10.5px; font-weight: 500; padding: 1.5px 8px; border-radius: 999px; }
+.pill.run { background: rgba(185, 124, 30, 0.12); color: var(--warning); }
+.pill.done { background: rgba(24, 154, 92, 0.1); color: var(--success); }
+.pill.fail { background: rgba(214, 69, 69, 0.1); color: var(--danger); }
+.toggle { position: relative; width: 36px; height: 20px; border-radius: 10px; background: var(--surface-3); transition: background var(--ease); flex-shrink: 0; }
+.toggle::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,0.15); transition: transform var(--ease); }
+.toggle.on { background: var(--success); }
+.toggle.on::after { transform: translateX(16px); }
+.skill-usage { font-size: 11px; color: var(--ink-faint); font-family: var(--mono); }
+.gitb { font-family: var(--mono); font-size: 10px; font-weight: 600; width: 14px; text-align: center; border-radius: 3px; }
+.gitb.m { color: var(--warning); background: rgba(185, 124, 30, 0.12); }
+.gitb.a { color: var(--success); background: rgba(24, 154, 92, 0.1); }
+.cbtn { width: 32px; height: 32px; border-radius: var(--radius-md); display: grid; place-items: center; color: var(--ink-subtle); transition: background var(--ease), color var(--ease); }
+.cbtn:hover { background: var(--surface-2); color: var(--ink); }
+.cbtn.rec:hover { color: var(--danger); }
+
+/* ── Home panel ───────────────────────────────────────────── */
+.home { max-width: 680px; margin: 0 auto; padding: 48px 24px; }
+.home-greet { font-size: 28px; font-weight: 600; letter-spacing: -0.7px; }
+.home-sub { color: var(--ink-subtle); margin-top: 8px; font-size: 14px; }
+.sugg { margin-top: 28px; display: flex; flex-direction: column; gap: 8px; }
+.sugg-item { display: flex; align-items: center; gap: 10px; text-align: left; padding: 12px 14px; border: 1px solid var(--hairline); border-radius: var(--radius-md); background: var(--surface); font-size: 13.5px; color: var(--ink-muted); transition: border-color var(--ease), background var(--ease); }
+.sugg-item:hover { border-color: var(--hairline-strong); background: var(--surface-2); }
+.sugg-item .s-ic { color: var(--ink-faint); }
+.home-recent { margin-top: 36px; }
+.home-recent-h { font-size: 12px; font-weight: 600; letter-spacing: 0.05em; color: var(--ink-faint); text-transform: uppercase; margin-bottom: 10px; }
+.recent-row { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: var(--radius-md); cursor: pointer; }
+.recent-row:hover { background: var(--surface-2); }
+.recent-row .rr-meta { flex: 1; min-width: 0; }
+.recent-row .rr-name { font-size: 13px; font-weight: 500; }
+.recent-row .rr-sub { font-size: 11.5px; color: var(--ink-faint); margin-top: 1px; }
+
+/* ── Agents panel：列表 ───────────────────────────────────── */
+.seg { display: inline-flex; background: var(--surface-2); border: 1px solid var(--hairline); border-radius: var(--radius-md); padding: 2px; gap: 2px; }
+.seg button { height: 26px; padding: 0 12px; border-radius: var(--radius-sm); font-size: 12px; color: var(--ink-subtle); }
+.seg button.on { background: var(--surface); color: var(--ink); font-weight: 500; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
+.ag-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+.ag-card { border: 1px solid var(--hairline); border-radius: var(--radius-lg); background: var(--surface); padding: 16px; cursor: pointer; transition: border-color var(--ease); display: flex; flex-direction: column; gap: 10px; }
+.ag-card:hover { border-color: var(--hairline-strong); }
+.ag-card .ag-top { display: flex; gap: 10px; align-items: center; }
+.ag-card .ag-name { font-size: 14.5px; font-weight: 600; display: flex; gap: 7px; align-items: center; }
+.ag-card .ag-sub { font-size: 12px; color: var(--ink-subtle); }
+.ag-stats { display: flex; gap: 14px; font-size: 11.5px; color: var(--ink-faint); }
+.ag-stats b { color: var(--ink-muted); font-weight: 500; }
+.ag-status { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--ink-subtle); }
+
+/* ── Agent 详情 ───────────────────────────────────────────── */
+.detail { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
+.detail-head { padding: 28px 36px 0; }
+.detail-title-row { display: flex; align-items: center; gap: 14px; }
+.detail-avatar { position: relative; width: 52px; height: 52px; border-radius: 14px; background: linear-gradient(135deg, #dce4f5, #c9d9f0); display: grid; place-items: center; font-size: 21px; font-weight: 600; color: #3d5a8a; }
+.detail-avatar .dt { position: absolute; right: -5px; bottom: -5px; width: 22px; height: 22px; border-radius: 6px; background: var(--dingtalk); border: 3px solid var(--canvas); display: grid; place-items: center; color: #fff; font-size: 10px; font-weight: 700; }
+.detail-name { font-size: 26px; font-weight: 600; letter-spacing: -0.7px; display: flex; align-items: center; gap: 10px; }
+.detail-sub { font-size: 12.5px; color: var(--ink-subtle); margin-top: 5px; display: flex; gap: 14px; flex-wrap: wrap; align-items: center; }
+.detail-sub .mono { font-family: var(--mono); font-size: 11.5px; }
+.detail-actions { display: flex; gap: 8px; margin-left: auto; }
+.detail-tabs { display: flex; gap: 2px; padding: 20px 36px 0; border-bottom: 1px solid var(--hairline); }
+.dtab { font-size: 13px; color: var(--ink-subtle); padding: 8px 12px; border-bottom: 2px solid transparent; cursor: pointer; display: flex; align-items: center; gap: 6px; }
+.dtab.active { color: var(--ink); border-bottom-color: var(--ink); font-weight: 500; }
+.dtab .gitb { margin-left: 0; }
+.detail-body { flex: 1; overflow-y: auto; padding: 24px 36px; }
+.dpane { display: none; }
+.dpane.active { display: block; }
+.cfg-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; max-width: 980px; }
+.cfg-card { border: 1px solid var(--hairline); border-radius: var(--radius-lg); background: var(--surface); }
+.cfg-card .cfg-h { padding: 12px 16px; font-size: 12px; font-weight: 600; letter-spacing: 0.04em; color: var(--ink-muted); border-bottom: 1px solid var(--hairline); display: flex; align-items: center; gap: 8px; }
+.cfg-card .cfg-b { padding: 6px 16px; }
+.cfg-row { display: flex; align-items: center; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--hairline); }
+.cfg-row:last-child { border-bottom: none; }
+.cfg-row .c-label { flex: 1; min-width: 0; }
+.cfg-row .c-name { font-size: 13px; }
+.cfg-row .c-desc { font-size: 11.5px; color: var(--ink-faint); margin-top: 1px; }
+.select { height: 30px; padding: 0 10px; border: 1px solid var(--hairline-strong); border-radius: var(--radius-md); background: var(--surface); font-size: 12.5px; color: var(--ink-muted); min-width: 170px; }
+.env-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; margin-bottom: 18px; }
+.env-card { border: 1px solid var(--hairline); border-radius: var(--radius-md); background: var(--surface); padding: 12px 14px; }
+.env-card .e-k { font-size: 10.5px; font-weight: 600; letter-spacing: 0.05em; color: var(--ink-faint); text-transform: uppercase; }
+.env-card .e-v { font-size: 13px; margin-top: 4px; font-family: var(--mono); }
+.env-card .e-v.sm { font-size: 12px; }
+.ws-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; max-width: 1080px; }
+.ftree { overflow-y: auto; font-size: 12.5px; border: 1px solid var(--hairline); border-radius: var(--radius-lg); background: var(--surface); padding: 10px 12px; }
+.ft-row { display: flex; align-items: center; gap: 7px; padding: 4.5px 6px; border-radius: var(--radius-sm); cursor: pointer; color: var(--ink-muted); }
+.ft-row:hover { background: var(--surface-2); color: var(--ink); }
+.ft-row.active { background: var(--accent-dim); color: var(--ink); }
+.ft-row .fname { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ft-row .indent-1 { padding-left: 16px; }
+.ft-row .indent-2 { padding-left: 32px; }
+
+/* ── 记录 panel ───────────────────────────────────────────── */
+.filters { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+
+/* ── 语音 panel ───────────────────────────────────────────── */
+.voice-wrap { max-width: 640px; margin: 0 auto; padding: 40px 24px; text-align: center; }
+.mic-ball { width: 110px; height: 110px; margin: 24px auto 18px; border-radius: 50%; background: var(--accent); color: var(--on-accent); display: grid; place-items: center; position: relative; }
+.mic-ball::before, .mic-ball::after { content: ""; position: absolute; inset: -14px; border-radius: 50%; border: 1px solid var(--hairline-strong); opacity: 0; }
+.mic-ball.rec { background: var(--danger); }
+.mic-ball.rec::before { animation: ripple 1.6s ease-out infinite; }
+.mic-ball.rec::after { animation: ripple 1.6s ease-out 0.8s infinite; }
+@keyframes ripple { 0% { transform: scale(0.86); opacity: 0.7; } 100% { transform: scale(1.25); opacity: 0; } }
+.transcript-box { border: 1px solid var(--hairline); border-radius: var(--radius-lg); background: var(--surface); padding: 14px 16px; min-height: 64px; font-size: 14px; color: var(--ink-muted); text-align: left; margin: 16px 0; }
+.transcript-box.active { border-color: var(--hairline-strong); color: var(--ink); }
+
+/* ── Todo panel ───────────────────────────────────────────── */
+.todo-phase { margin-bottom: 18px; }
+.todo-phase-h { display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 600; margin-bottom: 8px; }
+.pbar { flex: 1; height: 2px; background: var(--surface-3); border-radius: 1px; overflow: hidden; }
+.pbar i { display: block; height: 100%; background: var(--success); }
+.todo-item { display: flex; align-items: center; gap: 10px; padding: 7px 0 7px 2px; font-size: 13px; }
+.todo-item .cb { width: 16px; height: 16px; border: 1.5px solid var(--hairline-strong); border-radius: 4px; flex-shrink: 0; display: grid; place-items: center; color: transparent; }
+.todo-item.done { color: var(--ink-faint); text-decoration: line-through; }
+.todo-item.done .cb { background: var(--success); border-color: var(--success); color: #fff; }
+
+/* ── 模型 panel ───────────────────────────────────────────── */
+.model-hero { border: 1.5px solid var(--ink); border-radius: var(--radius-lg); background: var(--surface); padding: 20px 22px; margin-bottom: 20px; display: flex; align-items: center; gap: 16px; max-width: 860px; }
+.model-hero .mh-name { font-size: 17px; font-weight: 600; }
+.model-hero .mh-sub { font-size: 12px; color: var(--ink-subtle); margin-top: 3px; display: flex; gap: 12px; }
+.prov-h { font-size: 12px; font-weight: 600; color: var(--ink-faint); letter-spacing: 0.05em; text-transform: uppercase; margin: 20px 0 8px; }
+
+/* ── 工作台 panel（chat）─────────────────────────────────── */
+.chat-scroll { flex: 1; overflow-y: auto; }
+.chat-inner { max-width: 720px; margin: 0 auto; padding: 28px 24px 16px; }
+.msg-user { align-self: flex-end; max-width: 78%; margin-left: auto; background: var(--surface-3); border-radius: var(--radius-lg); padding: 10px 14px; font-size: 14px; line-height: 1.55; margin-bottom: 20px; }
+.msg-assistant { margin-bottom: 24px; font-size: 14.5px; line-height: 1.65; }
+.msg-assistant p { margin-bottom: 10px; }
+.msg-assistant p:last-child { margin-bottom: 0; }
+.msg-assistant code { font-family: var(--mono); font-size: 12.5px; background: var(--surface-2); border: 1px solid var(--hairline); border-radius: 4px; padding: 1px 5px; }
+.activity { margin: 4px 0 14px; }
+.activity-head { display: flex; align-items: center; gap: 8px; padding: 6px 4px; font-size: 12px; color: var(--ink-subtle); cursor: pointer; user-select: none; border-radius: var(--radius-sm); }
+.activity-head:hover { color: var(--ink-muted); background: var(--surface-2); }
+.activity-head .caret { transition: transform var(--ease); color: var(--ink-faint); }
+.activity.open .activity-head .caret { transform: rotate(90deg); }
+.activity-body { display: none; padding: 4px 0 4px 12px; border-left: 1px solid var(--hairline); margin-left: 6px; }
+.activity.open .activity-body { display: block; }
+.activity.open .activity-head { background: none; }
+.act-think { font-size: 12px; color: var(--ink-subtle); line-height: 1.6; padding: 8px 10px; margin-bottom: 6px; background: var(--surface-2); border-radius: var(--radius-sm); }
+.act-think .lbl { font-size: 10.5px; font-weight: 600; letter-spacing: 0.05em; color: var(--ink-faint); display: block; margin-bottom: 4px; }
+.toolcard { border: 1px solid var(--hairline); border-radius: var(--radius-md); background: var(--surface); margin-bottom: 6px; overflow: hidden; }
+.toolcard .tc-head { display: flex; align-items: center; gap: 8px; padding: 7px 10px; cursor: pointer; }
+.toolcard .tc-name { font-family: var(--mono); font-size: 12px; font-weight: 500; }
+.toolcard .tc-target { font-size: 11.5px; color: var(--ink-faint); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.toolcard .tc-body { display: none; border-top: 1px solid var(--hairline); background: var(--surface-2); padding: 8px 10px; font-family: var(--mono); font-size: 11.5px; line-height: 1.55; color: var(--ink-muted); white-space: pre-wrap; }
+.toolcard.open .tc-body { display: block; }
+.spin { width: 11px; height: 11px; border-radius: 50%; border: 1.5px solid rgba(185, 124, 30, 0.25); border-top-color: var(--warning); animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.approval { border: 1px solid var(--danger); border-radius: var(--radius-md); background: rgba(214, 69, 69, 0.03); margin: 4px 0 18px; overflow: hidden; }
+.approval .ap-head { display: flex; align-items: center; gap: 8px; padding: 10px 14px; font-size: 13px; font-weight: 600; color: var(--danger); border-bottom: 1px solid rgba(214, 69, 69, 0.15); }
+.approval .ap-body { padding: 12px 14px; }
+.approval .ap-cmd { font-family: var(--mono); font-size: 12px; background: var(--surface); border: 1px solid var(--hairline); border-radius: var(--radius-sm); padding: 8px 10px; margin-bottom: 8px; }
+.approval .ap-keys { font-size: 11.5px; color: var(--ink-subtle); margin-bottom: 12px; }
+.approval .ap-keys code { font-family: var(--mono); background: var(--surface-2); padding: 1px 5px; border-radius: 4px; font-size: 11px; }
+.ap-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.compress-divider { display: flex; align-items: center; gap: 12px; margin: 18px 0; color: var(--ink-faint); font-size: 11.5px; user-select: none; }
+.compress-divider::before, .compress-divider::after { content: ""; flex: 1; height: 1px; background: var(--hairline); }
+.stream-caret { display: inline-block; width: 7px; height: 15px; margin-left: 2px; background: var(--accent); border-radius: 2px; vertical-align: text-bottom; animation: breathe 1s ease-in-out infinite; }
+@keyframes breathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+.composer-wrap { flex-shrink: 0; border-top: 1px solid var(--hairline); background: var(--surface); }
+.composer { max-width: 720px; margin: 0 auto; padding: 12px 24px 14px; }
+.composer-box { border: 1px solid var(--hairline-strong); border-radius: var(--radius-lg); background: var(--surface); box-shadow: 0 1px 3px rgba(24,24,27,0.04); transition: border-color var(--ease); }
+.composer-box:focus-within { border-color: var(--ink-muted); }
+.composer textarea { width: 100%; border: none; outline: none; resize: none; font: inherit; font-size: 14px; line-height: 1.55; padding: 12px 14px 6px; color: var(--ink); background: none; min-height: 44px; }
+.composer-bar { display: flex; align-items: center; gap: 6px; padding: 6px 8px 8px; }
+.composer-chip { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border-radius: var(--radius-md); font-size: 12px; color: var(--ink-muted); border: 1px solid transparent; cursor: pointer; transition: all var(--ease); }
+.composer-chip:hover { border-color: var(--hairline); background: var(--surface-2); }
+.composer-chip .mono { font-family: var(--mono); font-size: 11px; }
+.composer-chip .avatar-sm { width: 18px; height: 18px; border-radius: 5px; background: linear-gradient(135deg, #dce4f5, #c9d9f0); display: grid; place-items: center; font-size: 9px; font-weight: 700; color: #3d5a8a; }
+.composer-bar .grow { flex: 1; }
+.ctx-ring { position: relative; width: 34px; height: 34px; cursor: pointer; }
+.ctx-ring svg { transform: rotate(-90deg); }
+.ctx-ring .val { position: absolute; inset: 0; display: grid; place-items: center; font-size: 9px; font-weight: 600; color: var(--ink-muted); }
+.send-btn { width: 34px; height: 34px; border-radius: 50%; background: var(--accent); color: var(--on-accent); display: grid; place-items: center; transition: background var(--ease); }
+.send-btn:hover { background: var(--accent-hover); }
+.composer-hint { text-align: center; font-size: 10.5px; color: var(--ink-faint); margin-top: 8px; }
+.composer-hint kbd { font-family: var(--mono); font-size: 9.5px; border: 1px solid var(--hairline); border-radius: 3px; padding: 0 4px; background: var(--surface-2); }
+
+/* ── 右栏 ─────────────────────────────────────────────────── */
+.rightpanel { width: 320px; flex-shrink: 0; background: var(--surface); border-left: 1px solid var(--hairline); display: flex; flex-direction: column; overflow: hidden; }
+.rightpanel.closed { display: none; }
+.rp-head { display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 14px; border-bottom: 1px solid var(--hairline); font-size: 12.5px; font-weight: 600; }
+.rp-tabs { display: flex; gap: 2px; padding: 8px 14px 0; }
+.rp-tab { font-size: 12px; color: var(--ink-subtle); padding: 6px 10px; border-radius: var(--radius-sm) var(--radius-sm) 0 0; cursor: pointer; border-bottom: 2px solid transparent; }
+.rp-tab.active { color: var(--ink); border-bottom-color: var(--ink); }
+.ft-preview { border-top: 1px solid var(--hairline); height: 46%; display: flex; flex-direction: column; }
+.ft-preview .fp-head { display: flex; align-items: center; gap: 8px; padding: 8px 14px; font-family: var(--mono); font-size: 11.5px; border-bottom: 1px solid var(--hairline); color: var(--ink-muted); }
+.fp-body { flex: 1; overflow: auto; padding: 10px 14px; font-family: var(--mono); font-size: 11.5px; line-height: 1.7; color: var(--ink-muted); counter-reset: line; }
+.fp-body .ln { display: flex; gap: 12px; }
+.fp-body .ln::before { counter-increment: line; content: counter(line); color: var(--ink-faint); width: 18px; text-align: right; flex-shrink: 0; user-select: none; }
+.mobile-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.25); z-index: 40; }
+.mobile-overlay.show { display: block; }
+
+/* ── 移动端 ───────────────────────────────────────────────── */
+@media (max-width: 900px) {
+	.app { grid-template-columns: 1fr; }
+	.rail { display: none; }
+	.sidebar { position: fixed; left: 0; top: 0; bottom: 0; width: 290px; z-index: 50; transform: translateX(-100%); transition: transform 200ms ease; box-shadow: 0 8px 24px rgba(0,0,0,0.12); }
+	.sidebar.mobile-open { transform: translateX(0); }
+	.rightpanel { position: fixed; right: 0; top: 0; bottom: 0; width: min(340px, 88vw); z-index: 50; transform: translateX(100%); transition: transform 200ms ease; box-shadow: -8px 0 24px rgba(0,0,0,0.12); }
+	.rightpanel.mobile-open { transform: translateX(0); }
+	.rightpanel.closed { display: flex; }
+	.topbar .burger { display: grid; }
+	.chat-inner { padding: 18px 16px 12px; }
+	.msg-user { max-width: 88%; }
+	.composer { padding: 10px 12px 12px; }
+	.composer-bar { flex-wrap: wrap; row-gap: 4px; }
+	.page, .detail-head, .detail-tabs, .detail-body { padding-left: 16px; padding-right: 16px; }
+	.cfg-grid, .ws-cols { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body>
+
+<div class="app">
+
+	<!-- ═══ 1. rail：现有全部页面一个不丢 ═══ -->
+	<nav class="rail">
+		<div class="rail-brand">Ω</div>
+		<button class="rail-btn" data-panel="home" aria-label="Home">
+			<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7h-6v7H4a1 1 0 0 1-1-1z"/></svg>
+			<span class="rail-tip">Home</span>
+		</button>
+		<button class="rail-btn active" data-panel="chat" aria-label="工作台">
+			<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+			<span class="rail-tip">工作台</span>
+		</button>
+		<button class="rail-btn" data-panel="agents" aria-label="Agents">
+			<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="8" width="16" height="12" rx="2"/><path d="M12 8V4m-4 0h8M9 13h.01M15 13h.01"/></svg>
+			<span class="rail-tip">Agents</span>
+		</button>
+		<button class="rail-btn" data-panel="records" aria-label="会话记录">
+			<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
+			<span class="rail-tip">会话记录</span>
+		</button>
+		<button class="rail-btn" data-panel="tasks" aria-label="定时任务">
+			<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+			<span class="rail-badge">2</span>
+			<span class="rail-tip">定时任务 · 2 条失败</span>
+		</button>
+		<button class="rail-btn" data-panel="skills" aria-label="技能">
+			<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10 4.5 8.5 3 4 7.5 5.5 9M14 4.5 15.5 3 20 7.5 18.5 9M9.5 14.5 12 17l2.5-2.5L12 12z"/></svg>
+			<span class="rail-tip">技能</span>
+		</button>
+		<button class="rail-btn" data-panel="voice" aria-label="语音">
+			<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+			<span class="rail-tip">语音</span>
+		</button>
+		<button class="rail-btn" data-panel="todo" aria-label="Todo">
+			<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h3v3H4zM4 14h3v3H4zM10 8.5h10M10 15.5h10"/></svg>
+			<span class="rail-tip">Todo</span>
+		</button>
+		<button class="rail-btn" data-panel="models" aria-label="模型">
+			<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="7" width="10" height="10" rx="2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
+			<span class="rail-tip">模型</span>
+		</button>
+		<button class="rail-btn" data-panel="memory" aria-label="记忆">
+			<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a3 3 0 0 0-3 3 3 3 0 0 0-3 3 3 3 0 0 0-1 5.8A3 3 0 0 0 8 21a3 3 0 0 0 4-1 3 3 0 0 0 4 1 3 3 0 0 0 3-6.2A3 3 0 0 0 18 9a3 3 0 0 0-3-3 3 3 0 0 0-3-3z"/></svg>
+			<span class="rail-tip">记忆</span>
+		</button>
+		<div class="rail-spacer"></div>
+		<button class="rail-btn" data-panel="settings" aria-label="设置">
+			<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.6-2-3.4-2.4 1a7 7 0 0 0-2-1.2L14 3h-4l-.5 2.6a7 7 0 0 0-2 1.2l-2.4-1-2 3.4 2 1.6A7 7 0 0 0 5 12a7 7 0 0 0 .1 1.2l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 2 1.2L10 21h4l.5-2.6a7 7 0 0 0 2-1.2l2.4 1 2-3.4-2-1.6A7 7 0 0 0 19 12z"/></svg>
+			<span class="rail-tip">设置</span>
+		</button>
+	</nav>
+
+	<!-- ═══ 2. 侧栏 ═══ -->
+	<aside class="sidebar" id="sidebar">
+		<div class="sb-head">
+			<div class="sb-search">
+				<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+				<input placeholder="搜索会话 / 内容…" />
+			</div>
+		</div>
+		<div class="sb-agent-card">
+			<div class="sb-avatar">研<span class="dt">钉</span></div>
+			<div class="sb-agent-meta">
+				<div class="sb-agent-name">研发 Agent <span class="tag coding">CODING</span></div>
+				<div class="sb-agent-sub">deepseek-v4-pro · 3 技能 · 2 定时</div>
+			</div>
+		</div>
+		<div class="sb-list">
+			<div class="sb-group-label"><span class="gdot" style="background:#3296fa"></span>研发工作区</div>
+			<div class="sess active">
+				<svg class="ic pinned" width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M16 3v5.06c0 .53-.21 1.04-.59 1.41L12 13l-3.4-3.5A2 2 0 0 1 8 8.06V3z" opacity=".9"/><path d="M12 13l1.9 7.4a1 1 0 0 1-1.9.2L10 13z"/></svg>
+				<div class="sess-title">
+					<div class="sess-name">multidevice-host 前端重构</div>
+					<div class="sess-meta">12 分钟前 · 86 条消息</div>
+				</div>
+			</div>
+			<div class="sess"><div class="sess-title"><div class="sess-name">natives AVX2 探针回归</div><div class="sess-meta">昨天 · 34 条消息</div></div></div>
+			<div class="sess"><div class="sess-title"><div class="sess-name">gateway 00:20 消息丢失复盘</div><div class="sess-meta">8-14 · 已归档</div></div></div>
+			<div class="sb-group-label"><span class="gdot" style="background:#189a5c"></span>运营工作区</div>
+			<div class="sess"><div class="sess-title"><div class="sess-name">HR Agent · 周报汇总</div><div class="sess-meta">每天 09:00 · cron</div></div></div>
+			<div class="sess"><div class="sess-title"><div class="sess-name">财务 Agent · 月度费用拉取</div><div class="sess-meta">每周一 08:30 · cron</div></div></div>
+		</div>
+		<div class="sb-foot"><span class="dot on"></span> 已连接 · 5 agents 在线</div>
+	</aside>
+
+	<!-- ═══ 3. 主区 ═══ -->
+	<main class="main">
+		<header class="topbar">
+			<button class="cbtn burger" id="burger" aria-label="菜单">
+				<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+			</button>
+			<div class="crumb">研发 Agent <span>/</span> <b id="crumbTail">multidevice-host 前端重构</b></div>
+			<div class="grow"></div>
+			<button class="chip" id="filesToggle">
+				<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16V8l-6-4H4z"/><path d="M14 4v4h6"/></svg>
+				文件
+			</button>
+		</header>
+
+		<div class="panel-area">
+
+			<!-- ── Home ── -->
+			<section class="panel" id="panel-home">
+				<div class="home">
+					<div class="home-greet">下午好，梦龙</div>
+					<div class="home-sub">5 个 agent 在线 · 2 个定时任务需要处理</div>
+					<div class="sugg">
+						<button class="sugg-item"><span class="s-ic">⊞</span> 看一下 multidevice-host 昨天的会话记录</button>
+						<button class="sugg-item"><span class="s-ic">⊞</span> 处理两个失败的定时任务</button>
+						<button class="sugg-item"><span class="s-ic">⊞</span> 新会话：让研发 Agent 继续 Activity 折叠行改造</button>
+					</div>
+					<div class="home-recent">
+						<div class="home-recent-h">最近活跃</div>
+						<div class="recent-row"><div class="sb-avatar">研<span class="dt">钉</span></div><div class="rr-meta"><div class="rr-name">研发 Agent</div><div class="rr-sub">12 分钟前 · multidevice-host 前端重构</div></div><span class="pill run">streaming</span></div>
+						<div class="recent-row"><div class="sb-avatar g2">H</div><div class="rr-meta"><div class="rr-name">HR Agent</div><div class="rr-sub">今天 09:00 · 周报汇总 cron</div></div></div>
+						<div class="recent-row"><div class="sb-avatar g3">财</div><div class="rr-meta"><div class="rr-name">财务 Agent</div><div class="rr-sub">昨天 · 月度费用拉取</div></div></div>
+					</div>
+				</div>
+			</section>
+
+			<!-- ── 工作台 ── -->
+			<section class="panel active" id="panel-chat">
+				<div class="chat-scroll">
+					<div class="chat-inner">
+						<div class="msg-user">把工作台的转录区降噪改掉，参考 hermes 的 Activity 折叠行方案，工具卡不要一级一级全铺开</div>
+						<div class="msg-assistant">
+							<div class="activity" id="act1">
+								<div class="activity-head" onclick="toggleAct('act1')">
+									<svg class="caret" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+									Activity: 6 tools
+									<span class="pill fail" style="margin-left:4px">1 失败</span>
+								</div>
+								<div class="activity-body">
+									<div class="act-think"><span class="lbl">THINKING</span>用户要转录降噪。需要看 Transcript.tsx 现在的工具卡渲染路径，确认哪些是 mock 遗留的默认展开……</div>
+									<div class="toolcard open">
+										<div class="tc-head" onclick="this.parentElement.classList.toggle('open')">
+											<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16V8l-6-4H4z"/><path d="M14 4v4h6"/></svg>
+											<span class="tc-name">read</span><span class="tc-target">pages/workspace/Transcript.tsx</span><span class="pill done">完成</span>
+										</div>
+										<div class="tc-body">95 行 · 工具卡一级渲染，桌面默认展开（useState(!isMobile)）——确认降噪目标</div>
+									</div>
+									<div class="toolcard">
+										<div class="tc-head" onclick="this.parentElement.classList.toggle('open')">
+											<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+											<span class="tc-name">search</span><span class="tc-target">"Activity" · packages/web-app/src</span><span class="pill done">完成</span>
+										</div>
+										<div class="tc-body">无既有实现 · 需新增组件</div>
+									</div>
+									<div class="toolcard">
+										<div class="tc-head" onclick="this.parentElement.classList.toggle('open')">
+											<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="m4 17 6-6-6-6M12 19h8"/></svg>
+											<span class="tc-name">edit</span><span class="tc-target">components/ActivityFold.tsx (新建)</span><span class="pill fail">失败</span>
+										</div>
+										<div class="tc-body">ENOENT: 路径笔误 · retry 可重试该步</div>
+									</div>
+								</div>
+							</div>
+							<p>改完了。核心变化：每个 assistant turn 只保留一个 <code>Activity: N tools</code> 折叠行，thinking 和全部工具卡收进去；默认折叠，展开状态按 turn 记忆。失败的工具在折叠行上露出徽标，不用展开就能看到。</p>
+						</div>
+						<div class="approval">
+							<div class="ap-head">
+								<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 2 20h20z"/><path d="M12 9v5m0 3h.01"/></svg>
+								需要审批 · bash
+							</div>
+							<div class="ap-body">
+								<div class="ap-cmd">git push origin multidevice-host --force-with-lease</div>
+								<div class="ap-keys">匹配规则 <code>git push --force*</code> · 本次会话已放行 2 条</div>
+								<div class="ap-actions">
+									<button class="btn danger">拒绝</button>
+									<button class="btn ghost">本次放行</button>
+									<button class="btn ghost">本会话放行</button>
+									<button class="btn primary">总是放行</button>
+								</div>
+							</div>
+						</div>
+						<div class="compress-divider">Context auto-compressed · 41k → 12k tokens</div>
+						<div class="msg-assistant"><p>继续。下一步是把审批闸门的 wire 协议命令补进 pi-wire 的命令面草稿<span class="stream-caret"></span></p></div>
+					</div>
+				</div>
+				<div class="composer-wrap">
+					<div class="composer">
+						<div class="composer-box">
+							<textarea rows="1" placeholder="发消息，或 / 触发命令…"></textarea>
+							<div class="composer-bar">
+								<button class="composer-chip"><span class="avatar-sm">研</span>研发 Agent<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>
+								<button class="cbtn" aria-label="附件"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="m21 12-8.5 8.5a5 5 0 0 1-7-7L13 5.8a3.3 3.3 0 0 1 4.7 4.7l-7.6 7.6a1.7 1.7 0 0 1-2.4-2.4l7-7"/></svg></button>
+								<button class="cbtn rec" aria-label="语音"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button>
+								<button class="composer-chip"><span class="mono">deepseek-v4-pro</span><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>
+								<button class="composer-chip">thinking · high</button>
+								<div class="grow"></div>
+								<button class="ctx-ring" title="上下文占用 68% · 点击压缩">
+									<svg width="34" height="34" viewBox="0 0 34 34"><circle cx="17" cy="17" r="13" fill="none" stroke="var(--surface-3)" stroke-width="3.5"/><circle cx="17" cy="17" r="13" fill="none" stroke="var(--warning)" stroke-width="3.5" stroke-linecap="round" stroke-dasharray="81.7 120.7"/></svg>
+									<span class="val">68%</span>
+								</button>
+								<button class="send-btn" aria-label="发送"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5m-7 7 7-7 7 7"/></svg></button>
+							</div>
+						</div>
+						<div class="composer-hint"><kbd>Enter</kbd> 发送 · <kbd>Shift Enter</kbd> 换行 · <kbd>Esc</kbd> 中止 · <kbd>/</kbd> 命令</div>
+					</div>
+				</div>
+			</section>
+
+			<!-- ── Agents：列表（工作区分节）→ 详情（工作区 + 配置）── -->
+			<section class="panel" id="panel-agents">
+				<!-- 列表视图 -->
+				<div class="page ag-view" id="agList">
+					<div class="page-head">
+						<div>
+							<div class="page-title">Agents</div>
+							<div class="page-sub">5 个 agent · 研发工作区 3 个 / 运营工作区 2 个</div>
+						</div>
+						<div class="grow"></div>
+						<div class="seg">
+							<button class="on">全部</button><button>研发</button><button>运营</button>
+						</div>
+						<button class="btn primary"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>注册 Agent</button>
+					</div>
+					<div class="prov-h">研发工作区</div>
+					<div class="ag-grid" style="margin-bottom:22px">
+						<div class="ag-card" onclick="showAgentDetail('dev')">
+							<div class="ag-top">
+								<div class="sb-avatar">研<span class="dt">钉</span></div>
+								<div>
+									<div class="ag-name">研发 Agent <span class="tag coding">CODING</span></div>
+									<div class="ag-sub">deepseek-v4-pro · thinking high</div>
+								</div>
+							</div>
+							<div class="ag-stats"><span><b>3</b> 技能</span><span><b>2</b> 定时任务</span><span><b>86</b> 条消息（当前）</span></div>
+							<div class="ag-status"><span class="dot busy"></span>streaming · 12 分钟活跃</div>
+						</div>
+						<div class="ag-card" onclick="showAgentDetail('dev2')">
+							<div class="ag-top">
+								<div class="sb-avatar g2">R</div>
+								<div>
+									<div class="ag-name">repro-agent <span class="tag coding">CODING</span></div>
+									<div class="ag-sub">kimi-k2.6 · thinking off</div>
+								</div>
+							</div>
+							<div class="ag-stats"><span><b>7</b> 技能</span><span><b>0</b> 定时任务</span><span><b>412</b> 条消息</span></div>
+							<div class="ag-status"><span class="dot on"></span>idle · 昨天</div>
+						</div>
+					</div>
+					<div class="prov-h">运营工作区</div>
+					<div class="ag-grid">
+						<div class="ag-card" onclick="showAgentDetail('hr')">
+							<div class="ag-top">
+								<div class="sb-avatar g2">H<span class="dt">钉</span></div>
+								<div>
+									<div class="ag-name">HR Agent <span class="tag worker">WORKER</span></div>
+									<div class="ag-sub">deepseek-v4-pro · thinking off</div>
+								</div>
+							</div>
+							<div class="ag-stats"><span><b>12</b> 技能</span><span><b>3</b> 定时任务</span><span>dws 全套工具</span></div>
+							<div class="ag-status"><span class="dot on"></span>idle · 今天 09:00 cron</div>
+						</div>
+						<div class="ag-card" onclick="showAgentDetail('fin')">
+							<div class="ag-top">
+								<div class="sb-avatar g3">财<span class="dt">钉</span></div>
+								<div>
+									<div class="ag-name">财务 Agent <span class="tag worker">WORKER</span></div>
+									<div class="ag-sub">qwen3-max · thinking off</div>
+								</div>
+							</div>
+							<div class="ag-stats"><span><b>5</b> 技能</span><span><b>2</b> 定时任务</span><span>1 个失败</span></div>
+							<div class="ag-status"><span class="dot on"></span>idle · 昨天</div>
+						</div>
+					</div>
+				</div>
+
+				<!-- 详情视图：工作区显示 + 配置（反馈 #1）-->
+				<div class="detail" id="agDetail" style="display:none">
+					<div class="detail-head">
+						<div class="detail-title-row">
+							<div class="detail-avatar">研<span class="dt">钉</span></div>
+							<div>
+								<div class="detail-name">研发 Agent <span class="tag coding">CODING</span></div>
+								<div class="detail-sub">
+									<span class="mono">~/.omp/agents/research/</span>
+									<span>attach 于本机 serve</span>
+									<span class="mono">deepseek-v4-pro</span>
+								</div>
+							</div>
+							<div class="detail-actions">
+								<button class="btn ghost" onclick="hideAgentDetail()">返回列表</button>
+								<button class="btn primary">进入会话</button>
+							</div>
+						</div>
+						<div class="detail-tabs">
+							<button class="dtab active" data-dt="ws">工作区 <span class="gitb m">3</span></button>
+							<button class="dtab" data-dt="cfg">配置</button>
+							<button class="dtab" data-dt="skills">技能 <span class="pill done">3</span></button>
+							<button class="dtab" data-dt="cron">定时任务 <span class="gitb m">2</span></button>
+							<button class="dtab" data-dt="bind">钉钉绑定</button>
+						</div>
+					</div>
+					<div class="detail-body">
+
+						<!-- tab 1: 工作区显示（env 摘要 + 文件树 + 最近会话）-->
+						<div class="dpane active" id="dt-ws">
+							<div class="env-grid">
+								<div class="env-card"><div class="e-k">Git 分支</div><div class="e-v sm">multidevice-host <span class="gitb m">M3</span> <span class="gitb a">A1</span></div></div>
+								<div class="env-card"><div class="e-k">工作目录</div><div class="e-v sm">~/Desktop/Narwal/oh-my-pi/.worktrees/multidevice-host</div></div>
+								<div class="env-card"><div class="e-k">运行时</div><div class="e-v sm">Bun 1.3.14 · node 22 · python 3.12</div></div>
+								<div class="env-card"><div class="e-k">上下文</div><div class="e-v sm">68% · 41k / 60k tokens</div></div>
+							</div>
+							<div class="ws-cols">
+								<div>
+									<div class="prov-h" style="margin-top:0">文件（改动 4）</div>
+									<div class="ftree" style="max-height:300px">
+										<div class="ft-row"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h5l2 2h9v10H4z"/></svg><span class="fname">packages/web-app/src</span></div>
+										<div class="ft-row indent-1"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16V8l-6-4H4z"/><path d="M14 4v4h6"/></svg><span class="fname">ActivityFold.tsx</span><span class="gitb a">A</span></div>
+										<div class="ft-row indent-1 active"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16V8l-6-4H4z"/><path d="M14 4v4h6"/></svg><span class="fname">Transcript.tsx</span><span class="gitb m">M</span></div>
+										<div class="ft-row indent-1"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16V8l-6-4H4z"/><path d="M14 4v4h6"/></svg><span class="fname">ToolCard.tsx</span><span class="gitb m">M</span></div>
+										<div class="ft-row"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h5l2 2h9v10H4z"/></svg><span class="fname">packages/pi-wire/src</span></div>
+										<div class="ft-row indent-1"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16V8l-6-4H4z"/><path d="M14 4v4h6"/></svg><span class="fname">commands.ts</span><span class="gitb m">M</span></div>
+									</div>
+								</div>
+								<div>
+									<div class="prov-h" style="margin-top:0">最近会话</div>
+									<div class="row-list">
+										<div class="row"><div class="r-main"><div class="r-name">multidevice-host 前端重构</div><div class="r-sub">86 条消息 · 12 分钟前</div></div><span class="pill run">streaming</span></div>
+										<div class="row"><div class="r-main"><div class="r-name">natives AVX2 探针回归</div><div class="r-sub">34 条消息 · 昨天</div></div><span class="pill done">完成</span></div>
+										<div class="row"><div class="r-main"><div class="r-name">gateway 00:20 消息丢失复盘</div><div class="r-sub">52 条消息 · 8-14</div></div><span class="pill done">完成</span></div>
+									</div>
+								</div>
+							</div>
+						</div>
+
+						<!-- tab 2: 配置（模型/thinking/工具开关/行为开关）-->
+						<div class="dpane" id="dt-cfg">
+							<div class="cfg-grid">
+								<div class="cfg-card">
+									<div class="cfg-h">模型与推理</div>
+									<div class="cfg-b">
+										<div class="cfg-row"><div class="c-label"><div class="c-name">模型</div><div class="c-desc">provider / modelId</div></div><select class="select"><option>narwal-plan/deepseek-v4-pro</option><option>narwal-plan/deepseek-v4-flash</option><option>anthropic/claude-sonnet-4.6</option></select></div>
+										<div class="cfg-row"><div class="c-label"><div class="c-name">Thinking 级别</div><div class="c-desc">off / low / medium / high</div></div><select class="select"><option>high</option><option>medium</option><option>off</option></select></div>
+										<div class="cfg-row"><div class="c-label"><div class="c-name">自动压缩</div><div class="c-desc">接近上下文上限时自动 compact</div></div><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
+										<div class="cfg-row"><div class="c-label"><div class="c-name">失败自动重试</div><div class="c-desc">stream 中断时自动重试</div></div><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
+									</div>
+								</div>
+								<div class="cfg-card">
+									<div class="cfg-h">工具开关</div>
+									<div class="cfg-b">
+										<div class="cfg-row"><div class="c-label"><div class="c-name">read / write / edit</div></div><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
+										<div class="cfg-row"><div class="c-label"><div class="c-name">bash</div><div class="c-desc">危险命令走审批闸门</div></div><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
+										<div class="cfg-row"><div class="c-label"><div class="c-name">search / grep / find</div></div><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
+										<div class="cfg-row"><div class="c-label"><div class="c-name">python</div></div><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
+										<div class="cfg-row"><div class="c-label"><div class="c-name">lsp / ast 工具</div></div><div class="toggle" onclick="this.classList.toggle('on')"></div></div>
+										<div class="cfg-row"><div class="c-label"><div class="c-name">task（子 agent）</div></div><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
+									</div>
+								</div>
+								<div class="cfg-card">
+									<div class="cfg-h">身份</div>
+									<div class="cfg-b">
+										<div class="cfg-row"><div class="c-label"><div class="c-name">Agent ID</div><div class="c-desc">注册表主键</div></div><span class="mono" style="font-size:12px;color:var(--ink-muted)">research</span></div>
+										<div class="cfg-row"><div class="c-label"><div class="c-name">agentDir</div><div class="c-desc">会话与记忆存储位置</div></div><span class="mono" style="font-size:12px;color:var(--ink-muted)">~/.omp/agents/research/</span></div>
+										<div class="cfg-row"><div class="c-label"><div class="c-name">类型</div></div><span class="tag coding">CODING</span></div>
+										<div class="cfg-row"><div class="c-label"><div class="c-name">工作区归属</div></div><span>研发工作区</span></div>
+									</div>
+								</div>
+								<div class="cfg-card">
+									<div class="cfg-h">用量</div>
+									<div class="cfg-b">
+										<div class="cfg-row"><div class="c-label"><div class="c-name">本月 tokens</div></div><span class="mono" style="font-size:12px;color:var(--ink-muted)">2.4M</span></div>
+										<div class="cfg-row"><div class="c-label"><div class="c-name">本月费用</div></div><span class="mono" style="font-size:12px;color:var(--ink-muted)">¥186</span></div>
+										<div class="cfg-row"><div class="c-label"><div class="c-name">会话数</div></div><span class="mono" style="font-size:12px;color:var(--ink-muted)">17</span></div>
+									</div>
+								</div>
+							</div>
+						</div>
+
+						<!-- tab 3: 技能 -->
+						<div class="dpane" id="dt-skills">
+							<div class="row-list" style="max-width:860px">
+								<div class="row"><div class="r-main"><div class="r-name">repro-inject <span class="tag evolved">EVOLVED</span></div><div class="r-sub">v3 · 钉钉链路复现注入</div></div><span class="skill-usage">32 次</span><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
+								<div class="row"><div class="r-main"><div class="r-name">gateway-cron-ops <span class="tag evolved">EVOLVED</span></div><div class="r-sub">v1 · 定时任务运维</div></div><span class="skill-usage">11 次</span><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
+								<div class="row"><div class="r-main"><div class="r-name">diagnosing-bugs</div><div class="r-sub">v2 · 内置</div></div><span class="skill-usage">7 次</span><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
+							</div>
+						</div>
+
+						<!-- tab 4: 定时任务 -->
+						<div class="dpane" id="dt-cron">
+							<div class="row-list" style="max-width:860px">
+								<div class="row"><div class="r-main"><div class="r-name">weekly-investor-update-draft</div><div class="r-sub"><span class="r-sched">0 9 * * 1</span><span>投递：邮件 + 钉钉 DM</span></div></div><span class="r-last fail">✗ 08:30 · 凭证过期</span><div class="row-actions"><button class="icon-btn" title="立即运行"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></button><button class="icon-btn" title="日志"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16M4 10h16M4 15h10"/></svg></button></div></div>
+								<div class="row"><div class="r-main"><div class="r-name">self-evolution-skill-mining</div><div class="r-sub"><span class="r-sched">0 3 * * *</span><span>静默任务</span></div></div><span class="r-last ok">✓ 03:00</span><div class="row-actions"><button class="icon-btn" title="立即运行"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></button><button class="icon-btn" title="日志"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16M4 10h16M4 15h10"/></svg></button></div></div>
+							</div>
+						</div>
+
+						<!-- tab 5: 钉钉绑定（配置走本地 gateway.json，状态只读 —— 任务 H 决策）-->
+						<div class="dpane" id="dt-bind">
+							<div class="cfg-grid">
+								<div class="cfg-card">
+									<div class="cfg-h">绑定状态（只读）</div>
+									<div class="cfg-b">
+										<div class="cfg-row"><div class="c-label"><div class="c-name">钉钉机器人</div><div class="c-desc">omp-gateway · hr 账号</div></div><span class="r-last ok">● connected · 建立于 08:02</span></div>
+										<div class="cfg-row"><div class="c-label"><div class="c-name">投递通道</div></div><span>webhook + OAuth DM 兜底</span></div>
+										<div class="cfg-row"><div class="c-label"><div class="c-name">今日消息</div></div><span class="mono" style="font-size:12px;color:var(--ink-muted)">37 in / 37 out</span></div>
+									</div>
+								</div>
+								<div class="cfg-card">
+									<div class="cfg-h">配置入口</div>
+									<div class="cfg-b">
+										<div class="cfg-row"><div class="c-label"><div class="c-name">AppKey / Secret / 绑定关系</div><div class="c-desc">本地 gateway.json，Web 壳直接读写</div></div><button class="btn ghost">编辑配置</button></div>
+										<div class="cfg-row"><div class="c-label"><div class="c-name">gateway 管理</div><div class="c-desc">重启 / 日志 / 健康检查</div></div><button class="btn ghost">打开 gateway 面板</button></div>
+									</div>
+								</div>
+							</div>
+						</div>
+
+					</div>
+				</div>
+			</section>
+
+			<!-- ── 会话记录 ── -->
+			<section class="panel" id="panel-records">
+				<div class="page">
+					<div class="page-head">
+						<div><div class="page-title">会话记录</div><div class="page-sub">17 个会话 · 含 cron 任务运行</div></div>
+						<div class="grow"></div>
+						<button class="btn ghost">导出 JSONL</button>
+					</div>
+					<div class="filters">
+						<div class="seg"><button class="on">全部</button><button>已完成</button><button>已中止</button><button>出错</button></div>
+						<div class="seg"><button class="on">全部 Agent</button><button>研发</button><button>HR</button><button>财务</button></div>
+					</div>
+					<div class="row-list">
+						<div class="row"><div class="r-main"><div class="r-name">multidevice-host 前端重构</div><div class="r-sub"><span>研发 Agent</span><span>12 分钟前起</span><span>86 条消息</span></div></div><span class="pill run">进行中</span><div class="row-actions"><button class="icon-btn" title="回放"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></button></div></div>
+						<div class="row"><div class="r-main"><div class="r-name">HR Agent · 周报汇总</div><div class="r-sub"><span>HR Agent</span><span>今天 09:00 · cron</span><span>23 条消息</span></div></div><span class="pill done">已完成</span><div class="row-actions"><button class="icon-btn" title="回放"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></button></div></div>
+						<div class="row"><div class="r-main"><div class="r-name">weekly-investor-update-draft</div><div class="r-sub"><span>财务 Agent</span><span>今天 08:30 · cron</span><span>4 条消息</span></div></div><span class="pill fail">出错 · 凭证过期</span><div class="row-actions"><button class="icon-btn" title="回放"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></button></div></div>
+						<div class="row"><div class="r-main"><div class="r-name">natives AVX2 探针回归</div><div class="r-sub"><span>研发 Agent</span><span>昨天</span><span>34 条消息</span></div></div><span class="pill done">已完成</span><div class="row-actions"><button class="icon-btn" title="回放"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></button></div></div>
+					</div>
+				</div>
+			</section>
+
+			<!-- ── 定时任务 ── -->
+			<section class="panel" id="panel-tasks">
+				<div class="page">
+					<div class="page-head">
+						<div><div class="page-title">定时任务</div><div class="page-sub">7 个任务 · 2 个失败需要处理</div></div>
+						<div class="grow"></div>
+						<button class="btn primary"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>新建任务</button>
+					</div>
+					<div class="row-list">
+						<div class="row"><div class="r-main"><div class="r-name">daily-2000-calendar-push</div><div class="r-sub"><span class="r-sched">0 20 * * *</span><span>HR Agent</span><span>钉钉群 · 运营日报</span></div></div><span class="r-last ok">✓ 20:00 · 4 分钟</span><div class="row-actions"><button class="icon-btn" title="立即运行"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></button><button class="icon-btn" title="日志"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16M4 10h16M4 15h10"/></svg></button><button class="icon-btn" title="暂停"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="7" y="5" width="3.5" height="14" rx="1"/><rect x="13.5" y="5" width="3.5" height="14" rx="1"/></svg></button></div></div>
+						<div class="row"><div class="r-main"><div class="r-name">weekly-investor-update-draft</div><div class="r-sub"><span class="r-sched">0 9 * * 1</span><span>财务 Agent</span><span>邮件 + 钉钉 DM</span></div></div><span class="r-last fail">✗ 08:30 · 凭证过期</span><div class="row-actions"><button class="icon-btn" title="立即运行"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></button><button class="icon-btn" title="日志"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16M4 10h16M4 15h10"/></svg></button><button class="icon-btn" title="暂停"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="7" y="5" width="3.5" height="14" rx="1"/><rect x="13.5" y="5" width="3.5" height="14" rx="1"/></svg></button></div></div>
+						<div class="row"><div class="r-main"><div class="r-name">self-evolution-skill-mining</div><div class="r-sub"><span class="r-sched">0 3 * * *</span><span>本机</span><span>静默任务</span></div></div><span class="r-last ok">✓ 03:00 · 1 分钟</span><div class="row-actions"><button class="icon-btn" title="立即运行"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></button><button class="icon-btn" title="日志"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16M4 10h16M4 15h10"/></svg></button><button class="icon-btn" title="暂停"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="7" y="5" width="3.5" height="14" rx="1"/><rect x="13.5" y="5" width="3.5" height="14" rx="1"/></svg></button></div></div>
+					</div>
+				</div>
+			</section>
+
+			<!-- ── 技能 ── -->
+			<section class="panel" id="panel-skills">
+				<div class="page">
+					<div class="page-head">
+						<div><div class="page-title">技能</div><div class="page-sub">研发 Agent · 12 个 · 4 个来自 self-evolution 挖掘</div></div>
+						<div class="grow"></div>
+						<button class="btn ghost">搜索</button><button class="btn primary">新建技能</button>
+					</div>
+					<div class="row-list" style="max-width:860px">
+						<div class="row"><div class="r-main"><div class="r-name">repro-inject <span class="tag evolved">EVOLVED</span></div><div class="r-sub">v3 · 钉钉链路复现注入 · 8-15 使用</div></div><span class="skill-usage">32 次</span><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
+						<div class="row"><div class="r-main"><div class="r-name">gateway-cron-ops <span class="tag evolved">EVOLVED</span></div><div class="r-sub">v1 · 定时任务运维</div></div><span class="skill-usage">11 次</span><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
+						<div class="row"><div class="r-main"><div class="r-name">session-diagnosis-orchestrator</div><div class="r-sub">v2 · 内置 · 6 维诊断</div></div><span class="skill-usage">7 次</span><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
+						<div class="row"><div class="r-main"><div class="r-name">browser-skill</div><div class="r-sub">v5 · 内置 · 需 bsk CLI</div></div><span class="skill-usage">0 次</span><div class="toggle" onclick="this.classList.toggle('on')"></div></div>
+					</div>
+				</div>
+			</section>
+
+			<!-- ── 语音 ── -->
+			<section class="panel" id="panel-voice">
+				<div class="voice-wrap">
+					<div class="page-title" style="text-align:left">语音</div>
+					<div class="page-sub" style="text-align:left;margin-top:4px">录音 → 转文字 → 发送给当前 agent；完成时可朗读</div>
+					<button class="mic-ball" id="micBall" onclick="this.classList.toggle('rec')">
+						<svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+					</button>
+					<div class="transcript-box" id="vbx">点击录音球开始…</div>
+					<div class="cfg-card" style="text-align:left;max-width:520px;margin:0 auto">
+						<div class="cfg-h">播报偏好</div>
+						<div class="cfg-b">
+							<div class="cfg-row"><div class="c-label"><div class="c-name">完成时朗读</div></div><div class="toggle" onclick="this.classList.toggle('on')"></div></div>
+							<div class="cfg-row"><div class="c-label"><div class="c-name">语速 / 音色</div></div><select class="select"><option>1.0x · 晓晓</option><option>1.2x · 晓晓</option></select></div>
+							<div class="cfg-row"><div class="c-label"><div class="c-name">静默时段</div></div><span style="font-size:12.5px;color:var(--ink-muted)">22:00 – 08:00</span></div>
+						</div>
+					</div>
+				</div>
+			</section>
+
+			<!-- ── Todo ── -->
+			<section class="panel" id="panel-todo">
+				<div class="page narrow">
+					<div class="page-head"><div><div class="page-title">Todo</div><div class="page-sub">当前会话 · multidevice-host 前端重构</div></div></div>
+					<div class="todo-phase">
+						<div class="todo-phase-h">Investigation <span style="color:var(--ink-faint);font-weight:400">2/2</span><div class="pbar"><i style="width:100%"></i></div></div>
+						<div class="todo-item done"><span class="cb">✓</span>读 Transcript.tsx 确认渲染路径</div>
+						<div class="todo-item done"><span class="cb">✓</span>对照 hermes Activity 规格定接口</div>
+					</div>
+					<div class="todo-phase">
+						<div class="todo-phase-h">Implementation <span style="color:var(--ink-faint);font-weight:400">1/3</span><div class="pbar"><i style="width:33%"></i></div></div>
+						<div class="todo-item done"><span class="cb">✓</span>ActivityFold 组件骨架</div>
+						<div class="todo-item"><span class="cb"></span>接入 session-store 工具流</div>
+						<div class="todo-item"><span class="cb"></span>展开态按 turn 持久化</div>
+					</div>
+					<div class="todo-phase">
+						<div class="todo-phase-h">Verification <span style="color:var(--ink-faint);font-weight:400">0/1</span><div class="pbar"><i style="width:0%"></i></div></div>
+						<div class="todo-item"><span class="cb"></span>跑 web-app 浏览器冒烟</div>
+					</div>
+				</div>
+			</section>
+
+			<!-- ── 模型 ── -->
+			<section class="panel" id="panel-models">
+				<div class="page">
+					<div class="page-head"><div><div class="page-title">模型</div><div class="page-sub">get_available_models · 实时</div></div></div>
+					<div class="model-hero">
+						<div>
+							<div class="mh-name">deepseek-v4-pro <span class="tag coding" style="margin-left:6px">当前</span></div>
+							<div class="mh-sub"><span>narwal-plan</span><span>128K 上下文</span><span>thinking 支持</span><span>¥1.2 / M in</span></div>
+						</div>
+						<div class="grow" style="flex:1"></div>
+						<button class="btn ghost">切换 thinking</button>
+					</div>
+					<div class="prov-h">Narwal Plan</div>
+					<div class="row-list" style="max-width:860px">
+						<div class="row"><div class="r-main"><div class="r-name">deepseek-v4-flash</div><div class="r-sub"><span>64K</span><span>thinking</span><span>¥0.3 / M in</span></div></div><button class="btn ghost">使用</button></div>
+						<div class="row"><div class="r-main"><div class="r-name">kimi-k2.6</div><div class="r-sub"><span>200K</span><span>thinking</span><span>¥0.8 / M in</span></div></div><button class="btn ghost">使用</button></div>
+					</div>
+					<div class="prov-h">Anthropic</div>
+					<div class="row-list" style="max-width:860px">
+						<div class="row"><div class="r-main"><div class="r-name">claude-sonnet-4.6</div><div class="r-sub"><span>200K</span><span>thinking</span><span>¥16 / M in</span></div></div><button class="btn ghost">使用</button></div>
+					</div>
+				</div>
+			</section>
+
+			<!-- ── 设置 ── -->
+			<section class="panel" id="panel-settings">
+				<div class="page narrow">
+					<div class="page-head"><div><div class="page-title">设置</div></div></div>
+					<div class="cfg-card" style="margin-bottom:16px">
+						<div class="cfg-h">连接</div>
+						<div class="cfg-b">
+							<div class="cfg-row"><div class="c-label"><div class="c-name">WebSocket</div><div class="c-desc mono" style="font-family:var(--mono)">ws://127.0.0.1:7891 · 协议 v1</div></div><span class="r-last ok">● 已连接</span></div>
+							<div class="cfg-row"><div class="c-label"><div class="c-name">agents 在线</div></div><span>5</span></div>
+						</div>
+					</div>
+					<div class="cfg-card" style="margin-bottom:16px">
+						<div class="cfg-h">会话行为</div>
+						<div class="cfg-b">
+							<div class="cfg-row"><div class="c-label"><div class="c-name">草稿保留</div><div class="c-desc">切会话不丢输入框内容</div></div><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
+							<div class="cfg-row"><div class="c-label"><div class="c-name">工具卡默认展开（桌面）</div></div><div class="toggle" onclick="this.classList.toggle('on')"></div></div>
+						</div>
+					</div>
+					<div class="cfg-card">
+						<div class="cfg-h">外观</div>
+						<div class="cfg-b">
+							<div class="cfg-row"><div class="c-label"><div class="c-name">主题</div></div><select class="select"><option>浅色（当前）</option><option>跟随系统</option></select></div>
+							<div class="cfg-row"><div class="c-label"><div class="c-name">字号</div></div><div class="seg"><button>小</button><button class="on">默认</button><button>大</button></div></div>
+						</div>
+					</div>
+				</div>
+			</section>
+
+		</div>
+	</main>
+
+	<!-- ═══ 4. 右栏 ═══ -->
+	<aside class="rightpanel" id="rightpanel">
+		<div class="rp-head">
+			<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16V8l-6-4H4z"/><path d="M14 4v4h6"/></svg>
+			工作区
+			<div class="grow" style="flex:1"></div>
+			<span style="font-family:var(--mono);font-size:10.5px;color:var(--ink-faint)">multidevice-host</span>
+			<button class="icon-btn" id="rpClose" aria-label="关闭"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+		</div>
+		<div class="rp-tabs"><div class="rp-tab active">文件</div><div class="rp-tab">改动 <span class="gitb m" style="margin-left:2px">3</span></div></div>
+		<div class="ftree" style="flex:1">
+			<div class="ft-row"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h5l2 2h9v10H4z"/></svg><span class="fname">packages</span></div>
+			<div class="ft-row indent-1"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h5l2 2h9v10H4z"/></svg><span class="fname">web-app</span></div>
+			<div class="ft-row indent-2"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16V8l-6-4H4z"/><path d="M14 4v4h6"/></svg><span class="fname">ActivityFold.tsx</span><span class="gitb a">A</span></div>
+			<div class="ft-row indent-2 active"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16V8l-6-4H4z"/><path d="M14 4v4h6"/></svg><span class="fname">Transcript.tsx</span><span class="gitb m">M</span></div>
+			<div class="ft-row indent-2"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16V8l-6-4H4z"/><path d="M14 4v4h6"/></svg><span class="fname">ToolCard.tsx</span><span class="gitb m">M</span></div>
+			<div class="ft-row indent-1"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h5l2 2h9v10H4z"/></svg><span class="fname">pi-wire</span></div>
+			<div class="ft-row indent-2"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16V8l-6-4H4z"/><path d="M14 4v4h6"/></svg><span class="fname">commands.ts</span><span class="gitb m">M</span></div>
+		</div>
+		<div class="ft-preview">
+			<div class="fp-head">Transcript.tsx · 95 行</div>
+			<div class="fp-body">
+				<div class="ln">{msg.thinking &amp;&amp; (</div>
+				<div class="ln">	&lt;ThinkingFold … /&gt;</div>
+				<div class="ln">)}</div>
+				<div class="ln">{msg.text &amp;&amp; &lt;MarkdownLite … /&gt;}</div>
+				<div class="ln">{msg.tools.map(tool =&gt; (</div>
+				<div class="ln">	&lt;ToolCard key={tool.id} … /&gt;</div>
+				<div class="ln">))}</div>
+				<div class="ln">/* → V7：三块收进 ActivityFold */</div>
+			</div>
+		</div>
+	</aside>
+</div>
+
+<div class="mobile-overlay" id="overlay"></div>
+
+<script>
+// rail panel 切换
+document.querySelectorAll('.rail-btn[data-panel]').forEach(btn => {
+	btn.addEventListener('click', () => {
+		document.querySelectorAll('.rail-btn').forEach(b => b.classList.remove('active'));
+		btn.classList.add('active');
+		document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+		document.getElementById('panel-' + btn.dataset.panel)?.classList.add('active');
+		const names = { home: 'Home', chat: 'multidevice-host 前端重构', agents: 'Agents', records: '会话记录', tasks: '定时任务', skills: '技能', voice: '语音', todo: 'Todo', models: '模型', settings: '设置' };
+		document.getElementById('crumbTail').textContent = names[btn.dataset.panel] || '';
+		closeMobile();
+	});
+});
+function toggleAct(id) { document.getElementById(id).classList.toggle('open'); }
+// Agents 列表 ↔ 详情
+function showAgentDetail(id) {
+	document.getElementById('agList').style.display = 'none';
+	document.getElementById('agDetail').style.display = 'flex';
+	document.getElementById('crumbTail').textContent = '研发 Agent · 详情';
+}
+function hideAgentDetail() {
+	document.getElementById('agDetail').style.display = 'none';
+	document.getElementById('agList').style.display = 'block';
+	document.getElementById('crumbTail').textContent = 'Agents';
+}
+// 详情 tab
+document.querySelectorAll('.dtab').forEach(t => {
+	t.addEventListener('click', () => {
+		document.querySelectorAll('.dtab').forEach(x => x.classList.remove('active'));
+		t.classList.add('active');
+		document.querySelectorAll('.dpane').forEach(p => p.classList.remove('active'));
+		document.getElementById('dt-' + t.dataset.dt)?.classList.add('active');
+	});
+});
+// 右栏
+const rp = document.getElementById('rightpanel');
+document.getElementById('filesToggle').addEventListener('click', () => {
+	if (window.innerWidth <= 900) { rp.classList.add('mobile-open'); overlay.classList.add('show'); }
+	else { rp.classList.toggle('closed'); }
+});
+document.getElementById('rpClose').addEventListener('click', () => {
+	rp.classList.remove('mobile-open'); rp.classList.add('closed'); overlay.classList.remove('show');
+});
+// 移动端
+const sidebar = document.getElementById('sidebar');
+const overlay = document.getElementById('overlay');
+document.getElementById('burger').addEventListener('click', () => { sidebar.classList.add('mobile-open'); overlay.classList.add('show'); });
+function closeMobile() { sidebar.classList.remove('mobile-open'); rp.classList.remove('mobile-open'); overlay.classList.remove('show'); }
+overlay.addEventListener('click', closeMobile);
+</script>
+</body>
+</html>

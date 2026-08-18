@@ -43,6 +43,7 @@ packages/ai/test/.temp-images/
 !.omp/
 .omp/plugins/
 .omp/self-evolution/
+.omp/design-refs/
 .pi_config/
 .opencode/
 .worktrees/
@@ -73,3 +74,5 @@ packages/self-evolution/.omp
 # SQLite write-ahead-log sidecars (runtime state, not source)
 *.db-shm
 *.db-wal
+playwright-report/
+test-results/
