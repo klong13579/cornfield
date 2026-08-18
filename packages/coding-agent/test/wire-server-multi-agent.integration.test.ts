@@ -181,6 +181,50 @@ test("serve 多 Agent：注册表 + attach + switch + 隔离 + 心跳", async ()
 	}
 }, 60_000);
 
+test("serve default agent 根 = git 仓库根（从包目录启动也归位）", async () => {
+	const isolatedHome = await fs.mkdtemp(path.join(os.tmpdir(), "omp-serve-root-"));
+	const savedHome = process.env.HOME;
+	process.env.HOME = isolatedHome;
+
+	const repoRoot = new URL("../../..", import.meta.url).pathname.replace(/\/$/, "");
+	const cliPath = `${repoRoot}/packages/coding-agent/src/cli.ts`;
+	const port = 56000 + Math.floor(Math.random() * 8000);
+	// 在仓库子目录（包目录）里启动 serve——default agent 根应提升到 git 仓库根
+	const proc = Bun.spawn(["bun", cliPath, "serve", "--port", String(port), "--host", "127.0.0.1", "--no-extensions"], {
+		cwd: path.join(repoRoot, "packages", "coding-agent"),
+		stdout: "pipe",
+		stderr: "pipe",
+		env: { ...process.env, HOME: isolatedHome, PI_NO_TITLE: "1" },
+	});
+
+	try {
+		const url = await waitForServe(proc);
+		const conn = await WireConn.connect(url, "");
+		const helloPush = await conn.nextPush("server_snapshot");
+		const sessions = (
+			helloPush.event as unknown as {
+				sessions: Array<{ id: string; agentDir: string }>;
+			}
+		).sessions;
+		const def = sessions.find(s => s.id === "default");
+		expect(def?.agentDir).toBe(repoRoot);
+
+		// fs_list 根 = agentDir：应列出仓库级顶层，而非包目录的特征（packages/coding-agent/src）
+		const fsResp = await conn.request({ type: "fs_list", sessionId: "default" });
+		expect(fsResp.ok).toBe(true);
+		const entries = (fsResp.result as { entries: Array<{ name: string }> }).entries;
+		const names = entries.map(e => e.name);
+		expect(names).toContain("packages");
+		expect(names).not.toContain("src");
+		conn.close();
+	} finally {
+		proc.kill();
+		await proc.exited;
+		process.env.HOME = savedHome;
+		await fs.rm(isolatedHome, { recursive: true, force: true });
+	}
+}, 60_000);
+
 test("serve B1/B8：get_state env 环境摘要 + branch 命令（快照推送）", async () => {
 	const isolatedHome = await fs.mkdtemp(path.join(os.tmpdir(), "omp-serve-b1b8-"));
 	const savedHome = process.env.HOME;

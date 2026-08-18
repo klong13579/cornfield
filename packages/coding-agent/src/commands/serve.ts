@@ -11,7 +11,7 @@
  */
 
 import * as path from "node:path";
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger, setProjectDir } from "@oh-my-pi/pi-utils";
 import { Command, Flags } from "@oh-my-pi/pi-utils/cli";
 import type { PermissionRequestPush } from "@oh-my-pi/pi-wire";
 import { parseArgs } from "../cli/args";
@@ -25,6 +25,7 @@ import type { SessionFactory } from "../server/session-registry";
 import { startWireServer } from "../server/wire-server";
 import { SessionManager } from "../session/session-manager";
 import { SessionStore } from "../session/session-store";
+import { repo } from "../utils/git";
 
 export default class Serve extends Command {
 	static description = "Run omp as a multidevice host: share sessions with TUI/web/pc/mobile over WS";
@@ -46,6 +47,14 @@ export default class Serve extends Command {
 
 	async run(): Promise<void> {
 		const { flags } = await this.parse(Serve);
+		// default agent 根 = 启动目录的 git 仓库根（"当前项目"语义）。chdir 后
+		// Settings / sessionManager / default session / wire-server 的 process.cwd()
+		// 全部跟随，一处改动处处一致；非 git 目录回退启动目录（行为不变）。
+		const startupCwd = process.cwd();
+		const projectRoot = await resolveServeProjectRoot(startupCwd);
+		if (projectRoot !== startupCwd) {
+			setProjectDir(projectRoot);
+		}
 		const cwd = process.cwd();
 		const host: string = flags.host ?? "127.0.0.1";
 		const port: number = flags.port ?? 7891;
@@ -114,4 +123,13 @@ function buildLaunchArgv(flags: Record<string, unknown>): string[] {
 	for (const ext of (flags.extension as string[] | undefined) ?? []) argv.push("--extension", String(ext));
 	if (flags["no-extensions"]) argv.push("--no-extensions");
 	return argv;
+}
+
+/** 解析 serve 的 default agent 根：向上取 git 仓库根；非 git 目录/探测失败回退启动目录。 */
+async function resolveServeProjectRoot(start: string): Promise<string> {
+	try {
+		return (await repo.root(start)) ?? start;
+	} catch {
+		return start;
+	}
 }
