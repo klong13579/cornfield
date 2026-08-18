@@ -43,6 +43,7 @@ export function TasksView(): React.JSX.Element {
 	const [tasks, setTasks] = useState<TaskRowDto[]>([]);
 	const [logs, setLogs] = useState<CronLogEntryDto[]>([]);
 	const [error, setError] = useState<string | null>(null);
+	const [logTask, setLogTask] = useState<TaskRowDto | null>(null);
 
 	useEffect(() => {
 		if (!view.connected) return;
@@ -63,9 +64,17 @@ export function TasksView(): React.JSX.Element {
 				<h1 className="mb-7 text-[32px] font-semibold tracking-[-0.8px] text-ink">定时任务</h1>
 				<div className="space-y-8">
 					<CronFormCard />
-					<TaskListCard tasks={tasks} logs={logs} error={error} connected={view.connected} />
+					<TaskListCard
+						tasks={tasks}
+						logs={logs}
+						error={error}
+						connected={view.connected}
+						onShowLogs={setLogTask}
+					/>
 				</div>
 			</div>
+
+			{logTask && <TaskLogPanel task={logTask} onClose={() => setLogTask(null)} />}
 		</div>
 	);
 }
@@ -312,11 +321,13 @@ function TaskListCard({
 	logs,
 	error,
 	connected,
+	onShowLogs,
 }: {
 	tasks: TaskRowDto[];
 	logs: CronLogEntryDto[];
 	error: string | null;
 	connected: boolean;
+	onShowLogs: (task: TaskRowDto) => void;
 }): React.JSX.Element {
 	// 最近一次运行（按 ts 取各任务最新）
 	const lastRunByTask = useMemo(() => {
@@ -403,20 +414,148 @@ function TaskListCard({
 								})()}
 							</div>
 
-							{/* 运行/日志：B6 代理只读；写操作仍走 gateway 直连（未接） */}
-							<button
-								type="button"
-								disabled
-								title="立即运行/修改调度需 gateway 侧直连（当前为只读代理）"
-								aria-label={`${task.name} 运行操作`}
-								className="mt-0.5 shrink-0 cursor-not-allowed rounded-md border border-hairline bg-surface-2 px-2.5 py-1 text-[11.5px] text-ink-faint"
-							>
-								运行
-							</button>
+							<div className="mt-0.5 flex shrink-0 gap-1.5">
+								<button
+									type="button"
+									onClick={() => onShowLogs(task)}
+									aria-label={`${task.name} 查看日志`}
+									className="rounded-md border border-hairline bg-surface-2 px-2.5 py-1 text-[11.5px] text-ink-subtle transition-colors hover:border-hairline-strong hover:text-ink"
+								>
+									日志
+								</button>
+								{/* 运行/修改：B6 代理只读；写操作仍走 gateway 直连（未接） */}
+								<button
+									type="button"
+									disabled
+									title="立即运行/修改调度需 gateway 侧直连（当前为只读代理）"
+									aria-label={`${task.name} 运行操作`}
+									className="cursor-not-allowed rounded-md border border-hairline bg-surface-2 px-2.5 py-1 text-[11.5px] text-ink-faint"
+								>
+									运行
+								</button>
+							</div>
 						</div>
 					))}
 				</div>
 			)}
+		</div>
+	);
+}
+
+/** 任务日志弹层：get_cron_logs(taskId) 最近 30 条运行记录（只读，直读日志文件）。 */
+function TaskLogPanel({ task, onClose }: { task: TaskRowDto; onClose: () => void }): React.JSX.Element {
+	const store = useSessionStore();
+	const [entries, setEntries] = useState<CronLogEntryDto[] | null>(null);
+	const [error, setError] = useState<string | null>(null);
+	const [expanded, setExpanded] = useState<Set<string>>(new Set());
+
+	useEffect(() => {
+		let alive = true;
+		setEntries(null);
+		setError(null);
+		void store
+			.fetchCronLogs({ taskId: task.name, days: 7, limit: 30 })
+			.then(r => {
+				if (alive) setEntries(r.logs);
+			})
+			.catch(err => {
+				if (alive) setError(err instanceof Error ? err.message : String(err));
+			});
+		return () => {
+			alive = false;
+		};
+	}, [store, task.name]);
+
+	const toggleExpand = (id: string) => {
+		setExpanded(prev => {
+			const next = new Set(prev);
+			if (next.has(id)) next.delete(id);
+			else next.add(id);
+			return next;
+		});
+	};
+
+	return (
+		<div
+			className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 p-6"
+			role="dialog"
+			aria-modal="true"
+		>
+			<div className="mt-8 max-h-[80vh] w-full max-w-2xl overflow-hidden rounded-xl border border-hairline bg-surface shadow-2xl">
+				<div className="flex items-baseline justify-between border-b border-hairline px-5 py-3">
+					<div className="min-w-0">
+						<span className="text-[14px] font-semibold text-ink">{task.name}</span>
+						<span className="ml-2 font-mono text-[11px] text-ink-faint">运行日志 · 最近 7 天</span>
+					</div>
+					<button
+						type="button"
+						onClick={onClose}
+						aria-label="关闭日志"
+						className="rounded-md px-2 py-1 text-[12px] text-ink-subtle transition-colors hover:bg-surface-2 hover:text-ink"
+					>
+						关闭 ✕
+					</button>
+				</div>
+
+				<div className="max-h-[70vh] overflow-y-auto">
+					{error && <div className="px-5 py-8 text-center text-[12px] text-ink-faint">日志不可用：{error}</div>}
+					{!error && entries === null && (
+						<div className="px-5 py-8 text-center text-[12px] text-ink-faint">加载日志…</div>
+					)}
+					{!error && entries !== null && entries.length === 0 && (
+						<div className="px-5 py-8 text-center text-[12px] text-ink-faint">该任务近 7 天无运行记录</div>
+					)}
+					{entries?.map(entry => (
+						<div key={entry.id} className="border-b border-hairline px-5 py-2.5 last:border-b-0">
+							<div className="flex items-baseline gap-2.5">
+								<span
+									className={
+										entry.status === "success"
+											? "font-mono text-[10.5px] font-semibold text-success"
+											: entry.status === "failed" || entry.status === "fail"
+												? "font-mono text-[10.5px] font-semibold text-danger"
+												: "font-mono text-[10.5px] font-semibold text-ink-subtle"
+									}
+								>
+									{entry.status}
+								</span>
+								<span className="font-mono text-[11px] text-ink-subtle">{fmtRun(entry.ts)}</span>
+								{entry.durationMs !== null && (
+									<span className="font-mono text-[10.5px] text-ink-faint">
+										{(entry.durationMs / 1000).toFixed(1)}s
+									</span>
+								)}
+								{entry.exitCode !== null && (
+									<span className="font-mono text-[10.5px] text-ink-faint">exit {entry.exitCode}</span>
+								)}
+								<button
+									type="button"
+									onClick={() => toggleExpand(entry.id)}
+									disabled={!entry.output}
+									className="ml-auto rounded px-1.5 py-0.5 font-mono text-[10.5px] text-ink-faint transition-colors hover:bg-surface-2 hover:text-ink disabled:cursor-default disabled:hover:bg-transparent"
+								>
+									{entry.output ? (expanded.has(entry.id) ? "收起" : "展开") : "—"}
+								</button>
+							</div>
+							{(expanded.has(entry.id) || (entry.output?.length ?? 0) < 120) && entry.output && (
+								<div className="mt-1">
+									<pre className="max-h-56 overflow-auto rounded-md border border-hairline bg-surface-2 px-2.5 py-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-ink-subtle">
+										{entry.output}
+									</pre>
+									{entry.outputTruncated && (
+										<div className="mt-0.5 text-[10px] text-ink-faint">输出超过 2KB 已截断</div>
+									)}
+								</div>
+							)}
+							{(entry.output?.length ?? 0) >= 120 && !expanded.has(entry.id) && entry.output && (
+								<div className="mt-1 max-h-16 overflow-hidden font-mono text-[10.5px] text-ink-faint">
+									{entry.output.slice(0, 140)}…
+								</div>
+							)}
+						</div>
+					))}
+				</div>
+			</div>
 		</div>
 	);
 }

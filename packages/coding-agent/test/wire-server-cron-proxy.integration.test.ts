@@ -188,6 +188,42 @@ describe("P2-W3-1 — cron 只读代理（真机数据）", () => {
 		}
 	});
 
+	test("get_cron_logs：limit 截断 + output 2KB 截断不变量", async () => {
+		const { ws, frames } = await connect(url);
+		try {
+			const tasks = (await request(ws, frames, { type: "get_cron_tasks" })) as { tasks: CronTask[] };
+			const first = tasks.tasks[0];
+			expect(first).toBeDefined();
+
+			// limit=1 → 恰 1 条
+			const limited = (await request(ws, frames, {
+				type: "get_cron_logs",
+				taskId: first.name,
+				days: 7,
+				limit: 1,
+			})) as { logs: CronLog[] };
+			expect(limited.logs.length).toBeLessThanOrEqual(1);
+
+			// 全量抓取（cap 200）：output 长度 ≤ 2048；truncated 标记与长度一致
+			const full = (await request(ws, frames, {
+				type: "get_cron_logs",
+				taskId: first.name,
+				days: 7,
+				limit: 200,
+			})) as { logs: CronLog[] };
+			for (const log of full.logs) {
+				if (log.output !== undefined) {
+					expect(log.output.length).toBeLessThanOrEqual(2048);
+					if (log.outputTruncated) {
+						expect(log.output.length).toBe(2048);
+					}
+				}
+			}
+		} finally {
+			ws.close();
+		}
+	});
+
 	test("get_cron_logs：taskId 过滤只返回该任务日志；未知任务返回空", async () => {
 		const { ws, frames } = await connect(url);
 		try {
