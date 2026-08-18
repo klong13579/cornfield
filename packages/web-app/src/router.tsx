@@ -2,6 +2,7 @@ import {
 	BarChart3,
 	Bot,
 	Brain,
+	CalendarClock,
 	Clock,
 	Cpu,
 	House,
@@ -22,6 +23,7 @@ import { ModelsView } from "./pages/models/ModelsView";
 import { PlaybackView } from "./pages/records/PlaybackView";
 import { RecordsView } from "./pages/records/RecordsView";
 import { SettingsView } from "./pages/settings/SettingsView";
+import { TasksView } from "./pages/tasks/TasksView";
 import { TodoView } from "./pages/todo/TodoView";
 import { VoiceView } from "./pages/voice/VoiceView";
 import { WorkspaceView } from "./pages/workspace/WorkspaceView";
@@ -123,6 +125,17 @@ function registerAllPanels(): void {
 		order: 9,
 		path: "/memory",
 		mount: () => MemoryView,
+	});
+
+	// W3 D4：定时任务面板壳（cron 配置预览；数据等 B6 gateway cron 代理命令）。
+	registerPanel({
+		id: "tasks",
+		title: "定时任务",
+		icon: CalendarClock,
+		group: "primary",
+		order: 10,
+		path: "/tasks",
+		mount: () => TasksView,
 	});
 
 	registerPanel({
@@ -248,6 +261,16 @@ export const PAGE_META: PageMeta[] = [
 		protocol: ["get_memory"],
 	},
 	{
+		id: "tasks",
+		path: "/tasks",
+		name: "定时任务",
+		breadcrumb: "定时任务",
+		group: "primary",
+		order: 10,
+		icon: CalendarClock,
+		protocol: [],
+	},
+	{
 		id: "settings",
 		path: "/settings",
 		name: "设置",
@@ -280,6 +303,7 @@ export const router = createBrowserRouter([
 			{ path: "/models", element: <ModelsView /> },
 			{ path: "/insights", element: <InsightsView /> },
 			{ path: "/memory", element: <MemoryView /> },
+			{ path: "/tasks", element: <TasksView /> },
 			{ path: "/settings", element: <SettingsView /> },
 			// P5 移动端裁剪
 			{ path: "/m", element: <WorkspaceView compact /> },

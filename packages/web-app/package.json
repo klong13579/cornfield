@@ -17,6 +17,7 @@
 	"dependencies": {
 		"@oh-my-pi/pi-client": "catalog:",
 		"@oh-my-pi/pi-wire": "catalog:",
+		"croner": "10.0.1",
 		"lucide-react": "catalog:",
 		"react": "catalog:",
 		"react-dom": "catalog:",

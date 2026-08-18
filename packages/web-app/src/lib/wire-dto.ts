@@ -325,6 +325,27 @@ export interface MemoryProjectionDto {
 	};
 }
 
+// ── 定时任务列表（W3 D4 TasksPanel；数据层 B6 gateway cron 代理命令接入点）──
+
+/**
+ * 定时任务行（对齐 omp-gateway ScheduledTask 可见字段；B6 网关代理命令落地前列表渲染空态，
+ * 此 DTO 为预留接口——字段名以 gateway scheduler 为准）。
+ */
+export interface TaskRowDto {
+	id: string;
+	name: string;
+	description?: string;
+	/** cron / interval / once。 */
+	scheduleType: "cron" | "interval" | "once";
+	/** 5 字段 cron 表达式（scheduleType=cron 时）。 */
+	cron?: string;
+	/** 下次触发（毫秒）。 */
+	nextRunAt?: number;
+	lastRunAt?: number;
+	enabled: boolean;
+	accountId?: string;
+}
+
 /** 连接后返回（hello_ack 内容 + 环境摘要，Home 用）。 */
 export interface EnvironmentSummaryDto {
 	repos: string;
