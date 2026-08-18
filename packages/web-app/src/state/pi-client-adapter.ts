@@ -1,4 +1,4 @@
-import type { PiClientEventKind } from "@oh-my-pi/pi-client";
+import type { PiClientEventKind, PiWebSocketCtor } from "@oh-my-pi/pi-client";
 import { PiClient as WirePiClient } from "@oh-my-pi/pi-client";
 import type { WireCommand } from "@oh-my-pi/pi-wire";
 import type { FsEntryDto, GatewayStatusDto, PiClient } from "../lib/pi-client-api";
@@ -109,12 +109,13 @@ export class PiClientAdapter implements PiClient {
 	#listeners = new Set<(frame: WireServerEventDto) => void>();
 	#connListeners = new Set<(conn: ConnectionInfoDto) => void>();
 
-	constructor(config: ServeConnectionConfig = loadServeConfig()) {
+	constructor(config: ServeConnectionConfig = loadServeConfig(), webSocketCtor?: PiWebSocketCtor) {
 		this.#connection = { connected: false, wsUrl: config.wsUrl, protocolVersion: 1 };
 		this.#client = new WirePiClient({
 			url: toWsUrl(config),
 			token: config.token,
 			autoReconnect: true,
+			...(webSocketCtor ? { webSocketCtor } : {}),
 		});
 		this.#client.subscribe(event => this.#handleEvent(event));
 	}
@@ -529,6 +530,11 @@ export class PiClientAdapter implements PiClient {
 		if (raw.type === "progress") {
 			const progress = normalizeProgress(raw.event);
 			if (progress) this.#emit({ type: "progress", sessionId: this.#sessionId ?? "", event: progress });
+			return;
+		}
+
+		if (raw.type === "permission_request") {
+			this.#emit(raw as unknown as WireServerEventDto);
 			return;
 		}
 
