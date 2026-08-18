@@ -110,6 +110,8 @@ export interface PiClient {
 	fsList(sessionId: string, path?: string): Promise<{ entries: FsEntryDto[] }>;
 	/** 读 agent workspace 文件（fs_read；>128KB 截断并标记 truncated）。 */
 	fsRead(sessionId: string, path: string): Promise<{ text: string; truncated: boolean }>;
+	/** 读 agent workspace 图片文件（fs_read_image；serve 返 base64 dataUrl，W3 待实现）。 */
+	fsReadImage(sessionId: string, path: string): Promise<{ dataUrl: string }>;
 	/** 本机 gateway 运行状态（gateway_status；未运行/文件缺失抛错）。 */
 	gatewayStatus(): Promise<GatewayStatusDto>;
 

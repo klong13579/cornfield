@@ -344,6 +344,16 @@ export class PiClientAdapter implements PiClient {
 		return { text: result.text ?? "", truncated: result.truncated === true };
 	}
 
+	/** 读 agent workspace 图片文件（fs_read_image；serve 返 base64 dataUrl）。 */
+	async fsReadImage(sessionId: string, path: string): Promise<{ dataUrl: string }> {
+		const result = await this.#req<{ dataUrl?: string | null }>({
+			type: "fs_read_image",
+			sessionId,
+			path,
+		} as never);
+		return { dataUrl: result.dataUrl ?? "" };
+	}
+
 	/** 本机 gateway 运行状态（gateway_status；serve 转发 gateway.status.json）。 */
 	async gatewayStatus(): Promise<GatewayStatusDto> {
 		return this.#req<GatewayStatusDto>({ type: "gateway_status" } as never);

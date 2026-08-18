@@ -356,6 +356,11 @@ class SessionStore {
 		return this.#client.fsRead(sessionId, path);
 	}
 
+	/** 读 agent workspace 图片（fs_read_image，代理到 pi-client；serve 待实现）。 */
+	fsReadImage(sessionId: string, path: string): Promise<{ dataUrl: string }> {
+		return this.#client.fsReadImage(sessionId, path);
+	}
+
 	/** 本机 gateway 运行状态（gateway_status，代理到 pi-client）。 */
 	gatewayStatus(): Promise<GatewayStatusDto> {
 		return this.#client.gatewayStatus();

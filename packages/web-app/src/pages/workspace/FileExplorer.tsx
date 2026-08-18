@@ -27,6 +27,12 @@ function fmtSize(n: number): string {
 	return String(n);
 }
 
+type SelectedFile =
+	| { path: string; kind: "text"; text: string; truncated: boolean }
+	| { path: string; kind: "image"; dataUrl: string };
+
+const IMAGE_EXT = /\.(png|jpe?g|gif|webp)$/i;
+
 export function FileExplorer({
 	agentId,
 	variant = "wide",
@@ -37,7 +43,7 @@ export function FileExplorer({
 	const store = useSessionStore();
 	const [root, setRoot] = useState<FsTreeNode | null>(null);
 	const [error, setError] = useState<string | null>(null);
-	const [selected, setSelected] = useState<{ path: string; text: string; truncated: boolean } | null>(null);
+	const [selected, setSelected] = useState<SelectedFile | null>(null);
 
 	const loadDir = async (node: FsTreeNode): Promise<void> => {
 		try {
@@ -52,8 +58,13 @@ export function FileExplorer({
 
 	const readFile = async (node: FsTreeNode): Promise<void> => {
 		try {
-			const result = await store.fsRead(agentId, node.path);
-			setSelected({ path: node.path, text: result.text, truncated: result.truncated });
+			if (IMAGE_EXT.test(node.path)) {
+				const { dataUrl } = await store.fsReadImage(agentId, node.path);
+				setSelected({ path: node.path, kind: "image", dataUrl });
+			} else {
+				const result = await store.fsRead(agentId, node.path);
+				setSelected({ path: node.path, kind: "text", text: result.text, truncated: result.truncated });
+			}
 			setError(null);
 		} catch (err) {
 			setError(err instanceof Error ? err.message : String(err));
@@ -124,11 +135,23 @@ export function FileExplorer({
 				<>
 					<div className="mb-2 flex shrink-0 items-center gap-2">
 						<span className="truncate font-mono text-[12px] text-ink">{selected.path}</span>
-						{selected.truncated && <span className="badge fail">截断（{FS_MAX_READ_HINT}）</span>}
+						{selected.kind === "text" && selected.truncated && (
+							<span className="badge fail">截断（{FS_MAX_READ_HINT}）</span>
+						)}
 					</div>
-					<pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap text-[12px] leading-relaxed text-ink-muted">
-						{selected.text}
-					</pre>
+					{selected.kind === "image" ? (
+						<div className="min-h-0 flex-1 overflow-auto">
+							<img
+								src={selected.dataUrl}
+								alt={selected.path}
+								className="block max-w-full rounded-md border border-hairline"
+							/>
+						</div>
+					) : (
+						<pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap text-[12px] leading-relaxed text-ink-muted">
+							{selected.text}
+						</pre>
+					)}
 				</>
 			) : (
 				<div className="py-10 text-center text-[12px] text-ink-faint">点击左侧目录展开，点文件查看内容</div>
