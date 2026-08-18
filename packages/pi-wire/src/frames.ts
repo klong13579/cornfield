@@ -196,11 +196,35 @@ export type WireServerEvent<TSnapshot = unknown, TEvent = unknown> =
 	| HostToolCancelPush
 	| HostToolsChangedPush;
 
+/**
+ * 协议批 B-4：wire response 错误码枚举（hermes 分类学 12 码）。
+ * 向后兼容：error 字段仍接受 string（旧调用方/旧 serve），新调用方优先结构化错误。
+ */
+export type WireErrorCode =
+	| "rate_limit"
+	| "quota_exhausted"
+	| "compression_exhausted"
+	| "model_not_found"
+	| "interrupted"
+	| "silent_failure"
+	| "tool_limit_reached"
+	| "not_implemented"
+	| "unauthorized"
+	| "timeout"
+	| "cancelled"
+	| "internal";
+
+/** 结构化错误载荷（ok:false 时 error 的半形）。 */
+export interface WireErrorPayload {
+	code: WireErrorCode;
+	message: string;
+}
+
 export type ServerFrame<TSnapshot = unknown, TEvent = unknown> =
 	| { type: "hello_ack"; connectionId: string; protocolVersion: number }
 	| { type: "hello_error"; error: string }
 	| { type: "response"; id: string; ok: true; result?: unknown }
-	| { type: "response"; id: string; ok: false; error: string }
+	| { type: "response"; id: string; ok: false; error: string | WireErrorPayload }
 	| { type: "push"; event: WireServerEvent<TSnapshot, TEvent> }
 	/** 心跳：server 回 client ping。ts 回回客户端的 ts（方便 RTT 估算）。 */
 	| { type: "pong"; ts?: number };

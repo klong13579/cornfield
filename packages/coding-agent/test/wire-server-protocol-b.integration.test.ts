@@ -231,7 +231,36 @@ describe("协议批 B-3 — list_commands 命令表", () => {
 	});
 });
 
-// ── B-4 error codes 的 describe 随提交追加 ──
+describe("协议批 B-4 — 错误码枚举", () => {
+	test("未知命令：response error 升级为 { code, message }（not_implemented）", async () => {
+		const { ws, frames } = await connect(url);
+		try {
+			const resp = (await rawRequest(ws, frames, { type: "no_such_command_xyz" })) as Frame;
+			expect(resp.ok).toBe(false);
+			const err = resp.error as { code?: string; message?: string };
+			expect(typeof err).toBe("object");
+			expect(err.code).toBe("not_implemented");
+			expect(typeof err.message).toBe("string");
+		} finally {
+			ws.close();
+		}
+	});
+
+	test("旧调用方兼容：已知命令的 string error 仍可用（如未知 agent 定向）", async () => {
+		const { ws, frames } = await connect(url);
+		try {
+			const resp = (await rawRequest(ws, frames, { type: "get_skills", sessionId: "no-such-agent" })) as Frame;
+			expect(resp.ok).toBe(false);
+			// 未升级路径仍为 string——向后兼容契约
+			expect(typeof resp.error).toBe("string");
+			expect(String(resp.error)).toMatch(/unknown agent/);
+		} finally {
+			ws.close();
+		}
+	});
+});
+
+// ── 协议批 B 四件全部就位 ──
 
 beforeAll(async () => {
 	isolatedHome = await fs.mkdtemp(path.join(os.tmpdir(), "omp-serve-proto-b-"));

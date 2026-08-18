@@ -5,6 +5,8 @@
  */
 
 /** 基类：所有 pi-client 抛出的错误都继承自此，方便 `err instanceof PiClientError` 统一拦截。 */
+import type { WireErrorCode, WireErrorPayload } from "@oh-my-pi/pi-wire";
+
 export class PiClientError extends Error {
 	constructor(message: string) {
 		super(message);
@@ -33,11 +35,18 @@ export class PiRequestTimeoutError extends PiClientError {
 /** 服务端回 {ok:false, error}。保留 error 的原始文本。 */
 export class PiServerError extends PiClientError {
 	readonly command: string;
-	readonly serverError: string;
-	constructor(command: string, serverError: string) {
-		super(`Server rejected "${command}": ${serverError}`);
+	/** 原始错误（协议批 B-4：string 或 { code, message }）。 */
+	readonly serverError: string | WireErrorPayload;
+	/** 结构化错误码（string 错误时为 undefined）。 */
+	readonly code?: WireErrorCode;
+	constructor(command: string, serverError: string | WireErrorPayload) {
+		const detail = typeof serverError === "string" ? serverError : `[${serverError.code}] ${serverError.message}`;
+		super(`Server rejected "${command}": ${detail}`);
 		this.command = command;
 		this.serverError = serverError;
+		if (typeof serverError !== "string") {
+			this.code = serverError.code;
+		}
 	}
 }
 

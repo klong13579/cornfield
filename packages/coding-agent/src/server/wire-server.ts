@@ -10,6 +10,7 @@ import type {
 	WireCommand,
 	WireCommandOfType,
 	WireEnvironmentSummary,
+	WireErrorCode,
 	WireServerEvent,
 } from "@oh-my-pi/pi-wire";
 import { MULTIDEVICE_PROTOCOL_VERSION } from "@oh-my-pi/pi-wire";
@@ -194,6 +195,8 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 	): Promise<void> => {
 		const done = (result?: unknown): void => reply({ type: "response", id: "", ok: true, result });
 		const fail = (error: string): void => reply({ type: "response", id: "", ok: false, error });
+		const failWithCode = (code: WireErrorCode, message: string): void =>
+			reply({ type: "response", id: "", ok: false, error: { code, message } });
 
 		try {
 			// ── registry 级命令（不定向具体 session）──
@@ -589,7 +592,7 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 				}
 
 				default:
-					fail(`not_implemented: ${(command as { type: string }).type}`);
+					failWithCode("not_implemented", `command not implemented: ${(command as { type: string }).type}`);
 			}
 		} catch (err) {
 			fail(err instanceof Error ? err.message : String(err));

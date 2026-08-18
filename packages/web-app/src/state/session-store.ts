@@ -161,7 +161,16 @@ class SessionStore {
 			this.#clearCommandError();
 			return r;
 		} catch (err) {
-			const msg = err instanceof Error ? err.message : String(err);
+			const msg =
+				typeof err === "string"
+					? err
+					: err instanceof Error
+						? err.message
+						: typeof err === "object" &&
+								err !== null &&
+								typeof (err as { message?: unknown }).message === "string"
+							? (err as { message: string }).message
+							: String(err);
 			this.#view = cloneView(this.getSnapshot());
 			this.#view.commandError = `命令失败（未连接）：${msg}`;
 			this.#notify();
