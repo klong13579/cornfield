@@ -1,3 +1,5 @@
+import { copyText } from "./copy";
+
 /**
  * mermaid SVG 查看器 —— 纯 DOM 命令式实现（port of hermes ui.js
  * `_mountMermaidViewer` / `_openMermaidLightbox`，约 ui.js:1970-2434）。
@@ -18,7 +20,7 @@ const ZOOM_STEP = 1.2;
 const INLINE_MIN_HEIGHT = 220;
 
 type Mode = "inline" | "lightbox";
-type IconKind = "zoomIn" | "zoomOut" | "reset" | "fit" | "fullscreen";
+type IconKind = "zoomIn" | "zoomOut" | "reset" | "fit" | "fullscreen" | "copy" | "check";
 
 interface Box {
 	x: number;
@@ -47,6 +49,8 @@ function icon(kind: IconKind): string {
 		fit: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"></path></svg>',
 		fullscreen:
 			'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"></path><path d="M4 4l5 5M20 4l-5 5M4 20l5-5M20 20l-5-5"></path></svg>',
+		copy: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"></rect><path d="M5 15V7a2 2 0 0 1 2-2h8"></path></svg>',
+		check: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12.5l5 5L20 6.5"></path></svg>',
 	};
 	return icons[kind] ?? "";
 }
@@ -64,6 +68,35 @@ function createButton(label: string, kind: IconKind, onClick: () => void): HTMLB
 		onClick();
 	};
 	return btn;
+}
+
+function addCopySourceButton(toolbar: HTMLDivElement, source: string): void {
+	const btn = document.createElement("button");
+	btn.type = "button";
+	btn.className = "mermaid-viewer-btn";
+	btn.setAttribute("aria-label", "复制源码");
+	btn.setAttribute("aria-live", "polite");
+	btn.title = "复制源码";
+	btn.innerHTML = icon("copy");
+	let resetTimer: ReturnType<typeof setTimeout> | null = null;
+	btn.onclick = e => {
+		e.preventDefault();
+		e.stopPropagation();
+		void copyText(source).then(ok => {
+			if (!ok) return;
+			btn.innerHTML = icon("check");
+			btn.title = "已复制";
+			btn.setAttribute("aria-label", "源码已复制");
+			if (resetTimer) clearTimeout(resetTimer);
+			resetTimer = setTimeout(() => {
+				btn.innerHTML = icon("copy");
+				btn.title = "复制源码";
+				btn.setAttribute("aria-label", "复制源码");
+				resetTimer = null;
+			}, 1500);
+		});
+	};
+	toolbar.appendChild(btn);
 }
 
 function svgBox(svgEl: SVGSVGElement): Box {
@@ -133,7 +166,10 @@ interface ViewerState {
 	y: number;
 }
 
-export function mountMermaidViewer(svgEl: SVGSVGElement, options: { mode: Mode }): ViewerHandle | null {
+export function mountMermaidViewer(
+	svgEl: SVGSVGElement,
+	options: { mode: Mode; source?: string },
+): ViewerHandle | null {
 	if (!svgEl) return null;
 
 	const mode: Mode = options.mode === "lightbox" ? "lightbox" : "inline";
@@ -439,6 +475,7 @@ export function mountMermaidViewer(svgEl: SVGSVGElement, options: { mode: Mode }
 	toolbar.appendChild(createButton("Reset view", "reset", resetViewer));
 	toolbar.appendChild(createButton("Fit to screen", "fit", fitViewer));
 	if (mode === "inline") toolbar.appendChild(createButton("Fullscreen", "fullscreen", openLightbox));
+	if (options.source) addCopySourceButton(toolbar, options.source);
 
 	function resizeToEnvelope() {
 		if (mode !== "lightbox") return;

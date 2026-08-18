@@ -1,5 +1,6 @@
 import { Check, Copy, GitFork, RefreshCw, Undo2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { copyText } from "./copy";
 import "./msg-actions.css";
 
 /**
@@ -26,31 +27,6 @@ export interface MsgActionsProps {
 	onRegenerate?: () => void;
 	onFork?: () => void;
 	className?: string;
-}
-
-async function copyText(text: string): Promise<boolean> {
-	if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
-		try {
-			await navigator.clipboard.writeText(text);
-			return true;
-		} catch {
-			/* fall through to execCommand */
-		}
-	}
-	try {
-		const ta = document.createElement("textarea");
-		ta.value = text;
-		ta.style.position = "fixed";
-		ta.style.opacity = "0";
-		document.body.appendChild(ta);
-		ta.focus();
-		ta.select();
-		const ok = document.execCommand("copy");
-		ta.remove();
-		return ok;
-	} catch {
-		return false;
-	}
 }
 
 export function MsgActions({
