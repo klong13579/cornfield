@@ -1,7 +1,5 @@
 import { useEffect, useMemo, useRef } from "react";
-import { Orb } from "../../components/Orb";
-import { ActivityFold } from "../../render/ActivityFold";
-import { Markdown } from "../../render/Markdown";
+import { AssistantTurn } from "../../render/AssistantTurn";
 import { MsgActions } from "../../render/MsgActions";
 import type { TranscriptMessage } from "../../state/session-store";
 import { useSessionStore } from "../../state/session-store";
@@ -87,48 +85,20 @@ function MessageRow({
 	}
 
 	return (
-		<div className="msg-row flex gap-3">
-			<div className="avatar assistant shrink-0">π</div>
-			<div className="min-w-0 flex-1">
-				<div className="mb-1.5 flex items-center gap-2 text-[11px] tracking-[0.02em] text-ink-faint">
-					<span>{msg.model ?? "—"}</span>
-					{streaming ? (
-						<span className="flex items-center gap-1.5 text-warning">
-							<Orb state="composing" size={16} />
-							streaming
-						</span>
-					) : (
-						<span className="font-medium text-success">✓ 已完成</span>
-					)}
-				</div>
-				<div className="text-[14px] leading-relaxed text-ink-muted">
-					<ActivityFold
-						thinking={msg.thinking}
-						tools={msg.tools}
-						turnId={msg.id}
-						streaming={streaming && msg.thinkingStreaming}
-						onRetry={() => sessionStore.abortRetry()}
-					/>
-					{msg.text && (
-						<div>
-							<Markdown text={msg.text} />
-							{streaming && msg.textStreaming && <span className="caret" />}
-						</div>
-					)}
-					{msg.error && (
-						<div className="mt-1 rounded-md border border-danger/40 bg-danger/5 px-3 py-2 text-[12.5px] leading-relaxed text-danger">
-							✗ Error: {msg.error}
-						</div>
-					)}
-				</div>
-				<MsgActions
-					messageRole="assistant"
-					text={msg.text}
-					onUndo={entryId && !streaming ? () => sessionStore.undoExchange(entryId) : undefined}
-					onRegenerate={entryId && !streaming ? () => sessionStore.retryFrom(entryId) : undefined}
-					onFork={entryId && !streaming ? () => sessionStore.forkFrom(entryId) : undefined}
-				/>
-			</div>
-		</div>
+		<AssistantTurn
+			model={msg.model}
+			thinking={msg.thinking}
+			thinkingStreaming={msg.thinkingStreaming}
+			text={msg.text}
+			textStreaming={msg.textStreaming}
+			tools={msg.tools}
+			turnId={msg.id}
+			streaming={streaming}
+			error={msg.error}
+			onRetry={() => sessionStore.abortRetry()}
+			onUndo={entryId && !streaming ? () => sessionStore.undoExchange(entryId) : undefined}
+			onRegenerate={entryId && !streaming ? () => sessionStore.retryFrom(entryId) : undefined}
+			onFork={entryId && !streaming ? () => sessionStore.forkFrom(entryId) : undefined}
+		/>
 	);
 }
