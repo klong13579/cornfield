@@ -117,6 +117,14 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 	getToolContext?: (toolCall?: ToolCallContext) => AgentToolContext | undefined;
 
 	/**
+	 * 工具执行前审批闸门。返回 true 允许执行，false 拒绝。
+	 * 回调返回的 Promise 可能挂起等待外部审批（多端/人工），由事件循环
+	 * 统一处理 120s 超时（默认拒绝）与 abort 联动（挂起中立即拒绝）。
+	 * 未设置 = 不闸门（现有行为不变）。
+	 */
+	canUseTool?: (ctx: CanUseToolContext) => Promise<boolean> | boolean;
+
+	/**
 	 * Refreshes prompt/tool context from live session state before each model call.
 	 * Use this when tool availability or the system prompt can change mid-turn.
 	 */
@@ -176,6 +184,22 @@ export interface ToolCallContext {
 	index: number;
 	total: number;
 	toolCalls: Array<{ id: string; name: string }>;
+}
+
+/** 工具调用审批上下文（canUseTool 回调入参）。 */
+export interface CanUseToolContext {
+	/** 工具调用 id。 */
+	toolCallId: string;
+	/** 工具名。 */
+	name: string;
+	/** 解析后的参数（已剥离 intent）。 */
+	args: Record<string, unknown>;
+	/** 工具意图（若有）。 */
+	intent?: string;
+	/** 批次上下文（与 ToolCallContext 对齐）。 */
+	batchId: string;
+	index: number;
+	total: number;
 }
 
 /**

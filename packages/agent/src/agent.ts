@@ -30,6 +30,7 @@ import type {
 	AgentState,
 	AgentTool,
 	AgentToolContext,
+	CanUseToolContext,
 	StreamFn,
 	ToolCallContext,
 } from "./types";
@@ -188,6 +189,9 @@ export interface AgentOptions {
 	 */
 	getToolContext?: (toolCall?: ToolCallContext) => AgentToolContext | undefined;
 
+	/** 工具执行前审批闸门：返回 true 允许/false 拒绝；Promise 挂起时由循环处理超时与 abort。 */
+	canUseTool?: (ctx: CanUseToolContext) => Promise<boolean> | boolean;
+
 	/**
 	 * Optional transform applied to tool call arguments before execution.
 	 * Use for deobfuscating secrets or rewriting arguments.
@@ -254,6 +258,7 @@ export class Agent {
 	#serviceTier?: ServiceTier;
 	#maxRetryDelayMs?: number;
 	#getToolContext?: (toolCall?: ToolCallContext) => AgentToolContext | undefined;
+	#canUseTool?: (ctx: CanUseToolContext) => Promise<boolean> | boolean;
 	#cursorExecHandlers?: CursorExecHandlers;
 	#cursorOnToolResult?: CursorToolResultHandler;
 	#runningPrompt?: Promise<void>;
@@ -298,6 +303,7 @@ export class Agent {
 		this.#onPayload = opts.onPayload;
 		this.#onResponse = opts.onResponse;
 		this.#getToolContext = opts.getToolContext;
+		this.#canUseTool = opts.canUseTool;
 		this.#cursorExecHandlers = opts.cursorExecHandlers;
 		this.#cursorOnToolResult = opts.cursorOnToolResult;
 		this.#kimiApiFormat = opts.kimiApiFormat;
@@ -807,6 +813,7 @@ export class Agent {
 			onResponse: this.#onResponse,
 			getApiKey: this.getApiKey,
 			getToolContext: this.#getToolContext,
+			canUseTool: this.#canUseTool,
 			syncContextBeforeModelCall: async context => {
 				if (this.#listeners.size > 0) {
 					await Bun.sleep(0);
