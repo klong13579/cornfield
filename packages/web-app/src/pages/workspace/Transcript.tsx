@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { Orb } from "../../components/Orb";
-import { Markdown } from "../../render/Markdown";
 import { ActivityFold } from "../../render/ActivityFold";
+import { Markdown } from "../../render/Markdown";
 import type { TranscriptMessage } from "../../state/session-store";
 import { useSessionStore } from "../../state/session-store";
 import { useSession } from "../../state/use-session";
