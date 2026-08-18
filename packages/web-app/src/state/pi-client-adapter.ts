@@ -641,7 +641,7 @@ function normalizeProgress(event: unknown): ProgressEventDto | null {
 
 	// 消息增量（thinking/text/toolcall delta）
 	if (raw.type === "message_update") {
-		const a = raw.assistantEvent as { type?: string; contentIndex?: number; delta?: string } | undefined;
+		const a = raw.assistantMessageEvent as { type?: string; contentIndex?: number; delta?: string } | undefined;
 		if (!a) return null;
 		const base = { contentIndex: a.contentIndex ?? 0, delta: a.delta ?? "" };
 		switch (a.type) {

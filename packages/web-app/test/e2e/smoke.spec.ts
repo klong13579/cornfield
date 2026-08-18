@@ -7,10 +7,10 @@
  *      dist/omp 二进制）、随机端口、真实 HOME（取真实 LLM 鉴权）
  *   3. 浏览器（系统 Chrome）注入 localStorage 连接配置指向该 serve 端口
  *
- * 断言：连上（conn-dot connected）→ 发 prompt → 用户回显 → 回合结束（✓ 已完成）→ 回复文本非空。
- * 流式渲染观测为诊断项：F2 实测当前栈回复为最终快照一次性提交（live 层未触发，
- * 100ms 轮询 90s 单样本 textLens=[N]），属产品缺口（pi-client-adapter 已标注「流式转场待协议
- * 扩展」）；冒烟硬断言闭环，流式缺口记录不上线。
+ * 断言：连上（conn-dot connected）→ 发 prompt → 用户回显 → 回合结束（✓ 已完成）→
+ * 流式渲染（streaming 状态触发 + 文本非空）。
+ * 流式硬断言已恢复（STREAM-1 修复 pi-client-adapter message_update 字段名不匹配，
+ * live 层现能收到 progress 增量）。
  *
  * 门上：E2E=1 才执行（真实 LLM 调用）；CI 默认 skip——`E2E=1 bun run test:ci` 本地验收用。
  */
@@ -172,8 +172,9 @@ test("smoke: 真实 serve → 连接 → prompt → 流式回复", async ({ page
 			.locator(":scope > div:nth-child(2)")
 			.textContent();
 		expect(assistantText?.trim().length ?? 0).toBeGreaterThan(0);
-		// 流式渲染为诊断观测（当前栈回复为最终快照一次性提交，见文件头注）；闭环+完成态为硬断言
-		if (!sawStreaming) console.warn("[smoke] 未观察到流式渲染（live 层未触发）——回复为快照一次性提交");
+		// 流式硬断言（STREAM-1 修复后必须触发）：meta 行曾出现 streaming + 文本非空
+		expect(sawStreaming).toBe(true);
+		expect(new Set(lengths).size).toBeGreaterThan(0);
 
 		await page.screenshot({ path: path.join("test-results", "smoke-reply.png"), fullPage: true });
 	} finally {
