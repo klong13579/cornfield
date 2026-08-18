@@ -20,6 +20,7 @@ import type {
 	AgentMessage,
 	AgentTool,
 	AgentToolResult,
+	CanUseToolContext,
 	StreamFn,
 } from "./types";
 
@@ -299,6 +300,7 @@ async function runLoop(
 					config.getToolContext,
 					config.transformToolCallArguments,
 					config.intentTracing,
+					config.canUseTool,
 				);
 
 				toolResults.push(...executionResult.toolResults);
@@ -588,6 +590,36 @@ async function streamAttempt(
 		: { kind: "clean", message: finalMessage };
 }
 
+/** 工具审批挂起超时（安全侧：默认拒绝）。 */
+const CAN_USE_TOOL_TIMEOUT_MS = 120_000;
+
+/**
+ * 工具执行前审批闸门：三方竞速——审批结果 / 超时(拒绝) / abort(拒绝)。
+ * 未设置 canUseTool 时不进入此函数（零变化）。
+ */
+async function gateToolUse(
+	canUseTool: (ctx: CanUseToolContext) => Promise<boolean> | boolean,
+	ctx: CanUseToolContext,
+	signal: AbortSignal | undefined,
+): Promise<boolean> {
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	const timeout = new Promise<boolean>(resolve => {
+		timer = setTimeout(() => resolve(false), CAN_USE_TOOL_TIMEOUT_MS);
+	});
+	const abort = new Promise<boolean>(resolve => {
+		if (signal?.aborted) {
+			resolve(false);
+			return;
+		}
+		signal?.addEventListener("abort", () => resolve(false), { once: true });
+	});
+	try {
+		return await Promise.race([Promise.resolve(canUseTool(ctx)).then(v => Boolean(v)), timeout, abort]);
+	} finally {
+		if (timer) clearTimeout(timer);
+	}
+}
+
 /**
  * Execute tool calls from an assistant message.
  */
@@ -601,6 +633,7 @@ async function executeToolCalls(
 	getToolContext?: AgentLoopConfig["getToolContext"],
 	transformToolCallArguments?: AgentLoopConfig["transformToolCallArguments"],
 	intentTracing?: AgentLoopConfig["intentTracing"],
+	canUseTool?: AgentLoopConfig["canUseTool"],
 ): Promise<{ toolResults: ToolResultMessage[]; steeringMessages?: AgentMessage[] }> {
 	type ToolCallContent = Extract<AssistantMessage["content"][number], { type: "toolCall" }>;
 	const toolCalls = assistantMessage.content.filter((c): c is ToolCallContent => c.type === "toolCall");
@@ -752,6 +785,26 @@ async function executeToolCalls(
 						toolCalls: toolCallInfos,
 					})
 				: undefined;
+			// 审批闸门：canUseTool 未设置时跳过（零变化）
+			if (canUseTool) {
+				const approved = await gateToolUse(
+					canUseTool,
+					{
+						toolCallId: toolCall.id,
+						name: toolCall.name,
+						args: argsForExecution,
+						intent: toolCall.intent,
+						batchId,
+						index,
+						total: toolCalls.length,
+					},
+					tool.nonAbortable ? undefined : toolSignal,
+				);
+				if (!approved) {
+					throw new Error("Tool execution was denied by approval");
+				}
+			}
+
 			result = await tool.execute(
 				toolCall.id,
 				transformToolCallArguments ? transformToolCallArguments(effectiveArgs, toolCall.name) : effectiveArgs,
