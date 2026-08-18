@@ -1,10 +1,12 @@
 /**
- * W3 D1 e2e — serve `get_stats` 只读命令（真实 serve 子进程 + bun WS 客户端）。
+ * W3 D1/D2 e2e — serve `get_stats` 只读命令 + `list_sessions` source 字段（真实 serve 子进程 + bun WS 客户端）。
  *
  * 验证：
  *   1. get_stats 返回 DashboardStats 形状（overall/byModel/byFolder/timeSeries 等键齐全）
  *   2. 不依赖任何 attached session（不定向，直接 registry 级可得）
  *   3. 与 `omp stats --json` 同源：内部 syncAllSessions 后聚合，失败时 ok:false 不崩
+ *   4. W3 D2：optional period 时间窗口 + priceCatalog 单价目录（models.json）
+ *   5. W3 D2 小卡：list_sessions 每条带 source（cli=default 根 / agent=registry agent）
  *
  * 隔离 HOME：避免写坏真实 ~/.omp/stats.db。不触发 LLM 计费。
  */
@@ -118,12 +120,89 @@ describe("W3 D1 — serve get_stats 只读命令", () => {
 		const again = await sendCommand({ type: "get_stats" }, 30_000);
 		expect(again.ok).toBe(true);
 	});
+
+	test("get_stats: optional period 时间窗口 + priceCatalog 单价目录（W3 D2）", async () => {
+		// period "7d"：形状与全量一致，附 priceCatalog（隔离 HOME 无会话 → 空数组）
+		const r = await sendCommand({ type: "get_stats", period: "7d" }, 30_000);
+		expect(r.ok).toBe(true);
+		const stats = r.result as Record<string, unknown>;
+		expect(Array.isArray(stats.priceCatalog)).toBe(true);
+		for (const key of [
+			"overall",
+			"byModel",
+			"byFolder",
+			"timeSeries",
+			"modelSeries",
+			"modelPerformanceSeries",
+			"costSeries",
+		]) {
+			expect(Object.hasOwn(stats, key)).toBe(true);
+		}
+		// 其余 period 值不崩（1d/30d/90d/all 与未知值都容忍）
+		for (const periodVal of ["1d", "30d", "90d", "all", "bogus"]) {
+			const rr = await sendCommand({ type: "get_stats", period: periodVal }, 30_000);
+			expect(rr.ok).toBe(true);
+		}
+	});
+
+	test("list_sessions: 每条带 source 字段（cli=default 根 / agent=registry agent）", async () => {
+		// 预置会话在 beforeAll 里 seed（registry 启动时加载，不能中途写）
+		const res = await sendCommand({ type: "list_sessions" }, 30_000);
+		expect(res.ok).toBe(true);
+		const sessions = ((res.result ?? {}) as { sessions?: { agentId: string; source: string }[] }).sessions ?? [];
+		const cliEntry = sessions.find(s => s.agentId === "default");
+		expect(cliEntry?.source).toBe("cli");
+		const hrEntry = sessions.find(s => s.agentId === "hr");
+		expect(hrEntry?.source).toBe("agent");
+	});
 });
 
 beforeAll(async () => {
 	isolatedHome = await fs.mkdtemp(path.join(os.tmpdir(), "omp-serve-stats-"));
 	savedHome = process.env.HOME;
 	process.env.HOME = isolatedHome;
+
+	// W3 D2：预置 default 根 CLI 会话 + hr registry agent 会话（serve 启动时加载 registry，必须在此 seed）
+	const home = isolatedHome;
+	const cliDir = path.join(home, ".omp", "agent", "sessions", "--work--demo--", "by-date", "2026-08-18");
+	await fs.mkdir(cliDir, { recursive: true });
+	await Bun.write(
+		path.join(cliDir, "000001__cli00001.jsonl"),
+		`${JSON.stringify({
+			type: "session",
+			version: 3,
+			id: "cli-0000-7000-0000-000000000001",
+			timestamp: "2026-08-18T09:00:00.000Z",
+			cwd: "/work/demo",
+			title: "cli session",
+		})}\n`,
+	);
+	const hrDir = path.join(home, "agents", "hr");
+	const hrSessions = path.join(hrDir, "sessions", "by-date", "2026-08-18");
+	await fs.mkdir(hrSessions, { recursive: true });
+	await fs.mkdir(path.join(hrDir, ".omp"), { recursive: true });
+	await Bun.write(
+		path.join(hrDir, ".omp", "workspace.json"),
+		JSON.stringify({ schemaVersion: 2, id: "hr", name: "hr-agent", type: "agent", root: ".", projectRoot: "." }),
+	);
+	await Bun.write(
+		path.join(home, ".omp", "agent", "registry.json"),
+		JSON.stringify({
+			version: 2,
+			agents: { hr: { path: hrDir, registeredAt: new Date().toISOString(), template: "default" } },
+		}),
+	);
+	await Bun.write(
+		path.join(hrSessions, "000002__hr000001.jsonl"),
+		`${JSON.stringify({
+			type: "session",
+			version: 3,
+			id: "hr-0000-7000-0000-000000000001",
+			timestamp: "2026-08-18T10:00:00.000Z",
+			cwd: hrDir,
+			title: "hr session",
+		})}\n`,
+	);
 
 	const repoRoot = new URL("../../..", import.meta.url).pathname.replace(/\/$/, "");
 	const cliPath = `${repoRoot}/packages/coding-agent/src/cli.ts`;

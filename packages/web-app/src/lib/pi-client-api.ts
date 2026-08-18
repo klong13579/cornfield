@@ -2,11 +2,13 @@ import type { BranchPoint, PlaybackEntry, SessionRecordSummary } from "./records
 import type {
 	AgentInfoDto,
 	ConnectionInfoDto,
+	DashboardStatsDto,
 	EnvironmentSummaryDto,
 	HostToolDefinitionDto,
 	ImageContentDto,
 	ModelInfoDto,
 	SessionSnapshotDto,
+	StatsPeriodDto,
 	TodoPhaseDto,
 	WireServerEventDto,
 } from "./wire-dto";
@@ -103,4 +105,11 @@ export interface PiClient {
 	fsRead(sessionId: string, path: string): Promise<{ text: string; truncated: boolean }>;
 	/** 本机 gateway 运行状态（gateway_status；未运行/文件缺失抛错）。 */
 	gatewayStatus(): Promise<GatewayStatusDto>;
+
+	// ── 用量统计（W3 D2 InsightsPanel）──
+	/**
+	 * 本地用量统计（get_stats，只读）。period 可选时间窗口（1d/7d/30d/90d/all）。
+	 * 失败/未连接抛错，由调用方渲染空态。
+	 */
+	getStats(period?: StatsPeriodDto): Promise<DashboardStatsDto>;
 }

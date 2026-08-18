@@ -8,12 +8,12 @@ import { useSession } from "../../state/use-session";
 /**
  * 会话侧栏（S3，FR-1 会话工作区）—— 300px 会话列表：
  * - 新会话按钮 + 搜索过滤
- * - 双源 tab：WebUI 会话 / CLI 会话（wire 尚无 source 字段，CLI 索引待后端区分）
+ * - 双源 tab：WebUI 会话（source=agent）/ CLI 会话（source=cli，按项目目录分组）
  * - 会话按工作区分组（session.agent → view.agents → workspace 映射）
  * - pin 收藏（localStorage 本地持久化，组内置顶）
  *
- * 数据源：当前会话（view.sessionId/sessionName）+ 历史会话（serve list_sessions 真索引）。
- * 无 mock——CLI 源无数据不伪造，显示空态。
+ * 数据源：当前会话（view.sessionId/sessionName）+ 历史会话（serve list_sessions 真索引，
+ * 按 source 字段分源）。无 mock——任一源无数据不伪造，显示空态。
  */
 
 type SourceId = "webui" | "cli";
@@ -49,6 +49,23 @@ function isCurrent(row: Row): row is CurrentRow {
 	return "current" in row;
 }
 
+/**
+ * CLI 会话的项目目录（从 sessionFile 的 <sessionsRoot>/<encoded-cwd>/by-date/ 布局提取）。
+ * 解析失败回退 "CLI"——不伪造数据，仅作为分组键。
+ */
+function cliFolderOf(row: Row): string {
+	if (!("sessionFile" in row) || !row.sessionFile) return "CLI";
+	const segments = row.sessionFile.replaceAll("\\", "/").split("/");
+	const idx = segments.lastIndexOf("sessions");
+	const enc = idx >= 0 && idx + 1 < segments.length ? segments[idx + 1] : undefined;
+	if (!enc) return "CLI";
+	try {
+		return decodeURIComponent(enc);
+	} catch {
+		return enc;
+	}
+}
+
 export function SessionSidebar(): React.JSX.Element {
 	const view = useSession();
 	const store = useSessionStore();
@@ -58,8 +75,8 @@ export function SessionSidebar(): React.JSX.Element {
 	const [sessions, setSessions] = useState<SessionRecordSummary[]>([]);
 	const [pinned, setPinned] = useState<Set<string>>(loadPinned);
 
+	/** 历史会话索引（list_sessions 真数据）；未连接/失败保持空列表，UI 空态 */
 	useEffect(() => {
-		// 历史会话索引（list_sessions 真数据）；未连接/失败保持空列表，UI 空态
 		if (!view.connected) return;
 		void store
 			.listSessions()
@@ -89,11 +106,15 @@ export function SessionSidebar(): React.JSX.Element {
 	}, [view.agents]);
 
 	const rows = useMemo(() => {
-		if (source === "cli") return [] as Row[];
-		const current: Row[] = view.sessionId
-			? [{ id: view.sessionId, name: view.sessionName ?? "当前会话", agent: "attached", current: true }]
-			: [];
-		const history = sessions.filter(s => s.id !== view.sessionId);
+		// 当前会话（attached）只在 WebUI 源展示
+		const current: Row[] =
+			source === "webui" && view.sessionId
+				? [{ id: view.sessionId, name: view.sessionName ?? "当前会话", agent: "attached", current: true }]
+				: [];
+		// 按 list_sessions source 字段分源：webui = agent 源；cli = default agent 的本地交互会话
+		const history = sessions.filter(
+			s => s.id !== view.sessionId && (source === "cli" ? s.source === "cli" : s.source === "agent"),
+		);
 		const q = query.trim().toLowerCase();
 		const filtered = q ? history.filter(s => s.name.toLowerCase().includes(q)) : history;
 		// pin 置顶：pinned 先，其余按 startedAt desc
@@ -106,12 +127,12 @@ export function SessionSidebar(): React.JSX.Element {
 		return [...current.filter(c => !q || c.name.toLowerCase().includes(q)), ...sorted];
 	}, [source, sessions, view.sessionId, view.sessionName, query, pinned]);
 
-	// 按工作区分组（当前会话单独置顶组）
+	// 按工作区分组（当前会话单独置顶组）；CLI 源按项目目录（sessionFile 首段）分组
 	const groups = useMemo(() => {
 		const order: string[] = [];
 		const map = new Map<string, Row[]>();
 		for (const row of rows) {
-			const key = isCurrent(row) ? "当前会话" : agentWorkspace(row.agent);
+			const key = isCurrent(row) ? "当前会话" : source === "cli" ? cliFolderOf(row) : agentWorkspace(row.agent);
 			if (!map.has(key)) {
 				map.set(key, []);
 				order.push(key);
@@ -119,7 +140,7 @@ export function SessionSidebar(): React.JSX.Element {
 			map.get(key)?.push(row);
 		}
 		return order.map(k => ({ workspace: k, rows: map.get(k) ?? [] }));
-	}, [rows, agentWorkspace]);
+	}, [rows, agentWorkspace, source]);
 
 	return (
 		<aside
@@ -166,35 +187,33 @@ export function SessionSidebar(): React.JSX.Element {
 
 			{/* 会话列表 */}
 			<div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
-				{source === "cli" && (
+				{groups.length === 0 && (
 					<div className="px-2 py-10 text-center text-[12px] text-ink-faint">
-						CLI 会话索引待 wire 命令补充来源字段（list_sessions 暂无 source 区分）
+						{view.connected
+							? source === "cli"
+								? "暂无 CLI 会话——本地交互会话索引（list_sessions source=cli）"
+								: "暂无历史会话"
+							: "未连接——会话索引不可用"}
 					</div>
 				)}
-				{source === "webui" && groups.length === 0 && (
-					<div className="px-2 py-10 text-center text-[12px] text-ink-faint">
-						{view.connected ? "暂无历史会话" : "未连接——会话索引不可用"}
-					</div>
-				)}
-				{source === "webui" &&
-					groups.map(g => (
-						<div key={g.workspace} className="mb-1">
-							<div className="flex items-center gap-1.5 px-2 pt-3 pb-1 text-[10.5px] font-semibold tracking-[0.08em] text-ink-faint uppercase">
-								<span className="h-[7px] w-[7px] shrink-0 rounded-[3px] bg-success" />
-								{g.workspace}
-								<span className="ml-auto font-mono text-[10px] text-ink-faint">{g.rows.length}</span>
-							</div>
-							{g.rows.map(row => (
-								<SessionRow
-									key={row.id}
-									row={row}
-									pinned={pinned.has(row.id)}
-									active={!isCurrent(row) && row.id === view.sessionId}
-									onTogglePin={() => togglePin(row.id)}
-								/>
-							))}
+				{groups.map(g => (
+					<div key={g.workspace} className="mb-1">
+						<div className="flex items-center gap-1.5 px-2 pt-3 pb-1 text-[10.5px] font-semibold tracking-[0.08em] text-ink-faint uppercase">
+							<span className="h-[7px] w-[7px] shrink-0 rounded-[3px] bg-success" />
+							{g.workspace}
+							<span className="ml-auto font-mono text-[10px] text-ink-faint">{g.rows.length}</span>
 						</div>
-					))}
+						{g.rows.map(row => (
+							<SessionRow
+								key={row.id}
+								row={row}
+								pinned={pinned.has(row.id)}
+								active={!isCurrent(row) && row.id === view.sessionId}
+								onTogglePin={() => togglePin(row.id)}
+							/>
+						))}
+					</div>
+				))}
 			</div>
 
 			{/* 底部状态 */}

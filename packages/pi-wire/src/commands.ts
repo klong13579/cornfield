@@ -141,8 +141,12 @@ export type WireExtensionCommand =
 	 * W3 D1：只读拉取本地用量统计（@oh-my-pi/omp-stats 聚合，DashboardStats）。
 	 * 与 `omp stats --json` 同源：调用前内部增量同步会话文件，返回整体/按模型/按目录/
 	 * 时间序列聚合。不依赖任何 attached session（不定向）。
+	 *
+	 * W3 D2 扩展：可选 `period`（1d/7d/30d/90d/all）——对 overall/byModel/byFolder
+	 * 做时间窗口聚合（默认省略 = all 全量）；时间序列仍是固定窗口（24h/14d/90d）。
+	 * 响应附带 priceCatalog（美元 /1M tokens，取自 models.json）供模型成本表展示单价。
 	 */
-	| { id?: string; type: "get_stats" };
+	| { id?: string; type: "get_stats"; period?: "1d" | "7d" | "30d" | "90d" | "all" };
 
 export type WireCommand = MultiplexCommand | WireExtensionCommand;
 

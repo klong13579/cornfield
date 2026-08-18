@@ -2,6 +2,7 @@ import type { FsEntryDto, GatewayStatusDto, PiClient } from "../lib/pi-client-ap
 import type { BranchPoint, PlaybackEntry, SessionRecordSummary } from "../lib/records";
 import type {
 	AgentInfoDto,
+	DashboardStatsDto,
 	EnvironmentSummaryDto,
 	HostToolDefinitionDto,
 	ImageContentDto,
@@ -11,6 +12,7 @@ import type {
 	ProgressEventDto,
 	SessionPhaseDto,
 	SessionSnapshotDto,
+	StatsPeriodDto,
 	TodoPhaseDto,
 	WireServerEventDto,
 } from "../lib/wire-dto";
@@ -317,6 +319,11 @@ class SessionStore {
 	/** 本机 gateway 运行状态（gateway_status，代理到 pi-client）。 */
 	gatewayStatus(): Promise<GatewayStatusDto> {
 		return this.#client.gatewayStatus();
+	}
+
+	/** 本地用量统计（get_stats，代理到 pi-client；展示层自行持有状态）。 */
+	fetchStats(period?: StatsPeriodDto): Promise<DashboardStatsDto> {
+		return this.#client.getStats(period);
 	}
 
 	// ── 帧归约 ──

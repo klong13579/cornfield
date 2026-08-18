@@ -1,6 +1,6 @@
 import * as path from "node:path";
 import { getSessionsDir, logger } from "@oh-my-pi/pi-utils";
-import type { WireSessionIndexEntry, WireSessionStatus } from "@oh-my-pi/pi-wire";
+import type { WireSessionIndexEntry, WireSessionSource, WireSessionStatus } from "@oh-my-pi/pi-wire";
 import type { AgentMeta } from "./session-registry";
 
 /**
@@ -23,11 +23,13 @@ const SCAN_CHUNK_BYTES = 1024 * 1024;
 const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 500;
 
-/** 一个 agent 的索引源：注册名 + sessions 根目录。 */
+/** 一个 agent 的索引源：注册名 + sessions 根目录 + 来源。 */
 export interface SessionIndexSource {
 	agentId: string;
 	agentName: string;
 	/** sessions 根目录（递归扫描）。 */ sessionsRoot: string;
+	/** 来源：default agent 根 → cli；registry agent → agent。 */
+	source: WireSessionSource;
 }
 
 /** default agent 的全局 sessions 根。 */
@@ -97,20 +99,18 @@ async function indexOne(source: SessionIndexSource, file: JsonlFile): Promise<Wi
 
 		const counts = await countMessageEntries(file.path, file.size);
 
-		let endTime: string | undefined;
-		let status: WireSessionStatus = "unknown";
-		let tailModel: string | undefined;
 		// 头部已含全文件（小文件）时直接用头文本解析尾部；否则读末 256KB
 		const tailText = file.size <= HEAD_BYTES ? headText : await f.slice(Math.max(0, file.size - TAIL_BYTES)).text();
 		const tailInfo = parseTail(tailText);
-		endTime = tailInfo.lastTimestamp;
-		status = tailInfo.status;
-		tailModel = tailInfo.model;
+		const endTime = tailInfo.lastTimestamp;
+		const status = tailInfo.status;
+		const tailModel = tailInfo.model;
 
 		return {
 			sessionId: header.id,
 			agentId: source.agentId,
 			agentName: source.agentName,
+			source: source.source,
 			title: header.title,
 			startTime: header.timestamp,
 			endTime: endTime ?? header.timestamp,

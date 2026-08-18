@@ -6,12 +6,14 @@ import type { BranchPoint, PlaybackEntry, PlaybackToolStep, RecordStatus, Sessio
 import type {
 	AgentInfoDto,
 	ConnectionInfoDto,
+	DashboardStatsDto,
 	EnvironmentSummaryDto,
 	HostToolDefinitionDto,
 	ImageContentDto,
 	ModelInfoDto,
 	ProgressEventDto,
 	SessionSnapshotDto,
+	StatsPeriodDto,
 	TodoPhaseDto,
 	WireServerEventDto,
 } from "../lib/wire-dto";
@@ -34,6 +36,7 @@ interface WireSessionIndexEntryDto {
 	endTime?: string;
 	messageCount: number;
 	status?: "completed" | "aborted" | "error" | "incomplete" | "unknown";
+	source?: "cli" | "agent";
 	sessionFile?: string;
 }
 
@@ -281,8 +284,8 @@ export class PiClientAdapter implements PiClient {
 
 	/**
 	 * 历史会话索引（serve list_sessions）。
-	 * 后端返回 WireSessionIndexEntry（sessionId/title/startTime/endTime/agentName/status/sessionFile），
-	 * 映射到前端 SessionRecordSummary（id/name/agent/startedAt）。失败返回空数组，UI 空态。
+	 * 后端返回 WireSessionIndexEntry（sessionId/title/startTime/endTime/agentName/status/source/sessionFile），
+	 * 映射到前端 SessionRecordSummary（id/name/agent/startedAt/source）。失败返回空数组，UI 空态。
 	 */
 	async listSessions(): Promise<SessionRecordSummary[]> {
 		try {
@@ -294,6 +297,7 @@ export class PiClientAdapter implements PiClient {
 				startedAt: s.startTime,
 				messageCount: s.messageCount,
 				status: (s.status ?? "unknown") as RecordStatus,
+				source: s.source ?? (s.agentId === "default" ? "cli" : "agent"),
 				sessionFile: s.sessionFile,
 			}));
 		} catch (err) {
@@ -325,6 +329,12 @@ export class PiClientAdapter implements PiClient {
 	/** 本机 gateway 运行状态（gateway_status；serve 转发 gateway.status.json）。 */
 	async gatewayStatus(): Promise<GatewayStatusDto> {
 		return this.#req<GatewayStatusDto>({ type: "gateway_status" } as never);
+	}
+
+	/** 本地用量统计（get_stats；period 可选时间窗口，无数据/失败抛错由调用方空态）。 */
+	async getStats(period?: StatsPeriodDto): Promise<DashboardStatsDto> {
+		const command = period === undefined || period === "all" ? { type: "get_stats" } : { type: "get_stats", period };
+		return this.#req<DashboardStatsDto>(command as never);
 	}
 
 	// hostToolResult：pi-client 无裸帧发送 API（host_tool_result 是独立 client frame），

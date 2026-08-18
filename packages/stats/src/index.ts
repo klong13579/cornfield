@@ -6,8 +6,8 @@ import { getDashboardStats, getTotalMessageCount, syncAllSessions } from "./aggr
 import { closeDb } from "./db";
 import { startServer } from "./server";
 
-export { getDashboardStats, getTotalMessageCount, syncAllSessions } from "./aggregator";
-export { closeDb } from "./db";
+export { buildModelPriceCatalog, getDashboardStats, getTotalMessageCount, syncAllSessions } from "./aggregator";
+export { closeDb, getCatalogCost } from "./db";
 export { startServer } from "./server";
 export type {
 	AggregatedStats,
@@ -15,6 +15,7 @@ export type {
 	FolderStats,
 	MessageStats,
 	ModelPerformancePoint,
+	ModelPriceEntry,
 	ModelStats,
 	ModelTimeSeriesPoint,
 	TimeSeriesPoint,

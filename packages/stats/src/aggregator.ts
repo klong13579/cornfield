@@ -3,6 +3,7 @@ import {
 	getRecentErrors as dbGetRecentErrors,
 	getRecentRequests as dbGetRecentRequests,
 	getCostTimeSeries,
+	getCatalogCost,
 	getFileOffset,
 	getMessageById,
 	getMessageCount,
@@ -17,7 +18,7 @@ import {
 	setFileOffset,
 } from "./db";
 import { getSessionEntry, listAllSessionFiles, parseSessionFile } from "./parser";
-import type { DashboardStats, MessageStats, RequestDetails } from "./types";
+import type { DashboardStats, MessageStats, ModelPriceEntry, RequestDetails } from "./types";
 
 /**
  * Sync a single session file to the database.
@@ -78,19 +79,40 @@ export async function syncAllSessions(): Promise<{ processed: number; files: num
 
 /**
  * Get all dashboard stats.
+ * @param sinceMs 可选时间下限（毫秒时间戳）；省略 = 全量聚合。
+ * 时间序列固定窗口不变：timeSeries 24h 小时桶 / modelSeries+performance 14 天 / costSeries 90 天。
  */
-export async function getDashboardStats(): Promise<DashboardStats> {
+export async function getDashboardStats(sinceMs?: number): Promise<DashboardStats> {
 	await initDb();
 
 	return {
-		overall: getOverallStats(),
-		byModel: getStatsByModel(),
-		byFolder: getStatsByFolder(),
+		overall: getOverallStats(sinceMs),
+		byModel: getStatsByModel(sinceMs),
+		byFolder: getStatsByFolder(sinceMs),
 		timeSeries: getTimeSeries(24),
 		modelSeries: getModelTimeSeries(14),
 		modelPerformanceSeries: getModelPerformanceSeries(14),
 		costSeries: getCostTimeSeries(90),
 	};
+}
+
+/**
+ * 模型单价目录（美元 / 1M tokens）——w3 D2 模型成本表的「单价」列数据源。
+ * 取自 models.json 目录（getBundledModel），仅含 stats 里实际出现的模型；
+ * 目录里查不到的模型（自定义/未收录）不出现——UI 侧显示「—」。
+ */
+export function buildModelPriceCatalog(byModel: { model: string; provider: string }[]): ModelPriceEntry[] {
+	const seen = new Set<string>();
+	const entries: ModelPriceEntry[] = [];
+	for (const { model, provider } of byModel) {
+		const key = `${provider}\u0000${model}`;
+		if (seen.has(key)) continue;
+		seen.add(key);
+		const price = getCatalogCost(provider, model);
+		if (!price) continue;
+		entries.push({ provider, model, price: { ...price } });
+	}
+	return entries;
 }
 export async function getRecentRequests(limit?: number): Promise<MessageStats[]> {
 	await initDb();

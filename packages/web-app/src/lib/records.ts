@@ -6,6 +6,9 @@
 
 export type RecordStatus = "completed" | "aborted" | "error" | "incomplete" | "unknown";
 
+/** 会话来源（list_sessions source 字段）：cli = 本地 CLI 交互会话；agent = gateway/registry agent 会话。 */
+export type SessionSource = "cli" | "agent";
+
 export interface SessionRecordSummary {
 	id: string;
 	name: string;
@@ -15,6 +18,8 @@ export interface SessionRecordSummary {
 	status: RecordStatus;
 	/** 会话 JSONL 路径（list_sessions 带出；历史回放/导出待后端读取命令）。 */
 	sessionFile?: string;
+	/** 会话来源（SessionSidebar 双源 tab 按此区分）。 */
+	source: SessionSource;
 }
 
 export interface PlaybackToolStep {

@@ -42,6 +42,7 @@ export function RecordsView(): React.JSX.Element {
 					startedAt: new Date().toISOString(),
 					messageCount: entries.length,
 					status: "completed",
+					source: "agent",
 				}),
 			)
 			.catch(() => undefined);

@@ -112,6 +112,9 @@ export interface WireEnvironmentSummary {
  */
 export type WireSessionStatus = "completed" | "aborted" | "error" | "incomplete" | "unknown";
 
+/** 会话来源：cli = 本地 CLI 交互会话（default agent）；agent = gateway/registry agent 会话。 */
+export type WireSessionSource = "cli" | "agent";
+
 export interface WireSessionIndexEntry {
 	/** 会话 id（JSONL 头 session.id）。 */
 	sessionId: string;
@@ -119,6 +122,8 @@ export interface WireSessionIndexEntry {
 	agentId: string;
 	/** 所属 agent 显示名。 */
 	agentName: string;
+	/** 会话来源（session-index 按源根判定；SessionSidebar 双源 tab 按此区分）。 */
+	source: WireSessionSource;
 	/** 会话标题（header.title；无则 undefined）。 */
 	title?: string;
 	/** 开始时间（header.timestamp，ISO）。 */

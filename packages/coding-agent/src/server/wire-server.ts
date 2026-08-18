@@ -2,9 +2,16 @@ import { randomUUID } from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { getDashboardStats, syncAllSessions } from "@oh-my-pi/omp-stats";
+import { buildModelPriceCatalog, getDashboardStats, syncAllSessions } from "@oh-my-pi/omp-stats";
 import { isEnoent, logger } from "@oh-my-pi/pi-utils";
-import type { ClientFrame, ServerFrame, WireCommand, WireEnvironmentSummary, WireServerEvent } from "@oh-my-pi/pi-wire";
+import type {
+	ClientFrame,
+	ServerFrame,
+	WireCommand,
+	WireCommandOfType,
+	WireEnvironmentSummary,
+	WireServerEvent,
+} from "@oh-my-pi/pi-wire";
 import { MULTIDEVICE_PROTOCOL_VERSION } from "@oh-my-pi/pi-wire";
 import { normalizeHostToolDefinitions } from "../modes/rpc/rpc-mode";
 import type { AgentSession } from "../session/agent-session";
@@ -12,7 +19,7 @@ import type { SessionStore } from "../session/session-store";
 import type { TodoPhase } from "../tools/todo-write";
 import * as git from "../utils/git";
 import { WireHostToolBridge } from "./host-tool-bridge";
-import { agentSessionsRoot, defaultSessionsRoot, indexSessions } from "./session-index";
+import { agentSessionsRoot, defaultSessionsRoot, indexSessions, type SessionIndexSource } from "./session-index";
 import {
 	type AgentMeta,
 	type AttachedSession,
@@ -244,10 +251,11 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 						fail(`unknown agent: ${command.sessionId}`);
 						return;
 					}
-					const sources = metas.map(m => ({
+					const sources: SessionIndexSource[] = metas.map(m => ({
 						agentId: m.id,
 						agentName: m.name,
 						sessionsRoot: m.id === "default" ? defaultSessionsRoot() : agentSessionsRoot(m),
+						source: m.id === "default" ? "cli" : "agent",
 					}));
 					const sessions = await indexSessions(sources, command.limit);
 					done({ sessions });
@@ -307,10 +315,12 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 				case "get_stats": {
 					// W3 D1：与 `omp stats --json` 同源——先增量同步会话文件再读聚合。
 					// 只读转发 stats.db（本地聚合缓存），不触碰任何 attached session。
+					// W3 D2：可选 period 对聚合做时间窗口；响应附带 models.json 单价目录。
 					try {
 						await syncAllSessions();
-						const stats = await getDashboardStats();
-						done(stats);
+						const periodMs = parseStatsPeriod(command.period);
+						const stats = await getDashboardStats(periodMs);
+						done({ ...stats, priceCatalog: buildModelPriceCatalog(stats.byModel) });
 					} catch (err) {
 						fail(`stats unavailable: ${String(err)}`);
 					}
@@ -830,4 +840,17 @@ function isPidAlive(pid: number): boolean {
 	} catch (err) {
 		return (err as NodeJS.ErrnoException).code === "EPERM";
 	}
+}
+
+const STATS_PERIOD_MS: Record<"1d" | "7d" | "30d" | "90d" | "all", number | undefined> = {
+	"1d": 24 * 60 * 60 * 1000,
+	"7d": 7 * 24 * 60 * 60 * 1000,
+	"30d": 30 * 24 * 60 * 60 * 1000,
+	"90d": 90 * 24 * 60 * 60 * 1000,
+	all: undefined,
+};
+
+/** get_stats 可选 period → 毫秒时间窗口（省略/未知值 → undefined = 全量）。 */
+function parseStatsPeriod(period: WireCommandOfType<"get_stats">["period"]): number | undefined {
+	return period === undefined ? undefined : (STATS_PERIOD_MS[period] ?? undefined);
 }

@@ -1,4 +1,5 @@
 import {
+	BarChart3,
 	Bot,
 	Clock,
 	Cpu,
@@ -14,6 +15,7 @@ import { AppShell } from "./layout/AppShell";
 import { registerPanel } from "./layout/panel-registry";
 import { AgentsView } from "./pages/agents/AgentsView";
 import { HomeView } from "./pages/home/HomeView";
+import { InsightsView } from "./pages/insights/InsightsView";
 import { ModelsView } from "./pages/models/ModelsView";
 import { PlaybackView } from "./pages/records/PlaybackView";
 import { RecordsView } from "./pages/records/RecordsView";
@@ -96,6 +98,18 @@ function registerAllPanels(): void {
 		order: 7,
 		path: "/models",
 		mount: () => ModelsView,
+	});
+
+	// W3 D2：用量面板（serve get_stats）。注册进 panelRegistry（M1 接口），
+	// AppSidebar/PanelHost 由此派生——加面板 = 此处加一项。
+	registerPanel({
+		id: "insights",
+		title: "用量",
+		icon: BarChart3,
+		group: "primary",
+		order: 8,
+		path: "/insights",
+		mount: () => InsightsView,
 	});
 
 	registerPanel({
@@ -201,6 +215,16 @@ export const PAGE_META: PageMeta[] = [
 		protocol: ["get_available_models"],
 	},
 	{
+		id: "insights",
+		path: "/insights",
+		name: "用量",
+		breadcrumb: "用量",
+		group: "primary",
+		order: 8,
+		icon: BarChart3,
+		protocol: ["get_stats"],
+	},
+	{
 		id: "settings",
 		path: "/settings",
 		name: "设置",
@@ -231,6 +255,7 @@ export const router = createBrowserRouter([
 			{ path: "/voice", element: <VoiceView /> },
 			{ path: "/todo", element: <TodoView /> },
 			{ path: "/models", element: <ModelsView /> },
+			{ path: "/insights", element: <InsightsView /> },
 			{ path: "/settings", element: <SettingsView /> },
 			// P5 移动端裁剪
 			{ path: "/m", element: <WorkspaceView compact /> },
