@@ -14,6 +14,7 @@ import {
 	type ThinkingLevel,
 } from "@oh-my-pi/pi-agent-core";
 import type { Message, Model, SimpleStreamOptions } from "@oh-my-pi/pi-ai";
+import { streamSimple } from "@oh-my-pi/pi-ai";
 import {
 	getOpenAICodexTransportDetails,
 	prewarmOpenAICodexResponses,
@@ -37,6 +38,7 @@ import { AsyncJobManager, isBackgroundJobSupportEnabled } from "./async";
 import { createAutoresearchExtension } from "./autoresearch";
 import { loadCapability } from "./capability";
 import { type Rule, ruleCapability } from "./capability/rule";
+import { resolveFallbackModels, withModelFallback } from "./config/model-fallback";
 import { ModelRegistry } from "./config/model-registry";
 import { formatModelString, parseModelPattern, parseModelString, resolveModelRoleValue } from "./config/model-resolver";
 import { loadPromptTemplates as loadPromptTemplatesInternal, type PromptTemplate } from "./config/prompt-templates";
@@ -857,6 +859,8 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		deobfuscateSessionContext(sessionManager.buildSessionContext(), obfuscator),
 	);
 	const existingBranch = logger.time("getSessionBranch", () => sessionManager.getBranch());
+	const modelFallbacks = resolveFallbackModels(settings, modelRegistry, modelRegistry.getAvailable());
+
 	const hasExistingSession = existingBranch.length > 0;
 	const hasThinkingEntry = existingBranch.some(entry => entry.type === "thinking_level_change");
 	const hasServiceTierEntry = existingBranch.some(entry => entry.type === "service_tier_change");
@@ -1755,7 +1759,10 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			doomLoop: resolveDoomLoopConfig(model, settings),
 			lengthStall: resolveLengthStallConfig(settings),
 			canUseTool: options.canUseTool,
-			streamFn: options.streamFn,
+			streamFn:
+				modelFallbacks.length > 0
+					? withModelFallback(options.streamFn ?? streamSimple, modelFallbacks)
+					: options.streamFn,
 		});
 
 		cursorEventEmitter = event => agent.emitExternalEvent(event);
