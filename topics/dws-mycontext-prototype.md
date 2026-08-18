@@ -3,17 +3,24 @@ name: 用 dws CLI 实现 MyContext 业务流原型
 status: active              # drafting/active/paused/waiting/done/aborted
 objective: 用现有 dws CLI + 模型网关跑出一条能把「一个人」完整刻画出来的 context 画像流水线（知道什么/跟谁协作/在做什么/怎么说话/怎么决策），用真实钉钉数据产出一份可读、可验证、可被 agent 消费的画像产物。手段是参考 MyContext 业务流；目标是完整了解使用者 context（含 MyContext 方法论的验证）。
 doneWhen: |-
-  - 待补充（用户未给验收契约；方案中的建议验收：真实数据跑出画像产物 + 一次"来新消息→判定→起草"演示，待用户确认）
-lastActivity: 2026-08-18 05:35
+  - 真实数据跑出画像产物（90 天窗口，794 条被问全部归类，8 类风险 class 全部有实测样本）——✅ 实测完成
+  - 一次"来新消息→判定→起草"演示闭环（brief verdict + check 自审）——✅ 实测完成
+  - 用户验收（待用户拍板）
+lastActivity: 2026-08-18 18:20
 sessionRefs: []
-nextAction: 等用户拍板范围/窗口/落盘位置三个默认值 → 写 L1 采集脚本（dws 拉聊天/日程/审批/待办 → SQLite 落库带水位）
-artifacts: []
-decisions: []
-openQuestions:
-  - 做到什么程度（4 档）：①画像快照（风格/关系/职责）②决策策略（+答复率/风险类/rules.json，推荐）③知识结构（+轻量图谱）④实时分身（+轮询判定/起草，不发送）——待用户选档
-  - 范围：L1+L2+L3（采集+蒸馏+分身判定）全做，还是只做 L2 画像蒸馏先出效果？
-  - 数据窗口：默认 90 天（与 user-distill 一致）？
-  - 落盘位置：~/.omp/agent/skills/dws-persona/demo/（延续 user-distill 模式）？
+nextAction: 等用户验收；若继续：群@数字ID 识别 / 档3 知识结构（轻量图谱）
+artifacts:
+  - ~/.omp/dws-persona-demo/bridge.py（dws→forge 采集转换，含 agent/bot 排除/信封解包/群@识别）
+  - ~/.omp/dws-persona-demo/real/corpus.jsonl（90 天净化语料 14249 条；excludes 1321 条 bot/媒体）
+  - ~/.omp/dws-persona-demo/data/persona-config.json + database（forge 语料库，asks 698）
+  - ~/.omp/dws-persona-demo/skills/（persona 画像包：SKILL.md + 7 references + rules.json + persona.py）
+  - ~/.omp/dws-persona-demo/graph/（档3：graph.json + graph-summary.md 统计层 + facts.md LLM 事实层）
+decisions:
+  - 2026-08-18 档位定为 2（决策策略）+ L3 判定 demo；窗口 90 天；落盘 ~/.omp/dws-persona-demo/
+  - 2026-08-18 群聊统计：仅 @owner 的群消息计入 ask（forge 同款规则）；M- 前缀 agent 账号与 AI小钉 排除；JSON 信封解包
+  - 2026-08-18 档3 图谱落地：零 LLM 统计层（人物/话题/时间）+ LLM 事实层（抽样 50 条高信号消息提炼）
+  - 2026-08-18 bot/系统账号清单最终化：龙哥bot/hermeskk/云鲸管家/日历助手/云鲸范儿/看板类 全排除（asks 801→698）；@数字ID 纳入 owner 正则（实测零漂移）
+openQuestions: []  # 全部完成：档3 图谱（统计层+事实层）✅，群@数字ID（防御性，实测零漂移）✅
 ---
 
 ## 设计方案
@@ -46,10 +53,22 @@ openQuestions:
 
 | 时间 | 验证命令 | 结果 |
 |---|---|---|
-| - | - | - |
+| 2026-08-18 17:20 | `python3 bridge.py --days 30` | 30 天基线：5542 条语料，owner 1424 条 |
+| 2026-08-18 17:47 | `forge build`（30 天版首次） | asks 272；locale auto 未命中（Han 51.3%）→ 强制 zh-CN |
+| 2026-08-18 17:50 | `forge build`（30 天 zh-CN 版） | asks 272→分类生效；11/11 层全测量 |
+| 2026-08-18 18:00 | `python3 bridge.py --days 90` | 19843 条原始 → 15570 条，owner 3330 条，285 会话 |
+| 2026-08-18 18:06 | forge pull/build（90 天版） | asks 801；风险 8 类全部有实测样本 |
+| 2026-08-18 18:12 | `persona.py brief` × 3 真实消息 | status_chase→draft（可答但 autonomy 锁）、other_ask→draft、ack→silent |
+| 2026-08-18 18:35 | graph.py（统计图谱） | 476 人网络 / 698 条真实 ask / 话题结构 / 活跃时间 |
+| 2026-08-18 18:40 | LLM 事实抽取（抽样 50 条） | facts.md：组织/人事/业务/研发/工作方式 5 组 20 条事实 + 待验证项 |
+| 2026-08-18 18:42 | bot 净化重建 | asks 801→698（挤出去 103 条 bot/看板假 ask）；corpus 14249 |
 
 ## 进度记录
 
+- 2026-08-18 18:45 — 全部延伸完成：群@数字ID（防御性修正，mention 集零漂移）、档3 知识图谱（统计层 graph.json/summary + LLM 事实层 facts.md）、bot/系统账号净化（asks 698）；待验收
+- 2026-08-18 18:20 — L1+L2+L3 全部实测完成：90 天采集、画像产物（风格/决策/关系/图谱 fidelity 11/11 层）、分身判定+起草+自审闭环；待用户验收
+- 2026-08-18 18:00 — 扩 90 天 + 群聊统计修复（@owner 精确识别、361 条群 ask 计入）+ JSON 信封解包（1331 条）
+- 2026-08-18 17:40 — 真实数据链路开工：dws 登录态确认、bridge 转换器、forge 全链 init/pull/build/publish，30 天基线产物
 - 2026-08-18 05:35 — objective 重定义：复刻看效果 → 完整了解使用者 context（用户澄清）；新增「做到什么程度」四档选项待选
 - 2026-08-18 05:20 — topic 创建；已完成 MyContext 深度研究（业务流九步 + 潜在问题 + 产物模板分析），方案待用户拍板
 
