@@ -12,7 +12,9 @@
 		"lint": "biome lint .",
 		"test": "bun test",
 		"fix": "biome check --write --unsafe .",
-		"fmt": "biome format --write ."
+		"fmt": "biome format --write .",
+		"e2e:smoke": "bun run build && playwright test",
+		"test:ci": "E2E=1 bun run e2e:smoke"
 	},
 	"dependencies": {
 		"@oh-my-pi/pi-client": "catalog:",
@@ -25,6 +27,7 @@
 		"thinking-orbs": "0.3.1"
 	},
 	"devDependencies": {
+		"@playwright/test": "1.60.0",
 		"@tailwindcss/vite": "^4.2.4",
 		"@types/react": "catalog:",
 		"@types/react-dom": "catalog:",
