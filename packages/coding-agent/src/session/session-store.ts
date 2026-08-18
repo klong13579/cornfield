@@ -51,6 +51,7 @@ export class SessionStore {
 			thinkingLevel: session.thinkingLevel,
 			scopedModels: session.scopedModels,
 			messages: session.messages,
+			messageEntryIds: session.getMessageEntryIdMap(),
 			todoPhases: session.getTodoPhases(),
 			activeToolNames: session.getActiveToolNames(),
 			queuedMessageCount: session.queuedMessageCount,

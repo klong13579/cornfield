@@ -71,6 +71,9 @@ export interface PiClient {
 	getHostTools(): HostToolDefinitionDto[];
 	compact(): Promise<void>;
 	newSession(): Promise<void>;
+	forkFrom(entryId: string): Promise<void>;
+	undoExchange(entryId: string): Promise<void>;
+	retryFrom(entryId: string, message?: string): Promise<void>;
 	setModel(modelId: string, provider?: string): Promise<void>;
 	setThinkingLevel(level: string): Promise<void>;
 	setTodos(phases: TodoPhaseDto[]): Promise<void>;

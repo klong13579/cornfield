@@ -61,6 +61,8 @@ export interface SessionView {
 	sessionName?: string;
 	/** 已落库消息。 */
 	messages: TranscriptMessage[];
+	/** messageId → session entryId（消息级 undo/fork/retry 定位）。 */
+	messageEntryIds: Record<string, string>;
 	/** 流式中的在途 assistant 消息（progress 瞬态层，快照到达即被权威替换）。 */
 	live?: TranscriptMessage;
 	isStreaming: boolean;
@@ -217,6 +219,17 @@ class SessionStore {
 	abortRetry(): void {
 		void this.#run(() => this.#client.abortRetry());
 	}
+	forkFrom(entryId: string): void {
+		void this.#run(() => this.#client.forkFrom(entryId));
+	}
+
+	undoExchange(entryId: string): void {
+		void this.#run(() => this.#client.undoExchange(entryId));
+	}
+
+	retryFrom(entryId: string, message?: string): void {
+		void this.#run(() => this.#client.retryFrom(entryId, message));
+	}
 
 	/** 前端已注册 host tools（set_host_tools 本地权威态）。 */
 	getHostTools(): HostToolDefinitionDto[] {
@@ -368,6 +381,7 @@ class SessionStore {
 			sessionId: snapshot.sessionId,
 			sessionName: snapshot.sessionName,
 			messages: mergeToolResults(snapshot.messages).map(m => this.#toMessage(m)),
+			messageEntryIds: snapshot.messageEntryIds ?? {},
 			isStreaming: snapshot.isStreaming || snapshot.phase === "streaming",
 			activeToolNames: [...snapshot.activeToolNames],
 			queued: snapshot.queuedMessageCount,
@@ -537,6 +551,7 @@ class SessionStore {
 				thinkingLevel: null,
 				sessionId: "",
 				messages: [],
+				messageEntryIds: {},
 				isStreaming: false,
 				activeToolNames: [],
 				queued: 0,
@@ -558,6 +573,7 @@ class SessionStore {
 			sessionId: snapshot.sessionId,
 			sessionName: snapshot.sessionName,
 			messages: snapshot.messages.map(m => this.#toMessage(m)),
+			messageEntryIds: snapshot.messageEntryIds ?? {},
 			isStreaming: snapshot.isStreaming,
 			activeToolNames: [...snapshot.activeToolNames],
 			queued: snapshot.queuedMessageCount,

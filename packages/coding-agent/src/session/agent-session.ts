@@ -6921,6 +6921,17 @@ export class AgentSession {
 		return { editorText, cancelled: false, summaryEntry, sessionContext: stateContext };
 	}
 
+	/** messageId → entryId 映射（供消息级 undo/fork/retry 定位 session entry）。 */
+	getMessageEntryIdMap(): Record<string, string> {
+		const map: Record<string, string> = {};
+		for (const entry of this.sessionManager.getEntries()) {
+			if (entry.type !== "message") continue;
+			const message = entry.message as { id?: string };
+			if (message.id) map[message.id] = entry.id;
+		}
+		return map;
+	}
+
 	/**
 	 * Get all user messages from session for branch selector.
 	 */

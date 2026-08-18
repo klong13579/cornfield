@@ -177,6 +177,17 @@ export class PiClientAdapter implements PiClient {
 	newSession(): Promise<void> {
 		return this.#req({ type: "new_session" }).then(() => undefined);
 	}
+	forkFrom(entryId: string): Promise<void> {
+		return this.#req({ type: "fork_from", entryId }).then(() => undefined);
+	}
+
+	undoExchange(entryId: string): Promise<void> {
+		return this.#req({ type: "undo_exchange", entryId }).then(() => undefined);
+	}
+
+	retryFrom(entryId: string, message?: string): Promise<void> {
+		return this.#req({ type: "retry_from", entryId, message }).then(() => undefined);
+	}
 
 	setModel(modelId: string, provider = "custom"): Promise<void> {
 		return this.#req({ type: "set_model", provider, modelId }).then(() => undefined);

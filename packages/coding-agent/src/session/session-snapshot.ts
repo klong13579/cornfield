@@ -36,6 +36,8 @@ export interface SessionSnapshot {
 	scopedModels?: ReadonlyArray<{ model: Model; thinkingLevel?: ThinkingLevel }>;
 	// ── 消息（UI 重建的基础）──
 	messages: AgentMessage[];
+	/** messageId → session entryId 映射（供消息级 undo/fork 定位 entry）。 */
+	messageEntryIds: Record<string, string>;
 	// ── 业务 ──
 	todoPhases: TodoPhase[];
 	activeToolNames: string[];

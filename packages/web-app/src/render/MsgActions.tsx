@@ -7,7 +7,7 @@ import "./msg-actions.css";
  *
  * 消费出口（W1 Transcript 替换时接入，放在每条消息 body 之后）：
  *   <MsgActions
- *     role={msg.role}
+ *     messageRole={msg.role}
  *     text={msg.text}
  *     onUndo={...}        // 未来 wire：undo exchange（assistant）
  *     onRegenerate={...}  // 未来 wire：重新生成（assistant）
@@ -19,7 +19,7 @@ import "./msg-actions.css";
  * - undo / regenerate / fork：先渲染 disabled 态（等 wire 命令；onXxx 传入即启用）
  */
 export interface MsgActionsProps {
-	role: "user" | "assistant";
+	messageRole: "user" | "assistant";
 	/** 复制目标文本（空则不提供 copy）。 */
 	text?: string;
 	onUndo?: () => void;
@@ -54,7 +54,7 @@ async function copyText(text: string): Promise<boolean> {
 }
 
 export function MsgActions({
-	role,
+	messageRole,
 	text,
 	onUndo,
 	onRegenerate,
@@ -79,7 +79,7 @@ export function MsgActions({
 		}
 	};
 
-	const isAssistant = role === "assistant";
+	const isAssistant = messageRole === "assistant";
 
 	return (
 		<div className={`msg-actions${className ? ` ${className}` : ""}`}>

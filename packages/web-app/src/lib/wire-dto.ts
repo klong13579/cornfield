@@ -63,6 +63,8 @@ export interface SessionSnapshotDto {
 	model?: ModelDto;
 	thinkingLevel?: string;
 	messages: MessageDto[];
+	/** messageId → session entryId（消息级 undo/fork/retry 定位）。 */
+	messageEntryIds: Record<string, string>;
 	todoPhases: TodoPhaseDto[];
 	activeToolNames: string[];
 	queuedMessageCount: number;

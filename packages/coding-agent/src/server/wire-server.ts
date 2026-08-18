@@ -370,6 +370,8 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 				"set_host_tools",
 				"new_session",
 				"branch",
+				"fork_from",
+				"undo_exchange",
 			]);
 			const sessionDone = (result?: unknown): void => {
 				done(result);
@@ -553,6 +555,41 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 					sessionDone({ text: result.selectedText, cancelled: result.cancelled });
 					break;
 				}
+				case "fork_from": {
+					// 从此 entry 分叉到新会话（复用 branch 语义），返回 fork 后会话 id + 推快照
+					const result = await session.branch(command.entryId);
+					sessionDone({ cancelled: result.cancelled, sessionId: session.sessionId });
+					break;
+				}
+				case "undo_exchange": {
+					// 撤销到指定轮：streaming 中拒绝（busy）制止竞态，截断后推权威快照
+					if (session.isStreaming) {
+						fail("busy");
+						return;
+					}
+					const result = await session.navigateTree(command.entryId, {});
+					sessionDone({ cancelled: result.cancelled, editorText: result.editorText });
+					break;
+				}
+				case "retry_from": {
+					// 撤销到指定轮 + 重新 prompt（原 user 文本，除非显式 message 覆盖）
+					if (session.isStreaming) {
+						fail("busy");
+						return;
+					}
+					const result = await session.navigateTree(command.entryId, {});
+					if (result.cancelled) {
+						done({ cancelled: true });
+						return;
+					}
+					const message = command.message ?? result.editorText ?? "";
+					session.prompt(message, { images: command.images }).catch((err: Error) => {
+						fail(err.message);
+					});
+					done();
+					break;
+				}
+
 				case "get_branch_messages": {
 					done({ messages: session.getUserMessagesForBranching() });
 					break;
