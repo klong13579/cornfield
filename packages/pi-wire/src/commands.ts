@@ -135,6 +135,12 @@ export type WireExtensionCommand =
 	/** 只读读一个 workspace 文件（文本，utf-8；> 128KB 截断到 128KB）。路径约束同上。 */
 	| { id?: string; type: "fs_read"; sessionId?: string; path: string }
 	/**
+	 * R-IMG-SERVE：只读读一个 workspace 图片文件（二进制）→ dataUrl。
+	 * 上限 2MB（超出截断并标记 truncated）；MIME 按扩展名（png/jpg/gif/webp/svg/bmp/ico/avif，
+	 * 未知回 octet-stream）。路径约束与 fs_read 同。FileExplorer 预览数据源。
+	 */
+	| { id?: string; type: "fs_read_image"; sessionId?: string; path: string }
+	/**
 	 * 读取本机 gateway 运行状态（~/.omp/gateway-data/gateway.status.json 只读转发，
 	 * gateway 定期写盘）。返回 accounts（bridgeRunning/bridgeState/channelHealth）+
 	 * scheduler/pid；statusWrittenAt 距今超 30s 视为 stale。gateway 未运行返回 ok:false。

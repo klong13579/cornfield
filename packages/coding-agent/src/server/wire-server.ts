@@ -327,6 +327,28 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 					done({ path: fsCmd.path ?? "", ...content });
 					return;
 				}
+				case "fs_read_image": {
+					// R-IMG-SERVE（备用卡）：二进制图片读取——FileExplorer 预览数据源。
+					// 返回 dataUrl（上限 2MB，超出截断标记），MIME 按扩展名。路径约束与 fs_read 同（resolveFsPath）。
+					const agentId = (command as { sessionId?: string }).sessionId ?? conn.activeAgentId;
+					const meta = registry.getMeta(agentId);
+					if (!meta) {
+						fail(`unknown agent: ${agentId}`);
+						return;
+					}
+					const target = resolveFsPath(meta.agentDir, (command as { path: string }).path ?? "");
+					if (!target.ok) {
+						fail(target.error);
+						return;
+					}
+					const res = await readImageFileClipped(target.path);
+					if ("error" in res) {
+						fail(res.error);
+						return;
+					}
+					done({ path: (command as { path: string }).path ?? "", ...res });
+					return;
+				}
 				case "gateway_status": {
 					const res = await readGatewayStatus();
 					if (!res.ok) {
@@ -1255,6 +1277,44 @@ async function readMemoryFileClipped(filePath: string): Promise<MemoryTextFilePr
 	const res = await readTextFileClipped(filePath);
 	if ("error" in res) return null;
 	return { path: filePath, content: res.text, truncated: res.truncated };
+}
+
+// ── R-IMG-SERVE：二进制图片读取（dataUrl，2MB 上限，MIME 按扩展名）──
+
+const FS_IMAGE_MAX_BYTES = 2 * 1024 * 1024;
+
+const IMAGE_MIME_BY_EXT: Record<string, string> = {
+	".png": "image/png",
+	".jpg": "image/jpeg",
+	".jpeg": "image/jpeg",
+	".gif": "image/gif",
+	".webp": "image/webp",
+	".svg": "image/svg+xml",
+	".bmp": "image/bmp",
+	".ico": "image/x-icon",
+	".avif": "image/avif",
+};
+
+async function readImageFileClipped(
+	filePath: string,
+): Promise<{ dataUrl: string; mimeType: string; sizeBytes: number; truncated: boolean } | { error: string }> {
+	try {
+		const f = Bun.file(filePath);
+		const stat = await f.stat();
+		const sizeBytes = stat.size;
+		const mimeType = IMAGE_MIME_BY_EXT[path.extname(filePath).toLowerCase()] ?? "application/octet-stream";
+		const bytes = await f.slice(0, Math.min(sizeBytes, FS_IMAGE_MAX_BYTES)).arrayBuffer();
+		const base64 = Buffer.from(bytes).toString("base64");
+		return {
+			dataUrl: `data:${mimeType};base64,${base64}`,
+			mimeType,
+			sizeBytes,
+			truncated: sizeBytes > FS_IMAGE_MAX_BYTES,
+		};
+	} catch (err) {
+		if (isEnoent(err)) return { error: `no such file: ${path.basename(filePath)}` };
+		throw err;
+	}
 }
 
 interface MemorySectionProjection {

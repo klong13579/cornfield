@@ -1,7 +1,7 @@
 import type { PiClientEventKind, PiWebSocketCtor } from "@oh-my-pi/pi-client";
 import { PiClient as WirePiClient } from "@oh-my-pi/pi-client";
 import type { WireCommand } from "@oh-my-pi/pi-wire";
-import type { FsEntryDto, GatewayStatusDto, PiClient } from "../lib/pi-client-api";
+import type { FsEntryDto, FsImageResult, GatewayStatusDto, PiClient } from "../lib/pi-client-api";
 import type { BranchPoint, PlaybackEntry, PlaybackToolStep, RecordStatus, SessionRecordSummary } from "../lib/records";
 import type {
 	AgentInfoDto,
@@ -346,6 +346,15 @@ export class PiClientAdapter implements PiClient {
 			path,
 		} as never);
 		return { text: result.text ?? "", truncated: result.truncated === true };
+	}
+
+	/** 读 agent workspace 图片（fs_read_image；dataUrl，2MB 上限；FileExplorer 预览用）。 */
+	async fsReadImage(sessionId: string, path: string): Promise<FsImageResult> {
+		return this.#req<FsImageResult>({
+			type: "fs_read_image",
+			sessionId,
+			path,
+		} as never);
 	}
 
 	/** 本机 gateway 运行状态（gateway_status；serve 转发 gateway.status.json）。 */

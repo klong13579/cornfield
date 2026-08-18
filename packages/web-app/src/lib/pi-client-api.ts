@@ -25,6 +25,14 @@ export interface FsEntryDto {
 	size: number;
 }
 
+/** fs_read_image 结果（R-IMG-SERVE：dataUrl + MIME + 大小/截断）。 */
+export interface FsImageResult {
+	dataUrl: string;
+	mimeType: string;
+	sizeBytes: number;
+	truncated: boolean;
+}
+
 /** gateway 运行状态（gateway_status 命令转发 gateway.status.json）。 */
 export interface GatewayStatusDto {
 	pid?: number;
@@ -113,6 +121,8 @@ export interface PiClient {
 	fsList(sessionId: string, path?: string): Promise<{ entries: FsEntryDto[] }>;
 	/** 读 agent workspace 文件（fs_read；>128KB 截断并标记 truncated）。 */
 	fsRead(sessionId: string, path: string): Promise<{ text: string; truncated: boolean }>;
+	/** 读 agent workspace 图片（fs_read_image；dataUrl，2MB 上限，MIME 按扩展名）。 */
+	fsReadImage(sessionId: string, path: string): Promise<FsImageResult>;
 	/** 本机 gateway 运行状态（gateway_status；未运行/文件缺失抛错）。 */
 	gatewayStatus(): Promise<GatewayStatusDto>;
 
