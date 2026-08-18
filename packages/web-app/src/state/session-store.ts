@@ -13,6 +13,7 @@ import type {
 	ProgressEventDto,
 	SessionPhaseDto,
 	SessionSnapshotDto,
+	SkillDto,
 	StatsPeriodDto,
 	TodoPhaseDto,
 	WireServerEventDto,
@@ -330,6 +331,11 @@ class SessionStore {
 	/** 记忆投影（get_memory，代理到 pi-client；展示层自行持有状态）。 */
 	fetchMemory(): Promise<MemoryProjectionDto> {
 		return this.#client.getMemory();
+	}
+
+	/** 已加载技能（get_skills，代理到 pi-client；展示层自行持有状态）。 */
+	fetchSkills(): Promise<SkillDto[]> {
+		return this.#client.getSkills();
 	}
 
 	// ── 帧归约 ──

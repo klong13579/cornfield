@@ -9,6 +9,7 @@ import type {
 	MemoryProjectionDto,
 	ModelInfoDto,
 	SessionSnapshotDto,
+	SkillDto,
 	StatsPeriodDto,
 	TodoPhaseDto,
 	WireServerEventDto,
@@ -120,4 +121,8 @@ export interface PiClient {
 	 * 取不到的区为 null；失败/未连接抛错，由调用方渲染空态。
 	 */
 	getMemory(): Promise<MemoryProjectionDto>;
+
+	// ── 技能列表（W3 D5 SkillsPanel）──
+	/** 已加载技能（get_skills，只读；session.skills 同源）。失败/未连接抛错，由调用方渲染空态。 */
+	getSkills(): Promise<SkillDto[]>;
 }
