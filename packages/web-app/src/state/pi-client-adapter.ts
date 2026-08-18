@@ -637,6 +637,9 @@ function normalizeProgress(event: unknown): ProgressEventDto | null {
 			return { type: "agent_start" };
 		case "agent_end":
 			return { type: "agent_end" };
+		case "steer":
+			// 协议批 B-1：steer 回显（serve 转发 steer 后推的 progress 帧，SteerIndicator 数据源）
+			return typeof raw.text === "string" ? { type: "steer", text: raw.text } : null;
 	}
 
 	// 消息增量（thinking/text/toolcall delta）

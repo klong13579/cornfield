@@ -10,7 +10,7 @@
 		"check": "biome check . && bun run check:types",
 		"check:types": "tsgo -p tsconfig.json --noEmit",
 		"lint": "biome lint .",
-		"test": "bun test",
+		"test": "bun test --path-ignore-patterns=test/e2e",
 		"fix": "biome check --write --unsafe .",
 		"fmt": "biome format --write .",
 		"e2e:smoke": "bun run build && playwright test",

@@ -386,6 +386,16 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 				}
 				case "steer": {
 					await session.steer(command.message, command.images);
+					// 协议批 B-1：steer 事件回显——转发后向订阅连接推 progress 帧（steer 标记 + 文本摘要），
+					// W2 的 SteerIndicator 以此为数据源（web-app 端归一到 ProgressEventDto steer）。
+					send(conn.ws, {
+						type: "push",
+						event: {
+							type: "progress",
+							sessionId: agentId,
+							event: { type: "steer", text: command.message },
+						},
+					});
 					done();
 					break;
 				}

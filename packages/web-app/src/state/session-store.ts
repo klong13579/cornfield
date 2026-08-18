@@ -66,6 +66,8 @@ export interface SessionView {
 	isStreaming: boolean;
 	activeToolNames: string[];
 	queued: number;
+	/** steer 回显文本（协议批 B-1；turn_end/agent_end 清空）。 */
+	steer?: string;
 	todo: TodoPhaseDto[];
 	context?: { usedTokens: number; totalTokens: number; percent: number; lastCompaction: number | null };
 	flags: { autoCompaction: boolean; autoRetry: boolean };
@@ -403,6 +405,7 @@ class SessionStore {
 			case "turn_end":
 			case "agent_end": {
 				view.isStreaming = false;
+				view.steer = undefined;
 				if (view.phase === "streaming") view.phase = EMPTY_PHASE;
 				if (view.live) {
 					view.live.done = true;
@@ -414,6 +417,9 @@ class SessionStore {
 				}
 				break;
 			}
+			case "steer":
+				view.steer = event.text;
+				break;
 			case "thinking_start":
 				view.live = ensureLive(view, prev);
 				view.live.thinking = view.live.thinking ?? "";

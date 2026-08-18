@@ -111,11 +111,12 @@ export interface SessionListEntryDto {
 
 // ── 进度事件（progress，非权威）──
 
-export type ProgressEventDto =
+	export type ProgressEventDto =
 	| { type: "turn_start" }
 	| { type: "turn_end" }
 	| { type: "agent_start" }
 	| { type: "agent_end" }
+	| { type: "steer"; text: string }
 	| { type: "message_update"; assistantEvent: { type: "text_delta"; contentIndex: number; delta: string } }
 	| { type: "message_update"; assistantEvent: { type: "thinking_delta"; contentIndex: number; delta: string } }
 	| { type: "message_update"; assistantEvent: { type: "toolcall_delta"; contentIndex: number; delta: string } }
