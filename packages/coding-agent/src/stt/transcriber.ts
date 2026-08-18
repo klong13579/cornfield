@@ -315,11 +315,29 @@ export async function transcribeViaApi(audioPath: string, options?: TranscribeVi
 		},
 	});
 
-	// Timeout: 120s for the full transcription
-	const TIMEOUT_MS = 120_000;
-	const timeout = setTimeout(() => {
+	// Timeout scales with audio length (same policy as the local whisper path): the
+	// realtime server must consume `duration` seconds of audio before it can return a
+	// transcript, so a fixed 120s cap misfires on multi-minute recordings.
+	const audioDurationSec = wavInfo.numFrames / wavInfo.sampleRate;
+	const TIMEOUT_MS = computeTranscribeTimeoutMs(audioDurationSec);
+
+	// Settle exactly once — the WS can close, error, time out, or deliver the transcript
+	// in any order. Any path that leaves the promise pending locks the ListenController
+	// in "transcribing" forever (progress frozen at the last emit). onclose in particular
+	// MUST reject: it can fire without an error event (server-side clean close), and the
+	// old handler cleared the timeout, permanently stranding the await below.
+	let settled = false;
+	let timeout: ReturnType<typeof setTimeout> | undefined;
+	const finish = (op: () => void): void => {
+		if (settled) return;
+		settled = true;
+		if (timeout) clearTimeout(timeout);
+		op();
+	};
+
+	timeout = setTimeout(() => {
 		ws.close();
-		reject(new Error(`WebSocket transcription timed out after ${TIMEOUT_MS / 1000}s`));
+		finish(() => reject(new Error(`WebSocket transcription timed out after ${TIMEOUT_MS / 1000}s`)));
 	}, TIMEOUT_MS);
 
 	let transcript = "";
@@ -401,9 +419,10 @@ export async function transcribeViaApi(audioPath: string, options?: TranscribeVi
 				} else {
 					transcript = transcript.trim();
 				}
-				clearTimeout(timeout);
-				ws.close();
-				resolve(transcript);
+				finish(() => {
+					ws.close();
+					resolve(transcript);
+				});
 				break;
 			}
 
@@ -428,9 +447,10 @@ export async function transcribeViaApi(audioPath: string, options?: TranscribeVi
 							}
 						}
 					}
-					clearTimeout(timeout);
-					ws.close();
-					resolve(transcript || "");
+					finish(() => {
+						ws.close();
+						resolve(transcript || "");
+					});
 				}
 				break;
 			}
@@ -438,9 +458,10 @@ export async function transcribeViaApi(audioPath: string, options?: TranscribeVi
 			case "error": {
 				const errMsg = (msg.message as string) ?? JSON.stringify(msg);
 				logger.error("realtime WS error", { message: errMsg });
-				clearTimeout(timeout);
-				ws.close();
-				reject(new Error(`Realtime transcription error: ${errMsg}`));
+				finish(() => {
+					ws.close();
+					reject(new Error(`Realtime transcription error: ${errMsg}`));
+				});
 				break;
 			}
 		}
@@ -448,14 +469,16 @@ export async function transcribeViaApi(audioPath: string, options?: TranscribeVi
 
 	ws.onerror = (err: Event) => {
 		logger.error("realtime WS onerror", { error: String(err) });
-		clearTimeout(timeout);
 		const errMsg = err instanceof ErrorEvent ? err.message : "WebSocket connection failed";
-		reject(new Error(`Realtime connection error: ${errMsg}`));
+		finish(() => reject(new Error(`Realtime connection error: ${errMsg}`)));
 	};
 
-	ws.onclose = () => {
-		logger.debug("realtime WS closed");
-		clearTimeout(timeout);
+	ws.onclose = (event: CloseEvent) => {
+		const code = event?.code;
+		const reason = event?.reason;
+		logger.debug("realtime WS closed", { code, reason });
+		const detail = code !== undefined ? ` (code=${code}${reason ? `, reason=${reason}` : ""})` : "";
+		finish(() => reject(new Error(`Realtime connection closed before transcription completed${detail}`)));
 	};
 
 	const text = await promise;
