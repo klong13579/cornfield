@@ -10,6 +10,7 @@ import type {
 	MessageContentDto,
 	MessageDto,
 	ModelInfoDto,
+	PermissionRequestDto,
 	ProgressEventDto,
 	SessionPhaseDto,
 	SessionSnapshotDto,
@@ -75,6 +76,8 @@ export interface SessionView {
 	env: EnvironmentSummaryDto | null;
 	/** 最近一次命令失败的可见错误（未连接等），成功或清空后为 undefined。 */
 	commandError?: string;
+	/** 待用户裁决的审批/澄清请求（permission_request push）。 */
+	pendingPermission?: PermissionRequestDto;
 }
 
 const EMPTY_PHASE: SessionPhaseDto = "idle";
@@ -228,6 +231,16 @@ class SessionStore {
 	abortRetry(): void {
 		void this.#run(() => this.#client.abortRetry());
 	}
+	/** 用户裁决回传（optimistic 清空 pending + 发 permission_respond）。 */
+	permissionRespond(requestId: string, choice: string): void {
+		const view = cloneView(this.getSnapshot());
+		if (view.pendingPermission?.requestId === requestId) {
+			view.pendingPermission = undefined;
+			this.#view = view;
+			this.#notify();
+		}
+		void this.#client.permissionRespond(requestId, choice).catch(() => undefined);
+	}
 
 	/** 前端已注册 host tools（set_host_tools 本地权威态）。 */
 	getHostTools(): HostToolDefinitionDto[] {
@@ -379,6 +392,11 @@ class SessionStore {
 				break;
 			case "progress":
 				this.#applyProgress(frame.event);
+				break;
+			case "permission_request":
+				this.#view = cloneView(this.getSnapshot());
+				this.#view.pendingPermission = frame;
+				this.#notify();
 				break;
 		}
 	}

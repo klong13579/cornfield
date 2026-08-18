@@ -175,6 +175,15 @@ export type WireExtensionCommand =
 	 * 不定向（registry 级只读）。
 	 */
 	| { id?: string; type: "list_commands" };
+	 * 壳内验证：注入一个 mock 审批/澄清请求（permission_request push），
+	 * 模拟危险命令审批，不接 agent-core。命令 response 会等到 respond 到达再回。
+	 */
+	| { id?: string; type: "inject_permission"; kind?: "approval" | "clarify" }
+	/**
+	 * 用户裁决回传：requestId 对应 permission_request；choice 白名单（approval: deny|once|session|always），
+	 * clarify 为所选 option 文本。脏值 serve 侧回 error。
+	 */
+	| { id?: string; type: "permission_respond"; requestId: string; choice: string };
 
 export type WireCommand = MultiplexCommand | WireExtensionCommand;
 

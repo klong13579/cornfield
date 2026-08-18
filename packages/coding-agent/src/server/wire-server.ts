@@ -24,6 +24,7 @@ import type { SessionStore } from "../session/session-store";
 import type { TodoPhase } from "../tools/todo-write";
 import * as git from "../utils/git";
 import { WireHostToolBridge } from "./host-tool-bridge";
+import { PERMISSION_TIMEOUT_OUTCOME, PermissionGate } from "./permission-gate";
 import { agentSessionsRoot, defaultSessionsRoot, indexSessions, type SessionIndexSource } from "./session-index";
 import {
 	type AgentMeta,
@@ -145,6 +146,9 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 		};
 		send(conn.ws, { type: "push", event });
 	};
+
+	// ── permission shell（壳内验证）：pending 表 + 广播 + 超时清理 ──
+	const gate = new PermissionGate();
 
 	// ── 事件路由：只推给 active 在该 agent 上的连接 ──
 	registry.subscribe(event => {
@@ -352,6 +356,26 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 					const builtin = BUILTIN_SLASH_COMMANDS.map(c => ({ name: `/${c.name}`, description: c.description }));
 					const virtual = TUI_VIRTUAL_COMMANDS;
 					done({ commands: [...builtin, ...virtual] });
+				case "inject_permission": {
+					const { push, outcome } = gate.inject(command.kind ?? "approval");
+					for (const conn of connections) {
+						send(conn.ws, { type: "push", event: push });
+					}
+					const choice = await outcome;
+					if (choice === PERMISSION_TIMEOUT_OUTCOME) {
+						fail("permission request timed out");
+						return;
+					}
+					done({ requestId: push.requestId, choice });
+					return;
+				}
+				case "permission_respond": {
+					const result = gate.respond(command.requestId, command.choice);
+					if (!result.ok) {
+						fail(result.error);
+						return;
+					}
+					done();
 					return;
 				}
 				default:
@@ -702,6 +726,9 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 				const connection = ws.data;
 				if (!connection) return;
 				connections.delete(connection);
+				if (connections.size === 0) {
+					gate.clearAll();
+				}
 				// host tool 执行者断开：pending 全拒（fail fast）
 				for (const bridge of connection.hostToolBridges.values()) {
 					bridge.detachOutput(`connection ${connection.connectionId} closed`);

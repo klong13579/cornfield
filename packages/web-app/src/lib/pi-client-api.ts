@@ -89,6 +89,8 @@ export interface PiClient {
 	setHostTools(tools: HostToolDefinitionDto[]): Promise<void>;
 	/** host tool 执行结果回传（host_tool_result client frame；视 pi-client 支持与否）。 */
 	hostToolResult?(id: string, resultText: string, isError?: boolean): void;
+	/** 用户裁决回传（permission_respond；approval 白名单 deny|once|session|always，clarify 为 option 文本）。 */
+	permissionRespond(requestId: string, choice: string): Promise<void>;
 
 	// ── P4 会话记录（serve 已实现 get_messages/get_session_stats/get_branch_messages）──
 	/** 拉取当前 attached session 的全部消息（get_messages），转播放时间线。 */

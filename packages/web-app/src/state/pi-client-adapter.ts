@@ -204,6 +204,11 @@ export class PiClientAdapter implements PiClient {
 		return this.#req({ type: "abort_retry" }).then(() => undefined);
 	}
 
+	/** 用户裁决回传（permission_respond）。 */
+	permissionRespond(requestId: string, choice: string): Promise<void> {
+		return this.#req({ type: "permission_respond", requestId, choice }).then(() => undefined);
+	}
+
 	/** 前端已注册的 host tools 声明（set_host_tools 后的本地权威态；UI 工具注册 tab 用）。 */
 	#hostTools: HostToolDefinitionDto[] = [];
 
