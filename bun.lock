@@ -16,7 +16,7 @@
     },
     "packages/agent": {
       "name": "@oh-my-pi/pi-agent-core",
-      "version": "14.5.12",
+      "version": "0.18.0",
       "dependencies": {
         "@oh-my-pi/pi-ai": "catalog:",
         "@oh-my-pi/pi-natives": "catalog:",
@@ -29,7 +29,7 @@
     },
     "packages/ai": {
       "name": "@oh-my-pi/pi-ai",
-      "version": "14.5.12",
+      "version": "0.18.0",
       "bin": {
         "pi-ai": "./src/cli.ts",
       },
@@ -56,7 +56,7 @@
     },
     "packages/coding-agent": {
       "name": "@oh-my-pi/pi-coding-agent",
-      "version": "14.5.12",
+      "version": "0.18.0",
       "bin": {
         "omp": "src/cli.ts",
       },
@@ -102,7 +102,7 @@
     },
     "packages/moa-extension": {
       "name": "@oh-my-pi/moa-extension",
-      "version": "14.5.12",
+      "version": "0.18.0",
       "dependencies": {
         "@oh-my-pi/pi-utils": "workspace:*",
       },
@@ -115,7 +115,7 @@
     },
     "packages/natives": {
       "name": "@oh-my-pi/pi-natives",
-      "version": "14.5.12",
+      "version": "0.18.0",
       "devDependencies": {
         "@napi-rs/cli": "catalog:",
         "@types/bun": "catalog:",
@@ -123,7 +123,7 @@
     },
     "packages/omp-gateway": {
       "name": "@oh-my-pi/omp-gateway",
-      "version": "14.5.13",
+      "version": "0.18.0",
       "dependencies": {
         "@oh-my-pi/pi-coding-agent": "workspace:*",
         "@oh-my-pi/pi-utils": "catalog:",
@@ -163,7 +163,7 @@
     },
     "packages/self-evolution": {
       "name": "@oh-my-pi/self-evolution",
-      "version": "14.5.12",
+      "version": "0.18.0",
       "dependencies": {
         "@oh-my-pi/cognitive-coordination": "workspace:*",
         "@oh-my-pi/pi-ai": "catalog:",
@@ -177,7 +177,7 @@
     },
     "packages/stats": {
       "name": "@oh-my-pi/omp-stats",
-      "version": "14.5.12",
+      "version": "0.18.0",
       "bin": {
         "omp-stats": "./src/index.ts",
       },
@@ -202,7 +202,7 @@
     },
     "packages/tui": {
       "name": "@oh-my-pi/pi-tui",
-      "version": "14.5.12",
+      "version": "0.18.0",
       "dependencies": {
         "@oh-my-pi/pi-natives": "catalog:",
         "@oh-my-pi/pi-utils": "catalog:",
@@ -242,7 +242,7 @@
     },
     "packages/utils": {
       "name": "@oh-my-pi/pi-utils",
-      "version": "14.5.12",
+      "version": "0.18.0",
       "dependencies": {
         "beautiful-mermaid": "catalog:",
         "handlebars": "catalog:",
@@ -268,6 +268,7 @@
         "thinking-orbs": "0.3.1",
       },
       "devDependencies": {
+        "@playwright/test": "1.62.1",
         "@tailwindcss/vite": "^4.2.4",
         "@types/react": "catalog:",
         "@types/react-dom": "catalog:",
@@ -297,16 +298,16 @@
     "@google/genai": "^1.50.1",
     "@mozilla/readability": "^0.6.0",
     "@napi-rs/cli": "3.6.2",
-    "@oh-my-pi/omp-stats": "14.5.12",
-    "@oh-my-pi/pi-agent-core": "14.5.12",
-    "@oh-my-pi/pi-ai": "14.5.12",
+    "@oh-my-pi/omp-stats": "0.18.0",
+    "@oh-my-pi/pi-agent-core": "0.18.0",
+    "@oh-my-pi/pi-ai": "0.18.0",
     "@oh-my-pi/pi-client": "14.5.12",
-    "@oh-my-pi/pi-coding-agent": "14.5.12",
-    "@oh-my-pi/pi-natives": "14.5.12",
-    "@oh-my-pi/pi-tui": "14.5.12",
-    "@oh-my-pi/pi-utils": "14.5.12",
+    "@oh-my-pi/pi-coding-agent": "0.18.0",
+    "@oh-my-pi/pi-natives": "0.18.0",
+    "@oh-my-pi/pi-tui": "0.18.0",
+    "@oh-my-pi/pi-utils": "0.18.0",
     "@oh-my-pi/pi-wire": "14.5.12",
-    "@oh-my-pi/self-evolution": "14.5.12",
+    "@oh-my-pi/self-evolution": "0.18.0",
     "@puppeteer/browsers": "^2.13.0",
     "@sinclair/typebox": "^0.34.49",
     "@smithy/node-http-handler": "^4.6.1",
@@ -769,6 +770,8 @@
     "@oh-my-pi/typescript-edit-benchmark": ["@oh-my-pi/typescript-edit-benchmark@workspace:packages/typescript-edit-benchmark"],
 
     "@oh-my-pi/web-app": ["@oh-my-pi/web-app@workspace:packages/web-app"],
+
+    "@playwright/test": ["@playwright/test@1.62.1", "", { "dependencies": { "playwright": "1.62.1" }, "bin": { "playwright": "cli.js" } }, "sha512-DTcUc8qii+cpHvtOwggMtBRMjKZHXYWdw8syRYu2vtzuq4Wxphqq4NfCs5Zt44L6mA8rfDfj+PHnxFc/FeK6mQ=="],
 
     "@protobufjs/aspromise": ["@protobufjs/aspromise@1.1.2", "", {}, "sha512-j+gKExEuLmKwvz3OgROXtrJ2UG2x8Ch2YZUxahh+s1F2HZ+wAceUNLkvy6zKCPVRkU++ZWQrdxsUeQXmcg4uoQ=="],
 
@@ -1478,6 +1481,10 @@
 
     "pinyin-pro": ["pinyin-pro@3.28.1", "", {}, "sha512-oqz8ulwRgtUXRi0vbqEfGNly19zpyCxYrjhkk5TibGcgSW6eNwS5woajCXRwqURi8Ehc2yOFTiB4uNoZ+NJOnA=="],
 
+    "playwright": ["playwright@1.62.1", "", { "dependencies": { "playwright-core": "1.62.1" }, "optionalDependencies": { "fsevents": "2.3.2" }, "bin": { "playwright": "cli.js" } }, "sha512-0M+L3LAD8/nm554LOla9Ayx0j0tmFZ0FBcoQ7F1VuVHpM/XpiC8RcDzBQB8W5+hA8L22THxELzeF+2WcUzvcLg=="],
+
+    "playwright-core": ["playwright-core@1.62.1", "", { "bin": { "playwright-core": "cli.js" } }, "sha512-wPYSwEBJY9GHraISXqyqtx0na0LpO3XEX7jNDhntbex7tzUS7kLnZsOlFruFJB4Hi/rhDMjXGqHewDZ68nYZVw=="],
+
     "postcss": ["postcss@8.5.14", "", { "dependencies": { "nanoid": "^3.3.11", "picocolors": "^1.1.1", "source-map-js": "^1.2.1" } }, "sha512-SoSL4+OSEtR99LHFZQiJLkT59C5B1amGO1NzTwj7TT1qCUgUO6hxOvzkOYxD+vMrXBM3XJIKzokoERdqQq/Zmg=="],
 
     "prettier": ["prettier@3.8.3", "", { "bin": { "prettier": "bin/prettier.cjs" } }, "sha512-7igPTM53cGHMW8xWuVTydi2KO233VFiTNyF5hLJqpilHfmn8C8gPf+PS7dUT64YcXFbiMGZxS9pCSxL/Dxm/Jw=="],
@@ -1743,6 +1750,8 @@
     "log-update/slice-ansi": ["slice-ansi@7.1.2", "", { "dependencies": { "ansi-styles": "^6.2.1", "is-fullwidth-code-point": "^5.0.0" } }, "sha512-iOBWFgUX7caIZiuutICxVgX1SdxwAVFFKwt1EvMYYec/NWO5meOJ6K5uQxhrYBdQJne4KxiqZc+KptFOWFSI9w=="],
 
     "node-fetch/data-uri-to-buffer": ["data-uri-to-buffer@4.0.1", "", {}, "sha512-0R9ikRb668HB7QDxT1vkpuUBtqc53YyAwMwGeUFKRojY/NWKvdZ+9UYtRfGmhqNbRkTSVpMbmyhXipFFv2cb/A=="],
+
+    "playwright/fsevents": ["fsevents@2.3.2", "", { "os": "darwin" }, "sha512-xiqMQR4xAeHTuB9uWm+fFRcIOgKBMiOBP+eXiyT7jsgVCq1bkVygt00oASowB7EdtpOHaaPgKt812P9ab+DDKA=="],
 
     "proxy-agent/lru-cache": ["lru-cache@7.18.3", "", {}, "sha512-jumlc0BIUrS3qJGgIkWZsyfAM7NCWiBcCDhnd+3NNM5KbBmLTgHVfWBcg6W+rLUsIpzpERPsvwUP7CckAQSOoA=="],
 

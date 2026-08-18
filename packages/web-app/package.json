@@ -24,6 +24,7 @@
 		"thinking-orbs": "0.3.1"
 	},
 	"devDependencies": {
+		"@playwright/test": "1.62.1",
 		"@tailwindcss/vite": "^4.2.4",
 		"@types/react": "catalog:",
 		"@types/react-dom": "catalog:",
