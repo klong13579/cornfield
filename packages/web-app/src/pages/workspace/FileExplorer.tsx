@@ -119,14 +119,14 @@ export function FileExplorer({
 	);
 
 	const preview = (
-		<div className="min-h-0 overflow-auto rounded-lg border border-hairline bg-surface px-4 py-3">
+		<div className="flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-hairline bg-surface px-4 py-3">
 			{selected ? (
 				<>
-					<div className="mb-2 flex items-center gap-2">
+					<div className="mb-2 flex shrink-0 items-center gap-2">
 						<span className="truncate font-mono text-[12px] text-ink">{selected.path}</span>
 						{selected.truncated && <span className="badge fail">截断（{FS_MAX_READ_HINT}）</span>}
 					</div>
-					<pre className="max-h-[420px] overflow-auto whitespace-pre-wrap text-[12px] leading-relaxed text-ink-muted">
+					<pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap text-[12px] leading-relaxed text-ink-muted">
 						{selected.text}
 					</pre>
 				</>
@@ -146,7 +146,7 @@ export function FileExplorer({
 	}
 
 	return (
-		<div className="grid min-h-0 grid-cols-[minmax(220px,340px)_1fr] gap-4">
+		<div className="grid min-h-[900px] grid-cols-[minmax(220px,340px)_1fr] gap-4">
 			{tree}
 			{preview}
 		</div>

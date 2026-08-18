@@ -1,3 +1,4 @@
+import { X } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { HostToolDefinitionDto, ModelInfoDto } from "../../lib/wire-dto";
 import { useSessionStore } from "../../state/session-store";
@@ -103,6 +104,15 @@ export function AgentDetailView({ agentId, onClose }: { agentId: string; onClose
 						/>
 						{agent ? `${statusText(agent.status)} · 最近活跃 ${agent.lastAction ?? "—"}` : "会话未注册"}
 						{agent?.dingtalkBound && <span className="badge done">钉钉已绑定</span>}
+						<button
+							type="button"
+							onClick={onClose}
+							aria-label="关闭详情"
+							title="关闭详情"
+							className="ml-auto flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-ink-subtle transition-colors hover:bg-surface-2 hover:text-ink"
+						>
+							<X size={16} strokeWidth={1.8} />
+						</button>
 					</div>
 					<div className="flex items-baseline gap-4">
 						<h1 className="text-[32px] font-semibold leading-snug tracking-[-0.8px] text-ink">{name}</h1>
