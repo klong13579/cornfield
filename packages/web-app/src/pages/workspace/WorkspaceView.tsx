@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { QueueCard } from "../../components/QueueCard";
 import { DevicePreview } from "../../layout/DevicePreview";
+import { FloatingCardHost } from "../../render/FloatingCardHost";
 import { useSessionStore } from "../../state/session-store";
 import { getUiStore, useUiState } from "../../state/ui-store";
 import { useSession } from "../../state/use-session";
@@ -83,6 +84,8 @@ export function WorkspaceView({ compact = false }: { compact?: boolean }): React
 				<QueueCard count={view.queued} className="mx-auto mb-1 max-w-[800px]" />
 
 				{/* 输入区：单一实例（CSS 自适应桌面/移动），避免模型列表/草稿逻辑双份执行 */}
+				{/* 审批/澄清浮层卡：position:relative 锚点，卡从 composer 上方滑入 */}
+				<FloatingCardHost />
 				<ComposerBar autoFocusDraft={draftSeed} />
 			</div>
 			{!compact && <RightPanel />}
