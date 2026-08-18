@@ -99,6 +99,20 @@ export function HomeView(): React.JSX.Element {
 								? "本地 serve"
 								: "未连接"}
 					</div>
+					{!view.connected && (
+						<div className="mt-3 flex items-center justify-center gap-3 text-[12px] text-ink-faint">
+							<button
+								type="button"
+								onClick={() => void store.connect()}
+								className="rounded border border-hairline bg-surface-2 px-3 py-1.5 text-ink-muted transition-colors hover:border-hairline-strong hover:text-ink"
+							>
+								重试
+							</button>
+							<Link to="/settings" className="text-ink-muted underline-offset-2 hover:underline">
+								去设置
+							</Link>
+						</div>
+					)}
 				</div>
 
 				{/* Suggestions：错峰入场 */}
