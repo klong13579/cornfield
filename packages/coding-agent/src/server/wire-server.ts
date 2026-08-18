@@ -3,7 +3,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { buildModelPriceCatalog, getDashboardStats, syncAllSessions } from "@oh-my-pi/omp-stats";
-import { getAgentDir, getConfigRootDir, isEnoent, logger } from "@oh-my-pi/pi-utils";
+import { getAgentDir, getConfigRootDir, isEnoent, logger, parseFrontmatter } from "@oh-my-pi/pi-utils";
 import type {
 	ClientFrame,
 	ServerFrame,
@@ -494,9 +494,9 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 					break;
 				}
 				case "get_skills": {
-					// W3 D5：只读列出该 agent 已加载技能（session.skills 与 agent 实际运行同源）。
-					// discovery 已按 settings 过滤——此处列表即「已启用」集；B3 启停协议落地前不做任何写返回。
-					// level（user/project/native）+ provider 供前端分类折叠。
+					// W3 D5 + P2-W3-3 回切：只读列出已加载技能 + 已停用名单。
+					// skills = session.skills（discovery 按 settings 过滤后的「已启用」集）；
+					// disabled = settings.skills.ignoredSkills 名单 + 技能目录 SKILL.md 元数据
 					done({
 						skills: session.skills.map(s => ({
 							name: s.name,
@@ -505,6 +505,7 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 							level: s._source?.level ?? "native",
 							provider: s._source?.providerName ?? "builtin",
 						})),
+						disabled: await buildDisabledSkillList(),
 					});
 					break;
 				}
@@ -524,11 +525,13 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 							ignored.add(skillName);
 						}
 						settings.set("skills.ignoredSkills", [...ignored]);
-						// 重发现（与 sdk 同样的发现参数）+ 会话热重载，get_skills 立即反映
+						// 重发现参数与 sdk boot 完全一致（含 settings 的 disabledExtensions——上一版传 []
+						// 会把用户停用的扩展技能全拉回来，42→74 事故根因）+ 会话热重载
 						const skillsSettings = settings.getGroup("skills");
+						const disabledExtensionIds = settings.get("disabledExtensions") ?? [];
 						const result = await discoverSkills(process.cwd(), getAgentDir(), {
 							...skillsSettings,
-							disabledExtensions: [],
+							disabledExtensions: disabledExtensionIds,
 						});
 						await session.reloadSkills(result.skills, result.warnings);
 						done({ ok: true, name: skillName, enabled: command.enabled });
@@ -944,6 +947,51 @@ async function readTextFileClipped(
 	}
 	if (text.length <= FS_MAX_READ_BYTES) return { text, truncated: false };
 	return { text: text.slice(0, FS_MAX_READ_BYTES), truncated: true };
+}
+
+// ── P2-W3-3 回切：已停用技能名单（settings.skills.ignoredSkills + SKILL.md 元数据）──
+
+interface DisabledSkillRow {
+	name: string;
+	description?: string;
+}
+
+async function buildDisabledSkillList(): Promise<DisabledSkillRow[]> {
+	const ignored = Settings.instance.get("skills.ignoredSkills") ?? [];
+	if (ignored.length === 0) return [];
+	const agentDir = getAgentDir();
+	const cwd = process.cwd();
+	const rows: DisabledSkillRow[] = [];
+	for (const name of ignored) {
+		const description = await readSkillFrontmatterDescription(name, cwd, agentDir);
+		rows.push(description !== undefined ? { name, description } : { name });
+	}
+	return rows;
+}
+
+/** 读技能目录 SKILL.md 的 description（用户级 agentDir/skills 或项目级 .omp/skills）。 */
+async function readSkillFrontmatterDescription(
+	name: string,
+	cwd: string,
+	agentDir: string,
+): Promise<string | undefined> {
+	const candidates = [
+		path.join(agentDir, "skills", name, "SKILL.md"),
+		path.join(cwd, ".omp", "skills", name, "SKILL.md"),
+	];
+	for (const filePath of candidates) {
+		try {
+			const content = await Bun.file(filePath).text();
+			const { frontmatter } = parseFrontmatter(content, { source: filePath });
+			if (typeof frontmatter.description === "string" && frontmatter.description.length > 0) {
+				return frontmatter.description;
+			}
+			return undefined;
+		} catch {
+			// 该候选目录不存在/损坏——试下一个
+		}
+	}
+	return undefined;
 }
 
 // ── gateway 运行状态（只读转发 gateway.status.json）──

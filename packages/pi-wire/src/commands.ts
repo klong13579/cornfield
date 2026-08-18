@@ -161,9 +161,11 @@ export type WireExtensionCommand =
 	 */
 	| { id?: string; type: "get_memory" }
 	/**
-	 * W3 D5：只读列出目标 agent 已加载技能（session.skills 同源——discovery 已按 settings
-	 * 过滤，「已启用集」语义）。返回 name/description/source/level（user|project|native）/provider。
-	 * 不实现启停写入：B3 技能管理协议落地前的只读前置。
+	 * W3 D5 + P2-W3-3：只读列出已加载技能 + 已停用名单。
+	 * skills = session.skills（discovery 按 settings 过滤后的「已启用」集）：name/description/
+	 * source/level（user|project|native）/provider。
+	 * disabled = settings.skills.ignoredSkills 名单 + 技能目录 SKILL.md 元数据（name/description?）
+	 * ——回切入口数据源（SkillsView「显示已停用」）。
 	 * - 无 sessionId：当前连接 active session；有 sessionId：定向该 agent（lazy attach）
 	 */
 	| { id?: string; type: "get_skills"; sessionId?: string }

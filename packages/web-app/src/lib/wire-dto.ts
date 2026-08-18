@@ -398,6 +398,12 @@ export interface SkillDto {
 	provider: string;
 }
 
+/** 已停用技能（settings.skills.ignoredSkills 名单 + SKILL.md 元数据；回切入口）。 */
+export interface DisabledSkillDto {
+	name: string;
+	description?: string;
+}
+
 /** 连接后返回（hello_ack 内容 + 环境摘要，Home 用）。 */
 export interface EnvironmentSummaryDto {
 	repos: string;

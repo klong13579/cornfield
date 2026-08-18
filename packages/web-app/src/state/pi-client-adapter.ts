@@ -8,6 +8,7 @@ import type {
 	ConnectionInfoDto,
 	CronLogEntryDto,
 	DashboardStatsDto,
+	DisabledSkillDto,
 	EnvironmentSummaryDto,
 	HostToolDefinitionDto,
 	ImageContentDto,
@@ -362,10 +363,12 @@ export class PiClientAdapter implements PiClient {
 		return this.#req<MemoryProjectionDto>({ type: "get_memory" } as never);
 	}
 
-	/** 已加载技能（get_skills；session.skills 同源，只读；失败抛错由调用方空态）。 */
-	async getSkills(): Promise<SkillDto[]> {
-		const result = await this.#req<{ skills?: SkillDto[] }>({ type: "get_skills" } as never);
-		return result.skills ?? [];
+	/** 已加载技能 + 已停用名单（get_skills；只读；失败抛错由调用方空态）。 */
+	async getSkills(): Promise<{ skills: SkillDto[]; disabled: DisabledSkillDto[] }> {
+		const result = await this.#req<{ skills?: SkillDto[]; disabled?: DisabledSkillDto[] }>({
+			type: "get_skills",
+		} as never);
+		return { skills: result.skills ?? [], disabled: result.disabled ?? [] };
 	}
 
 	/** 启停技能（set_skill_enabled；写配置 + 重发现热重载，失败抛错由调用方提示）。 */

@@ -4,6 +4,7 @@ import type {
 	AgentInfoDto,
 	CronLogEntryDto,
 	DashboardStatsDto,
+	DisabledSkillDto,
 	EnvironmentSummaryDto,
 	HostToolDefinitionDto,
 	ImageContentDto,
@@ -373,8 +374,8 @@ class SessionStore {
 		return this.#client.getMemory();
 	}
 
-	/** 已加载技能（get_skills，代理到 pi-client；展示层自行持有状态）。 */
-	fetchSkills(): Promise<SkillDto[]> {
+	/** 已加载技能 + 已停用名单（get_skills，代理到 pi-client；展示层自行持有状态）。 */
+	fetchSkills(): Promise<{ skills: SkillDto[]; disabled: DisabledSkillDto[] }> {
 		return this.#client.getSkills();
 	}
 

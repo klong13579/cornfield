@@ -136,16 +136,25 @@ describe("P2-W3-3 — set_skill_enabled（B3 技能写协议）", () => {
 			const offRes = off.result as { enabled: boolean };
 			expect(offRes.enabled).toBe(false);
 
-			// get_skills 立即移除（重发现热重载）
-			const afterOff = (await request(ws, { type: "get_skills" })) as { skills: SkillEntry[] };
+			// get_skills 立即移除（重发现热重载），且 disabled 名单带上描述（SKILL.md 元数据）
+			const afterOff = (await request(ws, { type: "get_skills" })) as {
+				skills: SkillEntry[];
+				disabled?: { name: string; description?: string }[];
+			};
 			expect(afterOff.skills.some(s => s.name === "demo-user-skill")).toBe(false);
+			expect(Array.isArray(afterOff.disabled)).toBe(true);
+			const dropped = afterOff.disabled?.find(d => d.name === "demo-user-skill");
+			expect(dropped).toBeDefined();
+			expect(dropped?.description).toContain("用户级技能 seed");
 
 			// config.yml 落盘（settings.ignoredSkills 含 demo-user-skill）——后台异步保存，轮询等写入
 			const cfgPath = path.join(isolatedHome, ".omp", "agent", "config.yml");
 			let cfg = "";
 			const cfgDeadline = Date.now() + 3000;
 			while (Date.now() < cfgDeadline) {
-				cfg = await Bun.file(cfgPath).text().catch(() => "");
+				cfg = await Bun.file(cfgPath)
+					.text()
+					.catch(() => "");
 				if (cfg.includes("demo-user-skill")) break;
 				await Bun.sleep(100);
 			}
@@ -158,8 +167,12 @@ describe("P2-W3-3 — set_skill_enabled（B3 技能写协议）", () => {
 				enabled: true,
 			})) as Frame;
 			expect(on.ok).toBe(true);
-			const afterOn = (await request(ws, { type: "get_skills" })) as { skills: SkillEntry[] };
+			const afterOn = (await request(ws, { type: "get_skills" })) as {
+				skills: SkillEntry[];
+				disabled?: { name: string }[];
+			};
 			expect(afterOn.skills.some(s => s.name === "demo-user-skill")).toBe(true);
+			expect(afterOn.disabled?.some(d => d.name === "demo-user-skill")).toBe(false);
 		} finally {
 			ws.close();
 		}
