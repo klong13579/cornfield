@@ -179,6 +179,19 @@ export type WireExtensionCommand =
 	 */
 	| { id?: string; type: "list_commands" }
 	/**
+	 * P2-W3-1（B6 只读代理）：拉取 gateway cron 任务表。
+	 * 数据源 jobs.json 直读（~/.omp/gateway-data/scheduler/jobs.json），不依赖 gateway 进程，
+	 * 不 import gateway 运行时。返回 { tasks: TaskRowDto 形状 }（字段对齐 jobs.json 任务）。
+	 */
+	| { id?: string; type: "get_cron_tasks" }
+	/**
+	 * P2-W3-1（B6 只读代理）：拉取 cron 执行日志（~/.omp/gateway-data/scheduler/logs/by-task/ 直读）。
+	 * - taskId 可选：缺省 = 全部任务；
+	 * - days 回溯天数（默认 3，钳 1-30）；limit 返回条数（默认 50，钳 1-200）
+	 * 返回 { logs: [{ taskId, id, ts, status, exitCode, durationMs, output(截断), stderr(截断) }] }。
+	 */
+	| { id?: string; type: "get_cron_logs"; taskId?: string; days?: number; limit?: number }
+	/**
 	 * 壳内验证：注入一个 mock 审批/澄清请求（permission_request push），
 	 * 模拟危险命令审批，不接 agent-core。命令 response 会等到 respond 到达再回。
 	 */
