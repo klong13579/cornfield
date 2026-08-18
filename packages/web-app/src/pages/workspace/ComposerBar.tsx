@@ -8,6 +8,35 @@ import { getUiStore, useUiState } from "../../state/ui-store";
 import { useSession } from "../../state/use-session";
 import { DEFAULT_COMMANDS, filterSlashCommands, type SlashCommandDef, SlashPalette } from "./SlashPalette";
 
+/** 模型菜单行（provider + id）。 */
+interface ModelMenuRow {
+	id: string;
+	provider: string;
+}
+
+/**
+ * 模型按 provider 分组；当前模型所在 provider 置顶，其余保持 serve 返回顺序。
+ * 纯函数——从 ComposerBar 提出，便于单测（模型下拉分组是「只显示第一个 provider」
+ * 截断问题修复的一部分）。
+ */
+export function groupModelsByProvider(
+	modelList: ModelMenuRow[],
+	currentModelId: string | null | undefined,
+): Array<[string, ModelMenuRow[]]> {
+	const byProvider = new Map<string, ModelMenuRow[]>();
+	for (const m of modelList) {
+		const group = byProvider.get(m.provider) ?? [];
+		group.push(m);
+		byProvider.set(m.provider, group);
+	}
+	const currentProvider = currentModelId ? modelList.find(m => m.id === currentModelId)?.provider : undefined;
+	return [...byProvider.entries()].sort((a, b) => {
+		if (currentProvider && a[0] === currentProvider) return -1;
+		if (currentProvider && b[0] === currentProvider) return 1;
+		return 0; // 稳定排序：同权重保留 serve 首现顺序
+	});
+}
+
 const THINKING_LEVELS = ["off", "low", "medium", "high"];
 
 function statusDot(s: string): string {
@@ -92,20 +121,7 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 	}, [store, view.connected]);
 
 	/** 模型按 provider 分组；当前模型所在 provider 置顶，其余保持 serve 返回顺序。 */
-	const modelGroups = useMemo(() => {
-		const byProvider = new Map<string, Array<{ id: string; provider: string }>>();
-		for (const m of modelList) {
-			const group = byProvider.get(m.provider) ?? [];
-			group.push(m);
-			byProvider.set(m.provider, group);
-		}
-		const currentProvider = modelList.find(m => m.id === view.model)?.provider;
-		return [...byProvider.entries()].sort((a, b) => {
-			if (currentProvider && a[0] === currentProvider) return -1;
-			if (currentProvider && b[0] === currentProvider) return 1;
-			return 0; // 稳定排序：同权重保留 serve 首现顺序
-		});
-	}, [modelList, view.model]);
+	const modelGroups = useMemo(() => groupModelsByProvider(modelList, view.model), [modelList, view.model]);
 
 	const active = view.isStreaming || view.phase !== "idle";
 	const agent = view.agents.find(a => a.id === agentId) ?? view.agents[0];
