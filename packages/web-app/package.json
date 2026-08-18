@@ -21,9 +21,15 @@
 		"@oh-my-pi/pi-wire": "catalog:",
 		"croner": "10.0.1",
 		"lucide-react": "catalog:",
+		"mermaid": "11.16.1",
 		"react": "catalog:",
 		"react-dom": "catalog:",
+		"react-markdown": "10.1.0",
 		"react-router-dom": "^7.1.1",
+		"rehype-highlight": "7.0.2",
+		"rehype-katex": "7.0.1",
+		"remark-gfm": "4.0.1",
+		"remark-math": "6.0.0",
 		"thinking-orbs": "0.3.1"
 	},
 	"devDependencies": {

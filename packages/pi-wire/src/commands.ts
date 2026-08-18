@@ -174,7 +174,8 @@ export type WireExtensionCommand =
 	 * 返回 { commands: [{ name（含前导 /）, description }] }——W1 SlashPalette 真源。
 	 * 不定向（registry 级只读）。
 	 */
-	| { id?: string; type: "list_commands" };
+	| { id?: string; type: "list_commands" }
+	/**
 	 * 壳内验证：注入一个 mock 审批/澄清请求（permission_request push），
 	 * 模拟危险命令审批，不接 agent-core。命令 response 会等到 respond 到达再回。
 	 */
