@@ -1,12 +1,7 @@
 import { useEffect, useRef } from "react";
 import { Orb } from "../../components/Orb";
-<<<<<<< HEAD
-import { ThinkingFold } from "../../components/ThinkingFold";
-import { ToolCard } from "../../components/ToolCard";
 import { Markdown } from "../../render/Markdown";
-=======
 import { ActivityFold } from "../../render/ActivityFold";
->>>>>>> w1-shell
 import type { TranscriptMessage } from "../../state/session-store";
 import { useSessionStore } from "../../state/session-store";
 import { useSession } from "../../state/use-session";
