@@ -85,7 +85,7 @@ export function HomeView(): React.JSX.Element {
 				{/* Greeting */}
 				<div className="rise-in flex flex-col items-center text-center">
 					<div className="flex items-center justify-center gap-3.5">
-						<Orb state="breathing" size={56} className="shrink-0" />
+						<Orb state="composing" size={56} className="shrink-0" />
 						<h1 className="text-[32px] font-semibold leading-snug tracking-[-0.8px] text-ink">
 							{timeGreeting()}
 							{userName ? `，${userName}` : ""}
