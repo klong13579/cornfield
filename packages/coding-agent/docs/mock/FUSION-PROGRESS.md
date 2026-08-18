@@ -1,4 +1,4 @@
-# Fusion 总账（夜班+日班全周期 · 完结）
+# Fusion 总账（Phase 1 + Phase 2 · 完结）
 
 > 2026-08-18 · 基线 0c54175c4b → HEAD，81 文件 +7807/-437，27 张卡全交付
 > 分支：hermes-fusion（主），w1-shell / w2-render / w3-data（三工位），一工位一 worktree
@@ -81,3 +81,32 @@
 - **验收纪律有效**：W3 一次虚假验收被抓；e2e 抓到流式 bug 和合并语法错误——"不要被骗"的机制真实起效
 - **三步决策门**：W2 方案等确认那次是好纪律，但也造成 idle——后续对信任度高的 agent 可以"方案+开工并行，事后审"
 - 成本：全程三 agent 并行约 8 小时，模型费合计 <$25（kimi-k2.6/deepseek-v4-pro/flash 三池）
+
+
+## 六、Phase 2 交付（追加，2026-08-18 下午）
+
+| 卡 | 内容 | commit |
+|---|---|---|
+| P2-W2-1 | AssistantTurn（ActivityFold+MsgActions 行）+ FloatingCardHost | 77be94431f |
+| P2-W2-2 | 渲染统一出口 + mermaid 复制源码 + ThinkingFold 死代码清除 | 598b81fae6 |
+| P2-W3-1 | B6 cron 只读代理（get_cron_tasks，真机 6 任务） | 333839e8d0 |
+| P2-W3-2 | cron 日志接口（真机 5 条记录 + 截断契约） | 22c432e340 |
+| P2-W3-3 | B3 技能写协议（42→41→42 严格往返 + disabled 名单/回切） | 7490c8bdc1 |
+| P2-W1-1 | **agent-core canUseTool 挂起钩子**（五路单测，零变化守卫） | ef1a367d93 |
+| P2-W1-4 | **serve 审批接线——审批链全真**（bash 上闸、once/session、14 测试） | 5ee903ad88 |
+
+### Phase 2 里程碑：审批闸门上线
+agent 跑 bash → web/任一端弹审批卡 → 人批（once/session）→ agent 继续。
+终验活链路：真 serve + inject approval → push 实际到达 → respond → 全链路 true。
+always 持久化按安全理由砍掉（模糊 pattern 雷区），permission-allowlist.json 留后续卡。
+
+### Phase 2 事故
+- W1/W2 被外部误杀 ×1 → worktree 是真相源，10 分钟恢复，W1 未提交 81 行零丢失
+- intercom 会话 ID 失效两次（worker 发旧 ID 静默丢信）→ 上报地址统一纠正 + intercom-check.sh 每日轮询进监控
+- W3 技能热重载 bug（42→74）→ 打回复修（重发现参数对齐 boot），往返严格一致
+
+### 遗留（更新）
+1. always 持久 allowlist + glob pattern（安全设计需单独立项）
+2. 澄清 disabledExtensions 与 ignoredSkills 双通道的管理面（现面板只管后者）
+3. web-app 全量 check:types 存量红（部分树缺 markdown 依赖——分支树孤立问题，合并主线已自愈）
+4. 存量 backlog 不变（协议版本协商/omp-gateway 在途测试/低优 hermes 项）
