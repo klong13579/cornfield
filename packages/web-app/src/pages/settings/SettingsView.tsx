@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ensureNotifyPermission, loadNotifyPrefs, type NotifyPrefs, saveNotifyPrefs } from "../../lib/notifications";
 import { DEFAULT_SERVE_CONFIG } from "../../state/pi-client-adapter";
 import { useSessionStore } from "../../state/session-store";
 import { getUiStore, useUiState } from "../../state/ui-store";
@@ -16,6 +17,23 @@ export function SettingsView(): React.JSX.Element {
 	const [wsUrl, setWsUrl] = useState(view.wsUrl);
 	const [token, setToken] = useState("");
 	const [saveError, setSaveError] = useState<string | null>(null);
+	const [notifyPrefs, setNotifyPrefs] = useState<NotifyPrefs>(loadNotifyPrefs);
+	const [notifyPermDenied, setNotifyPermDenied] = useState(
+		typeof Notification !== "undefined" && Notification.permission === "denied",
+	);
+	/** B7-1：开关 → localStorage + 权限（开启时请求）；拒绝后 desc 提示。 */
+	const toggleNotify =
+		(key: keyof NotifyPrefs) =>
+		(v: boolean): void => {
+			const next = { ...notifyPrefs, [key]: v };
+			setNotifyPrefs(next);
+			saveNotifyPrefs(next);
+			if (v) {
+				void ensureNotifyPermission().then(ok => {
+					if (!ok) setNotifyPermDenied(true);
+				});
+			}
+		};
 	const saveConnection = async (): Promise<void> => {
 		setSaveError(null);
 		try {
@@ -163,24 +181,33 @@ export function SettingsView(): React.JSX.Element {
 					<div className="divide-y divide-hairline rounded-lg border border-hairline bg-surface">
 						<ToggleRow
 							label="Agent 完成"
-							desc="通知通道待后端（缺口 B7）"
-							on={false}
-							onToggle={() => undefined}
-							disabled
+							desc={
+								notifyPermDenied
+									? "浏览器已拒绝通知权限——请在站点设置中开启"
+									: "页面不在前台时，回合结束发浏览器通知（Notification API）"
+							}
+							on={notifyPrefs.agentDone}
+							onToggle={toggleNotify("agentDone")}
 						/>
 						<ToggleRow
 							label="出错告警"
-							desc="通知通道待后端（缺口 B7）"
-							on={false}
-							onToggle={() => undefined}
-							disabled
+							desc={
+								notifyPermDenied
+									? "浏览器已拒绝通知权限——请在站点设置中开启"
+									: "回合/命令/重试出错时提醒（页面不在前台才发）"
+							}
+							on={notifyPrefs.errors}
+							onToggle={toggleNotify("errors")}
 						/>
 						<ToggleRow
 							label="定时任务"
-							desc="通知通道待后端（缺口 B7）"
-							on={false}
-							onToggle={() => undefined}
-							disabled
+							desc={
+								notifyPermDenied
+									? "浏览器已拒绝通知权限——请在站点设置中开启"
+									: "后台轮询 cron 执行日志（B6 只读），新运行完成时提醒（页面不在前台才发）"
+							}
+							on={notifyPrefs.cron}
+							onToggle={toggleNotify("cron")}
 						/>
 					</div>
 				</section>

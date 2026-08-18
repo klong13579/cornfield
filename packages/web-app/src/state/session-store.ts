@@ -1,3 +1,4 @@
+import { loadNotifyPrefs, notifyGuarded } from "../lib/notifications";
 import type { FsEntryDto, GatewayStatusDto, PiClient } from "../lib/pi-client-api";
 import type { BranchPoint, PlaybackEntry, SessionRecordSummary } from "../lib/records";
 import type {
@@ -83,6 +84,24 @@ export interface SessionView {
 	commandError?: string;
 	/** 待用户裁决的审批/澄清请求（permission_request push）。 */
 	pendingPermission?: PermissionRequestDto;
+}
+
+/** B7-1：回合收尾通知——有错误消息走出错告警（errors 开关），否则走完成（agentDone 开关）。 */
+function maybeNotifyTurnEnd(view: SessionView): void {
+	try {
+		const prefs = loadNotifyPrefs();
+		const lastMsg = view.live ?? view.messages[view.messages.length - 1];
+		if (lastMsg?.error) {
+			if (!prefs.errors) return;
+			void notifyGuarded("出错告警 · Agent 回合", lastMsg.error.slice(0, 120), "omp-notify-errors");
+			return;
+		}
+		if (!prefs.agentDone) return;
+		const reply = (lastMsg?.text ?? "").trim();
+		void notifyGuarded("Agent 完成", reply ? reply.slice(0, 80) : "回合已结束", "omp-notify-done");
+	} catch {
+		// 通知失败静默——前台本就该静默
+	}
 }
 
 const EMPTY_PHASE: SessionPhaseDto = "idle";
@@ -182,6 +201,8 @@ class SessionStore {
 			this.#view = cloneView(this.getSnapshot());
 			this.#view.commandError = `命令失败（未连接）：${msg}`;
 			this.#notify();
+			// B7-1：出错告警（命令失败）
+			void notifyGuarded("出错告警 · 命令失败", msg.slice(0, 120), "omp-notify-errors");
 			return undefined;
 		}
 	}
@@ -482,6 +503,8 @@ class SessionStore {
 				view.isStreaming = false;
 				view.steer = undefined;
 				if (view.phase === "streaming") view.phase = EMPTY_PHASE;
+				// B7-1：回合收尾通知（仅 turn_end 触发一次；页面不在前台才发）
+				if (event.type === "turn_end") void maybeNotifyTurnEnd(view);
 				if (view.live) {
 					view.live.done = true;
 					view.live.textStreaming = false;
@@ -545,6 +568,10 @@ class SessionStore {
 				break;
 			case "auto_retry_start":
 				view.phase = "retrying";
+				// B7-1：出错告警（重试前最后一次失败带 errorMessage）
+				if (event.errorMessage) {
+					void notifyGuarded("出错告警 · 自动重试", event.errorMessage.slice(0, 120), "omp-notify-errors");
+				}
 				break;
 			// todo_reminder / todo_auto_clear —— UI 提示型，暂不消费
 			case "todo_reminder":
