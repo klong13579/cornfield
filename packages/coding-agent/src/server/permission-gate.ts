@@ -1,21 +1,30 @@
 import { randomUUID } from "node:crypto";
+import type { CanUseToolContext } from "@oh-my-pi/pi-agent-core";
 import type { PermissionRequestPush } from "@oh-my-pi/pi-wire";
 
 /**
- * PermissionGate —— 审批/澄清 pending 表（壳内验证 mode）。
+ * PermissionGate —— 审批/澄清 pending 表。
  *
- * 参考 host-tool-bridge.ts 的 pending 模式：inject 建 pending → push 给连接（由
- * 上层广播），respond 按 requestId 决议；超时/清空时 resolve 哨兵值，防泄漏。
+ * 复用 host-tool-bridge.ts 的 pending 模式：inject/requestApproval 建 pending →
+ * push 给连接（由上层广播），respond 按 requestId 决议；超时/清空时 resolve 哨兵值，防泄漏。
  *
- * 与 WS 传输解耦（不持有连接）：`inject` 产出 push + outcome promise，`respond`
- * 只做白名单校验 + 决议。将来 agent-core canUseTool 接上后复用同一类即可。
+ * 与 WS 传输解耦（不持有连接）：`inject`/`requestApproval` 产出 push + outcome promise，
+ * `respond` 只做白名单校验 + 决议。
+ *
+ * 挂起语义（P2-W1-4）：
+ *   - 超时默认：拒绝（outcome settle 为 PERMISSION_TIMEOUT_OUTCOME）；
+ *   - abort：由 agent-core 的 canUseTool 三方竞速拒绝，这里的 pending 靠自身超时/clearAll 自清理；
+ *   - 多端：上层广播 push 给全部连接，谁先 respond 谁赢。
+ *
+ * 放行范围（P2-W1-4 拍板）：once=本次放行；session=本 serve 进程内精确命令放行（内存）。
+ * always 持久化 allowlist 从本卡剔除（模糊 pattern 派生/匹配是安全雷区）。
  */
 
 export type PermissionKind = "approval" | "clarify";
 
 export const PERMISSION_TIMEOUT_OUTCOME = "__timeout__";
 
-export const APPROVAL_CHOICES = new Set(["deny", "once", "session", "always"]);
+export const APPROVAL_CHOICES = new Set(["deny", "once", "session"]);
 
 export const MOCK_APPROVAL = {
 	command: "git push origin main --force-with-lease",
@@ -28,17 +37,23 @@ export const MOCK_CLARIFY = {
 	options: ["只迁亮色（V6 现状）", "亮色 + 深色都迁", "先亮色，深色进 backlog"],
 };
 
-function buildPermissionPush(requestId: string, kind: PermissionKind): PermissionRequestPush {
-	if (kind === "approval") {
-		return {
-			type: "permission_request",
-			requestId,
-			kind: "approval",
-			command: MOCK_APPROVAL.command,
-			description: MOCK_APPROVAL.description,
-			patternKeys: MOCK_APPROVAL.patternKeys,
-		};
-	}
+function buildApprovalPush(
+	requestId: string,
+	command: string,
+	description: string,
+	patternKeys: string[],
+): PermissionRequestPush {
+	return {
+		type: "permission_request",
+		requestId,
+		kind: "approval",
+		command,
+		description,
+		patternKeys,
+	};
+}
+
+function buildClarifyPush(requestId: string): PermissionRequestPush {
 	return {
 		type: "permission_request",
 		requestId,
@@ -50,38 +65,86 @@ function buildPermissionPush(requestId: string, kind: PermissionKind): Permissio
 
 interface PendingPermission {
 	kind: PermissionKind;
+	command?: string;
 	resolve: (choice: string) => void;
 }
 
 export type PermissionRespondResult = { ok: true } | { ok: false; error: string };
 
+/** 精确匹配用：trim + 折叠空白，session allowlist 的 key。 */
+function normalizeCommand(command: string): string {
+	return command.trim().replace(/\s+/g, " ");
+}
+
 export class PermissionGate {
 	readonly #pending = new Map<string, PendingPermission>();
+	readonly #sessionAllowlist = new Set<string>();
 	readonly #timeoutMs: number;
 
-	constructor(timeoutMs = 60_000) {
+	constructor(timeoutMs = 120_000) {
 		this.#timeoutMs = timeoutMs;
 	}
 
-	/** 注入一个请求；返回 push（上层广播）与 outcome（respond/timeout 时 settle 为 choice）。 */
-	inject(kind: PermissionKind): { push: PermissionRequestPush; outcome: Promise<string> } {
+	/** 测试通道：注入一个 mock 审批/澄清请求（不接 agent-core）。 */
+	inject(kind: PermissionKind): { requestId: string; push: PermissionRequestPush; outcome: Promise<string> } {
+		if (kind === "approval") {
+			return this.#requestApproval(MOCK_APPROVAL.command, MOCK_APPROVAL.description, MOCK_APPROVAL.patternKeys);
+		}
+		return this.#requestClarify();
+	}
+
+	/** 真实审批源：bash 命令审批。`command` 在 respond("session") 时入内存 allowlist。 */
+	requestApproval(
+		command: string,
+		description: string,
+	): { requestId: string; push: PermissionRequestPush; outcome: Promise<string> } {
+		return this.#requestApproval(command, description, []);
+	}
+
+	/** 该精确命令是否已在本 serve 进程内被放行过。 */
+	isSessionApproved(command: string): boolean {
+		return this.#sessionAllowlist.has(normalizeCommand(command));
+	}
+
+	#requestApproval(
+		command: string,
+		description: string,
+		patternKeys: string[],
+	): { requestId: string; push: PermissionRequestPush; outcome: Promise<string> } {
 		const requestId = randomUUID();
 		const { promise, resolve } = Promise.withResolvers<string>();
 		const timer = setTimeout(() => {
 			if (this.#pending.delete(requestId)) resolve(PERMISSION_TIMEOUT_OUTCOME);
 		}, this.#timeoutMs);
 		this.#pending.set(requestId, {
-			kind,
+			kind: "approval",
+			command,
 			resolve: choice => {
 				clearTimeout(timer);
 				resolve(choice);
 			},
 		});
-		return { push: buildPermissionPush(requestId, kind), outcome: promise };
+		return { requestId, push: buildApprovalPush(requestId, command, description, patternKeys), outcome: promise };
+	}
+
+	#requestClarify(): { requestId: string; push: PermissionRequestPush; outcome: Promise<string> } {
+		const requestId = randomUUID();
+		const { promise, resolve } = Promise.withResolvers<string>();
+		const timer = setTimeout(() => {
+			if (this.#pending.delete(requestId)) resolve(PERMISSION_TIMEOUT_OUTCOME);
+		}, this.#timeoutMs);
+		this.#pending.set(requestId, {
+			kind: "clarify",
+			resolve: choice => {
+				clearTimeout(timer);
+				resolve(choice);
+			},
+		});
+		return { requestId, push: buildClarifyPush(requestId), outcome: promise };
 	}
 
 	/**
-	 * 决议一个 pending。approval 的 choice 必须命中白名单（deny|once|session|always），
+	 * 决议一个 pending。approval 的 choice 必须命中白名单（deny|once|session），
 	 * clarify 为任意 option 文本。未知 requestId 或脏值返回 error，不消耗 pending。
 	 */
 	respond(requestId: string, choice: string): PermissionRespondResult {
@@ -93,6 +156,9 @@ export class PermissionGate {
 			return { ok: false, error: `invalid choice: ${choice}` };
 		}
 		this.#pending.delete(requestId);
+		if (pending.kind === "approval" && choice === "session" && pending.command) {
+			this.#sessionAllowlist.add(normalizeCommand(pending.command));
+		}
 		pending.resolve(choice);
 		return { ok: true };
 	}
@@ -104,4 +170,24 @@ export class PermissionGate {
 		}
 		this.#pending.clear();
 	}
+}
+
+/**
+ * 构造 serve 侧 canUseTool 钩子：只给 bash 上闸门，其余工具直接放行（零变化）。
+ * bash 命中 session allowlist 直接放行；否则 requestApproval → 广播 push → 等 respond。
+ * once/session → 放行；deny/超时/断开 → 拒绝。
+ */
+export function createApprovalCanUseTool(
+	gate: PermissionGate,
+	broadcast: (push: PermissionRequestPush) => void,
+): (ctx: CanUseToolContext) => Promise<boolean> {
+	return async ctx => {
+		if (ctx.name !== "bash") return true;
+		const command = typeof ctx.args?.command === "string" ? ctx.args.command : JSON.stringify(ctx.args);
+		if (gate.isSessionApproved(command)) return true;
+		const { push, outcome } = gate.requestApproval(command, ctx.name);
+		broadcast(push);
+		const choice = await outcome;
+		return choice === "once" || choice === "session";
+	};
 }

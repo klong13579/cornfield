@@ -6,6 +6,7 @@ import { buildModelPriceCatalog, getDashboardStats, syncAllSessions } from "@oh-
 import { getAgentDir, getConfigRootDir, isEnoent, logger } from "@oh-my-pi/pi-utils";
 import type {
 	ClientFrame,
+	PermissionRequestPush,
 	ServerFrame,
 	WireCommand,
 	WireCommandOfType,
@@ -42,6 +43,10 @@ export interface WireServerOptions {
 	defaultSession: { session: AgentSession; store: SessionStore };
 	/** lazy attach 注册表 agent 的工厂（serve.ts 装配）。 */
 	sessionFactory: SessionFactory;
+	/** 审批 pending 表（serve.ts 装配，canUseTool 与 inject_permission 共用）。 */
+	permissionGate?: PermissionGate;
+	/** 注册 permission_request 广播（canUseTool 触发时用）。 */
+	registerPermissionBroadcast?: (fn: (push: PermissionRequestPush) => void) => void;
 }
 
 /** 用户 HOME（读取 gateway 状态文件用；进程替换时跟随环境）。 */
@@ -147,8 +152,14 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 		send(conn.ws, { type: "push", event });
 	};
 
-	// ── permission shell（壳内验证）：pending 表 + 广播 + 超时清理 ──
-	const gate = new PermissionGate();
+	// ── permission shell：pending 表 + 广播（canUseTool 与 inject_permission 共用）+ 超时清理 ──
+	const gate = options.permissionGate ?? new PermissionGate();
+	const broadcastPermission = (push: PermissionRequestPush): void => {
+		for (const conn of connections) {
+			send(conn.ws, { type: "push", event: push });
+		}
+	};
+	options.registerPermissionBroadcast?.(broadcastPermission);
 
 	// ── 事件路由：只推给 active 在该 agent 上的连接 ──
 	registry.subscribe(event => {
@@ -360,9 +371,7 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 				}
 				case "inject_permission": {
 					const { push, outcome } = gate.inject(command.kind ?? "approval");
-					for (const conn of connections) {
-						send(conn.ws, { type: "push", event: push });
-					}
+					broadcastPermission(push);
 					const choice = await outcome;
 					if (choice === PERMISSION_TIMEOUT_OUTCOME) {
 						fail("permission request timed out");

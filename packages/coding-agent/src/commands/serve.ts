@@ -13,12 +13,14 @@
 import * as path from "node:path";
 import { logger } from "@oh-my-pi/pi-utils";
 import { Command, Flags } from "@oh-my-pi/pi-utils/cli";
+import type { PermissionRequestPush } from "@oh-my-pi/pi-wire";
 import { parseArgs } from "../cli/args";
 import { ModelRegistry } from "../config/model-registry";
 import { Settings } from "../config/settings";
 import { buildSessionOptions, createSessionManager } from "../main";
 import { initTheme } from "../modes/theme/theme";
 import { createAgentSession, discoverAuthStorage } from "../sdk";
+import { createApprovalCanUseTool, PermissionGate } from "../server/permission-gate";
 import type { SessionFactory } from "../server/session-registry";
 import { startWireServer } from "../server/wire-server";
 import { SessionManager } from "../session/session-manager";
@@ -61,6 +63,12 @@ export default class Serve extends Command {
 			const sessionManager = await createSessionManager(parsed, cwd);
 			const { options } = await buildSessionOptions(parsed, [], sessionManager, modelRegistry);
 			options.cwd = cwd;
+			// ── 审批挂起闸门：canUseTool → PermissionGate → 广播 permission_request ──
+			const gate = new PermissionGate();
+			let broadcastPermission: (push: PermissionRequestPush) => void = () => {};
+			const canUseTool = createApprovalCanUseTool(gate, push => broadcastPermission(push));
+
+			options.canUseTool = canUseTool;
 			const { session } = await createAgentSession(options);
 			const store = SessionStore.attach(session);
 
@@ -75,6 +83,7 @@ export default class Serve extends Command {
 					settings,
 					modelRegistry,
 					authStorage,
+					canUseTool,
 				});
 				return result.session;
 			};
@@ -86,6 +95,10 @@ export default class Serve extends Command {
 				token,
 				defaultSession: { session, store },
 				sessionFactory,
+				permissionGate: gate,
+				registerPermissionBroadcast: fn => {
+					broadcastPermission = fn;
+				},
 			});
 		});
 	}
