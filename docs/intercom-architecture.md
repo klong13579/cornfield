@@ -33,6 +33,10 @@ omp 会话 A(进程内)           omp 会话 B(进程内)      gateway 账号(�
   (全局,不随 agentDir 变),所有进程连同一个 broker —— 这是跨账号互通的前提。
 - **生命周期**:gateway 启动即起 broker,`gateway.stop()` 时优雅关闭;**没有独立
   broker 进程**,gateway 未运行则 intercom 不可用(连接会明确报错)。
+- **可靠性**:socket 文件被外部删除(误删/残留清理)时,broker 内置 watchdog
+  (默认 15s 探测一次)自动 rebind 恢复——rebind 会断开全部现有连接并让客户端
+  重连;`stop()` 只清理本实例真正绑定的 socket(被活 owner 拒绝的实例不会误删
+  他人 socket 文件)。
 - **扩展**:pi-intercom 作为 **omp 内置扩展**打包进二进制
   (`src/intercom-extension/`,经 `sdk.ts` inlineExtensions 挂载),二进制运行时
   无需外部依赖解析。
@@ -61,7 +65,7 @@ omp 会话 A(进程内)           omp 会话 B(进程内)      gateway 账号(�
 | `status` | 连接状态 |
 | `cancel` | 撤销已发消息(实时会话发控制帧,mailbox 直接删) |
 | presence | 模型/思考中/空闲/工具执行中/tool:xxx,上下文占比随心跳刷新 |
-| mailbox | 目标离线时队列暂存(256 条/24h),按 id 或「显式名字+同 cwd」补投 |
+| mailbox | 目标离线时队列暂存(256 条/24h),按 id 或「显式名字+同 cwd」补投;驱逐(超容量)与过期(24h)时向发送方回 `delivery_failed`,不静默丢件 |
 | 父子边 | 子注册时声明 `parentId`(父的目标名/sessionId),broker 全量广播保留该字段;父侧子表随 presence 事件增量维护 |
 
 协议与隐性行为:replyTo 必须匹配 pending ask(非 ask 的回复会被 broker 拒绝);
@@ -154,12 +158,27 @@ intercom({ action: "send", to: "hr", message: "...", attachments: [{ type: "snip
   然后 `omp-gateway service stop && sleep 5 && service start`
 - `alt+i` 无反应:检查 config `enabled`;确认扩展工具存在(`/intercom` 命令可试)
 - 会话收不到消息:对方忙时(非交互模式)自动拒绝且回复说明;`intercom({action:"status"})` 查连接
+- **会话偶发掉线**:broker 重启 / SIGKILL / 事件循环停顿 >5s(心跳超时)都会触发
+  自动重连,1~40s 内恢复,无需手动干预;长期不恢复先检查 gateway 是否在运行
+- **send 报 "does not fit" / delivery_failed "frame limit"**:消息超过 1 MiB
+  帧上限(含附件与会话信息包装),拆小再发
 
-## 8. 限制
+## 8. 限制与可靠性边界
 
 - 同机单用户网络(无跨机;跨机走 gateway/钉钉)
 - gateway 停止 ⇒ broker 停止 ⇒ intercom 不可用(会话断线重连自动恢复)
 - 每次重启 gateway 都会拉起 broker,socket 权限 0600,本机同用户即信任
+- **帧上限 1 MiB**:发送与转发两侧对称执行。超限消息在写侧本地拒绝(send 报错
+  "does not fit");broker 转发前对实际转发帧预检——消息体 + 会话信息包装后
+  超限时回 `delivery_failed`(reason 含 frame limit),接收方不受牵连
+- **写缓冲上限 8 MiB/连接**:接收方长时间不读导致缓冲堆积超限时断开该连接
+  (客户端自动重连恢复),防止单连接拖垮进程内存
+- **速率限制**:每连接 240 token、120/s 回充。超限帧回 `error` ack 但不断连;
+  连续拒绝 50 帧(持续洪水特征)才断开——一次性批量发送(如 260 条通知)
+  只会被节流不会掉线
+- **掉线自愈**:优雅关闭 2s 内感知断线;SIGKILL/崩溃(无 FIN)由 liveness 心跳
+  (30s 间隔/5s 超时,`PI_INTERCOM_LIVENESS_INTERVAL_MS`/`_TIMEOUT_MS` 覆盖)
+  兜底,最迟 ~35s 感知;重连退避 1s→30s 无限重试,broker 恢复即自动入网
 
 ## 9. 相关实现
 
