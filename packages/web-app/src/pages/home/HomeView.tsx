@@ -14,7 +14,7 @@ import { useSession } from "../../state/use-session";
  */
 
 const SUGGESTIONS = [
-	{ icon: CalendarDays, label: "检查今天的定时任务", to: "/agents" },
+	{ icon: CalendarDays, label: "检查今天的定时任务", to: "/tasks" },
 	{ icon: History, label: "最近会话回顾", to: "/records" },
 	{ icon: Mic, label: "语音记录一条指令", to: "/voice" },
 	{ icon: Cpu, label: "切换模型", to: "/models" },
