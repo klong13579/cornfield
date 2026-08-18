@@ -127,16 +127,16 @@ async function waitForUserCount(n: number, timeoutMs = 60_000): Promise<void> {
 		if (users === n && !latestSnapshot.isStreaming) return;
 		await Bun.sleep(200);
 	}
-	async function waitForTurn(target: number, timeoutMs = 60_000): Promise<void> {
-		const deadline = Date.now() + timeoutMs;
-		while (Date.now() < deadline) {
-			if (messageEndCount >= target) return;
-			await Bun.sleep(200);
-		}
-		throw new Error(`等待 message_end ${target} 超时（当前 ${messageEndCount}）`);
-	}
-
 	throw new Error(`等待 user 数 = ${n} 超时`);
+}
+
+async function waitForTurn(target: number, timeoutMs = 60_000): Promise<void> {
+	const deadline = Date.now() + timeoutMs;
+	while (Date.now() < deadline) {
+		if (messageEndCount >= target) return;
+		await Bun.sleep(200);
+	}
+	throw new Error(`等待 message_end ${target} 超时（当前 ${messageEndCount}）`);
 }
 
 const results: string[] = [];
