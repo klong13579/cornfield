@@ -1,8 +1,7 @@
 import { useEffect, useRef } from "react";
 import { MarkdownLite } from "../../components/MarkdownLite";
 import { Orb } from "../../components/Orb";
-import { ThinkingFold } from "../../components/ThinkingFold";
-import { ToolCard } from "../../components/ToolCard";
+import { ActivityFold } from "../../render/ActivityFold";
 import type { TranscriptMessage } from "../../state/session-store";
 import { useSessionStore } from "../../state/session-store";
 import { useSession } from "../../state/use-session";
@@ -73,16 +72,19 @@ function MessageRow({ msg, streaming = false }: { msg: TranscriptMessage; stream
 					)}
 				</div>
 				<div className="text-[14px] leading-relaxed text-ink-muted">
-					{msg.thinking && <ThinkingFold thinking={msg.thinking} streaming={streaming && msg.thinkingStreaming} />}
+					<ActivityFold
+						thinking={msg.thinking}
+						tools={msg.tools}
+						turnId={msg.id}
+						streaming={streaming && msg.thinkingStreaming}
+						onRetry={() => sessionStore.abortRetry()}
+					/>
 					{msg.text && (
 						<div>
 							<MarkdownLite text={msg.text} className="[&_p]:mb-2 [&_p:last-child]:mb-0" />
 							{streaming && msg.textStreaming && <span className="caret" />}
 						</div>
 					)}
-					{msg.tools.map(tool => (
-						<ToolCard key={tool.id} tool={tool} onRetry={() => sessionStore.abortRetry()} />
-					))}
 					{msg.error && (
 						<div className="mt-1 rounded-md border border-danger/40 bg-danger/5 px-3 py-2 text-[12.5px] leading-relaxed text-danger">
 							✗ Error: {msg.error}
