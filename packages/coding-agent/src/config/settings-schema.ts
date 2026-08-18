@@ -245,6 +245,9 @@ export const SETTINGS_SCHEMA = {
 
 	modelRoles: { type: "record", default: EMPTY_STRING_RECORD },
 
+	// 主模型失败（401/429/5xx/网络错误）时依次重试的备用模型，格式同 modelRoles 取值
+	modelFallbacks: { type: "array", default: EMPTY_STRING_ARRAY },
+
 	pinned: { type: "array", default: EMPTY_STRING_ARRAY },
 
 	// Models prioritized when selecting/switching: configured recommends outrank
@@ -2389,7 +2392,9 @@ export type SettingValue<P extends SettingPath> = Schema[P] extends { type: "boo
 
 /** Get the default value for a setting path */
 export function getDefault<P extends SettingPath>(path: P): SettingValue<P> {
-	return SETTINGS_SCHEMA[path].default as SettingValue<P>;
+	// 未注册的 path（运行时经 `as SettingPath` 绕过类型检查）返回 undefined 而非抛错：
+	// 一个漏注册的键不该让整个 agent 启动失败。
+	return SETTINGS_SCHEMA[path]?.default as SettingValue<P>;
 }
 
 /** Check if a path has UI metadata (should appear in settings panel) */

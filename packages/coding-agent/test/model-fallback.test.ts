@@ -1,5 +1,20 @@
 import { describe, expect, test, vi } from "bun:test";
-import { isRetryableError, withModelFallback } from "../src/config/model-fallback";
+import { isRetryableError, resolveFallbackModels, withModelFallback } from "../src/config/model-fallback";
+import type { ModelRegistry } from "../src/config/model-registry";
+import { Settings } from "../src/config/settings";
+
+describe("resolveFallbackModels", () => {
+	const registry = {} as ModelRegistry;
+
+	test("未配置 modelFallbacks → 返回空列表（不抛）", () => {
+		const settings = Settings.isolated();
+		expect(resolveFallbackModels(settings, registry, [])).toEqual([]);
+	});
+
+	test("settings.get('modelFallbacks') 有 schema 默认值", () => {
+		expect(Settings.isolated().get("modelFallbacks")).toEqual([]);
+	});
+});
 
 describe("isRetryableError", () => {
 	test("401/429/5xx 可回退", () => {
@@ -74,7 +89,10 @@ describe("withModelFallback", () => {
 			.mockReturnValue(streamOf({ type: "text_delta", text: "ok" }));
 		const wrapped = withModelFallback(raw as never, [backup] as never);
 		const out: string[] = [];
-		for await (const e of wrapped(primary as never, {} as never, {} as never) as AsyncIterable<{ type: string; text?: string }>) {
+		for await (const e of wrapped(primary as never, {} as never, {} as never) as AsyncIterable<{
+			type: string;
+			text?: string;
+		}>) {
 			out.push(e.text ?? "");
 		}
 		expect(out).toEqual(["ok"]);
@@ -86,7 +104,10 @@ describe("withModelFallback", () => {
 		const raw = vi.fn().mockReturnValue(streamOf({ type: "text_delta", text: "main" }));
 		const wrapped = withModelFallback(raw as never, [backup] as never);
 		const out: string[] = [];
-		for await (const e of wrapped(primary as never, {} as never, {} as never) as AsyncIterable<{ type: string; text?: string }>) {
+		for await (const e of wrapped(primary as never, {} as never, {} as never) as AsyncIterable<{
+			type: string;
+			text?: string;
+		}>) {
 			out.push(e.text ?? "");
 		}
 		expect(out).toEqual(["main"]);

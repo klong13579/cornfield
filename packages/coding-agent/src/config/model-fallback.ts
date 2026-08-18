@@ -27,7 +27,7 @@ import type { Api, AssistantMessageEventStream, Model } from "@oh-my-pi/pi-ai";
 import { logger } from "@oh-my-pi/pi-utils";
 import type { ModelRegistry } from "./model-registry";
 import { resolveModelRoleValue } from "./model-resolver";
-import type { SettingPath, Settings } from "./settings";
+import type { Settings } from "./settings";
 
 /** settings.modelFallbacks 键名。 */
 export const MODEL_FALLBACKS_KEY = "modelFallbacks";
@@ -57,7 +57,7 @@ export function resolveFallbackModels(
 	registry: ModelRegistry,
 	availableModels: Model<Api>[],
 ): Model<Api>[] {
-	const raw = settings.get("modelFallbacks" as SettingPath) as unknown;
+	const raw = settings.get(MODEL_FALLBACKS_KEY) as unknown;
 	if (raw === undefined || raw === null) return [];
 	const specs = (Array.isArray(raw) ? raw : typeof raw === "string" ? [raw] : []) as string[];
 	const out: Model<Api>[] = [];
