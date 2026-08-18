@@ -15,7 +15,7 @@ import "./float-card.css";
  * 渲染位置由父层决定：放在 `position:relative` 的 composer 容器内，卡从 composer
  * 上方滑入（.float-card 绝对定位 bottom 锚定）。数据当前用组件默认 demo 值。
  */
-export type ApprovalChoice = "deny" | "once" | "session" | "always";
+export type ApprovalChoice = "deny" | "once" | "session";
 
 export interface ApprovalCardProps {
 	/** 待审批命令（默认 demo）。 */
@@ -35,11 +35,10 @@ const DEMO_COMMAND = "git push origin main --force-with-lease";
 const DEMO_DESCRIPTION = "本会话已放行 2 条";
 const DEMO_KEYS = ["git push --force*"];
 
-const BUTTONS: { choice: ApprovalChoice; label: string; kind: "deny" | "plain" | "approve" }[] = [
+const BUTTONS: { choice: ApprovalChoice; label: string; kind: "deny" | "plain" }[] = [
 	{ choice: "deny", label: "拒绝", kind: "deny" },
 	{ choice: "once", label: "本次放行", kind: "plain" },
 	{ choice: "session", label: "本会话放行", kind: "plain" },
-	{ choice: "always", label: "总是放行", kind: "approve" },
 ];
 
 export function ApprovalCard({
@@ -91,7 +90,7 @@ export function ApprovalCard({
 						<button
 							key={b.choice}
 							type="button"
-							className={`abtn${b.kind === "deny" ? " deny" : b.kind === "approve" ? " approve" : ""}`}
+							className={`abtn${b.kind === "deny" ? " deny" : ""}`}
 							onClick={() => respond(b.choice)}
 						>
 							{b.label}
