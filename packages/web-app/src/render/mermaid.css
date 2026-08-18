@@ -1,0 +1,160 @@
+/*
+ * mermaid 查看器样式（port of hermes style.css `.mermaid-viewer*` / `.img-lightbox`）。
+ * 全部走 V6 亮色 token；lightbox scrim 用固定深色，衬托白色图表卡片。
+ */
+
+.mermaid-diagram {
+	margin: 8px 0;
+}
+
+.mermaid-error {
+	margin: 8px 0;
+	padding: 10px 12px;
+	border: 1px solid color-mix(in srgb, var(--color-danger) 40%, transparent);
+	border-radius: var(--radius-md);
+	background: color-mix(in srgb, var(--color-danger) 5%, transparent);
+	font-size: 12px;
+	color: var(--color-danger);
+	white-space: pre-wrap;
+	overflow-x: auto;
+}
+
+.mermaid-viewer {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	max-width: 100%;
+	min-width: 0;
+}
+
+.mermaid-viewer-toolbar {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: flex-end;
+	gap: 4px;
+	align-items: center;
+	flex-shrink: 0;
+}
+
+.mermaid-viewer-btn {
+	width: 28px;
+	height: 28px;
+	border: 1px solid var(--color-hairline);
+	border-radius: 6px;
+	background: var(--color-surface-2);
+	color: var(--color-ink-subtle);
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	cursor: pointer;
+	flex: 0 0 auto;
+	padding: 0;
+	transition:
+		background var(--ease),
+		color var(--ease),
+		border-color var(--ease);
+}
+.mermaid-viewer-btn:hover {
+	background: var(--color-surface-3);
+	color: var(--color-ink);
+}
+.mermaid-viewer-btn svg {
+	width: 14px;
+	height: 14px;
+	display: block;
+	fill: none;
+	stroke: currentColor;
+	stroke-width: 1.8;
+	stroke-linecap: round;
+	stroke-linejoin: round;
+}
+
+.mermaid-viewer-viewport {
+	position: relative;
+	overflow: hidden;
+	max-width: 100%;
+	border: 1px solid var(--color-hairline);
+	border-radius: var(--radius-md);
+	background: var(--color-surface);
+	cursor: grab;
+	touch-action: none;
+	user-select: none;
+	-webkit-user-select: none;
+}
+.mermaid-viewer-viewport.is-panning {
+	cursor: grabbing;
+}
+.mermaid-viewer--inline .mermaid-viewer-viewport {
+	width: 100%;
+	max-height: 70vh;
+}
+@media (max-width: 640px) {
+	.mermaid-viewer--inline .mermaid-viewer-viewport {
+		min-height: min(200px, 70vh);
+	}
+}
+.mermaid-viewer--lightbox .mermaid-viewer-viewport {
+	max-width: 90vw;
+	max-height: 90vh;
+	border: none;
+	box-shadow: 0 8px 48px rgba(0, 0, 0, 0.6);
+}
+
+.mermaid-viewer-canvas {
+	position: absolute;
+	left: 0;
+	top: 0;
+	transform-origin: 0 0;
+	will-change: transform;
+}
+.mermaid-viewer-svg {
+	display: block;
+	width: 100%;
+	height: 100%;
+}
+.img-lightbox .mermaid-lightbox-svg {
+	background: var(--color-surface);
+	cursor: default;
+}
+
+/* ── 全屏 lightbox（复刻 hermes img-lightbox） ── */
+.img-lightbox {
+	position: fixed;
+	inset: 0;
+	z-index: 9999;
+	background: rgba(0, 0, 0, 0.82);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	cursor: zoom-out;
+	animation: lb-in 0.15s ease;
+}
+@keyframes lb-in {
+	from {
+		opacity: 0;
+	}
+	to {
+		opacity: 1;
+	}
+}
+.img-lightbox-close {
+	position: absolute;
+	top: 16px;
+	right: 20px;
+	width: 36px;
+	height: 36px;
+	border: none;
+	border-radius: 50%;
+	background: rgba(255, 255, 255, 0.12);
+	color: #fff;
+	font-size: 20px;
+	line-height: 1;
+	cursor: pointer;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	transition: background 0.15s;
+}
+.img-lightbox-close:hover {
+	background: rgba(255, 255, 255, 0.22);
+}

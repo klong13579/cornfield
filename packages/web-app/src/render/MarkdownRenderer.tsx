@@ -2,11 +2,14 @@ import "katex/dist/katex.min.css";
 import "highlight.js/styles/github.css";
 import "./markdown.css";
 
+import type { Element, Text } from "hast";
+
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import rehypeKatex from "rehype-katex";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
+import { Mermaid } from "./Mermaid";
 
 /**
  * markdown 渲染器重实现（R1b）—— 只被 `Markdown.tsx`（lazy 包装）动态 import。
@@ -19,6 +22,21 @@ import remarkMath from "remark-math";
  * 本模块携带 katex/highlight.css 与两家全量依赖，必须保持动态加载不进主包；
  * 样式收敛在 `markdown.css` 的 `.md` 命名空间，用 V6 亮色 token 变量。
  */
+function extractMermaidCode(node: Element | undefined): string | null {
+	if (!node) return null;
+	const codeNode = node.children.find(
+		(child): child is Element => child.type === "element" && child.tagName === "code",
+	);
+	if (!codeNode) return null;
+	const cls = codeNode.properties?.className ?? [];
+	if (!cls.includes("language-mermaid")) return null;
+	return codeNode.children
+		.filter((child): child is Text => child.type === "text")
+		.map(child => child.value)
+		.join("")
+		.trimEnd();
+}
+
 export function MarkdownRenderer({ text, className = "" }: { text: string; className?: string }): React.JSX.Element {
 	return (
 		<div className={`md ${className}`}>
@@ -32,6 +50,11 @@ export function MarkdownRenderer({ text, className = "" }: { text: string; class
 								{children}
 							</a>
 						);
+					},
+					pre({ node, children }) {
+						const mermaidCode = extractMermaidCode(node);
+						if (mermaidCode !== null) return <Mermaid code={mermaidCode} />;
+						return <pre>{children}</pre>;
 					},
 				}}
 			>
