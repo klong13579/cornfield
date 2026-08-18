@@ -14,6 +14,9 @@ import type {
 } from "./types";
 
 type ModelCost = { input: number; output: number; cacheRead: number; cacheWrite: number };
+
+export type { ModelCost };
+
 type UsageCost = Usage["cost"];
 type CostTokens = Pick<Usage, "input" | "output" | "cacheRead" | "cacheWrite">;
 

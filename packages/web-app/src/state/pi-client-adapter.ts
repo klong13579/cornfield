@@ -10,6 +10,7 @@ import type {
 	EnvironmentSummaryDto,
 	HostToolDefinitionDto,
 	ImageContentDto,
+	MemoryProjectionDto,
 	ModelInfoDto,
 	ProgressEventDto,
 	SessionSnapshotDto,
@@ -335,6 +336,11 @@ export class PiClientAdapter implements PiClient {
 	async getStats(period?: StatsPeriodDto): Promise<DashboardStatsDto> {
 		const command = period === undefined || period === "all" ? { type: "get_stats" } : { type: "get_stats", period };
 		return this.#req<DashboardStatsDto>(command as never);
+	}
+
+	/** 记忆投影（get_memory；三分区只读，取不到为 null，失败抛错由调用方空态）。 */
+	async getMemory(): Promise<MemoryProjectionDto> {
+		return this.#req<MemoryProjectionDto>({ type: "get_memory" } as never);
 	}
 
 	// hostToolResult：pi-client 无裸帧发送 API（host_tool_result 是独立 client frame），

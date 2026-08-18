@@ -1,6 +1,7 @@
 import {
 	BarChart3,
 	Bot,
+	Brain,
 	Clock,
 	Cpu,
 	House,
@@ -16,6 +17,7 @@ import { registerPanel } from "./layout/panel-registry";
 import { AgentsView } from "./pages/agents/AgentsView";
 import { HomeView } from "./pages/home/HomeView";
 import { InsightsView } from "./pages/insights/InsightsView";
+import { MemoryView } from "./pages/memory/MemoryView";
 import { ModelsView } from "./pages/models/ModelsView";
 import { PlaybackView } from "./pages/records/PlaybackView";
 import { RecordsView } from "./pages/records/RecordsView";
@@ -110,6 +112,17 @@ function registerAllPanels(): void {
 		order: 8,
 		path: "/insights",
 		mount: () => InsightsView,
+	});
+
+	// W3 D3：记忆面板（serve get_memory 三分区投影）。
+	registerPanel({
+		id: "memory",
+		title: "记忆",
+		icon: Brain,
+		group: "primary",
+		order: 9,
+		path: "/memory",
+		mount: () => MemoryView,
 	});
 
 	registerPanel({
@@ -225,6 +238,16 @@ export const PAGE_META: PageMeta[] = [
 		protocol: ["get_stats"],
 	},
 	{
+		id: "memory",
+		path: "/memory",
+		name: "记忆",
+		breadcrumb: "记忆",
+		group: "primary",
+		order: 9,
+		icon: Brain,
+		protocol: ["get_memory"],
+	},
+	{
 		id: "settings",
 		path: "/settings",
 		name: "设置",
@@ -256,6 +279,7 @@ export const router = createBrowserRouter([
 			{ path: "/todo", element: <TodoView /> },
 			{ path: "/models", element: <ModelsView /> },
 			{ path: "/insights", element: <InsightsView /> },
+			{ path: "/memory", element: <MemoryView /> },
 			{ path: "/settings", element: <SettingsView /> },
 			// P5 移动端裁剪
 			{ path: "/m", element: <WorkspaceView compact /> },

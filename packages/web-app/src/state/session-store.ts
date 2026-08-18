@@ -6,6 +6,7 @@ import type {
 	EnvironmentSummaryDto,
 	HostToolDefinitionDto,
 	ImageContentDto,
+	MemoryProjectionDto,
 	MessageContentDto,
 	MessageDto,
 	ModelInfoDto,
@@ -324,6 +325,11 @@ class SessionStore {
 	/** 本地用量统计（get_stats，代理到 pi-client；展示层自行持有状态）。 */
 	fetchStats(period?: StatsPeriodDto): Promise<DashboardStatsDto> {
 		return this.#client.getStats(period);
+	}
+
+	/** 记忆投影（get_memory，代理到 pi-client；展示层自行持有状态）。 */
+	fetchMemory(): Promise<MemoryProjectionDto> {
+		return this.#client.getMemory();
 	}
 
 	// ── 帧归约 ──

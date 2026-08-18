@@ -6,6 +6,7 @@ import type {
 	EnvironmentSummaryDto,
 	HostToolDefinitionDto,
 	ImageContentDto,
+	MemoryProjectionDto,
 	ModelInfoDto,
 	SessionSnapshotDto,
 	StatsPeriodDto,
@@ -112,4 +113,11 @@ export interface PiClient {
 	 * 失败/未连接抛错，由调用方渲染空态。
 	 */
 	getStats(period?: StatsPeriodDto): Promise<DashboardStatsDto>;
+
+	// ── 记忆投影（W3 D3 MemoryPanel）──
+	/**
+	 * 记忆投影（get_memory，只读）——三分区：memory（self-evolution 记忆库）/ user（user.md）/ project（项目 MEMORY 文件）。
+	 * 取不到的区为 null；失败/未连接抛错，由调用方渲染空态。
+	 */
+	getMemory(): Promise<MemoryProjectionDto>;
 }

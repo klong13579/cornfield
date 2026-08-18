@@ -146,7 +146,17 @@ export type WireExtensionCommand =
 	 * 做时间窗口聚合（默认省略 = all 全量）；时间序列仍是固定窗口（24h/14d/90d）。
 	 * 响应附带 priceCatalog（美元 /1M tokens，取自 models.json）供模型成本表展示单价。
 	 */
-	| { id?: string; type: "get_stats"; period?: "1d" | "7d" | "30d" | "90d" | "all" };
+	| { id?: string; type: "get_stats"; period?: "1d" | "7d" | "30d" | "90d" | "all" }
+	/**
+	 * W3 D3：只读拉取记忆投影（三分区：memory/user/project）。
+	 * - memory：self-evolution 记忆库（vector_embeddings 分区，按 importance 排序）
+	 * - user：~/.omp/user.md 内容（身份画像；缺失 → null）
+	 * - project：当前项目记忆目录的 MEMORY.md / memory_summary.md / raw_memories.md
+	 *   （canonical evolution 目录优先，旧版扁平目录 agentDir/memories 回落）
+	 * 不依赖任何 attached session（不定向，锚定 serve 进程 cwd 的 default agent）。
+	 * 文件内容 > 128KB 截断并标记 truncated；取不到的区返回 null，UI 渲染空态。
+	 */
+	| { id?: string; type: "get_memory" };
 
 export type WireCommand = MultiplexCommand | WireExtensionCommand;
 

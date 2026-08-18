@@ -3,7 +3,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { buildModelPriceCatalog, getDashboardStats, syncAllSessions } from "@oh-my-pi/omp-stats";
-import { isEnoent, logger } from "@oh-my-pi/pi-utils";
+import { getAgentDir, getConfigRootDir, isEnoent, logger } from "@oh-my-pi/pi-utils";
 import type {
 	ClientFrame,
 	ServerFrame,
@@ -13,6 +13,9 @@ import type {
 	WireServerEvent,
 } from "@oh-my-pi/pi-wire";
 import { MULTIDEVICE_PROTOCOL_VERSION } from "@oh-my-pi/pi-wire";
+import { resolveGlobalMemoryRootCandidates } from "@oh-my-pi/self-evolution/paths";
+import { getMemoryDb, getMemoryRoot, releaseMemoryDb, resolveMemoryDbPath } from "../memories";
+import { loadSectionsFromDb } from "../memories/projection";
 import { normalizeHostToolDefinitions } from "../modes/rpc/rpc-mode";
 import type { AgentSession } from "../session/agent-session";
 import type { SessionStore } from "../session/session-store";
@@ -323,6 +326,18 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 						done({ ...stats, priceCatalog: buildModelPriceCatalog(stats.byModel) });
 					} catch (err) {
 						fail(`stats unavailable: ${String(err)}`);
+					}
+					return;
+				}
+				case "get_memory": {
+					// W3 D3：只读记忆投影（memory/user/project 三分区），锚定 serve 进程 cwd 的 default agent。
+					// 记忆根用 getAgentDir()（~/.omp/agent）——default meta 的 agentDir 是 workspace cwd（P1 语义），
+					// 与 sdk.ts 里 memory 扩展的解析不一致，不能用于记忆投影。
+					try {
+						const cwd = process.cwd();
+						done(await buildMemoryProjection(cwd, getAgentDir()));
+					} catch (err) {
+						fail(`memory unavailable: ${String(err)}`);
 					}
 					return;
 				}
@@ -853,4 +868,112 @@ const STATS_PERIOD_MS: Record<"1d" | "7d" | "30d" | "90d" | "all", number | unde
 /** get_stats 可选 period → 毫秒时间窗口（省略/未知值 → undefined = 全量）。 */
 function parseStatsPeriod(period: WireCommandOfType<"get_stats">["period"]): number | undefined {
 	return period === undefined ? undefined : (STATS_PERIOD_MS[period] ?? undefined);
+}
+
+// ── W3 D3：记忆投影（memory/user/project 三分区，只读）──
+
+interface MemoryTextFileProjection {
+	path: string;
+	content: string;
+	truncated: boolean;
+}
+
+/** 读文本文件（>128KB 截断并标记）；文件不存在/读取失败返回 null（空态）。 */
+async function readMemoryFileClipped(filePath: string): Promise<MemoryTextFileProjection | null> {
+	const res = await readTextFileClipped(filePath);
+	if ("error" in res) return null;
+	return { path: filePath, content: res.text, truncated: res.truncated };
+}
+
+interface MemorySectionProjection {
+	namespace: string;
+	entries: { id: string; content: string; importance: number; lastAccessedAt: number }[];
+}
+
+interface MemoryProjectFileProjection {
+	memoryRoot: string;
+	memoryMd: MemoryTextFileProjection | null;
+	summaryMd: MemoryTextFileProjection | null;
+	rawMd: MemoryTextFileProjection | null;
+}
+
+/**
+ * 项目记忆三分区：canonical evolution 目录优先，旧版扁平目录（agentDir/memories）回落。
+ * 任一候选目录有投影文件即采用；全部无文件则返回 canonical 的空投影（UI 显示「未生成」）。
+ */
+async function buildProjectMemoryZone(
+	memoryRoot: string | undefined,
+	agentDir: string,
+	cwd: string,
+): Promise<MemoryProjectFileProjection | null> {
+	if (!memoryRoot) return null;
+
+	const candidates = [memoryRoot];
+	try {
+		candidates.push(...resolveGlobalMemoryRootCandidates(agentDir, cwd));
+	} catch {
+		// 旧目录解析失败不影响 canonical
+	}
+
+	let emptyFallback: MemoryProjectFileProjection | null = null;
+	for (const root of candidates) {
+		const [memoryMd, summaryMd, rawMd] = await Promise.all([
+			readMemoryFileClipped(path.join(root, "MEMORY.md")),
+			readMemoryFileClipped(path.join(root, "memory_summary.md")),
+			readMemoryFileClipped(path.join(root, "raw_memories.md")),
+		]);
+		if (memoryMd || summaryMd || rawMd) {
+			return { memoryRoot: root, memoryMd, summaryMd, rawMd };
+		}
+		if (!emptyFallback) emptyFallback = { memoryRoot: root, memoryMd, summaryMd, rawMd };
+	}
+	return emptyFallback;
+}
+
+/** 记忆投影：user.md + 项目 MEMORY 文件 + self-evolution 记忆库分区。 */
+async function buildMemoryProjection(
+	cwd: string,
+	agentDir: string,
+): Promise<{
+	user: MemoryTextFileProjection | null;
+	project: MemoryProjectFileProjection | null;
+	memoryStore: { dbPath: string; sections: MemorySectionProjection[]; totalEntries: number };
+}> {
+	// user 区：~/.omp/user.md（身份画像；与 identity 工具同路径解析）
+	const userPath = path.join(getConfigRootDir(), "user.md");
+	const user = await readMemoryFileClipped(userPath);
+
+	// project 区：当前项目记忆目录的投影文件（MEMORY.md / memory_summary.md / raw_memories.md）
+	// getMemoryRoot 对系统路径（~/.omp 等）返回 undefined——该场景项目记忆不适用，置 null。
+	const memoryRoot = getMemoryRoot(agentDir, cwd);
+	const project = await buildProjectMemoryZone(memoryRoot, agentDir, cwd);
+
+	// memory 区：self-evolution 记忆库（vector_embeddings 分区，importance 降序）
+	// refcount 平衡：get 后无论如何 release（load 抛错也不漏 ref）
+	let sections: MemorySectionProjection[] = [];
+	let dbPath = "";
+	const db = getMemoryDb(cwd);
+	try {
+		dbPath = resolveMemoryDbPath(cwd);
+		sections = loadSectionsFromDb(db).map(section => ({
+			namespace: section.namespace,
+			entries: section.entries.map(e => ({
+				id: e.id,
+				content: e.content,
+				importance: e.importance,
+				lastAccessedAt: e.lastAccessedAt,
+			})),
+		}));
+	} catch (err) {
+		logger.debug("memory store read failed", { cwd, error: err instanceof Error ? err.message : String(err) });
+	} finally {
+		releaseMemoryDb(cwd);
+	}
+	const totalEntries = sections.reduce((sum, s) => sum + s.entries.length, 0);
+
+	return {
+		user,
+		project,
+		memoryStore: { dbPath, sections, totalEntries },
+	};
 }
