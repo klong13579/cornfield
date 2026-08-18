@@ -5,6 +5,7 @@ import type { FsEntryDto, FsImageResult, GatewayStatusDto, PiClient } from "../l
 import type { BranchPoint, PlaybackEntry, PlaybackToolStep, RecordStatus, SessionRecordSummary } from "../lib/records";
 import type {
 	AgentInfoDto,
+	AvailableModelsDto,
 	ConnectionInfoDto,
 	CronLogEntryDto,
 	DashboardStatsDto,
@@ -13,7 +14,6 @@ import type {
 	HostToolDefinitionDto,
 	ImageContentDto,
 	MemoryProjectionDto,
-	ModelInfoDto,
 	ProgressEventDto,
 	SessionSnapshotDto,
 	SkillDto,
@@ -238,22 +238,58 @@ export class PiClientAdapter implements PiClient {
 	}
 
 	/**
-	 * 真实模型列表（get_available_models → serve 真 Model[]）。未连接/命令失败返回空数组，
-	 * UI 显示「未连接/不可用」空态；绝不回退内置假数据（HF-1）。
+	 * 真实模型列表（get_available_models → serve 真 Model[]，已按 disabledProviders /
+	 * disabledModels 过滤）。未连接/命令失败返回空数组，UI 显示「未连接/不可用」空态；
+	 * 绝不回退内置假数据（HF-1）。
 	 * 映射补齐真实字段：name/reasoning/cost/contextWindow（数字→“200K”格式化，原始值保留供排序）。
+	 * 响应附带停用名单（disabledProviders/disabledModels）供「已停用」分区恢复入口。
 	 */
-	async getAvailableModels(): Promise<ModelInfoDto[]> {
-		const result = await this.#req<{ models?: ServeModelLike[] | null }>({ type: "get_available_models" });
-		return (result.models ?? []).map(m => ({
-			id: m.id,
-			provider: m.provider,
-			name: m.name ?? m.id,
-			description: m.name ?? m.id,
-			contextWindow: fmtTokens(m.contextWindow),
-			contextWindowTokens: m.contextWindow,
-			price: m.cost ? `$${m.cost.input}/M tokens` : undefined,
-			supportsThinking: m.reasoning === true,
-		}));
+	async getAvailableModels(): Promise<AvailableModelsDto> {
+		const result = await this.#req<{
+			models?: ServeModelLike[] | null;
+			disabledProviders?: string[] | null;
+			disabledModels?: string[] | null;
+		}>({ type: "get_available_models" });
+		return {
+			models: (result.models ?? []).map(m => ({
+				id: m.id,
+				provider: m.provider,
+				name: m.name ?? m.id,
+				description: m.name ?? m.id,
+				contextWindow: fmtTokens(m.contextWindow),
+				contextWindowTokens: m.contextWindow,
+				price: m.cost ? `$${m.cost.input}/M tokens` : undefined,
+				supportsThinking: m.reasoning === true,
+			})),
+			disabledProviders: result.disabledProviders ?? [],
+			disabledModels: result.disabledModels ?? [],
+		};
+	}
+
+	/**
+	 * 停用/恢复 provider（modelId 缺省）或单个模型（provider/modelId 精确 pattern）。
+	 * 写 settings（config.yml）后 get_available_models 立即反映；返回最新停用名单供 UI 同步。
+	 */
+	async setModelDisabled(
+		provider: string,
+		modelId: string | undefined,
+		disabled: boolean,
+	): Promise<{ ok: boolean; disabledProviders: string[]; disabledModels: string[] }> {
+		const result = await this.#req<{
+			ok?: boolean;
+			disabledProviders?: string[] | null;
+			disabledModels?: string[] | null;
+		}>({
+			type: "set_model_disabled",
+			provider,
+			...(modelId ? { modelId } : {}),
+			disabled,
+		} as never);
+		return {
+			ok: result.ok === true,
+			disabledProviders: result.disabledProviders ?? [],
+			disabledModels: result.disabledModels ?? [],
+		};
 	}
 
 	// ── P3 多 Agent ──

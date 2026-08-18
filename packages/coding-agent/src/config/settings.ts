@@ -473,6 +473,20 @@ export class Settings {
 		this.set("disabledProviders", ids);
 	}
 
+	/**
+	 * Set disabled model patterns（`provider/modelId` 精确匹配；整 provider 停用走
+	 * setDisabledProviders）。ModelRegistry#isModelAvailable 每调用都读当前值，
+	 * serve 会话选择器 / get_available_models 即时生效，无需重载注册表。
+	 */
+	setDisabledModels(patterns: string[]): void {
+		this.set("disabledModels", patterns);
+	}
+
+	/** 当前停用的模型 pattern 名单（`provider/modelId`）。 */
+	getDisabledModels(): string[] {
+		return this.get("disabledModels") ?? [];
+	}
+
 	// ─────────────────────────────────────────────────────────────────────────
 	// Loading
 	// ─────────────────────────────────────────────────────────────────────────

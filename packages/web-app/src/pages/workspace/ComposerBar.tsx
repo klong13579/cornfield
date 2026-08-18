@@ -107,9 +107,9 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 	const refreshModels = () => {
 		void store
 			.getAvailableModels()
-			.then(models => {
-				if (models.length > 0) {
-					setModelList(models.map(m => ({ id: m.id, provider: m.provider ?? "" })));
+			.then(result => {
+				if (result.models.length > 0) {
+					setModelList(result.models.map(m => ({ id: m.id, provider: m.provider ?? "" })));
 				}
 			})
 			.catch(() => undefined);

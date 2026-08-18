@@ -1415,6 +1415,82 @@ describe("ModelRegistry", () => {
 			expect(registry.getDiscoverableProviders()).not.toContain("ollama");
 		});
 	});
+	describe("disabled model filtering (W3 set_model_disabled 写协议同源)", () => {
+		const TEST_PLAN_PROVIDER = {
+			baseUrl: "https://example.com/v1",
+			api: "openai-completions",
+			auth: "none",
+			models: [
+				{
+					id: "glm-5",
+					name: "GLM 5",
+					reasoning: true,
+					input: ["text"],
+					cost: { input: 1, output: 3, cacheRead: 0, cacheWrite: 0 },
+					contextWindow: 200_000,
+					maxTokens: 131_072,
+				},
+				{
+					id: "gpt-5.4",
+					name: "GPT 5.4",
+					reasoning: true,
+					input: ["text"],
+					cost: { input: 1, output: 3, cacheRead: 0, cacheWrite: 0 },
+					contextWindow: 200_000,
+					maxTokens: 131_072,
+				},
+				// 含斜杠的模型 id（如 kimi/kimi-k2.6）：selector 是 `provider/id` 完整串，仍能精确匹配
+				{
+					id: "kimi/kimi-k2.6",
+					name: "Kimi K2.6",
+					reasoning: true,
+					input: ["text"],
+					cost: { input: 1, output: 3, cacheRead: 0, cacheWrite: 0 },
+					contextWindow: 200_000,
+					maxTokens: 131_072,
+				},
+			],
+		} as const;
+
+		test("getAvailable 排除 disabledModels 精确 pattern，同 provider 其它模型保留；getAll 目录完整", async () => {
+			writeRawModelsJson({ "test-plan": TEST_PLAN_PROVIDER });
+			await Settings.init({
+				inMemory: true,
+				overrides: {
+					disabledModels: ["test-plan/glm-5", "test-plan/kimi/kimi-k2.6"],
+				},
+			});
+
+			const registry = new ModelRegistry(authStorage, modelsJsonPath);
+			const available = registry.getAvailable();
+
+			expect(available.some(m => m.provider === "test-plan" && m.id === "glm-5")).toBe(false);
+			expect(available.some(m => m.provider === "test-plan" && m.id === "kimi/kimi-k2.6")).toBe(false);
+			expect(available.some(m => m.provider === "test-plan" && m.id === "gpt-5.4")).toBe(true);
+			// 停用只影响可用性，不删目录
+			expect(registry.getAll().some(m => m.provider === "test-plan" && m.id === "glm-5")).toBe(true);
+		});
+
+		test("setDisabledModels / setDisabledProviders 即时生效（settings 活引用，无需重载注册表）", async () => {
+			writeRawModelsJson({ "test-plan": TEST_PLAN_PROVIDER });
+			await Settings.init({ inMemory: true });
+
+			const registry = new ModelRegistry(authStorage, modelsJsonPath);
+			expect(registry.getAvailable().some(m => m.provider === "test-plan" && m.id === "glm-5")).toBe(true);
+
+			Settings.instance.setDisabledModels(["test-plan/glm-5"]);
+			expect(registry.getAvailable().some(m => m.provider === "test-plan" && m.id === "glm-5")).toBe(false);
+			expect(registry.getAvailable().some(m => m.provider === "test-plan" && m.id === "gpt-5.4")).toBe(true);
+
+			Settings.instance.setDisabledModels([]);
+			expect(registry.getAvailable().some(m => m.provider === "test-plan" && m.id === "glm-5")).toBe(true);
+
+			// provider 级（wire set_model_disabled 无 modelId 分支）：整 provider 消失
+			Settings.instance.setDisabledProviders(["test-plan"]);
+			expect(registry.getAvailable().some(m => m.provider === "test-plan")).toBe(false);
+			expect(registry.getAvailable().some(m => m.provider === "test-plan" && m.id === "gpt-5.4")).toBe(false);
+		});
+	});
 	describe("runtime discovery", () => {
 		test("auto-discovers ollama models without provider config", async () => {
 			using _hook = mockOllamaDiscovery(["phi4-mini"]);

@@ -84,7 +84,7 @@ export function AgentDetailView({ agentId, onClose }: { agentId: string; onClose
 	};
 
 	useEffect(() => {
-		void store.fetchModels().then(setModels);
+		void store.fetchModels().then(result => setModels(result.models));
 	}, [store]);
 
 	const agent = view.agents.find(a => a.id === agentId);

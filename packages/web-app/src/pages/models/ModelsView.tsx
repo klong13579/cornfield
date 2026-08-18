@@ -1,10 +1,14 @@
 import { useEffect, useState } from "react";
-import type { ModelInfoDto } from "../../lib/wire-dto";
+import type { AvailableModelsDto } from "../../lib/wire-dto";
 import { useSessionStore } from "../../state/session-store";
 import { useSession } from "../../state/use-session";
 
 /**
- * 模型市场（FR-6）—— get_available_models 按 Provider 分组 + set_model 切换。
+ * 模型市场（FR-6）—— get_available_models 按 Provider 分组 + set_model 切换 + 停用管理。
+ * 停用（W3 模型禁用写协议 set_model_disabled）：
+ * - provider 组头「停用」= 整 provider 停用（写 settings.disabledProviders）
+ * - 模型行「停用」= 精确模型停用（写 settings.disabledModels `provider/modelId`）
+ * 停用即从可用列表消失（服务端过滤），页面底部「已停用」分区可一键恢复。
  * 视觉主角：当前模型 hero（accent 描边大区块），其余模型行式排列。
  * 筛选：全部 / 支持 thinking / 高上下文 / 最新（启发式，真实渠道以 serve 返回为准）。
  */
@@ -19,12 +23,16 @@ const FILTERS: { id: Filter; label: string }[] = [
 export function ModelsView(): React.JSX.Element {
 	const view = useSession();
 	const store = useSessionStore();
-	const [models, setModels] = useState<ModelInfoDto[]>([]);
+	const [data, setData] = useState<AvailableModelsDto | null>(null);
 	const [filter, setFilter] = useState<Filter>("all");
+	/** in-flight 停用/恢复目标（`provider` 或 `provider/modelId`），期间禁用所有开关。 */
+	const [busy, setBusy] = useState<string | null>(null);
+
+	const models = data?.models ?? [];
 
 	useEffect(() => {
 		if (!view.connected) return; // 未连接时跳过，连接后再拉（避免先于 WS open 的一次性失败）
-		void store.fetchModels().then(setModels);
+		void store.fetchModels().then(setData);
 	}, [store, view.connected]);
 
 	const current = view.model;
@@ -53,10 +61,31 @@ export function ModelsView(): React.JSX.Element {
 		}
 	});
 
+	/** 停用/恢复 provider 或模型后重拉全量（models 会被服务端过滤，停用名单随响应更新）。 */
+	const toggleDisabled = async (target: string, provider: string, modelId: string | undefined, disabled: boolean) => {
+		if (busy) return;
+		setBusy(target);
+		try {
+			await store.setModelDisabled(provider, modelId, disabled);
+			setData(await store.fetchModels());
+		} catch {
+			// 命令失败（未连接等）：保留现列表，不改变本地视图
+		} finally {
+			setBusy(null);
+		}
+	};
+
+	const totalDisabled = (data?.disabledProviders.length ?? 0) + (data?.disabledModels.length ?? 0);
+
 	return (
 		<div className="px-10 pt-8 pb-12">
 			<div className="mx-auto max-w-[900px]">
-				<h1 className="mb-7 text-[32px] font-semibold tracking-[-0.8px] text-ink">模型</h1>
+				<h1 className="mb-7 flex items-baseline gap-3.5 text-[32px] font-semibold tracking-[-0.8px] text-ink">
+					<span>模型</span>
+					<span className="text-[13px] font-normal tracking-normal text-ink-faint">
+						{totalDisabled > 0 ? `${totalDisabled} 个已停用 · 底部可恢复` : "停用 provider 或单模型在列表内操作"}
+					</span>
+				</h1>
 
 				{currentInfo && (
 					<div className="mb-8 flex items-center gap-5 rounded-xl border border-accent bg-surface px-7 py-6">
@@ -101,8 +130,22 @@ export function ModelsView(): React.JSX.Element {
 				{/* Provider 分组 */}
 				{Array.from(new Set(visible.map(m => m.provider))).map(provider => (
 					<div key={provider} className="mb-7">
-						<div className="mb-2.5 text-[11px] font-semibold tracking-[0.08em] text-ink-faint uppercase">
-							{provider}
+						<div className="mb-2 flex items-baseline gap-2.5">
+							<span className="text-[11px] font-semibold tracking-[0.08em] text-ink-faint uppercase">
+								{provider}
+							</span>
+							<span className="font-mono text-[10px] text-ink-faint">
+								{visible.filter(m => m.provider === provider).length}
+							</span>
+							<button
+								type="button"
+								disabled={busy !== null}
+								title={`停用整个 ${provider} provider`}
+								className="ml-auto rounded px-1.5 py-0.5 text-[11px] text-ink-faint transition-colors hover:bg-danger/10 hover:text-danger disabled:cursor-not-allowed disabled:opacity-40"
+								onClick={() => void toggleDisabled(provider, provider, undefined, true)}
+							>
+								停用
+							</button>
 						</div>
 						{visible
 							.filter(m => m.provider === provider)
@@ -134,6 +177,15 @@ export function ModelsView(): React.JSX.Element {
 									</span>
 									<button
 										type="button"
+										disabled={busy !== null}
+										title={`停用 ${m.id}`}
+										className="shrink-0 rounded px-1.5 py-1 text-[11px] text-ink-faint transition-colors hover:bg-danger/10 hover:text-danger disabled:cursor-not-allowed disabled:opacity-40"
+										onClick={() => void toggleDisabled(`${provider}/${m.id}`, provider, m.id, true)}
+									>
+										停用
+									</button>
+									<button
+										type="button"
 										className="btn btn-sm shrink-0"
 										disabled={m.id === current}
 										onClick={() => store.setModel(m.id, m.provider)}
@@ -147,7 +199,76 @@ export function ModelsView(): React.JSX.Element {
 
 				{models.length === 0 && (
 					<div className="py-16 text-center text-[13px] text-ink-faint">
-						模型列表加载中（get_available_models）…
+						{data
+							? "没有可用模型——当前 provider 均已停用，底部可恢复"
+							: "模型列表加载中（get_available_models）…"}
+					</div>
+				)}
+
+				{/* 已停用分区：provider / 模型 两类，一键恢复 */}
+				{totalDisabled > 0 && (
+					<div className="mt-10 overflow-hidden rounded-xl border border-hairline bg-surface">
+						<div className="flex items-baseline justify-between border-b border-hairline px-5 py-3">
+							<span className="text-[11px] font-semibold tracking-[0.08em] text-ink-faint uppercase">
+								已停用
+							</span>
+							<span className="font-mono text-[11px] text-ink-faint">{totalDisabled} 项</span>
+						</div>
+
+						{data?.disabledProviders.length ? (
+							<div className="px-5 pt-3">
+								<div className="mb-1.5 text-[10px] font-semibold tracking-[0.08em] text-ink-faint uppercase">
+									Provider
+								</div>
+								{data.disabledProviders.map(provider => (
+									<div
+										key={provider}
+										className="flex items-center gap-3 border-b border-hairline px-1 py-2.5 last:border-b-0"
+									>
+										<span className="font-mono text-[13px] text-ink">{provider}</span>
+										<span className="text-[10.5px] text-ink-faint">整 provider 停用</span>
+										<button
+											type="button"
+											disabled={busy !== null}
+											className="ml-auto shrink-0 rounded border border-hairline bg-surface-2 px-2.5 py-1 text-[11.5px] text-ink-subtle transition-colors hover:border-hairline-strong hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
+											onClick={() => void toggleDisabled(provider, provider, undefined, false)}
+										>
+											恢复
+										</button>
+									</div>
+								))}
+							</div>
+						) : null}
+
+						{data?.disabledModels.length ? (
+							<div className="px-5 pt-3 pb-3">
+								<div className="mb-1.5 text-[10px] font-semibold tracking-[0.08em] text-ink-faint uppercase">
+									模型
+								</div>
+								{data.disabledModels.map(pattern => {
+									const provider = pattern.split("/")[0] ?? "";
+									return (
+										<div
+											key={pattern}
+											className="flex items-center gap-3 border-b border-hairline px-1 py-2.5 last:border-b-0"
+										>
+											<span className="truncate font-mono text-[13px] text-ink">{pattern}</span>
+											<button
+												type="button"
+												disabled={busy !== null}
+												className="ml-auto shrink-0 rounded border border-hairline bg-surface-2 px-2.5 py-1 text-[11.5px] text-ink-subtle transition-colors hover:border-hairline-strong hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
+												onClick={() => {
+													const modelId = pattern.slice(provider.length + 1);
+													void toggleDisabled(pattern, provider, modelId, false);
+												}}
+											>
+												恢复
+											</button>
+										</div>
+									);
+								})}
+							</div>
+						) : null}
 					</div>
 				)}
 			</div>

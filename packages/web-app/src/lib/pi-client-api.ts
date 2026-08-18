@@ -1,6 +1,7 @@
 import type { BranchPoint, PlaybackEntry, SessionRecordSummary } from "./records";
 import type {
 	AgentInfoDto,
+	AvailableModelsDto,
 	ConnectionInfoDto,
 	CronLogEntryDto,
 	DashboardStatsDto,
@@ -9,7 +10,6 @@ import type {
 	HostToolDefinitionDto,
 	ImageContentDto,
 	MemoryProjectionDto,
-	ModelInfoDto,
 	SessionSnapshotDto,
 	SkillDto,
 	StatsPeriodDto,
@@ -90,7 +90,17 @@ export interface PiClient {
 	setTodos(phases: TodoPhaseDto[]): Promise<void>;
 	setAutoCompaction(enabled: boolean): Promise<void>;
 	setAutoRetry(enabled: boolean): Promise<void>;
-	getAvailableModels(): Promise<ModelInfoDto[]>;
+	getAvailableModels(): Promise<AvailableModelsDto>;
+
+	/**
+	 * 停用/恢复 provider（modelId 缺省）或单个模型（provider/modelId 精确 pattern）。
+	 * 写 settings（~/.omp/agent/config.yml）并即时生效；返回最新停用名单供 UI 同步。
+	 */
+	setModelDisabled(
+		provider: string,
+		modelId: string | undefined,
+		disabled: boolean,
+	): Promise<{ ok: boolean; disabledProviders: string[]; disabledModels: string[] }>;
 
 	// ── P3 多 Agent ──
 	/** 拉取注册表 agent 元数据列表（list_agents，不触发 attach）。 */

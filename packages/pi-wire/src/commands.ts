@@ -208,6 +208,22 @@ export type WireExtensionCommand =
 	 */
 	| { id?: string; type: "set_skill_enabled"; sessionId?: string; name: string; enabled: boolean }
 	/**
+	 * W3 模型禁用写协议：停用/恢复一个 provider 或单个模型（模型市场页 disable 开关）。
+	 * - provider 必填；modelId 缺省 = 整 provider 停用/恢复（写入 settings.disabledProviders）
+	 * - modelId 提供 = 精确模型停用/恢复（写入 settings.disabledModels，pattern 为
+	 *   `provider/modelId`，如 `narwal-plan/deepseek-v4-flash`）
+	 * 两者都持久化到 ~/.omp/agent/config.yml；get_available_models 立即反映（available
+	 * 列表按 disabledProviders + disabledModels 过滤），响应返回值带两份名单供前端恢复入口。
+	 */
+	| {
+			id?: string;
+			type: "set_model_disabled";
+			sessionId?: string;
+			provider: string;
+			modelId?: string;
+			disabled: boolean;
+	  }
+	/**
 	 * 壳内验证：注入一个 mock 审批/澄清请求（permission_request push），
 	 * 模拟危险命令审批，不接 agent-core。命令 response 会等到 respond 到达再回。
 	 */

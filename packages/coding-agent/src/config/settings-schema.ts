@@ -241,6 +241,9 @@ export const SETTINGS_SCHEMA = {
 
 	disabledProviders: { type: "array", default: EMPTY_STRING_ARRAY },
 
+	// 精确模型停用 pattern 名单（`provider/modelId`；整 provider 停用走 disabledProviders）
+	disabledModels: { type: "array", default: EMPTY_STRING_ARRAY },
+
 	disabledExtensions: { type: "array", default: EMPTY_STRING_ARRAY },
 
 	modelRoles: { type: "record", default: EMPTY_STRING_RECORD },

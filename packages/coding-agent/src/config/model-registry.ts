@@ -787,6 +787,14 @@ function getDisabledProviderIdsFromSettings(): Set<string> {
 	}
 }
 
+function getDisabledModelPatternsFromSettings(): Set<string> {
+	try {
+		return new Set(settings.get("disabledModels"));
+	} catch {
+		return new Set();
+	}
+}
+
 function getConfiguredProviderOrderFromSettings(): string[] {
 	try {
 		return settings.get("modelProviderOrder");
@@ -1935,8 +1943,11 @@ export class ModelRegistry {
 
 	#isModelAvailable(model: Model<Api>): boolean {
 		const disabledProviders = getDisabledProviderIdsFromSettings();
+		const disabledModelPatterns = getDisabledModelPatternsFromSettings();
+		const selector = `${model.provider}/${model.id}`;
 		return (
 			!disabledProviders.has(model.provider) &&
+			!disabledModelPatterns.has(selector) &&
 			(this.#keylessProviders.has(model.provider) || this.authStorage.hasAuth(model.provider))
 		);
 	}

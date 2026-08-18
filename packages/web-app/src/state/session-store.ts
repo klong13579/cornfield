@@ -3,6 +3,7 @@ import type { FsEntryDto, GatewayStatusDto, PiClient } from "../lib/pi-client-ap
 import type { BranchPoint, PlaybackEntry, SessionRecordSummary } from "../lib/records";
 import type {
 	AgentInfoDto,
+	AvailableModelsDto,
 	CronLogEntryDto,
 	DashboardStatsDto,
 	DisabledSkillDto,
@@ -12,7 +13,6 @@ import type {
 	MemoryProjectionDto,
 	MessageContentDto,
 	MessageDto,
-	ModelInfoDto,
 	PermissionRequestDto,
 	ProgressEventDto,
 	SessionPhaseDto,
@@ -322,14 +322,25 @@ class SessionStore {
 		void this.#client.setTodos(phases).catch(() => undefined);
 	}
 
-	/** 拉取模型市场数据（get_available_models）；展示层自行持有。 */
-	fetchModels(): Promise<ModelInfoDto[]> {
+	/**
+	 * 拉取模型市场数据（get_available_models：models + 停用名单）；展示层自行持有。
+	 */
+	fetchModels(): Promise<AvailableModelsDto> {
 		return this.#client.getAvailableModels();
 	}
 
-	/** 别名（ComposerBar 接入真实模型列表）；serve stub 期间由 adapter 回退 fallback。 */
-	getAvailableModels(): Promise<ModelInfoDto[]> {
+	/** 别名（ComposerBar 接入真实模型列表）。 */
+	getAvailableModels(): Promise<AvailableModelsDto> {
 		return this.#client.getAvailableModels();
+	}
+
+	/** 停用/恢复 provider（modelId 缺省）或单个模型；返回最新停用名单供 UI 同步。 */
+	setModelDisabled(
+		provider: string,
+		modelId: string | undefined,
+		disabled: boolean,
+	): Promise<{ ok: boolean; disabledProviders: string[]; disabledModels: string[] }> {
+		return this.#client.setModelDisabled(provider, modelId, disabled);
 	}
 
 	/** 拉取注册表 agent 列表（list_agents）并刷新视图。 */

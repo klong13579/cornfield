@@ -196,6 +196,18 @@ export interface ModelInfoDto {
 	supportsThinking: boolean;
 }
 
+/**
+ * get_available_models 响应（W3 模型禁用：附加停用名单，前端「已停用」分区恢复入口用）。
+ * models 已按 disabledProviders（整 provider）+ disabledModels（`provider/modelId` 精确）过滤。
+ */
+export interface AvailableModelsDto {
+	models: ModelInfoDto[];
+	/** 已停用 provider（settings.disabledProviders）。 */
+	disabledProviders: string[];
+	/** 已停用模型 pattern（`provider/modelId`，settings.disabledModels）。 */
+	disabledModels: string[];
+}
+
 /** 图片附件（对应 pi-ai ImageContent：prompt.images 通道，base64 内联）。 */
 export interface ImageContentDto {
 	type: "image";

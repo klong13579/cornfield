@@ -620,8 +620,47 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 					break;
 				}
 				case "get_available_models": {
-					// P3 真实现：返回目标 session 的可用模型全量列表。
-					done({ models: session.getAvailableModels() });
+					// P3 真实现：返回目标 session 的可用模型全量列表（按 disabledProviders /
+					// disabledModels 过滤后），并随响应带两份停用名单——前端「已停用」分区恢复入口。
+					const currentSettings = Settings.instance;
+					done({
+						models: session.getAvailableModels(),
+						disabledProviders: currentSettings.get("disabledProviders") ?? [],
+						disabledModels: currentSettings.get("disabledModels") ?? [],
+					});
+					break;
+				}
+				case "set_model_disabled": {
+					// W3 模型禁用写协议（pi-wire）：provider 级写 disabledProviders，模型级
+					// 写 disabledModels（`provider/modelId` 精确 pattern）。settings 是活引用——
+					// isModelAvailable 每调用都读当前值，无需重载注册表即全局生效；持久化配置 yml。
+					const currentSettings = Settings.instance;
+					const provider = command.provider.trim();
+					if (!provider) {
+						fail("provider is required");
+						break;
+					}
+					const modelId = command.modelId?.trim();
+					if (modelId) {
+						const selector = `${provider}/${modelId}`;
+						const next = command.disabled
+							? [...new Set([...(currentSettings.get("disabledModels") ?? []), selector])]
+							: (currentSettings.get("disabledModels") ?? []).filter(p => p !== selector);
+						currentSettings.setDisabledModels(next);
+					} else {
+						const next = command.disabled
+							? [...new Set([...(currentSettings.get("disabledProviders") ?? []), provider])]
+							: (currentSettings.get("disabledProviders") ?? []).filter(p => p !== provider);
+						currentSettings.setDisabledProviders(next);
+					}
+					done({
+						ok: true,
+						provider,
+						modelId: modelId || undefined,
+						disabled: command.disabled,
+						disabledProviders: currentSettings.get("disabledProviders") ?? [],
+						disabledModels: currentSettings.get("disabledModels") ?? [],
+					});
 					break;
 				}
 
