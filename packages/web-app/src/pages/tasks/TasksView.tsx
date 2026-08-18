@@ -142,7 +142,7 @@ function CronFormCard(): React.JSX.Element {
 									}
 								}
 							}}
-							className="w-full rounded-md border border-hairline bg-surface-2 px-2.5 py-2 text-[13px] text-ink outline-none focus:border-hairline-strong"
+							className="w-full rounded-md border border-hairline bg-surface-2 px-2.5 py-2 text-[13px] text-ink outline-none focus:border-accent focus:shadow-[0_0_0_3px_var(--color-accent-dim)]"
 						>
 							{CRON_SCHEDULE_PRESETS.map(p => (
 								<option key={p.id} value={p.id}>
@@ -173,7 +173,7 @@ function CronFormCard(): React.JSX.Element {
 									type="time"
 									value={time}
 									onChange={e => setTime(e.target.value)}
-									className="w-full rounded-md border border-hairline bg-surface-2 px-2.5 py-2 font-mono text-[13px] text-ink outline-none focus:border-hairline-strong"
+									className="w-full rounded-md border border-hairline bg-surface-2 px-2.5 py-2 font-mono text-[13px] text-ink outline-none focus:border-accent focus:shadow-[0_0_0_3px_var(--color-accent-dim)]"
 								/>
 							</Field>
 						)}
@@ -183,7 +183,7 @@ function CronFormCard(): React.JSX.Element {
 									id="cron-weekday"
 									value={weekday}
 									onChange={e => setWeekday(e.target.value)}
-									className="w-full rounded-md border border-hairline bg-surface-2 px-2.5 py-2 text-[13px] text-ink outline-none focus:border-hairline-strong"
+									className="w-full rounded-md border border-hairline bg-surface-2 px-2.5 py-2 text-[13px] text-ink outline-none focus:border-accent focus:shadow-[0_0_0_3px_var(--color-accent-dim)]"
 								>
 									{WEEKDAYS.map(w => (
 										<option key={w.value} value={w.value}>
@@ -215,7 +215,7 @@ function CronFormCard(): React.JSX.Element {
 							onChange={e => setRaw(e.target.value)}
 							placeholder="0 9 * * 1-5"
 							spellCheck={false}
-							className="w-full rounded-md border border-hairline bg-surface-2 px-2.5 py-2 font-mono text-[13px] text-ink outline-none placeholder:text-ink-faint focus:border-hairline-strong"
+							className="w-full rounded-md border border-hairline bg-surface-2 px-2.5 py-2 font-mono text-[13px] text-ink outline-none placeholder:text-ink-faint focus:border-accent focus:shadow-[0_0_0_3px_var(--color-accent-dim)]"
 						/>
 					</Field>
 				)}
@@ -311,7 +311,7 @@ function NumberField({
 			max={bounds.max}
 			value={value}
 			onChange={e => onChange(e.target.value)}
-			className="w-full rounded-md border border-hairline bg-surface-2 px-2.5 py-2 font-mono text-[13px] text-ink outline-none focus:border-hairline-strong"
+			className="w-full rounded-md border border-hairline bg-surface-2 px-2.5 py-2 font-mono text-[13px] text-ink outline-none focus:border-accent focus:shadow-[0_0_0_3px_var(--color-accent-dim)]"
 		/>
 	);
 }
@@ -476,11 +476,7 @@ function TaskLogPanel({ task, onClose }: { task: TaskRowDto; onClose: () => void
 	};
 
 	return (
-		<div
-			className="fixed inset-0 z-50 flex items-start justify-center bg-ink/40 p-6"
-			role="dialog"
-			aria-modal="true"
-		>
+		<div className="fixed inset-0 z-50 flex items-start justify-center bg-ink/40 p-6" role="dialog" aria-modal="true">
 			<div className="mt-8 max-h-[80vh] w-full max-w-2xl overflow-hidden rounded-xl border border-hairline bg-surface shadow-2xl">
 				<div className="flex items-baseline justify-between border-b border-hairline px-5 py-3">
 					<div className="min-w-0">

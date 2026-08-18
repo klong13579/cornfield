@@ -83,7 +83,7 @@ export function SettingsView(): React.JSX.Element {
 									value={wsUrl}
 									onChange={e => setWsUrl(e.target.value)}
 									placeholder={DEFAULT_SERVE_CONFIG.wsUrl}
-									className="flex-1 rounded border border-hairline bg-surface-2 px-2.5 py-1.5 font-mono text-[12px] text-ink outline-none focus:border-hairline-strong"
+									className="flex-1 rounded border border-hairline bg-surface-2 px-2.5 py-1.5 font-mono text-[12px] text-ink outline-none focus:border-accent focus:shadow-[0_0_0_3px_var(--color-accent-dim)]"
 								/>
 							</div>
 						</div>
@@ -98,7 +98,7 @@ export function SettingsView(): React.JSX.Element {
 									value={token}
 									onChange={e => setToken(e.target.value)}
 									placeholder="serve 启动时打印的 token"
-									className="flex-1 rounded border border-hairline bg-surface-2 px-2.5 py-1.5 font-mono text-[12px] text-ink outline-none focus:border-hairline-strong"
+									className="flex-1 rounded border border-hairline bg-surface-2 px-2.5 py-1.5 font-mono text-[12px] text-ink outline-none focus:border-accent focus:shadow-[0_0_0_3px_var(--color-accent-dim)]"
 								/>
 								<button
 									type="button"
@@ -231,7 +231,7 @@ export function SettingsView(): React.JSX.Element {
 										onChange={e => setAppKey(e.target.value)}
 										disabled
 										placeholder="（配置存本地 gateway.json，编辑待接入）"
-										className="rounded border border-hairline bg-surface-2 px-2.5 py-1.5 font-mono text-[12px] text-ink outline-none placeholder:text-ink-faint focus:border-hairline-strong"
+										className="rounded border border-hairline bg-surface-2 px-2.5 py-1.5 font-mono text-[12px] text-ink outline-none placeholder:text-ink-faint focus:border-accent focus:shadow-[0_0_0_3px_var(--color-accent-dim)]"
 									/>
 								</label>
 								<label className="flex flex-col gap-1 text-[11px] text-ink-subtle">
@@ -242,7 +242,7 @@ export function SettingsView(): React.JSX.Element {
 										disabled
 										type="password"
 										placeholder="••••••"
-										className="rounded border border-hairline bg-surface-2 px-2.5 py-1.5 font-mono text-[12px] text-ink outline-none placeholder:text-ink-faint focus:border-hairline-strong"
+										className="rounded border border-hairline bg-surface-2 px-2.5 py-1.5 font-mono text-[12px] text-ink outline-none placeholder:text-ink-faint focus:border-accent focus:shadow-[0_0_0_3px_var(--color-accent-dim)]"
 									/>
 								</label>
 							</div>

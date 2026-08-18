@@ -292,7 +292,7 @@ export function AgentDetailView({ agentId, onClose }: { agentId: string; onClose
 								value={newHostName}
 								onChange={e => setNewHostName(e.target.value)}
 								placeholder="工具名（如 browser_capture）"
-								className="min-w-0 flex-1 rounded border border-hairline bg-surface-2 px-3 py-2 font-mono text-[12px] text-ink outline-none focus:border-hairline-strong"
+								className="min-w-0 flex-1 rounded border border-hairline bg-surface-2 px-3 py-2 font-mono text-[12px] text-ink outline-none focus:border-accent focus:shadow-[0_0_0_3px_var(--color-accent-dim)]"
 							/>
 							<button type="button" className="btn btn-sm shrink-0" onClick={registerHostTool}>
 								注册

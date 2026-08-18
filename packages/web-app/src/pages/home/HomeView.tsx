@@ -21,7 +21,7 @@ const SUGGESTIONS = [
 	{ icon: Bot, label: "打开 Agent 管理", to: "/agents" },
 ];
 
-const FACE_COLORS = ["#5e6ad2", "#3a7d5d", "#b8823a"];
+const FACE_COLORS = ["#e4e4e7", "#d4d4d8", "#ececee"];
 
 function timeGreeting(): string {
 	const h = new Date().getHours();
@@ -92,7 +92,7 @@ export function HomeView(): React.JSX.Element {
 						</h1>
 					</div>
 					<div className="mt-2 flex items-center justify-center gap-2 text-[14px] text-ink-subtle">
-						<span className="h-1.5 w-1.5 rounded-full bg-success shadow-[0_0_6px_rgba(24,154,92,0.4)]" />
+						<span className="conn-dot" />
 						{view.env
 							? `${view.env.repos} · ${view.env.branch} · ${view.env.activeAgentCount} agent 运行中 · ${view.env.pendingCronCount} 定时任务待执行`
 							: view.connected
@@ -148,7 +148,7 @@ export function HomeView(): React.JSX.Element {
 					<button
 						type="button"
 						onClick={send}
-						className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent text-on-accent transition-all duration-150 hover:bg-accent-hover active:scale-90"
+						className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-accent text-on-accent transition-all duration-150 hover:bg-accent-hover active:scale-95 sm:h-9 sm:w-9"
 						aria-label="发送"
 					>
 						<ArrowRight size={16} strokeWidth={1.5} />
@@ -183,7 +183,7 @@ export function HomeView(): React.JSX.Element {
 									}}
 								>
 									<span
-										className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[11px] font-semibold text-white"
+										className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[11px] font-semibold text-ink"
 										style={{ background: FACE_COLORS[i % FACE_COLORS.length] }}
 									>
 										{agent.face}
@@ -195,7 +195,7 @@ export function HomeView(): React.JSX.Element {
 										</span>
 									</span>
 									<span
-										className={`ml-auto h-[7px] w-[7px] shrink-0 rounded-full ${agent.status === "online" ? "bg-success shadow-[0_0_6px_rgba(24,154,92,0.4)]" : "bg-warning shadow-[0_0_6px_rgba(185,124,30,0.4)] animate-pulse"}`}
+										className={`ml-auto shrink-0 ${agent.status === "online" ? "conn-dot" : "conn-dot warn animate-pulse"}`}
 									/>
 								</button>
 							))}

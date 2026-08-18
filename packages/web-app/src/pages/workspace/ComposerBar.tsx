@@ -1,5 +1,5 @@
 import { ChevronDown, Cpu, Mic, Paperclip, Send, Square } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ContextRing } from "../../components/ContextRing";
 import type { ImageContentDto } from "../../lib/wire-dto";
@@ -70,22 +70,42 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 		}
 	};
 
-	// 拉取真实可用模型列表（serve get_available_models；连接就绪后重拉，未连接/失败时保持空）
-	useEffect(() => {
-		if (!view.connected) return; // 未连接时跳过，连接后就绪再拉
-		let cancelled = false;
+	/**
+	 * 拉取真实可用模型列表（serve get_available_models）；失败保持现有列表（可读性优先）。
+	 * 连接就绪后拉一次；每次打开下拉再刷一次——serve 重启后模型注册表可能变化
+	 * （如 models.yml 新增 provider），否则下拉停留在旧列表。
+	 */
+	const refreshModels = () => {
 		void store
 			.getAvailableModels()
 			.then(models => {
-				if (!cancelled && models.length > 0) {
+				if (models.length > 0) {
 					setModelList(models.map(m => ({ id: m.id, provider: m.provider ?? "" })));
 				}
 			})
 			.catch(() => undefined);
-		return () => {
-			cancelled = true;
-		};
+	};
+
+	useEffect(() => {
+		if (!view.connected) return; // 未连接时跳过，连接后就绪再拉
+		refreshModels();
 	}, [store, view.connected]);
+
+	/** 模型按 provider 分组；当前模型所在 provider 置顶，其余保持 serve 返回顺序。 */
+	const modelGroups = useMemo(() => {
+		const byProvider = new Map<string, Array<{ id: string; provider: string }>>();
+		for (const m of modelList) {
+			const group = byProvider.get(m.provider) ?? [];
+			group.push(m);
+			byProvider.set(m.provider, group);
+		}
+		const currentProvider = modelList.find(m => m.id === view.model)?.provider;
+		return [...byProvider.entries()].sort((a, b) => {
+			if (currentProvider && a[0] === currentProvider) return -1;
+			if (currentProvider && b[0] === currentProvider) return 1;
+			return 0; // 稳定排序：同权重保留 serve 首现顺序
+		});
+	}, [modelList, view.model]);
 
 	const active = view.isStreaming || view.phase !== "idle";
 	const agent = view.agents.find(a => a.id === agentId) ?? view.agents[0];
@@ -283,7 +303,17 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 
 						{/* 模型 + thinking 下拉 */}
 						<div className="relative">
-							<button type="button" className="cbtn" onClick={() => setShowModelMenu(v => !v)}>
+							<button
+								type="button"
+								className="cbtn"
+								onClick={() =>
+									setShowModelMenu(v => {
+										const next = !v;
+										if (next) refreshModels(); // 打开即刷新，防 serve 重启后的旧注册表
+										return next;
+									})
+								}
+							>
 								<Cpu size={15} strokeWidth={1.5} />
 								<b className="font-mono text-[12px] font-medium text-ink">{view.model ?? "—"}</b>
 								<span className="rounded-[4px] bg-surface-3 px-1.5 py-px font-mono text-[10px] text-ink-subtle">
@@ -292,46 +322,68 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 								<ChevronDown size={11} strokeWidth={1.5} className="text-ink-faint" />
 							</button>
 							{showModelMenu && (
-								<div className="absolute right-0 bottom-[calc(100%+8px)] z-30 min-w-60 overflow-hidden rounded-md border border-hairline-strong bg-surface p-1 shadow-lg">
-									<div className="px-2.5 pt-1.5 pb-1 text-[10px] font-semibold tracking-[0.08em] text-ink-faint uppercase">
+								<div className="absolute right-0 bottom-[calc(100%+8px)] z-30 w-80 overflow-hidden rounded-md border border-hairline-strong bg-surface shadow-lg">
+									<div className="px-3 pt-2 pb-1 text-[10px] font-semibold tracking-[0.08em] text-ink-faint uppercase">
 										模型
 									</div>
 									{modelList.length === 0 ? (
-										<div className="px-2.5 py-2 text-[12px] text-ink-faint">
+										<div className="px-3 py-2 text-[12px] text-ink-faint">
 											无可用模型（未连接 / 列表加载中）
 										</div>
 									) : (
-										modelList.map(m => (
+										// 模型列表区可滚动（此前无 max-h 的整树弹出被视口截断，首屏只能看到
+										// 第一个 provider 组——模型对话框「只显示 alibaba」根因）；思维级别固定在底部。
+										<div className="max-h-[46vh] overflow-y-auto overscroll-contain px-1 pb-1">
+											{modelGroups.map(([provider, models]) => (
+												<div key={provider}>
+													<div className="flex items-baseline gap-1.5 px-2.5 pt-1.5 pb-0.5">
+														<span className="text-[10px] font-semibold tracking-[0.08em] text-ink-faint uppercase">
+															{provider}
+														</span>
+														<span className="font-mono text-[9px] text-ink-faint">{models.length}</span>
+													</div>
+													{models.map(m => (
+														<button
+															key={`${provider}/${m.id}`}
+															type="button"
+															className={`flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left transition-colors hover:bg-surface-3 ${m.id === view.model ? "bg-accent-dim" : ""}`}
+															onClick={() => {
+																store.setModel(m.id, m.provider);
+																setShowModelMenu(false);
+															}}
+														>
+															<span className="min-w-0 flex-1 truncate font-mono text-[13px] text-ink">
+																{m.id}
+															</span>
+															{m.id === view.model && (
+																<span className="shrink-0 rounded bg-accent px-1 py-px font-mono text-[9px] text-on-accent">
+																	当前
+																</span>
+															)}
+														</button>
+													))}
+												</div>
+											))}
+										</div>
+									)}
+									<div className="border-t border-hairline px-3 pt-1.5 pb-1 text-[10px] font-semibold tracking-[0.08em] text-ink-faint uppercase">
+										思维级别
+									</div>
+									<div className="px-1 pb-1">
+										{THINKING_LEVELS.map(level => (
 											<button
-												key={`${m.provider}/${m.id}`}
+												key={level}
 												type="button"
-												className={`flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left font-mono text-[13px] transition-colors hover:bg-surface-3 ${m.id === view.model ? "bg-accent-dim" : ""}`}
+												className={`flex w-full items-center rounded px-2.5 py-1.5 text-left text-[13px] transition-colors hover:bg-surface-3 ${level === view.thinkingLevel ? "bg-accent-dim" : ""}`}
 												onClick={() => {
-													store.setModel(m.id, m.provider);
+													store.setThinkingLevel(level);
 													setShowModelMenu(false);
 												}}
 											>
-												{m.id}
-												<span className="ml-auto font-sans text-[10px] text-ink-faint">{m.provider}</span>
+												{level}
 											</button>
-										))
-									)}
-									<div className="mt-1.5 px-2.5 pt-1.5 pb-1 text-[10px] font-semibold tracking-[0.08em] text-ink-faint uppercase">
-										思维级别
+										))}
 									</div>
-									{THINKING_LEVELS.map(level => (
-										<button
-											key={level}
-											type="button"
-											className={`flex w-full items-center rounded px-2.5 py-1.5 text-left text-[13px] transition-colors hover:bg-surface-3 ${level === view.thinkingLevel ? "bg-accent-dim" : ""}`}
-											onClick={() => {
-												store.setThinkingLevel(level);
-												setShowModelMenu(false);
-											}}
-										>
-											{level}
-										</button>
-									))}
 								</div>
 							)}
 						</div>
@@ -350,7 +402,7 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 						<button
 							type="button"
 							onClick={() => (active ? store.abort() : send())}
-							className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md border-none transition-all duration-150 active:scale-90 ${active ? "bg-danger text-white hover:bg-danger/85" : "bg-accent text-on-accent hover:bg-accent-hover"}`}
+							className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-md border-none transition-all duration-150 active:scale-95 sm:h-9 sm:w-9 ${active ? "bg-danger text-white hover:bg-danger/85" : "bg-accent text-on-accent hover:bg-accent-hover"}`}
 							aria-label={active ? "停止" : "发送"}
 						>
 							{active ? (

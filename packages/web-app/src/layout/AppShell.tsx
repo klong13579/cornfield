@@ -14,10 +14,13 @@ export function AppShell(): React.JSX.Element {
 
 	return (
 		<div className="flex h-full">
+			<a href="#main" className="skip-link">
+				跳到主要内容
+			</a>
 			<AppSidebar />
 			<div className="flex min-w-0 flex-1 flex-col">
 				{!meta?.customTopbar && <AppTopbar meta={meta} />}
-				<main className="min-h-0 flex-1 overflow-y-auto">
+				<main id="main" tabIndex={-1} className="min-h-0 flex-1 overflow-y-auto">
 					<PanelHost />
 				</main>
 			</div>

@@ -1,8 +1,9 @@
-import { Plus, Search, Star } from "lucide-react";
+import { PanelLeftClose, PanelLeftOpen, Plus, Search, Star } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { SessionRecordSummary } from "../../lib/records";
+import { useMediaQuery } from "../../lib/use-media-query";
 import { useSessionStore } from "../../state/session-store";
-import { useUiState } from "../../state/ui-store";
+import { getUiStore, useUiState } from "../../state/ui-store";
 import { useSession } from "../../state/use-session";
 
 /**
@@ -70,6 +71,9 @@ export function SessionSidebar(): React.JSX.Element {
 	const view = useSession();
 	const store = useSessionStore();
 	const ui = useUiState();
+	const isLg = useMediaQuery("(min-width: 1024px)");
+	// 折叠只在桌面静态形态生效；移动抽屉（<lg）恒为完整 300px 形态。
+	const collapsed = ui.sessionSidebarCollapsed && isLg;
 	const [source, setSource] = useState<SourceId>("webui");
 	const [query, setQuery] = useState("");
 	const [sessions, setSessions] = useState<SessionRecordSummary[]>([]);
@@ -144,83 +148,122 @@ export function SessionSidebar(): React.JSX.Element {
 
 	return (
 		<aside
-			className={`fixed inset-y-0 left-0 z-50 flex w-[300px] flex-col border-r border-hairline bg-surface transition-transform duration-200 lg:static lg:z-auto lg:shrink-0 lg:translate-x-0 ${ui.mobileNavOpen ? "translate-x-0" : "-translate-x-full"}`}
+			className={`fixed inset-y-0 left-0 z-50 flex flex-col border-r border-hairline bg-surface transition-[transform,width] duration-200 lg:static lg:z-auto lg:shrink-0 lg:translate-x-0 ${collapsed ? "w-[60px]" : "w-[300px]"} ${ui.mobileNavOpen ? "translate-x-0" : "-translate-x-full"}`}
 		>
-			{/* 新会话 */}
-			<div className="px-3 pt-3 pb-2">
-				<button
-					type="button"
-					className="flex w-full items-center justify-center gap-2 rounded-md border border-hairline bg-accent px-3 py-2 text-[13px] font-semibold text-on-accent transition-colors hover:bg-accent-hover"
-					onClick={() => store.newSession()}
-				>
-					<Plus size={14} strokeWidth={2} />
-					新会话
-				</button>
-			</div>
-
-			{/* 搜索 */}
-			<div className="px-3 pb-2">
-				<div className="flex h-8 items-center gap-2 rounded-md border border-hairline bg-surface-2 px-2.5 focus-within:border-hairline-strong">
-					<Search size={13} strokeWidth={1.5} className="shrink-0 text-ink-faint" />
-					<input
-						value={query}
-						onChange={e => setQuery(e.target.value)}
-						placeholder="过滤会话…"
-						className="w-full border-none bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-faint"
-					/>
-				</div>
-			</div>
-
-			{/* 双源 tab */}
-			<div className="flex gap-1 px-3 pb-2">
-				{SOURCES.map(([id, label]) => (
+			{collapsed ? (
+				/* 折叠态薄栏（Linear 风格）：展开 / 新会话 / 连接状态 */
+				<div className="flex h-full flex-col items-center gap-1 py-3">
 					<button
-						key={id}
 						type="button"
-						className={`rounded-full border px-3 py-1 text-[11.5px] transition-colors ${source === id ? "border-hairline-strong bg-accent-dim text-ink font-medium" : "border-hairline text-ink-subtle hover:text-ink"}`}
-						onClick={() => setSource(id)}
+						className="nav-item"
+						onClick={() => getUiStore().setSessionSidebarCollapsed(false)}
+						aria-label="展开会话栏"
+						title="展开会话栏"
 					>
-						{label}
+						<PanelLeftOpen size={18} strokeWidth={1.5} />
 					</button>
-				))}
-			</div>
-
-			{/* 会话列表 */}
-			<div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
-				{groups.length === 0 && (
-					<div className="px-2 py-10 text-center text-[12px] text-ink-faint">
-						{view.connected
-							? source === "cli"
-								? "暂无 CLI 会话——本地交互会话索引（list_sessions source=cli）"
-								: "暂无历史会话"
-							: "未连接——会话索引不可用"}
+					<button
+						type="button"
+						className="nav-item"
+						onClick={() => store.newSession()}
+						aria-label="新会话"
+						title="新会话"
+					>
+						<Plus size={18} strokeWidth={1.5} />
+					</button>
+					<div className="flex-1" />
+					<span className={`conn-dot ${view.reconnecting ? "reconnecting" : ""}`} />
+				</div>
+			) : (
+				<>
+					{/* 新会话 */}
+					<div className="px-3 pt-3 pb-2">
+						<button
+							type="button"
+							className="flex w-full items-center justify-center gap-2 rounded-md border border-hairline bg-accent px-3 py-2 text-[13px] font-semibold text-on-accent transition-colors hover:bg-accent-hover"
+							onClick={() => store.newSession()}
+						>
+							<Plus size={14} strokeWidth={2} />
+							新会话
+						</button>
 					</div>
-				)}
-				{groups.map(g => (
-					<div key={g.workspace} className="mb-1">
-						<div className="flex items-center gap-1.5 px-2 pt-3 pb-1 text-[10.5px] font-semibold tracking-[0.08em] text-ink-faint uppercase">
-							<span className="h-[7px] w-[7px] shrink-0 rounded-[3px] bg-success" />
-							{g.workspace}
-							<span className="ml-auto font-mono text-[10px] text-ink-faint">{g.rows.length}</span>
-						</div>
-						{g.rows.map(row => (
-							<SessionRow
-								key={row.id}
-								row={row}
-								pinned={pinned.has(row.id)}
-								active={!isCurrent(row) && row.id === view.sessionId}
-								onTogglePin={() => togglePin(row.id)}
+
+					{/* 搜索 */}
+					<div className="px-3 pb-2">
+						<div className="flex h-8 items-center gap-2 rounded-md border border-hairline bg-surface-2 px-2.5 focus-within:border-hairline-strong">
+							<Search size={13} strokeWidth={1.5} className="shrink-0 text-ink-faint" />
+							<input
+								value={query}
+								onChange={e => setQuery(e.target.value)}
+								placeholder="过滤会话…"
+								className="w-full border-none bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-faint"
 							/>
+						</div>
+					</div>
+
+					{/* 双源 tab */}
+					<div className="flex gap-1 px-3 pb-2">
+						{SOURCES.map(([id, label]) => (
+							<button
+								key={id}
+								type="button"
+								className={`rounded-full border px-3 py-1 text-[11.5px] transition-colors ${source === id ? "border-hairline-strong bg-accent-dim text-ink font-medium" : "border-hairline text-ink-subtle hover:text-ink"}`}
+								onClick={() => setSource(id)}
+							>
+								{label}
+							</button>
 						))}
 					</div>
-				))}
-			</div>
 
-			{/* 底部状态 */}
-			<div className="flex shrink-0 items-center gap-2 border-t border-hairline px-3 py-2.5 text-[12px] text-ink-subtle">
-				<span className={`conn-dot ${view.reconnecting ? "reconnecting" : ""}`} />
-				{view.connected ? `已连接 · ${view.agents.length} agents` : "未连接"}
-			</div>
+					{/* 会话列表 */}
+					<div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
+						{groups.length === 0 && (
+							<div className="px-2 py-10 text-center text-[12px] text-ink-faint">
+								{view.connected
+									? source === "cli"
+										? "暂无 CLI 会话——本地交互会话索引（list_sessions source=cli）"
+										: "暂无历史会话"
+									: "未连接——会话索引不可用"}
+							</div>
+						)}
+						{groups.map(g => (
+							<div key={g.workspace} className="mb-1">
+								<div className="flex items-center gap-1.5 px-2 pt-3 pb-1 text-[10.5px] font-semibold tracking-[0.08em] text-ink-faint uppercase">
+									<span className="h-[7px] w-[7px] shrink-0 rounded-[3px] bg-success" />
+									{g.workspace}
+									<span className="ml-auto font-mono text-[10px] text-ink-faint">{g.rows.length}</span>
+								</div>
+								{g.rows.map(row => (
+									<SessionRow
+										key={row.id}
+										row={row}
+										pinned={pinned.has(row.id)}
+										active={!isCurrent(row) && row.id === view.sessionId}
+										onTogglePin={() => togglePin(row.id)}
+									/>
+								))}
+							</div>
+						))}
+					</div>
+
+					{/* 底部状态 */}
+					<div className="flex shrink-0 items-center gap-2 border-t border-hairline px-3 py-2.5 text-[12px] text-ink-subtle">
+						<span className={`conn-dot ${view.reconnecting ? "reconnecting" : ""}`} />
+						{view.connected ? `已连接 · ${view.agents.length} agents` : "未连接"}
+						{isLg && (
+							<button
+								type="button"
+								className="cbtn ml-auto"
+								onClick={() => getUiStore().setSessionSidebarCollapsed(true)}
+								aria-label="收起会话栏"
+								title="收起会话栏"
+							>
+								<PanelLeftClose size={14} strokeWidth={1.5} />
+							</button>
+						)}
+					</div>
+				</>
+			)}
 		</aside>
 	);
 }

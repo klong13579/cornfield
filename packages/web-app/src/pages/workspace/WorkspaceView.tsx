@@ -1,4 +1,4 @@
-import { Folder, Menu, PanelRight } from "lucide-react";
+import { Folder, Menu, PanelRight, Smartphone } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { QueueCard } from "../../components/QueueCard";
@@ -73,16 +73,25 @@ export function WorkspaceView({ compact = false }: { compact?: boolean }): React
 							<button
 								type="button"
 								className="cbtn hidden shrink-0 lg:inline-flex"
+								onClick={() => getUiStore().setPhonePreview(true)}
+								title="手机预览"
+								aria-label="手机预览"
+							>
+								<Smartphone size={16} strokeWidth={1.5} />
+							</button>
+							<button
+								type="button"
+								className="cbtn hidden shrink-0 lg:inline-flex"
 								onClick={() => getUiStore().setRightPanel(!ui.rightPanelOpen)}
 								aria-label={ui.rightPanelOpen ? "收起右栏" : "展开右栏"}
 								title={ui.rightPanelOpen ? "收起右栏" : "展开右栏"}
 							>
 								<PanelRight size={16} strokeWidth={1.5} />
 							</button>
-							<button type="button" className="link" onClick={() => store.compact()}>
+							<button type="button" className="cbtn" onClick={() => store.compact()}>
 								compact
 							</button>
-							<button type="button" className="link" onClick={() => store.newSession()}>
+							<button type="button" className="cbtn" onClick={() => store.newSession()}>
 								新会话
 							</button>
 						</>

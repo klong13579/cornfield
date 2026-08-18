@@ -1,9 +1,10 @@
-import { Smartphone, X } from "lucide-react";
+import { X } from "lucide-react";
 import { useEffect } from "react";
 import { getUiStore, useUiState } from "../state/ui-store";
 
 /**
  * 手机预览面板 —— 375 尺寸设备框内嵌 iframe（加载 /m 移动裁剪路由 / workspace 响应式）。
+ * 触发按钮由 WorkspaceView 顶栏渲染（避免 fixed 悬浮层遮挡顶栏操作）。
  * P5 阶段再完善为独立 mobile route 联调；当前/移动端裁剪已随 workspace 响应式断点生效。
  */
 export function DevicePreview(): React.JSX.Element {
@@ -20,16 +21,6 @@ export function DevicePreview(): React.JSX.Element {
 
 	return (
 		<>
-			{/* 桌面页右上角触发按钮（壳级常驻） */}
-			<button
-				type="button"
-				className="fixed right-4 top-3 z-20 flex h-8 items-center gap-1.5 rounded-md border border-hairline bg-surface-2 px-3 text-xs text-ink-muted transition-colors hover:border-hairline-strong hover:text-ink"
-				onClick={() => getUiStore().setPhonePreview(true)}
-			>
-				<Smartphone size={14} strokeWidth={1.5} />
-				预览手机
-			</button>
-
 			{ui.phonePreviewOpen && (
 				<button
 					type="button"

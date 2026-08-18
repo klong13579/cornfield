@@ -1,3 +1,5 @@
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
 @import "tailwindcss";
 
 /*
@@ -29,8 +31,8 @@
 	/* taste-skill: 着色阴影 — 用 warm gray 而非纯黑 */
 	--shadow-tint: 24, 24, 27;
 	--font-sans:
-		"Geist", -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Microsoft YaHei", sans-serif;
-	--font-mono: "Geist Mono", "SF Mono", ui-monospace, Menlo, monospace;
+		"Geist Variable", "Geist", -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Microsoft YaHei", sans-serif;
+	--font-mono: "Geist Mono Variable", "Geist Mono", "SF Mono", ui-monospace, Menlo, monospace;
 	--radius-sm: 6px;
 	--radius-md: 8px;
 	--radius-lg: 12px;
@@ -556,4 +558,41 @@ h1, h2, h3 {
 	font-size: 10px;
 	fill: var(--color-ink-faint);
 	font-family: var(--font-mono);
+}
+
+/* ── taste-skill: skip-to-content（a11y，首位键盘焦点）── */
+.skip-link {
+	position: fixed;
+	top: 12px;
+	left: 12px;
+	z-index: 1200;
+	padding: 8px 14px;
+	border-radius: var(--radius-md);
+	background: var(--color-surface);
+	color: var(--color-ink);
+	border: 1px solid var(--color-accent);
+	font-size: 12px;
+	font-weight: 500;
+	line-height: 1.4;
+	box-shadow: 0 2px 12px rgba(var(--shadow-tint), 0.12);
+	transform: translateY(-200%);
+	opacity: 0;
+	pointer-events: none;
+	transition:
+		transform var(--ease),
+		opacity var(--ease);
+}
+.skip-link:focus-visible {
+	transform: translateY(0);
+	opacity: 1;
+	pointer-events: auto;
+}
+main:focus {
+	outline: none;
+}
+
+/* ── taste-skill: 连接状态点 warn 变体（离线/告警，Home 头像复用）── */
+.conn-dot.warn {
+	background: var(--color-warning);
+	box-shadow: 0 0 8px rgba(185, 124, 30, 0.4);
 }

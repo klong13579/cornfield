@@ -282,7 +282,7 @@ export function VoiceView(): React.JSX.Element {
 								value={sttSupported ? manualText : finalText}
 								onChange={e => setFinalText(e.target.value)}
 								placeholder={sttSupported ? "也可直接输入作为指令" : "浏览器不支持语音识别，请手动输入指令"}
-								className="min-w-0 flex-1 rounded-md border border-hairline bg-surface-2 px-3.5 py-2.5 text-[13px] text-ink outline-none focus:border-hairline-strong"
+								className="min-w-0 flex-1 rounded-md border border-hairline bg-surface-2 px-3.5 py-2.5 text-[13px] text-ink outline-none focus:border-accent focus:shadow-[0_0_0_3px_var(--color-accent-dim)]"
 								onKeyDown={e => e.key === "Enter" && sendTranscript()}
 							/>
 							<button

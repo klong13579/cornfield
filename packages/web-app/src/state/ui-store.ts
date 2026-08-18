@@ -14,12 +14,15 @@ export interface UiState {
 	mobileNavOpen: boolean;
 	/** 右栏折叠开关（R-COLLAPSE，demand-driven；桌面折叠后转录全宽）。 */
 	rightPanelOpen: boolean;
+	/** 会话侧栏折叠开关（桌面 Linear 风格窄栏；移动端抽屉不受影响）。 */
+	sessionSidebarCollapsed: boolean;
 }
 
 const DRAFT_KEY = "omp.workspace.draft";
 const KEEPDRAFT_KEY = "omp.keepDraft";
 
 const RIGHTPANEL_KEY = "omp.workspace.rightPanel";
+const SESSIONSIDEBAR_KEY = "omp.workspace.sessionSidebar";
 
 function loadString(key: string): string {
 	try {
@@ -36,6 +39,7 @@ class UiStore {
 		keepDraft: loadString(KEEPDRAFT_KEY) !== "0",
 		mobileNavOpen: false,
 		rightPanelOpen: loadString(RIGHTPANEL_KEY) === "1",
+		sessionSidebarCollapsed: loadString(SESSIONSIDEBAR_KEY) === "1",
 	};
 	#listeners = new Set<() => void>();
 
@@ -79,6 +83,15 @@ class UiStore {
 		this.#mutate({ rightPanelOpen: open });
 		try {
 			localStorage.setItem(RIGHTPANEL_KEY, open ? "1" : "0");
+		} catch {
+			// localStorage 不可用时仅内存态
+		}
+	}
+
+	setSessionSidebarCollapsed(collapsed: boolean): void {
+		this.#mutate({ sessionSidebarCollapsed: collapsed });
+		try {
+			localStorage.setItem(SESSIONSIDEBAR_KEY, collapsed ? "1" : "0");
 		} catch {
 			// localStorage 不可用时仅内存态
 		}
