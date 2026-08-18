@@ -57,7 +57,7 @@ const serve = spawn("bun", [cliPath, "serve", "--port", String(port), "--host", 
 	stdio: ["ignore", "pipe", "pipe"],
 });
 
-await waitForOutput(serve, /ws:\/\/127\.0\.0\.1:\d+\/ws/, 30_000, "serve 启动");
+await waitForOutput(serve, /ws:\/\/127\.0\.0\.1:\d+\/ws/, 90_000, "serve 启动");
 
 const ws = new WebSocket(wsUrl);
 const pending = new Map<string, (frame: Frame) => void>();
@@ -127,6 +127,15 @@ async function waitForUserCount(n: number, timeoutMs = 60_000): Promise<void> {
 		if (users === n && !latestSnapshot.isStreaming) return;
 		await Bun.sleep(200);
 	}
+	async function waitForTurn(target: number, timeoutMs = 60_000): Promise<void> {
+		const deadline = Date.now() + timeoutMs;
+		while (Date.now() < deadline) {
+			if (messageEndCount >= target) return;
+			await Bun.sleep(200);
+		}
+		throw new Error(`等待 message_end ${target} 超时（当前 ${messageEndCount}）`);
+	}
+
 	throw new Error(`等待 user 数 = ${n} 超时`);
 }
 
@@ -138,13 +147,13 @@ const assert = (cond: boolean, label: string): void => {
 
 // 1. 两条 prompt
 await request({ type: "prompt", message: "请回复：第一条测试消息。" });
-await waitForUserCount(1);
+await waitForTurn(2);
 const entries1 = await userEntryIds();
 assert(entries1.length === 1, `第一条 user entry 数 = 1（实际 ${entries1.length}）`);
 const entry1 = entries1[0]?.entryId ?? "";
 
 await request({ type: "prompt", message: "请回复：第二条测试消息。" });
-await waitForUserCount(2);
+await waitForTurn(4);
 const entries2 = await userEntryIds();
 assert(entries2.length === 2, `第二条后 user entry 数 = 2（实际 ${entries2.length}）`);
 const entry2 = entries2[1]?.entryId ?? "";

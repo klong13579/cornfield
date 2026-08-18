@@ -356,6 +356,8 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 					const builtin = BUILTIN_SLASH_COMMANDS.map(c => ({ name: `/${c.name}`, description: c.description }));
 					const virtual = TUI_VIRTUAL_COMMANDS;
 					done({ commands: [...builtin, ...virtual] });
+					return;
+				}
 				case "inject_permission": {
 					const { push, outcome } = gate.inject(command.kind ?? "approval");
 					for (const conn of connections) {
