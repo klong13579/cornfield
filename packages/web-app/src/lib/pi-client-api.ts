@@ -148,4 +148,8 @@ export interface PiClient {
 	getCronTasks(): Promise<{ tasks: TaskRowDto[] }>;
 	/** cron 执行日志（get_cron_logs；logs/by-task 直读，taskId/days/limit 可选）。 */
 	getCronLogs(opts?: { taskId?: string; days?: number; limit?: number }): Promise<{ logs: CronLogEntryDto[] }>;
+
+	// ── 技能启停（P2-W3-3 B3 写协议）──
+	/** 启停技能（set_skill_enabled；serve 写 config.yml + 重发现热重载）。 */
+	setSkillEnabled(name: string, enabled: boolean): Promise<{ ok: boolean; name: string; enabled: boolean }>;
 }

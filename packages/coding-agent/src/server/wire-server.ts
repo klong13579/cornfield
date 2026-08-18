@@ -15,10 +15,12 @@ import type {
 } from "@oh-my-pi/pi-wire";
 import { MULTIDEVICE_PROTOCOL_VERSION } from "@oh-my-pi/pi-wire";
 import { resolveGlobalMemoryRootCandidates } from "@oh-my-pi/self-evolution/paths";
+import { Settings } from "../config/settings";
 import { BUILTIN_SLASH_COMMANDS } from "../extensibility/slash-commands";
 import { getMemoryDb, getMemoryRoot, releaseMemoryDb, resolveMemoryDbPath } from "../memories";
 import { loadSectionsFromDb } from "../memories/projection";
 import { normalizeHostToolDefinitions } from "../modes/rpc/rpc-mode";
+import { discoverSkills } from "../sdk";
 import type { AgentSession } from "../session/agent-session";
 import type { SessionStore } from "../session/session-store";
 import type { TodoPhase } from "../tools/todo-write";
@@ -504,6 +506,35 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 							provider: s._source?.providerName ?? "builtin",
 						})),
 					});
+					break;
+				}
+				case "set_skill_enabled": {
+					// P2-W3-3（B3 技能写协议）：写 settings（config.yml skills.ignoredSkills）+ 重发现热重载。
+					const skillName = command.name.trim();
+					if (!skillName || skillName.includes("/") || skillName.includes("\\")) {
+						failWithCode("internal", `invalid skill name: ${String(command.name)}`);
+						break;
+					}
+					try {
+						const settings = Settings.instance;
+						const ignored = new Set<string>(settings.get("skills.ignoredSkills") ?? []);
+						if (command.enabled) {
+							ignored.delete(skillName);
+						} else {
+							ignored.add(skillName);
+						}
+						settings.set("skills.ignoredSkills", [...ignored]);
+						// 重发现（与 sdk 同样的发现参数）+ 会话热重载，get_skills 立即反映
+						const skillsSettings = settings.getGroup("skills");
+						const result = await discoverSkills(process.cwd(), getAgentDir(), {
+							...skillsSettings,
+							disabledExtensions: [],
+						});
+						await session.reloadSkills(result.skills, result.warnings);
+						done({ ok: true, name: skillName, enabled: command.enabled });
+					} catch (err) {
+						failWithCode("internal", `skill toggle failed: ${String(err)}`);
+					}
 					break;
 				}
 				case "cancel_queued": {

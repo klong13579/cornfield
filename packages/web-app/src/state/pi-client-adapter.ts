@@ -368,6 +368,15 @@ export class PiClientAdapter implements PiClient {
 		return result.skills ?? [];
 	}
 
+	/** 启停技能（set_skill_enabled；写配置 + 重发现热重载，失败抛错由调用方提示）。 */
+	async setSkillEnabled(name: string, enabled: boolean): Promise<{ ok: boolean; name: string; enabled: boolean }> {
+		return this.#req<{ ok: boolean; name: string; enabled: boolean }>({
+			type: "set_skill_enabled",
+			name,
+			enabled,
+		} as never);
+	}
+
 	/** 排队文本（get_state 的 queued；协议批 B-2，QueueCard 数据源）。 */
 	async fetchQueue(): Promise<{ steering: string[]; followUp: string[] }> {
 		const result = await this.#req<{ queued?: { steering?: string[]; followUp?: string[] } }>({

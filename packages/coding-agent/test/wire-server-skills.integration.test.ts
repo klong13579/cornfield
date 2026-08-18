@@ -21,6 +21,18 @@ const URL_RE = /ws:\/\/127\.0\.0\.1:(\d+)\/ws(\?token=([a-zA-Z0-9]+))?/;
 
 type Frame = { type: string; [k: string]: unknown };
 
+import * as net from "node:net";
+
+function freePort(): Promise<number> {
+	return new Promise(resolve => {
+		const srv = net.createServer();
+		srv.listen(0, "127.0.0.1", () => {
+			const port = (srv.address() as net.AddressInfo).port;
+			srv.close(() => resolve(port));
+		});
+	});
+}
+
 interface SkillEntry {
 	name: string;
 	description: string;
@@ -77,6 +89,14 @@ async function request(ws: WebSocket, command: Record<string, unknown>): Promise
 	return (f as { result?: unknown }).result;
 }
 
+async function rawRequest(ws: WebSocket, command: Record<string, unknown>): Promise<unknown> {
+	const id = `q${++seq}`;
+	ws.send(JSON.stringify({ type: "request", id, command: { ...command, id } }));
+	const f = await nextFrame(ws, fr => fr.type === "response" && fr.id === id, 30_000);
+	if (!f) throw new Error(`timeout: ${command.type}`);
+	return f;
+}
+
 function nextFrame(ws: WebSocket, pred: (f: Frame) => boolean, timeoutMs: number): Promise<Frame | undefined> {
 	return new Promise(resolve => {
 		const timer = setTimeout(() => {
@@ -97,6 +117,71 @@ function nextFrame(ws: WebSocket, pred: (f: Frame) => boolean, timeoutMs: number
 function skillMd(name: string, description: string): string {
 	return `---\nname: ${name}\ndescription: |\n  ${description}\ntriggers:\n  - "test trigger"\n---\n`;
 }
+
+describe("P2-W3-3 — set_skill_enabled（B3 技能写协议）", () => {
+	test("停用 → get_skills 移除 + config.yml 写入；启用 → 恢复", async () => {
+		const ws = await connect(url);
+		try {
+			// 初始：demo-user-skill 在已加载集
+			const before = (await request(ws, { type: "get_skills" })) as { skills: SkillEntry[] };
+			expect(before.skills.some(s => s.name === "demo-user-skill")).toBe(true);
+
+			// 停用
+			const off = (await rawRequest(ws, {
+				type: "set_skill_enabled",
+				name: "demo-user-skill",
+				enabled: false,
+			})) as Frame;
+			expect(off.ok).toBe(true);
+			const offRes = off.result as { enabled: boolean };
+			expect(offRes.enabled).toBe(false);
+
+			// get_skills 立即移除（重发现热重载）
+			const afterOff = (await request(ws, { type: "get_skills" })) as { skills: SkillEntry[] };
+			expect(afterOff.skills.some(s => s.name === "demo-user-skill")).toBe(false);
+
+			// config.yml 落盘（settings.ignoredSkills 含 demo-user-skill）——后台异步保存，轮询等写入
+			const cfgPath = path.join(isolatedHome, ".omp", "agent", "config.yml");
+			let cfg = "";
+			const cfgDeadline = Date.now() + 3000;
+			while (Date.now() < cfgDeadline) {
+				cfg = await Bun.file(cfgPath).text().catch(() => "");
+				if (cfg.includes("demo-user-skill")) break;
+				await Bun.sleep(100);
+			}
+			expect(cfg).toContain("demo-user-skill");
+
+			// 启用 → 恢复
+			const on = (await rawRequest(ws, {
+				type: "set_skill_enabled",
+				name: "demo-user-skill",
+				enabled: true,
+			})) as Frame;
+			expect(on.ok).toBe(true);
+			const afterOn = (await request(ws, { type: "get_skills" })) as { skills: SkillEntry[] };
+			expect(afterOn.skills.some(s => s.name === "demo-user-skill")).toBe(true);
+		} finally {
+			ws.close();
+		}
+	}, 30_000);
+
+	test("非法技能名（含路径分隔符）→ 结构化错误 internal", async () => {
+		const ws = await connect(url);
+		try {
+			const bad = (await rawRequest(ws, {
+				type: "set_skill_enabled",
+				name: "../evil",
+				enabled: false,
+			})) as Frame;
+			expect(bad.ok).toBe(false);
+			const err = bad.error as { code?: string; message?: string };
+			expect(typeof err).toBe("object");
+			expect(err.code).toBe("internal");
+		} finally {
+			ws.close();
+		}
+	});
+});
 
 describe("W3 D5 — serve get_skills 只读技能列表", () => {
 	test("get_skills: 用户级 + 项目级技能（level 分类正确）", async () => {
@@ -157,7 +242,7 @@ beforeAll(async () => {
 	);
 
 	const repoRoot = new URL("../../..", import.meta.url).pathname.replace(/\/$/, "");
-	const port = 57000 + Math.floor(Math.random() * 8000);
+	const port = await freePort();
 	proc = Bun.spawn(
 		[
 			"bun",

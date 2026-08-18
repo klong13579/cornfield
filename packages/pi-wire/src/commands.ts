@@ -192,6 +192,14 @@ export type WireExtensionCommand =
 	 */
 	| { id?: string; type: "get_cron_logs"; taskId?: string; days?: number; limit?: number }
 	/**
+	 * P2-W3-3（B3 技能写协议）：启停一个技能。
+	 * serve 写 settings（~/.omp/agent/config.yml 的 skills.ignoredSkills 列表），随后
+	 * 重发现 + 会话热重载，get_skills 立即反映。
+	 * - name：技能名（非空、不含路径分隔符）
+	 * - enabled：true 启用（从 ignoredSkills 移除）/ false 停用（追加）
+	 */
+	| { id?: string; type: "set_skill_enabled"; sessionId?: string; name: string; enabled: boolean }
+	/**
 	 * 壳内验证：注入一个 mock 审批/澄清请求（permission_request push），
 	 * 模拟危险命令审批，不接 agent-core。命令 response 会等到 respond 到达再回。
 	 */
@@ -201,7 +209,6 @@ export type WireExtensionCommand =
 	 * clarify 为所选 option 文本。脏值 serve 侧回 error。
 	 */
 	| { id?: string; type: "permission_respond"; requestId: string; choice: string };
-
 export type WireCommand = MultiplexCommand | WireExtensionCommand;
 
 /** 获取具体命令结构的 helper。 */

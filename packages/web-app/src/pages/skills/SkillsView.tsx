@@ -29,6 +29,22 @@ export function SkillsView(): React.JSX.Element {
 	const [query, setQuery] = useState("");
 	const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 	const [error, setError] = useState<string | null>(null);
+	const [busy, setBusy] = useState<string | null>(null);
+
+	/** 启停（P2-W3-3 B3 写协议）：停用后技能从已加载列表消失——成功后重拉列表反映。 */
+	const toggleSkill = async (row: SkillRow) => {
+		if (busy) return;
+		setBusy(row.name);
+		try {
+			await store.setSkillEnabled(row.name, false);
+			const list = await store.fetchSkills();
+			setSkills(list.map(s => ({ ...s, enabled: true as const })));
+		} catch (err) {
+			setError(err instanceof Error ? err.message : String(err));
+		} finally {
+			setBusy(null);
+		}
+	};
 
 	useEffect(() => {
 		if (!view.connected) return;
@@ -104,7 +120,7 @@ export function SkillsView(): React.JSX.Element {
 						{!collapsed.has(group.level) && (
 							<div className="border-t border-hairline">
 								{group.rows.map(row => (
-									<SkillRowView key={row.name} row={row} />
+									<SkillRowView key={row.name} row={row} onDisable={() => void toggleSkill(row)} />
 								))}
 							</div>
 						)}
@@ -119,7 +135,7 @@ export function SkillsView(): React.JSX.Element {
 	);
 }
 
-function SkillRowView({ row }: { row: SkillRow }): React.JSX.Element {
+function SkillRowView({ row, onDisable }: { row: SkillRow; onDisable: () => void }): React.JSX.Element {
 	return (
 		<div className="flex items-start gap-3 border-b border-hairline px-5 py-3 last:border-b-0">
 			<div className="min-w-0 flex-1">
@@ -134,15 +150,15 @@ function SkillRowView({ row }: { row: SkillRow }): React.JSX.Element {
 				)}
 			</div>
 
-			{/* 启停 toggle：B3 技能管理协议未到，禁用态 + 提示 */}
+			{/* 启停 toggle（P2-W3-3 B3 写协议）：点击停用；当前列表=已启用集，停用后技能移除 */}
 			<button
 				type="button"
-				disabled
-				title={row.enabled ? "已启用——启停管理待 B3 技能协议接入" : "已停用"}
-				aria-label={`${row.name} 启停开关`}
-				className="mt-0.5 flex h-5 w-9 shrink-0 cursor-not-allowed items-center rounded-full bg-success/30 px-0.5"
+				onClick={onDisable}
+				title="停用该技能（写 config.yml skills.ignoredSkills）"
+				aria-label={`${row.name} 启停开关（当前已启用）`}
+				className="mt-0.5 flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full bg-success/40 px-0.5 transition-colors hover:bg-success/60"
 			>
-				<span className="ml-auto h-4 w-4 rounded-full bg-ink/50" />
+				<span className="ml-auto h-4 w-4 rounded-full bg-ink" />
 			</button>
 		</div>
 	);

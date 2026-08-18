@@ -378,6 +378,11 @@ class SessionStore {
 		return this.#client.getSkills();
 	}
 
+	/** 启停技能（set_skill_enabled，代理到 pi-client）。 */
+	setSkillEnabled(name: string, enabled: boolean): Promise<{ ok: boolean; name: string; enabled: boolean }> {
+		return this.#client.setSkillEnabled(name, enabled);
+	}
+
 	/** 排队文本（get_state queued，代理到 pi-client；展示层自行持有）。 */
 	fetchQueue(): Promise<{ steering: string[]; followUp: string[] }> {
 		return this.#client.fetchQueue();
