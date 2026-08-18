@@ -166,7 +166,28 @@ export type WireExtensionCommand =
 	 * 不实现启停写入：B3 技能管理协议落地前的只读前置。
 	 * - 无 sessionId：当前连接 active session；有 sessionId：定向该 agent（lazy attach）
 	 */
-	| { id?: string; type: "get_skills"; sessionId?: string };
+	| { id?: string; type: "get_skills"; sessionId?: string }
+	/**
+	 * 协议批 B-2：取消最近一条排队消息（steer/followUp 队列，LIFO）。
+	 * 空队列返回 { cancelled:false }；成功返回 { cancelled:true, text }（被取消的文本）。
+	 */
+	| { id?: string; type: "cancel_queued"; sessionId?: string }
+	/**
+	 * 协议批 B-3：TUI slash 命令表（BUILTIN_SLASH_COMMAND registry 同源）。
+	 * 返回 { commands: [{ name（含前导 /）, description }] }——W1 SlashPalette 真源。
+	 * 不定向（registry 级只读）。
+	 */
+	| { id?: string; type: "list_commands" }
+	/**
+	 * 壳内验证：注入一个 mock 审批/澄清请求（permission_request push），
+	 * 模拟危险命令审批，不接 agent-core。命令 response 会等到 respond 到达再回。
+	 */
+	| { id?: string; type: "inject_permission"; kind?: "approval" | "clarify" }
+	/**
+	 * 用户裁决回传：requestId 对应 permission_request；choice 白名单（approval: deny|once|session|always），
+	 * clarify 为所选 option 文本。脏值 serve 侧回 error。
+	 */
+	| { id?: string; type: "permission_respond"; requestId: string; choice: string };
 
 export type WireCommand = MultiplexCommand | WireExtensionCommand;
 

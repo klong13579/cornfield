@@ -2,7 +2,7 @@ import "katex/dist/katex.min.css";
 import "highlight.js/styles/github.css";
 import "./markdown.css";
 
-import type { Element, Text } from "hast";
+import type { Element, ElementContent, Text } from "hast";
 
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
@@ -25,13 +25,13 @@ import { Mermaid } from "./Mermaid";
 function extractMermaidCode(node: Element | undefined): string | null {
 	if (!node) return null;
 	const codeNode = node.children.find(
-		(child): child is Element => child.type === "element" && child.tagName === "code",
+		(child: ElementContent): child is Element => child.type === "element" && child.tagName === "code",
 	);
 	if (!codeNode) return null;
 	const cls = codeNode.properties?.className ?? [];
 	if (!cls.includes("language-mermaid")) return null;
 	return codeNode.children
-		.filter((child): child is Text => child.type === "text")
+		.filter((child: ElementContent): child is Text => child.type === "text")
 		.map(child => child.value)
 		.join("")
 		.trimEnd();
@@ -44,14 +44,14 @@ export function MarkdownRenderer({ text, className = "" }: { text: string; class
 				remarkPlugins={[remarkGfm, remarkMath]}
 				rehypePlugins={[rehypeKatex, [rehypeHighlight, { detect: false, ignoreMissing: true }]]}
 				components={{
-					a({ href, children }) {
+					a({ href, children }: { href?: string; children?: React.ReactNode }) {
 						return (
 							<a href={href} target="_blank" rel="noreferrer">
 								{children}
 							</a>
 						);
 					},
-					pre({ node, children }) {
+					pre({ node, children }: { node?: Element; children?: React.ReactNode }) {
 						const mermaidCode = extractMermaidCode(node);
 						if (mermaidCode !== null) return <Mermaid code={mermaidCode} />;
 						return <pre>{children}</pre>;

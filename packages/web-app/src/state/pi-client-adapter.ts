@@ -215,6 +215,11 @@ export class PiClientAdapter implements PiClient {
 		return this.#req({ type: "abort_retry" }).then(() => undefined);
 	}
 
+	/** 用户裁决回传（permission_respond）。 */
+	permissionRespond(requestId: string, choice: string): Promise<void> {
+		return this.#req({ type: "permission_respond", requestId, choice }).then(() => undefined);
+	}
+
 	/** 前端已注册的 host tools 声明（set_host_tools 后的本地权威态；UI 工具注册 tab 用）。 */
 	#hostTools: HostToolDefinitionDto[] = [];
 
@@ -359,6 +364,30 @@ export class PiClientAdapter implements PiClient {
 	async getSkills(): Promise<SkillDto[]> {
 		const result = await this.#req<{ skills?: SkillDto[] }>({ type: "get_skills" } as never);
 		return result.skills ?? [];
+	}
+
+	/** 排队文本（get_state 的 queued；协议批 B-2，QueueCard 数据源）。 */
+	async fetchQueue(): Promise<{ steering: string[]; followUp: string[] }> {
+		const result = await this.#req<{ queued?: { steering?: string[]; followUp?: string[] } }>({
+			type: "get_state",
+		} as never);
+		return {
+			steering: result.queued?.steering ?? [],
+			followUp: result.queued?.followUp ?? [],
+		};
+	}
+
+	/** 取消最近一条排队消息（cancel_queued；空队列 cancelled:false）。 */
+	async cancelQueued(): Promise<{ cancelled: boolean; text?: string }> {
+		return this.#req<{ cancelled: boolean; text?: string }>({ type: "cancel_queued" } as never);
+	}
+
+	/** TUI slash 命令表（list_commands；W1 SlashPalette 真源替换 DEFAULT_COMMANDS）。 */
+	async listCommands(): Promise<{ name: string; description: string }[]> {
+		const result = await this.#req<{ commands?: { name: string; description: string }[] }>({
+			type: "list_commands",
+		} as never);
+		return result.commands ?? [];
 	}
 
 	// hostToolResult：pi-client 无裸帧发送 API（host_tool_result 是独立 client frame），
@@ -648,6 +677,9 @@ function normalizeProgress(event: unknown): ProgressEventDto | null {
 			return { type: "agent_start" };
 		case "agent_end":
 			return { type: "agent_end" };
+		case "steer":
+			// 协议批 B-1：steer 回显（serve 转发 steer 后推的 progress 帧，SteerIndicator 数据源）
+			return typeof raw.text === "string" ? { type: "steer", text: raw.text } : null;
 	}
 
 	// 消息增量（thinking/text/toolcall delta）

@@ -92,6 +92,8 @@ export interface PiClient {
 	setHostTools(tools: HostToolDefinitionDto[]): Promise<void>;
 	/** host tool 执行结果回传（host_tool_result client frame；视 pi-client 支持与否）。 */
 	hostToolResult?(id: string, resultText: string, isError?: boolean): void;
+	/** 用户裁决回传（permission_respond；approval 白名单 deny|once|session|always，clarify 为 option 文本）。 */
+	permissionRespond(requestId: string, choice: string): Promise<void>;
 
 	// ── P4 会话记录（serve 已实现 get_messages/get_session_stats/get_branch_messages）──
 	/** 拉取当前 attached session 的全部消息（get_messages），转播放时间线。 */
@@ -128,4 +130,14 @@ export interface PiClient {
 	// ── 技能列表（W3 D5 SkillsPanel）──
 	/** 已加载技能（get_skills，只读；session.skills 同源）。失败/未连接抛错，由调用方渲染空态。 */
 	getSkills(): Promise<SkillDto[]>;
+
+	// ── 队列（协议批 B-2）──
+	/** 排队文本（get_state 的 queued 字段；快照只有计数）。 */
+	fetchQueue(): Promise<{ steering: string[]; followUp: string[] }>;
+	/** 取消最近一条排队消息（cancel_queued；空队列返回 cancelled:false）。 */
+	cancelQueued(): Promise<{ cancelled: boolean; text?: string }>;
+
+	// ── 命令表（协议批 B-3）──
+	/** TUI slash 命令表（list_commands；W1 SlashPalette 真源）。 */
+	listCommands(): Promise<{ name: string; description: string }[]>;
 }

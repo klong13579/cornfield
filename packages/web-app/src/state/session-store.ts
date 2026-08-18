@@ -10,6 +10,7 @@ import type {
 	MessageContentDto,
 	MessageDto,
 	ModelInfoDto,
+	PermissionRequestDto,
 	ProgressEventDto,
 	SessionPhaseDto,
 	SessionSnapshotDto,
@@ -68,6 +69,8 @@ export interface SessionView {
 	isStreaming: boolean;
 	activeToolNames: string[];
 	queued: number;
+	/** steer 回显文本（协议批 B-1；turn_end/agent_end 清空）。 */
+	steer?: string;
 	todo: TodoPhaseDto[];
 	context?: { usedTokens: number; totalTokens: number; percent: number; lastCompaction: number | null };
 	flags: { autoCompaction: boolean; autoRetry: boolean };
@@ -75,6 +78,8 @@ export interface SessionView {
 	env: EnvironmentSummaryDto | null;
 	/** 最近一次命令失败的可见错误（未连接等），成功或清空后为 undefined。 */
 	commandError?: string;
+	/** 待用户裁决的审批/澄清请求（permission_request push）。 */
+	pendingPermission?: PermissionRequestDto;
 }
 
 const EMPTY_PHASE: SessionPhaseDto = "idle";
@@ -161,7 +166,16 @@ class SessionStore {
 			this.#clearCommandError();
 			return r;
 		} catch (err) {
-			const msg = err instanceof Error ? err.message : String(err);
+			const msg =
+				typeof err === "string"
+					? err
+					: err instanceof Error
+						? err.message
+						: typeof err === "object" &&
+								err !== null &&
+								typeof (err as { message?: unknown }).message === "string"
+							? (err as { message: string }).message
+							: String(err);
 			this.#view = cloneView(this.getSnapshot());
 			this.#view.commandError = `命令失败（未连接）：${msg}`;
 			this.#notify();
@@ -229,6 +243,17 @@ class SessionStore {
 
 	retryFrom(entryId: string, message?: string): void {
 		void this.#run(() => this.#client.retryFrom(entryId, message));
+	}
+
+	/** 用户裁决回传（optimistic 清空 pending + 发 permission_respond）。 */
+	permissionRespond(requestId: string, choice: string): void {
+		const view = cloneView(this.getSnapshot());
+		if (view.pendingPermission?.requestId === requestId) {
+			view.pendingPermission = undefined;
+			this.#view = view;
+			this.#notify();
+		}
+		void this.#client.permissionRespond(requestId, choice).catch(() => undefined);
 	}
 
 	/** 前端已注册 host tools（set_host_tools 本地权威态）。 */
@@ -351,6 +376,21 @@ class SessionStore {
 		return this.#client.getSkills();
 	}
 
+	/** 排队文本（get_state queued，代理到 pi-client；展示层自行持有）。 */
+	fetchQueue(): Promise<{ steering: string[]; followUp: string[] }> {
+		return this.#client.fetchQueue();
+	}
+
+	/** 取消最近一条排队消息（cancel_queued，代理到 pi-client）。 */
+	cancelQueued(): Promise<{ cancelled: boolean; text?: string }> {
+		return this.#client.cancelQueued();
+	}
+
+	/** TUI slash 命令表（list_commands，代理到 pi-client；W1 SlashPalette 消费）。 */
+	listCommands(): Promise<{ name: string; description: string }[]> {
+		return this.#client.listCommands();
+	}
+
 	// ── 帧归约 ──
 
 	#onFrame(frame: WireServerEventDto): void {
@@ -366,6 +406,11 @@ class SessionStore {
 				break;
 			case "progress":
 				this.#applyProgress(frame.event);
+				break;
+			case "permission_request":
+				this.#view = cloneView(this.getSnapshot());
+				this.#view.pendingPermission = frame;
+				this.#notify();
 				break;
 		}
 	}
@@ -417,6 +462,7 @@ class SessionStore {
 			case "turn_end":
 			case "agent_end": {
 				view.isStreaming = false;
+				view.steer = undefined;
 				if (view.phase === "streaming") view.phase = EMPTY_PHASE;
 				if (view.live) {
 					view.live.done = true;
@@ -428,6 +474,9 @@ class SessionStore {
 				}
 				break;
 			}
+			case "steer":
+				view.steer = event.text;
+				break;
 			case "thinking_start":
 				view.live = ensureLive(view, prev);
 				view.live.thinking = view.live.thinking ?? "";

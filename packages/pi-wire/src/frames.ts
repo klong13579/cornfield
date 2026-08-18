@@ -188,19 +188,67 @@ export interface HostToolsChangedPush {
 	tools: WireHostToolDefinition[];
 }
 
+/**
+ * permission_request —— 需要用户裁决的审批/澄清请求（壳内验证 mode：由 serve 模拟注入触发，
+ * 将来 agent-core canUseTool 接上后同帧复用）。推给发起连接 + 全部在线连接（任一端可批）。
+ *
+ * approval：危险命令审批；clarify：Agent 澄清择一。`requestId` 供 permission_respond 回指。
+ */
+export type PermissionRequestPush =
+	| {
+			type: "permission_request";
+			requestId: string;
+			kind: "approval";
+			command: string;
+			description: string;
+			patternKeys: string[];
+	  }
+	| {
+			type: "permission_request";
+			requestId: string;
+			kind: "clarify";
+			question: string;
+			options: string[];
+	  };
+
 export type WireServerEvent<TSnapshot = unknown, TEvent = unknown> =
 	| { type: "server_snapshot"; sessions: SessionListEntry[] }
 	| { type: "session_snapshot"; sessionId: string; snapshot: TSnapshot }
 	| { type: "progress"; sessionId: string; event: TEvent }
 	| HostToolCallPush
 	| HostToolCancelPush
-	| HostToolsChangedPush;
+	| HostToolsChangedPush
+	| PermissionRequestPush;
+
+/**
+ * 协议批 B-4：wire response 错误码枚举（hermes 分类学 12 码）。
+ * 向后兼容：error 字段仍接受 string（旧调用方/旧 serve），新调用方优先结构化错误。
+ */
+export type WireErrorCode =
+	| "rate_limit"
+	| "quota_exhausted"
+	| "compression_exhausted"
+	| "model_not_found"
+	| "interrupted"
+	| "silent_failure"
+	| "tool_limit_reached"
+	| "not_implemented"
+	| "unauthorized"
+	| "timeout"
+	| "cancelled"
+	| "internal";
+
+/** 结构化错误载荷（ok:false 时 error 的半形）。 */
+export interface WireErrorPayload {
+	code: WireErrorCode;
+	message: string;
+}
 
 export type ServerFrame<TSnapshot = unknown, TEvent = unknown> =
 	| { type: "hello_ack"; connectionId: string; protocolVersion: number }
 	| { type: "hello_error"; error: string }
 	| { type: "response"; id: string; ok: true; result?: unknown }
-	| { type: "response"; id: string; ok: false; error: string }
+	| { type: "response"; id: string; ok: false; error: string | WireErrorPayload }
 	| { type: "push"; event: WireServerEvent<TSnapshot, TEvent> }
 	/** 心跳：server 回 client ping。ts 回回客户端的 ts（方便 RTT 估算）。 */
 	| { type: "pong"; ts?: number };

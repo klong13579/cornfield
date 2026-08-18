@@ -10,10 +10,12 @@ import type {
 	WireCommand,
 	WireCommandOfType,
 	WireEnvironmentSummary,
+	WireErrorCode,
 	WireServerEvent,
 } from "@oh-my-pi/pi-wire";
 import { MULTIDEVICE_PROTOCOL_VERSION } from "@oh-my-pi/pi-wire";
 import { resolveGlobalMemoryRootCandidates } from "@oh-my-pi/self-evolution/paths";
+import { BUILTIN_SLASH_COMMANDS } from "../extensibility/slash-commands";
 import { getMemoryDb, getMemoryRoot, releaseMemoryDb, resolveMemoryDbPath } from "../memories";
 import { loadSectionsFromDb } from "../memories/projection";
 import { normalizeHostToolDefinitions } from "../modes/rpc/rpc-mode";
@@ -22,6 +24,7 @@ import type { SessionStore } from "../session/session-store";
 import type { TodoPhase } from "../tools/todo-write";
 import * as git from "../utils/git";
 import { WireHostToolBridge } from "./host-tool-bridge";
+import { PERMISSION_TIMEOUT_OUTCOME, PermissionGate } from "./permission-gate";
 import { agentSessionsRoot, defaultSessionsRoot, indexSessions, type SessionIndexSource } from "./session-index";
 import {
 	type AgentMeta,
@@ -144,6 +147,9 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 		send(conn.ws, { type: "push", event });
 	};
 
+	// ── permission shell（壳内验证）：pending 表 + 广播 + 超时清理 ──
+	const gate = new PermissionGate();
+
 	// ── 事件路由：只推给 active 在该 agent 上的连接 ──
 	registry.subscribe(event => {
 		if (event.kind === "snapshot") {
@@ -193,6 +199,8 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 	): Promise<void> => {
 		const done = (result?: unknown): void => reply({ type: "response", id: "", ok: true, result });
 		const fail = (error: string): void => reply({ type: "response", id: "", ok: false, error });
+		const failWithCode = (code: WireErrorCode, message: string): void =>
+			reply({ type: "response", id: "", ok: false, error: { code, message } });
 
 		try {
 			// ── registry 级命令（不定向具体 session）──
@@ -341,6 +349,35 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 					}
 					return;
 				}
+				case "list_commands": {
+					// 协议批 B-3：TUI slash 命令表（BUILTIN_SLASH_COMMAND registry 同源）。
+					// 「能拿多少拿多少」：内置表 name/description；custom/extension 命令不进 wire 面。
+					// /undo /yolo /retry 非内置 slash（W1 SlashPalette 的虚拟惯例项），serve 补齐口径。
+					const builtin = BUILTIN_SLASH_COMMANDS.map(c => ({ name: `/${c.name}`, description: c.description }));
+					const virtual = TUI_VIRTUAL_COMMANDS;
+					done({ commands: [...builtin, ...virtual] });
+				case "inject_permission": {
+					const { push, outcome } = gate.inject(command.kind ?? "approval");
+					for (const conn of connections) {
+						send(conn.ws, { type: "push", event: push });
+					}
+					const choice = await outcome;
+					if (choice === PERMISSION_TIMEOUT_OUTCOME) {
+						fail("permission request timed out");
+						return;
+					}
+					done({ requestId: push.requestId, choice });
+					return;
+				}
+				case "permission_respond": {
+					const result = gate.respond(command.requestId, command.choice);
+					if (!result.ok) {
+						fail(result.error);
+						return;
+					}
+					done();
+					return;
+				}
 				default:
 					break;
 			}
@@ -388,6 +425,16 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 				}
 				case "steer": {
 					await session.steer(command.message, command.images);
+					// 协议批 B-1：steer 事件回显——转发后向订阅连接推 progress 帧（steer 标记 + 文本摘要），
+					// W2 的 SteerIndicator 以此为数据源（web-app 端归一到 ProgressEventDto steer）。
+					send(conn.ws, {
+						type: "push",
+						event: {
+							type: "progress",
+							sessionId: agentId,
+							event: { type: "steer", text: command.message },
+						},
+					});
 					done();
 					break;
 				}
@@ -438,6 +485,12 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 							provider: s._source?.providerName ?? "builtin",
 						})),
 					});
+					break;
+				}
+				case "cancel_queued": {
+					// 协议批 B-2：取消最近一条排队消息（session 现有 LIFO 队列操作）。
+					const text = session.popLastQueuedMessage();
+					done(text !== undefined ? { cancelled: true, text } : { cancelled: false });
 					break;
 				}
 				case "set_todos": {
@@ -600,7 +653,7 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 				}
 
 				default:
-					fail(`not_implemented: ${(command as { type: string }).type}`);
+					failWithCode("not_implemented", `command not implemented: ${(command as { type: string }).type}`);
 			}
 		} catch (err) {
 			fail(err instanceof Error ? err.message : String(err));
@@ -710,6 +763,9 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 				const connection = ws.data;
 				if (!connection) return;
 				connections.delete(connection);
+				if (connections.size === 0) {
+					gate.clearAll();
+				}
 				// host tool 执行者断开：pending 全拒（fail fast）
 				for (const bridge of connection.hostToolBridges.values()) {
 					bridge.detachOutput(`connection ${connection.connectionId} closed`);
@@ -766,6 +822,8 @@ function buildRpcState(
 		autoCompactionEnabled: session.autoCompactionEnabled,
 		messageCount: session.messages.length,
 		queuedMessageCount: session.queuedMessageCount,
+		// 协议批 B-2：排队文本（QueueCard 数据源；快照只有计数）
+		queued: session.getQueuedMessages(),
 		todoPhases: session.getTodoPhases(),
 		snapshotSeq: store.getSnapshot().seq,
 		env,
@@ -908,6 +966,13 @@ function isPidAlive(pid: number): boolean {
 		return (err as NodeJS.ErrnoException).code === "EPERM";
 	}
 }
+
+/** 协议批 B-3：W1 SlashPalette 虚拟惯例项（非内置 slash 命令，TUI 动作口径）。 */
+const TUI_VIRTUAL_COMMANDS: { name: string; description: string }[] = [
+	{ name: "/undo", description: "撤销最近一轮对话" },
+	{ name: "/yolo", description: "切换免审批模式（危险）" },
+	{ name: "/retry", description: "重试失败的上一轮" },
+];
 
 const STATS_PERIOD_MS: Record<"1d" | "7d" | "30d" | "90d" | "all", number | undefined> = {
 	"1d": 24 * 60 * 60 * 1000,
