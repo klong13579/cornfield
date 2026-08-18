@@ -181,7 +181,7 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 						onKeyDown={onKeyDown}
 						className="min-h-[52px] w-full resize-none border-none bg-transparent px-3.5 pt-3 pb-1.5 font-inherit text-ink outline-none placeholder:text-ink-faint"
 					/>
-					<div className="flex items-center gap-2 overflow-x-auto px-2.5 pb-1.5">
+					<div className="flex items-center gap-2 px-2.5 pb-1.5">
 						{/* Agent 选择器 */}
 						<div className="relative">
 							<button

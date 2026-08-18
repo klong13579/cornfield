@@ -9,7 +9,7 @@ import { FileExplorer } from "./FileExplorer";
  * - Files：复用 FileExplorer（S5 复用，不重写 fs 目录树），窄栏上下布局
  * - Artifacts：占位（Artifacts 产物面板待接入）
  *
- * 数据源：仅读当前 attached session 的 agentDir（view.sessionId；未挂载时回退首个 agent）。
+ * 数据源：取当前 attached agent 的 registry id（未挂载回退首个 agent）。
  */
 
 type TabId = "files" | "artifacts";
@@ -23,7 +23,7 @@ export function RightPanel(): React.JSX.Element {
 	const view = useSession();
 	const ui = useUiState();
 	const [tab, setTab] = useState<TabId>("files");
-	const agentId = view.sessionId || view.agents[0]?.id;
+	const agentId = view.agents.find(a => a.attached)?.id ?? view.agents[0]?.id;
 
 	return (
 		<aside
