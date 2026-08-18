@@ -340,6 +340,16 @@ class SessionStore {
 		return this.#client.getSkills();
 	}
 
+	/** 排队文本（get_state queued，代理到 pi-client；展示层自行持有）。 */
+	fetchQueue(): Promise<{ steering: string[]; followUp: string[] }> {
+		return this.#client.fetchQueue();
+	}
+
+	/** 取消最近一条排队消息（cancel_queued，代理到 pi-client）。 */
+	cancelQueued(): Promise<{ cancelled: boolean; text?: string }> {
+		return this.#client.cancelQueued();
+	}
+
 	// ── 帧归约 ──
 
 	#onFrame(frame: WireServerEventDto): void {

@@ -125,4 +125,10 @@ export interface PiClient {
 	// ── 技能列表（W3 D5 SkillsPanel）──
 	/** 已加载技能（get_skills，只读；session.skills 同源）。失败/未连接抛错，由调用方渲染空态。 */
 	getSkills(): Promise<SkillDto[]>;
+
+	// ── 队列（协议批 B-2）──
+	/** 排队文本（get_state 的 queued 字段；快照只有计数）。 */
+	fetchQueue(): Promise<{ steering: string[]; followUp: string[] }>;
+	/** 取消最近一条排队消息（cancel_queued；空队列返回 cancelled:false）。 */
+	cancelQueued(): Promise<{ cancelled: boolean; text?: string }>;
 }

@@ -448,6 +448,12 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 					});
 					break;
 				}
+				case "cancel_queued": {
+					// 协议批 B-2：取消最近一条排队消息（session 现有 LIFO 队列操作）。
+					const text = session.popLastQueuedMessage();
+					done(text !== undefined ? { cancelled: true, text } : { cancelled: false });
+					break;
+				}
 				case "set_todos": {
 					session.setTodoPhases(command.phases as TodoPhase[]);
 					sessionDone({ todoPhases: session.getTodoPhases() });
@@ -739,6 +745,8 @@ function buildRpcState(
 		autoCompactionEnabled: session.autoCompactionEnabled,
 		messageCount: session.messages.length,
 		queuedMessageCount: session.queuedMessageCount,
+		// 协议批 B-2：排队文本（QueueCard 数据源；快照只有计数）
+		queued: session.getQueuedMessages(),
 		todoPhases: session.getTodoPhases(),
 		snapshotSeq: store.getSnapshot().seq,
 		env,

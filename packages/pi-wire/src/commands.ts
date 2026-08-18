@@ -163,7 +163,12 @@ export type WireExtensionCommand =
 	 * 不实现启停写入：B3 技能管理协议落地前的只读前置。
 	 * - 无 sessionId：当前连接 active session；有 sessionId：定向该 agent（lazy attach）
 	 */
-	| { id?: string; type: "get_skills"; sessionId?: string };
+	| { id?: string; type: "get_skills"; sessionId?: string }
+	/**
+	 * 协议批 B-2：取消最近一条排队消息（steer/followUp 队列，LIFO）。
+	 * 空队列返回 { cancelled:false }；成功返回 { cancelled:true, text }（被取消的文本）。
+	 */
+	| { id?: string; type: "cancel_queued"; sessionId?: string };
 
 export type WireCommand = MultiplexCommand | WireExtensionCommand;
 

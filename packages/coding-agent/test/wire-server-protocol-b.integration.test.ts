@@ -167,7 +167,45 @@ describe("协议批 B-1 — steer 事件回显", () => {
 	});
 });
 
-// ── B-2 queue / B-3 list_commands / B-4 error codes 的 describe 随各自提交追加 ──
+describe("协议批 B-2 — queue 完整态", () => {
+	test("get_state 带排队文本；cancel_queued 取消并清空（LIFO）", async () => {
+		const { ws, frames } = await connect(url);
+		try {
+			// 排空此前测试残留的排队（B-1 steer 未消费会留在队列里），直到 cancelled:false
+			for (;;) {
+				const drain = (await rawRequest(ws, frames, { type: "cancel_queued" })) as Frame;
+				expect(drain.ok).toBe(true);
+				if (!(drain.result as { cancelled: boolean }).cancelled) break;
+			}
+
+			// steer（idle）→ 入队 #steeringMessages
+			await request(ws, frames, { type: "steer", message: "排队一号：换个角度" });
+			const state = (await request(ws, frames, { type: "get_state" })) as {
+				queued?: { steering?: string[]; followUp?: string[] };
+				queuedMessageCount?: number;
+			};
+			expect(state.queued?.steering).toContain("排队一号：换个角度");
+			expect(state.queuedMessageCount).toBeGreaterThanOrEqual(1);
+
+			// cancel_queued → 取消最近一条（LIFO），返回被取消文本
+			const cancelled = (await rawRequest(ws, frames, { type: "cancel_queued" })) as Frame;
+			expect(cancelled.ok).toBe(true);
+			const res = cancelled.result as { cancelled: boolean; text?: string };
+			expect(res.cancelled).toBe(true);
+			expect(res.text).toBe("排队一号：换个角度");
+
+			// 取消后队列清空
+			const after = (await request(ws, frames, { type: "get_state" })) as {
+				queued?: { steering?: string[] };
+			};
+			expect(after.queued?.steering?.length ?? 0).toBe(0);
+		} finally {
+			ws.close();
+		}
+	});
+});
+
+// ── B-3 list_commands / B-4 error codes 的 describe 随各自提交追加 ──
 
 beforeAll(async () => {
 	isolatedHome = await fs.mkdtemp(path.join(os.tmpdir(), "omp-serve-proto-b-"));

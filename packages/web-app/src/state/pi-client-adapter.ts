@@ -350,6 +350,20 @@ export class PiClientAdapter implements PiClient {
 		return result.skills ?? [];
 	}
 
+	/** 排队文本（get_state 的 queued；协议批 B-2，QueueCard 数据源）。 */
+	async fetchQueue(): Promise<{ steering: string[]; followUp: string[] }> {
+		const result = await this.#req<{ queued?: { steering?: string[]; followUp?: string[] } }>({ type: "get_state" } as never);
+		return {
+			steering: result.queued?.steering ?? [],
+			followUp: result.queued?.followUp ?? [],
+		};
+	}
+
+	/** 取消最近一条排队消息（cancel_queued；空队列 cancelled:false）。 */
+	async cancelQueued(): Promise<{ cancelled: boolean; text?: string }> {
+		return this.#req<{ cancelled: boolean; text?: string }>({ type: "cancel_queued" } as never);
+	}
+
 	// hostToolResult：pi-client 无裸帧发送 API（host_tool_result 是独立 client frame），
 	// 待 pi-client 补 sendRaw/hostToolResult 后实现（差异清单已反馈 be-dev）。
 
