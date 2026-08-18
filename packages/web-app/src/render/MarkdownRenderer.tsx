@@ -7,9 +7,56 @@ import type { Element, ElementContent, Text } from "hast";
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import rehypeKatex from "rehype-katex";
+import rehypeRaw from "rehype-raw";
+import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import { Mermaid } from "./Mermaid";
+
+// hermes SAFE_TAGS（HTML 白名单）—— 只放行这些标签，其余剥离（R-HTML 卡）。
+const SAFE_TAGS = [
+	"strong",
+	"em",
+	"del",
+	"code",
+	"pre",
+	"h1",
+	"h2",
+	"h3",
+	"h4",
+	"h5",
+	"h6",
+	"ul",
+	"ol",
+	"li",
+	"table",
+	"thead",
+	"tbody",
+	"tr",
+	"th",
+	"td",
+	"hr",
+	"blockquote",
+	"p",
+	"br",
+	"a",
+	"div",
+	"span",
+	"img",
+	// GFM 任务列表 checkbox（remark-gfm 产物，非 raw HTML；剥离会破坏已有任务列表）
+	"input",
+];
+
+const sanitizeSchema = {
+	...defaultSchema,
+	tagNames: SAFE_TAGS,
+	protocols: {
+		...(defaultSchema.protocols ?? {}),
+		// img 允许 data:image/*（base64 内联图）；a href 只允许 http/https/mailto
+		src: ["http", "https", "data"],
+		href: ["http", "https", "mailto"],
+	},
+};
 
 /**
  * markdown 渲染器重实现（R1b）—— 只被 `Markdown.tsx`（lazy 包装）动态 import。
@@ -42,7 +89,12 @@ export function MarkdownRenderer({ text, className = "" }: { text: string; class
 		<div className={`md ${className}`}>
 			<ReactMarkdown
 				remarkPlugins={[remarkGfm, remarkMath]}
-				rehypePlugins={[rehypeKatex, [rehypeHighlight, { detect: false, ignoreMissing: true }]]}
+				rehypePlugins={[
+					rehypeRaw,
+					[rehypeSanitize, sanitizeSchema],
+					rehypeKatex,
+					[rehypeHighlight, { detect: false, ignoreMissing: true }],
+				]}
 				components={{
 					a({ href, children }: { href?: string; children?: React.ReactNode }) {
 						return (
