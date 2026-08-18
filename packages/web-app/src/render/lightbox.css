@@ -7,7 +7,7 @@
 	position: fixed;
 	inset: 0;
 	z-index: 9999;
-	background: rgba(0, 0, 0, 0.82);
+	background: rgba(24, 24, 27, 0.82);
 	display: flex;
 	align-items: center;
 	justify-content: center;
@@ -48,5 +48,5 @@
 	max-height: 90vh;
 	border-radius: var(--radius-md);
 	background: var(--color-surface);
-	box-shadow: 0 8px 48px rgba(0, 0, 0, 0.6);
+	box-shadow: 0 8px 48px rgba(24, 24, 27, 0.4);
 }

@@ -33,13 +33,13 @@ export function DevicePreview(): React.JSX.Element {
 			{ui.phonePreviewOpen && (
 				<button
 					type="button"
-					className="fixed inset-0 z-30 cursor-default bg-black/50"
+					className="fixed inset-0 z-30 cursor-default bg-ink/50"
 					onClick={() => getUiStore().setPhonePreview(false)}
 					aria-label="关闭预览"
 				/>
 			)}
 			{ui.phonePreviewOpen && (
-				<div className="fixed top-0 right-0 z-31 flex h-screen w-[420px] flex-col border-l border-hairline-strong bg-surface shadow-[-16px_0_48px_rgba(0,0,0,0.12)]">
+				<div className="fixed top-0 right-0 z-31 flex h-screen w-[420px] flex-col border-l border-hairline-strong bg-surface shadow-[-16px_0_48px_rgba(24,24,27,0.08)]">
 					<div className="flex items-center gap-2.5 border-b border-hairline px-4 py-3">
 						<span className="font-mono text-xs text-ink-subtle">移动端预览 · 375×812</span>
 						<button
@@ -52,7 +52,7 @@ export function DevicePreview(): React.JSX.Element {
 						</button>
 					</div>
 					<div className="flex flex-1 items-center justify-center overflow-hidden p-6">
-						<div className="flex h-full max-h-[812px] w-[375px] flex-col overflow-hidden rounded-[40px] border border-hairline-strong bg-canvas shadow-[0_24px_64px_rgba(0,0,0,0.18)]">
+						<div className="flex h-full max-h-[812px] w-[375px] flex-col overflow-hidden rounded-[40px] border border-hairline-strong bg-canvas shadow-[0_24px_64px_rgba(24,24,27,0.12)]">
 							<div className="flex h-11 shrink-0 items-center justify-between px-6 text-xs font-semibold text-ink">
 								<span>9:41</span>
 								<span>omp</span>

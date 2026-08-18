@@ -92,7 +92,7 @@ export function HomeView(): React.JSX.Element {
 						</h1>
 					</div>
 					<div className="mt-2 flex items-center justify-center gap-2 text-[14px] text-ink-subtle">
-						<span className="h-1.5 w-1.5 rounded-full bg-success shadow-[0_0_6px_rgba(76,183,130,0.5)]" />
+						<span className="h-1.5 w-1.5 rounded-full bg-success shadow-[0_0_6px_rgba(24,154,92,0.4)]" />
 						{view.env
 							? `${view.env.repos} · ${view.env.branch} · ${view.env.activeAgentCount} agent 运行中 · ${view.env.pendingCronCount} 定时任务待执行`
 							: view.connected
@@ -121,7 +121,7 @@ export function HomeView(): React.JSX.Element {
 						<Link
 							key={s.label}
 							to={s.to}
-							className="rise-in flex cursor-pointer items-center gap-[7px] rounded-full border border-hairline bg-surface-2 px-4 py-2 text-[13px] text-ink-muted transition-all duration-150 hover:-translate-y-px hover:border-hairline-strong hover:text-ink"
+							className="rise-in flex cursor-pointer items-center gap-[7px] rounded-full border border-hairline bg-surface-2 px-4 py-2 text-[13px] text-ink-muted transition-all duration-150 hover:-translate-y-px hover:border-hairline-strong hover:text-ink active:scale-[0.97] active:translate-y-0"
 							style={{ animationDelay: `${120 + i * 70}ms` }}
 						>
 							<s.icon size={14} strokeWidth={1.5} className="text-ink-subtle" />
@@ -148,7 +148,7 @@ export function HomeView(): React.JSX.Element {
 					<button
 						type="button"
 						onClick={send}
-						className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent text-on-accent transition-colors hover:bg-accent-hover"
+						className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent text-on-accent transition-all duration-150 hover:bg-accent-hover active:scale-90"
 						aria-label="发送"
 					>
 						<ArrowRight size={16} strokeWidth={1.5} />
@@ -175,7 +175,7 @@ export function HomeView(): React.JSX.Element {
 								<button
 									type="button"
 									key={agent.id}
-									className="flex min-w-[160px] cursor-pointer items-center gap-2.5 rounded-xl border border-hairline bg-surface p-3 text-left transition-all duration-150 hover:-translate-y-px hover:border-hairline-strong"
+									className="flex min-w-[160px] cursor-pointer items-center gap-2.5 rounded-xl border border-hairline bg-surface p-3 text-left transition-all duration-150 hover:-translate-y-px hover:border-hairline-strong active:scale-[0.98] active:translate-y-0"
 									onClick={() => {
 										store.attach(agent.id);
 										store.switchSession(agent.id);
@@ -195,7 +195,7 @@ export function HomeView(): React.JSX.Element {
 										</span>
 									</span>
 									<span
-										className={`ml-auto h-[7px] w-[7px] shrink-0 rounded-full ${agent.status === "online" ? "bg-success shadow-[0_0_6px_rgba(76,183,130,0.5)]" : "bg-warning shadow-[0_0_6px_rgba(229,168,59,0.5)] animate-pulse"}`}
+										className={`ml-auto h-[7px] w-[7px] shrink-0 rounded-full ${agent.status === "online" ? "bg-success shadow-[0_0_6px_rgba(24,154,92,0.4)]" : "bg-warning shadow-[0_0_6px_rgba(185,124,30,0.4)] animate-pulse"}`}
 									/>
 								</button>
 							))}
