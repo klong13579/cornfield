@@ -223,7 +223,7 @@ function AgentCard({
 					: "未挂载";
 
 	return (
-		<div className="cursor-pointer rounded-xl border border-hairline bg-surface p-4 transition-all duration-150 hover:-translate-y-px hover:border-hairline-strong">
+		<div className="cursor-pointer rounded-xl border border-hairline bg-surface p-4 transition-all duration-150 hover:-translate-y-px hover:border-hairline-strong active:scale-[0.98] active:translate-y-0">
 			<div className="flex items-center gap-3">
 				<span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-surface-2 text-[12px] font-semibold text-ink">
 					{agent.face}

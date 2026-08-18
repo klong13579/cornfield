@@ -1,8 +1,9 @@
 @import "tailwindcss";
 
 /*
- * V6 亮色 design tokens → Tailwind theme（迁移自 docs/mock/README.md「亮色主题」）
+ * V6 亮色 design tokens → Tailwind theme（taste-skill 优化版）
  * token 一一对应 mock CSS 变量：canvas/surface/ink 三级、hairline 分隔、单色 accent、语义色克制。
+ * taste-skill 优化：Geist 字体、着色阴影、微噪点纹理、焦点环、tabular-nums、text-wrap、按压反馈。
  */
 @theme {
 	--color-canvas: #fafafa;
@@ -25,14 +26,17 @@
 	--color-info: #0288a8;
 	--color-user-bg: #ececee;
 	--color-dingtalk: #3296fa;
+	/* taste-skill: 着色阴影 — 用 warm gray 而非纯黑 */
+	--shadow-tint: 24, 24, 27;
 	--font-sans:
-		-apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Microsoft YaHei", sans-serif;
-	--font-mono: "SF Mono", ui-monospace, Menlo, monospace;
+		"Geist", -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Microsoft YaHei", sans-serif;
+	--font-mono: "Geist Mono", "SF Mono", ui-monospace, Menlo, monospace;
 	--radius-sm: 6px;
 	--radius-md: 8px;
 	--radius-lg: 12px;
 	--radius-full: 999px;
 	--ease: 150ms cubic-bezier(0.25, 0.46, 0.45, 0.94);
+	--ease-spring: 200ms cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 /* ── 基础 ── */
@@ -41,6 +45,9 @@ body,
 #root {
 	height: 100%;
 }
+html {
+	scroll-behavior: smooth;
+}
 body {
 	background: var(--color-canvas);
 	color: var(--color-ink);
@@ -48,12 +55,48 @@ body {
 		400 14px/1.6 var(--font-sans);
 	letter-spacing: -0.05px;
 	-webkit-font-smoothing: antialiased;
+	text-rendering: optimizeLegibility;
 }
+
+/* taste-skill: 微噪点纹理叠加 — 打破数字平面感 */
+body::before {
+	content: "";
+	position: fixed;
+	inset: 0;
+	z-index: 9999;
+	pointer-events: none;
+	opacity: 0.015;
+	background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' /%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)' /%3E%3C/svg%3E");
+}
+
 ::selection {
 	background: var(--color-accent-dim);
 }
 button {
 	cursor: pointer;
+}
+
+/* taste-skill: 焦点环 — 键盘导航可见焦点 */
+:focus-visible {
+	outline: 2px solid var(--color-accent);
+	outline-offset: 2px;
+	border-radius: 2px;
+}
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible {
+	outline: 2px solid var(--color-accent);
+	outline-offset: 2px;
+}
+
+/* taste-skill: 标题排版优化 */
+h1, h2, h3 {
+	text-wrap: balance;
+}
+/* taste-skill: 数据密集场景 tabular figures */
+.font-mono, .tname, code, pre {
+	font-variant-numeric: tabular-nums;
 }
 
 /* ── 动效 ── */
@@ -145,6 +188,7 @@ button {
 }
 
 /* ── 按钮 ── */
+/* taste-skill: 按压反馈 + 弹簧动效 */
 .btn {
 	background: var(--color-accent);
 	color: var(--color-on-accent);
@@ -153,10 +197,15 @@ button {
 	padding: 8px 18px;
 	font-size: 13px;
 	font-weight: 500;
-	transition: background var(--ease);
+	transition:
+		background var(--ease),
+		transform var(--ease-spring);
 }
 .btn:hover {
 	background: var(--color-accent-hover);
+}
+.btn:active {
+	transform: scale(0.97);
 }
 .btn:disabled {
 	opacity: 0.5;
@@ -170,12 +219,18 @@ button {
 .btn-secondary:hover {
 	background: var(--color-surface-3);
 }
+.btn-secondary:active {
+	transform: scale(0.97);
+}
 .btn-danger {
 	background: var(--color-danger);
 	color: #fff;
 }
 .btn-danger:hover {
 	background: color-mix(in srgb, var(--color-danger) 85%, #fff);
+}
+.btn-danger:active {
+	transform: scale(0.97);
 }
 .btn-sm {
 	padding: 5px 12px;
@@ -195,6 +250,9 @@ button {
 .btn-ghost:hover {
 	background: var(--color-surface-2);
 	color: var(--color-ink);
+}
+.btn-ghost:active {
+	transform: scale(0.96);
 }
 
 /* ── chip ── */
@@ -217,6 +275,9 @@ button {
 	border-color: var(--color-hairline-strong);
 	color: var(--color-ink-muted);
 }
+.chip:active {
+	transform: scale(0.97);
+}
 .chip b {
 	color: var(--color-ink);
 	font-weight: 500;
@@ -235,6 +296,7 @@ button {
 }
 
 /* ── 侧栏导航项 ── */
+/* taste-skill: 按压反馈 */
 .nav-item {
 	width: 40px;
 	height: 40px;
@@ -250,6 +312,9 @@ button {
 .nav-item:hover {
 	background: var(--color-surface-2);
 	color: var(--color-ink-subtle);
+}
+.nav-item:active {
+	transform: scale(0.92);
 }
 .nav-item.active {
 	background: var(--color-accent-dim);
@@ -270,6 +335,7 @@ button {
 }
 
 /* ── toggle（42×24 滑动开关）── */
+/* taste-skill: 着色阴影 */
 .toggle {
 	position: relative;
 	width: 42px;
@@ -293,8 +359,8 @@ button {
 	height: 18px;
 	border-radius: 50%;
 	background: #fff;
-	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
-	transition: transform 200ms ease;
+	box-shadow: 0 1px 3px rgba(var(--shadow-tint), 0.2);
+	transition: transform 200ms cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 .toggle.on::after {
 	transform: translateX(18px);
@@ -337,6 +403,9 @@ button {
 }
 .toolcard .head:hover {
 	background: var(--color-surface-2);
+}
+.toolcard .head:active {
+	background: var(--color-surface-3);
 }
 .toolcard .tname {
 	font-family: var(--font-mono);
@@ -411,17 +480,18 @@ button {
 .exec-dot.ok {
 	background: var(--color-success);
 }
+/* taste-skill: 着色光晕 */
 .conn-dot {
 	width: 7px;
 	height: 7px;
 	border-radius: 50%;
 	background: var(--color-success);
-	box-shadow: 0 0 8px rgba(69, 176, 122, 0.5);
+	box-shadow: 0 0 8px rgba(69, 176, 122, 0.4);
 	flex-shrink: 0;
 }
 .conn-dot.reconnecting {
 	background: var(--color-warning);
-	box-shadow: 0 0 8px rgba(217, 160, 63, 0.5);
+	box-shadow: 0 0 8px rgba(185, 124, 30, 0.4);
 	animation: pulse-dot 1.2s ease-in-out infinite;
 }
 
@@ -429,6 +499,7 @@ button {
 .rise-in {
 	animation: rise 500ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
+/* taste-skill: 按压反馈 */
 .cbtn {
 	display: inline-flex;
 	align-items: center;
@@ -446,6 +517,9 @@ button {
 	background: var(--color-surface-3);
 	color: var(--color-ink);
 }
+.cbtn:active {
+	transform: scale(0.95);
+}
 .link {
 	color: var(--color-ink-muted);
 	font-size: 12px;
@@ -455,6 +529,9 @@ button {
 .link:hover {
 	color: var(--color-ink);
 	text-decoration: underline;
+}
+.link:active {
+	opacity: 0.7;
 }
 .spin-warn {
 	border-top-color: var(--color-warning);

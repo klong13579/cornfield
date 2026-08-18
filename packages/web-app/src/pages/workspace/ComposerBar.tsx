@@ -350,7 +350,7 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 						<button
 							type="button"
 							onClick={() => (active ? store.abort() : send())}
-							className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md border-none transition-colors ${active ? "bg-danger text-white hover:bg-danger/85" : "bg-accent text-on-accent hover:bg-accent-hover"}`}
+							className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md border-none transition-all duration-150 active:scale-90 ${active ? "bg-danger text-white hover:bg-danger/85" : "bg-accent text-on-accent hover:bg-accent-hover"}`}
 							aria-label={active ? "停止" : "发送"}
 						>
 							{active ? (

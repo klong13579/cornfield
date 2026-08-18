@@ -97,7 +97,7 @@
 	max-width: 90vw;
 	max-height: 90vh;
 	border: none;
-	box-shadow: 0 8px 48px rgba(0, 0, 0, 0.6);
+	box-shadow: 0 8px 48px rgba(24, 24, 27, 0.4);
 }
 
 .mermaid-viewer-canvas {

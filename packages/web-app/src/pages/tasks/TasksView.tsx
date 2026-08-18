@@ -477,7 +477,7 @@ function TaskLogPanel({ task, onClose }: { task: TaskRowDto; onClose: () => void
 
 	return (
 		<div
-			className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 p-6"
+			className="fixed inset-0 z-50 flex items-start justify-center bg-ink/40 p-6"
 			role="dialog"
 			aria-modal="true"
 		>
