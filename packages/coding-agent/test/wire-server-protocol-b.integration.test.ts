@@ -205,7 +205,33 @@ describe("协议批 B-2 — queue 完整态", () => {
 	});
 });
 
-// ── B-3 list_commands / B-4 error codes 的 describe 随各自提交追加 ──
+describe("协议批 B-3 — list_commands 命令表", () => {
+	test("返回 TUI 命令表：≥ W1 硬编码 6 个 + name/description 字段", async () => {
+		const { ws, frames } = await connect(url);
+		try {
+			const result = (await request(ws, frames, { type: "list_commands" })) as {
+				commands: { name: string; description: string }[];
+			};
+			expect(Array.isArray(result.commands)).toBe(true);
+			expect(result.commands.length).toBeGreaterThanOrEqual(6);
+
+			const names = new Set(result.commands.map(c => c.name));
+			// W1 SlashPalette DEFAULT_COMMANDS 的 6 个必须全覆盖（名称带前导 /）
+			for (const expectName of ["/compact", "/undo", "/model", "/yolo", "/retry", "/usage"]) {
+				expect(names.has(expectName)).toBe(true);
+			}
+			// 每个命令都有非空描述
+			for (const c of result.commands) {
+				expect(c.name.startsWith("/")).toBe(true);
+				expect(c.description.length).toBeGreaterThan(0);
+			}
+		} finally {
+			ws.close();
+		}
+	});
+});
+
+// ── B-4 error codes 的 describe 随提交追加 ──
 
 beforeAll(async () => {
 	isolatedHome = await fs.mkdtemp(path.join(os.tmpdir(), "omp-serve-proto-b-"));

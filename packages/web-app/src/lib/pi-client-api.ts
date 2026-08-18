@@ -131,4 +131,8 @@ export interface PiClient {
 	fetchQueue(): Promise<{ steering: string[]; followUp: string[] }>;
 	/** 取消最近一条排队消息（cancel_queued；空队列返回 cancelled:false）。 */
 	cancelQueued(): Promise<{ cancelled: boolean; text?: string }>;
+
+	// ── 命令表（协议批 B-3）──
+	/** TUI slash 命令表（list_commands；W1 SlashPalette 真源）。 */
+	listCommands(): Promise<{ name: string; description: string }[]>;
 }

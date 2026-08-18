@@ -350,6 +350,11 @@ class SessionStore {
 		return this.#client.cancelQueued();
 	}
 
+	/** TUI slash 命令表（list_commands，代理到 pi-client；W1 SlashPalette 消费）。 */
+	listCommands(): Promise<{ name: string; description: string }[]> {
+		return this.#client.listCommands();
+	}
+
 	// ── 帧归约 ──
 
 	#onFrame(frame: WireServerEventDto): void {

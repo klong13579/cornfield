@@ -364,6 +364,12 @@ export class PiClientAdapter implements PiClient {
 		return this.#req<{ cancelled: boolean; text?: string }>({ type: "cancel_queued" } as never);
 	}
 
+	/** TUI slash 命令表（list_commands；W1 SlashPalette 真源替换 DEFAULT_COMMANDS）。 */
+	async listCommands(): Promise<{ name: string; description: string }[]> {
+		const result = await this.#req<{ commands?: { name: string; description: string }[] }>({ type: "list_commands" } as never);
+		return result.commands ?? [];
+	}
+
 	// hostToolResult：pi-client 无裸帧发送 API（host_tool_result 是独立 client frame），
 	// 待 pi-client 补 sendRaw/hostToolResult 后实现（差异清单已反馈 be-dev）。
 

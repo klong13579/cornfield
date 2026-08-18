@@ -14,6 +14,7 @@ import type {
 } from "@oh-my-pi/pi-wire";
 import { MULTIDEVICE_PROTOCOL_VERSION } from "@oh-my-pi/pi-wire";
 import { resolveGlobalMemoryRootCandidates } from "@oh-my-pi/self-evolution/paths";
+import { BUILTIN_SLASH_COMMANDS } from "../extensibility/slash-commands";
 import { getMemoryDb, getMemoryRoot, releaseMemoryDb, resolveMemoryDbPath } from "../memories";
 import { loadSectionsFromDb } from "../memories/projection";
 import { normalizeHostToolDefinitions } from "../modes/rpc/rpc-mode";
@@ -339,6 +340,15 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 					} catch (err) {
 						fail(`memory unavailable: ${String(err)}`);
 					}
+					return;
+				}
+				case "list_commands": {
+					// 协议批 B-3：TUI slash 命令表（BUILTIN_SLASH_COMMAND registry 同源）。
+					// 「能拿多少拿多少」：内置表 name/description；custom/extension 命令不进 wire 面。
+					// /undo /yolo /retry 非内置 slash（W1 SlashPalette 的虚拟惯例项），serve 补齐口径。
+					const builtin = BUILTIN_SLASH_COMMANDS.map(c => ({ name: `/${c.name}`, description: c.description }));
+					const virtual = TUI_VIRTUAL_COMMANDS;
+					done({ commands: [...builtin, ...virtual] });
 					return;
 				}
 				default:
@@ -889,6 +899,13 @@ function isPidAlive(pid: number): boolean {
 		return (err as NodeJS.ErrnoException).code === "EPERM";
 	}
 }
+
+/** 协议批 B-3：W1 SlashPalette 虚拟惯例项（非内置 slash 命令，TUI 动作口径）。 */
+const TUI_VIRTUAL_COMMANDS: { name: string; description: string }[] = [
+	{ name: "/undo", description: "撤销最近一轮对话" },
+	{ name: "/yolo", description: "切换免审批模式（危险）" },
+	{ name: "/retry", description: "重试失败的上一轮" },
+];
 
 const STATS_PERIOD_MS: Record<"1d" | "7d" | "30d" | "90d" | "all", number | undefined> = {
 	"1d": 24 * 60 * 60 * 1000,

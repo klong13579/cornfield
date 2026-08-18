@@ -168,7 +168,13 @@ export type WireExtensionCommand =
 	 * 协议批 B-2：取消最近一条排队消息（steer/followUp 队列，LIFO）。
 	 * 空队列返回 { cancelled:false }；成功返回 { cancelled:true, text }（被取消的文本）。
 	 */
-	| { id?: string; type: "cancel_queued"; sessionId?: string };
+	| { id?: string; type: "cancel_queued"; sessionId?: string }
+	/**
+	 * 协议批 B-3：TUI slash 命令表（BUILTIN_SLASH_COMMAND registry 同源）。
+	 * 返回 { commands: [{ name（含前导 /）, description }] }——W1 SlashPalette 真源。
+	 * 不定向（registry 级只读）。
+	 */
+	| { id?: string; type: "list_commands" };
 
 export type WireCommand = MultiplexCommand | WireExtensionCommand;
 
