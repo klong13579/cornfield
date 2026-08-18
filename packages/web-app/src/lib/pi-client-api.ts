@@ -2,6 +2,7 @@ import type { BranchPoint, PlaybackEntry, SessionRecordSummary } from "./records
 import type {
 	AgentInfoDto,
 	ConnectionInfoDto,
+	CronLogEntryDto,
 	DashboardStatsDto,
 	EnvironmentSummaryDto,
 	HostToolDefinitionDto,
@@ -11,6 +12,7 @@ import type {
 	SessionSnapshotDto,
 	SkillDto,
 	StatsPeriodDto,
+	TaskRowDto,
 	TodoPhaseDto,
 	WireServerEventDto,
 } from "./wire-dto";
@@ -140,4 +142,10 @@ export interface PiClient {
 	// ── 命令表（协议批 B-3）──
 	/** TUI slash 命令表（list_commands；W1 SlashPalette 真源）。 */
 	listCommands(): Promise<{ name: string; description: string }[]>;
+
+	// ── cron 只读代理（P2-W3-1 B6）──
+	/** gateway cron 任务表（get_cron_tasks；jobs.json 直读）。 */
+	getCronTasks(): Promise<{ tasks: TaskRowDto[] }>;
+	/** cron 执行日志（get_cron_logs；logs/by-task 直读，taskId/days/limit 可选）。 */
+	getCronLogs(opts?: { taskId?: string; days?: number; limit?: number }): Promise<{ logs: CronLogEntryDto[] }>;
 }

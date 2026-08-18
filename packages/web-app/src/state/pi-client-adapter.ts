@@ -6,6 +6,7 @@ import type { BranchPoint, PlaybackEntry, PlaybackToolStep, RecordStatus, Sessio
 import type {
 	AgentInfoDto,
 	ConnectionInfoDto,
+	CronLogEntryDto,
 	DashboardStatsDto,
 	EnvironmentSummaryDto,
 	HostToolDefinitionDto,
@@ -16,6 +17,7 @@ import type {
 	SessionSnapshotDto,
 	SkillDto,
 	StatsPeriodDto,
+	TaskRowDto,
 	TodoPhaseDto,
 	WireServerEventDto,
 } from "../lib/wire-dto";
@@ -388,6 +390,22 @@ export class PiClientAdapter implements PiClient {
 			type: "list_commands",
 		} as never);
 		return result.commands ?? [];
+	}
+
+	/** gateway cron 任务表（get_cron_tasks；jobs.json 直读，只读）。 */
+	async getCronTasks(): Promise<{ tasks: TaskRowDto[] }> {
+		return this.#req<{ tasks: TaskRowDto[] }>({ type: "get_cron_tasks" } as never);
+	}
+
+	/** cron 执行日志（get_cron_logs；logs/by-task 直读，只读）。 */
+	async getCronLogs(opts?: { taskId?: string; days?: number; limit?: number }): Promise<{ logs: CronLogEntryDto[] }> {
+		const command = {
+			type: "get_cron_logs",
+			...(opts?.taskId ? { taskId: opts.taskId } : {}),
+			...(opts?.days ? { days: opts.days } : {}),
+			...(opts?.limit ? { limit: opts.limit } : {}),
+		} as never;
+		return this.#req<{ logs: CronLogEntryDto[] }>(command);
 	}
 
 	// hostToolResult：pi-client 无裸帧发送 API（host_tool_result 是独立 client frame），

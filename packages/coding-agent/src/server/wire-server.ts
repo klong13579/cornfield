@@ -358,6 +358,23 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 					done({ commands: [...builtin, ...virtual] });
 					return;
 				}
+				case "get_cron_tasks": {
+					// P2-W3-1（B6 只读代理）：jobs.json 直读，不依赖 gateway 进程。
+					try {
+						done({ tasks: await readCronTaskList() });
+					} catch (err) {
+						failWithCode("internal", `cron tasks unavailable: ${String(err)}`);
+					}
+					return;
+				}
+				case "get_cron_logs": {
+					try {
+						done({ logs: await readCronLogList(command.taskId, command.days, command.limit) });
+					} catch (err) {
+						failWithCode("internal", `cron logs unavailable: ${String(err)}`);
+					}
+					return;
+				}
 				case "inject_permission": {
 					const { push, outcome } = gate.inject(command.kind ?? "approval");
 					for (const conn of connections) {
@@ -967,6 +984,154 @@ function isPidAlive(pid: number): boolean {
 	} catch (err) {
 		return (err as NodeJS.ErrnoException).code === "EPERM";
 	}
+}
+
+// ── P2-W3-1：gateway cron 只读代理（jobs.json + logs/by-task 直读，不 import gateway 运行时）──
+
+const CRON_LOG_MAX_OUTPUT = 2048;
+
+function gatewaySchedulerDir(): string {
+	return path.join(homeDir(), ".omp", "gateway-data", "scheduler");
+}
+
+interface CronTaskRow {
+	id: string;
+	name: string;
+	description?: string;
+	scheduleType: "cron" | "interval" | "once";
+	cron?: string;
+	command?: string;
+	nextRunAt?: number;
+	lastRunAt?: number;
+	enabled: boolean;
+	accountId?: string;
+	runCount?: number;
+	failCount?: number;
+	consecutiveFailures?: number;
+}
+
+/** 读 jobs.json（缺失/损坏 → 空列表，不抛）。 */
+async function readCronTaskList(): Promise<CronTaskRow[]> {
+	const jobsPath = path.join(gatewaySchedulerDir(), "jobs.json");
+	let raw: string;
+	try {
+		raw = await Bun.file(jobsPath).text();
+	} catch {
+		return [];
+	}
+	let parsed: { tasks?: Record<string, unknown>[] };
+	try {
+		parsed = JSON.parse(raw) as { tasks?: Record<string, unknown>[] };
+	} catch {
+		return [];
+	}
+	return (parsed.tasks ?? []).map(task => ({
+		id: String(task.id ?? ""),
+		name: String(task.name ?? ""),
+		description: typeof task.command === "string" ? String(task.command) : undefined,
+		scheduleType: (task.scheduleType === "interval" || task.scheduleType === "once" ? task.scheduleType : "cron") as
+			| "cron"
+			| "interval"
+			| "once",
+		cron: typeof task.cron === "string" ? String(task.cron) : undefined,
+		command: typeof task.command === "string" ? String(task.command) : undefined,
+		nextRunAt: typeof task.nextRunAt === "number" ? (task.nextRunAt as number) : undefined,
+		lastRunAt: typeof task.lastRunAt === "number" ? (task.lastRunAt as number) : undefined,
+		enabled: task.status !== "disabled",
+		accountId: typeof task.accountId === "string" ? String(task.accountId) : undefined,
+		runCount: typeof task.runCount === "number" ? (task.runCount as number) : undefined,
+		failCount: typeof task.failCount === "number" ? (task.failCount as number) : undefined,
+		consecutiveFailures:
+			typeof task.consecutiveFailures === "number" ? (task.consecutiveFailures as number) : undefined,
+	}));
+}
+
+/** 日志条目 DTO（output/stderr 截断 2KB）。 */
+interface CronLogRow {
+	taskId: string;
+	id: string;
+	ts: number;
+	status: string;
+	exitCode: number | null;
+	durationMs: number | null;
+	output?: string;
+	outputTruncated?: boolean;
+	stderr?: string;
+}
+
+async function readCronLogList(taskId?: string, days = 3, limit = 50): Promise<CronLogRow[]> {
+	const clampDays = Math.min(30, Math.max(1, days));
+	const clampLimit = Math.min(200, Math.max(1, limit));
+	const cutoff = Date.now() - clampDays * 24 * 60 * 60 * 1000;
+	const logsRoot = path.join(gatewaySchedulerDir(), "logs", "by-task");
+
+	let taskDirs: string[];
+	try {
+		taskDirs = (await fs.readdir(logsRoot, { withFileTypes: true })).filter(e => e.isDirectory()).map(e => e.name);
+	} catch {
+		return [];
+	}
+	if (taskId) {
+		// 精确匹配任务名目录；无则直接返回空
+		if (!taskDirs.includes(taskId)) return [];
+		taskDirs = [taskId];
+	}
+
+	const rows: CronLogRow[] = [];
+	for (const dir of taskDirs) {
+		const dirPath = path.join(logsRoot, dir);
+		let files: string[];
+		try {
+			files = (await fs.readdir(dirPath)).filter(f => f.endsWith(".jsonl"));
+		} catch {
+			continue;
+		}
+		for (const file of files) {
+			// 按文件名 YYYY-MM-DD 剪裁，避免整读陈旧日志
+			const day = file.replace(/\.jsonl$/, "");
+			const dayTs = Date.parse(day);
+			if (!Number.isNaN(dayTs) && dayTs < cutoff) continue;
+			let text: string;
+			try {
+				text = await Bun.file(path.join(dirPath, file)).text();
+			} catch {
+				continue;
+			}
+			for (const line of text.split("\n")) {
+				if (!line.trim()) continue;
+				let entry: {
+					id?: unknown;
+					ts?: unknown;
+					exitCode?: unknown;
+					status?: unknown;
+					durationMs?: unknown;
+					output?: unknown;
+					stderr?: unknown;
+				};
+				try {
+					entry = JSON.parse(line) as typeof entry;
+				} catch {
+					continue;
+				}
+				const ts = typeof entry.ts === "number" ? entry.ts : 0;
+				if (ts < cutoff) continue;
+				rows.push({
+					taskId: dir,
+					id: String(entry.id ?? ""),
+					ts,
+					status: String(entry.status ?? "unknown"),
+					exitCode: typeof entry.exitCode === "number" ? entry.exitCode : null,
+					durationMs: typeof entry.durationMs === "number" ? entry.durationMs : null,
+					output: typeof entry.output === "string" ? entry.output.slice(0, CRON_LOG_MAX_OUTPUT) : undefined,
+					outputTruncated:
+						typeof entry.output === "string" && entry.output.length > CRON_LOG_MAX_OUTPUT ? true : undefined,
+					stderr: typeof entry.stderr === "string" ? entry.stderr.slice(0, CRON_LOG_MAX_OUTPUT) : undefined,
+				});
+			}
+		}
+	}
+	rows.sort((a, b) => b.ts - a.ts);
+	return rows.slice(0, clampLimit);
 }
 
 /** 协议批 B-3：W1 SlashPalette 虚拟惯例项（非内置 slash 命令，TUI 动作口径）。 */

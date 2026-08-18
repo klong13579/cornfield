@@ -366,6 +366,24 @@ export interface TaskRowDto {
 	lastRunAt?: number;
 	enabled: boolean;
 	accountId?: string;
+	/** 执行命令（jobs.json command）。 */
+	command?: string;
+	runCount?: number;
+	failCount?: number;
+	consecutiveFailures?: number;
+}
+
+/** cron 执行日志条目（P2-W3-1 B6 代理；output/stderr 服务端已截断 2KB）。 */
+export interface CronLogEntryDto {
+	taskId: string;
+	id: string;
+	ts: number;
+	status: string;
+	exitCode: number | null;
+	durationMs: number | null;
+	output?: string;
+	outputTruncated?: boolean;
+	stderr?: string;
 }
 
 // ── 技能列表（serve get_skills，W3 D5；只读，B3 启停协议未到）──

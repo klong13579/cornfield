@@ -2,6 +2,7 @@ import type { FsEntryDto, GatewayStatusDto, PiClient } from "../lib/pi-client-ap
 import type { BranchPoint, PlaybackEntry, SessionRecordSummary } from "../lib/records";
 import type {
 	AgentInfoDto,
+	CronLogEntryDto,
 	DashboardStatsDto,
 	EnvironmentSummaryDto,
 	HostToolDefinitionDto,
@@ -16,6 +17,7 @@ import type {
 	SessionSnapshotDto,
 	SkillDto,
 	StatsPeriodDto,
+	TaskRowDto,
 	TodoPhaseDto,
 	WireServerEventDto,
 } from "../lib/wire-dto";
@@ -389,6 +391,16 @@ class SessionStore {
 	/** TUI slash 命令表（list_commands，代理到 pi-client；W1 SlashPalette 消费）。 */
 	listCommands(): Promise<{ name: string; description: string }[]> {
 		return this.#client.listCommands();
+	}
+
+	/** gateway cron 任务表（get_cron_tasks，代理到 pi-client）。 */
+	fetchCronTasks(): Promise<{ tasks: TaskRowDto[] }> {
+		return this.#client.getCronTasks();
+	}
+
+	/** cron 执行日志（get_cron_logs，代理到 pi-client）。 */
+	fetchCronLogs(opts?: { taskId?: string; days?: number; limit?: number }): Promise<{ logs: CronLogEntryDto[] }> {
+		return this.#client.getCronLogs(opts);
 	}
 
 	// ── 帧归约 ──

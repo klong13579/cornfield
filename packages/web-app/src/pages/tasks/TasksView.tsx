@@ -1,4 +1,7 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import type { CronLogEntryDto, TaskRowDto } from "../../lib/wire-dto";
+import { useSessionStore } from "../../state/session-store";
+import { useSession } from "../../state/use-session";
 import {
 	buildCronExpression,
 	CRON_SCHEDULE_PRESETS,
@@ -35,13 +38,32 @@ function fmtRun(ts: number): string {
 }
 
 export function TasksView(): React.JSX.Element {
+	const view = useSession();
+	const store = useSessionStore();
+	const [tasks, setTasks] = useState<TaskRowDto[]>([]);
+	const [logs, setLogs] = useState<CronLogEntryDto[]>([]);
+	const [error, setError] = useState<string | null>(null);
+
+	useEffect(() => {
+		if (!view.connected) return;
+		setError(null);
+		void store
+			.fetchCronTasks()
+			.then(r => setTasks(r.tasks))
+			.catch(err => setError(err instanceof Error ? err.message : String(err)));
+		void store
+			.fetchCronLogs({ days: 3, limit: 200 })
+			.then(r => setLogs(r.logs))
+			.catch(() => undefined);
+	}, [store, view.connected]);
+
 	return (
 		<div className="px-10 pt-8 pb-12">
 			<div className="mx-auto max-w-[1000px]">
 				<h1 className="mb-7 text-[32px] font-semibold tracking-[-0.8px] text-ink">定时任务</h1>
 				<div className="space-y-8">
 					<CronFormCard />
-					<TaskListCard />
+					<TaskListCard tasks={tasks} logs={logs} error={error} connected={view.connected} />
 				</div>
 			</div>
 		</div>
@@ -285,31 +307,116 @@ function NumberField({
 	);
 }
 
-function TaskListCard(): React.JSX.Element {
+function TaskListCard({
+	tasks,
+	logs,
+	error,
+	connected,
+}: {
+	tasks: TaskRowDto[];
+	logs: CronLogEntryDto[];
+	error: string | null;
+	connected: boolean;
+}): React.JSX.Element {
+	// 最近一次运行（按 ts 取各任务最新）
+	const lastRunByTask = useMemo(() => {
+		const map = new Map<string, CronLogEntryDto>();
+		for (const log of logs) {
+			const prev = map.get(log.taskId);
+			if (!prev || log.ts > prev.ts) map.set(log.taskId, log);
+		}
+		return map;
+	}, [logs]);
+
 	return (
 		<div className="rounded-xl border border-hairline bg-surface">
 			<div className="flex items-baseline justify-between px-5 pt-4 pb-2">
 				<div className="text-[11px] font-semibold tracking-[0.08em] text-ink-faint uppercase">任务列表</div>
-				<div className="font-mono text-[11px] text-ink-faint">B6 数据接入后显示</div>
-			</div>
-
-			<div className="space-y-2 px-5 pb-5">
-				{/* 列表占位行（taskRowDto 结构预演；B6 数据接入后由真实数据替换） */}
-				<div className="flex items-center justify-between rounded-md border border-hairline bg-surface-2 px-3 py-3">
-					<div className="space-y-1.5">
-						<div className="h-3 w-40 rounded bg-ink-faint/30" />
-						<div className="h-2.5 w-56 rounded bg-ink-faint/20" />
-					</div>
-					<div className="flex gap-2">
-						<div className="h-6 w-16 rounded bg-ink-faint/20" />
-						<div className="h-6 w-16 rounded bg-ink-faint/20" />
-					</div>
-				</div>
-
-				<div className="pt-2 text-center text-[12px] text-ink-faint">
-					任务列表/立即运行/日志查看等 gateway cron 代理命令（B6）落地后接入——当前渲染空态占位，不 mock 数据
+				<div className="font-mono text-[11px] text-ink-faint">
+					{connected && !error ? `${tasks.length} 个任务 · 来自 gateway jobs.json（只读代理）` : ""}
 				</div>
 			</div>
+
+			{!connected && <div className="px-5 pb-6 text-center text-[12px] text-ink-faint">未连接——任务列表不可用</div>}
+			{error && <div className="px-5 pb-6 text-center text-[12px] text-ink-faint">任务列表不可用：{error}</div>}
+			{connected && !error && tasks.length === 0 && (
+				<div className="px-5 pb-6 text-center text-[12px] text-ink-faint">
+					暂无定时任务——serve 直读 ~/.omp/gateway-data/scheduler/jobs.json（B6 只读代理）
+				</div>
+			)}
+
+			{connected && !error && tasks.length > 0 && (
+				<div className="pb-2">
+					{tasks.map(task => (
+						<div
+							key={task.id}
+							className="flex items-start gap-3 border-t border-hairline px-5 py-3 first:border-t-0"
+						>
+							<div className="min-w-0 flex-1">
+								<div className="flex items-baseline gap-2">
+									<span className="text-[13.5px] font-medium text-ink">{task.name}</span>
+									<span className="rounded bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] text-ink-faint">
+										{task.scheduleType}
+									</span>
+									{task.accountId && (
+										<span className="rounded bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] text-ink-faint">
+											{task.accountId}
+										</span>
+									)}
+									{!task.enabled && (
+										<span className="rounded bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] text-ink-faint">
+											disabled
+										</span>
+									)}
+								</div>
+								{task.cron && <div className="mt-0.5 font-mono text-[11.5px] text-ink-subtle">{task.cron}</div>}
+								<div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-[11px] text-ink-faint">
+									{task.nextRunAt !== undefined && task.nextRunAt > 0 && (
+										<span>下次：{fmtRun(task.nextRunAt)}</span>
+									)}
+									{task.runCount !== undefined && <span>已运行 {task.runCount} 次</span>}
+									{(task.consecutiveFailures ?? 0) > 0 && (
+										<span className="text-warning">连续失败 {task.consecutiveFailures} 次</span>
+									)}
+								</div>
+								{(() => {
+									const last = lastRunByTask.get(task.name);
+									if (!last) return null;
+									return (
+										<div className="mt-1 flex items-baseline gap-2 text-[11px] text-ink-faint">
+											<span
+												className={
+													last.status === "success"
+														? "font-medium text-success"
+														: "font-medium text-danger"
+												}
+											>
+												{last.status}
+											</span>
+											<span className="font-mono">{fmtRun(last.ts)}</span>
+											{last.durationMs !== null && <span>{(last.durationMs / 1000).toFixed(1)}s</span>}
+											{last.output && (
+												<span className="truncate pl-1 text-ink-faint">{last.output.slice(0, 80)}</span>
+											)}
+										</div>
+									);
+								})()}
+							</div>
+
+							{/* 运行/日志：B6 代理只读；写操作仍走 gateway 直连（未接） */}
+							<button
+								type="button"
+								disabled
+								title="立即运行/修改调度需 gateway 侧直连（当前为只读代理）"
+								aria-label={`${task.name} 运行操作`}
+								className="mt-0.5 shrink-0 cursor-not-allowed rounded-md border border-hairline bg-surface-2 px-2.5 py-1 text-[11.5px] text-ink-faint"
+							>
+								运行
+							</button>
+						</div>
+					))}
+				</div>
+			)}
 		</div>
 	);
 }
