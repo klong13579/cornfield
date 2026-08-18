@@ -143,10 +143,29 @@ export type ProgressEventDto =
 
 // ── 帧 ──
 
+/** 权限请求推送（approval：危险命令审批；clarify：Agent 澄清择一）。 */
+export type PermissionRequestDto =
+	| {
+			type: "permission_request";
+			requestId: string;
+			kind: "approval";
+			command: string;
+			description: string;
+			patternKeys: string[];
+	  }
+	| {
+			type: "permission_request";
+			requestId: string;
+			kind: "clarify";
+			question: string;
+			options: string[];
+	  };
+
 export type WireServerEventDto =
 	| { type: "server_snapshot"; sessions: SessionListEntryDto[] }
 	| { type: "session_snapshot"; sessionId: string; snapshot: SessionSnapshotDto }
-	| { type: "progress"; sessionId: string; event: ProgressEventDto };
+	| { type: "progress"; sessionId: string; event: ProgressEventDto }
+	| PermissionRequestDto;
 
 export interface ConnectionInfoDto {
 	connected: boolean;

@@ -188,13 +188,37 @@ export interface HostToolsChangedPush {
 	tools: WireHostToolDefinition[];
 }
 
+/**
+ * permission_request —— 需要用户裁决的审批/澄清请求（壳内验证 mode：由 serve 模拟注入触发，
+ * 将来 agent-core canUseTool 接上后同帧复用）。推给发起连接 + 全部在线连接（任一端可批）。
+ *
+ * approval：危险命令审批；clarify：Agent 澄清择一。`requestId` 供 permission_respond 回指。
+ */
+export type PermissionRequestPush =
+	| {
+			type: "permission_request";
+			requestId: string;
+			kind: "approval";
+			command: string;
+			description: string;
+			patternKeys: string[];
+	  }
+	| {
+			type: "permission_request";
+			requestId: string;
+			kind: "clarify";
+			question: string;
+			options: string[];
+	  };
+
 export type WireServerEvent<TSnapshot = unknown, TEvent = unknown> =
 	| { type: "server_snapshot"; sessions: SessionListEntry[] }
 	| { type: "session_snapshot"; sessionId: string; snapshot: TSnapshot }
 	| { type: "progress"; sessionId: string; event: TEvent }
 	| HostToolCallPush
 	| HostToolCancelPush
-	| HostToolsChangedPush;
+	| HostToolsChangedPush
+	| PermissionRequestPush;
 
 export type ServerFrame<TSnapshot = unknown, TEvent = unknown> =
 	| { type: "hello_ack"; connectionId: string; protocolVersion: number }
