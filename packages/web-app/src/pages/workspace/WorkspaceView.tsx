@@ -1,4 +1,4 @@
-import { Folder, Menu } from "lucide-react";
+import { Folder, Menu, PanelRight } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { QueueCard } from "../../components/QueueCard";
@@ -69,6 +69,15 @@ export function WorkspaceView({ compact = false }: { compact?: boolean }): React
 					<span className="flex-1" />
 					{!compact && (
 						<>
+							<button
+								type="button"
+								className="cbtn hidden shrink-0 lg:inline-flex"
+								onClick={() => getUiStore().setRightPanel(!ui.rightPanelOpen)}
+								aria-label={ui.rightPanelOpen ? "收起右栏" : "展开右栏"}
+								title={ui.rightPanelOpen ? "收起右栏" : "展开右栏"}
+							>
+								<PanelRight size={16} strokeWidth={1.5} />
+							</button>
 							<button type="button" className="link" onClick={() => store.compact()}>
 								compact
 							</button>
@@ -85,7 +94,7 @@ export function WorkspaceView({ compact = false }: { compact?: boolean }): React
 				{/* 输入区：单一实例（CSS 自适应桌面/移动），避免模型列表/草稿逻辑双份执行 */}
 				<ComposerBar autoFocusDraft={draftSeed} />
 			</div>
-			{!compact && <RightPanel />}
+			{!compact && <RightPanel collapsed={!ui.rightPanelOpen} />}
 			{!compact && <DevicePreview />}
 		</div>
 	);

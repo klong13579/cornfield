@@ -12,10 +12,14 @@ export interface UiState {
 	keepDraft: boolean;
 	/** 移动端左侧会话栏/右栏抽屉开关（<lg 断点）。 */
 	mobileNavOpen: boolean;
+	/** 右栏折叠开关（R-COLLAPSE，demand-driven；桌面折叠后转录全宽）。 */
+	rightPanelOpen: boolean;
 }
 
 const DRAFT_KEY = "omp.workspace.draft";
 const KEEPDRAFT_KEY = "omp.keepDraft";
+
+const RIGHTPANEL_KEY = "omp.workspace.rightPanel";
 
 function loadString(key: string): string {
 	try {
@@ -31,6 +35,7 @@ class UiStore {
 		phonePreviewOpen: false,
 		keepDraft: loadString(KEEPDRAFT_KEY) !== "0",
 		mobileNavOpen: false,
+		rightPanelOpen: loadString(RIGHTPANEL_KEY) === "1",
 	};
 	#listeners = new Set<() => void>();
 
@@ -68,6 +73,15 @@ class UiStore {
 
 	setMobileNav(open: boolean): void {
 		this.#mutate({ mobileNavOpen: open });
+	}
+
+	setRightPanel(open: boolean): void {
+		this.#mutate({ rightPanelOpen: open });
+		try {
+			localStorage.setItem(RIGHTPANEL_KEY, open ? "1" : "0");
+		} catch {
+			// localStorage 不可用时仅内存态
+		}
 	}
 
 	#mutate(patch: Partial<UiState>): void {
