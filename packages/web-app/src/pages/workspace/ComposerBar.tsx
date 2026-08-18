@@ -6,6 +6,7 @@ import type { ImageContentDto } from "../../lib/wire-dto";
 import { useSessionStore } from "../../state/session-store";
 import { getUiStore, useUiState } from "../../state/ui-store";
 import { useSession } from "../../state/use-session";
+import { DEFAULT_COMMANDS, filterSlashCommands, type SlashCommandDef, SlashPalette } from "./SlashPalette";
 
 const THINKING_LEVELS = ["off", "low", "medium", "high"];
 
@@ -47,6 +48,8 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 	const [showAgentMenu, setShowAgentMenu] = useState(false);
 	const [showModelMenu, setShowModelMenu] = useState(false);
 	const [modelList, setModelList] = useState<Array<{ id: string; provider: string }>>([]);
+	const [slashOpen, setSlashOpen] = useState(false);
+	const [slashIndex, setSlashIndex] = useState(0);
 	const value = ui.draft || autoFocusDraft;
 	const [attachments, setAttachments] = useState<ImageContentDto[]>([]);
 	const fileRef = useRef<HTMLInputElement>(null);
@@ -107,7 +110,37 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 		setAttachments([]);
 	};
 
+	const selectSlash = (cmd: SlashCommandDef) => {
+		getUiStore().setDraft(`${cmd.name} `);
+		setSlashOpen(false);
+		textRef.current?.focus();
+	};
+
 	const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+		if (slashOpen) {
+			const filtered = filterSlashCommands(DEFAULT_COMMANDS, value.slice(1));
+			if (e.key === "ArrowDown") {
+				e.preventDefault();
+				setSlashIndex(i => Math.min(i + 1, filtered.length - 1));
+				return;
+			}
+			if (e.key === "ArrowUp") {
+				e.preventDefault();
+				setSlashIndex(i => Math.max(i - 1, 0));
+				return;
+			}
+			if (e.key === "Enter" && !e.shiftKey) {
+				e.preventDefault();
+				const cmd = filtered[slashIndex];
+				if (cmd) selectSlash(cmd);
+				return;
+			}
+			if (e.key === "Escape") {
+				e.preventDefault();
+				setSlashOpen(false);
+				return;
+			}
+		}
 		if (e.key === "Enter" && !e.shiftKey) {
 			e.preventDefault();
 			if (active) {
@@ -123,13 +156,27 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 	return (
 		<div className="shrink-0 border-t border-hairline bg-surface px-4.5 pt-3.5 pb-3">
 			<div className="relative mx-auto max-w-[800px]">
+				{slashOpen && (
+					<SlashPalette
+						query={value.slice(1)}
+						activeIndex={slashIndex}
+						onSelect={selectSlash}
+						onHover={setSlashIndex}
+					/>
+				)}
+
 				<div className="rounded-xl border border-hairline bg-surface-2 transition-[border-color,box-shadow] duration-150 focus-within:border-hairline-strong focus-within:shadow-[0_0_0_3px_var(--color-accent-dim)]">
 					<textarea
 						ref={textRef}
 						rows={1}
 						value={value}
 						placeholder={`@${agent?.name ?? "Agent"} 发消息，或直接提问…`}
-						onChange={e => getUiStore().setDraft(e.target.value)}
+						onChange={e => {
+							const v = e.target.value;
+							getUiStore().setDraft(v);
+							setSlashOpen(v.startsWith("/"));
+							setSlashIndex(0);
+						}}
 						onInput={autoGrow}
 						onKeyDown={onKeyDown}
 						className="min-h-[52px] w-full resize-none border-none bg-transparent px-3.5 pt-3 pb-1.5 font-inherit text-ink outline-none placeholder:text-ink-faint"
