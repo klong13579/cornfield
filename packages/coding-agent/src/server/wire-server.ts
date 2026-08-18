@@ -423,6 +423,21 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 					done(buildRpcState(session, attached.store, await buildEnvironmentSummary(registry)));
 					break;
 				}
+				case "get_skills": {
+					// W3 D5：只读列出该 agent 已加载技能（session.skills 与 agent 实际运行同源）。
+					// discovery 已按 settings 过滤——此处列表即「已启用」集；B3 启停协议落地前不做任何写返回。
+					// level（user/project/native）+ provider 供前端分类折叠。
+					done({
+						skills: session.skills.map(s => ({
+							name: s.name,
+							description: s.description,
+							source: s.source,
+							level: s._source?.level ?? "native",
+							provider: s._source?.providerName ?? "builtin",
+						})),
+					});
+					break;
+				}
 				case "set_todos": {
 					session.setTodoPhases(command.phases as TodoPhase[]);
 					sessionDone({ todoPhases: session.getTodoPhases() });

@@ -14,6 +14,7 @@ import type {
 	ModelInfoDto,
 	ProgressEventDto,
 	SessionSnapshotDto,
+	SkillDto,
 	StatsPeriodDto,
 	TodoPhaseDto,
 	WireServerEventDto,
@@ -341,6 +342,12 @@ export class PiClientAdapter implements PiClient {
 	/** 记忆投影（get_memory；三分区只读，取不到为 null，失败抛错由调用方空态）。 */
 	async getMemory(): Promise<MemoryProjectionDto> {
 		return this.#req<MemoryProjectionDto>({ type: "get_memory" } as never);
+	}
+
+	/** 已加载技能（get_skills；session.skills 同源，只读；失败抛错由调用方空态）。 */
+	async getSkills(): Promise<SkillDto[]> {
+		const result = await this.#req<{ skills?: SkillDto[] }>({ type: "get_skills" } as never);
+		return result.skills ?? [];
 	}
 
 	// hostToolResult：pi-client 无裸帧发送 API（host_tool_result 是独立 client frame），

@@ -346,6 +346,18 @@ export interface TaskRowDto {
 	accountId?: string;
 }
 
+// ── 技能列表（serve get_skills，W3 D5；只读，B3 启停协议未到）──
+
+/** 技能项（session.skills 同源；level 供分类折叠）。 */
+export interface SkillDto {
+	name: string;
+	description: string;
+	source: string;
+	/** user（用户级）/ project（项目级）/ native（内置）。 */
+	level: "user" | "project" | "native";
+	provider: string;
+}
+
 /** 连接后返回（hello_ack 内容 + 环境摘要，Home 用）。 */
 export interface EnvironmentSummaryDto {
 	repos: string;

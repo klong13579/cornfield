@@ -156,7 +156,14 @@ export type WireExtensionCommand =
 	 * 不依赖任何 attached session（不定向，锚定 serve 进程 cwd 的 default agent）。
 	 * 文件内容 > 128KB 截断并标记 truncated；取不到的区返回 null，UI 渲染空态。
 	 */
-	| { id?: string; type: "get_memory" };
+	| { id?: string; type: "get_memory" }
+	/**
+	 * W3 D5：只读列出目标 agent 已加载技能（session.skills 同源——discovery 已按 settings
+	 * 过滤，「已启用集」语义）。返回 name/description/source/level（user|project|native）/provider。
+	 * 不实现启停写入：B3 技能管理协议落地前的只读前置。
+	 * - 无 sessionId：当前连接 active session；有 sessionId：定向该 agent（lazy attach）
+	 */
+	| { id?: string; type: "get_skills"; sessionId?: string };
 
 export type WireCommand = MultiplexCommand | WireExtensionCommand;
 
