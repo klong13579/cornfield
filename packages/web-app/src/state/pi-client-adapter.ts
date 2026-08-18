@@ -6,7 +6,9 @@ import type { BranchPoint, PlaybackEntry, PlaybackToolStep, RecordStatus, Sessio
 import type {
 	AgentInfoDto,
 	ConnectionInfoDto,
+	CronLogEntryDto,
 	DashboardStatsDto,
+	DisabledSkillDto,
 	EnvironmentSummaryDto,
 	HostToolDefinitionDto,
 	ImageContentDto,
@@ -16,6 +18,7 @@ import type {
 	SessionSnapshotDto,
 	SkillDto,
 	StatsPeriodDto,
+	TaskRowDto,
 	TodoPhaseDto,
 	WireServerEventDto,
 } from "../lib/wire-dto";
@@ -360,10 +363,21 @@ export class PiClientAdapter implements PiClient {
 		return this.#req<MemoryProjectionDto>({ type: "get_memory" } as never);
 	}
 
-	/** 已加载技能（get_skills；session.skills 同源，只读；失败抛错由调用方空态）。 */
-	async getSkills(): Promise<SkillDto[]> {
-		const result = await this.#req<{ skills?: SkillDto[] }>({ type: "get_skills" } as never);
-		return result.skills ?? [];
+	/** 已加载技能 + 已停用名单（get_skills；只读；失败抛错由调用方空态）。 */
+	async getSkills(): Promise<{ skills: SkillDto[]; disabled: DisabledSkillDto[] }> {
+		const result = await this.#req<{ skills?: SkillDto[]; disabled?: DisabledSkillDto[] }>({
+			type: "get_skills",
+		} as never);
+		return { skills: result.skills ?? [], disabled: result.disabled ?? [] };
+	}
+
+	/** 启停技能（set_skill_enabled；写配置 + 重发现热重载，失败抛错由调用方提示）。 */
+	async setSkillEnabled(name: string, enabled: boolean): Promise<{ ok: boolean; name: string; enabled: boolean }> {
+		return this.#req<{ ok: boolean; name: string; enabled: boolean }>({
+			type: "set_skill_enabled",
+			name,
+			enabled,
+		} as never);
 	}
 
 	/** 排队文本（get_state 的 queued；协议批 B-2，QueueCard 数据源）。 */
@@ -388,6 +402,22 @@ export class PiClientAdapter implements PiClient {
 			type: "list_commands",
 		} as never);
 		return result.commands ?? [];
+	}
+
+	/** gateway cron 任务表（get_cron_tasks；jobs.json 直读，只读）。 */
+	async getCronTasks(): Promise<{ tasks: TaskRowDto[] }> {
+		return this.#req<{ tasks: TaskRowDto[] }>({ type: "get_cron_tasks" } as never);
+	}
+
+	/** cron 执行日志（get_cron_logs；logs/by-task 直读，只读）。 */
+	async getCronLogs(opts?: { taskId?: string; days?: number; limit?: number }): Promise<{ logs: CronLogEntryDto[] }> {
+		const command = {
+			type: "get_cron_logs",
+			...(opts?.taskId ? { taskId: opts.taskId } : {}),
+			...(opts?.days ? { days: opts.days } : {}),
+			...(opts?.limit ? { limit: opts.limit } : {}),
+		} as never;
+		return this.#req<{ logs: CronLogEntryDto[] }>(command);
 	}
 
 	// hostToolResult：pi-client 无裸帧发送 API（host_tool_result 是独立 client frame），

@@ -2,7 +2,9 @@ import type { BranchPoint, PlaybackEntry, SessionRecordSummary } from "./records
 import type {
 	AgentInfoDto,
 	ConnectionInfoDto,
+	CronLogEntryDto,
 	DashboardStatsDto,
+	DisabledSkillDto,
 	EnvironmentSummaryDto,
 	HostToolDefinitionDto,
 	ImageContentDto,
@@ -11,6 +13,7 @@ import type {
 	SessionSnapshotDto,
 	SkillDto,
 	StatsPeriodDto,
+	TaskRowDto,
 	TodoPhaseDto,
 	WireServerEventDto,
 } from "./wire-dto";
@@ -129,7 +132,7 @@ export interface PiClient {
 
 	// ── 技能列表（W3 D5 SkillsPanel）──
 	/** 已加载技能（get_skills，只读；session.skills 同源）。失败/未连接抛错，由调用方渲染空态。 */
-	getSkills(): Promise<SkillDto[]>;
+	getSkills(): Promise<{ skills: SkillDto[]; disabled: DisabledSkillDto[] }>;
 
 	// ── 队列（协议批 B-2）──
 	/** 排队文本（get_state 的 queued 字段；快照只有计数）。 */
@@ -140,4 +143,14 @@ export interface PiClient {
 	// ── 命令表（协议批 B-3）──
 	/** TUI slash 命令表（list_commands；W1 SlashPalette 真源）。 */
 	listCommands(): Promise<{ name: string; description: string }[]>;
+
+	// ── cron 只读代理（P2-W3-1 B6）──
+	/** gateway cron 任务表（get_cron_tasks；jobs.json 直读）。 */
+	getCronTasks(): Promise<{ tasks: TaskRowDto[] }>;
+	/** cron 执行日志（get_cron_logs；logs/by-task 直读，taskId/days/limit 可选）。 */
+	getCronLogs(opts?: { taskId?: string; days?: number; limit?: number }): Promise<{ logs: CronLogEntryDto[] }>;
+
+	// ── 技能启停（P2-W3-3 B3 写协议）──
+	/** 启停技能（set_skill_enabled；serve 写 config.yml + 重发现热重载）。 */
+	setSkillEnabled(name: string, enabled: boolean): Promise<{ ok: boolean; name: string; enabled: boolean }>;
 }

@@ -161,9 +161,11 @@ export type WireExtensionCommand =
 	 */
 	| { id?: string; type: "get_memory" }
 	/**
-	 * W3 D5：只读列出目标 agent 已加载技能（session.skills 同源——discovery 已按 settings
-	 * 过滤，「已启用集」语义）。返回 name/description/source/level（user|project|native）/provider。
-	 * 不实现启停写入：B3 技能管理协议落地前的只读前置。
+	 * W3 D5 + P2-W3-3：只读列出已加载技能 + 已停用名单。
+	 * skills = session.skills（discovery 按 settings 过滤后的「已启用」集）：name/description/
+	 * source/level（user|project|native）/provider。
+	 * disabled = settings.skills.ignoredSkills 名单 + 技能目录 SKILL.md 元数据（name/description?）
+	 * ——回切入口数据源（SkillsView「显示已停用」）。
 	 * - 无 sessionId：当前连接 active session；有 sessionId：定向该 agent（lazy attach）
 	 */
 	| { id?: string; type: "get_skills"; sessionId?: string }
@@ -179,6 +181,27 @@ export type WireExtensionCommand =
 	 */
 	| { id?: string; type: "list_commands" }
 	/**
+	 * P2-W3-1（B6 只读代理）：拉取 gateway cron 任务表。
+	 * 数据源 jobs.json 直读（~/.omp/gateway-data/scheduler/jobs.json），不依赖 gateway 进程，
+	 * 不 import gateway 运行时。返回 { tasks: TaskRowDto 形状 }（字段对齐 jobs.json 任务）。
+	 */
+	| { id?: string; type: "get_cron_tasks" }
+	/**
+	 * P2-W3-1（B6 只读代理）：拉取 cron 执行日志（~/.omp/gateway-data/scheduler/logs/by-task/ 直读）。
+	 * - taskId 可选：缺省 = 全部任务；
+	 * - days 回溯天数（默认 3，钳 1-30）；limit 返回条数（默认 50，钳 1-200）
+	 * 返回 { logs: [{ taskId, id, ts, status, exitCode, durationMs, output(截断), stderr(截断) }] }。
+	 */
+	| { id?: string; type: "get_cron_logs"; taskId?: string; days?: number; limit?: number }
+	/**
+	 * P2-W3-3（B3 技能写协议）：启停一个技能。
+	 * serve 写 settings（~/.omp/agent/config.yml 的 skills.ignoredSkills 列表），随后
+	 * 重发现 + 会话热重载，get_skills 立即反映。
+	 * - name：技能名（非空、不含路径分隔符）
+	 * - enabled：true 启用（从 ignoredSkills 移除）/ false 停用（追加）
+	 */
+	| { id?: string; type: "set_skill_enabled"; sessionId?: string; name: string; enabled: boolean }
+	/**
 	 * 壳内验证：注入一个 mock 审批/澄清请求（permission_request push），
 	 * 模拟危险命令审批，不接 agent-core。命令 response 会等到 respond 到达再回。
 	 */
@@ -188,7 +211,6 @@ export type WireExtensionCommand =
 	 * clarify 为所选 option 文本。脏值 serve 侧回 error。
 	 */
 	| { id?: string; type: "permission_respond"; requestId: string; choice: string };
-
 export type WireCommand = MultiplexCommand | WireExtensionCommand;
 
 /** 获取具体命令结构的 helper。 */

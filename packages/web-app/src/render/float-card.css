@@ -166,3 +166,8 @@
 	border-color: var(--color-accent);
 	background: var(--color-accent-dim);
 }
+
+/* 浮层卡容器：position:relative 让 .float-card 绝对定位锚在 composer 上方（FloatingCardHost）。 */
+.floating-card-host {
+	position: relative;
+}

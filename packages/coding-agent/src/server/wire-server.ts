@@ -3,7 +3,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { buildModelPriceCatalog, getDashboardStats, syncAllSessions } from "@oh-my-pi/omp-stats";
-import { getAgentDir, getConfigRootDir, isEnoent, logger } from "@oh-my-pi/pi-utils";
+import { getAgentDir, getConfigRootDir, isEnoent, logger, parseFrontmatter } from "@oh-my-pi/pi-utils";
 import type {
 	ClientFrame,
 	PermissionRequestPush,
@@ -16,10 +16,12 @@ import type {
 } from "@oh-my-pi/pi-wire";
 import { MULTIDEVICE_PROTOCOL_VERSION } from "@oh-my-pi/pi-wire";
 import { resolveGlobalMemoryRootCandidates } from "@oh-my-pi/self-evolution/paths";
+import { Settings } from "../config/settings";
 import { BUILTIN_SLASH_COMMANDS } from "../extensibility/slash-commands";
 import { getMemoryDb, getMemoryRoot, releaseMemoryDb, resolveMemoryDbPath } from "../memories";
 import { loadSectionsFromDb } from "../memories/projection";
 import { normalizeHostToolDefinitions } from "../modes/rpc/rpc-mode";
+import { discoverSkills } from "../sdk";
 import type { AgentSession } from "../session/agent-session";
 import type { SessionStore } from "../session/session-store";
 import type { TodoPhase } from "../tools/todo-write";
@@ -369,6 +371,23 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 					done({ commands: [...builtin, ...virtual] });
 					return;
 				}
+				case "get_cron_tasks": {
+					// P2-W3-1（B6 只读代理）：jobs.json 直读，不依赖 gateway 进程。
+					try {
+						done({ tasks: await readCronTaskList() });
+					} catch (err) {
+						failWithCode("internal", `cron tasks unavailable: ${String(err)}`);
+					}
+					return;
+				}
+				case "get_cron_logs": {
+					try {
+						done({ logs: await readCronLogList(command.taskId, command.days, command.limit) });
+					} catch (err) {
+						failWithCode("internal", `cron logs unavailable: ${String(err)}`);
+					}
+					return;
+				}
 				case "inject_permission": {
 					const { push, outcome } = gate.inject(command.kind ?? "approval");
 					broadcastPermission(push);
@@ -484,9 +503,9 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 					break;
 				}
 				case "get_skills": {
-					// W3 D5：只读列出该 agent 已加载技能（session.skills 与 agent 实际运行同源）。
-					// discovery 已按 settings 过滤——此处列表即「已启用」集；B3 启停协议落地前不做任何写返回。
-					// level（user/project/native）+ provider 供前端分类折叠。
+					// W3 D5 + P2-W3-3 回切：只读列出已加载技能 + 已停用名单。
+					// skills = session.skills（discovery 按 settings 过滤后的「已启用」集）；
+					// disabled = settings.skills.ignoredSkills 名单 + 技能目录 SKILL.md 元数据
 					done({
 						skills: session.skills.map(s => ({
 							name: s.name,
@@ -495,7 +514,39 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 							level: s._source?.level ?? "native",
 							provider: s._source?.providerName ?? "builtin",
 						})),
+						disabled: await buildDisabledSkillList(),
 					});
+					break;
+				}
+				case "set_skill_enabled": {
+					// P2-W3-3（B3 技能写协议）：写 settings（config.yml skills.ignoredSkills）+ 重发现热重载。
+					const skillName = command.name.trim();
+					if (!skillName || skillName.includes("/") || skillName.includes("\\")) {
+						failWithCode("internal", `invalid skill name: ${String(command.name)}`);
+						break;
+					}
+					try {
+						const settings = Settings.instance;
+						const ignored = new Set<string>(settings.get("skills.ignoredSkills") ?? []);
+						if (command.enabled) {
+							ignored.delete(skillName);
+						} else {
+							ignored.add(skillName);
+						}
+						settings.set("skills.ignoredSkills", [...ignored]);
+						// 重发现参数与 sdk boot 完全一致（含 settings 的 disabledExtensions——上一版传 []
+						// 会把用户停用的扩展技能全拉回来，42→74 事故根因）+ 会话热重载
+						const skillsSettings = settings.getGroup("skills");
+						const disabledExtensionIds = settings.get("disabledExtensions") ?? [];
+						const result = await discoverSkills(process.cwd(), getAgentDir(), {
+							...skillsSettings,
+							disabledExtensions: disabledExtensionIds,
+						});
+						await session.reloadSkills(result.skills, result.warnings);
+						done({ ok: true, name: skillName, enabled: command.enabled });
+					} catch (err) {
+						failWithCode("internal", `skill toggle failed: ${String(err)}`);
+					}
 					break;
 				}
 				case "cancel_queued": {
@@ -907,6 +958,51 @@ async function readTextFileClipped(
 	return { text: text.slice(0, FS_MAX_READ_BYTES), truncated: true };
 }
 
+// ── P2-W3-3 回切：已停用技能名单（settings.skills.ignoredSkills + SKILL.md 元数据）──
+
+interface DisabledSkillRow {
+	name: string;
+	description?: string;
+}
+
+async function buildDisabledSkillList(): Promise<DisabledSkillRow[]> {
+	const ignored = Settings.instance.get("skills.ignoredSkills") ?? [];
+	if (ignored.length === 0) return [];
+	const agentDir = getAgentDir();
+	const cwd = process.cwd();
+	const rows: DisabledSkillRow[] = [];
+	for (const name of ignored) {
+		const description = await readSkillFrontmatterDescription(name, cwd, agentDir);
+		rows.push(description !== undefined ? { name, description } : { name });
+	}
+	return rows;
+}
+
+/** 读技能目录 SKILL.md 的 description（用户级 agentDir/skills 或项目级 .omp/skills）。 */
+async function readSkillFrontmatterDescription(
+	name: string,
+	cwd: string,
+	agentDir: string,
+): Promise<string | undefined> {
+	const candidates = [
+		path.join(agentDir, "skills", name, "SKILL.md"),
+		path.join(cwd, ".omp", "skills", name, "SKILL.md"),
+	];
+	for (const filePath of candidates) {
+		try {
+			const content = await Bun.file(filePath).text();
+			const { frontmatter } = parseFrontmatter(content, { source: filePath });
+			if (typeof frontmatter.description === "string" && frontmatter.description.length > 0) {
+				return frontmatter.description;
+			}
+			return undefined;
+		} catch {
+			// 该候选目录不存在/损坏——试下一个
+		}
+	}
+	return undefined;
+}
+
 // ── gateway 运行状态（只读转发 gateway.status.json）──
 
 interface GatewayAccountStatus {
@@ -976,6 +1072,154 @@ function isPidAlive(pid: number): boolean {
 	} catch (err) {
 		return (err as NodeJS.ErrnoException).code === "EPERM";
 	}
+}
+
+// ── P2-W3-1：gateway cron 只读代理（jobs.json + logs/by-task 直读，不 import gateway 运行时）──
+
+const CRON_LOG_MAX_OUTPUT = 2048;
+
+function gatewaySchedulerDir(): string {
+	return path.join(homeDir(), ".omp", "gateway-data", "scheduler");
+}
+
+interface CronTaskRow {
+	id: string;
+	name: string;
+	description?: string;
+	scheduleType: "cron" | "interval" | "once";
+	cron?: string;
+	command?: string;
+	nextRunAt?: number;
+	lastRunAt?: number;
+	enabled: boolean;
+	accountId?: string;
+	runCount?: number;
+	failCount?: number;
+	consecutiveFailures?: number;
+}
+
+/** 读 jobs.json（缺失/损坏 → 空列表，不抛）。 */
+async function readCronTaskList(): Promise<CronTaskRow[]> {
+	const jobsPath = path.join(gatewaySchedulerDir(), "jobs.json");
+	let raw: string;
+	try {
+		raw = await Bun.file(jobsPath).text();
+	} catch {
+		return [];
+	}
+	let parsed: { tasks?: Record<string, unknown>[] };
+	try {
+		parsed = JSON.parse(raw) as { tasks?: Record<string, unknown>[] };
+	} catch {
+		return [];
+	}
+	return (parsed.tasks ?? []).map(task => ({
+		id: String(task.id ?? ""),
+		name: String(task.name ?? ""),
+		description: typeof task.command === "string" ? String(task.command) : undefined,
+		scheduleType: (task.scheduleType === "interval" || task.scheduleType === "once" ? task.scheduleType : "cron") as
+			| "cron"
+			| "interval"
+			| "once",
+		cron: typeof task.cron === "string" ? String(task.cron) : undefined,
+		command: typeof task.command === "string" ? String(task.command) : undefined,
+		nextRunAt: typeof task.nextRunAt === "number" ? (task.nextRunAt as number) : undefined,
+		lastRunAt: typeof task.lastRunAt === "number" ? (task.lastRunAt as number) : undefined,
+		enabled: task.status !== "disabled",
+		accountId: typeof task.accountId === "string" ? String(task.accountId) : undefined,
+		runCount: typeof task.runCount === "number" ? (task.runCount as number) : undefined,
+		failCount: typeof task.failCount === "number" ? (task.failCount as number) : undefined,
+		consecutiveFailures:
+			typeof task.consecutiveFailures === "number" ? (task.consecutiveFailures as number) : undefined,
+	}));
+}
+
+/** 日志条目 DTO（output/stderr 截断 2KB）。 */
+interface CronLogRow {
+	taskId: string;
+	id: string;
+	ts: number;
+	status: string;
+	exitCode: number | null;
+	durationMs: number | null;
+	output?: string;
+	outputTruncated?: boolean;
+	stderr?: string;
+}
+
+async function readCronLogList(taskId?: string, days = 3, limit = 50): Promise<CronLogRow[]> {
+	const clampDays = Math.min(30, Math.max(1, days));
+	const clampLimit = Math.min(200, Math.max(1, limit));
+	const cutoff = Date.now() - clampDays * 24 * 60 * 60 * 1000;
+	const logsRoot = path.join(gatewaySchedulerDir(), "logs", "by-task");
+
+	let taskDirs: string[];
+	try {
+		taskDirs = (await fs.readdir(logsRoot, { withFileTypes: true })).filter(e => e.isDirectory()).map(e => e.name);
+	} catch {
+		return [];
+	}
+	if (taskId) {
+		// 精确匹配任务名目录；无则直接返回空
+		if (!taskDirs.includes(taskId)) return [];
+		taskDirs = [taskId];
+	}
+
+	const rows: CronLogRow[] = [];
+	for (const dir of taskDirs) {
+		const dirPath = path.join(logsRoot, dir);
+		let files: string[];
+		try {
+			files = (await fs.readdir(dirPath)).filter(f => f.endsWith(".jsonl"));
+		} catch {
+			continue;
+		}
+		for (const file of files) {
+			// 按文件名 YYYY-MM-DD 剪裁，避免整读陈旧日志
+			const day = file.replace(/\.jsonl$/, "");
+			const dayTs = Date.parse(day);
+			if (!Number.isNaN(dayTs) && dayTs < cutoff) continue;
+			let text: string;
+			try {
+				text = await Bun.file(path.join(dirPath, file)).text();
+			} catch {
+				continue;
+			}
+			for (const line of text.split("\n")) {
+				if (!line.trim()) continue;
+				let entry: {
+					id?: unknown;
+					ts?: unknown;
+					exitCode?: unknown;
+					status?: unknown;
+					durationMs?: unknown;
+					output?: unknown;
+					stderr?: unknown;
+				};
+				try {
+					entry = JSON.parse(line) as typeof entry;
+				} catch {
+					continue;
+				}
+				const ts = typeof entry.ts === "number" ? entry.ts : 0;
+				if (ts < cutoff) continue;
+				rows.push({
+					taskId: dir,
+					id: String(entry.id ?? ""),
+					ts,
+					status: String(entry.status ?? "unknown"),
+					exitCode: typeof entry.exitCode === "number" ? entry.exitCode : null,
+					durationMs: typeof entry.durationMs === "number" ? entry.durationMs : null,
+					output: typeof entry.output === "string" ? entry.output.slice(0, CRON_LOG_MAX_OUTPUT) : undefined,
+					outputTruncated:
+						typeof entry.output === "string" && entry.output.length > CRON_LOG_MAX_OUTPUT ? true : undefined,
+					stderr: typeof entry.stderr === "string" ? entry.stderr.slice(0, CRON_LOG_MAX_OUTPUT) : undefined,
+				});
+			}
+		}
+	}
+	rows.sort((a, b) => b.ts - a.ts);
+	return rows.slice(0, clampLimit);
 }
 
 /** 协议批 B-3：W1 SlashPalette 虚拟惯例项（非内置 slash 命令，TUI 动作口径）。 */

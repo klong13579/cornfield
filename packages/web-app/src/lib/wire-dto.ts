@@ -366,6 +366,24 @@ export interface TaskRowDto {
 	lastRunAt?: number;
 	enabled: boolean;
 	accountId?: string;
+	/** 执行命令（jobs.json command）。 */
+	command?: string;
+	runCount?: number;
+	failCount?: number;
+	consecutiveFailures?: number;
+}
+
+/** cron 执行日志条目（P2-W3-1 B6 代理；output/stderr 服务端已截断 2KB）。 */
+export interface CronLogEntryDto {
+	taskId: string;
+	id: string;
+	ts: number;
+	status: string;
+	exitCode: number | null;
+	durationMs: number | null;
+	output?: string;
+	outputTruncated?: boolean;
+	stderr?: string;
 }
 
 // ── 技能列表（serve get_skills，W3 D5；只读，B3 启停协议未到）──
@@ -378,6 +396,12 @@ export interface SkillDto {
 	/** user（用户级）/ project（项目级）/ native（内置）。 */
 	level: "user" | "project" | "native";
 	provider: string;
+}
+
+/** 已停用技能（settings.skills.ignoredSkills 名单 + SKILL.md 元数据；回切入口）。 */
+export interface DisabledSkillDto {
+	name: string;
+	description?: string;
 }
 
 /** 连接后返回（hello_ack 内容 + 环境摘要，Home 用）。 */

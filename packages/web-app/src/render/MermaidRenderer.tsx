@@ -84,7 +84,7 @@ export function MermaidRenderer({ code }: MermaidRendererProps): React.JSX.Eleme
 				if (el) {
 					el.innerHTML = svg;
 					const svgEl = el.querySelector("svg");
-					if (svgEl) viewer = mountMermaidViewer(svgEl, { mode: "inline" });
+					if (svgEl) viewer = mountMermaidViewer(svgEl, { mode: "inline", source: code });
 				}
 				setError(null);
 			} catch (err) {
