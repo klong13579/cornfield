@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import type { CronLogEntryDto, TaskRowDto } from "../../lib/wire-dto";
 import { useSessionStore } from "../../state/session-store";
 import { useSession } from "../../state/use-session";
@@ -35,6 +35,40 @@ function fmtRun(ts: number): string {
 	const d = new Date(ts);
 	const pad = (n: number) => String(n).padStart(2, "0");
 	return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/** 未指定 agent 的分组标识（jobs.json 无 accountId 字段的任务归此组，不伪造数据）。 */
+export const UNSPECIFIED_AGENT_LABEL = "未指定";
+
+export interface CronTaskGroupDto {
+	/** 分组键：accountId；空串 = 未指定。 */
+	accountId: string;
+	/** 组头展示名：accountId 或「未指定」。 */
+	label: string;
+	tasks: TaskRowDto[];
+}
+
+/**
+ * 定时任务按 agent（accountId）分组：组内保持 serve 顺序，组间保持首现顺序，
+ * 「未指定」组（无 accountId 或空串）固定垫底。纯函数——从 TaskListCard 提出，便于单测
+ * （无 accountId 归组、多 accountId 分桶）。
+ */
+export function groupTasksByAccount(tasks: TaskRowDto[]): CronTaskGroupDto[] {
+	const byAccount = new Map<string, TaskRowDto[]>();
+	for (const task of tasks) {
+		const key = task.accountId?.trim() || "";
+		const list = byAccount.get(key);
+		if (list) list.push(task);
+		else byAccount.set(key, [task]);
+	}
+	const groups: CronTaskGroupDto[] = [];
+	for (const [accountId, list] of byAccount) {
+		if (accountId === "") continue; // 未指定组垫底
+		groups.push({ accountId, label: accountId, tasks: list });
+	}
+	const unspecified = byAccount.get("");
+	if (unspecified) groups.push({ accountId: "", label: UNSPECIFIED_AGENT_LABEL, tasks: unspecified });
+	return groups;
 }
 
 export function TasksView(): React.JSX.Element {
@@ -316,6 +350,87 @@ function NumberField({
 	);
 }
 
+function TaskRow({
+	task,
+	lastLog,
+	onShowLogs,
+}: {
+	task: TaskRowDto;
+	lastLog: CronLogEntryDto | undefined;
+	onShowLogs: (task: TaskRowDto) => void;
+}): React.JSX.Element {
+	return (
+		<div className="flex items-start gap-3 border-t border-hairline px-5 py-3">
+			<div className="min-w-0 flex-1">
+				<div className="flex items-baseline gap-2">
+					<span className="text-[13.5px] font-medium text-ink">{task.name}</span>
+					<span className="rounded bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] text-ink-faint">
+						{task.scheduleType}
+					</span>
+					{task.accountId && (
+						<span className="rounded bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] text-ink-faint">
+							{task.accountId}
+						</span>
+					)}
+					{!task.enabled && (
+						<span className="rounded bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] text-ink-faint">
+							disabled
+						</span>
+					)}
+				</div>
+				{task.cron && <div className="mt-0.5 font-mono text-[11.5px] text-ink-subtle">{task.cron}</div>}
+				<div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-[11px] text-ink-faint">
+					{task.nextRunAt !== undefined && task.nextRunAt > 0 && <span>下次：{fmtRun(task.nextRunAt)}</span>}
+					{task.runCount !== undefined && <span>已运行 {task.runCount} 次</span>}
+					{(task.consecutiveFailures ?? 0) > 0 && (
+						<span className="text-warning">连续失败 {task.consecutiveFailures} 次</span>
+					)}
+				</div>
+				{(() => {
+					if (!lastLog) return null;
+					return (
+						<div className="mt-1 flex items-baseline gap-2 text-[11px] text-ink-faint">
+							<span
+								className={
+									lastLog.status === "success" ? "font-medium text-success" : "font-medium text-danger"
+								}
+							>
+								{lastLog.status}
+							</span>
+							<span className="font-mono">{fmtRun(lastLog.ts)}</span>
+							{lastLog.durationMs !== null && <span>{(lastLog.durationMs / 1000).toFixed(1)}s</span>}
+							{lastLog.output && (
+								<span className="truncate pl-1 text-ink-faint">{lastLog.output.slice(0, 80)}</span>
+							)}
+						</div>
+					);
+				})()}
+			</div>
+
+			<div className="mt-0.5 flex shrink-0 gap-1.5">
+				<button
+					type="button"
+					onClick={() => onShowLogs(task)}
+					aria-label={`${task.name} 查看日志`}
+					className="rounded-md border border-hairline bg-surface-2 px-2.5 py-1 text-[11.5px] text-ink-subtle transition-colors hover:border-hairline-strong hover:text-ink"
+				>
+					日志
+				</button>
+				{/* 运行/修改：B6 代理只读；写操作仍走 gateway 直连（未接） */}
+				<button
+					type="button"
+					disabled
+					title="立即运行/修改调度需 gateway 侧直连（当前为只读代理）"
+					aria-label={`${task.name} 运行操作`}
+					className="cursor-not-allowed rounded-md border border-hairline bg-surface-2 px-2.5 py-1 text-[11.5px] text-ink-faint"
+				>
+					运行
+				</button>
+			</div>
+		</div>
+	);
+}
+
 function TaskListCard({
 	tasks,
 	logs,
@@ -339,6 +454,8 @@ function TaskListCard({
 		return map;
 	}, [logs]);
 
+	const groups = useMemo(() => groupTasksByAccount(tasks), [tasks]);
+
 	return (
 		<div className="rounded-xl border border-hairline bg-surface">
 			<div className="flex items-baseline justify-between px-5 pt-4 pb-2">
@@ -358,83 +475,25 @@ function TaskListCard({
 
 			{connected && !error && tasks.length > 0 && (
 				<div className="pb-2">
-					{tasks.map(task => (
-						<div
-							key={task.id}
-							className="flex items-start gap-3 border-t border-hairline px-5 py-3 first:border-t-0"
-						>
-							<div className="min-w-0 flex-1">
-								<div className="flex items-baseline gap-2">
-									<span className="text-[13.5px] font-medium text-ink">{task.name}</span>
-									<span className="rounded bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] text-ink-faint">
-										{task.scheduleType}
-									</span>
-									{task.accountId && (
-										<span className="rounded bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] text-ink-faint">
-											{task.accountId}
-										</span>
-									)}
-									{!task.enabled && (
-										<span className="rounded bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] text-ink-faint">
-											disabled
-										</span>
-									)}
-								</div>
-								{task.cron && <div className="mt-0.5 font-mono text-[11.5px] text-ink-subtle">{task.cron}</div>}
-								<div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-[11px] text-ink-faint">
-									{task.nextRunAt !== undefined && task.nextRunAt > 0 && (
-										<span>下次：{fmtRun(task.nextRunAt)}</span>
-									)}
-									{task.runCount !== undefined && <span>已运行 {task.runCount} 次</span>}
-									{(task.consecutiveFailures ?? 0) > 0 && (
-										<span className="text-warning">连续失败 {task.consecutiveFailures} 次</span>
-									)}
-								</div>
-								{(() => {
-									const last = lastRunByTask.get(task.name);
-									if (!last) return null;
-									return (
-										<div className="mt-1 flex items-baseline gap-2 text-[11px] text-ink-faint">
-											<span
-												className={
-													last.status === "success"
-														? "font-medium text-success"
-														: "font-medium text-danger"
-												}
-											>
-												{last.status}
-											</span>
-											<span className="font-mono">{fmtRun(last.ts)}</span>
-											{last.durationMs !== null && <span>{(last.durationMs / 1000).toFixed(1)}s</span>}
-											{last.output && (
-												<span className="truncate pl-1 text-ink-faint">{last.output.slice(0, 80)}</span>
-											)}
-										</div>
-									);
-								})()}
+					{groups.map((group, gi) => (
+						<Fragment key={group.accountId || UNSPECIFIED_AGENT_LABEL}>
+							<div
+								className={`flex items-baseline justify-between border-t border-hairline px-5 py-2 ${gi === 0 ? "border-t-0" : ""}`}
+							>
+								<span className="text-[11px] font-semibold tracking-[0.08em] text-ink-faint uppercase">
+									{group.label}
+								</span>
+								<span className="font-mono text-[11px] text-ink-faint">{group.tasks.length} 个任务</span>
 							</div>
-
-							<div className="mt-0.5 flex shrink-0 gap-1.5">
-								<button
-									type="button"
-									onClick={() => onShowLogs(task)}
-									aria-label={`${task.name} 查看日志`}
-									className="rounded-md border border-hairline bg-surface-2 px-2.5 py-1 text-[11.5px] text-ink-subtle transition-colors hover:border-hairline-strong hover:text-ink"
-								>
-									日志
-								</button>
-								{/* 运行/修改：B6 代理只读；写操作仍走 gateway 直连（未接） */}
-								<button
-									type="button"
-									disabled
-									title="立即运行/修改调度需 gateway 侧直连（当前为只读代理）"
-									aria-label={`${task.name} 运行操作`}
-									className="cursor-not-allowed rounded-md border border-hairline bg-surface-2 px-2.5 py-1 text-[11.5px] text-ink-faint"
-								>
-									运行
-								</button>
-							</div>
-						</div>
+							{group.tasks.map(task => (
+								<TaskRow
+									key={task.id}
+									task={task}
+									lastLog={lastRunByTask.get(task.name)}
+									onShowLogs={onShowLogs}
+								/>
+							))}
+						</Fragment>
 					))}
 				</div>
 			)}

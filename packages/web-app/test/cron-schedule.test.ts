@@ -3,12 +3,14 @@
  * 覆盖：预设→表达式、表达式→预设反向识别、croner 预览（校验 + 下次触发）、字段边界。
  */
 import { describe, expect, it } from "bun:test";
+import type { TaskRowDto } from "../src/lib/wire-dto";
 import {
 	buildCronExpression,
 	normalizeCronField,
 	previewCronExpression,
 	stateFromCronExpression,
 } from "../src/pages/tasks/cron-schedule";
+import { groupTasksByAccount, UNSPECIFIED_AGENT_LABEL } from "../src/pages/tasks/TasksView";
 
 describe("buildCronExpression（预设 → 5 字段表达式，hermes 规格）", () => {
 	it("hourly: <minute> * * * *", () => {
@@ -109,5 +111,43 @@ describe("previewCronExpression（croner 校验 + 下次触发）", () => {
 	it("空表达式：invalid（UI 空态）", () => {
 		expect(previewCronExpression("", 3).valid).toBe(false);
 		expect(previewCronExpression("   ", 3).valid).toBe(false);
+	});
+});
+
+describe("groupTasksByAccount（定时任务按 agent 分组）", () => {
+	const row = (id: string, accountId?: string): TaskRowDto => ({
+		id,
+		name: id,
+		scheduleType: "cron",
+		enabled: true,
+		accountId,
+	});
+
+	it("多 accountId 分桶：同 accountId 归一组，组间保持首现顺序", () => {
+		const groups = groupTasksByAccount([row("a", "hr"), row("b", "algorithm"), row("c", "hr")]);
+		expect(groups.map(g => g.accountId)).toEqual(["hr", "algorithm"]);
+		expect(groups[0]?.tasks.map(t => t.id)).toEqual(["a", "c"]);
+		expect(groups[1]?.tasks.map(t => t.id)).toEqual(["b"]);
+	});
+
+	it("无 accountId（缺失/空串/空白）归「未指定」组并垫底", () => {
+		const groups = groupTasksByAccount([row("a", "hr"), row("b"), row("c", ""), row("d", "   ")]);
+		expect(groups.map(g => g.accountId)).toEqual(["hr", ""]);
+		expect(groups.at(-1)?.label).toBe(UNSPECIFIED_AGENT_LABEL);
+		expect(groups.at(-1)?.tasks.map(t => t.id)).toEqual(["b", "c", "d"]);
+	});
+
+	it("组内保持 serve 顺序，不被重排", () => {
+		const groups = groupTasksByAccount([row("z", "hr"), row("a", "hr"), row("m", "hr")]);
+		expect(groups[0]?.tasks.map(t => t.id)).toEqual(["z", "a", "m"]);
+	});
+
+	it("空列表 → 空分组", () => {
+		expect(groupTasksByAccount([])).toEqual([]);
+	});
+
+	it("group label：有 accountId 用 accountId，未指定用固定标识", () => {
+		const groups = groupTasksByAccount([row("a", "hr"), row("b")]);
+		expect(groups.map(g => g.label)).toEqual(["hr", UNSPECIFIED_AGENT_LABEL]);
 	});
 });
