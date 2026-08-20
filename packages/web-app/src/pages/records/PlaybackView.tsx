@@ -19,6 +19,16 @@ export function PlaybackView(): React.JSX.Element {
 	const [timeline, setTimeline] = useState<PlaybackEntry[] | null>(null);
 	const [branchPoints, setBranchPoints] = useState<BranchPoint[]>([]);
 	const [error, setError] = useState<string | null>(null);
+	// 工具调用步骤展开集（key = `${entryId}:${ti}`）；默认折叠，过大 args/result 以截断预览呈现
+	const [openTools, setOpenTools] = useState<ReadonlySet<string>>(new Set());
+	const toggleTool = (key: string) => {
+		setOpenTools(prev => {
+			const next = new Set(prev);
+			if (next.has(key)) next.delete(key);
+			else next.add(key);
+			return next;
+		});
+	};
 	const scrollRef = useRef<HTMLDivElement>(null);
 
 	// 历史会话标题暂用会话 id（短哈希）；current 为真数据。
@@ -198,22 +208,40 @@ export function PlaybackView(): React.JSX.Element {
 													))}
 												</div>
 											)}
-											{entry.tools.map((tool, ti) => (
-												<div key={ti} className="toolcard">
-													<div className="head">
-														<span className="tname">{tool.name}</span>
-														<span className="state">
-															{tool.state === "done" ? (
-																<span className="badge done">完成</span>
-															) : (
-																<span className="badge fail">失败</span>
-															)}
-														</span>
+											{entry.tools.map((tool, ti) => {
+												const key = `${entry.id}:${ti}`;
+												const open = openTools.has(key);
+												return (
+													<div key={ti} className="toolcard">
+														<button
+															type="button"
+															className="head w-full cursor-pointer text-left"
+															onClick={() => toggleTool(key)}
+															aria-expanded={open}
+														>
+															<span className="tname">{tool.name}</span>
+															<span className="state">
+																{tool.state === "done" ? (
+																	<span className="badge done">完成</span>
+																) : (
+																	<span className="badge fail">失败</span>
+																)}
+																<span className="ml-1 text-[11px] text-ink-faint">{open ? "▲" : "▼"}</span>
+															</span>
+														</button>
+														{tool.argsText && (
+															<div className="args">
+																{open ? tool.argsText : tool.argsText.length > 120 ? `${tool.argsText.slice(0, 120)}…` : tool.argsText}
+															</div>
+														)}
+														{tool.result && (
+															<div className="result">
+																{open ? tool.result : tool.result.length > 200 ? `${tool.result.slice(0, 200)}…` : tool.result}
+															</div>
+														)}
 													</div>
-													{tool.argsText && <div className="args">{tool.argsText}</div>}
-													{tool.result && <div className="result">{tool.result}</div>}
-												</div>
-											))}
+												);
+											})}
 										</div>
 									</>
 								)}
