@@ -44,6 +44,7 @@ export interface RemoteSkillItemDto {
 	description?: string;
 	source: string;
 	type: "skill" | "plugin";
+	category?: string;
 	homepage?: string;
 	repository?: string;
 	author?: string;

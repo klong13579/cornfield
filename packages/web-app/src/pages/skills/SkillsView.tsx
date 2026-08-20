@@ -54,6 +54,41 @@ export function SkillsView(): React.JSX.Element {
 		[remote],
 	);
 
+	/** Hub 分组：type 主分组（技能/插件）→ category 子分组（无 category 归「未分类」）。保留全局排名序号。 */
+	const hubGroups = useMemo(() => {
+		if (!sortedRemote) return null;
+		const typeOrder = ["技能", "插件"] as const;
+		const byType = new Map<string, Array<{ item: RemoteSkillItemDto; rank: number }>>();
+		sortedRemote.forEach((item, rank) => {
+			const key = item.type === "skill" ? "技能" : "插件";
+			const list = byType.get(key) ?? [];
+			list.push({ item, rank: rank + 1 });
+			byType.set(key, list);
+		});
+		const groups: Array<{
+			type: string;
+			categories: Array<{ label: string; items: Array<{ item: RemoteSkillItemDto; rank: number }> }>;
+		}> = [];
+		for (const type of typeOrder) {
+			const entries = byType.get(type);
+			if (!entries || entries.length === 0) continue;
+			const cats = new Map<string, typeof entries>();
+			for (const e of entries) {
+				const label = e.item.category?.trim() || "未分类";
+				const list = cats.get(label) ?? [];
+				list.push(e);
+				cats.set(label, list);
+			}
+			groups.push({
+				type,
+				categories: [...cats.entries()]
+					.sort(([a], [b]) => (a === "未分类" ? 1 : b === "未分类" ? -1 : a.localeCompare(b)))
+					.map(([label, items]) => ({ label, items })),
+			});
+		}
+		return groups;
+	}, [sortedRemote]);
+
 	/** 加载远程技能市场（list_remote_skills）：失败写 hubError，不崩页。 */
 	const loadRemote = async (): Promise<void> => {
 		if (!view.connected || hubLoading) return;
@@ -229,96 +264,120 @@ export function SkillsView(): React.JSX.Element {
 							<div className="px-5 py-6 text-center text-[12px] text-ink-faint">远程技能市场当前无可安装项</div>
 						) : (
 							<div>
-								{(sortedRemote ?? []).map((item, i) => {
-									const expanded = expandedName === item.name;
-									const link = item.homepage ?? item.repository;
-									return (
-										<div
-											key={`${item.source}:${item.name}`}
-											className="border-b border-hairline px-5 py-3 last:border-b-0"
-										>
-											<div className="flex items-start gap-3">
-												<div className="min-w-0 flex-1">
-													<div className="flex flex-wrap items-center gap-2">
-														<span className="font-mono text-[10.5px] text-ink-faint">#{i + 1}</span>
-														<button
-															type="button"
-															onClick={() => setExpandedName(expanded ? null : item.name)}
-															className="text-[13.5px] font-medium text-ink transition-colors hover:text-accent"
-															title="查看详情"
-														>
-															{item.name}
-														</button>
-														<span
-															className={`rounded px-1.5 py-0.5 font-mono text-[10px] ${
-																item.type === "plugin"
-																	? "bg-accent-dim text-accent"
-																	: "bg-surface-2 text-ink-faint"
-															}`}
-														>
-															{item.type}
-														</span>
-														<span
-															className="max-w-[180px] truncate font-mono text-[10.5px] text-ink-faint"
-															title={item.source}
-														>
-															{item.source}
-														</span>
-														{link && (
-															<a
-																href={link}
-																target="_blank"
-																rel="noreferrer"
-																className="max-w-[160px] truncate font-mono text-[10.5px] text-accent underline-offset-2 hover:underline"
-																title={link}
-																onClick={e => e.stopPropagation()}
-															>
-																{link.replace(/^https?:\/\//, "").replace(/^www\./, "")}
-															</a>
-														)}
-													</div>
-													{item.description && (
-														<div
-															className={`mt-0.5 text-[12px] text-ink-subtle ${expanded ? "" : "line-clamp-2"}`}
-														>
-															{item.description}
-														</div>
-													)}
-													{expanded && (
-														<div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 font-mono text-[10.5px] text-ink-faint">
-															{item.version && <span>v{item.version}</span>}
-															{item.author && <span>作者：{item.author}</span>}
-															{item.repository && (
-																<span>仓库：{item.repository.replace(/^https?:\/\//, "")}</span>
-															)}
-															<span>来源：{item.source}</span>
-														</div>
-													)}
-												</div>
-												<button
-													type="button"
-													data-testid={`install-skill-${item.name}`}
-													onClick={() => void installRemote(item)}
-													disabled={
-														!view.connected || installingName !== null || isInstalledRemote(item.name)
-													}
-													aria-label={`安装远程技能 ${item.name}`}
-													className={`mt-0.5 shrink-0 rounded-md border px-2.5 py-1 text-[11.5px] transition-colors disabled:cursor-default ${
-														isInstalledRemote(item.name)
-															? "border-hairline bg-surface-2 text-ink-faint opacity-70"
-															: "border-hairline bg-surface-2 text-ink-subtle hover:border-hairline-strong hover:text-ink"
-													}`}
-												>
-													{installingName === item.name
-														? "安装中…"
-														: isInstalledRemote(item.name)
-															? "已安装"
-															: "安装"}
-												</button>
-											</div>
+								{(hubGroups ?? []).map(group => (
+									<div key={group.type} className="border-t border-hairline first:border-t-0">
+										<div className="sticky top-0 z-10 border-b border-hairline bg-surface px-5 py-1.5 text-[11px] font-semibold tracking-[0.08em] text-ink-faint uppercase">
+											{group.type}
+											<span className="ml-1.5 font-mono text-[10px]">
+												{group.categories.reduce((n, c) => n + c.items.length, 0)}
+											</span>
 										</div>
-									);
-								})}
+										{group.categories.map(cat => (
+											<div key={cat.label}>
+												<div className="flex items-baseline gap-2 px-5 pt-2 pb-0.5">
+													<span className="text-[10.5px] font-semibold text-ink-subtle">{cat.label}</span>
+													<span className="font-mono text-[9.5px] text-ink-faint">{cat.items.length}</span>
+												</div>
+												{cat.items.map(({ item, rank }) => {
+													const expanded = expandedName === item.name;
+													const link = item.homepage ?? item.repository;
+													return (
+														<div
+															key={`${item.source}:${item.name}`}
+															className="border-b border-hairline px-5 py-3 last:border-b-0"
+														>
+															<div className="flex items-start gap-3">
+																<div className="min-w-0 flex-1">
+																	<div className="flex flex-wrap items-center gap-2">
+																		<span className="font-mono text-[10.5px] text-ink-faint">
+																			#{rank}
+																		</span>
+																		<button
+																			type="button"
+																			onClick={() => setExpandedName(expanded ? null : item.name)}
+																			className="text-[13.5px] font-medium text-ink transition-colors hover:text-accent"
+																			title="查看详情"
+																		>
+																			{item.name}
+																		</button>
+																		<span
+																			className={`rounded px-1.5 py-0.5 font-mono text-[10px] ${
+																				item.type === "plugin"
+																					? "bg-accent-dim text-accent"
+																					: "bg-surface-2 text-ink-faint"
+																			}`}
+																		>
+																			{item.type}
+																		</span>
+																		<span
+																			className="max-w-[180px] truncate font-mono text-[10.5px] text-ink-faint"
+																			title={item.source}
+																		>
+																			{item.source}
+																		</span>
+																		{link && (
+																			<a
+																				href={link}
+																				target="_blank"
+																				rel="noreferrer"
+																				className="max-w-[160px] truncate font-mono text-[10.5px] text-accent underline-offset-2 hover:underline"
+																				title={link}
+																				onClick={e => e.stopPropagation()}
+																			>
+																				{link.replace(/^https?:\/\//, "").replace(/^www\./, "")}
+																			</a>
+																		)}
+																	</div>
+																	{item.description && (
+																		<div
+																			className={`mt-0.5 text-[12px] text-ink-subtle ${expanded ? "" : "line-clamp-2"}`}
+																		>
+																			{item.description}
+																		</div>
+																	)}
+																	{expanded && (
+																		<div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 font-mono text-[10.5px] text-ink-faint">
+																			{item.version && <span>v{item.version}</span>}
+																			{item.author && <span>作者：{item.author}</span>}
+																			{item.repository && (
+																				<span>
+																					仓库：{item.repository.replace(/^https?:\/\//, "")}
+																				</span>
+																			)}
+																			<span>来源：{item.source}</span>
+																		</div>
+																	)}
+																</div>
+																<button
+																	type="button"
+																	data-testid={`install-skill-${item.name}`}
+																	onClick={() => void installRemote(item)}
+																	disabled={
+																		!view.connected ||
+																		installingName !== null ||
+																		isInstalledRemote(item.name)
+																	}
+																	aria-label={`安装远程技能 ${item.name}`}
+																	className={`mt-0.5 shrink-0 rounded-md border px-2.5 py-1 text-[11.5px] transition-colors disabled:cursor-default ${
+																		isInstalledRemote(item.name)
+																			? "border-hairline bg-surface-2 text-ink-faint opacity-70"
+																			: "border-hairline bg-surface-2 text-ink-subtle hover:border-hairline-strong hover:text-ink"
+																	}`}
+																>
+																	{installingName === item.name
+																		? "安装中…"
+																		: isInstalledRemote(item.name)
+																			? "已安装"
+																			: "安装"}
+																</button>
+															</div>
+														</div>
+													);
+												})}
+											</div>
+										))}
+									</div>
+								))}
 							</div>
 						)}
 					</div>
