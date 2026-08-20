@@ -5,6 +5,7 @@ import * as path from "node:path";
 import { buildModelPriceCatalog, getDashboardStats, syncAllSessions } from "@oh-my-pi/omp-stats";
 import { getAgentDir, getConfigRootDir, isEnoent, logger, parseFrontmatter } from "@oh-my-pi/pi-utils";
 import type {
+	AgentMessageDto,
 	ClientFrame,
 	PermissionRequestPush,
 	ServerFrame,
@@ -285,6 +286,16 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 					done({ sessions });
 					return;
 				}
+				case "get_session_messages": {
+					// 历史回放：读 sessionFile（绝对路径）的 message 条目，与 get_messages 同型。
+					const res = await readSessionMessages(command.sessionFile);
+					if ("error" in res) {
+						fail(res.error);
+						return;
+					}
+					done({ messages: res.messages });
+					return;
+				}
 				case "fs_list": {
 					const fsCmd = command as { type: "fs_list"; sessionId?: string; path?: string };
 					const agentId = fsCmd.sessionId ?? conn.activeAgentId;
@@ -386,11 +397,29 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 				}
 				case "list_commands": {
 					// 协议批 B-3：TUI slash 命令表（BUILTIN_SLASH_COMMAND registry 同源）。
-					// 「能拿多少拿多少」：内置表 name/description；custom/extension 命令不进 wire 面。
-					// /undo /yolo /retry 非内置 slash（W1 SlashPalette 的虚拟惯例项），serve 补齐口径。
-					const builtin = BUILTIN_SLASH_COMMANDS.map(c => ({ name: `/${c.name}`, description: c.description }));
-					const virtual = TUI_VIRTUAL_COMMANDS;
-					done({ commands: [...builtin, ...virtual] });
+					// 「能拿多少拿多少」：内置表 name/description；再补 active agent 会话挂载的
+					// hook/custom/skill 命令（与 interactive-mode 的完整 slash 表同构）。
+					// 每条带 group 分组（前端 palette 按组渲染 + 滚动）：系统命令/会话控制/扩展命令/自定义命令/技能命令。
+					const builtin = BUILTIN_SLASH_COMMANDS.map(c => ({ name: `/${c.name}`, description: c.description, group: "系统命令" as const }));
+					const virtual = TUI_VIRTUAL_COMMANDS.map(c => ({ ...c, group: "会话控制" as const }));
+					const attached = registry.getAttached(conn.activeAgentId);
+					const extra: { name: string; description: string; group: string }[] = [];
+					if (attached) {
+						const s = attached.session;
+						const builtinNames = new Set(BUILTIN_SLASH_COMMANDS.map(c => c.name));
+						for (const cmd of s.extensionRunner?.getRegisteredCommands(builtinNames) ?? []) {
+							extra.push({ name: cmd.name, description: cmd.description ?? "(hook command)", group: "扩展命令" });
+						}
+						for (const loaded of s.customCommands ?? []) {
+							extra.push({ name: loaded.command.name, description: `${loaded.command.description} (${loaded.source})`, group: "自定义命令" });
+						}
+						if (Settings.instance.get("skills.enableSkillCommands")) {
+							for (const skill of s.skills) {
+								extra.push({ name: `skill:${skill.name}`, description: skill.description, group: "技能命令" });
+							}
+						}
+					}
+					done({ commands: [...builtin, ...virtual, ...extra] });
 					return;
 				}
 				case "get_cron_tasks": {
@@ -1281,6 +1310,39 @@ async function readCronLogList(taskId?: string, days = 3, limit = 50): Promise<C
 	}
 	rows.sort((a, b) => b.ts - a.ts);
 	return rows.slice(0, clampLimit);
+}
+
+/** 读会话 JSONL，逐行 JSON.parse，提取 message 条目（跳过空行/非 message/损坏行）。 */
+async function readSessionMessages(sessionFile: string): Promise<{ messages: AgentMessageDto[] } | { error: string }> {
+	try {
+		const stat = await fs.stat(sessionFile);
+		if (!stat.isFile()) return { error: `not a file: ${sessionFile}` };
+	} catch (err) {
+		if (isEnoent(err)) return { error: `session file not found: ${sessionFile}` };
+		return { error: `cannot read session file: ${String(err)}` };
+	}
+
+	let text: string;
+	try {
+		text = await Bun.file(sessionFile).text();
+	} catch (err) {
+		return { error: `cannot read session file: ${String(err)}` };
+	}
+
+	const messages: AgentMessageDto[] = [];
+	for (const line of text.split("\n")) {
+		if (!line.trim()) continue;
+		let entry: { type?: unknown; message?: unknown };
+		try {
+			entry = JSON.parse(line) as typeof entry;
+		} catch {
+			continue;
+		}
+		if (entry.type !== "message") continue;
+		if (typeof entry.message !== "object" || entry.message === null) continue;
+		messages.push(entry.message as AgentMessageDto);
+	}
+	return { messages };
 }
 
 /** 协议批 B-3：W1 SlashPalette 虚拟惯例项（非内置 slash 命令，TUI 动作口径）。 */
