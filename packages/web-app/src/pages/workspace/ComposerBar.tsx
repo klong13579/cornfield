@@ -1,7 +1,8 @@
-import { ChevronDown, Cpu, Mic, Paperclip, Send, Square } from "lucide-react";
+import { ChevronDown, Mic, Paperclip, Send, Square } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ContextRing } from "../../components/ContextRing";
+import { ProviderLogo } from "../../components/ProviderLogo";
 import type { ImageContentDto } from "../../lib/wire-dto";
 import { useSessionStore } from "../../state/session-store";
 import { getUiStore, useUiState } from "../../state/ui-store";
@@ -134,6 +135,8 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 
 	/** 模型按 provider 分组；当前模型所在 provider 置顶，其余保持 serve 返回顺序。 */
 	const modelGroups = useMemo(() => groupModelsByProvider(modelList, view.model), [modelList, view.model]);
+	/** 当前模型的 provider（顶栏按钮 logo 用）。 */
+	const currentProvider = useMemo(() => modelList.find(m => m.id === view.model)?.provider, [modelList, view.model]);
 
 	const active = view.isStreaming || view.phase !== "idle";
 	const agent = view.agents.find(a => a.id === agentId) ?? view.agents[0];
@@ -343,8 +346,8 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 									})
 								}
 							>
-								<Cpu size={15} strokeWidth={1.5} />
-								<b className="font-mono text-[12px] font-medium text-ink">{view.model ?? "—"}</b>
+								<ProviderLogo provider={currentProvider ?? "-"} size={15} />
+								<b className="font-mono text-[12px] font-medium text-ink">{view.model ?? "—"}</b>{" "}
 								<span className="rounded-[4px] bg-surface-3 px-1.5 py-px font-mono text-[10px] text-ink-subtle">
 									{view.thinkingLevel ?? "off"}
 								</span>
@@ -366,6 +369,7 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 											{modelGroups.map(([provider, models]) => (
 												<div key={provider}>
 													<div className="flex items-baseline gap-1.5 px-2.5 pt-1.5 pb-0.5">
+														<ProviderLogo provider={provider} size={13} />
 														<span className="text-[10px] font-semibold tracking-[0.08em] text-ink-faint uppercase">
 															{provider}
 														</span>
