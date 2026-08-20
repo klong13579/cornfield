@@ -385,6 +385,7 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 																setShowModelMenu(false);
 															}}
 														>
+															<ProviderLogo provider={provider} modelId={m.id} size={12} />
 															<span className="min-w-0 flex-1 truncate font-mono text-[13px] text-ink">
 																{m.id}
 															</span>
