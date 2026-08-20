@@ -1,7 +1,7 @@
 import type { PiClientEventKind, PiWebSocketCtor } from "@oh-my-pi/pi-client";
 import { PiClient as WirePiClient } from "@oh-my-pi/pi-client";
 import type { WireCommand } from "@oh-my-pi/pi-wire";
-import type { FsEntryDto, FsImageResult, GatewayStatusDto, PiClient } from "../lib/pi-client-api";
+import type { AgentMessageDto, FsEntryDto, FsImageResult, GatewayStatusDto, PiClient } from "../lib/pi-client-api";
 import type { BranchPoint, PlaybackEntry, PlaybackToolStep, RecordStatus, SessionRecordSummary } from "../lib/records";
 import type {
 	AgentInfoDto,
@@ -321,6 +321,15 @@ export class PiClientAdapter implements PiClient {
 	async getMessages(): Promise<PlaybackEntry[]> {
 		const result = await this.#req<{ messages?: unknown[] }>({ type: "get_messages" });
 		return toPlaybackEntries(result.messages ?? []);
+	}
+
+	/** 按 sessionFile 拉取历史会话消息（get_session_messages；serve 端契约命令，WireCommand union 暂缺故最小局部 cast）。 */
+	async getSessionMessages(sessionFile: string): Promise<AgentMessageDto[]> {
+		const result = await this.#req<{ messages?: AgentMessageDto[] | null }>({
+			type: "get_session_messages",
+			sessionFile,
+		} as never);
+		return result.messages ?? [];
 	}
 
 	/** 原始消息 JSON 序列（导出 JSONL 用；与落盘 SessionEntry 格式不一致，导出时标注）。 */
