@@ -1,12 +1,10 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { buildRealtimeWsUrl, chunkPcm16, pcm16ToBase64, REALTIME_SAMPLE_RATE } from "@oh-my-pi/pi-ai";
 import { $which, logger } from "@oh-my-pi/pi-utils";
 import type { ModelRegistry } from "../config/model-registry";
 import { settings } from "../config/settings";
 import { readWavInfo } from "./chunker";
-import { resamplePcm16 } from "./pcm";
 
 import transcribeScript from "./transcribe.py" with { type: "text" };
 
@@ -36,6 +34,17 @@ const FALLBACK_TIMEOUT_SEC = 120;
 const TIMEOUT_FLOOR_MS = 60_000;
 /** How often to emit transcribing-stage progress updates. */
 const PROGRESS_INTERVAL_MS = 500;
+/**
+ * Gateway batch-ASR model used for REST transcription.
+ *
+ * The WS-realtime model ids (qwen-audio-3.0-realtime-*) are only serviced by
+ * the /realtime websocket endpoint, and that path caps the input buffer at
+ * 30s — recordings longer than that fail with "Input audio buffer exceeded
+ * maximum duration". The REST batch endpoint (POST /v1/audio/transcriptions)
+ * has no length limit and returns in seconds; it expects a batch-ASR model
+ * id instead of a realtime one.
+ */
+const REST_BATCH_TRANSCRIPTION_MODEL = "qwen3-asr-flash-filetrans";
 
 /**
  * Find a usable Python command.
@@ -262,226 +271,74 @@ export async function transcribeViaApi(audioPath: string, options?: TranscribeVi
 		throw new Error(`No API key configured for provider "${provider}".`);
 	}
 
-	// Keep the base URL as-is (e.g. "https://coder.narwal.com/v1").
-	// buildRealtimeWsUrl handles the /realtime suffix and protocol upgrade.
-	const normalizedBase = baseUrl.replace(/\/?$/, "");
-
-	logger.debug("Transcribing via realtime WebSocket", {
-		audioPath,
-		modelName,
-		provider,
-		baseUrl,
-		language,
-	});
+	// Normalize base URL: strip trailing /v1 or /v1/ if present, then append
+	// /v1/audio/transcriptions (REST batch semantics).
+	const normalizedBase = baseUrl.replace(/\/v1\/?$/, "");
+	const transcriptionUrl = `${normalizedBase}/v1/audio/transcriptions`;
 
 	const emitProgress = options?.onProgress;
 	emitProgress?.({ stage: "loading-model" });
 
-	// ---- Read WAV, extract PCM, resample to 24kHz ----
-	const wavInfo = await readWavInfo(audioPath);
-	if (wavInfo.channels !== 1 || wavInfo.sampleWidth !== 2) {
-		throw new Error(
-			`Unsupported WAV format: ${wavInfo.channels}ch ${wavInfo.sampleWidth * 8}bit ` +
-				"(only mono 16-bit PCM is supported)",
-		);
-	}
+	const audioDurationSec = await readAudioDurationSec(audioPath);
+	// Floor the timeout regardless of readAudioDurationSec: the REST endpoint
+	// needs seconds at minimum, and readWavInfo can misparse non-standard
+	// headers (afconvert's FLLR chunk) into a near-zero duration that would
+	// otherwise produce a sub-second timeout.
+	const timeoutMs = Math.max(computeTranscribeTimeoutMs(audioDurationSec), TIMEOUT_FLOOR_MS);
 
-	const wavBuf = Buffer.from(await audioFile.arrayBuffer());
-	// Skip the 44-byte RIFF/WAV header to get the raw PCM data.
-	const pcmRaw = new Uint8Array(wavBuf.buffer, wavBuf.byteOffset + 44, wavBuf.byteLength - 44);
+	// Real-time ids (qwen-audio-3.0-realtime-*) are WS-only on the gateway; the
+	// REST batch endpoint requires a batch-ASR model id.
+	const restModelName = modelName.startsWith("qwen-audio-3.0-realtime-") ? REST_BATCH_TRANSCRIPTION_MODEL : modelName;
 
-	// Resample to 24kHz if the recording is at a different rate.
-	// The recorder produces 16kHz; the realtime endpoint expects 24kHz PCM16.
-	let pcm: Uint8Array;
-	if (wavInfo.sampleRate === REALTIME_SAMPLE_RATE) {
-		pcm = pcmRaw;
-	} else {
-		pcm = resamplePcm16(pcmRaw, wavInfo.sampleRate, REALTIME_SAMPLE_RATE);
-	}
-
-	// ---- WebSocket realtime transcription ----
-	const wsUrl = buildRealtimeWsUrl(normalizedBase, modelName);
-
-	// Bun's WebSocket accepts custom headers; the DOM lib type does not.
-	const WebSocketWithHeaders = WebSocket as unknown as {
-		new (url: string, options?: { headers?: Record<string, string> }): WebSocket;
-	};
-
-	const { promise, resolve, reject } = Promise.withResolvers<string>();
-	const ws = new WebSocketWithHeaders(wsUrl, {
-		headers: {
-			Authorization: `Bearer ${apiKey}`,
-			"OpenAI-Beta": "realtime=v1",
-		},
+	logger.debug("Transcribing via REST batch API", {
+		audioPath,
+		modelName,
+		restModelName,
+		provider,
+		baseUrl,
+		transcriptionUrl,
+		language,
 	});
 
-	// Timeout scales with audio length (same policy as the local whisper path): the
-	// realtime server must consume `duration` seconds of audio before it can return a
-	// transcript, so a fixed 120s cap misfires on multi-minute recordings.
-	const audioDurationSec = wavInfo.numFrames / wavInfo.sampleRate;
-	const TIMEOUT_MS = computeTranscribeTimeoutMs(audioDurationSec);
+	// Build the multipart form data (Content-Type set automatically by fetch
+	// for FormData — multipart/form-data).
+	const formData = new FormData();
+	formData.append("model", restModelName);
+	formData.append("file", audioFile, path.basename(audioPath));
+	if (language) {
+		formData.append("language", language);
+	}
 
-	// Settle exactly once — the WS can close, error, time out, or deliver the transcript
-	// in any order. Any path that leaves the promise pending locks the ListenController
-	// in "transcribing" forever (progress frozen at the last emit). onclose in particular
-	// MUST reject: it can fire without an error event (server-side clean close), and the
-	// old handler cleared the timeout, permanently stranding the await below.
-	let settled = false;
-	let timeout: ReturnType<typeof setTimeout> | undefined;
-	const finish = (op: () => void): void => {
-		if (settled) return;
-		settled = true;
-		if (timeout) clearTimeout(timeout);
-		op();
-	};
-
-	timeout = setTimeout(() => {
-		ws.close();
-		finish(() => reject(new Error(`WebSocket transcription timed out after ${TIMEOUT_MS / 1000}s`)));
-	}, TIMEOUT_MS);
-
-	let transcript = "";
-
-	ws.onopen = () => {
-		logger.debug("realtime WS connected");
-	};
-
-	ws.onmessage = (event: MessageEvent) => {
-		if (typeof event.data !== "string") return;
-
-		let msg: Record<string, unknown>;
-		try {
-			msg = JSON.parse(event.data) as Record<string, unknown>;
-		} catch {
-			return;
+	let response: Response;
+	try {
+		response = await fetch(transcriptionUrl, {
+			method: "POST",
+			headers: {
+				Authorization: `Bearer ${apiKey}`,
+			},
+			body: formData,
+			signal: AbortSignal.timeout(timeoutMs),
+		});
+	} catch (err) {
+		if (err instanceof Error && err.name === "TimeoutError") {
+			throw new Error(
+				`API transcription timed out after ${Math.round(timeoutMs / 1000)}s ` +
+					`(audio was ${audioDurationSec ? `${Math.round(audioDurationSec)}s` : "unknown length"}). ` +
+					"Increase stt.transcribeTimeoutMaxSec if the gateway is slow.",
+			);
 		}
+		throw err;
+	}
 
-		const type = msg.type as string;
+	if (!response.ok) {
+		const errorBody = await response.text().catch(() => "(no body)");
+		throw new Error(`API transcription failed (${response.status}): ${errorBody.slice(0, 500)}`);
+	}
 
-		switch (type) {
-			case "session.created": {
-				// Server is ready — configure the session for transcription.
-				ws.send(
-					JSON.stringify({
-						type: "session.update",
-						session: {
-							modalities: ["text"],
-							input_audio_format: "pcm16",
-							input_audio_transcription: { model: "fun-asr" },
-							turn_detection: null,
-						},
-					}),
-				);
-				logger.debug("sent session.update");
-				break;
-			}
+	emitProgress?.({ stage: "transcribing", percent: 50 });
 
-			case "session.updated": {
-				// Session configured — start sending audio chunks.
-				emitProgress?.({ stage: "transcribing", percent: 10 });
-
-				// Send audio in 200ms chunks for smooth streaming.
-				const chunks = chunkPcm16(pcm, 200, REALTIME_SAMPLE_RATE);
-				for (const chunk of chunks) {
-					ws.send(
-						JSON.stringify({
-							type: "input_audio_buffer.append",
-							audio: pcm16ToBase64(chunk),
-						}),
-					);
-				}
-				logger.debug("sent audio chunks", { count: chunks.length });
-
-				// Commit the buffer so the server processes the audio.
-				ws.send(JSON.stringify({ type: "input_audio_buffer.commit" }));
-				logger.debug("sent input_audio_buffer.commit");
-				emitProgress?.({ stage: "transcribing", percent: 50 });
-				break;
-			}
-
-			case "conversation.item.created": {
-				// Audio item created on the server — ignore.
-				break;
-			}
-
-			case "conversation.item.input_audio_transcription.delta": {
-				// Streaming partial transcript.
-				const delta = msg.delta as string;
-				if (delta) transcript += delta;
-				break;
-			}
-
-			case "conversation.item.input_audio_transcription.completed": {
-				// Final transcript received.
-				const finalTranscript = msg.transcript as string;
-				if (finalTranscript) {
-					transcript = finalTranscript;
-				} else {
-					transcript = transcript.trim();
-				}
-				finish(() => {
-					ws.close();
-					resolve(transcript);
-				});
-				break;
-			}
-
-			case "response.done": {
-				// Server finished processing — if we haven't resolved yet, close.
-				// The transcript should have arrived via the completed event.
-				if (!transcript) {
-					const raw = msg.raw as Record<string, unknown> | undefined;
-					const response = raw?.response as Record<string, unknown> | undefined;
-					const output = response?.output as Array<Record<string, unknown>> | undefined;
-					if (output) {
-						for (const item of output) {
-							if (item.type === "input_audio") {
-								const content = item.content as Array<Record<string, unknown>> | undefined;
-								if (content) {
-									for (const c of content) {
-										if (c.type === "input_audio_transcription" && c.transcript) {
-											transcript = c.transcript as string;
-										}
-									}
-								}
-							}
-						}
-					}
-					finish(() => {
-						ws.close();
-						resolve(transcript || "");
-					});
-				}
-				break;
-			}
-
-			case "error": {
-				const errMsg = (msg.message as string) ?? JSON.stringify(msg);
-				logger.error("realtime WS error", { message: errMsg });
-				finish(() => {
-					ws.close();
-					reject(new Error(`Realtime transcription error: ${errMsg}`));
-				});
-				break;
-			}
-		}
-	};
-
-	ws.onerror = (err: Event) => {
-		logger.error("realtime WS onerror", { error: String(err) });
-		const errMsg = err instanceof ErrorEvent ? err.message : "WebSocket connection failed";
-		finish(() => reject(new Error(`Realtime connection error: ${errMsg}`)));
-	};
-
-	ws.onclose = (event: CloseEvent) => {
-		const code = event?.code;
-		const reason = event?.reason;
-		logger.debug("realtime WS closed", { code, reason });
-		const detail = code !== undefined ? ` (code=${code}${reason ? `, reason=${reason}` : ""})` : "";
-		finish(() => reject(new Error(`Realtime connection closed before transcription completed${detail}`)));
-	};
-
-	const text = await promise;
+	const result = (await response.json()) as { text?: string };
+	const text = (result.text ?? "").trim();
 
 	emitProgress?.({ stage: "finalizing", percent: 100 });
 
@@ -489,6 +346,7 @@ export async function transcribeViaApi(audioPath: string, options?: TranscribeVi
 		length: text.length,
 		provider,
 		modelName,
+		restModelName,
 	});
 	return text;
 }

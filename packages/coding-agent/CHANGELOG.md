@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **录音转写恢复 REST batch 语义，长音频不再失败** (`src/stt/transcriber.ts`): `transcribeViaApi` 从 WebSocket realtime 通道改回 `POST /v1/audio/transcriptions`（multipart 上传）。原 WS 通道的输入缓冲上限 30s——更长录音触发 `Input audio buffer exceeded maximum duration (30s)` 后连接中断并悬挂至超时。REST batch 端点无长度上限（实测 14 分钟音频约 14s 返回完整转写）。`record.model` 配置的 WS 专用模型 id（`qwen-audio-3.0-realtime-*`）自动映射到网关 batch ASR 模型（`qwen3-asr-flash-filetrans`），调用方无需改配置。超时保底 `stt.transcribeTimeoutMaxSec` 语义不变。
+
 ### Added
 
 - **推荐模型列表 `recommendedModels`** (`src/config/settings-schema.ts`, `src/config/settings.ts`, `src/tools/switch-model.ts`, `src/modes/components/model-selector.ts`, `test/tools/switch-model.test.ts`, `test/settings-manager.test.ts`): new `config.yml` array key (default empty) holding a preference-ordered list of `provider/modelId` recommendations. Selecting or switching models now prioritizes recommended ones — the TUI model selector sorts them first (in configured order, above role bindings/MRU/alphabetical), and the `switch_model` tool picks a recommended candidate before other matches within the same match tier (exact id / provider / substring / display name). Behavior is unchanged when the list is empty; role-based model resolution (`default`/`smol`/…) is intentionally untouched. 8 new tests.
