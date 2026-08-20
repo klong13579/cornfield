@@ -12,10 +12,11 @@ First, identify the user's intent type from context:
   → Analyze the current task. Identify ambiguous points, unresolved decisions, and unstated assumptions. Do NOT load a fixed template — generate questions dynamically from the task context.
 
 - **design** — stress-testing a plan or design before implementation
-  → Walk down each branch of the design tree, resolving dependencies between decisions one-by-one.
+  → Map this as a **design tree**: every decision branches into the decisions that hang off it. Work the tree in **rounds**: the **frontier** is every decision whose prerequisites are already settled — the questions you can ask _now_ without guessing at answers you haven't heard yet. Within a round, ask the frontier one question at a time, in dependency order, waiting for the answer to each before the next. Each settled answer reshapes the tree: recompute the frontier and begin the next round. A question whose answer depends on another still-open question belongs to a _later_ round, not this one. The session is done when the frontier is empty — every branch of the design tree visited, nothing left silently assumed.
 
 For all intent types:
 - Provide your recommended answer for each question.
 - Ask the questions one at a time, waiting for feedback on each question before continuing. Asking multiple questions at once is bewildering.
-- If a **fact** can be found by exploring the environment (filesystem, tools, etc.), look it up rather than asking. The **decisions**, though, are yours — put each one to me and wait for my answer.
-- Do not act on it until I confirm we have reached a shared understanding.
+- Finding _facts_ is your job, never the user's. When a frontier question needs a fact from the environment (filesystem, tools, etc.), look it up or dispatch a sub-agent — don't ask the user for anything you could find yourself. Don't block the rest of the round on it: only the questions downstream of the running exploration wait; ask the rest now.
+- The _decisions_ are the user's: put each one to them and wait.
+- Do not act on the plan until the user confirms you have reached a shared understanding.
