@@ -67,6 +67,14 @@ export interface GatewayStatusDto {
 	scheduler?: { running?: boolean; taskCount?: number } | null;
 }
 
+/** MCP 服务器条目（get_mcp_servers 返回；serve 端契约命令，与 m1 字符串契约对接）。 */
+export interface McpServerDto {
+	name: string;
+	command: string;
+	args: string[];
+	enabled: boolean;
+}
+
 /**
  * serve get_session_messages 返回的 message 条目 —— 与 get_messages 的 AgentMessage 同型
  * （前端渲染子集即 wire MessageDto：user/assistant/toolResult，含独立 toolResult 顶层消息）。
@@ -211,4 +219,19 @@ export interface PiClient {
 	 * 已存在返回 alreadyInstalled:true 不重复克隆；失败抛错由调用方提示。
 	 */
 	installRemoteSkill(source: string, name: string): Promise<{ path: string; alreadyInstalled: boolean }>;
+
+	// ── MCP 服务器管理（设置页；契约命令 get_mcp_servers / set_mcp_server / remove_mcp_server / test_mcp_server，由 serve 端并行实现）──
+	/** 列出 MCP 服务器（get_mcp_servers；读 ~/.omp/agent/mcp.json 的 mcpServers）。 */
+	getMcpServers(): Promise<{ servers: McpServerDto[] }>;
+	/** 新增/更新 MCP 服务器（set_mcp_server upsert；name 必填，command/args/enabled 可选缺省）。 */
+	setMcpServer(input: {
+		name: string;
+		command?: string;
+		args?: string[];
+		enabled?: boolean;
+	}): Promise<{ ok: boolean }>;
+	/** 删除 MCP 服务器（remove_mcp_server；幂等，不存在也返回 ok）。 */
+	removeMcpServer(name: string): Promise<{ ok: boolean }>;
+	/** 测试 MCP 服务器（test_mcp_server；JSON-RPC initialize 握手，8s 超时）。 */
+	testMcpServer(name: string): Promise<{ ok: boolean; message: string }>;
 }
