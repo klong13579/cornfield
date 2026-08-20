@@ -1,4 +1,5 @@
 import { describe, expect, test, vi } from "bun:test";
+import type { AssistantMessage, AssistantMessageEvent, AssistantMessageEventStream } from "@oh-my-pi/pi-ai";
 import { isRetryableError, resolveFallbackModels, withModelFallback } from "../src/config/model-fallback";
 import type { ModelRegistry } from "../src/config/model-registry";
 import { Settings } from "../src/config/settings";
@@ -166,5 +167,134 @@ describe("withModelFallback", () => {
 	test("fallbacks 为空 → 原样返回（同引用）", () => {
 		const raw = vi.fn() as never;
 		expect(withModelFallback(raw, [])).toBe(raw);
+	});
+});
+
+// result() 契约回归：agent-loop 在消费完事件后调 response.result() 拿最终消息，
+// 缺了它就会抛 TypeError: response.result is not a function（网关 cron 崩溃根因）。
+// 详见 packages/coding-agent/src/config/model-fallback.ts 头注释。
+describe("withModelFallback result() 契约", () => {
+	const primary: ModelMock = { provider: "p1", id: "main" };
+	const backup: ModelMock = { provider: "p2", id: "backup" };
+
+	function makeMessage(stopReason: AssistantMessage["stopReason"], errorMessage?: string): AssistantMessage {
+		return {
+			role: "assistant",
+			content: [{ type: "text" as const, text: "hi" }],
+			api: "anthropic-messages" as const,
+			provider: "anthropic" as const,
+			model: "test-model",
+			usage: {
+				input: 1,
+				output: 1,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 2,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
+			stopReason,
+			errorMessage,
+			timestamp: 0,
+		};
+	}
+
+	function streamOfEvents(...events: AssistantMessageEvent[]): AsyncIterable<AssistantMessageEvent> {
+		return {
+			async *[Symbol.asyncIterator]() {
+				for (const e of events) yield e;
+			},
+		};
+	}
+
+	/** 拉满包装流并断言迭代值，返回包装流（供 result() 断言）。 */
+	async function consumeWrapped(raw: ReturnType<typeof vi.fn>): Promise<AssistantMessageEventStream> {
+		const s = (await withModelFallback(raw as never, [backup] as never)(
+			primary as never,
+			{} as never,
+			{} as never,
+		)) as AssistantMessageEventStream;
+		const types: string[] = [];
+		for await (const e of s as AsyncIterable<{ type: string }>) {
+			types.push(e.type);
+		}
+		return s;
+	}
+
+	test("done 终端事件 → result() 返回其最终消息", async () => {
+		const msg = makeMessage("stop");
+		const raw = vi.fn().mockReturnValue(streamOfEvents({ type: "done", reason: "stop", message: msg }));
+		const s = await consumeWrapped(raw);
+		expect(await s.result()).toBe(msg);
+	});
+
+	test("收到终端事件立即调 result()（不继续迭代）：拿得到最终消息", async () => {
+		// streamAttempt 的收尾时序：for-await 收到 done/error 事件后立刻调
+		// response.result()，不会把生成器再拉一轮。finalize 必须先于 yield
+		// 落状态，否则这里会抛“流尚未产出终端事件”/拿到空结果。
+		const msg = makeMessage("stop");
+		const raw = vi.fn().mockReturnValue(
+			streamOfEvents(
+				{ type: "text_delta", contentIndex: 0, delta: "a", partial: msg },
+				{ type: "done", reason: "stop", message: msg },
+			),
+		);
+		const s = (await withModelFallback(raw as never, [backup] as never)(
+			primary as never,
+			{} as never,
+			{} as never,
+		)) as AssistantMessageEventStream;
+		const types: string[] = [];
+		for await (const e of s as AsyncIterable<{ type: string }>) {
+			types.push(e.type);
+			if (e.type === "done" || e.type === "error") break;
+		}
+		expect(types).toEqual(["text_delta", "done"]);
+		await expect(s.result()).resolves.toBe(msg);
+	});
+
+	test("主模型 setup 失败(401) → 回退模型 done，result() 返回备用模型的最终消息", async () => {
+		const backupMsg = makeMessage("stop");
+		const raw = vi
+			.fn()
+			.mockReturnValueOnce(failStream({ status: 401 }))
+			.mockReturnValue(streamOfEvents({ type: "done", reason: "stop", message: backupMsg }));
+		const s = await consumeWrapped(raw);
+		expect(raw).toHaveBeenCalledTimes(2);
+		expect(raw.mock.calls[1][0].id).toBe("backup");
+		expect(await s.result()).toBe(backupMsg);
+	});
+
+	test("error 终端事件 → result() 返回错误消息（已产出事件的失败不回退）", async () => {
+		const errMsg = makeMessage("error", "LLM failed mid-stream");
+		const raw = vi.fn().mockReturnValue(streamOfEvents({ type: "error", reason: "error", error: errMsg }));
+		const s = await consumeWrapped(raw);
+		expect(raw).toHaveBeenCalledTimes(1);
+		expect((await s.result()).errorMessage).toBe("LLM failed mid-stream");
+	});
+
+	test("内层流未发终端事件就结束 → result() 显式 reject（不悬挂）", async () => {
+		const partial = makeMessage("stop");
+		const raw = vi.fn().mockReturnValue(streamOfEvents({ type: "text_delta", contentIndex: 0, delta: "x", partial }));
+		const s = await consumeWrapped(raw);
+		await expect(s.result()).rejects.toThrow("未收到终端事件");
+	});
+
+	test("全部候选失败 → 迭代抛最后错误，result() 同错 reject", async () => {
+		const err = { status: 503 };
+		const raw = vi.fn().mockReturnValue(failStream(err));
+		const s = (await withModelFallback(raw as never, [backup] as never)(
+			primary as never,
+			{} as never,
+			{} as never,
+		)) as AssistantMessageEventStream;
+		await expect(
+			(async () => {
+				for await (const _ of s as AsyncIterable<{ type: string }>) {
+					// consume
+				}
+			})(),
+		).rejects.toEqual(err);
+		expect(raw).toHaveBeenCalledTimes(2);
+		await expect(s.result()).rejects.toEqual(err);
 	});
 });
