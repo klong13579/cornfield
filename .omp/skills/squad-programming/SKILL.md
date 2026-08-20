@@ -139,6 +139,12 @@ bun run .omp/skills/squad-programming/scripts/bootstrap.ts \
 
 ### 父 agent 侧盯盘
 
+- **健康扫描（父探活机制，防静默挂掉）** — 父不干等消息。每个工作轮次（收到消息后/间隙），对未终态子任务跑一次体检：
+  ```bash
+  bun run .omp/skills/squad-programming/scripts/probe.ts ~/.omp/squads/<squadId>/state.json
+  ```
+  三路探活：进程存活（ps 按 worktree 路径匹配 omp）→ agent 注册（`herdr workspace list` 的 agent_status）→ pane 输出尾部错误签名（API 断连/进程退出/崩溃堆栈）。输出 `[OK]/[WARN]`，有 WARN 退出码 1。
+  **WARN 处置阶梯（不直接判死）**：① 先看是否自愈——API 断连（`socket connection was closed` 等）是 provider 并发高时的常见噪声，omp 自带重试，worker 通常继续推进；② `intercom ask` 该子任务自报状态（ask 双向可靠，3 轮内无回复才疑死）；③ ask 不通 + pane 无进展 → 记 `stalled` → 转用户拍板（重启该子任务 / 等 / 打回）。
 - 用 `intercom({ action: "children" })` 看子 omp 实时状态，不轮询消息。
 - **每条状态消息落地 state.json**（父中断恢复的底账）：
   `bun run .omp/skills/squad-programming/scripts/squad-state.ts ~/.omp/squads/<squadId>/state.json update <taskId> <status> [一句话]`
