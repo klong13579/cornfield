@@ -1,4 +1,4 @@
-import { ChevronRight, FileText, type LucideIcon, Pencil, RefreshCcw, Search, Terminal, Wrench } from "lucide-react";
+import { ChevronDown, ChevronRight, FileText, type LucideIcon, Pencil, RefreshCcw, Search, Terminal, Wrench } from "lucide-react";
 import { useState } from "react";
 import { Orb } from "../components/Orb";
 import type { ToolView } from "../state/session-store";
@@ -147,6 +147,11 @@ function ToolRow({ tool, onRetry }: { tool: ToolView; onRetry?: () => void }): R
 					<Icon size={13} strokeWidth={1.5} className="toolrow-icon" />
 					<span className="toolrow-name">{tool.name}</span>
 					{target && <span className="toolrow-target">{target}</span>}
+					<ChevronDown
+						size={11}
+						strokeWidth={1.5}
+						className={`shrink-0 text-ink-faint transition-transform ${detail ? "rotate-180" : ""}`}
+					/>
 					{tool.state === "run" ? (
 						<span className="spin" />
 					) : tool.state === "fail" ? (
