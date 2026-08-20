@@ -5,6 +5,7 @@ import * as path from "node:path";
 import { buildModelPriceCatalog, getDashboardStats, syncAllSessions } from "@oh-my-pi/omp-stats";
 import { getAgentDir, getConfigRootDir, isEnoent, logger, parseFrontmatter } from "@oh-my-pi/pi-utils";
 import type {
+	AgentMessageDto,
 	ClientFrame,
 	PermissionRequestPush,
 	ServerFrame,
@@ -283,6 +284,16 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 					}));
 					const sessions = await indexSessions(sources, command.limit);
 					done({ sessions });
+					return;
+				}
+				case "get_session_messages": {
+					// 历史回放：读 sessionFile（绝对路径）的 message 条目，与 get_messages 同型。
+					const res = await readSessionMessages(command.sessionFile);
+					if ("error" in res) {
+						fail(res.error);
+						return;
+					}
+					done({ messages: res.messages });
 					return;
 				}
 				case "fs_list": {
@@ -1281,6 +1292,39 @@ async function readCronLogList(taskId?: string, days = 3, limit = 50): Promise<C
 	}
 	rows.sort((a, b) => b.ts - a.ts);
 	return rows.slice(0, clampLimit);
+}
+
+/** 读会话 JSONL，逐行 JSON.parse，提取 message 条目（跳过空行/非 message/损坏行）。 */
+async function readSessionMessages(sessionFile: string): Promise<{ messages: AgentMessageDto[] } | { error: string }> {
+	try {
+		const stat = await fs.stat(sessionFile);
+		if (!stat.isFile()) return { error: `not a file: ${sessionFile}` };
+	} catch (err) {
+		if (isEnoent(err)) return { error: `session file not found: ${sessionFile}` };
+		return { error: `cannot read session file: ${String(err)}` };
+	}
+
+	let text: string;
+	try {
+		text = await Bun.file(sessionFile).text();
+	} catch (err) {
+		return { error: `cannot read session file: ${String(err)}` };
+	}
+
+	const messages: AgentMessageDto[] = [];
+	for (const line of text.split("\n")) {
+		if (!line.trim()) continue;
+		let entry: { type?: unknown; message?: unknown };
+		try {
+			entry = JSON.parse(line) as typeof entry;
+		} catch {
+			continue;
+		}
+		if (entry.type !== "message") continue;
+		if (typeof entry.message !== "object" || entry.message === null) continue;
+		messages.push(entry.message as AgentMessageDto);
+	}
+	return { messages };
 }
 
 /** 协议批 B-3：W1 SlashPalette 虚拟惯例项（非内置 slash 命令，TUI 动作口径）。 */

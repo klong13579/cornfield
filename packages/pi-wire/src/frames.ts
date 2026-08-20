@@ -1,3 +1,4 @@
+import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { WireCommand, WireHostToolDefinition } from "./commands";
 
 /**
@@ -152,6 +153,13 @@ export interface WireSessionIndexEntry {
  * （model_change/compaction/custom…），对 /records 回放无影响。若未来需要字节级
  * 原样导出，应加静态文件服务而不是新 wire 命令（web-app 是本地应用）。
  */
+
+/**
+ * Wire 层消息 DTO：`get_messages` / `get_session_messages` 响应的 `messages` 数组元素型。
+ * 直接复刻 pi-agent-core 的 AgentMessage（消息联合）——JSONL message 条目的 `message`
+ * 字段反序列化后即此型，回放时间线所需 timestamp/role/content/stopReason 齐全（见上方任务 B 结论）。
+ */
+export type AgentMessageDto = AgentMessage;
 
 /**
  * host_tool_call — 服务端需要客户端执行一个客户端注册的 tool。

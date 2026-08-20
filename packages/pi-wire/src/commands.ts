@@ -127,6 +127,12 @@ export type WireExtensionCommand =
 	 */
 	| { id?: string; type: "list_sessions"; sessionId?: string; limit?: number }
 	/**
+	 * 读一个会话 JSONL 文件（`list_sessions` 返回的 sessionFile 绝对路径），逐行解析并
+	 * 提取 message 条目（跳过空行/非 message 条目）。返回 { messages: AgentMessageDto[] }，
+	 * 与 `get_messages`（读当前 attached session 内存）同型。不实例化 session，不定向 agent。
+	 */
+	| { id?: string; type: "get_session_messages"; sessionFile: string }
+	/**
 	 * 只读列出 agent workspace 目录（Agent 详情页文件系统 tab）。
 	 * path 相对 agentDir；省略 = agentDir 根。返回条目（目录在前，名/类型/大小）。
 	 * 路径约束：必须解析在 agentDir 内（防任意读）；越界 ok:false + error。
