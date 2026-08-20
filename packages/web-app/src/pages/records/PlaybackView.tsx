@@ -1,24 +1,27 @@
 import { Pause, Play, SkipBack, SkipForward } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
-import { type BranchPoint, CURRENT_SESSION_ID, type PlaybackEntry } from "../../lib/records";
+import { Link, useLocation, useParams } from "react-router-dom";
+import { type BranchPoint, CURRENT_SESSION_ID, type PlaybackEntry, toPlaybackEntries } from "../../lib/records";
 import { type PlaybackSpeed, usePlayback } from "../../lib/use-playback";
 import { useSessionStore } from "../../state/session-store";
 
 /**
  * 会话回放（FR-3）—— 播放引擎（use-playback）驱动时间线逐步 reveal。
- * 数据源：serve get_messages 真数据（当前会话）；历史会话空态待 JSONL 读取命令。
+ * 数据源：serve get_messages 真数据（当前会话）；历史会话走 get_session_messages 读取 JSONL 时间线。
  * 控制：播放/暂停、快进/快退、速度 1x/2x/4x、进度条 + Step 计数、右侧时间线跳转。
  */
 export function PlaybackView(): React.JSX.Element {
 	const { id = "" } = useParams();
 	const store = useSessionStore();
+	const location = useLocation();
+	// 历史会话：RecordsView 点击行时经 navigate state 携带 sessionFile；缺失则回放页给可见错误。
+	const sessionFile = (location.state as { sessionFile?: string } | null)?.sessionFile ?? null;
 	const [timeline, setTimeline] = useState<PlaybackEntry[] | null>(null);
 	const [branchPoints, setBranchPoints] = useState<BranchPoint[]>([]);
 	const [error, setError] = useState<string | null>(null);
 	const scrollRef = useRef<HTMLDivElement>(null);
 
-	// 历史会话回放待后端 JSONL 读取命令（list_sessions 已带出 sessionFile），标题暂为会话 id；current 为真数据
+	// 历史会话标题暂用会话 id（短哈希）；current 为真数据。
 	const title = id === CURRENT_SESSION_ID ? "当前会话（serve 真数据）" : `历史会话 · ${id.slice(0, 12)}`;
 
 	useEffect(() => {
@@ -40,13 +43,32 @@ export function PlaybackView(): React.JSX.Element {
 				})
 				.catch(() => undefined);
 		} else {
-			// 历史会话时间线 JSONL 读取待后端文件命令（list_sessions 已带出 sessionFile），暂为空态
-			setTimeline([]);
+			// 历史会话：读取该会话 JSONL 时间线（get_session_messages 真命令）。
+			if (!sessionFile) {
+				if (alive) setError("缺少会话文件路径（sessionFile）——请从会话记录列表进入。");
+				return;
+			}
+			// 契约（s2 并行实现 PiClient.getSessionMessages(sessionFile) → AgentMessageDto[]，
+			// 并经 session-store 透传同签名；与 get_messages 返回完全同型）。本分支 s4 先行消费，
+			// 方法未落地时保留运行期缺省并给出可见提示（不伪造数据）。
+			const getSessionMessages = (store as unknown as { getSessionMessages?: (file: string) => Promise<unknown[]> })
+				.getSessionMessages;
+			if (!getSessionMessages) {
+				if (alive) setError("历史会话时间线命令（get_session_messages）尚未就绪");
+				return;
+			}
+			getSessionMessages(sessionFile)
+				.then(messages => {
+					if (alive) setTimeline(toPlaybackEntries(messages));
+				})
+				.catch((err: unknown) => {
+					if (alive) setError(err instanceof Error ? err.message : String(err));
+				});
 		}
 		return () => {
 			alive = false;
 		};
-	}, [id, store]);
+	}, [id, store, sessionFile]);
 
 	const playback = usePlayback(timeline?.length ?? 0);
 	const revealed = useMemo(() => (timeline ? timeline.slice(0, playback.step) : []), [timeline, playback.step]);
