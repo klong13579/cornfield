@@ -11,21 +11,17 @@
  */
 
 import * as fs from "node:fs";
-import * as path from "node:path";
-import { isEnoent } from "@oh-my-pi/pi-utils";
 import { findAgentSessionPath } from "../session-paths";
 import { summarizeCronRunDiagnostics } from "./diagnostics";
 import { appendExecutionLog, getRecentDeliveryFailureCount, readExecutionLog } from "./execution-log";
 import { executeScheduledCommand, scanCronPrompt } from "./executor";
 import { runTestRun, type TestRunHardError, type TestRunResult } from "./test-run";
-import { clearTestRunMarker, readTestRunMarker } from "./test-run-marker";
-import type { ScheduledTask, SchedulerStorage } from "./types";
+import type { SchedulerStorage } from "./types";
 import {
 	formatExecutionRow,
 	formatTaskRow,
 	getGatewayPidPath,
 	getNextRun,
-	getSchedulerDir,
 	isDaemonRunning,
 	parseSchedule,
 } from "./types";
@@ -610,21 +606,30 @@ export interface CronTestRunOptions {
 }
 
 /**
- * CLI front-end for `omp-gateway cron test-run <name>`. The core
- * schedule-rewrite + poll + restore logic lives in `test-run.ts`
- * (`runTestRun`); this function owns argv parsing, SIGINT/SIGTERM
- * restore, console output, and process.exitCode translation.
+ * CLI front-end for `omp-gateway cron test-run <name>`.
  *
- * The shared core is non-negotiable: the LLM `cron` host tool's
- * `test-run` action calls the same `runTestRun`. A drift between
- * CLI and LLM behavior would mean the operator verifies one thing
- * and the agent verifies another — exactly the kind of split that
- * hides bugs.
+ * Fire-and-forget — same contract as the LLM host-tool `cron.test-run`
+ * action; both call the shared `runTestRun` with `awaitResult=false`.
+ * The CLI rewrites the task to a one-shot, writes the restore marker
+ * (with `awaitingFire` + `expiresAt`), and returns immediately. The
+ * daemon's engine fires at the ABSOLUTE target the CLI wrote (no re-parse
+ * drift; see engine.schedule), the task runs through the normal cron
+ * pipeline (warm bridge or cold fallback), and the result lands in the
+ * by-task exec JSONL AND the delivery card.
  *
- * Exit codes (matched to host-tool `isError: true` semantics):
- *   0  trigger fired, task exited 0, delivery succeeded (or no delivery)
- *   1  timeout, task not found, task exited non-zero, or delivery failed
- *  130 / 143  SIGINT / SIGTERM during wait (schedule restored in handler)
+ * Rationale (2026-08-20): the old poll-and-restore CLI waited for a
+ * terminal execution, but in-flight exec state exists only in the
+ * daemon's memory — a cross-process viewer can never see it — and the
+ * wait was further capped at `MAX_TIMEOUT_MS` (120s). The CLI therefore
+ * misreported `trigger_timeout` on ANY run longer than ~2 minutes while
+ * the task actually fired and completed (observed with daily-kb-sync's
+ * 300s timeout). Fire-and-forget removes the wait entirely; verdicts
+ * come from the exec log / delivery card, which are written by the
+ * runner itself and are truthful.
+ *
+ * Exit codes:
+ *   0  one-shot armed (result arrives via `cron logs` / delivery card)
+ *   1  task not found, corrupted schedule, gateway not running, bad args
  */
 export async function cronTestRun(args: string[], storage: SchedulerStorage): Promise<void> {
 	const name = args[0];
@@ -675,51 +680,33 @@ export async function cronTestRun(args: string[], storage: SchedulerStorage): Pr
 		return;
 	}
 
-	// AbortController wires the CLI's signal handling into the
-	// AbortSignal that `runTestRun` honors. The handler restores
-	// nothing directly — the shared core's `finally` block does the
-	// restore; the CLI handler just aborts the polling loop and lets
-	// the core return. The shared core then exits with
-	// `kind: "aborted"`.
-	const ac = new AbortController();
-	const onSig = () => ac.abort();
-	// Belt-and-suspenders: the `runTestRun` `finally` block is the
-	// primary restore path, but it never runs on SIGKILL / uncaught
-	// native crash / hard process termination. The restore marker
-	// on disk is the safety net — a sync `process.on("exit")` handler
-	// applies it if the CLI is dying while the marker still exists.
-	// `process.on("exit")` only allows sync work, so this writes
-	// directly to jobs.json rather than going through the storage
-	// abstraction. The gateway's own startup / tick handler picks up
-	// the same marker on its end.
-	const onExit = () => {
-		syncRestoreFromMarker();
-	};
-	process.on("exit", onExit);
-	process.once("SIGINT", () => {
-		onSig();
-		process.exit(130);
-	});
-	process.once("SIGTERM", () => {
-		onSig();
-		process.exit(143);
-	});
+	// Fire-and-forget mode has no waiting loop: the CLI exits right after
+	// arming the one-shot, and the daemon owns the run + restore. Signal
+	// handling (SIGINT/SIGTERM abort of a poll loop) and the exit-time
+	// marker restore are deliberately NOT wired — the marker must survive
+	// the CLI's exit so the engine can consume it post-fire.
 
-	// Fast-fail if the gateway daemon is not running. The shared core
-	// would eventually time out (no scheduler tick to pick up the
-	// schedule change), but the operator gets a clearer error this
-	// way. This check is CLI-only; the LLM host tool assumes the
-	// gateway is running (otherwise the dispatcher wouldn't exist).
+	// Fast-fail if the gateway daemon is not running. The one-shot only
+	// fires if the in-process scheduler picks up the schedule change.
 	const pidPath = getGatewayPidPath();
 	if (!isDaemonRunning(pidPath)) {
 		console.error(
-			`Gateway is not running. Start it with "omp-gateway start" first — test-run waits for the in-process scheduler to pick up the schedule change.`,
+			`Gateway is not running. Start it with "omp-gateway start" first — the one-shot needs the in-process scheduler to fire it.`,
 		);
 		process.exitCode = 1;
 		return;
 	}
 
-	console.log(`[test-run] Task "${name}" — preparing test-run (snapshot, rewrite to one-shot, wait, restore).`);
+	if (noRestore) {
+		console.error(
+			"cron test-run: --no-restore is not supported in fire-and-forget mode — the engine restores " +
+				"the original schedule automatically after the run (or via orphan recovery if it never fires).",
+		);
+		process.exitCode = 1;
+		return;
+	}
+
+	console.log(`[test-run] Task "${name}" — arming one-shot test run.`);
 
 	const result: TestRunResult | TestRunHardError = await runTestRun({
 		name,
@@ -727,8 +714,8 @@ export async function cronTestRun(args: string[], storage: SchedulerStorage): Pr
 		timeoutMs,
 		noRestore,
 		tickIntervalMs: gatewayTickMs,
-		signal: ac.signal,
 		storage,
+		awaitResult: false,
 	});
 
 	if (result.kind === "task_not_found") {
@@ -754,149 +741,26 @@ export async function cronTestRun(args: string[], storage: SchedulerStorage): Pr
 		return;
 	}
 
-	// Print result in CLI format. We translate the structured
-	// result to the same console layout the operator was getting
-	// before the refactor.
-	if (result.kind === "trigger_timeout") {
-		if (result.sawRunningExec) {
-			console.error(
-				`[test-run] Trigger fired (exec ${result.runningExecId}) but agent did NOT reach a terminal state within the wait window.`,
-			);
-			console.error(`[test-run] Check the gateway log (~/.omp/logs/omp.*.log) for the latest activity on this run.`);
-		} else {
-			console.error(`[test-run] Timed out waiting for trigger.`);
-		}
-		console.error(`[test-run] Schedule ${noRestore ? "NOT " : ""}restored to original.`);
-		process.exitCode = 1;
-		return;
-	}
-
-	if (result.kind === "aborted") {
+	// AwaitResult=false only ever returns `started` past the hard errors.
+	if (result.kind === "started") {
+		const fireAt = new Date(result.startedAt + result.inMs).toLocaleTimeString();
 		console.log(
-			`[test-run] Aborted after ${Math.round(result.waitedMs / 1000)}s; schedule ${result.scheduleRestored ? "" : "NOT "}restored.`,
+			`[test-run] One-shot armed: "${name}" fires at ~${fireAt} (+${Math.round(result.inMs / 1000)}s). CLI exits now.`,
 		);
-		// The signal handler will exit(130/143); we don't set exitCode
-		// here to avoid clobbering the signal-driven exit code.
-		return;
-	}
-
-	if (result.kind === "task_failed") {
-		console.log(`  exec id:   ${result.execId}`);
-		console.log(`  status:    ${result.status}`);
-		console.log(`  exit:      ${result.exitCode}`);
-		if (result.stderr) console.log(`  stderr:    ${result.stderr.slice(0, 500)}`);
+		console.log(`[test-run] Result:   omp-gateway cron logs ${name}  (exec JSONL written at completion)`);
 		console.log(
-			`[test-run] Schedule ${result.scheduleRestored ? "restored to original." : "NOT restored (--no-restore). Task is now cron='+<delay>s' once."}`,
+			`[test-run] Delivery: DingTalk summary card if the task has announce delivery (✅ / ⏰ / ❌ + failure card).`,
 		);
-		process.exitCode = 1;
-		return;
-	}
-
-	if (result.kind === "delivery_failed") {
-		console.log(`  exec id:   ${result.execId}`);
-		console.log(`  status:    ${result.status}`);
-		console.log(`  exit:      ${result.exitCode}`);
-		console.log(`  deliver:   FAILED — ${result.deliveryError}`);
 		console.log(
-			`[test-run] Schedule ${result.scheduleRestored ? "restored to original." : "NOT restored (--no-restore). Task is now cron='+<delay>s' once."}`,
+			`[test-run] Restore:  engine restores the original schedule after the run; orphan recovery covers never-fire.`,
 		);
-		process.exitCode = 1;
 		return;
 	}
 
-	// Success
-	if (result.kind !== "success") return; // started-only: nothing awaited
-	console.log(`[test-run] Triggered after ~${result.triggerLatencyMs}ms (poll wait)`);
-	console.log(`  exec id:   ${result.execId}`);
-	console.log(`  status:    ${result.status}`);
-	console.log(`  exit:      ${result.exitCode}`);
-	console.log(`  duration:  ${result.durationMs ?? "?"}ms`);
-	if (result.stderr) console.log(`  stderr:    ${result.stderr.slice(0, 500)}`);
-	if (result.delivery.configured) {
-		if (result.delivery.mode === "none") {
-			console.log(`  deliver:   silent (mode=none, no push attempted)`);
-		} else {
-			console.log(`  deliver:   ${result.delivery.ok ? "ok" : `FAILED — ${result.delivery.error}`}`);
-		}
-	} else {
-		console.log(`  deliver:   n/a (task has no delivery config)`);
-	}
-	if (result.output) {
-		console.log(`  --- output (truncated to 2K) ---`);
-		console.log(result.output.slice(0, 2000));
-	}
-	console.log(
-		`[test-run] Schedule ${result.scheduleRestored ? "restored to original." : "NOT restored (--no-restore). Task is now cron='+<delay>s' once."}`,
-	);
-}
-
-/**
- * Sync restore from a leftover test-run marker. Called from
- * `process.on("exit")` in the CLI when the CLI is dying but the
- * marker on disk still indicates an in-flight test-run. We can't
- * go through `runTestRun`'s storage abstraction (it may already be
- * closed), and we can't do async work (exit handlers are sync only),
- * so we read + write jobs.json directly.
- *
- * The gateway's own startup / tick also runs the same restore via
- * `consumeOrphanTestRunMarker` (in `gateway-cron-lifecycle.ts`),
- * which IS async. The two paths overlap deliberately — the gateway
- * handler is the primary safety net, the CLI handler is the
- * "be a good citizen before exiting" path.
- */
-function syncRestoreFromMarker(): void {
-	const marker = readTestRunMarker();
-	if (!marker) return;
-	try {
-		const jobsPath = path.join(getSchedulerDir(), "jobs.json");
-		let content: string;
-		try {
-			content = fs.readFileSync(jobsPath, "utf-8");
-		} catch (err) {
-			if (isEnoent(err)) {
-				clearTestRunMarker();
-				return;
-			}
-			throw err;
-		}
-		const data = JSON.parse(content) as { version: 1; tasks: ScheduledTask[]; metadata: { updatedAt: number } };
-		const idx = data.tasks.findIndex(t => t.id === marker.taskId);
-		if (idx < 0) {
-			// Task was deleted while test-run was in flight. Nothing
-			// to restore; just clear the marker.
-			clearTestRunMarker();
-			return;
-		}
-		const snap = marker.snapshot;
-		data.tasks[idx] = {
-			...data.tasks[idx]!,
-			cron: snap.cron,
-			scheduleType: snap.scheduleType,
-			nextRunAt: snap.nextRunAt,
-			status: snap.status,
-			lastRunAt: snap.lastRunAt,
-			runCount: snap.runCount,
-			failCount: snap.failCount,
-			consecutiveFailures: snap.consecutiveFailures,
-			repeatCompleted: snap.repeatCompleted,
-			lastDeliveryError: snap.lastDeliveryError,
-			updatedAt: Date.now(),
-		};
-		data.metadata.updatedAt = Date.now();
-		const tmp = `${jobsPath}.tmp`;
-		fs.writeFileSync(tmp, JSON.stringify(data, null, 2), "utf-8");
-		fs.renameSync(tmp, jobsPath);
-		clearTestRunMarker();
-		// eslint-disable-next-line no-console
-		console.error(
-			`[test-run] Sync-restored schedule from marker on exit: task "${marker.taskName}" -> cron='${snap.cron}'`,
-		);
-	} catch (err) {
-		// Don't throw from an exit handler — it would mask the original
-		// exit code. Just log and let the gateway's tick pick it up.
-		// eslint-disable-next-line no-console
-		console.error(`[test-run] sync restore from marker failed; gateway tick will retry`, String(err));
-	}
+	// Unreachable with awaitResult=false; keep a visible failure rather
+	// than a silent success if the shared core evolves.
+	console.error(`[test-run] Unexpected result kind: ${result.kind}`);
+	process.exitCode = 1;
 }
 
 /**

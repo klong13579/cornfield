@@ -349,6 +349,43 @@ describe("SchedulerEngine", () => {
 		expect(updated?.status).toBe("active");
 	});
 
+	it("fires a test-run one-shot at the stored absolute nextRunAt, not at reload+delay", async () => {
+		// Regression (2026-08-20): the CLI/LLM writes an ABSOLUTE fire target
+		// in `nextRunAt`; parseSchedule re-derives "+<n>s" relative to reload
+		// time, drifting the fire past the writer's deadline. The absolute
+		// target must win for test-run shapes.
+		const t0 = Date.now();
+		const task = storage.addTask({
+			name: "test-run-absolute",
+			cron: "+30s",
+			command: "echo test-run",
+			status: "active",
+			scheduleType: "once",
+			nextRunAt: t0 + 300, // CLI's absolute target
+			createdAt: Date.now(),
+			updatedAt: Date.now(),
+			runCount: 0,
+			failCount: 0,
+			consecutiveFailures: 0,
+		});
+
+		let firedAt = 0;
+		const engine = new SchedulerEngine({
+			storage,
+			onTrigger: async () => {
+				firedAt = Date.now();
+			},
+		});
+
+		engine.start();
+		await Bun.sleep(400); // the 300ms absolute target must have fired by now
+		engine.stop();
+
+		expect(firedAt).toBeGreaterThan(0);
+		expect(firedAt - t0).toBeLessThan(1_000); // NOT at ~30s (parsed relative delay)
+		expect(storage.getTask(task.id)?.status).toBe("active"); // test-run shape: no auto-disable
+	});
+
 	it("engine handles disabled tasks", () => {
 		storage.addTask({
 			name: "disabled-task",
@@ -981,7 +1018,7 @@ describe("JsonFileStorage.consumeOrphanTestRunMarker", () => {
 		storage.updateTask(created.id, {
 			cron: "+120s",
 			scheduleType: "once",
-			nextRunAt: Date.now() + 120_000,
+			nextRunAt: Date.now() - 1_000, // past target: engine already had its chance → orphan
 			updatedAt: Date.now(),
 		});
 		writeTestRunMarker(
@@ -1096,7 +1133,7 @@ describe("JsonFileStorage.consumeOrphanTestRunMarker", () => {
 		storage.updateTask(created.id, {
 			cron: "+120s",
 			scheduleType: "once",
-			nextRunAt: Date.now() + 120_000,
+			nextRunAt: Date.now() - 1_000, // past target → orphan
 			updatedAt: Date.now(),
 		});
 		const foreignMarker: TestRunMarker = {

@@ -178,7 +178,17 @@ export class SchedulerEngine {
 			this.#storage.updateTask(task.id, { nextRunAt: Date.now() + parsed.intervalMs });
 			task.nextRunAt = Date.now() + parsed.intervalMs;
 		} else if (scheduleType === "once") {
-			const target = parsed.nextRunAt ?? task.nextRunAt ?? Date.now();
+			// Test-run one-shots (+<n>s) carry an ABSOLUTE target written by the
+			// CLI/LLM (`nextRunAt`). parseSchedule re-derives "+<n>s" relative
+			// to THIS reload, so when the daemon tick lands after the writer's
+			// mutation the fire drifts past the writer's deadline and the CLI
+			// reports trigger_timeout (observed 2026-08-20: `omp-gateway cron
+			// test-run` scheduled the one-shot 60-90s late twice in a row).
+			// The absolute target wins for test-run shapes.
+			const target =
+				isTestRunSchedule(task.cron) && task.nextRunAt !== undefined
+					? task.nextRunAt
+					: (parsed.nextRunAt ?? task.nextRunAt ?? Date.now());
 			const delay = target - Date.now();
 			if (delay > 0) {
 				const timeout = setTimeout(async () => {

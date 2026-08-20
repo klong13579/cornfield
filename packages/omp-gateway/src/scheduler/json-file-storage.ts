@@ -12,7 +12,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { isEnoent, logger } from "@oh-my-pi/pi-utils";
 import { pruneAllLogs, readExecutionLog } from "./execution-log";
-import { clearTestRunMarker, readTestRunMarker } from "./test-run-marker";
+import { clearTestRunMarker, isTestRunSchedule, readTestRunMarker } from "./test-run-marker";
 import type { ScheduledTask, SchedulerStorage, TaskExecution } from "./types";
 import { generateExecutionId, generateTaskId, getSchedulerDir } from "./types";
 
@@ -34,6 +34,17 @@ interface JobsFile {
 
 function defaultJobsPath(): string {
 	return path.join(getSchedulerDir(), "jobs.json");
+}
+
+/** True when a PID answers signal 0 (alive, incl. permission-denied EPERM). */
+function isProcessAlive(pid: number | undefined): boolean {
+	if (pid === undefined || pid <= 0) return false;
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch (err) {
+		return (err as { code?: string }).code !== "ESRCH";
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -296,15 +307,39 @@ export class JsonFileStorage implements SchedulerStorage {
 		// own grace-period logic will disable it on the next tick.
 		//
 		// Cross-process markers (CLI test-run in a separate process, or
-		// a previous gateway instance) are always recoverable —
-		// they're true orphans.
+		// a previous gateway instance) are orphans ONLY when the writer
+		// process is gone. A LIVE writer is an in-flight CLI test-run —
+		// consuming its marker reverts the one-shot schedule before it
+		// can fire and the CLI reports trigger_timeout (observed
+		// 2026-08-20: `omp-gateway cron test-run` never fired against
+		// the running daemon until this liveness check was added).
+		//
+		// The one-shot itself is the stronger in-flight token: the
+		// fire-and-forget CLI arms a `+<n>s once` task and EXITS
+		// immediately (it never waits), so its writer is dead from the
+		// start and a liveness gate alone would orphan the marker at
+		// the very first tick — before the engine ever saw the
+		// schedule change (observed 2026-08-20 19:14: marker consumed
+		// 57s after arming, run never fired). A test-run one-shot whose
+		// target is still in the future is in-flight by definition:
+		// only consume it once the target is past (engine had its
+		// chance; the grace-period disable is otherwise the next
+		// event).
 		const sameProcess = marker.pid === process.pid;
 		const awaitingFireExpired =
 			marker.awaitingFire === true && marker.expiresAt !== undefined && Date.now() > marker.expiresAt;
-		if (sameProcess && !awaitingFireExpired) {
+		const task = this.#tasks.get(marker.taskId);
+		const armedInFuture =
+			task !== undefined &&
+			isTestRunSchedule(task.cron) &&
+			(task.nextRunAt ?? 0) > Date.now();
+		if (armedInFuture && !awaitingFireExpired) {
 			return false;
 		}
-		const existing = this.#tasks.get(marker.taskId);
+		if ((sameProcess || isProcessAlive(marker.pid)) && !awaitingFireExpired) {
+			return false;
+		}
+		const existing = task;
 		if (!existing) {
 			// Task was deleted while test-run was in flight. Nothing
 			// to restore; just clear the marker.

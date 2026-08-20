@@ -173,7 +173,7 @@ describe("JsonFileStorage cross-process change detection", () => {
 		cli.updateTask(task.id, {
 			cron: "+60s",
 			scheduleType: "once",
-			nextRunAt: Date.now() + 60_000,
+			nextRunAt: Date.now() - 1_000, // past target: engine already had its chance → orphan
 		});
 		writeTestRunMarkerRaw(
 			{
@@ -205,5 +205,118 @@ describe("JsonFileStorage cross-process change detection", () => {
 		expect(gw.getTask(task.id)?.cron).toBe("0 9 * * *");
 		expect(gw.getTask(task.id)?.scheduleType).toBe("cron");
 		expect(fs.existsSync(getTestRunMarkerPath(path.dirname(jobsPath)))).toBe(false);
+	});
+
+	it("keeps the marker while the CLI test-run is alive OR its one-shot is still armed; consumes a past-dated orphan", async () => {
+		const gw = new JsonFileStorage(jobsPath);
+		expect(gw.listTasks()).toHaveLength(0);
+
+		const cli = new JsonFileStorage(jobsPath);
+		const task = cli.addTask(makeTask("cli-test-run-live"));
+		cli.updateTask(task.id, {
+			cron: "+60s",
+			scheduleType: "once",
+			nextRunAt: Date.now() + 60_000,
+		});
+
+		const child = Bun.spawn(["sleep", "30"]);
+		const markerBase = path.dirname(jobsPath);
+		try {
+			writeTestRunMarkerRaw(
+				{
+					version: 1,
+					taskId: task.id,
+					taskName: task.name,
+					snapshot: {
+						cron: "0 9 * * *",
+						scheduleType: "cron",
+						nextRunAt: undefined,
+						status: "active",
+						lastRunAt: undefined,
+						runCount: 0,
+						failCount: 0,
+						consecutiveFailures: 0,
+						repeatCompleted: undefined,
+						lastDeliveryError: undefined,
+					},
+					startedAt: Date.now(),
+					pid: child.pid, // LIVE separate process = in-flight CLI test-run
+				},
+				markerBase,
+			);
+
+			// In-flight CLI: the gateway tick must NOT revert the one-shot.
+			expect(gw.consumeOrphanTestRunMarker()).toBe(false);
+			expect(gw.getTask(task.id)?.cron).toBe("+60s");
+			expect(fs.existsSync(getTestRunMarkerPath(markerBase))).toBe(true);
+
+			// Writer dies, one-shot still armed → STILL in-flight (not an
+			// orphan): the engine should fire it. Only a past-dated
+			// one-shot is a true orphan.
+			child.kill();
+			await child.exited;
+			expect(gw.consumeOrphanTestRunMarker()).toBe(false);
+			expect(gw.getTask(task.id)?.cron).toBe("+60s");
+			expect(fs.existsSync(getTestRunMarkerPath(markerBase))).toBe(true);
+
+			// Target passes without firing → orphan → restore + clear.
+			cli.updateTask(task.id, { nextRunAt: Date.now() - 1_000 });
+			expect(gw.consumeOrphanTestRunMarker()).toBe(true);
+			expect(gw.getTask(task.id)?.cron).toBe("0 9 * * *");
+			expect(fs.existsSync(getTestRunMarkerPath(markerBase))).toBe(false);
+		} finally {
+			child.kill();
+		}
+	});
+
+	it("keeps the marker while the one-shot is still armed, even with a dead writer (fire-and-forget CLI)", async () => {
+		// The fire-and-forget CLI arms a +<n>s once task and EXITS
+		// immediately — its writer pid is dead from the start. The
+		// still-armed one-shot (future nextRunAt) is the in-flight
+		// token: orphan recovery must NOT consume the marker before the
+		// engine fires (regression 2026-08-20 19:14: marker consumed
+		// 57s after arming, the run never fired).
+		const gw = new JsonFileStorage(jobsPath);
+		const cli = new JsonFileStorage(jobsPath);
+		const target = Date.now() + 60_000;
+		const task = cli.addTask(makeTask("cli-fire-forget"));
+		cli.updateTask(task.id, { cron: "+60s", scheduleType: "once", nextRunAt: target });
+
+		const markerBase = path.dirname(jobsPath);
+		writeTestRunMarkerRaw(
+			{
+				version: 1,
+				taskId: task.id,
+				taskName: task.name,
+				snapshot: {
+					cron: "0 9 * * *",
+					scheduleType: "cron",
+					nextRunAt: undefined,
+					status: "active",
+					lastRunAt: undefined,
+					runCount: 0,
+					failCount: 0,
+					consecutiveFailures: 0,
+					repeatCompleted: undefined,
+					lastDeliveryError: undefined,
+				},
+				startedAt: Date.now(),
+				pid: 424_242, // dead writer — the CLI exited right after arming
+				awaitingFire: true,
+				expiresAt: target + 90_000,
+			},
+			markerBase,
+		);
+
+		// Still armed (future nextRunAt): in-flight, even though the writer is dead.
+		expect(gw.consumeOrphanTestRunMarker()).toBe(false);
+		expect(gw.getTask(task.id)?.cron).toBe("+60s");
+		expect(fs.existsSync(getTestRunMarkerPath(markerBase))).toBe(true);
+
+		// Target passes without firing: orphan recovery restores + clears.
+		cli.updateTask(task.id, { nextRunAt: Date.now() - 1_000 });
+		expect(gw.consumeOrphanTestRunMarker()).toBe(true);
+		expect(gw.getTask(task.id)?.cron).toBe("0 9 * * *");
+		expect(fs.existsSync(getTestRunMarkerPath(markerBase))).toBe(false);
 	});
 });

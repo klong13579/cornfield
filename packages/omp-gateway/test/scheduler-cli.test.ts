@@ -32,6 +32,7 @@ import {
 } from "../src/scheduler/cli-commands";
 import { createCronTaskFromMessage, parseCronIntent } from "../src/scheduler/from-message";
 import { JsonFileStorage } from "../src/scheduler/json-file-storage";
+import { readTestRunMarker } from "../src/scheduler/test-run-marker";
 import { runTestRun } from "../src/scheduler/test-run";
 import type { ScheduledTask } from "../src/scheduler/types";
 
@@ -499,161 +500,31 @@ afterEach(() => {
 });
 
 describe("cronTestRun", () => {
-	it("restores the original schedule after the trigger fires", { timeout: 30_000 }, async () => {
+	it("arms a one-shot and exits immediately (fire-and-forget), marker awaits the engine post-fire restore", {
+		timeout: 15_000,
+	}, async () => {
 		makeGatewayRunningTr();
-		const task = seedTrTask({ name: "restored", cron: "0 18 * * *" });
+		const task = seedTrTask({ name: "armed", cron: "0 18 * * *" });
 
-		const exec = storageTr.recordExecution({
-			taskId: task.id,
-			startedAt: Date.now() + 50,
-			endedAt: Date.now() + 2000,
-			exitCode: 0,
-			output: "triggered ok",
-			status: "success",
-		});
+		await cronTestRun(["armed", "--in", "5s", "_gatewayTickMs", "500ms"], storageTr);
 
-		await cronTestRun(["restored", "--in", "5s", "--timeout", "30s", "_gatewayTickMs", "500ms"], storageTr);
-
-		const after = storageTr.getTaskByName("restored");
-		expect(after?.cron).toBe("0 18 * * *");
-		expect(after?.scheduleType).toBe("cron");
+		// One-shot armed, CLI returns without waiting for the run.
+		const after = storageTr.getTaskByName("armed");
+		expect(after?.cron).toBe("+5s");
+		expect(after?.scheduleType).toBe("once");
 		expect(after?.status).toBe("active");
 
-		expect(consoleLogBuf).toContain("restored");
-		expect(consoleLogBuf).toContain("Triggered");
-		expect(consoleLogBuf).toContain(`exec id:   ${exec.id}`);
-		expect(consoleLogBuf).toContain("status:    success");
-		expect(consoleLogBuf).toContain("exit:      0");
-		expect(consoleLogBuf).toContain("Schedule restored");
+		// Marker survives the CLI (engine consumes it post-fire; orphan
+		// recovery at expiresAt). 
+		const marker = readTestRunMarker();
+		expect(marker).not.toBeNull();
+		expect(marker?.taskId).toBe(task.id);
+		expect(marker?.awaitingFire).toBe(true);
+		expect(marker?.expiresAt).toBeGreaterThan(Date.now());
+
+		expect(consoleLogBuf).toContain("One-shot armed");
+		expect(consoleLogBuf).toContain("cron logs armed");
 		expect(process.exitCode).not.toBe(1);
-	});
-
-	it("reports delivery failure (sets exit code 1) when last_delivery_error is set", { timeout: 30_000 }, async () => {
-		makeGatewayRunningTr();
-		const task = seedTrTask({
-			name: "failed-delivery",
-			cron: "0 0 * * *",
-			delivery: { channel: "dingtalk", accountId: "hr", toUserId: "u1", mode: "announce" },
-		});
-		storageTr.recordExecution({
-			taskId: task.id,
-			startedAt: Date.now() + 50,
-			endedAt: Date.now() + 1000,
-			exitCode: 0,
-			output: "ran fine",
-			status: "success",
-		});
-		storageTr.updateTask(task.id, { lastDeliveryError: "Unknown channel: dingtalk" });
-
-		await cronTestRun(["failed-delivery", "--in", "5s", "--timeout", "30s", "_gatewayTickMs", "500ms"], storageTr);
-
-		expect(consoleLogBuf).toContain("deliver:   FAILED");
-		expect(consoleLogBuf).toContain("Unknown channel: dingtalk");
-		expect(process.exitCode).toBe(1);
-
-		expect(storageTr.getTaskByName("failed-delivery")?.cron).toBe("0 0 * * *");
-	});
-
-	it("reports delivery ok when there is a delivery config but no error", { timeout: 30_000 }, async () => {
-		makeGatewayRunningTr();
-		const task = seedTrTask({
-			name: "ok-delivery",
-			cron: "*/5 * * * *",
-			delivery: { channel: "dingtalk", accountId: "hr", toUserId: "u1", mode: "announce" },
-		});
-		storageTr.recordExecution({
-			taskId: task.id,
-			startedAt: Date.now() + 50,
-			endedAt: Date.now() + 500,
-			exitCode: 0,
-			output: "delivered",
-			status: "success",
-		});
-
-		await cronTestRun(["ok-delivery", "--in", "5s", "--timeout", "30s", "_gatewayTickMs", "500ms"], storageTr);
-
-		expect(consoleLogBuf).toContain("deliver:   ok");
-		expect(process.exitCode).not.toBe(1);
-	});
-
-	it("reports deliver=n/a when the task has no delivery config", { timeout: 30_000 }, async () => {
-		makeGatewayRunningTr();
-		const task = seedTrTask({ name: "no-delivery", cron: "0 9 * * *" });
-		storageTr.recordExecution({
-			taskId: task.id,
-			startedAt: Date.now() + 50,
-			endedAt: Date.now() + 100,
-			exitCode: 0,
-			output: "ran",
-			status: "success",
-		});
-
-		await cronTestRun(["no-delivery", "--in", "5s", "--timeout", "30s", "_gatewayTickMs", "500ms"], storageTr);
-
-		expect(consoleLogBuf).toContain("deliver:   n/a");
-	});
-
-	it("reports deliver=silent when delivery is configured but mode=none", { timeout: 30_000 }, async () => {
-		makeGatewayRunningTr();
-		const task = seedTrTask({
-			name: "silent-delivery",
-			cron: "0 9 * * *",
-			delivery: { channel: "dingtalk", accountId: "hr", toUserId: "u1", mode: "none" },
-		});
-		storageTr.recordExecution({
-			taskId: task.id,
-			startedAt: Date.now() + 50,
-			endedAt: Date.now() + 100,
-			exitCode: 0,
-			output: "ran fine",
-			status: "success",
-		});
-
-		await cronTestRun(["silent-delivery", "--in", "5s", "--timeout", "30s", "_gatewayTickMs", "500ms"], storageTr);
-
-		expect(consoleLogBuf).toContain("deliver:   silent (mode=none");
-		expect(consoleLogBuf).not.toContain("deliver:   ok");
-		expect(process.exitCode).not.toBe(1);
-	});
-
-	it("mode=none never reports delivery_failed even if lastDeliveryError is set", { timeout: 30_000 }, async () => {
-		makeGatewayRunningTr();
-		const task = seedTrTask({
-			name: "silent-with-stale-error",
-			cron: "0 9 * * *",
-			delivery: { channel: "dingtalk", accountId: "hr", toUserId: "u1", mode: "none" },
-		});
-		storageTr.recordExecution({
-			taskId: task.id,
-			startedAt: Date.now() + 50,
-			endedAt: Date.now() + 100,
-			exitCode: 0,
-			output: "ran",
-			status: "success",
-		});
-		storageTr.updateTask(task.id, { lastDeliveryError: "stale error from prior run" });
-
-		await cronTestRun(
-			["silent-with-stale-error", "--in", "5s", "--timeout", "30s", "_gatewayTickMs", "500ms"],
-			storageTr,
-		);
-
-		expect(consoleLogBuf).toContain("deliver:   silent (mode=none");
-		expect(consoleLogBuf).not.toContain("deliver:   FAILED");
-		expect(process.exitCode).not.toBe(1);
-	});
-
-	it("restores schedule on timeout (no execution appeared)", { timeout: 30_000 }, async () => {
-		makeGatewayRunningTr();
-		seedTrTask({ name: "times-out", cron: "30 8 * * *" });
-
-		await cronTestRun(["times-out", "--in", "1s", "--timeout", "1s", "_gatewayTickMs", "500ms"], storageTr);
-
-		const after = storageTr.getTaskByName("times-out");
-		expect(after?.cron).toBe("30 8 * * *");
-		expect(after?.scheduleType).toBe("cron");
-		expect(consoleErrorBuf).toContain("Timed out");
-		expect(process.exitCode).toBe(1);
 	});
 
 	it("refuses and does NOT change the task if name is missing", { timeout: 5_000 }, async () => {
@@ -686,63 +557,15 @@ describe("cronTestRun", () => {
 		expect(process.exitCode).toBe(1);
 	});
 
-	it("--no-restore leaves the schedule rewritten to one-shot", { timeout: 30_000 }, async () => {
+	it("rejects --no-restore in fire-and-forget mode (engine owns the restore)", { timeout: 5_000 }, async () => {
 		makeGatewayRunningTr();
 		const task = seedTrTask({ name: "leave-it", cron: "0 10 * * *" });
-		storageTr.recordExecution({
-			taskId: task.id,
-			startedAt: Date.now() + 50,
-			endedAt: Date.now() + 100,
-			exitCode: 0,
-			output: "ok",
-			status: "success",
-		});
 
-		await cronTestRun(
-			["leave-it", "--in", "5s", "--timeout", "30s", "--no-restore", "_gatewayTickMs", "500ms"],
-			storageTr,
-		);
+		await cronTestRun(["leave-it", "--in", "5s", "--timeout", "30s", "--no-restore", "_gatewayTickMs", "500ms"], storageTr);
 
-		const after = storageTr.getTaskByName("leave-it");
-		expect(after?.cron).toMatch(/^\+\d+s$/);
-		expect(after?.scheduleType).toBe("once");
-		expect(consoleLogBuf).toContain("Schedule NOT restored");
-	});
-
-	it("restores pre-existing stats fields unchanged after the trigger fires", { timeout: 30_000 }, async () => {
-		makeGatewayRunningTr();
-		const pastTime = Date.now() - 86_400_000;
-		const task = seedTrTask({
-			name: "with-history",
-			cron: "0 9 * * *",
-			lastRunAt: pastTime,
-			runCount: 5,
-			failCount: 2,
-			consecutiveFailures: 1,
-			repeatCompleted: 1,
-			lastDeliveryError: "stale error from a real run a week ago",
-		});
-		storageTr.recordExecution({
-			taskId: task.id,
-			startedAt: Date.now() + 50,
-			endedAt: Date.now() + 100,
-			exitCode: 0,
-			output: "ok",
-			status: "success",
-		});
-
-		await cronTestRun(["with-history", "--in", "5s", "--timeout", "30s", "_gatewayTickMs", "500ms"], storageTr);
-
-		const after = storageTr.getTaskByName("with-history");
-		expect(after?.cron).toBe("0 9 * * *");
-		expect(after?.scheduleType).toBe("cron");
-		expect(after?.status).toBe("active");
-		expect(after?.lastRunAt).toBe(pastTime);
-		expect(after?.runCount).toBe(5);
-		expect(after?.failCount).toBe(2);
-		expect(after?.consecutiveFailures).toBe(1);
-		expect(after?.repeatCompleted).toBe(1);
-		expect(after?.lastDeliveryError).toBe("stale error from a real run a week ago");
+		expect(storageTr.getTaskByName("leave-it")?.cron).toBe("0 10 * * *");
+		expect(consoleErrorBuf).toContain("--no-restore is not supported");
+		expect(process.exitCode).toBe(1);
 	});
 
 	it("rolls back a stats bump that happens between snapshot and restore", { timeout: 30_000 }, async () => {
