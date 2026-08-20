@@ -34,6 +34,17 @@ export interface FsImageResult {
 	truncated: boolean;
 }
 
+/**
+ * list_remote_skills 返回的远程可装项（契约命令，h1 serve 端并行实现，运行期对齐）。
+ * type: 'skill' 技能 / 'plugin' 插件；source 为来源标识（插件市场源 URL/名）。
+ */
+export interface RemoteSkillItemDto {
+	name: string;
+	description?: string;
+	source: string;
+	type: "skill" | "plugin";
+}
+
 /** gateway 运行状态（gateway_status 命令转发 gateway.status.json）。 */
 export interface GatewayStatusDto {
 	pid?: number;
@@ -182,4 +193,16 @@ export interface PiClient {
 	// ── 技能启停（P2-W3-3 B3 写协议）──
 	/** 启停技能（set_skill_enabled；serve 写 config.yml + 重发现热重载）。 */
 	setSkillEnabled(name: string, enabled: boolean): Promise<{ ok: boolean; name: string; enabled: boolean }>;
+
+	// ── 开源 Skill Hub（h1 契约：list_remote_skills / install_remote_skill；WireCommand union 暂缺故适配器 cast）──
+	/**
+	 * 远程技能市场列表（list_remote_skills；source 缺省用插件市场默认源）。
+	 * 失败/未连接抛错，由调用方渲染空态。
+	 */
+	listRemoteSkills(source?: string): Promise<RemoteSkillItemDto[]>;
+	/**
+	 * 安装远程技能（install_remote_skill；下载/克隆到 skills 对应来源子目录）。
+	 * 已存在返回 alreadyInstalled:true 不重复克隆；失败抛错由调用方提示。
+	 */
+	installRemoteSkill(source: string, name: string): Promise<{ path: string; alreadyInstalled: boolean }>;
 }

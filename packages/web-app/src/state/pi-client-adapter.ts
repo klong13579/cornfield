@@ -1,7 +1,14 @@
 import type { PiClientEventKind, PiWebSocketCtor } from "@oh-my-pi/pi-client";
 import { PiClient as WirePiClient } from "@oh-my-pi/pi-client";
 import type { WireCommand } from "@oh-my-pi/pi-wire";
-import type { AgentMessageDto, FsEntryDto, FsImageResult, GatewayStatusDto, PiClient } from "../lib/pi-client-api";
+import type {
+	AgentMessageDto,
+	FsEntryDto,
+	FsImageResult,
+	GatewayStatusDto,
+	PiClient,
+	RemoteSkillItemDto,
+} from "../lib/pi-client-api";
 import type { BranchPoint, PlaybackEntry, PlaybackToolStep, RecordStatus, SessionRecordSummary } from "../lib/records";
 import type {
 	AgentInfoDto,
@@ -432,6 +439,24 @@ export class PiClientAdapter implements PiClient {
 			type: "set_skill_enabled",
 			name,
 			enabled,
+		} as never);
+	}
+
+	/** 远程技能市场（list_remote_skills；契约命令名，WireCommand union 暂缺故最小局部 cast）。 */
+	async listRemoteSkills(source?: string): Promise<RemoteSkillItemDto[]> {
+		const result = await this.#req<{ items?: RemoteSkillItemDto[] | null }>({
+			type: "list_remote_skills",
+			...(source ? { source } : {}),
+		} as never);
+		return result.items ?? [];
+	}
+
+	/** 安装远程技能（install_remote_skill；契约命令名，WireCommand union 暂缺故最小局部 cast）。 */
+	async installRemoteSkill(source: string, name: string): Promise<{ path: string; alreadyInstalled: boolean }> {
+		return this.#req<{ path: string; alreadyInstalled: boolean }>({
+			type: "install_remote_skill",
+			source,
+			name,
 		} as never);
 	}
 
