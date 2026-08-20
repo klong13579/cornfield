@@ -226,17 +226,27 @@ export function PlaybackView(): React.JSX.Element {
 																) : (
 																	<span className="badge fail">失败</span>
 																)}
-																<span className="ml-1 text-[11px] text-ink-faint">{open ? "▲" : "▼"}</span>
+																<span className="ml-1 text-[11px] text-ink-faint">
+																	{open ? "▲" : "▼"}
+																</span>
 															</span>
 														</button>
 														{tool.argsText && (
 															<div className="args">
-																{open ? tool.argsText : tool.argsText.length > 120 ? `${tool.argsText.slice(0, 120)}…` : tool.argsText}
+																{open
+																	? tool.argsText
+																	: tool.argsText.length > 120
+																		? `${tool.argsText.slice(0, 120)}…`
+																		: tool.argsText}
 															</div>
 														)}
 														{tool.result && (
 															<div className="result">
-																{open ? tool.result : tool.result.length > 200 ? `${tool.result.slice(0, 200)}…` : tool.result}
+																{open
+																	? tool.result
+																	: tool.result.length > 200
+																		? `${tool.result.slice(0, 200)}…`
+																		: tool.result}
 															</div>
 														)}
 													</div>

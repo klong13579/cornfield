@@ -1,4 +1,14 @@
-import { ChevronDown, ChevronRight, FileText, type LucideIcon, Pencil, RefreshCcw, Search, Terminal, Wrench } from "lucide-react";
+import {
+	ChevronDown,
+	ChevronRight,
+	FileText,
+	type LucideIcon,
+	Pencil,
+	RefreshCcw,
+	Search,
+	Terminal,
+	Wrench,
+} from "lucide-react";
 import { useState } from "react";
 import { Orb } from "../components/Orb";
 import type { ToolView } from "../state/session-store";
