@@ -19,6 +19,8 @@ import { MULTIDEVICE_PROTOCOL_VERSION } from "@oh-my-pi/pi-wire";
 import { resolveGlobalMemoryRootCandidates } from "@oh-my-pi/self-evolution/paths";
 import { Settings } from "../config/settings";
 import { BUILTIN_SLASH_COMMANDS } from "../extensibility/slash-commands";
+import { connectToServer, disconnectServer } from "../mcp/client";
+import type { MCPServerConfig } from "../mcp/types";
 import { getMemoryDb, getMemoryRoot, releaseMemoryDb, resolveMemoryDbPath } from "../memories";
 import { loadSectionsFromDb } from "../memories/projection";
 import { normalizeHostToolDefinitions } from "../modes/rpc/rpc-mode";
@@ -217,6 +219,12 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 			reply({ type: "response", id: "", ok: false, error: { code, message } });
 
 		try {
+			// ── MCP 服务器管理命令（契约命令，尚未登记进 pi-wire WireCommand union；最小局部 cast）──
+			if (MCP_COMMAND_TYPES.has((command as { type: string }).type)) {
+				await handleMcpServerCommand(command as unknown as WireMcpServerCommand, done, fail);
+				return;
+			}
+
 			// ── registry 级命令（不定向具体 session）──
 			switch (command.type) {
 				case "list_agents": {
@@ -400,7 +408,11 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 					// 「能拿多少拿多少」：内置表 name/description；再补 active agent 会话挂载的
 					// hook/custom/skill 命令（与 interactive-mode 的完整 slash 表同构）。
 					// 每条带 group 分组（前端 palette 按组渲染 + 滚动）：系统命令/会话控制/扩展命令/自定义命令/技能命令。
-					const builtin = BUILTIN_SLASH_COMMANDS.map(c => ({ name: `/${c.name}`, description: c.description, group: "系统命令" as const }));
+					const builtin = BUILTIN_SLASH_COMMANDS.map(c => ({
+						name: `/${c.name}`,
+						description: c.description,
+						group: "系统命令" as const,
+					}));
 					const virtual = TUI_VIRTUAL_COMMANDS.map(c => ({ ...c, group: "会话控制" as const }));
 					const attached = registry.getAttached(conn.activeAgentId);
 					const extra: { name: string; description: string; group: string }[] = [];
@@ -408,10 +420,18 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 						const s = attached.session;
 						const builtinNames = new Set(BUILTIN_SLASH_COMMANDS.map(c => c.name));
 						for (const cmd of s.extensionRunner?.getRegisteredCommands(builtinNames) ?? []) {
-							extra.push({ name: cmd.name, description: cmd.description ?? "(hook command)", group: "扩展命令" });
+							extra.push({
+								name: cmd.name,
+								description: cmd.description ?? "(hook command)",
+								group: "扩展命令",
+							});
 						}
 						for (const loaded of s.customCommands ?? []) {
-							extra.push({ name: loaded.command.name, description: `${loaded.command.description} (${loaded.source})`, group: "自定义命令" });
+							extra.push({
+								name: loaded.command.name,
+								description: `${loaded.command.description} (${loaded.source})`,
+								group: "自定义命令",
+							});
 						}
 						if (Settings.instance.get("skills.enableSkillCommands")) {
 							for (const skill of s.skills) {
@@ -1343,6 +1363,189 @@ async function readSessionMessages(sessionFile: string): Promise<{ messages: Age
 		messages.push(entry.message as AgentMessageDto);
 	}
 	return { messages };
+}
+
+// ── MCP 服务器管理（读写 ~/.omp/agent/mcp.json + stdio 连通性测试）──
+
+const MCP_TEST_TIMEOUT_MS = 8_000;
+
+/** serve 端 MCP 服务器管理命令（契约命令；尚未登记进 pi-wire WireCommand union → 最小局部 cast）。 */
+type WireMcpServerCommand =
+	| { type: "get_mcp_servers" }
+	| { type: "set_mcp_server"; name: string; command?: string; args?: string[]; enabled?: boolean }
+	| { type: "remove_mcp_server"; name: string }
+	| { type: "test_mcp_server"; name: string };
+
+const MCP_COMMAND_TYPES = new Set<string>([
+	"get_mcp_servers",
+	"set_mcp_server",
+	"remove_mcp_server",
+	"test_mcp_server",
+]);
+
+interface AgentMcpServerEntry {
+	command?: string;
+	args?: string[];
+	enabled?: boolean;
+	env?: Record<string, string>;
+	cwd?: string;
+	type?: "stdio" | "http" | "sse";
+	[key: string]: unknown;
+}
+
+interface AgentMcpJson {
+	$schema?: string;
+	mcpServers?: Record<string, AgentMcpServerEntry>;
+	disabledServers?: string[];
+	[key: string]: unknown;
+}
+
+function agentMcpJsonPath(): string {
+	return path.join(getAgentDir(), "mcp.json");
+}
+
+async function readAgentMcpJson(): Promise<AgentMcpJson> {
+	const filePath = agentMcpJsonPath();
+	try {
+		const raw = await fs.readFile(filePath, "utf8");
+		const parsed = JSON.parse(raw) as AgentMcpJson;
+		if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed;
+		return {};
+	} catch (err) {
+		if (isEnoent(err)) return {};
+		throw err;
+	}
+}
+
+async function writeAgentMcpJson(config: AgentMcpJson): Promise<void> {
+	const filePath = agentMcpJsonPath();
+	await fs.mkdir(path.dirname(filePath), { recursive: true });
+	const tmpPath = `${filePath}.tmp`;
+	await fs.writeFile(tmpPath, `${JSON.stringify(config, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+	await fs.rename(tmpPath, filePath);
+}
+
+function projectMcpServers(
+	config: AgentMcpJson,
+): { name: string; command: string; args: string[]; enabled: boolean }[] {
+	return Object.entries(config.mcpServers ?? {}).map(([name, entry]) => ({
+		name,
+		command: typeof entry.command === "string" ? entry.command : "",
+		args: Array.isArray(entry.args) ? entry.args : [],
+		enabled: entry.enabled !== false,
+	}));
+}
+
+async function setMcpServer(
+	name: string,
+	patch: { command?: string; args?: string[]; enabled?: boolean },
+): Promise<void> {
+	const config = await readAgentMcpJson();
+	const mcpServers: Record<string, AgentMcpServerEntry> = config.mcpServers ?? {};
+	const existing: AgentMcpServerEntry = mcpServers[name] ?? {};
+	const next: AgentMcpServerEntry = { ...existing };
+	if (patch.command !== undefined) next.command = patch.command;
+	if (patch.args !== undefined) next.args = patch.args;
+	if (patch.enabled !== undefined) next.enabled = patch.enabled;
+	mcpServers[name] = next;
+	config.mcpServers = mcpServers;
+	await writeAgentMcpJson(config);
+}
+
+async function removeMcpServer(name: string): Promise<void> {
+	const config = await readAgentMcpJson();
+	if (config.mcpServers) delete config.mcpServers[name];
+	await writeAgentMcpJson(config);
+}
+
+async function testMcpServer(name: string, entry: AgentMcpServerEntry): Promise<{ ok: boolean; message: string }> {
+	const command = typeof entry.command === "string" ? entry.command : "";
+	if (!command) {
+		return { ok: false, message: `server "${name}" has no command (only stdio servers are testable)` };
+	}
+	const config: MCPServerConfig = {
+		command,
+		args: Array.isArray(entry.args) ? entry.args : [],
+		env: entry.env,
+		cwd: entry.cwd,
+		timeout: MCP_TEST_TIMEOUT_MS,
+	};
+	try {
+		const connection = await connectToServer(name, config);
+		try {
+			return { ok: true, message: `${connection.serverInfo.name}@${connection.serverInfo.version}` };
+		} finally {
+			await disconnectServer(connection).catch(() => {});
+		}
+	} catch (err) {
+		return { ok: false, message: err instanceof Error ? err.message : String(err) };
+	}
+}
+
+async function handleMcpServerCommand(
+	command: WireMcpServerCommand,
+	done: (result?: unknown) => void,
+	fail: (error: string) => void,
+): Promise<void> {
+	const name = (raw: unknown): string => (typeof raw === "string" ? raw.trim() : "");
+	switch (command.type) {
+		case "get_mcp_servers": {
+			try {
+				const config = await readAgentMcpJson();
+				done({ servers: projectMcpServers(config) });
+			} catch (err) {
+				fail(`mcp config unavailable: ${err instanceof Error ? err.message : String(err)}`);
+			}
+			return;
+		}
+		case "set_mcp_server": {
+			const serverName = name(command.name);
+			if (!serverName) {
+				fail("name is required");
+				return;
+			}
+			try {
+				await setMcpServer(serverName, { command: command.command, args: command.args, enabled: command.enabled });
+				done({ ok: true, name: serverName });
+			} catch (err) {
+				fail(`set_mcp_server failed: ${err instanceof Error ? err.message : String(err)}`);
+			}
+			return;
+		}
+		case "remove_mcp_server": {
+			const serverName = name(command.name);
+			if (!serverName) {
+				fail("name is required");
+				return;
+			}
+			try {
+				await removeMcpServer(serverName);
+				done({ ok: true, name: serverName });
+			} catch (err) {
+				fail(`remove_mcp_server failed: ${err instanceof Error ? err.message : String(err)}`);
+			}
+			return;
+		}
+		case "test_mcp_server": {
+			const serverName = name(command.name);
+			if (!serverName) {
+				fail("name is required");
+				return;
+			}
+			try {
+				const config = await readAgentMcpJson();
+				const entry = config.mcpServers?.[serverName];
+				if (!entry) {
+					done({ ok: false, message: `unknown mcp server: ${serverName}` });
+					return;
+				}
+				done(await testMcpServer(serverName, entry));
+			} catch (err) {
+				fail(`test_mcp_server failed: ${err instanceof Error ? err.message : String(err)}`);
+			}
+			return;
+		}
+	}
 }
 
 /** 协议批 B-3：W1 SlashPalette 虚拟惯例项（非内置 slash 命令，TUI 动作口径）。 */
