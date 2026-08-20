@@ -83,6 +83,8 @@ bun run .omp/skills/squad-programming/scripts/bootstrap.ts \
 
 **工作区形态（用户要求，全链验证过）**：父 omp 当前所在 workspace = 任务包 workspace（label 自动改名为 `squadId`）；每个子任务 = 一棵**任务 worktree 树节点**（`herdr worktree create --workspace <父> --label "T<n> · <title 前 18 字>"`），树节点显示名必须语义化（不能裸 T1/T2）；worker（omp）直接起在树节点的 pane 里。Spaces 面板呈现：`任务包 workspace` └─ `T1 · 任务目的` / `T2 · …` / `T3 · …`。
 
+**依赖安装（bootstrap 自动）**：新 worktree 没有 node_modules，tsgo 的 `types: ["bun", "assets"]` 会解析失败（报「从未安装依赖」）。`bootstrap.ts` 在 `herdr worktree create` 成功后自动 `bun install`（检查 `worktreePath/node_modules`，幂等：已存在或复用已有节点则跳过；hoisted 缓存下秒级到分钟级）。不要手工补装，也不要对未装依赖的 worktree 直接开 worker。
+
 ```text
 任务包 workspace（父 pane 所在，label=squadId）
 ├─ T1 · Artifacts 产物面板骨架   （worktree t1 · worker omp 在节点 pane）

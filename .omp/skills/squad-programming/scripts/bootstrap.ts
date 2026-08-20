@@ -331,6 +331,13 @@ async function ensureTaskWorktree(subtask: Subtask, baseBranch: string | undefin
 	const nodeWorkspaceId = result.workspace?.workspace_id;
 	const paneId = result.root_pane?.pane_id;
 	if (!nodeWorkspaceId || !paneId) fail(`herdr worktree create 未返回 workspace/pane，输出: ${json}`);
+	// 新 worktree 无 node_modules：tsgo 的 types ["bun","assets"] 会解析失败（"从未安装依赖"）。
+	// 创建后立即 bun install（幂等：已存在/复用分支跳过，hoisted 缓存下秒级到分钟级）。
+	if (!fs.existsSync(path.join(worktreePath, "node_modules"))) {
+		process.stderr.write(`安装依赖（${subtask.id}，首次约 1-3 分钟）...\n`);
+		await run(["bun", "install"], { cwd: worktreePath, quiet: true, timeoutMs: 300_000, fatal: true });
+		process.stderr.write(`依赖安装完成: ${worktreePath}/node_modules\n`);
+	}
 	process.stderr.write(`任务 worktree 节点: ${nodeWorkspaceId}（${subtask.id}，树节点在 ${workspaceId} 下）\n`);
 	return { nodeWorkspaceId, paneId };
 }
