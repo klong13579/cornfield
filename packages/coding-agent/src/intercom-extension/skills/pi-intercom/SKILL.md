@@ -211,7 +211,7 @@ Which API should I use?
 intercom({ action: "reply", message: "Use the stable v2 API." })
 ```
 
-This works because `reply` resolves the correct sender and message ID automatically.
+This works because `reply` resolves the correct sender and message ID automatically (when unambiguous — with multiple pending asks it fails loud and requires `to`/`replyTo`).
 
 **Three types of escalations to expect:**
 
@@ -261,7 +261,7 @@ new visible project panes should go through the supervisor.
 |--------|----------|----------|
 | `send` | Fire-and-forget; infers the sole pending ask as its reply | You don't need a response |
 | `ask` | Blocks until reply (10 min default, configurable with `PI_INTERCOM_ASK_TIMEOUT_MS`) | You need an answer to continue |
-| `reply` | Responds to the active or pending inbound ask | You were asked something and need to answer naturally |
+| `reply` | Resolves by explicit `replyTo`, or the unique pending ask; multiple pending asks fail loud and require `to`/`replyTo` | You were asked something and need to answer naturally |
 | `pending` | Lists unresolved inbound asks | You need to see who is waiting before replying |
 | `list` | Returns all sessions with live status | You need to discover targets or choose an idle peer |
 | `status` | Returns your connection state | Troubleshooting |
@@ -281,14 +281,17 @@ Ask the user before opening another visible surface manually.
 
 - **Connected targets only**: `ask` fails immediately when the target is not in the live intercom roster. Use `list` before asking when liveness is uncertain; use `send` for non-blocking mailbox delivery.
 - **Configurable timeout**: If no reply arrives before the shared ask timeout, the ask fails. The default is 10 minutes; set `PI_INTERCOM_ASK_TIMEOUT_MS` to a positive millisecond value to change it.
-- **One at a time**: Cannot have multiple pending asks from the same session
+- **No global single slot**: asks to *different* targets run in parallel (each reply resolves its own ask id, multi-slot waiters). The only refusal is the broker's symmetric-deadlock guard: when the target already has an open ask waiting on YOU, your ask comes back `Mutual ask refused` — answer the target's pending ask first (unless the pending-routing says otherwise), then ask again.
 - **Cannot self-target**: A session cannot ask itself, including through disconnected-mailbox remapping
 
 ```typescript
-// Check if already waiting before asking
+// Parallel asks to DIFFERENT targets are fine (multi-slot waiters, each reply
+// resolves its own ask id). This guard only trips on the symmetric-deadlock
+// case (the target is already waiting on a reply from you): answer the
+// target's pending ask first, then ask again.
 const result = await intercom({ action: "ask", to: "planner", message: "..." });
-if (result.isError && result.content[0].text.includes("Already waiting")) {
-  // Use send instead, or wait for current ask to complete
+if (result.isError && result.content[0].text.includes("Mutual ask refused")) {
+  // Reply to the planner's open ask, then retry your ask.
 }
 ```
 
@@ -346,11 +349,12 @@ Use `/name` so others can target you easily:
 
 **"Already waiting for a reply"**
 ```typescript
-// You can only have one pending ask at a time
+// Only a same-ask-id re-registration trips this (defensive; the tool generates
+// a fresh id per ask). Different targets ask fine in parallel.
 // Option 1: Use send instead
 intercom({ action: "send", to: "planner", message: "..." });
 
-// Option 2: Wait for current ask to complete first
+// Option 2: Wait for the current ask to complete first
 ```
 
 **"Cannot message the current session"**
