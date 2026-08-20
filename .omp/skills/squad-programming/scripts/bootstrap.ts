@@ -425,7 +425,7 @@ function workerBrief(bundle: Bundle, subtask: Subtask, model: string, briefPath:
 		`你是 ${subtask.id}（${subtask.title}）的实现者，属于 squad ${bundle.squadId} 的 worker。`,
 		`第一步（准备检查）：读 ${shellQuote(briefPath)} 的任务包（.squad.json），完整理解任务、scope、gate、汇报协议、模型档位；`,
 		`用 list_models 确认 ${model} 在可用列表；不在列表则 switch_model 切换到该档位可用模型（按实际生效模型为准）；`,
-		`然后发 STARTED 给 ${bundle.parent.target} —— 发送协议：① 先 intercom status 自检 Connected；② send 报 Session not found/失败则过 5s/10s/15s 退避重试（≤3 次；子进程 intercom 注册晚于 TUI 上线是正常现象，不是掉线）；③ 仍失败不要放弃任务，继续干活，后续状态消息补发，但任何终态（REVIEWING/COMPLETE/FAILED）必须送达父（同样重试规则）；父以收到的最新状态消息为准。`,
+		`然后向父发 STARTED 一次（发送规则：尝试 send 给 ${bundle.parent.target}；若报 Session not found/失败，不要重试刷屏、不要中断任务——这是启动窗口期 broker 路由未就绪的已知现象，父会用 intercom ask 来确认你；收到父 ask 必须回复「[${subtask.id}] ACK」带状态）。`,
 		`规则：只改 scope 内文件；求助必须用 intercom ask 且必须带 to=${bundle.parent.target}（不带 to 的 ask 会被 intercom 按 cwd 路由到同目录其他会话，不会到达父 —— 实测误投到 aion-ui）；`,
 		`状态用 intercom send 给 ${bundle.parent.target}，格式 "[${subtask.id}] <STATE>: 一句话"（STATE ∈ STARTED/BLOCKED/REVIEWING/COMPLETE/FAILED，STARTED 只在准备检查通过后发一次）；`,
 		`完成标准见任务包 acceptance。收尾铁律：验收通过后必须把改动提交到当前分支（git add <改动文件> && git commit -m "[${subtask.id}] <一句话>"；排除 .squad.json 和 node_modules，commit 前先 git status 确认只含你的改动）——未提交的交付无法交接/merge，父只接收已提交的分支；`

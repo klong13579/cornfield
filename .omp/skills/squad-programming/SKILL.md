@@ -119,11 +119,12 @@ bun run .omp/skills/squad-programming/scripts/bootstrap.ts \
 1. **脚本层（omp 活着）** — bootstrap 启动每个子任务后自动轮询 `herdr agent list`（默认 60s，`--verify-timeout <ms>` 可调）：pane 出现在 agent 列表 = omp TUI 已上线（✓）；
    - pane 输出出现启动失败信号（`command not found` / `No such file or directory` / `Cannot find module`）→ 立即失败并给快照；
    - 超时未上线 → 打印各 pane 输出快照并以退出码 1 失败，不静默继续。确认只是 herdr 探测延迟后，可 `--skip-verify` 重跑绕过，父再用 intercom 复核。
-2. **worker 层（包已读 + 模型可访问）** — 每个子 omp 开场必须先过准备检查再碰任务：读任务包 → `list_models` 核对档位模型在可用列表（不在则 `switch_model` 到档内可用模型）→ 向父发 `[T<n>] STARTED: <实际生效模型>，任务包已读`。  STARTED ack 本身要经过一次真实 LLM 调用 —— 一次证明三件事：omp 活着、模型可访问、任务包已获取。
-   - **STARTED 送达协议（时序问题的修复）**：子进程的 intercom 注册（连 broker + 登记自身 + 父 edge）**晚于 TUI 上线和首个 LLM 回合**（实测：flash 模型首答快，发 STARTED 时桥还没注册完，父明明在线却报 `Session not found`）。所以：① 发送前先 `intercom({ action: "status" })` 自检 Connected；② 失败/`Session not found` → 过 5s/10s/15s 退避重试 ≤3 次（这是正常启动延时，不是掉线）；③ 仍失败不阻塞任务，继续推进，后续状态消息补发；**任何终态（REVIEWING/COMPLETE/FAILED）必须送达**（同重试规则）。父以收到的最新状态消息为准（COMPLETE 蕴含包已读+模型生效）。
-3. **父层 wait-gate** — 父等全部子任务的 STARTED（默认超时 90s）。**超时不能直接判 BLOCKED** —— 子可能在 intercom 注册未完成的状态下發了 STARTED，消息其实坏了。硬步骤：① 先 `intercom({ action: "list" })` 轮询，等全部子进程登记成 `child of <父>`（注册可能晚于 STARTED 数十秒，实测）；② 注册齐全后再等一轮 ack；③ 仍无 → 对该子任务 `herdr pane read` 快照（看是否已按送达协议重试、是否在干活）+ try `intercom ask` 主动拉 ack（带 to）；④ ask 也失败（Session not found 且 list 无此子）→ 才标记 `BLOCKED` 并给原因（缺模型 key / 模型名写错 / PATH 缺 omp），修复后只重集结该子任务，不整波回滚。
+2. **worker 层（包已读 + 模型可访问）** — 每个子 omp 开场必须先过准备检查再碰任务：读任务包 → `list_models` 核对档位模型在可用列表（不在则 `switch_model` 到档内可用模型）→ 尝试向父发一次 `[T<n>] STARTED`。STARTED ack 本身要经过一次真实 LLM 调用 —— 一次证明三件事：omp 活着、模型可访问、任务包已获取。**但 STARTED 的确认以父 ask 拉动为准**（见下方父层 pull 机制）：
+   - **已知现象（实测复现）**：子进程主动 `send` 给父，在启动窗口期（首轮几十秒内）会报 `Session not found`——broker 的目标解析在子进程注册传播完成前不可用；窗口过后 send 恢复正常（批次一 T2/T3 延时消息均送达）。`ask`（父→子）不受影响，双向链路始终可靠。
+   - **子侧行为**：STARTED 尝试 send 一次；报 `Session not found`/失败 → **不要重试刷屏、不要中断任务**，继续干活；收到父的 ask 确认时如实回复。终态（REVIEWING/COMPLETE/FAILED）与求助消息都在窗口期后，send 可靠送达。
+3. **父层 wait-gate（pull 模式）** — 父 **不干等** STARTED 消息，主动驱动确认：① 先 `intercom({ action: "list" })` 轮询，等全部子进程登记成 `child of <父>`（注册可能晚于启动数十秒，实测）；② 注册齐全后对每个子任务 `intercom({ action: "ask", to: <子>, ... })` 拉 STARTED 确认（ask 双向始终可靠，实测 100% 成功率）；③ ask 无响应 → `herdr pane read <paneId>` 快照定位（是否在干活 / 启动报错）；④ ask 失败且 pane 死 → 才标记 `BLOCKED` 并给原因（缺模型 key / 模型名写错 / PATH 缺 omp），修复后只重集结该子任务，不整波回滚。
 
-**Completion criterion**：每个子任务已发 STARTED 或明确 BLOCKED 并给出原因；全部 STARTED 才进入 Phase 2。
+**Completion criterion**：每个子任务经父 ask 确认 STARTED 或明确 BLOCKED 并给出原因；全部确认才进入 Phase 2。
 
 ## Phase 2 — 执行与协作
 
@@ -133,7 +134,7 @@ bun run .omp/skills/squad-programming/scripts/bootstrap.ts \
 2. **模型核对** — 用 `list_models` 确认分配模型在可用列表；不在 → `switch_model` 切到档内可用模型，并按实际生效模型汇报（启动参数失效兜底）。
 3. **只动 scope 内文件** — scope 外需要改动 → `ask` 求助父。
 4. **求助** — `intercom({ action: "ask", to: <父 target>, message: "..." })` **必须带 to=父 target**。不带 to 的 ask 不会被自动路由到父：intercom 的路由优先 cwd 匹配（实测误投到同目录活跃的 aion-ui 会话），parent edge 只是次选。同时只允许一个 pending ask；求助期间不发重复 ask。
-5. **状态汇报** — `intercom({ action: "send", to: <父 target>, message: "[<taskId>] <STATE>: <一句话>" })`，STATE ∈ `STARTED` / `BLOCKED` / `REVIEWING` / `COMPLETE` / `FAILED`。**STARTED = 准备检查通过**（任务包已读 + 模型已核对并生效），只发一次，父以全部 STARTED 作为 Phase 2 的闸门。发送遵循 #Phase 1.5 的**送达协议**：status 自检 → 失败退避重试（5s/10s/15s）→ 仍失败继续任务、后续补发，终态必达；父以收到的最新状态为准。
+5. **状态汇报** — `intercom({ action: "send", to: <父 target>, message: "[<taskId>] <STATE>: <一句话>" })`，STATE ∈ `STARTED` / `BLOCKED` / `REVIEWING` / `COMPLETE` / `FAILED`。**STARTED = 准备检查通过**（任务包已读 + 模型已核对并生效），send 一次即可，**确认由父 ask 拉动**（见 #Phase 1.5 pull 机制）；启动窗口期 send 失败不要重试刷屏，窗口后 send 可靠（终态必达）。
 6. 每回合结束自动上报（agent_end 由运行时注入，无需手动）。
 
 ### 父 agent 侧盯盘
