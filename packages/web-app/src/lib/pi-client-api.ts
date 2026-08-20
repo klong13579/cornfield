@@ -36,13 +36,18 @@ export interface FsImageResult {
 
 /**
  * list_remote_skills 返回的远程可装项（契约命令，h1 serve 端并行实现，运行期对齐）。
- * type: 'skill' 技能 / 'plugin' 插件；source 为来源标识（插件市场源 URL/名）。
+ * type: 'skill' 技能 / 'plugin' 插件；source 为来源标识（插件市场源 URL/名）；
+ * homepage/repository/author/version 供 Hub 详情与链接（catalog 无评分字段，排名由前端按 name 序号给出）。
  */
 export interface RemoteSkillItemDto {
 	name: string;
 	description?: string;
 	source: string;
 	type: "skill" | "plugin";
+	homepage?: string;
+	repository?: string;
+	author?: string;
+	version?: string;
 }
 
 /** gateway 运行状态（gateway_status 命令转发 gateway.status.json）。 */

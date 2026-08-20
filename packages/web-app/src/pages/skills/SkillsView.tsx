@@ -46,6 +46,13 @@ export function SkillsView(): React.JSX.Element {
 	const [hubNotice, setHubNotice] = useState<string | null>(null);
 	/** 本次会话已确认安装过的远程项（install 返回 alreadyInstalled 时也计入）。 */
 	const [installedRemote, setInstalledRemote] = useState<ReadonlySet<string>>(new Set());
+	/** Hub 详情展开中的远程项名（null = 全部收起）。 */
+	const [expandedName, setExpandedName] = useState<string | null>(null);
+	/** 远程项按 name 排序（稳定序号=排名；catalog 无评分字段，排序序号是唯一确定性排名语义）。 */
+	const sortedRemote = useMemo(
+		() => (remote ? [...remote].sort((a, b) => a.name.localeCompare(b.name)) : null),
+		[remote],
+	);
 
 	/** 加载远程技能市场（list_remote_skills）：失败写 hubError，不崩页。 */
 	const loadRemote = async (): Promise<void> => {
@@ -222,56 +229,96 @@ export function SkillsView(): React.JSX.Element {
 							<div className="px-5 py-6 text-center text-[12px] text-ink-faint">远程技能市场当前无可安装项</div>
 						) : (
 							<div>
-								{remote.map(item => (
-									<div
-										key={`${item.source}:${item.name}`}
-										className="flex items-start gap-3 border-b border-hairline px-5 py-3 last:border-b-0"
-									>
-										<div className="min-w-0 flex-1">
-											<div className="flex flex-wrap items-baseline gap-2">
-												<span className="text-[13.5px] font-medium text-ink">{item.name}</span>
-												<span
-													className={`rounded px-1.5 py-0.5 font-mono text-[10px] ${
-														item.type === "plugin"
-															? "bg-accent-dim text-accent"
-															: "bg-surface-2 text-ink-faint"
+								{(sortedRemote ?? []).map((item, i) => {
+									const expanded = expandedName === item.name;
+									const link = item.homepage ?? item.repository;
+									return (
+										<div
+											key={`${item.source}:${item.name}`}
+											className="border-b border-hairline px-5 py-3 last:border-b-0"
+										>
+											<div className="flex items-start gap-3">
+												<div className="min-w-0 flex-1">
+													<div className="flex flex-wrap items-center gap-2">
+														<span className="font-mono text-[10.5px] text-ink-faint">#{i + 1}</span>
+														<button
+															type="button"
+															onClick={() => setExpandedName(expanded ? null : item.name)}
+															className="text-[13.5px] font-medium text-ink transition-colors hover:text-accent"
+															title="查看详情"
+														>
+															{item.name}
+														</button>
+														<span
+															className={`rounded px-1.5 py-0.5 font-mono text-[10px] ${
+																item.type === "plugin"
+																	? "bg-accent-dim text-accent"
+																	: "bg-surface-2 text-ink-faint"
+															}`}
+														>
+															{item.type}
+														</span>
+														<span
+															className="max-w-[180px] truncate font-mono text-[10.5px] text-ink-faint"
+															title={item.source}
+														>
+															{item.source}
+														</span>
+														{link && (
+															<a
+																href={link}
+																target="_blank"
+																rel="noreferrer"
+																className="max-w-[160px] truncate font-mono text-[10.5px] text-accent underline-offset-2 hover:underline"
+																title={link}
+																onClick={e => e.stopPropagation()}
+															>
+																{link.replace(/^https?:\/\//, "").replace(/^www\./, "")}
+															</a>
+														)}
+													</div>
+													{item.description && (
+														<div
+															className={`mt-0.5 text-[12px] text-ink-subtle ${expanded ? "" : "line-clamp-2"}`}
+														>
+															{item.description}
+														</div>
+													)}
+													{expanded && (
+														<div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 font-mono text-[10.5px] text-ink-faint">
+															{item.version && <span>v{item.version}</span>}
+															{item.author && <span>作者：{item.author}</span>}
+															{item.repository && (
+																<span>仓库：{item.repository.replace(/^https?:\/\//, "")}</span>
+															)}
+															<span>来源：{item.source}</span>
+														</div>
+													)}
+												</div>
+												<button
+													type="button"
+													data-testid={`install-skill-${item.name}`}
+													onClick={() => void installRemote(item)}
+													disabled={
+														!view.connected || installingName !== null || isInstalledRemote(item.name)
+													}
+													aria-label={`安装远程技能 ${item.name}`}
+													className={`mt-0.5 shrink-0 rounded-md border px-2.5 py-1 text-[11.5px] transition-colors disabled:cursor-default ${
+														isInstalledRemote(item.name)
+															? "border-hairline bg-surface-2 text-ink-faint opacity-70"
+															: "border-hairline bg-surface-2 text-ink-subtle hover:border-hairline-strong hover:text-ink"
 													}`}
 												>
-													{item.type}
-												</span>
-												<span
-													className="max-w-[180px] truncate font-mono text-[10.5px] text-ink-faint"
-													title={item.source}
-												>
-													{item.source}
-												</span>
+													{installingName === item.name
+														? "安装中…"
+														: isInstalledRemote(item.name)
+															? "已安装"
+															: "安装"}
+												</button>
 											</div>
-											{item.description && (
-												<div className="mt-0.5 line-clamp-2 text-[12px] text-ink-subtle">
-													{item.description}
-												</div>
-											)}
 										</div>
-										<button
-											type="button"
-											data-testid={`install-skill-${item.name}`}
-											onClick={() => void installRemote(item)}
-											disabled={!view.connected || installingName !== null || isInstalledRemote(item.name)}
-											aria-label={`安装远程技能 ${item.name}`}
-											className={`mt-0.5 shrink-0 rounded-md border px-2.5 py-1 text-[11.5px] transition-colors disabled:cursor-default ${
-												isInstalledRemote(item.name)
-													? "border-hairline bg-surface-2 text-ink-faint opacity-70"
-													: "border-hairline bg-surface-2 text-ink-subtle hover:border-hairline-strong hover:text-ink"
-											}`}
-										>
-											{installingName === item.name
-												? "安装中…"
-												: isInstalledRemote(item.name)
-													? "已安装"
-													: "安装"}
-										</button>
-									</div>
-								))}
+									);
+								})}
 							</div>
 						)}
 					</div>
