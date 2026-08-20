@@ -48,8 +48,6 @@ function resolvePendingSender(pending: IntercomContext[], to: string): IntercomC
 
 export class ReplyTracker {
 	private readonly pendingAsks = new Map<string, IntercomContext>();
-	private readonly pendingTurnContexts: IntercomContext[] = [];
-	private currentTurnContext: IntercomContext | null = null;
 
 	constructor(private readonly askTimeoutMs = getAskTimeoutMs()) {}
 
@@ -61,25 +59,19 @@ export class ReplyTracker {
 		return context;
 	}
 
-	queueTurnContext(context: IntercomContext): void {
-		this.pendingTurnContexts.push(context);
-	}
-
-	beginTurn(now = Date.now()): void {
-		this.pruneExpired(now);
-		this.currentTurnContext = this.pendingTurnContexts.shift() ?? null;
-	}
-
-	endTurn(): void {
-		this.currentTurnContext = null;
-	}
-
 	reset(): void {
 		this.pendingAsks.clear();
-		this.pendingTurnContexts.length = 0;
-		this.currentTurnContext = null;
 	}
 
+	/**
+	 * Resolve the target for an implicit reply. Routing is correlation-id only:
+	 * an explicit replyTo always wins (validated against the sender when `to` is
+	 * given); otherwise the reply is unambiguous only when exactly one pending
+	 * ask remains. Multiple pending asks are an explicit error. The previous
+	 * session-level turn-context shortcut silently routed replies to the wrong
+	 * sender when a steering message interleaved with the current turn, so no
+	 * implicit resolution happens while ambiguity exists — fail loud, never guess.
+	 */
 	resolveReplyTarget(options: { to?: string; replyTo?: string }, now = Date.now()): IntercomContext {
 		this.pruneExpired(now);
 
@@ -99,10 +91,6 @@ export class ReplyTracker {
 			return resolvePendingSender(pending, options.to);
 		}
 
-		if (this.currentTurnContext) {
-			return this.currentTurnContext;
-		}
-
 		if (pending.length === 1) {
 			return pending[0]!;
 		}
@@ -110,7 +98,7 @@ export class ReplyTracker {
 			throw new Error("No active intercom context to reply to");
 		}
 
-		throw new Error("Multiple pending asks — specify `to`");
+		throw new Error("Multiple pending asks — specify `to` or `replyTo`");
 	}
 
 	findUniquePendingAskFrom(to: string, now = Date.now()): IntercomContext | null {
@@ -129,14 +117,6 @@ export class ReplyTracker {
 
 	dismissPendingAsk(replyTo: string): void {
 		this.pendingAsks.delete(replyTo);
-		for (let index = this.pendingTurnContexts.length - 1; index >= 0; index -= 1) {
-			if (this.pendingTurnContexts[index]?.message.id === replyTo) {
-				this.pendingTurnContexts.splice(index, 1);
-			}
-		}
-		if (this.currentTurnContext?.message.id === replyTo) {
-			this.currentTurnContext = null;
-		}
 	}
 
 	listPending(now = Date.now()): IntercomContext[] {

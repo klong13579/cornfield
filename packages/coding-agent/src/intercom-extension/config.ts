@@ -19,12 +19,22 @@ export function getAskTimeoutMs(): number {
 
 export type InboundTriggerPolicy = "always" | "replies" | "never";
 
+export type InboundMode = "queue" | "interrupt";
+
 export interface IntercomConfig {
 	/** Require confirmation before non-reply sends from interactive sessions */
 	confirmSend: boolean;
 
 	/** Controls whether inbound broker messages may automatically trigger a model turn */
 	inboundTrigger: InboundTriggerPolicy;
+
+	/**
+	 * Delivery policy while the agent is busy: "queue" waits for the current
+	 * turn to end (follow-up, never interrupts in-flight tools or aborts a
+	 * blocking ask); "interrupt" steers immediately (steers after the current
+	 * tool call, skipping remaining tools). Default: "queue".
+	 */
+	inboundMode: InboundMode;
 
 	/** Optional custom status suffix shown after automatic lifecycle status */
 	status?: string;
@@ -46,6 +56,7 @@ export function getConfigPath(intercomDir: string = getIntercomDirPath()): strin
 const defaults: IntercomConfig = {
 	confirmSend: false,
 	inboundTrigger: "always",
+	inboundMode: "queue",
 	enabled: true,
 	replyHint: true,
 };
@@ -96,6 +107,13 @@ export function loadConfig(): IntercomConfig {
 				throw new Error(`"replyHint" must be a boolean`);
 			}
 			config.replyHint = parsedConfig.replyHint;
+		}
+
+		if (Object.hasOwn(parsedConfig, "inboundMode")) {
+			if (parsedConfig.inboundMode !== "queue" && parsedConfig.inboundMode !== "interrupt") {
+				throw new Error(`"inboundMode" must be "queue" or "interrupt"`);
+			}
+			config.inboundMode = parsedConfig.inboundMode;
 		}
 
 		if (Object.hasOwn(parsedConfig, "status")) {

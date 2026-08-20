@@ -9,7 +9,7 @@ import { Type } from "@sinclair/typebox";
 import { randomUUID } from "crypto";
 import { resolveAskRouting } from "./ask-routing";
 import { IntercomClient } from "./broker/client";
-import { getAskTimeoutMs, type IntercomConfig, loadConfig } from "./config";
+import { getAskTimeoutMs, type InboundMode, type IntercomConfig, loadConfig } from "./config";
 import { sameCwd } from "./cwd";
 import {
 	INTERCOM_EXTENSION_REGISTER_EVENT,
@@ -535,6 +535,63 @@ function firstTextContent(result: { content?: Array<{ type: string; text?: strin
 function formatMessageTimestamp(timestamp: number | undefined): string | undefined {
 	return typeof timestamp === "number" && Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : undefined;
 }
+
+/**
+ * Build the reply-tool hint embedded in an inbound message. Always carries the
+ * explicit replyTo (correlation id) so the model never has to guess which
+ * pending ask it is answering — ambiguity is resolved by the id, never by
+ * session turn state.
+ */
+export function buildReplyCommand(message: Message, replyHint: boolean): string | undefined {
+	if (!replyHint || !message.expectsReply) {
+		return undefined;
+	}
+	return `intercom({ action: "reply", replyTo: ${JSON.stringify(message.id)}, message: "..." })`;
+}
+
+export type InboundDeliveryMode = "trigger" | "followUp" | "steer" | "reject";
+
+/**
+ * Decide how an inbound intercom message should be delivered:
+ * - idle → trigger a fresh turn
+ * - busy + no UI → "reject": non-interactive sessions reply with a polite busy
+ *   notice instead of queuing work they cannot act on
+ * - busy + UI → followUp (default, queue until the current turn ends) or steer
+ *   (explicit inboundMode: "interrupt" opt-in)
+ */
+export function resolveInboundDeliveryMode(options: {
+	isIdle: boolean;
+	hasUI: boolean;
+	inboundMode: InboundMode;
+}): InboundDeliveryMode {
+	if (options.isIdle) {
+		return "trigger";
+	}
+	if (!options.hasUI) {
+		return "reject";
+	}
+	return options.inboundMode === "interrupt" ? "steer" : "followUp";
+}
+
+/**
+ * Map a delivery mode to the pi.sendMessage options. "trigger" only starts a
+ * turn when the inbound policy actually wants one; otherwise it degrades to a
+ * non-interrupting append (steer with no triggerTurn is a no-op append when
+ * idle). "followUp" always queues with triggerTurn so an idle window between
+ * the decision and the send still starts the turn.
+ */
+export function buildInboundDeliveryOptions(
+	delivery: "trigger" | "followUp" | "steer",
+	trigger: boolean,
+): { deliverAs?: "steer" | "followUp" | "nextTurn"; triggerTurn?: boolean } {
+	if (delivery === "trigger" && trigger) {
+		return { triggerTurn: true };
+	}
+	if (delivery === "followUp") {
+		return { deliverAs: "followUp", triggerTurn: true };
+	}
+	return { deliverAs: "steer" };
+}
 function formatInboundDeliveryMetadata(message: Message): string {
 	const parts = [`id ${message.id}`];
 	if (typeof message.senderSequence === "number") parts.push(`seq ${message.senderSequence}`);
@@ -740,12 +797,20 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
 		const receipt = latestOutboundReceipts.get(messageId);
 		return receipt ? receipt.status : fallback;
 	}
-	let replyWaiter: {
-		from: string;
-		replyTo: string;
-		resolve: (message: Message) => void;
-		reject: (error: Error) => void;
-	} | null = null;
+	/**
+	 * In-flight blocking `ask` waiters keyed by the ask's message id (replyTo).
+	 * Multi-slot so parallel asks can wait concurrently without cross-talk; each
+	 * inbound reply is demultiplexed by its replyTo (correlation id), never by
+	 * session-level turn state.
+	 */
+	const replyWaiters = new Map<
+		string,
+		{
+			from: string;
+			resolve: (message: Message) => void;
+			reject: (error: Error) => void;
+		}
+	>();
 	function waitForReply(
 		from: string,
 		replyTo: string,
@@ -753,7 +818,7 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
 		cancelOnAbort?: () => void,
 		getDeliveryState: () => string = () => "unknown",
 	): Promise<Message> {
-		if (replyWaiter) {
+		if (replyWaiters.has(replyTo)) {
 			return Promise.reject(new Error("Already waiting for a reply"));
 		}
 		if (signal?.aborted) {
@@ -764,6 +829,7 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
 				const timeoutDescription =
 					askTimeoutMs % 60000 === 0 ? `${askTimeoutMs / 60000} minutes` : `${askTimeoutMs}ms`;
 				rejectReplyWaiter(
+					replyTo,
 					new Error(
 						`No reply from "${from}" for message ${replyTo} within ${timeoutDescription}. Last known delivery state: ${getDeliveryState()}. This waiter timeout is not cancellation; the delivered message may still be queued or actionable in the recipient session.`,
 					),
@@ -772,9 +838,7 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
 			const cleanup = () => {
 				clearTimeout(timeout);
 				signal?.removeEventListener("abort", onAbort);
-				if (replyWaiter?.replyTo === replyTo) {
-					replyWaiter = null;
-				}
+				replyWaiters.delete(replyTo);
 			};
 			const onAbort = () => {
 				cancelOnAbort?.();
@@ -782,9 +846,8 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
 				reject(new Error("Cancelled"));
 			};
 			signal?.addEventListener("abort", onAbort, { once: true });
-			replyWaiter = {
+			replyWaiters.set(replyTo, {
 				from,
-				replyTo,
 				resolve: message => {
 					cleanup();
 					resolve(message);
@@ -793,11 +856,16 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
 					cleanup();
 					reject(error);
 				},
-			};
+			});
 		});
 	}
-	function rejectReplyWaiter(error: Error): void {
-		replyWaiter?.reject(error);
+	function rejectReplyWaiter(replyTo: string, error: Error): void {
+		replyWaiters.get(replyTo)?.reject(error);
+	}
+	function rejectAllReplyWaiters(error: Error): void {
+		for (const waiter of replyWaiters.values()) {
+			waiter.reject(error);
+		}
 	}
 	function clearReconnectTimer(): void {
 		if (!reconnectTimer) {
@@ -1083,7 +1151,7 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
 	}
 	function sendIncomingMessage(
 		entry: InboundMessageEntry,
-		delivery: "trigger" | "steer",
+		delivery: "trigger" | "followUp" | "steer",
 		generation = runtimeGeneration,
 		forceTrigger = false,
 	): void {
@@ -1092,15 +1160,12 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
 		}
 		const injectedMessage = { ...entry.message, injectedAt: Date.now() };
 		emitMessageReceipt(injectedMessage.id, "injected");
-		const replyCommand =
-			delivery === "steer" && entry.replyCommand && entry.message.expectsReply
-				? `intercom({ action: "reply", replyTo: ${JSON.stringify(entry.message.id)}, message: "..." })`
-				: entry.replyCommand;
+		const replyCommand = entry.replyCommand;
 		const deliveredEntry = { ...entry, message: injectedMessage, replyCommand };
-		replyTracker.queueTurnContext({ from: entry.from, message: injectedMessage, receivedAt: Date.now() });
 		const senderDisplay = entry.from.name || entry.from.id.slice(0, 8);
 		const replyInstruction = replyCommand ? `\n\nTo reply, use the intercom tool: ${replyCommand}` : "";
 		const deliveryMetadata = formatInboundDeliveryMetadata(injectedMessage);
+		const deliveryOptions = buildInboundDeliveryOptions(delivery, shouldTriggerInboundMessage(entry, forceTrigger));
 		pi.sendMessage(
 			{
 				customType: "intercom_message",
@@ -1108,9 +1173,7 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
 				display: true,
 				details: deliveredEntry,
 			},
-			delivery === "trigger" && shouldTriggerInboundMessage(entry, forceTrigger)
-				? { triggerTurn: true }
-				: { deliverAs: "steer" },
+			deliveryOptions,
 		);
 	}
 	function handleIncomingMessage(ctx: ExtensionContext, from: SessionInfo, message: Message): void {
@@ -1126,23 +1189,23 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
 		}
 		const receivedMessage = { ...message, receiverReceivedAt };
 		emitMessageReceipt(receivedMessage.id, "receiver_received");
-		if (replyWaiter) {
-			const senderTarget = from.name || from.id;
-			const fromMatches =
-				senderTarget.toLowerCase() === replyWaiter.from.toLowerCase() || from.id === replyWaiter.from;
-			const replyMatches = receivedMessage.replyTo === replyWaiter.replyTo;
-			if (fromMatches && replyMatches) {
-				emitMessageReceipt(receivedMessage.id, "acknowledged", "matched reply waiter");
-				replyWaiter.resolve(receivedMessage);
-				return;
+		if (receivedMessage.replyTo) {
+			const waiter = replyWaiters.get(receivedMessage.replyTo);
+			if (waiter) {
+				const senderTarget = from.name || from.id;
+				const fromMatches = senderTarget.toLowerCase() === waiter.from.toLowerCase() || from.id === waiter.from;
+				if (fromMatches) {
+					emitMessageReceipt(receivedMessage.id, "acknowledged", "matched reply waiter");
+					waiter.resolve(receivedMessage);
+					return;
+				}
 			}
 		}
 		const attachmentText = receivedMessage.content.attachments?.length
 			? formatAttachments(receivedMessage.content.attachments)
 			: "";
 		const bodyText = `${receivedMessage.content.text}${attachmentText}`;
-		const replyCommand =
-			config.replyHint && receivedMessage.expectsReply ? `intercom({ action: "reply", message: "..." })` : undefined;
+		const replyCommand = buildReplyCommand(receivedMessage, config.replyHint);
 		replyTracker.recordIncomingMessage(from, receivedMessage, receiverReceivedAt);
 		emitMessageReceipt(receivedMessage.id, "acknowledged", "accepted by receiver");
 		const entry = { from, message: receivedMessage, replyCommand, bodyText };
@@ -1151,30 +1214,35 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
 			if (!activeContext) {
 				return;
 			}
-			if (!activeContext.isIdle()) {
-				if (!activeContext.hasUI) {
-					const activeClient = client;
-					if (!message.replyTo && activeClient?.isConnected()) {
-						try {
-							const result = await activeClient.send(from.id, {
-								text: "This agent is running in non-interactive mode and cannot respond to intercom messages while it is working. It will continue its current task and exit when done.",
-								replyTo: message.id,
-							});
-							if (result.delivered && getLiveContext(liveContext, messageGeneration)) {
-								dismissIncomingAsk(message.id);
-							}
-						} catch {
-							// Best-effort reply; keep the busy non-interactive session running either way.
+			const deliveryMode = resolveInboundDeliveryMode({
+				isIdle: activeContext.isIdle(),
+				hasUI: activeContext.hasUI,
+				inboundMode: config.inboundMode,
+			});
+			if (deliveryMode === "reject") {
+				const activeClient = client;
+				if (!message.replyTo && activeClient?.isConnected()) {
+					try {
+						const result = await activeClient.send(from.id, {
+							text: "This agent is running in non-interactive mode and cannot respond to intercom messages while it is working. It will continue its current task and exit when done.",
+							replyTo: message.id,
+						});
+						if (result.delivered && getLiveContext(liveContext, messageGeneration)) {
+							dismissIncomingAsk(message.id);
 						}
+					} catch {
+						// Best-effort reply; keep the busy non-interactive session running either way.
 					}
-					return;
 				}
-				sendIncomingMessage(entry, "steer");
 				return;
 			}
-			if (getLiveContext(liveContext, messageGeneration)) {
-				sendIncomingMessage(entry, "trigger", messageGeneration);
+			if (deliveryMode === "trigger") {
+				if (getLiveContext(liveContext, messageGeneration)) {
+					sendIncomingMessage(entry, "trigger", messageGeneration);
+				}
+				return;
 			}
+			sendIncomingMessage(entry, deliveryMode);
 		})();
 	}
 	function attachClientHandlers(nextClient: IntercomClient): void {
@@ -1280,7 +1348,7 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
 			if (client !== nextClient) {
 				return;
 			}
-			rejectReplyWaiter(new Error(`Disconnected while waiting for reply: ${error.message}`, { cause: error }));
+			rejectAllReplyWaiters(new Error(`Disconnected while waiting for reply: ${error.message}`, { cause: error }));
 			for (const [namespace, extension] of localExtensions) {
 				extension.owner = undefined;
 				emitLocalExtensionEvent(namespace, { type: "connection", connected: false, supported: false });
@@ -1648,7 +1716,7 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
 		clearReconnectTimer();
 		clearStartupConnectTimer();
 		clearNamePollTimer();
-		rejectReplyWaiter(new Error("Session replaced"));
+		rejectAllReplyWaiters(new Error("Session replaced"));
 		replyTracker.reset();
 		if (previousClient) {
 			client = null;
@@ -1798,7 +1866,7 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
 		clearReconnectTimer();
 		clearNamePollTimer();
 		restoreIntercomSessionId();
-		rejectReplyWaiter(new Error("Session shutting down"));
+		rejectAllReplyWaiters(new Error("Session shutting down"));
 		replyTracker.reset();
 		agentRunning = false;
 		activeTools.clear();
@@ -1810,12 +1878,6 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
 		currentSessionId = null;
 		currentIntercomSessionId = null;
 		sessionStartedAt = null;
-	});
-	pi.on("turn_end", () => {
-		if (!getLiveContext()) {
-			return;
-		}
-		replyTracker.endTurn();
 	});
 	pi.on("agent_start", () => {
 		if (!getLiveContext()) {
@@ -1859,14 +1921,12 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
 				return;
 			}
 			startSessionRuntime(ctx);
-			replyTracker.beginTurn();
 			return;
 		}
 		if (!getLiveContext(ctx)) {
 			return;
 		}
 		syncPresenceIdentity(sessionId);
-		replyTracker.beginTurn();
 	});
 	pi.on("model_select", (event, ctx) => {
 		if (!getLiveContext(ctx)) {
@@ -2084,13 +2144,6 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
 						}
 					}
 
-					if (replyWaiter) {
-						return {
-							content: [{ type: "text", text: "Already waiting for a reply" }],
-							details: { error: true },
-						};
-					}
-
 					let replyPromise: Promise<Message> | null = null;
 					let deliveryState = "created";
 					let questionId: string | null = null;
@@ -2105,7 +2158,7 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
 						);
 						replyPromise.catch(() => undefined);
 						if (signal?.aborted) {
-							rejectReplyWaiter(new Error("Cancelled"));
+							rejectReplyWaiter(questionId!, new Error("Cancelled"));
 							try {
 								await replyPromise;
 							} catch {
@@ -2136,6 +2189,7 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
 						if (!sendResult.delivered) {
 							const errorText = sendResult.reason ?? "Session may not exist or has disconnected.";
 							rejectReplyWaiter(
+								questionId!,
 								new Error(`Message to "${metadata.orchestratorTarget}" was not delivered: ${errorText}`),
 							);
 							if (replyPromise) {
@@ -2191,7 +2245,9 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
 								: {},
 						};
 					} catch (error) {
-						rejectReplyWaiter(toError(error));
+						if (questionId) {
+							rejectReplyWaiter(questionId, toError(error));
+						}
 						if (replyPromise) {
 							try {
 								await replyPromise;
@@ -2675,13 +2731,6 @@ Usage:
 							};
 						}
 
-						if (replyWaiter) {
-							return {
-								content: [{ type: "text", text: "Already waiting for a reply" }],
-								details: { error: true },
-							};
-						}
-
 						if (_signal?.aborted) {
 							return {
 								content: [{ type: "text", text: "Cancelled" }],
@@ -2764,12 +2813,6 @@ Usage:
 									details: { error: true },
 								};
 							}
-							if (replyWaiter) {
-								return {
-									content: [{ type: "text", text: "Already waiting for a reply" }],
-									details: { error: true },
-								};
-							}
 							questionId = randomUUID();
 							replyPromise = waitForReply(
 								sendTo,
@@ -2792,7 +2835,10 @@ Usage:
 							deliveryState = sendResult.delivered ? "socket_delivered" : "delivery_failed";
 							if (!sendResult.delivered) {
 								const errorText = sendResult.reason ?? "Session may not exist or has disconnected.";
-								rejectReplyWaiter(new Error(`Message to "${targetDisplay}" was not delivered: ${errorText}`));
+								rejectReplyWaiter(
+									questionId!,
+									new Error(`Message to "${targetDisplay}" was not delivered: ${errorText}`),
+								);
 								if (replyPromise) {
 									try {
 										await replyPromise;
@@ -2837,7 +2883,9 @@ Usage:
 									: {},
 							};
 						} catch (error) {
-							rejectReplyWaiter(toError(error));
+							if (questionId) {
+								rejectReplyWaiter(questionId, toError(error));
+							}
 							if (replyPromise) {
 								try {
 									await replyPromise;

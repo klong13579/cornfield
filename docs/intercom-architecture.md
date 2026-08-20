@@ -60,7 +60,7 @@ omp 会话 A(进程内)           omp 会话 B(进程内)      gateway 账号(�
 | `children` | 本会话的子会话列表(声明了本会话为父的在线会话,含实时状态) |
 | `send` | 单发,可带附件(file/snippet/context),自动推断 pending ask 作为回复 |
 | `ask` | 发送并阻塞等待回复(默认超时 10min,`PI_INTERCOM_ASK_TIMEOUT_MS` 覆盖);**子模式下不带 `to` 时默认发给父** |
-| `reply` | 回复当前/指定待回复 ask(自动解析目标,保持线程) |
+| `reply` | 回复指定待回复 ask(显式 `replyTo` 优先,始终带 correlation id;多条 pending 未指定时 fail loud 报错,不再按会话状态隐式猜测),保持线程 |
 | `pending` | 列出未回复的 inbound ask |
 | `status` | 连接状态 |
 | `cancel` | 撤销已发消息(实时会话发控制帧,mailbox 直接删) |
@@ -91,7 +91,7 @@ intercom({ action: "send", to: "hr", message: "...", attachments: [{ type: "snip
 
 - **`alt+i`**:打开会话列表 overlay(↑/↓ 选择 → 输入消息 → 发送)
 - **`/intercom`**:同上(命令入口);**`/intercom-id`**:把当前会话的寻址片段插入输入框
-- 收消息:带边框的 `From: <sender> (<cwd>)` 渲染;忙时走 steer 队列不打断当前工作
+- 收消息:带边框的 `From: <sender> (<cwd>)` 渲染;忙时**默认走 follow-up 队列,当前回合结束后处理**——不 abort 在途工具、不 skip 剩余工具、不打扰阻塞中的 ask;要旧打断语义需显式配 `inboundMode: "interrupt"`
 
 ### 5.3 场景
 
@@ -135,6 +135,7 @@ intercom({ action: "send", to: "hr", message: "...", attachments: [{ type: "snip
   "enabled": true,
   "confirmSend": false,
   "inboundTrigger": "always",
+  "inboundMode": "queue",
   "replyHint": true,
   "stableId": "optional-stable-session-id"
 }
@@ -145,7 +146,8 @@ intercom({ action: "send", to: "hr", message: "...", attachments: [{ type: "snip
 | `enabled` | true | 总开关 |
 | `confirmSend` | false | 交互会话发送前确认 |
 | `inboundTrigger` | `"always"` | `always`/`replies`/`never`:收消息是否自动触发模型 turn |
-| `replyHint` | true | 收到的 ask 附回复指引 |
+| `inboundMode` | `"queue"` | `queue`/`interrupt`:忙时收消息的处理策略——`queue` 排到当前回合结束(默认,不打断),`interrupt` 立即 steer 打断(旧行为,会 abort 在途工具并跳过剩余工具) |
+| `replyHint` | true | 收到的 ask 附回复指引(始终携带显式 `replyTo`) |
 | `stableId` | — | 重启后保持的会话地址 |
 
 环境变量:`PI_INTERCOM_ASK_TIMEOUT_MS`(ask 超时)、`PI_INTERCOM_LIVENESS_INTERVAL_MS`/`_TIMEOUT_MS`(心跳)。
@@ -186,3 +188,15 @@ intercom({ action: "send", to: "hr", message: "...", attachments: [{ type: "snip
 - broker(gateway 内嵌):`packages/omp-gateway/src/intercom/`
 - API 对齐(pi 0.84.2 面):`packages/coding-agent/src/extensibility/extensions/types.ts`
 - 上游:pi-intercom(npm `pi-intercom`,GitHub nicobailon)
+
+## 10. 测试闭环
+
+一次跑全:根目录 `bun run test:intercom`(或分包跑)。三层各锁不同的失效模式,覆盖率侧重并发语义:
+
+| 层 | 位置 | 覆盖 | 门控 |
+|---|---|---|---|
+| 单元(路由/决策层,无 broker) | `packages/coding-agent/test/intercom-extension/{reply-tracker,inbound-concurrency}.test.ts` | 串话消歧:`resolveReplyTarget` 显式 replyTo 优先、≥2 pending fail loud、过期 prune;busy 投递决策:`resolveInboundDeliveryMode`/`buildInboundDeliveryOptions`/`buildReplyCommand`(hint 恒带 correlation id、busy 默认 followUp) | 无,默认跑 |
+| 集成(真实 broker + 真实 client,无 LLM) | `packages/omp-gateway/test/intercom-inbound-concurrency.test.ts`(并发 ask/reply 通路:双子并发 ask、replyTo 各归其位无串话、互斥 ask deadlock 拒绝、同源双 ask 独立边、stale reply 拒绝、cancel 隔离、父并行 ask demux)、`intercom-parent-child.test.ts`(父边契约) | 无,默认跑 |
+| 端到端(真实 omp rpc 子进程 + 真 LLM) | `packages/omp-gateway/test/intercom-parent-child-e2e.test.ts`(child 注册/完成报告/contact_supervisor 闭环) | `E2E=1` |
+
+单元层保证路由决策,集成层保证 broker 消息通路与并发语义(这是修复串话/抢断/多槽 waiter 的底层契约),e2e 层保证真实子进程全链路。纳入 CI:`bun run ci:test:full` 自动包含前三者,e2e 层按需 `E2E=1 bun test`。

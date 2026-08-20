@@ -3272,6 +3272,13 @@ export class AgentSession {
 			if (options?.deliverAs === "followUp") {
 				this.agent.followUp(appMessage);
 			} else {
+				logger.warn(
+					"Custom message trigger demoted to steering while the agent is streaming — the caller asked for a turn but got an interrupt",
+					{
+						customType: appMessage.customType,
+						triggerTurn: options?.triggerTurn ?? false,
+					},
+				);
 				this.agent.steer(appMessage);
 			}
 			return;
