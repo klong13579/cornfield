@@ -2,12 +2,13 @@ import { FolderOpen, Image } from "lucide-react";
 import { useState } from "react";
 import { useUiState } from "../../state/ui-store";
 import { useSession } from "../../state/use-session";
+import { ArtifactsPanel } from "./ArtifactsPanel";
 import { FileExplorer } from "./FileExplorer";
 
 /**
  * 工作台右栏（S5，hermes 右栏 Files/Artifacts 双 tab）。
  * - Files：复用 FileExplorer（S5 复用，不重写 fs 目录树），窄栏上下布局
- * - Artifacts：占位（Artifacts 产物面板待接入）
+ * - Artifacts：ArtifactsPanel 骨架（产物列表/空态/loading/错误态；wire 协议未接，仅留数据接入钩子）
  *
  * 数据源：取当前 attached agent 的 registry id（未挂载回退首个 agent）。
  */
@@ -59,10 +60,7 @@ export function RightPanel({ collapsed = false }: { collapsed?: boolean }): Reac
 						</div>
 					)
 				) : (
-					<div className="flex h-full flex-col items-center justify-center gap-2 text-center">
-						<Image size={24} strokeWidth={1.25} className="text-ink-faint" />
-						<div className="text-[12px] text-ink-faint">Artifacts 待实现（产物面板占位）</div>
-					</div>
+					<ArtifactsPanel />
 				)}
 			</div>
 		</aside>
