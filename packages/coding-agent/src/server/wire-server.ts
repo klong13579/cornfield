@@ -397,11 +397,28 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 				}
 				case "list_commands": {
 					// 协议批 B-3：TUI slash 命令表（BUILTIN_SLASH_COMMAND registry 同源）。
-					// 「能拿多少拿多少」：内置表 name/description；custom/extension 命令不进 wire 面。
-					// /undo /yolo /retry 非内置 slash（W1 SlashPalette 的虚拟惯例项），serve 补齐口径。
+					// 「能拿多少拿多少」：内置表 name/description；再补 active agent 会话挂载的
+					// hook/custom/skill 命令（与 interactive-mode 的完整 slash 表同构）。
 					const builtin = BUILTIN_SLASH_COMMANDS.map(c => ({ name: `/${c.name}`, description: c.description }));
 					const virtual = TUI_VIRTUAL_COMMANDS;
-					done({ commands: [...builtin, ...virtual] });
+					const attached = registry.getAttached(conn.activeAgentId);
+					const extra: { name: string; description: string }[] = [];
+					if (attached) {
+						const s = attached.session;
+						const builtinNames = new Set(BUILTIN_SLASH_COMMANDS.map(c => c.name));
+						for (const cmd of s.extensionRunner?.getRegisteredCommands(builtinNames) ?? []) {
+							extra.push({ name: cmd.name, description: cmd.description ?? "(hook command)" });
+						}
+						for (const loaded of s.customCommands ?? []) {
+							extra.push({ name: loaded.command.name, description: `${loaded.command.description} (${loaded.source})` });
+						}
+						if (Settings.instance.get("skills.enableSkillCommands")) {
+							for (const skill of s.skills) {
+								extra.push({ name: `skill:${skill.name}`, description: skill.description });
+							}
+						}
+					}
+					done({ commands: [...builtin, ...virtual, ...extra] });
 					return;
 				}
 				case "get_cron_tasks": {
