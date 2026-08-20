@@ -79,6 +79,7 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 	const [modelList, setModelList] = useState<Array<{ id: string; provider: string }>>([]);
 	const [slashOpen, setSlashOpen] = useState(false);
 	const [slashIndex, setSlashIndex] = useState(0);
+	const [slashCommands, setSlashCommands] = useState<SlashCommandDef[]>(DEFAULT_COMMANDS);
 	const value = ui.draft || autoFocusDraft;
 	const [attachments, setAttachments] = useState<ImageContentDto[]>([]);
 	const fileRef = useRef<HTMLInputElement>(null);
@@ -114,10 +115,21 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 			})
 			.catch(() => undefined);
 	};
+	const refreshCommands = () => {
+		void store
+			.listCommands()
+			.then(cmds => {
+				if (cmds.length > 0) {
+					setSlashCommands(cmds);
+				}
+			})
+			.catch(() => undefined);
+	};
 
 	useEffect(() => {
 		if (!view.connected) return; // 未连接时跳过，连接后就绪再拉
 		refreshModels();
+		refreshCommands();
 	}, [store, view.connected]);
 
 	/** 模型按 provider 分组；当前模型所在 provider 置顶，其余保持 serve 返回顺序。 */
@@ -154,7 +166,7 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 
 	const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
 		if (slashOpen) {
-			const filtered = filterSlashCommands(DEFAULT_COMMANDS, value.slice(1));
+			const filtered = filterSlashCommands(slashCommands, value.slice(1));
 			if (e.key === "ArrowDown") {
 				e.preventDefault();
 				setSlashIndex(i => Math.min(i + 1, filtered.length - 1));
@@ -194,6 +206,7 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 			<div className="relative mx-auto max-w-[800px]">
 				{slashOpen && (
 					<SlashPalette
+						commands={slashCommands}
 						query={value.slice(1)}
 						activeIndex={slashIndex}
 						onSelect={selectSlash}
