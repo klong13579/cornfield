@@ -4,9 +4,8 @@
  * 视觉基准：v8-hermes-full.html 的 .cmd-palette 段（浮层列表，圆角 12px、mono 命令名 + 描述）。
  * 交互抄 hermes commands.js：输入 / 弹出、继续输入过滤、↑↓ 选择、Enter 填充、Esc 关闭。
  *
- * 数据源：先硬编码起步命令表（/compact /undo /model /yolo /retry /usage 六个）。
- * serve 的 list_commands 命令尚未实现——组件已留 fetch 接口（见 useCommands fetch 位置），
- * 后端命令就绪后把 DEFAULT_COMMANDS 替换为 `store.listCommands()` 即可，UI 不动。
+ * 数据源：ComposerBar 通过 store.listCommands() 拉取真实命令表，以 commands prop 传入；
+ * DEFAULT_COMMANDS 仅在未加载或失败时兜底（不闪空）。filterSlashCommands 纯过滤语义不变。
  */
 
 export interface SlashCommandDef {
@@ -14,7 +13,7 @@ export interface SlashCommandDef {
 	description: string;
 }
 
-/** 起步命令表（serve list_commands 未就绪前的本地兜底）。 */
+/** 默认命令表——store.listCommands() 失败/为空时的 fallback（不闪空）。 */
 export const DEFAULT_COMMANDS: SlashCommandDef[] = [
 	{ name: "/compact", description: "手动压缩当前会话上下文" },
 	{ name: "/undo", description: "撤销最近一轮对话" },
@@ -35,18 +34,21 @@ export function filterSlashCommands(commands: SlashCommandDef[], query: string):
 }
 
 export function SlashPalette({
+	commands,
 	query,
 	activeIndex,
 	onSelect,
 	onHover,
 }: {
+	/** 全量命令表：ComposerBar 传 store.listCommands() 结果；未加载/失败时传 DEFAULT_COMMANDS。 */
+	commands: SlashCommandDef[];
 	/** 去掉前导 `/` 的输入片段。 */
 	query: string;
 	activeIndex: number;
 	onSelect: (cmd: SlashCommandDef) => void;
 	onHover: (index: number) => void;
 }): React.JSX.Element | null {
-	const filtered = filterSlashCommands(DEFAULT_COMMANDS, query);
+	const filtered = filterSlashCommands(commands, query);
 	if (filtered.length === 0) return null;
 
 	return (
