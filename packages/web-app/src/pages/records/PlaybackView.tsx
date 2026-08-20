@@ -57,7 +57,11 @@ export function PlaybackView(): React.JSX.Element {
 			}
 			// 直接以方法调用形式执行（脱绑解引用会丢 this → #client undefined），返回 Promise.resolve 吞掉同步抛错路径
 			Promise.resolve()
-				.then(() => (store as unknown as { getSessionMessages: (file: string) => Promise<unknown[]> }).getSessionMessages(sessionFile))
+				.then(() =>
+					(store as unknown as { getSessionMessages: (file: string) => Promise<unknown[]> }).getSessionMessages(
+						sessionFile,
+					),
+				)
 				.then(messages => {
 					if (alive) setTimeline(toPlaybackEntries(messages));
 				})
