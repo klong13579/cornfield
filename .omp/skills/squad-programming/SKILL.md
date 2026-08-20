@@ -162,9 +162,10 @@ bun run .omp/skills/squad-programming/scripts/bootstrap.ts \
 
 ## Phase 3 — 验收交接（skill 不合并代码）
 
-1. **验证**：对每个子任务在对应 worktree 跑 `gate.verifiers`（如 `bun check`、`bun test <scope>`）；失败 → 打回子 omp 修或标记 `FAILED` 上报用户。
-2. **交接**：父 agent **不做任何 merge** —— 合并代码进 base 是用户的动作。对每个验证过的子任务整理：branch 名 + diff 摘要 + gate 结果，逐条摆给用户；用户自己 `git merge <branch>`（或打回/丢弃）。
-3. **清理**（每步单独执行、确认 JSON 返回后再下一步，**禁止串行 `&&`**）：
+1. **提交检查**：交接前每个子任务必须已在分支**提交**（worker 收尾铁律，见启动 brief；未提交的交付父可代提交——只在 worktree 内 add/commit 源文件，排除 .squad.json/node_modules）。提交后 `git log <base>..<branch>` 应恰好是本次交付。
+2. **验证**：对每个子任务在对应 worktree 跑 `gate.verifiers`（如 `bun check`、`bun test <scope>`）；失败 → 打回子 omp 修或标记 `FAILED` 上报用户。
+3. **交接**：父 agent **不做任何 merge** —— 合并代码进 base 是用户的动作。对每个验证过的子任务整理：branch 名 + diff 摘要 + gate 结果，逐条摆给用户；用户自己 `git merge <branch>`（或打回/丢弃）。
+4. **清理**（每步单独执行、确认 JSON 返回后再下一步，**禁止串行 `&&`**）：
    - 用户确认过了某个子任务的分支（合并完或拍板丢弃） → `git branch -D <branch>` + `git worktree remove --force <worktree路径>`；
    - `herdr pane close <paneId>` 逐个关掉子任务 pane（paneId 在 state.json / 集结输出里）；
    - 归档任务包从 `~/.omp/squads/<squadId>/` 移入 `archive/`。
