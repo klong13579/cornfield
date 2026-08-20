@@ -399,22 +399,23 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 					// 协议批 B-3：TUI slash 命令表（BUILTIN_SLASH_COMMAND registry 同源）。
 					// 「能拿多少拿多少」：内置表 name/description；再补 active agent 会话挂载的
 					// hook/custom/skill 命令（与 interactive-mode 的完整 slash 表同构）。
-					const builtin = BUILTIN_SLASH_COMMANDS.map(c => ({ name: `/${c.name}`, description: c.description }));
-					const virtual = TUI_VIRTUAL_COMMANDS;
+					// 每条带 group 分组（前端 palette 按组渲染 + 滚动）：系统命令/会话控制/扩展命令/自定义命令/技能命令。
+					const builtin = BUILTIN_SLASH_COMMANDS.map(c => ({ name: `/${c.name}`, description: c.description, group: "系统命令" as const }));
+					const virtual = TUI_VIRTUAL_COMMANDS.map(c => ({ ...c, group: "会话控制" as const }));
 					const attached = registry.getAttached(conn.activeAgentId);
-					const extra: { name: string; description: string }[] = [];
+					const extra: { name: string; description: string; group: string }[] = [];
 					if (attached) {
 						const s = attached.session;
 						const builtinNames = new Set(BUILTIN_SLASH_COMMANDS.map(c => c.name));
 						for (const cmd of s.extensionRunner?.getRegisteredCommands(builtinNames) ?? []) {
-							extra.push({ name: cmd.name, description: cmd.description ?? "(hook command)" });
+							extra.push({ name: cmd.name, description: cmd.description ?? "(hook command)", group: "扩展命令" });
 						}
 						for (const loaded of s.customCommands ?? []) {
-							extra.push({ name: loaded.command.name, description: `${loaded.command.description} (${loaded.source})` });
+							extra.push({ name: loaded.command.name, description: `${loaded.command.description} (${loaded.source})`, group: "自定义命令" });
 						}
 						if (Settings.instance.get("skills.enableSkillCommands")) {
 							for (const skill of s.skills) {
-								extra.push({ name: `skill:${skill.name}`, description: skill.description });
+								extra.push({ name: `skill:${skill.name}`, description: skill.description, group: "技能命令" });
 							}
 						}
 					}
