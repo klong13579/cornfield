@@ -1,5 +1,5 @@
 import { loadNotifyPrefs, notifyGuarded } from "../lib/notifications";
-import type { FsEntryDto, GatewayStatusDto, PiClient } from "../lib/pi-client-api";
+import type { FsEntryDto, GatewayStatusDto, McpServerDto, PiClient } from "../lib/pi-client-api";
 import type { BranchPoint, PlaybackEntry, SessionRecordSummary } from "../lib/records";
 import type {
 	AgentInfoDto,
@@ -475,6 +475,29 @@ class SessionStore {
 	/** 启停技能（set_skill_enabled，代理到 pi-client）。 */
 	setSkillEnabled(name: string, enabled: boolean): Promise<{ ok: boolean; name: string; enabled: boolean }> {
 		return this.#client.setSkillEnabled(name, enabled);
+	}
+
+	// ── MCP 服务器管理（设置页；契约命令由 serve 端 m1 并行实现，代理到 pi-client）──
+	/** 列出 MCP 服务器（get_mcp_servers）。 */
+	getMcpServers(): Promise<{ servers: McpServerDto[] }> {
+		return this.#client.getMcpServers();
+	}
+	/** 新增/更新 MCP 服务器（set_mcp_server upsert）。 */
+	setMcpServer(input: {
+		name: string;
+		command?: string;
+		args?: string[];
+		enabled?: boolean;
+	}): Promise<{ ok: boolean }> {
+		return this.#client.setMcpServer(input);
+	}
+	/** 删除 MCP 服务器（remove_mcp_server 幂等）。 */
+	removeMcpServer(name: string): Promise<{ ok: boolean }> {
+		return this.#client.removeMcpServer(name);
+	}
+	/** 测试 MCP 服务器（test_mcp_server，结果内联展示，失败不报错页）。 */
+	testMcpServer(name: string): Promise<{ ok: boolean; message: string }> {
+		return this.#client.testMcpServer(name);
 	}
 
 	/** 排队文本（get_state queued，代理到 pi-client；展示层自行持有）。 */

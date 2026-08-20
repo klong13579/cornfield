@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ensureNotifyPermission, loadNotifyPrefs, type NotifyPrefs, saveNotifyPrefs } from "../../lib/notifications";
+import type { McpServerDto } from "../../lib/pi-client-api";
 import { DEFAULT_SERVE_CONFIG } from "../../state/pi-client-adapter";
 import { useSessionStore } from "../../state/session-store";
 import { getUiStore, useUiState } from "../../state/ui-store";
@@ -112,6 +113,8 @@ export function SettingsView(): React.JSX.Element {
 						</div>
 					</div>
 				</section>
+
+				<McpServerSection />
 
 				<section className="mb-9">
 					<GroupTitle title="主题" />
@@ -330,4 +333,371 @@ function ToggleRow({
 			<span className={`toggle ${on ? "on" : ""}`} />
 		</button>
 	);
+}
+
+/**
+ * MCP 服务器管理区（设置页「连接」下方）。
+ * 列表：名称 + command/args 摘要 + 启停 toggle + 测试 + 编辑 + 删除；新增/编辑用单表单。
+ * 契约命令（get_mcp_servers / set_mcp_server / remove_mcp_server / test_mcp_server）
+ * 由 serve 端 m1 并行实现，本前端按字符串契约对接（见 PiClient 方法注释）。
+ */
+function McpServerSection(): React.JSX.Element {
+	const view = useSession();
+	const store = useSessionStore();
+	const [servers, setServers] = useState<McpServerDto[]>([]);
+	const [loading, setLoading] = useState(false);
+	const [error, setError] = useState<string | null>(null);
+	const [busyName, setBusyName] = useState<string | null>(null);
+	const [testResults, setTestResults] = useState<Record<string, { ok: boolean; message: string }>>({});
+
+	// 新增/编辑表单（editName = null 表示新增；非 null 表示编辑该名服务器，允许改名）。
+	const [formOpen, setFormOpen] = useState(false);
+	const [editName, setEditName] = useState<string | null>(null);
+	const [formName, setFormName] = useState("");
+	const [formCommand, setFormCommand] = useState("");
+	const [formArgs, setFormArgs] = useState("");
+	const [formError, setFormError] = useState<string | null>(null);
+	const [formBusy, setFormBusy] = useState(false);
+
+	const refreshServers = async (): Promise<void> => {
+		setLoading(true);
+		setError(null);
+		try {
+			const { servers: list } = await store.getMcpServers();
+			setServers(list);
+		} catch (err) {
+			setError(err instanceof Error ? err.message : String(err));
+		} finally {
+			setLoading(false);
+		}
+	};
+
+	useEffect(() => {
+		if (!view.connected) return;
+		void refreshServers();
+	}, [store, view.connected]);
+
+	const toggleEnabled = async (name: string, enabled: boolean): Promise<void> => {
+		if (busyName) return;
+		setBusyName(name);
+		try {
+			await store.setMcpServer({ name, enabled });
+			await refreshServers();
+		} catch (err) {
+			setError(err instanceof Error ? err.message : String(err));
+		} finally {
+			setBusyName(null);
+		}
+	};
+
+	const testServer = async (name: string): Promise<void> => {
+		if (busyName) return;
+		setBusyName(name);
+		try {
+			const result = await store.testMcpServer(name);
+			setTestResults(prev => ({ ...prev, [name]: result }));
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			setTestResults(prev => ({ ...prev, [name]: { ok: false, message } }));
+		} finally {
+			setBusyName(null);
+		}
+	};
+
+	const removeServer = async (name: string): Promise<void> => {
+		if (busyName) return;
+		if (!window.confirm(`删除 MCP 服务器「${name}」？`)) return;
+		setBusyName(name);
+		try {
+			await store.removeMcpServer(name);
+			await refreshServers();
+		} catch (err) {
+			setError(err instanceof Error ? err.message : String(err));
+		} finally {
+			setBusyName(null);
+		}
+	};
+
+	const openAdd = (): void => {
+		setFormOpen(true);
+		setEditName(null);
+		setFormName("");
+		setFormCommand("");
+		setFormArgs("");
+		setFormError(null);
+	};
+
+	const openEdit = (srv: McpServerDto): void => {
+		setFormOpen(true);
+		setEditName(srv.name);
+		setFormName(srv.name);
+		setFormCommand(srv.command);
+		setFormArgs(quoteArgs(srv.args));
+		setFormError(null);
+	};
+
+	const saveServer = async (): Promise<void> => {
+		setFormError(null);
+		const name = formName.trim();
+		if (!name) {
+			setFormError("名称不能为空");
+			return;
+		}
+		const command = formCommand.trim();
+		if (!command) {
+			setFormError("command 不能为空");
+			return;
+		}
+		let args: string[];
+		try {
+			args = splitArgs(formArgs);
+		} catch (err) {
+			setFormError(err instanceof Error ? err.message : String(err));
+			return;
+		}
+		if (name !== editName && servers.some(s => s.name === name)) {
+			setFormError(`已存在同名服务器「${name}」`);
+			return;
+		}
+		setFormBusy(true);
+		try {
+			if (editName !== null && editName !== name) {
+				// 改名：set_mcp_server 只能按 name upsert，无法原地改名；先 upsert 新名（保留旧 enabled），再删旧名。
+				const old = servers.find(s => s.name === editName);
+				await store.setMcpServer({ name, command, args, ...(old ? { enabled: old.enabled } : {}) });
+				await store.removeMcpServer(editName);
+			} else {
+				await store.setMcpServer({ name, command, args });
+			}
+			setFormOpen(false);
+			setEditName(null);
+			await refreshServers();
+		} catch (err) {
+			setFormError(err instanceof Error ? err.message : String(err));
+		} finally {
+			setFormBusy(false);
+		}
+	};
+
+	return (
+		<section className="mb-9">
+			<div className="mb-2.5 flex items-center justify-between">
+				<h2 className="text-[11px] font-semibold tracking-[0.08em] text-ink-faint uppercase">MCP 服务器</h2>
+				<button
+					type="button"
+					onClick={openAdd}
+					className="rounded border border-hairline bg-surface px-2 py-0.5 text-[11px] text-ink-subtle hover:border-hairline-strong hover:text-ink"
+				>
+					新增
+				</button>
+			</div>
+
+			<div className="divide-y divide-hairline rounded-lg border border-hairline bg-surface">
+				{!view.connected && (
+					<div className="px-4 py-6 text-center text-[12px] text-ink-faint">未连接——MCP 服务器列表不可用</div>
+				)}
+				{view.connected && loading && servers.length === 0 && (
+					<div className="px-4 py-6 text-center text-[12px] text-ink-faint">加载中…</div>
+				)}
+				{view.connected && !loading && error && (
+					<div className="px-4 py-6 text-center text-[12px] text-danger">加载失败：{error}</div>
+				)}
+				{view.connected && !loading && !error && servers.length === 0 && (
+					<div className="px-4 py-6 text-center text-[12px] text-ink-faint">
+						暂无 MCP 服务器——点右上角「新增」添加
+					</div>
+				)}
+				{servers.map(srv => (
+					<div key={srv.name} className="px-4 py-3">
+						<div className="flex items-center gap-2">
+							<div className="min-w-0 flex-1">
+								<div className="flex items-baseline gap-2">
+									<span className="font-mono text-[13px] font-medium text-ink">{srv.name}</span>
+									{!srv.enabled && <span className="text-[11px] text-ink-faint">已停用</span>}
+								</div>
+								<div
+									className="mt-0.5 truncate font-mono text-[11px] text-ink-faint"
+									title={formatMcpCommand(srv)}
+								>
+									{formatMcpCommand(srv) || "—"}
+								</div>
+							</div>
+							<button
+								type="button"
+								onClick={() => void testServer(srv.name)}
+								disabled={busyName === srv.name}
+								className="rounded border border-hairline bg-surface-2 px-2 py-1 text-[11px] text-ink-subtle hover:border-hairline-strong hover:text-ink disabled:cursor-not-allowed disabled:opacity-60"
+							>
+								{busyName === srv.name ? "测试中…" : "测试"}
+							</button>
+							<button
+								type="button"
+								onClick={() => openEdit(srv)}
+								className="rounded border border-hairline bg-surface-2 px-2 py-1 text-[11px] text-ink-subtle hover:border-hairline-strong hover:text-ink"
+							>
+								编辑
+							</button>
+							<button
+								type="button"
+								onClick={() => void removeServer(srv.name)}
+								disabled={busyName === srv.name}
+								className="rounded border border-hairline bg-surface-2 px-2 py-1 text-[11px] text-danger hover:border-danger disabled:cursor-not-allowed disabled:opacity-60"
+							>
+								删除
+							</button>
+							<button
+								type="button"
+								onClick={() => void toggleEnabled(srv.name, !srv.enabled)}
+								disabled={busyName === srv.name}
+								aria-label={`${srv.name} 启停开关`}
+								className="shrink-0 disabled:cursor-not-allowed disabled:opacity-60"
+							>
+								<span className={`toggle ${srv.enabled ? "on" : ""}`} />
+							</button>
+						</div>
+						{testResults[srv.name] && (
+							<div
+								className={`mt-2 whitespace-pre-wrap break-all text-[11px] ${testResults[srv.name].ok ? "text-success" : "text-danger"}`}
+							>
+								{testResults[srv.name].message || (testResults[srv.name].ok ? "测试通过" : "测试失败")}
+							</div>
+						)}
+					</div>
+				))}
+			</div>
+
+			{formOpen && (
+				<div className="mt-2 rounded-lg border border-hairline bg-surface p-4">
+					<div className="text-[12px] font-semibold text-ink">
+						{editName !== null ? `编辑「${editName}」` : "新增 MCP 服务器"}
+					</div>
+					<div className="mt-3 space-y-3">
+						<label className="flex flex-col gap-1 text-[11px] text-ink-subtle">
+							名称
+							<input
+								value={formName}
+								onChange={e => setFormName(e.target.value)}
+								placeholder="如 gitnexus"
+								className="rounded border border-hairline bg-surface-2 px-2.5 py-1.5 font-mono text-[12px] text-ink outline-none placeholder:text-ink-faint focus:border-accent focus:shadow-[0_0_0_3px_var(--color-accent-dim)]"
+							/>
+						</label>
+						<label className="flex flex-col gap-1 text-[11px] text-ink-subtle">
+							Command
+							<input
+								value={formCommand}
+								onChange={e => setFormCommand(e.target.value)}
+								placeholder="如 node"
+								className="rounded border border-hairline bg-surface-2 px-2.5 py-1.5 font-mono text-[12px] text-ink outline-none placeholder:text-ink-faint focus:border-accent focus:shadow-[0_0_0_3px_var(--color-accent-dim)]"
+							/>
+						</label>
+						<label className="flex flex-col gap-1 text-[11px] text-ink-subtle">
+							Args（可选）
+							<input
+								value={formArgs}
+								onChange={e => setFormArgs(e.target.value)}
+								placeholder="单行输入，空格分隔，支持引号/反斜杠转义"
+								className="rounded border border-hairline bg-surface-2 px-2.5 py-1.5 font-mono text-[12px] text-ink outline-none placeholder:text-ink-faint focus:border-accent focus:shadow-[0_0_0_3px_var(--color-accent-dim)]"
+							/>
+							<div className="text-[10px] text-ink-faint">
+								按 shell 词法拆分：空格/制表符分隔，双引号 "" 或单引号 '' 包裹含空格参数，反斜杠转义单个字符。
+							</div>
+						</label>
+					</div>
+					{formError && <div className="mt-2 text-[11px] text-danger">{formError}</div>}
+					<div className="mt-3 flex gap-2">
+						<button
+							type="button"
+							onClick={() => void saveServer()}
+							disabled={formBusy}
+							className="rounded bg-accent px-3 py-1.5 text-[12px] font-medium text-on-accent hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
+						>
+							{formBusy ? "保存中…" : "保存"}
+						</button>
+						<button
+							type="button"
+							onClick={() => setFormOpen(false)}
+							disabled={formBusy}
+							className="btn btn-secondary btn-sm"
+						>
+							取消
+						</button>
+					</div>
+				</div>
+			)}
+		</section>
+	);
+}
+
+/**
+ * args 单行输入 → string[]（shell 词法拆分）：
+ * - 空格/制表符分隔；(未加引号的) 空 token 不产生空参
+ * - 双引号 "..."：分组，内部支持 \ 转义（" 和 \）
+ * - 单引号 '...'：分组，内部字面量
+ * - 反引号外的 \ 转义下一个字符（\ 后必须跟字符）
+ * 引号未闭合 / 反斜杠结尾 → 抛错，由表单展示。
+ */
+function splitArgs(input: string): string[] {
+	const args: string[] = [];
+	let current = "";
+	let hasToken = false;
+	let i = 0;
+	const n = input.length;
+	while (i < n) {
+		const ch = input[i];
+		if (ch === " " || ch === "\t" || ch === "\n") {
+			if (hasToken) {
+				args.push(current);
+				current = "";
+				hasToken = false;
+			}
+			i++;
+			continue;
+		}
+		hasToken = true;
+		if (ch === '"') {
+			i++;
+			while (i < n && input[i] !== '"') {
+				if (input[i] === "\\" && i + 1 < n) i++;
+				current += input[i];
+				i++;
+			}
+			if (i >= n) throw new Error("args 双引号未闭合");
+			i++;
+		} else if (ch === "'") {
+			i++;
+			while (i < n && input[i] !== "'") {
+				current += input[i];
+				i++;
+			}
+			if (i >= n) throw new Error("args 单引号未闭合");
+			i++;
+		} else if (ch === "\\") {
+			i++;
+			if (i >= n) throw new Error("args 反斜杠结尾非法");
+			current += input[i];
+			i++;
+		} else {
+			current += ch;
+			i++;
+		}
+	}
+	if (hasToken) args.push(current);
+	return args;
+}
+
+/** string[] → 单行可编辑文本（含空格/引号/反斜杠的参数用双引号包裹并转义，空参输出 ""）。
+ */
+function quoteArgs(args: string[]): string {
+	return args
+		.map(a => {
+			if (a === "") return '""';
+			return /[\s"'\\]/.test(a) ? `"${a.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"` : a;
+		})
+		.join(" ");
+}
+
+/** 命令摘要：command + 引号安全的 args 连接（列表与编辑表单共用）。 */
+function formatMcpCommand(srv: McpServerDto): string {
+	const args = quoteArgs(srv.args);
+	return args ? `${srv.command} ${args}` : srv.command;
 }

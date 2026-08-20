@@ -1,7 +1,14 @@
 import type { PiClientEventKind, PiWebSocketCtor } from "@oh-my-pi/pi-client";
 import { PiClient as WirePiClient } from "@oh-my-pi/pi-client";
 import type { WireCommand } from "@oh-my-pi/pi-wire";
-import type { AgentMessageDto, FsEntryDto, FsImageResult, GatewayStatusDto, PiClient } from "../lib/pi-client-api";
+import type {
+	AgentMessageDto,
+	FsEntryDto,
+	FsImageResult,
+	GatewayStatusDto,
+	McpServerDto,
+	PiClient,
+} from "../lib/pi-client-api";
 import type { BranchPoint, PlaybackEntry, PlaybackToolStep, RecordStatus, SessionRecordSummary } from "../lib/records";
 import type {
 	AgentInfoDto,
@@ -433,6 +440,51 @@ export class PiClientAdapter implements PiClient {
 			name,
 			enabled,
 		} as never);
+	}
+
+	// ── MCP 服务器管理（设置页；契约命令由 serve 端 m1 并行实现，WireCommand union 暂缺故最小局部 cast）──
+
+	/** 列出 MCP 服务器（get_mcp_servers；读 ~/.omp/agent/mcp.json 的 mcpServers）。 */
+	async getMcpServers(): Promise<{ servers: McpServerDto[] }> {
+		const result = await this.#req<{ servers?: McpServerDto[] | null }>({
+			type: "get_mcp_servers",
+		} as never);
+		return { servers: result.servers ?? [] };
+	}
+
+	/** 新增/更新 MCP 服务器（set_mcp_server upsert；name 必填，command/args/enabled 可选缺省，未提供字段由 serve 保留原值）。 */
+	async setMcpServer(input: {
+		name: string;
+		command?: string;
+		args?: string[];
+		enabled?: boolean;
+	}): Promise<{ ok: boolean }> {
+		const result = await this.#req<{ ok?: boolean }>({
+			type: "set_mcp_server",
+			name: input.name,
+			...(input.command !== undefined ? { command: input.command } : {}),
+			...(input.args !== undefined ? { args: input.args } : {}),
+			...(input.enabled !== undefined ? { enabled: input.enabled } : {}),
+		} as never);
+		return { ok: result.ok === true };
+	}
+
+	/** 删除 MCP 服务器（remove_mcp_server；幂等，不存在也 ok）。 */
+	async removeMcpServer(name: string): Promise<{ ok: boolean }> {
+		const result = await this.#req<{ ok?: boolean }>({
+			type: "remove_mcp_server",
+			name,
+		} as never);
+		return { ok: result.ok === true };
+	}
+
+	/** 测试 MCP 服务器（test_mcp_server；spawn + JSON-RPC initialize 握手 8s 超时，失败不崩 serve）。 */
+	async testMcpServer(name: string): Promise<{ ok: boolean; message: string }> {
+		const result = await this.#req<{ ok?: boolean; message?: string | null }>({
+			type: "test_mcp_server",
+			name,
+		} as never);
+		return { ok: result.ok === true, message: result.message ?? "" };
 	}
 
 	/** 排队文本（get_state 的 queued；协议批 B-2，QueueCard 数据源）。 */
