@@ -67,6 +67,7 @@ function statusLabel(s: string): string {
  * - 草稿自动保留（localStorage）
  * - 工具栏：Agent 选择器（按工作区分组 + CODING/WORKER + 钉钉角标）、附件、语音、
  *   模型/thinking 下拉、发送/停止
+ * - autoFocusDraft 仅约定聚焦（?q= 直达种子文本由 WorkspaceView 写入草稿 store）
  */
 export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }): React.JSX.Element {
 	const view = useSession();
@@ -81,7 +82,9 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 	const [slashOpen, setSlashOpen] = useState(false);
 	const [slashIndex, setSlashIndex] = useState(0);
 	const [slashCommands, setSlashCommands] = useState<SlashCommandDef[]>(DEFAULT_COMMANDS);
-	const value = ui.draft || autoFocusDraft;
+	/** ui.draft 是输入区唯一事实源（含 ?q= 直达种子——由 WorkspaceView 在挂载时写入一次、发送后清空）。
+	 * 不再回退 autoFocusDraft：否则种子成为永久 fallback，用户清空输入后文本立即恢复。 */
+	const value = ui.draft;
 	const [attachments, setAttachments] = useState<ImageContentDto[]>([]);
 	const fileRef = useRef<HTMLInputElement>(null);
 
