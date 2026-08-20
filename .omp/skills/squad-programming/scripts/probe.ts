@@ -16,9 +16,11 @@
  * 仍无响应才标记 STALLED/BLOCKED。错误签名有白名单语境（如 API 断连后 worker 自愈属正常）。
  */
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 
 const stateFile = process.argv[2];
+const STALL_AFTER_S = Number(process.env.PROBE_STALL_AFTER_S ?? 240); // 会话 JSONL 静默阈值
 
 interface SubtaskState {
 	id: string;
@@ -81,9 +83,41 @@ async function main(): Promise<void> {
 		/* workspace list 解析失败不致命，agent 维度化为 ? */
 	}
 
+	/** 最近活动时间戳：子 omp 的 session JSONL 最近写入时间（每回合必写；静默挂起=长时间未写）。 */
+	const lastWrite = (worktree: string): number | null => {
+		// cwd → 编码目录：~/.omp/agent/sessions/<cwd 去 HOME 前缀、/ 换 ->/by-date/<今日>/*.jsonl
+		const rel = worktree.replace(os.homedir(), "").replaceAll("/", "-");
+		const today = new Date();
+		const pad = (n: number) => String(n).padStart(2, "0");
+		const dateDir = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
+		const byDate = path.join(os.homedir(), ".omp", "agent", "sessions", rel, "by-date", dateDir);
+		try {
+			const files = fs.readdirSync(byDate).filter((f) => f.endsWith(".jsonl"));
+			if (files.length === 0) return null;
+			let latest = 0;
+			for (const f of files) {
+				const st = fs.statSync(path.join(byDate, f));
+				if (st.mtimeMs > latest) latest = st.mtimeMs;
+			}
+			return latest;
+		} catch {
+			return null; // 无 session 目录（未写任何日志），不判死只记为 null
+		}
+	};
+
 	let warn = 0;
 	for (const s of active) {
 		const problems: string[] = [];
+		// 0. 新近活动：session JSONL 静默挂起检测（进程活着但长时间不写记录 = 卡死/API 挂起）
+		if (s.worktree) {
+			const lw = lastWrite(s.worktree);
+			if (lw !== null) {
+				const idleFor = (Date.now() - lw) / 1000;
+				if (idleFor > STALL_AFTER_S) problems.push(`静默挂起：会话 ${Math.round(idleFor)}s 未写入（>${STALL_AFTER_S}s）`);
+			} else {
+				problems.push("会话日志缺失（未找到 session JSONL）");
+			}
+		}
 		// 1. 进程存活（omp + worktree 路径）
 		if (s.worktree) {
 			const ps = await run(["ps", "aux"]);
@@ -107,8 +141,7 @@ async function main(): Promise<void> {
 			}
 		}
 		if (problems.length > 0 && problems.some((p) => !p.includes("idle"))) warn++;
-		const flag = problems.length === 0 ? "OK" : "WARN";
-		console.log(`[${flag}] ${s.id} ${s.status}${s.paneId ? ` @${s.paneId}` : ""}${problems.length ? " — " + problems.join("；") : ""}`);
+		const flag = problems.length === 0 ? "OK" : "WARN";		console.log(`[${flag}] ${s.id} ${s.status}${s.paneId ? ` @${s.paneId}` : ""}${problems.length ? " — " + problems.join("；") : ""}`);
 	}
 	console.log(warn > 0 ? `\n[probe] ${warn} 个子任务有告警，父请复核（SKILL 父盯盘段）` : "\n[probe] 全部健康");
 	process.exit(warn > 0 ? 1 : 0);

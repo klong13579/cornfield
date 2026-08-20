@@ -4,6 +4,7 @@
 
 ### Added
 
+- **静默挂起探活维度** (`scripts/probe.ts`, `SKILL.md`): s2 实测 187s 静默案例——pid 活着 + pane 残影 ≠ 在推进（模型 API 响应挂起）。probe 增加 session JSONL 最近写入时间判据（每回合必写；>240s 未写 = 静默挂起，`PROBE_STALL_AFTER_S` 可调）；处置阶梯增加「ask 唤醒」——实测 ask 到达即恢复。
 - **父健康扫描探活机制** (`scripts/probe.ts`, `SKILL.md`): 父不干等消息——`probe.ts <state.json>` 对未终态子任务三路探活（ps 进程存活 / herdr agent 注册 / pane 输出错误签名扫描），输出 OK/WARN；WARN 处置阶梯不直接判死：先看 API 断连自愈 → ask 自报 → 无响应才 stalled 转用户。解决「worker 静默挂掉父不知道」。
 - **wait-gate 改 pull 模式** (`bootstrap.ts`, `SKILL.md`): 第二批次复现子进程首轮主动 send 报 Session not found（启动窗口期 broker 目标解析不可用，ask 双向始终可靠）——STARTED 确认改为父 ask 驱动（wait-gate 主动拉），worker 的 send 降级为可选补报且失败不刷屏。
 - **整体验证 integration worktree** (`scripts/integrate.ts`, `SKILL.md`, `USAGE.md`): 新增 Phase 3 整体验证步骤——`integrate.ts <state.json>` 把全部 complete 分支按序合并到 `.worktrees/<squadId>-integ`（纯 git worktree，不占 agent；`--link-node-modules` 软链主仓库依赖；`--force` 重建）。冲突即停并打回子任务，不在验证区打补丁；验证跑全部 gate 并集 + 整体功能冒烟（web → dev server + 浏览器）。用户 merge 后与正式分支一并清理。
