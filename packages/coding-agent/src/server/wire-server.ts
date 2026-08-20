@@ -1351,6 +1351,7 @@ interface RemoteSkillItem {
 	source: string;
 	type: "skill" | "plugin";
 	/** 链接与元信息（Hub 详情用；catalog 无评分/下载数字段，排名由前端按 name 排序序号给出）。 */
+	category?: string;
 	homepage?: string;
 	repository?: string;
 	author?: string;
@@ -1434,6 +1435,7 @@ async function listRemoteSkills(source: string): Promise<RemoteSkillItem[]> {
 				type: classifyRemoteSkillType(entry),
 			};
 			if (entry.description) item.description = entry.description;
+			if (entry.category) item.category = entry.category;
 			if (entry.homepage) item.homepage = entry.homepage;
 			if (entry.repository) item.repository = entry.repository;
 			if (entry.author && typeof entry.author === "object" && entry.author.name) item.author = entry.author.name;
