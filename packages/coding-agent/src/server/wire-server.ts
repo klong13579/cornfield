@@ -18,6 +18,15 @@ import type {
 import { MULTIDEVICE_PROTOCOL_VERSION } from "@oh-my-pi/pi-wire";
 import { resolveGlobalMemoryRootCandidates } from "@oh-my-pi/self-evolution/paths";
 import { Settings } from "../config/settings";
+import {
+	fetchMarketplace,
+	getMarketplacesCacheDir,
+	getMarketplacesRegistryPath,
+	isValidNameSegment,
+	type MarketplacePluginEntry,
+	readMarketplacesRegistry,
+	resolvePluginSource,
+} from "../extensibility/plugins/marketplace";
 import { BUILTIN_SLASH_COMMANDS } from "../extensibility/slash-commands";
 import { getMemoryDb, getMemoryRoot, releaseMemoryDb, resolveMemoryDbPath } from "../memories";
 import { loadSectionsFromDb } from "../memories/projection";
@@ -216,6 +225,28 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 		const failWithCode = (code: WireErrorCode, message: string): void =>
 			reply({ type: "response", id: "", ok: false, error: { code, message } });
 
+		// ── h1：serve 端 skill hub（list_remote_skills / install_remote_skill）──
+		// 契约命令不在 pi-wire 的 WireCommand union 内，serve 侧按字符串契约 + 局部窄类型实现；
+		// 前端按同一契约字符串对接（m2/h2 亦 cast + 注释）。复用 marketplace fetcher。
+		if ((command.type as string) === "list_remote_skills") {
+			const cmd = command as unknown as { type: "list_remote_skills"; source?: string };
+			try {
+				const source = await resolveRemoteSkillSource(cmd.source);
+				done({ items: await listRemoteSkills(source) });
+			} catch (err) {
+				failWithCode("internal", `list_remote_skills failed: ${String(err)}`);
+			}
+			return;
+		}
+		if ((command.type as string) === "install_remote_skill") {
+			const cmd = command as unknown as { type: "install_remote_skill"; source: string; name: string };
+			try {
+				done(await installRemoteSkill(cmd.source, cmd.name));
+			} catch (err) {
+				failWithCode("internal", `install_remote_skill failed: ${String(err)}`);
+			}
+			return;
+		}
 		try {
 			// ── registry 级命令（不定向具体 session）──
 			switch (command.type) {
@@ -1312,6 +1343,137 @@ async function readCronLogList(taskId?: string, days = 3, limit = 50): Promise<C
 	return rows.slice(0, clampLimit);
 }
 
+// ── h1：serve 端 skill hub（复用 extensibility/plugins/marketplace 的 fetchMarketplace）──
+
+interface RemoteSkillItem {
+	name: string;
+	description?: string;
+	source: string;
+	type: "skill" | "plugin";
+}
+
+/** 安装根目录：~/.omp/agent/skills（与 native skills 发现一致：skills/<name>/SKILL.md）。 */
+function remoteSkillsDir(): string {
+	return path.join(getAgentDir(), "skills");
+}
+
+/** 解析 source 缺省值：插件市场配置（marketplaces.json）里的第一个 marketplace 源。 */
+async function resolveRemoteSkillSource(source: string | undefined): Promise<string> {
+	const trimmed = source?.trim();
+	if (trimmed) return trimmed;
+	const reg = await readMarketplacesRegistry(getMarketplacesRegistryPath());
+	const first = reg.marketplaces[0];
+	if (!first) {
+		throw new Error("no skill source provided and no marketplace configured (marketplaces.json is empty)");
+	}
+	return first.sourceUri;
+}
+
+/** 本地 marketplace 源目录（git/github 源走 fetchMarketplace 返回的 clonePath）。 */
+function localMarketplaceRoot(source: string): string {
+	const expanded = source.startsWith("~/") ? path.join(os.homedir(), source.slice(2)) : source;
+	return path.resolve(expanded);
+}
+
+/** 目录是否存在（try-catch + isEnoent，不预判 exists）。 */
+async function isDirectoryPresent(dir: string): Promise<boolean> {
+	try {
+		const stat = await fs.stat(dir);
+		return stat.isDirectory();
+	} catch (err) {
+		if (isEnoent(err)) return false;
+		throw err;
+	}
+}
+
+/** 提取 plugin 条目的 source 特征串，用于 skill/plugin 分类。 */
+function pluginSourceHint(entry: MarketplacePluginEntry): string {
+	const s = entry.source;
+	if (typeof s === "string") return s;
+	switch (s.source) {
+		case "git-subdir":
+			return `${s.url} ${s.path}`;
+		case "url":
+			return s.url;
+		case "github":
+			return s.repo;
+		default:
+			return "";
+	}
+}
+
+/**
+ * skill/plugin 分类（deterministic，仅依据 catalog 条目自身信息，不额外网络/克隆）：
+ * - 显式声明 skills 数组 → skill
+ * - 名称以 -skills 结尾 → skill
+ * - source 指向 skills 树（路径段或 URL 含 "skills"） → skill
+ * - 其余 → plugin
+ */
+function classifyRemoteSkillType(entry: MarketplacePluginEntry): "skill" | "plugin" {
+	const extended = entry as MarketplacePluginEntry & { skills?: unknown };
+	if (Array.isArray(extended.skills) && extended.skills.length > 0) return "skill";
+	if (/[-_]skills?$/i.test(entry.name)) return "skill";
+	const hint = pluginSourceHint(entry).toLowerCase();
+	if (hint.split(/[\\/]/).includes("skills") || /\bskills?\b/.test(hint)) return "skill";
+	return "plugin";
+}
+
+/** 拉取 catalog 并投影可装项（fetchMarketplace 对 git/github 会 clone，用完清理临时 clone）。 */
+async function listRemoteSkills(source: string): Promise<RemoteSkillItem[]> {
+	const { catalog, clonePath } = await fetchMarketplace(source, getMarketplacesCacheDir());
+	try {
+		return catalog.plugins.map(entry => {
+			const item: RemoteSkillItem = {
+				name: entry.name,
+				source,
+				type: classifyRemoteSkillType(entry),
+			};
+			if (entry.description) item.description = entry.description;
+			return item;
+		});
+	} finally {
+		if (clonePath) await fs.rm(clonePath, { recursive: true, force: true }).catch(() => {});
+	}
+}
+
+/**
+ * 安装一个远程 skill/plugin：resolve 条目的实际 source 目录后拷到 ~/.omp/agent/skills/<name>。
+ * 幂等：目标目录已存在 → alreadyInstalled:true，不重复拷贝/克隆。
+ */
+async function installRemoteSkill(source: string, name: string): Promise<{ path: string; alreadyInstalled: boolean }> {
+	if (!isValidNameSegment(name)) {
+		throw new Error(`invalid skill/plugin name: "${name}"`);
+	}
+	const targetDir = path.join(remoteSkillsDir(), name);
+	if (await isDirectoryPresent(targetDir)) {
+		return { path: targetDir, alreadyInstalled: true };
+	}
+
+	const { catalog, clonePath } = await fetchMarketplace(source, getMarketplacesCacheDir());
+	try {
+		const entry = catalog.plugins.find(p => p.name === name);
+		if (!entry) {
+			throw new Error(`"${name}" not found in marketplace "${source}"`);
+		}
+
+		const marketplaceClonePath = clonePath ?? localMarketplaceRoot(source);
+		const { dir: srcDir, tempCloneRoot } = await resolvePluginSource(entry, {
+			marketplaceClonePath,
+			catalogMetadata: catalog.metadata,
+			tmpDir: os.tmpdir(),
+		});
+		try {
+			await fs.mkdir(path.dirname(targetDir), { recursive: true });
+			await fs.cp(srcDir, targetDir, { recursive: true });
+		} finally {
+			if (tempCloneRoot) await fs.rm(tempCloneRoot, { recursive: true, force: true }).catch(() => {});
+		}
+
+		return { path: targetDir, alreadyInstalled: false };
+	} finally {
+		if (clonePath) await fs.rm(clonePath, { recursive: true, force: true }).catch(() => {});
+	}
+}
 /** 读会话 JSONL，逐行 JSON.parse，提取 message 条目（跳过空行/非 message/损坏行）。 */
 async function readSessionMessages(sessionFile: string): Promise<{ messages: AgentMessageDto[] } | { error: string }> {
 	try {
