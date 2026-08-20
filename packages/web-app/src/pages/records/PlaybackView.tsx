@@ -51,13 +51,13 @@ export function PlaybackView(): React.JSX.Element {
 			// 契约（s2 并行实现 PiClient.getSessionMessages(sessionFile) → AgentMessageDto[]，
 			// 并经 session-store 透传同签名；与 get_messages 返回完全同型）。本分支 s4 先行消费，
 			// 方法未落地时保留运行期缺省并给出可见提示（不伪造数据）。
-			const getSessionMessages = (store as unknown as { getSessionMessages?: (file: string) => Promise<unknown[]> })
-				.getSessionMessages;
-			if (!getSessionMessages) {
+			if (!(store as unknown as { getSessionMessages?: unknown }).getSessionMessages) {
 				if (alive) setError("历史会话时间线命令（get_session_messages）尚未就绪");
 				return;
 			}
-			getSessionMessages(sessionFile)
+			// 直接以方法调用形式执行（脱绑解引用会丢 this → #client undefined），返回 Promise.resolve 吞掉同步抛错路径
+			Promise.resolve()
+				.then(() => (store as unknown as { getSessionMessages: (file: string) => Promise<unknown[]> }).getSessionMessages(sessionFile))
 				.then(messages => {
 					if (alive) setTimeline(toPlaybackEntries(messages));
 				})
