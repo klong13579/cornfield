@@ -425,7 +425,7 @@ function workerBrief(bundle: Bundle, subtask: Subtask, model: string, briefPath:
 		`你是 ${subtask.id}（${subtask.title}）的实现者，属于 squad ${bundle.squadId} 的 worker。`,
 		`第一步（准备检查）：读 ${shellQuote(briefPath)} 的任务包（.squad.json），完整理解任务、scope、gate、汇报协议、模型档位；`,
 		`用 list_models 确认 ${model} 在可用列表；不在列表则 switch_model 切换到该档位可用模型（按实际生效模型为准）；`,
-		`然后立刻用 intercom send 给 ${bundle.parent.target} 发 "[${subtask.id}] STARTED: <实际生效模型>，任务包已读" —— 父等你全部 STARTED 确认后才正式开工。`,
+		`然后发 STARTED 给 ${bundle.parent.target} —— 发送协议：① 先 intercom status 自检 Connected；② send 报 Session not found/失败则过 5s/10s/15s 退避重试（≤3 次；子进程 intercom 注册晚于 TUI 上线是正常现象，不是掉线）；③ 仍失败不要放弃任务，继续干活，后续状态消息补发，但任何终态（REVIEWING/COMPLETE/FAILED）必须送达父（同样重试规则）；父以收到的最新状态消息为准。`,
 		`规则：只改 scope 内文件；求助必须用 intercom ask 且必须带 to=${bundle.parent.target}（不带 to 的 ask 会被 intercom 按 cwd 路由到同目录其他会话，不会到达父 —— 实测误投到 aion-ui）；`,
 		`状态用 intercom send 给 ${bundle.parent.target}，格式 "[${subtask.id}] <STATE>: 一句话"（STATE ∈ STARTED/BLOCKED/REVIEWING/COMPLETE/FAILED，STARTED 只在准备检查通过后发一次）；`,
 		`完成标准见任务包 acceptance。开始。`,

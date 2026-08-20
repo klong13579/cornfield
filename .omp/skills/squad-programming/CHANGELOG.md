@@ -8,6 +8,7 @@
 
 ### Changed
 
+- **STARTED 送达协议防竞态** (`bootstrap.ts`, `SKILL.md`): 子进程 intercom 注册晚于 TUI 上线/首个 LLM 回合 —— 发 STARTED 前先 status 自检，失败按 5s/10s/15s 退避重试 ≤3 次，仍失败继续任务、终态必达；父 wait-gate 超时先轮询 `intercom list` 等子注册齐全，再 ask 拉 ack，仍失败才 BLOCKED（不直接判死）。
 - **merge 移出 skill 职责** (`SKILL.md`, `USAGE.md`): 父 agent 不再合并任何代码进 base —— Phase 3 改为「验收交接」，验证通过后把 branch + diff 摘要摆给用户，由用户自己 `git merge <branch>`；清理仅在用户表态后执行。`mergePolicy` 语义降级为验收提示（unknown 强制 human-review 护栏保留）。
 - **最终形态：父 workspace 改名 + 树节点 worktree** (`scripts/bootstrap.ts`, `SKILL.md`): 父 omp 所在 workspace label 改为任务包名（squadId）；每个子任务用 `herdr worktree create` 按任务名建树节点（`--label "T<n> · <title 前 18 字>"`，语义化显示；分支/目录 = id 小写；幂等复用 open_workspace_id），worker 直接起在树节点 pane —— Spaces 面板在任务包 workspace 下以树挂出 T1/T2/T3。取代 git worktree add（不产生树节点）与 0.2.0 的 squad 专属 workspace。
 - **worker 启动改 `exec omp` 直启** (`scripts/bootstrap.ts`): `bash -c 'export PI_SUBAGENT_*; exec omp …'` —— pane 前台进程必须是 omp，herdr agent 识别才登记（agents 列表可见）；弃 script -q 包装（前台是 script/bash，permanent 缺位）。env 注入走 shell export（tab create --env 破坏 pane prompt）。
