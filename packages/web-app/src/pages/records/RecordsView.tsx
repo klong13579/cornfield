@@ -18,6 +18,9 @@ import { useSession } from "../../state/use-session";
  */
 export function RecordsView(): React.JSX.Element {
 	const navigate = useNavigate();
+	const openSession = (row: SessionRecordSummary) => {
+		navigate(`/records/${row.id}`, { state: { sessionFile: row.sessionFile } });
+	};
 	const store = useSessionStore();
 	const view = useSession();
 	const [dateFilter, setDateFilter] = useState("all");
@@ -178,7 +181,7 @@ export function RecordsView(): React.JSX.Element {
 									className="flex items-center gap-1 text-ink-muted transition-colors hover:text-ink"
 									onClick={e => {
 										e.stopPropagation();
-										navigate(`/records/${row.id}`);
+										openSession(row);
 									}}
 								>
 									<Play size={11} strokeWidth={1.5} />
@@ -207,8 +210,8 @@ export function RecordsView(): React.JSX.Element {
 				</div>
 
 				<div className="mt-3 text-[11px] text-ink-faint">
-					数据来自 serve list_sessions 真索引；「当前会话」行来自 get_messages
-					真数据。历史会话时间线回放/导出待后端 JSONL 读取命令。
+					数据来自 serve list_sessions 真索引；「当前会话」行来自 get_messages 历史会话回放走 get_session_messages
+					读取 JSONL 时间线（导出仍待 JSONL 读取命令）。
 				</div>
 			</div>
 		</div>

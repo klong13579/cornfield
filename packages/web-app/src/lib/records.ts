@@ -71,3 +71,100 @@ export function recordStatusLabel(status: RecordStatus): string {
 			return "未知";
 	}
 }
+
+/**
+ * 会话消息（serve get_session_messages 返回的 AgentMessageDto[]，与 get_messages 完全同型）
+ * → 回放时间线 PlaybackEntry[]。
+ *
+ * 与 pi-client-adapter 内 get_messages 的转换保持同一规则：独立 toolResult 顶层消息按
+ * toolCallId 归并回对应 toolCall；错误消息补 ✗ Error 文本；空文本且无工具的消息跳过。
+ */
+export function toPlaybackEntries(messages: unknown[]): PlaybackEntry[] {
+	// 独立 toolResult 顶层消息（role:"toolResult"，serve 快照/JSONL 形状）→ 按 toolCallId 归并，
+	// 供下面渲染时挂回对应 toolCall（结果在消息自己的 content 内联形状时直接在循环内读取）。
+	const standaloneResults = new Map<string, { isError?: boolean; text: string }>();
+	for (const raw of messages) {
+		if (!raw || typeof raw !== "object") continue;
+		const m = raw as { role?: string; toolCallId?: string; isError?: boolean; content?: unknown };
+		if (m.role !== "toolResult" || !m.toolCallId) continue;
+		const parts = Array.isArray(m.content) ? (m.content as { type?: string; text?: string }[]) : [];
+		standaloneResults.set(m.toolCallId, {
+			isError: m.isError,
+			text: parts
+				.filter((c): c is { type: "text"; text: string } => c.type === "text")
+				.map(c => c.text)
+				.join("\n"),
+		});
+	}
+
+	const result = new Map<string, { isError?: boolean; text: string }>(standaloneResults);
+	const entries: PlaybackEntry[] = [];
+	for (const raw of messages) {
+		if (!raw || typeof raw !== "object") continue;
+		const msg = raw as {
+			id?: string;
+			role?: string;
+			model?: string;
+			content?: unknown;
+			errorMessage?: string;
+		};
+		const parts = Array.isArray(msg.content)
+			? (msg.content as {
+					type?: string;
+					text?: string;
+					thinking?: string;
+					id?: string;
+					name?: string;
+					content?: unknown;
+					isError?: boolean;
+					arguments?: Record<string, unknown>;
+				}[])
+			: [];
+		if (msg.role !== "user" && msg.role !== "assistant") continue;
+
+		const contentByType = (type: string) => parts.filter(p => p.type === type);
+		const text = [
+			...contentByType("text").map(p => p.text ?? ""),
+			...(msg.errorMessage ? [`✗ Error: ${msg.errorMessage}`] : []),
+		].join("\n\n");
+		const calls = contentByType("toolCall");
+		const toolResults = contentByType("toolResult") as {
+			toolCallId?: string;
+			isError?: boolean;
+			content?: { type: string; text?: string }[];
+		}[];
+		for (const tr of toolResults) {
+			result.set(tr.toolCallId ?? "", {
+				isError: tr.isError,
+				text: (tr.content ?? [])
+					.filter((c): c is { type: "text"; text: string } => c.type === "text")
+					.map(c => c.text)
+					.join("\n"),
+			});
+		}
+		const tools: PlaybackToolStep[] = calls.map(call => {
+			const r = result.get(call.id ?? "");
+			return {
+				name: call.name ?? "tool",
+				argsText: call.arguments ? prettyArgs(call.arguments) : "",
+				state: r?.isError ? "fail" : "done",
+				result: r?.text,
+			};
+		});
+		if (!text && tools.length === 0 && !msg.errorMessage) continue;
+		entries.push({
+			id: msg.id ?? `e${entries.length}`,
+			role: msg.role === "user" ? "user" : "assistant",
+			model: msg.model,
+			text,
+			tools,
+		});
+	}
+	return entries;
+}
+
+function prettyArgs(args: Record<string, unknown>): string {
+	return Object.entries(args)
+		.map(([k, v]) => `${k}: ${typeof v === "string" ? v : JSON.stringify(v)}`)
+		.join(" · ");
+}
