@@ -254,6 +254,17 @@ export class AgentBridge {
 					event.stderrTail,
 				);
 				if (event.error) this.#lastError = event.error.message;
+				// Fail fast: a dead child will never send `agent_end`. Reject any
+				// in-flight prompt(s) immediately instead of letting the
+				// inactivity/streaming watchdogs stall the queue for minutes.
+				// The executePrompt catch sees the "exited" message, runs crash
+				// recovery (bounded backoff restart) and returns a friendly
+				// "系统正在恢复中" fallback; cron falls back to the cold
+				// subprocess without waiting out the inactivity budget.
+				// Regression: 2026-08-19/20 omp-atomix "hang" — the child crashed
+				// at every turn finalize (withModelFallback TypeError) and the
+				// pending prompt sat unresolved for 13-18 minutes.
+				this.#queue.rejectAll(new Error("Agent RPC process exited unexpectedly"));
 				break;
 		}
 	}

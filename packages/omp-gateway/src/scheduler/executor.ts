@@ -184,7 +184,12 @@ export async function executeScheduledCommand(
 		}
 
 		const exitCode = await proc.exited;
-		return { exitCode, output, stderr, timedOut: _timedOut };
+		// A run that hit the timeout is a timeout — NOT a graceful success.
+		// The subprocess can exit 0 after our SIGTERM (clean shutdown), but
+		// the task did not complete within its budget. Force the standard
+		// cron timeout exit code (124) so every downstream consumer (exec-log
+		// status, engine stats, delivery cards) reports it truthfully.
+		return { exitCode: _timedOut ? 124 : exitCode, output, stderr, timedOut: _timedOut };
 	})();
 
 	const timeoutPromise = Bun.sleep(timeoutMs).then(async () => {

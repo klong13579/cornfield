@@ -227,3 +227,77 @@ describe("AgentBridge stderr tail diagnostics", () => {
 		}
 	});
 });
+
+// Child dies mid-prompt (like the 8/20 withModelFallback crash at turn
+// finalize). Regression: the pending prompt used to sit unresolved until the
+// inactivity/streaming watchdogs fired — 13-18 minutes in prod. The bridge
+// must reject it on `disconnected`, then auto-restart on the next prompt.
+const CRASH_ONCE_MID_PROMPT_SCRIPT = `#!/usr/bin/env bun
+import * as fs from "node:fs";
+const stateFile = process.env.FAKE_RPC_STATE;
+let spawns = 0;
+try {
+  spawns = Number(fs.readFileSync(stateFile, "utf8"));
+} catch {}
+fs.writeFileSync(stateFile, String(spawns + 1));
+function emit(value) {
+  process.stdout.write(JSON.stringify(value) + "\\n");
+}
+emit({ type: "ready", protocol_version: 1 });
+let buffer = "";
+async function handleFrame(frame) {
+  if (frame.type !== "prompt") return;
+  emit({ type: "response", id: frame.id, command: "prompt", success: true });
+  if (spawns === 0) {
+    setTimeout(() => {
+      emit({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "partial" }] } });
+      process.exit(1); // die mid-turn, like the finalize crash
+    }, 50);
+    return;
+  }
+  setTimeout(() => {
+    emit({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "recovered: " + frame.message }] } });
+    emit({ type: "agent_end" });
+  }, 0);
+}
+for await (const chunk of Bun.stdin.stream()) {
+  buffer += new TextDecoder().decode(chunk);
+  let index = buffer.indexOf("\\n");
+  while (index !== -1) {
+    const line = buffer.slice(0, index).trim();
+    buffer = buffer.slice(index + 1);
+    if (line) await handleFrame(JSON.parse(line));
+    index = buffer.indexOf("\\n");
+  }
+}
+`;
+
+describe("AgentBridge fail-fast on mid-prompt child death", () => {
+	test("rejects the in-flight prompt fast on disconnected, next prompt auto-restarts", async () => {
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-gateway-failfast-"));
+		const stateFile = path.join(dir, "spawn-count");
+		Bun.env.FAKE_RPC_STATE = stateFile;
+		const fake = await createFakeRpcBinary(CRASH_ONCE_MID_PROMPT_SCRIPT, "omp-gateway-failfast-rpc-");
+		const bridge = new AgentBridge({ ompPath: fake.path, crashBackoffMs: 1, maxCrashRetries: 3 });
+		try {
+			await bridge.start();
+
+			const started = Date.now();
+			// Fail-fast: rejects with the crash (not the 10s inactivity watchdog).
+			await expect(bridge.executePrompt("hello", { inactivityMs: 10_000 })).rejects.toThrow(/exited/);
+			const elapsed = Date.now() - started;
+			expect(elapsed).toBeLessThan(5_000);
+			expect(bridge.isRunning).toBe(false); // warm child died with the prompt
+
+			// Next prompt restarts the child automatically and succeeds.
+			const meta = await bridge.executePrompt("world", { inactivityMs: 10_000 });
+			expect(meta).toContain("recovered: world");
+			expect(bridge.isRunning).toBe(true);
+		} finally {
+			bridge.stop();
+			await fake.cleanup();
+			Bun.env.FAKE_RPC_STATE = "";
+			await fs.rm(dir, { recursive: true, force: true });
+		}
+	});
+});

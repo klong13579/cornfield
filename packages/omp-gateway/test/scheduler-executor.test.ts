@@ -376,3 +376,34 @@ describe("agentSessionPath round-trip (persistence fix)", () => {
 		expect(out[0]?.agentSessionPath).toBeUndefined();
 	});
 });
+
+// Executor timeout contract: a subprocess killed by the task timeout must
+// report the standard cron timeout exit code (124), even when the process
+// exits 0 after our SIGTERM (clean shutdown). Before the fix, the graceful
+// exit-0 produced `timedOut: true, exitCode: 0`, and cron-service recorded
+// the timed-out run as success (observed 2026-08-20 daily-kb-sync).
+describe("executeScheduledCommand timeout", () => {
+	it("reports 124 + timedOut for a clean-exiting subprocess killed by the timeout", async () => {
+		workDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), "omp-gateway-timeout-"));
+		const scriptPath = path.join(workDir, "trap-exit-0.sh");
+		await Bun.write(scriptPath, `#!/usr/bin/env sh\ntrap 'exit 0' TERM\nwhile true; do sleep 1; done\n`);
+		await fsPromises.chmod(scriptPath, 0o755);
+
+		const result = await executeScheduledCommand(scriptPath, {
+			taskType: "shell",
+			timeoutMs: 500,
+			cwd: workDir,
+		});
+		expect(result.timedOut).toBe(true);
+		expect(result.exitCode).toBe(124);
+	});
+
+	it("keeps the real exit code for runs that finish before the timeout", async () => {
+		const result = await executeScheduledCommand("exit 3", {
+			taskType: "shell",
+			timeoutMs: 5_000,
+		});
+		expect(result.timedOut).toBe(false);
+		expect(result.exitCode).toBe(3);
+	});
+});

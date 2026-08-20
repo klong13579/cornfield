@@ -624,9 +624,12 @@ export class CronService {
 			log.warn("Cron task forceFail override", { taskId: task.id, taskName: task.name });
 		}
 
-		// Record the execution result
+		// Record the execution result. A subprocess killed by the task timeout
+		// (timedOut=true, executor forces exit 124) must NOT be recorded as
+		// success — the run did not complete its work.
+		const execStatus: "success" | "failure" = exitCode === 0 && !timedOut ? "success" : "failure";
 		storage.updateExecution(executionId, {
-			status: exitCode === 0 ? "success" : "failure",
+			status: execStatus,
 			exitCode,
 			output: timedOut ? `[TIMED OUT after ${task.timeoutMs ?? 30_000}ms]\n${output}` : output,
 			stderr: timedOut ? `[TIMED OUT]\n${stderr}` : stderr,
@@ -803,10 +806,11 @@ export class CronService {
 			id: executionId,
 			ts: endedAt,
 			exitCode,
-			status: exitCode === 0 ? "success" : "failure",
+			status: execStatus,
 			durationMs,
 			output,
 			stderr,
+			...(timedOut ? { timedOut: true } : {}),
 			...(logDiagnostics ? { diagnostics: logDiagnostics } : {}),
 			// Persist the agent session path in the JSONL log so a
 			// gateway restart between this run and the next scheduled

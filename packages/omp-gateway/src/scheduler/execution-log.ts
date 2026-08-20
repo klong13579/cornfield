@@ -71,6 +71,9 @@ export interface ExecutionLogEntry {
 	stderr: string;
 	/** Structured diagnostics collected during execution. Absent in legacy entries. */
 	diagnostics?: CronRunDiagnostics;
+	/** Whether the run hit the task timeout. Absent for legacy entries / non-timeout runs. */
+	timedOut?: boolean;
+
 	/**
 	 * For agent tasks: absolute path to the OMP agent session JSONL that
 	 * contains the full LLM trace (thinking + tool_use + tool_result). Set
