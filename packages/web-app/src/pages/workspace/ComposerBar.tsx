@@ -346,7 +346,7 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 									})
 								}
 							>
-								<ProviderLogo provider={currentProvider ?? "-"} size={15} />
+								<ProviderLogo provider={currentProvider ?? "-"} size={12} />
 								<b className="font-mono text-[12px] font-medium text-ink">{view.model ?? "—"}</b>{" "}
 								<span className="rounded-[4px] bg-surface-3 px-1.5 py-px font-mono text-[10px] text-ink-subtle">
 									{view.thinkingLevel ?? "off"}
@@ -369,7 +369,7 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 											{modelGroups.map(([provider, models]) => (
 												<div key={provider}>
 													<div className="flex items-baseline gap-1.5 px-2.5 pt-1.5 pb-0.5">
-														<ProviderLogo provider={provider} size={13} />
+														<ProviderLogo provider={provider} size={10} />
 														<span className="text-[10px] font-semibold tracking-[0.08em] text-ink-faint uppercase">
 															{provider}
 														</span>
@@ -385,7 +385,7 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 																setShowModelMenu(false);
 															}}
 														>
-															<ProviderLogo provider={provider} modelId={m.id} size={12} />
+															<ProviderLogo provider={provider} modelId={m.id} size={10} />
 															<span className="min-w-0 flex-1 truncate font-mono text-[13px] text-ink">
 																{m.id}
 															</span>
