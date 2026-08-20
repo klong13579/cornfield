@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Added
+
+- **父中断恢复：squad state 落盘** (`scripts/squad-state.ts`, `scripts/bootstrap.ts`): 集结完成后写 `~/.omp/squads/<squadId>/state.json`（每子任务落点/分支/paneId/状态）；父每收一条状态消息用 `squad-state.ts update <taskId> <status>` 同步；父进程中断后 `squad-state.ts list` 读恢复清单，按 pane 复核后接续。SKILL.md 新增「父中断恢复」章节定义完整流程。
+
+### Changed
+
+- **merge 移出 skill 职责** (`SKILL.md`, `USAGE.md`): 父 agent 不再合并任何代码进 base —— Phase 3 改为「验收交接」，验证通过后把 branch + diff 摘要摆给用户，由用户自己 `git merge <branch>`；清理仅在用户表态后执行。`mergePolicy` 语义降级为验收提示（unknown 强制 human-review 护栏保留）。
+- **子任务 tab 建进父进程 workspace** (`scripts/bootstrap.ts`, `SKILL.md`, `USAGE.md`): 取消 squad 专属 workspace —— 所有子 omp 的 tab 直接建在父所在 workspace（`HERDR_WORKSPACE_ID`），父+子同一个 workspace、一个窗口全看到；回收改为 `herdr pane close <paneId>` 逐个关（不再 workspace close）。
+
 ## [0.2.0] - 2026-08-20
 
 ### Added

@@ -4,7 +4,7 @@
  * 作用
  * ────
  * 按任务包（.squad.json schema）把用户任务集结成一组并行子 omp：
- *   1. isolation="worktree"   → herdr worktree create（幂等，已存在则复用）——必须传 --workspace <squadWorkspaceId>，
+ *   1. isolation="worktree"   → git worktree add（幂等，已存在则复用）——仓库上下文由 -C parentCwd 明确
  *      worktree 建在 squad workspace 的 source repo（= workspace create --cwd 指定的仓库）；不传会建到父 workspace 的仓库（实测）
  *   2. isolation="shared-*"   → cwd 用 repo 根，brief 写到 /tmp/squad-<squadId>/<taskId>.squad.json
  *   3. 每个子任务 → herdr tab create（tab 固定落在 squad 专属 workspace，集结时创建并命名）
@@ -37,6 +37,8 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+
+import { statePath, writeState, type SquadState, type SubtaskState } from "./squad-state.ts";
 
 type Gate = {
 	kind: "derived" | "explicit" | "unknown";
@@ -327,32 +329,27 @@ async function createWorktree(subtask: Subtask, baseBranch: string | undefined, 
 	);
 }
 
-async function createSquadWorkspace(bundle: Bundle, parentCwd: string): Promise<string> {
-	// 每个 squad 一个专属 workspace：label 可命名（UI 识别 squad-<id>）、所有子任务 tab
-	// 固定落在这里（保证同 workspace）、与父 workspace 解耦（父被关不影响子任务）、
-	// 回收时父 agent 对 workspace_id 整体 close。source repo = parentCwd 所在 git 仓库。
-	const json = await run(
-		["herdr", "workspace", "create", "--cwd", parentCwd, "--label", `squad-${bundle.squadId}`, "--no-focus"],
-		{ quiet: true },
-	);
+async function parentWorkspaceId(): Promise<string> {
+	// 子任务 tab 建进父进程当前所在 workspace（父+子同一个 workspace，用户一个窗口全看到）。
+	// HERDR_WORKSPACE_ID 由 herdr 注入；缺失（非 herdr pane 直接跑）时查 list 找 focused。
+	const env = process.env.HERDR_WORKSPACE_ID?.trim();
+	if (env) return env;
+	const json = await run(["herdr", "workspace", "list"], { quiet: true });
 	try {
-		const parsed = JSON.parse(json.trim()) as { result?: { workspace?: { workspace_id?: string } } };
-		const id = parsed.result?.workspace?.workspace_id;
-		if (id) {
-			process.stderr.write(`squad 专属 workspace: ${id}（label=squad-${bundle.squadId}）\n`);
-			return id;
-		}
+		const parsed = JSON.parse(json) as { result?: { workspaces?: Array<{ workspace_id?: string; focused?: boolean }> } };
+		const focused = parsed.result?.workspaces?.find(w => w.focused);
+		if (focused?.workspace_id) return focused.workspace_id;
 	} catch {
-		/* 非 JSON 输出走下面 fail */
+		/* fallthrough */
 	}
-	fail(`workspace create 未返回 workspace_id，输出: ${json}`);
+	fail(`无法确定父进程所在 workspace（HERDR_WORKSPACE_ID 为空，workspace list 无 focused）`);
 }
 
-async function launchPane(cwd: string, paneCmd: string, label: string, squadWorkspaceId: string): Promise<string> {
-	// 每个子任务独立 tab（herdr tab create → root pane），不再 split 当前 tab：
+async function launchPane(cwd: string, paneCmd: string, label: string, workspaceId: string): Promise<string> {
+	// 每个子任务独立 tab（herdr tab create → root pane），不再 split 当前 pane：
 	// 分裂面板会把 TUI 挤在窄 pane 里且多个 omp 共享同一终端上下文（用户指定）。
-	// workspace 固定传 squad 专属 workspace（createSquadWorkspace 产出），所有子 omp 必在同一 workspace。
-	const args = ["herdr", "tab", "create", "--cwd", cwd, "--label", label, "--no-focus", "--workspace", squadWorkspaceId];
+	// workspace 固定传父进程所在 workspace（parentWorkspaceId），父+子同一个 workspace。
+	const args = ["herdr", "tab", "create", "--cwd", cwd, "--label", label, "--no-focus", "--workspace", workspaceId];
 	const json = await run(args);
 	const paneId = extractPaneId(json);
 	if (!paneId) fail(`tab create 未返回 root pane id，输出: ${json}`);
@@ -487,7 +484,8 @@ async function main(): Promise<void> {
 	const parentCwd = path.resolve(bundle.parent.cwd ?? process.cwd());
 
 	// 集结先建 squad 专属 workspace：所有子任务 tab 落在同一 workspace（命名 squad-<squadId>）。
-	const squadWorkspaceId = dryRun ? null : await createSquadWorkspace(bundle, parentCwd);
+	// 子任务 tab 建进父进程当前 workspace（父+子同 workspace，一个窗口全看到）
+	const workspaceId = dryRun ? "(dry-run)" : await parentWorkspaceId();
 
 	for (const [index, subtask] of bundle.subtasks.entries()) {
 		const model = resolveModel(bundle, subtask);
@@ -525,7 +523,7 @@ async function main(): Promise<void> {
 		const outLog = path.join(tmpDir, `${subtask.id}.out`);
 		fs.writeFileSync(shellFile, `#!/bin/bash\n${command}\n`);
 		const paneCmd = `script -q ${shellQuote(outLog)} bash ${shellQuote(shellFile)}`;
-		const paneId = await launchPane(cwd, paneCmd, subtask.id, squadWorkspaceId!);
+		const paneId = await launchPane(cwd, paneCmd, subtask.id, workspaceId);
 		launchedPanes.push({ taskId: subtask.id, paneId, outLog });
 		result.push({ taskId: subtask.id, isolation: subtask.isolation, cwd, worktree: subtask.isolation === "worktree" ? cwd : null, briefPath, paneId, model });
 	}
@@ -537,7 +535,39 @@ async function main(): Promise<void> {
 		process.stderr.write("准备检查已跳过（--skip-verify），由父 agent 用 intercom children 复核。\n");
 	}
 
-	process.stdout.write(JSON.stringify({ squadId: bundle.squadId, squadWorkspaceId, launched: result, verify }, null, 2) + "\n");
+	// 父中断恢复：集结结果落盘 ~/.omp/squads/<squadId>/state.json，父每收一条状态消息更新它
+	// （见 SKILL.md 父盯盘与中断恢复）。verify 失败也写（记录已启动的子任务）。
+	if (!dryRun) {
+		const branchById = new Map(bundle.subtasks.map(s => [s.id, s.branch]));
+		const subtaskStates: SubtaskState[] = result.map(r => {
+			const rr = r as { taskId: string; isolation: SubtaskState["isolation"]; worktree: string | null; paneId?: string; model?: string; briefPath: string };
+			return {
+				id: rr.taskId,
+				isolation: rr.isolation,
+				worktree: rr.worktree ?? undefined,
+				branch: branchById.get(rr.taskId),
+				paneId: rr.paneId,
+				model: rr.model,
+				briefPath: rr.briefPath,
+				status: "assembled",
+				updatedAt: Date.now(),
+			};
+		});
+		const state: SquadState = {
+			squadId: bundle.squadId,
+			taskType: bundle.taskType,
+			baseBranch: bundle.baseBranch,
+			parent: { target: bundle.parent.target, sessionId: bundle.parent.sessionId, cwd: parentCwd },
+			workspaceId,
+			createdAt: Date.now(),
+			subtasks: subtaskStates,
+		};
+		const stateFile = statePath(bundle.squadId);
+		writeState(stateFile, state);
+		process.stderr.write(`squad state 已写入 ${stateFile}（父中断后读它恢复）\n`);
+	}
+
+	process.stdout.write(JSON.stringify({ squadId: bundle.squadId, workspaceId, launched: result, verify }, null, 2) + "\n");
 	if (verify === "failed") process.exit(1);
 
 	const worktrees = result.filter(r => (r as { worktree?: string }).worktree).length;

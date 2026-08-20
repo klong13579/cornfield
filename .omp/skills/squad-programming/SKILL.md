@@ -23,7 +23,7 @@ mutating: true
 
 ## Outcome
 
-用户的任务被拆成 MECE 子任务，每个子任务在自己的 worktree（或只读共享区）由独立子 omp 执行；子 omp 通过 intercom 向父求助/汇报；父按任务包的 gate 验证每个子任务，按 mergePolicy 合并或交人类验收；结束后 worktree 清理，任务包归档。
+用户的任务被拆成 MECE 子任务，每个子任务在自己的 worktree（或只读共享区）由独立子 omp 执行；子 omp 通过 intercom 向父求助/汇报；父按任务包的 gate 验证每个子任务并把完成结果（branch + diff 摘要）**交接给用户**；合并代码进 base 由用户自己做；结束后 worktree 清理，任务包归档。
 
 ## 前置条件（不满足则 [blocked]）
 
@@ -58,7 +58,7 @@ mutating: true
 
 - `derived`（默认）：code/test 自动继承仓库验证链（`bun check`、`bun test <scope>`、lint），父补业务 acceptance（如「保持对外 API 签名不变」）。
 - `explicit`：用户给了明确验收 → 原样用。
-- `unknown`（推导不出「什么算好」）：`mergePolicy` 强制 `human-review`，走 #report-only 降级，永不自动合并。
+- `unknown`（推导不出「什么算好」）：`mergePolicy` 强制 `human-review`，走 #report-only 降级——标注给用户重点细审。
 
 ### Step 0.4 分配模型档位（见 #模型档位表）
 
@@ -66,7 +66,7 @@ mutating: true
 
 ### Step 0.5 产出任务包（.squad.json）
 
-见 #任务包 schema。任务包写入每个 worktree 的 `.squad.json`（脚本执行），父保留聚合副本到 `~/.omp/squads/<squadId>/`（不污染 repo 的 git status）。
+见 #任务包 schema。任务包写入每个 worktree 的 `.squad.json`（脚本执行），父保留聚合副本到 `~/.omp/squads/<squadId>/`（不污染 repo 的 git status）；集结脚本同时在这里写 `state.json`（状态底账，父中断后用于恢复，见 #父中断恢复）。
 
 **Completion criterion**：任务包通过 schema 校验（脚本 `bootstrap.ts --check <bundle>` 可静默校验）；每条硬规则无违反。
 
@@ -80,7 +80,7 @@ bun run .omp/skills/squad-programming/scripts/bootstrap.ts \
   [--dry-run]
 ```
 
-脚本对每个 `isolation: "worktree"` 子任务：建 worktree（**git 原生 `git worktree add -C <parentCwd>`**，不用 herdr worktree create —— 后者会给每个 worktree 自动开一个展示 workspace（`open_workspace_id`，含一个空 tab、无 omp，纯冗余），且仓库上下文绕 workspace 关联容易建错）→ 写入该 worktree 的 `.squad.json` → tab create（tab 固定落在 **squad 专属 workspace**，集结时创建并命名 `squad-<squadId>`，不 split 当前 pane）→ `pane run` 注入 `PI_SUBAGENT_*` env（注册父 edge）+ `--model <档位模型>` 启动子 omp。`shared-read` 子任务不建 worktree，cwd 用 repo 根。
+脚本对每个 `isolation: "worktree"` 子任务：建 worktree（**git 原生 `git worktree add -C <parentCwd>`**，不用 herdr worktree create —— 后者会给每个 worktree 自动开一个展示 workspace（`open_workspace_id`，含一个空 tab、无 omp，纯冗余），且仓库上下文绕 workspace 关联容易建错）→ 写入该 worktree 的 `.squad.json` → tab create（tab 固定落在**父进程当前 workspace**，Raiff + 子同一个 workspace，一个窗口全看到）→ `pane run` 注入 `PI_SUBAGENT_*` env（注册父 edge）+ `--model <档位模型>` 启动子 omp。`shared-read` 子任务不建 worktree，cwd 用 repo 根。
 
 启动后脚本自动做 **pane 层准备检查**：轮询各 pane 输出（pane read + `script -q` 落盘日志）确认 omp 已启动（默认超时 60s，`--verify-timeout <ms>` 可调），失败则带输出快照退出码 1。不做 herdr agent list 探测 —— script 包装启动的 pane 不会被识别为 omp agent（终端标题非 π，实测永久缺位）。确认只是启动慢时可 `--skip-verify` 绕过，改由父 agent 用 intercom 复核。完整三层检查见 #Phase 1.5 准备检查。
 
@@ -117,29 +117,42 @@ bun run .omp/skills/squad-programming/scripts/bootstrap.ts \
 ### 父 agent 侧盯盘
 
 - 用 `intercom({ action: "children" })` 看子 omp 实时状态，不轮询消息。
+- **每条状态消息落地 state.json**（父中断恢复的底账）：
+  `bun run .omp/skills/squad-programming/scripts/squad-state.ts ~/.omp/squads/<squadId>/state.json update <taskId> <status> [一句话]`
+  收到 `[T<n>] STARTED` → `started`；`BLOCKED` → `blocked`；`REVIEWING` → `reviewing`；`COMPLETE` → 先跑 gate 验证，通过才 `complete`（否则打回）；`FAILED` → `failed`。每回合至少核对一次 state 是否跟上。
 - 收到子 ask → 立即 `reply` 决策或引导；`pending` 看堆积，`reply to <taskId>` 定向回复。
 - 收到 `[T<n>] BLOCKED` → 判断是缺信息（补）还是缺决策（转用户拍板，绝不代拍）。
 
-**Completion criterion**：所有子任务达到 `COMPLETE` 或 `FAILED`（由父向每个子 omp 确认一次最终状态）。
+**Completion criterion**：所有子任务达到 `COMPLETE` 或 `FAILED`（由父向每个子 omp 确认一次最终状态），且 state.json 已同步为终态。
 
-## Phase 3 — 回收
+## 父中断恢复（进程重启后接续）
+
+父 omp 进程中断（崩溃/重启/被 kill）时，子 omp 的进程和 worktree 不受影响，但父的管辖上下文（谁 STARTED、谁卡在 ask）会丢。恢复步骤：
+
+1. `squad-state.ts <stateFile> list` 读未终态子任务（`stateFile = ~/.omp/squads/<squadId>/state.json`，集结时自动写入；找不到就搜 `~/.omp/squads/*/state.json` 按 `createdAt` 最新的）。
+2. 对每个未终态子任务，用 `intercom({ action: "children" })` + `herdr pane read <paneId>`（state 里有 paneId）复核实际状态：
+   - 还活着且在干活 → 保持 `started`，询问是否需要它重新发一次最新状态；
+   - 发了 COMPLETE 但父没收到 → 跑 gate 验证，过了直接标 `complete`；
+   - pane 死了/无响应 → 标记 `failed` 并给原因。
+3. 恢复期间对子任务补发一条确认消息（intercom send），告诉它父已回来；继续 Phase 2 盯盘。
+
+**兜底事实**：state.json 是权威底账，intercom 消息流只是事件源；两者不一致时以 state.json + 实际 pane 复核为准。
+
+## Phase 3 — 验收交接（skill 不合并代码）
 
 1. **验证**：对每个子任务在对应 worktree 跑 `gate.verifiers`（如 `bun check`、`bun test <scope>`）；失败 → 打回子 omp 修或标记 `FAILED` 上报用户。
-2. **合并**：
-   - `mergePolicy: "auto"` 且验证全过 → 合并到 base 分支（`git merge <branch>`），跑一次集成 `bun check`。
-   - `mergePolicy: "human-review"`（gate `unknown` 或产品/业务验收）→ **不合并**，整理 diff 摘要 + gate 分析给用户验收，用户点头才合。
+2. **交接**：父 agent **不做任何 merge** —— 合并代码进 base 是用户的动作。对每个验证过的子任务整理：branch 名 + diff 摘要 + gate 结果，逐条摆给用户；用户自己 `git merge <branch>`（或打回/丢弃）。
 3. **清理**（每步单独执行、确认 JSON 返回后再下一步，**禁止串行 `&&`**）：
-   - `herdr tab close <tab_id>` 逐个关掉 squad workspace 的 tab（`herdr tab list --workspace <squadWorkspaceId>` 拿全部 tab id）；
-   - `git worktree remove --force <worktree路径>` + `git branch -D <branch>`；
-   - 归档任务包从 `~/.omp/squads/<squadId>/` 移入 `archive/`；
-   - `herdr workspace close <squadWorkspaceId>` 仅作最后兜底：确认返回正常 JSON（`{"result":{"type":"ok"}}`）后再 git 清理；**返回异常（如 `No result provided`）立即停止**，先查该 workspace 是否还有父 omp 关联进程，再决定是否人工收。**不要用 `&&` 把 close 跟后面的 git 命令串在一起**——close 出错时后续命令会在不确定状态下继续执行。
+   - 用户确认过了某个子任务的分支（合并完或拍板丢弃） → `git branch -D <branch>` + `git worktree remove --force <worktree路径>`；
+   - `herdr pane close <paneId>` 逐个关掉子任务 pane（paneId 在 state.json / 集结输出里）；
+   - 归档任务包从 `~/.omp/squads/<squadId>/` 移入 `archive/`。
 
-**Completion criterion**：每个子任务处于「已合并」或「等待人验收」之一；worktree 全部清理；用户看到结果摘要。
+**Completion criterion**：每个子任务已验证并交接给用户（branch + 摘要）；用户确认后的分支与 worktree 清理干净；用户看到结果摘要。
 
 **清理权限（谁不用问你，谁必须等你）**：
-- `derived`/`explicit` gate 且验证全过、已合并 → 父 agent **自动清理**该子任务的 worktree/分支（改动已进 base，删分支无损）——不用逐项找用户确认；
-- `human-review`（gate `unknown`）或 `FAILED` → **不得清理**：worktree/分支保留，等用户验收/拍板后才删；
-- workspace close 只在这些之外的全部子任务已终态后执行；只要还有待验收/待修的 worktree 在，不 close（防止子任务上下文和会话终端被一起回收）。
+- 用户明确说「合并完了 / 这分支不要了」→ 父 agent 清理该子任务的 worktree/分支；
+- `FAILED` 或用户还没表态 → **不得清理**：worktree/分支保留，等用户拍板；
+- pane close 只在对应子任务已终态（用户已逐条表态后）执行；只要还有待合并/待验的 worktree 在，不关 pane（防止子任务上下文和会话终端被一起回收）。
 
 ## 模型档位表
 
@@ -153,9 +166,9 @@ bun run .omp/skills/squad-programming/scripts/bootstrap.ts \
 
 ## Gate 三态
 
-| 档位 | 来源 | mergePolicy |
+| 档位 | 来源 | mergePolicy（验收提示） |
 |---|---|---|
-| `derived` | 父按任务类型从仓库验证链自动推导（工程 gate：check/test/lint；业务 gate：父补写 acceptance） | `auto` |
+| `derived` | 父按任务类型从仓库验证链自动推导（工程 gate：check/test/lint；业务 gate：父补写 acceptance） | `auto`（验证过即可交接，用户自行 merge） |
 | `explicit` | 用户明确给出验收标准 | `auto` |
 | `unknown` | 推导不出 | 强制 `human-review`，走 report-only |
 
@@ -188,7 +201,7 @@ bun run .omp/skills/squad-programming/scripts/bootstrap.ts \
         "kind": "derived",                       // derived | explicit | unknown
         "verifiers": ["bun check", "bun test packages/foo"],
         "acceptance": "保持对外 API 签名不变",
-        "mergePolicy": "auto"                    // unknown 时强制 human-review
+        "mergePolicy": "auto"                    // 仅验收提示（skill 不自动 merge）：unknown 时强制 human-review
       },
       "modelTier": "mid",                        // cheap | mid，或 "model": "<provider>/<id>"
      "branch": "feat/t1",                       // worktree 目录按此自动推导（<父cwd>/.worktrees/feat-t1）
