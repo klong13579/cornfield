@@ -1350,6 +1350,11 @@ interface RemoteSkillItem {
 	description?: string;
 	source: string;
 	type: "skill" | "plugin";
+	/** 链接与元信息（Hub 详情用；catalog 无评分/下载数字段，排名由前端按 name 排序序号给出）。 */
+	homepage?: string;
+	repository?: string;
+	author?: string;
+	version?: string;
 }
 
 /** 安装根目录：~/.omp/agent/skills（与 native skills 发现一致：skills/<name>/SKILL.md）。 */
@@ -1429,6 +1434,10 @@ async function listRemoteSkills(source: string): Promise<RemoteSkillItem[]> {
 				type: classifyRemoteSkillType(entry),
 			};
 			if (entry.description) item.description = entry.description;
+			if (entry.homepage) item.homepage = entry.homepage;
+			if (entry.repository) item.repository = entry.repository;
+			if (entry.author && typeof entry.author === "object" && entry.author.name) item.author = entry.author.name;
+			if (entry.version) item.version = entry.version;
 			return item;
 		});
 	} finally {
