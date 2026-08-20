@@ -383,6 +383,11 @@ class SessionStore {
 	 *    无 sessionFile 则仅 switch，serve 推权威快照填充 Transcript。
 	 * 加载中 / 失败写 historyLoading / historyError（UI 可见，不 silent）。
 	 */
+	/** 历史会话时间线（get_session_messages；PlaybackView 回放消费，与 openHistorySession 同源）。 */
+	getSessionMessages(file: string): Promise<MessageDto[]> {
+		return this.#client.getSessionMessages(file);
+	}
+
 	async openHistorySession(record: { id: string; agent: string; sessionFile?: string }): Promise<void> {
 		const agents = this.#client.getServerAgents();
 		const agentId = agents.find(a => a.id === record.agent || a.name === record.agent)?.id ?? record.agent;
