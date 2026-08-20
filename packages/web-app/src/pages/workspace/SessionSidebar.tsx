@@ -215,6 +215,16 @@ export function SessionSidebar(): React.JSX.Element {
 						))}
 					</div>
 
+					{view.historyLoading && (
+						<div className="mx-3 mb-1 rounded-md bg-surface-2 px-3 py-2 text-[12px] text-ink-subtle">
+							加载会话记录中…
+						</div>
+					)}
+					{view.historyError && (
+						<div className="mx-3 mb-1 rounded-md border border-danger/30 bg-danger/5 px-3 py-2 text-[12px] text-danger">
+							{view.historyError}
+						</div>
+					)}
 					{/* 会话列表 */}
 					<div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
 						{groups.length === 0 && (
@@ -240,6 +250,7 @@ export function SessionSidebar(): React.JSX.Element {
 										pinned={pinned.has(row.id)}
 										active={!isCurrent(row) && row.id === view.sessionId}
 										onTogglePin={() => togglePin(row.id)}
+										onClick={isCurrent(row) ? undefined : () => store.openHistorySession(row)}
 									/>
 								))}
 							</div>
@@ -273,31 +284,41 @@ function SessionRow({
 	pinned,
 	active,
 	onTogglePin,
+	onClick,
 }: {
 	row: Row;
 	pinned: boolean;
 	active: boolean;
 	onTogglePin: () => void;
+	onClick?: () => void;
 }): React.JSX.Element {
 	return (
-		<button
-			type="button"
-			className={`group flex w-full items-start gap-1.5 rounded-lg px-2 py-2 text-left transition-colors hover:bg-surface-2 ${active ? "bg-accent-dim" : ""}`}
-			onClick={onTogglePin}
-			title={pinned ? "取消 pin" : "pin 置顶"}
+		<div
+			className={`group flex w-full items-start gap-1.5 rounded-lg px-2 py-2 transition-colors hover:bg-surface-2 ${active ? "bg-accent-dim" : ""}`}
 		>
-			<Star
-				size={12}
-				strokeWidth={1.5}
-				className={`mt-0.5 shrink-0 transition-colors ${pinned ? "text-accent" : "text-ink-faint opacity-0 group-hover:opacity-100"}`}
-			/>
-			<span className="min-w-0 flex-1">
+			<button
+				type="button"
+				className={`mt-0.5 shrink-0 transition-colors ${
+					pinned ? "text-accent" : "text-ink-faint opacity-0 group-hover:opacity-100"
+				}`}
+				title={pinned ? "取消 pin" : "pin 置顶"}
+				aria-label={pinned ? "取消 pin" : "pin 置顶"}
+				onClick={onTogglePin}
+			>
+				<Star size={12} strokeWidth={1.5} />
+			</button>
+			<button
+				type="button"
+				className="min-w-0 flex-1 text-left"
+				onClick={onClick}
+				title={isCurrent(row) ? "当前会话" : "打开会话"}
+			>
 				<span className="block truncate text-[13px] text-ink">{row.name}</span>
 				<span className="block truncate text-[11px] text-ink-faint">
 					{isCurrent(row) ? "当前会话" : row.agent}
 					{"messageCount" in row ? ` · ${row.messageCount} 条` : ""}
 				</span>
-			</span>
-		</button>
+			</button>
+		</div>
 	);
 }

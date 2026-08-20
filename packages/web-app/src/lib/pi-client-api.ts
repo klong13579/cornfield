@@ -10,6 +10,7 @@ import type {
 	HostToolDefinitionDto,
 	ImageContentDto,
 	MemoryProjectionDto,
+	MessageDto,
 	SessionSnapshotDto,
 	SkillDto,
 	StatsPeriodDto,
@@ -48,6 +49,12 @@ export interface GatewayStatusDto {
 	}[];
 	scheduler?: { running?: boolean; taskCount?: number } | null;
 }
+
+/**
+ * serve get_session_messages 返回的 message 条目 —— 与 get_messages 的 AgentMessage 同型
+ * （前端渲染子集即 wire MessageDto：user/assistant/toolResult，含独立 toolResult 顶层消息）。
+ */
+export type AgentMessageDto = MessageDto;
 
 /**
  * pi-client 接口契约（Web 壳消费的唯一数据面）。
@@ -121,6 +128,8 @@ export interface PiClient {
 	getMessages(): Promise<PlaybackEntry[]>;
 	/** 拉取原始消息 JSON 序列（导出 JSONL 用，不转换）。 */
 	getRawMessages(): Promise<unknown[]>;
+	/** 按 sessionFile 拉取历史会话消息（get_session_messages；serve 端契约命令，运行期对齐）。 */
+	getSessionMessages(sessionFile: string): Promise<AgentMessageDto[]>;
 	/** 分支候选（get_branch_messages：用户消息分支点 {entryId,text}）。 */
 	getBranchMessages(): Promise<BranchPoint[]>;
 	/** 历史会话索引（list_sessions；be-dev 就绪后返回真数据，未实现时返回基础查询）。 */

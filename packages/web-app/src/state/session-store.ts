@@ -84,6 +84,10 @@ export interface SessionView {
 	commandError?: string;
 	/** 待用户裁决的审批/澄清请求（permission_request push）。 */
 	pendingPermission?: PermissionRequestDto;
+	/** 历史会话回放：加载中（sidebar 点击会话行触发 get_session_messages）。 */
+	historyLoading: boolean;
+	/** 历史会话回放：失败错误文本（非空 = 加载失败，UI 可见）。 */
+	historyError?: string;
 }
 
 /** B7-1：回合收尾通知——有错误消息走出错告警（errors 开关），否则走完成（agentDone 开关）。 */
@@ -188,16 +192,7 @@ class SessionStore {
 			this.#clearCommandError();
 			return r;
 		} catch (err) {
-			const msg =
-				typeof err === "string"
-					? err
-					: err instanceof Error
-						? err.message
-						: typeof err === "object" &&
-								err !== null &&
-								typeof (err as { message?: unknown }).message === "string"
-							? (err as { message: string }).message
-							: String(err);
+			const msg = errorMessageOf(err);
 			this.#view = cloneView(this.getSnapshot());
 			this.#view.commandError = `命令失败（未连接）：${msg}`;
 			this.#notify();
@@ -379,6 +374,67 @@ class SessionStore {
 	/** 历史会话索引（list_sessions 真数据；失败时空数组，UI 空态）。 */
 	listSessions(): Promise<SessionRecordSummary[]> {
 		return this.#client.listSessions();
+	}
+
+	/**
+	 * 打开历史会话（sidebar 点击会话行）：
+	 * 1. switch 到所属 agent（serve 端 switch_session 内含 attach，工作台随后跟随）；
+	 * 2. 有 sessionFile 则 get_session_messages 拉历史消息 → 覆盖 view.messages（Transcript 复用渲染）；
+	 *    无 sessionFile 则仅 switch，serve 推权威快照填充 Transcript。
+	 * 加载中 / 失败写 historyLoading / historyError（UI 可见，不 silent）。
+	 */
+	/** 历史会话时间线（get_session_messages；PlaybackView 回放消费，与 openHistorySession 同源）。 */
+	getSessionMessages(file: string): Promise<MessageDto[]> {
+		return this.#client.getSessionMessages(file);
+	}
+
+	async openHistorySession(record: { id: string; agent: string; sessionFile?: string }): Promise<void> {
+		const agents = this.#client.getServerAgents();
+		const agentId = agents.find(a => a.id === record.agent || a.name === record.agent)?.id ?? record.agent;
+
+		try {
+			await this.#client.switchSession(agentId);
+		} catch {
+			// switch 失败（agent 已删除 / 未注册）不阻断历史回放，仅历史加载失败才可见报错
+		}
+
+		const loading = cloneView(this.getSnapshot());
+		loading.historyLoading = true;
+		loading.historyError = undefined;
+		this.#view = loading;
+		this.#notify();
+
+		if (!record.sessionFile) {
+			// 降级：无 sessionFile 仅 attach/switch；前述 switch 已触发 serve 推快照填充 Transcript
+			this.#clearHistoryLoading();
+			return;
+		}
+
+		try {
+			const messages = await this.#client.getSessionMessages(record.sessionFile);
+			const next = cloneView(this.getSnapshot());
+			next.messages = mergeToolResults(messages).map(m => this.#toMessage(m));
+			next.live = undefined;
+			next.historyLoading = false;
+			next.historyError = undefined;
+			this.#view = next;
+			this.#notify();
+		} catch (err) {
+			const next = cloneView(this.getSnapshot());
+			next.historyLoading = false;
+			next.historyError = `加载会话失败：${errorMessageOf(err)}`;
+			this.#view = next;
+			this.#notify();
+		}
+	}
+
+	#clearHistoryLoading(): void {
+		if (!this.#view?.historyLoading && !this.#view?.historyError) return;
+		const next = cloneView(this.getSnapshot());
+		next.historyLoading = false;
+		next.historyError = undefined;
+		this.#view = next;
+		this.#notify();
 	}
 
 	/** 列出 agent workspace 目录（fs_list，代理到 pi-client）。 */
@@ -669,6 +725,7 @@ class SessionStore {
 				flags: { autoCompaction: false, autoRetry: false },
 				agents,
 				env,
+				historyLoading: false,
 			};
 		}
 		return {
@@ -698,6 +755,7 @@ class SessionStore {
 			flags: { autoCompaction: snapshot.autoCompactionEnabled, autoRetry: snapshot.autoRetryEnabled },
 			agents,
 			env,
+			historyLoading: false,
 		};
 	}
 
@@ -773,6 +831,15 @@ function textOf(result: Extract<MessageContentDto, { type: "toolResult" }>): str
 function ratioPercent(used: number, total: number): number {
 	if (total <= 0) return 0;
 	return Math.min(100, Math.round((used / total) * 100));
+}
+
+function errorMessageOf(err: unknown): string {
+	if (typeof err === "string") return err;
+	if (err instanceof Error) return err.message;
+	if (typeof err === "object" && err !== null && typeof (err as { message?: unknown }).message === "string") {
+		return (err as { message: string }).message;
+	}
+	return String(err);
 }
 
 /** 单例导出。 */
