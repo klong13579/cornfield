@@ -30,8 +30,9 @@ mutating: true
 | 条件 | 检查 |
 |---|---|
 | 在 Herdr 环境 | `test "${HERDR_ENV:-}" = 1` |
-| herdr 可用 | `herdr worktree list` 能返回 JSON |
+| herdr ≥ 0.8.0 | `herdr --version`（bootstrap 结集前自动校验，tab/worktree --workspace 依赖） |
 | omp 可执行 | `command -v omp` 非空（bootstrap 用 omp 启 worker，不读 PI_INTERCOM_PI_BIN） |
+| **模型 provider 配了 key** | `models.yml` 的 `apiKey` 引用的环境变量非空（如 `NARWAL_PLAN_API_KEY`）；list_models 目录里有 ≠ key 有 |
 | intercom 在线 | `intercom({ action: "status" })` 连通 |
 | 知道自己 session id | `intercom({ action: "list" })` 中自己的 id（bootstrap 传参用） |
 | 仓库干净基线 | `git status` 无未提交改动（worktree 从 base 分支切出） |
@@ -80,16 +81,36 @@ bun run .omp/skills/squad-programming/scripts/bootstrap.ts \
   [--dry-run]
 ```
 
-脚本对每个 `isolation: "worktree"` 子任务：建 worktree（**git 原生 `git worktree add -C <parentCwd>`**，不用 herdr worktree create —— 后者会给每个 worktree 自动开一个展示 workspace（`open_workspace_id`，含一个空 tab、无 omp，纯冗余），且仓库上下文绕 workspace 关联容易建错）→ 写入该 worktree 的 `.squad.json` → tab create（tab 固定落在**父进程当前 workspace**，Raiff + 子同一个 workspace，一个窗口全看到）→ `pane run` 注入 `PI_SUBAGENT_*` env（注册父 edge）+ `--model <档位模型>` 启动子 omp。`shared-read` 子任务不建 worktree，cwd 用 repo 根。
+**工作区形态（用户要求，全链验证过）**：父 omp 当前所在 workspace = 任务包 workspace（label 自动改名为 `squadId`）；每个子任务 = 一棵**任务 worktree 树节点**（`herdr worktree create --workspace <父> --label "T<n> · <title 前 18 字>"`），树节点显示名必须语义化（不能裸 T1/T2）；worker（omp）直接起在树节点的 pane 里。Spaces 面板呈现：`任务包 workspace` └─ `T1 · 任务目的` / `T2 · …` / `T3 · …`。
 
-启动后脚本自动做 **pane 层准备检查**：轮询各 pane 输出（pane read + `script -q` 落盘日志）确认 omp 已启动（默认超时 60s，`--verify-timeout <ms>` 可调），失败则带输出快照退出码 1。不做 herdr agent list 探测 —— script 包装启动的 pane 不会被识别为 omp agent（终端标题非 π，实测永久缺位）。确认只是启动慢时可 `--skip-verify` 绕过，改由父 agent 用 intercom 复核。完整三层检查见 #Phase 1.5 准备检查。
+```text
+任务包 workspace（父 pane 所在，label=squadId）
+├─ T1 · Artifacts 产物面板骨架   （worktree t1 · worker omp 在节点 pane）
+├─ T2 · Slash 命令真源接线       （worktree t2）
+└─ T3 · Queue 取消排队接线       （worktree t3）
+```
 
-**Completion criterion**：脚本返回每个子任务的 paneId 且 pane 层检查通过；接下来走 #Phase 1.5 的 worker/父两层 gate。
+脚本对每个 `isolation: "worktree"` 子任务：
+1. **按任务名建 worktree** — `herdr worktree create --workspace <父ws> --branch <id小写> --base main --path .worktrees/<id小写> --label "T<n> · <title>"`。幂等：已存在则复用其 `open_workspace_id` 的 pane。**必须用 herdr worktree create**（不是 git worktree add）——它返回的展示 workspace 就是 Spaces 树的子节点（`WorkspaceInfo.worktree.is_linked_worktree`，herdr TUI 按它对主仓库下挂树）。
+2. **写入该 worktree 的 `.squad.json`**（回填 parent.cwd / worktree 实值）。
+3. **在树节点 pane 上起 worker** — `herdr pane run <节点pane> "bash <shell>"`，shell 内容 = `export PI_SUBAGENT_*; exec omp --model <档位模型> <brief>`。**必须 exec omp 直启**：herdr 的 agent 识别认 pane 前台进程，`script` 包装的 pane 前台是 script/bash → agents 列表永久缺位（实测）；`exec` 后前台就是 omp → 立即登记。env 注入（intercom 父 edge）走 shell export（`tab create --env` 会破坏 pane shell prompt，不用）。
+
+`shared-read` 子任务不建 worktree：父 workspace 内 tab create + 同一 worker 启动方式。
+
+启动后脚本自动做 **agent 登记检查**：轮询 `herdr agent list` 确认每个 pane 的 omp 已登记（默认超时 60s，`--verify-timeout <ms>` 可调），失败带 pane 快照退出码 1。确认只是同步慢可 `--skip-verify` 绕过，父用 intercom 复核。
+
+**Completion criterion**：脚本返回每个子任务的 paneId 且 agent 登记检查通过；接下来走 #Phase 1.5 的 worker/父两层 gate。
 
 波次调度规则（父 agent 执行）：
 - 每一波 = 所有 deps 已满足的子任务；一波内并行启动，波间等待全部收尾再进下一波（barrier）。
-- 并发数 ≤ `maxConcurrency`（默认 3）—— N 个 worktree 同时 build/test 会抢 CPU/磁盘。
+- 并发数 ≤ `maxConcurrency`（默认 3）—— N 个 worktree 同时 build/test 会抢 CPU/磁盘；**也受模型配额约束**（同 provider 多并发会 429：见 #模型使用纪律）。
 - `deps: []` 全空 → 单波纯并行；`maxConcurrency: 1` 或 deps 成链 → 纯串行。
+
+## 模型使用纪律（实测教训）
+
+- **选档位模型时必须确认该 provider 已配置 API key**（`models.yml` 的 `apiKey` 环境变量存在，如 `NARWAL_PLAN_API_KEY`）。`list_models` 只证明模型在目录里，**不证明 key**（实测 kimi-code/bailian 目录有模型但无 key，子 omp 直接 `No API key found for kimi-code`）。
+- 多子任务并发同一 provider 会命中分钟级 TPM 配额（`429 insufficient_quota`，narwal/alibaba 都实测踩过）——降 `maxConcurrency` 或分档（mid/pro 与 cheap/flash 错峰）。
+- 档位模型按子任务类别分：重实现（UI/逻辑）用 mid，轻任务（简单接线/文档）用 cheap，不一刀切。
 
 ## Phase 1.5 — 准备检查（readiness gate）
 
@@ -110,7 +131,7 @@ bun run .omp/skills/squad-programming/scripts/bootstrap.ts \
 1. **首件事读任务包** — 文件路径在启动 brief 里给出：worktree 场景为 `<cwd>/.squad.json`，shared 场景为 `/tmp/squad-<squadId>/<taskId>.squad.json`。任务、scope、gate、汇报协议、模型档位都在里面。读完立即做 #Phase 1.5 的准备检查汇报。
 2. **模型核对** — 用 `list_models` 确认分配模型在可用列表；不在 → `switch_model` 切到档内可用模型，并按实际生效模型汇报（启动参数失效兜底）。
 3. **只动 scope 内文件** — scope 外需要改动 → `ask` 求助父。
-4. **求助** — `intercom({ action: "ask", message: "..." })` **不带 to**（自动路由到父）。同时只允许一个 pending ask；求助期间不发重复 ask。
+4. **求助** — `intercom({ action: "ask", to: <父 target>, message: "..." })` **必须带 to=父 target**。不带 to 的 ask 不会被自动路由到父：intercom 的路由优先 cwd 匹配（实测误投到同目录活跃的 aion-ui 会话），parent edge 只是次选。同时只允许一个 pending ask；求助期间不发重复 ask。
 5. **状态汇报** — `intercom({ action: "send", to: <父 target>, message: "[<taskId>] <STATE>: <一句话>" })`，STATE ∈ `STARTED` / `BLOCKED` / `REVIEWING` / `COMPLETE` / `FAILED`。**STARTED = 准备检查通过**（任务包已读 + 模型已核对并生效），只发一次，父以全部 STARTED 作为 Phase 2 的闸门。
 6. 每回合结束自动上报（agent_end 由运行时注入，无需手动）。
 
@@ -187,7 +208,7 @@ bun run .omp/skills/squad-programming/scripts/bootstrap.ts \
     "mid": "narwal-plan/deepseek-v4-pro",
     "banned": ["narwal-plan/claude-opus-*", "narwal-plan/claude-sonnet-*"]
   },
-  "parent": { "target": "planner", "sessionId": "..." },  // cwd 可选：缺省 = bootstrap 运行目录（父 omp 会话 cwd），worktree 落 <父cwd>/.worktrees/
+  "parent": { "target": "planner", "sessionId": "...", "name": "可选可读展示名" },  // cwd 可选：缺省 = bootstrap 运行目录（父 omp 会话 cwd），worktree 落 <父cwd>/.worktrees/；name 仅展示（worker brief 用），路由仍走 target
   "subtasks": [
     {
       "id": "T1",
@@ -221,7 +242,7 @@ bun run .omp/skills/squad-programming/scripts/bootstrap.ts \
 shared 场景 = /tmp 绝对路径），完整理解任务、scope、gate、汇报协议、模型档位；
 用 list_models 确认分配模型在可用列表（不在则 switch_model 到档内模型并汇报实际生效模型）；
 然后立刻向父发 "[<taskId>] STARTED: <实际生效模型>，任务包已读" —— 父等全部 STARTED 才正式开工。
-规则：只改 scope 内文件；求助用 intercom ask（不带 to，自动路由父）；状态用 intercom send 给
+规则：只改 scope 内文件；求助必须用 intercom ask 且带 to=<parent.target>（不带 to 会被按 cwd 路由到同目录其他会话，收不到）；状态用 intercom send 给
 <parent.target>，格式 "[<taskId>] <STATE>: 一句话"（STATE ∈ STARTED/BLOCKED/REVIEWING/COMPLETE/FAILED）。
 完成标准即 .squad.json 中 acceptance。开始。
 ```
@@ -233,3 +254,7 @@ shared 场景 = /tmp 绝对路径），完整理解任务、scope、gate、汇�
 - **为并行而并行** — 单一连续任务硬拆成 N 个子任务，集结/回收开销大于收益。
 - **贵模型默认跑** — 子 omp 没显式指定模型就随缘；必须按档位表赋值。
 - **父 agent 代拍板** — gate 未知或产品类验收，父只整理摘要，决策权交回用户。
+- **worktree 用 git worktree add 绕过 herdr** — 不产生树节点（Spaces 面板挂不上）；必须 `herdr worktree create`。
+- **script -q 包装启动 omp** — pane 前台进程是 script/bash，herdr agent 识别缺位（agents 列表看不到）；必须 `exec omp` 直启。
+- **intercom ask 不带 to** — 按 cwd 优先路由，实测误投同目录活跃的其他会话（aion-ui）；ask 必须显式 to=父。
+- **agent.start 启动 omp** — agent_pane_busy / timeout / 名字不登记（本环境 5 轮反复失败）；pane run + exec omp 稳定。

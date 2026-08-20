@@ -3,14 +3,14 @@
  *
  * 作用
  * ────
- * 按任务包（.squad.json schema）把用户任务集结成一组并行子 omp：
- *   1. isolation="worktree"   → git worktree add（幂等，已存在则复用）——仓库上下文由 -C parentCwd 明确
- *      worktree 建在 squad workspace 的 source repo（= workspace create --cwd 指定的仓库）；不传会建到父 workspace 的仓库（实测）
- *   2. isolation="shared-*"   → cwd 用 repo 根，brief 写到 /tmp/squad-<squadId>/<taskId>.squad.json
- *   3. 每个子任务 → herdr tab create（tab 固定落在 squad 专属 workspace，集结时创建并命名）
- *      + pane run，注入 PI_SUBAGENT_* env（注册父 edge）+ --model 档位模型
- *   4. 启动后准备检查：轮询 herdr agent list，确认每个 pane 的 omp TUI 已上线；
- *      超时/启动失败信号 → 打印 pane 快照并以退出码 1 失败（不静默继续）
+ * 按任务包（.squad.json schema）把用户任务集结成一组并行子 omp（最终形态，全链真实验证）：
+ *   1. 父 workspace 改名任务包名（label=squadId，父 pane 所在 workspace 即任务包 workspace）
+ *   2. isolation="worktree" → herdr worktree create（按任务名建树节点：分支/目录 = id 小写，
+ *      label = "T<n> · <title 前 18 字>"），返回节点 workspace + pane —— Spaces 面板在父下挂树
+ *   3. 每个子任务在其树节点 pane 上起 worker：bash -c 'export PI_SUBAGENT_*; exec omp --model <档> <brief>'
+ *      —— exec 直启（agent 登记必需）；env 注入走 shell export（tab create --env 破坏 pane prompt）
+ *   4. isolation="shared-*" → 父 workspace 内 tab create + 同款 worker 启动
+ *   5. 启动后准备检查：轮询 herdr agent list 确认每个 pane 的 omp 已登记（agent.start 实验不稳定，不用）
  *
  * 用法
  * ────
@@ -69,7 +69,7 @@ type Bundle = {
 	baseBranch?: string;
 	maxConcurrency?: number;
 	modelTiers: { cheap: string; mid: string; banned?: string[] };
-	parent: { target: string; sessionId?: string; cwd: string };
+	parent: { target: string; sessionId?: string; name?: string; cwd?: string };
 	subtasks: Subtask[];
 	reportProtocol?: { status?: string; ask?: string };
 };
@@ -144,7 +144,7 @@ function describeHerdrError(raw: string): string {
 // herdr CLI 每次调用 = socket 一请求一连接；命令可能因 socket 挂起而卡死。
 // Bun 的 spawn(Async)/spawnSync timeoutMs 在本环境不生效（实测 1.3.14），
 // 所以自己用 Promise.race 做超时 + kill。
-async function run(command: string[], options: { cwd?: string; quiet?: boolean; timeoutMs?: number } = {}): Promise<string> {
+async function run(command: string[], options: { cwd?: string; quiet?: boolean; timeoutMs?: number; fatal?: boolean } = {}): Promise<string> {
 	if (options.cwd) {
 		const st = fs.statSync(options.cwd, { throwIfNoEntry: false });
 		if (!st?.isDirectory()) fail(`cwd 不是目录: ${options.cwd}`);
@@ -169,7 +169,12 @@ async function run(command: string[], options: { cwd?: string; quiet?: boolean; 
 		const headline = timedOut
 			? `命令超时 (${Math.round(timeoutMs / 1000)}s): ${command.join(" ")}`
 			: `命令失败 (${proc.exitCode}): ${command.join(" ")}`;
-		process.stderr.write(`${headline}\n${describeHerdrError(err + out)}\n`);
+		const detail = describeHerdrError(err + out);
+		if (options.fatal === false) {
+			process.stderr.write(`${headline}\n${detail}\n`);
+			throw new Error(detail);
+		}
+		process.stderr.write(`${headline}\n${detail}\n`);
 		process.exit(1);
 	}
 	if (!options.quiet && out.trim()) process.stdout.write(out);
@@ -217,53 +222,44 @@ function tryPaneRead(paneId: string): string {
 	}
 }
 
-// 子 omp 活体信号：优先问 outLog（script -q 落盘的 pane 原始终端流，omp 启动即刷屏）；
-// 拿得到非空且不撞失败模式的 pane read 也认。不再用 herdr agent list：
-// script 包装启动的 pane 终端标题是 bash，herdr 不会识别为 omp agent（实测 agent list 永远缺位）。
-function isPaneAlive(paneId: string, outLog: string): boolean {
-	const snapshot = tryPaneRead(paneId);
-	if (hasBootFailureSignal(snapshot)) return false;
-	if (snapshot.trim()) return true;
+async function agentListPaneIds(): Promise<Set<string>> {
 	try {
-		return fs.statSync(outLog).size > 64; // script 自身头部噪音以上 = 子进程有真实输出
+		const json = JSON.parse((await run(["herdr", "agent", "list"], { quiet: true })).trim()) as {
+			result?: { agents?: Array<{ pane_id?: string }> };
+		};
+		return new Set((json.result?.agents ?? []).flatMap(a => (a.pane_id ? [a.pane_id] : [])));
 	} catch {
-		return false;
+		return new Set();
 	}
 }
 
-// 启动后准备检查（脚本层）：轮询确认每个 pane 内的 omp 已启动。
-// 判定规则：
-//   - pane 输出非空或 outLog 有真实内容 = omp 已启动 → 通过；
-//   - pane 输出出现启动失败信号 → 立即失败并给快照；
-//   - 超时仍无信号 → 失败并给每个 pane 的输出快照（供父 agent 排查）。
-// 模型可访问性 + 任务包已读由 worker 侧 STARTED ack 确认（见 SKILL.md Phase 1.5），本函数只负责 pane 级活体。
-function verifyLaunched(items: Array<{ taskId: string; paneId: string; outLog: string }>, timeoutMs: number): "ok" | "failed" {
-	process.stderr.write(`准备检查: 确认 ${items.length} 个 pane 内 omp 已正常启动（pane 输出探测，超时 ${Math.round(timeoutMs / 1000)}s）...\n`);
+// 启动后准备检查（脚本层）：exec omp 启动后 herdr 会登记 agent（前台进程=omp），轮询 agent list 确认。
+async function verifyLaunched(items: Array<{ taskId: string; paneId: string }>, timeoutMs: number): Promise<"ok" | "failed"> {
+	process.stderr.write(`准备检查: 确认 ${items.length} 个 agent 登记（agent list 探测，超时 ${Math.round(timeoutMs / 1000)}s）...\n`);
 	const deadline = Date.now() + timeoutMs;
 	let pending = [...items];
 	const problems: Array<{ taskId: string; paneId: string; reason: string; snapshot: string }> = [];
 
 	while (pending.length > 0 && Date.now() < deadline) {
-		const remain: Array<{ taskId: string; paneId: string; outLog: string }> = [];
-		for (const item of pending) {
+		const livePaneIds = await agentListPaneIds();
+		pending = pending.filter(item => {
+			if (livePaneIds.has(item.paneId)) {
+				process.stderr.write(`  ✓ ${item.taskId} (${item.paneId}): agent 已登记\n`);
+				return false;
+			}
 			const snapshot = tryPaneRead(item.paneId);
 			if (hasBootFailureSignal(snapshot)) {
-				// 明确启动失败：记录问题并从轮询中剔除，其余 pane 继续等到 deadline
 				problems.push({ ...item, reason: "pane 输出出现启动失败信号", snapshot });
-			} else if (isPaneAlive(item.paneId, item.outLog)) {
-				process.stderr.write(`  ✓ ${item.taskId} (${item.paneId}): omp 已启动\n`);
-			} else {
-				remain.push(item);
+				return false;
 			}
-		}
-		pending = remain;
-		if (pending.length > 0 && problems.length === 0) Bun.sleepSync(VERIFY_POLL_MS);
+			return true;
+		});
+		if (pending.length > 0 && problems.length === 0) await Bun.sleep(VERIFY_POLL_MS);
 	}
 
-	// 有失败信号时不再等剩余 pane（只发一次提示）；否则等到 deadline 的按超时处理
 	if (pending.length > 0 && problems.length === 0) {
 		for (const item of pending) {
-			problems.push({ ...item, reason: "超时未检测到 omp 上线", snapshot: tryPaneRead(item.paneId) });
+			problems.push({ ...item, reason: "超时未登记 agent list", snapshot: tryPaneRead(item.paneId) });
 		}
 	} else if (pending.length > 0) {
 		process.stderr.write(`另有 ${pending.length} 个 pane 未检出（本轮已有失败，不再等待）\n`);
@@ -277,25 +273,14 @@ function verifyLaunched(items: Array<{ taskId: string; paneId: string; outLog: s
 			process.stderr.write(`    ${(problem.snapshot.slice(0, 500) || "(空)").split("\n").map(line => `      ${line}`).join("\n")}\n`);
 		}
 		process.stderr.write(
-			"恢复建议: 按快照排查（omp 是否在 PATH、模型是否合法、brief 是否可解析）。若确认只是启动慢/探测窗口短，\n" +
-				"父 agent 可用 --skip-verify 重跑集结绕过，再用 intercom({action:\"children\"}) 复核，全部 STARTED 后进 Phase 2。\n",
+			"恢复建议: 按快照排查（omp 是否在 PATH、模型是否有 key/配额、brief 是否可解析）。若确认只是 agent list 同步慢，\n" +
+				"父 agent 可用 --skip-verify 重跑集结绕过，再用 intercom 复核，全部 STARTED 后进 Phase 2。\n",
 		);
 		return "failed";
 	}
 
-	process.stderr.write(`准备检查通过: ${items.length} 个子任务的 omp 全部启动\n`);
+	process.stderr.write(`准备检查通过: ${items.length} 个子任务的 agent 全部登记\n`);
 	return "ok";
-}
-
-function envPrefix(bundle: Bundle, subtask: Subtask, index: number): string {
-	const entries: Array<[string, string]> = [
-		["PI_SUBAGENT_ORCHESTRATOR_TARGET", bundle.parent.target],
-		["PI_SUBAGENT_ORCHESTRATOR_SESSION_ID", bundle.parent.sessionId ?? bundle.parent.target],
-		["PI_SUBAGENT_RUN_ID", bundle.squadId],
-		["PI_SUBAGENT_CHILD_AGENT", subtask.id],
-		["PI_SUBAGENT_CHILD_INDEX", String(index)],
-	];
-	return `${entries.map(([k, v]) => `${k}=${shellQuote(v)}`).join(" ")} `;
 }
 
 function resolveWorktree(subtask: Subtask, parentCwd: string): string {
@@ -305,33 +290,53 @@ function resolveWorktree(subtask: Subtask, parentCwd: string): string {
 	return path.join(parentCwd, ".worktrees", (subtask.branch ?? "").replaceAll("/", "-"));
 }
 
-function piBin(): string {
-	// worker CLI 固定用 omp（本仓库的 CLI）。PI_INTERCOM_PI_BIN 是旧 intercom 的兼容变量，
-	// 指向 pi（pi-mono 的 CLI，认证栈与本仓库不互通），读取它会用错进程 —— 不再读。
-	// OMP_BIN 仅作为自定义 omp 路径的覆盖。
-	return process.env.OMP_BIN?.trim() || "omp";
-}
-
-async function worktreeExists(worktreePath: string, parentCwd: string): Promise<boolean> {
-	// git 原生 worktree 注册表（仓库上下文 = parentCwd 所在仓库）：herdr worktree list 需要 workspace
-	// 关联且可能读错仓库，不用。
-	const out = await run(["git", "worktree", "list", "--porcelain"], { cwd: parentCwd, quiet: true });
-	return out.includes(worktreePath);
-}
-
-async function createWorktree(subtask: Subtask, baseBranch: string | undefined, parentCwd: string, worktreePath: string): Promise<void> {
-	// git 原生 worktree add：仓库上下文由 -C parentCwd 明确。不用 herdr worktree create ——
-	// 它会自动为每个 worktree 开一个展示 workspace（open_workspace_id，含一个空 tab、无 omp，纯冗余），
-	// 且仓库上下文绕 workspace 关联容易建错位置（实测）。
-	await run(
-		["git", "worktree", "add", "--force", worktreePath, "-b", subtask.branch!, baseBranch ?? "main"],
-		{ cwd: parentCwd, quiet: true },
+async function ensureTaskWorktree(subtask: Subtask, baseBranch: string | undefined, workspaceId: string, worktreePath: string): Promise<{ nodeWorkspaceId: string; paneId: string }> {
+	// 任务名 worktree = herdr 树的子节点：herdr worktree create 会为任务建 linked worktree
+	// 并开一个展示 workspace（label=任务名，Spaces 面板挂在父 workspace 树下的子节点），
+	// worker 直接起在这个节点 workspace 的 pane 里（用户要求：先建任务 worktree，再挂 worker）。
+	// 幂等：已有则复用其 open workspace 的 pane。
+	try {
+		const list = JSON.parse((await run(["herdr", "worktree", "list", "--workspace", workspaceId], { quiet: true })).trim()) as {
+			result?: { worktrees?: Array<{ path?: string; open_workspace_id?: string }> };
+		};
+		const existing = list.result?.worktrees?.find(w => w.path === worktreePath);
+		if (existing?.open_workspace_id) {
+			const ws = JSON.parse((await run(["herdr", "workspace", "list"], { quiet: true })).trim()) as {
+				result?: { workspaces?: Array<{ workspace_id?: string; active_tab_id?: string }> };
+			};
+			const target = ws.result?.workspaces?.find(w => w.workspace_id === existing.open_workspace_id);
+			if (target?.workspace_id) {
+				const panes = JSON.parse((await run(["herdr", "pane", "list", "--workspace", target.workspace_id], { quiet: true })).trim()) as {
+					result?: { panes?: Array<{ pane_id?: string }> };
+				};
+				const paneId = panes.result?.panes?.[0]?.pane_id;
+				if (paneId) {
+					process.stderr.write(`复用任务 worktree 节点: ${target.workspace_id}（${subtask.id}）\n`);
+					return { nodeWorkspaceId: target.workspace_id, paneId };
+				}
+			}
+		}
+	} catch {
+		/* 列表解析失败走新建 */
+	}
+	const json = await run(
+		[
+			"herdr", "worktree", "create", "--workspace", workspaceId,
+			"--branch", subtask.branch!, "--base", baseBranch ?? "main",
+			"--path", worktreePath, "--label", tabLabel(subtask), "--no-focus",
+		],
+		{ quiet: true },
 	);
+	const result = JSON.parse(json.trim()).result as { workspace?: { workspace_id?: string }; root_pane?: { pane_id?: string } };
+	const nodeWorkspaceId = result.workspace?.workspace_id;
+	const paneId = result.root_pane?.pane_id;
+	if (!nodeWorkspaceId || !paneId) fail(`herdr worktree create 未返回 workspace/pane，输出: ${json}`);
+	process.stderr.write(`任务 worktree 节点: ${nodeWorkspaceId}（${subtask.id}，树节点在 ${workspaceId} 下）\n`);
+	return { nodeWorkspaceId, paneId };
 }
 
-async function parentWorkspaceId(): Promise<string> {
-	// 子任务 tab 建进父进程当前所在 workspace（父+子同一个 workspace，用户一个窗口全看到）。
-	// HERDR_WORKSPACE_ID 由 herdr 注入；缺失（非 herdr pane 直接跑）时查 list 找 focused。
+async function currentWorkspaceId(): Promise<string> {
+	// 父 workspace = 当前对话进程所在 workspace（HERDR_WORKSPACE_ID 由 herdr 注入；缺失查 focused）。
 	const env = process.env.HERDR_WORKSPACE_ID?.trim();
 	if (env) return env;
 	const json = await run(["herdr", "workspace", "list"], { quiet: true });
@@ -345,16 +350,40 @@ async function parentWorkspaceId(): Promise<string> {
 	fail(`无法确定父进程所在 workspace（HERDR_WORKSPACE_ID 为空，workspace list 无 focused）`);
 }
 
-async function launchPane(cwd: string, paneCmd: string, label: string, workspaceId: string): Promise<string> {
-	// 每个子任务独立 tab（herdr tab create → root pane），不再 split 当前 pane：
-	// 分裂面板会把 TUI 挤在窄 pane 里且多个 omp 共享同一终端上下文（用户指定）。
-	// workspace 固定传父进程所在 workspace（parentWorkspaceId），父+子同一个 workspace。
-	const args = ["herdr", "tab", "create", "--cwd", cwd, "--label", label, "--no-focus", "--workspace", workspaceId];
-	const json = await run(args);
-	const paneId = extractPaneId(json);
-	if (!paneId) fail(`tab create 未返回 root pane id，输出: ${json}`);
-	await run(["herdr", "pane", "run", paneId, paneCmd], { quiet: true });
-	return paneId;
+async function ensureParentWorkspaceLabel(workspaceId: string, squadId: string): Promise<void> {
+	// 父 workspace label 改为任务包名：用户看到的这个 workspace 就是当前 squad（不改 workspace_id）。
+	// 多次集结同名 label 时 rename 会报错或幂等 —— fatal:false 忽略。
+	await run(["herdr", "workspace", "rename", workspaceId, squadId], { quiet: true, fatal: false });
+}
+
+// tab label 语义化："T1 · <title 前 14 字符>"（herdr UI 平铺 tab，一眼对应子任务）。
+function tabLabel(subtask: Subtask): string {
+	// 语义化显示名："T1 · <title 前 18 字符>"（树节点/tab 都用它 —— 用户要求不能裸显示 T1）
+	const short = subtask.title.replace(/\s+/g, " ").trim().slice(0, 18);
+	return `${subtask.id} · ${short || "task"}`;
+}
+
+// 子 omp 进程环境注入：PI_SUBAGENT_* 注册 intercom 父 edge（ask 自动路由 + 父 children 可见）。
+// 注入位置 = 启动 shell 文件的 export 前缀（tab create --env 实测破坏 pane prompt，不用）。
+function envExports(bundle: Bundle, subtask: Subtask, index: number): string {
+	const entries: Array<[string, string]> = [
+		["PI_SUBAGENT_ORCHESTRATOR_TARGET", bundle.parent.target],
+		["PI_SUBAGENT_ORCHESTRATOR_SESSION_ID", bundle.parent.sessionId ?? bundle.parent.target],
+		["PI_SUBAGENT_RUN_ID", bundle.squadId],
+		["PI_SUBAGENT_CHILD_AGENT", subtask.id],
+		["PI_SUBAGENT_CHILD_INDEX", String(index)],
+	];
+	return entries.map(([k, v]) => `export ${k}=${shellQuote(v)};`).join(" ");
+}
+
+async function launchWorker(paneId: string, model: string, brief: string, name: string, envLine: string): Promise<void> {
+	// 在任务 pane 里启动 omp worker：bash -c 'export PI_SUBAGENT_*; exec omp …' ——
+	// exec 让前台进程就是 omp（herdr agent 识别认前台进程，实测 required）。
+	const tmpDir = path.join(os.tmpdir(), "squad-launch");
+	if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
+	const shellFile = path.join(tmpDir, `${name}.sh`);
+	fs.writeFileSync(shellFile, `#!/bin/bash\n${envLine} exec ${shellQuote("omp")} --model ${shellQuote(model)} ${shellQuote(brief)}\n`);
+	await run(["herdr", "pane", "run", paneId, `bash ${shellQuote(shellFile)}`], { quiet: true });
 }
 
 function extractPaneId(json: string): string | undefined {
@@ -389,12 +418,15 @@ function extractPaneId(json: string): string | undefined {
 }
 
 function workerBrief(bundle: Bundle, subtask: Subtask, model: string, briefPath: string): string {
+	// 展示名优先 parent.name（可读），路由 = parent.target。PI_SUBAGENT_* env 已注入（intercom 父 edge），
+	// ask 不带 to 也能自动路由到父；brief 里仍写明显式 to 作双保险。
+	const parentLabel = bundle.parent.name ?? bundle.parent.target;
 	const lines = [
 		`你是 ${subtask.id}（${subtask.title}）的实现者，属于 squad ${bundle.squadId} 的 worker。`,
 		`第一步（准备检查）：读 ${shellQuote(briefPath)} 的任务包（.squad.json），完整理解任务、scope、gate、汇报协议、模型档位；`,
 		`用 list_models 确认 ${model} 在可用列表；不在列表则 switch_model 切换到该档位可用模型（按实际生效模型为准）；`,
-		`然后立刻向 ${bundle.parent.target} 发 "[${subtask.id}] STARTED: <实际生效模型>，任务包已读" —— 父等你全部 STARTED 确认后才正式开工。`,
-		`规则：只改 scope 内文件；求助用 intercom ask（不带 to，自动路由父）；`,
+		`然后立刻用 intercom send 给 ${bundle.parent.target} 发 "[${subtask.id}] STARTED: <实际生效模型>，任务包已读" —— 父等你全部 STARTED 确认后才正式开工。`,
+		`规则：只改 scope 内文件；求助必须用 intercom ask 且必须带 to=${bundle.parent.target}（不带 to 的 ask 会被 intercom 按 cwd 路由到同目录其他会话，不会到达父 —— 实测误投到 aion-ui）；`,
 		`状态用 intercom send 给 ${bundle.parent.target}，格式 "[${subtask.id}] <STATE>: 一句话"（STATE ∈ STARTED/BLOCKED/REVIEWING/COMPLETE/FAILED，STARTED 只在准备检查通过后发一次）；`,
 		`完成标准见任务包 acceptance。开始。`,
 	];
@@ -476,16 +508,20 @@ async function main(): Promise<void> {
 	}
 
 	const result: unknown[] = [];
-	const launchedPanes: Array<{ taskId: string; paneId: string; outLog: string }> = [];
+	const launchedPanes: Array<{ taskId: string; paneId: string }> = [];
 	const tmpDir = path.join(os.tmpdir(), `squad-${bundle.squadId}`);
 	if (!dryRun) fs.mkdirSync(tmpDir, { recursive: true });
 
 	// worktree 落点仓库：parent.cwd（缺省 = bootstrap 运行目录，即父 omp 会话的 cwd）
 	const parentCwd = path.resolve(bundle.parent.cwd ?? process.cwd());
 
-	// 集结先建 squad 专属 workspace：所有子任务 tab 落在同一 workspace（命名 squad-<squadId>）。
-	// 子任务 tab 建进父进程当前 workspace（父+子同 workspace，一个窗口全看到）
-	const workspaceId = dryRun ? "(dry-run)" : await parentWorkspaceId();
+	// 父 workspace = 当前对话所在 workspace：改名任务包名，三个子 pane 直接挂载在它下面。
+	// 不新建 squad workspace（父+子同 workspace，一个窗口全看到）。
+	const workspaceId = dryRun ? "(dry-run)" : await currentWorkspaceId();
+	if (!dryRun) {
+		await ensureParentWorkspaceLabel(workspaceId, bundle.squadId);
+		process.stderr.write(`父 workspace ${workspaceId} 已命名：${bundle.squadId}\n`);
+	}
 
 	for (const [index, subtask] of bundle.subtasks.entries()) {
 		const model = resolveModel(bundle, subtask);
@@ -494,11 +530,14 @@ async function main(): Promise<void> {
 
 		let cwd: string;
 		let briefPath: string;
+		let paneId: string | null = null;
 		if (subtask.isolation === "worktree") {
 			cwd = resolveWorktree(subtask, parentCwd);
 			briefPath = path.join(cwd, ".squad.json");
 			if (!dryRun) {
-				if (!(await worktreeExists(cwd, parentCwd))) await createWorktree(subtask, bundle.baseBranch, parentCwd, cwd);
+				// 先按任务名建 worktree（herdr 树子节点），worker 后续起在节点 pane
+				const node = await ensureTaskWorktree(subtask, bundle.baseBranch, workspaceId, cwd);
+				paneId = node.paneId;
 				// 回填实际 worktree 路径再写入任务包：子 omp 读 .squad.json 时 worktree 字段是解析后的实值
 				writeJson(briefPath, {
 					...bundle,
@@ -512,27 +551,33 @@ async function main(): Promise<void> {
 			if (!dryRun) writeJson(briefPath, { ...bundle, parent: { ...bundle.parent, cwd: parentCwd } });
 		}
 
-		const command = `${envPrefix(bundle, subtask, index)}${shellQuote(piBin())} --model ${shellQuote(model)} ${shellQuote(workerBrief(bundle, subtask, model, briefPath))}`;
+		const brief = workerBrief(bundle, subtask, model, briefPath);
 		if (dryRun) {
-			result.push({ taskId: subtask.id, isolation: subtask.isolation, cwd, worktree: subtask.isolation === "worktree" ? cwd : null, briefPath, dryRunCommand: command });
-			return;
+			const dryRunCommand = `herdr worktree create --workspace <父ws> --branch ${subtask.branch ?? ""} --path ${cwd} --label ${subtask.id} && herdr pane run <节点pane> "bash <shell>（export PI_SUBAGENT_*; exec omp --model ${model} <brief>）"`;
+			result.push({ taskId: subtask.id, isolation: subtask.isolation, cwd, worktree: subtask.isolation === "worktree" ? cwd : null, briefPath, dryRunCommand });
+			continue;
 		}
-		// 用 script 包一层干净 PTY + 输出落盘：pane run 直接注入 TUI 会跟 pane 终端时序竞争
-		// （实测 4 个并发只活 1 个）；且落盘日志供父 agent 盯盘/排障。
-		const shellFile = path.join(tmpDir, `${subtask.id}.sh`);
-		const outLog = path.join(tmpDir, `${subtask.id}.out`);
-		fs.writeFileSync(shellFile, `#!/bin/bash\n${command}\n`);
-		const paneCmd = `script -q ${shellQuote(outLog)} bash ${shellQuote(shellFile)}`;
-		const paneId = await launchPane(cwd, paneCmd, subtask.id, workspaceId);
-		launchedPanes.push({ taskId: subtask.id, paneId, outLog });
+
+		// 先任务 worktree 节点（worktree 场景），再在其 pane 上起 worker（shared 场景 tab create 补 pane）
+		if (!paneId) {
+			const tabJson = await run(
+				["herdr", "tab", "create", "--cwd", cwd, "--label", tabLabel(subtask), "--no-focus", "--workspace", workspaceId],
+				{ quiet: true },
+			);
+			const created = extractPaneId(tabJson);
+			if (!created) fail(`tab create 未返回 root pane id，输出: ${tabJson}`);
+			paneId = created;
+		}
+		await launchWorker(paneId, model, brief, subtask.id.toLowerCase(), envExports(bundle, subtask, index));
+		launchedPanes.push({ taskId: subtask.id, paneId });
 		result.push({ taskId: subtask.id, isolation: subtask.isolation, cwd, worktree: subtask.isolation === "worktree" ? cwd : null, briefPath, paneId, model });
 	}
 
 	let verify: "ok" | "failed" | "skipped" = "skipped";
 	if (!dryRun && !skipVerify && launchedPanes.length > 0) {
-		verify = verifyLaunched(launchedPanes, verifyTimeoutMs);
+		verify = await verifyLaunched(launchedPanes, verifyTimeoutMs);
 	} else if (!dryRun && skipVerify) {
-		process.stderr.write("准备检查已跳过（--skip-verify），由父 agent 用 intercom children 复核。\n");
+		process.stderr.write("准备检查已跳过（--skip-verify），由父 agent 用 intercom 复核。\n");
 	}
 
 	// 父中断恢复：集结结果落盘 ~/.omp/squads/<squadId>/state.json，父每收一条状态消息更新它

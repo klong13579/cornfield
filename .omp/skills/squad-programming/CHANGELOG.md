@@ -9,7 +9,15 @@
 ### Changed
 
 - **merge 移出 skill 职责** (`SKILL.md`, `USAGE.md`): 父 agent 不再合并任何代码进 base —— Phase 3 改为「验收交接」，验证通过后把 branch + diff 摘要摆给用户，由用户自己 `git merge <branch>`；清理仅在用户表态后执行。`mergePolicy` 语义降级为验收提示（unknown 强制 human-review 护栏保留）。
-- **子任务 tab 建进父进程 workspace** (`scripts/bootstrap.ts`, `SKILL.md`, `USAGE.md`): 取消 squad 专属 workspace —— 所有子 omp 的 tab 直接建在父所在 workspace（`HERDR_WORKSPACE_ID`），父+子同一个 workspace、一个窗口全看到；回收改为 `herdr pane close <paneId>` 逐个关（不再 workspace close）。
+- **最终形态：父 workspace 改名 + 树节点 worktree** (`scripts/bootstrap.ts`, `SKILL.md`): 父 omp 所在 workspace label 改为任务包名（squadId）；每个子任务用 `herdr worktree create` 按任务名建树节点（`--label "T<n> · <title 前 18 字>"`，语义化显示；分支/目录 = id 小写；幂等复用 open_workspace_id），worker 直接起在树节点 pane —— Spaces 面板在任务包 workspace 下以树挂出 T1/T2/T3。取代 git worktree add（不产生树节点）与 0.2.0 的 squad 专属 workspace。
+- **worker 启动改 `exec omp` 直启** (`scripts/bootstrap.ts`): `bash -c 'export PI_SUBAGENT_*; exec omp …'` —— pane 前台进程必须是 omp，herdr agent 识别才登记（agents 列表可见）；弃 script -q 包装（前台是 script/bash，permanent 缺位）。env 注入走 shell export（tab create --env 破坏 pane prompt）。
+- **模型使用纪律** (`SKILL.md`): 档位模型必须确认 provider 有 key（list_models 目录≠key，实测 kimi-code 无 key 直接 No API key）；多并发同 provider 命中分钟级 TPM（429）；模型按子任务类别分档（重实现 mid / 轻任务 cheap）。
+
+### Fixed
+
+- **intercom ask 路由坑**: ask 不带 to 时按 cwd 优先路由，实测误投同目录活跃的其他会话（aion-ui）—— 协议更新为 ask 必须带 to=父 target（`SKILL.md`、`bootstrap.ts` worker brief）。
+- **herdr agent.start 不稳定实验**（记档）: 本环境 5 轮集结反复 agent_pane_busy / timeout / 名字不登记 —— 弃用，恢复 pane run + exec omp。
+- **集结 stdout 污染**: tab/worktree create 非 quiet 输出混入最终 JSON（"Extra data"）—— 命令 quiet 化。
 
 ## [0.2.0] - 2026-08-20
 
