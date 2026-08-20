@@ -16,11 +16,93 @@
  * 仍无响应才标记 STALLED/BLOCKED。错误签名有白名单语境（如 API 断连后 worker 自愈属正常）。
  */
 import * as fs from "node:fs";
+import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
 
 const stateFile = process.argv[2];
 const STALL_AFTER_S = Number(process.env.PROBE_STALL_AFTER_S ?? 240); // 会话 JSONL 静默阈值
+
+interface SessionInfo {
+	id: string;
+	name?: string;
+	cwd?: string;
+	model?: string;
+	pid?: number;
+	startedAt?: number;
+	lastActivity?: number;
+	status?: string;
+	parentId?: string;
+}
+
+/**
+ * probeIntercomSessions — 直连 intercom broker 拉会话状态（不绕 herdr）。
+ * broker = omp-gateway 托管的全局 IPC（~/.omp/intercom/broker.sock），
+ * length-prefixed JSON 帧（4 字节大端长度 + payload）。
+ * 发 {type:"list",requestId} → 收 {type:"sessions",sessions:SessionInfo[]}。
+ * SessionInfo.status 即 omp 自身状态机（working/idle/done 等同源数据，herdr 只是镜像），
+ * lastActivity 毫秒时间戳 = 活动新鲜度（不用再去 stat session JSONL）。
+ */
+async function probeIntercomSessions(): Promise<Map<string, { status?: string; lastActivity?: number; sessionPath?: string }>> {
+	const out = new Map<string, { status?: string; lastActivity?: number; sessionPath?: string }>();
+	const sockPath = path.join(os.homedir(), ".omp", "intercom", "broker.sock");
+	if (!fs.existsSync(sockPath)) return out; // broker 不可用 → 调用方回落
+	const requestId = crypto.randomUUID();
+	const regMsg = JSON.stringify({
+		type: "register",
+		session: { name: "omp-probe", cwd: "/", pid: process.pid, model: "", startedAt: Date.now(), lastActivity: Date.now() },
+	});
+	const listMsg = JSON.stringify({ type: "list", requestId });
+	const frameOf = (payload: string): Buffer => {
+		const b = Buffer.from(payload);
+		const f = Buffer.alloc(4 + b.length);
+		f.writeUInt32BE(b.length, 0);
+		b.copy(f, 4);
+		return f;
+	};
+	try {
+		const result = await new Promise<{ sessions?: Array<Record<string, unknown>> }>((resolve, reject) => {
+			const sock = net.createConnection(sockPath);
+			const timer = setTimeout(() => {
+				sock.destroy();
+				reject(new Error("broker timeout"));
+			}, 5000);
+			let buf = Buffer.alloc(0);
+			let registered = false;
+			sock.on("connect", () => sock.write(frameOf(regMsg)));
+			sock.on("data", (chunk) => {
+				buf = Buffer.concat([buf, chunk]);
+				while (buf.length >= 4) {
+					const len = buf.readUInt32BE(0);
+					if (buf.length < 4 + len) break;
+					const msg = JSON.parse(buf.subarray(4, 4 + len).toString("utf8"));
+					buf = buf.subarray(4 + len);
+					if (!registered && msg.type === "registered") {
+						registered = true;
+						sock.write(frameOf(listMsg));
+					} else if (registered && msg.type === "sessions" && msg.requestId === requestId) {
+						clearTimeout(timer);
+						sock.end();
+						resolve(msg as { sessions?: Array<Record<string, unknown>> });
+						return;
+					}
+				}
+			});
+			sock.on("error", (err) => {
+				clearTimeout(timer);
+				reject(err);
+			});
+		});
+		for (const s of result.sessions ?? []) {
+			const si = s as unknown as SessionInfo;
+			if (!si.cwd) continue;
+			out.set(si.cwd, { status: si.status, lastActivity: si.lastActivity, sessionPath: undefined });
+		}
+	} catch (err) {
+		process.stderr.write(`probe: broker 查询失败（回落到 herdr）: ${(err as Error).message}\n`);
+	}
+	return out;
+}
 
 interface SubtaskState {
 	id: string;
@@ -74,20 +156,12 @@ async function main(): Promise<void> {
 		console.log(`[probe] ${raw.squadId}: 无未终态子任务`);
 		process.exit(0);
 	}
-	const agentsList = await run(["herdr", "agent", "list"]);
-	const byCwd = new Map<string, { status: string; sessionPath?: string }>();
-	try {
-		const ags = (JSON.parse(agentsList.out) as { result: { agents: Array<{ agent_status?: string; cwd?: string; agent_session?: { value?: string } }> } }).result.agents;
-		for (const a of ags) {
-			if (!a.cwd) continue;
-			byCwd.set(a.cwd, { status: a.agent_status ?? "?", sessionPath: a.agent_session?.value });
-		}
-	} catch {
-		/* agent list 解析失败不致命，运行态降级 */
-	}
+	const byCwd = await probeIntercomSessions();
 
-	/** 最近活动时间戳：直接用 herdr agent list 带出的 session JSONL 路径（每回合必写；静默挂起=长时间未写）。 */
+	/** 最近活动时间戳：优先 broker 的 lastActivity（毫秒），缺失时回落到 session JSONL 文件 mtime。 */
 	const lastWrite = (worktree: string): number | null => {
+		const viaBroker = byCwd.get(worktree);
+		if (viaBroker?.lastActivity) return viaBroker.lastActivity;
 		const sessionPath = byCwd.get(worktree)?.sessionPath;
 		if (sessionPath) {
 			try {
@@ -96,7 +170,7 @@ async function main(): Promise<void> {
 				return null;
 			}
 		}
-		// fallback：编码路径推导（herdr 未登记 session 时）
+		// fallback：编码路径推导（未登记 session 时）
 		const rel = worktree.replace(os.homedir(), "").replaceAll("/", "-");
 		const today = new Date();
 		const pad = (n: number) => String(n).padStart(2, "0");

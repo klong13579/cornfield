@@ -4,6 +4,7 @@
 
 ### Added
 
+- **probe 改直连 intercom broker** (`scripts/probe.ts`, `SKILL.md`): 不再绕 herdr——broker.sock 注册+list 协议直接拿 `SessionInfo.status`/`lastActivity`（omp 状态机源头，herdr 只是镜像）。实证：register 需全字段（isSessionInfo 校验 cwd/model/pid/startedAt/lastActivity 必填，缺字段被断开）；一次 list 返回全部 13 会话状态+新鲜度。
 - **静默挂起探活维度** (`scripts/probe.ts`, `SKILL.md`): s2 实测 187s 静默案例——pid 活着 + pane 残影 ≠ 在推进（模型 API 响应挂起）。probe 增加 session JSONL 最近写入时间判据（每回合必写；>240s 未写 = 静默挂起，`PROBE_STALL_AFTER_S` 可调）；处置阶梯增加「ask 唤醒」——实测 ask 到达即恢复。
 - **父健康扫描探活机制** (`scripts/probe.ts`, `SKILL.md`): 父不干等消息——`probe.ts <state.json>` 对未终态子任务三路探活（ps 进程存活 / herdr agent 注册 / pane 输出错误签名扫描），输出 OK/WARN；WARN 处置阶梯不直接判死：先看 API 断连自愈 → ask 自报 → 无响应才 stalled 转用户。解决「worker 静默挂掉父不知道」。
 - **wait-gate 改 pull 模式** (`bootstrap.ts`, `SKILL.md`): 第二批次复现子进程首轮主动 send 报 Session not found（启动窗口期 broker 目标解析不可用，ask 双向始终可靠）——STARTED 确认改为父 ask 驱动（wait-gate 主动拉），worker 的 send 降级为可选补报且失败不刷屏。

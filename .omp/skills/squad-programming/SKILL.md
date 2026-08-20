@@ -143,7 +143,7 @@ bun run .omp/skills/squad-programming/scripts/bootstrap.ts \
   ```bash
   bun run .omp/skills/squad-programming/scripts/probe.ts ~/.omp/squads/<squadId>/state.json
   ```
-  三路探活：进程存活（ps 按 worktree 路径匹配 omp）→ agent 注册（`herdr workspace list` 的 agent_status）→ 会话新鲜度 + pane 错误签名（**静默挂起**：进程活着但 session JSONL 长时间未写入——模型 API 响应挂起时 pid 在、pane 有残影，但已死机，实测 187s 静默案例；`PROBE_STALL_AFTER_S` 可调静默阈值，默认 240s）。输出 `[OK]/[WARN]`，有 WARN 退出码 1。
+  状态/新鲜度**直连 intercom broker 拿**（不绕 herdr——broker 是 omp 自身状态机，herdr 只是镜像；probe 走 `~/.omp/intercom/broker.sock` 注册+list 协议，`SessionInfo.status` + `lastActivity` 即权威）：进程存活（ps 按 worktree 路径匹配 omp）→ broker 注册态（会话在否/status）→ `lastActivity` 新鲜度 + pane 错误签名（**静默挂起**：`lastActivity` 长时间不更新——模型 API 响应挂起时 pid 在、pane 有残影，但已死机，实测 187s 静默案例；`PROBE_STALL_AFTER_S` 默认 240s）。输出 `[OK]/[WARN]`，有 WARN 退出码 1。
   **WARN 处置阶梯（不直接判死）**：① 先看是否自愈——API 断连（`socket connection was closed` 等）是 provider 并发高时的常见噪声，omp 自带重试，worker 通常继续推进；② **静默挂起先用 ask 唤醒**（实测 ask 到达后 worker 立即恢复——ask 双向可靠，本身就是唤醒信号）；③ ask 无响应 + pane 无进展 → 记 `stalled` → 转用户拍板（重启该子任务 / 等 / 打回）。
 - 用 `intercom({ action: "children" })` 看子 omp 实时状态，不轮询消息。
 - **每条状态消息落地 state.json**（父中断恢复的底账）：
