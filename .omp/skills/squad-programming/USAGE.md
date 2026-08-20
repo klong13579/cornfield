@@ -25,7 +25,7 @@ Agent 侧的完整流程见 `SKILL.md`。这份只讲你怎么用。
   ↓
 ④ 并行干活：子 omp 求助会直接问父 agent，状态自动汇报
   ↓
-⑤ 回收：每个子任务跑验收（测试/lint）→ 父把 branch + diff 摘要交接给你，**合并由你手动做**；你表态后父逐 pane/分支清理
+⑤ 回收：每个子任务跑验收（测试/lint）→ 全部分支合进 integration worktree 做**整体功能验证**（scripts/integrate.ts：合体后起服务/浏览器冒烟，冲突即打回子任务）→ 父把 branch + diff + 整体验证结果交接给你，**合并由你手动做**；你表态后父逐 pane/分支/integration 清理
 ```
 
 ## 你要做的

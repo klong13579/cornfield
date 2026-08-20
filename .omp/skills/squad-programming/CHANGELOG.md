@@ -4,6 +4,7 @@
 
 ### Added
 
+- **整体验证 integration worktree** (`scripts/integrate.ts`, `SKILL.md`, `USAGE.md`): 新增 Phase 3 整体验证步骤——`integrate.ts <state.json>` 把全部 complete 分支按序合并到 `.worktrees/<squadId>-integ`（纯 git worktree，不占 agent；`--link-node-modules` 软链主仓库依赖；`--force` 重建）。冲突即停并打回子任务，不在验证区打补丁；验证跑全部 gate 并集 + 整体功能冒烟（web → dev server + 浏览器）。用户 merge 后与正式分支一并清理。
 - **父中断恢复：squad state 落盘** (`scripts/squad-state.ts`, `scripts/bootstrap.ts`): 集结完成后写 `~/.omp/squads/<squadId>/state.json`（每子任务落点/分支/paneId/状态）；父每收一条状态消息用 `squad-state.ts update <taskId> <status>` 同步；父进程中断后 `squad-state.ts list` 读恢复清单，按 pane 复核后接续。SKILL.md 新增「父中断恢复」章节定义完整流程。
 
 ### Changed
