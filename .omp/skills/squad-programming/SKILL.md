@@ -182,16 +182,17 @@ bun run .omp/skills/squad-programming/scripts/bootstrap.ts \
    - **打回规则**：整体验证失败 → 定位到回归/冲突的子任务打回，**不使用 integration worktree 当工作区改代码**（它是验证区，改了就没法重来）。
    - **通过** → 交接清单附 integration 分支与整体验证结果；用户 merge 正式分支后，integration worktree 与分支一并清理（见步骤 5，用户确认才删）。
 4. **交接**：父 agent **不做任何 merge** —— 合并代码进 base 是用户的动作。对每个验证过的子任务整理：branch 名 + diff 摘要 + gate 结果 + 整体验证结论，逐条摆给用户；用户自己 `git merge <branch>`（或打回/丢弃）。
-5. **清理**（每步单独执行、确认 JSON 返回后再下一步，**禁止串行 `&&`**）：
-   - 用户确认过了某个子任务的分支（合并完或拍板丢弃） → `git branch -D <branch>` + `git worktree remove --force <worktree路径>`；
-   - `herdr pane close <paneId>` 逐个关掉子任务 pane（paneId 在 state.json / 集结输出里）；
-   - 归档任务包从 `~/.omp/squads/<squadId>/` 移入 `archive/`。
+5. **清理**（每步单独执行、确认 JSON 返回后再下一步，**禁止串行 `&&`**）——顺序铁律：**先关 agent，再删 git worktree，最后归档**。
+   - **① 关 agent（容易漏，本次实测教训）**：子任务的 agent 节点 = herdr 树 workspace（`w57`/`w5A`…），里面跑的 omp 进程**不随 `git worktree remove` 消失**——实测删完 worktree 还残留 7 个 idle omp。逐个 `herdr workspace close <nodeWorkspaceId>`（= 关 pane + 杀进程 + 注销 intercom 会话）；之后验证判据三条：`ps aux | grep "omp --model"` 无残留、`herdr workspace list` 无 linked worktree 节点、`intercom({action:"list"})` 无该 squad 的子会话。
+   - **② 删 worktree + 分支**：`git worktree remove --force <worktree路径>` + `git branch -D <branch>`（用户已确认合并/丢弃）；integration worktree 同法（`.worktrees/<squadId>-integ` + `git branch -D <squadId>-integ`）。
+   - **③ 归档**：任务包移到 `~/.omp/squads/archive/<squadId>/`；清 `/tmp/squad-*.json` bundle。
+   - **④ 还原父 workspace 名**：`herdr workspace rename <父wsId> <原名>`（集结时被 rename 为 squadId）。
 
 **Completion criterion**：每个子任务已验证并交接给用户（branch + 摘要）；用户确认后的分支与 worktree 清理干净；用户看到结果摘要。
 
 **清理权限（谁不用问你，谁必须等你）**：
-- 用户明确说「合并完了 / 这分支不要了」→ 父 agent 清理该子任务的 worktree/分支；**同时清 integration worktree**（`git worktree remove --force .worktrees/<squadId>-integ` + `git branch -D <squadId>-integ`）；
-- `FAILED` 或用户还没表态 → **不得清理**：worktree/分支保留，等用户拍板；
+- 用户明确说「合并完了 / 这分支不要了」→ 父 agent 清理该子任务：**先 `herdr workspace close` 关 agent 节点**（非仅 git worktree）→ worktree/分支 → integration；
+- `FAILED` 或用户还没表态 → **不得清理**：worktree/分支/agent 节点全保留（agent 还可能在等用户反馈），等用户拍板；
 - pane close 只在对应子任务已终态（用户已逐条表态后）执行；只要还有待合并/待验的 worktree 在，不关 pane（防止子任务上下文和会话终端被一起回收）。
 
 ## 模型档位表
