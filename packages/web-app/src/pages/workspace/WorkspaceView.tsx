@@ -99,7 +99,11 @@ export function WorkspaceView({ compact = false }: { compact?: boolean }): React
 				</header>
 
 				<Transcript />
-				<QueueCard count={view.queued} className="mx-auto mb-1 max-w-[800px]" />
+				<QueueCard
+					count={view.queued}
+					onCancel={view.queued > 0 ? () => void store.cancelQueued() : undefined}
+					className="mx-auto mb-1 max-w-[800px]"
+				/>
 
 				{/* 输入区：单一实例（CSS 自适应桌面/移动），避免模型列表/草稿逻辑双份执行 */}
 				{/* 审批/澄清浮层卡：position:relative 锚点，卡从 composer 上方滑入 */}
