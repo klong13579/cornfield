@@ -101,12 +101,9 @@ describe("runTestRun corruption guard", () => {
 		const result = await runTestRun({
 			name: "weekly-kb-lint",
 			inMs: 120_000,
-			timeoutMs: 5_000,
 			tickIntervalMs: 60_000,
 			storage: corruptStorage,
 			markerBaseDir: corruptMarkerBaseDir,
-			awaitResult: false,
-			pollIntervalMs: 25,
 			onReload: () => {
 				reloadCount += 1;
 			},
@@ -129,12 +126,9 @@ describe("runTestRun corruption guard", () => {
 		const result = await runTestRun({
 			name: "orphaned",
 			inMs: 120_000,
-			timeoutMs: 5_000,
 			tickIntervalMs: 60_000,
 			storage: corruptStorage,
 			markerBaseDir: corruptMarkerBaseDir,
-			awaitResult: false,
-			pollIntervalMs: 25,
 			onReload: () => {
 				reloadCount += 1;
 			},
@@ -169,12 +163,9 @@ describe("runTestRun corruption guard", () => {
 		const result = await runTestRun({
 			name: "double-corrupted",
 			inMs: 120_000,
-			timeoutMs: 5_000,
 			tickIntervalMs: 60_000,
 			storage: corruptStorage,
 			markerBaseDir: corruptMarkerBaseDir,
-			awaitResult: false,
-			pollIntervalMs: 25,
 		});
 
 		expect(result.kind).toBe("schedule_corrupted");
@@ -201,12 +192,9 @@ describe("runTestRun corruption guard", () => {
 		const result = await runTestRun({
 			name: "clean-task",
 			inMs: 120_000,
-			timeoutMs: 5_000,
 			tickIntervalMs: 60_000,
 			storage: corruptStorage,
 			markerBaseDir: corruptMarkerBaseDir,
-			awaitResult: false,
-			pollIntervalMs: 25,
 			onReload: () => {
 				reloadCount += 1;
 			},
@@ -223,12 +211,9 @@ describe("runTestRun corruption guard", () => {
 		const result = await runTestRun({
 			name: "cli-path",
 			inMs: 120_000,
-			timeoutMs: 5_000,
 			tickIntervalMs: 60_000,
 			storage: corruptStorage,
 			markerBaseDir: corruptMarkerBaseDir,
-			awaitResult: false,
-			pollIntervalMs: 25,
 		});
 
 		expect(result.kind).toBe("started");
@@ -241,12 +226,9 @@ describe("runTestRun corruption guard", () => {
 		const result = await runTestRun({
 			name: "throw-on-reload",
 			inMs: 120_000,
-			timeoutMs: 5_000,
 			tickIntervalMs: 60_000,
 			storage: corruptStorage,
 			markerBaseDir: corruptMarkerBaseDir,
-			awaitResult: false,
-			pollIntervalMs: 25,
 			onReload: () => {
 				throw new Error("reload failed");
 			},

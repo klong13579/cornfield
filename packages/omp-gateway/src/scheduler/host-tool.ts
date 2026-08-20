@@ -23,7 +23,7 @@ import type { ChannelRegistry } from "../channels/registry";
 import type { HostToolHandler, HostToolResultBody, RpcHostToolDefinition } from "../host-tool-dispatcher";
 import type { InboundMessage } from "../types";
 import { readExecutionLog } from "./execution-log";
-import { runTestRun, type TestRunHardError, type TestRunResult } from "./test-run";
+import { runTestRun, type TestRunHardError, type TestRunStarted } from "./test-run";
 import type { SchedulerStorage } from "./types";
 import {
 	type CronDeliveryOutput,
@@ -165,14 +165,6 @@ const CRON_TOOL_PARAMETERS = Type.Object({
 				"test-run only: delay (ms) before one-shot fires. Default 120000 (2x gateway tick; values < 60000 are rejected — see racy zone below).",
 		}),
 	),
-	testTimeoutMs: Type.Optional(
-		Type.Number({
-			description: "test-run only: max wait (ms) for agent terminal state after trigger fires. Default 30000.",
-		}),
-	),
-	noRestore: Type.Optional(
-		Type.Boolean({ description: "test-run only: keep the schedule as +<delay>s after the run. Default false." }),
-	),
 });
 
 const CRON_TOOL_DEFINITION: RpcHostToolDefinition = {
@@ -223,16 +215,15 @@ const CRON_TOOL_DEFINITION: RpcHostToolDefinition = {
 		"`agentSessionPath` for the full LLM trace.\n\n" +
 		"**`test-run`** triggers a task through the REAL scheduler and reports that the trigger was scheduled. " +
 		"Use this to verify a task's end-to-end pipeline (warm bridge → agent run → DingTalk delivery) without waiting for the actual cron tick. " +
-		'**Async contract (fire-and-forget):** `test-run` returns in milliseconds with `{kind: "started", inMs, timeoutMs, expiresAt, startedAt}`. The actual run + card delivery happen in the background on the next engine tick + agent run cycle — the LLM is NOT blocked. ' +
+		'**Async contract (fire-and-forget):** `test-run` returns in milliseconds with `{kind: "started", inMs, expiresAt, startedAt}`. The actual run + card delivery happen in the background on the next engine tick + agent run cycle — the LLM is NOT blocked. ' +
 		'**Why async:** the previous sync version blocked the LLM in `runExclusive` for `inMs + timeoutMs` (default 150s) while awaiting `tool_result`. The agent-bridge watchdog trips at 60s of no session events, killing the LLM with "Agent bridge failed". Returning immediately keeps the LLM alive. ' +
 		"**What happens after the tool returns:** (1) the engine fires the rewritten one-shot at `inMs`; (2) the cron service runs the task (agent or shell) and delivers the card via the active chat's delivery config; (3) the engine's post-fire restore (`engine.ts#restoreTestRunSchedule`) reads the marker, applies the snapshot, and re-schedules the original cron expression. " +
 		'**What the LLM gets back:** just `kind: "started"` and the timeline (`inMs`, `expiresAt`). The actual success/failure verdict is delivered to the user as the AI Card (the same card a real cron tick would produce). ' +
 		"**Checking the result later:** call `cron.runs` with the task name/id to read the execution history after `expiresAt` (default `inMs + 90s`). " +
 		"**When to use:** the user just added/updated a task and wants to confirm it works end-to-end. " +
-		"**`inMs` minimum:** runtime callers (this tool, the CLI) hard-reject `inMs < 60000` (1x gateway tick). The gateway engine tick reloads schedules from storage; if `inMs` is shorter than one tick, the reload runs AFTER `next_run_at` and the engine auto-disables the task as past-dated. Use `inMs >= 120000` (2x tick) to be safe. " +
-		"**`noRestore: true`** keeps the schedule as `+<delay>s` after the run (debug escape hatch only). " +
+		"**`inMs` minimum:** runtime callers (this tool, the CLI) hard-reject `inMs < 60000` (1x gateway tick). The gateway engine tick reloads schedules from storage; if `inMs` is shorter than one tick, the reload runs AFTER `next_run_at` and the engine never sees the one-shot. Use `inMs >= 120000` (2x tick) to be safe. " +
 		"**Failure handling:** orphan-recovery safety net on every engine tick — if the engine fails to fire before `expiresAt`, the next tick restores the schedule from the marker and the task is back to its real cron. " +
-		"**CLI parity:** `omp-gateway cron test-run <name>` still uses the legacy sync path (polls and reports the run + delivery verdict) — the CLI is operator-facing and the synchronous report is the operator's expectation. The LLM path is the only one that's async.\n\n" +
+		"**CLI parity:** `omp-gateway cron test-run <name>` uses the same fire-and-forget core — it arms the one-shot, tells you the fire time, and exits; you confirm the result via `cron.runs` or the delivered card.\n\n" +
 		"**Delivery rendering — `cron.deliveryMode` vs `task.delivery.mode` (orthogonal, do not conflate):**\n" +
 		"- `cron.deliveryMode` (gateway config, global) — `card` (default) or `text`. Decides the RENDERING format when a task is delivered. `card` renders the result as a DingTalk AI card with buttons; `text` sends a plain IM message. Operator flips this to fleet-wide toggle card vs text.\n" +
 		"- `task.delivery.mode` (per-task) — `announce` (default) or `none`. Decides WHETHER to deliver at all. `announce` triggers delivery after the run; `none` runs silently (no DingTalk message). Set `none` for tasks whose result is just a side-effect (cleanup, sync).\n" +
@@ -273,8 +264,6 @@ interface CronToolArgs {
 		| "recent"
 		| "test-run";
 	inMs?: number;
-	testTimeoutMs?: number;
-	noRestore?: boolean;
 	// recent-only
 	limit?: number;
 	sinceMs?: number;
@@ -354,7 +343,7 @@ async function handleTestRun(args: CronToolArgs, ctx: CronToolContext): Promise<
 	if (inMs !== undefined && inMs < tickMs) {
 		return errResult(
 			`test-run: inMs=${inMs} is below the gateway tick (${tickMs}ms). ` +
-				`Sub-tick values almost always race the engine reload and end in trigger_timeout. ` +
+				`Sub-tick values almost always race the engine reload and the one-shot never fires. ` +
 				`Use inMs >= ${tickMs * 2}ms (2x tick) for reliable triggering.`,
 		);
 	}
@@ -377,23 +366,19 @@ async function handleTestRun(args: CronToolArgs, ctx: CronToolContext): Promise<
 	const activeSessionPath = bridge.getActiveSessionPath();
 	const origin = activeSessionPath ? { sessionPath: activeSessionPath } : undefined;
 
-	const result: TestRunResult | TestRunHardError = await runTestRun({
+	const result: TestRunStarted | TestRunHardError = await runTestRun({
 		name,
 		inMs,
-		timeoutMs: numberArg(args, "testTimeoutMs"),
-		noRestore: args.noRestore === true,
 		tickIntervalMs: ctx.tickIntervalMs,
 		// Fire-and-forget: the LLM does NOT block on the actual run.
-		// The previous sync path blocked `inMs + timeoutMs` (default
-		// 150s) while the LLM awaited `tool_result`, which tripped the
-		// agent-bridge watchdog at 60s ("no session event for 60s") and
-		// killed the LLM. Returning immediately unblocks the LLM; the
-		// engine's post-fire restore (engine.ts#restoreTestRunSchedule)
-		// heals the schedule after the one-shot actually fires, and
-		// the card delivery uses the same code path as a real cron
-		// tick. The LLM is told the result is "deferred" and the user
-		// gets the card.
-		awaitResult: false,
+		// The previous sync path blocked `inMs + timeoutMs` while the
+		// LLM awaited `tool_result`, which tripped the agent-bridge
+		// watchdog at 60s and killed the LLM. Returning immediately
+		// unblocks the LLM; the engine's post-fire restore
+		// (engine.ts#restoreTestRunSchedule) heals the schedule after
+		// the one-shot actually fires, and the card delivery uses the
+		// same code path as a real cron tick. The LLM is told the
+		// result is "deferred" and the user gets the card.
 		storage,
 		origin,
 		// Pass the gateway's engine-reload hook through so the
@@ -423,14 +408,11 @@ async function handleTestRun(args: CronToolArgs, ctx: CronToolContext): Promise<
 		);
 	}
 
-	// `isError: true` for non-success, non-started kinds so the LLM
-	// sees a failed tool call. `success` is the happy path; `started`
-	// is the fire-and-forget acknowledgement (a positive result — the
-	// test-run was scheduled, the LLM is unblocked, the actual run
-	// happens in the background). Everything else (task_failed,
-	// delivery_failed, trigger_timeout) is a real error.
-	const isError =
-		result.kind === "task_failed" || result.kind === "delivery_failed" || result.kind === "trigger_timeout";
+	// `started` is the only non-error result of the fire-and-forget core —
+	// a positive acknowledgement (the test-run was scheduled, the LLM is
+	// unblocked, the actual run happens in the background). Hard errors
+	// were returned above.
+	const isError = false;
 	return {
 		type: "tool_result",
 		tool_use_id: "",

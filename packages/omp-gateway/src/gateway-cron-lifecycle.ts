@@ -189,13 +189,13 @@ export class CronLifecycle {
 		const tickMs = cronConfig.tickIntervalMs ?? 60_000;
 		let tickCount = 0;
 		this.#watchInterval = setInterval(() => {
-			// Check for an orphan test-run marker on every tick. This
-			// is the safety net for cases where the test-run process
-			// (CLI or LLM session) died AFTER writing the marker but
-			// BEFORE its `finally` could clear it. The CLI's own
-			// `process.on("exit")` handler is the primary path; this
-			// tick handler is the belt-and-suspenders for both CLI
-			// and LLM paths when the gateway itself stays alive.
+			// Check for an orphan test-run marker on every tick. This is
+			// the safety net for markers whose engine fire never happened:
+			// `consumeOrphanTestRunMarker` keeps markers in flight while
+			// the one-shot is still armed or the writer process is alive,
+			// and consumes them once the target is past / the writer is
+			// gone (CLI fire-and-forget exits immediately — the armed
+			// one-shot is the in-flight token, not the writer).
 			if (this.#schedulerStorage?.consumeOrphanTestRunMarker()) {
 				this.#schedulerEngine?.reload();
 			}

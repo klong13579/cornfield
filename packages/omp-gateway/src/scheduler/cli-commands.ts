@@ -15,7 +15,7 @@ import { findAgentSessionPath } from "../session-paths";
 import { summarizeCronRunDiagnostics } from "./diagnostics";
 import { appendExecutionLog, getRecentDeliveryFailureCount, readExecutionLog } from "./execution-log";
 import { executeScheduledCommand, scanCronPrompt } from "./executor";
-import { runTestRun, type TestRunHardError, type TestRunResult } from "./test-run";
+import { runTestRun, type TestRunHardError, type TestRunStarted } from "./test-run";
 import type { SchedulerStorage } from "./types";
 import {
 	formatExecutionRow,
@@ -634,26 +634,19 @@ export interface CronTestRunOptions {
 export async function cronTestRun(args: string[], storage: SchedulerStorage): Promise<void> {
 	const name = args[0];
 	if (!name) {
-		console.error("Usage: cron test-run <name> [--in 120s] [--timeout 150s] [--no-restore]");
+		console.error("Usage: cron test-run <name> [--in 120s]");
 		process.exitCode = 1;
 		return;
 	}
 
-	// Parse flags. We accept the three documented flags plus an internal
+	// Parse flags. We accept the documented flags plus an internal
 	// `_gatewayTickMs` knob for tests that drive a faster tick.
 	let inMs: number | undefined;
-	let timeoutMs: number | undefined;
-	let noRestore = false;
 	let gatewayTickMs = 60_000;
 	for (let i = 1; i < args.length; i++) {
 		const a = args[i];
-		if (a === "--no-restore") {
-			noRestore = true;
-		} else if (a === "--in" && args[i + 1]) {
+		if (a === "--in" && args[i + 1]) {
 			inMs = parseDuration(args[i + 1]!);
-			i++;
-		} else if (a === "--timeout" && args[i + 1]) {
-			timeoutMs = parseDuration(args[i + 1]!);
 			i++;
 		} else if (a === "_gatewayTickMs" && args[i + 1]) {
 			gatewayTickMs = parseDuration(args[i + 1]!);
@@ -666,14 +659,15 @@ export async function cronTestRun(args: string[], storage: SchedulerStorage): Pr
 	}
 
 	// Hard-reject sub-tick inMs at parse time. Sub-tick values almost
-	// always race the gateway's reload tick and end in trigger_timeout;
-	// the operator gets a clear "won't work" instead of a silent
-	// 60–120s wait. The threshold is the gateway's own tick (the
-	// `--_gatewayTickMs` knob lets tests use a smaller value).
+	// always race the gateway's reload tick and the one-shot is never
+	// picked up before `expiresAt`; the operator gets a clear
+	// "won't work" instead of a silent wait. The threshold is the
+	// gateway's own tick (the `--_gatewayTickMs` knob lets tests use
+	// a smaller value).
 	if (inMs !== undefined && inMs < gatewayTickMs) {
 		console.error(
 			`cron test-run: --in ${inMs}ms is below the gateway tick (${gatewayTickMs}ms). ` +
-				`Sub-tick values almost always race the engine reload and end in trigger_timeout. ` +
+				`Sub-tick values almost always race the engine reload and the one-shot never fires. ` +
 				`Use --in >= ${gatewayTickMs * 2}ms (2x tick) for reliable triggering.`,
 		);
 		process.exitCode = 1;
@@ -697,25 +691,13 @@ export async function cronTestRun(args: string[], storage: SchedulerStorage): Pr
 		return;
 	}
 
-	if (noRestore) {
-		console.error(
-			"cron test-run: --no-restore is not supported in fire-and-forget mode — the engine restores " +
-				"the original schedule automatically after the run (or via orphan recovery if it never fires).",
-		);
-		process.exitCode = 1;
-		return;
-	}
-
 	console.log(`[test-run] Task "${name}" — arming one-shot test run.`);
 
-	const result: TestRunResult | TestRunHardError = await runTestRun({
+	const result: TestRunStarted | TestRunHardError = await runTestRun({
 		name,
 		inMs,
-		timeoutMs,
-		noRestore,
 		tickIntervalMs: gatewayTickMs,
 		storage,
-		awaitResult: false,
 	});
 
 	if (result.kind === "task_not_found") {
@@ -757,10 +739,10 @@ export async function cronTestRun(args: string[], storage: SchedulerStorage): Pr
 		return;
 	}
 
-	// Unreachable with awaitResult=false; keep a visible failure rather
-	// than a silent success if the shared core evolves.
-	console.error(`[test-run] Unexpected result kind: ${result.kind}`);
-	process.exitCode = 1;
+	// Exhaustive: `started` + hard errors are handled above. TS narrows
+	// `result` to `never` if the shared core adds a new kind without the
+	// CLI handling it.
+	return;
 }
 
 /**

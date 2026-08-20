@@ -902,156 +902,57 @@ describe("cron host tool — test-run action", () => {
 		return { id: t.id };
 	}
 
-	function seedTerminalExecution(taskId: string, status = "success", exitCode = 0): string {
-		const startedAt = Date.now();
-		const inserted = storage.recordExecution({
-			taskId,
-			startedAt,
-			endedAt: startedAt + 50,
-			exitCode,
-			output: "test output",
-			stderr: null,
-			status,
-			agentSessionPath: null,
-		});
-		return inserted.id;
-	}
-
 	it("returns task_not_found for unknown name", async () => {
-		const result = await runTestRun({
-			name: "no-such-task",
-			tickIntervalMs: 60_000,
-			storage,
-			pollIntervalMs: 25,
-		});
+		const result = await runTestRun({ name: "no-such-task", tickIntervalMs: 60_000, storage });
 		expect(result.kind).toBe("task_not_found");
 		if (result.kind === "task_not_found") {
 			expect(result.name).toBe("no-such-task");
 		}
 	});
 
-	it("returns success + restores schedule when a terminal execution appears", async () => {
+	it("arms a one-shot and returns started (fire-and-forget; engine owns the restore)", async () => {
 		const { id } = seedTask({ name: "verify-this" });
-		const execId = seedTerminalExecution(id, "success", 0);
 
 		const result = await runTestRun({
 			name: "verify-this",
 			inMs: 30_000,
-			timeoutMs: 5_000,
 			tickIntervalMs: 60_000,
 			storage,
-			pollIntervalMs: 25,
 		});
 
-		expect(result.kind).toBe("success");
-		if (result.kind === "success") {
-			expect(result.execId).toBe(execId);
-			expect(result.status).toBe("success");
-			expect(result.exitCode).toBe(0);
-			expect(result.scheduleRestored).toBe(true);
+		expect(result.kind).toBe("started");
+		if (result.kind === "started") {
+			expect(result.name).toBe("verify-this");
+			expect(result.inMs).toBe(30_000);
+			expect(result.expiresAt).toBe(result.startedAt + 30_000 + 90_000);
 		}
 		const after = storage.getTask(id);
-		expect(after?.cron).toBe("0 9 * * *");
-		expect(after?.scheduleType).toBe("cron");
+		expect(after?.cron).toBe("+30s");
+		expect(after?.scheduleType).toBe("once");
 		expect(after?.status).toBe("active");
 	});
 
-	it("returns delivery_failed when lastDeliveryError is set on the post-run task", async () => {
-		const { id } = seedTask({ name: "delivery-broken" });
-		storage.updateTask(id, {
-			delivery: { channel: "dingtalk", accountId: "hr", toUserId: "u999", mode: "announce" },
-			updatedAt: Date.now(),
-		});
-		const execId = seedTerminalExecution(id, "success", 0);
-		storage.updateTask(id, { lastDeliveryError: "dingtalk API 500", updatedAt: Date.now() });
-
-		const result = await runTestRun({
-			name: "delivery-broken",
-			inMs: 30_000,
-			timeoutMs: 5_000,
-			tickIntervalMs: 60_000,
-			storage,
-			pollIntervalMs: 25,
-		});
-
-		expect(result.kind).toBe("delivery_failed");
-		if (result.kind === "delivery_failed") {
-			expect(result.execId).toBe(execId);
-			expect(result.deliveryError).toBe("dingtalk API 500");
-			expect(result.scheduleRestored).toBe(true);
-		}
-	});
-
-	it("returns task_failed when the agent exits non-zero", async () => {
-		const { id } = seedTask({ name: "will-fail" });
-		const execId = seedTerminalExecution(id, "failure", 1);
-
-		const result = await runTestRun({
-			name: "will-fail",
-			inMs: 30_000,
-			timeoutMs: 5_000,
-			tickIntervalMs: 60_000,
-			storage,
-			pollIntervalMs: 25,
-		});
-
-		expect(result.kind).toBe("task_failed");
-		if (result.kind === "task_failed") {
-			expect(result.execId).toBe(execId);
-			expect(result.exitCode).toBe(1);
-			expect(result.scheduleRestored).toBe(true);
-		}
-		const after = storage.getTask(id);
-		expect(after?.cron).toBe("0 9 * * *");
-	});
-
-	it("leaves schedule NOT restored when noRestore: true", async () => {
-		const { id } = seedTask({ name: "debug-no-restore" });
-		seedTerminalExecution(id, "success", 0);
-
-		const result = await runTestRun({
-			name: "debug-no-restore",
-			inMs: 30_000,
-			timeoutMs: 5_000,
-			noRestore: true,
-			tickIntervalMs: 60_000,
-			storage,
-			pollIntervalMs: 25,
-		});
-
-		expect(result.kind).toBe("success");
-		if (result.kind === "success") {
-			expect(result.scheduleRestored).toBe(false);
-		}
-		const after = storage.getTask(id);
-		expect(after?.scheduleType).toBe("once");
-		expect(after?.cron).toBe("+30s");
-	});
-
-	it("clamps out-of-range inMs to the documented [30_000, 600_000] window", async () => {
-		const { id } = seedTask({ name: "clamp-test" });
-		seedTerminalExecution(id, "success", 0);
+	it("clamps out-of-range inMs to the [1_000, 600_000] window", async () => {
+		seedTask({ name: "clamp-test" });
 
 		const result = await runTestRun({
 			name: "clamp-test",
 			inMs: 0,
-			timeoutMs: 5_000,
 			tickIntervalMs: 60_000,
 			storage,
-			pollIntervalMs: 25,
 		});
-		expect(result.kind).toBe("success");
-		if (result.kind === "success") {
-			expect(result.scheduleRestored).toBe(true);
+
+		expect(result.kind).toBe("started");
+		if (result.kind === "started") {
+			expect(result.inMs).toBe(1_000);
 		}
-		const after = storage.getTask(id);
-		expect(after?.cron).toBe("0 9 * * *");
-		expect(after?.scheduleType).toBe("cron");
+		const after = storage.getTaskByName("clamp-test");
+		expect(after?.cron).toBe("+1s");
+		expect(after?.scheduleType).toBe("once");
 	});
 
 	it("the LLM host tool's test-run action returns fire-and-forget { kind: 'started' } in milliseconds", async () => {
 		const { id } = seedTask({ name: "via-host-tool" });
-		seedTerminalExecution(id, "success", 0);
 
 		const registry = new StubRegistry();
 		const tools = createCronToolDefinitions({
@@ -1067,7 +968,6 @@ describe("cron host tool — test-run action", () => {
 			action: "test-run",
 			name: "via-host-tool",
 			inMs: 120_000,
-			testTimeoutMs: 5_000,
 		});
 		const elapsed = Date.now() - before;
 		const { text, isError } = asText(body);
@@ -1076,8 +976,6 @@ describe("cron host tool — test-run action", () => {
 		expect(result.kind).toBe("started");
 		expect(result.name).toBe("via-host-tool");
 		expect(result.inMs).toBe(120_000);
-		expect(result.testTimeoutMs).toBe(5_000);
-		expect(result.wasClamped).toBe(false);
 		expect(result.expiresAt).toBeGreaterThan(Date.now());
 		expect(typeof result.startedAt).toBe("number");
 		expect(elapsed).toBeLessThan(1_500);
@@ -1130,10 +1028,10 @@ describe("cron host tool — test-run action", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Fire-and-forget (awaitResult: false)
+// Fire-and-forget
 // ---------------------------------------------------------------------------
 
-describe("runTestRun — fire-and-forget (awaitResult: false)", () => {
+describe("runTestRun — fire-and-forget", () => {
 	let tempDir: string;
 	let storage: JsonFileStorage;
 
@@ -1172,11 +1070,9 @@ describe("runTestRun — fire-and-forget (awaitResult: false)", () => {
 		const result = await runTestRun({
 			name: "fire-and-forget",
 			inMs: 120_000,
-			timeoutMs: 30_000,
 			tickIntervalMs: 60_000,
 			storage,
 			markerBaseDir: tempDir,
-			awaitResult: false,
 		});
 		const elapsed = Date.now() - before;
 
@@ -1184,8 +1080,6 @@ describe("runTestRun — fire-and-forget (awaitResult: false)", () => {
 		if (result.kind === "started") {
 			expect(result.name).toBe("fire-and-forget");
 			expect(result.inMs).toBe(120_000);
-			expect(result.testTimeoutMs).toBe(30_000);
-			expect(result.wasClamped).toBe(false);
 			expect(result.expiresAt).toBe(result.startedAt + 120_000 + 90_000);
 		}
 		expect(elapsed).toBeLessThan(1_500);
@@ -1205,11 +1099,9 @@ describe("runTestRun — fire-and-forget (awaitResult: false)", () => {
 		await runTestRun({
 			name: "fire-and-forget",
 			inMs: 60_000,
-			timeoutMs: 10_000,
 			tickIntervalMs: 60_000,
 			storage,
 			markerBaseDir: tempDir,
-			awaitResult: false,
 		});
 		expect(hasTestRunMarker(tempDir)).toBe(true);
 	});
@@ -1227,11 +1119,9 @@ describe("runTestRun — fire-and-forget (awaitResult: false)", () => {
 		await runTestRun({
 			name: "fire-and-forget",
 			inMs: 60_000,
-			timeoutMs: 10_000,
 			tickIntervalMs: 60_000,
 			storage,
 			markerBaseDir: tempDir,
-			awaitResult: false,
 		});
 		const marker = readTestRunMarker(tempDir);
 		expect(marker).not.toBeNull();
@@ -1248,11 +1138,9 @@ describe("runTestRun — fire-and-forget (awaitResult: false)", () => {
 		await runTestRun({
 			name: "fire-and-forget",
 			inMs: 60_000,
-			timeoutMs: 10_000,
 			tickIntervalMs: 60_000,
 			storage,
 			markerBaseDir: tempDir,
-			awaitResult: false,
 		});
 		clearTestRunMarker(tempDir);
 		expect(hasTestRunMarker(tempDir)).toBe(false);
@@ -1262,10 +1150,8 @@ describe("runTestRun — fire-and-forget (awaitResult: false)", () => {
 		const result = await runTestRun({
 			name: "does-not-exist",
 			inMs: 60_000,
-			timeoutMs: 10_000,
 			tickIntervalMs: 60_000,
 			storage,
-			awaitResult: false,
 		});
 		expect(result.kind).toBe("task_not_found");
 		expect(hasTestRunMarker(tempDir)).toBe(false);
