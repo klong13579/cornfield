@@ -1,6 +1,6 @@
 ---
 name: squad-programming
-version: 0.1.0
+version: 0.2.0
 description: >-
   并行编排：把一个大任务拆成 MECE 子任务，在多个 git worktree 里各起一个子
   omp 并行工作，用 intercom 主从通信做求助与进度汇报。Use when the user wants
@@ -11,7 +11,7 @@ mutating: true
 
 <!--
   脚本与 schema 的权威源：
-  - scripts/bootstrap.ts  — 集结（建 worktree、写任务包、启动子 omp）的全部机械步骤
+  - scripts/bootstrap.ts  — 集结（建 worktree、写任务包、启动子 omp + pane 启动检查）的全部机械步骤
   - #任务包 schema        — .squad.json 的字段契约，拆解阶段产出，脚本按它执行
   用户视角的使用说明见 USAGE.md（不重复本文内容）。
   改流程时 SKILL.md 与脚本一起改；SKILL.md 是唯一事实源。
@@ -31,7 +31,7 @@ mutating: true
 |---|---|
 | 在 Herdr 环境 | `test "${HERDR_ENV:-}" = 1` |
 | herdr 可用 | `herdr worktree list` 能返回 JSON |
-| pi 可执行 | `command -v pi` 非空 |
+| omp 可执行 | `command -v omp` 非空（bootstrap 用 omp 启 worker，不读 PI_INTERCOM_PI_BIN） |
 | intercom 在线 | `intercom({ action: "status" })` 连通 |
 | 知道自己 session id | `intercom({ action: "list" })` 中自己的 id（bootstrap 传参用） |
 | 仓库干净基线 | `git status` 无未提交改动（worktree 从 base 分支切出） |
@@ -52,6 +52,7 @@ mutating: true
 2. **顺序依赖不并行** — T2 需要 T1 的代码产物 → 合成同一执行序列（同一 worktree 接力，脚本只起一个 agent，agent 做完 T1 继续做 T2）；只有「契约式依赖」（先定接口/签名/proto 文件，双方基于契约独立开发）才允许作为 `deps` 并行。
 3. **每条 acceptance 可验证** — 能跑的命令或明确产物路径；写「做好」「完成」= 失败，重写。
 4. **只读子任务（review/research）isolation 用 `shared-read`** — 不建 worktree，直接并行读 repo。
+5. **worktree 路径不用手写** — 自动落在父 omp cwd 下：`<父cwd>/.worktrees/<branch 去/为->`（如 `feat/t1` → `.worktrees/feat-t1`）。任务包不写 `worktree` 字段；显式覆盖仅限特殊场景（磁盘位置、非父仓库）。
 
 ### Step 0.3 生成 gate（三态，见 #gate 三态）
 
@@ -79,24 +80,38 @@ bun run .omp/skills/squad-programming/scripts/bootstrap.ts \
   [--dry-run]
 ```
 
-脚本对每个 `isolation: "worktree"` 子任务：建 worktree（herdr）→ 写入该 worktree 的 `.squad.json` → split pane → `pane run` 注入 `PI_SUBAGENT_*` env（注册父 edge）+ `--model <档位模型>` 启动子 omp。`shared-read` 子任务不建 worktree，cwd 用 repo 根。
+脚本对每个 `isolation: "worktree"` 子任务：建 worktree（**git 原生 `git worktree add -C <parentCwd>`**，不用 herdr worktree create —— 后者会给每个 worktree 自动开一个展示 workspace（`open_workspace_id`，含一个空 tab、无 omp，纯冗余），且仓库上下文绕 workspace 关联容易建错）→ 写入该 worktree 的 `.squad.json` → tab create（tab 固定落在 **squad 专属 workspace**，集结时创建并命名 `squad-<squadId>`，不 split 当前 pane）→ `pane run` 注入 `PI_SUBAGENT_*` env（注册父 edge）+ `--model <档位模型>` 启动子 omp。`shared-read` 子任务不建 worktree，cwd 用 repo 根。
 
-**Completion criterion**：脚本返回每个子任务的 paneId；`intercom({ action: "children" })` 能看到所有子 omp 上线（或少量已注册）。
+启动后脚本自动做 **pane 层准备检查**：轮询各 pane 输出（pane read + `script -q` 落盘日志）确认 omp 已启动（默认超时 60s，`--verify-timeout <ms>` 可调），失败则带输出快照退出码 1。不做 herdr agent list 探测 —— script 包装启动的 pane 不会被识别为 omp agent（终端标题非 π，实测永久缺位）。确认只是启动慢时可 `--skip-verify` 绕过，改由父 agent 用 intercom 复核。完整三层检查见 #Phase 1.5 准备检查。
+
+**Completion criterion**：脚本返回每个子任务的 paneId 且 pane 层检查通过；接下来走 #Phase 1.5 的 worker/父两层 gate。
 
 波次调度规则（父 agent 执行）：
 - 每一波 = 所有 deps 已满足的子任务；一波内并行启动，波间等待全部收尾再进下一波（barrier）。
 - 并发数 ≤ `maxConcurrency`（默认 3）—— N 个 worktree 同时 build/test 会抢 CPU/磁盘。
 - `deps: []` 全空 → 单波纯并行；`maxConcurrency: 1` 或 deps 成链 → 纯串行。
 
+## Phase 1.5 — 准备检查（readiness gate）
+
+集结后**不许直接开工**。本阶段把「子 omp 正常打开 / 模型可访问 / 任务包已获取」三个前提全部验证绿灯，才进 Phase 2。三层检查：
+
+1. **脚本层（omp 活着）** — bootstrap 启动每个子任务后自动轮询 `herdr agent list`（默认 60s，`--verify-timeout <ms>` 可调）：pane 出现在 agent 列表 = omp TUI 已上线（✓）；
+   - pane 输出出现启动失败信号（`command not found` / `No such file or directory` / `Cannot find module`）→ 立即失败并给快照；
+   - 超时未上线 → 打印各 pane 输出快照并以退出码 1 失败，不静默继续。确认只是 herdr 探测延迟后，可 `--skip-verify` 重跑绕过，父再用 intercom 复核。
+2. **worker 层（包已读 + 模型可访问）** — 每个子 omp 开场必须先过准备检查再碰任务：读任务包 → `list_models` 核对档位模型在可用列表（不在则 `switch_model` 到档内可用模型）→ 向父发 `[T<n>] STARTED: <实际生效模型>，任务包已读`。  STARTED ack 本身要经过一次真实 LLM 调用 —— 一次证明三件事：omp 活着、模型可访问、任务包已获取。
+3. **父层 wait-gate** — 父等全部子任务的 STARTED（`intercom({ action: "children" })` 看注册，收消息等 ack，默认超时 90s）。超时 → 对该子任务 `herdr pane read` 快照 + children 列表定位；仍失败 → 标记 `BLOCKED` 并给原因（缺模型 key / 模型名写错 / PATH 缺 omp），修复后只重集结该子任务，不整波回滚。
+
+**Completion criterion**：每个子任务已发 STARTED 或明确 BLOCKED 并给出原因；全部 STARTED 才进入 Phase 2。
+
 ## Phase 2 — 执行与协作
 
 ### 子 omp 侧协议（写进启动 brief，agent 遵守）
 
-1. **首件事读任务包** — 文件路径在启动 brief 里给出：worktree 场景为 `<cwd>/.squad.json`，shared 场景为 `/tmp/squad-<squadId>/<taskId>.squad.json`。任务、scope、gate、汇报协议、模型档位都在里面。
-2. **模型核对** — 当前模型不在任务包的 `modelTier` 档位内 → 先 `switch_model` 切过去（启动参数失效兜底）。
+1. **首件事读任务包** — 文件路径在启动 brief 里给出：worktree 场景为 `<cwd>/.squad.json`，shared 场景为 `/tmp/squad-<squadId>/<taskId>.squad.json`。任务、scope、gate、汇报协议、模型档位都在里面。读完立即做 #Phase 1.5 的准备检查汇报。
+2. **模型核对** — 用 `list_models` 确认分配模型在可用列表；不在 → `switch_model` 切到档内可用模型，并按实际生效模型汇报（启动参数失效兜底）。
 3. **只动 scope 内文件** — scope 外需要改动 → `ask` 求助父。
 4. **求助** — `intercom({ action: "ask", message: "..." })` **不带 to**（自动路由到父）。同时只允许一个 pending ask；求助期间不发重复 ask。
-5. **状态汇报** — `intercom({ action: "send", to: <父 target>, message: "[<taskId>] <STATE>: <一句话>" })`，STATE ∈ `STARTED` / `BLOCKED` / `REVIEWING` / `COMPLETE` / `FAILED`。
+5. **状态汇报** — `intercom({ action: "send", to: <父 target>, message: "[<taskId>] <STATE>: <一句话>" })`，STATE ∈ `STARTED` / `BLOCKED` / `REVIEWING` / `COMPLETE` / `FAILED`。**STARTED = 准备检查通过**（任务包已读 + 模型已核对并生效），只发一次，父以全部 STARTED 作为 Phase 2 的闸门。
 6. 每回合结束自动上报（agent_end 由运行时注入，无需手动）。
 
 ### 父 agent 侧盯盘
@@ -113,9 +128,18 @@ bun run .omp/skills/squad-programming/scripts/bootstrap.ts \
 2. **合并**：
    - `mergePolicy: "auto"` 且验证全过 → 合并到 base 分支（`git merge <branch>`），跑一次集成 `bun check`。
    - `mergePolicy: "human-review"`（gate `unknown` 或产品/业务验收）→ **不合并**，整理 diff 摘要 + gate 分析给用户验收，用户点头才合。
-3. **清理**：`herdr worktree remove <path>`（或 `git worktree remove`）；归档任务包从 `~/.omp/squads/<squadId>/` 移入 `archive/`。
+3. **清理**（每步单独执行、确认 JSON 返回后再下一步，**禁止串行 `&&`**）：
+   - `herdr tab close <tab_id>` 逐个关掉 squad workspace 的 tab（`herdr tab list --workspace <squadWorkspaceId>` 拿全部 tab id）；
+   - `git worktree remove --force <worktree路径>` + `git branch -D <branch>`；
+   - 归档任务包从 `~/.omp/squads/<squadId>/` 移入 `archive/`；
+   - `herdr workspace close <squadWorkspaceId>` 仅作最后兜底：确认返回正常 JSON（`{"result":{"type":"ok"}}`）后再 git 清理；**返回异常（如 `No result provided`）立即停止**，先查该 workspace 是否还有父 omp 关联进程，再决定是否人工收。**不要用 `&&` 把 close 跟后面的 git 命令串在一起**——close 出错时后续命令会在不确定状态下继续执行。
 
 **Completion criterion**：每个子任务处于「已合并」或「等待人验收」之一；worktree 全部清理；用户看到结果摘要。
+
+**清理权限（谁不用问你，谁必须等你）**：
+- `derived`/`explicit` gate 且验证全过、已合并 → 父 agent **自动清理**该子任务的 worktree/分支（改动已进 base，删分支无损）——不用逐项找用户确认；
+- `human-review`（gate `unknown`）或 `FAILED` → **不得清理**：worktree/分支保留，等用户验收/拍板后才删；
+- workspace close 只在这些之外的全部子任务已终态后执行；只要还有待验收/待修的 worktree 在，不 close（防止子任务上下文和会话终端被一起回收）。
 
 ## 模型档位表
 
@@ -150,7 +174,7 @@ bun run .omp/skills/squad-programming/scripts/bootstrap.ts \
     "mid": "narwal-plan/deepseek-v4-pro",
     "banned": ["narwal-plan/claude-opus-*", "narwal-plan/claude-sonnet-*"]
   },
-  "parent": { "target": "planner", "sessionId": "...", "cwd": "/path/to/repo" },
+  "parent": { "target": "planner", "sessionId": "..." },  // cwd 可选：缺省 = bootstrap 运行目录（父 omp 会话 cwd），worktree 落 <父cwd>/.worktrees/
   "subtasks": [
     {
       "id": "T1",
@@ -167,8 +191,8 @@ bun run .omp/skills/squad-programming/scripts/bootstrap.ts \
         "mergePolicy": "auto"                    // unknown 时强制 human-review
       },
       "modelTier": "mid",                        // cheap | mid，或 "model": "<provider>/<id>"
-      "branch": "feat/t1",
-      "worktree": "/path/to/repo/.worktrees/t1",
+     "branch": "feat/t1",                       // worktree 目录按此自动推导（<父cwd>/.worktrees/feat-t1）
+     "worktree": "/path/to/repo/.worktrees/t1"  // 可选：省略则自动落在 <父cwd>/.worktrees/<branch 去/为->；仅特殊场景显式覆盖
       "budgetTokens": 200000                     // 可选：超预算强制上报父
     }
   ],
@@ -180,10 +204,12 @@ bun run .omp/skills/squad-programming/scripts/bootstrap.ts \
 
 ```
 你是 <taskId>（<title>）的实现者，属于 squad <squadId> 的 worker。
-第一步：读启动 brief 里给出的任务包路径（worktree 场景 = 当前目录 .squad.json，
-shared 场景 = /tmp 绝对路径），完整理解任务、scope、gate、汇报协议、模型档位。
-规则：模型不在档位内先 switch_model；只改 scope 内文件；求助用 intercom ask（不带 to，
-自动路由父）；状态用 intercom send 给 <parent.target>，格式 "[<taskId>] <STATE>: 一句话"。
+第一步（准备检查）：读启动 brief 里给出的任务包路径（worktree 场景 = 当前目录 .squad.json，
+shared 场景 = /tmp 绝对路径），完整理解任务、scope、gate、汇报协议、模型档位；
+用 list_models 确认分配模型在可用列表（不在则 switch_model 到档内模型并汇报实际生效模型）；
+然后立刻向父发 "[<taskId>] STARTED: <实际生效模型>，任务包已读" —— 父等全部 STARTED 才正式开工。
+规则：只改 scope 内文件；求助用 intercom ask（不带 to，自动路由父）；状态用 intercom send 给
+<parent.target>，格式 "[<taskId>] <STATE>: 一句话"（STATE ∈ STARTED/BLOCKED/REVIEWING/COMPLETE/FAILED）。
 完成标准即 .squad.json 中 acceptance。开始。
 ```
 
