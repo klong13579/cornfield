@@ -1,5 +1,5 @@
 import { loadNotifyPrefs, notifyGuarded } from "../lib/notifications";
-import type { FsEntryDto, GatewayStatusDto, McpServerDto, PiClient } from "../lib/pi-client-api";
+import type { FsEntryDto, GatewayStatusDto, McpServerDto, PiClient, RemoteSkillItemDto } from "../lib/pi-client-api";
 import type { BranchPoint, PlaybackEntry, SessionRecordSummary } from "../lib/records";
 import type {
 	AgentInfoDto,
@@ -475,6 +475,16 @@ class SessionStore {
 	/** 启停技能（set_skill_enabled，代理到 pi-client）。 */
 	setSkillEnabled(name: string, enabled: boolean): Promise<{ ok: boolean; name: string; enabled: boolean }> {
 		return this.#client.setSkillEnabled(name, enabled);
+	}
+
+	/** 远程技能市场（list_remote_skills，代理到 pi-client；展示层自行持有状态）。 */
+	fetchRemoteSkills(source?: string): Promise<RemoteSkillItemDto[]> {
+		return this.#client.listRemoteSkills(source);
+	}
+
+	/** 安装远程技能（install_remote_skill，代理到 pi-client）。 */
+	installRemoteSkill(source: string, name: string): Promise<{ path: string; alreadyInstalled: boolean }> {
+		return this.#client.installRemoteSkill(source, name);
 	}
 
 	// ── MCP 服务器管理（设置页；契约命令由 serve 端 m1 并行实现，代理到 pi-client）──
