@@ -4,6 +4,7 @@ import { Orb, type OrbState } from "../../components/Orb";
 import { inQuietHours, loadVoicePrefs, saveVoicePrefs, type VoicePreferences } from "../../lib/voice-preferences";
 import { useSessionStore } from "../../state/session-store";
 import { useSession } from "../../state/use-session";
+import { ListenView } from "./ListenView";
 
 /**
  * 语音页（FR-4 / FR-13）—— 基础语音 + Jarvis 双模式。
@@ -58,7 +59,7 @@ function stopSpeak(): void {
 	if ("speechSynthesis" in window) window.speechSynthesis.cancel();
 }
 
-type VoiceMode = "basic" | "jarvis";
+type VoiceMode = "basic" | "jarvis" | "listen";
 
 export function VoiceView(): React.JSX.Element {
 	const store = useSessionStore();
@@ -218,6 +219,7 @@ export function VoiceView(): React.JSX.Element {
 						[
 							["basic", "基础语音"],
 							["jarvis", "Jarvis 免提"],
+							["listen", "听记"],
 						] as [VoiceMode, string][]
 					).map(([m, label]) => (
 						<button
@@ -239,7 +241,9 @@ export function VoiceView(): React.JSX.Element {
 					</div>
 				)}
 				{/* 模式主体 */}
-				{mode === "basic" ? (
+				{mode === "listen" ? (
+					<ListenView />
+				) : mode === "basic" ? (
 					<div className="flex flex-col items-center gap-6">
 						{/* 录音球（120px 触控，录制时 pulse + 波纹） */}
 						<button

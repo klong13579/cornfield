@@ -36,6 +36,7 @@ import { normalizeHostToolDefinitions } from "../modes/rpc/rpc-mode";
 import { discoverSkills } from "../sdk";
 import type { AgentSession } from "../session/agent-session";
 import type { SessionStore } from "../session/session-store";
+import { listListenRecordings, saveListenText, transcribeAudioWithDefaults } from "../stt/listen-service";
 import type { TodoPhase } from "../tools/todo-write";
 import * as git from "../utils/git";
 import { WireHostToolBridge } from "./host-tool-bridge";
@@ -112,6 +113,9 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 		name: "default",
 		agentDir: process.cwd(),
 	});
+	// record_transcribe 的 API 转写路径（record.model）复用 default 会话的模型注册表；
+	// 未配置 API 模型时仅走本地 whisper，本引用不会被触碰。
+	const defaultModelRegistry = defaultSession.session.modelRegistry;
 	const metas = await loadMetasSafe();
 	for (const meta of metas) registry.registerMeta(meta);
 
@@ -397,6 +401,51 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 						return;
 					}
 					done({ path: (command as { path: string }).path ?? "", ...res });
+					return;
+				}
+				case "record_transcribe": {
+					// VOICE-D：浏览器录音上传 → TUI /record 同源转写管线（本地 whisper / record.model，
+					// 自动分块）→ 落 ~/.omp/listen/，与 /record 同目录同格式。不定向 agent（纯数据路径）。
+					const audio = (command as { audio?: unknown }).audio;
+					if (typeof audio !== "string" || audio.length === 0) {
+						fail("audio required (base64 PCM WAV)");
+						return;
+					}
+					const desc =
+						typeof (command as { desc?: unknown }).desc === "string"
+							? (command as { desc: string }).desc
+							: undefined;
+					let bytes: Uint8Array;
+					try {
+						bytes = Buffer.from(audio, "base64");
+					} catch {
+						fail("audio is not valid base64");
+						return;
+					}
+					if (bytes.length < 100) {
+						fail("audio is empty or too small");
+						return;
+					}
+					const id = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+					const tmpPath = path.join(os.tmpdir(), `omp-web-listen-${id}.wav`);
+					try {
+						await fs.writeFile(tmpPath, bytes);
+						const { text, model } = await transcribeAudioWithDefaults(tmpPath, {
+							modelRegistry: defaultModelRegistry,
+						});
+						const savedPath = await saveListenText(text, desc);
+						done({ ok: true, text, path: savedPath, model });
+					} catch (err) {
+						fail(err instanceof Error ? err.message : "transcription failed");
+					} finally {
+						await fs.rm(tmpPath, { force: true }).catch(() => {});
+					}
+					return;
+				}
+				case "listen_list": {
+					// /listen 前端化：列出 ~/.omp/listen/ 全部录音（名称倒序 + 转写全文，前端本地搜索/预览）。
+					const recordings = await listListenRecordings();
+					done({ ok: true, recordings });
 					return;
 				}
 				case "gateway_status": {

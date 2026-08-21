@@ -1,5 +1,12 @@
 import { loadNotifyPrefs, notifyGuarded } from "../lib/notifications";
-import type { FsEntryDto, GatewayStatusDto, McpServerDto, PiClient, RemoteSkillItemDto } from "../lib/pi-client-api";
+import type {
+	FsEntryDto,
+	GatewayStatusDto,
+	ListenRecordingDto,
+	McpServerDto,
+	PiClient,
+	RemoteSkillItemDto,
+} from "../lib/pi-client-api";
 import type { BranchPoint, PlaybackEntry, SessionRecordSummary } from "../lib/records";
 import type {
 	AgentInfoDto,
@@ -523,6 +530,22 @@ class SessionStore {
 	/** TUI slash 命令表（list_commands，代理到 pi-client；W1 SlashPalette 消费）。 */
 	listCommands(): Promise<{ name: string; description: string }[]> {
 		return this.#client.listCommands();
+	}
+
+	/**
+	 * 听记：上传浏览器录音（16kHz mono PCM WAV base64）→ serve 转写（TUI /record 同管线）→ 落盘。
+	 * 长请求（本地 whisper 分钟级）——adapter 内部独立短连接 + 长超时，不阻塞主命令面。
+	 */
+	recordTranscribe(
+		audioBase64: string,
+		desc?: string,
+	): Promise<{ ok: boolean; text: string; path: string; model: string; error?: string }> {
+		return this.#client.recordTranscribe(audioBase64, desc);
+	}
+
+	/** 听记历史（listen_list；~/.omp/listen/ 全部录音，名称倒序 + 转写全文）。 */
+	listenList(): Promise<{ ok: boolean; recordings: ListenRecordingDto[] }> {
+		return this.#client.listenList();
 	}
 
 	/** gateway cron 任务表（get_cron_tasks，代理到 pi-client）。 */

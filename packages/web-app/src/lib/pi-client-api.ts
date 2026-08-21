@@ -34,6 +34,16 @@ export interface FsImageResult {
 	truncated: boolean;
 }
 
+/** 听记历史条目（listen_list：~/.omp/listen/ 单条录音的元数据 + 转写全文）。 */
+export interface ListenRecordingDto {
+	name: string;
+	path: string;
+	/** ISO 时间（json recorded_at，缺失回退文件 mtime）。 */
+	recordedAt: string;
+	size: number;
+	text: string;
+}
+
 /**
  * list_remote_skills 返回的远程可装项（契约命令，h1 serve 端并行实现，运行期对齐）。
  * type: 'skill' 技能 / 'plugin' 插件；source 为来源标识（插件市场源 URL/名）；
@@ -219,6 +229,25 @@ export interface PiClient {
 	 * 已存在返回 alreadyInstalled:true 不重复克隆；失败抛错由调用方提示。
 	 */
 	installRemoteSkill(source: string, name: string): Promise<{ path: string; alreadyInstalled: boolean }>;
+
+	// ── 听记（VOICE-D：/voice 听记 tab）──
+	/**
+	 * 上传浏览器录音（16kHz mono PCM WAV base64）→ serve 转写（TUI /record 同管线：本地
+	 * whisper / record.model API，自动分块）→ 落 ~/.omp/listen/。返回转写文本 + 落盘路径 + 模型。
+	 */
+	recordTranscribe(
+		audioBase64: string,
+		desc?: string,
+	): Promise<{
+		ok: boolean;
+		text: string;
+		path: string;
+		model: string;
+		error?: string;
+	}>;
+
+	/** 听记历史（listen_list：~/.omp/listen/ 全部录音 json，名称倒序 + 转写全文，前端本地搜索/预览）。 */
+	listenList(): Promise<{ ok: boolean; recordings: ListenRecordingDto[] }>;
 
 	// ── MCP 服务器管理（设置页；契约命令 get_mcp_servers / set_mcp_server / remove_mcp_server / test_mcp_server，由 serve 端并行实现）──
 	/** 列出 MCP 服务器（get_mcp_servers；读 ~/.omp/agent/mcp.json 的 mcpServers）。 */

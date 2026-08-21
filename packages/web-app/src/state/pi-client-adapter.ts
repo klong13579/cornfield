@@ -6,6 +6,7 @@ import type {
 	FsEntryDto,
 	FsImageResult,
 	GatewayStatusDto,
+	ListenRecordingDto,
 	McpServerDto,
 	PiClient,
 	RemoteSkillItemDto,
@@ -116,9 +117,12 @@ export class PiClientAdapter implements PiClient {
 	#env: EnvironmentSummaryDto | null = null;
 	#listeners = new Set<(frame: WireServerEventDto) => void>();
 	#connListeners = new Set<(conn: ConnectionInfoDto) => void>();
+	/** 测试注入的 WebSocket 构造器（recordTranscribe 独立短连接共用）。 */
+	#wsCtor?: PiWebSocketCtor;
 
 	constructor(config: ServeConnectionConfig = loadServeConfig(), webSocketCtor?: PiWebSocketCtor) {
 		this.#connection = { connected: false, wsUrl: config.wsUrl, protocolVersion: 1 };
+		this.#wsCtor = webSocketCtor;
 		this.#client = new WirePiClient({
 			url: toWsUrl(config),
 			token: config.token,
@@ -533,6 +537,55 @@ export class PiClientAdapter implements PiClient {
 	/** gateway cron 任务表（get_cron_tasks；jobs.json 直读，只读）。 */
 	async getCronTasks(): Promise<{ tasks: TaskRowDto[] }> {
 		return this.#req<{ tasks: TaskRowDto[] }>({ type: "get_cron_tasks" } as never);
+	}
+
+	/**
+	 * 听记：上传浏览器录音（16kHz mono PCM WAV base64）→ serve 转写（TUI /record 同管线）→ 落盘。
+	 * 长请求（本地 whisper 分钟级）——独立短连接 + 10 分钟超时，不拖累主连接 30s 超时策略。
+	 */
+	async recordTranscribe(
+		audioBase64: string,
+		desc?: string,
+	): Promise<{ ok: boolean; text: string; path: string; model: string; error?: string }> {
+		const config = loadServeConfig();
+		const client = new WirePiClient({
+			url: toWsUrl(config),
+			token: config.token,
+			autoReconnect: false,
+			requestTimeoutMs: 600_000,
+			...(this.#wsCtor ? { webSocketCtor: this.#wsCtor } : {}),
+		});
+		try {
+			await client.connect();
+			const result = await client.request<{
+				ok?: boolean;
+				text?: string;
+				path?: string;
+				model?: string;
+				error?: string;
+			}>({
+				type: "record_transcribe",
+				audio: audioBase64,
+				...(desc ? { desc } : {}),
+			} as never);
+			return {
+				ok: result.ok === true,
+				text: result.text ?? "",
+				path: result.path ?? "",
+				model: result.model ?? "",
+				...(result.error ? { error: result.error } : {}),
+			};
+		} finally {
+			client.close("record_transcribe done");
+		}
+	}
+
+	/** 听记历史（listen_list；~/.omp/listen/ 全部录音，名称倒序 + 转写全文）。 */
+	async listenList(): Promise<{ ok: boolean; recordings: ListenRecordingDto[] }> {
+		const result = await this.#req<{ ok?: boolean; recordings?: ListenRecordingDto[] | null }>({
+			type: "listen_list",
+		} as never);
+		return { ok: result.ok === true, recordings: result.recordings ?? [] };
 	}
 
 	/** cron 执行日志（get_cron_logs；logs/by-task 直读，只读）。 */

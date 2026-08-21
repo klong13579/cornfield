@@ -55,7 +55,8 @@ test("composer 种子：显示 → 消费 URL → 清空不再恢复", async ({ 
 	);
 	try {
 		await waitForHttp(`http://127.0.0.1:${APP_PORT}/`, 30_000);
-		await page.goto(`http://127.0.0.1:${APP_PORT}/workspace?q=${encodeURIComponent(SEED)}`, {
+		// 路由是 hash 模式（createHashRouter）——workspace 页在 /#/workspace
+		await page.goto(`http://127.0.0.1:${APP_PORT}/#/workspace?q=${encodeURIComponent(SEED)}`, {
 			waitUntil: "domcontentloaded",
 		});
 
@@ -65,9 +66,9 @@ test("composer 种子：显示 → 消费 URL → 清空不再恢复", async ({ 
 		// 1. 种子文本进入输入区（挂载后一次写入草稿 store）
 		await expect(composer).toHaveValue(SEED);
 
-		// 2. 自动发送窗口（400ms）过后，q 参数必须从 URL 消费（replace）
+		// 2. 自动发送窗口（400ms）过后，q 参数必须从 URL 消费（replace，hash 模式下在 hash 内）
 		//    （serve 未启动时 prompt 会以 commandError 落条纹横幅，不影响本断言）
-		await page.waitForFunction(() => !new URLSearchParams(window.location.search).has("q"), undefined, {
+		await page.waitForFunction(() => !location.hash.includes("q="), undefined, {
 			timeout: 10_000,
 		});
 

@@ -238,7 +238,22 @@ export type WireExtensionCommand =
 	 * 用户裁决回传：requestId 对应 permission_request；choice 白名单（approval: deny|once|session|always），
 	 * clarify 为所选 option 文本。脏值 serve 侧回 error。
 	 */
-	| { id?: string; type: "permission_respond"; requestId: string; choice: string };
+	| { id?: string; type: "permission_respond"; requestId: string; choice: string }
+	/**
+	 * 听记（VOICE-D：/voice 听记 tab）：上传一段浏览器录制的 16kHz 单声道 PCM WAV（base64），
+	 * 走 TUI /record 同源转写管线（本地 whisper 或 record.model API，超长自动分块），
+	 * 结果落 ~/.omp/listen/YYYY-MM-DD-<desc>.json（与 /record 同目录同格式）。
+	 * - audio：PCM WAV base64（前端 encodeWav 产出，与 TUI 本地录音同标）
+	 * - desc：可选，文件名描述（缺省按时间自动命名）
+	 * 响应 { ok:true, text, path, model }；输入非法/转写失败 { ok:false, error }。
+	 */
+	| { id?: string; type: "record_transcribe"; audio: string; desc?: string }
+	/**
+	 * 听记历史（/listen 前端化）：列出 ~/.omp/listen/ 全部录音 json（文件名倒序），
+	 * 返回元数据 + 转写全文（前端本地搜索/预览零延迟）。
+	 * 响应 { ok:true, recordings: [{ name, path, recordedAt, size, text }] }；目录缺失 → { ok:true, recordings: [] }。
+	 */
+	| { id?: string; type: "listen_list" };
 export type WireCommand = MultiplexCommand | WireExtensionCommand;
 
 /** 获取具体命令结构的 helper。 */
