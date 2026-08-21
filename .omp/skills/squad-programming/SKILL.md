@@ -173,7 +173,9 @@ bun run .omp/skills/squad-programming/scripts/bootstrap.ts \
 
 1. **提交检查**：交接前每个子任务必须已在分支**提交**（worker 收尾铁律，见启动 brief；未提交的交付父可代提交——只在 worktree 内 add/commit 源文件，排除 .squad.json/node_modules）。提交后 `git log <base>..<branch>` 应恰好是本次交付。
 2. **单任务验证**：对每个子任务在对应 worktree 跑 `gate.verifiers`（如 `bun check`、`bun test <scope>`）；失败 → 打回子 omp 修或标记 `FAILED` 上报用户。
-3. **整体验证（integration worktree）** — 子任务**分开验了还不够**：改动同域（同页面/同包/互相引用）或验收涉及整体行为（起服务、端到端）时，必须把全部已完成分支合到一个验证区看合体效果。
+3. **整体验证（integration worktree）— 强制门禁，≥2 个 complete 子任务时必须执行**：子任务**分开验了还不够**。任何 squad 有 ≥2 个子任务达到 complete，父**必须**把全部已完成分支合到一个 integration worktree 做合体验证——**无论子任务是否同域、文件是否相交**。判定依据不是「文件是否重叠」，而是「**合体后的产物才是交付物**」：
+   - **契约式依赖也必须合体**：T1 定义类型/接口/加载逻辑，T2 消费/打包——即使各自改不同文件（单任务 gate 全绿），合体产物可能缺 T1 改动。实测案例（2026-08-21 打包 squad）：T1 改 `main.ts` 生产加载（`isPackaged → loadFile(renderer)`）、T2 改打包链路，单 worktree 验收各自通过；但打包只用 T2 worktree（不含 T1 改动）→ 产物 `main.js` 无 `isPackaged` 分支 → 装机白屏（占位页）。根因：验收没有走 integration worktree 合体。
+   - **唯一豁免**：squad 只有 1 个子任务（无合体意义），或全部子任务为纯只读 research（无产物）。豁免必须能在交接清单里显式说明理由。
    - **建法（机械活交给脚本）**：
      ```bash
      bun run .omp/skills/squad-programming/scripts/integrate.ts ~/.omp/squads/<squadId>/state.json [--link-node-modules] [--dry-run]
@@ -278,5 +280,6 @@ shared 场景 = /tmp 绝对路径），完整理解任务、scope、gate、汇�
 - **父 agent 代拍板** — gate 未知或产品类验收，父只整理摘要，决策权交回用户。
 - **worktree 用 git worktree add 绕过 herdr** — 不产生树节点（Spaces 面板挂不上）；必须 `herdr worktree create`。
 - **script -q 包装启动 omp** — pane 前台进程是 script/bash，herdr agent 识别缺位（agents 列表看不到）；必须 `exec omp` 直启。
+- **拿单 worktree 产物当整体验收**（2026-08-21 实测）— 契约式依赖（T1 改接口/加载逻辑、T2 消费/打包）下，子任务文件不相交、单任务 gate 全绿，就跳过 integration 合体直接拿其中一个 worktree 的构建/打包产物验收 → 产物缺另一半改动，装机才暴露（实测：T2 worktree 打包缺 T1 的 `main.ts isPackaged` 分支 → 白屏）。**≥2 个 complete 子任务必须走 integrate.ts 合体验证，产物以合体后为准**。
 - **intercom ask 不带 to** — 按 cwd 优先路由，实测误投同目录活跃的其他会话（aion-ui）；ask 必须显式 to=父。
 - **agent.start 启动 omp** — agent_pane_busy / timeout / 名字不登记（本环境 5 轮反复失败）；pane run + exec omp 稳定。

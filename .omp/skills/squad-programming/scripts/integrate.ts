@@ -1,9 +1,15 @@
 /**
- * integrate.ts — 整体验证 worktree（squad-programming Phase 3）
+ * integrate.ts — 整体验证 worktree（squad-programming Phase 3 强制门禁）
  *
  * 作用：把 squad 所有子任务分支合并到一个独立的 integration worktree，
  *      做整体功能验证（合体后起服务、跑子任务 gate 全集、端到端冒烟）。
  *      纯 git worktree，无 herdr pane/agent —— 这是验证区，不占子 agent。
+ *
+ * 强制门禁（2026-08-21 实测教训）：≥2 个子任务 complete 时必须执行——
+ *      契约式依赖（T1 定义/修改、T2 消费）即使文件不相交，单 worktree 的
+ *      构建/打包产物也会缺对方改动（实测：T2 单 worktree 打包缺 T1 的
+ *      main.ts isPackaged 分支 → 装机白屏）。合体后的产物才是交付物，
+ *      不能拿单个子任务的 worktree 产物验收。
  *
  * 用法：
  *   bun run .omp/skills/squad-programming/scripts/integrate.ts <state.json> \
@@ -87,6 +93,11 @@ async function main(): Promise<void> {
 	const integBranch = `${raw.squadId}-integ`;
 	const branches = raw.subtasks.filter((s) => s.status === "complete" && s.branch).map((s) => s.branch);
 	if (branches.length === 0) fail("没有 complete 状态的子任务分支可合并");
+	if (branches.length === 1) {
+		console.log(
+			`[integrate] 仅 ${branches.length} 个 complete 分支——单子任务豁免合体（SKILL.md Phase 3 强制门禁豁免），但仍建议确认该分支是完整交付物`,
+		);
+	}
 
 	console.log(`[integrate] squad ${raw.squadId} · 合并 ${branches.length} 个分支: ${branches.join(", ")}`);
 

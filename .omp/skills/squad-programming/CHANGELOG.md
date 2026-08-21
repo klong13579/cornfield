@@ -4,6 +4,10 @@
 
 ### Added
 
+- **整体验证升级为强制门禁** (`scripts/integrate.ts`, `SKILL.md`): Phase 3 整体验证从「条件触发」（改动同域或涉及整体行为时）改为**硬门禁**——任何 squad 有 ≥2 个 complete 子任务，父必须建 integration worktree 合体验证，无论子任务是否同域/文件是否相交；判定依据是「合体后的产物才是交付物」。实测教训（2026-08-21 打包 squad）：T1 改 `main.ts` 生产加载、T2 改打包链路，单 worktree 验收各自通过，但打包只用 T2 worktree（缺 T1 的 `isPackaged` 分支）→ 装机白屏。豁免仅限单子任务或全只读 research（交接清单须显式说明理由）。integrate.ts 对单分支场景输出豁免提示。
+
+### Changed
+
 - **worktree 自动安装依赖** (`scripts/bootstrap.ts`, `SKILL.md`): 新任务 worktree 无 node_modules → tsgo `types: ["bun","assets"]` 解析失败（「从未安装依赖」报错）。`ensureTaskWorktree` 在 `herdr worktree create` 成功后自动 `bun install`（`worktreePath/node_modules` 存在即跳过，幂等；复用已有节点分支不重复装；`timeoutMs 300s`、失败 fatal）。SKILL.md 集结段补充说明：不要对未装依赖的 worktree 直接开 worker。
 - **probe 改直连 intercom broker** (`scripts/probe.ts`, `SKILL.md`): 不再绕 herdr——broker.sock 注册+list 协议直接拿 `SessionInfo.status`/`lastActivity`（omp 状态机源头，herdr 只是镜像）。实证：register 需全字段（isSessionInfo 校验 cwd/model/pid/startedAt/lastActivity 必填，缺字段被断开）；一次 list 返回全部 13 会话状态+新鲜度。
 - **静默挂起探活维度** (`scripts/probe.ts`, `SKILL.md`): s2 实测 187s 静默案例——pid 活着 + pane 残影 ≠ 在推进（模型 API 响应挂起）。probe 增加 session JSONL 最近写入时间判据（每回合必写；>240s 未写 = 静默挂起，`PROBE_STALL_AFTER_S` 可调）；处置阶梯增加「ask 唤醒」——实测 ask 到达即恢复。
