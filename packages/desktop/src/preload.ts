@@ -13,6 +13,11 @@ const api = {
 	},
 	app: {
 		getVersion: (): Promise<string> => ipcRenderer.invoke("app:get-version"),
+		onUpdateAvailable: (cb: () => void): (() => void) => {
+			const listener = (): void => cb();
+			ipcRenderer.on("update:available", listener);
+			return () => ipcRenderer.removeListener("update:available", listener);
+		},
 	},
 } as const;
 

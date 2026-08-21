@@ -125,7 +125,6 @@ async function quitApp(): Promise<void> {
 }
 
 function configureUpdater(): void {
-	// updater 预留：electron-updater + autoUpdater 占位，未接入实际发布检查。
 	// 镜像开关：大陆环境可 export OMP_UPDATE_MIRROR=https://… 切到私有 generic 源。
 	const { autoUpdater } = electronUpdater;
 	const mirror = process.env.OMP_UPDATE_MIRROR?.trim();
@@ -135,7 +134,25 @@ function configureUpdater(): void {
 		autoUpdater.setFeedURL({ provider: "github", owner: "klong13579", repo: "oh-my-pi" });
 	}
 	autoUpdater.autoDownload = false;
-	// 接入发布流水线后，在 ready 之后调用 autoUpdater.checkForUpdates()。
+	// 发现新版本 → 提示用户下载/安装（autoDownload=false，用户确认后 downloadUpdate+quitAndInstall）。
+	autoUpdater.on("update-available", () => {
+		const win = BrowserWindow.getAllWindows()[0];
+		if (win) win.webContents.send("update:available");
+	});
+	autoUpdater.on("update-not-available", () => {
+		console.info("desktop: no update available");
+	});
+	autoUpdater.on("error", err => {
+		console.error("desktop: updater error (镜像/网络不可达时预期):", err.message);
+	});
+}
+
+/** 启动后延迟检查更新（不打和 sidecar 竞争首帧；失败不阻塞启动）。 */
+function checkForUpdates(): void {
+	const { autoUpdater } = electronUpdater;
+	autoUpdater.checkForUpdates().catch(err => {
+		console.warn("desktop: checkForUpdates failed", err);
+	});
 }
 
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
@@ -152,6 +169,8 @@ if (!gotSingleInstanceLock) {
 		mainWindow = createMainWindow();
 		_tray = createTray();
 		configureUpdater();
+		// 启动后延迟 30s 检查更新（避开首帧/侧载竞争；失败不阻塞）。
+		setTimeout(() => checkForUpdates(), 30_000);
 	});
 
 	app.on("activate", () => {

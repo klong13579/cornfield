@@ -13,10 +13,13 @@ interface SidecarBridge {
 	setWorkspaceDir: (dir: string) => Promise<unknown> | unknown;
 }
 
-/** Desktop 壳暴露到 window.api 的全部面（当前仅 sidecar + app 版本）。 */
+/** Desktop 壳暴露到 window.api 的全部面（当前仅 sidecar + app 版本 + 更新订阅）。 */
 interface DesktopBridgeApi {
 	sidecar?: SidecarBridge;
-	app?: { getVersion: () => Promise<string> | string };
+	app?: {
+		getVersion: () => Promise<string> | string;
+		onUpdateAvailable: (cb: () => void) => () => void;
+	};
 }
 
 /**
@@ -40,6 +43,8 @@ export function SettingsView(): React.JSX.Element {
 	const [workspaceError, setWorkspaceError] = useState<string | null>(null);
 	/** 桌面壳版本（Electron app.getVersion；网页直开无 window.api 时为 null）。 */
 	const [desktopVersion, setDesktopVersion] = useState<string | null>(null);
+	/** 新版本可用提示（desktop 壳 update-available 事件）。 */
+	const [updateAvailable, setUpdateAvailable] = useState(false);
 	const [notifyPrefs, setNotifyPrefs] = useState<NotifyPrefs>(loadNotifyPrefs);
 	const [notifyPermDenied, setNotifyPermDenied] = useState(
 		typeof Notification !== "undefined" && Notification.permission === "denied",
@@ -90,13 +95,15 @@ export function SettingsView(): React.JSX.Element {
 	const [appKey, setAppKey] = useState("");
 	const [appSecret, setAppSecret] = useState("");
 
-	// 桌面壳版本：Electron 环境经 window.api.app.getVersion() 读；网页直开无 api → 保持 null（显示「—」）。
+	// 桌面壳版本 + 更新订阅：Electron 环境经 window.api.app 读；网页直开无 api → 静默不处理。
 	useEffect(() => {
 		const api = (window as typeof window & { api?: DesktopBridgeApi }).api;
 		if (!api?.app?.getVersion) return;
 		Promise.resolve(api.app.getVersion())
 			.then(v => setDesktopVersion(String(v)))
 			.catch(() => setDesktopVersion(null));
+		const unsub = api.app.onUpdateAvailable?.(() => setUpdateAvailable(true));
+		return unsub;
 	}, []);
 
 	return (
@@ -122,6 +129,11 @@ export function SettingsView(): React.JSX.Element {
 						<Row k="桌面壳版本">
 							<span className="font-mono text-[11px] text-ink">{desktopVersion ?? "—"}</span>
 						</Row>
+						{updateAvailable && (
+							<Row k="更新">
+								<span className="text-[12px] font-medium text-accent">新版本可用 — 重启客户端完成更新</span>
+							</Row>
+						)}
 					</div>
 
 					<div className="mt-2 divide-y divide-hairline rounded-lg border border-hairline bg-surface">
