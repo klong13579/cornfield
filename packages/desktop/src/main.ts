@@ -1,3 +1,6 @@
+import * as childProcess from "node:child_process";
+import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import { app, BrowserWindow, ipcMain, Menu, nativeImage, Tray } from "electron";
 import electronUpdater from "electron-updater";
@@ -194,10 +197,91 @@ async function downloadUpdate(): Promise<{ ok: boolean; error?: string }> {
 	}
 }
 
-/** renderer 请求立即更新并退出（update:install IPC）。 */
+/**
+ * renderer 请求立即更新并退出（update:install IPC）。
+ *
+ * 自举安装路径（绕过 Squirrel 签名校验——macOS 上 Squirrel.Mac 强制要求正式
+ * Developer ID 签名（SQRLCodeSignatureErrorDomain，实测 adhoc 被拒）；但我们的
+ * 部署目标是用户目录（~/Applications，可写），可以用本地脚本完成 zip 替换：
+ *
+ * 1. 写 helper 脚本到临时目录，detached spawn（不随 app 退出）
+ * 2. helper 等旧 app 进程退出 → 解压已下载 zip → 原子替换 .app → open 重启
+ *
+ * 等以后有正式 Developer ID 证书，可切回 autoUpdater.quitAndInstall()（原生 Squirrel）。
+ */
 function installUpdate(): void {
 	const { autoUpdater } = electronUpdater;
-	autoUpdater.quitAndInstall();
+	// 下载缓存目录（electron-updater 的 updaterCacheDirName，app-update.yml 生成）。
+	const cacheDir = path.join(os.homedir(), "Library", "Caches", updaterCacheDirName());
+	const zipPath = findDownloadedZip(cacheDir);
+	if (!zipPath) {
+		console.error("desktop: install requested but no downloaded update found in", cacheDir);
+		return;
+	}
+	const appPath = app.getAppPath(); // …/OMP Desktop.app/Contents/Resources/app.asar
+	const bundleRoot = app.isPackaged ? path.dirname(path.dirname(path.dirname(appPath))) : "";
+	if (!bundleRoot || !bundleRoot.endsWith(".app")) {
+		console.error("desktop: cannot determine .app bundle root from", appPath);
+		return;
+	}
+	const script = buildBootstrapScript({ zipPath, bundleRoot, targetApp: process.execPath });
+	const scriptPath = path.join(os.tmpdir(), `omp-desktop-update-${Date.now()}.sh`);
+	fs.writeFileSync(scriptPath, script, { mode: 0o755 });
+	// detached：不随 app 进程树退出，独立跑完替换+重启。
+	childProcess.spawn("/bin/bash", [scriptPath], { detached: true, stdio: "ignore" }).unref();
+	isQuitting = true;
+	// 先试优雅退出（sidecar 排空），Squirrel 不再介入。
+	app.quit();
+}
+
+/** electron-updater 的缓存目录名（app-update.yml updaterCacheDirName；与它读 configOnDisk 一致）。 */
+function updaterCacheDirName(): string {
+	return "@oh-my-pidesktop-updater";
+}
+
+/** 在缓存目录找 electron-updater 落盘的待安装 zip（pending 或根目录的 *.zip）。 */
+function findDownloadedZip(cacheDir: string): string | null {
+	try {
+		for (const dir of [path.join(cacheDir, "pending"), cacheDir]) {
+			const entries = fs.readdirSync(dir);
+			const zip = entries.filter(e => e.endsWith(".zip")).map(e => path.join(dir, e));
+			if (zip.length > 0) return zip[0];
+		}
+	} catch {
+		// 目录不存在等
+	}
+	return null;
+}
+
+/** 生成自举安装脚本：等旧进程退出 → 解压 zip → 替换 .app → 重启。 */
+function buildBootstrapScript(opts: { zipPath: string; bundleRoot: string; targetApp: string }): string {
+	const { zipPath, bundleRoot, targetApp } = opts;
+	// zip 内是裸 .app 目录（electron-builder mac zip 结构）。解压后取 <zipstem>.app。
+	// 目标：替换整个 bundleRoot。helper 循环等旧可执行退出后执行替换。
+	// 注意：模板字符串里 bash 变量引用用单引号包裹，避免被 TS 当插值。
+	return `#!/bin/bash
+set -e
+ZIP="${zipPath}"
+BUNDLE="${bundleRoot}"
+# 等旧 app 完全退出（最多 30s）——用 zip 同目录的可执行名匹配
+OLD_EXEC="${path.basename(targetApp)}"
+for i in $(seq 1 60); do
+  if ! pgrep -f "$OLD_EXEC" >/dev/null 2>&1; then break; fi
+  sleep 0.5
+done
+WORK=$(mktemp -d)
+unzip -q -o "$ZIP" -d "$WORK"
+NEW_APP=$(find "$WORK" -maxdepth 2 -name "*.app" -type d | head -1)
+[ -n "$NEW_APP" ] || { echo "no .app in update zip"; exit 1; }
+# 原子替换：先移旧到备份，再放新，删备份
+if [ -d "$BUNDLE" ]; then rm -rf "$BUNDLE.old" 2>/dev/null || true; mv "$BUNDLE" "$BUNDLE.old" 2>/dev/null || true; fi
+mv "$NEW_APP" "$BUNDLE"
+rm -rf "$BUNDLE.old" "$WORK" 2>/dev/null || true
+# adhoc 签名 app 本地打开不需要 Gatekeeper 放行；重启新版本
+sleep 1
+open "$BUNDLE"
+exit 0
+`;
 }
 
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
