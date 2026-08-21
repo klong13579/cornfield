@@ -1,6 +1,10 @@
 # OMP 桌面客户端设计文档
 
-> 状态：**设计定稿，未开工** · 日期：2026-08-20 · 来源：grilling 会话（cross-modal review：GLM-5.3）
+> 状态：**已废弃（2026-08-21）** · Tauri 双窗口方案被**单窗口 Zomp 方案**取代：
+> 单 app 单窗口，顶部 [Agent | IDE] 模式切换，AppKit 原生壳内嵌 Zed（GPUIView），
+> 不再用 Tauri 壳 + 独立编辑器窗口。当前方案见 `docs/omp-client-zed-integration.md`。
+> 本文档留档，勿按此开工。
+> 原始状态：**设计定稿，未开工** · 日期：2026-08-20 · 来源：grilling 会话（cross-modal review：GLM-5.3）
 > 产品代号：MyOMP（内部叫法，未定名）
 
 ---

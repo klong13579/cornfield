@@ -1,0 +1,13 @@
+[package]
+name = "omp_embed_spike"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+gpui = { path = "../gpui" }
+gpui_platform = { path = "../gpui_platform", features = ["font-kit", "runtime_shaders"] }
+# 宿主 NSWindow 直接用与 gpui_macos 相同的 objc 0.2 + cocoa 体系（objc2-app-kit 缺 NSApplication feature）
+objc = { workspace = true }
+cocoa = { workspace = true }
+dispatch2 = "0.3.1"
