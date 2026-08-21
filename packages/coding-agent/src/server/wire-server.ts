@@ -948,6 +948,12 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 		port: options.port,
 		fetch(req, srv) {
 			const url = new URL(req.url);
+			if (url.pathname === "/health") {
+				return new Response(JSON.stringify({ ok: true }), {
+					status: 200,
+					headers: { "content-type": "application/json" },
+				});
+			}
 			if (url.pathname !== "/ws") return new Response("not found", { status: 404 });
 			// token 为空 = 本地免鉴权（仅绑 127.0.0.1）；非空时 URL query 与 hello 帧都要校验
 			if (token !== "" && url.searchParams.get("token") !== token)
