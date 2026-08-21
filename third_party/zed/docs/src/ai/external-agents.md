@@ -80,9 +80,26 @@ Cursor subscriptions do not configure Zed's LLM provider settings. Use Cursor's 
 
 ## Pi Coding Agent {#pi}
 
-Use Pi Coding Agent when you want Pi running as an ACP-integrated External Agent in Zed.
+Use Pi Coding Agent when you want Pi (oh-my-pi, `omp`) running as an ACP-integrated External Agent in Zed.
 
 Pi is an agent harness, not a Zed LLM subscription. Configure any provider auth, subscriptions, tools, or model choices in Pi.
+
+To register `omp` as a custom agent, make sure `omp` is on your `PATH`, then add it as a [Custom Agent](#custom-agents):
+
+```json [settings]
+{
+  "agent_servers": {
+    "omp": {
+      "type": "custom",
+      "command": "omp",
+      "args": ["acp"],
+      "env": {}
+    }
+  }
+}
+```
+
+Zed spawns `omp acp` and speaks the Agent Client Protocol over JSON-RPC on the subprocess's stdin/stdout. The `omp` binary needs an `acp` subcommand that implements the ACP server over stdio.
 
 ## Poolside {#poolside}
 
