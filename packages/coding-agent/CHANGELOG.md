@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-08-21
+
 ### Fixed
 
 - **Intercom 并发修复：回复路由只认 correlation id，busy 时默认排队** (`src/intercom-extension/{index,reply-tracker,config}.ts`, `src/session/agent-session.ts`, `test/intercom-extension/{reply-tracker,inbound-concurrency}.test.ts`): 三个并发缺陷修复 — (1) 串话：`ReplyTracker` 不再用会话回合状态做隐式回复路由；有多个 pending ask 时无地址的 `reply` 改为 fail loud（`Multiple pending asks — specify to or replyTo`），不再静默答错人，且回复 hint 始终携带显式 `replyTo`；(2) 回合被抢断：busy 时的 inbound 消息不再 `steer`（immediate 打断会 abort 在途工具、skip 剩余工具、并杀死阻塞中的 ask），默认改为 follow-up 排队、当前回合结束后处理；旧打断行为通过新配置 `inboundMode: "interrupt"` 显式保留（默认 `"queue"`）。投递决策抽成纯函数（`resolveInboundDeliveryMode`/`buildInboundDeliveryOptions`/`buildReplyCommand`），并发契约可确定性测试；(3) 可观测：自定义消息带 `triggerTurn` 在 streaming 中被静默降级为 steering 时新增 warn 日志。新增 26 个测试。

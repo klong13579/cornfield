@@ -166,42 +166,41 @@ describe("suggestAccountBinding", () => {
 	});
 });
 
-let testDirReconcile: string;
-let dbPathReconcile: string;
-let storageReconcile: JsonFileStorage;
-
-beforeEach(() => {
-	testDirReconcile = fs.mkdtempSync(path.join(os.tmpdir(), "omp-gateway-reconcile-"));
-	dbPathReconcile = path.join(testDirReconcile, "jobs.json");
-	storageReconcile = new JsonFileStorage(dbPathReconcile);
-});
-
-afterEach(() => {
-	storageReconcile?.close();
-	try {
-		fs.rmSync(testDirReconcile, { recursive: true, force: true });
-	} catch {
-		// ignore
-	}
-});
-
-function seedTask(name: string, accountId?: string): void {
-	storageReconcile.addTask({
-		name,
-		cron: "0 0 1 1 *",
-		command: "echo test",
-		status: "active",
-		createdAt: Date.now(),
-		updatedAt: Date.now(),
-		runCount: 0,
-		failCount: 0,
-		consecutiveFailures: 0,
-		timeoutMs: 30_000,
-		...(accountId ? { accountId } : {}),
-	});
-}
-
 describe("cronReconcile", () => {
+	let testDirReconcile: string;
+	let dbPathReconcile: string;
+	let storageReconcile: JsonFileStorage;
+
+	beforeEach(() => {
+		testDirReconcile = fs.mkdtempSync(path.join(os.tmpdir(), "omp-gateway-reconcile-"));
+		dbPathReconcile = path.join(testDirReconcile, "jobs.json");
+		storageReconcile = new JsonFileStorage(dbPathReconcile);
+	});
+
+	afterEach(() => {
+		storageReconcile?.close();
+		try {
+			fs.rmSync(testDirReconcile, { recursive: true, force: true });
+		} catch {
+			// ignore
+		}
+	});
+
+	function seedTask(name: string, accountId?: string): void {
+		storageReconcile.addTask({
+			name,
+			cron: "0 0 1 1 *",
+			command: "echo test",
+			status: "active",
+			createdAt: Date.now(),
+			updatedAt: Date.now(),
+			runCount: 0,
+			failCount: 0,
+			consecutiveFailures: 0,
+			timeoutMs: 30_000,
+			...(accountId ? { accountId } : {}),
+		});
+	}
 	it("prints nothing to do when every task is already bound", async () => {
 		seedTask("already-bound", "hr");
 		const exitBefore = process.exitCode;
@@ -258,68 +257,62 @@ describe("cronReconcile", () => {
 // ===========================================================================
 // cronUpdate
 // ===========================================================================
-
-// `vi.spyOn(os, "homedir")` in bun:test leaks across describes when
-// multiple tests set up spies. The cronTestRun tests' spy would leak
-// into the cronUpdate tests' beforeEach. To avoid this, the cronUpdate
-// describe is defined AFTER the cronTestRun describe in this file —
-// so the cronTestRun afterEach restores the spy before cronUpdate runs.
 //
-// If you reorder these describes, the cronUpdate --account tests will
-// silently fail (the spy points at the cronTestRun temp dir, which has
-// been cleaned up, so loadConfig returns DEFAULT_CONFIG).
-let testDirUpdate: string;
-let dbPathUpdate: string;
-let storageUpdate: JsonFileStorage;
-let homedirSpyUpdate: ReturnType<typeof vi.spyOn>;
+// Hooks are scoped to this describe. File-level `beforeEach` hoists
+// (e.g. the cronTestRun section's homedir spy + console capture) would
+// run for every test in the file and override this section's fixtures,
+// silently breaking the --account tests.
+describe("cronUpdate", () => {
+	let testDirUpdate: string;
+	let dbPathUpdate: string;
+	let storageUpdate: JsonFileStorage;
+	let homedirSpyUpdate: ReturnType<typeof vi.spyOn>;
 
-beforeEach(() => {
-	testDirUpdate = fs.mkdtempSync(path.join(os.tmpdir(), "omp-gateway-cron-update-"));
-	dbPathUpdate = path.join(testDirUpdate, "jobs.json");
-	storageUpdate = new JsonFileStorage(dbPathUpdate);
+	beforeEach(() => {
+		testDirUpdate = fs.mkdtempSync(path.join(os.tmpdir(), "omp-gateway-cron-update-"));
+		dbPathUpdate = path.join(testDirUpdate, "jobs.json");
+		storageUpdate = new JsonFileStorage(dbPathUpdate);
 
-	const ompDir = path.join(testDirUpdate, ".omp");
-	fs.mkdirSync(ompDir, { recursive: true });
-	const fakeGateway = {
-		channels: {
-			dingtalk: {
-				accounts: {
-					hr: { agentDir: path.join(testDirUpdate, "agents", "hr") },
-					opencode: { agentDir: path.join(testDirUpdate, "agents", "opencode") },
+		const ompDir = path.join(testDirUpdate, ".omp");
+		fs.mkdirSync(ompDir, { recursive: true });
+		const fakeGateway = {
+			channels: {
+				dingtalk: {
+					accounts: {
+						hr: { agentDir: path.join(testDirUpdate, "agents", "hr") },
+						opencode: { agentDir: path.join(testDirUpdate, "agents", "opencode") },
+					},
 				},
 			},
-		},
-	};
-	Bun.write(path.join(ompDir, "gateway.json"), JSON.stringify(fakeGateway));
-	homedirSpyUpdate = vi.spyOn(os, "homedir").mockReturnValue(testDirUpdate);
-});
-
-afterEach(() => {
-	storageUpdate?.close();
-	homedirSpyUpdate?.mockRestore();
-	try {
-		fs.rmSync(testDirUpdate, { recursive: true, force: true });
-	} catch {
-		// ignore
-	}
-});
-
-function seedUpdateTask(name: string): void {
-	storageUpdate.addTask({
-		name,
-		cron: "0 0 1 1 *",
-		command: "echo test",
-		status: "active",
-		createdAt: Date.now(),
-		updatedAt: Date.now(),
-		runCount: 0,
-		failCount: 0,
-		consecutiveFailures: 0,
-		timeoutMs: 30_000,
+		};
+		Bun.write(path.join(ompDir, "gateway.json"), JSON.stringify(fakeGateway));
+		homedirSpyUpdate = vi.spyOn(os, "homedir").mockReturnValue(testDirUpdate);
 	});
-}
 
-describe("cronUpdate", () => {
+	afterEach(() => {
+		storageUpdate?.close();
+		homedirSpyUpdate?.mockRestore();
+		try {
+			fs.rmSync(testDirUpdate, { recursive: true, force: true });
+		} catch {
+			// ignore
+		}
+	});
+
+	function seedUpdateTask(name: string): void {
+		storageUpdate.addTask({
+			name,
+			cron: "0 0 1 1 *",
+			command: "echo test",
+			status: "active",
+			createdAt: Date.now(),
+			updatedAt: Date.now(),
+			runCount: 0,
+			failCount: 0,
+			consecutiveFailures: 0,
+			timeoutMs: 30_000,
+		});
+	}
 	it("sets accountId on a task that had none", async () => {
 		seedUpdateTask("bind-me");
 		expect(storageUpdate.getTaskByName("bind-me")?.accountId).toBeUndefined();
@@ -432,73 +425,72 @@ describe("cronUpdate", () => {
 // cronTestRun
 // ===========================================================================
 
-let testDirTr: string;
-let dbPathTr: string;
-let storageTr: JsonFileStorage;
-let homedirSpyTr: ReturnType<typeof vi.spyOn>;
-let consoleLogBuf: string;
-let consoleErrorBuf: string;
-let origLog: typeof console.log;
-let origErr: typeof console.error;
-
-function seedTrTask(overrides: Partial<ScheduledTask> = {}): ScheduledTask {
-	return storageTr.addTask({
-		name: "test-task",
-		cron: "0 12 * * *",
-		command: "echo hello",
-		scheduleType: "cron",
-		status: "active",
-		taskType: "agent",
-		timeoutMs: 30_000,
-		createdAt: Date.now(),
-		updatedAt: Date.now(),
-		runCount: 0,
-		failCount: 0,
-		consecutiveFailures: 0,
-		...overrides,
-	});
-}
-
-function makeGatewayRunningTr(): void {
-	const dataDir = path.join(testDirTr, ".omp", "gateway-data");
-	fs.mkdirSync(dataDir, { recursive: true });
-	fs.writeFileSync(path.join(dataDir, "gateway.pid"), String(process.pid));
-}
-
-beforeEach(() => {
-	testDirTr = fs.mkdtempSync(path.join(os.tmpdir(), "omp-gateway-test-run-"));
-	dbPathTr = path.join(testDirTr, "jobs.json");
-	storageTr = new JsonFileStorage(dbPathTr);
-
-	homedirSpyTr = vi.spyOn(os, "homedir").mockReturnValue(testDirTr);
-
-	process.exitCode = 0;
-
-	consoleLogBuf = "";
-	consoleErrorBuf = "";
-	origLog = console.log;
-	origErr = console.error;
-	console.log = (...args: unknown[]) => {
-		consoleLogBuf += `${args.map(a => (typeof a === "string" ? a : JSON.stringify(a))).join(" ")}\n`;
-	};
-	console.error = (...args: unknown[]) => {
-		consoleErrorBuf += `${args.map(a => (typeof a === "string" ? a : JSON.stringify(a))).join(" ")}\n`;
-	};
-});
-
-afterEach(() => {
-	homedirSpyTr?.mockRestore();
-	console.log = origLog;
-	console.error = origErr;
-	try {
-		fs.rmSync(testDirTr, { recursive: true, force: true });
-	} catch {
-		// ignore
-	}
-	storageTr.close();
-});
-
 describe("cronTestRun", () => {
+	let testDirTr: string;
+	let dbPathTr: string;
+	let storageTr: JsonFileStorage;
+	let homedirSpyTr: ReturnType<typeof vi.spyOn>;
+	let consoleLogBuf: string;
+	let consoleErrorBuf: string;
+	let origLog: typeof console.log;
+	let origErr: typeof console.error;
+
+	function seedTrTask(overrides: Partial<ScheduledTask> = {}): ScheduledTask {
+		return storageTr.addTask({
+			name: "test-task",
+			cron: "0 12 * * *",
+			command: "echo hello",
+			scheduleType: "cron",
+			status: "active",
+			taskType: "agent",
+			timeoutMs: 30_000,
+			createdAt: Date.now(),
+			updatedAt: Date.now(),
+			runCount: 0,
+			failCount: 0,
+			consecutiveFailures: 0,
+			...overrides,
+		});
+	}
+
+	function makeGatewayRunningTr(): void {
+		const dataDir = path.join(testDirTr, ".omp", "gateway-data");
+		fs.mkdirSync(dataDir, { recursive: true });
+		fs.writeFileSync(path.join(dataDir, "gateway.pid"), String(process.pid));
+	}
+
+	beforeEach(() => {
+		testDirTr = fs.mkdtempSync(path.join(os.tmpdir(), "omp-gateway-test-run-"));
+		dbPathTr = path.join(testDirTr, "jobs.json");
+		storageTr = new JsonFileStorage(dbPathTr);
+
+		homedirSpyTr = vi.spyOn(os, "homedir").mockReturnValue(testDirTr);
+
+		process.exitCode = 0;
+
+		consoleLogBuf = "";
+		consoleErrorBuf = "";
+		origLog = console.log;
+		origErr = console.error;
+		console.log = (...args: unknown[]) => {
+			consoleLogBuf += `${args.map(a => (typeof a === "string" ? a : JSON.stringify(a))).join(" ")}\n`;
+		};
+		console.error = (...args: unknown[]) => {
+			consoleErrorBuf += `${args.map(a => (typeof a === "string" ? a : JSON.stringify(a))).join(" ")}\n`;
+		};
+	});
+
+	afterEach(() => {
+		homedirSpyTr?.mockRestore();
+		console.log = origLog;
+		console.error = origErr;
+		try {
+			fs.rmSync(testDirTr, { recursive: true, force: true });
+		} catch {
+			// ignore
+		}
+		storageTr.close();
+	});
 	it("arms a one-shot and exits immediately (fire-and-forget), marker awaits the engine post-fire restore", {
 		timeout: 15_000,
 	}, async () => {
@@ -572,30 +564,6 @@ describe("cronTestRun", () => {
 // parseCronIntent + createCronTaskFromMessage (from-message smoke)
 // ===========================================================================
 
-let testDirMsg: string;
-let agentDirMsg: string;
-let opencodeAgentDirMsg: string;
-let dbPathMsg: string;
-let storageMsg: JsonFileStorage;
-
-beforeEach(() => {
-	testDirMsg = fs.mkdtempSync(path.join(os.tmpdir(), "omp-gateway-msg-"));
-	agentDirMsg = path.join(testDirMsg, "agent");
-	fs.mkdirSync(agentDirMsg, { recursive: true });
-	dbPathMsg = path.join(testDirMsg, "jobs.json");
-	storageMsg = new JsonFileStorage(dbPathMsg);
-	opencodeAgentDirMsg = path.join(testDirMsg, "secondary-agent");
-});
-
-afterEach(() => {
-	storageMsg?.close();
-	try {
-		fs.rmSync(testDirMsg, { recursive: true, force: true });
-	} catch {
-		// ignore
-	}
-});
-
 describe("parseCronIntent", () => {
 	it("parses a basic /cron create command with -- separator", () => {
 		const intent = parseCronIntent("/cron create 0 8 * * * -- echo good morning");
@@ -638,6 +606,29 @@ describe("parseCronIntent", () => {
 });
 
 describe("createCronTaskFromMessage (smoke test)", () => {
+	let testDirMsg: string;
+	let agentDirMsg: string;
+	let opencodeAgentDirMsg: string;
+	let dbPathMsg: string;
+	let storageMsg: JsonFileStorage;
+
+	beforeEach(() => {
+		testDirMsg = fs.mkdtempSync(path.join(os.tmpdir(), "omp-gateway-msg-"));
+		agentDirMsg = path.join(testDirMsg, "agent");
+		fs.mkdirSync(agentDirMsg, { recursive: true });
+		dbPathMsg = path.join(testDirMsg, "jobs.json");
+		storageMsg = new JsonFileStorage(dbPathMsg);
+		opencodeAgentDirMsg = path.join(testDirMsg, "secondary-agent");
+	});
+
+	afterEach(() => {
+		storageMsg?.close();
+		try {
+			fs.rmSync(testDirMsg, { recursive: true, force: true });
+		} catch {
+			// ignore
+		}
+	});
 	it("creates a task file in <agentDir>/cron/tasks/ and inserts into the global DB", () => {
 		const outcome = createCronTaskFromMessage("/cron create 0 8 * * * -- echo good morning", agentDirMsg, storageMsg);
 

@@ -284,8 +284,9 @@ test("serve B1/B8：get_state env 环境摘要 + branch 命令（快照推送）
 		expect(stateResp.ok).toBe(true);
 		const env = (stateResp.result as { env?: Record<string, unknown> }).env;
 		expect(env).toBeDefined();
-		expect(typeof env?.repos).toBe("string");
-		expect((env?.repos as string).length).toBeGreaterThan(0);
+		const repos = env?.repos;
+		expect(typeof repos).toBe("string");
+		expect((repos as string).length).toBeGreaterThan(0);
 		// branch 字段必须在（非 git 环境可为 null，但键不缺失）
 		expect(Object.hasOwn(env ?? {}, "branch")).toBe(true);
 		expect(env?.activeAgentCount).toBe(1); // 仅 default attached（隔离 HOME 无注册 agent）

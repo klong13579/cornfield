@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-08-21
+
 - **Added: intercom broker parent edge** (`src/intercom/types.ts`, `src/intercom/protocol.ts`, `src/intercom/broker-server.ts`): `SessionInfo` gains an optional `parentId` field (the orchestrator target a child declares at registration, typically from `PI_SUBAGENT_ORCHESTRATOR_*` env vars). Registration persists it, `list` returns it, presence updates preserve it, and blank `parentId` values are rejected at registration. Peer sessions are unaffected (no `parentId` = plain peer). This is the broker-side contract for cross-process parent-child orchestration; the extension-side behaviours (children list, ask→parent routing, auto completion reports) live in the coding-agent intercom extension.
 
 - **Added: gateway account as an intercom child via `intercomParent`** (`src/types.ts`, `src/agent-bridge.ts`, `src/agent-transport.ts`, `src/gateway.ts`): a `gateway.json` account can set `intercomParent` (session name or stable id, typically the operator's TUI session). The account's `omp --mode rpc` then starts with `PI_SUBAGENT_ORCHESTRATOR_TARGET` / `_RUN_ID` / `_CHILD_AGENT=gateway-account` / `_CHILD_INDEX=0` env (run id stable per transport instance across reconnects), so the account registers on the intercom broker as a child of that session — `intercom({action:"children"})` lists it, task rounds auto-report completion, and `contact_supervisor` escalations route to the parent.

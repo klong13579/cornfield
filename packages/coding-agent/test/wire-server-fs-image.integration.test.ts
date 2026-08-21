@@ -162,8 +162,8 @@ describe("R-IMG-SERVE — fs_read_image 二进制图片读取", () => {
 	test("路径越界拒绝 + 不存在文件错误", async () => {
 		const { ws, frames } = await connect(url);
 		try {
-			const escape = (await rawRequest(ws, frames, { type: "fs_read_image", path: "../../etc/passwd" })) as Frame;
-			expect(escape.ok).toBe(false);
+			const resp = (await rawRequest(ws, frames, { type: "fs_read_image", path: "../../etc/passwd" })) as Frame;
+			expect(resp.ok).toBe(false);
 
 			const missing = (await rawRequest(ws, frames, { type: "fs_read_image", path: "no-such.png" })) as Frame;
 			expect(missing.ok).toBe(false);

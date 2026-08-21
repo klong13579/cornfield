@@ -1,7 +1,7 @@
 {
 	"type": "module",
 	"name": "@oh-my-pi/pi-client",
-	"version": "14.5.12",
+	"version": "0.19.0",
 	"description": "WebSocket client for omp serve (pi-wire protocol): connection state machine, request id correlation, exponential backoff reconnect, snapshot cache, subscribe-across-reconnect",
 	"homepage": "https://github.com/can1357/oh-my-pi",
 	"author": "Can Boluk",

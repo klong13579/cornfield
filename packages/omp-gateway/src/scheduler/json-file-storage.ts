@@ -329,10 +329,7 @@ export class JsonFileStorage implements SchedulerStorage {
 		const awaitingFireExpired =
 			marker.awaitingFire === true && marker.expiresAt !== undefined && Date.now() > marker.expiresAt;
 		const task = this.#tasks.get(marker.taskId);
-		const armedInFuture =
-			task !== undefined &&
-			isTestRunSchedule(task.cron) &&
-			(task.nextRunAt ?? 0) > Date.now();
+		const armedInFuture = task !== undefined && isTestRunSchedule(task.cron) && (task.nextRunAt ?? 0) > Date.now();
 		if (armedInFuture && !awaitingFireExpired) {
 			return false;
 		}

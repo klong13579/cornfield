@@ -232,12 +232,14 @@ describe("withModelFallback result() 契约", () => {
 		// response.result()，不会把生成器再拉一轮。finalize 必须先于 yield
 		// 落状态，否则这里会抛“流尚未产出终端事件”/拿到空结果。
 		const msg = makeMessage("stop");
-		const raw = vi.fn().mockReturnValue(
-			streamOfEvents(
-				{ type: "text_delta", contentIndex: 0, delta: "a", partial: msg },
-				{ type: "done", reason: "stop", message: msg },
-			),
-		);
+		const raw = vi
+			.fn()
+			.mockReturnValue(
+				streamOfEvents(
+					{ type: "text_delta", contentIndex: 0, delta: "a", partial: msg },
+					{ type: "done", reason: "stop", message: msg },
+				),
+			);
 		const s = (await withModelFallback(raw as never, [backup] as never)(
 			primary as never,
 			{} as never,
