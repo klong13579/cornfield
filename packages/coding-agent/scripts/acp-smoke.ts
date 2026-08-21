@@ -91,12 +91,12 @@ try {
 	console.log(`PASS initialize → protocolVersion=${protocolVersion}`);
 
 	// 2. ping → pong（liveness）
-	write({ jsonrpc: "2.0", id: 2, method: "ping", params: {} });
+	write({ jsonrpc: "2.0", id: 2, method: "_ping", params: {} });
 	const pong = await readLine(30_000);
 	if (pong.id !== 2 || (pong.result as { pong?: unknown } | undefined)?.pong !== true) {
 		throw new Error(`bad ping response: ${JSON.stringify(pong)}`);
 	}
-	console.log("PASS ping → pong=true");
+	console.log("PASS _ping → pong=true");
 
 	console.log("SMOKE OK");
 	proc.kill();
