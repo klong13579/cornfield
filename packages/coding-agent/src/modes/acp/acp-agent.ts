@@ -269,7 +269,7 @@ export class AcpAgent implements Agent {
 		};
 	}
 
-	async unstable_resumeSession(params: ResumeSessionRequest): Promise<ResumeSessionResponse> {
+	async resumeSession(params: ResumeSessionRequest): Promise<ResumeSessionResponse> {
 		this.#assertAbsoluteCwd(params.cwd);
 		const record = await this.#resumeManagedSession(params.sessionId, params.cwd, params.mcpServers ?? []);
 		const response: ResumeSessionResponse = {
@@ -294,7 +294,7 @@ export class AcpAgent implements Agent {
 		return response;
 	}
 
-	async unstable_closeSession(params: CloseSessionRequest): Promise<CloseSessionResponse> {
+	async closeSession(params: CloseSessionRequest): Promise<CloseSessionResponse> {
 		const record = this.#sessions.get(params.sessionId);
 		if (!record) {
 			return {};

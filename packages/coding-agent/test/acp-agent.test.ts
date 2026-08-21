@@ -340,7 +340,7 @@ describe("ACP agent", () => {
 		expect(forked.sessionId).not.toBe(first.sessionId);
 		expect(forkedMessages.some(message => message.role === "user" && message.content === "fork me")).toBe(true);
 
-		await harness.agent.unstable_closeSession({ sessionId: forked.sessionId });
+		await harness.agent.closeSession({ sessionId: forked.sessionId });
 		await expect(harness.agent.setSessionMode({ sessionId: forked.sessionId, modeId: "default" })).rejects.toThrow(
 			"Unsupported ACP session",
 		);
