@@ -18,6 +18,11 @@ const api = {
 			ipcRenderer.on("update:available", listener);
 			return () => ipcRenderer.removeListener("update:available", listener);
 		},
+		onUpdateNotAvailable: (cb: () => void): (() => void) => {
+			const listener = (): void => cb();
+			ipcRenderer.on("update:not-available", listener);
+			return () => ipcRenderer.removeListener("update:not-available", listener);
+		},
 		onUpdateProgress: (cb: (p: { percent: number; bytesPerSecond: number }) => void): (() => void) => {
 			const listener = (_e: unknown, p: { percent: number; bytesPerSecond: number }): void => cb(p);
 			ipcRenderer.on("update:progress", listener);
@@ -30,6 +35,7 @@ const api = {
 		},
 		downloadUpdate: (): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke("update:download"),
 		installUpdate: (): void => ipcRenderer.send("update:install"),
+		checkUpdate: (): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke("update:check"),
 	},
 } as const;
 

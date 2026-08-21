@@ -19,10 +19,12 @@ interface DesktopBridgeApi {
 	app?: {
 		getVersion: () => Promise<string> | string;
 		onUpdateAvailable: (cb: () => void) => () => void;
+		onUpdateNotAvailable: (cb: () => void) => () => void;
 		onUpdateProgress: (cb: (p: { percent: number; bytesPerSecond: number }) => void) => () => void;
 		onUpdateDownloaded: (cb: () => void) => () => void;
 		downloadUpdate: () => Promise<{ ok: boolean; error?: string }>;
 		installUpdate: () => void;
+		checkUpdate: () => Promise<{ ok: boolean; error?: string }>;
 	};
 }
 
@@ -47,10 +49,10 @@ export function SettingsView(): React.JSX.Element {
 	const [workspaceError, setWorkspaceError] = useState<string | null>(null);
 	/** 桌面壳版本（Electron app.getVersion；网页直开无 window.api 时为 null）。 */
 	const [desktopVersion, setDesktopVersion] = useState<string | null>(null);
-	/** 新版本可用提示（desktop 壳 update-available 事件）。 */
-	const [updateState, setUpdateState] = useState<"idle" | "available" | "downloading" | "downloaded" | "error">(
-		"idle",
-	);
+	/** 新版本可用提示（desktop 壳更新事件；状态机 available→downloading→downloaded；idle=未检查/无更新）。 */
+	const [updateState, setUpdateState] = useState<
+		"idle" | "checking" | "available" | "downloading" | "downloaded" | "error"
+	>("idle");
 	const [updateProgress, setUpdateProgress] = useState(0);
 	const [updateError, setUpdateError] = useState<string | null>(null);
 	const [notifyPrefs, setNotifyPrefs] = useState<NotifyPrefs>(loadNotifyPrefs);
@@ -103,6 +105,18 @@ export function SettingsView(): React.JSX.Element {
 	const [appKey, setAppKey] = useState("");
 	const [appSecret, setAppSecret] = useState("");
 
+	/** 用户点「检查更新」：显式触发 checkForUpdates，结果走 available/not-available 事件。 */
+	const checkUpdateNow = async (): Promise<void> => {
+		const api = (window as typeof window & { api?: DesktopBridgeApi }).api;
+		if (!api?.app?.checkUpdate) return;
+		setUpdateError(null);
+		setUpdateState("checking");
+		const res = await api.app.checkUpdate();
+		if (!res.ok) {
+			setUpdateError(res.error ?? "检查失败");
+			setUpdateState("error");
+		}
+	};
 	/** 用户点「下载更新」：触发 electron-updater downloadUpdate，进度走 onUpdateProgress。 */
 	const startUpdateDownload = async (): Promise<void> => {
 		const api = (window as typeof window & { api?: DesktopBridgeApi }).api;
@@ -129,6 +143,7 @@ export function SettingsView(): React.JSX.Element {
 			.then(v => setDesktopVersion(String(v)))
 			.catch(() => setDesktopVersion(null));
 		const unsubAvailable = api.app.onUpdateAvailable?.(() => setUpdateState("available"));
+		const unsubNotAvailable = api.app.onUpdateNotAvailable?.(() => setUpdateState("idle"));
 		const unsubProgress = api.app.onUpdateProgress?.(p => {
 			setUpdateState("downloading");
 			setUpdateProgress(Math.round(p.percent));
@@ -136,6 +151,7 @@ export function SettingsView(): React.JSX.Element {
 		const unsubDownloaded = api.app.onUpdateDownloaded?.(() => setUpdateState("downloaded"));
 		return () => {
 			unsubAvailable?.();
+			unsubNotAvailable?.();
 			unsubProgress?.();
 			unsubDownloaded?.();
 		};
@@ -164,7 +180,19 @@ export function SettingsView(): React.JSX.Element {
 						<Row k="桌面壳版本">
 							<span className="font-mono text-[11px] text-ink">{desktopVersion ?? "—"}</span>
 						</Row>
-						{updateState !== "idle" && (
+						{(updateState === "idle" || updateState === "checking") && (
+							<Row k="更新">
+								<button
+									type="button"
+									onClick={() => void checkUpdateNow()}
+									disabled={updateState === "checking"}
+									className="rounded border border-hairline px-2 py-0.5 text-[11px] font-medium text-ink-subtle hover:bg-surface-2 disabled:opacity-50"
+								>
+									{updateState === "checking" ? "检查中…" : "检查更新"}
+								</button>
+							</Row>
+						)}
+						{updateState !== "idle" && updateState !== "checking" && (
 							<Row k="更新">
 								<span className="flex items-center gap-2 text-[12px] font-medium text-accent">
 									{updateState === "available" && (

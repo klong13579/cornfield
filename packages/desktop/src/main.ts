@@ -109,7 +109,8 @@ function setupIpc(): void {
 	});
 	// 壳版本（electron-updater 对比新版本用；渲染层设置页展示）。
 	ipcMain.handle("app:get-version", () => app.getVersion());
-	// 更新流：renderer 触发下载 / 触发安装（事件经 update:* channel 广播）。
+	// 更新流：renderer 触发检查/下载/安装（事件经 update:* channel 广播）。
+	ipcMain.handle("update:check", () => checkUpdatesManual());
 	ipcMain.handle("update:download", () => downloadUpdate());
 	ipcMain.on("update:install", () => installUpdate());
 }
@@ -144,7 +145,7 @@ function configureUpdater(): void {
 		if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
 	};
 	autoUpdater.on("update-available", () => send("update:available"));
-	autoUpdater.on("update-not-available", () => console.info("desktop: no update available"));
+	autoUpdater.on("update-not-available", () => send("update:not-available"));
 	autoUpdater.on("download-progress", p =>
 		send("update:progress", { percent: p.percent, bytesPerSecond: p.bytesPerSecond }),
 	);
@@ -160,6 +161,19 @@ function checkForUpdates(): void {
 	autoUpdater.checkForUpdates().catch(err => {
 		console.warn("desktop: checkForUpdates failed", err);
 	});
+}
+
+/** renderer 手动触发「检查更新」（update:check IPC），结果经 update:available / update:not-available 提示。 */
+async function checkUpdatesManual(): Promise<{ ok: boolean; error?: string }> {
+	try {
+		const { autoUpdater } = electronUpdater;
+		const result = await autoUpdater.checkForUpdates();
+		// electron-updater 在无新版本时只触发 update-not-available 事件，不 resolve 明确值——
+		// 这里依赖事件广播即可（main.ts configureUpdater 已注册 update-not-available）。
+		return { ok: true, ...(result?.updateInfo ? {} : {}) };
+	} catch (err) {
+		return { ok: false, error: err instanceof Error ? err.message : String(err) };
+	}
 }
 
 /** renderer 请求下载新版本（update:download IPC）。 */
