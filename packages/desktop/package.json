@@ -4,10 +4,11 @@
 	"private": true,
 	"description": "OMP 桌面壳（Electron）—— 托盘常驻 + 探测/拉起 omp serve sidecar",
 	"type": "module",
-	"main": "src/main.ts",
+	"main": "dist/main.js",
 	"scripts": {
-		"dev": "electron .",
-		"build": "electron-builder",
+		"dev": "bun run build && electron .",
+		"build": "esbuild src/main.ts src/sidecar.ts --outdir=dist --platform=node --target=node22 --format=esm && esbuild src/preload.ts --outdir=dist --platform=node --target=node22 --format=cjs --out-extension:.js=.cjs",
+		"dist": "bun run build && electron-builder",
 		"check": "biome check . && bun run check:types",
 		"check:types": "tsgo -p tsconfig.json --noEmit",
 		"lint": "biome lint .",
@@ -23,6 +24,7 @@
 		"@typescript/native-preview": "catalog:",
 		"electron": "^43.4.1",
 		"electron-builder": "^26.15.3",
+		"esbuild": "^0.25.12",
 		"typescript": "catalog:"
 	},
 	"engines": {

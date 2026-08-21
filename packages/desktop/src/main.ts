@@ -1,13 +1,13 @@
 import * as path from "node:path";
 import { app, BrowserWindow, ipcMain, Menu, nativeImage, Tray } from "electron";
-import { autoUpdater } from "electron-updater";
+import electronUpdater from "electron-updater";
 import {
 	DEFAULT_WORKSPACE_DIR,
 	ensureSidecar,
 	resolveWorkspaceDir,
 	type SidecarHandle,
 	terminateSidecar,
-} from "./sidecar";
+} from "./sidecar.js";
 
 const TRAY_ICON_DATA_URL =
 	"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAMUlEQVR42mNgoBH4jwNTpJkoQ/4TiSnSjNWQ/2TiUQOoaQDF0UiVhESVpEyVzEQSAADQgJtl5l/1yAAAAABJRU5ErkJggg==";
@@ -33,7 +33,7 @@ function createMainWindow(): BrowserWindow {
 		height: 800,
 		show: false,
 		webPreferences: {
-			preload: path.join(import.meta.dirname, "preload.ts"),
+			preload: path.join(import.meta.dirname, "preload.cjs"),
 			contextIsolation: true,
 			nodeIntegration: false,
 			sandbox: true,
@@ -116,6 +116,7 @@ async function quitApp(): Promise<void> {
 function configureUpdater(): void {
 	// updater 预留：electron-updater + autoUpdater 占位，未接入实际发布检查。
 	// 镜像开关：大陆环境可 export OMP_UPDATE_MIRROR=https://… 切到私有 generic 源。
+	const { autoUpdater } = electronUpdater;
 	const mirror = process.env.OMP_UPDATE_MIRROR?.trim();
 	if (mirror) {
 		autoUpdater.setFeedURL({ provider: "generic", url: mirror });
