@@ -3,6 +3,9 @@ import type { Component } from "@oh-my-pi/pi-tui";
 import { Ellipsis, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@oh-my-pi/pi-tui";
 import type { Message, SessionInfo } from "../types";
 
+/** Number of message lines shown in the collapsed preview. Matches PREVIEW_LIMITS.OUTPUT_COLLAPSED (read tool). */
+const COLLAPSED_PREVIEW_LINES = 3;
+
 export class InlineMessageComponent implements Component {
 	private from: SessionInfo;
 	private message: Message;
@@ -12,7 +15,7 @@ export class InlineMessageComponent implements Component {
 	private collapsed: boolean;
 	// Caches assume message/bodyText never mutate after construction; theme
 	// styling stays outside the caches so live theme changes apply per render.
-	private collapsedPreview?: string;
+	private collapsedPreview?: string[];
 	private wrappedBody?: { width: number; lines: string[] };
 
 	constructor(
@@ -62,8 +65,16 @@ export class InlineMessageComponent implements Component {
 		};
 
 		if (this.collapsed) {
-			this.collapsedPreview ??= (this.bodyText || this.message.content.text).replace(/\s+/g, " ").trim();
-			lines.push(frameLine(this.theme.fg("text", this.collapsedPreview)));
+			// Collapsed preview: first COLLAPSED_PREVIEW_LINES logical lines, each whitespace-collapsed
+			// and width-truncated by frameLine. Blank lines are dropped so they don't consume preview rows.
+			this.collapsedPreview ??= (this.bodyText || this.message.content.text)
+				.split("\n")
+				.map(line => line.replace(/\s+/g, " ").trim())
+				.filter(Boolean)
+				.slice(0, COLLAPSED_PREVIEW_LINES);
+			for (const line of this.collapsedPreview) {
+				lines.push(frameLine(this.theme.fg("text", line)));
+			}
 
 			const meta: string[] = [];
 			if (this.replyCommand) meta.push(`To reply: ${this.replyCommand}`);
