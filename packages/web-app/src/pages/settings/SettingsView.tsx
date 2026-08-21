@@ -7,6 +7,20 @@ import { getUiStore, useUiState } from "../../state/ui-store";
 import { useSession } from "../../state/use-session";
 
 /**
+ * Electron 壳 preload bridge（T1 desktop 壳暴露的最小面：window.api.sidecar.setWorkspaceDir）。
+ * 网页直开（无 window.api）时工作目录降级存 localStorage，不 crash。
+ * 契约与 packages/desktop/src/preload.ts 保持一致；字段均防御式存在性判断。
+ */
+interface SidecarBridge {
+	setWorkspaceDir: (dir: string) => Promise<unknown> | unknown;
+}
+
+/** Desktop 壳暴露到 window.api 的全部面（当前仅 sidecar）。 */
+interface DesktopBridgeApi {
+	sidecar?: SidecarBridge;
+}
+
+/**
  * 设置页（FR-7）—— 连接信息（hello）/ 会话行为开关（set_auto_compaction / set_auto_retry）/
  * 主题 / 快捷键 / 连接配置 / 通知（缺口 B7 disabled）/ 钉钉集成（gateway 读占位）/ 危险操作（二次确认）。
  * 视觉主角：kbd 快捷键表。
@@ -18,6 +32,13 @@ export function SettingsView(): React.JSX.Element {
 	const [wsUrl, setWsUrl] = useState(view.wsUrl);
 	const [token, setToken] = useState("");
 	const [saveError, setSaveError] = useState<string | null>(null);
+	/** 工作目录（desktop 壳 sidecar 的工作区；默认 ~/workspace）。 */
+	const [workspaceDir, setWorkspaceDir] = useState(() => {
+		const stored = localStorage.getItem("omp.desktop.workspace")?.trim();
+		return stored || "~/workspace";
+	});
+	const [workspaceSaved, setWorkspaceSaved] = useState(false);
+	const [workspaceError, setWorkspaceError] = useState<string | null>(null);
 	const [notifyPrefs, setNotifyPrefs] = useState<NotifyPrefs>(loadNotifyPrefs);
 	const [notifyPermDenied, setNotifyPermDenied] = useState(
 		typeof Notification !== "undefined" && Notification.permission === "denied",
@@ -46,6 +67,23 @@ export function SettingsView(): React.JSX.Element {
 			await store.reconfigure({ wsUrl: url, token: token.trim() });
 		} catch (err) {
 			setSaveError(err instanceof Error ? err.message : String(err));
+		}
+	};
+	/** 保存工作目录：有 desktop 壳（window.api）时经 bridge 传 main；否则降级 localStorage 镜像（不 crash）。 */
+	const saveWorkspaceDir = async (): Promise<void> => {
+		setWorkspaceError(null);
+		setWorkspaceSaved(false);
+		const value = workspaceDir.trim() || "~/workspace";
+		try {
+			const api = (window as Window & { api?: DesktopBridgeApi }).api;
+			if (api?.sidecar?.setWorkspaceDir) {
+				await api.sidecar.setWorkspaceDir(value);
+			}
+			// 镜像到 localStorage（展示初值来源；无 window.api 时即降级存储路径）
+			localStorage.setItem("omp.desktop.workspace", value);
+			setWorkspaceSaved(true);
+		} catch (err) {
+			setWorkspaceError(err instanceof Error ? err.message : String(err));
 		}
 	};
 	const [appKey, setAppKey] = useState("");
@@ -110,6 +148,32 @@ export function SettingsView(): React.JSX.Element {
 								</button>
 							</div>
 							{saveError !== null && <div className="mt-1 text-[11px] text-danger">{saveError}</div>}
+						</div>
+						<div className="px-4 py-2.5">
+							<label className="block text-[12px] text-ink-subtle" htmlFor="conn-workspace">
+								工作目录
+							</label>
+							<div className="mt-1 flex gap-2">
+								<input
+									id="conn-workspace"
+									value={workspaceDir}
+									onChange={e => {
+										setWorkspaceDir(e.target.value);
+										setWorkspaceSaved(false);
+									}}
+									placeholder="~/workspace"
+									className="flex-1 rounded border border-hairline bg-surface-2 px-2.5 py-1.5 font-mono text-[12px] text-ink outline-none placeholder:text-ink-faint focus:border-accent focus:shadow-[0_0_0_3px_var(--color-accent-dim)]"
+								/>
+								<button
+									type="button"
+									onClick={() => void saveWorkspaceDir()}
+									className="shrink-0 rounded bg-accent px-3 py-1.5 text-[12px] font-medium text-on-accent hover:bg-accent-hover"
+								>
+									保存
+								</button>
+							</div>
+							{workspaceSaved && <div className="mt-1 text-[11px] text-success">已保存</div>}
+							{workspaceError !== null && <div className="mt-1 text-[11px] text-danger">{workspaceError}</div>}
 						</div>
 					</div>
 				</section>

@@ -13,7 +13,7 @@ import {
 	Mic,
 	SlidersHorizontal,
 } from "lucide-react";
-import { createBrowserRouter } from "react-router-dom";
+import { createHashRouter } from "react-router-dom";
 import { AppShell } from "./layout/AppShell";
 import { registerPanel } from "./layout/panel-registry";
 import { AgentsView } from "./pages/agents/AgentsView";
@@ -312,7 +312,7 @@ export function findPageMeta(pathname: string): PageMeta | undefined {
 
 // ── 路由导出 ──────────────────────────────────────────────────────────
 
-export const router = createBrowserRouter([
+export const router = createHashRouter([
 	{
 		element: <AppShell />,
 		children: [
