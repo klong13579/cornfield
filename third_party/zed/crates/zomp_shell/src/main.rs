@@ -17,6 +17,7 @@
 //!   通过 `AsyncApp::spawn` 延迟到下一轮 foreground tick，避免在 gpui 持锁期间重入。
 
 use std::ffi::c_void;
+use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use cocoa::appkit::{NSApplication, NSBackingStoreBuffered, NSWindowStyleMask};
@@ -27,7 +28,7 @@ use gpui::{
     div, prelude::*, px, rgb, size,
 };
 use gpui_platform::application;
-use objc::{class, declare::ClassDecl, msg_send, runtime::{NO, Object, Sel}, sel, sel_impl};
+use objc::{class, declare::ClassDecl, msg_send, runtime::{NO, Object, Sel, YES}, sel, sel_impl};
 
 // WebKit.framework 链接：WKWebView / WKWebViewConfiguration 等符号在运行时由
 // `objc_getClass` 解析，但需要 WebKit.framework 被链接进二进制，否则首次
@@ -44,8 +45,23 @@ const WINDOW_HEIGHT: f64 = 700.0;
 const TOP_BAR_HEIGHT: f64 = 40.0;
 const CONTENT_HEIGHT: f64 = WINDOW_HEIGHT - TOP_BAR_HEIGHT;
 
-/// Agent 模式占位 URL（真正内容由 T3 的 `omp serve :7891` 提供，此处仅占位）
-const PLACEHOLDER_URL: &str = "https://agent.omp.local/";
+/// Agent 模式 WKWebView 加载 URL（env `ZOMP_WEBAPP_URL` 可覆盖）。
+/// 默认指向本机 7890（sidecar / web-app 联调入口）；也可设为 `about:blank` 纯占位。
+const DEFAULT_WEBAPP_URL: &str = "http://127.0.0.1:7890";
+const WEBAPP_URL_ENV: &str = "ZOMP_WEBAPP_URL";
+
+/// sidecar 拉起配置（spawn 语义参考 packages/desktop/src/sidecar.ts）：
+/// - 触发：env `ZOMP_SIDECAR=1` 时壳启动同时拉起 `omp serve` sidecar
+/// - 标记：子进程注入 `OMP_SIDECAR=1`（供外部端口归属探测区分我方 sidecar）
+const SIDECAR_TRIGGER_ENV: &str = "ZOMP_SIDECAR";
+const SIDECAR_MARKER_ENV: &str = "OMP_SIDECAR";
+const SIDECAR_HOST: &str = "127.0.0.1";
+const SIDECAR_PORT: &str = "7891";
+
+/// 读取 Agent 模式加载 URL：env 优先，缺省回退默认地址。
+fn webapp_url() -> String {
+    std::env::var(WEBAPP_URL_ENV).unwrap_or_else(|_| DEFAULT_WEBAPP_URL.to_owned())
+}
 
 // ---------------------------------------------------------------------------
 // 模式
@@ -143,26 +159,23 @@ impl Shell {
         shell
     }
 
-    /// 无前置状态地挂载目标视图（仅启动时使用）。
+    /// 无前置状态地挂载目标视图（启动时使用；`switch_to` 复用挂载后的重排）。
     fn mount(&mut self, target: Mode) {
         match target {
             Mode::Agent => self.mount_agent(),
             Mode::Ide => self.mount_ide(),
         }
         self.mode = target;
+        self.relayout_content();
     }
 
-    /// 用户切换：先卸载当前视图，再挂载目标视图。
+    /// 用户切换：先卸载当前视图，再挂载目标视图（挂载后统一重排）。
     fn switch_to(&mut self, target: Mode) {
         if self.mode == target {
             return;
         }
         self.unmount_current();
-        match target {
-            Mode::Agent => self.mount_agent(),
-            Mode::Ide => self.mount_ide(),
-        }
-        self.mode = target;
+        self.mount(target);
     }
 
     fn unmount_current(&mut self) {
@@ -175,7 +188,7 @@ impl Shell {
     // --- Agent 模式：WKWebView ---
 
     fn mount_agent(&mut self) {
-        let web_view = create_web_view(PLACEHOLDER_URL, WINDOW_WIDTH, CONTENT_HEIGHT);
+        let web_view = create_web_view(&webapp_url(), WINDOW_WIDTH, CONTENT_HEIGHT);
         unsafe {
             let _: () = msg_send![self.content_area, addSubview: web_view];
         }
@@ -220,6 +233,24 @@ impl Shell {
             // 关闭内嵌窗口：经由 gpui 上下文置 removed 标记，触发窗口侧 teardown
             let mut async_cx = self.async_app.clone();
             let _ = handle.update(&mut async_cx, |_view, window, _cx| window.remove_window());
+        }
+    }
+
+    /// 切换后强制内容区重新布局：触发 AppKit 布局 pass，并刷新 WKWebView frame
+    /// 使其填满 content_area（内嵌 GPUIView 已带 autoresizing 掩码，跟随 superview）。
+    fn relayout_content(&self) {
+        unsafe {
+            let _: () = msg_send![self.content_area, setNeedsLayout: YES];
+            let _: () = msg_send![self.content_area, layoutSubtreeIfNeeded];
+            if self.mode == Mode::Agent {
+                if let Some(web_view) = self.web_view {
+                    let frame = NSRect::new(
+                        NSPoint::new(0.0, 0.0),
+                        NSSize::new(WINDOW_WIDTH, CONTENT_HEIGHT),
+                    );
+                    let _: () = msg_send![web_view, setFrame: frame];
+                }
+            }
         }
     }
 }
@@ -387,8 +418,38 @@ fn create_web_view(url: &str, width: f64, height: f64) -> id {
 // 入口
 // ---------------------------------------------------------------------------
 
+/// 壳启动时按需拉起 `omp serve` sidecar（spawn 语义参考 packages/desktop/src/sidecar.ts）：
+/// - 仅当 env `ZOMP_SIDECAR=1` 时拉起
+/// - 命令 `omp serve --port 7891 --host 127.0.0.1`，stdio 忽略（脱离终端），
+///   注入 `OMP_SIDECAR=1` 标记供外部端口归属探测
+/// - spawn 失败降级：仅打印日志，不阻塞壳启动
+fn maybe_spawn_sidecar() {
+    if std::env::var(SIDECAR_TRIGGER_ENV).as_deref() != Ok("1") {
+        return;
+    }
+    let spawn = Command::new("omp")
+        .args(["serve", "--port", SIDECAR_PORT, "--host", SIDECAR_HOST])
+        .env(SIDECAR_MARKER_ENV, "1")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn();
+    match spawn {
+        Ok(_child) => {
+            eprintln!(
+                "[zomp_shell] sidecar spawned: omp serve --port {SIDECAR_PORT} --host {SIDECAR_HOST}"
+            );
+        }
+        Err(err) => {
+            // 降级：sidecar 拉起失败（omp 未安装 / 不在 PATH）不阻塞壳启动。
+            eprintln!("[zomp_shell] sidecar spawn failed (degraded, shell continues): {err}");
+        }
+    }
+}
+
 fn main() {
     build_controller_class();
+    maybe_spawn_sidecar();
 
     application().run(|cx| {
         let async_app = cx.to_async();
