@@ -109,6 +109,9 @@ function setupIpc(): void {
 	});
 	// 壳版本（electron-updater 对比新版本用；渲染层设置页展示）。
 	ipcMain.handle("app:get-version", () => app.getVersion());
+	// 更新流：renderer 触发下载 / 触发安装（事件经 update:* channel 广播）。
+	ipcMain.handle("update:download", () => downloadUpdate());
+	ipcMain.on("update:install", () => installUpdate());
 }
 
 async function restartSidecar(next: string): Promise<void> {
@@ -133,15 +136,19 @@ function configureUpdater(): void {
 	} else {
 		autoUpdater.setFeedURL({ provider: "github", owner: "klong13579", repo: "oh-my-pi" });
 	}
+	// 手动触发下载（不在后台静默下载）。UI 流：available → 用户点「下载」→ progress → downloaded → 用户点「重启更新」。
 	autoUpdater.autoDownload = false;
-	// 发现新版本 → 提示用户下载/安装（autoDownload=false，用户确认后 downloadUpdate+quitAndInstall）。
-	autoUpdater.on("update-available", () => {
+	autoUpdater.autoInstallOnAppQuit = true;
+	const send = (channel: string, payload?: unknown): void => {
 		const win = BrowserWindow.getAllWindows()[0];
-		if (win) win.webContents.send("update:available");
-	});
-	autoUpdater.on("update-not-available", () => {
-		console.info("desktop: no update available");
-	});
+		if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
+	};
+	autoUpdater.on("update-available", () => send("update:available"));
+	autoUpdater.on("update-not-available", () => console.info("desktop: no update available"));
+	autoUpdater.on("download-progress", p =>
+		send("update:progress", { percent: p.percent, bytesPerSecond: p.bytesPerSecond }),
+	);
+	autoUpdater.on("update-downloaded", () => send("update:downloaded"));
 	autoUpdater.on("error", err => {
 		console.error("desktop: updater error (镜像/网络不可达时预期):", err.message);
 	});
@@ -153,6 +160,23 @@ function checkForUpdates(): void {
 	autoUpdater.checkForUpdates().catch(err => {
 		console.warn("desktop: checkForUpdates failed", err);
 	});
+}
+
+/** renderer 请求下载新版本（update:download IPC）。 */
+async function downloadUpdate(): Promise<{ ok: boolean; error?: string }> {
+	try {
+		const { autoUpdater } = electronUpdater;
+		await autoUpdater.downloadUpdate();
+		return { ok: true };
+	} catch (err) {
+		return { ok: false, error: err instanceof Error ? err.message : String(err) };
+	}
+}
+
+/** renderer 请求立即更新并退出（update:install IPC）。 */
+function installUpdate(): void {
+	const { autoUpdater } = electronUpdater;
+	autoUpdater.quitAndInstall();
 }
 
 const gotSingleInstanceLock = app.requestSingleInstanceLock();

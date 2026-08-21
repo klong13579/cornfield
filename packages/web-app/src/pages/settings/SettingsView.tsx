@@ -13,12 +13,16 @@ interface SidecarBridge {
 	setWorkspaceDir: (dir: string) => Promise<unknown> | unknown;
 }
 
-/** Desktop 壳暴露到 window.api 的全部面（当前仅 sidecar + app 版本 + 更新订阅）。 */
+/** Desktop 壳暴露到 window.api 的全部面（当前仅 sidecar + app 版本 + 更新流）。 */
 interface DesktopBridgeApi {
 	sidecar?: SidecarBridge;
 	app?: {
 		getVersion: () => Promise<string> | string;
 		onUpdateAvailable: (cb: () => void) => () => void;
+		onUpdateProgress: (cb: (p: { percent: number; bytesPerSecond: number }) => void) => () => void;
+		onUpdateDownloaded: (cb: () => void) => () => void;
+		downloadUpdate: () => Promise<{ ok: boolean; error?: string }>;
+		installUpdate: () => void;
 	};
 }
 
@@ -44,7 +48,11 @@ export function SettingsView(): React.JSX.Element {
 	/** 桌面壳版本（Electron app.getVersion；网页直开无 window.api 时为 null）。 */
 	const [desktopVersion, setDesktopVersion] = useState<string | null>(null);
 	/** 新版本可用提示（desktop 壳 update-available 事件）。 */
-	const [updateAvailable, setUpdateAvailable] = useState(false);
+	const [updateState, setUpdateState] = useState<"idle" | "available" | "downloading" | "downloaded" | "error">(
+		"idle",
+	);
+	const [updateProgress, setUpdateProgress] = useState(0);
+	const [updateError, setUpdateError] = useState<string | null>(null);
 	const [notifyPrefs, setNotifyPrefs] = useState<NotifyPrefs>(loadNotifyPrefs);
 	const [notifyPermDenied, setNotifyPermDenied] = useState(
 		typeof Notification !== "undefined" && Notification.permission === "denied",
@@ -95,15 +103,42 @@ export function SettingsView(): React.JSX.Element {
 	const [appKey, setAppKey] = useState("");
 	const [appSecret, setAppSecret] = useState("");
 
-	// 桌面壳版本 + 更新订阅：Electron 环境经 window.api.app 读；网页直开无 api → 静默不处理。
+	/** 用户点「下载更新」：触发 electron-updater downloadUpdate，进度走 onUpdateProgress。 */
+	const startUpdateDownload = async (): Promise<void> => {
+		const api = (window as typeof window & { api?: DesktopBridgeApi }).api;
+		if (!api?.app?.downloadUpdate) return;
+		setUpdateError(null);
+		setUpdateState("downloading");
+		const res = await api.app.downloadUpdate();
+		if (!res.ok) {
+			setUpdateError(res.error ?? "下载失败");
+			setUpdateState("error");
+		}
+	};
+	/** 用户点「重启更新」：quitAndInstall 立即重启应用完成安装。 */
+	const installUpdateNow = (): void => {
+		const api = (window as typeof window & { api?: DesktopBridgeApi }).api;
+		api?.app?.installUpdate?.();
+	};
+
+	// 桌面壳版本 + 更新流：Electron 环境经 window.api.app 读；网页直开无 api → 静默不处理。
 	useEffect(() => {
 		const api = (window as typeof window & { api?: DesktopBridgeApi }).api;
 		if (!api?.app?.getVersion) return;
 		Promise.resolve(api.app.getVersion())
 			.then(v => setDesktopVersion(String(v)))
 			.catch(() => setDesktopVersion(null));
-		const unsub = api.app.onUpdateAvailable?.(() => setUpdateAvailable(true));
-		return unsub;
+		const unsubAvailable = api.app.onUpdateAvailable?.(() => setUpdateState("available"));
+		const unsubProgress = api.app.onUpdateProgress?.(p => {
+			setUpdateState("downloading");
+			setUpdateProgress(Math.round(p.percent));
+		});
+		const unsubDownloaded = api.app.onUpdateDownloaded?.(() => setUpdateState("downloaded"));
+		return () => {
+			unsubAvailable?.();
+			unsubProgress?.();
+			unsubDownloaded?.();
+		};
 	}, []);
 
 	return (
@@ -129,9 +164,42 @@ export function SettingsView(): React.JSX.Element {
 						<Row k="桌面壳版本">
 							<span className="font-mono text-[11px] text-ink">{desktopVersion ?? "—"}</span>
 						</Row>
-						{updateAvailable && (
+						{updateState !== "idle" && (
 							<Row k="更新">
-								<span className="text-[12px] font-medium text-accent">新版本可用 — 重启客户端完成更新</span>
+								<span className="flex items-center gap-2 text-[12px] font-medium text-accent">
+									{updateState === "available" && (
+										<button
+											type="button"
+											onClick={() => void startUpdateDownload()}
+											className="rounded border border-accent px-2 py-0.5 text-[11px] font-medium hover:bg-accent-dim"
+										>
+											新版本可用 — 下载更新
+										</button>
+									)}
+									{updateState === "downloading" && (
+										<span className="flex items-center gap-2 text-[11px]">
+											<span>下载中 {updateProgress}%</span>
+											<span className="h-1 w-24 overflow-hidden rounded bg-accent-dim">
+												<span
+													className="block h-full bg-accent transition-all"
+													style={{ width: `${updateProgress}%` }}
+												/>
+											</span>
+										</span>
+									)}
+									{updateState === "downloaded" && (
+										<button
+											type="button"
+											onClick={installUpdateNow}
+											className="rounded border border-accent px-2 py-0.5 text-[11px] font-medium hover:bg-accent-dim"
+										>
+											重启更新
+										</button>
+									)}
+									{updateState === "error" && (
+										<span className="text-[11px] text-danger">更新下载失败：{updateError}</span>
+									)}
+								</span>
 							</Row>
 						)}
 					</div>
