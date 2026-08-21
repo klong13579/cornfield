@@ -17,6 +17,14 @@ extraResources:
   # 内嵌 web-app 生产构建（对应 main.ts 生产模式 loadFile(resources/renderer/index.html)）。
   - from: ../web-app/dist
     to: renderer
+# publish 配置驱动 electron-builder 生成更新元数据（latest-mac.yml）——
+# 没有它客户端 updater 拿不到版本对比文件，更新流永远检查不到新版本（2026-08-21 实测验证抓到）。
+# 用 generic provider + 空 url：只在本地构建时生成 latest-mac.yml（不上传，不要求 GH_TOKEN）；
+# 实际发布时 CI release_desktop job 把 dmg/zip/latest* 上传到 GitHub Release，
+# 客户端默认走 github provider（main.ts），或经 OMP_UPDATE_MIRROR 走任意 generic URL。
+publish:
+  provider: generic
+  url: ""
 mac:
   target:
     - dmg
