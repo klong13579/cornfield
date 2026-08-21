@@ -53,8 +53,17 @@ function createMainWindow(): BrowserWindow {
 
 	const devUrl = process.env.OMP_DESKTOP_DEV_URL?.trim();
 	if (devUrl) {
+		// 开发/覆盖：优先走 dev server。
 		win.loadURL(devUrl).catch(err => console.error("desktop: load dev url failed", err));
+	} else if (app.isPackaged) {
+		// 生产：加载打包内 web-app dist（electron-builder extraResources → renderer/）。
+		const rendererIndex = path.join(process.resourcesPath, "renderer", "index.html");
+		win.loadFile(rendererIndex).catch(err => {
+			console.error("desktop: load renderer failed, falling back to placeholder", err);
+			win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(FALLBACK_HTML)}`);
+		});
 	} else {
+		// 开发但未配置 dev server：保持现有占位兜底。
 		win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(FALLBACK_HTML)}`);
 	}
 
