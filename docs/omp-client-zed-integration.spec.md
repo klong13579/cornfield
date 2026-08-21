@@ -137,6 +137,19 @@ schema：`settings_content::CustomAgentServerSettings`（`#[serde(tag = "type", 
 - 与 `omp serve :7891`（HTTP sidecar，`GET /health` → ok）分离。
 - 最低握手：`initialize`（协商 `ProtocolVersion`）+ `session/new` + `session/prompt` + `session/update`；工具调用走 `session/update` 的 tool call。完整 schema 以 `agent-client-protocol` v2.0.0 为准。
 
+### 验证方法
+
+两个验证物，均无 Rust 编译依赖、可独立跑：
+
+1. **配置片段**：`docs/zomp-zed-agent-settings.json.example` —— 直接粘进 Zed `settings.json` 的 `agent_servers`（`type: "custom"`、`command: "omp"`、`args: ["acp"]`），与上文「Zed 侧注册配置」一致。
+2. **ACP 冒烟**：`docs/acp-smoke-test.ts`（`bun docs/acp-smoke-test.ts`）。脚本 spawn `omp acp`，经 stdin/stdout 用 newline-delimited JSON-RPC 2.0 发：
+   - `initialize`（`protocolVersion: 1`）→ 校验响应 `protocolVersion === 1`（ACP v1 握手）；
+   - `_ping`（ACP 扩展自定义方法，`_` 前缀）→ 期望 `pong`（存活探针）。
+   - `omp` 不在 PATH / 无 `acp` 子命令 / 超时 → 明确 `FAIL` 并给原因，不静默。
+   - 语法校验：`bun build docs/acp-smoke-test.ts --no-bundle`。
+
+> 注：ACP v1 **无内置 ping**；`_ping`/`pong` 按 ACP 扩展约定（自定义方法 `_` 前缀）定义为 OMP `omp acp` 侧的契约。`initialize` 是必选握手，`_ping` 是可选存活探针。
+
 ### 验证状态
 
 - **编译验证未跑**：zed workspace 全量 `cargo check` 需 Xcode/CLT + `runtime_shaders` 特性绕开 xcrun metal，成本高；且本任务注册路径是纯配置 + 文档，无 Rust 代码改动。按 acceptance「编译验证成本过高时明确标注待集成验证」，此处标注：**待集成验证**（gate unknown / human-review）。

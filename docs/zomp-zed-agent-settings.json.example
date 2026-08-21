@@ -1,0 +1,10 @@
+{
+  "agent_servers": {
+    "omp": {
+      "type": "custom",
+      "command": "omp",
+      "args": ["acp"],
+      "env": {}
+    }
+  }
+}
