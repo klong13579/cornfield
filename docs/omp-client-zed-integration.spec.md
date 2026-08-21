@@ -139,7 +139,7 @@ schema：`settings_content::CustomAgentServerSettings`（`#[serde(tag = "type", 
 
 ### 验证方法
 
-两个验证物，均无 Rust 编译依赖、可独立跑：
+三个验证物，均无 Rust 编译依赖、可独立跑：
 
 1. **配置片段**：`docs/zomp-zed-agent-settings.json.example` —— 直接粘进 Zed `settings.json` 的 `agent_servers`（`type: "custom"`、`command: "omp"`、`args: ["acp"]`），与上文「Zed 侧注册配置」一致。
 2. **ACP 冒烟**：`docs/acp-smoke-test.ts`（`bun docs/acp-smoke-test.ts`）。脚本 spawn `omp acp`，经 stdin/stdout 用 newline-delimited JSON-RPC 2.0 发：
@@ -147,6 +147,13 @@ schema：`settings_content::CustomAgentServerSettings`（`#[serde(tag = "type", 
    - `_ping`（ACP 扩展自定义方法，`_` 前缀）→ 期望 `pong`（存活探针）。
    - `omp` 不在 PATH / 无 `acp` 子命令 / 超时 → 明确 `FAIL` 并给原因，不静默。
    - 语法校验：`bun build docs/acp-smoke-test.ts --no-bundle`。
+3. **ACP 会话流冒烟**：`packages/coding-agent/scripts/acp-session-test.ts`（`bun packages/coding-agent/scripts/acp-session-test.ts`）。脚本 spawn `omp acp`，经 stdio 用 newline-delimited JSON-RPC 2.0 走完整会话生命周期：
+   - `initialize`（`protocolVersion: 1`）→ 校验 `protocolVersion === 1`；
+   - `session/new`（`cwd` 绝对路径 + `mcpServers: []`）→ 拿到 `sessionId`；
+   - `session/prompt`（`prompt: [{ type: "text", text: "/help" }]`）→ 校验 `stopReason === "end_turn"` 且收到 `session/update` 的 `agent_message_chunk`（含 "Oh My Pi"）；
+   - `session/close`（`sessionId`）→ 会话关闭无 error。
+   - 注：`/help` 是 OMP ACP 内置命令（同步路由、不走 LLM），保证冒烟确定性；`session/close` 走 SDK 稳定方法名 `closeSession`。
+
 
 > 注：ACP v1 **无内置 ping**；`_ping`/`pong` 按 ACP 扩展约定（自定义方法 `_` 前缀）定义为 OMP `omp acp` 侧的契约。`initialize` 是必选握手，`_ping` 是可选存活探针。
 
