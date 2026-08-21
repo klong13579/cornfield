@@ -153,6 +153,13 @@ function configureUpdater(): void {
 	autoUpdater.on("error", err => {
 		console.error("desktop: updater error (镜像/网络不可达时预期):", err.message);
 	});
+	// 关键：Squirrel 安装前会触发 before-quit-for-update（而非正常 before-quit）——
+	// 必须在此设 isQuitting，否则窗口 close 拦截（托盘常驻）会阻止 app 退出，安装卡死（实测）。
+	// 注：AppUpdaterEvents 类型未声明该事件，运行时真实存在（electron-updater 官方事件），用 as 断言。
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	(autoUpdater as unknown as { on: (e: string, cb: () => void) => void }).on("before-quit-for-update", () => {
+		isQuitting = true;
+	});
 }
 
 /** 启动后延迟检查更新（不打和 sidecar 竞争首帧；失败不阻塞启动）。 */
