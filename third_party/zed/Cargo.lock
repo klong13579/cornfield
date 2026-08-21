@@ -23751,6 +23751,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
 
 [[package]]
+name = "zomp_shell"
+version = "0.1.0"
+dependencies = [
+ "cocoa 0.26.0",
+ "gpui",
+ "gpui_platform",
+ "objc",
+]
+
+[[package]]
 name = "zstd"
 version = "0.11.2+zstd.1.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
