@@ -136,8 +136,9 @@ bun run .omp/skills/squad-programming/scripts/bootstrap.ts \
 2. **模型核对** — 用 `list_models` 确认分配模型在可用列表；不在 → `switch_model` 切到档内可用模型，并按实际生效模型汇报（启动参数失效兜底）。
 3. **只动 scope 内文件** — scope 外需要改动 → `ask` 求助父。
 4. **求助** — `intercom({ action: "ask", to: <父 target>, message: "..." })` **必须带 to=父 target**。不带 to 的 ask 不会被自动路由到父：intercom 的路由优先 cwd 匹配（实测误投到同目录活跃的 aion-ui 会话），parent edge 只是次选。同时只允许一个 pending ask；求助期间不发重复 ask。
-5. **状态汇报** — `intercom({ action: "send", to: <父 target>, message: "[<taskId>] <STATE>: <一句话>" })`，STATE ∈ `STARTED` / `BLOCKED` / `REVIEWING` / `COMPLETE` / `FAILED`。**STARTED = 准备检查通过**（任务包已读 + 模型已核对并生效），send 一次即可，**确认由父 ask 拉动**（见 #Phase 1.5 pull 机制）；启动窗口期 send 失败不要重试刷屏，窗口后 send 可靠（终态必达）。
-6. 每回合结束自动上报（agent_end 由运行时注入，无需手动）。
+5. **状态汇报** — `intercom({ action: "send", to: <父 target>, message: "[<taskId>] <STATE>: <一句话>" })`，STATE ∈ `STARTED` / `ACK` / `BLOCKED` / `REVIEWING` / `COMPLETE` / `FAILED`。**STARTED = 准备检查通过**（任务包已读 + 模型已核对并生效），send 一次即可，**确认由父 ask 拉动**（见 #Phase 1.5 pull 机制）；启动窗口期 send 失败不要重试刷屏，窗口后 send 可靠（终态必达）。
+6. **收到父新指令，先 ack 再干活** — 父通过 `ask`/`send` 下发新任务或继续指令时，**第一动作必须是给父回 ack**（`intercom({ action: "send"|"reply", to: <父>, message: "[<taskId>] ACK: 收到指令，开始执行 <任务要点>" })`），**然后**才开始干活。目的：父的 `ask` 是同步等待——没有一个先回 ack，ask 会一直挂着直到等待超时/取消（实测：父 3 个 ask 全部 Failed: Cancelled，指令实际已送达）。**例外**：仅在启动窗口期（首轮几十秒，Session not found 会刷屏——沿用第 5 条规则不回重试，但窗口期后的任何新指令必须 ack）。
+7. 每回合结束自动上报（agent_end 由运行时注入，无需手动）。
 
 ### 父 agent 侧盯盘
 
@@ -267,7 +268,8 @@ shared 场景 = /tmp 绝对路径），完整理解任务、scope、gate、汇�
 用 list_models 确认分配模型在可用列表（不在则 switch_model 到档内模型并汇报实际生效模型）；
 然后立刻向父发 "[<taskId>] STARTED: <实际生效模型>，任务包已读" —— 父等全部 STARTED 才正式开工。
 规则：只改 scope 内文件；求助必须用 intercom ask 且带 to=<parent.target>（不带 to 会被按 cwd 路由到同目录其他会话，收不到）；状态用 intercom send 给
-<parent.target>，格式 "[<taskId>] <STATE>: 一句话"（STATE ∈ STARTED/BLOCKED/REVIEWING/COMPLETE/FAILED）。
+<parent.target>，格式 "[<taskId>] <STATE>: 一句话"（STATE ∈ STARTED/ACK/BLOCKED/REVIEWING/COMPLETE/FAILED）。
+**收到父后发的新任务/继续指令：先回 "[<taskId>] ACK: 收到指令，开始执行" 再开工**（父 ask 同步等确认，不回 ask 会挂起）。
 完成标准即 .squad.json 中 acceptance。开始。
 ```
 
