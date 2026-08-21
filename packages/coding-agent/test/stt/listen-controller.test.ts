@@ -12,7 +12,8 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "bun:test";
 import * as fsp from "node:fs/promises";
 import { settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { buildFilename, ListenController } from "@oh-my-pi/pi-coding-agent/stt/listen-controller";
+import { buildFilename } from "@oh-my-pi/pi-coding-agent/stt/listen-service";
+import { ListenController } from "@oh-my-pi/pi-coding-agent/stt/listen-controller";
 
 // Shared mock instances — hoisted before static imports, shared across tests.
 const detectRecordingTools = vi.fn<() => string[]>();

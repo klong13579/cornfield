@@ -22,13 +22,16 @@ import * as fs from "node:fs";
 import * as fsp from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { getConfigRootDir, logger } from "@oh-my-pi/pi-utils";
 import type { ModelRegistry } from "../config/model-registry";
-import { parseModelString } from "../config/model-resolver";
 import { settings } from "../config/settings";
-import { cleanupChunks, joinTranscripts, splitWavFile } from "./chunker";
+import {
+	readSttNumber,
+	resolveEffectiveModelName,
+	saveListenText,
+	transcribeAudioWithDefaults,
+} from "./listen-service";
 import { detectRecordingTools, type RecordingHandle, startRecording, verifyRecordingFile } from "./recorder";
-import { type TranscribeProgress, transcribe } from "./transcriber";
+import type { TranscribeProgress } from "./transcriber";
 import { DEFAULT_VAD_OPTIONS, feedVadStream, initialVadStreamState, type VadStreamState } from "./vad";
 
 export type ListenState = "idle" | "recording" | "transcribing" | "saving";
@@ -60,39 +63,6 @@ export interface ListenControllerOptions {
 
 const LEVEL_BAR_CELLS = 7;
 const LEVEL_EMIT_THROTTLE_MS = 100;
-
-function getListenDir(): string {
-	const base = getConfigRootDir();
-	const d = path.join(base, "listen");
-	try {
-		fs.mkdirSync(d, { recursive: true });
-	} catch {
-		/* exists */
-	}
-	return d;
-}
-
-export function buildFilename(description?: string): string {
-	const now = new Date();
-	const datePart = now.toISOString().slice(0, 10);
-	if (description) {
-		const safe = description
-			.replace(/[<>:"/\\|?*]/g, "")
-			.replace(/\s+/g, "-")
-			.slice(0, 80);
-		return `${datePart}-${safe}.json`;
-	}
-	const timePart = now.toTimeString().slice(0, 8).replace(/:/g, "");
-	return `${datePart}-${timePart}.json`;
-}
-
-function readSttNumber(key: string, fallback: number): number {
-	// settings.get is typed as a keyof-Settings generic; a string variable
-	// loses the literal narrowing, so we go through `as never` to keep the
-	// single-line accessor ergonomic without losing the runtime safety net below.
-	const v = (settings.get as (k: string) => unknown)(key);
-	return typeof v === "number" && Number.isFinite(v) ? v : fallback;
-}
 
 /** Format a duration in seconds as a readable label (e.g. 7200 -> "2h"). */
 function formatDuration(totalSec: number): string {
@@ -140,7 +110,6 @@ export class ListenController {
 	#lastLevelEmitMs = 0;
 	#autoStopTriggered = false;
 	#maxRecordingMs = 0;
-	#currentChunkPaths: string[] = [];
 
 	get lastSavedPath(): string | null {
 		return this.#lastSavedPath;
@@ -156,14 +125,7 @@ export class ListenController {
 	 * transcription. Returns the model that WILL be used on the next call.
 	 */
 	getEffectiveModelName(): string {
-		const recordModel = settings.get("record.model") as string | undefined;
-		if (recordModel && !this.#isLocalWhisperModel(recordModel) && this.#modelRegistry) {
-			return this.#shortModelName(recordModel);
-		}
-		// Local whisper path: use record.model if set, else stt.modelName
-		const model =
-			recordModel ?? (settings.get("stt.modelName") as string | undefined) ?? "mlx-community/whisper-large-v3-turbo";
-		return this.#shortModelName(model);
+		return resolveEffectiveModelName(this.#modelRegistry);
 	}
 
 	constructor(opts: ListenControllerOptions) {
@@ -288,7 +250,6 @@ export class ListenController {
 		this.#recentRms = [];
 		this.#lastLevelEmitMs = 0;
 		this.#autoStopTriggered = false;
-		this.#currentChunkPaths = [];
 		try {
 			this.#recordingHandle = await startRecording(this.#tempFile, {
 				onLevel: rms => this.#handleLevelSample(rms),
@@ -317,9 +278,18 @@ export class ListenController {
 			await verifyRecordingFile(tempFile);
 			this.#setState("transcribing");
 			this.#showStatus("Transcribing audio...");
-			const text = await this.#transcribeMaybeChunked(tempFile);
+			const { text, model } = await transcribeAudioWithDefaults(tempFile, {
+				modelRegistry: this.#modelRegistry,
+				onProgress: (p, chunk) =>
+					this.#emit({
+						progress: p,
+						...(chunk ? { chunkIndex: chunk.index, chunkTotal: chunk.total } : {}),
+					}),
+			});
+			this.#lastUsedModel = model;
 			this.#setState("saving");
-			const savedFile = await this.#saveText(text, description, tempFile);
+			const savedFile = await saveListenText(text, description);
+			this.#lastSavedPath = savedFile;
 			this.#setState("idle");
 			const modelLabel = this.#lastUsedModel ?? "";
 			this.#showStatus(`${savedFile.replace(os.homedir(), "~")} （${modelLabel}）`);
@@ -348,9 +318,18 @@ export class ListenController {
 		this.#setState("transcribing");
 		this.#showStatus("Transcribing audio file...");
 		try {
-			const text = await this.#transcribeMaybeChunked(filePath);
+			const { text, model } = await transcribeAudioWithDefaults(filePath, {
+				modelRegistry: this.#modelRegistry,
+				onProgress: (p, chunk) =>
+					this.#emit({
+						progress: p,
+						...(chunk ? { chunkIndex: chunk.index, chunkTotal: chunk.total } : {}),
+					}),
+			});
+			this.#lastUsedModel = model;
 			this.#setState("saving");
-			const savedFile = await this.#saveText(text, description ?? path.basename(filePath, path.extname(filePath)));
+			const savedFile = await saveListenText(text, description ?? path.basename(filePath, path.extname(filePath)));
+			this.#lastSavedPath = savedFile;
 			this.#setState("idle");
 			const modelLabel = this.#lastUsedModel ?? "";
 			this.#showStatus(`${savedFile.replace(os.homedir(), "~")} （${modelLabel}）`);
@@ -384,143 +363,7 @@ export class ListenController {
 		this.#showStatus("Recording cancelled.");
 	}
 
-	/**
-	 * Decide whether `modelName` is a local whisper model (mlx-community/...)
-	 * vs an API-based model (e.g. qwen-audio-...).
-	 */
-	#isLocalWhisperModel(modelName: string | undefined): boolean {
-		if (!modelName) return true;
-		return modelName.startsWith("mlx-community/");
-	}
-
-	/**
-	 * Transcribe a single audio segment — either via local mlx-whisper or
-	 * the API-based record.model, depending on the configured model name.
-	 *
-	 * Falls back to local whisper when:
-	 * - record.model is not set (uses stt.modelName)
-	 * - modelRegistry is not available (API path unavailable)
-	 * - record.model is a local whisper model ID (mlx-community/...)
-	 */
-	/** Shorten a model name for display: take the last path segment. */
-	#shortModelName(name: string): string {
-		return name.includes("/") ? name.split("/").pop()! : name;
-	}
-
-	async #doTranscribe(audioPath: string, onProgress?: (p: TranscribeProgress) => void): Promise<string> {
-		const recordModel = settings.get("record.model") as string | undefined;
-		const language = settings.get("stt.language") as string | undefined;
-
-		// Use local whisper when the model is a whisper ID or when the API
-		// path is unavailable (no modelRegistry).
-		if (this.#isLocalWhisperModel(recordModel) || !this.#modelRegistry) {
-			const modelName = recordModel ?? (settings.get("stt.modelName") as string | undefined);
-			this.#lastUsedModel = this.#shortModelName(modelName ?? "whisper");
-			return await transcribe(audioPath, { modelName, language, onProgress });
-		}
-
-		// API-based transcription via the configured record.model
-		// isLocalWhisperModel(undefined) === true guarantees this branch only runs
-		// when recordModel is non-empty (see #isLocalWhisperModel).
-		this.#lastUsedModel = this.#shortModelName(recordModel!);
-		// Parse the model string to extract the provider. If the model is specified
-		// as "provider/modelId" (e.g. "narwal-plan/qwen-audio-3.0-realtime-flash"), use
-		// that provider. Otherwise default to "narwal-plan" — the only bench-verified
-		// realtime/audio transcription endpoint.
-		const parsed = recordModel ? parseModelString(recordModel) : undefined;
-		const provider = parsed?.provider ?? "narwal-plan";
-		const modelId = parsed?.id ?? recordModel;
-		const { transcribeViaApi } = await import("./transcriber");
-		return await transcribeViaApi(audioPath, {
-			modelName: modelId,
-			language,
-			modelRegistry: this.#modelRegistry,
-			provider,
-			onProgress,
-		});
-	}
-
-	/**
-	 * Transcribe a WAV file. If it exceeds `stt.chunkSizeMB`, split into chunks
-	 * and transcribe serially. Returns the joined transcript.
-	 */
-	async #transcribeMaybeChunked(audioPath: string): Promise<string> {
-		const chunkSizeMB = readSttNumber("stt.chunkSizeMB", 20);
-		const chunkSizeBytes = chunkSizeMB * 1024 * 1024;
-		let stat: fs.Stats;
-		try {
-			stat = await fsp.stat(audioPath);
-		} catch (err) {
-			// File might be missing, unreadable, or a non-WAV path passed via
-			// transcribeFile. Fall through to the direct path — transcribe()
-			// will produce a more specific error.
-			logger.debug("stat failed before chunking decision; falling back to direct transcribe", {
-				audioPath,
-				err: String(err),
-			});
-			return await this.#doTranscribe(audioPath, p => this.#emit({ progress: p }));
-		}
-
-		if (stat.size <= chunkSizeBytes) {
-			return await this.#doTranscribe(audioPath, p => this.#emit({ progress: p }));
-		}
-
-		// Oversized file: split and transcribe chunk by chunk.
-		const chunks = await splitWavFile(audioPath, { maxChunkBytes: chunkSizeBytes });
-		this.#currentChunkPaths = chunks;
-		logger.info("Recording exceeded chunk threshold; transcribing in parts", {
-			audioPath,
-			totalChunks: chunks.length,
-			chunkSizeMB,
-		});
-
-		const transcripts: string[] = [];
-		try {
-			for (let i = 0; i < chunks.length; i++) {
-				this.#emit({
-					progress: { stage: "transcribing", percent: 0 },
-					chunkIndex: i + 1,
-					chunkTotal: chunks.length,
-				});
-				const t = await this.#doTranscribe(chunks[i], p =>
-					this.#emit({
-						progress: p,
-						chunkIndex: i + 1,
-						chunkTotal: chunks.length,
-					}),
-				);
-				transcripts.push(t);
-			}
-		} finally {
-			await cleanupChunks(chunks);
-			this.#currentChunkPaths = [];
-		}
-
-		const joined = joinTranscripts(transcripts);
-		if (!joined) {
-			throw new Error("Transcription produced no text. Check audio quality or model settings.");
-		}
-		return joined;
-	}
-
-	async #saveText(text: string, description?: string, _sourceFile?: string): Promise<string> {
-		const dir = getListenDir();
-		const out = path.join(dir, buildFilename(description));
-		await fsp.writeFile(
-			out,
-			JSON.stringify({ version: 1, recorded_at: new Date().toISOString(), text }, null, 2),
-			"utf-8",
-		);
-		this.#lastSavedPath = out;
-		return out;
-	}
-
 	async #cleanupTranscriptionArtifacts(tempFile: string | null): Promise<void> {
-		// Clean up any leftover chunk files (in case of mid-transcribe error).
-		if (this.#currentChunkPaths.length > 0) {
-			await cleanupChunks(this.#currentChunkPaths);
-			this.#currentChunkPaths = [];
-		}
 		if (tempFile) {
 			await fsp.rm(tempFile, { force: true }).catch(() => {});
 		}
