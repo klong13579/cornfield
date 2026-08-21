@@ -498,7 +498,7 @@ export class AcpAgent implements Agent {
 				enableProvider(providerId);
 				return { enabled: true };
 			}
-			case "ping":
+			case "_ping":
 				return { pong: true };
 			default:
 				throw new Error(`Unknown ACP ext method: ${method}`);
