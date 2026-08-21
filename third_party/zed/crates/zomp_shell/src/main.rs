@@ -24,7 +24,7 @@ use cocoa::appkit::{NSApplication, NSBackingStoreBuffered, NSWindowStyleMask};
 use cocoa::base::{id, nil};
 use cocoa::foundation::{NSAutoreleasePool, NSString, NSPoint, NSRect, NSSize};
 use gpui::{
-    AsyncApp, Bounds, Context, Point, Render, Window, WindowBounds, WindowHandle, WindowOptions,
+    App, AsyncApp, Bounds, Context, Point, Render, Window, WindowBounds, WindowHandle, WindowOptions,
     div, prelude::*, px, rgb, size,
 };
 use gpui_platform::application;
@@ -126,7 +126,7 @@ struct Shell {
 }
 
 impl Shell {
-    fn new(async_app: AsyncApp) -> Self {
+    fn new(async_app: AsyncApp, cx: &mut App) -> Self {
         let host_window = create_host_window();
         let content_view: id = unsafe { msg_send![host_window, contentView] };
 
@@ -154,8 +154,10 @@ impl Shell {
             ide_window: None,
             async_app,
         };
-        // 初始模式：IDE（内嵌 GPUIView，主展示路径）
-        shell.mount(Mode::Ide);
+        // 初始模式：IDE（内嵌 GPUIView，主展示路径）。
+        // 首次挂载必须用 run 回调的 cx 直接 open_window——async_app.open_window 会
+        // 在 run 回调持有 App 时重入（RefCell already borrowed，运行时实测 panic）。
+        shell.mount_with_cx(Mode::Ide, cx);
         shell
     }
 
@@ -169,8 +171,19 @@ impl Shell {
         self.relayout_content();
     }
 
+    /// 启动时专用：IDE 首挂走 run 回调的 `cx`（async_app 在同一上下文重入会 panic）。
+    fn mount_with_cx(&mut self, target: Mode, cx: &mut App) {
+        match target {
+            Mode::Agent => self.mount_agent(),
+            Mode::Ide => self.mount_ide_with_cx(cx),
+        }
+        self.mode = target;
+        self.relayout_content();
+    }
+
     /// 用户切换：先卸载当前视图，再挂载目标视图（挂载后统一重排）。
     fn switch_to(&mut self, target: Mode) {
+        eprintln!("[zomp] switch_to: mode={:?} -> {target:?}", self.mode);
         if self.mode == target {
             return;
         }
@@ -207,9 +220,32 @@ impl Shell {
     // --- IDE 模式：GPUIView（embedded_in） ---
 
     fn mount_ide(&mut self) {
+        eprintln!("[zomp] mount_ide begin");
         let content_area = self.content_area as *mut c_void;
         let handle = self
             .async_app
+            .open_window(
+                WindowOptions {
+                    embedded_in: Some(content_area),
+                    window_bounds: Some(WindowBounds::Windowed(Bounds::new(
+                        Point::new(px(0.0), px(0.0)),
+                        size(px(WINDOW_WIDTH as f32), px(CONTENT_HEIGHT as f32)),
+                    ))),
+                    titlebar: None,
+                    show: false, // 宿主窗口已 makeKeyAndOrderFront，gpui 窗口无需自行显示
+                    focus: false,
+                    ..Default::default()
+                },
+                |_window, cx| cx.new(|_| IdeView::new()),
+            )
+            .expect("zomp_shell: 内嵌 IDE 窗口打开失败");
+        self.ide_window = Some(handle);
+    }
+
+    /// 启动时专用：用 run 回调的 `cx` 打开内嵌窗口（AsyncApp 同一上下文重入会 RefCell panic）。
+    fn mount_ide_with_cx(&mut self, cx: &mut App) {
+        let content_area = self.content_area as *mut c_void;
+        let handle = cx
             .open_window(
                 WindowOptions {
                     embedded_in: Some(content_area),
@@ -288,8 +324,6 @@ fn create_host_window() -> id {
         let _: () = msg_send![window, setReleasedWhenClosed: NO];
         // 无 bundle 的 CLI 进程 activation policy 默认不保证 Regular；显式设置
         let _: () = msg_send![app, setActivationPolicy: 0]; // NSApplicationActivationPolicyRegular
-        // 窗口加入所有 space（壳层验证需要：当前 space 可能被全屏 app 占用）
-        let _: () = msg_send![window, setCollectionBehavior: 1 << 1]; // NSWindowCollectionBehaviorCanJoinAllSpaces
         let _: () = msg_send![window, makeKeyAndOrderFront: nil];
         let _: () = msg_send![app, activateIgnoringOtherApps: true];
 
@@ -386,10 +420,13 @@ extern "C" fn switch_to_ide(_this: &Object, _sel: Sel, _sender: id) {
 /// AppKit 回调线程上：把切换请求排队到 foreground executor，避免在 gpui 持锁
 /// 期间重入（与 P0 spike 的「GCD 延迟注入」同理）。
 fn request_switch(target: Mode) {
+    eprintln!("[zomp] request_switch -> {target:?}");
     let async_app = shell_mut().async_app.clone();
     async_app
         .spawn(async move |_async_cx| {
+            eprintln!("[zomp] switch task running, target={target:?}");
             shell_mut().switch_to(target);
+            eprintln!("[zomp] switch done");
         })
         .detach();
 }
@@ -453,8 +490,19 @@ fn main() {
 
     application().run(|cx| {
         let async_app = cx.to_async();
-        let shell = Shell::new(async_app);
+        let shell = Shell::new(async_app, cx);
         // 壳状态移交堆上单例，供按钮回调访问；进程生命周期内不释放。
         SHELL_PTR.store(Box::into_raw(Box::new(shell)) as usize, Ordering::SeqCst);
+
+        // 自动切换自测（ZOMP_AUTO_SWITCH_TEST=1，dev 工具）：GCD 主队列调度
+        // （request_switch -> AsyncApp::spawn 是 spawn_local，必须在主线程触发；
+        //  std::thread 触发实测 panic "local task polled by a thread that didn't spawn it"）。
+        if std::env::var("ZOMP_AUTO_SWITCH_TEST").is_ok() {
+            let q = dispatch2::Queue::main();
+            let dt = |ms: u64| dispatch2::DispatchTime::try_from(std::time::Duration::from_millis(ms)).expect("time");
+            let _ = q.after(dt(2000), || { eprintln!("[zomp] AUTO: -> Agent"); request_switch(Mode::Agent); });
+            let _ = q.after(dt(5000), || { eprintln!("[zomp] AUTO: -> Ide"); request_switch(Mode::Ide); });
+            let _ = q.after(dt(8000), || { eprintln!("[zomp] AUTO: -> Agent"); request_switch(Mode::Agent); });
+        }
     });
 }

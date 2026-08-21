@@ -23755,6 +23755,7 @@ name = "zomp_shell"
 version = "0.1.0"
 dependencies = [
  "cocoa 0.26.0",
+ "dispatch2",
  "gpui",
  "gpui_platform",
  "objc",

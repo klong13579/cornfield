@@ -11,3 +11,4 @@ gpui_platform = { path = "../gpui_platform", features = ["font-kit", "runtime_sh
 # （objc2-app-kit 缺 NSApplication feature，这里不引入）
 objc = { workspace = true }
 cocoa = { workspace = true }
+dispatch2 = "0.3.1"
