@@ -147,6 +147,16 @@ export type WireExtensionCommand =
 	 */
 	| { id?: string; type: "fs_read_image"; sessionId?: string; path: string }
 	/**
+	 * SPIKE-4 实验：写一个 workspace 文件（utf-8 文本，整体写入）。
+	 * 路径约束与 fs_read 同（resolveFsPath 防越界）。OpenSumi FileSystemProvider 桥接所需。
+	 */
+	| { id?: string; type: "fs_write"; sessionId?: string; path: string; content: string }
+	/**
+	 * SPIKE-4 实验：订阅/退订 agentDir 递归文件事件（Bun.watch recursive）。
+	 * 订阅后服务器推 push 帧（WireServerEvent.fs_event）。同一连接重复订阅 = 替换根路径。
+	 */
+	| { id?: string; type: "fs_watch"; sessionId?: string; path?: string; action: "subscribe" | "unsubscribe" }
+	/**
 	 * 读取本机 gateway 运行状态（~/.omp/gateway-data/gateway.status.json 只读转发，
 	 * gateway 定期写盘）。返回 accounts（bridgeRunning/bridgeState/channelHealth）+
 	 * scheduler/pid；statusWrittenAt 距今超 30s 视为 stale。gateway 未运行返回 ok:false。

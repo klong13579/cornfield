@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import * as fs from "node:fs/promises";
+import * as fsSync from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { buildModelPriceCatalog, getDashboardStats, syncAllSessions } from "@oh-my-pi/omp-stats";
@@ -138,6 +139,9 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 	const send = (ws: WireSocket, frame: ServerFrame): void => {
 		ws.send(JSON.stringify(frame));
 	};
+
+	// SPIKE-4：连接级文件 watcher（fs_watch 订阅；close 时清理）
+	const watchSubs = new Map<WireSocket, { watcher: WatchHandle; agentDir: string }>();
 
 	const activeAgentIds = (): Set<string> => {
 		const ids = new Set<string>();
@@ -397,6 +401,103 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 						return;
 					}
 					done({ path: (command as { path: string }).path ?? "", ...res });
+					return;
+				}
+				case "fs_write": {
+					// SPIKE-4：整体写文本文件（utf-8）。越界约束与 fs_read 同。
+					const fsCmd = command as { type: "fs_write"; sessionId?: string; path: string; content: string };
+					const agentId = fsCmd.sessionId ?? conn.activeAgentId;
+					const meta = registry.getMeta(agentId);
+					if (!meta) {
+						fail(`unknown agent: ${agentId}`);
+						return;
+					}
+					const target = resolveFsPath(meta.agentDir, fsCmd.path ?? "");
+					if (!target.ok) {
+						fail(target.error);
+						return;
+					}
+					if (target.path === meta.agentDir) {
+						fail("cannot write agentDir root");
+						return;
+					}
+					try {
+						await Bun.write(target.path, fsCmd.content);
+					} catch (err) {
+						fail(`write failed: ${String(err)}`);
+						return;
+					}
+					done({ path: fsCmd.path, bytes: Buffer.byteLength(fsCmd.content, "utf-8") });
+					return;
+				}
+				case "fs_watch": {
+					// SPIKE-4：订阅/退订 agentDir 递归文件事件（Bun.watch recursive，跨平台）。
+					// 同连接重复 subscribe = 替换根路径；unsubscribe = 停。事件推 WireServerEvent.fs_event。
+					const fsCmd = command as { type: "fs_watch"; sessionId?: string; path?: string; action: "subscribe" | "unsubscribe" };
+					const agentId = fsCmd.sessionId ?? conn.activeAgentId;
+					const meta = registry.getMeta(agentId);
+					if (!meta) {
+						fail(`unknown agent: ${agentId}`);
+						return;
+					}
+					const target = resolveFsPath(meta.agentDir, fsCmd.path ?? "");
+					if (!target.ok) {
+						fail(target.error);
+						return;
+					}
+					const prev = watchSubs.get(conn.ws);
+					if (prev) {
+						try {
+							prev.watcher.close();
+						} catch {
+							/* ignore */
+						}
+						watchSubs.delete(conn.ws);
+					}
+					if (fsCmd.action === "unsubscribe") {
+						done({ watching: false });
+						return;
+					}
+					const watcher = fsSync.watch(target.path, { recursive: true }, (eventType, filename) => {
+						// node 语义：change → update；rename → 按 stat 区分 create/delete（存在=create，缺失=delete）
+						const rel = filename ? path.relative(meta.agentDir, String(filename)) : "";
+						const event = (): void => {
+							send(conn.ws, {
+								type: "push",
+								event: {
+									type: "fs_event",
+									path: String(filename),
+									kind: "update",
+									relative: rel,
+								},
+							});
+						};
+						if (eventType === "change") {
+							event();
+							return;
+						}
+						// rename：stat 区分 create/delete
+						if (!filename) {
+							event();
+							return;
+						}
+						const full = path.resolve(target.path, String(filename));
+						fs.stat(full)
+							.then(() => {
+								send(conn.ws, {
+									type: "push",
+									event: { type: "fs_event", path: full, kind: "create", relative: rel },
+								});
+							})
+							.catch(() => {
+								send(conn.ws, {
+									type: "push",
+									event: { type: "fs_event", path: full, kind: "delete", relative: rel },
+								});
+							});
+					});
+					watchSubs.set(conn.ws, { watcher, agentDir: meta.agentDir });
+					done({ watching: true, root: target.path });
 					return;
 				}
 				case "gateway_status": {
@@ -966,6 +1067,16 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 				const connection = ws.data;
 				if (!connection) return;
 				connections.delete(connection);
+				// SPIKE-4：连接断开时清理文件 watcher，防泄漏
+				const sub = watchSubs.get(ws);
+				if (sub) {
+					try {
+						sub.watcher.close();
+					} catch {
+						/* watcher 可能已自然停止 */
+					}
+					watchSubs.delete(ws);
+				}
 				if (connections.size === 0) {
 					gate.clearAll();
 				}
@@ -1048,6 +1159,8 @@ async function buildEnvironmentSummary(registry: SessionRegistry): Promise<WireE
 const FS_MAX_READ_BYTES = 128 * 1024;
 
 /** 解析 agentDir 内相对路径；拒绝越界（含 .. 逃逸与符号链接逃逸）。 */
+type WatchHandle = ReturnType<typeof fsSync.watch>;
+
 function resolveFsPath(agentDir: string, rel: string): { ok: true; path: string } | { ok: false; error: string } {
 	const resolved = path.resolve(agentDir, rel);
 	if (resolved !== agentDir && !resolved.startsWith(agentDir + path.sep)) {

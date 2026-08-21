@@ -223,6 +223,8 @@ export type WireServerEvent<TSnapshot = unknown, TEvent = unknown> =
 	| { type: "server_snapshot"; sessions: SessionListEntry[] }
 	| { type: "session_snapshot"; sessionId: string; snapshot: TSnapshot }
 	| { type: "progress"; sessionId: string; event: TEvent }
+	/** SPIKE-4：文件事件推送（fs_watch 订阅后；kind 语义同 chokidar/Bun.watch）。 */
+	| { type: "fs_event"; path: string; kind: "create" | "update" | "delete" | "rename"; relative: string }
 	| HostToolCallPush
 	| HostToolCancelPush
 	| HostToolsChangedPush
