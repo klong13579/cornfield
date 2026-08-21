@@ -107,6 +107,8 @@ function setupIpc(): void {
 		}
 		return { ok: true, workspaceDir: next };
 	});
+	// 壳版本（electron-updater 对比新版本用；渲染层设置页展示）。
+	ipcMain.handle("app:get-version", () => app.getVersion());
 }
 
 async function restartSidecar(next: string): Promise<void> {

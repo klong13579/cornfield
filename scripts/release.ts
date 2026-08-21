@@ -215,11 +215,15 @@ async function cmdRelease(version: string): Promise<void> {
 	console.log(`Updating package versions to ${version}…`);
 	const pkgJsonPaths = await Array.fromAsync(packageJsonGlob.scan("."));
 
-	// Filter out private packages
+	// private 但版本必须随主版本联动的包（不打 npm，但桌面壳的 electron-updater 靠
+	// package.json version 判断新版本 —— 0.0.0 永不比旧版本高，更新链路会永久判为已最新）。
+	const versionLinkedPrivate = new Set(["@oh-my-pi/desktop"]);
+
+	// Filter out private packages（版本联动白名单除外）
 	const publicPkgPaths: string[] = [];
 	for (const pkgPath of pkgJsonPaths) {
 		const pkgJson = await Bun.file(pkgPath).json();
-		if (pkgJson.private) {
+		if (pkgJson.private && !versionLinkedPrivate.has(pkgJson.name)) {
 			console.log(`  Skipping ${pkgJson.name} (private)`);
 			continue;
 		}

@@ -6,18 +6,17 @@ import { useSessionStore } from "../../state/session-store";
 import { getUiStore, useUiState } from "../../state/ui-store";
 import { useSession } from "../../state/use-session";
 
-/**
- * Electron 壳 preload bridge（T1 desktop 壳暴露的最小面：window.api.sidecar.setWorkspaceDir）。
- * 网页直开（无 window.api）时工作目录降级存 localStorage，不 crash。
- * 契约与 packages/desktop/src/preload.ts 保持一致；字段均防御式存在性判断。
- */
+/** Electron 壳 preload bridge（T1 desktop 壳暴露的最小面：window.api.sidecar.setWorkspaceDir + app.getVersion）。
+ * 网页直开（无 window.api）时工作目录降级存 localStorage，版本显示「—」，不 crash。
+ * 契约与 packages/desktop/src/preload.ts 保持一致；字段均防御式存在性判断。 */
 interface SidecarBridge {
 	setWorkspaceDir: (dir: string) => Promise<unknown> | unknown;
 }
 
-/** Desktop 壳暴露到 window.api 的全部面（当前仅 sidecar）。 */
+/** Desktop 壳暴露到 window.api 的全部面（当前仅 sidecar + app 版本）。 */
 interface DesktopBridgeApi {
 	sidecar?: SidecarBridge;
+	app?: { getVersion: () => Promise<string> | string };
 }
 
 /**
@@ -39,6 +38,8 @@ export function SettingsView(): React.JSX.Element {
 	});
 	const [workspaceSaved, setWorkspaceSaved] = useState(false);
 	const [workspaceError, setWorkspaceError] = useState<string | null>(null);
+	/** 桌面壳版本（Electron app.getVersion；网页直开无 window.api 时为 null）。 */
+	const [desktopVersion, setDesktopVersion] = useState<string | null>(null);
 	const [notifyPrefs, setNotifyPrefs] = useState<NotifyPrefs>(loadNotifyPrefs);
 	const [notifyPermDenied, setNotifyPermDenied] = useState(
 		typeof Notification !== "undefined" && Notification.permission === "denied",
@@ -89,6 +90,15 @@ export function SettingsView(): React.JSX.Element {
 	const [appKey, setAppKey] = useState("");
 	const [appSecret, setAppSecret] = useState("");
 
+	// 桌面壳版本：Electron 环境经 window.api.app.getVersion() 读；网页直开无 api → 保持 null（显示「—」）。
+	useEffect(() => {
+		const api = (window as typeof window & { api?: DesktopBridgeApi }).api;
+		if (!api?.app?.getVersion) return;
+		Promise.resolve(api.app.getVersion())
+			.then(v => setDesktopVersion(String(v)))
+			.catch(() => setDesktopVersion(null));
+	}, []);
+
 	return (
 		<div className="px-10 pt-8 pb-12">
 			<div className="mx-auto max-w-[720px]">
@@ -108,6 +118,9 @@ export function SettingsView(): React.JSX.Element {
 						</Row>
 						<Row k="协议版本">
 							<span className="font-mono text-[11px] text-ink">v{view.protocolVersion}</span>
+						</Row>
+						<Row k="桌面壳版本">
+							<span className="font-mono text-[11px] text-ink">{desktopVersion ?? "—"}</span>
 						</Row>
 					</div>
 

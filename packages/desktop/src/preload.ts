@@ -11,6 +11,9 @@ const api = {
 			ipcRenderer.invoke("sidecar:set-workspace-dir", dir),
 		getWorkspaceDir: (): Promise<string> => ipcRenderer.invoke("sidecar:get-workspace-dir"),
 	},
+	app: {
+		getVersion: (): Promise<string> => ipcRenderer.invoke("app:get-version"),
+	},
 } as const;
 
 contextBridge.exposeInMainWorld("api", api);
