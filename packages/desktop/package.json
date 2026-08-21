@@ -9,6 +9,7 @@
 		"dev": "bun run build && electron .",
 		"build": "esbuild src/main.ts src/sidecar.ts --outdir=dist --platform=node --target=node22 --format=esm && esbuild src/preload.ts --outdir=dist --platform=node --target=node22 --format=cjs --out-extension:.js=.cjs",
 		"dist": "bun run build && electron-builder",
+		"build:desktop": "bun scripts/build.ts",
 		"check": "biome check . && bun run check:types",
 		"check:types": "tsgo -p tsconfig.json --noEmit",
 		"lint": "biome lint .",
@@ -22,7 +23,7 @@
 		"@biomejs/biome": "catalog:",
 		"@types/node": "^24.9.0",
 		"@typescript/native-preview": "catalog:",
-		"electron": "^43.4.1",
+		"electron": "43.4.1",
 		"electron-builder": "^26.15.3",
 		"esbuild": "^0.25.12",
 		"typescript": "catalog:"
