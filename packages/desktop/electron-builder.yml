@@ -1,0 +1,17 @@
+# OMP Desktop —— electron-builder 打包配置。
+# 打包前需先构建 omp 二进制：bun --cwd=packages/coding-agent run build（产物 dist/omp）。
+appId: com.narwal.omp-desktop
+productName: OMP Desktop
+directories:
+  output: dist
+files:
+  - src/**
+extraResources:
+  # 内嵌 omp 二进制（对应 sidecar.ts resolveOmpBinary 的 packaged 路径 omp-binary/omp）。
+  - from: ../coding-agent/dist/omp
+    to: omp-binary/omp
+mac:
+  target:
+    - dmg
+    - zip
+  category: public.app-category.developer-tools
