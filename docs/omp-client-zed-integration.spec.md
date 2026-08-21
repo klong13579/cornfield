@@ -67,3 +67,77 @@ OMP 的 webapp（数字员工控制台 + agent 工作台）需要一个**程序�
 - P1：OMP.app 单图标启动 = 完整 Zed 编辑器可用（embedded 稳定 + sidecar 拉起 + 更新链通）
 - P2：顶部 Agent/IDE 切换 + webapp 面板 + ACP agent 对话走通
 - P3：fork 深挂点（⌘K inline / 审批卡 / 数字员工侧栏）上线
+
+---
+
+## ACP 注册（T4）— OMP Agent 作为 Zed External Agent
+
+> 状态：注册挂点已源码实证定位，协议契约已固化；**配置注册零 Zed 代码，provider 注册改动点在 T4 scope 外**，标注待集成验证。gate kind=unknown（无 verifier），mergePolicy=human-review。
+
+### 结论（一句话）
+
+OMP 作为 Zed external agent 走 **ACP 自定义 agent（custom agent）** 路径：纯 `settings.json` 的 `agent_servers` 配置驱动，Zed 侧无需改代码；Zed spawn `omp acp` 子进程，经 stdin/stdout 用 JSON-RPC 2.0 讲 ACP v1。
+
+### ACP 协议契约（供 T3 server 侧实现）
+
+| 项 | 值 |
+|---|---|
+| 协议 | Agent Client Protocol (ACP)，spec 见 https://agentclientprotocol.com |
+| 传输 | JSON-RPC 2.0，newline-delimited 消息，走子进程 **stdin/stdout**；stderr 为日志（Zed 收进 `AcpDebugMessageDirection::Stderr`） |
+| 协议库 | Zed workspace 依赖 `agent-client-protocol = { version = "=2.0.0", features = ["unstable"] }`（`third_party/zed/Cargo.toml:518`） |
+| schema | `agent_client_protocol::schema::v1`，握手协商 `ProtocolVersion` |
+| 角色 | Zed = ACP **client**（`agent_servers::AcpConnection` 持 `ConnectionTo<Agent>`）；OMP = ACP **agent/server** |
+
+**关键澄清**：Zed 的 external agent 连接**没有 TCP 端口**——是 spawn 子进程 + stdio JSON-RPC。`omp serve :7891`（T3）是 worker sidecar 的 HTTP 端口（webapp pi-wire + `GET /health`），与 ACP 传输无关。OMP 需要**新增一个 stdio 入口** `omp acp`（或 `omp serve --acp`），不要把它和 HTTP serve 混成一个。
+
+### Zed 侧注册配置（`settings.json`）
+
+```json
+{
+  "agent_servers": {
+    "omp": {
+      "type": "custom",
+      "command": "omp",
+      "args": ["acp"],
+      "env": {}
+    }
+  }
+}
+```
+
+schema：`settings_content::CustomAgentServerSettings`（`#[serde(tag = "type", rename_all = "snake_case")]`，`crates/settings_content/src/agent.rs:736-797`）。`Custom` 变体字段：`command`（重命名自 `path`）、`args: Vec<String>`、`env`，可选 `default_mode`/`default_config_options`/`favorite_config_option_values`。`Registry` 变体（`type: "registry"`，alias `"extension"`）走 ACP Registry。
+
+### 注册挂点（源码锚点，已逐一核实）
+
+配置驱动，无 per-agent 代码。数据流：
+
+1. `settings.json` `agent_servers` → `settings_content::CustomAgentServerSettings`
+2. `project::AgentServerStore::reregister_agents`（`crates/project/src/agent_server_store.rs:294`）：`Custom { command, .. }` → `LocalCustomAgent`
+3. `agent_servers::CustomAgentServer::connect`（`crates/agent_servers/src/custom.rs:193`）：spawn `command` + `acp::connect`（`crates/agent_servers/src/acp.rs`）→ stdio JSON-RPC
+
+`crates/zed/src`（T4 在 scope 内）的入口仅是 ACP 基础设施初始化，非 per-agent：
+
+- `crates/zed/src/main.rs:706` — `acp_tools::init(cx)`（ACP 调试工具栏）
+- `crates/zed/src/main.rs:715-719` — `project::AgentRegistryStore::init_global(...)`（ACP Registry）
+- `crates/zed/src/main.rs:720-727` — `agent_ui::init(...)`（Agent 面板）
+- `crates/zed/src/zed.rs:2461-2468` — `AI_ACTION_NAMESPACES` 含 `"acp::"`
+
+### Provider 注册改动点（T4 scope 外，待集成）
+
+若 OMP 要 first-class provider 待遇（类比 Claude/Codex/Gemini/Cursor 的 env 注入），改动点在 `crates/agent_servers/src/custom.rs`（**不在 T4 scope**，T4 scope 只含 `crates/zed/src/**`）：
+
+- `custom.rs:17-20` 已有 `GEMINI_ID`/`CLAUDE_AGENT_ID`/`CODEX_ID`/`CURSOR_ID` 常量 → 加 `pub const OMP_ID: &str = "omp";`
+- `custom.rs:229-247` `connect` 里 `match agent_id.as_ref() { OMP_ID => { /* env 注入 */ } }`
+
+这一层**不是必需**——custom agent 路径已经能用，只是没有 provider 专属 env 注入。标记为 follow-up。
+
+### T3 server 侧待实现（ACP 端）
+
+- OMP 二进制新增 `omp acp` 子命令：读 stdin 的 ACP v1 JSON-RPC，写 stdout，stderr 打日志。
+- 与 `omp serve :7891`（HTTP sidecar，`GET /health` → ok）分离。
+- 最低握手：`initialize`（协商 `ProtocolVersion`）+ `session/new` + `session/prompt` + `session/update`；工具调用走 `session/update` 的 tool call。完整 schema 以 `agent-client-protocol` v2.0.0 为准。
+
+### 验证状态
+
+- **编译验证未跑**：zed workspace 全量 `cargo check` 需 Xcode/CLT + `runtime_shaders` 特性绕开 xcrun metal，成本高；且本任务注册路径是纯配置 + 文档，无 Rust 代码改动。按 acceptance「编译验证成本过高时明确标注待集成验证」，此处标注：**待集成验证**（gate unknown / human-review）。
+- 已核实（源码实证，非推断）：协议库版本、传输方式、settings schema、注册数据流、`crates/zed/src` 入口锚点。
