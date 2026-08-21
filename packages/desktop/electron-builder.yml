@@ -1,15 +1,22 @@
 # OMP Desktop —— electron-builder 打包配置。
-# 打包前需先构建 omp 二进制：bun --cwd=packages/coding-agent run build（产物 dist/omp）。
+# 一键打包入口：bun run build:desktop（先构建 web-app 与 omp，再 electron-builder 出 dmg/zip）。
 appId: com.narwal.omp-desktop
 productName: OMP Desktop
 directories:
   output: dist
 files:
-  - src/**
+  # 只打包编译后的壳 JS（esbuild 产物）。electron-builder 输出目录也在 dist/ 下，
+  # 用显式文件列表而非 dist/** 以避免二次构建时把上一次的 app/dmg 递归收进 asar。
+  - dist/main.js
+  - dist/sidecar.js
+  - dist/preload.cjs
 extraResources:
   # 内嵌 omp 二进制（对应 sidecar.ts resolveOmpBinary 的 packaged 路径 omp-binary/omp）。
   - from: ../coding-agent/dist/omp
     to: omp-binary/omp
+  # 内嵌 web-app 生产构建（对应 main.ts 生产模式 loadFile(resources/renderer/index.html)）。
+  - from: ../web-app/dist
+    to: renderer
 mac:
   target:
     - dmg
