@@ -660,6 +660,39 @@ fn main() {
         });
         AppState::set_global(app_state.clone(), cx);
 
+        // ZOMP shell 模式（`ZOMP_SHELL=1`）：单窗口 [Agent | IDE]，IDE = 真实 workspace。
+        // 壳（宿主 NSWindow + 顶部切换条 + Agent WKWebView）由 zomp_shell 库提供，
+        // workspace 内嵌通过 build_window_options 注入的 embedded_in 挂到壳 contentArea。
+        if zomp_shell::shell_mode_enabled() {
+            let shell_async_app = cx.to_async();
+            zomp_shell::init_shell(shell_async_app.clone());
+            zomp_shell::set_switch_handler({
+                let app_state = app_state.clone();
+                Box::new(move |mode| match mode {
+                    zomp_shell::Mode::Ide => {
+                        // 切 IDE：打开 workspace（embedded_in 由 build_window_options 注入）
+                        let app_state = app_state.clone();
+                        shell_async_app
+                            .spawn(async move |cx| {
+                                if let Err(e) = restore_or_create_workspace(app_state, cx).await {
+                                    fail_to_open_window_async(e, cx)
+                                }
+                            })
+                            .detach();
+                    }
+                    zomp_shell::Mode::Agent => {
+                        // 切 Agent：关闭所有 gpui workspace 窗口，回到 WKWebView。
+                        let _ = shell_async_app.update(|cx| {
+                            let windows = cx.windows();
+                            for window in windows {
+                                let _ = window.update(cx, |_, window, _| window.remove_window());
+                            }
+                        });
+                    }
+                })
+            });
+        }
+
         auto_update::init(client.clone(), cx);
         dap_adapters::init(cx);
         auto_update_ui::init(cx);
@@ -1426,6 +1459,12 @@ pub(crate) async fn restore_or_create_workspace(
     app_state: Arc<AppState>,
     cx: &mut AsyncApp,
 ) -> Result<()> {
+    // ZOMP shell 模式：Agent 模式下不自动打开 workspace（等用户切 IDE 才打开）。
+    // 切 IDE 时 build_window_options 已通过 zomp_shell::ide_mode_active() 注入 embedded_in。
+    if zomp_shell::shell_mode_enabled() && !zomp_shell::ide_mode_active() {
+        return Ok(());
+    }
+
     let kvp = cx.update(|cx| KeyValueStore::global(cx));
     if let Some(multi_workspaces) = restorable_workspaces(cx, &app_state).await {
         let mut error_count = 0;

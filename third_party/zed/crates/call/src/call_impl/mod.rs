@@ -1,5 +1,8 @@
+#[cfg(feature = "livekit")]
 pub mod diagnostics;
+#[cfg(feature = "livekit")]
 pub mod participant;
+#[cfg(feature = "livekit")]
 pub mod room;
 
 use anyhow::{Context as _, Result, anyhow};
@@ -13,6 +16,7 @@ use gpui::{
 };
 use postage::watch;
 use project::Project;
+#[cfg(feature = "livekit")]
 use room::Event;
 use settings::Settings;
 use std::sync::Arc;
@@ -21,7 +25,9 @@ use workspace::{
     RemoteCollaborator, SharedScreen, Workspace,
 };
 
+#[cfg(feature = "livekit")]
 pub use livekit_client::{RemoteVideoTrack, RemoteVideoTrackView, RemoteVideoTrackViewEvent};
+#[cfg(feature = "livekit")]
 pub use room::Room;
 
 use crate::call_settings::CallSettings;
@@ -43,6 +49,7 @@ pub fn init(client: Arc<Client>, user_store: Entity<UserStore>, cx: &mut App) {
                     workspace.update_active_view_for_followers(window, cx)
                 });
 
+                #[cfg(feature = "livekit")]
                 if window.is_window_active() {
                     let project = workspace.read(cx).project().clone();
                     if let Ok(task) = active_call_handle.update(cx, |active_call, cx| {
@@ -70,11 +77,14 @@ pub fn init(client: Arc<Client>, user_store: Entity<UserStore>, cx: &mut App) {
                     return;
                 }
 
-                let project = multi_workspace.workspace().read(cx).project().clone();
-                if let Ok(task) = active_call_handle.update(cx, |active_call, cx| {
-                    active_call.set_location(Some(&project), cx)
-                }) {
-                    task.detach_and_log_err(cx);
+                #[cfg(feature = "livekit")]
+                {
+                    let project = multi_workspace.workspace().read(cx).project().clone();
+                    if let Ok(task) = active_call_handle.update(cx, |active_call, cx| {
+                        active_call.set_location(Some(&project), cx)
+                    }) {
+                        task.detach_and_log_err(cx);
+                    }
                 }
             }
         })
@@ -88,6 +98,7 @@ pub fn init(client: Arc<Client>, user_store: Entity<UserStore>, cx: &mut App) {
 #[derive(Clone)]
 struct ActiveCallEntity(Entity<ActiveCall>);
 
+#[cfg(feature = "livekit")]
 impl AnyActiveCall for ActiveCallEntity {
     fn entity(&self) -> gpui::AnyEntity {
         self.0.clone().into_any()
@@ -349,6 +360,118 @@ impl AnyActiveCall for ActiveCallEntity {
     }
 }
 
+#[cfg(not(feature = "livekit"))]
+impl AnyActiveCall for ActiveCallEntity {
+    fn entity(&self) -> gpui::AnyEntity {
+        self.0.clone().into_any()
+    }
+
+    fn is_in_room(&self, _: &App) -> bool {
+        false
+    }
+
+    fn room_id(&self, _: &App) -> Option<u64> {
+        None
+    }
+
+    fn channel_id(&self, _: &App) -> Option<ChannelId> {
+        None
+    }
+
+    fn hang_up(&self, _: &mut App) -> Task<Result<()>> {
+        Task::ready(Ok(()))
+    }
+
+    fn unshare_project(&self, _: Entity<Project>, _: &mut App) -> Result<()> {
+        Ok(())
+    }
+
+    fn remote_participant_for_peer_id(
+        &self,
+        _: proto::PeerId,
+        _: &App,
+    ) -> Option<workspace::RemoteCollaborator> {
+        None
+    }
+
+    fn is_sharing_project(&self, _: &App) -> bool {
+        false
+    }
+
+    fn is_sharing_screen(&self, _: &App) -> bool {
+        false
+    }
+
+    fn has_remote_participants(&self, _: &App) -> bool {
+        false
+    }
+
+    fn local_participant_is_guest(&self, _: &App) -> bool {
+        false
+    }
+
+    fn client(&self, cx: &App) -> Arc<Client> {
+        self.0.read(cx).client()
+    }
+
+    fn share_on_join(&self, cx: &App) -> bool {
+        CallSettings::get_global(cx).share_on_join
+    }
+
+    fn join_channel(&self, _: ChannelId, _: &mut App) -> Task<Result<bool>> {
+        Task::ready(Ok(false))
+    }
+
+    fn room_update_completed(&self, _: &mut App) -> Task<()> {
+        Task::ready(())
+    }
+
+    fn most_active_project(&self, _: &App) -> Option<(u64, u64)> {
+        None
+    }
+
+    fn share_project(&self, _: Entity<Project>, _: &mut App) -> Task<Result<u64>> {
+        Task::ready(Err(anyhow!("livekit disabled")))
+    }
+
+    fn join_project(
+        &self,
+        _: u64,
+        _: Arc<language::LanguageRegistry>,
+        _: Arc<dyn fs::Fs>,
+        _: &mut App,
+    ) -> Task<Result<Entity<Project>>> {
+        Task::ready(Err(anyhow!("livekit disabled")))
+    }
+
+    fn peer_id_for_user_in_room(&self, _: u64, _: &App) -> Option<proto::PeerId> {
+        None
+    }
+
+    fn subscribe(
+        &self,
+        _: &mut Window,
+        _: &mut Context<Workspace>,
+        _: Box<dyn Fn(&mut Workspace, &ActiveCallEvent, &mut Window, &mut Context<Workspace>)>,
+    ) -> Subscription {
+        Subscription::new(|| {})
+    }
+
+    fn create_shared_screen(
+        &self,
+        _: proto::PeerId,
+        _: &Entity<Pane>,
+        _: &mut Window,
+        _: &mut App,
+    ) -> Option<Entity<workspace::SharedScreen>> {
+        None
+    }
+
+    fn peer_ids_with_video_tracks(&self, _: &App) -> Vec<proto::PeerId> {
+        Vec::new()
+    }
+}
+
 pub struct OneAtATime {
     cancel: Option<oneshot::Sender<()>>,
 }
@@ -390,8 +513,11 @@ pub struct IncomingCall {
 
 /// Singleton global maintaining the user's participation in a room across workspaces.
 pub struct ActiveCall {
+    #[cfg(feature = "livekit")]
     room: Option<(Entity<Room>, Vec<Subscription>)>,
+    #[cfg(feature = "livekit")]
     last_call_diagnostics: Option<Entity<diagnostics::CallDiagnostics>>,
+    #[cfg(feature = "livekit")]
     pending_room_creation: Option<Shared<Task<Result<Entity<Room>, Arc<anyhow::Error>>>>>,
     location: Option<WeakEntity<Project>>,
     _join_debouncer: OneAtATime,
@@ -405,13 +531,17 @@ pub struct ActiveCall {
     _subscriptions: Vec<client::Subscription>,
 }
 
+#[cfg(feature = "livekit")]
 impl EventEmitter<Event> for ActiveCall {}
 
 impl ActiveCall {
     fn new(client: Arc<Client>, user_store: Entity<UserStore>, cx: &mut Context<Self>) -> Self {
         Self {
+            #[cfg(feature = "livekit")]
             room: None,
+            #[cfg(feature = "livekit")]
             last_call_diagnostics: None,
+            #[cfg(feature = "livekit")]
             pending_room_creation: None,
             location: None,
             pending_invites: Default::default(),
@@ -426,6 +556,7 @@ impl ActiveCall {
         }
     }
 
+#[cfg(feature = "livekit")]
     pub fn channel_id(&self, cx: &App) -> Option<ChannelId> {
         self.room()?.read(cx).channel_id()
     }
@@ -483,6 +614,7 @@ impl ActiveCall {
         any.0.entity().downcast::<Self>().ok()
     }
 
+#[cfg(feature = "livekit")]
     pub fn invite(
         &mut self,
         called_user_id: u64,
@@ -579,6 +711,7 @@ impl ActiveCall {
         })
     }
 
+#[cfg(feature = "livekit")]
     pub fn cancel_invite(
         &mut self,
         called_user_id: u64,
@@ -606,6 +739,7 @@ impl ActiveCall {
         self.incoming_call.1.clone()
     }
 
+#[cfg(feature = "livekit")]
     pub fn accept_incoming(&mut self, cx: &mut Context<Self>) -> Task<Result<()>> {
         if self.room.is_some() {
             return Task::ready(Err(anyhow!("cannot join while on another call")));
@@ -653,6 +787,7 @@ impl ActiveCall {
         Ok(())
     }
 
+#[cfg(feature = "livekit")]
     pub fn join_channel(
         &mut self,
         channel_id: ChannelId,
@@ -685,6 +820,7 @@ impl ActiveCall {
         })
     }
 
+#[cfg(feature = "livekit")]
     pub fn hang_up(&mut self, cx: &mut Context<Self>) -> Task<Result<()>> {
         cx.notify();
         self.report_call_event("Call Ended", cx);
@@ -701,6 +837,7 @@ impl ActiveCall {
         }
     }
 
+#[cfg(feature = "livekit")]
     pub fn share_project(
         &mut self,
         project: Entity<Project>,
@@ -714,6 +851,7 @@ impl ActiveCall {
         }
     }
 
+#[cfg(feature = "livekit")]
     pub fn unshare_project(
         &mut self,
         project: Entity<Project>,
@@ -728,6 +866,7 @@ impl ActiveCall {
         self.location.as_ref()
     }
 
+#[cfg(feature = "livekit")]
     pub fn set_location(
         &mut self,
         project: Option<&Entity<Project>>,
@@ -742,6 +881,7 @@ impl ActiveCall {
         Task::ready(Ok(()))
     }
 
+#[cfg(feature = "livekit")]
     fn set_room(&mut self, room: Option<Entity<Room>>, cx: &mut Context<Self>) -> Task<Result<()>> {
         if room.as_ref() == self.room.as_ref().map(|room| &room.0) {
             Task::ready(Ok(()))
@@ -779,10 +919,12 @@ impl ActiveCall {
         }
     }
 
+#[cfg(feature = "livekit")]
     pub fn room(&self) -> Option<&Entity<Room>> {
         self.room.as_ref().map(|(room, _)| room)
     }
 
+#[cfg(feature = "livekit")]
     pub fn call_diagnostics(&self, cx: &App) -> Option<Entity<diagnostics::CallDiagnostics>> {
         self.room()
             .and_then(|room| room.read(cx).diagnostics())
@@ -790,6 +932,7 @@ impl ActiveCall {
             .or_else(|| self.last_call_diagnostics.clone())
     }
 
+#[cfg(feature = "livekit")]
     fn retain_room_diagnostics(&mut self, cx: &App) {
         if let Some(diagnostics) = self
             .room()
@@ -808,6 +951,7 @@ impl ActiveCall {
         &self.pending_invites
     }
 
+#[cfg(feature = "livekit")]
     pub fn report_call_event(&self, operation: &'static str, cx: &mut App) {
         if let Some(room) = self.room() {
             let room = room.read(cx);

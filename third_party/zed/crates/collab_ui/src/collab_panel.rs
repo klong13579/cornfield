@@ -122,6 +122,7 @@ pub fn init(cx: &mut App) {
                 workspace.close_panel::<CollabPanel>(window, cx);
             }
         });
+        #[cfg(feature = "livekit")]
         workspace.register_action(|_, _: &OpenChannelNotes, window, cx| {
             let channel_id = ActiveCall::global(cx)
                 .read(cx)
@@ -145,11 +146,15 @@ pub fn init(cx: &mut App) {
         });
         // TODO: make it possible to bind this one to a held key for push to talk?
         // how to make "toggle_on_modifiers_press" contextual?
+        #[cfg(feature = "livekit")]
         workspace.register_action(|_, _: &Mute, _, cx| title_bar::collab::toggle_mute(cx));
+        #[cfg(feature = "livekit")]
         workspace.register_action(|_, _: &Deafen, _, cx| title_bar::collab::toggle_deafen(cx));
+        #[cfg(feature = "livekit")]
         workspace.register_action(|_, _: &LeaveCall, window, cx| {
             CollabPanel::leave_call(window, cx);
         });
+        #[cfg(feature = "livekit")]
         workspace.register_action(|workspace, _: &CopyRoomId, window, cx| {
             use workspace::notifications::{NotificationId, NotifyTaskExt as _};
 
@@ -177,6 +182,7 @@ pub fn init(cx: &mut App) {
                 workspace.show_error("There’s no active call; join one first.", cx);
             }
         });
+        #[cfg(feature = "livekit")]
         workspace.register_action(|workspace, _: &ShareProject, window, cx| {
             let project = workspace.project().clone();
             println!("{project:?}");
@@ -194,6 +200,7 @@ pub fn init(cx: &mut App) {
             });
         });
         // TODO(jk): Is this action ever triggered?
+        #[cfg(feature = "livekit")]
         workspace.register_action(|_, _: &ScreenShare, window, cx| {
             let room = ActiveCall::global(cx).read(cx).room().cloned();
             if let Some(room) = room {
@@ -611,6 +618,7 @@ impl CollabPanel {
         let old_entries = mem::take(&mut self.entries);
         let mut scroll_to_top = false;
 
+        #[cfg(feature = "livekit")]
         if let Some(room) = ActiveCall::global(cx).read(cx).room() {
             self.entries.push(ListEntry::Header(Section::ActiveCall));
             if !old_entries
@@ -1094,6 +1102,16 @@ impl CollabPanel {
                 }
             });
         }
+        #[cfg(not(feature = "livekit"))]
+        {
+            self.selection = self.selection.and_then(|prev_selection| {
+                if self.entries.is_empty() {
+                    None
+                } else {
+                    Some(prev_selection.min(self.entries.len() - 1))
+                }
+            });
+        }
 
         if scroll_to_top {
             let state = self.scroll_handle.0.borrow();
@@ -1189,18 +1207,15 @@ impl CollabPanel {
             == Some(user_id);
         let tooltip = format!("Follow {}", user.username);
 
+        #[cfg(feature = "livekit")]
         let is_call_admin = ActiveCall::global(cx).read(cx).room().is_some_and(|room| {
             room.read(cx).local_participant().role == proto::ChannelRole::Admin
         });
+        #[cfg(not(feature = "livekit"))]
+        let is_call_admin = false;
 
-        let end_slot = if is_pending {
+        let mut end_slot = if is_pending {
             Label::new("Calling").color(Color::Muted).into_any_element()
-        } else if is_current_user {
-            IconButton::new("leave-call", IconName::Exit)
-                .icon_size(IconSize::Small)
-                .tooltip(Tooltip::text("Leave Call"))
-                .on_click(move |_, window, cx| Self::leave_call(window, cx))
-                .into_any_element()
         } else if role == proto::ChannelRole::Guest {
             Label::new("Guest").color(Color::Muted).into_any_element()
         } else if role == proto::ChannelRole::Talker {
@@ -1210,6 +1225,15 @@ impl CollabPanel {
         } else {
             Empty.into_any_element()
         };
+
+        #[cfg(feature = "livekit")]
+        if !is_pending && is_current_user {
+            end_slot = IconButton::new("leave-call", IconName::Exit)
+                .icon_size(IconSize::Small)
+                .tooltip(Tooltip::text("Leave Call"))
+                .on_click(move |_, window, cx| Self::leave_call(window, cx))
+                .into_any_element();
+        }
 
         ListItem::new(user.username.clone())
             .start_slot(Avatar::new(user.avatar_uri.clone()))
@@ -1412,6 +1436,7 @@ impl CollabPanel {
         }
 
         let context_menu = ContextMenu::build(window, cx, |mut context_menu, window, _| {
+            #[cfg(feature = "livekit")]
             if role == proto::ChannelRole::Guest {
                 context_menu = context_menu.entry(
                     "Grant Mic Access",
@@ -1439,6 +1464,7 @@ impl CollabPanel {
                     }),
                 );
             }
+            #[cfg(feature = "livekit")]
             if role == proto::ChannelRole::Guest || role == proto::ChannelRole::Talker {
                 context_menu = context_menu.entry(
                     "Grant Write Access",
@@ -1466,6 +1492,7 @@ impl CollabPanel {
                     }),
                 );
             }
+            #[cfg(feature = "livekit")]
             if role == proto::ChannelRole::Member || role == proto::ChannelRole::Talker {
                 let label = if role == proto::ChannelRole::Talker {
                     "Mute"
@@ -1718,7 +1745,10 @@ impl CollabPanel {
             via_ellipsis_button,
         });
         let this = cx.entity();
+        #[cfg(feature = "livekit")]
         let in_room = ActiveCall::global(cx).read(cx).room().is_some();
+        #[cfg(not(feature = "livekit"))]
+        let in_room = false;
 
         let context_menu = ContextMenu::build(window, cx, |mut context_menu, _, _| {
             let user_id = contact.user.legacy_id;
@@ -1729,14 +1759,17 @@ impl CollabPanel {
                 } else {
                     format!("Call {}", contact.user.username)
                 };
-                context_menu = context_menu.entry(label, None, {
-                    let this = this.clone();
-                    move |window, cx| {
-                        this.update(cx, |this, cx| {
-                            this.call(user_id, window, cx);
-                        });
-                    }
-                });
+                #[cfg(feature = "livekit")]
+                {
+                    context_menu = context_menu.entry(label, None, {
+                        let this = this.clone();
+                        move |window, cx| {
+                            this.update(cx, |this, cx| {
+                                this.call(user_id, window, cx);
+                            });
+                        }
+                    });
+                }
             }
 
             context_menu.entry("Remove Contact", None, {
@@ -1836,7 +1869,10 @@ impl CollabPanel {
         {
             match entry {
                 ListEntry::Header(section) => match section {
+                    #[cfg(feature = "livekit")]
                     Section::ActiveCall => Self::leave_call(window, cx),
+                    #[cfg(not(feature = "livekit"))]
+                    Section::ActiveCall => {},
                     Section::Channels => self.new_root_channel(window, cx),
                     Section::Contacts => self.toggle_contact_finder(window, cx),
                     Section::FavoriteChannels
@@ -1849,6 +1885,7 @@ impl CollabPanel {
                 },
                 ListEntry::Contact { contact, calling } => {
                     if contact.online && !contact.busy && !calling {
+                    #[cfg(feature = "livekit")]
                         self.call(contact.user.legacy_id, window, cx);
                     }
                 }
@@ -1879,6 +1916,7 @@ impl CollabPanel {
                     }
                 }
                 ListEntry::Channel { channel, .. } => {
+                    #[cfg(feature = "livekit")]
                     let is_active = maybe!({
                         let call_channel = ActiveCall::global(cx)
                             .read(cx)
@@ -1889,6 +1927,8 @@ impl CollabPanel {
                         Some(call_channel == channel.id)
                     })
                     .unwrap_or(false);
+                    #[cfg(not(feature = "livekit"))]
+                    let is_active = false;
                     if is_active {
                         self.open_channel_notes(channel.id, window, cx)
                     } else {
@@ -1898,6 +1938,7 @@ impl CollabPanel {
                 ListEntry::ContactPlaceholder => self.toggle_contact_finder(window, cx),
                 ListEntry::CallParticipant { user, peer_id, .. } => {
                     if Some(user) == self.user_store.read(cx).current_user().as_ref() {
+                        #[cfg(feature = "livekit")]
                         Self::leave_call(window, cx);
                     } else if let Some(peer_id) = peer_id {
                         self.workspace
@@ -2122,6 +2163,7 @@ impl CollabPanel {
         );
     }
 
+    #[cfg(feature = "livekit")]
     fn leave_call(window: &mut Window, cx: &mut App) {
         ActiveCall::global(cx)
             .update(cx, |call, cx| call.hang_up(cx))
@@ -2646,6 +2688,7 @@ impl CollabPanel {
             .detach();
     }
 
+    #[cfg(feature = "livekit")]
     fn call(&mut self, recipient_user_id: u64, window: &mut Window, cx: &mut Context<Self>) {
         ActiveCall::global(cx)
             .update(cx, |call, cx| {
@@ -2958,12 +3001,13 @@ impl CollabPanel {
         is_collapsed: bool,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let mut channel_link = None;
-        let mut channel_tooltip_text = None;
-        let mut channel_icon = None;
+        let mut channel_link: Option<String> = None;
+        let mut channel_tooltip_text: Option<&'static str> = None;
+        let mut channel_icon: Option<IconName> = None;
 
         let text = match section {
             Section::ActiveCall => {
+                #[cfg(feature = "livekit")]
                 let channel_name = maybe!({
                     let channel_id = ActiveCall::global(cx).read(cx).channel_id(cx)?;
 
@@ -2981,6 +3025,8 @@ impl CollabPanel {
 
                     Some(channel.name.clone())
                 });
+                #[cfg(not(feature = "livekit"))]
+                let channel_name: Option<SharedString> = None;
 
                 if let Some(name) = channel_name {
                     name
@@ -3223,8 +3269,11 @@ impl CollabPanel {
                     } else if busy {
                         format!(" {username} is on a Call")
                     } else {
-                        let room = ActiveCall::global(cx).read(cx).room();
-                        if room.is_some() {
+                        #[cfg(feature = "livekit")]
+                        let in_call = ActiveCall::global(cx).read(cx).room().is_some();
+                        #[cfg(not(feature = "livekit"))]
+                        let in_call = false;
+                        if in_call {
                             format!("Invite {username} to Join Call")
                         } else {
                             format!("Call {username}")
@@ -3364,6 +3413,7 @@ impl CollabPanel {
     ) -> impl IntoElement {
         let channel_id = channel.id;
 
+        #[cfg(feature = "livekit")]
         let is_active = maybe!({
             let call_channel = ActiveCall::global(cx)
                 .read(cx)
@@ -3373,6 +3423,8 @@ impl CollabPanel {
             Some(call_channel == channel_id)
         })
         .unwrap_or(false);
+        #[cfg(not(feature = "livekit"))]
+        let is_active = false;
         let channel_store = self.channel_store.read(cx);
         let is_public = channel_store
             .channel_for_id(channel_id)

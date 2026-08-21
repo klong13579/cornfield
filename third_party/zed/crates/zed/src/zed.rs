@@ -358,6 +358,17 @@ fn bind_on_window_closed(cx: &mut App) -> Option<gpui::Subscription> {
     }
 }
 
+/// ZOMP shell 模式（`ZOMP_SHELL=1`）下，IDE 模式的 gpui workspace 内嵌进壳宿主窗口 contentArea；
+/// 否则为 `None`（与普通 zed 窗口行为一致，无回归）。
+#[cfg(target_os = "macos")]
+fn zomp_shell_embedded_in() -> Option<*mut std::ffi::c_void> {
+    if zomp_shell::ide_mode_active() {
+        Some(zomp_shell::content_area_ptr())
+    } else {
+        None
+    }
+}
+
 pub fn build_window_options(display_uuid: Option<Uuid>, cx: &mut App) -> WindowOptions {
     let display = display_uuid.and_then(|uuid| {
         cx.displays()
@@ -423,6 +434,9 @@ pub fn build_window_options(display_uuid: Option<Uuid>, cx: &mut App) -> WindowO
         } else {
             None
         },
+        // ZOMP shell 模式：IDE 模式下把 gpui workspace 内嵌到壳 contentArea，普通窗口走默认 None
+        #[cfg(target_os = "macos")]
+        embedded_in: zomp_shell_embedded_in(),
         ..Default::default()
     }
 }
