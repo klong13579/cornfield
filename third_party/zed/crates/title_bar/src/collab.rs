@@ -1,7 +1,9 @@
 use std::rc::Rc;
 use std::sync::Arc;
 
-use call::{ActiveCall, Room};
+use call::ActiveCall;
+#[cfg(feature = "livekit")]
+use call::Room;
 use channel::ChannelStore;
 use client::{User, proto::PeerId};
 use gpui::{
@@ -10,6 +12,7 @@ use gpui::{
 };
 use gpui::{App, Task, Window};
 use icons::IconName;
+#[cfg(feature = "livekit")]
 use livekit_client::ConnectionQuality;
 use project::WorktreeSettings;
 use remote_connection::RemoteConnectionModal;
@@ -34,6 +37,7 @@ fn format_stat<T>(value: Option<T>, format: impl Fn(T) -> String) -> String {
     }
 }
 
+#[cfg(feature = "livekit")]
 pub fn toggle_screen_sharing(
     screen: anyhow::Result<Option<Rc<dyn ScreenCaptureSource>>>,
     window: &mut Window,
@@ -90,6 +94,7 @@ pub fn toggle_screen_sharing(
     toggle_screen_sharing.detach_and_prompt_err("Sharing Screen Failed", window, cx, |e, _, _| Some(format!("{:?}\n\nPlease check that you have given Zed permissions to record your screen in Settings.", e)));
 }
 
+#[cfg(feature = "livekit")]
 pub fn toggle_mute(cx: &mut App) {
     let call = ActiveCall::global(cx).read(cx);
     if let Some(room) = call.room().cloned() {
@@ -110,6 +115,7 @@ pub fn toggle_mute(cx: &mut App) {
     }
 }
 
+#[cfg(feature = "livekit")]
 pub fn toggle_deafen(cx: &mut App) {
     if let Some(room) = ActiveCall::global(cx).read(cx).room().cloned() {
         room.update(cx, |room, cx| room.toggle_deafen(cx));
@@ -142,6 +148,7 @@ fn render_color_ribbon(color: Hsla) -> impl Element {
 }
 
 impl TitleBar {
+    #[cfg(feature = "livekit")]
     pub(crate) fn render_collaborator_list(
         &self,
         _: &mut Window,
@@ -249,6 +256,7 @@ impl TitleBar {
             )
     }
 
+    #[cfg(feature = "livekit")]
     fn render_collaborator(
         &self,
         user: &Arc<User>,
@@ -333,6 +341,7 @@ impl TitleBar {
         )
     }
 
+    #[cfg(feature = "livekit")]
     pub(crate) fn render_call_controls(
         &self,
         window: &mut Window,
@@ -689,6 +698,7 @@ impl TitleBar {
             .into_any_element()
     }
 
+    #[cfg(feature = "livekit")]
     fn render_screen_list(&self) -> impl IntoElement {
         PopoverMenu::new("screen-share-screen-list")
             .with_handle(self.screen_share_popover_handle.clone())

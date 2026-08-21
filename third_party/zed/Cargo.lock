@@ -23369,6 +23369,7 @@ dependencies = [
  "zed_env_vars",
  "zlog",
  "zlog_settings",
+ "zomp_shell",
  "ztracing",
 ]
 

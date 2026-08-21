@@ -334,6 +334,7 @@ impl Render for TitleBar {
                 .into_any_element(),
         );
 
+        #[cfg(feature = "livekit")]
         children.push(self.render_collaborator_list(window, cx).into_any_element());
 
         if title_bar_settings.show_onboarding_banner {
@@ -363,7 +364,12 @@ impl Render for TitleBar {
                 .pr_1()
                 .gap_1()
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                .child(self.render_call_controls(window, cx))
+                .child({
+                    #[cfg(feature = "livekit")]
+                    { self.render_call_controls(window, cx).into_any_element() }
+                    #[cfg(not(feature = "livekit"))]
+                    { gpui::Empty.into_any_element() }
+                })
                 .children(self.render_connection_status(status, cx))
                 .child(self.update_version.clone())
                 .when(
@@ -465,6 +471,7 @@ impl TitleBar {
             }),
         );
 
+        #[cfg(feature = "livekit")]
         subscriptions.push(cx.observe(&active_call, |this, _, cx| this.active_call_changed(cx)));
         subscriptions.push(
             cx.subscribe(&git_store, move |_, _, event, cx| match event {
@@ -519,6 +526,7 @@ impl TitleBar {
             _diagnostics_subscription: None,
         };
 
+        #[cfg(feature = "livekit")]
         this.observe_diagnostics(cx);
 
         this
@@ -1096,11 +1104,13 @@ impl TitleBar {
         )
     }
 
+    #[cfg(feature = "livekit")]
     fn active_call_changed(&mut self, cx: &mut Context<Self>) {
         self.observe_diagnostics(cx);
         cx.notify();
     }
 
+    #[cfg(feature = "livekit")]
     fn observe_diagnostics(&mut self, cx: &mut Context<Self>) {
         let diagnostics = ActiveCall::global(cx)
             .read(cx)
@@ -1114,6 +1124,7 @@ impl TitleBar {
         }
     }
 
+    #[cfg(feature = "livekit")]
     fn share_project(&mut self, cx: &mut Context<Self>) {
         let active_call = ActiveCall::global(cx);
         let project = self.project.clone();
@@ -1122,6 +1133,7 @@ impl TitleBar {
             .detach_and_log_err(cx);
     }
 
+    #[cfg(feature = "livekit")]
     fn unshare_project(&mut self, _: &mut Window, cx: &mut Context<Self>) {
         let active_call = ActiveCall::global(cx);
         let project = self.project.clone();

@@ -14,6 +14,7 @@ doctest = false
 
 [features]
 default = []
+livekit = ["dep:livekit_client", "call/livekit"]
 
 test-support = [
     "call/test-support",
@@ -45,7 +46,7 @@ db.workspace = true
 git_ui_core.workspace = true
 gpui = { workspace = true, features = ["screen-capture"] }
 icons.workspace = true
-livekit_client.workspace = true
+livekit_client = { workspace = true, optional = true }
 project.workspace = true
 recent_projects.workspace = true
 remote.workspace = true

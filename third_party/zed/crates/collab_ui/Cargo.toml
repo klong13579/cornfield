@@ -14,6 +14,7 @@ doctest = false
 
 [features]
 default = []
+livekit = ["dep:livekit_client", "call/livekit", "title_bar/livekit"]
 test-support = [
     "call/test-support",
     "client/test-support",
@@ -39,7 +40,7 @@ editor.workspace = true
 futures.workspace = true
 fuzzy.workspace = true
 gpui.workspace = true
-livekit_client.workspace = true
+livekit_client = { workspace = true, optional = true }
 menu.workspace = true
 notifications.workspace = true
 picker.workspace = true

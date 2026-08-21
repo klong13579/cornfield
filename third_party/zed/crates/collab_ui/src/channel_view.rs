@@ -73,13 +73,14 @@ impl ChannelView {
         window.spawn(cx, async move |cx| {
             let channel_view = channel_view.await?;
             pane.update_in(cx, |pane, window, cx| {
+                #[cfg(feature = "livekit")]
+                let room_id = ActiveCall::global(cx).read(cx).room().map(|r| r.read(cx).id());
+                #[cfg(not(feature = "livekit"))]
+                let room_id: Option<u64> = None;
                 telemetry::event!(
                     "Channel Notes Opened",
                     channel_id,
-                    room_id = ActiveCall::global(cx)
-                        .read(cx)
-                        .room()
-                        .map(|r| r.read(cx).id())
+                    room_id
                 );
                 pane.add_item(Box::new(channel_view.clone()), true, true, None, window, cx);
             })?;
