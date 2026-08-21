@@ -351,6 +351,9 @@ pub(crate) unsafe fn set_active_window_cursor_style(style: CursorStyle) {
 
         let window_state = get_window_state(&*active_window);
         let mut window_state = window_state.lock();
+        if !window_state.native_view_alive {
+            return;
+        }
         if window_state.cursor_style != style {
             window_state.cursor_style = style;
             let _: () = msg_send![
@@ -592,6 +595,9 @@ struct MacWindowState {
     native_window: id,
     native_view: NonNull<Object>,
     embedded: bool,
+    // 宿主窗口可能先于 gpui 窗口销毁（embedded 场景）：GPUIView dealloc 时置 false，
+    // 阻止后续 start_display_link / 光标更新解引用已释放的 native_view 裸指针。
+    native_view_alive: bool,
     blurred_view: Option<id>,
     background_appearance: WindowBackgroundAppearance,
     cursor_style: CursorStyle,
@@ -759,6 +765,10 @@ impl MacWindowState {
 
     fn start_display_link(&mut self) {
         self.stop_display_link();
+        // 生命周期边界：宿主窗口先销毁时 native_view 已 dealloc，不得再解引用其所在窗口。
+        if !self.native_view_alive {
+            return;
+        }
         unsafe {
             // SPIKE-P0：可见性以 GPUIView 实际所在窗口为准——normal 即 native_window，embedded 即宿主窗口。
             // embedded 用 isVisible：CanJoinAllSpaces 窗口在非活动 space 时 occlusionState 不含 Visible
@@ -1036,6 +1046,7 @@ impl MacWindow {
                 native_window,
                 native_view: NonNull::new_unchecked(native_view),
                 embedded: embedded_in.is_some(),
+                native_view_alive: true,
                 blurred_view: None,
                 background_appearance: WindowBackgroundAppearance::Opaque,
                 cursor_style: CursorStyle::Arrow,
@@ -2297,6 +2308,17 @@ extern "C" fn dealloc_window(this: &Object, _: Sel) {
 
 extern "C" fn dealloc_view(this: &Object, _: Sel) {
     unsafe {
+        // 生命周期边界（embedded）：宿主窗口可能先于 gpui 窗口销毁。GPUIView dealloc 时：
+        // 1) 标记 native_view 失效，阻止后续 start_display_link / 光标更新解引用悬空指针；
+        // 2) take 并释放 frame_source —— 其 Drop 会 cancel dispatch source，保证 vsync 回调
+        //    step 不再在 main queue 触发（否则 step 会解引用已释放的 view）。
+        let window_state = get_window_state(this);
+        {
+            let mut lock = window_state.lock();
+            lock.native_view_alive = false;
+            lock.frame_source.take();
+        }
+        drop(window_state);
         drop_window_state(this);
         let _: () = msg_send![super(this, class!(NSView)), dealloc];
     }
