@@ -22,3 +22,6 @@ mac:
     - dmg
     - zip
   category: public.app-category.developer-tools
+  # adhoc 签名（identity "-"）：本地构建免 Gatekeeper 弹窗（右键打开），不含公证。
+  # 正式对外发布前替换为 Developer ID Application 证书名 + notarize 配置。
+  identity: "-"
