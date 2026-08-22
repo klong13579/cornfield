@@ -252,6 +252,11 @@ impl Shell {
 /// 初始化壳：创建宿主窗口 + 顶部切换条 + 内容区，默认挂载 Agent 模式 WKWebView。
 /// 必须在 `application().run` 回调内调用（gpui 已初始化）。
 pub fn init_shell(async_app: AsyncApp) {
+    // 集成路径（zed main）也会走到这里：controller 类必须在任何按钮构造（make_button
+    // → controller()）之前注册，否则 class!(ZompShellController) 直接 panic。
+    // standalone 路径在 run_standalone 里已注册，重复调用无害（ClassDecl::new 返回 None
+    // 时跳过注册——见 build_controller_class 的 unwrap 仅首次成立）。
+    build_controller_class();
     let shell = Shell::new(async_app);
     // 壳状态移交堆上单例，供按钮回调 / zed build_window_options 访问；进程生命周期内不释放。
     SHELL_PTR.store(Box::into_raw(Box::new(shell)) as usize, Ordering::SeqCst);
@@ -382,7 +387,11 @@ fn make_button(title: &str, action: Sel) -> id {
 /// 注册 `ZompShellController` 类（进程内一次）。action 方法签名与 AppKit 约定一致。
 fn build_controller_class() {
     unsafe {
-        let mut decl = ClassDecl::new("ZompShellController", class!(NSObject)).unwrap();
+        // 幂等：类已注册（standalone + init_shell 双路径都调）时 ClassDecl::new 返回 None，
+        // 直接返回而不是 unwrap panic。
+        let Some(mut decl) = ClassDecl::new("ZompShellController", class!(NSObject)) else {
+            return;
+        };
         decl.add_method(
             sel!(switchToAgent:),
             switch_to_agent as extern "C" fn(&Object, Sel, id),
