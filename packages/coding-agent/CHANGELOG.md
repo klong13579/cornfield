@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **bash 工具执行中 ESC 无法取消（非 aborted 工具不传 signal）** (`src/tools/bash.ts`): `BashTool` 自 e7703ff1fd（RPC auto-background 修复）起带 `nonAbortable = true`，agent-loop 因此对 bash 执行完全不传 AbortSignal —— 模型调用 `sleep 60` 等长命令时，按 ESC（`session.abort()` → `agent.abort()`）无法中断子进程，命令跑满后才显示 Operation aborted。移除该 flag 恢复 signal 传递：ESC 立即杀子进程（`[Command cancelled]` + `Operation aborted`），steer 打断与 RPC abort 命令同样生效。`read`/`write` 保持 nonAbortable（短文件 IO，不可中断合理）。回归验证：本地 mock OpenAI 网关驱动真实 TUI，`sleep 60` 执行中按 ESC 2 秒内取消、无遗留子进程；bash-executor / agent-loop / concurrent-abort / streaming-edit-abort 100 测试通过。
 ## [0.19.0] - 2026-08-21
 
 ### Fixed
