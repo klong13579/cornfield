@@ -14,7 +14,7 @@
 //! - 壳状态是主线程单例（`SHELL_PTR`），AppKit 按钮回调只做「排队」，真正切换
 //!   通过 `AsyncApp::spawn` 延迟到下一轮 foreground tick，避免在 gpui 持锁期间重入。
 
-use std::ffi::c_void;
+use std::ffi::{c_ulong, c_void};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -147,15 +147,24 @@ impl Shell {
         let host_window = create_host_window();
         let content_view: id = unsafe { msg_send![host_window, contentView] };
 
-        // 顶部切换条 + 内容区：都挂在宿主窗口 contentView 之下
+        // 顶部切换条 + 内容区：都挂在宿主窗口 contentView 之下。
+        // autoresizing：top_bar 贴顶（宽度跟随缩放），content_area 填充剩余空间。
         let top_bar = new_view(NSRect::new(
             NSPoint::new(0.0, CONTENT_HEIGHT),
             NSSize::new(WINDOW_WIDTH, TOP_BAR_HEIGHT),
         ));
+        // NSViewWidthSizable(2) | NSViewMinYMargin(8)：宽跟随、顶对齐
+        unsafe {
+            let _: () = msg_send![top_bar, setAutoresizingMask: (2 | 8) as c_ulong];
+        }
         let content_area = new_view(NSRect::new(
             NSPoint::new(0.0, 0.0),
             NSSize::new(WINDOW_WIDTH, CONTENT_HEIGHT),
         ));
+        // NSViewWidthSizable(2) | NSViewHeightSizable(16)：填充
+        unsafe {
+            let _: () = msg_send![content_area, setAutoresizingMask: (2 | 16) as c_ulong];
+        }
 
         unsafe {
             let _: () = msg_send![content_view, addSubview: top_bar];
@@ -180,8 +189,8 @@ impl Shell {
     fn mount(&mut self, target: Mode) {
         match target {
             Mode::Agent => self.mount_agent(),
-            // IDE 视图由外部 switch_handler 挂载，壳不持有其句柄。
-            Mode::Ide => {}
+            // IDE 视图由外部 switch_handler 挂载；壳侧隐藏缓存的 WKWebView。
+            Mode::Ide => self.mount_ide(),
         }
         self.mode = target;
         self.relayout_content();
@@ -202,14 +211,20 @@ impl Shell {
     fn unmount_current(&mut self) {
         match self.mode {
             Mode::Agent => self.unmount_agent(),
-            // IDE 视图由外部持有，壳侧无内部状态需要清理。
-            Mode::Ide => {}
+            Mode::Ide => self.unmount_ide(),
         }
     }
 
     // --- Agent 模式：WKWebView ---
 
     fn mount_agent(&mut self) {
+        if let Some(web_view) = self.web_view {
+            // 已创建过：缓存复用，只恢复显示（避免每次切回重新加载 webapp 的秒级等待）。
+            unsafe {
+                let _: () = msg_send![web_view, setHidden: NO];
+            }
+            return;
+        }
         let web_view = create_web_view(&webapp_url(), WINDOW_WIDTH, CONTENT_HEIGHT);
         unsafe {
             let _: () = msg_send![self.content_area, addSubview: web_view];
@@ -217,28 +232,45 @@ impl Shell {
         self.web_view = Some(web_view);
     }
 
-    fn unmount_agent(&mut self) {
-        if let Some(web_view) = self.web_view.take() {
+    fn mount_ide(&mut self) {
+        // IDE 视图由外部 switch_handler 挂载；若已有缓存的 WKWebView 则隐藏（不销毁），
+        // 避免切回 Agent 时重建。web_view 所有权保留在壳侧。
+        if let Some(web_view) = self.web_view {
             unsafe {
-                let _: () = msg_send![web_view, removeFromSuperview];
-                let _: () = msg_send![web_view, release];
+                let _: () = msg_send![web_view, setHidden: YES];
+            }
+        }
+    }
+
+    fn unmount_agent(&mut self) {
+        // 视图切换改为隐藏/显示（mount_ide/mount_agent），不在事件链中移除视图：
+        // 1) 避免 AppKit 事件路由对已释放视图的悬垂（历史崩溃：objc_msgSend EXC_BAD_ACCESS）
+        // 2) 避免每次切回重新加载 webapp（加载秒级等待）
+    }
+
+    fn unmount_ide(&mut self) {
+        if let Some(web_view) = self.web_view {
+            unsafe {
+                let _: () = msg_send![web_view, setHidden: NO];
             }
         }
     }
 
     /// 切换后强制内容区重新布局：触发 AppKit 布局 pass，并刷新 WKWebView frame
-    /// 使其填满 content_area。
+    /// 使其填满 content_area（跟随窗口当前尺寸，而非硬编码初始值）。
     fn relayout_content(&self) {
         unsafe {
             let _: () = msg_send![self.content_area, setNeedsLayout: YES];
             let _: () = msg_send![self.content_area, layoutSubtreeIfNeeded];
             if self.mode == Mode::Agent {
                 if let Some(web_view) = self.web_view {
+                    let content_frame: NSRect = msg_send![self.content_area, frame];
                     let frame = NSRect::new(
                         NSPoint::new(0.0, 0.0),
-                        NSSize::new(WINDOW_WIDTH, CONTENT_HEIGHT),
+                        NSSize::new(content_frame.size.width, content_frame.size.height),
                     );
                     let _: () = msg_send![web_view, setFrame: frame];
+                    let _: () = msg_send![web_view, setAutoresizingMask: ((2 | 16) as c_ulong)];
                 }
             }
         }
@@ -324,8 +356,8 @@ fn create_host_window() -> id {
         let _: () = msg_send![window, setReleasedWhenClosed: NO];
         // 无 bundle 的 CLI 进程 activation policy 默认不保证 Regular；显式设置
         let _: () = msg_send![app, setActivationPolicy: 0]; // NSApplicationActivationPolicyRegular
-        // 窗口加入所有 space（壳层验证需要：当前 space 可能被全屏 app 占用）
-        let _: () = msg_send![window, setCollectionBehavior: 1 << 1]; // NSWindowCollectionBehaviorCanJoinAllSpaces
+        // 不设 CanJoinAllSpaces：它会让窗口 order 到非当前 space（P0/验证期实测窗口
+        // 跑到别的 space，当前屏 look 黑屏）。默认集合行为即可，由用户 Cmd+Tab 激活。
         let _: () = msg_send![window, makeKeyAndOrderFront: nil];
         let _: () = msg_send![app, activateIgnoringOtherApps: true];
 

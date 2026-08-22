@@ -20,12 +20,11 @@ rustflags = [
 [target.aarch64-unknown-linux-gnu]
 rustflags = ["-C", "link-arg=-fuse-ld=lld"]
 
-# Zomp: macOS arm64 大二进制（release __text > 128MB）必须用 lld——CLT classic ld64
-# 不生成 branch thunk，B/BL out of range（±128MB 指令编码硬限制）。
-# rustup 的 rust-lld 支持 Mach-O range-extension thunks，经 -B 目录符号链接接入。
-# 实测：`cargo build -p zed --release`（官方 profile，thin LTO）链接成功，2276 个 thunk。
-[target.'cfg(target_os = "macos")']
-rustflags = ["-C", "link-arg=-fuse-ld=lld", "-C", "link-arg=-B/Users/sz-0203015357/.local/bin"]
+# Zomp 注意：macOS arm64 大二进制的 lld 链接参数（-fuse-ld=lld -B.../ld64.lld）
+# 必须用命令行传递（cargo rustc -p zed --release -- -C link-arg=...），
+# 不要写进本 config 的 rustflags——rustflags 变化会失效所有 crate 的
+# fingerprint，触发全量重编（实测 1200+ crate 全部过期）。
+# 参考：crates/zomp_shell/README 或 README.zomp.md 的构建命令。
 
 [env]
 MACOSX_DEPLOYMENT_TARGET = "10.15.7"

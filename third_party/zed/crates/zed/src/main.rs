@@ -1465,6 +1465,22 @@ pub(crate) async fn restore_or_create_workspace(
         return Ok(());
     }
 
+    // ZOMP shell 模式：禁用 workspace 会话恢复——恢复路径按保存的窗口状态（全屏位置/尺寸）
+    // 创建普通窗口，不走 build_window_options 的 embedded_in 注入，会生成盖住壳的黑屏全屏窗口；
+    // 且关闭该窗口会触发应用退出（所有 gpui 窗口关闭）。直接走新建 embedded workspace。
+    if zomp_shell::shell_mode_enabled() && zomp_shell::ide_mode_active() {
+        cx.update(|cx| {
+            workspace::open_new(
+                Default::default(),
+                app_state.clone(),
+                cx,
+                |_workspace, _window, _cx| {},
+            )
+        })
+        .await?;
+        return Ok(());
+    }
+
     let kvp = cx.update(|cx| KeyValueStore::global(cx));
     if let Some(multi_workspaces) = restorable_workspaces(cx, &app_state).await {
         let mut error_count = 0;
