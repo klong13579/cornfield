@@ -3,6 +3,7 @@
 > Current task state. The agent updates this file as work progresses; an empty TODO is a valid state.
 
 ## 待办
+- [ ] omp 前后端分层优化(契约统一) → topics/omp-frontend-backend-layering.md
 - [ ] 学习使用herdr-board 功能
 - [ ] gbrain 接入 agent 共享记忆（dws-persona 决策日志入库） → topics/gbrain-agent-memory.md
 - [ ] 钉钉机器人帮助我读取群消息和文档链接，帮我自动提取，并且识别重要的事项，是的话记录待办并提醒我。 → topics/dingtalk-extract-important-todos.md
@@ -14,7 +15,8 @@
 - [ ] 测试 todo-write 参数序列化修复
 - [ ] 独立验证者：执行与验证分离，数字员工结果由独立进程验收 → topics/independent-verifier.md
 - [ ] 用 dws CLI 实现 MyContext 业务流原型 → topics/dws-mycontext-prototype.md
-- [ ] OMP 桌面客户端：主 app（Tauri）+ 编辑器（fork Zed）→ topics/omp-client-design.md
+- [ ] OMP 桌面客户端：主 app（Tauri）+ 编辑器（fork Zed） → topics/omp-client-design.md
+- [ ] 优化 omp 项目内存使用 → topics/omp-memory-optimization.md
 
 ## 已完成
 
