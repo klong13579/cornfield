@@ -110,7 +110,7 @@
         "@biomejs/biome": "catalog:",
         "@types/node": "^24.9.0",
         "@typescript/native-preview": "catalog:",
-        "electron": "^43.4.1",
+        "electron": "43.4.1",
         "electron-builder": "^26.15.3",
         "esbuild": "^0.25.12",
         "typescript": "catalog:",
