@@ -1626,6 +1626,14 @@ impl PlatformWindow for MacWindow {
 
     fn activate(&self) {
         let lock = self.0.lock();
+        // ZOMP：embedded 窗口的 GPUIView 已挂在宿主 contentArea，宿主窗口自身管理可见性
+        // 与 key 状态；这里的独立 NSWindow 只是 gpui 渲染载体外壳，makeKeyAndOrderFront
+        // 会把一个默认全屏尺寸的空 NSWindow 顶到前台（黑屏窗口，内容在宿主 view 里）。
+        // 跳过激活——壳切换 IDE 时由宿主窗口自然接管（1249 行 embedded_in.is_none()
+        // 已保证创建时不显示；此处堵住 activate_window 路径）。
+        if lock.embedded {
+            return;
+        }
         let window = lock.native_window;
         let closed = lock.closed.clone();
         let executor = lock.foreground_executor.clone();

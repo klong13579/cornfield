@@ -46,3 +46,29 @@ OMP_SPIKE_VERIFY=1 ./target/debug/omp_embed_spike
 ```
 
 实验开关：`OMP_SPIKE_NORMAL`（普通窗口对照）、`OMP_SPIKE_BADORDER`（坏初始化顺序，应 panic）、`OMP_SPIKE_SYNCSEND`（锁内同步 sendEvent，已证安全）、`OMP_SPIKE_AUTOCLICK`（GCD 注入合成点击）。
+
+# ZOMP 架构决策记录（2026-08-23）
+
+## 问题
+切 IDE 时出现黑屏全屏窗口（1512x944），关闭它会导致客户端退出。
+
+## 根因（三层，全部实证）
+1. **embedded 旁路设计缺陷（直接来源）**：
+   - `WindowOptions::embedded_in` 是 P0 spike 的旁路——把 GPUIView 挂到壳 contentArea，
+     但 gpui 的 open_window 仍创建一个独立 NSWindow（全屏默认尺寸）作为渲染载体；
+   - workspace 创建后 `activate_window()` → gpui_macos `makeKeyAndOrderFront:` →
+     这个"空壳 NSWindow"被顶到前台 → 黑屏（内容其实渲染在壳 view 里）。
+2. **持久化窗口 bounds 覆盖**：workspace 创建时读 workspaces 表全屏记录覆盖 window_bounds。
+3. **共享数据目录**：官方 Zed.app 与集成 zed 共用 `~/Library/Application Support/Zed/`，
+   官方写的全屏会话记录被集成 zed 读到（已用 `--user-data-dir` 隔离）。
+
+## 彻底方案（待拍板）
+删除 embedded 旁路，IDE 用 zed 原生独立窗口 + 壳协调切换：
+1. zed.rs：删 embedded_in 注入 + zomp_shell_embedded_in()
+2. main.rs：switch handler 改协调（切 IDE → 壳隐藏 + 原生开窗；切 Agent → 关窗 + 壳显示）
+3. workspace.rs：回退 bounds 跳过（原生窗口正常 bounds）
+4. main.rs：回退恢复禁用（原生窗口正常恢复会话）
+5. zomp_shell：删 content_area_ptr 导出
+
+保留：壳本身（切换条/Agent webview）、--user-data-dir 隔离、webview 缓存复用。
+形态变化：IDE 独立窗口（非内嵌），壳窗口切 IDE 时隐藏。

@@ -434,7 +434,9 @@ pub fn build_window_options(display_uuid: Option<Uuid>, cx: &mut App) -> WindowO
         } else {
             None
         },
-        // ZOMP shell 模式：IDE 模式下把 gpui workspace 内嵌到壳 contentArea，普通窗口走默认 None
+        // ZOMP shell 模式：IDE 模式下把 gpui workspace 内嵌到壳 contentArea，普通窗口走默认 None。
+        // 历史：P0 spike 曾因 embedded 空壳 NSWindow 被 activate_window 显示产生黑屏全屏窗口，
+        // 已由 gpui_macos activate() 的 embedded 跳过修复（空壳永不显示，用户不可见）。
         #[cfg(target_os = "macos")]
         embedded_in: zomp_shell_embedded_in(),
         ..Default::default()

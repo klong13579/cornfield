@@ -10507,7 +10507,12 @@ pub fn open_workspace_by_id(
 
             let options = cx.update(|cx| {
                 let mut options = (app_state.build_window_options)(display, cx);
-                options.window_bounds = window_bounds;
+                // ZOMP embedded（ZED 壳模式内嵌）：不应用持久化的全屏/位置 bounds——
+                // 恢复会创建 borderless 全屏 NSWindow 盖住壳（黑屏）。embedded 窗口
+                // 尺寸由宿主 view 决定，window_bounds 应保持 None。
+                if options.embedded_in.is_none() {
+                    options.window_bounds = window_bounds;
+                }
                 options
             });
 

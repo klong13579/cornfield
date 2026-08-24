@@ -670,22 +670,37 @@ fn main() {
                 let app_state = app_state.clone();
                 Box::new(move |mode| match mode {
                     zomp_shell::Mode::Ide => {
-                        // 切 IDE：打开 workspace（embedded_in 由 build_window_options 注入）
+                        // 切 IDE：直接创建 embedded workspace（build_window_options 经
+                        // zomp_shell::ide_mode_active() 注入 embedded_in）。不经
+                        // restore_or_create_workspace——那是启动路径，壳模式下会跳过。
                         let app_state = app_state.clone();
                         shell_async_app
                             .spawn(async move |cx| {
-                                if let Err(e) = restore_or_create_workspace(app_state, cx).await {
+                                let result = cx.update(|cx| {
+                                    workspace::open_new(
+                                        Default::default(),
+                                        app_state.clone(),
+                                        cx,
+                                        |_workspace, _window, _cx| {},
+                                    )
+                                });
+                                if let Err(e) = result.await {
                                     fail_to_open_window_async(e, cx)
                                 }
                             })
                             .detach();
                     }
                     zomp_shell::Mode::Agent => {
-                        // 切 Agent：关闭所有 gpui workspace 窗口，回到 WKWebView。
+                        // 切 Agent：最小化所有 gpui workspace 窗口（不 remove_window）——
+                        // remove 会触发 AppKit resize 链（setStyleMask/setFrame），embedded
+                        // 窗口的宿主 view 正在布局中，向已释放对象发消息 → objc_msgSend 崩溃
+                        // （实测 13:58 闪退）。minimize 保留窗口不触发 resize，切回 IDE 可恢复。
                         let _ = shell_async_app.update(|cx| {
                             let windows = cx.windows();
                             for window in windows {
-                                let _ = window.update(cx, |_, window, _| window.remove_window());
+                                let _ = window.update(cx, |_, window, _| {
+                                    window.minimize_window()
+                                });
                             }
                         });
                     }
@@ -1459,25 +1474,12 @@ pub(crate) async fn restore_or_create_workspace(
     app_state: Arc<AppState>,
     cx: &mut AsyncApp,
 ) -> Result<()> {
-    // ZOMP shell 模式：Agent 模式下不自动打开 workspace（等用户切 IDE 才打开）。
-    // 切 IDE 时 build_window_options 已通过 zomp_shell::ide_mode_active() 注入 embedded_in。
-    if zomp_shell::shell_mode_enabled() && !zomp_shell::ide_mode_active() {
-        return Ok(());
-    }
-
-    // ZOMP shell 模式：禁用 workspace 会话恢复——恢复路径按保存的窗口状态（全屏位置/尺寸）
-    // 创建普通窗口，不走 build_window_options 的 embedded_in 注入，会生成盖住壳的黑屏全屏窗口；
-    // 且关闭该窗口会触发应用退出（所有 gpui 窗口关闭）。直接走新建 embedded workspace。
-    if zomp_shell::shell_mode_enabled() && zomp_shell::ide_mode_active() {
-        cx.update(|cx| {
-            workspace::open_new(
-                Default::default(),
-                app_state.clone(),
-                cx,
-                |_workspace, _window, _cx| {},
-            )
-        })
-        .await?;
+    // ZOMP shell 模式：本函数是「启动路径」专用——壳模式下工作区由切 IDE 的
+    // switch handler 直接调 workspace::open_new 创建（embedded），启动恢复一律跳过。
+    // 1) 恢复路径按保存的窗口状态创建普通窗口（非 embedded），生成黑屏全屏窗口。
+    // 2) 启动 restore_task 是异步 spawn——若按 mode 判断，用户快速切 IDE 后
+    //    mode 变 Ide 会放行，竞态创建第二个窗口。
+    if zomp_shell::shell_mode_enabled() {
         return Ok(());
     }
 
