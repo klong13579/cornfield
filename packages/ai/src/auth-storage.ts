@@ -51,6 +51,7 @@ import { loginLmStudio } from "./utils/oauth/lm-studio";
 import { loginMiniMaxCode, loginMiniMaxCodeCn } from "./utils/oauth/minimax-code";
 import { loginMoonshot } from "./utils/oauth/moonshot";
 import { loginNanoGPT } from "./utils/oauth/nanogpt";
+import { loginNarwalPlan } from "./utils/oauth/narwal-plan";
 import { loginNvidia } from "./utils/oauth/nvidia";
 import { loginOllama } from "./utils/oauth/ollama";
 import { loginOllamaCloud } from "./utils/oauth/ollama-cloud";
@@ -878,6 +879,11 @@ export class AuthStorage {
 			}
 			case "minimax-code-cn": {
 				const apiKey = await loginMiniMaxCodeCn(ctrl);
+				await saveApiKeyCredential(apiKey);
+				return;
+			}
+			case "narwal-plan": {
+				const apiKey = await loginNarwalPlan(ctrl);
 				await saveApiKeyCredential(apiKey);
 				return;
 			}

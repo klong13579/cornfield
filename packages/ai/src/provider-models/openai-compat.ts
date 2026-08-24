@@ -10,6 +10,7 @@ import {
 import { toFireworksPublicModelId } from "../utils/fireworks-model-id";
 import { getGitHubCopilotBaseUrl, OPENCODE_HEADERS, parseGitHubCopilotApiKey } from "../utils/oauth/github-copilot";
 import { createBundledReferenceMap, createReferenceResolver } from "./bundled-references";
+import { NARWAL_PLAN_STATIC_MODELS } from "./narwal-plan";
 
 const MODELS_DEV_URL = "https://models.dev/api.json";
 const ANTHROPIC_BASE_URL = "https://api.anthropic.com/v1";
@@ -1081,6 +1082,47 @@ export function bailianCodingPlanModelManagerOptions(
 				mapModel: (entry, defaults) => {
 					const reference = references.get(defaults.id);
 					return mapWithBundledReference(entry, defaults, reference);
+				},
+			}),
+	};
+}
+
+// ---------------------------------------------------------------------------
+// 10.7 Narwal Plan
+// ---------------------------------------------------------------------------
+
+export interface NarwalPlanModelManagerConfig {
+	apiKey?: string;
+	baseUrl?: string;
+}
+
+export function narwalPlanModelManagerOptions(
+	config?: NarwalPlanModelManagerConfig,
+): ModelManagerOptions<"openai-completions"> {
+	const apiKey = config?.apiKey;
+	const baseUrl = config?.baseUrl ?? "https://coder.narwal.com/v1";
+	// Seed metadata comes from NARWAL_PLAN_STATIC_MODELS (user-verified costs / context
+	// windows), NOT getBundledModels("narwal-plan"): the gateway's /v1/models only
+	// returns bare ids, and models.json entries would otherwise be self-referential
+	// placeholders (222222 ctx / 8888 maxTokens / zero costs).
+	const references = new Map(NARWAL_PLAN_STATIC_MODELS.map(m => [m.id, m]));
+	return {
+		providerId: "narwal-plan",
+		staticModels: NARWAL_PLAN_STATIC_MODELS.map(m => ({
+			...m,
+			category: inferProbeCategory(m.id),
+		})),
+		fetchDynamicModels: () =>
+			fetchOpenAICompatibleModels({
+				api: "openai-completions",
+				provider: "narwal-plan",
+				baseUrl,
+				apiKey,
+				mapModel: (entry, defaults) => {
+					const reference = references.get(defaults.id);
+					const model = mapWithBundledReference(entry, defaults, reference);
+					Object.assign(model, { category: inferProbeCategory(model.id) });
+					return model;
 				},
 			}),
 	};

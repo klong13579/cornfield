@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Narwal Plan 内置 provider**（`src/provider-models/narwal-plan.ts`、`src/provider-models/openai-compat.ts`、`src/provider-models/descriptors.ts`、`src/models.json`）: narwal-plan（`https://coder.narwal.com/v1`，OpenAI-completions API）升级为内置 provider —— 模型目录由运行时 `/v1/models` discovery 提供；45 个核心模型（GLM/GPT/Claude/MiniMax/Qwen/Kimi/DeepSeek）的 context/cost/reasoning/thinking 元数据以静态种子 `NARWAL_PLAN_STATIC_MODELS` 固化，discovery 裸 id 经种子 reference 补全（避免占位元数据导致上下文窗口误判）。`getEnvApiKey`（`src/stream.ts`）新增 `NARWAL_PLAN_API_KEY`（兼容 `NARWAL_API_KEY`）解析。
+- **Narwal Plan `/login` 支持**（`src/utils/oauth/narwal-plan.ts`、`src/utils/oauth/index.ts`、`src/auth-storage.ts`）: `/login narwal-plan`（及选择器列表项）粘贴 key —— 对 `https://coder.narwal.com/v1/chat/completions` 真实校验（校验模型 `minimax-m3`）—— 存 agent.db api_key 凭据。登录后模型请求优先使用凭据，`NARWAL_PLAN_API_KEY` 环境变量与 models.yml 中对 narwal-plan 的声明退化为可选覆盖。8 个新测试（`test/narwal-plan-provider.test.ts`）。
+
 ## [0.17.0] - 2026-08-16
 
 ### Fixed
