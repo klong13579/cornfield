@@ -31,6 +31,7 @@ export type OAuthProvider =
 	| "moonshot"
 	| "nvidia"
 	| "nanogpt"
+	| "narwal-plan"
 	| "ollama"
 	| "ollama-cloud"
 	| "openai-codex"

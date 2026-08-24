@@ -92,6 +92,8 @@ export { loginMiniMaxCode, loginMiniMaxCodeCn } from "./minimax-code";
 export { loginMoonshot } from "./moonshot";
 // NanoGPT (API key)
 export { loginNanoGPT } from "./nanogpt";
+// Narwal Plan (API key)
+export { loginNarwalPlan } from "./narwal-plan";
 // NVIDIA (API key)
 export { loginNvidia } from "./nvidia";
 // Ollama (optional API key)
@@ -272,6 +274,11 @@ const builtInOAuthProviders: OAuthProviderInfo[] = [
 		available: true,
 	},
 	{
+		id: "narwal-plan",
+		name: "Narwal Plan",
+		available: true,
+	},
+	{
 		id: "moonshot",
 		name: "Moonshot (Kimi API)",
 		available: true,
@@ -427,6 +434,7 @@ export async function refreshOAuthToken(
 		case "venice":
 		case "minimax-code":
 		case "minimax-code-cn":
+		case "narwal-plan":
 		case "moonshot":
 		case "kagi":
 		case "cloudflare-ai-gateway":
