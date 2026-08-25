@@ -1189,6 +1189,36 @@ export const SETTINGS_SCHEMA = {
 		},
 	},
 
+	"context.windowing.enabled": {
+		type: "boolean",
+		default: false,
+		ui: {
+			tab: "context",
+			label: "History Windowing",
+			description:
+				"Archive tool results older than the recent window (off by default; enable only after A/B validation)",
+		},
+	},
+	"context.windowing.keepRecentTurns": {
+		type: "number",
+		default: 10,
+		ui: {
+			tab: "context",
+			label: "Keep Recent Turns",
+			description: "Turns whose tool results stay verbatim inside the window",
+		},
+	},
+	"context.windowing.earlyStrategy": {
+		type: "string",
+		default: "summarize",
+		values: ["summarize", "drop-with-pairing"],
+		ui: {
+			tab: "context",
+			label: "Early Strategy",
+			description: "How archived turns are represented (summarize = one-line archive note)",
+		},
+	},
+
 	"compaction.strategy": {
 		type: "enum",
 		values: ["context-full", "handoff", "off"] as const,
@@ -2619,9 +2649,16 @@ export interface AgentSettings {
 	lengthStall: AgentLengthStallSettings;
 }
 
+export interface WindowingSettings {
+	enabled: boolean;
+	keepRecentTurns: number;
+	earlyStrategy: "summarize" | "drop-with-pairing";
+}
+
 /** Map group prefix -> typed settings interface */
 export interface GroupTypeMap {
 	compaction: CompactionSettings;
+	windowing: WindowingSettings;
 	contextPromotion: ContextPromotionSettings;
 	retry: RetrySettings;
 	memories: MemoriesSettings;

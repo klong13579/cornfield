@@ -23,6 +23,113 @@ import { formatOutputNotice } from "../tools/output-meta";
 const COMPACTION_SUMMARY_TEMPLATE = compactionSummaryContextPrompt;
 const BRANCH_SUMMARY_TEMPLATE = branchSummaryContextPrompt;
 
+// ═══════════════════════════════════════════════════════════════════════════
+// History windowing (context hygiene — phase A of tool-output cleanup)
+// ═══════════════════════════════════════════════════════════════════════════
+// Keeps the most recent N turns verbatim and replaces older turns with a
+// one-line archive note, so long sessions stop paying context tokens for
+// tool results the model can no longer use. Turn pairing is preserved: a turn
+// (user → assistant toolCalls → toolResults) is archived whole or kept whole —
+// never split, because a bare tool_use without its tool_result is rejected by
+// providers. Off by default (A/B validated before enabling).
+
+const TURN_START_ROLES = new Set(["user", "bashExecution", "pythonExecution", "custom", "hookMessage"]);
+
+function turnUserText(turn: AgentMessage[]): string {
+	for (const m of turn) {
+		if (!TURN_START_ROLES.has(m.role)) continue;
+		const content = (m as { content?: unknown }).content;
+		if (typeof content === "string") return content;
+	}
+	return "";
+}
+
+function turnToolNames(turn: AgentMessage[]): string[] {
+	const names: string[] = [];
+	for (const m of turn) {
+		if (m.role !== "assistant") continue;
+		const content = (m as { content?: Array<{ type?: string; name?: string }> }).content;
+		if (!Array.isArray(content)) continue;
+		for (const block of content) {
+			if (block.type === "toolCall" && block.name) names.push(block.name);
+		}
+	}
+	return names;
+}
+
+function summarizeTurn(turn: AgentMessage[], seq: number): string {
+	const text = turnUserText(turn).replace(/\s+/g, " ").trim();
+	const clipped = text.length > 80 ? `${text.slice(0, 80)}…` : text;
+	const tools = [...new Set(turnToolNames(turn))];
+	return `[会话归档 #${seq}] ${clipped || "(无文本)"}${tools.length > 0 ? ` · 工具: ${tools.join(", ")}` : ""}`;
+}
+
+export interface WindowingOptions {
+	enabled: boolean;
+	keepRecentTurns: number;
+}
+
+/**
+ * Replace turns older than the recent window with archive notes.
+ * Non-archivable messages (developer, compactionSummary, branchSummary) pass
+ * through verbatim. Returns the input unchanged when disabled or when there
+ * are fewer turns than the window.
+ */
+export function applyWindowing(messages: AgentMessage[], options: WindowingOptions): AgentMessage[] {
+	if (!options.enabled || messages.length === 0 || options.keepRecentTurns <= 0) return messages;
+
+	// Count turn starts from the end; boundary = index of the keepRecentTurns-th start.
+	let turns = 0;
+	let boundary = -1;
+	for (let i = messages.length - 1; i >= 0; i--) {
+		if (TURN_START_ROLES.has(messages[i].role)) {
+			turns++;
+			if (turns === options.keepRecentTurns) {
+				boundary = i;
+				break;
+			}
+		}
+	}
+	if (boundary <= 0) return messages; // no older history to archive
+
+	const old = messages.slice(0, boundary);
+	const kept = messages.slice(boundary);
+
+	const replacements: AgentMessage[] = [];
+	let current: AgentMessage[] = [];
+	const flush = () => {
+		if (current.length === 0) return;
+		const first = current[0];
+		const seq = replacements.length + 1;
+		replacements.push(
+			createCustomMessage(
+				"windowing",
+				summarizeTurn(current, seq),
+				false,
+				undefined,
+				new Date(typeof first.timestamp === "number" ? first.timestamp : Date.now()).toISOString(),
+				"agent",
+			),
+		);
+		current = [];
+	};
+
+	for (const m of old) {
+		if (TURN_START_ROLES.has(m.role)) {
+			flush();
+			current = [m];
+		} else if (m.role === "developer" || m.role === "compactionSummary" || m.role === "branchSummary") {
+			flush();
+			replacements.push(m); // pass through verbatim
+		} else {
+			current.push(m); // assistant / toolResult belonging to the open turn
+		}
+	}
+	flush();
+
+	return [...replacements, ...kept];
+}
+
 export const SKILL_PROMPT_MESSAGE_TYPE = "skill-prompt";
 
 export interface SkillPromptDetails {
