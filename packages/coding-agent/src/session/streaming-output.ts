@@ -47,6 +47,8 @@ export interface TruncationResult {
 	outputBytes?: number;
 	lastLinePartial?: boolean;
 	firstLineExceedsLimit?: boolean;
+	/** Artifact sidecar id when the full output is persisted for page-fault reads. */
+	artifactId?: string;
 }
 
 export interface TruncationOptions {

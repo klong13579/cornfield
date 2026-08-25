@@ -321,6 +321,36 @@ export function formatFullOutputReference(artifactId: string): string {
 	return `Read artifact://${artifactId} for full output`;
 }
 
+/** Sidecar threshold: persist tool output as artifact when above this size (~8k tokens). */
+export const ARTIFACT_SIDECAR_MIN_BYTES = 32 * 1024;
+
+export interface ArtifactAllocator {
+	allocateOutputArtifact?: (toolType: string) => Promise<{ id?: string; path?: string }>;
+}
+
+/**
+ * Persist a tool's full output as a session artifact (artifact://<id>) when it
+ * exceeds the threshold, so the truncated view the model sees stays recoverable
+ * via a page-fault read (the artifact survives only for the session).
+ * Returns the artifact id, or undefined when output is small or no store exists.
+ */
+export async function persistToolOutputArtifact(
+	session: ArtifactAllocator,
+	toolType: string,
+	content: string,
+	minBytes: number = ARTIFACT_SIDECAR_MIN_BYTES,
+): Promise<string | undefined> {
+	if (!content || content.length < minBytes) return undefined;
+	const alloc = await session.allocateOutputArtifact?.(toolType);
+	if (!alloc?.path || !alloc.id) return undefined;
+	try {
+		await Bun.write(alloc.path, content);
+		return alloc.id;
+	} catch {
+		return undefined;
+	}
+}
+
 export function formatTruncationMetaNotice(truncation: TruncationMeta): string {
 	const range = truncation.shownRange;
 	let notice: string;

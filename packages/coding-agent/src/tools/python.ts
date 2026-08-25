@@ -14,7 +14,7 @@ import pythonDescription from "../prompts/tools/python.md" with { type: "text" }
 import { DEFAULT_MAX_BYTES, OutputSink, type OutputSummary, TailBuffer } from "../session/streaming-output";
 import { getTreeBranch, getTreeContinuePrefix, renderCodeCell } from "../tui";
 import type { ToolSession } from ".";
-import { formatStyledTruncationWarning, type OutputMeta } from "./output-meta";
+import { formatFullOutputReference, formatStyledTruncationWarning, type OutputMeta } from "./output-meta";
 import { formatTitle, replaceTabs, shortenPath, truncateToWidth, wrapBrackets } from "./render-utils";
 import { ToolAbortError, ToolError } from "./tool-errors";
 import { toolResult } from "./tool-result";
@@ -26,6 +26,13 @@ type PreludeCategory = {
 	name: string;
 	functions: PreludeHelper[];
 };
+
+/** Append an artifact:// page-fault reference when the output was truncated. */
+function withSidecar(text: string, summary: { truncated?: boolean; artifactId?: string }): string {
+	return summary.truncated && summary.artifactId
+		? `${text}\n\n${formatFullOutputReference(summary.artifactId)}`
+		: text;
+}
 
 function groupPreludeHelpers(helpers: PreludeHelper[]): PreludeCategory[] {
 	const categories: PreludeCategory[] = [];
@@ -397,7 +404,7 @@ export class PythonTool implements AgentTool<typeof pythonSchema> {
 						};
 
 						return toolResult(details)
-							.text(outputText)
+							.text(withSidecar(outputText, summaryForMeta))
 							.truncationFromSummary(summaryForMeta, { direction: "tail" })
 							.done();
 					}
@@ -444,7 +451,7 @@ export class PythonTool implements AgentTool<typeof pythonSchema> {
 						};
 
 						return toolResult(details)
-							.text(outputText)
+							.text(withSidecar(outputText, summaryForMeta))
 							.truncationFromSummary(summaryForMeta, { direction: "tail" })
 							.done();
 					}
@@ -486,7 +493,7 @@ export class PythonTool implements AgentTool<typeof pythonSchema> {
 				};
 
 				const resultBuilder = toolResult(details)
-					.text(outputText)
+					.text(withSidecar(outputText, summaryForMeta))
 					.truncationFromSummary(summaryForMeta, { direction: "tail" });
 
 				return resultBuilder.done();
