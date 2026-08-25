@@ -76,14 +76,15 @@
 
 ## Out of Scope
 
-- web-app 全部存量页面的迁移收尾（voice/insights/records 等——按价值排序，阶段 4 判定归档或迁移）
+- **web-app 存量页面迁移**：先行阶段（A）web-app 保留现状零改动；迁移/归档判定推迟到阶段 C（收敛）开工前，届时按「web-app 能力迁移清单」逐页三态拍板（12 页：agents/home/insights/memory/models/records/settings/skills/tasks/todo/voice/workspace），清单见 Further Notes——本 spec 不预先决定任何页面归档
 - 插件市场 / wasm 扩展宿主 / 远程协作 / multi-root workspace / AI inline 补全（均显式拒绝或 v2 评估）
 - zomp/Zed 深度集成（仅保留为后备）
 - 编辑体验类增强：LSP 深度集成、symbol outline、markdown 预览、terminal inline chat
-- 性能优化与首屏专项（阶段 4 验收项，不在此 spec 展开）
+- 性能优化与首屏专项（阶段 C 验收项，不在此 spec 展开）
 
 ## Further Notes
 
+- **web-app 能力迁移清单（阶段 C 输入，先行阶段不执行）**：12 页逐项标注三态（迁移→落点 / 合并→并入视图 / 归档），价值排序后由用户在阶段 C 开工前拍板；当前仅记录页面清单与建议落点（settings→设置面板；workspace→Agent 视图对话+agent workspace 预览；agents→域管理/我的 agent；memory→我的 agent 轻视图；records→追溯台；skills→治理台；models→设置面；tasks→管理台；todo→轻面板；home→Agent 视图对话；voice/insights→待定归档或迁移）
 - 与 unified-protocol-layer 的协同：阶段 0 的 wire 命令应落在其 P0 命令面收窄之后（或同步做），避免旧面加命令再迁移；本文档的 wire/ACP 双协议边界需在其方案中显式承认（编辑器是双协议消费者）
 - OpenSumi 版本跟随：ai-native 迭代快（ACP 还在演进），锁快照 + 升级走单独评审；stable 出 ACP 后评估切换
 - 探针环境保留于 `~/Desktop/Narwal/omp-opensumi-spike`（ide-electron / ide-startup 两套 + 全部 patch 记录），可复现

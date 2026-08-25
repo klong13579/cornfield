@@ -99,15 +99,17 @@
 
 ## 8. 阶段计划（含验收）
 
+> 三阶段结构（D14 终点状态单壳）：**A 现状保留 → B IDE 先行 → C 单壳收敛**。阶段 0 与阶段 B 可并行推进。
+
 | 阶段 | 范围 | 验收 |
 |---|---|---|
 | **阶段 0：wire 地基（~2-3 周）** | fs_write/fs_edit/fs_diff + LSP writethrough；git 最小集（status/diff/log/show/branches）；**新增 get_config/set_config 通用配置命令** | `bun test` 相关用例绿；PiClientAdapter 可调新命令；fs_write 后 LSP 状态不丢；配置命令读写 config.yml 往返一致 |
-| **阶段 1：壳搭建（~3-4 周）** | editor-extension 包（OpenSumi 组装 + 主题 + 视图骨架）；omp agent 正规注册；文件服务接 wire（agent workspace 预览）；集成点 1-5 落地 | 壳能起；打开项目；IDE 里与 omp agent 真实对话（spike 已验证路径）；agent workspace 只读预览出文件树 |
-| **阶段 2：Agent 视图差异化（~3-4 周）** | 我的 agent 轻视图 / 分域管理 / CEO 工作台（角色注入）；web-app 组件迁入（审批卡/会话/技能/记忆） | 三角色登录各自视图正确；审批卡在壳内可渲染 |
-| **阶段 3：审批 + Git（~2-3 周）** | AcpAgent 补 requestPermission；IDE diff 审阅接受/拒绝；git 面板 UI | 审批决策两端一致；diff 审阅闭环 |
-| **阶段 4：收尾（~2-3 周）** | Electron 打包（环境清单）；web-app 退役判定（剩余页面归档）；性能/首屏 | 桌面安装包可跑；web 同源可访问 |
+| **阶段 B1：壳搭建（~3-4 周）** | editor-extension 包（OpenSumi 组装 + web-app 风格主题 + 视图骨架）；omp agent 正规注册；集成点 1-5 落地 | 壳能起；打开项目；IDE 里与 omp agent 真实对话（spike 已验证路径） |
+| **阶段 B2：IDE 能力（~3-5 周）** | 文件通路（IFileService→wire + omp-agent:// 预览）；设置通路（偏好改道 + 经 wire 读写）；diff 审阅接受/拒绝；审批卡内嵌 | IDE 内打开/编辑 agent workspace 文件；设置读写 omp 配置不落 ~/.sumi；diff 审阅闭环；审批决策两端一致 |
+| **阶段 B3：Agent 视图起点（~2 周）** | 我的 agent 轻视图 + 角色注入骨架（web-app 保留，Agent 视图从壳内起步） | 员工登录看到自己的 agent 视图 |
+| **阶段 C：单壳收敛（~3-4 周）** | web-app 12 页按迁移清单（逐页三态：迁移/合并/归档）搬进壳；搬完退役 | 12 页能力盘点：无一丢失或明确归档；web-app 退役后壳内功能等价 |
 
-总账：约 12-17 周（与 v1 估算 9-12 周同量级，含单壳迁移增量）。
+总账：阶段 0 + B ≈ 10-14 周；C 收敛另 +3-4 周（web-app 迁移量按迁移清单细化）。
 
 ## 9. 风险与开放项
 
