@@ -1,6 +1,6 @@
 ---
 name: 统一协议层：TUI/web/桌面/IM 四前端收敛到一套 Wire（P0→P3 分阶段）
-status: waiting
+status: active              # P0 完成，待 P1 开工
 objective: 四个前端收敛到唯一 Wire 协议层，omp 核心为唯一实现；协议传输无关，宿主形态按前端定（TUI 进程内 / web·桌面 项目级 serve / IM 账号级常驻 gateway）
 doneWhen: |-
   - P0：bun check 全绿 + wire-server 集成测试全绿 + wire-server.ts 无命令 cast + wire-dto.ts/wire-types.ts 删除
@@ -51,6 +51,7 @@ openQuestions: []
 
 ## 进度记录
 
+- 2026-08-25 — P0 完成（5 commit：9458fe08/67bd0434/2cdca57/bf6125db+04164ce2/d2277f90）：①WireCommand union 收口（MCP 4 + skill-hub 2 登记，wire-server cast 清零）；②结果形状 8 领域进 pi-wire（stats/cron/memory/skills/session/agents/models/events）；③SessionSnapshot 权威类型移入 pi-wire（coding-agent 保留 reducePhase 运行时，todoPhases 用 WireTodoPhase 结构兼容）；④shape-lock 测试（compile-time 断言 + 运行时命令清单）；⑤web-app 直连 pi-wire，删 wire-dto.ts（镜像）+ wire-types.ts（shim，无 importers）。验证：pi-wire/web-app/coding-agent tsgo 全绿；web-app 功能零变化。**遗留**：wire-server 集成测试 pre-existing 挂（serve 隔离 HOME 启动失败，stash 验证与改动无关，待单独修）；GitNexus 索引过期（WireCommand/applyWindowing 未收录，需 gitnexus analyze 后补 impact）
 - 2026-08-25 15:31 — topic 创建；方案落档完成（D1–D7 grill 定稿，ADR-0002 + CONTEXT.md 术语更新），状态 waiting 待用户审方案
 
 ## 批注
