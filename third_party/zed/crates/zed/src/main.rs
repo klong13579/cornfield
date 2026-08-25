@@ -671,11 +671,16 @@ fn main() {
                 Box::new(move |mode| match mode {
                     zomp_shell::Mode::Ide => {
                         // 切 IDE：直接创建 embedded workspace（build_window_options 经
-                        // zomp_shell::ide_mode_active() 注入 embedded_in）。不经
-                        // restore_or_create_workspace——那是启动路径，壳模式下会跳过。
+                        // zomp_shell::ide_mode_active() 注入 embedded_in）。
+                        // 窗口创建后 GPUIView 挂壳 contentArea；切回 Agent 由 zomp_shell
+                        // 隐藏视图（不动窗口生命周期），故重复切 IDE 需检查是否已存在。
                         let app_state = app_state.clone();
                         shell_async_app
                             .spawn(async move |cx| {
+                                let has_window = cx.update(|cx| !cx.windows().is_empty());
+                                if has_window {
+                                    return; // 已有 workspace 窗口，zomp_shell 已恢复显示
+                                }
                                 let result = cx.update(|cx| {
                                     workspace::open_new(
                                         Default::default(),
@@ -691,17 +696,14 @@ fn main() {
                             .detach();
                     }
                     zomp_shell::Mode::Agent => {
-                        // 切 Agent：最小化所有 gpui workspace 窗口（不 remove_window）——
-                        // remove 会触发 AppKit resize 链（setStyleMask/setFrame），embedded
-                        // 窗口的宿主 view 正在布局中，向已释放对象发消息 → objc_msgSend 崩溃
-                        // （实测 13:58 闪退）。minimize 保留窗口不触发 resize，切回 IDE 可恢复。
+                        // 切 Agent：不动 gpui 窗口（不 remove/minimize）——remove 触发
+                        // AppKit resize 链崩溃（objc_msgSend 向已释放视图发消息，实测闪退），
+                        // minimize 造成布局错乱。workspace 视图隐藏由 zomp_shell
+                        // set_ide_view_hidden 处理（GPUIView setHidden），壳 WKWebView 显示。
                         let _ = shell_async_app.update(|cx| {
-                            let windows = cx.windows();
-                            for window in windows {
-                                let _ = window.update(cx, |_, window, _| {
-                                    window.minimize_window()
-                                });
-                            }
+                            // 仅确保壳窗口在前台（workspace 窗口若最小化则还原由
+                            // zomp_shell 视图层控制，无需 gpui 窗口操作）
+                            let _ = cx.windows();
                         });
                     }
                 })

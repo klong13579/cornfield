@@ -26,7 +26,7 @@ use gpui::{
     prelude::*, px, rgb, size,
 };
 use gpui_platform::application;
-use objc::{class, declare::ClassDecl, msg_send, runtime::{NO, Object, Sel, YES}, sel, sel_impl};
+use objc::{class, declare::ClassDecl, msg_send, runtime::{BOOL, NO, Object, Sel, YES}, sel, sel_impl};
 
 // WebKit.framework 链接：WKWebView / WKWebViewConfiguration 等符号在运行时由
 // `objc_getClass` 解析，但需要 WebKit.framework 被链接进二进制，否则首次
@@ -197,12 +197,16 @@ impl Shell {
     }
 
     /// 用户切换：先卸载当前视图，再挂载目标视图，随后通知外部 handler。
+    /// 相同模式点击也强制重同步（不静默 return）：切回 Agent 后手动全屏窗口等操作会让
+    /// 界面与 mode 状态脱节——mode 已是对应值但界面停在另一模式内容。重跑 mount+handler
+    /// 把界面拉回目标模式（unmount 跳过：相同模式卸载无意义，且 agent webview 隐藏/显示
+    /// 是幂等的）。
     fn switch_to(&mut self, target: Mode) {
-        if self.mode == target {
-            return;
+        if self.mode != target {
+            self.unmount_current();
         }
-        self.unmount_current();
         self.mount(target);
+        self.mode = target;
         if let Some(handler) = &self.switch_handler {
             handler(target);
         }
@@ -240,6 +244,8 @@ impl Shell {
                 let _: () = msg_send![web_view, setHidden: YES];
             }
         }
+        // 切 IDE：恢复显示 contentArea 里的 GPUIView（embedded workspace）。
+        self.set_ide_view_hidden(NO);
     }
 
     fn unmount_agent(&mut self) {
@@ -252,6 +258,28 @@ impl Shell {
         if let Some(web_view) = self.web_view {
             unsafe {
                 let _: () = msg_send![web_view, setHidden: NO];
+            }
+        }
+        // 切 Agent：隐藏 contentArea 里的 GPUIView（embedded workspace 视图），
+        // 否则它盖在 webview 上层（view 后 add 在上），webview 显示也被遮住。
+        self.set_ide_view_hidden(YES);
+    }
+
+    /// 隐藏/显示 contentArea 中除 webview 外的视图（即 gpui 挂载的 GPUIView）。
+    /// 切 Agent 隐藏 workspace，切 IDE 恢复；不动 gpui 窗口生命周期（避免 minimize
+    /// 的布局错乱与 remove 的 resize 崩溃链）。
+    fn set_ide_view_hidden(&self, hidden: BOOL) {
+        unsafe {
+            let subviews: id = msg_send![self.content_area, subviews];
+            let count: usize = msg_send![subviews, count];
+            for i in 0..count {
+                let view: id = msg_send![subviews, objectAtIndex: i];
+                if let Some(web_view) = self.web_view {
+                    if view == web_view {
+                        continue; // webview 由 mount_agent/unmount_ide 控制
+                    }
+                }
+                let _: () = msg_send![view, setHidden: hidden];
             }
         }
     }
