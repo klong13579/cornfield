@@ -76,6 +76,8 @@ interface Connection {
 	activeAgentId: string;
 	/** 本连接注册的 host tool bridge（per agent）。发 set_host_tools 的连接 = 执行者。 */
 	hostToolBridges: Map<string, WireHostToolBridge>;
+	/** wire core 注册的接收端注销函数（hello 时登记，close 时调用）。 */
+	removeTarget: () => void;
 }
 
 /**
@@ -122,9 +124,30 @@ const PROGRESS_EVENT_TYPES = new Set([
  *   server_snapshot（agent 列表）广播全连接
  * - host tool：set_host_tools 注册 bridge，call 帧只发给执行者连接；断开全拒
  */
-export async function startWireServer(options: WireServerOptions): Promise<void> {
-	const { token, defaultSession } = options;
-	const connections = new Set<Connection>();
+export interface WireCoreTarget {
+	id: string;
+	/** 当前焦点 agent id（可变：ws 连接 switch_session；内存客户端切换）。 */
+	getActiveAgentId(): string;
+	/** 推帧给本接收端（ws: send(ws)；内存: 直接投递）。 */
+	send(frame: ServerFrame): void;
+}
+
+export interface WireCore {
+	registry: SessionRegistry;
+	/** 注册接收端（ws 连接或内存客户端），返回注销函数。 */
+	addTarget(target: WireCoreTarget): () => void;
+	handleCommand(ctx: CommandContext, command: WireCommand, reply: (frame: ServerFrame) => void): Promise<void>;
+	/** 推目标 agent 的权威快照。 */
+	sendSessionSnapshotTo(target: WireCoreTarget): void;
+	broadcastServerSnapshot(): void;
+}
+
+/**
+ * 传输无关的 wire 核心（P3）：registry + 事件路由 + 权限 shell + 命令处理。
+ * ws 传输（startWireServer）与进程内内存传输（TUI 客户端）共用。
+ */
+export async function createWireCore(options: WireServerOptions): Promise<WireCore> {
+	const { defaultSession } = options;
 
 	const registry = new SessionRegistry(options.sessionFactory);
 	registry.registerMeta({
@@ -158,42 +181,46 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 		}),
 	);
 
-	const send = (ws: WireSocket, frame: ServerFrame): void => {
-		ws.send(JSON.stringify(frame));
+	const targets = new Set<WireCoreTarget>();
+	const addTarget = (t: WireCoreTarget): (() => void) => {
+		targets.add(t);
+		return () => {
+			targets.delete(t);
+			// 最后一个接收端断开：清空审批 pending（原 ws 层 close 逻辑）
+			if (targets.size === 0) gate.clearAll();
+		};
 	};
-
 	const activeAgentIds = (): Set<string> => {
 		const ids = new Set<string>();
-		for (const conn of connections) ids.add(conn.activeAgentId);
+		for (const target of targets) ids.add(target.getActiveAgentId());
 		return ids;
 	};
-
 	const broadcastServerSnapshot = (): void => {
 		const event: WireServerEvent = {
 			type: "server_snapshot",
 			sessions: registry.buildSessionList(activeAgentIds()),
 		};
-		for (const conn of connections) {
-			send(conn.ws, { type: "push", event });
+		for (const target of targets) {
+			target.send({ type: "push", event });
 		}
 	};
-
-	const sendSessionSnapshot = (conn: Connection): void => {
-		const attached = registry.getAttached(conn.activeAgentId);
+	const sendSessionSnapshotTo = (target: WireCoreTarget): void => {
+		const attached = registry.getAttached(target.getActiveAgentId());
 		if (!attached) return;
 		const event: WireServerEvent = {
 			type: "session_snapshot",
-			sessionId: conn.activeAgentId,
+			sessionId: target.getActiveAgentId(),
 			snapshot: attached.store.getSnapshot(),
 		};
-		send(conn.ws, { type: "push", event });
+		target.send({ type: "push", event });
 	};
+
 
 	// ── permission shell：pending 表 + 广播（canUseTool 与 inject_permission 共用）+ 超时清理 ──
 	const gate = options.permissionGate ?? new PermissionGate();
 	const broadcastPermission = (push: PermissionRequestPush): void => {
-		for (const conn of connections) {
-			send(conn.ws, { type: "push", event: push });
+		for (const target of targets) {
+			target.send({ type: "push", event: push });
 		}
 	};
 	options.registerPermissionBroadcast?.(broadcastPermission);
@@ -201,21 +228,21 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 	// ── 事件路由：只推给 active 在该 agent 上的连接 ──
 	registry.subscribe(event => {
 		if (event.kind === "snapshot") {
-			for (const conn of connections) {
-				if (conn.activeAgentId !== event.sessionId) continue;
+			for (const target of targets) {
+				if (target.getActiveAgentId() !== event.sessionId) continue;
 				const snapshotEvent: WireServerEvent = {
 					type: "session_snapshot",
 					sessionId: event.sessionId,
 					snapshot: event.snapshot,
 				};
-				send(conn.ws, { type: "push", event: snapshotEvent });
+				target.send({ type: "push", event: snapshotEvent });
 				if (PROGRESS_EVENT_TYPES.has(event.event.type)) {
 					const progressEvent: WireServerEvent = {
 						type: "progress",
 						sessionId: event.sessionId,
 						event: event.event,
 					};
-					send(conn.ws, { type: "push", event: progressEvent });
+					target.send({ type: "push", event: progressEvent });
 				}
 			}
 			return;
@@ -231,6 +258,7 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 	): { agentId: string; attached: AttachedSession } | { error: string } => {
 		const agentId = command.sessionId ?? ctx.activeAgentId;
 		if (!registry.getMeta(agentId)) {
+
 			return { error: `unknown agent: ${agentId}` };
 		}
 		const attached = registry.getAttached(agentId);
@@ -302,8 +330,8 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 						fail("cannot detach default agent");
 						return;
 					}
-					for (const c of connections) {
-						if (c.activeAgentId === command.sessionId) {
+					for (const target of targets) {
+						if (target.getActiveAgentId() === command.sessionId) {
 							fail(`agent is active on a connection: ${command.sessionId} (switch_session first)`);
 							return;
 						}
@@ -932,6 +960,23 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 			fail(err instanceof Error ? err.message : String(err));
 		}
 	};
+	return {
+		registry,
+		addTarget,
+		handleCommand,
+		sendSessionSnapshotTo,
+		broadcastServerSnapshot,
+	};
+}
+
+export async function startWireServer(options: WireServerOptions): Promise<void> {
+	const { token, defaultSession } = options;
+	const core = await createWireCore(options);
+	const { registry } = core;
+	const connections = new Set<Connection>();
+	const send = (ws: WireSocket, frame: ServerFrame): void => {
+		ws.send(JSON.stringify(frame));
+	};
 
 	const handleHostToolFrame = (conn: Connection, frame: ClientFrame): boolean => {
 		if (frame.type !== "host_tool_result" && frame.type !== "host_tool_update") return false;
@@ -978,17 +1023,24 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 				ws,
 				activeAgentId: "default",
 				hostToolBridges: new Map(),
+				removeTarget: () => {},
 			};
 			ws.data = connection;
 			connections.add(connection);
+			const target: WireCoreTarget = {
+				id: connection.connectionId,
+				getActiveAgentId: () => connection.activeAgentId,
+				send: frame => send(ws, frame),
+			};
+			connection.removeTarget = core.addTarget(target);
 			send(ws, {
 				type: "hello_ack",
 				connectionId: connection.connectionId,
 				protocolVersion: MULTIDEVICE_PROTOCOL_VERSION,
 			});
 			// 列表 + 当前焦点快照（P1 兼容：客户端仍能只靠 session_snapshot 重建）
-			broadcastServerSnapshot();
-			sendSessionSnapshot(connection);
+			core.broadcastServerSnapshot();
+			core.sendSessionSnapshotTo(target);
 			return;
 		}
 
@@ -1018,10 +1070,15 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 			},
 			hostToolBridges: conn.hostToolBridges,
 			sendPush: frame => send(conn.ws, frame),
-			sendSessionSnapshot: () => sendSessionSnapshot(conn),
-			broadcastServerSnapshot: () => broadcastServerSnapshot(),
+			sendSessionSnapshot: () =>
+				core.sendSessionSnapshotTo({
+					id: conn.connectionId,
+					getActiveAgentId: () => conn.activeAgentId,
+					send: frame => send(conn.ws, frame),
+				}),
+			broadcastServerSnapshot: () => core.broadcastServerSnapshot(),
 		};
-		void handleCommand(ctx, frame.command, reply);
+		void core.handleCommand(ctx, frame.command, reply);
 	};
 
 	const server = Bun.serve<Connection | undefined>({
@@ -1053,9 +1110,7 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 				const connection = ws.data;
 				if (!connection) return;
 				connections.delete(connection);
-				if (connections.size === 0) {
-					gate.clearAll();
-				}
+				connection.removeTarget();
 				// host tool 执行者断开：pending 全拒（fail fast）
 				for (const bridge of connection.hostToolBridges.values()) {
 					bridge.detachOutput(`connection ${connection.connectionId} closed`);
