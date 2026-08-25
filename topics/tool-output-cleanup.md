@@ -5,8 +5,8 @@ objective: 大工具输出旁路到 artifact:// 降窗口占用；历史轮次 t
 doneWhen: |-
   - read/search/grep/find 超阈值输出均带 artifact:// 引用且可完整拉回——✅ B 阶段完成（persistToolOutputArtifact + formatFullOutputReference footer）
   - 全部旁路路径 footer 统一——✅ read/search/find/python/ssh 统一走 formatFullOutputReference；bash/gh 保留既有等价标记
-  - 轮次窗口化默认关闭上线，开关切换行为可单测断言——待 A 阶段
-  - A/B canary（窗口化开/关同任务对比）通过后才开默认——待 A 阶段
+  - 轮次窗口化默认关闭上线，开关切换行为可单测断言——✅ A 阶段完成（applyWindowing + context.windowing.* 默认关 + 6 测试）
+  - A/B canary（窗口化开/关同任务对比）通过——✅ 离线 canary：30 轮长会话 payload 降 >50%、配对完整、最近轮保全；真实流量开默认待用户决策
 lastActivity: 2026-08-25 15:07
 sessionRefs: []
 artifacts: []
@@ -63,6 +63,7 @@ openQuestions:
 
 ## 进度记录
 
+- 2026-08-25 — A 阶段完成（commit 8562d11）：applyWindowing（messages.ts 纯函数，整轮归档为一行摘要、developer/compactionSummary/branchSummary 透传、配对保证）+ context.windowing.{enabled=false,keepRecentTurns=10,earlyStrategy} schema + sdk convertToLlm 路径接入（compaction 不受影响）；6 测试全过含离线 A/B canary（30 轮：payload -50%+、无裸 toolCall、最近轮保全）；默认关闭上线，真实流量开默认待用户决策
 - 2026-08-25 — B 阶段全部完成：persistToolOutputArtifact helper（output-meta.ts，32KB 阈值）+ TruncationResult.artifactId 字段；read/search/find 截断时写 artifact + footer；python（withSidecar 3 处）/ssh 补 footer；发现并利用既有渲染层（formatFullOutputReference 已在 read/search/find import）。验证：artifact-sidecar 4 测试 pass + tsgo 通过 + todo-write 9 pass + voice 69 pass
 - 2026-08-25 — topic 创建；已完成 Codex 源码调研与方案定型，任务清单已出（Phase A 3 项 + Phase B 3 项）
 
