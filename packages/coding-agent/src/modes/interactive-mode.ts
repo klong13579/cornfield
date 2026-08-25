@@ -27,6 +27,7 @@ import {
 } from "@oh-my-pi/pi-tui";
 import { APP_NAME, getProjectDir, hsvToRgb, isEnoent, logger, postmortem, prompt } from "@oh-my-pi/pi-utils";
 import chalk from "chalk";
+import type { InMemoryWireClient } from "../server/memory-wire";
 import { KeybindingsManager } from "../config/keybindings";
 import { type Settings, settings } from "../config/settings";
 import type {
@@ -236,6 +237,8 @@ export class InteractiveMode implements InteractiveModeContext {
 	#eventBus?: EventBus;
 	#eventBusUnsubscribers: Array<() => void> = [];
 	#welcomeComponent?: WelcomeComponent;
+	/** P3：进程内 wire 客户端（事件源切换后使用）。 */
+	#wireClient?: InMemoryWireClient;
 
 	constructor(
 		session: AgentSession,
@@ -245,6 +248,8 @@ export class InteractiveMode implements InteractiveModeContext {
 		lspServers: LspStartupServerInfo[] | undefined = undefined,
 		mcpManager?: import("../mcp").MCPManager,
 		eventBus?: EventBus,
+		_initialMessage?: string,
+		wireClient?: InMemoryWireClient,
 	) {
 		this.session = session;
 		this.sessionManager = session.sessionManager;
@@ -257,6 +262,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.lspServers = lspServers;
 		this.mcpManager = mcpManager;
 		this.#eventBus = eventBus;
+		this.#wireClient = wireClient;
 		if (eventBus) {
 			this.#eventBusUnsubscribers.push(
 				eventBus.on(LSP_STARTUP_EVENT_CHANNEL, data => {

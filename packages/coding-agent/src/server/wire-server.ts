@@ -62,6 +62,8 @@ export interface WireServerOptions {
 	permissionGate?: PermissionGate;
 	/** 注册 permission_request 广播（canUseTool 触发时用）。 */
 	registerPermissionBroadcast?: (fn: (push: PermissionRequestPush) => void) => void;
+	/** interactive（TUI 进程内）场景：不加载多 agent metas（单会话），默认 false。 */
+	loadAgents?: boolean;
 }
 
 /** 用户 HOME（读取 gateway 状态文件用；进程替换时跟随环境）。 */
@@ -158,7 +160,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 	// record_transcribe 的 API 转写路径（record.model）复用 default 会话的模型注册表；
 	// 未配置 API 模型时仅走本地 whisper，本引用不会被触碰。
 	const defaultModelRegistry = defaultSession.session.modelRegistry;
-	const metas = await loadMetasSafe();
+	const metas = options.loadAgents === false ? [] : await loadMetasSafe();
 	for (const meta of metas) registry.registerMeta(meta);
 
 	// default agent 启动即 attached（P1 语义：无 lazy、无 attach 命令也全功能）

@@ -46,6 +46,9 @@ import type { SubmittedUserInput } from "./modes/types";
 import { type CreateAgentSessionOptions, createAgentSession, discoverAuthStorage } from "./sdk";
 import type { AgentSession } from "./session/agent-session";
 import { resolveResumableSession, type SessionInfo, SessionManager } from "./session/session-manager";
+import { SessionStore } from "./session/session-store";
+import { createWireCore } from "./server/wire-server";
+import { createInMemoryWireClient } from "./server/memory-wire";
 import { resolvePromptInput } from "./system-prompt";
 import type { LspStartupServerInfo } from "./tools";
 import { getChangelogPath, getNewEntries, parseChangelog } from "./utils/changelog";
@@ -172,6 +175,19 @@ async function runInteractiveMode(
 	initialMessage?: string,
 	initialImages?: ImageContent[],
 ): Promise<void> {
+	// P3：TUI 进程内 wire 装配——client 注入 InteractiveMode（事件源切换后续，行为不变）
+	const store = SessionStore.attach(session);
+	const core = await createWireCore({
+		host: "127.0.0.1",
+		port: 0,
+		token: "",
+		sessionFactory: async () => {
+			throw new Error("interactive mode: no lazy agent attach");
+		},
+		defaultSession: { session, store },
+		loadAgents: false,
+	});
+	const wireClient = createInMemoryWireClient(core);
 	const mode = new InteractiveMode(
 		session,
 		version,
@@ -180,6 +196,8 @@ async function runInteractiveMode(
 		lspServers,
 		mcpManager,
 		eventBus,
+		undefined,
+		wireClient,
 	);
 
 	await mode.init();
