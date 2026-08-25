@@ -253,7 +253,21 @@ export type WireExtensionCommand =
 	 * 返回元数据 + 转写全文（前端本地搜索/预览零延迟）。
 	 * 响应 { ok:true, recordings: [{ name, path, recordedAt, size, text }] }；目录缺失 → { ok:true, recordings: [] }。
 	 */
-	| { id?: string; type: "listen_list" };
+	| { id?: string; type: "listen_list" }
+	/**
+	 * P0 收口：serve 端 skill hub —— 列出可安装的远程技能（marketplace 源；source 缺省走默认市场）。
+	 */
+	| { id?: string; type: "list_remote_skills"; source?: string }
+	/** P0 收口：serve 端 skill hub —— 安装一个远程技能。 */
+	| { id?: string; type: "install_remote_skill"; source: string; name: string }
+	/** P0 收口：列出已配置的 MCP 服务器（~/.omp/agent/mcp.json）。 */
+	| { id?: string; type: "get_mcp_servers" }
+	/** P0 收口：新建/更新一个 MCP 服务器配置。 */
+	| { id?: string; type: "set_mcp_server"; name: string; command?: string; args?: string[]; enabled?: boolean }
+	/** P0 收口：删除一个 MCP 服务器配置。 */
+	| { id?: string; type: "remove_mcp_server"; name: string }
+	/** P0 收口：测试一个 MCP 服务器连通性（stdio）。 */
+	| { id?: string; type: "test_mcp_server"; name: string };
 export type WireCommand = MultiplexCommand | WireExtensionCommand;
 
 /** 获取具体命令结构的 helper。 */
