@@ -7,7 +7,6 @@
 - [ ] 统一协议层：TUI/web/桌面/IM 四前端收敛到一套 Wire（P0→P3 分阶段） → topics/unified-protocol-layer.md
 - [ ] toolResult 轮次窗口化 + 配置（默认关闭） → topics/tool-output-cleanup.md
 - [ ] 窗口化 A/B canary 验证后开默认 → topics/tool-output-cleanup.md
-- [ ] 仓库瘦身：A+B 类全部清理（含需要确认的 6 项） → topics/repo-slimming.md
 - [ ] 学习使用herdr-board 功能
 - [ ] 钉钉机器人帮助我读取群消息和文档链接，帮我自动提取，并且识别重要的事项，是的话记录待办并提醒我。 → topics/dingtalk-extract-important-todos.md
 - [ ] omp 添加前端框架
@@ -19,6 +18,7 @@
 
 ## 已完成
 
+- [x] 仓库瘦身：A+B 类全部清理（含需要确认的 6 项） → topics/repo-slimming.md
 - [x] read 大文件输出旁路（artifact://） → topics/tool-output-cleanup.md
 - [x] search/grep/find 输出旁路（artifact://） → topics/tool-output-cleanup.md
 - [x] 工具旁路 footer 格式统一 → topics/tool-output-cleanup.md
