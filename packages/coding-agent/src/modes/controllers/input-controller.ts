@@ -522,9 +522,15 @@ export class InputController {
 		if (this.ctx.unsubscribe) {
 			this.ctx.unsubscribe();
 		}
-		this.ctx.unsubscribe = this.ctx.session.subscribe(async (event: AgentSessionEvent) => {
-			await this.ctx.handleBackgroundEvent(event);
-		});
+		this.ctx.unsubscribe = this.ctx.wireClient
+			? this.ctx.wireClient.onPush(frame => {
+				if (frame.type === "push" && frame.event.type === "progress") {
+					void this.ctx.handleBackgroundEvent(frame.event.event as AgentSessionEvent);
+				}
+			})
+			: this.ctx.session.subscribe(async (event: AgentSessionEvent) => {
+					await this.ctx.handleBackgroundEvent(event);
+				});
 
 		// Backgrounding keeps the current process to preserve in-flight agent state.
 		if (this.ctx.isInitialized) {

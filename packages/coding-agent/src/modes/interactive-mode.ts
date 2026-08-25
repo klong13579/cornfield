@@ -237,8 +237,8 @@ export class InteractiveMode implements InteractiveModeContext {
 	#eventBus?: EventBus;
 	#eventBusUnsubscribers: Array<() => void> = [];
 	#welcomeComponent?: WelcomeComponent;
-	/** P3：进程内 wire 客户端（事件源切换后使用）。 */
-	#wireClient?: InMemoryWireClient;
+	/** P3：进程内 wire 客户端（事件源切换后使用；ctx 接口字段）。 */
+	wireClient?: InMemoryWireClient;
 
 	constructor(
 		session: AgentSession,
@@ -262,7 +262,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.lspServers = lspServers;
 		this.mcpManager = mcpManager;
 		this.#eventBus = eventBus;
-		this.#wireClient = wireClient;
+		this.wireClient = wireClient;
 		if (eventBus) {
 			this.#eventBusUnsubscribers.push(
 				eventBus.on(LSP_STARTUP_EVENT_CHANNEL, data => {

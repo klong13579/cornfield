@@ -134,9 +134,15 @@ export class EventController {
 	}
 
 	subscribeToAgent(): void {
-		this.ctx.unsubscribe = this.ctx.session.subscribe(async (event: AgentSessionEvent) => {
-			await this.handleEvent(event);
-		});
+		this.ctx.unsubscribe = this.ctx.wireClient
+			? this.ctx.wireClient.onPush(frame => {
+				if (frame.type === "push" && frame.event.type === "progress") {
+					void this.handleEvent(frame.event.event as AgentSessionEvent);
+				}
+			})
+			: this.ctx.session.subscribe(async (event: AgentSessionEvent) => {
+					await this.handleEvent(event);
+				});
 	}
 
 	async handleEvent(event: AgentSessionEvent): Promise<void> {
