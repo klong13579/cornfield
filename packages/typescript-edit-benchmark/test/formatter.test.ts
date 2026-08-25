@@ -10,7 +10,8 @@ describe("formatContent", () => {
 
 			expect(spy).toHaveBeenCalledTimes(1);
 			const [, options] = spy.mock.calls[0]!;
-			expect(options.parser).toBe("flow");
+			expect(options).toBeDefined();
+			expect(options!.parser).toBe("flow");
 			expect(result.didFormat).toBe(true);
 		} finally {
 			spy.mockRestore();

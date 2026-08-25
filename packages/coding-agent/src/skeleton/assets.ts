@@ -25,7 +25,7 @@ import lintSkill from "./assets/.omp/skills/lint/SKILL.md" with { type: "text" }
 import agentsManifest from "./assets/AGENTS.md" with { type: "text" };
 import externalWorkspaces from "./assets/knowledge/external-workspaces.md" with { type: "text" };
 import mission from "./assets/mission.md" with { type: "text" };
-import promptIncludes from "./assets/prompt-includes.json" with { type: "text" };
+import promptIncludes from "./assets/prompt-includes.json";
 import todo from "./assets/TODO.md" with { type: "text" };
 import tools from "./assets/TOOLS.md" with { type: "text" };
 import user from "./assets/user.md" with { type: "text" };
@@ -57,7 +57,7 @@ export const SKELETON_FILES: readonly SkeletonFile[] = [
 	{ relPath: "TOOLS.md", content: tools },
 	{ relPath: "TODO.md", content: todo },
 	{ relPath: "user.md", content: user },
-	{ relPath: "prompt-includes.json", content: promptIncludes },
+	{ relPath: "prompt-includes.json", content: JSON.stringify(promptIncludes) },
 	{ relPath: ".gitignore", content: gitignore },
 	{ relPath: ".omp/config.yml", content: ompConfig },
 	{ relPath: ".omp/SYSTEM.md", content: ompSystemPrompt },
