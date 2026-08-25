@@ -79,7 +79,7 @@
 
 ## 五、跨视图机制
 
-- **客户端形态（D14）**：单壳收敛——OpenSumi 为唯一客户端壳；Agent 视图 = 壳内自定义视图（LayoutService 动态角色注入）；web-app 资产按优先级迁移进壳后退役（钉钉入口不受影响）
+- **客户端形态（D14）**：**终点状态单壳**——先行阶段 web-app 保留现状不动；IDE 壳（OpenSumi）独立交付（遵守 D15/D16，不制造新债）；收敛阶段把 web-app 页面按迁移清单搬进壳后退役（纯搬运）
 - **UI 风格（D15）**：整体沿用 web-app 风格与动效——自定义 OpenSumi 主题匹配 web-app 设计体系；壳内自定义视图直接复用 web-app 组件/样式；OpenSumi 默认外观不作为客户端长相
 - **配置系统（D16）**：沿用 omp 配置系统（config.yml / models.yml / agentDir 等），**不建 ~/.sumi 独立偏好存储**；OpenSumi 偏好仅作 IDE 侧读写代理，schema 与存储归属 omp
 - **数据一致**：同一套 agent/session/权限数据，内核唯一
@@ -124,6 +124,6 @@
 | D11 | CEO 工作台第一屏 | 分层下钻（域级战报 + 跨域事项 → 员工明细） |
 | D12 | 员工个人 agent 界面 | 员工有"我的 agent"轻视图（状态/知识库/画像/任务/对话），钉钉是入口之一 |
 | D13 | 技术路线 | OpenSumi 为底座（spike 过，4/4 点）；zomp 分支冻结不删为后备；路线无关资产并入 main |
-| D14 | 客户端形态 | 单壳收敛：OpenSumi 唯一客户端壳，Agent 视图 = 壳内自定义视图，web-app 迁移后退役 |
+| D14 | 客户端形态 | **终点状态单壳**：OpenSumi 唯一客户端壳，Agent 视图 = 壳内自定义视图；**先行阶段保留 web-app 现状（零改动），IDE 壳独立交付，收敛（web-app 迁移/退役）后置为阶段 C**；并存期 IDE 壳仍遵守 D15/D16 |
 | D15 | UI 风格 | 整体沿用 web-app 风格与动效（自定义 OpenSumi 主题），不用 OpenSumi 默认外观 |
 | D16 | 配置系统 | 沿用 omp 配置（config.yml/models.yml/agentDir），不建 ~/.sumi 独立存储 |
