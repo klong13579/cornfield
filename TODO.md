@@ -8,7 +8,6 @@
 - [ ] 学习使用herdr-board 功能
 - [ ] 钉钉机器人帮助我读取群消息和文档链接，帮我自动提取，并且识别重要的事项，是的话记录待办并提醒我。 → topics/dingtalk-extract-important-todos.md
 - [ ] omp 添加前端框架
-- [ ] omp2omp 通信机制
 - [ ] session 诊断优化：诊断结果 → learning/nudge/regression 三阶段落地 → topics/session-diagnosis-loop.md
 - [ ] omp 本地增加定时器功能
 - [ ] 独立验证者：执行与验证分离，数字员工结果由独立进程验收 → topics/independent-verifier.md
@@ -16,6 +15,7 @@
 
 ## 已完成
 
+- [x] omp2omp 通信机制
 - [x] toolResult 轮次窗口化 + 配置（默认关闭） → topics/tool-output-cleanup.md
 - [x] 窗口化 A/B canary 验证后开默认 → topics/tool-output-cleanup.md
 - [x] 仓库瘦身：A+B 类全部清理（含需要确认的 6 项） → topics/repo-slimming.md
