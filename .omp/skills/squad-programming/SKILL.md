@@ -1,6 +1,6 @@
 ---
 name: squad-programming
-version: 0.2.0
+version: 0.3.0
 description: >-
   并行编排：把一个大任务拆成 MECE 子任务，在多个 git worktree 里各起一个子
   omp 并行工作，用 intercom 主从通信做求助与进度汇报。Use when the user wants
@@ -148,8 +148,12 @@ bun run .omp/skills/squad-programming/scripts/bootstrap.ts \
   状态/新鲜度**直连 intercom broker 拿**（不绕 herdr——broker 是 omp 自身状态机，herdr 只是镜像；probe 走 `~/.omp/intercom/broker.sock` 注册+list 协议，`SessionInfo.status` + `lastActivity` 即权威）：进程存活（ps 按 worktree 路径匹配 omp）→ broker 注册态（会话在否/status）→ `lastActivity` 新鲜度 + pane 错误签名（**静默挂起**：`lastActivity` 长时间不更新——模型 API 响应挂起时 pid 在、pane 有残影，但已死机，实测 187s 静默案例；`PROBE_STALL_AFTER_S` 默认 240s）。输出 `[OK]/[WARN]`，有 WARN 退出码 1。
   **WARN 处置阶梯（不直接判死）**：① 先看是否自愈——API 断连（`socket connection was closed` 等）是 provider 并发高时的常见噪声，omp 自带重试，worker 通常继续推进；② **静默挂起先用 ask 唤醒**（实测 ask 到达后 worker 立即恢复——ask 双向可靠，本身就是唤醒信号）；③ ask 无响应 + pane 无进展 → 记 `stalled` → 转用户拍板（重启该子任务 / 等 / 打回）。
 - 用 `intercom({ action: "children" })` 看子 omp 实时状态，不轮询消息。
-- **每条状态消息落地 state.json**（父中断恢复的底账）：
-  `bun run .omp/skills/squad-programming/scripts/squad-state.ts ~/.omp/squads/<squadId>/state.json update <taskId> <status> [一句话]`
+- **每条状态消息落地 state.json**（父中断恢复的底账）:
+  `bun run .omp/skills/squad-programming/scripts/squad-state.ts ~/.omp/squads/<squadId>/state.json update <taskId> <status> [一句话] [--force]`
+  - 转移矩阵：`assembled -> started`（正常流程），`started -> blocked / reviewing / complete / failed`，`blocked/reviewing -> started / complete / failed`。
+  - 终态（`complete` / `failed`）不可逆，非法转移被拒绝。
+  - `--force` 跳过转移校验，仅父中断恢复场景使用（见 #父中断恢复）。
+  - 同一状态重复设置是幂等的（仅更新 timestamp）。
   收到 `[T<n>] STARTED` → `started`；`BLOCKED` → `blocked`；`REVIEWING` → `reviewing`；`COMPLETE` → 先跑 gate 验证，通过才 `complete`（否则打回）；`FAILED` → `failed`。每回合至少核对一次 state 是否跟上。
 - 收到子 ask → 立即 `reply` 决策或引导；`pending` 看堆积，`reply to <taskId>` 定向回复。
 - 收到 `[T<n>] BLOCKED` → 判断是缺信息（补）还是缺决策（转用户拍板，绝不代拍）。
@@ -163,8 +167,8 @@ bun run .omp/skills/squad-programming/scripts/bootstrap.ts \
 1. `squad-state.ts <stateFile> list` 读未终态子任务（`stateFile = ~/.omp/squads/<squadId>/state.json`，集结时自动写入；找不到就搜 `~/.omp/squads/*/state.json` 按 `createdAt` 最新的）。
 2. 对每个未终态子任务，用 `intercom({ action: "children" })` + `herdr pane read <paneId>`（state 里有 paneId）复核实际状态：
    - 还活着且在干活 → 保持 `started`，询问是否需要它重新发一次最新状态；
-   - 发了 COMPLETE 但父没收到 → 跑 gate 验证，过了直接标 `complete`；
-   - pane 死了/无响应 → 标记 `failed` 并给原因。
+   - 发了 COMPLETE 但父没收到 → 跑 gate 验证，过了直接标 `complete`（用 `--force` 跳过 assembled → complete 校验）；
+   - pane 死了/无响应 → 标记 `failed` 并给原因（用 `--force` 跳过 assembled → failed 校验）。
 3. 恢复期间对子任务补发一条确认消息（intercom send），告诉它父已回来；继续 Phase 2 盯盘。
 
 **兜底事实**：state.json 是权威底账，intercom 消息流只是事件源；两者不一致时以 state.json + 实际 pane 复核为准。
@@ -205,9 +209,35 @@ bun run .omp/skills/squad-programming/scripts/bootstrap.ts \
 |---|---|---|
 | `cheap` | `narwal-plan/deepseek-v4-flash` | research / docs / test |
 | `mid` | `narwal-plan/deepseek-v4-pro` | code 实现 / review |
+| `high` | `narwal-plan/glm-5.3` | 重任务（复杂重构/跨模块改动），显式指定时使用 |
 | 禁用 | `narwal-plan/claude-opus-*`、`claude-sonnet-*` | 默认不启用；父显式在任务包指定才用 |
 
 档位是**单点配置**：子 omp 启动后若模型不在档位，`switch_model` 切回档内模型。禁用清单只增不减 —— 子 omp 禁止使用禁用清单内的模型，用户拍板才放行新贵档。
+
+## 版本管理
+
+任务包 schema 有版本号 `squadVersion`，与脚本的版本校验逻辑绑定。
+
+| 字段 | 说明 |
+|---|---|
+| `squadVersion` | 任务包 schema 版本号（当前 `1`）。bootstrap 启动时校验版本匹配，不匹配则拒绝执行。 |
+| `SKILL.md` frontmatter `version` | Skill 自身的发布版本（`0.3.0`）。记录流程/脚本的变更历史。 |
+
+### 版本兼容规则
+
+| 场景 | 行为 |
+|---|---|
+| `squadVersion` 未填写 | 拒绝（`bundle.squadVersion` 缺失） |
+| `squadVersion` 不等于 `CURRENT_SQUAD_VERSION` | 拒绝（版本不匹配，提示当前版本号） |
+| `squadVersion` 非数字 | 拒绝（`squadVersion` 必须是整数） |
+
+### 升级流程
+
+当任务包 schema 发生不兼容变更（新增必填字段、删除字段、修改字段语义）时：
+1. 递增 `CURRENT_SQUAD_VERSION`（`bootstrap.ts` 顶部常量）
+2. 更新 `validateBundle()` 中的校验逻辑
+3. 更新 `SKILL.md` 中的 schema 文档
+4. 旧版本任务包应被新脚本拒绝（不改旧包，显式报错让用户重产）
 
 ## Gate 三态
 
@@ -223,6 +253,7 @@ bun run .omp/skills/squad-programming/scripts/bootstrap.ts \
 
 ```jsonc
 {
+  "squadVersion": 1,                           // 任务包 schema 版本（必填，当前 1）
   "squadId": "squad-20260818-a3f2",
   "taskType": "mixed",
   "baseBranch": "main",
@@ -230,6 +261,7 @@ bun run .omp/skills/squad-programming/scripts/bootstrap.ts \
   "modelTiers": {
     "cheap": "narwal-plan/deepseek-v4-flash",
     "mid": "narwal-plan/deepseek-v4-pro",
+    "high": "narwal-plan/glm-5.3",               // 重任务档位，显式指定时使用
     "banned": ["narwal-plan/claude-opus-*", "narwal-plan/claude-sonnet-*"]
   },
   "parent": { "target": "planner", "sessionId": "...", "name": "可选可读展示名" },  // cwd 可选：缺省 = bootstrap 运行目录（父 omp 会话 cwd），worktree 落 <父cwd>/.worktrees/；name 仅展示（worker brief 用），路由仍走 target
@@ -248,7 +280,7 @@ bun run .omp/skills/squad-programming/scripts/bootstrap.ts \
         "acceptance": "保持对外 API 签名不变",
         "mergePolicy": "auto"                    // 仅验收提示（skill 不自动 merge）：unknown 时强制 human-review
       },
-      "modelTier": "mid",                        // cheap | mid，或 "model": "<provider>/<id>"
+      "modelTier": "mid",                        // cheap | mid | high，或 "model": "<provider>/<id>"
      "branch": "feat/t1",                       // worktree 目录按此自动推导（<父cwd>/.worktrees/feat-t1）
      "worktree": "/path/to/repo/.worktrees/t1"  // 可选：省略则自动落在 <父cwd>/.worktrees/<branch 去/为->；仅特殊场景显式覆盖
       "budgetTokens": 200000                     // 可选：超预算强制上报父
@@ -265,7 +297,8 @@ bun run .omp/skills/squad-programming/scripts/bootstrap.ts \
 第一步（准备检查）：读启动 brief 里给出的任务包路径（worktree 场景 = 当前目录 .squad.json，
 shared 场景 = /tmp 绝对路径），完整理解任务、scope、gate、汇报协议、模型档位；
 用 list_models 确认分配模型在可用列表（不在则 switch_model 到档内模型并汇报实际生效模型）；
-然后立刻向父发 "[<taskId>] STARTED: <实际生效模型>，任务包已读" —— 父等全部 STARTED 才正式开工。
+然后立刻向父发 "[<taskId>] STARTED: <实际生效模型>，任务包已读"；
+【硬约束】收到父的开工确认（parent ask 回复「GO」或「开工」）前不得开始实现，只做准备检查。父等全部 STARTED 后才统一发开工确认。
 规则：只改 scope 内文件；求助必须用 intercom ask 且带 to=<parent.target>（不带 to 会被按 cwd 路由到同目录其他会话，收不到）；状态用 intercom send 给
 <parent.target>，格式 "[<taskId>] <STATE>: 一句话"（STATE ∈ STARTED/BLOCKED/REVIEWING/COMPLETE/FAILED）。
 完成标准即 .squad.json 中 acceptance。开始。

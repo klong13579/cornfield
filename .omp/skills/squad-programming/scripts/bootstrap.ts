@@ -40,6 +40,11 @@ import * as path from "node:path";
 
 import { statePath, writeState, type SquadState, type SubtaskState } from "./squad-state.ts";
 
+/** 当前任务包 schema 版本。与 bundle.squadVersion 比对，不匹配则拒绝。 */
+const CURRENT_SQUAD_VERSION = 1;
+
+const VALID_TIERS = ["cheap", "mid", "high"] as const;
+
 type Gate = {
 	kind: "derived" | "explicit" | "unknown";
 	verifiers?: string[];
@@ -56,7 +61,7 @@ type Subtask = {
 	deps?: string[];
 	acceptance: string;
 	gate: Gate;
-	modelTier?: "cheap" | "mid";
+	modelTier?: "cheap" | "mid" | "high";
 	model?: string;
 	branch?: string;
 	worktree?: string;
@@ -68,7 +73,8 @@ type Bundle = {
 	taskType: string;
 	baseBranch?: string;
 	maxConcurrency?: number;
-	modelTiers: { cheap: string; mid: string; banned?: string[] };
+	squadVersion?: number;
+	modelTiers: { cheap: string; mid: string; high?: string; banned?: string[] };
 	parent: { target: string; sessionId?: string; name?: string; cwd?: string };
 	subtasks: Subtask[];
 	reportProtocol?: { status?: string; ask?: string };
@@ -90,6 +96,13 @@ function validateBundle(raw: unknown): Bundle {
 	if (typeof raw !== "object" || raw === null) fail("任务包不是 JSON 对象");
 	const b = raw as Bundle;
 	if (!b.squadId || typeof b.squadId !== "string") fail("缺少 string: squadId");
+	// 版本校验
+	if (b.squadVersion === undefined || b.squadVersion === null)
+		fail(`缺少 squadVersion（当前版本 ${CURRENT_SQUAD_VERSION}）`);
+	if (typeof b.squadVersion !== "number" || !Number.isInteger(b.squadVersion))
+		fail(`squadVersion 必须是整数，收到: ${JSON.stringify(b.squadVersion)}`);
+	if (b.squadVersion !== CURRENT_SQUAD_VERSION)
+		fail(`squadVersion 不匹配：任务包 ${b.squadVersion}，脚本要求 ${CURRENT_SQUAD_VERSION}（请重新生成任务包）`);
 	if (!b.modelTiers || typeof b.modelTiers !== "object") fail("缺少 modelTiers 表（cheap/mid）");
 	if (!b.parent || typeof b.parent !== "object") fail("缺少 parent（target 必填，cwd 可选）");
 	if (!b.parent.target) fail("缺少 parent.target（父 session 名或 id）");
@@ -113,9 +126,9 @@ function validateBundle(raw: unknown): Bundle {
 			fail(`${tag}(${s.id}) gate=unknown 必须 mergePolicy=human-review（report-only 护栏）`);
 		if (s.isolation === "worktree" && !s.branch) fail(`${tag}(${s.id}) isolation=worktree 需要 branch`);
 		// worktree 字段可选：缺省时按 <父cwd>/.worktrees/<branch> 自动推导（见 resolveWorktree）
-		if (s.modelTier && !["cheap", "mid"].includes(s.modelTier))
-			fail(`${tag}(${s.id}) modelTier 非法: ${s.modelTier}`);
-		const model = s.model ?? (s.modelTier ? b.modelTiers[s.modelTier] : b.modelTiers.cheap);
+		if (s.modelTier && !(VALID_TIERS as readonly string[]).includes(s.modelTier))
+			fail(`${tag}(${s.id}) modelTier 非法: ${s.modelTier}（可选: ${VALID_TIERS.join(" | ")}）`);
+		const model = resolveModel(b, s);
 		if (!model) fail(`${tag}(${s.id}) 解析不出模型（model 或 modelTier→档位表）`);
 		if (isBanned(model, b.modelTiers.banned)) fail(`${tag}(${s.id}) 模型在禁用清单: ${model}`);
 	}
@@ -433,6 +446,7 @@ function workerBrief(bundle: Bundle, subtask: Subtask, model: string, briefPath:
 		`第一步（准备检查）：读 ${shellQuote(briefPath)} 的任务包（.squad.json），完整理解任务、scope、gate、汇报协议、模型档位；`,
 		`用 list_models 确认 ${model} 在可用列表；不在列表则 switch_model 切换到该档位可用模型（按实际生效模型为准）；`,
 		`然后向父发 STARTED 一次（发送规则：尝试 send 给 ${bundle.parent.target}；若报 Session not found/失败，不要重试刷屏、不要中断任务——这是启动窗口期 broker 路由未就绪的已知现象，父会用 intercom ask 来确认你；收到父 ask 必须回复「[${subtask.id}] ACK」带状态）。`,
+		`【硬约束】收到父的开工确认（parent ask 回复「GO」或「开工」）之前，不得开始实现代码。你在准备检查阶段只做：读任务包 + 核对模型 + 发 STARTED + 等父确认。父确认后才有下一步。`,
 		`规则：只改 scope 内文件；求助必须用 intercom ask 且必须带 to=${bundle.parent.target}（不带 to 的 ask 会被 intercom 按 cwd 路由到同目录其他会话，不会到达父 —— 实测误投到 aion-ui）；`,
 		`状态用 intercom send 给 ${bundle.parent.target}，格式 "[${subtask.id}] <STATE>: 一句话"（STATE ∈ STARTED/BLOCKED/REVIEWING/COMPLETE/FAILED，STARTED 只在准备检查通过后发一次）；`,
 		`完成标准见任务包 acceptance。收尾铁律：验收通过后必须把改动提交到当前分支（git add <改动文件> && git commit -m "[${subtask.id}] <一句话>"；排除 .squad.json 和 node_modules，commit 前先 git status 确认只含你的改动）——未提交的交付无法交接/merge，父只接收已提交的分支；`
@@ -440,8 +454,15 @@ function workerBrief(bundle: Bundle, subtask: Subtask, model: string, briefPath:
 	return lines.join(" ");
 }
 
-function resolveModel(bundle: Bundle, subtask: Subtask): string {
-	return subtask.model ?? (subtask.modelTier ? bundle.modelTiers[subtask.modelTier] : bundle.modelTiers.cheap);
+function resolveModel(bundle: Bundle, subtask: Subtask): string | undefined {
+	// 优先 subtask.model 显式指定，其次按 modelTier 查档位表，兜底 cheap
+	if (subtask.model) return subtask.model;
+	if (subtask.modelTier) {
+		const m = (bundle.modelTiers as Record<string, string | undefined>)[subtask.modelTier];
+		if (m) return m;
+		return undefined; // 档位在表里但没配置模型（如 glM5 未填）
+	}
+	return bundle.modelTiers.cheap;
 }
 
 function writeJson(file: string, data: unknown): void {
@@ -607,6 +628,8 @@ async function main(): Promise<void> {
 		});
 		const state: SquadState = {
 			squadId: bundle.squadId,
+			squadVersion: CURRENT_SQUAD_VERSION,
+			version: 0,
 			taskType: bundle.taskType,
 			baseBranch: bundle.baseBranch,
 			parent: { target: bundle.parent.target, sessionId: bundle.parent.sessionId, cwd: parentCwd },
