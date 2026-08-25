@@ -16,7 +16,7 @@ import { executeSSH } from "../ssh/ssh-executor";
 import { renderStatusLine } from "../tui";
 import { CachedOutputBlock } from "../tui/output-block";
 import type { ToolSession } from ".";
-import { formatStyledTruncationWarning, type OutputMeta } from "./output-meta";
+import { formatFullOutputReference, formatStyledTruncationWarning, type OutputMeta } from "./output-meta";
 import { ToolError } from "./tool-errors";
 import { toolResult } from "./tool-result";
 import { clampTimeout } from "./tool-timeouts";
@@ -175,7 +175,10 @@ export class SshTool implements AgentTool<typeof sshSchema, SSHToolDetails> {
 			throw new ToolError(result.output || "Command aborted");
 		}
 
-		const outputText = result.output || "(no output)";
+		const outputText =
+			result.truncated && result.artifactId
+				? `${result.output || "(no output)"}\n\n${formatFullOutputReference(result.artifactId)}`
+				: result.output || "(no output)";
 		const details: SSHToolDetails = {};
 		const resultBuilder = toolResult(details).text(outputText).truncationFromSummary(result, { direction: "tail" });
 

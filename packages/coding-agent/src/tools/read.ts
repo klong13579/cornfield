@@ -40,7 +40,12 @@ import {
 	renderReadUrlResult,
 } from "./fetch";
 import { applyListLimit } from "./list-limit";
-import { formatFullOutputReference, formatStyledTruncationWarning, type OutputMeta } from "./output-meta";
+import {
+	formatFullOutputReference,
+	formatStyledTruncationWarning,
+	type OutputMeta,
+	persistToolOutputArtifact,
+} from "./output-meta";
 import { expandPath, formatPathRelativeToCwd, resolveReadPath } from "./path-utils";
 import { formatAge, formatBytes, shortenPath, wrapBrackets } from "./render-utils";
 import {
@@ -1314,6 +1319,13 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 						result: truncation,
 						options: { direction: "head", startLine: startLineDisplay, totalFileLines },
 					};
+					// Sidecar: persist the full collected content so the truncated view
+					// stays recoverable via artifact:// (page-fault read).
+					const sidecarId = await persistToolOutputArtifact(this.session, "read", selectedContent);
+					if (sidecarId) {
+						truncation.artifactId = sidecarId;
+						outputText += `\n\n${formatFullOutputReference(sidecarId)}`;
+					}
 				} else if (startLine + userLimitedLines < totalFileLines) {
 					const remaining = totalFileLines - (startLine + userLimitedLines);
 					const nextOffset = startLine + userLimitedLines + 1;

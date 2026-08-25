@@ -3,10 +3,10 @@ name: 工具输出清理：工具旁路补齐 + 轮次窗口化（消费后清�
 status: active
 objective: 大工具输出旁路到 artifact:// 降窗口占用；历史轮次 toolResult 窗口化，减少 context rot
 doneWhen: |-
-  - read/search/grep/find 超阈值输出均带 artifact:// 引用且可完整拉回
-  - 全部旁路路径 footer 格式统一（等价 `[raw output: artifact://<id>]`）
-  - 轮次窗口化默认关闭上线，开关切换行为可单测断言
-  - A/B canary（窗口化开/关同任务对比）通过后才开默认
+  - read/search/grep/find 超阈值输出均带 artifact:// 引用且可完整拉回——✅ B 阶段完成（persistToolOutputArtifact + formatFullOutputReference footer）
+  - 全部旁路路径 footer 统一——✅ read/search/find/python/ssh 统一走 formatFullOutputReference；bash/gh 保留既有等价标记
+  - 轮次窗口化默认关闭上线，开关切换行为可单测断言——待 A 阶段
+  - A/B canary（窗口化开/关同任务对比）通过后才开默认——待 A 阶段
 lastActivity: 2026-08-25 15:07
 sessionRefs: []
 artifacts: []
@@ -63,7 +63,8 @@ openQuestions:
 
 ## 进度记录
 
-- 2026-08-25 15:07 — topic 创建；已完成 Codex 源码调研与方案定型，任务清单已出（Phase A 3 项 + Phase B 3 项）
+- 2026-08-25 — B 阶段全部完成：persistToolOutputArtifact helper（output-meta.ts，32KB 阈值）+ TruncationResult.artifactId 字段；read/search/find 截断时写 artifact + footer；python（withSidecar 3 处）/ssh 补 footer；发现并利用既有渲染层（formatFullOutputReference 已在 read/search/find import）。验证：artifact-sidecar 4 测试 pass + tsgo 通过 + todo-write 9 pass + voice 69 pass
+- 2026-08-25 — topic 创建；已完成 Codex 源码调研与方案定型，任务清单已出（Phase A 3 项 + Phase B 3 项）
 
 ## 批注
 
