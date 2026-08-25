@@ -321,6 +321,8 @@ jobs:
     runs-on: ubuntu-22.04
     permissions:
       contents: write
+    env:
+      NPM_TOKEN_SET: ${{ secrets.NPM_TOKEN != '' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -373,7 +375,7 @@ jobs:
             packages/desktop/dist/*.blockmap
           generate_release_notes: true
       - name: Publish to npm
-        if: ${{ !inputs.skip_npm && secrets.NPM_TOKEN != '' }}
+        if: ${{ !inputs.skip_npm && env.NPM_TOKEN_SET == 'true' }}
         env:
           NPM_CONFIG_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: bun run ci:release:publish
