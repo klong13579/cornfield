@@ -47,6 +47,36 @@ export interface WireHostToolDefinition {
 	hidden?: boolean;
 }
 
+/** 行锚点（与 hashline 编辑模式的行引用同构：行号 + 2 字母 hash）。 */
+export interface WireLineAnchor {
+	line: number;
+	hash: string;
+	contentHint?: string;
+}
+
+/** replace 模式编辑条目（与 coding-agent edit 工具 replace 模式 schema 同构）。 */
+export interface WireReplaceEditEntry {
+	old_text: string;
+	new_text: string;
+	all?: boolean;
+}
+
+/** patch 模式编辑条目（与 coding-agent edit 工具 patch 模式 schema 同构）。 */
+export interface WirePatchEditEntry {
+	op?: "create" | "delete" | "update";
+	rename?: string;
+	diff?: string;
+}
+
+/** hashline 模式编辑条目（loc/content，与 coding-agent edit 工具 hashline 模式 schema 同构）。 */
+export interface WireHashlineEditEntry {
+	loc?: "append" | "prepend" | { append: string } | { prepend: string } | { range: { pos: string; end: string } };
+	content?: string[] | null;
+}
+
+/** fs_edit 的编辑条目联合（载荷按 mode 区分）。 */
+export type WireEditEntry = WireReplaceEditEntry | WirePatchEditEntry | WireHashlineEditEntry;
+
 /**
  * Multiplex 命令 — P3 升级后每条命令均可带 `sessionId` 参数定向 agent。
  */
@@ -267,7 +297,53 @@ export type WireExtensionCommand =
 	/** P0 收口：删除一个 MCP 服务器配置。 */
 	| { id?: string; type: "remove_mcp_server"; name: string }
 	/** P0 收口：测试一个 MCP 服务器连通性（stdio）。 */
-	| { id?: string; type: "test_mcp_server"; name: string };
+	| { id?: string; type: "test_mcp_server"; name: string }
+	/**
+	 * fs 写命令面（票 01）：整段写一个 workspace 文件（UTF-8）。
+	 * 路径约束与 fs_read 同（必须解析在 agentDir 内，越界 ok:false）；写后走 LSP
+	 * writethrough（didChange 同步 + notifySaved），格式化/诊断状态不丢。
+	 */
+	| { id?: string; type: "fs_write"; sessionId?: string; path: string; content: string }
+	/**
+	 * 精确编辑（透传既有 edit 工具多模 schema）。mode 缺省 = settings `edit.mode`；
+	 * mode ∈ replace/patch/hashline 用 `edits`，atom 用 `input`。写后同 fs_write 走 LSP writethrough。
+	 */
+	| {
+			id?: string;
+			type: "fs_edit";
+			sessionId?: string;
+			path: string;
+			mode?: "replace" | "patch" | "hashline" | "atom";
+			edits?: WireEditEntry[];
+			input?: string;
+	  }
+	/**
+	 * 前后内容统一 diff（供前端 diff 视图）。path+content：agentDir 内文件 vs 待写 content；
+	 * before+after：纯文本 diff（不落地）。
+	 */
+	| {
+			id?: string;
+			type: "fs_diff";
+			sessionId?: string;
+			path?: string;
+			content?: string;
+			before?: string;
+			after?: string;
+	  }
+	/** git 最小集（票 02）：当前分支 + staged/unstaged/untracked 列表。 */
+	| { id?: string; type: "git_status"; sessionId?: string }
+	/** working tree vs HEAD（或 staged）diff。 */
+	| { id?: string; type: "git_diff"; sessionId?: string; cached?: boolean; path?: string }
+	/** 最近 n 条 commit（hash/author/message）。 */
+	| { id?: string; type: "git_log"; sessionId?: string; count?: number }
+	/** 单 commit 详情。 */
+	| { id?: string; type: "git_show"; sessionId?: string; revision: string }
+	/** 分支列表（local + remote + current）。 */
+	| { id?: string; type: "git_branches"; sessionId?: string }
+	/** 配置读写（票 03）：读 ~/.omp/agent/config.yml 的域。 */
+	| { id?: string; type: "get_config"; key?: string }
+	/** 写指定域并持久化（同一份 config.yml，与 set_skill_enabled/set_model_disabled 不双写）。 */
+	| { id?: string; type: "set_config"; key: string; value: unknown };
 export type WireCommand = MultiplexCommand | WireExtensionCommand;
 
 /** 获取具体命令结构的 helper。 */
