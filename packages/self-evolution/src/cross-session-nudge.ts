@@ -17,6 +17,7 @@ const AUTO_DISMISS_THRESHOLD = 3; // auto-dismiss after 3 deliveries in 30 days
 export class CrossSessionNudgeEngine {
 	#nudgeHistoryStore: NudgeHistoryStore;
 	#episodeStore: EpisodeStore;
+	// biome-ignore lint/correctness/noUnusedPrivateClassMembers: injected via constructor, future read path
 	#diagnosisStore?: EpisodeDiagnosisStore;
 
 	#lastDeliveredAt = 0;

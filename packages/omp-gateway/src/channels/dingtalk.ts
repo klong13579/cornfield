@@ -395,6 +395,7 @@ export class DingTalkChannel extends BaseChannel {
 
 	#client: DWClient | null = null;
 	#config: DingTalkConfig | null = null;
+	// biome-ignore lint/correctness/noUnusedPrivateClassMembers: written on connect/disconnect, read path is #connectionFailed — future getter
 	#connected = false;
 	#connectionFailed = false;
 	#accountId = "__default__";
@@ -1652,11 +1653,8 @@ export class DingTalkChannel extends BaseChannel {
 
 	// Metrics — written in #handleMessage / handleInbound. Kept as
 	// plain counters for now; exposing them through a getter is a
-	// future change. biome's `noUnusedPrivateClassMembers` flags them
-	// as unused because they're only written; suppress inline.
-	// biome-ignore lint/correctness/noUnusedPrivateClassMembers: written in #handleMessage, future getter
+	// future change.
 	#receivedCount = 0;
-	// biome-ignore lint/correctness/noUnusedPrivateClassMembers: written in #handleMessage, future getter
 	#processedCount = 0;
 
 	async onConnect(config: ChannelConfig): Promise<void> {

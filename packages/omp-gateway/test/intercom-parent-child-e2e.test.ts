@@ -87,7 +87,7 @@ describeE2E("intercom parent-child closed-loop", () => {
 	let childSessionId: string | null = null;
 	const childLines: string[] = [];
 	let childBuf = "";
-	let childErr = "";
+	let _childErr = "";
 	const childFrames = (): Array<{ type: string; [key: string]: unknown }> =>
 		childLines
 			.map(line => {
@@ -174,7 +174,7 @@ describeE2E("intercom parent-child closed-loop", () => {
 			}
 		})();
 		(async () => {
-			for await (const chunk of child.stderr!) childErr += decoder.decode(chunk);
+			for await (const chunk of child.stderr!) _childErr += decoder.decode(chunk);
 		})();
 
 		// NOTE: do NOT wait for `ready` inside beforeAll — bun:test caps hook
@@ -223,11 +223,11 @@ describeE2E("intercom parent-child closed-loop", () => {
 
 	test("child auto-reports task-round completion to parent", async () => {
 		child?.stdin?.write(
-			JSON.stringify({
+			`${JSON.stringify({
 				id: 1,
 				type: "prompt",
 				message: "完成一个最小任务：直接回答 OK 两个字即可。不要调用任何工具。",
-			}) + "\n",
+			})}\n`,
 		);
 		await waitFor("round-1 agent_end", () => childFrames().some(f => f.type === "agent_end"), 120_000);
 
@@ -256,7 +256,7 @@ describeE2E("intercom parent-child closed-loop", () => {
 		// ready inside a real test (240s budget) fixed both the ready wait and
 		// this round-2 mechanic.
 		child?.stdin?.write(
-			JSON.stringify({ id: 2, type: "prompt", message: "本轮请直接回答 2+2=？只回答数字。" }) + "\n",
+			`${JSON.stringify({ id: 2, type: "prompt", message: "本轮请直接回答 2+2=？只回答数字。" })}\n`,
 		);
 		await waitFor("round-2 agent_end", () => childFrames().filter(f => f.type === "agent_end").length >= 2, 120_000);
 	}, 240_000);

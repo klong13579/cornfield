@@ -163,7 +163,10 @@ describe("record_transcribe 入参校验（不触模型）", () => {
 	});
 
 	test("tiny audio (<100B) → ok:false", async () => {
-		const res = await sendCommand({ type: "record_transcribe", audio: Buffer.from("x".repeat(50), "utf-8").toString("base64") });
+		const res = await sendCommand({
+			type: "record_transcribe",
+			audio: Buffer.from("x".repeat(50), "utf-8").toString("base64"),
+		});
 		expect(res.ok).toBe(false);
 		expect(String(res.error)).toMatch(/too small|empty/);
 	});
