@@ -87,9 +87,49 @@ function fail(message: string): never {
 	process.exit(1);
 }
 
+/** 档位等级：cheap=0 < mid=1 < high=2。数值越大越高级。 */
+const TIER_ORDER: Record<string, number> = { cheap: 0, mid: 1, high: 2 };
+
 function isBanned(model: string, banned: string[] | undefined): boolean {
 	if (!banned) return BANNED_GLOB_TIPS.some(glob => model.includes(glob));
 	return banned.some(glob => model.includes(glob.replaceAll("*", "")));
+}
+
+/**
+ * 将模型字符串映射到档位标签（cheap/mid/high）。
+ * 在 modelTiers 表里逐项匹配值；不在标准档位表时返回 undefined。
+ */
+function resolveTierLabel(model: string, tiers: Bundle["modelTiers"]): string | undefined {
+	for (const [tier, tierModel] of Object.entries(tiers)) {
+		if (tier === "banned") continue;
+		if (typeof tierModel === "string" && model === tierModel) return tier;
+	}
+	return undefined;
+}
+
+/**
+ * 校验父模型 >= 所有子模型的档位。
+ * 父模型不在标准档位表时跳过（假设为高级模型）。
+ * 子模型不在标准档位表时跳过（无法判断档位时不拦）。
+ */
+function validateParentModel(parentModel: string, bundle: Bundle): void {
+	const parentTier = resolveTierLabel(parentModel, bundle.modelTiers);
+	if (!parentTier) return; // 父模型不在标准档位表，假设 >= high
+	const parentLevel = TIER_ORDER[parentTier] ?? 2;
+
+	for (const s of bundle.subtasks) {
+		const childModel = resolveModel(bundle, s);
+		if (!childModel) continue;
+		const childTier = resolveTierLabel(childModel, bundle.modelTiers);
+		if (!childTier) continue; // 子模型不在标准档位表，跳过
+		const childLevel = TIER_ORDER[childTier] ?? 2;
+		if (childLevel > parentLevel) {
+			fail(
+				`${s.id} 模型档位（${childTier}）高于父模型档位（${parentTier}），` +
+				`父模型必须 >= 子模型（当前父: ${parentModel} = ${parentTier}, 子: ${childModel} = ${childTier}）`,
+			);
+		}
+	}
 }
 
 function validateBundle(raw: unknown): Bundle {
@@ -482,6 +522,7 @@ async function main(): Promise<void> {
 				"  --bundle <bundle>          任务包绝对路径（集结）",
 				"  --parent-target <id>       父 session 名或前缀（PI_SUBAGENT_ORCHESTRATOR_TARGET）",
 				"  --parent-session-id <id>   父 session id（PI_SUBAGENT_ORCHESTRATOR_SESSION_ID）",
+				"  --parent-model <model>     父当前模型（如 narwal-plan/deepseek-v4-pro）；集结时必填，校验父 >= 子",
 				"  --dry-run                  只打印将执行的命令，不执行",
 				"  --skip-verify              跳过启动后 pane 准备检查（仅父 agent 确需绕过时用）",
 				"  --verify-timeout <ms>      pane 准备检查超时（默认 60000）",
@@ -518,6 +559,14 @@ async function main(): Promise<void> {
 		fail(`任务包文件不可读: ${bundlePath}`);
 	}
 	const bundle = validateBundle(JSON.parse(raw));
+
+	const parentModel = flagValue("--parent-model");
+	if (parentModel) {
+		validateParentModel(parentModel, bundle);
+	} else if (!checkOnly) {
+		// 集结（非 --check）时 --parent-model 必填，确保父模型 >= 子模型
+		fail("集结需要 --parent-model <父当前模型>（如 narwal-plan/deepseek-v4-pro），用于校验父模型 >= 子模型");
+	}
 
 	if (checkOnly) {
 		process.stdout.write(`任务包校验通过: ${bundle.squadId}（${bundle.subtasks.length} 个子任务）\n`);

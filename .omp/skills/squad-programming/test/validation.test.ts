@@ -361,3 +361,117 @@ describe("general bundle validation", () => {
 		expect(stderr).toMatch(/modelTiers/);
 	});
 });
+
+// ─── 父模型 >= 子模型校验 ───────────────────────────────────────────────────
+
+describe("parent model >= child model tier", () => {
+	async function runCheckWithParent(
+		bundle: Record<string, unknown>,
+		parentModel: string,
+	): Promise<{ code: number; stderr: string }> {
+		const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "squad-test-"));
+		const bundlePath = path.join(tmpDir, "bundle.json");
+		await fs.promises.writeFile(bundlePath, JSON.stringify(bundle, null, 2));
+
+		const proc = Bun.spawn(
+			["bun", "run", BOOTSTRAP_SCRIPT, "--check", bundlePath, "--parent-model", parentModel],
+			{ stdout: "pipe", stderr: "pipe" },
+		);
+		const exitCode = await proc.exited;
+		const stderr = await new Response(proc.stderr).text();
+		await fs.promises.rm(tmpDir, { recursive: true, force: true });
+		return { code: exitCode ?? 1, stderr };
+	}
+
+	function childWithTier(tier: string): Record<string, unknown> {
+		return {
+			...(makeBundle().subtasks as Array<Record<string, unknown>>)[0],
+			modelTier: tier,
+		};
+	}
+
+	test("父=mid, 子=cheap 通过", async () => {
+		const { code } = await runCheckWithParent(
+			makeBundle({ subtasks: [childWithTier("cheap")] }),
+			"narwal-plan/deepseek-v4-pro",
+		);
+		expect(code).toBe(0);
+	});
+
+	test("父=mid, 子=mid 通过（同级允许）", async () => {
+		const { code } = await runCheckWithParent(
+			makeBundle({ subtasks: [childWithTier("mid")] }),
+			"narwal-plan/deepseek-v4-pro",
+		);
+		expect(code).toBe(0);
+	});
+
+	test("父=mid, 子=high 拒绝", async () => {
+		const { code, stderr } = await runCheckWithParent(
+			makeBundle({ subtasks: [childWithTier("high")] }),
+			"narwal-plan/deepseek-v4-pro",
+		);
+		expect(code).not.toBe(0);
+		expect(stderr).toMatch(/高于/);
+	});
+
+	test("父=high, 子=high 通过", async () => {
+		const { code } = await runCheckWithParent(
+			makeBundle({ subtasks: [childWithTier("high")] }),
+			"narwal-plan/glm-5.3",
+		);
+		expect(code).toBe(0);
+	});
+
+	test("父=high, 子=cheap 通过", async () => {
+		const { code } = await runCheckWithParent(
+			makeBundle({ subtasks: [childWithTier("cheap")] }),
+			"narwal-plan/glm-5.3",
+		);
+		expect(code).toBe(0);
+	});
+
+	test("父=cheap, 子=mid 拒绝", async () => {
+		const { code, stderr } = await runCheckWithParent(
+			makeBundle({ subtasks: [childWithTier("mid")] }),
+			"narwal-plan/deepseek-v4-flash",
+		);
+		expect(code).not.toBe(0);
+		expect(stderr).toMatch(/高于/);
+	});
+
+	test("父模型不在标准档位表跳过校验", async () => {
+		const { code } = await runCheckWithParent(
+			makeBundle({ subtasks: [childWithTier("high")] }),
+			"anthropic/claude-sonnet-4", // 不在 cheap/mid/high 中 → 跳过
+		);
+		expect(code).toBe(0);
+	});
+
+	test("子模型不在标准档位表跳过比较", async () => {
+		const { code } = await runCheckWithParent(
+			makeBundle({
+				subtasks: [
+					{
+						...(makeBundle().subtasks as Array<Record<string, unknown>>)[0],
+						modelTier: undefined,
+						model: "anthropic/claude-sonnet-4",
+					},
+				],
+			}),
+			"narwal-plan/deepseek-v4-flash",
+		);
+		expect(code).toBe(0);
+	});
+
+	test("多个子任务，一个违规就拒绝", async () => {
+		const t1 = childWithTier("cheap");
+		const t2 = { ...childWithTier("high"), id: "T2", branch: "feat/t2" }; // 违规
+		const { code, stderr } = await runCheckWithParent(
+			makeBundle({ subtasks: [t1, t2] }),
+			"narwal-plan/deepseek-v4-pro",
+		);
+		expect(code).not.toBe(0);
+		expect(stderr).toMatch(/高于/);
+	});
+});

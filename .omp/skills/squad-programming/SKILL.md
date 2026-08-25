@@ -65,6 +65,13 @@ mutating: true
 
 按任务类型映射；`unknown` 或特殊需求可 per-subtask 覆盖 `model`/`modelTier`。编排者（父）保持当前模型不动。
 
+**硬约束：父模型必须 >= 所有子模型的档位。**
+- 父用 `narwal-plan/deepseek-v4-pro`（mid）时，子不能用 `high`（narwal-plan/glm-5.3）。
+- 父用 `narwal-plan/glm-5.3`（high）时，子可以用任何档位。
+- 父模型不在标准档位表（cheap/mid/high）时，假设为最高级，不拦截。
+- 子模型不在标准档位表时，跳过档位比较（无法判断时不拦）。
+- 集结时 `--parent-model` 传入父当前模型，脚本自动校验。
+
 ### Step 0.5 产出任务包（.squad.json）
 
 见 #任务包 schema。任务包写入每个 worktree 的 `.squad.json`（脚本执行），父保留聚合副本到 `~/.omp/squads/<squadId>/`（不污染 repo 的 git status）；集结脚本同时在这里写 `state.json`（状态底账，父中断后用于恢复，见 #父中断恢复）。
@@ -78,6 +85,7 @@ bun run .omp/skills/squad-programming/scripts/bootstrap.ts \
   --bundle <任务包绝对路径> \
   --parent-target <父 session 名或 id> \
   --parent-session-id <父 session id> \
+  --parent-model <父当前模型> \
   [--dry-run]
 ```
 
