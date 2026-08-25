@@ -386,7 +386,13 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 					return;
 				}
 				case "fs_read": {
-					const fsCmd = command as { type: "fs_read"; sessionId?: string; path?: string };
+					const fsCmd = command as {
+						type: "fs_read";
+						sessionId?: string;
+						path?: string;
+						offset?: number;
+						limit?: number;
+					};
 					const agentId = fsCmd.sessionId ?? conn.activeAgentId;
 					const meta = registry.getMeta(agentId);
 					if (!meta) {
@@ -398,7 +404,7 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 						fail(target.error);
 						return;
 					}
-					const content = await readTextFileClipped(target.path);
+					const content = await readTextFileClipped(target.path, fsCmd.offset, fsCmd.limit);
 					if (content.error) {
 						fail(content.error);
 						return;
@@ -706,6 +712,43 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 						});
 					} catch (err) {
 						fail(`git_branches failed: ${err instanceof Error ? err.message : String(err)}`);
+					}
+					return;
+				}
+				case "git_commit": {
+					const gc = command as { type: "git_commit"; sessionId?: string; message?: string; paths?: string[] };
+					const agentId = gc.sessionId ?? conn.activeAgentId;
+					const meta = registry.getMeta(agentId);
+					if (!meta) {
+						fail(`unknown agent: ${agentId}`);
+						return;
+					}
+					const message = (gc.message ?? "").trim();
+					if (!message) {
+						fail("git_commit: message required");
+						return;
+					}
+					try {
+						const addArgs = gc.paths && gc.paths.length > 0 ? ["add", "--", ...gc.paths] : ["add", "-A"];
+						const addRes = await runWireGit(meta.agentDir, addArgs);
+						if (addRes.exitCode !== 0) {
+							fail(`git add failed: ${addRes.stderr.trim() || addRes.stdout.trim()}`);
+							return;
+						}
+						const commitRes = await runWireGit(meta.agentDir, ["commit", "-m", message]);
+						if (commitRes.exitCode !== 0) {
+							const commitOut = (commitRes.stderr + commitRes.stdout).trim();
+							if (/nothing to commit|no changes added/i.test(commitOut)) {
+								done({ committed: false, reason: "nothing to commit" });
+								return;
+							}
+							fail(`git commit failed: ${commitOut}`);
+							return;
+						}
+						const head = await runWireGit(meta.agentDir, ["rev-parse", "HEAD"]);
+						done({ committed: true, hash: head.exitCode === 0 ? head.stdout.trim() : undefined });
+					} catch (err) {
+						fail(`git_commit failed: ${err instanceof Error ? err.message : String(err)}`);
 					}
 					return;
 				}
@@ -1400,11 +1443,14 @@ async function listDirEntries(
 	return { items };
 }
 
-/** 读文本文件，> 128KB 截断并标记 truncated。 */
+/** 读文本文件：缺省 = 整文件 + 128KB 截断（保持既有行为）；offset/limit = 按行分块读（票 06 补，>128KB 不截断）。 */
 async function readTextFileClipped(
 	file: string,
+	offset?: number,
+	limit?: number,
 ): Promise<
-	{ text: string; truncated: boolean; error?: undefined } | { text?: undefined; truncated?: undefined; error: string }
+	| { text: string; truncated: boolean; total?: number; offset?: number; limit?: number; error?: undefined }
+	| { text?: undefined; truncated?: undefined; error: string }
 > {
 	let text: string;
 	try {
@@ -1412,6 +1458,18 @@ async function readTextFileClipped(
 	} catch (err) {
 		if (isEnoent(err)) return { error: `no such file: ${path.basename(file)}` };
 		throw err;
+	}
+	if (offset !== undefined || limit !== undefined) {
+		const lines = text.split("\n");
+		const start = Math.max(0, offset ?? 0);
+		const end = limit !== undefined ? Math.min(lines.length, start + limit) : lines.length;
+		let chunk = lines.slice(start, end).join("\n");
+		let truncated = false;
+		if (chunk.length > FS_MAX_READ_BYTES) {
+			chunk = chunk.slice(0, FS_MAX_READ_BYTES);
+			truncated = true;
+		}
+		return { text: chunk, truncated, total: lines.length, offset: start, limit: end - start };
 	}
 	if (text.length <= FS_MAX_READ_BYTES) return { text, truncated: false };
 	return { text: text.slice(0, FS_MAX_READ_BYTES), truncated: true };

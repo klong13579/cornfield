@@ -110,6 +110,18 @@ const COMMAND_TYPES = [
 	"set_mcp_server",
 	"remove_mcp_server",
 	"test_mcp_server",
+	// 票 01+02+03（fs 写 / git 最小集 / 配置读写）——合体时 T1 的登记提交未并入，补登记
+	"fs_write",
+	"fs_edit",
+	"fs_diff",
+	"git_status",
+	"git_diff",
+	"git_log",
+	"git_show",
+	"git_branches",
+	"git_commit",
+	"get_config",
+	"set_config",
 ] as const satisfies readonly string[];
 
 /** 从 WireCommand union 提取 type 字面量（编译期核对清单）。 */

@@ -169,7 +169,15 @@ export type WireExtensionCommand =
 	 */
 	| { id?: string; type: "fs_list"; sessionId?: string; path?: string }
 	/** 只读读一个 workspace 文件（文本，utf-8；> 128KB 截断到 128KB）。路径约束同上。 */
-	| { id?: string; type: "fs_read"; sessionId?: string; path: string }
+	| {
+			id?: string;
+			type: "fs_read";
+			sessionId?: string;
+			path: string;
+			/** 行偏移（0 基）+ 行数上限——大文件分块读（票 06 补：>128KB 不截断）。缺省 = 整文件（保持既有 128KB 截断行为）。 */
+			offset?: number;
+			limit?: number;
+	  }
 	/**
 	 * R-IMG-SERVE：只读读一个 workspace 图片文件（二进制）→ dataUrl。
 	 * 上限 2MB（超出截断并标记 truncated）；MIME 按扩展名（png/jpg/gif/webp/svg/bmp/ico/avif，
@@ -340,6 +348,8 @@ export type WireExtensionCommand =
 	| { id?: string; type: "git_show"; sessionId?: string; revision: string }
 	/** 分支列表（local + remote + current）。 */
 	| { id?: string; type: "git_branches"; sessionId?: string }
+	/** 提交（票 11 补）：message 必填；paths 缺省 = 全部改动（git add -A）。 */
+	| { id?: string; type: "git_commit"; sessionId?: string; message: string; paths?: string[] }
 	/** 配置读写（票 03）：读 ~/.omp/agent/config.yml 的域。 */
 	| { id?: string; type: "get_config"; key?: string }
 	/** 写指定域并持久化（同一份 config.yml，与 set_skill_enabled/set_model_disabled 不双写）。 */

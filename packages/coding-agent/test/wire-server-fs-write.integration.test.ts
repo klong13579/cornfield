@@ -166,4 +166,28 @@ describe("fs 写命令面（fs_write / fs_edit / fs_diff）", () => {
 			expect(res.diff).toContain("two");
 		});
 	});
+
+	test("fs_read 分块：>128KB 文件按 offset/limit 读，突破截断（票 06 补）", async () => {
+		const big = Array.from({ length: 4000 }, (_, i) => `line-${String(i).padStart(4, "0")}-${("x").repeat(48)}`).join(
+			"\n",
+		);
+		await Bun.write(path.join(projectCwd, "big.txt"), big);
+		await withClient(async client => {
+			const whole = await client.request<{ text: string; truncated: boolean }>({ type: "fs_read", path: "big.txt" });
+			expect(whole.truncated).toBe(true);
+			const res = await client.request<{
+				text: string;
+				truncated: boolean;
+				total?: number;
+				offset?: number;
+				limit?: number;
+			}>({ type: "fs_read", path: "big.txt", offset: 3000, limit: 200 });
+			expect(res.total).toBe(4000);
+			expect(res.offset).toBe(3000);
+			expect(res.limit).toBe(200);
+			expect(res.text.startsWith("line-3000-")).toBe(true);
+			expect(res.text).toContain("line-3199-");
+			expect(res.text).not.toContain("line-3200-");
+		});
+	});
 });

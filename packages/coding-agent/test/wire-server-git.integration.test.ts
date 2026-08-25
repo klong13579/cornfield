@@ -182,9 +182,10 @@ describe("git 最小集 — 有改动 + 多分支仓库", () => {
 describe("git 最小集 — 空仓库（无 commit）", () => {
 	let proc: ReturnType<typeof Bun.spawn> | undefined;
 	let info = { url: "", token: "" };
+	let repo: string;
 
 	beforeAll(async () => {
-		const repo = await fs.mkdtemp(path.join(os.tmpdir(), "omp-git-empty-"));
+		repo = await fs.mkdtemp(path.join(os.tmpdir(), "omp-git-empty-"));
 		await runGit(repo, ["init", "-b", "main"]);
 		await Bun.write(path.join(repo, "seed.txt"), "seed\n");
 
@@ -220,6 +221,39 @@ describe("git 最小集 — 空仓库（无 commit）", () => {
 			});
 			expect(res.local).toEqual([]);
 			expect(res.current).not.toBeNull();
+		} finally {
+			client.close();
+		}
+	});
+
+	test("git_commit：修改文件后提交，返回 hash 且 git log 可见（票 11 补）", async () => {
+		await Bun.write(path.join(repo, "a.txt"), "committed content\n");
+		const client = new PiClient({ url: info.url, token: info.token, autoReconnect: false });
+		await client.connect();
+		try {
+			const res = await client.request<{ committed: boolean; hash?: string; reason?: string }>({
+				type: "git_commit",
+				message: "test commit from wire",
+			});
+			expect(res.committed).toBe(true);
+			expect(typeof res.hash).toBe("string");
+			const log = await runGit(repo, ["log", "--oneline", "-1"]);
+			expect(log).toContain("test commit from wire");
+		} finally {
+			client.close();
+		}
+	});
+
+	test("git_commit：无改动时返回 committed:false（nothing to commit）", async () => {
+		const client = new PiClient({ url: info.url, token: info.token, autoReconnect: false });
+		await client.connect();
+		try {
+			const res = await client.request<{ committed: boolean; reason?: string }>({
+				type: "git_commit",
+				message: "nothing to commit test",
+			});
+			expect(res.committed).toBe(false);
+			expect(res.reason).toContain("nothing to commit");
 		} finally {
 			client.close();
 		}
