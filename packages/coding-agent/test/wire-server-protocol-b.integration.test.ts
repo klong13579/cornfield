@@ -220,9 +220,9 @@ describe("协议批 B-3 — list_commands 命令表", () => {
 			for (const expectName of ["/compact", "/undo", "/model", "/yolo", "/retry", "/usage"]) {
 				expect(names.has(expectName)).toBe(true);
 			}
-			// 每个命令都有非空描述
+			// 内置/虚拟命令带前导 /；extra（hook/custom/skill:）形态各异——
+			// 只断言描述非空（前导 / 断言只对内置命令成立，见上面 6 个全覆盖）。
 			for (const c of result.commands) {
-				expect(c.name.startsWith("/")).toBe(true);
 				expect(c.description.length).toBeGreaterThan(0);
 			}
 		} finally {
