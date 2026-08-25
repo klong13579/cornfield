@@ -84,7 +84,7 @@ interface Connection {
  * 传输无关的命令执行上下文（P3：ws 与内存传输共用 handleCommand）。
  * ws 层把 Connection 适配成此接口；未来 TUI 进程内客户端传内存实现。
  */
-interface CommandContext {
+export interface CommandContext {
 	/** 当前焦点 agent id。 */
 	activeAgentId: string;
 	/** attach/switch 后更新焦点。 */
