@@ -412,8 +412,8 @@ export class InteractiveMode implements InteractiveModeContext {
 		);
 
 		// Get current model info for welcome screen
-		const modelName = this.session.model?.name ?? "Unknown";
-		const providerName = this.session.model?.provider ?? "Unknown";
+		const modelName = (this.wireClient?.getSnapshot()?.model ?? this.session.model)?.name ?? "Unknown";
+		const providerName = (this.wireClient?.getSnapshot()?.model ?? this.session.model)?.provider ?? "Unknown";
 
 		// Get recent sessions
 		const recentSessions = await logger.time("InteractiveMode.init:recentSessions", () =>
@@ -697,7 +697,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		if (this.#pendingSubmittedInput === input) {
 			this.#pendingSubmittedInput = undefined;
 		}
-		if (!this.session.isStreaming) {
+		if (!(this.wireClient?.getSnapshot()?.isStreaming ?? this.session.isStreaming)) {
 			this.#clearLoadingAnimation();
 		}
 	}
@@ -733,7 +733,7 @@ export class InteractiveMode implements InteractiveModeContext {
 			if (ansi) {
 				this.editor.borderColor = (str: string) => `${ansi}${str}\x1b[39m`;
 			} else {
-				const level = this.session.thinkingLevel ?? ThinkingLevel.Off;
+				const level = (this.wireClient?.getSnapshot()?.thinkingLevel ?? this.session.thinkingLevel) ?? ThinkingLevel.Off;
 				this.editor.borderColor = theme.getThinkingBorderColor(level);
 			}
 		}
@@ -855,7 +855,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		const resolved = this.session.resolveRoleModelWithThinking("plan");
 		if (!resolved.model) return;
 
-		const currentModel = this.session.model;
+		const currentModel = this.wireClient?.getSnapshot()?.model ?? this.session.model;
 		const sameModel = modelsAreEqual(currentModel, resolved.model);
 		const planThinkingLevel = resolved.explicitThinkingLevel ? resolved.thinkingLevel : undefined;
 
@@ -864,7 +864,7 @@ export class InteractiveMode implements InteractiveModeContext {
 			: undefined;
 
 		if (!sameModel) {
-			if (this.session.isStreaming) {
+			if (this.wireClient?.getSnapshot()?.isStreaming ?? this.session.isStreaming) {
 				this.#pendingModelSwitch = { model: resolved.model, thinkingLevel: planThinkingLevel };
 				return;
 			}
@@ -931,7 +931,7 @@ export class InteractiveMode implements InteractiveModeContext {
 			workflow: options?.workflow ?? "parallel",
 			reentry: this.#planModeHasEntered,
 		});
-		if (this.session.isStreaming) {
+		if (this.wireClient?.getSnapshot()?.isStreaming ?? this.session.isStreaming) {
 			await this.session.sendPlanModeContext({ deliverAs: "steer" });
 		}
 		this.#planModeHasEntered = true;
@@ -957,7 +957,7 @@ export class InteractiveMode implements InteractiveModeContext {
 				// which would reset provider-side sessions (openai-responses/Codex) and
 				// break conversation continuity.
 				this.session.setThinkingLevel(prev.thinkingLevel);
-			} else if (this.session.isStreaming) {
+			} else if (this.wireClient?.getSnapshot()?.isStreaming ?? this.session.isStreaming) {
 				this.#pendingModelSwitch = { model: prev.model, thinkingLevel: prev.thinkingLevel };
 			} else {
 				await this.session.setModelTemporary(prev.model, prev.thinkingLevel);
