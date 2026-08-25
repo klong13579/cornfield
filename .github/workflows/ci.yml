@@ -13,6 +13,14 @@ on:
         description: "Skip npm publish"
         type: boolean
         default: false
+      trigger_release:
+        description: "Build 5-platform binaries and create a GitHub Release (push triggers are disabled on this repo)"
+        type: boolean
+        default: false
+      release_tag:
+        description: "Release tag name (e.g. v0.20.0) — required when trigger_release is true"
+        type: string
+        default: ""
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -42,7 +50,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ startsWith(github.ref, 'refs/tags/v') && fromJSON('[
+        include: ${{ (startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.trigger_release == 'true')) && fromJSON('[
           {"os":"ubuntu-22.04","platform":"linux","arch":"x64","variants":"baseline modern","rust_checks":true},
           {"os":"ubuntu-22.04","platform":"linux","arch":"arm64","target":"aarch64-unknown-linux-gnu"},
           {"os":"macos-15-intel","platform":"darwin","arch":"x64","variants":"baseline modern"},
@@ -186,6 +194,10 @@ jobs:
       - name: Compare this tag against the highest version tag
         id: check
         run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.trigger_release }}" == "true" ]]; then
+            echo "is_latest=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           if [[ "${{ github.ref_type }}" != "tag" ]]; then
             echo "is_latest=false" >> "$GITHUB_OUTPUT"
             exit 0
@@ -199,7 +211,7 @@ jobs:
           fi
 
   release_binary:
-    if: startsWith(github.ref, 'refs/tags/v') && needs.check_latest_tag.outputs.is_latest == 'true'
+    if: (startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.trigger_release == 'true')) && needs.check_latest_tag.outputs.is_latest == 'true'
     needs: [check_latest_tag, check, native, test]
     strategy:
       fail-fast: false
@@ -280,7 +292,7 @@ jobs:
             ${{ matrix.gateway_path }}
 
   release_desktop:
-    if: startsWith(github.ref, 'refs/tags/v') && needs.check_latest_tag.outputs.is_latest == 'true'
+    if: (startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.trigger_release == 'true')) && needs.check_latest_tag.outputs.is_latest == 'true'
     needs: [check_latest_tag, check, native, test]
     runs-on: macos-14
     permissions:
@@ -317,7 +329,7 @@ jobs:
             packages/desktop/dist/*.blockmap
 
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.trigger_release == 'true')
     needs: [release_binary, release_desktop]
     runs-on: ubuntu-22.04
     permissions:
@@ -365,9 +377,17 @@ jobs:
         run: cp packages/natives/native/*.node packages/coding-agent/binaries/
       - name: Build release archives
         run: bun run ci:release:build-archives
+      - name: Validate release tag (dispatch mode)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          if [[ -z "${{ inputs.release_tag }}" ]]; then
+            echo "release_tag input is required when trigger_release is true" >&2
+            exit 1
+          fi
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: "${{ (github.event_name == 'workflow_dispatch' && inputs.release_tag) || github.ref_name }}"
           files: |
             packages/coding-agent/binaries/*
             packages/desktop/dist/*.dmg
