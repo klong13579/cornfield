@@ -1,33 +1,32 @@
 {
+	"extends": "../../tsconfig.base.json",
 	"compilerOptions": {
-		"module": "commonjs",
-		"target": "es2017",
-		"baseUrl": "src",
-		"moduleResolution": "node",
-		"strict": true,
-		"strictPropertyInitialization": false,
-		"sourceMap": true,
-		"experimentalDecorators": true,
-		"emitDecoratorMetadata": true,
-		"importHelpers": true,
-		"resolveJsonModule": true,
-		"noFallthroughCasesInSwitch": true,
-		"forceConsistentCasingInFileNames": true,
-		"downlevelIteration": true,
-		"noEmitOnError": false,
+		"lib": [
+			"ES2024",
+			"DOM",
+			"DOM.Iterable",
+			"DOM.AsyncIterable",
+			"WebWorker"
+		],
+		"jsx": "react-jsx",
+		"types": [
+			"node",
+			"bun"
+		],
 		"noImplicitAny": false,
-		"skipLibCheck": true,
 		"strictFunctionTypes": false,
-		"jsx": "react",
-		"lib": ["dom", "esnext", "webworker"],
-		"typeRoots": ["./node_modules/@types", "../../node_modules/@types"]
+		"strictPropertyInitialization": false
 	},
+	"include": [
+		"src",
+		"scripts"
+	],
 	"exclude": [
-		"./extensions/**/*",
-		"./workspace/**/*",
-		"./hosted/**/*",
-		"./dist-node/**/*",
-		"./dist/**/*",
-		"./node_modules/**/*"
+		"dist",
+		"dist-node",
+		"hosted",
+		"workspace",
+		"extensions",
+		"node_modules"
 	]
 }

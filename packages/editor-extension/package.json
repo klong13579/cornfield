@@ -5,7 +5,7 @@
 	"description": "omp client shell integration layer (OpenSumi 3.9.1-next + web-app theme + omp ACP agent registration)",
 	"type": "commonjs",
 	"scripts": {
-		"check": "biome check . --no-errors-on-unmatched",
+		"check": "biome check . --no-errors-on-unmatched && bun run check:types",
 		"build": "cross-env NODE_ENV=production NODE_OPTIONS=--max_old_space_size=5120 npm-run-all -p compile:browser compile:node compile:worker-host compile:ext-host compile:webview",
 		"compile:browser": "webpack --config ./configs/webpack.browser.config.js",
 		"compile:node": "webpack --config ./configs/webpack.node.config.js",
@@ -16,7 +16,8 @@
 		"start:client": "cross-env NODE_ENV=development webpack-dev-server --config ./configs/webpack.browser.config.js --progress --color",
 		"start:server": "cross-env EXT_MODE=js KTLOG_SHOW_DEBUG=1 ts-node -r tsconfig-paths/register ./src/node/index.ts",
 		"start:webview": "webpack-dev-server --config ./configs/webpack.webview.config.js",
-		"smoke": "bun run scripts/smoke.ts"
+		"smoke": "bun run scripts/smoke.ts",
+		"check:types": "tsgo -p tsconfig.json --noEmit"
 	},
 	"dependencies": {
 		"@opensumi/di": "1.10.1",

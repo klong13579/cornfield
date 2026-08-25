@@ -2,8 +2,8 @@ import { Deferred } from "@opensumi/ide-core-common";
 import { type IServerAppOpts, type NodeModule, ServerApp } from "@opensumi/ide-core-node";
 import * as fs from "fs";
 import * as http from "http";
-import * as Koa from "koa";
-import * as koaStatic from "koa-static";
+import Koa from "koa";
+import koaStatic from "koa-static";
 import * as path from "path";
 
 /**
