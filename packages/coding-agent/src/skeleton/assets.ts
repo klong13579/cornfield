@@ -57,7 +57,7 @@ export const SKELETON_FILES: readonly SkeletonFile[] = [
 	{ relPath: "TOOLS.md", content: tools },
 	{ relPath: "TODO.md", content: todo },
 	{ relPath: "user.md", content: user },
-	{ relPath: "prompt-includes.json", content: JSON.stringify(promptIncludes) },
+	{ relPath: "prompt-includes.json", content: promptIncludes },
 	{ relPath: ".gitignore", content: gitignore },
 	{ relPath: ".omp/config.yml", content: ompConfig },
 	{ relPath: ".omp/SYSTEM.md", content: ompSystemPrompt },
