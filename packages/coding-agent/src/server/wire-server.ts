@@ -78,6 +78,25 @@ interface Connection {
 	hostToolBridges: Map<string, WireHostToolBridge>;
 }
 
+/**
+ * 传输无关的命令执行上下文（P3：ws 与内存传输共用 handleCommand）。
+ * ws 层把 Connection 适配成此接口；未来 TUI 进程内客户端传内存实现。
+ */
+interface CommandContext {
+	/** 当前焦点 agent id。 */
+	activeAgentId: string;
+	/** attach/switch 后更新焦点。 */
+	setActiveAgentId(id: string): void;
+	/** 本上下文注册的 host tool bridge（per agent）。 */
+	hostToolBridges: Map<string, WireHostToolBridge>;
+	/** 推 push 帧（progress/snapshot/...）给本上下文的接收端。 */
+	sendPush(frame: ServerFrame): void;
+	/** 推当前焦点 agent 的权威快照。 */
+	sendSessionSnapshot(): void;
+	/** 广播 server snapshot（agent 列表变化）。 */
+	broadcastServerSnapshot(): void;
+}
+
 type WireSocket = Bun.ServerWebSocket<Connection | undefined>;
 
 const PROGRESS_EVENT_TYPES = new Set([
@@ -207,10 +226,10 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 
 	/** 命令解析：返回目标 attached session；未 attach / 未注册时报错。 */
 	const resolveTarget = (
-		conn: Connection,
+		ctx: { activeAgentId: string },
 		command: { sessionId?: string },
 	): { agentId: string; attached: AttachedSession } | { error: string } => {
-		const agentId = command.sessionId ?? conn.activeAgentId;
+		const agentId = command.sessionId ?? ctx.activeAgentId;
 		if (!registry.getMeta(agentId)) {
 			return { error: `unknown agent: ${agentId}` };
 		}
@@ -222,7 +241,7 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 	};
 
 	const handleCommand = async (
-		conn: Connection,
+		ctx: CommandContext,
 		command: WireCommand,
 		reply: (frame: ServerFrame) => void,
 	): Promise<void> => {
@@ -299,10 +318,10 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 						return;
 					}
 					await registry.attach(command.sessionId);
-					conn.activeAgentId = command.sessionId;
+					ctx.setActiveAgentId(command.sessionId);
 					// 新焦点的快照立即推给本连接（快照权威，客户端零恢复逻辑）
-					sendSessionSnapshot(conn);
-					broadcastServerSnapshot();
+					ctx.sendSessionSnapshot();
+					ctx.broadcastServerSnapshot();
 					done({ sessionId: command.sessionId });
 					return;
 				}
@@ -343,7 +362,7 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 				}
 				case "fs_list": {
 					const fsCmd = command as { type: "fs_list"; sessionId?: string; path?: string };
-					const agentId = fsCmd.sessionId ?? conn.activeAgentId;
+					const agentId = fsCmd.sessionId ?? ctx.activeAgentId;
 					const meta = registry.getMeta(agentId);
 					if (!meta) {
 						fail(`unknown agent: ${agentId}`);
@@ -364,7 +383,7 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 				}
 				case "fs_read": {
 					const fsCmd = command as { type: "fs_read"; sessionId?: string; path?: string };
-					const agentId = fsCmd.sessionId ?? conn.activeAgentId;
+					const agentId = fsCmd.sessionId ?? ctx.activeAgentId;
 					const meta = registry.getMeta(agentId);
 					if (!meta) {
 						fail(`unknown agent: ${agentId}`);
@@ -386,7 +405,7 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 				case "fs_read_image": {
 					// R-IMG-SERVE（备用卡）：二进制图片读取——FileExplorer 预览数据源。
 					// 返回 dataUrl（上限 2MB，超出截断标记），MIME 按扩展名。路径约束与 fs_read 同（resolveFsPath）。
-					const agentId = (command as { sessionId?: string }).sessionId ?? conn.activeAgentId;
+					const agentId = (command as { sessionId?: string }).sessionId ?? ctx.activeAgentId;
 					const meta = registry.getMeta(agentId);
 					if (!meta) {
 						fail(`unknown agent: ${agentId}`);
@@ -496,7 +515,7 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 						group: "系统命令" as const,
 					}));
 					const virtual = TUI_VIRTUAL_COMMANDS.map(c => ({ ...c, group: "会话控制" as const }));
-					const attached = registry.getAttached(conn.activeAgentId);
+					const attached = registry.getAttached(ctx.activeAgentId);
 					const extra: { name: string; description: string; group: string }[] = [];
 					if (attached) {
 						const s = attached.session;
@@ -566,7 +585,7 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 			}
 
 			// ── session 级命令：全部需要已 attach 的目标 ──
-			const target = resolveTarget(conn, command);
+			const target = resolveTarget(ctx, command);
 			if ("error" in target) {
 				fail(target.error);
 				return;
@@ -595,7 +614,7 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 			]);
 			const sessionDone = (result?: unknown): void => {
 				done(result);
-				if (MUTATING_NO_EVENT.has(command.type)) sendSessionSnapshot(conn);
+				if (MUTATING_NO_EVENT.has(command.type)) ctx.sendSessionSnapshot();
 			};
 			switch (command.type) {
 				// ── Prompting ──
@@ -610,7 +629,7 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 					await session.steer(command.message, command.images);
 					// 协议批 B-1：steer 事件回显——转发后向订阅连接推 progress 帧（steer 标记 + 文本摘要），
 					// W2 的 SteerIndicator 以此为数据源（web-app 端归一到 ProgressEventDto steer）。
-					send(conn.ws, {
+					ctx.sendPush( {
 						type: "push",
 						event: {
 							type: "progress",
@@ -716,19 +735,19 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 				case "set_host_tools": {
 					// P3：双向帧已定义（pi-wire HostToolCallPush/...）。本连接成为执行者。
 					const definitions = normalizeHostToolDefinitions(command.tools);
-					let bridge = conn.hostToolBridges.get(agentId);
+					let bridge = ctx.hostToolBridges.get(agentId);
 					if (!bridge) {
 						bridge = new WireHostToolBridge(agentId);
-						conn.hostToolBridges.set(agentId, bridge);
+						ctx.hostToolBridges.set(agentId, bridge);
 					}
-					bridge.bindOutput(push => send(conn.ws, { type: "push", event: push }));
+					bridge.bindOutput(push => ctx.sendPush( { type: "push", event: push }));
 					await session.refreshRpcHostTools(bridge.setTools(definitions));
 					const changedEvent: WireServerEvent = {
 						type: "host_tools_changed",
 						sessionId: agentId,
 						tools: command.tools,
 					};
-					send(conn.ws, { type: "push", event: changedEvent });
+					ctx.sendPush( { type: "push", event: changedEvent });
 					sessionDone({ toolNames: definitions.map(tool => tool.name) });
 					break;
 				}
@@ -991,7 +1010,18 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 		const reply = (f: ServerFrame): void => {
 			send(ws, f.type === "response" ? { ...f, id: frame.id } : f);
 		};
-		void handleCommand(conn, frame.command, reply);
+		// ws → 传输无关 ctx 适配（P3：handleCommand 不碰 Connection）
+		const ctx: CommandContext = {
+			activeAgentId: conn.activeAgentId,
+			setActiveAgentId: id => {
+				conn.activeAgentId = id;
+			},
+			hostToolBridges: conn.hostToolBridges,
+			sendPush: frame => send(conn.ws, frame),
+			sendSessionSnapshot: () => sendSessionSnapshot(conn),
+			broadcastServerSnapshot: () => broadcastServerSnapshot(),
+		};
+		void handleCommand(ctx, frame.command, reply);
 	};
 
 	const server = Bun.serve<Connection | undefined>({
