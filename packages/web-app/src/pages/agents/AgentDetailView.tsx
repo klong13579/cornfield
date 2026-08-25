@@ -1,6 +1,6 @@
 import { X } from "lucide-react";
 import { useEffect, useState } from "react";
-import type { HostToolDefinitionDto, ModelInfoDto } from "../../lib/wire-dto";
+import type { HostToolDefinitionDto, ModelInfoDto } from "@oh-my-pi/pi-wire"
 import { useSessionStore } from "../../state/session-store";
 import { useSession } from "../../state/use-session";
 import { FileExplorer } from "../workspace/FileExplorer";

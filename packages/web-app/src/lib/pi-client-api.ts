@@ -1,6 +1,5 @@
 import type { BranchPoint, PlaybackEntry, SessionRecordSummary } from "./records";
-import type {
-	AgentInfoDto,
+import type { AgentInfoDto,
 	AvailableModelsDto,
 	ConnectionInfoDto,
 	CronLogEntryDto,
@@ -16,8 +15,7 @@ import type {
 	StatsPeriodDto,
 	TaskRowDto,
 	TodoPhaseDto,
-	WireServerEventDto,
-} from "./wire-dto";
+	WireServerEventDto, } from "@oh-my-pi/pi-wire"
 
 /** fs_list 条目（agent workspace 目录项）。 */
 export interface FsEntryDto {
@@ -94,7 +92,7 @@ export type AgentMessageDto = MessageDto;
 /**
  * pi-client 接口契约（Web 壳消费的唯一数据面）。
  *
- * 形态对齐 requirements.md FR-1 与 wire-types.ts 的 snapshot/progress 语义：
+ * 形态对齐 requirements.md FR-1 与 pi-wire 的 snapshot/progress 语义：
  * - `session_snapshot` 为权威缓存（getSnapshot/subscribe 重建 UI）
  * - `progress` 只做事件通知（subscribe 回调中的 progress 事件，UI 层不得归约为权威状态）
  * - 命令面覆盖 workspace 需要的 12+ 条（prompt/abort/set_model/set_todos/…）

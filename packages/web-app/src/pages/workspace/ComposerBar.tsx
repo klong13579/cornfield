@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ContextRing } from "../../components/ContextRing";
 import { ProviderLogo } from "../../components/ProviderLogo";
-import type { ImageContentDto } from "../../lib/wire-dto";
+import type { ImageContentDto } from "@oh-my-pi/pi-wire"
 import { useSessionStore } from "../../state/session-store";
 import { getUiStore, useUiState } from "../../state/ui-store";
 import { useSession } from "../../state/use-session";

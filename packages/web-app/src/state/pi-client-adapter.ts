@@ -12,8 +12,7 @@ import type {
 	RemoteSkillItemDto,
 } from "../lib/pi-client-api";
 import type { BranchPoint, PlaybackEntry, PlaybackToolStep, RecordStatus, SessionRecordSummary } from "../lib/records";
-import type {
-	AgentInfoDto,
+import type { AgentInfoDto,
 	AvailableModelsDto,
 	ConnectionInfoDto,
 	CronLogEntryDto,
@@ -29,8 +28,7 @@ import type {
 	StatsPeriodDto,
 	TaskRowDto,
 	TodoPhaseDto,
-	WireServerEventDto,
-} from "../lib/wire-dto";
+	WireServerEventDto, } from "@oh-my-pi/pi-wire"
 
 /** serve get_state env 条目（pi-wire WireEnvironmentSummary；pendingCronCount 为可选缺省）。 */
 interface WireEnvironmentSummaryDto {

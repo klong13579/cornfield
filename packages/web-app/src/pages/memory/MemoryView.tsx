@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { MemoryProjectionDto } from "../../lib/wire-dto";
+import type { MemoryProjectionDto } from "@oh-my-pi/pi-wire"
 import { useSessionStore } from "../../state/session-store";
 import { useSession } from "../../state/use-session";
 
