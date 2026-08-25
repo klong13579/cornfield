@@ -110,7 +110,7 @@ export type WidgetPlacement = "aboveEditor" | "belowEditor";
  * - "json": print-mode with JSON output (headless)
  * - "print": plain-text print mode (headless)
  */
-export type ExtensionMode = "tui" | "rpc" | "json" | "print";
+export type ExtensionMode = "tui" | "rpc" | "json" | "print" | "wire-stdio";
 
 export interface ExtensionWidgetOptions {
 	placement?: WidgetPlacement;

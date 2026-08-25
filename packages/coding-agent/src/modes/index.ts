@@ -18,6 +18,7 @@ export {
 	type RpcEventListener,
 } from "./rpc/rpc-client";
 export { runRpcMode } from "./rpc/rpc-mode";
+export { runWireStdioMode } from "./wire-stdio";
 export type {
 	RpcCommand,
 	RpcHostToolCallRequest,
