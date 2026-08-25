@@ -876,7 +876,7 @@ export class InteractiveMode implements InteractiveModeContext {
 				);
 			}
 		} else if (planThinkingLevel) {
-			this.session.setThinkingLevel(planThinkingLevel);
+			this.wireClient ? void this.wireClient.sendCommand({ type: "set_thinking_level", level: planThinkingLevel }) : this.session.setThinkingLevel(planThinkingLevel);
 		}
 	}
 
@@ -956,7 +956,11 @@ export class InteractiveMode implements InteractiveModeContext {
 				// Same model — only thinking level may differ. Avoid setModelTemporary()
 				// which would reset provider-side sessions (openai-responses/Codex) and
 				// break conversation continuity.
-				this.session.setThinkingLevel(prev.thinkingLevel);
+				// undefined 时 wire 路径跳过（保持当前思维级别；session 直调的模型默认 resolve 语义
+				// 是 P3 协议未覆盖的边缘，接受差异）
+				this.wireClient && prev.thinkingLevel
+					? void this.wireClient.sendCommand({ type: "set_thinking_level", level: prev.thinkingLevel })
+					: this.session.setThinkingLevel(prev.thinkingLevel);
 			} else if (this.wireClient?.getSnapshot()?.isStreaming ?? this.session.isStreaming) {
 				this.#pendingModelSwitch = { model: prev.model, thinkingLevel: prev.thinkingLevel };
 			} else {
@@ -1156,7 +1160,8 @@ export class InteractiveMode implements InteractiveModeContext {
 		// again) while the popup is showing. The event listener fires asynchronously
 		// (agent's #emit is fire-and-forget), so without this the model sees "Plan
 		// ready for approval." and immediately calls exit_plan_mode in a loop.
-		await this.session.abort();
+		if (this.wireClient) await this.wireClient.sendCommand({ type: "abort" });
+		else await this.session.abort();
 
 		const planFilePath = details.planFilePath || this.planModePlanFilePath || (await this.#getPlanFilePath());
 		this.planModePlanFilePath = planFilePath;
