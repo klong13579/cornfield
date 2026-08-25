@@ -110,7 +110,7 @@ const COMMAND_TYPES = [
 	"set_mcp_server",
 	"remove_mcp_server",
 	"test_mcp_server",
-];
+] as const satisfies readonly string[];
 
 /** 从 WireCommand union 提取 type 字面量（编译期核对清单）。 */
 type AllCommandTypes = WireCommand["type"];
