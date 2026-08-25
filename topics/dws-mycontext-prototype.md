@@ -1,11 +1,13 @@
 ---
-name: 用 dws CLI 实现 MyContext 业务流原型
-status: active              # drafting/active/paused/waiting/done/aborted
-objective: 用现有 dws CLI + 模型网关跑出一条能把「一个人」完整刻画出来的 context 画像流水线（知道什么/跟谁协作/在做什么/怎么说话/怎么决策），用真实钉钉数据产出一份可读、可验证、可被 agent 消费的画像产物。手段是参考 MyContext 业务流；目标是完整了解使用者 context（含 MyContext 方法论的验证）。
+name: 我的 context engineer：数据驱动用户画像供 agent 了解我（me-context skill）
+status: done
+objective: 用 dws 采集 + forge 测量把彭梦龙的画像（决策记录/风格/人物圈层/关注话题/决策边界）做成 agent 可查的 context，供 agent 干活时更了解他。不以代答分身形式。
 doneWhen: |-
-  - 真实数据跑出画像产物（90 天窗口，794 条被问全部归类，8 类风险 class 全部有实测样本）——✅ 实测完成
-  - 一次"来新消息→判定→起草"演示闭环（brief verdict + check 自审）——✅ 实测完成
+  - 真实数据画像产物完成：90 天窗口，决策 28 条 + 风格测量 + 60 人圈层 + 7 个关注 topic——已完成
+  - 迁移到统一用户级目录 ~/.omp/agent/skills/me-context/（含 demo 数据）——✅ 2026-08-25 完成
+  - 不依赖 gbrain（独立 skill，图形化 dashboard 两级话题分组）——✅ 2026-08-25 完成
   - 用户验收（待用户拍板）
+lastActivity: 2026-08-25
 lastActivity: 2026-08-18 18:20
 sessionRefs: []
 nextAction: 等用户验收；若继续：群@数字ID 识别 / 档3 知识结构（轻量图谱）
@@ -65,6 +67,7 @@ openQuestions: []  # 全部完成：档3 图谱（统计层+事实层）✅，�
 
 ## 进度记录
 
+- 2026-08-25 — 方向修正（用户拍板）：不要分身，构建 context engineer——agent 更充分了解「我」；迁移到统一目录 ~/.omp/agent/skills/me-context/（含 demo），平铺结构、全部路径引用修正、引擎 status 验证通过；dashboard 两级话题分组完成（8 类词表 + 高频具体词 + 会话投入榜，bot/URL 参数噪声过滤）；SKILL.md 定位改为 context 入口（frontmatter name 同步改 me-context）；暂不依赖 gbrain
 - 2026-08-18 18:45 — 全部延伸完成：群@数字ID（防御性修正，mention 集零漂移）、档3 知识图谱（统计层 graph.json/summary + LLM 事实层 facts.md）、bot/系统账号净化（asks 698）；待验收
 - 2026-08-18 18:20 — L1+L2+L3 全部实测完成：90 天采集、画像产物（风格/决策/关系/图谱 fidelity 11/11 层）、分身判定+起草+自审闭环；待用户验收
 - 2026-08-18 18:00 — 扩 90 天 + 群聊统计修复（@owner 精确识别、361 条群 ask 计入）+ JSON 信封解包（1331 条）
@@ -74,6 +77,6 @@ openQuestions: []  # 全部完成：档3 图谱（统计层+事实层）✅，�
 
 ## 批注
 
+- 2026-08-25 方向修正（用户原话）：「我并不需要分身的功能，而是需要能让 agent 更充分了解我的功能。构建我的 context engineer」——产物定位从代答分身变为 agent 的上下文供给；两条落地指令：(1) skill 放统一用户级目录含 demo 一起；(2) 暂不依赖 gbrain。dashboard 需求：高频具体话题 + 话题类别分组（已实现两级结构）。
 - 用户原话：参考 mycontext 的业务流，使用 dws cli 工具实现它的功能，看下效果。
-- doneWhen 未从用户处获得明确验收契约（用户以"看下效果"为目标），按 skill 规则留待补充，不代为发明验收项。
 - 拍板点（方案第 2 步）：范围 L1/L2/L3、数据窗口、落盘位置。用户确认后进入执行。
