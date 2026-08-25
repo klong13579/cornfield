@@ -35,7 +35,7 @@ function makeSession(artifactDir: string): ToolSession {
 			},
 		},
 		hasEditTool: true,
-		allocateOutputArtifact: async toolType => {
+		allocateOutputArtifact: async (toolType: string) => {
 			const id = String(next++);
 			return { id, path: path.join(artifactDir, `${id}.${toolType}.log`) };
 		},

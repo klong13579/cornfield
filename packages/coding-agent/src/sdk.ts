@@ -108,7 +108,7 @@ import {
 } from "./secrets";
 import { AgentSession } from "./session/agent-session";
 import { AuthStorage } from "./session/auth-storage";
-import { convertToLlm } from "./session/messages";
+import { applyWindowing, convertToLlm } from "./session/messages";
 import { SessionManager } from "./session/session-manager";
 import { SkillWatcher } from "./session/skill-watcher";
 import { closeAllConnections } from "./ssh/connection-manager";
@@ -1636,7 +1636,13 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 
 		// Create convertToLlm wrapper that filters images if blockImages is enabled (defense-in-depth)
 		const convertToLlmWithBlockImages = (messages: AgentMessage[]): Message[] => {
-			const converted = convertToLlm(messages);
+			// History windowing (phase A): archive tool results older than the recent
+			// window before converting. Read dynamically so mid-session changes apply.
+			const windowed = applyWindowing(messages, {
+				enabled: settings.get("context.windowing.enabled") ?? false,
+				keepRecentTurns: settings.get("context.windowing.keepRecentTurns") ?? 10,
+			});
+			const converted = convertToLlm(windowed);
 			// Check setting dynamically so mid-session changes take effect
 			if (!settings.get("images.blockImages")) {
 				return converted;
