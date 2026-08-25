@@ -1034,15 +1034,13 @@ export class AgentSession {
 						"Fix the todo payload and call todo_write again before continuing.",
 						"</system-reminder>",
 					].join("\n");
-					await this.sendCustomMessage(
-						{
+					await this.sendCustomMessage({
 							customType: "todo-write-error-reminder",
 							content: reminderText,
 							display: false,
 							details: { toolName, errorText },
 						},
-						{ deliverAs: "nextTurn" },
-					);
+						{ deliverAs: "nextTurn" },);
 				}
 				if (toolName === "checkpoint" && !isError) {
 					const checkpointEntryId = this.sessionManager.getEntries().at(-1)?.id ?? null;
@@ -2505,15 +2503,13 @@ export class AgentSession {
 	async sendPlanModeContext(options?: { deliverAs?: "steer" | "followUp" | "nextTurn" }): Promise<void> {
 		const message = await this.#buildPlanModeMessage();
 		if (!message) return;
-		await this.sendCustomMessage(
-			{
+		await this.sendCustomMessage({
 				customType: message.customType,
 				content: message.content,
 				display: message.display,
 				details: message.details,
 			},
-			options ? { deliverAs: options.deliverAs } : undefined,
-		);
+			options ? { deliverAs: options.deliverAs } : undefined,);
 	}
 
 	resolveRoleModel(role: string): Model | undefined {
@@ -2772,6 +2768,7 @@ export class AgentSession {
 
 		await this.#promptWithMessage(customMessage, textContent, options);
 	}
+
 
 	async #promptWithMessage(
 		message: AgentMessage,
@@ -3138,7 +3135,7 @@ export class AgentSession {
 	 */
 	#canAutoContinueForFollowUp(): boolean {
 		if (this.isStreaming) return false;
-		if (this.isRetrying) return false;
+		if (this.#isRetrying) return false;
 		const messages = this.agent.state.messages;
 		const last = messages[messages.length - 1];
 		if (last?.role !== "assistant") return false;
@@ -3535,7 +3532,7 @@ export class AgentSession {
 		this.#promptGeneration++;
 		this.#scheduledHiddenNextTurnGeneration = undefined;
 		this.abortCompaction();
-		this.abortHandoff();
+		this.#abortHandoff();
 		this.abortBash();
 		this.abortPython();
 		const postPromptDrain = this.#cancelPostPromptTasks();
@@ -3986,14 +3983,14 @@ export class AgentSession {
 		return this.serviceTier === "priority";
 	}
 
-	setServiceTier(serviceTier: ServiceTier | undefined): void {
+	#setServiceTier(serviceTier: ServiceTier | undefined): void {
 		if (this.serviceTier === serviceTier) return;
 		this.agent.serviceTier = serviceTier;
 		this.sessionManager.appendServiceTierChange(serviceTier ?? null);
 	}
 
 	setFastMode(enabled: boolean): void {
-		this.setServiceTier(enabled ? "priority" : undefined);
+		this.#setServiceTier(enabled ? "priority" : undefined);
 	}
 
 	toggleFastMode(): boolean {
@@ -4248,7 +4245,7 @@ export class AgentSession {
 	/**
 	 * Cancel in-progress handoff generation.
 	 */
-	abortHandoff(): void {
+	#abortHandoff(): void {
 		this.#handoffAbortController?.abort();
 	}
 
@@ -5915,7 +5912,7 @@ export class AgentSession {
 	}
 
 	/** Whether auto-retry is currently in progress */
-	get isRetrying(): boolean {
+	get #isRetrying(): boolean {
 		return this.#retryPromise !== undefined;
 	}
 
@@ -5966,7 +5963,7 @@ export class AgentSession {
 				cwd,
 			});
 			if (hookResult?.result) {
-				this.recordBashResult(command, hookResult.result, options);
+				this.#recordBashResult(command, hookResult.result, options);
 				return hookResult.result;
 			}
 		}
@@ -5983,7 +5980,7 @@ export class AgentSession {
 				onMinimizedSave: originalText => this.#saveBashOriginalArtifact(originalText),
 			});
 
-			this.recordBashResult(command, result, options);
+			this.#recordBashResult(command, result, options);
 			return result;
 		} finally {
 			this.#bashAbortControllers.delete(abortController);
@@ -5994,7 +5991,7 @@ export class AgentSession {
 	 * Record a bash execution result in session history.
 	 * Used by executeBash and by extensions that handle bash execution themselves.
 	 */
-	recordBashResult(command: string, result: BashResult, options?: { excludeFromContext?: boolean }): void {
+	#recordBashResult(command: string, result: BashResult, options?: { excludeFromContext?: boolean }): void {
 		const meta = outputMeta().truncationFromSummary(result, { direction: "tail" }).get();
 		const bashMessage: BashExecutionMessage = {
 			role: "bashExecution",
@@ -6036,7 +6033,7 @@ export class AgentSession {
 	}
 
 	/** Whether there are pending bash messages waiting to be flushed */
-	get hasPendingBashMessages(): boolean {
+	get #hasPendingBashMessages(): boolean {
 		return this.#pendingBashMessages.length > 0;
 	}
 
@@ -6089,7 +6086,7 @@ export class AgentSession {
 				});
 				this.assertPythonExecutionAllowed();
 				if (hookResult?.result) {
-					this.recordPythonResult(code, hookResult.result, options);
+					this.#recordPythonResult(code, hookResult.result, options);
 					return hookResult.result;
 				}
 			}
@@ -6106,7 +6103,7 @@ export class AgentSession {
 				onChunk,
 				signal: abortController.signal,
 			});
-			this.recordPythonResult(code, result, options);
+			this.#recordPythonResult(code, result, options);
 			return result;
 		})();
 		return await this.trackPythonExecution(execution, abortController);
@@ -6140,7 +6137,7 @@ export class AgentSession {
 	/**
 	 * Record a Python execution result in session history.
 	 */
-	recordPythonResult(code: string, result: PythonResult, options?: { excludeFromContext?: boolean }): void {
+	#recordPythonResult(code: string, result: PythonResult, options?: { excludeFromContext?: boolean }): void {
 		const meta = outputMeta().truncationFromSummary(result, { direction: "tail" }).get();
 		const pythonMessage: PythonExecutionMessage = {
 			role: "pythonExecution",
@@ -6210,7 +6207,7 @@ export class AgentSession {
 	}
 
 	/** Whether there are pending Python messages waiting to be flushed */
-	get hasPendingPythonMessages(): boolean {
+	get #hasPendingPythonMessages(): boolean {
 		return this.#pendingPythonMessages.length > 0;
 	}
 
@@ -7271,7 +7268,7 @@ export class AgentSession {
 	/**
 	 * Check if extensions have handlers for a specific event type.
 	 */
-	hasExtensionHandlers(eventType: string): boolean {
+	#hasExtensionHandlers(eventType: string): boolean {
 		return this.#extensionRunner?.hasHandlers(eventType) ?? false;
 	}
 
