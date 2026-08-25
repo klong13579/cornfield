@@ -232,31 +232,33 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 			reply({ type: "response", id: "", ok: false, error: { code, message } });
 
 		// ── h1：serve 端 skill hub（list_remote_skills / install_remote_skill）──
-		// 契约命令不在 pi-wire 的 WireCommand union 内，serve 侧按字符串契约 + 局部窄类型实现；
-		// 前端按同一契约字符串对接（m2/h2 亦 cast + 注释）。复用 marketplace fetcher。
-		if ((command.type as string) === "list_remote_skills") {
-			const cmd = command as unknown as { type: "list_remote_skills"; source?: string };
+		// P0 收口：命令已登记进 pi-wire WireCommand union，直接按具体类型处理。
+		if (command.type === "list_remote_skills") {
 			try {
-				const source = await resolveRemoteSkillSource(cmd.source);
+				const source = await resolveRemoteSkillSource(command.source);
 				done({ items: await listRemoteSkills(source) });
 			} catch (err) {
 				failWithCode("internal", `list_remote_skills failed: ${String(err)}`);
 			}
 			return;
 		}
-		if ((command.type as string) === "install_remote_skill") {
-			const cmd = command as unknown as { type: "install_remote_skill"; source: string; name: string };
+		if (command.type === "install_remote_skill") {
 			try {
-				done(await installRemoteSkill(cmd.source, cmd.name));
+				done(await installRemoteSkill(command.source, command.name));
 			} catch (err) {
 				failWithCode("internal", `install_remote_skill failed: ${String(err)}`);
 			}
 			return;
 		}
 		try {
-			// ── MCP 服务器管理命令（契约命令，尚未登记进 pi-wire WireCommand union；最小局部 cast）──
-			if (MCP_COMMAND_TYPES.has((command as { type: string }).type)) {
-				await handleMcpServerCommand(command as unknown as WireMcpServerCommand, done, fail);
+			// ── MCP 服务器管理命令（P0 收口：已登记进 pi-wire WireCommand union）──
+			if (
+				command.type === "get_mcp_servers" ||
+				command.type === "set_mcp_server" ||
+				command.type === "remove_mcp_server" ||
+				command.type === "test_mcp_server"
+			) {
+				await handleMcpServerCommand(command, done, fail);
 				return;
 			}
 
@@ -1597,19 +1599,11 @@ async function readSessionMessages(sessionFile: string): Promise<{ messages: Age
 
 const MCP_TEST_TIMEOUT_MS = 8_000;
 
-/** serve 端 MCP 服务器管理命令（契约命令；尚未登记进 pi-wire WireCommand union → 最小局部 cast）。 */
-type WireMcpServerCommand =
-	| { type: "get_mcp_servers" }
-	| { type: "set_mcp_server"; name: string; command?: string; args?: string[]; enabled?: boolean }
-	| { type: "remove_mcp_server"; name: string }
-	| { type: "test_mcp_server"; name: string };
-
-const MCP_COMMAND_TYPES = new Set<string>([
-	"get_mcp_servers",
-	"set_mcp_server",
-	"remove_mcp_server",
-	"test_mcp_server",
-]);
+/** serve 端 MCP 服务器管理命令（P0 收口：已登记进 pi-wire WireCommand union）。 */
+type WireMcpServerCommand = Extract<
+	WireCommand,
+	{ type: "get_mcp_servers" | "set_mcp_server" | "remove_mcp_server" | "test_mcp_server" }
+>;
 
 interface AgentMcpServerEntry {
 	command?: string;
