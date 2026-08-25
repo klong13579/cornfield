@@ -25,7 +25,7 @@
 import type { ImageContent } from "@oh-my-pi/pi-ai";
 import { logger } from "@oh-my-pi/pi-utils";
 import type { ForwardStreamHandlers } from "./agent-bridge";
-import type { AgentEvent, RpcTransport } from "./agent-transport";
+import type { AgentEvent, WireTransport } from "./agent-transport-wire";
 
 /** Long-task watcher configuration. */
 export const DEFAULT_INACTIVITY_MS = 120_000;
@@ -67,14 +67,14 @@ interface LongTaskWatcher {
  * and calls `clearAll()` on `stop()`.
  */
 export class PromptQueue {
-	#transport: RpcTransport;
+	#transport: WireTransport;
 	#longTaskConfig: LongTaskConfig;
 	#pendingPrompts = new Map<string, PendingPrompt>();
 	#activePromptId: string | undefined;
 	#operationTail: Promise<void> = Promise.resolve();
 	#promptIdCounter = 0;
 
-	constructor(transport: RpcTransport, longTaskConfig: LongTaskConfig) {
+	constructor(transport: WireTransport, longTaskConfig: LongTaskConfig) {
 		this.#transport = transport;
 		this.#longTaskConfig = longTaskConfig;
 	}
