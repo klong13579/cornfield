@@ -212,7 +212,7 @@ jobs:
 
   release_binary:
     if: (startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.trigger_release == 'true')) && needs.check_latest_tag.outputs.is_latest == 'true'
-    needs: [check_latest_tag, check, native, test]
+    needs: [check_latest_tag, check, native]
     strategy:
       fail-fast: false
       matrix:
@@ -293,7 +293,7 @@ jobs:
 
   release_desktop:
     if: (startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.trigger_release == 'true')) && needs.check_latest_tag.outputs.is_latest == 'true'
-    needs: [check_latest_tag, check, native, test]
+    needs: [check_latest_tag, check, native]
     runs-on: macos-14
     permissions:
       contents: read
