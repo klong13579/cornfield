@@ -5,6 +5,7 @@ import * as path from "node:path";
 import { buildModelPriceCatalog, getDashboardStats, syncAllSessions } from "@oh-my-pi/omp-stats";
 import { getAgentDir, getConfigRootDir, isEnoent, logger, parseFrontmatter } from "@oh-my-pi/pi-utils";
 import type {
+	AgentInfoDto,
 	AgentMessageDto,
 	ClientFrame,
 	PermissionRequestPush,
@@ -289,6 +290,61 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 			switch (command.type) {
 				case "list_agents": {
 					done({ agents: registry.buildSessionList(activeAgentIds()) });
+					return;
+				}
+				case "list_domains": {
+					const metas = registry.listMetas();
+					const byDomain = new Map<
+						string,
+						{ id: string; name: string; leadAgentId?: string; agents: AgentInfoDto[] }
+					>();
+					for (const meta of metas) {
+						const d = meta.domain;
+						const key = d?.id ?? "__ungrouped__";
+						let bucket = byDomain.get(key);
+						if (!bucket) {
+							bucket = { id: d?.id ?? "__ungrouped__", name: d?.name ?? "未分组", agents: [] };
+							byDomain.set(key, bucket);
+						}
+						if (d?.lead) bucket.leadAgentId = meta.id;
+						bucket.agents.push({
+							id: meta.id,
+							name: meta.name,
+							face: meta.name.slice(0, 1).toUpperCase(),
+							workspace: meta.agentDir,
+							kind: "worker",
+							status: activeAgentIds().has(meta.id) ? "online" : "idle",
+							skillsCount: meta.skillCount,
+							agentDir: meta.agentDir,
+							domain: meta.domain,
+						});
+					}
+					done({ domains: [...byDomain.values()] });
+					return;
+				}
+				case "domain_report": {
+					const lead = registry.listMetas().find(m => m.domain?.id === command.domainId && m.domain.lead);
+					if (!lead) {
+						done({ domainId: command.domainId, report: undefined });
+						return;
+					}
+					const summaryPath = path.join(lead.agentDir, "context", "summary.md");
+					let report: string | undefined;
+					let updatedAt: string | undefined;
+					try {
+						const st = await fs.stat(summaryPath);
+						updatedAt = st.mtime.toISOString();
+						report = await Bun.file(summaryPath).text();
+					} catch (err) {
+						if (!isEnoent(err)) {
+							logger.warn("serve:domain-report-read-failed", {
+								domainId: command.domainId,
+								path: summaryPath,
+								error: String(err),
+							});
+						}
+					}
+					done({ domainId: command.domainId, report, updatedAt });
 					return;
 				}
 				case "attach": {

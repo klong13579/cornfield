@@ -2,30 +2,29 @@ import { Autowired, Injectable } from "@opensumi/di";
 import { ClientAppContribution, Domain } from "@opensumi/ide-core-browser";
 import type { View, ViewContainerOptions } from "@opensumi/ide-core-browser/lib/layout";
 import { IMainLayoutService } from "@opensumi/ide-main-layout/lib/common/main-layout.definition";
-import { MyAgentView } from "./my-agent-view";
+import { DomainView } from "./domain-view";
 
 /**
- * MyAgentContribution —— 我的 agent 轻视图（票 10）。
+ * DomainContribution —— 域管理视图（B1，D8/D10）。
  *
- * 注册侧栏自定义视图（状态/知识库/画像/近期任务/对话入口），数据来自 omp 平台
- * wire 命令（list_agents/get_memory/get_skills/list_sessions），角色注入骨架默认员工。
+ * 注册侧栏域视图（域列表 + 域内 agent + 域 agent），数据来自 wire list_domains
+ * （域声明聚合自 agent 注册的 domain 字段）。
  */
 @Injectable()
 @Domain(ClientAppContribution)
-export class MyAgentContribution implements ClientAppContribution {
+export class DomainContribution implements ClientAppContribution {
 	@Autowired(IMainLayoutService)
 	private readonly layoutService: IMainLayoutService;
 
 	initialize(): void {
 		const view: View = {
-			id: "omp-my-agent",
-			name: "我的 agent",
-			description: "个人 agent 状态/知识库/画像/任务",
-			priority: 10,
-			component: MyAgentView,
+			id: "omp-domains",
+			name: "域管理",
+			description: "域列表 + 域内 agent（B1）",
+			component: DomainView,
 		};
 		const options: ViewContainerOptions = {
-			containerId: "omp-my-agent",
+			containerId: "omp-domains",
 			iconClass: "team",
 		};
 		this.layoutService.collectTabbarComponent([view], options, "view");

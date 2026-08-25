@@ -16,10 +16,21 @@ function ensureShortTmpDir(): void {
 	fs.mkdirSync(shortTmpDir, { recursive: true });
 }
 
+/**
+ * SHELL 兑底（A7）：bun 的 os.userInfo().shell 在 macOS 上返回 "unknown"（不解析 passwd），
+ * 且 bun 子进程可能不带 SHELL 环境变量——OpenSumi 终端默认 shell 探测（getSystemShellUnixLike）
+ * 先看 SHELL 再退回 userInfo().shell，两者都不对时会把 "unknown" 当可执行文件，终端起不来。
+ * 启动前兜底注入真实 shell。
+ */
+function ensureShellEnv(): void {
+	process.env.SHELL ||= "/bin/zsh";
+}
+
 export async function startServer(arg1: NodeModule[] | Partial<IServerAppOpts>) {
 	const app = new Koa();
 	const deferred = new Deferred<http.Server>();
 	ensureShortTmpDir();
+	ensureShellEnv();
 	process.env.EXT_MODE = "js";
 	const port = process.env.IDE_SERVER_PORT || 8000;
 	const workspaceDir = process.env.WORKSPACE_DIR || path.join(__dirname, "../../workspace");

@@ -69,8 +69,7 @@ const buttonStyle: React.CSSProperties = {
  * GitPanelView —— Git 面板（票 11）。
  *
  * 展示 status（分支/staged/unstaged/untracked）、diff、log、分支列表 —— 数据来自
- * wire git_* 只读命令。提交入口就位：wire 面（T1 票 02）只有只读集，git_commit
- * 写命令未实现，提交落地待 serve 端补写命令并接入票 09 审批流。
+ * wire git_* 命令。提交入口调 wire git_commit（serve 端实现，见补票）。
  */
 export function GitPanelView(): React.JSX.Element {
 	const wire = getWireClient();
@@ -100,12 +99,21 @@ export function GitPanelView(): React.JSX.Element {
 		void load();
 	}, []);
 
-	const commit = () => {
-		// wire git 命令面为只读（T1 票 02：status/diff/log/branches），git_commit 写命令未在 wire 面。
-		// 提交入口 UI 就位；真实落地需 serve 端补 git_commit + 接入审批流（票 09）。
-		setNotice(
-			"wire git 命令面为只读（status/diff/log/branches），git_commit 写命令未实现；提交入口已就位，落地待 serve 端补写命令并接入审批流。",
-		);
+	const commit = async () => {
+		setNotice(null);
+		setError(null);
+		try {
+			const res = await wire.gitCommit(commitMessage);
+			if (res.committed) {
+				setNotice(`已提交 ${res.hash?.slice(0, 8)}`);
+				setCommitMessage("");
+				void load();
+			} else {
+				setNotice(res.reason ?? "无可提交内容");
+			}
+		} catch (err) {
+			setError(err instanceof Error ? err.message : String(err));
+		}
 	};
 
 	return (

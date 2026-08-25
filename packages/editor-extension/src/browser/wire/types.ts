@@ -1,5 +1,10 @@
 import type {
+	AgentMessageDto,
 	DisabledSkillDto,
+	DomainDto,
+	DomainRef,
+	DomainReportResult,
+	ListDomainsResult,
 	MemoryProjectionDto,
 	PermissionRequestPush,
 	SessionListEntry,
@@ -90,6 +95,13 @@ export interface GitBranchesResult {
 	remote: string[];
 }
 
+/** git_commit 响应（票 11 补）。 */
+export interface GitCommitResult {
+	committed: boolean;
+	hash?: string;
+	reason?: string;
+}
+
 /** get_config 响应。 */
 export interface GetConfigResult {
 	config: unknown;
@@ -107,9 +119,17 @@ export interface ListAgentsResult {
 	agents: SessionListEntry[];
 }
 
+/** list_domains 响应（B1）：域类型来自 pi-wire（DomainDto/DomainRef/ListDomainsResult）。 */
+export type { DomainDto, DomainRef, DomainReportResult, ListDomainsResult };
+
 /** list_sessions 响应。 */
 export interface ListSessionsResult {
 	sessions: WireSessionIndexEntry[];
+}
+
+/** get_session_messages 响应（B4 追溯台）。 */
+export interface GetSessionMessagesResult {
+	messages: AgentMessageDto[];
 }
 
 /** get_skills 响应。 */

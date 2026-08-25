@@ -24,7 +24,7 @@ export class GitContribution implements ClientAppContribution {
 		};
 		const options: ViewContainerOptions = {
 			containerId: "omp-git",
-			iconClass: "git-branch",
+			iconClass: "git",
 		};
 		this.layoutService.collectTabbarComponent([view], options, "view");
 	}

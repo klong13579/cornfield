@@ -146,6 +146,10 @@ export type WireExtensionCommand =
 	| { id?: string; type: "detach"; sessionId: string }
 	/** P3 新增：列出所有已注册 agent 的元数据（不触发 attach）。 */
 	| { id?: string; type: "list_agents" }
+	/** B1 新增：按域聚合列出 agent（域声明来自 registry 条目的 domain 字段）。 */
+	| { id?: string; type: "list_domains" }
+	/** B2 新增：域战报（CEO 工作台）——域 agent 的 D4 目标产出（业务进展汇总）。 */
+	| { id?: string; type: "domain_report"; domainId: string }
 	/**
 	 * P4 新增：历史会话索引（/records 列表页）。扫描 sessions 目录，返回按开始时间
 	 * 倒序的会话元数据列表。不实例化任何 session（纯文件索引）。

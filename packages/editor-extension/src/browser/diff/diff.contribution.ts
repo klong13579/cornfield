@@ -25,7 +25,7 @@ export class DiffContribution implements ClientAppContribution {
 		};
 		const options: ViewContainerOptions = {
 			containerId: "omp-diff-review",
-			iconClass: "git-compare",
+			iconClass: "open-changes",
 		};
 		this.layoutService.collectTabbarComponent([view], options, "view");
 	}

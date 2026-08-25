@@ -1,6 +1,6 @@
 import * as path from "node:path";
 import { logger } from "@oh-my-pi/pi-utils";
-import type { SessionListEntry } from "@oh-my-pi/pi-wire";
+import type { DomainRef, SessionListEntry } from "@oh-my-pi/pi-wire";
 import type { AgentSession, AgentSessionEvent } from "../session/agent-session";
 import type { SessionSnapshot } from "../session/session-snapshot";
 import { SessionStore } from "../session/session-store";
@@ -31,6 +31,8 @@ export interface AgentMeta {
 	agentDir: string;
 	/** 技能数（skillsDir 扫描，best-effort，失败为 undefined）。 */
 	skillCount?: number;
+	/** 域声明（B1）：来自 registry 条目的 domain 字段。 */
+	domain?: DomainRef;
 }
 
 export interface AttachedSession {
@@ -59,6 +61,7 @@ export async function loadAgentMetas(): Promise<AgentMeta[]> {
 			name: workspace?.name ?? entry.displayName ?? name,
 			agentDir: entry.path,
 			skillCount: await countSkills(entry.path, workspace?.skillsDir),
+			domain: entry.domain,
 		});
 	}
 	return metas;

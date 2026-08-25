@@ -26,6 +26,7 @@
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import type { DomainRef } from "@oh-my-pi/pi-wire";
 
 const REGISTRY_DIR_NAME = "agent";
 const REGISTRY_FILE_NAME = "registry.json";
@@ -55,6 +56,8 @@ export interface AgentEntry {
 	workspaceVersion?: number;
 	/** Cached declaration `updatedAt` from `.omp/workspace.json` (v2). */
 	workspaceUpdatedAt?: string;
+	/** 域声明（B1，D8/D10）：agent 所属域 + 是否域 agent。注册时可传，也可后续 `omp agent register --domain` 更新。 */
+	domain?: DomainRef;
 }
 
 export interface Registry {
@@ -98,7 +101,12 @@ export async function saveRegistry(reg: Registry): Promise<void> {
 }
 
 /** Add or update an entry. Returns the new entry. */
-export async function registerAgent(name: string, agentDir: string, template = "default"): Promise<AgentEntry> {
+export async function registerAgent(
+	name: string,
+	agentDir: string,
+	template = "default",
+	domain?: DomainRef,
+): Promise<AgentEntry> {
 	const reg = await loadRegistry();
 	const resolved = path.resolve(agentDir);
 	// Best-effort cache fill from the workspace declaration (v2). Read-only:
@@ -126,6 +134,7 @@ export async function registerAgent(name: string, agentDir: string, template = "
 	if (displayName !== undefined) entry.displayName = displayName;
 	if (workspaceVersion !== undefined) entry.workspaceVersion = workspaceVersion;
 	if (workspaceUpdatedAt !== undefined) entry.workspaceUpdatedAt = workspaceUpdatedAt;
+	if (domain !== undefined) entry.domain = domain;
 	reg.agents[name] = entry;
 	// Writing v2 entries: bump the file version so legacy v1 registries are
 	// migrated on the next write (their entries are preserved unchanged).

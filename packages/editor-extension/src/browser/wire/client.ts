@@ -3,19 +3,23 @@ import type { PiClientListener } from "@oh-my-pi/pi-client";
 import { PiClient } from "@oh-my-pi/pi-client";
 import type { WireCommand, WireServerEvent } from "@oh-my-pi/pi-wire";
 import type {
+	DomainReportResult,
 	FsDiffResult,
 	FsEditResult,
 	FsListResult,
 	FsReadResult,
 	FsWriteResult,
 	GetConfigResult,
+	GetSessionMessagesResult,
 	GetSkillsResult,
 	GitBranchesResult,
+	GitCommitResult,
 	GitDiffResult,
 	GitLogResult,
 	GitShowResult,
 	GitStatusResult,
 	ListAgentsResult,
+	ListDomainsResult,
 	ListSessionsResult,
 	MemoryProjectionDto,
 	SetConfigResult,
@@ -138,6 +142,11 @@ export class WireClient {
 		return this.request<GitBranchesResult>({ type: "git_branches", sessionId });
 	}
 
+	/** git_commit（票 11 补）：提交工作区改动。paths 缺省 = 全部（git add -A）。 */
+	gitCommit(message: string, sessionId?: string, paths?: string[]): Promise<GitCommitResult> {
+		return this.request<GitCommitResult>({ type: "git_commit", sessionId, message, paths });
+	}
+
 	// ── 配置（票 07）──
 	getConfig(key?: string): Promise<GetConfigResult> {
 		return this.request<GetConfigResult>({ type: "get_config", key });
@@ -167,6 +176,16 @@ export class WireClient {
 		return this.request<ListAgentsResult>({ type: "list_agents" });
 	}
 
+	// ── 域（B1）──
+	listDomains(): Promise<ListDomainsResult> {
+		return this.request<ListDomainsResult>({ type: "list_domains" });
+	}
+
+	// ── 域战报（B2，CEO 工作台）──
+	domainReport(domainId: string): Promise<DomainReportResult> {
+		return this.request<DomainReportResult>({ type: "domain_report", domainId });
+	}
+
 	getMemory(): Promise<MemoryProjectionDto> {
 		return this.request<MemoryProjectionDto>({ type: "get_memory" });
 	}
@@ -177,6 +196,11 @@ export class WireClient {
 
 	listSessions(sessionId?: string, limit?: number): Promise<ListSessionsResult> {
 		return this.request<ListSessionsResult>({ type: "list_sessions", sessionId, limit });
+	}
+
+	// ── 追溯台（B4，User Story 23）──
+	getSessionMessages(sessionFile: string): Promise<GetSessionMessagesResult> {
+		return this.request<GetSessionMessagesResult>({ type: "get_session_messages", sessionFile });
 	}
 }
 

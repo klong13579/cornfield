@@ -84,6 +84,8 @@ const COMMAND_TYPES = [
 	"attach",
 	"detach",
 	"list_agents",
+	"list_domains",
+	"domain_report",
 	"list_sessions",
 	"get_session_messages",
 	"fs_list",

@@ -40,6 +40,13 @@ module.exports = {
 	experiments: { asyncWebAssembly: true },
 	resolve: {
 		extensions: [".ts", ".tsx", ".js", ".json", ".less"],
+		alias: {
+			// omp ACP 兜底：agent 解析的 fallback 恒为 omp（偏好异常时不 spawn qwen/claude-agent-acp）。
+			"@opensumi/ide-ai-native/lib/browser/chat/get-default-agent-type$": path.resolve(
+				__dirname,
+				"../src/browser/opensumi-patch/get-default-agent-type.ts",
+			),
+		},
 		plugins: [new TsconfigPathsPlugin({ configFile: tsConfigPath })],
 		fallback: {
 			net: false,

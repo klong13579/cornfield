@@ -3,12 +3,15 @@ import type { IClientAppOpts } from "@opensumi/ide-core-browser";
 import { ClientApp } from "@opensumi/ide-core-browser/lib/bootstrap/app";
 import { MyAgentContribution } from "./agent-view/my-agent.contribution";
 import { ApprovalContribution } from "./approval/approval.contribution";
+import { CeoWorkbenchContribution } from "./ceo/ceo-workbench.contribution";
 import { ConfigContribution } from "./config/config.contribution";
 import { CoreCommandContribution } from "./core-commands";
 import { DiffContribution } from "./diff/diff.contribution";
+import { DomainContribution } from "./domain/domain.contribution";
 import { FileSystemContribution } from "./file-system/file-system.contribution";
 import { GitContribution } from "./git/git.contribution";
 import { OmpThemeContribution } from "./theme.contribution";
+import { TraceContribution } from "./trace/trace.contribution";
 
 export async function renderApp(opts: IClientAppOpts) {
 	const injector = new Injector();
@@ -17,6 +20,9 @@ export async function renderApp(opts: IClientAppOpts) {
 	injector.addProviders(FileSystemContribution);
 	injector.addProviders(ConfigContribution);
 	injector.addProviders(DiffContribution);
+	injector.addProviders(DomainContribution);
+	injector.addProviders(CeoWorkbenchContribution);
+	injector.addProviders(TraceContribution);
 	injector.addProviders(ApprovalContribution);
 	injector.addProviders(MyAgentContribution);
 	injector.addProviders(GitContribution);
