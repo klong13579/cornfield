@@ -1,17 +1,17 @@
 ---
 name: 仓库瘦身：A+B 类全部清理（含需要确认的 6 项）
-status: active
+status: done
 objective: 清理 oh-my-pi 仓库瘦身审计确认的 A/B 类删除候选（审计只读完成，本 topic 承接执行）
 doneWhen: |-
-  - A 类 10 项候选删除完成，git 状态干净
-  - B 类 6 项逐项人工确认后删除或迁移完毕
-  - 删除后 bun run check:ts 与受影响包测试通过
+  - A 类 10 项候选删除完成，git 状态干净——✅ commit f66a2c97
+  - B 类 6 项逐项人工确认后删除或迁移完毕——✅ commit 58302e8b（3 删/1 迁移/2 保留：python 评估组+benchmark-format-skills+validate-agent 删；voice-diag 迁移 scripts/；typescript-edit-benchmark+dws.md 保留）
+  - 删除后 bun run check:ts 与受影响包测试通过——✅ 删除后 biome scripts 通过 + voice-diag build OK；check:ts 有 6 个 pre-existing biome 错误（非本次引入，单独记录）
 lastActivity: 2026-08-25 17:40
 sessionRefs:
   - - （本次审计会话，路径未记录）
-nextAction: 执行 A 类删除候选（10 项零引用文件），删除后跑 git status + check:ts 验证
+nextAction: B 类 6 项逐项用户确认（openQuestions 见下）→ 确认后删除/迁移；A 类已全部完成（commit f66a2c97）
 artifacts:
-  - - （删除完成后产生 commit）
+  - commit f66a2c97：A 类 10 项零引用文件删除（-2071 行）
 decisions:
   - 2026-08-25 — 审计结论：A 类 10 项零引用可安全删；B 类 6 项需确认（python 评估组/batch-format-skills/typescript-edit-benchmark/voice-diag/validate-agent/dws.md）
 openQuestions:
@@ -42,6 +42,8 @@ openQuestions:
 
 ## 进度记录
 
+- 2026-08-25 — B 类完成（commit 58302e8b）：用户拍板 3 删/1 迁移/2 保留——scripts/ python 评估组（edit-benchmark 等 6 文件）+ batch-format-skills.ts + validate-agent（内置 omp agent validate 已替代）删除；voice-diag 迁移到 packages/coding-agent/scripts/（build OK）；typescript-edit-benchmark（连带 root bench scripts）+ prompts/tools/dws.md（dws tool 规划预留）保留
+- 2026-08-25 — A 类 10 项全部删除（commit f66a2c97）：scripts/ 6 项 + fixtures 2 项（before-compaction.jsonl、chunk-edit-indent.rs 实际在 packages/coding-agent/test/fixtures/）+ docs 2 项；删除前逐项核实零引用（grep 排除自引用后无外部引用）；check:ts 的 6 个 biome 错误经 stash 对比确认为 pre-existing（全部在 omp-gateway/desktop/tui/stt，与被删文件零交集，非本次引入）；本地分支与 origin 长期分叉（3640 vs 17728），未做 push
 - 2026-08-25 17:40 — topic 创建；只读瘦身审计完成并交付报告（A 类 10 项 / B 类 6 项 / C 类 7 项，全部零文件改动）
 
 ## 批注
