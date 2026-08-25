@@ -1,0 +1,8 @@
+# Build outputs (root .gitignore covers dist/, *.node; these are package-specific extras)
+dist-node/
+hosted/
+workspace/
+
+# Downloaded VS Code extensions — the builtin omp-web-app theme is committed source
+extensions/*
+!extensions/omp-web-app/
