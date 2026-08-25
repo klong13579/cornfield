@@ -18,9 +18,12 @@ import {
 	type McpServer,
 	type NewSessionRequest,
 	type NewSessionResponse,
+	type PermissionOption,
 	PROTOCOL_VERSION,
 	type PromptRequest,
 	type PromptResponse,
+	type RequestPermissionRequest,
+	type RequestPermissionResponse,
 	type ResumeSessionRequest,
 	type ResumeSessionResponse,
 	type SessionConfigOption,
@@ -35,8 +38,10 @@ import {
 	type SetSessionModelResponse,
 	type SetSessionModeRequest,
 	type SetSessionModeResponse,
+	type ToolCallUpdate,
 	type Usage,
 } from "@agentclientprotocol/sdk";
+import type { AgentTool } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage, Model } from "@oh-my-pi/pi-ai";
 import { logger, VERSION } from "@oh-my-pi/pi-utils";
 import { disableProvider, enableProvider } from "../../capability";
@@ -63,6 +68,105 @@ const MODEL_CONFIG_ID = "model";
 const THINKING_CONFIG_ID = "thinking";
 const THINKING_OFF = "off";
 const SESSION_PAGE_SIZE = 50;
+
+// ── ACP 审批链发射侧 ──
+// bash 工具执行前向 client 发 session/request_permission 帧，client 决策（allow/reject）后才放行/拒绝。
+// 与 serve 侧 canUseTool 闸门同语义，但发射通道是 ACP 的 requestPermission 帧。
+const BASH_TOOL_NAME = "bash";
+const ACP_APPROVAL_TIMEOUT_MS = 120_000;
+
+const APPROVAL_OPTION_ALLOW_ONCE = "allow_once";
+const APPROVAL_OPTION_ALLOW_ALWAYS = "allow_always";
+const APPROVAL_OPTION_REJECT_ONCE = "reject_once";
+const APPROVAL_OPTION_REJECT_ALWAYS = "reject_always";
+
+/** 已安装审批发射侧的 bash 工具对象，防重复包装。 */
+const bashToolsWithApproval = new WeakSet<object>();
+
+function buildBashApprovalOptions(): PermissionOption[] {
+	return [
+		{ optionId: APPROVAL_OPTION_ALLOW_ONCE, name: "Allow once", kind: "allow_once" },
+		{ optionId: APPROVAL_OPTION_ALLOW_ALWAYS, name: "Always allow this session", kind: "allow_always" },
+		{ optionId: APPROVAL_OPTION_REJECT_ONCE, name: "Reject", kind: "reject_once" },
+		{ optionId: APPROVAL_OPTION_REJECT_ALWAYS, name: "Always reject", kind: "reject_always" },
+	];
+}
+
+function isApprovalAllowed(response: RequestPermissionResponse | undefined): boolean {
+	if (!response) return false;
+	if (response.outcome.outcome === "cancelled") return false;
+	return (
+		response.outcome.optionId === APPROVAL_OPTION_ALLOW_ONCE ||
+		response.outcome.optionId === APPROVAL_OPTION_ALLOW_ALWAYS
+	);
+}
+
+/**
+ * 向 ACP client 发 requestPermission 帧并等决策。超时 / abort / 断开一律拒绝（安全侧）。
+ */
+async function requestBashApproval(
+	connection: AgentSideConnection,
+	sessionId: string,
+	toolCallId: string,
+	args: unknown,
+	signal: AbortSignal | undefined,
+): Promise<boolean> {
+	const argsRecord = (args ?? {}) as Record<string, unknown>;
+	const rawCommand = argsRecord.command;
+	const command = typeof rawCommand === "string" ? rawCommand : JSON.stringify(argsRecord);
+	const toolCall: ToolCallUpdate = {
+		toolCallId,
+		title: `bash: ${command.length > 120 ? `${command.slice(0, 117)}...` : command}`,
+		kind: "execute",
+		status: "pending",
+		rawInput: args,
+	};
+	const request: RequestPermissionRequest = {
+		sessionId,
+		toolCall,
+		options: buildBashApprovalOptions(),
+	};
+
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	const timeout = new Promise<boolean>(resolve => {
+		timer = setTimeout(() => resolve(false), ACP_APPROVAL_TIMEOUT_MS);
+	});
+	const abort = new Promise<boolean>(resolve => {
+		if (signal?.aborted) {
+			resolve(false);
+			return;
+		}
+		signal?.addEventListener("abort", () => resolve(false), { once: true });
+	});
+	try {
+		return await Promise.race([
+			connection.requestPermission(request).then(isApprovalAllowed, () => false),
+			timeout,
+			abort,
+		]);
+	} finally {
+		if (timer) clearTimeout(timer);
+	}
+}
+
+/**
+ * 给 bash 工具装上 ACP 审批发射侧。只在工具真正执行前拦截：client allow → 执行原逻辑；
+ * reject / 超时 / 断开 → 抛错（agent-loop 捕获为失败工具结果反馈给模型）。
+ */
+function installBashApproval(session: AgentSession, connection: AgentSideConnection): void {
+	const bashTool: AgentTool | undefined = session.getToolByName(BASH_TOOL_NAME);
+	if (!bashTool || bashToolsWithApproval.has(bashTool)) return;
+	bashToolsWithApproval.add(bashTool);
+
+	const originalExecute = bashTool.execute;
+	bashTool.execute = (async (toolCallId, params, signal, onUpdate, context) => {
+		const approved = await requestBashApproval(connection, session.sessionId, toolCallId, params, signal);
+		if (!approved) {
+			throw new Error("Tool execution was denied by approval");
+		}
+		return originalExecute.call(bashTool, toolCallId, params, signal, onUpdate, context);
+	}) as typeof bashTool.execute;
+}
 
 type AgentImageContent = {
 	type: "image";
@@ -613,6 +717,7 @@ export class AcpAgent implements Agent {
 		try {
 			await this.#configureExtensions(record);
 			await this.#configureMcpServers(record, mcpServers);
+			installBashApproval(session, this.#connection);
 			this.#sessions.set(session.sessionId, record);
 			return record;
 		} catch (error) {
