@@ -114,4 +114,35 @@ describe("InMemoryWireClient", () => {
 		expect(pushes[0].event.requestId).toBe("r1");
 		client.dispose();
 	});
+
+	test("session_snapshot push populates the snapshot cache", async () => {
+		const { core, targets } = makeStubCore();
+		const client = createInMemoryWireClient(core);
+		expect(client.getSnapshot()).toBeUndefined();
+		const target = targets.find(t => t.id === "tui-memory")!;
+		target.send({
+			type: "push",
+			event: {
+				type: "session_snapshot",
+				sessionId: "default",
+				snapshot: { seq: 1, sessionId: "default", messages: [], todoPhases: [], activeToolNames: [], queuedMessageCount: 2, phase: "streaming", retryAttempt: 0, isCompacting: false, isStreaming: true, autoCompactionEnabled: true, autoRetryEnabled: true },
+			},
+		});
+		const snap = client.getSnapshot();
+		expect(snap).toBeDefined();
+		expect(snap?.queuedMessageCount).toBe(2);
+		expect(snap?.isStreaming).toBe(true);
+		// 后续 push 覆盖缓存
+		target.send({
+			type: "push",
+			event: {
+				type: "session_snapshot",
+				sessionId: "default",
+				snapshot: { seq: 2, sessionId: "default", messages: [], todoPhases: [], activeToolNames: [], queuedMessageCount: 0, phase: "idle", retryAttempt: 0, isCompacting: false, isStreaming: false, autoCompactionEnabled: true, autoRetryEnabled: true },
+			},
+		});
+		expect(client.getSnapshot()?.isStreaming).toBe(false);
+		client.dispose();
+		expect(client.getSnapshot()).toBeUndefined();
+	});
 });
