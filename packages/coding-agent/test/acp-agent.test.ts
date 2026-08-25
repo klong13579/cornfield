@@ -2,7 +2,14 @@ import { afterEach, describe, expect, it } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { AgentSideConnection, PromptRequest, SessionNotification } from "@agentclientprotocol/sdk";
+import type {
+	AgentSideConnection,
+	PromptRequest,
+	RequestPermissionRequest,
+	RequestPermissionResponse,
+	SessionNotification,
+} from "@agentclientprotocol/sdk";
+import type { AgentTool } from "@oh-my-pi/pi-agent-core";
 import type { Model } from "@oh-my-pi/pi-ai";
 import { getConfigRootDir, setAgentDir } from "@oh-my-pi/pi-utils";
 import { AcpAgent } from "../src/modes/acp/acp-agent";
@@ -74,6 +81,8 @@ class FakeAgentSession {
 	queuedMessageCount = 0;
 	systemPrompt = "system";
 	disposed = false;
+	bashExecuteCalls: Array<{ toolCallId: string; params: unknown }> = [];
+	#bashTool: AgentTool | undefined;
 	#listeners = new Set<(event: AgentSessionEvent) => void>();
 
 	constructor(
@@ -207,6 +216,23 @@ class FakeAgentSession {
 		return [];
 	}
 
+	getToolByName(name: string): AgentTool | undefined {
+		if (name !== "bash") return undefined;
+		if (!this.#bashTool) {
+			this.#bashTool = {
+				name: "bash",
+				label: "Bash",
+				description: "",
+				parameters: {},
+				execute: async (toolCallId: string, params: unknown) => {
+					this.bashExecuteCalls.push({ toolCallId, params });
+					return { content: [{ type: "text", text: "executed" }], details: {} };
+				},
+			} as unknown as AgentTool;
+		}
+		return this.#bashTool;
+	}
+
 	setActiveToolsByName(_toolNames: string[]): void {}
 
 	async sendCustomMessage(_message: string, _options?: unknown): Promise<void> {}
@@ -235,6 +261,8 @@ interface AgentHarness {
 	cwdA: string;
 	cwdB: string;
 	findSession(sessionId: string): FakeAgentSession | undefined;
+	permissionRequests: RequestPermissionRequest[];
+	setPermissionOutcome(outcome: RequestPermissionResponse): void;
 }
 
 function getChunkMessageId(notification: SessionNotification): string | undefined {
@@ -273,11 +301,19 @@ async function createHarness(emitMode: "first" | "late" | "never" = "first"): Pr
 	const updates: SessionNotification[] = [];
 	const abortController = new AbortController();
 	const sessions: FakeAgentSession[] = [];
+	const permissionRequests: RequestPermissionRequest[] = [];
+	let permissionOutcome: RequestPermissionResponse = {
+		outcome: { outcome: "selected", optionId: "allow_once" },
+	};
 	const connection = {
 		sessionUpdate: async (notification: SessionNotification) => {
 			updates.push(notification);
 		},
 		signal: abortController.signal,
+		requestPermission: async (request: RequestPermissionRequest) => {
+			permissionRequests.push(request);
+			return permissionOutcome;
+		},
 		closed: Promise.withResolvers<void>().promise,
 	} as unknown as AgentSideConnection;
 
@@ -297,6 +333,10 @@ async function createHarness(emitMode: "first" | "late" | "never" = "first"): Pr
 		cwdA,
 		cwdB,
 		findSession: (sessionId: string) => sessions.find(session => session.sessionId === sessionId),
+		permissionRequests,
+		setPermissionOutcome: (outcome: RequestPermissionResponse) => {
+			permissionOutcome = outcome;
+		},
 	};
 }
 
@@ -459,6 +499,41 @@ describe("ACP agent", () => {
 		expect((reply!.update as { content?: { text?: string } }).content?.text ?? "").toContain(
 			"Model switching is not exposed",
 		);
+
+		harness.abortController.abort();
+		await Bun.sleep(0);
+	});
+	it("emits requestPermission before bash execution and honors allow/reject decisions", async () => {
+		const harness = await createHarness();
+		const session = await harness.agent.newSession({ cwd: harness.cwdA, mcpServers: [] });
+		const fakeSession = harness.findSession(session.sessionId);
+		const bashTool = fakeSession?.getToolByName("bash");
+		expect(fakeSession).toBeDefined();
+		expect(bashTool).toBeDefined();
+
+		// allow_once：发出 requestPermission 帧，client 放行后执行原 bash
+		harness.setPermissionOutcome({ outcome: { outcome: "selected", optionId: "allow_once" } });
+		const result = await bashTool!.execute("tool-call-1", { command: "ls -la" } as never);
+		expect(harness.permissionRequests).toHaveLength(1);
+		expect(harness.permissionRequests[0]!.sessionId).toBe(session.sessionId);
+		expect(harness.permissionRequests[0]!.toolCall.toolCallId).toBe("tool-call-1");
+		expect(harness.permissionRequests[0]!.toolCall.kind).toBe("execute");
+		expect(harness.permissionRequests[0]!.options.map(option => option.optionId)).toEqual([
+			"allow_once",
+			"allow_always",
+			"reject_once",
+			"reject_always",
+		]);
+		expect(JSON.stringify(result)).toContain("executed");
+		expect(fakeSession!.bashExecuteCalls).toHaveLength(1);
+
+		// reject_once：发出 requestPermission 帧，client 拒绝后拒绝执行
+		harness.setPermissionOutcome({ outcome: { outcome: "selected", optionId: "reject_once" } });
+		await expect(bashTool!.execute("tool-call-2", { command: "rm -rf /" } as never)).rejects.toThrow(
+			"Tool execution was denied by approval",
+		);
+		expect(harness.permissionRequests).toHaveLength(2);
+		expect(fakeSession!.bashExecuteCalls).toHaveLength(1); // 拒绝路径未执行原 bash
 
 		harness.abortController.abort();
 		await Bun.sleep(0);
