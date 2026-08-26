@@ -91,6 +91,13 @@ jobs:
       - name: Rust checks
         if: matrix.rust_checks
         run: bun run check:rs
+      - uses: taiki-e/install-action@v2
+        if: matrix.rust_checks
+        with:
+          tool: nextest
+      - name: Rust tests
+        if: matrix.rust_checks
+        run: bun run test:rs
       - name: Build native addon(s)
         env:
           CROSS_TARGET: ${{ matrix.target }}
@@ -109,8 +116,13 @@ jobs:
           if-no-files-found: error
 
   test:
+    needs: [native]
     runs-on: ubuntu-22.04
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1/2, 2/2]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -119,18 +131,6 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.3"
-      - uses: dtolnay/rust-toolchain@nightly
-        with:
-          toolchain: nightly-2026-04-29
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-workspace-crates: true
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: nextest
-      - uses: mlugg/setup-zig@v2
-        with:
-          version: 0.15.2
       - name: Cache bun dependencies
         uses: actions/cache@v4
         with:
@@ -143,9 +143,13 @@ jobs:
           sudo ln -s $(which fdfind) /usr/local/bin/fd
           sudo ln -sf /usr/bin/convert /usr/local/bin/magick
       - run: bun install --frozen-lockfile
-      - run: bun run build:native
-      - name: Test workspace
-        run: bun run ci:test:full
+      - name: Download native addon(s)
+        uses: actions/download-artifact@v4
+        with:
+          name: pi-natives-linux-x64
+          path: packages/natives/native
+      - name: Test workspace (TS shard)
+        run: bun run test:ts -- --shard=${{ matrix.shard }}
       - name: CLI smoke test
         run: bun run ci:test:smoke
 
