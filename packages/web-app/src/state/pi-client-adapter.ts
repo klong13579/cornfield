@@ -412,9 +412,9 @@ export class PiClientAdapter implements PiClient {
 		} as never);
 	}
 
-	/** 本机 gateway 运行状态（gateway_status；serve 转发 gateway.status.json）。 */
+	/** 本机 gateway 运行状态（gateway_status；gateway 生产端点直连）。 */
 	async gatewayStatus(): Promise<GatewayStatusDto> {
-		return this.#req<GatewayStatusDto>({ type: "gateway_status" } as never);
+		return this.#gatewayWire<GatewayStatusDto>({ type: "gateway_status" });
 	}
 
 	/** 本地用量统计（get_stats；period 可选时间窗口，无数据/失败抛错由调用方空态）。 */
@@ -532,9 +532,37 @@ export class PiClientAdapter implements PiClient {
 		return result.commands ?? [];
 	}
 
-	/** gateway cron 任务表（get_cron_tasks；jobs.json 直读，只读）。 */
+	/**
+	 * P2-4：cron/gateway 命令直连 gateway 生产端点（POST /wire，本机 7891）。
+	 * 不再经 serve 中转。gateway 未运行 → 明确错误。
+	 */
+	async #gatewayWire<T>(command: Record<string, unknown>): Promise<T> {
+		const port = Number.parseInt(process.env.OMP_GATEWAY_WIRE_PORT ?? "7891", 10);
+		const res = await fetch(`http://127.0.0.1:${port}/wire`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify(command),
+		});
+		const data = (await res.json()) as { ok?: boolean; result?: unknown; error?: unknown };
+		if (!res.ok || data.ok !== true) {
+			throw new Error(typeof data.error === "string" ? data.error : `gateway wire ${res.status}`);
+		}
+		return data.result as T;
+	}
+
+	/** gateway cron 任务表（get_cron_tasks；gateway 生产端点直连）。 */
 	async getCronTasks(): Promise<{ tasks: TaskRowDto[] }> {
-		return this.#req<{ tasks: TaskRowDto[] }>({ type: "get_cron_tasks" } as never);
+		return this.#gatewayWire<{ tasks: TaskRowDto[] }>({ type: "get_cron_tasks" });
+	}
+
+	/** cron 执行日志（get_cron_logs；gateway 生产端点直连，taskId/days/limit 可选）。 */
+	async getCronLogs(opts?: { taskId?: string; days?: number; limit?: number }): Promise<{ logs: CronLogEntryDto[] }> {
+		return this.#gatewayWire<{ logs: CronLogEntryDto[] }>({
+			type: "get_cron_logs",
+			...(opts?.taskId ? { taskId: opts.taskId } : {}),
+			...(opts?.days ? { days: opts.days } : {}),
+			...(opts?.limit ? { limit: opts.limit } : {}),
+		});
 	}
 
 	/**
@@ -584,17 +612,6 @@ export class PiClientAdapter implements PiClient {
 			type: "listen_list",
 		} as never);
 		return { ok: result.ok === true, recordings: result.recordings ?? [] };
-	}
-
-	/** cron 执行日志（get_cron_logs；logs/by-task 直读，只读）。 */
-	async getCronLogs(opts?: { taskId?: string; days?: number; limit?: number }): Promise<{ logs: CronLogEntryDto[] }> {
-		const command = {
-			type: "get_cron_logs",
-			...(opts?.taskId ? { taskId: opts.taskId } : {}),
-			...(opts?.days ? { days: opts.days } : {}),
-			...(opts?.limit ? { limit: opts.limit } : {}),
-		} as never;
-		return this.#req<{ logs: CronLogEntryDto[] }>(command);
 	}
 
 	// hostToolResult：pi-client 无裸帧发送 API（host_tool_result 是独立 client frame），
