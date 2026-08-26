@@ -562,7 +562,8 @@ export class EventController {
 		this.#cancelIdleCompaction();
 		this.ctx.autoCompactionEscapeHandler = this.ctx.editor.onEscape;
 		this.ctx.editor.onEscape = () => {
-			this.ctx.session.abortCompaction();
+			if (this.ctx.wireClient) void this.ctx.wireClient.sendCommand({ type: "abort_compaction" });
+			else this.ctx.session.abortCompaction();
 		};
 		this.ctx.statusContainer.clear();
 		const reasonText =

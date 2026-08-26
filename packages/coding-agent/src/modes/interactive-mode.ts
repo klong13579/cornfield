@@ -563,7 +563,14 @@ export class InteractiveMode implements InteractiveModeContext {
 			basePath,
 		);
 		this.editor.setAutocompleteProvider(autocompleteProvider);
-		this.session.setSlashCommands(fileCommands);
+		if (this.wireClient) {
+			void this.wireClient.sendCommand({
+				type: "set_slash_commands",
+				commands: fileCommands.map(c => ({ name: c.name, description: c.description, content: c.content, source: c.source })),
+			});
+		} else {
+			this.session.setSlashCommands(fileCommands);
+		}
 	}
 
 	async getUserInput(): Promise<SubmittedUserInput> {
@@ -869,7 +876,8 @@ export class InteractiveMode implements InteractiveModeContext {
 				return;
 			}
 			try {
-				await this.session.setModelTemporary(resolved.model, planThinkingLevel);
+				if (this.wireClient) await this.wireClient.sendCommand({ type: "set_model_temporary", provider: resolved.model.provider, modelId: resolved.model.id, thinkingLevel: planThinkingLevel });
+			else await this.session.setModelTemporary(resolved.model, planThinkingLevel);
 			} catch (error) {
 				this.showWarning(
 					`Failed to switch to plan model for plan mode: ${error instanceof Error ? error.message : String(error)}`,
@@ -886,7 +894,8 @@ export class InteractiveMode implements InteractiveModeContext {
 		if (!pending) return;
 		this.#pendingModelSwitch = undefined;
 		try {
-			await this.session.setModelTemporary(pending.model, pending.thinkingLevel);
+			if (this.wireClient) await this.wireClient.sendCommand({ type: "set_model_temporary", provider: pending.model.provider, modelId: pending.model.id, thinkingLevel: pending.thinkingLevel });
+			else await this.session.setModelTemporary(pending.model, pending.thinkingLevel);
 		} catch (error) {
 			this.showWarning(
 				`Failed to switch model after streaming: ${error instanceof Error ? error.message : String(error)}`,
@@ -924,15 +933,25 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.planModePlanFilePath = planFilePath;
 		this.planModeEnabled = true;
 
-		await this.session.setActiveToolsByName(uniquePlanTools);
-		this.session.setPlanModeState({
-			enabled: true,
-			planFilePath,
-			workflow: options?.workflow ?? "parallel",
-			reentry: this.#planModeHasEntered,
-		});
+		if (this.wireClient) await this.wireClient.sendCommand({ type: "set_active_tools", toolNames: uniquePlanTools });
+		else await this.session.setActiveToolsByName(uniquePlanTools);
+		if (this.wireClient) {
+			void this.wireClient.sendCommand({
+				type: "set_plan_mode",
+				enabled: true,
+				planFilePath,
+			});
+		} else {
+			this.session.setPlanModeState({
+				enabled: true,
+				planFilePath,
+				workflow: options?.workflow ?? "parallel",
+				reentry: this.#planModeHasEntered,
+			});
+		}
 		if (this.wireClient?.getSnapshot()?.isStreaming ?? this.session.isStreaming) {
-			await this.session.sendPlanModeContext({ deliverAs: "steer" });
+			if (this.wireClient) await this.wireClient.sendCommand({ type: "send_plan_mode_context" });
+		else await this.session.sendPlanModeContext({ deliverAs: "steer" });
 		}
 		this.#planModeHasEntered = true;
 		await this.#applyPlanModeModel();
@@ -948,7 +967,8 @@ export class InteractiveMode implements InteractiveModeContext {
 
 		const previousTools = this.#planModePreviousTools;
 		if (previousTools && previousTools.length > 0) {
-			await this.session.setActiveToolsByName(previousTools);
+			if (this.wireClient) await this.wireClient.sendCommand({ type: "set_active_tools", toolNames: previousTools });
+		else await this.session.setActiveToolsByName(previousTools);
 		}
 		if (this.#planModePreviousModelState) {
 			const prev = this.#planModePreviousModelState;
@@ -964,7 +984,8 @@ export class InteractiveMode implements InteractiveModeContext {
 			} else if (this.wireClient?.getSnapshot()?.isStreaming ?? this.session.isStreaming) {
 				this.#pendingModelSwitch = { model: prev.model, thinkingLevel: prev.thinkingLevel };
 			} else {
-				await this.session.setModelTemporary(prev.model, prev.thinkingLevel);
+				if (this.wireClient) await this.wireClient.sendCommand({ type: "set_model_temporary", provider: prev.model.provider, modelId: prev.model.id, thinkingLevel: prev.thinkingLevel });
+			else await this.session.setModelTemporary(prev.model, prev.thinkingLevel);
 			}
 			// If #applyPlanModeModel queued a deferred switch to the plan-role model
 			// (because the session was streaming on entry), drop it now: we are
@@ -980,7 +1001,8 @@ export class InteractiveMode implements InteractiveModeContext {
 				}
 			}
 		}
-		this.session.setPlanModeState(undefined);
+		if (this.wireClient) void this.wireClient.sendCommand({ type: "set_plan_mode", enabled: false });
+		else this.session.setPlanModeState(undefined);
 		this.planModeEnabled = false;
 		this.planModePaused = options?.paused ?? false;
 		this.planModePlanFilePath = undefined;
@@ -1123,10 +1145,19 @@ export class InteractiveMode implements InteractiveModeContext {
 		});
 		await Bun.write(newLocalPath, planContent);
 		if (previousTools.length > 0) {
-			await this.session.setActiveToolsByName(previousTools);
+			if (this.wireClient) await this.wireClient.sendCommand({ type: "set_active_tools", toolNames: previousTools });
+		else await this.session.setActiveToolsByName(previousTools);
 		}
-		this.session.setPlanReferencePath(options.finalPlanFilePath);
-		this.session.markPlanReferenceSent();
+		if (this.wireClient) {
+			void this.wireClient.sendCommand({
+				type: "set_plan_reference",
+				path: options.finalPlanFilePath,
+				markSent: true,
+			});
+		} else {
+			this.session.setPlanReferencePath(options.finalPlanFilePath);
+			this.session.markPlanReferenceSent();
+		}
 		const planModePrompt = prompt.render(planModeApprovedPrompt, {
 			planContent,
 			finalPlanFilePath: options.finalPlanFilePath,

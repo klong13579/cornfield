@@ -659,7 +659,14 @@ export class InputController {
 	async cycleRoleModel(options?: { temporary?: boolean }): Promise<void> {
 		try {
 			const cycleOrder = settings.get("cycleOrder");
-			const result = await this.ctx.session.cycleRoleModels(cycleOrder, options);
+			const wireCycle = this.ctx.wireClient
+				? await this.ctx.wireClient.sendCommand({ type: "cycle_role_models", roleOrder: cycleOrder })
+				: null;
+			const result = wireCycle
+				? wireCycle.ok
+					? (wireCycle.result as { model: { id: string; provider: string; name?: string; thinking?: unknown }; role: string; thinkingLevel?: string } | undefined)
+					: undefined
+				: await this.ctx.session.cycleRoleModels(cycleOrder, options);
 			if (!result) {
 				this.ctx.showStatus("Only one role model available");
 				return;
