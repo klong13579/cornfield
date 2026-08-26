@@ -327,15 +327,16 @@ export class InteractiveMode implements InteractiveModeContext {
 		}));
 
 		// Convert custom commands (TypeScript) to SlashCommand format
-		const customCommands: SlashCommand[] = this.session.customCommands.map(loaded => ({
-			name: loaded.command.name,
-			description: `${loaded.command.description} (${loaded.source})`,
+		const customCommands: SlashCommand[] = (this.wireClient?.getSnapshot()?.customCommands ?? this.session.customCommands.map(c => ({ name: c.command.name, description: `${c.command.description} (${c.source})`, source: c.source }))).map(c => ({
+			name: c.name,
+			description: c.description,
 		}));
 
 		// Build skill commands from session.skills (if enabled)
 		const skillCommandList: SlashCommand[] = [];
 		if (settings.get("skills.enableSkillCommands")) {
-			for (const skill of this.session.skills) {
+			const snapSkills = this.wireClient?.getSnapshot()?.skills ?? this.session.skills.map(s => ({ name: s.name, filePath: s.filePath, description: s.description }));
+			for (const skill of snapSkills) {
 				const commandName = `skill:${skill.name}`;
 				this.skillCommands.set(commandName, skill.filePath);
 				skillCommandList.push({ name: commandName, description: skill.description });
@@ -428,7 +429,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		const startupQuiet = settings.get("startup.quiet");
 		this.#welcomeComponent = undefined;
 
-		for (const warning of this.session.configWarnings) {
+		for (const warning of this.wireClient?.getSnapshot()?.configWarnings ?? this.session.configWarnings) {
 			this.ui.addChild(new Text(theme.fg("warning", `Warning: ${warning}`), 1, 0));
 			this.ui.addChild(new Spacer(1));
 		}
