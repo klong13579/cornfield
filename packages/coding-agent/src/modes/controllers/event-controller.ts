@@ -134,9 +134,15 @@ export class EventController {
 	}
 
 	subscribeToAgent(): void {
-		this.ctx.unsubscribe = this.ctx.session.subscribe(async (event: AgentSessionEvent) => {
-			await this.handleEvent(event);
-		});
+		this.ctx.unsubscribe = this.ctx.wireClient
+			? this.ctx.wireClient.onPush(frame => {
+				if (frame.type === "push" && frame.event.type === "progress") {
+					void this.handleEvent(frame.event.event as AgentSessionEvent);
+				}
+			})
+			: this.ctx.session.subscribe(async (event: AgentSessionEvent) => {
+					await this.handleEvent(event);
+				});
 	}
 
 	async handleEvent(event: AgentSessionEvent): Promise<void> {
@@ -556,7 +562,8 @@ export class EventController {
 		this.#cancelIdleCompaction();
 		this.ctx.autoCompactionEscapeHandler = this.ctx.editor.onEscape;
 		this.ctx.editor.onEscape = () => {
-			this.ctx.session.abortCompaction();
+			if (this.ctx.wireClient) void this.ctx.wireClient.sendCommand({ type: "abort_compaction" });
+			else this.ctx.session.abortCompaction();
 		};
 		this.ctx.statusContainer.clear();
 		const reasonText =

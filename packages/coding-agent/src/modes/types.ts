@@ -70,6 +70,8 @@ export interface InteractiveModeContext {
 
 	// Session access
 	session: AgentSession;
+	/** P3：进程内 wire 客户端（事件源切换用，注入后取代 session.subscribe）。 */
+	wireClient?: import("../server/memory-wire").InMemoryWireClient;
 	sessionManager: SessionManager;
 	settings: Settings;
 	keybindings: KeybindingsManager;

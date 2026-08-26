@@ -153,7 +153,8 @@ export class ExtensionUiController {
 			getContextUsage: () => this.ctx.session.getContextUsage(),
 			waitForIdle: () => this.ctx.session.agent.waitForIdle(),
 			reload: async () => {
-				await this.ctx.session.reload();
+				if (this.ctx.wireClient) await this.ctx.wireClient.sendCommand({ type: "reload" });
+				else await this.ctx.session.reload();
 				this.ctx.chatContainer.clear();
 				this.ctx.renderInitialMessages();
 				await this.ctx.reloadTodos();
@@ -209,7 +210,14 @@ export class ExtensionUiController {
 				return { cancelled: false };
 			},
 			branch: async entryId => {
-				const result = await this.ctx.session.branch(entryId);
+				const wireBranch = this.ctx.wireClient
+					? await this.ctx.wireClient.sendCommand({ type: "branch", entryId })
+					: null;
+				const result = wireBranch
+					? wireBranch.ok
+						? { cancelled: false, selectedText: (wireBranch.result as { selectedText?: string } | undefined)?.selectedText ?? "" }
+						: { cancelled: true, selectedText: "" }
+					: await this.ctx.session.branch(entryId);
 				if (result.cancelled) {
 					return { cancelled: true };
 				}
@@ -426,7 +434,8 @@ export class ExtensionUiController {
 				if (this.ctx.isBackgrounded) {
 					return;
 				}
-				await this.ctx.session.reload();
+				if (this.ctx.wireClient) await this.ctx.wireClient.sendCommand({ type: "reload" });
+				else await this.ctx.session.reload();
 				this.ctx.chatContainer.clear();
 				this.ctx.renderInitialMessages();
 				await this.ctx.reloadTodos();
@@ -477,7 +486,14 @@ export class ExtensionUiController {
 				if (this.ctx.isBackgrounded) {
 					return { cancelled: true };
 				}
-				const result = await this.ctx.session.branch(entryId);
+				const wireBranch = this.ctx.wireClient
+					? await this.ctx.wireClient.sendCommand({ type: "branch", entryId })
+					: null;
+				const result = wireBranch
+					? wireBranch.ok
+						? { cancelled: false, selectedText: (wireBranch.result as { selectedText?: string } | undefined)?.selectedText ?? "" }
+						: { cancelled: true, selectedText: "" }
+					: await this.ctx.session.branch(entryId);
 				if (result.cancelled) {
 					return { cancelled: true };
 				}
@@ -948,7 +964,11 @@ export class ExtensionUiController {
 	}
 
 	#sendExtensionUserMessage: SendUserMessageHandler = (content, options) => {
-		this.ctx.session.sendUserMessage(content, options).catch((err: unknown) => {
+		const sendUser = (): Promise<void> =>
+				this.ctx.wireClient
+					? this.ctx.wireClient.sendCommand({ type: "send_user_message", message: typeof content === "string" ? content : "" }).then(() => undefined)
+					: this.ctx.session.sendUserMessage(content, options);
+			sendUser().catch((err: unknown) => {
 			this.ctx.showError(`Extension sendUserMessage failed: ${err instanceof Error ? err.message : String(err)}`);
 		});
 	};

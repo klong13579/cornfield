@@ -256,13 +256,20 @@ export class VoiceModeController {
 		// Context freshness: every main-session turn (typed or voice task)
 		// refreshes the realtime front-end's summary, so deictic questions
 		// ("刚才那个改对了吗") see recent work instead of the voice-start snapshot.
-		this.#sessionUnsubscribe = this.#ctx.session.subscribe(event => {
+		const handleVoiceEvent = (event: AgentSessionEvent): void => {
 			if (event.type === "agent_end") {
 				this.#refreshInstructions();
 				this.#pushThinking("");
 			}
 			this.#feedThinking(event);
-		});
+		};
+		this.#sessionUnsubscribe = this.#ctx.wireClient
+			? this.#ctx.wireClient.onPush(frame => {
+				if (frame.type === "push" && frame.event.type === "progress") {
+					handleVoiceEvent(frame.event.event as AgentSessionEvent);
+				}
+			})
+			: this.#ctx.session.subscribe(handleVoiceEvent);
 
 		const callbacks: VoicePanelCallbacks = {
 			onExit: () => {
