@@ -2,7 +2,20 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **交接物改为集成分支 + diff 预览，用户确认后自动合并到 base 并清理** (`SKILL.md`): Phase 3 步骤 4 交接物从 N 个原始分支名改为已验证通过的集成分支（`<squadId>-integ`）完整 diff 预览 + 整体验证结果；步骤 5 改为「合并与清理」，用户说「合吧」后父自动合并到 base、关 agent、删 worktree、归档一次完成。清理权限同步更新。
+
 ### Added
+
+- **新增 high 模型档位** (`SKILL.md`, `scripts/bootstrap.ts`): `narwal-plan/glm-5.3` 作为 `high` 档（重任务/复杂重构使用），子任务 `modelTier` 可选 cheap | mid | high。
+- **任务包版本管理** (`SKILL.md`, `scripts/bootstrap.ts`, `scripts/squad-state.ts`): `.squad.json` 新增 `squadVersion` 字段（当前 `1`），bootstrap 启动时校验版本匹配，不匹配则拒绝；state.json 同步记录 `squadVersion` 供恢复时核对。
+
+### Changed
+
+- **bootstrap 改调用 `resolveModel()`** (`scripts/bootstrap.ts`): 从内联表达式提取为独立函数，支持 `high` 档位和 `modelTiers` 可选字段的安全访问。
+- **状态机增加转移护栏** (`scripts/squad-state.ts`): 新增 `VALID_TRANSITIONS` 转移矩阵，`updateState()` 校验非法转移（如 `assembled -> complete`）；终态（`complete`/`failed`）不可逆，重复设置同一状态幂等；`--force` 参数供恢复场景跳过校验。CLI 同步支持 `--force` 标志。
+- **父模型 >= 子模型硬约束** (`scripts/bootstrap.ts`, `SKILL.md`): 新增 `--parent-model` 参数，`validateParentModel()` 校验父模型档位不低于任何子任务；`cheap < mid < high` 三级比较，不在标准档位表的模型假设为最高级。
 
 - **整体验证升级为强制门禁** (`scripts/integrate.ts`, `SKILL.md`): Phase 3 整体验证从「条件触发」（改动同域或涉及整体行为时）改为**硬门禁**——任何 squad 有 ≥2 个 complete 子任务，父必须建 integration worktree 合体验证，无论子任务是否同域/文件是否相交；判定依据是「合体后的产物才是交付物」。实测教训（2026-08-21 打包 squad）：T1 改 `main.ts` 生产加载、T2 改打包链路，单 worktree 验收各自通过，但打包只用 T2 worktree（缺 T1 的 `isPackaged` 分支）→ 装机白屏。豁免仅限单子任务或全只读 research（交接清单须显式说明理由）。integrate.ts 对单分支场景输出豁免提示。
 

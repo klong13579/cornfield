@@ -1,6 +1,6 @@
 ---
 name: squad-programming
-version: 0.2.0
+version: 0.4.0
 description: >-
   并行编排：把一个大任务拆成 MECE 子任务，在多个 git worktree 里各起一个子
   omp 并行工作，用 intercom 主从通信做求助与进度汇报。Use when the user wants
@@ -23,7 +23,7 @@ mutating: true
 
 ## Outcome
 
-用户的任务被拆成 MECE 子任务，每个子任务在自己的 worktree（或只读共享区）由独立子 omp 执行；子 omp 通过 intercom 向父求助/汇报；父按任务包的 gate 验证每个子任务并把完成结果（branch + diff 摘要）**交接给用户**；合并代码进 base 由用户自己做；结束后 worktree 清理，任务包归档。
+用户的任务被拆成 MECE 子任务，每个子任务在自己的 worktree（或只读共享区）由独立子 omp 执行；子 omp 通过 intercom 向父求助/汇报；父按任务包的 gate 验证每个子任务并把通过合体验证的集成分支 + diff 预览**交接给用户**；用户确认后父自动合并到 base 分支，清理 worktree 和 agent，归档任务包。
 
 ## 前置条件（不满足则 [blocked]）
 
@@ -65,6 +65,13 @@ mutating: true
 
 按任务类型映射；`unknown` 或特殊需求可 per-subtask 覆盖 `model`/`modelTier`。编排者（父）保持当前模型不动。
 
+**硬约束：父模型必须 >= 所有子模型的档位。**
+- 父用 `narwal-plan/deepseek-v4-pro`（mid）时，子不能用 `high`（narwal-plan/glm-5.3）。
+- 父用 `narwal-plan/glm-5.3`（high）时，子可以用任何档位。
+- 父模型不在标准档位表（cheap/mid/high）时，假设为最高级，不拦截。
+- 子模型不在标准档位表时，跳过档位比较（无法判断时不拦）。
+- 集结时 `--parent-model` 传入父当前模型，脚本自动校验。
+
 ### Step 0.5 产出任务包（.squad.json）
 
 见 #任务包 schema。任务包写入每个 worktree 的 `.squad.json`（脚本执行），父保留聚合副本到 `~/.omp/squads/<squadId>/`（不污染 repo 的 git status）；集结脚本同时在这里写 `state.json`（状态底账，父中断后用于恢复，见 #父中断恢复）。
@@ -78,6 +85,7 @@ bun run .omp/skills/squad-programming/scripts/bootstrap.ts \
   --bundle <任务包绝对路径> \
   --parent-target <父 session 名或 id> \
   --parent-session-id <父 session id> \
+  --parent-model <父当前模型> \
   [--dry-run]
 ```
 
@@ -148,8 +156,12 @@ bun run .omp/skills/squad-programming/scripts/bootstrap.ts \
   状态/新鲜度**直连 intercom broker 拿**（不绕 herdr——broker 是 omp 自身状态机，herdr 只是镜像；probe 走 `~/.omp/intercom/broker.sock` 注册+list 协议，`SessionInfo.status` + `lastActivity` 即权威）：进程存活（ps 按 worktree 路径匹配 omp）→ broker 注册态（会话在否/status）→ `lastActivity` 新鲜度 + pane 错误签名（**静默挂起**：`lastActivity` 长时间不更新——模型 API 响应挂起时 pid 在、pane 有残影，但已死机，实测 187s 静默案例；`PROBE_STALL_AFTER_S` 默认 240s）。输出 `[OK]/[WARN]`，有 WARN 退出码 1。
   **WARN 处置阶梯（不直接判死）**：① 先看是否自愈——API 断连（`socket connection was closed` 等）是 provider 并发高时的常见噪声，omp 自带重试，worker 通常继续推进；② **静默挂起先用 ask 唤醒**（实测 ask 到达后 worker 立即恢复——ask 双向可靠，本身就是唤醒信号）；③ ask 无响应 + pane 无进展 → 记 `stalled` → 转用户拍板（重启该子任务 / 等 / 打回）。
 - 用 `intercom({ action: "children" })` 看子 omp 实时状态，不轮询消息。
-- **每条状态消息落地 state.json**（父中断恢复的底账）：
-  `bun run .omp/skills/squad-programming/scripts/squad-state.ts ~/.omp/squads/<squadId>/state.json update <taskId> <status> [一句话]`
+- **每条状态消息落地 state.json**（父中断恢复的底账）:
+  `bun run .omp/skills/squad-programming/scripts/squad-state.ts ~/.omp/squads/<squadId>/state.json update <taskId> <status> [一句话] [--force]`
+  - 转移矩阵：`assembled -> started`（正常流程），`started -> blocked / reviewing / complete / failed`，`blocked/reviewing -> started / complete / failed`。
+  - 终态（`complete` / `failed`）不可逆，非法转移被拒绝。
+  - `--force` 跳过转移校验，仅父中断恢复场景使用（见 #父中断恢复）。
+  - 同一状态重复设置是幂等的（仅更新 timestamp）。
   收到 `[T<n>] STARTED` → `started`；`BLOCKED` → `blocked`；`REVIEWING` → `reviewing`；`COMPLETE` → 先跑 gate 验证，通过才 `complete`（否则打回）；`FAILED` → `failed`。每回合至少核对一次 state 是否跟上。
 - 收到子 ask → 立即 `reply` 决策或引导；`pending` 看堆积，`reply to <taskId>` 定向回复。
 - 收到 `[T<n>] BLOCKED` → 判断是缺信息（补）还是缺决策（转用户拍板，绝不代拍）。
@@ -163,8 +175,8 @@ bun run .omp/skills/squad-programming/scripts/bootstrap.ts \
 1. `squad-state.ts <stateFile> list` 读未终态子任务（`stateFile = ~/.omp/squads/<squadId>/state.json`，集结时自动写入；找不到就搜 `~/.omp/squads/*/state.json` 按 `createdAt` 最新的）。
 2. 对每个未终态子任务，用 `intercom({ action: "children" })` + `herdr pane read <paneId>`（state 里有 paneId）复核实际状态：
    - 还活着且在干活 → 保持 `started`，询问是否需要它重新发一次最新状态；
-   - 发了 COMPLETE 但父没收到 → 跑 gate 验证，过了直接标 `complete`；
-   - pane 死了/无响应 → 标记 `failed` 并给原因。
+   - 发了 COMPLETE 但父没收到 → 跑 gate 验证，过了直接标 `complete`（用 `--force` 跳过 assembled → complete 校验）；
+   - pane 死了/无响应 → 标记 `failed` 并给原因（用 `--force` 跳过 assembled → failed 校验）。
 3. 恢复期间对子任务补发一条确认消息（intercom send），告诉它父已回来；继续 Phase 2 盯盘。
 
 **兜底事实**：state.json 是权威底账，intercom 消息流只是事件源；两者不一致时以 state.json + 实际 pane 复核为准。
@@ -184,18 +196,20 @@ bun run .omp/skills/squad-programming/scripts/bootstrap.ts \
    - **冲突处理**：merge 冲突/失败即停（不自动解决、不继续后续分支）——冲突 = 子任务边界侵入，**打回该子任务修**，不在这里打补丁；修好后 `--force` 重建 integration 重来。
    - **验证内容**：每个子任务 gate.verifiers 的并集 + 整体功能冒烟（web → `bun run dev` + 浏览器过一遍受影响页面；CLI → 冒烟命令/端到端）。
    - **打回规则**：整体验证失败 → 定位到回归/冲突的子任务打回，**不使用 integration worktree 当工作区改代码**（它是验证区，改了就没法重来）。
-   - **通过** → 交接清单附 integration 分支与整体验证结果；用户 merge 正式分支后，integration worktree 与分支一并清理（见步骤 5，用户确认才删）。
-4. **交接**：父 agent **不做任何 merge** —— 合并代码进 base 是用户的动作。对每个验证过的子任务整理：branch 名 + diff 摘要 + gate 结果 + 整体验证结论，逐条摆给用户；用户自己 `git merge <branch>`（或打回/丢弃）。
-5. **清理**（每步单独执行、确认 JSON 返回后再下一步，**禁止串行 `&&`**）——顺序铁律：**先关 agent，再删 git worktree，最后归档**。
-   - **① 关 agent（容易漏，本次实测教训）**：子任务的 agent 节点 = herdr 树 workspace（`w57`/`w5A`…），里面跑的 omp 进程**不随 `git worktree remove` 消失**——实测删完 worktree 还残留 7 个 idle omp。逐个 `herdr workspace close <nodeWorkspaceId>`（= 关 pane + 杀进程 + 注销 intercom 会话）；之后验证判据三条：`ps aux | grep "omp --model"` 无残留、`herdr workspace list` 无 linked worktree 节点、`intercom({action:"list"})` 无该 squad 的子会话。
-   - **② 删 worktree + 分支**：`git worktree remove --force <worktree路径>` + `git branch -D <branch>`（用户已确认合并/丢弃）；integration worktree 同法（`.worktrees/<squadId>-integ` + `git branch -D <squadId>-integ`）。
-   - **③ 归档**：任务包移到 `~/.omp/squads/archive/<squadId>/`；清 `/tmp/squad-*.json` bundle。
-   - **④ 还原父 workspace 名**：`herdr workspace rename <父wsId> <原名>`（集结时被 rename 为 squadId）。
+     - **通过** → 进入步骤 4（交接）。
+4. **交接**：父 agent 向用户展示集成分支（`<squadId>-integ`）的完整 diff 预览 + 整体验证结果 + 每个子任务的摘要。用户确认后（说「合吧」/「合并」/「merge」），父 agent 自动执行步骤 5。用户打回/丢弃时，分支和 worktree 保留不动。
+5. **合并与清理**（用户确认后自动执行，每步单独执行、确认 JSON 返回后再下一步，**禁止串行 `&&`**）——顺序铁律：**先合并到 base，再关 agent，再删 git worktree，最后归档**。
+   - **① 合并到 base**：在 integration worktree 内执行 `git checkout <baseBranch> && git merge <squadId>-integ`（必要时代用户 push）。合并失败（冲突等）→ 停止，报告给用户，不继续清理。
+   - **② 关 agent**：子任务的 agent 节点 = herdr 树 workspace（`w57`/`w5A`…），里面跑的 omp 进程**不随 `git worktree remove` 消失**——实测删完 worktree 还残留 7 个 idle omp。逐个 `herdr workspace close <nodeWorkspaceId>`（= 关 pane + 杀进程 + 注销 intercom 会话）；之后验证判据三条：`ps aux | grep "omp --model"` 无残留、`herdr workspace list` 无 linked worktree 节点、`intercom({action:"list"})` 无该 squad 的子会话。
+   - **③ 删 worktree + 分支**：`git worktree remove --force <worktree路径>` + `git branch -D <branch>`（用户已确认合并/丢弃）；integration worktree 同法（`.worktrees/<squadId>-integ` + `git branch -D <squadId>-integ`）。
+   - **④ 归档**：任务包移到 `~/.omp/squads/archive/<squadId>/`；清 `/tmp/squad-*.json` bundle。
+   - **⑤ 还原父 workspace 名**：`herdr workspace rename <父wsId> <原名>`（集结时被 rename 为 squadId）。
+   - 合并完成后通知用户：「已合并到 `<baseBranch>`，已清理。」
 
-**Completion criterion**：每个子任务已验证并交接给用户（branch + 摘要）；用户确认后的分支与 worktree 清理干净；用户看到结果摘要。
+**Completion criterion**：集成分支已验证并交接给用户（diff 预览 + 验证结果）；用户确认后已合并到 base，worktree 和 agent 已清理。
 
 **清理权限（谁不用问你，谁必须等你）**：
-- 用户明确说「合并完了 / 这分支不要了」→ 父 agent 清理该子任务：**先 `herdr workspace close` 关 agent 节点**（非仅 git worktree）→ worktree/分支 → integration；
+- 用户验收通过说「合吧」→ 父 agent 自动执行完整合并与清理流程（合并到 base → 关 agent → 删 worktree/分支 → 归档）；
 - `FAILED` 或用户还没表态 → **不得清理**：worktree/分支/agent 节点全保留（agent 还可能在等用户反馈），等用户拍板；
 - pane close 只在对应子任务已终态（用户已逐条表态后）执行；只要还有待合并/待验的 worktree 在，不关 pane（防止子任务上下文和会话终端被一起回收）。
 
@@ -205,9 +219,35 @@ bun run .omp/skills/squad-programming/scripts/bootstrap.ts \
 |---|---|---|
 | `cheap` | `narwal-plan/deepseek-v4-flash` | research / docs / test |
 | `mid` | `narwal-plan/deepseek-v4-pro` | code 实现 / review |
+| `high` | `narwal-plan/glm-5.3` | 重任务（复杂重构/跨模块改动），显式指定时使用 |
 | 禁用 | `narwal-plan/claude-opus-*`、`claude-sonnet-*` | 默认不启用；父显式在任务包指定才用 |
 
 档位是**单点配置**：子 omp 启动后若模型不在档位，`switch_model` 切回档内模型。禁用清单只增不减 —— 子 omp 禁止使用禁用清单内的模型，用户拍板才放行新贵档。
+
+## 版本管理
+
+任务包 schema 有版本号 `squadVersion`，与脚本的版本校验逻辑绑定。
+
+| 字段 | 说明 |
+|---|---|
+| `squadVersion` | 任务包 schema 版本号（当前 `1`）。bootstrap 启动时校验版本匹配，不匹配则拒绝执行。 |
+| `SKILL.md` frontmatter `version` | Skill 自身的发布版本（`0.3.0`）。记录流程/脚本的变更历史。 |
+
+### 版本兼容规则
+
+| 场景 | 行为 |
+|---|---|
+| `squadVersion` 未填写 | 拒绝（`bundle.squadVersion` 缺失） |
+| `squadVersion` 不等于 `CURRENT_SQUAD_VERSION` | 拒绝（版本不匹配，提示当前版本号） |
+| `squadVersion` 非数字 | 拒绝（`squadVersion` 必须是整数） |
+
+### 升级流程
+
+当任务包 schema 发生不兼容变更（新增必填字段、删除字段、修改字段语义）时：
+1. 递增 `CURRENT_SQUAD_VERSION`（`bootstrap.ts` 顶部常量）
+2. 更新 `validateBundle()` 中的校验逻辑
+3. 更新 `SKILL.md` 中的 schema 文档
+4. 旧版本任务包应被新脚本拒绝（不改旧包，显式报错让用户重产）
 
 ## Gate 三态
 
@@ -223,6 +263,7 @@ bun run .omp/skills/squad-programming/scripts/bootstrap.ts \
 
 ```jsonc
 {
+  "squadVersion": 1,                           // 任务包 schema 版本（必填，当前 1）
   "squadId": "squad-20260818-a3f2",
   "taskType": "mixed",
   "baseBranch": "main",
@@ -230,6 +271,7 @@ bun run .omp/skills/squad-programming/scripts/bootstrap.ts \
   "modelTiers": {
     "cheap": "narwal-plan/deepseek-v4-flash",
     "mid": "narwal-plan/deepseek-v4-pro",
+    "high": "narwal-plan/glm-5.3",               // 重任务档位，显式指定时使用
     "banned": ["narwal-plan/claude-opus-*", "narwal-plan/claude-sonnet-*"]
   },
   "parent": { "target": "planner", "sessionId": "...", "name": "可选可读展示名" },  // cwd 可选：缺省 = bootstrap 运行目录（父 omp 会话 cwd），worktree 落 <父cwd>/.worktrees/；name 仅展示（worker brief 用），路由仍走 target
@@ -248,7 +290,7 @@ bun run .omp/skills/squad-programming/scripts/bootstrap.ts \
         "acceptance": "保持对外 API 签名不变",
         "mergePolicy": "auto"                    // 仅验收提示（skill 不自动 merge）：unknown 时强制 human-review
       },
-      "modelTier": "mid",                        // cheap | mid，或 "model": "<provider>/<id>"
+      "modelTier": "mid",                        // cheap | mid | high，或 "model": "<provider>/<id>"
      "branch": "feat/t1",                       // worktree 目录按此自动推导（<父cwd>/.worktrees/feat-t1）
      "worktree": "/path/to/repo/.worktrees/t1"  // 可选：省略则自动落在 <父cwd>/.worktrees/<branch 去/为->；仅特殊场景显式覆盖
       "budgetTokens": 200000                     // 可选：超预算强制上报父
@@ -265,7 +307,8 @@ bun run .omp/skills/squad-programming/scripts/bootstrap.ts \
 第一步（准备检查）：读启动 brief 里给出的任务包路径（worktree 场景 = 当前目录 .squad.json，
 shared 场景 = /tmp 绝对路径），完整理解任务、scope、gate、汇报协议、模型档位；
 用 list_models 确认分配模型在可用列表（不在则 switch_model 到档内模型并汇报实际生效模型）；
-然后立刻向父发 "[<taskId>] STARTED: <实际生效模型>，任务包已读" —— 父等全部 STARTED 才正式开工。
+然后立刻向父发 "[<taskId>] STARTED: <实际生效模型>，任务包已读"；
+【硬约束】收到父的开工确认（parent ask 回复「GO」或「开工」）前不得开始实现，只做准备检查。父等全部 STARTED 后才统一发开工确认。
 规则：只改 scope 内文件；求助必须用 intercom ask 且带 to=<parent.target>（不带 to 会被按 cwd 路由到同目录其他会话，收不到）；状态用 intercom send 给
 <parent.target>，格式 "[<taskId>] <STATE>: 一句话"（STATE ∈ STARTED/BLOCKED/REVIEWING/COMPLETE/FAILED）。
 完成标准即 .squad.json 中 acceptance。开始。

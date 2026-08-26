@@ -25,7 +25,7 @@ import lintSkill from "./assets/.omp/skills/lint/SKILL.md" with { type: "text" }
 import agentsManifest from "./assets/AGENTS.md" with { type: "text" };
 import externalWorkspaces from "./assets/knowledge/external-workspaces.md" with { type: "text" };
 import mission from "./assets/mission.md" with { type: "text" };
-import promptIncludes from "./assets/prompt-includes.json" with { type: "text" };
+import promptIncludes from "./assets/prompt-includes.json";
 import todo from "./assets/TODO.md" with { type: "text" };
 import tools from "./assets/TOOLS.md" with { type: "text" };
 import user from "./assets/user.md" with { type: "text" };

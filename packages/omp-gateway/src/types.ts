@@ -305,6 +305,13 @@ export interface ChannelHealth {
 	 * empty/unsupported payloads).
 	 */
 	processedCount: number;
+	/**
+	 * Epoch ms of the last inbound BUSINESS message (0 if none yet). Socket
+	 * liveness (lastSocketAvailableAt) can stay fresh via pong/heartbeat while
+	 * the platform has silently stopped delivering messages — this field
+	 * distinguishes that fake-alive state.
+	 */
+	lastMessageReceivedAt?: number;
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -317,6 +324,12 @@ export interface SessionRecord {
 	accountId: string;
 	userId: string;
 	conversationId: string;
+	/** Conversation display name (DingTalk group title / DM peer title). */
+	conversationTitle?: string | null;
+	/** True when the conversation is a group chat. */
+	isGroup?: boolean | null;
+	/** Nickname of the most recent message sender. */
+	userName?: string | null;
 	createdAt: number;
 	updatedAt: number;
 	lastMessageId?: string;
@@ -416,6 +429,8 @@ export interface DingtalkAccountConfig {
 	appKey: string;
 	appSecret: string;
 	robotCode?: string;
+	/** Display name of the DingTalk robot for this account (as shown to users). */
+	robotName?: string;
 	/** Optional agent workspace directory for this specific account */
 	agentDir?: string;
 	/** Optional model override for this account */

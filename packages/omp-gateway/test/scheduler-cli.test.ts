@@ -94,7 +94,6 @@ describe("resolveAgentCwd", () => {
 		const cfg3: Cfg = {
 			channels: {
 				dingtalk: { accounts: {} },
-				// biome-ignore lint/suspicious/noExplicitAny: synthetic future-channel test fixture
 				feishu: { accounts: { hr: { agentDir: "/wrong/path" } } } as any,
 			},
 		};

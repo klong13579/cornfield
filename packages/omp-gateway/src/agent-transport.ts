@@ -222,6 +222,10 @@ export class RpcTransport {
 	/** Trailing stderr lines of the current child process (crash diagnosis). */
 	#stderrTail: string[] = [];
 	#listeners: EventHandler[] = [];
+	/** Monotonic spawn generation. Guards stale exited-handlers from a killed
+	 * previous process clobbering the NEW process's state (ready flag / #proc
+	 * reference) when the old exit callback lands after a restart. */
+	#spawnGeneration = 0;
 	#hostToolHandler: HostToolCallHandler | undefined;
 
 	constructor(options: RpcTransportOptions = {}) {
@@ -370,6 +374,7 @@ export class RpcTransport {
 		this.#reconnectGuard = true;
 
 		try {
+			this.#spawnGeneration++;
 			if (this.#proc) {
 				this.#proc.kill();
 				this.#proc = null;
@@ -450,7 +455,13 @@ export class RpcTransport {
 				}
 			}, 50);
 
+			const spawnGeneration = this.#spawnGeneration;
 			void proc.exited.then(exitCode => {
+				if (spawnGeneration !== this.#spawnGeneration) {
+					// This process was killed by a newer spawn (restart). Its exit must
+					// not clear the new process's ready flag or null its #proc reference.
+					return;
+				}
 				if (!settled && !this.#ready) {
 					// Genuine spawn failure: the process died before the ready
 					// frame was ever processed (or died without emitting it).

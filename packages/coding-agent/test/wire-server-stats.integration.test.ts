@@ -15,8 +15,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { MULTIDEVICE_PROTOCOL_VERSION } from "@oh-my-pi/pi-wire";
-
-const TOKEN_RE = /ws:\/\/127\.0\.0\.1:(\d+)\/ws(\?token=([a-zA-Z0-9]+))?/;
+import { waitForServe } from "./wait-for-serve";
 
 type Frame = { type: string; [k: string]: unknown };
 
@@ -24,25 +23,6 @@ let isolatedHome: string;
 let savedHome: string | undefined;
 let proc: ReturnType<typeof Bun.spawn> | undefined;
 let url = "";
-
-async function waitForServe(p: ReturnType<typeof Bun.spawn>): Promise<string> {
-	const deadline = Date.now() + 30_000;
-	const reader = (p.stdout as ReadableStream<Uint8Array>).getReader();
-	const dec = new TextDecoder();
-	let buf = "";
-	while (Date.now() < deadline) {
-		const { value, done } = await reader.read();
-		if (done) throw new Error(`serve exited; log:\n${buf.slice(-1500)}`);
-		buf += dec.decode(value);
-		const m = buf.match(TOKEN_RE);
-		if (m) {
-			reader.releaseLock();
-			return m[0];
-		}
-	}
-	reader.releaseLock();
-	throw new Error(`serve not ready; log:\n${buf.slice(-1500)}`);
-}
 
 /** 封装单次命令往返（不多路复用，保证测试隔离）。 */
 async function sendCommand(command: object, timeoutMs = 30_000): Promise<Frame> {
@@ -212,7 +192,7 @@ beforeAll(async () => {
 		stderr: "pipe",
 		env: { ...process.env, HOME: isolatedHome, PI_NO_TITLE: "1" },
 	});
-	url = await waitForServe(proc);
+	url = (await waitForServe(proc, port)).url;
 }, 30_000);
 
 afterAll(async () => {

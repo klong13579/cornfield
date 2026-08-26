@@ -1628,7 +1628,9 @@ describe("edit tool CRLF handling", () => {
 			edits: [{ old_text: "second\n", new_text: "REPLACED\n" }],
 		});
 
-		const content = await Bun.file(testFile).text();
+		// Bun.file().text() strips the UTF-8 BOM during decoding — read raw bytes
+		// via fs so the BOM assertion is meaningful.
+		const content = await fs.promises.readFile(testFile, "utf8");
 		expect(content).toBe("\uFEFFfirst\r\nREPLACED\r\nthird\r\n");
 	});
 });

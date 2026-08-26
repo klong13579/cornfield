@@ -959,10 +959,16 @@ export function alibabaCodingPlanModelManagerOptions(
 	const staticModels = getBundledModels("alibaba-coding-plan") as Model<"openai-completions">[];
 	return {
 		providerId: "alibaba-coding-plan",
-		staticModels: staticModels.map(m => ({
-			...m,
-			category: inferProbeCategory(m.id),
-		})),
+		staticModels: staticModels.map(m => {
+			const category = inferProbeCategory(m.id);
+			return {
+				...m,
+				category,
+				// Model selector groups by category; prefix the display name with the
+				// category emoji (skipped when already prefixed, e.g. re-bundling).
+				name: m.name.startsWith(emojiForCategory(category)) ? m.name : `${emojiForCategory(category)} ${m.name}`,
+			};
+		}),
 		fetchDynamicModels: () =>
 			fetchOpenAICompatibleModels({
 				api: "openai-completions",
@@ -972,7 +978,10 @@ export function alibabaCodingPlanModelManagerOptions(
 				mapModel: (entry, defaults) => {
 					const reference = references.get(defaults.id);
 					const model = mapWithBundledReference(entry, defaults, reference);
-					Object.assign(model, { category: inferProbeCategory(model.id) });
+					Object.assign(model, {
+						category: inferProbeCategory(model.id),
+						name: `${emojiForCategory(inferProbeCategory(model.id))} ${model.name}`,
+					});
 					return model;
 				},
 			}),
@@ -982,6 +991,22 @@ export function alibabaCodingPlanModelManagerOptions(
 const PROBE_TIMEOUT_MS = 3_000;
 
 type ProbeCategory = "chat" | "coding" | "reasoning" | "vision" | "asr" | "tts" | "image" | "video" | "embedding";
+
+const EMOJI_FOR_CATEGORY: Record<ProbeCategory, string> = {
+	chat: "💬",
+	coding: "💻",
+	reasoning: "🧠",
+	vision: "👁",
+	asr: "🎤",
+	tts: "🔊",
+	image: "🎨",
+	video: "🎬",
+	embedding: "🔢",
+};
+
+function emojiForCategory(category: ProbeCategory): string {
+	return EMOJI_FOR_CATEGORY[category];
+}
 
 function inferProbeCategory(id: string): ProbeCategory {
 	if (/^qwen3-coder/.test(id)) return "coding";

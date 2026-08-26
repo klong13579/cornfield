@@ -33,6 +33,19 @@ IM 平台接入的具体实现（目前仅 DingTalkChannel）。负责消息解�
 ### Bridge (AgentBridge)
 管理 `omp --mode rpc` 子进程的生命周期，通过 JSON-line RPC 协议与 agent 进程通信。每个 gateway 账号持有自己的 Bridge 实例，提供 prompt 转发、会话切换、模型热切换、工具禁用等能力。
 
+### Wire 协议
+前端与 omp 核心之间的唯一协议契约：帧、命令 union、结果形状、事件类型。所有前端（TUI、web、桌面、IM 适配）说 Wire，核心实现 Wire。全 TypeScript，前端直接 import 协议类型，不生成、不镜像。
+_Avoid_: RPC 协议, DTO 契约
+
+### Wire 端点
+宿主 Wire 协议、实现一个领域切片的进程。serve 端点宿主项目会话；gateway 端点宿主 CronTask、账号与 IM 投递。一套协议、多个端点、按关切分域。
+
+### Sidecar
+由桌面壳拉起并监督的伴随进程（当前为 omp serve）。生命周期跟随主程序：启动时 spawn、按端口契约复用或接管、退出时回收。不是常驻服务——桌面关闭后定时任务不能活在 sidecar 里。
+
+### 服务端→客户端请求
+Wire 协议中服务端向客户端索取用户输入（权限批准、选择、确认、自由输入）的通用请求，客户端应答走同一协议返回。权限批准是其第一个实现。
+
 ### Self-evolution
 Agent 的自主学习系统。从 session 记录中提取技能（skills）、工作流模式、用户偏好，存入 SQLite 演化数据库，并在后续会话中注入上下文。无需外部训练管道，纯在线/离线混合。
 _Avoid_: Training, fine-tuning, learning pipeline
@@ -50,10 +63,10 @@ Rust 编写的 N-API cdylib（`crates/pi-natives`），暴露性能敏感的操�
 _Avoid_: Native addon, WASM, extension
 
 ### CronTask / ScheduledTask
-Gateway 中由调度器按 cron 表达式定时触发的 agent 或 shell 任务。每 CronTask 有唯一 id、cron 表达式、type（agent/shell）、agentDir、timeoutMs、retry 策略等。定义以 JSON5 文件存放在 `cron/tasks/` 下，运行时同步至 SQLite。
+Gateway 中由调度器按 cron 表达式定时触发的 agent 或 shell 任务。每 CronTask 有唯一 id、cron 表达式、type（agent/shell）、agentDir、timeoutMs、retry 策略等。定义以 JSON5 文件存放在 `cron/tasks/` 下，运行时同步至 jobs.json。
 
 ### CronExecution
-CronTask 的一次触发执行。有唯一 executionId、startedAt、endedAt、exitCode、status（running/success/failure）。记录在 SQLite scheduler.db 的 executions 表。
+CronTask 的一次触发执行。有唯一 executionId、startedAt、endedAt、exitCode、status（running/success/failure）。持久化在 JSONL 执行日志中。
 
 ### CronRunDiagnostics
 CronExecution 的结构化诊断数据。包含多个 CronRunDiagnosticEntry，每个有 source（cron-preflight / agent-run / tool / exec / delivery）、severity（info/warn/error）、message、可选 toolName/exitCode。上限 10 条，每条 1000 字符，自动脱敏。

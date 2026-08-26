@@ -112,7 +112,7 @@ describe("moa executePlan", () => {
 		expect(firstCall?.cwd).toBe("/tmp/moa");
 		expect(firstCall?.model).toBe("provider/divergent");
 		expect(firstCall?.thinkingLevel).toBe("high");
-		expect(firstCall?.tools).toEqual(["read", "search", "find", "web_search", "ast_grep"]);
+		expect(firstCall?.tools).toEqual(["read", "search", "find", "ast_grep"]);
 		expect(firstCall?.task).toContain("Design the MOA panel");
 		expect(firstCall?.task).toContain("## plan");
 		expect(firstCall?.task).toMatch(/FIRST line MUST be exactly `## plan`/);

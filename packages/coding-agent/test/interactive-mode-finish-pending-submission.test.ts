@@ -34,7 +34,7 @@ describe("InteractiveMode.finishPendingSubmission", () => {
 		tempDir = TempDir.createSync("@pi-finish-pending-submission-");
 		await Settings.init({ inMemory: true, cwd: tempDir.path() });
 		authStorage = await AuthStorage.create(path.join(tempDir.path(), "testauth.db"));
-		const modelRegistry = new ModelRegistry(authStorage);
+		const modelRegistry = new ModelRegistry(authStorage, path.join(tempDir.path(), "models.yml"));
 		const model = modelRegistry.find("anthropic", "claude-sonnet-4-5");
 		if (!model) {
 			throw new Error("Expected claude-sonnet-4-5 to exist in registry");

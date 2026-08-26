@@ -25,6 +25,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { MULTIDEVICE_PROTOCOL_VERSION } from "@oh-my-pi/pi-wire";
+import { waitForServe } from "./wait-for-serve";
 
 const TOKEN_RE = /ws:\/\/127\.0\.0\.1:(\d+)\/ws(\?token=([a-zA-Z0-9]+))?/;
 
@@ -86,7 +87,7 @@ test("serve 多 Agent：注册表 + attach + switch + 隔离 + 心跳", async ()
 
 	try {
 		// ── 等 serve:listening ──
-		const url = await waitForServe(proc);
+		const url = (await waitForServe(proc, port)).url;
 		const token = url.match(TOKEN_RE)?.[2] ?? "";
 
 		// ── 连接 A：默认 focus=default ──
@@ -198,7 +199,7 @@ test("serve default agent 根 = git 仓库根（从包目录启动也归位）",
 	});
 
 	try {
-		const url = await waitForServe(proc);
+		const url = (await waitForServe(proc, port)).url;
 		const conn = await WireConn.connect(url, "");
 		const helloPush = await conn.nextPush("server_snapshot");
 		const sessions = (
@@ -272,7 +273,7 @@ test("serve B1/B8：get_state env 环境摘要 + branch 命令（快照推送）
 	);
 
 	try {
-		const url = await waitForServe(proc);
+		const url = (await waitForServe(proc, port)).url;
 		const token = url.match(TOKEN_RE)?.[2] ?? "";
 		const conn = await WireConn.connect(url, token);
 		// hello 自动推送先消费掉（server_snapshot + session_snapshot）
@@ -316,27 +317,6 @@ test("serve B1/B8：get_state env 环境摘要 + branch 命令（快照推送）
 		await fs.rm(isolatedHome, { recursive: true, force: true });
 	}
 }, 60_000);
-
-async function waitForServe(proc: ReturnType<typeof Bun.spawn>): Promise<string> {
-	// 冷启动根因已修（recipe cargo 探测超时，见 tools/recipe/runner.ts）：隔离 HOME 实测 ~8s。
-	// 30s 预算给 CI 慢盘留余量。
-	const deadline = Date.now() + 30_000;
-	const reader = (proc.stdout as ReadableStream<Uint8Array>).getReader();
-	const dec = new TextDecoder();
-	let buf = "";
-	while (Date.now() < deadline) {
-		const { value, done } = await reader.read();
-		if (done) throw new Error(`serve exited; log:\n${buf.slice(-1500)}`);
-		buf += dec.decode(value);
-		const m = buf.match(TOKEN_RE);
-		if (m) {
-			reader.releaseLock();
-			return m[0];
-		}
-	}
-	reader.releaseLock();
-	throw new Error(`serve not ready; log:\n${buf.slice(-1500)}`);
-}
 
 class WireConn {
 	static async connect(url: string, token: string): Promise<WireConn> {

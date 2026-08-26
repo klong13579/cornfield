@@ -34,17 +34,25 @@ export function resolveCredentialEnvVars(): Record<string, string> {
 
 	const envVars: Record<string, string> = {};
 	const missing: string[] = [];
+	const missingEnvVars = new Set<string>();
 
+	// Two passes: models.yml may alias providers (e.g. `openai` and `narwal-plan`
+	// both referencing NARWAL_PLAN_API_KEY for the same gateway). Pass 1 resolves
+	// every provider that CAN resolve; pass 2 reports an env var as missing only
+	// when NO provider referencing it resolved (iteration order must not decide
+	// whether an aliased env var is reported).
 	for (const [provider, envVarName] of Object.entries(providerEnvMap)) {
-		// Already set in current process? Skip.
-		if (process.env[envVarName]) continue;
-
-		// Look up in stored credentials
+		if (process.env[envVarName] || envVars[envVarName]) continue;
 		const storedKey = storedKeys[provider];
 		if (storedKey) {
 			envVars[envVarName] = storedKey;
-		} else {
+		}
+	}
+	for (const [provider, envVarName] of Object.entries(providerEnvMap)) {
+		if (process.env[envVarName] || envVars[envVarName]) continue;
+		if (!missingEnvVars.has(envVarName)) {
 			missing.push(`${provider} → ${envVarName}`);
+			missingEnvVars.add(envVarName);
 		}
 	}
 

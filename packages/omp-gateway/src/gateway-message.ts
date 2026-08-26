@@ -17,6 +17,8 @@ import type { ModelSwitch } from "./gateway-model-switch";
 import type { NewSessionHandler } from "./gateway-new-session";
 import type { ResponseHandler } from "./gateway-response";
 import type { SkillCommand } from "./gateway-skills";
+import { appendRequestAudit } from "./request-audit";
+import type { RobotContextWriter } from "./robot-context";
 import { createCronTaskFromMessage } from "./scheduler/from-message";
 import type { SessionManager } from "./session-manager";
 import type { SQLiteSessionStore } from "./session-store";
@@ -36,6 +38,7 @@ export interface MessageGatewayDeps {
 	newSessionHandler: NewSessionHandler;
 	responseHandler: ResponseHandler;
 	skillCommand: SkillCommand;
+	robotContext?: RobotContextWriter;
 	extractMessageText(msg: InboundMessage): string;
 }
 
@@ -54,6 +57,11 @@ export class MessageHandler {
 	/** Update the session manager reference after it's created in Gateway.start(). */
 	setSessionManager(sm: SessionManager): void {
 		this.#deps.sessionManager = sm;
+	}
+
+	/** Update the robot context writer after it's created in Gateway.start(). */
+	setRobotContext(writer: RobotContextWriter): void {
+		this.#deps.robotContext = writer;
 	}
 
 	async handleInboundMessage(msg: InboundMessage): Promise<void> {
@@ -89,14 +97,23 @@ export class MessageHandler {
 					accountId,
 					userId: msg.userId,
 					conversationId: msg.conversationId,
+					conversationTitle: msg.conversationTitle || null,
+					isGroup: msg.isGroup,
+					userName: msg.userName || null,
 					createdAt: now,
 					updatedAt: now,
 					ompSessionPath: sessionPath,
 					sessionWebhook: msg.sessionWebhook,
 					status: "active",
 				});
+				await this.#deps.robotContext?.refresh(accountId);
 			} else if (session && this.#deps.store) {
 				const sessionPath = this.#buildSessionPath(msg.channelId, accountId, msg.conversationId);
+				const conversationMeta = {
+					conversationTitle: msg.conversationTitle || undefined,
+					isGroup: msg.isGroup,
+					userName: msg.userName || undefined,
+				};
 				if (session.ompSessionPath !== sessionPath) {
 					if (session.ompSessionPath) {
 						await this.#migrateSessionPath(session.ompSessionPath, sessionPath);
@@ -105,11 +122,23 @@ export class MessageHandler {
 						ompSessionPath: sessionPath,
 						updatedAt: now,
 						sessionWebhook: msg.sessionWebhook,
+						...conversationMeta,
 					});
 					session = { ...session, ompSessionPath: sessionPath, sessionWebhook: msg.sessionWebhook };
 				} else {
-					await this.#deps.store.updateSession(session.id, { updatedAt: now, sessionWebhook: msg.sessionWebhook });
+					await this.#deps.store.updateSession(session.id, {
+						updatedAt: now,
+						sessionWebhook: msg.sessionWebhook,
+						...conversationMeta,
+					});
 					session = { ...session, sessionWebhook: msg.sessionWebhook };
+				}
+				// Conversation meta discovery (new group / renamed group / DM peer change)
+				// → refresh robot context. Compare against the pre-update session record.
+				const titleChanged = (msg.conversationTitle || "") !== (session.conversationTitle || "");
+				const dmPeerChanged = !msg.isGroup && (msg.userName || "") !== (session.userName || "");
+				if (titleChanged || dmPeerChanged) {
+					await this.#deps.robotContext?.refresh(accountId);
 				}
 			}
 
@@ -139,20 +168,27 @@ export class MessageHandler {
 			// one-shot — consumed here, not carried to the next message.
 			await this.#deps.skillCommand.applyPendingSkillContext(msg, accountId, msg.conversationId);
 
-			const usedCard = await this.#deps.responseHandler.tryStreamAgentResponse(
+			const usedCardMeta = await this.#deps.responseHandler.tryStreamAgentResponse(
 				msg,
 				session,
 				accountId,
 				channel,
 				this.#deps.sessionManager,
 			);
-			if (!usedCard) {
-				await this.#deps.responseHandler.sendAgentResponseViaV1Markdown(
+			let meta = usedCardMeta;
+			if (!usedCardMeta) {
+				meta = await this.#deps.responseHandler.sendAgentResponseViaV1Markdown(
 					msg,
 					session,
 					accountId,
 					this.#deps.sessionManager,
 				);
+			}
+
+			// Request audit — one JSONL line per user request, in the account's own workspace.
+			const agentDir = this.#deps.accountAgentDirs.get(accountId);
+			if (agentDir) {
+				await appendRequestAudit(agentDir, msg, meta);
 			}
 
 			if (this.#deps.store && session) {

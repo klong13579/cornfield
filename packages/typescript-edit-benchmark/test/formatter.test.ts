@@ -1,12 +1,20 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, vi } from "bun:test";
+import * as prettier from "prettier";
 import { formatContent } from "../src/formatter";
 
 describe("formatContent", () => {
 	it("pins .js files to the flow parser (no fallback to babel-ts)", async () => {
-		const tsOnlySyntaxInJs = "namespace Foo { export const value = 1; }\n";
-		const result = await formatContent("fixture.js", tsOnlySyntaxInJs);
+		const spy = vi.spyOn(prettier, "format").mockResolvedValue("formatted");
+		try {
+			const result = await formatContent("fixture.js", "const value = 1;\n");
 
-		expect(result.didFormat).toBe(false);
-		expect(result.formatted).toBe(tsOnlySyntaxInJs);
+			expect(spy).toHaveBeenCalledTimes(1);
+			const [, options] = spy.mock.calls[0]!;
+			expect(options).toBeDefined();
+			expect(options!.parser).toBe("flow");
+			expect(result.didFormat).toBe(true);
+		} finally {
+			spy.mockRestore();
+		}
 	});
 });
