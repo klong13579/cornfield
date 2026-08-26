@@ -960,13 +960,34 @@ export async function runRootCommand(parsed: Args, rawArgs: string[]): Promise<v
 			initialImages,
 		);
 	} else {
-		await runPrintMode(session, {
-			mode,
-			messages: parsedArgs.messages,
-			initialMessage,
-			initialImages,
+		// P3：print 经 wire 消费核心（进程内 client，框架与 interactive 装配一致）
+		const printStore = SessionStore.attach(session);
+		const printCore = await createWireCore({
+			host: "127.0.0.1",
+			port: 0,
+			token: "",
+			sessionFactory: async () => {
+				throw new Error("print mode: no lazy agent attach");
+			},
+			defaultSession: { session, store: printStore },
+			loadAgents: false,
 		});
-		await session.dispose();
+		const printWireClient = createInMemoryWireClient(printCore);
+		try {
+			await runPrintMode(
+				session,
+				{
+					mode,
+					messages: parsedArgs.messages,
+					initialMessage,
+					initialImages,
+				},
+				printWireClient,
+			);
+		} finally {
+			printWireClient.dispose();
+		}
+		session.dispose();
 		stopThemeWatcher();
 		await postmortem.quit(0);
 	}

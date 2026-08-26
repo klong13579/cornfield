@@ -9,6 +9,7 @@ import type { AssistantMessage, ImageContent } from "@oh-my-pi/pi-ai";
 import { stripReasoningTagsFromText } from "@oh-my-pi/pi-ai/utils/reasoning-tags";
 import { sanitizeText } from "@oh-my-pi/pi-natives";
 import { runExtensionCompact, runExtensionSetModel } from "../extensibility/extensions/compact-handler";
+import type { InMemoryWireClient } from "../server/memory-wire";
 import type { AgentSession } from "../session/agent-session";
 
 /**
@@ -29,7 +30,7 @@ export interface PrintModeOptions {
  * Run in print (single-shot) mode.
  * Sends prompts to the agent and outputs the result.
  */
-export async function runPrintMode(session: AgentSession, options: PrintModeOptions): Promise<void> {
+export async function runPrintMode(session: AgentSession, options: PrintModeOptions, wireClient?: InMemoryWireClient): Promise<void> {
 	const { mode, messages = [], initialMessage, initialImages } = options;
 
 	// Emit session header for JSON mode
@@ -153,26 +154,38 @@ export async function runPrintMode(session: AgentSession, options: PrintModeOpti
 	}
 
 	// Always subscribe to enable session persistence via _handleAgentEvent
-	session.subscribe(event => {
+	const subscribeEvents = (event: unknown): void => {
 		// In JSON mode, output all events
 		if (mode === "json") {
 			process.stdout.write(`${JSON.stringify(event)}\n`);
 		}
-	});
+	};
+	if (wireClient) {
+		wireClient.onPush(frame => {
+			if (frame.type === "push" && frame.event.type === "progress") {
+				subscribeEvents(frame.event.event);
+			}
+		});
+	} else {
+		session.subscribe(subscribeEvents);
+	}
+
 
 	// Send initial message with attachments
 	if (initialMessage !== undefined) {
-		await session.prompt(initialMessage, { images: initialImages });
+		if (wireClient) await wireClient.sendCommand({ type: "prompt", message: initialMessage, images: initialImages });
+		else await session.prompt(initialMessage, { images: initialImages });
 	}
 
 	// Send remaining messages
 	for (const message of messages) {
-		await session.prompt(message);
+		if (wireClient) await wireClient.sendCommand({ type: "prompt", message });
+		else await session.prompt(message);
 	}
 
 	// In text mode, output final response
 	if (mode === "text") {
-		const state = session.state;
+		const state = wireClient?.getSnapshot()?.messages !== undefined ? ({ messages: wireClient.getSnapshot()?.messages }) as unknown as typeof session.state : session.state;
 		const lastMessage = state.messages[state.messages.length - 1];
 
 		if (lastMessage?.role === "assistant") {
