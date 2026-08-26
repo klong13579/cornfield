@@ -13,7 +13,7 @@
 
 import * as path from "node:path";
 import { isEnoent, logger } from "@oh-my-pi/pi-utils";
-import { type AgentEvent, WireTransport, WireTransportError, type RpcTransportEvent } from "./agent-transport-wire";
+import { type AgentEvent, type RpcTransportEvent, WireTransport, WireTransportError } from "./agent-transport-wire";
 import { CircuitBreaker, type CircuitState } from "./circuit-breaker";
 import { CrashRecovery } from "./crash-recovery";
 import { PromptExtractor } from "./prompt-extractor";

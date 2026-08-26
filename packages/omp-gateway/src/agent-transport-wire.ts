@@ -21,18 +21,18 @@
  *   agent side (bridge has no dialog host).
  */
 
-import * as path from "node:path";
 import * as fs from "node:fs";
 import * as os from "node:os";
+import * as path from "node:path";
 import { logger } from "@oh-my-pi/pi-utils";
+import type { ClientFrame, ServerFrame, WireCommand, WireErrorPayload } from "@oh-my-pi/pi-wire";
 import type { FileSink } from "bun";
 import { randomUUID } from "crypto";
+import type { AgentEvent, HostToolCallHandler, RpcTransportEvent } from "./agent-transport";
 import { resolveCredentialEnvVars } from "./credential-resolver";
-import type { ClientFrame, ServerFrame, WireCommand, WireErrorPayload } from "@oh-my-pi/pi-wire";
-import type { AgentEvent, RpcTransportEvent, HostToolCallHandler, HostToolCallRequest } from "./agent-transport";
 
 /** P2：bridge 消费侧从 wire 传输 re-export 旧类型（agent-transport.ts 删除后类型迁至此）。 */
-export type { AgentEvent, RpcTransportEvent, HostToolCallHandler, HostToolCallRequest } from "./agent-transport";
+export type { AgentEvent, HostToolCallHandler, HostToolCallRequest, RpcTransportEvent } from "./agent-transport";
 
 interface PendingCommand {
 	command: string;
@@ -341,7 +341,9 @@ export class WireTransport {
 				this.#stdinWriter = undefined;
 				this.#emit({
 					type: "disconnected",
-					error: new Error(`Agent wire process exited with code ${exitCode} after hello_ack (wasReady=${wasReady})`),
+					error: new Error(
+						`Agent wire process exited with code ${exitCode} after hello_ack (wasReady=${wasReady})`,
+					),
 					stderrTail: this.#stderrTail.join("\n"),
 				});
 			});
@@ -445,7 +447,7 @@ export class WireTransport {
 						const message =
 							typeof frame.error === "string"
 								? frame.error
-								: (frame.error as WireErrorPayload | undefined)?.message ?? "Unknown error";
+								: ((frame.error as WireErrorPayload | undefined)?.message ?? "Unknown error");
 						pending.reject(new Error(message));
 					}
 					return;

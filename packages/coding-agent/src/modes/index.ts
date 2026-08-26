@@ -18,7 +18,6 @@ export {
 	type RpcEventListener,
 } from "./rpc/rpc-client";
 export { runRpcMode } from "./rpc/rpc-mode";
-export { runWireStdioMode } from "./wire-stdio";
 export type {
 	RpcCommand,
 	RpcHostToolCallRequest,
@@ -29,6 +28,7 @@ export type {
 	RpcResponse,
 	RpcSessionState,
 } from "./rpc/rpc-types";
+export { runWireStdioMode } from "./wire-stdio";
 
 postmortem.register("terminal-restore", () => {
 	emergencyTerminalRestore();

@@ -13,15 +13,9 @@
  *
  * gateway 的 AgentBridge 切到本协议后，rpc-mode + agent-transport 旧协议层删除。
  */
-import { $env, logger, readJsonl, Snowflake } from "@oh-my-pi/pi-utils";
-import type {
-	ExtensionUIContext,
-	ExtensionUIDialogOptions,
-	ExtensionWidgetOptions,
-} from "../extensibility/extensions";
-import { runExtensionCompact, runExtensionSetModel } from "../extensibility/extensions/compact-handler";
-import { type Theme, theme } from "./theme/theme";
-import type { AgentSession } from "../session/agent-session";
+
+import type { AgentTool, AgentToolResult, AgentToolUpdateCallback } from "@oh-my-pi/pi-agent-core";
+import { logger, readJsonl, Snowflake } from "@oh-my-pi/pi-utils";
 import type {
 	ClientFrame,
 	HostToolCallPush,
@@ -31,9 +25,12 @@ import type {
 	WireHostToolDefinition,
 	WireServerEvent,
 } from "@oh-my-pi/pi-wire";
-import type { AgentTool, AgentToolResult, AgentToolUpdateCallback } from "@oh-my-pi/pi-agent-core";
 import type { Static, TSchema } from "@sinclair/typebox";
+import type { ExtensionUIContext, ExtensionUIDialogOptions } from "../extensibility/extensions";
+import { runExtensionCompact, runExtensionSetModel } from "../extensibility/extensions/compact-handler";
 import { applyToolProxy } from "../extensibility/tool-proxy";
+import type { AgentSession } from "../session/agent-session";
+import { type Theme, theme } from "./theme/theme";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Host tools（wire 帧版）——pending map 模式与 RpcHostToolBridge 同构
@@ -53,13 +50,17 @@ function isAgentToolResult(value: unknown): value is AgentToolResult<unknown> {
 	return Array.isArray(content);
 }
 
-export function isWireHostToolResult(value: unknown): value is { type: "host_tool_result"; id: string; result: AgentToolResult<unknown>; isError?: boolean } {
+export function isWireHostToolResult(
+	value: unknown,
+): value is { type: "host_tool_result"; id: string; result: AgentToolResult<unknown>; isError?: boolean } {
 	if (!value || typeof value !== "object") return false;
 	const frame = value as { type?: unknown; id?: unknown; result?: unknown };
 	return frame.type === "host_tool_result" && typeof frame.id === "string" && isAgentToolResult(frame.result);
 }
 
-export function isWireHostToolUpdate(value: unknown): value is { type: "host_tool_update"; id: string; partialResult: AgentToolResult<unknown> } {
+export function isWireHostToolUpdate(
+	value: unknown,
+): value is { type: "host_tool_update"; id: string; partialResult: AgentToolResult<unknown> } {
 	if (!value || typeof value !== "object") return false;
 	const frame = value as { type?: unknown; id?: unknown; partialResult?: unknown };
 	return frame.type === "host_tool_update" && typeof frame.id === "string" && isAgentToolResult(frame.partialResult);
@@ -119,7 +120,12 @@ class WireHostToolBridge {
 		return tools.map(tool => new WireHostToolAdapter(tool, this));
 	}
 
-	handleResult(frame: { type: "host_tool_result"; id: string; result: AgentToolResult<unknown>; isError?: boolean }): boolean {
+	handleResult(frame: {
+		type: "host_tool_result";
+		id: string;
+		result: AgentToolResult<unknown>;
+		isError?: boolean;
+	}): boolean {
 		const pending = this.#pendingCalls.get(frame.id);
 		if (!pending) return false;
 		this.#pendingCalls.delete(frame.id);
@@ -273,11 +279,19 @@ class WireExtensionUIContext implements ExtensionUIContext {
 		return "";
 	}
 
-	async editor(_title: string, _prefill?: string, _dialogOptions?: ExtensionUIDialogOptions): Promise<string | undefined> {
+	async editor(
+		_title: string,
+		_prefill?: string,
+		_dialogOptions?: ExtensionUIDialogOptions,
+	): Promise<string | undefined> {
 		return undefined;
 	}
 
-	async select(_title: string, _options: string[], _dialogOptions?: ExtensionUIDialogOptions): Promise<string | undefined> {
+	async select(
+		_title: string,
+		_options: string[],
+		_dialogOptions?: ExtensionUIDialogOptions,
+	): Promise<string | undefined> {
 		return undefined;
 	}
 
@@ -285,7 +299,11 @@ class WireExtensionUIContext implements ExtensionUIContext {
 		return false;
 	}
 
-	async input(_title: string, _placeholder?: string, _dialogOptions?: ExtensionUIDialogOptions): Promise<string | undefined> {
+	async input(
+		_title: string,
+		_placeholder?: string,
+		_dialogOptions?: ExtensionUIDialogOptions,
+	): Promise<string | undefined> {
 		return undefined;
 	}
 
@@ -487,7 +505,7 @@ export async function runWireStdioMode(session: AgentSession): Promise<never> {
 
 	// ── 命令分发 ──
 	const handleCommand = async (command: WireCommand): Promise<ServerFrame> => {
-		const id = command.id ?? Snowflake.next() as string;
+		const id = command.id ?? (Snowflake.next() as string);
 
 		switch (command.type) {
 			// Prompting
@@ -522,9 +540,7 @@ export async function runWireStdioMode(session: AgentSession): Promise<never> {
 
 			case "abort_and_prompt": {
 				await session.abort();
-				session
-					.prompt(command.message, { images: command.images })
-					.catch(e => writeFrame(fail(id, e.message)));
+				session.prompt(command.message, { images: command.images }).catch(e => writeFrame(fail(id, e.message)));
 				return success(id);
 			}
 
@@ -747,7 +763,6 @@ export async function runWireStdioMode(session: AgentSession): Promise<never> {
 			case "fork_from":
 			case "undo_exchange":
 			case "retry_from":
-			case "get_session_messages":
 				return fail(id, `Command not implemented in wire-stdio mode: ${command.type}`);
 
 			default: {
