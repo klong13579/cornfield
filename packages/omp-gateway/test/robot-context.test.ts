@@ -7,11 +7,12 @@
  *   - RobotContextWriter.refresh: writes robot-context.md, registers it in
  *     prompt-includes.json (repairs double-encoded JSON), idempotent re-run.
  */
+
+import { Database } from "bun:sqlite";
 import { afterAll, describe, expect, it } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { Database } from "bun:sqlite";
 import { RobotContextWriter, renderRobotContext } from "../src/robot-context";
 import { SQLiteSessionStore } from "../src/session-store";
 
@@ -98,38 +99,34 @@ describe("SQLiteSessionStore conversation meta", () => {
 
 describe("renderRobotContext", () => {
 	it("renders identity, groups, and DMs", () => {
-		const md = renderRobotContext(
-			"me",
-			{ robotCode: "dingXXX", robotName: "hermeskk" },
-			[
-				{
-					id: "1",
-					channelId: "dingtalk",
-					accountId: "me",
-					userId: "u1",
-					conversationId: "cidG1",
-					conversationTitle: "高管群",
-					isGroup: true,
-					userName: "Magnum",
-					createdAt: 0,
-					updatedAt: 1780000000000,
-					status: "active",
-				},
-				{
-					id: "2",
-					channelId: "dingtalk",
-					accountId: "me",
-					userId: "601590212",
-					conversationId: "cidD1",
-					conversationTitle: "彭梦龙",
-					isGroup: false,
-					userName: "Magnum",
-					createdAt: 0,
-					updatedAt: 1780000000000,
-					status: "active",
-				},
-			],
-		);
+		const md = renderRobotContext("me", { robotCode: "dingXXX", robotName: "hermeskk" }, [
+			{
+				id: "1",
+				channelId: "dingtalk",
+				accountId: "me",
+				userId: "u1",
+				conversationId: "cidG1",
+				conversationTitle: "高管群",
+				isGroup: true,
+				userName: "Magnum",
+				createdAt: 0,
+				updatedAt: 1780000000000,
+				status: "active",
+			},
+			{
+				id: "2",
+				channelId: "dingtalk",
+				accountId: "me",
+				userId: "601590212",
+				conversationId: "cidD1",
+				conversationTitle: "彭梦龙",
+				isGroup: false,
+				userName: "Magnum",
+				createdAt: 0,
+				updatedAt: 1780000000000,
+				status: "active",
+			},
+		]);
 		expect(md).toContain("hermeskk (dingXXX)");
 		expect(md).toContain("高管群");
 		expect(md).toContain("cidG1");

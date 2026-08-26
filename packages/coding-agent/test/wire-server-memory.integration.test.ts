@@ -33,6 +33,7 @@ let savedHome: string | undefined;
 let proc: ReturnType<typeof Bun.spawn> | undefined;
 let url = "";
 let serveCwd = "";
+let repoRoot: string;
 
 async function waitForServe(p: ReturnType<typeof Bun.spawn>): Promise<string> {
 	const deadline = Date.now() + 30_000;
@@ -129,7 +130,7 @@ describe("W3 D3 — serve get_memory 只读记忆投影", () => {
 			// project 区：canonical evolution 目录为空时回落到旧版扁平目录（agentDir/memories）——
 			// 真机目前记忆投影在扁平目录，fallback 即生产路径。memoryRoot 应指向 seed 的扁平目录。
 			expect(result.project?.memoryRoot).toBe(
-				path.join(isolatedHome, ".omp", "agent", "memories", encodeProjectPath(serveCwd)),
+				path.join(isolatedHome, ".omp", "agent", "memories", encodeProjectPath(repoRoot)),
 			);
 			expect(result.project?.memoryMd?.content).toContain("项目记忆 seed");
 			expect(result.project?.summaryMd?.content).toContain("summary seed");
@@ -169,11 +170,13 @@ beforeAll(async () => {
 		"# 测试用户画像\n\n- name: 测试用户\n- note: seed content for wire e2e\n",
 	);
 
-	const repoRoot = new URL("../../..", import.meta.url).pathname.replace(/\/$/, "");
+	repoRoot = new URL("../../..", import.meta.url).pathname.replace(/\/$/, "");
 	serveCwd = `${repoRoot}/packages/coding-agent`;
 
 	// project 区 seed：$HOME/agent/memories/<encoded-cwd>/{MEMORY.md, memory_summary.md}
-	const memoryRoot = path.join(isolatedHome, ".omp", "agent", "memories", encodeProjectPath(serveCwd));
+	// serve 启动时会把 cwd 提升到 git 仓库根（resolveServeProjectRoot），
+	// 记忆投影锚定 process.cwd()（仓库根），seed 必须用仓库根的 encoded。
+	const memoryRoot = path.join(isolatedHome, ".omp", "agent", "memories", encodeProjectPath(repoRoot));
 	await fs.mkdir(memoryRoot, { recursive: true });
 	await Bun.write(path.join(memoryRoot, "MEMORY.md"), "# Memory Report\n\n## project\n\n- 项目记忆 seed\n");
 	await Bun.write(path.join(memoryRoot, "memory_summary.md"), "# Memory Summary\n\n- summary seed\n");

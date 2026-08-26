@@ -138,6 +138,7 @@ function normalizeToolResult<TDetails>(result: RpcClientToolResult<TDetails>): A
 
 export class RpcClient {
 	#process: ptree.ChildProcess | null = null;
+	#stopped = false;
 	#eventListeners: RpcEventListener[] = [];
 	#pendingRequests: Map<string, { resolve: (response: RpcResponse) => void; reject: (error: Error) => void }> =
 		new Map();
@@ -154,7 +155,7 @@ export class RpcClient {
 	 * Start the RPC agent process.
 	 */
 	async start(): Promise<void> {
-		if (this.#process) {
+		if (this.#process || this.#stopped) {
 			throw new Error("Client already started");
 		}
 
@@ -240,11 +241,15 @@ export class RpcClient {
 	 * Stop the RPC agent process.
 	 */
 	stop() {
-		if (!this.#process) return;
+		if (!this.#process) {
+			this.#stopped = true;
+			return;
+		}
 
 		this.#process.kill();
 		this.#abortController.abort();
 		this.#process = null;
+		this.#stopped = true;
 		this.#pendingRequests.clear();
 		for (const pendingCall of this.#pendingHostToolCalls.values()) {
 			pendingCall.controller.abort();
