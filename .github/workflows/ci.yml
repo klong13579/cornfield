@@ -122,7 +122,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1/2, 2/2]
+        shard: [1/4, 2/4, 3/4, 4/4]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -149,7 +149,12 @@ jobs:
           name: pi-natives-linux-x64
           path: packages/natives/native
       - name: Test workspace (TS shard)
-        run: bun run test:ts -- --shard=${{ matrix.shard }}
+        # --parallel=1: serial file execution stabilizes the worker-level env
+        # isolation (parallel workers randomly re-assign files, turning
+        # leftover-HOME/env pollution into flaky failures). Serial is
+        # deterministic: a leaked env kills the same file every run, which is
+        # fixable. Cost ~1.5x wall time, offset by the 4-way shard below.
+        run: bun run test:ts -- --shard=${{ matrix.shard }} --parallel=1
       - name: CLI smoke test
         run: bun run ci:test:smoke
 

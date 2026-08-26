@@ -187,13 +187,18 @@ process.stdin.on("data", chunk => {
 	buffer += chunk.toString("utf8");
 	// Consume input but never respond
 });
-// Exit after delay without sending ready
-setTimeout(() => process.exit(0), 500);
+// Hang forever — never ready, never exit. A fixed 500ms exit raced
+// RpcClient's ready timeout: fast startup (warm bun cache) hit the
+// "Agent process exited" path, slow startup hit the "before ready"
+// path. Hanging forces the deterministic start-timeout path.
+await new Promise(() => {});
 `,
 		);
 		tempPaths.push(scriptPath);
 
-		using client = new RpcClient({ cliPath: scriptPath });
-		await expect(client.start()).rejects.toThrow(/before ready/);
+		using client = new RpcClient({ cliPath: scriptPath, startTimeoutMs: 2_000 });
+		// start 失败路径有几种消息（exited before ready / exited with code /
+		// Timeout waiting for ready）——都含 "ready"，断言统一匹配。
+		await expect(client.start()).rejects.toThrow(/ready/);
 	});
 });

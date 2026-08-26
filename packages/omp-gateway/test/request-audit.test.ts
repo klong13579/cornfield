@@ -47,9 +47,7 @@ function msg(overrides: Partial<InboundMessage> = {}): InboundMessage {
 
 describe("classifyError", () => {
 	it("maps repetitive tool calls", () => {
-		expect(classifyError("Repetitive tool calls detected in the conversation history")).toBe(
-			"repetitive_tool_calls",
-		);
+		expect(classifyError("Repetitive tool calls detected in the conversation history")).toBe("repetitive_tool_calls");
 	});
 	it("maps timeout", () => {
 		expect(classifyError("Request timeout after 300s")).toBe("timeout");
@@ -69,7 +67,10 @@ describe("appendRequestAudit", () => {
 
 	async function readLog(dir: string): Promise<Array<Record<string, unknown>>> {
 		const text = await fs.readFile(path.join(dir, "logs", "requests.jsonl"), "utf8");
-		return text.trimEnd().split("\n").map(l => JSON.parse(l));
+		return text
+			.trimEnd()
+			.split("\n")
+			.map(l => JSON.parse(l));
 	}
 
 	it("writes an ok entry for a successful DM request", async () => {

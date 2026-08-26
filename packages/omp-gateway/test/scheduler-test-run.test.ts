@@ -370,7 +370,7 @@ describe("notifyOriginSessionIfPending", () => {
 		expect(bridge.executePrompt).toHaveBeenCalledTimes(1);
 		const [promptText, opts] = bridge.executePrompt.mock.calls[0];
 		expect(opts.sessionPath).toBe(sampleOrigin.sessionPath);
-		expect(opts.timeoutMs).toBe(60_000);
+		expect(opts.inactivityMs).toBe(60_000);
 		expect(promptText).toContain("weekly-kb-lint");
 		expect(promptText).toContain("success");
 		expect(promptText).toContain("124.0s");
