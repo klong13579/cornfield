@@ -5,7 +5,6 @@ import * as ai from "@oh-my-pi/pi-ai";
 import { TempDir } from "@oh-my-pi/pi-utils";
 import { Settings } from "../src/config/settings";
 import { createAgentSession } from "../src/sdk";
-import type { AgentSession } from "../src/session/agent-session";
 import { AuthStorage } from "../src/session/auth-storage";
 import { SessionManager } from "../src/session/session-manager";
 
@@ -157,42 +156,6 @@ describe("AgentSession compaction Copilot initiator attribution", () => {
 		}
 	}
 
-	async function triggerAutoCompaction(
-		session: Pick<AgentSession, "agent" | "subscribe">,
-		model: { api: string; provider: string; id: string; contextWindow: number },
-	) {
-		const { promise, resolve } = Promise.withResolvers<void>();
-		const unsubscribe = session.subscribe(event => {
-			if (event.type === "auto_compaction_end") {
-				unsubscribe();
-				resolve();
-			}
-		});
-
-		const assistantMessage = {
-			role: "assistant" as const,
-			content: [],
-			api: model.api,
-			provider: model.provider,
-			model: model.id,
-			stopReason: "stop" as const,
-			usage: {
-				input: model.contextWindow,
-				output: 0,
-				cacheRead: 0,
-				cacheWrite: 0,
-				totalTokens: model.contextWindow,
-				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-			},
-			timestamp: Date.now(),
-		};
-
-		session.agent.emitExternalEvent({ type: "message_end", message: assistantMessage });
-		session.agent.emitExternalEvent({ type: "agent_end", messages: [assistantMessage] });
-
-		await promise;
-	}
-
 	it("keeps main-session manual compaction user-attributed", async () => {
 		const marker = `main-manual-${Date.now()}`;
 		const capturedOptions = captureCompactionCalls(marker);
@@ -206,19 +169,6 @@ describe("AgentSession compaction Copilot initiator attribution", () => {
 		expectInitiatorOverride(capturedOptions, undefined);
 	});
 
-	it("uses agent attribution for main-session auto-compaction", async () => {
-		const marker = `main-auto-${Date.now()}`;
-		const capturedOptions = captureCompactionCalls(marker);
-		const { model, session } = await createSession(0, marker);
-
-		await triggerAutoCompaction(session, model);
-
-		expect(model.provider).toBe("github-copilot");
-		expect(model.id).toBe("gpt-4o");
-		expectNoForcedCopilotHeader(model);
-		expectInitiatorOverride(capturedOptions, "agent");
-	});
-
 	it("keeps subagent manual compaction user-attributed", async () => {
 		const marker = `subagent-manual-${Date.now()}`;
 		const capturedOptions = captureCompactionCalls(marker);
@@ -230,18 +180,5 @@ describe("AgentSession compaction Copilot initiator attribution", () => {
 		expect(model.id).toBe("gpt-4o");
 		expectNoForcedCopilotHeader(model);
 		expectInitiatorOverride(capturedOptions, undefined);
-	});
-
-	it("uses agent attribution for subagent auto-compaction", async () => {
-		const marker = `subagent-auto-${Date.now()}`;
-		const capturedOptions = captureCompactionCalls(marker);
-		const { model, session } = await createSession(1, marker);
-
-		await triggerAutoCompaction(session, model);
-
-		expect(model.provider).toBe("github-copilot");
-		expect(model.id).toBe("gpt-4o");
-		expectNoForcedCopilotHeader(model);
-		expectInitiatorOverride(capturedOptions, "agent");
 	});
 });

@@ -1,102 +1,80 @@
-# 已知测试失败清单（2026-08-25）
+# 已知测试失败清单（更新 2026-08-26）
 
 > 状态：不阻塞发布（release 已与 test job 解耦）。`check`/`native`/`release_binary` 全绿。
-> 这些失败全部是 **功能开发与测试未对齐**（或 mock 落后），非环境偶发。
-> 逐个修复后，`test` job 即可恢复为发布门禁。
+> 本次更新：删除 7 个冗余/假路径测试、修复 10 个（mock 补齐/期望对齐）。
+> 剩余失败 = 功能行为验证类 + 环境依赖类，均需**功能判断**（不是期望值错误）。
+
+## 当前总数
+
+`bun --cwd=packages/coding-agent test`：**3984 测试，31 fail**（48 → 31，-17）。
+
+剩余 31 个按根因分组：
 
 ---
 
-## 1. SessionStore ×5 — `packages/coding-agent/test/session-store.test.ts`
+## 1. 功能行为验证类（实现行为 vs 测试期望，需团队判断对错）
 
-|失败|根因|
-|---|---|
-|attach 初始化 seq=0 且快照字段来自 session getters|**mock session 缺 `getMessageEntryIdMap()`**——生产代码 `session-store.ts:54` 的 `getSnapshot` 调用它，测试的 mock session 对象没有该方法，抛 `TypeError`|
-|每个事件归约 seq+1，phase 随事件迁移|同上（`session-store.ts:91` `#onEvent` → `getSnapshot`）|
-|retryAttempt 在 auto_retry_start 置位、auto_retry_end 清零|同上|
-|subscribe 每次事件收到最新 snapshot|同上|
-|快照 → 重建 → 再快照 幂等|同上|
+### 1a. createAgentSession MCP discovery ×6 — `test/sdk-mcp-discovery.test.ts`
+激活工具列表包含 9-11 个工具（read/intercom/write_memory/...），测试期望 `expect.arrayContaining` 语义或精确列表不符。
+**问题**：discovery 模式下激活工具集的实际构成与测试假设不同。
 
-**修复方向**：测试里 mock session 补 `getMessageEntryIdMap: () => new Map()`（一行）。mock 落后于生产 `getSnapshot` 的演进。
+### 1b. ModelRegistry ×5 — `test/model-registry.test.ts`
+canonical 变体归并（claude-opus-latest → claude-opus-4-7）、baseUrl 覆盖、模型 merge、discovered 字段继承——mock fixture 期望的归并/覆盖逻辑与实现不符。
+**问题**：canonicalization 行为的预期 family 归属需确认。
 
----
+### 1c. AgentSession retry fallback ×3 — `test/agent-session-retry-fallback.test.ts`
+期望 fallback 链走 `openai/gpt-4o-mini` → `openai/gpt-4o`，实际三次全请求主模型 `anthropic/claude-sonnet-4-5`——**fallback 未触发**（模型存在，机制性问题）。
+**问题**：fallback 链在测试场景下不生效。
 
-## 2. AgentSession OpenAI Responses replay ×2 — `packages/coding-agent/test/agent-session-openai-responses-replay.test.ts`
+### 1d. AgentSession replay ×2 — `test/agent-session-openai-responses-replay.test.ts`
+reload 后期望模型切换为新保存值（openai/gpt-5-mini、openai/gpt-5.4-mini），实际仍保持旧模型（openai-codex/gpt-5-mini）——**reload 未反映模型变更**。
+**问题**：`session.reload()` 后的模型状态同步。
 
-|失败|根因|
-|---|---|
-|resets provider session state（same-file reload 恢复不同 saved model）|**模型/Provider ID 期望漂移**：`Expected "openai" Received "openai-codex"`（547 行）|
-|resets plain openai-responses provider state|`Expected "gpt-5.4-mini" Received "gpt-5-mini"`（581 行）|
+### 1e. memories runtime ×3 — `test/memories-runtime.test.ts`
+MEMORY.md 内容（期望 "Consolidated body" 实际含 V3 节）+ 清理行为（old.md 未删、MEMORY.md 未删）——~3 秒 waitFor 超时边缘。
+**问题**：phase2 输出/清理行为与期望不符或过慢。
 
-**修复方向**：测试写死了旧的模型/Provider ID，与 models.json 当前默认值不符。改用运行时解析（`getBundledModel` / `DEFAULT_MODEL_PER_PROVIDER`）或更新期望 ID。
+### 1f. 其他 ×7
+- `createTools` search_tool_bm25（MCP discovery 未产出）
+- `edit tool CRLF` BOM 保留
+- `EventController idle` `#handleAgentEnd` 崩溃（`this.ctx` undefined——**疑似真 bug**）
+- `createAgentSession skills option`（sdk-skills，5 秒超时——MCP server 加载）
+- `issue #846` logger.error 未触发（3 秒边缘）
+- `RPC lifecycle` start-after-stop 错误消息不符
+- `协议批 B-3` 命令描述空
 
----
+## 2. 环境/数据依赖类（≤8）
 
-## 3. createTools ×3 — `packages/coding-agent/test/tools/index.test.ts`
-
-|失败|根因|
-|---|---|
-|includes search_tool_bm25（MCP discovery 启用且可执行）|期望启用 `mcp.discoveryMode` 后 `createTools` 含 `search_tool_bm25`，实际工具列表不含——MCP 发现注册条件与测试预期不符|
-|python fallback：falls back to bash when python disabled|python 禁用时期望 fallback 到 bash，实际未 fallback|
-|python fallback：falls back to bash-only when kernel unavailable|kernel 不可用时期望 bash-only，实际未 fallback|
-
-**修复方向**：查 `createTools` 中 `search_tool_bm25` 的注册条件（discovery hook 是否生效）与 python tool 的 fallback 分支（`python` 禁用/kernel 不可用时是否落入 bash）。
-
----
-
-## 4. edit BOM ×1 — `packages/coding-agent/test/tools.test.ts:1632`
-
-|失败|根因|
-|---|---|
-|should preserve UTF-8 BOM after edit|编辑含 `\uFEFF`（BOM）+ CRLF 的文件后，输出与 `\uFEFFfirst\r\nREPLACED\r\nthird\r\n` 不符（BOM 或换行被改写）|
-
-**修复方向**：查 edit 工具对 BOM/CRLF 的保留逻辑（读取/写入时是否剥离/重写）。
+- `wire-server-skills` ×3：缺 `demo-user-skill` seed 数据
+- `W3 D3 get_memory`：memoryRoot 真实路径期望
+- `resolveActiveProjectRegistryPath`：tmp 目录无 `.git` 的 fallback 路径
+- `createAgentSession skills option` 超时（MCP server 启动）
 
 ---
 
-## 5. EventController idle ×1 — `packages/coding-agent/test/modes/controllers/event-controller-idle-compaction.test.ts`
+## 已删除（2026-08-26，用户确认）
 
-|失败|根因|
+|目标|理由|
 |---|---|
-|cancels scheduled idle compaction when disposed|`#handleAgentEnd`（`event-controller.ts:530`）抛错——dispose 清理 idle compaction 定时器的路径崩溃|
+|`test/tools/python-fallback.test.ts` + `python-tool-mode.test.ts`|与 `python-tool-settings.test.ts` 重复（同 describe 同断言）|
+|`agent-session-handoff.test.ts` ×3 it（uses handoff strategy / completes threshold auto-handoff / falls back to context-full）|设计缺陷：`emitExternalEvent` 模拟不触发真实 handoff 流程（compaction/handoff 只在真实 prompt 路径运行）|
+|`agent-session-auto-compaction-x-initiator.test.ts` ×2 it（主/子会话 agent attribution）+ 相关未用辅助函数|同设计缺陷：compaction 事件链不触发 → 5 秒超时|
 
-**修复方向**：查 `event-controller.ts:530` 附近 `#handleAgentEnd` 在 dispose 后的 timer/状态访问（可能访问已清理的对象）。
+## 已修复（2026-08-26）
 
----
-
-## 6. doom-loop-recovery-real-llm ×1 — `packages/agent/test/doom-loop-recovery-real-llm.test.ts`
-
-|失败|根因|
-|---|---|
-|final user-visible message is not a doom echo|**环境类**：本地有 `ALIBABA_*` key 但模型调用 193ms 返回空输出（key 无效/网络不可达），`finalText.length = 0` 断言失败。CI 无 key 已 `describe.skipIf` 跳过|
-
-**处理**：非代码问题。验证/更新本地 alibaba key 后本地可过；CI 保持 skip。
-
----
-
-## 已修复（本次会话，无需处理）
-
-|修复|说明|
-|---|---|
-|semantic 挂起|`runAgentValidate` 无条件跑 LLM audit → 挂起 40+ 测试 + CI 18 分钟无输出。已加 `--semantic` 门控|
-|prompt-includes 双序列化|skeleton 模板 `JSON.stringify(text-import)` → 所有 init 的 agentDir 都是坏 JSON。已改 JSON 对象导入|
-|R7 File Map 正则|模板表格行 `||` 开头不匹配单 `|` 正则。已容错 `\|{1,2}`|
-|fake timers 挂起|auto-compaction-queue 测试 `vi.useFakeTimers()` 卡死整个 suite（bun test 下 fake timers 使超时机制失效）。已移除，改真实等待；1 个测试因设计缺陷（compaction 只在真实 prompt 流程触发）`it.skip`|
-|emoji enrich|alibaba 静态模型补 category emoji 前缀（模型选择器展示）|
-|moa 工具期望|`PLAN_WORKER_TOOLS_NO_SEARCH`（web_search 剥离）是有意设计，测试期望已对齐|
-|formatter 测试|prettier 新版 flow parser 支持 namespace，改用 spyOn 验证 parser 选择|
-|cron proxy 空机容忍|CI 无真机数据，数量断言放宽、无数据 early return|
-|real-omp skip|缺 `dist/omp` 构建产物时 `describe.skipIf`|
-|runAgentShow/R8 断言对齐|模板 TOOLS.md 无 grep（有 search）、模板自带 lint skill、硬约束含 "injected" 是合法约束|
+|组|数量|修法|
+|---|---|---|
+|python tool 期望|2|期望列表补 `identity` 工具（新工具未更新测试）|
+|SessionStore|6|mock 补 `getMessageEntryIdMap`；幂等测试对齐 `isStreaming` phase 联动设计（idle 强制 false）|
+|registry 版本|1|`version` 期望 1 → 2（注册表演进）|
 
 ---
 
 ## 复现方式
 
 ```bash
-# 用 workspace cwd（不要从仓库根跑——根目录 24.7 万文件触发 bun 的 fd 上限 bug，
-# 子进程 spawn pipe 输出全空，误报大量 e2e 失败）
-bun --cwd=packages/coding-agent test test/session-store.test.ts
-bun --cwd=packages/coding-agent test test/tools/index.test.ts
+# 用 workspace cwd（不要从仓库根跑——根目录 24.7 万文件触发 bun fd bug，spawn pipe 全空误报）
+bun --cwd=packages/coding-agent test
 ```
 
 ## 修复后恢复发布门禁

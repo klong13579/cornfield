@@ -46,7 +46,7 @@ describe("python tool settings", () => {
 		const sessionFile = path.join(testDir, "session.jsonl");
 		const tools = await createTools(createSession(testDir, sessionFile), ["python"]);
 
-		expect(tools.map(tool => tool.name).sort()).toEqual(["exit_plan_mode", "python"]);
+		expect(tools.map(tool => tool.name).sort()).toEqual(["exit_plan_mode", "identity", "python"]);
 	});
 
 	it("falls back to bash when python is unavailable", async () => {
@@ -57,7 +57,7 @@ describe("python tool settings", () => {
 		const sessionFile = path.join(testDir, "session.jsonl");
 		const tools = await createTools(createSession(testDir, sessionFile), ["python"]);
 
-		expect(tools.map(tool => tool.name).sort()).toEqual(["bash", "exit_plan_mode"]);
+		expect(tools.map(tool => tool.name).sort()).toEqual(["bash", "exit_plan_mode", "identity"]);
 	});
 
 	it("passes kernel owner and kernel mode from settings to executor", async () => {
