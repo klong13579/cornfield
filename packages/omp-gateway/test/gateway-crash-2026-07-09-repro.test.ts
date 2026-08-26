@@ -239,8 +239,17 @@ describe("Gateway crash repro: 2026-07-09 14:32", () => {
 			// Streaming watchdog should have fired within 2s
 			expect(elapsed).toBeLessThan(2_000);
 
-			// Bridge must still be running
-			expect(bridge.isRunning).toBe(true);
+			// Bridge must still be running after the watchdog abort. Since the
+			// watchdog-abort path now rebuilds the transport asynchronously
+			// (process-level self-heal), there is a brief not-ready window while
+			// the old zombie subprocess is killed and the replacement handshakes.
+			// Poll for up to 10s — the end state must be a running bridge.
+			let running = false;
+			for (let i = 0; i < 50 && !running; i++) {
+				running = bridge.isRunning;
+				if (!running) await Bun.sleep(200);
+			}
+			expect(running).toBe(true);
 
 			// No leaked errors — this is the root-cause assertion
 			expect(uncaughtExceptions).toHaveLength(0);
