@@ -4,7 +4,7 @@
 
 ## 待办
 - [ ] 去 omp 化：oh-my-pi → mika 改名（P0→P4 分阶段执行） → topics/de-omp-mika-rename.md
-- [ ] 统一协议层：TUI/web/桌面/IM 四前端收敛到一套 Wire（P0✓ P1✓ P3 待排期；P2 gateway 切换未开工） → topics/unified-protocol-layer.md
+- [ ] 统一协议层：TUI/web/桌面/IM 四前端收敛到一套 Wire（P0✓ P1✓ P2✓ P3✓；剩 P2-5 生产验证 = gateway 重启后 repro-inject 真实钉钉） → topics/unified-protocol-layer.md
 - [ ] 学习使用herdr-board 功能
 - [ ] 钉钉机器人帮助我读取群消息和文档链接，帮我自动提取，并且识别重要的事项，是的话记录待办并提醒我。 → topics/dingtalk-extract-important-todos.md
 - [ ] omp 添加前端框架
