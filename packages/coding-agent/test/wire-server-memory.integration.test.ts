@@ -107,10 +107,10 @@ describe("W3 D3 — serve get_memory 只读记忆投影", () => {
 			expect(result.user?.path.endsWith("user.md")).toBe(true);
 			expect(result.user?.content).toContain("测试用户画像");
 
-			// project 区：canonical evolution 目录为空时回落到旧版扁平目录（agentDir/memories）——
-			// 真机目前记忆投影在扁平目录，fallback 即生产路径。memoryRoot 应指向 seed 的扁平目录。
+			// project 区：canonical evolution 目录（self-evolution/memory）优先；
+			// 有效 cwd 经 resolveServeProjectRoot 归一到 repo 根。memoryRoot 应指向 seed 的 canonical 目录。
 			expect(result.project?.memoryRoot).toBe(
-				path.join(isolatedHome, ".omp", "agent", "memories", encodeProjectPath(repoRoot)),
+				path.join(isolatedHome, ".omp", "self-evolution", "memory", encodeProjectPath(repoRoot)),
 			);
 			expect(result.project?.memoryMd?.content).toContain("项目记忆 seed");
 			expect(result.project?.summaryMd?.content).toContain("summary seed");
@@ -150,13 +150,12 @@ beforeAll(async () => {
 		"# 测试用户画像\n\n- name: 测试用户\n- note: seed content for wire e2e\n",
 	);
 
-	repoRoot = new URL("../../..", import.meta.url).pathname.replace(/\/$/, "");
-	serveCwd = `${repoRoot}/packages/coding-agent`;
+	const repoRootLocal = new URL("../../..", import.meta.url).pathname.replace(/\/$/, "");
+	repoRoot = repoRootLocal;
+	serveCwd = `${repoRootLocal}/packages/coding-agent`;
 
-	// project 区 seed：$HOME/agent/memories/<encoded-cwd>/{MEMORY.md, memory_summary.md}
-	// serve 启动时会把 cwd 提升到 git 仓库根（resolveServeProjectRoot），
-	// 记忆投影锚定 process.cwd()（仓库根），seed 必须用仓库根的 encoded。
-	const memoryRoot = path.join(isolatedHome, ".omp", "agent", "memories", encodeProjectPath(repoRoot));
+	// project 区 seed：canonical evolution 目录 $HOME/self-evolution/memory/<encoded repoRoot>/{MEMORY.md, memory_summary.md}
+	const memoryRoot = path.join(isolatedHome, ".omp", "self-evolution", "memory", encodeProjectPath(repoRoot));
 	await fs.mkdir(memoryRoot, { recursive: true });
 	await Bun.write(path.join(memoryRoot, "MEMORY.md"), "# Memory Report\n\n## project\n\n- 项目记忆 seed\n");
 	await Bun.write(path.join(memoryRoot, "memory_summary.md"), "# Memory Summary\n\n- summary seed\n");
