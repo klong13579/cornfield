@@ -1,5 +1,5 @@
-import type { BranchPoint, PlaybackEntry, SessionRecordSummary } from "./records";
-import type { AgentInfoDto,
+import type {
+	AgentInfoDto,
 	AvailableModelsDto,
 	ConnectionInfoDto,
 	CronLogEntryDto,
@@ -15,7 +15,9 @@ import type { AgentInfoDto,
 	StatsPeriodDto,
 	TaskRowDto,
 	TodoPhaseDto,
-	WireServerEventDto, } from "@oh-my-pi/pi-wire"
+	WireServerEventDto,
+} from "@oh-my-pi/pi-wire";
+import type { BranchPoint, PlaybackEntry, SessionRecordSummary } from "./records";
 
 /** fs_list 条目（agent workspace 目录项）。 */
 export interface FsEntryDto {

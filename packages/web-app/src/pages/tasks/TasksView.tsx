@@ -1,5 +1,5 @@
+import type { CronLogEntryDto, TaskRowDto } from "@oh-my-pi/pi-wire";
 import { Fragment, useEffect, useMemo, useState } from "react";
-import type { CronLogEntryDto, TaskRowDto } from "@oh-my-pi/pi-wire"
 import { useSessionStore } from "../../state/session-store";
 import { useSession } from "../../state/use-session";
 import {
