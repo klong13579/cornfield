@@ -43,7 +43,7 @@ describe("resolveActiveProjectRegistryPath", () => {
 	let tmpDir: string;
 
 	beforeEach(() => {
-		tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "omp-proj-scope-"));
+		tmpDir = fs.mkdtempSync(path.join(os.homedir(), ".omp-proj-scope-"));
 	});
 
 	afterEach(() => {

@@ -7,7 +7,8 @@
  *     never abort in-flight tools, skip remaining tool calls, or walk over a
  *     blocking ask (inboundMode: "interrupt" is the explicit opt-in).
  *   - the reply hint always carries the explicit replyTo (correlation id).
- *   - non-interactive busy sessions reject politely instead of queuing work.
+ *   - non-interactive busy sessions queue as followUp (headless agents can
+ *     collaborate via intercom instead of leaving ask-waiters to time out).
  */
 import { describe, expect, test } from "bun:test";
 import {
@@ -44,9 +45,9 @@ describe("resolveInboundDeliveryMode", () => {
 		expect(resolveInboundDeliveryMode({ isIdle: false, hasUI: true, inboundMode: "interrupt" })).toBe("steer");
 	});
 
-	test("busy + no UI rejects regardless of mode", () => {
-		expect(resolveInboundDeliveryMode({ isIdle: false, hasUI: false, inboundMode: "queue" })).toBe("reject");
-		expect(resolveInboundDeliveryMode({ isIdle: false, hasUI: false, inboundMode: "interrupt" })).toBe("reject");
+	test("busy + no UI queues as followUp (headless agents can collaborate)", () => {
+		expect(resolveInboundDeliveryMode({ isIdle: false, hasUI: false, inboundMode: "queue" })).toBe("followUp");
+		expect(resolveInboundDeliveryMode({ isIdle: false, hasUI: false, inboundMode: "interrupt" })).toBe("followUp");
 	});
 });
 

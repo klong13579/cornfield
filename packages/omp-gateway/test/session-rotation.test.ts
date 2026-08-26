@@ -32,13 +32,19 @@ import type { InboundMessage, SessionRecord } from "../src/types";
  * non-existent file, omp creates a fresh session at that path.
  */
 const FAKE_RPC_SCRIPT = `#!/usr/bin/env bun
-process.stdout.write(JSON.stringify({ type: "ready", protocol_version: 1 }) + "\\n");
+// Wire protocol fake (omp --mode wire-stdio): hello_ack handshake, then serve
+// switch_session / prompt requests. AgentEvents are wrapped in push/progress
+// frames (rpc parity: the transport flattens them back).
 let currentSession = "";
 let sessionId = "";
 let buffer = "";
 
 function emit(value) {
   process.stdout.write(JSON.stringify(value) + "\\n");
+}
+
+function pushEvent(event) {
+  emit({ type: "push", event: { type: "progress", sessionId: "s1", event } });
 }
 
 function loadOrCreateSession(sessionPath) {
@@ -63,24 +69,30 @@ function loadOrCreateSession(sessionPath) {
 }
 
 async function handleFrame(frame) {
-  if (frame.type === "switch_session") {
-    loadOrCreateSession(frame.sessionPath);
-    emit({ type: "response", id: frame.id, command: "switch_session", success: true, data: { cancelled: false } });
+  if (frame.type === "hello") {
+    emit({ type: "hello_ack", connectionId: "fake", protocolVersion: 1 });
     return;
   }
-  if (frame.type === "prompt") {
-    emit({ type: "response", id: frame.id, command: "prompt", success: true });
+  if (frame.type !== "request") return;
+  const cmd = frame.command;
+  if (cmd.type === "switch_session") {
+    loadOrCreateSession(cmd.sessionPath);
+    emit({ type: "response", id: frame.id, ok: true, result: { cancelled: false } });
+    return;
+  }
+  if (cmd.type === "prompt") {
+    emit({ type: "response", id: frame.id, ok: true });
     const sid = sessionId;
-    const msg = frame.message;
+    const msg = cmd.message;
     setTimeout(() => {
-      emit({
+      pushEvent({
         type: "message_end",
         message: {
           role: "assistant",
           content: [{ type: "text", text: "session=" + sid + " :: " + msg }],
         },
       });
-      emit({ type: "agent_end" });
+      pushEvent({ type: "agent_end" });
     }, 10);
   }
 }

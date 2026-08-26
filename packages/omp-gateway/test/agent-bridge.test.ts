@@ -69,34 +69,43 @@ function makeSession(sessionPath: string, conversationId: string): SessionRecord
 // ═══════════════════════════════════════════════════════════════════════
 
 const FAKE_RPC_SCRIPT = `#!/usr/bin/env bun
-process.stdout.write(JSON.stringify({ type: "ready", protocol_version: 1 }) + "\\n");
+// Wire-stdio fake agent: hello → hello_ack; request → response; events → push(progress).
 let currentSession = "";
 let buffer = "";
 function emit(value) {
   process.stdout.write(JSON.stringify(value) + "\\n");
 }
+function pushEvent(event) {
+  emit({ type: "push", event: { type: "progress", sessionId: "s1", event } });
+}
 async function handleFrame(frame) {
-  if (frame.type === "switch_session") {
-    currentSession = frame.sessionPath;
-    emit({ type: "response", id: frame.id, command: "switch_session", success: true, data: { cancelled: false } });
+  if (frame.type === "hello") {
+    emit({ type: "hello_ack", connectionId: "fake", protocolVersion: 1 });
     return;
   }
-  if (frame.type === "prompt") {
-    if (String(frame.message).includes("fail")) {
-      emit({ type: "response", id: frame.id, command: "prompt", success: false, error: "synthetic failure" });
+  if (frame.type !== "request") return;
+  const cmd = frame.command;
+  if (cmd.type === "switch_session") {
+    currentSession = cmd.sessionId ?? cmd.sessionPath;
+    emit({ type: "response", id: frame.id, ok: true, result: { cancelled: false } });
+    return;
+  }
+  if (cmd.type === "prompt") {
+    if (String(cmd.message).includes("fail")) {
+      emit({ type: "response", id: frame.id, ok: false, error: "synthetic failure" });
       return;
     }
-    emit({ type: "response", id: frame.id, command: "prompt", success: true });
+    emit({ type: "response", id: frame.id, ok: true });
     const sessionAtPrompt = currentSession;
-    const delay = String(frame.message).includes("slow") ? 50 : 0;
+    const delay = String(cmd.message).includes("slow") ? 50 : 0;
     setTimeout(() => {
-      emit({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: sessionAtPrompt + " :: " + frame.message }] } });
-      emit({ type: "agent_end" });
+      pushEvent({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: sessionAtPrompt + " :: " + cmd.message }] } });
+      pushEvent({ type: "agent_end" });
     }, delay);
     return;
   }
-  if (frame.type === "abort") {
-    emit({ type: "response", id: frame.id, command: "abort", success: true });
+  if (cmd.type === "abort") {
+    emit({ type: "response", id: frame.id, ok: true });
   }
 }
 for await (const chunk of Bun.stdin.stream()) {
@@ -213,7 +222,7 @@ describe("AgentBridge", () => {
 		const bridge = new AgentBridge({ ompPath: fake.path, crashBackoffMs: 1, maxCrashRetries: 0 });
 		try {
 			for (let i = 0; i < 6; i++) {
-				await expect(bridge.start()).rejects.toThrow("before ready");
+				await expect(bridge.start()).rejects.toThrow("before hello_ack");
 			}
 			await expect(bridge.start()).rejects.toThrow("ERROR state");
 		} finally {
@@ -235,36 +244,41 @@ function log(entry) {
     fs.appendFileSync(logPath, JSON.stringify(entry) + "\\n");
   }
 }
-process.stdout.write(JSON.stringify({ type: "ready", protocol_version: 1 }) + "\\n");
+process.stdout.write(JSON.stringify({ type: "hello_ack", connectionId: "rec", protocolVersion: 1 }) + "\\n");
 let currentSession = "";
 let buffer = "";
 function emit(value) {
   process.stdout.write(JSON.stringify(value) + "\\n");
 }
+function pushEvent(event) {
+  emit({ type: "push", event: { type: "progress", sessionId: "s1", event } });
+}
 async function handleFrame(frame) {
-  if (frame.type === "switch_session") {
-    currentSession = frame.sessionPath;
-    log({ ts: Date.now(), cmd: "switch_session", session: frame.sessionPath });
-    emit({ type: "response", id: frame.id, command: "switch_session", success: true, data: { cancelled: false } });
+  if (frame.type === "hello") return;
+  if (frame.type !== "request") return;
+  const cmd = frame.command;
+  if (cmd.type === "switch_session") {
+    currentSession = cmd.sessionId ?? cmd.sessionPath;
+    log({ ts: Date.now(), cmd: "switch_session", session: currentSession });
+    emit({ type: "response", id: frame.id, ok: true, result: { cancelled: false } });
     return;
   }
-  if (frame.type === "get_state") {
+  if (cmd.type === "get_state") {
     log({ ts: Date.now(), cmd: "get_state", session: currentSession });
     emit({
       type: "response",
       id: frame.id,
-      command: "get_state",
-      success: true,
-      data: { sessionFile: currentSession, sessionId: "fake-session-id" },
+      ok: true,
+      result: { sessionFile: currentSession, sessionId: "fake-session-id" },
     });
     return;
   }
-  if (frame.type === "prompt") {
-    log({ ts: Date.now(), cmd: "prompt", message: String(frame.message).slice(0, 80) });
-    emit({ type: "response", id: frame.id, command: "prompt", success: true });
+  if (cmd.type === "prompt") {
+    log({ ts: Date.now(), cmd: "prompt", message: String(cmd.message).slice(0, 80) });
+    emit({ type: "response", id: frame.id, ok: true });
     setTimeout(() => {
-      emit({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "ack: " + frame.message }] } });
-      emit({ type: "agent_end" });
+      pushEvent({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "ack: " + cmd.message }] } });
+      pushEvent({ type: "agent_end" });
     }, 0);
   }
 }
@@ -401,36 +415,44 @@ describe("AgentBridge.executePrompt (cron path)", () => {
 // ═══════════════════════════════════════════════════════════════════════
 
 const INACTIVE_FAKE_SCRIPT = `#!/usr/bin/env bun
-process.stdout.write(JSON.stringify({ type: "ready", protocol_version: 1 }) + "\\n");
 let buffer = "";
 function emit(value) {
   process.stdout.write(JSON.stringify(value) + "\\n");
 }
+function pushEvent(event) {
+  emit({ type: "push", event: { type: "progress", sessionId: "s1", event } });
+}
 async function handleFrame(frame) {
-  if (frame.type === "switch_session") {
-    emit({ type: "response", id: frame.id, command: "switch_session", success: true, data: { cancelled: false } });
+  if (frame.type === "hello") {
+    emit({ type: "hello_ack", connectionId: "inactive", protocolVersion: 1 });
     return;
   }
-  if (frame.type === "prompt") {
-    emit({ type: "response", id: frame.id, command: "prompt", success: true });
-    if (String(frame.message).includes("INACTIVE")) return;
-    if (String(frame.message).includes("EVENTUAL")) {
-      setTimeout(() => emit({ type: "message_start" }), 500);
-      setTimeout(() => emit({ type: "message_update", content: "..." }), 1_000);
-      setTimeout(() => emit({ type: "message_update", content: "...." }), 1_500);
+  if (frame.type !== "request") return;
+  const cmd = frame.command;
+  if (cmd.type === "switch_session") {
+    emit({ type: "response", id: frame.id, ok: true, result: { cancelled: false } });
+    return;
+  }
+  if (cmd.type === "prompt") {
+    emit({ type: "response", id: frame.id, ok: true });
+    if (String(cmd.message).includes("INACTIVE")) return;
+    if (String(cmd.message).includes("EVENTUAL")) {
+      setTimeout(() => pushEvent({ type: "message_start" }), 500);
+      setTimeout(() => pushEvent({ type: "message_update", content: "..." }), 1_000);
+      setTimeout(() => pushEvent({ type: "message_update", content: "...." }), 1_500);
       setTimeout(() => {
-        emit({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "late" }] } });
-        emit({ type: "agent_end" });
+        pushEvent({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "late" }] } });
+        pushEvent({ type: "agent_end" });
       }, 2_000);
       return;
     }
     setTimeout(() => {
-      emit({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "ack" }] } });
-      emit({ type: "agent_end" });
+      pushEvent({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "ack" }] } });
+      pushEvent({ type: "agent_end" });
     }, 0);
   }
-  if (frame.type === "abort") {
-    emit({ type: "response", id: frame.id, command: "abort", success: true });
+  if (cmd.type === "abort") {
+    emit({ type: "response", id: frame.id, ok: true });
   }
 }
 for await (const chunk of Bun.stdin.stream()) {
@@ -545,39 +567,47 @@ describe("AgentBridge BOOT.md self-check", () => {
 describe("AgentBridge model re-application", () => {
 	function makeTrackingScript(trackerPath: string): string {
 		return `#!/usr/bin/env bun
-process.stdout.write(JSON.stringify({ type: "ready", protocol_version: 1 }) + "\\n");
 let currentSession = "";
 let buffer = "";
 const setModelCalls = [];
 function emit(value) {
   process.stdout.write(JSON.stringify(value) + "\\n");
 }
+function pushEvent(event) {
+  emit({ type: "push", event: { type: "progress", sessionId: "s1", event } });
+}
 function recordCall() {
   require("fs").writeFileSync(${JSON.stringify(trackerPath)}, JSON.stringify(setModelCalls));
 }
 async function handleFrame(frame) {
-  if (frame.type === "switch_session") {
-    currentSession = frame.sessionPath;
-    emit({ type: "response", id: frame.id, command: "switch_session", success: true, data: { cancelled: false } });
+  if (frame.type === "hello") {
+    emit({ type: "hello_ack", connectionId: "track", protocolVersion: 1 });
+    return;
+  }
+  if (frame.type !== "request") return;
+  const cmd = frame.command;
+  if (cmd.type === "switch_session") {
+    currentSession = cmd.sessionId ?? cmd.sessionPath;
+    emit({ type: "response", id: frame.id, ok: true, result: { cancelled: false } });
     recordCall();
     return;
   }
-  if (frame.type === "set_model") {
-    setModelCalls.push({ provider: frame.provider, modelId: frame.modelId });
-    emit({ type: "response", id: frame.id, command: "set_model", success: true, data: { provider: frame.provider, id: frame.modelId } });
+  if (cmd.type === "set_model") {
+    setModelCalls.push({ provider: cmd.provider, modelId: cmd.modelId });
+    emit({ type: "response", id: frame.id, ok: true, result: { provider: cmd.provider, id: cmd.modelId } });
     recordCall();
     return;
   }
-  if (frame.type === "prompt") {
-    emit({ type: "response", id: frame.id, command: "prompt", success: true });
+  if (cmd.type === "prompt") {
+    emit({ type: "response", id: frame.id, ok: true });
     setTimeout(() => {
-      emit({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: frame.message }] } });
-      emit({ type: "agent_end" });
+      pushEvent({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: cmd.message }] } });
+      pushEvent({ type: "agent_end" });
     }, 0);
     return;
   }
-  if (frame.type === "abort") {
-    emit({ type: "response", id: frame.id, command: "abort", success: true });
+  if (cmd.type === "abort") {
+    emit({ type: "response", id: frame.id, ok: true });
   }
 }
 for await (const chunk of Bun.stdin.stream()) {
@@ -669,9 +699,11 @@ for await (const chunk of Bun.stdin.stream()) {
 // ═══════════════════════════════════════════════════════════════════════
 
 const STREAMING_RPC_SCRIPT = `#!/usr/bin/env bun
-process.stdout.write(JSON.stringify({ type: "ready", protocol_version: 1 }) + "\\n");
 let buffer = "";
 function emit(value) { process.stdout.write(JSON.stringify(value) + "\\n"); }
+function pushEvent(event) {
+  emit({ type: "push", event: { type: "progress", sessionId: "s1", event } });
+}
 for await (const chunk of Bun.stdin.stream()) {
   buffer += new TextDecoder().decode(chunk);
   let idx = buffer.indexOf("\\n");
@@ -680,18 +712,20 @@ for await (const chunk of Bun.stdin.stream()) {
     buffer = buffer.slice(idx + 1);
     if (!line) { idx = buffer.indexOf("\\n"); continue; }
     const frame = JSON.parse(line);
-    if (frame.type === "switch_session") {
-      emit({ type: "response", id: frame.id, command: "switch_session", success: true, data: { cancelled: false } });
-    } else if (frame.type === "prompt") {
-      emit({ type: "response", id: frame.id, command: "prompt", success: true });
-      emit({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "Hello", contentIndex: 0 }, message: { role: "assistant", content: [] } });
-      emit({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: ", world", contentIndex: 0 }, message: { role: "assistant", content: [] } });
-      emit({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "!", contentIndex: 0 }, message: { role: "assistant", content: [] } });
-      emit({ type: "message_update", assistantMessageEvent: { type: "thinking_delta", delta: "model thought a bit" }, message: { role: "assistant", content: [] } });
-      emit({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "Hello, world!" }] } });
-      emit({ type: "agent_end" });
-    } else if (frame.type === "abort") {
-      emit({ type: "response", id: frame.id, command: "abort", success: true });
+    if (frame.type === "hello") {
+      emit({ type: "hello_ack", connectionId: "stream", protocolVersion: 1 });
+    } else if (frame.type === "request" && frame.command.type === "switch_session") {
+      emit({ type: "response", id: frame.id, ok: true, result: { cancelled: false } });
+    } else if (frame.type === "request" && frame.command.type === "prompt") {
+      emit({ type: "response", id: frame.id, ok: true });
+      pushEvent({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "Hello", contentIndex: 0 }, message: { role: "assistant", content: [] } });
+      pushEvent({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: ", world", contentIndex: 0 }, message: { role: "assistant", content: [] } });
+      pushEvent({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "!", contentIndex: 0 }, message: { role: "assistant", content: [] } });
+      pushEvent({ type: "message_update", assistantMessageEvent: { type: "thinking_delta", delta: "model thought a bit" }, message: { role: "assistant", content: [] } });
+      pushEvent({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "Hello, world!" }] } });
+      pushEvent({ type: "agent_end" });
+    } else if (frame.type === "request" && frame.command.type === "abort") {
+      emit({ type: "response", id: frame.id, ok: true });
     }
     idx = buffer.indexOf("\\n");
   }
@@ -781,9 +815,11 @@ describe("AgentBridge.forwardWithMeta (streaming)", () => {
 // ═══════════════════════════════════════════════════════════════════════
 
 const TOOL_RPC_SCRIPT = `#!/usr/bin/env bun
-process.stdout.write(JSON.stringify({ type: "ready", protocol_version: 1 }) + "\\n");
 let buffer = "";
 function emit(value) { process.stdout.write(JSON.stringify(value) + "\\n"); }
+function pushEvent(event) {
+  emit({ type: "push", event: { type: "progress", sessionId: "s1", event } });
+}
 for await (const chunk of Bun.stdin.stream()) {
   buffer += new TextDecoder().decode(chunk);
   let idx = buffer.indexOf("\\n");
@@ -792,19 +828,21 @@ for await (const chunk of Bun.stdin.stream()) {
     buffer = buffer.slice(idx + 1);
     if (!line) { idx = buffer.indexOf("\\n"); continue; }
     const frame = JSON.parse(line);
-    if (frame.type === "switch_session") {
-      emit({ type: "response", id: frame.id, command: "switch_session", success: true, data: { cancelled: false } });
-    } else if (frame.type === "prompt") {
-      emit({ type: "response", id: frame.id, command: "prompt", success: true });
-      emit({ type: "message_update", assistantMessageEvent: { type: "toolcall_start", contentIndex: 0 }, message: { role: "assistant", content: [] } });
-      emit({ type: "message_update", assistantMessageEvent: { type: "toolcall_delta", contentIndex: 0, delta: '{"path":"/tmp/x"}' }, message: { role: "assistant", content: [] } });
-      emit({ type: "message_update", assistantMessageEvent: { type: "toolcall_end", contentIndex: 0, toolCall: { id: "tc_1", name: "read", arguments: { path: "/tmp/x" } } }, message: { role: "assistant", content: [] } });
-      emit({ type: "message_end", message: { role: "toolResult", toolCallId: "tc_1", toolName: "read", isError: false, content: [{ type: "text", text: "file contents here" }] } });
-      emit({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "Done.", contentIndex: 0 }, message: { role: "assistant", content: [] } });
-      emit({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "Done." }, { type: "toolCall", id: "tc_1", name: "read", arguments: { path: "/tmp/x" } }] } });
-      emit({ type: "agent_end" });
-    } else if (frame.type === "abort") {
-      emit({ type: "response", id: frame.id, command: "abort", success: true });
+    if (frame.type === "hello") {
+      emit({ type: "hello_ack", connectionId: "tool", protocolVersion: 1 });
+    } else if (frame.type === "request" && frame.command.type === "switch_session") {
+      emit({ type: "response", id: frame.id, ok: true, result: { cancelled: false } });
+    } else if (frame.type === "request" && frame.command.type === "prompt") {
+      emit({ type: "response", id: frame.id, ok: true });
+      pushEvent({ type: "message_update", assistantMessageEvent: { type: "toolcall_start", contentIndex: 0 }, message: { role: "assistant", content: [] } });
+      pushEvent({ type: "message_update", assistantMessageEvent: { type: "toolcall_delta", contentIndex: 0, delta: '{"path":"/tmp/x"}' }, message: { role: "assistant", content: [] } });
+      pushEvent({ type: "message_update", assistantMessageEvent: { type: "toolcall_end", contentIndex: 0, toolCall: { id: "tc_1", name: "read", arguments: { path: "/tmp/x" } } }, message: { role: "assistant", content: [] } });
+      pushEvent({ type: "message_end", message: { role: "toolResult", toolCallId: "tc_1", toolName: "read", isError: false, content: [{ type: "text", text: "file contents here" }] } });
+      pushEvent({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "Done.", contentIndex: 0 }, message: { role: "assistant", content: [] } });
+      pushEvent({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "Done." }, { type: "toolCall", id: "tc_1", name: "read", arguments: { path: "/tmp/x" } }] } });
+      pushEvent({ type: "agent_end" });
+    } else if (frame.type === "request" && frame.command.type === "abort") {
+      emit({ type: "response", id: frame.id, ok: true });
     }
     idx = buffer.indexOf("\\n");
   }
@@ -910,42 +948,50 @@ describe("AgentBridge.forwardWithMeta (tool events)", () => {
 // ═══════════════════════════════════════════════════════════════════════
 
 const SCRIPT_STREAMING_HANG = `#!/usr/bin/env bun
-process.stdout.write(JSON.stringify({ type: "ready", protocol_version: 1 }) + "\\n");
 let currentSession = "";
 function emit(value) {
   process.stdout.write(JSON.stringify(value) + "\\n");
 }
+function pushEvent(event) {
+  emit({ type: "push", event: { type: "progress", sessionId: "s1", event } });
+}
 async function handleFrame(frame) {
-  if (frame.type === "switch_session") {
-    currentSession = frame.sessionPath;
-    emit({ type: "response", id: frame.id, command: "switch_session", success: true, data: { cancelled: false } });
+  if (frame.type === "hello") {
+    emit({ type: "hello_ack", connectionId: "hang", protocolVersion: 1 });
     return;
   }
-  if (frame.type === "prompt") {
-    emit({ type: "response", id: frame.id, command: "prompt", success: true });
-    if (String(frame.message).includes("hang")) {
-      emit({ type: "message_update", assistantMessageEvent: { type: "thinking_delta", delta: "thinking..." } });
+  if (frame.type !== "request") return;
+  const cmd = frame.command;
+  if (cmd.type === "switch_session") {
+    currentSession = cmd.sessionId ?? cmd.sessionPath;
+    emit({ type: "response", id: frame.id, ok: true, result: { cancelled: false } });
+    return;
+  }
+  if (cmd.type === "prompt") {
+    emit({ type: "response", id: frame.id, ok: true });
+    if (String(cmd.message).includes("hang")) {
+      pushEvent({ type: "message_update", assistantMessageEvent: { type: "thinking_delta", delta: "thinking..." } });
       return;
     }
-    if (String(frame.message).includes("slow")) {
+    if (String(cmd.message).includes("slow")) {
       let n = 0;
       const tick = setInterval(() => {
-        emit({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "x" } });
+        pushEvent({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "x" } });
         n++;
         if (n >= 5) {
           clearInterval(tick);
-          emit({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "done" }] } });
-          emit({ type: "agent_end" });
+          pushEvent({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "done" }] } });
+          pushEvent({ type: "agent_end" });
         }
       }, 50);
       return;
     }
-    emit({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "ok" }] } });
-    emit({ type: "agent_end" });
+    pushEvent({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "ok" }] } });
+    pushEvent({ type: "agent_end" });
     return;
   }
-  if (frame.type === "abort") {
-    emit({ type: "response", id: frame.id, command: "abort", success: true });
+  if (cmd.type === "abort") {
+    emit({ type: "response", id: frame.id, ok: true });
   }
 }
 for await (const chunk of Bun.stdin.stream()) {
@@ -1023,6 +1069,40 @@ describe("AgentBridge streaming watchdog", () => {
 		const elapsed = Date.now() - start;
 		expect(reply).toContain("系统繁忙");
 		expect(elapsed).toBeLessThan(15_000);
+		await bridge.stop();
+	});
+	test("watchdog abort rebuilds the transport (process-level self-heal)", async () => {
+		const scriptPath = await writeWatchdogScript();
+		const bridge = new AgentBridge({
+			ompPath: scriptPath,
+			cwd: watchdogAgentDir,
+			streamingWatchdogMs: 300,
+		});
+		await bridge.start();
+		expect(bridge.isRunning).toBe(true);
+
+		// First prompt hangs → watchdog aborts → transport rebuild fires (async)
+		const reply = await bridge.forward(
+			makeMsgForWatchdog("cid-heal", "hang please"),
+			makeSessionForWatchdog("/tmp/cid-heal.jsonl"),
+		);
+		expect(reply).toContain("系统繁忙");
+
+		// The rebuild is fire-and-forget; give it a moment to land. A successful
+		// restart keeps the bridge running (fresh subprocess ready). Poll for up
+		// to 10s — the fake script's spawn+ready handshake can take a few seconds.
+		let healed = false;
+		for (let i = 0; i < 50 && !healed; i++) {
+			healed = bridge.isRunning;
+			if (!healed) await Bun.sleep(200);
+		}
+		expect(healed).toBe(true);
+		// And a subsequent prompt still works against the rebuilt transport.
+		const reply2 = await bridge.forward(
+			makeMsgForWatchdog("cid-heal2", "slow please"),
+			makeSessionForWatchdog("/tmp/cid-heal2.jsonl"),
+		);
+		expect(reply2).toContain("done");
 		await bridge.stop();
 	});
 
@@ -1103,9 +1183,11 @@ describe("AgentBridge active-session sentinel", () => {
 
 const SLOW_TOOL_RPC_SCRIPT = `#!/usr/bin/env bun
 const HOLD_MS = 200;
-process.stdout.write(JSON.stringify({ type: "ready", protocol_version: 1 }) + "\\n");
 let buffer = "";
 function emit(value) { process.stdout.write(JSON.stringify(value) + "\\n"); }
+function pushEvent(event) {
+  emit({ type: "push", event: { type: "progress", sessionId: "s1", event } });
+}
 for await (const chunk of Bun.stdin.stream()) {
   buffer += new TextDecoder().decode(chunk);
   let idx = buffer.indexOf("\\n");
@@ -1114,21 +1196,23 @@ for await (const chunk of Bun.stdin.stream()) {
     buffer = buffer.slice(idx + 1);
     if (!line) { idx = buffer.indexOf("\\n"); continue; }
     const frame = JSON.parse(line);
-    if (frame.type === "switch_session") {
-      emit({ type: "response", id: frame.id, command: "switch_session", success: true, data: { cancelled: false } });
-    } else if (frame.type === "prompt") {
-      emit({ type: "response", id: frame.id, command: "prompt", success: true });
-      emit({ type: "message_update", assistantMessageEvent: { type: "toolcall_start", contentIndex: 0 }, message: { role: "assistant", content: [] } });
-      emit({ type: "message_update", assistantMessageEvent: { type: "toolcall_delta", contentIndex: 0, delta: '{"command":"sleep 10"}' }, message: { role: "assistant", content: [] } });
-      emit({ type: "message_update", assistantMessageEvent: { type: "toolcall_end", contentIndex: 0, toolCall: { id: "tc_long", name: "bash", arguments: { command: "sleep 10" } } }, message: { role: "assistant", content: [] } });
+    if (frame.type === "hello") {
+      emit({ type: "hello_ack", connectionId: "slow", protocolVersion: 1 });
+    } else if (frame.type === "request" && frame.command.type === "switch_session") {
+      emit({ type: "response", id: frame.id, ok: true, result: { cancelled: false } });
+    } else if (frame.type === "request" && frame.command.type === "prompt") {
+      emit({ type: "response", id: frame.id, ok: true });
+      pushEvent({ type: "message_update", assistantMessageEvent: { type: "toolcall_start", contentIndex: 0 }, message: { role: "assistant", content: [] } });
+      pushEvent({ type: "message_update", assistantMessageEvent: { type: "toolcall_delta", contentIndex: 0, delta: '{"command":"sleep 10"}' }, message: { role: "assistant", content: [] } });
+      pushEvent({ type: "message_update", assistantMessageEvent: { type: "toolcall_end", contentIndex: 0, toolCall: { id: "tc_long", name: "bash", arguments: { command: "sleep 10" } } }, message: { role: "assistant", content: [] } });
       const start = Date.now();
       while (Date.now() - start < HOLD_MS) { /* spin */ }
-      emit({ type: "message_end", message: { role: "toolResult", toolCallId: "tc_long", toolName: "bash", isError: false, content: [{ type: "text", text: "done" }] } });
-      emit({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "ok", contentIndex: 0 }, message: { role: "assistant", content: [] } });
-      emit({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "ok" }, { type: "toolCall", id: "tc_long", name: "bash", arguments: { command: "sleep 10" } }] } });
-      emit({ type: "agent_end" });
-    } else if (frame.type === "abort") {
-      emit({ type: "response", id: frame.id, command: "abort", success: true });
+      pushEvent({ type: "message_end", message: { role: "toolResult", toolCallId: "tc_long", toolName: "bash", isError: false, content: [{ type: "text", text: "done" }] } });
+      pushEvent({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "ok", contentIndex: 0 }, message: { role: "assistant", content: [] } });
+      pushEvent({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "ok" }, { type: "toolCall", id: "tc_long", name: "bash", arguments: { command: "sleep 10" } }] } });
+      pushEvent({ type: "agent_end" });
+    } else if (frame.type === "request" && frame.command.type === "abort") {
+      emit({ type: "response", id: frame.id, ok: true });
     }
     idx = buffer.indexOf("\\n");
   }

@@ -1034,13 +1034,15 @@ export class AgentSession {
 						"Fix the todo payload and call todo_write again before continuing.",
 						"</system-reminder>",
 					].join("\n");
-					await this.sendCustomMessage({
+					await this.sendCustomMessage(
+						{
 							customType: "todo-write-error-reminder",
 							content: reminderText,
 							display: false,
 							details: { toolName, errorText },
 						},
-						{ deliverAs: "nextTurn" },);
+						{ deliverAs: "nextTurn" },
+					);
 				}
 				if (toolName === "checkpoint" && !isError) {
 					const checkpointEntryId = this.sessionManager.getEntries().at(-1)?.id ?? null;
@@ -2503,13 +2505,15 @@ export class AgentSession {
 	async sendPlanModeContext(options?: { deliverAs?: "steer" | "followUp" | "nextTurn" }): Promise<void> {
 		const message = await this.#buildPlanModeMessage();
 		if (!message) return;
-		await this.sendCustomMessage({
+		await this.sendCustomMessage(
+			{
 				customType: message.customType,
 				content: message.content,
 				display: message.display,
 				details: message.details,
 			},
-			options ? { deliverAs: options.deliverAs } : undefined,);
+			options ? { deliverAs: options.deliverAs } : undefined,
+		);
 	}
 
 	resolveRoleModel(role: string): Model | undefined {
@@ -2768,7 +2772,6 @@ export class AgentSession {
 
 		await this.#promptWithMessage(customMessage, textContent, options);
 	}
-
 
 	async #promptWithMessage(
 		message: AgentMessage,
@@ -6032,11 +6035,6 @@ export class AgentSession {
 		return this.#bashAbortControllers.size > 0;
 	}
 
-	/** Whether there are pending bash messages waiting to be flushed */
-	get #hasPendingBashMessages(): boolean {
-		return this.#pendingBashMessages.length > 0;
-	}
-
 	/**
 	 * Flush pending bash messages to agent state and session.
 	 * Called after agent turn completes to maintain proper message ordering.
@@ -6204,11 +6202,6 @@ export class AgentSession {
 	/** Whether a Python execution is currently running */
 	get isPythonRunning(): boolean {
 		return this.#pythonAbortControllers.size > 0;
-	}
-
-	/** Whether there are pending Python messages waiting to be flushed */
-	get #hasPendingPythonMessages(): boolean {
-		return this.#pendingPythonMessages.length > 0;
 	}
 
 	/**
@@ -7264,13 +7257,6 @@ export class AgentSession {
 	// =========================================================================
 	// Extension System
 	// =========================================================================
-
-	/**
-	 * Check if extensions have handlers for a specific event type.
-	 */
-	#hasExtensionHandlers(eventType: string): boolean {
-		return this.#extensionRunner?.hasHandlers(eventType) ?? false;
-	}
 
 	/**
 	 * Get the extension runner (for setting UI context and error handlers).

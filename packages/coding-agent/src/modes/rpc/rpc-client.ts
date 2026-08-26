@@ -43,6 +43,8 @@ export interface RpcClientOptions {
 	args?: string[];
 	/** Custom tools owned by the embedding host and exposed over the RPC transport */
 	customTools?: RpcClientCustomTool[];
+	/** Max ms to wait for the agent to report ready (default 30s) */
+	startTimeoutMs?: number;
 }
 
 export type ModelInfo = Pick<Model, "provider" | "id" | "contextWindow" | "reasoning" | "thinking">;
@@ -138,6 +140,7 @@ function normalizeToolResult<TDetails>(result: RpcClientToolResult<TDetails>): A
 
 export class RpcClient {
 	#process: ptree.ChildProcess | null = null;
+	#stopped = false;
 	#eventListeners: RpcEventListener[] = [];
 	#pendingRequests: Map<string, { resolve: (response: RpcResponse) => void; reject: (error: Error) => void }> =
 		new Map();
@@ -154,7 +157,7 @@ export class RpcClient {
 	 * Start the RPC agent process.
 	 */
 	async start(): Promise<void> {
-		if (this.#process) {
+		if (this.#process || this.#stopped) {
 			throw new Error("Client already started");
 		}
 
@@ -218,7 +221,7 @@ export class RpcClient {
 		});
 
 		// Timeout to prevent hanging forever
-		const readyTimeout = this.#startTimeout(30000, () => {
+		const readyTimeout = this.#startTimeout(this.options.startTimeoutMs ?? 30_000, () => {
 			if (readySettled) return;
 			readySettled = true;
 			readyReject(
@@ -240,11 +243,15 @@ export class RpcClient {
 	 * Stop the RPC agent process.
 	 */
 	stop() {
-		if (!this.#process) return;
+		if (!this.#process) {
+			this.#stopped = true;
+			return;
+		}
 
 		this.#process.kill();
 		this.#abortController.abort();
 		this.#process = null;
+		this.#stopped = true;
 		this.#pendingRequests.clear();
 		for (const pendingCall of this.#pendingHostToolCalls.values()) {
 			pendingCall.controller.abort();

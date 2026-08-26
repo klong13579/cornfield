@@ -11,15 +11,15 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "bun:test";
 import * as fsp from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
-import { setConfigRootDir } from "@oh-my-pi/pi-utils";
+import { settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import {
 	buildFilename,
 	listListenRecordings,
 	saveListenText,
 	transcribeAudioWithDefaults,
 } from "@oh-my-pi/pi-coding-agent/stt/listen-service";
+import { setConfigRootDir } from "@oh-my-pi/pi-utils";
 
 const transcribe = vi.fn<() => Promise<string>>();
 const transcribeViaApi = vi.fn<() => Promise<string>>();

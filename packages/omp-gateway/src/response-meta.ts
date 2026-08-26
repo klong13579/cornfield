@@ -1,4 +1,35 @@
 /**
+ * Rewrite internal retry/fallback machinery text into a stable, actionable
+ * user-facing message. The raw errorMessage may be an omp auto-retry chain
+ * status ("Max retries exhausted — trying fallback…"), a model-fallback
+ * transition note, or a provider error body quoted verbatim (which can carry
+ * the upstream gateway's internal wording). IM users cannot act on any of
+ * that — they can retry, or wait. Recognizable provider idioms (rate limit,
+ * overload, timeout, auth) are mapped to concrete hints; everything else
+ * collapses to a generic retry suggestion. The full raw message always
+ * stays in the gateway log for diagnosis.
+ */
+export function friendlyLlmError(raw: string): string {
+	const msg = raw.toLowerCase();
+	if (/rate.?limit|too many requests|429/.test(msg)) {
+		return "请求频率受限，请稍等一分钟再重试。";
+	}
+	if (/overload|50[023]/.test(msg)) {
+		return "模型服务暂时过载，请稍后重试。";
+	}
+	if (/timeout|timed out/.test(msg)) {
+		return "模型响应超时，请重试。";
+	}
+	if (/401|unauthorized|invalid.*key|credential/.test(msg)) {
+		return "模型凭据异常（已通知管理员）。";
+	}
+	if (/context.*(overflow|too.*(large|long))|maximum context/.test(msg)) {
+		return "对话过长超出模型上下文，请开新会话（发 /new）。";
+	}
+	return "服务暂时不稳定，已自动重试未成功，请稍后重试。";
+}
+
+/**
  * ResponseMetaBuilder — extracts AgentResponseMeta from a stream of AgentEvents.
  *
  * Two paths:

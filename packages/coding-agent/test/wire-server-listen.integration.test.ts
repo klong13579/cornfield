@@ -14,6 +14,7 @@ import * as fsp from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { MULTIDEVICE_PROTOCOL_VERSION } from "@oh-my-pi/pi-wire";
+import { waitForServe } from "./wait-for-serve";
 
 type Frame = { type: string; [k: string]: unknown };
 
@@ -26,41 +27,6 @@ interface E2eContext {
 const repoRoot = path.resolve(import.meta.dir, "..", "..", "..");
 
 // ── helpers（与 wire-server-p2-commands.integration.test.ts 同构） ──
-
-async function waitForServe(proc: ReturnType<typeof Bun.spawn>): Promise<{ url: string; token: string }> {
-	const deadline = Date.now() + 60_000;
-	const reader = (proc.stdout as ReadableStream<Uint8Array>).getReader();
-	const errReader = (proc.stderr as ReadableStream<Uint8Array>).getReader();
-	const dec = new TextDecoder();
-	let buf = "";
-	let errBuf = "";
-	const pumpErr = async (): Promise<void> => {
-		try {
-			const { value, done } = await errReader.read();
-			if (done) return;
-			errBuf += dec.decode(value);
-			if (errBuf.length > 8000) errBuf = errBuf.slice(-8000);
-			if (!done) void pumpErr();
-		} catch {
-			/* closed */
-		}
-	};
-	void pumpErr();
-	while (Date.now() < deadline) {
-		const { value, done } = await reader.read();
-		if (done) throw new Error(`serve exited before emitting listening url; stderr:\n${errBuf.slice(-2000)}`);
-		buf += dec.decode(value);
-		const m = buf.match(/ws:\/\/127\.0\.0\.1:(\d+)\/ws(\?token=([a-zA-Z0-9]+))?/);
-		if (m) {
-			reader.releaseLock();
-			errReader.releaseLock();
-			return { url: `ws://127.0.0.1:${m[1]}/ws${m[2] ?? ""}`, token: m[3] ?? "" };
-		}
-	}
-	reader.releaseLock();
-	errReader.releaseLock();
-	throw new Error(`serve did not become ready within 60s; stderr:\n${errBuf.slice(-2000)}`);
-}
 
 async function sendCommand(command: object, timeoutMs = 15_000): Promise<Frame> {
 	const ws = new WebSocket(ctx.url);
@@ -130,7 +96,7 @@ const proc = Bun.spawn(
 		stderr: "pipe",
 	},
 );
-const ready = await waitForServe(proc);
+const ready = await waitForServe(proc, port);
 const ctx: E2eContext = { proc, ...ready };
 
 afterAll(() => {
@@ -163,7 +129,10 @@ describe("record_transcribe 入参校验（不触模型）", () => {
 	});
 
 	test("tiny audio (<100B) → ok:false", async () => {
-		const res = await sendCommand({ type: "record_transcribe", audio: Buffer.from("x".repeat(50), "utf-8").toString("base64") });
+		const res = await sendCommand({
+			type: "record_transcribe",
+			audio: Buffer.from("x".repeat(50), "utf-8").toString("base64"),
+		});
 		expect(res.ok).toBe(false);
 		expect(String(res.error)).toMatch(/too small|empty/);
 	});

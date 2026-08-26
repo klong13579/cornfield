@@ -9,13 +9,13 @@
  *       → parses action JSON
  *         → installed action handler
  *           → ActionRegistry.lookup
- *             → bridge.abort()
- *               → AgentBridge.sendCommandAndWait("abort")
- *                 → fake RPC emits abort response + interrupted toolResult
- *                   + final text + agent_end
+ *       → bridge.abort()
+ *         → AgentBridge.sendCommandAndWait("abort")
+ *           → fake wire-stdio emits abort response + interrupted toolResult
+ *             + final text + agent_end
  *                     → forwardWithMeta resolves with aborted: true
  *
- * The fake RPC and the real bridge / channel are the same code path the
+ * The fake wire-stdio and the real bridge / channel are the same code path the
  * gateway's `omp gateway test-longtask --simulate-stop` CLI exercises,
  * minus the real DingTalk API call. This lets us pin the integration
  * in a unit test that runs in <500ms.
@@ -36,20 +36,23 @@ const HR_CONFIG: DingTalkConfig = {
 	robotCode: "ding8yvoithqnrrz0kz5",
 };
 
-/** Build a fake RPC that holds for `holdMs`, then answers the abort
- *  command by emitting an interrupted toolResult + agent_end. */
+/** Build a fake wire-stdio child that holds for `holdMs`, then answers
+ *  the abort command by emitting an interrupted toolResult + agent_end.
+ *  Wire 协议：事件必须包进 push/progress 帧（老 RPC 协议是裸 emit）。 */
 function buildHoldRpc(holdMs: number): string {
 	return `#!/usr/bin/env bun
 const HOLD_MS = ${holdMs};
-process.stdout.write(JSON.stringify({ type: "ready", protocol_version: 1 }) + "\\n");
 let buffer = "";
 const emit = (v) => process.stdout.write(JSON.stringify(v) + "\\n");
+function pushEvent(event) {
+  emit({ type: "push", event: { type: "progress", sessionId: "conv_1", event } });
+}
 let toolActive = false;
 let toolTimer = null;
 const finish = (aborted) => {
   if (toolTimer) { clearTimeout(toolTimer); toolTimer = null; }
   toolActive = false;
-  emit({
+  pushEvent({
     type: "message_end",
     message: {
       role: "toolResult",
@@ -59,10 +62,35 @@ const finish = (aborted) => {
       content: [{ type: "text", text: aborted ? "[abort] interrupted" : "done" }]
     }
   });
-  emit({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: aborted ? "aborted" : "ok", contentIndex: 0 }, message: { role: "assistant", content: [] } });
-  emit({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: aborted ? "aborted by user" : "ok" }] } });
-  emit({ type: "agent_end" });
+  pushEvent({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: aborted ? "aborted" : "ok", contentIndex: 0 }, message: { role: "assistant", content: [] } });
+  pushEvent({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: aborted ? "aborted by user" : "ok" }] } });
+  pushEvent({ type: "agent_end" });
 };
+async function handleFrame(frame) {
+  if (frame.type === "hello") {
+    emit({ type: "hello_ack", connectionId: "stop-click", protocolVersion: 1 });
+    return;
+  }
+  if (frame.type !== "request") return;
+  const cmd = frame.command;
+  if (cmd.type === "switch_session") {
+    emit({ type: "response", id: frame.id, ok: true, result: { cancelled: false } });
+    return;
+  }
+  if (cmd.type === "prompt") {
+    emit({ type: "response", id: frame.id, ok: true });
+    pushEvent({ type: "message_update", assistantMessageEvent: { type: "toolcall_start", contentIndex: 0 }, message: { role: "assistant", content: [] } });
+    pushEvent({ type: "message_update", assistantMessageEvent: { type: "toolcall_delta", contentIndex: 0, delta: '{"command":"sleep 30"}' }, message: { role: "assistant", content: [] } });
+    pushEvent({ type: "message_update", assistantMessageEvent: { type: "toolcall_end", contentIndex: 0, toolCall: { id: "tc_test", name: "bash", arguments: { command: "sleep 30" } } }, message: { role: "assistant", content: [] } });
+    toolActive = true;
+    toolTimer = setTimeout(() => finish(false), HOLD_MS);
+    return;
+  }
+  if (cmd.type === "abort") {
+    emit({ type: "response", id: frame.id, ok: true });
+    if (toolActive) finish(true);
+  }
+}
 for await (const chunk of Bun.stdin.stream()) {
   buffer += new TextDecoder().decode(chunk);
   let idx = buffer.indexOf("\\n");
@@ -70,20 +98,7 @@ for await (const chunk of Bun.stdin.stream()) {
     const line = buffer.slice(0, idx).trim();
     buffer = buffer.slice(idx + 1);
     if (!line) { idx = buffer.indexOf("\\n"); continue; }
-    const f = JSON.parse(line);
-    if (f.type === "switch_session") {
-      emit({ type: "response", id: f.id, command: "switch_session", success: true, data: { cancelled: false } });
-    } else if (f.type === "prompt") {
-      emit({ type: "response", id: f.id, command: "prompt", success: true });
-      emit({ type: "message_update", assistantMessageEvent: { type: "toolcall_start", contentIndex: 0 }, message: { role: "assistant", content: [] } });
-      emit({ type: "message_update", assistantMessageEvent: { type: "toolcall_delta", contentIndex: 0, delta: '{"command":"sleep 30"}' }, message: { role: "assistant", content: [] } });
-      emit({ type: "message_update", assistantMessageEvent: { type: "toolcall_end", contentIndex: 0, toolCall: { id: "tc_test", name: "bash", arguments: { command: "sleep 30" } } }, message: { role: "assistant", content: [] } });
-      toolActive = true;
-      toolTimer = setTimeout(() => finish(false), HOLD_MS);
-    } else if (f.type === "abort") {
-      emit({ type: "response", id: f.id, command: "abort", success: true });
-      if (toolActive) finish(true);
-    }
+    await handleFrame(JSON.parse(line));
     idx = buffer.indexOf("\\n");
   }
 }

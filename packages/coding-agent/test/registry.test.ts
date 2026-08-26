@@ -37,7 +37,7 @@ afterEach(async () => {
 describe("agentDir registry", () => {
 	it("returns an empty registry when the file does not exist", async () => {
 		const reg = await loadRegistry();
-		expect(reg.version).toBe(1);
+		expect(reg.version).toBe(2);
 		expect(reg.agents).toEqual({});
 	});
 

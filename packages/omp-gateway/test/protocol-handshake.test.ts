@@ -1,9 +1,12 @@
 /**
- * RPC protocol handshake — the `omp --mode rpc` ready frame contract.
+ * Wire protocol handshake — the `omp --mode wire-stdio` hello_ack contract.
  *
- * The gateway only accepts agent subprocesses whose first stdout frame is
- * `{"type": "ready", "protocol_version": 1, "agent": "omp"}`. Legacy binaries
- * (no protocol_version) and future version mismatches are REJECTED with a
+ * The gateway only accepts agent subprocesses that complete the wire hello
+ * handshake: after the transport sends `hello`, the first stdout frame must
+ * be `hello_ack` carrying a numeric protocolVersion >= 1 (current wire
+ * protocol: MULTIDEVICE_PROTOCOL_VERSION in packages/pi-wire/src/frames.ts).
+ * Peers that answer `hello_error` (legacy binaries, no wire protocol support)
+ * and peers that ack with an incompatible protocolVersion are REJECTED with a
  * diagnostic error naming the fix (upgrade omp) — hard cutover, no silent
  * compatibility mode (see docs/gateway-binary-split-plan.md §5.4).
  */
@@ -12,34 +15,50 @@ import { describe, expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { RPC_PROTOCOL_VERSION, RpcTransport, resolveDefaultOmpPath } from "../src/agent-transport";
+import { MULTIDEVICE_PROTOCOL_VERSION } from "@oh-my-pi/pi-wire";
+import { resolveDefaultOmpPath, WireTransport } from "../src/agent-transport-wire";
 
-async function createFakeRpc(
+async function createFakeWire(
 	script: string,
 	prefix = "proto-handshake-",
 ): Promise<{ path: string; cleanup: () => void }> {
 	const dir = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
-	const scriptPath = path.join(dir, "fake-rpc");
+	const scriptPath = path.join(dir, "fake-wire");
 	await fs.writeFile(scriptPath, script, { mode: 0o755 });
 	return { path: scriptPath, cleanup: () => void fs.rm(dir, { recursive: true, force: true }) };
 }
 
-/** Ready + stay alive so `transport.start()` can observe the handshake. */
-function holdOpen(readyFrame: string): string {
+/** hello_ack + stay alive so `transport.start()` can observe the handshake. */
+function holdOpen(helloAck: string): string {
 	return `#!/usr/bin/env bun
-process.stdout.write(${JSON.stringify(readyFrame)} + "\\n");
+process.stdout.write(${JSON.stringify(helloAck)} + "\\n");
 await new Promise(() => {});
 `;
 }
 
-const READY_V1 = holdOpen(JSON.stringify({ type: "ready", protocol_version: RPC_PROTOCOL_VERSION, agent: "omp" }));
-const READY_LEGACY = holdOpen(JSON.stringify({ type: "ready" }));
-const READY_V2 = holdOpen(JSON.stringify({ type: "ready", protocol_version: 2, agent: "omp" }));
+/** Emit the frame, then exit shortly after — a deterministic pre-ready rejection. */
+function respondThenExit(frame: string): string {
+	return `#!/usr/bin/env bun
+process.stdout.write(${JSON.stringify(frame)} + "\\n");
+setTimeout(() => process.exit(0), 100);
+`;
+}
 
-describe("RpcTransport protocol handshake", () => {
-	test("accepts a protocol_version 1 ready frame (current omp)", async () => {
-		const fake = await createFakeRpc(READY_V1);
-		const transport = new RpcTransport({ ompPath: fake.path, readyTimeoutMs: 5_000 });
+const HELLO_ACK_V1 = JSON.stringify({
+	type: "hello_ack",
+	connectionId: "proto",
+	protocolVersion: MULTIDEVICE_PROTOCOL_VERSION,
+});
+const HELLO_ACK_BAD_VERSION = JSON.stringify({ type: "hello_ack", connectionId: "proto", protocolVersion: 0 });
+const HELLO_ERROR_LEGACY = JSON.stringify({
+	type: "hello_error",
+	error: "legacy binary: no wire protocol support, upgrade omp",
+});
+
+describe("WireTransport protocol handshake", () => {
+	test("accepts a protocolVersion 1 hello_ack (current wire protocol)", async () => {
+		const fake = await createFakeWire(holdOpen(HELLO_ACK_V1));
+		const transport = new WireTransport({ ompPath: fake.path, readyTimeoutMs: 5_000 });
 		try {
 			await transport.start();
 			expect(transport.isReady).toBe(true);
@@ -49,22 +68,22 @@ describe("RpcTransport protocol handshake", () => {
 		}
 	});
 
-	test("rejects a legacy ready frame without protocol_version", async () => {
-		const fake = await createFakeRpc(READY_LEGACY);
-		const transport = new RpcTransport({ ompPath: fake.path, readyTimeoutMs: 5_000 });
+	test("rejects a legacy peer answering with hello_error (no wire protocol support)", async () => {
+		const fake = await createFakeWire(respondThenExit(HELLO_ERROR_LEGACY));
+		const transport = new WireTransport({ ompPath: fake.path, readyTimeoutMs: 5_000 });
 		try {
-			await expect(transport.start()).rejects.toThrow(/protocol_version.*Upgrade omp/s);
+			await expect(transport.start()).rejects.toThrow(/hello rejected: legacy binary.*upgrade omp/s);
 		} finally {
 			transport.stop();
 			await fake.cleanup();
 		}
 	});
 
-	test("rejects a future protocol_version 2 ready frame", async () => {
-		const fake = await createFakeRpc(READY_V2);
-		const transport = new RpcTransport({ ompPath: fake.path, readyTimeoutMs: 5_000 });
+	test("rejects a hello_ack with an incompatible protocolVersion", async () => {
+		const fake = await createFakeWire(respondThenExit(HELLO_ACK_BAD_VERSION));
+		const transport = new WireTransport({ ompPath: fake.path, readyTimeoutMs: 5_000 });
 		try {
-			await expect(transport.start()).rejects.toThrow(/protocol_version 2/);
+			await expect(transport.start()).rejects.toThrow(/Incompatible wire protocol version: 0/);
 		} finally {
 			transport.stop();
 			await fake.cleanup();

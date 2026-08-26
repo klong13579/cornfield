@@ -66,7 +66,7 @@ afterEach(() => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════
-// Fake RPC scripts
+// Fake wire scripts
 // ═══════════════════════════════════════════════════════════════════════
 
 /** OMP child that receives the prompt but never emits any session events
@@ -76,7 +76,26 @@ afterEach(() => {
  *  Also handles `switch_session` and `set_model` so the bridge's
  *  pre-prompt commands don't hang. */
 const LONG_INACTIVE_SCRIPT = `#!/usr/bin/env bun
-process.stdout.write(JSON.stringify({ type: "ready", protocol_version: 1 }) + "\\n");
+function emit(value) {
+    process.stdout.write(JSON.stringify(value) + "\\n");
+}
+async function handleFrame(frame) {
+    if (frame.type === "hello") {
+        emit({ type: "hello_ack", connectionId: "long-inactive", protocolVersion: 1 });
+        return;
+    }
+    if (frame.type !== "request") return;
+    const cmd = frame.command;
+    if (cmd.type === "switch_session") {
+        emit({ type: "response", id: frame.id, ok: true, result: { cancelled: false } });
+    } else if (cmd.type === "set_model") {
+        emit({ type: "response", id: frame.id, ok: true });
+    } else if (cmd.type === "prompt") {
+        emit({ type: "response", id: frame.id, ok: true });
+    } else if (cmd.type === "abort") {
+        emit({ type: "response", id: frame.id, ok: true });
+    }
+}
 let buffer = "";
 for await (const chunk of Bun.stdin.stream()) {
     buffer += new TextDecoder().decode(chunk);
@@ -84,18 +103,7 @@ for await (const chunk of Bun.stdin.stream()) {
     while (index !== -1) {
         const line = buffer.slice(0, index).trim();
         buffer = buffer.slice(index + 1);
-        if (line) {
-            const frame = JSON.parse(line);
-            if (frame.type === "switch_session") {
-                process.stdout.write(JSON.stringify({ type: "response", id: frame.id, command: "switch_session", success: true, data: { cancelled: false } }) + "\\n");
-            } else if (frame.type === "set_model") {
-                process.stdout.write(JSON.stringify({ type: "response", id: frame.id, command: "set_model", success: true }) + "\\n");
-            } else if (frame.type === "prompt") {
-                process.stdout.write(JSON.stringify({ type: "response", id: frame.id, command: "prompt", success: true }) + "\\n");
-            } else if (frame.type === "abort") {
-                process.stdout.write(JSON.stringify({ type: "response", id: frame.id, command: "abort", success: true }) + "\\n");
-            }
-        }
+        if (line) await handleFrame(JSON.parse(line));
         index = buffer.indexOf("\\n");
     }
 }
@@ -105,7 +113,25 @@ for await (const chunk of Bun.stdin.stream()) {
  *  an OMP child crash mid-prompt. The transport's `proc.exited` promise
  *  resolves, which fires the transport's `disconnected` event. */
 const CRASH_MID_PROMPT_SCRIPT = `#!/usr/bin/env bun
-process.stdout.write(JSON.stringify({ type: "ready", protocol_version: 1 }) + "\\n");
+function emit(value) {
+    process.stdout.write(JSON.stringify(value) + "\\n");
+}
+async function handleFrame(frame) {
+    if (frame.type === "hello") {
+        emit({ type: "hello_ack", connectionId: "crash-mid-prompt", protocolVersion: 1 });
+        return;
+    }
+    if (frame.type !== "request") return;
+    const cmd = frame.command;
+    if (cmd.type === "switch_session") {
+        emit({ type: "response", id: frame.id, ok: true, result: { cancelled: false } });
+    } else if (cmd.type === "set_model") {
+        emit({ type: "response", id: frame.id, ok: true });
+    } else if (cmd.type === "prompt") {
+        emit({ type: "response", id: frame.id, ok: true });
+        process.exit(1);
+    }
+}
 let buffer = "";
 for await (const chunk of Bun.stdin.stream()) {
     buffer += new TextDecoder().decode(chunk);
@@ -113,17 +139,7 @@ for await (const chunk of Bun.stdin.stream()) {
     while (index !== -1) {
         const line = buffer.slice(0, index).trim();
         buffer = buffer.slice(index + 1);
-        if (line) {
-            const frame = JSON.parse(line);
-            if (frame.type === "switch_session") {
-                process.stdout.write(JSON.stringify({ type: "response", id: frame.id, command: "switch_session", success: true, data: { cancelled: false } }) + "\\n");
-            } else if (frame.type === "set_model") {
-                process.stdout.write(JSON.stringify({ type: "response", id: frame.id, command: "set_model", success: true }) + "\\n");
-            } else if (frame.type === "prompt") {
-                process.stdout.write(JSON.stringify({ type: "response", id: frame.id, command: "prompt", success: true }) + "\\n");
-                process.exit(1);
-            }
-        }
+        if (line) await handleFrame(JSON.parse(line));
         index = buffer.indexOf("\\n");
     }
 }
@@ -132,7 +148,31 @@ for await (const chunk of Bun.stdin.stream()) {
 /** OMP child that emits a normal response — used to test the handler-throw
  *  path (Test 4) where the RPC works fine but a registered handler throws. */
 const NORMAL_RESPONSE_SCRIPT = `#!/usr/bin/env bun
-process.stdout.write(JSON.stringify({ type: "ready", protocol_version: 1 }) + "\\n");
+function emit(value) {
+    process.stdout.write(JSON.stringify(value) + "\\n");
+}
+function pushEvent(event) {
+    emit({ type: "push", event: { type: "progress", sessionId: "s1", event } });
+}
+async function handleFrame(frame) {
+    if (frame.type === "hello") {
+        emit({ type: "hello_ack", connectionId: "normal", protocolVersion: 1 });
+        return;
+    }
+    if (frame.type !== "request") return;
+    const cmd = frame.command;
+    if (cmd.type === "switch_session") {
+        emit({ type: "response", id: frame.id, ok: true, result: { cancelled: false } });
+    } else if (cmd.type === "set_model") {
+        emit({ type: "response", id: frame.id, ok: true });
+    } else if (cmd.type === "prompt") {
+        emit({ type: "response", id: frame.id, ok: true });
+        setTimeout(() => {
+            pushEvent({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "ok" }] } });
+            pushEvent({ type: "agent_end" });
+        }, 10);
+    }
+}
 let buffer = "";
 for await (const chunk of Bun.stdin.stream()) {
     buffer += new TextDecoder().decode(chunk);
@@ -140,20 +180,7 @@ for await (const chunk of Bun.stdin.stream()) {
     while (index !== -1) {
         const line = buffer.slice(0, index).trim();
         buffer = buffer.slice(index + 1);
-        if (line) {
-            const frame = JSON.parse(line);
-            if (frame.type === "switch_session") {
-                process.stdout.write(JSON.stringify({ type: "response", id: frame.id, command: "switch_session", success: true, data: { cancelled: false } }) + "\\n");
-            } else if (frame.type === "set_model") {
-                process.stdout.write(JSON.stringify({ type: "response", id: frame.id, command: "set_model", success: true }) + "\\n");
-            } else if (frame.type === "prompt") {
-                process.stdout.write(JSON.stringify({ type: "response", id: frame.id, command: "prompt", success: true }) + "\\n");
-                setTimeout(() => {
-                    process.stdout.write(JSON.stringify({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "ok" }] } }) + "\\n");
-                    process.stdout.write(JSON.stringify({ type: "agent_end" }) + "\\n");
-                }, 10);
-            }
-        }
+        if (line) await handleFrame(JSON.parse(line));
         index = buffer.indexOf("\\n");
     }
 }
@@ -239,8 +266,17 @@ describe("Gateway crash repro: 2026-07-09 14:32", () => {
 			// Streaming watchdog should have fired within 2s
 			expect(elapsed).toBeLessThan(2_000);
 
-			// Bridge must still be running
-			expect(bridge.isRunning).toBe(true);
+			// Bridge must still be running after the watchdog abort. Since the
+			// watchdog-abort path now rebuilds the transport asynchronously
+			// (process-level self-heal), there is a brief not-ready window while
+			// the old zombie subprocess is killed and the replacement handshakes.
+			// Poll for up to 10s — the end state must be a running bridge.
+			let running = false;
+			for (let i = 0; i < 50 && !running; i++) {
+				running = bridge.isRunning;
+				if (!running) await Bun.sleep(200);
+			}
+			expect(running).toBe(true);
 
 			// No leaked errors — this is the root-cause assertion
 			expect(uncaughtExceptions).toHaveLength(0);

@@ -1,14 +1,5 @@
-import { loadNotifyPrefs, notifyGuarded } from "../lib/notifications";
 import type {
-	FsEntryDto,
-	GatewayStatusDto,
-	ListenRecordingDto,
-	McpServerDto,
-	PiClient,
-	RemoteSkillItemDto,
-} from "../lib/pi-client-api";
-import type { BranchPoint, PlaybackEntry, SessionRecordSummary } from "../lib/records";
-import type { AgentInfoDto,
+	AgentInfoDto,
 	AvailableModelsDto,
 	CronLogEntryDto,
 	DashboardStatsDto,
@@ -27,7 +18,18 @@ import type { AgentInfoDto,
 	StatsPeriodDto,
 	TaskRowDto,
 	TodoPhaseDto,
-	WireServerEventDto, } from "@oh-my-pi/pi-wire"
+	WireServerEventDto,
+} from "@oh-my-pi/pi-wire";
+import { loadNotifyPrefs, notifyGuarded } from "../lib/notifications";
+import type {
+	FsEntryDto,
+	GatewayStatusDto,
+	ListenRecordingDto,
+	McpServerDto,
+	PiClient,
+	RemoteSkillItemDto,
+} from "../lib/pi-client-api";
+import type { BranchPoint, PlaybackEntry, SessionRecordSummary } from "../lib/records";
 import { createClient } from "./client";
 import { type ServeConnectionConfig, saveServeConfig } from "./pi-client-adapter";
 

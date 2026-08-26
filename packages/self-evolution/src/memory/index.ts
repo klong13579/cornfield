@@ -1534,6 +1534,18 @@ async function runStage1JobWithFallback(options: {
 	const result = await runStage1Job(options);
 	if (result.kind === "output") return result;
 
+	// Rollout file missing = data inconsistency (thread references a file that is
+	// gone). Hard-fail instead of falling back: rule-based extraction reads the
+	// same file and would silently produce an empty "successful" result, hiding
+	// the data loss (issue #846).
+	if (result.kind === "failed" && /ENOENT/.test(result.reason)) {
+		logger.error("Stage1 rollout file missing", {
+			threadId: options.claim.threadId,
+			reason: result.reason,
+		});
+		return result;
+	}
+
 	// Fallback to rule-based extraction
 	logger.warn("Stage1 LLM failed, using fallback", {
 		threadId: options.claim.threadId,

@@ -13,12 +13,12 @@
 
 import * as path from "node:path";
 import { isEnoent, logger } from "@oh-my-pi/pi-utils";
-import { type AgentEvent, RpcTransport, RpcTransportError, type RpcTransportEvent } from "./agent-transport";
+import { type AgentEvent, type RpcTransportEvent, WireTransport, WireTransportError } from "./agent-transport-wire";
 import { CircuitBreaker, type CircuitState } from "./circuit-breaker";
 import { CrashRecovery } from "./crash-recovery";
 import { PromptExtractor } from "./prompt-extractor";
 import { PromptQueue } from "./prompt-queue";
-import { extractAssistantError, extractAssistantText, ResponseMetaBuilder } from "./response-meta";
+import { extractAssistantError, extractAssistantText, friendlyLlmError, ResponseMetaBuilder } from "./response-meta";
 import { clearRestartSentinel, writeRestartSentinel } from "./restart-sentinel";
 import type { AgentResponseMeta, InboundMessage, SessionRecord } from "./types";
 
@@ -127,7 +127,7 @@ export type { AgentEvent };
 import type { ForwardStreamHandlers } from "./agent-bridge-types";
 
 export class AgentBridge {
-	#transport: RpcTransport;
+	#transport: WireTransport;
 	#queue: PromptQueue;
 	#extractor: PromptExtractor;
 	/** Set when `abort()` is called, so `forwardWithMeta` can distinguish an
@@ -183,7 +183,7 @@ export class AgentBridge {
 			disabled: thresholdMs <= 0,
 		});
 
-		this.#transport = new RpcTransport({
+		this.#transport = new WireTransport({
 			ompPath: options.ompPath,
 			model: options.model,
 			cwd: options.cwd,
@@ -326,7 +326,7 @@ export class AgentBridge {
 			this.#recordCrash(
 				`bridge.start() failed: ${err instanceof Error ? err.message : String(err)}`,
 				exitCode ? Number(exitCode) : undefined,
-				err instanceof RpcTransportError ? err.stderrTail : undefined,
+				err instanceof WireTransportError ? err.stderrTail : undefined,
 			);
 			this.#lastError = err instanceof Error ? err.message : String(err);
 			throw err;
@@ -675,6 +675,21 @@ export class AgentBridge {
 						accountId: this.#accountId,
 						conversationId: msg.conversationId,
 					});
+					// Process-level self-heal: a stalled prompt means the rpc subprocess
+					// is unresponsive (dead TCP / stuck model call / wedged loop). Aborting
+					// the request alone leaves the zombie process serving the NEXT message
+					// too — observed 2026-08-26 (me account: every subsequent prompt hit the
+					// same watchdog until a manual gateway restart). Rebuild the transport so
+					// the next message gets a fresh subprocess. Fire-and-forget: the queue
+					// drains this request now; restart takes seconds while IM messages
+					// arrive minutes apart, so the rebuild lands first in practice.
+					void this.#restartTransport().catch(restartErr => {
+						logger.error("Transport rebuild after streaming-watchdog abort failed", {
+							accountId: this.#accountId,
+							error: restartErr instanceof Error ? restartErr.message : String(restartErr),
+						});
+						this.#circuit.recordFailure();
+					});
 					return this.#metaBuilder.fallback("系统繁忙：LLM 长时间无响应，请重试上一条消息。", startedAt, {
 						aborted: true,
 					});
@@ -689,7 +704,14 @@ export class AgentBridge {
 					const agentError = extractAssistantError(events);
 					if (agentError) {
 						logger.warn("Agent returned error", { errorMessage: agentError.errorMessage });
-						return this.#metaBuilder.fallback(`LLM 请求失败：${agentError.errorMessage}`, startedAt);
+						// Internal retry/fallback machinery text (auto-retry chains, model
+						// fallback transitions, provider error bodies mentioning retries)
+						// is mechanism-speak the IM user cannot act on — and the raw
+						// provider error body may carry the upstream gateway's internal
+						// wording verbatim. Keep the full diagnostic in logs; give the
+						// user a stable, actionable message.
+						const friendly = friendlyLlmError(agentError.errorMessage);
+						return this.#metaBuilder.fallback(`LLM 请求失败：${friendly}`, startedAt);
 					}
 					logger.warn("Agent returned empty response");
 					return this.#metaBuilder.fallback("（Agent 未返回内容）", startedAt);

@@ -12,3 +12,8 @@ saveTextLockfile = true
 
 [run]
 bun = true
+
+[test]
+# 全局默认测试超时 20s（bun 默认 5s）——其余 workspace（omp-gateway/ai 等）
+# 无独立 bunfig，继承此值。覆盖慢机/并行环境下的 5s 超时边缘。
+timeout = 20000

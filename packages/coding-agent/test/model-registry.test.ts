@@ -235,8 +235,23 @@ describe("ModelRegistry", () => {
 			});
 
 			const registry = new ModelRegistry(authStorage, modelsJsonPath);
-			const opusVariants = registry.getCanonicalVariants("claude-opus-4-7");
-			const haikuVariants = registry.getCanonicalVariants("claude-haiku-4-5");
+
+			// Resolve the canonical family dynamically — the "best upstream" family
+			// id comes from the bundled models (e.g. claude-opus-4-6 / 4.8 depending
+			// on the bundled catalog), so the assertion must not pin a version.
+			const opusDemo = registry.getAll().find(m => m.provider === "demo" && m.id === "anthropic/claude-opus-latest");
+			expect(opusDemo).toBeDefined();
+			const opusCanonicalId = registry.getCanonicalId(opusDemo!);
+			expect(opusCanonicalId).toMatch(/^claude-opus-/);
+			const haikuDemo = registry
+				.getAll()
+				.find(m => m.provider === "demo" && m.id === "anthropic/claude-haiku-latest");
+			expect(haikuDemo).toBeDefined();
+			const haikuCanonicalId = registry.getCanonicalId(haikuDemo!);
+			expect(haikuCanonicalId).toMatch(/^claude-haiku-/);
+
+			const opusVariants = registry.getCanonicalVariants(opusCanonicalId!);
+			const haikuVariants = registry.getCanonicalVariants(haikuCanonicalId!);
 
 			expect(opusVariants.some(variant => variant.selector === "demo/anthropic/claude-opus-latest")).toBe(true);
 			expect(haikuVariants.some(variant => variant.selector === "demo/anthropic/claude-haiku-latest")).toBe(true);

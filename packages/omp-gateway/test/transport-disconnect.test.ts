@@ -1,5 +1,5 @@
 /**
- * RpcTransport disconnected-event emission.
+ * WireTransport disconnected-event emission.
  *
  * Plan v2 Fix B: after the subprocess reaches `ready` and then exits, the
  * transport must emit `{type: "disconnected"}` so the bridge can record
@@ -16,22 +16,23 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { RpcTransport, type RpcTransportEvent } from "../src/agent-transport";
+import { type RpcTransportEvent, WireTransport } from "../src/agent-transport-wire";
 
 let tmpDir: string;
 
 const SCRIPT_CRASH_AFTER_READY = `#!/usr/bin/env bun
-process.stdout.write(JSON.stringify({ type: "ready", protocol_version: 1 }) + "\\n");
+// Wire handshake: reply hello_ack, then crash shortly after ready.
+process.stdout.write(JSON.stringify({ type: "hello_ack", connectionId: "fake", protocolVersion: 1 }) + "\\n");
 setTimeout(() => process.exit(7), 50);
 `;
 
 const SCRIPT_CRASH_BEFORE_READY = `#!/usr/bin/env bun
-// Exit immediately, never emit ready.
+// Exit immediately, never emit hello_ack.
 process.exit(9);
 `;
 
 const SCRIPT_NEVER_READY = `#!/usr/bin/env bun
-// Stay alive but never emit ready.
+// Stay alive but never emit hello_ack.
 setInterval(() => {}, 1000);
 `;
 
@@ -50,10 +51,10 @@ afterEach(async () => {
 	await fs.rm(tmpDir, { recursive: true, force: true });
 });
 
-describe("RpcTransport disconnected event", () => {
+describe("WireTransport disconnected event", () => {
 	test("emits disconnected after subprocess exits post-ready", async () => {
 		const scriptPath = await writeScript(SCRIPT_CRASH_AFTER_READY);
-		const transport = new RpcTransport({ ompPath: scriptPath, readyTimeoutMs: 5_000 });
+		const transport = new WireTransport({ ompPath: scriptPath, readyTimeoutMs: 5_000 });
 		const events: RpcTransportEvent[] = [];
 		transport.onEvent(e => events.push(e));
 		await transport.start();
@@ -69,10 +70,10 @@ describe("RpcTransport disconnected event", () => {
 
 	test("pre-ready exit rejects start() with before-ready error (no disconnected emit during start)", async () => {
 		const scriptPath = await writeScript(SCRIPT_CRASH_BEFORE_READY);
-		const transport = new RpcTransport({ ompPath: scriptPath, readyTimeoutMs: 5_000 });
+		const transport = new WireTransport({ ompPath: scriptPath, readyTimeoutMs: 5_000 });
 		const events: RpcTransportEvent[] = [];
 		transport.onEvent(e => events.push(e));
-		await expect(transport.start()).rejects.toThrow(/exited with code 9 before ready/);
+		await expect(transport.start()).rejects.toThrow(/exited with code 9 before hello_ack/);
 		// No disconnected event is expected from the start() promise — the
 		// pre-ready path is handled via rejection. The exit handler in
 		// `#spawnAndWaitReady` does skip the emit when not yet ready.
@@ -81,14 +82,14 @@ describe("RpcTransport disconnected event", () => {
 
 	test("subprocess that never reaches ready hits readyTimeoutMs", async () => {
 		const scriptPath = await writeScript(SCRIPT_NEVER_READY);
-		const transport = new RpcTransport({ ompPath: scriptPath, readyTimeoutMs: 200 });
-		await expect(transport.start()).rejects.toThrow(/timed out waiting for ready/);
+		const transport = new WireTransport({ ompPath: scriptPath, readyTimeoutMs: 200 });
+		await expect(transport.start()).rejects.toThrow(/timed out waiting for hello_ack/);
 		await transport.stop();
 	});
 
 	test("transport cleanup wipes proc and stdinWriter after post-ready crash", async () => {
 		const scriptPath = await writeScript(SCRIPT_CRASH_AFTER_READY);
-		const transport = new RpcTransport({ ompPath: scriptPath, readyTimeoutMs: 5_000 });
+		const transport = new WireTransport({ ompPath: scriptPath, readyTimeoutMs: 5_000 });
 		await transport.start();
 		await Bun.sleep(200);
 		// After disconnect, the writer is cleared — sendFrame throws a

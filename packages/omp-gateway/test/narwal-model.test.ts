@@ -3,15 +3,16 @@
  *
  * Tests that:
  * 1. omp can be spawned with --model narwal-plan/minimax-m3
- * 2. It sends a ready signal
+ * 2. It completes the wire hello handshake (hello → hello_ack)
  * 3. It can process a simple prompt and return a response
  */
 import { describe, expect, test } from "bun:test";
+import { MULTIDEVICE_PROTOCOL_VERSION } from "@oh-my-pi/pi-wire";
 
-const RPC_READY = '"type":"ready"';
+const WIRE_HELLO_ACK = '"type":"hello_ack"';
 
-function spawnRpc(model?: string) {
-	const args = ["--mode", "rpc"];
+function spawnWire(model?: string) {
+	const args = ["--mode", "wire-stdio"];
 	if (model) args.push("--model", model);
 	return Bun.spawn(["omp", ...args], {
 		stdin: "pipe",
@@ -22,26 +23,33 @@ function spawnRpc(model?: string) {
 }
 
 describe("Gateway with narwal-plan/minimax-m3 model", () => {
-	test("omp spawns with the new model and sends ready", async () => {
-		const proc = spawnRpc("narwal-plan/minimax-m3");
+	test("omp spawns with the new model and completes the wire hello handshake", async () => {
+		const proc = spawnWire("narwal-plan/minimax-m3");
 		try {
+			// wire-stdio only answers hello_ack after receiving the hello frame
+			// (rpc parity: the ready frame was emitted proactively).
+			proc.stdin.write(
+				new TextEncoder().encode(
+					`${JSON.stringify({ type: "hello", version: MULTIDEVICE_PROTOCOL_VERSION, token: "test" })}\n`,
+				),
+			);
 			const reader = proc.stdout.getReader();
 			const decoder = new TextDecoder();
 			let buffer = "";
-			let gotReady = false;
+			let gotHelloAck = false;
 
 			const timeout = setTimeout(() => proc.kill(), 15_000);
 
-			while (!gotReady) {
+			while (!gotHelloAck) {
 				const { done, value } = await reader.read();
 				if (done) break;
 				buffer += decoder.decode(value, { stream: true });
-				if (buffer.includes(RPC_READY)) {
-					gotReady = true;
+				if (buffer.includes(WIRE_HELLO_ACK)) {
+					gotHelloAck = true;
 				}
 			}
 			clearTimeout(timeout);
-			expect(gotReady).toBe(true);
+			expect(gotHelloAck).toBe(true);
 		} finally {
 			proc.kill();
 		}

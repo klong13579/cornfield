@@ -411,7 +411,7 @@ const filemapAccuracy: MeceRule = {
 		if (!agents) return [];
 		const violations: MeceViolation[] = [];
 		// Extract paths from File Map table rows
-		const tableRowRe = /^\|\s*`([^`]+)`\s*\|/;
+		const tableRowRe = /^\|{1,2}\s*`([^`]+)`\s*\|/;
 		const lines = linesOf(agents);
 		let inFileMap = false;
 		for (let i = 0; i < lines.length; i++) {

@@ -27,6 +27,9 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import { type AssistantMessage, getBundledModel, type TextContent } from "@oh-my-pi/pi-ai";
 
+// Requires real provider auth; skip when no key is configured (e.g. CI runners).
+const hasAlibabaKey = Boolean(process.env.ALIBABA_CODING_PLAN_API_KEY || process.env.ALIBABA_API_KEY);
+
 const PROMPT = "为什么一直在重复输出：All 78 channel tests pass. Run biome + related. （请直接回答，不要重复）";
 
 function extractText(message: AssistantMessage): string {
@@ -36,7 +39,7 @@ function extractText(message: AssistantMessage): string {
 		.join("");
 }
 
-describe("doom-loop recovery: real LLM (143736 prompt)", () => {
+describe.skipIf(!hasAlibabaKey)("doom-loop recovery: real LLM (143736 prompt)", () => {
 	let agent: Agent | undefined;
 	const events: Array<{ type: string; message?: unknown }> = [];
 
