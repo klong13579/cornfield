@@ -17,6 +17,7 @@ import type { ModelSwitch } from "./gateway-model-switch";
 import type { NewSessionHandler } from "./gateway-new-session";
 import type { ResponseHandler } from "./gateway-response";
 import type { SkillCommand } from "./gateway-skills";
+import { appendRequestAudit } from "./request-audit";
 import type { RobotContextWriter } from "./robot-context";
 import { createCronTaskFromMessage } from "./scheduler/from-message";
 import type { SessionManager } from "./session-manager";
@@ -167,20 +168,27 @@ export class MessageHandler {
 			// one-shot — consumed here, not carried to the next message.
 			await this.#deps.skillCommand.applyPendingSkillContext(msg, accountId, msg.conversationId);
 
-			const usedCard = await this.#deps.responseHandler.tryStreamAgentResponse(
+			const usedCardMeta = await this.#deps.responseHandler.tryStreamAgentResponse(
 				msg,
 				session,
 				accountId,
 				channel,
 				this.#deps.sessionManager,
 			);
-			if (!usedCard) {
-				await this.#deps.responseHandler.sendAgentResponseViaV1Markdown(
+			let meta = usedCardMeta;
+			if (!usedCardMeta) {
+				meta = await this.#deps.responseHandler.sendAgentResponseViaV1Markdown(
 					msg,
 					session,
 					accountId,
 					this.#deps.sessionManager,
 				);
+			}
+
+			// Request audit — one JSONL line per user request, in the account's own workspace.
+			const agentDir = this.#deps.accountAgentDirs.get(accountId);
+			if (agentDir) {
+				await appendRequestAudit(agentDir, msg, meta);
 			}
 
 			if (this.#deps.store && session) {

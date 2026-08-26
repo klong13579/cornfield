@@ -2,7 +2,8 @@
 
 ## [Unreleased]
 
-- **Added: `omp-gateway robot-context probe` — active robot×group membership probe** (`src/robot-probe.ts`, `src/commands/gateway.ts`, `src/cli.ts`): passive discovery (write-through on @-mentions) only learns groups where a robot has already been mentioned. The probe enumerates the user's groups via the `dws` CLI, queries DingTalk's `/v1.0/robot/groups/robots/query` for each (using the first gateway account token that has the `qyapi_chat_manage` permission — the API answers for ALL robots in a group, not just the token's own), then upserts discovered (robot, group) pairs into the sessions table and refreshes each affected account's `robot-context.md`. Supports `--dry-run`. This closes the gap where a robot added to a group (but never @-mentioned) was invisible to its agent. Test: `test/robot-probe.test.ts`.
+- **Added: per-agent request audit log** (`src/request-audit.ts`, `src/gateway-response.ts`, `src/gateway-message.ts`): every user request (DM or group @-mention) to any IM agent is now appended as one JSONL line to `<agentDir>/logs/requests.jsonl` — sender, senderId, request text (truncated to 500 chars), status (`ok`/`error`/`aborted`), errorType (`repetitive_tool_calls`/`timeout`/`llm_error`/`fallback`/`no_response`/…), durationMs, model, group title. `tryStreamAgentResponse` and `sendAgentResponseViaV1Markdown` now return the `AgentResponseMeta` (previously void/boolean) so the message handler can audit the outcome; follow-up dispatch audits via a marker meta. The file lives in the agent's own workspace so agents can read their own history on demand; it is deliberately NOT registered in prompt-includes. Audit writes never throw on the reply path. Test: `test/request-audit.test.ts`.
+
 
 
 ## [0.19.0] - 2026-08-21
