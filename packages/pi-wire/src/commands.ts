@@ -65,23 +65,53 @@ export type MultiplexCommand =
 	| { id?: string; type: "abort"; sessionId?: string }
 	| { id?: string; type: "abort_and_prompt"; sessionId?: string; message: string; images?: ImageContent[] }
 	| { id?: string; type: "new_session"; sessionId?: string; parentSession?: string }
+	// P3：用户消息/自定义消息（不经 LLM 转发的直接入队）
+	| { id?: string; type: "send_user_message"; sessionId?: string; message: string }
+	| {
+			id?: string;
+			type: "send_custom_message";
+			sessionId?: string;
+			customType: string;
+			content: string | Array<{ type: "text"; text: string } | ImageContent>;
+			display?: boolean;
+	  }
 	// State
 	| { id?: string; type: "get_state"; sessionId?: string }
 	| { id?: string; type: "set_todos"; sessionId?: string; phases: WireTodoPhase[] }
 	| { id?: string; type: "set_host_tools"; sessionId?: string; tools: WireHostToolDefinition[] }
+	// P3：TUI 工具开关（set_active_tools）与注册表刷新
+	| { id?: string; type: "set_active_tools"; sessionId?: string; toolNames: string[] }
 	// Model
 	| { id?: string; type: "set_model"; sessionId?: string; provider: string; modelId: string }
+	| { id?: string; type: "set_model_temporary"; sessionId?: string; provider: string; modelId: string; thinkingLevel?: ThinkingLevel }
 	| { id?: string; type: "cycle_model"; sessionId?: string }
 	| { id?: string; type: "get_available_models"; sessionId?: string }
+	| { id?: string; type: "get_available_thinking_levels"; sessionId?: string }
+	| { id?: string; type: "cycle_role_models"; sessionId?: string; roleOrder: string[] }
 	// Thinking
 	| { id?: string; type: "set_thinking_level"; sessionId?: string; level: ThinkingLevel }
 	| { id?: string; type: "cycle_thinking_level"; sessionId?: string }
+	// P3：plan mode 状态与上下文
+	| { id?: string; type: "set_plan_mode"; sessionId?: string; enabled: boolean; planFilePath?: string }
+	| { id?: string; type: "send_plan_mode_context"; sessionId?: string }
+	| { id?: string; type: "set_plan_reference"; sessionId?: string; path: string; markSent: boolean }
+	| { id?: string; type: "set_slash_commands"; sessionId?: string; commands: Array<{ name: string; description: string; content: string; source?: string }> }
 	// Compaction
 	| { id?: string; type: "compact"; sessionId?: string; customInstructions?: string }
 	| { id?: string; type: "set_auto_compaction"; sessionId?: string; enabled: boolean }
+	| { id?: string; type: "abort_compaction"; sessionId?: string }
+	| { id?: string; type: "abort_branch_summary"; sessionId?: string }
+	| { id?: string; type: "run_idle_compaction"; sessionId?: string }
 	// Retry
 	| { id?: string; type: "set_auto_retry"; sessionId?: string; enabled: boolean }
 	| { id?: string; type: "abort_retry"; sessionId?: string }
+	// P3：会话控制
+	| { id?: string; type: "reload"; sessionId?: string }
+	| { id?: string; type: "handoff"; sessionId?: string; customInstructions?: string }
+	| { id?: string; type: "run_ephemeral_turn"; sessionId?: string; message: string }
+	// Bash/Python（P2 加 bash/abort_bash；P3 补 python 对）
+	| { id?: string; type: "execute_python"; sessionId?: string; code: string }
+	| { id?: string; type: "abort_python"; sessionId?: string }
 	// Session
 	| { id?: string; type: "get_session_stats"; sessionId?: string }
 	/**

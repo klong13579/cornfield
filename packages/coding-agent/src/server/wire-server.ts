@@ -700,6 +700,121 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 					done({ snapshot: attached.store.getSnapshot() });
 					break;
 				}
+				// ── P3：TUI 交互命令（wire 面补齐） ──
+				case "send_user_message": {
+					await session.sendUserMessage(command.message);
+					sessionDone();
+					break;
+				}
+				case "send_custom_message": {
+					await session.sendCustomMessage({
+						customType: command.customType,
+						content: command.content,
+						display: command.display ?? false,
+					});
+					sessionDone();
+					break;
+				}
+				case "set_active_tools": {
+					await session.setActiveToolsByName(command.toolNames);
+					sessionDone({ active: session.getActiveToolNames() });
+					break;
+				}
+				case "set_model_temporary": {
+					const models = session.getAvailableModels();
+					const model = models.find(m => m.provider === command.provider && m.id === command.modelId);
+					if (!model) {
+						fail(`model not found: ${command.provider}/${command.modelId}`);
+						break;
+					}
+					await session.setModelTemporary(model, command.thinkingLevel);
+					sessionDone({ model });
+					break;
+				}
+				case "get_available_thinking_levels": {
+					done({ levels: session.getAvailableThinkingLevels() });
+					break;
+				}
+				case "cycle_role_models": {
+					const result = await session.cycleRoleModels(command.roleOrder);
+					if (!result) {
+						fail("no role models for role order");
+						break;
+					}
+					sessionDone({ model: result.model, thinkingLevel: result.thinkingLevel });
+					break;
+				}
+				case "set_plan_mode": {
+					session.setPlanModeState({
+						enabled: command.enabled,
+						planFilePath: command.planFilePath ?? "",
+					});
+					sessionDone();
+					break;
+				}
+				case "send_plan_mode_context": {
+					await session.sendPlanModeContext();
+					sessionDone();
+					break;
+				}
+				case "set_plan_reference": {
+					session.setPlanReferencePath(command.path);
+					if (command.markSent) session.markPlanReferenceSent();
+					sessionDone();
+					break;
+				}
+				case "set_slash_commands": {
+					session.setSlashCommands(
+						command.commands.map(c => ({
+							name: c.name,
+							description: c.description,
+							content: c.content,
+							source: c.source ?? "wire",
+						})),
+					);
+					sessionDone();
+					break;
+				}
+				case "abort_compaction": {
+					session.abortCompaction();
+					sessionDone();
+					break;
+				}
+				case "abort_branch_summary": {
+					session.abortBranchSummary();
+					sessionDone();
+					break;
+				}
+				case "run_idle_compaction": {
+					await session.runIdleCompaction();
+					sessionDone();
+					break;
+				}
+				case "reload": {
+					await session.reload();
+					sessionDone();
+					break;
+				}
+				case "handoff": {
+					const result = await session.handoff(command.customInstructions);
+					sessionDone({ result });
+					break;
+				}
+				case "run_ephemeral_turn": {
+					await session.runEphemeralTurn({ promptText: command.message });
+					sessionDone();
+					break;
+				}
+				case "execute_python": {
+					const result = await session.executePython(command.code);
+					sessionDone(result);
+					break;
+				}
+				case "abort_python": {
+					session.abortPython();
+					sessionDone();
+					break;
+				}
 				case "get_state": {
 					done(buildRpcState(session, attached.store, await buildEnvironmentSummary(registry)));
 					break;
