@@ -76,9 +76,13 @@ export class CommandController {
 		}
 	}
 
-	handleDumpCommand() {
+	async handleDumpCommand(): Promise<void> {
 		try {
-			const formatted = this.ctx.session.formatSessionAsText();
+			let formatted = this.ctx.session.formatSessionAsText();
+			if (this.ctx.wireClient) {
+				const res = await this.ctx.wireClient.sendCommand({ type: "format_session_as_text" });
+				if (res.ok) formatted = (res as { ok: true; result: { text: string } }).result.text;
+			}
 			if (!formatted) {
 				this.ctx.showError("No messages to dump yet.");
 				return;

@@ -7196,6 +7196,7 @@ export class AgentSession {
 	 * Format the entire session as plain text for clipboard export.
 	 * Includes user messages, assistant text, thinking blocks, tool calls, and tool results.
 	 */
+	/** @internal TUI /dump 导出（P3 收窄：wire 面见 format_session_as_text）。 */
 	formatSessionAsText(): string {
 		return formatSessionDumpText({
 			messages: this.messages,
