@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **交接物改为集成分支 + diff 预览，用户确认后自动合并到 base 并清理** (`SKILL.md`): Phase 3 步骤 4 交接物从 N 个原始分支名改为已验证通过的集成分支（`<squadId>-integ`）完整 diff 预览 + 整体验证结果；步骤 5 改为「合并与清理」，用户说「合吧」后父自动合并到 base、关 agent、删 worktree、归档一次完成。清理权限同步更新。
+
 ### Added
 
 - **新增 high 模型档位** (`SKILL.md`, `scripts/bootstrap.ts`): `narwal-plan/glm-5.3` 作为 `high` 档（重任务/复杂重构使用），子任务 `modelTier` 可选 cheap | mid | high。

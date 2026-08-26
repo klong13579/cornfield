@@ -200,7 +200,7 @@ export async function executeScheduledCommand(
 			// process may already be gone
 		}
 		return (
-			(await Promise.race([execPromise, Bun.sleep(1000).then(() => null)])) ?? {
+			(await Promise.race([execPromise.catch(() => null), Bun.sleep(1000).then(() => null)])) ?? {
 				exitCode: 124,
 				output,
 				stderr,

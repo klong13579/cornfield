@@ -16,18 +16,10 @@ class MockTerminal implements Terminal {
 	rows = 24;
 	kittyProtocolActive = false;
 	appearance: TerminalAppearance | undefined = undefined;
-	private inputHandler?: (data: string) => void;
-	private resizeHandler?: () => void;
 
-	start(onInput: (data: string) => void, onResize: () => void): void {
-		this.inputHandler = onInput;
-		this.resizeHandler = onResize;
-	}
+	start(_onInput: (data: string) => void, _onResize: () => void): void {}
 	async drainInput(): Promise<void> {}
-	stop(): void {
-		this.inputHandler = undefined;
-		this.resizeHandler = undefined;
-	}
+	stop(): void {}
 	write(_data: string): void {}
 	onAppearanceChange(_cb: (appearance: TerminalAppearance) => void): void {}
 	moveBy(_lines: number): void {}

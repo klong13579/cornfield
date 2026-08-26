@@ -120,6 +120,13 @@ intercom({ action: "reply", to: "planner", message: "Use exponential backoff sta
 
 `reply` still preserves exact threading under the hood by sending the response with the original `replyTo` value.
 
+**Multiple pending asks — verify before replying.** When more than one inbound ask is unanswered (check
+`intercom({ action: "pending" })`), you MUST cross-check the `replyTo` id against the question you are
+answering — the reply command embedded in each incoming message is bound to that message only. Copying
+a reply command from an earlier/historical message sends your answer to the wrong ask: the intended
+sender times out while a stale ask gets a mismatched reply. Rule: answer → find the inbound message
+that asked it → use THAT message's embedded reply command (or `replyTo` id).
+
 ### Pattern 4: Broadcast to Multiple Workers
 
 Send to multiple sessions in parallel:

@@ -26,6 +26,7 @@ const dingtalkAccountConfigSchema = z.object({
 	appKey: z.string().min(1),
 	appSecret: z.string().min(1),
 	robotCode: z.string().optional(),
+	robotName: z.string().optional(),
 	agentDir: z.string().optional(),
 	deniedTools: z.array(z.string()).optional(),
 	/** Legacy fallback only — prefer `<agentDir>/.omp/config.yml`. */

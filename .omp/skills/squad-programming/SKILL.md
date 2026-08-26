@@ -1,6 +1,6 @@
 ---
 name: squad-programming
-version: 0.3.0
+version: 0.4.0
 description: >-
   并行编排：把一个大任务拆成 MECE 子任务，在多个 git worktree 里各起一个子
   omp 并行工作，用 intercom 主从通信做求助与进度汇报。Use when the user wants
@@ -23,7 +23,7 @@ mutating: true
 
 ## Outcome
 
-用户的任务被拆成 MECE 子任务，每个子任务在自己的 worktree（或只读共享区）由独立子 omp 执行；子 omp 通过 intercom 向父求助/汇报；父按任务包的 gate 验证每个子任务并把完成结果（branch + diff 摘要）**交接给用户**；合并代码进 base 由用户自己做；结束后 worktree 清理，任务包归档。
+用户的任务被拆成 MECE 子任务，每个子任务在自己的 worktree（或只读共享区）由独立子 omp 执行；子 omp 通过 intercom 向父求助/汇报；父按任务包的 gate 验证每个子任务并把通过合体验证的集成分支 + diff 预览**交接给用户**；用户确认后父自动合并到 base 分支，清理 worktree 和 agent，归档任务包。
 
 ## 前置条件（不满足则 [blocked]）
 
@@ -196,18 +196,20 @@ bun run .omp/skills/squad-programming/scripts/bootstrap.ts \
    - **冲突处理**：merge 冲突/失败即停（不自动解决、不继续后续分支）——冲突 = 子任务边界侵入，**打回该子任务修**，不在这里打补丁；修好后 `--force` 重建 integration 重来。
    - **验证内容**：每个子任务 gate.verifiers 的并集 + 整体功能冒烟（web → `bun run dev` + 浏览器过一遍受影响页面；CLI → 冒烟命令/端到端）。
    - **打回规则**：整体验证失败 → 定位到回归/冲突的子任务打回，**不使用 integration worktree 当工作区改代码**（它是验证区，改了就没法重来）。
-   - **通过** → 交接清单附 integration 分支与整体验证结果；用户 merge 正式分支后，integration worktree 与分支一并清理（见步骤 5，用户确认才删）。
-4. **交接**：父 agent **不做任何 merge** —— 合并代码进 base 是用户的动作。对每个验证过的子任务整理：branch 名 + diff 摘要 + gate 结果 + 整体验证结论，逐条摆给用户；用户自己 `git merge <branch>`（或打回/丢弃）。
-5. **清理**（每步单独执行、确认 JSON 返回后再下一步，**禁止串行 `&&`**）——顺序铁律：**先关 agent，再删 git worktree，最后归档**。
-   - **① 关 agent（容易漏，本次实测教训）**：子任务的 agent 节点 = herdr 树 workspace（`w57`/`w5A`…），里面跑的 omp 进程**不随 `git worktree remove` 消失**——实测删完 worktree 还残留 7 个 idle omp。逐个 `herdr workspace close <nodeWorkspaceId>`（= 关 pane + 杀进程 + 注销 intercom 会话）；之后验证判据三条：`ps aux | grep "omp --model"` 无残留、`herdr workspace list` 无 linked worktree 节点、`intercom({action:"list"})` 无该 squad 的子会话。
-   - **② 删 worktree + 分支**：`git worktree remove --force <worktree路径>` + `git branch -D <branch>`（用户已确认合并/丢弃）；integration worktree 同法（`.worktrees/<squadId>-integ` + `git branch -D <squadId>-integ`）。
-   - **③ 归档**：任务包移到 `~/.omp/squads/archive/<squadId>/`；清 `/tmp/squad-*.json` bundle。
-   - **④ 还原父 workspace 名**：`herdr workspace rename <父wsId> <原名>`（集结时被 rename 为 squadId）。
+     - **通过** → 进入步骤 4（交接）。
+4. **交接**：父 agent 向用户展示集成分支（`<squadId>-integ`）的完整 diff 预览 + 整体验证结果 + 每个子任务的摘要。用户确认后（说「合吧」/「合并」/「merge」），父 agent 自动执行步骤 5。用户打回/丢弃时，分支和 worktree 保留不动。
+5. **合并与清理**（用户确认后自动执行，每步单独执行、确认 JSON 返回后再下一步，**禁止串行 `&&`**）——顺序铁律：**先合并到 base，再关 agent，再删 git worktree，最后归档**。
+   - **① 合并到 base**：在 integration worktree 内执行 `git checkout <baseBranch> && git merge <squadId>-integ`（必要时代用户 push）。合并失败（冲突等）→ 停止，报告给用户，不继续清理。
+   - **② 关 agent**：子任务的 agent 节点 = herdr 树 workspace（`w57`/`w5A`…），里面跑的 omp 进程**不随 `git worktree remove` 消失**——实测删完 worktree 还残留 7 个 idle omp。逐个 `herdr workspace close <nodeWorkspaceId>`（= 关 pane + 杀进程 + 注销 intercom 会话）；之后验证判据三条：`ps aux | grep "omp --model"` 无残留、`herdr workspace list` 无 linked worktree 节点、`intercom({action:"list"})` 无该 squad 的子会话。
+   - **③ 删 worktree + 分支**：`git worktree remove --force <worktree路径>` + `git branch -D <branch>`（用户已确认合并/丢弃）；integration worktree 同法（`.worktrees/<squadId>-integ` + `git branch -D <squadId>-integ`）。
+   - **④ 归档**：任务包移到 `~/.omp/squads/archive/<squadId>/`；清 `/tmp/squad-*.json` bundle。
+   - **⑤ 还原父 workspace 名**：`herdr workspace rename <父wsId> <原名>`（集结时被 rename 为 squadId）。
+   - 合并完成后通知用户：「已合并到 `<baseBranch>`，已清理。」
 
-**Completion criterion**：每个子任务已验证并交接给用户（branch + 摘要）；用户确认后的分支与 worktree 清理干净；用户看到结果摘要。
+**Completion criterion**：集成分支已验证并交接给用户（diff 预览 + 验证结果）；用户确认后已合并到 base，worktree 和 agent 已清理。
 
 **清理权限（谁不用问你，谁必须等你）**：
-- 用户明确说「合并完了 / 这分支不要了」→ 父 agent 清理该子任务：**先 `herdr workspace close` 关 agent 节点**（非仅 git worktree）→ worktree/分支 → integration；
+- 用户验收通过说「合吧」→ 父 agent 自动执行完整合并与清理流程（合并到 base → 关 agent → 删 worktree/分支 → 归档）；
 - `FAILED` 或用户还没表态 → **不得清理**：worktree/分支/agent 节点全保留（agent 还可能在等用户反馈），等用户拍板；
 - pane close 只在对应子任务已终态（用户已逐条表态后）执行；只要还有待合并/待验的 worktree 在，不关 pane（防止子任务上下文和会话终端被一起回收）。
 

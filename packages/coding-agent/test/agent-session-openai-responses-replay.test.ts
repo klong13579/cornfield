@@ -169,10 +169,11 @@ async function createSessionHarness(
 	options: { provider?: Parameters<typeof getBundledModel>[0]; modelId?: string } = {},
 ): Promise<{ session: AgentSession; authStorage: AuthStorage }> {
 	const { provider = "openai", modelId = "gpt-5-mini" } = options;
-	const [{ createAgentSession }, { Settings }, { AuthStorage }] = await Promise.all([
+	const [{ createAgentSession }, { Settings }, { AuthStorage }, { ModelRegistry }] = await Promise.all([
 		import("@oh-my-pi/pi-coding-agent/sdk"),
 		import("@oh-my-pi/pi-coding-agent/config/settings"),
 		import("@oh-my-pi/pi-coding-agent/session/auth-storage"),
+		import("@oh-my-pi/pi-coding-agent/config/model-registry"),
 	]);
 	const authStorage = await AuthStorage.create(path.join(tempDir, `testauth-${Snowflake.next()}.db`));
 	authStorage.setRuntimeApiKey("openai", "test-key");
@@ -188,6 +189,7 @@ async function createSessionHarness(
 		authStorage,
 		sessionManager,
 		model,
+		modelRegistry: new ModelRegistry(authStorage, path.join(tempDir, "models.yml")),
 		settings: Settings.isolated(),
 		disableExtensionDiscovery: true,
 		skills: [],

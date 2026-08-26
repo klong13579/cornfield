@@ -15,7 +15,9 @@ import { Snowflake } from "@oh-my-pi/pi-utils";
 import { getUnifiedSkillsDir } from "@oh-my-pi/self-evolution/skill-storage";
 
 function memoryDbPath(cwd: string): string {
-	return memoryStorage.resolveMemoryDbPath(cwd, false);
+	// Startup path (runMemoryStartup → getMemoryDb) uses the global evolution
+	// store; the test must seed the same DB for watermark/threads to be visible.
+	return memoryStorage.resolveMemoryDbPath(cwd, true);
 }
 
 interface SessionFixture {
@@ -106,8 +108,10 @@ async function waitFor(assertion: () => Promise<void> | void, timeoutMs = 3000):
 describe("memories runtime", () => {
 	let savedXdgData: string | undefined;
 	let savedXdgState: string | undefined;
+	let savedHome: string | undefined;
+	let isolatedHome: string;
 
-	beforeEach(() => {
+	beforeEach(async () => {
 		vi.clearAllMocks();
 		vi.restoreAllMocks();
 		// Prevent getXdgDataPath/getXdgStatePath from resolving to real user data
@@ -115,12 +119,19 @@ describe("memories runtime", () => {
 		savedXdgState = process.env.XDG_STATE_HOME;
 		process.env.XDG_DATA_HOME = "/nonexistent-xdg-data";
 		process.env.XDG_STATE_HOME = "/nonexistent-xdg-state";
+		// Global evolution store lives at ~/.omp/self-evolution — isolate HOME so the
+		// seeded DB (globalStore=true) never touches the user's real evolution.db.
+		savedHome = process.env.HOME;
+		isolatedHome = await fs.mkdtemp(path.join(os.tmpdir(), "omp-mem-home-"));
+		process.env.HOME = isolatedHome;
 	});
 
 	afterEach(async () => {
 		vi.restoreAllMocks();
 		process.env.XDG_DATA_HOME = savedXdgData;
 		process.env.XDG_STATE_HOME = savedXdgState;
+		process.env.HOME = savedHome!;
+		await fs.rm(isolatedHome, { recursive: true, force: true });
 		for (const dir of createdDirs) {
 			await fs.rm(dir, { recursive: true, force: true });
 		}
@@ -200,7 +211,10 @@ describe("memories runtime", () => {
 						type: "text",
 						text: JSON.stringify({
 							memory_md: "# Memory\n\nConsolidated body",
-							memory_summary: "Consolidated summary",
+							memory_summary:
+								"Consolidated summary. This session covered rollout extraction, raw memory consolidation, and skill discovery." +
+								" Phase2 generates a durable memory file for the agent to inject on future sessions. " +
+								"The summary must exceed the minimum injection length so the LLM path is exercised.",
 							skills: [
 								{
 									name: "deploy-playbook",
@@ -225,10 +239,8 @@ describe("memories runtime", () => {
 
 		const memoryRoot = getMemoryRoot(fx.agentDir, fx.session.sessionManager.getCwd());
 		await waitFor(async () => {
-			expect((await fs.readFile(path.join(memoryRoot, "MEMORY.md"), "utf8")).trim()).toBe(
-				"# Memory\n\nConsolidated body",
-			);
-			expect((await fs.readFile(path.join(memoryRoot, "memory_summary.md"), "utf8")).trim()).toBe(
+			expect(await fs.readFile(path.join(memoryRoot, "MEMORY.md"), "utf8")).toContain("Consolidated body");
+			expect((await fs.readFile(path.join(memoryRoot, "memory_summary.md"), "utf8")).trim()).toContain(
 				"Consolidated summary",
 			);
 			const skillMd = path.join(getUnifiedSkillsDir(fx.session.sessionManager.getCwd(), true), "deploy-playbook.md");
@@ -249,6 +261,11 @@ describe("memories runtime", () => {
 				{
 					type: "text",
 					text: JSON.stringify({
+						// stage1 fields (rollout generation)
+						rollout_summary: "Rollout summary",
+						rollout_slug: "rollout-a",
+						raw_memory: "Raw memory",
+						// phase2 fields (global consolidation)
 						memory_md: "# Memory\n\nMerged",
 						memory_summary: "Merged summary",
 						skills: [{ name: "ops", content: "# Ops\nRunbook" }],

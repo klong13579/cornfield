@@ -18,7 +18,7 @@ import * as ai from "@oh-my-pi/pi-ai";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { startMemoryStartupTask } from "@oh-my-pi/pi-coding-agent/memories";
 import * as memoryStorage from "@oh-my-pi/pi-coding-agent/memories/storage";
-import { getAgentDbPath, logger, Snowflake } from "@oh-my-pi/pi-utils";
+import { logger, Snowflake } from "@oh-my-pi/pi-utils";
 
 interface SessionLike {
 	sessionManager: {
@@ -68,19 +68,26 @@ function createModelRegistry(model: Model): ModelRegistryLike {
 describe("issue #846: phase1 stage1 failures must be logged", () => {
 	let savedXdgData: string | undefined;
 	let savedXdgState: string | undefined;
+	let savedHome: string | undefined;
+	let isolatedHome: string;
 
-	beforeEach(() => {
+	beforeEach(async () => {
 		vi.restoreAllMocks();
 		savedXdgData = process.env.XDG_DATA_HOME;
 		savedXdgState = process.env.XDG_STATE_HOME;
 		process.env.XDG_DATA_HOME = "/nonexistent-xdg-data";
 		process.env.XDG_STATE_HOME = "/nonexistent-xdg-state";
+		savedHome = process.env.HOME;
+		isolatedHome = await fs.mkdtemp(path.join(os.tmpdir(), "omp-846-home-"));
+		process.env.HOME = isolatedHome;
 	});
 
 	afterEach(async () => {
 		vi.restoreAllMocks();
 		process.env.XDG_DATA_HOME = savedXdgData;
 		process.env.XDG_STATE_HOME = savedXdgState;
+		process.env.HOME = savedHome!;
+		await fs.rm(isolatedHome, { recursive: true, force: true });
 		for (const dir of createdDirs) {
 			await fs.rm(dir, { recursive: true, force: true });
 		}
@@ -120,7 +127,7 @@ describe("issue #846: phase1 stage1 failures must be logged", () => {
 		// throws ENOENT inside runStage1Job, which currently catches and silently
 		// records the reason in DB only.
 		const missingRollout = path.join(sessionDir, "thread-missing.jsonl");
-		const db = memoryStorage.openMemoryDb(getAgentDbPath(agentDir));
+		const db = memoryStorage.openMemoryDb(memoryStorage.resolveMemoryDbPath(agentDir, true));
 		memoryStorage.upsertThreads(db, [
 			{
 				id: "thread-missing",
@@ -150,7 +157,7 @@ describe("issue #846: phase1 stage1 failures must be logged", () => {
 		const start = Date.now();
 		let lastError: string | null = null;
 		while (Date.now() - start < 3000) {
-			const probe = memoryStorage.openMemoryDb(getAgentDbPath(agentDir));
+			const probe = memoryStorage.openMemoryDb(memoryStorage.resolveMemoryDbPath(agentDir, true));
 			const row = probe
 				.prepare("SELECT last_error, status FROM jobs WHERE kind = 'memory_stage1' AND job_key = ?")
 				.get("thread-missing") as { last_error?: string; status?: string } | undefined;

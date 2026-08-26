@@ -1,3 +1,22 @@
+/** Placeholder meta for follow-up dispatch: the request was queued into a
+ * running card session; the outcome surfaces on that card, so we audit
+ * as ok with a marker. */
+const FOLLOW_UP_META: AgentResponseMeta = {
+	text: "",
+	rawText: "",
+	model: null,
+	provider: null,
+	usage: null,
+	agentDurationMs: null,
+	taskDurationMs: 0,
+	effort: null,
+	toolCalls: [],
+	toolResults: [],
+	error: null,
+	aborted: false,
+	isFallback: false,
+};
+
 /**
  * Agent response delivery — send replies, stream AI Cards, handle card actions.
  *
@@ -156,10 +175,8 @@ export class ResponseHandler {
 		accountId: string,
 		channel: Channel | undefined,
 		sessionManager: SessionManager | undefined,
-	): Promise<boolean> {
-		if (!channel?.streamCard) return false;
-		if (!sessionManager) return false;
-
+	): Promise<AgentResponseMeta | null> {
+		if (!channel?.streamCard || !sessionManager) return null;
 		const context: ReplyFormatterContext = {
 			accountId,
 			agentName: this.resolveAgentName(accountId),
@@ -176,15 +193,24 @@ export class ResponseHandler {
 		// followUp instead of creating a new card. The running session's
 		// streaming handlers receive the follow-up turn's events.
 		if (await sessionManager.tryDispatchAsFollowUp(msg, session)) {
-			return true;
+			// Follow-up: outcome is surfaced by the running card, but we still
+			// audit this request as delivered through the follow-up path.
+			return { ...FOLLOW_UP_META, taskDurationMs: 0 };
 		}
 
+		let lastMeta: AgentResponseMeta | null = null;
 		const submit = (handlers?: ForwardStreamHandlers): Promise<AgentResponseMeta | null> =>
-			sessionManager.enqueueWithMeta(msg, session, handlers);
+			sessionManager.enqueueWithMeta(msg, session, handlers).then(m => {
+				lastMeta = m;
+				return m;
+			});
 
 		try {
 			const outbound = await channel.streamCard(msg, session, context, submit);
-			return outbound !== null;
+			// streamCard returning null means the card path failed before the
+			// agent ran (e.g. card create + v1 fallback both failed). In that case
+			// outbound !== null signals handled-but-we-still-capture-meta-if-any.
+			return outbound !== null ? (lastMeta ?? null) : null;
 		} catch (err) {
 			logger.error("Failed to run AI Card stream path, falling back to v1 markdown", {
 				accountId,
@@ -192,7 +218,7 @@ export class ResponseHandler {
 				channel: msg.channelId,
 				error: err instanceof Error ? err.message : String(err),
 			});
-			return false;
+			return null;
 		}
 	}
 
@@ -274,7 +300,7 @@ export class ResponseHandler {
 		session: SessionRecord,
 		accountId: string,
 		sessionManager: SessionManager | undefined,
-	): Promise<void> {
+	): Promise<AgentResponseMeta | null> {
 		// AI Card is the primary surface; this V1 path is the fallback for
 		// when the app lacks `Card.Instance.Write` permission. Without a
 		// placeholder the user stares at a blank 5–30s window while the
@@ -305,6 +331,7 @@ export class ResponseHandler {
 		if (meta) {
 			await this.sendFormattedAgentResponse(msg, meta, accountId);
 		}
+		return meta ?? null;
 	}
 
 	// ═══════════════════════════════════════════════════════════════════

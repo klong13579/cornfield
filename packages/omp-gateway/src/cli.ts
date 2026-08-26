@@ -54,6 +54,7 @@ const GATEWAY_ACTIONS = new Set([
 	"doctor",
 	"config",
 	"cron",
+	"robot-context",
 	"service",
 	"setup",
 	"test-longtask",

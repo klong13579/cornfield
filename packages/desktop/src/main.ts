@@ -210,7 +210,6 @@ async function downloadUpdate(): Promise<{ ok: boolean; error?: string }> {
  * 等以后有正式 Developer ID 证书，可切回 autoUpdater.quitAndInstall()（原生 Squirrel）。
  */
 function installUpdate(): void {
-	const { autoUpdater } = electronUpdater;
 	// 下载缓存目录（electron-updater 的 updaterCacheDirName，app-update.yml 生成）。
 	const cacheDir = path.join(os.homedir(), "Library", "Caches", updaterCacheDirName());
 	const zipPath = findDownloadedZip(cacheDir);
@@ -220,7 +219,7 @@ function installUpdate(): void {
 	}
 	const appPath = app.getAppPath(); // …/OMP Desktop.app/Contents/Resources/app.asar
 	const bundleRoot = app.isPackaged ? path.dirname(path.dirname(path.dirname(appPath))) : "";
-	if (!bundleRoot || !bundleRoot.endsWith(".app")) {
+	if (!bundleRoot?.endsWith(".app")) {
 		console.error("desktop: cannot determine .app bundle root from", appPath);
 		return;
 	}

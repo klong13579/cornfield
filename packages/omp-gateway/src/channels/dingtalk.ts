@@ -395,6 +395,7 @@ export class DingTalkChannel extends BaseChannel {
 
 	#client: DWClient | null = null;
 	#config: DingTalkConfig | null = null;
+	// biome-ignore lint/correctness/noUnusedPrivateClassMembers: written on connect/disconnect, read path is #connectionFailed — future getter
 	#connected = false;
 	#connectionFailed = false;
 	#accountId = "__default__";
@@ -1652,12 +1653,13 @@ export class DingTalkChannel extends BaseChannel {
 
 	// Metrics — written in #handleMessage / handleInbound. Kept as
 	// plain counters for now; exposing them through a getter is a
-	// future change. biome's `noUnusedPrivateClassMembers` flags them
-	// as unused because they're only written; suppress inline.
-	// biome-ignore lint/correctness/noUnusedPrivateClassMembers: written in #handleMessage, future getter
+	// future change.
 	#receivedCount = 0;
-	// biome-ignore lint/correctness/noUnusedPrivateClassMembers: written in #handleMessage, future getter
 	#processedCount = 0;
+	/** Epoch ms of the last inbound business message (not pong/heartbeat).
+	 * Socket liveness can stay fresh while the platform silently stops
+	 * delivering — this field distinguishes that fake-alive state. */
+	#lastMessageReceivedAt = 0;
 
 	async onConnect(config: ChannelConfig): Promise<void> {
 		this.#config = config as DingTalkConfig;
@@ -1822,6 +1824,7 @@ export class DingTalkChannel extends BaseChannel {
 			lastSocketAvailableAt: this.#lastSocketAvailableTime,
 			receivedCount: this.#receivedCount,
 			processedCount: this.#processedCount,
+			lastMessageReceivedAt: this.#lastMessageReceivedAt,
 		};
 	}
 
@@ -2748,6 +2751,7 @@ export class DingTalkChannel extends BaseChannel {
 
 	async #handleMessage(msg: DWClientDownStream): Promise<void> {
 		this.#receivedCount++;
+		this.#lastMessageReceivedAt = Date.now();
 		const { headers, data: rawData } = msg;
 		const messageId = headers.messageId;
 		// Acknowledge immediately

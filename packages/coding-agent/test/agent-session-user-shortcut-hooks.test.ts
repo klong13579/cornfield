@@ -22,7 +22,7 @@ describe("AgentSession user shortcut hooks", () => {
 	beforeEach(async () => {
 		tempDir = TempDir.createSync("@pi-user-shortcut-hooks-");
 		authStorage = await AuthStorage.create(path.join(tempDir.path(), "testauth.db"));
-		modelRegistry = new ModelRegistry(authStorage);
+		modelRegistry = new ModelRegistry(authStorage, path.join(tempDir.path(), "models.yml"));
 	});
 
 	afterEach(async () => {
