@@ -36,6 +36,7 @@ const ACTIONS = [
 	"doctor",
 	"config",
 	"cron",
+	"robot-context",
 	"service",
 	"setup",
 	"test-longtask",
@@ -48,7 +49,7 @@ export default class Gateway extends Command {
 	static args = {
 		action: Args.string({
 			description:
-				"Gateway action: start | stop | status | doctor | reload | config | cron | service | test-longtask | help",
+				"Gateway action: start | stop | status | doctor | reload | config | cron | robot-context | service | test-longtask | help",
 			required: false,
 			options: ACTIONS,
 		}),
@@ -85,6 +86,10 @@ export default class Gateway extends Command {
 		"  omp-gateway setup --non-interactive      Print manual-edit instructions and exit (for CI/scripting)",
 		"  omp-gateway config                       Print resolved config",
 		"  omp-gateway config --config /path/gw.json Print custom config",
+		"",
+		"  ======== 机器人上下文 ========",
+		"  omp-gateway robot-context probe           探测机器人×群矩阵并刷新各 agent 的 robot-context.md",
+		"  omp-gateway robot-context probe --dry-run 只探测不写入",
 		"",
 		"  ======== 定时任务 ========",
 		"  omp-gateway cron create '0 9 * * *' 'cmd'  Create cron task",
@@ -497,6 +502,10 @@ export default class Gateway extends Command {
 				}
 				break;
 			}
+			case "robot-context": {
+				await this.#handleRobotContext();
+				break;
+			}
 			case "setup": {
 				// Direct in-process call into the setup wizard — no subprocess spawn.
 				// The legacy `omp-gateway install` path used `bun <cliPath> install`;
@@ -559,8 +568,73 @@ export default class Gateway extends Command {
 	}
 
 	// ═══════════════════════════════════════════════════════════════════
-	// Cron — inline handler (no subprocess spawn)
+	// Robot context — active group-membership probe
 	// ═══════════════════════════════════════════════════════════════════
+
+	async #handleRobotContext(): Promise<void> {
+		const argv = process.argv.slice(process.argv.indexOf("robot-context") + 1);
+		const action = argv[0] ?? "help";
+		if (action !== "probe") {
+			console.log("Usage: omp-gateway robot-context probe [--dry-run]");
+			console.log("  Probe robot×group membership via DingTalk API and update every");
+			console.log("  account's <agentDir>/robot-context.md. Requires dws CLI and one");
+			console.log("  gateway account with the qyapi_chat_manage permission.");
+			if (action !== "help") process.exitCode = 1;
+			return;
+		}
+		const dryRun = argv.includes("--dry-run");
+
+		const { loadConfig, getDataDir, getDingTalkConfig } = await import("../config");
+		const config = await loadConfig(undefined);
+		const dt = getDingTalkConfig(config);
+		if (!dt?.accounts || Object.keys(dt.accounts).length === 0) {
+			console.error("No DingTalk accounts configured in gateway.json");
+			process.exitCode = 1;
+			return;
+		}
+
+		const accounts = new Map<string, { appKey: string; appSecret: string }>();
+		const robotCodeToAccount = new Map<string, string>();
+		for (const [id, acc] of Object.entries(dt.accounts)) {
+			accounts.set(id, { appKey: acc.appKey, appSecret: acc.appSecret });
+			if (acc.robotCode) robotCodeToAccount.set(acc.robotCode, id);
+		}
+
+		const { probeRobotGroups, ingestProbeResult } = await import("../robot-probe");
+		console.error("Probing robot×group membership...");
+		const result = await probeRobotGroups(accounts, robotCodeToAccount);
+		console.log(`Scanned ${result.scanned} groups (failures: ${result.failures}) via ${result.tokenAccount} token`);
+		for (const [robotCode, groups] of result.byRobot) {
+			const acc = robotCodeToAccount.get(robotCode);
+			console.log(`  ${acc ?? robotCode}: ${groups.length} groups`);
+			for (const g of groups) console.log(`    - ${g.title}`);
+		}
+		if (dryRun) {
+			console.log("--dry-run: skipping sessions/robot-context update");
+			return;
+		}
+
+		const { SQLiteSessionStore } = await import("../session-store");
+		const { RobotContextWriter } = await import("../robot-context");
+		const dataDir = getDataDir(config);
+		const store = new SQLiteSessionStore(`${dataDir}/sessions.db`);
+		try {
+			const agentDirs = new Map<string, string>();
+			const { resolveAgentDir } = await import("@oh-my-pi/pi-coding-agent/skeleton");
+			const robotMeta = new Map<string, { robotCode?: string; robotName?: string }>();
+			for (const [id, acc] of Object.entries(dt.accounts)) {
+				agentDirs.set(id, resolveAgentDir(id, acc.agentDir));
+				robotMeta.set(id, { robotCode: acc.robotCode, robotName: acc.robotName });
+			}
+			const writer = new RobotContextWriter({ store, agentDirs, robotMeta });
+			const written = await ingestProbeResult(store, writer, result, robotCodeToAccount);
+			for (const [id, n] of written)
+				console.log(`Updated ${id}: ${n} session(s) changed, robot-context.md refreshed`);
+			if (written.size === 0) console.log("No changes — robot contexts already up to date");
+		} finally {
+			store.close();
+		}
+	}
 
 	async #handleCron(): Promise<void> {
 		const argv = process.argv.slice(process.argv.indexOf("cron") + 1);
