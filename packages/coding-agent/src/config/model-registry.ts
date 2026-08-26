@@ -1002,14 +1002,28 @@ export class ModelRegistry {
 		return merged;
 	}
 
-	/** Drops discovery/cached extras when models.yml defines an explicit non-empty `models` list for that provider. */
+	/**
+	 * Drops discovery/cached extras when models.yml defines an explicit non-empty
+	 * `models` list for that provider. Built-in models are always kept — an
+	 * explicit list extends the provider's model set, it does not hide the
+	 * bundled models.
+	 */
 	#applyExplicitProviderAllowlist(models: Model<Api>[]): Model<Api>[] {
 		if (this.#explicitProviderModelIds.size === 0) {
 			return models;
 		}
+		const bundledKeys = new Set<string>();
+		for (const provider of getBundledProviders()) {
+			for (const m of getBundledModels(provider as Parameters<typeof getBundledModels>[0])) {
+				bundledKeys.add(`${provider}/${m.id}`);
+			}
+		}
 		return models.filter(m => {
 			const allowed = this.#explicitProviderModelIds.get(m.provider);
 			if (!allowed) {
+				return true;
+			}
+			if (bundledKeys.has(`${m.provider}/${m.id}`)) {
 				return true;
 			}
 			return allowed.has(m.id);

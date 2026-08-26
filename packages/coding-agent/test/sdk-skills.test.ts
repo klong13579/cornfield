@@ -19,6 +19,8 @@ function createIsolatedSkillsSettings(): Settings {
 	});
 }
 
+// createAgentSession 初始化 + skills 发现是全量 init，workspace 并行环境下
+// 会超过 bun 默认 5s 超时（全局 bunfig.toml test.timeout=20s 覆盖）。
 describe("createAgentSession skills option", () => {
 	let tempDir: string;
 	let skillsDir: string;

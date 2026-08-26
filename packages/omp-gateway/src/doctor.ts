@@ -238,8 +238,21 @@ function checkChannelsAndBridges(status: Awaited<ReturnType<typeof getGatewaySta
 					),
 				);
 			} else {
+				// Fake-alive detection: socket liveness (pong) can stay fresh while the
+				// platform silently stops delivering business messages. Quiet hours
+				// are legitimate silence, so this is an annotation, not an error.
+				const lastMsg = h?.lastMessageReceivedAt ?? 0;
+				let silenceNote = "";
+				if (lastMsg > 0) {
+					const silenceMin = Math.round((Date.now() - lastMsg) / 60000);
+					if (silenceMin >= 60) {
+						silenceNote = `, last business msg ${silenceMin}m ago${silenceMin >= 240 ? " — 若非深夜/低峰，疑似投递僵死，考虑重启" : ""}`;
+					}
+				} else if (h && h.receivedCount === 0) {
+					silenceNote = ", no business message since channel start";
+				}
 				const meta = h
-					? ` (recv=${h.receivedCount}, processed=${h.processedCount}, reconnects=${h.reconnectAttempts})`
+					? ` (recv=${h.receivedCount}, processed=${h.processedCount}, reconnects=${h.reconnectAttempts}${silenceNote})`
 					: "";
 				channelFindings.push(ok(`${acc.accountId}: connected${meta}`));
 			}

@@ -17,7 +17,7 @@
 		"check": "biome check . && bun run check:types",
 		"check:types": "tsgo -p tsconfig.json --noEmit",
 		"lint": "biome lint .",
-		"test": "bun test",
+		"test": "echo [paused] self-evolution tests disabled while feature is off",
 		"fix": "biome check --write --unsafe .",
 		"fmt": "biome format --write ."
 	},

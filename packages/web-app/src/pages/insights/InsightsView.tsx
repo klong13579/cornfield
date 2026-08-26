@@ -1,6 +1,6 @@
+import type { DashboardStatsDto, StatsFolderRowDto, StatsPeriodDto } from "@oh-my-pi/pi-wire";
 import { useEffect, useMemo, useState } from "react";
 import type { SessionRecordSummary } from "../../lib/records";
-import type { DashboardStatsDto, StatsFolderRowDto, StatsPeriodDto } from "@oh-my-pi/pi-wire"
 import { useSessionStore } from "../../state/session-store";
 import { useSession } from "../../state/use-session";
 

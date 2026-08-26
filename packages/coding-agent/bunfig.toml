@@ -3,6 +3,11 @@ linker = "isolated"
 exact = true
 saveTextLockfile = true
 
+[test]
+# 全局默认测试超时 20s（bun 默认 5s）——workspace 并行/慢机下
+# createAgentSession 初始化、RPC spawn、热重载 watcher 等会超过 5s 边缘。
+timeout = 20000
+
 [loader]
 ".md" = "text"
 ".py" = "text"

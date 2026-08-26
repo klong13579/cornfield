@@ -68,6 +68,7 @@ function makeStubSession(overrides: Partial<AgentSession> = {}) {
 		autoRetryEnabled: true,
 		getTodoPhases: () => [],
 		getActiveToolNames: () => [],
+		getMessageEntryIdMap: () => new Map(),
 		subscribe(listener: AgentSessionEventListener) {
 			listeners.add(listener);
 			return () => listeners.delete(listener);
@@ -151,7 +152,8 @@ describe("SessionStore", () => {
 		const a = store.getSnapshot();
 		const b = store.getSnapshot();
 		expect(a.messages).toBe(b.messages);
-		expect(a.isStreaming).toBe(true);
+		// isStreaming 与 phase 联动：idle 时强制 false（session-store.ts 设计，避免残留 streaming）
+		expect(a.isStreaming).toBe(false);
 		expect(a.phase).toBe("idle");
 		store.dispose();
 	});

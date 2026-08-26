@@ -25,6 +25,9 @@ CREATE TABLE IF NOT EXISTS sessions (
   last_message_id TEXT,
   omp_session_path TEXT,
   session_webhook TEXT,
+  conversation_title TEXT,
+  is_group INTEGER,
+  user_name TEXT,
   status TEXT NOT NULL DEFAULT 'active',
   UNIQUE(channel_id, account_id, conversation_id)
 );`;
@@ -39,9 +42,27 @@ export class SQLiteSessionStore implements SessionStore {
 	#getSessionByPath: Statement<SessionRecord, [string]>;
 	#insertSession: Statement<
 		void,
-		[string, string, string, string, string, number, number, string | null, string | null, string | null, string]
+		[
+			string,
+			string,
+			string,
+			string,
+			string,
+			number,
+			number,
+			string | null,
+			string | null,
+			string | null,
+			string | null,
+			number | null,
+			string | null,
+			string,
+		]
 	>;
-	#updateSession: Statement<void, [number, string | null, string | null, string | null, string, string]>;
+	#updateSession: Statement<
+		void,
+		[number, string | null, string | null, string | null, string | null, number | null, string | null, string, string]
+	>;
 	#closeSession: Statement<void, [number, string]>;
 	#getActiveSessions: Statement<SessionRecord, [string | null]>;
 
@@ -53,7 +74,8 @@ export class SQLiteSessionStore implements SessionStore {
 		this.#getSessionByConv = this.#db.prepare<SessionRecord, [string, string, string]>(`
 			SELECT id, channel_id as channelId, account_id as accountId, user_id as userId, conversation_id as conversationId,
 			       created_at as createdAt, updated_at as updatedAt,
-			       last_message_id as lastMessageId, omp_session_path as ompSessionPath, session_webhook as sessionWebhook, status
+			       last_message_id as lastMessageId, omp_session_path as ompSessionPath, session_webhook as sessionWebhook,
+			       conversation_title as conversationTitle, is_group as isGroup, user_name as userName, status
 			FROM sessions
 			WHERE channel_id = ? AND account_id = ? AND conversation_id = ? AND status != 'closed'
 		`);
@@ -61,20 +83,24 @@ export class SQLiteSessionStore implements SessionStore {
 		this.#getSessionByPath = this.#db.prepare<SessionRecord, [string]>(`
 			SELECT id, channel_id as channelId, account_id as accountId, user_id as userId, conversation_id as conversationId,
 			       created_at as createdAt, updated_at as updatedAt,
-			       last_message_id as lastMessageId, omp_session_path as ompSessionPath, session_webhook as sessionWebhook, status
+			       last_message_id as lastMessageId, omp_session_path as ompSessionPath, session_webhook as sessionWebhook,
+			       conversation_title as conversationTitle, is_group as isGroup, user_name as userName, status
 			FROM sessions
 			WHERE omp_session_path = ? AND status != 'closed'
 			LIMIT 1
 		`);
 		this.#insertSession = this.#db.prepare(`
-			INSERT INTO sessions (id, channel_id, account_id, user_id, conversation_id, created_at, updated_at, last_message_id, omp_session_path, session_webhook, status)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			INSERT INTO sessions (id, channel_id, account_id, user_id, conversation_id, created_at, updated_at, last_message_id, omp_session_path, session_webhook, conversation_title, is_group, user_name, status)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`);
 
 		this.#updateSession = this.#db.prepare(`
 			UPDATE sessions SET updated_at = ?, last_message_id = COALESCE(?, last_message_id),
 			                    omp_session_path = COALESCE(?, omp_session_path),
 			                    session_webhook = COALESCE(?, session_webhook),
+			                    conversation_title = COALESCE(?, conversation_title),
+			                    is_group = COALESCE(?, is_group),
+			                    user_name = COALESCE(?, user_name),
 			                    status = COALESCE(NULLIF(?, ''), status)
 			WHERE id = ?
 		`);
@@ -86,7 +112,8 @@ export class SQLiteSessionStore implements SessionStore {
 		this.#getActiveSessions = this.#db.prepare<SessionRecord, [string | null]>(`
 			SELECT id, channel_id as channelId, account_id as accountId, user_id as userId, conversation_id as conversationId,
 			       created_at as createdAt, updated_at as updatedAt,
-			       last_message_id as lastMessageId, omp_session_path as ompSessionPath, session_webhook as sessionWebhook, status
+			       last_message_id as lastMessageId, omp_session_path as ompSessionPath, session_webhook as sessionWebhook,
+			       conversation_title as conversationTitle, is_group as isGroup, user_name as userName, status
 			FROM sessions
 			WHERE status != 'closed' AND channel_id = COALESCE(?, channel_id)
 		`);
@@ -103,10 +130,22 @@ export class SQLiteSessionStore implements SessionStore {
 		const columns = this.#db.query("PRAGMA table_info(sessions)").all() as Array<{ name: string }>;
 		const hasAccountId = columns.some(c => c.name === "account_id");
 		const hasWebhook = columns.some(c => c.name === "session_webhook");
+		const hasTitle = columns.some(c => c.name === "conversation_title");
+		const hasIsGroup = columns.some(c => c.name === "is_group");
+		const hasUserName = columns.some(c => c.name === "user_name");
 
-		// Add session_webhook column if missing (online migration, no table rebuild)
+		// Online column migrations, no table rebuild
 		if (!hasWebhook) {
 			this.#db.exec("ALTER TABLE sessions ADD COLUMN session_webhook TEXT;");
+		}
+		if (!hasTitle) {
+			this.#db.exec("ALTER TABLE sessions ADD COLUMN conversation_title TEXT;");
+		}
+		if (!hasIsGroup) {
+			this.#db.exec("ALTER TABLE sessions ADD COLUMN is_group INTEGER;");
+		}
+		if (!hasUserName) {
+			this.#db.exec("ALTER TABLE sessions ADD COLUMN user_name TEXT;");
 		}
 
 		// If account_id already exists, we're fully migrated
@@ -139,11 +178,13 @@ export class SQLiteSessionStore implements SessionStore {
 	}
 
 	async getSession(channelId: string, accountId: string, conversationId: string): Promise<SessionRecord | null> {
-		return this.#getSessionByConv.get(channelId, accountId, conversationId) ?? null;
+		const row = this.#getSessionByConv.get(channelId, accountId, conversationId) ?? null;
+		return row ? normalizeSessionRow(row) : null;
 	}
 
 	async getSessionByPath(ompSessionPath: string): Promise<SessionRecord | null> {
-		return this.#getSessionByPath.get(ompSessionPath) ?? null;
+		const row = this.#getSessionByPath.get(ompSessionPath) ?? null;
+		return row ? normalizeSessionRow(row) : null;
 	}
 
 	async createSession(session: Omit<SessionRecord, "id">): Promise<SessionRecord> {
@@ -159,6 +200,9 @@ export class SQLiteSessionStore implements SessionStore {
 			session.lastMessageId ?? null,
 			session.ompSessionPath ?? null,
 			session.sessionWebhook ?? null,
+			session.conversationTitle ?? null,
+			session.isGroup === undefined || session.isGroup === null ? null : session.isGroup ? 1 : 0,
+			session.userName ?? null,
 			session.status ?? "active",
 		);
 		return { ...session, id };
@@ -171,6 +215,9 @@ export class SQLiteSessionStore implements SessionStore {
 			updates.lastMessageId ?? null,
 			updates.ompSessionPath ?? null,
 			updates.sessionWebhook ?? null,
+			updates.conversationTitle ?? null,
+			updates.isGroup === undefined || updates.isGroup === null ? null : updates.isGroup ? 1 : 0,
+			updates.userName ?? null,
 			updates.status ?? "",
 			id,
 		);
@@ -181,10 +228,15 @@ export class SQLiteSessionStore implements SessionStore {
 	}
 
 	async getActiveSessions(channelId?: string): Promise<SessionRecord[]> {
-		return this.#getActiveSessions.all(channelId ?? null);
+		return this.#getActiveSessions.all(channelId ?? null).map(normalizeSessionRow);
 	}
 
 	close(): void {
 		this.#db.close();
 	}
+}
+
+/** SQLite returns is_group as 0/1 — normalize to boolean for SessionRecord consumers. */
+function normalizeSessionRow(row: SessionRecord): SessionRecord {
+	return row.isGroup == null ? row : { ...row, isGroup: Boolean(row.isGroup) };
 }

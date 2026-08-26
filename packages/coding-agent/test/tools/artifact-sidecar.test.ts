@@ -4,8 +4,8 @@ import * as os from "node:os";
 import * as path from "node:path";
 import {
 	ARTIFACT_SIDECAR_MIN_BYTES,
-	persistToolOutputArtifact,
 	type ArtifactAllocator,
+	persistToolOutputArtifact,
 } from "../../src/tools/output-meta";
 
 function makeAllocator(dir: string, enabled = true): ArtifactAllocator {

@@ -1071,6 +1071,40 @@ describe("AgentBridge streaming watchdog", () => {
 		expect(elapsed).toBeLessThan(15_000);
 		await bridge.stop();
 	});
+	test("watchdog abort rebuilds the transport (process-level self-heal)", async () => {
+		const scriptPath = await writeWatchdogScript();
+		const bridge = new AgentBridge({
+			ompPath: scriptPath,
+			cwd: watchdogAgentDir,
+			streamingWatchdogMs: 300,
+		});
+		await bridge.start();
+		expect(bridge.isRunning).toBe(true);
+
+		// First prompt hangs → watchdog aborts → transport rebuild fires (async)
+		const reply = await bridge.forward(
+			makeMsgForWatchdog("cid-heal", "hang please"),
+			makeSessionForWatchdog("/tmp/cid-heal.jsonl"),
+		);
+		expect(reply).toContain("系统繁忙");
+
+		// The rebuild is fire-and-forget; give it a moment to land. A successful
+		// restart keeps the bridge running (fresh subprocess ready). Poll for up
+		// to 10s — the fake script's spawn+ready handshake can take a few seconds.
+		let healed = false;
+		for (let i = 0; i < 50 && !healed; i++) {
+			healed = bridge.isRunning;
+			if (!healed) await Bun.sleep(200);
+		}
+		expect(healed).toBe(true);
+		// And a subsequent prompt still works against the rebuilt transport.
+		const reply2 = await bridge.forward(
+			makeMsgForWatchdog("cid-heal2", "slow please"),
+			makeSessionForWatchdog("/tmp/cid-heal2.jsonl"),
+		);
+		expect(reply2).toContain("done");
+		await bridge.stop();
+	});
 
 	test("does NOT abort a prompt that streams continuously within the threshold", async () => {
 		const scriptPath = await writeWatchdogScript();

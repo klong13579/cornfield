@@ -118,6 +118,17 @@ const COMMAND_TYPES = [
 	"abort_bash",
 	"set_disabled_toolsets",
 	"export_html",
+	// 票 01+02+03（fs 写 / git 最小集 / 配置读写）
+	"fs_write",
+	"fs_edit",
+	"fs_diff",
+	"git_status",
+	"git_diff",
+	"git_log",
+	"git_show",
+	"git_branches",
+	"get_config",
+	"set_config",
 ] as const satisfies readonly string[];
 
 /** 从 WireCommand union 提取 type 字面量（编译期核对清单）。 */

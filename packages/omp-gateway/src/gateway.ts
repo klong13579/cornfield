@@ -39,6 +39,7 @@ import { HostToolDispatcher } from "./host-tool-dispatcher";
 import { createDingtalkSendMessageToolDefinitions } from "./host-tools/dingtalk-send-message-tool";
 import { IntercomBroker } from "./intercom/broker-server";
 import { clearRestartSentinel, readRestartSentinel, writeRestartSentinel } from "./restart-sentinel";
+import { RobotContextWriter } from "./robot-context";
 import { createCronToolDefinitions } from "./scheduler/host-tool";
 import { type BridgeStat, type QueueStat, SessionManager } from "./session-manager";
 import { SQLiteSessionStore } from "./session-store";
@@ -249,6 +250,8 @@ export class Gateway {
 	#newSessionHandler: NewSessionHandler;
 	#responseHandler: ResponseHandler;
 	#messageHandler: MessageHandler;
+	/** Regenerates per-account robot-context.md (agent self-awareness file). */
+	#robotContext: RobotContextWriter | null = null;
 	/** Periodic health check: restart bridges stuck in circuit-open. */
 	#healthInterval?: NodeJS.Timeout;
 	/** Maps accountId → epoch ms of last circuit-open restart (anti-storm). */
@@ -436,6 +439,20 @@ export class Gateway {
 		this.#messageHandler.setStore(this.#store);
 		this.#newSessionHandler.setStore(this.#store);
 
+		// Robot self-awareness: regenerate <agentDir>/robot-context.md per account.
+		// robotMeta comes from gateway.json accounts (robotCode/robotName);
+		// agentDirs are populated by #registerDingTalkChannels below.
+		const robotMeta = new Map<string, { robotCode?: string; robotName?: string }>();
+		for (const [id, account] of Object.entries(getDingTalkConfig(this.#config)?.accounts ?? {})) {
+			robotMeta.set(id, { robotCode: account.robotCode, robotName: account.robotName });
+		}
+		this.#robotContext = new RobotContextWriter({
+			store: this.#store,
+			agentDirs: this.#accountAgentDirs,
+			robotMeta,
+		});
+		this.#messageHandler.setRobotContext(this.#robotContext);
+
 		// Register channels (handle multi-account DingTalk)
 		const enabled = getEnabledChannels(this.#config);
 		for (const { id } of enabled) {
@@ -444,6 +461,9 @@ export class Gateway {
 			}
 			// Future: feishu, wechat, etc.
 		}
+
+		// Channels registered → agentDirs known → seed robot contexts once.
+		await this.#robotContext?.refreshAll();
 
 		const hasDingTalkAccounts = Boolean(
 			getDingTalkConfig(this.#config)?.accounts &&

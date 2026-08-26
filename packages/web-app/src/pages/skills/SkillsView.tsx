@@ -1,7 +1,7 @@
+import type { DisabledSkillDto, SkillDto } from "@oh-my-pi/pi-wire";
 import { Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { RemoteSkillItemDto } from "../../lib/pi-client-api";
-import type { DisabledSkillDto, SkillDto } from "@oh-my-pi/pi-wire"
 import { useSessionStore } from "../../state/session-store";
 import { useSession } from "../../state/use-session";
 

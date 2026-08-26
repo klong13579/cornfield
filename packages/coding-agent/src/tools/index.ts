@@ -46,6 +46,7 @@ import { createReportToolIssueTool, isAutoQaEnabled } from "./report-tool-issue"
 import { ResolveTool } from "./resolve";
 import { reportFindingTool } from "./review";
 import { SearchTool } from "./search";
+import { SearchToolBm25Tool } from "./search-tool-bm25";
 import { loadSshTool } from "./ssh";
 import { SwitchModelTool } from "./switch-model";
 import { type TodoPhase, TodoWriteTool } from "./todo-write";
@@ -245,6 +246,7 @@ export const BUILTIN_TOOLS: Record<string, ToolFactory> = {
 	write: s => new WriteTool(s),
 	switch_model: s => new SwitchModelTool(s),
 	list_models: s => new ListModelsTool(s),
+	search_tool_bm25: SearchToolBm25Tool.createIf,
 };
 
 export const HIDDEN_TOOLS: Record<string, ToolFactory> = {

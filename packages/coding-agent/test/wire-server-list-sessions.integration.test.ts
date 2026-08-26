@@ -14,8 +14,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { MULTIDEVICE_PROTOCOL_VERSION } from "@oh-my-pi/pi-wire";
-
-const URL_RE = /ws:\/\/127\.0\.0\.1:(\d+)\/ws(\?token=([a-zA-Z0-9]+))?/;
+import { waitForServe } from "./wait-for-serve";
 
 type Frame = { type: string; [k: string]: unknown };
 
@@ -115,7 +114,7 @@ test("list_sessions：索引/状态推断/排序/过滤", async () => {
 	);
 
 	try {
-		const match = await waitForServe(proc);
+		const match = (await waitForServe(proc, port)).url;
 		const ws = await connect(match);
 
 		// 全量：至少 3 条预置 hr 会话（default 的当前会话 JSONL 可能尚未 flush，不断言它）
@@ -174,25 +173,6 @@ test("list_sessions：索引/状态推断/排序/过滤", async () => {
 		await fs.rm(isolatedHome, { recursive: true, force: true });
 	}
 }, 60_000);
-
-async function waitForServe(proc: ReturnType<typeof Bun.spawn>): Promise<string> {
-	const deadline = Date.now() + 30_000;
-	const reader = (proc.stdout as ReadableStream<Uint8Array>).getReader();
-	const dec = new TextDecoder();
-	let buf = "";
-	while (Date.now() < deadline) {
-		const { value, done } = await reader.read();
-		if (done) throw new Error(`serve exited; log:\n${buf.slice(-1500)}`);
-		buf += dec.decode(value);
-		const m = buf.match(URL_RE);
-		if (m) {
-			reader.releaseLock();
-			return m[0];
-		}
-	}
-	reader.releaseLock();
-	throw new Error(`serve not ready; log:\n${buf.slice(-1500)}`);
-}
 
 async function connect(url: string): Promise<WebSocket> {
 	const ws = new WebSocket(url);

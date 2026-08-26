@@ -590,18 +590,20 @@ export async function runAgentValidate(args: ValidateArgs): Promise<ValidateResu
 		});
 	}
 
-	// 7. Semantic MECE audit (always-on via LLM)
+	// 7. Semantic MECE audit (opt-in via --semantic flag)
 	let semanticResult: ValidateResult["semantic"];
-	semanticResult = await runSemanticPhase(agentDir, meceCtx);
-	// Merge semantic violations into issues as warnings
-	for (const sv of semanticResult.violations) {
-		issues.push({
-			level: sv.severity,
-			file: sv.files.join(", ") || "(multiple)",
-			message: sv.message,
-			rule: `semantic:${sv.rule}`,
-			repairable: false,
-		});
+	if (args.semantic) {
+		semanticResult = await runSemanticPhase(agentDir, meceCtx);
+		// Merge semantic violations into issues as warnings
+		for (const sv of semanticResult.violations) {
+			issues.push({
+				level: sv.severity,
+				file: sv.files.join(", ") || "(multiple)",
+				message: sv.message,
+				rule: `semantic:${sv.rule}`,
+				repairable: false,
+			});
+		}
 	}
 
 	return {
