@@ -4,6 +4,7 @@ import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
 import { PiClient } from "@oh-my-pi/pi-client";
+import { waitForServe } from "./wait-for-serve";
 
 /**
  * 票 01 e2e — serve `fs_write` / `fs_edit` / `fs_diff`（真实 serve 子进程 + pi-client）。
@@ -11,32 +12,11 @@ import { PiClient } from "@oh-my-pi/pi-client";
  *
  * 验证：整段写可回读、replace 精确编辑、before/after 统一 diff、路径越界拒绝与 read 侧一致。
  */
-const URL_RE = /ws:\/\/127\.0\.0\.1:(\d+)\/ws(\?token=([a-zA-Z0-9]+))?/;
-
 let isolatedHome: string;
 let projectCwd: string;
 let savedHome: string | undefined;
 let proc: ReturnType<typeof Bun.spawn> | undefined;
 let serveInfo: { url: string; token: string } = { url: "", token: "" };
-
-async function waitForServe(p: ReturnType<typeof Bun.spawn>): Promise<{ url: string; token: string }> {
-	const deadline = Date.now() + 60_000;
-	const reader = (p.stdout as ReadableStream<Uint8Array>).getReader();
-	const dec = new TextDecoder();
-	let buf = "";
-	while (Date.now() < deadline) {
-		const { value, done } = await reader.read();
-		if (done) throw new Error(`serve exited before ready; log:\n${buf.slice(-1500)}`);
-		buf += dec.decode(value);
-		const m = buf.match(URL_RE);
-		if (m) {
-			reader.releaseLock();
-			return { url: `ws://127.0.0.1:${m[1]}/ws${m[2] ?? ""}`, token: m[3] ?? "" };
-		}
-	}
-	reader.releaseLock();
-	throw new Error(`serve not ready within 60s; log:\n${buf.slice(-1500)}`);
-}
 
 beforeAll(async () => {
 	isolatedHome = await fs.mkdtemp(path.join(os.tmpdir(), "omp-serve-fswrite-"));
@@ -72,7 +52,7 @@ beforeAll(async () => {
 			env: { ...process.env, HOME: isolatedHome, PI_NO_TITLE: "1" },
 		},
 	);
-	serveInfo = await waitForServe(proc);
+	serveInfo = await waitForServe(proc, port);
 }, 70_000);
 
 afterAll(async () => {

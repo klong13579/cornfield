@@ -4,37 +4,17 @@ import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
 import { PiClient } from "@oh-my-pi/pi-client";
+import { waitForServe } from "./wait-for-serve";
 
 /**
  * 票 03 e2e — serve 配置命令（get_config / set_config）。
  * 隔离 HOME：config.yml 落在 isolatedHome/.omp/agent/config.yml，不污染真实配置。
  * 验证：set→get 往返一致、嵌套 key 往返、与 set_model_disabled 同文件共存不冲突。
  */
-const URL_RE = /ws:\/\/127\.0\.0\.1:(\d+)\/ws(\?token=([a-zA-Z0-9]+))?/;
-
 let isolatedHome: string;
 let savedHome: string | undefined;
 let proc: ReturnType<typeof Bun.spawn> | undefined;
 let info = { url: "", token: "" };
-
-async function waitForServe(p: ReturnType<typeof Bun.spawn>): Promise<{ url: string; token: string }> {
-	const deadline = Date.now() + 60_000;
-	const reader = (p.stdout as ReadableStream<Uint8Array>).getReader();
-	const dec = new TextDecoder();
-	let buf = "";
-	while (Date.now() < deadline) {
-		const { value, done } = await reader.read();
-		if (done) throw new Error(`serve exited; log:\n${buf.slice(-1500)}`);
-		buf += dec.decode(value);
-		const m = buf.match(URL_RE);
-		if (m) {
-			reader.releaseLock();
-			return { url: `ws://127.0.0.1:${m[1]}/ws${m[2] ?? ""}`, token: m[3] ?? "" };
-		}
-	}
-	reader.releaseLock();
-	throw new Error(`serve not ready; log:\n${buf.slice(-1500)}`);
-}
 
 beforeAll(async () => {
 	isolatedHome = await fs.mkdtemp(path.join(os.tmpdir(), "omp-serve-config-"));
@@ -69,7 +49,7 @@ beforeAll(async () => {
 			env: { ...process.env, HOME: isolatedHome, PI_NO_TITLE: "1" },
 		},
 	);
-	info = await waitForServe(proc);
+	info = await waitForServe(proc, port);
 }, 70_000);
 
 afterAll(async () => {

@@ -4,12 +4,12 @@ import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
 import { PiClient } from "@oh-my-pi/pi-client";
+import { waitForServe } from "./wait-for-serve";
 
 /**
  * 票 02 e2e — serve git 最小集（git_status/git_diff/git_log/git_show/git_branches）。
  * 三个场景：有改动 + 多分支仓库、空仓库。真实 serve 子进程 + pi-client。
  */
-const URL_RE = /ws:\/\/127\.0\.0\.1:(\d+)\/ws(\?token=([a-zA-Z0-9]+))?/;
 const REPO_ROOT = new URL("../../..", import.meta.url).pathname.replace(/\/$/, "");
 
 async function runGit(cwd: string, args: string[]): Promise<string> {
@@ -50,22 +50,8 @@ async function spawnServe(
 		],
 		{ cwd, stdout: "pipe", stderr: "pipe", env: { ...process.env, PI_NO_TITLE: "1" } },
 	);
-	const deadline = Date.now() + 60_000;
-	const reader = (proc.stdout as ReadableStream<Uint8Array>).getReader();
-	const dec = new TextDecoder();
-	let buf = "";
-	while (Date.now() < deadline) {
-		const { value, done } = await reader.read();
-		if (done) throw new Error(`serve exited; log:\n${buf.slice(-1500)}`);
-		buf += dec.decode(value);
-		const m = buf.match(URL_RE);
-		if (m) {
-			reader.releaseLock();
-			return { proc, info: { url: `ws://127.0.0.1:${m[1]}/ws${m[2] ?? ""}`, token: m[3] ?? "" } };
-		}
-	}
-	reader.releaseLock();
-	throw new Error(`serve not ready; log:\n${buf.slice(-1500)}`);
+	const info = await waitForServe(proc, port, 60_000);
+	return { proc, info };
 }
 
 describe("git 最小集 — 有改动 + 多分支仓库", () => {
