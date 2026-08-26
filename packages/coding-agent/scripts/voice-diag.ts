@@ -274,7 +274,7 @@ function analyze(
 				lastEndpointTs = ev.ts; // client endpoint committed a turn
 			}
 			if (ev.to === "listening") {
-				if (current && current.doneTs && !current.listeningTs) current.listeningTs = ev.ts;
+				if (current?.doneTs && !current.listeningTs) current.listeningTs = ev.ts;
 				if (gapStart === undefined) gapStart = ev.ts;
 			} else if (ev.to === "speaking") {
 				closeGap(ev.ts);
