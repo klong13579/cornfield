@@ -12,6 +12,7 @@
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { MULTIDEVICE_PROTOCOL_VERSION } from "@oh-my-pi/pi-wire";
+import { waitForServe } from "./wait-for-serve";
 
 type Frame = { type: string; [k: string]: unknown };
 
@@ -22,26 +23,6 @@ interface E2eContext {
 }
 
 let ctx: E2eContext;
-
-async function waitForServe(proc: ReturnType<typeof Bun.spawn>): Promise<{ url: string; token: string }> {
-	const deadline = Date.now() + 60_000;
-	// omp 的 logger 用 winston Console（默认 stdout），所以 serve:listening 在 stdout 上。
-	const reader = (proc.stdout as ReadableStream<Uint8Array>).getReader();
-	const dec = new TextDecoder();
-	let buf = "";
-	while (Date.now() < deadline) {
-		const { value, done } = await reader.read();
-		if (done) throw new Error("serve exited before emitting listening url");
-		buf += dec.decode(value);
-		const m = buf.match(/ws:\/\/127\.0\.0\.1:(\d+)\/ws(\?token=([a-zA-Z0-9]+))?/);
-		if (m) {
-			reader.releaseLock();
-			return { url: `ws://127.0.0.1:${m[1]}/ws${m[2] ?? ""}`, token: m[3] ?? "" };
-		}
-	}
-	reader.releaseLock();
-	throw new Error(`serve did not become ready within 60s; log:\n${buf.slice(-2000)}`);
-}
 
 /** 封装单次命令往返（不多路复用，保证测试隔离）。 */
 async function sendCommand(command: object, timeoutMs = 30_000): Promise<Frame> {
@@ -98,7 +79,7 @@ beforeAll(async () => {
 			HOME: process.env.HOME ?? "",
 		},
 	});
-	const info = await waitForServe(proc);
+	const info = await waitForServe(proc, port);
 	ctx = { proc, ...info };
 }, 30_000);
 

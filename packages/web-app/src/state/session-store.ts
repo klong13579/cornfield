@@ -1,13 +1,3 @@
-import { loadNotifyPrefs, notifyGuarded } from "../lib/notifications";
-import type {
-	FsEntryDto,
-	GatewayStatusDto,
-	ListenRecordingDto,
-	McpServerDto,
-	PiClient,
-	RemoteSkillItemDto,
-} from "../lib/pi-client-api";
-import type { BranchPoint, PlaybackEntry, SessionRecordSummary } from "../lib/records";
 import type {
 	AgentInfoDto,
 	AvailableModelsDto,
@@ -29,7 +19,17 @@ import type {
 	TaskRowDto,
 	TodoPhaseDto,
 	WireServerEventDto,
-} from "../lib/wire-dto";
+} from "@oh-my-pi/pi-wire";
+import { loadNotifyPrefs, notifyGuarded } from "../lib/notifications";
+import type {
+	FsEntryDto,
+	GatewayStatusDto,
+	ListenRecordingDto,
+	McpServerDto,
+	PiClient,
+	RemoteSkillItemDto,
+} from "../lib/pi-client-api";
+import type { BranchPoint, PlaybackEntry, SessionRecordSummary } from "../lib/records";
 import { createClient } from "./client";
 import { type ServeConnectionConfig, saveServeConfig } from "./pi-client-adapter";
 
@@ -130,7 +130,7 @@ function cloneView(v: SessionView): SessionView {
  * SessionStore —— 单例。快照权威（缓存）+ progress 瞬态（打字机）两层：
  * - session_snapshot 到达 → 缓存更新，瞬态层清空，视图整体重建（权威）
  * - progress 到达 → 仅作用在瞬态层（视图克隆上增量），绝不移入缓存
- * 与 wire-types.ts「progress 不得归约为状态」语义一致。
+ * 与 pi-wire「progress 不得归约为状态」语义一致。
  */
 class SessionStore {
 	#client!: PiClient;

@@ -163,7 +163,8 @@ function parseSessionFile(file: string): JsonlEntry[] {
 							if (!c || typeof c !== "object") return "";
 							const cc = c as Record<string, unknown>;
 							if (cc.type === "text") return String(cc.text ?? "");
-							if (cc.type === "toolCall" || cc.type === "tool_call") return `[tool:${String(cc.name ?? cc.toolName ?? "")}]`;
+							if (cc.type === "toolCall" || cc.type === "tool_call")
+								return `[tool:${String(cc.name ?? cc.toolName ?? "")}]`;
 							return "";
 						})
 						.filter(Boolean)
@@ -238,7 +239,11 @@ interface Anomaly {
 	text: string;
 }
 
-function analyze(events: LogEvent[], jsonl: JsonlEntry[], gapMs: number): { recs: ResponseRec[]; anomalies: Anomaly[] } {
+function analyze(
+	events: LogEvent[],
+	jsonl: JsonlEntry[],
+	gapMs: number,
+): { recs: ResponseRec[]; anomalies: Anomaly[] } {
 	const recs: ResponseRec[] = [];
 	const anomalies: Anomaly[] = [];
 	let current: ResponseRec | undefined;
@@ -269,7 +274,7 @@ function analyze(events: LogEvent[], jsonl: JsonlEntry[], gapMs: number): { recs
 				lastEndpointTs = ev.ts; // client endpoint committed a turn
 			}
 			if (ev.to === "listening") {
-				if (current && current.doneTs && !current.listeningTs) current.listeningTs = ev.ts;
+				if (current?.doneTs && !current.listeningTs) current.listeningTs = ev.ts;
 				if (gapStart === undefined) gapStart = ev.ts;
 			} else if (ev.to === "speaking") {
 				closeGap(ev.ts);
@@ -404,9 +409,12 @@ for (const [i, r] of recs.entries()) {
 	}
 	if (r.doneTs) {
 		const gen = r.doneTs - (r.speakingTs ?? r.createdTs);
-		lines.push(`   →done[${r.status ?? "?"}] ${dur(gen)}${r.listeningTs ? `   →listening +${dur(r.listeningTs - r.doneTs)} (drain)` : ""}`);
+		lines.push(
+			`   →done[${r.status ?? "?"}] ${dur(gen)}${r.listeningTs ? `   →listening +${dur(r.listeningTs - r.doneTs)} (drain)` : ""}`,
+		);
 	}
-	if (r.fnCallSuspect) lines.push("   ⚠ FN-CALL 指纹：created→done<400ms 无音频，紧随新 create — 模型自调用了工具（自确认嫌疑）");
+	if (r.fnCallSuspect)
+		lines.push("   ⚠ FN-CALL 指纹：created→done<400ms 无音频，紧随新 create — 模型自调用了工具（自确认嫌疑）");
 	console.log(lines.join("\n"));
 }
 console.log("");

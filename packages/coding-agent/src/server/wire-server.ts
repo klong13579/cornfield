@@ -17,7 +17,22 @@ import type {
 } from "@oh-my-pi/pi-wire";
 import { MULTIDEVICE_PROTOCOL_VERSION } from "@oh-my-pi/pi-wire";
 import { resolveGlobalMemoryRootCandidates } from "@oh-my-pi/self-evolution/paths";
+import { YAML } from "bun";
+import { withFileLock } from "../config/file-lock";
 import { Settings } from "../config/settings";
+import {
+	DEFAULT_EDIT_MODE,
+	type EditMode,
+	executeAtomSingle,
+	executeHashlineSingle,
+	executePatchSingle,
+	executeReplaceSingle,
+	generateUnifiedDiffString,
+	type HashlineToolEdit,
+	normalizeEditMode,
+	type PatchEditEntry,
+	type ReplaceEditEntry,
+} from "../edit";
 import {
 	fetchMarketplace,
 	getMarketplacesCacheDir,
@@ -28,6 +43,12 @@ import {
 	resolvePluginSource,
 } from "../extensibility/plugins/marketplace";
 import { BUILTIN_SLASH_COMMANDS } from "../extensibility/slash-commands";
+import {
+	createLspWritethrough,
+	type WritethroughCallback,
+	type WritethroughDeferredHandle,
+	writethroughNoop,
+} from "../lsp";
 import { connectToServer, disconnectServer } from "../mcp/client";
 import type { MCPServerConfig } from "../mcp/types";
 import { getMemoryDb, getMemoryRoot, releaseMemoryDb, resolveMemoryDbPath } from "../memories";
@@ -37,6 +58,8 @@ import { discoverSkills } from "../sdk";
 import type { AgentSession } from "../session/agent-session";
 import type { SessionStore } from "../session/session-store";
 import { listListenRecordings, saveListenText, transcribeAudioWithDefaults } from "../stt/listen-service";
+import type { ToolSession } from "../tools";
+import { invalidateFsScanAfterWrite } from "../tools/fs-cache-invalidation";
 import type { TodoPhase } from "../tools/todo-write";
 import * as git from "../utils/git";
 import { WireHostToolBridge } from "./host-tool-bridge";
@@ -232,31 +255,33 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 			reply({ type: "response", id: "", ok: false, error: { code, message } });
 
 		// ── h1：serve 端 skill hub（list_remote_skills / install_remote_skill）──
-		// 契约命令不在 pi-wire 的 WireCommand union 内，serve 侧按字符串契约 + 局部窄类型实现；
-		// 前端按同一契约字符串对接（m2/h2 亦 cast + 注释）。复用 marketplace fetcher。
-		if ((command.type as string) === "list_remote_skills") {
-			const cmd = command as unknown as { type: "list_remote_skills"; source?: string };
+		// P0 收口：命令已登记进 pi-wire WireCommand union，直接按具体类型处理。
+		if (command.type === "list_remote_skills") {
 			try {
-				const source = await resolveRemoteSkillSource(cmd.source);
+				const source = await resolveRemoteSkillSource(command.source);
 				done({ items: await listRemoteSkills(source) });
 			} catch (err) {
 				failWithCode("internal", `list_remote_skills failed: ${String(err)}`);
 			}
 			return;
 		}
-		if ((command.type as string) === "install_remote_skill") {
-			const cmd = command as unknown as { type: "install_remote_skill"; source: string; name: string };
+		if (command.type === "install_remote_skill") {
 			try {
-				done(await installRemoteSkill(cmd.source, cmd.name));
+				done(await installRemoteSkill(command.source, command.name));
 			} catch (err) {
 				failWithCode("internal", `install_remote_skill failed: ${String(err)}`);
 			}
 			return;
 		}
 		try {
-			// ── MCP 服务器管理命令（契约命令，尚未登记进 pi-wire WireCommand union；最小局部 cast）──
-			if (MCP_COMMAND_TYPES.has((command as { type: string }).type)) {
-				await handleMcpServerCommand(command as unknown as WireMcpServerCommand, done, fail);
+			// ── MCP 服务器管理命令（P0 收口：已登记进 pi-wire WireCommand union）──
+			if (
+				command.type === "get_mcp_servers" ||
+				command.type === "set_mcp_server" ||
+				command.type === "remove_mcp_server" ||
+				command.type === "test_mcp_server"
+			) {
+				await handleMcpServerCommand(command, done, fail);
 				return;
 			}
 
@@ -559,6 +584,161 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 					done();
 					return;
 				}
+				// ── git 最小集（票 02）──
+				case "git_status": {
+					const agentId = (command as { sessionId?: string }).sessionId ?? conn.activeAgentId;
+					const meta = registry.getMeta(agentId);
+					if (!meta) {
+						fail(`unknown agent: ${agentId}`);
+						return;
+					}
+					try {
+						const branch = await git.branch.current(meta.agentDir);
+						const porcelain = await runWireGit(meta.agentDir, [
+							"status",
+							"--porcelain=v1",
+							"--untracked-files=all",
+						]);
+						if (porcelain.exitCode !== 0) {
+							fail(
+								`git_status failed: ${porcelain.stderr.trim() || porcelain.stdout.trim() || "git status exited non-zero"}`,
+							);
+							return;
+						}
+						const { staged, unstaged, untracked } = parseGitPorcelain(porcelain.stdout);
+						done({ branch, staged, unstaged, untracked });
+					} catch (err) {
+						fail(`git_status failed: ${err instanceof Error ? err.message : String(err)}`);
+					}
+					return;
+				}
+				case "git_diff": {
+					const agentId = (command as { sessionId?: string }).sessionId ?? conn.activeAgentId;
+					const meta = registry.getMeta(agentId);
+					if (!meta) {
+						fail(`unknown agent: ${agentId}`);
+						return;
+					}
+					const cmd = command as { cached?: boolean; path?: string };
+					try {
+						const args = ["diff"];
+						if (cmd.cached) args.push("--cached");
+						if (cmd.path) args.push("--", cmd.path);
+						const r = await runWireGit(meta.agentDir, args);
+						if (r.exitCode !== 0) {
+							fail(`git_diff failed: ${r.stderr.trim() || r.stdout.trim() || "git diff exited non-zero"}`);
+							return;
+						}
+						done({ diff: r.stdout });
+					} catch (err) {
+						fail(`git_diff failed: ${err instanceof Error ? err.message : String(err)}`);
+					}
+					return;
+				}
+				case "git_log": {
+					const agentId = (command as { sessionId?: string }).sessionId ?? conn.activeAgentId;
+					const meta = registry.getMeta(agentId);
+					if (!meta) {
+						fail(`unknown agent: ${agentId}`);
+						return;
+					}
+					const count = Math.min(100, Math.max(1, Math.trunc((command as { count?: number }).count ?? 20)));
+					try {
+						const r = await runWireGit(meta.agentDir, ["log", `-n${count}`, "--pretty=format:%H%x1f%an%x1f%s"]);
+						// 空仓库（无 commit）/ 非 git 目录：git log 非零退出 → 空列表而非报错
+						if (r.exitCode !== 0) {
+							done({ commits: [] });
+							return;
+						}
+						done({ commits: parseGitLog(r.stdout) });
+					} catch (err) {
+						fail(`git_log failed: ${err instanceof Error ? err.message : String(err)}`);
+					}
+					return;
+				}
+				case "git_show": {
+					const agentId = (command as { sessionId?: string }).sessionId ?? conn.activeAgentId;
+					const meta = registry.getMeta(agentId);
+					if (!meta) {
+						fail(`unknown agent: ${agentId}`);
+						return;
+					}
+					const revision = (command as { revision: string }).revision;
+					try {
+						const r = await runWireGit(meta.agentDir, ["show", "--format=fuller", "--stat", revision]);
+						if (r.exitCode !== 0) {
+							fail(`git_show failed: ${r.stderr.trim() || r.stdout.trim() || "unknown revision"}`);
+							return;
+						}
+						done({ revision, detail: r.stdout });
+					} catch (err) {
+						fail(`git_show failed: ${err instanceof Error ? err.message : String(err)}`);
+					}
+					return;
+				}
+				case "git_branches": {
+					const agentId = (command as { sessionId?: string }).sessionId ?? conn.activeAgentId;
+					const meta = registry.getMeta(agentId);
+					if (!meta) {
+						fail(`unknown agent: ${agentId}`);
+						return;
+					}
+					try {
+						const [current, localRes, remoteRes] = await Promise.all([
+							git.branch.current(meta.agentDir),
+							runWireGit(meta.agentDir, ["branch", "--format=%(refname:short)"]),
+							runWireGit(meta.agentDir, ["branch", "-r", "--format=%(refname:short)"]),
+						]);
+						if (localRes.exitCode !== 0 || remoteRes.exitCode !== 0) {
+							fail("git_branches failed to list branches");
+							return;
+						}
+						done({
+							current,
+							local: localRes.stdout
+								.split("\n")
+								.map(s => s.trim())
+								.filter(Boolean),
+							remote: remoteRes.stdout
+								.split("\n")
+								.map(s => s.trim())
+								.filter(Boolean),
+						});
+					} catch (err) {
+						fail(`git_branches failed: ${err instanceof Error ? err.message : String(err)}`);
+					}
+					return;
+				}
+				// ── 配置读写（票 03）──
+				case "get_config": {
+					try {
+						const config = await readAgentConfigYaml();
+						const key = (command as { key?: string }).key;
+						const value = key ? configGetByPath(config, key.split(".")) : config;
+						done({ config: value });
+					} catch (err) {
+						fail(`get_config failed: ${err instanceof Error ? err.message : String(err)}`);
+					}
+					return;
+				}
+				case "set_config": {
+					const cmd = command as { key: string; value?: unknown };
+					const key = cmd.key.trim();
+					if (!key) {
+						fail("key is required");
+						return;
+					}
+					try {
+						const config = await readAgentConfigYaml();
+						configSetByPath(config, key.split("."), cmd.value);
+						await writeAgentConfigYaml(config);
+						done({ ok: true, key, value: cmd.value });
+					} catch (err) {
+						fail(`set_config failed: ${err instanceof Error ? err.message : String(err)}`);
+					}
+					return;
+				}
+
 				default:
 					break;
 			}
@@ -901,6 +1081,89 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 				}
 				case "get_messages": {
 					done({ messages: session.messages });
+					break;
+				}
+
+				// ── fs 写命令面（票 01）：LSP writethrough 续接 ──
+				case "fs_write": {
+					const cmd = command as { path: string; content: string };
+					if (typeof cmd.content !== "string") {
+						fail("content required (string)");
+						break;
+					}
+					const agentDir = registry.getMeta(agentId)?.agentDir ?? session.sessionManager.getCwd();
+					const target = resolveFsPath(agentDir, cmd.path);
+					if (!target.ok) {
+						fail(target.error);
+						break;
+					}
+					try {
+						const toolSession = toWireToolSession(session, agentDir);
+						await createWireWritethrough(toolSession)(target.path, cmd.content);
+						invalidateFsScanAfterWrite(target.path);
+						done({ path: cmd.path, bytesWritten: Buffer.byteLength(cmd.content, "utf8") });
+					} catch (err) {
+						fail(err instanceof Error ? err.message : String(err));
+					}
+					break;
+				}
+				case "fs_edit": {
+					const cmd = command as { path: string; mode?: EditMode; edits?: unknown[]; input?: string };
+					const agentDir = registry.getMeta(agentId)?.agentDir ?? session.sessionManager.getCwd();
+					const target = resolveFsPath(agentDir, cmd.path);
+					if (!target.ok) {
+						fail(target.error);
+						break;
+					}
+					const mode =
+						cmd.mode ?? normalizeEditMode(String(session.settings.get("edit.mode") ?? "")) ?? DEFAULT_EDIT_MODE;
+					try {
+						const toolSession = toWireToolSession(session, agentDir);
+						const writethrough = createWireWritethrough(toolSession);
+						const { diff, firstChangedLine } = await executeWireEdit(
+							mode,
+							toolSession,
+							target.path,
+							{ edits: cmd.edits, input: cmd.input },
+							writethrough,
+						);
+						done({ path: cmd.path, mode, diff, firstChangedLine });
+					} catch (err) {
+						fail(err instanceof Error ? err.message : String(err));
+					}
+					break;
+				}
+				case "fs_diff": {
+					const cmd = command as { path?: string; content?: string; before?: string; after?: string };
+					try {
+						if (cmd.before !== undefined || cmd.after !== undefined) {
+							done(generateUnifiedDiffString(cmd.before ?? "", cmd.after ?? ""));
+							break;
+						}
+						if (cmd.path !== undefined && cmd.content !== undefined) {
+							const agentDir = registry.getMeta(agentId)?.agentDir ?? session.sessionManager.getCwd();
+							const target = resolveFsPath(agentDir, cmd.path);
+							if (!target.ok) {
+								fail(target.error);
+								break;
+							}
+							let beforeText: string;
+							try {
+								beforeText = await Bun.file(target.path).text();
+							} catch (err) {
+								if (isEnoent(err)) {
+									fail(`no such file: ${cmd.path}`);
+									break;
+								}
+								throw err;
+							}
+							done(generateUnifiedDiffString(beforeText, cmd.content));
+							break;
+						}
+						fail("fs_diff requires (path, content) or (before, after)");
+					} catch (err) {
+						fail(err instanceof Error ? err.message : String(err));
+					}
 					break;
 				}
 
@@ -1597,19 +1860,11 @@ async function readSessionMessages(sessionFile: string): Promise<{ messages: Age
 
 const MCP_TEST_TIMEOUT_MS = 8_000;
 
-/** serve 端 MCP 服务器管理命令（契约命令；尚未登记进 pi-wire WireCommand union → 最小局部 cast）。 */
-type WireMcpServerCommand =
-	| { type: "get_mcp_servers" }
-	| { type: "set_mcp_server"; name: string; command?: string; args?: string[]; enabled?: boolean }
-	| { type: "remove_mcp_server"; name: string }
-	| { type: "test_mcp_server"; name: string };
-
-const MCP_COMMAND_TYPES = new Set<string>([
-	"get_mcp_servers",
-	"set_mcp_server",
-	"remove_mcp_server",
-	"test_mcp_server",
-]);
+/** serve 端 MCP 服务器管理命令（P0 收口：已登记进 pi-wire WireCommand union）。 */
+type WireMcpServerCommand = Extract<
+	WireCommand,
+	{ type: "get_mcp_servers" | "set_mcp_server" | "remove_mcp_server" | "test_mcp_server" }
+>;
 
 interface AgentMcpServerEntry {
 	command?: string;
@@ -1940,4 +2195,242 @@ async function buildMemoryProjection(
 		project,
 		memoryStore: { dbPath, sections, totalEntries },
 	};
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// fs 写 / git 最小集 / 配置（票 01+02+03）
+// ═══════════════════════════════════════════════════════════════════════
+
+/** 从 AgentSession 构造写/编辑所需的 ToolSession 适配（cwd 锚定 agentDir，与 read 侧 sandbox 同源）。 */
+function toWireToolSession(session: AgentSession, agentDir: string): ToolSession {
+	return {
+		cwd: agentDir,
+		hasUI: false,
+		enableLsp: true,
+		settings: session.settings,
+		getSessionFile: () => session.sessionFile ?? null,
+		getSessionSpawns: () => null,
+		getPlanModeState: () => undefined,
+	};
+}
+
+/** LSP writethrough：与 write/edit 工具同一路径（didChange 同步 + notifySaved，格式化/诊断不重置）。 */
+function createWireWritethrough(session: ToolSession): WritethroughCallback {
+	const enableLsp = session.enableLsp ?? true;
+	const enableDiagnostics = enableLsp && session.settings.get("lsp.diagnosticsOnWrite");
+	const enableFormat = enableLsp && session.settings.get("lsp.formatOnWrite");
+	return enableLsp ? createLspWritethrough(session.cwd, { enableFormat, enableDiagnostics }) : writethroughNoop;
+}
+
+/** wire 侧无流式诊断注入点——延迟诊断直接取消。 */
+function makeWireDeferredDiagnostics(): WritethroughDeferredHandle {
+	const ctrl = new AbortController();
+	return {
+		onDeferredDiagnostics: () => {},
+		signal: ctrl.signal,
+		finalize: () => ctrl.abort(),
+	};
+}
+
+/** 透传既有 edit 工具的多模执行（replace/patch/hashline/atom），聚合 diff。 */
+async function executeWireEdit(
+	mode: EditMode,
+	session: ToolSession,
+	absPath: string,
+	payload: { edits?: unknown[]; input?: string },
+	writethrough: WritethroughCallback,
+): Promise<{ diff: string; firstChangedLine?: number }> {
+	const allowFuzzy = session.settings.get("edit.fuzzyMatch");
+	const fuzzyThreshold = session.settings.get("edit.fuzzyThreshold");
+	const beginDeferred = makeWireDeferredDiagnostics;
+
+	switch (mode) {
+		case "replace": {
+			const entries = (payload.edits ?? []) as ReplaceEditEntry[];
+			if (entries.length === 0) throw new Error("fs_edit replace mode requires at least one edit entry");
+			const diffs: string[] = [];
+			let first: number | undefined;
+			for (const entry of entries) {
+				const res = await executeReplaceSingle({
+					session,
+					path: absPath,
+					params: entry,
+					allowFuzzy,
+					fuzzyThreshold,
+					writethrough,
+					beginDeferredDiagnosticsForPath: beginDeferred,
+				});
+				if (res.details?.diff) diffs.push(res.details.diff);
+				first ??= res.details?.firstChangedLine;
+			}
+			return { diff: diffs.join("\n"), firstChangedLine: first };
+		}
+		case "patch": {
+			const entries = (payload.edits ?? []) as PatchEditEntry[];
+			if (entries.length === 0) throw new Error("fs_edit patch mode requires at least one edit entry");
+			const diffs: string[] = [];
+			let first: number | undefined;
+			for (const entry of entries) {
+				const res = await executePatchSingle({
+					session,
+					path: absPath,
+					params: entry,
+					allowFuzzy,
+					fuzzyThreshold,
+					writethrough,
+					beginDeferredDiagnosticsForPath: beginDeferred,
+				});
+				if (res.details?.diff) diffs.push(res.details.diff);
+				first ??= res.details?.firstChangedLine;
+			}
+			return { diff: diffs.join("\n"), firstChangedLine: first };
+		}
+		case "hashline": {
+			const edits = (payload.edits ?? []) as HashlineToolEdit[];
+			if (edits.length === 0) throw new Error("fs_edit hashline mode requires at least one edit entry");
+			const res = await executeHashlineSingle({
+				session,
+				path: absPath,
+				edits,
+				writethrough,
+				beginDeferredDiagnosticsForPath: beginDeferred,
+			});
+			return { diff: res.details?.diff ?? "", firstChangedLine: res.details?.firstChangedLine };
+		}
+		case "atom": {
+			if (typeof payload.input !== "string") throw new Error("fs_edit atom mode requires input string");
+			const res = await executeAtomSingle({
+				session,
+				input: payload.input,
+				path: absPath,
+				writethrough,
+				beginDeferredDiagnosticsForPath: beginDeferred,
+			});
+			return { diff: res.details?.diff ?? "", firstChangedLine: res.details?.firstChangedLine };
+		}
+		default:
+			throw new Error(`fs_edit mode "${mode}" is not supported over wire (use replace/patch/hashline/atom)`);
+	}
+}
+
+// ── git 最小集（票 02）──
+
+const GIT_WIRE_SHORT_LIVED_CONFIG: readonly string[] = [
+	"-c",
+	"core.fsmonitor=false",
+	"-c",
+	"core.untrackedCache=false",
+	"--no-optional-locks",
+];
+
+interface WireGitResult {
+	exitCode: number;
+	stdout: string;
+	stderr: string;
+}
+
+/** spawn git 子进程（与 utils/git 相同的短生命周期配置，避免并行锁竞争）。 */
+async function runWireGit(cwd: string, args: readonly string[]): Promise<WireGitResult> {
+	const child = Bun.spawn(["git", ...GIT_WIRE_SHORT_LIVED_CONFIG, ...args], {
+		cwd,
+		stdin: "ignore",
+		stdout: "pipe",
+		stderr: "pipe",
+		env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" },
+	});
+	if (!child.stdout || !child.stderr) {
+		throw new Error("Failed to capture git command output.");
+	}
+	const [stdout, stderr, exitCode] = await Promise.all([
+		new Response(child.stdout).text(),
+		new Response(child.stderr).text(),
+		child.exited,
+	]);
+	return { exitCode: exitCode ?? 0, stdout, stderr };
+}
+
+/** 解析 porcelain v1 状态行（rename 取目标路径）。 */
+function parseGitPorcelain(text: string): { staged: string[]; unstaged: string[]; untracked: string[] } {
+	const staged: string[] = [];
+	const unstaged: string[] = [];
+	const untracked: string[] = [];
+	for (const line of text.split("\n")) {
+		if (!line) continue;
+		const x = line[0];
+		const y = line[1];
+		if (!x || !y) continue;
+		const rest = line.slice(3).trim();
+		const target = rest.includes(" -> ") ? (rest.split(" -> ")[1] ?? "").trim() : rest;
+		if (x === "?" && y === "?") {
+			untracked.push(target);
+			continue;
+		}
+		if (x !== " " && x !== "?") staged.push(target);
+		if (y !== " ") unstaged.push(target);
+	}
+	return { staged, unstaged, untracked };
+}
+
+/** 解析 `%H%x1f%an%x1f%s` 日志行。 */
+function parseGitLog(stdout: string): { hash: string; author: string; message: string }[] {
+	return stdout
+		.split("\n")
+		.filter(line => line.length > 0)
+		.map(line => {
+			const [hash = "", author = "", ...message] = line.split("\x1f");
+			return { hash, author, message: message.join("\x1f") };
+		});
+}
+
+// ── 配置读写（票 03）──
+
+function agentConfigPath(): string {
+	return path.join(getAgentDir(), "config.yml");
+}
+
+async function readAgentConfigYaml(): Promise<Record<string, unknown>> {
+	const filePath = agentConfigPath();
+	try {
+		const raw = await Bun.file(filePath).text();
+		const parsed = YAML.parse(raw) as unknown;
+		if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+			return parsed as Record<string, unknown>;
+		}
+		return {};
+	} catch (err) {
+		if (isEnoent(err)) return {};
+		throw err;
+	}
+}
+
+async function writeAgentConfigYaml(config: Record<string, unknown>): Promise<void> {
+	const filePath = agentConfigPath();
+	await fs.mkdir(path.dirname(filePath), { recursive: true });
+	await withFileLock(filePath, async () => {
+		const tmpPath = `${filePath}.tmp`;
+		await fs.writeFile(tmpPath, YAML.stringify(config, null, 2), { encoding: "utf8" });
+		await fs.rename(tmpPath, filePath);
+	});
+}
+
+function configGetByPath(obj: Record<string, unknown>, segments: string[]): unknown {
+	let current: unknown = obj;
+	for (const segment of segments) {
+		if (current === null || current === undefined || typeof current !== "object") return undefined;
+		current = (current as Record<string, unknown>)[segment];
+	}
+	return current;
+}
+
+function configSetByPath(obj: Record<string, unknown>, segments: string[], value: unknown): void {
+	let current: Record<string, unknown> = obj;
+	for (let i = 0; i < segments.length - 1; i++) {
+		const segment = segments[i];
+		const next = current[segment];
+		if (typeof next !== "object" || next === null || Array.isArray(next)) {
+			current[segment] = {};
+		}
+		current = current[segment] as Record<string, unknown>;
+	}
+	current[segments[segments.length - 1]] = value;
 }

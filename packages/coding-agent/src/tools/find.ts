@@ -22,7 +22,7 @@ import {
 } from "../tui";
 import type { ToolSession } from ".";
 import { applyListLimit } from "./list-limit";
-import { formatFullOutputReference, type OutputMeta } from "./output-meta";
+import { formatFullOutputReference, type OutputMeta, persistToolOutputArtifact } from "./output-meta";
 import {
 	formatPathRelativeToCwd,
 	normalizePathLikeInput,
@@ -140,7 +140,7 @@ export class FindTool implements AgentTool<typeof findSchema, FindToolDetails> {
 				});
 			};
 
-			const buildResult = (files: string[]): AgentToolResult<FindToolDetails> => {
+			const buildResult = async (files: string[]): Promise<AgentToolResult<FindToolDetails>> => {
 				if (files.length === 0) {
 					const details: FindToolDetails = { scopePath, fileCount: 0, files: [], truncated: false };
 					return toolResult(details).text("No files found matching pattern").done();
@@ -151,6 +151,11 @@ export class FindTool implements AgentTool<typeof findSchema, FindToolDetails> {
 				const limitMeta = listLimit.meta;
 				const rawOutput = limited.join("\n");
 				const truncation = truncateHead(rawOutput, { maxLines: Number.MAX_SAFE_INTEGER });
+				const sidecarId = truncation.truncated
+					? await persistToolOutputArtifact(this.session, "find", rawOutput)
+					: undefined;
+				if (sidecarId) truncation.artifactId = sidecarId;
+				const output = truncation.content + (sidecarId ? `\n\n${formatFullOutputReference(sidecarId)}` : "");
 
 				const details: FindToolDetails = {
 					scopePath,
@@ -162,7 +167,7 @@ export class FindTool implements AgentTool<typeof findSchema, FindToolDetails> {
 				};
 
 				const resultBuilder = toolResult(details)
-					.text(truncation.content)
+					.text(output)
 					.limits({ resultLimit: limitMeta.resultLimit?.reached });
 				if (truncation.truncated) {
 					resultBuilder.truncation(truncation, { direction: "head" });
@@ -179,7 +184,7 @@ export class FindTool implements AgentTool<typeof findSchema, FindToolDetails> {
 				if (!hasGlob && this.#customOps.stat) {
 					const stat = await this.#customOps.stat(searchPath);
 					if (stat.isFile()) {
-						return buildResult([scopePath]);
+						return await buildResult([scopePath]);
 					}
 				}
 
@@ -189,7 +194,7 @@ export class FindTool implements AgentTool<typeof findSchema, FindToolDetails> {
 				});
 				const relativized = results.map(p => formatMatchPath(p));
 
-				return buildResult(relativized);
+				return await buildResult(relativized);
 			}
 
 			let searchStat: fs.Stats;
@@ -203,7 +208,7 @@ export class FindTool implements AgentTool<typeof findSchema, FindToolDetails> {
 			}
 
 			if (!hasGlob && searchStat.isFile()) {
-				return buildResult([scopePath]);
+				return await buildResult([scopePath]);
 			}
 			if (!searchStat.isDirectory()) {
 				throw new ToolError(`Path is not a directory: ${searchPath}`);
@@ -282,7 +287,7 @@ export class FindTool implements AgentTool<typeof findSchema, FindToolDetails> {
 				relativized.push(formatMatchPath(match.path, match.fileType));
 			}
 
-			return buildResult(relativized);
+			return await buildResult(relativized);
 		});
 	}
 }

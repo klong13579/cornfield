@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { PiClient } from "@oh-my-pi/pi-client";
 import type { WireServerEvent } from "@oh-my-pi/pi-wire";
+import { waitForServe } from "./wait-for-serve";
 
 /**
  * 审批 shell e2e — 真 serve 子进程 + pi-client（P2-W1-4 的 inject 触发路径）。
@@ -10,25 +11,6 @@ import type { WireServerEvent } from "@oh-my-pi/pi-wire";
 
 let proc: ReturnType<typeof Bun.spawn> | undefined;
 const serveInfo: { url: string; token: string } = { url: "", token: "" };
-
-async function waitForServe(p: ReturnType<typeof Bun.spawn>): Promise<{ url: string; token: string }> {
-	const deadline = Date.now() + 60_000;
-	const reader = (p.stdout as ReadableStream<Uint8Array>).getReader();
-	const dec = new TextDecoder();
-	let buf = "";
-	while (Date.now() < deadline) {
-		const { value, done } = await reader.read();
-		if (done) throw new Error("serve exited before emitting listening url");
-		buf += dec.decode(value);
-		const m = buf.match(/ws:\/\/127\.0\.0\.1:(\d+)\/ws(\?token=([a-zA-Z0-9]+))?/);
-		if (m) {
-			reader.releaseLock();
-			return { url: `ws://127.0.0.1:${m[1]}/ws${m[2] ?? ""}`, token: m[3] ?? "" };
-		}
-	}
-	reader.releaseLock();
-	throw new Error(`serve did not become ready within 60s; log:\n${buf.slice(-2000)}`);
-}
 
 function nextPermissionRequest(client: PiClient): Promise<Extract<WireServerEvent, { type: "permission_request" }>> {
 	const { promise, resolve } = Promise.withResolvers<Extract<WireServerEvent, { type: "permission_request" }>>();
@@ -50,7 +32,7 @@ beforeAll(async () => {
 		stderr: "pipe",
 		env: { ...process.env, PI_NO_TITLE: "1" },
 	});
-	const info = await waitForServe(proc);
+	const info = await waitForServe(proc, port);
 	serveInfo.url = info.url;
 	serveInfo.token = info.token;
 }, 30_000);

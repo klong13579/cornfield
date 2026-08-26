@@ -1,17 +1,5 @@
 import type { PiClientEventKind, PiWebSocketCtor } from "@oh-my-pi/pi-client";
 import { PiClient as WirePiClient } from "@oh-my-pi/pi-client";
-import type { WireCommand } from "@oh-my-pi/pi-wire";
-import type {
-	AgentMessageDto,
-	FsEntryDto,
-	FsImageResult,
-	GatewayStatusDto,
-	ListenRecordingDto,
-	McpServerDto,
-	PiClient,
-	RemoteSkillItemDto,
-} from "../lib/pi-client-api";
-import type { BranchPoint, PlaybackEntry, PlaybackToolStep, RecordStatus, SessionRecordSummary } from "../lib/records";
 import type {
 	AgentInfoDto,
 	AvailableModelsDto,
@@ -29,8 +17,20 @@ import type {
 	StatsPeriodDto,
 	TaskRowDto,
 	TodoPhaseDto,
+	WireCommand,
 	WireServerEventDto,
-} from "../lib/wire-dto";
+} from "@oh-my-pi/pi-wire";
+import type {
+	AgentMessageDto,
+	FsEntryDto,
+	FsImageResult,
+	GatewayStatusDto,
+	ListenRecordingDto,
+	McpServerDto,
+	PiClient,
+	RemoteSkillItemDto,
+} from "../lib/pi-client-api";
+import type { BranchPoint, PlaybackEntry, PlaybackToolStep, RecordStatus, SessionRecordSummary } from "../lib/records";
 
 /** serve get_state env 条目（pi-wire WireEnvironmentSummary；pendingCronCount 为可选缺省）。 */
 interface WireEnvironmentSummaryDto {

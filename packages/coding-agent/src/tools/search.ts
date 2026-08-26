@@ -16,7 +16,7 @@ import type { ToolSession } from ".";
 import { createFileRecorder, formatResultPath } from "./file-recorder";
 import { formatGroupedFiles } from "./grouped-file-output";
 import { formatMatchLine } from "./match-line-format";
-import { formatFullOutputReference, type OutputMeta } from "./output-meta";
+import { formatFullOutputReference, type OutputMeta, persistToolOutputArtifact } from "./output-meta";
 import {
 	formatPathRelativeToCwd,
 	hasGlobPathChars,
@@ -346,7 +346,11 @@ export class SearchTool implements AgentTool<typeof searchSchema, SearchToolDeta
 			}
 			const rawOutput = outputLines.join("\n");
 			const truncation = truncateHead(rawOutput, { maxLines: Number.MAX_SAFE_INTEGER });
-			const output = truncation.content;
+			const sidecarId = truncation.truncated
+				? await persistToolOutputArtifact(this.session, "search", rawOutput)
+				: undefined;
+			if (sidecarId) truncation.artifactId = sidecarId;
+			const output = truncation.content + (sidecarId ? `\n\n${formatFullOutputReference(sidecarId)}` : "");
 			const truncated = Boolean(matchLimitReached || result.limitReached || truncation.truncated || linesTruncated);
 			const details: SearchToolDetails = {
 				scopePath,

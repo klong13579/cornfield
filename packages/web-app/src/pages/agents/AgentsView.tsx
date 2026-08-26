@@ -1,8 +1,8 @@
+import type { AgentInfoDto } from "@oh-my-pi/pi-wire";
 import { Search, Server, TerminalSquare } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { GatewayStatusDto } from "../../lib/pi-client-api";
-import type { AgentInfoDto } from "../../lib/wire-dto";
 import { useSessionStore } from "../../state/session-store";
 import { useSession } from "../../state/use-session";
 import { AgentDetailView } from "./AgentDetailView";
