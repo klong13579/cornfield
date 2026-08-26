@@ -30,33 +30,41 @@ import type { GatewayConfig, InboundMessage, OutboundMessage, SessionRecord } fr
 
 /** Fake RPC: records every command, echoes session state for switch_session. */
 const FAKE_RPC_SCRIPT = `#!/usr/bin/env bun
-process.stdout.write(JSON.stringify({ type: "ready", protocol_version: 1 }) + "\\n");
 const receivedCommands = [];
 let currentSession = "";
 let sessionIdCounter = 0;
 let buffer = "";
 function emit(v) { process.stdout.write(JSON.stringify(v) + "\\n"); }
+function pushEvent(event) {
+  emit({ type: "push", event: { type: "progress", sessionId: "s1", event } });
+}
 async function handleFrame(frame) {
-  receivedCommands.push({ type: frame.type, id: frame.id });
-  if (frame.type === "switch_session") {
-    currentSession = frame.sessionPath;
-    emit({ type: "response", id: frame.id, command: "switch_session", success: true, data: { cancelled: false } });
+  if (frame.type === "hello") {
+    emit({ type: "hello_ack", connectionId: "new-session", protocolVersion: 1 });
     return;
   }
-  if (frame.type === "new_session") {
+  if (frame.type !== "request") return;
+  const cmd = frame.command;
+  receivedCommands.push({ type: cmd.type, id: frame.id });
+  if (cmd.type === "switch_session") {
+    currentSession = cmd.sessionPath;
+    emit({ type: "response", id: frame.id, ok: true, result: { cancelled: false } });
+    return;
+  }
+  if (cmd.type === "new_session") {
     sessionIdCounter += 1;
-    emit({ type: "response", id: frame.id, command: "new_session", success: true, data: { cancelled: false } });
+    emit({ type: "response", id: frame.id, ok: true, result: { cancelled: false } });
     return;
   }
-  if (frame.type === "get_state") {
-    emit({ type: "response", id: frame.id, command: "get_state", success: true, data: { sessionId: "sess-" + sessionIdCounter, sessionFile: currentSession, messageCount: 0 } });
+  if (cmd.type === "get_state") {
+    emit({ type: "response", id: frame.id, ok: true, result: { sessionId: "sess-" + sessionIdCounter, sessionFile: currentSession, messageCount: 0 } });
     return;
   }
-  if (frame.type === "prompt") {
-    emit({ type: "response", id: frame.id, command: "prompt", success: true });
+  if (cmd.type === "prompt") {
+    emit({ type: "response", id: frame.id, ok: true });
     setTimeout(() => {
-      emit({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "ack" }] } });
-      emit({ type: "agent_end" });
+      pushEvent({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "ack" }] } });
+      pushEvent({ type: "agent_end" });
     }, 0);
   }
 }

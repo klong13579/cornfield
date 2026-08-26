@@ -317,6 +317,20 @@ export class WireTransport {
 			}, 50);
 
 			void proc.exited.then(exitCode => {
+				// Only the process currently registered as `#proc` may drive the
+				// disconnect path. A stale exit callback from a process killed
+				// during `#restartTransport` must not clobber the freshly spawned
+				// replacement's `#ready`/`#proc`/`#stdinWriter` registration —
+				// otherwise the new process stays alive-but-unregistered and the
+				// bridge reports `isRunning=false` until a manual restart.
+				if (this.#proc?.pid !== proc.pid) {
+					logger.debug("Ignoring exit from stale wire process", {
+						pid: proc.pid,
+						currentPid: this.#proc?.pid,
+						exitCode,
+					});
+					return;
+				}
 				if (!settled && !this.#ready) {
 					settled = true;
 					clearTimeout(timeout);
