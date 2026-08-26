@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+
+- **Changed: intercom inbound delivery for headless sessions — busy sessions now queue instead of rejecting** (`src/intercom-extension/index.ts`): `resolveInboundDeliveryMode` returned `"reject"` when a non-interactive session (e.g. gateway RPC agents) was busy, leaving `ask` waiters in other agent sessions to time out with no recourse — headless agents could never reliably participate in intercom collaboration while processing a turn. Busy headless sessions now return `"followUp"` (queue until the current turn ends), matching the has-UI default. Idle behavior unchanged (trigger). This plus the per-agent SYSTEM.md intercom reply discipline closes the "gateway agents can't talk to each other" gap end-to-end.
+
 ### Fixed
 
 - **bash 工具执行中 ESC 无法取消（非 aborted 工具不传 signal）** (`src/tools/bash.ts`): `BashTool` 自 e7703ff1fd（RPC auto-background 修复）起带 `nonAbortable = true`，agent-loop 因此对 bash 执行完全不传 AbortSignal —— 模型调用 `sleep 60` 等长命令时，按 ESC（`session.abort()` → `agent.abort()`）无法中断子进程，命令跑满后才显示 Operation aborted。移除该 flag 恢复 signal 传递：ESC 立即杀子进程（`[Command cancelled]` + `Operation aborted`），steer 打断与 RPC abort 命令同样生效。`read`/`write` 保持 nonAbortable（短文件 IO，不可中断合理）。回归验证：本地 mock OpenAI 网关驱动真实 TUI，`sleep 60` 执行中按 ESC 2 秒内取消、无遗留子进程；bash-executor / agent-loop / concurrent-abort / streaming-edit-abort 100 测试通过。

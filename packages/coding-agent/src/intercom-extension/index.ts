@@ -554,8 +554,13 @@ export type InboundDeliveryMode = "trigger" | "followUp" | "steer" | "reject";
 /**
  * Decide how an inbound intercom message should be delivered:
  * - idle → trigger a fresh turn
- * - busy + no UI → "reject": non-interactive sessions reply with a polite busy
- *   notice instead of queuing work they cannot act on
+ * - busy + no UI → "followUp": non-interactive sessions (e.g. gateway RPC
+ *   agents) queue the message and handle it when the current turn ends.
+ *   Rejected messages previously left senders (often `ask` waiters in other
+ *   agent sessions) timing out with no recourse — queueing matches the
+ *   has-UI default so headless agents can participate in intercom
+ *   collaboration. The old "reject" path would reply with a polite busy
+ *   notice instead.
  * - busy + UI → followUp (default, queue until the current turn ends) or steer
  *   (explicit inboundMode: "interrupt" opt-in)
  */
@@ -568,7 +573,9 @@ export function resolveInboundDeliveryMode(options: {
 		return "trigger";
 	}
 	if (!options.hasUI) {
-		return "reject";
+		// Headless sessions cannot steer mid-turn (no interrupt semantics),
+		// but they CAN queue — same as the has-UI default.
+		return "followUp";
 	}
 	return options.inboundMode === "interrupt" ? "steer" : "followUp";
 }
