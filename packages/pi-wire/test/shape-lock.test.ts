@@ -110,6 +110,14 @@ const COMMAND_TYPES = [
 	"set_mcp_server",
 	"remove_mcp_server",
 	"test_mcp_server",
+	// P2 纳入（bridge 专有命令）
+	"set_steering_mode",
+	"set_follow_up_mode",
+	"set_interrupt_mode",
+	"bash",
+	"abort_bash",
+	"set_disabled_toolsets",
+	"export_html",
 	// 票 01+02+03（fs 写 / git 最小集 / 配置读写）
 	"fs_write",
 	"fs_edit",

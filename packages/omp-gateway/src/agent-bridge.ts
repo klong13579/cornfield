@@ -13,7 +13,7 @@
 
 import * as path from "node:path";
 import { isEnoent, logger } from "@oh-my-pi/pi-utils";
-import { type AgentEvent, RpcTransport, RpcTransportError, type RpcTransportEvent } from "./agent-transport";
+import { type AgentEvent, type RpcTransportEvent, WireTransport, WireTransportError } from "./agent-transport-wire";
 import { CircuitBreaker, type CircuitState } from "./circuit-breaker";
 import { CrashRecovery } from "./crash-recovery";
 import { PromptExtractor } from "./prompt-extractor";
@@ -127,7 +127,7 @@ export type { AgentEvent };
 import type { ForwardStreamHandlers } from "./agent-bridge-types";
 
 export class AgentBridge {
-	#transport: RpcTransport;
+	#transport: WireTransport;
 	#queue: PromptQueue;
 	#extractor: PromptExtractor;
 	/** Set when `abort()` is called, so `forwardWithMeta` can distinguish an
@@ -183,7 +183,7 @@ export class AgentBridge {
 			disabled: thresholdMs <= 0,
 		});
 
-		this.#transport = new RpcTransport({
+		this.#transport = new WireTransport({
 			ompPath: options.ompPath,
 			model: options.model,
 			cwd: options.cwd,
@@ -326,7 +326,7 @@ export class AgentBridge {
 			this.#recordCrash(
 				`bridge.start() failed: ${err instanceof Error ? err.message : String(err)}`,
 				exitCode ? Number(exitCode) : undefined,
-				err instanceof RpcTransportError ? err.stderrTail : undefined,
+				err instanceof WireTransportError ? err.stderrTail : undefined,
 			);
 			this.#lastError = err instanceof Error ? err.message : String(err);
 			throw err;

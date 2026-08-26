@@ -410,26 +410,36 @@ describe("isGatewayProcess", () => {
 // ---------------------------------------------------------------------------
 
 const FAKE_RPC_SCRIPT_RELOAD = `#!/usr/bin/env bun
-process.stdout.write(JSON.stringify({ type: "ready", protocol_version: 1 }) + "\\n");
 let buffer = "";
 function emit(value) {
   process.stdout.write(JSON.stringify(value) + "\\n");
 }
+// Wire 协议：消息事件必须包进 push/progress 帧（老 RPC 协议是裸 emit）。
+function pushEvent(event) {
+  emit({ type: "push", event: { type: "progress", sessionId: "s1", event } });
+}
 async function handleFrame(frame) {
-  if (frame.type === "switch_session") {
-    emit({ type: "response", id: frame.id, command: "switch_session", success: true, data: { cancelled: false } });
+  if (frame.type === "hello") {
+    emit({ type: "hello_ack", connectionId: "reload", protocolVersion: 1 });
     return;
   }
-  if (frame.type === "prompt") {
-    emit({ type: "response", id: frame.id, command: "prompt", success: true });
+  if (frame.type !== "request") return;
+  const cmd = frame.command;
+  if (cmd.type === "switch_session") {
+    emit({ type: "response", id: frame.id, ok: true, result: { cancelled: false } });
+    return;
+  }
+  if (cmd.type === "prompt") {
+    emit({ type: "response", id: frame.id, ok: true });
     setTimeout(() => {
-      emit({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "ok" }] } });
-      emit({ type: "agent_end" });
+      pushEvent({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "ok" }] } });
+      pushEvent({ type: "agent_end" });
     }, 0);
     return;
   }
-  if (frame.type === "abort" || frame.type === "set_disabled_toolsets") {
-    emit({ type: "response", id: frame.id, command: frame.type, success: true });
+  // set_host_tools：bridge 在每次 ready 后 fire-and-forget 注册 host tools。
+  if (cmd.type === "abort" || cmd.type === "set_disabled_toolsets" || cmd.type === "set_host_tools") {
+    emit({ type: "response", id: frame.id, ok: true, result: {} });
   }
 }
 for await (const chunk of Bun.stdin.stream()) {
@@ -574,52 +584,55 @@ describe("Gateway reload plan", () => {
 const FAKE_RPC_SCRIPT_HEALTH = `#!/usr/bin/env bun
 process.on("uncaughtException", e => { process.stderr.write("UNCAUGHT:" + (e && e.stack ? e.stack : String(e)) + "\\n"); process.exit(1); });
 process.on("unhandledRejection", (r) => { process.stderr.write("UNHANDLED:" + String(r) + "\\n"); process.exit(1); });
-process.stdout.write(JSON.stringify({ type: "ready", protocol_version: 1 }) + "\\n");
 let currentSession = "";
 let buffer = "";
 function emit(value) {
   process.stdout.write(JSON.stringify(value) + "\\n");
 }
+// Wire 协议：消息事件必须包进 push/progress 帧（老 RPC 协议是裸 emit）。
+function pushEvent(event) {
+  emit({ type: "push", event: { type: "progress", sessionId: "conv-health", event } });
+}
 async function handleFrame(frame) {
-  if (frame.type === "switch_session") {
-    currentSession = frame.sessionPath;
-    emit({ type: "response", id: frame.id, command: "switch_session", success: true, data: { cancelled: false } });
+  if (frame.type === "hello") {
+    emit({ type: "hello_ack", connectionId: "health", protocolVersion: 1 });
     return;
   }
-  if (frame.type === "get_state") {
-    emit({ type: "response", id: frame.id, command: "get_state", success: true, data: { model: "fake", provider: "fake", modelId: "fake" } });
+  if (frame.type !== "request") return;
+  const cmd = frame.command;
+  if (cmd.type === "switch_session") {
+    currentSession = cmd.sessionPath;
+    emit({ type: "response", id: frame.id, ok: true, result: { cancelled: false } });
     return;
   }
-  if (frame.type === "set_model") {
-    emit({ type: "response", id: frame.id, command: "set_model", success: true });
+  if (cmd.type === "get_state") {
+    emit({ type: "response", id: frame.id, ok: true, result: { sessionId: currentSession, sessionFile: currentSession, messageCount: 0 } });
     return;
   }
-  if (frame.type === "set_host_tools") {
-    emit({ type: "response", id: frame.id, command: "set_host_tools", success: true, data: { toolNames: frame.tools ? frame.tools.map(t => t.name) : [] } });
+  if (cmd.type === "set_model") {
+    emit({ type: "response", id: frame.id, ok: true });
     return;
   }
-  if (frame.type === "set_denied_tools") {
-    emit({ type: "response", id: frame.id, command: "set_denied_tools", success: true });
+  // bridge 不消费 set_host_tools/set_denied_tools/set_disabled_toolsets 的 result，空对象即可。
+  if (cmd.type === "set_host_tools" || cmd.type === "set_denied_tools" || cmd.type === "set_disabled_toolsets") {
+    emit({ type: "response", id: frame.id, ok: true, result: {} });
     return;
   }
-  if (frame.type === "prompt") {
-    if (String(frame.message).includes("fail")) {
-      emit({ type: "response", id: frame.id, command: "prompt", success: false, error: "synthetic failure" });
+  if (cmd.type === "prompt") {
+    if (String(cmd.message).includes("fail")) {
+      emit({ type: "response", id: frame.id, ok: false, error: "synthetic failure" });
       return;
     }
-    emit({ type: "response", id: frame.id, command: "prompt", success: true });
+    emit({ type: "response", id: frame.id, ok: true });
     const sessionAtPrompt = currentSession;
     setTimeout(() => {
-      emit({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: sessionAtPrompt + " :: " + frame.message }] } });
-      emit({ type: "agent_end" });
+      pushEvent({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: sessionAtPrompt + " :: " + cmd.message }] } });
+      pushEvent({ type: "agent_end" });
     }, 0);
     return;
   }
-  if (frame.type === "abort") {
-    emit({ type: "response", id: frame.id, command: "abort", success: true });
-  }
-  if (frame.type === "set_disabled_toolsets") {
-    emit({ type: "response", id: frame.id, command: "set_disabled_toolsets", success: true });
+  if (cmd.type === "abort") {
+    emit({ type: "response", id: frame.id, ok: true });
   }
 }
 for await (const chunk of Bun.stdin.stream()) {

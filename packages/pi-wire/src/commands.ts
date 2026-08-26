@@ -20,10 +20,12 @@ import type { ImageContent } from "@oh-my-pi/pi-ai";
  *
  * 新增专属命令：`list_agents` —— 返回所有已注册 agent 的元数据列表。
  *
- * ## 情境外命令（已在 requirement.md 约定创除）
+ * ## 情境外命令（P2 纳入）
  *
  * set_steering_mode / set_follow_up_mode / set_interrupt_mode /
- * set_disabled_toolsets / export_html / bash / abort_bash。gateway-specific，不进多端。
+ * set_disabled_toolsets / export_html / bash / abort_bash 原为 gateway-specific
+ * 不进多端（P1 前决策）；P2 gateway 切 wire-stdio 后 AgentBridge 需要它们，
+ * 已正式登记进 MultiplexCommand。
  */
 
 /** todo phase shape（与 coding-agent tools/todo-write 同形，作为 wire 数据面单一事实源）。 */
@@ -112,8 +114,18 @@ export type MultiplexCommand =
 	// Retry
 	| { id?: string; type: "set_auto_retry"; sessionId?: string; enabled: boolean }
 	| { id?: string; type: "abort_retry"; sessionId?: string }
+	// Queue modes（P2：bridge 专有命令纳入 wire 面）
+	| { id?: string; type: "set_steering_mode"; sessionId?: string; mode: "all" | "one-at-a-time" }
+	| { id?: string; type: "set_follow_up_mode"; sessionId?: string; mode: "all" | "one-at-a-time" }
+	| { id?: string; type: "set_interrupt_mode"; sessionId?: string; mode: "immediate" | "wait" }
+	// Bash（P2：bridge 专有命令纳入 wire 面）
+	| { id?: string; type: "bash"; sessionId?: string; command: string }
+	| { id?: string; type: "abort_bash"; sessionId?: string }
+	// Tool control（P2：bridge 专有命令纳入 wire 面）
+	| { id?: string; type: "set_disabled_toolsets"; sessionId?: string; toolsets: string[] }
 	// Session
 	| { id?: string; type: "get_session_stats"; sessionId?: string }
+	| { id?: string; type: "export_html"; sessionId?: string; outputPath?: string }
 	/**
 	 * P3: 切换本连接的 active session。入参为 agent 注册名。
 	 * 切换后：本连接后续无 sessionId 的命令都默认这个 session；

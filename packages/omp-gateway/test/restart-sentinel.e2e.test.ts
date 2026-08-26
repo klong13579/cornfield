@@ -8,7 +8,7 @@
  * 4. Start new gateway → resumeFromSentinel() → agent receives continuation
  * 5. Verify agent sees full history and responds
  *
- * Uses a fake RPC script to avoid needing a real LLM/omp process.
+ * Uses a fake wire script to avoid needing a real LLM/omp process.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
@@ -24,7 +24,7 @@ import type { Channel, ChannelCapabilities, InboundMessage, OutboundMessage } fr
 import { sampleTextMessage } from "./fixtures/sample-messages";
 
 /**
- * Fake RPC script that simulates an omp --mode rpc process.
+ * Fake wire script that simulates an omp --mode wire-stdio process.
  * - Writes session entries to disk (like real omp does)
  * - Supports slow prompts (for testing drain timeout)
  * - Tracks session history across restarts
@@ -32,12 +32,14 @@ import { sampleTextMessage } from "./fixtures/sample-messages";
 const FAKE_RPC_SCRIPT = `#!/usr/bin/env bun
 import fs from 'node:fs';
 import path from 'node:path';
-process.stdout.write(JSON.stringify({ type: "ready", protocol_version: 1 }) + "\\n");
 let currentSession = "";
 let sessionHistory = [];
 let buffer = "";
 function emit(value) {
   process.stdout.write(JSON.stringify(value) + "\\n");
+}
+function pushEvent(event) {
+  emit({ type: "push", event: { type: "progress", sessionId: "s1", event } });
 }
 function appendToSession(sessionPath, role, content) {
   if (!sessionPath) return;
@@ -46,42 +48,48 @@ function appendToSession(sessionPath, role, content) {
   fs.appendFileSync(sessionPath, JSON.stringify(entry) + "\\n");
 }
 async function handleFrame(frame) {
-	if (frame.type === "switch_session") {
-    currentSession = frame.sessionPath;
+  if (frame.type === "hello") {
+    emit({ type: "hello_ack", connectionId: "restart-e2e", protocolVersion: 1 });
+    return;
+  }
+  if (frame.type !== "request") return;
+  const cmd = frame.command;
+	if (cmd.type === "switch_session") {
+    currentSession = cmd.sessionPath;
     if (!sessionHistory.includes(currentSession)) {
       sessionHistory.push(currentSession);
     }
-    emit({ type: "response", id: frame.id, command: "switch_session", success: true, data: { cancelled: false } });
+    emit({ type: "response", id: frame.id, ok: true, result: { cancelled: false } });
     return;
   }
-  if (frame.type === "get_state") {
-    emit({ type: "response", id: frame.id, command: "get_state", success: true, data: { model: "fake", provider: "fake", modelId: "fake" } });
+  if (cmd.type === "get_state") {
+    emit({ type: "response", id: frame.id, ok: true, result: { model: "fake", provider: "fake", modelId: "fake" } });
     return;
   }
-  if (frame.type === "set_model") {
-    emit({ type: "response", id: frame.id, command: "set_model", success: true });
+  if (cmd.type === "set_model") {
+    emit({ type: "response", id: frame.id, ok: true });
     return;
   }
-  if (frame.type === "set_host_tools") {
-    emit({ type: "response", id: frame.id, command: "set_host_tools", success: true, data: { toolNames: frame.tools ? frame.tools.map(t => t.name) : [] } });
+  if (cmd.type === "set_host_tools") {
+    emit({ type: "response", id: frame.id, ok: true, result: { toolNames: cmd.tools ? cmd.tools.map(t => t.name) : [] } });
     return;
   }
-  if (frame.type === "set_denied_tools") {
-    emit({ type: "response", id: frame.id, command: "set_denied_tools", success: true });
+  if (cmd.type === "set_denied_tools") {
+    emit({ type: "response", id: frame.id, ok: true });
     return;
   }
-  if (frame.type === "prompt") {
-    appendToSession(currentSession, "user", frame.message);
-    emit({ type: "response", id: frame.id, command: "prompt", success: true });
+  if (cmd.type === "prompt") {
+    appendToSession(currentSession, "user", cmd.message);
+    emit({ type: "response", id: frame.id, ok: true });
     const sessionAtPrompt = currentSession;
     const sessionsSeen = sessionHistory.join(",");
-    const responseText = "session=" + sessionAtPrompt + " sessions=" + sessionsSeen + " msg=" + frame.message;
+    const responseText = "session=" + sessionAtPrompt + " sessions=" + sessionsSeen + " msg=" + cmd.message;
     // Simulate slow processing for drain timeout testing
-    const delay = frame.message.includes("slow-prompt") ? 5000 : 50;
+    const delay = cmd.message.includes("slow-prompt") ? 5000 : 50;
     setTimeout(() => {
       appendToSession(currentSession, "assistant", responseText);
-      emit({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: responseText }] } });
-      emit({ type: "agent_end" });
+      pushEvent({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: responseText }] } });
+      pushEvent({ type: "agent_end" });
     }, delay);
   }
 }

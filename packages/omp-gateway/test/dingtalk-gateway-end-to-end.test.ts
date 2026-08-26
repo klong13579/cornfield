@@ -14,7 +14,7 @@
  *  - `ChannelRegistry` registration + routing.
  *  - `SQLiteSessionStore` session lifecycle.
  *  - `SessionManager` per-account queue.
- *  - `AgentBridge` (subprocess IPC against a tiny fake `omp --mode rpc`
+ *  - `AgentBridge` (subprocess IPC against a tiny fake `omp --mode wire-stdio`
  *    script that emits a deterministic JSONL response — stands in for the
  *    LLM runtime without hitting a real model).
  *  - The full inbound pipeline the Gateway uses: parse, dedup, allowlist,
@@ -24,7 +24,7 @@
  *  - The DingTalk WebSocket transport: replaced by a tiny `EventEmitter`-based
  *    fake `DWClient` injected via the `protected createDWClient` factory seam.
  *    The channel drives the same callback path it would in production.
- *  - The `omp --mode rpc` child process: replaced by a bun script that emits
+ *  - The `omp --mode wire-stdio` child process: replaced by a bun script that emits
  *    a deterministic reply. The bridge is the real one — process lifecycle,
  *    JSONL framing, and session switch are all real.
  *  - The DingTalk sessionWebhook URL: points to a local `Bun.serve` capture
@@ -48,33 +48,42 @@ import { SQLiteSessionStore } from "../src/session-store";
 import type { ChannelConfig, DingTalkConfig, DingTalkRawMessage, InboundMessage } from "../src/types";
 
 // ---------------------------------------------------------------------------
-// Fake omp --mode rpc: deterministic JSONL echo
+// Fake omp --mode wire-stdio: deterministic JSONL echo
 // ---------------------------------------------------------------------------
 
 const FAKE_RPC_SCRIPT = `#!/usr/bin/env bun
-process.stdout.write(JSON.stringify({ type: "ready", protocol_version: 1 }) + "\\n");
 let currentSession = "";
 let buffer = "";
 function emit(value) {
 	process.stdout.write(JSON.stringify(value) + "\\n");
 }
+function pushEvent(event) {
+	emit({ type: "push", event: { type: "progress", sessionId: "s1", event } });
+}
 async function handleFrame(frame) {
-	if (frame.type === "switch_session") {
-		currentSession = frame.sessionPath;
-		emit({ type: "response", id: frame.id, command: "switch_session", success: true, data: { cancelled: false } });
+	if (frame.type === "hello") {
+		emit({ type: "hello_ack", connectionId: "e2e", protocolVersion: 1 });
 		return;
 	}
-	if (frame.type === "prompt") {
-		emit({ type: "response", id: frame.id, command: "prompt", success: true });
+	if (frame.type !== "request") return;
+	const cmd = frame.command;
+	if (cmd.type === "switch_session") {
+		currentSession = cmd.sessionPath;
+		emit({ type: "response", id: frame.id, ok: true, result: { cancelled: false } });
+		return;
+	}
+	if (cmd.type === "prompt") {
+		emit({ type: "response", id: frame.id, ok: true });
 		const sessionAtPrompt = currentSession;
 		setTimeout(() => {
 			const sid = sessionAtPrompt.split("/").pop();
-			emit({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "ack: " + frame.message + " (sid=" + sid + ")" }] } });
-			emit({ type: "agent_end" });
+			pushEvent({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "ack: " + cmd.message + " (sid=" + sid + ")" }] } });
+			pushEvent({ type: "agent_end" });
 		}, 0);
+		return;
 	}
-	if (frame.type === "abort") {
-		emit({ type: "response", id: frame.id, command: "abort", success: true });
+	if (cmd.type === "abort") {
+		emit({ type: "response", id: frame.id, ok: true });
 	}
 }
 for await (const chunk of Bun.stdin.stream()) {

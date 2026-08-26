@@ -334,10 +334,42 @@ const REPLY_WITH_MIXED_MEDIA = `Here is the analysis:
 That's the lot.`;
 
 const FAKE_RPC_SCRIPT = `#!/usr/bin/env bun
-process.stdout.write(JSON.stringify({ type: "ready", protocol_version: 1 }) + "\\n");
 const reply = ${JSON.stringify(REPLY_WITH_MIXED_MEDIA)};
 let buffer = "";
 function emit(value) { process.stdout.write(JSON.stringify(value) + "\\n"); }
+function pushEvent(event) { emit({ type: "push", event: { type: "progress", sessionId: "s1", event } }); }
+async function handleFrame(frame) {
+  if (frame.type === "hello") {
+    emit({ type: "hello_ack", connectionId: "media", protocolVersion: 1 });
+    return;
+  }
+  if (frame.type !== "request") return;
+  const cmd = frame.command;
+  if (cmd.type === "switch_session") {
+    emit({ type: "response", id: frame.id, ok: true, result: { cancelled: false } });
+    return;
+  }
+  if (cmd.type === "prompt") {
+    emit({ type: "response", id: frame.id, ok: true });
+    pushEvent({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: reply, contentIndex: 0 }, message: { role: "assistant", content: [] } });
+    pushEvent({
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: reply }],
+        model: "test-model",
+        provider: "test",
+        usage: { input: 5, output: 2, cacheRead: 0, cacheWrite: 0, totalTokens: 7 },
+        duration: 50,
+      },
+    });
+    pushEvent({ type: "agent_end" });
+    return;
+  }
+  if (cmd.type === "abort") {
+    emit({ type: "response", id: frame.id, ok: true });
+  }
+}
 for await (const chunk of Bun.stdin.stream()) {
   buffer += new TextDecoder().decode(chunk);
   let idx = buffer.indexOf("\\n");
@@ -345,27 +377,7 @@ for await (const chunk of Bun.stdin.stream()) {
     const line = buffer.slice(0, idx).trim();
     buffer = buffer.slice(idx + 1);
     if (!line) { idx = buffer.indexOf("\\n"); continue; }
-    const frame = JSON.parse(line);
-    if (frame.type === "switch_session") {
-      emit({ type: "response", id: frame.id, command: "switch_session", success: true, data: { cancelled: false } });
-    } else if (frame.type === "prompt") {
-      emit({ type: "response", id: frame.id, command: "prompt", success: true });
-      emit({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: reply, contentIndex: 0 }, message: { role: "assistant", content: [] } });
-      emit({
-        type: "message_end",
-        message: {
-          role: "assistant",
-          content: [{ type: "text", text: reply }],
-          model: "test-model",
-          provider: "test",
-          usage: { input: 5, output: 2, cacheRead: 0, cacheWrite: 0, totalTokens: 7 },
-          duration: 50,
-        },
-      });
-      emit({ type: "agent_end" });
-    } else if (frame.type === "abort") {
-      emit({ type: "response", id: frame.id, command: "abort", success: true });
-    }
+    await handleFrame(JSON.parse(line));
     idx = buffer.indexOf("\\n");
   }
 }
@@ -793,28 +805,37 @@ const logPath = process.env.IMAGE_RPC_LOG;
 function log(entry) {
   if (logPath) fs.appendFileSync(logPath, JSON.stringify(entry) + "\\n");
 }
-process.stdout.write(JSON.stringify({ type: "ready", protocol_version: 1 }) + "\\n");
 let buffer = "";
 function emit(value) {
   process.stdout.write(JSON.stringify(value) + "\\n");
 }
+function pushEvent(event) {
+  emit({ type: "push", event: { type: "progress", sessionId: "s1", event } });
+}
 async function handleFrame(frame) {
-  if (frame.type === "switch_session") {
-    emit({ type: "response", id: frame.id, command: "switch_session", success: true, data: { cancelled: false } });
+  if (frame.type === "hello") {
+    emit({ type: "hello_ack", connectionId: "img", protocolVersion: 1 });
     return;
   }
-  if (frame.type === "prompt") {
+  if (frame.type !== "request") return;
+  const cmd = frame.command;
+  if (cmd.type === "switch_session") {
+    emit({ type: "response", id: frame.id, ok: true, result: { cancelled: false } });
+    return;
+  }
+  if (cmd.type === "prompt") {
     log({
       type: "prompt",
-      message: frame.message,
-      images: frame.images ?? null,
-      imageCount: frame.images ? frame.images.length : 0,
+      message: cmd.message,
+      images: cmd.images ?? null,
+      imageCount: cmd.images ? cmd.images.length : 0,
     });
-    emit({ type: "response", id: frame.id, command: "prompt", success: true });
+    emit({ type: "response", id: frame.id, ok: true });
     setTimeout(() => {
-      emit({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "received" }] } });
-      emit({ type: "agent_end" });
+      pushEvent({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "received" }] } });
+      pushEvent({ type: "agent_end" });
     }, 0);
+    return;
   }
 }
 for await (const chunk of Bun.stdin.stream()) {

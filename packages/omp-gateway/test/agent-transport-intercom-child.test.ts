@@ -3,26 +3,25 @@
  * account config → transport spawn env.
  *
  * Covers the two ends of the plumbing:
- *   - RpcTransport injects PI_SUBAGENT_ORCHESTRATOR_TARGET/_RUN_ID/_CHILD_AGENT/
+ *   - WireTransport injects PI_SUBAGENT_ORCHESTRATOR_TARGET/_RUN_ID/_CHILD_AGENT/
  *     _CHILD_INDEX into the spawned omp child when `intercomParent` is set;
  *     without it, no child env leaks into the process.
  *   - createAccountBridgeOptions forwards `account.intercomParent` into the
  *     bridge options.
  *
- * The bridge-level hop (AgentBridgeOptions → RpcTransport) is type-checked
+ * The bridge-level hop (AgentBridgeOptions → WireTransport) is type-checked
  * only; the runtime contract is the transport env + options factory below.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { RpcTransport } from "../src/agent-transport";
+import { WireTransport } from "../src/agent-transport-wire";
 import { createAccountBridgeOptions } from "../src/gateway";
 
 let tmpDir: string;
 
 const SCRIPT_DUMP_CHILD_ENV = `#!/usr/bin/env bun
-process.stdout.write(JSON.stringify({ type: "ready", protocol_version: 1 }) + "\\n");
 const fs = require("node:fs");
 fs.writeFileSync(
   process.env.__INTERCOM_CHILD_DUMP!,
@@ -33,6 +32,8 @@ fs.writeFileSync(
     index: process.env.PI_SUBAGENT_CHILD_INDEX ?? null,
   }),
 );
+// Wire handshake: reply hello_ack so WireTransport.start() resolves.
+process.stdout.write(JSON.stringify({ type: "hello_ack", connectionId: "intercom-child", protocolVersion: 1 }) + "\\n");
 setInterval(() => {}, 1000);
 `;
 
@@ -64,11 +65,11 @@ afterEach(async () => {
 	await fs.rm(tmpDir, { recursive: true, force: true });
 });
 
-describe("RpcTransport intercom child env", () => {
+describe("WireTransport intercom child env", () => {
 	test("injects PI_SUBAGENT_* env when intercomParent is set", async () => {
 		const scriptPath = await writeScript();
 		const outPath = path.join(tmpDir, "env-dump-with.json");
-		const transport = new RpcTransport({
+		const transport = new WireTransport({
 			ompPath: scriptPath,
 			readyTimeoutMs: 5_000,
 			intercomParent: "main-omp",
@@ -93,7 +94,7 @@ describe("RpcTransport intercom child env", () => {
 	test("does not inject child env without intercomParent", async () => {
 		const scriptPath = await writeScript();
 		const outPath = path.join(tmpDir, "env-dump-without.json");
-		const transport = new RpcTransport({
+		const transport = new WireTransport({
 			ompPath: scriptPath,
 			readyTimeoutMs: 5_000,
 			cwd: tmpDir,

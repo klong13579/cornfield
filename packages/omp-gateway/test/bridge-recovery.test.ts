@@ -90,22 +90,29 @@ fs.writeFileSync(stateFile, String(spawns + 1));
 function emit(value) {
   process.stdout.write(JSON.stringify(value) + "\\n");
 }
-if (spawns === 0) {
-  emit({ type: "ready", protocol_version: 1 });
-  process.exit(5); // after-ready crash, like the 8/10 SIGTRAP
+function pushEvent(event) {
+  emit({ type: "push", event: { type: "progress", sessionId: "s1", event } });
 }
-emit({ type: "ready", protocol_version: 1 });
 let buffer = "";
 async function handleFrame(frame) {
-  if (frame.type === "switch_session") {
-    emit({ type: "response", id: frame.id, command: "switch_session", success: true, data: { cancelled: false } });
+  if (frame.type === "hello") {
+    emit({ type: "hello_ack", connectionId: "crash", protocolVersion: 1 });
+    if (spawns === 0) {
+      process.exit(5); // after-hello crash, like the 8/10 SIGTRAP
+    }
     return;
   }
-  if (frame.type === "prompt") {
-    emit({ type: "response", id: frame.id, command: "prompt", success: true });
+  if (frame.type !== "request") return;
+  const cmd = frame.command;
+  if (cmd.type === "switch_session") {
+    emit({ type: "response", id: frame.id, ok: true, result: { cancelled: false } });
+    return;
+  }
+  if (cmd.type === "prompt") {
+    emit({ type: "response", id: frame.id, ok: true });
     setTimeout(() => {
-      emit({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "recovered: " + frame.message }] } });
-      emit({ type: "agent_end" });
+      pushEvent({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "recovered: " + cmd.message }] } });
+      pushEvent({ type: "agent_end" });
     }, 0);
     return;
   }
@@ -127,10 +134,17 @@ const CRASH_WITH_STDERR_SCRIPT = `#!/usr/bin/env bun
 function emit(value) {
   process.stdout.write(JSON.stringify(value) + "\\n");
 }
-emit({ type: "ready", protocol_version: 1 });
-process.stderr.write("Bun panic: fake crash trace\\n  at fakeModule (fake:1:1)\\n  at secondFrame (fake:2:2)\\n");
-await Bun.sleep(100);
-process.exit(5);
+for await (const chunk of Bun.stdin.stream()) {
+  const line = new TextDecoder().decode(chunk).trim();
+  if (!line) continue;
+  const f = JSON.parse(line);
+  if (f.type === "hello") {
+    emit({ type: "hello_ack", connectionId: "stderr", protocolVersion: 1 });
+    process.stderr.write("Bun panic: fake crash trace\\n  at fakeModule (fake:1:1)\\n  at secondFrame (fake:2:2)\\n");
+    await Bun.sleep(100);
+    process.exit(5);
+  }
+}
 `;
 
 // Spawn-time failure (before ready) with a config error on stderr.
@@ -190,7 +204,7 @@ describe("AgentBridge stderr tail diagnostics", () => {
 			const crash = entries.find(e => e.kind === "crash");
 			expect(crash).toBeDefined();
 			expect(crash?.exitCode).toBe(5);
-			expect(crash?.reason).toContain("exited with code 5 after ready");
+			expect(crash?.reason).toContain("exited with code 5 after hello_ack");
 			expect(crash?.stderrTail).toContain("Bun panic: fake crash trace");
 			expect(crash?.stderrTail).toContain("secondFrame");
 		} finally {
@@ -213,7 +227,7 @@ describe("AgentBridge stderr tail diagnostics", () => {
 			maxCrashRetries: 0,
 		});
 		try {
-			await expect(bridge.start()).rejects.toThrow("before ready");
+			await expect(bridge.start()).rejects.toThrow("before hello_ack");
 
 			const entries = await crashLog.recent("ops");
 			const crash = entries.find(e => e.kind === "crash");
@@ -243,21 +257,29 @@ fs.writeFileSync(stateFile, String(spawns + 1));
 function emit(value) {
   process.stdout.write(JSON.stringify(value) + "\\n");
 }
-emit({ type: "ready", protocol_version: 1 });
+function pushEvent(event) {
+  emit({ type: "push", event: { type: "progress", sessionId: "s1", event } });
+}
 let buffer = "";
 async function handleFrame(frame) {
-  if (frame.type !== "prompt") return;
-  emit({ type: "response", id: frame.id, command: "prompt", success: true });
+  if (frame.type === "hello") {
+    emit({ type: "hello_ack", connectionId: "mid", protocolVersion: 1 });
+    return;
+  }
+  if (frame.type !== "request") return;
+  const cmd = frame.command;
+  if (cmd.type !== "prompt") return;
+  emit({ type: "response", id: frame.id, ok: true });
   if (spawns === 0) {
     setTimeout(() => {
-      emit({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "partial" }] } });
+      pushEvent({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "partial" }] } });
       process.exit(1); // die mid-turn, like the finalize crash
     }, 50);
     return;
   }
   setTimeout(() => {
-    emit({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "recovered: " + frame.message }] } });
-    emit({ type: "agent_end" });
+    pushEvent({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "recovered: " + cmd.message }] } });
+    pushEvent({ type: "agent_end" });
   }, 0);
 }
 for await (const chunk of Bun.stdin.stream()) {

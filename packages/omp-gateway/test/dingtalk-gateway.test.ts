@@ -21,9 +21,12 @@ import type { InboundMessage, OutboundMessage, SessionRecord } from "../src/type
 // Fake omp --mode rpc that emits a rich AssistantMessage with all the
 // fields the bridge meta extraction looks for.
 const FAKE_RPC_SCRIPT = `#!/usr/bin/env bun
-process.stdout.write(JSON.stringify({ type: "ready", protocol_version: 1 }) + "\\n");
+// Wire protocol fake (omp --mode wire-stdio): hello_ack handshake, then serve
+// switch_session / prompt / abort requests. All AgentEvents are wrapped in
+// push/progress frames (rpc parity: the transport flattens them back).
 let buffer = "";
 function emit(value) { process.stdout.write(JSON.stringify(value) + "\\n"); }
+function pushEvent(event) { emit({ type: "push", event: { type: "progress", sessionId: "s1", event } }); }
 process.stdin.on("data", chunk => {
   buffer += chunk.toString("utf8");
   let idx;
@@ -33,31 +36,36 @@ process.stdin.on("data", chunk => {
     if (!line) continue;
     let frame;
     try { frame = JSON.parse(line); } catch { continue; }
-    if (frame.type === "switch_session") {
-      emit({ type: "response", id: frame.id, command: "switch_session", success: true, data: { cancelled: false } });
-    } else if (frame.type === "prompt") {
-      emit({ type: "response", id: frame.id, command: "prompt", success: true });
-      emit({ type: "message_end", message: { role: "toolResult", toolCallId: "tc1", toolName: "read", content: [{ type: "text", text: "file contents" }], isError: false } });
-      emit({
-        type: "message_end",
-        message: {
-          role: "assistant",
-          content: [
-            { type: "toolCall", id: "tc1", name: "read", arguments: { path: "/tmp/example" } },
-            { type: "text", text: "I read the file. It contains: " + frame.message }
-          ],
-          api: "anthropic",
-          provider: "anthropic",
-          model: "claude-sonnet-4-5",
-          usage: { input: 120, output: 80, cacheRead: 0, cacheWrite: 0, totalTokens: 200 },
-          stopReason: "stop",
-          duration: 1500,
-          timestamp: Date.now()
-        }
-      });
-      emit({ type: "agent_end" });
-    } else if (frame.type === "abort") {
-      emit({ type: "response", id: frame.id, command: "abort", success: true });
+    if (frame.type === "hello") {
+      emit({ type: "hello_ack", connectionId: "fake", protocolVersion: 1 });
+    } else if (frame.type === "request") {
+      const cmd = frame.command;
+      if (cmd.type === "switch_session") {
+        emit({ type: "response", id: frame.id, ok: true, result: { cancelled: false } });
+      } else if (cmd.type === "prompt") {
+        emit({ type: "response", id: frame.id, ok: true });
+        pushEvent({ type: "message_end", message: { role: "toolResult", toolCallId: "tc1", toolName: "read", content: [{ type: "text", text: "file contents" }], isError: false } });
+        pushEvent({
+          type: "message_end",
+          message: {
+            role: "assistant",
+            content: [
+              { type: "toolCall", id: "tc1", name: "read", arguments: { path: "/tmp/example" } },
+              { type: "text", text: "I read the file. It contains: " + cmd.message }
+            ],
+            api: "anthropic",
+            provider: "anthropic",
+            model: "claude-sonnet-4-5",
+            usage: { input: 120, output: 80, cacheRead: 0, cacheWrite: 0, totalTokens: 200 },
+            stopReason: "stop",
+            duration: 1500,
+            timestamp: Date.now()
+          }
+        });
+        pushEvent({ type: "agent_end" });
+      } else if (cmd.type === "abort") {
+        emit({ type: "response", id: frame.id, ok: true });
+      }
     }
   }
 });
@@ -194,8 +202,9 @@ describe("Bridge → formatter end-to-end (v1 reply path)", () => {
 		// assistant message_end) — the bridge treats this as "agent did not
 		// return content" and returns a fallback meta (isFallback: true).
 		const empty = await createFakeRpcBinary(`#!/usr/bin/env bun
-process.stdout.write(JSON.stringify({ type: "ready", protocol_version: 1 }) + "\\n");
 let buffer = "";
+function emit(value) { process.stdout.write(JSON.stringify(value) + "\\n"); }
+function pushEvent(event) { emit({ type: "push", event: { type: "progress", sessionId: "s1", event } }); }
 process.stdin.on("data", chunk => {
   buffer += chunk.toString("utf8");
   let idx;
@@ -205,11 +214,16 @@ process.stdin.on("data", chunk => {
     if (!line) continue;
     let frame;
     try { frame = JSON.parse(line); } catch { continue; }
-    if (frame.type === "prompt") {
-      process.stdout.write(JSON.stringify({ type: "response", id: frame.id, command: "prompt", success: true }) + "\\n");
-      process.stdout.write(JSON.stringify({ type: "agent_end" }) + "\\n");
-    } else if (frame.type === "switch_session") {
-      process.stdout.write(JSON.stringify({ type: "response", id: frame.id, command: "switch_session", success: true, data: { cancelled: false } }) + "\\n");
+    if (frame.type === "hello") {
+      emit({ type: "hello_ack", connectionId: "fake", protocolVersion: 1 });
+    } else if (frame.type === "request") {
+      const cmd = frame.command;
+      if (cmd.type === "prompt") {
+        emit({ type: "response", id: frame.id, ok: true });
+        pushEvent({ type: "agent_end" });
+      } else if (cmd.type === "switch_session") {
+        emit({ type: "response", id: frame.id, ok: true, result: { cancelled: false } });
+      }
     }
   }
 });

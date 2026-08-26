@@ -286,31 +286,39 @@ async function waitForExecution(
 	return undefined;
 }
 
-// Fake OMP: RPC mode fails on prompt, --print hangs forever (subprocess timeout)
+// Fake OMP: wire mode fails on prompt, --print hangs forever (subprocess timeout)
 const FAKE_OMP_HANG_SCRIPT = `#!/usr/bin/env bun
 const args = process.argv.slice(2);
 
-if (args[0] === "--mode" && args[1] === "rpc") {
-  process.stdout.write(JSON.stringify({ type: "ready", protocol_version: 1 }) + "\\n");
+if (args[0] === "--mode" && args[1] === "wire-stdio") {
   let buffer = "";
+  function emit(value) {
+    process.stdout.write(JSON.stringify(value) + "\\n");
+  }
+  async function handleFrame(frame) {
+    if (frame.type === "hello") {
+      emit({ type: "hello_ack", connectionId: "cron-hang", protocolVersion: 1 });
+      return;
+    }
+    if (frame.type !== "request") return;
+    const cmd = frame.command;
+    if (cmd.type === "switch_session") {
+      emit({ type: "response", id: frame.id, ok: true, result: { cancelled: false } });
+    } else if (cmd.type === "get_state") {
+      emit({ type: "response", id: frame.id, ok: true, result: { model: "test-model", provider: "test-provider" } });
+    } else if (cmd.type === "prompt") {
+      emit({ type: "response", id: frame.id, ok: false, error: "simulated bridge inactivity (971s)" });
+    } else {
+      emit({ type: "response", id: frame.id, ok: true, result: {} });
+    }
+  }
   for await (const chunk of Bun.stdin.stream()) {
     buffer += new TextDecoder().decode(chunk);
     let idx = buffer.indexOf("\\n");
     while (idx !== -1) {
       const line = buffer.slice(0, idx).trim();
       buffer = buffer.slice(idx + 1);
-      if (line) {
-        const frame = JSON.parse(line);
-        if (frame.type === "switch_session") {
-          process.stdout.write(JSON.stringify({ type: "response", id: frame.id, command: "switch_session", success: true, data: { cancelled: false } }) + "\\n");
-        } else if (frame.type === "get_state") {
-          process.stdout.write(JSON.stringify({ type: "response", id: frame.id, command: "get_state", success: true, data: { model: "test-model", provider: "test-provider" } }) + "\\n");
-        } else if (frame.type === "prompt") {
-          process.stdout.write(JSON.stringify({ type: "response", id: frame.id, command: "prompt", success: false, error: "simulated bridge inactivity (971s)" }) + "\\n");
-        } else {
-          process.stdout.write(JSON.stringify({ type: "response", id: frame.id, command: frame.type, success: true, data: {} }) + "\\n");
-        }
-      }
+      if (line) await handleFrame(JSON.parse(line));
       idx = buffer.indexOf("\\n");
     }
   }
@@ -321,40 +329,48 @@ if (args[0] === "--mode" && args[1] === "rpc") {
 }
 `;
 
-// Fake OMP: RPC mode succeeds on get_state, succeeds on first set_model,
+// Fake OMP: wire mode succeeds on get_state, succeeds on first set_model,
 // fails on prompt, fails on second set_model (restore). --print succeeds.
 const FAKE_OMP_RESTORE_FAIL_SCRIPT = `#!/usr/bin/env bun
 const args = process.argv.slice(2);
 
-if (args[0] === "--mode" && args[1] === "rpc") {
-  process.stdout.write(JSON.stringify({ type: "ready", protocol_version: 1 }) + "\\n");
+if (args[0] === "--mode" && args[1] === "wire-stdio") {
   let setModelCount = 0;
   let buffer = "";
+  function emit(value) {
+    process.stdout.write(JSON.stringify(value) + "\\n");
+  }
+  async function handleFrame(frame) {
+    if (frame.type === "hello") {
+      emit({ type: "hello_ack", connectionId: "cron-restore", protocolVersion: 1 });
+      return;
+    }
+    if (frame.type !== "request") return;
+    const cmd = frame.command;
+    if (cmd.type === "switch_session") {
+      emit({ type: "response", id: frame.id, ok: true, result: { cancelled: false } });
+    } else if (cmd.type === "get_state") {
+      emit({ type: "response", id: frame.id, ok: true, result: { model: "original-model", provider: "test-provider" } });
+    } else if (cmd.type === "set_model") {
+      setModelCount++;
+      if (setModelCount <= 1) {
+        emit({ type: "response", id: frame.id, ok: true, result: {} });
+      } else {
+        emit({ type: "response", id: frame.id, ok: false, error: "simulated restore failure" });
+      }
+    } else if (cmd.type === "prompt") {
+      emit({ type: "response", id: frame.id, ok: false, error: "warm bridge failure" });
+    } else {
+      emit({ type: "response", id: frame.id, ok: true, result: {} });
+    }
+  }
   for await (const chunk of Bun.stdin.stream()) {
     buffer += new TextDecoder().decode(chunk);
     let idx = buffer.indexOf("\\n");
     while (idx !== -1) {
       const line = buffer.slice(0, idx).trim();
       buffer = buffer.slice(idx + 1);
-      if (line) {
-        const frame = JSON.parse(line);
-        if (frame.type === "switch_session") {
-          process.stdout.write(JSON.stringify({ type: "response", id: frame.id, command: "switch_session", success: true, data: { cancelled: false } }) + "\\n");
-        } else if (frame.type === "get_state") {
-          process.stdout.write(JSON.stringify({ type: "response", id: frame.id, command: "get_state", success: true, data: { model: "original-model", provider: "test-provider" } }) + "\\n");
-        } else if (frame.type === "set_model") {
-          setModelCount++;
-          if (setModelCount <= 1) {
-            process.stdout.write(JSON.stringify({ type: "response", id: frame.id, command: "set_model", success: true, data: {} }) + "\\n");
-          } else {
-            process.stdout.write(JSON.stringify({ type: "response", id: frame.id, command: "set_model", success: false, error: "simulated restore failure" }) + "\\n");
-          }
-        } else if (frame.type === "prompt") {
-          process.stdout.write(JSON.stringify({ type: "response", id: frame.id, command: "prompt", success: false, error: "warm bridge failure" }) + "\\n");
-        } else {
-          process.stdout.write(JSON.stringify({ type: "response", id: frame.id, command: frame.type, success: true, data: {} }) + "\\n");
-        }
-      }
+      if (line) await handleFrame(JSON.parse(line));
       idx = buffer.indexOf("\\n");
     }
   }
@@ -364,30 +380,38 @@ if (args[0] === "--mode" && args[1] === "rpc") {
 }
 `;
 
-// Fake OMP: RPC mode fails on prompt (warm-bridge failure). --print echoes
+// Fake OMP: wire mode fails on prompt (warm-bridge failure). --print echoes
 // the prompt (successful fallback).
 const FAKE_OMP_FALLBACK_SCRIPT = `#!/usr/bin/env bun
 const args = process.argv.slice(2);
 
-if (args[0] === "--mode" && args[1] === "rpc") {
-  process.stdout.write(JSON.stringify({ type: "ready", protocol_version: 1 }) + "\\n");
+if (args[0] === "--mode" && args[1] === "wire-stdio") {
   let buffer = "";
+  function emit(value) {
+    process.stdout.write(JSON.stringify(value) + "\\n");
+  }
+  async function handleFrame(frame) {
+    if (frame.type === "hello") {
+      emit({ type: "hello_ack", connectionId: "cron-fallback", protocolVersion: 1 });
+      return;
+    }
+    if (frame.type !== "request") return;
+    const cmd = frame.command;
+    if (cmd.type === "switch_session") {
+      emit({ type: "response", id: frame.id, ok: true, result: { cancelled: false } });
+    } else if (cmd.type === "prompt") {
+      emit({ type: "response", id: frame.id, ok: false, error: "simulated warm-bridge failure" });
+    } else {
+      emit({ type: "response", id: frame.id, ok: true, result: {} });
+    }
+  }
   for await (const chunk of Bun.stdin.stream()) {
     buffer += new TextDecoder().decode(chunk);
     let idx = buffer.indexOf("\\n");
     while (idx !== -1) {
       const line = buffer.slice(0, idx).trim();
       buffer = buffer.slice(idx + 1);
-      if (line) {
-        const frame = JSON.parse(line);
-        if (frame.type === "switch_session") {
-          process.stdout.write(JSON.stringify({ type: "response", id: frame.id, command: "switch_session", success: true, data: { cancelled: false } }) + "\\n");
-        } else if (frame.type === "prompt") {
-          process.stdout.write(JSON.stringify({ type: "response", id: frame.id, command: "prompt", success: false, error: "simulated warm-bridge failure" }) + "\\n");
-        } else {
-          process.stdout.write(JSON.stringify({ type: "response", id: frame.id, command: frame.type, success: true, data: {} }) + "\\n");
-        }
-      }
+      if (line) await handleFrame(JSON.parse(line));
       idx = buffer.indexOf("\\n");
     }
   }

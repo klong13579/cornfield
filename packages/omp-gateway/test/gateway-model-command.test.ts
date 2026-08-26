@@ -13,12 +13,14 @@ import { AgentBridge } from "../src/agent-bridge";
 import type { InboundMessage, OutboundMessage } from "../src/types";
 
 const FAKE_RPC_SCRIPT = `#!/usr/bin/env bun
-process.stdout.write(JSON.stringify({ type: "ready", protocol_version: 1 }) + "\\n");
 let currentSession = "";
 let currentModel = { provider: "narwal-plan", id: "deepseek-r1" };
 let buffer = "";
 function emit(value) {
   process.stdout.write(JSON.stringify(value) + "\\n");
+}
+function pushEvent(event) {
+  emit({ type: "push", event: { type: "progress", sessionId: "s1", event } });
 }
 const AVAILABLE_MODELS = [
   { provider: "narwal-plan", id: "deepseek-r1", contextWindow: 64000, reasoning: true },
@@ -26,40 +28,46 @@ const AVAILABLE_MODELS = [
   { provider: "alibaba-coding-plan", id: "qwen3-coder-plus", contextWindow: 131072, reasoning: false },
 ];
 async function handleFrame(frame) {
-  if (frame.type === "switch_session") {
-    currentSession = frame.sessionPath;
-    emit({ type: "response", id: frame.id, command: "switch_session", success: true, data: { cancelled: false } });
+  if (frame.type === "hello") {
+    emit({ type: "hello_ack", connectionId: "model-cmd", protocolVersion: 1 });
     return;
   }
-  if (frame.type === "prompt") {
-    emit({ type: "response", id: frame.id, command: "prompt", success: true });
+  if (frame.type !== "request") return;
+  const cmd = frame.command;
+  if (cmd.type === "switch_session") {
+    currentSession = cmd.sessionPath;
+    emit({ type: "response", id: frame.id, ok: true, result: { cancelled: false } });
+    return;
+  }
+  if (cmd.type === "prompt") {
+    emit({ type: "response", id: frame.id, ok: true });
     const sessionAtPrompt = currentSession;
     setTimeout(() => {
-      emit({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: sessionAtPrompt + " :: " + frame.message }] } });
-      emit({ type: "agent_end" });
+      pushEvent({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: sessionAtPrompt + " :: " + cmd.message }] } });
+      pushEvent({ type: "agent_end" });
     }, 10);
     return;
   }
-  if (frame.type === "abort") {
-    emit({ type: "response", id: frame.id, command: "abort", success: true });
+  if (cmd.type === "abort") {
+    emit({ type: "response", id: frame.id, ok: true });
     return;
   }
-  if (frame.type === "get_available_models") {
-    emit({ type: "response", id: frame.id, command: "get_available_models", success: true, data: { models: AVAILABLE_MODELS } });
+  if (cmd.type === "get_available_models") {
+    emit({ type: "response", id: frame.id, ok: true, result: { models: AVAILABLE_MODELS } });
     return;
   }
-  if (frame.type === "set_model") {
-    const found = AVAILABLE_MODELS.find(m => m.provider === frame.provider && m.id === frame.modelId);
+  if (cmd.type === "set_model") {
+    const found = AVAILABLE_MODELS.find(m => m.provider === cmd.provider && m.id === cmd.modelId);
     if (!found) {
-      emit({ type: "response", id: frame.id, command: "set_model", success: false, error: "No model " + frame.provider + "/" + frame.modelId });
+      emit({ type: "response", id: frame.id, ok: false, error: "No model " + cmd.provider + "/" + cmd.modelId });
       return;
     }
     currentModel = { provider: found.provider, id: found.id };
-    emit({ type: "response", id: frame.id, command: "set_model", success: true, data: found });
+    emit({ type: "response", id: frame.id, ok: true, result: found });
     return;
   }
-  if (frame.type === "get_state") {
-    emit({ type: "response", id: frame.id, command: "get_state", success: true, data: { model: currentModel, thinkingLevel: "medium", isStreaming: false } });
+  if (cmd.type === "get_state") {
+    emit({ type: "response", id: frame.id, ok: true, result: { model: currentModel, thinkingLevel: "medium", isStreaming: false } });
     return;
   }
 }

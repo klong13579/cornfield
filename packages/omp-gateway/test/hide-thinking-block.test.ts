@@ -29,9 +29,45 @@ import type { AgentResponseMeta, DingTalkConfig, InboundMessage, SessionRecord }
 // deltas so the throttled streamAICard actually buffers, and two
 // thinking deltas to give the filter something to drop.
 const FAKE_RPC_SCRIPT = `#!/usr/bin/env bun
-process.stdout.write(JSON.stringify({ type: "ready", protocol_version: 1 }) + "\\n");
 let buffer = "";
 function emit(value) { process.stdout.write(JSON.stringify(value) + "\\n"); }
+function pushEvent(event) { emit({ type: "push", event: { type: "progress", sessionId: "s1", event } }); }
+async function handleFrame(frame) {
+  if (frame.type === "hello") {
+    emit({ type: "hello_ack", connectionId: "hide", protocolVersion: 1 });
+    return;
+  }
+  if (frame.type !== "request") return;
+  const cmd = frame.command;
+  if (cmd.type === "switch_session") {
+    emit({ type: "response", id: frame.id, ok: true, result: { cancelled: false } });
+    return;
+  }
+  if (cmd.type === "prompt") {
+    emit({ type: "response", id: frame.id, ok: true });
+    // Thinking stream
+    pushEvent({ type: "message_update", assistantMessageEvent: { type: "thinking_start", contentIndex: 0 }, message: { role: "assistant", content: [] } });
+    pushEvent({ type: "message_update", assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: "用户问的是具身数据平台 JD。" }, message: { role: "assistant", content: [] } });
+    pushEvent({ type: "message_update", assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: "我应该答 X。" }, message: { role: "assistant", content: [] } });
+    pushEvent({ type: "message_update", assistantMessageEvent: { type: "thinking_end", contentIndex: 0, content: "用户问的是具身数据平台 JD。我应该答 X。" }, message: { role: "assistant", content: [] } });
+    // Text stream
+    pushEvent({ type: "message_update", assistantMessageEvent: { type: "text_start", contentIndex: 1 }, message: { role: "assistant", content: [] } });
+    pushEvent({ type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 1, delta: "这是答案。" }, message: { role: "assistant", content: [] } });
+    // Tool call
+    pushEvent({ type: "message_update", assistantMessageEvent: { type: "toolcall_start", contentIndex: 2 }, message: { role: "assistant", content: [] } });
+    pushEvent({ type: "message_update", assistantMessageEvent: { type: "toolcall_delta", contentIndex: 2, delta: '{"command":"echo hi"}' }, message: { role: "assistant", content: [] } });
+    pushEvent({ type: "message_update", assistantMessageEvent: { type: "toolcall_end", contentIndex: 2, toolCall: { id: "tc1", name: "bash", arguments: { command: "echo hi" } } }, message: { role: "assistant", content: [] } });
+    // Tool result
+    pushEvent({ type: "message_end", message: { role: "toolResult", toolCallId: "tc1", toolName: "bash", isError: false, content: [{ type: "text", text: "hi" }] } });
+    // Final assistant message
+    pushEvent({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "这是答案。" }], model: "test-model", provider: "test", usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, totalTokens: 15 }, duration: 100 } });
+    pushEvent({ type: "agent_end" });
+    return;
+  }
+  if (cmd.type === "abort") {
+    emit({ type: "response", id: frame.id, ok: true });
+  }
+}
 for await (const chunk of Bun.stdin.stream()) {
   buffer += new TextDecoder().decode(chunk);
   let idx = buffer.indexOf("\\n");
@@ -39,31 +75,7 @@ for await (const chunk of Bun.stdin.stream()) {
     const line = buffer.slice(0, idx).trim();
     buffer = buffer.slice(idx + 1);
     if (!line) { idx = buffer.indexOf("\\n"); continue; }
-    const frame = JSON.parse(line);
-    if (frame.type === "switch_session") {
-      emit({ type: "response", id: frame.id, command: "switch_session", success: true, data: { cancelled: false } });
-    } else if (frame.type === "prompt") {
-      emit({ type: "response", id: frame.id, command: "prompt", success: true });
-      // Thinking stream
-      emit({ type: "message_update", assistantMessageEvent: { type: "thinking_start", contentIndex: 0 }, message: { role: "assistant", content: [] } });
-      emit({ type: "message_update", assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: "用户问的是具身数据平台 JD。" }, message: { role: "assistant", content: [] } });
-      emit({ type: "message_update", assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: "我应该答 X。" }, message: { role: "assistant", content: [] } });
-      emit({ type: "message_update", assistantMessageEvent: { type: "thinking_end", contentIndex: 0, content: "用户问的是具身数据平台 JD。我应该答 X。" }, message: { role: "assistant", content: [] } });
-      // Text stream
-      emit({ type: "message_update", assistantMessageEvent: { type: "text_start", contentIndex: 1 }, message: { role: "assistant", content: [] } });
-      emit({ type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 1, delta: "这是答案。" }, message: { role: "assistant", content: [] } });
-      // Tool call
-      emit({ type: "message_update", assistantMessageEvent: { type: "toolcall_start", contentIndex: 2 }, message: { role: "assistant", content: [] } });
-      emit({ type: "message_update", assistantMessageEvent: { type: "toolcall_delta", contentIndex: 2, delta: '{"command":"echo hi"}' }, message: { role: "assistant", content: [] } });
-      emit({ type: "message_update", assistantMessageEvent: { type: "toolcall_end", contentIndex: 2, toolCall: { id: "tc1", name: "bash", arguments: { command: "echo hi" } } }, message: { role: "assistant", content: [] } });
-      // Tool result
-      emit({ type: "message_end", message: { role: "toolResult", toolCallId: "tc1", toolName: "bash", isError: false, content: [{ type: "text", text: "hi" }] } });
-      // Final assistant message
-      emit({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "这是答案。" }], model: "test-model", provider: "test", usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, totalTokens: 15 }, duration: 100 } });
-      emit({ type: "agent_end" });
-    } else if (frame.type === "abort") {
-      emit({ type: "response", id: frame.id, command: "abort", success: true });
-    }
+    await handleFrame(JSON.parse(line));
     idx = buffer.indexOf("\\n");
   }
 }

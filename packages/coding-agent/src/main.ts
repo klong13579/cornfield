@@ -40,7 +40,7 @@ import {
 	MarketplaceManager,
 } from "./extensibility/plugins/marketplace";
 import type { MCPManager } from "./mcp";
-import { InteractiveMode, runAcpMode, runPrintMode, runRpcMode } from "./modes";
+import { InteractiveMode, runAcpMode, runPrintMode, runRpcMode, runWireStdioMode } from "./modes";
 import { initTheme, stopThemeWatcher } from "./modes/theme/theme";
 import type { SubmittedUserInput } from "./modes/types";
 import { type CreateAgentSessionOptions, createAgentSession, discoverAuthStorage } from "./sdk";
@@ -658,7 +658,7 @@ export async function runRootCommand(parsed: Args, rawArgs: string[]): Promise<v
 	if (parsedArgs.noPty) {
 		Bun.env.PI_NO_PTY = "1";
 	}
-	if (parsedArgs.noTitle || parsedArgs.mode === "rpc") {
+	if (parsedArgs.noTitle || parsedArgs.mode === "rpc" || parsedArgs.mode === "wire-stdio") {
 		Bun.env.PI_NO_TITLE = "1";
 	}
 	const { pipedInput, fileText, fileImages } = await logger.time("prepareInitialMessage", async () => {
@@ -816,7 +816,7 @@ export async function runRootCommand(parsed: Args, rawArgs: string[]): Promise<v
 	// logger's console transport writes to stdout by default and must be silenced
 	// before session setup so startup-time warn/info (e.g. Python kernel fallback)
 	// cannot corrupt the protocol stream. File logging is unaffected.
-	if (parsedArgs.mode === "rpc" || parsedArgs.mode === "acp") {
+	if (parsedArgs.mode === "rpc" || parsedArgs.mode === "acp" || parsedArgs.mode === "wire-stdio") {
 		logger.silenceConsoleLogging();
 	}
 
@@ -899,6 +899,8 @@ export async function runRootCommand(parsed: Args, rawArgs: string[]): Promise<v
 
 	if (mode === "rpc") {
 		await runRpcMode(session);
+	} else if (mode === "wire-stdio") {
+		await runWireStdioMode(session);
 	} else if (mode === "acp") {
 		await runAcpMode(session, createAcpSession);
 	} else if (isInteractive) {
