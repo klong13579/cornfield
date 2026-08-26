@@ -305,6 +305,13 @@ export interface ChannelHealth {
 	 * empty/unsupported payloads).
 	 */
 	processedCount: number;
+	/**
+	 * Epoch ms of the last inbound BUSINESS message (0 if none yet). Socket
+	 * liveness (lastSocketAvailableAt) can stay fresh via pong/heartbeat while
+	 * the platform has silently stopped delivering messages — this field
+	 * distinguishes that fake-alive state.
+	 */
+	lastMessageReceivedAt?: number;
 }
 
 // ═══════════════════════════════════════════════════════════════════════

@@ -1656,6 +1656,10 @@ export class DingTalkChannel extends BaseChannel {
 	// future change.
 	#receivedCount = 0;
 	#processedCount = 0;
+	/** Epoch ms of the last inbound business message (not pong/heartbeat).
+	 * Socket liveness can stay fresh while the platform silently stops
+	 * delivering — this field distinguishes that fake-alive state. */
+	#lastMessageReceivedAt = 0;
 
 	async onConnect(config: ChannelConfig): Promise<void> {
 		this.#config = config as DingTalkConfig;
@@ -1820,6 +1824,7 @@ export class DingTalkChannel extends BaseChannel {
 			lastSocketAvailableAt: this.#lastSocketAvailableTime,
 			receivedCount: this.#receivedCount,
 			processedCount: this.#processedCount,
+			lastMessageReceivedAt: this.#lastMessageReceivedAt,
 		};
 	}
 
@@ -2746,6 +2751,7 @@ export class DingTalkChannel extends BaseChannel {
 
 	async #handleMessage(msg: DWClientDownStream): Promise<void> {
 		this.#receivedCount++;
+		this.#lastMessageReceivedAt = Date.now();
 		const { headers, data: rawData } = msg;
 		const messageId = headers.messageId;
 		// Acknowledge immediately
