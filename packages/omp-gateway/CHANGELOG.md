@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- **Fixed: credential resolver env-var aliasing caused per-spawn warning spam** (`src/credential-resolver.ts`): models.yml may alias providers (e.g. `openai` and `narwal-plan` both referencing `NARWAL_PLAN_API_KEY` for the same gateway). Single-pass resolution let iteration order decide whether an aliased env var was reported missing — when the alias without a stored agent.db entry came first, every spawned RPC process emitted one "Credentials not found" warning (170+ in one day's log). Resolution is now two-pass: pass 1 resolves every provider that can resolve; pass 2 reports an env var missing only when no provider referencing it resolved, deduplicated per env var. Test: `test/credential-resolver.test.ts`.
+
 - **Added: per-agent request audit log** (`src/request-audit.ts`, `src/gateway-response.ts`, `src/gateway-message.ts`): every user request (DM or group @-mention) to any IM agent is now appended as one JSONL line to `<agentDir>/logs/requests.jsonl` — sender, senderId, request text (truncated to 500 chars), status (`ok`/`error`/`aborted`), errorType (`repetitive_tool_calls`/`timeout`/`llm_error`/`fallback`/`no_response`/…), durationMs, model, group title. `tryStreamAgentResponse` and `sendAgentResponseViaV1Markdown` now return the `AgentResponseMeta` (previously void/boolean) so the message handler can audit the outcome; follow-up dispatch audits via a marker meta. The file lives in the agent's own workspace so agents can read their own history on demand; it is deliberately NOT registered in prompt-includes. Audit writes never throw on the reply path. Test: `test/request-audit.test.ts`.
 
 
