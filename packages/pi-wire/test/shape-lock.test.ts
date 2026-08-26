@@ -95,6 +95,11 @@ const COMMAND_TYPES = [
 	"get_last_assistant_text",
 	"set_session_name",
 	"get_messages",
+	"get_tool",
+	"get_async_job_snapshot",
+	"format_session_as_text",
+	"get_display_context",
+	"resolve_role_model",
 	// extension
 	"subscribe",
 	"unsubscribe",

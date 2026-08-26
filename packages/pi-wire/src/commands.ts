@@ -128,7 +128,13 @@ export type MultiplexCommand =
 	| { id?: string; type: "get_last_assistant_text"; sessionId?: string }
 	| { id?: string; type: "set_session_name"; sessionId?: string; name: string }
 	// Messages
-	| { id?: string; type: "get_messages"; sessionId?: string };
+	| { id?: string; type: "get_messages"; sessionId?: string }
+	// P3：TUI 渲染/导出查询
+	| { id?: string; type: "get_tool"; sessionId?: string; toolName: string }
+	| { id?: string; type: "get_async_job_snapshot"; sessionId?: string; recentLimit?: number }
+	| { id?: string; type: "format_session_as_text"; sessionId?: string }
+	| { id?: string; type: "get_display_context"; sessionId?: string }
+	| { id?: string; type: "resolve_role_model"; sessionId?: string; role: string };
 
 /** 多端专属命令（rpc-types 没有，wire 层新增）。 */
 export type WireExtensionCommand =

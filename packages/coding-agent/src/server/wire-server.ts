@@ -741,7 +741,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 						fail("no role models for role order");
 						break;
 					}
-					sessionDone({ model: result.model, thinkingLevel: result.thinkingLevel });
+					sessionDone({ model: result.model, thinkingLevel: result.thinkingLevel, role: result.role });
 					break;
 				}
 				case "set_plan_mode": {
@@ -1023,7 +1023,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 					// 语义对齐 rpc-mode：从指定 entry 建 branch 会话，结果带选中文案供编辑器预填。
 					// branch 会替换 session 内容但不保证走事件流 → 加入 MUTATING_NO_EVENT 推权威快照。
 					const result = await session.branch(command.entryId);
-					sessionDone({ text: result.selectedText, cancelled: result.cancelled });
+					sessionDone({ text: result.selectedText, selectedText: result.selectedText, cancelled: result.cancelled });
 					break;
 				}
 				case "fork_from": {
@@ -1067,6 +1067,34 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 				}
 				case "get_messages": {
 					done({ messages: session.messages });
+					break;
+				}
+
+				// ── P3：TUI 渲染/导出查询 ──
+				case "get_tool": {
+					const tool = session.getToolByName(command.toolName);
+					done({ tool: tool ? { name: tool.name, description: tool.description, parameters: tool.parameters } : null });
+					break;
+				}
+				case "get_async_job_snapshot": {
+					done({ jobs: session.getAsyncJobSnapshot({ recentLimit: command.recentLimit }) });
+					break;
+				}
+				case "format_session_as_text": {
+					done({ text: session.formatSessionAsText() });
+					break;
+				}
+				case "get_display_context": {
+					const context = session.buildDisplaySessionContext();
+					done({ context });
+					break;
+				}
+				case "resolve_role_model": {
+					const resolved = session.resolveRoleModelWithThinking(command.role);
+					done({
+						model: resolved.model,
+						thinkingLevel: resolved.explicitThinkingLevel ? resolved.thinkingLevel : undefined,
+					});
 					break;
 				}
 

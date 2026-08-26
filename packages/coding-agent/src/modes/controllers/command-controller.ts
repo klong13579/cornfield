@@ -429,7 +429,11 @@ export class CommandController {
 	}
 
 	async handleJobsCommand(): Promise<void> {
-		const snapshot = this.ctx.session.getAsyncJobSnapshot({ recentLimit: 5 });
+		let snapshot = this.ctx.session.getAsyncJobSnapshot({ recentLimit: 5 });
+		if (this.ctx.wireClient) {
+			const res = await this.ctx.wireClient.sendCommand({ type: "get_async_job_snapshot", recentLimit: 5 });
+			if (res.ok) snapshot = (res as { ok: true; result: { jobs: never } }).result.jobs as never;
+		}
 		if (!snapshot) {
 			this.ctx.showWarning("Async background jobs are unavailable in this session.");
 			return;

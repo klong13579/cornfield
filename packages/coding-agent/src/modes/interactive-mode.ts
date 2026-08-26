@@ -860,7 +860,14 @@ export class InteractiveMode implements InteractiveModeContext {
 	}
 
 	async #applyPlanModeModel(): Promise<void> {
-		const resolved = this.session.resolveRoleModelWithThinking("plan");
+		let resolved = this.session.resolveRoleModelWithThinking("plan");
+		if (this.wireClient) {
+			const res = await this.wireClient.sendCommand({ type: "resolve_role_model", role: "plan" });
+			if (res.ok) {
+				const r = (res as { ok: true; result: { model: never; thinkingLevel?: never } }).result;
+				resolved = { model: r.model, thinkingLevel: r.thinkingLevel, explicitThinkingLevel: r.thinkingLevel !== undefined } as never;
+			}
+		}
 		if (!resolved.model) return;
 
 		const currentModel = this.wireClient?.getSnapshot()?.model ?? this.session.model;
@@ -926,7 +933,11 @@ export class InteractiveMode implements InteractiveModeContext {
 
 		const planFilePath = options?.planFilePath ?? (await this.#getPlanFilePath());
 		const previousTools = this.session.getActiveToolNames();
-		const hasExitTool = this.session.getToolByName("exit_plan_mode") !== undefined;
+		let hasExitTool = this.session.getToolByName("exit_plan_mode") !== undefined;
+		if (this.wireClient) {
+			const res = await this.wireClient.sendCommand({ type: "get_tool", toolName: "exit_plan_mode" });
+			if (res.ok) hasExitTool = (res as { ok: true; result: { tool: unknown } }).result.tool !== null;
+		}
 		const planTools = hasExitTool ? [...previousTools, "exit_plan_mode"] : previousTools;
 		const uniquePlanTools = [...new Set(planTools)];
 
@@ -996,9 +1007,19 @@ export class InteractiveMode implements InteractiveModeContext {
 			// model — leave any unrelated user-queued switch intact.
 			const pending = this.#pendingModelSwitch;
 			if (pending) {
-				const planResolution = this.session.resolveRoleModelWithThinking("plan");
-				if (planResolution.model && modelsAreEqual(pending.model, planResolution.model)) {
-					this.#pendingModelSwitch = undefined;
+				if (this.wireClient) {
+					const res = await this.wireClient.sendCommand({ type: "resolve_role_model", role: "plan" });
+					if (res.ok) {
+						const r = (res as { ok: true; result: { model: never } }).result;
+						if (r.model && modelsAreEqual(pending.model, r.model)) {
+							this.#pendingModelSwitch = undefined;
+						}
+					}
+				} else {
+					const planResolution = this.session.resolveRoleModelWithThinking("plan");
+					if (planResolution.model && modelsAreEqual(pending.model, planResolution.model)) {
+						this.#pendingModelSwitch = undefined;
+					}
 				}
 			}
 		}
