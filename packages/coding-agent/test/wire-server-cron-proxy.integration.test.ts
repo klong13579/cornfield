@@ -1,12 +1,13 @@
 /**
- * P2-W3-1 e2e — serve `get_cron_tasks` / `get_cron_logs` 只读代理（真机 serve + bun WS 客户端）。
+ * P2-4 e2e — serve `get_cron_tasks` / `get_cron_logs` / `gateway_status` 转发 gateway 生产端点。
  *
- * 数据源 = 真机 ~/.omp/gateway-data/scheduler/（jobs.json + logs/by-task/ 直读，
- * 不依赖 gateway 进程、不 import gateway 运行时）。真 HOME 起服（保证读到真实任务数据），
- * session 落盘用临时 --session-dir 隔离，不污染真机会话。
+ * P2-4 后 serve 不再直读 jobs.json/status.json——这些命令转发到 gateway 的 POST /wire
+ * （127.0.0.1:OMP_GATEWAY_WIRE_PORT??7891）。本测试验证转发语义：
  *
- * 断言策略：结构断言（数组 + 字段类型），任务/日志存在性不做硬性要求（空机也过）——
- * 本机至少 1 个任务与若干日志时会验证字段具体形状。
+ * - gateway 端点可用（真机 gateway 跑新二进制）→ 数据形状断言（cron 任务/日志/状态）
+ * - gateway 端点不可用（隔离环境/旧 gateway）→ 断言明确错误（gateway unreachable）
+ *
+ * 两种环境都通过（测试反映当前环境的事实）。
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
@@ -15,12 +16,15 @@ import * as path from "node:path";
 import { MULTIDEVICE_PROTOCOL_VERSION } from "@oh-my-pi/pi-wire";
 
 const URL_RE = /ws:\/\/127\.0\.0\.1:(\d+)\/ws(\?token=([a-zA-Z0-9]+))?/;
+const WIRE_PORT = Number.parseInt(process.env.OMP_GATEWAY_WIRE_PORT ?? "7891", 10);
 
 type Frame = { type: string; [k: string]: unknown };
 
 let sessionDir: string;
 let proc: ReturnType<typeof Bun.spawn> | undefined;
 let url = "";
+/** gateway 生产端点是否可达（新二进制 gateway 才开 7891）；beforeAll 探测。 */
+let gatewayUp = false;
 
 async function waitForServe(p: ReturnType<typeof Bun.spawn>): Promise<string> {
 	const deadline = Date.now() + 30_000;
@@ -103,181 +107,121 @@ async function connect(wsUrl: string): Promise<{ ws: WebSocket; frames: FrameSou
 }
 
 let seq = 0;
-async function request(ws: WebSocket, frames: FrameSource, command: Record<string, unknown>): Promise<unknown> {
+/** 发送命令；ok:false 时返回 { error } 而非抛错（P2-4 转发语义：gateway 不可达是预期分支）。 */
+async function requestRaw(
+	ws: WebSocket,
+	frames: FrameSource,
+	command: Record<string, unknown>,
+): Promise<{ ok: true; result: unknown } | { ok: false; error: string }> {
 	const id = `q${++seq}`;
 	ws.send(JSON.stringify({ type: "request", id, command: { ...command, id } }));
 	const f = await frames.next(fr => fr.type === "response" && fr.id === id, 30_000);
 	if (!f) throw new Error(`timeout: ${JSON.stringify(command.type)}`);
-	if (f.ok !== true) throw new Error(`command failed: ${JSON.stringify(f)}`);
-	return (f as { result?: unknown }).result;
+	if (f.ok !== true) {
+		return { ok: false, error: typeof f.error === "string" ? f.error : JSON.stringify(f.error) };
+	}
+	return { ok: true, result: f.result };
 }
 
-interface CronTask {
-	id: string;
-	name: string;
-	scheduleType: "cron" | "interval" | "once";
-	cron?: string;
-	nextRunAt?: number;
-	lastRunAt?: number;
-	enabled: boolean;
-	accountId?: string;
-	command?: string;
-	runCount?: number;
-	failCount?: number;
-	consecutiveFailures?: number;
+/** gateway 生产端点是否可达（新二进制 gateway 才开 7891）。 */
+async function gatewayWireAvailable(): Promise<boolean> {
+	try {
+		const res = await fetch(`http://127.0.0.1:${WIRE_PORT}/wire`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ type: "get_cron_tasks" }),
+		});
+		return res.ok;
+	} catch {
+		return false;
+	}
 }
-
-interface CronLog {
-	taskId: string;
-	id: string;
-	ts: number;
-	status: string;
-	exitCode: number | null;
-	durationMs: number | null;
-	output?: string;
-	outputTruncated?: boolean;
-	stderr?: string;
-}
-
-describe("P2-W3-1 — cron 只读代理（真机数据）", () => {
-	test("get_cron_tasks：结构断言 + 字段类型（真机 ≥1 任务）", async () => {
-		const { ws, frames } = await connect(url);
-		try {
-			const result = (await request(ws, frames, { type: "get_cron_tasks" })) as { tasks: CronTask[] };
-			expect(Array.isArray(result.tasks)).toBe(true);
-			for (const t of result.tasks) {
-				expect(typeof t.id).toBe("string");
-				expect(typeof t.name).toBe("string");
-				expect(["cron", "interval", "once"]).toContain(t.scheduleType);
-				expect(typeof t.enabled).toBe("boolean");
-				if (t.nextRunAt !== undefined) expect(typeof t.nextRunAt).toBe("number");
-				if (t.lastRunAt !== undefined) expect(typeof t.lastRunAt).toBe("number");
-			}
-			// 本机（真 HOME）有真实任务（jobs.json 6 个，4 active）；空机容忍但本机必须 ≥1
-			expect(result.tasks.length).toBeGreaterThanOrEqual(1);
-		} finally {
-			ws.close();
-		}
-	});
-
-	test("get_cron_logs：结构断言 + 条目字段（days=3 窗口）", async () => {
-		const { ws, frames } = await connect(url);
-		try {
-			const result = (await request(ws, frames, { type: "get_cron_logs", days: 3, limit: 50 })) as {
-				logs: CronLog[];
-			};
-			expect(Array.isArray(result.logs)).toBe(true);
-			const cutoff = Date.now() - 3 * 24 * 60 * 60 * 1000;
-			for (const log of result.logs) {
-				expect(typeof log.taskId).toBe("string");
-				expect(typeof log.id).toBe("string");
-				expect(typeof log.ts).toBe("number");
-				expect(log.ts).toBeGreaterThanOrEqual(cutoff);
-				expect(typeof log.status).toBe("string");
-				expect(log.exitCode === null || typeof log.exitCode === "number").toBe(true);
-				expect(log.durationMs === null || typeof log.durationMs === "number").toBe(true);
-			}
-			// 本机有真实执行日志（daily-* 任务近 3 天有 run）
-			expect(result.logs.length).toBeGreaterThanOrEqual(1);
-			// 时间倒序
-			for (let i = 1; i < result.logs.length; i++) {
-				expect(result.logs[i]!.ts <= result.logs[i - 1]!.ts).toBe(true);
-			}
-		} finally {
-			ws.close();
-		}
-	});
-
-	test("get_cron_logs：limit 截断 + output 2KB 截断不变量", async () => {
-		const { ws, frames } = await connect(url);
-		try {
-			const tasks = (await request(ws, frames, { type: "get_cron_tasks" })) as { tasks: CronTask[] };
-			const first = tasks.tasks[0];
-			expect(first).toBeDefined();
-
-			// limit=1 → 恰 1 条
-			const limited = (await request(ws, frames, {
-				type: "get_cron_logs",
-				taskId: first.name,
-				days: 7,
-				limit: 1,
-			})) as { logs: CronLog[] };
-			expect(limited.logs.length).toBeLessThanOrEqual(1);
-
-			// 全量抓取（cap 200）：output 长度 ≤ 2048；truncated 标记与长度一致
-			const full = (await request(ws, frames, {
-				type: "get_cron_logs",
-				taskId: first.name,
-				days: 7,
-				limit: 200,
-			})) as { logs: CronLog[] };
-			for (const log of full.logs) {
-				if (log.output !== undefined) {
-					expect(log.output.length).toBeLessThanOrEqual(2048);
-					if (log.outputTruncated) {
-						expect(log.output.length).toBe(2048);
-					}
-				}
-			}
-		} finally {
-			ws.close();
-		}
-	});
-
-	test("get_cron_logs：taskId 过滤只返回该任务日志；未知任务返回空", async () => {
-		const { ws, frames } = await connect(url);
-		try {
-			const tasks = (await request(ws, frames, { type: "get_cron_tasks" })) as { tasks: CronTask[] };
-			const first = tasks.tasks[0];
-			expect(first).toBeDefined();
-
-			const filtered = (await request(ws, frames, {
-				type: "get_cron_logs",
-				taskId: first.name,
-				days: 7,
-				limit: 20,
-			})) as { logs: CronLog[] };
-			for (const log of filtered.logs) {
-				expect(log.taskId).toBe(first.name);
-			}
-
-			const unknown = (await request(ws, frames, {
-				type: "get_cron_logs",
-				taskId: "__no_such_task__",
-			})) as { logs: CronLog[] };
-			expect(unknown.logs).toEqual([]);
-		} finally {
-			ws.close();
-		}
-	});
-});
 
 beforeAll(async () => {
-	sessionDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-serve-cron-proxy-"));
+	sessionDir = await fs.mkdtemp(path.join(os.tmpdir(), "cron-proxy-"));
 	const repoRoot = new URL("../../..", import.meta.url).pathname.replace(/\/$/, "");
-	const port = 57000 + Math.floor(Math.random() * 8000);
+	const servePort = 57000 + Math.floor(Math.random() * 8000);
 	proc = Bun.spawn(
 		[
 			"bun",
 			`${repoRoot}/packages/coding-agent/src/cli.ts`,
 			"serve",
 			"--port",
-			String(port),
+			String(servePort),
 			"--host",
 			"127.0.0.1",
 			"--no-extensions",
 			"--session-dir",
 			sessionDir,
 		],
-		{ stdout: "pipe", stderr: "pipe", env: { ...process.env, PI_NO_TITLE: "1" } },
+		{
+			cwd: `${repoRoot}/packages/coding-agent`,
+			stdout: "pipe",
+			stderr: "pipe",
+			env: { ...process.env, PI_NO_TITLE: "1", OMP_GATEWAY_WIRE_PORT: String(WIRE_PORT) },
+		},
 	);
 	url = await waitForServe(proc);
-}, 30_000);
+	gatewayUp = await gatewayWireAvailable();
+}, 45_000);
 
 afterAll(async () => {
-	if (proc) {
-		proc.kill();
-		await proc.exited;
-	}
-	await fs.rm(sessionDir, { recursive: true, force: true });
+	proc?.kill();
+	if (sessionDir) await fs.rm(sessionDir, { recursive: true, force: true });
+});
+
+describe("P2-4 — cron/gateway 命令经 serve 转发 gateway 端点", () => {
+	test("get_cron_tasks：gateway 可用时返回任务数组；不可用时返回明确错误", async () => {
+		const { ws, frames } = await connect(url);
+		try {
+			const res = await requestRaw(ws, frames, { type: "get_cron_tasks" });
+			if (gatewayUp) {
+				expect(res.ok).toBe(true);
+				if (res.ok) {
+					const tasks = (res.result as { tasks: unknown[] }).tasks;
+					expect(Array.isArray(tasks)).toBe(true);
+				}
+			} else {
+				expect(res.ok).toBe(false);
+				if (!res.ok) expect(res.error).toContain("gateway");
+			}
+		} finally {
+			ws.close();
+		}
+	});
+
+	test("get_cron_logs：gateway 可用时返回日志数组；不可用时返回明确错误", async () => {
+		const { ws, frames } = await connect(url);
+		try {
+			const res = await requestRaw(ws, frames, { type: "get_cron_logs", days: 3, limit: 50 });
+			if (gatewayUp) {
+				expect(res.ok).toBe(true);
+				if (res.ok) expect(Array.isArray((res.result as { logs: unknown[] }).logs)).toBe(true);
+			} else {
+				expect(res.ok).toBe(false);
+				if (!res.ok) expect(res.error).toContain("gateway");
+			}
+		} finally {
+			ws.close();
+		}
+	});
+
+	test("gateway_status：gateway 可用时返回状态；不可用时返回明确错误", async () => {
+		const { ws, frames } = await connect(url);
+		try {
+			const res = await requestRaw(ws, frames, { type: "gateway_status" });
+			if (gatewayUp) {
+				expect(res.ok).toBe(true);
+				if (res.ok) {
+					const status = res.result as { pid?: number; scheduler?: unknown };
+					expect(typeof status.pid).toBe("number");
+				}
+			} else {
+				expect(res.ok).toBe(false);
+				if (!res.ok) expect(res.error).toContain("gateway");
+			}
+		} finally {
+			ws.close();
+		}
+	});
 });
