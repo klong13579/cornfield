@@ -694,9 +694,11 @@ export async function runWireStdioMode(session: AgentSession): Promise<never> {
 			}
 
 			case "switch_session": {
-				// WireCommand.switch_session 语义是 wire 多 agent 注册表切换（sessionId = 注册名）；
-				// wire-stdio 子进程固定一个 agent，切换由 gateway 按账号 spawn 新子进程承担。
-				return fail(id, "Command not implemented in wire-stdio mode: switch_session");
+				// 与 RPC 模式同语义：切换当前 agent 的会话文件。
+				// （WireCommand.switch_session 的注册表语义仅 serve/wire-server 面使用；
+				// bridge 在此传 sessionPath，语义等于 RPC 模式。）
+				const cancelled = !(await session.switchSession(command.sessionPath));
+				return success(id, { cancelled });
 			}
 
 			case "branch": {
