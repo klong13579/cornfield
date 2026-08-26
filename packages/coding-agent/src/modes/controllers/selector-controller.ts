@@ -715,10 +715,18 @@ export class SelectorController {
 					}
 
 					try {
-						const result = await this.ctx.session.navigateTree(entryId, {
-							summarize: wantsSummary,
-							customInstructions,
-						});
+						const result = this.ctx.wireClient
+							? (await this.ctx.wireClient.sendCommand({
+									type: "navigate_tree",
+									targetId: entryId,
+									summarize: wantsSummary,
+								})).ok
+								? { cancelled: false }
+								: { cancelled: true }
+							: await this.ctx.session.navigateTree(entryId, {
+									summarize: wantsSummary,
+									customInstructions,
+								});
 
 						if (result.aborted) {
 							// Summarization aborted - re-show tree selector

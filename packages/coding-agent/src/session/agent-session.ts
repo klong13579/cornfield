@@ -2130,6 +2130,9 @@ export class AgentSession {
 	/**
 	 * Get a tool by name from the registry.
 	 */
+	/**
+	 * @internal TUI 渲染/内部 seam（P3 收窄：快照 tools 元数据替代渲染读；wire 面见 get_tool）。
+	 */
 	getToolByName(name: string): AgentTool | undefined {
 		return this.#toolRegistry.get(name);
 	}
@@ -6762,6 +6765,7 @@ export class AgentSession {
 	 * @param options.customInstructions Custom instructions for summarizer
 	 * @returns Result with editorText (if user message) and cancelled status
 	 */
+	/** @internal TUI/扩展进程内导航（P3 收窄：wire 面见 navigate_tree）。 */
 	async navigateTree(
 		targetId: string,
 		options: { summarize?: boolean; customInstructions?: string } = {},

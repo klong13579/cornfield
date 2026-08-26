@@ -66,6 +66,14 @@ export class SessionStore {
 			description: s.description,
 		})),
 		configWarnings: session.configWarnings,
+		tools: session
+			.getActiveToolNames()
+			.flatMap(name => {
+				const tool = session.getToolByName(name);
+				if (!tool) return [];
+				const parameters = tool.parameters as Record<string, unknown> | undefined;
+				return [{ name: tool.name, description: tool.description, ...(parameters ? { parameters } : {}) }];
+			}),
 			phase: this.#phase,
 			retryAttempt: this.#retryAttempt,
 			isCompacting: session.isCompacting,

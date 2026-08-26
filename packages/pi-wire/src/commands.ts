@@ -132,6 +132,7 @@ export type MultiplexCommand =
 	 */
 	| { id?: string; type: "switch_session"; sessionId: string }
 	| { id?: string; type: "branch"; sessionId?: string; entryId: string }
+	| { id?: string; type: "navigate_tree"; sessionId?: string; targetId: string; summarize?: boolean }
 	| { id?: string; type: "fork_from"; sessionId?: string; entryId: string }
 	| { id?: string; type: "undo_exchange"; sessionId?: string; entryId: string }
 	| { id?: string; type: "retry_from"; sessionId?: string; entryId: string; message?: string; images?: ImageContent[] }

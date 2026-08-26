@@ -1044,6 +1044,11 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 					done(session.getSessionStats());
 					break;
 				}
+				case "navigate_tree": {
+					const result = await session.navigateTree(command.targetId, { summarize: command.summarize });
+					sessionDone({ cancelled: result.cancelled });
+					break;
+				}
 				case "branch": {
 					// 语义对齐 rpc-mode：从指定 entry 建 branch 会话，结果带选中文案供编辑器预填。
 					// branch 会替换 session 内容但不保证走事件流 → 加入 MUTATING_NO_EVENT 推权威快照。

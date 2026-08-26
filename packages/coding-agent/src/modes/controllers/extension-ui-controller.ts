@@ -232,7 +232,11 @@ export class ExtensionUiController {
 				return { cancelled: false };
 			},
 			navigateTree: async (targetId, options) => {
-				const result = await this.ctx.session.navigateTree(targetId, { summarize: options?.summarize });
+				const result = this.ctx.wireClient
+						? (await this.ctx.wireClient.sendCommand({ type: "navigate_tree", targetId, summarize: options?.summarize })).ok
+							? { cancelled: false }
+							: { cancelled: true }
+						: await this.ctx.session.navigateTree(targetId, { summarize: options?.summarize });
 				if (result.cancelled) {
 					return { cancelled: true };
 				}
@@ -511,7 +515,11 @@ export class ExtensionUiController {
 				if (this.ctx.isBackgrounded) {
 					return { cancelled: true };
 				}
-				const result = await this.ctx.session.navigateTree(targetId, { summarize: options?.summarize });
+				const result = this.ctx.wireClient
+						? (await this.ctx.wireClient.sendCommand({ type: "navigate_tree", targetId, summarize: options?.summarize })).ok
+							? { cancelled: false }
+							: { cancelled: true }
+						: await this.ctx.session.navigateTree(targetId, { summarize: options?.summarize });
 				if (result.cancelled) {
 					return { cancelled: true };
 				}

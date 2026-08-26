@@ -51,6 +51,7 @@ export interface SessionSnapshot {
 	// ── 队列（只暴露计数）──
 	queuedMessageCount: number;
 	// ── TUI 渲染补充（P3：slash 命令/skill 命令/配置警告）──
+	tools?: Array<{ name: string; description: string; parameters?: Record<string, unknown> }>;
 	customCommands?: Array<{ name: string; description: string; source: string }>;
 	skills?: Array<{ name: string; filePath: string; description: string }>;
 	configWarnings?: string[];

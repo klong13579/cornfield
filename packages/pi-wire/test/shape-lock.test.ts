@@ -88,6 +88,7 @@ const COMMAND_TYPES = [
 	"get_session_stats",
 	"switch_session",
 	"branch",
+	"navigate_tree",
 	"fork_from",
 	"undo_exchange",
 	"retry_from",
