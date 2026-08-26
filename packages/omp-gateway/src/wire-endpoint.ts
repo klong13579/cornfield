@@ -16,13 +16,8 @@ export interface GatewayWireDeps {
 	storage: SchedulerStorage;
 	/** scheduler reload 触发（test-run 用；gateway 启动时装配）。 */
 	reloadScheduler?: () => Promise<void> | void;
-	/** gateway 进程内状态（status.json 的权威源）。 */
-	gatewayStatus: () => {
-		pid: number;
-		statusWrittenAt: number;
-		accounts: Array<{ accountId: string; agentDir: string; running: boolean }>;
-		scheduler: { running: boolean; taskCount: number };
-	};
+	/** gateway 进程内状态（status.json 的权威源；gateway.getStatus() 的实现）。 */
+	gatewayStatus: () => Promise<unknown>;
 }
 
 export type GatewayWireResult = { ok: true; result: unknown } | { ok: false; error: string };
@@ -184,7 +179,7 @@ export async function handleGatewayWireCommand(
 		}
 
 		case "gateway_status": {
-			return { ok: true, result: gatewayStatus() };
+			return { ok: true, result: await gatewayStatus() };
 		}
 
 		default:

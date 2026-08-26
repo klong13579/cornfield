@@ -19,7 +19,7 @@ describe("gateway wire endpoint", () => {
 		storage = new SchedulerDbStorage(path.join(dir, "scheduler.db"));
 		deps = {
 			storage,
-			gatewayStatus: () => ({
+			gatewayStatus: async () => ({
 				pid: 4242,
 				statusWrittenAt: Date.now(),
 				accounts: [{ accountId: "hr", agentDir: dir, running: true }],
