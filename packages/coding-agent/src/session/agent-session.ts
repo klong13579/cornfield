@@ -2378,6 +2378,7 @@ export class AgentSession {
 		return this.#autoCompactionAbortController !== undefined || this.#compactionAbortController !== undefined;
 	}
 
+/** @internal TUI 进程内渲染实现（P3：同步渲染/回调语义，不进 wire 协议面；wire 面见 get_display_context/format_session_as_text/get_async_job_snapshot 等命令）。 */
 	/** All messages including custom types like BashExecutionMessage */
 	get messages(): AgentMessage[] {
 		return this.agent.state.messages;
@@ -6343,6 +6344,7 @@ export class AgentSession {
 		void this.#emitSessionEvent({ type: "irc_message", message: record });
 	}
 
+/** @internal TUI 进程内渲染实现（P3：同步渲染/回调语义，不进 wire 协议面；wire 面见 get_display_context/format_session_as_text/get_async_job_snapshot 等命令）。 */
 	/**
 	 * Run a single ephemeral side-channel turn against this session's current
 	 * model + system prompt + history.  No tools are used; the side request
@@ -6750,6 +6752,7 @@ export class AgentSession {
 	// Tree Navigation
 	// =========================================================================
 
+/** @internal TUI 进程内渲染实现（P3：同步渲染/回调语义，不进 wire 协议面；wire 面见 get_display_context/format_session_as_text/get_async_job_snapshot 等命令）。 */
 	/**
 	 * Navigate to a different node in the session tree.
 	 * Unlike branch() which creates a new session file, this stays in the same file.
@@ -7184,6 +7187,7 @@ export class AgentSession {
 		return text.trim() || undefined;
 	}
 
+/** @internal TUI 进程内渲染实现（P3：同步渲染/回调语义，不进 wire 协议面；wire 面见 get_display_context/format_session_as_text/get_async_job_snapshot 等命令）。 */
 	/**
 	 * Format the entire session as plain text for clipboard export.
 	 * Includes user messages, assistant text, thinking blocks, tool calls, and tool results.
