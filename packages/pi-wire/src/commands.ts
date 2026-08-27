@@ -130,8 +130,11 @@ export type MultiplexCommand =
 	 * P3: 切换本连接的 active session。入参为 agent 注册名。
 	 * 切换后：本连接后续无 sessionId 的命令都默认这个 session；
 	 * server 主动 push session_snapshot(sessionId=新)。
+	 *
+	 * gateway 面（bridge → wire-stdio）复用此命令做会话文件切换：
+	 * 传 `sessionPath`（RPC 语义），子进程加载指定会话文件。
 	 */
-	| { id?: string; type: "switch_session"; sessionId: string }
+	| { id?: string; type: "switch_session"; sessionId: string; sessionPath?: string }
 	| { id?: string; type: "branch"; sessionId?: string; entryId: string }
 	| { id?: string; type: "fork_from"; sessionId?: string; entryId: string }
 	| { id?: string; type: "undo_exchange"; sessionId?: string; entryId: string }
