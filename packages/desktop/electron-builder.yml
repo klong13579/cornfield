@@ -2,6 +2,10 @@
 # 一键打包入口：bun run build:desktop（先构建 web-app 与 omp，再 electron-builder 出 dmg/zip）。
 appId: com.narwal.omp-desktop
 productName: OMP Desktop
+# artifactName 用连字符命名（无空格）：GitHub Release 上传时会把空格替换成
+# 点（OMP Desktop → OMP.Desktop），导致 latest-mac.yml 里的 URL 与真实资产名
+# 不匹配，客户端 updater 下载 404。
+artifactName: OMP-Desktop-${version}-${arch}.${ext}
 directories:
   output: dist
 files:
