@@ -70,7 +70,44 @@ async function main(): Promise<void> {
 		return;
 	}
 
-	await $`bun run build`;
+	// 并行竞争防护：`bun run --workspaces build` 时 stats 的 build 与
+	// coding-agent 的 build（本脚本）同时操作 dist/client。本脚本不再自己
+	// 触发 build，而是等待并行 stats build 产出完整 dist/client
+	// （index.js + index.html 均存在，且连续 1s 稳定）；超时（独立运行、
+	// 无并行 build 时）再自行构建兑底。
+	const BUILD_READY_TIMEOUT_MS = 120_000;
+	const deadline = Date.now() + BUILD_READY_TIMEOUT_MS;
+	let ready = false;
+	while (Date.now() < deadline) {
+		const hasIndexJs = await fs
+			.access(path.join(DIST_CLIENT_DIR, "index.js"))
+			.then(() => true)
+			.catch(() => false);
+		const hasIndexHtml = await fs
+			.access(path.join(DIST_CLIENT_DIR, "index.html"))
+			.then(() => true)
+			.catch(() => false);
+		if (hasIndexJs && hasIndexHtml) {
+			// 稳定窗口：并行 build 可能正在 rm+重建，文件齐全后等 1s 确认
+			// 没有再次被 rm（stats build 只 rm 一次，完成后不再动 dist/client）。
+			await Bun.sleep(1_000);
+			const stillThere = await fs
+				.access(path.join(DIST_CLIENT_DIR, "index.js"))
+				.then(() => true)
+				.catch(() => false);
+			if (stillThere) {
+				ready = true;
+				break;
+			}
+		} else {
+			await Bun.sleep(250);
+		}
+	}
+	if (!ready) {
+		console.log("dist/client not ready after wait; building stats client inline");
+		await $`bun run build`;
+	}
+
 	const archiveBase64 = await buildArchiveBase64(DIST_CLIENT_DIR);
 	await Bun.write(GENERATED_FILE, archiveBase64);
 	console.log(`Generated ${GENERATED_FILE}`);
