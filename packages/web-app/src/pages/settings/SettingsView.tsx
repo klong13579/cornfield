@@ -23,7 +23,8 @@ interface DesktopBridgeApi {
 		onUpdateProgress: (cb: (p: { percent: number; bytesPerSecond: number }) => void) => () => void;
 		onUpdateDownloaded: (cb: () => void) => () => void;
 		downloadUpdate: () => Promise<{ ok: boolean; error?: string }>;
-		installUpdate: () => void;
+		installUpdate: () => Promise<{ ok: boolean; error?: string }>;
+		hasDownloadedUpdate: () => Promise<boolean>;
 		checkUpdate: () => Promise<{ ok: boolean; error?: string }>;
 	};
 }
@@ -51,7 +52,7 @@ export function SettingsView(): React.JSX.Element {
 	const [desktopVersion, setDesktopVersion] = useState<string | null>(null);
 	/** 新版本可用提示（desktop 壳更新事件；状态机 available→downloading→downloaded；idle=未检查/无更新）。 */
 	const [updateState, setUpdateState] = useState<
-		"idle" | "checking" | "available" | "downloading" | "downloaded" | "error"
+		"idle" | "checking" | "available" | "downloading" | "downloaded" | "installing" | "error"
 	>("idle");
 	const [updateProgress, setUpdateProgress] = useState(0);
 	const [updateError, setUpdateError] = useState<string | null>(null);
@@ -130,9 +131,16 @@ export function SettingsView(): React.JSX.Element {
 		}
 	};
 	/** 用户点「重启更新」：quitAndInstall 立即重启应用完成安装。 */
-	const installUpdateNow = (): void => {
+	const installUpdateNow = async (): Promise<void> => {
 		const api = (window as typeof window & { api?: DesktopBridgeApi }).api;
-		api?.app?.installUpdate?.();
+		if (!api?.app?.installUpdate) return;
+		setUpdateError(null);
+		setUpdateState("installing");
+		const res = await api.app.installUpdate();
+		if (!res?.ok) {
+			setUpdateError(res?.error ?? "重启更新失败");
+			setUpdateState("error");
+		}
 	};
 
 	// 桌面壳版本 + 更新流：Electron 环境经 window.api.app 读；网页直开无 api → 静默不处理。
@@ -142,6 +150,13 @@ export function SettingsView(): React.JSX.Element {
 		Promise.resolve(api.app.getVersion())
 			.then(v => setDesktopVersion(String(v)))
 			.catch(() => setDesktopVersion(null));
+		// 已下载状态持久化：重进设置页时 update-downloaded 事件不会重放，
+		// 从 main 查询 pending zip 是否存在来恢复「重启更新」按钮。
+		Promise.resolve(api.app.hasDownloadedUpdate?.())
+			.then(has => {
+				if (has) setUpdateState("downloaded");
+			})
+			.catch(() => {});
 		const unsubAvailable = api.app.onUpdateAvailable?.(() => setUpdateState("available"));
 		const unsubNotAvailable = api.app.onUpdateNotAvailable?.(() => setUpdateState("idle"));
 		const unsubProgress = api.app.onUpdateProgress?.(p => {
@@ -159,7 +174,7 @@ export function SettingsView(): React.JSX.Element {
 
 	return (
 		<div className="px-10 pt-8 pb-12">
-			<div className="mx-auto max-w-[720px]">
+			<div className="mx-auto page-narrow">
 				<h1 className="mb-8 text-[32px] font-semibold tracking-[-0.8px] text-ink">设置</h1>
 
 				<section className="mb-9">
@@ -171,7 +186,7 @@ export function SettingsView(): React.JSX.Element {
 								{view.reconnecting ? "重连中（指数退避）" : "connected"}
 							</span>
 						</Row>
-						<Row k="Connection ID">
+						<Row k="连接 ID">
 							<span className="font-mono text-[11px] text-ink">{view.connectionId ?? "—"}</span>
 						</Row>
 						<Row k="协议版本">
@@ -218,12 +233,13 @@ export function SettingsView(): React.JSX.Element {
 									{updateState === "downloaded" && (
 										<button
 											type="button"
-											onClick={installUpdateNow}
+											onClick={() => void installUpdateNow()}
 											className="rounded border border-accent px-2 py-0.5 text-[11px] font-medium hover:bg-accent-dim"
 										>
 											重启更新
 										</button>
 									)}
+									{updateState === "installing" && <span className="text-[11px]">正在重启…</span>}
 									{updateState === "error" && (
 										<span className="text-[11px] text-danger">更新下载失败：{updateError}</span>
 									)}
@@ -243,7 +259,7 @@ export function SettingsView(): React.JSX.Element {
 									value={wsUrl}
 									onChange={e => setWsUrl(e.target.value)}
 									placeholder={DEFAULT_SERVE_CONFIG.wsUrl}
-									className="flex-1 rounded border border-hairline bg-surface-2 px-2.5 py-1.5 font-mono text-[12px] text-ink outline-none focus:border-accent focus:shadow-[0_0_0_3px_var(--color-accent-dim)]"
+									className="flex-1 rounded border border-hairline bg-surface-2 px-2.5 py-1.5 font-mono text-[12px] text-ink focus:border-accent focus:shadow-[0_0_0_3px_var(--color-accent-dim)]"
 								/>
 							</div>
 						</div>
@@ -258,7 +274,7 @@ export function SettingsView(): React.JSX.Element {
 									value={token}
 									onChange={e => setToken(e.target.value)}
 									placeholder="serve 启动时打印的 token"
-									className="flex-1 rounded border border-hairline bg-surface-2 px-2.5 py-1.5 font-mono text-[12px] text-ink outline-none focus:border-accent focus:shadow-[0_0_0_3px_var(--color-accent-dim)]"
+									className="flex-1 rounded border border-hairline bg-surface-2 px-2.5 py-1.5 font-mono text-[12px] text-ink focus:border-accent focus:shadow-[0_0_0_3px_var(--color-accent-dim)]"
 								/>
 								<button
 									type="button"
@@ -283,7 +299,7 @@ export function SettingsView(): React.JSX.Element {
 										setWorkspaceSaved(false);
 									}}
 									placeholder="~/workspace"
-									className="flex-1 rounded border border-hairline bg-surface-2 px-2.5 py-1.5 font-mono text-[12px] text-ink outline-none placeholder:text-ink-faint focus:border-accent focus:shadow-[0_0_0_3px_var(--color-accent-dim)]"
+									className="flex-1 rounded border border-hairline bg-surface-2 px-2.5 py-1.5 font-mono text-[12px] text-ink placeholder:text-ink-faint focus:border-accent focus:shadow-[0_0_0_3px_var(--color-accent-dim)]"
 								/>
 								<button
 									type="button"
@@ -308,12 +324,6 @@ export function SettingsView(): React.JSX.Element {
 							<span className="flex gap-1.5">
 								<span className="rounded bg-accent px-2.5 py-1 text-[12px] font-medium text-on-accent">
 									亮色（V6）
-								</span>
-								<span
-									className="rounded border border-hairline px-2.5 py-1 text-[12px] text-ink-faint"
-									title="深色 token 待落地"
-								>
-									深色（TODO）
 								</span>
 							</span>
 						</Row>
@@ -419,7 +429,7 @@ export function SettingsView(): React.JSX.Element {
 										onChange={e => setAppKey(e.target.value)}
 										disabled
 										placeholder="（配置存本地 gateway.json，编辑待接入）"
-										className="rounded border border-hairline bg-surface-2 px-2.5 py-1.5 font-mono text-[12px] text-ink outline-none placeholder:text-ink-faint focus:border-accent focus:shadow-[0_0_0_3px_var(--color-accent-dim)]"
+										className="rounded border border-hairline bg-surface-2 px-2.5 py-1.5 font-mono text-[12px] text-ink placeholder:text-ink-faint focus:border-accent focus:shadow-[0_0_0_3px_var(--color-accent-dim)]"
 									/>
 								</label>
 								<label className="flex flex-col gap-1 text-[11px] text-ink-subtle">
@@ -430,7 +440,7 @@ export function SettingsView(): React.JSX.Element {
 										disabled
 										type="password"
 										placeholder="••••••"
-										className="rounded border border-hairline bg-surface-2 px-2.5 py-1.5 font-mono text-[12px] text-ink outline-none placeholder:text-ink-faint focus:border-accent focus:shadow-[0_0_0_3px_var(--color-accent-dim)]"
+										className="rounded border border-hairline bg-surface-2 px-2.5 py-1.5 font-mono text-[12px] text-ink placeholder:text-ink-faint focus:border-accent focus:shadow-[0_0_0_3px_var(--color-accent-dim)]"
 									/>
 								</label>
 							</div>
@@ -451,8 +461,7 @@ export function SettingsView(): React.JSX.Element {
 					<div className="flex gap-3">
 						<button
 							type="button"
-							className="btn btn-danger btn-sm"
-							title="后端暂无会话删除命令：点击仅开启新会话，不会清除历史记录（缺口 B6）"
+							className="btn btn-secondary btn-sm"
 							onClick={() => {
 								if (
 									window.confirm("后端尚无会话删除命令 —— 此操作仅开启新会话，不会清除任何历史记录。继续？")
@@ -461,7 +470,7 @@ export function SettingsView(): React.JSX.Element {
 								}
 							}}
 						>
-							清除会话记录
+							新建会话
 						</button>
 						<button
 							type="button"
@@ -763,7 +772,7 @@ function McpServerSection(): React.JSX.Element {
 								value={formName}
 								onChange={e => setFormName(e.target.value)}
 								placeholder="如 gitnexus"
-								className="rounded border border-hairline bg-surface-2 px-2.5 py-1.5 font-mono text-[12px] text-ink outline-none placeholder:text-ink-faint focus:border-accent focus:shadow-[0_0_0_3px_var(--color-accent-dim)]"
+								className="rounded border border-hairline bg-surface-2 px-2.5 py-1.5 font-mono text-[12px] text-ink placeholder:text-ink-faint focus:border-accent focus:shadow-[0_0_0_3px_var(--color-accent-dim)]"
 							/>
 						</label>
 						<label className="flex flex-col gap-1 text-[11px] text-ink-subtle">
@@ -772,7 +781,7 @@ function McpServerSection(): React.JSX.Element {
 								value={formCommand}
 								onChange={e => setFormCommand(e.target.value)}
 								placeholder="如 node"
-								className="rounded border border-hairline bg-surface-2 px-2.5 py-1.5 font-mono text-[12px] text-ink outline-none placeholder:text-ink-faint focus:border-accent focus:shadow-[0_0_0_3px_var(--color-accent-dim)]"
+								className="rounded border border-hairline bg-surface-2 px-2.5 py-1.5 font-mono text-[12px] text-ink placeholder:text-ink-faint focus:border-accent focus:shadow-[0_0_0_3px_var(--color-accent-dim)]"
 							/>
 						</label>
 						<label className="flex flex-col gap-1 text-[11px] text-ink-subtle">
@@ -781,7 +790,7 @@ function McpServerSection(): React.JSX.Element {
 								value={formArgs}
 								onChange={e => setFormArgs(e.target.value)}
 								placeholder="单行输入，空格分隔，支持引号/反斜杠转义"
-								className="rounded border border-hairline bg-surface-2 px-2.5 py-1.5 font-mono text-[12px] text-ink outline-none placeholder:text-ink-faint focus:border-accent focus:shadow-[0_0_0_3px_var(--color-accent-dim)]"
+								className="rounded border border-hairline bg-surface-2 px-2.5 py-1.5 font-mono text-[12px] text-ink placeholder:text-ink-faint focus:border-accent focus:shadow-[0_0_0_3px_var(--color-accent-dim)]"
 							/>
 							<div className="text-[10px] text-ink-faint">
 								按 shell 词法拆分：空格/制表符分隔，双引号 "" 或单引号 '' 包裹含空格参数，反斜杠转义单个字符。
