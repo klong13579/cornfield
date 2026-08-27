@@ -44,6 +44,7 @@ packages/ai/test/.temp-images/
 .omp/plugins/
 .omp/self-evolution/
 .omp/design-refs/
+.omp/evolution/
 .pi_config/
 .opencode/
 .worktrees/
