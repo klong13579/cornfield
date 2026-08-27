@@ -174,13 +174,14 @@ test("听记：历史真实加载 + 假麦克风四态 UI 链路", async ({ page
 
 		// ── B. 假麦克风四态：录音 → 停止 → 转写 → 错误态（链路连通） ──
 		await page.getByRole("button", { name: "开始录音" }).click();
-		// recording：orb listening 动效 + 计时出现
-		await page.waitForFunction(() => /^\d{2}:\d{2}$/m.test(document.body.textContent ?? ""), undefined, {
-			timeout: 8_000,
-		});
+		// recording：orb listening 动效 + 计时出现（元素级断言——textContent 无换行，行锚正则永不匹配）
+		await page
+			.getByText(/^\d{2}:\d{2}$/)
+			.first()
+			.waitFor({ state: "visible", timeout: 8_000 });
 		await page.waitForTimeout(1_200);
 		await page.screenshot({ path: path.join("test-results", "listen-recording.png"), fullPage: true });
-		await page.getByRole("button", { name: "停止并转写" }).click();
+		await page.getByText("停止并转写", { exact: true }).click();
 		// 转写中（orb working + 转写中文案）
 		await page.getByText("转写中…", { exact: false }).first().waitFor({ state: "visible", timeout: 5_000 });
 		// 静音音频 → whisper 无文本 → 服务端 ok:false → UI 错误态

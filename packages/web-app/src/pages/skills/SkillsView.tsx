@@ -213,16 +213,16 @@ export function SkillsView(): React.JSX.Element {
 
 	return (
 		<div className="px-10 pt-8 pb-12">
-			<div className="mx-auto max-w-[900px]">
+			<div className="mx-auto page-narrow">
 				<div className="mb-6 flex items-center justify-between gap-4">
 					<h1 className="text-[32px] font-semibold tracking-[-0.8px] text-ink">技能</h1>
 					<div className="flex items-center gap-3">
-						<label className="flex items-center gap-1.5 text-[11.5px] text-ink-subtle">
+						<label className="flex items-center gap-1.5 text-2xs text-ink-subtle">
 							<input
 								type="checkbox"
 								checked={showDisabled}
 								onChange={e => setShowDisabled(e.target.checked)}
-								className="h-3.5 w-3.5 accent-[var(--color-accent)]"
+								className="h-3.5 w-3.5 accent-accent"
 							/>
 							显示已停用
 						</label>
@@ -242,15 +242,15 @@ export function SkillsView(): React.JSX.Element {
 				{/* 开源 Skill Hub（h2）——远程技能市场浏览 + 安装。加载/安装中/失败均可见，不崩页。 */}
 				<div className="mb-6 overflow-hidden rounded-xl border border-hairline bg-surface">
 					<div className="flex items-center gap-2.5 px-5 py-3">
-						<span className="text-[12px] font-semibold tracking-[0.06em] text-ink uppercase">开源 Skill Hub</span>
-						<span className="font-mono text-[11px] text-ink-faint">远程技能市场</span>
+						<span className="text-xs font-semibold tracking-[0.06em] text-ink uppercase">开源 Skill Hub</span>
+						<span className="font-mono text-xs text-ink-faint">远程技能市场</span>
 						<span className="ml-auto flex items-center gap-2">
-							{hubNotice && <span className="text-[11.5px] text-success">{hubNotice}</span>}
+							{hubNotice && <span className="text-2xs text-success">{hubNotice}</span>}
 							<button
 								type="button"
 								onClick={() => void loadRemote()}
 								disabled={!view.connected || hubLoading}
-								className="rounded-md border border-hairline bg-surface-2 px-2.5 py-1 text-[11.5px] text-ink-subtle transition-colors hover:border-hairline-strong hover:text-ink disabled:cursor-default disabled:opacity-60"
+								className="rounded-md border border-hairline bg-surface-2 px-2.5 py-1 text-2xs text-ink-subtle transition-colors hover:border-hairline-strong hover:text-ink disabled:cursor-default disabled:opacity-60"
 							>
 								{hubLoading ? "加载中…" : remote ? "刷新" : "加载"}
 							</button>
@@ -259,35 +259,31 @@ export function SkillsView(): React.JSX.Element {
 
 					<div className="border-t border-hairline">
 						{!view.connected ? (
-							<div className="px-5 py-6 text-center text-[12px] text-ink-faint">未连接——远程技能市场不可用</div>
+							<div className="px-5 py-6 text-center text-xs text-ink-faint">未连接——远程技能市场不可用</div>
 						) : hubLoading && remote === null ? (
-							<div className="px-5 py-6 text-center text-[12px] text-ink-faint">正在加载远程技能市场…</div>
+							<div className="px-5 py-6 text-center text-xs text-ink-faint">正在加载远程技能市场…</div>
 						) : hubError && remote === null ? (
-							<div className="px-5 py-6 text-center text-[12px] text-ink-faint">
-								远程技能市场不可用：{hubError}
-							</div>
+							<div className="px-5 py-6 text-center text-xs text-ink-faint">远程技能市场不可用：{hubError}</div>
 						) : remote === null ? (
-							<div className="px-5 py-6 text-center text-[12px] text-ink-faint">
-								点击「加载」浏览开源技能市场
-							</div>
+							<div className="px-5 py-6 text-center text-xs text-ink-faint">点击「加载」浏览开源技能市场</div>
 						) : remote.length === 0 ? (
-							<div className="px-5 py-6 text-center text-[12px] text-ink-faint">远程技能市场当前无可安装项</div>
+							<div className="px-5 py-6 text-center text-xs text-ink-faint">远程技能市场当前无可安装项</div>
 						) : (
 							<div>
 								{(hubGroups ?? []).map(group => (
 									<div key={group.type} className="border-t border-hairline first:border-t-0">
-										<div className="sticky top-0 z-10 border-b border-hairline bg-surface">
+										<div className="sticky top-0 z-sticky border-b border-hairline bg-surface">
 											<button
 												type="button"
 												onClick={() => toggleGroup(group.type)}
-												className="flex w-full items-center gap-1.5 px-5 py-1.5 text-left text-[11px] font-semibold tracking-[0.08em] text-ink-faint uppercase transition-colors hover:bg-surface-2 hover:text-ink-subtle"
+												className="flex w-full items-center gap-1.5 px-5 py-1.5 text-left text-xs font-semibold section-title text-ink-faint uppercase transition-colors hover:bg-surface-2 hover:text-ink-subtle"
 												aria-expanded={!collapsedGroups.has(group.type)}
 											>
 												<span className="inline-block w-3 text-[9px]">
 													{collapsedGroups.has(group.type) ? "▸" : "▾"}
 												</span>
 												<span>{group.type}</span>
-												<span className="ml-1 font-mono text-[10px]">
+												<span className="ml-1 font-mono text-xs">
 													{group.categories.reduce((n, c) => n + c.items.length, 0)}
 												</span>
 											</button>
@@ -304,12 +300,8 @@ export function SkillsView(): React.JSX.Element {
 														<span className="inline-block w-3 text-[9px] text-ink-faint">
 															{collapsedGroups.has(`${group.type}#${cat.label}`) ? "▸" : "▾"}
 														</span>
-														<span className="text-[10.5px] font-semibold text-ink-subtle">
-															{cat.label}
-														</span>
-														<span className="font-mono text-[9.5px] text-ink-faint">
-															{cat.items.length}
-														</span>
+														<span className="text-3xs font-semibold text-ink-subtle">{cat.label}</span>
+														<span className="font-mono text-2xs text-ink-faint">{cat.items.length}</span>
 													</button>
 													{!collapsedGroups.has(`${group.type}#${cat.label}`) &&
 														cat.items.map(({ item, rank }) => {
@@ -323,7 +315,7 @@ export function SkillsView(): React.JSX.Element {
 																	<div className="flex items-start gap-3">
 																		<div className="min-w-0 flex-1">
 																			<div className="flex flex-wrap items-center gap-2">
-																				<span className="font-mono text-[10.5px] text-ink-faint">
+																				<span className="font-mono text-3xs text-ink-faint">
 																					#{rank}
 																				</span>
 																				<button
@@ -331,13 +323,13 @@ export function SkillsView(): React.JSX.Element {
 																					onClick={() =>
 																						setExpandedName(expanded ? null : item.name)
 																					}
-																					className="text-[13.5px] font-medium text-ink transition-colors hover:text-accent"
+																					className="text-xs font-medium text-ink transition-colors hover:text-accent"
 																					title="查看详情"
 																				>
 																					{item.name}
 																				</button>
 																				<span
-																					className={`rounded px-1.5 py-0.5 font-mono text-[10px] ${
+																					className={`rounded px-1.5 py-0.5 font-mono text-xs ${
 																						item.type === "plugin"
 																							? "bg-accent-dim text-accent"
 																							: "bg-surface-2 text-ink-faint"
@@ -346,7 +338,7 @@ export function SkillsView(): React.JSX.Element {
 																					{item.type}
 																				</span>
 																				<span
-																					className="max-w-[180px] truncate font-mono text-[10.5px] text-ink-faint"
+																					className="max-w-[180px] truncate font-mono text-3xs text-ink-faint"
 																					title={item.source}
 																				>
 																					{item.source}
@@ -356,7 +348,7 @@ export function SkillsView(): React.JSX.Element {
 																						href={link}
 																						target="_blank"
 																						rel="noreferrer"
-																						className="max-w-[160px] truncate font-mono text-[10.5px] text-accent underline-offset-2 hover:underline"
+																						className="max-w-[160px] truncate font-mono text-3xs text-accent underline-offset-2 hover:underline"
 																						title={link}
 																						onClick={e => e.stopPropagation()}
 																					>
@@ -368,13 +360,13 @@ export function SkillsView(): React.JSX.Element {
 																			</div>
 																			{item.description && (
 																				<div
-																					className={`mt-0.5 text-[12px] text-ink-subtle ${expanded ? "" : "line-clamp-2"}`}
+																					className={`mt-0.5 text-xs text-ink-subtle ${expanded ? "" : "line-clamp-2"}`}
 																				>
 																					{item.description}
 																				</div>
 																			)}
 																			{expanded && (
-																				<div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 font-mono text-[10.5px] text-ink-faint">
+																				<div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 font-mono text-3xs text-ink-faint">
 																					{item.version && <span>v{item.version}</span>}
 																					{item.author && <span>作者：{item.author}</span>}
 																					{item.repository && (
@@ -396,7 +388,7 @@ export function SkillsView(): React.JSX.Element {
 																				isInstalledRemote(item.name)
 																			}
 																			aria-label={`安装远程技能 ${item.name}`}
-																			className={`mt-0.5 shrink-0 rounded-md border px-2.5 py-1 text-[11.5px] transition-colors disabled:cursor-default ${
+																			className={`mt-0.5 shrink-0 rounded-md border px-2.5 py-1 text-2xs transition-colors disabled:cursor-default ${
 																				isInstalledRemote(item.name)
 																					? "border-hairline bg-surface-2 text-ink-faint opacity-70"
 																					: "border-hairline bg-surface-2 text-ink-subtle hover:border-hairline-strong hover:text-ink"
@@ -437,14 +429,14 @@ export function SkillsView(): React.JSX.Element {
 							className="flex w-full items-center gap-2.5 px-5 py-3 text-left"
 						>
 							<span
-								className={`text-[10px] text-ink-faint transition-transform ${collapsed.has(group.level) ? "" : "rotate-90"}`}
+								className={`text-xs text-ink-faint transition-transform ${collapsed.has(group.level) ? "" : "rotate-90"}`}
 							>
 								▶
 							</span>
-							<span className="text-[12px] font-semibold tracking-[0.06em] text-ink uppercase">
+							<span className="text-xs font-semibold tracking-[0.06em] text-ink uppercase">
 								{LEVEL_LABELS[group.level]}
 							</span>
-							<span className="ml-auto font-mono text-[11px] text-ink-faint">{group.rows.length}</span>
+							<span className="ml-auto font-mono text-xs text-ink-faint">{group.rows.length}</span>
 						</button>
 
 						{!collapsed.has(group.level) && (
@@ -461,14 +453,12 @@ export function SkillsView(): React.JSX.Element {
 				{showDisabled && (
 					<div className="mb-4 overflow-hidden rounded-xl border border-hairline bg-surface">
 						<div className="flex items-center gap-2.5 px-5 py-3">
-							<span className="text-[10px] text-ink-faint">▶</span>
-							<span className="text-[12px] font-semibold tracking-[0.06em] text-ink-faint uppercase">
-								已停用
-							</span>
-							<span className="ml-auto font-mono text-[11px] text-ink-faint">{disabledFiltered.length}</span>
+							<span className="text-xs text-ink-faint">▶</span>
+							<span className="text-xs font-semibold tracking-[0.06em] text-ink-faint uppercase">已停用</span>
+							<span className="ml-auto font-mono text-xs text-ink-faint">{disabledFiltered.length}</span>
 						</div>
 						{disabledFiltered.length === 0 ? (
-							<div className="border-t border-hairline px-5 py-6 text-center text-[12px] text-ink-faint">
+							<div className="border-t border-hairline px-5 py-6 text-center text-xs text-ink-faint">
 								暂无已停用技能
 							</div>
 						) : (
@@ -480,14 +470,10 @@ export function SkillsView(): React.JSX.Element {
 									>
 										<div className="min-w-0 flex-1">
 											<div className="flex items-baseline gap-2">
-												<span className="text-[13.5px] font-medium text-ink-faint line-through">
-													{row.name}
-												</span>
+												<span className="text-xs font-medium text-ink-faint line-through">{row.name}</span>
 											</div>
 											{row.description && (
-												<div className="mt-0.5 line-clamp-2 text-[12px] text-ink-faint">
-													{row.description}
-												</div>
+												<div className="mt-0.5 line-clamp-2 text-xs text-ink-faint">{row.description}</div>
 											)}
 										</div>
 										<button
@@ -495,7 +481,7 @@ export function SkillsView(): React.JSX.Element {
 											onClick={() => void toggleSkill(row.name, true)}
 											disabled={busy === row.name}
 											aria-label={`${row.name} 启用`}
-											className="mt-0.5 shrink-0 rounded-md border border-hairline bg-surface-2 px-2.5 py-1 text-[11.5px] text-ink-subtle transition-colors hover:border-hairline-strong hover:text-ink disabled:cursor-default"
+											className="mt-0.5 shrink-0 rounded-md border border-hairline bg-surface-2 px-2.5 py-1 text-2xs text-ink-subtle transition-colors hover:border-hairline-strong hover:text-ink disabled:cursor-default"
 										>
 											{busy === row.name ? "启用中…" : "启用"}
 										</button>
@@ -519,14 +505,12 @@ function SkillRowView({ row, onToggle }: { row: SkillRow; onToggle: () => void }
 		<div className="flex items-start gap-3 border-b border-hairline px-5 py-3 last:border-b-0">
 			<div className="min-w-0 flex-1">
 				<div className="flex items-baseline gap-2">
-					<span className="text-[13.5px] font-medium text-ink">{row.name}</span>
-					<span className="rounded bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] text-ink-faint">
+					<span className="text-xs font-medium text-ink">{row.name}</span>
+					<span className="rounded bg-surface-2 px-1.5 py-0.5 font-mono text-xs text-ink-faint">
 						{row.provider}
 					</span>
 				</div>
-				{row.description && (
-					<div className="mt-0.5 line-clamp-2 text-[12px] text-ink-subtle">{row.description}</div>
-				)}
+				{row.description && <div className="mt-0.5 line-clamp-2 text-xs text-ink-subtle">{row.description}</div>}
 			</div>
 
 			{/* 启停 toggle（P2-W3-3 B3 写协议）：点击停用；当前列表=已启用集，停用后技能移除 */}
@@ -535,7 +519,7 @@ function SkillRowView({ row, onToggle }: { row: SkillRow; onToggle: () => void }
 				onClick={onToggle}
 				title="停用该技能（写 config.yml skills.ignoredSkills）"
 				aria-label={`${row.name} 启停开关（当前已启用）`}
-				className="mt-0.5 flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full bg-success/40 px-0.5 transition-colors hover:bg-success/60"
+				className="mt-0.5 flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full bg-success/40 px-0.5 transition-colors hover:bg-success/60 disabled:cursor-not-allowed"
 			>
 				<span className="ml-auto h-4 w-4 rounded-full bg-ink" />
 			</button>

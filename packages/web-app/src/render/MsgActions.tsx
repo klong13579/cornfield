@@ -60,34 +60,51 @@ export function MsgActions({
 	return (
 		<div className={`msg-actions${className ? ` ${className}` : ""}`}>
 			{isAssistant && (
-				<button type="button" className="mact" title="撤销本轮（等 wire 命令）" disabled={!onUndo} onClick={onUndo}>
-					<Undo2 size={13} strokeWidth={1.5} />
+				<button
+					type="button"
+					className="icon-btn"
+					title="该功能尚未接入"
+					disabled={!onUndo}
+					onClick={onUndo}
+					style={{ display: "inline-flex", alignItems: "center", justifyContent: "center" }}
+				>
+					<Undo2 size={14} strokeWidth={1.5} />
 				</button>
 			)}
 			{isAssistant && (
 				<button
 					type="button"
-					className="mact"
-					title="重新生成（等 wire 命令）"
+					className="icon-btn"
+					title="该功能尚未接入"
 					disabled={!onRegenerate}
 					onClick={onRegenerate}
+					style={{ display: "inline-flex", alignItems: "center", justifyContent: "center" }}
 				>
-					<RefreshCw size={13} strokeWidth={1.5} />
+					<RefreshCw size={14} strokeWidth={1.5} />
 				</button>
 			)}
-			<button type="button" className="mact" title="从此处分叉（等 wire 命令）" disabled={!onFork} onClick={onFork}>
-				<GitFork size={13} strokeWidth={1.5} />
-			</button>
 			<button
 				type="button"
-				className="mact"
-				title={copied ? "已复制" : "复制"}
-				aria-live="polite"
-				disabled={!text}
-				onClick={copy}
+				className="icon-btn"
+				title="该功能尚未接入"
+				disabled={!onFork}
+				onClick={onFork}
+				style={{ display: "inline-flex", alignItems: "center", justifyContent: "center" }}
 			>
-				{copied ? <Check size={13} strokeWidth={1.5} /> : <Copy size={13} strokeWidth={1.5} />}
+				<GitFork size={14} strokeWidth={1.5} />
 			</button>
+			<div className="flex items-center justify-center">
+				<button
+					type="button"
+					className="icon-btn"
+					title={copied ? "已复制" : "复制"}
+					aria-live="polite"
+					disabled={!text}
+					onClick={copy}
+				>
+					{copied ? <Check size={14} strokeWidth={1.5} /> : <Copy size={14} strokeWidth={1.5} />}
+				</button>
+			</div>
 		</div>
 	);
 }

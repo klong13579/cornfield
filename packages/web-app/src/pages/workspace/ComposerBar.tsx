@@ -75,6 +75,8 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 	const ui = useUiState();
 	const navigate = useNavigate();
 	const textRef = useRef<HTMLTextAreaElement>(null);
+	const menuRef = useRef<HTMLDivElement>(null);
+
 	const [agentId, setAgentId] = useState<string | undefined>(view.agents[0]?.id);
 	const [showAgentMenu, setShowAgentMenu] = useState(false);
 	const [showModelMenu, setShowModelMenu] = useState(false);
@@ -148,12 +150,36 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 	useEffect(() => {
 		if (autoFocusDraft) textRef.current?.focus();
 	}, [autoFocusDraft]);
+	/** Agent / model 下拉：Escape 关闭 + 点击外部关闭。 */
+	useEffect(() => {
+		if (!showAgentMenu && !showModelMenu) return;
+		const close = (e: KeyboardEvent) => {
+			if (e.key === "Escape") {
+				setShowAgentMenu(false);
+				setShowModelMenu(false);
+			}
+		};
+		document.addEventListener("keydown", close);
+		return () => document.removeEventListener("keydown", close);
+	}, [showAgentMenu, showModelMenu]);
+
+	useEffect(() => {
+		if (!showAgentMenu && !showModelMenu) return;
+		const handler = (e: MouseEvent) => {
+			if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+				setShowAgentMenu(false);
+				setShowModelMenu(false);
+			}
+		};
+		document.addEventListener("mousedown", handler);
+		return () => document.removeEventListener("mousedown", handler);
+	}, [showAgentMenu, showModelMenu]);
 
 	const autoGrow = () => {
 		const el = textRef.current;
 		if (!el) return;
 		el.style.height = "auto";
-		el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
+		el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
 	};
 
 	const send = () => {
@@ -209,15 +235,17 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 
 	return (
 		<div className="shrink-0 border-t border-hairline bg-surface px-4.5 pt-3.5 pb-3">
-			<div className="relative mx-auto max-w-[800px]">
+			<div className="relative mx-auto max-w-[760px]">
 				{slashOpen && (
-					<SlashPalette
-						commands={slashCommands}
-						query={value.slice(1)}
-						activeIndex={slashIndex}
-						onSelect={selectSlash}
-						onHover={setSlashIndex}
-					/>
+					<div className="relative z-menu">
+						<SlashPalette
+							commands={slashCommands}
+							query={value.slice(1)}
+							activeIndex={slashIndex}
+							onSelect={selectSlash}
+							onHover={setSlashIndex}
+						/>
+					</div>
 				)}
 
 				<div className="rounded-xl border border-hairline bg-surface-2 transition-[border-color,box-shadow] duration-150 focus-within:border-hairline-strong focus-within:shadow-[0_0_0_3px_var(--color-accent-dim)]">
@@ -257,7 +285,10 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 								<ChevronDown size={11} strokeWidth={1.5} className="text-ink-faint" />
 							</button>
 							{showAgentMenu && (
-								<div className="absolute bottom-[calc(100%+8px)] left-0 z-30 min-w-65 overflow-hidden rounded-md border border-hairline-strong bg-surface shadow-lg">
+								<div
+									ref={menuRef}
+									className="absolute bottom-[calc(100%+8px)] left-0 z-30 min-w-65 overflow-hidden rounded-md border border-hairline-strong bg-surface shadow-lg"
+								>
 									{workspaces.map(ws => (
 										<div key={ws}>
 											<div className="border-b border-hairline px-3 py-2 text-[10px] font-semibold tracking-[0.08em] text-ink-faint uppercase">
@@ -351,13 +382,16 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 							>
 								<ProviderLogo provider={currentProvider ?? "-"} size={12} />
 								<b className="font-mono text-[12px] font-medium text-ink">{view.model ?? "—"}</b>{" "}
-								<span className="rounded-[4px] bg-surface-3 px-1.5 py-px font-mono text-[10px] text-ink-subtle">
+								<span className="rounded-sm bg-surface-3 px-1.5 py-px font-mono text-[10px] text-ink-subtle">
 									{view.thinkingLevel ?? "off"}
 								</span>
 								<ChevronDown size={11} strokeWidth={1.5} className="text-ink-faint" />
 							</button>
 							{showModelMenu && (
-								<div className="absolute right-0 bottom-[calc(100%+8px)] z-30 w-80 overflow-hidden rounded-md border border-hairline-strong bg-surface shadow-lg">
+								<div
+									ref={menuRef}
+									className="absolute right-0 bottom-[calc(100%+8px)] z-30 w-80 overflow-hidden rounded-md border border-hairline-strong bg-surface shadow-lg"
+								>
 									<div className="px-3 pt-2 pb-1 text-[10px] font-semibold tracking-[0.08em] text-ink-faint uppercase">
 										模型
 									</div>

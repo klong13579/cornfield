@@ -1,4 +1,4 @@
-import { Play, Search } from "lucide-react";
+import { MessageSquare, Play, Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -77,6 +77,11 @@ export function RecordsView(): React.JSX.Element {
 
 	const agents = useMemo(() => Array.from(new Set(serveRows.map(r => r.agent))), [serveRows]);
 
+	const formatDate = (d: Date) => {
+		const pad = (n: number) => String(n).padStart(2, "0");
+		return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+	};
+
 	const rows: SessionRecordSummary[] = [...(currentSummary ? [currentSummary] : []), ...serveRows];
 
 	const filtered = rows.filter(row => {
@@ -99,7 +104,7 @@ export function RecordsView(): React.JSX.Element {
 
 	return (
 		<div className="px-10 pt-8 pb-12">
-			<div className="mx-auto max-w-[960px]">
+			<div className="mx-auto page-wide">
 				<div className="mb-5 flex items-baseline gap-3.5">
 					<h1 className="text-[32px] font-semibold tracking-[-0.8px] text-ink">会话记录</h1>
 					<span className="text-[13px] text-ink-faint">{rows.length} 条会话</span>
@@ -117,7 +122,7 @@ export function RecordsView(): React.JSX.Element {
 							<button
 								key={key}
 								type="button"
-								className={`rounded px-3 py-1 text-[12px] transition-colors ${dateFilter === key ? "bg-surface-3 text-ink" : "text-ink-subtle hover:text-ink"}`}
+								className={`rounded px-3 py-1 text-[12px] transition-colors ${dateFilter === key ? "bg-accent-dim font-medium text-ink" : "text-ink-subtle hover:text-ink"}`}
 								onClick={() => setDateFilter(key)}
 							>
 								{label}
@@ -144,7 +149,7 @@ export function RecordsView(): React.JSX.Element {
 						<option value="aborted">已中止</option>
 						<option value="error">出错</option>
 					</select>
-					<div className="ml-auto flex w-[200px] items-center gap-2 rounded-md border border-hairline bg-surface-2 px-3 py-1.5 focus-within:border-hairline-strong focus-within:shadow-[0_0_0_3px_var(--color-accent-dim)]">
+					<div className="ml-auto flex min-w-0 flex-1 items-center gap-2 rounded-md border border-hairline bg-surface-2 px-3 py-1.5 focus-within:border-hairline-strong focus-within:shadow-[0_0_0_3px_var(--color-accent-dim)]">
 						<Search size={13} strokeWidth={1.5} className="shrink-0 text-ink-faint" />
 						<input
 							value={query}
@@ -162,13 +167,7 @@ export function RecordsView(): React.JSX.Element {
 							<div className="min-w-0 flex-1">
 								<div className="truncate text-[15px] font-medium text-ink">{row.name}</div>
 								<div className="mt-0.5 text-[12px] text-ink-subtle">
-									{row.agent} ·{" "}
-									{new Date(row.startedAt).toLocaleString("zh-CN", {
-										month: "numeric",
-										day: "numeric",
-										hour: "2-digit",
-										minute: "2-digit",
-									})}
+									{row.agent} · {formatDate(new Date(row.startedAt))}
 								</div>
 							</div>
 							<span className="w-[52px] shrink-0 text-right font-mono text-[12px] text-ink-faint">
@@ -205,7 +204,10 @@ export function RecordsView(): React.JSX.Element {
 						</div>
 					))}
 					{filtered.length === 0 && (
-						<div className="px-4 py-14 text-center text-[13px] text-ink-faint">没有匹配的会话记录。</div>
+						<div className="flex flex-col items-center gap-2 px-4 py-14">
+							<MessageSquare className="size-8 text-ink-faint" />
+							<span className="text-[13px] text-ink-faint">没有会话记录</span>
+						</div>
 					)}
 				</div>
 

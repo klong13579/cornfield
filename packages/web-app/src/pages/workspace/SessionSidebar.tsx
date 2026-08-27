@@ -275,6 +275,13 @@ export function SessionSidebar(): React.JSX.Element {
 					</div>
 				</>
 			)}
+			{!isLg && ui.mobileNavOpen && (
+				<div
+					aria-hidden
+					className="fixed inset-0 z-menu bg-ink/20"
+					onClick={() => getUiStore().setMobileNav(false)}
+				/>
+			)}
 		</aside>
 	);
 }
@@ -298,7 +305,7 @@ function SessionRow({
 		>
 			<button
 				type="button"
-				className={`mt-0.5 shrink-0 transition-colors ${
+				className={`mt-0.5 shrink-0 transition-colors transition-opacity duration-150 ${
 					pinned ? "text-accent" : "text-ink-faint opacity-0 group-hover:opacity-100"
 				}`}
 				title={pinned ? "取消 pin" : "pin 置顶"}

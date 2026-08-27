@@ -29,8 +29,7 @@ import "./activity-fold.css";
  *     />
  *   ) : null}
  *
- * - 折叠一行：`Activity: N tools`，失败数红标露出（`K 失败`）
- * - 展开：THINKING 块 + 每个工具的紧凑行（icon + name + target + ✓/✗/spinner）
+ * - 折叠一行：`活动 · N 个工具`，失败数红标露出（`K 个失败`）
  * - 展开态按 turnId 持久化 localStorage（默认折叠），刷新保持
  * - 失败工具行露出 retry（abort_retry）；单击工具行展开 args/result 审计细节
  */
@@ -105,9 +104,9 @@ export function ActivityFold({
 		<div className={`activity-fold${open ? " open" : ""}${className ? ` ${className}` : ""}`}>
 			<button type="button" className="activity-fold-head" onClick={toggle} aria-expanded={open}>
 				<ChevronRight size={13} strokeWidth={1.5} className="caret" />
-				<span className="activity-fold-title">Activity: {tools.length} tools</span>
+				<span className="activity-fold-title">活动 · {tools.length} 个工具</span>
 				{running && <span className="spin" />}
-				{failCount > 0 && <span className="activity-fold-err">{failCount} 失败</span>}
+				{failCount > 0 && <span className="activity-fold-err">{failCount} 个失败</span>}
 			</button>
 			{open && (
 				<div className="activity-fold-body">
@@ -128,7 +127,7 @@ function ThinkBlock({ text, streaming }: { text: string; streaming: boolean }): 
 		<div className="think-block">
 			<span className="think-label">
 				{streaming && <Orb state="shaping" size={12} />}
-				<span>THINKING</span>
+				<span>思考</span>
 			</span>
 			<div className="think-text">{capped}</div>
 			{trimmed.length > MAX_THINKING_CHARS && (

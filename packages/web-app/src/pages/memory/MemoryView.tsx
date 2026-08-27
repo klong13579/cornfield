@@ -78,9 +78,9 @@ function SectionCard({
 	children: React.ReactNode;
 }): React.JSX.Element {
 	return (
-		<div className="rounded-xl border border-hairline bg-surface">
+		<div className="rounded-lg border border-hairline bg-surface">
 			<div className="flex items-baseline justify-between px-5 pt-4 pb-2">
-				<div className="text-[11px] font-semibold tracking-[0.08em] text-ink-faint uppercase">{title}</div>
+				<div className="section-title text-ink-faint">{title}</div>
 				{subtitle && <div className="font-mono text-[11px] text-ink-faint">{subtitle}</div>}
 			</div>
 			{children}
@@ -98,19 +98,19 @@ function MemoryStoreSection({
 	return (
 		<SectionCard title="记忆库" subtitle={totalEntries > 0 ? `${totalEntries} 条` : undefined}>
 			{sections.length === 0 ? (
-				<div className="px-5 pb-6 text-[12px] text-ink-faint">
+				<div className="px-5 pb-6 text-xs text-ink-faint">
 					暂无记忆条目——self-evolution 在会话后自动沉淀，沉淀后这里会出现
 				</div>
 			) : (
 				<div className="space-y-4 px-5 pb-5">
 					{sections.map(section => (
 						<div key={section.namespace}>
-							<div className="mb-1.5 text-[12px] font-semibold text-ink">{section.namespace}</div>
+							<div className="mb-1.5 text-xs font-semibold text-ink">{section.namespace}</div>
 							<div className="space-y-1.5">
 								{section.entries.map(entry => (
 									<div key={entry.id} className="rounded-md border border-hairline bg-surface-2 px-3 py-2">
-										<div className="text-[12.5px] leading-relaxed text-ink-subtle">{entry.content}</div>
-										<div className="mt-1 font-mono text-[10.5px] text-ink-faint">
+										<div className="text-xs leading-relaxed text-ink-subtle">{entry.content}</div>
+										<div className="mt-1 font-mono text-3xs text-ink-faint">
 											{fmtImportance(entry.importance)} 重要度 · 最近访问 {fmtDate(entry.lastAccessedAt)}
 										</div>
 									</div>
@@ -135,13 +135,13 @@ function FileBlock({
 	return (
 		<div className="px-5 pb-4">
 			<div className="mb-1 flex items-baseline justify-between">
-				<div className="text-[12px] font-semibold text-ink">{label}</div>
-				<div className="font-mono text-[10.5px] text-ink-faint">
+				<div className="text-xs font-semibold text-ink">{label}</div>
+				<div className="font-mono text-3xs text-ink-faint">
 					{file.path.split("/").pop()}
 					{file.truncated ? "（128KB 截断）" : ""}
 				</div>
 			</div>
-			<pre className="max-h-72 overflow-auto rounded-md border border-hairline bg-surface-2 px-3 py-2.5 font-mono text-[11.5px] leading-relaxed whitespace-pre-wrap text-ink-subtle">
+			<pre className="max-h-72 overflow-auto rounded-md border border-hairline bg-surface-2 px-3 py-2.5 font-mono text-2xs leading-relaxed whitespace-pre-wrap text-ink-subtle">
 				{file.content}
 			</pre>
 		</div>
@@ -163,7 +163,7 @@ function ProjectSection({
 	return (
 		<SectionCard title="项目记忆" subtitle={memoryRoot ? memoryRoot.split("/").slice(-2).join("/") : undefined}>
 			{!memoryRoot || !hasAny ? (
-				<div className="px-5 pb-6 text-[12px] text-ink-faint">
+				<div className="px-5 pb-6 text-xs text-ink-faint">
 					{memoryRoot ? "项目记忆尚未生成——会话沉淀后自动生成 MEMORY.md" : "当前目录不适用项目记忆（系统路径）"}
 				</div>
 			) : (

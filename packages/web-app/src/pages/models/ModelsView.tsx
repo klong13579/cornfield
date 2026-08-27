@@ -25,6 +25,7 @@ export function ModelsView(): React.JSX.Element {
 	const store = useSessionStore();
 	const [data, setData] = useState<AvailableModelsDto | null>(null);
 	const [filter, setFilter] = useState<Filter>("all");
+	const [isLoading, setIsLoading] = useState(true);
 	/** in-flight 停用/恢复目标（`provider` 或 `provider/modelId`），期间禁用所有开关。 */
 	const [busy, setBusy] = useState<string | null>(null);
 
@@ -33,6 +34,7 @@ export function ModelsView(): React.JSX.Element {
 	useEffect(() => {
 		if (!view.connected) return; // 未连接时跳过，连接后再拉（避免先于 WS open 的一次性失败）
 		void store.fetchModels().then(setData);
+		setIsLoading(false);
 	}, [store, view.connected]);
 
 	const current = view.model;
@@ -79,7 +81,7 @@ export function ModelsView(): React.JSX.Element {
 
 	return (
 		<div className="px-10 pt-8 pb-12">
-			<div className="mx-auto max-w-[900px]">
+			<div className="page-wide">
 				<h1 className="mb-7 flex items-baseline gap-3.5 text-[32px] font-semibold tracking-[-0.8px] text-ink">
 					<span>模型</span>
 					<span className="text-[13px] font-normal tracking-normal text-ink-faint">
@@ -90,9 +92,7 @@ export function ModelsView(): React.JSX.Element {
 				{currentInfo && (
 					<div className="mb-8 flex items-center gap-5 rounded-xl border border-accent bg-surface px-7 py-6">
 						<div className="flex-1">
-							<div className="mb-1.5 text-[11px] font-semibold tracking-[0.08em] text-accent-hover uppercase">
-								当前使用
-							</div>
+							<span className="section-title">当前使用</span>
 							<div className="font-mono text-[24px] font-semibold tracking-[-0.02em] text-ink">
 								{currentInfo.id}
 							</div>
@@ -100,6 +100,7 @@ export function ModelsView(): React.JSX.Element {
 							<div className="mt-3 flex gap-6">
 								<HeroSpec label="上下文" value={currentInfo.contextWindow ?? "—"} />
 								<HeroSpec label="价格" value={currentInfo.price ?? "—"} />
+								<span className="text-3xs text-ink-faint">每百万 tokens（输入 / 输出）</span>
 							</div>
 							{currentInfo.supportsThinking && (
 								<div className="mt-3 flex gap-1.5">
@@ -119,7 +120,7 @@ export function ModelsView(): React.JSX.Element {
 						<button
 							key={f.id}
 							type="button"
-							className={`rounded px-3 py-1 text-[12px] transition-colors ${filter === f.id ? "bg-surface-3 text-ink" : "text-ink-subtle hover:text-ink"}`}
+							className={`rounded px-3 py-1 text-[12px] transition-colors ${filter === f.id ? "bg-accent-dim font-medium text-ink" : "text-ink-subtle hover:text-ink"}`}
 							onClick={() => setFilter(f.id)}
 						>
 							{f.label}
@@ -131,9 +132,7 @@ export function ModelsView(): React.JSX.Element {
 				{Array.from(new Set(visible.map(m => m.provider))).map(provider => (
 					<div key={provider} className="mb-7">
 						<div className="mb-2 flex items-baseline gap-2.5">
-							<span className="text-[11px] font-semibold tracking-[0.08em] text-ink-faint uppercase">
-								{provider}
-							</span>
+							<span className="section-title">{provider}</span>
 							<span className="font-mono text-[10px] text-ink-faint">
 								{visible.filter(m => m.provider === provider).length}
 							</span>
@@ -163,16 +162,14 @@ export function ModelsView(): React.JSX.Element {
 										</div>
 										<div className="mt-0.5 text-[12px] text-ink-subtle">{m.description}</div>
 									</div>
-									<span className="w-[140px] shrink-0 font-mono text-[12px] text-ink-subtle">
-										{m.contextWindow}
-									</span>
+									<span className="w-[140px] shrink-0 font-mono text-xs">{m.contextWindow}</span>
 									<span className="flex shrink-0 gap-1">
 										{m.supportsThinking ? (
-											<span className="rounded bg-accent-dim px-1.5 py-px font-mono text-[10px] text-accent">
+											<span className="rounded bg-accent-dim px-1.5 py-px font-mono text-3xs text-accent">
 												thinking
 											</span>
 										) : (
-											<span className="rounded px-1.5 py-px font-mono text-[10px] text-ink-faint">—</span>
+											<span className="rounded px-1.5 py-px font-mono text-3xs text-ink-faint">—</span>
 										)}
 									</span>
 									<button
@@ -197,36 +194,39 @@ export function ModelsView(): React.JSX.Element {
 					</div>
 				))}
 
-				{models.length === 0 && (
+				{isLoading ? (
+					<>
+						<div className="skeleton h-10 w-full" />
+						<div className="skeleton h-10 w-full" />
+						<div className="skeleton h-10 w-full" />
+						<div className="skeleton h-10 w-full" />
+					</>
+				) : models.length === 0 ? (
 					<div className="py-16 text-center text-[13px] text-ink-faint">
 						{data
 							? "没有可用模型——当前 provider 均已停用，底部可恢复"
 							: "模型列表加载中（get_available_models）…"}
 					</div>
-				)}
+				) : null}
 
 				{/* 已停用分区：provider / 模型 两类，一键恢复 */}
 				{totalDisabled > 0 && (
 					<div className="mt-10 overflow-hidden rounded-xl border border-hairline bg-surface">
 						<div className="flex items-baseline justify-between border-b border-hairline px-5 py-3">
-							<span className="text-[11px] font-semibold tracking-[0.08em] text-ink-faint uppercase">
-								已停用
-							</span>
+							<span className="section-title">已停用</span>
 							<span className="font-mono text-[11px] text-ink-faint">{totalDisabled} 项</span>
 						</div>
 
 						{data?.disabledProviders.length ? (
 							<div className="px-5 pt-3">
-								<div className="mb-1.5 text-[10px] font-semibold tracking-[0.08em] text-ink-faint uppercase">
-									Provider
-								</div>
+								<div className="mb-1.5 section-title">Provider</div>
 								{data.disabledProviders.map(provider => (
 									<div
 										key={provider}
 										className="flex items-center gap-3 border-b border-hairline px-1 py-2.5 last:border-b-0"
 									>
 										<span className="font-mono text-[13px] text-ink">{provider}</span>
-										<span className="text-[10.5px] text-ink-faint">整 provider 停用</span>
+										<span className="text-3xs text-ink-faint">整 provider 停用</span>
 										<button
 											type="button"
 											disabled={busy !== null}
@@ -242,9 +242,7 @@ export function ModelsView(): React.JSX.Element {
 
 						{data?.disabledModels.length ? (
 							<div className="px-5 pt-3 pb-3">
-								<div className="mb-1.5 text-[10px] font-semibold tracking-[0.08em] text-ink-faint uppercase">
-									模型
-								</div>
+								<div className="mb-1.5 section-title">模型</div>
 								{data.disabledModels.map(pattern => {
 									const provider = pattern.split("/")[0] ?? "";
 									return (

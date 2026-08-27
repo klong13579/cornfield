@@ -1,5 +1,5 @@
 import { Files } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 /**
  * Artifacts 产物面板骨架（工作台右栏 Artifacts tab，替换原占位）。
@@ -40,20 +40,15 @@ function fmtTime(ts: number): string {
 
 /**
  * Artifacts 数据源（接入钩子）。
- * wire 协议暂无 artifacts 命令/帧，禁止伪造数据源——此处直接落 ready 空态。
- * 协议落地后替换下方 settle 为真拉取：
+ * wire 协议暂无 artifacts 命令/帧，禁止伪造数据源——直接落 ready 空态。
+ * 协议落地后替换为真拉取：
  *
  *   useSessionStore().listArtifacts()
  *     .then(entries => setState({ status: "ready", entries, error: null }))
  *     .catch(err => setState({ status: "error", entries: [], error: msg(err) }));
  */
 function useArtifacts(): ArtifactsState {
-	const [state, setState] = useState<ArtifactsState>({ status: "loading", entries: [], error: null });
-
-	useEffect(() => {
-		setState({ status: "ready", entries: [], error: null });
-	}, []);
-
+	const [state] = useState<ArtifactsState>({ status: "ready", entries: [], error: null });
 	return state;
 }
 

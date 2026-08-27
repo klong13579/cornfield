@@ -16,7 +16,9 @@
  */
 
 import { type ChildProcess, spawn } from "node:child_process";
+import * as fsp from "node:fs/promises";
 import * as net from "node:net";
+import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
@@ -84,6 +86,14 @@ test.skip(!process.env.E2E, "F2 冒烟需要真实 LLM 鉴权——设 E2E=1 才
 test("smoke: 真实 serve → 连接 → prompt → 流式回复", async ({ page }) => {
 	const servePort = await freePort();
 	const serveUrl = `ws://127.0.0.1:${servePort}/ws`;
+	// 隔离 agentDir：拷贝真实 agent.db（鉴权 + 设置），session/历史落在临时目录——
+	// 不隔离时 serve 复用真实 ~/.omp，历次运行的 prompt 会累积进真实 session 文件。
+	const isoAgentDir = await fsp.mkdtemp(path.join(os.tmpdir(), "omp-smoke-e2e-"));
+	await fsp
+		.copyFile(path.join(os.homedir(), ".omp", "agent", "agent.db"), path.join(isoAgentDir, "agent.db"))
+		.catch(() => {
+			// agent.db 不存在（全新环境）：空库也合法，AuthStorage 会新建
+		});
 
 	const serve = spawn(
 		"bun",
@@ -96,7 +106,7 @@ test("smoke: 真实 serve → 连接 → prompt → 流式回复", async ({ page
 			"127.0.0.1",
 			"--no-extensions",
 		],
-		{ env: { ...process.env, PI_NO_TITLE: "1" } },
+		{ env: { ...process.env, PI_NO_TITLE: "1", PI_CODING_AGENT_DIR: isoAgentDir } },
 	);
 	const preview = spawn(
 		"bun",
@@ -107,7 +117,6 @@ test("smoke: 真实 serve → 连接 → prompt → 流式回复", async ({ page
 	try {
 		await waitForOutput(serve, /ws:\/\/127\.0\.0\.1:\d+\/ws/, 30_000, "serve 启动");
 		await waitForHttp(`http://127.0.0.1:${APP_PORT}/`, 30_000);
-		await page.goto("/workspace", { waitUntil: "domcontentloaded" });
 	} catch (err) {
 		kill(serve);
 		kill(preview);
@@ -115,15 +124,17 @@ test("smoke: 真实 serve → 连接 → prompt → 流式回复", async ({ page
 	}
 
 	try {
-		// 注入连接配置后重载（goto 之后 addInitScript 也需生效于下次导航）
+		// 连接配置必须在首次导航前注册：addInitScript 对同 URL 的二次 goto 不生效
+		// （同文档 hash 导航不重载页面），且无配置时 app 会连默认 7891（真实桌面 sidecar），
+		// 污染真实会话。
 		await page.addInitScript((wsUrl: string) => {
 			localStorage.setItem("omp.serve.connection", JSON.stringify({ wsUrl, token: "" }));
 		}, serveUrl);
-		await page.goto("/workspace", { waitUntil: "domcontentloaded" });
+		await page.goto("/#/workspace", { waitUntil: "domcontentloaded" });
 
 		// ── 断言 1：连接建立（conn-dot connected）──
 		await page.locator(".conn-dot:not(.reconnecting)").first().waitFor({ state: "visible", timeout: 30_000 });
-		await page.getByText("connected", { exact: true }).waitFor({ state: "visible" });
+		await page.getByText("已连接", { exact: true }).waitFor({ state: "visible" });
 
 		// ── 断言 2：发送 prompt ──
 		const composer = page.getByPlaceholder(/发消息，或直接提问/);
@@ -132,7 +143,7 @@ test("smoke: 真实 serve → 连接 → prompt → 流式回复", async ({ page
 		await page.getByRole("button", { name: "发送" }).click();
 
 		// ── 断言 3：流式断言——发送瞬间起并发 100ms 轮询 meta 行，不阻塞其余等待 ──
-		// meta 行（assistant 内容 div 的第一个子 div）在流式期间显示 streaming，落定后 ✓ 已完成
+		// meta 行（assistant 内容 div 的第一个子 div）在流式期间显示 生成中，落定后 ✓ 完成
 		const metaProbe = page.locator(".avatar.assistant + div > div:first-child").last();
 		const textProbe = page.locator(".avatar.assistant + div > div:nth-child(2)").last();
 		let sawStreaming = false;
@@ -145,7 +156,7 @@ test("smoke: 真实 serve → 连接 → prompt → 流式回复", async ({ page
 				const body = (await textProbe.textContent().catch(() => "")) ?? "";
 				if (meta.length > 0) lastMetaText = meta;
 				if (body.trim().length > 0) lengths.push(body.trim().length);
-				if (meta.includes("streaming")) sawStreaming = true;
+				if (meta.includes("生成中")) sawStreaming = true;
 				await page.waitForTimeout(100);
 			}
 		})();
@@ -153,8 +164,8 @@ test("smoke: 真实 serve → 连接 → prompt → 流式回复", async ({ page
 		// 用户回显（bg-user-bg 气泡）
 		await page.locator("div.bg-user-bg", { hasText: "冒烟测试" }).waitFor({ state: "visible", timeout: 15_000 });
 
-		// 回复落定：meta 行出现 ✓ 已完成
-		await page.getByText("✓ 已完成", { exact: true }).first().waitFor({ state: "visible", timeout: 120_000 });
+		// 回复落定：meta 行出现 ✓ 完成
+		await page.getByText("✓ 完成", { exact: true }).first().waitFor({ state: "visible", timeout: 120_000 });
 		await poll;
 		console.log(
 			"[smoke] sawStreaming=",
@@ -172,7 +183,7 @@ test("smoke: 真实 serve → 连接 → prompt → 流式回复", async ({ page
 			.locator(":scope > div:nth-child(2)")
 			.textContent();
 		expect(assistantText?.trim().length ?? 0).toBeGreaterThan(0);
-		// 流式硬断言（STREAM-1 修复后必须触发）：meta 行曾出现 streaming + 文本非空
+		// 流式硬断言（STREAM-1 修复后必须触发）：meta 行曾出现 生成中 + 文本非空
 		expect(sawStreaming).toBe(true);
 		expect(new Set(lengths).size).toBeGreaterThan(0);
 
@@ -180,5 +191,6 @@ test("smoke: 真实 serve → 连接 → prompt → 流式回复", async ({ page
 	} finally {
 		kill(serve);
 		kill(preview);
+		await fsp.rm(isoAgentDir, { recursive: true, force: true }).catch(() => undefined);
 	}
 });

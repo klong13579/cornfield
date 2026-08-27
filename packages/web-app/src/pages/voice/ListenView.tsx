@@ -235,14 +235,14 @@ export function ListenView(): React.JSX.Element {
 		<div className="flex flex-col items-center gap-6">
 			{/* 错误提示 */}
 			{error && (
-				<div className="w-full max-w-[560px] rounded-lg border border-danger/40 bg-danger/5 px-4 py-3 text-[12.5px] leading-relaxed text-ink">
+				<div className="w-full page-narrow rounded-lg border border-danger/40 bg-danger/5 px-4 py-3 text-[12.5px] leading-relaxed text-ink">
 					{error}
 					<button type="button" className="link ml-2" onClick={() => setError(null)}>
 						清除
 					</button>
 				</div>
 			)}
-			{notice && <div className="w-full max-w-[560px] text-center text-[12px] text-ink-subtle">{notice}</div>}
+			{notice && <div className="w-full page-narrow text-center text-[12px] text-ink-subtle">{notice}</div>}
 
 			{/* orb 槽位：idle/done 静止帧（paused），录音/转写才动 */}
 			<button
@@ -274,13 +274,15 @@ export function ListenView(): React.JSX.Element {
 						{levels.map((h, i) => (
 							<i
 								key={i}
-								className="block w-[7px] rounded-[3px] bg-accent opacity-80 transition-[height] duration-100"
+								className="block w-[7px] rounded-[3px] bg-success opacity-80 transition-[height] duration-100"
 								style={{ height: `${Math.round(h * 28)}px` }}
 							/>
 						))}
 					</div>
 					<div className="flex items-center gap-3.5">
-						<span className="font-mono text-[22px] tracking-[0.5px] text-ink">{formatClock(elapsed)}</span>
+						<span className="font-mono text-2xl font-medium tabular-nums tracking-[0.5px] text-ink">
+							{formatClock(elapsed)}
+						</span>
 						<button
 							type="button"
 							className="btn flex items-center gap-2 bg-danger text-white hover:bg-danger/85"
@@ -300,7 +302,7 @@ export function ListenView(): React.JSX.Element {
 				<>
 					<div className="text-[13px] text-ink-muted">转写中…（本地 whisper / record.model，长录音自动分块）</div>
 					<div className="h-[5px] w-[200px] overflow-hidden rounded-[3px] bg-surface-3">
-						<i className="block h-full w-full animate-pulse rounded-[3px] bg-accent" />
+						<i className="block h-full w-full animate-pulse rounded-[3px] bg-success" />
 					</div>
 					<div className="font-mono text-[11px] text-ink-faint">请勿关闭页面</div>
 				</>
@@ -308,11 +310,11 @@ export function ListenView(): React.JSX.Element {
 
 			{/* done：文本卡 + 操作组 */}
 			{phase === "done" && result && (
-				<div className="w-full max-w-[560px]">
+				<div className="w-full page-narrow">
 					<div className="mb-2 flex flex-wrap items-center gap-2 text-[11px] text-ink-faint">
 						<span className="mono">{formatClock(elapsed)}</span>
 						<span>·</span>
-						<span className="rounded bg-surface-3 px-1.5 py-px font-mono">{result.model || "whisper"}</span>
+						<span className="badge neutral">{result.model || "whisper"}</span>
 						<span className="rounded bg-surface-2 px-1.5 py-px font-mono">
 							{result.path.replace(/^\/Users\/[^/]+/, "~")}
 						</span>
@@ -377,7 +379,7 @@ export function ListenView(): React.JSX.Element {
 			)}
 
 			{/* ── 历史记录（listen_list） ── */}
-			<div className="mt-4 w-full max-w-[560px]">
+			<div className="mt-4 w-full page-narrow">
 				<div className="mb-2 flex items-center gap-3">
 					<h3 className="text-[11px] font-semibold tracking-[0.08em] text-ink-faint uppercase">历史记录</h3>
 					<span className="text-[11px] text-ink-faint">~/.omp/listen/ · 与 TUI /listen 同数据</span>
@@ -385,7 +387,7 @@ export function ListenView(): React.JSX.Element {
 						value={search}
 						onChange={e => setSearch(e.target.value)}
 						placeholder="搜索关键词…"
-						className="ml-auto max-w-[220px] rounded border border-hairline bg-surface px-2.5 py-1.5 text-[12px] text-ink outline-none focus:border-ink focus:shadow-[0_0_0_3px_var(--color-accent-dim)]"
+						className="ml-auto max-w-[220px] rounded border border-hairline bg-surface px-2.5 py-1.5 text-[12px] text-ink"
 					/>
 				</div>
 				<div className="overflow-hidden rounded-xl border border-hairline bg-surface">
@@ -396,7 +398,9 @@ export function ListenView(): React.JSX.Element {
 						</div>
 					)}
 					{filtered.length === 0 && search && (
-						<div className="px-4 py-6 text-center text-[12px] text-ink-faint">没有匹配「{search}」的记录</div>
+						<div className="px-4 py-6 text-center text-[12px] text-ink-faint">
+							没有匹配「{search}」的记录，换个关键词试试
+						</div>
 					)}
 					{filtered.map(rec => (
 						<div key={rec.path}>
@@ -409,7 +413,7 @@ export function ListenView(): React.JSX.Element {
 									<span className="mt-0.5 flex gap-2.5 font-mono text-[11px] text-ink-faint">
 										<span>{new Date(rec.recordedAt).toLocaleString()}</span>
 										<span>{Math.max(1, Math.round(rec.size / 1024))} KB</span>
-										<span className="rounded bg-surface-3 px-1.5 py-px">whisper</span>
+										<span className="badge neutral">whisper</span>
 									</span>
 								</span>
 								<button

@@ -44,14 +44,24 @@ export function Transcript(): React.JSX.Element {
 		}
 	}, [messages, live, view.phase]);
 
+	const pending =
+		!live && (view.phase === "streaming" || view.phase === "retrying" || view.phase === "executing_tool");
+	const compacting = !live && view.phase === "compacting";
+
 	return (
 		<div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-6 pt-7 pb-3">
-			<div className="mx-auto flex max-w-[720px] flex-col gap-7">
+			<div aria-live="polite" className="mx-auto flex max-w-[760px] flex-col gap-7">
 				{rows.map(({ msg, entryId }) => (
 					<MessageRow key={msg.id} msg={msg} entryId={entryId} />
 				))}
 				{live && <MessageRow msg={live} streaming />}
-				{!live && messages.length === 0 && (
+				{(pending || compacting) && (
+					<div className="flex items-center gap-2 py-1 text-xs text-ink-subtle">
+						<span className="spin" />
+						{compacting ? "整理上下文中…" : "思考中…"}
+					</div>
+				)}
+				{!live && !pending && !compacting && messages.length === 0 && (
 					<div className="py-16 text-center text-[13px] text-ink-faint">还没有消息 —— 从下方输入第一条指令。</div>
 				)}
 			</div>

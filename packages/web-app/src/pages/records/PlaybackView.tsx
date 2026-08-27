@@ -1,4 +1,5 @@
-import { Pause, Play, SkipBack, SkipForward } from "lucide-react";
+import { Pause, Play, SkipBack, SkipForward, XCircle } from "lucide-react";
+
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
 import { type BranchPoint, CURRENT_SESSION_ID, type PlaybackEntry, toPlaybackEntries } from "../../lib/records";
@@ -136,7 +137,7 @@ export function PlaybackView(): React.JSX.Element {
 						<button
 							key={s}
 							type="button"
-							className={`rounded px-2.5 py-0.5 font-mono text-[11px] transition-colors ${playback.speed === s ? "bg-surface-3 text-ink" : "text-ink-subtle hover:text-ink"}`}
+							className={`rounded px-2.5 py-0.5 font-mono text-[11px] transition-colors ${playback.speed === s ? "bg-accent-dim font-medium text-ink" : "text-ink-subtle hover:text-ink"}`}
 							onClick={() => playback.setSpeed(s)}
 						>
 							{s}x
@@ -176,7 +177,7 @@ export function PlaybackView(): React.JSX.Element {
 						)}
 						{error && (
 							<div className="rounded-md border border-danger/40 bg-danger/5 px-4 py-3 text-[12.5px] text-danger">
-								✗ {error}
+								<XCircle size={13} className="text-danger" /> {error}
 							</div>
 						)}
 
@@ -262,7 +263,7 @@ export function PlaybackView(): React.JSX.Element {
 
 				{/* 时间线导航 */}
 				{timeline && timeline.length > 1 && (
-					<aside className="hidden w-[240px] shrink-0 overflow-y-auto border-l border-hairline bg-surface p-4 lg:block">
+					<aside className="hidden min-w-0 flex-1 overflow-y-auto border-l border-hairline bg-surface p-4 lg:w-[240px] lg:shrink-0 lg:block">
 						<h3 className="mb-3 text-[10px] font-semibold tracking-[0.08em] text-ink-faint uppercase">
 							时间线 · {timeline.length}
 						</h3>

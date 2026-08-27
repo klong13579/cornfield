@@ -54,7 +54,7 @@ export function SlashPalette({
 	if (filtered.length === 0) return null;
 
 	return (
-		<div className="absolute bottom-[calc(100%+8px)] left-0 right-0 z-40 mx-auto max-w-[560px] rounded-[12px] border border-hairline-strong bg-surface p-1.5 shadow-xl">
+		<div className="absolute bottom-[calc(100%+8px)] left-0 right-0 z-menu mx-auto max-w-[560px] rounded-[12px] border border-hairline-strong bg-surface p-1.5 shadow-xl">
 			<div className="max-h-[min(45vh,420px)] overflow-y-auto overscroll-contain">
 				{filtered.map((cmd, i) => {
 					const prev = i > 0 ? filtered[i - 1] : undefined;
@@ -62,13 +62,13 @@ export function SlashPalette({
 					return (
 						<div key={cmd.name}>
 							{groupStart && (
-								<div className="sticky top-0 z-10 border-b border-hairline bg-surface px-2.5 pt-2 pb-1 text-[10.5px] font-semibold tracking-[0.08em] text-ink-faint uppercase">
+								<div className="sticky top-0 border-b border-hairline bg-surface px-2.5 pt-2 pb-1 text-[10.5px] font-semibold tracking-[0.08em] text-ink-faint uppercase">
 									{cmd.group ?? "系统命令"}
 								</div>
 							)}
 							<button
 								type="button"
-								className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left transition-colors ${i === activeIndex ? "bg-accent-dim" : "hover:bg-surface-2"}`}
+								className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left transition-colors ${i === activeIndex ? "bg-surface-2 text-ink" : "hover:bg-surface-2"}`}
 								onMouseEnter={() => onHover(i)}
 								onClick={() => onSelect(cmd)}
 							>

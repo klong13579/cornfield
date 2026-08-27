@@ -168,7 +168,7 @@ export function InsightsView(): React.JSX.Element {
 	if (!view.connected) {
 		return (
 			<div className="px-10 pt-8 pb-12">
-				<div className="mx-auto max-w-[1100px]">
+				<div className="page-wide">
 					<Header period={period} onPeriod={setPeriod} />
 					<div className="py-20 text-center text-[13px] text-ink-faint">未连接——用量统计不可用</div>
 				</div>
@@ -180,7 +180,7 @@ export function InsightsView(): React.JSX.Element {
 
 	return (
 		<div className="px-10 pt-8 pb-12">
-			<div className="mx-auto max-w-[1100px]">
+			<div className="page-wide">
 				<Header period={period} onPeriod={setPeriod} />
 
 				{error && <div className="py-20 text-center text-[13px] text-ink-faint">用量统计不可用：{error}</div>}
@@ -265,7 +265,7 @@ function KpiCards({ overall }: { overall: DashboardStatsDto["overall"] }): React
 			{cards.map(c => (
 				<div key={c.label} className="rounded-xl border border-hairline bg-surface px-5 py-4">
 					<div className="text-[11px] font-semibold tracking-[0.08em] text-ink-faint uppercase">{c.label}</div>
-					<div className="mt-1.5 font-mono text-[22px] font-semibold tracking-[-0.02em] text-ink">{c.value}</div>
+					<div className="mt-1.5 font-mono text-2xl font-semibold tabular-nums text-ink">{c.value}</div>
 					<div className="mt-1 truncate text-[11.5px] text-ink-subtle">{c.sub}</div>
 				</div>
 			))}
@@ -286,7 +286,7 @@ function TrendStrip({
 	return (
 		<div className="rounded-xl border border-hairline bg-surface px-5 py-4">
 			<div className="mb-3 flex items-baseline justify-between">
-				<div className="text-[11px] font-semibold tracking-[0.08em] text-ink-faint uppercase">请求趋势</div>
+				<div className="section-title">请求趋势</div>
 				<div className="font-mono text-[11px] text-ink-faint">{points.length} 个时段</div>
 			</div>
 			{points.length === 0 ? (
@@ -324,12 +324,10 @@ function ModelCostTable({
 }): React.JSX.Element {
 	return (
 		<div className="rounded-xl border border-hairline bg-surface">
-			<div className="px-5 pt-4 pb-2 text-[11px] font-semibold tracking-[0.08em] text-ink-faint uppercase">
-				模型成本表
-			</div>
+			<div className="section-title">模型成本表</div>
 			<table className="w-full border-collapse text-[12.5px]">
 				<thead>
-					<tr className="text-left text-[10.5px] font-semibold tracking-[0.08em] text-ink-faint uppercase">
+					<tr className="section-title">
 						<th className="px-5 py-2 font-semibold">模型</th>
 						<th className="px-3 py-2 text-right font-semibold">请求</th>
 						<th className="px-3 py-2 text-right font-semibold">输入 tok</th>
@@ -347,17 +345,25 @@ function ModelCostTable({
 								<div className="font-mono text-[12.5px] text-ink">{r.model}</div>
 								<div className="text-[11px] text-ink-faint">{r.provider}</div>
 							</td>
-							<td className="px-3 py-2.5 text-right font-mono text-ink-subtle">{fmtNum(r.totalRequests)}</td>
-							<td className="px-3 py-2.5 text-right font-mono text-ink-subtle">{fmtNum(r.totalInputTokens)}</td>
-							<td className="px-3 py-2.5 text-right font-mono text-ink-subtle">{fmtNum(r.totalOutputTokens)}</td>
-							<td className="px-3 py-2.5 text-right font-mono text-ink-subtle">
+							<td className="px-3 py-2.5 text-right font-mono tabular-nums text-ink-subtle">
+								{fmtNum(r.totalRequests)}
+							</td>
+							<td className="px-3 py-2.5 text-right font-mono tabular-nums text-ink-subtle">
+								{fmtNum(r.totalInputTokens)}
+							</td>
+							<td className="px-3 py-2.5 text-right font-mono tabular-nums text-ink-subtle">
+								{fmtNum(r.totalOutputTokens)}
+							</td>
+							<td className="px-3 py-2.5 text-right font-mono tabular-nums text-ink-subtle">
 								{fmtNum(r.totalCacheReadTokens)}
 							</td>
-							<td className="px-3 py-2.5 text-right font-mono text-ink-subtle">
+							<td className="px-3 py-2.5 text-right font-mono tabular-nums text-ink-subtle">
 								{r.priceInput !== undefined ? `$${r.priceInput}` : "—"}
 							</td>
-							<td className="px-3 py-2.5 text-right font-mono text-ink">{fmtMoney(r.totalCost)}</td>
-							<td className="px-5 py-2.5 text-right font-mono text-ink-subtle">{fmtPct(r.errorRate)}</td>
+							<td className="px-3 py-2.5 text-right font-mono tabular-nums text-ink">{fmtMoney(r.totalCost)}</td>
+							<td className="px-5 py-2.5 text-right font-mono tabular-nums text-ink-subtle">
+								{fmtPct(r.errorRate)}
+							</td>
 						</tr>
 					))}
 				</tbody>
@@ -375,15 +381,13 @@ function FolderTable({
 }): React.JSX.Element {
 	return (
 		<div className="rounded-xl border border-hairline bg-surface">
-			<div className="px-5 pt-4 pb-2 text-[11px] font-semibold tracking-[0.08em] text-ink-faint uppercase">
-				按目录用量（folder → agent）
-			</div>
+			<div className="section-title">按目录用量（folder → agent）</div>
 			{rows.length === 0 ? (
 				<div className="px-5 pb-6 text-[12px] text-ink-faint">该时段无目录级数据</div>
 			) : (
 				<table className="w-full border-collapse text-[12.5px]">
 					<thead>
-						<tr className="text-left text-[10.5px] font-semibold tracking-[0.08em] text-ink-faint uppercase">
+						<tr className="section-title">
 							<th className="px-5 py-2 font-semibold">目录</th>
 							<th className="px-3 py-2 text-right font-semibold">请求</th>
 							<th className="px-3 py-2 text-right font-semibold">Tokens</th>
@@ -394,12 +398,16 @@ function FolderTable({
 					<tbody>
 						{rows.map(r => (
 							<tr key={r.folder} className="border-t border-hairline">
-								<td className="px-5 py-2.5 font-mono text-[12.5px] text-ink">{r.folder}</td>
+								<td className="px-3 py-2.5 text-right font-mono tabular-nums text-ink-subtle">
+									{fmtNum(r.totalRequests)}
+								</td>
 								<td className="px-3 py-2.5 text-right font-mono text-ink-subtle">{fmtNum(r.totalRequests)}</td>
-								<td className="px-3 py-2.5 text-right font-mono text-ink-subtle">
+								<td className="px-3 py-2.5 text-right font-mono tabular-nums text-ink-subtle">
 									{fmtNum(r.totalInputTokens + r.totalOutputTokens)}
 								</td>
-								<td className="px-3 py-2.5 text-right font-mono text-ink-subtle">{fmtMoney(r.totalCost)}</td>
+								<td className="px-3 py-2.5 text-right font-mono tabular-nums text-ink-subtle">
+									{fmtMoney(r.totalCost)}
+								</td>
 								<td className="px-5 py-2.5 text-ink-subtle">{folderAgents.get(r.folder) ?? "—"}</td>
 							</tr>
 						))}

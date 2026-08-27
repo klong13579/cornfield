@@ -70,9 +70,7 @@ export function WorkspaceView({ compact = false }: { compact?: boolean }): React
 					</button>
 					<span className="flex items-center gap-1.5 text-[12px] text-success">
 						<span className={`conn-dot ${view.reconnecting ? "reconnecting" : ""}`} />
-						{view.reconnecting
-							? `reconnecting${view.connectionId ? ` · ${view.connectionId}` : ""}`
-							: "connected"}
+						{view.reconnecting ? `重连中${view.connectionId ? ` · ${view.connectionId}` : ""}` : "已连接"}
 					</span>
 					<span className="h-[18px] w-px bg-hairline" />
 					<button type="button" className="chip">
@@ -115,7 +113,7 @@ export function WorkspaceView({ compact = false }: { compact?: boolean }): React
 				<QueueCard
 					count={view.queued}
 					onCancel={view.queued > 0 ? () => void store.cancelQueued() : undefined}
-					className="mx-auto mb-1 max-w-[800px]"
+					className="mx-auto mb-1 max-w-[760px]"
 				/>
 
 				{/* 输入区：单一实例（CSS 自适应桌面/移动），避免模型列表/草稿逻辑双份执行 */}

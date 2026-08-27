@@ -21,6 +21,7 @@ const SUGGESTIONS = [
 	{ icon: Bot, label: "打开 Agent 管理", to: "/agents" },
 ];
 
+// 人物配色
 const FACE_COLORS = ["#e4e4e7", "#d4d4d8", "#ececee"];
 
 function timeGreeting(): string {
@@ -131,10 +132,7 @@ export function HomeView(): React.JSX.Element {
 				</div>
 
 				{/* Composer */}
-				<div
-					className="rise-in flex w-full max-w-[560px] items-end gap-2.5 rounded-[24px] border border-hairline bg-surface-2 py-2 pr-2 pl-4.5 transition-[border-color,box-shadow] duration-150 focus-within:border-accent focus-within:shadow-[0_0_0_3px_var(--color-accent-dim)]"
-					style={{ animationDelay: "360ms" }}
-				>
+				<div className="rise-in flex w-full max-w-[560px] items-end gap-2.5 rounded-lg border border-hairline bg-surface-2 py-2 pr-2 pl-4.5 transition-[border-color,box-shadow] duration-150 [animation-delay:360ms] focus-within:border-accent focus-within:shadow-[0_0_0_3px_var(--color-accent-dim)]">
 					<input
 						id="home-composer"
 						value={query}
@@ -154,10 +152,7 @@ export function HomeView(): React.JSX.Element {
 						<ArrowRight size={16} strokeWidth={1.5} />
 					</button>
 				</div>
-				<div
-					className="rise-in flex w-full max-w-[560px] justify-center gap-4 text-[11px] text-ink-faint"
-					style={{ animationDelay: "440ms" }}
-				>
+				<div className="rise-in flex w-full max-w-[560px] justify-center gap-4 text-[11px] text-ink-faint [animation-delay:440ms]">
 					<span>
 						<span className="kbd">Enter</span> 发送直达会话工作台
 					</span>
@@ -165,7 +160,7 @@ export function HomeView(): React.JSX.Element {
 
 				{/* 最近活跃 */}
 				{recent.length > 0 && (
-					<div className="rise-in w-full max-w-[560px]" style={{ animationDelay: "520ms" }}>
+					<div className="rise-in w-full max-w-[560px] [animation-delay:520ms]">
 						<div className="mb-2.5 text-center text-[10px] font-semibold tracking-[0.08em] text-ink-faint uppercase">
 							最近活跃
 						</div>

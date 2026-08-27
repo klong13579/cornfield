@@ -110,7 +110,7 @@ export function TodoView(): React.JSX.Element {
 						checked={line.done}
 						readOnly
 						tabIndex={-1}
-						className="mt-[4px] h-[15px] w-[15px] shrink-0 cursor-default accent-[var(--color-accent)]"
+						className="mt-[4px] size-4 shrink-0 cursor-default accent-[var(--color-accent)]"
 					/>
 					<div className={`min-w-0 flex-1 text-[14px] ${line.done ? "text-ink-faint line-through" : "text-ink"}`}>
 						{line.text}
@@ -144,7 +144,13 @@ export function TodoView(): React.JSX.Element {
 				);
 			case "loaded":
 				if (mdLines.length === 0) {
-					return <div className="py-16 text-center text-[13px] text-ink-faint">项目根 TODO.md 为空。</div>;
+					return (
+						<div className="py-16 text-center text-[13px] text-ink-faint">
+							项目根 TODO.md 为空。
+							<br />
+							还没有任务。把事项加到 TODO.md 后这里会同步显示。
+						</div>
+					);
 				}
 				return <div>{mdLines.map(renderMdLine)}</div>;
 		}
@@ -204,7 +210,7 @@ export function TodoView(): React.JSX.Element {
 											type="checkbox"
 											checked={task.status === "completed"}
 											onChange={() => store.toggleTodo(phase.name, i)}
-											className="mt-[4px] h-[15px] w-[15px] shrink-0 cursor-pointer accent-[var(--color-accent)]"
+											className="mt-[4px] size-4 shrink-0 cursor-pointer accent-[var(--color-accent)]"
 										/>
 										<div className="min-w-0 flex-1">
 											<div
@@ -222,7 +228,7 @@ export function TodoView(): React.JSX.Element {
 										</div>
 										<button
 											type="button"
-											className="shrink-0 rounded px-1 py-0.5 text-[12px] text-ink-faint opacity-0 transition-all group-hover:opacity-100 hover:bg-surface-2 hover:text-danger"
+											className="shrink-0 rounded px-1 py-0.5 text-[12px] text-ink-faint opacity-0 transition-colors group-hover:opacity-100 active:scale-95 hover:bg-surface-2 hover:text-danger"
 											onClick={() => store.removeTodo(phase.name, i)}
 											aria-label={`删除 ${task.content}`}
 										>

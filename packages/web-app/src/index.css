@@ -39,8 +39,40 @@
 	--radius-full: 999px;
 	--ease: 150ms cubic-bezier(0.25, 0.46, 0.45, 0.94);
 	--ease-spring: 200ms cubic-bezier(0.34, 1.56, 0.64, 1);
+	/* 字号补齐：3xs=10px / 2xs=11px，消灭 9.5/10.5/11.5 分数像素 */
+	--text-3xs: 10px;
+	--text-3xs--line-height: 1.45;
+	--text-2xs: 11px;
+	--text-2xs--line-height: 1.5;
 }
 
+/* ── 容器宽度（两档，替代各页自选 560~1100px）── */
+@utility page-narrow {
+	margin-inline: auto;
+	width: 100%;
+	max-width: 760px;
+	padding-inline: 20px;
+}
+@utility page-wide {
+	margin-inline: auto;
+	width: 100%;
+	max-width: 1100px;
+	padding-inline: 20px;
+}
+
+/* ── z-index 阶梯（替代散落的 z-10/40/50）── */
+@utility z-sticky {
+	z-index: 20;
+}
+@utility z-menu {
+	z-index: 60;
+}
+@utility z-drawer {
+	z-index: 70;
+}
+@utility z-modal {
+	z-index: 80;
+}
 /* ── 基础 ── */
 html,
 body,
@@ -595,4 +627,77 @@ main:focus {
 .conn-dot.warn {
 	background: var(--color-warning);
 	box-shadow: 0 0 8px rgba(185, 124, 30, 0.4);
+}
+
+
+/* ── taste v2 补齐：加载骨架 / 中性 badge / 图标按钮 / 中文区标题 ── */
+@keyframes skeleton-wave {
+	0% {
+		background-position: 200% 0;
+	}
+	100% {
+		background-position: -200% 0;
+	}
+}
+.skeleton {
+	background: linear-gradient(
+			100deg,
+			var(--color-surface-2) 40%,
+			var(--color-surface-3) 50%,
+			var(--color-surface-2) 60%
+		)
+		var(--color-surface-2);
+	background-size: 200% 100%;
+	animation: skeleton-wave 1.4s ease-in-out infinite;
+	border-radius: var(--radius-md);
+}
+.badge.neutral {
+	color: var(--color-ink-muted);
+	background: var(--color-surface-3);
+}
+.badge.info {
+	color: var(--color-info);
+	background: color-mix(in srgb, var(--color-info) 10%, transparent);
+}
+/* 图标按钮：28px 视觉 + ::after 扩 8px 热区（补足触控最小标准） */
+.icon-btn {
+	position: relative;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 28px;
+	height: 28px;
+	border: none;
+	border-radius: var(--radius-sm);
+	background: none;
+	color: var(--color-ink-subtle);
+	cursor: pointer;
+	transition:
+		background var(--ease),
+		color var(--ease),
+		transform var(--ease-spring);
+}
+.icon-btn::after {
+	content: "";
+	position: absolute;
+	inset: -8px;
+}
+.icon-btn:hover {
+	background: var(--color-surface-2);
+	color: var(--color-ink);
+}
+.icon-btn:active {
+	transform: scale(0.92);
+}
+.icon-btn:disabled {
+	opacity: 0.4;
+	cursor: not-allowed;
+	transform: none;
+}
+/* 中文区块标题：替代 uppercase+tracking（对 CJK 无效的模板写法） */
+.section-title {
+	font-size: 13px;
+	font-weight: 600;
+	color: var(--color-ink);
+	letter-spacing: 0;
 }

@@ -7,7 +7,7 @@ import "./float-card.css";
  *
  * 协议形状（clarify push 到时通电）：
  *   <ClarifyCard
- *     question="要把 mock 里的深色主题一并迁移吗？"
+ *     question="需要更多信息才能继续"
  *     options={["只迁亮色", "亮色 + 深色都迁"]}
  *     onAnswer={(option) => …}
  *   />
@@ -24,7 +24,7 @@ export interface ClarifyCardProps {
 	className?: string;
 }
 
-const DEMO_QUESTION = "要把 mock 里的深色主题一并迁移吗？";
+const DEMO_QUESTION = "需要更多信息才能继续";
 const DEMO_OPTIONS = ["只迁亮色（V6 现状）", "亮色 + 深色都迁", "先亮色，深色进 backlog"];
 
 export function ClarifyCard({
@@ -51,7 +51,12 @@ export function ClarifyCard({
 				<div className="fc-keys fc-question">{question}</div>
 				<div className="clarify-opts">
 					{options.map(option => (
-						<button key={option} type="button" className="clarify-opt" onClick={() => answer(option)}>
+						<button
+							key={option}
+							type="button"
+							className="clarify-opt hover:bg-surface-2 active:scale-[0.98]"
+							onClick={() => answer(option)}
+						>
 							{option}
 						</button>
 					))}

@@ -7,17 +7,15 @@ import { FileExplorer } from "../workspace/FileExplorer";
 import { KindBadge } from "./AgentsView";
 
 /**
- * Agent 详情（FR-2）—— 7 tab：Skills / Cron / 模型 / 工具 / 画像 / 文件 / Prompts。
+ * Agent 详情（FR-2）—— 6 tab：Skills / 模型 / 工具 / 画像 / 文件 / Prompts。
  * 数据源：Skills 读 .omp/skills 真实列表（fs_list+SKILL.md）、画像读 mission.md+user.md、
- * 模型接 get_available_models/set_model 真命令、Cron 待 wire 命令缺口 B4（disabled 占位）、
- * 画像实时建模待连接器路径（缺口 B5）。
+ * 模型接 get_available_models/set_model 真命令、画像实时建模待连接器路径（缺口 B5）。
  */
 
-type TabId = "skills" | "cron" | "model" | "tools" | "profile" | "files" | "prompts";
+type TabId = "skills" | "model" | "tools" | "profile" | "files" | "prompts";
 
-const TABS: { id: TabId; label: string; count?: number }[] = [
-	{ id: "skills", label: "Skills", count: 6 },
-	{ id: "cron", label: "定时任务", count: 2 },
+const TABS: { id: TabId; label: string }[] = [
+	{ id: "skills", label: "Skills" },
 	{ id: "model", label: "模型配置" },
 	{ id: "tools", label: "工具开关" },
 	{ id: "profile", label: "用户画像" },
@@ -27,29 +25,6 @@ const TABS: { id: TabId; label: string; count?: number }[] = [
 
 // 技能列表改为真实数据：fs_list 读 .omp/skills/ 目录（serve skillCount 同源）。
 // 版本/描述从各 skill 的 SKILL.md frontmatter 解析（fs_read）。
-
-// cron 数据为骨架展示：wire 命令缺口 B4
-const CRONS = [
-	{
-		name: "每日代码审查报告",
-		schedule: "0 9 * * 1-5",
-		desc: "每个工作日早上 9 点，扫描昨日提交的 PR，生成代码审查摘要",
-		runs: [
-			{ ok: true, at: "8/16 09:00" },
-			{ ok: true, at: "8/15 09:00" },
-			{ ok: false, at: "8/14 09:00" },
-		],
-	},
-	{
-		name: "每周架构健康检查",
-		schedule: "0 10 * * 1",
-		desc: "每周一早上 10 点，全仓库架构扫描，检查循环依赖和设计漂移",
-		runs: [
-			{ ok: true, at: "8/11 10:00" },
-			{ ok: true, at: "8/4 10:00" },
-		],
-	},
-];
 
 const THINKING_LEVELS = ["off", "low", "medium", "high"];
 
@@ -95,7 +70,7 @@ export function AgentDetailView({ agentId, onClose }: { agentId: string; onClose
 
 	return (
 		<div className="px-10 pt-8 pb-12">
-			<div className="mx-auto max-w-[860px]">
+			<div className="page-narrow">
 				{/* 头部（编辑式排版，无装饰图形） */}
 				<div className="mb-8">
 					<div className="mb-2.5 flex items-center gap-2 text-[12px] text-ink-subtle">
@@ -136,10 +111,8 @@ export function AgentDetailView({ agentId, onClose }: { agentId: string; onClose
 							onClick={() => setTab(t.id)}
 						>
 							{t.label}
-							{t.count !== undefined && (
-								<span className="ml-1 text-[11px] text-ink-faint">
-									{t.id === "skills" ? (agent?.skillsCount ?? t.count) : t.count}
-								</span>
+							{t.id === "skills" && agent?.skillsCount !== undefined && (
+								<span className="ml-1 text-2xs text-ink-faint">{agent.skillsCount}</span>
 							)}
 						</button>
 					))}
@@ -147,68 +120,9 @@ export function AgentDetailView({ agentId, onClose }: { agentId: string; onClose
 
 				{tab === "skills" && <SkillsView agentId={agentId} />}
 
-				{tab === "cron" && (
-					<div>
-						<div className="mb-5">
-							<button type="button" className="btn btn-sm" disabled title="cron wire 命令待后端（缺口 B4）">
-								+ 新建定时任务（待后端命令）
-							</button>
-						</div>
-						{CRONS.map(cron => (
-							<div key={cron.name} className="border-b border-hairline px-1 py-4">
-								<div className="mb-1 flex items-center gap-2.5">
-									<span className="text-[14px] font-medium text-ink">{cron.name}</span>
-									<span className="badge done">运行中</span>
-									<span className="rounded bg-surface-3 px-2 py-0.5 font-mono text-[12px] text-ink">
-										{cron.schedule}
-									</span>
-								</div>
-								<div className="mb-2 text-[12px] text-ink-subtle">{cron.desc}</div>
-								<div className="flex items-center gap-3 text-[12px] text-ink-faint">
-									<span>最近运行</span>
-									{cron.runs.map((r, i) => (
-										<span key={i} className={r.ok ? "text-success" : "text-danger"}>
-											{r.ok ? "✓" : "✗"} {r.at}
-										</span>
-									))}
-								</div>
-								<div className="mt-2.5 flex gap-1.5">
-									<button
-										type="button"
-										className="cbtn shrink-0 border border-hairline"
-										disabled
-										title="cron wire 命令待后端（缺口 B4）"
-									>
-										暂停
-									</button>
-									<button
-										type="button"
-										className="cbtn shrink-0 border border-hairline"
-										disabled
-										title="cron wire 命令待后端（缺口 B4）"
-									>
-										立即运行
-									</button>
-									<button
-										type="button"
-										className="cbtn shrink-0 border border-hairline"
-										disabled
-										title="cron wire 命令待后端（缺口 B4）"
-									>
-										日志
-									</button>
-								</div>
-							</div>
-						))}
-						<div className="mt-3 text-[11px] text-ink-faint">cron 数据接口wire 协议扩展后就绪（be-dev P3）</div>
-					</div>
-				)}
-
 				{tab === "model" && (
 					<div>
-						<h4 className="mb-3.5 text-[11px] font-semibold tracking-[0.08em] text-ink-faint uppercase">
-							模型选择
-						</h4>
+						<h4 className="mb-3.5 section-title text-ink-faint">模型选择</h4>
 						<div className="flex max-w-[420px] flex-col gap-2.5">
 							<label className="flex items-center gap-3 text-[13px] text-ink-subtle">
 								<span className="w-[90px] shrink-0">Provider</span>
@@ -260,9 +174,7 @@ export function AgentDetailView({ agentId, onClose }: { agentId: string; onClose
 
 				{tab === "tools" && (
 					<div>
-						<h4 className="mb-3 text-[11px] font-semibold tracking-[0.08em] text-ink-faint uppercase">
-							host 工具注册（set_host_tools）
-						</h4>
+						<h4 className="mb-3 section-title text-ink-faint">host 工具注册（set_host_tools）</h4>
 						{hostTools.length === 0 ? (
 							<div className="rounded-lg border border-dashed border-hairline-strong bg-surface px-4 py-6 text-center text-[12px] text-ink-faint">
 								尚未注册任何 host 工具。host tool 由前端声明（如浏览器/桌面能力），声明后 LLM 可调用，
@@ -409,7 +321,13 @@ function SkillsView({ agentId }: { agentId: string }): React.JSX.Element {
 		return <div className="px-1 py-3 text-[12px] text-danger">技能列表加载失败：{error}</div>;
 	}
 	if (!skills) {
-		return <div className="px-1 py-3 text-[12px] text-ink-faint">加载中…</div>;
+		return (
+			<div className="flex flex-col gap-2 px-1 py-3">
+				{[0, 1, 2, 3].map(i => (
+					<div key={i} className="skeleton h-6 w-full" />
+				))}
+			</div>
+		);
 	}
 	if (skills.length === 0) {
 		return (
@@ -435,7 +353,7 @@ function SkillsView({ agentId }: { agentId: string }): React.JSX.Element {
 						aria-checked={true}
 						role="switch"
 						disabled
-						title="技能启停待 set_skill_enabled 协议（后端缺口 B3）"
+						title="技能启停即将支持"
 					/>
 				</div>
 			))}
@@ -489,9 +407,7 @@ function ProfileView({ agentId }: { agentId: string }): React.JSX.Element {
 		<div className="flex flex-col gap-6">
 			{missionMd && (
 				<section>
-					<h4 className="mb-2 text-[11px] font-semibold tracking-[0.08em] text-ink-faint uppercase">
-						mission.md（agent 职责）
-					</h4>
+					<h4 className="mb-2 section-title text-ink-faint">mission.md（agent 职责）</h4>
 					<pre className="max-h-[260px] overflow-auto whitespace-pre-wrap rounded-lg border border-hairline bg-surface px-4 py-3 text-[13px] leading-relaxed text-ink-muted">
 						{missionMd}
 					</pre>
@@ -499,9 +415,7 @@ function ProfileView({ agentId }: { agentId: string }): React.JSX.Element {
 			)}
 			{userMd && (
 				<section>
-					<h4 className="mb-2 text-[11px] font-semibold tracking-[0.08em] text-ink-faint uppercase">
-						user.md（用户画像声明）
-					</h4>
+					<h4 className="mb-2 section-title text-ink-faint">user.md（用户画像声明）</h4>
 					<pre className="max-h-[420px] overflow-auto whitespace-pre-wrap rounded-lg border border-hairline bg-surface px-4 py-3 text-[13px] leading-relaxed text-ink-muted">
 						{userMd}
 					</pre>

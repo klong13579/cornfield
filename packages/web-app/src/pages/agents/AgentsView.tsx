@@ -69,9 +69,9 @@ export function AgentsView(): React.JSX.Element {
 
 	return (
 		<div className="px-10 pt-8 pb-12">
-			<div className="mx-auto max-w-[1100px]">
+			<div className="page-wide">
 				<div className="mb-5 flex items-baseline gap-3.5">
-					<h1 className="text-[32px] font-semibold tracking-[-0.8px] text-ink">Agent</h1>
+					<h1 className="text-3xl font-semibold text-ink">Agent</h1>
 					<span className="text-[13px] text-ink-faint">
 						{workspaces.length} 工作区 · {agents.length} agent · {running} 运行中
 					</span>
@@ -108,7 +108,7 @@ export function AgentsView(): React.JSX.Element {
 							<button
 								key={ws}
 								type="button"
-								className={`rounded px-3 py-1 text-[12px] transition-colors ${wsFilter === ws ? "bg-surface-3 text-ink" : "text-ink-subtle hover:text-ink"}`}
+								className={`rounded px-3 py-1 text-[12px] transition-colors ${wsFilter === ws ? "bg-accent-dim font-medium text-ink" : "text-ink-subtle hover:text-ink"}`}
 								onClick={() => setWsFilter(ws)}
 							>
 								{ws === "all" ? "全部" : ws}
@@ -126,14 +126,14 @@ export function AgentsView(): React.JSX.Element {
 							<button
 								key={key}
 								type="button"
-								className={`rounded px-3 py-1 text-[12px] transition-colors ${statusFilter === key ? "bg-surface-3 text-ink" : "text-ink-subtle hover:text-ink"}`}
+								className={`rounded px-3 py-1 text-[12px] transition-colors ${statusFilter === key ? "bg-accent-dim font-medium text-ink" : "text-ink-subtle hover:text-ink"}`}
 								onClick={() => setStatusFilter(key)}
 							>
 								{label}
 							</button>
 						))}
 					</div>
-					<div className="ml-auto flex w-[200px] items-center gap-2 rounded-md border border-hairline bg-surface-2 px-3 py-1.5 focus-within:border-hairline-strong focus-within:shadow-[0_0_0_3px_var(--color-accent-dim)]">
+					<div className="ml-auto flex w-[200px] items-center gap-2 rounded-md border border-hairline bg-surface-2 px-3 py-1.5 focus-within:border-hairline-strong">
 						<Search size={13} strokeWidth={1.5} className="shrink-0 text-ink-faint" />
 						<input
 							value={query}
@@ -147,11 +147,7 @@ export function AgentsView(): React.JSX.Element {
 				{agents.length === 0 && (
 					<div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-hairline-strong bg-surface px-6 py-16 text-center">
 						<TerminalSquare size={28} strokeWidth={1.5} className="text-ink-faint" />
-						<div className="text-[14px] text-ink-muted">尚无 Agent 数据</div>
-						<div className="max-w-md text-[12px] text-ink-faint">
-							be-dev 多 Agent 注册表（serve 会话注册表 + switch_session + server_snapshot 多 Agent
-							列表）落地后，本页自动填充。当前单会话由 serve 提供。
-						</div>
+						<div className="text-[14px] text-ink-muted">还没有 agent。在 agents 目录创建后会出现在这里。</div>
 					</div>
 				)}
 
@@ -223,11 +219,9 @@ function AgentCard({
 					: "未挂载";
 
 	return (
-		<div className="cursor-pointer rounded-xl border border-hairline bg-surface p-4 transition-all duration-150 hover:-translate-y-px hover:border-hairline-strong active:scale-[0.98] active:translate-y-0">
+		<div className="rounded-xl border border-hairline bg-surface p-4 transition-all duration-150 hover:-translate-y-px hover:border-hairline-strong active:scale-[0.98] active:translate-y-0">
 			<div className="flex items-center gap-3">
-				<span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-surface-2 text-[12px] font-semibold text-ink">
-					{agent.face}
-				</span>
+				<span className="avatar">{agent.face}</span>
 				<div className="min-w-0 flex-1">
 					<div className="flex items-center gap-2">
 						<span className="truncate text-[15px] font-medium text-ink">{agent.name}</span>
@@ -276,7 +270,7 @@ function AgentCard({
 export function KindBadge({ kind }: { kind: "coding" | "worker" }): React.JSX.Element {
 	if (kind === "coding") {
 		return (
-			<span className="inline-flex items-center gap-1 rounded bg-surface-3 px-1.5 py-px font-mono text-[9px] tracking-wide text-ink-subtle">
+			<span className="badge neutral inline-flex items-center gap-1 font-mono text-[9px] tracking-wide">
 				<TerminalSquare size={9} strokeWidth={2} />
 				CODING
 			</span>

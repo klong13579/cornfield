@@ -42,6 +42,14 @@ function getRecognitionCtor(): SpeechRecognitionCtor | null {
 }
 
 // ── TTS 工具 ──
+// ── Orb 状态中文标签映射 ──
+const ORB_LABELS: Record<string, string> = {
+	breathing: "待命",
+	listening: "聆听中",
+	shaping: "思考中",
+	composing: "播放中",
+};
+
 function speak(text: string, prefs: VoicePreferences): void {
 	if (!("speechSynthesis" in window) || !text.trim()) return;
 	if (inQuietHours(prefs)) return;
@@ -207,7 +215,8 @@ export function VoiceView(): React.JSX.Element {
 		<div className="px-10 pt-8 pb-12">
 			<div className="mx-auto max-w-[760px]">
 				<div className="mb-6 flex items-baseline gap-3.5">
-					<h1 className="text-[32px] font-semibold tracking-[-0.8px] text-ink">Voice</h1>
+					<h1 className="text-[32px] font-semibold tracking-[-0.8px] text-ink">语音</h1>
+
 					<span className="text-[13px] text-ink-faint">
 						{sttSupported ? "Web Speech API · 本地转写" : "降级模式：手动输入"}
 					</span>
@@ -254,7 +263,7 @@ export function VoiceView(): React.JSX.Element {
 							aria-label={recording ? "停止录音" : "开始录音"}
 						>
 							{recording && (
-								<span className="absolute inset-0 animate-ping rounded-full border border-warning/50" />
+								<span className="absolute inset-0 motion-safe:animate-ping rounded-full border border-warning/50" />
 							)}
 							{recording ? (
 								<CircleStop size={44} strokeWidth={1.25} className="text-danger" />
@@ -305,7 +314,7 @@ export function VoiceView(): React.JSX.Element {
 						{/* Jarvis：64px orb 状态机 */}
 						<div className="flex flex-col items-center gap-2.5">
 							<Orb state={jarvisOrb} size={64} className="shrink-0" />
-							<span className="font-mono text-[11px] text-ink-faint">{jarvisOrb}</span>
+							<span className="font-mono text-[11px] text-ink-faint">{ORB_LABELS[jarvisOrb] ?? jarvisOrb}</span>
 						</div>
 
 						{/* 唤醒/免持说明 + 录音控制 */}
@@ -323,11 +332,7 @@ export function VoiceView(): React.JSX.Element {
 							>
 								{recording ? <CircleStop size={22} strokeWidth={1.5} /> : <Mic size={22} strokeWidth={1.5} />}
 							</button>
-							<div className="text-[12px] leading-snug text-ink-faint">
-								唤醒词「{prefs.wakeWord}」占位（常驻唤醒需独立语音引擎，P4 后置）
-								<br />
-								点击麦克风开始 / 停止
-							</div>
+							<div className="text-[12px] leading-snug text-ink-faint">点击麦克风开始 / 停止</div>
 						</div>
 
 						{/* 转写区 */}
@@ -426,7 +431,7 @@ export function VoiceView(): React.JSX.Element {
 									<button
 										key={r}
 										type="button"
-										className={`rounded px-2.5 py-0.5 font-mono text-[11px] ${prefs.rate === r ? "bg-surface-3 text-ink" : "text-ink-subtle hover:text-ink"}`}
+										className={`rounded px-2.5 py-0.5 font-mono text-[11px] ${prefs.rate === r ? "bg-accent-dim font-medium text-ink" : "text-ink-subtle hover:text-ink"}`}
 										onClick={() => updatePrefs({ rate: r })}
 									>
 										{r}x
@@ -458,6 +463,8 @@ export function VoiceView(): React.JSX.Element {
 									type="time"
 									value={prefs.quietStart}
 									onChange={e => updatePrefs({ quietStart: e.target.value })}
+									min="00:00"
+									max="23:59"
 									className="rounded border border-hairline bg-surface-2 px-2 py-1 outline-none"
 								/>
 								–
@@ -465,6 +472,8 @@ export function VoiceView(): React.JSX.Element {
 									type="time"
 									value={prefs.quietEnd}
 									onChange={e => updatePrefs({ quietEnd: e.target.value })}
+									min="00:00"
+									max="23:59"
 									className="rounded border border-hairline bg-surface-2 px-2 py-1 outline-none"
 								/>
 							</span>

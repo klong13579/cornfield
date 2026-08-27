@@ -146,9 +146,7 @@ function CronFormCard(): React.JSX.Element {
 
 	return (
 		<div className="rounded-xl border border-hairline bg-surface">
-			<div className="px-5 pt-4 pb-2 text-[11px] font-semibold tracking-[0.08em] text-ink-faint uppercase">
-				新建定时任务 · 配置预览
-			</div>
+			<div className="section-title">新建定时任务 · 配置预览</div>
 
 			<div className="space-y-4 px-5 pb-5">
 				{/* 预设 */}
@@ -257,7 +255,7 @@ function CronFormCard(): React.JSX.Element {
 				{/* 表达式 + 下次触发预览 */}
 				<div className="rounded-md border border-hairline bg-surface-2 px-3 py-2.5">
 					<div className="flex items-baseline justify-between">
-						<div className="text-[11px] font-semibold tracking-[0.08em] text-ink-faint uppercase">表达式</div>
+						<div className="section-title">表达式</div>
 						{preview.valid && presetId !== "custom" && (
 							<div className="font-mono text-[11px] text-ink-faint">cron 表达式（预览）</div>
 						)}
@@ -291,7 +289,7 @@ function CronFormCard(): React.JSX.Element {
 						type="button"
 						disabled
 						title="B6 gateway cron 代理命令落地后可创建任务"
-						className="cursor-not-allowed rounded-md bg-accent/40 px-4 py-2 text-[13px] font-semibold text-on-accent/60"
+						className="btn btn-secondary disabled:opacity-50 disabled:cursor-not-allowed"
 					>
 						创建任务
 					</button>
@@ -364,19 +362,9 @@ function TaskRow({
 			<div className="min-w-0 flex-1">
 				<div className="flex items-baseline gap-2">
 					<span className="text-[13.5px] font-medium text-ink">{task.name}</span>
-					<span className="rounded bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] text-ink-faint">
-						{task.scheduleType}
-					</span>
-					{task.accountId && (
-						<span className="rounded bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] text-ink-faint">
-							{task.accountId}
-						</span>
-					)}
-					{!task.enabled && (
-						<span className="rounded bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] text-ink-faint">
-							disabled
-						</span>
-					)}
+					<span className="badge neutral">{task.scheduleType}</span>
+					{task.accountId && <span className="badge neutral">{task.accountId}</span>}
+					{!task.enabled && <span className="badge neutral">disabled</span>}
 				</div>
 				{task.cron && <div className="mt-0.5 font-mono text-[11.5px] text-ink-subtle">{task.cron}</div>}
 				<div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-[11px] text-ink-faint">
@@ -459,7 +447,7 @@ function TaskListCard({
 	return (
 		<div className="rounded-xl border border-hairline bg-surface">
 			<div className="flex items-baseline justify-between px-5 pt-4 pb-2">
-				<div className="text-[11px] font-semibold tracking-[0.08em] text-ink-faint uppercase">任务列表</div>
+				<div className="section-title">任务列表</div>
 				<div className="font-mono text-[11px] text-ink-faint">
 					{connected && !error ? `${tasks.length} 个任务 · 来自 gateway jobs.json（只读代理）` : ""}
 				</div>
@@ -480,9 +468,7 @@ function TaskListCard({
 							<div
 								className={`flex items-baseline justify-between border-t border-hairline px-5 py-2 ${gi === 0 ? "border-t-0" : ""}`}
 							>
-								<span className="text-[11px] font-semibold tracking-[0.08em] text-ink-faint uppercase">
-									{group.label}
-								</span>
+								<span className="section-title">{group.label}</span>
 								<span className="font-mono text-[11px] text-ink-faint">{group.tasks.length} 个任务</span>
 							</div>
 							{group.tasks.map(task => (
@@ -535,9 +521,13 @@ function TaskLogPanel({ task, onClose }: { task: TaskRowDto; onClose: () => void
 	};
 
 	return (
-		<div className="fixed inset-0 z-50 flex items-start justify-center bg-ink/40 p-6" role="dialog" aria-modal="true">
+		<div
+			className="fixed inset-0 z-modal flex items-start justify-center bg-ink/40 p-6"
+			role="dialog"
+			aria-modal="true"
+		>
 			<div className="mt-8 max-h-[80vh] w-full max-w-2xl overflow-hidden rounded-xl border border-hairline bg-surface shadow-2xl">
-				<div className="flex items-baseline justify-between border-b border-hairline px-5 py-3">
+				<div className="mt-8 max-h-[80vh] w-full max-w-2xl overflow-hidden rounded-xl border border-hairline bg-surface shadow-lg">
 					<div className="min-w-0">
 						<span className="text-[14px] font-semibold text-ink">{task.name}</span>
 						<span className="ml-2 font-mono text-[11px] text-ink-faint">运行日志 · 最近 7 天</span>

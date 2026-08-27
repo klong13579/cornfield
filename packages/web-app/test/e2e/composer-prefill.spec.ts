@@ -48,11 +48,25 @@ test.setTimeout(60_000);
 test.skip(!process.env.E2E, "web-app UI 回归在 E2E 门后执行（bun run test:ci）");
 
 test("composer 种子：显示 → 消费 URL → 清空不再恢复", async ({ page }) => {
-	const preview = spawn(
-		"bun",
-		["x", "vite", "preview", "--port", String(APP_PORT), "--strictPort", "--host", "127.0.0.1"],
-		{ cwd: path.join(repoRoot, "packages/web-app"), env: process.env },
-	);
+	// 阻断默认连接（ws://127.0.0.1:7891 = 真实桌面 sidecar）：不注入时 ?q= 自动发送
+	// 会打到真实 serve，把测试 prompt 和 LLM 回复写进用户真实会话。死端口让发送在
+	// 本地以 commandError 落横幅（本断言不受影响，spec 注释已顶设此场景）。
+	await page.addInitScript(() => {
+		localStorage.setItem("omp.serve.connection", JSON.stringify({ wsUrl: "ws://127.0.0.1:9/ws", token: "" }));
+	});
+	const preview = spawn("bun", [
+		"x",
+		"vite",
+		"preview",
+		"--port",
+		String(APP_PORT),
+		"--strictPort",
+		"--host",
+		"127.0.0.1",
+	], {
+		cwd: path.join(repoRoot, "packages/web-app"),
+		env: process.env,
+	});
 	try {
 		await waitForHttp(`http://127.0.0.1:${APP_PORT}/`, 30_000);
 		// 路由是 hash 模式（createHashRouter）——workspace 页在 /#/workspace

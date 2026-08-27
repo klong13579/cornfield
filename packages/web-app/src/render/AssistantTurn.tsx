@@ -62,12 +62,12 @@ export function AssistantTurn({
 				<div className="mb-1.5 flex items-center gap-2 text-[11px] tracking-[0.02em] text-ink-faint">
 					<span>{model ?? "—"}</span>
 					{streaming ? (
-						<span className="flex items-center gap-1.5 text-warning">
+						<span className="flex items-center gap-1.5 text-ink-subtle">
 							<Orb state="composing" size={16} />
-							streaming
+							生成中
 						</span>
 					) : (
-						<span className="font-medium text-success">✓ 已完成</span>
+						<span className="font-medium text-success">✓ 完成</span>
 					)}
 				</div>
 				<div className="text-[14px] leading-relaxed text-ink-muted">
@@ -85,8 +85,14 @@ export function AssistantTurn({
 						</div>
 					)}
 					{error && (
-						<div className="mt-1 rounded-md border border-danger/40 bg-danger/5 px-3 py-2 text-[12.5px] leading-relaxed text-danger">
-							✗ Error: {error}
+						<div
+							className="mt-1 rounded-md border px-3 py-2 text-xs leading-relaxed text-danger"
+							style={{
+								backgroundColor: "color-mix(in srgb, var(--color-danger) 6%, transparent)",
+								borderColor: "color-mix(in srgb, var(--color-danger) 35%, transparent)",
+							}}
+						>
+							出错：{error}
 						</div>
 					)}
 				</div>
