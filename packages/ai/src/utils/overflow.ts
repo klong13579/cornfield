@@ -1,4 +1,4 @@
-import type { AssistantMessage } from "../types";
+import type { AssistantMessage, Usage } from "../types";
 
 /**
  * Regex patterns to detect context overflow errors from different providers.
@@ -96,11 +96,21 @@ const OVERFLOW_PATTERNS = [
  * 4. The pattern should be added to OVERFLOW_PATTERNS in this file, or
  *    check the errorMessage yourself before calling this function
  *
+ * Error turns carry zeroed usage. Callers should pass the last successful
+ * assistant usage as `fallbackUsage` so overflow is still detected when the
+ * provider or a gateway swallows the real error text (e.g. new-api style
+ * "openai_error / bad_response_status_code" shells that match no pattern).
+ *
  * @param message - The assistant message to check
  * @param contextWindow - Optional context window size for detecting silent overflow (z.ai)
- * @returns true if the message indicates a context overflow
+ * @param fallbackUsage - Optional last successful assistant usage, used when the message itself carries no usage data
  */
-export function isContextOverflow(message: AssistantMessage, contextWindow?: number): boolean {
+function hasUsageData(usage: Usage | undefined): boolean {
+	if (!usage) return false;
+	return usage.input > 0 || usage.output > 0 || usage.cacheRead > 0 || usage.cacheWrite > 0;
+}
+
+export function isContextOverflow(message: AssistantMessage, contextWindow?: number, fallbackUsage?: Usage): boolean {
 	// Case 1: Check error message patterns
 	if (message.stopReason === "error" && message.errorMessage) {
 		// Check known patterns
@@ -117,9 +127,12 @@ export function isContextOverflow(message: AssistantMessage, contextWindow?: num
 
 	// Case 2: Usage-based overflow (silent or provider-specific)
 	if (contextWindow) {
-		const inputTokens = message.usage.input + message.usage.cacheRead + message.usage.cacheWrite;
-		if (inputTokens > contextWindow) {
-			return true;
+		const usage = hasUsageData(message.usage) ? message.usage : fallbackUsage;
+		if (usage) {
+			const inputTokens = usage.input + usage.cacheRead + usage.cacheWrite;
+			if (inputTokens > contextWindow) {
+				return true;
+			}
 		}
 	}
 

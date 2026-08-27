@@ -12,6 +12,9 @@ import {
 	calculateContextTokens,
 	compact,
 	DEFAULT_COMPACTION_SETTINGS,
+	estimateContextTokens,
+	estimateMessagesTokens,
+	estimateToolSchemaTokens,
 	findCutPoint,
 	getLastAssistantUsage,
 	prepareCompaction,
@@ -222,6 +225,52 @@ describe("getLastAssistantUsage", () => {
 	it("should return undefined if no assistant messages", () => {
 		const entries: SessionEntry[] = [createMessageEntry(createUserMessage("Hello"))];
 		expect(getLastAssistantUsage(entries)).toBeUndefined();
+	});
+});
+
+describe("estimateContextTokens", () => {
+	it("includes system prompt and tool schemas on top of messages", () => {
+		const messages = [createUserMessage("hello world")];
+		const messagesOnly = estimateMessagesTokens(messages);
+		const systemPrompt = "You are a helpful assistant. ".repeat(100);
+		const tools = [
+			{
+				name: "read_file",
+				description: "Read a file from disk. ".repeat(20),
+				parameters: {
+					type: "object",
+					properties: { path: { type: "string", description: "Absolute file path" } },
+					required: ["path"],
+				},
+			},
+		];
+
+		const full = estimateContextTokens({ messages, systemPrompt, tools });
+		expect(full).toBeGreaterThan(messagesOnly);
+		expect(full - messagesOnly).toBeGreaterThan(estimateToolSchemaTokens(tools));
+	});
+
+	it("equals the message-only estimate without system prompt or tools", () => {
+		const messages = [createUserMessage("hello world")];
+		expect(estimateContextTokens({ messages })).toBe(estimateMessagesTokens(messages));
+	});
+
+	it("estimates a positive token count for tool schemas", () => {
+		const tools = [
+			{
+				name: "bash",
+				description: "Execute a shell command.",
+				parameters: { type: "object", properties: { command: { type: "string" } }, required: ["command"] },
+			},
+		];
+		expect(estimateToolSchemaTokens(tools)).toBeGreaterThan(10);
+	});
+
+	it("tolerates unserializable tool schema parameters", () => {
+		const cyclic: Record<string, unknown> = {};
+		cyclic.self = cyclic;
+		const tools = [{ name: "t", description: "d", parameters: cyclic }];
+		expect(() => estimateToolSchemaTokens(tools)).not.toThrow();
 	});
 });
 

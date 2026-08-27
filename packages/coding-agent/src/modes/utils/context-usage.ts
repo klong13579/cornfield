@@ -4,8 +4,12 @@ import { formatNumber } from "@oh-my-pi/pi-utils";
 import type { Skill } from "../../extensibility/skills";
 import type { AgentSession } from "../../session/agent-session";
 import type { CompactionSettings } from "../../session/compaction";
-import { effectiveReserveTokens, estimateTokens, resolveThresholdTokens } from "../../session/compaction";
-import type { Tool } from "../../tools";
+import {
+	effectiveReserveTokens,
+	estimateTokens,
+	estimateToolSchemaTokens,
+	resolveThresholdTokens,
+} from "../../session/compaction";
 import type { theme as Theme } from "../theme/theme";
 
 const GRID_COLS = 20;
@@ -43,19 +47,6 @@ function estimateSkillsTokens(skills: readonly Skill[]): number {
 		// "- name: description\n" wire framing tokenizes ~identically to the
 		// concatenated form, so encode each piece separately and sum.
 		fragments.push(skill.name, skill.description);
-	}
-	return countTokens(fragments);
-}
-
-function estimateToolSchemaTokens(tools: ReadonlyArray<Pick<Tool, "name" | "description" | "parameters">>): number {
-	const fragments: string[] = [];
-	for (const tool of tools) {
-		fragments.push(tool.name, tool.description);
-		try {
-			fragments.push(JSON.stringify(tool.parameters ?? {}));
-		} catch {
-			// Schema may contain functions or cycles; ignore.
-		}
 	}
 	return countTokens(fragments);
 }

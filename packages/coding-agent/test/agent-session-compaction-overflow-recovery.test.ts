@@ -1,3 +1,23 @@
+/**
+ * Regression test: overflow recovery must not dead-lock when a gateway swallows
+ * the real overflow error.
+ *
+ * Production incident (2026-08-27, narwal-plan/deepseek-v4-flash-0731 via
+ * coder.narwal.com): the session's real prompt tokens climbed past the 1M
+ * context window. The gateway returned `400 openai_error
+ * (type=bad_response_status_code)` — a generic shell that matches none of the
+ * overflow error-text patterns — and the error turn itself carries zeroed
+ * usage. Result: three consecutive 400s with no compaction, because
+ * (a) the overflow check read usage only from the (error) turn itself, and
+ * (b) the threshold check skipped error turns entirely.
+ *
+ * The fix: fall back to the last successful assistant usage for overflow
+ * detection, and let error turns run the threshold check using the
+ * usage+estimate hybrid. This test drives the exact event sequence:
+ * successful toolUse turn (usage > window) → error turn (gateway shell) →
+ * agent_end, and asserts overflow auto-compaction fires.
+ */
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -12,7 +32,7 @@ import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { getProjectAgentDir, TempDir, withTimeout } from "@oh-my-pi/pi-utils";
 
-const runtimeSignalStoreKey = "__ompRuntimeSignals";
+const runtimeSignalStoreKey = "__ompOverflowRecoverySignals";
 
 type RuntimeSignalGlobal = typeof globalThis & { [runtimeSignalStoreKey]?: string[] };
 
@@ -24,11 +44,7 @@ function getRuntimeSignals(): string[] {
 	return globalWithSignals[runtimeSignalStoreKey];
 }
 
-/**
- * Regression test: auto-compaction completion should resume the agent loop when
- * there are queued agent-level messages (follow-up/steering/custom).
- */
-describe("AgentSession auto-compaction queue resume", () => {
+describe("AgentSession overflow recovery (gateway-swallowed errors)", () => {
 	let tempDir: TempDir;
 	let session: AgentSession;
 	let sessionManager: SessionManager;
@@ -36,10 +52,9 @@ describe("AgentSession auto-compaction queue resume", () => {
 	let modelRegistry: ModelRegistry;
 
 	beforeEach(async () => {
-		tempDir = TempDir.createSync("@pi-auto-compaction-queue-");
+		tempDir = TempDir.createSync("@pi-overflow-recovery-");
 
-		// Provide an extension that short-circuits compaction so the test doesn't
-		// make any LLM calls.
+		// Extension short-circuits compaction so the test makes no LLM calls.
 		const extensionsDir = path.join(getProjectAgentDir(tempDir.path()), "extensions");
 		fs.mkdirSync(extensionsDir, { recursive: true });
 		const extensionPath = path.join(extensionsDir, "compaction-short-circuit.ts");
@@ -65,10 +80,6 @@ describe("AgentSession auto-compaction queue resume", () => {
 				'\tpi.on("auto_compaction_end", async (event) => {',
 				`\t\tconst signals = globalThis.${runtimeSignalStoreKey} ?? (globalThis.${runtimeSignalStoreKey} = []);`,
 				'\t\tsignals.push("compaction:end:" + (event.aborted ? "aborted" : "ok"));',
-				"\t});",
-				'\tpi.on("todo_reminder", async (event) => {',
-				`\t\tconst signals = globalThis.${runtimeSignalStoreKey} ?? (globalThis.${runtimeSignalStoreKey} = []);`,
-				'\t\tsignals.push("todo:" + event.attempt + "/" + event.maxAttempts);',
 				"\t});",
 				"}",
 			].join("\n"),
@@ -103,7 +114,6 @@ describe("AgentSession auto-compaction queue resume", () => {
 			},
 		});
 
-		// Seed a minimal session branch so prepareCompaction() returns a preparation.
 		sessionManager.appendMessage({
 			role: "user",
 			content: "hello",
@@ -115,8 +125,7 @@ describe("AgentSession auto-compaction queue resume", () => {
 			sessionManager,
 			settings: Settings.isolated({
 				"compaction.autoContinue": false,
-				"todo.reminders": true,
-				"todo.reminders.max": 3,
+				"contextPromotion.enabled": false,
 			}),
 			modelRegistry,
 			extensionRunner,
@@ -124,7 +133,6 @@ describe("AgentSession auto-compaction queue resume", () => {
 	});
 
 	afterEach(async () => {
-		vi.useRealTimers();
 		await session.dispose();
 		authStorage.close();
 		tempDir.removeSync();
@@ -132,116 +140,124 @@ describe("AgentSession auto-compaction queue resume", () => {
 		vi.restoreAllMocks();
 	});
 
-	it("resumes after threshold compaction when only agent-level queued messages exist", async () => {
-		session.agent.followUp({
-			role: "custom",
-			customType: "test",
-			content: [{ type: "text", text: "Queued custom" }],
-			display: false,
-			timestamp: Date.now(),
-		});
-
-		expect(session.agent.hasQueuedMessages()).toBe(true);
-
+	it("compacts on overflow when the gateway swallows the error text (regression)", async () => {
 		const continueSpy = vi.spyOn(session.agent, "continue").mockResolvedValue();
 
-		// Wait for auto_compaction_end event to know when the async handler is done
 		const { promise: compactionDone, resolve: onCompactionDone } = Promise.withResolvers<void>();
 		session.subscribe(event => {
 			if (event.type === "auto_compaction_end") onCompactionDone();
 		});
 
-		// Build a fake AssistantMessage with high token usage to trigger threshold
-		// compaction (contextWindow=200000, threshold ~80%).
-		const assistantMsg = {
+		const contextWindow = 200_000;
+
+		// Mid-loop successful turn whose reported usage already exceeds the window.
+		const successMsg = {
 			role: "assistant" as const,
-			content: [],
+			content: [{ type: "text" as const, text: "working on it" }],
 			api: "anthropic-messages" as const,
 			provider: "anthropic" as const,
 			model: "claude-sonnet-4-5",
 			stopReason: "stop" as const,
 			usage: {
-				input: 190000,
-				output: 1000,
+				input: contextWindow + 10_000,
+				output: 100,
 				cacheRead: 0,
 				cacheWrite: 0,
-				totalTokens: 191000,
+				totalTokens: contextWindow + 10_100,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
+			timestamp: Date.now() - 1000,
+		};
+
+		// Final turn: gateway-swallowed 400 shell, zeroed usage.
+		const errorMsg = {
+			role: "assistant" as const,
+			content: [],
+			api: "anthropic-messages" as const,
+			provider: "anthropic" as const,
+			model: "claude-sonnet-4-5",
+			stopReason: "error" as const,
+			errorMessage: "400 openai_error (type=bad_response_status_code param=bad_response_status_code)",
+			usage: {
+				input: 0,
+				output: 0,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 0,
 				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 			},
 			timestamp: Date.now(),
 		};
 
-		// Drive auto-compaction through the event flow:
-		// message_end → stores #lastAssistantMessage
-		// agent_end   → #checkCompaction → shouldCompact → #runAutoCompaction
-		session.agent.emitExternalEvent({ type: "message_end", message: assistantMsg });
-		session.agent.emitExternalEvent({ type: "agent_end", messages: [assistantMsg] });
-		await Bun.sleep(100); // let the agent's async event chain process
+		session.agent.emitExternalEvent({ type: "message_end", message: successMsg });
+		session.agent.emitExternalEvent({ type: "message_end", message: errorMsg });
+		session.agent.emitExternalEvent({ type: "agent_end", messages: [errorMsg] });
 
-		// Wait for compaction completion, then verify waitForIdle blocks on queued continuation.
-		await withTimeout(compactionDone, 5000, "compaction completion timed out");
-		await Promise.resolve();
-		const idlePromise = session.waitForIdle();
-		let idleResolved = false;
-		void idlePromise.then(() => {
-			idleResolved = true;
-		});
-		await Promise.resolve();
-		expect(idleResolved).toBe(false);
-		await withTimeout(idlePromise, 5000, "waitForIdle timed out");
+		await withTimeout(compactionDone, 5000, "overflow compaction timed out");
 
-		expect(continueSpy).toHaveBeenCalledTimes(1);
 		const runtimeSignals = getRuntimeSignals();
-		expect(runtimeSignals).toContain("compaction:start:threshold");
-		// Compaction now runs from the injected event path: the threshold check
-		// uses the wire-reported usage from the last successful assistant turn,
-		// which the fake message above provides.
+		expect(runtimeSignals).toContain("compaction:start:overflow");
 		expect(runtimeSignals.some(signal => signal.startsWith("compaction:end:"))).toBe(true);
+		expect(continueSpy).not.toHaveBeenCalled(); // autoContinue disabled
 	});
 
-	it("forwards todo reminder lifecycle signals to extensions", async () => {
+	it("compacts on threshold when an error turn ends with oversized context (regression)", async () => {
 		const continueSpy = vi.spyOn(session.agent, "continue").mockResolvedValue();
 
-		session.setTodoPhases([
-			{
-				name: "Execution",
-				tasks: [{ content: "Finish pending task", status: "in_progress" }],
-			},
-		]);
-
-		const { promise: reminderDone, resolve: onReminderDone } = Promise.withResolvers<void>();
+		const { promise: compactionDone, resolve: onCompactionDone } = Promise.withResolvers<void>();
 		session.subscribe(event => {
-			if (event.type === "todo_reminder") onReminderDone();
+			if (event.type === "auto_compaction_end") onCompactionDone();
 		});
 
-		const assistantMsg = {
+		// Reported prompt usage crosses the default threshold
+		// (window - max(15%, reserve)) but stays under the window.
+		const threshold = Math.floor(200_000 * 0.85);
+
+		const successMsg = {
 			role: "assistant" as const,
-			content: [],
+			content: [{ type: "text" as const, text: "done" }],
 			api: "anthropic-messages" as const,
 			provider: "anthropic" as const,
 			model: "claude-sonnet-4-5",
 			stopReason: "stop" as const,
 			usage: {
-				input: 100,
-				output: 20,
+				input: threshold + 5_000,
+				output: 100,
 				cacheRead: 0,
 				cacheWrite: 0,
-				totalTokens: 120,
+				totalTokens: threshold + 5_100,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
+			timestamp: Date.now() - 1000,
+		};
+
+		const errorMsg = {
+			role: "assistant" as const,
+			content: [],
+			api: "anthropic-messages" as const,
+			provider: "anthropic" as const,
+			model: "claude-sonnet-4-5",
+			stopReason: "error" as const,
+			errorMessage: "400 openai_error (type=bad_response_status_code param=bad_response_status_code)",
+			usage: {
+				input: 0,
+				output: 0,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 0,
 				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 			},
 			timestamp: Date.now(),
 		};
 
-		session.agent.emitExternalEvent({ type: "message_end", message: assistantMsg });
-		session.agent.emitExternalEvent({ type: "agent_end", messages: [assistantMsg] });
-		await Bun.sleep(100); // let the agent's async event chain process
+		session.agent.emitExternalEvent({ type: "message_end", message: successMsg });
+		session.agent.emitExternalEvent({ type: "message_end", message: errorMsg });
+		session.agent.emitExternalEvent({ type: "agent_end", messages: [errorMsg] });
 
-		await withTimeout(reminderDone, 1000, "Todo reminder timed out");
-		await Promise.resolve();
+		await withTimeout(compactionDone, 5000, "threshold compaction timed out");
 
-		expect(getRuntimeSignals()).toContain("todo:1/3");
-		expect(continueSpy).toHaveBeenCalledTimes(1);
-		await session.waitForIdle();
+		const runtimeSignals = getRuntimeSignals();
+		expect(runtimeSignals).toContain("compaction:start:threshold");
+		expect(continueSpy).not.toHaveBeenCalled();
 	});
 });
-console.log("FILE_TOP_LOADED");

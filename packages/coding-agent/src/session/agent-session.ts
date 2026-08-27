@@ -154,9 +154,10 @@ import {
 	calculatePromptTokens,
 	collectEntriesForBranchSummary,
 	compact,
-	estimateMessagesTokens,
+	estimateContextTokens,
 	estimateTokens,
 	generateBranchSummary,
+	getLastAssistantUsage,
 	prepareCompaction,
 	resolveKeepRecentTokens,
 	resolveThresholdTokens,
@@ -2644,7 +2645,7 @@ export class AgentSession {
 				const contextWindow = this.model?.contextWindow ?? 0;
 				if (contextWindow > 0) {
 					const compactionSettings = this.settings.getGroup("compaction");
-					const contextTokens = estimateMessagesTokens(this.agent.state.messages);
+					const contextTokens = this.#estimateContextTokens().tokens;
 					const thresholdTokens = resolveThresholdTokens(contextWindow, compactionSettings);
 					const keepRecent = resolveKeepRecentTokens(thresholdTokens, compactionSettings);
 					if (contextTokens > keepRecent) {
@@ -4453,7 +4454,16 @@ export class AgentSession {
 		const compactionEntry = getLatestCompactionEntry(this.sessionManager.getBranch());
 		const errorIsFromBeforeCompaction =
 			compactionEntry !== null && assistantMessage.timestamp < new Date(compactionEntry.timestamp).getTime();
-		if (sameModel && !errorIsFromBeforeCompaction && isContextOverflow(assistantMessage, contextWindow)) {
+		// Error turns carry zeroed usage. Fall back to the last successful assistant
+		// usage so overflow stays detectable when the provider or a gateway swallows
+		// the real error text (e.g. new-api "openai_error" shells that match no pattern).
+		const fallbackUsage =
+			assistantMessage.stopReason === "error" ? getLastAssistantUsage(this.sessionManager.getBranch()) : undefined;
+		if (
+			sameModel &&
+			!errorIsFromBeforeCompaction &&
+			isContextOverflow(assistantMessage, contextWindow, fallbackUsage)
+		) {
 			// Remove the error message from agent state (it IS saved to session for history,
 			// but we don't want it in context for the retry)
 			const messages = this.agent.state.messages;
@@ -4480,15 +4490,12 @@ export class AgentSession {
 		const compactionSettings = this.settings.getGroup("compaction");
 		if (!compactionSettings.enabled || compactionSettings.strategy === "off") return;
 
-		// Case 2: Threshold - turn succeeded but context is getting large
-		// Skip if this was an error (non-overflow errors don't have usage data)
-		if (assistantMessage.stopReason === "error") return;
+		// Case 2: Threshold - context is getting large.
+		// Runs on error turns too: the estimate is computed locally (last successful
+		// usage + content estimate), so an error turn must not dead-lock compaction.
 		// Hermes-style: pruned tool outputs first, then estimate from actual content
 		await this.#pruneToolOutputs();
-		// Estimate actual context size from in-memory messages
-		// instead of relying on provider-reported usage (which may include
-		// cacheRead for some providers like MiniMax-M3, inflating the count)
-		const contextTokens = estimateMessagesTokens(this.agent.state.messages);
+		const contextTokens = this.#estimateContextTokens().tokens;
 		if (shouldCompact(contextTokens, contextWindow, compactionSettings)) {
 			// Try promotion first — if a larger model is available, switch instead of compacting
 			const promoted = await this.#tryContextPromotion(assistantMessage);
@@ -7090,47 +7097,50 @@ export class AgentSession {
 	}
 
 	/**
-	 * Estimate context tokens from messages, using the last assistant usage when available.
+	 * Estimate the current wire context size (messages + system prompt + tool schemas).
+	 *
+	 * Combines two signals and takes the max, because each fails in a different way:
+	 * - Wire-reported usage from the last successful assistant turn: accurate for
+	 *   providers that report prompt tokens faithfully (DeepSeek, OpenAI), but
+	 *   under-reports for some gateways (MiniMax-M3 reports per-turn buckets, not
+	 *   the accumulated context).
+	 * - Local content estimate: tokenizer-based, robust to usage quirks, but
+	 *   drifts when the tokenizer ratio differs from the provider's (Chinese-heavy
+	 *   content on cl100k under-counts by 10-25%).
+	 *
+	 * Error and aborted turns carry zeroed usage and are skipped when looking for
+	 * the last usable usage.
 	 */
 	#estimateContextTokens(): {
 		tokens: number;
 	} {
 		const messages = this.messages;
 
-		// Find last assistant message with usage
-		let lastUsageIndex: number | null = null;
-		let lastUsage: Usage | undefined;
+		const localEstimate = estimateContextTokens({
+			messages,
+			systemPrompt: this.systemPrompt,
+			tools: this.agent.state.tools,
+		});
+
+		let usageTokens = 0;
 		for (let i = messages.length - 1; i >= 0; i--) {
 			const msg = messages[i];
-			if (msg.role === "assistant") {
-				const assistantMsg = msg as AssistantMessage;
-				if (assistantMsg.usage) {
-					lastUsage = assistantMsg.usage;
-					lastUsageIndex = i;
-					break;
-				}
+			if (msg.role !== "assistant") continue;
+			const assistantMsg = msg as AssistantMessage;
+			if (assistantMsg.stopReason === "error" || assistantMsg.stopReason === "aborted") continue;
+			const promptTokens = calculatePromptTokens(assistantMsg.usage);
+			if (promptTokens <= 0) continue;
+			// Messages appended after the usage-reporting turn add on top of the report.
+			let trailingTokens = 0;
+			for (let j = i + 1; j < messages.length; j++) {
+				trailingTokens += estimateTokens(messages[j]);
 			}
-		}
-
-		if (!lastUsage || lastUsageIndex === null) {
-			// No usage data - estimate all messages
-			let estimated = 0;
-			for (const message of messages) {
-				estimated += estimateTokens(message);
-			}
-			return {
-				tokens: estimated,
-			};
-		}
-
-		const usageTokens = calculatePromptTokens(lastUsage);
-		let trailingTokens = 0;
-		for (let i = lastUsageIndex + 1; i < messages.length; i++) {
-			trailingTokens += estimateTokens(messages[i]);
+			usageTokens = promptTokens + trailingTokens;
+			break;
 		}
 
 		return {
-			tokens: usageTokens + trailingTokens,
+			tokens: Math.max(localEstimate, usageTokens),
 		};
 	}
 

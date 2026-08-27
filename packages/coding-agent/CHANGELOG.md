@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **溢出/阈值压缩死锁修复：网关吞错也能触发自动压缩**（`src/session/agent-session.ts`、`src/session/compaction/compaction.ts`、`src/modes/utils/context-usage.ts`）: 2026-08-27 事故（narwal-plan/deepseek-v4-flash-0731，1M 窗口 session 真实 prompt 爬到 1,003,237 token）暴露两条失效路径——(1) 溢出检测只读当前（错误）回合的零值 usage，且网关壳错误文本 `openai_error (type=bad_response_status_code)` 匹配不上任何溢出 pattern，导致三连 400 无压缩、只能人工 /compact；(2) 阈值检查用 `estimateMessagesTokens`（cl100k）低估 10-25%（中文场景）且不计入 system prompt（~6 万 token）与 42 个工具 JSON schema（~2.9 万 token），session 真实 871K→968K 持续超过 850K 阈值 12 个回合却从未触发。修复：`#checkCompaction` 溢出检测在错误回合回退到 `getLastAssistantUsage`（最后一条成功 usage）；阈值检查不再跳过错误回合，并改用 `#estimateContextTokens()` —— 取 max(本地全量估算[消息+system prompt+工具 schema]，最后成功 usage+尾部估算)，两个信号互为下界（MiniMax 系 usage 低报由估算兑底，tokenizer 低估由 usage 兑底）。`estimateToolSchemaTokens` 从 context-usage.ts 上移到 compaction.ts 统一出口。同时修复 `#estimateContextTokens` 原先会把错误回合零值 usage 当作“最后 usage”导致显示塌缩的隐患，以及 idle 压缩检查同样改用 wire 口径。新增回归测试 `test/agent-session-compaction-overflow-recovery.test.ts`（网关吞错溢出恢复 + 错误回合阈值压缩），解跳 `agent-session-auto-compaction-queue.test.ts` 中因同一低估值 bug 被 skip 的用例。
+
 
 - **Changed: intercom inbound delivery for headless sessions — busy sessions now queue instead of rejecting** (`src/intercom-extension/index.ts`): `resolveInboundDeliveryMode` returned `"reject"` when a non-interactive session (e.g. gateway RPC agents) was busy, leaving `ask` waiters in other agent sessions to time out with no recourse — headless agents could never reliably participate in intercom collaboration while processing a turn. Busy headless sessions now return `"followUp"` (queue until the current turn ends), matching the has-UI default. Idle behavior unchanged (trigger). This plus the per-agent SYSTEM.md intercom reply discipline closes the "gateway agents can't talk to each other" gap end-to-end.
 

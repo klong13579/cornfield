@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **`isContextOverflow` 支持回退 usage 检测网关吞错的溢出**（`src/utils/overflow.ts`）: 错误回合携带的 usage 为零值，导致仅靠错误文本匹配（26 条 pattern）判定溢出时，网关壳错误（如 new-api 系 `openai_error (type=bad_response_status_code)`）永远判不出溢出。新增可选参数 `fallbackUsage`：消息自身无有效 usage 时改用调用方传入的最后一条成功 assistant usage 做 `input+cacheRead+cacheWrite > contextWindow` 判定。配套 coding-agent 修复见该包同期条目（2026-08-27 narwal-plan deepseek-v4-flash-0731 三连 400 死循环事故）。
+
 ### Added
 
 - **Narwal Plan 内置 provider**（`src/provider-models/narwal-plan.ts`、`src/provider-models/openai-compat.ts`、`src/provider-models/descriptors.ts`、`src/models.json`）: narwal-plan（`https://coder.narwal.com/v1`，OpenAI-completions API）升级为内置 provider —— 模型目录由运行时 `/v1/models` discovery 提供；45 个核心模型（GLM/GPT/Claude/MiniMax/Qwen/Kimi/DeepSeek）的 context/cost/reasoning/thinking 元数据以静态种子 `NARWAL_PLAN_STATIC_MODELS` 固化，discovery 裸 id 经种子 reference 补全（避免占位元数据导致上下文窗口误判）。`getEnvApiKey`（`src/stream.ts`）新增 `NARWAL_PLAN_API_KEY`（兼容 `NARWAL_API_KEY`）解析。

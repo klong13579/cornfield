@@ -282,6 +282,47 @@ export function estimateMessagesTokens(messages: AgentMessage[]): number {
 	}
 	return total;
 }
+/** Structural subset of a tool definition needed to estimate its wire schema size. */
+export type ToolSchemaEstimateSource = {
+	name: string;
+	description: string;
+	parameters?: unknown;
+};
+
+/**
+ * Estimate the tokens a provider bills for the JSON tool schemas sent on the wire.
+ * Tool descriptions are also embedded in the system prompt (markdown), but the
+ * JSON schemas themselves are a separate payload not covered by message estimation.
+ */
+export function estimateToolSchemaTokens(tools: ReadonlyArray<ToolSchemaEstimateSource>): number {
+	const fragments: string[] = [];
+	for (const tool of tools) {
+		fragments.push(tool.name, tool.description);
+		try {
+			fragments.push(JSON.stringify(tool.parameters ?? {}));
+		} catch {
+			// Schema may contain functions or cycles; ignore.
+		}
+	}
+	return countTokens(fragments);
+}
+
+/**
+ * Estimate the full wire context a provider receives: messages + system prompt
+ * + JSON tool schemas. Used for the compaction threshold check so tool and
+ * system prompt tokens cannot silently hide below the threshold.
+ */
+export function estimateContextTokens(input: {
+	messages: AgentMessage[];
+	systemPrompt?: string;
+	tools?: ReadonlyArray<ToolSchemaEstimateSource>;
+}): number {
+	return (
+		estimateMessagesTokens(input.messages) +
+		(input.systemPrompt ? countTokens([input.systemPrompt]) : 0) +
+		(input.tools ? estimateToolSchemaTokens(input.tools) : 0)
+	);
+}
 
 /**
  * Estimate token count for a message using cl100k_base via the native

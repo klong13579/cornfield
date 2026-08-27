@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import type { AssistantMessage } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage, Usage } from "@oh-my-pi/pi-ai";
 import { isContextOverflow } from "@oh-my-pi/pi-ai/utils/overflow";
 
 function createErrorMessage(errorMessage: string): AssistantMessage {
@@ -49,5 +49,43 @@ describe("isContextOverflow - HTTP 413 variants", () => {
 	it("does not classify unrelated 413 errors as overflow", () => {
 		const message = createErrorMessage("413 Forbidden");
 		expect(isContextOverflow(message)).toBe(false);
+	});
+});
+function createUsage(input: number): Usage {
+	return {
+		input,
+		output: 0,
+		cacheRead: 0,
+		cacheWrite: 0,
+		totalTokens: input,
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+	};
+}
+
+describe("isContextOverflow - fallback usage", () => {
+	it("detects overflow via fallback usage when gateway swallows the real error text", () => {
+		// Regression: new-api style gateway shells (observed on narwal-plan)
+		const message = createErrorMessage(
+			"400 openai_error (type=bad_response_status_code param=bad_response_status_code)",
+		);
+		expect(isContextOverflow(message, 1_000_000, createUsage(1_003_237))).toBe(true);
+	});
+
+	it("does not classify as overflow when fallback usage is within the window", () => {
+		const message = createErrorMessage(
+			"400 openai_error (type=bad_response_status_code param=bad_response_status_code)",
+		);
+		expect(isContextOverflow(message, 1_000_000, createUsage(500_000))).toBe(false);
+	});
+
+	it("prefers the message's own nonzero usage over the fallback", () => {
+		const message = createErrorMessage("400 openai_error");
+		message.usage = createUsage(900_000);
+		expect(isContextOverflow(message, 1_000_000, createUsage(1_500_000))).toBe(false);
+	});
+
+	it("returns false without fallback when the error turn carries zeroed usage", () => {
+		const message = createErrorMessage("400 openai_error");
+		expect(isContextOverflow(message, 1_000_000)).toBe(false);
 	});
 });
