@@ -34,7 +34,8 @@ const api = {
 			return () => ipcRenderer.removeListener("update:downloaded", listener);
 		},
 		downloadUpdate: (): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke("update:download"),
-		installUpdate: (): void => ipcRenderer.send("update:install"),
+		installUpdate: (): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke("update:install"),
+		hasDownloadedUpdate: (): Promise<boolean> => ipcRenderer.invoke("update:has-downloaded"),
 		checkUpdate: (): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke("update:check"),
 	},
 } as const;

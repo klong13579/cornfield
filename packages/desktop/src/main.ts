@@ -115,7 +115,11 @@ function setupIpc(): void {
 	// 更新流：renderer 触发检查/下载/安装（事件经 update:* channel 广播）。
 	ipcMain.handle("update:check", () => checkUpdatesManual());
 	ipcMain.handle("update:download", () => downloadUpdate());
-	ipcMain.on("update:install", () => installUpdate());
+	ipcMain.handle("update:install", () => installUpdate());
+	// 设置页重挂载时恢复"已下载"状态：检查 pending zip 是否存在。
+	ipcMain.handle("update:has-downloaded", () => {
+		return findDownloadedZip(path.join(os.homedir(), "Library", "Caches", updaterCacheDirName())) !== null;
+	});
 }
 
 async function restartSidecar(next: string): Promise<void> {
@@ -209,28 +213,36 @@ async function downloadUpdate(): Promise<{ ok: boolean; error?: string }> {
  *
  * 等以后有正式 Developer ID 证书，可切回 autoUpdater.quitAndInstall()（原生 Squirrel）。
  */
-function installUpdate(): void {
-	// 下载缓存目录（electron-updater 的 updaterCacheDirName，app-update.yml 生成）。
-	const cacheDir = path.join(os.homedir(), "Library", "Caches", updaterCacheDirName());
-	const zipPath = findDownloadedZip(cacheDir);
-	if (!zipPath) {
-		console.error("desktop: install requested but no downloaded update found in", cacheDir);
-		return;
+async function installUpdate(): Promise<{ ok: boolean; error?: string }> {
+	try {
+		// 下载缓存目录（electron-updater 的 updaterCacheDirName，app-update.yml 生成）。
+		const cacheDir = path.join(os.homedir(), "Library", "Caches", updaterCacheDirName());
+		const zipPath = findDownloadedZip(cacheDir);
+		if (!zipPath) {
+			throw new Error("no downloaded update found in " + cacheDir);
+		}
+		const appPath = app.getAppPath(); // …/OMP Desktop.app/Contents/Resources/app.asar
+		const bundleRoot = app.isPackaged ? path.dirname(path.dirname(path.dirname(appPath))) : "";
+		if (!bundleRoot?.endsWith(".app")) {
+			throw new Error("cannot determine .app bundle root from " + appPath);
+		}
+		// 先干净终止 sidecar（等退出/排空），否则 bootstrap 脚本的 pgrep 会误匹配
+		// sidecar（argv 含 OMP Desktop.app 路径）导致替换失败或 open 新实例端口冲突。
+		isQuitting = true;
+		const handle = sidecar;
+		sidecar = null;
+		await terminateSidecar(handle);
+		const script = buildBootstrapScript({ zipPath, bundleRoot, targetApp: process.execPath });
+		const scriptPath = path.join(os.tmpdir(), `omp-desktop-update-${Date.now()}.sh`);
+		fs.writeFileSync(scriptPath, script, { mode: 0o755 });
+		// detached：不随 app 进程树退出，独立跑完替换+重启。
+		childProcess.spawn("/bin/bash", [scriptPath], { detached: true, stdio: "ignore" }).unref();
+		app.quit();
+		return { ok: true };
+	} catch (err) {
+		console.error("desktop: install update failed", err instanceof Error ? err.message : String(err));
+		return { ok: false, error: err instanceof Error ? err.message : String(err) };
 	}
-	const appPath = app.getAppPath(); // …/OMP Desktop.app/Contents/Resources/app.asar
-	const bundleRoot = app.isPackaged ? path.dirname(path.dirname(path.dirname(appPath))) : "";
-	if (!bundleRoot?.endsWith(".app")) {
-		console.error("desktop: cannot determine .app bundle root from", appPath);
-		return;
-	}
-	const script = buildBootstrapScript({ zipPath, bundleRoot, targetApp: process.execPath });
-	const scriptPath = path.join(os.tmpdir(), `omp-desktop-update-${Date.now()}.sh`);
-	fs.writeFileSync(scriptPath, script, { mode: 0o755 });
-	// detached：不随 app 进程树退出，独立跑完替换+重启。
-	childProcess.spawn("/bin/bash", [scriptPath], { detached: true, stdio: "ignore" }).unref();
-	isQuitting = true;
-	// 先试优雅退出（sidecar 排空），Squirrel 不再介入。
-	app.quit();
 }
 
 /** electron-updater 的缓存目录名（app-update.yml updaterCacheDirName；与它读 configOnDisk 一致）。 */
@@ -238,14 +250,20 @@ function updaterCacheDirName(): string {
 	return "@oh-my-pidesktop-updater";
 }
 
-/** 在缓存目录找 electron-updater 落盘的待安装 zip（pending 或根目录的 *.zip）。 */
+/** 在缓存目录找 electron-updater 落盘的待安装 zip（pending 或根目录的 *.zip，取最新的）。 */
 function findDownloadedZip(cacheDir: string): string | null {
 	try {
+		const candidates: string[] = [];
 		for (const dir of [path.join(cacheDir, "pending"), cacheDir]) {
 			const entries = fs.readdirSync(dir);
-			const zip = entries.filter(e => e.endsWith(".zip")).map(e => path.join(dir, e));
-			if (zip.length > 0) return zip[0];
+			for (const e of entries) {
+				if (e.endsWith(".zip")) candidates.push(path.join(dir, e));
+			}
 		}
+		if (candidates.length === 0) return null;
+		// 取 mtime 最新的：多次下载残留时避免装到旧版本。
+		candidates.sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
+		return candidates[0] ?? null;
 	} catch {
 		// 目录不存在等
 	}
@@ -258,14 +276,17 @@ function buildBootstrapScript(opts: { zipPath: string; bundleRoot: string; targe
 	// zip 内是裸 .app 目录（electron-builder mac zip 结构）。解压后取 <zipstem>.app。
 	// 目标：替换整个 bundleRoot。helper 循环等旧可执行退出后执行替换。
 	// 注意：模板字符串里 bash 变量引用用单引号包裹，避免被 TS 当插值。
+	// OLD_EXEC 用 app 自有可执行文件的完整路径做 pgrep 精确匹配——不能用 basename：
+	// sidecar（omp-binary/omp serve）与 helper（Frameworks/OMP Desktop）的 argv 都含
+	// "OMP Desktop"，宽匹配会一直等到超时才替换。
 	return `#!/bin/bash
 set -e
 ZIP="${zipPath}"
 BUNDLE="${bundleRoot}"
-# 等旧 app 完全退出（最多 30s）——用 zip 同目录的可执行名匹配
-OLD_EXEC="${path.basename(targetApp)}"
+# 等旧 app 完全退出（最多 30s）——精确匹配 app 自有可执行文件路径
+OLD_EXEC="${targetApp}"
 for i in $(seq 1 60); do
-  if ! pgrep -f "$OLD_EXEC" >/dev/null 2>&1; then break; fi
+  if ! pgrep -fx "$OLD_EXEC" >/dev/null 2>&1; then break; fi
   sleep 0.5
 done
 WORK=$(mktemp -d)
