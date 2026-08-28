@@ -3,7 +3,7 @@
 > Current task state. The agent updates this file as work progresses; an empty TODO is a valid state.
 
 ## 待办
-- [ ] 去 omp 化：oh-my-pi → mika 改名（P0→P4 分阶段执行） → topics/de-omp-mika-rename.md
+- [ ] 去 omp 化：oh-my-pi → CornField 改名（P0✓ standalone 仓库已创建并迁移；P1→P4 分阶段执行） → topics/de-omp-mika-rename.md
 - [ ] 统一协议层：TUI/web/桌面/IM 四前端收敛到一套 Wire（P0✓ P1✓ P2✓ 含实机验收；P3 TUI 代码完成在 feat/agent-work 未合 main，暂缓） → topics/unified-protocol-layer.md
 - [ ] 学习使用herdr-board 功能
 - [ ] 钉钉机器人帮助我读取群消息和文档链接，帮我自动提取，并且识别重要的事项，是的话记录待办并提醒我。 → topics/dingtalk-extract-important-todos.md

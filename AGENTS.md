@@ -499,7 +499,7 @@ background task.
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **oh-my-pi** (52284 symbols, 118229 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **cornfield** (52646 symbols, 119339 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
 
@@ -523,10 +523,10 @@ This project is indexed by GitNexus as **oh-my-pi** (52284 symbols, 118229 relat
 
 | Resource | Use for |
 |----------|---------|
-| `gitnexus://repo/oh-my-pi/context` | Codebase overview, check index freshness |
-| `gitnexus://repo/oh-my-pi/clusters` | All functional areas |
-| `gitnexus://repo/oh-my-pi/processes` | All execution flows |
-| `gitnexus://repo/oh-my-pi/process/{name}` | Step-by-step execution trace |
+| `gitnexus://repo/cornfield/context` | Codebase overview, check index freshness |
+| `gitnexus://repo/cornfield/clusters` | All functional areas |
+| `gitnexus://repo/cornfield/processes` | All execution flows |
+| `gitnexus://repo/cornfield/process/{name}` | Step-by-step execution trace |
 
 ## CLI
 
