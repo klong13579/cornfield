@@ -156,7 +156,7 @@ export function requestRpcEditor(
  */
 export async function runRpcMode(session: AgentSession): Promise<never> {
 	// Surface unhandled errors as explicit exits so the gateway bridge can
-	// detect OMP death via proc.exited (exit code != 0) rather than guessing
+	// detect agent death via proc.exited (exit code != 0) rather than guessing
 	// from stdin/stdout silence. Without this, an uncaught exception or
 	// unhandled promise rejection silently kills the subprocess and the
 	// bridge only learns about it on the next transport.start() retry —
@@ -179,7 +179,7 @@ export async function runRpcMode(session: AgentSession): Promise<never> {
 	// protocol_version field is the wire handshake the gateway validates
 	// before treating this subprocess as compatible (see RPC_PROTOCOL_VERSION
 	// in packages/omp-gateway/src/agent-transport.ts — keep the value in sync).
-	process.stdout.write(`${JSON.stringify({ type: "ready", protocol_version: 1, agent: "omp" })}\n`);
+	process.stdout.write(`${JSON.stringify({ type: "ready", protocol_version: 1, agent: "cornfield" })}\n`);
 	const output = (obj: RpcResponse | RpcExtensionUIRequest | object) => {
 		process.stdout.write(`${JSON.stringify(obj)}\n`);
 	};

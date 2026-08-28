@@ -62,7 +62,7 @@ const LIVENESS_TIMEOUT_MS = 1000;
 const STATE_CACHE_TTL_MS = 5 * 60 * 1000;
 
 /** launchd job label for the lspmux server (macOS only). */
-const LSPMUX_SERVICE_NAME = "com.narwal.pi-lspmux";
+const LSPMUX_SERVICE_NAME = "com.cornfield.lspmux";
 
 /** How long to wait for the lspmux server to become ready after starting it. */
 const SERVER_STARTUP_TIMEOUT_MS = 5_000;
@@ -107,7 +107,7 @@ export function getLaunchdPlistPath(home: string = os.homedir()): string {
 	return path.join(home, "Library", "LaunchAgents", `${LSPMUX_SERVICE_NAME}.plist`);
 }
 
-/** Path of the lspmux server log (~/.omp/logs/lspmux.log). */
+/** Path of the lspmux server log (~/.cornfield/logs/lspmux.log). */
 export function getLspmuxLogPath(): string {
 	return path.join(getLogsDir(), "lspmux.log");
 }
@@ -280,7 +280,7 @@ async function runDetached(argv: string[], timeoutMs = 3_000): Promise<number | 
 /**
  * macOS: register the lspmux server as a launchd LaunchAgent (idempotent) and
  * wait for it to respond. Once registered, launchd owns the lifecycle
- * (KeepAlive restarts, RunAtLoad on next login) — no per-omp spawning.
+ * (KeepAlive restarts, RunAtLoad on next login) — no per-cornfield spawning.
  */
 async function ensureLspmuxServerLaunchd(binaryPath: string): Promise<boolean> {
 	const home = os.homedir();
@@ -317,7 +317,7 @@ async function ensureLspmuxServerLaunchd(binaryPath: string): Promise<boolean> {
 
 /**
  * Non-macOS: spawn `lspmux server` as a detached background process with the
- * log redirected to ~/.omp/logs/lspmux.log, then wait for it to respond.
+ * log redirected to ~/.cornfield/logs/lspmux.log, then wait for it to respond.
  * Idempotent across processes via the status poll above.
  */
 async function ensureLspmuxServerBare(binaryPath: string): Promise<boolean> {
