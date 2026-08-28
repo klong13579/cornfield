@@ -29,7 +29,7 @@ import type { InteractiveModeContext } from "../../modes/types";
 import { computeContextBreakdown, renderContextUsage } from "../../modes/utils/context-usage";
 import { buildHotkeysMarkdown } from "../../modes/utils/hotkeys-markdown";
 import { buildToolsMarkdown } from "../../modes/utils/tools-markdown";
-import type { AsyncJobSnapshotItem } from "../../session/agent-session";
+import type { AsyncJobSnapshotItem, HandoffResult } from "../../session/agent-session";
 import type { AuthStorage } from "../../session/auth-storage";
 import type { NewSessionOptions } from "../../session/session-manager";
 import { outputMeta } from "../../tools/output-meta";
@@ -429,7 +429,11 @@ export class CommandController {
 	}
 
 	async handleJobsCommand(): Promise<void> {
-		const snapshot = this.ctx.session.getAsyncJobSnapshot({ recentLimit: 5 });
+		let snapshot = this.ctx.session.getAsyncJobSnapshot({ recentLimit: 5 });
+		if (this.ctx.wireClient) {
+			const res = await this.ctx.wireClient.sendCommand({ type: "get_async_job_snapshot", recentLimit: 5 });
+			if (res.ok) snapshot = (res as { ok: true; result: { jobs: never } }).result.jobs as never;
+		}
 		if (!snapshot) {
 			this.ctx.showWarning("Async background jobs are unavailable in this session.");
 			return;
@@ -586,7 +590,8 @@ export class CommandController {
 		this.ctx.statusContainer.clear();
 
 		if (this.ctx.session.isCompacting) {
-			this.ctx.session.abortCompaction();
+			if (this.ctx.wireClient) void this.ctx.wireClient.sendCommand({ type: "abort_compaction" });
+			else this.ctx.session.abortCompaction();
 			while (this.ctx.session.isCompacting) {
 				await Bun.sleep(10);
 			}
@@ -842,7 +847,8 @@ export class CommandController {
 
 		const originalOnEscape = this.ctx.editor.onEscape;
 		this.ctx.editor.onEscape = () => {
-			this.ctx.session.abortCompaction();
+			if (this.ctx.wireClient) void this.ctx.wireClient.sendCommand({ type: "abort_compaction" });
+			else this.ctx.session.abortCompaction();
 		};
 
 		this.ctx.chatContainer.addChild(new Spacer(1));
@@ -895,7 +901,14 @@ export class CommandController {
 
 		try {
 			// The agent will visibly generate the handoff document in chat
-			const result = await this.ctx.session.handoff(customInstructions);
+			const wireResult = this.ctx.wireClient
+				? await this.ctx.wireClient.sendCommand({ type: "handoff", customInstructions })
+				: null;
+			const result = wireResult
+				? wireResult.ok
+					? (wireResult.result as HandoffResult | undefined)
+					: null
+				: await this.ctx.session.handoff(customInstructions);
 
 			if (!result) {
 				this.ctx.showError("Handoff cancelled");

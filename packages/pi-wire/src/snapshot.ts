@@ -50,6 +50,10 @@ export interface SessionSnapshot {
 	activeToolNames: string[];
 	// ── 队列（只暴露计数）──
 	queuedMessageCount: number;
+	// ── TUI 渲染补充（P3：slash 命令/skill 命令/配置警告）──
+	customCommands?: Array<{ name: string; description: string; source: string }>;
+	skills?: Array<{ name: string; filePath: string; description: string }>;
+	configWarnings?: string[];
 	// ── 运行状态（枚举化）──
 	phase: SessionPhase;
 	retryAttempt: number;

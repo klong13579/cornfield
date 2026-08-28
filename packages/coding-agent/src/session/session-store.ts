@@ -55,6 +55,17 @@ export class SessionStore {
 			todoPhases: session.getTodoPhases(),
 			activeToolNames: session.getActiveToolNames(),
 			queuedMessageCount: session.queuedMessageCount,
+		customCommands: session.customCommands.map(c => ({
+			name: c.command.name,
+			description: `${c.command.description} (${c.source})`,
+			source: c.source,
+		})),
+		skills: session.skills.map(s => ({
+			name: s.name,
+			filePath: s.filePath,
+			description: s.description,
+		})),
+		configWarnings: session.configWarnings,
 			phase: this.#phase,
 			retryAttempt: this.#retryAttempt,
 			isCompacting: session.isCompacting,
