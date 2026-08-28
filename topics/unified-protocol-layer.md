@@ -52,6 +52,7 @@ openQuestions: []
 | 2026-08-28 | `bun test ./test/wire-server-*.ts` (coding-agent，13 文件) | 54 pass / 1 skip / 0 fail |
 | 2026-08-28 | 新 binary 安装 + 优雅重启 | `POST /wire` @ 7892 live：gateway_status（6 账号/scheduler running）、get_cron_tasks（9 任务） |
 | 2026-08-28 | cron CRUD 实机往返 | create→update(paused+cron)→remove 全过；test_run 未知任务拒绝 |
+| 2026-08-28 | `bun check`（全仓） | check:ts 全 workspace biome+tsgo 绿（pi-coding-agent 1172 文件等，27s）+ check:rs clippy 绿（24.6s）——P0 验收「bun check 全绿」闭环 |
 | 2026-08-28 | repro-inject 真实钉钉 | hr 账号注入 200 OK → AgentBridge → wire-stdio 子进程回复「收到，链路通。」落钉钉 |
 
 ## 进度记录
