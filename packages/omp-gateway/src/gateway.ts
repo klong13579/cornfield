@@ -275,7 +275,7 @@ export class Gateway {
 	 * Listens on 127.0.0.1 only. See `injectTestEndpoint`.
 	 */
 	#testServer: { stop: () => void; port: number } | null = null;
-	/** P2-4：生产 wire HTTP 端点（POST /wire，127.0.0.1:OMP_GATEWAY_WIRE_PORT??7891）。 */
+	/** P2-4：生产 wire HTTP 端点（POST /wire，127.0.0.1:OMP_GATEWAY_WIRE_PORT??7892；7891 是 desktop serve sidecar）。 */
 	#wireServer: { stop: () => void; port: number } | null = null;
 	#skillCache: SkillCache | null = null;
 	#skillCommand: SkillCommand | null = null;
@@ -1245,14 +1245,15 @@ export class Gateway {
 
 	/**
 	 * P2-4：生产 wire HTTP 端点（方案 1——HTTP POST 帧）。
-	 * 绑定 127.0.0.1（本机浏览器/web-app 访问），端口 OMP_GATEWAY_WIRE_PORT ?? 7891，
+	 * 绑定 127.0.0.1（本机浏览器/web-app 访问），端口 OMP_GATEWAY_WIRE_PORT ?? 7892，
+	 * （7891 系 desktop sidecar `omp serve` 占用；同端口会被桌面端误判为 foreign 复用），
 	 * 无 token（localhost 即边界，与 serve 的 ws 免鉴权策略一致）。
 	 *
 	 * 命令 → handleGatewayWireCommand（传输无关领域层），统一 {"ok":...} 响应。
 	 * 端口被占（旧二进制 gateway / 另一实例）→ 跳过并 warn，不阻塞启动。
 	 */
 	async #startWireEndpoint(): Promise<void> {
-		const port = Number.parseInt(process.env.OMP_GATEWAY_WIRE_PORT ?? "7891", 10);
+		const port = Number.parseInt(process.env.OMP_GATEWAY_WIRE_PORT ?? "7892", 10);
 		let server: ReturnType<typeof Bun.serve> | undefined;
 		try {
 			server = Bun.serve({

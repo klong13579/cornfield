@@ -50,7 +50,7 @@ openQuestions: []
 |---|---|---|
 | 2026-08-28 | `bun test ./test/` (omp-gateway 全量) | 1040 pass / 7 skip / 0 fail |
 | 2026-08-28 | `bun test ./test/wire-server-*.ts` (coding-agent，13 文件) | 54 pass / 1 skip / 0 fail |
-| 2026-08-28 | 新 binary 安装 + 优雅重启 | `POST /wire` @ 7891 live：gateway_status（6 账号/scheduler running）、get_cron_tasks（9 任务） |
+| 2026-08-28 | 新 binary 安装 + 优雅重启 | `POST /wire` @ 7892 live：gateway_status（6 账号/scheduler running）、get_cron_tasks（9 任务） |
 | 2026-08-28 | cron CRUD 实机往返 | create→update(paused+cron)→remove 全过；test_run 未知任务拒绝 |
 | 2026-08-28 | repro-inject 真实钉钉 | hr 账号注入 200 OK → AgentBridge → wire-stdio 子进程回复「收到，链路通。」落钉钉 |
 
@@ -67,4 +67,5 @@ openQuestions: []
 - 与「仓库瘦身」topic 无文件交集：P0 动的 pi-wire / wire-server / web-app 不在瘦身删除清单内，两线可并行。
 - P2 开工前需与在途的 gateway 改动对表（避免同批文件冲突）。
 - P2-4 web-app 直连 gateway 端点（24924bcf64）随 feat/agent-work 合入时跟进；serve 转发已覆盖功能。
+- **端口修正（2026-08-28）**：gateway wire 端点默认端口 7891 → 7892。7891 是 desktop sidecar `omp serve` 的既定端口（desktop SERVE_PORT / serve.ts 默认 / web-app 默认 wsUrl），同端口会被桌面端 `probePortState` 误判为 foreign 复用，导致 web-app 连到 gateway 的 /wire 而非 serve。分支上 24924bcf64 及文案里的 7891 引用在 P3 合入时一并改 7892。
 - P3 TUI 全量在 feat/agent-work 分支（22 commits，落后 main 83），合入需解 wire-server.ts/commands.ts 冲突；用户已拍板 P3 暂缓。

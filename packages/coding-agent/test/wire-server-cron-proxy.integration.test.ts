@@ -2,7 +2,7 @@
  * P2-4 e2e — serve `get_cron_tasks` / `get_cron_logs` / `gateway_status` 转发 gateway 生产端点。
  *
  * P2-4 后 serve 不再直读 jobs.json/status.json——这些命令转发到 gateway 的 POST /wire
- * （127.0.0.1:OMP_GATEWAY_WIRE_PORT??7891）。本测试用封真 mock gateway 端点（进程内
+ * （127.0.0.1:OMP_GATEWAY_WIRE_PORT??7892；7891 系 serve sidecar，不与 gateway 共用）。本测试用封真 mock gateway 端点（进程内
  * Bun.serve）验证转发语义（确定性，不依赖机器真实 gateway）：
  *
  * - 转发成功：canned 形状原样穿透（TaskRowDto / CronLogEntryDto / GatewayStatusDto），
