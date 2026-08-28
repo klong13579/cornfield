@@ -11,9 +11,9 @@
  */
 import { afterEach, beforeEach, describe, expect, test, vi } from "bun:test";
 import * as fsp from "node:fs/promises";
-import { settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { ListenController } from "@oh-my-pi/pi-coding-agent/stt/listen-controller";
-import { buildFilename } from "@oh-my-pi/pi-coding-agent/stt/listen-service";
+import { settings } from "@cornfield/coding-agent/config/settings";
+import { ListenController } from "@cornfield/coding-agent/stt/listen-controller";
+import { buildFilename } from "@cornfield/coding-agent/stt/listen-service";
 
 // Shared mock instances — hoisted before static imports, shared across tests.
 const detectRecordingTools = vi.fn<() => string[]>();
@@ -33,15 +33,15 @@ const transcribe =
 		) => Promise<string>
 	>();
 
-vi.mock("@oh-my-pi/pi-coding-agent/stt/recorder", () => ({
+vi.mock("@cornfield/coding-agent/stt/recorder", () => ({
 	detectRecordingTools,
 	startRecording,
 	verifyRecordingFile,
 }));
-vi.mock("@oh-my-pi/pi-coding-agent/stt/transcriber", () => ({ transcribe }));
+vi.mock("@cornfield/coding-agent/stt/transcriber", () => ({ transcribe }));
 
 // Import Settings AFTER vi.mock registrations (hoisted)
-let Settings: Awaited<typeof import("@oh-my-pi/pi-coding-agent/config/settings")>["Settings"];
+let Settings: Awaited<typeof import("@cornfield/coding-agent/config/settings")>["Settings"];
 
 // ────────────────────────────────────────────────────────────────────────────
 // buildFilename
@@ -99,7 +99,7 @@ describe("ListenController", () => {
 		// Initialize Settings singleton (inMemory) so settings.get() doesn't
 		// throw "Settings not initialized" in stopRecording/transcribeFile.
 		if (!Settings) {
-			const mod = await import("@oh-my-pi/pi-coding-agent/config/settings");
+			const mod = await import("@cornfield/coding-agent/config/settings");
 			Settings = mod.Settings;
 		}
 		await Settings.init({ inMemory: true });

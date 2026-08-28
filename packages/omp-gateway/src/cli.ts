@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { APP_NAME, MIN_BUN_VERSION, VERSION } from "@oh-my-pi/pi-utils";
+import { APP_NAME, MIN_BUN_VERSION, VERSION } from "@cornfield/utils";
 /**
  * omp-gateway CLI entry point — the standalone gateway daemon binary.
  *
@@ -14,7 +14,7 @@ import { APP_NAME, MIN_BUN_VERSION, VERSION } from "@oh-my-pi/pi-utils";
  * below maps `omp-gateway <action> ...` to the command class so the action
  * name is parsed as its first positional arg.
  */
-import { type CommandEntry, run } from "@oh-my-pi/pi-utils/cli";
+import { type CommandEntry, run } from "@cornfield/utils/cli";
 
 function parseSemver(version: string): [number, number, number] {
 	function toint(value: string): number {

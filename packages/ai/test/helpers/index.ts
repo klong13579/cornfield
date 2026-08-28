@@ -1,5 +1,5 @@
-import { enrichModelThinking } from "@oh-my-pi/pi-ai/model-thinking";
-import type { Model } from "@oh-my-pi/pi-ai/types";
+import { enrichModelThinking } from "@cornfield/ai/model-thinking";
+import type { Model } from "@cornfield/ai/types";
 
 export async function withEnv(
 	overrides: Record<string, string | undefined>,

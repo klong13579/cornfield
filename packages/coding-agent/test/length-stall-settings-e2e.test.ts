@@ -11,7 +11,7 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { Settings } from "@cornfield/coding-agent/config/settings";
 
 /**
  * `Settings.getGroup(prefix)` strips the prefix and returns the remaining

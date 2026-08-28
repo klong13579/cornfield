@@ -2,14 +2,14 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { createAgentSession } from "@oh-my-pi/pi-coding-agent/sdk";
-import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
+import { Settings } from "@cornfield/coding-agent/config/settings";
+import { createAgentSession } from "@cornfield/coding-agent/sdk";
+import { SessionManager } from "@cornfield/coding-agent/session/session-manager";
 import {
 	buildSystemPrompt,
 	loadProjectContextFiles,
 	loadSystemPromptFiles,
-} from "@oh-my-pi/pi-coding-agent/system-prompt";
+} from "@cornfield/coding-agent/system-prompt";
 import { cleanupTempHome } from "./helpers/temp-home-cleanup";
 
 function escapeRegExp(text: string): string {

@@ -24,7 +24,7 @@ import {
 	type AgentState,
 	type AgentTool,
 	ThinkingLevel,
-} from "@oh-my-pi/pi-agent-core";
+} from "@cornfield/agent";
 import type {
 	AssistantMessage,
 	Context,
@@ -41,7 +41,7 @@ import type {
 	ToolChoice,
 	Usage,
 	UsageReport,
-} from "@oh-my-pi/pi-ai";
+} from "@cornfield/ai";
 import {
 	calculateRateLimitBackoffMs,
 	getSupportedEfforts,
@@ -51,8 +51,8 @@ import {
 	modelsAreEqual,
 	parseRateLimitReason,
 	streamSimple,
-} from "@oh-my-pi/pi-ai";
-import { killTree, MacOSPowerAssertion } from "@oh-my-pi/pi-natives";
+} from "@cornfield/ai";
+import { killTree, MacOSPowerAssertion } from "@cornfield/natives";
 import {
 	abortableSleep,
 	getAgentDbPath,
@@ -61,7 +61,7 @@ import {
 	prompt,
 	Snowflake,
 	setNativeKillTree,
-} from "@oh-my-pi/pi-utils";
+} from "@cornfield/utils";
 import type { AsyncJob, AsyncJobManager } from "../async";
 import type { Rule } from "../capability/rule";
 import { MODEL_ROLE_IDS, type ModelRegistry } from "../config/model-registry";

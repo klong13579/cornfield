@@ -4,15 +4,15 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { Agent } from "@oh-my-pi/pi-agent-core";
-import { getBundledModel } from "@oh-my-pi/pi-ai";
-import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
-import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
-import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
-import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
-import { createTools, type ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
-import { Snowflake } from "@oh-my-pi/pi-utils";
+import { Agent } from "@cornfield/agent";
+import { getBundledModel } from "@cornfield/ai";
+import { ModelRegistry } from "@cornfield/coding-agent/config/model-registry";
+import { Settings } from "@cornfield/coding-agent/config/settings";
+import { AgentSession } from "@cornfield/coding-agent/session/agent-session";
+import { AuthStorage } from "@cornfield/coding-agent/session/auth-storage";
+import { SessionManager } from "@cornfield/coding-agent/session/session-manager";
+import { createTools, type ToolSession } from "@cornfield/coding-agent/tools";
+import { Snowflake } from "@cornfield/utils";
 import { e2eApiKey } from "../../ai/test/oauth";
 
 export { e2eApiKey };

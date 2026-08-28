@@ -1,8 +1,8 @@
 import * as fs from "node:fs";
 import { homedir } from "node:os";
 import * as path from "node:path";
-import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
-import { getSupportedEfforts, type Model, modelsAreEqual } from "@oh-my-pi/pi-ai";
+import { ThinkingLevel } from "@cornfield/agent";
+import { getSupportedEfforts, type Model, modelsAreEqual } from "@cornfield/ai";
 import {
 	Container,
 	getKeybindings,
@@ -14,7 +14,7 @@ import {
 	Text,
 	type TUI,
 	visibleWidth,
-} from "@oh-my-pi/pi-tui";
+} from "@cornfield/tui";
 import type { ModelRegistry } from "../../config/model-registry";
 import { getKnownRoleIds, getRoleInfo, MODEL_ROLE_IDS, MODEL_ROLES } from "../../config/model-registry";
 import { resolveModelRoleValue } from "../../config/model-resolver";

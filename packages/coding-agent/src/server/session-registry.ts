@@ -1,6 +1,6 @@
 import * as path from "node:path";
-import { getConfigRootDir, isEnoent, logger } from "@oh-my-pi/pi-utils";
-import type { DingtalkAgentConfigDto, SessionListEntry } from "@oh-my-pi/pi-wire";
+import { getConfigRootDir, isEnoent, logger } from "@cornfield/utils";
+import type { DingtalkAgentConfigDto, SessionListEntry } from "@cornfield/wire";
 import type { AgentSession, AgentSessionEvent } from "../session/agent-session";
 import type { SessionSnapshot } from "../session/session-snapshot";
 import { SessionStore } from "../session/session-store";

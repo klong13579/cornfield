@@ -1,5 +1,5 @@
 import * as path from "node:path";
-import { getAgentDir, getProjectDir, isBunTestRuntime, isEnoent, logger } from "@oh-my-pi/pi-utils";
+import { getAgentDir, getProjectDir, isBunTestRuntime, isEnoent, logger } from "@cornfield/utils";
 import { OutputSink } from "../session/streaming-output";
 import { shutdownSharedGateway } from "./gateway-coordinator";
 import {

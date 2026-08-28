@@ -15,7 +15,7 @@
  * pruned and is meant to be called periodically (e.g. once per
  * minute) by the gateway.
  */
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 
 /** Per-card routing info stored in the registry. */
 export interface CardActionInfo {

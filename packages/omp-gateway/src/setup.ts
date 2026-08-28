@@ -15,7 +15,7 @@
  *     don't gather credentials we'd then refuse to use.
  */
 
-import { runAgentInit } from "@oh-my-pi/pi-coding-agent/cli/agent-cli";
+import { runAgentInit } from "@cornfield/coding-agent/cli/agent-cli";
 import { ZodError } from "zod";
 import { getConfigPath, loadConfig, validateAndNormalizeConfig } from "./config";
 import type { DingTalkConfig, DingtalkAccountConfig, GatewayConfig } from "./types";

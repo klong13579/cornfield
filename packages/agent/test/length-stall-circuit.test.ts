@@ -4,9 +4,9 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { Agent, type AgentTool } from "@oh-my-pi/pi-agent-core";
-import { type AssistantMessage, getBundledModel } from "@oh-my-pi/pi-ai";
-import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
+import { Agent, type AgentTool } from "@cornfield/agent";
+import { type AssistantMessage, getBundledModel } from "@cornfield/ai";
+import { AssistantMessageEventStream } from "@cornfield/ai/utils/event-stream";
 import { Type } from "@sinclair/typebox";
 import { createAssistantMessage } from "./helpers";
 

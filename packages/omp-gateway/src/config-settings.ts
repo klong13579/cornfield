@@ -16,7 +16,7 @@
  */
 import * as os from "node:os";
 import * as path from "node:path";
-import { isEnoent, logger } from "@oh-my-pi/pi-utils";
+import { isEnoent, logger } from "@cornfield/utils";
 
 /** Read + parse a YAML config file. Returns null on ENOENT / parse / non-object. */
 async function readConfigObject(file: string): Promise<Record<string, unknown> | null> {

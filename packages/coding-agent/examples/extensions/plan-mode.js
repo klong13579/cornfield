@@ -1,4 +1,4 @@
-import { Key } from "@oh-my-pi/pi-tui";
+import { Key } from "@cornfield/tui";
 // Read-only tools for plan mode
 const PLAN_MODE_TOOLS = ["read", "bash", "search", "find"];
 // Full set of tools for normal mode

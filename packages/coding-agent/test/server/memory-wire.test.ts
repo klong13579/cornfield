@@ -3,7 +3,7 @@
  * 用 stub WireCore 验证：命令往返、push 分发、焦点切换、dispose。
  */
 import { describe, expect, test } from "bun:test";
-import type { ServerFrame, WireCommand } from "@oh-my-pi/pi-wire";
+import type { ServerFrame, WireCommand } from "@cornfield/wire";
 import { createInMemoryWireClient } from "../../src/server/memory-wire";
 import type { CommandContext, WireCore, WireCoreTarget } from "../../src/server/wire-server";
 

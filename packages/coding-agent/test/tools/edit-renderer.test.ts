@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import { editToolRenderer } from "@oh-my-pi/pi-coding-agent/edit/renderer";
-import * as themeModule from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
+import { editToolRenderer } from "@cornfield/coding-agent/edit/renderer";
+import * as themeModule from "@cornfield/coding-agent/modes/theme/theme";
 
 async function getUiTheme() {
 	await themeModule.initTheme(false, undefined, undefined, "dark", "light");

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import type { CanUseToolContext } from "@oh-my-pi/pi-agent-core";
-import type { PermissionRequestPush } from "@oh-my-pi/pi-wire";
+import type { CanUseToolContext } from "@cornfield/agent";
+import type { PermissionRequestPush } from "@cornfield/wire";
 
 /**
  * PermissionGate —— 审批/澄清 pending 表。

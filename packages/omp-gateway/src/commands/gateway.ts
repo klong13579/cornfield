@@ -24,8 +24,8 @@
  */
 
 import * as path from "node:path";
-import { logger } from "@oh-my-pi/pi-utils";
-import { Args, Command, Flags, renderCommandHelp } from "@oh-my-pi/pi-utils/cli";
+import { logger } from "@cornfield/utils";
+import { Args, Command, Flags, renderCommandHelp } from "@cornfield/utils/cli";
 import { clearStatusFileSync } from "../gateway-daemon";
 
 const ACTIONS = [
@@ -620,7 +620,7 @@ export default class Gateway extends Command {
 		const store = new SQLiteSessionStore(`${dataDir}/sessions.db`);
 		try {
 			const agentDirs = new Map<string, string>();
-			const { resolveAgentDir } = await import("@oh-my-pi/pi-coding-agent/skeleton");
+			const { resolveAgentDir } = await import("@cornfield/coding-agent/skeleton");
 			const robotMeta = new Map<string, { robotCode?: string; robotName?: string }>();
 			for (const [id, acc] of Object.entries(dt.accounts)) {
 				agentDirs.set(id, resolveAgentDir(id, acc.agentDir));

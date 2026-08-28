@@ -3,7 +3,7 @@
  * audio source/sink — no hardware, no mocks.
  */
 import { afterEach, describe, expect, test, vi } from "bun:test";
-import { pcm16ToBase64, RealtimeWsTransport } from "@oh-my-pi/pi-ai";
+import { pcm16ToBase64, RealtimeWsTransport } from "@cornfield/ai";
 import { LiveSessionController } from "../src/live/controller";
 import type { LiveAudioSink, LiveIntent, LivePhase, LiveTranscript } from "../src/live/types";
 

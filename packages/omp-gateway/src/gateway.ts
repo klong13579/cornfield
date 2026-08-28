@@ -17,8 +17,8 @@ import {
 	ensureAgentDir,
 	registerAgent,
 	resolveAgentDir,
-} from "@oh-my-pi/pi-coding-agent/skeleton";
-import { isEnoent, logger } from "@oh-my-pi/pi-utils";
+} from "@cornfield/coding-agent/skeleton";
+import { isEnoent, logger } from "@cornfield/utils";
 import { ActionRegistry } from "./action-registry";
 import { AgentBridge, type AgentBridgeOptions } from "./agent-bridge";
 import { createBridgeStatusToolDefinitions } from "./bridge-status-tool";

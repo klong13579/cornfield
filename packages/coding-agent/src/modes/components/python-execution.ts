@@ -3,8 +3,8 @@
  * Shares the same kernel session as the agent's Python tool.
  */
 
-import { sanitizeText } from "@oh-my-pi/pi-natives";
-import { Container, Loader, Spacer, Text, type TUI } from "@oh-my-pi/pi-tui";
+import { sanitizeText } from "@cornfield/natives";
+import { Container, Loader, Spacer, Text, type TUI } from "@cornfield/tui";
 import { getSymbolTheme, highlightCode, theme } from "../../modes/theme/theme";
 import { formatTruncationMetaNotice, type TruncationMeta } from "../../tools/output-meta";
 import { DynamicBorder } from "./dynamic-border";

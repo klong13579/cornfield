@@ -17,7 +17,7 @@
  *
  * Exposed as `omp-gateway robot-context probe [--dry-run]`.
  */
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 import type { RobotContextWriter } from "./robot-context";
 import type { SQLiteSessionStore } from "./session-store";
 

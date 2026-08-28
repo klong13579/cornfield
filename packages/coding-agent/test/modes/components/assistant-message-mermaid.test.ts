@@ -1,10 +1,10 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
-import type { AssistantMessage } from "@oh-my-pi/pi-ai";
-import { _resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { AssistantMessageComponent } from "@oh-my-pi/pi-coding-agent/modes/components/assistant-message";
-import { clearMermaidCache } from "@oh-my-pi/pi-coding-agent/modes/theme/mermaid-cache";
-import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
-import { setTerminalImageProtocol, TERMINAL } from "@oh-my-pi/pi-tui";
+import type { AssistantMessage } from "@cornfield/ai";
+import { _resetSettingsForTest, Settings } from "@cornfield/coding-agent/config/settings";
+import { AssistantMessageComponent } from "@cornfield/coding-agent/modes/components/assistant-message";
+import { clearMermaidCache } from "@cornfield/coding-agent/modes/theme/mermaid-cache";
+import { initTheme } from "@cornfield/coding-agent/modes/theme/theme";
+import { setTerminalImageProtocol, TERMINAL } from "@cornfield/tui";
 
 const originalImageProtocol = TERMINAL.imageProtocol;
 

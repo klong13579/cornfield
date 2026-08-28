@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { setAgentDir, setConfigRootDir } from "@oh-my-pi/pi-utils";
+import { setAgentDir, setConfigRootDir } from "@cornfield/utils";
 import { buildSystemPrompt } from "../src/system-prompt";
 
 /**
@@ -18,7 +18,7 @@ let originalEnv: string | undefined;
 
 beforeEach(async () => {
 	tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "sp-user-test-"));
-	originalAgentDir = (await import("@oh-my-pi/pi-utils")).getAgentDir();
+	originalAgentDir = (await import("@cornfield/utils")).getAgentDir();
 	originalEnv = process.env.CORNFIELD_AGENT_DIR;
 	setConfigRootDir(tmpDir);
 	setAgentDir(tmpDir);

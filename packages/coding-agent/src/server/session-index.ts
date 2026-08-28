@@ -1,6 +1,6 @@
 import * as path from "node:path";
-import { getSessionsDir, logger } from "@oh-my-pi/pi-utils";
-import type { WireSessionIndexEntry, WireSessionSource, WireSessionStatus } from "@oh-my-pi/pi-wire";
+import { getSessionsDir, logger } from "@cornfield/utils";
+import type { WireSessionIndexEntry, WireSessionSource, WireSessionStatus } from "@cornfield/wire";
 import type { AgentMeta } from "./session-registry";
 
 /**

@@ -20,8 +20,8 @@ import {
 	loadSkills as defaultLoadSkills,
 	type LoadSkillsResult,
 	type Skill,
-} from "@oh-my-pi/pi-coding-agent/extensibility/skills";
-import { logger } from "@oh-my-pi/pi-utils";
+} from "@cornfield/coding-agent/extensibility/skills";
+import { logger } from "@cornfield/utils";
 
 /** Function shape for the underlying skill loader. Replaces the real
  *  `loadSkills` in tests so HOME-override is unnecessary. Accepts a

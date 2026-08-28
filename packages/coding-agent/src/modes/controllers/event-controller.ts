@@ -1,6 +1,6 @@
-import { INTENT_FIELD } from "@oh-my-pi/pi-agent-core";
-import type { AssistantMessage, ImageContent } from "@oh-my-pi/pi-ai";
-import { Loader, TERMINAL, Text } from "@oh-my-pi/pi-tui";
+import { INTENT_FIELD } from "@cornfield/agent";
+import type { AssistantMessage, ImageContent } from "@cornfield/ai";
+import { Loader, TERMINAL, Text } from "@cornfield/tui";
 import { settings } from "../../config/settings";
 import { AssistantMessageComponent } from "../../modes/components/assistant-message";
 import { ReadToolGroupComponent } from "../../modes/components/read-tool-group";

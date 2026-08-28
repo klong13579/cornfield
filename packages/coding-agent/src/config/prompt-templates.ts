@@ -1,13 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import {
-	getProjectDir,
-	getProjectPromptsDir,
-	getPromptsDir,
-	logger,
-	parseFrontmatter,
-	prompt,
-} from "@oh-my-pi/pi-utils";
+import { getProjectDir, getProjectPromptsDir, getPromptsDir, logger, parseFrontmatter, prompt } from "@cornfield/utils";
 import { computeLineHash, HASHLINE_CONTENT_SEPARATOR } from "../edit/line-hash";
 import { jtdToTypeScript } from "../tools/jtd-to-typescript";
 import { parseCommandArgs, substituteArgs } from "../utils/command-args";
@@ -33,7 +26,7 @@ prompt.registerHelper("jtdToTypeScript", (schema: unknown): string => {
 // `sectionSeparator` + SECTION_SEPARATOR helper live in pi-utils/prompt so every
 // template consumer gets them registered without a coupling back to this module.
 // Re-exported here for call sites that already reference the coding-agent path.
-export { sectionSeparator } from "@oh-my-pi/pi-utils/prompt";
+export { sectionSeparator } from "@cornfield/utils/prompt";
 
 function formatHashlineRef(lineNum: unknown, content: unknown): { num: number; text: string; ref: string } {
 	const num = typeof lineNum === "number" ? lineNum : Number.parseInt(String(lineNum), 10);

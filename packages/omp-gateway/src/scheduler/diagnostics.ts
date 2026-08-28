@@ -15,7 +15,7 @@
  */
 
 import * as fs from "node:fs";
-import { isEnoent } from "@oh-my-pi/pi-utils";
+import { isEnoent } from "@cornfield/utils";
 
 export type CronRunDiagnosticSource =
 	| "cron-preflight" // 任务定义/配置校验

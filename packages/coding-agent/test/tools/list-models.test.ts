@@ -1,8 +1,8 @@
 import { describe, expect, it } from "bun:test";
-import type { Model } from "@oh-my-pi/pi-ai";
-import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
-import { ListModelsTool } from "@oh-my-pi/pi-coding-agent/tools/list-models";
+import type { Model } from "@cornfield/ai";
+import { Settings } from "@cornfield/coding-agent/config/settings";
+import type { ToolSession } from "@cornfield/coding-agent/tools";
+import { ListModelsTool } from "@cornfield/coding-agent/tools/list-models";
 
 function makeModel(overrides: Partial<Model> & Pick<Model, "provider" | "id">): Model {
 	return {

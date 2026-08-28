@@ -5,9 +5,9 @@
  * Usage:
  *   bun packages/self-evolution/scripts/run-session-learner-once.ts [--cwd <repo>] [--session-id <id>]
  */
-import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
-import { discoverAuthStorage } from "@oh-my-pi/pi-coding-agent/sdk";
-import { getAgentDir } from "@oh-my-pi/pi-utils";
+import { ModelRegistry } from "@cornfield/coding-agent/config/model-registry";
+import { discoverAuthStorage } from "@cornfield/coding-agent/sdk";
+import { getAgentDir } from "@cornfield/utils";
 import { DEFAULT_EVOLUTION_GLOBAL_STORE, resolveEvolutionProjectionDir } from "../src/paths";
 import { projectLearnings } from "../src/projection/learnings";
 import { extractSessionLearnings } from "../src/session-learner";

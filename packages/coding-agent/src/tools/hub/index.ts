@@ -12,8 +12,8 @@
  * the daemon-broker launch subsystem is not part of this workspace.
  */
 
-import type { AgentTool, AgentToolResult } from "@oh-my-pi/pi-agent-core";
-import { formatAge } from "@oh-my-pi/pi-utils";
+import type { AgentTool, AgentToolResult } from "@cornfield/agent";
+import { formatAge } from "@cornfield/utils";
 import { type Static, Type } from "@sinclair/typebox";
 import hubDescription from "../../prompts/tools/hub.md" with { type: "text" };
 import type { AgentRef, AgentRegistry } from "../../registry/agent-registry";

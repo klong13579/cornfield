@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
-import type { AgentTool, AgentToolResult, AgentToolUpdateCallback } from "@oh-my-pi/pi-agent-core";
-import { Snowflake } from "@oh-my-pi/pi-utils";
-import type { HostToolCallPush, HostToolCancelPush, WireHostToolDefinition } from "@oh-my-pi/pi-wire";
+import type { AgentTool, AgentToolResult, AgentToolUpdateCallback } from "@cornfield/agent";
+import { Snowflake } from "@cornfield/utils";
+import type { HostToolCallPush, HostToolCancelPush, WireHostToolDefinition } from "@cornfield/wire";
 
 /**
  * Wire 版 host tool bridge（P3 任务 C）——复刻 rpc-mode 的 RpcHostToolBridge 语义，

@@ -1,9 +1,9 @@
 /**
  * Native audio bindings for the live voice session (macOS: miniaudio/CoreAudio).
  */
-import { REALTIME_SAMPLE_RATE } from "@oh-my-pi/pi-ai";
-import { AudioCapture, AudioPlayback, AudioVoiceSession } from "@oh-my-pi/pi-natives";
-import { logger } from "@oh-my-pi/pi-utils";
+import { REALTIME_SAMPLE_RATE } from "@cornfield/ai";
+import { AudioCapture, AudioPlayback, AudioVoiceSession } from "@cornfield/natives";
+import { logger } from "@cornfield/utils";
 import type { LiveAudioSinkFactory, LiveAudioSource } from "./types";
 
 /** Mic source backed by the native AudioCapture (streaming f32 mono chunks). */

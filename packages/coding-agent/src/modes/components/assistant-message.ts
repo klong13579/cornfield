@@ -1,7 +1,7 @@
-import type { AssistantMessage, ImageContent, Usage } from "@oh-my-pi/pi-ai";
-import { stripReasoningTagsFromText } from "@oh-my-pi/pi-ai/utils/reasoning-tags";
-import { Container, Image, ImageProtocol, Markdown, Spacer, TERMINAL, Text } from "@oh-my-pi/pi-tui";
-import { formatNumber } from "@oh-my-pi/pi-utils";
+import type { AssistantMessage, ImageContent, Usage } from "@cornfield/ai";
+import { stripReasoningTagsFromText } from "@cornfield/ai/utils/reasoning-tags";
+import { Container, Image, ImageProtocol, Markdown, Spacer, TERMINAL, Text } from "@cornfield/tui";
+import { formatNumber } from "@cornfield/utils";
 import { settings } from "../../config/settings";
 import { getMarkdownTheme, theme } from "../../modes/theme/theme";
 import { resolveImageOptions } from "../../tools/render-utils";

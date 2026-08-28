@@ -22,7 +22,7 @@ import { afterEach, beforeEach, describe, expect, it, spyOn, test, vi } from "bu
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 import * as cardModule from "../src/channels/dingtalk-card";
 import { Gateway } from "../src/gateway";
 import { type CronCardPayload, deliverCronResultAsCard } from "../src/scheduler/cron-card-delivery";

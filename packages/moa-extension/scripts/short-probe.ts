@@ -11,9 +11,9 @@
  *   bun packages/moa-extension/scripts/short-probe.ts --list
  */
 import * as path from "node:path";
-import { discoverAuthStorage } from "@oh-my-pi/pi-coding-agent";
-import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
-import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { discoverAuthStorage } from "@cornfield/coding-agent";
+import { ModelRegistry } from "@cornfield/coding-agent/config/model-registry";
+import { Settings } from "@cornfield/coding-agent/config/settings";
 import { loadMoaConfigOverrides } from "../src/moa-config";
 import { buildPlan, rebindWorkerPrompts } from "../src/planner";
 import { enrichSchemaWithSources, renderResearchGuidance, resolveResearchMode } from "../src/research-mode";

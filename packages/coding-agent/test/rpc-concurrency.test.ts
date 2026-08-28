@@ -7,9 +7,9 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { AgentEvent } from "@oh-my-pi/pi-agent-core";
-import { RpcClient } from "@oh-my-pi/pi-coding-agent/modes";
-import { Snowflake } from "@oh-my-pi/pi-utils";
+import type { AgentEvent } from "@cornfield/agent";
+import { RpcClient } from "@cornfield/coding-agent/modes";
+import { Snowflake } from "@cornfield/utils";
 import { e2eApiKey } from "./utilities";
 
 describe.skipIf(!e2eApiKey("ANTHROPIC_API_KEY"))("RPC concurrency", () => {

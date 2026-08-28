@@ -13,7 +13,7 @@
  */
 
 import * as fsp from "node:fs/promises";
-import { isEnoent } from "@oh-my-pi/pi-utils";
+import { isEnoent } from "@cornfield/utils";
 
 const WAV_HEADER_BYTES = 44;
 /** Reserve 64KB for any chunk-level metadata (matches Hermes). */

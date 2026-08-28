@@ -7,8 +7,8 @@
  *   ALIBABA_API_KEY=sk-sp-... bun packages/self-evolution/scripts/sync-alibaba-api-key-to-db.ts
  *   bun packages/self-evolution/scripts/sync-alibaba-api-key-to-db.ts --from-omp-pane omp-memory-verify
  */
-import { discoverAuthStorage } from "@oh-my-pi/pi-coding-agent/sdk";
-import { getAgentDir } from "@oh-my-pi/pi-utils";
+import { discoverAuthStorage } from "@cornfield/coding-agent/sdk";
+import { getAgentDir } from "@cornfield/utils";
 import { $ } from "bun";
 
 function maskKey(key: string): string {

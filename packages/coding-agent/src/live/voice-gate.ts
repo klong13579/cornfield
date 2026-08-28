@@ -11,7 +11,7 @@
  * agent-readable reason. Fail-safe: disarming (voice mode exit) settles any
  * pending confirmation as cancel.
  */
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 import type { ExtensionRunner } from "../extensibility/extensions/runner";
 import type { Extension, ToolCallEvent, ToolCallEventResult } from "../extensibility/extensions/types";
 import { classifyToolRisk, describeToolCall, type ToolRiskLevel } from "./tool-risk";

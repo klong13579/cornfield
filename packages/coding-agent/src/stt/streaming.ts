@@ -11,8 +11,8 @@
  * `turn_detection: null` (the caller controls commit timing) and server-side
  * `input_audio_transcription: { model: "fun-asr" }`.
  */
-import { buildRealtimeWsUrl, pcm16ToBase64, REALTIME_SAMPLE_RATE } from "@oh-my-pi/pi-ai";
-import { logger } from "@oh-my-pi/pi-utils";
+import { buildRealtimeWsUrl, pcm16ToBase64, REALTIME_SAMPLE_RATE } from "@cornfield/ai";
+import { logger } from "@cornfield/utils";
 import { float32ToPcm16, resamplePcm16 } from "./pcm";
 
 /** Give up waiting for the session.updated ack (some servers never ack). */

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "bun:test";
-import type { AuthStorage, ExtensionAPI, ExtensionCommandContext, RegisteredCommand } from "@oh-my-pi/pi-coding-agent";
-import * as codingAgent from "@oh-my-pi/pi-coding-agent";
-import { type ModelRegistry, Settings } from "@oh-my-pi/pi-coding-agent";
+import type { AuthStorage, ExtensionAPI, ExtensionCommandContext, RegisteredCommand } from "@cornfield/coding-agent";
+import * as codingAgent from "@cornfield/coding-agent";
+import { type ModelRegistry, Settings } from "@cornfield/coding-agent";
 import { executePlan } from "../src/executor";
 import moaExtension from "../src/extension";
 import { buildPlan } from "../src/planner";

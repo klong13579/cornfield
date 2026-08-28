@@ -4,7 +4,7 @@
  * Handles `omp plugin <command>` subcommands for plugin lifecycle management.
  */
 
-import { APP_NAME, getProjectDir } from "@oh-my-pi/pi-utils";
+import { APP_NAME, getProjectDir } from "@cornfield/utils";
 import chalk from "chalk";
 import { resolveOrDefaultProjectRegistryPath } from "../discovery/helpers";
 import { PluginManager, parseSettingValue, validateSetting } from "../extensibility/plugins";
@@ -350,7 +350,7 @@ async function handleInstall(
 	if (packages.length === 0) {
 		console.error(chalk.red(`Usage: ${APP_NAME} plugin install <package[@version]>[features] ...`));
 		console.error(chalk.dim("Examples:"));
-		console.error(chalk.dim(`  ${APP_NAME} plugin install @oh-my-pi/exa`));
+		console.error(chalk.dim(`  ${APP_NAME} plugin install @cornfield/exa`));
 		console.error(chalk.dim(`  ${APP_NAME} plugin install name@marketplace`));
 		process.exit(1);
 	}
@@ -932,7 +932,7 @@ ${chalk.bold("Options:")}
   -l, --local      Use project-local overrides
 
 ${chalk.bold("Examples:")}
-  ${APP_NAME} plugin install @oh-my-pi/exa[search]
+  ${APP_NAME} plugin install @cornfield/exa[search]
   ${APP_NAME} plugin list --json
   ${APP_NAME} plugin features my-plugin --enable search,web
   ${APP_NAME} plugin config set my-plugin apiKey sk-xxx

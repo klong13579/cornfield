@@ -17,7 +17,7 @@
  * account config, then delegates rendering to this module.
  */
 
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 import type { AgentResponseMeta, InboundMessage } from "../types";
 
 /** Hard ceiling for a single DingTalk markdown body (group chats cap at ~4000). */

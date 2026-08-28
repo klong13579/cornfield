@@ -1,5 +1,5 @@
-import type { AgentTool, AgentToolContext, AgentToolResult, AgentToolUpdateCallback } from "@oh-my-pi/pi-agent-core";
-import { getConfigRootDir, isEnoent, prompt, VERSION } from "@oh-my-pi/pi-utils";
+import type { AgentTool, AgentToolContext, AgentToolResult, AgentToolUpdateCallback } from "@cornfield/agent";
+import { getConfigRootDir, isEnoent, prompt, VERSION } from "@cornfield/utils";
 import { type Static, Type } from "@sinclair/typebox";
 import identityDescription from "../prompts/tools/identity.md" with { type: "text" };
 import type { ToolSession } from ".";

@@ -2,8 +2,8 @@ import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import * as os from "node:os";
 import * as path from "node:path";
-import { getBundledModel } from "@oh-my-pi/pi-ai";
-import { getAgentDir, getStatsDbPath, setAgentDir, TempDir } from "@oh-my-pi/pi-utils";
+import { getBundledModel } from "@cornfield/ai";
+import { getAgentDir, getStatsDbPath, setAgentDir, TempDir } from "@cornfield/utils";
 import { closeDb, getRecentRequests, initDb, insertMessageStats } from "../src/db";
 import type { MessageStats } from "../src/types";
 

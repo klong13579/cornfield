@@ -7,9 +7,9 @@
  */
 import * as os from "node:os";
 import * as path from "node:path";
-import { INTENT_FIELD } from "@oh-my-pi/pi-agent-core";
-import { buildSystemPrompt } from "@oh-my-pi/pi-coding-agent/system-prompt";
-import { countTokens } from "@oh-my-pi/pi-natives";
+import { INTENT_FIELD } from "@cornfield/agent";
+import { buildSystemPrompt } from "@cornfield/coding-agent/system-prompt";
+import { countTokens } from "@cornfield/natives";
 
 const SAMPLE_NEVER_RULE = "- NEVER commit untracked secrets to the repository";
 const agentsMd = ["# Agents", "", SAMPLE_NEVER_RULE, "- MUST NOT use console.log in coding-agent"].join("\n");

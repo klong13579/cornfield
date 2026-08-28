@@ -1,10 +1,10 @@
 #!/usr/bin/env bun
-import { APP_NAME, MIN_BUN_VERSION, VERSION } from "@oh-my-pi/pi-utils";
+import { APP_NAME, MIN_BUN_VERSION, VERSION } from "@cornfield/utils";
 /**
  * CLI entry point — registers all commands explicitly and delegates to the
  * lightweight CLI runner from pi-utils.
  */
-import { type CommandEntry, run } from "@oh-my-pi/pi-utils/cli";
+import { type CommandEntry, run } from "@cornfield/utils/cli";
 
 function parseSemver(version: string): [number, number, number] {
 	function toint(value: string): number {
@@ -62,8 +62,8 @@ const commands: CommandEntry[] = [
 	{ name: "search", load: () => import("./commands/web-search").then(m => m.default), aliases: ["q"] },
 ];
 
-async function showHelp(config: import("@oh-my-pi/pi-utils/cli").CliConfig): Promise<void> {
-	const { renderRootHelp } = await import("@oh-my-pi/pi-utils/cli");
+async function showHelp(config: import("@cornfield/utils/cli").CliConfig): Promise<void> {
+	const { renderRootHelp } = await import("@cornfield/utils/cli");
 	const { getExtraHelpText } = await import("./cli/args");
 	renderRootHelp(config);
 	const extra = getExtraHelpText();

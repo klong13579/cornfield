@@ -22,8 +22,8 @@
  * keeps the transport ↔ queue seam one-directional.
  */
 
-import type { ImageContent } from "@oh-my-pi/pi-ai";
-import { logger } from "@oh-my-pi/pi-utils";
+import type { ImageContent } from "@cornfield/ai";
+import { logger } from "@cornfield/utils";
 import type { ForwardStreamHandlers } from "./agent-bridge";
 import type { AgentEvent, WireTransport } from "./agent-transport-wire";
 

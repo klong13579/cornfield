@@ -13,8 +13,8 @@
  * `{ pong: true }`，用于冒烟验证传输层与握手已通。
  */
 
-import { logger } from "@oh-my-pi/pi-utils";
-import { Command, Flags } from "@oh-my-pi/pi-utils/cli";
+import { logger } from "@cornfield/utils";
+import { Command, Flags } from "@cornfield/utils/cli";
 import { parseArgs } from "../cli/args";
 import { ModelRegistry } from "../config/model-registry";
 import { Settings } from "../config/settings";

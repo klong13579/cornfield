@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { checkBashInterception } from "@oh-my-pi/pi-coding-agent/tools/bash-interceptor";
+import { checkBashInterception } from "@cornfield/coding-agent/tools/bash-interceptor";
 
 const ALL_TOOLS = ["bash", "read", "search", "find", "edit", "write"];
 

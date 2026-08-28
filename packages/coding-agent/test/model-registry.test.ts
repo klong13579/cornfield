@@ -2,11 +2,11 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { Effort, type Model, type OpenAICompat, type ThinkingConfig, writeModelCache } from "@oh-my-pi/pi-ai";
-import { kNoAuth, MODEL_ROLES, ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
-import { _resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
-import { hookFetch, Snowflake } from "@oh-my-pi/pi-utils";
+import { Effort, type Model, type OpenAICompat, type ThinkingConfig, writeModelCache } from "@cornfield/ai";
+import { kNoAuth, MODEL_ROLES, ModelRegistry } from "@cornfield/coding-agent/config/model-registry";
+import { _resetSettingsForTest, Settings } from "@cornfield/coding-agent/config/settings";
+import { AuthStorage } from "@cornfield/coding-agent/session/auth-storage";
+import { hookFetch, Snowflake } from "@cornfield/utils";
 
 describe("ModelRegistry", () => {
 	let tempDir: string;

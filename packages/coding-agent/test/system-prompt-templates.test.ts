@@ -2,10 +2,10 @@ import { afterEach, describe, expect, test, vi } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { type AgentTool, INTENT_FIELD } from "@oh-my-pi/pi-agent-core";
-import { buildSystemPrompt, buildSystemPromptToolMetadata } from "@oh-my-pi/pi-coding-agent/system-prompt";
-import { countTokens } from "@oh-my-pi/pi-natives";
-import { prompt } from "@oh-my-pi/pi-utils";
+import { type AgentTool, INTENT_FIELD } from "@cornfield/agent";
+import { buildSystemPrompt, buildSystemPromptToolMetadata } from "@cornfield/coding-agent/system-prompt";
+import { countTokens } from "@cornfield/natives";
+import { prompt } from "@cornfield/utils";
 import { Type } from "@sinclair/typebox";
 import Handlebars from "handlebars";
 

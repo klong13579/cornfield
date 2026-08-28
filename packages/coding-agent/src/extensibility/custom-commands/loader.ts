@@ -6,7 +6,7 @@
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { getAgentDir, getProjectDir, isEnoent, logger } from "@oh-my-pi/pi-utils";
+import { getAgentDir, getProjectDir, isEnoent, logger } from "@cornfield/utils";
 import * as typebox from "@sinclair/typebox";
 import { getConfigDirs } from "../../config";
 import { execCommand } from "../../exec/exec";
@@ -183,7 +183,7 @@ export async function loadCustomCommands(options: LoadCustomCommandsOptions = {}
 		exec: (command: string, args: string[], execOptions) =>
 			execCommand(command, args, execOptions?.cwd ?? cwd, execOptions),
 		typebox,
-		pi: await import("@oh-my-pi/pi-coding-agent"),
+		pi: await import("@cornfield/coding-agent"),
 	};
 
 	// 1. Load bundled commands first (lowest priority - can be overridden)

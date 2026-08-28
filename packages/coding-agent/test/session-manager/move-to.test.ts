@@ -7,9 +7,9 @@ import {
 	loadEntriesFromFile,
 	type SessionHeader,
 	SessionManager,
-} from "@oh-my-pi/pi-coding-agent/session/session-manager";
-import { stripOuterDoubleQuotes } from "@oh-my-pi/pi-coding-agent/tools/path-utils";
-import { getConfigRootDir, setAgentDir } from "@oh-my-pi/pi-utils";
+} from "@cornfield/coding-agent/session/session-manager";
+import { stripOuterDoubleQuotes } from "@cornfield/coding-agent/tools/path-utils";
+import { getConfigRootDir, setAgentDir } from "@cornfield/utils";
 
 // -- helpers ----------------------------------------------------------------
 

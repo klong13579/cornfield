@@ -17,7 +17,7 @@ import { execSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { REALTIME_SAMPLE_RATE, RealtimeWsTransport } from "@oh-my-pi/pi-ai";
+import { REALTIME_SAMPLE_RATE, RealtimeWsTransport } from "@cornfield/ai";
 import { LiveConsultBridge } from "../src/live/consult-bridge";
 import { LiveSessionController } from "../src/live/controller";
 import { LiveTranscriptRecorder, VOICE_MESSAGE_TYPE } from "../src/live/transcript-recorder";

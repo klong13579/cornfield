@@ -6,8 +6,8 @@ import {
 	type CustomMessageEntry,
 	loadEntriesFromFile,
 	SessionManager,
-} from "@oh-my-pi/pi-coding-agent/session/session-manager";
-import { getConfigRootDir, setAgentDir } from "@oh-my-pi/pi-utils";
+} from "@cornfield/coding-agent/session/session-manager";
+import { getConfigRootDir, setAgentDir } from "@cornfield/utils";
 
 describe("custom_message persistence", () => {
 	let testAgentDir: string;

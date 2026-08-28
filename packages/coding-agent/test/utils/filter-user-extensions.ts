@@ -1,5 +1,5 @@
 import * as path from "node:path";
-import { getAgentDir } from "@oh-my-pi/pi-utils";
+import { getAgentDir } from "@cornfield/utils";
 
 /** Paths that come from the developer's real user/agent config, not the test fixture. */
 function isExternalUserExtensionPath(extPath: string): boolean {

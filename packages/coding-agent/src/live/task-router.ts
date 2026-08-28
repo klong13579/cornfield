@@ -15,7 +15,7 @@
  * P1b (§6): the router is also the control surface for a running task —
  * status reports, steer injections (deliverAs "steer"), and cancel (abort).
  */
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 import { extractAssistantText, summarizeActivity } from "./consult-bridge";
 import type { VoiceGate } from "./voice-gate";
 

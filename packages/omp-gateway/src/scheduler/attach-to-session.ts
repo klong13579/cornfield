@@ -47,7 +47,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { buildAgentSessionPath } from "@oh-my-pi/pi-coding-agent/skeleton";
+import { buildAgentSessionPath } from "@cornfield/coding-agent/skeleton";
 
 /** Mirrors the `delivery` shape on `ScheduledTask`. */
 export interface MirrorDelivery {

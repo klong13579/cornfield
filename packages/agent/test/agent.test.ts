@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
-import { Agent, type AgentTool, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
-import { getBundledModel, type SimpleStreamOptions, type ThinkingBudgets } from "@oh-my-pi/pi-ai";
-import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
+import { Agent, type AgentTool, ThinkingLevel } from "@cornfield/agent";
+import { getBundledModel, type SimpleStreamOptions, type ThinkingBudgets } from "@cornfield/ai";
+import { AssistantMessageEventStream } from "@cornfield/ai/utils/event-stream";
 import { Type } from "@sinclair/typebox";
 import { createAssistantMessage, pushAlphaThenDoneEvent } from "./helpers";
 

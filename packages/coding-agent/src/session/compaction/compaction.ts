@@ -4,7 +4,7 @@
  * Pure functions for compaction logic. The session manager handles I/O,
  * and after compaction the session is reloaded.
  */
-import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
+import type { AgentMessage } from "@cornfield/agent";
 import {
 	type AssistantMessage,
 	completeSimple,
@@ -12,22 +12,22 @@ import {
 	type MessageAttribution,
 	type Model,
 	type Usage,
-} from "@oh-my-pi/pi-ai";
+} from "@cornfield/ai";
 import {
 	CODEX_BASE_URL,
 	getCodexAccountId,
 	OPENAI_HEADER_VALUES,
 	OPENAI_HEADERS,
-} from "@oh-my-pi/pi-ai/providers/openai-codex/constants";
-import { parseTextSignature } from "@oh-my-pi/pi-ai/providers/openai-responses-shared";
-import { transformMessages } from "@oh-my-pi/pi-ai/providers/transform-messages";
+} from "@cornfield/ai/providers/openai-codex/constants";
+import { parseTextSignature } from "@cornfield/ai/providers/openai-responses-shared";
+import { transformMessages } from "@cornfield/ai/providers/transform-messages";
 import {
 	getOpenAIResponsesHistoryItems,
 	getOpenAIResponsesHistoryPayload,
 	normalizeResponsesToolCallId,
-} from "@oh-my-pi/pi-ai/utils";
-import { countTokens } from "@oh-my-pi/pi-natives";
-import { logger, prompt } from "@oh-my-pi/pi-utils";
+} from "@cornfield/ai/utils";
+import { countTokens } from "@cornfield/natives";
+import { logger, prompt } from "@cornfield/utils";
 import compactionShortSummaryPrompt from "../../prompts/compaction/compaction-short-summary.md" with { type: "text" };
 import compactionSummaryPrompt from "../../prompts/compaction/compaction-summary.md" with { type: "text" };
 import compactionTurnPrefixPrompt from "../../prompts/compaction/compaction-turn-prefix.md" with { type: "text" };

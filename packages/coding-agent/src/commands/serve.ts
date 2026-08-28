@@ -11,9 +11,9 @@
  */
 
 import * as path from "node:path";
-import { logger, setProjectDir } from "@oh-my-pi/pi-utils";
-import { Command, Flags } from "@oh-my-pi/pi-utils/cli";
-import type { PermissionRequestPush } from "@oh-my-pi/pi-wire";
+import { logger, setProjectDir } from "@cornfield/utils";
+import { Command, Flags } from "@cornfield/utils/cli";
+import type { PermissionRequestPush } from "@cornfield/wire";
 import { parseArgs } from "../cli/args";
 import { ModelRegistry } from "../config/model-registry";
 import { Settings } from "../config/settings";

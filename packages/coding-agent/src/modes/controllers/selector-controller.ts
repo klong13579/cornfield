@@ -1,10 +1,10 @@
 import * as os from "node:os";
 import * as path from "node:path";
-import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
-import { getOAuthProviders, type OAuthProvider } from "@oh-my-pi/pi-ai";
-import type { Component, OverlayHandle } from "@oh-my-pi/pi-tui";
-import { Input, Loader, Spacer, Text } from "@oh-my-pi/pi-tui";
-import { getAgentDbPath, getConfigDirName, getProjectDir } from "@oh-my-pi/pi-utils";
+import { ThinkingLevel } from "@cornfield/agent";
+import { getOAuthProviders, type OAuthProvider } from "@cornfield/ai";
+import type { Component, OverlayHandle } from "@cornfield/tui";
+import { Input, Loader, Spacer, Text } from "@cornfield/tui";
+import { getAgentDbPath, getConfigDirName, getProjectDir } from "@cornfield/utils";
 import { invalidate as invalidateFsCache } from "../../capability/fs";
 import { getRoleInfo, type ModelRegistry } from "../../config/model-registry";
 import { formatModelSelectorValue } from "../../config/model-resolver";

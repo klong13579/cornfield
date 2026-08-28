@@ -15,8 +15,8 @@ import {
 	stripHashlinePrefixes,
 	stripNewLinePrefixes,
 	validateLineRef,
-} from "@oh-my-pi/pi-coding-agent/edit";
-import type { Anchor, HashlineEdit } from "@oh-my-pi/pi-coding-agent/edit/modes/hashline";
+} from "@cornfield/coding-agent/edit";
+import type { Anchor, HashlineEdit } from "@cornfield/coding-agent/edit/modes/hashline";
 
 function makeTag(line: number, content: string): Anchor {
 	return {

@@ -24,7 +24,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { isEnoent } from "@oh-my-pi/pi-utils";
+import { isEnoent } from "@cornfield/utils";
 import { spawn } from "bun";
 import { IntercomClient } from "../../coding-agent/src/intercom-extension/broker/client";
 import { IntercomBroker } from "../src/intercom/broker-server";

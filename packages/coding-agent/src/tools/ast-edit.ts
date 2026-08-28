@@ -1,8 +1,8 @@
-import type { AgentTool, AgentToolContext, AgentToolResult, AgentToolUpdateCallback } from "@oh-my-pi/pi-agent-core";
-import { type AstReplaceChange, astEdit } from "@oh-my-pi/pi-natives";
-import type { Component } from "@oh-my-pi/pi-tui";
-import { Text } from "@oh-my-pi/pi-tui";
-import { $envpos, prompt, untilAborted } from "@oh-my-pi/pi-utils";
+import type { AgentTool, AgentToolContext, AgentToolResult, AgentToolUpdateCallback } from "@cornfield/agent";
+import { type AstReplaceChange, astEdit } from "@cornfield/natives";
+import type { Component } from "@cornfield/tui";
+import { Text } from "@cornfield/tui";
+import { $envpos, prompt, untilAborted } from "@cornfield/utils";
 import { type Static, Type } from "@sinclair/typebox";
 import { computeLineHash, HASHLINE_CONTENT_SEPARATOR } from "../edit/line-hash";
 import type { RenderResultOptions } from "../extensibility/custom-tools/types";

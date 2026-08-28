@@ -22,9 +22,9 @@
  * 上下文不完整的信号，切模型重放会丢语义，直接抛原错。
  */
 
-import type { StreamFn } from "@oh-my-pi/pi-agent-core";
-import type { Api, AssistantMessage, AssistantMessageEvent, AssistantMessageEventStream, Model } from "@oh-my-pi/pi-ai";
-import { logger } from "@oh-my-pi/pi-utils";
+import type { StreamFn } from "@cornfield/agent";
+import type { Api, AssistantMessage, AssistantMessageEvent, AssistantMessageEventStream, Model } from "@cornfield/ai";
+import { logger } from "@cornfield/utils";
 import type { ModelRegistry } from "./model-registry";
 import { resolveModelRoleValue } from "./model-resolver";
 import type { Settings } from "./settings";

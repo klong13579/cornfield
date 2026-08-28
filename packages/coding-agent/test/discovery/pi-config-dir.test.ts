@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { LoadContext } from "@oh-my-pi/pi-coding-agent/capability/types";
-import { getConfigDirs } from "@oh-my-pi/pi-coding-agent/config";
-import { getUserPath } from "@oh-my-pi/pi-coding-agent/discovery/helpers";
+import type { LoadContext } from "@cornfield/coding-agent/capability/types";
+import { getConfigDirs } from "@cornfield/coding-agent/config";
+import { getUserPath } from "@cornfield/coding-agent/discovery/helpers";
 
 describe("CORNFIELD_CONFIG_DIR", () => {
 	const original = process.env.CORNFIELD_CONFIG_DIR;

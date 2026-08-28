@@ -1,5 +1,5 @@
-import { sanitizeText } from "@oh-my-pi/pi-natives";
-import { getIndentation } from "@oh-my-pi/pi-utils";
+import { sanitizeText } from "@cornfield/natives";
+import { getIndentation } from "@cornfield/utils";
 import * as Diff from "diff";
 import { theme } from "../../modes/theme/theme";
 import { type CodeFrameMarker, formatCodeFrameLine, replaceTabs } from "../../tools/render-utils";

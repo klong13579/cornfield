@@ -6,7 +6,7 @@
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 import { SchedulerEngine } from "./engine";
 import { appendExecutionLog } from "./execution-log";
 import { executeScheduledCommand } from "./executor";

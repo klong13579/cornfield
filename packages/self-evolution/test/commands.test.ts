@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 import { beforeEach, describe, expect, test } from "bun:test";
-import type { AutocompleteItem } from "@oh-my-pi/pi-tui";
+import type { AutocompleteItem } from "@cornfield/tui";
 import { registerEpisodicCommands, registerSelfEvolutionCommands } from "../src/commands";
 import { EpisodicManager } from "../src/episodic-manager";
 import { initSchema } from "../src/storage/db";

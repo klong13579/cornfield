@@ -1,4 +1,4 @@
-import { Editor, type KeyId, matchesKey, parseKittySequence } from "@oh-my-pi/pi-tui";
+import { Editor, type KeyId, matchesKey, parseKittySequence } from "@cornfield/tui";
 import type { AppKeybinding } from "../../config/keybindings";
 
 type ConfigurableEditorAction = Extract<

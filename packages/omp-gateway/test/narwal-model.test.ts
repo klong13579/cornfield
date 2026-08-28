@@ -7,7 +7,7 @@
  * 3. It can process a simple prompt and return a response
  */
 import { describe, expect, test } from "bun:test";
-import { MULTIDEVICE_PROTOCOL_VERSION } from "@oh-my-pi/pi-wire";
+import { MULTIDEVICE_PROTOCOL_VERSION } from "@cornfield/wire";
 
 const WIRE_HELLO_ACK = '"type":"hello_ack"';
 

@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
-import { RpcClient } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-client";
-import { Snowflake } from "@oh-my-pi/pi-utils";
+import type { AgentMessage } from "@cornfield/agent";
+import { RpcClient } from "@cornfield/coding-agent/modes/rpc/rpc-client";
+import { Snowflake } from "@cornfield/utils";
 import { e2eApiKey } from "../../coding-agent/test/utilities";
 import { MOA_ARCHIVE_ENTRY_TYPE } from "../src/types";
 

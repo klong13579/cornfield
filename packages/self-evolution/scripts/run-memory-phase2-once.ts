@@ -7,11 +7,11 @@
  *   bun packages/self-evolution/scripts/run-memory-phase2-once.ts [--cwd <repo>] [--no-enqueue] [--phase2-only]
  */
 import * as path from "node:path";
-import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
-import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { discoverAuthStorage } from "@oh-my-pi/pi-coding-agent/sdk";
-import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
-import { getAgentDir } from "@oh-my-pi/pi-utils";
+import { ModelRegistry } from "@cornfield/coding-agent/config/model-registry";
+import { Settings } from "@cornfield/coding-agent/config/settings";
+import { discoverAuthStorage } from "@cornfield/coding-agent/sdk";
+import type { AgentSession } from "@cornfield/coding-agent/session/agent-session";
+import { getAgentDir } from "@cornfield/utils";
 import { enqueueMemoryConsolidation, runMemoryMaintenanceOnce } from "../src/memory/index";
 import { getMemoryRoot } from "../src/paths";
 

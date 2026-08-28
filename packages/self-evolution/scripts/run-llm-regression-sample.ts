@@ -1,15 +1,15 @@
 #!/usr/bin/env bun
-import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
-import { resolveRoleSelection } from "@oh-my-pi/pi-coding-agent/config/model-resolver";
-import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { discoverAuthStorage } from "@oh-my-pi/pi-coding-agent/sdk";
+import { ModelRegistry } from "@cornfield/coding-agent/config/model-registry";
+import { resolveRoleSelection } from "@cornfield/coding-agent/config/model-resolver";
+import { Settings } from "@cornfield/coding-agent/config/settings";
+import { discoverAuthStorage } from "@cornfield/coding-agent/sdk";
 /**
  * LLM regression replay on evolved skills (global DB).
  *
  * Usage:
  *   OMP_REGRESSION_REPLAY=llm bun packages/self-evolution/scripts/run-llm-regression-sample.ts
  */
-import { getAgentDir } from "@oh-my-pi/pi-utils";
+import { getAgentDir } from "@cornfield/utils";
 import { createRegressionReplayBackend } from "../src/regression/replay-backend";
 import { clearRegressionReplayRuntime, setRegressionReplayRuntime } from "../src/regression/replay-runtime";
 import { selectFixturesForSkill } from "../src/regression/select-fixtures";

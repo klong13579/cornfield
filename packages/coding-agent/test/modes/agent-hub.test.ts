@@ -1,7 +1,7 @@
 import { beforeAll, beforeEach, describe, expect, test } from "bun:test";
-import { AgentHub } from "@oh-my-pi/pi-coding-agent/modes/components/agent-hub";
-import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
-import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
+import { AgentHub } from "@cornfield/coding-agent/modes/components/agent-hub";
+import { AgentRegistry } from "@cornfield/coding-agent/registry/agent-registry";
+import type { AgentSession } from "@cornfield/coding-agent/session/agent-session";
 import { initTheme } from "../../src/modes/theme/theme";
 
 const fakeSession = {} as AgentSession;

@@ -1,5 +1,5 @@
-import type { AgentToolUpdateCallback } from "@oh-my-pi/pi-agent-core";
-import { sanitizeText } from "@oh-my-pi/pi-natives";
+import type { AgentToolUpdateCallback } from "@cornfield/agent";
+import { sanitizeText } from "@cornfield/natives";
 import { formatBytes } from "../tools/render-utils";
 import { sanitizeWithOptionalSixelPassthrough } from "../utils/sixel";
 

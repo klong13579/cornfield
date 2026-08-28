@@ -23,7 +23,7 @@
 
 import { access } from "node:fs/promises";
 
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 import { Type } from "@sinclair/typebox";
 import type { AgentBridge } from "./agent-bridge";
 import { DingTalkChannel } from "./channels/dingtalk";

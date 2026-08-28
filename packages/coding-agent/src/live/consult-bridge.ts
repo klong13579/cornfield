@@ -12,7 +12,7 @@
  * nothing here may be able to mutate anything.
  */
 
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 import { Type } from "@sinclair/typebox";
 import type { AgentToolResult } from "../extensibility/extensions/types";
 import consultInstructions from "../prompts/live/consult-instructions.md" with { type: "text" };

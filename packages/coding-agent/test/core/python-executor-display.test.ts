@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import { executePythonWithKernel } from "@oh-my-pi/pi-coding-agent/ipy/executor";
-import type { KernelDisplayOutput } from "@oh-my-pi/pi-coding-agent/ipy/kernel";
+import { executePythonWithKernel } from "@cornfield/coding-agent/ipy/executor";
+import type { KernelDisplayOutput } from "@cornfield/coding-agent/ipy/kernel";
 import { FakeKernel } from "./helpers";
 
 describe("executePythonWithKernel display outputs", () => {

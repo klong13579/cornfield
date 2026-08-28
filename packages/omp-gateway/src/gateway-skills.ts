@@ -26,7 +26,7 @@
  * Pending state is one-shot: consumed on the next inbound message.
  * TTL is 30 min so a stale selection doesn't haunt the next session.
  */
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 import type { SkillCache } from "./skill-cache";
 import type { InboundMessage, MessageContent } from "./types";
 

@@ -1,7 +1,7 @@
 /**
  * Scheduling engine that manages active cron jobs using croner.
  */
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 import { Cron } from "croner";
 import { clearTestRunMarker, readTestRunMarker } from "./test-run-marker";
 import type { EngineOptions, ScheduledTask, SchedulerStorage } from "./types";

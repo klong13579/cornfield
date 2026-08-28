@@ -1,17 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import * as path from "node:path";
-import { Agent, type AgentMessage } from "@oh-my-pi/pi-agent-core";
-import { getBundledModel, type Message } from "@oh-my-pi/pi-ai";
-import { inferCopilotInitiator } from "@oh-my-pi/pi-ai/providers/github-copilot-headers";
-import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
-import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
-import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import type { ExtensionRunner } from "@oh-my-pi/pi-coding-agent/extensibility/extensions";
-import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
-import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
-import { convertToLlm } from "@oh-my-pi/pi-coding-agent/session/messages";
-import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
-import { TempDir } from "@oh-my-pi/pi-utils";
+import { Agent, type AgentMessage } from "@cornfield/agent";
+import { getBundledModel, type Message } from "@cornfield/ai";
+import { inferCopilotInitiator } from "@cornfield/ai/providers/github-copilot-headers";
+import { AssistantMessageEventStream } from "@cornfield/ai/utils/event-stream";
+import { ModelRegistry } from "@cornfield/coding-agent/config/model-registry";
+import { Settings } from "@cornfield/coding-agent/config/settings";
+import type { ExtensionRunner } from "@cornfield/coding-agent/extensibility/extensions";
+import { AgentSession } from "@cornfield/coding-agent/session/agent-session";
+import { AuthStorage } from "@cornfield/coding-agent/session/auth-storage";
+import { convertToLlm } from "@cornfield/coding-agent/session/messages";
+import { SessionManager } from "@cornfield/coding-agent/session/session-manager";
+import { TempDir } from "@cornfield/utils";
 import { createAssistantMessage } from "./helpers/agent-session-setup";
 
 class MockAssistantStream extends AssistantMessageEventStream {}

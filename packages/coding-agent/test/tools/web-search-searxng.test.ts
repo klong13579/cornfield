@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "bun:test";
-import { hookFetch } from "@oh-my-pi/pi-utils";
+import { hookFetch } from "@cornfield/utils";
 import { searchSearXNG } from "../../src/web/search/providers/searxng";
 
 describe("SearXNG web search provider", () => {

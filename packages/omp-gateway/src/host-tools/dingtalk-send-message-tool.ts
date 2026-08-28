@@ -10,7 +10,7 @@
  * See `docs/phase-b-user-oauth.md` when that work starts.
  */
 
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 import { Type } from "@sinclair/typebox";
 import { DingTalkChannel } from "../channels/dingtalk";
 import type { ChannelRegistry } from "../channels/registry";

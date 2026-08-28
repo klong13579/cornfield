@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import type { PiWebSocketCtor, PiWebSocketLike } from "@oh-my-pi/pi-client";
+import type { PiWebSocketCtor, PiWebSocketLike } from "@cornfield/client";
 import type { PermissionRequestDto, WireServerEventDto } from "../src/lib/wire-dto";
 import { PiClientAdapter, type ServeConnectionConfig } from "../src/state/pi-client-adapter";
 

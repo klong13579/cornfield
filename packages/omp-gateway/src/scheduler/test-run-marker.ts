@@ -33,7 +33,7 @@
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { isEnoent, logger } from "@oh-my-pi/pi-utils";
+import { isEnoent, logger } from "@cornfield/utils";
 import type { ScheduledTask } from "./types";
 import { getSchedulerDir } from "./types";
 

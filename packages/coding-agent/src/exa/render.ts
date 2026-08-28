@@ -3,9 +3,9 @@
  *
  * Tree-based rendering with collapsed/expanded states for Exa search results.
  */
-import type { Component } from "@oh-my-pi/pi-tui";
-import { Text } from "@oh-my-pi/pi-tui";
-import { logger } from "@oh-my-pi/pi-utils";
+import type { Component } from "@cornfield/tui";
+import { Text } from "@cornfield/tui";
+import { logger } from "@cornfield/utils";
 import type { RenderResultOptions } from "../extensibility/custom-tools/types";
 import type { Theme } from "../modes/theme/theme";
 import {

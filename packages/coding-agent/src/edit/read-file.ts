@@ -5,7 +5,7 @@
  * error referencing the display path.
  */
 import * as fs from "node:fs/promises";
-import { isEnoent } from "@oh-my-pi/pi-utils";
+import { isEnoent } from "@cornfield/utils";
 
 export async function readEditFileText(absolutePath: string, path: string): Promise<string> {
 	// Bun.file().text() strips a UTF-8 BOM during decoding; the edit pipeline

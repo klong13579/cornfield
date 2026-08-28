@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { Settings } from "@cornfield/coding-agent/config/settings";
 import { buildMemoryToolDeveloperInstructions, getMemoryRoot } from "../../src/memory/index";
 
 async function withTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {

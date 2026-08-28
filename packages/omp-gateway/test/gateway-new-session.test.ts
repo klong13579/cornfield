@@ -22,7 +22,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { buildAgentSessionPath, ensureAgentDir } from "@oh-my-pi/pi-coding-agent/skeleton";
+import { buildAgentSessionPath, ensureAgentDir } from "@cornfield/coding-agent/skeleton";
 import { AgentBridge } from "../src/agent-bridge";
 import { NewSessionHandler } from "../src/gateway-new-session";
 import { SQLiteSessionStore } from "../src/session-store";

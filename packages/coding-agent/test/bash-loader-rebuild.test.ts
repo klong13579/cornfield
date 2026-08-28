@@ -4,10 +4,10 @@
  * while status === "running" — must call start() again or the spinner freezes.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
-import { BashExecutionComponent } from "@oh-my-pi/pi-coding-agent/modes/components/bash-execution";
-import { PythonExecutionComponent } from "@oh-my-pi/pi-coding-agent/modes/components/python-execution";
-import { getThemeByName, setThemeInstance } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
-import type { TUI } from "@oh-my-pi/pi-tui";
+import { BashExecutionComponent } from "@cornfield/coding-agent/modes/components/bash-execution";
+import { PythonExecutionComponent } from "@cornfield/coding-agent/modes/components/python-execution";
+import { getThemeByName, setThemeInstance } from "@cornfield/coding-agent/modes/theme/theme";
+import type { TUI } from "@cornfield/tui";
 
 describe("bash/python loader survives clear-then-readd rebuild", () => {
 	let renderSpy: ReturnType<typeof vi.fn>;

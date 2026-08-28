@@ -1,17 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import * as path from "node:path";
-import { Agent } from "@oh-my-pi/pi-agent-core";
-import { getBundledModel } from "@oh-my-pi/pi-ai";
-import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
-import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import * as bashExecutor from "@oh-my-pi/pi-coding-agent/exec/bash-executor";
-import type { ExtensionRunner } from "@oh-my-pi/pi-coding-agent/extensibility/extensions";
-import * as pythonExecutor from "@oh-my-pi/pi-coding-agent/ipy/executor";
-import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
-import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
-import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
-import { TOOL_TIMEOUTS } from "@oh-my-pi/pi-coding-agent/tools/tool-timeouts";
-import { TempDir } from "@oh-my-pi/pi-utils";
+import { Agent } from "@cornfield/agent";
+import { getBundledModel } from "@cornfield/ai";
+import { ModelRegistry } from "@cornfield/coding-agent/config/model-registry";
+import { Settings } from "@cornfield/coding-agent/config/settings";
+import * as bashExecutor from "@cornfield/coding-agent/exec/bash-executor";
+import type { ExtensionRunner } from "@cornfield/coding-agent/extensibility/extensions";
+import * as pythonExecutor from "@cornfield/coding-agent/ipy/executor";
+import { AgentSession } from "@cornfield/coding-agent/session/agent-session";
+import { AuthStorage } from "@cornfield/coding-agent/session/auth-storage";
+import { SessionManager } from "@cornfield/coding-agent/session/session-manager";
+import { TOOL_TIMEOUTS } from "@cornfield/coding-agent/tools/tool-timeouts";
+import { TempDir } from "@cornfield/utils";
 
 describe("AgentSession user shortcut hooks", () => {
 	let tempDir: TempDir;

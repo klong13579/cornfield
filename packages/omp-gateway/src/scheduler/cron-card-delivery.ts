@@ -27,7 +27,7 @@
 
 import * as os from "node:os";
 import * as path from "node:path";
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 import {
 	type AICardInstance,
 	type AICardTarget,

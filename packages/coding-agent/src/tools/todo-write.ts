@@ -1,8 +1,8 @@
-import type { AgentTool, AgentToolContext, AgentToolResult, AgentToolUpdateCallback } from "@oh-my-pi/pi-agent-core";
-import { StringEnum } from "@oh-my-pi/pi-ai";
-import type { Component } from "@oh-my-pi/pi-tui";
-import { Text } from "@oh-my-pi/pi-tui";
-import { prompt } from "@oh-my-pi/pi-utils";
+import type { AgentTool, AgentToolContext, AgentToolResult, AgentToolUpdateCallback } from "@cornfield/agent";
+import { StringEnum } from "@cornfield/ai";
+import type { Component } from "@cornfield/tui";
+import { Text } from "@cornfield/tui";
+import { prompt } from "@cornfield/utils";
 import { type Static, Type } from "@sinclair/typebox";
 import chalk from "chalk";
 import type { RenderResultOptions } from "../extensibility/custom-tools/types";

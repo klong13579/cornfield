@@ -7,9 +7,9 @@
  * toggles mute inside the session. The panel mounts above the editor so text
  * input keeps working while voice runs (design §4.4).
  */
-import { RealtimeWsTransport } from "@oh-my-pi/pi-ai";
-import type { Component } from "@oh-my-pi/pi-tui";
-import { logger } from "@oh-my-pi/pi-utils";
+import { RealtimeWsTransport } from "@cornfield/ai";
+import type { Component } from "@cornfield/tui";
+import { logger } from "@cornfield/utils";
 import { LiveConsultBridge } from "../../live/consult-bridge";
 import { LiveSessionController } from "../../live/controller";
 import { buildGreetingNote, deriveAddressName, extractUserName } from "../../live/greeting";

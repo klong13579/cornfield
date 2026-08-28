@@ -1,4 +1,4 @@
-import type { Message, TextContent } from "@oh-my-pi/pi-ai";
+import type { Message, TextContent } from "@cornfield/ai";
 import type { SessionContext } from "../session/session-manager";
 import { compileSecretRegex } from "./regex";
 

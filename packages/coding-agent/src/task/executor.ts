@@ -5,8 +5,8 @@
  */
 
 import path from "node:path";
-import type { AgentEvent, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
-import { logger, prompt, untilAborted } from "@oh-my-pi/pi-utils";
+import type { AgentEvent, ThinkingLevel } from "@cornfield/agent";
+import { logger, prompt, untilAborted } from "@cornfield/utils";
 import type { TSchema } from "@sinclair/typebox";
 import Ajv, { type ValidateFunction } from "ajv";
 import { ModelRegistry } from "../config/model-registry";

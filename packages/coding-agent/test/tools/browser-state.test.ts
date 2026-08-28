@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { EMPTY_BROWSER_STATE, mergeBrowserState, type PersistedCookie } from "@oh-my-pi/pi-coding-agent/tools";
+import { EMPTY_BROWSER_STATE, mergeBrowserState, type PersistedCookie } from "@cornfield/coding-agent/tools";
 
 function cookie(overrides: Partial<PersistedCookie> & Pick<PersistedCookie, "name" | "domain">): PersistedCookie {
 	return {

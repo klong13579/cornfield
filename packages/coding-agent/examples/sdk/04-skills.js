@@ -4,7 +4,7 @@
  * Skills provide specialized instructions loaded into the system prompt.
  * Discover, filter, merge, or replace them.
  */
-import { createAgentSession, discoverSkills, SessionManager } from "@oh-my-pi/pi-coding-agent";
+import { createAgentSession, discoverSkills, SessionManager } from "@cornfield/coding-agent";
 // Discover all skills from cwd/.omp/skills, ~/.omp/agent/skills, etc.
 const { skills: allSkills } = await discoverSkills();
 console.log("Discovered skills:", allSkills.map(s => s.name));

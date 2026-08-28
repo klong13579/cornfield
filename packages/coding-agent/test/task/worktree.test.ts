@@ -8,7 +8,7 @@ const projfsOverlayStartMock = vi.fn();
 const projfsOverlayStopMock = vi.fn();
 const tempDirs: string[] = [];
 
-vi.mock("@oh-my-pi/pi-natives", () => ({
+vi.mock("@cornfield/natives", () => ({
 	projfsOverlayStart: projfsOverlayStartMock,
 	projfsOverlayStop: projfsOverlayStopMock,
 }));

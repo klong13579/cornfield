@@ -8,7 +8,7 @@
 
 import * as os from "node:os";
 import * as path from "node:path";
-import { isEnoent, logger } from "@oh-my-pi/pi-utils";
+import { isEnoent, logger } from "@cornfield/utils";
 import { z } from "zod";
 import type { ChannelConfig, DingTalkConfig, GatewayConfig } from "./types";
 

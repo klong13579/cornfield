@@ -1,6 +1,5 @@
 import * as os from "node:os";
 import * as path from "node:path";
-import moaExtension from "@oh-my-pi/moa-extension";
 import {
 	Agent,
 	type AgentEvent,
@@ -12,14 +11,16 @@ import {
 	INTENT_FIELD,
 	type StreamFn,
 	type ThinkingLevel,
-} from "@oh-my-pi/pi-agent-core";
-import type { Message, Model, SimpleStreamOptions } from "@oh-my-pi/pi-ai";
-import { streamSimple } from "@oh-my-pi/pi-ai";
+} from "@cornfield/agent";
+import type { Message, Model, SimpleStreamOptions } from "@cornfield/ai";
+import { streamSimple } from "@cornfield/ai";
 import {
 	getOpenAICodexTransportDetails,
 	prewarmOpenAICodexResponses,
-} from "@oh-my-pi/pi-ai/providers/openai-codex-responses";
-import type { Component } from "@oh-my-pi/pi-tui";
+} from "@cornfield/ai/providers/openai-codex-responses";
+import moaExtension from "@cornfield/moa-extension";
+import { createSelfEvolutionExtension } from "@cornfield/self-evolution";
+import type { Component } from "@cornfield/tui";
 import {
 	$env,
 	$flag,
@@ -31,8 +32,7 @@ import {
 	postmortem,
 	prompt,
 	Snowflake,
-} from "@oh-my-pi/pi-utils";
-import { createSelfEvolutionExtension } from "@oh-my-pi/self-evolution";
+} from "@cornfield/utils";
 import chalk from "chalk";
 import { AsyncJobManager, isBackgroundJobSupportEnabled } from "./async";
 import { createAutoresearchExtension } from "./autoresearch";
@@ -757,7 +757,7 @@ function buildMCPPromptCommands(manager: MCPManager): LoadedCustomCommand[] {
  * const { session } = await createAgentSession();
  *
  * // With explicit model
- * import { getModel } from '@oh-my-pi/pi-ai';
+ * import { getModel } from '@cornfield/ai';
  * const { session } = await createAgentSession({
  *   model: getModel('anthropic', 'claude-opus-4-5'),
  *   thinkingLevel: 'high',

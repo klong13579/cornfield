@@ -4,7 +4,7 @@
  * Supports both shell execution (sh -c) and agent execution (omp --print).
  * All executions are bounded by a configurable timeout.
  */
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 
 export interface ExecutionResult {
 	exitCode: number;

@@ -1,5 +1,5 @@
-import type { AssistantMessage, Usage } from "@oh-my-pi/pi-ai";
-import type { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
+import type { AssistantMessage, Usage } from "@cornfield/ai";
+import type { AssistantMessageEventStream } from "@cornfield/ai/utils/event-stream";
 
 /**
  * Pushes the canonical two-call stream script used across agent tests:

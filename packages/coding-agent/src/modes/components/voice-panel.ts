@@ -10,9 +10,9 @@
  * signature so idle states produce zero redraws.
  */
 
-import { sanitizeText } from "@oh-my-pi/pi-natives";
-import type { KeyId } from "@oh-my-pi/pi-tui";
-import { type Component, matchesKey, type TUI, visibleWidth, wrapTextWithAnsi } from "@oh-my-pi/pi-tui";
+import { sanitizeText } from "@cornfield/natives";
+import type { KeyId } from "@cornfield/tui";
+import { type Component, matchesKey, type TUI, visibleWidth, wrapTextWithAnsi } from "@cornfield/tui";
 import type { LivePhase } from "../../live/types";
 import { replaceTabs, truncateToWidth } from "../../tools/render-utils";
 import { theme as globalTheme, type Theme, type ThemeColor } from "../theme/theme";

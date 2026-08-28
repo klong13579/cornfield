@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, it } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { _resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { _resetSettingsForTest, Settings } from "@cornfield/coding-agent/config/settings";
 import {
 	applyAtomEdits,
 	atomEditParamsSchema,
@@ -14,8 +14,8 @@ import {
 	parseAtomWithWarnings,
 	splitAtomInput,
 	splitAtomInputs,
-} from "@oh-my-pi/pi-coding-agent/edit";
-import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
+} from "@cornfield/coding-agent/edit";
+import type { ToolSession } from "@cornfield/coding-agent/tools";
 import { Value } from "@sinclair/typebox/value";
 
 beforeAll(async () => {
