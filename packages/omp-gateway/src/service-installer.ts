@@ -58,13 +58,13 @@ export function detectPlatform(): Platform {
  *
  *   1. The operator's shell value at install time (explicit override).
  *      An empty string is treated the same as unset — both fall through
- *      to step 2 — so a stale `export OMP_GATEWAY_TEST_MODE=` in the
+ *      to step 2 — so a stale `export CORNFIELD_GATEWAY_TEST_MODE=` in the
  *      shell cannot silently disable the test-injection endpoint.
  *   2. The `PERSISTED_ENV_DEFAULTS` value for the var.
  *   3. (No default → var is omitted from the config.)
  *
- * `OMP_GATEWAY_TEST_MODE=1` turns on the POST /test/inject endpoint
- * (see gateway.ts#startTestServer), and `OMP_GATEWAY_TEST_PORT`
+ * `CORNFIELD_GATEWAY_TEST_MODE=1` turns on the POST /test/inject endpoint
+ * (see gateway.ts#startTestServer), and `CORNFIELD_GATEWAY_TEST_PORT`
  * controls which port that endpoint binds to. These two are defaulted
  * to "1" / "7890" so the test-injection surface is available out of
  * the box after `cornfield-gateway service install` — the prior behaviour
@@ -79,10 +79,10 @@ export function detectPlatform(): Platform {
  * and the systemd unit will get an Environment="NAME=VALUE" line.
  *
  * Opt-out: set the var to a non-empty value in your shell before
- * running `service install`, e.g. `export OMP_GATEWAY_TEST_MODE=0`
+ * running `service install`, e.g. `export CORNFIELD_GATEWAY_TEST_MODE=0`
  * to keep the endpoint off.
  */
-export const PERSISTED_ENV_VARS = ["OMP_GATEWAY_TEST_MODE", "OMP_GATEWAY_TEST_PORT"] as const;
+export const PERSISTED_ENV_VARS = ["CORNFIELD_GATEWAY_TEST_MODE", "CORNFIELD_GATEWAY_TEST_PORT"] as const;
 
 /**
  * Default values applied when the operator's shell has not set the
@@ -91,8 +91,8 @@ export const PERSISTED_ENV_VARS = ["OMP_GATEWAY_TEST_MODE", "OMP_GATEWAY_TEST_PO
  * pre-existing "only-if-set" behaviour (no default; unset ⇒ omitted).
  */
 export const PERSISTED_ENV_DEFAULTS: Partial<Record<(typeof PERSISTED_ENV_VARS)[number], string>> = {
-	OMP_GATEWAY_TEST_MODE: "1",
-	OMP_GATEWAY_TEST_PORT: "7890",
+	CORNFIELD_GATEWAY_TEST_MODE: "1",
+	CORNFIELD_GATEWAY_TEST_PORT: "7890",
 };
 
 /**
@@ -187,7 +187,7 @@ export function resolvePersistedEnv(env: NodeJS.ProcessEnv = process.env): Recor
 export function getServicePaths() {
 	const platform = detectPlatform();
 	const home = os.homedir();
-	const dataDir = path.join(home, ".omp", "gateway-data");
+	const dataDir = path.join(home, ".cornfield", "gateway-data");
 	const logDir = path.join(dataDir, "logs");
 
 	switch (platform) {

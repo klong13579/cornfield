@@ -1,7 +1,7 @@
 /**
  * JSON-file-backed implementation of SchedulerStorage.
  *
- * Task definitions + runtime state live in a single `~/.omp/gateway-data/scheduler/jobs.json`
+ * Task definitions + runtime state live in a single `~/.cornfield/gateway-data/scheduler/jobs.json`
  * file with atomic writes (tmp → os.replace + fsync). Execution records are ephemeral
  * in-memory during runtime and also written to JSONL logs for persistence.
  *

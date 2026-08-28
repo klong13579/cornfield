@@ -2,7 +2,7 @@
  * 听记（VOICE-D）UI e2e —— 真实 serve（本仓库源码，隔离配置根）→ vite preview → 浏览器。
  *
  * 编排（spec 内自管）：
- *   1. serve 以源码启动（bun packages/coding-agent/src/cli.ts）、随机端口、隔离 PI_CONFIG_DIR
+ *   1. serve 以源码启动（bun packages/coding-agent/src/cli.ts）、随机端口、隔离 CORNFIELD_CONFIG_DIR
  *      （不碰真实 ~/.omp/listen）；spec 预置一条历史录音 json
  *   2. vite preview 起 build 后 dist（4174）
  *   3. 浏览器注入 localStorage 连接配置指向该 serve；假麦克风 flags
@@ -99,7 +99,7 @@ test("听记：历史真实加载 + 假麦克风四态 UI 链路", async ({ page
 	const serveUrl = `ws://127.0.0.1:${servePort}/ws`;
 	const isoHome = await fsp.mkdtemp(path.join(os.tmpdir(), "omp-listen-ui-e2e-"));
 
-	// 预置一条历史录音（serve 的 ~/PI_CONFIG_DIR/listen/）
+	// 预置一条历史录音（serve 的 ~/CORNFIELD_CONFIG_DIR/listen/）
 	await fsp.mkdir(path.join(isoHome, "listen"), { recursive: true });
 	await fsp.writeFile(
 		path.join(isoHome, "listen", "2026-08-20-e2e历史.json"),
@@ -122,7 +122,7 @@ test("听记：历史真实加载 + 假麦克风四态 UI 链路", async ({ page
 			"127.0.0.1",
 			"--no-extensions",
 		],
-		{ env: { ...process.env, PI_CONFIG_DIR: isoHome, PI_NO_TITLE: "1" } },
+		{ env: { ...process.env, CORNFIELD_CONFIG_DIR: isoHome, PI_NO_TITLE: "1" } },
 	);
 	let serveErr = "";
 	serve.stderr?.on("data", d => {

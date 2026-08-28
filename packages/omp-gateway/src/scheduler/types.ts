@@ -1,7 +1,7 @@
 /**
  * Core types for the persistent cron scheduler.
  *
- * Paths relocated to ~/.omp/gateway-data/scheduler/ for unified gateway.
+ * Paths relocated to ~/.cornfield/gateway-data/scheduler/ for unified gateway.
  */
 
 import * as os from "node:os";
@@ -295,11 +295,11 @@ export type ScheduleAction = "add" | "diagnose" | "list" | "remove" | "run" | "e
 export type DaemonAction = "start" | "stop" | "status" | "restart";
 
 // ---------------------------------------------------------------------------
-// Paths — unified under ~/.omp/gateway-data/
+// Paths — unified under ~/.cornfield/gateway-data/
 // ---------------------------------------------------------------------------
 
 export function getGatewayDataDir(): string {
-	return path.join(os.homedir(), ".omp", "gateway-data");
+	return path.join(os.homedir(), ".cornfield", "gateway-data");
 }
 
 export function getSchedulerDir(): string {
@@ -566,7 +566,7 @@ export function formatChannel(deliver: string | undefined): string {
 /**
  * Render the owning agent directory as a single human-readable cell.
  *
- *   agentDir="~/.omp/agents/hr"  → "hr"
+ *   agentDir="~/.cornfield/agents/hr"  → "hr"
  *   agentDir undefined            → "—"
  *
  * Shows the last path segment of the agent directory. Long paths are

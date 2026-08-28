@@ -1,7 +1,7 @@
 /**
- * Centralized file logger for omp.
+ * Centralized file logger for cornfield.
  *
- * Logs to ~/.omp/logs/ with size-based rotation, supporting concurrent omp instances.
+ * Logs to ~/.cornfield/logs/ with size-based rotation, supporting concurrent cornfield instances.
  * Each log entry includes process.pid for traceability.
  */
 import * as fs from "node:fs";
@@ -13,7 +13,7 @@ import { installStdioErrorGuards } from "./stdio-guard";
 
 // Broken TTY writes emit `error` on stdout/stderr. Without a listener those
 // become uncaughtException → postmortem logs again → EIO storm (14GB heap).
-// Install as early as the logger loads (nearly every omp process).
+// Install as early as the logger loads (nearly every cornfield process).
 installStdioErrorGuards(process.stdout);
 installStdioErrorGuards(process.stderr);
 
@@ -65,7 +65,7 @@ const logFormat = winston.format.combine(
  */
 const fileTransport = new RotatingFileTransport({
 	dirname: ensureLogsDir(),
-	filename: "omp.%DATE%.log",
+	filename: "cornfield.%DATE%.log",
 	datePattern: "YYYY-MM-DD",
 	maxSize: "100m",
 	maxFiles: 5,

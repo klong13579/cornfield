@@ -36,7 +36,7 @@ describe.skipIf(!e2eApiKey("ANTHROPIC_API_KEY"))("RPC concurrency", () => {
 		using clientA = new RpcClient({
 			cliPath: path.join(import.meta.dir, "..", "dist", "cli.js"),
 			cwd: path.join(import.meta.dir, ".."),
-			env: { PI_CODING_AGENT_DIR: sessionDirA },
+			env: { CORNFIELD_AGENT_DIR: sessionDirA },
 			provider: "anthropic",
 			model: "claude-sonnet-4-5",
 		});
@@ -44,7 +44,7 @@ describe.skipIf(!e2eApiKey("ANTHROPIC_API_KEY"))("RPC concurrency", () => {
 		using clientB = new RpcClient({
 			cliPath: path.join(import.meta.dir, "..", "dist", "cli.js"),
 			cwd: path.join(import.meta.dir, ".."),
-			env: { PI_CODING_AGENT_DIR: sessionDirB },
+			env: { CORNFIELD_AGENT_DIR: sessionDirB },
 			provider: "anthropic",
 			model: "claude-sonnet-4-5",
 		});
@@ -73,7 +73,7 @@ describe.skipIf(!e2eApiKey("ANTHROPIC_API_KEY"))("RPC concurrency", () => {
 		using client = new RpcClient({
 			cliPath: path.join(import.meta.dir, "..", "dist", "cli.js"),
 			cwd: path.join(import.meta.dir, ".."),
-			env: { PI_CODING_AGENT_DIR: path.join(os.tmpdir(), `omp-rpc-msgcnt-${Snowflake.next()}`) },
+			env: { CORNFIELD_AGENT_DIR: path.join(os.tmpdir(), `omp-rpc-msgcnt-${Snowflake.next()}`) },
 			provider: "anthropic",
 			model: "claude-sonnet-4-5",
 		});
@@ -92,7 +92,7 @@ describe.skipIf(!e2eApiKey("ANTHROPIC_API_KEY"))("RPC concurrency", () => {
 		using client = new RpcClient({
 			cliPath: path.join(import.meta.dir, "..", "dist", "cli.js"),
 			cwd: path.join(import.meta.dir, ".."),
-			env: { PI_CODING_AGENT_DIR: path.join(os.tmpdir(), `omp-rpc-reset-${Snowflake.next()}`) },
+			env: { CORNFIELD_AGENT_DIR: path.join(os.tmpdir(), `omp-rpc-reset-${Snowflake.next()}`) },
 			provider: "anthropic",
 			model: "claude-sonnet-4-5",
 		});

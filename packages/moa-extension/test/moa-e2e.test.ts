@@ -138,7 +138,7 @@ describe.skipIf(!narwalApiKey)("moa extension e2e", () => {
 			cliPath: path.join(import.meta.dir, "..", "..", "coding-agent", "src", "cli.ts"),
 			cwd: path.join(import.meta.dir, "..", "..", ".."),
 			env: {
-				PI_CODING_AGENT_DIR: agentDir,
+				CORNFIELD_AGENT_DIR: agentDir,
 				NARWAL_PLAN_API_KEY: narwalApiKey!,
 				PI_LOG_CONSOLE: "false",
 				PI_MOA_SETTINGS_JSON: buildMoaSettingsEnv(),

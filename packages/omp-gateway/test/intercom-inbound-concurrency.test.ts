@@ -95,8 +95,8 @@ function collector(client: IntercomClient): {
 
 beforeAll(async () => {
 	runtimeDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-intercom-concurrency-"));
-	previousAgentDir = process.env.PI_CODING_AGENT_DIR;
-	process.env.PI_CODING_AGENT_DIR = path.join(runtimeDir, "agent");
+	previousAgentDir = process.env.CORNFIELD_AGENT_DIR;
+	process.env.CORNFIELD_AGENT_DIR = path.join(runtimeDir, "agent");
 	broker = new IntercomBroker({
 		intercomDir: path.join(runtimeDir, "intercom"),
 		listenTarget: path.join(runtimeDir, "intercom", "broker.sock"),
@@ -121,7 +121,7 @@ afterAll(async () => {
 	if (child1) await child1.disconnect();
 	if (parent) await parent.disconnect();
 	if (broker) broker.stop();
-	process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+	process.env.CORNFIELD_AGENT_DIR = previousAgentDir;
 	await fs.rm(runtimeDir, { recursive: true, force: true });
 });
 

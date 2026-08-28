@@ -45,7 +45,7 @@ function makeInbound(text: string, conversationId = "conv-test"): InboundMessage
 }
 
 async function makeSkillDir(rootDir: string, skills: Array<{ name: string; description: string }>): Promise<string> {
-	const skillsDir = path.join(rootDir, ".omp", "agent", "skills");
+	const skillsDir = path.join(rootDir, ".cornfield", "agent", "skills");
 	await fs.mkdir(skillsDir, { recursive: true });
 	for (const s of skills) {
 		const dir = path.join(skillsDir, s.name);
@@ -295,7 +295,7 @@ describe("SkillCommand", () => {
 
 		test("/skills with no skills available replies with helpful text", async () => {
 			const emptyDir = path.join(rootDir, "empty");
-			await fs.mkdir(path.join(emptyDir, ".omp", "agent"), { recursive: true });
+			await fs.mkdir(path.join(emptyDir, ".cornfield", "agent"), { recursive: true });
 
 			const channel = makeStubChannel();
 			const h = makeHarness(emptyDir, channel);

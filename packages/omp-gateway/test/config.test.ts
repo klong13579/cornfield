@@ -32,12 +32,12 @@ describe("config", () => {
 
 	it("resolves config path in home directory", () => {
 		const path = getConfigPath();
-		expect(path).toContain(".omp/gateway.json");
+		expect(path).toContain(".cornfield/gateway.json");
 	});
 
 	it("resolves data dir", () => {
 		const dir = getDataDir();
-		expect(dir).toContain(".omp/gateway-data");
+		expect(dir).toContain(".cornfield/gateway-data");
 	});
 
 	it("resolves DingTalk appSecret env references", () => {

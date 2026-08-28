@@ -80,7 +80,7 @@ function parseValueDialogResponse(
 }
 
 function shouldEmitRpcTitles(): boolean {
-	const raw = $env.PI_RPC_EMIT_TITLE;
+	const raw = $env.CORNFIELD_RPC_EMIT_TITLE;
 	if (!raw) return false;
 	const normalized = raw.trim().toLowerCase();
 	return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
@@ -352,7 +352,7 @@ export async function runRpcMode(session: AgentSession): Promise<never> {
 		}
 
 		setTitle(title: string): void {
-			// Title updates are low-value noise for most RPC hosts; opt in via PI_RPC_EMIT_TITLE=1.
+			// Title updates are low-value noise for most RPC hosts; opt in via CORNFIELD_RPC_EMIT_TITLE=1.
 			if (!emitRpcTitles) return;
 			this.output({
 				type: "extension_ui_request",

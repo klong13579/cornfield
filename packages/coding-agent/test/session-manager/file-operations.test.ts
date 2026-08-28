@@ -205,7 +205,7 @@ describe("resolveResumableSession", () => {
 
 describe("SessionManager temp cwd session dirs", () => {
 	let testAgentDir: string;
-	const originalAgentDir = process.env.PI_CODING_AGENT_DIR;
+	const originalAgentDir = process.env.CORNFIELD_AGENT_DIR;
 	const fallbackAgentDir = path.join(getConfigRootDir(), "agent");
 
 	function expectedTempSessionDirName(tempCwd: string): string {
@@ -229,7 +229,7 @@ describe("SessionManager temp cwd session dirs", () => {
 			setAgentDir(originalAgentDir);
 		} else {
 			setAgentDir(fallbackAgentDir);
-			delete process.env.PI_CODING_AGENT_DIR;
+			delete process.env.CORNFIELD_AGENT_DIR;
 		}
 		fs.rmSync(testAgentDir, { recursive: true, force: true });
 	});
@@ -565,7 +565,7 @@ describe("SessionManager.list with hierarchical by-date layout", () => {
 
 		// listAll reads from the agent sessions root, not an arbitrary dir.
 		// We point setAgentDir at tempDir so sessions/ is the root.
-		const originalAgentDir = process.env.PI_CODING_AGENT_DIR;
+		const originalAgentDir = process.env.CORNFIELD_AGENT_DIR;
 		setAgentDir(tempDir);
 		try {
 			const sessions = await SessionManager.listAll();
@@ -576,7 +576,7 @@ describe("SessionManager.list with hierarchical by-date layout", () => {
 				setAgentDir(originalAgentDir);
 			} else {
 				setAgentDir(path.join(getConfigRootDir(), "agent"));
-				delete process.env.PI_CODING_AGENT_DIR;
+				delete process.env.CORNFIELD_AGENT_DIR;
 			}
 		}
 	});

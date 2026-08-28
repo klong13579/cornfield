@@ -1,7 +1,7 @@
 /**
  * JSONL-based execution log for the scheduler.
  *
- * Logs live under `~/.omp/gateway-data/scheduler/logs/by-task/<slug>/<YYYY-MM-DD>.jsonl`
+ * Logs live under `~/.cornfield/gateway-data/scheduler/logs/by-task/<slug>/<YYYY-MM-DD>.jsonl`
  * where `<slug>` is `slugify(task.name)` (kebab-case, pinyin for CJK). All runs
  * of a task on the same day are appended to the same file. Browsing the tree
  * shows tasks as directories and dates as files.
@@ -22,7 +22,7 @@ import { pinyin } from "pinyin-pro";
 import type { CronRunDiagnostics } from "./diagnostics";
 
 function defaultLogRoot(): string {
-	return path.join(os.homedir(), ".omp", "gateway-data", "scheduler", "logs");
+	return path.join(os.homedir(), ".cornfield", "gateway-data", "scheduler", "logs");
 }
 
 /** Active log root; tests can override via {@link setLogRoot}. */

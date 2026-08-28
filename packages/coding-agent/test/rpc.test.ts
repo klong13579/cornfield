@@ -37,7 +37,7 @@ describe.skipIf(!e2eApiKey("ANTHROPIC_API_KEY"))("RPC mode", () => {
 		client = new RpcClient({
 			cliPath: path.join(import.meta.dir, "..", "dist", "cli.js"),
 			cwd: path.join(import.meta.dir, ".."),
-			env: { PI_CODING_AGENT_DIR: sessionDir },
+			env: { CORNFIELD_AGENT_DIR: sessionDir },
 			provider: "anthropic",
 			model: "claude-sonnet-4-5",
 		});

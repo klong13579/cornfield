@@ -1,8 +1,8 @@
 /**
  * Centralized path helpers for cornfield config directories.
  *
- * Uses PI_CONFIG_DIR (default ".cornfield") for the config root and
- * PI_CODING_AGENT_DIR to override the agent directory.
+ * Uses CORNFIELD_CONFIG_DIR (default ".cornfield") for the config root and
+ * CORNFIELD_AGENT_DIR to override the agent directory.
  *
  * On Linux, if XDG_DATA_HOME / XDG_STATE_HOME / XDG_CACHE_HOME environment
  * variables are set, paths are redirected to XDG-compliant locations under
@@ -89,12 +89,12 @@ export function setProjectDir(dir: string): void {
 	process.chdir(projectDir);
 }
 
-/** Get the config directory name relative to home (e.g. ".cornfield" or PI_CONFIG_DIR override). */
+/** Get the config directory name relative to home (e.g. ".cornfield" or CORNFIELD_CONFIG_DIR override). */
 export function getConfigDirName(): string {
-	return process.env.PI_CONFIG_DIR || CONFIG_DIR_NAME;
+	return process.env.CORNFIELD_CONFIG_DIR || CONFIG_DIR_NAME;
 }
 
-/** Get the config agent directory name relative to home (e.g. ".cornfield/agent" or PI_CONFIG_DIR + "/agent"). */
+/** Get the config agent directory name relative to home (e.g. ".cornfield/agent" or CORNFIELD_CONFIG_DIR + "/agent"). */
 export function getConfigAgentDirName(): string {
 	return `${getConfigDirName()}/agent`;
 }
@@ -125,7 +125,7 @@ class DirResolver {
 
 	constructor(agentDirOverride?: string) {
 		const dirName = getConfigDirName();
-		// PI_CONFIG_DIR may be absolute (e.g. /tmp/test-cornfield) — use it directly;
+		// CORNFIELD_CONFIG_DIR may be absolute (e.g. /tmp/test-cornfield) — use it directly;
 		// otherwise join it under the home directory (relative name like ".cornfield").
 		this.configRoot = configRootOverride ?? (path.isAbsolute(dirName) ? dirName : path.join(os.homedir(), dirName));
 
@@ -194,10 +194,10 @@ class DirResolver {
 }
 
 /** Test-only override for the config root (~/.cornfield). When set, takes precedence over
- * the PI_CONFIG_DIR-derived default. Pass `undefined` to reset to the default. */
+ * the CORNFIELD_CONFIG_DIR-derived default. Pass `undefined` to reset to the default. */
 let configRootOverride: string | undefined;
 
-let dirs = new DirResolver(process.env.PI_CODING_AGENT_DIR);
+let dirs = new DirResolver(process.env.CORNFIELD_AGENT_DIR);
 
 // =============================================================================
 // Root directories
@@ -212,13 +212,13 @@ export function getConfigRootDir(): string {
  * Rebuilds the resolver, invalidating all cached paths. */
 export function setConfigRootDir(dir: string | undefined): void {
 	configRootOverride = dir;
-	dirs = new DirResolver(process.env.PI_CODING_AGENT_DIR);
+	dirs = new DirResolver(process.env.CORNFIELD_AGENT_DIR);
 }
 
 /** Set the coding agent directory. Creates a fresh resolver, invalidating all cached paths. */
 export function setAgentDir(dir: string): void {
 	dirs = new DirResolver(dir);
-	process.env.PI_CODING_AGENT_DIR = dir;
+	process.env.CORNFIELD_AGENT_DIR = dir;
 }
 
 /** Get the agent config directory (~/.cornfield/agent). */

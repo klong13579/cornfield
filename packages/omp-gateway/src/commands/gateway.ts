@@ -2,7 +2,7 @@
  * Find the OMP agent session JSONL created during a specific time window.
  *
  * OMP writes agent session files to
- *   `~/.omp/agent/sessions/<encoded-cwd>/<timestamp>_<id>.jsonl`
+ *   `~/.cornfield/agent/sessions/<encoded-cwd>/<timestamp>_<id>.jsonl`
  * where the ISO timestamp prefix is the immutable creation time of the
  * session (e.g. `2026-06-15T09-18-46-865Z_019eca93-...jsonl`).
  *
@@ -57,7 +57,7 @@ export default class Gateway extends Command {
 
 	static flags = {
 		foreground: Flags.boolean({ description: "Run in foreground (used internally for daemon mode)" }),
-		config: Flags.string({ description: "Path to gateway config file (default: ~/.omp/gateway.json)" }),
+		config: Flags.string({ description: "Path to gateway config file (default: ~/.cornfield/gateway.json)" }),
 		nonInteractive: Flags.boolean({
 			description: "Skip prompts; for setup action, prints manual-edit instructions and exits",
 		}),
@@ -271,7 +271,7 @@ export default class Gateway extends Command {
 				}
 
 				if (!ready) {
-					console.error("Gateway failed to start within 15s. Check logs: ~/.omp/logs/omp.*.log");
+					console.error("Gateway failed to start within 15s. Check logs: ~/.cornfield/logs/cornfield.*.log");
 					process.exitCode = 1;
 					return;
 				}

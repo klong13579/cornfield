@@ -132,7 +132,7 @@ export async function runInteractiveSetup(opts: SetupOptions = {}): Promise<Setu
 	}
 
 	const robotCode = (await ask(`RobotCode (可选, 默认同 AppKey) [${appKey}]: `)).trim() || appKey;
-	// Model is configured in agentDir/.omp/config.yml (modelRoles.default)
+	// Model is configured in agentDir/.cornfield/config.yml (modelRoles.default)
 	const agentDirInput = (await ask(`Agent 工作目录 (可选, 默认 ~/.omp/agents/${accountId}/) []: `)).trim();
 	// Mission file: optional. If provided, content is seeded into <agentDir>/mission.md
 	// before the skeleton runs, so the user's identity wins over the default template.
@@ -228,7 +228,7 @@ export async function runInteractiveSetup(opts: SetupOptions = {}): Promise<Setu
 	console.log(`  omp-gateway start              启动网关`);
 	console.log(`  omp-gateway stop               停止网关`);
 	console.log(`  omp-gateway service install    安装为系统服务(开机自启)`);
-	console.log(`\n配置模型: 编辑 ${agentDir}/.omp/config.yml 下的 modelRoles.default`);
+	console.log(`\n配置模型: 编辑 ${agentDir}/.cornfield/config.yml 下的 modelRoles.default`);
 
 	return { ok: true, accountId, agentDir, configPath: cfgPath, createdAccount: true };
 }

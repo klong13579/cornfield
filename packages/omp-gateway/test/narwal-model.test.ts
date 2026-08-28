@@ -71,7 +71,7 @@ describe("Gateway with narwal-plan/minimax-m3 model", () => {
 		expect(dtConfig).not.toBeNull();
 		expect(dtConfig!.accounts).toBeDefined();
 		expect(dtConfig!.accounts!.opencode).toBeDefined();
-		// model is read from agentDir/.omp/config.yml, not gateway.json
+		// model is read from agentDir/.cornfield/config.yml, not gateway.json
 		expect(dtConfig!.accounts!.opencode.appKey).toBe("dingnubwjpndghf8sox8");
 	});
 });
