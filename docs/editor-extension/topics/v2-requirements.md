@@ -1,7 +1,7 @@
-# omp 客户端需求 v2 —— 两个视图目标功能设计
+# cornfield 客户端需求 v2 —— 两个视图目标功能设计
 
 > 状态：**待确认**（2026-08-25 讨论产出 + 独立评审修订：D12 新增员工"我的 agent"轻视图）
-> 范围：本文档定义 omp 客户端两个视图（Agent 视图 + IDE 视图）的目标功能；§二三层结构是视图需求的上层上下文，不是独立功能域。
+> 范围：本文档定义 cornfield 客户端两个视图（Agent 视图 + IDE 视图）的目标功能；§二三层结构是视图需求的上层上下文，不是独立功能域。
 > 关系：`topics/v1-synthesis.md` 是方案层（借鉴映射/MVP 切分）；本文是需求层（目标功能）。需求拍板后，技术路线选型基于本文 §7 的未决问题展开。
 > 讨论来源：docs/editor-extension（01/02/03/v1-synthesis）+ feat/zomp-embedded 现状 + Cursor 客户端功能界面参照（2026-08-25 现场截屏）
 
@@ -15,7 +15,7 @@
 
 1. **不是审批/管控中心**：审批是安全机制，退居后台——权限在配置层管（新 agent 收紧、成熟 agent 放行），运行期只在需要人判断的时刻打扰（对齐"低优先级不打扰"习惯）
 2. **不是 Cursor 平替**：IDE 只是研发团队的工具之一，平台本体是三层数字员工结构
-3. **基于 omp 为底座**：agent/sessions/skills/记忆/审批/cron/MCP 全部复用 omp，改内核三端受益（CLI/桌面/IDE/Agent 视图），不复刻
+3. **基于 cornfield 为底座**：agent/sessions/skills/记忆/审批/cron/MCP 全部复用 cornfield，改内核三端受益（CLI/桌面/IDE/Agent 视图），不复刻
 
 ## 二、平台结构（三层 + 一网关）
 
@@ -81,7 +81,7 @@
 
 - **客户端形态（D14）**：**终点状态单壳**——先行阶段 web-app 保留现状不动；IDE 壳（OpenSumi）独立交付（遵守 D15/D16，不制造新债）；收敛阶段把 web-app 页面按迁移清单搬进壳后退役（纯搬运）
 - **UI 风格（D15）**：整体沿用 web-app 风格与动效——自定义 OpenSumi 主题匹配 web-app 设计体系；壳内自定义视图直接复用 web-app 组件/样式；OpenSumi 默认外观不作为客户端长相
-- **配置系统（D16）**：沿用 omp 配置系统（config.yml / models.yml / agentDir 等），**不建 ~/.sumi 独立偏好存储**；OpenSumi 偏好仅作 IDE 侧读写代理，schema 与存储归属 omp
+- **配置系统（D16）**：沿用 cornfield 配置系统（config.yml / models.yml / agentDir 等），**不建 ~/.sumi 独立偏好存储**；OpenSumi 偏好仅作 IDE 侧读写代理，schema 与存储归属 cornfield
 - **数据一致**：同一套 agent/session/权限数据，内核唯一
 - **审批机制**：存在但不在视图层设中心；权限配置层管理；运行期只打扰需要判断的时刻
 - **常驻底座**：gateway（钉钉多账号 = 员工 agent 载体）+ cron（确定性目标的定期触发）+ narwal-plan（模型网关）
@@ -94,14 +94,14 @@
 | narwal-plan provider（公司级模型网关） | ✓ 分支已实现 |
 | web-app 组件（ApprovalCard / ClarifyCard / 会话工作台 / 只读文件浏览） | ✓ 已具备（D14 单壳：迁移进 OpenSumi 壳内复用） |
 | self-evolution（evolution.db）/ identity（update_persona）/ memories | ✓ 已具备（L0 G3 目标底子） |
-| ACP embed（OMP 注册为外部 agent） | ✓ 分支已实现（T4） |
+| ACP embed（CornField 注册为外部 agent） | ✓ 分支已实现（T4） |
 | L0 目标的"持续/定期"触发 | ✗ 需 cron 任务装配（当前按需/手动） |
 | 员工"我的 agent"轻视图 / 运转看板 / 跨域事项 / 分域管理 UI | ✗ 要新建 |
 | IDE 编辑器内核 | ✗ 架构未定 |
 
 ## 七、未决问题
 
-1. **技术路线（已定 2026-08-25）**：**OpenSumi 为底座**（spike 验证 4/4 点过，见 `spike-opensumi-verdict.md`）；zomp（Zed fork）分支**冻结不删**作为编辑体验升级的后备研究；路线无关资产（`omp acp` / ACP 测试 / sidecar / narwal-plan provider）并入 main
+1. **技术路线（已定 2026-08-25）**：**OpenSumi 为底座**（spike 验证 4/4 点过，见 `spike-opensumi-verdict.md`）；zomp（Zed fork）分支**冻结不删**作为编辑体验升级的后备研究；路线无关资产（`cornfield acp` / ACP 测试 / sidecar / narwal-plan provider）并入 main
 2. 域内协作的具体形态（域 agent 拉起协作的方式、人在哪里响应）
 3. 研发团队的双重身份：研发编码会话是否进运转看板、如何归档（IDE 与三层结构的挂接）
 4. 员工个人 agent 钉钉 context 摄入的授权与隐私边界（按人授权，涉及合规宜早定）
@@ -126,4 +126,4 @@
 | D13 | 技术路线 | OpenSumi 为底座（spike 过，4/4 点）；zomp 分支冻结不删为后备；路线无关资产并入 main |
 | D14 | 客户端形态 | **终点状态单壳**：OpenSumi 唯一客户端壳，Agent 视图 = 壳内自定义视图；**先行阶段保留 web-app 现状（零改动），IDE 壳独立交付，收敛（web-app 迁移/退役）后置为阶段 C**；并存期 IDE 壳仍遵守 D15/D16 |
 | D15 | UI 风格 | 整体沿用 web-app 风格与动效（自定义 OpenSumi 主题），不用 OpenSumi 默认外观 |
-| D16 | 配置系统 | 沿用 omp 配置（config.yml/models.yml/agentDir），不建 ~/.sumi 独立存储 |
+| D16 | 配置系统 | 沿用 cornfield 配置（config.yml/models.yml/agentDir），不建 ~/.sumi 独立存储 |

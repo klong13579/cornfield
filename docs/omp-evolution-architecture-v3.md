@@ -1,15 +1,15 @@
-# OMP Evolution 功能方案设计（V4）
+# CornField Evolution 功能方案设计（V4）
 
-**状态**：当前默认实现（2026-05-22 起）  
-**代码包**：`packages/self-evolution/`（内联扩展，随 `omp` 加载）  
-**设计决策原文**：[2026-05-19-evolution-v3-radical-redesign.md](./plans/2026-05-19-evolution-v3-radical-redesign.md)  
-**背景参考**：[omp-evolution-architecture-v2.1.md](./omp-evolution-architecture-v2.1.md)（Memory × Pipeline 四层模型）  
+**状态**：当前默认实现（2026-05-22 起）
+**代码包**：`packages/self-evolution/`（内联扩展，随 `cornfield` 加载）
+**设计决策原文**：[2026-05-19-evolution-v3-radical-redesign.md](./plans/2026-05-19-evolution-v3-radical-redesign.md)
+**背景参考**：[omp-evolution-architecture-v2.1.md](./omp-evolution-architecture-v2.1.md)（Memory × Pipeline 四层模型）
 
 ---
 
 ## 1. 文档目的与读者
 
-本文档描述 **omp evolution**（自进化子系统）的完整功能方案：顶层设计、记忆分层、各类提取方式、注入管道、数据与存储、运行时流程、模块职责及运维方式。
+本文档描述 **cornfield evolution**（自进化子系统）的完整功能方案：顶层设计、记忆分层、各类提取方式、注入管道、数据与存储、运行时流程、模块职责及运维方式。
 
 | 读者 | 建议阅读章节 |
 |------|----------------|
@@ -24,7 +24,7 @@
 
 ### 2.1 系统定位
 
-**OMP Evolution** 是 coding-agent 的**项目级学习与上下文增强层**。V4 相比 V3 的核心简化：
+**CornField Evolution** 是 coding-agent 的**项目级学习与上下文增强层**。V4 相比 V3 的核心简化：
 
 1. 唯一的写入口：`write_memory` tool（agent 在对话中主动写） + `user_explicit` regex（兜底）+ `SessionLearner`（降频回退）
 2. learnings 表是记忆的唯一 truth
@@ -38,11 +38,11 @@
 3. **失败不进长期库**：错误模式 → `evolution_escalations` / 当轮 nudge
 4. **注入预算小**：默认整段注入约 **2000 字符** 上限，单一区块不重复
 5. **晋升简化（2-A）**：`manual_pin` / `agent_written` 直通 active；统计达标后自动 active
-6. **用户级存储（默认）**：默认数据在 `~/.omp/self-evolution/`，跨项目共享；可选项目级存储
+6. **用户级存储（默认）**：默认数据在 `~/.cornfield/self-evolution/`，跨项目共享；可选项目级存储
 
 ### 2.3 对标参考
 
-| 能力 | Hermes | OMP V4 |
+| 能力 | Hermes | CornField V4 |
 |------|--------|--------|
 | 写入过滤 | Turn / memory tool 审查 | `write_memory` tool + `user_explicit` |
 | 长期合并 | Curator | 后台仅拼接 learnings + episodes，0 LLM |
@@ -108,7 +108,7 @@
 |------|----------|----------|----------|----------|
 | **短期** | 当前回合 | `before_agent_start` | active/pinned `learnings`、检索到的 skills/episodes、跨会话 nudge | 每轮 agent 启动 |
 | **中期** | 单次会话 ~ 数天 | `agent_end` | `learnings`(candidate)、`episodes`、`session_traces` | 候选 learning 待晋升；episode 供检索 |
-| **长期** | 周 ~ 永久 | pin、统计晋升 | `learnings`(active)、`.omp/skills/*.md` | 短期层读取 |
+| **长期** | 周 ~ 永久 | pin、统计晋升 | `learnings`(active)、`.cornfield/skills/*.md` | 短期层读取 |
 
 ### 3.2 短期记忆（注入上下文）
 
@@ -332,7 +332,7 @@ scope:    global | project | ephemeral
 ### 7.4 文件布局
 
 ```
-~/.omp/self-evolution/
+~/.cornfield/self-evolution/
 ├── evolution.db              # SQLite WAL + FTS5
 ├── learnings.md               # learnings 投影（仅在变更时写）
 ├── system-diagnosis.md
@@ -341,8 +341,8 @@ scope:    global | project | ephemeral
 ```
 
 不再有：
-- `~/.omp/persona.json`
-- `~/.omp/agent/memories/`（整个目录不再使用）
+- `~/.cornfield/persona.json`
+- `~/.cornfield/agent/memories/`（整个目录不再使用）
 - `raw_memories.md`、`rollout_summaries/`、`MEMORY.md`
 - `user_profile.md`、`evolution_log.md`、`nudges.md`
 
@@ -405,8 +405,8 @@ scope:    global | project | ephemeral
 | `--no-self-evolution-enable-prompt-injection` | — | 关闭注入 |
 | `--self-evolution-max-episodes` | 100 | episode 保留上限 |
 | `--no-self-evolution-llm-rerank` | — | episode 仅关键词检索 |
-| `--self-evolution-global-store` | on | 用户级 `~/.omp/self-evolution`（默认） |
-| `--self-evolution-project-store` | off | 项目级 `<cwd>/.omp/` |
+| `--self-evolution-global-store` | on | 用户级 `~/.cornfield/self-evolution`（默认） |
+| `--self-evolution-project-store` | off | 项目级 `<cwd>/.cornfield/` |
 
 **已移除**：
 - `--self-evolution-skill-threshold`（SkillExtractor 删除）
@@ -421,7 +421,7 @@ scope:    global | project | ephemeral
 | 项 | 说明 |
 |----|------|
 | **主入口** | `/evolution <subcommand> [args]` |
-| **作用域** | 默认用户级 `~/.omp/self-evolution`；`--self-evolution-project-store` 时用当前项目 `ctx.cwd` 下 `.omp/` |
+| **作用域** | 默认用户级 `~/.cornfield/self-evolution`；`--self-evolution-project-store` 时用当前项目 `ctx.cwd` 下 `.cornfield/` |
 
 **已移除**：`/evolution memory` 子命令体系（Phase1/Phase2 删除）。
 
@@ -437,7 +437,7 @@ scope:    global | project | ephemeral
 | `archive` | `/evolution archive` | 归档低质量技能 |
 | `history` | `/evolution history <skill-name>` | 查看技能版本历史 |
 | `rollback` | `/evolution rollback <name> <version>` | 回滚技能 |
-| `sync-skills` | `/evolution sync-skills` | 将 DB 中技能导出为 `.omp/skills/*.md` |
+| `sync-skills` | `/evolution sync-skills` | 将 DB 中技能导出为 `.cornfield/skills/*.md` |
 | `audit` | `/evolution audit` | 系统健康报告 |
 | `report` | `/evolution report` | 当日会话日报 |
 | `fit` | `/evolution fit` | 「懂我程度」五维评估 |
@@ -493,7 +493,7 @@ bash packages/self-evolution/scripts/migrate-evolution-data.sh /path/to/repo
 
 ### 11.3 回滚
 
-恢复备份的 `evolution.db` 与 `.omp/` 目录。
+恢复备份的 `evolution.db` 与 `.cornfield/` 目录。
 
 ---
 
@@ -518,7 +518,7 @@ bash packages/self-evolution/scripts/migrate-evolution-data.sh /path/to/repo
 | 扩展入口 | `packages/self-evolution/src/index.ts` |
 | V3 设计决策 | `docs/plans/2026-05-19-evolution-v3-radical-redesign.md` |
 | 包 README | `packages/self-evolution/doc/README.md` |
-| 测试方案 | `docs/omp-evolution-test-plan.md` |
+| 测试方案 | `docs/cornfield-evolution-test-plan.md` |
 
 ---
 

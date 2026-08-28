@@ -1,4 +1,4 @@
-# Porting to pi-natives (N-API) — Field Notes
+# Porting to natives (N-API) — Field Notes
 
 This is a practical guide for moving hot paths into `crates/pi-natives` and wiring them through the generated native package entrypoint. It exists to avoid the same failures happening twice.
 
@@ -16,14 +16,14 @@ Avoid ports that depend on JS-only state or dynamic imports. N-API exports shoul
 
 ## Current package shape
 
-`@oh-my-pi/pi-natives` no longer has a `packages/natives/src/<module>` TypeScript wrapper layer. The package root points at generated native artifacts:
+`@cornfield/natives` no longer has a `packages/natives/src/<module>` TypeScript wrapper layer. The package root points at generated native artifacts:
 
 - runtime entry: `packages/natives/native/index.js`
 - types entry: `packages/natives/native/index.d.ts`
 - loader helpers: `packages/natives/native/loader-state.js`
 - embedded manifest: `packages/natives/native/embedded-addon.js`
 
-Consumers import directly from `@oh-my-pi/pi-natives`. The generated declarations are produced during `bun --cwd=packages/natives run build`.
+Consumers import directly from `@cornfield/natives`. The generated declarations are produced during `bun --cwd=packages/natives run build`.
 
 ## Anatomy of a native export
 
@@ -40,7 +40,7 @@ Consumers import directly from `@oh-my-pi/pi-natives`. The generated declaration
 
 - `packages/natives/scripts/build-native.ts` runs napi-rs, installs the `.node` artifact, copies generated `index.js`/`index.d.ts`, and appends enum runtime exports.
 - `packages/natives/native/index.js` is the loader that chooses a candidate `.node` file and returns the loaded addon.
-- `packages/natives/package.json` exposes only the package root (`@oh-my-pi/pi-natives`).
+- `packages/natives/package.json` exposes only the package root (`@cornfield/natives`).
 
 **Consumer side:**
 
@@ -66,7 +66,7 @@ Consumers import directly from `@oh-my-pi/pi-natives`. The generated declaration
 
 3. **Update consumers**
 
-- Import the new export directly from `@oh-my-pi/pi-natives`.
+- Import the new export directly from `@cornfield/natives`.
 - Replace only callsites where the native implementation is faster/equivalent and preserves behavior.
 - Remove obsolete JS implementation code in the same change when the native path becomes canonical.
 
@@ -89,23 +89,23 @@ Consumers import directly from `@oh-my-pi/pi-natives`. The generated declaration
 
 The loader probes platform-tagged artifacts in deterministic order. For x64, selected variant candidates are tried before the unsuffixed default fallback:
 
-- `modern`: `pi_natives.<tag>-modern.node`, then `...-baseline.node`, then `pi_natives.<tag>.node`.
-- `baseline`: `pi_natives.<tag>-baseline.node`, then `pi_natives.<tag>.node`.
+- `modern`: `cornfield_natives.<tag>-modern.node`, then `...-baseline.node`, then `cornfield_natives.<tag>.node`.
+- `baseline`: `cornfield_natives.<tag>-baseline.node`, then `cornfield_natives.<tag>.node`.
 
-Non-x64 uses `pi_natives.<tag>.node`.
+Non-x64 uses `cornfield_natives.<tag>.node`.
 
 Compiled binaries also probe `<getNativesDir()>/<version>/...` and a legacy user-data directory before package/executable locations. If any earlier candidate is stale, a new export may appear missing.
 
 **Fix:** remove stale candidate/cache files and rebuild.
 
 ```bash
-rm packages/natives/native/pi_natives.<platform>-<arch>.node
-rm packages/natives/native/pi_natives.<platform>-<arch>-modern.node
-rm packages/natives/native/pi_natives.<platform>-<arch>-baseline.node
+rm packages/natives/native/cornfield_natives.<platform>-<arch>.node
+rm packages/natives/native/cornfield_natives.<platform>-<arch>-modern.node
+rm packages/natives/native/cornfield_natives.<platform>-<arch>-baseline.node
 bun --cwd=packages/natives run build
 ```
 
-For compiled binaries, delete the versioned addon cache shown in the loader error (normally under `~/.omp/natives/<version>` unless `$XDG_DATA_HOME/omp` is used).
+For compiled binaries, delete the versioned addon cache shown in the loader error (normally under `~/.cornfield/natives/<version>` unless `$XDG_DATA_HOME/cornfield` is used).
 
 ### 2) Generated types do not match loaded binary
 
@@ -114,7 +114,7 @@ This can happen when `native/index.d.ts` was regenerated but the `.node` file be
 Verify the loaded export set from the actual candidate path:
 
 ```bash
-bun -e 'const tag = `${process.platform}-${process.arch}`; const mod = require(`./packages/natives/native/pi_natives.${tag}.node`); console.log(Object.keys(mod).sort())'
+bun -e 'const tag = `${process.platform}-${process.arch}`; const mod = require(`./packages/natives/native/cornfield_natives.${tag}.node`); console.log(Object.keys(mod).sort())'
 ```
 
 Fix the build/candidate mismatch. Do not paper over it with optional consumer checks if the export is required.

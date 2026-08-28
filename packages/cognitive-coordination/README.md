@@ -1,4 +1,4 @@
-# @oh-my-pi/cognitive-coordination
+# @cornfield/cognitive-coordination
 
 > Cognitive Coordination Layer — Project Synapse
 
@@ -35,7 +35,7 @@ import {
   assembleContext,
   analyzeActivityTrends,
   validateSkill,
-} from "@oh-my-pi/cognitive-coordination";
+} from "@cornfield/cognitive-coordination";
 
 // Load unified skills
 const registry = new UnifiedSkillRegistry();
@@ -61,5 +61,5 @@ bun test packages/cognitive-coordination/src/
 
 ## Related
 
-- [`@oh-my-pi/self-evolution`](../self-evolution/) — Extension factory, storage, lifecycle hooks
+- [`@cornfield/self-evolution`](../self-evolution/) — Extension factory, storage, lifecycle hooks
 - [`l4-evolution-architecture.md`](../../l4-evolution-architecture.md) — Architecture design

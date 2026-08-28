@@ -1,4 +1,4 @@
-# Spec：omp 客户端单壳收敛（Agent 视图 + IDE 视图）
+# Spec：cornfield 客户端单壳收敛（Agent 视图 + IDE 视图）
 
 > 状态：**待 review**（2026-08-25，to-spec 生成）
 > 前置：`v2-requirements.md`（D1–D16）、`spike-opensumi-verdict.md`（三轮实证）、`v3-architecture.md`（架构基线）
@@ -8,7 +8,7 @@
 
 ## Problem Statement
 
-公司用 omp 搭建数字员工平台（三层：员工个人 agent / 域 agent / 研发 IDE），但当前客户端形态撑不住这个目标：
+公司用 cornfield 搭建数字员工平台（三层：员工个人 agent / 域 agent / 研发 IDE），但当前客户端形态撑不住这个目标：
 
 1. **没有 IDE**：研发团队没有在真实编辑器里与 agent 协作的界面——agent 改文件人没法审（无 diff 审阅、无接受/拒绝），只能看 chat 里的文本
 2. **两个壳分裂**：OpenSumi（IDE 底座）有自己的一套 UI/设置（~/.sumi），web-app 有另一套——同一平台两套风格、两套设置、功能各自实现，长期必然漂移
@@ -17,12 +17,12 @@
 
 ## Solution
 
-**单壳收敛**：OpenSumi 3.9.1-next 为唯一客户端壳，Agent 视图（团队工作台）与 IDE 视图（研发工作台）都是壳内一等视图；web-app 资产组件化迁入后退役；配置/风格/数据全部归 omp 平台，壳不产生第二份。
+**单壳收敛**：OpenSumi 3.9.1-next 为唯一客户端壳，Agent 视图（团队工作台）与 IDE 视图（研发工作台）都是壳内一等视图；web-app 资产组件化迁入后退役；配置/风格/数据全部归 cornfield 平台，壳不产生第二份。
 
 - 员工、域负责人、CEO 在壳内看到各自角色的视图（我的 agent / 分域管理 / CEO 工作台）
-- 研发团队在壳内 IDE 与 omp agent 真实协作（对话 / diff 审阅 / 审批卡 / agent workspace 预览）
+- 研发团队在壳内 IDE 与 cornfield agent 真实协作（对话 / diff 审阅 / 审批卡 / agent workspace 预览）
 - 钉钉仍是员工与域 agent 的日常入口（gateway 常驻，独立于壳）
-- 平台配置唯一真源是 omp（config.yml / models.yml / agentDir），壳只做读写代理
+- 平台配置唯一真源是 cornfield（config.yml / models.yml / agentDir），壳只做读写代理
 - 壳的 UI 风格与动效沿用 web-app 设计体系
 
 ## User Stories
@@ -39,28 +39,28 @@
 10. 作为 CEO，我想在壳内看到一个"跨域事项"区（交期冲突/产出异常/资源协调），以便聚焦需要我判断的事
 11. 作为 CEO，我想点进某个域看域内员工 agent 明细，以便下钻了解细节
 12. 作为研发工程师，我想在壳内打开一个项目（git repo）进行编码，以便在真实编辑器里工作
-13. 作为研发工程师，我想在 IDE 里跟 omp agent 对话（侧栏 + inline ⌘K），以便让 agent 直接改代码
+13. 作为研发工程师，我想在 IDE 里跟 cornfield agent 对话（侧栏 + inline ⌘K），以便让 agent 直接改代码
 14. 作为研发工程师，我想看到 agent 改动的 diff 并接受/拒绝/手动修改后接受，以便我信任 agent 的产出
 15. 作为研发工程师，我想在 IDE 里内嵌审批卡（agent 要 push/改配置时），以便不切窗口完成审批
 16. 作为研发工程师，我想从 agent 详情跳转查看它的 workspace 文件（只读预览），以便了解 agent 在文件世界的工作现场
 17. 作为研发工程师，我想在显式授权后编辑 agent 的配置/技能文件（skill.md/mission.md/rules），以便维护数字员工本身
 18. 作为研发工程师，我想在 IDE 里看到 git 状态/diff/log/分支并提交，以便完成日常开发闭环
-19. 作为任何用户，我想壳内看到的设置与 omp 平台配置一致（改一处处处生效），以便不被两套设置搞晕
+19. 作为任何用户，我想壳内看到的设置与 cornfield 平台配置一致（改一处处处生效），以便不被两套设置搞晕
 20. 作为任何用户，我想壳内 UI 风格/动效和之前的 web-app 一致，以便无缝迁移、不重新学习
-21. 作为任何用户，我想平台配置（模型/thinking/权限/技能开关）只此一份且归 omp，以便换前端不丢配置
+21. 作为任何用户，我想平台配置（模型/thinking/权限/技能开关）只此一份且归 cornfield，以便换前端不丢配置
 22. 作为管理员，我想 agent 的危险操作（花钱/改权限/删数据/对外发消息）必须经过审批，以便守住安全底线
 23. 作为管理者，我想查看任何 agent 的会话/工具调用/决策依据回放，以便追溯与复盘
 
 ## Implementation Decisions
 
 1. **单壳收敛（D14）**：OpenSumi `3.9.1-next-1787303337.0`（锁快照）为唯一客户端壳；Agent 视图 = 壳内自定义视图（`LayoutService.collectTabbarComponent` 动态注册 + `TabbarHandler` 控制），按账号角色注入（员工/域负责人/CEO）
-2. **双协议通路**：IDE 内 agent 对话走 ACP（OpenSumi Agentic Layout 强制，spawn `omp acp` stdio）；Agent 视图内对话走 wire（PiClientAdapter prompt）；两类会话都落 omp sessions（追溯台统一）。文件/状态/配置一律走 wire
+2. **双协议通路**：IDE 内 agent 对话走 ACP（OpenSumi Agentic Layout 强制，spawn `cornfield acp` stdio）；Agent 视图内对话走 wire（ClientAdapter prompt）；两类会话都落 cornfield sessions（追溯台统一）。文件/状态/配置一律走 wire
 3. **wire 命令面（阶段 0）**：新增 `fs_write` / `fs_edit` / `fs_diff`（含 LSP writethrough 续接）、git 最小集（`git_status/git_diff/git_log/git_show/git_branches`）、通用配置命令 `get_config` / `set_config`（现有仅分散写命令 set_skill_enabled/set_model_disabled，无通用读写——需补）
-4. **文件服务接 wire**：OpenSumi `IFileService` 注册自定义 FileSystemProvider 代理到 wire；agent workspace 预览用 `omp-agent://` scheme（只读；编辑需显式授权，D5）
-5. **审批链路（阶段 3）**：OMP AcpAgent 补发 ACP `requestPermission`（agent→client 方法，OpenSumi 侧处理器已存在）；审批决策两端（IDE 审批卡 / Agent 视图）一致
-6. **配置统一（D16）**：omp 配置（config.yml/models.yml/agentDir）唯一真源；OpenSumi 偏好仅存 IDE 瞬时视图状态，持久化用 preferenceDirName 系列重定向，不落 ~/.sumi 平台配置；设置 UI 经 wire `get_config/set_config` 读写
+4. **文件服务接 wire**：OpenSumi `IFileService` 注册自定义 FileSystemProvider 代理到 wire；agent workspace 预览用 `cornfield-agent://` scheme（只读；编辑需显式授权，D5）
+5. **审批链路（阶段 3）**：CornField AcpAgent 补发 ACP `requestPermission`（agent→client 方法，OpenSumi 侧处理器已存在）；审批决策两端（IDE 审批卡 / Agent 视图）一致
+6. **配置统一（D16）**：cornfield 配置（config.yml/models.yml/agentDir）唯一真源；OpenSumi 偏好仅存 IDE 瞬时视图状态，持久化用 preferenceDirName 系列重定向，不落 ~/.sumi 平台配置；设置 UI 经 wire `get_config/set_config` 读写
 7. **UI 风格统一（D15）**：自定义 OpenSumi 主题 = `IThemeContribution` 注册 color-token JSON（含 textMateRules），对齐 web-app 设计 token；web-app 组件（Tailwind）随 import 带入，动效随组件继承
-8. **包结构**：新建壳集成层包（renderApp 组装/自定义视图/主题/配置代理/agent 注册）；现有 Electron 壳（desktop）主进程机制保留（窗口/托盘/sidecar）；web-app 为资产源逐步迁入后退役；pi-wire/pi-client 扩展命令不破协议；coding-agent 小扩（fs_* 服务端 + requestPermission）
+8. **包结构**：新建壳集成层包（renderApp 组装/自定义视图/主题/配置代理/agent 注册）；现有 Electron 壳（desktop）主进程机制保留（窗口/托盘/sidecar）；web-app 为资产源逐步迁入后退役；wire/client 扩展命令不破协议；coding-agent 小扩（fs_* 服务端 + requestPermission）
 9. **集成环境要点**（spike 实证）：monaco worker 本地化（next CDN 404）；短 TMPDIR（watcher socket 路径上限）；默认 agent 用正规偏好配置（`ai.native.agent.defaultType` + `ai-native.acp.agents`）；workspace 经 `?workspaceDir=` 传递；Electron 侧原生模块重建流程文档化；正式壳建议 Electron ≥28（免 Node16 polyfill）
 10. **zomp 冻结**：feat/zomp-embedded 分支保留不删，作为编辑体验升级后备；路线无关资产已在 main
 
@@ -68,10 +68,10 @@
 
 - **好测试的定义**：测协议往返与用户可见行为（命令发出去、结果正确回来、审批决策生效、diff 可接受/拒绝），不测实现细节
 - **Seam 方案（最低 seam 数 = 2 协议契约 + 1 验收冒烟）**：
-  - **wire 协议 seam**（平台命令）——最高 seam：所有前端消费同一协议。用 `PiClient` 直连 wire-server 的集成测试测 fs_*/git_*/config 命令契约。先例：现有 wire-server 集成测试
-  - **ACP 协议 seam**（agent 会话/审批）——用 `acp-session-test.ts` 模式（ACP JSON-RPC 直连 omp acp）测会话生命周期与 requestPermission 发射。先例：acp-smoke / acp-session-test
-  - **壳 e2e 冒烟**（验收用，非常规测试）——spike 的全量探针（OpenSumi + omp acp + 真实对话 + workspace 文件树）保留为阶段验收冒烟，不作为每次回归
-- **测试模块**：pi-wire（命令契约）、coding-agent（fs_* 实现 + acp server + requestPermission）、壳集成层（冒烟）
+  - **wire 协议 seam**（平台命令）——最高 seam：所有前端消费同一协议。用 `Client` 直连 wire-server 的集成测试测 fs_*/git_*/config 命令契约。先例：现有 wire-server 集成测试
+  - **ACP 协议 seam**（agent 会话/审批）——用 `acp-session-test.ts` 模式（ACP JSON-RPC 直连 cornfield acp）测会话生命周期与 requestPermission 发射。先例：acp-smoke / acp-session-test
+  - **壳 e2e 冒烟**（验收用，非常规测试）——spike 的全量探针（OpenSumi + cornfield acp + 真实对话 + workspace 文件树）保留为阶段验收冒烟，不作为每次回归
+- **测试模块**：wire（命令契约）、coding-agent（fs_* 实现 + acp server + requestPermission）、壳集成层（冒烟）
 - **先例复用**：gateway 的 fake-RPC 模式（agent 行为注入）可用于壳内 diff 审阅的验收测试
 
 ## Out of Scope

@@ -1,4 +1,4 @@
-# OMP 桌面客户端 — Zed 深嵌实施蓝图（B'）
+# CornField 桌面客户端 — Zed 深嵌实施蓝图（B'）
 
 > 状态：方案待拍板（2026-08-21，源码验证闭环后；2026-08-21 UX 修订：顶部 Agent/IDE 模式切换替代左右分栏）
 > 关联：`topics/omp-client-design.md`（定稿 B：Tauri 壳 + Zed 窗口级）被本蓝图的 **B'：原生壳 + Zed 视图深嵌** 深化替换
@@ -8,7 +8,7 @@
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│ OMP  ◉ [ Agent | IDE ]        ● worker 在线 · 设置   │ ← 顶部常驻切换栏（⌘1/⌘2）
+│ CornField  ◉ [ Agent | IDE ]        ● worker 在线 · 设置   │ ← 顶部常驻切换栏（⌘1/⌘2）
 ├─────────────────────────────────────────────────────┤
 │  Agent 模式（默认进入）          IDE 模式             │
 │  整窗 = WKWebView(webapp)  ⇄   整窗 = GPUIView(Zed)  │
@@ -26,7 +26,7 @@
 - 壳选择：Zomp 原生壳（AppKit 容器）；Electron 壳不适用（GPUIView 嵌 Electron 窗口需 hack）——
   现有 `packages/desktop` 的 worker sidecar 逻辑平搬，webapp 资产经 WKWebView 零重写，更新体系借 Zomp 自带 updater
 
-## 2. Fork 改造：Zomp（Zed + OMP 挂点）
+## 2. Fork 改造：Zomp（Zed + CornField 挂点）
 
 ### 2.1 gpui 嵌入式窗口模式（B 的地基，已源码证实可行）
 - **证据**：`gpui_macos/src/window.rs:1009-1020` —— `GPUIView`（NSView 子类，带 keyDown/mouseDown/绘制 display link）单独 `alloc + initWithFrame` 后手动装进 `NSWindow.contentView`。view 与 window 解耦 ⇒ 可挂任意宿主视图。
@@ -38,23 +38,23 @@
 
 ### 2.2 zed 启动层
 - `zed/src/main.rs:126` 唯一窗口创建调用点：支持 `--embed` 模式（Zomp 壳启动 Zed 渲染时传宿主 view 标识/由壳直接调用库函数）
-- 品牌：bundle id / 图标 / 应用名（OMP）——Zed GPL-3.0 fork 可改名（Apache 部分双 license）
+- 品牌：bundle id / 图标 / 应用名（CornField）——Zed GPL-3.0 fork 可改名（Apache 部分双 license）
 
-### 2.3 OMP agent 挂点（编辑器体验层）
+### 2.3 CornField agent 挂点（编辑器体验层）
 - 集成面按「由浅入深」：
-  1. **Zed 原生 ACP/agent 面板**（已完成验收）：OMP worker 作为 ACP external agent —— agent 对话在 Zed 原生面板
-  2. **MCP/context server**：OMP 技能/工具经 MCP 暴露给 Zed Agent
-  3. 深挂点（phase 2+，fork 内定制）：OMP 面板作为 Zed 侧栏 view（复用 agent 面板结构）、⌘K inline 集成、审批卡——**这些是 fork 的核心定制区**
-- 面板 UI 取舍：**OMP 面板 = WKWebView 跑现有 webapp**（零重写、React 资产全保留）vs gpui 原生化（性能/观感统一，但 F1 账翻倍）——推荐前者起步
+  1. **Zed 原生 ACP/agent 面板**（已完成验收）：CornField worker 作为 ACP external agent —— agent 对话在 Zed 原生面板
+  2. **MCP/context server**：CornField 技能/工具经 MCP 暴露给 Zed Agent
+  3. 深挂点（phase 2+，fork 内定制）：CornField 面板作为 Zed 侧栏 view（复用 agent 面板结构）、⌘K inline 集成、审批卡——**这些是 fork 的核心定制区**
+- 面板 UI 取舍：**CornField 面板 = WKWebView 跑现有 webapp**（零重写、React 资产全保留）vs gpui 原生化（性能/观感统一，但 F1 账翻倍）——推荐前者起步
 
 ## 3. 壳与进程模型
 
 | 层 | 定案 | 备注 |
 |---|---|---|
-| 壳栈 | **AppKit/SwiftUI 容器**（NSWindow + contentView），左右子 view：WKWebView（OMP 面板）+ GPUIView（编辑器） | AppKit 原生可嵌入任意 NSView；SwiftUI 可桥接 |
-| OMP 面板 | WKWebView → 现有 `packages/web-app`（React），pi-wire over WS→worker | webapp 全部资产零重写 |
-| 通信 | OMP 面板 ⇄ worker：pi-wire（现状）；worker ⇄ 编辑器：ACP/MCP（现状路径）；壳 ⇄ 两者：本地进程管理 | |
-| worker | sidecar 进程（OMP 内核，serve 模式），壳管理生命周期 | |
+| 壳栈 | **AppKit/SwiftUI 容器**（NSWindow + contentView），左右子 view：WKWebView（CornField 面板）+ GPUIView（编辑器） | AppKit 原生可嵌入任意 NSView；SwiftUI 可桥接 |
+| CornField 面板 | WKWebView → 现有 `packages/web-app`（React），wire over WS→worker | webapp 全部资产零重写 |
+| 通信 | CornField 面板 ⇄ worker：wire（现状）；worker ⇄ 编辑器：ACP/MCP（现状路径）；壳 ⇄ 两者：本地进程管理 | |
+| worker | sidecar 进程（CornField 内核，serve 模式），壳管理生命周期 | |
 | 分发 | 单 .app（Zomp.exe/.app），worker 内嵌资源或并存 | |
 
 ## 4. 分阶段计划
@@ -63,8 +63,8 @@
 |---|---|---|---|
 | **P0 spike** | 最小 embedded 验证：裸 AppKit 窗口 + GPUIView 显示 + zed workspace 打开 + 键盘/绘制正常 + 功耗 | 1-2 周（1 人 Rust） | GPUIView 在宿主窗口渲染 Zed UI，事件可用 |
 | **P1 Zomp 壳** | embedded 稳定（first responder/布局/多窗口）、zed 启动集成、品牌（图标/名/dock 单图标）、worker sidecar 拉起 | 2-4 周 | 单 app 启动 = 完整 Zed 编辑器可用 |
-| **P2 OMP 面板** | WKWebView 面板 + 布局分栏（可拖拽）+ 数字员工控制台（webapp）+ pi-wire 打通 + ACP agent 注册 | 2-3 周 | 左面板会话/管理，右编辑器，agent 对话走通 |
-| **P3 差异化** | fork 内定制：OMP 侧栏（身份/cron/多 agent）、⌘K 挂点、审批卡、学习沉淀注入 | 3-5 周 | 定稿 Phase 2 数字员工能力上线 |
+| **P2 CornField 面板** | WKWebView 面板 + 布局分栏（可拖拽）+ 数字员工控制台（webapp）+ wire 打通 + ACP agent 注册 | 2-3 周 | 左面板会话/管理，右编辑器，agent 对话走通 |
+| **P3 差异化** | fork 内定制：CornField 侧栏（身份/cron/多 agent）、⌘K 挂点、审批卡、学习沉淀注入 | 3-5 周 | 定稿 Phase 2 数字员工能力上线 |
 | 合计 | | ~2.5-3.5 月（1-2 专职 Rust + web 侧复用现有） | |
 
 ## 5. 风险账本（新）

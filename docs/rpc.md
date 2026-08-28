@@ -16,7 +16,7 @@ Primary implementation:
 ## Startup
 
 ```bash
-omp --mode rpc [regular CLI options]
+cornfield --mode rpc [regular CLI options]
 ```
 
 Behavior notes:
@@ -334,7 +334,7 @@ Runtime note:
 
 - Automatic session title generation is disabled in RPC mode, and `setTitle` UI
   requests are also suppressed by default because most hosts do not have a
-  meaningful terminal-title surface. Set `PI_RPC_EMIT_TITLE=1` to opt back in to
+  meaningful terminal-title surface. Set `CORNFIELD_RPC_EMIT_TITLE=1` to opt back in to
   the UI event only.
 
 Example:
