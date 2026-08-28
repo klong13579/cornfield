@@ -1,5 +1,5 @@
 {
-  "name": "@cornfield/omp-gateway",
+  "name": "@cornfield/gateway",
   "version": "0.19.2",
   "description": "IM gateway for CornField — connects AI agents to messaging platforms",
   "type": "module",
@@ -15,8 +15,8 @@
     "test": "bun test"
   },
   "dependencies": {
-    "@cornfield/pi-coding-agent": "workspace:*",
-    "@cornfield/pi-utils": "catalog:",
+    "@cornfield/coding-agent": "workspace:*",
+    "@cornfield/utils": "catalog:",
     "@sinclair/typebox": "catalog:",
     "croner": "10.0.1",
     "dingtalk-stream": "2.1.6-beta.1",

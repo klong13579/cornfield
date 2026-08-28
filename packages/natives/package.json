@@ -1,5 +1,5 @@
 {
-	"name": "@cornfield/pi-natives",
+	"name": "@cornfield/natives",
 	"version": "0.19.2",
 	"description": "Native Rust bindings for grep, clipboard, image processing, syntax highlighting, PTY, and shell operations via N-API",
 	"homepage": "https://github.com/klong13579/cornfield",

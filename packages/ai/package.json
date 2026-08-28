@@ -1,6 +1,6 @@
 {
 	"type": "module",
-	"name": "@cornfield/pi-ai",
+	"name": "@cornfield/ai",
 	"version": "0.19.2",
 	"description": "Unified LLM API with automatic model discovery and provider configuration",
 	"homepage": "https://github.com/klong13579/cornfield",
@@ -29,7 +29,7 @@
 	"main": "./src/index.ts",
 	"types": "./src/index.ts",
 	"bin": {
-		"pi-ai": "./src/cli.ts"
+		"cornfield-ai": "./src/cli.ts"
 	},
 	"scripts": {
 		"check": "biome check . && bun run check:types",
@@ -46,8 +46,8 @@
 		"@aws-sdk/credential-provider-node": "catalog:",
 		"@bufbuild/protobuf": "catalog:",
 		"@google/genai": "catalog:",
-		"@cornfield/pi-natives": "catalog:",
-		"@cornfield/pi-utils": "catalog:",
+		"@cornfield/natives": "catalog:",
+		"@cornfield/utils": "catalog:",
 		"@sinclair/typebox": "catalog:",
 		"@smithy/node-http-handler": "catalog:",
 		"ajv": "catalog:",

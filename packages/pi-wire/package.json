@@ -1,8 +1,8 @@
 {
 	"type": "module",
-	"name": "@cornfield/pi-wire",
+	"name": "@cornfield/wire",
 	"version": "0.19.2",
-	"description": "Multidevice wire protocol types (frames, commands, protocol version) for CornField serve <-> pi-client",
+	"description": "Multidevice wire protocol types (frames, commands, protocol version) for CornField serve <-> client",
 	"homepage": "https://github.com/klong13579/cornfield",
 	"author": "Can Boluk",
 	"license": "MIT",
@@ -25,8 +25,8 @@
 		"fmt": "biome format --write ."
 	},
 	"dependencies": {
-		"@cornfield/pi-agent-core": "catalog:",
-		"@cornfield/pi-ai": "catalog:"
+		"@cornfield/agent": "catalog:",
+		"@cornfield/ai": "catalog:"
 	},
 	"devDependencies": {
 		"@types/bun": "catalog:"

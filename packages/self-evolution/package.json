@@ -23,9 +23,9 @@
 	},
 	"dependencies": {
 		"@cornfield/cognitive-coordination": "workspace:*",
-		"@cornfield/pi-ai": "catalog:",
-		"@cornfield/pi-coding-agent": "catalog:",
-		"@cornfield/pi-utils": "catalog:"
+		"@cornfield/ai": "catalog:",
+		"@cornfield/coding-agent": "catalog:",
+		"@cornfield/utils": "catalog:"
 	},
 	"devDependencies": {
 		"@sinclair/typebox": "catalog:",

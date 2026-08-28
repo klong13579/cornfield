@@ -9,6 +9,6 @@
 		"./*": "./src/*.ts"
 	},
 	"dependencies": {
-		"@cornfield/pi-utils": "workspace:*"
+		"@cornfield/utils": "workspace:*"
 	}
 }

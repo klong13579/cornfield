@@ -1,6 +1,6 @@
 {
 	"type": "module",
-	"name": "@cornfield/pi-tui",
+	"name": "@cornfield/tui",
 	"version": "0.19.2",
 	"description": "Terminal User Interface library with differential rendering for efficient text-based applications",
 	"homepage": "https://github.com/klong13579/cornfield",
@@ -37,8 +37,8 @@
 		"fmt": "biome format --write ."
 	},
 	"dependencies": {
-		"@cornfield/pi-natives": "catalog:",
-		"@cornfield/pi-utils": "catalog:",
+		"@cornfield/natives": "catalog:",
+		"@cornfield/utils": "catalog:",
 		"lru-cache": "catalog:",
 		"marked": "catalog:"
 	},

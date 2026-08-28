@@ -30,14 +30,14 @@
 		"@babel/parser": "catalog:",
 		"@babel/traverse": "catalog:",
 		"@babel/types": "catalog:",
-		"@cornfield/pi-agent-core": "catalog:",
-		"@cornfield/pi-coding-agent": "catalog:",
-		"@cornfield/pi-utils": "catalog:",
+		"@cornfield/agent": "catalog:",
+		"@cornfield/coding-agent": "catalog:",
+		"@cornfield/utils": "catalog:",
 		"diff": "catalog:",
 		"prettier": "catalog:",
 		"regexp-tree": "catalog:",
-		"@cornfield/pi-ai": "catalog:",
-		"@cornfield/pi-tui": "catalog:"
+		"@cornfield/ai": "catalog:",
+		"@cornfield/tui": "catalog:"
 	},
 	"devDependencies": {
 		"@types/babel__generator": "catalog:",

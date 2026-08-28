@@ -19,8 +19,8 @@
 	"dependencies": {
 		"@fontsource-variable/geist": "5.3.0",
 		"@fontsource-variable/geist-mono": "5.3.0",
-		"@cornfield/pi-client": "catalog:",
-		"@cornfield/pi-wire": "catalog:",
+		"@cornfield/client": "catalog:",
+		"@cornfield/wire": "catalog:",
 		"croner": "10.0.1",
 		"lucide-react": "catalog:",
 		"mermaid": "11.16.1",

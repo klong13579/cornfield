@@ -1,6 +1,6 @@
 {
 	"type": "module",
-	"name": "@cornfield/omp-stats",
+	"name": "@cornfield/stats",
 	"version": "0.19.2",
 	"description": "Local observability dashboard for CornField AI usage statistics",
 	"homepage": "https://github.com/klong13579/cornfield",
@@ -37,8 +37,8 @@
 		"fmt": "biome format --write ."
 	},
 	"dependencies": {
-		"@cornfield/pi-ai": "catalog:",
-		"@cornfield/pi-utils": "catalog:",
+		"@cornfield/ai": "catalog:",
+		"@cornfield/utils": "catalog:",
 		"@tailwindcss/node": "catalog:",
 		"chart.js": "catalog:",
 		"date-fns": "catalog:",

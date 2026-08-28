@@ -1,8 +1,8 @@
 {
 	"type": "module",
-	"name": "@cornfield/pi-client",
+	"name": "@cornfield/client",
 	"version": "0.19.2",
-	"description": "WebSocket client for CornField serve (pi-wire protocol): connection state machine, request id correlation, exponential backoff reconnect, snapshot cache, subscribe-across-reconnect",
+	"description": "WebSocket client for CornField serve (wire protocol): connection state machine, request id correlation, exponential backoff reconnect, snapshot cache, subscribe-across-reconnect",
 	"homepage": "https://github.com/klong13579/cornfield",
 	"author": "Can Boluk",
 	"license": "MIT",
@@ -26,7 +26,7 @@
 		"fmt": "biome format --write ."
 	},
 	"dependencies": {
-		"@cornfield/pi-wire": "catalog:"
+		"@cornfield/wire": "catalog:"
 	},
 	"devDependencies": {
 		"@types/bun": "catalog:"
