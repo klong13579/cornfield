@@ -26,7 +26,7 @@ const path = require("node:path");
  * require, and inlined extension bundles) so a second `loadNative()` returns
  * the first `.node` without calling `dlopen` again — which segfaults at 0x8000.
  */
-const NATIVE_BINDINGS_SYMBOL = Symbol.for("@oh-my-pi/pi-natives.bindings");
+const NATIVE_BINDINGS_SYMBOL = Symbol.for("@cornfield/natives.bindings");
 
 /**
  * @param {Record<symbol | string, unknown>} [store]

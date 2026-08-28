@@ -3,12 +3,12 @@
  */
 
 import * as dns from "node:dns/promises";
-import { ptree } from "@oh-my-pi/pi-utils";
+import { ptree } from "@cornfield/utils";
 import TurndownService from "turndown";
 import { gfm } from "turndown-plugin-gfm";
 import { ToolAbortError } from "../../tools/tool-errors";
 
-export { formatNumber } from "@oh-my-pi/pi-utils";
+export { formatNumber } from "@cornfield/utils";
 
 export interface RenderResult {
 	url: string;

@@ -1,11 +1,11 @@
 import { describe, expect, it } from "bun:test";
-import type { AssistantMessage } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage } from "@cornfield/ai";
 import {
 	buildSessionContext,
 	type ModelChangeEntry,
 	type SessionEntry,
 	type SessionMessageEntry,
-} from "@oh-my-pi/pi-coding-agent/session/session-manager";
+} from "@cornfield/coding-agent/session/session-manager";
 
 /**
  * Issue #849: After a user explicitly switches to gpt-5.5, the session reverts

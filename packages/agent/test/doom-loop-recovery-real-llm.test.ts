@@ -24,8 +24,8 @@
  */
 
 import { afterEach, describe, expect, it } from "bun:test";
-import { Agent } from "@oh-my-pi/pi-agent-core";
-import { type AssistantMessage, getBundledModel, type TextContent } from "@oh-my-pi/pi-ai";
+import { Agent } from "@cornfield/agent";
+import { type AssistantMessage, getBundledModel, type TextContent } from "@cornfield/ai";
 
 // Requires real provider auth; skip when no key is configured (e.g. CI runners).
 const hasAlibabaKey = Boolean(process.env.ALIBABA_CODING_PLAN_API_KEY || process.env.ALIBABA_API_KEY);

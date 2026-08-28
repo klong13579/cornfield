@@ -4,7 +4,7 @@
  * Handles `omp setup <component>` to install dependencies for optional features.
  */
 import * as path from "node:path";
-import { $which, APP_NAME, getPythonEnvDir } from "@oh-my-pi/pi-utils";
+import { $which, APP_NAME, getPythonEnvDir } from "@cornfield/utils";
 import { $ } from "bun";
 import chalk from "chalk";
 import { theme } from "../modes/theme/theme";

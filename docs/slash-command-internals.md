@@ -28,7 +28,7 @@ The capability registry loads all registered providers, sorted by provider prior
 
 Current slash-command providers and priorities:
 
-1. `native` (OMP) — priority `100`
+1. `native` (CornField) — priority `100`
 2. `claude` — priority `80`
 3. `claude-plugins` — priority `70`
 4. `codex` — priority `70`
@@ -59,10 +59,10 @@ So hidden files/directories are not loaded, ignored paths are skipped, and file 
 
 ## `native` provider (`builtin.ts`)
 
-Search roots come from `.omp` directories:
+Search roots come from `.cornfield` directories:
 
-- project: `<cwd>/.omp/commands/*.md`
-- user: `~/.omp/agent/commands/*.md`
+- project: `<cwd>/.cornfield/commands/*.md`
+- user: `~/.cornfield/agent/commands/*.md`
 
 `getConfigDirs()` returns project first, then user, so **project native commands beat user native commands** when names collide.
 
@@ -160,15 +160,15 @@ The Extensions dashboard also loads `slash-commands` capability and displays act
 
 `AgentSession.prompt(...)` slash handling order (when `expandPromptTemplates !== false`):
 
-1. **Extension commands** (`#tryExecuteExtensionCommand`)  
+1. **Extension commands** (`#tryExecuteExtensionCommand`)
    If `/name` matches extension-registered command, handler executes immediately and prompt returns.
-2. **TypeScript custom commands** (`#tryExecuteCustomCommand`)  
+2. **TypeScript custom commands** (`#tryExecuteCustomCommand`)
    Boundary only: if matched, it executes and may return:
    - `string` -> replace prompt text with that string
    - `void/undefined` -> treated as handled; no LLM prompt
-3. **File-based slash commands** (`expandSlashCommand`)  
+3. **File-based slash commands** (`expandSlashCommand`)
    If text still starts with `/`, attempt markdown command expansion.
-4. **Prompt templates** (`expandPromptTemplate`)  
+4. **Prompt templates** (`expandPromptTemplate`)
    Applied after slash/custom processing.
 5. **Delivery**
    - idle: prompt is sent immediately to agent

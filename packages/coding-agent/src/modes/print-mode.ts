@@ -5,9 +5,9 @@
  * - `omp -p "prompt"` - text output
  * - `omp --mode json "prompt"` - JSON event stream
  */
-import type { AssistantMessage, ImageContent } from "@oh-my-pi/pi-ai";
-import { stripReasoningTagsFromText } from "@oh-my-pi/pi-ai/utils/reasoning-tags";
-import { sanitizeText } from "@oh-my-pi/pi-natives";
+import type { AssistantMessage, ImageContent } from "@cornfield/ai";
+import { stripReasoningTagsFromText } from "@cornfield/ai/utils/reasoning-tags";
+import { sanitizeText } from "@cornfield/natives";
 import { runExtensionCompact, runExtensionSetModel } from "../extensibility/extensions/compact-handler";
 import type { AgentSession } from "../session/agent-session";
 

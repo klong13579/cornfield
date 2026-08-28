@@ -1,5 +1,5 @@
-import type { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
-import type { Api, Model } from "@oh-my-pi/pi-ai";
+import type { ThinkingLevel } from "@cornfield/agent";
+import type { Api, Model } from "@cornfield/ai";
 import { MODEL_ROLE_IDS } from "../config/model-registry";
 import {
 	type ModelLookupRegistry,

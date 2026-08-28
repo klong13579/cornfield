@@ -1,5 +1,5 @@
-import type { MessageRenderer } from "@oh-my-pi/pi-coding-agent";
-import { Box, type Component, Markdown, type MarkdownTheme, Spacer, Text } from "@oh-my-pi/pi-tui";
+import type { MessageRenderer } from "@cornfield/coding-agent";
+import { Box, type Component, Markdown, type MarkdownTheme, Spacer, Text } from "@cornfield/tui";
 import type { MoaTraceDetails } from "./types";
 
 /**

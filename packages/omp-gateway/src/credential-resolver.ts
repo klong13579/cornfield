@@ -3,7 +3,7 @@
  * and resolves them as env vars for child processes.
  *
  * Flow:
- * 1. Read ~/.omp/agent/models.yml to find provider→apiKey env-var mapping
+ * 1. Read ~/.cornfield/agent/models.yml to find provider→apiKey env-var mapping
  * 2. Read agent.db auth_credentials for stored API keys
  * 3. Return env vars to set for the spawned process
  */
@@ -12,7 +12,7 @@ import { Database } from "bun:sqlite";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 
 const { readFileSync } = fs;
 
@@ -22,7 +22,7 @@ const { readFileSync } = fs;
  */
 export function resolveCredentialEnvVars(): Record<string, string> {
 	const homeDir = os.homedir();
-	const agentDir = path.join(homeDir, ".omp", "agent");
+	const agentDir = path.join(homeDir, ".cornfield", "agent");
 	const modelsPath = path.join(agentDir, "models.yml");
 	const dbPath = path.join(agentDir, "agent.db");
 
@@ -57,7 +57,7 @@ export function resolveCredentialEnvVars(): Record<string, string> {
 	}
 
 	if (missing.length > 0) {
-		logger.warn("Credentials not found in agent.db; use omp login or ensure env var is set", { missing });
+		logger.warn("Credentials not found in agent.db; use cornfield login or ensure env var is set", { missing });
 	}
 
 	return envVars;
@@ -73,9 +73,9 @@ export function resolveCredentialEnvVars(): Record<string, string> {
  * highest-value checks the doctor performs.
  */
 export interface CredentialCheck {
-	/** Whether ~/.omp/agent/models.yml was found and parsed. */
+	/** Whether ~/.cornfield/agent/models.yml was found and parsed. */
 	modelsYmlFound: boolean;
-	/** Whether ~/.omp/agent/agent.db was found. */
+	/** Whether ~/.cornfield/agent/agent.db was found. */
 	agentDbFound: boolean;
 	/** Per-provider resolution status. */
 	providers: Array<{
@@ -88,7 +88,7 @@ export interface CredentialCheck {
 
 export function checkCredentials(): CredentialCheck {
 	const homeDir = os.homedir();
-	const agentDir = path.join(homeDir, ".omp", "agent");
+	const agentDir = path.join(homeDir, ".cornfield", "agent");
 	const modelsPath = path.join(agentDir, "models.yml");
 	const dbPath = path.join(agentDir, "agent.db");
 

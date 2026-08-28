@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import { type RequestBody, transformRequestBody } from "@oh-my-pi/pi-ai/providers/openai-codex/request-transformer";
-import { parseCodexError } from "@oh-my-pi/pi-ai/providers/openai-codex/response-handler";
+import { type RequestBody, transformRequestBody } from "@cornfield/ai/providers/openai-codex/request-transformer";
+import { parseCodexError } from "@cornfield/ai/providers/openai-codex/response-handler";
 import { createCodexModel } from "./helpers";
 
 const DEFAULT_PROMPT_PREFIX =

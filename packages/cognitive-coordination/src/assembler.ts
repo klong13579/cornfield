@@ -14,7 +14,7 @@
  *   Stage 6 — System Prompt Injection (7-layer priority)
  */
 
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 import type { ConflictReport } from "./conflict-resolver";
 import type { QueryAnalysis } from "./query-analyzer";
 import { QueryAnalyzer } from "./query-analyzer";

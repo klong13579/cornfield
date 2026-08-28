@@ -21,7 +21,7 @@
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { buildAgentSessionPath, ensureAgentDir } from "@oh-my-pi/pi-coding-agent/skeleton";
+import { buildAgentSessionPath, ensureAgentDir } from "@cornfield/coding-agent/skeleton";
 import { AgentBridge } from "../src/agent-bridge";
 import { DingTalkChannel } from "../src/channels/dingtalk";
 import { downloadMedia as realDownloadMedia } from "../src/channels/dingtalk-media";

@@ -12,7 +12,7 @@
  */
 
 import * as path from "node:path";
-import { Args, Command, Flags, renderCommandHelp } from "@oh-my-pi/pi-utils/cli";
+import { Args, Command, Flags, renderCommandHelp } from "@cornfield/utils/cli";
 import {
 	renderList,
 	renderReconcile,

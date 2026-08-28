@@ -18,10 +18,10 @@ import type {
 	TodoPhaseDto,
 	ToolSwitchesDto,
 	WireServerEventDto,
-} from "@oh-my-pi/pi-wire";
+} from "@cornfield/wire";
 
 // ArtifactDto / ArtifactsResultDto 由 pi-wire 定义，消费方（ArtifactsPanel 等）从本层引入。
-export type { ArtifactDto } from "@oh-my-pi/pi-wire";
+export type { ArtifactDto } from "@cornfield/wire";
 
 import type { BranchPoint, PlaybackEntry, SessionRecordSummary } from "./records";
 

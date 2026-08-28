@@ -5,7 +5,7 @@
 
 ## 背景与动机
 
-用户对 OMP 的 TODO 面板（`<projectRoot>/TODO.md`，TUI 顶部渲染）有三个痛点：
+用户对 CornField 的 TODO 面板（`<projectRoot>/TODO.md`，TUI 顶部渲染）有三个痛点：
 
 1. 只有一行待办名字，**不知道目标是什么、参考对象是什么**；
 2. **不知道之前对话到什么程度，能不能继续**之前的对话；
@@ -14,8 +14,8 @@
 同期对 pi 生态插件 `pi-goal-list-loop-audit`（glla，pkg: pi-goal-list-loop-audit）做了深度研究
 （README/PLAN/DESIGN/CHANGELOG/npm 元数据/下载量/GitHub 活跃度）。结论：
 
-- **不集成 glla 插件本体**：强耦合 `@earendil-works/pi-*` 扩展 API（OMP 是其 fork 后的独立演进，
-  14.x vs 0.84），跑不了 OMP；单人项目、AGPL、API 持续漂移，不宜成为 OMP 的承诺面。
+- **不集成 glla 插件本体**：强耦合 `@earendil-works/pi-*` 扩展 API（CornField 是其 fork 后的独立演进，
+  14.x vs 0.84），跑不了 CornField；单人项目、AGPL、API 持续漂移，不宜成为 CornField 的承诺面。
 - **移植其思想三层**：① 验证契约（todo 固化成可机械验证的 `Done when:`）；② 执行与验证分离
   （glla 用独立无扩展审计进程验货）；③ 证据强制（验收必须附原始命令输出，无证据的批准判不通过）。
 - 第一层（验证契约 + topic 上下文）**今日已落地**；第二、三层（独立验证者）是后续大件，
@@ -43,7 +43,7 @@
 
 ### 已提交（commit `86fe4a8a8e`）
 
-- `~/.omp/agent/skills/project-todo/SKILL.md`（用户级，即时生效）：新增 **Create topic /
+- `~/.cornfield/agent/skills/project-todo/SKILL.md`（用户级，即时生效）：新增 **Create topic /
   Update topic / Resume topic** 分支 + topic 模板 + slug 规则 + 边界规则
   （进度是事实不是散文；topic 永不注入 always-on 上下文；不碰 `todo_write`/`/todo` phases；
   删除待办不删 topic 文件；不发明 `doneWhen` 契约）。
@@ -63,13 +63,13 @@
 - **Create topic 流程（skill）经两个实弹用例验证通过**：slug 规则、幂等、frontmatter、挂链均正常。
 - **Update topic / Resume topic 未经实战验证**（等后续真正推进 topic 时验证）。
 - **暴露缺口**：TUI 面板仍旧只渲染一行名字——topic 内容存在文件里，行文本只有链接字面量，
-  打开 omp 看不到 status/进度/摘要。用户明确指出"topic 还是不清晰，只有一个名字"。
+  打开 cornfield 看不到 status/进度/摘要。用户明确指出"topic 还是不清晰，只有一个名字"。
 
 ## 遗留与下一步（改天继续，按序）
 
 1. **P0 路径拍板**：实现"完整 topic 功能"的三条路已核实边界 ——
    - skill 实现：只能管 agent 流程约定，做不出面板可见性/命令/校验；
-   - 自定义插件：OMP 扩展系统给了 slash command + 工具 + session 生命周期 hooks，
+   - 自定义插件：CornField 扩展系统给了 slash command + 工具 + session 生命周期 hooks，
      **但没有 welcome 右栏 UI 注入点、没有 turn 级（agent_end）钩子**——面板仍旧只有一行名字
      （glla 在 pi 上撞的同一堵宿主墙）；
    - **内置到 coding-agent（推荐）**：todo.ts/welcome 是宿主代码，全接口在手。

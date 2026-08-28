@@ -1,8 +1,8 @@
 #!/bin/sh
 set -e
 
-# OMP Coding Agent Installer
-# Usage: curl -fsSL https://raw.githubusercontent.com/klong13579/oh-my-pi/main/scripts/install.sh | sh
+# CornField Coding Agent Installer
+# Usage: curl -fsSL https://raw.githubusercontent.com/klong13579/cornfield/main/scripts/install.sh | sh
 #
 # Options:
 #   --source       Install via bun (installs bun if needed)
@@ -10,9 +10,9 @@ set -e
 #   --ref <ref>    Install specific tag/commit/branch
 #   -r <ref>       Shorthand for --ref
 
-REPO="klong13579/oh-my-pi"
-PACKAGE="@oh-my-pi/pi-coding-agent"
-INSTALL_DIR="${PI_INSTALL_DIR:-$HOME/.local/bin}"
+REPO="klong13579/cornfield"
+PACKAGE="@cornfield/coding-agent"
+INSTALL_DIR="${CORNFIELD_INSTALL_DIR:-$HOME/.local/bin}"
 MIN_BUN_VERSION="1.3.7"
 
 # Parse arguments
@@ -179,8 +179,8 @@ install_via_bun() {
         }
     fi
     echo ""
-    echo "✓ Installed omp via bun"
-    echo "Run 'omp' to get started!"
+    echo "✓ Installed cornfield via bun"
+    echo "Run 'cornfield' to get started!"
 }
 
 # Install binary from GitHub releases
@@ -201,7 +201,7 @@ install_binary() {
         *)             echo "Unsupported architecture: $ARCH"; exit 1 ;;
     esac
 
-    BINARY="omp-${PLATFORM}-${ARCH}"
+    BINARY="cornfield-${PLATFORM}-${ARCH}"
     # Get release tag
     if [ -n "$REF" ]; then
         echo "Fetching release $REF..."
@@ -228,17 +228,17 @@ install_binary() {
     # Download binaries (agent + gateway)
     BINARY_URL="https://github.com/${REPO}/releases/download/${LATEST}/${BINARY}"
     echo "Downloading ${BINARY}..."
-    curl -fsSL "$BINARY_URL" -o "${INSTALL_DIR}/omp"
-    chmod +x "${INSTALL_DIR}/omp"
-    GATEWAY_BINARY="omp-gateway-${PLATFORM}-${ARCH}"
+    curl -fsSL "$BINARY_URL" -o "${INSTALL_DIR}/cornfield"
+    chmod +x "${INSTALL_DIR}/cornfield"
+    GATEWAY_BINARY="cornfield-gateway-${PLATFORM}-${ARCH}"
     GATEWAY_URL="https://github.com/${REPO}/releases/download/${LATEST}/${GATEWAY_BINARY}"
     echo "Downloading ${GATEWAY_BINARY}..."
-    curl -fsSL "$GATEWAY_URL" -o "${INSTALL_DIR}/omp-gateway"
-    chmod +x "${INSTALL_DIR}/omp-gateway"
+    curl -fsSL "$GATEWAY_URL" -o "${INSTALL_DIR}/cornfield-gateway"
+    chmod +x "${INSTALL_DIR}/cornfield-gateway"
     downloaded_native=0
     if [ "$ARCH" = "x64" ]; then
         for variant in modern baseline; do
-            NATIVE_ADDON="pi_natives.${PLATFORM}-${ARCH}-${variant}.node"
+            NATIVE_ADDON="cornfield_natives.${PLATFORM}-${ARCH}-${variant}.node"
             NATIVE_URL="https://github.com/${REPO}/releases/download/${LATEST}/${NATIVE_ADDON}"
             echo "Downloading ${NATIVE_ADDON}..."
             curl -fsSL "$NATIVE_URL" -o "${INSTALL_DIR}/${NATIVE_ADDON}" || {
@@ -248,21 +248,21 @@ install_binary() {
             downloaded_native=$((downloaded_native + 1))
         done
     else
-        NATIVE_ADDON="pi_natives.${PLATFORM}-${ARCH}.node"
+        NATIVE_ADDON="cornfield_natives.${PLATFORM}-${ARCH}.node"
         NATIVE_URL="https://github.com/${REPO}/releases/download/${LATEST}/${NATIVE_ADDON}"
         echo "Downloading ${NATIVE_ADDON}..."
         curl -fsSL "$NATIVE_URL" -o "${INSTALL_DIR}/${NATIVE_ADDON}"
         downloaded_native=1
     fi
     echo ""
-    echo "✓ Installed omp to ${INSTALL_DIR}/omp"
-    echo "✓ Installed omp-gateway to ${INSTALL_DIR}/omp-gateway"
+    echo "✓ Installed cornfield to ${INSTALL_DIR}/cornfield"
+    echo "✓ Installed cornfield-gateway to ${INSTALL_DIR}/cornfield-gateway"
     echo "✓ Installed ${downloaded_native} native addon file(s) to ${INSTALL_DIR}"
 
     # Check if in PATH
     case ":$PATH:" in
-        *":$INSTALL_DIR:"*) echo "Run 'omp' to get started!" ;;
-        *) echo "Add ${INSTALL_DIR} to your PATH, then run 'omp'" ;;
+        *":$INSTALL_DIR:"*) echo "Run 'cornfield' to get started!" ;;
+        *) echo "Add ${INSTALL_DIR} to your PATH, then run 'cornfield'" ;;
     esac
 }
 

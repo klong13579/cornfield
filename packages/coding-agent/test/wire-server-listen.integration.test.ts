@@ -13,7 +13,7 @@ import { afterAll, describe, expect, test } from "bun:test";
 import * as fsp from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { MULTIDEVICE_PROTOCOL_VERSION } from "@oh-my-pi/pi-wire";
+import { MULTIDEVICE_PROTOCOL_VERSION } from "@cornfield/wire";
 import { waitForServe } from "./wait-for-serve";
 
 type Frame = { type: string; [k: string]: unknown };
@@ -91,7 +91,7 @@ const proc = Bun.spawn(
 		"127.0.0.1",
 	],
 	{
-		env: { ...process.env, PI_CONFIG_DIR: isoHome, PI_NO_TITLE: "1" },
+		env: { ...process.env, CORNFIELD_CONFIG_DIR: isoHome, PI_NO_TITLE: "1" },
 		stdout: "pipe",
 		stderr: "pipe",
 	},

@@ -5,8 +5,8 @@
  * 反向依赖禁止。todoPhases 使用协议 todo 形状（WireTodoPhase），与
  * coding-agent tools/todo-write 的 TodoPhase 结构同形，赋值兼容。
  */
-import type { AgentMessage, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
-import type { Model } from "@oh-my-pi/pi-ai";
+import type { AgentMessage, ThinkingLevel } from "@cornfield/agent";
+import type { Model } from "@cornfield/ai";
 import type { WireTodoPhase } from "./commands";
 
 /**

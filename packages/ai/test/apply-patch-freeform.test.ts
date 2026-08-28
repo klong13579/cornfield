@@ -2,18 +2,18 @@ import { describe, expect, test } from "bun:test";
 import {
 	convertTools as convertCodexTools,
 	normalizeCodexToolChoice,
-} from "@oh-my-pi/pi-ai/providers/openai-codex-responses";
+} from "@cornfield/ai/providers/openai-codex-responses";
 import {
 	convertTools,
 	mapOpenAIResponsesToolChoiceForTools,
 	supportsFreeformApplyPatch,
-} from "@oh-my-pi/pi-ai/providers/openai-responses";
+} from "@cornfield/ai/providers/openai-responses";
 import {
 	appendResponsesToolResultMessages,
 	convertResponsesAssistantMessage,
 	processResponsesStream,
-} from "@oh-my-pi/pi-ai/providers/openai-responses-shared";
-import type { AssistantMessage, Model, Tool, ToolResultMessage } from "@oh-my-pi/pi-ai/types";
+} from "@cornfield/ai/providers/openai-responses-shared";
+import type { AssistantMessage, Model, Tool, ToolResultMessage } from "@cornfield/ai/types";
 import { Type } from "@sinclair/typebox";
 import type { ResponseStreamEvent } from "openai/resources/responses/responses";
 

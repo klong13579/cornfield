@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { Settings } from "@cornfield/coding-agent/config/settings";
 import {
 	buildPromptModel,
 	commandFromOp,
@@ -13,7 +13,7 @@ import {
 	type ToolSession,
 	tasksFromCargoMetadata,
 	titleFromOp,
-} from "@oh-my-pi/pi-coding-agent/tools";
+} from "@cornfield/coding-agent/tools";
 
 const detectedRunners: DetectedRunner[] = [
 	{

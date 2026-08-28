@@ -10,8 +10,8 @@ import {
 	streamSimple,
 	type ToolResultMessage,
 	validateToolArguments,
-} from "@oh-my-pi/pi-ai";
-import { sanitizeText } from "@oh-my-pi/pi-natives";
+} from "@cornfield/ai";
+import { sanitizeText } from "@cornfield/natives";
 import { type DoomVerdict, detectDoomLoop } from "./streaming/doom-loop-detector";
 import type {
 	AgentContext,

@@ -1,10 +1,10 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { resolve as resolvePath } from "node:path";
-import { StringEnum } from "@oh-my-pi/pi-ai";
-import { defineTool, type ExtensionAPI, type ExtensionContext } from "@oh-my-pi/pi-coding-agent";
-import { type AutocompleteItem, Text } from "@oh-my-pi/pi-tui";
-import { getAgentDir, isEnoent } from "@oh-my-pi/pi-utils";
+import { StringEnum } from "@cornfield/ai";
+import { defineTool, type ExtensionAPI, type ExtensionContext } from "@cornfield/coding-agent";
+import { type AutocompleteItem, Text } from "@cornfield/tui";
+import { getAgentDir, isEnoent } from "@cornfield/utils";
 import { Type } from "@sinclair/typebox";
 import { randomUUID } from "crypto";
 import { resolveAskRouting } from "./ask-routing";

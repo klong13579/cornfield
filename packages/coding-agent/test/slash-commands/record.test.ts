@@ -7,9 +7,9 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "bun:test";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
-import { executeBuiltinSlashCommand } from "@oh-my-pi/pi-coding-agent/slash-commands/builtin-registry";
-import type { ListenController } from "@oh-my-pi/pi-coding-agent/stt/listen-controller";
+import type { InteractiveModeContext } from "@cornfield/coding-agent/modes/types";
+import { executeBuiltinSlashCommand } from "@cornfield/coding-agent/slash-commands/builtin-registry";
+import type { ListenController } from "@cornfield/coding-agent/stt/listen-controller";
 
 function createRuntime() {
 	const listenController = {

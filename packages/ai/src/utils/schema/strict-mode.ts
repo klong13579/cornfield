@@ -1,4 +1,4 @@
-import { $flag } from "@oh-my-pi/pi-utils";
+import { $flag } from "@cornfield/utils";
 import { type TUnsafe, Type } from "@sinclair/typebox";
 import { areJsonValuesEqual } from "./equality";
 import { COMBINATOR_KEYS, NON_STRUCTURAL_SCHEMA_KEYS } from "./fields";

@@ -17,10 +17,10 @@
 
 import { describe, expect, it } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
-import { Agent } from "@oh-my-pi/pi-agent-core";
-import { DEFAULT_DOOM_LOOP_CONFIG, detectDoomLoop } from "@oh-my-pi/pi-agent-core/streaming/doom-loop-detector";
-import { type AssistantMessageEvent, getBundledModel } from "@oh-my-pi/pi-ai";
-import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
+import { Agent } from "@cornfield/agent";
+import { DEFAULT_DOOM_LOOP_CONFIG, detectDoomLoop } from "@cornfield/agent/streaming/doom-loop-detector";
+import { type AssistantMessageEvent, getBundledModel } from "@cornfield/ai";
+import { AssistantMessageEventStream } from "@cornfield/ai/utils/event-stream";
 import { createUsage } from "./helpers";
 
 /**

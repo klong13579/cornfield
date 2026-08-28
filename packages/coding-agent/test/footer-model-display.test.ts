@@ -3,12 +3,12 @@
  */
 
 import { afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
-import { Effort, type Model } from "@oh-my-pi/pi-ai";
-import { FooterComponent } from "@oh-my-pi/pi-coding-agent/modes/components/footer";
-import { renderSegment, type SegmentContext } from "@oh-my-pi/pi-coding-agent/modes/components/status-line/segments";
-import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
-import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
-import * as piUtils from "@oh-my-pi/pi-utils";
+import { Effort, type Model } from "@cornfield/ai";
+import { FooterComponent } from "@cornfield/coding-agent/modes/components/footer";
+import { renderSegment, type SegmentContext } from "@cornfield/coding-agent/modes/components/status-line/segments";
+import { initTheme } from "@cornfield/coding-agent/modes/theme/theme";
+import type { AgentSession } from "@cornfield/coding-agent/session/agent-session";
+import * as piUtils from "@cornfield/utils";
 
 function stripAnsi(line: string): string {
 	return line.replace(/\x1b\[[0-9;]*m/g, "");

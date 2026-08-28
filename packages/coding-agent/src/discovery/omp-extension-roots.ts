@@ -17,7 +17,7 @@
  */
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { isEnoent, logger, tryParseJson } from "@oh-my-pi/pi-utils";
+import { isEnoent, logger, tryParseJson } from "@cornfield/utils";
 import { readDirEntries, readFile } from "../capability/fs";
 import type { LoadContext } from "../capability/types";
 import { getEnabledPlugins } from "../extensibility/plugins/loader";

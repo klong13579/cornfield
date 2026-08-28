@@ -15,8 +15,8 @@
  * `null` to delete the targeted range.
  */
 
-import type { AgentToolResult } from "@oh-my-pi/pi-agent-core";
-import { isEnoent } from "@oh-my-pi/pi-utils";
+import type { AgentToolResult } from "@cornfield/agent";
+import { isEnoent } from "@cornfield/utils";
 import { type Static, Type } from "@sinclair/typebox";
 import type { BunFile } from "bun";
 import type { WritethroughCallback, WritethroughDeferredHandle } from "../../lsp";

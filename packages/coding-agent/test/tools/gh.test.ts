@@ -2,14 +2,14 @@ import { afterEach, describe, expect, it, vi } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { AgentToolContext } from "@oh-my-pi/pi-agent-core";
-import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
-import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
-import { GithubTool } from "@oh-my-pi/pi-coding-agent/tools/gh";
-import { wrapToolWithMetaNotice } from "@oh-my-pi/pi-coding-agent/tools/output-meta";
-import * as git from "@oh-my-pi/pi-coding-agent/utils/git";
-import { getAgentDir, setAgentDir } from "@oh-my-pi/pi-utils";
+import type { AgentToolContext } from "@cornfield/agent";
+import { Settings } from "@cornfield/coding-agent/config/settings";
+import { SessionManager } from "@cornfield/coding-agent/session/session-manager";
+import type { ToolSession } from "@cornfield/coding-agent/tools";
+import { GithubTool } from "@cornfield/coding-agent/tools/gh";
+import { wrapToolWithMetaNotice } from "@cornfield/coding-agent/tools/output-meta";
+import * as git from "@cornfield/coding-agent/utils/git";
+import { getAgentDir, setAgentDir } from "@cornfield/utils";
 
 function createSession(
 	cwd: string = "/tmp/test",

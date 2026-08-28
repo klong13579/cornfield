@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { agentLoop, agentLoopContinue, INTENT_FIELD } from "@oh-my-pi/pi-agent-core/agent-loop";
+import { agentLoop, agentLoopContinue, INTENT_FIELD } from "@cornfield/agent/agent-loop";
 import type {
 	AgentContext,
 	AgentEvent,
@@ -8,9 +8,9 @@ import type {
 	AgentTool,
 	AgentToolContext,
 	ToolCallContext,
-} from "@oh-my-pi/pi-agent-core/types";
-import type { AssistantMessage, Context, Message, Model, ToolResultMessage, UserMessage } from "@oh-my-pi/pi-ai";
-import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
+} from "@cornfield/agent/types";
+import type { AssistantMessage, Context, Message, Model, ToolResultMessage, UserMessage } from "@cornfield/ai";
+import { AssistantMessageEventStream } from "@cornfield/ai/utils/event-stream";
 import { Type } from "@sinclair/typebox";
 import { createAssistantMessage, pushAlphaThenDoneEvent } from "./helpers";
 

@@ -15,7 +15,7 @@ import {
 	resolveKeepRecentTokens,
 	resolveThresholdTokens,
 	shouldCompact,
-} from "@oh-my-pi/pi-coding-agent/session/compaction";
+} from "@cornfield/coding-agent/session/compaction";
 
 const DEFAULT_SETTINGS: CompactionSettings = {
 	enabled: true,
@@ -131,7 +131,7 @@ const messages = [
 	{ role: "assistant" as const, content: [{ type: "text" as const, text: "Another response" }] },
 ];
 
-const estimated = estimateMessagesTokens(messages as unknown as import("@oh-my-pi/pi-agent-core").AgentMessage[]);
+const estimated = estimateMessagesTokens(messages as unknown as import("@cornfield/agent").AgentMessage[]);
 console.log(`  Estimated tokens: ${estimated}`);
 assert(estimated > 10_000, `Large context: ${estimated} > 10,000`);
 
@@ -140,7 +140,7 @@ const bigMessages = Array.from({ length: 10 }, (_, i) => [
 	{ role: "user" as const, content: [{ type: "text" as const, text: `Block ${i}: ${largeBlock}` }] },
 	{ role: "assistant" as const, content: [{ type: "text" as const, text: `Response ${i}` }] },
 ]).flat();
-const bigEstimated = estimateMessagesTokens(bigMessages as unknown as import("@oh-my-pi/pi-agent-core").AgentMessage[]);
+const bigEstimated = estimateMessagesTokens(bigMessages as unknown as import("@cornfield/agent").AgentMessage[]);
 console.log(`  Very large context: ${bigEstimated} tokens`);
 assert(bigEstimated > 40_000, `Very large: ${bigEstimated} > 40,000`);
 

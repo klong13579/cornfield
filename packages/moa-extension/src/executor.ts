@@ -1,5 +1,5 @@
 import * as path from "node:path";
-import { isEnoent } from "@oh-my-pi/pi-utils";
+import { isEnoent } from "@cornfield/utils";
 import { mergeMissingInputs } from "./merge-missing";
 import { rebindWorkerPrompts } from "./planner";
 import { enrichSchemaWithSources, renderResearchGuidance, resolveResearchMode } from "./research-mode";

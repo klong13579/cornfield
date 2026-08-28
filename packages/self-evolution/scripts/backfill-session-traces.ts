@@ -5,7 +5,7 @@
  * Usage:
  *   bun packages/self-evolution/scripts/backfill-session-traces.ts [limit] [--cwd <project>]
  */
-import { getSessionsDir } from "@oh-my-pi/pi-utils";
+import { getSessionsDir } from "@cornfield/utils";
 import { refreshBenefitAdmissionState } from "../src/benefit-admission-refresh";
 import { backfillSessionTracesFromEpisodes } from "../src/regression/backfill-traces";
 import { closeEvolutionDb, getEvolutionDb } from "../src/storage/db";

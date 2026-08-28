@@ -1,2 +1,2 @@
-/** @deprecated Import from `@oh-my-pi/self-evolution/memory/projection` */
-export * from "@oh-my-pi/self-evolution/memory/projection";
+/** @deprecated Import from `@cornfield/self-evolution/memory/projection` */
+export * from "@cornfield/self-evolution/memory/projection";

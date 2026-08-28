@@ -22,7 +22,7 @@ import { afterEach, beforeEach, describe, expect, it, spyOn, test, vi } from "bu
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 import * as cardModule from "../src/channels/dingtalk-card";
 import { Gateway } from "../src/gateway";
 import { type CronCardPayload, deliverCronResultAsCard } from "../src/scheduler/cron-card-delivery";
@@ -119,7 +119,7 @@ describe("deliverCronResultAsCard", () => {
 		const logBtn = actionBlock?.btns?.find(b => b.text === "查看执行日志");
 		expect(logBtn?.actionType).toBe("url");
 		expect(logBtn?.url).toMatch(
-			/^file:\/\/.*\.omp\/gateway-data\/scheduler\/logs\/by-task\/daily-brief\/\d{4}-\d{2}-\d{2}\.jsonl$/,
+			/^file:\/\/.*\.cornfield\/gateway-data\/scheduler\/logs\/by-task\/daily-brief\/\d{4}-\d{2}-\d{2}\.jsonl$/,
 		);
 
 		const copyBtn = actionBlock?.btns?.find(b => b.text === "复制输出");
@@ -436,7 +436,7 @@ describe("cron timeout diagnostics bugfix", () => {
 
 		const fakeOmpPath = await makeFakeOmpScript(tmpHome, FAKE_OMP_HANG_SCRIPT);
 
-		const schedulerDir = path.join(tmpHome, ".omp", "gateway-data", "scheduler");
+		const schedulerDir = path.join(tmpHome, ".cornfield", "gateway-data", "scheduler");
 		const jobsPath = path.join(schedulerDir, "jobs.json");
 		await seedTask(jobsPath, {
 			name: "timeout-diag-test",
@@ -452,7 +452,7 @@ describe("cron timeout diagnostics bugfix", () => {
 			channels: {},
 			agent: { ompPath: fakeOmpPath },
 			cron: { enabled: true, tickIntervalMs: 500, maxConcurrentRuns: 1 },
-			intercomDir: path.join(tmpHome, ".omp", "intercom"),
+			intercomDir: path.join(tmpHome, ".cornfield", "intercom"),
 		};
 
 		gateway = new Gateway(config);
@@ -466,7 +466,7 @@ describe("cron timeout diagnostics bugfix", () => {
 	});
 
 	test("JSONL records failure with structured diagnostics when warm bridge and subprocess both fail", async () => {
-		const schedulerDir = path.join(tmpHome, ".omp", "gateway-data", "scheduler");
+		const schedulerDir = path.join(tmpHome, ".cornfield", "gateway-data", "scheduler");
 		const jobsPath = path.join(schedulerDir, "jobs.json");
 		const storage = new JsonFileStorage(jobsPath);
 
@@ -505,11 +505,11 @@ describe("cron model restore failure logging", () => {
 	beforeEach(async () => {
 		tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), "omp-gateway-restore-"));
 		vi.spyOn(os, "homedir").mockReturnValue(tmpHome);
-		setLogRoot(path.join(tmpHome, ".omp", "gateway-data", "scheduler", "logs"));
+		setLogRoot(path.join(tmpHome, ".cornfield", "gateway-data", "scheduler", "logs"));
 
 		const fakeOmpPath = await makeFakeOmpScript(tmpHome, FAKE_OMP_RESTORE_FAIL_SCRIPT);
 
-		const schedulerDir = path.join(tmpHome, ".omp", "gateway-data", "scheduler");
+		const schedulerDir = path.join(tmpHome, ".cornfield", "gateway-data", "scheduler");
 		const jobsPath = path.join(schedulerDir, "jobs.json");
 		await seedTask(jobsPath, {
 			name: "restore-fail-test",
@@ -527,7 +527,7 @@ describe("cron model restore failure logging", () => {
 			channels: {},
 			agent: { ompPath: fakeOmpPath },
 			cron: { enabled: true, tickIntervalMs: 500, maxConcurrentRuns: 1 },
-			intercomDir: path.join(tmpHome, ".omp", "intercom"),
+			intercomDir: path.join(tmpHome, ".cornfield", "intercom"),
 		};
 
 		gateway = new Gateway(config);
@@ -545,7 +545,7 @@ describe("cron model restore failure logging", () => {
 	});
 
 	test("logs error when model restore fails after cron task", async () => {
-		const schedulerDir = path.join(tmpHome, ".omp", "gateway-data", "scheduler");
+		const schedulerDir = path.join(tmpHome, ".cornfield", "gateway-data", "scheduler");
 		const jobsPath = path.join(schedulerDir, "jobs.json");
 		const storage = new JsonFileStorage(jobsPath);
 
@@ -574,7 +574,7 @@ describe("cron warm-bridge fallback contract", () => {
 
 		const fakeOmpPath = await makeFakeOmpScript(tmpHome, FAKE_OMP_FALLBACK_SCRIPT);
 
-		const schedulerDir = path.join(tmpHome, ".omp", "gateway-data", "scheduler");
+		const schedulerDir = path.join(tmpHome, ".cornfield", "gateway-data", "scheduler");
 		const jobsPath = path.join(schedulerDir, "jobs.json");
 		await seedTask(jobsPath, {
 			name: "test-fallback",
@@ -591,7 +591,7 @@ describe("cron warm-bridge fallback contract", () => {
 			channels: {},
 			agent: { ompPath: fakeOmpPath },
 			cron: { enabled: true, tickIntervalMs: 500, maxConcurrentRuns: 1 },
-			intercomDir: path.join(tmpHome, ".omp", "intercom"),
+			intercomDir: path.join(tmpHome, ".cornfield", "intercom"),
 		};
 
 		gateway = new Gateway(config);
@@ -605,7 +605,7 @@ describe("cron warm-bridge fallback contract", () => {
 	});
 
 	test("falls back to omp --print when warm-bridge executePrompt fails", async () => {
-		const schedulerDir = path.join(tmpHome, ".omp", "gateway-data", "scheduler");
+		const schedulerDir = path.join(tmpHome, ".cornfield", "gateway-data", "scheduler");
 		const jobsPath = path.join(schedulerDir, "jobs.json");
 		const storage = new JsonFileStorage(jobsPath);
 

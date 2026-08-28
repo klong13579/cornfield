@@ -4,7 +4,7 @@
  * Implements forgetting/elimination algorithms for vector embeddings.
  */
 import type { Database } from "bun:sqlite";
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 
 export interface LifecycleOptions {
 	/** Half-life in days for exponential decay (default: 30) */

@@ -2,12 +2,12 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { type ChildProcess, execSync, spawn } from "node:child_process";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { Effort } from "@oh-my-pi/pi-ai";
-import { getBundledModel } from "@oh-my-pi/pi-ai/models";
-import { complete, getEnvApiKey, stream } from "@oh-my-pi/pi-ai/stream";
-import type { Api, Context, ImageContent, Model, OptionsForApi, Tool, ToolResultMessage } from "@oh-my-pi/pi-ai/types";
-import { StringEnum } from "@oh-my-pi/pi-ai/utils/schema";
-import { $which } from "@oh-my-pi/pi-utils";
+import { Effort } from "@cornfield/ai";
+import { getBundledModel } from "@cornfield/ai/models";
+import { complete, getEnvApiKey, stream } from "@cornfield/ai/stream";
+import type { Api, Context, ImageContent, Model, OptionsForApi, Tool, ToolResultMessage } from "@cornfield/ai/types";
+import { StringEnum } from "@cornfield/ai/utils/schema";
+import { $which } from "@cornfield/utils";
 import { Type } from "@sinclair/typebox";
 import { e2eApiKey, resolveApiKey } from "./oauth";
 

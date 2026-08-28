@@ -7,9 +7,9 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { AgentEvent } from "@oh-my-pi/pi-agent-core";
-import { RpcClient } from "@oh-my-pi/pi-coding-agent/modes";
-import { Snowflake } from "@oh-my-pi/pi-utils";
+import type { AgentEvent } from "@cornfield/agent";
+import { RpcClient } from "@cornfield/coding-agent/modes";
+import { Snowflake } from "@cornfield/utils";
 import { e2eApiKey } from "./utilities";
 
 describe.skipIf(!e2eApiKey("ANTHROPIC_API_KEY"))("RPC concurrency", () => {
@@ -36,7 +36,7 @@ describe.skipIf(!e2eApiKey("ANTHROPIC_API_KEY"))("RPC concurrency", () => {
 		using clientA = new RpcClient({
 			cliPath: path.join(import.meta.dir, "..", "dist", "cli.js"),
 			cwd: path.join(import.meta.dir, ".."),
-			env: { PI_CODING_AGENT_DIR: sessionDirA },
+			env: { CORNFIELD_AGENT_DIR: sessionDirA },
 			provider: "anthropic",
 			model: "claude-sonnet-4-5",
 		});
@@ -44,7 +44,7 @@ describe.skipIf(!e2eApiKey("ANTHROPIC_API_KEY"))("RPC concurrency", () => {
 		using clientB = new RpcClient({
 			cliPath: path.join(import.meta.dir, "..", "dist", "cli.js"),
 			cwd: path.join(import.meta.dir, ".."),
-			env: { PI_CODING_AGENT_DIR: sessionDirB },
+			env: { CORNFIELD_AGENT_DIR: sessionDirB },
 			provider: "anthropic",
 			model: "claude-sonnet-4-5",
 		});
@@ -73,7 +73,7 @@ describe.skipIf(!e2eApiKey("ANTHROPIC_API_KEY"))("RPC concurrency", () => {
 		using client = new RpcClient({
 			cliPath: path.join(import.meta.dir, "..", "dist", "cli.js"),
 			cwd: path.join(import.meta.dir, ".."),
-			env: { PI_CODING_AGENT_DIR: path.join(os.tmpdir(), `omp-rpc-msgcnt-${Snowflake.next()}`) },
+			env: { CORNFIELD_AGENT_DIR: path.join(os.tmpdir(), `omp-rpc-msgcnt-${Snowflake.next()}`) },
 			provider: "anthropic",
 			model: "claude-sonnet-4-5",
 		});
@@ -92,7 +92,7 @@ describe.skipIf(!e2eApiKey("ANTHROPIC_API_KEY"))("RPC concurrency", () => {
 		using client = new RpcClient({
 			cliPath: path.join(import.meta.dir, "..", "dist", "cli.js"),
 			cwd: path.join(import.meta.dir, ".."),
-			env: { PI_CODING_AGENT_DIR: path.join(os.tmpdir(), `omp-rpc-reset-${Snowflake.next()}`) },
+			env: { CORNFIELD_AGENT_DIR: path.join(os.tmpdir(), `omp-rpc-reset-${Snowflake.next()}`) },
 			provider: "anthropic",
 			model: "claude-sonnet-4-5",
 		});

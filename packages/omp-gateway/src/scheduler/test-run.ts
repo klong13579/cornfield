@@ -21,7 +21,7 @@
  * verdicts come from the exec JSONL / delivery card, which the runner
  * itself writes and are truthful.
  */
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 import {
 	clearTestRunMarker,
 	isTestRunSchedule,

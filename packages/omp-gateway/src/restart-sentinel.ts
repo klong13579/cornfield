@@ -6,12 +6,12 @@
  * the sentinel and resumes the conversation, so the agent can acknowledge the
  * restart and continue where it left off.
  *
- * The sentinel is a single JSON file at `~/.omp/gateway-data/restart-pending.json`.
+ * The sentinel is a single JSON file at `~/.cornfield/gateway-data/restart-pending.json`.
  * It is written before shutdown and cleared after successful recovery.
  */
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { isEnoent, logger } from "@oh-my-pi/pi-utils";
+import { isEnoent, logger } from "@cornfield/utils";
 import { getDataDir } from "./config";
 import type { GatewayConfig } from "./types";
 
@@ -22,7 +22,7 @@ export interface RestartSentinel {
 	conversationId: string;
 	/** The account ID for multi-account routing. */
 	accountId: string;
-	/** The gateway agent session path (e.g. ~/.omp/agents/<accountId>/sessions/<safeId>.jsonl). */
+	/** The gateway agent session path (e.g. ~/.cornfield/agents/<accountId>/sessions/<safeId>.jsonl). */
 	ompSessionPath: string;
 	/** The message to send to the agent after restart to resume the conversation. */
 	continuationMessage: string;

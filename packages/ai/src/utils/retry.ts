@@ -1,4 +1,4 @@
-import { abortableSleep } from "@oh-my-pi/pi-utils";
+import { abortableSleep } from "@cornfield/utils";
 
 type ErrorLike = {
 	message?: string;

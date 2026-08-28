@@ -1,14 +1,14 @@
 /**
  * Gateway configuration loading and validation.
  *
- * Loads from ~/.pi/gateway.json with sensible defaults.
+ * Loads from ~/.cornfield/gateway.json with sensible defaults.
  * Extended with cron scheduler and heartbeat configuration
  * for the unified gateway architecture.
  */
 
 import * as os from "node:os";
 import * as path from "node:path";
-import { isEnoent, logger } from "@oh-my-pi/pi-utils";
+import { isEnoent, logger } from "@cornfield/utils";
 import { z } from "zod";
 import type { ChannelConfig, DingTalkConfig, GatewayConfig } from "./types";
 
@@ -29,8 +29,7 @@ const dingtalkAccountConfigSchema = z.object({
 	robotName: z.string().optional(),
 	agentDir: z.string().optional(),
 	deniedTools: z.array(z.string()).optional(),
-	/** Legacy fallback only — prefer `<agentDir>/.omp/config.yml`. */
-	hideThinkingBlock: z.boolean().default(false),
+	/** Legacy fallback only — prefer `<agentDir>/.cornfield/config.yml`. */
 	enabled: z.boolean().default(true),
 });
 
@@ -130,12 +129,12 @@ const DEFAULT_CONFIG: GatewayConfig = {
 // ═══════════════════════════════════════════════════════════════════════
 
 export function getConfigPath(): string {
-	return path.join(os.homedir(), ".omp", "gateway.json");
+	return path.join(os.homedir(), ".cornfield", "gateway.json");
 }
 
 export function getDataDir(config?: GatewayConfig): string {
 	if (config?.dataDir) return config.dataDir;
-	return path.join(os.homedir(), ".omp", "gateway-data");
+	return path.join(os.homedir(), ".cornfield", "gateway-data");
 }
 
 // ═══════════════════════════════════════════════════════════════════════

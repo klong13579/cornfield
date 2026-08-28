@@ -17,8 +17,8 @@ import {
 	ensureAgentDir,
 	registerAgent,
 	resolveAgentDir,
-} from "@oh-my-pi/pi-coding-agent/skeleton";
-import { isEnoent, logger } from "@oh-my-pi/pi-utils";
+} from "@cornfield/coding-agent/skeleton";
+import { isEnoent, logger } from "@cornfield/utils";
 import { ActionRegistry } from "./action-registry";
 import { AgentBridge, type AgentBridgeOptions } from "./agent-bridge";
 import { createBridgeStatusToolDefinitions } from "./bridge-status-tool";
@@ -59,17 +59,17 @@ export function buildChannelKey(channelId: string, accountId?: string): string {
 }
 
 /**
- * Register a gateway account's agentDir in `~/.omp/agent/registry.json` —
+ * Register a gateway account's agentDir in `~/.cornfield/agent/registry.json` —
  * but never pollute the real user registry with test-mode temp dirs
  * (`pi-gw-pipeline-*` / `pi-gw-slash-*` under `os.tmpdir()`).
  *
  * Context: integration/e2e tests (repro-inject, test-longtask) boot a real
- * gateway with `OMP_GATEWAY_TEST_MODE=1` and temp agentDirs; without this
+ * gateway with `CORNFIELD_GATEWAY_TEST_MODE=1` and temp agentDirs; without this
  * guard their registerAgent() writes clobbered real account paths, which
  * `omp serve` later reads → agents pointing at vanished temp dirs.
  */
 async function registerAccountAgent(accountId: string, agentDir: string, log: typeof logger): Promise<void> {
-	const isTestMode = process.env.OMP_GATEWAY_TEST_MODE === "1";
+	const isTestMode = process.env.CORNFIELD_GATEWAY_TEST_MODE === "1";
 	const isTempDir = agentDir.startsWith(os.tmpdir());
 	if (isTestMode && isTempDir) {
 		log.debug("Skipping registerAgent for test-mode temp agentDir", { accountId, agentDir });
@@ -208,7 +208,7 @@ export async function createAccountBridgeOptions(
 	let model = account.model ?? agentConfig?.model;
 	if (!model) {
 		try {
-			const settingsPath = path.join(agentDir, ".omp", "settings.json");
+			const settingsPath = path.join(agentDir, ".cornfield", "settings.json");
 			const settings = JSON.parse(await Bun.file(settingsPath).text());
 			if (settings.modelRoles?.default) {
 				model = settings.modelRoles.default;
@@ -271,7 +271,7 @@ export class Gateway {
 	#channelFactory?: (accountId?: string) => DingTalkChannel;
 	/**
 	 * Test injection HTTP server. Only started when
-	 * `OMP_GATEWAY_TEST_MODE=1` AND this is a non-production build.
+	 * `CORNFIELD_GATEWAY_TEST_MODE=1` AND this is a non-production build.
 	 * Listens on 127.0.0.1 only. See `injectTestEndpoint`.
 	 */
 	#testServer: { stop: () => void; port: number } | null = null;
@@ -525,7 +525,7 @@ export class Gateway {
 		// integration tests push real `DingTalkRawMessage` payloads
 		// into the running gateway without going through the Stream
 		// SDK. See `injectTestEndpoint` for the API contract.
-		if (process.env.OMP_GATEWAY_TEST_MODE === "1") {
+		if (process.env.CORNFIELD_GATEWAY_TEST_MODE === "1") {
 			await this.#startTestServer();
 		}
 	}
@@ -633,12 +633,12 @@ export class Gateway {
 					logger.warn("Failed to register agentDir", { accountId, agentDir, error: String(err) });
 				}
 
-				// Card think filter: agentDir/.omp/config.yml is canonical
-				// (same key as omp TUI); gateway.json is legacy fallback only.
+				// Card think filter: agentDir/.cornfield/config.yml is canonical
+				// (same key as cornfield TUI); gateway.json is legacy fallback only.
 				channel.setHideThinkingBlock(await resolveHideThinkingBlock(agentDir, account.hideThinkingBlock ?? false));
 
 				// Create per-account agent bridge with account-specific config
-				// Model is loaded from agentDir/.omp/config.yml by omp itself
+				// Model is loaded from agentDir/.cornfield/config.yml by cornfield itself
 				const dispatcher = this.#buildHostToolDispatcher(agentDir, accountId);
 				const bridge = new AgentBridge(
 					await createAccountBridgeOptions(this.#config.agent, accountId, account, agentDir, dispatcher),
@@ -1179,7 +1179,7 @@ export class Gateway {
 	// ═══════════════════════════════════════════════════════════════
 	//
 	// Generic injection endpoint for production-environment
-	// integration tests. When `OMP_GATEWAY_TEST_MODE=1` is set in the
+	// integration tests. When `CORNFIELD_GATEWAY_TEST_MODE=1` is set in the
 	// gateway's environment, `start()` spins up a localhost-only HTTP
 	// server that accepts `POST /test/inject` with a real
 	// `DingTalkRawMessage` payload and routes it through the same
@@ -1206,7 +1206,7 @@ export class Gateway {
 	// gateway behavior end-to-end against a real production daemon.
 	// It is NOT a public API and must be gated by env var.
 	async #startTestServer(): Promise<void> {
-		const port = Number.parseInt(process.env.OMP_GATEWAY_TEST_PORT ?? "7890", 10);
+		const port = Number.parseInt(process.env.CORNFIELD_GATEWAY_TEST_PORT ?? "7890", 10);
 		const host = "127.0.0.1";
 		// Capture the registry + factory in locals so the fetch handler
 		// (which runs with `this` bound to Bun's Server) can route through

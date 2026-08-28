@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { setAgentDir, setConfigRootDir } from "@oh-my-pi/pi-utils";
+import { setAgentDir, setConfigRootDir } from "@cornfield/utils";
 import type { ToolSession } from ".";
 import { IdentityTool } from "./identity";
 
@@ -22,8 +22,8 @@ function makeTool(): IdentityTool {
 
 beforeEach(async () => {
 	tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "identity-test-"));
-	originalAgentDir = (await import("@oh-my-pi/pi-utils")).getAgentDir();
-	originalEnv = process.env.PI_CODING_AGENT_DIR;
+	originalAgentDir = (await import("@cornfield/utils")).getAgentDir();
+	originalEnv = process.env.CORNFIELD_AGENT_DIR;
 
 	setConfigRootDir(tmpDir);
 	setAgentDir(tmpDir);
@@ -32,9 +32,9 @@ beforeEach(async () => {
 afterEach(async () => {
 	setAgentDir(originalAgentDir);
 	if (originalEnv === undefined) {
-		delete process.env.PI_CODING_AGENT_DIR;
+		delete process.env.CORNFIELD_AGENT_DIR;
 	} else {
-		process.env.PI_CODING_AGENT_DIR = originalEnv;
+		process.env.CORNFIELD_AGENT_DIR = originalEnv;
 	}
 	setConfigRootDir(undefined);
 	await fs.rm(tmpDir, { recursive: true, force: true });

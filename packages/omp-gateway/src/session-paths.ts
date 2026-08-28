@@ -9,14 +9,14 @@
  *   1. <agentDir>/sessions/cron_<ts>.jsonl
  *      (set explicitly by the gateway cron path)
  *
- *   2. ~/.omp/agent/sessions/<encoded-cwd>/by-date/...
+ *   2. ~/.cornfield/agent/sessions/<encoded-cwd>/by-date/...
  *      (computed silently by the OMP child when no explicit path was set)
  *
  * That ambiguity is the root cause of:
  *   - "agent session path" being empty in the executions table for some runs
  *   - sibling `cron_<id>/` directories that no .jsonl ever lives in
  *   - the old `findAgentSessionPath` having to walk the entire
- *     `~/.omp/agent/sessions/` tree to find any cron session
+ *     `~/.cornfield/agent/sessions/` tree to find any cron session
  *
  * After this module, ALL session files for an agent live in a single tree:
  *
@@ -124,7 +124,7 @@ const INTERACTIVE_FILE = /^\d{6}(?:-[a-z0-9-]+)?__[0-9a-f]{8}\.jsonl$/;
  * previous implementation).
  *
  * Scans ONLY `<agentDir>/sessions/`. Does NOT fall back to
- * `~/.omp/agent/sessions/` — that path is no longer authoritative for
+ * `~/.cornfield/agent/sessions/` — that path is no longer authoritative for
  * gateway-managed agents.
  *
  * Returns the path of the most recently mtime'd match, or undefined.

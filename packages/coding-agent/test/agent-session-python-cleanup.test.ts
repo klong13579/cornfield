@@ -2,15 +2,15 @@ import { afterEach, describe, expect, it, vi } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { getBundledModel } from "@oh-my-pi/pi-ai";
-import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import * as pythonExecutor from "@oh-my-pi/pi-coding-agent/ipy/executor";
-import type { PreludeHelper, PythonKernel as PythonKernelInstance } from "@oh-my-pi/pi-coding-agent/ipy/kernel";
-import * as pythonKernel from "@oh-my-pi/pi-coding-agent/ipy/kernel";
-import * as memories from "@oh-my-pi/pi-coding-agent/memories";
-import { createAgentSession, type ExtensionFactory } from "@oh-my-pi/pi-coding-agent/sdk";
-import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
-import { Snowflake } from "@oh-my-pi/pi-utils";
+import { getBundledModel } from "@cornfield/ai";
+import { Settings } from "@cornfield/coding-agent/config/settings";
+import * as pythonExecutor from "@cornfield/coding-agent/ipy/executor";
+import type { PreludeHelper, PythonKernel as PythonKernelInstance } from "@cornfield/coding-agent/ipy/kernel";
+import * as pythonKernel from "@cornfield/coding-agent/ipy/kernel";
+import * as memories from "@cornfield/coding-agent/memories";
+import { createAgentSession, type ExtensionFactory } from "@cornfield/coding-agent/sdk";
+import { SessionManager } from "@cornfield/coding-agent/session/session-manager";
+import { Snowflake } from "@cornfield/utils";
 
 const OK_EXECUTION = { status: "ok", cancelled: false, timedOut: false, stdinRequested: false } as const;
 

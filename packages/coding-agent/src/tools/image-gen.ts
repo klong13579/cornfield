@@ -1,13 +1,13 @@
 import * as os from "node:os";
 import * as path from "node:path";
-import { getAntigravityHeaders, getEnvApiKey, type Model, StringEnum } from "@oh-my-pi/pi-ai";
+import { getAntigravityHeaders, getEnvApiKey, type Model, StringEnum } from "@cornfield/ai";
 import {
 	CODEX_BASE_URL,
 	getCodexAccountId,
 	OPENAI_HEADER_VALUES,
 	OPENAI_HEADERS,
 	URL_PATHS,
-} from "@oh-my-pi/pi-ai/providers/openai-codex/constants";
+} from "@cornfield/ai/providers/openai-codex/constants";
 import {
 	$env,
 	isEnoent,
@@ -17,7 +17,7 @@ import {
 	readSseJson,
 	Snowflake,
 	untilAborted,
-} from "@oh-my-pi/pi-utils";
+} from "@cornfield/utils";
 import { type Static, Type } from "@sinclair/typebox";
 import packageJson from "../../package.json" with { type: "json" };
 import { isAuthenticated, type ModelRegistry } from "../config/model-registry";

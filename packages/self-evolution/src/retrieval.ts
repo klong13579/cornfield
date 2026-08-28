@@ -1,5 +1,5 @@
-import type { Model } from "@oh-my-pi/pi-ai";
-import { logger, prompt } from "@oh-my-pi/pi-utils";
+import type { Model } from "@cornfield/ai";
+import { logger, prompt } from "@cornfield/utils";
 import rerankEpisodesTemplate from "./prompts/rerank-episodes.md" with { type: "text" };
 import rerankEpisodesInputTemplate from "./prompts/rerank-episodes-input.md" with { type: "text" };
 import type { EpisodicBackend } from "./storage/episodic-backend";

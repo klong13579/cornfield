@@ -18,7 +18,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 import { $ } from "bun";
 import { DWClient, type DWClientDownStream, TOPIC_CARD, TOPIC_ROBOT } from "dingtalk-stream";
 import type {
@@ -404,7 +404,7 @@ export class DingTalkChannel extends BaseChannel {
 	 * Card. The omp agent still emits thinking deltas; the channel
 	 * just discards them instead of forwarding to `buildThinkBlock`.
 	 * Set by the gateway via `resolveHideThinkingBlock` — agentDir
-	 * `.omp/config.yml` is canonical; `gateway.json` is legacy fallback.
+	 * `.cornfield/config.yml` is canonical; `gateway.json` is legacy fallback.
 	 */
 	#hideThinkingBlock = false;
 	/**
@@ -524,7 +524,7 @@ export class DingTalkChannel extends BaseChannel {
 	 * Card via `buildThinkBlock`. The model still thinks; the card
 	 * just doesn't show it. Set by the gateway from
 	 * Prefer resolving via `resolveHideThinkingBlock(agentDir)` so the
-	 * value matches `<agentDir>/.omp/config.yml`.
+	 * value matches `<agentDir>/.cornfield/config.yml`.
 	 */
 	setHideThinkingBlock(hide: boolean): void {
 		this.#hideThinkingBlock = hide;
@@ -2895,7 +2895,7 @@ export class DingTalkChannel extends BaseChannel {
 	// gateway is running as a daemon and we want to simulate a user
 	// message without manually opening DingTalk. Callers are expected to
 	// gate the test HTTP endpoint (see `Gateway.injectTestEndpoint`)
-	// behind `OMP_GATEWAY_TEST_MODE=1`.
+	// behind `CORNFIELD_GATEWAY_TEST_MODE=1`.
 	//
 	// Returns the parsed `InboundMessage` on success so callers can
 	// assert on `conversationId`, `userId`, etc. without re-parsing.

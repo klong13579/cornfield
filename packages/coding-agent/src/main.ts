@@ -10,8 +10,8 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { createInterface } from "node:readline/promises";
-import type { ImageContent } from "@oh-my-pi/pi-ai";
-import { $env, getConfigDirName, getProjectDir, logger, postmortem, setProjectDir, VERSION } from "@oh-my-pi/pi-utils";
+import type { ImageContent } from "@cornfield/ai";
+import { $env, getConfigDirName, getProjectDir, logger, postmortem, setProjectDir, VERSION } from "@cornfield/utils";
 import chalk from "chalk";
 import { invalidate as invalidateFsCache } from "./capability/fs";
 import type { Args } from "./cli/args";
@@ -75,7 +75,7 @@ async function checkForNewVersion(currentVersion: string): Promise<string | unde
 	try {
 		const controller = new AbortController();
 		const timeout = setTimeout(() => controller.abort(), UPDATE_CHECK_TIMEOUT_MS);
-		const response = await fetch("https://registry.npmjs.org/@oh-my-pi/pi-coding-agent/latest", {
+		const response = await fetch("https://registry.npmjs.org/@cornfield/coding-agent/latest", {
 			signal: controller.signal,
 		});
 		clearTimeout(timeout);

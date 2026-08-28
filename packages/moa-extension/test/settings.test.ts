@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "bun:test";
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 import { DEFAULT_SETTINGS, resolveSettings } from "../src/settings";
 import type { MoaSettings } from "../src/types";
 

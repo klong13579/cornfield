@@ -6,11 +6,11 @@
  */
 import type { Database } from "bun:sqlite";
 import * as path from "node:path";
-import { Pipeline } from "@oh-my-pi/cognitive-coordination/assembler";
-import { validateSkill } from "@oh-my-pi/cognitive-coordination/sandbox";
-import type { ExtensionAPI, ExtensionFactory } from "@oh-my-pi/pi-coding-agent/extensibility/extensions";
+import type { ExtensionAPI, ExtensionFactory } from "@cornfield/coding-agent/extensibility/extensions";
+import { Pipeline } from "@cornfield/cognitive-coordination/assembler";
+import { validateSkill } from "@cornfield/cognitive-coordination/sandbox";
 
-import { getAgentDir, getSessionsDir, isEnoent, logger } from "@oh-my-pi/pi-utils";
+import { getAgentDir, getSessionsDir, isEnoent, logger } from "@cornfield/utils";
 import { isSkillEligibleForInjection } from "./benefit-admission";
 import { refreshBenefitAdmissionState } from "./benefit-admission-refresh";
 import {

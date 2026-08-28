@@ -19,7 +19,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { ensureAgentDir } from "@oh-my-pi/pi-coding-agent/skeleton";
+import { ensureAgentDir } from "@cornfield/coding-agent/skeleton";
 import { ActionRegistry } from "../src/action-registry";
 import { AgentBridge } from "../src/agent-bridge";
 import { DingTalkChannel } from "../src/channels/dingtalk";

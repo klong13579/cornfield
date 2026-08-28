@@ -1,4 +1,4 @@
-import type { AvailableModelsDto } from "@oh-my-pi/pi-wire";
+import type { AvailableModelsDto } from "@cornfield/wire";
 import { useEffect, useState } from "react";
 import { useSessionStore } from "../../state/session-store";
 import { useSession } from "../../state/use-session";

@@ -13,7 +13,7 @@
 import * as fs from "node:fs";
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
-import { getConfigRootDir, logger } from "@oh-my-pi/pi-utils";
+import { getConfigRootDir, logger } from "@cornfield/utils";
 import type { ModelRegistry } from "../config/model-registry";
 import { parseModelString } from "../config/model-resolver";
 import { settings } from "../config/settings";

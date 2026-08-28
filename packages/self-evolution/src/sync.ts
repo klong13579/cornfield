@@ -8,7 +8,7 @@
 import type { Database } from "bun:sqlite";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 
 import { HeuristicSkillEvaluator, type ScoreBreakdown } from "./evaluator";
 import { formatSkillMarkdown } from "./skill-format";

@@ -23,18 +23,18 @@ import { RotatingFileTransport } from "../src/rotating-file-transport";
 
 describe("RotatingFileTransport", () => {
 	const originalHome = process.env.HOME;
-	const originalPiDir = process.env.PI_CODING_AGENT_DIR;
+	const originalPiDir = process.env.CORNFIELD_AGENT_DIR;
 	let tmpHome: string;
 
 	beforeEach(() => {
 		tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "omp-logger-test-"));
 		process.env.HOME = tmpHome;
-		process.env.PI_CODING_AGENT_DIR = path.join(tmpHome, "agent");
+		process.env.CORNFIELD_AGENT_DIR = path.join(tmpHome, "agent");
 	});
 
 	afterEach(() => {
 		process.env.HOME = originalHome;
-		process.env.PI_CODING_AGENT_DIR = originalPiDir;
+		process.env.CORNFIELD_AGENT_DIR = originalPiDir;
 		fs.rmSync(tmpHome, { recursive: true, force: true });
 	});
 

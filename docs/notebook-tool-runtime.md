@@ -119,7 +119,7 @@ Resource exhaustion recovery:
 
 Kernel startup receives the optional session file path from executor:
 
-- `PI_SESSION_FILE` (session state file path)
+- `CORNFIELD_SESSION_FILE` (session state file path)
 
 `PythonKernel.#initializeKernelEnvironment(...)` then runs init script inside kernel to:
 
@@ -141,7 +141,7 @@ The kernel client processes Jupyter protocol messages per execution:
   - structured outputs captured separately:
     - `application/json` -> `{ type: "json" }`
     - `image/png` -> `{ type: "image" }`
-    - `application/x-omp-status` -> `{ type: "status" }` (no text emission)
+    - `application/x-cornfield-status` -> `{ type: "status" }` (no text emission)
 - `error` -> traceback text pushed to chunk stream + structured error metadata
 - `input_request` -> emits stdin warning text, sends empty `input_reply`, marks stdin requested
 - completion waits for both `execute_reply` and kernel `status=idle`

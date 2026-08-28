@@ -10,7 +10,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as zlib from "node:zlib";
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 import type { DingTalkConfig, InboundAttachment } from "../types";
 import { getAccessToken } from "./dingtalk-card";
 

@@ -1,6 +1,6 @@
-import type { Theme } from "@oh-my-pi/pi-coding-agent";
-import type { Component } from "@oh-my-pi/pi-tui";
-import { Ellipsis, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@oh-my-pi/pi-tui";
+import type { Theme } from "@cornfield/coding-agent";
+import type { Component } from "@cornfield/tui";
+import { Ellipsis, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@cornfield/tui";
 import type { Message, SessionInfo } from "../types";
 
 /** Number of message lines shown in the collapsed preview. Matches PREVIEW_LIMITS.OUTPUT_COLLAPSED (read tool). */

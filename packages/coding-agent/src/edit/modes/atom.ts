@@ -16,8 +16,8 @@
 
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import type { AgentToolResult } from "@oh-my-pi/pi-agent-core";
-import { isEnoent } from "@oh-my-pi/pi-utils";
+import type { AgentToolResult } from "@cornfield/agent";
+import { isEnoent } from "@cornfield/utils";
 import { type Static, Type } from "@sinclair/typebox";
 import type { WritethroughCallback, WritethroughDeferredHandle } from "../../lsp";
 import type { ToolSession } from "../../tools";

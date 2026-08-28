@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test } from "bun:test";
-import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
-import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
+import { AgentRegistry } from "@cornfield/coding-agent/registry/agent-registry";
+import type { AgentSession } from "@cornfield/coding-agent/session/agent-session";
 
 const fakeSession = {} as AgentSession;
 

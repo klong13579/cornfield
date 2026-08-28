@@ -1,4 +1,4 @@
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 import type { RetrievedEpisode } from "./context-aware-retriever";
 import type { Learning } from "./types";
 

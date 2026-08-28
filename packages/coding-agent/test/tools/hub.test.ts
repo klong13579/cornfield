@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, test } from "bun:test";
-import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
-import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
-import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
-import { HubTool } from "@oh-my-pi/pi-coding-agent/tools/hub";
-import type { HubDetails } from "@oh-my-pi/pi-coding-agent/tools/hub/types";
+import { Settings } from "@cornfield/coding-agent/config/settings";
+import { AgentRegistry } from "@cornfield/coding-agent/registry/agent-registry";
+import type { AgentSession } from "@cornfield/coding-agent/session/agent-session";
+import type { ToolSession } from "@cornfield/coding-agent/tools";
+import { HubTool } from "@cornfield/coding-agent/tools/hub";
+import type { HubDetails } from "@cornfield/coding-agent/tools/hub/types";
 
 const fakeSession = {} as AgentSession;
 

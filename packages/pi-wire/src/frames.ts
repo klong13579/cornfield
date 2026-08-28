@@ -1,4 +1,4 @@
-import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
+import type { AgentMessage } from "@cornfield/agent";
 import type { WireCommand, WireHostToolDefinition } from "./commands";
 
 /**

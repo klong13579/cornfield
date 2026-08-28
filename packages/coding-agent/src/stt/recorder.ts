@@ -6,8 +6,8 @@
  * the WAV in JS on stop.
  */
 import * as fsp from "node:fs/promises";
-import { AudioCapture } from "@oh-my-pi/pi-natives";
-import { logger } from "@oh-my-pi/pi-utils";
+import { AudioCapture } from "@cornfield/natives";
+import { logger } from "@cornfield/utils";
 import { encodeWav, float32ToPcm16, rmsLevel } from "./pcm";
 
 export interface RecordingHandle {

@@ -27,7 +27,7 @@
  * card body instead of a silent broken player.
  */
 
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 
 /** Coarse kind for routing media through DingTalk. */
 export type FileKind = "image" | "audio" | "video" | "document" | "unsupported";

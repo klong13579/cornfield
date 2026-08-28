@@ -6,8 +6,8 @@
  *   bun packages/coding-agent/scripts/analyze-default-prompt-size.ts [--cwd <dir>] [--no-mcp]
  */
 import * as path from "node:path";
-import { countTokens } from "@oh-my-pi/pi-natives";
-import { getProjectDir } from "@oh-my-pi/pi-utils";
+import { countTokens } from "@cornfield/natives";
+import { getProjectDir } from "@cornfield/utils";
 import { computeContextBreakdown } from "../src/modes/utils/context-usage";
 import { createAgentSession } from "../src/sdk";
 

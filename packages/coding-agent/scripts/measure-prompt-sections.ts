@@ -7,9 +7,9 @@
  */
 import * as os from "node:os";
 import * as path from "node:path";
-import { INTENT_FIELD } from "@oh-my-pi/pi-agent-core";
-import { buildSystemPrompt } from "@oh-my-pi/pi-coding-agent/system-prompt";
-import { countTokens } from "@oh-my-pi/pi-natives";
+import { INTENT_FIELD } from "@cornfield/agent";
+import { buildSystemPrompt } from "@cornfield/coding-agent/system-prompt";
+import { countTokens } from "@cornfield/natives";
 import contractPartial from "../src/prompts/system/_contract.md" with { type: "text" };
 import environmentPartial from "../src/prompts/system/_environment.md" with { type: "text" };
 import identityPartial from "../src/prompts/system/_identity.md" with { type: "text" };

@@ -1,14 +1,14 @@
 {
 	"type": "module",
-	"name": "@oh-my-pi/self-evolution",
+	"name": "@cornfield/self-evolution",
 	"version": "0.19.2",
-	"description": "Self-evolution plugin for oh-my-pi: automatic skill extraction and episodic memory",
-	"homepage": "https://github.com/can1357/oh-my-pi",
+	"description": "Self-evolution plugin for CornField: automatic skill extraction and episodic memory",
+	"homepage": "https://github.com/klong13579/cornfield",
 	"author": "Can Boluk",
 	"license": "MIT",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/can1357/oh-my-pi.git",
+		"url": "git+https://github.com/klong13579/cornfield.git",
 		"directory": "packages/self-evolution"
 	},
 	"main": "./src/index.ts",
@@ -22,10 +22,10 @@
 		"fmt": "biome format --write ."
 	},
 	"dependencies": {
-		"@oh-my-pi/cognitive-coordination": "workspace:*",
-		"@oh-my-pi/pi-ai": "catalog:",
-		"@oh-my-pi/pi-coding-agent": "catalog:",
-		"@oh-my-pi/pi-utils": "catalog:"
+		"@cornfield/cognitive-coordination": "workspace:*",
+		"@cornfield/ai": "catalog:",
+		"@cornfield/coding-agent": "catalog:",
+		"@cornfield/utils": "catalog:"
 	},
 	"devDependencies": {
 		"@sinclair/typebox": "catalog:",

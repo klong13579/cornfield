@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it } from "bun:test";
-import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
-import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
-import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
-import { IrcTool } from "@oh-my-pi/pi-coding-agent/tools/irc";
+import { Settings } from "@cornfield/coding-agent/config/settings";
+import { AgentRegistry } from "@cornfield/coding-agent/registry/agent-registry";
+import type { AgentSession } from "@cornfield/coding-agent/session/agent-session";
+import type { ToolSession } from "@cornfield/coding-agent/tools";
+import { IrcTool } from "@cornfield/coding-agent/tools/irc";
 
 interface FakeSession {
 	session: AgentSession;

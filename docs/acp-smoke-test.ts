@@ -1,21 +1,21 @@
 #!/usr/bin/env bun
-// ACP v1 smoke test for the OMP Zed external agent.
+// ACP v1 smoke test for the CornField Zed external agent.
 //
-// Spawns `omp acp` and drives two newline-delimited JSON-RPC 2.0 round-trips
+// Spawns `cornfield acp` and drives two newline-delimited JSON-RPC 2.0 round-trips
 // over the subprocess stdin/stdout:
 //   1. `initialize` — the mandatory ACP v1 handshake (negotiate protocolVersion).
 //   2. `_ping`      — a custom liveness probe (ACP extensibility: custom
 //                     methods use a leading `_`), expecting a `"pong"` result.
 //
-// ACP v1 has no built-in `ping` method; `_ping`/`pong` is an OMP-side contract
+// ACP v1 has no built-in `ping` method; `_ping`/`pong` is a CornField-side contract
 // defined for this smoke test. The `initialize` handshake is the mandatory part.
 //
 // Standalone: no package imports. Run with `bun docs/acp-smoke-test.ts`.
-// Env overrides: OMP_BIN (default `omp`), ACP_SMOKE_TIMEOUT_MS (default 5000).
+// Env overrides: CORNFIELD_BIN (default `cornfield`), ACP_SMOKE_TIMEOUT_MS (default 5000).
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 
-const OMP_BIN = process.env.OMP_BIN ?? "omp";
+const CORNFIELD_BIN = process.env.CORNFIELD_BIN ?? "cornfield";
 const ACP_ARGS = ["acp"];
 const TIMEOUT_MS = Number(process.env.ACP_SMOKE_TIMEOUT_MS ?? 5000);
 
@@ -57,7 +57,7 @@ const ping: JsonRpcMessage = {
 
 let nonJsonStdoutLines = 0;
 
-const child = spawn(OMP_BIN, ACP_ARGS, {
+const child = spawn(CORNFIELD_BIN, ACP_ARGS, {
   stdio: ["pipe", "pipe", "pipe"] as ["pipe", "pipe", "pipe"],
 });
 
@@ -66,10 +66,10 @@ child.stderr.pipe(process.stderr);
 child.on("error", (err: { code?: string; message: string }) => {
   if (err.code === "ENOENT") {
     fail(
-      `command '${OMP_BIN}' not found on PATH — expected 'omp acp' to implement ACP v1 over stdio`,
+      `command '${CORNFIELD_BIN}' not found on PATH — expected 'cornfield acp' to implement ACP v1 over stdio`,
     );
   }
-  fail(`failed to spawn '${OMP_BIN} ${ACP_ARGS.join(" ")}': ${err.message}`);
+  fail(`failed to spawn '${CORNFIELD_BIN} ${ACP_ARGS.join(" ")}': ${err.message}`);
 });
 
 let exited = false;
@@ -81,7 +81,7 @@ child.on("exit", (code) => {
 
 function notAnAcpServerHint(): string {
   if (nonJsonStdoutLines === 0) return "";
-  return ` (received ${nonJsonStdoutLines} non-JSON stdout lines — is 'omp acp' an ACP server?)`;
+  return ` (received ${nonJsonStdoutLines} non-JSON stdout lines — is 'cornfield acp' an ACP server?)`;
 }
 
 const timer = setTimeout(() => {
@@ -157,7 +157,7 @@ async function main(): Promise<void> {
 main().catch((err: unknown) => {
   clearTimeout(timer);
   child.kill("SIGTERM");
-  const hint = exited ? ` (omp exited with code ${exitCode})` : notAnAcpServerHint();
+  const hint = exited ? ` (cornfield exited with code ${exitCode})` : notAnAcpServerHint();
   const message = err instanceof Error ? (err.stack ?? err.message) : String(err);
   fail(`${message}${hint}`);
 });

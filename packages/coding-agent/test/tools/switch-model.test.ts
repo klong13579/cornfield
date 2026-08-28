@@ -1,7 +1,7 @@
 import { describe, expect, it, mock } from "bun:test";
-import type { Model } from "@oh-my-pi/pi-ai";
-import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
-import { resolveModel, SwitchModelTool } from "@oh-my-pi/pi-coding-agent/tools/switch-model";
+import type { Model } from "@cornfield/ai";
+import type { ToolSession } from "@cornfield/coding-agent/tools";
+import { resolveModel, SwitchModelTool } from "@cornfield/coding-agent/tools/switch-model";
 
 function makeModel(overrides: Partial<Model> & Pick<Model, "provider" | "id">): Model {
 	return {

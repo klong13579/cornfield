@@ -2,10 +2,10 @@ import { describe, expect, it } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { adaptSchemaForStrict } from "@oh-my-pi/pi-ai/utils/schema";
-import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { ToolChoiceQueue } from "@oh-my-pi/pi-coding-agent/session/tool-choice-queue";
-import { createTools, type ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
+import { adaptSchemaForStrict } from "@cornfield/ai/utils/schema";
+import { Settings } from "@cornfield/coding-agent/config/settings";
+import { ToolChoiceQueue } from "@cornfield/coding-agent/session/tool-choice-queue";
+import { createTools, type ToolSession } from "@cornfield/coding-agent/tools";
 
 type InvokedToolResult = {
 	content: Array<{ type: string; text?: string }>;

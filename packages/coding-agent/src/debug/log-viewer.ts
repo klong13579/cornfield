@@ -1,4 +1,4 @@
-import { sanitizeText } from "@oh-my-pi/pi-natives";
+import { sanitizeText } from "@cornfield/natives";
 import {
 	type Component,
 	extractPrintableText,
@@ -7,7 +7,7 @@ import {
 	replaceTabs,
 	truncateToWidth,
 	visibleWidth,
-} from "@oh-my-pi/pi-tui";
+} from "@cornfield/tui";
 import { theme } from "../modes/theme/theme";
 import { copyToClipboard } from "../utils/clipboard";
 import {

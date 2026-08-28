@@ -1,4 +1,4 @@
-import { prompt } from "@oh-my-pi/pi-utils";
+import { prompt } from "@cornfield/utils";
 import workerPromptTemplate from "./prompts/worker.md" with { type: "text" };
 import {
 	DEFAULT_OUTPUT_SCHEMA,

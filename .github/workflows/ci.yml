@@ -1,4 +1,4 @@
-# CI — oh-my-pi monorepo
+# CI — cornfield monorepo
 name: CI
 
 on:
@@ -111,8 +111,8 @@ jobs:
       - name: Upload native addon(s)
         uses: actions/upload-artifact@v4
         with:
-          name: pi-natives-${{ matrix.platform }}-${{ matrix.arch }}
-          path: packages/natives/native/pi_natives.${{ matrix.platform }}-${{ matrix.arch }}*.node
+          name: cornfield-natives-${{ matrix.platform }}-${{ matrix.arch }}
+          path: packages/natives/native/cornfield_natives.${{ matrix.platform }}-${{ matrix.arch }}*.node
           if-no-files-found: error
 
   test:
@@ -146,7 +146,7 @@ jobs:
       - name: Download native addon(s)
         uses: actions/download-artifact@v4
         with:
-          name: pi-natives-linux-x64
+          name: cornfield-natives-linux-x64
           path: packages/natives/native
       - name: Test workspace (TS shard)
         # --parallel=1: serial file execution stabilizes the worker-level env
@@ -159,7 +159,7 @@ jobs:
         run: bun run ci:test:smoke
 
   install_methods:
-    if: github.repository == 'can1357/oh-my-pi'
+    if: github.repository == 'klong13579/cornfield'
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -228,29 +228,29 @@ jobs:
         include:
           - os: ubuntu-22.04
             target_id: linux-x64
-            native_artifact: pi-natives-linux-x64
-            binary_path: packages/coding-agent/binaries/omp-linux-x64
-            gateway_path: packages/coding-agent/binaries/omp-gateway-linux-x64
+            native_artifact: cornfield-natives-linux-x64
+            binary_path: packages/coding-agent/binaries/cornfield-linux-x64
+            gateway_path: packages/coding-agent/binaries/cornfield-gateway-linux-x64
           - os: ubuntu-24.04-arm
             target_id: linux-arm64
-            native_artifact: pi-natives-linux-arm64
-            binary_path: packages/coding-agent/binaries/omp-linux-arm64
-            gateway_path: packages/coding-agent/binaries/omp-gateway-linux-arm64
+            native_artifact: cornfield-natives-linux-arm64
+            binary_path: packages/coding-agent/binaries/cornfield-linux-arm64
+            gateway_path: packages/coding-agent/binaries/cornfield-gateway-linux-arm64
           - os: macos-15-intel
             target_id: darwin-x64
-            native_artifact: pi-natives-darwin-x64
-            binary_path: packages/coding-agent/binaries/omp-darwin-x64
-            gateway_path: packages/coding-agent/binaries/omp-gateway-darwin-x64
+            native_artifact: cornfield-natives-darwin-x64
+            binary_path: packages/coding-agent/binaries/cornfield-darwin-x64
+            gateway_path: packages/coding-agent/binaries/cornfield-gateway-darwin-x64
           - os: macos-14
             target_id: darwin-arm64
-            native_artifact: pi-natives-darwin-arm64
-            binary_path: packages/coding-agent/binaries/omp-darwin-arm64
-            gateway_path: packages/coding-agent/binaries/omp-gateway-darwin-arm64
+            native_artifact: cornfield-natives-darwin-arm64
+            binary_path: packages/coding-agent/binaries/cornfield-darwin-arm64
+            gateway_path: packages/coding-agent/binaries/cornfield-gateway-darwin-arm64
           - os: windows-latest
             target_id: win32-x64
-            native_artifact: pi-natives-win32-x64
-            binary_path: packages/coding-agent/binaries/omp-windows-x64.exe
-            gateway_path: packages/coding-agent/binaries/omp-gateway-windows-x64.exe
+            native_artifact: cornfield-natives-win32-x64
+            binary_path: packages/coding-agent/binaries/cornfield-windows-x64.exe
+            gateway_path: packages/coding-agent/binaries/cornfield-gateway-windows-x64.exe
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
@@ -286,7 +286,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $runtimeDir = Join-Path $env:TEMP ("omp-runtime-" + [System.Guid]::NewGuid().ToString("N"))
+          $runtimeDir = Join-Path $env:TEMP ("cornfield-runtime-" + [System.Guid]::NewGuid().ToString("N"))
           New-Item -ItemType Directory -Force -Path $runtimeDir | Out-Null
           $env:HOME = Join-Path $runtimeDir "home"
           $env:XDG_DATA_HOME = Join-Path $runtimeDir "xdg"
@@ -295,7 +295,7 @@ jobs:
       - name: Upload release binary artifact
         uses: actions/upload-artifact@v4
         with:
-          name: omp-binary-${{ matrix.target_id }}
+          name: cornfield-binary-${{ matrix.target_id }}
           path: |
             ${{ matrix.binary_path }}
             ${{ matrix.gateway_path }}
@@ -322,7 +322,7 @@ jobs:
       - name: Download native addon(s)
         uses: actions/download-artifact@v4
         with:
-          name: pi-natives-darwin-arm64
+          name: cornfield-natives-darwin-arm64
           path: packages/natives/native
       - name: Build desktop app (dmg + zip + latest.yml)
         run: bun run build:desktop
@@ -330,7 +330,7 @@ jobs:
       - name: Upload desktop artifact
         uses: actions/upload-artifact@v4
         with:
-          name: omp-desktop-darwin-arm64
+          name: cornfield-desktop-darwin-arm64
           path: |
             packages/desktop/dist/*.dmg
             packages/desktop/dist/*.zip
@@ -365,19 +365,19 @@ jobs:
       - name: Download release binaries
         uses: actions/download-artifact@v4
         with:
-          pattern: omp-binary-*
+          pattern: cornfield-binary-*
           path: packages/coding-agent/binaries
           merge-multiple: true
       - name: Download desktop artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: omp-desktop-*
+          pattern: cornfield-desktop-*
           path: packages/desktop/dist
           merge-multiple: true
       - name: Download native addons
         uses: actions/download-artifact@v4
         with:
-          pattern: pi-natives-*
+          pattern: cornfield-natives-*
           path: packages/natives/native
           merge-multiple: true
       - name: Verify native addons

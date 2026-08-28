@@ -24,7 +24,7 @@ import { randomUUID } from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { MULTIDEVICE_PROTOCOL_VERSION } from "@oh-my-pi/pi-wire";
+import { MULTIDEVICE_PROTOCOL_VERSION } from "@cornfield/wire";
 import { waitForServe } from "./wait-for-serve";
 
 const TOKEN_RE = /ws:\/\/127\.0\.0\.1:(\d+)\/ws(\?token=([a-zA-Z0-9]+))?/;

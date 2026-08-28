@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fsp from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { cleanupChunks, joinTranscripts, readWavInfo, splitWavFile } from "@oh-my-pi/pi-coding-agent/stt/chunker";
+import { cleanupChunks, joinTranscripts, readWavInfo, splitWavFile } from "@cornfield/coding-agent/stt/chunker";
 
 let tmpDir: string;
 

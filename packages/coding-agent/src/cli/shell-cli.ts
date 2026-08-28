@@ -5,8 +5,8 @@
  */
 import * as path from "node:path";
 import { createInterface } from "node:readline/promises";
-import { type MinimizerOptions, Shell } from "@oh-my-pi/pi-natives";
-import { APP_NAME, getProjectDir } from "@oh-my-pi/pi-utils";
+import { type MinimizerOptions, Shell } from "@cornfield/natives";
+import { APP_NAME, getProjectDir } from "@cornfield/utils";
 import chalk from "chalk";
 import { Settings, type ShellMinimizerSettings } from "../config/settings";
 import { getOrCreateSnapshot } from "../utils/shell-snapshot";

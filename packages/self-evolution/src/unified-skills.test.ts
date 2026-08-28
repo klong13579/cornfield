@@ -2,7 +2,7 @@ import { Database } from "bun:sqlite";
 import { afterEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { getAgentDir, setAgentDir } from "@oh-my-pi/pi-utils";
+import { getAgentDir, setAgentDir } from "@cornfield/utils";
 import { getUnifiedSkillsDir } from "./skill-storage";
 import { SqliteSkillStore } from "./storage/skills";
 import { loadUnifiedSkillsForInjection } from "./unified-skills";

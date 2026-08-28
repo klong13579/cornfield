@@ -6,8 +6,8 @@
  * compatibility but redirect to the new hierarchy.
  */
 import type { Database } from "bun:sqlite";
-import type { ExtensionAPI, ExtensionCommandContext } from "@oh-my-pi/pi-coding-agent/extensibility/extensions";
-import { getAgentDir, getSessionsDir, logger } from "@oh-my-pi/pi-utils";
+import type { ExtensionAPI, ExtensionCommandContext } from "@cornfield/coding-agent/extensibility/extensions";
+import { getAgentDir, getSessionsDir, logger } from "@cornfield/utils";
 import { queryAdmissionAuditStats } from "./audit-admission-stats";
 import { formatAuditReport } from "./audit-report";
 import { refreshBenefitAdmissionState } from "./benefit-admission-refresh";

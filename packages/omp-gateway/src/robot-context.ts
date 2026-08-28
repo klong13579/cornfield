@@ -14,7 +14,7 @@
  */
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { isEnoent, logger } from "@oh-my-pi/pi-utils";
+import { isEnoent, logger } from "@cornfield/utils";
 import type { SQLiteSessionStore } from "./session-store";
 import type { SessionRecord } from "./types";
 

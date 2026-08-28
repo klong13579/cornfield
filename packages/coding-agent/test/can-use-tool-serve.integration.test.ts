@@ -1,16 +1,10 @@
 import { describe, expect, it } from "bun:test";
-import { agentLoop } from "@oh-my-pi/pi-agent-core/agent-loop";
-import type {
-	AgentContext,
-	AgentLoopConfig,
-	AgentMessage,
-	AgentTool,
-	CanUseToolContext,
-} from "@oh-my-pi/pi-agent-core/types";
-import type { AssistantMessage, Message, Model, Usage, UserMessage } from "@oh-my-pi/pi-ai";
-import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
-import { createApprovalCanUseTool, PermissionGate } from "@oh-my-pi/pi-coding-agent/server/permission-gate";
-import type { PermissionRequestPush } from "@oh-my-pi/pi-wire";
+import { agentLoop } from "@cornfield/agent/agent-loop";
+import type { AgentContext, AgentLoopConfig, AgentMessage, AgentTool, CanUseToolContext } from "@cornfield/agent/types";
+import type { AssistantMessage, Message, Model, Usage, UserMessage } from "@cornfield/ai";
+import { AssistantMessageEventStream } from "@cornfield/ai/utils/event-stream";
+import { createApprovalCanUseTool, PermissionGate } from "@cornfield/coding-agent/server/permission-gate";
+import type { PermissionRequestPush } from "@cornfield/wire";
 import { Type } from "@sinclair/typebox";
 
 /**

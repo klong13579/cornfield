@@ -8,7 +8,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { RpcClient } from "@oh-my-pi/pi-coding-agent/modes";
+import { RpcClient } from "@cornfield/coding-agent/modes";
 
 const tempPaths: string[] = [];
 

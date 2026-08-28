@@ -1,6 +1,6 @@
-import type { AgentTool } from "@oh-my-pi/pi-agent-core";
-import type { Model, ToolChoice } from "@oh-my-pi/pi-ai";
-import { $env, $flag, isBunTestRuntime, logger } from "@oh-my-pi/pi-utils";
+import type { AgentTool } from "@cornfield/agent";
+import type { Model, ToolChoice } from "@cornfield/ai";
+import { $env, $flag, isBunTestRuntime, logger } from "@cornfield/utils";
 import type { AsyncJobManager } from "../async";
 import type { PromptTemplate } from "../config/prompt-templates";
 import type { Settings } from "../config/settings";

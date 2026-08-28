@@ -22,16 +22,16 @@
  * running, we'd see 2+ renders in that window (at 80ms intervals).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
-import type { AssistantMessage } from "@oh-my-pi/pi-ai";
-import { _resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { BashExecutionComponent } from "@oh-my-pi/pi-coding-agent/modes/components/bash-execution";
-import { PythonExecutionComponent } from "@oh-my-pi/pi-coding-agent/modes/components/python-execution";
-import { ToolExecutionComponent } from "@oh-my-pi/pi-coding-agent/modes/components/tool-execution";
-import { EventController } from "@oh-my-pi/pi-coding-agent/modes/controllers/event-controller";
-import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
-import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
-import type { Terminal, TerminalAppearance } from "@oh-my-pi/pi-tui";
-import { Container, TUI } from "@oh-my-pi/pi-tui";
+import type { AssistantMessage } from "@cornfield/ai";
+import { _resetSettingsForTest, Settings } from "@cornfield/coding-agent/config/settings";
+import { BashExecutionComponent } from "@cornfield/coding-agent/modes/components/bash-execution";
+import { PythonExecutionComponent } from "@cornfield/coding-agent/modes/components/python-execution";
+import { ToolExecutionComponent } from "@cornfield/coding-agent/modes/components/tool-execution";
+import { EventController } from "@cornfield/coding-agent/modes/controllers/event-controller";
+import { initTheme } from "@cornfield/coding-agent/modes/theme/theme";
+import type { InteractiveModeContext } from "@cornfield/coding-agent/modes/types";
+import type { Terminal, TerminalAppearance } from "@cornfield/tui";
+import { Container, TUI } from "@cornfield/tui";
 
 /** Minimal Terminal implementation for testing — no real stdin/stdout. */
 class MockTerminal implements Terminal {

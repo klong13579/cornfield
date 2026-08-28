@@ -1,9 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "bun:test";
-import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import * as pythonExecutor from "@oh-my-pi/pi-coding-agent/ipy/executor";
-import { createTools, type ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
-import { PythonTool } from "@oh-my-pi/pi-coding-agent/tools/python";
-import { TempDir } from "@oh-my-pi/pi-utils";
+import { Settings } from "@cornfield/coding-agent/config/settings";
+import * as pythonExecutor from "@cornfield/coding-agent/ipy/executor";
+import { createTools, type ToolSession } from "@cornfield/coding-agent/tools";
+import { PythonTool } from "@cornfield/coding-agent/tools/python";
+import { TempDir } from "@cornfield/utils";
 
 let previousSkipCheck: string | undefined;
 let tempDir: TempDir;

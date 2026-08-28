@@ -2,8 +2,9 @@ import { randomUUID } from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { buildModelPriceCatalog, getDashboardStats, syncAllSessions } from "@oh-my-pi/omp-stats";
-import { getAgentDir, getConfigRootDir, isEnoent, logger, parseFrontmatter } from "@oh-my-pi/pi-utils";
+import { resolveGlobalMemoryRootCandidates } from "@cornfield/self-evolution/paths";
+import { buildModelPriceCatalog, getDashboardStats, syncAllSessions } from "@cornfield/stats";
+import { getAgentDir, getConfigRootDir, isEnoent, logger, parseFrontmatter } from "@cornfield/utils";
 import type {
 	AgentMessageDto,
 	ClientFrame,
@@ -15,9 +16,8 @@ import type {
 	WireEnvironmentSummary,
 	WireErrorCode,
 	WireServerEvent,
-} from "@oh-my-pi/pi-wire";
-import { MULTIDEVICE_PROTOCOL_VERSION } from "@oh-my-pi/pi-wire";
-import { resolveGlobalMemoryRootCandidates } from "@oh-my-pi/self-evolution/paths";
+} from "@cornfield/wire";
+import { MULTIDEVICE_PROTOCOL_VERSION } from "@cornfield/wire";
 import { YAML } from "bun";
 import { withFileLock } from "../config/file-lock";
 import { type SettingPath, Settings } from "../config/settings";

@@ -1,7 +1,7 @@
 /**
  * TraceRecorder: consumes agent events and builds a SessionTrace in memory.
  */
-import type { Model } from "@oh-my-pi/pi-ai";
+import type { Model } from "@cornfield/ai";
 import type {
 	AgentEndEvent,
 	AgentStartEvent,
@@ -9,7 +9,7 @@ import type {
 	MessageEndEvent,
 	ToolExecutionEndEvent,
 	ToolExecutionStartEvent,
-} from "@oh-my-pi/pi-coding-agent/extensibility/extensions";
+} from "@cornfield/coding-agent/extensibility/extensions";
 import { NudgeDetector } from "./nudge-detector";
 import type { Nudge, QueuedAgentNudge, SessionTrace } from "./types";
 

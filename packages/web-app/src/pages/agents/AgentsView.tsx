@@ -1,4 +1,4 @@
-import type { AgentInfoDto } from "@oh-my-pi/pi-wire";
+import type { AgentInfoDto } from "@cornfield/wire";
 import { Search, Server, TerminalSquare } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";

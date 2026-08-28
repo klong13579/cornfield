@@ -1,7 +1,7 @@
 /**
  * Core types for the self-evolution plugin.
  */
-import type { Model } from "@oh-my-pi/pi-ai";
+import type { Model } from "@cornfield/ai";
 
 // ============================================================================
 // Session Trace (in-memory, per-session)

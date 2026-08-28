@@ -1,4 +1,4 @@
-import { $env, logger } from "@oh-my-pi/pi-utils";
+import { $env, logger } from "@cornfield/utils";
 import OpenAI from "openai";
 import type {
 	ChatCompletionAssistantMessageParam,

@@ -6,7 +6,7 @@
  * - Different account bridges may process concurrently.
  * - Queue depth is bounded per account to avoid unbounded memory growth.
  */
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 import type { AgentBridge, AgentBridgeSnapshot, ForwardStreamHandlers } from "./agent-bridge";
 import type { AgentResponseMeta, InboundMessage, SessionRecord } from "./types";
 

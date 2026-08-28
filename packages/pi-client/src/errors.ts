@@ -5,7 +5,7 @@
  */
 
 /** 基类：所有 pi-client 抛出的错误都继承自此，方便 `err instanceof PiClientError` 统一拦截。 */
-import type { WireErrorCode, WireErrorPayload } from "@oh-my-pi/pi-wire";
+import type { WireErrorCode, WireErrorPayload } from "@cornfield/wire";
 
 export class PiClientError extends Error {
 	constructor(message: string) {

@@ -1,5 +1,5 @@
 /**
- * @oh-my-pi/pi-client — WebSocket client for `omp serve` (pi-wire protocol).
+ * @cornfield/client — WebSocket client for `omp serve` (pi-wire protocol).
  *
  * 职责边界：
  *  - 不包含任何业务命令包装（UI 自己拼 `client.request({type: "prompt", message})`）

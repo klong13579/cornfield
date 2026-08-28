@@ -16,7 +16,7 @@
 	},
 	{
 		"kind": "procedure",
-		"content": "在 coding-agent 包中禁止 console.log，使用 @oh-my-pi/pi-utils 的 logger",
+		"content": "在 coding-agent 包中禁止 console.log，使用 @cornfield/utils 的 logger",
 		"pin": true
 	}
 ]

@@ -1,6 +1,6 @@
 # MOA Multi-Round — 设计与实施计划
 
-**作者**: Pi staff engineer
+**作者**: CornField staff engineer
 **日期**: 2026-07-14
 **Status**: 设计已锁定，PR1/PR2 已实施；2026-07-15 回退 phase 分裂并完成合同修复（见 §17）
 **前置文档**: [`docs/moa-input-fulfillment.md`](./moa-input-fulfillment.md) — 单轮 TCO 流水线已上线，本文档是其上的 multi-round 增强
@@ -367,7 +367,7 @@ interface MoaSettings {
 
 ### 14.2 设计来源
 
-- 本次设计是 Hermes dispatcher 模式翻译到 OMP subprocess 架构的产物
+- 本次设计是 Hermes dispatcher 模式翻译到 CornField subprocess 架构的产物
 - 动态 schema 来自 pi-fusion 的 fusion prompts configurable 思路
 - 质量 heuristic 的"守契约"评分来自 Hermes KANBAN_GUIDANCE 的反向工程
 
@@ -382,7 +382,7 @@ interface MoaSettings {
 
 | 优先级 | 项目 | 备注 |
 |---|---|---|
-| P1 | Gateway / cron multi-round | 加 `OMP_MOA_GATEWAY_ASK_URL` 让 cron 任务也能 ask 钉钉用户 |
+| P1 | Gateway / cron multi-round | 加 `CORNFIELD_MOA_GATEWAY_ASK_URL` 让 cron 任务也能 ask 钉钉用户 |
 | ~~P1~~ | ~~LLM judge 质量评分~~ | ✅ 已在 [Quality v2](./plans/2026-07-15-moa-quality-v2-design.md) 以 hybrid judge 实现（默认关） |
 | P2 | Cross-task memory | 答过的题进 user.md / TCO cache，新 task 自动复用 |
 | P2 | "auto-fill from memory" 按钮 | TUI ask 阶段可点"我答过了"，跳过 |

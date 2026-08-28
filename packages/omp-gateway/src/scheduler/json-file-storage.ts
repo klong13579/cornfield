@@ -1,7 +1,7 @@
 /**
  * JSON-file-backed implementation of SchedulerStorage.
  *
- * Task definitions + runtime state live in a single `~/.omp/gateway-data/scheduler/jobs.json`
+ * Task definitions + runtime state live in a single `~/.cornfield/gateway-data/scheduler/jobs.json`
  * file with atomic writes (tmp → os.replace + fsync). Execution records are ephemeral
  * in-memory during runtime and also written to JSONL logs for persistence.
  *
@@ -10,7 +10,7 @@
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { isEnoent, logger } from "@oh-my-pi/pi-utils";
+import { isEnoent, logger } from "@cornfield/utils";
 import { pruneAllLogs, readExecutionLog } from "./execution-log";
 import { clearTestRunMarker, isTestRunSchedule, readTestRunMarker } from "./test-run-marker";
 import type { ScheduledTask, SchedulerStorage, TaskExecution } from "./types";

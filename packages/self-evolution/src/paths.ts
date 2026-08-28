@@ -8,7 +8,7 @@
  */
 import * as os from "node:os";
 import * as path from "node:path";
-import { getAgentDir, getMemoriesDir, getProjectAgentDir } from "@oh-my-pi/pi-utils";
+import { getAgentDir, getMemoriesDir, getProjectAgentDir } from "@cornfield/utils";
 
 /** Default: user-level `~/.omp/self-evolution` + encoded memory paths. */
 export const DEFAULT_EVOLUTION_GLOBAL_STORE = true;

@@ -1,8 +1,8 @@
 /**
  * SkillManager: lifecycle management for evolved skills (merge, evaluate, archive, versioning).
  */
-import type { Model } from "@oh-my-pi/pi-ai";
-import { logger } from "@oh-my-pi/pi-utils";
+import type { Model } from "@cornfield/ai";
+import { logger } from "@cornfield/utils";
 import { AggressiveSkillOptimizer } from "./aggressive-optimizer";
 import { HeuristicSkillEvaluator } from "./evaluator";
 import type { ActivityLogger } from "./logging/activity-logger";

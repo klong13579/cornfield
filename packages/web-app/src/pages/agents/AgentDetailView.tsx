@@ -1,4 +1,4 @@
-import type { HostToolDefinitionDto, ModelInfoDto, ToolSwitchDto, ToolSwitchesDto } from "@oh-my-pi/pi-wire";
+import type { HostToolDefinitionDto, ModelInfoDto, ToolSwitchDto, ToolSwitchesDto } from "@cornfield/wire";
 import { X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useSessionStore } from "../../state/session-store";

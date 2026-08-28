@@ -341,7 +341,7 @@ async function main(): Promise<void> {
 	const command = args[0];
 
 	if (!command || command === "help" || command === "--help" || command === "-h") {
-		console.log(`Usage: bunx @oh-my-pi/pi-ai <command> [provider]
+		console.log(`Usage: bunx @cornfield/ai <command> [provider]
 
 Commands:
   login [provider]  Login to a provider
@@ -368,11 +368,11 @@ Providers:
   ollama-cloud      Ollama Cloud
 
 Examples:
-  bunx @oh-my-pi/pi-ai login              # interactive provider selection
-  bunx @oh-my-pi/pi-ai login anthropic    # login to specific provider
-  bunx @oh-my-pi/pi-ai logout anthropic   # logout from specific provider
-  bunx @oh-my-pi/pi-ai status             # show logged-in providers
-  bunx @oh-my-pi/pi-ai list               # list providers
+  bunx @cornfield/ai login              # interactive provider selection
+  bunx @cornfield/ai login anthropic    # login to specific provider
+  bunx @cornfield/ai logout anthropic   # logout from specific provider
+  bunx @cornfield/ai status             # show logged-in providers
+  bunx @cornfield/ai list               # list providers
 `);
 		return;
 	}
@@ -383,7 +383,7 @@ Examples:
 			const providers = storage.listProviders();
 			if (providers.length === 0) {
 				console.log("No credentials stored.");
-				console.log(`Use 'bunx @oh-my-pi/pi-ai login' to authenticate.`);
+				console.log(`Use 'bunx @cornfield/ai login' to authenticate.`);
 			} else {
 				console.log("Logged-in providers:\n");
 				for (const provider of providers) {
@@ -492,7 +492,7 @@ Examples:
 
 		if (!PROVIDERS.some(p => p.id === provider)) {
 			console.error(`Unknown provider: ${provider}`);
-			console.error(`Use 'bunx @oh-my-pi/pi-ai list' to see available providers`);
+			console.error(`Use 'bunx @cornfield/ai list' to see available providers`);
 			process.exit(1);
 		}
 
@@ -502,7 +502,7 @@ Examples:
 	}
 
 	console.error(`Unknown command: ${command}`);
-	console.error(`Use 'bunx @oh-my-pi/pi-ai --help' for usage`);
+	console.error(`Use 'bunx @cornfield/ai --help' for usage`);
 	process.exit(1);
 }
 

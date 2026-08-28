@@ -56,7 +56,7 @@ const proc = Bun.spawn({
 	cwd: projectDir,
 	env: {
 		...process.env,
-		PI_CODING_AGENT_DIR: agentDir,
+		CORNFIELD_AGENT_DIR: agentDir,
 		PI_LOG_CONSOLE: "false",
 		PI_MOA_SETTINGS_JSON: JSON.stringify({
 			workers: [

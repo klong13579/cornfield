@@ -8,8 +8,8 @@ import {
 	setKeybindings,
 	TUI_KEYBINDINGS,
 	KeybindingsManager as TuiKeybindingsManager,
-} from "@oh-my-pi/pi-tui";
-import { getAgentDir, isEnoent, logger } from "@oh-my-pi/pi-utils";
+} from "@cornfield/tui";
+import { getAgentDir, isEnoent, logger } from "@cornfield/utils";
 
 /**
  * Application-level keybindings (coding agent specific).
@@ -55,7 +55,7 @@ interface AppKeybindings {
 
 export type AppKeybinding = keyof AppKeybindings;
 
-declare module "@oh-my-pi/pi-tui" {
+declare module "@cornfield/tui" {
 	interface Keybindings extends AppKeybindings {}
 }
 

@@ -27,7 +27,7 @@
 
 import * as os from "node:os";
 import * as path from "node:path";
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 import {
 	type AICardInstance,
 	type AICardTarget,
@@ -144,7 +144,7 @@ function buildLogFileUrl(slug: string): string {
 	const dd = String(date.getDate()).padStart(2, "0");
 	const logPath = path.join(
 		os.homedir(),
-		".omp",
+		".cornfield",
 		"gateway-data",
 		"scheduler",
 		"logs",

@@ -6,8 +6,8 @@
  * spinner while workers stream — bypassing the string[] MAX_WIDGET_LINES=10 cap.
  */
 
-import type { ExtensionUIContext, ExtensionWidgetContent } from "@oh-my-pi/pi-coding-agent";
-import { Text } from "@oh-my-pi/pi-tui";
+import type { ExtensionUIContext, ExtensionWidgetContent } from "@cornfield/coding-agent";
+import { Text } from "@cornfield/tui";
 
 export interface WorkerStreamChunk {
 	name: string;

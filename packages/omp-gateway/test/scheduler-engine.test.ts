@@ -415,7 +415,7 @@ describe("SchedulerEngine", () => {
 
 describe("JsonFileStorage prune", () => {
 	// JsonFileStorage.pruneExecutions delegates to pruneAllLogs which
-	// walks ~/.omp/gateway-data/scheduler/logs/by-task/. Per-task
+	// walks ~/.cornfield/gateway-data/scheduler/logs/by-task/. Per-task
 	// execution logs are in that global tree, not in the storage
 	// instance's tempdir — we can't isolate the prune in a unit
 	// test without mocking `getLogRoot`. What we CAN verify in
@@ -502,7 +502,7 @@ describe("SchedulerEngine — test-run post-fire restore", () => {
 
 	beforeEach(() => {
 		testDir = fs.mkdtempSync(path.join(os.tmpdir(), "omp-gateway-engine-restore-"));
-		schedulerDir2 = path.join(testDir, ".omp", "gateway-data", "scheduler");
+		schedulerDir2 = path.join(testDir, ".cornfield", "gateway-data", "scheduler");
 		fs.mkdirSync(schedulerDir2, { recursive: true });
 		homedirSpy = vi.spyOn(os, "homedir").mockReturnValue(testDir);
 		const jobsPath = path.join(schedulerDir2, "jobs.json");
@@ -734,7 +734,7 @@ describe("SchedulerEngine — test-run post-fire restore", () => {
 
 describe("test-run-marker path parity", () => {
 	it("getTestRunMarkerPath uses the same dir as the engine's readTestRunMarker call", () => {
-		const expected = path.join(os.homedir(), ".omp", "gateway-data", "scheduler", "test-run-restore.json");
+		const expected = path.join(os.homedir(), ".cornfield", "gateway-data", "scheduler", "test-run-restore.json");
 		expect(getTestRunMarkerPath()).toBe(expected);
 	});
 });

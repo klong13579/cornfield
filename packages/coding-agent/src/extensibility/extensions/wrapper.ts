@@ -1,8 +1,8 @@
 /**
  * Tool wrappers for extensions.
  */
-import type { AgentTool, AgentToolContext, AgentToolUpdateCallback } from "@oh-my-pi/pi-agent-core";
-import type { ImageContent, TextContent } from "@oh-my-pi/pi-ai";
+import type { AgentTool, AgentToolContext, AgentToolUpdateCallback } from "@cornfield/agent";
+import type { ImageContent, TextContent } from "@cornfield/ai";
 import type { Static, TSchema } from "@sinclair/typebox";
 import type { Theme } from "../../modes/theme/theme";
 import { applyToolProxy } from "../tool-proxy";

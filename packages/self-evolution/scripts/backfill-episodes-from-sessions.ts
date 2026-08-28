@@ -8,7 +8,7 @@ import type { Database } from "bun:sqlite";
  */
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { getSessionsDir } from "@oh-my-pi/pi-utils";
+import { getSessionsDir } from "@cornfield/utils";
 import { refreshBenefitAdmissionState } from "../src/benefit-admission-refresh";
 import { projectEvolutionLog } from "../src/logging/evolution-log";
 import { resolveEvolutionProjectionDir } from "../src/paths";

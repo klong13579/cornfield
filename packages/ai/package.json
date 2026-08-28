@@ -1,9 +1,9 @@
 {
 	"type": "module",
-	"name": "@oh-my-pi/pi-ai",
+	"name": "@cornfield/ai",
 	"version": "0.19.2",
 	"description": "Unified LLM API with automatic model discovery and provider configuration",
-	"homepage": "https://github.com/can1357/oh-my-pi",
+	"homepage": "https://github.com/klong13579/cornfield",
 	"author": "Can Boluk",
 	"contributors": [
 		"Mario Zechner"
@@ -11,11 +11,11 @@
 	"license": "MIT",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/can1357/oh-my-pi.git",
+		"url": "git+https://github.com/klong13579/cornfield.git",
 		"directory": "packages/ai"
 	},
 	"bugs": {
-		"url": "https://github.com/can1357/oh-my-pi/issues"
+		"url": "https://github.com/klong13579/cornfield/issues"
 	},
 	"keywords": [
 		"ai",
@@ -29,7 +29,7 @@
 	"main": "./src/index.ts",
 	"types": "./src/index.ts",
 	"bin": {
-		"pi-ai": "./src/cli.ts"
+		"cornfield-ai": "./src/cli.ts"
 	},
 	"scripts": {
 		"check": "biome check . && bun run check:types",
@@ -46,8 +46,8 @@
 		"@aws-sdk/credential-provider-node": "catalog:",
 		"@bufbuild/protobuf": "catalog:",
 		"@google/genai": "catalog:",
-		"@oh-my-pi/pi-natives": "catalog:",
-		"@oh-my-pi/pi-utils": "catalog:",
+		"@cornfield/natives": "catalog:",
+		"@cornfield/utils": "catalog:",
 		"@sinclair/typebox": "catalog:",
 		"@smithy/node-http-handler": "catalog:",
 		"ajv": "catalog:",

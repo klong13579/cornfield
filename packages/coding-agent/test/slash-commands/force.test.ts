@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "bun:test";
-import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
-import { executeBuiltinSlashCommand } from "@oh-my-pi/pi-coding-agent/slash-commands/builtin-registry";
+import type { InteractiveModeContext } from "@cornfield/coding-agent/modes/types";
+import { executeBuiltinSlashCommand } from "@cornfield/coding-agent/slash-commands/builtin-registry";
 
 function createRuntimeHarness(overrides?: { setForcedToolChoice?: (toolName: string) => void }) {
 	const setForcedToolChoice = vi.fn(overrides?.setForcedToolChoice ?? ((_toolName: string) => {}));

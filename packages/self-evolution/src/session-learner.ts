@@ -1,8 +1,8 @@
 /**
  * V3 SessionLearner — one LLM call per session to extract ≤3 learnings (Hermes-style write filter).
  */
-import type { Model } from "@oh-my-pi/pi-ai";
-import { logger, prompt } from "@oh-my-pi/pi-utils";
+import type { Model } from "@cornfield/ai";
+import { logger, prompt } from "@cornfield/utils";
 import { LEARNING_MAX_PER_SESSION, newLearningLifecycleState, validateLearningContent } from "./learning-admission";
 import extractSessionLearningsSystemTemplate from "./prompts/extract-session-learnings.md" with { type: "text" };
 import extractSessionLearningsInputTemplate from "./prompts/extract-session-learnings-input.md" with { type: "text" };

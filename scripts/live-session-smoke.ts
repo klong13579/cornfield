@@ -6,7 +6,7 @@
  * Run: bun scripts/live-session-smoke.ts [baseUrl] [model] [apiKey]
  * (env NARWAL_PLAN_BASE_URL / NARWAL_PLAN_API_KEY work too)
  */
-import { RealtimeWsTransport } from "@oh-my-pi/pi-ai";
+import { RealtimeWsTransport } from "@cornfield/ai";
 import { LiveSessionController } from "../packages/coding-agent/src/live/controller";
 import { createNativeAudioSource, createNativeSinkFactory } from "../packages/coding-agent/src/live/natives-audio";
 

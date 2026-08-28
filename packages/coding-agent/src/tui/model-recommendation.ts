@@ -3,7 +3,7 @@
  *
  * Renders model selection info and cooldown status for display in the agent TUI.
  */
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 import type { ModelRouter } from "../model-router";
 
 export interface ModelRecommendationOptions {

@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { StringEnum } from "@oh-my-pi/pi-ai";
-import { Text } from "@oh-my-pi/pi-tui";
+import { StringEnum } from "@cornfield/ai";
+import { Text } from "@cornfield/tui";
 import { Type } from "@sinclair/typebox";
 import type { ToolDefinition } from "../../extensibility/extensions";
 import type { Theme } from "../../modes/theme/theme";

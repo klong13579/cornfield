@@ -1,4 +1,4 @@
-import type { ExtensionFactory } from "@oh-my-pi/pi-coding-agent";
+import type { ExtensionFactory } from "@cornfield/coding-agent";
 
 /** True when `read` path targets a remote http(s) URL (not a local file). */
 export function isRemoteReadPath(path: string): boolean {

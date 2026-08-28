@@ -3,8 +3,8 @@
  * Uses existing callBackgroundLlm from self-evolution.
  */
 
-import type { Model } from "@oh-my-pi/pi-ai";
-import { logger } from "@oh-my-pi/pi-utils";
+import type { Model } from "@cornfield/ai";
+import { logger } from "@cornfield/utils";
 import { callBackgroundLlm } from "../utils/llm";
 
 /**

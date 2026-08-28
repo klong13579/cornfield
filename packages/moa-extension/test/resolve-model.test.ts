@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "bun:test";
-import type { AuthStorage, ModelRegistry } from "@oh-my-pi/pi-coding-agent";
-import { Settings } from "@oh-my-pi/pi-coding-agent";
+import type { AuthStorage, ModelRegistry } from "@cornfield/coding-agent";
+import { Settings } from "@cornfield/coding-agent";
 import { executePlan } from "../src/executor";
 import { buildPlan } from "../src/planner";
 import { DEFAULT_SYNTHESIS_MODEL, DEFAULT_WORKER_MODELS, DEFAULT_WORKER_SLOTS, resolveSettings } from "../src/settings";

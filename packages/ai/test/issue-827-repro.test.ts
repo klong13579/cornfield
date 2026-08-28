@@ -8,9 +8,9 @@
  * reasoning for that single turn rather than dropping `tool_choice` outright.
  */
 import { afterEach, describe, expect, it } from "bun:test";
-import { getBundledModel } from "@oh-my-pi/pi-ai/models";
-import { streamOpenAICompletions } from "@oh-my-pi/pi-ai/providers/openai-completions";
-import type { Context, Model, Tool } from "@oh-my-pi/pi-ai/types";
+import { getBundledModel } from "@cornfield/ai/models";
+import { streamOpenAICompletions } from "@cornfield/ai/providers/openai-completions";
+import type { Context, Model, Tool } from "@cornfield/ai/types";
 import { Type } from "@sinclair/typebox";
 
 const originalFetch = global.fetch;

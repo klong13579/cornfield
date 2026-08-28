@@ -7,7 +7,7 @@
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { logger, prompt } from "@oh-my-pi/pi-utils";
+import { logger, prompt } from "@cornfield/utils";
 import type { AgentBridge } from "./agent-bridge";
 import { resolveDefaultOmpPath } from "./agent-transport-wire";
 import type { AICardTarget } from "./channels/dingtalk-card";

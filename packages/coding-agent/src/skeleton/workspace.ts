@@ -22,7 +22,7 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 
-import { isEnoent } from "@oh-my-pi/pi-utils";
+import { isEnoent } from "@cornfield/utils";
 
 export const WORKSPACE_DIR_NAME = ".omp";
 export const WORKSPACE_FILE_NAME = "workspace.json";

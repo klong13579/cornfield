@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { AgentEvent, AgentMessage } from "@oh-my-pi/pi-agent-core";
+import type { AgentEvent, AgentMessage } from "@cornfield/agent";
 import { RpcClient } from "../src/modes/rpc/rpc-client";
 import {
 	type BranchSummaryEntry,
@@ -39,7 +39,7 @@ async function main() {
 	const client = new RpcClient({
 		cliPath: path.join(projectRoot, "src/cli.ts"),
 		cwd: projectRoot,
-		env: { PI_CODING_AGENT_DIR: sessionDir },
+		env: { CORNFIELD_AGENT_DIR: sessionDir },
 		args: ["--no-color"],
 	});
 

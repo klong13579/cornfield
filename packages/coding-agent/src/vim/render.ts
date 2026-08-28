@@ -1,4 +1,4 @@
-import { extractSegments } from "@oh-my-pi/pi-tui";
+import { extractSegments } from "@cornfield/tui";
 import { formatCodeFrameLine, truncateToWidth } from "../tools/render-utils";
 import type {
 	VimErrorLocation,

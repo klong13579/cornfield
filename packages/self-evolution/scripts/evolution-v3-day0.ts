@@ -7,7 +7,7 @@
  */
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { getAgentDir, isEnoent } from "@oh-my-pi/pi-utils";
+import { getAgentDir, isEnoent } from "@cornfield/utils";
 import { clearProjectEvolutionData } from "../src/clear-project-evolution";
 import { applyLearningsSeed, defaultLearningsSeedPath, readLearningsSeedFile } from "../src/learnings-seed";
 import { ensureMemorySummaryFromMemory } from "../src/memory/summary";

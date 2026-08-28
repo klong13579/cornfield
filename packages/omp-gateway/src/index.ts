@@ -1,5 +1,5 @@
 /**
- * @oh-my-pi/omp-gateway
+ * @cornfield/gateway
  *
  * IM gateway for Oh My Pi — the standalone daemon binary (`omp-gateway`)
  * that hosts IM channels, the cron scheduler, and the agent bridge.

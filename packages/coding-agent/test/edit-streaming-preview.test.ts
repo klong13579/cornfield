@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { dropIncompleteLastEdit, EDIT_MODE_STRATEGIES } from "@oh-my-pi/pi-coding-agent/edit";
+import { dropIncompleteLastEdit, EDIT_MODE_STRATEGIES } from "@cornfield/coding-agent/edit";
 
 describe("dropIncompleteLastEdit", () => {
 	test("keeps all entries when partialJson is undefined", () => {

@@ -1,9 +1,9 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
 import * as path from "node:path";
-import { Agent } from "@oh-my-pi/pi-agent-core";
-import { _resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
-import { TempDir } from "@oh-my-pi/pi-utils";
+import { Agent } from "@cornfield/agent";
+import { _resetSettingsForTest, Settings } from "@cornfield/coding-agent/config/settings";
+import { initTheme } from "@cornfield/coding-agent/modes/theme/theme";
+import { TempDir } from "@cornfield/utils";
 import { ModelRegistry } from "../src/config/model-registry";
 import { InteractiveMode } from "../src/modes/interactive-mode";
 import { AgentSession } from "../src/session/agent-session";

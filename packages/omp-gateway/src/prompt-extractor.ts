@@ -14,8 +14,8 @@
 
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import type { ImageContent } from "@oh-my-pi/pi-ai";
-import { logger } from "@oh-my-pi/pi-utils";
+import type { ImageContent } from "@cornfield/ai";
+import { logger } from "@cornfield/utils";
 import { extractPdfText, extractPptxText } from "./channels/dingtalk-media";
 import type { InboundAttachment, InboundMessage } from "./types";
 

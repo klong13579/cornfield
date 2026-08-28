@@ -15,7 +15,7 @@ import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as timers from "node:timers/promises";
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 
 export const SERVE_HOST = "127.0.0.1";
 export const SERVE_PORT = 7891;

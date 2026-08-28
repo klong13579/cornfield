@@ -27,7 +27,7 @@ import * as fs from "node:fs";
 import * as fsp from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 
 export type CrashLogKind = "crash" | "recovery" | "suppressed" | "state";
 
@@ -68,7 +68,7 @@ export interface CrashLogState extends CrashLogEntryBase {
 
 export type CrashLogEntry = CrashLogCrash | CrashLogRecovery | CrashLogSuppressed | CrashLogState;
 
-const DEFAULT_LOG_DIR = path.join(os.homedir(), ".omp", "gateway-data");
+const DEFAULT_LOG_DIR = path.join(os.homedir(), ".cornfield", "gateway-data");
 const DEFAULT_LOG_FILE = "crash_log.jsonl";
 
 export class CrashLog {

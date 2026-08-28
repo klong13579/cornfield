@@ -25,8 +25,8 @@ import {
 	type ThinkingConfig,
 	unregisterCustomApis,
 	unregisterOAuthProviders,
-} from "@oh-my-pi/pi-ai";
-import { isRecord, logger } from "@oh-my-pi/pi-utils";
+} from "@cornfield/ai";
+import { isRecord, logger } from "@cornfield/utils";
 import { type Static, Type } from "@sinclair/typebox";
 import { type ConfigError, ConfigFile } from "../config";
 import { parseModelString, resolveProviderModelReference } from "../config/model-resolver";

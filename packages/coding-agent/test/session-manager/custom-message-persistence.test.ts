@@ -6,13 +6,13 @@ import {
 	type CustomMessageEntry,
 	loadEntriesFromFile,
 	SessionManager,
-} from "@oh-my-pi/pi-coding-agent/session/session-manager";
-import { getConfigRootDir, setAgentDir } from "@oh-my-pi/pi-utils";
+} from "@cornfield/coding-agent/session/session-manager";
+import { getConfigRootDir, setAgentDir } from "@cornfield/utils";
 
 describe("custom_message persistence", () => {
 	let testAgentDir: string;
 	let cwd: string;
-	const originalAgentDir = process.env.PI_CODING_AGENT_DIR;
+	const originalAgentDir = process.env.CORNFIELD_AGENT_DIR;
 	const fallbackAgentDir = path.join(getConfigRootDir(), "agent");
 
 	beforeEach(() => {
@@ -27,7 +27,7 @@ describe("custom_message persistence", () => {
 			setAgentDir(originalAgentDir);
 		} else {
 			setAgentDir(fallbackAgentDir);
-			delete process.env.PI_CODING_AGENT_DIR;
+			delete process.env.CORNFIELD_AGENT_DIR;
 		}
 		fs.rmSync(testAgentDir, { recursive: true, force: true });
 	});

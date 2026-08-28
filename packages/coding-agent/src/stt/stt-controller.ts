@@ -1,8 +1,8 @@
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { AudioCapture } from "@oh-my-pi/pi-natives";
-import { logger, Snowflake } from "@oh-my-pi/pi-utils";
+import { AudioCapture } from "@cornfield/natives";
+import { logger, Snowflake } from "@cornfield/utils";
 import type { ModelRegistry } from "../config/model-registry";
 import { settings } from "../config/settings";
 import { ensureSTTDependencies } from "./downloader";

@@ -3,8 +3,8 @@
  * phase color semantics, level-driven modulation, geometry invariants.
  */
 import { describe, expect, it } from "bun:test";
-import { LOOP_FRAMES, VoiceOrb } from "@oh-my-pi/pi-coding-agent/modes/components/voice-orb";
-import { visibleWidth } from "@oh-my-pi/pi-tui";
+import { LOOP_FRAMES, VoiceOrb } from "@cornfield/coding-agent/modes/components/voice-orb";
+import { visibleWidth } from "@cornfield/tui";
 
 const W = 60;
 const H = 20;

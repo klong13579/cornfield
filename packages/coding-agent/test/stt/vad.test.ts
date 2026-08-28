@@ -12,7 +12,7 @@ import {
 	initialVadStreamState,
 	renderLevelBar,
 	rmsToLevel,
-} from "@oh-my-pi/pi-coding-agent/stt/vad";
+} from "@cornfield/coding-agent/stt/vad";
 
 describe("feedVadStream", () => {
 	test("does not auto-stop if user never speaks within maxWait", () => {

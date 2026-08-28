@@ -1,5 +1,5 @@
-import type { Component } from "@oh-my-pi/pi-tui";
-import { Container, Text } from "@oh-my-pi/pi-tui";
+import type { Component } from "@cornfield/tui";
+import { Container, Text } from "@cornfield/tui";
 import { getLanguageFromPath, theme } from "../../modes/theme/theme";
 import { PREVIEW_LIMITS, shortenPath } from "../../tools/render-utils";
 import { renderCodeCell } from "../../tui";

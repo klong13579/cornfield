@@ -6,7 +6,7 @@ import * as path from "node:path";
 import {
 	MarketplaceManager,
 	readInstalledPluginsRegistry,
-} from "@oh-my-pi/pi-coding-agent/extensibility/plugins/marketplace";
+} from "@cornfield/coding-agent/extensibility/plugins/marketplace";
 
 // Fixture: the valid-marketplace directory used across all tests.
 const FIXTURE_DIR = path.join(import.meta.dir, "fixtures", "valid-marketplace");

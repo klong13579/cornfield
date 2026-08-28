@@ -7,7 +7,7 @@
  * `switch_model` tool, fuzzy-match the user's request, and confirm the
  * switch in the assistant reply.
  */
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 import type { AgentBridge } from "./agent-bridge";
 import type { InboundMessage } from "./types";
 

@@ -1,8 +1,8 @@
 import * as fs from "node:fs/promises";
-import { type AgentMessage, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
-import { sanitizeText } from "@oh-my-pi/pi-natives";
-import type { AutocompleteProvider, SlashCommand } from "@oh-my-pi/pi-tui";
-import { $env } from "@oh-my-pi/pi-utils";
+import { type AgentMessage, ThinkingLevel } from "@cornfield/agent";
+import { sanitizeText } from "@cornfield/natives";
+import type { AutocompleteProvider, SlashCommand } from "@cornfield/tui";
+import { $env } from "@cornfield/utils";
 import { settings } from "../../config/settings";
 import { createPromptActionAutocompleteProvider } from "../../modes/prompt-action-autocomplete";
 import { theme } from "../../modes/theme/theme";

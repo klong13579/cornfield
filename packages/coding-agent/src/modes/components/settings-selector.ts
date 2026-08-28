@@ -1,5 +1,5 @@
-import type { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
-import type { Effort } from "@oh-my-pi/pi-ai";
+import type { ThinkingLevel } from "@cornfield/agent";
+import type { Effort } from "@cornfield/ai";
 import {
 	Container,
 	Input,
@@ -12,7 +12,7 @@ import {
 	type Tab,
 	TabBar,
 	Text,
-} from "@oh-my-pi/pi-tui";
+} from "@cornfield/tui";
 import { type SettingPath, settings } from "../../config/settings";
 import type {
 	SettingTab,

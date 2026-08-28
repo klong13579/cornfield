@@ -4,7 +4,7 @@
  * Supports both shell execution (sh -c) and agent execution (omp --print).
  * All executions are bounded by a configurable timeout.
  */
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 
 export interface ExecutionResult {
 	exitCode: number;
@@ -60,7 +60,7 @@ export interface ExecutionOptions {
 	promptPrefix?: string;
 	/**
 	 * Working directory for the spawned process. For `agent` tasks, this
-	 * is the agentDir (where omp finds its `.omp/config.yml`). For
+	 * is the agentDir (where cornfield finds its `.cornfield/config.yml`). For
 	 * `shell` tasks, it can be set to scope the command's view of the
 	 * filesystem. When unset, the gateway's cwd is used.
 	 */
@@ -224,7 +224,7 @@ interface ScriptResult {
  * - **Absolute path** (`/foo/bar.py`, `~/baz.py`): used as-is. Caller is
  *   responsible for ensuring the path is readable and trusted.
  * - **Relative path** (`mine.py`, `subdir/x.sh`): resolved against
- *   `~/.omp/gateway-data/scheduler/scripts/`. Must stay within that
+ *   `~/.cornfield/gateway-data/scheduler/scripts/`. Must stay within that
  *   directory; paths that escape it are rejected.
  *
  * If the script does not exist or is not readable, the call returns an
@@ -245,7 +245,7 @@ async function runPreScript(scriptPath: string): Promise<ScriptResult> {
 				? path.join(os.homedir(), scriptPath.slice(2))
 				: scriptPath;
 
-	const scriptsDir = path.join(os.homedir(), ".omp", "gateway-data", "scheduler", "scripts");
+	const scriptsDir = path.join(os.homedir(), ".cornfield", "gateway-data", "scheduler", "scripts");
 
 	let resolved: string;
 	if (path.isAbsolute(expanded)) {

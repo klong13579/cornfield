@@ -5,7 +5,7 @@
  * message logging, and connection state tracking.
  */
 
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 import type { Channel, ChannelCapabilities, ChannelConfig, InboundMessage, OutboundMessage } from "../types";
 
 export abstract class BaseChannel implements Channel {

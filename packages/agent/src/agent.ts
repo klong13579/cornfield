@@ -19,7 +19,7 @@ import {
 	type ThinkingBudgets,
 	type ToolChoice,
 	type ToolResultMessage,
-} from "@oh-my-pi/pi-ai";
+} from "@cornfield/ai";
 import { agentLoop, agentLoopContinue } from "./agent-loop";
 import type { DoomLoopConfig } from "./streaming/doom-loop-detector";
 import type {

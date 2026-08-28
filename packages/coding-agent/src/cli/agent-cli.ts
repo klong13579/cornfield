@@ -24,7 +24,7 @@ import {
 	resolveAgentDir,
 	SKELETON_FILES,
 	unregisterAgent,
-} from "@oh-my-pi/pi-coding-agent/skeleton";
+} from "@cornfield/coding-agent/skeleton";
 import { MECE_FILES, type MeceContext, runMeceChecks, runMeceRepairs } from "./mece-rules";
 import { runSemanticAudit, type SemanticViolation } from "./semantic-audit";
 
@@ -143,7 +143,7 @@ export async function runAgentList(args: ListArgs): Promise<AgentSummary[]> {
 	// Step 1: read the registry so custom `--dir` paths (e.g. `OMP-workspace-test/hr3`)
 	// are visible without the user having to pass `--dir` again.
 	if (!args.dir) {
-		const { listRegistered } = await import("@oh-my-pi/pi-coding-agent/skeleton");
+		const { listRegistered } = await import("@cornfield/coding-agent/skeleton");
 		const registered = await listRegistered();
 		for (const { name, entry } of registered) {
 			const status = await probeAgentStatus(entry.path);
@@ -247,7 +247,7 @@ export async function runAgentShow(args: ShowArgs): Promise<AgentDetail> {
 		// Registry lookup first so custom --dir paths (e.g. nested account ids
 		// like `ops/hr` stored under a non-default location) are found without
 		// the user having to pass --dir again.
-		const { findAgent } = await import("@oh-my-pi/pi-coding-agent/skeleton");
+		const { findAgent } = await import("@cornfield/coding-agent/skeleton");
 		const entry = await findAgent(args.name);
 		agentDir = entry?.path ?? path.join(homeDir(), ".omp", "agents", args.name);
 	}
@@ -835,7 +835,7 @@ export interface ReconcileResult {
  */
 export async function runAgentReconcile(_args: ReconcileArgs = {}): Promise<ReconcileResult> {
 	const pruned = await pruneStaleEntries();
-	const { listRegistered, registerAgent: reg } = await import("@oh-my-pi/pi-coding-agent/skeleton");
+	const { listRegistered, registerAgent: reg } = await import("@cornfield/coding-agent/skeleton");
 	const existing = await listRegistered();
 	const knownPaths = new Set(existing.map(e => e.entry.path));
 

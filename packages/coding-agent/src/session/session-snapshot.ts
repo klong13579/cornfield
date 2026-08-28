@@ -1,8 +1,8 @@
 /**
- * 会话快照 —— 类型已迁往 @oh-my-pi/pi-wire（协议定义层），本文件保留
+ * 会话快照 —— 类型已迁往 @cornfield/wire（协议定义层），本文件保留
  * 构建快照的运行时（reducePhase 归约器）。方向：协议定义 → 核心实现。
  */
-import type { SessionPhase, SessionSnapshot } from "@oh-my-pi/pi-wire";
+import type { SessionPhase, SessionSnapshot } from "@cornfield/wire";
 
 export type { SessionPhase, SessionSnapshot };
 

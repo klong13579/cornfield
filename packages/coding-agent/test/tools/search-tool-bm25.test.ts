@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { getThemeByName } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
+import { getThemeByName } from "@cornfield/coding-agent/modes/theme/theme";
 import { Settings } from "../../src/config/settings";
 import {
 	buildDiscoverableMCPSearchIndex,

@@ -13,7 +13,7 @@ import { expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { getConfigRootDir, setConfigRootDir } from "@oh-my-pi/pi-utils";
+import { getConfigRootDir, setConfigRootDir } from "@cornfield/utils";
 import { loadAgentMetas } from "../src/server/session-registry";
 
 test("loadAgentMetas：gateway.json dingtalk accounts 映射到 AgentMeta", async () => {

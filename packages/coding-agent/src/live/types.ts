@@ -5,7 +5,7 @@
  * audio source (mic), and an audio sink (speaker). All three sit behind small
  * interfaces so tests can drive the state machine without hardware.
  */
-import type { RealtimeSessionConfig, RealtimeWsTransport } from "@oh-my-pi/pi-ai";
+import type { RealtimeSessionConfig, RealtimeWsTransport } from "@cornfield/ai";
 
 export type LivePhase = "connecting" | "listening" | "thinking" | "speaking" | "interrupted" | "muted" | "error";
 

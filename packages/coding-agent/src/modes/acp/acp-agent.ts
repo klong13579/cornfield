@@ -37,8 +37,8 @@ import {
 	type SetSessionModeResponse,
 	type Usage,
 } from "@agentclientprotocol/sdk";
-import type { AssistantMessage, Model } from "@oh-my-pi/pi-ai";
-import { logger, VERSION } from "@oh-my-pi/pi-utils";
+import type { AssistantMessage, Model } from "@cornfield/ai";
+import { logger, VERSION } from "@cornfield/utils";
 import { disableProvider, enableProvider } from "../../capability";
 import { Settings } from "../../config/settings";
 import type { ExtensionUIContext } from "../../extensibility/extensions";

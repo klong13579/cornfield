@@ -8,7 +8,7 @@
 
 ## 1. 背景与问题
 
-当前 omp 的 skill 管理存在三个实际困扰：
+当前 cornfield 的 skill 管理存在三个实际困扰：
 
 1. **可见性缺失**：gateway agent 启动即加载 ~80 个 skill（69 用户级 + 20 项目级 − 9 同名去重），无裁剪、无按 agent 视角的清单，无人知晓这些 skill 的用途与归属。
 2. **无执行记录**：skill 写完后没有"跑得怎么样"的记录——是否被用、成功与否、耗时多少、失败原因、是否需要改进，全部无从知晓。
@@ -59,7 +59,7 @@
 ### D. 查询面
 | ID | 功能 | 说明 |
 |---|---|---|
-| D1 | 命令族 | `omp skill list / groups / group / stats / trace / health / ingest` |
+| D1 | 命令族 | `cornfield skill list / groups / group / stats / trace / health / ingest` |
 | D2 | 过滤维度 | 窗口（d/w/m）、agent、trigger、group，正交可组合 |
 | D3 | 双模输出 | 人读表格 + `--json`（供 agent/脚本消费） |
 
@@ -69,7 +69,7 @@
 | E1 | JSONL 解析 | 复用/抽取现有 session JSONL 解析管道（非 evolution 插件依赖） |
 | E2 | 双触发 | session 结束增量 + `ingest` 全量回填（历史日志可回溯） |
 | E3 | 版本快照 | SkillWatcher 文件变更 → skill_versions 落库（含时间戳） |
-| E4 | 扫描范围 | 交互式 `~/.omp/agent/sessions/**/by-date/*.jsonl` + 各 gateway `<agentDir>/sessions/*.jsonl`（从 gateway.json 枚举） |
+| E4 | 扫描范围 | 交互式 `~/.cornfield/agent/sessions/**/by-date/*.jsonl` + 各 gateway `<agentDir>/sessions/*.jsonl`（从 gateway.json 枚举） |
 | E5 | 已知盲区（明示） | subagent（task 派生子 agent）的内部工具调用不进父 session JSONL，其 skill 使用 v1 不可见；接受此缺口 |
 
 ### F. 非功能约束
@@ -81,9 +81,9 @@
 
 ## 4. 技术设计
 
-### 4.1 数据层（新全局库 `~/.omp/skill-telemetry.db`）
+### 4.1 数据层（新全局库 `~/.cornfield/skill-telemetry.db`）
 
-**skills** — 薄维度表（文件系统 `.omp/skills` / `~/.omp/agent/skills` 是目录真相，此表仅做 JOIN）
+**skills** — 薄维度表（文件系统 `.cornfield/skills` / `~/.cornfield/agent/skills` 是目录真相，此表仅做 JOIN）
 ```
 scope TEXT         -- 'user' | 'project' | 'agent:<id>'（gateway agentDir 内 skill）
 name TEXT          -- skill 名（与 scope 联合主键，⚠️ 9 个跨域同名）
@@ -123,9 +123,9 @@ tool_sequence JSON     -- 该次使用前后工具调用、isError、时间戳
 
 ### 4.2 摄取
 
-- JSONL 解析器从 self-evolution 的 `parse-omp-json-events.ts` / `omp-session-to-trace.ts` 抽取为独立模块（不依赖插件加载）。
+- JSONL 解析器从 self-evolution 的 `parse-cornfield-json-events.ts` / `cornfield-session-to-trace.ts` 抽取为独立模块（不依赖插件加载）。
 - 增量：agent session 结束时钩子解析刚写入的 JSONL（复用现有 session 生命周期钩子，无新事件）。
-- 回填：`omp skill ingest --full` 扫全量历史日志一次性建数——**部署当天即获得历史统计**。
+- 回填：`cornfield skill ingest --full` 扫全量历史日志一次性建数——**部署当天即获得历史统计**。
 - 版本归因：执行时间戳 JOIN skill_versions（watcher 已打时间戳）回填 `skill_version`，解决"日志里无版本"缺口。
 - 扫描规则对齐加载器：过滤下划线前缀引导文件（`_AGENT_README.md` 等）、无 description 的非 skill 文件、helper md（`grilling-template.md` 等）。
 
@@ -133,13 +133,13 @@ tool_sequence JSON     -- 该次使用前后工具调用、isError、时间戳
 
 命令族（挂 coding-agent `commands/`，独立于 `/evolution`）：
 ```
-omp skill list [--agent X]              # A1/A4
-omp skill groups                        # A2 分组总览（组/数量/次数/成功率/耗时）
-omp skill group set|unset <name> <组>   # C3
-omp skill stats [--skill X] [--agent Y] [--group G] [--trigger T] [--window d|w|m] [--json]   # B2-B4/D2/D3
-omp skill trace <name> [--last N]       # B5
-omp skill health [--agent X] [--group G] # C1/C4
-omp skill ingest [--full]               # E2
+cornfield skill list [--agent X]              # A1/A4
+cornfield skill groups                        # A2 分组总览（组/数量/次数/成功率/耗时）
+cornfield skill group set|unset <name> <组>   # C3
+cornfield skill stats [--skill X] [--agent Y] [--group G] [--trigger T] [--window d|w|m] [--json]   # B2-B4/D2/D3
+cornfield skill trace <name> [--last N]       # B5
+cornfield skill health [--agent X] [--group G] # C1/C4
+cornfield skill ingest [--full]               # E2
 ```
 
 消费对象仅两类：**用户本人**（人读表格）与 **agent 代为查询**（`--json`）；不做统计自动注入 prompt。
@@ -175,12 +175,12 @@ concept-* / para-* / voice-* / strategic-reading / data-research / webhook-* / d
 | 1 | 只统计 engaged（真实使用），不做注入曝光计数 |
 | 2 | 零埋点：全部从 session JSONL 日志解析（可使用历史回填） |
 | 3 | 执行粒度 = 工具级（skill 内部 step 成败 v1 不可得，需 LLM 自报/对齐推断，不做） |
-| 4 | 新全局库 `~/.omp/skill-telemetry.db`，从零设计 schema，不迁移 evolution.db |
+| 4 | 新全局库 `~/.cornfield/skill-telemetry.db`，从零设计 schema，不迁移 evolution.db |
 | 5 | duration 方案 A（触发顺序切分）；聚合支持按 agent/trigger 拆分（默认 skill×agent，trigger 可选） |
 | 6 | failure_reason 枚举（PACE 四维 + 故障类），纯日志推导，单层 |
 | 7 | 版本归因 = watcher 文件快照（frontmatter 版本字段不可靠，已验证） |
 | 8 | skills 表主键 = `(scope, name)`（9 个跨域同名真实存在） |
-| 9 | 消费面独立于 `/evolution`（该插件已被禁用），仅 `omp skill` 命令族 + 双模输出 |
+| 9 | 消费面独立于 `/evolution`（该插件已被禁用），仅 `cornfield skill` 命令族 + 双模输出 |
 | 10 | 反馈仅建议层（health/对照/借鉴），永不自动 mutate |
 | 11 | 分组 = 独立映射表（不碰 skill 文件），名字模式播种 + 人工调整，单分组 |
 | 12 | subagent 使用盲区（E5）v1 明示接受 |
@@ -189,7 +189,7 @@ concept-* / para-* / voice-* / strategic-reading / data-research / webhook-* / d
 
 - v1 明示接受：subagent skill 使用不可见（E5）。
 - v1 不做：skill 内部 step 级成败、精确 per-skill 计时（日志近似）、TUI 面板。
-- v2 候选：`omp stats` 仪表盘 skill trace 面板；subagent 会话侧单独落日志后接入；分组标签化（多组）。
+- v2 候选：`cornfield stats` 仪表盘 skill trace 面板；subagent 会话侧单独落日志后接入；分组标签化（多组）。
 
 ## 7. 行业参考（调研结论，2026-08）
 

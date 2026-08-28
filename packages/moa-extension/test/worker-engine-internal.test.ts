@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
-import type { AssistantMessage } from "@oh-my-pi/pi-ai";
-import type { AgentSession, AuthStorage, ModelRegistry } from "@oh-my-pi/pi-coding-agent";
-import * as codingAgent from "@oh-my-pi/pi-coding-agent";
+import type { AssistantMessage } from "@cornfield/ai";
+import type { AgentSession, AuthStorage, ModelRegistry } from "@cornfield/coding-agent";
+import * as codingAgent from "@cornfield/coding-agent";
 import type { SpawnWorkerInput } from "../src/subprocess";
 import { createWorkerEngine } from "../src/worker-engine";
 

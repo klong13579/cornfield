@@ -5,7 +5,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { AgentTool } from "@oh-my-pi/pi-agent-core";
+import type { AgentTool } from "@cornfield/agent";
 import {
 	$env,
 	getConfigRootDir,
@@ -15,7 +15,7 @@ import {
 	isEnoent,
 	logger,
 	prompt,
-} from "@oh-my-pi/pi-utils";
+} from "@cornfield/utils";
 import { $ } from "bun";
 import { contextFileCapability } from "./capability/context-file";
 import { systemPromptCapability } from "./capability/system-prompt";

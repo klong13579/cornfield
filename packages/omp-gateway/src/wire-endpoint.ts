@@ -12,8 +12,8 @@
  * web-app 消费方无需改动；cron_create / cron_update / cron_remove / cron_test_run
  * 是新增写面（无既有消费方，纯增量）。
  */
-import { logger } from "@oh-my-pi/pi-utils";
-import type { CronLogEntryDto, TaskRowDto } from "@oh-my-pi/pi-wire";
+import { logger } from "@cornfield/utils";
+import type { CronLogEntryDto, TaskRowDto } from "@cornfield/wire";
 import { runTestRun } from "./scheduler/test-run";
 import type { ScheduledTask, SchedulerStorage } from "./scheduler/types";
 

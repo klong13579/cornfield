@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { disposeAllKernelSessions, executePython } from "@oh-my-pi/pi-coding-agent/ipy/executor";
+import { disposeAllKernelSessions, executePython } from "@cornfield/coding-agent/ipy/executor";
 import {
 	type KernelExecuteOptions,
 	type KernelExecuteResult,
 	type KernelShutdownResult,
 	PythonKernel,
-} from "@oh-my-pi/pi-coding-agent/ipy/kernel";
+} from "@cornfield/coding-agent/ipy/kernel";
 
 Bun.env.PI_PYTHON_SKIP_CHECK = "1";
 

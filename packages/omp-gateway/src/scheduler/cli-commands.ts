@@ -32,21 +32,21 @@ import {
 
 /**
  * Resolve a task's `accountId` to the `agentDir` declared in
- * `~/.omp/gateway.json` (under `channels.dingtalk.accounts[<id>]`).
+ * `~/.cornfield/gateway.json` (under `channels.dingtalk.accounts[<id>]`).
  *
  * Returns the agentDir path on a hit, or `undefined` when:
  *   - the accountId has no matching entry in config, OR
  *   - the entry exists but has no `agentDir` field.
  *
  * Callers in `cronRun` use the returned path as the `Bun.spawn` cwd so
- * the spawned `omp` process finds the right `.omp/config.yml` for the
+ * the spawned agent process finds the right `.cornfield/config.yml` for the
  * account that owns the task. Returning `undefined` triggers a fallback
  * to the gateway cwd with a warning, so a stale or removed binding does
  * not silently fail (the task still runs, just with the gateway's
  * default agent context).
  *
  * Extracted from `cronRun` so the resolution can be unit-tested with a
- * fixture config object without touching the real `~/.omp/gateway.json`
+ * fixture config object without touching the real `~/.cornfield/gateway.json`
  * or mocking module imports.
  */
 export function resolveAgentCwd(
@@ -62,7 +62,7 @@ export function resolveAgentCwd(
 // ---------------------------------------------------------------------------
 // (findAgentSessionPath has moved to ../session-paths.ts. It now requires an
 // agentDir argument and scopes its search to that agent's `sessions/` tree.
-// The old cross-tree walk over `~/.omp/agent/sessions/` is gone.)
+// The old cross-tree walk over the shared agent sessions tree is gone.)
 
 export async function cronCreate(args: string[], storage: SchedulerStorage): Promise<void> {
 	let name: string | undefined;
@@ -185,7 +185,7 @@ export async function cronCreate(args: string[], storage: SchedulerStorage): Pro
 	// agentDir resolves where the spawned omp process runs (its cwd). It
 	// is set directly via --agent-dir, or resolved from --account via
 	// gateway.json. For agent tasks an agentDir is required so omp finds
-	// the right .omp/config.yml; shell tasks may run without one (the
+	// the right .cornfield/config.yml; shell tasks may run without one (the
 	// gateway cwd is used).
 	if (!agentDir && accountId) {
 		try {

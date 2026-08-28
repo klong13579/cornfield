@@ -1,4 +1,4 @@
-# omp Jarvis 实时语音 · 设计（P0 + P1 合并稿）
+# cornfield Jarvis 实时语音 · 设计（P0 + P1 合并稿）
 
 > 状态：**P0 已交付、P1 已实现**（2026-08），实现位置 `packages/coding-agent/src/live/` + `src/modes/controllers/voice-mode-controller.ts` + `src/modes/components/voice-orb.ts`。
 > 本文档是 `voice-jarvis-p0-design.md` 与 `voice-jarvis-p1-design.md`(P1 评审修订稿) 的合并稿，原文已删（git 历史可查）。
@@ -7,7 +7,7 @@
 
 ## 1. 目标与非目标
 
-**P0 目标**：Mac 上 `omp` TUI 内一键进入连续双工语音模式（说话→语音播报，可中途打断）；需要干活时 realtime 模型通过 function call 委托给 omp agent（agent-consult 模式），25+ 工具/session/memory 全保留；语音轮 transcript 实时写 session JSONL，语音/打字共享历史；端到端延迟 ≤1.5s。
+**P0 目标**：Mac 上 `cornfield` TUI 内一键进入连续双工语音模式（说话→语音播报，可中途打断）；需要干活时 realtime 模型通过 function call 委托给 cornfield agent（agent-consult 模式），25+ 工具/session/memory 全保留；语音轮 transcript 实时写 session JSONL，语音/打字共享历史；端到端延迟 ≤1.5s。
 
 **P1 目标一句话**：语音成为「嘴打的 TUI」——任务直接进主会话，上下文/工具/thinking/展示天然对齐，安全靠分级确认门而不是阉割能力。
 
@@ -23,15 +23,15 @@
 ## 2. 总体架构
 
 ```
-┌─────────────────────────── omp 进程 ───────────────────────────┐
-│  麦克风 ──AEC──▶ AudioCapture (pi-natives, CoreAudio)          │
+┌─────────────────────────── cornfield 进程 ───────────────────────────┐
+│  麦克风 ──AEC──▶ AudioCapture (natives, CoreAudio)          │
 │                    │ PCM16 帧                                  │
 │                    ▼                                           │
 │  LiveSessionController（状态机 + 电平 + 打断仲裁）              │
 │                    │ input_audio_buffer.append                 │
 │                    ▼                                           │
 │  RealtimeWsTransport ──WSS──► narwal-plan                      │
-│  (pi-ai/realtime)              qwen-audio-3.0-realtime-flash/plus│
+│  (ai/realtime)              qwen-audio-3.0-realtime-flash/plus│
 │                    │                                           │
 │     ┌──────────────┴───────────────┐                           │
 │     │ 语音直接回答（chat/query 快路径）│ function_call            │
@@ -43,13 +43,13 @@
 └────────────────────────────────────────────────────────────────┘
 ```
 
-职责切分原则：**realtime 模型是嘴巴和耳朵，不是大脑**。闲聊/确认/播报本地完成；任何查文件、跑命令、操作业务系统的请求必须委托 omp agent，绝不让 realtime 模型自己编排多步任务。
+职责切分原则：**realtime 模型是嘴巴和耳朵，不是大脑**。闲聊/确认/播报本地完成；任何查文件、跑命令、操作业务系统的请求必须委托 cornfield agent，绝不让 realtime 模型自己编排多步任务。
 
 P1 两条执行路径并存：
 - **query/chat 快路径**：只读 consult 会话，一次调用秒回（「天气」「TODO 几条」）。
 - **task 路径**：任务直接 `sendUserMessage` 进当前主会话（`VoiceModeController.#ctx.session`），获得与打字完全相同的执行语义——完整 system prompt / 全量工具 / 完整历史 / 持久化 / memory / 自进化。展示零成本：主会话事件流本就由 TUI 渲染，语音侧只滚动工具活动行。
 
-## 3. 传输与协议（pi-ai realtime）
+## 3. 传输与协议（ai realtime）
 
 `packages/ai/src/realtime/`：`transport.ts`（WSS 握手/鉴权/指数退避重连/心跳/事件分发）、`protocol.ts`（双向事件类型）、`audio.ts`（PCM16 base64、24kHz、静音帧）、`function-bridge.ts`（function 注册/收参/回注）。
 

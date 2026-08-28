@@ -1,4 +1,4 @@
-import type { DisabledSkillDto, SkillDto } from "@oh-my-pi/pi-wire";
+import type { DisabledSkillDto, SkillDto } from "@cornfield/wire";
 import { Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { RemoteSkillItemDto } from "../../lib/pi-client-api";

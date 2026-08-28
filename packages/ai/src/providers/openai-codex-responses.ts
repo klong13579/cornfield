@@ -1,5 +1,5 @@
 import * as os from "node:os";
-import { $env, $flag, abortableSleep, asRecord, logger, readSseJson, structuredCloneJSON } from "@oh-my-pi/pi-utils";
+import { $env, $flag, abortableSleep, asRecord, logger, readSseJson, structuredCloneJSON } from "@cornfield/utils";
 import type OpenAI from "openai";
 import type {
 	ResponseCustomToolCall,

@@ -1,5 +1,5 @@
 import * as fs from "node:fs";
-import { type GeneratedProvider, getBundledModels, getBundledProviders } from "@oh-my-pi/pi-ai";
+import { type GeneratedProvider, getBundledModels, getBundledProviders } from "@cornfield/ai";
 import {
 	getRecentErrors as dbGetRecentErrors,
 	getRecentRequests as dbGetRecentRequests,

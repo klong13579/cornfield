@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { PiClient } from "@oh-my-pi/pi-client";
-import type { WireServerEvent } from "@oh-my-pi/pi-wire";
+import { PiClient } from "@cornfield/client";
+import type { WireServerEvent } from "@cornfield/wire";
 import { waitForServe } from "./wait-for-serve";
 
 /**

@@ -1,18 +1,18 @@
 {
 	"type": "module",
-	"name": "@oh-my-pi/moa-extension",
+	"name": "@cornfield/moa-extension",
 	"version": "0.19.2",
-	"description": "Mixture-of-Agents extension for omp",
-	"homepage": "https://github.com/can1357/oh-my-pi",
+	"description": "Mixture-of-Agents extension for CornField",
+	"homepage": "https://github.com/klong13579/cornfield",
 	"author": "Narwal",
 	"license": "MIT",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/can1357/oh-my-pi.git",
+		"url": "git+https://github.com/klong13579/cornfield.git",
 		"directory": "packages/moa-extension"
 	},
 	"bugs": {
-		"url": "https://github.com/can1357/oh-my-pi/issues"
+		"url": "https://github.com/klong13579/cornfield/issues"
 	},
 	"keywords": [
 		"moa",
@@ -32,13 +32,13 @@
 		"test": "bun test"
 	},
 	"dependencies": {
-		"@oh-my-pi/pi-utils": "workspace:*"
+		"@cornfield/utils": "workspace:*"
 	},
 	"devDependencies": {
 		"@types/bun": "catalog:"
 	},
 	"peerDependencies": {
-		"@oh-my-pi/pi-coding-agent": "^14"
+		"@cornfield/coding-agent": "workspace:*"
 	},
 	"engines": {
 		"bun": ">=1.3.7"

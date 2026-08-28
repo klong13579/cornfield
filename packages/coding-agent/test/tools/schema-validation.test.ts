@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
-import { sanitizeSchemaForGoogle } from "@oh-my-pi/pi-ai";
-import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { createTools, HIDDEN_TOOLS, type ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
+import { sanitizeSchemaForGoogle } from "@cornfield/ai";
+import { Settings } from "@cornfield/coding-agent/config/settings";
+import { createTools, HIDDEN_TOOLS, type ToolSession } from "@cornfield/coding-agent/tools";
 
 /**
  * Problematic JSON Schema features that cause issues with various providers.
