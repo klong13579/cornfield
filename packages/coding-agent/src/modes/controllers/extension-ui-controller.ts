@@ -215,7 +215,10 @@ export class ExtensionUiController {
 					: null;
 				const result = wireBranch
 					? wireBranch.ok
-						? { cancelled: false, selectedText: (wireBranch.result as { selectedText?: string } | undefined)?.selectedText ?? "" }
+						? {
+								cancelled: false,
+								selectedText: (wireBranch.result as { selectedText?: string } | undefined)?.selectedText ?? "",
+							}
 						: { cancelled: true, selectedText: "" }
 					: await this.ctx.session.branch(entryId);
 				if (result.cancelled) {
@@ -491,7 +494,10 @@ export class ExtensionUiController {
 					: null;
 				const result = wireBranch
 					? wireBranch.ok
-						? { cancelled: false, selectedText: (wireBranch.result as { selectedText?: string } | undefined)?.selectedText ?? "" }
+						? {
+								cancelled: false,
+								selectedText: (wireBranch.result as { selectedText?: string } | undefined)?.selectedText ?? "",
+							}
 						: { cancelled: true, selectedText: "" }
 					: await this.ctx.session.branch(entryId);
 				if (result.cancelled) {
@@ -965,10 +971,12 @@ export class ExtensionUiController {
 
 	#sendExtensionUserMessage: SendUserMessageHandler = (content, options) => {
 		const sendUser = (): Promise<void> =>
-				this.ctx.wireClient
-					? this.ctx.wireClient.sendCommand({ type: "send_user_message", message: typeof content === "string" ? content : "" }).then(() => undefined)
-					: this.ctx.session.sendUserMessage(content, options);
-			sendUser().catch((err: unknown) => {
+			this.ctx.wireClient
+				? this.ctx.wireClient
+						.sendCommand({ type: "send_user_message", message: typeof content === "string" ? content : "" })
+						.then(() => undefined)
+				: this.ctx.session.sendUserMessage(content, options);
+		sendUser().catch((err: unknown) => {
 			this.ctx.showError(`Extension sendUserMessage failed: ${err instanceof Error ? err.message : String(err)}`);
 		});
 	};

@@ -115,7 +115,14 @@ export type MultiplexCommand =
 	| { id?: string; type: "set_active_tools"; sessionId?: string; toolNames: string[] }
 	// Model
 	| { id?: string; type: "set_model"; sessionId?: string; provider: string; modelId: string }
-	| { id?: string; type: "set_model_temporary"; sessionId?: string; provider: string; modelId: string; thinkingLevel?: ThinkingLevel }
+	| {
+			id?: string;
+			type: "set_model_temporary";
+			sessionId?: string;
+			provider: string;
+			modelId: string;
+			thinkingLevel?: ThinkingLevel;
+	  }
 	| { id?: string; type: "cycle_model"; sessionId?: string }
 	| { id?: string; type: "get_available_models"; sessionId?: string }
 	| { id?: string; type: "get_available_thinking_levels"; sessionId?: string }
@@ -127,7 +134,12 @@ export type MultiplexCommand =
 	| { id?: string; type: "set_plan_mode"; sessionId?: string; enabled: boolean; planFilePath?: string }
 	| { id?: string; type: "send_plan_mode_context"; sessionId?: string }
 	| { id?: string; type: "set_plan_reference"; sessionId?: string; path: string; markSent: boolean }
-	| { id?: string; type: "set_slash_commands"; sessionId?: string; commands: Array<{ name: string; description: string; content: string; source?: string }> }
+	| {
+			id?: string;
+			type: "set_slash_commands";
+			sessionId?: string;
+			commands: Array<{ name: string; description: string; content: string; source?: string }>;
+	  }
 	// Compaction
 	| { id?: string; type: "compact"; sessionId?: string; customInstructions?: string }
 	| { id?: string; type: "set_auto_compaction"; sessionId?: string; enabled: boolean }
@@ -153,7 +165,6 @@ export type MultiplexCommand =
 	| { id?: string; type: "abort_bash"; sessionId?: string }
 	// Tool control（P2：bridge 专有命令纳入 wire 面）
 	| { id?: string; type: "set_disabled_toolsets"; sessionId?: string; toolsets: string[] }
-main
 	// Session
 	| { id?: string; type: "get_session_stats"; sessionId?: string }
 	| { id?: string; type: "export_html"; sessionId?: string; outputPath?: string }

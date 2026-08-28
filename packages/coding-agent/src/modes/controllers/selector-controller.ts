@@ -607,11 +607,15 @@ export class SelectorController {
 				userMessages.map(m => ({ id: m.entryId, text: m.text })),
 				async entryId => {
 					const wireBranch = this.ctx.wireClient
-					? await this.ctx.wireClient.sendCommand({ type: "branch", entryId })
-					: null;
+						? await this.ctx.wireClient.sendCommand({ type: "branch", entryId })
+						: null;
 					const result = wireBranch
 						? wireBranch.ok
-							? { cancelled: false, selectedText: (wireBranch.result as { selectedText?: string } | undefined)?.selectedText ?? "" }
+							? {
+									cancelled: false,
+									selectedText:
+										(wireBranch.result as { selectedText?: string } | undefined)?.selectedText ?? "",
+								}
 							: { cancelled: true, selectedText: "" }
 						: await this.ctx.session.branch(entryId);
 					if (result.cancelled) {

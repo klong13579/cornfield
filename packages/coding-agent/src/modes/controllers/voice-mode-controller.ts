@@ -265,10 +265,10 @@ export class VoiceModeController {
 		};
 		this.#sessionUnsubscribe = this.#ctx.wireClient
 			? this.#ctx.wireClient.onPush(frame => {
-				if (frame.type === "push" && frame.event.type === "progress") {
-					handleVoiceEvent(frame.event.event as AgentSessionEvent);
-				}
-			})
+					if (frame.type === "push" && frame.event.type === "progress") {
+						handleVoiceEvent(frame.event.event as AgentSessionEvent);
+					}
+				})
 			: this.#ctx.session.subscribe(handleVoiceEvent);
 
 		const callbacks: VoicePanelCallbacks = {

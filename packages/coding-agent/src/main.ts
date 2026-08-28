@@ -44,11 +44,11 @@ import { InteractiveMode, runAcpMode, runPrintMode, runRpcMode, runWireStdioMode
 import { initTheme, stopThemeWatcher } from "./modes/theme/theme";
 import type { SubmittedUserInput } from "./modes/types";
 import { type CreateAgentSessionOptions, createAgentSession, discoverAuthStorage } from "./sdk";
+import { createInMemoryWireClient } from "./server/memory-wire";
+import { createWireCore } from "./server/wire-server";
 import type { AgentSession } from "./session/agent-session";
 import { resolveResumableSession, type SessionInfo, SessionManager } from "./session/session-manager";
 import { SessionStore } from "./session/session-store";
-import { createWireCore } from "./server/wire-server";
-import { createInMemoryWireClient } from "./server/memory-wire";
 import { resolvePromptInput } from "./system-prompt";
 import type { LspStartupServerInfo } from "./tools";
 import { getChangelogPath, getNewEntries, parseChangelog } from "./utils/changelog";

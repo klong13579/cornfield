@@ -524,10 +524,10 @@ export class InputController {
 		}
 		this.ctx.unsubscribe = this.ctx.wireClient
 			? this.ctx.wireClient.onPush(frame => {
-				if (frame.type === "push" && frame.event.type === "progress") {
-					void this.ctx.handleBackgroundEvent(frame.event.event as AgentSessionEvent);
-				}
-			})
+					if (frame.type === "push" && frame.event.type === "progress") {
+						void this.ctx.handleBackgroundEvent(frame.event.event as AgentSessionEvent);
+					}
+				})
 			: this.ctx.session.subscribe(async (event: AgentSessionEvent) => {
 					await this.ctx.handleBackgroundEvent(event);
 				});
@@ -664,7 +664,13 @@ export class InputController {
 				: null;
 			const result = wireCycle
 				? wireCycle.ok
-					? (wireCycle.result as { model: { id: string; provider: string; name?: string; thinking?: unknown }; role: string; thinkingLevel?: string } | undefined)
+					? (wireCycle.result as
+							| {
+									model: { id: string; provider: string; name?: string; thinking?: unknown };
+									role: string;
+									thinkingLevel?: string;
+							  }
+							| undefined)
 					: undefined
 				: await this.ctx.session.cycleRoleModels(cycleOrder, options);
 			if (!result) {

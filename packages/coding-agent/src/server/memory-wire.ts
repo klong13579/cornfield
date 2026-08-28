@@ -10,7 +10,7 @@
  * 2. interactive-mode 的关键路径（模型/审批/会话元数据）切到本客户端，
  *    逐步扩大直到 TUI 完全经协议层消费核心。
  */
-import type { ClientFrame, ServerFrame, SessionSnapshot, WireCommand } from "@oh-my-pi/pi-wire";
+import type { ServerFrame, SessionSnapshot, WireCommand } from "@oh-my-pi/pi-wire";
 import type { CommandContext, WireCore, WireCoreTarget } from "./wire-server";
 
 export interface InMemoryWireClient {

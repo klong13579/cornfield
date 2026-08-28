@@ -509,7 +509,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 					if (cmd.sessionFile) {
 						// 定向会话：agentDir 从该会话归属的 agent 解析（sessionFile 位于其 sessions 树下，
 						// 用 activeAgentId 对应 meta 的 agentDir 做路径约束即可——sessionFile 本身只读）。
-						const agentId = cmd.sessionId ?? conn.activeAgentId;
+						const agentId = cmd.sessionId ?? ctx.activeAgentId;
 						const meta = registry.getMeta(agentId);
 						if (!meta) {
 							fail(`unknown agent: ${agentId}`);
@@ -532,7 +532,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 						done({ artifacts });
 						return;
 					}
-					const agentId = cmd.sessionId ?? conn.activeAgentId;
+					const agentId = cmd.sessionId ?? ctx.activeAgentId;
 					const meta = registry.getMeta(agentId);
 					if (!meta) {
 						fail(`unknown agent: ${agentId}`);
@@ -715,7 +715,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 				}
 				// ── git 最小集（票 02）──
 				case "git_status": {
-					const agentId = (command as { sessionId?: string }).sessionId ?? conn.activeAgentId;
+					const agentId = (command as { sessionId?: string }).sessionId ?? ctx.activeAgentId;
 					const meta = registry.getMeta(agentId);
 					if (!meta) {
 						fail(`unknown agent: ${agentId}`);
@@ -742,7 +742,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 					return;
 				}
 				case "git_diff": {
-					const agentId = (command as { sessionId?: string }).sessionId ?? conn.activeAgentId;
+					const agentId = (command as { sessionId?: string }).sessionId ?? ctx.activeAgentId;
 					const meta = registry.getMeta(agentId);
 					if (!meta) {
 						fail(`unknown agent: ${agentId}`);
@@ -765,7 +765,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 					return;
 				}
 				case "git_log": {
-					const agentId = (command as { sessionId?: string }).sessionId ?? conn.activeAgentId;
+					const agentId = (command as { sessionId?: string }).sessionId ?? ctx.activeAgentId;
 					const meta = registry.getMeta(agentId);
 					if (!meta) {
 						fail(`unknown agent: ${agentId}`);
@@ -786,7 +786,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 					return;
 				}
 				case "git_show": {
-					const agentId = (command as { sessionId?: string }).sessionId ?? conn.activeAgentId;
+					const agentId = (command as { sessionId?: string }).sessionId ?? ctx.activeAgentId;
 					const meta = registry.getMeta(agentId);
 					if (!meta) {
 						fail(`unknown agent: ${agentId}`);
@@ -806,7 +806,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 					return;
 				}
 				case "git_branches": {
-					const agentId = (command as { sessionId?: string }).sessionId ?? conn.activeAgentId;
+					const agentId = (command as { sessionId?: string }).sessionId ?? ctx.activeAgentId;
 					const meta = registry.getMeta(agentId);
 					if (!meta) {
 						fail(`unknown agent: ${agentId}`);
@@ -843,7 +843,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 				// registry agent 的配置根 <agentDir>/config.yml（与 serve sessionFactory 的
 				// Settings.create({ agentDir }) 同源）。
 				case "get_config": {
-					const agentId = (command as { sessionId?: string }).sessionId ?? conn.activeAgentId;
+					const agentId = (command as { sessionId?: string }).sessionId ?? ctx.activeAgentId;
 					const meta = registry.getMeta(agentId);
 					if (!meta) {
 						fail(`unknown agent: ${agentId}`);
@@ -860,7 +860,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 					return;
 				}
 				case "set_config": {
-					const agentId = (command as { sessionId?: string }).sessionId ?? conn.activeAgentId;
+					const agentId = (command as { sessionId?: string }).sessionId ?? ctx.activeAgentId;
 					const meta = registry.getMeta(agentId);
 					if (!meta) {
 						fail(`unknown agent: ${agentId}`);
@@ -1480,7 +1480,6 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 					} catch (err) {
 						fail(err instanceof Error ? err.message : String(err));
 					}
-					main;
 					break;
 				}
 

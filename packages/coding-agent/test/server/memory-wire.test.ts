@@ -4,7 +4,7 @@
  */
 import { describe, expect, test } from "bun:test";
 import type { ServerFrame, WireCommand } from "@oh-my-pi/pi-wire";
-import { createInMemoryWireClient, type InMemoryWireClient } from "../../src/server/memory-wire";
+import { createInMemoryWireClient } from "../../src/server/memory-wire";
 import type { CommandContext, WireCore, WireCoreTarget } from "../../src/server/wire-server";
 
 function makeStubCore(): { core: WireCore; targets: WireCoreTarget[]; ctxs: CommandContext[] } {
@@ -20,7 +20,8 @@ function makeStubCore(): { core: WireCore; targets: WireCoreTarget[]; ctxs: Comm
 			};
 		},
 		handleCommand: async (ctx, command: WireCommand, reply) => {
-			ctxs.push(ctx);			switch (command.type) {
+			ctxs.push(ctx);
+			switch (command.type) {
 				case "get_state":
 					reply({ type: "response", id: command.id ?? "", ok: true, result: { sessionId: ctx.activeAgentId } });
 					return;
@@ -32,7 +33,10 @@ function makeStubCore(): { core: WireCore; targets: WireCoreTarget[]; ctxs: Comm
 			}
 		},
 		sendSessionSnapshotTo: (t: WireCoreTarget) => {
-			t.send({ type: "push", event: { type: "session_snapshot", sessionId: t.getActiveAgentId(), snapshot: {} as never } });
+			t.send({
+				type: "push",
+				event: { type: "session_snapshot", sessionId: t.getActiveAgentId(), snapshot: {} as never },
+			});
 		},
 		broadcastServerSnapshot: () => {
 			for (const t of targets) t.send({ type: "push", event: { type: "server_snapshot", sessions: [] } });
@@ -108,7 +112,17 @@ describe("InMemoryWireClient", () => {
 		client.onPush(f => pushes.push(f as never));
 		// 模拟 core 发 permission_request（通过 target.send）
 		const target = targets.find(t => t.id === "tui-memory")!;
-		target.send({ type: "push", event: { type: "permission_request", kind: "approval", requestId: "r1", command: "bash", description: "run bash?", patternKeys: [] } });
+		target.send({
+			type: "push",
+			event: {
+				type: "permission_request",
+				kind: "approval",
+				requestId: "r1",
+				command: "bash",
+				description: "run bash?",
+				patternKeys: [],
+			},
+		});
 		expect(pushes.length).toBe(1);
 		expect(pushes[0].event.type).toBe("permission_request");
 		expect(pushes[0].event.requestId).toBe("r1");
@@ -125,7 +139,20 @@ describe("InMemoryWireClient", () => {
 			event: {
 				type: "session_snapshot",
 				sessionId: "default",
-				snapshot: { seq: 1, sessionId: "default", messages: [], todoPhases: [], activeToolNames: [], queuedMessageCount: 2, phase: "streaming", retryAttempt: 0, isCompacting: false, isStreaming: true, autoCompactionEnabled: true, autoRetryEnabled: true },
+				snapshot: {
+					seq: 1,
+					sessionId: "default",
+					messages: [],
+					todoPhases: [],
+					activeToolNames: [],
+					queuedMessageCount: 2,
+					phase: "streaming",
+					retryAttempt: 0,
+					isCompacting: false,
+					isStreaming: true,
+					autoCompactionEnabled: true,
+					autoRetryEnabled: true,
+				},
 			},
 		});
 		const snap = client.getSnapshot();
@@ -138,7 +165,20 @@ describe("InMemoryWireClient", () => {
 			event: {
 				type: "session_snapshot",
 				sessionId: "default",
-				snapshot: { seq: 2, sessionId: "default", messages: [], todoPhases: [], activeToolNames: [], queuedMessageCount: 0, phase: "idle", retryAttempt: 0, isCompacting: false, isStreaming: false, autoCompactionEnabled: true, autoRetryEnabled: true },
+				snapshot: {
+					seq: 2,
+					sessionId: "default",
+					messages: [],
+					todoPhases: [],
+					activeToolNames: [],
+					queuedMessageCount: 0,
+					phase: "idle",
+					retryAttempt: 0,
+					isCompacting: false,
+					isStreaming: false,
+					autoCompactionEnabled: true,
+					autoRetryEnabled: true,
+				},
 			},
 		});
 		expect(client.getSnapshot()?.isStreaming).toBe(false);

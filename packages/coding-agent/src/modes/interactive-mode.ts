@@ -27,7 +27,6 @@ import {
 } from "@oh-my-pi/pi-tui";
 import { APP_NAME, getProjectDir, hsvToRgb, isEnoent, logger, postmortem, prompt } from "@oh-my-pi/pi-utils";
 import chalk from "chalk";
-import type { InMemoryWireClient } from "../server/memory-wire";
 import { KeybindingsManager } from "../config/keybindings";
 import { type Settings, settings } from "../config/settings";
 import type {
@@ -43,6 +42,7 @@ import { shutdownSharedGateway } from "../ipy/gateway-coordinator";
 import { LSP_STARTUP_EVENT_CHANNEL, type LspStartupEvent } from "../lsp/startup-events";
 import { renameApprovedPlanFile } from "../plan-mode/approved-plan";
 import planModeApprovedPrompt from "../prompts/system/plan-mode-approved.md" with { type: "text" };
+import type { InMemoryWireClient } from "../server/memory-wire";
 import type { AgentSession, AgentSessionEvent } from "../session/agent-session";
 import { HistoryStorage } from "../session/history-storage";
 import type { SessionContext, SessionManager } from "../session/session-manager";
@@ -327,7 +327,14 @@ export class InteractiveMode implements InteractiveModeContext {
 		}));
 
 		// Convert custom commands (TypeScript) to SlashCommand format
-		const customCommands: SlashCommand[] = (this.wireClient?.getSnapshot()?.customCommands ?? this.session.customCommands.map(c => ({ name: c.command.name, description: `${c.command.description} (${c.source})`, source: c.source }))).map(c => ({
+		const customCommands: SlashCommand[] = (
+			this.wireClient?.getSnapshot()?.customCommands ??
+			this.session.customCommands.map(c => ({
+				name: c.command.name,
+				description: `${c.command.description} (${c.source})`,
+				source: c.source,
+			}))
+		).map(c => ({
 			name: c.name,
 			description: c.description,
 		}));
@@ -335,7 +342,9 @@ export class InteractiveMode implements InteractiveModeContext {
 		// Build skill commands from session.skills (if enabled)
 		const skillCommandList: SlashCommand[] = [];
 		if (settings.get("skills.enableSkillCommands")) {
-			const snapSkills = this.wireClient?.getSnapshot()?.skills ?? this.session.skills.map(s => ({ name: s.name, filePath: s.filePath, description: s.description }));
+			const snapSkills =
+				this.wireClient?.getSnapshot()?.skills ??
+				this.session.skills.map(s => ({ name: s.name, filePath: s.filePath, description: s.description }));
 			for (const skill of snapSkills) {
 				const commandName = `skill:${skill.name}`;
 				this.skillCommands.set(commandName, skill.filePath);
@@ -567,7 +576,12 @@ export class InteractiveMode implements InteractiveModeContext {
 		if (this.wireClient) {
 			void this.wireClient.sendCommand({
 				type: "set_slash_commands",
-				commands: fileCommands.map(c => ({ name: c.name, description: c.description, content: c.content, source: c.source })),
+				commands: fileCommands.map(c => ({
+					name: c.name,
+					description: c.description,
+					content: c.content,
+					source: c.source,
+				})),
 			});
 		} else {
 			this.session.setSlashCommands(fileCommands);
@@ -741,7 +755,8 @@ export class InteractiveMode implements InteractiveModeContext {
 			if (ansi) {
 				this.editor.borderColor = (str: string) => `${ansi}${str}\x1b[39m`;
 			} else {
-				const level = (this.wireClient?.getSnapshot()?.thinkingLevel ?? this.session.thinkingLevel) ?? ThinkingLevel.Off;
+				const level =
+					this.wireClient?.getSnapshot()?.thinkingLevel ?? this.session.thinkingLevel ?? ThinkingLevel.Off;
 				this.editor.borderColor = theme.getThinkingBorderColor(level);
 			}
 		}
@@ -865,7 +880,11 @@ export class InteractiveMode implements InteractiveModeContext {
 			const res = await this.wireClient.sendCommand({ type: "resolve_role_model", role: "plan" });
 			if (res.ok) {
 				const r = (res as { ok: true; result: { model: never; thinkingLevel?: never } }).result;
-				resolved = { model: r.model, thinkingLevel: r.thinkingLevel, explicitThinkingLevel: r.thinkingLevel !== undefined } as never;
+				resolved = {
+					model: r.model,
+					thinkingLevel: r.thinkingLevel,
+					explicitThinkingLevel: r.thinkingLevel !== undefined,
+				} as never;
 			}
 		}
 		if (!resolved.model) return;
@@ -884,15 +903,23 @@ export class InteractiveMode implements InteractiveModeContext {
 				return;
 			}
 			try {
-				if (this.wireClient) await this.wireClient.sendCommand({ type: "set_model_temporary", provider: resolved.model.provider, modelId: resolved.model.id, thinkingLevel: planThinkingLevel });
-			else await this.session.setModelTemporary(resolved.model, planThinkingLevel);
+				if (this.wireClient)
+					await this.wireClient.sendCommand({
+						type: "set_model_temporary",
+						provider: resolved.model.provider,
+						modelId: resolved.model.id,
+						thinkingLevel: planThinkingLevel,
+					});
+				else await this.session.setModelTemporary(resolved.model, planThinkingLevel);
 			} catch (error) {
 				this.showWarning(
 					`Failed to switch to plan model for plan mode: ${error instanceof Error ? error.message : String(error)}`,
 				);
 			}
 		} else if (planThinkingLevel) {
-			this.wireClient ? void this.wireClient.sendCommand({ type: "set_thinking_level", level: planThinkingLevel }) : this.session.setThinkingLevel(planThinkingLevel);
+			this.wireClient
+				? void this.wireClient.sendCommand({ type: "set_thinking_level", level: planThinkingLevel })
+				: this.session.setThinkingLevel(planThinkingLevel);
 		}
 	}
 
@@ -902,7 +929,13 @@ export class InteractiveMode implements InteractiveModeContext {
 		if (!pending) return;
 		this.#pendingModelSwitch = undefined;
 		try {
-			if (this.wireClient) await this.wireClient.sendCommand({ type: "set_model_temporary", provider: pending.model.provider, modelId: pending.model.id, thinkingLevel: pending.thinkingLevel });
+			if (this.wireClient)
+				await this.wireClient.sendCommand({
+					type: "set_model_temporary",
+					provider: pending.model.provider,
+					modelId: pending.model.id,
+					thinkingLevel: pending.thinkingLevel,
+				});
 			else await this.session.setModelTemporary(pending.model, pending.thinkingLevel);
 		} catch (error) {
 			this.showWarning(
@@ -963,7 +996,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		}
 		if (this.wireClient?.getSnapshot()?.isStreaming ?? this.session.isStreaming) {
 			if (this.wireClient) await this.wireClient.sendCommand({ type: "send_plan_mode_context" });
-		else await this.session.sendPlanModeContext({ deliverAs: "steer" });
+			else await this.session.sendPlanModeContext({ deliverAs: "steer" });
 		}
 		this.#planModeHasEntered = true;
 		await this.#applyPlanModeModel();
@@ -980,7 +1013,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		const previousTools = this.#planModePreviousTools;
 		if (previousTools && previousTools.length > 0) {
 			if (this.wireClient) await this.wireClient.sendCommand({ type: "set_active_tools", toolNames: previousTools });
-		else await this.session.setActiveToolsByName(previousTools);
+			else await this.session.setActiveToolsByName(previousTools);
 		}
 		if (this.#planModePreviousModelState) {
 			const prev = this.#planModePreviousModelState;
@@ -996,8 +1029,14 @@ export class InteractiveMode implements InteractiveModeContext {
 			} else if (this.wireClient?.getSnapshot()?.isStreaming ?? this.session.isStreaming) {
 				this.#pendingModelSwitch = { model: prev.model, thinkingLevel: prev.thinkingLevel };
 			} else {
-				if (this.wireClient) await this.wireClient.sendCommand({ type: "set_model_temporary", provider: prev.model.provider, modelId: prev.model.id, thinkingLevel: prev.thinkingLevel });
-			else await this.session.setModelTemporary(prev.model, prev.thinkingLevel);
+				if (this.wireClient)
+					await this.wireClient.sendCommand({
+						type: "set_model_temporary",
+						provider: prev.model.provider,
+						modelId: prev.model.id,
+						thinkingLevel: prev.thinkingLevel,
+					});
+				else await this.session.setModelTemporary(prev.model, prev.thinkingLevel);
 			}
 			// If #applyPlanModeModel queued a deferred switch to the plan-role model
 			// (because the session was streaming on entry), drop it now: we are
@@ -1168,7 +1207,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		await Bun.write(newLocalPath, planContent);
 		if (previousTools.length > 0) {
 			if (this.wireClient) await this.wireClient.sendCommand({ type: "set_active_tools", toolNames: previousTools });
-		else await this.session.setActiveToolsByName(previousTools);
+			else await this.session.setActiveToolsByName(previousTools);
 		}
 		if (this.wireClient) {
 			void this.wireClient.sendCommand({
