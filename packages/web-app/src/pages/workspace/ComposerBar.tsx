@@ -274,10 +274,10 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 							>
 								<span className="relative flex h-6 w-6 items-center justify-center rounded-[6px] border border-hairline bg-surface-2 text-[10px] font-semibold text-ink">
 									{agent?.face ?? "?"}
-									{agent?.dingtalkBound && (
+									{agent?.dingtalk?.enabled && (
 										<span
 											className="absolute -right-1 -bottom-1 flex h-3 w-3 items-center justify-center rounded-[4px] bg-dingtalk"
-											title="钉钉绑定"
+											title={`钉钉：${agent?.dingtalk?.robotName ?? "已绑定"}`}
 										/>
 									)}
 								</span>

@@ -143,9 +143,8 @@ async function collectArtifactPaths(
 	return byPath;
 }
 
-/** stat 过滤 + 排序 + 上限（共享收尾）。 */
+/** stat 过滤 + 排序 + 上限（共享收尾）。byPath 的 key 已是绝对路径。 */
 async function finalizeArtifacts(
-	agentDir: string,
 	byPath: Map<string, { title: string; type: ArtifactKind; path: string }>,
 ): Promise<ArtifactDto[]> {
 	const artifacts: ArtifactDto[] = [];
@@ -177,7 +176,7 @@ async function finalizeArtifacts(
 export async function listAgentArtifacts(agentDir: string, sessionsRoot: string): Promise<ArtifactDto[]> {
 	const sessionFiles = await listRecentSessionFiles(sessionsRoot, SCAN_SESSION_LIMIT);
 	if (sessionFiles.length === 0) return [];
-	return finalizeArtifacts(agentDir, await collectArtifactPaths(agentDir, sessionFiles));
+	return finalizeArtifacts(await collectArtifactPaths(agentDir, sessionFiles));
 }
 
 /**
@@ -187,5 +186,5 @@ export async function listAgentArtifacts(agentDir: string, sessionsRoot: string)
  */
 export async function listSessionArtifacts(agentDir: string, sessionFile: string): Promise<ArtifactDto[]> {
 	const byPath = await collectArtifactPaths(agentDir, [sessionFile]);
-	return finalizeArtifacts(agentDir, byPath);
+	return finalizeArtifacts(byPath);
 }

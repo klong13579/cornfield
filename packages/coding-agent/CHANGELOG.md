@@ -8,6 +8,8 @@
 
 ### Fixed
 
+- **Agent 钉钉绑定展示 + 详情页路由化** (`src/server/session-registry.ts`、`packages/web-app/src/{pages/agents/AgentsView.tsx,pages/agents/AgentDetailView.tsx,pages/workspace/ComposerBar.tsx,pages/workspace/SessionSidebar.tsx,router.tsx}`): loadAgentMetas 从 `gateway.json` 的 channels.dingtalk.accounts 按 accountId 挂 `AgentMeta.dingtalk`（config root 下读取，缺失不崩溃），list_agents/server_snapshot 带出机器人配置；前端 AgentsView 展示绑定 badge、Agent 详情页改路由 `#/agents/<id>`（内容区打开保留导航）、新增钉钉 tab（机器人名/状态/appKey/robotCode/隐藏思考块/agentDir）、会话栏按 agent 显示名分组。新增 `test/session-registry-dingtalk.test.ts`（映射/停用/缺失三条路径）。
+
 - **list_artifacts 按会话隔离修正** (`src/server/wire-server.ts`、`src/server/artifacts.ts`): 定向 `sessionFile` 时 fresh 会话（JSONL 未落盘）诚实返回空数组而非降级 agent 维度——降级会把其它会话的产物混入当前会话视图，破坏按会话隔离。同时补充 `pi-wire` 的 `ArtifactDto` barrel export（此前已提交的 `results/artifacts.ts` 未接入 `index.ts`，`@oh-my-pi/pi-wire` 导不出该类型），并在 `wire-stdio` 面登记 `list_artifacts` 命令。
 
 - **会话列表/回放显示会话名而非 id** (`src/server/session-index.ts`、`packages/web-app/src/pages/records/{RecordsView,PlaybackView}.tsx`): 无 title 会话（空会话、旧版本、gateway 未设标题）在 RecordsView/SessionSidebar 显示 `sessionId` 前 8 位、回放页显示 id 短哈希。serve 端 `list_sessions` 标题优先级改为三档——header title → 首条 user 消息文本（与 session-manager 自动标题同源，40 字截断）→ 文件名推导（`by-date/<date>/<HHMMSS>[-<slug>]__<8hex>` → `MM-DD HHMMSS [slug]`；subagent 子会话 `by-date/<主会话>/<NN>-<name>` → 任务名；gateway 扁平 `<convId>.jsonl` 不匹配则回落 id）。RecordsView 点击行经 navigate state 携带会话名，回放页优先显示。

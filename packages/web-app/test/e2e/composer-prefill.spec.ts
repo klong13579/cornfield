@@ -54,19 +54,14 @@ test("composer 种子：显示 → 消费 URL → 清空不再恢复", async ({ 
 	await page.addInitScript(() => {
 		localStorage.setItem("omp.serve.connection", JSON.stringify({ wsUrl: "ws://127.0.0.1:9/ws", token: "" }));
 	});
-	const preview = spawn("bun", [
-		"x",
-		"vite",
-		"preview",
-		"--port",
-		String(APP_PORT),
-		"--strictPort",
-		"--host",
-		"127.0.0.1",
-	], {
-		cwd: path.join(repoRoot, "packages/web-app"),
-		env: process.env,
-	});
+	const preview = spawn(
+		"bun",
+		["x", "vite", "preview", "--port", String(APP_PORT), "--strictPort", "--host", "127.0.0.1"],
+		{
+			cwd: path.join(repoRoot, "packages/web-app"),
+			env: process.env,
+		},
+	);
 	try {
 		await waitForHttp(`http://127.0.0.1:${APP_PORT}/`, 30_000);
 		// 路由是 hash 模式（createHashRouter）——workspace 页在 /#/workspace

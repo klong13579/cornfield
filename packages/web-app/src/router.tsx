@@ -13,9 +13,10 @@ import {
 	Mic,
 	SlidersHorizontal,
 } from "lucide-react";
-import { createHashRouter } from "react-router-dom";
+import { createHashRouter, useNavigate, useParams } from "react-router-dom";
 import { AppShell } from "./layout/AppShell";
 import { registerPanel } from "./layout/panel-registry";
+import { AgentDetailView } from "./pages/agents/AgentDetailView";
 import { AgentsView } from "./pages/agents/AgentsView";
 import { HomeView } from "./pages/home/HomeView";
 import { InsightsView } from "./pages/insights/InsightsView";
@@ -312,6 +313,14 @@ export function findPageMeta(pathname: string): PageMeta | undefined {
 
 // ── 路由导出 ──────────────────────────────────────────────────────────
 
+/** /agents/:id —— Agent 详情页（内容区打开，保留左侧导航栏）。 */
+function AgentDetailRoute(): React.JSX.Element {
+	const { id } = useParams();
+	const navigate = useNavigate();
+	if (!id) return <AgentsView />;
+	return <AgentDetailView agentId={id} onClose={() => navigate("/agents")} />;
+}
+
 export const router = createHashRouter([
 	{
 		element: <AppShell />,
@@ -319,6 +328,7 @@ export const router = createHashRouter([
 			{ path: "/", element: <HomeView /> },
 			{ path: "/workspace", element: <WorkspaceView /> },
 			{ path: "/agents", element: <AgentsView /> },
+			{ path: "/agents/:id", element: <AgentDetailRoute /> },
 			{ path: "/records", element: <RecordsView /> },
 			{ path: "/records/:id", element: <PlaybackView /> },
 			{ path: "/voice", element: <VoiceView /> },

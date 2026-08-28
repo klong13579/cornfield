@@ -1,6 +1,6 @@
 import * as path from "node:path";
-import { logger } from "@oh-my-pi/pi-utils";
-import type { SessionListEntry } from "@oh-my-pi/pi-wire";
+import { getConfigRootDir, isEnoent, logger } from "@oh-my-pi/pi-utils";
+import type { DingtalkAgentConfigDto, SessionListEntry } from "@oh-my-pi/pi-wire";
 import type { AgentSession, AgentSessionEvent } from "../session/agent-session";
 import type { SessionSnapshot } from "../session/session-snapshot";
 import { SessionStore } from "../session/session-store";
@@ -31,6 +31,8 @@ export interface AgentMeta {
 	agentDir: string;
 	/** 技能数（skillsDir 扫描，best-effort，失败为 undefined）。 */
 	skillCount?: number;
+	/** 钉钉机器人配置（gateway.json channels.dingtalk.accounts，按 accountId 匹配；未绑定省略）。 */
+	dingtalk?: DingtalkAgentConfigDto;
 }
 
 export interface AttachedSession {
@@ -51,6 +53,7 @@ export type RegistryEvent =
 /** 从磁盘读全部 agent 元数据（registry.json + 各 agentDir 的 workspace.json）。不写任何文件。 */
 export async function loadAgentMetas(): Promise<AgentMeta[]> {
 	const registered = await listRegistered();
+	const dingtalk = await loadDingtalkConfigs();
 	const metas: AgentMeta[] = [];
 	for (const { name, entry } of registered) {
 		const workspace = await loadWorkspace(entry.path).catch(() => null);
@@ -59,9 +62,37 @@ export async function loadAgentMetas(): Promise<AgentMeta[]> {
 			name: workspace?.name ?? entry.displayName ?? name,
 			agentDir: entry.path,
 			skillCount: await countSkills(entry.path, workspace?.skillsDir),
+			dingtalk: dingtalk.get(name),
 		});
 	}
 	return metas;
+}
+
+/**
+ * gateway.json → channels.dingtalk.accounts（accountId → 机器人配置）。
+ * 读失败（未安装 gateway / 文件损坏）→ 空 Map，serve 仅无绑定视图，不崩溃。
+ */
+async function loadDingtalkConfigs(): Promise<Map<string, DingtalkAgentConfigDto>> {
+	const out = new Map<string, DingtalkAgentConfigDto>();
+	try {
+		const raw = (await Bun.file(path.join(getConfigRootDir(), "gateway.json")).json()) as {
+			channels?: { dingtalk?: { accounts?: Record<string, Record<string, unknown>> } };
+		};
+		const accounts = raw.channels?.dingtalk?.accounts;
+		if (!accounts) return out;
+		for (const [accountId, cfg] of Object.entries(accounts)) {
+			out.set(accountId, {
+				enabled: cfg.enabled !== false,
+				robotName: typeof cfg.robotName === "string" ? cfg.robotName : undefined,
+				appKey: typeof cfg.appKey === "string" ? cfg.appKey : undefined,
+				robotCode: typeof cfg.robotCode === "string" ? cfg.robotCode : undefined,
+				hideThinkingBlock: typeof cfg.hideThinkingBlock === "boolean" ? cfg.hideThinkingBlock : undefined,
+			});
+		}
+	} catch (err) {
+		if (!isEnoent(err)) logger.warn("serve:dingtalk-config-unavailable", { error: String(err) });
+	}
+	return out;
 }
 
 async function countSkills(agentDir: string, skillsDir: string | undefined): Promise<number | undefined> {
@@ -207,6 +238,7 @@ export class SessionRegistry {
 				attached: attached !== undefined,
 				agentDir: meta.agentDir,
 				skillCount: meta.skillCount,
+				dingtalk: meta.dingtalk,
 			};
 			if (attached) {
 				entry.sessionFile = attached.session.sessionFile;

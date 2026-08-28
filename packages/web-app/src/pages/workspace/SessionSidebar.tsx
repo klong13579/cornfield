@@ -9,8 +9,8 @@ import { useSession } from "../../state/use-session";
 /**
  * 会话侧栏（S3，FR-1 会话工作区）—— 300px 会话列表：
  * - 新会话按钮 + 搜索过滤
- * - 双源 tab：WebUI 会话（source=agent）/ CLI 会话（source=cli，按项目目录分组）
- * - 会话按工作区分组（session.agent → view.agents → workspace 映射）
+ * - 双源 tab：WebUI 会话（source=agent，按 agent 分组）/ CLI 会话（source=cli，按项目目录分组）
+ * - 会话按 agent 分组（session.agent → agent 显示名映射）
  * - pin 收藏（localStorage 本地持久化，组内置顶）
  *
  * 数据源：当前会话（view.sessionId/sessionName）+ 历史会话（serve list_sessions 真索引，
@@ -102,11 +102,11 @@ export function SessionSidebar(): React.JSX.Element {
 		});
 	};
 
-	// agent → workspace 映射（历史会话按工作区分组）
-	const agentWorkspace = useMemo(() => {
-		const byId = new Map(view.agents.map(a => [a.id, a.workspace]));
-		const byName = new Map(view.agents.map(a => [a.name, a.workspace]));
-		return (agent: string): string => byId.get(agent) ?? byName.get(agent) ?? "其他";
+	// agent → 显示名映射（历史会话按 agent 分组；id 与 name 双键兼容）
+	const agentLabel = useMemo(() => {
+		const byId = new Map(view.agents.map(a => [a.id, a.name]));
+		const byName = new Map(view.agents.map(a => [a.name, a.name]));
+		return (agent: string): string => byId.get(agent) ?? byName.get(agent) ?? (agent || "其他");
 	}, [view.agents]);
 
 	const rows = useMemo(() => {
@@ -131,12 +131,12 @@ export function SessionSidebar(): React.JSX.Element {
 		return [...current.filter(c => !q || c.name.toLowerCase().includes(q)), ...sorted];
 	}, [source, sessions, view.sessionId, view.sessionName, query, pinned]);
 
-	// 按工作区分组（当前会话单独置顶组）；CLI 源按项目目录（sessionFile 首段）分组
+	// 按 agent 分组（当前会话单独置顶组）；CLI 源按项目目录（sessionFile 首段）分组
 	const groups = useMemo(() => {
 		const order: string[] = [];
 		const map = new Map<string, Row[]>();
 		for (const row of rows) {
-			const key = isCurrent(row) ? "当前会话" : source === "cli" ? cliFolderOf(row) : agentWorkspace(row.agent);
+			const key = isCurrent(row) ? "当前会话" : source === "cli" ? cliFolderOf(row) : agentLabel(row.agent);
 			if (!map.has(key)) {
 				map.set(key, []);
 				order.push(key);
@@ -144,7 +144,7 @@ export function SessionSidebar(): React.JSX.Element {
 			map.get(key)?.push(row);
 		}
 		return order.map(k => ({ workspace: k, rows: map.get(k) ?? [] }));
-	}, [rows, agentWorkspace, source]);
+	}, [rows, agentLabel, source]);
 
 	return (
 		<aside

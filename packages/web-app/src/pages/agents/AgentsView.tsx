@@ -5,7 +5,6 @@ import { useNavigate } from "react-router-dom";
 import type { GatewayStatusDto } from "../../lib/pi-client-api";
 import { useSessionStore } from "../../state/session-store";
 import { useSession } from "../../state/use-session";
-import { AgentDetailView } from "./AgentDetailView";
 
 /**
  * Agent 列表（FR-2）—— 数据源：server_snapshot → adapter 映射（view.agents）。
@@ -20,7 +19,6 @@ export function AgentsView(): React.JSX.Element {
 	const [wsFilter, setWsFilter] = useState<string>("all");
 	const [statusFilter, setStatusFilter] = useState<string>("all");
 	const [query, setQuery] = useState("");
-	const [detailId, setDetailId] = useState<string | null>(null);
 
 	// serve 多 Agent 注册表就绪：挂载时拉一次 list_agents（server_snapshot 推送也会更新）
 	useEffect(() => {
@@ -167,7 +165,7 @@ export function AgentsView(): React.JSX.Element {
 										key={agent.id}
 										agent={agent}
 										gatewayBridge={bridgeState(agent.id)}
-										onOpen={() => setDetailId(agent.id)}
+										onOpen={() => navigate(`/agents/${agent.id}`)}
 										onSession={() => {
 											store.attach(agent.id); // lazy attach（幂等）
 											store.switchSession(agent.id); // 切 active 再进工作台
@@ -180,11 +178,6 @@ export function AgentsView(): React.JSX.Element {
 					);
 				})}
 			</div>
-			{detailId && (
-				<div className="fixed inset-0 z-40 overflow-y-auto bg-canvas">
-					<AgentDetailView agentId={detailId} onClose={() => setDetailId(null)} />
-				</div>
-			)}
 		</div>
 	);
 }
@@ -226,7 +219,14 @@ function AgentCard({
 					<div className="flex items-center gap-2">
 						<span className="truncate text-[15px] font-medium text-ink">{agent.name}</span>
 						<KindBadge kind={agent.kind} />
-						{agent.dingtalkBound && <span className="badge done">钉钉</span>}
+						{agent.dingtalk?.enabled && (
+							<span
+								className="badge done"
+								title={`钉钉机器人：${agent.dingtalk.robotName ?? agent.dingtalk.appKey ?? "未命名"} · 启用中`}
+							>
+								钉钉
+							</span>
+						)}
 					</div>
 					<div className="mt-0.5 flex items-center gap-1.5 text-[12px] text-ink-subtle">
 						<span className={`h-2 w-2 rounded-full ${dotClass}`} />

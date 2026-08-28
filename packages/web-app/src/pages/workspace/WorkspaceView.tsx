@@ -28,7 +28,9 @@ export function WorkspaceView({ compact = false }: { compact?: boolean }): React
 	const activeAgent = view.activeAgentId ? view.agents.find(a => a.id === view.activeAgentId) : undefined;
 	const workspaceLabel =
 		view.activeWorkspace ??
-		(activeAgent?.agentDir ? activeAgent.agentDir.replace(/\/+$/, "").split("/").pop() || activeAgent.agentDir : undefined) ??
+		(activeAgent?.agentDir
+			? activeAgent.agentDir.replace(/\/+$/, "").split("/").pop() || activeAgent.agentDir
+			: undefined) ??
 		view.env?.repos ??
 		"未连接";
 
