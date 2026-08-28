@@ -92,6 +92,9 @@ tree-sitter-xml = "0.7"
 tree-sitter-yaml = "0.7"
 tree-sitter-zig = "1.1"
 inferno = { version = "0.12", default-features = false }
+# flate2 1.1.10 引入 zlib-rs（运行时 SIMD dispatch 含 AVX-512 指令），
+# 被 CI 的 x86-64-v2/v3 变体 ISA 检查命中。pin 到 1.1.9（无 zlib-rs）保持产物低于 x86-64-v4。
+flate2 = "=1.1.9"
 image = { version = "0.25", default-features = false, features = [
    "png",
    "jpeg",
