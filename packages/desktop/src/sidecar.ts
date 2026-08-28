@@ -7,7 +7,7 @@ import * as timers from "node:timers/promises";
 
 export const SERVE_HOST = "127.0.0.1";
 export const SERVE_PORT = 7891;
-export const SIDECAR_ENV = "OMP_SIDECAR";
+export const SIDECAR_ENV = "CORNFIELD_SIDECAR";
 export const DEFAULT_WORKSPACE_DIR = path.join(os.homedir(), "workspace");
 
 const SIDECAR_DRAIN_MS = 3000;
@@ -15,9 +15,9 @@ const PORT_FREE_POLL_INTERVAL_MS = 200;
 const PORT_FREE_TIMEOUT_MS = 5000;
 
 export interface SidecarOptions {
-	/** sidecar（`omp serve`）的工作目录，对应 web-app「工作目录」设置。 */
+	/** sidecar（`cornfield serve`）的工作目录，对应 web-app「工作目录」设置。 */
 	workspaceDir: string;
-	/** Electron 打包后的 resources 目录（`process.resourcesPath`），用于定位打包内嵌的 omp 二进制。 */
+	/** Electron 打包后的 resources 目录（`process.resourcesPath`），用于定位打包内嵌的 cornfield 二进制。 */
 	resourcesPath: string;
 }
 
@@ -45,25 +45,25 @@ export function resolveWorkspaceDir(override?: string): string {
 	return path.resolve(raw);
 }
 
-/** 解析 omp 二进制路径，优先级与 gateway 的 `resolveDefaultOmpPath` 对齐并前插打包内嵌路径。 */
+/** 解析 cornfield 二进制路径，优先级与 gateway 的 `resolveDefaultOmpPath` 对齐并前插打包内嵌路径。 */
 export function resolveOmpBinary(resourcesPath: string): string {
-	const explicit = process.env.OMP_BINARY?.trim();
+	const explicit = process.env.CORNFIELD_BINARY?.trim();
 	if (explicit) return explicit;
 
-	// 1. 打包内嵌（electron-builder extraResources 复制 ../coding-agent/dist/omp → omp-binary/omp）。
-	const packaged = path.join(resourcesPath, "omp-binary", "omp");
+	// 1. 打包内嵌（electron-builder extraResources 复制 ../coding-agent/dist/cornfield → cornfield-binary/cornfield）。
+	const packaged = path.join(resourcesPath, "cornfield-binary", "cornfield");
 	if (isExecutable(packaged)) return packaged;
 
 	// 2. 规范安装位置（scripts/install.sh 产物）。
-	const installed = path.join(os.homedir(), ".local", "bin", "omp");
+	const installed = path.join(os.homedir(), ".local", "bin", "cornfield");
 	if (isExecutable(installed)) return installed;
 
 	// 3. 开发 checkout 的构建产物。
-	const devBuild = path.resolve(import.meta.dirname, "../../coding-agent/dist/omp");
+	const devBuild = path.resolve(import.meta.dirname, "../../coding-agent/dist/cornfield");
 	if (isExecutable(devBuild)) return devBuild;
 
 	// 回退 PATH（开发机尚未构建二进制时）。
-	return "omp";
+	return "cornfield";
 }
 
 function execFileOut(file: string, args: string[]): Promise<string> {
@@ -141,7 +141,7 @@ function spawnSidecar(options: SidecarOptions): childProcess.ChildProcess {
 		stdio: "ignore",
 	});
 	child.on("error", err => {
-		console.error(`desktop: failed to spawn omp serve sidecar (${bin}):`, err);
+		console.error(`desktop: failed to spawn cornfield serve sidecar (${bin}):`, err);
 	});
 	return child;
 }
@@ -168,8 +168,8 @@ async function waitForPortFree(): Promise<void> {
 }
 
 /**
- * 确保 7891 上有一个 `omp serve` sidecar：
- * - 空闲 → spawn 新 sidecar（cwd=工作目录，注入 OMP_SIDECAR=1）；
+ * 确保 7891 上有一个 `cornfield serve` sidecar：
+ * - 空闲 → spawn 新 sidecar（cwd=工作目录，注入 CORNFIELD_SIDECAR=1）；
  * - 被遗留的我方 sidecar 占用 → 接管：SIGTERM 后重启；
  * - 被非我方进程占用 → 复用，不杀、不重启（返回 `{ state: "reused" }`）。
  */

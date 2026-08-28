@@ -1,4 +1,4 @@
-//! Native utilities exported via N-API for the Oh My Pi toolchain.
+//! Native utilities exported via N-API for the CornField toolchain.
 //!
 //! # Overview
 //! High-performance primitives for clipboard access, grep, file discovery,
@@ -7,7 +7,7 @@
 //!
 //! # Example
 //! ```ignore
-//! use pi_natives::text::visible_width;
+//! use cornfield_natives::text::visible_width;
 //!
 //! let width = visible_width("hello");
 //! assert_eq!(width, 5);
