@@ -88,6 +88,8 @@ async function main(): Promise<void> {
 			{
 				...Bun.env,
 				RUSTFLAGS: variant.rustflags,
+				CFLAGS: variant.name === "modern" ? "-march=x86-64-v3" : "-march=x86-64-v2",
+				CXXFLAGS: variant.name === "modern" ? "-march=x86-64-v3" : "-march=x86-64-v2",
 				TARGET_VARIANT: variant.name,
 			},
 			variant.name,
