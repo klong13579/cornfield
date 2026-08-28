@@ -153,7 +153,7 @@ describe("Settings", () => {
 		});
 	});
 
-	describe("recommended model list", () => {
+		describe("recommended model list", () => {
 		it("defaults to empty", () => {
 			const settings = Settings.isolated();
 			expect(settings.getRecommendedModels()).toEqual([]);
@@ -167,6 +167,47 @@ describe("Settings", () => {
 			expect(settings.isRecommended("anthropic/claude-opus-4-5")).toBe(true);
 			expect(settings.isRecommended("narwal-plan/minimax-m3")).toBe(true);
 			expect(settings.isRecommended("alibaba-coding-plan/qwen3-coder-plus")).toBe(false);
+		});
+	});
+
+	describe("Settings.create（serve per-agent 持久化实例）", () => {
+		it("creates an independent persistent instance without touching the global singleton", async () => {
+			const global = await Settings.init({ cwd: projectDir, agentDir });
+			global.set("theme", "light");
+			await global.flush();
+
+			// 模拟 registry agent 的独立 agentDir
+			const opsDir = path.join(testDir, "ops-agent");
+			await fs.mkdirSync(opsDir, { recursive: true });
+			const agent = await Settings.create({ cwd: opsDir, agentDir: opsDir });
+			agent.set("theme", "dark");
+			agent.set("search.enabled", false);
+			await agent.flush();
+
+			// 全局单例不受影响（内存 + 默认值）
+			expect(global.get("theme")).toBe("light");
+			expect(global.get("search.enabled")).toBe(true);
+
+			// 独立实例写自己的 config.yml
+			const opsFile = YAML.parse(await Bun.file(path.join(opsDir, "config.yml")).text()) as Record<string, unknown>;
+			expect(opsFile.theme).toBe("dark");
+			expect(opsFile.search).toEqual({ enabled: false });
+
+			// 全局单例的文件不被动到
+			const globalFile = await readSettings();
+			expect(globalFile.theme).toBe("light");
+			expect(globalFile.search).toBeUndefined();
+		});
+
+		it("reloads existing per-agent config.yml on create (双进程/重启后同文件语义)", async () => {
+			const opsDir = path.join(testDir, "ops-agent");
+			await fs.mkdirSync(opsDir, { recursive: true });
+			// 预置一个已修改的 config.yml（模拟 gateway 进程先写过）
+			await Bun.write(path.join(opsDir, "config.yml"), YAML.stringify({ search: { enabled: false } }, null, 2));
+
+			const agent = await Settings.create({ cwd: opsDir, agentDir: opsDir });
+			expect(agent.get("search.enabled")).toBe(false);
+			expect(agent.get("find.enabled")).toBe(true); // 未配置路径回落内核默认
 		});
 	});
 });

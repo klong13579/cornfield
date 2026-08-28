@@ -9,6 +9,7 @@ import type {
 	ClientFrame,
 	PermissionRequestPush,
 	ServerFrame,
+	ToolSwitchesDto,
 	WireCommand,
 	WireCommandOfType,
 	WireEnvironmentSummary,
@@ -19,7 +20,7 @@ import { MULTIDEVICE_PROTOCOL_VERSION } from "@oh-my-pi/pi-wire";
 import { resolveGlobalMemoryRootCandidates } from "@oh-my-pi/self-evolution/paths";
 import { YAML } from "bun";
 import { withFileLock } from "../config/file-lock";
-import { Settings } from "../config/settings";
+import { type SettingPath, Settings } from "../config/settings";
 import {
 	DEFAULT_EDIT_MODE,
 	type EditMode,
@@ -62,6 +63,7 @@ import type { ToolSession } from "../tools";
 import { invalidateFsScanAfterWrite } from "../tools/fs-cache-invalidation";
 import type { TodoPhase } from "../tools/todo-write";
 import * as git from "../utils/git";
+import { listAgentArtifacts } from "./artifacts";
 import { WireHostToolBridge } from "./host-tool-bridge";
 import { PERMISSION_TIMEOUT_OUTCOME, PermissionGate } from "./permission-gate";
 import { agentSessionsRoot, defaultSessionsRoot, indexSessions, type SessionIndexSource } from "./session-index";
@@ -114,6 +116,35 @@ const PROGRESS_EVENT_TYPES = new Set([
 	"agent_start",
 	"agent_end",
 ]);
+
+/**
+ * 工具开关语义注册表（get_tool_switches 数据源）。
+ *
+ * 与 tools/index.ts `createTools` 的 isToolAllowed 中 settings 门控路径同源；
+ * 增加/删除开关时两侧同步。bash/python 由 python.toolMode 派生，不列在布尔开关里；
+ * search_tool_bm25 依赖 mcp.discoveryMode（非布尔枚举），不列。
+ */
+const TOOL_SWITCH_DEFS: Array<{ tool: string; label: string; path: SettingPath }> = [
+	{ tool: "find", label: "find 文件查找", path: "find.enabled" },
+	{ tool: "search", label: "search 内容搜索", path: "search.enabled" },
+	{ tool: "ast_grep", label: "ast_grep 结构搜索", path: "astGrep.enabled" },
+	{ tool: "ast_edit", label: "ast_edit 结构改写", path: "astEdit.enabled" },
+	{ tool: "lsp", label: "lsp 代码智能", path: "lsp.enabled" },
+	{ tool: "debug", label: "debug 调试器", path: "debug.enabled" },
+	{ tool: "todo_write", label: "todo_write 任务看板", path: "todo.enabled" },
+	{ tool: "github", label: "github 集成", path: "github.enabled" },
+	{ tool: "render_mermaid", label: "render_mermaid 图表渲染", path: "renderMermaid.enabled" },
+	{ tool: "notebook", label: "notebook Jupyter 笔记本", path: "notebook.enabled" },
+	{ tool: "switch_model", label: "switch_model 模型切换", path: "switchModel.enabled" },
+	{ tool: "inspect_image", label: "inspect_image 图像分析", path: "inspect_image.enabled" },
+	{ tool: "web_search", label: "web_search 联网搜索", path: "web_search.enabled" },
+	{ tool: "calc", label: "calc 计算器", path: "calc.enabled" },
+	{ tool: "browser", label: "browser 浏览器自动化", path: "browser.enabled" },
+	{ tool: "checkpoint", label: "checkpoint 检查点/回退", path: "checkpoint.enabled" },
+	{ tool: "irc", label: "irc 会话互发消息", path: "irc.enabled" },
+	{ tool: "identity", label: "identity 身份档案", path: "identity.enabled" },
+	{ tool: "recipe", label: "recipe 配方执行", path: "recipe.enabled" },
+];
 
 /**
  * `omp serve` 的 WS 传输层（P3 多 Agent 版）。
@@ -428,6 +459,19 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 					done({ path: (command as { path: string }).path ?? "", ...res });
 					return;
 				}
+				case "list_artifacts": {
+					// R-ARTIFACTS：从会话 JSONL 工具调用提取写出文件（write/edit/screenshot）。
+					const agentId = (command as { sessionId?: string }).sessionId ?? conn.activeAgentId;
+					const meta = registry.getMeta(agentId);
+					if (!meta) {
+						fail(`unknown agent: ${agentId}`);
+						return;
+					}
+					const sessionsRoot = meta.id === "default" ? defaultSessionsRoot() : agentSessionsRoot(meta);
+					const artifacts = await listAgentArtifacts(meta.agentDir, sessionsRoot);
+					done({ artifacts });
+					return;
+				}
 				case "record_transcribe": {
 					// VOICE-D：浏览器录音上传 → TUI /record 同源转写管线（本地 whisper / record.model，
 					// 自动分块）→ 落 ~/.omp/listen/，与 /record 同目录同格式。不定向 agent（纯数据路径）。
@@ -709,10 +753,19 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 					}
 					return;
 				}
-				// ── 配置读写（票 03）──
+				// ── 配置读写（票 03）—— per-agent：sessionId 定向到该 agent 的 config.yml ──
+				// default agent 的配置根 ~/.omp/agent（Settings.init 的 agentDir），非 process.cwd()；
+				// registry agent 的配置根 <agentDir>/config.yml（与 serve sessionFactory 的
+				// Settings.create({ agentDir }) 同源）。
 				case "get_config": {
+					const agentId = (command as { sessionId?: string }).sessionId ?? conn.activeAgentId;
+					const meta = registry.getMeta(agentId);
+					if (!meta) {
+						fail(`unknown agent: ${agentId}`);
+						return;
+					}
 					try {
-						const config = await readAgentConfigYaml();
+						const config = await readAgentConfigYaml(agentConfigPathFor(meta));
 						const key = (command as { key?: string }).key;
 						const value = key ? configGetByPath(config, key.split(".")) : config;
 						done({ config: value });
@@ -722,6 +775,12 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 					return;
 				}
 				case "set_config": {
+					const agentId = (command as { sessionId?: string }).sessionId ?? conn.activeAgentId;
+					const meta = registry.getMeta(agentId);
+					if (!meta) {
+						fail(`unknown agent: ${agentId}`);
+						return;
+					}
 					const cmd = command as { key: string; value?: unknown };
 					const key = cmd.key.trim();
 					if (!key) {
@@ -729,9 +788,9 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 						return;
 					}
 					try {
-						const config = await readAgentConfigYaml();
+						const config = await readAgentConfigYaml(agentConfigPathFor(meta));
 						configSetByPath(config, key.split("."), cmd.value);
-						await writeAgentConfigYaml(config);
+						await writeAgentConfigYaml(agentConfigPathFor(meta), config);
 						done({ ok: true, key, value: cmd.value });
 					} catch (err) {
 						fail(`set_config failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -912,6 +971,30 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 				}
 
 				// ── Model ──
+				case "get_tool_switches": {
+					// 工具开关语义视图：config.yml 文件优先（与 .omp 显示一致），未配置项回落
+					// 内核默认（session.settings，attach 时加载）。修改走 set_config 写同一文件。
+					try {
+						const config = await readAgentConfigYaml(agentConfigPathFor(attached.meta));
+						done({
+							tools: TOOL_SWITCH_DEFS.map(({ tool, label, path }) => ({
+								tool,
+								label,
+								path,
+								enabled:
+									(configGetByPath(config, path.split(".")) as boolean | undefined) ??
+									session.settings.get(path) === true,
+							})),
+							pythonToolMode:
+								(configGetByPath(config, ["python", "toolMode"]) as
+									| ToolSwitchesDto["pythonToolMode"]
+									| undefined) ?? session.settings.get("python.toolMode"),
+						});
+					} catch (err) {
+						fail(`get_tool_switches failed: ${err instanceof Error ? err.message : String(err)}`);
+					}
+					break;
+				}
 				case "set_model": {
 					const models = session.getAvailableModels();
 					const model = models.find(m => m.provider === command.provider && m.id === command.modelId);
@@ -1265,6 +1348,30 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 					status: 200,
 					headers: { "content-type": "application/json" },
 				});
+			}
+			// R-ARTIFACTS 静态预览：/preview/<agentId>/<relpath>（agentDir 当 docroot，只读）。
+			// 路径逐段 URL 编码；token 校验同 /ws（空 token 本地免鉴权）。
+			if (url.pathname.startsWith("/preview/")) {
+				if (token !== "" && url.searchParams.get("token") !== token)
+					return new Response("unauthorized", { status: 401 });
+				const segs = url.pathname.slice("/preview/".length).split("/").filter(Boolean);
+				if (segs.length < 2) return new Response("bad request", { status: 400 });
+				let agentId: string;
+				let rel: string;
+				try {
+					agentId = decodeURIComponent(segs[0]);
+					rel = segs
+						.slice(1)
+						.map(s => decodeURIComponent(s))
+						.join("/");
+				} catch {
+					return new Response("bad request", { status: 400 });
+				}
+				const meta = registry.getMeta(agentId);
+				if (!meta) return new Response("unknown agent", { status: 404 });
+				const target = resolveFsPath(meta.agentDir, rel);
+				if (!target.ok) return new Response(target.error, { status: 400 });
+				return servePreviewFile(target.path);
 			}
 			if (url.pathname !== "/ws") return new Response("not found", { status: 404 });
 			// token 为空 = 本地免鉴权（仅绑 127.0.0.1）；非空时 URL query 与 hello 帧都要校验
@@ -2082,6 +2189,38 @@ const IMAGE_MIME_BY_EXT: Record<string, string> = {
 	".avif": "image/avif",
 };
 
+/** /preview 静态预览 Content-Type（html/md 走文本，图片复用 IMAGE_MIME_BY_EXT）。 */
+const PREVIEW_MIME_BY_EXT: Record<string, string> = {
+	".html": "text/html; charset=utf-8",
+	".htm": "text/html; charset=utf-8",
+	".md": "text/markdown; charset=utf-8",
+	".markdown": "text/markdown; charset=utf-8",
+	".txt": "text/plain; charset=utf-8",
+	".json": "application/json; charset=utf-8",
+	".csv": "text/csv; charset=utf-8",
+	".pdf": "application/pdf",
+	".css": "text/css; charset=utf-8",
+	".js": "text/javascript; charset=utf-8",
+	".mjs": "text/javascript; charset=utf-8",
+	".xml": "application/xml; charset=utf-8",
+	...IMAGE_MIME_BY_EXT,
+};
+
+/** 只读静态预览（/preview 路由）：agentDir 内文件 → Response。不存在 → 404。 */
+async function servePreviewFile(filePath: string): Promise<Response> {
+	try {
+		const f = Bun.file(filePath);
+		const stat = await f.stat();
+		if (!stat.isFile()) return new Response("not a file", { status: 404 });
+		const mime = PREVIEW_MIME_BY_EXT[path.extname(filePath).toLowerCase()] ?? "application/octet-stream";
+		return new Response(f, { headers: { "content-type": mime, "cache-control": "no-store" } });
+	} catch (err) {
+		if (isEnoent(err)) return new Response("not found", { status: 404 });
+		logger.warn("serve:preview-read-failed", { file: filePath, error: String(err) });
+		return new Response("internal error", { status: 500 });
+	}
+}
+
 async function readImageFileClipped(
 	filePath: string,
 ): Promise<{ dataUrl: string; mimeType: string; sizeBytes: number; truncated: boolean } | { error: string }> {
@@ -2384,12 +2523,12 @@ function parseGitLog(stdout: string): { hash: string; author: string; message: s
 
 // ── 配置读写（票 03）──
 
-function agentConfigPath(): string {
-	return path.join(getAgentDir(), "config.yml");
+/** 目标 agent 的 config.yml 路径：default 的配置根是全局 agent 目录，registry agent 是自身 agentDir。 */
+function agentConfigPathFor(meta: AgentMeta): string {
+	return meta.id === "default" ? path.join(getAgentDir(), "config.yml") : path.join(meta.agentDir, "config.yml");
 }
 
-async function readAgentConfigYaml(): Promise<Record<string, unknown>> {
-	const filePath = agentConfigPath();
+async function readAgentConfigYaml(filePath: string): Promise<Record<string, unknown>> {
 	try {
 		const raw = await Bun.file(filePath).text();
 		const parsed = YAML.parse(raw) as unknown;
@@ -2403,8 +2542,7 @@ async function readAgentConfigYaml(): Promise<Record<string, unknown>> {
 	}
 }
 
-async function writeAgentConfigYaml(config: Record<string, unknown>): Promise<void> {
-	const filePath = agentConfigPath();
+async function writeAgentConfigYaml(filePath: string, config: Record<string, unknown>): Promise<void> {
 	await fs.mkdir(path.dirname(filePath), { recursive: true });
 	await withFileLock(filePath, async () => {
 		const tmpPath = `${filePath}.tmp`;

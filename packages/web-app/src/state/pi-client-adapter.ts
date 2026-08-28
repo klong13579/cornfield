@@ -6,6 +6,7 @@ import type {
 	ConnectionInfoDto,
 	CronLogEntryDto,
 	DashboardStatsDto,
+	DingtalkAgentConfigDto,
 	DisabledSkillDto,
 	EnvironmentSummaryDto,
 	HostToolDefinitionDto,
@@ -17,11 +18,13 @@ import type {
 	StatsPeriodDto,
 	TaskRowDto,
 	TodoPhaseDto,
+	ToolSwitchesDto,
 	WireCommand,
 	WireServerEventDto,
 } from "@oh-my-pi/pi-wire";
 import type {
 	AgentMessageDto,
+	ArtifactDto,
 	FsEntryDto,
 	FsImageResult,
 	GatewayStatusDto,
@@ -113,6 +116,7 @@ export class PiClientAdapter implements PiClient {
 	#client: WirePiClient;
 	#sessionId: string | null = null;
 	#connection: ConnectionInfoDto;
+	#token: string;
 	#agents: AgentInfoDto[] = [];
 	#env: EnvironmentSummaryDto | null = null;
 	#listeners = new Set<(frame: WireServerEventDto) => void>();
@@ -122,6 +126,7 @@ export class PiClientAdapter implements PiClient {
 
 	constructor(config: ServeConnectionConfig = loadServeConfig(), webSocketCtor?: PiWebSocketCtor) {
 		this.#connection = { connected: false, wsUrl: config.wsUrl, protocolVersion: 1 };
+		this.#token = config.token;
 		this.#wsCtor = webSocketCtor;
 		this.#client = new WirePiClient({
 			url: toWsUrl(config),
@@ -205,12 +210,14 @@ export class PiClientAdapter implements PiClient {
 		return this.#req({ type: "retry_from", entryId, message }).then(() => undefined);
 	}
 
-	setModel(modelId: string, provider = "custom"): Promise<void> {
-		return this.#req({ type: "set_model", provider, modelId }).then(() => undefined);
+	setModel(modelId: string, provider = "custom", sessionId?: string): Promise<void> {
+		return this.#req({ type: "set_model", provider, modelId, ...(sessionId ? { sessionId } : {}) }).then(
+			() => undefined,
+		);
 	}
 
-	setThinkingLevel(level: string): Promise<void> {
-		const command = { type: "set_thinking_level", level } as WireCommand;
+	setThinkingLevel(level: string, sessionId?: string): Promise<void> {
+		const command = { type: "set_thinking_level", level, ...(sessionId ? { sessionId } : {}) } as WireCommand;
 		return this.#req(command).then(() => undefined);
 	}
 
@@ -234,6 +241,24 @@ export class PiClientAdapter implements PiClient {
 	/** 用户裁决回传（permission_respond）。 */
 	permissionRespond(requestId: string, choice: string): Promise<void> {
 		return this.#req({ type: "permission_respond", requestId, choice }).then(() => undefined);
+	}
+
+	/** 读目标 agent 的 config.yml 域（get_config；per-agent，sessionId 必传）。 */
+	getConfig(sessionId: string, key?: string): Promise<{ config: unknown }> {
+		const command = { type: "get_config", sessionId, ...(key ? { key } : {}) } as never;
+		return this.#req<{ config: unknown }>(command);
+	}
+
+	/** 写目标 agent 的 config.yml 域并持久化（set_config；per-agent）。 */
+	setConfig(sessionId: string, key: string, value: unknown): Promise<{ ok: boolean; key: string; value: unknown }> {
+		const command = { type: "set_config", sessionId, key, value } as never;
+		return this.#req<{ ok: boolean; key: string; value: unknown }>(command);
+	}
+
+	/** 工具开关语义视图（get_tool_switches；per-agent）。 */
+	getToolSwitches(sessionId: string): Promise<ToolSwitchesDto> {
+		const command = { type: "get_tool_switches", sessionId } as never;
+		return this.#req<ToolSwitchesDto>(command);
 	}
 
 	/** 前端已注册的 host tools 声明（set_host_tools 后的本地权威态；UI 工具注册 tab 用）。 */
@@ -412,6 +437,27 @@ export class PiClientAdapter implements PiClient {
 			sessionId,
 			path,
 		} as never);
+	}
+
+	/** 产物列表（list_artifacts；会话 toolCall 提取，mtime 倒序；失败抛错由调用方空态）。 */
+	async listArtifacts(sessionId: string): Promise<{ artifacts: ArtifactDto[] }> {
+		const result = await this.#req<{ artifacts?: ArtifactDto[] | null }>({
+			type: "list_artifacts",
+			sessionId,
+		} as never);
+		return { artifacts: result.artifacts ?? [] };
+	}
+
+	/** 产物静态预览 URL（/preview/<agentId>/<relpath>，serve 同源端口，逐段编码；token 非空时带上）。 */
+	artifactPreviewUrl(agentId: string, path: string): string {
+		const wsUrl = this.#connection.wsUrl;
+		const base = wsUrl.replace(/^ws:/, "http:").replace(/\/ws$/, "");
+		const segs = path
+			.split("/")
+			.map(s => encodeURIComponent(s))
+			.join("/");
+		const tokenQuery = this.#token ? `?token=${encodeURIComponent(this.#token)}` : "";
+		return `${base}/preview/${encodeURIComponent(agentId)}/${segs}${tokenQuery}`;
 	}
 
 	/** 本机 gateway 运行状态（gateway_status；serve 转发 gateway.status.json）。 */
@@ -856,6 +902,7 @@ interface SessionEntryLike {
 	phase?: "idle" | "streaming" | "compacting" | "retrying" | "executing_tool";
 	attached?: boolean;
 	agentDir?: string;
+	dingtalk?: DingtalkAgentConfigDto;
 }
 
 function mapAgentEntry(s: SessionEntryLike, index: number): AgentInfoDto {
@@ -873,6 +920,7 @@ function mapAgentEntry(s: SessionEntryLike, index: number): AgentInfoDto {
 		attached: s.attached,
 		phase: s.phase,
 		agentDir: s.agentDir,
+		dingtalk: s.dingtalk,
 	};
 }
 

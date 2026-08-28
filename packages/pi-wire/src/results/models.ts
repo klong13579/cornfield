@@ -30,6 +30,22 @@ export interface AvailableModelsDto {
 	disabledModels: string[];
 }
 
+/** 单个工具的开关项（get_tool_switches）。 enabled 为目标 agent 的生效值（未配置 = 内核默认）；path 为 config.yml 写入键（set_config 用）。 */
+export interface ToolSwitchDto {
+	tool: string;
+	label: string;
+	/** config.yml 写入键（如 "search.enabled"），set_config 修改用。 */
+	path: string;
+	enabled: boolean;
+}
+
+/** get_tool_switches 响应（工具开关语义视图，与 createTools isToolAllowed 的 settings 路径同源）。 */
+export interface ToolSwitchesDto {
+	tools: ToolSwitchDto[];
+	/** python 工具模式（bash-only / ipy-only / both）；bash 开关由它派生，不单独列。 */
+	pythonToolMode: "bash-only" | "ipy-only" | "both";
+}
+
 /** 图片附件（对应 pi-ai ImageContent：prompt.images 通道，base64 内联）。 */
 export interface ImageContentDto {
 	type: "image";

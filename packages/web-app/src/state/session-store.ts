@@ -18,10 +18,12 @@ import type {
 	StatsPeriodDto,
 	TaskRowDto,
 	TodoPhaseDto,
+	ToolSwitchesDto,
 	WireServerEventDto,
 } from "@oh-my-pi/pi-wire";
 import { loadNotifyPrefs, notifyGuarded } from "../lib/notifications";
 import type {
+	ArtifactDto,
 	FsEntryDto,
 	GatewayStatusDto,
 	ListenRecordingDto,
@@ -236,12 +238,12 @@ class SessionStore {
 		void this.#run(() => this.#client.newSession());
 	}
 
-	setModel(modelId: string, provider?: string): void {
-		void this.#client.setModel(modelId, provider).catch(() => undefined);
+	setModel(modelId: string, provider?: string, agentId?: string): void {
+		void this.#client.setModel(modelId, provider, agentId).catch(() => undefined);
 	}
 
-	setThinkingLevel(level: string): void {
-		void this.#client.setThinkingLevel(level).catch(() => undefined);
+	setThinkingLevel(level: string, agentId?: string): void {
+		void this.#client.setThinkingLevel(level, agentId).catch(() => undefined);
 	}
 
 	setTodos(phases: TodoPhaseDto[]): void {
@@ -280,6 +282,21 @@ class SessionStore {
 			this.#notify();
 		}
 		void this.#client.permissionRespond(requestId, choice).catch(() => undefined);
+	}
+
+	/** 读目标 agent 的 config.yml 域（per-agent）。 */
+	getConfig(agentId: string, key?: string): Promise<{ config: unknown }> {
+		return this.#client.getConfig(agentId, key);
+	}
+
+	/** 写目标 agent 的 config.yml 域并持久化（per-agent；同步更新该 agent 的配置视图）。 */
+	setConfig(agentId: string, key: string, value: unknown): Promise<{ ok: boolean }> {
+		return this.#client.setConfig(agentId, key, value);
+	}
+
+	/** 工具开关语义视图（per-agent）。 */
+	getToolSwitches(agentId: string): Promise<ToolSwitchesDto> {
+		return this.#client.getToolSwitches(agentId);
 	}
 
 	/** 前端已注册 host tools（set_host_tools 本地权威态）。 */
@@ -457,6 +474,16 @@ class SessionStore {
 	/** 读 agent workspace 图片（fs_read_image，代理到 pi-client；serve 待实现）。 */
 	fsReadImage(sessionId: string, path: string): Promise<{ dataUrl: string }> {
 		return this.#client.fsReadImage(sessionId, path);
+	}
+
+	/** 产物列表（list_artifacts，代理到 pi-client；ArtifactsPanel 数据源）。 */
+	listArtifacts(sessionId: string): Promise<{ artifacts: ArtifactDto[] }> {
+		return this.#client.listArtifacts(sessionId);
+	}
+
+	/** 产物静态预览 URL（交互式 web：serve 同源 /preview 路由；代理到 pi-client）。 */
+	artifactPreviewUrl(agentId: string, path: string): string {
+		return this.#client.artifactPreviewUrl(agentId, path);
 	}
 
 	/** 本机 gateway 运行状态（gateway_status，代理到 pi-client）。 */

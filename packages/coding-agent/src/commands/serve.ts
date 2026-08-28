@@ -65,7 +65,10 @@ export default class Serve extends Command {
 			const authStorage = await discoverAuthStorage();
 			const modelRegistry = new ModelRegistry(authStorage);
 			Bun.env.PI_NO_TITLE = "1";
-			const settings = await Settings.init({ cwd });
+			// 初始化全局 settings（default agent 的配置根 = 全局 agent 目录；registry agent 各自
+			// Settings.create({ agentDir }) 在 sessionFactory 内惰性创建）。后续 Settings.instance
+			// 读取（如 get_available_models 的 disabled 名单）依赖此初始化。
+			await Settings.init({ cwd });
 			await modelRegistry.refresh("online-if-uncached");
 
 			const parsed = parseArgs(buildLaunchArgv(flags));
@@ -81,15 +84,17 @@ export default class Serve extends Command {
 			const { session } = await createAgentSession(options);
 			const store = SessionStore.attach(session);
 
-			// P3 lazy attach 工厂：每个 registry agent 独立 AgentSession，
-			// cwd/agentDir = 其 agentDir，session 落 <agentDir>/sessions/。
+			// P3 lazy attach 工厂：每个 registry agent 独立 AgentSession + 独立 Settings
+			// （per-agent 配置读写：工具开关 / modelRoles / thinking 落在 <agentDir>/config.yml，
+			// 前端 get_config/set_config 定向到该文件。default agent 保持全局单例（P1 语义）。
 			const sessionFactory: SessionFactory = async meta => {
+				const agentSettings = await Settings.create({ cwd: meta.agentDir, agentDir: meta.agentDir });
 				const agentSessionManager = SessionManager.create(meta.agentDir, path.join(meta.agentDir, "sessions"));
 				const result = await createAgentSession({
 					cwd: meta.agentDir,
 					agentDir: meta.agentDir,
 					sessionManager: agentSessionManager,
-					settings,
+					settings: agentSettings,
 					modelRegistry,
 					authStorage,
 					canUseTool,

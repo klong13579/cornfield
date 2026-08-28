@@ -294,11 +294,18 @@ export type WireExtensionCommand =
 	 */
 	| { id?: string; type: "record_transcribe"; audio: string; desc?: string }
 	/**
-	 * 听记历史（/listen 前端化）：列出 ~/.omp/listen/ 全部录音 json（文件名倒序），
+	/** 听记历史（/listen 前端化）：列出 ~/.omp/listen/ 全部录音 json（文件名倒序），
 	 * 返回元数据 + 转写全文（前端本地搜索/预览零延迟）。
 	 * 响应 { ok:true, recordings: [{ name, path, recordedAt, size, text }] }；目录缺失 → { ok:true, recordings: [] }。
 	 */
 	| { id?: string; type: "listen_list" }
+	/**
+	 * 产物列表（R-ARTIFACTS）：从该 agent 最近会话 JSONL 的工具调用（write / edit /
+	 * puppeteer screenshot）提取写出文件，返回可预览产物（html / image / markdown / text）。
+	 * 路径约束与 fs_read 同（resolveFsPath：必须解析在 agentDir 内）。
+	 * 响应 { artifacts: ArtifactDto[] }；静态预览走 /preview/<agentId>/<relpath>（serve 端路由）。
+	 */
+	| { id?: string; type: "list_artifacts"; sessionId?: string }
 	/**
 	 * P0 收口：serve 端 skill hub —— 列出可安装的远程技能（marketplace 源；source 缺省走默认市场）。
 	 */
@@ -355,10 +362,12 @@ export type WireExtensionCommand =
 	| { id?: string; type: "git_show"; sessionId?: string; revision: string }
 	/** 分支列表（local + remote + current）。 */
 	| { id?: string; type: "git_branches"; sessionId?: string }
-	/** 配置读写（票 03）：读 ~/.omp/agent/config.yml 的域。 */
-	| { id?: string; type: "get_config"; key?: string }
-	/** 写指定域并持久化（同一份 config.yml，与 set_skill_enabled/set_model_disabled 不双写）。 */
-	| { id?: string; type: "set_config"; key: string; value: unknown };
+	/** 配置读写（票 03）：读目标 agent 的 config.yml 域（sessionId 定向，缺省 active）。 */
+	| { id?: string; type: "get_config"; sessionId?: string; key?: string }
+	/** 写指定域并持久化到目标 agent 的 config.yml（sessionId 定向；与 set_skill_enabled/set_model_disabled 不双写）。 */
+	| { id?: string; type: "set_config"; sessionId?: string; key: string; value: unknown }
+	/** 工具开关语义视图（get_config 的域化封装）：返回目标 agent 每个工具的 enabled 开关 + python 工具模式。 */
+	| { id?: string; type: "get_tool_switches"; sessionId?: string };
 export type WireCommand = MultiplexCommand | WireExtensionCommand;
 
 /** 获取具体命令结构的 helper。 */

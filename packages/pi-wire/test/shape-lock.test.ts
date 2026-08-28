@@ -103,6 +103,7 @@ const COMMAND_TYPES = [
 	"permission_respond",
 	"record_transcribe",
 	"listen_list",
+	"list_artifacts",
 	// P0 收口（skill hub + MCP）
 	"list_remote_skills",
 	"install_remote_skill",
@@ -129,6 +130,7 @@ const COMMAND_TYPES = [
 	"git_branches",
 	"get_config",
 	"set_config",
+	"get_tool_switches",
 ] as const satisfies readonly string[];
 
 /** 从 WireCommand union 提取 type 字面量（编译期核对清单）。 */

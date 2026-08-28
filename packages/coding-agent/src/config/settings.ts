@@ -173,6 +173,20 @@ export class Settings {
 	}
 
 	/**
+	 * Create an independent persistent instance.
+	 *
+	 * Unlike init(), does NOT touch the global singleton — each call loads its own
+	 * agentDir/config.yml and persists changes through the same debounced save path.
+	 * Used by `omp serve` for per-agent settings (each registry agent gets its own
+	 * Settings rooted at <agentDir>/config.yml).
+	 */
+	static async create(options: SettingsOptions = {}): Promise<Settings> {
+		const instance = new Settings(options);
+		await instance.#load();
+		return instance;
+	}
+
+	/**
 	 * Create an isolated instance for testing.
 	 * Does not affect the global singleton.
 	 */

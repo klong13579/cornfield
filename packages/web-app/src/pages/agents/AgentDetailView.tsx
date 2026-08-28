@@ -1,4 +1,4 @@
-import type { HostToolDefinitionDto, ModelInfoDto } from "@oh-my-pi/pi-wire";
+import type { HostToolDefinitionDto, ModelInfoDto, ToolSwitchDto, ToolSwitchesDto } from "@oh-my-pi/pi-wire";
 import { X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useSessionStore } from "../../state/session-store";
@@ -12,10 +12,11 @@ import { KindBadge } from "./AgentsView";
  * 模型接 get_available_models/set_model 真命令、画像实时建模待连接器路径（缺口 B5）。
  */
 
-type TabId = "skills" | "model" | "tools" | "profile" | "files" | "prompts";
+type TabId = "skills" | "dingtalk" | "model" | "tools" | "profile" | "files" | "prompts";
 
 const TABS: { id: TabId; label: string }[] = [
 	{ id: "skills", label: "Skills" },
+	{ id: "dingtalk", label: "钉钉" },
 	{ id: "model", label: "模型配置" },
 	{ id: "tools", label: "工具开关" },
 	{ id: "profile", label: "用户画像" },
@@ -78,7 +79,19 @@ export function AgentDetailView({ agentId, onClose }: { agentId: string; onClose
 							className={`h-2 w-2 rounded-full ${agent?.status === "busy" ? "bg-warning animate-pulse" : agent?.status === "idle" || agent?.status === "online" ? "bg-success" : "bg-ink-faint"}`}
 						/>
 						{agent ? `${statusText(agent.status)} · 最近活跃 ${agent.lastAction ?? "—"}` : "会话未注册"}
-						{agent?.dingtalkBound && <span className="badge done">钉钉已绑定</span>}
+						{agent?.dingtalk?.enabled && (
+							<span
+								className="badge done"
+								title={`钉钉机器人：${agent.dingtalk.robotName ?? agent.dingtalk.appKey ?? "未命名"}（gateway.json accounts）`}
+							>
+								钉钉已绑定{agent.dingtalk.robotName ? ` · ${agent.dingtalk.robotName}` : ""}
+							</span>
+						)}
+						{agent?.dingtalk && !agent.dingtalk.enabled && (
+							<span className="badge fail" title="gateway.json 中该账号已停用">
+								钉钉已停用
+							</span>
+						)}
 						<button
 							type="button"
 							onClick={onClose}
@@ -120,6 +133,8 @@ export function AgentDetailView({ agentId, onClose }: { agentId: string; onClose
 
 				{tab === "skills" && <SkillsView agentId={agentId} />}
 
+				{tab === "dingtalk" && <DingtalkView agentId={agentId} />}
+
 				{tab === "model" && (
 					<div>
 						<h4 className="mb-3.5 section-title text-ink-faint">模型选择</h4>
@@ -143,7 +158,7 @@ export function AgentDetailView({ agentId, onClose }: { agentId: string; onClose
 								<select
 									value={currentModel}
 									onChange={e => {
-										if (e.target.value) store.setModel(e.target.value, selProvider);
+										if (e.target.value) store.setModel(e.target.value, selProvider, agentId);
 									}}
 									className="flex-1 rounded border border-hairline bg-surface-2 px-2.5 py-2 text-[13px] text-ink outline-none focus:border-accent"
 								>
@@ -159,7 +174,7 @@ export function AgentDetailView({ agentId, onClose }: { agentId: string; onClose
 								<span className="w-[90px] shrink-0">Thinking</span>
 								<select
 									value={view.thinkingLevel ?? "off"}
-									onChange={e => store.setThinkingLevel(e.target.value)}
+									onChange={e => store.setThinkingLevel(e.target.value, agentId)}
 									className="flex-1 rounded border border-hairline bg-surface-2 px-2.5 py-2 text-[13px] text-ink outline-none focus:border-accent"
 								>
 									{THINKING_LEVELS.map(l => (
@@ -173,48 +188,55 @@ export function AgentDetailView({ agentId, onClose }: { agentId: string; onClose
 				)}
 
 				{tab === "tools" && (
-					<div>
-						<h4 className="mb-3 section-title text-ink-faint">host 工具注册（set_host_tools）</h4>
-						{hostTools.length === 0 ? (
-							<div className="rounded-lg border border-dashed border-hairline-strong bg-surface px-4 py-6 text-center text-[12px] text-ink-faint">
-								尚未注册任何 host 工具。host tool 由前端声明（如浏览器/桌面能力），声明后 LLM 可调用，
-								执行结果经 host_tool_result 帧回传（pi-client 裸帧能力待补）。
+					<div className="flex flex-col gap-8">
+						<section>
+							<h4 className="mb-3 section-title text-ink-faint">内核工具开关（写该 agent 的 config.yml）</h4>
+							<ToolSwitchesView agentId={agentId} />
+						</section>
+						<section>
+							<h4 className="mb-3 section-title text-ink-faint">
+								host 工具注册（前端声明，运行时生效，不落盘）
+							</h4>
+							{hostTools.length === 0 ? (
+								<div className="rounded-lg border border-dashed border-hairline-strong bg-surface px-4 py-6 text-center text-[12px] text-ink-faint">
+									尚未注册任何 host 工具。host tool 由前端声明（如浏览器/桌面能力），声明后 LLM 可调用，
+									执行结果经 host_tool_result 帧回传（pi-client 裸帧能力待补）。
+								</div>
+							) : (
+								<div className="divide-y divide-hairline rounded-lg border border-hairline bg-surface">
+									{hostTools.map(t => (
+										<div key={t.name} className="flex items-center gap-3 px-4 py-2.5">
+											<span className="min-w-0 flex-1">
+												<span className="block font-mono text-[13px] text-ink">{t.name}</span>
+												<span className="block truncate text-[11px] text-ink-faint">{t.description}</span>
+											</span>
+											<button
+												type="button"
+												className="btn btn-secondary btn-sm shrink-0"
+												onClick={() => unregisterHostTool(t.name)}
+											>
+												移除
+											</button>
+										</div>
+									))}
+								</div>
+							)}
+							<div className="mt-4 flex items-center gap-2">
+								<input
+									value={newHostName}
+									onChange={e => setNewHostName(e.target.value)}
+									placeholder="工具名（如 browser_capture）"
+									className="min-w-0 flex-1 rounded border border-hairline bg-surface-2 px-3 py-2 font-mono text-[12px] text-ink outline-none focus:border-accent focus:shadow-[0_0_0_3px_var(--color-accent-dim)]"
+								/>
+								<button type="button" className="btn btn-sm shrink-0" onClick={registerHostTool}>
+									注册
+								</button>
 							</div>
-						) : (
-							<div className="divide-y divide-hairline rounded-lg border border-hairline bg-surface">
-								{hostTools.map(t => (
-									<div key={t.name} className="flex items-center gap-3 px-4 py-2.5">
-										<span className="min-w-0 flex-1">
-											<span className="block font-mono text-[13px] text-ink">{t.name}</span>
-											<span className="block truncate text-[11px] text-ink-faint">{t.description}</span>
-										</span>
-										<button
-											type="button"
-											className="btn btn-secondary btn-sm shrink-0"
-											onClick={() => unregisterHostTool(t.name)}
-										>
-											移除
-										</button>
-									</div>
-								))}
+							<div className="mt-3 text-[11px] text-ink-faint">
+								set_host_tools 已实现：注册后 serve 推 host_tool_call 帧 → 前端执行 → host_tool_result
+								回传（pi-client 裸帧发送待补）。
 							</div>
-						)}
-						<div className="mt-4 flex items-center gap-2">
-							<input
-								value={newHostName}
-								onChange={e => setNewHostName(e.target.value)}
-								placeholder="工具名（如 browser_capture）"
-								className="min-w-0 flex-1 rounded border border-hairline bg-surface-2 px-3 py-2 font-mono text-[12px] text-ink outline-none focus:border-accent focus:shadow-[0_0_0_3px_var(--color-accent-dim)]"
-							/>
-							<button type="button" className="btn btn-sm shrink-0" onClick={registerHostTool}>
-								注册
-							</button>
-						</div>
-						<div className="mt-3 text-[11px] text-ink-faint">
-							set_host_tools 已实现：注册后 serve 推 host_tool_call 帧 → 前端执行 → host_tool_result
-							回传（pi-client 裸帧发送待补）。session 内置工具开关 wire 面无命令，本 tab 为前端 host tool
-							注册管理。
-						</div>
+						</section>
 					</div>
 				)}
 
@@ -251,6 +273,160 @@ function statusText(status?: string): string {
 		default:
 			return "状态未知";
 	}
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// 钉钉 tab：agent 绑定的机器人配置（gateway.json channels.dingtalk.accounts）
+// ─────────────────────────────────────────────────────────────────────
+
+function DingtalkView({ agentId }: { agentId: string }): React.JSX.Element {
+	const view = useSession();
+	const agent = view.agents.find(a => a.id === agentId);
+	const dt = agent?.dingtalk;
+	if (!dt) {
+		return (
+			<div className="rounded-lg border border-dashed border-hairline-strong bg-surface px-4 py-8 text-center text-[12px] text-ink-faint">
+				该 agent 未绑定钉钉机器人（~/.omp/gateway.json → channels.dingtalk.accounts 无对应账号）
+			</div>
+		);
+	}
+	const rows: [string, string][] = [
+		["机器人名", dt.robotName ?? "—"],
+		["状态", dt.enabled ? "启用中" : "已停用"],
+		["appKey", dt.appKey ?? "—"],
+		["robotCode", dt.robotCode ?? "—"],
+		["隐藏思考块", dt.hideThinkingBlock ? "是" : "否"],
+		["绑定 agentDir", agent?.agentDir ?? "—"],
+	];
+	return (
+		<div className="max-w-[560px]">
+			<div className="divide-y divide-hairline rounded-lg border border-hairline bg-surface">
+				{rows.map(([k, v]) => (
+					<div key={k} className="flex items-center gap-3 px-4 py-2.5">
+						<span className="w-[120px] shrink-0 text-[12px] text-ink-subtle">{k}</span>
+						<span className="min-w-0 flex-1 truncate font-mono text-[12px] text-ink">{v}</span>
+					</div>
+				))}
+			</div>
+			<div className="mt-3 text-[11px] text-ink-faint">
+				配置来源：~/.omp/gateway.json → channels.dingtalk.accounts（按 accountId 匹配 agent）。appSecret 不展示。
+			</div>
+		</div>
+	);
+}
+
+const PYTHON_MODES: Array<{ value: ToolSwitchesDto["pythonToolMode"]; label: string }> = [
+	{ value: "both", label: "both — bash + Python 双模式" },
+	{ value: "bash-only", label: "bash-only — 仅 shell" },
+	{ value: "ipy-only", label: "ipy-only — 仅 Python" },
+];
+
+/** 内核工具开关（get_tool_switches 真读 + set_config 写回该 agent 的 config.yml）。 */
+function ToolSwitchesView({ agentId }: { agentId: string }): React.JSX.Element {
+	const store = useSessionStore();
+	const view = useSession();
+	const [switches, setSwitches] = useState<ToolSwitchesDto | null>(null);
+	const [saving, setSaving] = useState<string | null>(null);
+	const [error, setError] = useState<string | null>(null);
+
+	useEffect(() => {
+		let cancelled = false;
+		if (!view.connected) return; // 连接就绪后再拉，避免 get_tool_switches 在握手期失败
+		const load = async (): Promise<void> => {
+			try {
+				const dto = await store.getToolSwitches(agentId);
+				if (!cancelled) setSwitches(dto);
+			} catch (err) {
+				if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+			}
+		};
+		void load();
+		return () => {
+			cancelled = true;
+		};
+	}, [agentId, store, view.connected]);
+
+	const setEnabled = (tool: ToolSwitchDto, enabled: boolean): void => {
+		// optimistic 更新；失败回滚
+		setSwitches(prev =>
+			prev ? { ...prev, tools: prev.tools.map(t => (t.tool === tool.tool ? { ...t, enabled } : t)) } : prev,
+		);
+		setSaving(tool.tool);
+		void store
+			.setConfig(agentId, tool.path, enabled)
+			.then(() => setSaving(null))
+			.catch(err => {
+				setSwitches(prev =>
+					prev
+						? { ...prev, tools: prev.tools.map(t => (t.tool === tool.tool ? { ...t, enabled: !enabled } : t)) }
+						: prev,
+				);
+				setSaving(null);
+				setError(err instanceof Error ? err.message : String(err));
+			});
+	};
+
+	const setPythonMode = (mode: ToolSwitchesDto["pythonToolMode"]): void => {
+		setSwitches(prev => (prev ? { ...prev, pythonToolMode: mode } : prev));
+		void store
+			.setConfig(agentId, "python.toolMode", mode)
+			.catch(err => setError(err instanceof Error ? err.message : String(err)));
+	};
+
+	if (error) {
+		return <div className="px-1 py-3 text-[12px] text-danger">工具开关加载失败：{error}</div>;
+	}
+	if (!switches) {
+		return (
+			<div className="flex flex-col gap-2 px-1 py-3">
+				{[0, 1, 2, 3, 4].map(i => (
+					<div key={i} className="skeleton h-6 w-full" />
+				))}
+			</div>
+		);
+	}
+
+	return (
+		<div>
+			<div className="mb-3 flex items-center gap-3 text-[12px] text-ink-subtle">
+				<span className="w-[130px] shrink-0">python 工具模式</span>
+				<select
+					value={switches.pythonToolMode}
+					onChange={e => setPythonMode(e.target.value as ToolSwitchesDto["pythonToolMode"])}
+					className="flex-1 rounded border border-hairline bg-surface-2 px-2.5 py-1.5 text-[12px] text-ink outline-none focus:border-accent"
+				>
+					{PYTHON_MODES.map(m => (
+						<option key={m.value} value={m.value}>
+							{m.label}
+						</option>
+					))}
+				</select>
+			</div>
+			<div className="divide-y divide-hairline rounded-lg border border-hairline bg-surface">
+				{switches.tools.map(t => (
+					<div key={t.tool} className="flex items-center gap-3 px-4 py-2.5">
+						<span className="min-w-0 flex-1">
+							<span className="block font-mono text-[13px] text-ink">{t.tool}</span>
+							<span className="block truncate text-[11px] text-ink-faint">
+								{t.label} · {t.path}
+							</span>
+						</span>
+						<button
+							type="button"
+							role="switch"
+							aria-checked={t.enabled}
+							disabled={saving === t.tool}
+							className={`toggle shrink-0 ${t.enabled ? "on" : ""}`}
+							onClick={() => setEnabled(t, !t.enabled)}
+						/>
+					</div>
+				))}
+			</div>
+			<div className="mt-3 text-[11px] text-ink-faint">
+				开关状态来自该 agent 的 config.yml（未配置项显示内核默认）；切换立即写回配置文件，新建会话生效。
+			</div>
+		</div>
+	);
 }
 
 // ─────────────────────────────────────────────────────────────────────

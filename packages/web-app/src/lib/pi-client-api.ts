@@ -1,5 +1,6 @@
 import type {
 	AgentInfoDto,
+	ArtifactDto,
 	AvailableModelsDto,
 	ConnectionInfoDto,
 	CronLogEntryDto,
@@ -15,8 +16,13 @@ import type {
 	StatsPeriodDto,
 	TaskRowDto,
 	TodoPhaseDto,
+	ToolSwitchesDto,
 	WireServerEventDto,
 } from "@oh-my-pi/pi-wire";
+
+// ArtifactDto / ArtifactsResultDto 由 pi-wire 定义，消费方（ArtifactsPanel 等）从本层引入。
+export type { ArtifactDto } from "@oh-my-pi/pi-wire";
+
 import type { BranchPoint, PlaybackEntry, SessionRecordSummary } from "./records";
 
 /** fs_list 条目（agent workspace 目录项）。 */
@@ -127,8 +133,14 @@ export interface PiClient {
 	forkFrom(entryId: string): Promise<void>;
 	undoExchange(entryId: string): Promise<void>;
 	retryFrom(entryId: string, message?: string): Promise<void>;
-	setModel(modelId: string, provider?: string): Promise<void>;
-	setThinkingLevel(level: string): Promise<void>;
+	setModel(modelId: string, provider?: string, sessionId?: string): Promise<void>;
+	setThinkingLevel(level: string, sessionId?: string): Promise<void>;
+	/** 读目标 agent 的 config.yml 域（per-agent）。 */
+	getConfig(sessionId: string, key?: string): Promise<{ config: unknown }>;
+	/** 写目标 agent 的 config.yml 域并持久化（per-agent）。 */
+	setConfig(sessionId: string, key: string, value: unknown): Promise<{ ok: boolean; key: string; value: unknown }>;
+	/** 工具开关语义视图（per-agent）。 */
+	getToolSwitches(sessionId: string): Promise<ToolSwitchesDto>;
 	setTodos(phases: TodoPhaseDto[]): Promise<void>;
 	setAutoCompaction(enabled: boolean): Promise<void>;
 	setAutoRetry(enabled: boolean): Promise<void>;
@@ -177,6 +189,10 @@ export interface PiClient {
 	fsRead(sessionId: string, path: string): Promise<{ text: string; truncated: boolean }>;
 	/** 读 agent workspace 图片（fs_read_image；dataUrl，2MB 上限，MIME 按扩展名）。 */
 	fsReadImage(sessionId: string, path: string): Promise<FsImageResult>;
+	/** 产物列表（list_artifacts；从会话 toolCall 提取写出文件，按 mtime 倒序）。 */
+	listArtifacts(sessionId: string): Promise<{ artifacts: ArtifactDto[] }>;
+	/** 产物静态预览 URL（/preview/<agentId>/<relpath>，serve 端只读 docroot 路由）。 */
+	artifactPreviewUrl(agentId: string, path: string): string;
 	/** 本机 gateway 运行状态（gateway_status；未运行/文件缺失抛错）。 */
 	gatewayStatus(): Promise<GatewayStatusDto>;
 
