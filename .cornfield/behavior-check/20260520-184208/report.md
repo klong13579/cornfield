@@ -1,6 +1,6 @@
 # System prompt behavior check (tmux)
 
-- Out dir: `.omp/behavior-check/20260520-184208`
+- Out dir: `.cornfield/behavior-check/20260520-184208`
 - Pass: 4 / Fail: 1 / Blocked: 0 / Total: 5
 
 | Case | Verdict | Reason | Tools |

@@ -74,14 +74,14 @@ mutating: true
 
 ### Step 0.5 产出任务包（.squad.json）
 
-见 #任务包 schema。任务包写入每个 worktree 的 `.squad.json`（脚本执行），父保留聚合副本到 `~/.omp/squads/<squadId>/`（不污染 repo 的 git status）；集结脚本同时在这里写 `state.json`（状态底账，父中断后用于恢复，见 #父中断恢复）。
+见 #任务包 schema。任务包写入每个 worktree 的 `.squad.json`（脚本执行），父保留聚合副本到 `~/.cornfield/squads/<squadId>/`（不污染 repo 的 git status）；集结脚本同时在这里写 `state.json`（状态底账，父中断后用于恢复，见 #父中断恢复）。
 
 **Completion criterion**：任务包通过 schema 校验（脚本 `bootstrap.ts --check <bundle>` 可静默校验）；每条硬规则无违反。
 
 ## Phase 1 — 集结（机械工作，交给脚本）
 
 ```bash
-bun run .omp/skills/squad-programming/scripts/bootstrap.ts \
+bun run .cornfield/skills/squad-programming/scripts/bootstrap.ts \
   --bundle <任务包绝对路径> \
   --parent-target <父 session 名或 id> \
   --parent-session-id <父 session id> \
@@ -151,13 +151,13 @@ bun run .omp/skills/squad-programming/scripts/bootstrap.ts \
 
 - **健康扫描（父探活机制，防静默挂掉）** — 父不干等消息。每个工作轮次（收到消息后/间隙），对未终态子任务跑一次体检：
   ```bash
-  bun run .omp/skills/squad-programming/scripts/probe.ts ~/.omp/squads/<squadId>/state.json
+  bun run .cornfield/skills/squad-programming/scripts/probe.ts ~/.cornfield/squads/<squadId>/state.json
   ```
-  状态/新鲜度**直连 intercom broker 拿**（不绕 herdr——broker 是 omp 自身状态机，herdr 只是镜像；probe 走 `~/.omp/intercom/broker.sock` 注册+list 协议，`SessionInfo.status` + `lastActivity` 即权威）：进程存活（ps 按 worktree 路径匹配 omp）→ broker 注册态（会话在否/status）→ `lastActivity` 新鲜度 + pane 错误签名（**静默挂起**：`lastActivity` 长时间不更新——模型 API 响应挂起时 pid 在、pane 有残影，但已死机，实测 187s 静默案例；`PROBE_STALL_AFTER_S` 默认 240s）。输出 `[OK]/[WARN]`，有 WARN 退出码 1。
+  状态/新鲜度**直连 intercom broker 拿**（不绕 herdr——broker 是 omp 自身状态机，herdr 只是镜像；probe 走 `~/.cornfield/intercom/broker.sock` 注册+list 协议，`SessionInfo.status` + `lastActivity` 即权威）：进程存活（ps 按 worktree 路径匹配 omp）→ broker 注册态（会话在否/status）→ `lastActivity` 新鲜度 + pane 错误签名（**静默挂起**：`lastActivity` 长时间不更新——模型 API 响应挂起时 pid 在、pane 有残影，但已死机，实测 187s 静默案例；`PROBE_STALL_AFTER_S` 默认 240s）。输出 `[OK]/[WARN]`，有 WARN 退出码 1。
   **WARN 处置阶梯（不直接判死）**：① 先看是否自愈——API 断连（`socket connection was closed` 等）是 provider 并发高时的常见噪声，omp 自带重试，worker 通常继续推进；② **静默挂起先用 ask 唤醒**（实测 ask 到达后 worker 立即恢复——ask 双向可靠，本身就是唤醒信号）；③ ask 无响应 + pane 无进展 → 记 `stalled` → 转用户拍板（重启该子任务 / 等 / 打回）。
 - 用 `intercom({ action: "children" })` 看子 omp 实时状态，不轮询消息。
 - **每条状态消息落地 state.json**（父中断恢复的底账）:
-  `bun run .omp/skills/squad-programming/scripts/squad-state.ts ~/.omp/squads/<squadId>/state.json update <taskId> <status> [一句话] [--force]`
+  `bun run .cornfield/skills/squad-programming/scripts/squad-state.ts ~/.cornfield/squads/<squadId>/state.json update <taskId> <status> [一句话] [--force]`
   - 转移矩阵：`assembled -> started`（正常流程），`started -> blocked / reviewing / complete / failed`，`blocked/reviewing -> started / complete / failed`。
   - 终态（`complete` / `failed`）不可逆，非法转移被拒绝。
   - `--force` 跳过转移校验，仅父中断恢复场景使用（见 #父中断恢复）。
@@ -172,7 +172,7 @@ bun run .omp/skills/squad-programming/scripts/bootstrap.ts \
 
 父 omp 进程中断（崩溃/重启/被 kill）时，子 omp 的进程和 worktree 不受影响，但父的管辖上下文（谁 STARTED、谁卡在 ask）会丢。恢复步骤：
 
-1. `squad-state.ts <stateFile> list` 读未终态子任务（`stateFile = ~/.omp/squads/<squadId>/state.json`，集结时自动写入；找不到就搜 `~/.omp/squads/*/state.json` 按 `createdAt` 最新的）。
+1. `squad-state.ts <stateFile> list` 读未终态子任务（`stateFile = ~/.cornfield/squads/<squadId>/state.json`，集结时自动写入；找不到就搜 `~/.cornfield/squads/*/state.json` 按 `createdAt` 最新的）。
 2. 对每个未终态子任务，用 `intercom({ action: "children" })` + `herdr pane read <paneId>`（state 里有 paneId）复核实际状态：
    - 还活着且在干活 → 保持 `started`，询问是否需要它重新发一次最新状态；
    - 发了 COMPLETE 但父没收到 → 跑 gate 验证，过了直接标 `complete`（用 `--force` 跳过 assembled → complete 校验）；
@@ -190,7 +190,7 @@ bun run .omp/skills/squad-programming/scripts/bootstrap.ts \
    - **唯一豁免**：squad 只有 1 个子任务（无合体意义），或全部子任务为纯只读 research（无产物）。豁免必须能在交接清单里显式说明理由。
    - **建法（机械活交给脚本）**：
      ```bash
-     bun run .omp/skills/squad-programming/scripts/integrate.ts ~/.omp/squads/<squadId>/state.json [--link-node-modules] [--dry-run]
+     bun run .cornfield/skills/squad-programming/scripts/integrate.ts ~/.cornfield/squads/<squadId>/state.json [--link-node-modules] [--dry-run]
      ```
      生成 `.worktrees/<squadId>-integ`（分支 `<squadId>-integ`，base = baseBranch）；按子任务数组序逐个 merge **status=complete** 的分支；web 类项目加 `--link-node-modules`（软链主仓库 node_modules）。纯 git worktree，**无 herdr pane/agent** —— 验证区不占子 agent。
    - **冲突处理**：merge 冲突/失败即停（不自动解决、不继续后续分支）——冲突 = 子任务边界侵入，**打回该子任务修**，不在这里打补丁；修好后 `--force` 重建 integration 重来。
@@ -202,7 +202,7 @@ bun run .omp/skills/squad-programming/scripts/bootstrap.ts \
    - **① 合并到 base**：在 integration worktree 内执行 `git checkout <baseBranch> && git merge <squadId>-integ`（必要时代用户 push）。合并失败（冲突等）→ 停止，报告给用户，不继续清理。
    - **② 关 agent**：子任务的 agent 节点 = herdr 树 workspace（`w57`/`w5A`…），里面跑的 omp 进程**不随 `git worktree remove` 消失**——实测删完 worktree 还残留 7 个 idle omp。逐个 `herdr workspace close <nodeWorkspaceId>`（= 关 pane + 杀进程 + 注销 intercom 会话）；之后验证判据三条：`ps aux | grep "omp --model"` 无残留、`herdr workspace list` 无 linked worktree 节点、`intercom({action:"list"})` 无该 squad 的子会话。
    - **③ 删 worktree + 分支**：`git worktree remove --force <worktree路径>` + `git branch -D <branch>`（用户已确认合并/丢弃）；integration worktree 同法（`.worktrees/<squadId>-integ` + `git branch -D <squadId>-integ`）。
-   - **④ 归档**：任务包移到 `~/.omp/squads/archive/<squadId>/`；清 `/tmp/squad-*.json` bundle。
+   - **④ 归档**：任务包移到 `~/.cornfield/squads/archive/<squadId>/`；清 `/tmp/squad-*.json` bundle。
    - **⑤ 还原父 workspace 名**：`herdr workspace rename <父wsId> <原名>`（集结时被 rename 为 squadId）。
    - 合并完成后通知用户：「已合并到 `<baseBranch>`，已清理。」
 

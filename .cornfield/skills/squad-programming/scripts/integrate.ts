@@ -12,11 +12,11 @@
  *      不能拿单个子任务的 worktree 产物验收。
  *
  * 用法：
- *   bun run .omp/skills/squad-programming/scripts/integrate.ts <state.json> \
+ *   bun run .cornfield/skills/squad-programming/scripts/integrate.ts <state.json> \
  *     [--link-node-modules] [--dry-run] [--force]
  *
  * 行为：
- *   1. 读 state.json（~/.omp/squads/<squadId>/state.json）→ squadId / baseBranch / subtasks[].branch
+ *   1. 读 state.json（~/.cornfield/squads/<squadId>/state.json）→ squadId / baseBranch / subtasks[].branch
  *   2. 建 worktree：.worktrees/<squadId>-integ，分支 <squadId>-integ，base = baseBranch
  *      （已存在 → 报错退出，不覆盖；--force 先清旧区重建）
  *   3. 按子任务数组序逐个 git merge --no-edit <branch>（只合并 status=complete 的）：
@@ -85,7 +85,7 @@ async function run(
 }
 
 async function main(): Promise<void> {
-	if (!stateFile) fail("缺少 state.json 路径（~/.omp/squads/<squadId>/state.json）");
+	if (!stateFile) fail("缺少 state.json 路径（~/.cornfield/squads/<squadId>/state.json）");
 	const raw = readJSON(stateFile) as SquadState;
 	if (!raw.squadId || !raw.baseBranch || !Array.isArray(raw.subtasks)) fail("state.json 结构缺失 squadId/baseBranch/subtasks");
 	repoRoot = raw.parent?.cwd ?? repoRoot;

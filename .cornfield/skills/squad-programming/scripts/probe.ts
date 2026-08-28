@@ -7,7 +7,7 @@
  *   3. pane 输出尾部 + 错误签名扫描（API 连接断/进程退出/崩溃堆栈等）
  *
  * 用法：
- *   bun run .omp/skills/squad-programming/scripts/probe.ts ~/.omp/squads/<squadId>/state.json
+ *   bun run .cornfield/skills/squad-programming/scripts/probe.ts ~/.cornfield/squads/<squadId>/state.json
  *
  * 输出：每子任务一行 [OK]/[WARN]；WARN 条件 = 进程死 / agent 缺位 / pane 输出命中错误签名。
  * 有 WARN 退出码 1（供父/CI 判读）。
@@ -37,7 +37,7 @@ interface SessionInfo {
 
 /**
  * probeIntercomSessions — 直连 intercom broker 拉会话状态（不绕 herdr）。
- * broker = omp-gateway 托管的全局 IPC（~/.omp/intercom/broker.sock），
+ * broker = omp-gateway 托管的全局 IPC（~/.cornfield/intercom/broker.sock），
  * length-prefixed JSON 帧（4 字节大端长度 + payload）。
  * 发 {type:"list",requestId} → 收 {type:"sessions",sessions:SessionInfo[]}。
  * SessionInfo.status 即 omp 自身状态机（working/idle/done 等同源数据，herdr 只是镜像），
@@ -45,7 +45,7 @@ interface SessionInfo {
  */
 async function probeIntercomSessions(): Promise<Map<string, { status?: string; lastActivity?: number; sessionPath?: string }>> {
 	const out = new Map<string, { status?: string; lastActivity?: number; sessionPath?: string }>();
-	const sockPath = path.join(os.homedir(), ".omp", "intercom", "broker.sock");
+	const sockPath = path.join(os.homedir(), ".cornfield", "intercom", "broker.sock");
 	if (!fs.existsSync(sockPath)) return out; // broker 不可用 → 调用方回落
 	const requestId = crypto.randomUUID();
 	const regMsg = JSON.stringify({
@@ -175,7 +175,7 @@ async function main(): Promise<void> {
 		const today = new Date();
 		const pad = (n: number) => String(n).padStart(2, "0");
 		const dateDir = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
-		const byDate = path.join(os.homedir(), ".omp", "agent", "sessions", rel, "by-date", dateDir);
+		const byDate = path.join(os.homedir(), ".cornfield", "agent", "sessions", rel, "by-date", dateDir);
 		try {
 			const files = fs.readdirSync(byDate).filter((f) => f.endsWith(".jsonl"));
 			if (files.length === 0) return null;

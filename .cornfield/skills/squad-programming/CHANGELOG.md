@@ -28,7 +28,7 @@
 - **清理协议硬化：先关 agent 再删 worktree** (`SKILL.md`): 实测——`git worktree remove` 不杀 herdr 树节点里跑的 omp 进程（7 个 idle worker 残留，进程/节点/intercom 会话三处漏清）。Phase 3 步骤 5 改为：① `herdr workspace close` 关 agent 节点（ps 无 omp 残留 + 树无节点 + intercom 无子会话三判据）→ ② worktree remove + branch -D → ③ state 归档 → ④ 父 workspace 名还原。
 - **wait-gate 改 pull 模式** (`bootstrap.ts`, `SKILL.md`): 第二批次复现子进程首轮主动 send 报 Session not found（启动窗口期 broker 目标解析不可用，ask 双向始终可靠）——STARTED 确认改为父 ask 驱动（wait-gate 主动拉），worker 的 send 降级为可选补报且失败不刷屏。
 - **整体验证 integration worktree** (`scripts/integrate.ts`, `SKILL.md`, `USAGE.md`): 新增 Phase 3 整体验证步骤——`integrate.ts <state.json>` 把全部 complete 分支按序合并到 `.worktrees/<squadId>-integ`（纯 git worktree，不占 agent；`--link-node-modules` 软链主仓库依赖；`--force` 重建）。冲突即停并打回子任务，不在验证区打补丁；验证跑全部 gate 并集 + 整体功能冒烟（web → dev server + 浏览器）。用户 merge 后与正式分支一并清理。
-- **父中断恢复：squad state 落盘** (`scripts/squad-state.ts`, `scripts/bootstrap.ts`): 集结完成后写 `~/.omp/squads/<squadId>/state.json`（每子任务落点/分支/paneId/状态）；父每收一条状态消息用 `squad-state.ts update <taskId> <status>` 同步；父进程中断后 `squad-state.ts list` 读恢复清单，按 pane 复核后接续。SKILL.md 新增「父中断恢复」章节定义完整流程。
+- **父中断恢复：squad state 落盘** (`scripts/squad-state.ts`, `scripts/bootstrap.ts`): 集结完成后写 `~/.cornfield/squads/<squadId>/state.json`（每子任务落点/分支/paneId/状态）；父每收一条状态消息用 `squad-state.ts update <taskId> <status>` 同步；父进程中断后 `squad-state.ts list` 读恢复清单，按 pane 复核后接续。SKILL.md 新增「父中断恢复」章节定义完整流程。
 
 ### Changed
 

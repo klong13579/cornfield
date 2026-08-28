@@ -1,6 +1,6 @@
 # System prompt behavior check (tmux)
 
-- Out dir: `/Users/sz-0203015357/Desktop/Narwal/oh-my-pi/.omp/behavior-check/20260520-184208`
+- Out dir: `/Users/sz-0203015357/Desktop/Narwal/oh-my-pi/.cornfield/behavior-check/20260520-184208`
 - Pass: 3 / Fail: 2 / Blocked: 0 / Total: 5
 
 | Case | Verdict | Reason | Tools |

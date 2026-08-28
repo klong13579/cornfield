@@ -87,7 +87,7 @@ WORKSPACE/
 
 ### 4.2 清理
 - 删除已合并的 rule 文件（`.omp/rules/` 下被吸收的 .md）
-- 删除已合并的 skill 目录（`.omp/skills/` 下已吸收的 alwaysApply skill）
+- 删除已合并的 skill 目录（`.cornfield/skills/` 下已吸收的 alwaysApply skill）
 - 保留作为参考的 skill（非 alwaysApply，按需 read）
 - 删除空的 `.omp/rules/` 目录
 

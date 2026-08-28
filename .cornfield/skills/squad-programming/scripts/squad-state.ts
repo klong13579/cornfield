@@ -14,7 +14,7 @@
  * 非法转移（如 complete → started）会被拒绝，除非 --force（仅恢复场景使用）。
  * 终态（complete / failed）不可逆，重复设置同一状态是幂等的（仅更新 timestamp）。
  *
- * 零依赖：只 node:fs / os / path。状态文件 ~/.omp/squads/<squadId>/state.json
+ * 零依赖：只 node:fs / os / path。状态文件 ~/.cornfield/squads/<squadId>/state.json
  * （与任务包归档同目录约定）。
  */
 
@@ -62,7 +62,7 @@ export const VALID_TRANSITIONS: Record<string, string[]> = {
 };
 
 export function squadsDir(): string {
-	return path.join(os.homedir(), ".omp", "squads");
+	return path.join(os.homedir(), ".cornfield", "squads");
 }
 
 export function statePath(squadId: string): string {
