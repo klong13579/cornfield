@@ -219,12 +219,12 @@ async function installUpdate(): Promise<{ ok: boolean; error?: string }> {
 		const cacheDir = path.join(os.homedir(), "Library", "Caches", updaterCacheDirName());
 		const zipPath = findDownloadedZip(cacheDir);
 		if (!zipPath) {
-			throw new Error("no downloaded update found in " + cacheDir);
+			throw new Error(`no downloaded update found in ${cacheDir}`);
 		}
 		const appPath = app.getAppPath(); // …/OMP Desktop.app/Contents/Resources/app.asar
 		const bundleRoot = app.isPackaged ? path.dirname(path.dirname(path.dirname(appPath))) : "";
 		if (!bundleRoot?.endsWith(".app")) {
-			throw new Error("cannot determine .app bundle root from " + appPath);
+			throw new Error(`cannot determine .app bundle root from ${appPath}`);
 		}
 		// 先干净终止 sidecar（等退出/排空），否则 bootstrap 脚本的 pgrep 会误匹配
 		// sidecar（argv 含 OMP Desktop.app 路径）导致替换失败或 open 新实例端口冲突。
