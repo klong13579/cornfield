@@ -473,24 +473,20 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 							fail(`unknown agent: ${agentId}`);
 							return;
 						}
-						// sessionFile 容错：live 会话文件可能尚未落盘（serve 重启后的新会话）或已被清理——
-						// 不存在时降级 agent 维度（扫该 agent 最近会话），不向前端硬报错。
+						// sessionFile 容错：fresh 会话（serve 刚重启 / 新会话尚无消息）JSONL 可能尚未落盘。
+						// 此时诚实返回空数组（该会话确实没有产物），不降级 agent 维度——降级会混入
+						// 其它会话的产物，破坏按会话隔离视图。
 						let exists = false;
 						try {
 							exists = (await fs.stat(cmd.sessionFile)).isFile();
 						} catch {
 							exists = false;
 						}
-						if (exists) {
-							const artifacts = await listSessionArtifacts(meta.agentDir, cmd.sessionFile);
-							done({ artifacts });
+						if (!exists) {
+							done({ artifacts: [] });
 							return;
 						}
-						const sessionsRoot =
-							meta.id === "default"
-								? path.join(defaultSessionsRoot(), getDefaultSessionDirName(meta.agentDir).encodedDirName)
-								: agentSessionsRoot(meta);
-						const artifacts = await listAgentArtifacts(meta.agentDir, sessionsRoot);
+						const artifacts = await listSessionArtifacts(meta.agentDir, cmd.sessionFile);
 						done({ artifacts });
 						return;
 					}

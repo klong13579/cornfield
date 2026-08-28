@@ -3,6 +3,7 @@
  * wire-server 产出、前端（web-app/desktop/pi-client）消费，双方直接 import 本包。
  */
 export * from "./agents";
+export * from "./artifacts";
 export * from "./cron";
 export * from "./events";
 export * from "./memory";

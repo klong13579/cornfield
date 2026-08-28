@@ -153,13 +153,13 @@ test("list_artifacts：提取/分类/排序 + /preview 静态服务", async () =
 		})) as { artifacts: ArtifactRow[] };
 		expect(staleResult.artifacts).toEqual([]);
 
-		// 不存在的 sessionFile → 降级 agent 维度（不硬报错；serve 重启后旧会话文件可能未落盘/已清理）
+		// 不存在的 sessionFile（fresh 会话未落盘）→ 诚实返回空数组，不降级 agent 维度
 		const missing = (await request(ws, {
 			type: "list_artifacts",
 			sessionId: "hr",
 			sessionFile: path.join(hrSessions, "nope.jsonl"),
 		})) as { artifacts: ArtifactRow[] };
-		expect(missing.artifacts.length).toBe(2); // 回退扫 hr 最近会话：新/旧两会话的产物都在
+		expect(missing.artifacts).toEqual([]);
 
 		// ── /preview 静态服务：html ──
 		const previewUrl = url.replace(/^ws:/, "http:").replace(/\/ws$/, "");

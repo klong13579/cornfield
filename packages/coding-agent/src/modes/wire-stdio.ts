@@ -757,6 +757,7 @@ export async function runWireStdioMode(session: AgentSession): Promise<never> {
 			case "permission_respond":
 			case "record_transcribe":
 			case "listen_list":
+			case "list_artifacts":
 			case "list_remote_skills":
 			case "install_remote_skill":
 			case "get_mcp_servers":

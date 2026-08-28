@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import type { ArtifactDto } from "../../lib/pi-client-api";
 import { Markdown } from "../../render/Markdown";
 import { useSessionStore } from "../../state/session-store";
+import { useSession } from "../../state/use-session";
 
 /**
  * Artifacts 产物面板（工作台右栏 Artifacts tab，R-ARTIFACTS 接真数据）。
@@ -50,7 +51,11 @@ function fmtSize(n: number): string {
 	return String(n);
 }
 
-function useArtifacts(agentId: string | undefined, sessionFile: string | undefined): ArtifactsState {
+function useArtifacts(
+	agentId: string | undefined,
+	sessionFile: string | undefined,
+	isStreaming: boolean,
+): ArtifactsState {
 	const store = useSessionStore();
 	const [state, setState] = useState<ArtifactsState>({ status: "loading", entries: [], error: null });
 
@@ -74,7 +79,7 @@ function useArtifacts(agentId: string | undefined, sessionFile: string | undefin
 		return () => {
 			cancelled = true;
 		};
-	}, [agentId, sessionFile, store]);
+	}, [agentId, sessionFile, store, isStreaming]);
 
 	return state;
 }
@@ -87,7 +92,8 @@ export function ArtifactsPanel({
 	sessionFile?: string;
 }): React.JSX.Element {
 	const store = useSessionStore();
-	const { status, entries, error } = useArtifacts(agentId, sessionFile);
+	const view = useSession();
+	const { status, entries, error } = useArtifacts(agentId, sessionFile, view.isStreaming);
 	const [selected, setSelected] = useState<ArtifactDto | null>(null);
 	const [preview, setPreview] = useState<PreviewState | null>(null);
 	const [zoomed, setZoomed] = useState(false);
