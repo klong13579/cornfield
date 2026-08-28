@@ -96,6 +96,23 @@ test("list_sessions：索引/状态推断/排序/过滤", async () => {
 		userMessage("q3"),
 		assistantMessage("stop"),
 	]);
+	// 第 4 条：header 无 title + 有 user 消息 —— 应提取首条 user 消息为名（与 session-manager 自动标题同源）
+	await Bun.write(
+		path.join(hrSessions, `090000__ffff0001.jsonl`),
+		`${[JSON.stringify({ type: "session", version: 3, id: "dddd4444-0000-7000-0000-000000000004", timestamp: "2026-08-18T09:00:00.000Z", cwd: hrDir }), entryLine("model_change", { model: "test-provider/test-model" }), userMessage("q4"), assistantMessage("stop")].join("\n")}\n`,
+	);
+	// 第 5 条：header 无 title 也无 user 消息（空会话）—— 回落文件名推导（slug 转空格）
+	await Bun.write(
+		path.join(hrSessions, `080000-empty-slug__ffff0002.jsonl`),
+		`${[JSON.stringify({ type: "session", version: 3, id: "eeee5555-0000-7000-0000-000000000005", timestamp: "2026-08-18T08:00:00.000Z", cwd: hrDir }), entryLine("model_change", { model: "test-provider/test-model" })].join("\n")}\n`,
+	);
+	// 第 6 条：subagent 子会话（by-date/<主会话>/<NN>-<name>.jsonl）—— 文件名取任务名
+	const subDir = path.join(hrSessions, "070000__aaaa9999");
+	await fs.mkdir(subDir, { recursive: true });
+	await Bun.write(
+		path.join(subDir, `21-FixSettings.jsonl`),
+		`${[JSON.stringify({ type: "session", version: 3, id: "ffff6666-0000-7000-0000-000000000006", timestamp: "2026-08-18T07:00:00.000Z", cwd: hrDir }), entryLine("model_change", { model: "test-provider/test-model" })].join("\n")}\n`,
+	);
 
 	const repoRoot = new URL("../../..", import.meta.url).pathname.replace(/\/$/, "");
 	const port = 57000 + Math.floor(Math.random() * 8000);
@@ -121,18 +138,28 @@ test("list_sessions：索引/状态推断/排序/过滤", async () => {
 		const all = (await request(ws, { type: "list_sessions" })) as { sessions: IndexEntry[] };
 		expect(all.sessions.length).toBeGreaterThanOrEqual(3);
 
-		// hr 的 3 条都在
+		// hr 的 6 条都在（3 条带 title + 首条 user 消息提取 + 文件名推导 + subagent 任务名）
 		const hr = all.sessions.filter(s => s.agentId === "hr");
-		expect(hr.length).toBe(3);
+		expect(hr.length).toBe(6);
 
-		// 时间倒序：hr 内部 newest → mid → oldest
-		expect(hr.map(s => s.title)).toEqual(["newest complete", "mid truncated", "oldest aborted"]);
+		// 时间倒序：newest → mid → oldest → user 消息提取（09:00）→ 文件名推导（08:00）→ subagent（07:00）
+		expect(hr.map(s => s.title)).toEqual([
+			"newest complete",
+			"mid truncated",
+			"oldest aborted",
+			"q4",
+			"08-18 080000 empty slug",
+			"FixSettings",
+		]);
 
 		// 状态推断
 		const byTitle = new Map(hr.map(s => [s.title as string, s]));
 		expect(byTitle.get("newest complete")?.status).toBe("completed");
 		expect(byTitle.get("mid truncated")?.status).toBe("incomplete");
 		expect(byTitle.get("oldest aborted")?.status).toBe("aborted");
+		expect(byTitle.get("q4")?.status).toBe("completed");
+		expect(byTitle.get("08-18 080000 empty slug")?.status).toBe("unknown");
+		expect(byTitle.get("FixSettings")?.status).toBe("unknown");
 
 		// 结构字段
 		const newest = byTitle.get("newest complete");
@@ -150,7 +177,7 @@ test("list_sessions：索引/状态推断/排序/过滤", async () => {
 
 		// sessionId 过滤：只 hr
 		const onlyHr = (await request(ws, { type: "list_sessions", sessionId: "hr" })) as { sessions: IndexEntry[] };
-		expect(onlyHr.sessions.length).toBe(3);
+		expect(onlyHr.sessions.length).toBe(6);
 		expect(onlyHr.sessions.every(s => s.agentId === "hr")).toBe(true);
 
 		// 未知 agent 报错
@@ -158,12 +185,13 @@ test("list_sessions：索引/状态推断/排序/过滤", async () => {
 		expect(bogus.ok).toBe(false);
 		expect(String(bogus.error)).toMatch(/unknown agent/);
 
-		// limit
+		// limit（按 mtime 取每源前 N 个文件再按 startTime 倒序）
 		const limited = (await request(ws, { type: "list_sessions", sessionId: "hr", limit: 2 })) as {
 			sessions: IndexEntry[];
 		};
 		expect(limited.sessions.length).toBe(2);
-		expect(limited.sessions[0]?.title).toBe("newest complete"); // 仍按时间倒序
+		// 仍按时间倒序（具体是哪两条取决于 mtime，不断言具体条目）
+		expect(limited.sessions[0]!.startTime >= limited.sessions[1]!.startTime).toBe(true);
 
 		ws.close();
 	} finally {

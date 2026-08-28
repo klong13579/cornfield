@@ -19,7 +19,7 @@ import { useSession } from "../../state/use-session";
 export function RecordsView(): React.JSX.Element {
 	const navigate = useNavigate();
 	const openSession = (row: SessionRecordSummary) => {
-		navigate(`/records/${row.id}`, { state: { sessionFile: row.sessionFile } });
+		navigate(`/records/${row.id}`, { state: { sessionFile: row.sessionFile, name: row.name } });
 	};
 	const store = useSessionStore();
 	const view = useSession();

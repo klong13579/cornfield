@@ -99,6 +99,10 @@ async function indexOne(source: SessionIndexSource, file: JsonlFile): Promise<Wi
 
 		const counts = await countMessageEntries(file.path, file.size);
 
+		// title 优先级（与 session-manager 自动标题同源）：header.title → 首条 user 消息 → 文件名推导
+		const firstPrompt = header.title ? undefined : extractFirstUserPrompt(headText);
+		const title = header.title ?? sanitizeDisplayTitle(firstPrompt) ?? deriveSessionTitle(file.path);
+
 		// 头部已含全文件（小文件）时直接用头文本解析尾部；否则读末 256KB
 		const tailText = file.size <= HEAD_BYTES ? headText : await f.slice(Math.max(0, file.size - TAIL_BYTES)).text();
 		const tailInfo = parseTail(tailText);
@@ -111,7 +115,7 @@ async function indexOne(source: SessionIndexSource, file: JsonlFile): Promise<Wi
 			agentId: source.agentId,
 			agentName: source.agentName,
 			source: source.source,
-			title: header.title,
+			title,
 			startTime: header.timestamp,
 			endTime: endTime ?? header.timestamp,
 			messageCount: counts.messages,
@@ -135,6 +139,68 @@ interface ParsedHeader {
 	timestamp: string;
 	title?: string;
 	model?: string;
+}
+
+/** 从会话文件名推导可读名（header 无 title 时的兜底）。
+ *
+ * by-date 布局（session-paths.ts）：`<HHMMSS>[-<slug>]__<8hex>.jsonl`
+ *   - `143205__a1b2c3d4.jsonl`               → "MM-DD 143205"
+ *   - `143205-fix-login-bug__a1b2c3d4.jsonl` → "MM-DD 143205 fix login bug"
+ * 无标题的 gateway 扁平文件（`<convId>.jsonl`）不匹配 → undefined（前端回落 id）。
+ */
+function deriveSessionTitle(filePath: string): string | undefined {
+	const base = path.basename(filePath, ".jsonl");
+	// by-date 布局：`<HHMMSS>[-<slug>]__<8hex>.jsonl`
+	const m = base.match(/^(\d{6})(?:-([^_]+))?__[0-9a-f]{8}$/);
+	if (m) {
+		const stamp = m[1];
+		const slug = m[2];
+		const dateDir = path.basename(path.dirname(filePath));
+		const day = /^\d{4}-\d{2}-\d{2}$/.test(dateDir) ? dateDir.slice(5) : undefined; // MM-DD
+		const label = slug ? `${stamp} ${slug.replace(/[-_]+/g, " ")}` : stamp;
+		return day ? `${day} ${label}` : label;
+	}
+	// subagent 子会话：`by-date/<date>/<主会话>/<NN>-<name>.jsonl` → 任务名
+	const sub = base.match(/^\d{1,3}-(.+)$/);
+	if (sub) return sub[1].replace(/[-_]+/g, " ");
+	// 无标题的 gateway 扁平文件（`<convId>.jsonl`）不匹配 → undefined（前端回落 id）
+	return undefined;
+}
+
+/** 显示用标题清洗：首行、去控制字符、trim、40 字符截断（与 RecentSessionInfo.name 同款）。 */
+function sanitizeDisplayTitle(value: string | undefined): string | undefined {
+	if (!value) return undefined;
+	const firstLine = value.split(/\r?\n/)[0] ?? "";
+	const stripped = firstLine.replace(/[\x00-\x1F\x7F]/g, "").trim();
+	if (!stripped) return undefined;
+	return stripped.length <= 40 ? stripped : `${stripped.slice(0, 39)}…`;
+}
+
+/** 从头部文本提取第一条 user 消息文本（与 session-manager extractFirstUserPrompt 同构）。 */
+function extractFirstUserPrompt(headText: string): string | undefined {
+	for (const line of headText.split("\n")) {
+		if (!line.startsWith("{")) continue;
+		let entry: Record<string, unknown>;
+		try {
+			entry = JSON.parse(line) as Record<string, unknown>;
+		} catch {
+			continue; // 截断行/坏行
+		}
+		if (entry.type !== "message") continue;
+		const message = entry.message as { role?: string; content?: unknown } | undefined;
+		if (message?.role !== "user") continue;
+		const content = message.content;
+		if (typeof content === "string") return content;
+		if (Array.isArray(content)) {
+			for (const block of content) {
+				if (typeof block === "object" && block !== null && "text" in block) {
+					const text = (block as { text: unknown }).text;
+					if (typeof text === "string" && text.trim().length > 0) return text;
+				}
+			}
+		}
+	}
+	return undefined;
 }
 
 /** 头部解析：第一行必须是 {type:"session"...}；順便拿头部的 model_change（若有）。 */

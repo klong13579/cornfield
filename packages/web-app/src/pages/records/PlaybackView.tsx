@@ -32,8 +32,10 @@ export function PlaybackView(): React.JSX.Element {
 	};
 	const scrollRef = useRef<HTMLDivElement>(null);
 
-	// 历史会话标题暂用会话 id（短哈希）；current 为真数据。
-	const title = id === CURRENT_SESSION_ID ? "当前会话（serve 真数据）" : `历史会话 · ${id.slice(0, 12)}`;
+	// RecordsView 点击行时携 name 进来；缺失（直链/刷新）回落会话 id 短哈希。
+	const histName = (location.state as { name?: string } | null)?.name;
+	const title =
+		id === CURRENT_SESSION_ID ? "当前会话（serve 真数据）" : histName?.trim() || `历史会话 · ${id.slice(0, 12)}`;
 
 	useEffect(() => {
 		let alive = true;
