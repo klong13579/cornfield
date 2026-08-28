@@ -175,9 +175,13 @@ function startMockWire(): void {
 }
 
 /** 起一个 serve（OMP_GATEWAY_WIRE_PORT 定向到给定端口）。 */
-async function spawnServe(wirePortOverride: number): Promise<{ proc: ReturnType<typeof Bun.spawn>; url: string }> {
+async function spawnServe(
+	wirePortOverride: number,
+	servePortBase: number,
+	servePortRange = 1500,
+): Promise<{ proc: ReturnType<typeof Bun.spawn>; url: string }> {
 	const repoRoot = new URL("../../..", import.meta.url).pathname.replace(/\/$/, "");
-	const servePort = 57000 + Math.floor(Math.random() * 8000);
+	const servePort = servePortBase + Math.floor(Math.random() * servePortRange);
 	const proc = Bun.spawn(
 		[
 			"bun",
@@ -205,12 +209,13 @@ beforeAll(async () => {
 	startMockWire();
 	sessionDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-serve-cron-proxy-"));
 	// 主实例：mock gateway 可达 → 转发穿透用例
-	const main = await spawnServe(wirePort);
+	const main = await spawnServe(wirePort, 48500, 1500);
 	proc = main.proc;
 	url = main.url;
-	// down 实例：定向到从不绑定的死端口 → gateway unreachable 用例
-	deadPort = 58000 + Math.floor(Math.random() * 8000);
-	const down = await spawnServe(deadPort);
+	// down 实例：定向到从不绑定的死端口 → gateway unreachable 用例；
+	// serve port 用独立段（48500+1500 已被主实例占用范围，避免随机撞端口）。
+	deadPort = 53000 + Math.floor(Math.random() * 1000);
+	const down = await spawnServe(deadPort, 51000, 1000);
 	downProc = down.proc;
 	downUrl = down.url;
 }, 45_000);
