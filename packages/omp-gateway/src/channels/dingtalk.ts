@@ -1683,7 +1683,7 @@ export class DingTalkChannel extends BaseChannel {
 		this.#client = this.createDWClient({
 			clientId: this.#config.appKey,
 			clientSecret: this.#config.appSecret,
-			ua: "omp-gateway/0.1.0",
+			ua: "cornfield-gateway/0.1.0",
 			debug: false,
 			autoReconnect: false, // omp-gateway has its own #doReconnect logic
 		});

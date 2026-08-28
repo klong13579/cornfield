@@ -14,7 +14,7 @@ interface BinaryTarget {
 const repoRoot = path.join(import.meta.dir, "..");
 const binariesDir = path.join(repoRoot, "packages", "coding-agent", "binaries");
 const entrypoint = "./packages/coding-agent/src/cli.ts";
-const gatewayEntrypoint = "./packages/omp-gateway/src/cli.ts";
+const gatewayEntrypoint = "./packages/cornfield-gateway/src/cli.ts";
 const isDryRun = process.argv.includes("--dry-run");
 const targets: BinaryTarget[] = [
 	{
@@ -22,35 +22,35 @@ const targets: BinaryTarget[] = [
 		platform: "darwin",
 		arch: "arm64",
 		target: "bun-darwin-arm64",
-		outfile: "packages/coding-agent/binaries/omp-darwin-arm64",
+		outfile: "packages/coding-agent/binaries/cornfield-darwin-arm64",
 	},
 	{
 		id: "darwin-x64",
 		platform: "darwin",
 		arch: "x64",
 		target: "bun-darwin-x64",
-		outfile: "packages/coding-agent/binaries/omp-darwin-x64",
+		outfile: "packages/coding-agent/binaries/cornfield-darwin-x64",
 	},
 	{
 		id: "linux-x64",
 		platform: "linux",
 		arch: "x64",
 		target: "bun-linux-x64-baseline",
-		outfile: "packages/coding-agent/binaries/omp-linux-x64",
+		outfile: "packages/coding-agent/binaries/cornfield-linux-x64",
 	},
 	{
 		id: "linux-arm64",
 		platform: "linux",
 		arch: "arm64",
 		target: "bun-linux-arm64",
-		outfile: "packages/coding-agent/binaries/omp-linux-arm64",
+		outfile: "packages/coding-agent/binaries/cornfield-linux-arm64",
 	},
 	{
 		id: "win32-x64",
 		platform: "win32",
 		arch: "x64",
 		target: "bun-windows-x64-modern",
-		outfile: "packages/coding-agent/binaries/omp-windows-x64.exe",
+		outfile: "packages/coding-agent/binaries/cornfield-windows-x64.exe",
 	},
 ];
 
@@ -146,7 +146,7 @@ async function buildBinary(target: BinaryTarget): Promise<void> {
 async function buildGatewayBinary(target: BinaryTarget): Promise<void> {
 	const gatewayExt = target.platform === "win32" ? ".exe" : "";
 	const gatewayPlatform = target.platform === "win32" ? "windows" : target.platform;
-	const gatewayOutfile = `packages/coding-agent/binaries/omp-gateway-${gatewayPlatform}-${target.arch}${gatewayExt}`;
+	const gatewayOutfile = `packages/coding-agent/binaries/cornfield-gateway-${gatewayPlatform}-${target.arch}${gatewayExt}`;
 	console.log(`Building ${gatewayOutfile}...`);
 	if (isDryRun) {
 		console.log(`DRY RUN bun build --compile --no-compile-autoload-bunfig --no-compile-autoload-dotenv --define process.env.PI_COMPILED="true" --root . --external mupdf --target=${target.target} ${gatewayEntrypoint} --outfile ${gatewayOutfile}`);

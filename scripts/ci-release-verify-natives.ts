@@ -16,8 +16,8 @@ const defaultExpectedAddons = [
 	"win32-x64-baseline",
 ] as const;
 const x64LinuxIsaContracts = [
-	{ addon: "linux-x64-baseline", filename: "pi_natives.linux-x64-baseline.node", label: "x86-64-v2" },
-	{ addon: "linux-x64-modern", filename: "pi_natives.linux-x64-modern.node", label: "x86-64-v3" },
+	{ addon: "linux-x64-baseline", filename: "cornfield_natives.linux-x64-baseline.node", label: "x86-64-v2" },
+	{ addon: "linux-x64-modern", filename: "cornfield_natives.linux-x64-modern.node", label: "x86-64-v3" },
 ] as const;
 const AVX512_REGISTER_PATTERN = /\bzmm\d+\b|\bk[0-7]\b/;
 
@@ -73,16 +73,16 @@ async function main(): Promise<void> {
 	console.log();
 	console.log(`Expected addons: ${expectedAddons.join(", ")}`);
 
-	const missingAddons = expectedAddons.filter((platform) => !entries.includes(`pi_natives.${platform}.node`));
+	const missingAddons = expectedAddons.filter((platform) => !entries.includes(`cornfield_natives.${platform}.node`));
 	if (missingAddons.length > 0) {
 		for (const platform of missingAddons) {
-			console.error(`MISSING pi_natives.${platform}.node`);
+			console.error(`MISSING cornfield_natives.${platform}.node`);
 		}
 		process.exit(1);
 	}
 
 	for (const platform of expectedAddons) {
-		console.log(`OK pi_natives.${platform}.node`);
+		console.log(`OK cornfield_natives.${platform}.node`);
 	}
 
 	const isaFailures: string[] = [];

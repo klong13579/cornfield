@@ -21,48 +21,48 @@ const archivesDir = path.join(binariesDir, ".archives");
 const targets: ArchiveTarget[] = [
 	{
 		id: "darwin-arm64",
-		binaryName: "omp-darwin-arm64",
-		archiveName: "omp-darwin-arm64.tar.gz",
-		executableName: "omp",
-		gatewayBinaryName: "omp-gateway-darwin-arm64",
-		gatewayExecutableName: "omp-gateway",
-		nativeAddons: ["pi_natives.darwin-arm64.node"],
+		binaryName: "cornfield-darwin-arm64",
+		archiveName: "cornfield-darwin-arm64.tar.gz",
+		executableName: "cornfield",
+		gatewayBinaryName: "cornfield-gateway-darwin-arm64",
+		gatewayExecutableName: "cornfield-gateway",
+		nativeAddons: ["cornfield_natives.darwin-arm64.node"],
 	},
 	{
 		id: "darwin-x64",
-		binaryName: "omp-darwin-x64",
-		archiveName: "omp-darwin-x64.tar.gz",
-		executableName: "omp",
-		gatewayBinaryName: "omp-gateway-darwin-x64",
-		gatewayExecutableName: "omp-gateway",
-		nativeAddons: ["pi_natives.darwin-x64-modern.node", "pi_natives.darwin-x64-baseline.node"],
+		binaryName: "cornfield-darwin-x64",
+		archiveName: "cornfield-darwin-x64.tar.gz",
+		executableName: "cornfield",
+		gatewayBinaryName: "cornfield-gateway-darwin-x64",
+		gatewayExecutableName: "cornfield-gateway",
+		nativeAddons: ["cornfield_natives.darwin-x64-modern.node", "cornfield_natives.darwin-x64-baseline.node"],
 	},
 	{
 		id: "linux-x64",
-		binaryName: "omp-linux-x64",
-		archiveName: "omp-linux-x64.tar.gz",
-		executableName: "omp",
-		gatewayBinaryName: "omp-gateway-linux-x64",
-		gatewayExecutableName: "omp-gateway",
-		nativeAddons: ["pi_natives.linux-x64-modern.node", "pi_natives.linux-x64-baseline.node"],
+		binaryName: "cornfield-linux-x64",
+		archiveName: "cornfield-linux-x64.tar.gz",
+		executableName: "cornfield",
+		gatewayBinaryName: "cornfield-gateway-linux-x64",
+		gatewayExecutableName: "cornfield-gateway",
+		nativeAddons: ["cornfield_natives.linux-x64-modern.node", "cornfield_natives.linux-x64-baseline.node"],
 	},
 	{
 		id: "linux-arm64",
-		binaryName: "omp-linux-arm64",
-		archiveName: "omp-linux-arm64.tar.gz",
-		executableName: "omp",
-		gatewayBinaryName: "omp-gateway-linux-arm64",
-		gatewayExecutableName: "omp-gateway",
-		nativeAddons: ["pi_natives.linux-arm64.node"],
+		binaryName: "cornfield-linux-arm64",
+		archiveName: "cornfield-linux-arm64.tar.gz",
+		executableName: "cornfield",
+		gatewayBinaryName: "cornfield-gateway-linux-arm64",
+		gatewayExecutableName: "cornfield-gateway",
+		nativeAddons: ["cornfield_natives.linux-arm64.node"],
 	},
 	{
 		id: "win32-x64",
-		binaryName: "omp-windows-x64.exe",
-		archiveName: "omp-windows-x64.tar.gz",
-		executableName: "omp.exe",
-		gatewayBinaryName: "omp-gateway-windows-x64.exe",
-		gatewayExecutableName: "omp-gateway.exe",
-		nativeAddons: ["pi_natives.win32-x64-modern.node", "pi_natives.win32-x64-baseline.node"],
+		binaryName: "cornfield-windows-x64.exe",
+		archiveName: "cornfield-windows-x64.tar.gz",
+		executableName: "cornfield.exe",
+		gatewayBinaryName: "cornfield-gateway-windows-x64.exe",
+		gatewayExecutableName: "cornfield-gateway.exe",
+		nativeAddons: ["cornfield_natives.win32-x64-modern.node", "cornfield_natives.win32-x64-baseline.node"],
 	},
 ];
 
@@ -88,7 +88,7 @@ async function createArchive(target: ArchiveTarget): Promise<void> {
 		await copyRequiredFile(path.join(binariesDir, addonName), path.join(stagingDir, addonName));
 	}
 
-	if (target.executableName === "omp") {
+	if (target.executableName === "cornfield") {
 		await fs.chmod(path.join(stagingDir, target.executableName), 0o755);
 		await fs.chmod(path.join(stagingDir, target.gatewayExecutableName), 0o755);
 	}

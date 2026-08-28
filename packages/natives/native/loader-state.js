@@ -3,7 +3,7 @@
 /**
  * Pure helpers used by `./index.js` to decide whether the loader is running
  * inside a Bun-compiled standalone binary, and to compute the ordered list of
- * candidate paths the loader probes for `pi_natives.<platform>-<arch>*.node`.
+ * candidate paths the loader probes for `cornfield_natives.<platform>-<arch>*.node`.
  *
  * Kept as a separate CommonJS module so the logic can be unit-tested without
  * triggering the side-effectful `loadNative()` call in `index.js`.
@@ -68,10 +68,10 @@ function detectCompiledBinary({ embeddedAddon, env, importMetaUrl }) {
  * @returns {string[]}
  */
 function getAddonFilenames({ tag, arch, variant }) {
-	const defaultFilename = `pi_natives.${tag}.node`;
+	const defaultFilename = `cornfield_natives.${tag}.node`;
 	if (arch !== "x64" || !variant) return [defaultFilename];
-	const baselineFilename = `pi_natives.${tag}-baseline.node`;
-	const modernFilename = `pi_natives.${tag}-modern.node`;
+	const baselineFilename = `cornfield_natives.${tag}-baseline.node`;
+	const modernFilename = `cornfield_natives.${tag}-modern.node`;
 	if (variant === "modern") {
 		return [modernFilename, baselineFilename, defaultFilename];
 	}

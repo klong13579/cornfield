@@ -62,20 +62,20 @@ export function resolveOmpBinary(resourcesPath: string): string {
 	const explicit = process.env.OMP_BINARY?.trim();
 	if (explicit) return explicit;
 
-	// 1. 打包内嵌（electron-builder extraResources 复制 ../coding-agent/dist/omp → omp-binary/omp）。
-	const packaged = path.join(resourcesPath, "omp-binary", "omp");
+	// 1. 打包内嵌（electron-builder extraResources 复制 ../coding-agent/dist/cornfield → omp-binary/cornfield）。
+	const packaged = path.join(resourcesPath, "omp-binary", "cornfield");
 	if (isExecutable(packaged)) return packaged;
 
 	// 2. 规范安装位置（scripts/install.sh 产物）。
-	const installed = path.join(os.homedir(), ".local", "bin", "omp");
+	const installed = path.join(os.homedir(), ".local", "bin", "cornfield");
 	if (isExecutable(installed)) return installed;
 
 	// 3. 开发 checkout 的构建产物。
-	const devBuild = path.resolve(import.meta.dirname, "../../dist/omp");
+	const devBuild = path.resolve(import.meta.dirname, "../../dist/cornfield");
 	if (isExecutable(devBuild)) return devBuild;
 
 	// 回退 PATH（开发机尚未构建二进制时）。
-	return "omp";
+	return "cornfield";
 }
 
 function execFileOut(file: string, args: string[]): Promise<string> {

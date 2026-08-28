@@ -3,7 +3,7 @@
  *
  * On WSL (and any host where the user moves the standalone binary away from the
  * build-time native artifacts), the compiled `omp` binary fails to load
- * `pi_natives.linux-x64-*.node`. Root cause: the loader's `isCompiledBinary`
+ * `cornfield_natives.linux-x64-*.node`. Root cause: the loader's `isCompiledBinary`
  * detection in `packages/natives/native/index.js` relies on
  *   - `process.env.PI_COMPILED` — never set, because `bun build --compile
  *     --define PI_COMPILED=true` substitutes the bare identifier, not
@@ -45,8 +45,8 @@ describe("issue 823: standalone-binary native loader path resolution", () => {
 					files: [
 						{
 							variant: "modern",
-							filename: "pi_natives.linux-x64-modern.node",
-							filePath: "/$bunfs/root/packages/natives/native/pi_natives.linux-x64-modern.node",
+							filename: "cornfield_natives.linux-x64-modern.node",
+							filePath: "/$bunfs/root/packages/natives/native/cornfield_natives.linux-x64-modern.node",
 						},
 					],
 				},
@@ -97,10 +97,10 @@ describe("issue 823: standalone-binary native loader path resolution", () => {
 			userDataDir,
 		});
 
-		const versionedModern = path.join(versionedDir, "pi_natives.linux-x64-modern.node");
-		const versionedBaseline = path.join(versionedDir, "pi_natives.linux-x64-baseline.node");
-		const userDataModern = path.join(userDataDir, "pi_natives.linux-x64-modern.node");
-		const buildHostModern = path.join(nativeDir, "pi_natives.linux-x64-modern.node");
+		const versionedModern = path.join(versionedDir, "cornfield_natives.linux-x64-modern.node");
+		const versionedBaseline = path.join(versionedDir, "cornfield_natives.linux-x64-baseline.node");
+		const userDataModern = path.join(userDataDir, "cornfield_natives.linux-x64-modern.node");
+		const buildHostModern = path.join(nativeDir, "cornfield_natives.linux-x64-modern.node");
 
 		// Versioned cache and user-data dir candidates must exist for compiled binaries —
 		// these are where the embedded-addon extraction lands (~/.omp/natives/<v>) and where
@@ -125,7 +125,7 @@ describe("issue 823: standalone-binary native loader path resolution", () => {
 			versionedDir,
 			userDataDir,
 		});
-		expect(candidates).not.toContain(path.join(versionedDir, "pi_natives.linux-x64-baseline.node"));
-		expect(candidates).not.toContain(path.join(userDataDir, "pi_natives.linux-x64-baseline.node"));
+		expect(candidates).not.toContain(path.join(versionedDir, "cornfield_natives.linux-x64-baseline.node"));
+		expect(candidates).not.toContain(path.join(userDataDir, "cornfield_natives.linux-x64-baseline.node"));
 	});
 });
