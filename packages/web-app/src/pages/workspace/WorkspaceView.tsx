@@ -23,6 +23,15 @@ export function WorkspaceView({ compact = false }: { compact?: boolean }): React
 	const [searchParams, setSearchParams] = useSearchParams();
 	const initialQuery = (searchParams.get("q") ?? "").trim();
 
+	// 顶栏工作区：跟随当前焦点会话/agent 的工作目录短名（cli 会话 = 其打开目录；agent = agentDir）；
+	// 未点击/未识别时回落进程仓库（env.repos）
+	const activeAgent = view.activeAgentId ? view.agents.find(a => a.id === view.activeAgentId) : undefined;
+	const workspaceLabel =
+		view.activeWorkspace ??
+		(activeAgent?.agentDir ? activeAgent.agentDir.replace(/\/+$/, "").split("/").pop() || activeAgent.agentDir : undefined) ??
+		view.env?.repos ??
+		"未连接";
+
 	useEffect(() => {
 		if (!initialQuery) return;
 		// Home ?q= 直达：输入区为空则先放入种子文本（用户可随时改写）；
@@ -75,7 +84,7 @@ export function WorkspaceView({ compact = false }: { compact?: boolean }): React
 					<span className="h-[18px] w-px bg-hairline" />
 					<button type="button" className="chip">
 						<Folder size={13} strokeWidth={1.5} />
-						<b>{view.env?.repos ?? "未连接"}</b>
+						<b>{workspaceLabel}</b>
 						{view.env ? ` · ${view.env.branch}` : ""}
 					</button>
 					<span className="flex-1" />

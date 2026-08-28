@@ -406,7 +406,8 @@ function encodeRelativeSessionDirName(prefix: string, root: string, cwd: string)
 	return relative ? (prefix.endsWith("-") ? `${prefix}${relative}` : `${prefix}-${relative}`) : prefix;
 }
 
-function getDefaultSessionDirName(cwd: string): { encodedDirName: string; resolvedCwd: string } {
+/** 供 serve 侧（artifacts 提取等）定位 default 会话目录：home/tmp 内相对编码 + legacy 绝对编码。 */
+export function getDefaultSessionDirName(cwd: string): { encodedDirName: string; resolvedCwd: string } {
 	const resolvedCwd = path.resolve(cwd);
 	const canonicalCwd = resolveEquivalentPath(resolvedCwd);
 	const home = resolveEquivalentPath(os.homedir());

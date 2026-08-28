@@ -116,6 +116,7 @@ async function indexOne(source: SessionIndexSource, file: JsonlFile): Promise<Wi
 			agentName: source.agentName,
 			source: source.source,
 			title,
+			cwd: header.cwd,
 			startTime: header.timestamp,
 			endTime: endTime ?? header.timestamp,
 			messageCount: counts.messages,
@@ -138,6 +139,7 @@ interface ParsedHeader {
 	id: string;
 	timestamp: string;
 	title?: string;
+	cwd?: string;
 	model?: string;
 }
 
@@ -208,10 +210,17 @@ function parseSessionHeader(headText: string): ParsedHeader | null {
 	const firstNewline = headText.indexOf("\n");
 	const firstLine = firstNewline >= 0 ? headText.slice(0, firstNewline) : headText;
 	try {
-		const parsed = JSON.parse(firstLine) as { type?: string; id?: string; timestamp?: string; title?: string };
+		const parsed = JSON.parse(firstLine) as {
+			type?: string;
+			id?: string;
+			timestamp?: string;
+			title?: string;
+			cwd?: string;
+		};
 		if (parsed.type !== "session" || !parsed.id || !parsed.timestamp) return null;
 		const header: ParsedHeader = { id: parsed.id, timestamp: parsed.timestamp };
 		if (parsed.title) header.title = parsed.title;
+		if (parsed.cwd) header.cwd = parsed.cwd;
 		header.model = findModelChange(headText);
 		return header;
 	} catch {

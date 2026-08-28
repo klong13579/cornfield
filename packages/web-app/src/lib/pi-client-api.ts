@@ -190,7 +190,7 @@ export interface PiClient {
 	/** 读 agent workspace 图片（fs_read_image；dataUrl，2MB 上限，MIME 按扩展名）。 */
 	fsReadImage(sessionId: string, path: string): Promise<FsImageResult>;
 	/** 产物列表（list_artifacts；从会话 toolCall 提取写出文件，按 mtime 倒序）。 */
-	listArtifacts(sessionId: string): Promise<{ artifacts: ArtifactDto[] }>;
+	listArtifacts(sessionId: string, sessionFile?: string): Promise<{ artifacts: ArtifactDto[] }>;
 	/** 产物静态预览 URL（/preview/<agentId>/<relpath>，serve 端只读 docroot 路由）。 */
 	artifactPreviewUrl(agentId: string, path: string): string;
 	/** 本机 gateway 运行状态（gateway_status；未运行/文件缺失抛错）。 */

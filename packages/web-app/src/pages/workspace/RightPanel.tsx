@@ -24,7 +24,12 @@ export function RightPanel({ collapsed = false }: { collapsed?: boolean }): Reac
 	const view = useSession();
 	const ui = useUiState();
 	const [tab, setTab] = useState<TabId>("files");
-	const agentId = view.agents.find(a => a.attached)?.id ?? view.agents[0]?.id;
+	// 跟随本连接当前焦点 agent（switchSession 记录）；未切过/未挂载时回落第一 attached / 首个 agent
+	const agentId =
+		view.activeAgentId ??
+		view.agents.find(a => a.active)?.id ??
+		view.agents.find(a => a.attached)?.id ??
+		view.agents[0]?.id;
 
 	return (
 		<>
@@ -71,7 +76,7 @@ export function RightPanel({ collapsed = false }: { collapsed?: boolean }): Reac
 							</div>
 						)
 					) : (
-						<ArtifactsPanel />
+						<ArtifactsPanel agentId={agentId} sessionFile={view.sessionFile} />
 					)}
 				</div>
 			</aside>

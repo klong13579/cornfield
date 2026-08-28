@@ -49,6 +49,7 @@ interface WireSessionIndexEntryDto {
 	agentId?: string;
 	agentName?: string;
 	title?: string;
+	cwd?: string;
 	startTime: string;
 	endTime?: string;
 	messageCount: number;
@@ -403,6 +404,7 @@ export class PiClientAdapter implements PiClient {
 				status: (s.status ?? "unknown") as RecordStatus,
 				source: s.source ?? (s.agentId === "default" ? "cli" : "agent"),
 				sessionFile: s.sessionFile,
+				cwd: s.cwd,
 			}));
 		} catch (err) {
 			console.warn("[web-app] list_sessions unavailable", err);
@@ -439,11 +441,12 @@ export class PiClientAdapter implements PiClient {
 		} as never);
 	}
 
-	/** 产物列表（list_artifacts；会话 toolCall 提取，mtime 倒序；失败抛错由调用方空态）。 */
-	async listArtifacts(sessionId: string): Promise<{ artifacts: ArtifactDto[] }> {
+	/** 产物列表（list_artifacts；会话 toolCall 提取，mtime 倒序；sessionFile 定向单会话；失败抛错由调用方空态）。 */
+	async listArtifacts(sessionId: string, sessionFile?: string): Promise<{ artifacts: ArtifactDto[] }> {
 		const result = await this.#req<{ artifacts?: ArtifactDto[] | null }>({
 			type: "list_artifacts",
 			sessionId,
+			...(sessionFile ? { sessionFile } : {}),
 		} as never);
 		return { artifacts: result.artifacts ?? [] };
 	}
@@ -918,6 +921,7 @@ function mapAgentEntry(s: SessionEntryLike, index: number): AgentInfoDto {
 		model: s.model?.id,
 		skillsCount: s.skillCount,
 		attached: s.attached,
+		active: s.active,
 		phase: s.phase,
 		agentDir: s.agentDir,
 		dingtalk: s.dingtalk,

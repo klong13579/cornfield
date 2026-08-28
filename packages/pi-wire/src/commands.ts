@@ -304,8 +304,11 @@ export type WireExtensionCommand =
 	 * puppeteer screenshot）提取写出文件，返回可预览产物（html / image / markdown / text）。
 	 * 路径约束与 fs_read 同（resolveFsPath：必须解析在 agentDir 内）。
 	 * 响应 { artifacts: ArtifactDto[] }；静态预览走 /preview/<agentId>/<relpath>（serve 端路由）。
+	 *
+	 * sessionFile（可选）：定向到单个会话文件，只提取该会话的产物（按会话隔离视图，
+	 * 前端产物 tab 随当前会话切换）；缺省 = agent 维度（最近 N 个会话混合）。
 	 */
-	| { id?: string; type: "list_artifacts"; sessionId?: string }
+	| { id?: string; type: "list_artifacts"; sessionId?: string; sessionFile?: string }
 	/**
 	 * P0 收口：serve 端 skill hub —— 列出可安装的远程技能（marketplace 源；source 缺省走默认市场）。
 	 */

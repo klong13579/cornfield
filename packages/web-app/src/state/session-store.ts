@@ -73,6 +73,8 @@ export interface SessionView {
 	thinkingLevel: string | null;
 	sessionId: string;
 	sessionName?: string;
+	/** 当前会话 JSONL 绝对路径（快照带出；产物 tab 按会话隔离视图用）。 */
+	sessionFile?: string;
 	/** 已落库消息。 */
 	messages: TranscriptMessage[];
 	/** messageId → session entryId（消息级 undo/fork/retry 定位）。 */
@@ -89,6 +91,10 @@ export interface SessionView {
 	flags: { autoCompaction: boolean; autoRetry: boolean };
 	agents: AgentInfoDto[];
 	env: EnvironmentSummaryDto | null;
+	/** 本连接当前焦点 agent 的 registry id（switchSession/openHistorySession 时记录）。 */
+	activeAgentId?: string;
+	/** 当前焦点会话/agent 的工作目录短名（cli 会话 = 其打开目录，agent 会话 = agentDir）。 */
+	activeWorkspace?: string;
 	/** 最近一次命令失败的可见错误（未连接等），成功或清空后为 undefined。 */
 	commandError?: string;
 	/** 待用户裁决的审批/澄清请求（permission_request push）。 */
@@ -138,6 +144,10 @@ class SessionStore {
 	#client!: PiClient;
 	#view: SessionView | null = null;
 	#listeners = new Set<() => void>();
+	/** 本连接当前焦点 agent（switchSession/openHistorySession 记录；serve 启动焦点 = default）。 */
+	#activeAgentId: string | null = null;
+	/** 当前焦点会话/agent 的工作目录短名（cli 会话 = 其打开目录，agent 会话 = agentDir）。 */
+	#activeWorkspace: string | undefined;
 
 	init(client: PiClient): void {
 		this.#client = client;
@@ -377,7 +387,27 @@ class SessionStore {
 
 	/** 切换活动会话（switch_session；serve 随后推新 session_snapshot，工作台自动跟随）。 */
 	switchSession(sessionId: string): void {
+		this.#setActiveAgent(sessionId, this.#workspaceShortOf(undefined, sessionId));
 		void this.#client.switchSession(sessionId).catch(() => undefined);
+	}
+
+	/** 记录本连接焦点 agent 并立即同步到 view（UI 立即跟随，不等 serve 快照）。 */
+	#setActiveAgent(agentId: string, workspace?: string): void {
+		this.#activeAgentId = agentId;
+		this.#activeWorkspace = workspace;
+		const view = cloneView(this.getSnapshot());
+		view.activeAgentId = agentId;
+		view.activeWorkspace = workspace;
+		this.#view = view;
+		this.#notify();
+	}
+
+	/** 工作目录短名：会话 cwd 优先，回落 agentDir 末段；均无则 undefined。 */
+	#workspaceShortOf(cwd?: string, agentId?: string): string | undefined {
+		const dir = cwd ?? this.#client.getServerAgents().find(a => a.id === agentId)?.agentDir;
+		if (!dir) return undefined;
+		const trimmed = dir.replace(/\/+$/, "");
+		return trimmed.split("/").pop() || dir;
 	}
 
 	/** 拉取当前会话消息（get_messages）转播放时间线。 */
@@ -412,12 +442,14 @@ class SessionStore {
 		return this.#client.getSessionMessages(file);
 	}
 
-	async openHistorySession(record: { id: string; agent: string; sessionFile?: string }): Promise<void> {
+	async openHistorySession(record: { id: string; agent: string; sessionFile?: string; cwd?: string }): Promise<void> {
 		const agents = this.#client.getServerAgents();
 		const agentId = agents.find(a => a.id === record.agent || a.name === record.agent)?.id ?? record.agent;
 
 		try {
 			await this.#client.switchSession(agentId);
+			// cli 会话显示其打开目录（header.cwd），agent 会话回落 agentDir
+			this.#setActiveAgent(agentId, this.#workspaceShortOf(record.cwd, agentId));
 		} catch {
 			// switch 失败（agent 已删除 / 未注册）不阻断历史回放，仅历史加载失败才可见报错
 		}
@@ -441,6 +473,8 @@ class SessionStore {
 			next.live = undefined;
 			next.historyLoading = false;
 			next.historyError = undefined;
+			// 产物 panel 定向到被回放会话（而非 live 快照的 sessionFile，后者可能未落盘）
+			next.sessionFile = record.sessionFile;
 			this.#view = next;
 			this.#notify();
 		} catch (err) {
@@ -476,9 +510,9 @@ class SessionStore {
 		return this.#client.fsReadImage(sessionId, path);
 	}
 
-	/** 产物列表（list_artifacts，代理到 pi-client；ArtifactsPanel 数据源）。 */
-	listArtifacts(sessionId: string): Promise<{ artifacts: ArtifactDto[] }> {
-		return this.#client.listArtifacts(sessionId);
+	/** 产物列表（list_artifacts，代理到 pi-client；sessionFile 定向单会话；ArtifactsPanel 数据源）。 */
+	listArtifacts(sessionId: string, sessionFile?: string): Promise<{ artifacts: ArtifactDto[] }> {
+		return this.#client.listArtifacts(sessionId, sessionFile);
 	}
 
 	/** 产物静态预览 URL（交互式 web：serve 同源 /preview 路由；代理到 pi-client）。 */
@@ -619,6 +653,7 @@ class SessionStore {
 			thinkingLevel: snapshot.thinkingLevel ?? null,
 			sessionId: snapshot.sessionId,
 			sessionName: snapshot.sessionName,
+			sessionFile: snapshot.sessionFile,
 			messages: mergeToolResults(snapshot.messages).map(m => this.#toMessage(m)),
 			messageEntryIds: snapshot.messageEntryIds ?? {},
 			isStreaming: snapshot.isStreaming || snapshot.phase === "streaming",
@@ -808,6 +843,8 @@ class SessionStore {
 				flags: { autoCompaction: false, autoRetry: false },
 				agents,
 				env,
+				activeAgentId: this.#activeAgentId ?? undefined,
+				activeWorkspace: this.#activeWorkspace,
 				historyLoading: false,
 			};
 		}
@@ -822,6 +859,7 @@ class SessionStore {
 			thinkingLevel: snapshot.thinkingLevel ?? null,
 			sessionId: snapshot.sessionId,
 			sessionName: snapshot.sessionName,
+			sessionFile: snapshot.sessionFile,
 			messages: snapshot.messages.map(m => this.#toMessage(m)),
 			messageEntryIds: snapshot.messageEntryIds ?? {},
 			isStreaming: snapshot.isStreaming,
@@ -838,6 +876,8 @@ class SessionStore {
 			flags: { autoCompaction: snapshot.autoCompactionEnabled, autoRetry: snapshot.autoRetryEnabled },
 			agents,
 			env,
+			activeAgentId: this.#activeAgentId ?? undefined,
+			activeWorkspace: this.#activeWorkspace,
 			historyLoading: false,
 		};
 	}

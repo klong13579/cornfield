@@ -57,13 +57,14 @@ import { loadSectionsFromDb } from "../memories/projection";
 import { normalizeHostToolDefinitions } from "../modes/rpc/rpc-mode";
 import { discoverSkills } from "../sdk";
 import type { AgentSession } from "../session/agent-session";
+import { getDefaultSessionDirName } from "../session/session-manager";
 import type { SessionStore } from "../session/session-store";
 import { listListenRecordings, saveListenText, transcribeAudioWithDefaults } from "../stt/listen-service";
 import type { ToolSession } from "../tools";
 import { invalidateFsScanAfterWrite } from "../tools/fs-cache-invalidation";
 import type { TodoPhase } from "../tools/todo-write";
 import * as git from "../utils/git";
-import { listAgentArtifacts } from "./artifacts";
+import { listAgentArtifacts, listSessionArtifacts } from "./artifacts";
 import { WireHostToolBridge } from "./host-tool-bridge";
 import { PERMISSION_TIMEOUT_OUTCOME, PermissionGate } from "./permission-gate";
 import { agentSessionsRoot, defaultSessionsRoot, indexSessions, type SessionIndexSource } from "./session-index";
@@ -461,13 +462,50 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 				}
 				case "list_artifacts": {
 					// R-ARTIFACTS：从会话 JSONL 工具调用提取写出文件（write/edit/screenshot）。
-					const agentId = (command as { sessionId?: string }).sessionId ?? conn.activeAgentId;
+					// sessionFile（可选）→ 按会话隔离视图，只提取该会话的产物；缺省 → agent 维度。
+					const cmd = command as { sessionId?: string; sessionFile?: string };
+					if (cmd.sessionFile) {
+						// 定向会话：agentDir 从该会话归属的 agent 解析（sessionFile 位于其 sessions 树下，
+						// 用 activeAgentId 对应 meta 的 agentDir 做路径约束即可——sessionFile 本身只读）。
+						const agentId = cmd.sessionId ?? conn.activeAgentId;
+						const meta = registry.getMeta(agentId);
+						if (!meta) {
+							fail(`unknown agent: ${agentId}`);
+							return;
+						}
+						// sessionFile 容错：live 会话文件可能尚未落盘（serve 重启后的新会话）或已被清理——
+						// 不存在时降级 agent 维度（扫该 agent 最近会话），不向前端硬报错。
+						let exists = false;
+						try {
+							exists = (await fs.stat(cmd.sessionFile)).isFile();
+						} catch {
+							exists = false;
+						}
+						if (exists) {
+							const artifacts = await listSessionArtifacts(meta.agentDir, cmd.sessionFile);
+							done({ artifacts });
+							return;
+						}
+						const sessionsRoot =
+							meta.id === "default"
+								? path.join(defaultSessionsRoot(), getDefaultSessionDirName(meta.agentDir).encodedDirName)
+								: agentSessionsRoot(meta);
+						const artifacts = await listAgentArtifacts(meta.agentDir, sessionsRoot);
+						done({ artifacts });
+						return;
+					}
+					const agentId = cmd.sessionId ?? conn.activeAgentId;
 					const meta = registry.getMeta(agentId);
 					if (!meta) {
 						fail(`unknown agent: ${agentId}`);
 						return;
 					}
-					const sessionsRoot = meta.id === "default" ? defaultSessionsRoot() : agentSessionsRoot(meta);
+					// 会话根必须精确到 agent 自己的目录：default 是 <sessions>/<encoded-cwd>
+					// （全局根下其它项目的新会话会挤掉 Top N）；registry 是 <agentDir>/sessions。
+					const sessionsRoot =
+						meta.id === "default"
+							? path.join(defaultSessionsRoot(), getDefaultSessionDirName(meta.agentDir).encodedDirName)
+							: agentSessionsRoot(meta);
 					const artifacts = await listAgentArtifacts(meta.agentDir, sessionsRoot);
 					done({ artifacts });
 					return;

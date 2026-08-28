@@ -18,6 +18,8 @@ export interface SessionRecordSummary {
 	status: RecordStatus;
 	/** 会话 JSONL 路径（list_sessions 带出；历史回放/导出待后端读取命令）。 */
 	sessionFile?: string;
+	/** 会话打开时的工作目录（header.cwd；cli 会话 = omp 启动目录，agent 会话 = agentDir）。 */
+	cwd?: string;
 	/** 会话来源（SessionSidebar 双源 tab 按此区分）。 */
 	source: SessionSource;
 }

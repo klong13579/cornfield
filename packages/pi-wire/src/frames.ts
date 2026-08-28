@@ -47,6 +47,20 @@ export type ClientFrame =
 
 // ── 服务端 → 客户端 ──
 
+/** 钉钉机器人绑定配置（gateway.json → channels.dingtalk.accounts，按 accountId 匹配 agent id）。 */
+export interface DingtalkAgentConfigDto {
+	/** 机器人启用状态（gateway 实际挂载）。 */
+	enabled: boolean;
+	/** 机器人显示名（如 "M-HR"）。 */
+	robotName?: string;
+	/** 钉钉应用 appKey（非 secret，可识别机器人）。 */
+	appKey?: string;
+	/** 机器人 code（常见与 appKey 同值）。 */
+	robotCode?: string;
+	/** 卡片渲染隐藏思考块（账号级偏好）。 */
+	hideThinkingBlock?: boolean;
+}
+
 /**
  * 多 Agent 列表项。P3 升级：从纯 id/name 扩至含 role/model/skills/state。
  *
@@ -77,6 +91,8 @@ export interface SessionListEntry {
 	attached: boolean;
 	/** agentDir 绝对路径（来自注册表）。 */
 	agentDir?: string;
+	/** 钉钉机器人配置（gateway.json channels.dingtalk.accounts；未绑定/未配置时省略）。 */
+	dingtalk?: DingtalkAgentConfigDto;
 }
 
 /**
@@ -127,6 +143,8 @@ export interface WireSessionIndexEntry {
 	source: WireSessionSource;
 	/** 会话标题（header.title；无则 undefined）。 */
 	title?: string;
+	/** 会话打开时的工作目录（header.cwd；cli 会话为 `omp` 启动目录，agent 会话为该 agent 的 agentDir）。 */
+	cwd?: string;
 	/** 开始时间（header.timestamp，ISO）。 */
 	startTime: string;
 	/** 结束时间（最后一条 entry 的 timestamp，ISO；仅头部时 = startTime）。 */

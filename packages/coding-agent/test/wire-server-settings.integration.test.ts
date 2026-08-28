@@ -14,11 +14,11 @@
  */
 
 import { expect, test } from "bun:test";
-import { YAML } from "bun";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { MULTIDEVICE_PROTOCOL_VERSION } from "@oh-my-pi/pi-wire";
+import { YAML } from "bun";
 import { waitForServe } from "./wait-for-serve";
 
 const TOKEN_RE = /ws:\/\/127\.0\.0\.1:(\d+)\/ws(\?token=([a-zA-Z0-9]+))?/;
@@ -95,7 +95,10 @@ test("serve per-agent 配置：get_tool_switches + set_config 定向写各自 co
 		// ── 1. get_tool_switches：hr 的默认开关视图（未配置 → 内核默认）──
 		const swResp = await conn.request({ type: "get_tool_switches", sessionId: "hr" });
 		expect(swResp.ok).toBe(true);
-		const sw = swResp.result as { tools: Array<{ tool: string; label: string; path: string; enabled: boolean }>; pythonToolMode: string };
+		const sw = swResp.result as {
+			tools: Array<{ tool: string; label: string; path: string; enabled: boolean }>;
+			pythonToolMode: string;
+		};
 		expect(Array.isArray(sw.tools)).toBe(true);
 		expect(sw.tools.length).toBeGreaterThan(10);
 		const searchSwitch = sw.tools.find(t => t.tool === "search");
@@ -131,7 +134,12 @@ test("serve per-agent 配置：get_tool_switches + set_config 定向写各自 co
 		await expect(Bun.file(opsConfigPath).exists()).resolves.toBe(false); // ops 的 config.yml 未被创建
 
 		// ── 5. python.toolMode 枚举读写 ──
-		const pyResp = await conn.request({ type: "set_config", sessionId: "hr", key: "python.toolMode", value: "bash-only" });
+		const pyResp = await conn.request({
+			type: "set_config",
+			sessionId: "hr",
+			key: "python.toolMode",
+			value: "bash-only",
+		});
 		expect(pyResp.ok).toBe(true);
 		const pyAfter = await conn.request({ type: "get_tool_switches", sessionId: "hr" });
 		expect((pyAfter.result as { pythonToolMode: string }).pythonToolMode).toBe("bash-only");
