@@ -629,14 +629,14 @@ export class WireTransport {
 }
 
 /**
- * Resolve the default omp binary path (same policy as RpcTransport).
+ * Resolve the default cornfield binary path (same policy as WireTransport).
  */
 export function resolveDefaultOmpPath(home: string = os.homedir()): string {
-	const stable = path.join(home, ".local", "bin", "omp");
+	const stable = path.join(home, ".local", "bin", "cornfield");
 	try {
 		fs.accessSync(stable, fs.constants.X_OK);
 		return stable;
 	} catch {
-		return "omp";
+		return "cornfield";
 	}
 }
