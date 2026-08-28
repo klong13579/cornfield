@@ -232,7 +232,7 @@ function loadNative() {
 			`If missing, delete ${versionedDir} and re-run, or download manually:\n${downloadHints}`;
 	} else {
 		helpMessage =
-			"If installed via npm/bun, try reinstalling: bun install @cornfield/cornfield-natives\n" +
+			"If installed via npm/bun, try reinstalling: bun install @cornfield/natives\n" +
 			"If developing locally, build with: bun --cwd=packages/natives run build\n" +
 			"Optional x64 variants: TARGET_VARIANT=baseline|modern bun --cwd=packages/natives run build";
 	}
