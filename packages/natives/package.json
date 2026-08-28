@@ -1,17 +1,17 @@
 {
-	"name": "@cornfield/cornfield-natives",
+	"name": "@oh-my-pi/pi-natives",
 	"version": "0.19.2",
 	"description": "Native Rust bindings for grep, clipboard, image processing, syntax highlighting, PTY, and shell operations via N-API",
-	"homepage": "https://github.com/klong13579/cornfield",
+	"homepage": "https://github.com/can1357/oh-my-pi",
 	"author": "Can Boluk",
 	"license": "MIT",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/klong13579/cornfield.git",
+		"url": "git+https://github.com/can1357/oh-my-pi.git",
 		"directory": "packages/natives"
 	},
 	"bugs": {
-		"url": "https://github.com/klong13579/cornfield/issues"
+		"url": "https://github.com/can1357/oh-my-pi/issues"
 	},
 	"keywords": [
 		"napi",
