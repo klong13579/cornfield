@@ -1,9 +1,9 @@
 {
-	"name": "@oh-my-pi/desktop",
+	"name": "@cornfield/desktop",
 	"version": "0.19.2",
 	"private": true,
 	"author": "Magnum",
-	"description": "OMP 桌面壳（Electron）—— 托盘常驻 + 探测/拉起 omp serve sidecar",
+	"description": "CornField 桌面壳（Electron）—— 托盘常驻 + 探测/拉起 CornField serve sidecar",
 	"type": "module",
 	"main": "dist/main.js",
 	"scripts": {

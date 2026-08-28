@@ -1,5 +1,5 @@
 {
-	"name": "@oh-my-pi/cognitive-coordination",
+	"name": "@cornfield/cognitive-coordination",
 	"version": "0.19.2",
 	"type": "module",
 	"main": "src/index.ts",
@@ -9,6 +9,6 @@
 		"./*": "./src/*.ts"
 	},
 	"dependencies": {
-		"@oh-my-pi/pi-utils": "workspace:*"
+		"@cornfield/pi-utils": "workspace:*"
 	}
 }

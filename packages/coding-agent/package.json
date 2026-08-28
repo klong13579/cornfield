@@ -1,9 +1,9 @@
 {
 	"type": "module",
-	"name": "@oh-my-pi/pi-coding-agent",
+	"name": "@cornfield/pi-coding-agent",
 	"version": "0.19.2",
 	"description": "Coding agent CLI with read, bash, edit, write tools and session management",
-	"homepage": "https://github.com/can1357/oh-my-pi",
+	"homepage": "https://github.com/klong13579/cornfield",
 	"author": "Can Boluk",
 	"contributors": [
 		"Mario Zechner"
@@ -11,11 +11,11 @@
 	"license": "MIT",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/can1357/oh-my-pi.git",
+		"url": "git+https://github.com/klong13579/cornfield.git",
 		"directory": "packages/coding-agent"
 	},
 	"bugs": {
-		"url": "https://github.com/can1357/oh-my-pi/issues"
+		"url": "https://github.com/klong13579/cornfield/issues"
 	},
 	"keywords": [
 		"coding-agent",
@@ -28,7 +28,7 @@
 	"main": "./src/index.ts",
 	"types": "./src/index.ts",
 	"bin": {
-		"omp": "src/cli.ts"
+		"cornfield": "src/cli.ts"
 	},
 	"scripts": {
 		"build": "bun scripts/build-binary.ts",
@@ -46,15 +46,15 @@
 	"dependencies": {
 		"@agentclientprotocol/sdk": "catalog:",
 		"@mozilla/readability": "catalog:",
-		"@oh-my-pi/omp-stats": "catalog:",
-		"@oh-my-pi/pi-agent-core": "catalog:",
-		"@oh-my-pi/pi-ai": "catalog:",
-		"@oh-my-pi/omp-gateway": "workspace:*",
-		"@oh-my-pi/pi-tui": "catalog:",
-		"@oh-my-pi/pi-utils": "catalog:",
-		"@oh-my-pi/pi-wire": "catalog:",
-		"@oh-my-pi/self-evolution": "catalog:",
-		"@oh-my-pi/moa-extension": "workspace:*",
+		"@cornfield/omp-stats": "catalog:",
+		"@cornfield/pi-agent-core": "catalog:",
+		"@cornfield/pi-ai": "catalog:",
+		"@cornfield/omp-gateway": "workspace:*",
+		"@cornfield/pi-tui": "catalog:",
+		"@cornfield/pi-utils": "catalog:",
+		"@cornfield/pi-wire": "catalog:",
+		"@cornfield/self-evolution": "catalog:",
+		"@cornfield/moa-extension": "workspace:*",
 		"@puppeteer/browsers": "catalog:",
 		"@sinclair/typebox": "catalog:",
 		"@xterm/headless": "catalog:",

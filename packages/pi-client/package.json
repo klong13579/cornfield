@@ -1,20 +1,20 @@
 {
 	"type": "module",
-	"name": "@oh-my-pi/pi-client",
+	"name": "@cornfield/pi-client",
 	"version": "0.19.2",
-	"description": "WebSocket client for omp serve (pi-wire protocol): connection state machine, request id correlation, exponential backoff reconnect, snapshot cache, subscribe-across-reconnect",
-	"homepage": "https://github.com/can1357/oh-my-pi",
+	"description": "WebSocket client for CornField serve (pi-wire protocol): connection state machine, request id correlation, exponential backoff reconnect, snapshot cache, subscribe-across-reconnect",
+	"homepage": "https://github.com/klong13579/cornfield",
 	"author": "Can Boluk",
 	"license": "MIT",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/can1357/oh-my-pi.git",
+		"url": "git+https://github.com/klong13579/cornfield.git",
 		"directory": "packages/pi-client"
 	},
 	"bugs": {
-		"url": "https://github.com/can1357/oh-my-pi/issues"
+		"url": "https://github.com/klong13579/cornfield/issues"
 	},
-	"keywords": ["omp", "wire", "client", "websocket", "multidevice"],
+	"keywords": ["cornfield", "wire", "client", "websocket", "multidevice"],
 	"main": "./src/index.ts",
 	"types": "./src/index.ts",
 	"scripts": {
@@ -26,7 +26,7 @@
 		"fmt": "biome format --write ."
 	},
 	"dependencies": {
-		"@oh-my-pi/pi-wire": "catalog:"
+		"@cornfield/pi-wire": "catalog:"
 	},
 	"devDependencies": {
 		"@types/bun": "catalog:"
