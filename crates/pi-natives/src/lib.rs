@@ -1,4 +1,4 @@
-//! Native utilities exported via N-API for the CornField toolchain.
+//! Native utilities exported via `N-API` for the `CornField` toolchain.
 //!
 //! # Overview
 //! High-performance primitives for clipboard access, grep, file discovery,

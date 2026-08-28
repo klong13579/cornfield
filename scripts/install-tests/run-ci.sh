@@ -65,27 +65,27 @@ mkdir -p "$TARBALL_DIR"
 # the gateway, and the desktop app). Without an override for every
 # @cornfield/* dep, `bun add <tarball>` resolves the unpublished ones from
 # the registry at the current version and 404s mid-release.
-for pkg in utils natives ai agent tui stats coding-agent pi-wire pi-client cornfield-gateway self-evolution moa-extension cognitive-coordination; do
+for pkg in utils natives ai agent tui stats coding-agent pi-wire pi-client omp-gateway self-evolution moa-extension cognitive-coordination; do
 	(
 		cd "$ROOT_DIR/packages/$pkg"
 		bun pm pack --destination "$TARBALL_DIR" --quiet >/dev/null
 	)
 done
 
-utils_tgz="$(find_tarball "$TARBALL_DIR"/oh-my-pi-pi-utils-*.tgz)"
-natives_tgz="$(find_tarball "$TARBALL_DIR"/oh-my-pi-pi-natives-*.tgz)"
-ai_tgz="$(find_tarball "$TARBALL_DIR"/oh-my-pi-pi-ai-*.tgz)"
-agent_tgz="$(find_tarball "$TARBALL_DIR"/oh-my-pi-pi-agent-core-*.tgz)"
-tui_tgz="$(find_tarball "$TARBALL_DIR"/oh-my-pi-pi-tui-*.tgz)"
-stats_tgz="$(find_tarball "$TARBALL_DIR"/oh-my-pi-omp-stats-*.tgz)"
+utils_tgz="$(find_tarball "$TARBALL_DIR"/cornfield-utils-*.tgz)"
+natives_tgz="$(find_tarball "$TARBALL_DIR"/cornfield-natives-*.tgz)"
+ai_tgz="$(find_tarball "$TARBALL_DIR"/cornfield-ai-*.tgz)"
+agent_tgz="$(find_tarball "$TARBALL_DIR"/cornfield-agent-*.tgz)"
+tui_tgz="$(find_tarball "$TARBALL_DIR"/cornfield-tui-*.tgz)"
+stats_tgz="$(find_tarball "$TARBALL_DIR"/cornfield-stats-*.tgz)"
 
-coding_agent_tgz="$(find_tarball "$TARBALL_DIR"/oh-my-pi-pi-coding-agent-*.tgz)"
-wire_tgz="$(find_tarball "$TARBALL_DIR"/oh-my-pi-pi-wire-*.tgz)"
-client_tgz="$(find_tarball "$TARBALL_DIR"/oh-my-pi-pi-client-*.tgz)"
-gateway_tgz="$(find_tarball "$TARBALL_DIR"/oh-my-pi-cornfield-gateway-*.tgz)"
-self_evolution_tgz="$(find_tarball "$TARBALL_DIR"/oh-my-pi-self-evolution-*.tgz)"
-moa_extension_tgz="$(find_tarball "$TARBALL_DIR"/oh-my-pi-moa-extension-*.tgz)"
-cognitive_coordination_tgz="$(find_tarball "$TARBALL_DIR"/oh-my-pi-cognitive-coordination-*.tgz)"
+coding_agent_tgz="$(find_tarball "$TARBALL_DIR"/cornfield-coding-agent-*.tgz)"
+wire_tgz="$(find_tarball "$TARBALL_DIR"/cornfield-wire-*.tgz)"
+client_tgz="$(find_tarball "$TARBALL_DIR"/cornfield-client-*.tgz)"
+gateway_tgz="$(find_tarball "$TARBALL_DIR"/cornfield-gateway-*.tgz)"
+self_evolution_tgz="$(find_tarball "$TARBALL_DIR"/cornfield-self-evolution-*.tgz)"
+moa_extension_tgz="$(find_tarball "$TARBALL_DIR"/cornfield-moa-extension-*.tgz)"
+cognitive_coordination_tgz="$(find_tarball "$TARBALL_DIR"/cornfield-cognitive-coordination-*.tgz)"
 
 TARBALL_APP_DIR="$WORK_DIR/tarball-install"
 mkdir -p "$TARBALL_APP_DIR"
