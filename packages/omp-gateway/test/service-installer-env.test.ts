@@ -188,32 +188,32 @@ describe("generateLaunchdPlist env persistence", () => {
 });
 
 describe("resolveStableRuntime", () => {
-	test("returns the omp-gateway path when ~/.local/bin/omp-gateway exists and is executable", () => {
-		const home = mkdtempSync(join(tmpdir(), "omp-stable-"));
+	test("returns the cornfield-gateway path when ~/.local/bin/cornfield-gateway exists and is executable", () => {
+		const home = mkdtempSync(join(tmpdir(), "cornfield-stable-"));
 		try {
 			const dir = join(home, ".local", "bin");
 			require("node:fs").mkdirSync(dir, { recursive: true });
-			require("node:fs").writeFileSync(join(dir, "omp-gateway"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
-			expect(resolveStableRuntime(home)).toBe(join(home, ".local", "bin", "omp-gateway"));
+			require("node:fs").writeFileSync(join(dir, "cornfield-gateway"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+			expect(resolveStableRuntime(home)).toBe(join(home, ".local", "bin", "cornfield-gateway"));
 		} finally {
 			rmSync(home, { recursive: true, force: true });
 		}
 	});
 
-	test("ignores a plain ~/.local/bin/omp — the agent binary cannot act as the daemon", () => {
-		const home = mkdtempSync(join(tmpdir(), "omp-stable-"));
+	test("ignores a plain ~/.local/bin/cornfield — the agent binary cannot act as the daemon", () => {
+		const home = mkdtempSync(join(tmpdir(), "cornfield-stable-"));
 		try {
 			const dir = join(home, ".local", "bin");
 			require("node:fs").mkdirSync(dir, { recursive: true });
-			require("node:fs").writeFileSync(join(dir, "omp"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+			require("node:fs").writeFileSync(join(dir, "cornfield"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
 			expect(resolveStableRuntime(home)).toBeNull();
 		} finally {
 			rmSync(home, { recursive: true, force: true });
 		}
 	});
 
-	test("returns null when ~/.local/bin/omp-gateway does not exist", () => {
-		const home = mkdtempSync(join(tmpdir(), "omp-stable-"));
+	test("returns null when ~/.local/bin/cornfield-gateway does not exist", () => {
+		const home = mkdtempSync(join(tmpdir(), "cornfield-stable-"));
 		try {
 			expect(resolveStableRuntime(home)).toBeNull();
 		} finally {
@@ -221,12 +221,12 @@ describe("resolveStableRuntime", () => {
 		}
 	});
 
-	test("returns null when ~/.local/bin/omp-gateway exists but is not executable", () => {
-		const home = mkdtempSync(join(tmpdir(), "omp-stable-"));
+	test("returns null when ~/.local/bin/cornfield-gateway exists but is not executable", () => {
+		const home = mkdtempSync(join(tmpdir(), "cornfield-stable-"));
 		try {
 			const dir = join(home, ".local", "bin");
 			require("node:fs").mkdirSync(dir, { recursive: true });
-			require("node:fs").writeFileSync(join(dir, "omp-gateway"), "not executable\n", { mode: 0o644 });
+			require("node:fs").writeFileSync(join(dir, "cornfield-gateway"), "not executable\n", { mode: 0o644 });
 			expect(resolveStableRuntime(home)).toBeNull();
 		} finally {
 			rmSync(home, { recursive: true, force: true });
@@ -235,16 +235,16 @@ describe("resolveStableRuntime", () => {
 });
 
 describe("generateLaunchdPlist runtime resolution", () => {
-	test("ProgramArguments: stable runtime + root subcommands when omp-gateway exists", () => {
-		const home = mkdtempSync(join(tmpdir(), "omp-stable-"));
+	test("ProgramArguments: stable runtime + root subcommands when cornfield-gateway exists", () => {
+		const home = mkdtempSync(join(tmpdir(), "cornfield-stable-"));
 		try {
 			const dir = join(home, ".local", "bin");
 			require("node:fs").mkdirSync(dir, { recursive: true });
-			require("node:fs").writeFileSync(join(dir, "omp-gateway"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+			require("node:fs").writeFileSync(join(dir, "cornfield-gateway"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
 			const plist = generateLaunchdPlist("/tmp/log", { HOME: home });
 			// First ProgramArguments entry must be the stable runtime, NOT
 			// whatever process.execPath happens to be in the test env.
-			expect(plist).toContain(`<string>${join(home, ".local", "bin", "omp-gateway")}</string>`);
+			expect(plist).toContain(`<string>${join(home, ".local", "bin", "cornfield-gateway")}</string>`);
 			expect(plist).not.toContain(`<string>${process.execPath}</string>`);
 			// Root subcommands — no `gateway` middle layer anymore.
 			expect(plist).toContain("<string>start</string>");
@@ -255,7 +255,7 @@ describe("generateLaunchdPlist runtime resolution", () => {
 	});
 
 	test("falls back to dev/prod detection when no stable runtime is present", () => {
-		const home = mkdtempSync(join(tmpdir(), "omp-stable-"));
+		const home = mkdtempSync(join(tmpdir(), "cornfield-stable-"));
 		try {
 			const plist = generateLaunchdPlist("/tmp/log", { HOME: home });
 			// No stable runtime → plist must use process.execPath as argv[0],

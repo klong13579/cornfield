@@ -83,11 +83,11 @@ function isSubcommand(first: string | undefined): boolean {
 
 const GATEWAY_MOVED_MESSAGE =
 	`\nThe gateway daemon is now a separate binary.\n` +
-	`\`omp gateway\` was removed from omp; use \`omp-gateway\` (installed alongside omp):\n` +
+	`\`cornfield gateway\` was removed from cornfield; use \`cornfield-gateway\` (installed alongside cornfield):\n` +
 	`\n` +
-	`  omp-gateway start --foreground\n` +
-	`  omp-gateway status\n` +
-	`  omp-gateway service install\n`;
+	`  cornfield-gateway start --foreground\n` +
+	`  cornfield-gateway status\n` +
+	`  cornfield-gateway service install\n`;
 
 /** Run the CLI with the given argv (no `process.argv` prefix). */
 export function runCli(argv: string[]): Promise<void> {
@@ -95,8 +95,8 @@ export function runCli(argv: string[]): Promise<void> {
 	// Everything else that isn't a known subcommand routes to "launch".
 	const first = argv[0];
 
-	// `gateway` is a reserved name: it was split out of omp into the standalone
-	// omp-gateway binary. Reject it explicitly instead of silently falling
+	// `gateway` is a reserved name: it was split out of cornfield into the standalone
+	// cornfield-gateway binary. Reject it explicitly instead of silently falling
 	// through to the interactive "launch" mode.
 	if (first === "gateway") {
 		process.stderr.write(`${GATEWAY_MOVED_MESSAGE}\n`);
