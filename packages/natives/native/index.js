@@ -10,10 +10,10 @@ const path = require("node:path");
 
 function getNativesDir() {
 	const xdgDataHome = process.env.XDG_DATA_HOME;
-	if (xdgDataHome && fs.existsSync(path.join(xdgDataHome, "omp"))) {
-		return path.join(xdgDataHome, "omp", "natives");
+	if (xdgDataHome && fs.existsSync(path.join(xdgDataHome, "cornfield"))) {
+		return path.join(xdgDataHome, "cornfield", "natives");
 	}
-	return path.join(os.homedir(), ".omp", "natives");
+	return path.join(os.homedir(), ".cornfield", "natives");
 }
 const packageJson = require("../package.json");
 const {
@@ -33,7 +33,7 @@ const execDir = path.dirname(process.execPath);
 const versionedDir = path.join(getNativesDir(), packageVersion);
 const userDataDir =
 	process.platform === "win32"
-		? path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"), "omp")
+		? path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"), "cornfield")
 		: path.join(os.homedir(), ".local", "bin");
 
 // Eagerly load the embedded-addon manifest. In dev/non-compiled mode this resolves to the
@@ -54,7 +54,7 @@ const isCompiledBinary = detectCompiledBinary({
 const SUPPORTED_PLATFORMS = ["linux-x64", "linux-arm64", "darwin-x64", "darwin-arm64", "win32-x64"];
 
 function getVariantOverride() {
-	const value = process.env.PI_NATIVE_VARIANT;
+	const value = process.env.CORNFIELD_NATIVE_VARIANT;
 	if (!value) return null;
 	if (value === "modern" || value === "baseline") return value;
 	return null;
@@ -222,7 +222,7 @@ function loadNative() {
 		const expectedPaths = addonFilenames.map(filename => `  ${path.join(versionedDir, filename)}`).join("\n");
 		const downloadHints = addonFilenames
 			.map(filename => {
-				const downloadUrl = `https://github.com/klong13579/oh-my-pi/releases/latest/download/${filename}`;
+				const downloadUrl = `https://github.com/klong13579/cornfield/releases/latest/download/${filename}`;
 				const targetPath = path.join(versionedDir, filename);
 				return `  curl -fsSL "${downloadUrl}" -o "${targetPath}"`;
 			})
@@ -232,12 +232,12 @@ function loadNative() {
 			`If missing, delete ${versionedDir} and re-run, or download manually:\n${downloadHints}`;
 	} else {
 		helpMessage =
-			"If installed via npm/bun, try reinstalling: bun install @oh-my-pi/pi-natives\n" +
+			"If installed via npm/bun, try reinstalling: bun install @cornfield/cornfield-natives\n" +
 			"If developing locally, build with: bun --cwd=packages/natives run build\n" +
 			"Optional x64 variants: TARGET_VARIANT=baseline|modern bun --cwd=packages/natives run build";
 	}
 
-	throw new Error(`Failed to load pi_natives native addon for ${addonLabel}.\n\nTried:\n${details}\n\n${helpMessage}`);
+	throw new Error(`Failed to load cornfield_natives native addon for ${addonLabel}.\n\nTried:\n${details}\n\n${helpMessage}`);
 }
 
 module.exports = loadNative();

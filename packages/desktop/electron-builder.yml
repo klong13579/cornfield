@@ -1,11 +1,11 @@
-# OMP Desktop —— electron-builder 打包配置。
-# 一键打包入口：bun run build:desktop（先构建 web-app 与 omp，再 electron-builder 出 dmg/zip）。
-appId: com.narwal.omp-desktop
-productName: OMP Desktop
+# CornField Desktop —— electron-builder 打包配置。
+# 一键打包入口：bun run build:desktop（先构建 web-app 与 cornfield，再 electron-builder 出 dmg/zip）。
+appId: com.cornfield.desktop
+productName: CornField Desktop
 # artifactName 用连字符命名（无空格）：GitHub Release 上传时会把空格替换成
 # 点（OMP Desktop → OMP.Desktop），导致 latest-mac.yml 里的 URL 与真实资产名
 # 不匹配，客户端 updater 下载 404。
-artifactName: OMP-Desktop-${version}-${arch}.${ext}
+artifactName: CornField-Desktop-${version}-${arch}.${ext}
 directories:
   output: dist
 files:
@@ -15,9 +15,9 @@ files:
   - dist/sidecar.js
   - dist/preload.cjs
 extraResources:
-  # 内嵌 omp 二进制（对应 sidecar.ts resolveOmpBinary 的 packaged 路径 omp-binary/omp）。
-  - from: ../coding-agent/dist/omp
-    to: omp-binary/omp
+  # 内嵌 cornfield 二进制（对应 sidecar.ts resolveOmpBinary 的 packaged 路径 cornfield-binary/cornfield）。
+  - from: ../coding-agent/dist/cornfield
+    to: cornfield-binary/cornfield
   # 内嵌 web-app 生产构建（对应 main.ts 生产模式 loadFile(resources/renderer/index.html)）。
   - from: ../web-app/dist
     to: renderer
