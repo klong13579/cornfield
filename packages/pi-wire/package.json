@@ -1,7 +1,7 @@
 {
 	"type": "module",
 	"name": "@oh-my-pi/pi-wire",
-	"version": "0.19.0",
+	"version": "0.19.2",
 	"description": "Multidevice wire protocol types (frames, commands, protocol version) for omp serve <-> pi-client",
 	"homepage": "https://github.com/can1357/oh-my-pi",
 	"author": "Can Boluk",

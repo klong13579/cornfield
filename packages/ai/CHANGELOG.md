@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.19.2] - 2026-08-28
+
 ### Fixed
 
 - **`isContextOverflow` 支持回退 usage 检测网关吞错的溢出**（`src/utils/overflow.ts`）: 错误回合携带的 usage 为零值，导致仅靠错误文本匹配（26 条 pattern）判定溢出时，网关壳错误（如 new-api 系 `openai_error (type=bad_response_status_code)`）永远判不出溢出。新增可选参数 `fallbackUsage`：消息自身无有效 usage 时改用调用方传入的最后一条成功 assistant usage 做 `input+cacheRead+cacheWrite > contextWindow` 判定。配套 coding-agent 修复见该包同期条目（2026-08-27 narwal-plan deepseek-v4-flash-0731 三连 400 死循环事故）。

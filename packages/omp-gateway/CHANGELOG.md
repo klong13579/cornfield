@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.19.2] - 2026-08-28
+
 - **P2-4: serve 的 cron/gateway 只读命令转发 gateway 生产端点** (`src/wire-endpoint.ts`、`packages/coding-agent/src/server/wire-server.ts`): 新增 gateway `POST /wire` 端点（wire-endpoint），serve 的 `get_cron_tasks`/`get_cron_logs`/`gateway_status` 不再直读 `jobs.json`/`status.json`，改为转发到该端点——cron CRUD（create/update/remove/test_run）也经此落地到真实 scheduler 存储。`TaskRowDto` 增 `status`（active/paused/disabled，前端可区分暂停与禁用）。删除 JSON-line 时代的 `agent-transport.ts`（协议类型迁入 `agent-transport-wire.ts`）。测试：`test/wire-endpoint.test.ts`（7 用例）。
 
 - **Added: fake-alive channel detection — business-message silence signal** (`src/channels/dingtalk.ts`, `src/types.ts`, `src/doctor.ts`): the DingTalk Stream socket can stay liveness-fresh (pong/heartbeat) while the platform has silently stopped delivering messages — the connection looks healthy but inbound traffic never arrives (observed 2026-08-26: messages from 19:10 onward never reached the gateway; only a restart restored delivery). `DingTalkChannel` now stamps `lastMessageReceivedAt` on every inbound business message and exposes it via `ChannelHealth`; `gateway doctor` annotates channel lines with business-message silence (≥60m noted, ≥240m flagged with a restart hint — legitimate during quiet hours, so it stays an annotation, not an error).

@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.19.2] - 2026-08-28
+
 ### Added
 
 - **serve per-agent 配置：每个 agent 的工具/模型配置与其 .omp 目录双向一致** (`src/commands/serve.ts`、`src/server/wire-server.ts`、`src/config/settings.ts`、`test/wire-server-settings.integration.test.ts`): registry agent 的 lazy session 现在用独立的 `Settings.create({ agentDir })`（不再共享全局单例），`set_model`/`set_thinking_level` 落各自 `<agentDir>/config.yml`；`get_config`/`set_config` 支持 `sessionId` 定向到目标 agent 的配置文件（default 仍是全局 agent 目录）；新增 `get_tool_switches` 命令返回工具开关语义视图（config.yml 文件值优先，未配置回落内核默认；python.toolMode 枚举一并返回），前端修改经 `set_config` 写回同一文件，显示与 .omp 配置一致、跨 agent 相互隔离。`Settings.create` 为非单例持久化工厂（复用防抖部分合并保存，外部修改不被覆盖）。
