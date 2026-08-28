@@ -1,4 +1,4 @@
-# @oh-my-pi/pi-natives
+# @cornfield/natives
 
 Native Rust functionality via N-API.
 
@@ -11,7 +11,7 @@ Native Rust functionality via N-API.
 ## Usage
 
 ```typescript
-import { grep, find, PhotonImage, SamplingFilter, ImageFormat } from "@oh-my-pi/pi-natives";
+import { grep, find, PhotonImage, SamplingFilter, ImageFormat } from "@cornfield/natives";
 
 // Grep for a pattern
 const results = await grep({
@@ -52,9 +52,9 @@ crates/pi-natives/       # Rust source (workspace member)
   src/image.rs           # Image processing (photon-rs)
   Cargo.toml             # Rust dependencies
 native/                  # Native addon binaries
-  pi_natives.<platform>-<arch>-modern.node   # x64 modern ISA (AVX2)
-  pi_natives.<platform>-<arch>-baseline.node # x64 baseline ISA
-  pi_natives.<platform>-<arch>.node          # non-x64 build artifact
+  cornfield_natives.<platform>-<arch>-modern.node   # x64 modern ISA (AVX2)
+  cornfield_natives.<platform>-<arch>-baseline.node # x64 baseline ISA
+  cornfield_natives.<platform>-<arch>.node          # non-x64 build artifact
 src/                     # TypeScript wrappers
   native.ts              # Native addon loader
   index.ts               # Public API

@@ -26,11 +26,11 @@
 
 ## 一、整体定位
 
-host_tool 是 RPC 模式里**宿主进程向 agent 注入执行能力**的机制。它让 agent 从"只能用 omp 内置工具"变成"可以调用宿主提供的任何能力"——查数据库、调内部 API、操作 IDE、控制浏览器，全部走这个口子。
+host_tool 是 RPC 模式里**宿主进程向 agent 注入执行能力**的机制。它让 agent 从"只能用 cornfield 内置工具"变成"可以调用宿主提供的任何能力"——查数据库、调内部 API、操作 IDE、控制浏览器，全部走这个口子。
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                       Agent (omp 进程)                       │
+│                       Agent (cornfield 进程)                       │
 │                                                              │
 │   ┌─────────────────┐        ┌──────────────────────────┐    │
 │   │  内置工具        │        │  host_tool（宿主注入）    │    │
@@ -52,7 +52,7 @@ host_tool 是 RPC 模式里**宿主进程向 agent 注入执行能力**的机制
                               └──────────────────────────┘
 ```
 
-**核心抽象：** 模型只看到「工具名 + 描述 + JSON Schema」，跟调用内置工具感觉完全一样。区别在于执行路径——内置工具是 omp 内部直接跑，host_tool 是把请求扔回宿主等结果。
+**核心抽象：** 模型只看到「工具名 + 描述 + JSON Schema」，跟调用内置工具感觉完全一样。区别在于执行路径——内置工具是 cornfield 内部直接跑，host_tool 是把请求扔回宿主等结果。
 
 ---
 
@@ -64,7 +64,7 @@ host_tool 是 RPC 模式里**宿主进程向 agent 注入执行能力**的机制
 **命令：** `set_host_tools`
 
 ```
-宿主进程                              omp 进程
+宿主进程                              cornfield 进程
   │                                     │
   │ {type:"set_host_tools", tools:[...]}│
   ├────────────────────────────────────→│
@@ -85,7 +85,7 @@ host_tool 是 RPC 模式里**宿主进程向 agent 注入执行能力**的机制
 
 ### 阶段 2：模型决策
 
-omp 把宿主注入的工具 schema 跟内置工具 schema 合并，统一塞给 LLM。LLM 在推理时决定是否调用：
+cornfield 把宿主注入的工具 schema 跟内置工具 schema 合并，统一塞给 LLM。LLM 在推理时决定是否调用：
 
 ```
 LLM 看到：
@@ -98,14 +98,14 @@ LLM 思考：用户要修 bug，应该先建工单跟踪
 LLM 输出 tool_call: { name: "create_jira", arguments: {...} }
 ```
 
-omp 的 agent loop 检查这个 tool_call 的名字，发现是 host_tool，**不直接执行**，走阶段 3。
+cornfield 的 agent loop 检查这个 tool_call 的名字，发现是 host_tool，**不直接执行**，走阶段 3。
 
 ### 阶段 3：调用发起
 
 **方向：** agent → 宿主（stdout）
 
 ```
-宿主进程                              omp 进程                    LLM
+宿主进程                              cornfield 进程                    LLM
   │                                     │                          │
   │                                     │ tool_call 来了            │
   │                                     │ 检查是 host_tool          │
@@ -137,7 +137,7 @@ omp 的 agent loop 检查这个 tool_call 的名字，发现是 host_tool，**�
 适合**耗时操作**（部署、跑测试、长查询），让模型能拿到中间状态：
 
 ```
-宿主进程                                omp 进程
+宿主进程                                cornfield 进程
   │                                       │
   │ 工具执行中...                          │
   │                                       │
@@ -167,12 +167,12 @@ omp 的 agent loop 检查这个 tool_call 的名字，发现是 host_tool，**�
 **命令：** `host_tool_result`
 
 ```
-宿主进程                                omp 进程
+宿主进程                                cornfield 进程
   │                                       │
   │ {type:"host_tool_result",             │
   │  id:"host_1",                         │
   │  result:{content:[{type:"text",       │
-  │                   text:"OMP-1234 创建成功"}]}}│
+  │                   text:"CornField-1234 创建成功"}]}}│
   ├──────────────────────────────────────→│
   │                                       │ 把 result 追加到消息历史
   │                                       │ 作为 tool 调用的返回
@@ -203,7 +203,7 @@ omp 的 agent loop 检查这个 tool_call 的名字，发现是 host_tool，**�
 ### 正常完成
 
 ```
-宿主             omp 进程              LLM
+宿主             cornfield 进程              LLM
  │                  │                   │
  │ set_host_tools   │                   │
  ├─────────────────→│                   │
@@ -243,7 +243,7 @@ omp 的 agent loop 检查这个 tool_call 的名字，发现是 host_tool，**�
 ### 中途取消
 
 ```
-宿主             omp 进程              LLM              用户
+宿主             cornfield 进程              LLM              用户
  │                  │                   │                │
  │                  │ host_tool_call 之后                  │
  │                  │ 正在等待 result   │                │
@@ -262,7 +262,7 @@ omp 的 agent loop 检查这个 tool_call 的名字，发现是 host_tool，**�
  │                  │                   │                │
 ```
 
-**注意：** `host_tool_cancel` 是 omp 单方面通知宿主停止，**宿主没有义务 ack**。如果宿主已经在执行一个不可中断的操作（比如发出去的 HTTP 请求），它可以选择忽略 cancel，等执行完照样发 `host_tool_result`——omp 会忽略迟到的 result。
+**注意：** `host_tool_cancel` 是 cornfield 单方面通知宿主停止，**宿主没有义务 ack**。如果宿主已经在执行一个不可中断的操作（比如发出去的 HTTP 请求），它可以选择忽略 cancel，等执行完照样发 `host_tool_result`——cornfield 会忽略迟到的 result。
 
 ---
 
@@ -275,13 +275,13 @@ omp 的 agent loop 检查这个 tool_call 的名字，发现是 host_tool，**�
              │ LLM 决定调用
              ↓
     ┌────────────────┐
-    │ tool_called    │ ←── omp 已发 host_tool_call，等待宿主响应
+    │ tool_called    │ ←── cornfield 已发 host_tool_call，等待宿主响应
     └─┬──────┬───────┘
       │      │
       │      │ 用户 abort / turn 中断
       │      ↓
       │   ┌─────────────┐
-      │   │ cancelled   │ ←── omp 发 host_tool_cancel，强制结束
+      │   │ cancelled   │ ←── cornfield 发 host_tool_cancel，强制结束
       │   └─────────────┘
       │
       │ 宿主发 host_tool_update（可选，0 到 N 次）
@@ -326,11 +326,11 @@ LLM 输出:
     { id: "toolu_xyz", function: {name:"create_jira", arguments:"..."} }
   ]
                           │
-                          │ omp 包装
+                          │ cornfield 包装
                           ↓
 agent → 宿主:
   {
-    id: "host_1",           ← RPC 帧 id（omp 生成）
+    id: "host_1",           ← RPC 帧 id（cornfield 生成）
     toolCallId: "toolu_xyz", ← LLM 层 id（透传）
     toolName: "create_jira",
     arguments: {...}
@@ -344,7 +344,7 @@ agent → 宿主:
     result: {...}
   }
                           │
-                          │ omp 处理
+                          │ cornfield 处理
                           ↓
 消息历史中:
   tool_use {
@@ -361,7 +361,7 @@ agent → 宿主:
 **记忆口诀：**
 
 - `id` 是 **RPC 协议层**的关联，宿主用
-- `toolCallId` 是 **LLM 消息层**的关联，omp 用来写历史
+- `toolCallId` 是 **LLM 消息层**的关联，cornfield 用来写历史
 
 ---
 
@@ -416,13 +416,13 @@ class HostToolServer {
   }
 
   start(ompStdin, ompStdout) {
-    // 注册工具到 omp
+    // 注册工具到 cornfield
     ompStdin.write({
       type: "set_host_tools",
       tools: Array.from(this.handlers.entries()).map(([name, h]) => h.definition)
     });
 
-    // 处理 omp 来的请求
+    // 处理 cornfield 来的请求
     readJsonl(ompStdout).onFrame(async (frame) => {
       if (frame.type === "host_tool_call") {
         const handler = this.handlers.get(frame.toolName);
@@ -452,5 +452,5 @@ server.register(
   { name: "get_weather", description: "查询某城市天气", parameters: {...} },
   async (args) => fetch(`https://api.weather.com/${args.city}`).then(r => r.json())
 );
-server.start(process.stdout, process.stdin);  // 反向，因为 omp 才是从外部 spawn 的
+server.start(process.stdout, process.stdin);  // 反向，因为 cornfield 才是从外部 spawn 的
 ```

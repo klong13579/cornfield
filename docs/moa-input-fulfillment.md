@@ -1,6 +1,6 @@
 # MOA Input Fulfillment — 设计与实施计划
 
-**作者**: Pi staff engineer
+**作者**: CornField staff engineer
 **日期**: 2026-07-13
 **Status**: 设计已确认，已实施 (2026-07-13)
 **关联**: `packages/moa-extension/`
@@ -139,7 +139,7 @@ interface MoaSettings {
 **测试场景**:
 1. TCO 解析: Discovery LLM 输出标准 / 缺字段 / 多 missing_inputs 超限 / 错类型
 2. Ask user: 正常流 / timeout / required skip / 非 TUI fallback
-3. 端到端: 用真实 OMP 跑"招聘计划"任务，3 worker 全产出方案（不卡反问）
+3. 端到端: 用真实 CornField 跑"招聘计划"任务，3 worker 全产出方案（不卡反问）
 4. 端到端: gateway 模式（无 UI）走 assumed fallback，synthesis 显式呈现 assumption
 
 ### Phase 5: 文档与 changelog
@@ -151,7 +151,7 @@ interface MoaSettings {
 
 ## 6. 配置示例
 
-`~/.omp/agent/moa.yml` 新增段（与现有 `discoveryEnabled` 等并存）：
+`~/.cornfield/agent/moa.yml` 新增段（与现有 `discoveryEnabled` 等并存）：
 
 ```yaml
 # 现有字段

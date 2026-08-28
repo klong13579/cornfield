@@ -6,10 +6,10 @@
 
 ## 背景
 
-目标：在 oh-my-pi gateway 系统中实现企业级多 agent 编排——多个 agent 自主循环运行以完成特定任务目标。
+目标：在 cornfield gateway 系统中实现企业级多 agent 编排——多个 agent 自主循环运行以完成特定任务目标。
 
 核心问题：
-1. 多个钉钉 bot（各自背后是独立的 omp RPC 进程）能否互相调用？
+1. 多个钉钉 bot（各自背后是独立的 cornfield RPC 进程）能否互相调用？
 2. 未来的"编排"主进程能否负责任务分发和编排？
 
 ## 架构决策
@@ -18,7 +18,7 @@
 
 | # | 决策点 | 选择 | 理由 |
 |---|---|---|---|
-| 1 | 进程模型 | 混合：Orchestrator 用 warm bridge（常驻、保 cache/上下文）；Worker 用一次性 omp 进程（真并行、crash 隔离） | warm bridge 保 orchestrator 的长期上下文和 cache；一次性 worker 规避 SessionManager 串行约束，和 Hermes 一致 |
+| 1 | 进程模型 | 混合：Orchestrator 用 warm bridge（常驻、保 cache/上下文）；Worker 用一次性 cornfield 进程（真并行、crash 隔离） | warm bridge 保 orchestrator 的长期上下文和 cache；一次性 worker 规避 SessionManager 串行约束，和 Hermes 一致 |
 | 2 | 任务执行 | goal-mode loop | worker 自主 loop 直到达标或 budget 耗尽 |
 | 3 | Orchestrator | (b) 专门的 LLM orchestrator agent | 通过 `kanban_create` + `kanban_link` 自主分解任务 |
 | 4 | Worker 发现 | (b)+(c) 两者都要 | agentDir/`agent.yml`（自描述能力）+ gateway 配置 lane 声明（集中管控 + 派发路由） |
@@ -41,7 +41,7 @@
 │  │             │    │                       │ │
 │  │ LLM 自主     │    │  扫 ready 任务         │ │
 │  │ 分解任务     │───→│  → claim (原子 CAS)    │ │
-│  │ → kanban_   │    │  → spawn 一次性 omp    │ │
+│  │ → kanban_   │    │  → spawn 一次性 cornfield    │ │
 │  │   create    │    │  → 监控 PID (crash     │ │
 │  │   + link    │    │   detection)          │ │
 │  └─────────────┘    └──────────┬───────────┘ │
@@ -59,7 +59,7 @@
      ┌─────────┐ ┌─────────┐ ┌─────────┐
      │ Worker 1│ │ Worker 2│ │ Worker 3│
      │ (一次性) │ │ (一次性) │ │ (一次性) │
-     │ omp 进程 │ │ omp 进程 │ │ omp 进程 │
+     │ cornfield 进程 │ │ cornfield 进程 │ │ cornfield 进程 │
      │          │ │          │ │          │
      │ goal-mode│ │ goal-mode│ │ goal-mode│
      │ loop     │ │ loop     │ │ loop     │
@@ -146,14 +146,14 @@
 
 - `runSubprocess`（`task/executor.ts:447`）名字叫 "subprocess"但实际是 in-process——同一个 Bun 进程内创建 AgentSession，共享 event loop、共享内存。
 - 内置 subagent 是主 agent 的手——匿名、临时、共享一切。
-- 多进程 omp 是独立的人——有名、有记忆、有边界。
+- 多进程 cornfield 是独立的人——有名、有记忆、有边界。
 - 最终设计：保留内置 subagent 作为 worker 内部的并行加速器。两者不冲突，是不同层级。
 
-## 内置 subagent vs 多进程 omp 的核心区别
+## 内置 subagent vs 多进程 cornfield 的核心区别
 
-| 维度 | 内置 subagent（task 工具 / swarm） | 多进程 omp（gateway AgentBridge） |
+| 维度 | 内置 subagent（task 工具 / swarm） | 多进程 cornfield（gateway AgentBridge） |
 |---|---|---|
-| 进程模型 | 同一个 Bun 进程，共享 event loop | 独立 OS 进程（`omp --mode rpc`） |
+| 进程模型 | 同一个 Bun 进程，共享 event loop | 独立 OS 进程（`cornfield --mode rpc`） |
 | 隔离边界 | 无。共享内存，一个 subagent 的未捕获异常可以炸掉主 agent | OS 级。一个进程 crash 不影响其他 |
 | 身份/记忆 | 无。匿名、临时、做完即销毁 | 有。独立 agentDir、mission.md、session 历史 |
 | 凭证/权限 | 继承父 agent | 独立。每个 agentDir 有自己的凭证 |
@@ -165,12 +165,12 @@
 
 ### 何时用哪个
 
-- **需要持久身份、独立凭证、crash 隔离** → 多进程 omp
+- **需要持久身份、独立凭证、crash 隔离** → 多进程 cornfield
 - **需要快速并行、不需要身份、随父生灭** → 内置 subagent
 
 本方案的编排分层：
 1. **Orchestrator（gateway warm bridge）**：决定派什么任务给谁。持久上下文。
-2. **Worker（多进程 omp，一次性）**：独立 agent，goal-mode loop，持久身份。
+2. **Worker（多进程 cornfield，一次性）**：独立 agent，goal-mode loop，持久身份。
 3. **Worker 内部的 subagent（内置 task 工具）**：worker 执行过程中的并行加速器。快、便宜、不需要身份。
 
 ## Push vs Pull 派发模型分析
@@ -210,10 +210,10 @@
 
 | 零件 | 位置 | 对应角色 |
 |---|---|---|
-| `AgentBridge` warm bridge | `omp-gateway/src/agent-bridge.ts` | Orchestrator 的执行载体 |
-| `SessionManager` | `omp-gateway/src/session-manager.ts` | Orchestrator 的 prompt 串行化 |
-| `SchedulerEngine` | `omp-gateway/src/scheduler/engine.ts` | Dispatcher 的 tick 基础设施 |
-| `SchedulerDbStorage` | `omp-gateway/src/scheduler/storage.ts` | SQLite 持久化基础 |
+| `AgentBridge` warm bridge | `cornfield-gateway/src/agent-bridge.ts` | Orchestrator 的执行载体 |
+| `SessionManager` | `cornfield-gateway/src/session-manager.ts` | Orchestrator 的 prompt 串行化 |
+| `SchedulerEngine` | `cornfield-gateway/src/scheduler/engine.ts` | Dispatcher 的 tick 基础设施 |
+| `SchedulerDbStorage` | `cornfield-gateway/src/scheduler/storage.ts` | SQLite 持久化基础 |
 | `runSubprocess` | `coding-agent/src/task/executor.ts` | 一次性 worker spawn 机制 |
 | DAG 原语 | `coding-agent/src/task/dag.ts`（原 swarm-extension，2026-08 退役后保留） | 任务依赖图（parent→child promotion） |
 | DingTalk account → agentDir 绑定 | `gateway.json` channels 配置 | lane 声明的基础 |
@@ -224,8 +224,8 @@
 |---|---|---|
 | **kanban.db schema** | tasks / task_runs / comments / links 表，SQLite WAL | 中。参照 Hermes schema |
 | **任务状态机** | `triage → todo → ready → running → blocked → done` + 依赖 promotion | 中 |
-| **Dispatcher** | gateway 内嵌，tick 扫 ready → 原子 claim → spawn omp 进程 → PID 监控 → crash reclaim | 高。但 `SchedulerEngine` 的 tick 框架可复用 |
-| **Worker spawn 机制** | `Bun.spawn(["omp", ...])` + `OMP_KANBAN_TASK` 环境变量注入 + `kanban_*` 工具集翻转 | 中。`runSubprocess` 已有 spawn 能力 |
+| **Dispatcher** | gateway 内嵌，tick 扫 ready → 原子 claim → spawn cornfield 进程 → PID 监控 → crash reclaim | 高。但 `SchedulerEngine` 的 tick 框架可复用 |
+| **Worker spawn 机制** | `Bun.spawn(["cornfield", ...])` + `CORNFIELD_KANBAN_TASK` 环境变量注入 + `kanban_*` 工具集翻转 | 中。`runSubprocess` 已有 spawn 能力 |
 | **`kanban_*` 工具集** | `kanban_show` / `kanban_list` / `kanban_complete` / `kanban_block` / `kanban_heartbeat` / `kanban_comment` / `kanban_create` / `kanban_link` | 高。需从零起建，无现有工具可复用 |
 | **Lane 声明 + agent.yml** | gateway 配置加 lanes 段 + 每个 agentDir 加 `agent.yml` 能力声明 | 低 |
 | **Goal-mode** | worker prompt 注入 goal + budget 上限 + 自判逻辑 | 中。prompt 工程 + budget 计数器 |
@@ -238,13 +238,13 @@
 
 ### P1 — 没有 step 级 checkpoint，crash 重跑浪费巨大（严重）
 
-**问题**：worker 是一次性 omp 进程，跑 goal-mode loop 可能几十轮、十几分钟、花 $20+。如果 worker 在第 15 轮 crash，dispatcher 检测到 PID 消失 → reclaim → 任务回 ready → 下个 tick 重新 spawn → 从头开始。前 15 轮的工作和 token 全部浪费。
+**问题**：worker 是一次性 cornfield 进程，跑 goal-mode loop 可能几十轮、十几分钟、花 $20+。如果 worker 在第 15 轮 crash，dispatcher 检测到 PID 消失 → reclaim → 任务回 ready → 下个 tick 重新 spawn → 从头开始。前 15 轮的工作和 token 全部浪费。
 
 kanban 有 `task_runs`（任务级别的 crash recovery），但没有 step 级别的 checkpoint。worker 内部的每一轮 LLM 调用、每一次 tool call、每一个中间结论，都没有持久化。
 
 Hermes 有一个缓解措施：`build_worker_context` 会把 prior attempts 的 summary 给 retry worker 看。但如果 prior attempt 没 `kanban_complete` 就 crash 了，没有 summary——新 worker 完全失明。
 
-**行业解法**：durable execution——每个 step checkpoint，crash 后从上一个 checkpoint 恢复。但 worker 是 omp 进程，内部 loop 不受 gateway 控制。
+**行业解法**：durable execution——每个 step checkpoint，crash 后从上一个 checkpoint 恢复。但 worker 是 cornfield 进程，内部 loop 不受 gateway 控制。
 
 **缓解方案**：
 - worker 定期调 `kanban_heartbeat(note="已完成X，正在做Y")` 把中间进度写进 kanban.db。crash 后新 worker 读 heartbeat 知道前一个做到哪了。
@@ -262,8 +262,8 @@ LLM 是非确定性的——retry 时 worker 可能选择完全不同的路径�
 - Idempotency key 从 workflow context 派生（task_id + step_number），不是从 LLM 参数派生。
 
 **缓解方案**：
-- worker 的 side effect 工具（发消息、写数据库等）应该接受 idempotency key（从 `OMP_KANBAN_TASK` + step 派生），在工具层做去重。
-- 需要改 omp 的工具层。
+- worker 的 side effect 工具（发消息、写数据库等）应该接受 idempotency key（从 `CORNFIELD_KANBAN_TASK` + step 派生），在工具层做去重。
+- 需要改 cornfield 的工具层。
 
 ### P3 — Orchestrator 是串行瓶颈（中等）
 
@@ -300,7 +300,7 @@ Anthropic 的经验：subagent 的输出如果经过 lead agent 中转，信息�
 
 ### P6 — Worker 冷启动成本（低-中）
 
-**问题**：每个 worker 是一次性 omp 进程——加载所有模块、初始化工具、建立 API 连接。冷启动可能要几秒到十几秒。
+**问题**：每个 worker 是一次性 cornfield 进程——加载所有模块、初始化工具、建立 API 连接。冷启动可能要几秒到十几秒。
 
 **缓解方案**：
 - 任务粒度不要太小。小任务走内置 subagent。
@@ -308,7 +308,7 @@ Anthropic 的经验：subagent 的输出如果经过 lead agent 中转，信息�
 
 ### P7 — 部署时 running agent 的代码版本不一致（低）
 
-**问题**：orchestrator warm bridge 是长驻的——更新了 omp 代码，orchestrator 还在跑旧代码，直到重启。重启会丢 session 上下文。
+**问题**：orchestrator warm bridge 是长驻的——更新了 cornfield 代码，orchestrator 还在跑旧代码，直到重启。重启会丢 session 上下文。
 
 **缓解方案**：
 - 接受。orchestrator 的状态在 kanban.db 里，不依赖 session 内存。重启后可从看板恢复。
@@ -319,9 +319,9 @@ Anthropic 的经验：subagent 的输出如果经过 lead agent 中转，信息�
 **问题**：缺少跨进程的分布式追踪——orchestrator → worker → tool call → external API 的完整调用链。
 
 **缓解方案**：
-- 给每个 task 分配 trace_id，worker 进程启动时注入 `OMP_TRACE_ID` 环境变量。
+- 给每个 task 分配 trace_id，worker 进程启动时注入 `CORNFIELD_TRACE_ID` 环境变量。
 - kanban.db 的 task_runs 表加 `trace_id` 列。
-- 排查时用 trace_id 关联 kanban 状态和 omp 日志。
+- 排查时用 trace_id 关联 kanban 状态和 cornfield 日志。
 
 ### 问题严重度总览
 
@@ -334,7 +334,7 @@ Anthropic 的经验：subagent 的输出如果经过 lead agent 中转，信息�
 | 中等 | P5 — token 成本失控 | 需要 total budget + retry 上限 + loop detection |
 | 低-中 | P6 — worker 冷启动成本 | 任务粒度控制 |
 | 低 | P7 — 部署版本不一致 | 接受，kanban.db 可恢复状态 |
-| 低-中 | P8 — 可观测性缺失 | trace_id 贯穿 kanban + omp 日志 |
+| 低-中 | P8 — 可观测性缺失 | trace_id 贯穿 kanban + cornfield 日志 |
 
 P1 和 P2 是必须在设计阶段就回答的——不是"以后优化"，是"不解决就上不了生产"的结构性问题。
 
@@ -344,8 +344,8 @@ P1 和 P2 是必须在设计阶段就回答的——不是"以后优化"，是"�
 |---|---|---|
 | `AgentRegistry` | `packages/coding-agent/src/registry/agent-registry.ts` | 进程全局单例，IRC 路由核心，跨进程通信的阻断点 |
 | `respondAsBackground` | `packages/coding-agent/src/session/agent-session.ts:6087` | Side-channel turn，不阻塞 recipient 主循环，已解决 in-process IRC 死锁 |
-| `SessionManager` 不变量 | `packages/omp-gateway/src/session-manager.ts:4-7` | "One account bridge processes at most one prompt at a time" |
-| Cron 路径禁用工具 | `packages/omp-gateway/src/gateway.ts:1159` | 禁用 `["cronjob", "messaging"]`，安全措施 |
+| `SessionManager` 不变量 | `packages/cornfield-gateway/src/session-manager.ts:4-7` | "One account bridge processes at most one prompt at a time" |
+| Cron 路径禁用工具 | `packages/cornfield-gateway/src/gateway.ts:1159` | 禁用 `["cronjob", "messaging"]`，安全措施 |
 | DAG 原语 | `packages/coding-agent/src/task/dag.ts` | 依赖图/wave 构建（原 swarm-extension，已退役归档） |
 | `runSubprocess` | `packages/coding-agent/src/task/executor.ts:447` | 实际是 in-process 执行（注释写 "Run a single agent in-process"） |
 | Hermes Kanban 文档 | `https://hermes-agent.nousresearch.com/docs/user-guide/features/kanban` | 直接原型 |

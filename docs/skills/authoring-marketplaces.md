@@ -1,6 +1,6 @@
 ---
 name: authoring-marketplaces
-description: Use when creating a new omp marketplace. Covers marketplace.json schema, source types, install commands, and publishing.
+description: Use when creating a new cornfield marketplace. Covers marketplace.json schema, source types, install commands, and publishing.
 ---
 
 # Authoring Marketplaces
@@ -79,7 +79,7 @@ The catalog file must live at `.claude-plugin/marketplace.json` in the repositor
     "name": "Acme Corp",
     "email": "plugins@acme.example"
   },
-  "description": "Official Acme plugins for oh-my-pi",
+  "description": "Official Acme plugins for cornfield",
   "plugins": [
     {
       "name": "acme-linter",
@@ -93,7 +93,7 @@ The catalog file must live at `.claude-plugin/marketplace.json` in the repositor
       "category": "devops",
       "source": {
         "source": "github",
-        "repo": "acme-corp/omp-deploy-plugin",
+        "repo": "acme-corp/cornfield-deploy-plugin",
         "ref": "main"
       }
     }
@@ -174,7 +174,7 @@ Declares the plugin as an npm package. `version` is optional:
 ```json
 "source": {
   "source": "npm",
-  "package": "@acme/omp-plugin",
+  "package": "@acme/cornfield-plugin",
   "version": "1.2.0"
 }
 ```
@@ -187,7 +187,7 @@ Each plugin directory (regardless of source type) should contain:
 
 ```
 my-plugin/
-  package.json          ← required: declares omp.extensions entry points
+  package.json          ← required: declares cornfield.extensions entry points
   src/
     main.ts             ← extension factory
   README.md             ← recommended: description + usage
@@ -198,7 +198,7 @@ Minimum `package.json`:
 ```json
 {
   "name": "my-plugin",
-  "omp": {
+  "cornfield": {
     "extensions": ["./src/main.ts"]
   }
 }
@@ -215,14 +215,14 @@ Minimum `package.json`:
 CLI equivalent:
 
 ```
-omp plugin marketplace add owner/repo
-omp plugin install name@marketplace-name
+cornfield plugin marketplace add owner/repo
+cornfield plugin install name@marketplace-name
 ```
 
 Scope behavior:
 
-- **user** (default) — installed in `~/.omp/plugins/installed_plugins.json`, available in all projects
-- **project** — installed in `<project>/.omp/plugins/installed_plugins.json`, available only in that project
+- **user** (default) — installed in `~/.cornfield/plugins/installed_plugins.json`, available in all projects
+- **project** — installed in `<project>/.cornfield/plugins/installed_plugins.json`, available only in that project
 
 Project-scoped installs shadow user-scoped installs of the same plugin name.
 

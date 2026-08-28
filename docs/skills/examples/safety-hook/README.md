@@ -1,6 +1,6 @@
 # safety-hook
 
-An `oh-my-pi` extension that demonstrates `tool_call` blocking. It intercepts every `bash` tool call and returns `{ block: true, reason: "..." }` if the command matches `rm -rf /`, preventing the LLM from executing the command.
+An `cornfield` extension that demonstrates `tool_call` blocking. It intercepts every `bash` tool call and returns `{ block: true, reason: "..." }` if the command matches `rm -rf /`, preventing the LLM from executing the command.
 
 ## What it demonstrates
 
@@ -11,15 +11,15 @@ An `oh-my-pi` extension that demonstrates `tool_call` blocking. It intercepts ev
 ## Install
 
 ```
-cp -r . ~/.omp/agent/extensions/safety-hook
+cp -r . ~/.cornfield/agent/extensions/safety-hook
 ```
 
-Restart `omp`. The hook is active for all sessions.
+Restart `cornfield`. The hook is active for all sessions.
 
 Or load once:
 
 ```
-omp --extension ./safety-hook
+cornfield --extension ./safety-hook
 ```
 
 ## How it works

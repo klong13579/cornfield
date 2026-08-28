@@ -16,7 +16,7 @@ Primary implementation files:
 
 Default config path:
 
-- `~/.omp/agent/models.yml`
+- `~/.cornfield/agent/models.yml`
 
 Legacy behavior still present:
 
@@ -49,7 +49,7 @@ equivalence:
 providers:
   my-provider:
     baseUrl: https://api.example.com/v1
-    apiKey: MY_PROVIDER_API_KEY
+    apiKey: MY_PROVIDER_ACORNFIELD_KEY
     api: openai-completions
     headers:
       X-Team: platform
@@ -137,7 +137,7 @@ Must define at least one of:
 
 ModelRegistry pipeline (on refresh):
 
-1. Load built-in providers/models from `@oh-my-pi/pi-ai`.
+1. Load built-in providers/models from `@cornfield/ai`.
 2. Load `models.yml` custom config.
 3. Apply provider overrides (`baseUrl`, `headers`) to built-in models.
 4. Apply `modelOverrides` (per provider + model id).
@@ -164,7 +164,7 @@ Example:
 providers:
   zenmux:
     baseUrl: https://api.zenmux.example/v1
-    apiKey: ZENMUX_API_KEY
+    apiKey: ZENMUX_ACORNFIELD_KEY
     api: openai-codex-responses
     models:
       - id: codex
@@ -290,7 +290,7 @@ When requesting a key for a provider, effective order is:
 1. Runtime override (CLI `--api-key`)
 2. Stored API key credential in `agent.db`
 3. Stored OAuth credential in `agent.db` (with refresh)
-4. Environment variable mapping (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, etc.)
+4. Environment variable mapping (`OPENAI_ACORNFIELD_KEY`, `ANTHROPIC_ACORNFIELD_KEY`, etc.)
 5. ModelRegistry fallback resolver (provider `apiKey` from `models.yml`, env-name-or-literal semantics)
 
 `models.yml` `apiKey` behavior:
@@ -473,7 +473,7 @@ providers:
 providers:
   anthropic-proxy:
     baseUrl: https://proxy.example.com/anthropic
-    apiKey: ANTHROPIC_PROXY_API_KEY
+    apiKey: ANTHROPIC_PROXY_ACORNFIELD_KEY
     api: anthropic-messages
     authHeader: true
     models:
@@ -501,7 +501,7 @@ providers:
 
 ## Legacy consumer caveat
 
-Most model configuration now flows through `models.yml` via `ModelRegistry`. Explicit `.json` / `.jsonc` paths remain supported only when passed programmatically to `ModelRegistry`; the default user config is `~/.omp/agent/models.yml`.
+Most model configuration now flows through `models.yml` via `ModelRegistry`. Explicit `.json` / `.jsonc` paths remain supported only when passed programmatically to `ModelRegistry`; the default user config is `~/.cornfield/agent/models.yml`.
 
 ## Failure mode
 
