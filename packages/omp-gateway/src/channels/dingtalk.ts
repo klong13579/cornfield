@@ -114,7 +114,7 @@ const MAX_BACKOFF_DELAY = 30_000;
  *  usually means credentials are wrong or the account was revoked,
  *  in which case reconnecting every 30s just spams the log without
  *  any realistic chance of succeeding. Operators can re-enable the
- *  channel via `omp-gateway reload` or a process restart. */
+ *  channel via `cornfield-gateway reload` or a process restart. */
 const MAX_RECONNECT_ATTEMPTS = 50;
 /** Message processing keepalive interval (ms) — refresh lastSocketAvailableTime */
 const PROCESSING_KEEPALIVE_INTERVAL = 15_000;

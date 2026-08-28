@@ -66,45 +66,43 @@ export default class Gateway extends Command {
 	static examples = [
 		"",
 		"  ======== 生命周期 ========",
-		"  omp-gateway start                        Start gateway (foreground)",
-		"  omp-gateway start --config /path/gw.json  Start with custom config",
-		"  omp-gateway stop                         Stop gateway (via PID file)",
-		"  omp-gateway status                       Show running status & PID",
-		"  omp-gateway reload                        Reload config without restart (SIGHUP)",
-		"  omp-gateway doctor                       Run health checks (config, creds, channels, scheduler)",
-		"  omp-gateway doctor --fix                 Apply safe fixes (clear stale state, fail orphaned execs)",
+		"  cornfield-gateway start                        Start gateway (foreground)",
+		"  cornfield-gateway start --config /path/gw.json  Start with custom config",
+		"  cornfield-gateway stop                         Stop gateway (via PID file)",
+		"  cornfield-gateway status                       Show running status & PID",
+		"  cornfield-gateway reload                        Reload config without restart (SIGHUP)",
+		"  cornfield-gateway doctor                       Run health checks (config, creds, channels, scheduler)",
+		"  cornfield-gateway doctor --fix                 Apply safe fixes (clear stale state, fail orphaned execs)",
 		"",
 		"  ======== 系统服务 (launchd/systemd) ========",
-		"  omp-gateway service install              Install as system daemon",
-		"  omp-gateway service uninstall            Remove system daemon",
-		"  omp-gateway service start                Start daemon",
-		"  omp-gateway service stop                 Stop daemon (no auto-restart)",
-		"  omp-gateway service status               Show daemon status",
-		"",
-		"  ======== 配置 ========",
-		"  omp-gateway setup                        Interactive DingTalk credential setup",
-		"  omp-gateway setup --non-interactive      Print manual-edit instructions and exit (for CI/scripting)",
-		"  omp-gateway config                       Print resolved config",
-		"  omp-gateway config --config /path/gw.json Print custom config",
+		"  cornfield-gateway service install              Install as system daemon",
+		"  cornfield-gateway service uninstall            Remove system daemon",
+		"  cornfield-gateway service start                Start daemon",
+		"  cornfield-gateway service stop                 Stop daemon (no auto-restart)",
+		"  cornfield-gateway service status               Show daemon status",
+		"  cornfield-gateway setup                        Interactive DingTalk credential setup",
+		"  cornfield-gateway setup --non-interactive      Print manual-edit instructions and exit (for CI/scripting)",
+		"  cornfield-gateway config                       Print resolved config",
+		"  cornfield-gateway config --config /path/gw.json Print custom config",
 		"",
 		"  ======== 机器人上下文 ========",
-		"  omp-gateway robot-context probe           探测机器人×群矩阵并刷新各 agent 的 robot-context.md",
-		"  omp-gateway robot-context probe --dry-run 只探测不写入",
+		"  cornfield-gateway robot-context probe           探测机器人×群矩阵并刷新各 agent 的 robot-context.md",
+		"  cornfield-gateway robot-context probe --dry-run 只探测不写入",
 		"",
 		"  ======== 定时任务 ========",
-		"  omp-gateway cron create '0 9 * * *' 'cmd'  Create cron task",
-		"  omp-gateway cron list                     List all tasks",
-		"  omp-gateway cron pause <name>             Pause a task",
-		"  omp-gateway cron resume <name>            Resume a task",
-		"  omp-gateway cron run <name>               Run a task now (debug only — skips delivery)",
-		"  omp-gateway cron test-run <name>          Trigger through the real scheduler; verifies delivery",
-		"  omp-gateway cron remove <name>            Delete a task",
-		"  omp-gateway cron update <name> ...        Update task fields in place",
-		"  omp-gateway cron reconcile [--apply]      Backfill accountId on legacy unbound tasks",
-		"  omp-gateway cron status                   Show scheduler status",
-		"  omp-gateway cron diagnose [--json]        System health (task counts + per-task snapshot)",
-		"  omp-gateway cron diagnose <name> [--json]  View JSONL execution diagnostics for a task",
-		"  omp-gateway cron logs <name> [--json]     View execution logs",
+		"  cornfield-gateway cron create '0 9 * * *' 'cmd'  Create cron task",
+		"  cornfield-gateway cron list                     List all tasks",
+		"  cornfield-gateway cron pause <name>             Pause a task",
+		"  cornfield-gateway cron resume <name>            Resume a task",
+		"  cornfield-gateway cron run <name>               Run a task now (debug only — skips delivery)",
+		"  cornfield-gateway cron test-run <name>          Trigger through the real scheduler; verifies delivery",
+		"  cornfield-gateway cron remove <name>            Delete a task",
+		"  cornfield-gateway cron update <name> ...        Update task fields in place",
+		"  cornfield-gateway cron reconcile [--apply]      Backfill accountId on legacy unbound tasks",
+		"  cornfield-gateway cron status                   Show scheduler status",
+		"  cornfield-gateway cron diagnose [--json]        System health (task counts + per-task snapshot)",
+		"  cornfield-gateway cron diagnose <name> [--json]  View JSONL execution diagnostics for a task",
+		"  cornfield-gateway cron logs <name> [--json]     View execution logs",
 		"",
 	];
 
@@ -384,7 +382,7 @@ export default class Gateway extends Command {
 					if (newPid) {
 						console.log(`Gateway restarted via system service (new PID ${newPid}).`);
 					} else {
-						console.log("Gateway restart requested; new PID not yet visible (check `omp-gateway status`).");
+						console.log("Gateway restart requested; new PID not yet visible (check `cornfield-gateway status`).");
 					}
 					return;
 				}
@@ -415,7 +413,7 @@ export default class Gateway extends Command {
 				}
 
 				console.error(
-					"Gateway is not running and not installed as a system service. Use `omp-gateway start` first.",
+					"Gateway is not running and not installed as a system service. Use `cornfield-gateway start` first.",
 				);
 				process.exitCode = 1;
 				break;
@@ -478,7 +476,7 @@ export default class Gateway extends Command {
 				}
 				if (!accountId) {
 					console.error(
-						"Usage: omp-gateway test-longtask <accountId> [--hold-ms N] [--user-id <id>] [--simulate-stop]",
+						"Usage: cornfield-gateway test-longtask <accountId> [--hold-ms N] [--user-id <id>] [--simulate-stop]",
 					);
 					process.exitCode = 1;
 					break;
@@ -575,7 +573,7 @@ export default class Gateway extends Command {
 		const argv = process.argv.slice(process.argv.indexOf("robot-context") + 1);
 		const action = argv[0] ?? "help";
 		if (action !== "probe") {
-			console.log("Usage: omp-gateway robot-context probe [--dry-run]");
+			console.log("Usage: cornfield-gateway robot-context probe [--dry-run]");
 			console.log("  Probe robot×group membership via DingTalk API and update every");
 			console.log("  account's <agentDir>/robot-context.md. Requires dws CLI and one");
 			console.log("  gateway account with the qyapi_chat_manage permission.");
@@ -714,19 +712,19 @@ export default class Gateway extends Command {
 				default:
 					console.log(`
 Cron management commands:
-  omp-gateway cron create <schedule> <command...> [--name <name>] [--type shell|agent] [--deliver <channel>] [--deliver-user <id>] [--model <model>] [--provider <provider>] [--toolsets <a,b,c>] [--repeat <N>] [--source-channel <ch>] [--source-user <uid>] [--timeout-ms <ms>] [--skills <s1,s2,...>] [--retry <maxAttempts>] [--pre-script <path>]
-  omp-gateway cron list [--json]
-  omp-gateway cron pause <name>
-  omp-gateway cron resume <name>
-  omp-gateway cron run <name>                              Trigger a task now (debug only — skips delivery)
-  omp-gateway cron test-run <name> [--in 90s] [--timeout 150s] [--no-restore]    Trigger through the real scheduler (waits + restores); verifies delivery
-  omp-gateway cron remove <name>
-  omp-gateway cron update <name> [--account <id> | --clear-account] [--deliver <channel> | --clear-deliver] [--deliver-user <id> | --clear-deliver-user] [--timeout-ms <ms>]
-  omp-gateway cron reconcile [--apply]                      Backfill accountId on legacy unbound tasks (dry run by default)
-  omp-gateway cron status
-  omp-gateway cron diagnose [--json]                        System health (task counts + per-task snapshot)
-  omp-gateway cron diagnose <name> [--json]                 View JSONL execution diagnostics for a task
-  omp-gateway cron logs <name> [--json]
+  cornfield-gateway cron create <schedule> <command...> [--name <name>] [--type shell|agent] [--deliver <channel>] [--deliver-user <id>] [--model <model>] [--provider <provider>] [--toolsets <a,b,c>] [--repeat <N>] [--source-channel <ch>] [--source-user <uid>] [--timeout-ms <ms>] [--skills <s1,s2,...>] [--retry <maxAttempts>] [--pre-script <path>]
+  cornfield-gateway cron list [--json]
+  cornfield-gateway cron pause <name>
+  cornfield-gateway cron resume <name>
+  cornfield-gateway cron run <name>                              Trigger a task now (debug only — skips delivery)
+  cornfield-gateway cron test-run <name> [--in 90s] [--timeout 150s] [--no-restore]    Trigger through the real scheduler (waits + restores); verifies delivery
+  cornfield-gateway cron remove <name>
+  cornfield-gateway cron update <name> [--account <id> | --clear-account] [--deliver <channel> | --clear-deliver] [--deliver-user <id> | --clear-deliver-user] [--timeout-ms <ms>]
+  cornfield-gateway cron reconcile [--apply]                      Backfill accountId on legacy unbound tasks (dry run by default)
+  cornfield-gateway cron status
+  cornfield-gateway cron diagnose [--json]                        System health (task counts + per-task snapshot)
+  cornfield-gateway cron diagnose <name> [--json]                 View JSONL execution diagnostics for a task
+  cornfield-gateway cron logs <name> [--json]
 `);
 					break;
 			}
@@ -750,7 +748,7 @@ Cron management commands:
 				// (Previously this resolved `<omp-gateway>/src/cli.ts` and passed it through,
 				// which only worked in dev mode and broke the compiled-binary install path.)
 				await installService();
-				console.log("Service installed. Run 'omp-gateway service start' to begin.");
+				console.log("Service installed. Run 'cornfield-gateway service start' to begin.");
 				break;
 			}
 			case "uninstall":
@@ -777,11 +775,11 @@ Cron management commands:
 			default:
 				console.log(`
 Service management commands:
-  omp-gateway service install     Install as system service
-  omp-gateway service uninstall   Remove system service
-  omp-gateway service start       Start system service
-  omp-gateway service stop        Stop system service
-  omp-gateway service status      Show service status
+  cornfield-gateway service install     Install as system service
+  cornfield-gateway service uninstall   Remove system service
+  cornfield-gateway service start       Start system service
+  cornfield-gateway service stop        Stop system service
+  cornfield-gateway service status      Show service status
 `);
 		}
 	}

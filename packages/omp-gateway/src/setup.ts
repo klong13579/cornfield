@@ -1,7 +1,7 @@
 /**
  * Interactive DingTalk setup wizard.
  *
- * Replaces `omp-gateway install` / `omp-gateway setup` legacy behavior. Walks
+ * Replaces `omp-gateway install` / `cornfield-gateway setup` legacy behavior. Walks
  * the user through accountId, AppKey, AppSecret, RobotCode, agentDir and
  * (optional) mission file, then writes a complete gateway config to disk.
  *
@@ -225,9 +225,9 @@ export async function runInteractiveSetup(opts: SetupOptions = {}): Promise<Setu
 	console.log(`\n下一步：`);
 	console.log(`  omp agent show ${accountId}        查看身份/工具/技能`);
 	console.log(`  omp agent validate --dir ${agentDir}   校验目录结构`);
-	console.log(`  omp-gateway start              启动网关`);
-	console.log(`  omp-gateway stop               停止网关`);
-	console.log(`  omp-gateway service install    安装为系统服务(开机自启)`);
+	console.log(`  cornfield-gateway start              启动网关`);
+	console.log(`  cornfield-gateway stop               停止网关`);
+	console.log(`  cornfield-gateway service install    安装为系统服务(开机自启)`);
 	console.log(`\n配置模型: 编辑 ${agentDir}/.cornfield/config.yml 下的 modelRoles.default`);
 
 	return { ok: true, accountId, agentDir, configPath: cfgPath, createdAccount: true };
