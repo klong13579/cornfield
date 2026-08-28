@@ -61,6 +61,21 @@ async function runNativeBuild(env: Record<string, string | undefined>, label: st
 	await $`bun --cwd=packages/natives run build`.cwd(repoRoot).env(env);
 }
 
+
+async function reportAvx512ObjectFiles(targetDir: string): Promise<void> {
+	if (targetPlatform !== "linux" || targetArch !== "x64") return;
+	const objdump = Bun.which("objdump");
+	if (!objdump) return;
+	const entries = await Array.fromAsync(new Bun.Glob("**/*.{o,a}").scan({ cwd: targetDir, absolute: true }));
+	for (const entry of entries) {
+		const result = Bun.spawnSync([objdump, "-d", entry], { stdout: "pipe", stderr: "ignore" });
+		if (result.exitCode !== 0) continue;
+		const lines = result.stdout.toString("utf-8").split("\n");
+		const marker = lines.find(line => /%(?:zmm\d+|k[0-7])\b/.test(line));
+		if (marker) console.error(`[native-isa-source] ${entry}\n${marker.trim()}`);
+	}
+}
+
 async function verifyBuiltAddons(expectedAddons: string[]): Promise<void> {
 	if (isDryRun) {
 		console.log(`DRY RUN bun scripts/ci-release-verify-natives.ts PI_NATIVE_EXPECTED_ADDONS=${expectedAddons.join(" ")}`);
@@ -96,6 +111,7 @@ async function main(): Promise<void> {
 			},
 			variant.name,
 		);
+		await reportAvx512ObjectFiles(path.join(repoRoot, "target", "napi-build"));
 	}
 
 	await verifyBuiltAddons(resolveExpectedAddons(variants));
