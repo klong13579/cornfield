@@ -1261,22 +1261,37 @@ export class Gateway {
 				port,
 				fetch: async req => {
 					const url = new URL(req.url);
+					// CORS（浏览器 web-app 直连本机端点）：localhost-only + 无凭据，Allow-Origin * 可接受。
+					const corsHeaders = {
+						"access-control-allow-origin": "*",
+						"access-control-allow-methods": "POST, OPTIONS",
+						"access-control-allow-headers": "content-type",
+					};
+					if (req.method === "OPTIONS") {
+						return new Response(null, { status: 204, headers: corsHeaders });
+					}
 					if (req.method !== "POST" || url.pathname !== "/wire") {
-						return Response.json({ ok: false, error: "not_found" }, { status: 404 });
+						return Response.json({ ok: false, error: "not_found" }, { status: 404, headers: corsHeaders });
 					}
 					let body: unknown;
 					try {
 						body = await req.json();
 					} catch {
-						return Response.json({ ok: false, error: "invalid_json" }, { status: 400 });
+						return Response.json({ ok: false, error: "invalid_json" }, { status: 400, headers: corsHeaders });
 					}
 					const command = body as { type?: unknown } | null;
 					if (!command || typeof command.type !== "string") {
-						return Response.json({ ok: false, error: "missing command type" }, { status: 400 });
+						return Response.json(
+							{ ok: false, error: "missing command type" },
+							{ status: 400, headers: corsHeaders },
+						);
 					}
 					const schedulerStorage = this.#cronLifecycle.schedulerStorage;
 					if (!schedulerStorage) {
-						return Response.json({ ok: false, error: "scheduler not started" }, { status: 503 });
+						return Response.json(
+							{ ok: false, error: "scheduler not started" },
+							{ status: 503, headers: corsHeaders },
+						);
 					}
 					const result = await handleGatewayWireCommand(command as { type: string; [key: string]: unknown }, {
 						storage: schedulerStorage,
@@ -1302,7 +1317,7 @@ export class Gateway {
 					});
 					return Response.json(
 						result.ok ? { ok: true, result: result.result } : { ok: false, error: result.error },
-						{ status: result.ok ? 200 : 400 },
+						{ status: result.ok ? 200 : 400, headers: corsHeaders },
 					);
 				},
 			});

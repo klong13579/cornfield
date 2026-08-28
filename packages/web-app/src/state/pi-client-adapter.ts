@@ -463,9 +463,9 @@ export class PiClientAdapter implements PiClient {
 		return `${base}/preview/${encodeURIComponent(agentId)}/${segs}${tokenQuery}`;
 	}
 
-	/** 本机 gateway 运行状态（gateway_status；serve 转发 gateway.status.json）。 */
+	/** 本机 gateway 运行状态（gateway_status；gateway 生产端点直连）。 */
 	async gatewayStatus(): Promise<GatewayStatusDto> {
-		return this.#req<GatewayStatusDto>({ type: "gateway_status" } as never);
+		return this.#gatewayWire<GatewayStatusDto>({ type: "gateway_status" });
 	}
 
 	/** 本地用量统计（get_stats；period 可选时间窗口，无数据/失败抛错由调用方空态）。 */
@@ -583,9 +583,9 @@ export class PiClientAdapter implements PiClient {
 		return result.commands ?? [];
 	}
 
-	/** gateway cron 任务表（get_cron_tasks；jobs.json 直读，只读）。 */
+	/** gateway cron 任务表（get_cron_tasks；gateway 生产端点直连）。 */
 	async getCronTasks(): Promise<{ tasks: TaskRowDto[] }> {
-		return this.#req<{ tasks: TaskRowDto[] }>({ type: "get_cron_tasks" } as never);
+		return this.#gatewayWire<{ tasks: TaskRowDto[] }>({ type: "get_cron_tasks" });
 	}
 
 	/**
@@ -637,15 +637,14 @@ export class PiClientAdapter implements PiClient {
 		return { ok: result.ok === true, recordings: result.recordings ?? [] };
 	}
 
-	/** cron 执行日志（get_cron_logs；logs/by-task 直读，只读）。 */
+	/** cron 执行日志（get_cron_logs；gateway 生产端点直连，taskId/days/limit 可选）。 */
 	async getCronLogs(opts?: { taskId?: string; days?: number; limit?: number }): Promise<{ logs: CronLogEntryDto[] }> {
-		const command = {
+		return this.#gatewayWire<{ logs: CronLogEntryDto[] }>({
 			type: "get_cron_logs",
 			...(opts?.taskId ? { taskId: opts.taskId } : {}),
 			...(opts?.days ? { days: opts.days } : {}),
 			...(opts?.limit ? { limit: opts.limit } : {}),
-		} as never;
-		return this.#req<{ logs: CronLogEntryDto[] }>(command);
+		});
 	}
 
 	// hostToolResult：pi-client 无裸帧发送 API（host_tool_result 是独立 client frame），
@@ -658,6 +657,25 @@ export class PiClientAdapter implements PiClient {
 			console.warn("[web-app] serve command failed", command.type, err);
 			throw err;
 		});
+	}
+
+	/**
+	 * P2-4：cron/gateway 命令直连 gateway 生产端点（POST /wire，127.0.0.1:7892）。
+	 * 不再经 serve 中转。gateway 未运行（端点不可达）→ fetch 抛错（调用方错误态）。
+	 * 端口写死 7892：浏览器无 process.env；与 gateway #startWireEndpoint 默认一致，
+	 * 当地址调整时随 gateway 侧改动同步（serve 转发侧用 OMP_GATEWAY_WIRE_PORT 覆盖）。
+	 */
+	async #gatewayWire<T>(command: Record<string, unknown>): Promise<T> {
+		const res = await fetch(`http://127.0.0.1:7892/wire`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify(command),
+		});
+		const data = (await res.json()) as { ok?: boolean; result?: unknown; error?: unknown };
+		if (!res.ok || data.ok !== true) {
+			throw new Error(typeof data.error === "string" ? data.error : `gateway wire ${res.status}`);
+		}
+		return data.result as T;
 	}
 
 	/** 拉取环境摘要（get_state → env，serve B1 已实现）。失败保留旧值/置 null，不阻塞连接。 */
