@@ -1,7 +1,7 @@
 # session-stats
 
 Ad-hoc analyses over the local agent session corpus
-(`~/.omp/agent/sessions/`). Single Rust binary with subcommands.
+(`~/.cornfield/agent/sessions/`). Single Rust binary with subcommands.
 
 ## Subcommands
 
@@ -62,7 +62,7 @@ TOOL_USAGE_CSV=tools.csv \
   cargo run --release --manifest-path scripts/session-stats/Cargo.toml -- tools -n 200
 ```
 
-The walk root is `~/.omp/agent/sessions/`. Subagent jsonls
+The walk root is `~/.cornfield/agent/sessions/`. Subagent jsonls
 (`<session-id>/<n>-<name>.jsonl`) count as their own session and are included
 in the recency window independently.
 

@@ -28,7 +28,7 @@ vi.mock("@cornfield/coding-agent/stt/transcriber", () => ({ transcribe, transcri
 
 let Settings: Awaited<typeof import("@cornfield/coding-agent/config/settings")>["Settings"];
 
-// 隔离 config 根，避免污染真实 ~/.omp/listen
+// 隔离 config 根，避免污染真实 ~/.cornfield/listen
 const isoRoot = await fsp.mkdtemp(path.join(os.tmpdir(), "omp-listen-service-test-"));
 
 async function clearListenDir(): Promise<void> {

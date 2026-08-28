@@ -457,7 +457,7 @@ function TaskListCard({
 			{error && <div className="px-5 pb-6 text-center text-[12px] text-ink-faint">任务列表不可用：{error}</div>}
 			{connected && !error && tasks.length === 0 && (
 				<div className="px-5 pb-6 text-center text-[12px] text-ink-faint">
-					暂无定时任务——serve 直读 ~/.omp/gateway-data/scheduler/jobs.json（B6 只读代理）
+					暂无定时任务——serve 直读 ~/.cornfield/gateway-data/scheduler/jobs.json（B6 只读代理）
 				</div>
 			)}
 

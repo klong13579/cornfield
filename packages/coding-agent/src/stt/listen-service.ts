@@ -4,7 +4,7 @@
  * 从 ListenController 抽出的纯数据路径（不持有 UI 状态）：
  * - 转写：本地 whisper（mlx-whisper/openai-whisper）或 API `record.model`（qwen3-asr
  *   批量端点），超长音频（> stt.chunkSizeMB）自动分块串行转写后拼接——与 /record 同管线。
- * - 落盘：`~/.omp/listen/YYYY-MM-DD-<desc>.json`，格式 { version, recorded_at, text }。
+ * - 落盘：`~/.cornfield/listen/YYYY-MM-DD-<desc>.json`，格式 { version, recorded_at, text }。
  *
  * 谁在用：
  * - ListenController（TUI /record、/listen 的控制器外壳，持有录音/电平/VAD 状态机）
@@ -166,7 +166,7 @@ export async function transcribeAudioWithDefaults(
 	return { text: joined, model };
 }
 
-/** 转写文本落盘 `~/.omp/listen/<buildFilename>.json`，返回绝对路径。 */
+/** 转写文本落盘 `~/.cornfield/listen/<buildFilename>.json`，返回绝对路径。 */
 export async function saveListenText(text: string, description?: string): Promise<string> {
 	const dir = getListenDir();
 	const out = path.join(dir, buildFilename(description));
@@ -178,7 +178,7 @@ export async function saveListenText(text: string, description?: string): Promis
 	return out;
 }
 
-/** 列出 ~/.omp/listen/ 全部录音（文件名倒序），目录缺失时返回空数组。 */
+/** 列出 ~/.cornfield/listen/ 全部录音（文件名倒序），目录缺失时返回空数组。 */
 export async function listListenRecordings(): Promise<ListenRecordingSummary[]> {
 	const dir = getListenDir();
 	const files = await fsp.readdir(dir).catch(() => []);

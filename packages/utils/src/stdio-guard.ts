@@ -21,7 +21,7 @@ const BROKEN_STDIO_CODES = new Set([
 	"ERR_STREAM_WRITE_AFTER_END",
 ]);
 
-const GUARD_FLAG = Symbol.for("oh-my-pi.stdioErrorGuard");
+const GUARD_FLAG = Symbol.for("cornfield.stdioErrorGuard");
 
 /** True when `err` looks like a dead/broken stdout/stderr write. */
 export function isBrokenStdioError(err: unknown): boolean {

@@ -3,7 +3,7 @@
   Status:  production
   Use:     Rendered into a new user-message turn in the LLM's origin
            IM session, immediately after the cron task's card delivery
-           completes. Rendered via `@oh-my-pi/pi-utils#prompt.render`
+           completes. Rendered via `@cornfield/utils#prompt.render`
            with the context built by
            `CronLifecycle.#maybeNotifyOriginSession`.
 

@@ -31,6 +31,6 @@ describe("CORNFIELD_CONFIG_DIR", () => {
 		process.env.CORNFIELD_CONFIG_DIR = ".config/omp";
 		const result = getConfigDirs("commands", { project: false });
 		const expected = path.resolve(path.join(os.homedir(), ".config/omp", "agent", "commands"));
-		expect(result[0]).toEqual({ path: expected, source: ".omp", level: "user" });
+		expect(result[0]).toEqual({ path: expected, source: ".cornfield", level: "user" });
 	});
 });

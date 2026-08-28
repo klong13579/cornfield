@@ -516,7 +516,7 @@ export class PiClientAdapter implements PiClient {
 
 	// ── MCP 服务器管理（设置页；契约命令由 serve 端 m1 并行实现，WireCommand union 暂缺故最小局部 cast）──
 
-	/** 列出 MCP 服务器（get_mcp_servers；读 ~/.omp/agent/mcp.json 的 mcpServers）。 */
+	/** 列出 MCP 服务器（get_mcp_servers；读 ~/.cornfield/agent/mcp.json 的 mcpServers）。 */
 	async getMcpServers(): Promise<{ servers: McpServerDto[] }> {
 		const result = await this.#req<{ servers?: McpServerDto[] | null }>({
 			type: "get_mcp_servers",
@@ -629,7 +629,7 @@ export class PiClientAdapter implements PiClient {
 		}
 	}
 
-	/** 听记历史（listen_list；~/.omp/listen/ 全部录音，名称倒序 + 转写全文）。 */
+	/** 听记历史（listen_list；~/.cornfield/listen/ 全部录音，名称倒序 + 转写全文）。 */
 	async listenList(): Promise<{ ok: boolean; recordings: ListenRecordingDto[] }> {
 		const result = await this.#req<{ ok?: boolean; recordings?: ListenRecordingDto[] | null }>({
 			type: "listen_list",

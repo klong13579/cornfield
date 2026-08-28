@@ -8,10 +8,10 @@
  *   identity          → mission.md
  *   tool rules        → TOOLS.md
  *   hard constraints  → AGENTS.md
- *   work discipline   → .omp/SYSTEM.md
+ *   work discipline   → .cornfield/SYSTEM.md
  *   domain knowledge  → knowledge/handbook/*
  *   data source URLs  → knowledge/external-workspaces.md
- *   dws command ref   → .omp/skills/dws/SKILL.md
+ *   dws command ref   → .cornfield/skills/dws/SKILL.md
  */
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -187,7 +187,7 @@ const noSafetyDuplication: MeceRule = {
 	description: "SYSTEM.md should not duplicate MUST NOT/NEVER lines from AGENTS.md",
 	check(ctx) {
 		const agents = getFile(ctx, "AGENTS.md");
-		const system = getFile(ctx, ".omp/SYSTEM.md");
+		const system = getFile(ctx, ".cornfield/SYSTEM.md");
 		if (!agents || !system) return [];
 
 		// Extract MUST NOT / NEVER lines from AGENTS.md hard-constraints section
@@ -219,7 +219,7 @@ const noSafetyDuplication: MeceRule = {
 					if (normalize(trimmed) === normalize(agentsLine)) {
 						violations.push({
 							rule: this.id,
-							file: ".omp/SYSTEM.md",
+							file: ".cornfield/SYSTEM.md",
 							line: i + 1,
 							message: `Duplicates AGENTS.md hard constraint: "${trimmed.slice(0, 60)}"`,
 							repairable: true,
@@ -232,7 +232,7 @@ const noSafetyDuplication: MeceRule = {
 	},
 	repair(ctx) {
 		const agents = getFile(ctx, "AGENTS.md");
-		const system = getFile(ctx, ".omp/SYSTEM.md");
+		const system = getFile(ctx, ".cornfield/SYSTEM.md");
 		if (!agents || !system) return { changes: [], summary: "Nothing to repair" };
 
 		const agentsLines = linesOf(agents);
@@ -268,7 +268,7 @@ const noSafetyDuplication: MeceRule = {
 		}
 		newContent = newContent.replace(/\n{3,}/g, "\n\n").replace(/\s+$/g, "\n");
 		return {
-			changes: [{ file: ".omp/SYSTEM.md", newContent }],
+			changes: [{ file: ".cornfield/SYSTEM.md", newContent }],
 			summary: "Removed duplicated hard constraints from SYSTEM.md, added reference to AGENTS.md",
 		};
 	},
@@ -365,13 +365,13 @@ const noDwsCommandsInTools: MeceRule = {
 // R6: skills-path-format
 // ────────────────────────────────────────────────────────────────────────────
 
-const OLD_SKILLS_PATH_RE = /\.omp\/skills\/<name>\.md/;
-const NEW_SKILLS_PATH = ".omp/skills/<name>/SKILL.md";
+const OLD_SKILLS_PATH_RE = /\.cornfield\/skills\/<name>\.md/;
+const NEW_SKILLS_PATH = ".cornfield/skills/<name>/SKILL.md";
 
 const skillsPathFormat: MeceRule = {
 	id: "skills-path-format",
 	severity: "error",
-	description: "AGENTS.md File Map should use .omp/skills/<name>/SKILL.md (not <name>.md)",
+	description: "AGENTS.md File Map should use .cornfield/skills/<name>/SKILL.md (not <name>.md)",
 	check(ctx) {
 		const agents = getFile(ctx, "AGENTS.md");
 		if (!agents) return [];
@@ -457,7 +457,7 @@ const DEPRECATED_AGENT_PATH_RE = /\.agent\//;
 const noDeprecatedAgentDir: MeceRule = {
 	id: "no-deprecated-agent-dir",
 	severity: "error",
-	description: "No .agent/ directory should exist (deprecated, replaced by .omp/)",
+	description: "No .agent/ directory should exist (deprecated, replaced by .cornfield/)",
 	async check(ctx) {
 		const violations: MeceViolation[] = [];
 
@@ -468,7 +468,7 @@ const noDeprecatedAgentDir: MeceRule = {
 			violations.push({
 				rule: this.id,
 				file: ".agent/",
-				message: "Deprecated .agent/ directory exists (should be .omp/)",
+				message: "Deprecated .agent/ directory exists (should be .cornfield/)",
 				repairable: true,
 			});
 		} catch {
@@ -499,13 +499,13 @@ const noDeprecatedAgentDir: MeceRule = {
 		// Fix AGENTS.md references
 		const agents = getFile(ctx, "AGENTS.md");
 		if (agents && DEPRECATED_AGENT_PATH_RE.test(agents)) {
-			// Line-by-line: .agent/SYSTEM.md → .omp/SYSTEM.md (valid mapping),
+			// Line-by-line: .agent/SYSTEM.md → .cornfield/SYSTEM.md (valid mapping),
 			// other .agent/ paths (prompts/, rules/) are deleted — new design has no equivalent.
 			const lines = linesOf(agents);
 			const fixed = lines
 				.map(line => {
 					if (/\.agent\/SYSTEM\.md/.test(line)) {
-						return line.replace(/\.agent\/SYSTEM\.md/g, ".omp/SYSTEM.md");
+						return line.replace(/\.agent\/SYSTEM\.md/g, ".cornfield/SYSTEM.md");
 					}
 					if (DEPRECATED_AGENT_PATH_RE.test(line)) {
 						return null; // delete line
@@ -550,7 +550,7 @@ export const MECE_FILES: ReadonlyArray<string> = [
 	"TOOLS.md",
 	"TODO.md",
 	"knowledge/external-workspaces.md",
-	".omp/SYSTEM.md",
+	".cornfield/SYSTEM.md",
 ];
 
 // ────────────────────────────────────────────────────────────────────────────

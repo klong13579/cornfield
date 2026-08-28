@@ -48,7 +48,7 @@ function mergeByName(existing: UnifiedSkill, incoming: UnifiedSkill): UnifiedSki
 }
 
 /**
- * Load skills from ~/.omp/self-evolution/skills/ (single tree), then overlay SQLite.
+ * Load skills from ~/.cornfield/self-evolution/skills/ (single tree), then overlay SQLite.
  */
 export async function loadUnifiedSkillsForInjection(
 	cwd: string,

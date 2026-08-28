@@ -6,7 +6,7 @@
  * 合并（mapWithBundledReference / mergeDynamicModel）时作为 reference 补全元数据，
  * 并在 generate-models 时与动态模型合并后写入 models.json。
  *
- * Generated from ~/.omp/agent/models.yml providers.narwal-plan —— 保持与用户实测
+ * Generated from ~/.cornfield/agent/models.yml providers.narwal-plan —— 保持与用户实测
  * 元数据一致。新增/变更模型时同步更新此处或依赖 discovery 裸条目（元数据为占位值）。
  */
 import { Effort } from "../model-thinking";

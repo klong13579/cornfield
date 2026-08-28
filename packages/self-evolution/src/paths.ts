@@ -2,15 +2,15 @@
  * Canonical filesystem layout for OMP evolution (memory + self-evolution).
  *
  * All state lives under the evolution root:
- * - **User scope** (default): `~/.omp/self-evolution/{memory,skills,evolution.db}`
+ * - **User scope** (default): `~/.cornfield/self-evolution/{memory,skills,evolution.db}`
  * - **Project scope** (`--self-evolution-project-store`): `<cwd>/.omp/evolution/{memory,skills,evolution.db}`
- * - **User evolution utilities**: `~/.omp/agent/evolution` (fit / cross-project; not mixed with project dirs)
+ * - **User evolution utilities**: `~/.cornfield/agent/evolution` (fit / cross-project; not mixed with project dirs)
  */
 import * as os from "node:os";
 import * as path from "node:path";
 import { getAgentDir, getMemoriesDir, getProjectAgentDir } from "@cornfield/utils";
 
-/** Default: user-level `~/.omp/self-evolution` + encoded memory paths. */
+/** Default: user-level `~/.cornfield/self-evolution` + encoded memory paths. */
 export const DEFAULT_EVOLUTION_GLOBAL_STORE = true;
 
 export function resolveGlobalStoreFromFlag(getFlag: (name: string) => boolean | string | undefined): boolean {
@@ -61,7 +61,7 @@ function userHomeDir(): string {
 	return fromEnv && fromEnv.length > 0 ? fromEnv : os.homedir();
 }
 
-/** Global (user-level) evolution root at `~/.omp/self-evolution`. */
+/** Global (user-level) evolution root at `~/.cornfield/self-evolution`. */
 export function resolveGlobalEvolutionDir(): string {
 	return path.join(userHomeDir(), ".omp", "self-evolution");
 }
@@ -70,7 +70,7 @@ export function resolveExternalTraceDir(): string {
 	return path.join(userHomeDir(), ".omp", "traces", "external");
 }
 
-/** Encode `cwd` for per-project memory under `~/.omp/self-evolution/memory/`. */
+/** Encode `cwd` for per-project memory under `~/.cornfield/self-evolution/memory/`. */
 export function encodeProjectPathForGlobalMemory(cwd: string): string {
 	return `--${cwd.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`;
 }
@@ -136,7 +136,7 @@ export function resolveEvolutionPathLayout(cwd: string, globalStore?: boolean): 
 	};
 }
 
-/** Evolution DB + projection root (user `~/.omp/self-evolution` by default). */
+/** Evolution DB + projection root (user `~/.cornfield/self-evolution` by default). */
 export function resolveEvolutionRoot(cwd: string, globalStore?: boolean): string {
 	return resolveEvolutionPathLayout(cwd, globalStore).evolutionDir;
 }

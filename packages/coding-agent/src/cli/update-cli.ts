@@ -12,7 +12,7 @@ import { $ } from "bun";
 import chalk from "chalk";
 import { theme } from "../modes/theme/theme";
 
-const REPO = "can1357/oh-my-pi";
+const REPO = "klong13579/cornfield";
 const PACKAGE = "@cornfield/coding-agent";
 
 interface ReleaseInfo {

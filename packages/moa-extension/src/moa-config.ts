@@ -11,7 +11,7 @@ import type { MoaSettings } from "./types";
  * or a project config file, merged with project winning on conflict.
  *
  * Locations:
- *   - Global:  `~/.omp/agent/moa.{yml,yaml,json}` (first match)
+ *   - Global:  `~/.cornfield/agent/moa.{yml,yaml,json}` (first match)
  *   - Project: walk up from cwd looking for `.git`, then check
  *              `<root>/.omp/moa.{yml,yaml,json}` (first match)
  *

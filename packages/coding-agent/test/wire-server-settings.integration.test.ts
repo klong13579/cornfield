@@ -8,7 +8,7 @@
  *   3. 隔离：hr 的开关修改不影响 ops；ops 的 config.yml 不被污染
  *   4. get_tool_switches 反映 set_config 后的文件值（显示 = 文件）
  *   5. python.toolMode 枚举读写
- *   6. default agent 的 set_config 落 ~/.omp/agent/config.yml（全局 agent 目录）
+ *   6. default agent 的 set_config 落 ~/.cornfield/agent/config.yml（全局 agent 目录）
  *
  * 不发 prompt（不触发计费）。
  */
@@ -28,10 +28,10 @@ type Frame = { type: string; [k: string]: unknown };
 async function setupAgents(isolatedHome: string): Promise<void> {
 	for (const name of ["hr", "ops"]) {
 		const agentDir = path.join(isolatedHome, "agents", name);
-		await fs.mkdir(path.join(agentDir, ".omp"), { recursive: true });
+		await fs.mkdir(path.join(agentDir, ".cornfield"), { recursive: true });
 		await fs.mkdir(path.join(agentDir, "sessions"), { recursive: true });
 		await Bun.write(
-			path.join(agentDir, ".omp", "workspace.json"),
+			path.join(agentDir, ".cornfield", "workspace.json"),
 			JSON.stringify({
 				schemaVersion: 2,
 				id: name,
@@ -39,12 +39,12 @@ async function setupAgents(isolatedHome: string): Promise<void> {
 				type: "agent",
 				root: ".",
 				projectRoot: ".",
-				skillsDir: ".omp/skills/",
+				skillsDir: ".cornfield/skills/",
 				sessionsDir: "sessions/",
 			}),
 		);
 	}
-	const registryDir = path.join(isolatedHome, ".omp", "agent");
+	const registryDir = path.join(isolatedHome, ".cornfield", "agent");
 	await fs.mkdir(registryDir, { recursive: true });
 	await Bun.write(
 		path.join(registryDir, "registry.json"),
@@ -144,12 +144,12 @@ test("serve per-agent 配置：get_tool_switches + set_config 定向写各自 co
 		const pyAfter = await conn.request({ type: "get_tool_switches", sessionId: "hr" });
 		expect((pyAfter.result as { pythonToolMode: string }).pythonToolMode).toBe("bash-only");
 
-		// ── 6. default agent：set_config 落 ~/.omp/agent/config.yml（非 cwd）──
+		// ── 6. default agent：set_config 落 ~/.cornfield/agent/config.yml（非 cwd）──
 		const defSet = await conn.request({ type: "set_config", key: "custom.perAgentProbe", value: 7 });
 		expect(defSet.ok).toBe(true);
 		const defGet = await conn.request({ type: "get_config", key: "custom.perAgentProbe" });
 		expect((defGet.result as { config: unknown }).config).toBe(7);
-		const globalConfigPath = path.join(isolatedHome, ".omp", "agent", "config.yml");
+		const globalConfigPath = path.join(isolatedHome, ".cornfield", "agent", "config.yml");
 		const globalConfig = YAML.parse(await Bun.file(globalConfigPath).text()) as Record<string, unknown>;
 		expect(globalConfig.custom).toEqual({ perAgentProbe: 7 });
 

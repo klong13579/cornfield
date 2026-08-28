@@ -168,7 +168,7 @@ export const createSelfEvolutionExtension: ExtensionFactory = api => {
 		type: "boolean",
 		default: false,
 		description:
-			"Global user store: ~/.omp/self-evolution + memory under ~/.omp/self-evolution/memory/ (enable to override project store)",
+			"Global user store: ~/.cornfield/self-evolution + memory under ~/.cornfield/self-evolution/memory/ (enable to override project store)",
 	});
 	api.registerFlag("self-evolution-project-store", {
 		type: "boolean",

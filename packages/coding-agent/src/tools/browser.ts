@@ -72,7 +72,7 @@ async function loadPuppeteer(): Promise<typeof Puppeteer> {
 /**
  * Lazily download Chromium on first browser launch via @puppeteer/browsers.
  * Skipped when a system Chromium (NixOS) or PUPPETEER_EXECUTABLE_PATH is set.
- * The browser is cached under ~/.omp/puppeteer (getPuppeteerDir).
+ * The browser is cached under ~/.cornfield/puppeteer (getPuppeteerDir).
  */
 let chromiumExecutablePromise: Promise<string | undefined> | undefined;
 async function ensureChromiumExecutable(): Promise<string | undefined> {
@@ -732,7 +732,7 @@ function formatEvaluateResult(value: unknown): string {
 /**
  * --- Browser state persistence (cookies + localStorage) ---
  *
- * Saves login state to ~/.omp/agent/browser-state.json so that sites
+ * Saves login state to ~/.cornfield/agent/browser-state.json so that sites
  * logged in during a previous browser session remain logged in when
  * a new Chromium instance is launched. Cookies are restored eagerly
  * via CDP on browser start; localStorage is injected lazily on first

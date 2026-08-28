@@ -458,7 +458,7 @@ export async function loadProjectContextFiles(
 }
 
 /**
- * Load the user's declarative persona from `~/.omp/user.md` (user-level, shared across all agentDirs).
+ * Load the user's declarative persona from `~/.cornfield/user.md` (user-level, shared across all agentDirs).
  * Returns null when absent (optional file — never an error).
  * This is the user-side analog of mission.md: hand-authored stable identity.
  */

@@ -3,7 +3,7 @@
  *
  * Subcommands (per `packages/coding-agent/docs/agent-design-v1.md` §6.2):
  *   - init <name>     create a new agentDir
- *   - list            list agentDirs under ~/.omp/agents/
+ *   - list            list agentDirs under ~/.cornfield/agents/
  *   - show <name>     print identity / tools / skills / cron summary
  *   - validate <dir>  check always-on files + runtime artifacts
  *
@@ -57,7 +57,8 @@ export default class Agent extends Command {
 
 	static flags = {
 		dir: Flags.string({
-			description: "Directory: parent for init/list/show, or full agentDir for validate (default: ~/.omp/agents)",
+			description:
+				"Directory: parent for init/list/show, or full agentDir for validate (default: ~/.cornfield/agents)",
 		}),
 		template: Flags.string({ description: "Template name (init). Only `default` is supported." }),
 		mission: Flags.string({ description: "Path to a custom mission.md (init)" }),
@@ -72,26 +73,26 @@ export default class Agent extends Command {
 	static examples = [
 		"",
 		"  ======== 创建 ========",
-		"  omp agent init hr-bot                          Create ~/.omp/agents/hr-bot/ with default template",
+		"  omp agent init hr-bot                          Create ~/.cornfield/agents/hr-bot/ with default template",
 		"  omp agent init hr-bot --dir /opt/agents         Custom parent directory",
 		"  omp agent init hr-bot --mission ./mission.md    Seed from existing mission.md",
 		"  omp agent init hr-bot --template default        Explicit template (default only, for now)",
 		"",
 		"  ======== 查看 ========",
-		"  omp agent list                                  List all agentDirs under ~/.omp/agents/",
+		"  omp agent list                                  List all agentDirs under ~/.cornfield/agents/",
 		"  omp agent list --json                           List as JSON",
 		"  omp agent show hr-bot                           Show identity, tools, skills, cron, sessions",
 		"  omp agent show hr-bot --json                    Show as JSON",
 		"",
 		"  ======== 校验 ========",
-		"  omp agent validate --dir ~/.omp/agents/hr-bot        Check always-on + runtime hard deps",
+		"  omp agent validate --dir ~/.cornfield/agents/hr-bot        Check always-on + runtime hard deps",
 		"  omp agent validate --dir .                            Check current directory",
-		"  omp agent validate --dir ~/.omp/agents/hr-bot --json  Output as JSON",
+		"  omp agent validate --dir ~/.cornfield/agents/hr-bot --json  Output as JSON",
 		"  omp agent validate --dir . --fix                         Auto-repair MECE violations + skeleton gaps",
 		"  omp agent validate --dir . --semantic                   Run LLM semantic audit (needs model+key)",
 		"",
 		"  ======== 注册表 ========",
-		"  omp agent register hr3 --dir /path/to/hr3       Add an existing agentDir to ~/.omp/agent/registry.json",
+		"  omp agent register hr3 --dir /path/to/hr3       Add an existing agentDir to ~/.cornfield/agent/registry.json",
 		"  omp agent register hr3 /path/to/hr3              Positional shortcut for --dir",
 		"  omp agent unregister hr3                          Remove hr3 from the registry (does not delete files)",
 		"  omp agent unregister hr3 --delete-files           Also rm -rf the agentDir on disk",

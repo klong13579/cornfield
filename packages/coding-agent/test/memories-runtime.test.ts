@@ -119,7 +119,7 @@ describe("memories runtime", () => {
 		savedXdgState = process.env.XDG_STATE_HOME;
 		process.env.XDG_DATA_HOME = "/nonexistent-xdg-data";
 		process.env.XDG_STATE_HOME = "/nonexistent-xdg-state";
-		// Global evolution store lives at ~/.omp/self-evolution — isolate HOME so the
+		// Global evolution store lives at ~/.cornfield/self-evolution — isolate HOME so the
 		// seeded DB (globalStore=true) never touches the user's real evolution.db.
 		savedHome = process.env.HOME;
 		isolatedHome = await fs.mkdtemp(path.join(os.tmpdir(), "omp-mem-home-"));

@@ -550,7 +550,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 				}
 				case "record_transcribe": {
 					// VOICE-D：浏览器录音上传 → TUI /record 同源转写管线（本地 whisper / record.model，
-					// 自动分块）→ 落 ~/.omp/listen/，与 /record 同目录同格式。不定向 agent（纯数据路径）。
+					// 自动分块）→ 落 ~/.cornfield/listen/，与 /record 同目录同格式。不定向 agent（纯数据路径）。
 					const audio = (command as { audio?: unknown }).audio;
 					if (typeof audio !== "string" || audio.length === 0) {
 						fail("audio required (base64 PCM WAV)");
@@ -588,7 +588,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 					return;
 				}
 				case "listen_list": {
-					// /listen 前端化：列出 ~/.omp/listen/ 全部录音（名称倒序 + 转写全文，前端本地搜索/预览）。
+					// /listen 前端化：列出 ~/.cornfield/listen/ 全部录音（名称倒序 + 转写全文，前端本地搜索/预览）。
 					const recordings = await listListenRecordings();
 					done({ ok: true, recordings });
 					return;
@@ -619,7 +619,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 				}
 				case "get_memory": {
 					// W3 D3：只读记忆投影（memory/user/project 三分区），锚定 serve 进程 cwd 的 default agent。
-					// 记忆根用 getAgentDir()（~/.omp/agent）——default meta 的 agentDir 是 workspace cwd（P1 语义），
+					// 记忆根用 getAgentDir()（~/.cornfield/agent）——default meta 的 agentDir 是 workspace cwd（P1 语义），
 					// 与 sdk.ts 里 memory 扩展的解析不一致，不能用于记忆投影。
 					try {
 						const cwd = process.cwd();
@@ -839,7 +839,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 					return;
 				}
 				// ── 配置读写（票 03）—— per-agent：sessionId 定向到该 agent 的 config.yml ──
-				// default agent 的配置根 ~/.omp/agent（Settings.init 的 agentDir），非 process.cwd()；
+				// default agent 的配置根 ~/.cornfield/agent（Settings.init 的 agentDir），非 process.cwd()；
 				// registry agent 的配置根 <agentDir>/config.yml（与 serve sessionFactory 的
 				// Settings.create({ agentDir }) 同源）。
 				case "get_config": {
@@ -1815,7 +1815,7 @@ async function buildDisabledSkillList(): Promise<DisabledSkillRow[]> {
 	return rows;
 }
 
-/** 读技能目录 SKILL.md 的 description（用户级 agentDir/skills 或项目级 .omp/skills）。 */
+/** 读技能目录 SKILL.md 的 description（用户级 agentDir/skills 或项目级 .cornfield/skills）。 */
 async function readSkillFrontmatterDescription(
 	name: string,
 	cwd: string,
@@ -1823,7 +1823,7 @@ async function readSkillFrontmatterDescription(
 ): Promise<string | undefined> {
 	const candidates = [
 		path.join(agentDir, "skills", name, "SKILL.md"),
-		path.join(cwd, ".omp", "skills", name, "SKILL.md"),
+		path.join(cwd, ".cornfield", "skills", name, "SKILL.md"),
 	];
 	for (const filePath of candidates) {
 		try {
@@ -1886,7 +1886,7 @@ interface RemoteSkillItem {
 	version?: string;
 }
 
-/** 安装根目录：~/.omp/agent/skills（与 native skills 发现一致：skills/<name>/SKILL.md）。 */
+/** 安装根目录：~/.cornfield/agent/skills（与 native skills 发现一致：skills/<name>/SKILL.md）。 */
 function remoteSkillsDir(): string {
 	return path.join(getAgentDir(), "skills");
 }
@@ -1976,7 +1976,7 @@ async function listRemoteSkills(source: string): Promise<RemoteSkillItem[]> {
 }
 
 /**
- * 安装一个远程 skill/plugin：resolve 条目的实际 source 目录后拷到 ~/.omp/agent/skills/<name>。
+ * 安装一个远程 skill/plugin：resolve 条目的实际 source 目录后拷到 ~/.cornfield/agent/skills/<name>。
  * 幂等：目标目录已存在 → alreadyInstalled:true，不重复拷贝/克隆。
  */
 async function installRemoteSkill(source: string, name: string): Promise<{ path: string; alreadyInstalled: boolean }> {
@@ -2046,7 +2046,7 @@ async function readSessionMessages(sessionFile: string): Promise<{ messages: Age
 	return { messages };
 }
 
-// ── MCP 服务器管理（读写 ~/.omp/agent/mcp.json + stdio 连通性测试）──
+// ── MCP 服务器管理（读写 ~/.cornfield/agent/mcp.json + stdio 连通性测试）──
 
 const MCP_TEST_TIMEOUT_MS = 8_000;
 
@@ -2380,7 +2380,7 @@ async function buildMemoryProjection(
 	project: MemoryProjectFileProjection | null;
 	memoryStore: { dbPath: string; sections: MemorySectionProjection[]; totalEntries: number };
 }> {
-	// user 区：~/.omp/user.md（身份画像；与 identity 工具同路径解析）
+	// user 区：~/.cornfield/user.md（身份画像；与 identity 工具同路径解析）
 	const userPath = path.join(getConfigRootDir(), "user.md");
 	const user = await readMemoryFileClipped(userPath);
 

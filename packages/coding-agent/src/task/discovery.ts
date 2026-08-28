@@ -2,10 +2,10 @@
  * Agent discovery from filesystem.
  *
  * Discovers agent definitions from:
- *   - ~/.omp/agent/agents/*.md (user-level, primary)
+ *   - ~/.cornfield/agent/agents/*.md (user-level, primary)
  *   - ~/.pi/agent/agents/*.md (user-level, legacy)
  *   - ~/.claude/agents/*.md (user-level, legacy)
- *   - .omp/agents/*.md (project-level, primary)
+ *   - .cornfield/agents/*.md (project-level, primary)
  *   - .pi/agents/*.md (project-level, legacy)
  *   - .claude/agents/*.md (project-level, legacy)
  *

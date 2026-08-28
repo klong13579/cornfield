@@ -7,7 +7,7 @@ import { useSession } from "../../state/use-session";
  * 记忆面板（W3 D3）—— serve get_memory 只读投影，三分区：
  * - 记忆库（memory）：self-evolution vector_embeddings 分区（importance 降序）
  * - 项目（project）：当前项目 memories 目录的 MEMORY.md / memory_summary.md / raw_memories.md
- * - 用户（user）：~/.omp/user.md 身份画像
+ * - 用户（user）：~/.cornfield/user.md 身份画像
  *
  * 无 mock：任一区取不到（null / 空）渲染对应空态，绝不回退假数据。
  */

@@ -7,7 +7,7 @@ import type { AgentMeta } from "./session-registry";
  * 历史会话索引（P4）——纯文件扫描，不实例化任何 session。
  *
  * 目录布局（两种都扫，递归扫全目录树里的 .jsonl）：
- * - default agent：getSessionsDir() 根（~/.omp/agent/sessions）→ <encoded-cwd>/by-date/<date>/ 下的 .jsonl
+ * - default agent：getSessionsDir() 根（~/.cornfield/agent/sessions）→ <encoded-cwd>/by-date/<date>/ 下的 .jsonl
  * - registry agent：<agentDir>/sessions/ → by-date/<date>/ 下（serve 写）或 <safeConvId>.jsonl 扁平（gateway 写）
  *
  * 解析策略（不整读大文件，不逐行 JSON.parse）：

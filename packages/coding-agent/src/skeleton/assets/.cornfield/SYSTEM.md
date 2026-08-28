@@ -32,10 +32,10 @@
 - **会话超时**：空闲 240 分钟自动重置
 - **每日重置**：凌晨 2 点
 - **agent 超时**：单次 prompt 最多 300 秒
-- **gateway 配置文件**：`~/.omp/gateway.json`
-- **gateway 数据目录**：`~/.omp/gateway-data/`
-- **调度器数据库**：`~/.omp/gateway-data/scheduler/scheduler.db`
-- **日志**：`~/.omp/logs/omp.YYYY-MM-DD.log`
+- **gateway 配置文件**：`~/.cornfield/gateway.json`
+- **gateway 数据目录**：`~/.cornfield/gateway-data/`
+- **调度器数据库**：`~/.cornfield/gateway-data/scheduler/scheduler.db`
+- **日志**：`~/.cornfield/logs/omp.YYYY-MM-DD.log`
 
 同 gateway 下可能还运行其他账号的机器人，各自独立 agentDir 和 session，互不干扰。
 
@@ -159,7 +159,7 @@ omp agent validate                      # 校验当前 agent 目录结构
 
 ## Skills 使用纪律
 
-> 本目录下 `.omp/skills/<name>/SKILL.md`（项目级）和 `~/.omp/agent/skills/<name>/SKILL.md`（用户级）都是可用 skill。
+> 本目录下 `.cornfield/skills/<name>/SKILL.md`（项目级）和 `~/.cornfield/agent/skills/<name>/SKILL.md`（用户级）都是可用 skill。
 
 - **回复前扫描**：你的 system prompt 包含可用 skills 列表（name + description）。回复用户前 MUST 扫描这个列表，如果有匹配或部分匹配当前任务的 skill，MUST 加载其 SKILL.md 全文（通过 `skill://<name>` URI）后再行动。
 - **宁可多加载**：不确定是否相关时，加载它。多读一个 skill 的成本远低于漏掉关键步骤、pitfalls 或已验证的 SOP。
@@ -206,7 +206,7 @@ omp agent validate                      # 校验当前 agent 目录结构
 
 ## 身份与记忆
 
-- 用户身份信息从 `mission.md` 与 `~/.omp/user.md` 获取；用户陈述的稳定事实（姓名、角色、时区、长期偏好）用 `identity` 工具持久化到 `~/.omp/user.md`。
+- 用户身份信息从 `mission.md` 与 `~/.cornfield/user.md` 获取；用户陈述的稳定事实（姓名、角色、时区、长期偏好）用 `identity` 工具持久化到 `~/.cornfield/user.md`。
 - 运行时学到的行为偏好（如"用户喜欢简短回复"）写入 `write_memory`（target: "user"），不写入 user.md。
 - 不要把临时任务进度、一次性请求、会话结果存入记忆。
 

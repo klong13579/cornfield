@@ -110,7 +110,7 @@ describe("W3 D3 — serve get_memory 只读记忆投影", () => {
 			// project 区：canonical evolution 目录（self-evolution/memory）优先；
 			// 有效 cwd 经 resolveServeProjectRoot 归一到 repo 根。memoryRoot 应指向 seed 的 canonical 目录。
 			expect(result.project?.memoryRoot).toBe(
-				path.join(isolatedHome, ".omp", "self-evolution", "memory", encodeProjectPath(repoRoot)),
+				path.join(isolatedHome, ".cornfield", "self-evolution", "memory", encodeProjectPath(repoRoot)),
 			);
 			expect(result.project?.memoryMd?.content).toContain("项目记忆 seed");
 			expect(result.project?.summaryMd?.content).toContain("summary seed");
@@ -143,10 +143,10 @@ beforeAll(async () => {
 	savedHome = process.env.HOME;
 	process.env.HOME = isolatedHome;
 
-	// user 区 seed：~/.omp/user.md
-	await fs.mkdir(path.join(isolatedHome, ".omp"), { recursive: true });
+	// user 区 seed：~/.cornfield/user.md
+	await fs.mkdir(path.join(isolatedHome, ".cornfield"), { recursive: true });
 	await Bun.write(
-		path.join(isolatedHome, ".omp", "user.md"),
+		path.join(isolatedHome, ".cornfield", "user.md"),
 		"# 测试用户画像\n\n- name: 测试用户\n- note: seed content for wire e2e\n",
 	);
 
@@ -155,7 +155,7 @@ beforeAll(async () => {
 	serveCwd = `${repoRootLocal}/packages/coding-agent`;
 
 	// project 区 seed：canonical evolution 目录 $HOME/self-evolution/memory/<encoded repoRoot>/{MEMORY.md, memory_summary.md}
-	const memoryRoot = path.join(isolatedHome, ".omp", "self-evolution", "memory", encodeProjectPath(repoRoot));
+	const memoryRoot = path.join(isolatedHome, ".cornfield", "self-evolution", "memory", encodeProjectPath(repoRoot));
 	await fs.mkdir(memoryRoot, { recursive: true });
 	await Bun.write(path.join(memoryRoot, "MEMORY.md"), "# Memory Report\n\n## project\n\n- 项目记忆 seed\n");
 	await Bun.write(path.join(memoryRoot, "memory_summary.md"), "# Memory Summary\n\n- summary seed\n");

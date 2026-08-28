@@ -175,7 +175,7 @@ async function login(provider: OAuthProvider): Promise<void> {
 					},
 				});
 				storage.saveApiKey(provider, apiKey);
-				console.log(`\nAPI key saved to ~/.omp/agent/agent.db`);
+				console.log(`\nAPI key saved to ~/.cornfield/agent/agent.db`);
 				return;
 			}
 			case "tavily": {
@@ -191,7 +191,7 @@ async function login(provider: OAuthProvider): Promise<void> {
 					},
 				});
 				storage.saveApiKey(provider, apiKey);
-				console.log(`\nAPI key saved to ~/.omp/agent/agent.db`);
+				console.log(`\nAPI key saved to ~/.cornfield/agent/agent.db`);
 				return;
 			}
 			case "parallel": {
@@ -207,7 +207,7 @@ async function login(provider: OAuthProvider): Promise<void> {
 					},
 				});
 				storage.saveApiKey(provider, apiKey);
-				console.log(`\nAPI key saved to ~/.omp/agent/agent.db`);
+				console.log(`\nAPI key saved to ~/.cornfield/agent/agent.db`);
 				return;
 			}
 
@@ -235,7 +235,7 @@ async function login(provider: OAuthProvider): Promise<void> {
 					},
 				});
 				storage.saveApiKey(provider, apiKey);
-				console.log(`\nAPI key saved to ~/.omp/agent/agent.db`);
+				console.log(`\nAPI key saved to ~/.cornfield/agent/agent.db`);
 				return;
 			}
 
@@ -252,7 +252,7 @@ async function login(provider: OAuthProvider): Promise<void> {
 					},
 				});
 				storage.saveApiKey(provider, apiKey);
-				console.log(`\nAPI key saved to ~/.omp/agent/agent.db`);
+				console.log(`\nAPI key saved to ~/.cornfield/agent/agent.db`);
 				return;
 			}
 
@@ -269,7 +269,7 @@ async function login(provider: OAuthProvider): Promise<void> {
 					},
 				});
 				storage.saveApiKey(provider, apiKey);
-				console.log(`\nAPI key saved to ~/.omp/agent/agent.db`);
+				console.log(`\nAPI key saved to ~/.cornfield/agent/agent.db`);
 				return;
 			}
 			case "ollama-cloud": {
@@ -285,7 +285,7 @@ async function login(provider: OAuthProvider): Promise<void> {
 					},
 				});
 				storage.saveApiKey(provider, apiKey);
-				console.log(`\nAPI key saved to ~/.omp/agent/agent.db`);
+				console.log(`\nAPI key saved to ~/.cornfield/agent/agent.db`);
 				return;
 			}
 
@@ -302,7 +302,7 @@ async function login(provider: OAuthProvider): Promise<void> {
 					},
 				});
 				storage.saveApiKey(provider, apiKey);
-				console.log(`\nAPI key saved to ~/.omp/agent/agent.db`);
+				console.log(`\nAPI key saved to ~/.cornfield/agent/agent.db`);
 				return;
 			}
 
@@ -319,7 +319,7 @@ async function login(provider: OAuthProvider): Promise<void> {
 					},
 				});
 				storage.saveApiKey(provider, apiKey);
-				console.log(`\nAPI key saved to ~/.omp/agent/agent.db`);
+				console.log(`\nAPI key saved to ~/.cornfield/agent/agent.db`);
 				return;
 			}
 
@@ -329,7 +329,7 @@ async function login(provider: OAuthProvider): Promise<void> {
 
 		storage.saveOAuth(provider, credentials);
 
-		console.log(`\nCredentials saved to ~/.omp/agent/agent.db`);
+		console.log(`\nCredentials saved to ~/.cornfield/agent/agent.db`);
 	} finally {
 		storage.close();
 		rl.close();

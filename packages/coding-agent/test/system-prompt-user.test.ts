@@ -7,7 +7,7 @@ import { buildSystemPrompt } from "../src/system-prompt";
 
 /**
  * Contract: buildSystemPrompt injects the user's declarative persona from
- * `~/.omp/user.md` (user-level configRoot) into a `<user>` block, and omits it when absent.
+ * `~/.cornfield/user.md` (user-level configRoot) into a `<user>` block, and omits it when absent.
  *
  * Isolation: `setConfigRootDir(tempDir)` repoints getConfigRootDir() at a per-test temp
  * directory; cwd is also the temp dir so AGENTS.md / context discovery is empty.

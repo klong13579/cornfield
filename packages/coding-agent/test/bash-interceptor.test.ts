@@ -44,8 +44,8 @@ describe("bash-interceptor: skill shell command", () => {
 		expect(result.block).toBe(false);
 	});
 
-	it("does NOT block `ls ~/.omp/agent/skills/` (legitimate discovery path)", () => {
-		const result = checkBashInterception("ls ~/.omp/agent/skills/", ALL_TOOLS);
+	it("does NOT block `ls ~/.cornfield/agent/skills/` (legitimate discovery path)", () => {
+		const result = checkBashInterception("ls ~/.cornfield/agent/skills/", ALL_TOOLS);
 		expect(result.block).toBe(false);
 	});
 

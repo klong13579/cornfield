@@ -156,7 +156,7 @@ import { buildNamedToolChoice } from "./utils/tool-choice";
 export interface CreateAgentSessionOptions {
 	/** Working directory for project-local discovery. Default: getProjectDir() */
 	cwd?: string;
-	/** Global config directory. Default: ~/.omp/agent */
+	/** Global config directory. Default: ~/.cornfield/agent */
 	agentDir?: string;
 	/** Spawns to allow. Default: "*" */
 	spawns?: string;
@@ -205,7 +205,7 @@ export interface CreateAgentSessionOptions {
 	rules?: Rule[];
 	/** Context files (AGENTS.md content). Default: discovered walking up from cwd */
 	contextFiles?: Array<{ path: string; content: string }>;
-	/** Prompt templates. Default: discovered from cwd/.omp/prompts/ + agentDir/prompts/ */
+	/** Prompt templates. Default: discovered from cwd/.cornfield/prompts/ + agentDir/prompts/ */
 	promptTemplates?: PromptTemplate[];
 	/** File-based slash commands. Default: discovered from commands/ directories */
 	slashCommands?: FileSlashCommand[];
@@ -1988,7 +1988,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			skillDirs.add(path.join(os.homedir(), ".agents", "skills"));
 
 			// Project-level skill directories (cwd only)
-			// Native provider: <cwd>/.omp/skills/ — gateway agent skills live here
+			// Native provider: <cwd>/.cornfield/skills/ — gateway agent skills live here
 			skillDirs.add(path.join(cwd, configName, "skills"));
 			// Agents provider: walk-up .agent/.agents — regular dev sessions
 			skillDirs.add(path.join(cwd, ".agent", "skills"));

@@ -29,7 +29,7 @@ describe("skill hot-reload", () => {
 	});
 
 	it("rebuilds system prompt when SKILL.md changes", async () => {
-		const skillDir = path.join(tempDir, ".omp", "skills", "my-test-skill");
+		const skillDir = path.join(tempDir, ".cornfield", "skills", "my-test-skill");
 		fs.mkdirSync(skillDir, { recursive: true });
 
 		const initialContent = `---
@@ -84,7 +84,7 @@ This is the updated skill content version 2.
 	});
 
 	it("does not reload when skills are explicitly provided (no watcher)", async () => {
-		const skillDir = path.join(tempDir, ".omp", "skills", "static-skill");
+		const skillDir = path.join(tempDir, ".cornfield", "skills", "static-skill");
 		fs.mkdirSync(skillDir, { recursive: true });
 
 		fs.writeFileSync(

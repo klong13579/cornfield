@@ -6,8 +6,8 @@
  *
  * Instead these tests validate the structural contract that listClaudePluginRoots
  * depends on:
- *   1. OMP registry lives at path.join(home, ".omp", "plugins", "installed_plugins.json")
- *      (matches getConfigDirName() == ".omp")
+ *   1. OMP registry lives at path.join(home, ".cornfield", "plugins", "installed_plugins.json")
+ *      (matches getConfigDirName() == ".cornfield")
  *   2. The registry format passes the same validator that parseClaudePluginsRegistry uses
  *   3. readInstalledPluginsRegistry / writeInstalledPluginsRegistry produce files that
  *      satisfy that validator
@@ -52,9 +52,9 @@ function validateClaudeRegistryFormat(content: string): Record<string, unknown> 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 // Matches getConfigDirName() — single source of truth is in @cornfield/utils,
-// but we know the value is ".omp" and hardcoding it here keeps tests free of
+// but we know the value is ".cornfield" and hardcoding it here keeps tests free of
 // native-addon transitive imports.
-const OMP_CONFIG_DIR = ".omp";
+const OMP_CONFIG_DIR = ".cornfield";
 
 function makeEntry(installPath: string, version = "1.0.0"): InstalledPluginEntry {
 	return {
@@ -69,7 +69,7 @@ function makeEntry(installPath: string, version = "1.0.0"): InstalledPluginEntry
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
 let tmpHome: string;
-/** ~/.omp/plugins/installed_plugins.json inside tmpHome */
+/** ~/.cornfield/plugins/installed_plugins.json inside tmpHome */
 let ompRegistryPath: string;
 
 beforeEach(() => {
@@ -85,10 +85,10 @@ afterEach(() => {
 // ── Path contract ─────────────────────────────────────────────────────────────
 
 describe("OMP registry path contract", () => {
-	it("OMP registry lives at home/.omp/plugins/installed_plugins.json", () => {
+	it("OMP registry lives at home/.cornfield/plugins/installed_plugins.json", () => {
 		// This is the path that listClaudePluginRoots reads.
 		// Any change to this path must be reflected in helpers.ts.
-		const expected = path.join(tmpHome, ".omp", "plugins", "installed_plugins.json");
+		const expected = path.join(tmpHome, ".cornfield", "plugins", "installed_plugins.json");
 		expect(ompRegistryPath).toBe(expected);
 	});
 
@@ -96,7 +96,7 @@ describe("OMP registry path contract", () => {
 		// Validate our hardcoded constant matches getConfigDirName().
 		// If getConfigDirName() ever changes, this assertion will fail and
 		// we'll know the path constant here must be updated too.
-		expect(OMP_CONFIG_DIR).toBe(".omp");
+		expect(OMP_CONFIG_DIR).toBe(".cornfield");
 	});
 });
 

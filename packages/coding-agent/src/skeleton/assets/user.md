@@ -5,7 +5,7 @@
 > Learned preferences belong in write_memory (target: "user"), not here.
 >
 > This is the **agentDir-level** user profile (project-scoped persona).
-> It supplements the **user-level** `~/.omp/user.md` (which is loaded by the
+> It supplements the **user-level** `~/.cornfield/user.md` (which is loaded by the
 > system prompt into the `<user>` block at startup, see `loadUserProfile`).
 > If both exist, agentDir-level wins for this project; user-level stays the
 > cross-project baseline.

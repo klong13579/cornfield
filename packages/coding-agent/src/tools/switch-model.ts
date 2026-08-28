@@ -72,7 +72,7 @@ export class SwitchModelTool implements AgentTool<typeof switchModelSchema, Swit
 		if (models.length === 0) {
 			throw new ToolError(
 				"No models available. Check provider configuration and API keys in " +
-					"~/.omp/agent/config.yml and ~/.omp/agent/auth.db.",
+					"~/.cornfield/agent/config.yml and ~/.cornfield/agent/auth.db.",
 			);
 		}
 

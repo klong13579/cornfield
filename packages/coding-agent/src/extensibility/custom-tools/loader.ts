@@ -189,7 +189,7 @@ export async function loadCustomTools(
 /**
  * Discover and load tools from standard locations via capability system:
  * 1. User and project tools discovered by capability providers
- * 2. Installed plugins (~/.omp/plugins/node_modules/*)
+ * 2. Installed plugins (~/.cornfield/plugins/node_modules/*)
  * 3. Explicitly configured paths from settings or CLI
  *
  * @param configuredPaths - Explicit paths from settings.json and CLI --tool flags
@@ -229,7 +229,7 @@ export async function discoverAndLoadCustomTools(
 		});
 	}
 
-	// 2. Plugin tools: ~/.omp/plugins/node_modules/*/
+	// 2. Plugin tools: ~/.cornfield/plugins/node_modules/*/
 	for (const pluginPath of await getAllPluginToolPaths(cwd)) {
 		addPath(pluginPath, { provider: "plugin", providerName: "Plugin", level: "user" });
 	}

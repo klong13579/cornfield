@@ -19,9 +19,9 @@
 | `TODO.md`                            | CONTEXT (current task)           | always-on                                                            |
 | `knowledge/external-workspaces.md`   | CONTEXT (data sources)           | always-on                                                            |
 | `prompt-includes.json`               | RUNTIME (injection manifest)     | read at startup                                                      |
-| `.omp/config.yml`                    | RUNTIME (model/role/theme)       | read at startup (hard dependency)                                    |
-| `.omp/SYSTEM.md`                     | RUNTIME (gateway system prompt)  | overrides OMP built-in prompt — gateway agent baseline               |
-| `.omp/skills/<name>/SKILL.md`        | BEHAVIOR (on-demand)             | via `skill://<name>` URI                                             |
+| `.cornfield/config.yml`                    | RUNTIME (model/role/theme)       | read at startup (hard dependency)                                    |
+| `.cornfield/SYSTEM.md`                     | RUNTIME (gateway system prompt)  | overrides OMP built-in prompt — gateway agent baseline               |
+| `.cornfield/skills/<name>/SKILL.md`        | BEHAVIOR (on-demand)             | via `skill://<name>` URI                                             |
 || `knowledge/handbook/*`               | CONTEXT (on-demand)              | read by agent (user-created)                                         |
 || `raw/`                               | CONTEXT (data ingress)           | raw/unstructured data (user-created)                                 |
 || `wiki/`                              | CONTEXT (structured knowledge)   | curated wiki pages (user-created)                                    |
@@ -41,10 +41,10 @@
 | 身份/角色/职责 | `mission.md` | SYSTEM.md 不重复定义身份 |
 | 工具使用规则（per-tool MUST） | `TOOLS.md` | SYSTEM.md 不列具体工具规则 |
 | 安全硬约束（MUST NOT） | `AGENTS.md` hard-constraints | SYSTEM.md 不重复同等约束 |
-| 工作纪律/风格原则（建议语气） | `.omp/SYSTEM.md` | MUST/NOT 级别的硬约束放 AGENTS.md |
+| 工作纪律/风格原则（建议语气） | `.cornfield/SYSTEM.md` | MUST/NOT 级别的硬约束放 AGENTS.md |
 | 领域知识/研发文档 | `knowledge/handbook/*` | mission.md 只放索引不放内容 |
 | 外部数据源登记 | `knowledge/external-workspaces.md` | mission.md 只引用不重列 |
-| 一次性 procedure / SOP | `.omp/skills/<name>/SKILL.md` | TOOLS.md 只放约束不放命令 |
+| 一次性 procedure / SOP | `.cornfield/skills/<name>/SKILL.md` | TOOLS.md 只放约束不放命令 |
 | 定时任务 | `cron/tasks/*.json5` | 通过 `cron` host tool 注册 |
 
 修改任何 prompt 文件前 **MUST** 检查：要加的内容是否已在另一个文件里定义。如是，改为引用而非复制内容。
@@ -56,8 +56,8 @@
 - `TOOLS.md` — add tool-level `MUST` / `MUST NOT` rules co-located with each tool (design §4 principle 2).
 - `TODO.md` — track the current task; updated by the agent as work progresses.
 - `prompt-includes.json` — change which files are injected as always-on.
-- `.omp/config.yml` — change `modelRoles.default` to switch the active model.
-- `.omp/SYSTEM.md` — gateway agent system prompt baseline; edit to customize behavior. Leave empty to fall back to OMP's built-in prompt.
+- `.cornfield/config.yml` — change `modelRoles.default` to switch the active model.
+- `.cornfield/SYSTEM.md` — gateway agent system prompt baseline; edit to customize behavior. Leave empty to fall back to OMP's built-in prompt.
 
 ## Global hard constraints
 

@@ -3,8 +3,8 @@
  *
  * Discovers agent definitions from:
  *   - Bundled agents (shipped with omp-coding-agent)
- *   - ~/.omp/agent/agents/*.md (user-level)
- *   - .omp/agents/*.md (project-level)
+ *   - ~/.cornfield/agent/agents/*.md (user-level)
+ *   - .cornfield/agents/*.md (project-level)
  *
  * Supports:
  *   - Single agent execution

@@ -7,7 +7,7 @@
  *
  * Post-creation repair:
  *   - Legacy `.agent/SYSTEM.md` (deprecated path) is detected and removed.
- *   - `.omp/SYSTEM.md` is force-created from the skeleton template if missing.
+ *   - `.cornfield/SYSTEM.md` is force-created from the skeleton template if missing.
  *
  * I/O failures bubble to the caller (gateway install / omp agent init) which decides
  * whether to abort or retry.
@@ -82,13 +82,13 @@ async function removeLegacyAgentSystemMd(agentDir: string): Promise<void> {
 }
 
 /**
- * Ensure `.omp/SYSTEM.md` exists, creating it from the skeleton template if missing.
+ * Ensure `.cornfield/SYSTEM.md` exists, creating it from the skeleton template if missing.
  */
 async function ensureOmpSystemMd(agentDir: string): Promise<void> {
-	const ompSystemMdEntry = SKELETON_FILES.find(f => f.relPath === ".omp/SYSTEM.md");
+	const ompSystemMdEntry = SKELETON_FILES.find(f => f.relPath === ".cornfield/SYSTEM.md");
 	if (!ompSystemMdEntry) return;
 
-	const targetPath = path.join(agentDir, ".omp/SYSTEM.md");
+	const targetPath = path.join(agentDir, ".cornfield/SYSTEM.md");
 	try {
 		await fs.access(targetPath);
 	} catch {
@@ -207,20 +207,20 @@ function splitSkeletonYamlIntoBlocks(content: string): Array<{ key: string; bloc
 /**
  * Additively reconcile existing skeleton files with the latest skeleton template.
  *
- * - `.omp/config.yml`: YAML key-level merge — adds skeleton keys that don't exist
+ * - `.cornfield/config.yml`: YAML key-level merge — adds skeleton keys that don't exist
  *   in the existing config (text-level, preserves comments and formatting).
  * - Other skeleton files: if the file's first significant line matches the skeleton
  *   template, overwrite with latest content. Customized files (first line differs)
  *   are left untouched.
  */
 export async function reconcileSkeletonFiles(agentDir: string): Promise<void> {
-	const configEntry = SKELETON_FILES.find(f => f.relPath === ".omp/config.yml");
+	const configEntry = SKELETON_FILES.find(f => f.relPath === ".cornfield/config.yml");
 	if (configEntry) {
 		await reconcileConfigYml(path.join(agentDir, configEntry.relPath), configEntry.content);
 	}
 
 	for (const entry of SKELETON_FILES) {
-		if (entry.relPath === ".omp/config.yml") continue; // handled above
+		if (entry.relPath === ".cornfield/config.yml") continue; // handled above
 		if (USER_CUSTOMIZED_FILES.has(entry.relPath)) continue; // user content, never overwrite
 		const filePath = path.join(agentDir, entry.relPath);
 		if (await isAtSkeletonBaseline(filePath, entry.content)) {
@@ -231,7 +231,7 @@ export async function reconcileSkeletonFiles(agentDir: string): Promise<void> {
 }
 
 /**
- * Reconcile `.omp/config.yml`: append skeleton key blocks whose top-level keys
+ * Reconcile `.cornfield/config.yml`: append skeleton key blocks whose top-level keys
  * don't exist in the current config. Preserves all existing content including
  * comments, user-chosen model roles, custom theme, etc.
  */

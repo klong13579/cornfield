@@ -271,7 +271,7 @@ function createExtension(extensionPath: string, resolvedPath: string): Extension
 }
 
 async function importExtensionModule(resolvedPath: string): Promise<{ default?: ExtensionFactory }> {
-	// Direct Bun import — no Bun.build / .omp/cache/extension-bundles middleman.
+	// Direct Bun import — no Bun.build / .cornfield/cache/extension-bundles middleman.
 	// First-party extensions (moa, swarm, autoresearch) ship via inlineFactories
 	// in sdk.ts; path-based extensions load from their resolved entry files.
 	return import(pathToFileURL(resolvedPath).href) as Promise<{ default?: ExtensionFactory }>;

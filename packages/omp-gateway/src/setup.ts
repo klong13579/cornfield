@@ -133,7 +133,7 @@ export async function runInteractiveSetup(opts: SetupOptions = {}): Promise<Setu
 
 	const robotCode = (await ask(`RobotCode (可选, 默认同 AppKey) [${appKey}]: `)).trim() || appKey;
 	// Model is configured in agentDir/.cornfield/config.yml (modelRoles.default)
-	const agentDirInput = (await ask(`Agent 工作目录 (可选, 默认 ~/.omp/agents/${accountId}/) []: `)).trim();
+	const agentDirInput = (await ask(`Agent 工作目录 (可选, 默认 ~/.cornfield/agents/${accountId}/) []: `)).trim();
 	// Mission file: optional. If provided, content is seeded into <agentDir>/mission.md
 	// before the skeleton runs, so the user's identity wins over the default template.
 	const missionInput = (await ask(`Mission 文件 (可选, 直接回车用默认) []: `)).trim();

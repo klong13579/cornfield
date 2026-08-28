@@ -5,7 +5,7 @@ import * as lspmux from "../src/lsp/lspmux";
  * Unit tests for the lspmux integration (LSP server multiplexing).
  *
  * The launchd-branch tests mock Bun.spawn / Bun.write / Bun.file so they
- * never touch the real LaunchAgents dir, launchctl, or ~/.omp/logs.
+ * never touch the real LaunchAgents dir, launchctl, or ~/.cornfield/logs.
  */
 
 function fakeProc(exit: number = 0) {

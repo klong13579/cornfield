@@ -113,7 +113,7 @@ export class Settings {
 	#global: RawSettings = {};
 	/** Project settings from .claude/settings.yml etc */
 	#project: RawSettings = {};
-	/** Whether a project-level .omp/config.yml exists */
+	/** Whether a project-level .cornfield/config.yml exists */
 	#hasProjectConfigFile = false;
 
 	/** Runtime overrides (not persisted) */
@@ -374,7 +374,7 @@ export class Settings {
 	/**
 	 * Set a model role (helper for modelRoles record).
 	 *
-	 * Writes to project level if a project-level .omp/config.yml exists (so reads
+	 * Writes to project level if a project-level .cornfield/config.yml exists (so reads
 	 * and writes are consistent — project overrides global in the merged view).
 	 * Otherwise writes to global.
 	 */
@@ -544,7 +544,7 @@ export class Settings {
 	async #loadProjectSettings(): Promise<RawSettings> {
 		let merged: RawSettings = {};
 
-		// Load per-directory .omp/config.yml (project-level override of global config.yml)
+		// Load per-directory .cornfield/config.yml (project-level override of global config.yml)
 		const projectConfigPath = path.join(this.#cwd, CONFIG_DIR_NAME, "config.yml");
 		this.#hasProjectConfigFile = await Bun.file(projectConfigPath)
 			.exists()
@@ -717,7 +717,7 @@ export class Settings {
 	}
 
 	/**
-	 * Persist project-level settings to .omp/config.yml.
+	 * Persist project-level settings to .cornfield/config.yml.
 	 * Reads the current file first to preserve external changes,
 	 * then applies the in-memory #project snapshot on top.
 	 */

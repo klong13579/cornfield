@@ -16,10 +16,10 @@
 | 身份/角色/职责 | `mission.md` | SYSTEM.md 不重复定义身份 |
 | 工具使用规则（per-tool MUST） | `TOOLS.md` | SYSTEM.md 不列具体工具规则 |
 | 安全硬约束（MUST NOT） | `AGENTS.md` hard-constraints | SYSTEM.md 不重复同等约束 |
-| 工作纪律/完成纪律/IM沟通 | `.omp/SYSTEM.md` | mission.md 不重复通用纪律 |
+| 工作纪律/完成纪律/IM沟通 | `.cornfield/SYSTEM.md` | mission.md 不重复通用纪律 |
 | 领域知识/研发文档 | `knowledge/handbook/*` | mission.md 只放索引不放内容 |
 | 外部数据源登记 | `knowledge/external-workspaces.md` | mission.md 只引用不重列 |
-| dws 命令速查 | `.omp/skills/dws/SKILL.md` | TOOLS.md 只放约束不放命令 |
+| dws 命令速查 | `.cornfield/skills/dws/SKILL.md` | TOOLS.md 只放约束不放命令 |
 
 ### 五分类体系
 
@@ -34,7 +34,7 @@
 ## 违规类型
 
 ### S1: identity-conflict
-`mission.md` 与 `.omp/SYSTEM.md` 对 agent 身份的定义矛盾。例如 mission.md 说身份是「X 助手」，SYSTEM.md 说身份是「Y」，且两者互相排斥。身份应只在 mission.md 定义（或 profile.yaml）。
+`mission.md` 与 `.cornfield/SYSTEM.md` 对 agent 身份的定义矛盾。例如 mission.md 说身份是「X 助手」，SYSTEM.md 说身份是「Y」，且两者互相排斥。身份应只在 mission.md 定义（或 profile.yaml）。
 
 ### S2: content-duplication
 同一关注点的规则在多个文件重复定义（非引用）。例如工作纪律在 mission.md 和 SYSTEM.md 各写一遍，而非一处理论一处理引用。

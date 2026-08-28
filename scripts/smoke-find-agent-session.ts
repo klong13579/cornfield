@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * e2e smoke for findAgentSessionPath against the real ~/.omp/agent/sessions/ tree.
+ * e2e smoke for findAgentSessionPath against the real ~/.cornfield/agent/sessions/ tree.
  *
  * Verifies:
  *  1. Recent time window picks up the new layout (by-date/<today>/<HHMMSS>__<8hex>.jsonl)
@@ -14,7 +14,7 @@ import * as path from "node:path";
 import * as os from "node:os";
 import * as fs from "node:fs";
 
-const sessionsRoot = path.join(os.homedir(), ".omp", "agent", "sessions");
+const sessionsRoot = path.join(os.homedir(), ".cornfield", "agent", "sessions");
 const projectDir = path.join(sessionsRoot, "-Desktop-Narwal-oh-my-pi");
 
 let pass = 0;
@@ -94,7 +94,7 @@ console.log("\n[5] Wide window (last 7 days): picks the file with the latest mti
 			}
 			return out;
 		};
-		const sessionsRoot = path.join(os.homedir(), ".omp", "agent", "sessions");
+		const sessionsRoot = path.join(os.homedir(), ".cornfield", "agent", "sessions");
 		const all = walk(sessionsRoot);
 		const winnerMtime = statSync(found).mtimeMs;
 		const anyNewer = all.some(f => statSync(f).mtimeMs > winnerMtime && statSync(f).mtimeMs <= now + 60_000 && statSync(f).mtimeMs >= sevenDaysAgo);

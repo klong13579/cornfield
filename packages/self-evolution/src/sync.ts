@@ -1,7 +1,7 @@
 /**
  * Sync Evolution Skills from SQLite to Files
  *
- * Exports skills to ~/.omp/self-evolution/skills/*.md per prompts/skill-template.md.
+ * Exports skills to ~/.cornfield/self-evolution/skills/*.md per prompts/skill-template.md.
  * Evolution metrics live in YAML only; the body is agent-facing content.
  */
 

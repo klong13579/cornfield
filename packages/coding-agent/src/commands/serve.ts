@@ -6,7 +6,7 @@
  *
  * P3：serve 从单 AgentSession 升级为会话注册表。
  * - default agent：启动即建（cwd 进程，P1 语义不变）
- * - 其它 agent：从 ~/.omp/agent/registry.json 只读加载元数据，收到 attach/switch_session
+ * - 其它 agent：从 ~/.cornfield/agent/registry.json 只读加载元数据，收到 attach/switch_session
  *   时 lazy 实例化（每 agent 独立 agentDir + <agentDir>/sessions/）
  */
 

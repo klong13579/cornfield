@@ -8,9 +8,9 @@
  * examples, docs) are NOT in this list and must not raise errors when missing.
  */
 export const SKELETON_DIRS: readonly string[] = [
-	".omp",
-	".omp/skills",
-	".omp/skills/lint",
+	".cornfield",
+	".cornfield/skills",
+	".cornfield/skills/lint",
 	"knowledge",
 	"knowledge/handbook",
 	"cron",
