@@ -31,7 +31,7 @@
  * ───────────────────
  *   1. --webhook 显式 URL (一次性,不写缓存,不查 db)
  *   2. --grab-webhook 实时抓 (另起 DWClient 连钉Talk WS)
- *   3. ~/.omp/gateway-data/sessions.db 里该 account_id 的最近一条 active 会话
+ *   3. ~/.cornfield/gateway-data/sessions.db 里该 account_id 的最近一条 active 会话
  *      (过滤掉 repro-/-test-/-regress-/e2e- 这类自动化测试残留会话,
  *       优先取 webhook 域名是 oapi.dingtalk.com 的)
  *   4. 上面都没有 → 自动 fallback 到 grab (除非 --no-grab-fallback)
@@ -59,9 +59,9 @@ import { DWClient, type DWClientDownStream, TOPIC_ROBOT } from "dingtalk-stream"
 import { getDingTalkConfig, loadConfig } from "../../../packages/omp-gateway/src/config";
 import type { DingTalkRawMessage } from "../../../packages/omp-gateway/src/types";
 
-const STATE_PATH = path.join(os.homedir(), ".omp", "repro-state.json");
+const STATE_PATH = path.join(os.homedir(), ".cornfield", "repro-state.json");
 const DEFAULT_GATEWAY = "http://127.0.0.1:7890";
-const DEFAULT_GATEWAY_DATA_DIR = path.join(os.homedir(), ".omp", "gateway-data");
+const DEFAULT_GATEWAY_DATA_DIR = path.join(os.homedir(), ".cornfield", "gateway-data");
 const WEBHOOK_TTL_MS = 5 * 60_000;
 
 /**
@@ -245,13 +245,13 @@ Webhook 来源 (按优先级):
 网关:
   --port <n>                 /test/inject 端口 (默认 7890)
   --gateway <url>            网关根 URL (默认 http://127.0.0.1:7890)
-  --gateway-data-dir <path>  gateway 数据目录 (默认 ~/.omp/gateway-data)
+  --gateway-data-dir <path>  gateway 数据目录 (默认 ~/.cornfield/gateway-data)
 
 杂项:
   --config <path>            自定义 gateway.json 路径
   --timeout <ms>             --grab-webhook 等多久 (默认 60000)
-  --list                     列出 ~/.omp/repro-state.json 里的缓存 webhooks
-  --clear                    清空 ~/.omp/repro-state.json
+  --list                     列出 ~/.cornfield/repro-state.json 里的缓存 webhooks
+  --clear                    清空 ~/.cornfield/repro-state.json
   --json                     输出 JSON 而不是人类可读文本
   --verify                   注入后等 agent 回复, 从 session JSONL 读出来打印
   --verify-timeout <ms>      --verify 等多久 (默认 90000)
