@@ -108,11 +108,11 @@ async function main(): Promise<void> {
 		await runNativeBuild(
 			{
 				...Bun.env,
-				RUSTFLAGS: variant.rustflags,
-				CFLAGS: variant.name === "modern" ? "-march=x86-64-v3" : "-march=x86-64-v2",
-				CXXFLAGS: variant.name === "modern" ? "-march=x86-64-v3" : "-march=x86-64-v2",
-				CFLAGS_x86_64_unknown_linux_gnu: variant.name === "modern" ? "-march=x86-64-v3" : "-march=x86-64-v2",
-				CXXFLAGS_x86_64_unknown_linux_gnu: variant.name === "modern" ? "-march=x86-64-v3" : "-march=x86-64-v2",
+				RUSTFLAGS: `${variant.rustflags} -C target-feature=-avx512f,-avx512bw,-avx512vl,-avx512dq,-avx512cd`,
+				CFLAGS: variant.name === "modern" ? "-march=x86-64-v3 -mno-avx512f -mno-avx512bw -mno-avx512vl -mno-avx512dq -mno-avx512cd" : "-march=x86-64-v2 -mno-avx512f -mno-avx512bw -mno-avx512vl -mno-avx512dq -mno-avx512cd",
+				CXXFLAGS: variant.name === "modern" ? "-march=x86-64-v3 -mno-avx512f -mno-avx512bw -mno-avx512vl -mno-avx512dq -mno-avx512cd" : "-march=x86-64-v2 -mno-avx512f -mno-avx512bw -mno-avx512vl -mno-avx512dq -mno-avx512cd",
+				CFLAGS_x86_64_unknown_linux_gnu: variant.name === "modern" ? "-march=x86-64-v3 -mno-avx512f -mno-avx512bw -mno-avx512vl -mno-avx512dq -mno-avx512cd" : "-march=x86-64-v2 -mno-avx512f -mno-avx512bw -mno-avx512vl -mno-avx512dq -mno-avx512cd",
+				CXXFLAGS_x86_64_unknown_linux_gnu: variant.name === "modern" ? "-march=x86-64-v3 -mno-avx512f -mno-avx512bw -mno-avx512vl -mno-avx512dq -mno-avx512cd" : "-march=x86-64-v2 -mno-avx512f -mno-avx512bw -mno-avx512vl -mno-avx512dq -mno-avx512cd",
 				TARGET_VARIANT: variant.name,
 			},
 			variant.name,
