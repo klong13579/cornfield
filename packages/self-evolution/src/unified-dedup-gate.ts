@@ -5,7 +5,7 @@
  * before they enter the Cognitive Pipeline. Ensures no semantic overlap
  * across sources.
  */
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 export interface DedupEntry {
 	/** Unique identifier */
 	id: string;

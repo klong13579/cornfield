@@ -1,7 +1,7 @@
 /**
  * RuleBasedPromptOptimizer: GEPA-style prompt optimization for skills.
  */
-import type { Model } from "@oh-my-pi/pi-ai";
+import type { Model } from "@cornfield/ai";
 import optimizePromptTemplate from "./prompts/optimize-prompt.md" with { type: "text" };
 import type { EvolvedSkill } from "./types";
 import { type BackgroundLlmAuth, callBackgroundLlm } from "./utils/llm";

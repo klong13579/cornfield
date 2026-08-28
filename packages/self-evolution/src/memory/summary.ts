@@ -1,5 +1,5 @@
 import * as path from "node:path";
-import { isEnoent } from "@oh-my-pi/pi-utils";
+import { isEnoent } from "@cornfield/utils";
 
 const MIN_SUMMARY_CHARS = 200;
 const DEFAULT_SUMMARY_MAX_CHARS = 1200;

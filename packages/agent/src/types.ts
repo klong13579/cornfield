@@ -12,7 +12,7 @@ import type {
 	Tool,
 	ToolChoice,
 	ToolResultMessage,
-} from "@oh-my-pi/pi-ai";
+} from "@cornfield/ai";
 import type { Static, TSchema } from "@sinclair/typebox";
 import type { DoomLoopConfig } from "./streaming/doom-loop-detector";
 
@@ -208,7 +208,7 @@ export interface CanUseToolContext {
  *
  * @example
  * ```typescript
- * declare module "@oh-my-pi/agent" {
+ * declare module "@cornfield/agent" {
  *   interface CustomAgentMessages {
  *     artifact: ArtifactMessage;
  *     notification: NotificationMessage;

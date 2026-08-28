@@ -1,8 +1,8 @@
 /**
  * Load skills for context injection from the canonical skills directory + SQLite.
  */
-import { type UnifiedSkill, UnifiedSkillRegistry } from "@oh-my-pi/cognitive-coordination";
-import { getAgentDir } from "@oh-my-pi/pi-utils";
+import { type UnifiedSkill, UnifiedSkillRegistry } from "@cornfield/cognitive-coordination";
+import { getAgentDir } from "@cornfield/utils";
 import { getMemoryRoot } from "./paths";
 import { ensureUnifiedSkillStorage } from "./skill-storage";
 import type { SkillStore } from "./storage/types";

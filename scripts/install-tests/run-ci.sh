@@ -63,7 +63,7 @@ mkdir -p "$TARBALL_DIR"
 # dependency closure (pi-wire / pi-client / omp-gateway / self-evolution /
 # moa-extension are never published to npm — they ship inside binaries,
 # the gateway, and the desktop app). Without an override for every
-# @oh-my-pi/* dep, `bun add <tarball>` resolves the unpublished ones from
+# @cornfield/* dep, `bun add <tarball>` resolves the unpublished ones from
 # the registry at the current version and 404s mid-release.
 for pkg in utils natives ai agent tui stats coding-agent pi-wire pi-client omp-gateway self-evolution moa-extension cognitive-coordination; do
 	(
@@ -98,19 +98,19 @@ mkdir -p "$TARBALL_APP_DIR"
 	node -e "
 		const pkg = JSON.parse(require('fs').readFileSync('package.json', 'utf8'));
 		pkg.overrides = {
-			'@oh-my-pi/pi-utils': '$utils_tgz',
-			'@oh-my-pi/pi-natives': '$natives_tgz',
-			'@oh-my-pi/pi-ai': '$ai_tgz',
-			'@oh-my-pi/pi-agent-core': '$agent_tgz',
-			'@oh-my-pi/pi-tui': '$tui_tgz',
-			'@oh-my-pi/omp-stats': '$stats_tgz',
-			'@oh-my-pi/pi-coding-agent': '$coding_agent_tgz',
-			'@oh-my-pi/pi-wire': '$wire_tgz',
-			'@oh-my-pi/pi-client': '$client_tgz',
-			'@oh-my-pi/omp-gateway': '$gateway_tgz',
-			'@oh-my-pi/self-evolution': '$self_evolution_tgz',
-			'@oh-my-pi/moa-extension': '$moa_extension_tgz',
-			'@oh-my-pi/cognitive-coordination': '$cognitive_coordination_tgz'
+			'@cornfield/utils': '$utils_tgz',
+			'@cornfield/natives': '$natives_tgz',
+			'@cornfield/ai': '$ai_tgz',
+			'@cornfield/agent': '$agent_tgz',
+			'@cornfield/tui': '$tui_tgz',
+			'@cornfield/stats': '$stats_tgz',
+			'@cornfield/coding-agent': '$coding_agent_tgz',
+			'@cornfield/wire': '$wire_tgz',
+			'@cornfield/client': '$client_tgz',
+			'@cornfield/gateway': '$gateway_tgz',
+			'@cornfield/self-evolution': '$self_evolution_tgz',
+			'@cornfield/moa-extension': '$moa_extension_tgz',
+			'@cornfield/cognitive-coordination': '$cognitive_coordination_tgz'
 		};
 		require('fs').writeFileSync('package.json', JSON.stringify(pkg, null, 2));
 	"

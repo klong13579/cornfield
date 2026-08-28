@@ -1,7 +1,7 @@
 /**
  * Format evolved skills as markdown per skill-template.md (agent body only in正文).
  */
-import type { SkillFrontmatter } from "@oh-my-pi/cognitive-coordination";
+import type { SkillFrontmatter } from "@cornfield/cognitive-coordination";
 import { normalizeEvolutionScore } from "./skill-score";
 import { normalizeSkillDescription, type SkillValidationInput } from "./skill-validation";
 import type { EvolvedSkill } from "./types";

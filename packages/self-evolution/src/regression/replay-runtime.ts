@@ -1,4 +1,4 @@
-import type { Model } from "@oh-my-pi/pi-ai";
+import type { Model } from "@cornfield/ai";
 import type { BackgroundLlmAuth } from "../utils/llm";
 
 export interface RegressionReplayRuntime {

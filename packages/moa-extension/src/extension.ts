@@ -1,5 +1,5 @@
 import * as path from "node:path";
-import type { ExtensionAPI, ExtensionCommandContext } from "@oh-my-pi/pi-coding-agent";
+import type { ExtensionAPI, ExtensionCommandContext } from "@cornfield/coding-agent";
 import { executePlan } from "./executor";
 import { loadMoaConfigOverrides } from "./moa-config";
 import { buildPlan } from "./planner";

@@ -1,4 +1,4 @@
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 import type { MoaQualityJudgeSettings, MoaQualitySettings } from "./quality/types";
 import {
 	TCO_ASK_TIMEOUT_MS_DEFAULT,

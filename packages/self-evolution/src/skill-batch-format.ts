@@ -2,7 +2,7 @@
  * Batch-normalize evolved skills to prompts/skill-template.md before export.
  */
 import type { Database } from "bun:sqlite";
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 import { HeuristicSkillEvaluator } from "./evaluator";
 import { formatAgentSkillBody } from "./skill-format";
 import { isValidSkillName } from "./skill-score";

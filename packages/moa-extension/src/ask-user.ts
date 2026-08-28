@@ -17,7 +17,7 @@
  * stage.
  */
 
-import type { ExtensionUIContext } from "@oh-my-pi/pi-coding-agent";
+import type { ExtensionUIContext } from "@cornfield/coding-agent";
 import { pruneMissingAnsweredKeys } from "./decision-missing";
 import type { TaskContextObject, TcoAssumption, TcoMissingInput } from "./tco";
 import { TCO_ASK_TIMEOUT_MS_DEFAULT } from "./tco";

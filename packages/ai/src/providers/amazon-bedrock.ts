@@ -20,7 +20,7 @@ import {
 	ToolResultStatus,
 } from "@aws-sdk/client-bedrock-runtime";
 import { type DefaultProviderInit, defaultProvider } from "@aws-sdk/credential-provider-node";
-import { $env, $flag } from "@oh-my-pi/pi-utils";
+import { $env, $flag } from "@cornfield/utils";
 import { NodeHttpHandler } from "@smithy/node-http-handler";
 import { ProxyAgent } from "proxy-agent";
 import type { Effort } from "../model-thinking";

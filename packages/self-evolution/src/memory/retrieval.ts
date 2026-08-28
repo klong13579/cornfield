@@ -4,7 +4,7 @@
  * Scoring formula: 0.5 * similarity + 0.3 * recency + 0.2 * importance
  */
 import type { Database } from "bun:sqlite";
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 import { searchVectorEmbeddings, type VectorEmbedding } from "./storage";
 
 export interface CompositeSearchParams {

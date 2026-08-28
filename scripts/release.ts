@@ -217,7 +217,7 @@ async function cmdRelease(version: string): Promise<void> {
 
 	// private 但版本必须随主版本联动的包（不打 npm，但桌面壳的 electron-updater 靠
 	// package.json version 判断新版本 —— 0.0.0 永不比旧版本高，更新链路会永久判为已最新）。
-	const versionLinkedPrivate = new Set(["@oh-my-pi/desktop"]);
+	const versionLinkedPrivate = new Set(["@cornfield/desktop"]);
 
 	// Filter out private packages（版本联动白名单除外）
 	const publicPkgPaths: string[] = [];
@@ -240,7 +240,7 @@ async function cmdRelease(version: string): Promise<void> {
 	}
 	console.log();
 
-	// Update @oh-my-pi/* catalog entries in root package.json
+	// Update @cornfield/* catalog entries in root package.json
 	console.log("Updating root catalog versions...");
 	let rootPkgRaw = await Bun.file("package.json").text();
 	rootPkgRaw = rootPkgRaw.replace(
@@ -248,7 +248,7 @@ async function cmdRelease(version: string): Promise<void> {
 		`$1"${version}"`,
 	);
 	await Bun.write("package.json", rootPkgRaw);
-	console.log("  Updated root catalog @oh-my-pi/* entries");
+	console.log("  Updated root catalog @cornfield/* entries");
 
 	// 3. Update Rust workspace version
 	console.log(`Updating Rust workspace version to ${version}…`);

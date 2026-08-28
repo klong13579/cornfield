@@ -10,8 +10,8 @@
  * Continuous evaluation (architecture doc §6.12):
  *   Tracks last 3 scores per skill; graduates on 3 consecutive > 0.7, eliminates on 3 consecutive < 0.35.
  */
-import type { Model } from "@oh-my-pi/pi-ai";
-import { logger } from "@oh-my-pi/pi-utils";
+import type { Model } from "@cornfield/ai";
+import { logger } from "@cornfield/utils";
 import { applySkillRegressionBeforePromotion } from "./benefit-admission-refresh";
 import type { RegressionReplayBackend } from "./regression/replay-backend";
 import type { RegressionFixtureStore, RegressionTrialStore, SkillPopulationStore, SkillStore } from "./storage/types";

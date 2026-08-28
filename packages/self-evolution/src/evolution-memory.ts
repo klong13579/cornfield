@@ -3,8 +3,8 @@
  */
 import type { Database } from "bun:sqlite";
 import * as path from "node:path";
-import type { ExtensionCommandContext } from "@oh-my-pi/pi-coding-agent/extensibility/extensions";
-import { getAgentDir, isEnoent, logger } from "@oh-my-pi/pi-utils";
+import type { ExtensionCommandContext } from "@cornfield/coding-agent/extensibility/extensions";
+import { getAgentDir, isEnoent, logger } from "@cornfield/utils";
 import type { EmbeddingGenerator } from "./embedding";
 import { clearMemoryData, enqueueMemoryConsolidation } from "./memory/index";
 import { generateMemoryMd, loadSectionsFromDb } from "./memory/projection";

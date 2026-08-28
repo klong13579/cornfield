@@ -6,7 +6,7 @@
  */
 import type { Database } from "bun:sqlite";
 import * as path from "node:path";
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 
 export interface ProjectionOptions {
 	memoryRoot: string;

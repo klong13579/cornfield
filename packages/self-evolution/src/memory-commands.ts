@@ -2,7 +2,7 @@
  * `/memory` compat — delegates to `/evolution memory`.
  */
 import type { Database } from "bun:sqlite";
-import type { ExtensionAPI, ExtensionCommandContext } from "@oh-my-pi/pi-coding-agent/extensibility/extensions";
+import type { ExtensionAPI, ExtensionCommandContext } from "@cornfield/coding-agent/extensibility/extensions";
 import type { EmbeddingGenerator } from "./embedding";
 import { EVOLUTION_MEMORY_SUBCOMMANDS, runEvolutionMemorySubcommand } from "./evolution-memory";
 import { DEFAULT_EVOLUTION_GLOBAL_STORE } from "./paths";

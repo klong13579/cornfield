@@ -1,4 +1,4 @@
-import type { ImageContentDto } from "@oh-my-pi/pi-wire";
+import type { ImageContentDto } from "@cornfield/wire";
 import { ChevronDown, Mic, Paperclip, Send, Square } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";

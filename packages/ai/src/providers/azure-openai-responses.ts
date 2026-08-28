@@ -1,4 +1,4 @@
-import { $env } from "@oh-my-pi/pi-utils";
+import { $env } from "@cornfield/utils";
 import { AzureOpenAI } from "openai";
 import type {
 	Tool as OpenAITool,

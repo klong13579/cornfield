@@ -3,7 +3,7 @@
  * Injectable IO for unit tests; defaults to process.stderr + readline stdin.
  */
 import * as readline from "node:readline";
-import type { ExtensionUIContext } from "@oh-my-pi/pi-coding-agent";
+import type { ExtensionUIContext } from "@cornfield/coding-agent";
 
 export interface StageCliIo {
 	write(text: string): void;

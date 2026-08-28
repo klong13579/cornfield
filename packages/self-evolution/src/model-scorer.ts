@@ -10,7 +10,7 @@
  *   - recency: exponential decay based on days since last use (half-life: 7 days)
  *   - consistency: ratio of productive sessions to total, clamped by min sample size
  */
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 import type { SqliteSessionModelStatsStore } from "./storage/session-model-stats";
 
 const DECAY_HALF_LIFE_DAYS = 7;

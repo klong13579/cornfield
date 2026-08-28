@@ -3,7 +3,7 @@
  */
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 import type { EpisodeStore, RegressionFixtureStore, SessionTraceStore } from "../storage/types";
 import type { Episode, SessionTrace } from "../types";
 import { buildRegressionFixtureFromTrace } from "./fixture-from-trace";

@@ -4,7 +4,7 @@
  * Detects contradictions between extracted conventions/rules and resolves them
  * using provenance priority: user_stated > implied > inferred > fallback.
  */
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 
 export type ProvenanceLevel = "user_stated" | "implied" | "inferred" | "fallback";
 

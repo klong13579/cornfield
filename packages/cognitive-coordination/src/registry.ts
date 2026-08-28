@@ -1,5 +1,5 @@
 import * as fs from "node:fs/promises";
-import { logger, parseFrontmatter } from "@oh-my-pi/pi-utils";
+import { logger, parseFrontmatter } from "@cornfield/utils";
 import type { SkillFrontmatter, UnifiedSkill } from "./types.js";
 
 /**

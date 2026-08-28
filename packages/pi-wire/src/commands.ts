@@ -1,5 +1,5 @@
-import type { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
-import type { ImageContent } from "@oh-my-pi/pi-ai";
+import type { ThinkingLevel } from "@cornfield/agent";
+import type { ImageContent } from "@cornfield/ai";
 
 /**
  * Wire 命令面 (multiplex 子集)。
@@ -246,7 +246,7 @@ export type WireExtensionCommand =
 	 */
 	| { id?: string; type: "gateway_status" }
 	/**
-	 * W3 D1：只读拉取本地用量统计（@oh-my-pi/omp-stats 聚合，DashboardStats）。
+	 * W3 D1：只读拉取本地用量统计（@cornfield/stats 聚合，DashboardStats）。
 	 * 与 `omp stats --json` 同源：调用前内部增量同步会话文件，返回整体/按模型/按目录/
 	 * 时间序列聚合。不依赖任何 attached session（不定向）。
 	 *

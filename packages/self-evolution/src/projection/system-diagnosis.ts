@@ -3,7 +3,7 @@
  */
 import type { Database } from "bun:sqlite";
 import * as path from "node:path";
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 import { type AuditReport, type AuditRuntimeContext, formatAuditReport, generateAuditReport } from "../audit-report";
 import type { ActivityLogger } from "../logging/activity-logger";
 import type { EpisodeStore, SkillStore } from "../storage/types";

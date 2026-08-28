@@ -2,7 +2,7 @@
  * CrossSessionNudgeEngine: analyzes historical patterns across ALL sessions
  * and delivers proactive insights before each new session starts.
  */
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 import { shouldSuppressNudgeType } from "./nudge-suppression";
 import type { EpisodeDiagnosisStore, EpisodeStore, NudgeHistoryStore } from "./storage/types";
 import type { CrossSessionNudge } from "./types";

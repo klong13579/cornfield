@@ -7,8 +7,8 @@
  * - Adaptive error pattern discovery (new patterns not in hard-coded list)
  * - Tool efficiency and redundancy detection
  */
-import type { Model } from "@oh-my-pi/pi-ai";
-import { logger, prompt } from "@oh-my-pi/pi-utils";
+import type { Model } from "@cornfield/ai";
+import { logger, prompt } from "@cornfield/utils";
 import traceAnalysisSystemTemplate from "./prompts/trace-analysis.md" with { type: "text" };
 import traceAnalysisInputTemplate from "./prompts/trace-analysis-input.md" with { type: "text" };
 import type {

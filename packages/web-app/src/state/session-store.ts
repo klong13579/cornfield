@@ -20,7 +20,7 @@ import type {
 	TodoPhaseDto,
 	ToolSwitchesDto,
 	WireServerEventDto,
-} from "@oh-my-pi/pi-wire";
+} from "@cornfield/wire";
 import { loadNotifyPrefs, notifyGuarded } from "../lib/notifications";
 import type {
 	ArtifactDto,

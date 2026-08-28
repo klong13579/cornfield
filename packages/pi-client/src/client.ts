@@ -1,5 +1,5 @@
-import type { ClientFrame, ServerFrame, WireCommand, WireServerEvent } from "@oh-my-pi/pi-wire";
-import { MULTIDEVICE_PROTOCOL_VERSION } from "@oh-my-pi/pi-wire";
+import type { ClientFrame, ServerFrame, WireCommand, WireServerEvent } from "@cornfield/wire";
+import { MULTIDEVICE_PROTOCOL_VERSION } from "@cornfield/wire";
 import { PiDisconnectedError, PiHandshakeError, PiRequestTimeoutError, PiServerError } from "./errors";
 
 /**

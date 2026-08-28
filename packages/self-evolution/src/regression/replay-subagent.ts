@@ -1,5 +1,5 @@
 import * as path from "node:path";
-import { logger, prompt } from "@oh-my-pi/pi-utils";
+import { logger, prompt } from "@cornfield/utils";
 import regressionReplaySubagentTemplate from "../prompts/regression-replay-subagent.md" with { type: "text" };
 import type { EvolvedSkill, RegressionFixture } from "../types";
 import { applyToolChainCompareToVerdict, compareFixtureToReplayChain } from "./compare-tool-chains";

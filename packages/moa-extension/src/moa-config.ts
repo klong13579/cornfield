@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import * as path from "node:path";
-import { isEnoent, logger } from "@oh-my-pi/pi-utils";
+import { isEnoent, logger } from "@cornfield/utils";
 import type { MoaSettings } from "./types";
 
 /**

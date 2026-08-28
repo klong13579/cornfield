@@ -1,10 +1,10 @@
-import { $env } from "@oh-my-pi/pi-utils";
+import { $env } from "@cornfield/utils";
 import type { ResponseInput } from "openai/resources/responses/responses";
 import type { CacheRetention, OpenAIResponsesHistoryPayload, ProviderPayload } from "./types";
 
 type OpenAIResponsesReplayItem = ResponseInput[number];
 
-export { isRecord } from "@oh-my-pi/pi-utils";
+export { isRecord } from "@cornfield/utils";
 
 export function toNumber(value: unknown): number | undefined {
 	if (typeof value === "number" && Number.isFinite(value)) return value;

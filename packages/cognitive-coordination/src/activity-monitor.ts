@@ -3,7 +3,7 @@
  *
  * Analyzes activity logs to identify trends in skill usage, error rates, and decay patterns.
  */
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 
 /**
  * Activity log entry types

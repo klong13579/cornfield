@@ -2,7 +2,7 @@
  * Bootstrap learnings from a static seed file (post–/evolution clear or new project).
  */
 import * as path from "node:path";
-import { isEnoent } from "@oh-my-pi/pi-utils";
+import { isEnoent } from "@cornfield/utils";
 import { validateLearningContent } from "./learning-admission";
 import type { SqliteLearningStore } from "./storage/learnings";
 import type { Learning, LearningKind } from "./types";

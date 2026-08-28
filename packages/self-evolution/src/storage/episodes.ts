@@ -2,7 +2,7 @@
  * Episode storage with FTS5 full-text search.
  */
 import type { Database } from "bun:sqlite";
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 import type { Episode } from "../types";
 import type { EpisodeStore } from "./types";
 

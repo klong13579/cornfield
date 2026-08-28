@@ -11,9 +11,9 @@ import {
 	type SimpleStreamOptions,
 	type StopReason,
 	type ToolCall,
-} from "@oh-my-pi/pi-ai";
-import { parseStreamingJson } from "@oh-my-pi/pi-ai/utils/json-parse";
-import { readSseJson } from "@oh-my-pi/pi-utils";
+} from "@cornfield/ai";
+import { parseStreamingJson } from "@cornfield/ai/utils/json-parse";
+import { readSseJson } from "@cornfield/utils";
 
 // Create stream class matching ProxyMessageEventStream
 class ProxyMessageEventStream extends EventStream<AssistantMessageEvent, AssistantMessage> {

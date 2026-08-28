@@ -4,7 +4,7 @@
  * Manages the skill_population table for evolutionary lifecycle tracking.
  */
 import type { Database } from "bun:sqlite";
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 import { normalizeEvolutionScore } from "../skill-score";
 import type { SkillPopulationEvolutionEvent, SkillPopulationRecord, SkillPopulationState } from "../types";
 import type { SkillPopulationStore } from "./types";
