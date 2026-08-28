@@ -23,17 +23,16 @@ const AVX512_REGISTER_PATTERN = /\bzmm\d+\b|\bk[0-7]\b/;
 
 export function hasAvx512Markers(disassembly: string): boolean {
 	return disassembly.split("\n").some(line => {
-		if (AVX512_REGISTER_PATTERN.test(line)) {
-			return true;
-		}
-
 		const columns = line.split("\t");
 		if (columns.length < 3) {
 			return false;
 		}
 
 		const bytes = columns[1]?.trim() ?? "";
-		const instruction = columns[2]?.trim() ?? "";
+		const instruction = columns.slice(2).join("\t").trim();
+		if (AVX512_REGISTER_PATTERN.test(instruction)) {
+			return true;
+		}
 		return bytes.startsWith("62 ") && /^[a-z]/i.test(instruction) && !instruction.startsWith(".byte");
 	});
 }
