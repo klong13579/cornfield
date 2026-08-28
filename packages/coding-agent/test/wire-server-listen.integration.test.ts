@@ -91,7 +91,7 @@ const proc = Bun.spawn(
 		"127.0.0.1",
 	],
 	{
-		env: { ...process.env, PI_CONFIG_DIR: isoHome, PI_NO_TITLE: "1" },
+		env: { ...process.env, CORNFIELD_CONFIG_DIR: isoHome, PI_NO_TITLE: "1" },
 		stdout: "pipe",
 		stderr: "pipe",
 	},

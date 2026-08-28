@@ -272,7 +272,7 @@ describe("cronUpdate", () => {
 		dbPathUpdate = path.join(testDirUpdate, "jobs.json");
 		storageUpdate = new JsonFileStorage(dbPathUpdate);
 
-		const ompDir = path.join(testDirUpdate, ".omp");
+		const ompDir = path.join(testDirUpdate, ".cornfield");
 		fs.mkdirSync(ompDir, { recursive: true });
 		const fakeGateway = {
 			channels: {
@@ -453,7 +453,7 @@ describe("cronTestRun", () => {
 	}
 
 	function makeGatewayRunningTr(): void {
-		const dataDir = path.join(testDirTr, ".omp", "gateway-data");
+		const dataDir = path.join(testDirTr, ".cornfield", "gateway-data");
 		fs.mkdirSync(dataDir, { recursive: true });
 		fs.writeFileSync(path.join(dataDir, "gateway.pid"), String(process.pid));
 	}

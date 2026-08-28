@@ -7,7 +7,7 @@ import { runConfigCommand } from "../src/cli/config-cli";
 import { _resetSettingsForTest } from "../src/config/settings";
 
 let testAgentDir = "";
-const originalAgentDir = process.env.PI_CODING_AGENT_DIR;
+const originalAgentDir = process.env.CORNFIELD_AGENT_DIR;
 const fallbackAgentDir = path.join(getConfigRootDir(), "agent");
 
 beforeEach(async () => {
@@ -23,7 +23,7 @@ afterEach(async () => {
 		setAgentDir(originalAgentDir);
 	} else {
 		setAgentDir(fallbackAgentDir);
-		delete process.env.PI_CODING_AGENT_DIR;
+		delete process.env.CORNFIELD_AGENT_DIR;
 	}
 	await fs.rm(testAgentDir, { recursive: true, force: true });
 });

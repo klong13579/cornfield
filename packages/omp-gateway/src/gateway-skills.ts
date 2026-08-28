@@ -107,7 +107,7 @@ export class SkillCommand {
 		if (skills.length === 0) {
 			await this.#deps.sendAgentResponse(
 				msg,
-				"当前没有可用的技能。请检查 .omp/skills 或 ~/.omp/agent/skills 目录。",
+				"当前没有可用的技能。请检查 .cornfield/skills 或 ~/.cornfield/agent/skills 目录。",
 			);
 			return true;
 		}

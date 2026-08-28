@@ -5,7 +5,7 @@
  * Isolation:
  *   - HOME → empty fake home (no global moa.yml bleed)
  *   - cwd → temp project with `.git` + `.omp/moa.yml` matching DEFAULT_* in settings.ts
- *   - PI_CODING_AGENT_DIR → seeded agent dir (config/models)
+ *   - CORNFIELD_AGENT_DIR → seeded agent dir (config/models)
  *   - no PI_MOA_SETTINGS_JSON
  *
  * Skips unless BOTH NARWAL_PLAN_API_KEY and ALIBABA_API_KEY are set.
@@ -154,7 +154,7 @@ describe.skipIf(!narwalApiKey || !alibabaApiKey)("moa e2e: cost-lite layout from
 			cwd: projectDir,
 			env: {
 				HOME: fakeHome,
-				PI_CODING_AGENT_DIR: agentDir,
+				CORNFIELD_AGENT_DIR: agentDir,
 				NARWAL_PLAN_API_KEY: narwalApiKey!,
 				ALIBABA_API_KEY: alibabaApiKey!,
 				PI_LOG_CONSOLE: "false",

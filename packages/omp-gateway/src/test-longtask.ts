@@ -56,7 +56,7 @@ export interface LongTaskTestOptions {
 	 * is fine because the test never sends anything back to this
 	 * conversation, it only delivers a fresh card to `userId`. */
 	conversationId?: string;
-	/** Override the gateway config path. Default: ~/.omp/gateway.json. */
+	/** Override the gateway config path. Default: ~/.cornfield/gateway.json. */
 	configPath?: string;
 	/** If true, after the long-task watcher fires the threshold, the
 	 *  test synthesises a TOPIC_CARD stop-click callback and routes it
@@ -256,7 +256,7 @@ async function loadAccountConfig(
  * before returning. The bridge is stopped before returning.
  */
 export async function runLongTaskTest(opts: LongTaskTestOptions): Promise<LongTaskTestResult> {
-	const configPath = opts.configPath ?? path.join(os.homedir(), ".omp", "gateway.json");
+	const configPath = opts.configPath ?? path.join(os.homedir(), ".cornfield", "gateway.json");
 	const conversationId = opts.conversationId ?? `test-longtask-${Date.now()}`;
 
 	const { dtConfig, agentDir } = await loadAccountConfig(opts.accountId, configPath);

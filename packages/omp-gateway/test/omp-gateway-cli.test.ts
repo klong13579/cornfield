@@ -78,7 +78,7 @@ describe("omp-gateway CLI", () => {
 
 	test("status with a stale PID file reports the stale state", async () => {
 		const home = await isolatedHome();
-		const dataDir = path.join(home, ".omp", "gateway-data");
+		const dataDir = path.join(home, ".cornfield", "gateway-data");
 		await fs.mkdir(dataDir, { recursive: true });
 		await fs.writeFile(path.join(dataDir, "gateway.pid"), "999999999\n");
 		const { stdout, exitCode } = await runCli(["status"], { HOME: home });

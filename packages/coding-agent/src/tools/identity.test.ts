@@ -23,7 +23,7 @@ function makeTool(): IdentityTool {
 beforeEach(async () => {
 	tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "identity-test-"));
 	originalAgentDir = (await import("@oh-my-pi/pi-utils")).getAgentDir();
-	originalEnv = process.env.PI_CODING_AGENT_DIR;
+	originalEnv = process.env.CORNFIELD_AGENT_DIR;
 
 	setConfigRootDir(tmpDir);
 	setAgentDir(tmpDir);
@@ -32,9 +32,9 @@ beforeEach(async () => {
 afterEach(async () => {
 	setAgentDir(originalAgentDir);
 	if (originalEnv === undefined) {
-		delete process.env.PI_CODING_AGENT_DIR;
+		delete process.env.CORNFIELD_AGENT_DIR;
 	} else {
-		process.env.PI_CODING_AGENT_DIR = originalEnv;
+		process.env.CORNFIELD_AGENT_DIR = originalEnv;
 	}
 	setConfigRootDir(undefined);
 	await fs.rm(tmpDir, { recursive: true, force: true });

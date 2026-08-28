@@ -7,23 +7,23 @@ import { getAgentDir, getStatsDbPath, setAgentDir, TempDir } from "@oh-my-pi/pi-
 import { closeDb, getRecentRequests, initDb, insertMessageStats } from "../src/db";
 import type { MessageStats } from "../src/types";
 
-const originalConfigDir = process.env.PI_CONFIG_DIR;
+const originalConfigDir = process.env.CORNFIELD_CONFIG_DIR;
 const originalAgentDir = getAgentDir();
 let tempDir: TempDir | null = null;
 
 beforeEach(() => {
 	tempDir = TempDir.createSync("@pi-stats-db-");
 	const configDir = path.relative(os.homedir(), tempDir.join("config"));
-	process.env.PI_CONFIG_DIR = configDir;
+	process.env.CORNFIELD_CONFIG_DIR = configDir;
 	setAgentDir(path.join(os.homedir(), configDir, "agent"));
 });
 
 afterEach(() => {
 	closeDb();
 	if (originalConfigDir === undefined) {
-		delete process.env.PI_CONFIG_DIR;
+		delete process.env.CORNFIELD_CONFIG_DIR;
 	} else {
-		process.env.PI_CONFIG_DIR = originalConfigDir;
+		process.env.CORNFIELD_CONFIG_DIR = originalConfigDir;
 	}
 	setAgentDir(originalAgentDir);
 	tempDir?.removeSync();

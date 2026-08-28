@@ -170,10 +170,12 @@ async function checkCredentialsSection(config?: GatewayConfig): Promise<Section>
 
 	const cred = checkCredentials();
 	if (!cred.modelsYmlFound) {
-		findings.push(warn("~/.omp/agent/models.yml not found", "No provider→API-key mappings to verify."));
+		findings.push(warn("~/.cornfield/agent/models.yml not found", "No provider→API-key mappings to verify."));
 	}
 	if (!cred.agentDbFound) {
-		findings.push(warn("~/.omp/agent/agent.db not found", "Stored credentials cannot be resolved; run `omp login`."));
+		findings.push(
+			warn("~/.cornfield/agent/agent.db not found", "Stored credentials cannot be resolved; run `cornfield login`."),
+		);
 	}
 	if (cred.providers.length === 0) {
 		if (cred.modelsYmlFound) findings.push(ok("No provider API-key references in models.yml"));
@@ -476,7 +478,7 @@ async function safeRead(p: string): Promise<string | null> {
 /**
  * Run all checks and return a report.
  *
- * @param configPath  Path to gateway.json (defaults to ~/.omp/gateway.json).
+ * @param configPath  Path to gateway.json (defaults to ~/.cornfield/gateway.json).
  * @param opts.schedulerDbPath  Override the scheduler DB path. Production passes
  *   nothing and the default `getSchedulerDbPath()` is used; tests pass a temp DB
  *   so the real scheduler check (and its `--fix` repair closure) can be exercised

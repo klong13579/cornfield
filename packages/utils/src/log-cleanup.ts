@@ -3,7 +3,7 @@
  *
  * Two kinds of leftovers are removed:
  *
- * 1. 0-byte `omp.<date>.log.<N>` files. `file-stream-rotator` opens
+ * 1. 0-byte `omp.<date>.log.<N>` / `cornfield.<date>.log.<N>` files. `file-stream-rotator` opens
  *    the rotated file with `O_CREAT` before any byte is written. If
  *    the process is killed (or the stream is closed for any reason)
  *    before the first chunk lands, the file is left at 0 bytes.
@@ -12,7 +12,7 @@
  *    transport's `maxFiles` retention never reclaims them. They
  *    accumulate forever otherwise.
  *
- * 2. `.omp-audit-<PID>.json` files whose PID is no longer alive. The
+ * 2. Legacy `.omp-audit-<PID>.json` files (written by the retired file-stream-rotator) whose PID is no longer alive. The
  *    audit file is keyed by PID so concurrent processes do not
  *    contend on a single shared file (a known
  *    `winston-daily-rotate-file` deadlock — see issue #245). The
@@ -20,9 +20,9 @@
  *    once the process is dead.
  *
  * We do NOT touch:
- *  - `omp.<date>.log` (the active log file, even if the date
+ *  - `omp.<date>.log` / `cornfield.<date>.log` (the active log file, even if the date
  *    changed and the process is still running).
- *  - Non-zero `omp.<date>.log.<N>` (real rotated content; the
+ *  - Non-zero `omp.<date>.log.<N>` / `cornfield.<date>.log.<N>` (real rotated content; the
  *    transport's `maxFiles` policy cleans them).
  *  - Our own audit file.
  *
@@ -48,8 +48,9 @@ export function cleanupStaleLogs(logsDir?: string): number {
 
 	let removed = 0;
 	for (const name of entries) {
-		// 0-byte rotated logs: omp.<date>.log.<N>
-		if (/^omp\..*\.log\.\d+$/.test(name)) {
+		// 0-byte rotated logs: cornfield.<date>.log.<N> (legacy omp.<date>.log.<N> kept — files written
+		// by the pre-rename logger still litter real disks)
+		if (/^(omp|cornfield)\..*\.log\.\d+$/.test(name)) {
 			try {
 				const stat = fs.statSync(`${dir}/${name}`);
 				if (stat.size === 0) {

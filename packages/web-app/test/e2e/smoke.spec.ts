@@ -106,7 +106,7 @@ test("smoke: 真实 serve → 连接 → prompt → 流式回复", async ({ page
 			"127.0.0.1",
 			"--no-extensions",
 		],
-		{ env: { ...process.env, PI_NO_TITLE: "1", PI_CODING_AGENT_DIR: isoAgentDir } },
+		{ env: { ...process.env, PI_NO_TITLE: "1", CORNFIELD_AGENT_DIR: isoAgentDir } },
 	);
 	const preview = spawn(
 		"bun",

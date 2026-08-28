@@ -1172,7 +1172,7 @@ describe("cron host tool — recent action", () => {
 		storage = newDb();
 		storages.push(storage);
 		// Isolate the JSONL log directory so this test cannot leak entries
-		// from the global `~/.omp/gateway-data/scheduler/logs/` (which
+		// from the global `~/.cornfield/gateway-data/scheduler/logs/` (which
 		// `readExecutionLog` reads by default). Without this, the
 		// cross-task JSONL walk picks up rows from previous test runs
 		// (or real cron history) and inflates the count.

@@ -68,7 +68,7 @@ export interface CrashLogState extends CrashLogEntryBase {
 
 export type CrashLogEntry = CrashLogCrash | CrashLogRecovery | CrashLogSuppressed | CrashLogState;
 
-const DEFAULT_LOG_DIR = path.join(os.homedir(), ".omp", "gateway-data");
+const DEFAULT_LOG_DIR = path.join(os.homedir(), ".cornfield", "gateway-data");
 const DEFAULT_LOG_FILE = "crash_log.jsonl";
 
 export class CrashLog {

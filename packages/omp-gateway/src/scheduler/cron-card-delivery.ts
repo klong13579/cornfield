@@ -144,7 +144,7 @@ function buildLogFileUrl(slug: string): string {
 	const dd = String(date.getDate()).padStart(2, "0");
 	const logPath = path.join(
 		os.homedir(),
-		".omp",
+		".cornfield",
 		"gateway-data",
 		"scheduler",
 		"logs",
