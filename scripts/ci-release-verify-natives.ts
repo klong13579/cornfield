@@ -19,7 +19,7 @@ const x64LinuxIsaContracts = [
 	{ addon: "linux-x64-baseline", filename: "cornfield_natives.linux-x64-baseline.node", label: "x86-64-v2" },
 	{ addon: "linux-x64-modern", filename: "cornfield_natives.linux-x64-modern.node", label: "x86-64-v3" },
 ] as const;
-const AVX512_REGISTER_PATTERN = /\bzmm\d+\b|\bk[0-7]\b/;
+const AVX512_REGISTER_PATTERN = /%(?:zmm\d+|k[0-7])\b/;
 
 export function hasAvx512Markers(disassembly: string): boolean {
 	return disassembly.split("\n").some(line => {
