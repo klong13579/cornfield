@@ -52,6 +52,7 @@ import type {
 	OutboundMessage,
 	SessionRecord,
 } from "./types";
+import { handleGatewayWireCommand } from "./wire-endpoint";
 
 export function buildChannelKey(channelId: string, accountId?: string): string {
 	return accountId ? `${channelId}:${accountId}` : channelId;
@@ -274,6 +275,8 @@ export class Gateway {
 	 * Listens on 127.0.0.1 only. See `injectTestEndpoint`.
 	 */
 	#testServer: { stop: () => void; port: number } | null = null;
+	/** P2-4：生产 wire HTTP 端点（POST /wire，127.0.0.1:OMP_GATEWAY_WIRE_PORT??7891）。 */
+	#wireServer: { stop: () => void; port: number } | null = null;
 	#skillCache: SkillCache | null = null;
 	#skillCommand: SkillCommand | null = null;
 	/** Per-account cached disabledExtensions list (read once per account, then memoized). */
@@ -514,6 +517,9 @@ export class Gateway {
 		}
 
 		await this.#writeStatusFile();
+
+		// P2-4：生产 wire 端点（cron CRUD / gateway_status，serve 转发 + 浏览器/web-app 直连）
+		await this.#startWireEndpoint();
 
 		// Test injection endpoint: only when explicitly enabled. Lets
 		// integration tests push real `DingTalkRawMessage` payloads
@@ -842,6 +848,13 @@ export class Gateway {
 				this.#testServer.stop();
 			} catch {}
 			this.#testServer = null;
+		}
+
+		if (this.#wireServer) {
+			try {
+				this.#wireServer.stop();
+			} catch {}
+			this.#wireServer = null;
 		}
 
 		if (warnings.length > 0) {
@@ -1227,6 +1240,84 @@ export class Gateway {
 			host,
 			port: server.port,
 			endpoint: "POST /test/inject",
+		});
+	}
+
+	/**
+	 * P2-4：生产 wire HTTP 端点（方案 1——HTTP POST 帧）。
+	 * 绑定 127.0.0.1（本机浏览器/web-app 访问），端口 OMP_GATEWAY_WIRE_PORT ?? 7891，
+	 * 无 token（localhost 即边界，与 serve 的 ws 免鉴权策略一致）。
+	 *
+	 * 命令 → handleGatewayWireCommand（传输无关领域层），统一 {"ok":...} 响应。
+	 * 端口被占（旧二进制 gateway / 另一实例）→ 跳过并 warn，不阻塞启动。
+	 */
+	async #startWireEndpoint(): Promise<void> {
+		const port = Number.parseInt(process.env.OMP_GATEWAY_WIRE_PORT ?? "7891", 10);
+		let server: ReturnType<typeof Bun.serve> | undefined;
+		try {
+			server = Bun.serve({
+				hostname: "127.0.0.1",
+				port,
+				fetch: async req => {
+					const url = new URL(req.url);
+					if (req.method !== "POST" || url.pathname !== "/wire") {
+						return Response.json({ ok: false, error: "not_found" }, { status: 404 });
+					}
+					let body: unknown;
+					try {
+						body = await req.json();
+					} catch {
+						return Response.json({ ok: false, error: "invalid_json" }, { status: 400 });
+					}
+					const command = body as { type?: unknown } | null;
+					if (!command || typeof command.type !== "string") {
+						return Response.json({ ok: false, error: "missing command type" }, { status: 400 });
+					}
+					const schedulerStorage = this.#cronLifecycle.schedulerStorage;
+					if (!schedulerStorage) {
+						return Response.json({ ok: false, error: "scheduler not started" }, { status: 503 });
+					}
+					const result = await handleGatewayWireCommand(command as { type: string; [key: string]: unknown }, {
+						storage: schedulerStorage,
+						reloadScheduler: () => {
+							this.#cronLifecycle.engineReload();
+						},
+						gatewayStatus: async () => {
+							const st = await this.getStatus();
+							return {
+								pid: process.pid,
+								statusWrittenAt: Date.now(),
+								stale: false,
+								accounts: st.accounts.map(a => ({
+									accountId: a.accountId,
+									bridgeRunning: a.bridgeRunning,
+									bridgeState: a.bridgeState,
+									channelConnected: a.channelConnected,
+									agentDir: a.agentDir,
+								})),
+								scheduler: st.scheduler,
+							};
+						},
+					});
+					return Response.json(
+						result.ok ? { ok: true, result: result.result } : { ok: false, error: result.error },
+						{ status: result.ok ? 200 : 400 },
+					);
+				},
+			});
+		} catch (err) {
+			logger.warn("gateway:wire-endpoint skipped (bind failed)", {
+				port,
+				error: err instanceof Error ? err.message : String(err),
+			});
+			return;
+		}
+		if (server == null) return;
+		this.#wireServer = { stop: () => server.stop(), port: server.port ?? port };
+		logger.info("gateway:wire-endpoint", {
+			host: "127.0.0.1",
+			port: server.port ?? port,
+			endpoint: "POST /wire",
 		});
 	}
 

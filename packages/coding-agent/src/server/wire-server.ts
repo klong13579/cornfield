@@ -90,11 +90,6 @@ export interface WireServerOptions {
 	registerPermissionBroadcast?: (fn: (push: PermissionRequestPush) => void) => void;
 }
 
-/** 用户 HOME（读取 gateway 状态文件用；进程替换时跟随环境）。 */
-function homeDir(): string {
-	return process.env.HOME ?? os.homedir();
-}
-
 interface Connection {
 	connectionId: string;
 	ws: Bun.ServerWebSocket<Connection | undefined>;
@@ -552,12 +547,13 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 					return;
 				}
 				case "gateway_status": {
-					const res = await readGatewayStatus();
+					// P2-4：转发 gateway 生产端点（POST /wire；不再直读 status.json）
+					const res = await callGatewayWire({ type: "gateway_status" });
 					if (!res.ok) {
 						fail(res.error);
 						return;
 					}
-					done(res.status);
+					done(res.result);
 					return;
 				}
 				case "get_stats": {
@@ -626,20 +622,28 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 					return;
 				}
 				case "get_cron_tasks": {
-					// P2-W3-1（B6 只读代理）：jobs.json 直读，不依赖 gateway 进程。
-					try {
-						done({ tasks: await readCronTaskList() });
-					} catch (err) {
-						failWithCode("internal", `cron tasks unavailable: ${String(err)}`);
+					// P2-4：转发 gateway 生产端点（不再直读 jobs.json）
+					const res = await callGatewayWire({ type: "get_cron_tasks" });
+					if (!res.ok) {
+						failWithCode("internal", res.error);
+						return;
 					}
+					done(res.result);
 					return;
 				}
 				case "get_cron_logs": {
-					try {
-						done({ logs: await readCronLogList(command.taskId, command.days, command.limit) });
-					} catch (err) {
-						failWithCode("internal", `cron logs unavailable: ${String(err)}`);
+					// P2-4：转发 gateway 生产端点（不再直读 logs/by-task）
+					const res = await callGatewayWire({
+						type: "get_cron_logs",
+						taskId: command.taskId,
+						days: command.days,
+						limit: command.limit,
+					});
+					if (!res.ok) {
+						failWithCode("internal", res.error);
+						return;
 					}
+					done(res.result);
 					return;
 				}
 				case "inject_permission": {
@@ -1603,223 +1607,35 @@ async function readSkillFrontmatterDescription(
 	return undefined;
 }
 
-// ── gateway 运行状态（只读转发 gateway.status.json）──
+// ── P2-4：cron/gateway 命令转发 gateway 生产端点（POST /wire）──
+//
+// serve 不再直读 jobs.json / gateway.status.json——gateway 是调度器主人，直接回答
+// 自己领域。gateway 未运行（端点不可达）时返回明确错误（旧客户端可见原因）。
+// 形状与旧直读代理一致（TaskRowDto / CronLogEntryDto / GatewayStatusDto），
+// 因此 web-app 消费方无需改动。
 
-interface GatewayAccountStatus {
-	accountId: string;
-	bridgeRunning?: boolean;
-	bridgeState?: string;
-	channelConnected?: boolean;
-	agentDir?: string;
-}
+const GATEWAY_WIRE_PORT = Number.parseInt(process.env.OMP_GATEWAY_WIRE_PORT ?? "7891", 10);
 
-/**
- * 读 `~/.omp/gateway-data/gateway.status.json`（gateway 定期写盘）。
- * 返回 accounts 明细 + stale 标记；文件缺失/失效返回 error（gateway 未运行）。
- */
-async function readGatewayStatus(): Promise<
-	| {
-			ok: true;
-			status: {
-				pid?: number;
-				statusWrittenAt?: number;
-				stale: boolean;
-				accounts: GatewayAccountStatus[];
-				scheduler?: { running?: boolean; taskCount?: number } | null;
-			};
-	  }
-	| { ok: false; error: string }
-> {
-	const statusPath = path.join(homeDir(), ".omp", "gateway-data", "gateway.status.json");
-	let raw: string;
+async function callGatewayWire(command: {
+	type: string;
+	[key: string]: unknown;
+}): Promise<{ ok: true; result: unknown } | { ok: false; error: string }> {
 	try {
-		raw = await fs.readFile(statusPath, "utf8");
-	} catch (err) {
-		if (isEnoent(err)) return { ok: false, error: "gateway 未运行（无状态文件）" };
-		throw err;
-	}
-	try {
-		const parsed = JSON.parse(raw) as {
-			pid?: number;
-			statusWrittenAt?: number;
-			accounts?: GatewayAccountStatus[];
-			scheduler?: { running?: boolean; taskCount?: number } | null;
-		};
-		// stale 判据：写文件进程（pid）是否还活着。gateway 只在启动/重载时写盘，
-		// 空闲期文件长期不更新 —— 时间阈值会误报；pid 存活即运行中。
-		const pidAlive = parsed.pid != null && isPidAlive(parsed.pid);
-		const stale = !pidAlive;
-		return {
-			ok: true,
-			status: {
-				pid: parsed.pid,
-				statusWrittenAt: parsed.statusWrittenAt,
-				stale,
-				accounts: Array.isArray(parsed.accounts) ? parsed.accounts : [],
-				scheduler: parsed.scheduler ?? null,
-			},
-		};
-	} catch {
-		return { ok: false, error: "gateway 状态文件损坏（非 JSON）" };
-	}
-}
-
-/** pid 是否存活（kill 0 探测；ESRCH=不存在，EPERM=存在）。 */
-function isPidAlive(pid: number): boolean {
-	try {
-		process.kill(pid, 0);
-		return true;
-	} catch (err) {
-		return (err as NodeJS.ErrnoException).code === "EPERM";
-	}
-}
-
-// ── P2-W3-1：gateway cron 只读代理（jobs.json + logs/by-task 直读，不 import gateway 运行时）──
-
-const CRON_LOG_MAX_OUTPUT = 2048;
-
-function gatewaySchedulerDir(): string {
-	return path.join(homeDir(), ".omp", "gateway-data", "scheduler");
-}
-
-interface CronTaskRow {
-	id: string;
-	name: string;
-	description?: string;
-	scheduleType: "cron" | "interval" | "once";
-	cron?: string;
-	command?: string;
-	nextRunAt?: number;
-	lastRunAt?: number;
-	enabled: boolean;
-	accountId?: string;
-	runCount?: number;
-	failCount?: number;
-	consecutiveFailures?: number;
-}
-
-/** 读 jobs.json（缺失/损坏 → 空列表，不抛）。 */
-async function readCronTaskList(): Promise<CronTaskRow[]> {
-	const jobsPath = path.join(gatewaySchedulerDir(), "jobs.json");
-	let raw: string;
-	try {
-		raw = await Bun.file(jobsPath).text();
-	} catch {
-		return [];
-	}
-	let parsed: { tasks?: Record<string, unknown>[] };
-	try {
-		parsed = JSON.parse(raw) as { tasks?: Record<string, unknown>[] };
-	} catch {
-		return [];
-	}
-	return (parsed.tasks ?? []).map(task => ({
-		id: String(task.id ?? ""),
-		name: String(task.name ?? ""),
-		description: typeof task.command === "string" ? String(task.command) : undefined,
-		scheduleType: (task.scheduleType === "interval" || task.scheduleType === "once" ? task.scheduleType : "cron") as
-			| "cron"
-			| "interval"
-			| "once",
-		cron: typeof task.cron === "string" ? String(task.cron) : undefined,
-		command: typeof task.command === "string" ? String(task.command) : undefined,
-		nextRunAt: typeof task.nextRunAt === "number" ? (task.nextRunAt as number) : undefined,
-		lastRunAt: typeof task.lastRunAt === "number" ? (task.lastRunAt as number) : undefined,
-		enabled: task.status !== "disabled",
-		accountId: typeof task.accountId === "string" ? String(task.accountId) : undefined,
-		runCount: typeof task.runCount === "number" ? (task.runCount as number) : undefined,
-		failCount: typeof task.failCount === "number" ? (task.failCount as number) : undefined,
-		consecutiveFailures:
-			typeof task.consecutiveFailures === "number" ? (task.consecutiveFailures as number) : undefined,
-	}));
-}
-
-/** 日志条目 DTO（output/stderr 截断 2KB）。 */
-interface CronLogRow {
-	taskId: string;
-	id: string;
-	ts: number;
-	status: string;
-	exitCode: number | null;
-	durationMs: number | null;
-	output?: string;
-	outputTruncated?: boolean;
-	stderr?: string;
-}
-
-async function readCronLogList(taskId?: string, days = 3, limit = 50): Promise<CronLogRow[]> {
-	const clampDays = Math.min(30, Math.max(1, days));
-	const clampLimit = Math.min(200, Math.max(1, limit));
-	const cutoff = Date.now() - clampDays * 24 * 60 * 60 * 1000;
-	const logsRoot = path.join(gatewaySchedulerDir(), "logs", "by-task");
-
-	let taskDirs: string[];
-	try {
-		taskDirs = (await fs.readdir(logsRoot, { withFileTypes: true })).filter(e => e.isDirectory()).map(e => e.name);
-	} catch {
-		return [];
-	}
-	if (taskId) {
-		// 精确匹配任务名目录；无则直接返回空
-		if (!taskDirs.includes(taskId)) return [];
-		taskDirs = [taskId];
-	}
-
-	const rows: CronLogRow[] = [];
-	for (const dir of taskDirs) {
-		const dirPath = path.join(logsRoot, dir);
-		let files: string[];
-		try {
-			files = (await fs.readdir(dirPath)).filter(f => f.endsWith(".jsonl"));
-		} catch {
-			continue;
+		const res = await fetch(`http://127.0.0.1:${GATEWAY_WIRE_PORT}/wire`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify(command),
+		});
+		const data = (await res.json()) as { ok?: boolean; result?: unknown; error?: unknown };
+		if (!res.ok) {
+			return { ok: false, error: typeof data.error === "string" ? data.error : `gateway wire ${res.status}` };
 		}
-		for (const file of files) {
-			// 按文件名 YYYY-MM-DD 剪裁，避免整读陈旧日志
-			const day = file.replace(/\.jsonl$/, "");
-			const dayTs = Date.parse(day);
-			if (!Number.isNaN(dayTs) && dayTs < cutoff) continue;
-			let text: string;
-			try {
-				text = await Bun.file(path.join(dirPath, file)).text();
-			} catch {
-				continue;
-			}
-			for (const line of text.split("\n")) {
-				if (!line.trim()) continue;
-				let entry: {
-					id?: unknown;
-					ts?: unknown;
-					exitCode?: unknown;
-					status?: unknown;
-					durationMs?: unknown;
-					output?: unknown;
-					stderr?: unknown;
-				};
-				try {
-					entry = JSON.parse(line) as typeof entry;
-				} catch {
-					continue;
-				}
-				const ts = typeof entry.ts === "number" ? entry.ts : 0;
-				if (ts < cutoff) continue;
-				rows.push({
-					taskId: dir,
-					id: String(entry.id ?? ""),
-					ts,
-					status: String(entry.status ?? "unknown"),
-					exitCode: typeof entry.exitCode === "number" ? entry.exitCode : null,
-					durationMs: typeof entry.durationMs === "number" ? entry.durationMs : null,
-					output: typeof entry.output === "string" ? entry.output.slice(0, CRON_LOG_MAX_OUTPUT) : undefined,
-					outputTruncated:
-						typeof entry.output === "string" && entry.output.length > CRON_LOG_MAX_OUTPUT ? true : undefined,
-					stderr: typeof entry.stderr === "string" ? entry.stderr.slice(0, CRON_LOG_MAX_OUTPUT) : undefined,
-				});
-			}
-		}
+		return data.ok
+			? { ok: true, result: data.result }
+			: { ok: false, error: (data.error as string | undefined) ?? "gateway error" };
+	} catch (err) {
+		return { ok: false, error: `gateway unreachable: ${err instanceof Error ? err.message : String(err)}` };
 	}
-	rows.sort((a, b) => b.ts - a.ts);
-	return rows.slice(0, clampLimit);
 }
 
 // ── h1：serve 端 skill hub（复用 extensibility/plugins/marketplace 的 fetchMarketplace）──

@@ -192,9 +192,9 @@ export type WireExtensionCommand =
 	 */
 	| { id?: string; type: "fs_read_image"; sessionId?: string; path: string }
 	/**
-	 * 读取本机 gateway 运行状态（~/.omp/gateway-data/gateway.status.json 只读转发，
-	 * gateway 定期写盘）。返回 accounts（bridgeRunning/bridgeState/channelHealth）+
-	 * scheduler/pid；statusWrittenAt 距今超 30s 视为 stale。gateway 未运行返回 ok:false。
+	 * P2-4：读取本机 gateway 运行状态。serve 转发 gateway 生产端点（POST /wire），
+	 * 不再直读 status.json。返回 accounts（bridgeRunning/bridgeState/channelHealth）+
+	 * scheduler/pid；live gateway stale=false。gateway 未运行（端点不可达）→ ok:false。
 	 */
 	| { id?: string; type: "gateway_status" }
 	/**
@@ -238,14 +238,15 @@ export type WireExtensionCommand =
 	 */
 	| { id?: string; type: "list_commands" }
 	/**
-	 * P2-W3-1（B6 只读代理）：拉取 gateway cron 任务表。
-	 * 数据源 jobs.json 直读（~/.omp/gateway-data/scheduler/jobs.json），不依赖 gateway 进程，
-	 * 不 import gateway 运行时。返回 { tasks: TaskRowDto 形状 }（字段对齐 jobs.json 任务）。
+	 * P2-4：拉取 gateway cron 任务表。serve 转发 gateway 生产端点（POST /wire）
+	 * 回答，不再直读 jobs.json。返回 { tasks: TaskRowDto 形状 }。gateway 未运行
+	 * （端点不可达）→ ok:false + gateway unreachable。
 	 */
 	| { id?: string; type: "get_cron_tasks" }
 	/**
-	 * P2-W3-1（B6 只读代理）：拉取 cron 执行日志（~/.omp/gateway-data/scheduler/logs/by-task/ 直读）。
-	 * - taskId 可选：缺省 = 全部任务；
+	 * P2-4：拉取 cron 执行日志。serve 转发 gateway 生产端点（POST /wire），
+	 * 不再直读 logs/by-task。
+	 * - taskId 可选：缺省 = 全部任务（按任务名匹配）；
 	 * - days 回溯天数（默认 3，钳 1-30）；limit 返回条数（默认 50，钳 1-200）
 	 * 返回 { logs: [{ taskId, id, ts, status, exitCode, durationMs, output(截断), stderr(截断) }] }。
 	 */

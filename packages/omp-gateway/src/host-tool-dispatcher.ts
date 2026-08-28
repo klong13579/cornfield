@@ -18,9 +18,9 @@
  *     handler signature.
  *
  * The dispatcher is intentionally transport-agnostic; it doesn't know
- * about stdin/stdout framing. The transport (`agent-transport.ts`)
+ * about stdin/stdout framing. The transport (`agent-transport-wire.ts`)
  * forwards parsed `host_tool_call` frames here and writes the result
- * frames back via `RpcTransport.sendFrame(...)`.
+ * frames back via `WireTransport.sendFrame(...)`.
  */
 
 import { logger } from "@oh-my-pi/pi-utils";

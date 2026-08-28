@@ -21,7 +21,7 @@
 
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { resolveDefaultOmpPath } from "./agent-transport";
+import { resolveDefaultOmpPath } from "./agent-transport-wire";
 import { type ConfigValidation, getDataDir, validateConfig } from "./config";
 import { checkCredentials } from "./credential-resolver";
 import { getGatewayStatus, PID_FILE, STATUS_FILE } from "./gateway-daemon";

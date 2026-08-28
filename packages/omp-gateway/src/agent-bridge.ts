@@ -1,14 +1,14 @@
 /**
- * Agent Bridge — forwards IM messages to OMP via RPC mode.
+ * Agent Bridge — forwards IM messages to OMP via wire-stdio mode.
  *
  * Architecture:
- *   [IM Message] → AgentBridge.forward() → PromptQueue → RpcTransport → omp --mode rpc → JSON-line protocol → [Reply]
+ *   [IM Message] → AgentBridge.forward() → PromptQueue → WireTransport → omp --mode wire-stdio → Wire frames → [Reply]
  *
  * The bridge is the orchestration layer: it manages session/model state,
  * circuit breaker, crash recovery, and the public API. Prompt lifecycle
  * and streaming dispatch are owned by `PromptQueue` (see `./prompt-queue.ts`).
- * Process lifecycle and the JSON-line protocol are owned by `RpcTransport`
- * (see `./agent-transport.ts`).
+ * Process lifecycle and the Wire protocol are owned by `WireTransport`
+ * (see `./agent-transport-wire.ts`).
  */
 
 import * as path from "node:path";

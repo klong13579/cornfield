@@ -11,14 +11,14 @@
  * - Resolve prompts on `agent_end`, timeout, or abort.
  *
  * Non-responsibilities (owned by AgentBridge):
- * - Process lifecycle, JSON-line protocol (owned by RpcTransport).
+ * - Process lifecycle, Wire protocol (owned by WireTransport).
  * - Session switching, model overrides.
  * - Public API surface (`forward`, `forwardWithMeta`, `executePrompt`).
  * - Circuit breaker, crash recovery.
  * - Attachment extraction, prompt formatting.
  *
  * The queue receives events from AgentBridge (which receives them from
- * RpcTransport). The queue never touches the transport directly — that
+ * WireTransport). The queue never touches the transport directly — that
  * keeps the transport ↔ queue seam one-directional.
  */
 

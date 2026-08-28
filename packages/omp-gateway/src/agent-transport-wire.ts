@@ -1,8 +1,9 @@
 /**
  * WireTransport — owns the lifecycle of an `omp --mode wire-stdio` child process
  * and the Wire protocol (pi-wire frames) on its stdin/stdout. P2 replacement for
- * RpcTransport (JSON-line protocol); the bridge switches over and agent-transport.ts
- * is deleted once all consumers are migrated.
+ * RpcTransport (JSON-line protocol). P2-4：agent-transport.ts 已删除——原 JSON-line
+ * 协议类型（AgentEvent / HostToolCall* / RpcTransportEvent）迁入本文件，bridge 消费
+ * 侧 continue 使用（本文件是共享协议类型的唯一家）。
  *
  * Responsibilities (mirror RpcTransport):
  * - Spawn the child, send `hello`, wait for `hello_ack`.
@@ -28,11 +29,56 @@ import { logger } from "@oh-my-pi/pi-utils";
 import type { ClientFrame, ServerFrame, WireCommand, WireErrorPayload } from "@oh-my-pi/pi-wire";
 import type { FileSink } from "bun";
 import { randomUUID } from "crypto";
-import type { AgentEvent, HostToolCallHandler, RpcTransportEvent } from "./agent-transport";
 import { resolveCredentialEnvVars } from "./credential-resolver";
 
-/** P2：bridge 消费侧从 wire 传输 re-export 旧类型（agent-transport.ts 删除后类型迁至此）。 */
-export type { AgentEvent, HostToolCallHandler, HostToolCallRequest, RpcTransportEvent } from "./agent-transport";
+// ── 共享协议类型（迁自 agent-transport.ts；JSON-line 时代的心智模型保留）──
+
+/** Inline-shape RPC event（rpc-types 的传输投影；bridge 消费侧保持此形状）。 */
+export interface AgentEvent {
+	type: string;
+	id?: string;
+	command?: string;
+	success?: boolean;
+	error?: string;
+	data?: unknown;
+	message?: {
+		role?: string;
+		content?: Array<{ type: string; text?: string }>;
+	};
+	text?: string;
+	/** 流式子事件（text/thinking/toolcall 增量 + 生命周期标记）。 */
+	assistantMessageEvent?: {
+		type: string;
+		delta?: string;
+		contentIndex?: number;
+		[key: string]: unknown;
+	};
+}
+
+/** 传输向 owner 发出的事件（父进程视角；wire 帧推到 rpc 形状）。 */
+export type RpcTransportEvent =
+	/** 子进程握手完成，可发命令。 */
+	| { type: "ready" }
+	/** 已发命令的 response 帧到达。 */
+	| { type: "command_response"; commandId: string; event: AgentEvent }
+	/** 会话事件（无 id），流式推给当前 prompt。 */
+	| { type: "session_event"; event: AgentEvent }
+	/** 子进程退出（异常退出带 stderrTail 供崩溃诊断）。 */
+	| { type: "disconnected"; error?: Error; stderrTail?: string };
+
+/** OMP 发出的 host_tool_call 请求（传输不理解语义，仅转交 handler）。 */
+export interface HostToolCallRequest {
+	id: string;
+	toolCallId: string;
+	toolName: string;
+	arguments: Record<string, unknown>;
+}
+
+/** host_tool_call 回调：写入 reply(result) 即回 host_tool_result 帧。 */
+export type HostToolCallHandler = (
+	call: HostToolCallRequest,
+	reply: (body: { content: Array<{ type: "text"; text: string }>; isError?: boolean }) => void,
+) => Promise<void> | void;
 
 interface PendingCommand {
 	command: string;

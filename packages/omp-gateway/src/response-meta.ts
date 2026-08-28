@@ -40,7 +40,7 @@ export function friendlyLlmError(raw: string): string {
  */
 
 import type { AssistantMessage, ToolCall, ToolResultMessage, Usage } from "@oh-my-pi/pi-ai";
-import type { AgentEvent } from "./agent-transport";
+import type { AgentEvent } from "./agent-transport-wire";
 import type { AgentResponseMeta, AgentResponseToolCall, AgentResponseToolResult } from "./types";
 
 type WireMessage = AssistantMessage | ToolResultMessage | { role: string; [k: string]: unknown };

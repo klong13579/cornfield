@@ -9,7 +9,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { logger, prompt } from "@oh-my-pi/pi-utils";
 import type { AgentBridge } from "./agent-bridge";
-import { resolveDefaultOmpPath } from "./agent-transport";
+import { resolveDefaultOmpPath } from "./agent-transport-wire";
 import type { AICardTarget } from "./channels/dingtalk-card";
 import { mirrorDeliveryToSession } from "./scheduler/attach-to-session";
 import { type CronCardPayload, deliverCronResultAsCard } from "./scheduler/cron-card-delivery";

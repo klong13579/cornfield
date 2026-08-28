@@ -6,11 +6,11 @@
  *
  * Since the binary split: gateway daemon logic ships in this package and is
  * compiled to `~/.local/bin/omp-gateway`; the coding-agent (`omp`) is the
- * agent runtime and is spawned on demand via `omp --mode rpc` (protocol
- * handshake: RPC_PROTOCOL_VERSION in agent-transport.ts).
+ * agent runtime and is spawned on demand via `omp --mode wire-stdio` (Wire
+ * protocol, pi-wire frames on stdio).
  *
  * Architecture:
- *   [IM Platform] → [Channel] → [Gateway] → [Session Store] → [Agent Bridge] → [omp --mode rpc]
+ *   [IM Platform] → [Channel] → [Gateway] → [Session Store] → [Agent Bridge] → [omp --mode wire-stdio]
  *
  * Channels supported: DingTalk (with Stream mode), Feishu, WeChat (planned).
  */

@@ -8,6 +8,8 @@ export interface TaskRowDto {
 	id: string;
 	name: string;
 	description?: string;
+	/** 启停状态（active/paused/disabled；前端可以此区分暂停与禁用）。 */
+	status?: "active" | "paused" | "disabled";
 	/** cron / interval / once。 */
 	scheduleType: "cron" | "interval" | "once";
 	/** 5 字段 cron 表达式（scheduleType=cron 时）。 */
