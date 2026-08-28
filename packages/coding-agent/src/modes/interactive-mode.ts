@@ -842,7 +842,7 @@ export class InteractiveMode implements InteractiveModeContext {
 	}
 
 	async #loadTodoList(): Promise<void> {
-		this.todoPhases = this.session.getTodoPhases();
+		this.todoPhases = this.wireClient?.getSnapshot()?.todoPhases ?? this.session.getTodoPhases();
 		this.#renderTodoList();
 	}
 
