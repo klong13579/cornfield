@@ -18,7 +18,7 @@
 |------|-----|
 | intent | `design` |
 | research | `encouraged`（架构/取舍类） |
-| 来源 | `test/moa-e2e-real-config.test.ts`、`test-mr-e2e-cotest.ts` |
+| 来源 | `test/moa-e2e-real-config.test.ts` |
 | 脚本答案（cotest） | 深圳；研发期 50 人四组（世界模型/行为智能/软件系统/机电系统）等 |
 
 ### D2 · 2 周校园招聘（预算/城市未定）
@@ -230,7 +230,7 @@ bun packages/moa-extension/scripts/stage-test.ts --stage all --task "对比一�
 
 # 真实 LLM e2e（门控）
 E2E=1 bun test packages/moa-extension/test/moa-e2e-real-config.test.ts
-E2E=1 bun run packages/moa-extension/test-mr-e2e-cotest.ts
+E2E=1 bun test packages/moa-extension/test/moa-e2e-real-config.test.ts
 
 # Discovery / P0 smoke
 bun tmp/moa-p0-smoke.ts

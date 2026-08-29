@@ -519,7 +519,7 @@ export async function discoverExtensionModulePaths(_ctx: LoadContext, dir: strin
 	//    declared entries. Without this gate, a package like `moa-extension/`
 	//    whose `package.json#omp.extensions` declares `./src/extension.ts`
 	//    would also auto-load every top-level `*.ts` it contains — including
-	//    test scripts such as `test-mr-e2e-cotest.ts`, which then get
+	//    stray root-level test scripts, which then get
 	//    `Bun.build`-bundled and fail at runtime with `posix_spawn ENOENT`.
 	const dirManifest = await readExtensionModuleManifest(_ctx, path.join(dir, "package.json"));
 	const dirDeclared =
