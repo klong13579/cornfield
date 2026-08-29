@@ -139,8 +139,7 @@ function configureUpdater(): void {
 	// 镜像开关：大陆环境可 export CORNFIELD_UPDATE_MIRROR=https://… 切到私有 generic 源。
 	// 兼容旧名 OMP_UPDATE_MIRROR（已弃用，保留读取）。
 	const { autoUpdater } = electronUpdater;
-	const mirror =
-		process.env.CORNFIELD_UPDATE_MIRROR?.trim() ?? process.env.OMP_UPDATE_MIRROR?.trim();
+	const mirror = process.env.CORNFIELD_UPDATE_MIRROR?.trim() ?? process.env.OMP_UPDATE_MIRROR?.trim();
 	if (mirror) {
 		autoUpdater.setFeedURL({ provider: "generic", url: mirror });
 	} else {
