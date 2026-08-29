@@ -1,6 +1,6 @@
-# omp 配置 (runtime 硬依赖, 详见设计 §6.1a #5)
-# omp --mode rpc 启动时读取本文件
-# 用于覆盖 omp 全局配置 (modelRoles, theme 等)
+# cornfield 配置 (runtime 硬依赖, 详见设计 §6.1a #5)
+# cornfield --mode rpc 启动时读取本文件
+# 用于覆盖 cornfield 全局配置 (modelRoles, theme 等)
 
 modelRoles:
   default: narwal-plan/minimax-m3   # 该 agent 使用的默认模型

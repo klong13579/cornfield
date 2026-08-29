@@ -1,7 +1,7 @@
 #!/bin/bash
-# OMP.app launcher —— 双击入口：
+# CornField.app launcher —— 双击入口：
 # 1. 幂等拉起 webapp 静态 server（5180，serve 打包进来的 dist）
-# 2. 幂等拉起 sidecar `omp serve`（7891，webapp WS 数据通道）
+# 2. 幂等拉起 sidecar `cornfield serve`（7891，webapp WS 数据通道）
 # 3. exec zed 主程序壳模式（ZOMP_SHELL=1 → Agent/IDE 双视图）
 set -u
 
@@ -15,17 +15,17 @@ export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:/u
 
 # --- 1. webapp 静态 server ---
 if ! lsof -nP -iTCP:$WEBAPP_PORT -sTCP:LISTEN >/dev/null 2>&1; then
-	"$DIR/serve-webapp" "$RES/webapp" "$WEBAPP_PORT" >/tmp/omp-webapp.log 2>&1 &
+	"$DIR/serve-webapp" "$RES/webapp" "$WEBAPP_PORT" >/tmp/cornfield-webapp.log 2>&1 &
 fi
 
 # --- 2. sidecar（WS 数据通道） ---
 if ! lsof -nP -iTCP:$SIDECAR_PORT -sTCP:LISTEN >/dev/null 2>&1; then
-	OMP_BIN="$HOME/.local/bin/omp"
-	if [ ! -x "$OMP_BIN" ]; then
-		OMP_BIN="$(command -v omp)"
+	CORNFIELD_BIN="$HOME/.local/bin/cornfield"
+	if [ ! -x "$CORNFIELD_BIN" ]; then
+		CORNFIELD_BIN="$(command -v cornfield)"
 	fi
-	if [ -n "${OMP_BIN:-}" ]; then
-		"$OMP_BIN" serve --port "$SIDECAR_PORT" --host 127.0.0.1 >/tmp/omp-sidecar.log 2>&1 &
+	if [ -n "${CORNFIELD_BIN:-}" ]; then
+		"$CORNFIELD_BIN" serve --port "$SIDECAR_PORT" --host 127.0.0.1 >/tmp/cornfield-sidecar.log 2>&1 &
 	fi
 fi
 

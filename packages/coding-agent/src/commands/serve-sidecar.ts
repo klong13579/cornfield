@@ -4,7 +4,7 @@
  * 职责：确保 `127.0.0.1:7891` 上有一个 `omp serve` sidecar 在跑，并负责其
  * spawn / 守护 / 崩溃重启 / 版本（二进制解析）的对外语义。桌面壳（Electron）
  * 与原生壳（Zed fork 的 zomp_shell）共享同一套 spawn/守护契约：
- * - 空闲 → spawn 新 sidecar（cwd=工作目录，注入 OMP_SIDECAR=1）；
+ * - 空闲 → spawn 新 sidecar（cwd=工作目录，注入 CORNFIELD_SIDECAR=1）；
  * - 被遗留的我方 sidecar 占用 → 接管：SIGTERM 后重启；
  * - 被非我方进程占用 → 复用，不杀、不重启（返回 `{ state: "reused" }`）。
  */
@@ -19,7 +19,7 @@ import { logger } from "@cornfield/utils";
 
 export const SERVE_HOST = "127.0.0.1";
 export const SERVE_PORT = 7891;
-export const SIDECAR_ENV = "OMP_SIDECAR";
+export const SIDECAR_ENV = "CORNFIELD_SIDECAR";
 export const DEFAULT_WORKSPACE_DIR = path.join(os.homedir(), "workspace");
 
 const SIDECAR_DRAIN_MS = 3000;
@@ -181,7 +181,7 @@ async function waitForPortFree(): Promise<void> {
 
 /**
  * 确保 7891 上有一个 `omp serve` sidecar：
- * - 空闲 → spawn 新 sidecar（cwd=工作目录，注入 OMP_SIDECAR=1）；
+ * - 空闲 → spawn 新 sidecar（cwd=工作目录，注入 CORNFIELD_SIDECAR=1）；
  * - 被遗留的我方 sidecar 占用 → 接管：SIGTERM 后重启；
  * - 被非我方进程占用 → 复用，不杀、不重启（返回 `{ state: "reused" }`）。
  */

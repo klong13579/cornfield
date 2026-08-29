@@ -5,7 +5,7 @@ Oh My Pi 是一个可进化的 AI 编程助手（terminal coding agent），同�
 ## Language
 
 ### Agent
-处理用户消息并调用工具的 AI 助手。可以是终端模式（omp CLI）或网关模式（通过 AgentBridge 以 RPC 协议驱动）。Agent 的核心循环（message → LLM → tool calls → result → next turn）由 pi-agent-core 实现。
+处理用户消息并调用工具的 AI 助手。可以是终端模式（cornfield CLI）或网关模式（通过 AgentBridge 以 RPC 协议驱动）。Agent 的核心循环（message → LLM → tool calls → result → next turn）由 @cornfield/agent 实现。
 _Avoid_: Bot, assistant, chatbot
 
 ### Session
@@ -31,17 +31,17 @@ _Avoid_: IM server, relay
 IM 平台接入的具体实现（目前仅 DingTalkChannel）。负责消息解析（文本/图片/文件/音视频）、卡片构建、媒体下载、Stream 回调订阅等。
 
 ### Bridge (AgentBridge)
-管理 `omp --mode rpc` 子进程的生命周期，通过 JSON-line RPC 协议与 agent 进程通信。每个 gateway 账号持有自己的 Bridge 实例，提供 prompt 转发、会话切换、模型热切换、工具禁用等能力。
+管理 `cornfield --mode rpc` 子进程的生命周期，通过 JSON-line RPC 协议与 agent 进程通信。每个 gateway 账号持有自己的 Bridge 实例，提供 prompt 转发、会话切换、模型热切换、工具禁用等能力。
 
 ### Wire 协议
-前端与 omp 核心之间的唯一协议契约：帧、命令 union、结果形状、事件类型。所有前端（TUI、web、桌面、IM 适配）说 Wire，核心实现 Wire。全 TypeScript，前端直接 import 协议类型，不生成、不镜像。
+前端与 cornfield 核心之间的唯一协议契约：帧、命令 union、结果形状、事件类型。所有前端（TUI、web、桌面、IM 适配）说 Wire，核心实现 Wire。全 TypeScript，前端直接 import 协议类型，不生成、不镜像。
 _Avoid_: RPC 协议, DTO 契约
 
 ### Wire 端点
 宿主 Wire 协议、实现一个领域切片的进程。serve 端点宿主项目会话；gateway 端点宿主 CronTask、账号与 IM 投递。一套协议、多个端点、按关切分域。
 
 ### Sidecar
-由桌面壳拉起并监督的伴随进程（当前为 omp serve）。生命周期跟随主程序：启动时 spawn、按端口契约复用或接管、退出时回收。不是常驻服务——桌面关闭后定时任务不能活在 sidecar 里。
+由桌面壳拉起并监督的伴随进程（当前为 cornfield serve）。生命周期跟随主程序：启动时 spawn、按端口契约复用或接管、退出时回收。不是常驻服务——桌面关闭后定时任务不能活在 sidecar 里。
 
 ### 服务端→客户端请求
 Wire 协议中服务端向客户端索取用户输入（权限批准、选择、确认、自由输入）的通用请求，客户端应答走同一协议返回。权限批准是其第一个实现。

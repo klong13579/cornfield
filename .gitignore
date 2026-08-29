@@ -60,7 +60,7 @@ tmp/moa-stage/
 # Generated files
 packages/coding-agent/src/internal-urls/docs-index.generated.ts
 /runs/
-python/omp-rpc/src/omp_rpc.egg-info/
+python/cornfield-rpc/src/cornfield_rpc.egg-info/
 
 scripts/session-stats/Cargo.lock
 

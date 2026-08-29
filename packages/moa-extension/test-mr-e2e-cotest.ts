@@ -33,7 +33,7 @@ const SCRIPTED_ANSWERS = [
 	"质量底线 = 感知/规划/工业设计 3 个岗不能降；其他 P5/P6 够用",
 ];
 
-const OMP_BIN = process.env.MOA_CORNFIELD_BIN ?? path.join(import.meta.dir, "..", "coding-agent", "src", "cli.ts");
+const CORNFIELD_BIN = process.env.MOA_CORNFIELD_BIN ?? path.join(import.meta.dir, "..", "coding-agent", "src", "cli.ts");
 
 const stamp = Date.now();
 const agentDir = path.join(os.tmpdir(), `omp-moa-cotest-agent-${stamp}`);
@@ -45,14 +45,14 @@ await fs.mkdir(path.join(projectDir, ".git"), { recursive: true });
 await Bun.write(path.join(agentDir, "config.yml"), await Bun.file(path.join(userAgent, "config.yml")).text());
 await Bun.write(path.join(agentDir, "models.yml"), await Bun.file(path.join(userAgent, "models.yml")).text());
 
-console.log(`[co-test] OMP binary: ${OMP_BIN}`);
+console.log(`[co-test] cornfield binary: ${CORNFIELD_BIN}`);
 console.log(`[co-test] agentDir: ${agentDir}`);
 console.log(`[co-test] projectDir: ${projectDir}`);
 console.log(`[co-test] task: ${TASK}`);
 console.log(`[co-test] scripted answers: ${SCRIPTED_ANSWERS.length} prepared`);
 
 const proc = Bun.spawn({
-	cmd: [OMP_BIN, "--no-color"],
+	cmd: [CORNFIELD_BIN, "--no-color"],
 	cwd: projectDir,
 	env: {
 		...process.env,

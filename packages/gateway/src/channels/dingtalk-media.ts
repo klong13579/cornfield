@@ -516,7 +516,7 @@ async function extractVideoFrames(videoPath: string, filename: string): Promise<
 		timestamps.push(offset * i);
 	}
 
-	const frameDir = fs.mkdtempSync(path.join(os.tmpdir(), "omp-video-frames-"));
+	const frameDir = fs.mkdtempSync(path.join(os.tmpdir(), "cornfield-video-frames-"));
 	const frames: InboundAttachment[] = [];
 
 	try {

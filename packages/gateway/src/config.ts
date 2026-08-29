@@ -108,8 +108,9 @@ const DEFAULT_CONFIG: GatewayConfig = {
 	agent: {
 		// No default `ompPath` on purpose: an unset agent.ompPath surfaces as
 		// `undefined` and consumers resolve it via `resolveDefaultOmpPath()`
-		// (~/.local/bin/omp first, PATH fallback). A hard-coded "omp" default
-		// here would shadow the stable-path logic in the transport.
+		// (~/.local/bin/cornfield first, PATH fallback). A hard-coded "cornfield"
+		// default here would shadow the stable-path logic in the transport.
+		// 注：字段名保留 ompPath 是与既有 gateway.json 的兼容名（历史命名）。
 		maxConcurrentSessions: 3,
 	},
 	session: {

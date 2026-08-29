@@ -1,6 +1,6 @@
 # Repository Guidelines
 
-Oh My Pi (`omp`) is a Bun-based monorepo that builds a terminal coding agent (`omp` CLI). The agent is a multi-provider LLM harness with a differential TUI, 25+ built-in tools, slash commands, session/memory management, a self-evolution learning system, and a gateway for IM channel integration (DingTalk). It compiles to a standalone binary that ships with native Rust addons.
+CornField (`cornfield`) is a Bun-based monorepo that builds a terminal coding agent (`cornfield` CLI). The agent is a multi-provider LLM harness with a differential TUI, 25+ built-in tools, slash commands, session/memory management, a self-evolution learning system, and a gateway for IM channel integration (DingTalk). It compiles to a standalone binary that ships with native Rust addons.
 
 ## Runtime & Tooling Preferences
 
@@ -94,13 +94,13 @@ tail -20 ~/.omp/gateway-data/logs/service.log | grep -E "BOOT|service start"
 
 ### Build & deploy model
 
-`~/.local/bin/omp` is **a compiled Mach-O binary** produced by `bun scripts/build-binary.ts` (in `packages/coding-agent`) + `bun scripts/embed-native.ts`. Source edits to `packages/*/src/**/*.ts` do **not** take effect on the running gateway until:
+`~/.local/bin/cornfield` is **a compiled Mach-O binary** produced by `bun scripts/build-binary.ts` (in `packages/coding-agent`) + `bun scripts/embed-native.ts`. Source edits to `packages/*/src/**/*.ts` do **not** take effect on the running gateway until:
 
-1. `bun run build` (or `bun run --cwd=packages/coding-agent build`) — produces a new `packages/coding-agent/dist/omp` (on macOS the build verifies the signed binary executes; a kernel-rejected signature fails the build)
-2. Atomically replace the installed binary — **`mv` onto a fresh inode, never `cp` over the running binary**: `cp packages/coding-agent/dist/omp /tmp/omp.new && mv /tmp/omp.new ~/.local/bin/omp`. `cp` truncates the same inode the running gateway is mapped from; the kernel's code-signature validation then transiently rejects the new content (`load code signature error 2` → SIGKILL on exec, exit 137), which looks like a broken signature even though `codesign --verify` passes. A fresh inode (mv) or rewriting the file (re-sign/touch) avoids it.
+1. `bun run build` (or `bun run --cwd=packages/coding-agent build`) — produces a new `packages/coding-agent/dist/cornfield` (on macOS the build verifies the signed binary executes; a kernel-rejected signature fails the build)
+2. Atomically replace the installed binary — **`mv` onto a fresh inode, never `cp` over the running binary**: `cp packages/coding-agent/dist/cornfield /tmp/cornfield.new && mv /tmp/cornfield.new ~/.local/bin/cornfield`. `cp` truncates the same inode the running gateway is mapped from; the kernel's code-signature validation then transiently rejects the new content (`load code signature error 2` → SIGKILL on exec, exit 137), which looks like a broken signature even though `codesign --verify` passes. A fresh inode (mv) or rewriting the file (re-sign/touch) avoids it.
 3. `cornfield-gateway service stop && sleep 5 && cornfield-gateway service start` — picks up the new binary
 
-Skipping step 1+2 makes "live test" silently exercise the **old** binary, masking source-level changes. Quick check: `file ~/.local/bin/omp` (should be `Mach-O 64-bit executable arm64`) and `ls -la ~/.local/bin/omp packages/coding-agent/dist/omp` (mtimes should match within the same minute after a build).
+Skipping step 1+2 makes "live test" silently exercise the **old** binary, masking source-level changes. Quick check: `file ~/.local/bin/cornfield` (should be `Mach-O 64-bit executable arm64`) and `ls -la ~/.local/bin/cornfield packages/coding-agent/dist/cornfield` (mtimes should match within the same minute after a build).
 
 ## Architecture & Data Flow
 
@@ -112,7 +112,7 @@ packages/coding-agent/src/cli.ts        # Bun runtime guard + command table; rou
        ├─ commands/<subcommand>.ts      # commit, config, grep, jupyter, plugin, setup, shell, ssh, stats, update, gateway, ...
        └─ modes/                         # interactive | print | rpc | acp
             └─ sdk.ts (createAgentSession)  # wires AgentSession, builds tools, registers extensions, configures auth
-                 └─ @oh-my-pi/pi-agent-core  # agent runtime: message/tool loop, state
+                 └─ @cornfield/agent  # agent runtime: message/tool loop, state
 ```
 
 ### Package dependency graph
@@ -132,7 +132,7 @@ coding-agent              ← main CLI: TUI, 25+ tools, slash commands, modes, s
 Extension products:
   cornfield-gateway              ← IM channels (DingTalk), scheduler (cron/interval/one-shot), agent bridge
   cognitive-coordination  ← L4 Synapse coordination layer (WIP)
-  stats (omp-stats)       ← local observability dashboard
+  stats (cornfield-stats)       ← local observability dashboard
 ```
 
 ### Key data flow
@@ -154,7 +154,7 @@ Extension products:
 ```
 packages/
   coding-agent/src/
-    cli.ts                    # entry point (bin "omp")
+    cli.ts                    # entry point (bin "cornfield")
     main.ts                   # root command dispatch
     sdk.ts                    # createAgentSession — wires everything
     commands/                 # subcommand implementations (commit, config, grep, ...)
@@ -225,7 +225,7 @@ docs/                         # 50+ design/runtime docs (see Documentation)
 
 ```typescript
 // Single syscall, atomic, no race condition
-import { isEnoent } from "@oh-my-pi/pi-utils";
+import { isEnoent } from "@cornfield/utils";
 try {
   return await Bun.file(path).json();
 } catch (err) {
@@ -241,17 +241,17 @@ Never check `.exists()` before reading — use try-catch with `isEnoent`. Never 
 Use the centralized logger — **never** `console.log`/`console.error`/`console.warn` in `packages/coding-agent` (corrupts TUI rendering):
 
 ```typescript
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 logger.error("MCP request failed", { url, method });
 ```
 
-Logs go to `~/.omp/logs/omp.YYYY-MM-DD.log` with automatic rotation via a custom `RotatingFileTransport` (replaces `winston-daily-rotate-file` which leaked FDs under Bun).
+Logs go to `~/.omp/logs/cornfield.YYYY-MM-DD.log` with automatic rotation via a custom `RotatingFileTransport` (replaces `winston-daily-rotate-file` which leaked FDs under Bun).
 
 ### TUI sanitization
 
 All text rendered to the TUI must be sanitized:
 
-- **Tabs → spaces**: `replaceTabs()` from `@oh-my-pi/pi-tui` or `../tools/render-utils`.
+- **Tabs → spaces**: `replaceTabs()` from `@cornfield/tui` or `../tools/render-utils`.
 - **Line truncation**: `truncateToWidth()` / `ui.truncate()` with `TRUNCATE_LENGTHS` constants.
 - **Path shortening**: `shortenPath()` (replaces `~` for home).
 - **Preview limits**: use `PREVIEW_LIMITS` constants, not ad-hoc limits.
@@ -480,7 +480,7 @@ Default: `~/.omp/` (override with `PI_CODING_AGENT_DIR`).
     auth.db                    # OAuth/API credentials
     skills/                    # unified skills dir
     extensions/                # installed extensions
-    logs/omp.YYYY-MM-DD.log    # rotating logs
+    logs/cornfield.YYYY-MM-DD.log    # rotating logs
   self-evolution/
     evolution.db               # SQLite: episodes, skills, workflow patterns, nudges
 ```
@@ -499,7 +499,7 @@ background task.
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **cornfield** (52646 symbols, 119339 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **cornfield** (53683 symbols, 122170 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
 

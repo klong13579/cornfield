@@ -136,13 +136,15 @@ async function quitApp(): Promise<void> {
 }
 
 function configureUpdater(): void {
-	// 镜像开关：大陆环境可 export OMP_UPDATE_MIRROR=https://… 切到私有 generic 源。
+	// 镜像开关：大陆环境可 export CORNFIELD_UPDATE_MIRROR=https://… 切到私有 generic 源。
+	// 兼容旧名 OMP_UPDATE_MIRROR（已弃用，保留读取）。
 	const { autoUpdater } = electronUpdater;
-	const mirror = process.env.OMP_UPDATE_MIRROR?.trim();
+	const mirror =
+		process.env.CORNFIELD_UPDATE_MIRROR?.trim() ?? process.env.OMP_UPDATE_MIRROR?.trim();
 	if (mirror) {
 		autoUpdater.setFeedURL({ provider: "generic", url: mirror });
 	} else {
-		autoUpdater.setFeedURL({ provider: "github", owner: "klong13579", repo: "oh-my-pi" });
+		autoUpdater.setFeedURL({ provider: "github", owner: "klong13579", repo: "cornfield" });
 	}
 	// 手动触发下载（不在后台静默下载）。UI 流：available → 用户点「下载」→ progress → downloaded → 用户点「重启更新」。
 	autoUpdater.autoDownload = false;
@@ -233,7 +235,7 @@ async function installUpdate(): Promise<{ ok: boolean; error?: string }> {
 		sidecar = null;
 		await terminateSidecar(handle);
 		const script = buildBootstrapScript({ zipPath, bundleRoot, targetApp: process.execPath });
-		const scriptPath = path.join(os.tmpdir(), `omp-desktop-update-${Date.now()}.sh`);
+		const scriptPath = path.join(os.tmpdir(), `cornfield-desktop-update-${Date.now()}.sh`);
 		fs.writeFileSync(scriptPath, script, { mode: 0o755 });
 		// detached：不随 app 进程树退出，独立跑完替换+重启。
 		childProcess.spawn("/bin/bash", [scriptPath], { detached: true, stdio: "ignore" }).unref();

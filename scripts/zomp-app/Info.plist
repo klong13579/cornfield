@@ -3,11 +3,11 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleName</key>
-	<string>OMP</string>
+	<string>CornField</string>
 	<key>CFBundleDisplayName</key>
-	<string>OMP</string>
+	<string>CornField</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.narwal.omp</string>
+	<string>com.cornfield.zomp</string>
 	<key>CFBundleVersion</key>
 	<string>0.1.0</string>
 	<key>CFBundleShortVersionString</key>

@@ -26,4 +26,4 @@ RUN mkdir -p /root/.local/bin && \
 ENV PATH="/root/.local/bin:$PATH"
 
 # Verify
-RUN HOME=/tmp/cornfield-home XDG_DATA_HOME=/tmp/cornfield-xdg omp --version
+RUN HOME=/tmp/cornfield-home XDG_DATA_HOME=/tmp/cornfield-xdg cornfield --version

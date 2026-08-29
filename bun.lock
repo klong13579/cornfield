@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "omp-monorepo",
+      "name": "cornfield-monorepo",
       "devDependencies": {
         "@biomejs/biome": "catalog:",
         "@bufbuild/protoc-gen-es": "catalog:",
