@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * OMP Desktop 一键打包：web-app → omp 二进制 → desktop 壳 JS → electron-builder。
+ * CornField 一键打包：web-app → omp 二进制 → desktop 壳 JS → electron-builder。
  *
  * 用法（均在 packages/desktop 下）：
  *   bun run build:desktop        # 完整构建，产出 dmg + zip

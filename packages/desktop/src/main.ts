@@ -17,9 +17,9 @@ const TRAY_ICON_DATA_URL =
 
 const FALLBACK_HTML = `<!doctype html>
 <html lang="zh-CN">
-<head><meta charset="utf-8"><title>OMP Desktop</title></head>
+<head><meta charset="utf-8"><title>CornField</title></head>
 <body style="font-family: system-ui; padding: 2rem; background: #111; color: #eee">
-<h1>OMP Desktop</h1>
+<h1>CornField</h1>
 <p>桌面壳已启动，连接 ws://127.0.0.1:7891/ws。通过托盘菜单「显示」管理窗口。</p>
 </body>
 </html>`;
@@ -87,7 +87,7 @@ function createTray(): Tray {
 	const icon = nativeImage.createFromDataURL(TRAY_ICON_DATA_URL);
 	icon.setTemplateImage(true);
 	const item = new Tray(icon);
-	item.setToolTip("OMP Desktop");
+	item.setToolTip("CornField");
 	item.setContextMenu(
 		Menu.buildFromTemplate([
 			{ label: "显示", click: () => showMainWindow() },
@@ -221,13 +221,13 @@ async function installUpdate(): Promise<{ ok: boolean; error?: string }> {
 		if (!zipPath) {
 			throw new Error(`no downloaded update found in ${cacheDir}`);
 		}
-		const appPath = app.getAppPath(); // …/OMP Desktop.app/Contents/Resources/app.asar
+		const appPath = app.getAppPath(); // …/CornField.app/Contents/Resources/app.asar
 		const bundleRoot = app.isPackaged ? path.dirname(path.dirname(path.dirname(appPath))) : "";
 		if (!bundleRoot?.endsWith(".app")) {
 			throw new Error(`cannot determine .app bundle root from ${appPath}`);
 		}
 		// 先干净终止 sidecar（等退出/排空），否则 bootstrap 脚本的 pgrep 会误匹配
-		// sidecar（argv 含 OMP Desktop.app 路径）导致替换失败或 open 新实例端口冲突。
+		// sidecar（argv 含 CornField.app 路径）导致替换失败或 open 新实例端口冲突。
 		isQuitting = true;
 		const handle = sidecar;
 		sidecar = null;
@@ -245,9 +245,11 @@ async function installUpdate(): Promise<{ ok: boolean; error?: string }> {
 	}
 }
 
-/** electron-updater 的缓存目录名（app-update.yml updaterCacheDirName；与它读 configOnDisk 一致）。 */
+/** electron-updater 的缓存目录名（app-update.yml updaterCacheDirName；与它读 configOnDisk 一致）。
+ * 注意：该值由包名 @cornfield/desktop 驱动（去 @ 与 /），不随 productName 变化
+ * —— 改包名时必须同步此处与 app-update.yml。 */
 function updaterCacheDirName(): string {
-	return "@oh-my-pidesktop-updater";
+	return "@cornfielddesktop-updater";
 }
 
 /** 在缓存目录找 electron-updater 落盘的待安装 zip（pending 或根目录的 *.zip，取最新的）。 */
@@ -277,8 +279,8 @@ function buildBootstrapScript(opts: { zipPath: string; bundleRoot: string; targe
 	// 目标：替换整个 bundleRoot。helper 循环等旧可执行退出后执行替换。
 	// 注意：模板字符串里 bash 变量引用用单引号包裹，避免被 TS 当插值。
 	// OLD_EXEC 用 app 自有可执行文件的完整路径做 pgrep 精确匹配——不能用 basename：
-	// sidecar（omp-binary/omp serve）与 helper（Frameworks/OMP Desktop）的 argv 都含
-	// "OMP Desktop"，宽匹配会一直等到超时才替换。
+	// sidecar（omp-binary/omp serve）与 helper（Frameworks/CornField）的 argv 都含
+	// "CornField"，宽匹配会一直等到超时才替换。
 	return `#!/bin/bash
 set -e
 ZIP="${zipPath}"

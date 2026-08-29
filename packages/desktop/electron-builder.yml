@@ -1,11 +1,10 @@
-# CornField Desktop —— electron-builder 打包配置。
+# CornField —— electron-builder 打包配置。
 # 一键打包入口：bun run build:desktop（先构建 web-app 与 cornfield，再 electron-builder 出 dmg/zip）。
 appId: com.cornfield.desktop
-productName: CornField Desktop
-# artifactName 用连字符命名（无空格）：GitHub Release 上传时会把空格替换成
-# 点（OMP Desktop → OMP.Desktop），导致 latest-mac.yml 里的 URL 与真实资产名
-# 不匹配，客户端 updater 下载 404。
-artifactName: CornField-Desktop-${version}-${arch}.${ext}
+productName: CornField
+# artifactName 用连字符命名（无空格）避免 GitHub Release 上传时把空格替换成点导致
+# latest-mac.yml 里的 URL 与真实资产名不匹配（客户端 updater 下载 404）。
+artifactName: CornField-${version}-${arch}.${ext}
 directories:
   output: dist
 files:
