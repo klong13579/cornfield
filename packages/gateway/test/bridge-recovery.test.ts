@@ -68,7 +68,7 @@ function makeSession(sessionPath: string, conversationId: string): SessionRecord
 		conversationId,
 		createdAt: Date.now(),
 		updatedAt: Date.now(),
-		ompSessionPath: sessionPath,
+		cornfieldSessionPath: sessionPath,
 		status: "active",
 	};
 }
@@ -160,7 +160,7 @@ describe("AgentBridge crash recovery via SessionManager", () => {
 		const stateFile = path.join(dir, "spawn-count");
 		Bun.env.FAKE_RPC_STATE = stateFile;
 		const fake = await createFakeRpcBinary(CRASH_ONCE_SCRIPT, "cornfield-gateway-recover-rpc-");
-		const bridge = new AgentBridge({ ompPath: fake.path, crashBackoffMs: 1, maxCrashRetries: 3 });
+		const bridge = new AgentBridge({ cornfieldPath: fake.path, crashBackoffMs: 1, maxCrashRetries: 3 });
 		const manager = new SessionManager({ bridges: new Map([["ops", bridge]]) });
 		try {
 			await bridge.start();
@@ -194,7 +194,7 @@ describe("AgentBridge stderr tail diagnostics", () => {
 		const crashLogPath = path.join(dir, "crash_log.jsonl");
 		const crashLog = new CrashLog(crashLogPath);
 		const fake = await createFakeRpcBinary(CRASH_WITH_STDERR_SCRIPT, "cornfield-gateway-stderr-rpc-");
-		const bridge = new AgentBridge({ ompPath: fake.path, accountId: "ops", crashLog, crashBackoffMs: 1 });
+		const bridge = new AgentBridge({ cornfieldPath: fake.path, accountId: "ops", crashLog, crashBackoffMs: 1 });
 		try {
 			await bridge.start();
 			await Bun.sleep(300); // disconnected → crash log write
@@ -220,7 +220,7 @@ describe("AgentBridge stderr tail diagnostics", () => {
 		const crashLog = new CrashLog(crashLogPath);
 		const fake = await createFakeRpcBinary(FAIL_BEFORE_READY_SCRIPT, "cornfield-gateway-beforeready-rpc-");
 		const bridge = new AgentBridge({
-			ompPath: fake.path,
+			cornfieldPath: fake.path,
 			accountId: "ops",
 			crashLog,
 			crashBackoffMs: 1,
@@ -300,7 +300,7 @@ describe("AgentBridge fail-fast on mid-prompt child death", () => {
 		const stateFile = path.join(dir, "spawn-count");
 		Bun.env.FAKE_RPC_STATE = stateFile;
 		const fake = await createFakeRpcBinary(CRASH_ONCE_MID_PROMPT_SCRIPT, "cornfield-gateway-failfast-rpc-");
-		const bridge = new AgentBridge({ ompPath: fake.path, crashBackoffMs: 1, maxCrashRetries: 3 });
+		const bridge = new AgentBridge({ cornfieldPath: fake.path, crashBackoffMs: 1, maxCrashRetries: 3 });
 		try {
 			await bridge.start();
 

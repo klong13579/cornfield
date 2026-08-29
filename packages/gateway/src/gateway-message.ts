@@ -102,7 +102,7 @@ export class MessageHandler {
 					userName: msg.userName || null,
 					createdAt: now,
 					updatedAt: now,
-					ompSessionPath: sessionPath,
+					cornfieldSessionPath: sessionPath,
 					sessionWebhook: msg.sessionWebhook,
 					status: "active",
 				});
@@ -114,17 +114,17 @@ export class MessageHandler {
 					isGroup: msg.isGroup,
 					userName: msg.userName || undefined,
 				};
-				if (session.ompSessionPath !== sessionPath) {
-					if (session.ompSessionPath) {
-						await this.#migrateSessionPath(session.ompSessionPath, sessionPath);
+				if (session.cornfieldSessionPath !== sessionPath) {
+					if (session.cornfieldSessionPath) {
+						await this.#migrateSessionPath(session.cornfieldSessionPath, sessionPath);
 					}
 					await this.#deps.store.updateSession(session.id, {
-						ompSessionPath: sessionPath,
+						cornfieldSessionPath: sessionPath,
 						updatedAt: now,
 						sessionWebhook: msg.sessionWebhook,
 						...conversationMeta,
 					});
-					session = { ...session, ompSessionPath: sessionPath, sessionWebhook: msg.sessionWebhook };
+					session = { ...session, cornfieldSessionPath: sessionPath, sessionWebhook: msg.sessionWebhook };
 				} else {
 					await this.#deps.store.updateSession(session.id, {
 						updatedAt: now,

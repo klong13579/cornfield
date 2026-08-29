@@ -193,7 +193,7 @@ describe("restart sentinel e2e — production simulation", () => {
 				dataDir,
 				drainTimeoutMs: 100, // 100ms for fast test
 				channels: {}, // No real channels
-				agent: { ompPath: fakeScriptPath },
+				agent: { cornfieldPath: fakeScriptPath },
 				intercomDir: path.join(tmpDir, "intercom"),
 			},
 			{ store: store1 },
@@ -218,7 +218,7 @@ describe("restart sentinel e2e — production simulation", () => {
 					conversationId: msg.conversationId,
 					createdAt: Date.now(),
 					updatedAt: Date.now(),
-					ompSessionPath: sessionPath,
+					cornfieldSessionPath: sessionPath,
 					status: "active",
 				});
 			}
@@ -231,7 +231,7 @@ describe("restart sentinel e2e — production simulation", () => {
 				conversationId: msg.conversationId,
 				createdAt: Date.now(),
 				updatedAt: Date.now(),
-				ompSessionPath: sessionPath,
+				cornfieldSessionPath: sessionPath,
 				status: "active",
 			});
 		});
@@ -275,7 +275,7 @@ describe("restart sentinel e2e — production simulation", () => {
 		expect(sentinel).not.toBeNull();
 		expect(sentinel!.conversationId).toBe(conversationId);
 		expect(sentinel!.accountId).toBe("__default__");
-		expect(sentinel!.ompSessionPath).toBe(sessionPath);
+		expect(sentinel!.cornfieldSessionPath).toBe(sessionPath);
 		expect(sentinel!.continuationMessage).toContain("restarted");
 
 		// Verify the session file was created with the user message
@@ -294,7 +294,7 @@ describe("restart sentinel e2e — production simulation", () => {
 				dataDir,
 				drainTimeoutMs: 100,
 				channels: {},
-				agent: { ompPath: fakeScriptPath },
+				agent: { cornfieldPath: fakeScriptPath },
 				intercomDir: path.join(tmpDir, "intercom"),
 			},
 			{ store: store2 },
@@ -326,7 +326,7 @@ describe("restart sentinel e2e — production simulation", () => {
 
 		const store = new SQLiteSessionStore(path.join(dataDir, "sessions.db"));
 		const bridge = new AgentBridge({
-			ompPath: fakeScriptPath,
+			cornfieldPath: fakeScriptPath,
 			cwd: agentDir,
 		});
 
@@ -335,7 +335,7 @@ describe("restart sentinel e2e — production simulation", () => {
 				dataDir,
 				drainTimeoutMs: 100,
 				channels: {},
-				agent: { ompPath: fakeScriptPath },
+				agent: { cornfieldPath: fakeScriptPath },
 				intercomDir: path.join(tmpDir, "intercom"),
 			},
 			{ bridge, store },
@@ -356,7 +356,7 @@ describe("restart sentinel e2e — production simulation", () => {
 					conversationId: msg.conversationId,
 					createdAt: Date.now(),
 					updatedAt: Date.now(),
-					ompSessionPath: sessionPath,
+					cornfieldSessionPath: sessionPath,
 					status: "active",
 				});
 			}
@@ -368,7 +368,7 @@ describe("restart sentinel e2e — production simulation", () => {
 				conversationId: msg.conversationId,
 				createdAt: Date.now(),
 				updatedAt: Date.now(),
-				ompSessionPath: sessionPath,
+				cornfieldSessionPath: sessionPath,
 				status: "active",
 			});
 		});

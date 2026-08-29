@@ -508,7 +508,7 @@ function makeMediaSession(sessionPath: string, conversationId: string): SessionR
 		conversationId,
 		createdAt: Date.now(),
 		updatedAt: Date.now(),
-		ompSessionPath: sessionPath,
+		cornfieldSessionPath: sessionPath,
 		status: "active",
 	};
 }
@@ -597,7 +597,7 @@ describe("DingTalkChannel.streamCard media routing pipeline", () => {
 				JSON.stringify(rewriteMediaReplyPaths(REPLY_WITH_MIXED_MEDIA, files.dir)),
 			),
 		);
-		bridge = new AgentBridge({ ompPath: rpc.path });
+		bridge = new AgentBridge({ cornfieldPath: rpc.path });
 		await bridge.start();
 	});
 
@@ -894,7 +894,7 @@ function makeImagePipelineSession(sessionPath: string, conversationId: string): 
 		conversationId,
 		createdAt: Date.now(),
 		updatedAt: Date.now(),
-		ompSessionPath: sessionPath,
+		cornfieldSessionPath: sessionPath,
 		status: "active",
 	};
 }
@@ -915,7 +915,7 @@ function makeImageAttachment(overrides?: Partial<InboundAttachment>): InboundAtt
 describe("AgentBridge image attachment forwarding", () => {
 	test("forwards image attachments as ImageContent[] in the RPC prompt", async () => {
 		const fake = await createImageAwareRpc();
-		const bridge = new AgentBridge({ ompPath: fake.path });
+		const bridge = new AgentBridge({ cornfieldPath: fake.path });
 		try {
 			await bridge.start();
 
@@ -949,7 +949,7 @@ describe("AgentBridge image attachment forwarding", () => {
 
 	test("text message with image attachment sends both text and images", async () => {
 		const fake = await createImageAwareRpc();
-		const bridge = new AgentBridge({ ompPath: fake.path });
+		const bridge = new AgentBridge({ cornfieldPath: fake.path });
 		try {
 			await bridge.start();
 
@@ -978,7 +978,7 @@ describe("AgentBridge image attachment forwarding", () => {
 
 	test("text message without attachments sends no images field", async () => {
 		const fake = await createImageAwareRpc();
-		const bridge = new AgentBridge({ ompPath: fake.path });
+		const bridge = new AgentBridge({ cornfieldPath: fake.path });
 		try {
 			await bridge.start();
 
@@ -1007,7 +1007,7 @@ describe("AgentBridge image attachment forwarding", () => {
 
 	test("non-image attachment produces text description without images", async () => {
 		const fake = await createImageAwareRpc();
-		const bridge = new AgentBridge({ ompPath: fake.path });
+		const bridge = new AgentBridge({ cornfieldPath: fake.path });
 		try {
 			await bridge.start();
 
@@ -1260,7 +1260,7 @@ describe("extractPptxText", () => {
 describe("AgentBridge file attachment forwarding (too_large + PPTX)", () => {
 	test("too_large attachment surfaces a description in the prompt, not [non-text message]", async () => {
 		const fake = await createImageAwareRpc();
-		const bridge = new AgentBridge({ ompPath: fake.path });
+		const bridge = new AgentBridge({ cornfieldPath: fake.path });
 		try {
 			await bridge.start();
 			const msg: InboundMessage = {
@@ -1310,7 +1310,7 @@ describe("AgentBridge file attachment forwarding (too_large + PPTX)", () => {
 
 	test("PPTX attachment surfaces extracted slide text in the prompt", async () => {
 		const fake = await createImageAwareRpc();
-		const bridge = new AgentBridge({ ompPath: fake.path });
+		const bridge = new AgentBridge({ cornfieldPath: fake.path });
 		let bytes: Uint8Array | undefined;
 		try {
 			bytes = await buildTestPptx([

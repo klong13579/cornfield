@@ -217,14 +217,14 @@ describe("deliverCronResultAsCard", () => {
 });
 
 // ===========================================================================
-// Integration tests (Gateway + fake OMP)
+// Integration tests (Gateway + fake cornfield)
 // ===========================================================================
 
 async function makeFakeOmpScript(dir: string, script: string): Promise<string> {
-	const fakeOmpPath = path.join(dir, "fake-omp");
-	await Bun.write(fakeOmpPath, script);
-	await fs.chmod(fakeOmpPath, 0o755);
-	return fakeOmpPath;
+	const fakeCornfieldPath = path.join(dir, "fake-cornfield");
+	await Bun.write(fakeCornfieldPath, script);
+	await fs.chmod(fakeCornfieldPath, 0o755);
+	return fakeCornfieldPath;
 }
 
 async function seedTask(
@@ -287,7 +287,7 @@ async function waitForExecution(
 }
 
 // Fake OMP: wire mode fails on prompt, --print hangs forever (subprocess timeout)
-const FAKE_OMP_HANG_SCRIPT = `#!/usr/bin/env bun
+const FAKE_CORNFIELD_HANG_SCRIPT = `#!/usr/bin/env bun
 const args = process.argv.slice(2);
 
 if (args[0] === "--mode" && args[1] === "wire-stdio") {
@@ -331,7 +331,7 @@ if (args[0] === "--mode" && args[1] === "wire-stdio") {
 
 // Fake OMP: wire mode succeeds on get_state, succeeds on first set_model,
 // fails on prompt, fails on second set_model (restore). --print succeeds.
-const FAKE_OMP_RESTORE_FAIL_SCRIPT = `#!/usr/bin/env bun
+const FAKE_CORNFIELD_RESTORE_FAIL_SCRIPT = `#!/usr/bin/env bun
 const args = process.argv.slice(2);
 
 if (args[0] === "--mode" && args[1] === "wire-stdio") {
@@ -382,7 +382,7 @@ if (args[0] === "--mode" && args[1] === "wire-stdio") {
 
 // Fake OMP: wire mode fails on prompt (warm-bridge failure). --print echoes
 // the prompt (successful fallback).
-const FAKE_OMP_FALLBACK_SCRIPT = `#!/usr/bin/env bun
+const FAKE_CORNFIELD_FALLBACK_SCRIPT = `#!/usr/bin/env bun
 const args = process.argv.slice(2);
 
 if (args[0] === "--mode" && args[1] === "wire-stdio") {
@@ -434,7 +434,7 @@ describe("cron timeout diagnostics bugfix", () => {
 		tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), "cornfield-gateway-diag-"));
 		vi.spyOn(os, "homedir").mockReturnValue(tmpHome);
 
-		const fakeOmpPath = await makeFakeOmpScript(tmpHome, FAKE_OMP_HANG_SCRIPT);
+		const fakeCornfieldPath = await makeFakeOmpScript(tmpHome, FAKE_CORNFIELD_HANG_SCRIPT);
 
 		const schedulerDir = path.join(tmpHome, ".cornfield", "gateway-data", "scheduler");
 		const jobsPath = path.join(schedulerDir, "jobs.json");
@@ -450,7 +450,7 @@ describe("cron timeout diagnostics bugfix", () => {
 
 		const config: GatewayConfig = {
 			channels: {},
-			agent: { ompPath: fakeOmpPath },
+			agent: { cornfieldPath: fakeCornfieldPath },
 			cron: { enabled: true, tickIntervalMs: 500, maxConcurrentRuns: 1 },
 			intercomDir: path.join(tmpHome, ".cornfield", "intercom"),
 		};
@@ -507,7 +507,7 @@ describe("cron model restore failure logging", () => {
 		vi.spyOn(os, "homedir").mockReturnValue(tmpHome);
 		setLogRoot(path.join(tmpHome, ".cornfield", "gateway-data", "scheduler", "logs"));
 
-		const fakeOmpPath = await makeFakeOmpScript(tmpHome, FAKE_OMP_RESTORE_FAIL_SCRIPT);
+		const fakeCornfieldPath = await makeFakeOmpScript(tmpHome, FAKE_CORNFIELD_RESTORE_FAIL_SCRIPT);
 
 		const schedulerDir = path.join(tmpHome, ".cornfield", "gateway-data", "scheduler");
 		const jobsPath = path.join(schedulerDir, "jobs.json");
@@ -525,7 +525,7 @@ describe("cron model restore failure logging", () => {
 
 		const config: GatewayConfig = {
 			channels: {},
-			agent: { ompPath: fakeOmpPath },
+			agent: { cornfieldPath: fakeCornfieldPath },
 			cron: { enabled: true, tickIntervalMs: 500, maxConcurrentRuns: 1 },
 			intercomDir: path.join(tmpHome, ".cornfield", "intercom"),
 		};
@@ -572,7 +572,7 @@ describe("cron warm-bridge fallback contract", () => {
 		tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), "cornfield-gateway-cron-fallback-"));
 		vi.spyOn(os, "homedir").mockReturnValue(tmpHome);
 
-		const fakeOmpPath = await makeFakeOmpScript(tmpHome, FAKE_OMP_FALLBACK_SCRIPT);
+		const fakeCornfieldPath = await makeFakeOmpScript(tmpHome, FAKE_CORNFIELD_FALLBACK_SCRIPT);
 
 		const schedulerDir = path.join(tmpHome, ".cornfield", "gateway-data", "scheduler");
 		const jobsPath = path.join(schedulerDir, "jobs.json");
@@ -589,7 +589,7 @@ describe("cron warm-bridge fallback contract", () => {
 
 		const config: GatewayConfig = {
 			channels: {},
-			agent: { ompPath: fakeOmpPath },
+			agent: { cornfieldPath: fakeCornfieldPath },
 			cron: { enabled: true, tickIntervalMs: 500, maxConcurrentRuns: 1 },
 			intercomDir: path.join(tmpHome, ".cornfield", "intercom"),
 		};

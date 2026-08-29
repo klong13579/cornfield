@@ -276,7 +276,7 @@ function makeNotifyLifecycle(bridge: FakeBridge): CronLifecycle {
 	const fakeRegistry = { sendMessage: mock(async () => {}) };
 	const fakeConfig = {
 		cron: { deliveryMode: "text" },
-		agent: { ompPath: "/usr/bin/true" },
+		agent: { cornfieldPath: "/usr/bin/true" },
 	} as any;
 	return new CronLifecycle({
 		config: fakeConfig,

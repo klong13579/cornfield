@@ -173,7 +173,7 @@ function makeSession(sessionPath: string, conversationId: string): SessionRecord
 		conversationId,
 		createdAt: Date.now(),
 		updatedAt: Date.now(),
-		ompSessionPath: sessionPath,
+		cornfieldSessionPath: sessionPath,
 		status: "active",
 	};
 }
@@ -250,7 +250,7 @@ describe("DingTalkChannel.hideThinkingBlock filter", () => {
 		rpc = await createFakeRpcBinary();
 		card = await startFakeCardServer();
 		restoreFetch = await installCardApiBaseForTest(card.host, card.port);
-		bridge = new AgentBridge({ ompPath: rpc.path });
+		bridge = new AgentBridge({ cornfieldPath: rpc.path });
 		await bridge.start();
 	});
 

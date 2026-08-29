@@ -320,8 +320,8 @@ describe("sendDirectMessage multi-account routing", () => {
 			await ensureAgentDir(opsDir);
 			await ensureAgentDir(hrDir);
 
-			const opsBridge = new AgentBridge({ ompPath: fake.path, cwd: opsDir });
-			const hrBridge = new AgentBridge({ ompPath: fake.path, cwd: hrDir });
+			const opsBridge = new AgentBridge({ cornfieldPath: fake.path, cwd: opsDir });
+			const hrBridge = new AgentBridge({ cornfieldPath: fake.path, cwd: hrDir });
 
 			await opsBridge.start();
 			await hrBridge.start();
@@ -401,7 +401,7 @@ describe("sendDirectMessage multi-account routing", () => {
 		try {
 			const agentDir = path.join(rootDir, "agents", "default");
 			await ensureAgentDir(agentDir);
-			const defaultBridge = new AgentBridge({ ompPath: fake.path, cwd: agentDir });
+			const defaultBridge = new AgentBridge({ cornfieldPath: fake.path, cwd: agentDir });
 			await defaultBridge.start();
 
 			const bridges = new Map<string, AgentBridge>(); // empty = single-account mode

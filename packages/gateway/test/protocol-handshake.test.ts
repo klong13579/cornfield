@@ -16,7 +16,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { MULTIDEVICE_PROTOCOL_VERSION } from "@cornfield/wire";
-import { resolveDefaultOmpPath, WireTransport } from "../src/agent-transport-wire";
+import { resolveDefaultCornfieldPath, WireTransport } from "../src/agent-transport-wire";
 
 async function createFakeWire(
 	script: string,
@@ -58,7 +58,7 @@ const HELLO_ERROR_LEGACY = JSON.stringify({
 describe("WireTransport protocol handshake", () => {
 	test("accepts a protocolVersion 1 hello_ack (current wire protocol)", async () => {
 		const fake = await createFakeWire(holdOpen(HELLO_ACK_V1));
-		const transport = new WireTransport({ ompPath: fake.path, readyTimeoutMs: 5_000 });
+		const transport = new WireTransport({ cornfieldPath: fake.path, readyTimeoutMs: 5_000 });
 		try {
 			await transport.start();
 			expect(transport.isReady).toBe(true);
@@ -70,7 +70,7 @@ describe("WireTransport protocol handshake", () => {
 
 	test("rejects a legacy peer answering with hello_error (no wire protocol support)", async () => {
 		const fake = await createFakeWire(respondThenExit(HELLO_ERROR_LEGACY));
-		const transport = new WireTransport({ ompPath: fake.path, readyTimeoutMs: 5_000 });
+		const transport = new WireTransport({ cornfieldPath: fake.path, readyTimeoutMs: 5_000 });
 		try {
 			await expect(transport.start()).rejects.toThrow(/hello rejected: legacy binary.*upgrade cornfield/s);
 		} finally {
@@ -81,7 +81,7 @@ describe("WireTransport protocol handshake", () => {
 
 	test("rejects a hello_ack with an incompatible protocolVersion", async () => {
 		const fake = await createFakeWire(respondThenExit(HELLO_ACK_BAD_VERSION));
-		const transport = new WireTransport({ ompPath: fake.path, readyTimeoutMs: 5_000 });
+		const transport = new WireTransport({ cornfieldPath: fake.path, readyTimeoutMs: 5_000 });
 		try {
 			await expect(transport.start()).rejects.toThrow(/Incompatible wire protocol version: 0/);
 		} finally {
@@ -91,12 +91,12 @@ describe("WireTransport protocol handshake", () => {
 	});
 });
 
-describe("resolveDefaultOmpPath", () => {
+describe("resolveDefaultCornfieldPath", () => {
 	test("falls back to the PATH name when ~/.local/bin/omp is absent", async () => {
 		// Use an empty temp dir as HOME — no ~/.local/bin/omp exists there.
 		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "proto-omp-path-"));
 		try {
-			expect(resolveDefaultOmpPath(dir)).toBe("cornfield");
+			expect(resolveDefaultCornfieldPath(dir)).toBe("cornfield");
 		} finally {
 			await fs.rm(dir, { recursive: true, force: true });
 		}
@@ -108,7 +108,7 @@ describe("resolveDefaultOmpPath", () => {
 			const bin = path.join(dir, ".local", "bin");
 			await fs.mkdir(bin, { recursive: true });
 			await fs.writeFile(path.join(bin, "cornfield"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
-			expect(resolveDefaultOmpPath(dir)).toBe(path.join(bin, "cornfield"));
+			expect(resolveDefaultCornfieldPath(dir)).toBe(path.join(bin, "cornfield"));
 		} finally {
 			await fs.rm(dir, { recursive: true, force: true });
 		}

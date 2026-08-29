@@ -45,7 +45,7 @@ export const dingtalkConfigSchema = channelConfigSchema.extend({
 });
 
 const agentConfigSchema = z.object({
-	ompPath: z.string().optional(),
+	cornfieldPath: z.string().optional(),
 	maxConcurrentSessions: z.number().int().positive().optional(),
 	maxCrashRetries: z.number().int().positive().optional(),
 	crashBackoffMs: z.number().int().positive().optional(),
@@ -106,11 +106,11 @@ const gatewayConfigSchema = z.object({
 const DEFAULT_CONFIG: GatewayConfig = {
 	channels: {},
 	agent: {
-		// No default `ompPath` on purpose: an unset agent.ompPath surfaces as
-		// `undefined` and consumers resolve it via `resolveDefaultOmpPath()`
+		// No default `cornfieldPath` on purpose: an unset agent.cornfieldPath surfaces as
+		// `undefined` and consumers resolve it via `resolveDefaultCornfieldPath()`
 		// (~/.local/bin/cornfield first, PATH fallback). A hard-coded "cornfield"
 		// default here would shadow the stable-path logic in the transport.
-		// 注：字段名保留 ompPath 是与既有 gateway.json 的兼容名（历史命名）。
+		// 注：字段名保留 cornfieldPath 是与既有 gateway.json 的兼容名（历史命名）。
 		maxConcurrentSessions: 3,
 	},
 	session: {

@@ -1079,7 +1079,7 @@ export class Gateway {
 			conversationId,
 			createdAt: Date.now(),
 			updatedAt: Date.now(),
-			ompSessionPath: sessionPath,
+			cornfieldSessionPath: sessionPath,
 			status: "active",
 		};
 
@@ -1398,7 +1398,7 @@ export class Gateway {
 	 * `SessionRecord` from the store. Returns the info needed to write a restart
 	 * sentinel, or `null` if no bridge has an active session.
 	 */
-	#getActiveSessionInfo(): { conversationId: string; accountId: string; ompSessionPath: string } | null {
+	#getActiveSessionInfo(): { conversationId: string; accountId: string; cornfieldSessionPath: string } | null {
 		// Check account bridges first, then default bridge
 		const bridgesToCheck = [
 			...Array.from(this.#accountBridges.entries()).map(([accountId, bridge]) => ({ accountId, bridge })),
@@ -1418,7 +1418,7 @@ export class Gateway {
 			return {
 				conversationId,
 				accountId,
-				ompSessionPath: sessionPath,
+				cornfieldSessionPath: sessionPath,
 			};
 		}
 
@@ -1443,7 +1443,7 @@ export class Gateway {
 		logger.info("Resuming from restart sentinel", {
 			conversationId: sentinel.conversationId,
 			accountId: sentinel.accountId,
-			ompSessionPath: sentinel.ompSessionPath,
+			cornfieldSessionPath: sentinel.cornfieldSessionPath,
 		});
 
 		// Find the appropriate bridge
@@ -1452,7 +1452,7 @@ export class Gateway {
 		try {
 			// Send the continuation message to resume the conversation
 			const response = await bridge.executePrompt(sentinel.continuationMessage, {
-				sessionPath: sentinel.ompSessionPath,
+				sessionPath: sentinel.cornfieldSessionPath,
 				inactivityMs: 60_000, // 1 minute inactivity for recovery
 			});
 

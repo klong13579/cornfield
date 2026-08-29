@@ -23,7 +23,7 @@ export interface RestartSentinel {
 	/** The account ID for multi-account routing. */
 	accountId: string;
 	/** The gateway agent session path (e.g. ~/.cornfield/agents/<accountId>/sessions/<safeId>.jsonl). */
-	ompSessionPath: string;
+	cornfieldSessionPath: string;
 	/** The message to send to the agent after restart to resume the conversation. */
 	continuationMessage: string;
 	/** Timestamp when the sentinel was written. */
@@ -66,7 +66,7 @@ export async function writeRestartSentinel(
 	params: {
 		conversationId: string;
 		accountId: string;
-		ompSessionPath: string;
+		cornfieldSessionPath: string;
 		continuationMessage?: string;
 	},
 	location?: SentinelLocation,
@@ -74,7 +74,7 @@ export async function writeRestartSentinel(
 	const sentinel: RestartSentinel = {
 		conversationId: params.conversationId,
 		accountId: params.accountId,
-		ompSessionPath: params.ompSessionPath,
+		cornfieldSessionPath: params.cornfieldSessionPath,
 		continuationMessage: params.continuationMessage ?? DEFAULT_CONTINUATION_MESSAGE,
 		timestamp: Date.now(),
 	};
@@ -110,8 +110,15 @@ export async function readRestartSentinel(location?: SentinelLocation): Promise<
 		const raw = await Bun.file(sentinelPath).text();
 		const sentinel = JSON.parse(raw) as RestartSentinel;
 
+		// Transitional compat (one deploy window): sentinels written by the
+		// pre-rename binary carry `ompSessionPath`. Recover the field so a restart
+		// across the rename does not lose the active-session reference.
+		if (!sentinel.cornfieldSessionPath && (sentinel as unknown as { ompSessionPath?: string }).ompSessionPath) {
+			sentinel.cornfieldSessionPath = (sentinel as unknown as { ompSessionPath: string }).ompSessionPath;
+		}
+
 		// Validate required fields
-		if (!sentinel.conversationId || !sentinel.accountId || !sentinel.ompSessionPath || !sentinel.timestamp) {
+		if (!sentinel.conversationId || !sentinel.accountId || !sentinel.cornfieldSessionPath || !sentinel.timestamp) {
 			logger.warn("Restart sentinel is malformed, clearing", { sentinelPath });
 			await clearRestartSentinel(location);
 			return null;

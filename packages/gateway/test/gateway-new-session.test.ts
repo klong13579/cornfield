@@ -122,7 +122,7 @@ describe("NewSessionHandler", () => {
 		await ensureAgentDir(agentDir);
 
 		store = new SQLiteSessionStore(path.join(rootDir, "sessions.db"));
-		bridge = new AgentBridge({ ompPath: rpcPath, cwd: agentDir });
+		bridge = new AgentBridge({ cornfieldPath: rpcPath, cwd: agentDir });
 		await bridge.start();
 		replies = [];
 	});
@@ -200,7 +200,7 @@ describe("NewSessionHandler", () => {
 				conversationId: convId,
 				createdAt: oldTime,
 				updatedAt: oldTime,
-				ompSessionPath: sessionPath,
+				cornfieldSessionPath: sessionPath,
 				status: "active",
 			});
 
@@ -237,7 +237,7 @@ describe("NewSessionHandler", () => {
 			// SQLite row refreshed in place (same id, fresh updatedAt)
 			const refreshed = await store.getSession("dingtalk:test", "ops", convId);
 			expect(refreshed?.id).toBe(session.id);
-			expect(refreshed?.ompSessionPath).toBe(sessionPath);
+			expect(refreshed?.cornfieldSessionPath).toBe(sessionPath);
 			expect(refreshed?.updatedAt).toBeGreaterThan(oldTime);
 
 			// User received confirmation
@@ -263,7 +263,7 @@ describe("NewSessionHandler", () => {
 				conversationId: convId,
 				createdAt: now,
 				updatedAt: now,
-				ompSessionPath: sessionPath,
+				cornfieldSessionPath: sessionPath,
 				status: "active",
 			});
 
@@ -361,7 +361,7 @@ describe("NewSessionHandler", () => {
 				conversationId: convId,
 				createdAt: oldTime,
 				updatedAt: oldTime,
-				ompSessionPath: sessionPath,
+				cornfieldSessionPath: sessionPath,
 				status: "active",
 			});
 			const session: SessionRecord = created;
@@ -381,7 +381,7 @@ describe("NewSessionHandler", () => {
 			const result = await handler.rotate(session, "ops", { injectSystemNote: true, msg });
 
 			expect(result.session.id).toBe(session.id);
-			expect(result.session.ompSessionPath).toBe(sessionPath);
+			expect(result.session.cornfieldSessionPath).toBe(sessionPath);
 			expect(result.session.updatedAt).toBeGreaterThan(oldTime);
 			expect(result.archived).toBe(true);
 
@@ -424,7 +424,7 @@ describe("NewSessionHandler", () => {
 				conversationId: convId,
 				createdAt: now,
 				updatedAt: now,
-				ompSessionPath: sessionPath,
+				cornfieldSessionPath: sessionPath,
 				status: "active",
 			});
 			const session: SessionRecord = created;
@@ -461,7 +461,7 @@ describe("NewSessionHandler", () => {
 				conversationId: convId,
 				createdAt: oldTime,
 				updatedAt: oldTime,
-				ompSessionPath: sessionPath,
+				cornfieldSessionPath: sessionPath,
 				status: "active",
 			});
 			const session: SessionRecord = created;
@@ -497,7 +497,7 @@ describe("NewSessionHandler", () => {
 				conversationId: convId,
 				createdAt: now,
 				updatedAt: now,
-				ompSessionPath: sessionPath,
+				cornfieldSessionPath: sessionPath,
 				status: "active",
 			});
 			const session: SessionRecord = created;
@@ -531,7 +531,7 @@ describe("NewSessionHandler", () => {
 				conversationId: "x",
 				createdAt: updatedAt,
 				updatedAt,
-				ompSessionPath: "x.jsonl",
+				cornfieldSessionPath: "x.jsonl",
 				status: "active",
 			};
 		}

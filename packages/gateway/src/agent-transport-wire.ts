@@ -88,8 +88,8 @@ interface PendingCommand {
 }
 
 export interface WireTransportOptions {
-	/** Path to omp binary (default: resolveDefaultOmpPath()) */
-	ompPath?: string;
+	/** Path to cornfield binary (default: resolveDefaultCornfieldPath()) */
+	cornfieldPath?: string;
 	/** Model to pass via `--model` flag on spawn (default: undefined) */
 	model?: string;
 	/** Working directory for the child process (default: process.cwd()) */
@@ -295,15 +295,15 @@ export class WireTransport {
 			}
 			this.#pendingCommands.clear();
 
-			const ompPath = this.#options.ompPath ?? resolveDefaultOmpPath();
+			const cornfieldPath = this.#options.cornfieldPath ?? resolveDefaultCornfieldPath();
 			const args = ["--mode", "wire-stdio"];
 			if (this.#options.model) {
 				args.push("--model", this.#options.model);
 			}
 
-			logger.debug("Spawning agent wire-stdio process", { ompPath, args });
+			logger.debug("Spawning agent wire-stdio process", { cornfieldPath, args });
 
-			const proc = Bun.spawn([ompPath, ...args], {
+			const proc = Bun.spawn([cornfieldPath, ...args], {
 				stdout: "pipe",
 				stderr: "pipe",
 				stdin: "pipe",
@@ -631,7 +631,7 @@ export class WireTransport {
 /**
  * Resolve the default cornfield binary path (same policy as WireTransport).
  */
-export function resolveDefaultOmpPath(home: string = os.homedir()): string {
+export function resolveDefaultCornfieldPath(home: string = os.homedir()): string {
 	const stable = path.join(home, ".local", "bin", "cornfield");
 	try {
 		fs.accessSync(stable, fs.constants.X_OK);

@@ -74,7 +74,7 @@ export class SQLiteSessionStore implements SessionStore {
 		this.#getSessionByConv = this.#db.prepare<SessionRecord, [string, string, string]>(`
 			SELECT id, channel_id as channelId, account_id as accountId, user_id as userId, conversation_id as conversationId,
 			       created_at as createdAt, updated_at as updatedAt,
-			       last_message_id as lastMessageId, omp_session_path as ompSessionPath, session_webhook as sessionWebhook,
+			       last_message_id as lastMessageId, omp_session_path as cornfieldSessionPath, session_webhook as sessionWebhook,
 			       conversation_title as conversationTitle, is_group as isGroup, user_name as userName, status
 			FROM sessions
 			WHERE channel_id = ? AND account_id = ? AND conversation_id = ? AND status != 'closed'
@@ -83,7 +83,7 @@ export class SQLiteSessionStore implements SessionStore {
 		this.#getSessionByPath = this.#db.prepare<SessionRecord, [string]>(`
 			SELECT id, channel_id as channelId, account_id as accountId, user_id as userId, conversation_id as conversationId,
 			       created_at as createdAt, updated_at as updatedAt,
-			       last_message_id as lastMessageId, omp_session_path as ompSessionPath, session_webhook as sessionWebhook,
+			       last_message_id as lastMessageId, omp_session_path as cornfieldSessionPath, session_webhook as sessionWebhook,
 			       conversation_title as conversationTitle, is_group as isGroup, user_name as userName, status
 			FROM sessions
 			WHERE omp_session_path = ? AND status != 'closed'
@@ -112,7 +112,7 @@ export class SQLiteSessionStore implements SessionStore {
 		this.#getActiveSessions = this.#db.prepare<SessionRecord, [string | null]>(`
 			SELECT id, channel_id as channelId, account_id as accountId, user_id as userId, conversation_id as conversationId,
 			       created_at as createdAt, updated_at as updatedAt,
-			       last_message_id as lastMessageId, omp_session_path as ompSessionPath, session_webhook as sessionWebhook,
+			       last_message_id as lastMessageId, omp_session_path as cornfieldSessionPath, session_webhook as sessionWebhook,
 			       conversation_title as conversationTitle, is_group as isGroup, user_name as userName, status
 			FROM sessions
 			WHERE status != 'closed' AND channel_id = COALESCE(?, channel_id)
@@ -182,8 +182,8 @@ export class SQLiteSessionStore implements SessionStore {
 		return row ? normalizeSessionRow(row) : null;
 	}
 
-	async getSessionByPath(ompSessionPath: string): Promise<SessionRecord | null> {
-		const row = this.#getSessionByPath.get(ompSessionPath) ?? null;
+	async getSessionByPath(cornfieldSessionPath: string): Promise<SessionRecord | null> {
+		const row = this.#getSessionByPath.get(cornfieldSessionPath) ?? null;
 		return row ? normalizeSessionRow(row) : null;
 	}
 
@@ -198,7 +198,7 @@ export class SQLiteSessionStore implements SessionStore {
 			session.createdAt,
 			session.updatedAt,
 			session.lastMessageId ?? null,
-			session.ompSessionPath ?? null,
+			session.cornfieldSessionPath ?? null,
 			session.sessionWebhook ?? null,
 			session.conversationTitle ?? null,
 			session.isGroup === undefined || session.isGroup === null ? null : session.isGroup ? 1 : 0,
@@ -213,7 +213,7 @@ export class SQLiteSessionStore implements SessionStore {
 		this.#updateSession.run(
 			now,
 			updates.lastMessageId ?? null,
-			updates.ompSessionPath ?? null,
+			updates.cornfieldSessionPath ?? null,
 			updates.sessionWebhook ?? null,
 			updates.conversationTitle ?? null,
 			updates.isGroup === undefined || updates.isGroup === null ? null : updates.isGroup ? 1 : 0,

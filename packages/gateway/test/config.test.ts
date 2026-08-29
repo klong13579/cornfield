@@ -24,9 +24,9 @@ describe("config", () => {
 	it("returns default config when file does not exist", async () => {
 		const config = await loadConfig("/nonexistent/path.json");
 		expect(config.channels).toEqual({});
-		// No hard-coded ompPath default — unset stays undefined so consumers
-		// resolve it via resolveDefaultOmpPath() (~/.local/bin/omp first).
-		expect(config.agent?.ompPath).toBeUndefined();
+		// No hard-coded cornfieldPath default — unset stays undefined so consumers
+		// resolve it via resolveDefaultCornfieldPath() (~/.local/bin/omp first).
+		expect(config.agent?.cornfieldPath).toBeUndefined();
 		expect(config.session?.idleTimeoutMinutes).toBe(240);
 	});
 
@@ -163,8 +163,8 @@ describe("validateAndNormalizeConfig", () => {
 	it("accepts an empty config and fills in defaults", () => {
 		const r = validateAndNormalizeConfig({});
 		expect(r.cron.tickIntervalMs).toBe(60_000);
-		// ompPath is intentionally unset by default (resolved downstream via
-		// resolveDefaultOmpPath).
-		expect(r.agent.ompPath).toBeUndefined();
+		// cornfieldPath is intentionally unset by default (resolved downstream via
+		// resolveDefaultCornfieldPath).
+		expect(r.agent.cornfieldPath).toBeUndefined();
 	});
 });

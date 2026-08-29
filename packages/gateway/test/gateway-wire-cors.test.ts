@@ -49,7 +49,7 @@ describe("gateway wire endpoint CORS", () => {
 		return new Gateway({
 			channels: {},
 			dataDir: tmpDir,
-			agent: { ompPath: fakePath },
+			agent: { cornfieldPath: fakePath },
 			intercomDir: path.join(tmpDir, "intercom"),
 		});
 	}

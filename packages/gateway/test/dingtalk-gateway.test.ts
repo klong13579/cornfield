@@ -111,7 +111,7 @@ function makeSession(sessionPath: string, conversationId: string): SessionRecord
 		conversationId,
 		createdAt: Date.now(),
 		updatedAt: Date.now(),
-		ompSessionPath: sessionPath,
+		cornfieldSessionPath: sessionPath,
 		status: "active",
 	};
 }
@@ -122,7 +122,7 @@ describe("Bridge → formatter end-to-end (v1 reply path)", () => {
 
 	beforeEach(async () => {
 		fake = await createFakeRpcBinary();
-		bridge = new AgentBridge({ ompPath: fake.path });
+		bridge = new AgentBridge({ cornfieldPath: fake.path });
 		await bridge.start();
 	});
 
@@ -229,7 +229,7 @@ process.stdin.on("data", chunk => {
 });
 `);
 		try {
-			const emptyBridge = new AgentBridge({ ompPath: empty.path });
+			const emptyBridge = new AgentBridge({ cornfieldPath: empty.path });
 			await emptyBridge.start();
 			const meta = await emptyBridge.forwardWithMeta(
 				makeMessage("hi", "conv-fail"),

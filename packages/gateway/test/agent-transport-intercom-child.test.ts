@@ -70,7 +70,7 @@ describe("WireTransport intercom child env", () => {
 		const scriptPath = await writeScript();
 		const outPath = path.join(tmpDir, "env-dump-with.json");
 		const transport = new WireTransport({
-			ompPath: scriptPath,
+			cornfieldPath: scriptPath,
 			readyTimeoutMs: 5_000,
 			intercomParent: "main-omp",
 			cwd: tmpDir,
@@ -95,7 +95,7 @@ describe("WireTransport intercom child env", () => {
 		const scriptPath = await writeScript();
 		const outPath = path.join(tmpDir, "env-dump-without.json");
 		const transport = new WireTransport({
-			ompPath: scriptPath,
+			cornfieldPath: scriptPath,
 			readyTimeoutMs: 5_000,
 			cwd: tmpDir,
 		});

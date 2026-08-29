@@ -484,7 +484,7 @@ describe("Gateway reload plan", () => {
 		const config = {
 			channels: {},
 			dataDir: tmpDir,
-			agent: { ompPath: fake.path },
+			agent: { cornfieldPath: fake.path },
 			intercomDir: path.join(tmpDir, "intercom"),
 		};
 		const gateway = new Gateway(config);
@@ -509,7 +509,7 @@ describe("Gateway reload plan", () => {
 		const config1 = {
 			channels: {},
 			dataDir: tmpDir,
-			agent: { ompPath: fake.path },
+			agent: { cornfieldPath: fake.path },
 			intercomDir: path.join(tmpDir, "intercom"),
 		};
 		const gateway = new Gateway(config1);
@@ -544,7 +544,7 @@ describe("Gateway reload plan", () => {
 		const config = {
 			channels: {},
 			dataDir: tmpDir,
-			agent: { ompPath: fake.path },
+			agent: { cornfieldPath: fake.path },
 			intercomDir: path.join(tmpDir, "intercom"),
 		};
 		const gateway = new Gateway(config);
@@ -680,7 +680,7 @@ function makeSession(sessionPath: string): SessionRecord {
 		conversationId: "conv-health",
 		createdAt: Date.now(),
 		updatedAt: Date.now(),
-		ompSessionPath: sessionPath,
+		cornfieldSessionPath: sessionPath,
 		status: "active",
 	};
 }
@@ -711,7 +711,7 @@ describe("Gateway circuit breaker health check", () => {
 		const gateway = new Gateway({
 			channels: {},
 			dataDir: tmpDir,
-			agent: { ompPath: fake.path },
+			agent: { cornfieldPath: fake.path },
 			intercomDir: path.join(tmpDir, "intercom"),
 		});
 
@@ -760,7 +760,7 @@ describe("Gateway circuit breaker health check", () => {
 		const gateway = new Gateway({
 			channels: {},
 			dataDir: tmpDir,
-			agent: { ompPath: fake.path },
+			agent: { cornfieldPath: fake.path },
 			intercomDir: path.join(tmpDir, "intercom"),
 		});
 

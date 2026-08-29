@@ -54,7 +54,7 @@ afterEach(async () => {
 describe("WireTransport disconnected event", () => {
 	test("emits disconnected after subprocess exits post-ready", async () => {
 		const scriptPath = await writeScript(SCRIPT_CRASH_AFTER_READY);
-		const transport = new WireTransport({ ompPath: scriptPath, readyTimeoutMs: 5_000 });
+		const transport = new WireTransport({ cornfieldPath: scriptPath, readyTimeoutMs: 5_000 });
 		const events: RpcTransportEvent[] = [];
 		transport.onEvent(e => events.push(e));
 		await transport.start();
@@ -70,7 +70,7 @@ describe("WireTransport disconnected event", () => {
 
 	test("pre-ready exit rejects start() with before-ready error (no disconnected emit during start)", async () => {
 		const scriptPath = await writeScript(SCRIPT_CRASH_BEFORE_READY);
-		const transport = new WireTransport({ ompPath: scriptPath, readyTimeoutMs: 5_000 });
+		const transport = new WireTransport({ cornfieldPath: scriptPath, readyTimeoutMs: 5_000 });
 		const events: RpcTransportEvent[] = [];
 		transport.onEvent(e => events.push(e));
 		await expect(transport.start()).rejects.toThrow(/exited with code 9 before hello_ack/);
@@ -82,14 +82,14 @@ describe("WireTransport disconnected event", () => {
 
 	test("subprocess that never reaches ready hits readyTimeoutMs", async () => {
 		const scriptPath = await writeScript(SCRIPT_NEVER_READY);
-		const transport = new WireTransport({ ompPath: scriptPath, readyTimeoutMs: 200 });
+		const transport = new WireTransport({ cornfieldPath: scriptPath, readyTimeoutMs: 200 });
 		await expect(transport.start()).rejects.toThrow(/timed out waiting for hello_ack/);
 		await transport.stop();
 	});
 
 	test("transport cleanup wipes proc and stdinWriter after post-ready crash", async () => {
 		const scriptPath = await writeScript(SCRIPT_CRASH_AFTER_READY);
-		const transport = new WireTransport({ ompPath: scriptPath, readyTimeoutMs: 5_000 });
+		const transport = new WireTransport({ cornfieldPath: scriptPath, readyTimeoutMs: 5_000 });
 		await transport.start();
 		await Bun.sleep(200);
 		// After disconnect, the writer is cleared — sendFrame throws a

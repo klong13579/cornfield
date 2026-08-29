@@ -229,7 +229,7 @@ function makeSession(sessionPath: string, conversationId: string): SessionRecord
 		conversationId,
 		createdAt: Date.now(),
 		updatedAt: Date.now(),
-		ompSessionPath: sessionPath,
+		cornfieldSessionPath: sessionPath,
 		status: "active",
 	};
 }
@@ -247,7 +247,7 @@ describe("Gateway crash repro: 2026-07-09 14:32", () => {
 		// leaks an error — that's the production root cause.
 		const fake = await createFakeRpcBinary(LONG_INACTIVE_SCRIPT);
 		const bridge = new AgentBridge({
-			ompPath: fake.path,
+			cornfieldPath: fake.path,
 			streamingWatchdogMs: 300, // fire after 300ms of no events
 		});
 		try {
@@ -295,7 +295,7 @@ describe("Gateway crash repro: 2026-07-09 14:32", () => {
 		// leaks an error from the emit handler, this test catches it.
 		const fake = await createFakeRpcBinary(CRASH_MID_PROMPT_SCRIPT);
 		const bridge = new AgentBridge({
-			ompPath: fake.path,
+			cornfieldPath: fake.path,
 			streamingWatchdogMs: 300,
 		});
 		try {
@@ -328,7 +328,7 @@ describe("Gateway crash repro: 2026-07-09 14:32", () => {
 		// here. Also stress-tests the circuit breaker (CIRCUIT_FAILURE_THRESHOLD=10).
 		const fake = await createFakeRpcBinary(LONG_INACTIVE_SCRIPT);
 		const bridge = new AgentBridge({
-			ompPath: fake.path,
+			cornfieldPath: fake.path,
 			streamingWatchdogMs: 200,
 		});
 		try {
@@ -362,7 +362,7 @@ describe("Gateway crash repro: 2026-07-09 14:32", () => {
 		// If this test fires an uncaughtException, the handler-throw path
 		// is unhandled — that's the production root cause.
 		const fake = await createFakeRpcBinary(NORMAL_RESPONSE_SCRIPT);
-		const bridge = new AgentBridge({ ompPath: fake.path });
+		const bridge = new AgentBridge({ cornfieldPath: fake.path });
 		try {
 			await bridge.start();
 			const throwingHandlers: ForwardStreamHandlers = {

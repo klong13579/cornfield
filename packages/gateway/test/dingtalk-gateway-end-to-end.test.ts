@@ -281,7 +281,7 @@ async function createHarness(options?: {
 	const agentDir = path.join(rootDir, "agents", accountId);
 	await ensureAgentDir(agentDir);
 
-	const bridge = new AgentBridge({ ompPath: rpcPath, cwd: agentDir });
+	const bridge = new AgentBridge({ cornfieldPath: rpcPath, cwd: agentDir });
 	await bridge.start();
 
 	const store = new SQLiteSessionStore(path.join(rootDir, "sessions.db"));
@@ -334,7 +334,7 @@ async function createHarness(options?: {
 				conversationId: msg.conversationId,
 				createdAt: Date.now(),
 				updatedAt: Date.now(),
-				ompSessionPath: buildAgentSessionPath(agentDir, msg.conversationId),
+				cornfieldSessionPath: buildAgentSessionPath(agentDir, msg.conversationId),
 				status: "active",
 			});
 		}
@@ -450,7 +450,7 @@ describe("DingTalk channel + gateway end-to-end", () => {
 
 		const session = await harness.store.getSession("dingtalk", "hr", "conv-dm-001");
 		expect(session).not.toBeNull();
-		expect(session?.ompSessionPath).toBe(path.join(harness.agentDir, "sessions", "conv-dm-001.jsonl"));
+		expect(session?.cornfieldSessionPath).toBe(path.join(harness.agentDir, "sessions", "conv-dm-001.jsonl"));
 	});
 
 	test("duplicate msgId is dropped by the channel's real dedup before reaching the gateway", async () => {

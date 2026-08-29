@@ -57,7 +57,7 @@ export function resolveWorkspaceDir(override?: string): string {
 	return path.resolve(raw);
 }
 
-/** 解析 cornfield 二进制路径，优先级与 gateway 的 `resolveDefaultOmpPath` 对齐并前插打包内嵌路径。 */
+/** 解析 cornfield 二进制路径，优先级与 gateway 的 `resolveDefaultCornfieldPath` 对齐并前插打包内嵌路径。 */
 export function resolveCornfieldBinary(resourcesPath: string): string {
 	const explicit = process.env.CORNFIELD_BINARY?.trim();
 	if (explicit) return explicit;

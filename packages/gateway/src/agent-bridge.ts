@@ -79,7 +79,7 @@ export interface AgentBridgeSnapshot {
 }
 
 export interface AgentBridgeOptions {
-	ompPath?: string;
+	cornfieldPath?: string;
 	model?: string;
 	cwd?: string;
 	maxCrashRetries?: number;
@@ -184,7 +184,7 @@ export class AgentBridge {
 		});
 
 		this.#transport = new WireTransport({
-			ompPath: options.ompPath,
+			cornfieldPath: options.cornfieldPath,
 			model: options.model,
 			cwd: options.cwd,
 			intercomParent: options.intercomParent,
@@ -405,7 +405,7 @@ export class AgentBridge {
 	 * same session. Returns `undefined` when no prompt is active or
 	 * the active prompt is sessionless (cron path). The value is
 	 * set by `forwardWithMeta` from the SessionRecord passed in by
-	 * the SessionManager; it is the same `ompSessionPath` the
+	 * the SessionManager; it is the same `cornfieldSessionPath` the
 	 * bridge will write the response to.
 	 */
 	getActiveSessionPath(): string | undefined {
@@ -425,14 +425,14 @@ export class AgentBridge {
 	 * leaves a recoverable trail. Best-effort: failures are logged at warn
 	 * and never thrown, since writing the sentinel is not on the user path.
 	 */
-	#beginActiveSession(conversationId: string, ompSessionPath: string, continuationMessage?: string): void {
+	#beginActiveSession(conversationId: string, cornfieldSessionPath: string, continuationMessage?: string): void {
 		if (!this.#dataDir) return;
 		if (this.#accountId === "unknown") return;
 		void writeRestartSentinel(
 			{
 				conversationId,
 				accountId: this.#accountId,
-				ompSessionPath,
+				cornfieldSessionPath,
 				...(continuationMessage ? { continuationMessage } : {}),
 			},
 			{ dataDir: this.#dataDir },
@@ -570,8 +570,8 @@ export class AgentBridge {
 
 			// Write a restart sentinel so a SIGKILL mid-prompt leaves a
 			// recoverable trail. Cleared in the finally block.
-			if (session.ompSessionPath) {
-				this.#beginActiveSession(msg.conversationId, session.ompSessionPath);
+			if (session.cornfieldSessionPath) {
+				this.#beginActiveSession(msg.conversationId, session.cornfieldSessionPath);
 			}
 
 			// Streaming watchdog: if no session event arrives within the
@@ -627,11 +627,13 @@ export class AgentBridge {
 				userId: msg.userId,
 				conversationId: msg.conversationId,
 				messageLength: text.length,
-				sessionPath: session.ompSessionPath,
+				sessionPath: session.cornfieldSessionPath,
 			});
 
 			try {
-				const sessionChanged = session.ompSessionPath ? await this.#switchSession(session.ompSessionPath) : false;
+				const sessionChanged = session.cornfieldSessionPath
+					? await this.#switchSession(session.cornfieldSessionPath)
+					: false;
 				// Re-apply the model only when the session actually changed (the
 				// subprocess restores the session's model on switch_session) or
 				// when the transport was restarted (subprocess lost all state).
@@ -1106,7 +1108,7 @@ export class AgentBridge {
 	 * path computed via `sessionFilePath()` (the interactive omp convention
 	 * `by-date/<date>/<HHMMSS>__<8hex>.jsonl`), which differs from the
 	 * gateway agent convention `<agentDir>/sessions/<safeConvId>.jsonl`.
-	 * Callers should immediately follow with `switchSession(ompSessionPath)`
+	 * Callers should immediately follow with `switchSession(cornfieldSessionPath)`
 	 * to force the agent back to the gateway-tracked file.
 	 */
 	async newSession(): Promise<AgentEvent> {

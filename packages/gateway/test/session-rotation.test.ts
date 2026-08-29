@@ -154,9 +154,9 @@ function shouldResetSession(
 
 async function resetSession(session: SessionRecord, _accountId: string): Promise<SessionRecord> {
 	// 1. Archive old jsonl (rename with timestamp suffix)
-	if (session.ompSessionPath) {
+	if (session.cornfieldSessionPath) {
 		try {
-			const dot = session.ompSessionPath.lastIndexOf(".");
+			const dot = session.cornfieldSessionPath.lastIndexOf(".");
 			const ts = new Date()
 				.toISOString()
 				.replace(/[-:T]/g, "")
@@ -164,9 +164,9 @@ async function resetSession(session: SessionRecord, _accountId: string): Promise
 				.replace(/(\d{8})(\d{6})/, "$1_$2");
 			const archivePath =
 				dot === -1
-					? `${session.ompSessionPath}.${ts}`
-					: `${session.ompSessionPath.slice(0, dot)}.${ts}${session.ompSessionPath.slice(dot)}`;
-			await fs.rename(session.ompSessionPath, archivePath);
+					? `${session.cornfieldSessionPath}.${ts}`
+					: `${session.cornfieldSessionPath.slice(0, dot)}.${ts}${session.cornfieldSessionPath.slice(dot)}`;
+			await fs.rename(session.cornfieldSessionPath, archivePath);
 		} catch (err) {
 			if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
 		}
@@ -215,7 +215,7 @@ describe("session rotation algorithm", () => {
 			conversationId: "test-conv",
 			createdAt: fiveHoursAgo,
 			updatedAt: fiveHoursAgo,
-			ompSessionPath: sessionPath,
+			cornfieldSessionPath: sessionPath,
 			status: "active",
 		});
 
@@ -268,7 +268,7 @@ describe("session rotation algorithm", () => {
 			conversationId: "test-conv2",
 			createdAt: now,
 			updatedAt: now,
-			ompSessionPath: sessionPath,
+			cornfieldSessionPath: sessionPath,
 			status: "active",
 		});
 
@@ -292,7 +292,7 @@ describe("session rotation algorithm", () => {
 			conversationId: "test-conv3",
 			createdAt: ts,
 			updatedAt: ts,
-			ompSessionPath: buildAgentSessionPath(path.join(os.tmpdir(), "rot-daily"), "test-conv3"),
+			cornfieldSessionPath: buildAgentSessionPath(path.join(os.tmpdir(), "rot-daily"), "test-conv3"),
 			status: "active",
 		});
 
@@ -310,7 +310,7 @@ describe("session rotation algorithm", () => {
 			conversationId: "test-conv4",
 			createdAt: veryOld,
 			updatedAt: veryOld,
-			ompSessionPath: buildAgentSessionPath(path.join(os.tmpdir(), "rot-none"), "test-conv4"),
+			cornfieldSessionPath: buildAgentSessionPath(path.join(os.tmpdir(), "rot-none"), "test-conv4"),
 			status: "active",
 		});
 
@@ -332,7 +332,7 @@ describe("session rotation algorithm", () => {
 			conversationId: "test-conv5",
 			createdAt: oldTime,
 			updatedAt: oldTime,
-			ompSessionPath: sessionPath,
+			cornfieldSessionPath: sessionPath,
 			status: "active",
 		});
 
@@ -360,7 +360,7 @@ describe("session rotation algorithm", () => {
 
 		// Session record refreshed in place — same id, same path, fresh updatedAt
 		expect(newSession.id).toBe(session.id);
-		expect(newSession.ompSessionPath).toBe(sessionPath);
+		expect(newSession.cornfieldSessionPath).toBe(sessionPath);
 		expect(newSession.updatedAt).toBeGreaterThan(oldTime);
 		expect(newSession.status).toBe("active");
 		await fs.rm(agentDir, { recursive: true, force: true });
@@ -402,7 +402,7 @@ describe("session rotation e2e", () => {
 		store = new SQLiteSessionStore(path.join(rootDir, "sessions.db"));
 		agentDir = path.join(rootDir, "agent");
 		await ensureAgentDir(agentDir);
-		bridge = new AgentBridge({ ompPath: rpcPath, cwd: agentDir });
+		bridge = new AgentBridge({ cornfieldPath: rpcPath, cwd: agentDir });
 		await bridge.start();
 	});
 
@@ -448,7 +448,7 @@ describe("session rotation e2e", () => {
 			conversationId,
 			createdAt: now,
 			updatedAt: now,
-			ompSessionPath: sessionPath,
+			cornfieldSessionPath: sessionPath,
 			status: "active",
 		});
 
@@ -573,7 +573,7 @@ describe("session rotation e2e", () => {
 			conversationId,
 			createdAt: now,
 			updatedAt: now,
-			ompSessionPath: sessionPath,
+			cornfieldSessionPath: sessionPath,
 			status: "active",
 		});
 

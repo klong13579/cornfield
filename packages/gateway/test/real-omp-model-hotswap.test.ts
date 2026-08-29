@@ -1,15 +1,15 @@
 /**
- * Real omp agent model hot-swap integration test.
+ * Real cornfield agent model hot-swap integration test.
  *
- * Starts a real omp --mode rpc subprocess and tests the model
+ * Starts a real cornfield --mode rpc subprocess and tests the model
  * management RPC commands end-to-end: get_available_models,
  * set_model, get_state. This proves the model hot-swap path
  * works through the actual agent, not just through mocks.
  *
- * Since the binary split, this must exercise the NEW omp (which stamps
+ * Since the binary split, this must exercise the NEW cornfield (which stamps
  * protocol_version into its ready frame). Resolve the dev build product
- * (`packages/coding-agent/dist/omp`) and fail fast with build instructions
- * when it is absent — a PATH lookup would silently pick up a legacy omp
+ * (`packages/coding-agent/dist/cornfield`) and fail fast with build instructions
+ * when it is absent — a PATH lookup would silently pick up a legacy cornfield
  * that the gateway's handshake now rejects.
  */
 
@@ -18,20 +18,20 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { AgentBridge } from "../src/agent-bridge";
 
-/** Dev build product of the omp agent binary (post-split). */
-function resolveDevOmpPath(): string | null {
-	const candidate = path.join(import.meta.dir, "..", "..", "coding-agent", "dist", "omp");
+/** Dev build product of the cornfield agent binary (post-split). */
+function resolveDevCornfieldPath(): string | null {
+	const candidate = path.join(import.meta.dir, "..", "..", "coding-agent", "dist", "cornfield");
 	return fs.existsSync(candidate) ? candidate : null;
 }
 
-const devOmpPath = resolveDevOmpPath();
+const devCornfieldPath = resolveDevCornfieldPath();
 
-describe.skipIf(!devOmpPath)("real omp agent model hot-swap", () => {
+describe.skipIf(!devCornfieldPath)("real cornfield agent model hot-swap", () => {
 	const bridge = new AgentBridge({
-		ompPath: devOmpPath!,
+		cornfieldPath: devCornfieldPath!,
 	});
 
-	test("starts real omp agent", async () => {
+	test("starts real cornfield agent", async () => {
 		await bridge.start();
 		expect(bridge.isRunning).toBe(true);
 	});

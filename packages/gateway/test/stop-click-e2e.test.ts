@@ -119,7 +119,7 @@ describe("DingTalk stop-click end-to-end", () => {
 		await Bun.write(rpcPath, buildHoldRpc(60_000));
 		await fs.chmod(rpcPath, 0o755);
 
-		bridge = new AgentBridge({ ompPath: rpcPath });
+		bridge = new AgentBridge({ cornfieldPath: rpcPath });
 		await bridge.start();
 
 		channel = new DingTalkChannel();
@@ -186,7 +186,7 @@ describe("DingTalk stop-click end-to-end", () => {
 			conversationId: "conv_1",
 			createdAt: Date.now(),
 			updatedAt: Date.now(),
-			ompSessionPath: "/tmp/test-session.jsonl",
+			cornfieldSessionPath: "/tmp/test-session.jsonl",
 			status: "active" as const,
 		};
 		const forwardP = bridge.forwardWithMeta(inbound, session);

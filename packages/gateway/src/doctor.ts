@@ -21,7 +21,7 @@
 
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { resolveDefaultOmpPath } from "./agent-transport-wire";
+import { resolveDefaultCornfieldPath } from "./agent-transport-wire";
 import { type ConfigValidation, getDataDir, validateConfig } from "./config";
 import { checkCredentials } from "./credential-resolver";
 import { getGatewayStatus, PID_FILE, STATUS_FILE } from "./gateway-daemon";
@@ -155,16 +155,16 @@ async function checkConfig(
 async function checkCredentialsSection(config?: GatewayConfig): Promise<Section> {
 	const findings: Finding[] = [];
 
-	// ompPath binary must exist and be runnable for agent tasks/RPC.
-	const ompPath = config?.agent?.ompPath ?? resolveDefaultOmpPath();
-	if (ompPath === "omp" || !ompPath.includes("/")) {
-		findings.push(ok(`ompPath: "${ompPath}" (resolved from PATH)`));
+	// cornfieldPath binary must exist and be runnable for agent tasks/RPC.
+	const cornfieldPath = config?.agent?.cornfieldPath ?? resolveDefaultCornfieldPath();
+	if (cornfieldPath === "omp" || !cornfieldPath.includes("/")) {
+		findings.push(ok(`cornfieldPath: "${cornfieldPath}" (resolved from PATH)`));
 	} else {
 		try {
-			await fs.access(ompPath, (await import("node:fs")).constants.X_OK);
-			findings.push(ok(`ompPath: ${ompPath} exists and is executable`));
+			await fs.access(cornfieldPath, (await import("node:fs")).constants.X_OK);
+			findings.push(ok(`cornfieldPath: ${cornfieldPath} exists and is executable`));
 		} catch {
-			findings.push(error(`ompPath: ${ompPath} not found or not executable`));
+			findings.push(error(`cornfieldPath: ${cornfieldPath} not found or not executable`));
 		}
 	}
 

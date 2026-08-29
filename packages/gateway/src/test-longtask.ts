@@ -9,7 +9,7 @@
  * sees a real card with a real "停止" button on their DingTalk.
  *
  * No LLM round-trip; no agent session file needed. The bridge uses the
- * fake RPC as its `ompPath`, so it never spawns a real omp process.
+ * fake RPC as its `cornfieldPath`, so it never spawns a real omp process.
  *
  * Usage:
  *   import { runLongTaskTest } from "./test-longtask";
@@ -269,7 +269,7 @@ export async function runLongTaskTest(opts: LongTaskTestOptions): Promise<LongTa
 
 	// 2. Create the bridge (no real agent, no real session)
 	const bridge = new AgentBridge({
-		ompPath: rpcPath,
+		cornfieldPath: rpcPath,
 		// Force a short threshold so we don't have to wait the default 3
 		// min. The watcher should also be tunable via the env var, but
 		// the option takes precedence — set it explicitly so the test
@@ -302,7 +302,7 @@ export async function runLongTaskTest(opts: LongTaskTestOptions): Promise<LongTa
 		conversationId,
 		createdAt: Date.now(),
 		updatedAt: Date.now(),
-		ompSessionPath: path.join(agentDir, "sessions", `${conversationId}.jsonl`),
+		cornfieldSessionPath: path.join(agentDir, "sessions", `${conversationId}.jsonl`),
 		status: "active",
 	};
 

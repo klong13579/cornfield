@@ -96,7 +96,7 @@ async function createHarness(): Promise<Harness> {
 	await Bun.write(rpcPath, FAKE_RPC_SCRIPT);
 	await fs.chmod(rpcPath, 0o755);
 
-	const bridge = new AgentBridge({ ompPath: rpcPath });
+	const bridge = new AgentBridge({ cornfieldPath: rpcPath });
 	await bridge.start();
 
 	const replyBuffer: OutboundMessage[] = [];

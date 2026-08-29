@@ -145,7 +145,7 @@ async function createHarness(): Promise<Harness> {
 	for (const accountId of ["ops", "hr"]) {
 		const agentDir = path.join(rootDir, "agents", accountId);
 		await ensureAgentDir(agentDir);
-		const bridge = new AgentBridge({ ompPath: rpcPath, cwd: agentDir });
+		const bridge = new AgentBridge({ cornfieldPath: rpcPath, cwd: agentDir });
 		await bridge.start();
 		bridges.set(accountId, bridge);
 
@@ -167,7 +167,7 @@ async function createHarness(): Promise<Harness> {
 				conversationId: msg.conversationId,
 				createdAt: Date.now(),
 				updatedAt: Date.now(),
-				ompSessionPath: buildAgentSessionPath(agentDir, msg.conversationId),
+				cornfieldSessionPath: buildAgentSessionPath(agentDir, msg.conversationId),
 				status: "active",
 			});
 		}
@@ -245,10 +245,10 @@ describe("gateway runtime integration", () => {
 
 		const opsSession = await harness.store.getSession("dingtalk", "ops", "shared-conv");
 		const hrSession = await harness.store.getSession("dingtalk", "hr", "shared-conv");
-		expect(opsSession?.ompSessionPath).toBe(
+		expect(opsSession?.cornfieldSessionPath).toBe(
 			path.join(harness.rootDir, "agents", "ops", "sessions", "shared-conv.jsonl"),
 		);
-		expect(hrSession?.ompSessionPath).toBe(
+		expect(hrSession?.cornfieldSessionPath).toBe(
 			path.join(harness.rootDir, "agents", "hr", "sessions", "shared-conv.jsonl"),
 		);
 	});
@@ -283,7 +283,7 @@ function makeSession(sessionPath: string) {
 		conversationId: "real-conv",
 		createdAt: Date.now(),
 		updatedAt: Date.now(),
-		ompSessionPath: sessionPath,
+		cornfieldSessionPath: sessionPath,
 		status: "active" as const,
 	};
 }
@@ -308,11 +308,11 @@ describe("real OMP gateway integration", () => {
 		"parses a raw DingTalk message, calls real omp rpc, and writes the session log",
 		async () => {
 			const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "cornfield-gateway-real-omp-"));
-			const ompPath = process.env.PI_GATEWAY_REAL_OMP_PATH ?? "omp";
+			const cornfieldPath = process.env.PI_GATEWAY_REAL_OMP_PATH ?? "omp";
 			const model = process.env.PI_GATEWAY_REAL_OMP_MODEL;
 			const prompt = process.env.PI_GATEWAY_REAL_OMP_PROMPT ?? "Reply with exactly: OK";
 			const sessionPath = path.join(tmpDir, "sessions", "real-conv.jsonl");
-			const bridge = new AgentBridge({ ompPath, cwd: tmpDir, model });
+			const bridge = new AgentBridge({ cornfieldPath, cwd: tmpDir, model });
 
 			try {
 				await ensureAgentDir(tmpDir);
@@ -341,13 +341,13 @@ describe("real OMP gateway integration", () => {
 		"accepts abort during a real omp rpc turn and returns to idle",
 		async () => {
 			const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "cornfield-gateway-real-omp-abort-"));
-			const ompPath = process.env.PI_GATEWAY_REAL_OMP_PATH ?? "omp";
+			const cornfieldPath = process.env.PI_GATEWAY_REAL_OMP_PATH ?? "omp";
 			const model = process.env.PI_GATEWAY_REAL_OMP_MODEL;
 			const prompt =
 				process.env.PI_GATEWAY_REAL_OMP_ABORT_PROMPT ??
 				"Write a long numbered list of 200 items, one item per line.";
 			const sessionPath = path.join(tmpDir, "sessions", "real-conv.jsonl");
-			const bridge = new AgentBridge({ ompPath, cwd: tmpDir, model });
+			const bridge = new AgentBridge({ cornfieldPath, cwd: tmpDir, model });
 
 			try {
 				await ensureAgentDir(tmpDir);

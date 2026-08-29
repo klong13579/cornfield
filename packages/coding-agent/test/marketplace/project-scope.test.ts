@@ -111,8 +111,8 @@ describe("resolveActiveProjectRegistryPath", () => {
 			// Start from a tmpDir that has no .omp/ or .git/ of its own.
 			const result = await resolveActiveProjectRegistryPath(tmpDir);
 			// Must not resolve to the home-dir OMP registry.
-			const homeOmpPath = path.join(homeDir, ".cornfield", "plugins", "installed_plugins.json");
-			expect(result).not.toBe(homeOmpPath);
+			const homeCornfieldPath = path.join(homeDir, ".cornfield", "plugins", "installed_plugins.json");
+			expect(result).not.toBe(homeCornfieldPath);
 		} finally {
 			if (!hadGit) await fs.promises.rm(fakeHomeGit, { recursive: true, force: true });
 		}

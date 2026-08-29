@@ -59,7 +59,7 @@ function makeSession(sessionPath: string, conversationId: string): SessionRecord
 		conversationId,
 		createdAt: Date.now(),
 		updatedAt: Date.now(),
-		ompSessionPath: sessionPath,
+		cornfieldSessionPath: sessionPath,
 		status: "active",
 	};
 }
@@ -123,7 +123,7 @@ for await (const chunk of Bun.stdin.stream()) {
 describe("AgentBridge", () => {
 	test("switches to the session path before prompting", async () => {
 		const fake = await createFakeRpcBinary(FAKE_RPC_SCRIPT);
-		const bridge = new AgentBridge({ ompPath: fake.path });
+		const bridge = new AgentBridge({ cornfieldPath: fake.path });
 		try {
 			await bridge.start();
 			const response = await bridge.forward(
@@ -139,7 +139,7 @@ describe("AgentBridge", () => {
 
 	test("serializes concurrent prompts so session events do not cross", async () => {
 		const fake = await createFakeRpcBinary(FAKE_RPC_SCRIPT);
-		const bridge = new AgentBridge({ ompPath: fake.path });
+		const bridge = new AgentBridge({ cornfieldPath: fake.path });
 		try {
 			await bridge.start();
 			const slow = bridge.forward(makeMessage("slow", "conv-a"), makeSession("/tmp/session-a.jsonl", "conv-a"));
@@ -156,7 +156,7 @@ describe("AgentBridge", () => {
 
 	test("reports bridge lifecycle snapshot", async () => {
 		const fake = await createFakeRpcBinary(FAKE_RPC_SCRIPT);
-		const bridge = new AgentBridge({ ompPath: fake.path });
+		const bridge = new AgentBridge({ cornfieldPath: fake.path });
 		try {
 			expect(bridge.getSnapshot().state).toBe("stopped");
 			await bridge.start();
@@ -180,7 +180,7 @@ describe("AgentBridge", () => {
 
 	test("sends abort while a prompt is active", async () => {
 		const fake = await createFakeRpcBinary(FAKE_RPC_SCRIPT);
-		const bridge = new AgentBridge({ ompPath: fake.path });
+		const bridge = new AgentBridge({ cornfieldPath: fake.path });
 		try {
 			await bridge.start();
 			expect(await bridge.abort()).toBe(false);
@@ -196,7 +196,7 @@ describe("AgentBridge", () => {
 
 	test("opens the circuit after repeated prompt failures", async () => {
 		const fake = await createFakeRpcBinary(FAKE_RPC_SCRIPT);
-		const bridge = new AgentBridge({ ompPath: fake.path });
+		const bridge = new AgentBridge({ cornfieldPath: fake.path });
 		try {
 			await bridge.start();
 			for (let i = 0; i < 10; i++) {
@@ -219,7 +219,7 @@ describe("AgentBridge", () => {
 
 	test("enters error state after repeated startup crashes", async () => {
 		const fake = await createFakeRpcBinary("#!/usr/bin/env bun\nprocess.exit(1);\n");
-		const bridge = new AgentBridge({ ompPath: fake.path, crashBackoffMs: 1, maxCrashRetries: 0 });
+		const bridge = new AgentBridge({ cornfieldPath: fake.path, crashBackoffMs: 1, maxCrashRetries: 0 });
 		try {
 			for (let i = 0; i < 6; i++) {
 				await expect(bridge.start()).rejects.toThrow("before hello_ack");
@@ -330,7 +330,7 @@ async function createRecordingRpcBinary(): Promise<{
 describe("AgentBridge.executePrompt (cron path)", () => {
 	test("throws on empty prompt without starting the bridge", async () => {
 		const fake = await createRecordingRpcBinary();
-		const bridge = new AgentBridge({ ompPath: fake.path });
+		const bridge = new AgentBridge({ cornfieldPath: fake.path });
 		try {
 			await expect(bridge.executePrompt("")).rejects.toThrow("Empty prompt");
 			await expect(bridge.executePrompt("   \n\t  ")).rejects.toThrow("Empty prompt");
@@ -342,7 +342,7 @@ describe("AgentBridge.executePrompt (cron path)", () => {
 
 	test("switches to the provided sessionPath before prompting", async () => {
 		const fake = await createRecordingRpcBinary();
-		const bridge = new AgentBridge({ ompPath: fake.path });
+		const bridge = new AgentBridge({ cornfieldPath: fake.path });
 		try {
 			await bridge.start();
 			const response = await bridge.executePrompt("do thing", {
@@ -362,7 +362,7 @@ describe("AgentBridge.executePrompt (cron path)", () => {
 
 	test("restores the prior session after a prompt when one was active", async () => {
 		const fake = await createRecordingRpcBinary();
-		const bridge = new AgentBridge({ ompPath: fake.path });
+		const bridge = new AgentBridge({ cornfieldPath: fake.path });
 		try {
 			await bridge.start();
 
@@ -393,7 +393,7 @@ describe("AgentBridge.executePrompt (cron path)", () => {
 
 	test("does not issue an extra switch_session on a cold bridge", async () => {
 		const fake = await createRecordingRpcBinary();
-		const bridge = new AgentBridge({ ompPath: fake.path });
+		const bridge = new AgentBridge({ cornfieldPath: fake.path });
 		try {
 			await bridge.start();
 			await bridge.executePrompt("first task", { sessionPath: "/tmp/cron_task_a.jsonl" });
@@ -483,7 +483,7 @@ async function createInactiveRpcBinary(): Promise<{ path: string; cleanup: () =>
 describe("AgentBridge.executePrompt inactivity timeout", () => {
 	test("aborts a prompt that emits no events within the inactivity budget", async () => {
 		const fake = await createInactiveRpcBinary();
-		const bridge = new AgentBridge({ ompPath: fake.path });
+		const bridge = new AgentBridge({ cornfieldPath: fake.path });
 		try {
 			await bridge.start();
 			const start = Date.now();
@@ -501,7 +501,7 @@ describe("AgentBridge.executePrompt inactivity timeout", () => {
 
 	test("does not abort a prompt that is slow but actively emitting events", async () => {
 		const fake = await createInactiveRpcBinary();
-		const bridge = new AgentBridge({ ompPath: fake.path });
+		const bridge = new AgentBridge({ cornfieldPath: fake.path });
 		try {
 			await bridge.start();
 			const start = Date.now();
@@ -534,7 +534,7 @@ describe("AgentBridge BOOT.md self-check", () => {
 		const fake = await createFakeRpcBinary(FAKE_RPC_SCRIPT);
 		const bootDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-boot-"));
 		await Bun.write(path.join(bootDir, "BOOT.md"), "Check today's tasks and report status.");
-		const bridge = new AgentBridge({ ompPath: fake.path, cwd: bootDir });
+		const bridge = new AgentBridge({ cornfieldPath: fake.path, cwd: bootDir });
 		try {
 			await bridge.start();
 			await Bun.sleep(200);
@@ -553,7 +553,7 @@ describe("AgentBridge BOOT.md self-check", () => {
 
 	test("starts normally when BOOT.md is absent", async () => {
 		const fake = await createFakeRpcBinary(FAKE_RPC_SCRIPT);
-		const bridge = new AgentBridge({ ompPath: fake.path });
+		const bridge = new AgentBridge({ cornfieldPath: fake.path });
 		try {
 			await bridge.start();
 			expect(bridge.isRunning).toBe(true);
@@ -649,7 +649,7 @@ for await (const chunk of Bun.stdin.stream()) {
 		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-model-track-"));
 		const trackerPath = path.join(dir, "calls.json");
 		const fake = await createTrackingRpc(trackerPath);
-		const bridge = new AgentBridge({ ompPath: fake.path, model: "test-provider/test-model" });
+		const bridge = new AgentBridge({ cornfieldPath: fake.path, model: "test-provider/test-model" });
 		try {
 			await bridge.start();
 			const session = makeSession("/tmp/same-session.jsonl", "conv-same");
@@ -672,7 +672,7 @@ for await (const chunk of Bun.stdin.stream()) {
 		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-model-crash-"));
 		const trackerPath = path.join(dir, "calls.json");
 		const fake = await createTrackingRpc(trackerPath);
-		const bridge = new AgentBridge({ ompPath: fake.path, model: "test-provider/test-model" });
+		const bridge = new AgentBridge({ cornfieldPath: fake.path, model: "test-provider/test-model" });
 		try {
 			await bridge.start();
 			const session = makeSession("/tmp/crash-test-session.jsonl", "conv-crash");
@@ -738,7 +738,7 @@ describe("AgentBridge.forwardWithMeta (streaming)", () => {
 
 	beforeEach(async () => {
 		fake = await createFakeRpcBinary(STREAMING_RPC_SCRIPT, "cornfield-gateway-stream-");
-		bridge = new AgentBridge({ ompPath: fake.path });
+		bridge = new AgentBridge({ cornfieldPath: fake.path });
 		await bridge.start();
 	});
 
@@ -855,7 +855,7 @@ describe("AgentBridge.forwardWithMeta (tool events)", () => {
 
 	beforeEach(async () => {
 		fake = await createFakeRpcBinary(TOOL_RPC_SCRIPT, "cornfield-gateway-tool-");
-		bridge = new AgentBridge({ ompPath: fake.path });
+		bridge = new AgentBridge({ cornfieldPath: fake.path });
 		await bridge.start();
 	});
 
@@ -1011,7 +1011,7 @@ let watchdogDataDir: string;
 let watchdogAgentDir: string;
 
 async function writeWatchdogScript(): Promise<string> {
-	const p = path.join(watchdogTmpDir, "fake-omp.bun");
+	const p = path.join(watchdogTmpDir, "fake-cornfield.bun");
 	await Bun.write(p, SCRIPT_STREAMING_HANG);
 	await fs.chmod(p, 0o755);
 	return p;
@@ -1041,7 +1041,7 @@ function makeMsgForWatchdog(conversationId = "cid-123", text = "hang please") {
 	} as unknown as Parameters<AgentBridge["forward"]>[0];
 }
 
-function makeSessionForWatchdog(ompSessionPath = "/tmp/agent/sessions/cid-123.jsonl") {
+function makeSessionForWatchdog(cornfieldSessionPath = "/tmp/agent/sessions/cid-123.jsonl") {
 	return {
 		id: "s1",
 		channelId: "dingtalk",
@@ -1050,7 +1050,7 @@ function makeSessionForWatchdog(ompSessionPath = "/tmp/agent/sessions/cid-123.js
 		conversationId: "cid-123",
 		createdAt: Date.now(),
 		updatedAt: Date.now(),
-		ompSessionPath,
+		cornfieldSessionPath,
 		status: "active" as const,
 	};
 }
@@ -1059,7 +1059,7 @@ describe("AgentBridge streaming watchdog", () => {
 	test("aborts prompt that streams one event then goes silent", async () => {
 		const scriptPath = await writeWatchdogScript();
 		const bridge = new AgentBridge({
-			ompPath: scriptPath,
+			cornfieldPath: scriptPath,
 			cwd: watchdogAgentDir,
 			streamingWatchdogMs: 300,
 		});
@@ -1074,7 +1074,7 @@ describe("AgentBridge streaming watchdog", () => {
 	test("watchdog abort rebuilds the transport (process-level self-heal)", async () => {
 		const scriptPath = await writeWatchdogScript();
 		const bridge = new AgentBridge({
-			ompPath: scriptPath,
+			cornfieldPath: scriptPath,
 			cwd: watchdogAgentDir,
 			streamingWatchdogMs: 300,
 		});
@@ -1109,7 +1109,7 @@ describe("AgentBridge streaming watchdog", () => {
 	test("does NOT abort a prompt that streams continuously within the threshold", async () => {
 		const scriptPath = await writeWatchdogScript();
 		const bridge = new AgentBridge({
-			ompPath: scriptPath,
+			cornfieldPath: scriptPath,
 			cwd: watchdogAgentDir,
 			streamingWatchdogMs: 5_000,
 		});
@@ -1137,7 +1137,7 @@ describe("AgentBridge active-session sentinel", () => {
 	test("writes sentinel during a running prompt and clears it on completion", async () => {
 		const scriptPath = await writeWatchdogScript();
 		const bridge = new AgentBridge({
-			ompPath: scriptPath,
+			cornfieldPath: scriptPath,
 			cwd: watchdogAgentDir,
 			dataDir: watchdogDataDir,
 			accountId: "test-acct",
@@ -1155,7 +1155,7 @@ describe("AgentBridge active-session sentinel", () => {
 		const sentinel = JSON.parse(text);
 		expect(sentinel.conversationId).toBe("cid-sentinel");
 		expect(sentinel.accountId).toBe("test-acct");
-		expect(sentinel.ompSessionPath).toBe("/tmp/sentinel-session.jsonl");
+		expect(sentinel.cornfieldSessionPath).toBe("/tmp/sentinel-session.jsonl");
 		await forwardPromise;
 		expect(await Bun.file(sentinelPath).exists()).toBe(false);
 		await bridge.stop();
@@ -1164,7 +1164,7 @@ describe("AgentBridge active-session sentinel", () => {
 	test("skips sentinel when dataDir not configured", async () => {
 		const scriptPath = await writeWatchdogScript();
 		const bridge = new AgentBridge({
-			ompPath: scriptPath,
+			cornfieldPath: scriptPath,
 			cwd: watchdogAgentDir,
 			accountId: "test-acct",
 		});
@@ -1239,7 +1239,7 @@ describe("AgentBridge long-task watcher", () => {
 
 	test("fires onLongTask once at the threshold, then on each ping", async () => {
 		bridge = new AgentBridge({
-			ompPath: fake.path,
+			cornfieldPath: fake.path,
 			longTaskThresholdMs: 50,
 			progressPingIntervalMs: 30,
 		});
@@ -1270,7 +1270,7 @@ describe("AgentBridge long-task watcher", () => {
 
 	test("does not fire onLongTask when the tool completes before the threshold", async () => {
 		bridge = new AgentBridge({
-			ompPath: fake.path,
+			cornfieldPath: fake.path,
 			longTaskThresholdMs: 10_000,
 			progressPingIntervalMs: 5_000,
 		});
@@ -1294,7 +1294,7 @@ describe("AgentBridge long-task watcher", () => {
 
 	test("does not start a watcher when longTaskThresholdMs is 0 (disabled)", async () => {
 		bridge = new AgentBridge({
-			ompPath: fake.path,
+			cornfieldPath: fake.path,
 			longTaskThresholdMs: 0,
 		});
 		await bridge.start();

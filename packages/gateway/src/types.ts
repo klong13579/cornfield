@@ -333,14 +333,14 @@ export interface SessionRecord {
 	createdAt: number;
 	updatedAt: number;
 	lastMessageId?: string;
-	ompSessionPath?: string;
+	cornfieldSessionPath?: string;
 	sessionWebhook?: string;
 	status: "active" | "idle" | "closed";
 }
 
 export interface SessionStore {
 	getSession(channelId: string, accountId: string, conversationId: string): Promise<SessionRecord | null>;
-	getSessionByPath(ompSessionPath: string): Promise<SessionRecord | null>;
+	getSessionByPath(cornfieldSessionPath: string): Promise<SessionRecord | null>;
 	createSession(session: Omit<SessionRecord, "id">): Promise<SessionRecord>;
 	updateSession(id: string, updates: Partial<SessionRecord>): Promise<void>;
 	closeSession(id: string): Promise<void>;
@@ -352,7 +352,7 @@ export interface SessionStore {
 // ═══════════════════════════════════════════════════════════════════════
 
 export interface AgentConfig {
-	ompPath?: string;
+	cornfieldPath?: string;
 	model?: string;
 	maxConcurrentSessions?: number;
 	maxCrashRetries?: number;

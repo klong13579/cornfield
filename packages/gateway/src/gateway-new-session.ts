@@ -14,10 +14,10 @@
  *    understands the abrupt context loss on the next turn.
  *
  * Rotation is a hard reset:
- *   1. fs.rename the old `ompSessionPath` to `ompSessionPath.<TIMESTAMP>.jsonl`
+ *   1. fs.rename the old `cornfieldSessionPath` to `cornfieldSessionPath.<TIMESTAMP>.jsonl`
  *      (history preserved, file disappears from the active path).
  *   2. RPC `new_session` → agent clears in-memory messages, context, cache.
- *   3. RPC `switch_session(ompSessionPath)` → agent re-opens the
+ *   3. RPC `switch_session(cornfieldSessionPath)` → agent re-opens the
  *      gateway-tracked path; the file does not exist yet, so the write
  *      stream creates a fresh empty file. This step is required because
  *      `new_session` makes the agent point at an interactive-style
@@ -163,18 +163,18 @@ export class NewSessionHandler {
 
 		// 1. Archive old file (rename with timestamp suffix).
 		let archived = false;
-		if (session.ompSessionPath) {
+		if (session.cornfieldSessionPath) {
 			try {
-				const archivePath = this.#archivePath(session.ompSessionPath);
-				await fs.rename(session.ompSessionPath, archivePath);
+				const archivePath = this.#archivePath(session.cornfieldSessionPath);
+				await fs.rename(session.cornfieldSessionPath, archivePath);
 				archived = true;
-				logger.info("Archived old session file", { from: session.ompSessionPath, to: archivePath });
+				logger.info("Archived old session file", { from: session.cornfieldSessionPath, to: archivePath });
 			} catch (err) {
 				if (isEnoent(err)) {
-					logger.info("Session file already missing, nothing to archive", { path: session.ompSessionPath });
+					logger.info("Session file already missing, nothing to archive", { path: session.cornfieldSessionPath });
 				} else {
 					logger.warn("Failed to archive old session file", {
-						path: session.ompSessionPath,
+						path: session.cornfieldSessionPath,
 						error: err instanceof Error ? err.message : String(err),
 					});
 				}
@@ -188,8 +188,8 @@ export class NewSessionHandler {
 		if (bridge?.isRunning) {
 			try {
 				await bridge.newSession();
-				if (session.ompSessionPath) {
-					await bridge.switchSession(session.ompSessionPath);
+				if (session.cornfieldSessionPath) {
+					await bridge.switchSession(session.cornfieldSessionPath);
 				}
 			} catch (err) {
 				logger.warn("Failed to reset agent in-memory state during rotation", {
