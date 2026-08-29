@@ -54,7 +54,7 @@ pub struct ContentItem {
 
 pub fn sessions_root() -> Result<PathBuf> {
     let home = dirs::home_dir().context("could not resolve home directory")?;
-    Ok(home.join(".omp").join("agent").join("sessions"))
+    Ok(home.join(".cornfield").join("agent").join("sessions"))
 }
 
 pub struct WalkOpts {

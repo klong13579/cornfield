@@ -12,7 +12,7 @@
  * Post-fix: ProcessTerminal.start() registers a stdin 'end' handler that
  * sends SIGTERM to self, triggering postmortem cleanup + exit.
  *
- * NOTE: This test requires the compiled binary at packages/coding-agent/dist/omp.
+ * NOTE: This test requires the compiled binary at packages/coding-agent/dist/cornfield.
  * Run `bun run build` first if it doesn't exist. The test is skipped if the
  * binary is missing (CI may not have built it).
  */
@@ -20,11 +20,11 @@ import { describe, expect, it } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-const OMP_BINARY = path.resolve(import.meta.dir, "../../coding-agent/dist/omp");
+const CORNFIELD_BINARY = path.resolve(import.meta.dir, "../../coding-agent/dist/cornfield");
 
 function binaryExists(): boolean {
 	try {
-		return fs.statSync(OMP_BINARY).size > 0;
+		return fs.statSync(CORNFIELD_BINARY).size > 0;
 	} catch {
 		return false;
 	}
@@ -44,7 +44,7 @@ describe.skipIf(!binaryExists())("omp stdin close → process exit", () => {
 		//
 		// We use a timeout to detect hanging (pre-fix behavior).
 		const proc = Bun.spawn({
-			cmd: [OMP_BINARY],
+			cmd: [CORNFIELD_BINARY],
 			stdin: "pipe",
 			stdout: "pipe",
 			stderr: "pipe",

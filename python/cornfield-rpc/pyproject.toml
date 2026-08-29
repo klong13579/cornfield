@@ -3,14 +3,14 @@ requires = ["setuptools>=69"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "omp-rpc"
+name = "cornfield-rpc"
 version = "0.1.0"
-description = "Typed Python client for the omp coding-agent RPC protocol"
+description = "Typed Python client for the cornfield coding-agent RPC protocol"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "OpenAI Codex" }]
-keywords = ["omp", "rpc", "agent", "coding-agent", "jsonl", "stdio"]
+keywords = ["cornfield", "rpc", "agent", "coding-agent", "jsonl", "stdio"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -33,4 +33,4 @@ package-dir = { "" = "src" }
 where = ["src"]
 
 [tool.setuptools.package-data]
-omp_rpc = ["py.typed"]
+cornfield_rpc = ["py.typed"]

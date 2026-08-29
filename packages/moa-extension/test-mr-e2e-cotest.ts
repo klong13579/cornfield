@@ -33,7 +33,7 @@ const SCRIPTED_ANSWERS = [
 	"质量底线 = 感知/规划/工业设计 3 个岗不能降；其他 P5/P6 够用",
 ];
 
-const OMP_BIN = process.env.MOA_OMP_BIN ?? path.join(import.meta.dir, "..", "coding-agent", "src", "cli.ts");
+const OMP_BIN = process.env.MOA_CORNFIELD_BIN ?? path.join(import.meta.dir, "..", "coding-agent", "src", "cli.ts");
 
 const stamp = Date.now();
 const agentDir = path.join(os.tmpdir(), `omp-moa-cotest-agent-${stamp}`);

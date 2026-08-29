@@ -6,7 +6,7 @@ import threading
 import time
 import unittest
 
-from omp_rpc import RpcClient, RpcCommandError, RpcConcurrencyError, RpcError, host_tool
+from cornfield_rpc import RpcClient, RpcCommandError, RpcConcurrencyError, RpcError, host_tool
 
 
 FAKE_SERVER = textwrap.dedent(

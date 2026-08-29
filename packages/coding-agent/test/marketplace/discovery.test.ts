@@ -54,7 +54,7 @@ function validateClaudeRegistryFormat(content: string): Record<string, unknown> 
 // Matches getConfigDirName() — single source of truth is in @cornfield/utils,
 // but we know the value is ".cornfield" and hardcoding it here keeps tests free of
 // native-addon transitive imports.
-const OMP_CONFIG_DIR = ".cornfield";
+const CORNFIELD_CONFIG_DIR = ".cornfield";
 
 function makeEntry(installPath: string, version = "1.0.0"): InstalledPluginEntry {
 	return {
@@ -74,7 +74,7 @@ let ompRegistryPath: string;
 
 beforeEach(() => {
 	tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "omp-discovery-test-"));
-	ompRegistryPath = path.join(tmpHome, OMP_CONFIG_DIR, "plugins", "installed_plugins.json");
+	ompRegistryPath = path.join(tmpHome, CORNFIELD_CONFIG_DIR, "plugins", "installed_plugins.json");
 	fs.mkdirSync(path.dirname(ompRegistryPath), { recursive: true });
 });
 
@@ -96,7 +96,7 @@ describe("OMP registry path contract", () => {
 		// Validate our hardcoded constant matches getConfigDirName().
 		// If getConfigDirName() ever changes, this assertion will fail and
 		// we'll know the path constant here must be updated too.
-		expect(OMP_CONFIG_DIR).toBe(".cornfield");
+		expect(CORNFIELD_CONFIG_DIR).toBe(".cornfield");
 	});
 });
 

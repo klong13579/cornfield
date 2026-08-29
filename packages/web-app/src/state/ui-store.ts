@@ -18,11 +18,11 @@ export interface UiState {
 	sessionSidebarCollapsed: boolean;
 }
 
-const DRAFT_KEY = "omp.workspace.draft";
-const KEEPDRAFT_KEY = "omp.keepDraft";
+const DRAFT_KEY = "cornfield.workspace.draft";
+const KEEPDRAFT_KEY = "cornfield.keepDraft";
 
-const RIGHTPANEL_KEY = "omp.workspace.rightPanel";
-const SESSIONSIDEBAR_KEY = "omp.workspace.sessionSidebar";
+const RIGHTPANEL_KEY = "cornfield.workspace.rightPanel";
+const SESSIONSIDEBAR_KEY = "cornfield.workspace.sessionSidebar";
 
 function loadString(key: string): string {
 	try {

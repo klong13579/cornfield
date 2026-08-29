@@ -170,7 +170,7 @@ function buildEnv(input: Pick<SpawnWorkerInput, "env">): Record<string, string> 
 function buildArgs(input: SpawnWorkerInput, systemPromptPath: string, taskPath: string): string[] {
 	const args: string[] = [];
 	// OMP binary selection:
-	//   - $MOA_OMP_BIN allows the user / test harness to override (e.g. for dev
+	//   - $MOA_CORNFIELD_BIN allows the user / test harness to override (e.g. for dev
 	//     runs that want `bun --cwd=packages/coding-agent src/cli.ts`).
 	//   - Otherwise prefer `omp` from PATH.
 	// The CLI args below are appended after the binary.
@@ -187,14 +187,14 @@ function buildArgs(input: SpawnWorkerInput, systemPromptPath: string, taskPath: 
 	return args;
 }
 
-function pickOmpBin(): string {
-	return process.env.MOA_OMP_BIN ?? Bun.which("omp") ?? "omp";
+function pickCornfieldBin(): string {
+	return process.env.MOA_CORNFIELD_BIN ?? Bun.which("cornfield") ?? "cornfield";
 }
 
-function assembleOmpCommand(input: SpawnWorkerInput, systemPromptPath: string, taskPath: string): string[] {
-	const bin = pickOmpBin();
+function assembleCornfieldCommand(input: SpawnWorkerInput, systemPromptPath: string, taskPath: string): string[] {
+	const bin = pickCornfieldBin();
 	const argv = buildArgs(input, systemPromptPath, taskPath);
-	// If the user pointed MOA_OMP_BIN at a binary that needs extra argv
+	// If the user pointed MOA_CORNFIELD_BIN at a binary that needs extra argv
 	// (e.g. `bun --cwd=packages/coding-agent src/cli.ts`), allow space-
 	// separated splitting. Otherwise it's a single binary path.
 	if (bin.includes(" ")) {
@@ -382,7 +382,7 @@ export async function spawnMoaWorker(input: SpawnWorkerInput): Promise<WorkerOut
 	const systemPromptPath = await writeTempFile(input.systemPrompt, "moa-system", ".md");
 	const taskPath = await writeTempFile(input.task, "moa-task", ".md");
 
-	const cmd = assembleOmpCommand(input, systemPromptPath, taskPath);
+	const cmd = assembleCornfieldCommand(input, systemPromptPath, taskPath);
 	const env = buildEnv(input);
 
 	let proc: ReturnType<typeof Bun.spawn> | undefined;

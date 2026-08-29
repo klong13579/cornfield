@@ -71,13 +71,13 @@ interface WireSessionIndexEntryDto {
  * - get_available_models 已接真（serve 返回 Model[]）；失败返回空数组，UI 空态
  */
 
-/** `omp serve` 连接配置（设置页可改，localStorage 持久化）。 */
+/** `cornfield serve` 连接配置（设置页可改，localStorage 持久化）。 */
 export interface ServeConnectionConfig {
 	wsUrl: string;
 	token: string;
 }
 
-const CONN_STORAGE_KEY = "omp.serve.connection";
+const CONN_STORAGE_KEY = "cornfield.serve.connection";
 
 export const DEFAULT_SERVE_CONFIG: ServeConnectionConfig = {
 	wsUrl: "ws://127.0.0.1:7891/ws",

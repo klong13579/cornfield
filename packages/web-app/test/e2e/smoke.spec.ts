@@ -4,7 +4,7 @@
  * 编排（spec 内自管，双进程 + 双端口）：
  *   1. build 已在 `test:ci` 前置完成；vite preview 起 dist（127.0.0.1:4173）
  *   2. serve 以源码启动（bun packages/coding-agent/src/cli.ts，绝不依赖可能过期的
- *      dist/omp 二进制）、随机端口、真实 HOME（取真实 LLM 鉴权）
+ *      dist/cornfield 二进制）、随机端口、真实 HOME（取真实 LLM 鉴权）
  *   3. 浏览器（系统 Chrome）注入 localStorage 连接配置指向该 serve 端口
  *
  * 断言：连上（conn-dot connected）→ 发 prompt → 用户回显 → 回合结束（✓ 已完成）→
@@ -87,7 +87,7 @@ test("smoke: 真实 serve → 连接 → prompt → 流式回复", async ({ page
 	const servePort = await freePort();
 	const serveUrl = `ws://127.0.0.1:${servePort}/ws`;
 	// 隔离 agentDir：拷贝真实 agent.db（鉴权 + 设置），session/历史落在临时目录——
-	// 不隔离时 serve 复用真实 ~/.omp，历次运行的 prompt 会累积进真实 session 文件。
+	// 不隔离时 serve 复用真实 ~/.cornfield，历次运行的 prompt 会累积进真实 session 文件。
 	const isoAgentDir = await fsp.mkdtemp(path.join(os.tmpdir(), "omp-smoke-e2e-"));
 	await fsp
 		.copyFile(path.join(os.homedir(), ".omp", "agent", "agent.db"), path.join(isoAgentDir, "agent.db"))
@@ -128,7 +128,7 @@ test("smoke: 真实 serve → 连接 → prompt → 流式回复", async ({ page
 		// （同文档 hash 导航不重载页面），且无配置时 app 会连默认 7891（真实桌面 sidecar），
 		// 污染真实会话。
 		await page.addInitScript((wsUrl: string) => {
-			localStorage.setItem("omp.serve.connection", JSON.stringify({ wsUrl, token: "" }));
+			localStorage.setItem("cornfield.serve.connection", JSON.stringify({ wsUrl, token: "" }));
 		}, serveUrl);
 		await page.goto("/#/workspace", { waitUntil: "domcontentloaded" });
 

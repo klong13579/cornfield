@@ -19,7 +19,7 @@ import * as path from "node:path";
  * Options:
  *   --input <wav>      Question audio, 24kHz PCM16 mono (default: /tmp/live-in.wav)
  *   --voice <id>       Voices to compare (repeatable; default: longanqian, longanlufeng)
- *   --out-dir <dir>    Output dir (default: ~/.omp/voice-samples/live-test)
+ *   --out-dir <dir>    Output dir (default: ~/.cornfield/voice-samples/live-test)
  *   --model <id>       Realtime model id (default: qwen-audio-3.0-realtime-flash)
  *   --base-url <url>   Gateway base URL (default: https://coder.narwal.com/v1)
  *   --api-key <key>    API key (default: $NARWAL_PLAN_API_KEY, then models.yml)
@@ -53,7 +53,7 @@ function usage(): string {
 		"Options:",
 		"  --input <wav>      Question audio, 24kHz PCM16 mono (default: /tmp/live-in.wav)",
 		"  --voice <id>       Voices to compare (repeatable; default: longanqian, longanlufeng)",
-		"  --out-dir <dir>    Output dir (default: ~/.omp/voice-samples/live-test)",
+		"  --out-dir <dir>    Output dir (default: ~/.cornfield/voice-samples/live-test)",
 		"  --model <id>       Realtime model id (default: qwen-audio-3.0-realtime-flash)",
 		"  --base-url <url>   Gateway base URL (default: https://coder.narwal.com/v1)",
 		"  --api-key <key>    API key (default: $NARWAL_PLAN_API_KEY, then models.yml)",

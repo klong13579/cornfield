@@ -43,7 +43,7 @@ export function SettingsView(): React.JSX.Element {
 	const [saveError, setSaveError] = useState<string | null>(null);
 	/** 工作目录（desktop 壳 sidecar 的工作区；默认 ~/workspace）。 */
 	const [workspaceDir, setWorkspaceDir] = useState(() => {
-		const stored = localStorage.getItem("omp.desktop.workspace")?.trim();
+		const stored = localStorage.getItem("cornfield.desktop.workspace")?.trim();
 		return stored || "~/workspace";
 	});
 	const [workspaceSaved, setWorkspaceSaved] = useState(false);
@@ -97,7 +97,7 @@ export function SettingsView(): React.JSX.Element {
 				await api.sidecar.setWorkspaceDir(value);
 			}
 			// 镜像到 localStorage（展示初值来源；无 window.api 时即降级存储路径）
-			localStorage.setItem("omp.desktop.workspace", value);
+			localStorage.setItem("cornfield.desktop.workspace", value);
 			setWorkspaceSaved(true);
 		} catch (err) {
 			setWorkspaceError(err instanceof Error ? err.message : String(err));

@@ -1,6 +1,6 @@
 /**
  * 语音偏好 —— 本地设置持久化（播报/速度/角色/静默时段/唤醒词）。
- * localStorage key: omp.voice.prefs；缺失字段回默认。
+ * localStorage key: cornfield.voice.prefs；缺失字段回默认。
  */
 
 export interface VoicePreferences {
@@ -17,7 +17,7 @@ export interface VoicePreferences {
 	wakeWord: string;
 }
 
-const PREFS_KEY = "omp.voice.prefs";
+const PREFS_KEY = "cornfield.voice.prefs";
 
 export const DEFAULT_VOICE_PREFS: VoicePreferences = {
 	autoSpeak: true,

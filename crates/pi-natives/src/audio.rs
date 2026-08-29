@@ -477,7 +477,7 @@ mod tests {
 
 	#[test]
 	fn opt_in_default_capture_receives_frames() {
-		if env::var_os("OMP_NATIVE_AUDIO_CAPTURE_TEST").is_none() {
+		if env::var_os("CORNFIELD_NATIVE_AUDIO_CAPTURE_TEST").is_none() {
 			return;
 		}
 

@@ -1,4 +1,4 @@
-# omp-rpc
+# cornfield-rpc
 
 Typed Python bindings for the `omp --mode rpc` protocol used by the coding agent.
 
@@ -17,7 +17,7 @@ provides:
 ## Basic Usage
 
 ```python
-from omp_rpc import RpcClient
+from cornfield_rpc import RpcClient
 
 with RpcClient(provider="anthropic", model="claude-sonnet-4-5") as client:
     state = client.get_state()
@@ -31,7 +31,7 @@ The wrapper also exposes the common RPC startup flags directly, so scripts do no
 need to build `extra_args` by hand:
 
 ```python
-from omp_rpc import RpcClient
+from cornfield_rpc import RpcClient
 
 with RpcClient(
     model="openrouter/anthropic/claude-sonnet-4.6",
@@ -49,7 +49,7 @@ For orchestration hosts, the wrapper also exposes typed event hooks and a simple
 way to seed todos before the first prompt:
 
 ```python
-from omp_rpc import MessageUpdateEvent, RpcClient
+from cornfield_rpc import MessageUpdateEvent, RpcClient
 
 def on_message_update(event: MessageUpdateEvent) -> None:
     assistant_event = event.assistant_message_event
@@ -81,7 +81,7 @@ You can also point it at a custom command, which is useful inside this repo whil
 developing against the Bun entrypoint:
 
 ```python
-from omp_rpc import RpcClient
+from cornfield_rpc import RpcClient
 
 with RpcClient(
     command=[
@@ -107,7 +107,7 @@ typed signature:
 ```python
 from typing import TypedDict
 
-from omp_rpc import RpcClient, host_tool
+from cornfield_rpc import RpcClient, host_tool
 
 
 class EchoArgs(TypedDict):
@@ -187,7 +187,7 @@ allows:
 For long-lived hosts, retained event and stderr history is bounded by default:
 
 ```python
-from omp_rpc import RpcClient
+from cornfield_rpc import RpcClient
 
 with RpcClient(max_event_history=20_000, max_stderr_chunks=256) as client:
     ...
@@ -210,7 +210,7 @@ If a host explicitly needs reasoning text too, use the `*_with_thinking`
 helpers:
 
 ```python
-from omp_rpc import assistant_text, assistant_text_with_thinking
+from cornfield_rpc import assistant_text, assistant_text_with_thinking
 
 visible = assistant_text(message)
 full = assistant_text_with_thinking(message)

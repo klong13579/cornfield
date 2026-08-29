@@ -14,7 +14,7 @@ export interface NotifyPrefs {
 	cron: boolean;
 }
 
-const PREFS_KEY = "omp.notify.prefs";
+const PREFS_KEY = "cornfield.notify.prefs";
 
 export const NOTIFY_PREFS_DEFAULTS: NotifyPrefs = { agentDone: true, errors: true, cron: true };
 

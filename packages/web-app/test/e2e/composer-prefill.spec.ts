@@ -52,7 +52,7 @@ test("composer 种子：显示 → 消费 URL → 清空不再恢复", async ({ 
 	// 会打到真实 serve，把测试 prompt 和 LLM 回复写进用户真实会话。死端口让发送在
 	// 本地以 commandError 落横幅（本断言不受影响，spec 注释已顶设此场景）。
 	await page.addInitScript(() => {
-		localStorage.setItem("omp.serve.connection", JSON.stringify({ wsUrl: "ws://127.0.0.1:9/ws", token: "" }));
+		localStorage.setItem("cornfield.serve.connection", JSON.stringify({ wsUrl: "ws://127.0.0.1:9/ws", token: "" }));
 	});
 	const preview = spawn(
 		"bun",

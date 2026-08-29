@@ -3,7 +3,7 @@
  *
  * 编排（spec 内自管）：
  *   1. serve 以源码启动（bun packages/coding-agent/src/cli.ts）、随机端口、隔离 CORNFIELD_CONFIG_DIR
- *      （不碰真实 ~/.omp/listen）；spec 预置一条历史录音 json
+ *      （不碰真实 ~/.cornfield/listen）；spec 预置一条历史录音 json
  *   2. vite preview 起 build 后 dist（4174）
  *   3. 浏览器注入 localStorage 连接配置指向该 serve；假麦克风 flags
  *
@@ -146,7 +146,7 @@ test("听记：历史真实加载 + 假麦克风四态 UI 链路", async ({ page
 		await waitForHttp(`http://127.0.0.1:${APP_PORT}/`, 30_000);
 
 		await page.addInitScript((wsUrl: string) => {
-			localStorage.setItem("omp.serve.connection", JSON.stringify({ wsUrl, token: "" }));
+			localStorage.setItem("cornfield.serve.connection", JSON.stringify({ wsUrl, token: "" }));
 		}, serveUrl);
 		// 路由是 hash 模式（createHashRouter）——voice 页在 /#/voice
 		await page.goto(`http://127.0.0.1:${APP_PORT}/#/voice`, { waitUntil: "domcontentloaded" });

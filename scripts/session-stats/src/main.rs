@@ -1,5 +1,5 @@
 //! session-stats: ad-hoc analyses over the local agent session corpus
-//! (`~/.omp/agent/sessions/`).
+//! (`~/.cornfield/agent/sessions/`).
 //!
 //! Subcommands:
 //!
@@ -26,7 +26,7 @@ fn usage() {
                              session jsonl files (default 1000).
 
 Token counting uses the o200k_base tokenizer (the GPT-4o / Claude-adjacent BPE).
-Walk root: ~/.omp/agent/sessions/"
+Walk root: ~/.cornfield/agent/sessions/"
     );
 }
 

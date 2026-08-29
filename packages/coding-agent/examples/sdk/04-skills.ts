@@ -6,7 +6,7 @@
  */
 import { createAgentSession, discoverSkills, SessionManager, type Skill } from "@cornfield/coding-agent";
 
-// Discover all skills from cwd/.omp/skills, ~/.omp/agent/skills, etc.
+// Discover all skills from cwd/.cornfield/skills, ~/.cornfield/agent/skills, etc.
 const { skills: allSkills } = await discoverSkills();
 console.log(
 	"Discovered skills:",

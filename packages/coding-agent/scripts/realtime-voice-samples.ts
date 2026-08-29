@@ -19,7 +19,7 @@ import * as path from "node:path";
  *
  * Options:
  *   --text <content>   Text to speak (default: a neutral Chinese announcement)
- *   --out-dir <dir>    Output dir (default: ~/.omp/voice-samples)
+ *   --out-dir <dir>    Output dir (default: ~/.cornfield/voice-samples)
  *   --model <id>       Realtime model id (default: qwen-audio-3.0-realtime-flash)
  *   --base-url <url>   Gateway base URL (default: https://coder.narwal.com/v1)
  *   --api-key <key>    API key (default: $NARWAL_PLAN_API_KEY, then models.yml)
@@ -60,7 +60,7 @@ function usage(): string {
 		"",
 		"Options:",
 		"  --text <content>   Text to speak (default: neutral Chinese announcement)",
-		"  --out-dir <dir>    Output dir (default: ~/.omp/voice-samples)",
+		"  --out-dir <dir>    Output dir (default: ~/.cornfield/voice-samples)",
 		"  --model <id>       Realtime model id (default: qwen-audio-3.0-realtime-flash)",
 		"  --base-url <url>   Gateway base URL (default: https://coder.narwal.com/v1)",
 		"  --api-key <key>    API key (default: $NARWAL_PLAN_API_KEY, then models.yml)",
@@ -268,7 +268,7 @@ async function main(): Promise<void> {
 		`# omp realtime voice samples (${new Date().toISOString().slice(0, 10)})`,
 		`# text: ${resolved.text}`,
 		"",
-		'# play all: for f in ~/.omp/voice-samples/*.wav; do afplay "$f"; done',
+		'# play all: for f in ~/.cornfield/voice-samples/*.wav; do afplay "$f"; done',
 		"",
 	];
 	for (const row of summary) {

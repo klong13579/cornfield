@@ -19,7 +19,7 @@ import { useSession } from "../../state/use-session";
 
 type SourceId = "webui" | "cli";
 
-const PINNED_KEY = "omp.session-sidebar.pinned";
+const PINNED_KEY = "cornfield.session-sidebar.pinned";
 
 const SOURCES: [SourceId, string][] = [
 	["webui", "WebUI 会话"],

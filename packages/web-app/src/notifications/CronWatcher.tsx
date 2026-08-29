@@ -31,7 +31,7 @@ export function NotificationCronWatcher(): null {
 						notify(
 							"定时任务执行完成",
 							`${l.taskId} · ${l.status}${l.durationMs !== null ? ` · ${(l.durationMs / 1000).toFixed(1)}s` : ""}`,
-							`omp-notify-cron-${l.id}`,
+							`cornfield-notify-cron-${l.id}`,
 						);
 					}
 				})

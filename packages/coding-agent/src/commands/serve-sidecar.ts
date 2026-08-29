@@ -59,7 +59,7 @@ export function resolveWorkspaceDir(override?: string): string {
 
 /** 解析 cornfield 二进制路径，优先级与 gateway 的 `resolveDefaultOmpPath` 对齐并前插打包内嵌路径。 */
 export function resolveCornfieldBinary(resourcesPath: string): string {
-	const explicit = process.env.OMP_BINARY?.trim();
+	const explicit = process.env.CORNFIELD_BINARY?.trim();
 	if (explicit) return explicit;
 
 	// 1. 打包内嵌（electron-builder extraResources 复制 ../coding-agent/dist/cornfield → omp-binary/cornfield）。

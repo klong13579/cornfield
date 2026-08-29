@@ -479,13 +479,13 @@ mod tests {
 
 	use super::macos::AudioVoiceSession;
 
-	/// Opt-in hardware test: OMP_NATIVE_VPIO_TEST=1 cargo test.
+	/// Opt-in hardware test: CORNFIELD_NATIVE_VPIO_TEST=1 cargo test.
 	/// Capture delivery needs a JS threadsafe function, so it is exercised by
 	/// the live voice session instead; here we verify the session lifecycle
 	/// and the playback queue.
 	#[test]
 	fn voice_session_lifecycle() {
-		if env::var_os("OMP_NATIVE_VPIO_TEST").is_none() {
+		if env::var_os("CORNFIELD_NATIVE_VPIO_TEST").is_none() {
 			return;
 		}
 		let session = AudioVoiceSession::new(24_000).expect("voice session initializes");

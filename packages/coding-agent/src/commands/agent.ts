@@ -119,7 +119,7 @@ export default class Agent extends Command {
 		flags: Record<string, unknown>,
 	): Promise<void> {
 		if (!action || action === "help") {
-			renderCommandHelp("omp", "agent", Agent);
+			renderCommandHelp("cornfield", "agent", Agent);
 			return;
 		}
 

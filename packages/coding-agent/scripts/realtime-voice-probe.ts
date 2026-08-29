@@ -20,7 +20,7 @@
  *   bun run packages/coding-agent/scripts/realtime-voice-probe.ts --voice qwen-audio-3.0-realtime-plus-myvoice-xxxxxx
  *   bun run packages/coding-agent/scripts/realtime-voice-probe.ts --api-key sk-xxx --base-url https://coder.narwal.com/v1
  *
- * Credentials: CLI --api-key > $NARWAL_PLAN_API_KEY > ~/.omp/agent/models.yml
+ * Credentials: CLI --api-key > $NARWAL_PLAN_API_KEY > ~/.cornfield/agent/models.yml
  * (narwal-plan.apiKey may name an env var or hold a literal key).
  *
  * Exit codes: 0 = no server-side rejection (voice accepted/echoed),

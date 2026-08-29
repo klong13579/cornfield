@@ -112,12 +112,12 @@ function maybeNotifyTurnEnd(view: SessionView): void {
 		const lastMsg = view.live ?? view.messages[view.messages.length - 1];
 		if (lastMsg?.error) {
 			if (!prefs.errors) return;
-			void notifyGuarded("出错告警 · Agent 回合", lastMsg.error.slice(0, 120), "omp-notify-errors");
+			void notifyGuarded("出错告警 · Agent 回合", lastMsg.error.slice(0, 120), "cornfield-notify-errors");
 			return;
 		}
 		if (!prefs.agentDone) return;
 		const reply = (lastMsg?.text ?? "").trim();
-		void notifyGuarded("Agent 完成", reply ? reply.slice(0, 80) : "回合已结束", "omp-notify-done");
+		void notifyGuarded("Agent 完成", reply ? reply.slice(0, 80) : "回合已结束", "cornfield-notify-done");
 	} catch {
 		// 通知失败静默——前台本就该静默
 	}
@@ -216,7 +216,7 @@ class SessionStore {
 			this.#view.commandError = `命令失败（未连接）：${msg}`;
 			this.#notify();
 			// B7-1：出错告警（命令失败）
-			void notifyGuarded("出错告警 · 命令失败", msg.slice(0, 120), "omp-notify-errors");
+			void notifyGuarded("出错告警 · 命令失败", msg.slice(0, 120), "cornfield-notify-errors");
 			return undefined;
 		}
 	}
@@ -760,7 +760,7 @@ class SessionStore {
 				view.phase = "retrying";
 				// B7-1：出错告警（重试前最后一次失败带 errorMessage）
 				if (event.errorMessage) {
-					void notifyGuarded("出错告警 · 自动重试", event.errorMessage.slice(0, 120), "omp-notify-errors");
+					void notifyGuarded("出错告警 · 自动重试", event.errorMessage.slice(0, 120), "cornfield-notify-errors");
 				}
 				break;
 			// todo_reminder / todo_auto_clear —— UI 提示型，暂不消费

@@ -4,7 +4,7 @@
  * （assistantMessageEvent vs assistantEvent）。
  *
  * 用法：E2E=1 bun run packages/web-app/test/e2e/diagnose-stream.ts
- * 依赖：真实 LLM 鉴权（本机 ~/.omp/agent/auth.db 或环境 API key）。
+ * 依赖：真实 LLM 鉴权（本机 ~/.cornfield/agent/auth.db 或环境 API key）。
  */
 
 import { spawn } from "node:child_process";

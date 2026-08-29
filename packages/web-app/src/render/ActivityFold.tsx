@@ -48,7 +48,7 @@ export interface ActivityFoldProps {
 }
 
 const MAX_THINKING_CHARS = 4000;
-const STORAGE_PREFIX = "omp:activity-fold:";
+const STORAGE_PREFIX = "cornfield:activity-fold:";
 
 const TOOL_ICONS: Record<string, LucideIcon> = {
 	read: FileText,
