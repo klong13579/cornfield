@@ -50,7 +50,7 @@ describe("omp-gateway CLI", () => {
 	test("--version prints the omp-gateway banner", async () => {
 		const { stdout, exitCode } = await runCli(["--version"]);
 		expect(exitCode).toBe(0);
-		expect(stdout.trim()).toMatch(/^omp-gateway\//);
+		expect(stdout.trim()).toMatch(/^cornfield-gateway\//);
 	});
 
 	test("--help lists the gateway actions", async () => {
@@ -58,7 +58,7 @@ describe("omp-gateway CLI", () => {
 		expect(exitCode).toBe(0);
 		expect(stdout).toContain("USAGE");
 		expect(stdout).toContain("ACTIONS");
-		expect(stdout).toContain("omp-gateway start"); // example lines survive the migration
+		expect(stdout).toContain("cornfield-gateway start"); // example lines survive the migration
 		expect(stdout).toContain("cron");
 		expect(stdout).toContain("service");
 	});
