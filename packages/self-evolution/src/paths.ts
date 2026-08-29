@@ -8,7 +8,7 @@
  */
 import * as os from "node:os";
 import * as path from "node:path";
-import { getAgentDir, getMemoriesDir, getProjectAgentDir } from "@cornfield/utils";
+import { getAgentDir, getConfigDirName, getMemoriesDir, getProjectAgentDir } from "@cornfield/utils";
 
 /** Default: user-level `~/.cornfield/self-evolution` + encoded memory paths. */
 export const DEFAULT_EVOLUTION_GLOBAL_STORE = true;
@@ -63,11 +63,11 @@ function userHomeDir(): string {
 
 /** Global (user-level) evolution root at `~/.cornfield/self-evolution`. */
 export function resolveGlobalEvolutionDir(): string {
-	return path.join(userHomeDir(), ".omp", "self-evolution");
+	return path.join(userHomeDir(), getConfigDirName(), "self-evolution");
 }
 
 export function resolveExternalTraceDir(): string {
-	return path.join(userHomeDir(), ".omp", "traces", "external");
+	return path.join(userHomeDir(), getConfigDirName(), "traces", "external");
 }
 
 /** Encode `cwd` for per-project memory under `~/.cornfield/self-evolution/memory/`. */
@@ -80,10 +80,9 @@ export function isSystemPath(cwd: string): boolean {
 	const normalizedCwd = path.normalize(cwd);
 	return (
 		normalizedCwd === home ||
-		normalizedCwd.startsWith(path.join(home, ".omp")) ||
-		normalizedCwd === path.join(home, ".omp", "self-evolution")
+		normalizedCwd.startsWith(path.join(home, getConfigDirName())) ||
+		normalizedCwd === path.join(home, getConfigDirName(), "self-evolution"),
 	);
-}
 
 /**
  * Global-store memory root: encoded path under agent `memories/`.
