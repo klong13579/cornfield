@@ -269,8 +269,8 @@ impl SupportLang {
 	pub const fn all_langs() -> &'static [Self] {
 		use SupportLang::*;
 		&[
-			Bash, C, Cpp, Css, Diff, Dockerfile, Go, Html, Java, JavaScript, Json, Lua, Markdown,
-			Php, Python, Regex, Ruby, Rust, Sql, Toml, Tsx, TypeScript, Yaml,
+			Bash, C, Cpp, Css, Diff, Dockerfile, Go, Html, Java, JavaScript, Json, Lua, Markdown, Php,
+			Python, Regex, Ruby, Rust, Sql, Toml, Tsx, TypeScript, Yaml,
 		]
 	}
 
@@ -436,12 +436,9 @@ const fn extensions(lang: SupportLang) -> &'static [&'static str] {
 /// Guess language from file extension.
 fn from_extension(path: &Path) -> Option<SupportLang> {
 	let name = path.file_name()?.to_str()?;
-	if name == "Makefile" || name == "makefile" || name == "GNUmakefile" {
-	}
-	if name == "Justfile" || name == "justfile" {
-	}
-	if name == "CMakeLists.txt" {
-	}
+	if name == "Makefile" || name == "makefile" || name == "GNUmakefile" {}
+	if name == "Justfile" || name == "justfile" {}
+	if name == "CMakeLists.txt" {}
 	if name == "Dockerfile"
 		|| name == "dockerfile"
 		|| name.starts_with("Dockerfile.")
