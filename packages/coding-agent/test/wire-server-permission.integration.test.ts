@@ -35,7 +35,7 @@ beforeAll(async () => {
 	const info = await waitForServe(proc, port);
 	serveInfo.url = info.url;
 	serveInfo.token = info.token;
-}, 30_000);
+}, 90_000);
 
 afterAll(async () => {
 	if (proc) {

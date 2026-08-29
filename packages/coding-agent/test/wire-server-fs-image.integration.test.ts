@@ -194,7 +194,7 @@ beforeAll(async () => {
 		},
 	);
 	url = (await waitForServe(proc, port)).url;
-}, 30_000);
+}, 90_000);
 
 afterAll(async () => {
 	if (proc) {

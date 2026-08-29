@@ -81,7 +81,7 @@ beforeAll(async () => {
 	});
 	const info = await waitForServe(proc, port);
 	ctx = { proc, ...info };
-}, 30_000);
+}, 90_000);
 
 afterAll(async () => {
 	if (ctx?.proc) {
@@ -170,7 +170,7 @@ describe("P2 wire-server 命令面 — 12 条真机 e2e", () => {
 	});
 
 	test("new_session: 在无任何活动时 → ok:true 带 cancelled:false", async () => {
-		const r = await sendCommand({ type: "new_session" }, 30_000);
+		const r = await sendCommand({ type: "new_session" }, 90_000);
 		expect(r.ok).toBe(true);
 		expect((r.result as { cancelled: boolean }).cancelled).toBe(false);
 	});

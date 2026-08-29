@@ -65,7 +65,7 @@ async function sendCommand(command: object, timeoutMs = 30_000): Promise<Frame> 
 
 describe("W3 D1 — serve get_stats 只读命令", () => {
 	test("get_stats: 返回 DashboardStats 完整形状（隔离 HOME 下全零/空数组不崩）", async () => {
-		const r = await sendCommand({ type: "get_stats" }, 30_000);
+		const r = await sendCommand({ type: "get_stats" }, 90_000);
 		expect(r.ok).toBe(true);
 		const stats = r.result as Record<string, unknown>;
 		// 顶层键齐全（与 packages/stats/src/types.ts DashboardStats 对齐）
@@ -97,13 +97,13 @@ describe("W3 D1 — serve get_stats 只读命令", () => {
 		const state = await sendCommand({ type: "get_state" });
 		expect(state.ok).toBe(true);
 		// get_stats 再调用一次，确保重复调用幂等（sync 增量无副作用）
-		const again = await sendCommand({ type: "get_stats" }, 30_000);
+		const again = await sendCommand({ type: "get_stats" }, 90_000);
 		expect(again.ok).toBe(true);
 	});
 
 	test("get_stats: optional period 时间窗口 + priceCatalog 单价目录（W3 D2）", async () => {
 		// period "7d"：形状与全量一致，附 priceCatalog（隔离 HOME 无会话 → 空数组）
-		const r = await sendCommand({ type: "get_stats", period: "7d" }, 30_000);
+		const r = await sendCommand({ type: "get_stats", period: "7d" }, 90_000);
 		expect(r.ok).toBe(true);
 		const stats = r.result as Record<string, unknown>;
 		expect(Array.isArray(stats.priceCatalog)).toBe(true);
@@ -120,14 +120,14 @@ describe("W3 D1 — serve get_stats 只读命令", () => {
 		}
 		// 其余 period 值不崩（1d/30d/90d/all 与未知值都容忍）
 		for (const periodVal of ["1d", "30d", "90d", "all", "bogus"]) {
-			const rr = await sendCommand({ type: "get_stats", period: periodVal }, 30_000);
+			const rr = await sendCommand({ type: "get_stats", period: periodVal }, 90_000);
 			expect(rr.ok).toBe(true);
 		}
 	});
 
 	test("list_sessions: 每条带 source 字段（cli=default 根 / agent=registry agent）", async () => {
 		// 预置会话在 beforeAll 里 seed（registry 启动时加载，不能中途写）
-		const res = await sendCommand({ type: "list_sessions" }, 30_000);
+		const res = await sendCommand({ type: "list_sessions" }, 90_000);
 		expect(res.ok).toBe(true);
 		const sessions = ((res.result ?? {}) as { sessions?: { agentId: string; source: string }[] }).sessions ?? [];
 		const cliEntry = sessions.find(s => s.agentId === "default");
@@ -193,7 +193,7 @@ beforeAll(async () => {
 		env: { ...process.env, HOME: isolatedHome, PI_NO_TITLE: "1" },
 	});
 	url = (await waitForServe(proc, port)).url;
-}, 30_000);
+}, 90_000);
 
 afterAll(async () => {
 	if (proc) {

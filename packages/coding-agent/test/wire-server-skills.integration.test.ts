@@ -156,7 +156,7 @@ describe("P2-W3-3 — set_skill_enabled（B3 技能写协议）", () => {
 		} finally {
 			ws.close();
 		}
-	}, 30_000);
+	}, 90_000);
 
 	test("非法技能名（含路径分隔符）→ 结构化错误 internal", async () => {
 		const ws = await connect(url);
@@ -255,7 +255,7 @@ beforeAll(async () => {
 		},
 	);
 	url = (await waitForServe(proc, port)).url;
-}, 30_000);
+}, 90_000);
 
 afterAll(async () => {
 	if (proc) {

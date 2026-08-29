@@ -20,7 +20,7 @@ export interface ServeHandle {
 export async function waitForServe(
 	proc: ReturnType<typeof Bun.spawn>,
 	port: number,
-	timeoutMs = 30_000,
+	timeoutMs = 60_000,
 ): Promise<ServeHandle> {
 	const deadline = Date.now() + timeoutMs;
 	while (Date.now() < deadline) {

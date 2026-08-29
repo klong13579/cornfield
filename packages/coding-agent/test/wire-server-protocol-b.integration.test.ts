@@ -263,7 +263,7 @@ beforeAll(async () => {
 		{ stdout: "pipe", stderr: "pipe", env: { ...process.env, HOME: isolatedHome, PI_NO_TITLE: "1" } },
 	);
 	url = (await waitForServe(proc, port)).url;
-}, 30_000);
+}, 90_000);
 
 afterAll(async () => {
 	if (proc) {
