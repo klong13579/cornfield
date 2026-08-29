@@ -22,11 +22,12 @@ const BOOTSTRAP_SCRIPT = path.resolve(
 
 function makeBundle(overrides: Record<string, unknown> = {}): Record<string, unknown> {
 	return {
-		squadVersion: 1,
+		squadVersion: 2,
 		squadId: "test-squad-boundary",
 		taskType: "code",
 		baseBranch: "main",
 		maxConcurrency: 2,
+		reportProtocol: { status: "send", ask: "ask-with-to" },
 		modelTiers: {
 			cheap: "narwal-plan/deepseek-v4-flash",
 			mid: "narwal-plan/deepseek-v4-pro",
@@ -88,9 +89,15 @@ async function runCheck(bundle: Record<string, unknown>): Promise<{ code: number
 // ─── squadVersion 校验 ───────────────────────────────────────────────────────
 
 describe("squadVersion validation", () => {
-	test("squadVersion=1 通过", async () => {
+	test("squadVersion=2 通过", async () => {
 		const { code } = await runCheck(makeBundle());
 		expect(code).toBe(0);
+	});
+
+	test("squadVersion=1 拒绝（v1 已废弃，重产任务包）", async () => {
+		const { code, stderr } = await runCheck(makeBundle({ squadVersion: 1 }));
+		expect(code).not.toBe(0);
+		expect(stderr).toMatch(/不匹配/);
 	});
 
 	test("缺少 squadVersion 拒绝", async () => {
@@ -125,9 +132,9 @@ describe("squadVersion validation", () => {
 		expect(stderr).toMatch(/不匹配/);
 	});
 
-	test("squadVersion=2 拒绝（未来版本）", async () => {
+	test("squadVersion=3 拒绝（未来版本）", async () => {
 		const { code, stderr } = await runCheck(
-			makeBundle({ squadVersion: 2 }),
+			makeBundle({ squadVersion: 3 }),
 		);
 		expect(code).not.toBe(0);
 		expect(stderr).toMatch(/不匹配/);
@@ -473,5 +480,104 @@ describe("parent model >= child model tier", () => {
 		);
 		expect(code).not.toBe(0);
 		expect(stderr).toMatch(/高于/);
+	});
+});
+
+// ─── reportProtocol 校验（ask 必须 ask-with-to） ─────────────────────────────
+
+describe("reportProtocol validation", () => {
+	test("ask-with-to 通过", async () => {
+		const { code } = await runCheck(makeBundle({ reportProtocol: { status: "send", ask: "ask-with-to" } }));
+		expect(code).toBe(0);
+	});
+
+	test("ask-without-to 拒绝（协议说明不一致的根源，v1 文档默认值）", async () => {
+		const { code, stderr } = await runCheck(makeBundle({ reportProtocol: { status: "send", ask: "ask-without-to" } }));
+		expect(code).not.toBe(0);
+		expect(stderr).toMatch(/ask-with-to/);
+	});
+
+	test("非法 status 拒绝", async () => {
+		const { code, stderr } = await runCheck(makeBundle({ reportProtocol: { status: "broadcast", ask: "ask-with-to" } }));
+		expect(code).not.toBe(0);
+		expect(stderr).toMatch(/reportProtocol\.status/);
+	});
+
+	test("缺省 reportProtocol 通过（可选字段，默认行为即 ask-with-to）", async () => {
+		const bundle = makeBundle();
+		delete bundle.reportProtocol;
+		const { code } = await runCheck(bundle);
+		expect(code).toBe(0);
+	});
+});
+
+// ─── deps 结构校验（引用存在/不自指/无环） ────────────────────────────────
+
+describe("deps validation", () => {
+	function subtask(id: string, overrides: Record<string, unknown> = {}): Record<string, unknown> {
+		return {
+			...(makeBundle().subtasks as Array<Record<string, unknown>>)[0],
+			id,
+			branch: `feat/${id.toLowerCase()}`,
+			...overrides,
+		};
+	}
+
+	test("无 deps（可并行）通过", async () => {
+		const { code } = await runCheck(makeBundle({ subtasks: [subtask("T1")] }));
+		expect(code).toBe(0);
+	});
+
+	test("契约式依赖链（T2 deps T1）通过", async () => {
+		const { code } = await runCheck(makeBundle({ subtasks: [subtask("T1"), subtask("T2", { deps: ["T1"] })] }));
+		expect(code).toBe(0);
+	});
+
+	test("引用不存在的子任务拒绝", async () => {
+		const { code, stderr } = await runCheck(makeBundle({ subtasks: [subtask("T1", { deps: ["T99"] })] }));
+		expect(code).not.toBe(0);
+		expect(stderr).toMatch(/不存在的子任务/);
+	});
+
+	test("自指拒绝", async () => {
+		const { code, stderr } = await runCheck(makeBundle({ subtasks: [subtask("T1", { deps: ["T1"] })] }));
+		expect(code).not.toBe(0);
+		expect(stderr).toMatch(/自指/);
+	});
+
+	test("循环依赖拒绝（T1→T2→T1）", async () => {
+		const { code, stderr } = await runCheck(
+			makeBundle({ subtasks: [subtask("T1", { deps: ["T2"] }), subtask("T2", { deps: ["T1"] })] }),
+		);
+		expect(code).not.toBe(0);
+		expect(stderr).toMatch(/循环依赖/);
+	});
+
+	test("长链环拒绝（T1→T2→T3→T1）", async () => {
+		const { code, stderr } = await runCheck(
+			makeBundle({
+				subtasks: [
+					subtask("T1", { deps: ["T3"] }),
+					subtask("T2", { deps: ["T1"] }),
+					subtask("T3", { deps: ["T2"] }),
+				],
+			}),
+		);
+		expect(code).not.toBe(0);
+		expect(stderr).toMatch(/循环依赖/);
+	});
+
+	test("DAG（菱形依赖）通过", async () => {
+		const { code } = await runCheck(
+			makeBundle({
+				subtasks: [
+					subtask("T1"),
+					subtask("T2", { deps: ["T1"] }),
+					subtask("T3", { deps: ["T1"] }),
+					subtask("T4", { deps: ["T2", "T3"] }),
+				],
+			}),
+		);
+		expect(code).toBe(0);
 	});
 });

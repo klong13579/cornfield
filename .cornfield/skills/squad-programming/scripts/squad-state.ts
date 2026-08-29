@@ -1,16 +1,21 @@
 /**
  * squad-state — squad 编排状态读写（父进程中断后可恢复）
  *
- * 父 omp 每收到一条子任务状态消息（STARTED/BLOCKED/REVIEWING/COMPLETE/FAILED），就更新
- * state.json 一次；父进程中断重启后，读 state.json 重建每子任务的已知状态，对未终态
- * 子任务逐个用 intercom children + pane 快照复核后继续。
+ * 状态语义（三段启动语义）：
+ *   assembled — worker 进程已启动（pane/agent 在），STARTED 尚未被父确认
+ *   started   — 准备检查通过（任务包已读 + 模型生效，父经 ask 确认）——worker 停在 GO 闸门等开工
+ *   running   — 父已发 GO（幂等，可补发）——worker 实现中
+ *   blocked   — worker 上报阻塞/求助（从 assembled/started/running 均可达）
+ *   reviewing — worker 自报待验收（实现完成，等父跑 gate）
+ *   complete / failed — 终态（failed 也用于取消：note 记 "cancelled: 原因"）
  *
  * 用法：
  *   state.json show                               打印全部子任务状态
  *   state.json list                               只看未终态（== 恢复清单）
  *   state.json update <taskId> <status> [note] [--force]  更新一个子任务状态
+ *   state.json reconcile [--max-concurrency N]    计算 GO 发放/待确认/等待计划（幂等，含父中断恢复）
  *
- * 状态机：assembled → started → blocked / reviewing → complete / failed
+ * 状态机：assembled → started → running → blocked / reviewing → complete / failed
  * 非法转移（如 complete → started）会被拒绝，除非 --force（仅恢复场景使用）。
  * 终态（complete / failed）不可逆，重复设置同一状态是幂等的（仅更新 timestamp）。
  *
@@ -30,7 +35,9 @@ type SubtaskState = {
 	paneId?: string;
 	model?: string;
 	briefPath?: string;
-	status: "assembled" | "started" | "blocked" | "reviewing" | "complete" | "failed";
+	/** 契约式依赖的子任务 id（集结时从任务包回填；reconcile 按它判断 GO 资格）。 */
+	deps?: string[];
+	status: "assembled" | "started" | "running" | "blocked" | "reviewing" | "complete" | "failed";
 	updatedAt: number;
 	note?: string;
 };
@@ -40,6 +47,8 @@ export type SquadState = {
 	squadVersion?: number;
 	taskType?: string;
 	baseBranch?: string;
+	/** GO 发放的并发槽位上限（reconcile 用；缺省 3）。 */
+	maxConcurrency?: number;
 	parent: { target: string; sessionId?: string; cwd: string };
 	workspaceId?: string;
 	createdAt: number;
@@ -48,15 +57,25 @@ export type SquadState = {
 	subtasks: SubtaskState[];
 };
 
-export const STATE_STATUSES = ["assembled", "started", "blocked", "reviewing", "complete", "failed"] as const;
+export const STATE_STATUSES = ["assembled", "started", "running", "blocked", "reviewing", "complete", "failed"] as const;
 export const TERMINAL_STATUSES = ["complete", "failed"] as const;
 
-/** 合法的状态转移矩阵。键=当前状态，值=允许的目标状态。 */
+/** 默认并发槽位：同时处于 running/reviewing/blocked 的子任务数上限。 */
+export const DEFAULT_MAX_CONCURRENCY = 3;
+
+/**
+ * 合法的状态转移矩阵。键=当前状态，值=允许的目标状态。
+ * - assembled 允许直转 blocked/failed：准备检查失败（模型缺 key/包不可读）或 pane 死，
+ *   worker 首条消息可能是 BLOCKED/FAILED——不允许会卡死父的落账。
+ * - started 只在 GO 闸门：转 running = GO 已发；转 reviewing 是容错（父漏记 running、
+ *   worker 已回报 REVIEWING）。started → complete 被拒——GO 台账不能丢，恢复场景用 --force。
+ */
 export const VALID_TRANSITIONS: Record<string, string[]> = {
-	assembled: ["started"],
-	started: ["blocked", "reviewing", "complete", "failed"],
-	blocked: ["started", "reviewing", "complete", "failed"],
-	reviewing: ["started", "complete", "failed"],
+	assembled: ["started", "blocked", "failed"],
+	started: ["running", "blocked", "reviewing", "failed"],
+	running: ["blocked", "reviewing", "complete", "failed"],
+	blocked: ["started", "running", "reviewing", "complete", "failed"],
+	reviewing: ["running", "complete", "failed"],
 	complete: [], // 终态 — 不可变
 	failed: [],   // 终态 — 不可变
 };
@@ -142,6 +161,99 @@ export function pendingSubtasks(state: SquadState): SubtaskState[] {
 	return state.subtasks.filter(s => !(TERMINAL_STATUSES as readonly string[]).includes(s.status));
 }
 
+/** reconcile 计划：父按它驱动 STARTED 确认、GO 发放与调度等待（幂等，含父中断恢复）。 */
+export type ReconcilePlan = {
+	/** assembled：STARTED 尚未确认——父用 intercom ask 拉（拉到后 update started）。 */
+	needAsk: string[];
+	/** started 且 deps 全 complete 且槽位空闲——父发 GO（幂等可补发），发完 update running。 */
+	needGo: string[];
+	/** started 但 deps 未全 complete（blockedBy = 未 complete 的依赖 id，含 failed 与未知 id）。 */
+	waitingDeps: Array<{ id: string; blockedBy: string[] }>;
+	/** started、deps 已满足但并发槽位满（按子任务数组序排队）。 */
+	waitingConcurrency: string[];
+	/** started 但 deps 中有 failed——不可能开工，转用户拍板（重拆/放弃）。 */
+	unrunnable: Array<{ id: string; failedDeps: string[] }>;
+	/** running/reviewing——已开工，占槽。 */
+	inFlight: string[];
+	/** blocked——等父/用户决策，占槽。 */
+	blocked: string[];
+	/** complete/failed。 */
+	terminal: string[];
+	maxConcurrency: number;
+	freeSlots: number;
+};
+
+/**
+ * 计算 reconcile 计划（纯函数，不写文件）。
+ * 槽位口径：running / reviewing / blocked 都占槽（进程活着的 worker）；
+ * assembled / started 停在 GO 闸门不占槽。maxConcurrency 显式参数 > state.maxConcurrency > 默认 3。
+ */
+export function reconcilePlan(state: SquadState, maxConcurrency?: number): ReconcilePlan {
+	const cap = maxConcurrency ?? state.maxConcurrency ?? DEFAULT_MAX_CONCURRENCY;
+	const statusOf = new Map(state.subtasks.map(s => [s.id, s.status]));
+	const plan: ReconcilePlan = {
+		needAsk: [],
+		needGo: [],
+		waitingDeps: [],
+		waitingConcurrency: [],
+		unrunnable: [],
+		inFlight: [],
+		blocked: [],
+		terminal: [],
+		maxConcurrency: cap,
+		freeSlots: 0,
+	};
+	const goEligible: string[] = [];
+	for (const s of state.subtasks) {
+		if (s.status === "complete" || s.status === "failed") {
+			plan.terminal.push(s.id);
+		} else if (s.status === "assembled") {
+			plan.needAsk.push(s.id);
+		} else if (s.status === "blocked") {
+			plan.blocked.push(s.id);
+		} else if (s.status === "running" || s.status === "reviewing") {
+			plan.inFlight.push(s.id);
+		} else {
+			// started：GO 闸门候选，按 deps 分流
+			const failedDeps = (s.deps ?? []).filter(d => statusOf.get(d) === "failed");
+			const incompleteDeps = (s.deps ?? []).filter(d => statusOf.get(d) !== "complete");
+			if (failedDeps.length > 0) {
+				plan.unrunnable.push({ id: s.id, failedDeps });
+			} else if (incompleteDeps.length > 0) {
+				plan.waitingDeps.push({ id: s.id, blockedBy: incompleteDeps });
+			} else {
+				goEligible.push(s.id);
+			}
+		}
+	}
+	plan.freeSlots = Math.max(0, cap - plan.inFlight.length - plan.blocked.length);
+	plan.needGo = goEligible.slice(0, plan.freeSlots);
+	plan.waitingConcurrency = goEligible.slice(plan.freeSlots);
+	return plan;
+}
+
+/** reconcile 计划的人读行动指引（stderr；stdout 始终是 JSON 计划本身）。 */
+function describePlan(plan: ReconcilePlan): string {
+	const lines: string[] = [];
+	if (plan.needAsk.length > 0) {
+		lines.push(`needAsk: 对 ${plan.needAsk.join(", ")} 逐个 intercom ask 拉 STARTED/当前状态，确认后 update <id> started`);
+	}
+	if (plan.needGo.length > 0) {
+		lines.push(`needGo: 向 ${plan.needGo.join(", ")} 发 GO（intercom send "[<id>] GO: 开工"，幂等可补发），发完立即 update <id> running`);
+	}
+	if (plan.waitingDeps.length > 0) {
+		for (const w of plan.waitingDeps) lines.push(`waitingDeps: ${w.id} 等依赖 ${w.blockedBy.join(", ")} complete`);
+	}
+	if (plan.waitingConcurrency.length > 0) {
+		lines.push(`waitingConcurrency: ${plan.waitingConcurrency.join(", ")} 依赖已满足但槽位满（占用中：${[...plan.inFlight, ...plan.blocked].join(", ") || "无"}）`);
+	}
+	if (plan.unrunnable.length > 0) {
+		for (const u of plan.unrunnable) lines.push(`unrunnable: ${u.id} 依赖 ${u.failedDeps.join(", ")} 已 failed——转用户拍板（重拆/放弃）`);
+	}
+	if (lines.length === 0) lines.push("无需动作：无待确认/待开工/等待项");
+	return lines.join("\n");
+}
+
 function main(): void {
 	const args = process.argv.slice(2);
 	const forceIndex = args.indexOf("--force");
@@ -158,16 +270,24 @@ function main(): void {
 			process.stderr.write("show|list 不带额外参数\n");
 			process.exit(1);
 		}
-	} else if (verb === "update") {
-		if (rest.length < 2 || rest.length > 3) {
-			process.stderr.write("用法: squad-state <state.json> update <taskId> <status> [note] [--force]\n");
+	} else if (verb === "reconcile") {
+		if (rest.length > 1 || (rest.length === 1 && !rest[0]!.startsWith("--max-concurrency="))) {
+			process.stderr.write("用法: squad-state <state.json> reconcile [--max-concurrency=N]\n");
 			process.exit(1);
 		}
 	} else {
-		process.stderr.write(`未知操作: ${verb}（show|list|update）\n`);
+		process.stderr.write(`未知操作: ${verb}（show|list|update|reconcile）\n`);
 		process.exit(1);
 	}
 	const state = loadState(file);
+	if (verb === "reconcile") {
+		const flag = rest[0];
+		const cap = flag ? Number(flag.slice("--max-concurrency=".length)) : undefined;
+		const plan = reconcilePlan(state, cap !== undefined && Number.isFinite(cap) && cap >= 1 ? cap : undefined);
+		process.stderr.write(describePlan(plan) + "\n");
+		process.stdout.write(JSON.stringify(plan, null, 2) + "\n");
+		return;
+	}
 	if (verb === "show" || verb === "list") {
 		const subs = verb === "list" ? pendingSubtasks(state) : state.subtasks;
 		process.stdout.write(
@@ -179,16 +299,18 @@ function main(): void {
 					parent: state.parent,
 					createdAt: new Date(state.createdAt).toISOString(),
 					version: state.version,
-					subtasks: subs.map(s => ({
-						id: s.id,
-						status: s.status,
-						worktree: s.worktree ?? null,
-						branch: s.branch ?? null,
-						paneId: s.paneId ?? null,
-						updatedAt: new Date(s.updatedAt).toISOString(),
-						note: s.note ?? "",
-					})),
-				},
+				subtasks: subs.map(s => ({
+					id: s.id,
+					status: s.status,
+					deps: s.deps ?? [],
+					worktree: s.worktree ?? null,
+					branch: s.branch ?? null,
+					paneId: s.paneId ?? null,
+					updatedAt: new Date(s.updatedAt).toISOString(),
+					note: s.note ?? "",
+				})),
+				maxConcurrency: state.maxConcurrency ?? null,
+			},
 				null,
 				2,
 			) + "\n",

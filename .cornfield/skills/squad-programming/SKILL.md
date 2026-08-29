@@ -1,6 +1,6 @@
 ---
 name: squad-programming
-version: 0.4.0
+version: 0.5.0
 description: >-
   并行编排：把一个大任务拆成 MECE 子任务，在多个 git worktree 里各起一个子
   omp 并行工作，用 intercom 主从通信做求助与进度汇报。Use when the user wants
@@ -19,8 +19,7 @@ mutating: true
 
 # squad-programming
 
-> **squad** — 一个父 omp 当 coordinator，N 个子 omp 在隔离 worktree 里并行，波内并行、波间串行，全部经 gate 验证后回收。
-
+> **squad** — 一个父 omp 当 coordinator，N 个子 omp 在隔离 worktree 里并行；worker 停在 GO 闸门，父按依赖与并发槽位发 GO 调度，全部经 gate 验证后回收。
 ## Outcome
 
 用户的任务被拆成 MECE 子任务，每个子任务在自己的 worktree（或只读共享区）由独立子 omp 执行；子 omp 通过 intercom 向父求助/汇报；父按任务包的 gate 验证每个子任务并把通过合体验证的集成分支 + diff 预览**交接给用户**；用户确认后父自动合并到 base 分支，清理 worktree 和 agent，归档任务包。
@@ -111,10 +110,11 @@ bun run .cornfield/skills/squad-programming/scripts/bootstrap.ts \
 
 **Completion criterion**：脚本返回每个子任务的 paneId 且 agent 登记检查通过；接下来走 #Phase 1.5 的 worker/父两层 gate。
 
-波次调度规则（父 agent 执行）：
-- 每一波 = 所有 deps 已满足的子任务；一波内并行启动，波间等待全部收尾再进下一波（barrier）。
-- 并发数 ≤ `maxConcurrency`（默认 3）—— N 个 worktree 同时 build/test 会抢 CPU/磁盘；**也受模型配额约束**（同 provider 多并发会 429：见 #模型使用纪律）。
-- `deps: []` 全空 → 单波纯并行；`maxConcurrency: 1` 或 deps 成链 → 纯串行。
+波次调度规则（GO 闸门实现，见 #GO 发放）：
+- bootstrap 一次性启动全部 worker 进程——每个 worker 在 GO 闸门空等（不耗模型配额），真正开工由 GO 发放控制。
+- GO 发放条件 = 子任务 `started` + deps 全部 `complete` + 并发槽位空闲（`running`/`reviewing`/`blocked` 计数 < `maxConcurrency`，默认 3——N 个 worktree 同时 build/test 抢 CPU/磁盘，同 provider 多并发还会 429，见 #模型使用纪律）。
+- `deps: []` 全空 → 纯并行（受槽位限制）；`maxConcurrency: 1` 或 deps 成链 → 纯串行。
+- deps 只允许契约式依赖（先定接口/签名，双方基于契约独立开发）；顺序依赖必须合并为同一执行序列（见 Step 0.2），集结时 bootstrap 会拒绝自指/未知引用/循环依赖。
 
 ## 模型使用纪律（实测教训）
 
@@ -131,10 +131,35 @@ bun run .cornfield/skills/squad-programming/scripts/bootstrap.ts \
    - 超时未上线 → 打印各 pane 输出快照并以退出码 1 失败，不静默继续。确认只是 herdr 探测延迟后，可 `--skip-verify` 重跑绕过，父再用 intercom 复核。
 2. **worker 层（包已读 + 模型可访问）** — 每个子 omp 开场必须先过准备检查再碰任务：读任务包 → `list_models` 核对档位模型在可用列表（不在则 `switch_model` 到档内可用模型）→ 尝试向父发一次 `[T<n>] STARTED`。STARTED ack 本身要经过一次真实 LLM 调用 —— 一次证明三件事：omp 活着、模型可访问、任务包已获取。**但 STARTED 的确认以父 ask 拉动为准**（见下方父层 pull 机制）：
    - **已知现象（实测复现）**：子进程主动 `send` 给父，在启动窗口期（首轮几十秒内）会报 `Session not found`——broker 的目标解析在子进程注册传播完成前不可用；窗口过后 send 恢复正常（批次一 T2/T3 延时消息均送达）。`ask`（父→子）不受影响，双向链路始终可靠。
-   - **子侧行为**：STARTED 尝试 send 一次；报 `Session not found`/失败 → **不要重试刷屏、不要中断任务**，继续干活；收到父的 ask 确认时如实回复。终态（REVIEWING/COMPLETE/FAILED）与求助消息都在窗口期后，send 可靠送达。
-3. **父层 wait-gate（pull 模式）** — 父 **不干等** STARTED 消息，主动驱动确认：① 先 `intercom({ action: "list" })` 轮询，等全部子进程登记成 `child of <父>`（注册可能晚于启动数十秒，实测）；② 注册齐全后对每个子任务 `intercom({ action: "ask", to: <子>, ... })` 拉 STARTED 确认（ask 双向始终可靠，实测 100% 成功率）；③ ask 无响应 → `herdr pane read <paneId>` 快照定位（是否在干活 / 启动报错）；④ ask 失败且 pane 死 → 才标记 `BLOCKED` 并给原因（缺模型 key / 模型名写错 / PATH 缺 omp），修复后只重集结该子任务，不整波回滚。
+   - **子侧行为**：STARTED 尝试 send 一次；报 `Session not found`/失败 → **不要重试刷屏、不要中断任务**，停在 GO 闸门等父的 ask/GO；收到父的 ask 确认时如实回复。终态（REVIEWING/COMPLETE/FAILED）与求助消息都在窗口期后，send 可靠送达。
+3. **父层 wait-gate（pull 模式）** — 父 **不干等** STARTED 消息，主动驱动确认：① 先 `intercom({ action: "pending" })` 清积压 ask（父在忙别的/重启时错过的请求在这里补收）；② `intercom({ action: "list" })` 轮询，等全部子进程登记成 `child of <父>`（注册可能晚于启动数十秒，实测）；③ 注册齐全后对每个子任务 `intercom({ action: "ask", to: <子>, ... })` 拉 STARTED 确认（ask 双向始终可靠，实测 100% 成功率），确认后立即落账 `squad-state.ts <stateFile> update <taskId> started`；④ ask 无响应 → `herdr pane read <paneId>` 快照定位（是否在干活 / 启动报错）；⑤ ask 失败且 pane 死 → 才标 `blocked`（`update <taskId> blocked`）并给原因（缺模型 key / 模型名写错 / PATH 缺 omp），修复后只重集结该子任务，不整波回滚。准备检查失败的 worker 首条消息可能是 BLOCKED/FAILED——`assembled -> blocked/failed` 是合法转移，直接落账。
 
-**Completion criterion**：每个子任务经父 ask 确认 STARTED 或明确 BLOCKED 并给出原因；全部确认才进入 Phase 2。
+**Completion criterion**：每个子任务 `started`（STARTED 已确认并落账）或 `blocked` 并给出原因。
+
+## GO 发放（reconcile 驱动，可恢复）
+
+全部子任务 `started` 后**仍不许开工**——GO（开工确认）由父按 reconcile 计划发放，这是「父漏发 GO → worker 死等」的根治点：
+
+```bash
+bun run .cornfield/skills/squad-programming/scripts/squad-state.ts ~/.cornfield/squads/<squadId>/state.json reconcile
+```
+
+输出 JSON 计划（幂等，每轮盯盘都跑；stdout 是 JSON，stderr 是人读指引）：
+
+| 字段 | 含义 | 父的动作 |
+|---|---|---|
+| `needAsk` | assembled：STARTED 未确认 | intercom ask 拉确认 → `update <id> started` |
+| `needGo` | started 且 deps 全 complete 且槽位空闲 | intercom send `"[<id>] GO: 开工"`（或对 pending ask 直接 reply）→ **发完立即 `update <id> running`** |
+| `waitingDeps` | deps 未全 complete | 等依赖方终态，不动 |
+| `waitingConcurrency` | deps 已满足但槽位满 | 等槽位释放，不动 |
+| `unrunnable` | deps 中有 failed | 不可能开工，转用户拍板（重拆/放弃） |
+| `inFlight` / `blocked` / `terminal` | 全景 | 无 |
+
+可靠性规则：
+- **GO 幂等**：worker brief 写明重复 GO 无副作用（已在干活就继续，不重启）。父崩溃恢复后对 `started` 子任务**直接补发 GO**，不怕重——这就是漏发 GO 的自愈路径。
+- **先发后记**：GO 先发消息再落账 `running`；父若在两步间崩溃，恢复后 reconcile 仍报 `started` → 补发 GO（幂等），无死等窗口。反向（先记后发）会在崩溃时留下假 running，故禁止。
+- **槽位口径**：`running`/`reviewing`/`blocked` 占槽（进程活着的 worker）；`assembled`/`started` 停在闸门不占槽。默认 3，任务包 `maxConcurrency` 可调，reconcile `--max-concurrency=N` 可临时覆盖。
+- **取消**：用户要取消某子任务 → 父 send `"[<id>] CANCEL: <原因>"` → worker 停止实现与提交并回 `CANCELLED` → 父 `update <taskId> failed "cancelled: <原因>"`（分支/worktree 按 FAILED 清理规则保留等用户表态）。
 
 ## Phase 2 — 执行与协作
 
@@ -142,13 +167,15 @@ bun run .cornfield/skills/squad-programming/scripts/bootstrap.ts \
 
 1. **首件事读任务包** — 文件路径在启动 brief 里给出：worktree 场景为 `<cwd>/.squad.json`，shared 场景为 `/tmp/squad-<squadId>/<taskId>.squad.json`。任务、scope、gate、汇报协议、模型档位都在里面。读完立即做 #Phase 1.5 的准备检查汇报。
 2. **模型核对** — 用 `list_models` 确认分配模型在可用列表；不在 → `switch_model` 切到档内可用模型，并按实际生效模型汇报（启动参数失效兜底）。
-3. **只动 scope 内文件** — scope 外需要改动 → `ask` 求助父。
-4. **求助** — `intercom({ action: "ask", to: <父 target>, message: "..." })` **必须带 to=父 target**。不带 to 的 ask 不会被自动路由到父：intercom 的路由优先 cwd 匹配（实测误投到同目录活跃的 aion-ui 会话），parent edge 只是次选。同时只允许一个 pending ask；求助期间不发重复 ask。
-5. **状态汇报** — `intercom({ action: "send", to: <父 target>, message: "[<taskId>] <STATE>: <一句话>" })`，STATE ∈ `STARTED` / `BLOCKED` / `REVIEWING` / `COMPLETE` / `FAILED`。**STARTED = 准备检查通过**（任务包已读 + 模型已核对并生效），send 一次即可，**确认由父 ask 拉动**（见 #Phase 1.5 pull 机制）；启动窗口期 send 失败不要重试刷屏，窗口后 send 可靠（终态必达）。
-6. 每回合结束自动上报（agent_end 由运行时注入，无需手动）。
+3. **GO 闸门（硬约束）** — 准备检查通过并报 STARTED 后停在闸门：收到父的开工确认（消息含「GO」或「开工」，可能经 parent ask 的 reply 或 send 到达）之前不得开始实现。**重复 GO 无副作用**——已在干活就继续，不重启任务。收到含「CANCEL」的消息（`"[<taskId>] CANCEL: <原因>"`）→ 立即停止实现与提交，回复 `"[<taskId>] CANCELLED: <一句话>"`，不再改动任何文件。
+4. **只动 scope 内文件** — scope 外需要改动 → `ask` 求助父。
+5. **求助** — `intercom({ action: "ask", to: <父 target>, message: "..." })` **必须带 to=父 target**。不带 to 的 ask 不会被自动路由到父：intercom 的路由优先 cwd 匹配（实测误投到同目录活跃的 aion-ui 会话），parent edge 只是次选。同时只允许一个 pending ask；求助期间不发重复 ask。
+6. **状态汇报** — `intercom({ action: "send", to: <父 target>, message: "[<taskId>] <STATE>: <一句话>" })`，STATE ∈ `STARTED` / `BLOCKED` / `REVIEWING` / `COMPLETE` / `FAILED`。**STARTED = 准备检查通过**（任务包已读 + 模型已核对并生效），send 一次即可，**确认由父 ask 拉动**（见 #Phase 1.5 pull 机制）；启动窗口期 send 失败不要重试刷屏，窗口后 send 可靠（终态必达）。收到父 ask（问 STARTED/当前状态）必须回复 `"[<taskId>] ACK: <当前状态与实际生效模型>"`。
+7. 每回合结束自动上报（agent_end 由运行时注入，无需手动）。
 
 ### 父 agent 侧盯盘
 
+- **reconcile 每轮跑（唯一调度真源）** — 每收到消息/每个工作轮次：先 `intercom({ action: "pending" })` 清积压 ask，再跑 `squad-state.ts <stateFile> reconcile`，按计划行动（ask 确认 / 发 GO 落 running / 等待 / unrunnable 转用户）。父中断恢复用的也是同一条命令——reconcile 从 state.json 重算计划，不依赖父的内存。
 - **健康扫描（父探活机制，防静默挂掉）** — 父不干等消息。每个工作轮次（收到消息后/间隙），对未终态子任务跑一次体检：
   ```bash
   bun run .cornfield/skills/squad-programming/scripts/probe.ts ~/.cornfield/squads/<squadId>/state.json
@@ -158,11 +185,11 @@ bun run .cornfield/skills/squad-programming/scripts/bootstrap.ts \
 - 用 `intercom({ action: "children" })` 看子 omp 实时状态，不轮询消息。
 - **每条状态消息落地 state.json**（父中断恢复的底账）:
   `bun run .cornfield/skills/squad-programming/scripts/squad-state.ts ~/.cornfield/squads/<squadId>/state.json update <taskId> <status> [一句话] [--force]`
-  - 转移矩阵：`assembled -> started`（正常流程），`started -> blocked / reviewing / complete / failed`，`blocked/reviewing -> started / complete / failed`。
-  - 终态（`complete` / `failed`）不可逆，非法转移被拒绝。
+  - 转移矩阵：`assembled -> started / blocked / failed`（blocked/failed = 准备检查失败或 pane 死），`started -> running / blocked / reviewing / failed`（running = GO 已发；reviewing 为容错），`running -> blocked / reviewing / complete / failed`，`blocked/reviewing -> started / running / complete / failed`。
+  - 终态（`complete` / `failed`）不可逆，非法转移被拒绝；`started -> complete` 被拒（GO 台账不能丢——恢复时确知已发过 GO 才可用 `--force`）。
   - `--force` 跳过转移校验，仅父中断恢复场景使用（见 #父中断恢复）。
   - 同一状态重复设置是幂等的（仅更新 timestamp）。
-  收到 `[T<n>] STARTED` → `started`；`BLOCKED` → `blocked`；`REVIEWING` → `reviewing`；`COMPLETE` → 先跑 gate 验证，通过才 `complete`（否则打回）；`FAILED` → `failed`。每回合至少核对一次 state 是否跟上。
+  收到 `[T<n>] STARTED`/父 ask 确认 → `started`；发完 GO → `running`；`BLOCKED` → `blocked`；`REVIEWING` → `reviewing`；`COMPLETE` → 先跑 gate 验证，通过才 `complete`（否则打回）；`FAILED` → `failed`；取消 → `failed`（note 记 `cancelled: 原因`）。每回合至少核对一次 state 是否跟上。
 - 收到子 ask → 立即 `reply` 决策或引导；`pending` 看堆积，`reply to <taskId>` 定向回复。
 - 收到 `[T<n>] BLOCKED` → 判断是缺信息（补）还是缺决策（转用户拍板，绝不代拍）。
 
@@ -170,14 +197,20 @@ bun run .cornfield/skills/squad-programming/scripts/bootstrap.ts \
 
 ## 父中断恢复（进程重启后接续）
 
-父 omp 进程中断（崩溃/重启/被 kill）时，子 omp 的进程和 worktree 不受影响，但父的管辖上下文（谁 STARTED、谁卡在 ask）会丢。恢复步骤：
+父 omp 进程中断（崩溃/重启/被 kill）时，子 omp 的进程和 worktree 不受影响，但父的管辖上下文（谁 STARTED、谁已 GO、谁卡在 ask）会丢。恢复入口只有一条命令：
 
-1. `squad-state.ts <stateFile> list` 读未终态子任务（`stateFile = ~/.cornfield/squads/<squadId>/state.json`，集结时自动写入；找不到就搜 `~/.cornfield/squads/*/state.json` 按 `createdAt` 最新的）。
-2. 对每个未终态子任务，用 `intercom({ action: "children" })` + `herdr pane read <paneId>`（state 里有 paneId）复核实际状态：
-   - 还活着且在干活 → 保持 `started`，询问是否需要它重新发一次最新状态；
-   - 发了 COMPLETE 但父没收到 → 跑 gate 验证，过了直接标 `complete`（用 `--force` 跳过 assembled → complete 校验）；
-   - pane 死了/无响应 → 标记 `failed` 并给原因（用 `--force` 跳过 assembled → failed 校验）。
-3. 恢复期间对子任务补发一条确认消息（intercom send），告诉它父已回来；继续 Phase 2 盯盘。
+```bash
+bun run .cornfield/skills/squad-programming/scripts/squad-state.ts <stateFile> reconcile
+```
+
+（`stateFile = ~/.cornfield/squads/<squadId>/state.json`，集结时自动写入；找不到就搜 `~/.cornfield/squads/*/state.json` 按 `createdAt` 最新的。）reconcile 从 state.json 重算计划，按计划处置：
+
+1. **`needAsk`（assembled）** — 用 `intercom({ action: "children" })` + `herdr pane read <paneId>`（state 里有 paneId）复核后 ask 拉 STARTED/当前状态，确认后 `update <id> started`。
+2. **`needGo`（started）** — **直接补发 GO**（幂等：崩溃前发没发过都不怕重，worker 收到重复 GO 只会继续干活），发完 `update <id> running`。这就是「父在发 GO 前后崩溃导致 worker 死等」的闭环。
+3. **`inFlight`（running/reviewing）** — `probe.ts` 体检 + ask 问最新状态：还活着且在干活 → 保持不动；worker 报过 COMPLETE 但父没收到 → 跑 gate 验证，过了直接标 `complete`（用 `--force` 跳过转移校验）；pane 死了/无响应 → `update <id> failed <原因>`（`--force`）。
+4. **`unrunnable`** — 依赖已 failed，转用户拍板（重拆/放弃）。
+5. 恢复期间对未终态子任务补发一条确认消息（intercom send），告诉它父已回来；继续 Phase 2 盯盘。
+
 
 **兜底事实**：state.json 是权威底账，intercom 消息流只是事件源；两者不一致时以 state.json + 实际 pane 复核为准。
 
@@ -230,8 +263,8 @@ bun run .cornfield/skills/squad-programming/scripts/bootstrap.ts \
 
 | 字段 | 说明 |
 |---|---|
-| `squadVersion` | 任务包 schema 版本号（当前 `1`）。bootstrap 启动时校验版本匹配，不匹配则拒绝执行。 |
-| `SKILL.md` frontmatter `version` | Skill 自身的发布版本（`0.3.0`）。记录流程/脚本的变更历史。 |
+| `squadVersion` | 任务包 schema 版本号（当前 `2`）。bootstrap 启动时校验版本匹配，不匹配则拒绝执行。 |
+| `SKILL.md` frontmatter `version` | Skill 自身的发布版本（`0.5.0`）。记录流程/脚本的变更历史。 |
 
 ### 版本兼容规则
 
@@ -263,11 +296,11 @@ bun run .cornfield/skills/squad-programming/scripts/bootstrap.ts \
 
 ```jsonc
 {
-  "squadVersion": 1,                           // 任务包 schema 版本（必填，当前 1）
+  "squadVersion": 2,                           // 任务包 schema 版本（必填，当前 2）
   "squadId": "squad-20260818-a3f2",
   "taskType": "mixed",
   "baseBranch": "main",
-  "maxConcurrency": 3,
+  "maxConcurrency": 3,                         // GO 发放并发槽位上限（running/reviewing/blocked 计数；缺省 3）
   "modelTiers": {
     "cheap": "narwal-plan/deepseek-v4-flash",
     "mid": "narwal-plan/deepseek-v4-pro",
@@ -282,7 +315,7 @@ bun run .cornfield/skills/squad-programming/scripts/bootstrap.ts \
       "kind": "code",                            // code | test | docs | review | research
       "isolation": "worktree",                   // worktree | shared-read | shared-write
       "scope": { "files": ["packages/foo/src/auth/**"] },
-      "deps": [],                                // 契约式依赖才允许；空 = 可并行
+      "deps": [],                                // 契约式依赖才允许；空 = 可并行。只允许引用存在的 id、不自指、无环（bootstrap 校验）；reconcile 按它判 GO 资格
       "acceptance": "可验证的描述或命令",
       "gate": {
         "kind": "derived",                       // derived | explicit | unknown
@@ -296,7 +329,7 @@ bun run .cornfield/skills/squad-programming/scripts/bootstrap.ts \
       "budgetTokens": 200000                     // 可选：超预算强制上报父
     }
   ],
-  "reportProtocol": { "status": "send", "ask": "ask-without-to" }
+  "reportProtocol": { "status": "send", "ask": "ask-with-to" }  // ask 必须带 to=父（不带 to 按 cwd 路由实测误投；bootstrap 校验，ask-without-to 拒绝）
 }
 ```
 
@@ -307,14 +340,18 @@ bun run .cornfield/skills/squad-programming/scripts/bootstrap.ts \
 第一步（准备检查）：读启动 brief 里给出的任务包路径（worktree 场景 = 当前目录 .squad.json，
 shared 场景 = /tmp 绝对路径），完整理解任务、scope、gate、汇报协议、模型档位；
 用 list_models 确认分配模型在可用列表（不在则 switch_model 到档内模型并汇报实际生效模型）；
-然后立刻向父发 "[<taskId>] STARTED: <实际生效模型>，任务包已读"；
-【硬约束】收到父的开工确认（parent ask 回复「GO」或「开工」）前不得开始实现，只做准备检查。父等全部 STARTED 后才统一发开工确认。
+然后向父报 "[<taskId>] STARTED: <实际生效模型>，任务包已读"（send 失败不重试不中断，父会用 ask 确认你；收到父 ask 回 "[<taskId>] ACK: <当前状态与实际生效模型>"）；
+【硬约束·GO 闸门】收到父的开工确认（消息含「GO」或「开工」，可能经 ask reply 或 send 到达）前不得开始实现，只做准备检查。父按 reconcile 计划发 GO（deps + 并发槽位）。重复 GO 无副作用——已在干活就继续，不重启任务。
+【取消】收到含「CANCEL」的消息（"[<taskId>] CANCEL: <原因>"）→ 立即停止实现与提交，回复 "[<taskId>] CANCELLED: <一句话>"，不再改动任何文件。
 规则：只改 scope 内文件；求助必须用 intercom ask 且带 to=<parent.target>（不带 to 会被按 cwd 路由到同目录其他会话，收不到）；状态用 intercom send 给
 <parent.target>，格式 "[<taskId>] <STATE>: 一句话"（STATE ∈ STARTED/BLOCKED/REVIEWING/COMPLETE/FAILED）。
-完成标准即 .squad.json 中 acceptance。开始。
+完成标准即 .squad.json 中 acceptance。收尾铁律：验收通过后必须把改动提交到当前分支（排除 .squad.json 和 node_modules，commit 前先 git status 确认只含你的改动）。开始。
 ```
 
 ## 反模式
+
+- **父漏发 GO 让 worker 死等** — worker 停在 GO 闸门，父确认完 STARTED 忘了发 GO（或只在内存里记得发过）→ 全 squad 静默卡死。根治：每轮盯盘跑 `squad-state.ts reconcile`，`needGo` 非空就发 GO 并落 `running`。
+- **先记 running 再发 GO** — 崩溃窗口会留下假 running（父以为发了、worker 没收到）。顺序锁死：先发消息，后落账；崩溃后靠幂等补发。
 
 - **顺序依赖拆并行** — T2 靠 T1 产物仍拆两个并行 worktree → 合并冲突/串内容；正确做法：同一 worktree 接力。
 - **unknown gate 还 auto merge** — 推导不出验收标准就自动放行 = 帮你做决定；必须 human-review。

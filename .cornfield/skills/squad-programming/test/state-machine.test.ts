@@ -2,7 +2,8 @@
  * squad-programming 调度状态机异常情况测试
  *
  * 测试 squad-state.ts 的状态机：
- *   assembled → started → blocked / reviewing → complete / failed
+ *   assembled → started → running → blocked / reviewing → complete / failed
+ *   （三段启动语义：assembled=已启动待确认，started=就绪停在 GO 闸门，running=GO 已发）
  *
  * 覆盖：合法转移 / 非法转移拦截 / 终态锁定 / 并发保护 / 文件损坏 / 恢复场景 / 边界值
  */
@@ -76,70 +77,94 @@ afterAll(() => {
 // ─── 1. 正常状态转移（happy path） ───────────────────────────────────────────
 
 describe("valid state transitions (happy path)", () => {
-	test("assembled → started → blocked → reviewing → complete", () => {
+	test("assembled → started → running → blocked → reviewing → complete", () => {
 		const state = makeState();
 		writeState(stateFile, state);
 
 		const s1 = updateState(stateFile, "T1", "started");
 		expect(s1.subtasks.find(s => s.id === "T1")!.status).toBe("started");
 
-		const s2 = updateState(stateFile, "T1", "blocked");
-		expect(s2.subtasks.find(s => s.id === "T1")!.status).toBe("blocked");
+		const s2 = updateState(stateFile, "T1", "running", "GO 已发");
+		expect(s2.subtasks.find(s => s.id === "T1")!.status).toBe("running");
 
-		const s3 = updateState(stateFile, "T1", "reviewing");
-		expect(s3.subtasks.find(s => s.id === "T1")!.status).toBe("reviewing");
+		const s3 = updateState(stateFile, "T1", "blocked");
+		expect(s3.subtasks.find(s => s.id === "T1")!.status).toBe("blocked");
 
-		const s4 = updateState(stateFile, "T1", "complete");
-		expect(s4.subtasks.find(s => s.id === "T1")!.status).toBe("complete");
+		const s4 = updateState(stateFile, "T1", "reviewing");
+		expect(s4.subtasks.find(s => s.id === "T1")!.status).toBe("reviewing");
+
+		const s5 = updateState(stateFile, "T1", "complete");
+		expect(s5.subtasks.find(s => s.id === "T1")!.status).toBe("complete");
 	});
 
-	test("assembled → started → reviewing → complete", () => {
+	test("assembled → started → running → reviewing → complete", () => {
 		const state = makeState();
 		writeState(stateFile, state);
 
 		updateState(stateFile, "T1", "started");
+		updateState(stateFile, "T1", "running");
 		updateState(stateFile, "T1", "reviewing");
 		const s = updateState(stateFile, "T1", "complete");
 		expect(s.subtasks.find(s => s.id === "T1")!.status).toBe("complete");
 	});
 
-	test("assembled → started → failed", () => {
+	test("assembled → started → running → failed（worker 干活中崩溃）", () => {
 		const state = makeState();
 		writeState(stateFile, state);
 
 		updateState(stateFile, "T1", "started");
+		updateState(stateFile, "T1", "running");
 		const s = updateState(stateFile, "T1", "failed");
 		expect(s.subtasks.find(s => s.id === "T1")!.status).toBe("failed");
 	});
 
-	test("started → blocked → failed", () => {
+	test("assembled → blocked 直接合法（准备检查失败首报 BLOCKED，不再卡死落账）", () => {
+		const state = makeState();
+		writeState(stateFile, state);
+
+		const s = updateState(stateFile, "T1", "blocked", "模型无 key");
+		expect(s.subtasks.find(s => s.id === "T1")!.status).toBe("blocked");
+	});
+
+	test("assembled → failed 直接合法（pane 死/boot 失败）", () => {
+		const state = makeState();
+		writeState(stateFile, state);
+
+		const s = updateState(stateFile, "T1", "failed", "pane 死");
+		expect(s.subtasks.find(s => s.id === "T1")!.status).toBe("failed");
+	});
+
+	test("started → blocked（闸门上求助）→ running（补发 GO）", () => {
 		const state = makeState();
 		writeState(stateFile, state);
 
 		updateState(stateFile, "T1", "started");
 		updateState(stateFile, "T1", "blocked");
-		const s = updateState(stateFile, "T1", "failed");
-		expect(s.subtasks.find(s => s.id === "T1")!.status).toBe("failed");
+		const s = updateState(stateFile, "T1", "running", "解除阻塞补发 GO");
+		expect(s.subtasks.find(s => s.id === "T1")!.status).toBe("running");
 	});
 
-	test("blocked → started 允许（解除阻塞继续工作）", () => {
+	test("reviewing → running 允许（review 打回继续干）", () => {
 		const state = makeState();
 		writeState(stateFile, state);
 
 		updateState(stateFile, "T1", "started");
-		updateState(stateFile, "T1", "blocked");
-		const s = updateState(stateFile, "T1", "started");
-		expect(s.subtasks.find(s => s.id === "T1")!.status).toBe("started");
-	});
-
-	test("reviewing → started 允许（review 反馈后回退修改）", () => {
-		const state = makeState();
-		writeState(stateFile, state);
-
-		updateState(stateFile, "T1", "started");
+		updateState(stateFile, "T1", "running");
 		updateState(stateFile, "T1", "reviewing");
-		const s = updateState(stateFile, "T1", "started");
-		expect(s.subtasks.find(s => s.id === "T1")!.status).toBe("started");
+		const s = updateState(stateFile, "T1", "running", "打回修改");
+		expect(s.subtasks.find(s => s.id === "T1")!.status).toBe("running");
+	});
+
+	test("取消：running → failed 且 note 记 cancelled", () => {
+		const state = makeState();
+		writeState(stateFile, state);
+
+		updateState(stateFile, "T1", "started");
+		updateState(stateFile, "T1", "running");
+		const s = updateState(stateFile, "T1", "failed", "cancelled: 用户取消");
+		const t1 = s.subtasks.find(x => x.id === "T1")!;
+		expect(t1.status).toBe("failed");
+		expect(t1.note).toBe("cancelled: 用户取消");
 	});
 });
 
@@ -153,18 +178,42 @@ describe("invalid transitions (guarded — should throw)", () => {
 		expect(() => updateState(stateFile, "T1", "complete")).toThrow(/不允许|终态/);
 	});
 
-	test("assembled → failed 直接跳（跳过 started）", () => {
+	test("assembled → failed 直接跳不再拒绝（pane 死/boot 失败是合法首报，v0.5 语义）", () => {
 		const state = makeState();
 		writeState(stateFile, state);
 
-		expect(() => updateState(stateFile, "T1", "failed")).toThrow(/不允许/);
+		expect(() => updateState(stateFile, "T1", "failed")).not.toThrow();
 	});
 
-	test("assembled → blocked 直接跳（跳过 started）", () => {
+	test("assembled → blocked 直接跳不再拒绝（准备检查失败合法，v0.5 语义）", () => {
 		const state = makeState();
 		writeState(stateFile, state);
 
-		expect(() => updateState(stateFile, "T1", "blocked")).toThrow(/不允许/);
+		expect(() => updateState(stateFile, "T1", "blocked")).not.toThrow();
+	});
+
+	test("started → complete 被拒（GO 台账不能丢——必须先落 running）", () => {
+		const state = makeState();
+		writeState(stateFile, state);
+
+		updateState(stateFile, "T1", "started");
+		expect(() => updateState(stateFile, "T1", "complete")).toThrow(/不允许/);
+	});
+
+	test("started → running → complete 正常链（对照上一条）", () => {
+		const state = makeState();
+		writeState(stateFile, state);
+
+		updateState(stateFile, "T1", "started");
+		updateState(stateFile, "T1", "running");
+		expect(() => updateState(stateFile, "T1", "complete")).not.toThrow();
+	});
+
+	test("assembled → running 被拒（跳过 STARTED 确认）", () => {
+		const state = makeState();
+		writeState(stateFile, state);
+
+		expect(() => updateState(stateFile, "T1", "running")).toThrow(/不允许/);
 	});
 
 	test("assembled → reviewing 直接跳（跳过 started）", () => {
@@ -179,6 +228,7 @@ describe("invalid transitions (guarded — should throw)", () => {
 		writeState(stateFile, state);
 
 		updateState(stateFile, "T1", "started");
+		updateState(stateFile, "T1", "running");
 		updateState(stateFile, "T1", "complete");
 		expect(() => updateState(stateFile, "T1", "started")).toThrow(/终态/);
 	});
@@ -188,6 +238,7 @@ describe("invalid transitions (guarded — should throw)", () => {
 		writeState(stateFile, state);
 
 		updateState(stateFile, "T1", "started");
+		updateState(stateFile, "T1", "running");
 		updateState(stateFile, "T1", "complete");
 		expect(() => updateState(stateFile, "T1", "failed")).toThrow(/终态/);
 	});
@@ -216,6 +267,16 @@ describe("invalid transitions (guarded — should throw)", () => {
 
 		updateState(stateFile, "T1", "started");
 		expect(() => updateState(stateFile, "T1", "assembled")).toThrow(/不允许/);
+	});
+
+	test("reviewing → started 被拒（打回后回 GO 闸门无意义，回 running）", () => {
+		const state = makeState();
+		writeState(stateFile, state);
+
+		updateState(stateFile, "T1", "started");
+		updateState(stateFile, "T1", "running");
+		updateState(stateFile, "T1", "reviewing");
+		expect(() => updateState(stateFile, "T1", "started")).toThrow(/不允许/);
 	});
 
 	test("blocked → assembled（回退，不允许）", () => {
@@ -284,6 +345,7 @@ describe("terminal state behavior", () => {
 		writeState(stateFile, state);
 
 		updateState(stateFile, "T1", "started");
+		updateState(stateFile, "T1", "running");
 		updateState(stateFile, "T1", "complete");
 
 		const loaded = loadState(stateFile);
@@ -309,6 +371,7 @@ describe("terminal state behavior", () => {
 		writeState(stateFile, state);
 
 		updateState(stateFile, "T1", "started");
+		updateState(stateFile, "T1", "running");
 		updateState(stateFile, "T1", "complete");
 		expect(() => updateState(stateFile, "T1", "complete")).not.toThrow();
 	});
@@ -475,6 +538,7 @@ describe("parent crash recovery scenarios", () => {
 		writeState(stateFile, state);
 
 		updateState(stateFile, "T1", "started");
+		updateState(stateFile, "T1", "running");
 		updateState(stateFile, "T1", "complete");
 		updateState(stateFile, "T2", "started");
 		updateState(stateFile, "T2", "failed");

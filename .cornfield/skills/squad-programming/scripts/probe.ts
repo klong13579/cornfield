@@ -196,14 +196,17 @@ async function main(): Promise<void> {
 		const runtime = s.worktree ? byCwd.get(s.worktree) : undefined;
 		const runtimeLabel = runtime ? runtime.status : "缺位";
 		let activity = "";
-		// 0. 新近活动：session JSONL 静默挂起检测（进程活着但长时间不写记录 = 卡死/API 挂起）
+		// 0. 新近活动：session JSONL 静默挂起检测（进程活着但长时间不写记录 = 卡死/API 挂起）。
+		// 只对 running 判停滞：assembled/started 停在 GO 闸门、reviewing 等验收——静默属预期。
 		if (s.worktree) {
 			const lw = lastWrite(s.worktree);
 			if (lw !== null) {
 				const idleFor = (Date.now() - lw) / 1000;
 				activity = `活动 ${Math.round(idleFor)}s 前`;
-				if (idleFor > STALL_AFTER_S) problems.push(`静默挂起：会话 ${Math.round(idleFor)}s 未写入（>${STALL_AFTER_S}s）`);
-			} else {
+				if (s.status === "running" && idleFor > STALL_AFTER_S)
+					problems.push(`静默挂起：会话 ${Math.round(idleFor)}s 未写入（>${STALL_AFTER_S}s）`);
+			} else if (s.status === "running") {
+				// 已开工但找不到会话日志 = 异常；闸门阶段日志还没写属正常
 				problems.push("会话日志缺失（未找到 session JSONL）");
 			}
 		}
@@ -216,13 +219,13 @@ async function main(): Promise<void> {
 		// 2. agent 注册（herdr agent list 的运行态）
 		if (s.worktree && runtime === undefined) {
 			problems.push("agent 缺位（不在 herdr agent list）");
-		} else if (runtime?.status === "idle" && s.status === "started") {
+		} else if (runtime?.status === "idle" && s.status === "running") {
+			// idle 只在业务态 running 时可疑；assembled/started 停在 GO 闸门、blocked 等决策——idle 属预期
 			problems.push(`运行态 idle（业务态 ${s.status}，未在推进）`);
-		} else if (runtime?.status === "done" && s.status !== "complete") {
+		} else if (runtime?.status === "done" && !(s.status === "complete" || s.status === "failed" || s.status === "blocked")) {
 			// herdr done = agent 完成回合/进程空闲态；业务态未跟上但运行态 done = 漏报终态，提示父 ask 确认
 			problems.push(`运行态 done（业务态 ${s.status}，可能漏报终态，ask 确认）`);
 		}
-		// 3. pane 输出错误签名
 		if (s.paneId) {
 			const pane = await run(["herdr", "pane", "read", s.paneId]);
 			if (pane.code !== 0) {

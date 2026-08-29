@@ -40,8 +40,8 @@ import * as path from "node:path";
 
 import { statePath, writeState, type SquadState, type SubtaskState } from "./squad-state.ts";
 
-/** 当前任务包 schema 版本。与 bundle.squadVersion 比对，不匹配则拒绝。 */
-const CURRENT_SQUAD_VERSION = 1;
+/** 当前任务包 schema 版本。与 bundle.squadVersion 比对，不匹配则拒绝。v2：reportProtocol.ask 强制 ask-with-to + deps 结构校验。 */
+const CURRENT_SQUAD_VERSION = 2;
 
 const VALID_TIERS = ["cheap", "mid", "high"] as const;
 
@@ -172,7 +172,55 @@ function validateBundle(raw: unknown): Bundle {
 		if (!model) fail(`${tag}(${s.id}) 解析不出模型（model 或 modelTier→档位表）`);
 		if (isBanned(model, b.modelTiers.banned)) fail(`${tag}(${s.id}) 模型在禁用清单: ${model}`);
 	}
+	// deps 结构校验：引用存在、不自指、无环（环 = reconcile 永远等不到 GO，集结前拒掉）
+	for (const [i, s] of b.subtasks.entries()) {
+		for (const dep of s.deps ?? []) {
+			if (dep === s.id) fail(`subtasks[${i}](${s.id}) deps 不允许自指: ${dep}`);
+			if (!ids.has(dep)) fail(`subtasks[${i}](${s.id}) deps 引用了不存在的子任务: ${dep}`);
+		}
+	}
+	const cycle = detectDepsCycle(b.subtasks);
+	if (cycle) fail(`subtasks deps 存在循环依赖: ${cycle}——顺序依赖必须合并为同一执行序列（见 SKILL.md Step 0.2）`);
+	// reportProtocol 校验：ask 必须 ask-with-to（不带 to 的 ask 按 cwd 路由，实测误投同目录其他会话）
+	if (b.reportProtocol) {
+		if (b.reportProtocol.status !== undefined && b.reportProtocol.status !== "send")
+			fail(`reportProtocol.status 非法: ${b.reportProtocol.status}（状态汇报只支持 send）`);
+		if (b.reportProtocol.ask !== undefined && b.reportProtocol.ask !== "ask-with-to")
+			fail(`reportProtocol.ask 非法: ${b.reportProtocol.ask}（必须 ask-with-to——ask 不带 to 实测会误投同目录其他会话，见 SKILL.md Phase 2）`);
+	}
 	return b;
+}
+
+/** 检测 subtasks deps 环；有环返回环路径描述（A -> B -> A），无环返回 null。 */
+function detectDepsCycle(subtasks: Subtask[]): string | null {
+	const depsOf = new Map(subtasks.map(s => [s.id, s.deps ?? []]));
+	const color = new Map<string, 0 | 1 | 2>(); // 0=未访 1=在栈 2=完成
+	const stack: string[] = [];
+	const visit = (id: string): string | null => {
+		color.set(id, 1);
+		stack.push(id);
+		for (const dep of depsOf.get(id) ?? []) {
+			const c = color.get(dep) ?? 0;
+			if (c === 1) {
+				const start = stack.indexOf(dep);
+				return [...stack.slice(start), dep].join(" -> ");
+			}
+			if (c === 0) {
+				const found = visit(dep);
+				if (found) return found;
+			}
+		}
+		color.set(id, 2);
+		stack.pop();
+		return null;
+	};
+	for (const s of subtasks) {
+		if ((color.get(s.id) ?? 0) === 0) {
+			const found = visit(s.id);
+			if (found) return found;
+		}
+	}
+	return null;
 }
 
 const DEFAULT_RUN_TIMEOUT_MS = 30_000;
@@ -477,18 +525,18 @@ function extractPaneId(json: string): string | undefined {
 	return undefined;
 }
 
-function workerBrief(bundle: Bundle, subtask: Subtask, model: string, briefPath: string): string {
-	// 展示名优先 parent.name（可读），路由 = parent.target。PI_SUBAGENT_* env 已注入（intercom 父 edge），
-	// ask 不带 to 也能自动路由到父；brief 里仍写明显式 to 作双保险。
-	const parentLabel = bundle.parent.name ?? bundle.parent.target;
+export function workerBrief(bundle: Bundle, subtask: Subtask, model: string, briefPath: string): string {
+	// 展示名优先 parent.name（可读），路由 = parent.target。
+	// 注意：intercom 路由优先 cwd 匹配，parent edge 只是次选——ask 必须显式 to=父（实测误投 aion-ui）。
 	const lines = [
 		`你是 ${subtask.id}（${subtask.title}）的实现者，属于 squad ${bundle.squadId} 的 worker。`,
 		`第一步（准备检查）：读 ${shellQuote(briefPath)} 的任务包（.squad.json），完整理解任务、scope、gate、汇报协议、模型档位；`,
 		`用 list_models 确认 ${model} 在可用列表；不在列表则 switch_model 切换到该档位可用模型（按实际生效模型为准）；`,
-		`然后向父发 STARTED 一次（发送规则：尝试 send 给 ${bundle.parent.target}；若报 Session not found/失败，不要重试刷屏、不要中断任务——这是启动窗口期 broker 路由未就绪的已知现象，父会用 intercom ask 来确认你；收到父 ask 必须回复「[${subtask.id}] ACK」带状态）。`,
-		`【硬约束】收到父的开工确认（parent ask 回复「GO」或「开工」）之前，不得开始实现代码。你在准备检查阶段只做：读任务包 + 核对模型 + 发 STARTED + 等父确认。父确认后才有下一步。`,
+		`然后向父报 STARTED 一次（intercom send 给 ${bundle.parent.target}，格式 "[${subtask.id}] STARTED: <实际生效模型>，任务包已读"；若报 Session not found/失败，不要重试刷屏、不要中断任务——这是启动窗口期 broker 路由未就绪的已知现象，父会用 ask 来确认你；收到父 ask（问 STARTED/当前状态）必须回复 "[${subtask.id}] ACK: <当前状态与实际生效模型>"）。`,
+		`【硬约束·GO 闸门】收到父的开工确认（消息含「GO」或「开工」，可能经 parent ask 的 reply 或 send 到达）之前，不得开始实现代码；准备检查阶段只做：读任务包 + 核对模型 + 报 STARTED + 等待。GO 可重复到达（父恢复/补发），重复 GO 无副作用——已在干活就继续，不要重启任务。`,
+		`【取消】收到含「CANCEL」的消息（"[${subtask.id}] CANCEL: <原因>"）→ 立即停止实现与提交，回复 "[${subtask.id}] CANCELLED: <一句话>"，不再改动任何文件。`,
 		`规则：只改 scope 内文件；求助必须用 intercom ask 且必须带 to=${bundle.parent.target}（不带 to 的 ask 会被 intercom 按 cwd 路由到同目录其他会话，不会到达父 —— 实测误投到 aion-ui）；`,
-		`状态用 intercom send 给 ${bundle.parent.target}，格式 "[${subtask.id}] <STATE>: 一句话"（STATE ∈ STARTED/BLOCKED/REVIEWING/COMPLETE/FAILED，STARTED 只在准备检查通过后发一次）；`,
+		`状态用 intercom send 给 ${bundle.parent.target}，格式 "[${subtask.id}] <STATE>: 一句话"（STATE ∈ STARTED/BLOCKED/REVIEWING/COMPLETE/FAILED，STARTED 只在准备检查通过后发一次；终态与 BLOCKED 求助消息在启动窗口期后 send 可靠送达）；`,
 		`完成标准见任务包 acceptance。收尾铁律：验收通过后必须把改动提交到当前分支（git add <改动文件> && git commit -m "[${subtask.id}] <一句话>"；排除 .squad.json 和 node_modules，commit 前先 git status 确认只含你的改动）——未提交的交付无法交接/merge，父只接收已提交的分支；`
 	];
 	return lines.join(" ");
@@ -660,17 +708,18 @@ async function main(): Promise<void> {
 	// 父中断恢复：集结结果落盘 ~/.cornfield/squads/<squadId>/state.json，父每收一条状态消息更新它
 	// （见 SKILL.md 父盯盘与中断恢复）。verify 失败也写（记录已启动的子任务）。
 	if (!dryRun) {
-		const branchById = new Map(bundle.subtasks.map(s => [s.id, s.branch]));
+		const subtaskById = new Map(bundle.subtasks.map(s => [s.id, s]));
 		const subtaskStates: SubtaskState[] = result.map(r => {
 			const rr = r as { taskId: string; isolation: SubtaskState["isolation"]; worktree: string | null; paneId?: string; model?: string; briefPath: string };
 			return {
 				id: rr.taskId,
 				isolation: rr.isolation,
 				worktree: rr.worktree ?? undefined,
-				branch: branchById.get(rr.taskId),
+				branch: subtaskById.get(rr.taskId)?.branch,
 				paneId: rr.paneId,
 				model: rr.model,
 				briefPath: rr.briefPath,
+				deps: subtaskById.get(rr.taskId)?.deps ?? [],
 				status: "assembled",
 				updatedAt: Date.now(),
 			};
@@ -681,6 +730,7 @@ async function main(): Promise<void> {
 			version: 0,
 			taskType: bundle.taskType,
 			baseBranch: bundle.baseBranch,
+			maxConcurrency: bundle.maxConcurrency,
 			parent: { target: bundle.parent.target, sessionId: bundle.parent.sessionId, cwd: parentCwd },
 			workspaceId,
 			createdAt: Date.now(),
@@ -694,14 +744,16 @@ async function main(): Promise<void> {
 	process.stdout.write(JSON.stringify({ squadId: bundle.squadId, workspaceId, launched: result, verify }, null, 2) + "\n");
 	if (verify === "failed") process.exit(1);
 
-	const worktrees = result.filter(r => (r as { worktree?: string }).worktree).length;
 	process.stderr.write(
-		`集结完成: ${result.length} 个子任务（${worktrees} 个 worktree / ${result.length - worktrees} 个共享区）\n` +
-			`父 agent 等全部子任务的 STARTED 汇报（任务包已读 + 模型已核对，见 SKILL.md Phase 1.5）后进入 Phase 2。\n`,
+		`集结完成: ${result.length} 个子任务（${worktrees} 个 worktree / ${result.length - worktrees} 个共享区）。worker 全部停在 GO 闸门。\n` +
+		`下一步（父 agent）：① intercom ask 逐个确认 STARTED（确认后 squad-state update <id> started）；\n` +
+		`② 跑 squad-state.ts <stateFile> reconcile 计算 GO 发放（deps + 并发槽位），按 needGo 发 GO 并 update <id> running（见 SKILL.md Phase 1.5/GO 发放）。\n`,
 	);
 }
 
-main().catch(err => {
-	process.stderr.write(`bootstrap 异常终止: ${err instanceof Error ? err.stack : String(err)}\n`);
-	process.exit(1);
-});
+if (import.meta.main) {
+	main().catch(err => {
+		process.stderr.write(`bootstrap 异常终止: ${err instanceof Error ? err.stack : String(err)}\n`);
+		process.exit(1);
+	});
+}

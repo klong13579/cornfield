@@ -2,8 +2,20 @@
 
 ## [Unreleased]
 
+### Added
+
+- **GO 发放与 reconcile 调度**（`scripts/squad-state.ts`, `SKILL.md`）：新增 `running` 状态与 `reconcile` 动词——按「`started` + deps 全 complete + 并发槽位空闲（running/reviewing/blocked 计数 < maxConcurrency）」计算 `needGo`/`needAsk`/`waitingDeps`/`waitingConcurrency`/`unrunnable` 计划。GO 幂等可补发：worker brief 写明重复 GO 无副作用；父每轮盯盘跑 reconcile，父中断恢复用同一条命令，根治「父漏发 GO → worker 死等」。
+- **取消协议**（`scripts/bootstrap.ts` worker brief, `SKILL.md`）：父 send `[<id>] CANCEL: 原因` → worker 停止实现与提交并回 `CANCELLED` → 父 `update <id> failed "cancelled: 原因"`，分支/worktree 按 FAILED 规则保留等用户表态。
+- **deps 结构校验**（`scripts/bootstrap.ts`）：deps 引用不存在的 id / 自指 / 循环依赖在集结前拒绝（环 = reconcile 永远等不到 GO）。state.json 回填每子任务 deps 与 maxConcurrency。
+- **测试**（`test/`）：新增 reconcile（槽位/依赖/恢复/CLI）与 worker brief 协议（GO 闸门/幂等/CANCEL/ask-with-to）测试；状态机测试覆盖 `running` 新转移。
+
 ### Changed
 
+- **assembled/started 状态语义修正为三段**（`scripts/squad-state.ts`, `SKILL.md`）：`assembled`=已启动待确认，`started`=就绪确认停在 GO 闸门，`running`=GO 已发。转移矩阵同步：允许 `assembled -> blocked/failed`（准备失败上报不再被拒）、`started -> running`（GO 台账）；`started -> complete` 被拒（GO 台账不能丢，恢复用 `--force`）。
+- **squadVersion 1 → 2**（`scripts/bootstrap.ts`, `SKILL.md`）：`reportProtocol.ask` 强制 `ask-with-to`（原文档默认 `ask-without-to` 与「ask 必须带 to」规则矛盾）；旧版任务包被拒绝重产。
+- **波次调度改槽位制**（`SKILL.md`）：bootstrap 一次启动全部 worker（闸门空等不耗配额），开工由 GO 按 deps+槽位发放——与 `maxConcurrency` 文档语义对齐。
+- **probe 闸门误报修复**（`scripts/probe.ts`）：idle/静默停滞/日志缺失告警只对业务态 `running` 生效（assembled/started 停在 GO 闸门、reviewing 等验收，静默属预期）；`done` 告警排除 blocked/failed。
+- **Phase 1.5 父层增加 pending 清积压**（`SKILL.md`）：父每轮先 `intercom pending` 补收错过的 ask，再 list/ask 确认。
 - **交接物改为集成分支 + diff 预览，用户确认后自动合并到 base 并清理** (`SKILL.md`): Phase 3 步骤 4 交接物从 N 个原始分支名改为已验证通过的集成分支（`<squadId>-integ`）完整 diff 预览 + 整体验证结果；步骤 5 改为「合并与清理」，用户说「合吧」后父自动合并到 base、关 agent、删 worktree、归档一次完成。清理权限同步更新。
 
 ### Added
