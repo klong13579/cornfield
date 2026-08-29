@@ -35,6 +35,15 @@ import { JsonFileStorage } from "../src/scheduler/json-file-storage";
 import { readTestRunMarker } from "../src/scheduler/test-run-marker";
 import type { ScheduledTask } from "../src/scheduler/types";
 
+// The CLI commands under test set `process.exitCode` (error paths). bun test
+// keeps one shared process-global for the whole file run — if any test leaves
+// exitCode = 1 behind, the runner exits 1 despite 0 failures (CI hit this as
+// "0 fail but Exited with code 1" in the gateway test shard). Always reset it
+// after each test so a leftover never pollutes the runner exit code.
+afterEach(() => {
+	process.exitCode = 0;
+});
+
 // ===========================================================================
 // resolveAgentCwd
 // ===========================================================================

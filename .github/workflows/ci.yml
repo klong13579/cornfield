@@ -154,9 +154,58 @@ jobs:
         # leftover-HOME/env pollution into flaky failures). Serial is
         # deterministic: a leaked env kills the same file every run, which is
         # fixable. Cost ~1.5x wall time, offset by the 4-way shard below.
-        run: bun run test:ts -- --shard=${{ matrix.shard }} --parallel=1
+        # omp-gateway runs in its own job (test_gateway) — its tests carry
+        # process-global state (exitCode, wire port, brokers) and the
+        # parallel-package sweep made them flaky (0-fail exit-1 runs).
+        run: |
+          set -e
+          for dir in packages/*/; do
+            pkg="${dir%/}"
+            [ "${pkg##*/}" = "omp-gateway" ] && continue
+            [ -f "$pkg/package.json" ] || continue
+            grep -q '"test"' "$pkg/package.json" || continue
+            (cd "$pkg" && bun run test -- --shard="${{ matrix.shard }}" --parallel=1) &
+          done
+          wait
       - name: CLI smoke test
         run: bun run ci:test:smoke
+
+  test_gateway:
+    # Gateway tests carry process-global state (process.exitCode assertions,
+    # wire port, spawned brokers) — inside the parallel-package sweep they
+    # intermittently exited 1 with 0 failures (timing-sensitive leftover
+    # exitCode). Full suite in its own job: deterministic signal, independent
+    # retry, no cross-package interference.
+    needs: [native]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          lfs: true
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3"
+      - name: Cache bun dependencies
+        uses: actions/cache@v5
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('**/bun.lock') }}
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev fd-find ripgrep imagemagick
+          sudo ln -s $(which fdfind) /usr/local/bin/fd
+          sudo ln -sf /usr/bin/convert /usr/local/bin/magick
+      - run: bun install --frozen-lockfile
+      - name: Download native addon(s)
+        uses: actions/download-artifact@v5
+        with:
+          name: cornfield-natives-linux-x64
+          path: packages/natives/native
+      - name: Test gateway (full suite)
+        run: bun --cwd=packages/omp-gateway run test -- --parallel=1
 
   install_methods:
     if: github.repository == 'klong13579/cornfield'
