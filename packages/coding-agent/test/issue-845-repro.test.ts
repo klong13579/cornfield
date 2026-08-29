@@ -2,8 +2,8 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { _resolveUpdateMethodForTest } from "../src/cli/update-cli";
 import { APP_NAME } from "@cornfield/utils";
+import { _resolveUpdateMethodForTest } from "../src/cli/update-cli";
 
 // Issue #845: on Windows with Bun installed via Scoop, ~/.bun is a junction
 // to scoop\persist\Oven-sh.Bun\.bun. `bun pm bin -g` and the cornfield path that

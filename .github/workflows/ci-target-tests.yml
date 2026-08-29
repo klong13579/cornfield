@@ -1,0 +1,42 @@
+# Temporary target-test runner — reproduce specific CI test failures on the
+# ubuntu runner without the full 4-shard sweep. Delete once flaky investigations
+# are done. Usage:
+#   gh workflow run ci-target-tests.yml --ref <branch> \
+#     -f 'target=gateway:test/gateway-lifecycle.test.ts coding-agent:test/wire-server-permission.integration.test.ts'
+name: CI-Target-Tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Space-separated 'pkg:test-file' specs to run on ubuntu"
+        type: string
+        default: "gateway:test/gateway-lifecycle.test.ts coding-agent:test/wire-server-permission.integration.test.ts"
+
+jobs:
+  target:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          lfs: true
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3"
+      - run: bun install --frozen-lockfile
+      - name: Download native addon(s)
+        uses: actions/download-artifact@v5
+        with:
+          name: cornfield-natives-linux-x64
+          path: packages/natives/native
+      - name: Run target tests
+        run: |
+          set -e
+          for spec in ${{ inputs.target }}; do
+            pkg="${spec%%:*}"
+            file="${spec#*:}"
+            echo "== $pkg :: $file"
+            bun --cwd="packages/$pkg" run test "$file" -- --parallel=1
+          done

@@ -17,7 +17,9 @@ describe("substitutePluginRoot", () => {
 	});
 
 	it("replaces both variables in same string", () => {
-		expect(substitutePluginRoot(`${CLAUDE_VAR}:${CORNFIELD_VAR}`, ROOT)).toBe("/plugins/my-plugin:/plugins/my-plugin");
+		expect(substitutePluginRoot(`${CLAUDE_VAR}:${CORNFIELD_VAR}`, ROOT)).toBe(
+			"/plugins/my-plugin:/plugins/my-plugin",
+		);
 	});
 
 	it("handles arrays recursively", () => {
