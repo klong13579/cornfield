@@ -35,8 +35,8 @@ import { slashCommandCapability } from "../capability/slash-command";
 import type { CustomTool } from "../capability/tool";
 import { toolCapability } from "../capability/tool";
 import type { LoadContext, LoadResult } from "../capability/types";
+import { type CornfieldExtensionRoot, listCornfieldExtensionRoots } from "./cornfield-extension-roots";
 import { buildRuleFromMarkdown, createSourceMeta, loadFilesFromDir, scanSkillsFromDir } from "./helpers";
-import { listCornfieldExtensionRoots, type CornfieldExtensionRoot } from "./cornfield-extension-roots";
 
 const PROVIDER_ID = "omp-plugins";
 const DISPLAY_NAME = "OMP Extension Packages";
