@@ -39,5 +39,10 @@ describe("native build safety", () => {
 			expect(hasAvx512Markers("401004:\tc5 f5 fe c2\tvpaddd %ymm2,%ymm1,%ymm0")).toBe(false);
 			expect(hasAvx512Markers("58b83d7:\t62 00 00 00 ")).toBe(false);
 		});
+
+		it("ignores AVX-512-like text outside the instruction column", () => {
+			expect(hasAvx512Markers("0000000000000000 <worker_k1>:")).toBe(false);
+			expect(hasAvx512Markers("Disassembly of section .text.zmm0_helper:")).toBe(false);
+		});
 	});
 });

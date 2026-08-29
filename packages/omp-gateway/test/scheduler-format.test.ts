@@ -91,26 +91,26 @@ describe("formatAgent", () => {
 	});
 
 	it("extracts the last path segment as the agent label", () => {
-		expect(formatAgent("~/.omp/agents/hr")).toBe("hr");
+		expect(formatAgent("~/.cornfield/agents/hr")).toBe("hr");
 	});
 
 	it("extracts the last segment of a nested agent path", () => {
-		expect(formatAgent("~/.omp/agents/ops/hr")).toBe("hr");
+		expect(formatAgent("~/.cornfield/agents/ops/hr")).toBe("hr");
 	});
 
 	it("truncates the label with an ellipsis when it exceeds the default max (12)", () => {
-		const cell = formatAgent("~/.omp/agents/way-too-long-account-id");
+		const cell = formatAgent("~/.cornfield/agents/way-too-long-account-id");
 		expect(cell.length).toBe(12);
 		expect(cell.endsWith("\u2026")).toBe(true);
 	});
 
 	it("respects a custom max width", () => {
-		expect(formatAgent("~/.omp/agents/ops-team", 4)).toBe("ops…");
+		expect(formatAgent("~/.cornfield/agents/ops-team", 4)).toBe("ops…");
 	});
 
 	it("returns the label as-is when it equals the max", () => {
 		const id = "a".repeat(15);
-		expect(formatAgent(`~/.omp/agents/${id}`, 15)).toBe(id);
+		expect(formatAgent(`~/.cornfield/agents/${id}`, 15)).toBe(id);
 	});
 });
 
@@ -128,9 +128,9 @@ describe("formatTaskRow column layout", () => {
 			makeTask({ accountId: "hr" }),
 			makeTask({ accountId: "ops/hr" }),
 			makeTask({ accountId: "way-too-long-account-id" }),
-			makeTask({ agentDir: "~/.omp/agents/hr" }),
-			makeTask({ agentDir: "~/.omp/agents/ops/hr" }),
-			makeTask({ agentDir: "~/.omp/agents/way-too-long-account-id" }),
+			makeTask({ agentDir: "~/.cornfield/agents/hr" }),
+			makeTask({ agentDir: "~/.cornfield/agents/ops/hr" }),
+			makeTask({ agentDir: "~/.cornfield/agents/way-too-long-account-id" }),
 			makeTask({ delivery: { channel: "dingtalk:hr", mode: "announce" } }),
 			makeTask({ delivery: { channel: "dingtalk:user:601590212", mode: "announce" } }),
 		];
@@ -202,7 +202,7 @@ describe("formatTaskRow column layout", () => {
 	});
 
 	it("renders the agentDir label in the row when set", () => {
-		const row = formatTaskRow(makeTask({ name: "x", agentDir: "~/.omp/agents/hr" }));
+		const row = formatTaskRow(makeTask({ name: "x", agentDir: "~/.cornfield/agents/hr" }));
 		expect(row).toContain("hr");
 	});
 

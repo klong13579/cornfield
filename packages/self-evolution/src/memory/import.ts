@@ -5,7 +5,7 @@
  * into the vector_embeddings table.
  */
 import type { Database } from "bun:sqlite";
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 import { insertVectorEmbedding } from "./storage";
 
 export interface ParsedMemoryEntry {

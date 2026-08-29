@@ -3,9 +3,9 @@
  * that the gateway uses to filter the IM skill picker.
  *
  * We use temp dirs for both the user-level and project-level config files
- * (with PI_CONFIG_DIR override) to avoid touching real user state. The
+ * (with CORNFIELD_CONFIG_DIR override) to avoid touching real user state. The
  * production code reads `<homedir>/<configDirName>/agent/config.yml` and
- * `<agentDir>/.omp/config.yml` — we use the same paths under temp dirs.
+ * `<agentDir>/.cornfield/config.yml` — we use the same paths under temp dirs.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
@@ -22,17 +22,17 @@ let savedHome: string | undefined;
 beforeEach(async () => {
 	homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-cfg-home-"));
 	agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-cfg-agent-"));
-	// PI_CONFIG_DIR can be absolute (skips <home>), so point it at the temp
+	// CORNFIELD_CONFIG_DIR can be absolute (skips <home>), so point it at the temp
 	// home dir to fully isolate from real user state. Restore in afterEach.
-	savedConfigDir = process.env.PI_CONFIG_DIR;
-	process.env.PI_CONFIG_DIR = homeDir;
+	savedConfigDir = process.env.CORNFIELD_CONFIG_DIR;
+	process.env.CORNFIELD_CONFIG_DIR = homeDir;
 	savedHome = process.env.HOME;
 	process.env.HOME = homeDir;
 });
 
 afterEach(async () => {
-	if (savedConfigDir === undefined) delete process.env.PI_CONFIG_DIR;
-	else process.env.PI_CONFIG_DIR = savedConfigDir;
+	if (savedConfigDir === undefined) delete process.env.CORNFIELD_CONFIG_DIR;
+	else process.env.CORNFIELD_CONFIG_DIR = savedConfigDir;
 	if (savedHome === undefined) delete process.env.HOME;
 	else process.env.HOME = savedHome;
 	await fs.rm(homeDir, { recursive: true, force: true });
@@ -45,8 +45,8 @@ async function writeUserConfig(content: string): Promise<void> {
 }
 
 async function writeProjectConfig(content: string): Promise<void> {
-	await fs.mkdir(path.join(agentDir, ".omp"), { recursive: true });
-	await Bun.write(path.join(agentDir, ".omp", "config.yml"), content);
+	await fs.mkdir(path.join(agentDir, ".cornfield"), { recursive: true });
+	await Bun.write(path.join(agentDir, ".cornfield", "config.yml"), content);
 }
 
 describe("resolveDisabledExtensions", () => {
@@ -111,7 +111,7 @@ describe("resolveHideThinkingBlock", () => {
 		expect(await resolveHideThinkingBlock(agentDir, false)).toBe(false);
 	});
 
-	test("agentDir/.omp/config.yml is canonical when the key is present", async () => {
+	test("agentDir/.cornfield/config.yml is canonical when the key is present", async () => {
 		await writeProjectConfig("hideThinkingBlock: true\n");
 		expect(await resolveHideThinkingBlock(agentDir, false)).toBe(true);
 	});
@@ -121,7 +121,7 @@ describe("resolveHideThinkingBlock", () => {
 		expect(await resolveHideThinkingBlock(agentDir, true)).toBe(false);
 	});
 
-	test("falls back to user-level ~/.omp/agent/config.yml when project omits the key", async () => {
+	test("falls back to user-level ~/.cornfield/agent/config.yml when project omits the key", async () => {
 		await writeUserConfig("hideThinkingBlock: true\n");
 		await writeProjectConfig("defaultThinkingLevel: medium\n");
 		expect(await resolveHideThinkingBlock(agentDir, false)).toBe(true);

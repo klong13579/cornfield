@@ -7,7 +7,7 @@ import type {
 	MessageCreateParamsStreaming,
 	MessageParam,
 } from "@anthropic-ai/sdk/resources/messages";
-import { $env, abortableSleep, isEnoent } from "@oh-my-pi/pi-utils";
+import { $env, abortableSleep, isEnoent } from "@cornfield/utils";
 import { hasOpus47ApiRestrictions, mapEffortToAnthropicAdaptiveEffort } from "../model-thinking";
 import { calculateCost } from "../models";
 import { getEnvApiKey, OUTPUT_FALLBACK_BUFFER } from "../stream";
@@ -1640,7 +1640,7 @@ function buildParams(
  * Anthropic's standard tool_result schema only carries `tool_use_id`. Detect
  * that endpoint so we can emit the non-standard alias for it without
  * polluting requests to api.anthropic.com or other compatible proxies.
- * See: https://github.com/can1357/oh-my-pi/issues/814
+ * See: https://github.com/klong13579/cornfield/issues/814
  */
 function isZaiAnthropicEndpoint(model: Model<"anthropic-messages">): boolean {
 	if (model.provider === "zai") return true;

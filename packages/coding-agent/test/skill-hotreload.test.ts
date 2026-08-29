@@ -8,11 +8,11 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { getBundledModel } from "@oh-my-pi/pi-ai";
-import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { createAgentSession } from "@oh-my-pi/pi-coding-agent/sdk";
-import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
-import { Snowflake } from "@oh-my-pi/pi-utils";
+import { getBundledModel } from "@cornfield/ai";
+import { Settings } from "@cornfield/coding-agent/config/settings";
+import { createAgentSession } from "@cornfield/coding-agent/sdk";
+import { SessionManager } from "@cornfield/coding-agent/session/session-manager";
+import { Snowflake } from "@cornfield/utils";
 
 describe("skill hot-reload", () => {
 	let tempDir: string;
@@ -29,7 +29,7 @@ describe("skill hot-reload", () => {
 	});
 
 	it("rebuilds system prompt when SKILL.md changes", async () => {
-		const skillDir = path.join(tempDir, ".omp", "skills", "my-test-skill");
+		const skillDir = path.join(tempDir, ".cornfield", "skills", "my-test-skill");
 		fs.mkdirSync(skillDir, { recursive: true });
 
 		const initialContent = `---
@@ -84,7 +84,7 @@ This is the updated skill content version 2.
 	});
 
 	it("does not reload when skills are explicitly provided (no watcher)", async () => {
-		const skillDir = path.join(tempDir, ".omp", "skills", "static-skill");
+		const skillDir = path.join(tempDir, ".cornfield", "skills", "static-skill");
 		fs.mkdirSync(skillDir, { recursive: true });
 
 		fs.writeFileSync(

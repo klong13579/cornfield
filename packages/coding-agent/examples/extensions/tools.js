@@ -1,5 +1,5 @@
-import { getSettingsListTheme } from "@oh-my-pi/pi-coding-agent";
-import { Container, SettingsList } from "@oh-my-pi/pi-tui";
+import { getSettingsListTheme } from "@cornfield/coding-agent";
+import { Container, SettingsList } from "@cornfield/tui";
 export default function toolsExtension(pi) {
     // Track enabled tools
     let enabledTools = new Set();

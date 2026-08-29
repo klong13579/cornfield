@@ -2,14 +2,14 @@ import { afterEach, describe, expect, it, vi } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { AgentToolContext } from "@oh-my-pi/pi-agent-core";
-import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
-import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
-import { GithubTool } from "@oh-my-pi/pi-coding-agent/tools/gh";
-import { wrapToolWithMetaNotice } from "@oh-my-pi/pi-coding-agent/tools/output-meta";
-import * as git from "@oh-my-pi/pi-coding-agent/utils/git";
-import { getAgentDir, setAgentDir } from "@oh-my-pi/pi-utils";
+import type { AgentToolContext } from "@cornfield/agent";
+import { Settings } from "@cornfield/coding-agent/config/settings";
+import { SessionManager } from "@cornfield/coding-agent/session/session-manager";
+import type { ToolSession } from "@cornfield/coding-agent/tools";
+import { GithubTool } from "@cornfield/coding-agent/tools/gh";
+import { wrapToolWithMetaNotice } from "@cornfield/coding-agent/tools/output-meta";
+import * as git from "@cornfield/coding-agent/utils/git";
+import { getAgentDir, setAgentDir } from "@cornfield/utils";
 
 function createSession(
 	cwd: string = "/tmp/test",
@@ -119,7 +119,7 @@ async function createPrFixture(): Promise<{
 /**
  * Stub `os.homedir()` AND rebuild the cached `dirs` resolver in pi-utils so
  * `getWorktreesDir()` resolves under an isolated temp home instead of the
- * user's real `~/.omp/wt`. Returns the temp home and a cleanup hook.
+ * user's real `~/.cornfield/wt`. Returns the temp home and a cleanup hook.
  */
 async function setupTempHome(): Promise<{ home: string; cleanup: () => Promise<void> }> {
 	const home = await fs.mkdtemp(path.join(os.tmpdir(), "gh-pr-tool-home-"));
@@ -128,7 +128,7 @@ async function setupTempHome(): Promise<{ home: string; cleanup: () => Promise<v
 	// we must rebuild the resolver after the spy is in place. `setAgentDir`
 	// recreates it; we point it at the temp home's default agent dir.
 	const originalAgentDir = getAgentDir();
-	setAgentDir(path.join(home, ".omp", "agent"));
+	setAgentDir(path.join(home, ".cornfield", "agent"));
 	return {
 		home,
 		cleanup: async () => {
@@ -149,7 +149,7 @@ async function expectedWorktreePath(home: string, primaryRoot: string, localBran
 		.resolve(primaryRoot)
 		.replace(/^[/\\]/, "")
 		.replace(/[/\\:]/g, "-");
-	return fs.realpath(path.join(home, ".omp", "wt", encoded, localBranch));
+	return fs.realpath(path.join(home, ".cornfield", "wt", encoded, localBranch));
 }
 
 describe("github tool", () => {

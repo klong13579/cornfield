@@ -1,7 +1,7 @@
 {
-  "name": "@oh-my-pi/omp-gateway",
+  "name": "@cornfield/gateway",
   "version": "0.19.2",
-  "description": "IM gateway for Oh My Pi — connects AI agents to messaging platforms",
+  "description": "IM gateway for CornField — connects AI agents to messaging platforms",
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
@@ -15,8 +15,8 @@
     "test": "bun test"
   },
   "dependencies": {
-    "@oh-my-pi/pi-coding-agent": "workspace:*",
-    "@oh-my-pi/pi-utils": "catalog:",
+    "@cornfield/coding-agent": "workspace:*",
+    "@cornfield/utils": "catalog:",
     "@sinclair/typebox": "catalog:",
     "croner": "10.0.1",
     "dingtalk-stream": "2.1.6-beta.1",

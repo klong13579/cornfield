@@ -72,7 +72,7 @@ Edit an existing file via `atom` / `hashline` / `patch` mode.
 - MUST NOT use `sed` / `awk` for structural edits; use `edit` instead.
 
 ### `identity`
-Persist stable user facts (name, role, timezone) to `~/.omp/user.md`.
+Persist stable user facts (name, role, timezone) to `~/.cornfield/user.md`.
 
 - MUST only persist facts durable across sessions; ephemeral task context belongs in conversation, not user.md.
 - MUST NOT persist one-off requests or guesses.
@@ -128,7 +128,7 @@ Actions: `add` / `list` / `show` / `update` / `remove` / `enable` / `disable` / 
 - MUST set `command` (not `prompt`) when `taskType: "shell"`.
 - MUST pick a unique, descriptive `name` slug (e.g. `daily-1830-report`, `interview-prep-1h`). The tool returns the persisted task — surface `name` / schedule / delivery to the user verbatim from the response.
 - MUST NOT use the v1 flag set: `--account`, `--deliver`, `--deliver-user`. Those flags were removed in the v2 schema (v2 uses `--channel` / `--to-user-id` / `--to-conversation-id` at the CLI surface; the host tool uses the same field names under `delivery`).
-- MUST NOT shell out to `bash` to read `~/.omp/gateway.json` just to look up the agentDir or accountId — it's already in the active chat context (auto-inference handles it) and the project root is implicit from where the agent is running.
+- MUST NOT shell out to `bash` to read `~/.cornfield/gateway.json` just to look up the agentDir or accountId — it's already in the active chat context (auto-inference handles it) and the project root is implicit from where the agent is running.
 
 Example `cron.add` call (DM context, daily 18:30 report):
 

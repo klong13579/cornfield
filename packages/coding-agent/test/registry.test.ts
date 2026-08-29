@@ -1,7 +1,7 @@
 /**
  * Tests for the agentDir registry.
  *
- * Uses a temp HOME so the real `~/.omp/agent/registry.json` is never touched.
+ * Uses a temp HOME so the real `~/.cornfield/agent/registry.json` is never touched.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
@@ -26,7 +26,7 @@ const savedHome = process.env.HOME;
 
 beforeEach(async () => {
 	process.env.HOME = tempHome;
-	await fs.rm(path.join(tempHome, ".omp"), { recursive: true, force: true });
+	await fs.rm(path.join(tempHome, ".cornfield"), { recursive: true, force: true });
 });
 
 afterEach(async () => {
@@ -78,7 +78,7 @@ describe("agentDir registry", () => {
 
 	it("recovers from corrupt JSON by returning an empty registry", async () => {
 		// Write garbage to the registry file
-		const regFile = path.join(tempHome, ".omp", "agent", "registry.json");
+		const regFile = path.join(tempHome, ".cornfield", "agent", "registry.json");
 		await fs.mkdir(path.dirname(regFile), { recursive: true });
 		await Bun.write(regFile, "{ not valid json");
 		const reg = await loadRegistry();

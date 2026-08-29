@@ -2,8 +2,8 @@
  * Intercom parent-child closed-loop, end-to-end (E2E=1 gated).
  *
  * Runs WITHOUT touching the production gateway or broker: the test hosts its
- * own IntercomBroker on an isolated PI_CODING_AGENT_DIR, copies the user's
- * agent config (~/.omp/agent: models, auth) into that isolated dir so the
+ * own IntercomBroker on an isolated CORNFIELD_AGENT_DIR, copies the user's
+ * agent config (~/.cornfield/agent: models, auth) into that isolated dir so the
  * child omp has model credentials, and spawns the child from THIS repo's
  * source (`bun packages/coding-agent/src/cli.ts --mode rpc`) with
  * PI_SUBAGENT_* parent metadata.
@@ -24,7 +24,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { isEnoent } from "@oh-my-pi/pi-utils";
+import { isEnoent } from "@cornfield/utils";
 import { spawn } from "bun";
 import { IntercomClient } from "../../coding-agent/src/intercom-extension/broker/client";
 import { IntercomBroker } from "../src/intercom/broker-server";
@@ -33,7 +33,7 @@ const isE2E = process.env.E2E === "1";
 
 // Self-host an isolated broker: the injected listenTarget lives under the
 // temporary runtime dir, and the child omp / parent client resolve the same
-// socket from PI_CODING_AGENT_DIR (set scoped inside beforeAll, restored in
+// socket from CORNFIELD_AGENT_DIR (set scoped inside beforeAll, restored in
 // afterAll — never mutated at module load).
 const repoRoot = path.resolve(import.meta.dir, "..", "..", "..");
 // Pin the child's model explicitly: the closed-loop's escalation step depends
@@ -101,13 +101,13 @@ describeE2E("intercom parent-child closed-loop", () => {
 
 	beforeAll(async () => {
 		runtimeDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-e2e-parent-"));
-		previousAgentDir = process.env.PI_CODING_AGENT_DIR;
-		process.env.PI_CODING_AGENT_DIR = path.join(runtimeDir, "agent");
+		previousAgentDir = process.env.CORNFIELD_AGENT_DIR;
+		process.env.CORNFIELD_AGENT_DIR = path.join(runtimeDir, "agent");
 
 		// Copy ONLY the model/config files the child needs — never the whole agent
 		// dir (can be >1GB of sessions/blobs; fs.cp of it blows the beforeAll
 		// hook window and stalls the box with IO).
-		const userAgentDir = path.join(os.homedir(), ".omp/agent");
+		const userAgentDir = path.join(os.homedir(), ".cornfield/agent");
 		for (const name of ["config.yml", "models.yml", "auth.db"] as const) {
 			try {
 				await fs.cp(path.join(userAgentDir, name), path.join(runtimeDir, "agent", name));
@@ -178,7 +178,7 @@ describeE2E("intercom parent-child closed-loop", () => {
 		})();
 
 		// NOTE: do NOT wait for `ready` inside beforeAll — bun:test caps hook
-		// execution at ~5s, and an isolated PI_CODING_AGENT_DIR makes the child
+		// execution at ~5s, and an isolated CORNFIELD_AGENT_DIR makes the child
 		// probe local LLM provider endpoints (llama.cpp :8080, lm-studio :1234,
 		// …) on startup, pushing the first ready frame past 5s on a cold box.
 		// The ready wait lives in the first test, which has a 240s budget.
@@ -192,7 +192,7 @@ describeE2E("intercom parent-child closed-loop", () => {
 		if (child?.exitCode === null) child?.kill();
 		await parent.disconnect();
 		broker.stop();
-		process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+		process.env.CORNFIELD_AGENT_DIR = previousAgentDir;
 		await fs.rm(runtimeDir, { recursive: true, force: true });
 	});
 
@@ -250,7 +250,7 @@ describeE2E("intercom parent-child closed-loop", () => {
 		// already busy-free after round 1 (agent_end count >= 2, numeric answer).
 		// Root cause note: this used to flake because the child's READY frame
 		// was awaited inside beforeAll — bun:test caps hooks at ~5s and an empty
-		// PI_CODING_AGENT_DIR adds local-provider endpoint probes (llama.cpp,
+		// CORNFIELD_AGENT_DIR adds local-provider endpoint probes (llama.cpp,
 		// lm-studio, …) on startup, so the child could still be booting when the
 		// hook was killed, leaving the spawn/session in a broken state. Awaiting
 		// ready inside a real test (240s budget) fixed both the ready wait and

@@ -20,7 +20,7 @@ import type {
 	TodoPhaseDto,
 	ToolSwitchesDto,
 	WireServerEventDto,
-} from "@oh-my-pi/pi-wire";
+} from "@cornfield/wire";
 import { loadNotifyPrefs, notifyGuarded } from "../lib/notifications";
 import type {
 	ArtifactDto,
@@ -604,7 +604,7 @@ class SessionStore {
 		return this.#client.recordTranscribe(audioBase64, desc);
 	}
 
-	/** 听记历史（listen_list；~/.omp/listen/ 全部录音，名称倒序 + 转写全文）。 */
+	/** 听记历史（listen_list；~/.cornfield/listen/ 全部录音，名称倒序 + 转写全文）。 */
 	listenList(): Promise<{ ok: boolean; recordings: ListenRecordingDto[] }> {
 		return this.#client.listenList();
 	}

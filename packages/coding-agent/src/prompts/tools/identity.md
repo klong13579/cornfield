@@ -2,8 +2,8 @@ Query and update identity information.
 
 <instruction>
 - `whoRu`: Returns the current agent's operational identity — name, version, working directory, active model, provider, and session. Role and working style live in the system prompt.
-- `whoisme`: Returns the user's declarative persona from `~/.omp/agent/user.md`. If absent, returns an empty template.
-- `update_persona`: Updates one section of `~/.omp/agent/user.md`. Provide `section` (one of: basics, career, interests, preferences, interaction, thinking, constraints) and `data` (a partial object whose entries are merged into that section as markdown bullets).
+- `whoisme`: Returns the user's declarative persona from `~/.cornfield/agent/user.md`. If absent, returns an empty template.
+- `update_persona`: Updates one section of `~/.cornfield/agent/user.md`. Provide `section` (one of: basics, career, interests, preferences, interaction, thinking, constraints) and `data` (a partial object whose entries are merged into that section as markdown bullets).
 </instruction>
 
 <boundary>

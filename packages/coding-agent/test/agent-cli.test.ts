@@ -7,7 +7,7 @@
  *   - show: parses mission/AGENTS/TOOLS/skills/cron/sessions into a structured detail
  *   - validate: detects missing always-on, broken JSON/YAML, exits via `valid` flag
  *
- * All tests use a temp dir; the real `~/.omp/agents/` is never touched.
+ * All tests use a temp dir; the real `~/.cornfield/agents/` is never touched.
  */
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "bun:test";
@@ -32,7 +32,7 @@ let isolatedHome: string;
 beforeEach(async () => {
 	tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-agent-test-"));
 	// Isolate HOME for every test in this file. The agent registry lives at
-	// `~/.omp/agent/registry.json` and several test paths (runAgentInit,
+	// `~/.cornfield/agent/registry.json` and several test paths (runAgentInit,
 	// runAgentReconcile's auto-register) call registerAgent as a side effect.
 	// Without isolation, `bun test` writes to the user's real registry and
 	// leaves dead entries pointing at temp dirs that the OS later cleans —
@@ -156,7 +156,7 @@ describe("runAgentList", () => {
 		expect(result.map(s => s.name)).toEqual(["alpha"]);
 	});
 
-	test("marks agentDirs as active when mission.md + .omp/config.yml present", async () => {
+	test("marks agentDirs as active when mission.md + .cornfield/config.yml present", async () => {
 		await runAgentInit({ name: "alpha", dir: tmpDir });
 		const result = await runAgentList({ dir: tmpDir });
 		expect(result[0]?.status).toBe("active");
@@ -242,28 +242,28 @@ describe("runAgentShow", () => {
 	test("discovers skills from subdirectories with SKILL.md", async () => {
 		await runAgentInit({ name: "alpha", dir: tmpDir });
 		// Directory-based skill with frontmatter description
-		await fs.mkdir(path.join(tmpDir, "alpha", ".omp", "skills", "dws"), { recursive: true });
+		await fs.mkdir(path.join(tmpDir, "alpha", ".cornfield", "skills", "dws"), { recursive: true });
 		await Bun.write(
-			path.join(tmpDir, "alpha", ".omp", "skills", "dws", "SKILL.md"),
+			path.join(tmpDir, "alpha", ".cornfield", "skills", "dws", "SKILL.md"),
 			"---\ndescription: DingTalk integration\n---\n\n# body\n",
 		);
 		// Another directory-based skill with no frontmatter
-		await fs.mkdir(path.join(tmpDir, "alpha", ".omp", "skills", "interview-prep"), { recursive: true });
+		await fs.mkdir(path.join(tmpDir, "alpha", ".cornfield", "skills", "interview-prep"), { recursive: true });
 		await Bun.write(
-			path.join(tmpDir, "alpha", ".omp", "skills", "interview-prep", "SKILL.md"),
+			path.join(tmpDir, "alpha", ".cornfield", "skills", "interview-prep", "SKILL.md"),
 			"# Interview prep\n\nBody.\n",
 		);
 		// Flat .md file — should NOT be discovered (matches runtime behavior)
-		await fs.mkdir(path.join(tmpDir, "alpha", ".omp", "skills"), { recursive: true });
+		await fs.mkdir(path.join(tmpDir, "alpha", ".cornfield", "skills"), { recursive: true });
 		await Bun.write(
-			path.join(tmpDir, "alpha", ".omp", "skills", "changelog.md"),
+			path.join(tmpDir, "alpha", ".cornfield", "skills", "changelog.md"),
 			"---\ndescription: Track changes\n---\n\n# Changelog\n",
 		);
 		// Directory without SKILL.md — should be skipped
-		await fs.mkdir(path.join(tmpDir, "alpha", ".omp", "skills", "empty-dir"), { recursive: true });
+		await fs.mkdir(path.join(tmpDir, "alpha", ".cornfield", "skills", "empty-dir"), { recursive: true });
 
 		const result = await runAgentShow({ name: "alpha", dir: tmpDir });
-		// Template ships .omp/skills/lint/ plus the two added below
+		// Template ships .cornfield/skills/lint/ plus the two added below
 		expect(result.skills).toHaveLength(3);
 
 		const dws = result.skills.find(s => s.name === "dws");
@@ -279,7 +279,7 @@ describe("runAgentShow", () => {
 
 	test("reads skill name + frontmatter description from SKILL.md", async () => {
 		await runAgentInit({ name: "alpha", dir: tmpDir });
-		const skillDir = path.join(tmpDir, "alpha", ".omp", "skills", "gitlab-auto-login");
+		const skillDir = path.join(tmpDir, "alpha", ".cornfield", "skills", "gitlab-auto-login");
 		await fs.mkdir(skillDir, { recursive: true });
 		await Bun.write(
 			path.join(skillDir, "SKILL.md"),
@@ -334,12 +334,12 @@ describe("runAgentValidate", () => {
 		expect(issue?.message).toContain("`files` array");
 	});
 
-	test("flags invalid .omp/config.yml", async () => {
+	test("flags invalid .cornfield/config.yml", async () => {
 		await runAgentInit({ name: "alpha", dir: tmpDir });
 		// Write something Bun.YAML can't parse: an unterminated flow sequence
-		await Bun.write(path.join(tmpDir, "alpha", ".omp", "config.yml"), "modelRoles: [unterminated");
+		await Bun.write(path.join(tmpDir, "alpha", ".cornfield", "config.yml"), "modelRoles: [unterminated");
 		const result = await runAgentValidate({ agentDir: path.join(tmpDir, "alpha") });
-		const issue = result.issues.find(i => i.file === ".omp/config.yml" && i.level === "error");
+		const issue = result.issues.find(i => i.file === ".cornfield/config.yml" && i.level === "error");
 		expect(issue?.message).toContain("Invalid YAML");
 	});
 
@@ -347,11 +347,11 @@ describe("runAgentValidate", () => {
 		await runAgentInit({ name: "alpha", dir: tmpDir });
 		await fs.unlink(path.join(tmpDir, "alpha", "prompt-includes.json"));
 		await fs.unlink(path.join(tmpDir, "alpha", ".gitignore"));
-		await fs.unlink(path.join(tmpDir, "alpha", ".omp", "SYSTEM.md"));
+		await fs.unlink(path.join(tmpDir, "alpha", ".cornfield", "SYSTEM.md"));
 		const result = await runAgentValidate({ agentDir: path.join(tmpDir, "alpha") });
 		expect(result.valid).toBe(true); // warnings don't invalidate
 		const warnings = result.issues.filter(i => i.level === "warning" && !i.rule);
-		expect(warnings.map(i => i.file).sort()).toEqual([".gitignore", ".omp/SYSTEM.md", "prompt-includes.json"]);
+		expect(warnings.map(i => i.file).sort()).toEqual([".cornfield/SYSTEM.md", ".gitignore", "prompt-includes.json"]);
 	});
 });
 
@@ -412,13 +412,13 @@ describe("runAgentValidate — MECE rules", () => {
 		}
 		expect(mustNotLine).toBeTruthy();
 		// Add the same line to SYSTEM.md
-		await Bun.write(path.join(dir, ".omp", "SYSTEM.md"), `# System\n\n## 安全\n\n${mustNotLine}\n`);
+		await Bun.write(path.join(dir, ".cornfield", "SYSTEM.md"), `# System\n\n## 安全\n\n${mustNotLine}\n`);
 		const result = await runAgentValidate({ agentDir: dir });
 		const violation = result.mece?.violations.find(v => v.rule === "no-safety-duplication");
 		expect(violation).toBeTruthy();
 		// Fix
 		await runAgentValidate({ agentDir: dir, fix: true });
-		const systemAfter = await Bun.file(path.join(dir, ".omp", "SYSTEM.md")).text();
+		const systemAfter = await Bun.file(path.join(dir, ".cornfield", "SYSTEM.md")).text();
 		// The duplicated line should be gone, but a reference should be added
 		expect(systemAfter).toMatch(/AGENTS\.md/);
 	});
@@ -454,7 +454,7 @@ describe("runAgentValidate — MECE rules", () => {
 	test("R6: detects and repairs skills path format", async () => {
 		const dir = await initAgent();
 		const agents = await Bun.file(path.join(dir, "AGENTS.md")).text();
-		const oldAgents = agents.replace(".omp/skills/<name>/SKILL.md", ".omp/skills/<name>.md");
+		const oldAgents = agents.replace(".cornfield/skills/<name>/SKILL.md", ".cornfield/skills/<name>.md");
 		await Bun.write(path.join(dir, "AGENTS.md"), oldAgents);
 		const result = await runAgentValidate({ agentDir: dir });
 		const violation = result.mece?.violations.find(v => v.rule === "skills-path-format");
@@ -503,7 +503,7 @@ describe("runAgentValidate — MECE rules", () => {
 		await Bun.write(path.join(dir, ".agent", "SYSTEM.md"), "old system prompt");
 		// Add .agent/ reference to AGENTS.md File Map
 		const agents = await Bun.file(path.join(dir, "AGENTS.md")).text();
-		const withDeprecated = agents.replace(".omp/SYSTEM.md", ".agent/SYSTEM.md");
+		const withDeprecated = agents.replace(".cornfield/SYSTEM.md", ".agent/SYSTEM.md");
 		await Bun.write(path.join(dir, "AGENTS.md"), withDeprecated);
 		// Validate — should detect
 		const result = await runAgentValidate({ agentDir: dir });
@@ -520,33 +520,33 @@ describe("runAgentValidate — MECE rules", () => {
 		await runAgentValidate({ agentDir: dir, fix: true });
 		// .agent/ directory should be deleted
 		await expect(fs.access(path.join(dir, ".agent"))).rejects.toThrow();
-		// AGENTS.md should reference .omp/SYSTEM.md not .agent/SYSTEM.md
+		// AGENTS.md should reference .cornfield/SYSTEM.md not .agent/SYSTEM.md
 		const agentsAfter = await Bun.file(path.join(dir, "AGENTS.md")).text();
 		expect(agentsAfter).not.toMatch(/\.agent\//);
-		expect(agentsAfter).toMatch(/\.omp\/SYSTEM\.md/);
+		expect(agentsAfter).toMatch(/\.cornfield\/SYSTEM\.md/);
 		// Re-validate — should be valid
 		const reResult = await runAgentValidate({ agentDir: dir });
 		expect(reResult.valid).toBe(true);
 	});
 
-	test("R8: deletes .agent/prompts/ rows instead of replacing with .omp/prompts/", async () => {
+	test("R8: deletes .agent/prompts/ rows instead of replacing with .cornfield/prompts/", async () => {
 		const dir = await initAgent();
 		await fs.mkdir(path.join(dir, ".agent"), { recursive: true });
 		await Bun.write(path.join(dir, ".agent", "SYSTEM.md"), "old");
 		// Add .agent/SYSTEM.md + .agent/prompts/ to AGENTS.md
 		const agents = await Bun.file(path.join(dir, "AGENTS.md")).text();
 		const withDeprecated = agents
-			.replace(".omp/SYSTEM.md", ".agent/SYSTEM.md")
+			.replace(".cornfield/SYSTEM.md", ".agent/SYSTEM.md")
 			.replace("|| `sessions/*.jsonl`", "| `.agent/prompts/` | BEHAVIOR | templates |\n|| `sessions/*.jsonl`");
 		await Bun.write(path.join(dir, "AGENTS.md"), withDeprecated);
 		// Fix
 		await runAgentValidate({ agentDir: dir, fix: true });
 		const agentsAfter = await Bun.file(path.join(dir, "AGENTS.md")).text();
 		// SYSTEM.md path should be replaced
-		expect(agentsAfter).toMatch(/\.omp\/SYSTEM\.md/);
+		expect(agentsAfter).toMatch(/\.cornfield\/SYSTEM\.md/);
 		// prompts/ row should be deleted, not replaced
 		expect(agentsAfter).not.toMatch(/\.agent\//);
-		expect(agentsAfter).not.toMatch(/\.omp\/prompts/);
+		expect(agentsAfter).not.toMatch(/\.cornfield\/prompts/);
 		// Re-validate — should be valid
 		const reResult = await runAgentValidate({ agentDir: dir });
 		expect(reResult.valid).toBe(true);
@@ -643,10 +643,10 @@ describe("omp agent register / unregister / reconcile", () => {
 	test("reconcile auto-registers agentDirs in the default location not in the registry", async () => {
 		// Simulate a legacy agentDir (created before the registry existed) by
 		// dropping it directly into the default location under the isolated HOME.
-		const defaultRoot = path.join(isolatedHome, ".omp", "agents");
+		const defaultRoot = path.join(isolatedHome, ".cornfield", "agents");
 		const legacyDir = path.join(defaultRoot, "legacy-bot");
 		await fs.mkdir(legacyDir, { recursive: true });
-		// Sanity: the registry file is at ~/.omp/agent/registry.json under isolatedHome,
+		// Sanity: the registry file is at ~/.cornfield/agent/registry.json under isolatedHome,
 		// which the afterEach hook will clean up.
 		const result = await runAgentReconcile();
 		expect(result.registered).toContain("legacy-bot");

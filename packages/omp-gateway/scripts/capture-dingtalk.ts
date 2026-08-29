@@ -101,7 +101,7 @@ async function main() {
 	const client = new DWClient({
 		clientId: account.appKey!,
 		clientSecret: account.appSecret!,
-		ua: "omp-gateway/0.1.0",
+		ua: "cornfield-gateway/0.1.0",
 		debug: args.verbose,
 		autoReconnect: true,
 	});

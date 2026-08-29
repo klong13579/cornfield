@@ -2,7 +2,7 @@
  * IntentClassifier: hybrid rule-based + LLM fallback intent classification.
  */
 
-import type { Model } from "@oh-my-pi/pi-ai";
+import type { Model } from "@cornfield/ai";
 import classifyIntentTemplate from "./prompts/classify-intent.md" with { type: "text" };
 import type { IntentCategory, IntentResult, SessionTrace } from "./types";
 import { type BackgroundLlmAuth, callBackgroundLlm } from "./utils/llm";

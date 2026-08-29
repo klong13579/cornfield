@@ -24,7 +24,7 @@ const FOLLOW_UP_META: AgentResponseMeta = {
  * inline in Gateway: sendAgentResponse, sendFormattedAgentResponse,
  * tryStreamAgentResponse, handleCardAction, handleAbortMessage, etc.
  */
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 import type { ActionRegistry } from "./action-registry";
 import type { DingTalkCardActionEvent } from "./channels/dingtalk";
 import type { ChannelRegistry } from "./channels/registry";

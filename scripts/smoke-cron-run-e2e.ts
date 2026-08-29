@@ -21,7 +21,7 @@ import * as os from "node:os";
 import { findAgentSessionPath } from "../packages/omp-gateway/src/scheduler/cli-commands";
 import { sessionFilePath } from "../packages/coding-agent/src/session/session-paths";
 
-const sessionDir = path.join(os.homedir(), ".omp", "agent", "sessions", "-Desktop-Narwal-oh-my-pi");
+const sessionDir = path.join(os.homedir(), ".cornfield", "agent", "sessions", "-Desktop-Narwal-oh-my-pi");
 
 // A real UUIDv7-shaped id (last 8 hex = b8c75295 in this test run, deterministic suffix)
 const sessionId = "019ee0c7-7493-7000-93bf-1d5bb8c75295";

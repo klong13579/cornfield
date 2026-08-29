@@ -3,7 +3,7 @@
  *
  * Configure API key resolution via AuthStorage and ModelRegistry.
  */
-import { AuthStorage, createAgentSession, discoverAuthStorage, discoverModels, ModelRegistry, SessionManager, } from "@oh-my-pi/pi-coding-agent";
+import { AuthStorage, createAgentSession, discoverAuthStorage, discoverModels, ModelRegistry, SessionManager, } from "@cornfield/coding-agent";
 // Default: discoverAuthStorage() uses ~/.omp/agent/agent.db
 // discoverModels() loads built-in + custom models from ~/.omp/agent/models.json
 const authStorage = await discoverAuthStorage();

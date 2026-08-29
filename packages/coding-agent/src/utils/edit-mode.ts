@@ -1,4 +1,4 @@
-import { $env, $flag } from "@oh-my-pi/pi-utils";
+import { $env, $flag } from "@cornfield/utils";
 
 export type EditMode = "replace" | "patch" | "hashline" | "vim" | "apply_patch" | "atom";
 

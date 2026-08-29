@@ -5,10 +5,10 @@ import type * as fs1 from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
-import type { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
-import type { ImageContent, Model, TextContent } from "@oh-my-pi/pi-ai";
-import type { KeyId } from "@oh-my-pi/pi-tui";
-import { hasFsCode, isEacces, isEnoent, logger } from "@oh-my-pi/pi-utils";
+import type { ThinkingLevel } from "@cornfield/agent";
+import type { ImageContent, Model, TextContent } from "@cornfield/ai";
+import type { KeyId } from "@cornfield/tui";
+import { hasFsCode, isEacces, isEnoent, logger } from "@cornfield/utils";
 import type { TSchema } from "@sinclair/typebox";
 import * as TypeBox from "@sinclair/typebox";
 import { type ExtensionModule, extensionModuleCapability } from "../../capability/extension-module";
@@ -123,7 +123,7 @@ class ConcreteExtensionAPI implements ExtensionAPI, IExtensionRuntime {
 	}> = [];
 
 	constructor(
-		public readonly pi: typeof import("@oh-my-pi/pi-coding-agent"),
+		public readonly pi: typeof import("@cornfield/coding-agent"),
 		private readonly extension: Extension,
 		private readonly runtime: IExtensionRuntime,
 		private readonly cwd: string,
@@ -271,7 +271,7 @@ function createExtension(extensionPath: string, resolvedPath: string): Extension
 }
 
 async function importExtensionModule(resolvedPath: string): Promise<{ default?: ExtensionFactory }> {
-	// Direct Bun import — no Bun.build / .omp/cache/extension-bundles middleman.
+	// Direct Bun import — no Bun.build / .cornfield/cache/extension-bundles middleman.
 	// First-party extensions (moa, swarm, autoresearch) ship via inlineFactories
 	// in sdk.ts; path-based extensions load from their resolved entry files.
 	return import(pathToFileURL(resolvedPath).href) as Promise<{ default?: ExtensionFactory }>;
@@ -297,13 +297,7 @@ async function loadExtension(
 		}
 
 		const extension = createExtension(extensionPath, resolvedPath);
-		const api = new ConcreteExtensionAPI(
-			await import("@oh-my-pi/pi-coding-agent"),
-			extension,
-			runtime,
-			cwd,
-			eventBus,
-		);
+		const api = new ConcreteExtensionAPI(await import("@cornfield/coding-agent"), extension, runtime, cwd, eventBus);
 		await factory(api);
 
 		return { extension, error: null };
@@ -324,7 +318,7 @@ export async function loadExtensionFromFactory(
 	name = "<inline>",
 ): Promise<Extension> {
 	const extension = createExtension(name, name);
-	const api = new ConcreteExtensionAPI(await import("@oh-my-pi/pi-coding-agent"), extension, runtime, cwd, eventBus);
+	const api = new ConcreteExtensionAPI(await import("@cornfield/coding-agent"), extension, runtime, cwd, eventBus);
 	await factory(api);
 	return extension;
 }

@@ -31,7 +31,7 @@
  * - Markdown formatting fixes for DingTalk rendering
  */
 
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 import type { DingTalkConfig } from "../types";
 
 // ═══════════════════════════════════════════════════════════════════════

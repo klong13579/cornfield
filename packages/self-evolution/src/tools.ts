@@ -1,7 +1,7 @@
 /**
  * Agent-callable tools for the self-evolution plugin.
  */
-import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent/extensibility/extensions";
+import type { ExtensionAPI } from "@cornfield/coding-agent/extensibility/extensions";
 import type { ActivityLogger } from "./logging/activity-logger";
 import type { SkillManager } from "./manager";
 import type { EpisodeRetriever } from "./retrieval";

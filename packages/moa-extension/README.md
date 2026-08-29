@@ -1,6 +1,6 @@
 # MOA Extension
 
-Mixture-of-Agents planning extension for OMP.
+Mixture-of-Agents planning extension for CornField.
 
 Current state: v1 command-driven planning panel scaffold is live.
 
@@ -17,10 +17,10 @@ Implemented v1:
 
 ## Setup
 
-`/moa` ships **inline** with `omp` (same pattern as swarm / autoresearch /
+`/moa` ships **inline** with `cornfield` (same pattern as swarm / autoresearch /
 self-evolution). After `bun --cwd=packages/coding-agent run build`, the
 compiled binary already registers `/moa` — no `extensions` path, no
-`.omp/cache/extension-bundles` build step.
+`.cornfield/cache/extension-bundles` build step.
 
 If your settings still list `../moa-extension` (or an absolute path to this
 package), **remove that entry** so the factory is not loaded twice.
@@ -29,7 +29,7 @@ package), **remove that entry** so the factory is not loaded twice.
 
 ```bash
 bun --cwd=packages/coding-agent run build
-omp                                    # or: bun --cwd=packages/coding-agent src/cli.ts
+cornfield                                    # or: bun --cwd=packages/coding-agent src/cli.ts
 # In the TUI:
 /moa help                              # expect usage notification
 /moa status                            # expect config dump
@@ -90,22 +90,22 @@ Three different model families for the workers (diversity > strength, per the [T
 
 There are three ways to override, in priority order (top wins):
 
-1. **`PI_MOA_SETTINGS_JSON` env var** (one-off, JSON5 object; same shape as `MoaSettings`)
-2. **Project config file** at `<git-root>/.omp/moa.{yml,yaml,json}` (committed, shared with the team)
-3. **Global config file** at `~/.omp/agent/moa.{yml,yaml,json}` (per-user, all repos)
+1. **`CORNFIELD_MOA_SETTINGS_JSON` env var** (one-off, JSON5 object; same shape as `MoaSettings`)
+2. **Project config file** at `<git-root>/.cornfield/moa.{yml,yaml,json}` (committed, shared with the team)
+3. **Global config file** at `~/.cornfield/agent/moa.{yml,yaml,json}` (per-user, all repos)
 4. The bundled defaults in `DEFAULT_WORKER_SLOTS` / `DEFAULT_SETTINGS.synthesisModel`
 
 #### Env var (one-off)
 
 ```bash
-PI_MOA_SETTINGS_JSON='{
+CORNFIELD_MOA_SETTINGS_JSON='{
   workers: [
     { name: "divergent", model: "alibaba-coding-plan/glm-5.1" },
     { name: "grounded",  model: "alibaba-coding-plan/deepseek-v4-pro" },
     { name: "critical",  model: "narwal-plan/kimi-k2.5" },
   ],
   synthesisModel: "narwal-plan/gpt-5.4",
-}' omp ...
+}' cornfield ...
 ```
 
 #### Config file (persistent)
@@ -113,7 +113,7 @@ PI_MOA_SETTINGS_JSON='{
 Project (committed; shared with the team):
 
 ```yaml
-# <repo-root>/.omp/moa.yml
+# <repo-root>/.cornfield/moa.yml
 workers:
   - { name: divergent, model: alibaba-coding-plan/glm-5.1 }
   - { name: grounded,  model: alibaba-coding-plan/deepseek-v4-pro }
@@ -124,12 +124,12 @@ synthesisModel: narwal-plan/gpt-5.4
 Global (per-user, all repos):
 
 ```yaml
-# ~/.omp/agent/moa.yml
+# ~/.cornfield/agent/moa.yml
 synthesisThinking: medium
 timeoutMs: 300000
 ```
 
-The loader walks up from the active cwd to find the project root (the first ancestor with a `.git` entry), then looks for `<root>/.omp/moa.{yml,yaml,json}`. The global file lives at `~/.omp/agent/moa.{yml,yaml,json}`. Project wins on conflict (shallow merge — arrays are replaced, not deep-merged).
+The loader walks up from the active cwd to find the project root (the first ancestor with a `.git` entry), then looks for `<root>/.cornfield/moa.{yml,yaml,json}`. The global file lives at `~/.cornfield/agent/moa.{yml,yaml,json}`. Project wins on conflict (shallow merge — arrays are replaced, not deep-merged).
 
 Malformed YAML, unknown fields, and unreadable files are tolerated: the loader logs a warning and returns empty overrides. A bad config file never blocks `/moa run`.
 
@@ -168,7 +168,7 @@ MOA supports two worker execution modes, controlled by `workerExecutionMode`:
 
 | Mode | Default | Description |
 | --- | --- | --- |
-| `subprocess` | **yes** | Each worker runs as an `omp --mode json -p --no-session` subprocess. Full tool access, extension support, MCP, LSP. Backward compatible. |
+| `subprocess` | **yes** | Each worker runs as an `cornfield --mode json -p --no-session` subprocess. Full tool access, extension support, MCP, LSP. Backward compatible. |
 | `in-process` | no | Workers run in the current process via `createAgentSession()`. No subprocess overhead — lower memory, shares the runtime. **Intentionally conservative**: no extension discovery, no MCP, no LSP, read-only tools only (`read`/`search`/`find`/`web_search`/`ast_grep`). |
 
 ### Config (any MOA config source)
@@ -184,7 +184,7 @@ workerExecutionMode: in-process
 - **Session**: `in-process` uses `SessionManager.inMemory()` — no session log is written to disk for worker sessions.
 - **Python**: `in-process` skips Python kernel warmup.
 - **Timeout**: `in-process` uses `AbortController` + `Promise.race`. Unlike subprocess, the worker's execution cannot be forcibly killed — timeout returns `timedOut: true` and signals the abort; resource reclamation is best-effort.
-- **Recursion guard**: `in-process` workers do not set `PI_MOA_SUBAGENT`. The existing subprocess guard (`process.env.PI_MOA_SUBAGENT === "1"`) still applies to the subprocess path only.
+- **Recursion guard**: `in-process` workers do not set `CORNFIELD_MOA_SUBAGENT`. The existing subprocess guard (`process.env.CORNFIELD_MOA_SUBAGENT === "1"`) still applies to the subprocess path only.
 
 Default remains `subprocess` for full backward compatibility. `in-process` is an opt-in experimental path for reduced memory footprint.
 
@@ -221,4 +221,4 @@ bun packages/moa-extension/scripts/stage-test.ts --stage rewrite --from tmp/moa-
 # Options: --out tmp/moa-stage --rounds N --continue-on-fail
 ```
 
-Reads `~/.omp/agent/moa.yml` (and project `.omp/moa.yml`). Not part of default CI.
+Reads `~/.cornfield/agent/moa.yml` (and project `.cornfield/moa.yml`). Not part of default CI.

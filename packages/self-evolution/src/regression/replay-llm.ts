@@ -1,5 +1,5 @@
-import type { Model } from "@oh-my-pi/pi-ai";
-import { prompt } from "@oh-my-pi/pi-utils";
+import type { Model } from "@cornfield/ai";
+import { prompt } from "@cornfield/utils";
 import regressionReplaySystemTemplate from "../prompts/regression-replay.md" with { type: "text" };
 import regressionReplayInputTemplate from "../prompts/regression-replay-input.md" with { type: "text" };
 import type { EvolvedSkill, RegressionFixture } from "../types";

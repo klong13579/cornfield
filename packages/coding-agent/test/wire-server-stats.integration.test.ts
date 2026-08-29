@@ -8,13 +8,13 @@
  *   4. W3 D2：optional period 时间窗口 + priceCatalog 单价目录（models.json）
  *   5. W3 D2 小卡：list_sessions 每条带 source（cli=default 根 / agent=registry agent）
  *
- * 隔离 HOME：避免写坏真实 ~/.omp/stats.db。不触发 LLM 计费。
+ * 隔离 HOME：避免写坏真实 ~/.cornfield/stats.db。不触发 LLM 计费。
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { MULTIDEVICE_PROTOCOL_VERSION } from "@oh-my-pi/pi-wire";
+import { MULTIDEVICE_PROTOCOL_VERSION } from "@cornfield/wire";
 import { waitForServe } from "./wait-for-serve";
 
 type Frame = { type: string; [k: string]: unknown };
@@ -144,7 +144,7 @@ beforeAll(async () => {
 
 	// W3 D2：预置 default 根 CLI 会话 + hr registry agent 会话（serve 启动时加载 registry，必须在此 seed）
 	const home = isolatedHome;
-	const cliDir = path.join(home, ".omp", "agent", "sessions", "--work--demo--", "by-date", "2026-08-18");
+	const cliDir = path.join(home, ".cornfield", "agent", "sessions", "--work--demo--", "by-date", "2026-08-18");
 	await fs.mkdir(cliDir, { recursive: true });
 	await Bun.write(
 		path.join(cliDir, "000001__cli00001.jsonl"),
@@ -160,13 +160,13 @@ beforeAll(async () => {
 	const hrDir = path.join(home, "agents", "hr");
 	const hrSessions = path.join(hrDir, "sessions", "by-date", "2026-08-18");
 	await fs.mkdir(hrSessions, { recursive: true });
-	await fs.mkdir(path.join(hrDir, ".omp"), { recursive: true });
+	await fs.mkdir(path.join(hrDir, ".cornfield"), { recursive: true });
 	await Bun.write(
-		path.join(hrDir, ".omp", "workspace.json"),
+		path.join(hrDir, ".cornfield", "workspace.json"),
 		JSON.stringify({ schemaVersion: 2, id: "hr", name: "hr-agent", type: "agent", root: ".", projectRoot: "." }),
 	);
 	await Bun.write(
-		path.join(home, ".omp", "agent", "registry.json"),
+		path.join(home, ".cornfield", "agent", "registry.json"),
 		JSON.stringify({
 			version: 2,
 			agents: { hr: { path: hrDir, registeredAt: new Date().toISOString(), template: "default" } },

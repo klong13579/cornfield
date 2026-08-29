@@ -1,5 +1,5 @@
-import { emergencyTerminalRestore } from "@oh-my-pi/pi-tui";
-import { postmortem } from "@oh-my-pi/pi-utils";
+import { emergencyTerminalRestore } from "@cornfield/tui";
+import { postmortem } from "@cornfield/utils";
 
 /**
  * Run modes for the coding agent.

@@ -1,8 +1,8 @@
 {
   "agent_servers": {
-    "omp": {
+    "cornfield": {
       "type": "custom",
-      "command": "omp",
+      "command": "cornfield",
       "args": ["acp"],
       "env": {}
     }

@@ -10,7 +10,7 @@
 - **self-evolution 测试暂停**（功能禁用）：`packages/self-evolution/package.json` 的 `test` 脚本改为
   no-op（18 个确定性失败：profile/ContextAwareRetriever/InjectionFormatter/7-layer/E2E DB Sync 等
   均为实现演进后测试未对齐）。功能重新启用时恢复 `"test": "bun test"` 并修上述漂移。
-- **pi-wire**：删空 `test` 脚本（bun test 遇 0 文件 exit 1，曾使 ci:test:full 确定性红）。
+- **wire**：删空 `test` 脚本（bun test 遇 0 文件 exit 1，曾使 ci:test:full 确定性红）。
 
 ## 已修复（本轮 2026-08-26）
 
@@ -18,7 +18,7 @@
 |问题|修法|
 |---|---|
 |EventController `#handleAgentEnd` 崩溃（`this.ctx.pendingBashComponents` undefined）|测试 context mock 补全缺字段（types.ts 契约）|
-|retry fallback 未触发 ×3|**测试污染**：用户全局 `~/.omp/agent/models.yml` 覆盖 openai provider（只剩 embedding 模型）→ `ModelRegistry.find("openai","gpt-4o-mini")` 失败 → fallback 被跳过。6 个测试补隔离 models.yml 路径|
+|retry fallback 未触发 ×3|**测试污染**：用户全局 `~/.cornfield/agent/models.yml` 覆盖 openai provider（只剩 embedding 模型）→ `ModelRegistry.find("openai","gpt-4o-mini")` 失败 → fallback 被跳过。6 个测试补隔离 models.yml 路径|
 |replay reload 模型未切换 ×2|同上污染（harness 的 ModelRegistry）|
 |ModelRegistry canonicalization/merge ×5|①`#applyExplicitProviderAllowlist` 误伤 built-in（设计注释只 drop discovery/cached extras）→ built-in 恒保留 ②claude-opus-latest 归并目标写死 4-7（当前 best 是 4.8）→ 动态解析 canonical family|
 |MCP discovery 激活工具集 ×6 + search_tool_bm25 ×1|`SearchToolBm25Tool` 有类有 createIf 但 **BUILTIN_TOOLS 漏注册** → 补 `search_tool_bm25: SearchToolBm25Tool.createIf`|
@@ -31,7 +31,7 @@
 ### 环境/数据组
 |问题|修法|
 |---|---|
-|project-scope `.git` fallback ×1|测试 tmpDir 在 `/var/folders`（home 外）→ walk 不停在 homeDir、误命中系统 tmp 的 .omp → tmpDir 放 homeDir 下|
+|project-scope `.git` fallback ×1|测试 tmpDir 在 `/var/folders`（home 外）→ walk 不停在 homeDir、误命中系统 tmp 的 .cornfield → tmpDir 放 homeDir 下|
 |wire-server-skills seed ×3、sdk-skills 超时|随上述修复顺带解决（单独跑全绿）|
 |list_commands 命令名 ×1|hook/custom/skill 命令用各自命名空间（无 `/` 前缀是设计）→ 断言放宽为非空 name|
 

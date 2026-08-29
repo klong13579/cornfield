@@ -7,7 +7,7 @@
  * instead of Jaccard word overlap.
  */
 import type { Database } from "bun:sqlite";
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 import type { EmbeddingGenerator } from "./embedding";
 import { cosineSimilarity, VectorStore } from "./vector-store";
 

@@ -7,7 +7,7 @@
  * 3. It can process a simple prompt and return a response
  */
 import { describe, expect, test } from "bun:test";
-import { MULTIDEVICE_PROTOCOL_VERSION } from "@oh-my-pi/pi-wire";
+import { MULTIDEVICE_PROTOCOL_VERSION } from "@cornfield/wire";
 
 const WIRE_HELLO_ACK = '"type":"hello_ack"';
 
@@ -71,7 +71,7 @@ describe("Gateway with narwal-plan/minimax-m3 model", () => {
 		expect(dtConfig).not.toBeNull();
 		expect(dtConfig!.accounts).toBeDefined();
 		expect(dtConfig!.accounts!.opencode).toBeDefined();
-		// model is read from agentDir/.omp/config.yml, not gateway.json
+		// model is read from agentDir/.cornfield/config.yml, not gateway.json
 		expect(dtConfig!.accounts!.opencode.appKey).toBe("dingnubwjpndghf8sox8");
 	});
 });

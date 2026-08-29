@@ -1,10 +1,10 @@
 /**
  * Extension runner - executes extensions and manages their lifecycle.
  */
-import type { AgentMessage, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
-import type { ImageContent, Model, ProviderResponseMetadata } from "@oh-my-pi/pi-ai";
-import type { KeyId } from "@oh-my-pi/pi-tui";
-import { logger } from "@oh-my-pi/pi-utils";
+import type { AgentMessage, ThinkingLevel } from "@cornfield/agent";
+import type { ImageContent, Model, ProviderResponseMetadata } from "@cornfield/ai";
+import type { KeyId } from "@cornfield/tui";
+import { logger } from "@cornfield/utils";
 import type { ModelRegistry } from "../../config/model-registry";
 import type { ScopedModel } from "../../config/model-resolver";
 import { type Theme, theme } from "../../modes/theme/theme";

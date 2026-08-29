@@ -2,7 +2,7 @@
  * One-time / periodic refresh of lifecycle states from benefit metrics + regression replay.
  */
 
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 import { shouldDeprecateSkillFromInjectionStats } from "./benefit-admission";
 import { REGRESSION_MAX_FIXTURES } from "./regression/replay";
 import type { RegressionReplayBackend } from "./regression/replay-backend";

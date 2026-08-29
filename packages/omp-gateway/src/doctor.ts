@@ -94,7 +94,7 @@ async function checkConfig(
 
 	switch (result.status) {
 		case "missing":
-			findings.push(error(`Config file not found: ${result.path}`, "Run `omp-gateway setup` to create one."));
+			findings.push(error(`Config file not found: ${result.path}`, "Run `cornfield-gateway setup` to create one."));
 			return { section: { name: "CONFIG", findings }, config: undefined };
 		case "parse-error":
 			findings.push(error(`Config file is not valid JSON5: ${result.path}`, result.error));
@@ -170,10 +170,12 @@ async function checkCredentialsSection(config?: GatewayConfig): Promise<Section>
 
 	const cred = checkCredentials();
 	if (!cred.modelsYmlFound) {
-		findings.push(warn("~/.omp/agent/models.yml not found", "No provider→API-key mappings to verify."));
+		findings.push(warn("~/.cornfield/agent/models.yml not found", "No provider→API-key mappings to verify."));
 	}
 	if (!cred.agentDbFound) {
-		findings.push(warn("~/.omp/agent/agent.db not found", "Stored credentials cannot be resolved; run `omp login`."));
+		findings.push(
+			warn("~/.cornfield/agent/agent.db not found", "Stored credentials cannot be resolved; run `cornfield login`."),
+		);
 	}
 	if (cred.providers.length === 0) {
 		if (cred.modelsYmlFound) findings.push(ok("No provider API-key references in models.yml"));
@@ -209,7 +211,7 @@ function checkChannelsAndBridges(status: Awaited<ReturnType<typeof getGatewaySta
 		const reason = status.stalePidFile
 			? `gateway died (stale PID file cleaned; pidFile=${status.pid ?? "?"})`
 			: "gateway not running";
-		const detail = "Start with `omp-gateway start` for live channel/bridge/queue health.";
+		const detail = "Start with `cornfield-gateway start` for live channel/bridge/queue health.";
 		channelFindings.push(warn(reason, detail));
 		bridgeFindings.push(warn(reason));
 		queueFindings.push(warn(reason));
@@ -456,7 +458,7 @@ async function checkService(): Promise<Section> {
 	if (svc.running) {
 		findings.push(ok(`Running${svc.pid ? ` (pid ${svc.pid})` : ""}`));
 	} else {
-		findings.push(error("Service installed but not running", "Run `omp-gateway service start`."));
+		findings.push(error("Service installed but not running", "Run `cornfield-gateway service start`."));
 	}
 	return { name: "SERVICE", findings };
 }
@@ -476,7 +478,7 @@ async function safeRead(p: string): Promise<string | null> {
 /**
  * Run all checks and return a report.
  *
- * @param configPath  Path to gateway.json (defaults to ~/.omp/gateway.json).
+ * @param configPath  Path to gateway.json (defaults to ~/.cornfield/gateway.json).
  * @param opts.schedulerDbPath  Override the scheduler DB path. Production passes
  *   nothing and the default `getSchedulerDbPath()` is used; tests pass a temp DB
  *   so the real scheduler check (and its `--fix` repair closure) can be exercised
@@ -588,7 +590,7 @@ export function renderText(report: DoctorReport): string {
 	const c = countBySeverity(report);
 	lines.push(`Summary: ${c.error} error(s), ${c.warn} warning(s), ${c.fixable} fixable`);
 	if (c.fixable > 0) {
-		lines.push("Run `omp-gateway doctor --fix` to apply safe fixes.");
+		lines.push("Run `cornfield-gateway doctor --fix` to apply safe fixes.");
 	}
 	return lines.join("\n");
 }

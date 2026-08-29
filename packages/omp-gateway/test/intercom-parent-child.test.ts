@@ -62,10 +62,10 @@ describe("intercom parent-child broker edge", () => {
 
 	beforeAll(async () => {
 		runtimeDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-intercom-parent-"));
-		previousAgentDir = process.env.PI_CODING_AGENT_DIR;
-		process.env.PI_CODING_AGENT_DIR = path.join(runtimeDir, "agent");
+		previousAgentDir = process.env.CORNFIELD_AGENT_DIR;
+		process.env.CORNFIELD_AGENT_DIR = path.join(runtimeDir, "agent");
 		broker = new IntercomBroker({
-			// Clients resolve the socket from PI_CODING_AGENT_DIR: agentDir is
+			// Clients resolve the socket from CORNFIELD_AGENT_DIR: agentDir is
 			// <tmp>/agent, so the intercom dir (dirname) is <tmp>/intercom — keep
 			// the injected listener on the same path.
 			intercomDir: path.join(runtimeDir, "intercom"),
@@ -87,7 +87,7 @@ describe("intercom parent-child broker edge", () => {
 		if (broker) {
 			broker.stop();
 		}
-		process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+		process.env.CORNFIELD_AGENT_DIR = previousAgentDir;
 		await fs.rm(runtimeDir, { recursive: true, force: true });
 	});
 
@@ -210,7 +210,7 @@ describe("intercom parent-child broker edge", () => {
 		// External deletion of the socket FILE orphanes the listener (new
 		// clients get ENOENT) — the exact production incident. The broker's
 		// socket watchdog must rebind the path and accept new clients again.
-		// The client libs resolve the broker path from PI_CODING_AGENT_DIR, so
+		// The client libs resolve the broker path from CORNFIELD_AGENT_DIR, so
 		// this test probes the independent watchdog broker with a raw socket.
 		const watchDir = path.join(runtimeDir, "intercom-watch");
 		await fs.mkdir(watchDir, { recursive: true });

@@ -3,7 +3,7 @@
  * Standard Gemini models only (gemini-2.0-flash, gemini-2.5-*)
  */
 
-import { $env } from "@oh-my-pi/pi-utils";
+import { $env } from "@cornfield/utils";
 import { getGeminiCliHeaders } from "../../providers/google-gemini-cli";
 import { runGoogleOAuthLogin } from "./google-oauth-shared";
 import type { OAuthController, OAuthCredentials } from "./types";

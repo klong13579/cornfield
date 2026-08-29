@@ -15,7 +15,7 @@ import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as timers from "node:timers/promises";
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 
 export const SERVE_HOST = "127.0.0.1";
 export const SERVE_PORT = 7891;
@@ -62,20 +62,20 @@ export function resolveOmpBinary(resourcesPath: string): string {
 	const explicit = process.env.OMP_BINARY?.trim();
 	if (explicit) return explicit;
 
-	// 1. 打包内嵌（electron-builder extraResources 复制 ../coding-agent/dist/omp → omp-binary/omp）。
-	const packaged = path.join(resourcesPath, "omp-binary", "omp");
+	// 1. 打包内嵌（electron-builder extraResources 复制 ../coding-agent/dist/cornfield → omp-binary/cornfield）。
+	const packaged = path.join(resourcesPath, "omp-binary", "cornfield");
 	if (isExecutable(packaged)) return packaged;
 
 	// 2. 规范安装位置（scripts/install.sh 产物）。
-	const installed = path.join(os.homedir(), ".local", "bin", "omp");
+	const installed = path.join(os.homedir(), ".local", "bin", "cornfield");
 	if (isExecutable(installed)) return installed;
 
 	// 3. 开发 checkout 的构建产物。
-	const devBuild = path.resolve(import.meta.dirname, "../../dist/omp");
+	const devBuild = path.resolve(import.meta.dirname, "../../dist/cornfield");
 	if (isExecutable(devBuild)) return devBuild;
 
 	// 回退 PATH（开发机尚未构建二进制时）。
-	return "omp";
+	return "cornfield";
 }
 
 function execFileOut(file: string, args: string[]): Promise<string> {

@@ -409,7 +409,7 @@ export interface GatewayConfig {
 	/**
 	 * Isolated intercom broker runtime dir. Test seam: lets a gateway under
 	 * test host its broker on a tmp path instead of the production
-	 * `~/.omp/intercom` (a test broker's stop() used to unlink the production
+	 * `~/.cornfield/intercom` (a test broker's stop() used to unlink the production
 	 * socket — the 2026-08-18 incident). Omitted in production.
 	 */
 	intercomDir?: string;
@@ -439,7 +439,7 @@ export interface DingtalkAccountConfig {
 	deniedTools?: string[];
 	/**
 	 * Legacy fallback: drop thinking/reasoning blocks from the DingTalk AI Card.
-	 * Prefer `<agentDir>/.omp/config.yml` `hideThinkingBlock` (same key as the
+	 * Prefer `<agentDir>/.cornfield/config.yml` `hideThinkingBlock` (same key as the
 	 * omp TUI). Gateway resolves agentDir first, then user-level config, then
 	 * this field. The omp agent still emits thinking over RPC; the channel
 	 * just doesn't render it when resolved true.

@@ -18,7 +18,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 import { $ } from "bun";
 import { DWClient, type DWClientDownStream, TOPIC_CARD, TOPIC_ROBOT } from "dingtalk-stream";
 import type {
@@ -114,7 +114,7 @@ const MAX_BACKOFF_DELAY = 30_000;
  *  usually means credentials are wrong or the account was revoked,
  *  in which case reconnecting every 30s just spams the log without
  *  any realistic chance of succeeding. Operators can re-enable the
- *  channel via `omp-gateway reload` or a process restart. */
+ *  channel via `cornfield-gateway reload` or a process restart. */
 const MAX_RECONNECT_ATTEMPTS = 50;
 /** Message processing keepalive interval (ms) — refresh lastSocketAvailableTime */
 const PROCESSING_KEEPALIVE_INTERVAL = 15_000;
@@ -404,7 +404,7 @@ export class DingTalkChannel extends BaseChannel {
 	 * Card. The omp agent still emits thinking deltas; the channel
 	 * just discards them instead of forwarding to `buildThinkBlock`.
 	 * Set by the gateway via `resolveHideThinkingBlock` — agentDir
-	 * `.omp/config.yml` is canonical; `gateway.json` is legacy fallback.
+	 * `.cornfield/config.yml` is canonical; `gateway.json` is legacy fallback.
 	 */
 	#hideThinkingBlock = false;
 	/**
@@ -524,7 +524,7 @@ export class DingTalkChannel extends BaseChannel {
 	 * Card via `buildThinkBlock`. The model still thinks; the card
 	 * just doesn't show it. Set by the gateway from
 	 * Prefer resolving via `resolveHideThinkingBlock(agentDir)` so the
-	 * value matches `<agentDir>/.omp/config.yml`.
+	 * value matches `<agentDir>/.cornfield/config.yml`.
 	 */
 	setHideThinkingBlock(hide: boolean): void {
 		this.#hideThinkingBlock = hide;
@@ -1683,7 +1683,7 @@ export class DingTalkChannel extends BaseChannel {
 		this.#client = this.createDWClient({
 			clientId: this.#config.appKey,
 			clientSecret: this.#config.appSecret,
-			ua: "omp-gateway/0.1.0",
+			ua: "cornfield-gateway/0.1.0",
 			debug: false,
 			autoReconnect: false, // omp-gateway has its own #doReconnect logic
 		});
@@ -2895,7 +2895,7 @@ export class DingTalkChannel extends BaseChannel {
 	// gateway is running as a daemon and we want to simulate a user
 	// message without manually opening DingTalk. Callers are expected to
 	// gate the test HTTP endpoint (see `Gateway.injectTestEndpoint`)
-	// behind `OMP_GATEWAY_TEST_MODE=1`.
+	// behind `CORNFIELD_GATEWAY_TEST_MODE=1`.
 	//
 	// Returns the parsed `InboundMessage` on success so callers can
 	// assert on `conversationId`, `userId`, etc. without re-parsing.

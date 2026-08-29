@@ -39,7 +39,7 @@ export function friendlyLlmError(raw: string): string {
  * Pure functions: no state, no I/O. Testable in isolation.
  */
 
-import type { AssistantMessage, ToolCall, ToolResultMessage, Usage } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage, ToolCall, ToolResultMessage, Usage } from "@cornfield/ai";
 import type { AgentEvent } from "./agent-transport-wire";
 import type { AgentResponseMeta, AgentResponseToolCall, AgentResponseToolResult } from "./types";
 

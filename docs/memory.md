@@ -92,5 +92,5 @@ Additional tuning knobs (concurrency, lease durations, token budgets) are availa
 - `packages/self-evolution/src/memory/index.ts` — pipeline orchestration and injection
 - `packages/self-evolution/src/memory/storage.ts` — SQLite-backed job queue and thread registry
 - `packages/self-evolution/src/memory/prompts/` — memory prompt templates
-- `@oh-my-pi/pi-coding-agent/memories` — compatibility re-exports
+- `@cornfield/coding-agent/memories` — compatibility re-exports
 - `packages/coding-agent/src/internal-urls/memory-protocol.ts` — `memory://` URL handler

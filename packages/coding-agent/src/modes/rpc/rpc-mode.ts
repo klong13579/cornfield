@@ -10,7 +10,7 @@
  * - Events: AgentSessionEvent objects streamed as they occur
  * - Extension UI: Extension UI requests are emitted, client responds with extension_ui_response
  */
-import { $env, logger, readJsonl, Snowflake } from "@oh-my-pi/pi-utils";
+import { $env, logger, readJsonl, Snowflake } from "@cornfield/utils";
 import type {
 	ExtensionUIContext,
 	ExtensionUIDialogOptions,
@@ -80,7 +80,7 @@ function parseValueDialogResponse(
 }
 
 function shouldEmitRpcTitles(): boolean {
-	const raw = $env.PI_RPC_EMIT_TITLE;
+	const raw = $env.CORNFIELD_RPC_EMIT_TITLE;
 	if (!raw) return false;
 	const normalized = raw.trim().toLowerCase();
 	return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
@@ -156,7 +156,7 @@ export function requestRpcEditor(
  */
 export async function runRpcMode(session: AgentSession): Promise<never> {
 	// Surface unhandled errors as explicit exits so the gateway bridge can
-	// detect OMP death via proc.exited (exit code != 0) rather than guessing
+	// detect agent death via proc.exited (exit code != 0) rather than guessing
 	// from stdin/stdout silence. Without this, an uncaught exception or
 	// unhandled promise rejection silently kills the subprocess and the
 	// bridge only learns about it on the next transport.start() retry —
@@ -179,7 +179,7 @@ export async function runRpcMode(session: AgentSession): Promise<never> {
 	// protocol_version field is the wire handshake the gateway validates
 	// before treating this subprocess as compatible (see RPC_PROTOCOL_VERSION
 	// in packages/omp-gateway/src/agent-transport.ts — keep the value in sync).
-	process.stdout.write(`${JSON.stringify({ type: "ready", protocol_version: 1, agent: "omp" })}\n`);
+	process.stdout.write(`${JSON.stringify({ type: "ready", protocol_version: 1, agent: "cornfield" })}\n`);
 	const output = (obj: RpcResponse | RpcExtensionUIRequest | object) => {
 		process.stdout.write(`${JSON.stringify(obj)}\n`);
 	};
@@ -352,7 +352,7 @@ export async function runRpcMode(session: AgentSession): Promise<never> {
 		}
 
 		setTitle(title: string): void {
-			// Title updates are low-value noise for most RPC hosts; opt in via PI_RPC_EMIT_TITLE=1.
+			// Title updates are low-value noise for most RPC hosts; opt in via CORNFIELD_RPC_EMIT_TITLE=1.
 			if (!emitRpcTitles) return;
 			this.output({
 				type: "extension_ui_request",

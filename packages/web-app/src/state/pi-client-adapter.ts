@@ -1,5 +1,5 @@
-import type { PiClientEventKind, PiWebSocketCtor } from "@oh-my-pi/pi-client";
-import { PiClient as WirePiClient } from "@oh-my-pi/pi-client";
+import type { PiClientEventKind, PiWebSocketCtor } from "@cornfield/client";
+import { PiClient as WirePiClient } from "@cornfield/client";
 import type {
 	AgentInfoDto,
 	AvailableModelsDto,
@@ -21,7 +21,7 @@ import type {
 	ToolSwitchesDto,
 	WireCommand,
 	WireServerEventDto,
-} from "@oh-my-pi/pi-wire";
+} from "@cornfield/wire";
 import type {
 	AgentMessageDto,
 	ArtifactDto,
@@ -59,7 +59,7 @@ interface WireSessionIndexEntryDto {
 }
 
 /**
- * 真实 `@oh-my-pi/pi-client` 适配器 —— 实现 web-app 内部契约（lib/pi-client-api.ts）。
+ * 真实 `@cornfield/client` 适配器 —— 实现 web-app 内部契约（lib/pi-client-api.ts）。
  *
  * 差异映射（pi-client 真实 API vs 本前端契约，完整差异清单见 P3 汇报）：
  * - pi-client 只提供 `request(WireCommand)` 通用命令面，无业务方法 → 本层按命令拼装
@@ -516,7 +516,7 @@ export class PiClientAdapter implements PiClient {
 
 	// ── MCP 服务器管理（设置页；契约命令由 serve 端 m1 并行实现，WireCommand union 暂缺故最小局部 cast）──
 
-	/** 列出 MCP 服务器（get_mcp_servers；读 ~/.omp/agent/mcp.json 的 mcpServers）。 */
+	/** 列出 MCP 服务器（get_mcp_servers；读 ~/.cornfield/agent/mcp.json 的 mcpServers）。 */
 	async getMcpServers(): Promise<{ servers: McpServerDto[] }> {
 		const result = await this.#req<{ servers?: McpServerDto[] | null }>({
 			type: "get_mcp_servers",
@@ -629,7 +629,7 @@ export class PiClientAdapter implements PiClient {
 		}
 	}
 
-	/** 听记历史（listen_list；~/.omp/listen/ 全部录音，名称倒序 + 转写全文）。 */
+	/** 听记历史（listen_list；~/.cornfield/listen/ 全部录音，名称倒序 + 转写全文）。 */
 	async listenList(): Promise<{ ok: boolean; recordings: ListenRecordingDto[] }> {
 		const result = await this.#req<{ ok?: boolean; recordings?: ListenRecordingDto[] | null }>({
 			type: "listen_list",

@@ -2,9 +2,9 @@
  * Exported MoA pipeline stage runners (design: docs/plans/2026-07-15-moa-stage-test-design.md).
  * `executePlan` orchestrates these; the stage-test CLI calls them directly.
  */
-import type { AuthStorage, ExtensionUIContext, ModelRegistry, Settings } from "@oh-my-pi/pi-coding-agent";
-import { parseModelPattern } from "@oh-my-pi/pi-coding-agent/config/model-resolver";
-import { prompt } from "@oh-my-pi/pi-utils";
+import type { AuthStorage, ExtensionUIContext, ModelRegistry, Settings } from "@cornfield/coding-agent";
+import { parseModelPattern } from "@cornfield/coding-agent/config/model-resolver";
+import { prompt } from "@cornfield/utils";
 import {
 	type AskQuestionsListItem,
 	type AskUserContext,

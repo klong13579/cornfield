@@ -1,7 +1,7 @@
 /**
  * Registry v2 / workspace declaration tests.
  *
- * Covers the workspace-v2 design (`agentDir/.omp/workspace.json` as source of
+ * Covers the workspace-v2 design (`agentDir/.cornfield/workspace.json` as source of
  * truth, registry as thin index with cached fields):
  *   - loadWorkspace: missing/corrupt → null, valid → declaration
  *   - ensureWorkspace: creates with defaults, additive (never overwrites)
@@ -41,7 +41,7 @@ describe("loadWorkspace", () => {
 	});
 
 	test("returns null for a corrupt / non-v2 file", async () => {
-		await fs.mkdir(path.join(agentDir, ".omp"), { recursive: true });
+		await fs.mkdir(path.join(agentDir, ".cornfield"), { recursive: true });
 		await Bun.write(workspaceFilePath(agentDir), "not json");
 		expect(await loadWorkspace(agentDir)).toBeNull();
 
@@ -65,7 +65,7 @@ describe("loadWorkspace", () => {
 });
 
 describe("ensureWorkspace", () => {
-	test("creates .omp/workspace.json with defaults; idempotent on second call", async () => {
+	test("creates .cornfield/workspace.json with defaults; idempotent on second call", async () => {
 		const first = await ensureWorkspace(agentDir, { name: "hr" });
 		await fs.writeFile(path.join(agentDir, "mission.md"), "# custom\n");
 		const second = await ensureWorkspace(agentDir, { name: "hr" });
@@ -127,7 +127,7 @@ describe("registry v2", () => {
 		const entry = await registerAgent("ops/hr", agentDir, "default");
 		expect(entry.workspaceVersion).toBeUndefined();
 		expect(entry.displayName).toBeUndefined();
-		// No .omp/workspace.json created by registration itself.
+		// No .cornfield/workspace.json created by registration itself.
 		await expect(fs.stat(workspaceFilePath(agentDir))).rejects.toThrow();
 	});
 });

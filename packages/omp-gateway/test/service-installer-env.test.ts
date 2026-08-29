@@ -39,61 +39,64 @@ describe("resolvePersistedEnv", () => {
 	});
 
 	test("applies defaults when the shell has neither var", () => {
-		delete process.env.OMP_GATEWAY_TEST_MODE;
-		delete process.env.OMP_GATEWAY_TEST_PORT;
+		delete process.env.CORNFIELD_GATEWAY_TEST_MODE;
+		delete process.env.CORNFIELD_GATEWAY_TEST_PORT;
 		expect(resolvePersistedEnv()).toEqual({
-			OMP_GATEWAY_TEST_MODE: "1",
-			OMP_GATEWAY_TEST_PORT: "7890",
+			CORNFIELD_GATEWAY_TEST_MODE: "1",
+			CORNFIELD_GATEWAY_TEST_PORT: "7890",
 		});
 	});
 
 	test("uses explicit shell value when set", () => {
-		process.env.OMP_GATEWAY_TEST_MODE = "1";
-		process.env.OMP_GATEWAY_TEST_PORT = "9000";
+		process.env.CORNFIELD_GATEWAY_TEST_MODE = "1";
+		process.env.CORNFIELD_GATEWAY_TEST_PORT = "9000";
 		expect(resolvePersistedEnv()).toEqual({
-			OMP_GATEWAY_TEST_MODE: "1",
-			OMP_GATEWAY_TEST_PORT: "9000",
+			CORNFIELD_GATEWAY_TEST_MODE: "1",
+			CORNFIELD_GATEWAY_TEST_PORT: "9000",
 		});
 	});
 
 	test("respects explicit opt-out (e.g. 0) over the default", () => {
-		process.env.OMP_GATEWAY_TEST_MODE = "0";
-		delete process.env.OMP_GATEWAY_TEST_PORT;
+		process.env.CORNFIELD_GATEWAY_TEST_MODE = "0";
+		delete process.env.CORNFIELD_GATEWAY_TEST_PORT;
 		expect(resolvePersistedEnv()).toEqual({
-			OMP_GATEWAY_TEST_MODE: "0",
-			OMP_GATEWAY_TEST_PORT: "7890",
+			CORNFIELD_GATEWAY_TEST_MODE: "0",
+			CORNFIELD_GATEWAY_TEST_PORT: "7890",
 		});
 	});
 
 	test("treats empty-string shell values as unset (default applies)", () => {
-		process.env.OMP_GATEWAY_TEST_MODE = "";
-		process.env.OMP_GATEWAY_TEST_PORT = "";
+		process.env.CORNFIELD_GATEWAY_TEST_MODE = "";
+		process.env.CORNFIELD_GATEWAY_TEST_PORT = "";
 		expect(resolvePersistedEnv()).toEqual({
-			OMP_GATEWAY_TEST_MODE: "1",
-			OMP_GATEWAY_TEST_PORT: "7890",
+			CORNFIELD_GATEWAY_TEST_MODE: "1",
+			CORNFIELD_GATEWAY_TEST_PORT: "7890",
 		});
 	});
 
 	test("mixes default + explicit (one set, one not)", () => {
-		delete process.env.OMP_GATEWAY_TEST_MODE;
-		process.env.OMP_GATEWAY_TEST_PORT = "9999";
+		delete process.env.CORNFIELD_GATEWAY_TEST_MODE;
+		process.env.CORNFIELD_GATEWAY_TEST_PORT = "9999";
 		expect(resolvePersistedEnv()).toEqual({
-			OMP_GATEWAY_TEST_MODE: "1",
-			OMP_GATEWAY_TEST_PORT: "9999",
+			CORNFIELD_GATEWAY_TEST_MODE: "1",
+			CORNFIELD_GATEWAY_TEST_PORT: "9999",
 		});
 	});
 
 	test("respects the allowlist ordering", () => {
-		process.env.OMP_GATEWAY_TEST_PORT = "7890";
-		process.env.OMP_GATEWAY_TEST_MODE = "1";
-		expect(Object.keys(resolvePersistedEnv())).toEqual(["OMP_GATEWAY_TEST_MODE", "OMP_GATEWAY_TEST_PORT"]);
+		process.env.CORNFIELD_GATEWAY_TEST_PORT = "7890";
+		process.env.CORNFIELD_GATEWAY_TEST_MODE = "1";
+		expect(Object.keys(resolvePersistedEnv())).toEqual([
+			"CORNFIELD_GATEWAY_TEST_MODE",
+			"CORNFIELD_GATEWAY_TEST_PORT",
+		]);
 	});
 
 	test("accepts an explicit env snapshot for hermetic tests", () => {
-		const env = { OMP_GATEWAY_TEST_MODE: "1", OMP_GATEWAY_TEST_PORT: "9000" };
+		const env = { CORNFIELD_GATEWAY_TEST_MODE: "1", CORNFIELD_GATEWAY_TEST_PORT: "9000" };
 		expect(resolvePersistedEnv(env)).toEqual({
-			OMP_GATEWAY_TEST_MODE: "1",
-			OMP_GATEWAY_TEST_PORT: "9000",
+			CORNFIELD_GATEWAY_TEST_MODE: "1",
+			CORNFIELD_GATEWAY_TEST_PORT: "9000",
 		});
 	});
 
@@ -146,39 +149,39 @@ describe("generateLaunchdPlist env persistence", () => {
 		const envSection = plist.split("<key>EnvironmentVariables</key>")[1]?.split("</dict>")[0] ?? "";
 		expect(envSection).toContain("<key>PATH</key>");
 		expect(envSection).toContain("/Users/test/.local/bin");
-		expect(envSection).toContain("<key>OMP_GATEWAY_TEST_MODE</key>\n\t\t<string>1</string>");
-		expect(envSection).toContain("<key>OMP_GATEWAY_TEST_PORT</key>\n\t\t<string>7890</string>");
+		expect(envSection).toContain("<key>CORNFIELD_GATEWAY_TEST_MODE</key>\n\t\t<string>1</string>");
+		expect(envSection).toContain("<key>CORNFIELD_GATEWAY_TEST_PORT</key>\n\t\t<string>7890</string>");
 	});
 
-	test("uses explicit OMP_GATEWAY_TEST_MODE=1 when set", () => {
-		const env: NodeJS.ProcessEnv = { HOME: "/Users/test", OMP_GATEWAY_TEST_MODE: "1" };
+	test("uses explicit CORNFIELD_GATEWAY_TEST_MODE=1 when set", () => {
+		const env: NodeJS.ProcessEnv = { HOME: "/Users/test", CORNFIELD_GATEWAY_TEST_MODE: "1" };
 		const plist = generateLaunchdPlist("/tmp/log", env);
-		expect(plist).toContain("<key>OMP_GATEWAY_TEST_MODE</key>");
+		expect(plist).toContain("<key>CORNFIELD_GATEWAY_TEST_MODE</key>");
 		expect(plist).toContain("<string>1</string>");
 	});
 
 	test("respects explicit opt-out (0) over the default", () => {
-		const env: NodeJS.ProcessEnv = { HOME: "/Users/test", OMP_GATEWAY_TEST_MODE: "0" };
+		const env: NodeJS.ProcessEnv = { HOME: "/Users/test", CORNFIELD_GATEWAY_TEST_MODE: "0" };
 		const plist = generateLaunchdPlist("/tmp/log", env);
-		expect(plist).toContain("<key>OMP_GATEWAY_TEST_MODE</key>\n\t\t<string>0</string>");
-		expect(plist).toContain("<key>OMP_GATEWAY_TEST_PORT</key>\n\t\t<string>7890</string>");
+		expect(plist).toContain("<key>CORNFIELD_GATEWAY_TEST_MODE</key>\n\t\t<string>0</string>");
+		expect(plist).toContain("<key>CORNFIELD_GATEWAY_TEST_PORT</key>\n\t\t<string>7890</string>");
 	});
 
 	test("includes both vars with both values when both are set", () => {
 		const env: NodeJS.ProcessEnv = {
 			HOME: "/Users/test",
-			OMP_GATEWAY_TEST_MODE: "1",
-			OMP_GATEWAY_TEST_PORT: "9000",
+			CORNFIELD_GATEWAY_TEST_MODE: "1",
+			CORNFIELD_GATEWAY_TEST_PORT: "9000",
 		};
 		const plist = generateLaunchdPlist("/tmp/log", env);
-		expect(plist).toContain("<key>OMP_GATEWAY_TEST_MODE</key>\n\t\t<string>1</string>");
-		expect(plist).toContain("<key>OMP_GATEWAY_TEST_PORT</key>\n\t\t<string>9000</string>");
+		expect(plist).toContain("<key>CORNFIELD_GATEWAY_TEST_MODE</key>\n\t\t<string>1</string>");
+		expect(plist).toContain("<key>CORNFIELD_GATEWAY_TEST_PORT</key>\n\t\t<string>9000</string>");
 	});
 
 	test("XML-escapes values containing XML metacharacters", () => {
 		const env: NodeJS.ProcessEnv = {
 			HOME: "/Users/test",
-			OMP_GATEWAY_TEST_MODE: 'a&b<c>"',
+			CORNFIELD_GATEWAY_TEST_MODE: 'a&b<c>"',
 		};
 		const plist = generateLaunchdPlist("/tmp/log", env);
 		// Each metacharacter must be replaced with the entity reference
@@ -188,32 +191,32 @@ describe("generateLaunchdPlist env persistence", () => {
 });
 
 describe("resolveStableRuntime", () => {
-	test("returns the omp-gateway path when ~/.local/bin/omp-gateway exists and is executable", () => {
-		const home = mkdtempSync(join(tmpdir(), "omp-stable-"));
+	test("returns the cornfield-gateway path when ~/.local/bin/cornfield-gateway exists and is executable", () => {
+		const home = mkdtempSync(join(tmpdir(), "cornfield-stable-"));
 		try {
 			const dir = join(home, ".local", "bin");
 			require("node:fs").mkdirSync(dir, { recursive: true });
-			require("node:fs").writeFileSync(join(dir, "omp-gateway"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
-			expect(resolveStableRuntime(home)).toBe(join(home, ".local", "bin", "omp-gateway"));
+			require("node:fs").writeFileSync(join(dir, "cornfield-gateway"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+			expect(resolveStableRuntime(home)).toBe(join(home, ".local", "bin", "cornfield-gateway"));
 		} finally {
 			rmSync(home, { recursive: true, force: true });
 		}
 	});
 
-	test("ignores a plain ~/.local/bin/omp — the agent binary cannot act as the daemon", () => {
-		const home = mkdtempSync(join(tmpdir(), "omp-stable-"));
+	test("ignores a plain ~/.local/bin/cornfield — the agent binary cannot act as the daemon", () => {
+		const home = mkdtempSync(join(tmpdir(), "cornfield-stable-"));
 		try {
 			const dir = join(home, ".local", "bin");
 			require("node:fs").mkdirSync(dir, { recursive: true });
-			require("node:fs").writeFileSync(join(dir, "omp"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+			require("node:fs").writeFileSync(join(dir, "cornfield"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
 			expect(resolveStableRuntime(home)).toBeNull();
 		} finally {
 			rmSync(home, { recursive: true, force: true });
 		}
 	});
 
-	test("returns null when ~/.local/bin/omp-gateway does not exist", () => {
-		const home = mkdtempSync(join(tmpdir(), "omp-stable-"));
+	test("returns null when ~/.local/bin/cornfield-gateway does not exist", () => {
+		const home = mkdtempSync(join(tmpdir(), "cornfield-stable-"));
 		try {
 			expect(resolveStableRuntime(home)).toBeNull();
 		} finally {
@@ -221,12 +224,12 @@ describe("resolveStableRuntime", () => {
 		}
 	});
 
-	test("returns null when ~/.local/bin/omp-gateway exists but is not executable", () => {
-		const home = mkdtempSync(join(tmpdir(), "omp-stable-"));
+	test("returns null when ~/.local/bin/cornfield-gateway exists but is not executable", () => {
+		const home = mkdtempSync(join(tmpdir(), "cornfield-stable-"));
 		try {
 			const dir = join(home, ".local", "bin");
 			require("node:fs").mkdirSync(dir, { recursive: true });
-			require("node:fs").writeFileSync(join(dir, "omp-gateway"), "not executable\n", { mode: 0o644 });
+			require("node:fs").writeFileSync(join(dir, "cornfield-gateway"), "not executable\n", { mode: 0o644 });
 			expect(resolveStableRuntime(home)).toBeNull();
 		} finally {
 			rmSync(home, { recursive: true, force: true });
@@ -235,16 +238,16 @@ describe("resolveStableRuntime", () => {
 });
 
 describe("generateLaunchdPlist runtime resolution", () => {
-	test("ProgramArguments: stable runtime + root subcommands when omp-gateway exists", () => {
-		const home = mkdtempSync(join(tmpdir(), "omp-stable-"));
+	test("ProgramArguments: stable runtime + root subcommands when cornfield-gateway exists", () => {
+		const home = mkdtempSync(join(tmpdir(), "cornfield-stable-"));
 		try {
 			const dir = join(home, ".local", "bin");
 			require("node:fs").mkdirSync(dir, { recursive: true });
-			require("node:fs").writeFileSync(join(dir, "omp-gateway"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+			require("node:fs").writeFileSync(join(dir, "cornfield-gateway"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
 			const plist = generateLaunchdPlist("/tmp/log", { HOME: home });
 			// First ProgramArguments entry must be the stable runtime, NOT
 			// whatever process.execPath happens to be in the test env.
-			expect(plist).toContain(`<string>${join(home, ".local", "bin", "omp-gateway")}</string>`);
+			expect(plist).toContain(`<string>${join(home, ".local", "bin", "cornfield-gateway")}</string>`);
 			expect(plist).not.toContain(`<string>${process.execPath}</string>`);
 			// Root subcommands — no `gateway` middle layer anymore.
 			expect(plist).toContain("<string>start</string>");
@@ -255,7 +258,7 @@ describe("generateLaunchdPlist runtime resolution", () => {
 	});
 
 	test("falls back to dev/prod detection when no stable runtime is present", () => {
-		const home = mkdtempSync(join(tmpdir(), "omp-stable-"));
+		const home = mkdtempSync(join(tmpdir(), "cornfield-stable-"));
 		try {
 			const plist = generateLaunchdPlist("/tmp/log", { HOME: home });
 			// No stable runtime → plist must use process.execPath as argv[0],
@@ -277,41 +280,41 @@ describe("generateSystemdService env persistence", () => {
 		const serviceSection = unit.split("[Service]")[1]?.split("[Install]")[0] ?? "";
 		expect(serviceSection).toContain('Environment="PATH=');
 		expect(serviceSection).toContain("/Users/test/.local/bin");
-		expect(serviceSection).toContain('Environment="OMP_GATEWAY_TEST_MODE=1"');
-		expect(serviceSection).toContain('Environment="OMP_GATEWAY_TEST_PORT=7890"');
+		expect(serviceSection).toContain('Environment="CORNFIELD_GATEWAY_TEST_MODE=1"');
+		expect(serviceSection).toContain('Environment="CORNFIELD_GATEWAY_TEST_PORT=7890"');
 	});
 
-	test("includes OMP_GATEWAY_TEST_MODE=1 when set", () => {
-		const env: NodeJS.ProcessEnv = { HOME: "/Users/test", OMP_GATEWAY_TEST_MODE: "1" };
+	test("includes CORNFIELD_GATEWAY_TEST_MODE=1 when set", () => {
+		const env: NodeJS.ProcessEnv = { HOME: "/Users/test", CORNFIELD_GATEWAY_TEST_MODE: "1" };
 		const unit = generateSystemdService("/tmp/log", env);
-		expect(unit).toContain('Environment="OMP_GATEWAY_TEST_MODE=1"');
+		expect(unit).toContain('Environment="CORNFIELD_GATEWAY_TEST_MODE=1"');
 	});
 
 	test("respects explicit opt-out (0) over the default", () => {
-		const env: NodeJS.ProcessEnv = { HOME: "/Users/test", OMP_GATEWAY_TEST_MODE: "0" };
+		const env: NodeJS.ProcessEnv = { HOME: "/Users/test", CORNFIELD_GATEWAY_TEST_MODE: "0" };
 		const unit = generateSystemdService("/tmp/log", env);
-		expect(unit).toContain('Environment="OMP_GATEWAY_TEST_MODE=0"');
-		expect(unit).toContain('Environment="OMP_GATEWAY_TEST_PORT=7890"');
+		expect(unit).toContain('Environment="CORNFIELD_GATEWAY_TEST_MODE=0"');
+		expect(unit).toContain('Environment="CORNFIELD_GATEWAY_TEST_PORT=7890"');
 	});
 
 	test("includes both vars with both values when both are set", () => {
 		const env: NodeJS.ProcessEnv = {
 			HOME: "/Users/test",
-			OMP_GATEWAY_TEST_MODE: "1",
-			OMP_GATEWAY_TEST_PORT: "9000",
+			CORNFIELD_GATEWAY_TEST_MODE: "1",
+			CORNFIELD_GATEWAY_TEST_PORT: "9000",
 		};
 		const unit = generateSystemdService("/tmp/log", env);
-		expect(unit).toContain('Environment="OMP_GATEWAY_TEST_MODE=1"');
-		expect(unit).toContain('Environment="OMP_GATEWAY_TEST_PORT=9000"');
+		expect(unit).toContain('Environment="CORNFIELD_GATEWAY_TEST_MODE=1"');
+		expect(unit).toContain('Environment="CORNFIELD_GATEWAY_TEST_PORT=9000"');
 	});
 
 	test("escapes embedded double quotes and backslashes in values", () => {
 		const env: NodeJS.ProcessEnv = {
 			HOME: "/Users/test",
-			OMP_GATEWAY_TEST_MODE: 'a"b\\c',
+			CORNFIELD_GATEWAY_TEST_MODE: 'a"b\\c',
 		};
 		const unit = generateSystemdService("/tmp/log", env);
 		// Backslashes doubled, double-quotes backslash-escaped
-		expect(unit).toContain('Environment="OMP_GATEWAY_TEST_MODE=a\\"b\\\\c"');
+		expect(unit).toContain('Environment="CORNFIELD_GATEWAY_TEST_MODE=a\\"b\\\\c"');
 	});
 });

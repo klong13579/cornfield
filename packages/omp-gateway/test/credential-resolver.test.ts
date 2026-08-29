@@ -13,10 +13,10 @@ import { vi } from "vitest";
 
 function makeFakeHome(modelsYml: string, credentials: Array<{ provider: string; key: string }>): string {
 	const home = fs.mkdtempSync(path.join(os.tmpdir(), "omp-cred-test-"));
-	fs.mkdirSync(path.join(home, ".omp", "agent"), { recursive: true });
-	fs.writeFileSync(path.join(home, ".omp", "agent", "models.yml"), modelsYml);
+	fs.mkdirSync(path.join(home, ".cornfield", "agent"), { recursive: true });
+	fs.writeFileSync(path.join(home, ".cornfield", "agent", "models.yml"), modelsYml);
 	const { Database } = require("bun:sqlite");
-	const db = new Database(path.join(home, ".omp", "agent", "agent.db"));
+	const db = new Database(path.join(home, ".cornfield", "agent", "agent.db"));
 	db.exec(`CREATE TABLE auth_credentials (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		provider TEXT NOT NULL,

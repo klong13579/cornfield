@@ -5,7 +5,7 @@
  * Each channel is responsible for its own connection lifecycle.
  */
 
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 import type { Channel, ChannelConfig, InboundMessage, OutboundMessage } from "../types";
 
 export class ChannelRegistry {

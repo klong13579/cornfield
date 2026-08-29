@@ -6,7 +6,7 @@
  * where it left off.
  */
 import type { Database } from "bun:sqlite";
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 
 export interface ResumeContext {
 	/** Previous session ID */

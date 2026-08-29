@@ -1,6 +1,6 @@
 # Natives Architecture
 
-`@oh-my-pi/pi-natives` is now a two-layer package around a loader:
+`@cornfield/natives` is now a two-layer package around a loader:
 
 1. **CommonJS loader/package entrypoint** resolves and loads the correct `.node` addon and patches generated enum objects onto the export object.
 2. **Rust N-API module layer** implements the exported functions/classes and emits the generated TypeScript declarations.
@@ -28,7 +28,7 @@ This document is the foundation for deeper module-level docs.
 - `exports["."].types`: `./native/index.d.ts`
 - `exports["."].import`: `./native/index.js`
 
-There is no current `packages/natives/src` TypeScript wrapper layer. Consumers import functions/classes/enums directly from `@oh-my-pi/pi-natives`; the type contract is the generated `native/index.d.ts` plus enum exports appended by `scripts/gen-enums.ts`.
+There is no current `packages/natives/src` TypeScript wrapper layer. Consumers import functions/classes/enums directly from `@cornfield/natives`; the type contract is the generated `native/index.d.ts` plus enum exports appended by `scripts/gen-enums.ts`.
 
 Current capability groups in the generated API include:
 
@@ -56,8 +56,8 @@ Current capability groups in the generated API include:
 
 Filename strategy:
 
-- Default: `pi_natives.<platform>-<arch>.node`
-- x64 variant: `pi_natives.<platform>-<arch>-modern.node` or `...-baseline.node`
+- Default: `cornfield_natives.<platform>-<arch>.node`
+- x64 variant: `cornfield_natives.<platform>-<arch>-modern.node` or `...-baseline.node`
 - x64 runtime fallback includes the unsuffixed default filename after variant candidates.
 
 ### Platform-specific variant detection
@@ -68,7 +68,7 @@ For x64, variant selection uses:
 - macOS: `sysctl -n machdep.cpu.leaf7_features`, then `machdep.cpu.features`
 - Windows: PowerShell check for `System.Runtime.Intrinsics.X86.Avx2`
 
-`PI_NATIVE_VARIANT` can force `modern` or `baseline`; invalid values are ignored.
+`CORNFIELD_NATIVE_VARIANT` can force `modern` or `baseline`; invalid values are ignored.
 
 ### Binary distribution and extraction model
 
@@ -78,11 +78,11 @@ For compiled binaries, loader behavior is:
 
 1. Check versioned user cache path: `<getNativesDir()>/<packageVersion>/...`.
 2. Check legacy compiled-binary location:
-   - Windows: `%LOCALAPPDATA%/omp` (fallback `%USERPROFILE%/AppData/Local/omp`)
+   - Windows: `%LOCALAPPDATA%/cornfield` (fallback `%USERPROFILE%/AppData/Local/cornfield`)
    - non-Windows: `~/.local/bin`
 3. Fall back to packaged `native/` and executable directory candidates.
 
-`getNativesDir()` uses `$XDG_DATA_HOME/omp/natives` when `$XDG_DATA_HOME/omp` exists; otherwise it uses `~/.omp/natives`.
+`getNativesDir()` uses `$XDG_DATA_HOME/cornfield/natives` when `$XDG_DATA_HOME/cornfield` exists; otherwise it uses `~/.cornfield/natives`.
 
 If a populated embedded addon manifest is present, it is also treated as a compiled-binary signal. The loader can extract the matching embedded `.node` into the versioned cache directory before candidate probing.
 
@@ -143,7 +143,7 @@ N-API exports are generated from Rust `#[napi]` functions/classes/objects/enums.
 
 ## Runtime flow (high level)
 
-1. Consumer imports from `@oh-my-pi/pi-natives`.
+1. Consumer imports from `@cornfield/natives`.
 2. `native/index.js` computes platform/arch/variant and candidate paths.
 3. Optional embedded binary extraction occurs for compiled distributions.
 4. The first `require(candidate)` that succeeds becomes the exported addon object.

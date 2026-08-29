@@ -1,7 +1,7 @@
 /**
  * NudgeDeliverer: formats and delivers nudge messages to the user.
  */
-import type { ExtensionContext } from "@oh-my-pi/pi-coding-agent/extensibility/extensions";
+import type { ExtensionContext } from "@cornfield/coding-agent/extensibility/extensions";
 import { formatNudgeContextContent } from "./nudge-context-injector";
 import type { Nudge } from "./types";
 

@@ -7,7 +7,7 @@
  *   - Missing files are added additively when `mission.md` already exists.
  *   - Default content matches the design (mission, AGENTS, TOOLS, etc.).
  *   - User-created / optional directories (scripts, external) are NOT in the skeleton.
- *   - `resolveAgentDir` defaults to `~/.omp/agents/<id>` and respects an explicit override.
+ *   - `resolveAgentDir` defaults to `~/.cornfield/agents/<id>` and respects an explicit override.
  *   - `buildAgentSessionPath` produces a `<agentDir>/sessions/cid_<safeId>.jsonl` path.
  */
 
@@ -32,9 +32,9 @@ const REQUIRED_FILES = [
 	"prompt-includes.json",
 	".gitignore",
 	// runtime
-	".omp/config.yml",
-	".omp/SYSTEM.md",
-	".omp/skills/.gitkeep",
+	".cornfield/config.yml",
+	".cornfield/SYSTEM.md",
+	".cornfield/skills/.gitkeep",
 	"knowledge/handbook/.gitkeep",
 	"sessions/.gitkeep",
 	"cron/tasks/.gitkeep",
@@ -151,29 +151,29 @@ describe("skeleton", () => {
 		]);
 	});
 
-	test(".omp/SYSTEM.md contains gateway agent system prompt baseline", async () => {
+	test(".cornfield/SYSTEM.md contains gateway agent system prompt baseline", async () => {
 		await ensureAgentDir(tmpDir);
-		const content = await Bun.file(path.join(tmpDir, ".omp/SYSTEM.md")).text();
+		const content = await Bun.file(path.join(tmpDir, ".cornfield/SYSTEM.md")).text();
 		expect(content).toContain("Gateway Agent");
 		expect(content).toContain("工具纪律");
 		expect(content).toContain("安全与授权");
 	});
 
-	test(".omp/config.yml contains modelRoles default and theme", async () => {
+	test(".cornfield/config.yml contains modelRoles default and theme", async () => {
 		await ensureAgentDir(tmpDir);
-		const content = await Bun.file(path.join(tmpDir, ".omp/config.yml")).text();
+		const content = await Bun.file(path.join(tmpDir, ".cornfield/config.yml")).text();
 		expect(content).toContain("modelRoles");
 		expect(content).toContain("default");
 		expect(content).toContain("theme");
 	});
 
-	test(".gitignore matches design §2.2 (sessions, cron/logs, .omp/evolution, .omp, *.log, *.bak)", async () => {
+	test(".gitignore matches design §2.2 (sessions, cron/logs, .cornfield/evolution, .cornfield, *.log, *.bak)", async () => {
 		await ensureAgentDir(tmpDir);
 		const content = await Bun.file(path.join(tmpDir, ".gitignore")).text();
 		expect(content).toContain("sessions/");
 		expect(content).toContain("cron/logs/");
-		expect(content).toContain(".omp/evolution/");
-		expect(content).toContain(".omp/");
+		expect(content).toContain(".cornfield/evolution/");
+		expect(content).toContain(".cornfield/");
 		expect(content).toContain("*.log");
 		expect(content).toContain("*.bak");
 	});
@@ -200,9 +200,9 @@ describe("skeleton", () => {
 		}
 	});
 
-	test("resolveAgentDir defaults to ~/.omp/agents/<id> when no explicit dir", () => {
+	test("resolveAgentDir defaults to ~/.cornfield/agents/<id> when no explicit dir", () => {
 		const result = resolveAgentDir("test-account");
-		const expected = path.join(os.homedir(), ".omp", "agents", "test-account");
+		const expected = path.join(os.homedir(), ".cornfield", "agents", "test-account");
 		expect(result).toBe(expected);
 	});
 

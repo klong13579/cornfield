@@ -10,9 +10,9 @@
  * See docs/plans/2026-07-15-moa-stage-test-design.md
  */
 import * as path from "node:path";
-import { discoverAuthStorage } from "@oh-my-pi/pi-coding-agent";
-import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
-import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { discoverAuthStorage } from "@cornfield/coding-agent";
+import { ModelRegistry } from "@cornfield/coding-agent/config/model-registry";
+import { Settings } from "@cornfield/coding-agent/config/settings";
 import { mergeMissingInputs } from "../src/merge-missing";
 import { loadMoaConfigOverrides } from "../src/moa-config";
 import { buildPlan, rebindWorkerPrompts } from "../src/planner";

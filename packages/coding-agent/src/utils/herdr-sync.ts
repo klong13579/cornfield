@@ -1,4 +1,4 @@
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 
 /** 超过此时长仍未退出则终止 herdr 进程，防止同步调用挂死。 */
 const HERDR_SYNC_TIMEOUT_MS = 5_000;

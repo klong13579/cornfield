@@ -1009,8 +1009,8 @@ export function emptyTco(task: string, note: string): TaskContextObject {
 
 /**
  * Aggregate discovery context for the LLM. Reads:
- *   - ~/.omp/agent/user.md (if exists)
- *   - ~/.omp/agent/moa.yml (if exists)
+ *   - ~/.cornfield/agent/user.md (if exists)
+ *   - ~/.cornfield/agent/moa.yml (if exists)
  *   - cwd README / package.json / Cargo.toml (top-level only)
  *
  * Returns a bounded markdown block. Designed to be passed to the Discovery
@@ -1024,9 +1024,9 @@ export async function gatherDiscoveryContext(cwd: string, opts: { maxBytes?: num
 	const home = process.env.HOME ?? "";
 	if (home) {
 		const userMd = await readBounded(`${home}/.omp/agent/user.md`, 1500);
-		if (userMd) sections.push(`### ~/.omp/agent/user.md\n${userMd}`);
+		if (userMd) sections.push(`### ~/.cornfield/agent/user.md\n${userMd}`);
 		const moaYml = await readBounded(`${home}/.omp/agent/moa.yml`, 1500);
-		if (moaYml) sections.push(`### ~/.omp/agent/moa.yml\n${moaYml}`);
+		if (moaYml) sections.push(`### ~/.cornfield/agent/moa.yml\n${moaYml}`);
 	}
 	if (cwd && cwd !== home) {
 		const readme = await readBounded(`${cwd}/README.md`, 1500);

@@ -34,13 +34,13 @@ The tool is `concurrency = "exclusive"` for a session, so calls do not overlap.
 
 There are two gateway paths:
 
-1. **External gateway** (`PI_PYTHON_GATEWAY_URL` set)
+1. **External gateway** (`CORNFIELD_PYTHON_GATEWAY_URL` set)
    - Uses the configured URL directly.
-   - Optional auth with `PI_PYTHON_GATEWAY_TOKEN`.
+   - Optional auth with `CORNFIELD_PYTHON_GATEWAY_TOKEN`.
    - No local gateway process is spawned or managed.
 
 2. **Local shared gateway** (default path)
-   - Uses a single shared process coordinated under `~/.omp/agent/python-gateway`.
+   - Uses a single shared process coordinated under `~/.cornfield/agent/python-gateway`.
    - Metadata file: `gateway.json`
    - Lock file: `gateway.lock`
    - Spawn command:
@@ -80,8 +80,8 @@ Kernel startup sequence:
 4. Initialize kernel env (`cwd`, env vars, `sys.path`)
 5. Execute `PYTHON_PRELUDE`
 6. Load extension modules from:
-   - user: `~/.omp/agent/modules/*.py`
-   - project: `<cwd>/.omp/modules/*.py` (overrides same-name user module)
+   - user: `~/.cornfield/agent/modules/*.py`
+   - project: `<cwd>/.cornfield/modules/*.py` (overrides same-name user module)
 
 Kernel shutdown:
 
@@ -123,20 +123,20 @@ If an intermediate cell fails:
 Environment is filtered before launching gateway/kernel runtime:
 
 - Allowlist includes core vars like `PATH`, `HOME`, locale vars, `VIRTUAL_ENV`, `PYTHONPATH`, etc.
-- Allow-prefixes: `LC_`, `XDG_`, `PI_`
+- Allow-prefixes: `LC_`, `XDG_`, `CORNFIELD_`
 - Denylist strips common API keys (OpenAI/Anthropic/Gemini/etc.)
 
 Runtime selection order:
 
 1. Active/located venv (`VIRTUAL_ENV`, then `<cwd>/.venv`, `<cwd>/venv`)
-2. Managed venv at `~/.omp/python-env`
+2. Managed venv at `~/.cornfield/python-env`
 3. `python` or `python3` on PATH
 
 When a venv is selected, its bin/Scripts path is prepended to `PATH`.
 
 Kernel startup receives the optional session file path from the executor:
 
-- `PI_SESSION_FILE` (session state file path)
+- `CORNFIELD_SESSION_FILE` (session state file path)
 
 `PythonKernel.#initializeKernelEnvironment(...)` then runs init script inside kernel to:
 
@@ -146,13 +146,13 @@ Kernel startup receives the optional session file path from the executor:
 
 ## Tool availability and mode selection
 
-`python.toolMode` (default `both`) + optional `PI_PY` override controls exposure:
+`python.toolMode` (default `both`) + optional `CORNFIELD_PY` override controls exposure:
 
 - `ipy-only`
 - `bash-only`
 - `both`
 
-`PI_PY` accepted values:
+`CORNFIELD_PY` accepted values:
 
 - `0` / `bash` -> `bash-only`
 - `1` / `py` -> `ipy-only`
@@ -202,7 +202,7 @@ From kernel messages:
 - `stream` -> plain text chunks
 - `display_data`/`execute_result` -> rich display handling
 - `error` -> traceback text
-- custom MIME `application/x-omp-status` -> structured status events
+- custom MIME `application/x-cornfield-status` -> structured status events
 
 Display MIME precedence:
 
@@ -214,7 +214,7 @@ Additionally captured as structured outputs:
 
 - `application/json` -> JSON tree data
 - `image/png` -> image payloads
-- `application/x-omp-status` -> status events
+- `application/x-cornfield-status` -> status events
 
 ### Storage and truncation
 
@@ -239,9 +239,9 @@ Tool results can include truncation metadata and `artifact://<id>` for full outp
 Set:
 
 ```bash
-export PI_PYTHON_GATEWAY_URL="http://127.0.0.1:8888"
+export CORNFIELD_PYTHON_GATEWAY_URL="http://127.0.0.1:8888"
 # Optional:
-export PI_PYTHON_GATEWAY_TOKEN="..."
+export CORNFIELD_PYTHON_GATEWAY_TOKEN="..."
 ```
 
 Behavior differences from local shared gateway:
@@ -254,7 +254,7 @@ Behavior differences from local shared gateway:
 ## Operational troubleshooting (current failure modes)
 
 - **Python tool not available**
-  - Check `python.toolMode` / `PI_PY`.
+  - Check `python.toolMode` / `CORNFIELD_PY`.
   - If preflight fails, runtime falls back to bash-only.
 
 - **Kernel availability errors**
@@ -268,7 +268,7 @@ Behavior differences from local shared gateway:
   - This is expected with current implementation.
 
 - **External gateway auth/reachability failures**
-  - 401/403 -> set `PI_PYTHON_GATEWAY_TOKEN`.
+  - 401/403 -> set `CORNFIELD_PYTHON_GATEWAY_TOKEN`.
   - timeout/unreachable -> verify URL/network and gateway health.
 
 - **Execution hangs then times out**
@@ -286,9 +286,9 @@ Behavior differences from local shared gateway:
 
 ## Relevant environment variables
 
-- `PI_PY` — tool exposure override (`bash-only`/`ipy-only`/`both` mapping above)
-- `PI_PYTHON_GATEWAY_URL` — use external gateway
-- `PI_PYTHON_GATEWAY_TOKEN` — optional external gateway auth token
-- `PI_PYTHON_SKIP_CHECK=1` — bypass Python preflight/warm checks
-- `PI_PYTHON_IPC_TRACE=1` — log kernel IPC send/receive traces
-- `PI_DEBUG_STARTUP=1` — emit startup-stage debug markers
+- `CORNFIELD_PY` — tool exposure override (`bash-only`/`ipy-only`/`both` mapping above)
+- `CORNFIELD_PYTHON_GATEWAY_URL` — use external gateway
+- `CORNFIELD_PYTHON_GATEWAY_TOKEN` — optional external gateway auth token
+- `CORNFIELD_PYTHON_SKIP_CHECK=1` — bypass Python preflight/warm checks
+- `CORNFIELD_PYTHON_IPC_TRACE=1` — log kernel IPC send/receive traces
+- `CORNFIELD_DEBUG_STARTUP=1` — emit startup-stage debug markers

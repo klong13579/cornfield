@@ -1,6 +1,6 @@
-import type { Model } from "@oh-my-pi/pi-ai";
-import { countTokens } from "@oh-my-pi/pi-natives";
-import { formatNumber } from "@oh-my-pi/pi-utils";
+import type { Model } from "@cornfield/ai";
+import { countTokens } from "@cornfield/natives";
+import { formatNumber } from "@cornfield/utils";
 import type { Skill } from "../../extensibility/skills";
 import type { AgentSession } from "../../session/agent-session";
 import type { CompactionSettings } from "../../session/compaction";

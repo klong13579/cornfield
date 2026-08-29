@@ -5,9 +5,9 @@
  * Usage:
  *   bun packages/self-evolution/scripts/run-memory-verify.ts [--cwd <repo>] [--run-omp]
  */
-import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
-import { discoverAuthStorage } from "@oh-my-pi/pi-coding-agent/sdk";
-import { getAgentDir } from "@oh-my-pi/pi-utils";
+import { ModelRegistry } from "@cornfield/coding-agent/config/model-registry";
+import { discoverAuthStorage } from "@cornfield/coding-agent/sdk";
+import { getAgentDir } from "@cornfield/utils";
 import { $ } from "bun";
 import { enqueueMemoryConsolidation } from "../src/memory/index";
 import { ensureMemorySummaryFromMemory } from "../src/memory/summary";

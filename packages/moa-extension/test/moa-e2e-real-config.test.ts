@@ -5,7 +5,7 @@
  * Isolation:
  *   - HOME → empty fake home (no global moa.yml bleed)
  *   - cwd → temp project with `.git` + `.omp/moa.yml` matching DEFAULT_* in settings.ts
- *   - PI_CODING_AGENT_DIR → seeded agent dir (config/models)
+ *   - CORNFIELD_AGENT_DIR → seeded agent dir (config/models)
  *   - no PI_MOA_SETTINGS_JSON
  *
  * Skips unless BOTH NARWAL_PLAN_API_KEY and ALIBABA_API_KEY are set.
@@ -14,9 +14,9 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
-import { RpcClient } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-client";
-import { Snowflake } from "@oh-my-pi/pi-utils";
+import type { AgentMessage } from "@cornfield/agent";
+import { RpcClient } from "@cornfield/coding-agent/modes/rpc/rpc-client";
+import { Snowflake } from "@cornfield/utils";
 import { e2eApiKey } from "../../coding-agent/test/utilities";
 import { DEFAULT_SYNTHESIS_MODEL, DEFAULT_WORKER_MODELS } from "../src/settings";
 import { MOA_ARCHIVE_ENTRY_TYPE } from "../src/types";
@@ -154,7 +154,7 @@ describe.skipIf(!narwalApiKey || !alibabaApiKey)("moa e2e: cost-lite layout from
 			cwd: projectDir,
 			env: {
 				HOME: fakeHome,
-				PI_CODING_AGENT_DIR: agentDir,
+				CORNFIELD_AGENT_DIR: agentDir,
 				NARWAL_PLAN_API_KEY: narwalApiKey!,
 				ALIBABA_API_KEY: alibabaApiKey!,
 				PI_LOG_CONSOLE: "false",

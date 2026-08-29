@@ -2,8 +2,8 @@
  * AggressiveSkillOptimizer: deeply rewrites skills based on failure history
  * to maximize agent autonomy and minimize human intervention.
  */
-import type { Model } from "@oh-my-pi/pi-ai";
-import { logger } from "@oh-my-pi/pi-utils";
+import type { Model } from "@cornfield/ai";
+import { logger } from "@cornfield/utils";
 import aggressiveOptimizeTemplate from "./prompts/aggressive-optimize.md" with { type: "text" };
 import type { EvolvedSkill } from "./types";
 import { type BackgroundLlmAuth, callBackgroundLlm } from "./utils/llm";

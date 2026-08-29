@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
-import MODELS from "@oh-my-pi/pi-ai/models.json" with { type: "json" };
-import { complete } from "@oh-my-pi/pi-ai/stream";
-import type { Model } from "@oh-my-pi/pi-ai/types";
+import MODELS from "@cornfield/ai/models.json" with { type: "json" };
+import { complete } from "@cornfield/ai/stream";
+import type { Model } from "@cornfield/ai/types";
 import { e2eApiKey } from "./oauth";
 
 describe.skipIf(!e2eApiKey("OPENCODE_API_KEY"))("OpenCode Models Smoke Test", () => {

@@ -1,8 +1,8 @@
 /**
  * Workspace declaration (schema v2).
  *
- * `.omp/workspace.json` inside an agentDir is the **source of truth** for the
- * workspace's structured metadata. `~/.omp/agent/registry.json` stays a thin
+ * `.cornfield/workspace.json` inside an agentDir is the **source of truth** for the
+ * workspace's structured metadata. `~/.cornfield/agent/registry.json` stays a thin
  * index (name → path + minimal cache) so enumeration never needs to open every
  * directory.
  *
@@ -22,9 +22,9 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 
-import { isEnoent } from "@oh-my-pi/pi-utils";
+import { isEnoent } from "@cornfield/utils";
 
-export const WORKSPACE_DIR_NAME = ".omp";
+export const WORKSPACE_DIR_NAME = ".cornfield";
 export const WORKSPACE_FILE_NAME = "workspace.json";
 export const WORKSPACE_SCHEMA_VERSION = 2;
 
@@ -83,7 +83,7 @@ export function workspaceFilePath(agentDir: string): string {
 }
 
 /**
- * Load the declaration from `agentDir/.omp/workspace.json`.
+ * Load the declaration from `agentDir/.cornfield/workspace.json`.
  * Returns null when missing or not a valid v2 declaration (never throws for
  * missing files — callers fall back to registry cache / defaults).
  */
@@ -132,12 +132,12 @@ export async function ensureWorkspace(
 		projectRoot: ".",
 		knowledge: {
 			identity: "mission.md",
-			rules: ["AGENTS.md", "TOOLS.md", ".omp/SYSTEM.md"],
+			rules: ["AGENTS.md", "TOOLS.md", ".cornfield/SYSTEM.md"],
 			docsDir: "knowledge/handbook/",
 			memoryDir: "memory/",
 			memoryIndex: "memory/MEMORY.md",
 		},
-		skillsDir: ".omp/skills/",
+		skillsDir: ".cornfield/skills/",
 		mcp: ".mcp.json",
 		sessionsDir: "sessions/",
 		members: [],

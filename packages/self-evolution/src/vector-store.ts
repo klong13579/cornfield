@@ -6,7 +6,7 @@
  * collections up to ~10K embeddings without native extensions.
  */
 import type { Database, Statement } from "bun:sqlite";
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 
 // ---------------------------------------------------------------------------
 // Types

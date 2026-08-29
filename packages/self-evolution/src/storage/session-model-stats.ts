@@ -2,7 +2,7 @@
  * Per-session model performance statistics storage.
  */
 import type { Database } from "bun:sqlite";
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 
 export interface SessionModelStats {
 	sessionId: string;

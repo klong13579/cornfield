@@ -1,6 +1,6 @@
 # Natives Build, Release, and Debugging Runbook
 
-This runbook describes how `@oh-my-pi/pi-natives` produces `.node` addons, generated declarations, and compiled-binary embedded payloads, and how to debug loader/build failures.
+This runbook describes how `@cornfield/natives` produces `.node` addons, generated declarations, and compiled-binary embedded payloads, and how to debug loader/build failures.
 
 It follows the architecture terms from `docs/natives-architecture.md`:
 
@@ -50,7 +50,7 @@ Root scripts include `build:native` as `bun --cwd=packages/natives run build`.
 After napi-rs succeeds, `build-native.ts`:
 
 1. resolves the built addon in the isolated output directory;
-2. normalizes its name to `pi_natives.<platform>-<arch>(-variant).node` when needed;
+2. normalizes its name to `cornfield_natives.<platform>-<arch>(-variant).node` when needed;
 3. installs the addon into `packages/natives/native/` with temp-file + rename semantics;
 4. copies generated `index.js` and `index.d.ts` into `packages/natives/native/` when present;
 5. runs `generateEnumExports()` to append enum runtime objects to `native/index.js`.
@@ -76,8 +76,8 @@ Non-x64 uses a single default artifact with no variant suffix.
 
 ### Output filenames
 
-- x64: `pi_natives.<platform>-<arch>-modern.node` or `...-baseline.node`
-- non-x64: `pi_natives.<platform>-<arch>.node`
+- x64: `cornfield_natives.<platform>-<arch>-modern.node` or `...-baseline.node`
+- non-x64: `cornfield_natives.<platform>-<arch>.node`
 
 Runtime x64 candidate order also includes the unsuffixed default filename after the selected variant candidates.
 
@@ -85,8 +85,8 @@ Runtime x64 candidate order also includes the unsuffixed default filename after 
 
 ## Runtime flags
 
-- `PI_NATIVE_VARIANT`: x64 runtime override; valid values are `modern` and `baseline`.
-- `PI_COMPILED`: legacy compiled-mode signal. A populated embedded-addon manifest is also a compiled-mode signal and is the authoritative signal for Bun standalone builds that do not preserve `process.env.PI_COMPILED`.
+- `CORNFIELD_NATIVE_VARIANT`: x64 runtime override; valid values are `modern` and `baseline`.
+- `CORNFIELD_COMPILED`: legacy compiled-mode signal. A populated embedded-addon manifest is also a compiled-mode signal and is the authoritative signal for Bun standalone builds that do not preserve `process.env.CORNFIELD_COMPILED`.
 
 ## Build-time flags/options
 
@@ -102,7 +102,7 @@ Runtime x64 candidate order also includes the unsuffixed default filename after 
     - non-x64 / no variant: `-C target-cpu=native`
   - if already set, script does not override.
 - `ZIG`: optional real Zig path used when the host Zig CPU contract wrapper is enabled.
-- `PI_NATIVE_REAL_ZIG`, `PI_NATIVE_ZIG_TARGET`, `PI_NATIVE_ZIG_CPU`: set internally for `zig-safe-wrapper.ts` when building local x64 Linux/macOS artifacts with Zig available.
+- `CORNFIELD_NATIVE_REAL_ZIG`, `CORNFIELD_NATIVE_ZIG_TARGET`, `CORNFIELD_NATIVE_ZIG_CPU`: set internally for `zig-safe-wrapper.ts` when building local x64 Linux/macOS artifacts with Zig available.
 
 ## Build state/lifecycle transitions
 
@@ -116,7 +116,7 @@ Runtime x64 candidate order also includes the unsuffixed default filename after 
    - x64 local build without override → detect host AVX2.
 3. **CPU policy**: set `RUSTFLAGS` if allowed; optionally route Zig through `zig-safe-wrapper.ts` to avoid leaking newer host CPU instructions into x64 artifacts.
 4. **Compile**: run napi-rs against `crates/pi-natives` into an isolated output directory.
-5. **Locate artifact**: accept the canonical filename or a single napi-rs-generated `pi_natives.<platform>-<arch>*.node` candidate.
+5. **Locate artifact**: accept the canonical filename or a single napi-rs-generated `cornfield_natives.<platform>-<arch>*.node` candidate.
 6. **Install**: copy/rename addon into `packages/natives/native`.
 7. **Install generated bindings**: copy `index.js`/`index.d.ts` if needed.
 8. **Patch enums**: append generated enum runtime exports.
@@ -148,13 +148,13 @@ Typical local loop:
 
 ## Shipped/compiled binary workflow
 
-In compiled mode (`PI_COMPILED`, Bun embedded URL markers, or populated embedded manifest):
+In compiled mode (`CORNFIELD_COMPILED`, Bun embedded URL markers, or populated embedded manifest):
 
 1. Loader computes versioned cache dir: `<getNativesDir()>/<packageVersion>`.
 2. If embedded manifest matches current platform+version, loader may extract the selected embedded file into that versioned dir.
 3. Runtime candidate order includes:
    - versioned cache dir,
-   - legacy compiled-binary dir (`%LOCALAPPDATA%/omp` on Windows, `~/.local/bin` elsewhere),
+   - legacy compiled-binary dir (`%LOCALAPPDATA%/cornfield` on Windows, `~/.local/bin` elsewhere),
    - package/executable directories.
 4. First successfully loaded addon is returned.
 
@@ -197,7 +197,7 @@ Generated declarations currently include exports from these Rust modules:
 | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
 | `Cannot find module` or dynamic library load error for every candidate | Missing release artifact, wrong platform tag, or stale compiled cache                       | Inspect loader error list and `packages/natives/native` filenames | Build correct target/variant; delete stale cache for the package version                      |
 | Export is missing at runtime but present in TypeScript                 | Stale `.node` loaded, generated declarations newer than binary, or Rust export not compiled | Require the actual candidate and inspect `Object.keys(mod)`       | Rebuild native package and remove stale candidate/cache paths                                 |
-| x64 machine loads baseline when modern expected                        | `PI_NATIVE_VARIANT=baseline`, no AVX2 detected, or modern file unavailable                  | Check env and filenames in `native/`                              | Build modern variant (`TARGET_VARIANT=modern ... build`) and ship it                          |
+| x64 machine loads baseline when modern expected                        | `CORNFIELD_NATIVE_VARIANT=baseline`, no AVX2 detected, or modern file unavailable                  | Check env and filenames in `native/`                              | Build modern variant (`TARGET_VARIANT=modern ... build`) and ship it                          |
 | Cross-build produces wrong-labeled binary                              | Mismatch between `CROSS_TARGET` and `TARGET_PLATFORM`/`TARGET_ARCH`, or missing x64 variant | Confirm env tuple and output filename                             | Re-run with consistent env values and explicit x64 `TARGET_VARIANT`                           |
 | Compiled binary fails after upgrade                                    | Stale extracted cache or embedded manifest version mismatch                                 | Inspect `<getNativesDir()>/<version>` and loader error list       | Delete versioned cache for the package version; regenerate embedded manifest during packaging |
 | `embed:native` fails with `No native addons found`                     | Required platform artifact was not built before embedding                                   | Check expected list in error text                                 | Build at least one expected artifact for the target, then rerun `embed:native`                |

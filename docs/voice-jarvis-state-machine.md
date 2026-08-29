@@ -16,7 +16,7 @@ L4 记录层   LiveTurnBuffer + recorder（话语去重）
 
 ---
 
-## L1 传输层（`pi-ai/realtime/transport.ts`）
+## L1 传输层（`ai/realtime/transport.ts`）
 
 `idle → connecting → connected ⇄ reconnecting → closed`（closed 为终态，不可复活）
 

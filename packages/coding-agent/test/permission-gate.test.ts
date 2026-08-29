@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { PERMISSION_TIMEOUT_OUTCOME, PermissionGate } from "@oh-my-pi/pi-coding-agent/server/permission-gate";
+import { PERMISSION_TIMEOUT_OUTCOME, PermissionGate } from "@cornfield/coding-agent/server/permission-gate";
 
 /**
  * 审批/澄清 shell 的 gate 级集成测试：inject（mock 测试通道）+ requestApproval（真实 bash 源）

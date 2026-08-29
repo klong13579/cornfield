@@ -4,11 +4,11 @@
  * 5-tier auth resolution:
  *   1. ANTHROPIC_SEARCH_API_KEY / ANTHROPIC_SEARCH_BASE_URL env vars
  *   2. ANTHROPIC_FOUNDRY_API_KEY override when Foundry mode is enabled
- *   3. OAuth credentials in ~/.omp/agent/agent.db (with expiry check)
- *   4. API key credentials in ~/.omp/agent/agent.db
+ *   3. OAuth credentials in ~/.cornfield/agent/agent.db (with expiry check)
+ *   4. API key credentials in ~/.cornfield/agent/agent.db
  *   5. Generic Anthropic fallback (ANTHROPIC_API_KEY / ANTHROPIC_BASE_URL)
  */
-import { $env, getAgentDbPath } from "@oh-my-pi/pi-utils";
+import { $env, getAgentDbPath } from "@cornfield/utils";
 import { type AuthCredential, AuthCredentialStore } from "../auth-storage";
 import {
 	buildAnthropicHeaders as buildProviderAnthropicHeaders,

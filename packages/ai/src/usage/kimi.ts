@@ -1,4 +1,4 @@
-import { $env } from "@oh-my-pi/pi-utils";
+import { $env } from "@cornfield/utils";
 import type {
 	UsageAmount,
 	UsageFetchContext,

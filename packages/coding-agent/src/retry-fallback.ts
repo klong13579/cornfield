@@ -1,4 +1,4 @@
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 
 export interface FallbackConfig {
 	maxConsecutiveFailures: number; // Default: 3

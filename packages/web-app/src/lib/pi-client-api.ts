@@ -18,10 +18,10 @@ import type {
 	TodoPhaseDto,
 	ToolSwitchesDto,
 	WireServerEventDto,
-} from "@oh-my-pi/pi-wire";
+} from "@cornfield/wire";
 
 // ArtifactDto / ArtifactsResultDto 由 pi-wire 定义，消费方（ArtifactsPanel 等）从本层引入。
-export type { ArtifactDto } from "@oh-my-pi/pi-wire";
+export type { ArtifactDto } from "@cornfield/wire";
 
 import type { BranchPoint, PlaybackEntry, SessionRecordSummary } from "./records";
 
@@ -40,7 +40,7 @@ export interface FsImageResult {
 	truncated: boolean;
 }
 
-/** 听记历史条目（listen_list：~/.omp/listen/ 单条录音的元数据 + 转写全文）。 */
+/** 听记历史条目（listen_list：~/.cornfield/listen/ 单条录音的元数据 + 转写全文）。 */
 export interface ListenRecordingDto {
 	name: string;
 	path: string;
@@ -148,7 +148,7 @@ export interface PiClient {
 
 	/**
 	 * 停用/恢复 provider（modelId 缺省）或单个模型（provider/modelId 精确 pattern）。
-	 * 写 settings（~/.omp/agent/config.yml）并即时生效；返回最新停用名单供 UI 同步。
+	 * 写 settings（~/.cornfield/agent/config.yml）并即时生效；返回最新停用名单供 UI 同步。
 	 */
 	setModelDisabled(
 		provider: string,
@@ -249,7 +249,7 @@ export interface PiClient {
 	// ── 听记（VOICE-D：/voice 听记 tab）──
 	/**
 	 * 上传浏览器录音（16kHz mono PCM WAV base64）→ serve 转写（TUI /record 同管线：本地
-	 * whisper / record.model API，自动分块）→ 落 ~/.omp/listen/。返回转写文本 + 落盘路径 + 模型。
+	 * whisper / record.model API，自动分块）→ 落 ~/.cornfield/listen/。返回转写文本 + 落盘路径 + 模型。
 	 */
 	recordTranscribe(
 		audioBase64: string,
@@ -262,11 +262,11 @@ export interface PiClient {
 		error?: string;
 	}>;
 
-	/** 听记历史（listen_list：~/.omp/listen/ 全部录音 json，名称倒序 + 转写全文，前端本地搜索/预览）。 */
+	/** 听记历史（listen_list：~/.cornfield/listen/ 全部录音 json，名称倒序 + 转写全文，前端本地搜索/预览）。 */
 	listenList(): Promise<{ ok: boolean; recordings: ListenRecordingDto[] }>;
 
 	// ── MCP 服务器管理（设置页；契约命令 get_mcp_servers / set_mcp_server / remove_mcp_server / test_mcp_server，由 serve 端并行实现）──
-	/** 列出 MCP 服务器（get_mcp_servers；读 ~/.omp/agent/mcp.json 的 mcpServers）。 */
+	/** 列出 MCP 服务器（get_mcp_servers；读 ~/.cornfield/agent/mcp.json 的 mcpServers）。 */
 	getMcpServers(): Promise<{ servers: McpServerDto[] }>;
 	/** 新增/更新 MCP 服务器（set_mcp_server upsert；name 必填，command/args/enabled 可选缺省）。 */
 	setMcpServer(input: {

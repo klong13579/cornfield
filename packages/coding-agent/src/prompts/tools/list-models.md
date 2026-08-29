@@ -12,7 +12,7 @@ List all LLM models the current omp session can call.
   - "列出 anthropic 的模型" / "show claude models" → pass `query: "anthropic"` or `query: "claude"`
   - "现在用的什么模型" → call once and look at the "current: …" line
 - Do **not** use this to actually switch the model — that's `switch_model`'s job. `list_models` is read-only.
-- If the table is empty, the user has no providers configured. Tell them to check `~/.omp/agent/config.yml` and `auth.db`.
+- If the table is empty, the user has no providers configured. Tell them to check `~/.cornfield/agent/config.yml` and `auth.db`.
 </instruction>
 
 <boundary>

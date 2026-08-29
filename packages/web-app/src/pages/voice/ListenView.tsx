@@ -8,7 +8,7 @@ import { useSessionStore } from "../../state/session-store";
 /**
  * 听记（VOICE-D）—— TUI /record 的 web 前端：浏览器录音 → 16kHz PCM WAV →
  * serve record_transcribe（TUI /record 同源转写管线：本地 whisper / record.model API，
- * 自动分块）→ 落 ~/.omp/listen/（与 /record 同目录同格式）。历史 = listen_list 全量加载。
+ * 自动分块）→ 落 ~/.cornfield/listen/（与 /record 同目录同格式）。历史 = listen_list 全量加载。
  *
  * 四态：idle（orb breathing 静止帧）→ recording（orb listening 动效 + 7 格电平 + 计时）
  * → transcribing（orb working）→ done（文本卡 + 操作组：整理纪要/提取待办/发 Agent/
@@ -382,7 +382,7 @@ export function ListenView(): React.JSX.Element {
 			<div className="mt-4 w-full page-narrow">
 				<div className="mb-2 flex items-center gap-3">
 					<h3 className="text-[11px] font-semibold tracking-[0.08em] text-ink-faint uppercase">历史记录</h3>
-					<span className="text-[11px] text-ink-faint">~/.omp/listen/ · 与 TUI /listen 同数据</span>
+					<span className="text-[11px] text-ink-faint">~/.cornfield/listen/ · 与 TUI /listen 同数据</span>
 					<input
 						value={search}
 						onChange={e => setSearch(e.target.value)}

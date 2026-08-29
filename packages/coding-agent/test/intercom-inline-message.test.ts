@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it } from "bun:test";
-import type { Message, SessionInfo } from "@oh-my-pi/pi-coding-agent/intercom-extension/types";
-import { InlineMessageComponent } from "@oh-my-pi/pi-coding-agent/intercom-extension/ui/inline-message";
-import { getThemeByName } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
-import { visibleWidth } from "@oh-my-pi/pi-tui";
+import type { Message, SessionInfo } from "@cornfield/coding-agent/intercom-extension/types";
+import { InlineMessageComponent } from "@cornfield/coding-agent/intercom-extension/ui/inline-message";
+import { getThemeByName } from "@cornfield/coding-agent/modes/theme/theme";
+import { visibleWidth } from "@cornfield/tui";
 import stripAnsi from "strip-ansi";
 
 function makeFrom(): SessionInfo {

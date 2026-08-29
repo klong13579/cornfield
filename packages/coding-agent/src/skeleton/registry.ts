@@ -1,9 +1,9 @@
 /**
  * agentDir registry.
  *
- * Persists a `name → path` map at `~/.omp/agent/registry.json` so that
+ * Persists a `name → path` map at `~/.cornfield/agent/registry.json` so that
  * `omp agent list` / `omp agent show <name>` can find agentDirs regardless
- * of where they live (default `~/.omp/agents/`, custom `--dir` paths,
+ * of where they live (default `~/.cornfield/agents/`, custom `--dir` paths,
  * nested account ids like `ops/hr`, etc.).
  *
  * Design:
@@ -11,7 +11,7 @@
  *     is on disk. If the name already exists, the path is overwritten.
  *   - `list` reads the registry. For backward compatibility with agents
  *     created before the registry existed, it also scans the default
- *     `~/.omp/agents/` location for entries not in the registry.
+ *     `~/.cornfield/agents/` location for entries not in the registry.
  *   - `show <name>` looks the name up in the registry first and falls
  *     back to `resolveAgentDir(name)` if missing.
  *   - `register` / `unregister` let the user add or remove entries
@@ -39,7 +39,7 @@ function homeDir(): string {
 
 /** Resolved at call time so tests can change HOME between calls. */
 function registryPath(): string {
-	return path.join(homeDir(), ".omp", REGISTRY_DIR_NAME, REGISTRY_FILE_NAME);
+	return path.join(homeDir(), ".cornfield", REGISTRY_DIR_NAME, REGISTRY_FILE_NAME);
 }
 
 export interface AgentEntry {
@@ -49,11 +49,11 @@ export interface AgentEntry {
 	registeredAt: string;
 	/** Template name used to create the agentDir. Only `default` today. */
 	template: string;
-	/** Cached display name from `.omp/workspace.json` (v2). Optional for v1 entries. */
+	/** Cached display name from `.cornfield/workspace.json` (v2). Optional for v1 entries. */
 	displayName?: string;
-	/** Cached declaration schema version from `.omp/workspace.json` (v2). */
+	/** Cached declaration schema version from `.cornfield/workspace.json` (v2). */
 	workspaceVersion?: number;
-	/** Cached declaration `updatedAt` from `.omp/workspace.json` (v2). */
+	/** Cached declaration `updatedAt` from `.cornfield/workspace.json` (v2). */
 	workspaceUpdatedAt?: string;
 }
 
@@ -102,7 +102,7 @@ export async function registerAgent(name: string, agentDir: string, template = "
 	const reg = await loadRegistry();
 	const resolved = path.resolve(agentDir);
 	// Best-effort cache fill from the workspace declaration (v2). Read-only:
-	// creating/updating `.omp/workspace.json` is the caller's job (ensureWorkspace),
+	// creating/updating `.cornfield/workspace.json` is the caller's job (ensureWorkspace),
 	// so the gateway account path stays side-effect free on registration.
 	let displayName: string | undefined;
 	let workspaceVersion: number | undefined;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
+import type { AgentMessage } from "@cornfield/agent";
 import { applyWindowing, convertToLlm } from "../../src/session/messages";
 
 // Minimal message builders (types are wide; tests assert behavior, not schema)

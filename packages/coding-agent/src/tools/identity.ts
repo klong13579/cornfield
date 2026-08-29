@@ -1,5 +1,5 @@
-import type { AgentTool, AgentToolContext, AgentToolResult, AgentToolUpdateCallback } from "@oh-my-pi/pi-agent-core";
-import { getConfigRootDir, isEnoent, prompt, VERSION } from "@oh-my-pi/pi-utils";
+import type { AgentTool, AgentToolContext, AgentToolResult, AgentToolUpdateCallback } from "@cornfield/agent";
+import { getConfigRootDir, isEnoent, prompt, VERSION } from "@cornfield/utils";
 import { type Static, Type } from "@sinclair/typebox";
 import identityDescription from "../prompts/tools/identity.md" with { type: "text" };
 import type { ToolSession } from ".";
@@ -10,7 +10,7 @@ import { ToolError } from "./tool-errors";
  *
  * Three actions:
  * - `whoRu`:      return the current agent's operational identity (model, cwd, version).
- * - `whoisme`:    return the user's declarative persona from `~/.omp/user.md`.
+ * - `whoisme`:    return the user's declarative persona from `~/.cornfield/user.md`.
  * - `update_persona`: update one section of `user.md`.
  *
  * Boundary: `user.md` holds hand-authored, stable user identity (name, role, timezone,
@@ -47,7 +47,7 @@ const identitySchema = Type.Object({
 
 type IdentityParams = Static<typeof identitySchema>;
 
-/** Path to the user-level declarative persona file (~/.omp/user.md, shared across all agentDirs). */
+/** Path to the user-level declarative persona file (~/.cornfield/user.md, shared across all agentDirs). */
 function userPersonaPath(): string {
 	return `${getConfigRootDir()}/user.md`;
 }

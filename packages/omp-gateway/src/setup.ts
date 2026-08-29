@@ -1,7 +1,7 @@
 /**
  * Interactive DingTalk setup wizard.
  *
- * Replaces `omp-gateway install` / `omp-gateway setup` legacy behavior. Walks
+ * Replaces `omp-gateway install` / `cornfield-gateway setup` legacy behavior. Walks
  * the user through accountId, AppKey, AppSecret, RobotCode, agentDir and
  * (optional) mission file, then writes a complete gateway config to disk.
  *
@@ -15,7 +15,7 @@
  *     don't gather credentials we'd then refuse to use.
  */
 
-import { runAgentInit } from "@oh-my-pi/pi-coding-agent/cli/agent-cli";
+import { runAgentInit } from "@cornfield/coding-agent/cli/agent-cli";
 import { ZodError } from "zod";
 import { getConfigPath, loadConfig, validateAndNormalizeConfig } from "./config";
 import type { DingTalkConfig, DingtalkAccountConfig, GatewayConfig } from "./types";
@@ -132,8 +132,8 @@ export async function runInteractiveSetup(opts: SetupOptions = {}): Promise<Setu
 	}
 
 	const robotCode = (await ask(`RobotCode (可选, 默认同 AppKey) [${appKey}]: `)).trim() || appKey;
-	// Model is configured in agentDir/.omp/config.yml (modelRoles.default)
-	const agentDirInput = (await ask(`Agent 工作目录 (可选, 默认 ~/.omp/agents/${accountId}/) []: `)).trim();
+	// Model is configured in agentDir/.cornfield/config.yml (modelRoles.default)
+	const agentDirInput = (await ask(`Agent 工作目录 (可选, 默认 ~/.cornfield/agents/${accountId}/) []: `)).trim();
 	// Mission file: optional. If provided, content is seeded into <agentDir>/mission.md
 	// before the skeleton runs, so the user's identity wins over the default template.
 	const missionInput = (await ask(`Mission 文件 (可选, 直接回车用默认) []: `)).trim();
@@ -225,10 +225,10 @@ export async function runInteractiveSetup(opts: SetupOptions = {}): Promise<Setu
 	console.log(`\n下一步：`);
 	console.log(`  omp agent show ${accountId}        查看身份/工具/技能`);
 	console.log(`  omp agent validate --dir ${agentDir}   校验目录结构`);
-	console.log(`  omp-gateway start              启动网关`);
-	console.log(`  omp-gateway stop               停止网关`);
-	console.log(`  omp-gateway service install    安装为系统服务(开机自启)`);
-	console.log(`\n配置模型: 编辑 ${agentDir}/.omp/config.yml 下的 modelRoles.default`);
+	console.log(`  cornfield-gateway start              启动网关`);
+	console.log(`  cornfield-gateway stop               停止网关`);
+	console.log(`  cornfield-gateway service install    安装为系统服务(开机自启)`);
+	console.log(`\n配置模型: 编辑 ${agentDir}/.cornfield/config.yml 下的 modelRoles.default`);
 
 	return { ok: true, accountId, agentDir, configPath: cfgPath, createdAccount: true };
 }

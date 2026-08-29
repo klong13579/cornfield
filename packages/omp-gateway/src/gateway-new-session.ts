@@ -27,7 +27,7 @@
  *      unique — same conversation always uses the same SQLite row.
  */
 import * as fs from "node:fs/promises";
-import { isEnoent, logger } from "@oh-my-pi/pi-utils";
+import { isEnoent, logger } from "@cornfield/utils";
 import type { AgentBridge } from "./agent-bridge";
 import type { SQLiteSessionStore } from "./session-store";
 import type { GatewayConfig, InboundMessage, MessageContent, SessionRecord } from "./types";

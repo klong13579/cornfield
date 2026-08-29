@@ -5,7 +5,7 @@
  * global store do not interfere with each other's flush timers.
  */
 import * as fs from "node:fs/promises";
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 import { resolveEvolutionPathLayout } from "../paths";
 import type { LogEntry } from "../types";
 

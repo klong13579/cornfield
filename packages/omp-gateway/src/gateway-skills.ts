@@ -26,7 +26,7 @@
  * Pending state is one-shot: consumed on the next inbound message.
  * TTL is 30 min so a stale selection doesn't haunt the next session.
  */
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 import type { SkillCache } from "./skill-cache";
 import type { InboundMessage, MessageContent } from "./types";
 
@@ -107,7 +107,7 @@ export class SkillCommand {
 		if (skills.length === 0) {
 			await this.#deps.sendAgentResponse(
 				msg,
-				"当前没有可用的技能。请检查 .omp/skills 或 ~/.omp/agent/skills 目录。",
+				"当前没有可用的技能。请检查 .cornfield/skills 或 ~/.cornfield/agent/skills 目录。",
 			);
 			return true;
 		}

@@ -11,24 +11,24 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "bun:test";
 import * as fsp from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
-import { settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import type { ModelRegistry } from "@cornfield/coding-agent/config/model-registry";
+import { settings } from "@cornfield/coding-agent/config/settings";
 import {
 	buildFilename,
 	listListenRecordings,
 	saveListenText,
 	transcribeAudioWithDefaults,
-} from "@oh-my-pi/pi-coding-agent/stt/listen-service";
-import { setConfigRootDir } from "@oh-my-pi/pi-utils";
+} from "@cornfield/coding-agent/stt/listen-service";
+import { setConfigRootDir } from "@cornfield/utils";
 
 const transcribe = vi.fn<() => Promise<string>>();
 const transcribeViaApi = vi.fn<() => Promise<string>>();
 
-vi.mock("@oh-my-pi/pi-coding-agent/stt/transcriber", () => ({ transcribe, transcribeViaApi }));
+vi.mock("@cornfield/coding-agent/stt/transcriber", () => ({ transcribe, transcribeViaApi }));
 
-let Settings: Awaited<typeof import("@oh-my-pi/pi-coding-agent/config/settings")>["Settings"];
+let Settings: Awaited<typeof import("@cornfield/coding-agent/config/settings")>["Settings"];
 
-// 隔离 config 根，避免污染真实 ~/.omp/listen
+// 隔离 config 根，避免污染真实 ~/.cornfield/listen
 const isoRoot = await fsp.mkdtemp(path.join(os.tmpdir(), "omp-listen-service-test-"));
 
 async function clearListenDir(): Promise<void> {
@@ -39,7 +39,7 @@ beforeEach(async () => {
 	setConfigRootDir(isoRoot);
 	await clearListenDir();
 	if (!Settings) {
-		Settings = (await import("@oh-my-pi/pi-coding-agent/config/settings")).Settings;
+		Settings = (await import("@cornfield/coding-agent/config/settings")).Settings;
 	}
 	await Settings.init({ inMemory: true });
 	transcribe.mockReset().mockResolvedValue("测试转写");

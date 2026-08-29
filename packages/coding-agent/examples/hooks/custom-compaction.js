@@ -12,8 +12,8 @@
  * Usage:
  *   omp --hook examples/hooks/custom-compaction.ts
  */
-import { complete, getModel } from "@oh-my-pi/pi-ai";
-import { convertToLlm, serializeConversation } from "@oh-my-pi/pi-coding-agent";
+import { complete, getModel } from "@cornfield/ai";
+import { convertToLlm, serializeConversation } from "@cornfield/coding-agent";
 export default function (pi) {
     pi.on("session_before_compact", async (event, ctx) => {
         ctx.ui.notify("Custom compaction hook triggered", "info");

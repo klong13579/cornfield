@@ -11,7 +11,7 @@ description: >-
 ---
 
 <!--
-  Co-located with the script: .omp/skills/repro-inject/repro-inject.ts
+  Co-located with the script: .cornfield/skills/repro-inject/repro-inject.ts
   Edit both together when the flow changes; the script's --help and the
   script's own header comment are the canonical flag list and contract.
   This skill encodes the decision tree and side-effect warnings, not the
@@ -41,7 +41,7 @@ Completion criterion: `mode: "test-injection"` is in the `/test/health` response
 
 ### Step 2 — Pick the webhook source
 
-Default is the `sessions.db` path. Override only when it won't work. (For a non-default data dir, pass `--gateway-data-dir <path>`; default `~/.omp/gateway-data/`.)
+Default is the `sessions.db` path. Override only when it won't work. (For a non-default data dir, pass `--gateway-data-dir <path>`; default `~/.cornfield/gateway-data/`.)
 
 | Scenario | Flag |
 |---|---|
@@ -61,7 +61,7 @@ Completion criterion: one source is selected and the chosen flag (if any) is in 
 ### Step 3 — Inject and verify
 
 ```bash
-bun run .omp/skills/repro-inject/repro-inject.ts \
+bun run .cornfield/skills/repro-inject/repro-inject.ts \
   --account <id> --text "<reproduction step>" --verify
 ```
 

@@ -124,7 +124,7 @@ For multi-file changes, refactors, new features, tests, or investigations, break
 
 {{#has tools "ssh"}}
 ### SSH
-Match commands to the host shell: linux/bash and macos/zsh use Unix commands; windows/cmd uses `dir`/`type`/`findstr`; windows/powershell uses `Get-ChildItem`/`Get-Content`. Remote filesystems live under `~/.omp/remote/<hostname>/`. Windows paths need colons (`C:/Users/…`).
+Match commands to the host shell: linux/bash and macos/zsh use Unix commands; windows/cmd uses `dir`/`type`/`findstr`; windows/powershell uses `Get-ChildItem`/`Get-Content`. Remote filesystems live under `~/.cornfield/remote/<hostname>/`. Windows paths need colons (`C:/Users/…`).
 {{/has}}
 
 ### Search before you read

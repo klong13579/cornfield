@@ -1,6 +1,6 @@
-import type { AgentTool, AgentToolContext, AgentToolResult, AgentToolUpdateCallback } from "@oh-my-pi/pi-agent-core";
-import type { Model } from "@oh-my-pi/pi-ai";
-import { logger, prompt } from "@oh-my-pi/pi-utils";
+import type { AgentTool, AgentToolContext, AgentToolResult, AgentToolUpdateCallback } from "@cornfield/agent";
+import type { Model } from "@cornfield/ai";
+import { logger, prompt } from "@cornfield/utils";
 import { type Static, Type } from "@sinclair/typebox";
 import switchModelDescription from "../prompts/tools/switch-model.md" with { type: "text" };
 import type { ToolSession } from "./index";
@@ -72,7 +72,7 @@ export class SwitchModelTool implements AgentTool<typeof switchModelSchema, Swit
 		if (models.length === 0) {
 			throw new ToolError(
 				"No models available. Check provider configuration and API keys in " +
-					"~/.omp/agent/config.yml and ~/.omp/agent/auth.db.",
+					"~/.cornfield/agent/config.yml and ~/.cornfield/agent/auth.db.",
 			);
 		}
 

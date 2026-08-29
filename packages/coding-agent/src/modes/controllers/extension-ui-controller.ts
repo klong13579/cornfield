@@ -1,6 +1,6 @@
-import type { Component, OverlayHandle, OverlayOptions, TUI } from "@oh-my-pi/pi-tui";
-import { Container, Spacer, Text } from "@oh-my-pi/pi-tui";
-import { logger } from "@oh-my-pi/pi-utils";
+import type { Component, OverlayHandle, OverlayOptions, TUI } from "@cornfield/tui";
+import { Container, Spacer, Text } from "@cornfield/tui";
+import { logger } from "@cornfield/utils";
 import { KeybindingsManager } from "../../config/keybindings";
 import type {
 	CompactOptions,

@@ -6,9 +6,9 @@
  * Returns synthesized answers with web search sources.
  */
 import * as os from "node:os";
-import { getBundledModels } from "@oh-my-pi/pi-ai";
-import { decodeJwt } from "@oh-my-pi/pi-ai/utils/oauth/openai-codex";
-import { $env, getAgentDbPath, readSseJson } from "@oh-my-pi/pi-utils";
+import { getBundledModels } from "@cornfield/ai";
+import { decodeJwt } from "@cornfield/ai/utils/oauth/openai-codex";
+import { $env, getAgentDbPath, readSseJson } from "@cornfield/utils";
 import packageJson from "../../../../package.json" with { type: "json" };
 import { AgentStorage } from "../../../session/agent-storage";
 import type { SearchResponse, SearchSource } from "../../../web/search/types";

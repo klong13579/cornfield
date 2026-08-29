@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Build the standalone `omp-gateway` binary (packages/omp-gateway/dist/omp-gateway).
+ * Build the standalone `cornfield-gateway` binary (packages/cornfield-gateway/dist/cornfield-gateway).
  *
  * This is the daemon-host counterpart of the `omp` coding-agent binary — see
  * docs/gateway-binary-split-plan.md. Deliberately slimmer than the coding-agent
@@ -15,13 +15,13 @@
  *   - No stats client bundle.
  * Both binaries share the darwin adhoc-sign + smoke-exec verification so a
  * kernel-rejected signature fails the build instead of surfacing at
- * `omp-gateway service start`.
+ * `cornfield-gateway service start`.
  */
 
 import * as path from "node:path";
 
 const packageDir = path.join(import.meta.dir, "..");
-const outputPath = path.join(packageDir, "dist", "omp-gateway");
+const outputPath = path.join(packageDir, "dist", "cornfield-gateway");
 
 function shouldAdhocSignDarwinBinary(): boolean {
 	return process.platform === "darwin";
@@ -53,7 +53,7 @@ async function main(): Promise<void> {
 		"../..",
 		"./src/cli.ts",
 		"--outfile",
-		"dist/omp-gateway",
+		"dist/cornfield-gateway",
 	]);
 
 	// Bun 1.3.12 emits a truncated Mach-O signature on darwin builds — same

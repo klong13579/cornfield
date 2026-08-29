@@ -5,7 +5,7 @@
  */
 import * as os from "node:os";
 import * as path from "node:path";
-import { getProjectDir, isEnoent, logger } from "@oh-my-pi/pi-utils";
+import { getProjectDir, isEnoent, logger } from "@cornfield/utils";
 
 /** Title text preferred when the file has multiple H2 sections. */
 const PREFERRED_SECTION_TITLE = "待办";

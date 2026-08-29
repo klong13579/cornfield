@@ -26,7 +26,7 @@ import * as path from "node:path";
  *   --play             Play each reply with afplay after the run (macOS)
  *   -h, --help         Show this help
  */
-import { chunkPcm16, createSilenceChunk, pcm16ToBase64, RealtimeWsTransport } from "@oh-my-pi/pi-ai";
+import { chunkPcm16, createSilenceChunk, pcm16ToBase64, RealtimeWsTransport } from "@cornfield/ai";
 import { concatPcm, encodeWav, resolveRealtimeCredentials } from "./realtime-common";
 
 const INPUT_SAMPLE_RATE = 24_000; // narwal/qwen realtime input is 24kHz PCM16 (bench-verified)

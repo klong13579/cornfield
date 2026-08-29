@@ -1,4 +1,4 @@
-import type { HostToolDefinitionDto, ModelInfoDto, ToolSwitchDto, ToolSwitchesDto } from "@oh-my-pi/pi-wire";
+import type { HostToolDefinitionDto, ModelInfoDto, ToolSwitchDto, ToolSwitchesDto } from "@cornfield/wire";
 import { X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useSessionStore } from "../../state/session-store";
@@ -286,7 +286,7 @@ function DingtalkView({ agentId }: { agentId: string }): React.JSX.Element {
 	if (!dt) {
 		return (
 			<div className="rounded-lg border border-dashed border-hairline-strong bg-surface px-4 py-8 text-center text-[12px] text-ink-faint">
-				该 agent 未绑定钉钉机器人（~/.omp/gateway.json → channels.dingtalk.accounts 无对应账号）
+				该 agent 未绑定钉钉机器人（~/.cornfield/gateway.json → channels.dingtalk.accounts 无对应账号）
 			</div>
 		);
 	}
@@ -309,7 +309,8 @@ function DingtalkView({ agentId }: { agentId: string }): React.JSX.Element {
 				))}
 			</div>
 			<div className="mt-3 text-[11px] text-ink-faint">
-				配置来源：~/.omp/gateway.json → channels.dingtalk.accounts（按 accountId 匹配 agent）。appSecret 不展示。
+				配置来源：~/.cornfield/gateway.json → channels.dingtalk.accounts（按 accountId 匹配 agent）。appSecret
+				不展示。
 			</div>
 		</div>
 	);

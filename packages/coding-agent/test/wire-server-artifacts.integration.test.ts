@@ -14,7 +14,7 @@ import { expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { MULTIDEVICE_PROTOCOL_VERSION } from "@oh-my-pi/pi-wire";
+import { MULTIDEVICE_PROTOCOL_VERSION } from "@cornfield/wire";
 import { waitForServe } from "./wait-for-serve";
 
 type Frame = { type: string; [k: string]: unknown };
@@ -53,9 +53,9 @@ test("list_artifacts：提取/分类/排序 + /preview 静态服务", async () =
 	const hrDir = path.join(isolatedHome, "agents", "hr");
 	const hrSessions = path.join(hrDir, "sessions", "by-date", "2026-08-27");
 	await fs.mkdir(hrSessions, { recursive: true });
-	await fs.mkdir(path.join(hrDir, ".omp"), { recursive: true });
+	await fs.mkdir(path.join(hrDir, ".cornfield"), { recursive: true });
 	await Bun.write(
-		path.join(hrDir, ".omp", "workspace.json"),
+		path.join(hrDir, ".cornfield", "workspace.json"),
 		JSON.stringify({ schemaVersion: 2, id: "hr", name: "hr-agent", type: "agent", root: ".", projectRoot: "." }),
 	);
 
@@ -67,7 +67,7 @@ test("list_artifacts：提取/分类/排序 + /preview 静态服务", async () =
 		Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
 	);
 
-	const registryDir = path.join(isolatedHome, ".omp", "agent");
+	const registryDir = path.join(isolatedHome, ".cornfield", "agent");
 	await fs.mkdir(registryDir, { recursive: true });
 	await Bun.write(
 		path.join(registryDir, "registry.json"),

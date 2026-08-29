@@ -1,4 +1,4 @@
-import { THINKING_EFFORTS } from "@oh-my-pi/pi-ai";
+import { THINKING_EFFORTS } from "@cornfield/ai";
 import { TASK_SIMPLE_MODES } from "../task/simple-mode";
 import { EDIT_MODES } from "../utils/edit-mode";
 
@@ -200,7 +200,7 @@ export const DEFAULT_BASH_INTERCEPTOR_RULES: BashInterceptorRule[] = [
 		pattern: "^\\s*skill(\\s+|$|;|&&|\\|)",
 		tool: "read",
 		message:
-			"There is no `skill` shell command. To load a skill, use the read tool: `read skill://<name>`. To discover skills, use `read ~/.omp/agent/skills/`.",
+			"There is no `skill` shell command. To load a skill, use the read tool: `read skill://<name>`. To discover skills, use `read ~/.cornfield/agent/skills/`.",
 	},
 ];
 

@@ -1,5 +1,5 @@
 import * as path from "node:path";
-import { isEnoent, logger } from "@oh-my-pi/pi-utils";
+import { isEnoent, logger } from "@cornfield/utils";
 import { randomUUID } from "crypto";
 import { type Stats, statSync, unlinkSync, writeFileSync } from "fs";
 import net from "net";
@@ -179,13 +179,13 @@ export class IntercomBroker {
 		options: { intercomDir?: string; listenTarget?: BrokerConnectTarget; socketWatchIntervalMs?: number } = {},
 	) {
 		// The runtime dir defaults to the module-level intercom dir, but tests
-		// inject an isolated one so the broker never touches ~/.omp/intercom.
+		// inject an isolated one so the broker never touches ~/.cornfield/intercom.
 		const runtimeDir = options.intercomDir ?? INTERCOM_DIR;
 		this.listenTarget = options.listenTarget ?? getBrokerListenTarget();
 		this.socketWatchIntervalMs = options.socketWatchIntervalMs ?? 15_000;
 		// The socket must live in an existing directory: ensure the listen
 		// target's own dir (when it is a unix socket path) so hot-swapping
-		// PI_CODING_AGENT_DIR mid-process still works, then the runtime dir
+		// CORNFIELD_AGENT_DIR mid-process still works, then the runtime dir
 		// (extension state) which defaults to the module-level intercom dir.
 		if (typeof this.listenTarget === "string") {
 			ensureIntercomRuntimeDir(path.dirname(this.listenTarget));

@@ -1,4 +1,4 @@
-import type { AssistantMessage, TextContent } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage, TextContent } from "@cornfield/ai";
 import {
 	type AgentSession,
 	type AuthStorage,
@@ -6,8 +6,8 @@ import {
 	type ModelRegistry,
 	SessionManager,
 	type Settings,
-} from "@oh-my-pi/pi-coding-agent";
-import { untilAborted } from "@oh-my-pi/pi-utils";
+} from "@cornfield/coding-agent";
+import { untilAborted } from "@cornfield/utils";
 import { createActivityTimeout } from "./activity-timeout";
 import { createBlockRemoteReadExtension } from "./block-remote-read";
 import { type SpawnWorkerInput, spawnMoaWorker, type WorkerOutput } from "./subprocess";

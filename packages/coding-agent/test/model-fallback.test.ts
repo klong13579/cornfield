@@ -1,5 +1,5 @@
 import { describe, expect, test, vi } from "bun:test";
-import type { AssistantMessage, AssistantMessageEvent, AssistantMessageEventStream } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage, AssistantMessageEvent, AssistantMessageEventStream } from "@cornfield/ai";
 import { isRetryableError, resolveFallbackModels, withModelFallback } from "../src/config/model-fallback";
 import type { ModelRegistry } from "../src/config/model-registry";
 import { Settings } from "../src/config/settings";

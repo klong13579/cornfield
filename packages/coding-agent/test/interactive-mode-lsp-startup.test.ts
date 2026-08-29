@@ -1,9 +1,9 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
 import * as path from "node:path";
-import { Agent } from "@oh-my-pi/pi-agent-core";
-import { _resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { initTheme, theme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
-import { TempDir } from "@oh-my-pi/pi-utils";
+import { Agent } from "@cornfield/agent";
+import { _resetSettingsForTest, Settings } from "@cornfield/coding-agent/config/settings";
+import { initTheme, theme } from "@cornfield/coding-agent/modes/theme/theme";
+import { TempDir } from "@cornfield/utils";
 import { ModelRegistry } from "../src/config/model-registry";
 import { LSP_STARTUP_EVENT_CHANNEL, type LspStartupEvent } from "../src/lsp/startup-events";
 import { InteractiveMode } from "../src/modes/interactive-mode";

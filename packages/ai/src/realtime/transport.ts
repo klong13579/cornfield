@@ -9,7 +9,7 @@
  * replayed by the transport — callers must re-send `session.update` on every
  * "connected" transition (the server treats each socket as a fresh session).
  */
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 import { pcm16ToBase64 } from "./audio";
 import { parseRealtimeServerEvent, type RealtimeClientEvent, type RealtimeServerEvent } from "./protocol";
 

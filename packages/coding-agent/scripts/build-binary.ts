@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Build the `omp` coding-agent binary (packages/coding-agent/dist/omp).
+ * Build the `cornfield` coding-agent binary (packages/coding-agent/dist/cornfield).
  *
  * This is the agent runtime half of the gateway binary split — the gateway
  * daemon is built separately as `omp-gateway` by
@@ -12,7 +12,7 @@
 import * as path from "node:path";
 
 const packageDir = path.join(import.meta.dir, "..");
-const outputPath = path.join(packageDir, "dist", "omp");
+const outputPath = path.join(packageDir, "dist", "cornfield");
 
 function shouldAdhocSignDarwinBinary(): boolean {
 	return process.platform === "darwin";
@@ -53,7 +53,7 @@ async function main(): Promise<void> {
 					"../..",
 					"./src/cli.ts",
 					"--outfile",
-					"dist/omp",
+					"dist/cornfield",
 				],
 				buildEnv,
 			);

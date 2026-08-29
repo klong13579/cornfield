@@ -141,7 +141,7 @@ async function resolveBuiltAddonPath(outputDir: string, canonicalFilename: strin
 	}
 
 	const generatedCandidates = entries.filter(entry => {
-		if (!entry.startsWith(`pi_natives.${targetPlatform}-${targetArch}`) || !entry.endsWith(".node")) {
+		if (!entry.startsWith(`cornfield_natives.${targetPlatform}-${targetArch}`) || !entry.endsWith(".node")) {
 			return false;
 		}
 		return true;
@@ -229,10 +229,10 @@ const napiArgs = [
 
 if (crossTarget) napiArgs.push("--target", crossTarget);
 
-const canonicalAddonFilename = `pi_natives.${targetPlatform}-${targetArch}${variantSuffix}.node`;
+const canonicalAddonFilename = `cornfield_natives.${targetPlatform}-${targetArch}${variantSuffix}.node`;
 const canonicalAddonPath = path.join(nativeDir, canonicalAddonFilename);
 
-console.log(`Building pi-natives for ${targetPlatform}-${targetArch}${variantSuffix}${profileSuffix}…`);
+console.log(`Building cornfield-natives for ${targetPlatform}-${targetArch}${variantSuffix}${profileSuffix}…`);
 
 await fs.mkdir(nativeDir, { recursive: true });
 await cleanupStaleTemps(nativeDir);

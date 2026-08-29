@@ -34,8 +34,8 @@ import {
 	REALTIME_SAMPLE_RATE,
 	RealtimeFunctionBridge,
 	type RealtimeServerEvent,
-} from "@oh-my-pi/pi-ai";
-import { logger } from "@oh-my-pi/pi-utils";
+} from "@cornfield/ai";
+import { logger } from "@cornfield/utils";
 import { float32ToPcm16, pcm16ToFloat32, rmsLevel } from "../stt/pcm";
 import type {
 	LiveAudioSink,

@@ -2,7 +2,7 @@
  * SQLite implementation of WorkflowPatternStore.
  */
 import type { Database } from "bun:sqlite";
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 import type { WorkflowPattern } from "../types";
 import type { WorkflowPatternStore } from "./types";
 

@@ -37,8 +37,8 @@ import {
 	type SetSessionModeResponse,
 	type Usage,
 } from "@agentclientprotocol/sdk";
-import type { AssistantMessage, Model } from "@oh-my-pi/pi-ai";
-import { logger, VERSION } from "@oh-my-pi/pi-utils";
+import type { AssistantMessage, Model } from "@cornfield/ai";
+import { logger, VERSION } from "@cornfield/utils";
 import { disableProvider, enableProvider } from "../../capability";
 import { Settings } from "../../config/settings";
 import type { ExtensionUIContext } from "../../extensibility/extensions";
@@ -191,8 +191,8 @@ export class AcpAgent implements Agent {
 		return {
 			protocolVersion: PROTOCOL_VERSION,
 			agentInfo: {
-				name: "oh-my-pi",
-				title: "Oh My Pi",
+				name: "cornfield",
+				title: "CornField",
 				version: VERSION,
 			},
 			authMethods: [
@@ -1058,7 +1058,7 @@ export class AcpAgent implements Agent {
 				}
 			}
 			case "model":
-				return "Model switching is not exposed in ACP. Edit ~/.omp/agent/config.yml or use the TUI.";
+				return "Model switching is not exposed in ACP. Edit ~/.cornfield/agent/config.yml or use the TUI.";
 			case "clear":
 				return "Context clearing is not exposed in ACP. Start a new Zed thread to reset.";
 			case "exit":

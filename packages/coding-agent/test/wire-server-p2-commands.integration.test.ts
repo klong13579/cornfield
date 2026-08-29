@@ -11,7 +11,7 @@
  * new_session/set_session_name/set_todos/set_host_tools 都是本地状态变更。
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { MULTIDEVICE_PROTOCOL_VERSION } from "@oh-my-pi/pi-wire";
+import { MULTIDEVICE_PROTOCOL_VERSION } from "@cornfield/wire";
 import { waitForServe } from "./wait-for-serve";
 
 type Frame = { type: string; [k: string]: unknown };

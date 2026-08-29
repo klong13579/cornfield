@@ -32,7 +32,7 @@ async function main(): Promise<void> {
 	// 1. web-app 前端（vite build → packages/web-app/dist）。
 	await runCommand(["bun", "run", "build"], webAppDir);
 
-	// 2. omp 二进制（build-binary.ts → packages/coding-agent/dist/omp）。
+	// 2. omp 二进制（build-binary.ts → packages/coding-agent/dist/cornfield）。
 	await runCommand(["bun", "run", "build"], codingAgentDir);
 
 	// 3. desktop 壳 JS（esbuild → packages/desktop/dist/{main,sidecar}.js + preload.cjs）。

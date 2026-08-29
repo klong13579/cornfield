@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import * as path from "node:path";
-import type { AssistantMessage, Context, SimpleStreamOptions } from "@oh-my-pi/pi-ai";
-import * as ai from "@oh-my-pi/pi-ai";
-import { TempDir } from "@oh-my-pi/pi-utils";
+import type { AssistantMessage, Context, SimpleStreamOptions } from "@cornfield/ai";
+import * as ai from "@cornfield/ai";
+import { TempDir } from "@cornfield/utils";
 import { Settings } from "../src/config/settings";
 import { createAgentSession } from "../src/sdk";
 import { AuthStorage } from "../src/session/auth-storage";

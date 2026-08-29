@@ -27,7 +27,7 @@
  *             1 = server rejected or rewrote at least one voice,
  *             2 = probe itself failed (connect/auth/credential lookup).
  */
-import { RealtimeWsTransport } from "@oh-my-pi/pi-ai";
+import { RealtimeWsTransport } from "@cornfield/ai";
 import { DEFAULT_BASE_URL, DEFAULT_MODEL, resolveRealtimeCredentials } from "./realtime-common";
 
 const SYSTEM_VOICE = "longanqian";

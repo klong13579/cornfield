@@ -11,7 +11,7 @@
  * Speak normally for the 5-second window. The script reports chunk count,
  * peak RMS, and a final verdict: MIC OK / MIC DEAD / MIC ERR.
  */
-import { AudioCapture } from "@oh-my-pi/pi-natives";
+import { AudioCapture } from "@cornfield/natives";
 
 const SAMPLE_RATE = 24_000;
 const WINDOW_MS = 5_000;

@@ -56,10 +56,10 @@ const platformTag = `${targetPlatform}-${targetArch}`;
 const candidates: CandidateAddon[] =
 	targetArch === "x64"
 		? [
-				{ variant: "modern", filename: `pi_natives.${platformTag}-modern.node` },
-				{ variant: "baseline", filename: `pi_natives.${platformTag}-baseline.node` },
+				{ variant: "modern", filename: `cornfield_natives.${platformTag}-modern.node` },
+				{ variant: "baseline", filename: `cornfield_natives.${platformTag}-baseline.node` },
 			]
-		: [{ variant: "default", filename: `pi_natives.${platformTag}.node` }];
+		: [{ variant: "default", filename: `cornfield_natives.${platformTag}.node` }];
 
 const available: CandidateAddon[] = [];
 for (const candidate of candidates) {

@@ -5,9 +5,9 @@
  * Supported models: text-embedding-3-small, text-embedding-3-large, etc.
  * Falls back gracefully when no model/API key is available.
  */
-import type { Model } from "@oh-my-pi/pi-ai";
-import { getEnvApiKey } from "@oh-my-pi/pi-ai";
-import { logger } from "@oh-my-pi/pi-utils";
+import type { Model } from "@cornfield/ai";
+import { getEnvApiKey } from "@cornfield/ai";
+import { logger } from "@cornfield/utils";
 
 // ---------------------------------------------------------------------------
 // Types

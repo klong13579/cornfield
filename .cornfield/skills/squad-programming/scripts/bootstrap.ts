@@ -15,10 +15,10 @@
  * 用法
  * ────
  *   # 只校验任务包 schema（不执行任何操作，Phase 0 的 completion 检查）
- *   bun run .omp/skills/squad-programming/scripts/bootstrap.ts --check <任务包路径>
+ *   bun run .cornfield/skills/squad-programming/scripts/bootstrap.ts --check <任务包路径>
  *
  *   # 集结（建 worktree / 写任务包 / 启动子 omp + 启动后准备检查）
- *   bun run .omp/skills/squad-programming/scripts/bootstrap.ts \
+ *   bun run .cornfield/skills/squad-programming/scripts/bootstrap.ts \
  *     --bundle <任务包绝对路径> \
  *     --parent-target <父 session 名或前缀> \
  *     --parent-session-id <父 session id> \
@@ -528,8 +528,8 @@ async function main(): Promise<void> {
 				"  --verify-timeout <ms>      pane 准备检查超时（默认 60000）",
 				"",
 				"示例:",
-				"  bun run .omp/skills/squad-programming/scripts/bootstrap.ts --check /tmp/bundle.json",
-				"  bun run .omp/skills/squad-programming/scripts/bootstrap.ts --bundle /tmp/bundle.json --parent-target planner --parent-session-id abc123",
+				"  bun run .cornfield/skills/squad-programming/scripts/bootstrap.ts --check /tmp/bundle.json",
+				"  bun run .cornfield/skills/squad-programming/scripts/bootstrap.ts --bundle /tmp/bundle.json --parent-target planner --parent-session-id abc123",
 			].join("\n") + "\n",
 		);
 		return;
@@ -657,7 +657,7 @@ async function main(): Promise<void> {
 		process.stderr.write("准备检查已跳过（--skip-verify），由父 agent 用 intercom 复核。\n");
 	}
 
-	// 父中断恢复：集结结果落盘 ~/.omp/squads/<squadId>/state.json，父每收一条状态消息更新它
+	// 父中断恢复：集结结果落盘 ~/.cornfield/squads/<squadId>/state.json，父每收一条状态消息更新它
 	// （见 SKILL.md 父盯盘与中断恢复）。verify 失败也写（记录已启动的子任务）。
 	if (!dryRun) {
 		const branchById = new Map(bundle.subtasks.map(s => [s.id, s.branch]));

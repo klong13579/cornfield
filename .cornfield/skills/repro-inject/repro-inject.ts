@@ -5,19 +5,19 @@
  * ────
  * 1. 默认从 gateway 的 sessions.db 读最近一次活跃会话的 webhook,直接注入
  *    (不需要预先发消息,只要用户之前跟 bot 聊过,gateway 自动把 webhook 写进 db):
- *      bun run .omp/skills/repro-inject/repro-inject.ts --account hr --text "帮我看下这个工单"
+ *      bun run .cornfield/skills/repro-inject/repro-inject.ts --account hr --text "帮我看下这个工单"
  *
  * 2. 注入 + 验证 (等 agent 回复, 从 session JSONL 读出响应):
- *      bun run .omp/skills/repro-inject/repro-inject.ts --account hr --text "ping" --verify
+ *      bun run .cornfield/skills/repro-inject/repro-inject.ts --account hr --text "ping" --verify
  *
  * 3. 冷启动: db 里没有该账号的会话,自动转 grab (让你在钉钉给 bot 发一条消息):
- *      bun run .omp/skills/repro-inject/repro-inject.ts --account hr --text "..." --grab-webhook
+ *      bun run .cornfield/skills/repro-inject/repro-inject.ts --account hr --text "..." --grab-webhook
  *
  * 4. CI / 纯复现场景: db 没有就直接报错,不要抓:
- *      bun run .omp/skills/repro-inject/repro-inject.ts --account hr --text "..." --no-grab-fallback
+ *      bun run .cornfield/skills/repro-inject/repro-inject.ts --account hr --text "..." --no-grab-fallback
  *
  * 5. 临时用一个 webhook (不写缓存,不查 db):
- *      bun run .omp/skills/repro-inject/repro-inject.ts --account hr --text "..." \
+ *      bun run .cornfield/skills/repro-inject/repro-inject.ts --account hr --text "..." \
  *          --webhook "https://oapi.dingtalk.com/robot/sendBySession?session=xxx"
  *
  * 工作原理
@@ -31,7 +31,7 @@
  * ───────────────────
  *   1. --webhook 显式 URL (一次性,不写缓存,不查 db)
  *   2. --grab-webhook 实时抓 (另起 DWClient 连钉Talk WS)
- *   3. ~/.omp/gateway-data/sessions.db 里该 account_id 的最近一条 active 会话
+ *   3. ~/.cornfield/gateway-data/sessions.db 里该 account_id 的最近一条 active 会话
  *      (过滤掉 repro-/-test-/-regress-/e2e- 这类自动化测试残留会话,
  *       优先取 webhook 域名是 oapi.dingtalk.com 的)
  *   4. 上面都没有 → 自动 fallback 到 grab (除非 --no-grab-fallback)
@@ -54,14 +54,14 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { DWClient, type DWClientDownStream, TOPIC_ROBOT } from "dingtalk-stream";
-// Relative path goes 3 levels up (.omp/skills/repro-inject -> oh-my-pi) to reach the omp-gateway package.
-// 脚本与 skill 同住 于 .omp/skills/repro-inject/,保留原始 package 依赖而非复制。
+// Relative path goes 3 levels up (.cornfield/skills/repro-inject -> oh-my-pi) to reach the omp-gateway package.
+// 脚本与 skill 同住 于 .cornfield/skills/repro-inject/,保留原始 package 依赖而非复制。
 import { getDingTalkConfig, loadConfig } from "../../../packages/omp-gateway/src/config";
 import type { DingTalkRawMessage } from "../../../packages/omp-gateway/src/types";
 
-const STATE_PATH = path.join(os.homedir(), ".omp", "repro-state.json");
+const STATE_PATH = path.join(os.homedir(), ".cornfield", "repro-state.json");
 const DEFAULT_GATEWAY = "http://127.0.0.1:7890";
-const DEFAULT_GATEWAY_DATA_DIR = path.join(os.homedir(), ".omp", "gateway-data");
+const DEFAULT_GATEWAY_DATA_DIR = path.join(os.homedir(), ".cornfield", "gateway-data");
 const WEBHOOK_TTL_MS = 5 * 60_000;
 
 /**
@@ -223,7 +223,7 @@ function printHelp() {
 	console.log(`repro-inject — 复现钉钉问题时的消息注入工具
 
 用法:
-  bun run .omp/skills/repro-inject/repro-inject.ts --account <id> --text "<msg>" [选项]
+  bun run .cornfield/skills/repro-inject/repro-inject.ts --account <id> --text "<msg>" [选项]
 
 必需:
   --account <id>             gateway.json 里的钉钉账号 (如 hr / algorithm)
@@ -245,13 +245,13 @@ Webhook 来源 (按优先级):
 网关:
   --port <n>                 /test/inject 端口 (默认 7890)
   --gateway <url>            网关根 URL (默认 http://127.0.0.1:7890)
-  --gateway-data-dir <path>  gateway 数据目录 (默认 ~/.omp/gateway-data)
+  --gateway-data-dir <path>  gateway 数据目录 (默认 ~/.cornfield/gateway-data)
 
 杂项:
   --config <path>            自定义 gateway.json 路径
   --timeout <ms>             --grab-webhook 等多久 (默认 60000)
-  --list                     列出 ~/.omp/repro-state.json 里的缓存 webhooks
-  --clear                    清空 ~/.omp/repro-state.json
+  --list                     列出 ~/.cornfield/repro-state.json 里的缓存 webhooks
+  --clear                    清空 ~/.cornfield/repro-state.json
   --json                     输出 JSON 而不是人类可读文本
   --verify                   注入后等 agent 回复, 从 session JSONL 读出来打印
   --verify-timeout <ms>      --verify 等多久 (默认 90000)
@@ -259,19 +259,19 @@ Webhook 来源 (按优先级):
 
 示例:
   # 1. 最常用: 默认从 sessions.db 读最近活跃 webhook
-  bun run .omp/skills/repro-inject/repro-inject.ts --account hr --text "帮我看下这个工单"
+  bun run .cornfield/skills/repro-inject/repro-inject.ts --account hr --text "帮我看下这个工单"
 
   # 2. + 验证 agent 回复
-  bun run .omp/skills/repro-inject/repro-inject.ts --account hr --text "ping" --verify
+  bun run .cornfield/skills/repro-inject/repro-inject.ts --account hr --text "ping" --verify
 
   # 3. 冷启动: db 没有该账号会话时, 显式要求 grab (在钉钉给 bot 发一条)
-  bun run .omp/skills/repro-inject/repro-inject.ts --account hr --text "..." --grab-webhook
+  bun run .cornfield/skills/repro-inject/repro-inject.ts --account hr --text "..." --grab-webhook
 
   # 4. CI/纯复现: db 没有就报错退出, 不要触发抓包
-  bun run .omp/skills/repro-inject/repro-inject.ts --account hr --text "..." --no-grab-fallback
+  bun run .cornfield/skills/repro-inject/repro-inject.ts --account hr --text "..." --no-grab-fallback
 
   # 5. 临时用一个 webhook (不写缓存, 不查 db)
-  bun run .omp/skills/repro-inject/repro-inject.ts --account hr --text "..." \\
+  bun run .cornfield/skills/repro-inject/repro-inject.ts --account hr --text "..." \\
       --webhook "https://oapi.dingtalk.com/robot/sendBySession?session=xxx"
 
 注意: DM 走 AI Card 流式路径, 用户的 DingTalk 客户端直接看到 bot 的卡片回复。

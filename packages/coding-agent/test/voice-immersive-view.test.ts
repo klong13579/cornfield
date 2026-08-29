@@ -6,9 +6,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import {
 	type VoiceImmersiveState,
 	VoiceImmersiveView,
-} from "@oh-my-pi/pi-coding-agent/modes/components/voice-immersive-view";
-import { getThemeByName, type Theme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
-import { type TUI, visibleWidth } from "@oh-my-pi/pi-tui";
+} from "@cornfield/coding-agent/modes/components/voice-immersive-view";
+import { getThemeByName, type Theme } from "@cornfield/coding-agent/modes/theme/theme";
+import { type TUI, visibleWidth } from "@cornfield/tui";
 
 const WIDTH = 112;
 const ROWS = 44;

@@ -8,8 +8,8 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { RpcClient } from "@oh-my-pi/pi-coding-agent/modes";
-import { Snowflake } from "@oh-my-pi/pi-utils";
+import { RpcClient } from "@cornfield/coding-agent/modes";
+import { Snowflake } from "@cornfield/utils";
 import { e2eApiKey } from "./utilities";
 
 const tempPaths: string[] = [];
@@ -135,7 +135,7 @@ describe.skipIf(!e2eApiKey("ANTHROPIC_API_KEY"))("RPC lifecycle (real process)",
 		client = new RpcClient({
 			cliPath: path.join(import.meta.dir, "..", "dist", "cli.js"),
 			cwd: path.join(import.meta.dir, ".."),
-			env: { PI_CODING_AGENT_DIR: sessionDir },
+			env: { CORNFIELD_AGENT_DIR: sessionDir },
 			provider: "anthropic",
 			model: "claude-sonnet-4-5",
 		});

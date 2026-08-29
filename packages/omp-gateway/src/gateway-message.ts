@@ -7,8 +7,8 @@
  */
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { buildAgentSessionPath } from "@oh-my-pi/pi-coding-agent/skeleton";
-import { isEnoent, logger } from "@oh-my-pi/pi-utils";
+import { buildAgentSessionPath } from "@cornfield/coding-agent/skeleton";
+import { isEnoent, logger } from "@cornfield/utils";
 import type { AgentBridge } from "./agent-bridge";
 import type { ChannelRegistry } from "./channels/registry";
 import { getDataDir } from "./config";

@@ -25,8 +25,8 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { logger } from "@oh-my-pi/pi-utils";
-import type { ClientFrame, ServerFrame, WireCommand, WireErrorPayload } from "@oh-my-pi/pi-wire";
+import { logger } from "@cornfield/utils";
+import type { ClientFrame, ServerFrame, WireCommand, WireErrorPayload } from "@cornfield/wire";
 import type { FileSink } from "bun";
 import { randomUUID } from "crypto";
 import { resolveCredentialEnvVars } from "./credential-resolver";
@@ -629,14 +629,14 @@ export class WireTransport {
 }
 
 /**
- * Resolve the default omp binary path (same policy as RpcTransport).
+ * Resolve the default cornfield binary path (same policy as WireTransport).
  */
 export function resolveDefaultOmpPath(home: string = os.homedir()): string {
-	const stable = path.join(home, ".local", "bin", "omp");
+	const stable = path.join(home, ".local", "bin", "cornfield");
 	try {
 		fs.accessSync(stable, fs.constants.X_OK);
 		return stable;
 	} catch {
-		return "omp";
+		return "cornfield";
 	}
 }

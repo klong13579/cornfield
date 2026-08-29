@@ -2,8 +2,8 @@
  * SkillExtractor: rule-based screening + optional LLM refinement.
  */
 
-import type { Model } from "@oh-my-pi/pi-ai";
-import { logger } from "@oh-my-pi/pi-utils";
+import type { Model } from "@cornfield/ai";
+import { logger } from "@cornfield/utils";
 import { HeuristicSkillEvaluator } from "./evaluator";
 import extractSkillPromptTemplate from "./prompts/extract-skill.md" with { type: "text" };
 import type { ExtractedSkill, SessionTrace, ToolChainDiagnosis } from "./types";

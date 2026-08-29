@@ -1,3 +1,4 @@
+import { $env } from "@cornfield/utils";
 import {
 	type GenerateContentConfig,
 	type GenerateContentParameters,
@@ -5,7 +6,6 @@ import {
 	type ThinkingConfig,
 	ThinkingLevel,
 } from "@google/genai";
-import { $env } from "@oh-my-pi/pi-utils";
 import { calculateCost } from "../models";
 import type {
 	Api,

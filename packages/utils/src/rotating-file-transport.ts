@@ -11,8 +11,8 @@
  * synchronous `write()` and `end()` with reliable FD lifecycle management.
  *
  * Features:
- *   - Date-based filenames: `omp.YYYY-MM-DD.log`
- *   - Size-based rotation: rename to `omp.YYYY-MM-DD.log.N` when exceeding `maxSize`
+ *   - Date-based filenames: `cornfield.YYYY-MM-DD.log`
+ *   - Size-based rotation: rename to `cornfield.YYYY-MM-DD.log.N` when exceeding `maxSize`
  *   - `maxFiles` retention: deletes oldest rotated files
  *   - No audit file (retention is managed inline on rotation)
  */
@@ -119,7 +119,7 @@ export class RotatingFileTransport extends Transport {
 	}
 
 	#shiftRotatedFiles(): void {
-		// Rename omp.YYYY-MM-DD.log → omp.YYYY-MM-DD.log.1
+		// Rename cornfield.YYYY-MM-DD.log → cornfield.YYYY-MM-DD.log.1
 		// Shift existing .N → .N+1, up to maxFiles-1
 		const baseName = this.#filenamePattern.replace("%DATE%", this.#currentDate);
 		for (let i = this.#maxFiles - 1; i >= 1; i--) {

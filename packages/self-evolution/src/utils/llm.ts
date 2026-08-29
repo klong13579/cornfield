@@ -2,9 +2,9 @@
  * LLM wrapper for background calls (skill refinement, reranking, prompt optimization).
  */
 
-import type { Context, Model } from "@oh-my-pi/pi-ai";
-import { completeSimple } from "@oh-my-pi/pi-ai";
-import { logger } from "@oh-my-pi/pi-utils";
+import type { Context, Model } from "@cornfield/ai";
+import { completeSimple } from "@cornfield/ai";
+import { logger } from "@cornfield/utils";
 
 export interface BackgroundLlmAuth {
 	getApiKey(model: Model): Promise<string | undefined>;

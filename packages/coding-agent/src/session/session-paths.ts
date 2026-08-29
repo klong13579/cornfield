@@ -15,7 +15,7 @@
  * lives in the JSONL header and surfaces via `omp session ls`.
  */
 import * as path from "node:path";
-import { slugifySync } from "@oh-my-pi/pi-utils";
+import { slugifySync } from "@cornfield/utils";
 
 /** Extract `YYYY-MM-DD` from a Date. */
 export function dateStamp(d: Date = new Date()): string {

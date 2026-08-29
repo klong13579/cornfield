@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "bun:test";
-import type { AuthStorage, ModelRegistry } from "@oh-my-pi/pi-coding-agent";
-import { Settings } from "@oh-my-pi/pi-coding-agent";
+import type { AuthStorage, ModelRegistry } from "@cornfield/coding-agent";
+import { Settings } from "@cornfield/coding-agent";
 import { buildPlan } from "../src/planner";
 import * as judgeModule from "../src/quality/judge";
 import { resolveSettings } from "../src/settings";

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "bun:test";
-import type { Model } from "@oh-my-pi/pi-ai";
-import * as piAi from "@oh-my-pi/pi-ai";
+import type { Model } from "@cornfield/ai";
+import * as piAi from "@cornfield/ai";
 import { callBackgroundLlm } from "../src/utils/llm";
 
 const testModel = {

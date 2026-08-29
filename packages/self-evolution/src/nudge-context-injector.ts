@@ -1,7 +1,7 @@
 /**
  * Formats pending session nudges for injection into the next LLM context.
  */
-import { prompt } from "@oh-my-pi/pi-utils";
+import { prompt } from "@cornfield/utils";
 import nudgeContextTemplate from "./prompts/nudge-context.md" with { type: "text" };
 import type { Nudge, QueuedAgentNudge } from "./types";
 

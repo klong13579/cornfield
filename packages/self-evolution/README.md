@@ -1,4 +1,4 @@
-# @oh-my-pi/self-evolution
+# @cornfield/self-evolution
 
 > L4 Metacognitive Evolution Engine — Project Synapse
 
@@ -81,12 +81,12 @@ The self-evolution package transforms the agent from a passive executor into an 
 
 ## Storage
 
-**Default (per project):** all evolution + memory state lives under `<project-root>/.omp/`. Session JSONL remains in `~/.omp/agent/sessions/`; credentials stay in `~/.omp/agent/agent.db` (not mixed with evolution data).
+**Default (per project):** all evolution + memory state lives under `<project-root>/.cornfield/`. Session JSONL remains in `~/.cornfield/agent/sessions/`; credentials stay in `~/.cornfield/agent/agent.db` (not mixed with evolution data).
 
 ### Layout
 
 ```
-<repo>/.omp/
+<repo>/.cornfield/
 ├── memory/                    # Memory pipeline artifacts
 │   ├── MEMORY.md
 │   ├── memory_summary.md
@@ -101,7 +101,7 @@ The self-evolution package transforms the agent from a passive executor into an 
 └── skills/                    # Exported skill markdown (*.md)
 ```
 
-### SQLite (`<repo>/.omp/evolution/evolution.db`)
+### SQLite (`<repo>/.cornfield/evolution/evolution.db`)
 
 | Table | Purpose |
 |---|---|
@@ -123,7 +123,7 @@ The self-evolution package transforms the agent from a passive executor into an 
 | `nudge_history` | Cross-session nudge records |
 | `stats` | System counters |
 
-**Default (global user store)**: `~/.omp/self-evolution/` — memory under `~/.omp/self-evolution/memory/--encoded-cwd--/`. **Per-project layout** (opt-in `--self-evolution-project-store`): `<cwd>/.omp/evolution/{memory,skills,evolution.db}`. To copy global-store data into a repo tree, run `packages/self-evolution/scripts/migrate-evolution-data.sh <repo>`.
+**Default (global user store)**: `~/.cornfield/self-evolution/` — memory under `~/.cornfield/self-evolution/memory/--encoded-cwd--/`. **Per-project layout** (opt-in `--self-evolution-project-store`): `<cwd>/.cornfield/evolution/{memory,skills,evolution.db}`. To copy global-store data into a repo tree, run `packages/self-evolution/scripts/migrate-evolution-data.sh <repo>`.
 
 ### Migrating from older installs
 
@@ -131,7 +131,7 @@ The self-evolution package transforms the agent from a passive executor into an 
 # FS copy + agent.db memory rows → project evolution.db
 bash packages/self-evolution/scripts/migrate-evolution-data.sh /path/to/repo
 
-# Re-archive sessions from ~/.omp/agent/sessions/*.jsonl
+# Re-archive sessions from ~/.cornfield/agent/sessions/*.jsonl
 bun packages/self-evolution/scripts/backfill-episodes-from-sessions.ts --cwd /path/to/repo --per-project
 ```
 
@@ -141,7 +141,7 @@ bun packages/self-evolution/scripts/backfill-episodes-from-sessions.ts --cwd /pa
 /evolution status              Show statistics (episodes, skills, versions)
 /evolution skills [--detail]   List evolved skills with score breakdown
 /evolution rate <name> <1-5>   Rate a skill
-/evolution clear               Delete project .omp/memory, evolution, skills (after confirm)
+/evolution clear               Delete project .cornfield/memory, evolution, skills (after confirm)
 /evolution archive             Archive low-quality skills
 /evolution history <name>      View version history for a skill
 /evolution rollback <n> <v>    Rollback a skill to a version
@@ -166,13 +166,13 @@ Flags passed via CLI or config:
 | `--self-evolution-llm-rerank` | `true` | Use LLM to rerank episodes |
 | `--self-evolution-enable-versioning` | `true` | Enable skill version snapshots |
 | `--self-evolution-enable-activity-log` | `true` | Enable JSONL activity logging |
-| `--self-evolution-global-store` | `true` | Global user store: `~/.omp/self-evolution` + encoded agent memories (default) |
-| `--self-evolution-project-store` | `false` | Per-project `<cwd>/.omp/memory`, `evolution`, `skills` |
+| `--self-evolution-global-store` | `true` | Global user store: `~/.cornfield/self-evolution` + encoded agent memories (default) |
+| `--self-evolution-project-store` | `false` | Per-project `<cwd>/.cornfield/memory`, `evolution`, `skills` |
 
 ## API
 
 ```typescript
-import { createSelfEvolutionExtension } from "@oh-my-pi/self-evolution";
+import { createSelfEvolutionExtension } from "@cornfield/self-evolution";
 
 // Register as an extension
 session.registerExtension(createSelfEvolutionExtension({ settings, agentDir }));
@@ -199,5 +199,5 @@ bun test packages/cognitive-coordination/src/ packages/self-evolution/src/
 
 ## Related
 
-- [`@oh-my-pi/cognitive-coordination`](../cognitive-coordination/) — Unified skill registry, context assembler
+- [`@cornfield/cognitive-coordination`](../cognitive-coordination/) — Unified skill registry, context assembler
 - [`l4-evolution-architecture.md`](../../l4-evolution-architecture.md) — Full architecture design document

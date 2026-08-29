@@ -4,19 +4,19 @@
  * The coding-agent's `Settings` class is a global singleton tied to a single
  * cwd/agentDir. The gateway runs multiple accounts in one process, each with
  * its own agentDir, so we can't use `Settings.init()` directly. This module
- * reads the relevant fields out of the same yaml files (`<home>/.omp/agent/config.yml`
- * + `<agentDir>/.omp/config.yml`) and merges them with the same precedence
+ * reads the relevant fields out of the same yaml files (`<home>/.cornfield/agent/config.yml`
+ * + `<agentDir>/.cornfield/config.yml`) and merges them with the same precedence
  * the agent runtime applies.
  *
  * - `disabledExtensions`: project entries are appended after user-level
  *   (union / dedup) so a project can extend the global disable list.
- * - `hideThinkingBlock`: `<agentDir>/.omp/config.yml` is canonical (same
+ * - `hideThinkingBlock`: `<agentDir>/.cornfield/config.yml` is canonical (same
  *   key the omp TUI reads). User-level config is fallback; `gateway.json`
  *   account field is last resort only.
  */
 import * as os from "node:os";
 import * as path from "node:path";
-import { isEnoent, logger } from "@oh-my-pi/pi-utils";
+import { isEnoent, logger } from "@cornfield/utils";
 
 /** Read + parse a YAML config file. Returns null on ENOENT / parse / non-object. */
 async function readConfigObject(file: string): Promise<Record<string, unknown> | null> {
@@ -64,11 +64,11 @@ async function readBooleanField(file: string, field: string): Promise<boolean | 
 }
 
 function configPaths(agentDir: string): { userFile: string; projectFile: string } {
-	const configDirName = process.env.PI_CONFIG_DIR ?? ".omp";
+	const configDirName = process.env.CORNFIELD_CONFIG_DIR ?? ".cornfield";
 	const userConfigRoot = path.isAbsolute(configDirName) ? configDirName : path.join(os.homedir(), configDirName);
 	return {
 		userFile: path.join(userConfigRoot, "agent", "config.yml"),
-		projectFile: path.join(agentDir, ".omp", "config.yml"),
+		projectFile: path.join(agentDir, ".cornfield", "config.yml"),
 	};
 }
 
@@ -95,8 +95,8 @@ function dedupeConcat(a: string[], b: string[]): string[] {
  * Resolve the merged `disabledExtensions` list for a given account agentDir.
  *
  * Sources, in order:
- *   1. `<home>/.omp/agent/config.yml`  (user-level)
- *   2. `<agentDir>/.omp/config.yml`    (project-level)
+ *   1. `<home>/.cornfield/agent/config.yml`  (user-level)
+ *   2. `<agentDir>/.cornfield/config.yml`    (project-level)
  *
  * Returns deduped union. Empty array if neither file has the field.
  */
@@ -123,8 +123,8 @@ export async function resolveDisabledExtensions(agentDir: string): Promise<strin
  * Resolve whether the DingTalk AI Card should drop thinking blocks.
  *
  * Precedence (first defined boolean wins):
- *   1. `<agentDir>/.omp/config.yml` — canonical (same as omp TUI)
- *   2. `<home>/.omp/agent/config.yml` — user-level fallback
+ *   1. `<agentDir>/.cornfield/config.yml` — canonical (same as cornfield TUI)
+ *   2. `<home>/.cornfield/agent/config.yml` — user-level fallback
  *   3. `gatewayFallback` — legacy `gateway.json` `accounts.*.hideThinkingBlock`
  *   4. `false`
  */

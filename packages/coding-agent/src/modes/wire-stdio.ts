@@ -14,8 +14,8 @@
  * gateway 的 AgentBridge 切到本协议后，rpc-mode + agent-transport 旧协议层删除。
  */
 
-import type { AgentTool, AgentToolResult, AgentToolUpdateCallback } from "@oh-my-pi/pi-agent-core";
-import { logger, readJsonl, Snowflake } from "@oh-my-pi/pi-utils";
+import type { AgentTool, AgentToolResult, AgentToolUpdateCallback } from "@cornfield/agent";
+import { logger, readJsonl, Snowflake } from "@cornfield/utils";
 import type {
 	ClientFrame,
 	HostToolCallPush,
@@ -24,7 +24,7 @@ import type {
 	WireCommand,
 	WireHostToolDefinition,
 	WireServerEvent,
-} from "@oh-my-pi/pi-wire";
+} from "@cornfield/wire";
 import type { Static, TSchema } from "@sinclair/typebox";
 import type { ExtensionUIContext, ExtensionUIDialogOptions } from "../extensibility/extensions";
 import { runExtensionCompact, runExtensionSetModel } from "../extensibility/extensions/compact-handler";

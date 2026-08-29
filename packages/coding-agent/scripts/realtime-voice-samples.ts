@@ -29,7 +29,7 @@ import * as path from "node:path";
  *   --pause-ms <n>     Pause between --play tracks (default: 1500)
  *   -h, --help         Show this help
  */
-import { RealtimeWsTransport } from "@oh-my-pi/pi-ai";
+import { RealtimeWsTransport } from "@cornfield/ai";
 import { concatPcm, encodeWav, REALTIME_VOICES, resolveRealtimeCredentials, type VoiceInfo } from "./realtime-common";
 
 const SAMPLE_RATE = 24_000;

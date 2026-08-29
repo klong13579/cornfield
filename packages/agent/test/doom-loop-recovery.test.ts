@@ -27,15 +27,15 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { Agent } from "@oh-my-pi/pi-agent-core";
+import { Agent } from "@cornfield/agent";
 import {
 	type AssistantMessage,
 	type AssistantMessageEventStream,
 	type Context,
 	getBundledModel,
 	type Model,
-} from "@oh-my-pi/pi-ai";
-import { AssistantMessageEventStream as PiEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
+} from "@cornfield/ai";
+import { AssistantMessageEventStream as PiEventStream } from "@cornfield/ai/utils/event-stream";
 import { createUsage } from "./helpers";
 
 function makeModel() {

@@ -17,11 +17,11 @@
  */
 
 import { beforeAll, describe, expect, it, type Mock, vi } from "bun:test";
-import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
-import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
-import { UiHelpers } from "@oh-my-pi/pi-coding-agent/modes/utils/ui-helpers";
-import type { SessionContext } from "@oh-my-pi/pi-coding-agent/session/session-manager";
-import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
+import { initTheme } from "@cornfield/coding-agent/modes/theme/theme";
+import type { InteractiveModeContext } from "@cornfield/coding-agent/modes/types";
+import { UiHelpers } from "@cornfield/coding-agent/modes/utils/ui-helpers";
+import type { SessionContext } from "@cornfield/coding-agent/session/session-manager";
+import { SessionManager } from "@cornfield/coding-agent/session/session-manager";
 
 beforeAll(() => {
 	initTheme();

@@ -12,7 +12,7 @@
  *      split into chunks and each chunk is transcribed serially; results
  *      are concatenated.
  *   3. The final text is written to a JSON file under
- *      `~/.omp/listen/YYYY-MM-DD-<desc>.json` (or auto-named if no desc).
+ *      `~/.cornfield/listen/YYYY-MM-DD-<desc>.json` (or auto-named if no desc).
  *
  * Adaptive timeout: transcription timeout scales with audio length
  * (`stt.transcribeTimeoutMultiplier × duration`, capped at

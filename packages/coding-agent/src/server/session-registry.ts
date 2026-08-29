@@ -1,6 +1,6 @@
 import * as path from "node:path";
-import { getConfigRootDir, isEnoent, logger } from "@oh-my-pi/pi-utils";
-import type { DingtalkAgentConfigDto, SessionListEntry } from "@oh-my-pi/pi-wire";
+import { getConfigRootDir, isEnoent, logger } from "@cornfield/utils";
+import type { DingtalkAgentConfigDto, SessionListEntry } from "@cornfield/wire";
 import type { AgentSession, AgentSessionEvent } from "../session/agent-session";
 import type { SessionSnapshot } from "../session/session-snapshot";
 import { SessionStore } from "../session/session-store";
@@ -12,7 +12,7 @@ import { loadWorkspace } from "../skeleton/workspace";
  *
  * 职责：把「注册表里的 agentDir 元数据」与「进程内活跃的 AgentSession」分开管理。
  *
- * - 元数据层：`~/.omp/agent/registry.json` 只读加载（绝不做写操作），加上 serve 自带的
+ * - 元数据层：`~/.cornfield/agent/registry.json` 只读加载（绝不做写操作），加上 serve 自带的
  *   default agent（P1 兼容：cwd 进程的那个会话）。列表展示（server_snapshot / list_agents）
  *   只依赖这层，零成本。
  * - 会话层：lazy attach —— 收到 attach/switch_session 或命令定向到某 agent 时才调
@@ -96,7 +96,7 @@ async function loadDingtalkConfigs(): Promise<Map<string, DingtalkAgentConfigDto
 }
 
 async function countSkills(agentDir: string, skillsDir: string | undefined): Promise<number | undefined> {
-	const dir = path.join(agentDir, skillsDir ?? ".omp/skills");
+	const dir = path.join(agentDir, skillsDir ?? ".cornfield/skills");
 	try {
 		const entries = await Array.fromAsync(new Bun.Glob("*/SKILL.md").scan({ cwd: dir, onlyFiles: true }));
 		return entries.length;

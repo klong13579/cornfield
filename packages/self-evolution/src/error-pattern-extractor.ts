@@ -3,7 +3,7 @@
  *
  * Patterns feed `evolution_escalations` only — no `negative_rule` convention writes.
  */
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 import { TraceAnalyzer } from "./trace-analyzer";
 import type { ErrorPattern, ReadFailureType, SessionTrace } from "./types";
 

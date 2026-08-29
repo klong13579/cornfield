@@ -7,8 +7,8 @@
  */
 
 import type { Database } from "bun:sqlite";
-import type { SandboxReport } from "@oh-my-pi/cognitive-coordination";
-import { logger } from "@oh-my-pi/pi-utils";
+import type { SandboxReport } from "@cornfield/cognitive-coordination";
+import { logger } from "@cornfield/utils";
 import { SqliteSkillStore } from "./storage/skills";
 
 export interface PruningConfig {

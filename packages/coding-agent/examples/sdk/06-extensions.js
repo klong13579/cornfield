@@ -13,7 +13,7 @@
  * An extension is a TypeScript file that exports a default function:
  *   export default function (pi: ExtensionAPI) { ... }
  */
-import { createAgentSession, SessionManager } from "@oh-my-pi/pi-coding-agent";
+import { createAgentSession, SessionManager } from "@cornfield/coding-agent";
 // Extensions are loaded from disk, not passed inline to createAgentSession.
 // Use the discovery mechanism:
 //   1. Place extension files in ~/.omp/agent/extensions/ or .omp/extensions/
@@ -33,7 +33,7 @@ await session.prompt("List files in the current directory.");
 console.log();
 // Example extension file (./my-logging-extension.ts):
 /*
-import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
+import type { ExtensionAPI } from "@cornfield/coding-agent";
 
 export default function (pi: ExtensionAPI) {
     pi.on("agent_start", async () => {

@@ -5,7 +5,7 @@
  */
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { getAgentDir, logger } from "@oh-my-pi/pi-utils";
+import { getAgentDir, logger } from "@cornfield/utils";
 import { getUnifiedSkillsDir, resolveGlobalMemoryRootCandidates } from "./paths";
 import { ensureAgentBodyShape } from "./skill-format";
 import { isValidSkillName } from "./skill-score";

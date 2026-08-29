@@ -1,6 +1,6 @@
 import { execSync } from "node:child_process";
-import type { ClipboardImage } from "@oh-my-pi/pi-natives";
-import * as native from "@oh-my-pi/pi-natives";
+import type { ClipboardImage } from "@cornfield/natives";
+import * as native from "@cornfield/natives";
 
 const hasDisplay = process.platform !== "linux" || Boolean(process.env.DISPLAY || process.env.WAYLAND_DISPLAY);
 

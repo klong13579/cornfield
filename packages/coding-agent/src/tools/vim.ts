@@ -1,7 +1,7 @@
-import type { AgentTool, AgentToolContext, AgentToolResult, AgentToolUpdateCallback } from "@oh-my-pi/pi-agent-core";
-import type { Component } from "@oh-my-pi/pi-tui";
-import { extractSegments, sliceWithWidth, Text } from "@oh-my-pi/pi-tui";
-import { isEnoent, logger, prompt, untilAborted } from "@oh-my-pi/pi-utils";
+import type { AgentTool, AgentToolContext, AgentToolResult, AgentToolUpdateCallback } from "@cornfield/agent";
+import type { Component } from "@cornfield/tui";
+import { extractSegments, sliceWithWidth, Text } from "@cornfield/tui";
+import { isEnoent, logger, prompt, untilAborted } from "@cornfield/utils";
 import { type Static, Type } from "@sinclair/typebox";
 import * as Diff from "diff";
 import type { RenderResultOptions } from "../extensibility/custom-tools/types";

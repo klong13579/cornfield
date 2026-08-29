@@ -2,16 +2,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { type SettingPath, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
-import { ReadTool } from "@oh-my-pi/pi-coding-agent/tools/read";
-import { ToolAbortError } from "@oh-my-pi/pi-coding-agent/tools/tool-errors";
-import * as imageResize from "@oh-my-pi/pi-coding-agent/utils/image-resize";
-import * as toolsManager from "@oh-my-pi/pi-coding-agent/utils/tools-manager";
-import * as scrapers from "@oh-my-pi/pi-coding-agent/web/scrapers/types";
-import * as scraperUtils from "@oh-my-pi/pi-coding-agent/web/scrapers/utils";
-import * as natives from "@oh-my-pi/pi-natives";
-import { hookFetch, ptree, Snowflake } from "@oh-my-pi/pi-utils";
+import { type SettingPath, Settings } from "@cornfield/coding-agent/config/settings";
+import type { ToolSession } from "@cornfield/coding-agent/tools";
+import { ReadTool } from "@cornfield/coding-agent/tools/read";
+import { ToolAbortError } from "@cornfield/coding-agent/tools/tool-errors";
+import * as imageResize from "@cornfield/coding-agent/utils/image-resize";
+import * as toolsManager from "@cornfield/coding-agent/utils/tools-manager";
+import * as scrapers from "@cornfield/coding-agent/web/scrapers/types";
+import * as scraperUtils from "@cornfield/coding-agent/web/scrapers/utils";
+import * as natives from "@cornfield/natives";
+import { hookFetch, ptree, Snowflake } from "@cornfield/utils";
 
 const withMissingSystemPython = () => {
 	const whichSpy = vi.spyOn(Bun, "which").mockImplementation(() => null);

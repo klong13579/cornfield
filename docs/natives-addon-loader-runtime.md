@@ -1,6 +1,6 @@
 # Natives Addon Loader Runtime
 
-This document covers the runtime loader shipped by `@oh-my-pi/pi-natives`: how `native/index.js` decides which `.node` file to require, how compiled-binary embedded payloads are extracted, and what startup failures report.
+This document covers the runtime loader shipped by `@cornfield/natives`: how `native/index.js` decides which `.node` file to require, how compiled-binary embedded payloads are extracted, and what startup failures report.
 
 ## Implementation files
 
@@ -32,16 +32,16 @@ At module initialization, `native/index.js` computes:
   - `execDir`: directory containing `process.execPath`.
   - `versionedDir`: `<getNativesDir()>/<packageVersion>`.
   - `userDataDir` fallback:
-    - Windows: `%LOCALAPPDATA%/omp` or `%USERPROFILE%/AppData/Local/omp`.
+    - Windows: `%LOCALAPPDATA%/cornfield` or `%USERPROFILE%/AppData/Local/cornfield`.
     - Non-Windows: `~/.local/bin`.
 - **Natives cache root** (`getNativesDir()`):
-  - if `$XDG_DATA_HOME/omp` exists, `$XDG_DATA_HOME/omp/natives`;
-  - otherwise `~/.omp/natives`.
+  - if `$XDG_DATA_HOME/cornfield` exists, `$XDG_DATA_HOME/cornfield/natives`;
+  - otherwise `~/.cornfield/natives`.
 - **Compiled-binary mode** (`detectCompiledBinary`): true if any of:
   - embedded-addon manifest is non-null,
-  - `PI_COMPILED` env var is set,
+  - `CORNFIELD_COMPILED` env var is set,
   - `import.meta.url` contains Bun embedded markers (`$bunfs`, `~BUN`, `%7EBUN`).
-- **Variant override**: `PI_NATIVE_VARIANT` (`modern`/`baseline` only; invalid values ignored).
+- **Variant override**: `CORNFIELD_NATIVE_VARIANT` (`modern`/`baseline` only; invalid values ignored).
 - **Selected variant**: explicit override, otherwise runtime AVX2 detection on x64 (`modern` if AVX2, else `baseline`).
 
 ## Platform support and tag resolution
@@ -60,7 +60,7 @@ Unsupported platforms are not rejected before probing. The loader first tries th
 
 ### x64 behavior
 
-1. `PI_NATIVE_VARIANT=modern|baseline` wins when valid.
+1. `CORNFIELD_NATIVE_VARIANT=modern|baseline` wins when valid.
 2. Otherwise AVX2 support is detected:
    - Linux: scan `/proc/cpuinfo` for `avx2`.
    - macOS: `sysctl -n machdep.cpu.leaf7_features`, then `machdep.cpu.features`.
@@ -69,20 +69,20 @@ Unsupported platforms are not rejected before probing. The loader first tries th
 
 ### Non-x64 behavior
 
-No variant suffix is used; the filename is `pi_natives.<platform>-<arch>.node`.
+No variant suffix is used; the filename is `cornfield_natives.<platform>-<arch>.node`.
 
 ### Filename construction
 
 `loader-state.js#getAddonFilenames` returns:
 
-- Non-x64 or no variant: `pi_natives.<tag>.node`
+- Non-x64 or no variant: `cornfield_natives.<tag>.node`
 - x64 + `modern`:
-  1. `pi_natives.<tag>-modern.node`
-  2. `pi_natives.<tag>-baseline.node`
-  3. `pi_natives.<tag>.node`
+  1. `cornfield_natives.<tag>-modern.node`
+  2. `cornfield_natives.<tag>-baseline.node`
+  3. `cornfield_natives.<tag>.node`
 - x64 + `baseline`:
-  1. `pi_natives.<tag>-baseline.node`
-  2. `pi_natives.<tag>.node`
+  1. `cornfield_natives.<tag>-baseline.node`
+  2. `cornfield_natives.<tag>.node`
 
 The default unsuffixed fallback remains part of the x64 candidate list.
 
@@ -171,7 +171,7 @@ If all candidates fail and `platformTag` is not supported, the loader throws:
 
 If the platform is supported but no candidate can be loaded, the final error includes:
 
-- `Failed to load pi_natives native addon for <platformTag>` or `<platformTag> (<variant>)`
+- `Failed to load cornfield_natives native addon for <platformTag>` or `<platformTag> (<variant>)`
 - every attempted path with the corresponding `require(...)` error
 - mode-specific remediation hints
 
@@ -187,6 +187,6 @@ Compiled mode diagnostics include:
 
 Normal package/runtime diagnostics include:
 
-- reinstall hint (`bun install @oh-my-pi/pi-natives`),
+- reinstall hint (`bun install @cornfield/natives`),
 - local rebuild command (`bun --cwd=packages/natives run build`),
 - optional x64 variant build hint (`TARGET_VARIANT=baseline|modern bun --cwd=packages/natives run build`).

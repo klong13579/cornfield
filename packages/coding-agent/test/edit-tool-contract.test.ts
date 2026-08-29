@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import * as os from "node:os";
-import type { Tool, ToolCall } from "@oh-my-pi/pi-ai/types";
-import { validateToolArguments } from "@oh-my-pi/pi-ai/utils/validation";
-import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { EditTool } from "@oh-my-pi/pi-coding-agent/edit";
-import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
+import type { Tool, ToolCall } from "@cornfield/ai/types";
+import { validateToolArguments } from "@cornfield/ai/utils/validation";
+import { Settings } from "@cornfield/coding-agent/config/settings";
+import { EditTool } from "@cornfield/coding-agent/edit";
+import type { ToolSession } from "@cornfield/coding-agent/tools";
 import { Type } from "@sinclair/typebox";
 
 // ============================================================================

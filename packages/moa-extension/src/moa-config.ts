@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import * as path from "node:path";
-import { isEnoent, logger } from "@oh-my-pi/pi-utils";
+import { isEnoent, logger } from "@cornfield/utils";
 import type { MoaSettings } from "./types";
 
 /**
@@ -11,7 +11,7 @@ import type { MoaSettings } from "./types";
  * or a project config file, merged with project winning on conflict.
  *
  * Locations:
- *   - Global:  `~/.omp/agent/moa.{yml,yaml,json}` (first match)
+ *   - Global:  `~/.cornfield/agent/moa.{yml,yaml,json}` (first match)
  *   - Project: walk up from cwd looking for `.git`, then check
  *              `<root>/.omp/moa.{yml,yaml,json}` (first match)
  *

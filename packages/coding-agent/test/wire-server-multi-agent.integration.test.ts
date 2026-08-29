@@ -24,7 +24,7 @@ import { randomUUID } from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { MULTIDEVICE_PROTOCOL_VERSION } from "@oh-my-pi/pi-wire";
+import { MULTIDEVICE_PROTOCOL_VERSION } from "@cornfield/wire";
 import { waitForServe } from "./wait-for-serve";
 
 const TOKEN_RE = /ws:\/\/127\.0\.0\.1:(\d+)\/ws(\?token=([a-zA-Z0-9]+))?/;
@@ -39,10 +39,10 @@ test("serve 多 Agent：注册表 + attach + switch + 隔离 + 心跳", async ()
 	// ── 预置 2 个 agent 的 agentDir + workspace.json + registry.json ──
 	for (const name of ["hr", "ops"]) {
 		const agentDir = path.join(isolatedHome, "agents", name);
-		await fs.mkdir(path.join(agentDir, ".omp"), { recursive: true });
+		await fs.mkdir(path.join(agentDir, ".cornfield"), { recursive: true });
 		await fs.mkdir(path.join(agentDir, "sessions"), { recursive: true });
 		await Bun.write(
-			path.join(agentDir, ".omp", "workspace.json"),
+			path.join(agentDir, ".cornfield", "workspace.json"),
 			JSON.stringify({
 				schemaVersion: 2,
 				id: name,
@@ -50,12 +50,12 @@ test("serve 多 Agent：注册表 + attach + switch + 隔离 + 心跳", async ()
 				type: "agent",
 				root: ".",
 				projectRoot: ".",
-				skillsDir: ".omp/skills/",
+				skillsDir: ".cornfield/skills/",
 				sessionsDir: "sessions/",
 			}),
 		);
 	}
-	const registryDir = path.join(isolatedHome, ".omp", "agent");
+	const registryDir = path.join(isolatedHome, ".cornfield", "agent");
 	await fs.mkdir(registryDir, { recursive: true });
 	await Bun.write(
 		path.join(registryDir, "registry.json"),

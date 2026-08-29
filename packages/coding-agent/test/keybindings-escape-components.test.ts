@@ -1,13 +1,13 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
-import { getBundledModel } from "@oh-my-pi/pi-ai";
-import { KeybindingsManager } from "@oh-my-pi/pi-coding-agent/config/keybindings";
-import type { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
-import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { ModelSelectorComponent } from "@oh-my-pi/pi-coding-agent/modes/components/model-selector";
-import { SessionSelectorComponent } from "@oh-my-pi/pi-coding-agent/modes/components/session-selector";
-import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
-import type { SessionInfo } from "@oh-my-pi/pi-coding-agent/session/session-manager";
-import { setKeybindings, type TUI } from "@oh-my-pi/pi-tui";
+import { getBundledModel } from "@cornfield/ai";
+import { KeybindingsManager } from "@cornfield/coding-agent/config/keybindings";
+import type { ModelRegistry } from "@cornfield/coding-agent/config/model-registry";
+import { Settings } from "@cornfield/coding-agent/config/settings";
+import { ModelSelectorComponent } from "@cornfield/coding-agent/modes/components/model-selector";
+import { SessionSelectorComponent } from "@cornfield/coding-agent/modes/components/session-selector";
+import { initTheme } from "@cornfield/coding-agent/modes/theme/theme";
+import type { SessionInfo } from "@cornfield/coding-agent/session/session-manager";
+import { setKeybindings, type TUI } from "@cornfield/tui";
 
 beforeAll(() => {
 	initTheme();

@@ -56,10 +56,10 @@ Consequence: precedence and deduplication are **name-based only**. Two different
 
 ### Native provider (`builtin.ts`)
 
-Loads `.omp` rules from:
+Loads `.cornfield` rules from:
 
-- project: `<cwd>/.omp/rules/*.{md,mdc}`
-- user: `~/.omp/agent/rules/*.{md,mdc}`
+- project: `<cwd>/.cornfield/rules/*.{md,mdc}`
+- user: `~/.cornfield/agent/rules/*.{md,mdc}`
 
 Normalization:
 

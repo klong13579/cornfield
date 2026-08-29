@@ -6,22 +6,22 @@
  *
  * Asset layout mirrors the agentDir layout per `packages/coding-agent/docs/agent-design-v1.md` §2:
  *   - 5 always-on files at root: AGENTS.md, mission.md, TOOLS.md, TODO.md, knowledge/external-workspaces.md
- *   - 1 project-level user persona: user.md (overrides / supplements the user-level ~/.omp/user.md)
- *   - runtime files: prompt-includes.json, .gitignore, .omp/config.yml, .omp/SYSTEM.md
+ *   - 1 project-level user persona: user.md (overrides / supplements the user-level ~/.cornfield/user.md)
+ *   - runtime files: prompt-includes.json, .gitignore, .cornfield/config.yml, .cornfield/SYSTEM.md
  */
 const gitignore = `sessions/
 cron/logs/
-.omp/evolution/
-.omp/*
-!.omp/config.yml
-!.omp/SYSTEM.md
-!.omp/skills/
+.cornfield/evolution/
+.cornfield/*
+!.cornfield/config.yml
+!.cornfield/SYSTEM.md
+!.cornfield/skills/
 *.log
 *.bak`;
 
-import ompConfig from "./assets/.omp/config.yml" with { type: "text" };
-import ompSystemPrompt from "./assets/.omp/SYSTEM.md" with { type: "text" };
-import lintSkill from "./assets/.omp/skills/lint/SKILL.md" with { type: "text" };
+import ompConfig from "./assets/.cornfield/config.yml" with { type: "text" };
+import ompSystemPrompt from "./assets/.cornfield/SYSTEM.md" with { type: "text" };
+import lintSkill from "./assets/.cornfield/skills/lint/SKILL.md" with { type: "text" };
 import agentsManifest from "./assets/AGENTS.md" with { type: "text" };
 import externalWorkspaces from "./assets/knowledge/external-workspaces.md" with { type: "text" };
 import mission from "./assets/mission.md" with { type: "text" };
@@ -43,8 +43,8 @@ export interface SkeletonFile {
  *   - 5 always-on files at root: AGENTS.md, mission.md, TOOLS.md, TODO.md, knowledge/external-workspaces.md
  *     (loaded into <context> via prompt-includes.json; see `loadProjectContextFiles`)
  *   - 1 project-level user persona: user.md
- *     (overrides / supplements the user-level ~/.omp/user.md that `loadUserProfile` injects into <user>)
- *   - runtime files: prompt-includes.json, .gitignore, .omp/config.yml, .omp/SYSTEM.md
+ *     (overrides / supplements the user-level ~/.cornfield/user.md that `loadUserProfile` injects into <user>)
+ *   - runtime files: prompt-includes.json, .gitignore, .cornfield/config.yml, .cornfield/SYSTEM.md
  *
  * `user.md` is intentionally NOT listed in `prompt-includes.json` to avoid being
  * loaded twice (once into <user> by `loadUserProfile`, once into <context> by
@@ -59,8 +59,8 @@ export const SKELETON_FILES: readonly SkeletonFile[] = [
 	{ relPath: "user.md", content: user },
 	{ relPath: "prompt-includes.json", content: JSON.stringify(promptIncludes) },
 	{ relPath: ".gitignore", content: gitignore },
-	{ relPath: ".omp/config.yml", content: ompConfig },
-	{ relPath: ".omp/SYSTEM.md", content: ompSystemPrompt },
+	{ relPath: ".cornfield/config.yml", content: ompConfig },
+	{ relPath: ".cornfield/SYSTEM.md", content: ompSystemPrompt },
 	{ relPath: "knowledge/external-workspaces.md", content: externalWorkspaces },
-	{ relPath: ".omp/skills/lint/SKILL.md", content: lintSkill },
+	{ relPath: ".cornfield/skills/lint/SKILL.md", content: lintSkill },
 ] as const;

@@ -23,7 +23,7 @@
  * frames back via `WireTransport.sendFrame(...)`.
  */
 
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 
 /**
  * OpenAI / Anthropic tool-calling schema requires the `name` field to match
@@ -53,7 +53,7 @@ export function assertValidToolName(name: string): void {
 /**
  * Mirrors the OMP `RpcHostToolDefinition` shape — see
  * `packages/coding-agent/src/modes/rpc/rpc-types.ts`. We redeclare it here
- * (rather than importing from `@oh-my-pi/pi-coding-agent`) because the
+ * (rather than importing from `@cornfield/coding-agent`) because the
  * gateway should not take a runtime dependency on the agent's RPC types:
  * the contract is the JSON shape on the wire, not the TS type.
  */

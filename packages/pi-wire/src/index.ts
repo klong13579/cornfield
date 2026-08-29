@@ -1,5 +1,5 @@
 /**
- * @oh-my-pi/pi-wire — 多端 wire 协议类型包。
+ * @cornfield/wire — 多端 wire 协议类型包。
  *
  * 职责边界：
  * - 只定义类型（帧/命令/事件/协议版本），不召时包含任何行为（零运行时依赖 coding-agent）。

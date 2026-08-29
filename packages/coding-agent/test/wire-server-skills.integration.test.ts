@@ -1,7 +1,7 @@
 /**
  * W3 D5 e2e — serve `get_skills` 只读技能列表（真实 serve 子进程 + bun WS 客户端）。
  *
- * 预置：用户级技能（$HOME/.omp/agent/skills/）+ 项目级技能（serve cwd 的 .omp/skills/），
+ * 预置：用户级技能（$HOME/.omp/agent/skills/）+ 项目级技能（serve cwd 的 .cornfield/skills/），
  * SKILL.md frontmatter 同真机格式。验证 session.skills 同源列表 + level 分类。
  *
  * 验证：
@@ -15,7 +15,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { MULTIDEVICE_PROTOCOL_VERSION } from "@oh-my-pi/pi-wire";
+import { MULTIDEVICE_PROTOCOL_VERSION } from "@cornfield/wire";
 
 type Frame = { type: string; [k: string]: unknown };
 
@@ -128,7 +128,7 @@ describe("P2-W3-3 — set_skill_enabled（B3 技能写协议）", () => {
 			expect(dropped?.description).toContain("用户级技能 seed");
 
 			// config.yml 落盘（settings.ignoredSkills 含 demo-user-skill）——后台异步保存，轮询等写入
-			const cfgPath = path.join(isolatedHome, ".omp", "agent", "config.yml");
+			const cfgPath = path.join(isolatedHome, ".cornfield", "agent", "config.yml");
 			let cfg = "";
 			const cfgDeadline = Date.now() + 3000;
 			while (Date.now() < cfgDeadline) {
@@ -221,13 +221,13 @@ beforeAll(async () => {
 	process.env.HOME = isolatedHome;
 
 	// 用户级技能：$HOME/.omp/agent/skills/<name>/SKILL.md
-	const userSkillDir = path.join(isolatedHome, ".omp", "agent", "skills", "demo-user-skill");
+	const userSkillDir = path.join(isolatedHome, ".cornfield", "agent", "skills", "demo-user-skill");
 	await fs.mkdir(userSkillDir, { recursive: true });
 	await Bun.write(path.join(userSkillDir, "SKILL.md"), skillMd("demo-user-skill", "用户级技能 seed for wire e2e"));
 
-	// 项目级技能：<serve cwd>/.omp/skills/<name>/SKILL.md——serve 以临时项目为 cwd 启动
+	// 项目级技能：<serve cwd>/.cornfield/skills/<name>/SKILL.md——serve 以临时项目为 cwd 启动
 	projectCwd = path.join(isolatedHome, "project");
-	const projectSkillDir = path.join(projectCwd, ".omp", "skills", "demo-project-skill");
+	const projectSkillDir = path.join(projectCwd, ".cornfield", "skills", "demo-project-skill");
 	await fs.mkdir(projectSkillDir, { recursive: true });
 	await Bun.write(
 		path.join(projectSkillDir, "SKILL.md"),

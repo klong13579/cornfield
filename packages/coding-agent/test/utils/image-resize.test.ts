@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { ImageFormat, PhotonImage, SamplingFilter } from "@oh-my-pi/pi-natives";
+import { ImageFormat, PhotonImage, SamplingFilter } from "@cornfield/natives";
 import { resizeImage } from "../../src/utils/image-resize";
 
 // 1x1 red PNG (69 bytes) — used as a Photon seed to synthesize larger fixtures

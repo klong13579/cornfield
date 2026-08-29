@@ -12,9 +12,9 @@
  * roster stays live while the panel is open.
  */
 
-import type { Component } from "@oh-my-pi/pi-tui";
-import { Container, matchesKey, replaceTabs, Text } from "@oh-my-pi/pi-tui";
-import { formatAge } from "@oh-my-pi/pi-utils";
+import type { Component } from "@cornfield/tui";
+import { Container, matchesKey, replaceTabs, Text } from "@cornfield/tui";
+import { formatAge } from "@cornfield/utils";
 import { type AgentRef, AgentRegistry } from "../../registry/agent-registry";
 import { type ThemeColor, theme } from "../theme/theme";
 

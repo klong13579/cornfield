@@ -13,7 +13,7 @@ import { expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { getConfigRootDir, setConfigRootDir } from "@oh-my-pi/pi-utils";
+import { getConfigRootDir, setConfigRootDir } from "@cornfield/utils";
 import { loadAgentMetas } from "../src/server/session-registry";
 
 test("loadAgentMetas：gateway.json dingtalk accounts 映射到 AgentMeta", async () => {
@@ -26,9 +26,9 @@ test("loadAgentMetas：gateway.json dingtalk accounts 映射到 AgentMeta", asyn
 	const hrDir = path.join(isolatedHome, "agents", "hr");
 	const swDir = path.join(isolatedHome, "agents", "sw");
 	for (const dir of [hrDir, swDir]) {
-		await fs.mkdir(path.join(dir, ".omp"), { recursive: true });
+		await fs.mkdir(path.join(dir, ".cornfield"), { recursive: true });
 		await Bun.write(
-			path.join(dir, ".omp", "workspace.json"),
+			path.join(dir, ".cornfield", "workspace.json"),
 			JSON.stringify({
 				schemaVersion: 2,
 				id: path.basename(dir),
@@ -39,7 +39,7 @@ test("loadAgentMetas：gateway.json dingtalk accounts 映射到 AgentMeta", asyn
 			}),
 		);
 	}
-	const registryDir = path.join(isolatedHome, ".omp", "agent");
+	const registryDir = path.join(isolatedHome, ".cornfield", "agent");
 	await fs.mkdir(registryDir, { recursive: true });
 	await Bun.write(
 		path.join(registryDir, "registry.json"),
@@ -107,9 +107,9 @@ test("loadAgentMetas：gateway.json 缺失 → 空 Map 不崩溃，无 dingtalk 
 	setConfigRootDir(isolatedHome);
 
 	const hrDir = path.join(isolatedHome, "agents", "hr");
-	await fs.mkdir(path.join(hrDir, ".omp"), { recursive: true });
+	await fs.mkdir(path.join(hrDir, ".cornfield"), { recursive: true });
 	await Bun.write(
-		path.join(hrDir, ".omp", "workspace.json"),
+		path.join(hrDir, ".cornfield", "workspace.json"),
 		JSON.stringify({
 			schemaVersion: 2,
 			id: "hr",
@@ -119,7 +119,7 @@ test("loadAgentMetas：gateway.json 缺失 → 空 Map 不崩溃，无 dingtalk 
 			projectRoot: ".",
 		}),
 	);
-	const registryDir = path.join(isolatedHome, ".omp", "agent");
+	const registryDir = path.join(isolatedHome, ".cornfield", "agent");
 	await fs.mkdir(registryDir, { recursive: true });
 	await Bun.write(
 		path.join(registryDir, "registry.json"),

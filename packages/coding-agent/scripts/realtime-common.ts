@@ -11,7 +11,7 @@
 
 import * as os from "node:os";
 import * as path from "node:path";
-import { isEnoent } from "@oh-my-pi/pi-utils";
+import { isEnoent } from "@cornfield/utils";
 
 export const DEFAULT_MODEL = "qwen-audio-3.0-realtime-flash";
 export const DEFAULT_BASE_URL = "https://coder.narwal.com/v1";

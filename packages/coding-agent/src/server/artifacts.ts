@@ -1,7 +1,7 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { logger } from "@oh-my-pi/pi-utils";
-import type { ArtifactDto, ArtifactKind } from "@oh-my-pi/pi-wire";
+import { logger } from "@cornfield/utils";
+import type { ArtifactDto, ArtifactKind } from "@cornfield/wire";
 
 /**
  * 产物提取（R-ARTIFACTS）——从 agent 最近会话 JSONL 的工具调用中提取写出文件。

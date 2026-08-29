@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "bun:test";
-import type { TextContent, UserMessage } from "@oh-my-pi/pi-ai";
-import { EventController } from "@oh-my-pi/pi-coding-agent/modes/controllers/event-controller";
-import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
+import type { TextContent, UserMessage } from "@cornfield/ai";
+import { EventController } from "@cornfield/coding-agent/modes/controllers/event-controller";
+import type { InteractiveModeContext } from "@cornfield/coding-agent/modes/types";
 
 function createUserMessage(text: string): UserMessage {
 	return {

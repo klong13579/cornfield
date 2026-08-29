@@ -4,7 +4,7 @@
 import { Database, type SQLQueryBindings, type Statement } from "bun:sqlite";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 import { clearTestRunMarker, readTestRunMarker } from "./test-run-marker";
 import {
 	generateExecutionId,

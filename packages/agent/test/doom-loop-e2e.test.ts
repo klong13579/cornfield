@@ -23,9 +23,9 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { Agent } from "@oh-my-pi/pi-agent-core";
-import { type AssistantMessage, type AssistantMessageEvent, getBundledModel } from "@oh-my-pi/pi-ai";
-import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
+import { Agent } from "@cornfield/agent";
+import { type AssistantMessage, type AssistantMessageEvent, getBundledModel } from "@cornfield/ai";
+import { AssistantMessageEventStream } from "@cornfield/ai/utils/event-stream";
 import { createUsage } from "./helpers";
 
 function makeModel() {

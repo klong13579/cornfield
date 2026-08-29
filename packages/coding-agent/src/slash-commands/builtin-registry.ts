@@ -2,8 +2,8 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import { getOAuthProviders } from "@oh-my-pi/pi-ai";
-import { getConfigDirName } from "@oh-my-pi/pi-utils";
+import { getOAuthProviders } from "@cornfield/ai";
+import { getConfigDirName } from "@cornfield/utils";
 import { invalidate as invalidateFsCache } from "../capability/fs";
 import type { SettingPath, SettingValue } from "../config/settings";
 import { settings } from "../config/settings";
@@ -1031,7 +1031,7 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<BuiltinSlashCommandSpec> = [
 			const sub = args[0] ?? "list";
 			const rest = args.slice(1).join(" ");
 
-			const { getConfigRootDir } = await import("@oh-my-pi/pi-utils");
+			const { getConfigRootDir } = await import("@cornfield/utils");
 			const base = getConfigRootDir();
 			const listenDir = path.join(base, "listen");
 

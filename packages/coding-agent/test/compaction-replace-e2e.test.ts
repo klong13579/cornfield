@@ -22,7 +22,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
+import type { AgentMessage } from "@cornfield/agent";
 import { ModelRegistry } from "../src/config/model-registry";
 import { AuthStorage } from "../src/session/auth-storage";
 import { generateSummary } from "../src/session/compaction/compaction";

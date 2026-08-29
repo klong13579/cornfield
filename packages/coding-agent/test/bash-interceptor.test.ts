@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { checkBashInterception } from "@oh-my-pi/pi-coding-agent/tools/bash-interceptor";
+import { checkBashInterception } from "@cornfield/coding-agent/tools/bash-interceptor";
 
 const ALL_TOOLS = ["bash", "read", "search", "find", "edit", "write"];
 
@@ -44,8 +44,8 @@ describe("bash-interceptor: skill shell command", () => {
 		expect(result.block).toBe(false);
 	});
 
-	it("does NOT block `ls ~/.omp/agent/skills/` (legitimate discovery path)", () => {
-		const result = checkBashInterception("ls ~/.omp/agent/skills/", ALL_TOOLS);
+	it("does NOT block `ls ~/.cornfield/agent/skills/` (legitimate discovery path)", () => {
+		const result = checkBashInterception("ls ~/.cornfield/agent/skills/", ALL_TOOLS);
 		expect(result.block).toBe(false);
 	});
 

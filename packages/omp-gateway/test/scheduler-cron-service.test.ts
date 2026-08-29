@@ -50,7 +50,7 @@ const noopLogger: CronLogger = {
 };
 
 function cleanupExecutionLog(slug: string) {
-	const logDir = path.join(os.homedir(), ".omp", "gateway-data", "scheduler", "logs", "by-task", slug);
+	const logDir = path.join(os.homedir(), ".cornfield", "gateway-data", "scheduler", "logs", "by-task", slug);
 	try {
 		fs.rmSync(logDir, { recursive: true, force: true });
 	} catch {

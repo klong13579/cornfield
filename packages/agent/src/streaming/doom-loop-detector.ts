@@ -39,7 +39,7 @@ import type {
 	SimpleStreamOptions,
 	TextContent,
 	ThinkingContent,
-} from "@oh-my-pi/pi-ai";
+} from "@cornfield/ai";
 
 /**
  * Per-content-type detector thresholds. Defaults are calibrated against the

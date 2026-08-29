@@ -2,14 +2,14 @@
  * ExternalTraceIngester — consume tool-execution JSONL from external pipelines.
  *
  * External environments (Cursor, IDE plugins, CI scripts) write JSONL to
- * ~/.omp/traces/external/<sessionId>.jsonl in a subset of the omp session format.
+ * ~/.cornfield/traces/external/<sessionId>.jsonl in a subset of the omp session format.
  * This module scans for completed files (containing a "session_end" marker),
  * parses them into SessionTraces, and feeds them into the evolution pipeline
  * (episode store, trace store, session learner, etc.).
  */
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger } from "@cornfield/utils";
 import { resolveExternalTraceDir } from "./paths";
 import { parseOmpSessionJsonlToTrace } from "./regression/omp-session-to-trace";
 import type { Episode, SessionTrace } from "./types";

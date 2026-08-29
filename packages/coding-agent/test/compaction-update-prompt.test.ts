@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "bun:test";
-import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
-import * as ai from "@oh-my-pi/pi-ai";
-import { getBundledModel } from "@oh-my-pi/pi-ai/models";
-import type { AssistantMessage, Model, Usage } from "@oh-my-pi/pi-ai/types";
+import type { AgentMessage } from "@cornfield/agent";
+import * as ai from "@cornfield/ai";
+import { getBundledModel } from "@cornfield/ai/models";
+import type { AssistantMessage, Model, Usage } from "@cornfield/ai/types";
 import updateSummaryPrompt from "../src/prompts/compaction/compaction-update-summary.md" with { type: "text" };
 import summarizationSystemPrompt from "../src/prompts/system/summarization-system.md" with { type: "text" };
 import { generateSummary } from "../src/session/compaction/compaction";

@@ -48,7 +48,7 @@ describe("resolveAgentCwd", () => {
 				accounts: {
 					hr: { agentDir: "/Users/test/OMP-workspace-test/hr3" },
 					opencode: { agentDir: "/Users/test/OMP-workspace-test/omp-atomix" },
-					"ops/hr": { agentDir: "/Users/test/.omp/agents/ops/hr" },
+					"ops/hr": { agentDir: "/Users/test/.cornfield/agents/ops/hr" },
 					credentials_only: { agentDir: undefined as unknown as string },
 				},
 			},
@@ -60,7 +60,7 @@ describe("resolveAgentCwd", () => {
 	});
 
 	it("returns the agentDir for accounts with slash in their key (ops/hr)", () => {
-		expect(resolveAgentCwd("ops/hr", cfg)).toBe("/Users/test/.omp/agents/ops/hr");
+		expect(resolveAgentCwd("ops/hr", cfg)).toBe("/Users/test/.cornfield/agents/ops/hr");
 	});
 
 	it("returns undefined for an account that exists but has no agentDir", () => {
@@ -108,7 +108,7 @@ describe("resolveAgentCwd", () => {
 const accounts: Record<string, { agentDir?: string }> = {
 	hr: { agentDir: "/Users/test/OMP-workspace-test/hr3" },
 	opencode: { agentDir: "/Users/test/OMP-workspace-test/omp-atomix" },
-	"ops/hr": { agentDir: "/Users/test/.omp/agents/ops/hr" },
+	"ops/hr": { agentDir: "/Users/test/.cornfield/agents/ops/hr" },
 	credentials_only: {},
 };
 
@@ -272,7 +272,7 @@ describe("cronUpdate", () => {
 		dbPathUpdate = path.join(testDirUpdate, "jobs.json");
 		storageUpdate = new JsonFileStorage(dbPathUpdate);
 
-		const ompDir = path.join(testDirUpdate, ".omp");
+		const ompDir = path.join(testDirUpdate, ".cornfield");
 		fs.mkdirSync(ompDir, { recursive: true });
 		const fakeGateway = {
 			channels: {
@@ -453,7 +453,7 @@ describe("cronTestRun", () => {
 	}
 
 	function makeGatewayRunningTr(): void {
-		const dataDir = path.join(testDirTr, ".omp", "gateway-data");
+		const dataDir = path.join(testDirTr, ".cornfield", "gateway-data");
 		fs.mkdirSync(dataDir, { recursive: true });
 		fs.writeFileSync(path.join(dataDir, "gateway.pid"), String(process.pid));
 	}

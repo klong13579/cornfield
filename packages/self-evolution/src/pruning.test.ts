@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
-import type { SandboxReport } from "@oh-my-pi/cognitive-coordination";
+import type { SandboxReport } from "@cornfield/cognitive-coordination";
 import { applySandboxReports } from "./pruning";
 
 describe("applySandboxReports (SR-01: Auto-Rollback)", () => {

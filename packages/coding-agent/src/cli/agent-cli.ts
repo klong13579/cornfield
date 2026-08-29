@@ -7,7 +7,7 @@
  *
  * Subcommands (per `packages/coding-agent/docs/agent-design-v1.md` §6.2):
  *   - init <name>     create a new agentDir
- *   - list            list agentDirs under ~/.omp/agents/
+ *   - list            list agentDirs under ~/.cornfield/agents/
  *   - show <name>     print identity / tools / skills / cron summary
  *   - validate <dir>  check always-on files + runtime artifacts
  */
@@ -24,7 +24,7 @@ import {
 	resolveAgentDir,
 	SKELETON_FILES,
 	unregisterAgent,
-} from "@oh-my-pi/pi-coding-agent/skeleton";
+} from "@cornfield/coding-agent/skeleton";
 import { MECE_FILES, type MeceContext, runMeceChecks, runMeceRepairs } from "./mece-rules";
 import { runSemanticAudit, type SemanticViolation } from "./semantic-audit";
 
@@ -101,13 +101,13 @@ export async function runAgentInit(args: InitArgs): Promise<InitResult> {
 	const effectiveCreated = created || (!dirExistedBefore && !created);
 	const filesWritten = effectiveCreated ? SKELETON_FILES.length : 0;
 
-	// Write the workspace declaration (`.omp/workspace.json`) so the agentDir
+	// Write the workspace declaration (`.cornfield/workspace.json`) so the agentDir
 	// carries its structured metadata with it (registry stays a thin index).
 	const { ensureWorkspace } = await import("../skeleton/workspace");
 	await ensureWorkspace(agentDir, { name: args.name });
 
 	// Persist the (name, path) mapping so `omp agent list` / `show` can find
-	// this agentDir regardless of where it lives (default `~/.omp/agents/`,
+	// this agentDir regardless of where it lives (default `~/.cornfield/agents/`,
 	// custom `--dir`, nested account id like `ops/hr`).
 	// Runs after ensureWorkspace so the v2 cache fields are filled from the
 	// declaration just written.
@@ -143,7 +143,7 @@ export async function runAgentList(args: ListArgs): Promise<AgentSummary[]> {
 	// Step 1: read the registry so custom `--dir` paths (e.g. `OMP-workspace-test/hr3`)
 	// are visible without the user having to pass `--dir` again.
 	if (!args.dir) {
-		const { listRegistered } = await import("@oh-my-pi/pi-coding-agent/skeleton");
+		const { listRegistered } = await import("@cornfield/coding-agent/skeleton");
 		const registered = await listRegistered();
 		for (const { name, entry } of registered) {
 			const status = await probeAgentStatus(entry.path);
@@ -153,10 +153,10 @@ export async function runAgentList(args: ListArgs): Promise<AgentSummary[]> {
 		}
 	}
 
-	// Step 2: scan the directory (default `~/.omp/agents/`, or `--dir` if given).
+	// Step 2: scan the directory (default `~/.cornfield/agents/`, or `--dir` if given).
 	// This picks up legacy agentDirs created before the registry existed and entries
 	// the user dropped into the default location without going through `omp agent init`.
-	const root = path.resolve(args.dir ?? path.join(homeDir(), ".omp", "agents"));
+	const root = path.resolve(args.dir ?? path.join(homeDir(), ".cornfield", "agents"));
 	let entries: import("node:fs").Dirent[];
 	try {
 		entries = await fs.readdir(root, { withFileTypes: true });
@@ -198,7 +198,7 @@ async function probeAgentStatus(dir: string): Promise<AgentStatus> {
 				() => true,
 				() => false,
 			),
-			fs.access(path.join(dir, ".omp", "config.yml")).then(
+			fs.access(path.join(dir, ".cornfield", "config.yml")).then(
 				() => true,
 				() => false,
 			),
@@ -247,9 +247,9 @@ export async function runAgentShow(args: ShowArgs): Promise<AgentDetail> {
 		// Registry lookup first so custom --dir paths (e.g. nested account ids
 		// like `ops/hr` stored under a non-default location) are found without
 		// the user having to pass --dir again.
-		const { findAgent } = await import("@oh-my-pi/pi-coding-agent/skeleton");
+		const { findAgent } = await import("@cornfield/coding-agent/skeleton");
 		const entry = await findAgent(args.name);
-		agentDir = entry?.path ?? path.join(homeDir(), ".omp", "agents", args.name);
+		agentDir = entry?.path ?? path.join(homeDir(), ".cornfield", "agents", args.name);
 	}
 
 	const exists = await pathExists(agentDir);
@@ -271,7 +271,7 @@ export async function runAgentShow(args: ShowArgs): Promise<AgentDetail> {
 		readIdentitySummary(path.join(agentDir, "mission.md")),
 		readHardConstraints(path.join(agentDir, "AGENTS.md")),
 		readToolsList(path.join(agentDir, "TOOLS.md")),
-		readSkills(path.join(agentDir, ".omp", "skills")),
+		readSkills(path.join(agentDir, ".cornfield", "skills")),
 		countJson5Files(path.join(agentDir, "cron", "tasks")),
 		countJsonlFiles(path.join(agentDir, "sessions")),
 	]);
@@ -456,9 +456,9 @@ const ALWAYS_ON: ReadonlyArray<string> = [
 	"knowledge/external-workspaces.md",
 ];
 
-const RUNTIME_HARD_DEPS: ReadonlyArray<string> = [".omp/config.yml"];
+const RUNTIME_HARD_DEPS: ReadonlyArray<string> = [".cornfield/config.yml"];
 
-const RUNTIME_RECOMMENDED: ReadonlyArray<string> = ["prompt-includes.json", ".gitignore", ".omp/SYSTEM.md"];
+const RUNTIME_RECOMMENDED: ReadonlyArray<string> = ["prompt-includes.json", ".gitignore", ".cornfield/SYSTEM.md"];
 
 export async function runAgentValidate(args: ValidateArgs): Promise<ValidateResult> {
 	const agentDir = path.resolve(args.agentDir);
@@ -516,8 +516,8 @@ export async function runAgentValidate(args: ValidateArgs): Promise<ValidateResu
 		}
 	}
 
-	// 5. .omp/config.yml must be valid YAML if present
-	const configYmlPath = path.join(agentDir, ".omp", "config.yml");
+	// 5. .cornfield/config.yml must be valid YAML if present
+	const configYmlPath = path.join(agentDir, ".cornfield", "config.yml");
 	if (await pathExists(configYmlPath)) {
 		try {
 			const text = await Bun.file(configYmlPath).text();
@@ -528,14 +528,14 @@ export async function runAgentValidate(args: ValidateArgs): Promise<ValidateResu
 				// Without a parser, surface a warning rather than failing.
 				issues.push({
 					level: "warning",
-					file: ".omp/config.yml",
+					file: ".cornfield/config.yml",
 					message: "Bun.YAML not available; skipping deep validation",
 				});
 			}
 		} catch (err) {
 			issues.push({
 				level: "error",
-				file: ".omp/config.yml",
+				file: ".cornfield/config.yml",
 				message: `Invalid YAML: ${(err as Error).message}`,
 			});
 		}
@@ -623,7 +623,7 @@ export async function runAgentValidate(args: ValidateArgs): Promise<ValidateResu
 // ────────────────────────────────────────────────────────────────────────────
 
 /**
- * Resolve model + apiKey from agentDir's .omp/config.yml, then run semantic audit.
+ * Resolve model + apiKey from agentDir's .cornfield/config.yml, then run semantic audit.
  * Falls back to global Settings default model if agentDir config is missing.
  * Returns { violations: [] } with error set if model/apiKey unavailable.
  */
@@ -645,8 +645,8 @@ async function runSemanticPhaseInner(
 	meceCtx: MeceContext,
 ): Promise<{ violations: SemanticViolation[]; model?: string; error?: string }> {
 	try {
-		// Read agentDir's .omp/config.yml for modelRoles.default
-		const configPath = path.join(agentDir, ".omp", "config.yml");
+		// Read agentDir's .cornfield/config.yml for modelRoles.default
+		const configPath = path.join(agentDir, ".cornfield", "config.yml");
 		let modelRoleStr: string | undefined;
 		try {
 			const configText = await Bun.file(configPath).text();
@@ -829,19 +829,19 @@ export interface ReconcileResult {
 /**
  * Reconcile the registry against the filesystem:
  *   1. Remove entries whose path no longer exists.
- *   2. Scan the default `~/.omp/agents/` for agentDirs not yet in the registry
+ *   2. Scan the default `~/.cornfield/agents/` for agentDirs not yet in the registry
  *      and add them (so legacy agents are visible).
  *   3. Surface names that could not be auto-registered.
  */
 export async function runAgentReconcile(_args: ReconcileArgs = {}): Promise<ReconcileResult> {
 	const pruned = await pruneStaleEntries();
-	const { listRegistered, registerAgent: reg } = await import("@oh-my-pi/pi-coding-agent/skeleton");
+	const { listRegistered, registerAgent: reg } = await import("@cornfield/coding-agent/skeleton");
 	const existing = await listRegistered();
 	const knownPaths = new Set(existing.map(e => e.entry.path));
 
 	const registered: string[] = [];
 	const skipped: string[] = [];
-	const defaultRoot = path.join(homeDir(), ".omp", "agents");
+	const defaultRoot = path.join(homeDir(), ".cornfield", "agents");
 	let entries: import("node:fs").Dirent[];
 	try {
 		entries = await fs.readdir(defaultRoot, { withFileTypes: true });
@@ -890,7 +890,7 @@ export function renderList(summaries: AgentSummary[], json: boolean): string {
 			.trimEnd();
 	const lines: string[] = [fmt(header), "─".repeat(widths.reduce((a, b) => a + b, 0) + colGap * 3), ...rows.map(fmt)];
 	lines.push("");
-	lines.push("REG: *=registered in ~/.omp/agent/registry.json  (blank)=filesystem scan only");
+	lines.push("REG: *=registered in ~/.cornfield/agent/registry.json  (blank)=filesystem scan only");
 	return lines.join("\n");
 }
 

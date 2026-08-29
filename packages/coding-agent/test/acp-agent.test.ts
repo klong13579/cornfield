@@ -3,8 +3,8 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { AgentSideConnection, PromptRequest, SessionNotification } from "@agentclientprotocol/sdk";
-import type { Model } from "@oh-my-pi/pi-ai";
-import { getConfigRootDir, setAgentDir } from "@oh-my-pi/pi-utils";
+import type { Model } from "@cornfield/ai";
+import { getConfigRootDir, setAgentDir } from "@cornfield/utils";
 import { AcpAgent } from "../src/modes/acp/acp-agent";
 import type { AgentSession, AgentSessionEvent } from "../src/session/agent-session";
 import { SessionManager } from "../src/session/session-manager";
@@ -243,7 +243,7 @@ function getChunkMessageId(notification: SessionNotification): string | undefine
 }
 
 const cleanupRoots: string[] = [];
-const originalAgentDir = process.env.PI_CODING_AGENT_DIR;
+const originalAgentDir = process.env.CORNFIELD_AGENT_DIR;
 const fallbackAgentDir = path.join(getConfigRootDir(), "agent");
 
 afterEach(async () => {
@@ -251,7 +251,7 @@ afterEach(async () => {
 		setAgentDir(originalAgentDir);
 	} else {
 		setAgentDir(fallbackAgentDir);
-		delete process.env.PI_CODING_AGENT_DIR;
+		delete process.env.CORNFIELD_AGENT_DIR;
 	}
 
 	for (const root of cleanupRoots.splice(0)) {

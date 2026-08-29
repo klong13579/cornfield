@@ -4,8 +4,8 @@ import {
 	type DoomLoopConfig,
 	type DoomVerdict,
 	detectDoomLoop,
-} from "@oh-my-pi/pi-agent-core/streaming/doom-loop-detector";
-import type { AssistantMessage, AssistantMessageEvent } from "@oh-my-pi/pi-ai";
+} from "@cornfield/agent/streaming/doom-loop-detector";
+import type { AssistantMessage, AssistantMessageEvent } from "@cornfield/ai";
 import { createAssistantMessage } from "./helpers";
 
 function makePartial(content: AssistantMessage["content"]): AssistantMessage {

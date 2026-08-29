@@ -12,7 +12,7 @@
  */
 
 import * as path from "node:path";
-import { isEnoent, logger } from "@oh-my-pi/pi-utils";
+import { isEnoent, logger } from "@cornfield/utils";
 import { type AgentEvent, type RpcTransportEvent, WireTransport, WireTransportError } from "./agent-transport-wire";
 import { CircuitBreaker, type CircuitState } from "./circuit-breaker";
 import { CrashRecovery } from "./crash-recovery";

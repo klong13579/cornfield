@@ -2,9 +2,9 @@
  * Root command for the coding agent CLI.
  */
 
-import { THINKING_EFFORTS } from "@oh-my-pi/pi-ai";
-import { APP_NAME } from "@oh-my-pi/pi-utils";
-import { Args, Command, Flags } from "@oh-my-pi/pi-utils/cli";
+import { THINKING_EFFORTS } from "@cornfield/ai";
+import { APP_NAME } from "@cornfield/utils";
+import { Args, Command, Flags } from "@cornfield/utils/cli";
 import { parseArgs } from "../cli/args";
 import { runRootCommand } from "../main";
 
@@ -138,7 +138,7 @@ export default class Index extends Command {
 		`# Continue previous session\n  ${APP_NAME} --continue "What did we discuss?"`,
 		`# Use different model (fuzzy matching)\n  ${APP_NAME} --model opus "Help me refactor this code"`,
 		`# Limit model cycling to specific models\n  ${APP_NAME} --models claude-sonnet,claude-haiku,gpt-4o`,
-		`# Export a session file to HTML\n  ${APP_NAME} --export ~/.omp/agent/sessions/--path--/session.jsonl`,
+		`# Export a session file to HTML\n  ${APP_NAME} --export ~/.cornfield/agent/sessions/--path--/session.jsonl`,
 	];
 
 	static strict = false;

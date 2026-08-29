@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { Snowflake } from "@oh-my-pi/pi-utils";
+import { Snowflake } from "@cornfield/utils";
 import { parseAutoresearchContract } from "../src/autoresearch/contract";
 import { isAutoresearchShCommand } from "../src/autoresearch/helpers";
 import { createAutoresearchExtension } from "../src/autoresearch/index";

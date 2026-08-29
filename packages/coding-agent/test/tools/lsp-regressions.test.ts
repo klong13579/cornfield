@@ -1,19 +1,19 @@
 import { describe, expect, it, vi } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { RenderResultOptions } from "@oh-my-pi/pi-agent-core";
-import { LspTool } from "@oh-my-pi/pi-coding-agent/lsp";
-import * as lspClient from "@oh-my-pi/pi-coding-agent/lsp/client";
-import * as lspConfig from "@oh-my-pi/pi-coding-agent/lsp/config";
-import { getServersForFile, loadConfig } from "@oh-my-pi/pi-coding-agent/lsp/config";
-import { renderCall, renderResult } from "@oh-my-pi/pi-coding-agent/lsp/render";
+import type { RenderResultOptions } from "@cornfield/agent";
+import { LspTool } from "@cornfield/coding-agent/lsp";
+import * as lspClient from "@cornfield/coding-agent/lsp/client";
+import * as lspConfig from "@cornfield/coding-agent/lsp/config";
+import { getServersForFile, loadConfig } from "@cornfield/coding-agent/lsp/config";
+import { renderCall, renderResult } from "@cornfield/coding-agent/lsp/render";
 import type {
 	CodeAction,
 	Diagnostic,
 	LspClient,
 	ServerConfig,
 	SymbolInformation,
-} from "@oh-my-pi/pi-coding-agent/lsp/types";
+} from "@cornfield/coding-agent/lsp/types";
 import {
 	applyCodeAction,
 	collectGlobMatches,
@@ -24,13 +24,13 @@ import {
 	hasGlobPattern,
 	resolveDiagnosticTargets,
 	resolveSymbolColumn,
-} from "@oh-my-pi/pi-coding-agent/lsp/utils";
-import { getThemeByName } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
-import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
-import { clampTimeout } from "@oh-my-pi/pi-coding-agent/tools/tool-timeouts";
-import { sanitizeText } from "@oh-my-pi/pi-natives";
-import * as piUtils from "@oh-my-pi/pi-utils";
-import { TempDir } from "@oh-my-pi/pi-utils";
+} from "@cornfield/coding-agent/lsp/utils";
+import { getThemeByName } from "@cornfield/coding-agent/modes/theme/theme";
+import type { ToolSession } from "@cornfield/coding-agent/tools";
+import { clampTimeout } from "@cornfield/coding-agent/tools/tool-timeouts";
+import { sanitizeText } from "@cornfield/natives";
+import * as piUtils from "@cornfield/utils";
+import { TempDir } from "@cornfield/utils";
 
 describe("lsp regressions", () => {
 	it("detects bracket-style glob patterns", () => {

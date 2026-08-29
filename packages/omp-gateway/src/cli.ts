@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { APP_NAME, MIN_BUN_VERSION, VERSION } from "@oh-my-pi/pi-utils";
+import { APP_NAME, MIN_BUN_VERSION, VERSION } from "@cornfield/utils";
 /**
  * omp-gateway CLI entry point — the standalone gateway daemon binary.
  *
@@ -9,12 +9,12 @@ import { APP_NAME, MIN_BUN_VERSION, VERSION } from "@oh-my-pi/pi-utils";
  * `omp` (the coding-agent binary), spawned on demand via `omp --mode rpc`.
  *
  * Command model: every gateway action is a root subcommand
- * (`omp-gateway start`, `omp-gateway cron list`, ...) implemented by the
+ * (`cornfield-gateway start`, `cornfield-gateway cron list`, ...) implemented by the
  * single Gateway command class with an `action` argument. The argv rewrite
  * below maps `omp-gateway <action> ...` to the command class so the action
  * name is parsed as its first positional arg.
  */
-import { type CommandEntry, run } from "@oh-my-pi/pi-utils/cli";
+import { type CommandEntry, run } from "@cornfield/utils/cli";
 
 function parseSemver(version: string): [number, number, number] {
 	function toint(value: string): number {
@@ -86,7 +86,7 @@ async function showHelp(): Promise<void> {
 function runCli(argv: string[]): Promise<void> {
 	const first = argv[0];
 	const runArgv = first !== undefined && GATEWAY_ACTIONS.has(first) ? ["gateway", ...argv] : argv;
-	return run({ bin: "omp-gateway", version: VERSION, argv: runArgv, commands, help: showHelp });
+	return run({ bin: "cornfield-gateway", version: VERSION, argv: runArgv, commands, help: showHelp });
 }
 
 await runCli(process.argv.slice(2));

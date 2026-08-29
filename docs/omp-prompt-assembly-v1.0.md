@@ -1,7 +1,7 @@
-# OMP Prompt Assembly v1.0
+# CornField Prompt Assembly v1.0
 
-**Status**: Design reference (2026-05-26)  
-**Scope**: How OMP assembles the main-session system prompt, and how that compares to Hermes Agent and OpenClaw.  
+**Status**: Design reference (2026-05-26)
+**Scope**: How CornField assembles the main-session system prompt, and how that compares to Hermes Agent and OpenClaw.
 **Primary implementation**: `packages/coding-agent/src/system-prompt.ts`, `packages/coding-agent/src/prompts/system/system-prompt.md`
 
 ---
@@ -10,16 +10,16 @@
 
 This document captures:
 
-1. The section structure of OMP’s default system prompt template.
+1. The section structure of CornField’s default system prompt template.
 2. How `AGENTS.md` and other context files enter the prompt.
 3. Deduplication and hard-constraint handling.
 4. A structured comparison with **Hermes Agent** and **OpenClaw** prompt assembly.
 
-Use it when customizing OMP toward a personal/team agent (Hermes/OpenClaw style) or when refactoring prompt layers.
+Use it when customizing CornField toward a personal/team agent (Hermes/OpenClaw style) or when refactoring prompt layers.
 
 ---
 
-## 2. OMP assembly pipeline
+## 2. CornField assembly pipeline
 
 ```mermaid
 flowchart TD
@@ -49,7 +49,7 @@ flowchart TD
 
 ## 3. `system-prompt.md` section structure
 
-The default template uses six `{{SECTION_SEPARATOR "…"}}` blocks (helper in `@oh-my-pi/pi-utils` `prompt.ts`) plus a preamble and optional hard-constraints block.
+The default template uses six `{{SECTION_SEPARATOR "…"}}` blocks (helper in `@cornfield/utils` `prompt.ts`) plus a preamble and optional hard-constraints block.
 
 ```text
 ┌─────────────────────────────────────────────────────────┐
@@ -93,7 +93,7 @@ Static product persona and engineering norms (mostly not Handlebars-dynamic):
 
 | Tag | Topic |
 |-----|--------|
-| `<role>` | Staff engineer inside Oh My Pi coding harness |
+| `<role>` | Staff engineer inside CornField coding harness |
 | `<instruction-priority>` | User vs AGENTS hard constraints vs system safety |
 | `<failure-mode-policy>` | Missing info → `[inference]` / `[blocked]` |
 | `<pre-yield-check>` | Checklist before yielding |
@@ -156,7 +156,7 @@ Main fields passed from `buildSystemPrompt()` (`system-prompt.ts`):
 
 | Provider | File | Priority (typical) | Behavior |
 |----------|------|-------------------|----------|
-| `builtin` | `.omp/AGENTS.md` | 100 | Nearest `.omp` config dir |
+| `builtin` | `.cornfield/AGENTS.md` | 100 | Nearest `.cornfield` config dir |
 | `claude` | `.claude/…/AGENTS.md`, `CLAUDE.md` | 80 | Ecosystem compat |
 | `agents` | `.agent(s)/AGENTS.md` | 70 | Walk-up + user home |
 | `agents-md` | Standalone `AGENTS.md` | 10 | Walk from `cwd` to `repoRoot` / `home` |
@@ -194,11 +194,11 @@ key: file => (file.level === "user" ? "user" : `project:${Math.max(0, file.depth
 
 ---
 
-## 5. Three-way comparison: OMP vs Hermes vs OpenClaw
+## 5. Three-way comparison: CornField vs Hermes vs OpenClaw
 
 ### 5.1 Structural model
 
-| Dimension | OMP | Hermes | OpenClaw |
+| Dimension | CornField | Hermes | OpenClaw |
 |-----------|-----|--------|----------|
 | **Organization** | 6 `SECTION_SEPARATOR` + XML tags | 10-layer cached prefix order | Fixed framework sections + `# Project Context` bootstrap |
 | **Identity** | Template `<role>` | `~/.hermes/SOUL.md` or default | `SOUL.md` + `IDENTITY.md` |
@@ -211,7 +211,7 @@ key: file => (file.level === "user" ? "user" : `project:${Math.max(0, file.depth
 ### 5.2 Layer map (conceptual)
 
 ```text
-OMP                          Hermes (cached)              OpenClaw (full mode)
+CornField                          Hermes (cached)              OpenClaw (full mode)
 ────────────────────────────────────────────────────────────────────────────
 [hard-constraints]           (in identity / tools)        Safety
   ↑ AGENTS NEVER                                              Execution Bias
@@ -256,7 +256,7 @@ Source: [OpenClaw system prompt](https://docs.openclaw.ai/concepts/system-prompt
 
 **Bootstrap files** (injected under Project Context):
 
-| File | Role | OMP analogue |
+| File | Role | CornField analogue |
 |------|------|----------------|
 | `SOUL.md` | Values, tone, boundaries | `<role>` + Identity section (in template) |
 | `IDENTITY.md` | Name, emoji, avatar | No dedicated file |
@@ -264,14 +264,14 @@ Source: [OpenClaw system prompt](https://docs.openclaw.ai/concepts/system-prompt
 | `USER.md` | User preferences | evolution / identity |
 | `TOOLS.md` | Env-specific tool notes | Tool schema + Environment section |
 | `MEMORY.md` | Curated long-term memory | learnings / projections |
-| `HEARTBEAT.md` | Proactive / scheduled behavior | `omp schedule` + daemon |
+| `HEARTBEAT.md` | Proactive / scheduled behavior | `cornfield schedule` + daemon |
 | `memory/*.md` | Daily logs, on-demand search | episodes / optional wiki |
 
 **Limits**: `bootstrapMaxChars` per file (default 12000), `bootstrapTotalMaxChars` (default 60000). Sub-agents: only `AGENTS.md` + `TOOLS.md` when `promptMode=minimal`.
 
 ### 5.5 Concept placement matrix
 
-| Concept | OMP | Hermes | OpenClaw |
+| Concept | CornField | Hermes | OpenClaw |
 |---------|-----|--------|----------|
 | Absolute prohibitions | `<hard-constraints>` + `<contract>` | SOUL + project file + tool layer | Safety + AGENTS |
 | Project conventions | `<context>` (multi) | Single project context | AGENTS + TOOLS + … |
@@ -285,13 +285,13 @@ Source: [OpenClaw system prompt](https://docs.openclaw.ai/concepts/system-prompt
 
 | Product | Emphasis | Best fit |
 |---------|----------|----------|
-| **OMP** | Full coding harness contract in-repo template; monorepo AGENTS; tool-gated Environment | Strict coding agent, yield/completeness, deep repo rules |
+| **CornField** | Full coding harness contract in-repo template; monorepo AGENTS; tool-gated Environment | Strict coding agent, yield/completeness, deep repo rules |
 | **Hermes** | SOUL + small frozen MEMORY/USER; single project context file; cache-friendly | CLI agent, cross-session persona, compact memory |
 | **OpenClaw** | Workspace markdown split (soul vs handbook vs user vs tools); gateway/channels; heartbeats | IM-connected personal/team agent, multi-workspace |
 
 ---
 
-## 6. Alignment with OMP Evolution (V4)
+## 6. Alignment with CornField Evolution (V4)
 
 Evolution injects separately in `before_agent_start` (not part of `system-prompt.md` template):
 
@@ -307,12 +307,12 @@ See `docs/omp-evolution-architecture-v3.md` for the full evolution pipeline.
 
 ## 7. Migration notes (toward Hermes / OpenClaw style)
 
-| Goal | Suggested approach in OMP |
+| Goal | Suggested approach in CornField |
 |------|---------------------------|
-| Hermes-like identity | Add `~/.omp/SOUL.md` (or project file) loaded before `<role>`; shorten static `<role>` |
+| Hermes-like identity | Add `~/.cornfield/SOUL.md` (or project file) loaded before `<role>`; shorten static `<role>` |
 | Hermes-like frozen memory | Optional session-frozen projection of learnings → append block; or document “restart session to refresh” |
 | OpenClaw-like workspace | Split: `SOUL.md` / `AGENTS.md` / `USER.md` / `TOOLS.md` under workspace; extend context-file providers |
-| Keep OMP strengths | Retain `hard-constraints`, Procedure, `dir-context`, tool gating in Environment |
+| Keep CornField strengths | Retain `hard-constraints`, Procedure, `dir-context`, tool gating in Environment |
 | Sub-agent parity | Already filters `agents.md`; align with OpenClaw minimal = AGENTS + TOOLS only |
 
 ---
@@ -325,7 +325,7 @@ See `docs/omp-evolution-architecture-v3.md` for the full evolution pipeline.
 | Custom template | `packages/coding-agent/src/prompts/system/custom-system-prompt.md` |
 | Builder | `packages/coding-agent/src/system-prompt.ts` |
 | Standalone AGENTS walk-up | `packages/coding-agent/src/discovery/agents-md.ts` |
-| `.omp` AGENTS | `packages/coding-agent/src/discovery/builtin.ts` |
+| `.cornfield` AGENTS | `packages/coding-agent/src/discovery/builtin.ts` |
 | Context capability | `packages/coding-agent/src/capability/context-file.ts` |
 | Subagent template | `packages/coding-agent/src/prompts/system/subagent-system-prompt.md` |
 | Tests | `packages/coding-agent/test/system-prompt-templates.test.ts` |
@@ -346,4 +346,4 @@ See `docs/omp-evolution-architecture-v3.md` for the full evolution pipeline.
 
 | Version | Date | Notes |
 |---------|------|-------|
-| v1.0 | 2026-05-26 | Initial doc: OMP `system-prompt.md` structure, AGENTS dedup, Hermes/OpenClaw comparison |
+| v1.0 | 2026-05-26 | Initial doc: CornField `system-prompt.md` structure, AGENTS dedup, Hermes/OpenClaw comparison |

@@ -9,8 +9,8 @@
  * - 'user': user identity, preferences, personal details
  * - 'memory': project facts, conventions, environment knowledge
  */
-import type { AgentTool, AgentToolResult } from "@oh-my-pi/pi-agent-core";
-import { prompt } from "@oh-my-pi/pi-utils";
+import type { AgentTool, AgentToolResult } from "@cornfield/agent";
+import { prompt } from "@cornfield/utils";
 import { type Static, Type } from "@sinclair/typebox";
 import writeMemoryDescription from "./prompts/write-memory-tool.md" with { type: "text" };
 import type { SqliteLearningStore } from "./storage/learnings";
