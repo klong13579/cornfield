@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **CI 全红修复：迁移后测试契约/行为对齐**（`test/cli-gateway-reject.test.ts`、`src/slash-commands/builtin-registry.ts`、`test/stt/listen-controller.test.ts`、`test/lspmux.test.ts`、`test/wire-server-multi-agent.integration.test.ts`）: cornfield 迁移后 CI 首次全量跑暴露的一批遗漏——(1) `cli-gateway-reject` 仍断言 `omp-gateway` 旧名（cli.ts 已输出 `cornfield-gateway`）；(2) `/listen search/export` 无参数时的 Usage 提示被提前的目录检查拦截（无录音目录时误报 "No recordings yet"），参数校验移至目录检查之前；(3) `listen-controller` 录音路径正则仍是 `.omp/listen`；
+(4) `lspmux` launchd/plist 两个用例是 macOS 专属设计，在 Linux CI 上走 bare 分支先写日志文件导致断言失配，限 darwin 运行；(5) multi-agent 集成测试的 `get_available_models` 断言非空，但隔离 HOME 无 API key 时返回空是正确行为，改为协议结构验证。
+
 ## [0.19.2] - 2026-08-28
 
 ### Added

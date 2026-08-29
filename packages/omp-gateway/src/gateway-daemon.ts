@@ -71,11 +71,23 @@ export async function isGatewayProcess(pid: number): Promise<boolean> {
 		return false;
 	}
 	try {
-		const result = Bun.spawnSync(["ps", "-p", String(pid), "-o", "args="]);
-		if (result.exitCode !== 0) return false;
+		const result = Bun.spawnSync(["ps", "-p", String(pid), "-o", "command="]);
+		if (result.exitCode !== 0) {
+			logger.info("[gateway] ps failed while probing gateway identity", { pid, exitCode: result.exitCode });
+			return false;
+		}
 		const args = result.stdout.toString();
-		return args.includes("gateway") && args.includes("--foreground");
-	} catch {
+		// macOS joins argv with \n, Linux with spaces — split on both so the
+		// shape check is token-based, not substring-over-raw-output based.
+		const tokens = args.split(/[\s\n]+/).filter(Boolean);
+		const hasGateway = tokens.some(token => token.includes("gateway"));
+		const hasForeground = tokens.includes("--foreground");
+		if (!hasGateway || !hasForeground) {
+			logger.info("[gateway] ps argv did not match gateway shape", { pid, args });
+		}
+		return hasGateway && hasForeground;
+	} catch (err) {
+		logger.warn("[gateway] isGatewayProcess check failed", { pid, error: String(err) });
 		return false;
 	}
 }

@@ -24,6 +24,24 @@ import type { ScheduledTask } from "../src/scheduler/types";
 let tmpDir: string;
 let jobsPath: string;
 
+/**
+ * Find a PID that is definitely not alive on this machine. CentOS/Ubuntu
+ * allow pid_max up to 4M+, so a hardcoded "large" PID (424242) can collide
+ * with a real process on CI and silently flip the orphan-consumer's
+ * liveness gate. Probe downward from the kernel max until one is ESRCH.
+ */
+function findDeadPid(): number {
+	for (let p = 4_194_304; p > 1_000_000; p -= 1_000) {
+		try {
+			process.kill(p, 0);
+		} catch (err) {
+			const code = (err as NodeJS.ErrnoException).code;
+			if (code === "ESRCH" || code === "EINVAL") return p;
+		}
+	}
+	return 999_999_999;
+}
+
 function makeTask(name: string, overrides: Partial<ScheduledTask> = {}): Omit<ScheduledTask, "id"> {
 	return {
 		name,
@@ -301,7 +319,7 @@ describe("JsonFileStorage cross-process change detection", () => {
 					lastDeliveryError: undefined,
 				},
 				startedAt: Date.now(),
-				pid: 424_242, // dead writer — the CLI exited right after arming
+				pid: findDeadPid(), // dead writer — the CLI exited right after arming
 				awaitingFire: true,
 				expiresAt: target + 90_000,
 			},

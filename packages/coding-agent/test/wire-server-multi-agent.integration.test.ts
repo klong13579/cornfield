@@ -8,7 +8,7 @@
  *   3. switch_session 切焦点 → 推送 session_snapshot 切到对应 agent
  *   4. 推送隔离：A 连接切到 hr 后，default 的事件不再推给它
  *   5. 定向命令：sessionId 参数直接指定 hr（无需 switch）
- *   6. get_available_models 真实现（非空）
+ *   6. get_available_models 真实现（协议结构验证；列表非空依赖环境配置的 key）
  *   7. ping/pong 心跳
  *   8. host_tool 双向闭环：set_host_tools 注册 → 触发调用（用 get_state 后的 prompt 不可行，
  *      改用直接校验 host_tools_changed push + 注册回执；调用闭环需 LLM，留 fe 联调）
@@ -143,12 +143,19 @@ test("serve 多 Agent：注册表 + attach + switch + 隔离 + 心跳", async ()
 		await new Promise(r => setTimeout(r, 300));
 		expect(bGotForeign).toBe(false);
 
-		// ── get_available_models 真实现（非空）──
+		// ── get_available_models 真实现 —— 协议结构验证 ──
+		// 模型列表依赖运行环境配置的 provider/key（auth.db）；隔离 HOME 下
+		// 无 key 时返回空是正确行为，不能断言非空。协议契约：ok + models
+		// 数组 + 停用名单结构正确。非空断言留给有 key 的 E2E（E2E=1）。
 		const modelsResp = await connA.request({ type: "get_available_models", sessionId: "hr" });
 		expect(modelsResp.ok).toBe(true);
 		const models = (modelsResp.result as { models: unknown[] }).models;
 		expect(Array.isArray(models)).toBe(true);
-		expect(models.length).toBeGreaterThan(0);
+		if (models.length > 0) {
+			const first = models[0] as Record<string, unknown>;
+			expect(first.provider).toBeTruthy();
+			expect(first.id).toBeTruthy();
+		}
 
 		// ── 未 attach 的 agent 定向命令 → 显式报错（preload 后需先 detach）──
 		const detachResp = await connA.request({ type: "detach", sessionId: "ops" });

@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- **Fixed: isGatewayProcess 跨平台 argv 解析 + CI 测试修复** (`src/gateway-daemon.ts`, `test/gateway-lifecycle.test.ts`, `test/json-file-storage.test.ts`, `test/narwal-model.test.ts`): `isGatewayProcess` 直接对 `ps -o args=` 的原始输出做子串匹配，macOS 用 `\n` 连接 argv、Linux 用空格——改为按空白/换行切 token 后做 `gateway`/`--foreground` 形状检查，并补充不匹配时的诊断日志。测试侧：(1) `json-file-storage` 孤 marker 测试用固定 PID 424242 模拟死进程，在 Linux 高 pid_max 下可能撞上存活进程，改为运行时探测确定不存在的 PID；(2) `narwal-model` 的 wire E2E spawn 硬编码 `omp` 二进制名（迁移后改名 `cornfield`），探测 PATH 现有名、无二进制时整组 skip（CI test job 不构建/安装二进制）；(3) `gateway-lifecycle` 的 isGatewayProcess 用例随实现修正而在正常环境全绿。
+
 ## [0.19.2] - 2026-08-28
 
 - **P2-4: serve 的 cron/gateway 只读命令转发 gateway 生产端点** (`src/wire-endpoint.ts`、`packages/coding-agent/src/server/wire-server.ts`): 新增 gateway `POST /wire` 端点（wire-endpoint），serve 的 `get_cron_tasks`/`get_cron_logs`/`gateway_status` 不再直读 `jobs.json`/`status.json`，改为转发到该端点——cron CRUD（create/update/remove/test_run）也经此落地到真实 scheduler 存储。`TaskRowDto` 增 `status`（active/paused/disabled，前端可区分暂停与禁用）。删除 JSON-line 时代的 `agent-transport.ts`（协议类型迁入 `agent-transport-wire.ts`）。测试：`test/wire-endpoint.test.ts`（7 用例）。

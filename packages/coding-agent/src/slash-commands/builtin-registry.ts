@@ -1034,16 +1034,17 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<BuiltinSlashCommandSpec> = [
 			const { getConfigRootDir } = await import("@cornfield/utils");
 			const base = getConfigRootDir();
 			const listenDir = path.join(base, "listen");
-
-			try {
-				await fs.access(listenDir);
-			} catch {
-				runtime.ctx.showStatus("No recordings yet. Use /record to create one.");
-				return;
-			}
+			const hasRecordings = await fs.access(listenDir).then(
+				() => true,
+				() => false,
+			);
 
 			switch (sub) {
 				case "list": {
+					if (!hasRecordings) {
+						runtime.ctx.showStatus("No recordings yet. Use /record to create one.");
+						return;
+					}
 					const files = await fs.readdir(listenDir);
 					const jsonFiles = files
 						.filter((f: string) => f.endsWith(".json"))
@@ -1063,6 +1064,10 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<BuiltinSlashCommandSpec> = [
 				case "search": {
 					if (!rest) {
 						runtime.ctx.showStatus("Usage: /listen search <keyword>");
+						return;
+					}
+					if (!hasRecordings) {
+						runtime.ctx.showStatus("No recordings yet. Use /record to create one.");
 						return;
 					}
 					const files = await fs.readdir(listenDir);

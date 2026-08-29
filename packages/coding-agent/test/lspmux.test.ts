@@ -104,38 +104,41 @@ describe("ensureLspmuxServer", () => {
 		expect(result).toBe(state);
 	});
 
-	it("registers a launchd agent and waits for the server (macOS path)", async () => {
-		const binaryPath = "/fake/bin/lspmux";
-		const state = { available: true, running: false, binaryPath, config: null };
+	it.skipIf(process.platform !== "darwin")(
+		"registers a launchd agent and waits for the server (macOS path)",
+		async () => {
+			const binaryPath = "/fake/bin/lspmux";
+			const state = { available: true, running: false, binaryPath, config: null };
 
-		// Plist does not exist → Bun.file throws ENOENT.
-		vi.spyOn(Bun, "file").mockReturnValue({
-			text: async () => {
-				throw enoentError();
-			},
-			exists: async () => false,
-		} as unknown as ReturnType<typeof Bun.file>);
+			// Plist does not exist → Bun.file throws ENOENT.
+			vi.spyOn(Bun, "file").mockReturnValue({
+				text: async () => {
+					throw enoentError();
+				},
+				exists: async () => false,
+			} as unknown as ReturnType<typeof Bun.file>);
 
-		const writeMock = vi.spyOn(Bun, "write").mockResolvedValue(0);
+			const writeMock = vi.spyOn(Bun, "write").mockResolvedValue(0);
 
-		// launchctl print/bootstrap exit 0; `lspmux status` exits 0 (server up).
-		vi.spyOn(Bun, "spawn").mockImplementation((() => fakeProc(0)) as never);
+			// launchctl print/bootstrap exit 0; `lspmux status` exits 0 (server up).
+			vi.spyOn(Bun, "spawn").mockImplementation((() => fakeProc(0)) as never);
 
-		const result = await lspmux.ensureLspmuxServer(state);
+			const result = await lspmux.ensureLspmuxServer(state);
 
-		expect(result.running).toBe(true);
-		expect(result).not.toBe(state); // new object with running=true
+			expect(result.running).toBe(true);
+			expect(result).not.toBe(state); // new object with running=true
 
-		// plist was written with the launchd label and server args
-		expect(writeMock).toHaveBeenCalledTimes(1);
-		const [plistPath, content] = writeMock.mock.calls[0];
-		expect(String(plistPath)).toContain("LaunchAgents");
-		expect(String(content)).toContain("com.cornfield.lspmux");
-		expect(String(content)).toContain(binaryPath);
-		expect(String(content)).toContain("<string>server</string>");
-	});
+			// plist was written with the launchd label and server args
+			expect(writeMock).toHaveBeenCalledTimes(1);
+			const [plistPath, content] = writeMock.mock.calls[0];
+			expect(String(plistPath)).toContain("LaunchAgents");
+			expect(String(content)).toContain("com.cornfield.lspmux");
+			expect(String(content)).toContain(binaryPath);
+			expect(String(content)).toContain("<string>server</string>");
+		},
+	);
 
-	it("does not rewrite the plist when it already exists", async () => {
+	it.skipIf(process.platform !== "darwin")("does not rewrite the plist when it already exists", async () => {
 		const state = { available: true, running: false, binaryPath: "/fake/bin/lspmux", config: null };
 
 		vi.spyOn(Bun, "file").mockReturnValue({

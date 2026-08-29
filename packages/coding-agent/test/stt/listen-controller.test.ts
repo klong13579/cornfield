@@ -225,7 +225,7 @@ describe("ListenController", () => {
 		const content = writeCall[1] as string;
 		const parsed = JSON.parse(content);
 
-		expect(filePath).toMatch(/\.omp\/listen\/\d{4}-\d{2}-\d{2}-/);
+		expect(filePath).toMatch(/\.cornfield\/listen\/\d{4}-\d{2}-\d{2}-/);
 		expect(parsed.version).toBe(1);
 		expect(parsed.text).toBe("这是测试转写文本");
 		expect(parsed.recorded_at).toBeDefined();

@@ -11,10 +11,27 @@ import { MULTIDEVICE_PROTOCOL_VERSION } from "@cornfield/wire";
 
 const WIRE_HELLO_ACK = '"type":"hello_ack"';
 
+/**
+ * This suite spawns the real agent binary over wire-stdio. The binary is
+ * renamed (omp → cornfield), so probe $PATH for the current name first.
+ * CI (test job) never builds/installs the binary — skip the whole suite
+ * there instead of failing on `Executable not found`.
+ */
+function resolveAgentBin(): string | null {
+	for (const bin of ["cornfield", "omp"]) {
+		const probe = Bun.spawnSync(["sh", "-c", `command -v ${bin}`]);
+		if (probe.exitCode === 0 && probe.stdout.toString().trim().length > 0) return bin;
+	}
+	return null;
+}
+
+const agentBin = resolveAgentBin();
+const describeAgent = agentBin ? describe : describe.skip;
+
 function spawnWire(model?: string) {
 	const args = ["--mode", "wire-stdio"];
 	if (model) args.push("--model", model);
-	return Bun.spawn(["omp", ...args], {
+	return Bun.spawn([agentBin!, ...args], {
 		stdin: "pipe",
 		stdout: "pipe",
 		stderr: "pipe",
@@ -22,7 +39,7 @@ function spawnWire(model?: string) {
 	});
 }
 
-describe("Gateway with narwal-plan/minimax-m3 model", () => {
+describeAgent("Gateway with narwal-plan/minimax-m3 model", () => {
 	test("omp spawns with the new model and completes the wire hello handshake", async () => {
 		const proc = spawnWire("narwal-plan/minimax-m3");
 		try {
