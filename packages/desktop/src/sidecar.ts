@@ -46,7 +46,7 @@ export function resolveWorkspaceDir(override?: string): string {
 }
 
 /** 解析 cornfield 二进制路径，优先级与 gateway 的 `resolveDefaultOmpPath` 对齐并前插打包内嵌路径。 */
-export function resolveOmpBinary(resourcesPath: string): string {
+export function resolveCornfieldBinary(resourcesPath: string): string {
 	const explicit = process.env.CORNFIELD_BINARY?.trim();
 	if (explicit) return explicit;
 
@@ -134,7 +134,7 @@ export async function probePortState(): Promise<PortState> {
 }
 
 function spawnSidecar(options: SidecarOptions): childProcess.ChildProcess {
-	const bin = resolveOmpBinary(options.resourcesPath);
+	const bin = resolveCornfieldBinary(options.resourcesPath);
 	const child = childProcess.spawn(bin, ["serve", "--port", String(SERVE_PORT), "--host", SERVE_HOST], {
 		cwd: options.workspaceDir,
 		env: { ...process.env, [SIDECAR_ENV]: "1" },
