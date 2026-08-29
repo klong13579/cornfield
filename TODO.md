@@ -3,6 +3,7 @@
 > Current task state. The agent updates this file as work progresses; an empty TODO is a valid state.
 
 ## 待办
+- [ ] fork herdr 新增 cornfield AgentKind 定制版（herdr 集成方案 B，暂缓）
 - [ ] 去 omp 化：oh-my-pi → CornField 改名（P0✓ standalone 仓库已创建并迁移；P1→P4 分阶段执行） → topics/de-omp-mika-rename.md
 - [ ] 统一协议层：TUI/web/桌面/IM 四前端收敛到一套 Wire（P0✓ P1✓ P2✓ 含实机验收；P3 TUI 代码完成在 feat/agent-work 未合 main，暂缓） → topics/unified-protocol-layer.md
 - [ ] 学习使用herdr-board 功能
