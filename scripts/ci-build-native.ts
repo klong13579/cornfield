@@ -66,13 +66,7 @@ async function reportAvx512ObjectFiles(targetDir: string): Promise<void> {
 	if (targetPlatform !== "linux" || targetArch !== "x64") return;
 	const objdump = Bun.which("objdump");
 	if (!objdump) return;
-	const entries = (
-		await Promise.all(
-			["**/*.o", "**/*.a", "**/*.rlib"].map(pattern =>
-				Array.fromAsync(new Bun.Glob(pattern).scan({ cwd: targetDir, absolute: true })),
-			),
-		)
-	).flat();
+	const entries = await Array.fromAsync(new Bun.Glob("**/*.{o,a}").scan({ cwd: targetDir, absolute: true }));
 	for (const entry of entries) {
 		const result = Bun.spawnSync([objdump, "-d", entry], { stdout: "pipe", stderr: "ignore" });
 		if (result.exitCode !== 0) continue;
