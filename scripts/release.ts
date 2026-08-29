@@ -244,7 +244,7 @@ async function cmdRelease(version: string): Promise<void> {
 	console.log("Updating root catalog versions...");
 	let rootPkgRaw = await Bun.file("package.json").text();
 	rootPkgRaw = rootPkgRaw.replace(
-		/("@oh-my-pi\/[^"]+":\s*)"[^"]+"/g,
+		/("@cornfield\/[^"]+":\s*)"[^"]+"/g,
 		`$1"${version}"`,
 	);
 	await Bun.write("package.json", rootPkgRaw);

@@ -2,10 +2,20 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **去 omp 化品牌迁移**: `src/**` 符号/文件名/环境变量/用户可见标识对齐 cornfield（纯改名，无行为变化）——命令入口符号/文件名 `omp → cornfield`（A 档）；包 scope `@oh-my-pi/* → @cornfield/*`（B 档）；环境变量 `OMP_*`/`PI_* → CORNFIELD_*`（`CORNFIELD_AGENT_DIR`/`CORNFIELD_CONFIG_DIR`）；DAP 客户端标识 `clientID/clientName → cornfield/CornField`、commit agent system prompt 名称同步。
+
 ### Fixed
 
 - **CI 全红修复：迁移后测试契约/行为对齐**（`test/cli-gateway-reject.test.ts`、`src/slash-commands/builtin-registry.ts`、`test/stt/listen-controller.test.ts`、`test/lspmux.test.ts`、`test/wire-server-multi-agent.integration.test.ts`）: cornfield 迁移后 CI 首次全量跑暴露的一批遗漏——(1) `cli-gateway-reject` 仍断言 `omp-gateway` 旧名（cli.ts 已输出 `cornfield-gateway`）；(2) `/listen search/export` 无参数时的 Usage 提示被提前的目录检查拦截（无录音目录时误报 "No recordings yet"），参数校验移至目录检查之前；(3) `listen-controller` 录音路径正则仍是 `.omp/listen`；
 (4) `lspmux` launchd/plist 两个用例是 macOS 专属设计，在 Linux CI 上走 bare 分支先写日志文件导致断言失配，限 darwin 运行；(5) multi-agent 集成测试的 `get_available_models` 断言非空，但隔离 HOME 无 API key 时返回空是正确行为，改为协议结构验证。
+
+- **TaskTool 模块环注册 TDZ 修复**（`src/tools/task.ts`): 惰性注册 + executor 直连 `truncateTail`，消除模块环初始化时序导致的注册崩溃。
+
+- **wire-server serve hook 超时放宽**（`test/wire-server*.test.ts`、`src/server/wire-server.ts`): `waitForServe` 默认超时提至 60s，beforeAll/test hook 30s→90s，消除 CI 冷启动 serve 的 30s race。
+
+- **assistant message start 事件转发**（`src/server/wire-server.ts`): 会话级 `message_start` 事件不再吞掉，前端可即时渲染开始状态。
 
 ## [0.19.2] - 2026-08-28
 

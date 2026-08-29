@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **去 omp 化品牌迁移**: 包引用/环境变量/路径对齐 cornfield —— 包 scope `@oh-my-pi/* → @cornfield/*`，配置根路径 `~/.omp → ~/.cornfield`，环境变量 `OMP_*`/`PI_* → CORNFIELD_*`（含 gateway 目录改名 `omp-gateway → gateway` 后的 import 路径更新）。纯改名，无行为变化。
+
 ## [14.5.4] - 2026-04-28
 
 ### Fixed

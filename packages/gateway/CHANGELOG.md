@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- **Changed: 去 omp 化品牌迁移**（`packages/omp-gateway → packages/gateway` 目录改名、`src/agent-bridge.ts`、`src/agent-transport-wire.ts`、`src/service-installer.ts`): 包目录对齐新名；运行期契约 `ompPath`/`ompSessionPath`/`resolveDefaultOmpPath → cornfieldPath`/`cornfieldSessionPath`/`resolveDefaultCornfieldPath`；持久化环境变量 `OMP_GATEWAY_TEST_MODE/OMP_GATEWAY_TEST_PORT → CORNFIELD_GATEWAY_TEST_MODE/CORNFIELD_GATEWAY_TEST_PORT`（`PERSISTED_ENV_VARS`/`PERSISTED_ENV_DEFAULTS` 与 launchd plist/systemd unit 安装同步）。
+
+- **Fixed: scheduler 默认二进制 omp→cornfield**（`src/scheduler/executor.ts`): 机器 PATH 已无 `omp`，未显式配置 `cornfieldPath` 的 cron agent 任务此前 spawn 直接失败；默认回退二进制名改为 `cornfield`。
+
 - **Fixed: isGatewayProcess 跨平台 argv 解析 + CI 测试修复** (`src/gateway-daemon.ts`, `test/gateway-lifecycle.test.ts`, `test/json-file-storage.test.ts`, `test/narwal-model.test.ts`): `isGatewayProcess` 直接对 `ps -o args=` 的原始输出做子串匹配，macOS 用 `\n` 连接 argv、Linux 用空格——改为按空白/换行切 token 后做 `gateway`/`--foreground` 形状检查，并补充不匹配时的诊断日志。测试侧：(1) `json-file-storage` 孤 marker 测试用固定 PID 424242 模拟死进程，在 Linux 高 pid_max 下可能撞上存活进程，改为运行时探测确定不存在的 PID；(2) `narwal-model` 的 wire E2E spawn 硬编码 `omp` 二进制名（迁移后改名 `cornfield`），探测 PATH 现有名、无二进制时整组 skip（CI test job 不构建/安装二进制）；(3) `gateway-lifecycle` 的 isGatewayProcess 用例随实现修正而在正常环境全绿。
 
 ## [0.19.2] - 2026-08-28

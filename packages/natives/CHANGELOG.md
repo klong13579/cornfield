@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **去 omp 化品牌迁移**: 包引用/环境变量/路径对齐 cornfield —— 包 scope `@oh-my-pi/* → @cornfield/*`，配置根路径 `~/.omp → ~/.cornfield`，环境变量 `OMP_*`/`PI_* → CORNFIELD_*`。纯改名，无行为变化。
+
+### Fixed
+
+- **pin flate2 1.1.9**（`crates/pi-natives`）: 锁定 flate2 版本，避免 zlib-rs 引入 AVX-512 指令导致 CI ISA 检查失败。
+
 ## [0.17.0] - 2026-08-16
 
 ### Fixed

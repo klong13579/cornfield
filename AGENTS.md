@@ -60,7 +60,7 @@ The canonical pattern for all gateway lifecycle operations. **Both `AGENTS.md`'s
 
 #### Service-managed (standard)
 
-A fresh `cornfield-gateway service install` writes `OMP_GATEWAY_TEST_MODE=1` and `OMP_GATEWAY_TEST_PORT=7890` into the plist by default (per `packages/gateway/src/service-installer.ts` `PERSISTED_ENV_DEFAULTS`). Opt out with `export OMP_GATEWAY_TEST_MODE=0` before `service install`.
+A fresh `cornfield-gateway service install` writes `CORNFIELD_GATEWAY_TEST_MODE=1` and `CORNFIELD_GATEWAY_TEST_PORT=7890` into the plist by default (per `packages/gateway/src/service-installer.ts` `PERSISTED_ENV_DEFAULTS`). Opt out with `export CORNFIELD_GATEWAY_TEST_MODE=0` before `service install`.
 
 ```bash
 # One-time setup:
@@ -118,21 +118,21 @@ packages/coding-agent/src/cli.ts        # Bun runtime guard + command table; rou
 ### Package dependency graph
 
 ```
-utils (pi-utils)          ← shared helpers (logger, dirs, env, stream, isEnoent, ...)
+utils (@cornfield/utils)   ← shared helpers (logger, dirs, env, stream, isEnoent, ...)
   ↑
-ai (pi-ai)                ← multi-provider LLM client, streaming, OAuth, models.json (generated)
+ai (@cornfield/ai)        ← multi-provider LLM client, streaming, OAuth, models.json (generated)
   ↑
-agent (pi-agent-core)     ← agent runtime: tool-calling loop, session state
+agent (@cornfield/agent)   ← agent runtime: tool-calling loop, session state
   ↑
 coding-agent              ← main CLI: TUI, 25+ tools, slash commands, modes, sessions, memory, SDK
-  ├─ tui (pi-tui)         ← differential terminal UI, layout, components
-  ├─ natives (pi-natives) ← N-API bindings → crates/pi-natives (Rust cdylib)
+  ├─ tui (@cornfield/tui)   ← differential terminal UI, layout, components
+  ├─ natives (@cornfield/natives) ← N-API bindings → crates/pi-natives (Rust cdylib)
   └─ self-evolution       ← SQLite evolution DB, skill mining, episodic memory, regression replay
 
 Extension products:
   cornfield-gateway              ← IM channels (DingTalk), scheduler (cron/interval/one-shot), agent bridge
   cognitive-coordination  ← L4 Synapse coordination layer (WIP)
-  stats (cornfield-stats)       ← local observability dashboard
+  stats (@cornfield/stats)       ← local observability dashboard
 ```
 
 ### Key data flow
@@ -273,7 +273,7 @@ Then regenerate: `bun --cwd=packages/ai run generate-models`.
 
 |File|Role|
 |---|---|
-|`packages/coding-agent/src/cli.ts`|CLI entry point (bin `omp`). Bun runtime guard + command routing.|
+|`packages/coding-agent/src/cli.ts`|CLI entry point (bin `cornfield`). Bun runtime guard + command routing.|
 |`packages/coding-agent/src/main.ts`|Root command: arg parsing, settings init, mode dispatch.|
 |`packages/coding-agent/src/sdk.ts`|`createAgentSession` — wires AgentSession, tools, extensions, auth.|
 |`packages/coding-agent/src/tools/index.ts`|Tool registry: `BUILTIN_TOOLS`, `HIDDEN_TOOLS`, `createTools()`.|
@@ -288,7 +288,7 @@ Then regenerate: `bun --cwd=packages/ai run generate-models`.
 |`scripts/release.ts`|Release pipeline (version bump, CHANGELOG finalization, tag, CI watch).|
 |`scripts/run-rs-task.ts`|Rust task runner (skips locally if no `.rs` changed).|
 |`scripts/ci-build-native.ts`|Native addon build for CI (baseline/modern variant selection).|
-|`scripts/ci-release-build-binaries.ts`|Cross-compile `omp` binary for 5 targets via `bun build --compile`.|
+|`scripts/ci-release-build-binaries.ts`|Cross-compile `cornfield` binary for 5 targets via `bun build --compile`.|
 |`scripts/ci-release-publish.ts`|Publish 7 packages to npm in dep order.|
 |`scripts/install.sh` / `install.ps1`|End-user installers (bun-source / binary modes).|
 
@@ -323,7 +323,7 @@ Tests live in `packages/*/test/`, except `packages/cognitive-coordination` which
 
 ```typescript
 // HOME isolation (avoid polluting ~/.cornfield/agent/registry.json)
-const isolatedHome = await fs.mkdtemp(path.join(os.tmpdir(), "omp-test-"));
+const isolatedHome = await fs.mkdtemp(path.join(os.tmpdir(), "cornfield-test-"));
 const savedHome = process.env.HOME;
 process.env.HOME = isolatedHome;
 afterEach(async () => {
@@ -332,7 +332,7 @@ afterEach(async () => {
 });
 ```
 
-- Save + restore `PI_CONFIG_DIR` / `PI_CODING_AGENT_DIR` in `afterEach` if touched.
+- Save + restore `CORNFIELD_CONFIG_DIR` / `CORNFIELD_AGENT_DIR` in `afterEach` if touched.
 - Use `Bun.sleep()` + `Promise.race` with timeout for hang detection in PTY/shell tests.
 - Never use long-lived file-wide mutations of globals (`Bun.*`, `process.platform`, `process.env`). Use per-test `vi.spyOn(...)` with immediate restoration.
 
@@ -340,13 +340,13 @@ afterEach(async () => {
 
 Gateway features (image pipeline, card rendering, streaming) MUST be tested with the fake RPC pattern — bypass the real LLM entirely. This is fast, deterministic, and doesn't depend on agent prompt compliance.
 
-Pattern: write a fake `omp --mode rpc` script that emits synthetic agent events (text deltas, tool calls, agent_end), spawn a real `AgentBridge` with the fake script as `ompPath`, call `DingTalkChannel.streamCard` directly. The card is delivered to a real DingTalk user via real API.
+Pattern: write a fake `cornfield --mode rpc` script that emits synthetic agent events (text deltas, tool calls, agent_end), spawn a real `AgentBridge` with the fake script as `cornfieldPath`, call `DingTalkChannel.streamCard` directly. The card is delivered to a real DingTalk user via real API.
 
 Reference implementation: `packages/gateway/src/test-longtask.ts` (long-task watcher test).
 
 Steps:
 1. Write a fake RPC script that emits the agent response you want to test (e.g. text containing `![](https://...)` for image pipeline)
-2. Create `AgentBridge` with `ompPath` pointing to the fake script
+2. Create `AgentBridge` with `cornfieldPath` pointing to the fake script
 3. Create `DingTalkChannel` with real config from `~/.cornfield/gateway.json`
 4. Build synthetic `InboundMessage` + `SessionRecord`
 5. Call `channel.streamCard(inbound, session, context, submit)`
@@ -360,7 +360,7 @@ For **issue reproduction** (not unit testing) — when the user reports a real D
 
 **Tool:** `.cornfield/skills/repro-inject/repro-inject.ts` — POSTs a synthetic `DingTalkRawMessage` to the gateway's `POST /test/inject` endpoint. The gateway treats it as real, runs it through `channel.injectTestMessage` → the full `#handleMessage` pipeline → real `AgentBridge` → real `DingTalkChannel.sendMessage`. DM reply is sent to the actual DingTalk user (OAuth-DM fallback via `senderStaffId` if the webhook is rejected by DingTalk).
 
-**Prereq:** the gateway must be running with `OMP_GATEWAY_TEST_MODE=1` and `/test/inject` live. See the **Restart gateway** section above for the canonical start pattern. The same `launchctl kickstart -k` and stale-pid warnings apply.
+**Prereq:** the gateway must be running with `CORNFIELD_GATEWAY_TEST_MODE=1` and `/test/inject` live. See the **Restart gateway** section above for the canonical start pattern. The same `launchctl kickstart -k` and stale-pid warnings apply.
 
 **Common flows:**
 
@@ -411,7 +411,7 @@ to OAuth DM on `errcode 300001` regardless.
 **Known caveats:**
 - `cornfield-gateway service stop` waits for graceful drain. If the gateway is stuck, use `pkill -TERM` (not `kill -9`) — see "Restart gateway" above.
 - The script's local JSON cache at `~/.cornfield/repro-state.json` is now only populated by the `--grab-webhook` path (5 min TTL, for back-to-back injects on the same freshly-grabbed session). The primary webhook source is `sessions.db`. If a grab went stale, `--clear` empties the cache so the next inject re-grabs.
-- `omp gateway cron test-run` (CLI) and `cron.test-run` (LLM host tool) both share the same `runTestRun` core; see `packages/gateway/src/scheduler/test-run.ts` and `docs/...` for the scheduler-side contract.
+- `cornfield gateway cron test-run` (CLI) and `cron.test-run` (LLM host tool) both share the same `runTestRun` core; see `packages/gateway/src/scheduler/test-run.ts` and `docs/...` for the scheduler-side contract.
 
 ### Running tests
 
@@ -433,7 +433,7 @@ Single workflow, triggered on push to `main`, `v*` tags, PRs, and manual dispatc
 2. **native** — matrix build of `pi-natives` for 5 OS/arch targets on tags (linux-x64 baseline+modern, linux-arm64, macOS x64/arm64, Windows); just linux-x64 on PRs.
 3. **test** — full `ci:test:full` + `ci:test:smoke`, installs system deps (cairo, pango, libjpeg, libgif, librsvg2, fd, ripgrep, imagemagick).
 4. **install_methods** — binary / source-link / tarball install smoke via `scripts/install-tests/run-ci.sh`.
-5. **release_binary** (tags only) — cross-compile `omp` for 5 targets, smoke-run in isolated HOME.
+5. **release_binary** (tags only) — cross-compile `cornfield` for 5 targets, smoke-run in isolated HOME.
 6. **release** (tags only) — verify natives, build archives, GitHub Release, npm publish (7 packages in dep order).
 
 ## Documentation
@@ -467,7 +467,7 @@ Each package has its own `packages/*/CHANGELOG.md`. Format under `## [Unreleased
 
 ## User Data Directory
 
-Default: `~/.cornfield/` (override with `PI_CODING_AGENT_DIR`).
+Default: `~/.cornfield/` (override with `CORNFIELD_AGENT_DIR`).
 
 ```
 ~/.cornfield/
