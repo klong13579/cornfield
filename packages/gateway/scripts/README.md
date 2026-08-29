@@ -1,4 +1,4 @@
-# omp-gateway/scripts/
+# cornfield-gateway/scripts/
 
 Manual tools for inspecting DingTalk wire format and exercising the channel
 parser / bridge pipeline against real or synthetic data.
@@ -12,7 +12,7 @@ a fake `omp --mode rpc` echo script. Prints the raw JSON, the parsed
 content, the prompt the agent sees, and the response.
 
 ```bash
-cd packages/omp-gateway
+cd packages/gateway
 bun run scripts/dump-dingtalk-msgtype.ts                 # all 7 types
 bun run scripts/dump-dingtalk-msgtype.ts video          # one type
 bun run scripts/dump-dingtalk-msgtype.ts --json '{...}' # raw override
@@ -30,7 +30,7 @@ a JSONL file. Used to:
    richText messages from a live source.
 
 ```bash
-cd packages/omp-gateway
+cd packages/gateway
 bun run scripts/capture-dingtalk.ts --account hr
 bun run scripts/capture-dingtalk.ts --account hr --out /tmp/cap.jsonl
 bun run scripts/capture-dingtalk.ts --account hr --msgtypes picture,video,file
@@ -54,7 +54,7 @@ hit the real DingTalk servers with your real credentials. If you do not
 want that, use `--fake-download` to substitute a placeholder instead.
 
 ```bash
-cd packages/omp-gateway
+cd packages/gateway
 bun run scripts/replay-dingtalk.ts /tmp/dingtalk-capture.jsonl
 bun run scripts/replay-dingtalk.ts /tmp/cap.jsonl --only picture,video
 bun run scripts/replay-dingtalk.ts /tmp/cap.jsonl --fake-download

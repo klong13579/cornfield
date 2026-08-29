@@ -432,7 +432,7 @@ describe("appendDeliveryFailureLog", () => {
 	let tmpDir: string;
 
 	beforeEach(async () => {
-		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-gateway-delivery-log-"));
+		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "cornfield-gateway-delivery-log-"));
 		setLogRoot(tmpDir);
 	});
 

@@ -1,17 +1,17 @@
 #!/usr/bin/env bun
 import { APP_NAME, MIN_BUN_VERSION, VERSION } from "@cornfield/utils";
 /**
- * omp-gateway CLI entry point — the standalone gateway daemon binary.
+ * cornfield-gateway CLI entry point — the standalone gateway daemon binary.
  *
  * Split from the single `omp` binary (see docs/gateway-binary-split-plan.md):
- * omp-gateway hosts IM channels (DingTalk), the cron scheduler, the agent
+ * cornfield-gateway hosts IM channels (DingTalk), the cron scheduler, the agent
  * bridge, and the launchd/systemd service installer. Agent execution stays in
  * `omp` (the coding-agent binary), spawned on demand via `omp --mode rpc`.
  *
  * Command model: every gateway action is a root subcommand
  * (`cornfield-gateway start`, `cornfield-gateway cron list`, ...) implemented by the
  * single Gateway command class with an `action` argument. The argv rewrite
- * below maps `omp-gateway <action> ...` to the command class so the action
+ * below maps `cornfield-gateway <action> ...` to the command class so the action
  * name is parsed as its first positional arg.
  */
 import { type CommandEntry, run } from "@cornfield/utils/cli";
@@ -68,7 +68,7 @@ async function showHelp(): Promise<void> {
 	const lines: string[] = [];
 	lines.push(`${APP_NAME} gateway v${VERSION}\n`);
 	lines.push("USAGE");
-	lines.push("  $ omp-gateway <action> [FLAGS]\n");
+	lines.push("  $ cornfield-gateway <action> [FLAGS]\n");
 	if (GatewayCommand.examples && GatewayCommand.examples.length > 0) {
 		lines.push("ACTIONS");
 		lines.push(GatewayCommand.examples.join("\n"));
@@ -78,9 +78,9 @@ async function showHelp(): Promise<void> {
 }
 
 /**
- * Route `omp-gateway <action> ...` to the Gateway command class. The action
+ * Route `cornfield-gateway <action> ...` to the Gateway command class. The action
  * name becomes the command's first positional arg (`args.action`); a bare
- * `omp-gateway` or `omp-gateway --help` falls through to `run()`'s own help
+ * `cornfield-gateway` or `cornfield-gateway --help` falls through to `run()`'s own help
  * handling by skipping the rewrite.
  */
 function runCli(argv: string[]): Promise<void> {

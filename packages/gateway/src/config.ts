@@ -184,7 +184,7 @@ export async function loadConfig(configPath?: string): Promise<GatewayConfig> {
  * reasoning.
  *
  * Exists so callers that build a config programmatically (e.g. the
- * `omp-gateway setup` wizard) can validate before writing to disk.
+ * `cornfield-gateway setup` wizard) can validate before writing to disk.
  */
 export function validateAndNormalizeConfig(raw: unknown): GatewayConfig {
 	const validated = gatewayConfigSchema.parse(raw);

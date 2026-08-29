@@ -183,7 +183,7 @@ let store: SQLiteSessionStore;
 
 describe("session rotation algorithm", () => {
 	beforeEach(async () => {
-		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-gateway-rot-alg-"));
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "cornfield-gateway-rot-alg-"));
 		store = new SQLiteSessionStore(path.join(dir, "sessions.db"));
 	});
 
@@ -199,7 +199,7 @@ describe("session rotation algorithm", () => {
 
 		// Create a session with updatedAt 5 hours ago
 		const fiveHoursAgo = Date.now() - 5 * 60 * 60_000;
-		const agentDir = path.join(os.tmpdir(), `omp-gateway-rot-alg-${Date.now()}`);
+		const agentDir = path.join(os.tmpdir(), `cornfield-gateway-rot-alg-${Date.now()}`);
 		await fs.mkdir(agentDir, { recursive: true });
 		const sessionPath = buildAgentSessionPath(agentDir, "test-conv");
 		await fs.mkdir(path.dirname(sessionPath), { recursive: true });
@@ -318,7 +318,7 @@ describe("session rotation algorithm", () => {
 	});
 
 	test("reset deletes jsonl file and creates new session with same path", async () => {
-		const agentDir = path.join(os.tmpdir(), `omp-gateway-rot-file-${Date.now()}`);
+		const agentDir = path.join(os.tmpdir(), `cornfield-gateway-rot-file-${Date.now()}`);
 		await fs.mkdir(agentDir, { recursive: true });
 		const sessionPath = buildAgentSessionPath(agentDir, "test-conv5");
 		await fs.mkdir(path.dirname(sessionPath), { recursive: true });
@@ -394,7 +394,7 @@ describe("session rotation e2e", () => {
 	let agentDir: string;
 
 	beforeEach(async () => {
-		rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-gateway-rotation-e2e-"));
+		rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "cornfield-gateway-rotation-e2e-"));
 		rpcPath = path.join(rootDir, "fake-rpc");
 		await Bun.write(rpcPath, FAKE_RPC_SCRIPT);
 		await fs.chmod(rpcPath, 0o755);

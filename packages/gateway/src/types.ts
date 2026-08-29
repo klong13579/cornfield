@@ -278,7 +278,7 @@ export interface AgentResponseToolResult {
  * (and any platform channel implementation) can type its `streamCard`
  * parameter without importing from `@oh-my-pi/pi-agent-bridge` directly.
  *
- * See `packages/omp-gateway/src/agent-bridge.ts` for the authoritative
+ * See `packages/gateway/src/agent-bridge.ts` for the authoritative
  * definition.
  */
 export type ForwardStreamHandlers = import("./agent-bridge").ForwardStreamHandlers;

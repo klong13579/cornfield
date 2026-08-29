@@ -2,10 +2,10 @@
  * Shared cron CLI command implementations.
  *
  * These functions provide the canonical implementation of cron subcommands
- * used by `omp-gateway cron`. They live in the scheduler package so the
+ * used by `cornfield-gateway cron`. They live in the scheduler package so the
  * CLI can call them without duplicating logic.
  *
- * Feature set (richer than the old omp-gateway CLI):
+ * Feature set (richer than the old cornfield-gateway CLI):
  * - create: --name, --type, --deliver, --timeout-ms, --skills, --retry, --pre-script
  * - run: writes JSONL execution log + links agent session traces
  */
@@ -606,7 +606,7 @@ export interface CronTestRunOptions {
 }
 
 /**
- * CLI front-end for `omp-gateway cron test-run <name>`.
+ * CLI front-end for `cornfield-gateway cron test-run <name>`.
  *
  * Fire-and-forget — same contract as the LLM host-tool `cron.test-run`
  * action; both call the shared `runTestRun` with `awaitResult=false`.
@@ -685,7 +685,7 @@ export async function cronTestRun(args: string[], storage: SchedulerStorage): Pr
 	const pidPath = getGatewayPidPath();
 	if (!isDaemonRunning(pidPath)) {
 		console.error(
-			`Gateway is not running. Start it with "omp-gateway start" first — the one-shot needs the in-process scheduler to fire it.`,
+			`Gateway is not running. Start it with "cornfield-gateway start" first — the one-shot needs the in-process scheduler to fire it.`,
 		);
 		process.exitCode = 1;
 		return;
@@ -729,7 +729,7 @@ export async function cronTestRun(args: string[], storage: SchedulerStorage): Pr
 		console.log(
 			`[test-run] One-shot armed: "${name}" fires at ~${fireAt} (+${Math.round(result.inMs / 1000)}s). CLI exits now.`,
 		);
-		console.log(`[test-run] Result:   omp-gateway cron logs ${name}  (exec JSONL written at completion)`);
+		console.log(`[test-run] Result:   cornfield-gateway cron logs ${name}  (exec JSONL written at completion)`);
 		console.log(
 			`[test-run] Delivery: DingTalk summary card if the task has announce delivery (✅ / ⏰ / ❌ + failure card).`,
 		);

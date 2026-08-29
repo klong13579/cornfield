@@ -203,7 +203,7 @@ async function writeTriggerScript(marker: "uncaught" | "rejection"): Promise<str
 }
 
 beforeEach(async () => {
-	tmpDirRpc = await fs.mkdtemp(path.join(os.tmpdir(), "omp-gateway-rpc-safety-"));
+	tmpDirRpc = await fs.mkdtemp(path.join(os.tmpdir(), "cornfield-gateway-rpc-safety-"));
 });
 
 afterEach(async () => {
@@ -272,7 +272,7 @@ describe("Gateway status", () => {
 	let tmpDir: string;
 
 	beforeEach(async () => {
-		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-gateway-status-"));
+		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "cornfield-gateway-status-"));
 	});
 
 	afterEach(async () => {
@@ -302,7 +302,7 @@ describe("Gateway status", () => {
 	});
 
 	test("reload swaps the gateway config while stopped", async () => {
-		const nextDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-gateway-status-next-"));
+		const nextDir = await fs.mkdtemp(path.join(os.tmpdir(), "cornfield-gateway-status-next-"));
 		try {
 			await Bun.write(path.join(nextDir, "gateway.pid"), String(process.pid));
 			const gateway = new Gateway({ channels: {}, dataDir: tmpDir, intercomDir: path.join(tmpDir, "intercom") });
@@ -367,14 +367,14 @@ describe("isGatewayProcess", () => {
 	});
 
 	// Post-split argv shapes (docs/gateway-binary-split-plan.md §5.5): the
-	// daemon is now `omp-gateway start --foreground` (binary) or
-	// `bun .../packages/omp-gateway/src/cli.ts start --foreground` (dev). The
-	// `gateway` substring matcher must stay true for both — "omp-gateway" and
-	// the "omp-gateway" path segment both contain it, so the unchanged
+	// daemon is now `cornfield-gateway start --foreground` (binary) or
+	// `bun .../packages/gateway/src/cli.ts start --foreground` (dev). The
+	// `gateway` substring matcher must stay true for both — "cornfield-gateway" and
+	// the "cornfield-gateway" path segment both contain it, so the unchanged
 	// detection keeps working without an explicit argv rewrite.
-	test("returns true for the new binary shape `omp-gateway start --foreground`", async () => {
+	test("returns true for the new binary shape `cornfield-gateway start --foreground`", async () => {
 		const child = Bun.spawn({
-			cmd: ["/usr/bin/yes", "omp-gateway", "start", "--foreground"],
+			cmd: ["/usr/bin/yes", "cornfield-gateway", "start", "--foreground"],
 			stdin: "ignore",
 			stdout: "ignore",
 			stderr: "ignore",
@@ -388,9 +388,9 @@ describe("isGatewayProcess", () => {
 		}
 	});
 
-	test("returns true for the new dev shape `bun .../omp-gateway/src/cli.ts start --foreground`", async () => {
+	test("returns true for the new dev shape `bun .../cornfield-gateway/src/cli.ts start --foreground`", async () => {
 		const child = Bun.spawn({
-			cmd: ["/usr/bin/yes", "bun", "packages/omp-gateway/src/cli.ts", "start", "--foreground"],
+			cmd: ["/usr/bin/yes", "bun", "packages/gateway/src/cli.ts", "start", "--foreground"],
 			stdin: "ignore",
 			stdout: "ignore",
 			stderr: "ignore",
@@ -455,7 +455,7 @@ for await (const chunk of Bun.stdin.stream()) {
 `;
 
 async function createFakeRpcBinaryReload(): Promise<{ path: string; cleanup: () => Promise<void> }> {
-	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-gateway-reload-rpc-"));
+	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "cornfield-gateway-reload-rpc-"));
 	const scriptPath = path.join(dir, "fake-rpc");
 	await Bun.write(scriptPath, FAKE_RPC_SCRIPT_RELOAD);
 	await fs.chmod(scriptPath, 0o755);
@@ -472,7 +472,7 @@ describe("Gateway reload plan", () => {
 	let fake: { path: string; cleanup: () => Promise<void> };
 
 	beforeEach(async () => {
-		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-gateway-reload-"));
+		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "cornfield-gateway-reload-"));
 		fake = await createFakeRpcBinaryReload();
 	});
 
@@ -519,7 +519,7 @@ describe("Gateway reload plan", () => {
 			const bridge = gateway.getDefaultBridge();
 			const pidBefore = bridge.getSnapshot().pid;
 
-			const nextDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-gateway-reload-next-"));
+			const nextDir = await fs.mkdtemp(path.join(os.tmpdir(), "cornfield-gateway-reload-next-"));
 			try {
 				await fs.writeFile(path.join(nextDir, "gateway.pid"), String(process.pid));
 
@@ -648,7 +648,7 @@ for await (const chunk of Bun.stdin.stream()) {
 `;
 
 async function createFakeRpcBinaryHealth(): Promise<{ path: string; cleanup: () => Promise<void> }> {
-	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-gateway-health-rpc-"));
+	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "cornfield-gateway-health-rpc-"));
 	const scriptPath = path.join(dir, "fake-rpc");
 	await Bun.write(scriptPath, FAKE_RPC_SCRIPT_HEALTH);
 	await fs.chmod(scriptPath, 0o755);
@@ -693,7 +693,7 @@ describe("Gateway circuit breaker health check", () => {
 	let originalCooldownMs: string | undefined;
 
 	beforeEach(async () => {
-		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-gateway-health-"));
+		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "cornfield-gateway-health-"));
 		fake = await createFakeRpcBinaryHealth();
 		originalOpenMs = process.env.GATEWAY_CIRCUIT_OPEN_MS;
 		originalCooldownMs = process.env.GATEWAY_CIRCUIT_COOLDOWN_MS;

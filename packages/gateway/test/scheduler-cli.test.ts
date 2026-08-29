@@ -180,7 +180,7 @@ describe("cronReconcile", () => {
 	let storageReconcile: JsonFileStorage;
 
 	beforeEach(() => {
-		testDirReconcile = fs.mkdtempSync(path.join(os.tmpdir(), "omp-gateway-reconcile-"));
+		testDirReconcile = fs.mkdtempSync(path.join(os.tmpdir(), "cornfield-gateway-reconcile-"));
 		dbPathReconcile = path.join(testDirReconcile, "jobs.json");
 		storageReconcile = new JsonFileStorage(dbPathReconcile);
 	});
@@ -277,7 +277,7 @@ describe("cronUpdate", () => {
 	let homedirSpyUpdate: ReturnType<typeof vi.spyOn>;
 
 	beforeEach(() => {
-		testDirUpdate = fs.mkdtempSync(path.join(os.tmpdir(), "omp-gateway-cron-update-"));
+		testDirUpdate = fs.mkdtempSync(path.join(os.tmpdir(), "cornfield-gateway-cron-update-"));
 		dbPathUpdate = path.join(testDirUpdate, "jobs.json");
 		storageUpdate = new JsonFileStorage(dbPathUpdate);
 
@@ -468,7 +468,7 @@ describe("cronTestRun", () => {
 	}
 
 	beforeEach(() => {
-		testDirTr = fs.mkdtempSync(path.join(os.tmpdir(), "omp-gateway-test-run-"));
+		testDirTr = fs.mkdtempSync(path.join(os.tmpdir(), "cornfield-gateway-test-run-"));
 		dbPathTr = path.join(testDirTr, "jobs.json");
 		storageTr = new JsonFileStorage(dbPathTr);
 
@@ -621,7 +621,7 @@ describe("createCronTaskFromMessage (smoke test)", () => {
 	let storageMsg: JsonFileStorage;
 
 	beforeEach(() => {
-		testDirMsg = fs.mkdtempSync(path.join(os.tmpdir(), "omp-gateway-msg-"));
+		testDirMsg = fs.mkdtempSync(path.join(os.tmpdir(), "cornfield-gateway-msg-"));
 		agentDirMsg = path.join(testDirMsg, "agent");
 		fs.mkdirSync(agentDirMsg, { recursive: true });
 		dbPathMsg = path.join(testDirMsg, "jobs.json");

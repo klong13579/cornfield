@@ -44,7 +44,7 @@ async function writeScript(content: string): Promise<string> {
 }
 
 beforeEach(async () => {
-	tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-gateway-disconnect-"));
+	tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "cornfield-gateway-disconnect-"));
 });
 
 afterEach(async () => {

@@ -520,7 +520,7 @@ export class IntercomBroker {
 
 		this.shutdownTimer = setTimeout(() => {
 			this.shutdownTimer = null;
-			// Intentionally no self-shutdown: omp-gateway owns the broker lifecycle.
+			// Intentionally no self-shutdown: cornfield-gateway owns the broker lifecycle.
 		}, 5000);
 	}
 
@@ -1764,7 +1764,7 @@ export class IntercomBroker {
 		// Only the instance that actually bound the path may unlink it. A broker
 		// whose start() was refused by a live owner (probe said "already
 		// running") must NOT delete the owner's socket FILE — that was the
-		// 2026-08-18 production incident, where a omp-gateway test instance's
+		// 2026-08-18 production incident, where a cornfield-gateway test instance's
 		// stop() wiped the production broker.sock and the production watchdog's
 		// rebind then wedged (see #checkSocketHealth).
 		if (

@@ -663,7 +663,7 @@ export class PiClientAdapter implements PiClient {
 	 * P2-4：cron/gateway 命令直连 gateway 生产端点（POST /wire，127.0.0.1:7892）。
 	 * 不再经 serve 中转。gateway 未运行（端点不可达）→ fetch 抛错（调用方错误态）。
 	 * 端口写死 7892：浏览器无 process.env；与 gateway #startWireEndpoint 默认一致，
-	 * 当地址调整时随 gateway 侧改动同步（serve 转发侧用 OMP_GATEWAY_WIRE_PORT 覆盖）。
+	 * 当地址调整时随 gateway 侧改动同步（serve 转发侧用 CORNFIELD_GATEWAY_WIRE_PORT 覆盖）。
 	 */
 	async #gatewayWire<T>(command: Record<string, unknown>): Promise<T> {
 		const res = await fetch(`http://127.0.0.1:7892/wire`, {

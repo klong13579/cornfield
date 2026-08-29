@@ -59,7 +59,7 @@ export async function checkPidFile(dataDir: string, pidFile: string): Promise<bo
  *
  * Identity is checked via `ps -p <pid> -o args=` and looking for the same
  * "gateway" + "--foreground" tokens the gateway is started with
- * (`omp-gateway start --foreground` and the dev-mode `bun run cli.ts
+ * (`cornfield-gateway start --foreground` and the dev-mode `bun run cli.ts
  * start --foreground` both produce these). Best-effort: on a `ps` failure
  * (e.g. non-POSIX platforms in the future) we return false — that means
  * "not confirmed our process", which the caller treats as "stale, overwrite".
@@ -125,12 +125,12 @@ export async function killOrphanRpcProcesses(): Promise<void> {
 
 /**
  * Scan for any remaining gateway processes (those started outside the
- * PID-file or launchd mechanisms, e.g. the legacy omp-gateway CLI).
+ * PID-file or launchd mechanisms, e.g. the legacy cornfield-gateway CLI).
  * Sends SIGTERM, waits 3s, then SIGKILL. Best-effort.
  *
  * Matching: process args contain "gateway" AND "start" AND "--foreground".
- * This covers both `omp-gateway start --foreground` and the legacy
- * `omp-gateway gateway start --foreground` (process.title = "omp-gateway").
+ * This covers both `cornfield-gateway start --foreground` and the legacy
+ * `cornfield-gateway gateway start --foreground` (process.title = "cornfield-gateway").
  */
 export async function scanAndKillRemainingGatewayProcesses(): Promise<void> {
 	try {

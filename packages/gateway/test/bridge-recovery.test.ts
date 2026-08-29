@@ -156,10 +156,10 @@ process.exit(1);
 
 describe("AgentBridge crash recovery via SessionManager", () => {
 	test("restarts a crashed bridge on the next inbound message", async () => {
-		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-gateway-recover-"));
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "cornfield-gateway-recover-"));
 		const stateFile = path.join(dir, "spawn-count");
 		Bun.env.FAKE_RPC_STATE = stateFile;
-		const fake = await createFakeRpcBinary(CRASH_ONCE_SCRIPT, "omp-gateway-recover-rpc-");
+		const fake = await createFakeRpcBinary(CRASH_ONCE_SCRIPT, "cornfield-gateway-recover-rpc-");
 		const bridge = new AgentBridge({ ompPath: fake.path, crashBackoffMs: 1, maxCrashRetries: 3 });
 		const manager = new SessionManager({ bridges: new Map([["ops", bridge]]) });
 		try {
@@ -190,10 +190,10 @@ describe("AgentBridge crash recovery via SessionManager", () => {
 
 describe("AgentBridge stderr tail diagnostics", () => {
 	test("persists the child stderr tail for an after-ready crash", async () => {
-		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-gateway-stderr-"));
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "cornfield-gateway-stderr-"));
 		const crashLogPath = path.join(dir, "crash_log.jsonl");
 		const crashLog = new CrashLog(crashLogPath);
-		const fake = await createFakeRpcBinary(CRASH_WITH_STDERR_SCRIPT, "omp-gateway-stderr-rpc-");
+		const fake = await createFakeRpcBinary(CRASH_WITH_STDERR_SCRIPT, "cornfield-gateway-stderr-rpc-");
 		const bridge = new AgentBridge({ ompPath: fake.path, accountId: "ops", crashLog, crashBackoffMs: 1 });
 		try {
 			await bridge.start();
@@ -215,10 +215,10 @@ describe("AgentBridge stderr tail diagnostics", () => {
 	});
 
 	test("carries the stderr tail through a before-ready spawn failure", async () => {
-		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-gateway-beforeready-"));
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "cornfield-gateway-beforeready-"));
 		const crashLogPath = path.join(dir, "crash_log.jsonl");
 		const crashLog = new CrashLog(crashLogPath);
-		const fake = await createFakeRpcBinary(FAIL_BEFORE_READY_SCRIPT, "omp-gateway-beforeready-rpc-");
+		const fake = await createFakeRpcBinary(FAIL_BEFORE_READY_SCRIPT, "cornfield-gateway-beforeready-rpc-");
 		const bridge = new AgentBridge({
 			ompPath: fake.path,
 			accountId: "ops",
@@ -296,10 +296,10 @@ for await (const chunk of Bun.stdin.stream()) {
 
 describe("AgentBridge fail-fast on mid-prompt child death", () => {
 	test("rejects the in-flight prompt fast on disconnected, next prompt auto-restarts", async () => {
-		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-gateway-failfast-"));
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "cornfield-gateway-failfast-"));
 		const stateFile = path.join(dir, "spawn-count");
 		Bun.env.FAKE_RPC_STATE = stateFile;
-		const fake = await createFakeRpcBinary(CRASH_ONCE_MID_PROMPT_SCRIPT, "omp-gateway-failfast-rpc-");
+		const fake = await createFakeRpcBinary(CRASH_ONCE_MID_PROMPT_SCRIPT, "cornfield-gateway-failfast-rpc-");
 		const bridge = new AgentBridge({ ompPath: fake.path, crashBackoffMs: 1, maxCrashRetries: 3 });
 		try {
 			await bridge.start();

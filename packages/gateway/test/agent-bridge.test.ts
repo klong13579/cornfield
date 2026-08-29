@@ -25,7 +25,7 @@ interface FakeBinary {
 	cleanup: () => Promise<void>;
 }
 
-async function createFakeRpcBinary(script: string, prefix = "omp-gateway-rpc-"): Promise<FakeBinary> {
+async function createFakeRpcBinary(script: string, prefix = "cornfield-gateway-rpc-"): Promise<FakeBinary> {
 	const dir = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
 	const scriptPath = path.join(dir, "fake-rpc");
 	await Bun.write(scriptPath, script);
@@ -300,7 +300,7 @@ async function createRecordingRpcBinary(): Promise<{
 	readLog: () => Promise<Array<{ ts: number; cmd: string; session?: string; message?: string }>>;
 	cleanup: () => Promise<void>;
 }> {
-	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-gateway-rpc-rec-"));
+	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "cornfield-gateway-rpc-rec-"));
 	const scriptPath = path.join(dir, "fake-rpc");
 	const logPath = path.join(dir, "rpc.log");
 	await Bun.write(scriptPath, RECORDING_FAKE_SCRIPT);
@@ -468,7 +468,7 @@ for await (const chunk of Bun.stdin.stream()) {
 `;
 
 async function createInactiveRpcBinary(): Promise<{ path: string; cleanup: () => Promise<void> }> {
-	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-gateway-rpc-inactive-"));
+	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "cornfield-gateway-rpc-inactive-"));
 	const scriptPath = path.join(dir, "fake-rpc-inactive");
 	await Bun.write(scriptPath, INACTIVE_FAKE_SCRIPT);
 	await fs.chmod(scriptPath, 0o755);
@@ -624,7 +624,7 @@ for await (const chunk of Bun.stdin.stream()) {
 	}
 
 	async function createTrackingRpc(trackerPath: string): Promise<{ path: string; cleanup: () => Promise<void> }> {
-		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-gateway-rpc-track-"));
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "cornfield-gateway-rpc-track-"));
 		const scriptPath = path.join(dir, "fake-rpc");
 		await Bun.write(scriptPath, makeTrackingScript(trackerPath));
 		await fs.chmod(scriptPath, 0o755);
@@ -737,7 +737,7 @@ describe("AgentBridge.forwardWithMeta (streaming)", () => {
 	let bridge: AgentBridge;
 
 	beforeEach(async () => {
-		fake = await createFakeRpcBinary(STREAMING_RPC_SCRIPT, "omp-gateway-stream-");
+		fake = await createFakeRpcBinary(STREAMING_RPC_SCRIPT, "cornfield-gateway-stream-");
 		bridge = new AgentBridge({ ompPath: fake.path });
 		await bridge.start();
 	});
@@ -854,7 +854,7 @@ describe("AgentBridge.forwardWithMeta (tool events)", () => {
 	let bridge: AgentBridge;
 
 	beforeEach(async () => {
-		fake = await createFakeRpcBinary(TOOL_RPC_SCRIPT, "omp-gateway-tool-");
+		fake = await createFakeRpcBinary(TOOL_RPC_SCRIPT, "cornfield-gateway-tool-");
 		bridge = new AgentBridge({ ompPath: fake.path });
 		await bridge.start();
 	});
@@ -1018,7 +1018,7 @@ async function writeWatchdogScript(): Promise<string> {
 }
 
 beforeEach(async () => {
-	watchdogTmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-gateway-bridge-watchdog-"));
+	watchdogTmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "cornfield-gateway-bridge-watchdog-"));
 	watchdogDataDir = path.join(watchdogTmpDir, "gateway-data");
 	watchdogAgentDir = path.join(watchdogTmpDir, "agent");
 	await fs.mkdir(watchdogDataDir, { recursive: true });
@@ -1228,7 +1228,7 @@ describe("AgentBridge long-task watcher", () => {
 	beforeEach(async () => {
 		now = 1_700_000_000_000;
 		Date.now = () => now;
-		fake = await createFakeRpcBinary(SLOW_TOOL_RPC_SCRIPT, "omp-gateway-longtask-");
+		fake = await createFakeRpcBinary(SLOW_TOOL_RPC_SCRIPT, "cornfield-gateway-longtask-");
 	});
 
 	afterEach(async () => {

@@ -1,9 +1,9 @@
 /**
  * cron 结果形状（B6 gateway 代理：get_cron_tasks / get_cron_logs）。
- * 字段对齐 omp-gateway scheduler 的 jobs.json / 执行日志。
+ * 字段对齐 cornfield-gateway scheduler 的 jobs.json / 执行日志。
  */
 
-/** 定时任务行（对齐 omp-gateway ScheduledTask 可见字段）。 */
+/** 定时任务行（对齐 cornfield-gateway ScheduledTask 可见字段）。 */
 export interface TaskRowDto {
 	id: string;
 	name: string;

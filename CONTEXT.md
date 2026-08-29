@@ -24,7 +24,7 @@ _Avoid_: Backend, service, API
 具体 LLM 模型标识（如 `claude-4`、`gpt-4o`）。由 `models.json`（生成产物）注册，提供 context window、thinking/reasoning、定价等元数据。用户可通过 `set_model` RPC 命令在运行时切换。
 
 ### Gateway
-将 Agent 通过 IM 渠道（目前仅 DingTalk）暴露给用户的中介层。启动和管理 AgentBridge RPC 子进程，将 IM 消息转换为 agent prompt，将 agent 输出渲染为 IM 消息/卡片。属于 omp-gateway 包。
+将 Agent 通过 IM 渠道（目前仅 DingTalk）暴露给用户的中介层。启动和管理 AgentBridge RPC 子进程，将 IM 消息转换为 agent prompt，将 agent 输出渲染为 IM 消息/卡片。属于 cornfield-gateway 包。
 _Avoid_: IM server, relay
 
 ### Channel
@@ -79,7 +79,7 @@ CronExecution 的投递结果状态：delivered（成功送达）/ not-delivered
 CronTask 可选的独立失败通知目标。与主 delivery 分离，确保投递链自身出问题时用户仍能收到告警。配置在 cron 任务定义的 failureDelivery 字段。
 
 ### SchedulerEngine
-CronTask 的调度执行引擎。管理 croner 定时器，处理并发限制、grace window 跳过、重试逻辑、执行记录。在 omp-gateway 内部。
+CronTask 的调度执行引擎。管理 croner 定时器，处理并发限制、grace window 跳过、重试逻辑、执行记录。在 cornfield-gateway 内部。
   _Avoid_: cron service, scheduler daemon
 
 ### CronLifecycle

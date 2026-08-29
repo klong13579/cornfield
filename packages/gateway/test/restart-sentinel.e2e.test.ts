@@ -164,7 +164,7 @@ describe("restart sentinel e2e — production simulation", () => {
 	let agentDir: string;
 
 	beforeEach(async () => {
-		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-gateway-restart-e2e-"));
+		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "cornfield-gateway-restart-e2e-"));
 		dataDir = path.join(tmpDir, "gateway-data");
 		agentDir = path.join(tmpDir, "agent");
 		await fs.mkdir(dataDir, { recursive: true });

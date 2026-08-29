@@ -311,7 +311,7 @@ export class JsonFileStorage implements SchedulerStorage {
 		// process is gone. A LIVE writer is an in-flight CLI test-run —
 		// consuming its marker reverts the one-shot schedule before it
 		// can fire and the CLI reports trigger_timeout (observed
-		// 2026-08-20: `omp-gateway cron test-run` never fired against
+		// 2026-08-20: `cornfield-gateway cron test-run` never fired against
 		// the running daemon until this liveness check was added).
 		//
 		// The one-shot itself is the stronger in-flight token: the

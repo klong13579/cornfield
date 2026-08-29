@@ -279,7 +279,7 @@ for await (const chunk of Bun.stdin.stream()) {
 `;
 
 async function createFakeRpcBinary(): Promise<{ path: string; cleanup: () => Promise<void> }> {
-	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-gateway-direct-msg-"));
+	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "cornfield-gateway-direct-msg-"));
 	const scriptPath = path.join(dir, "fake-rpc");
 	await Bun.write(scriptPath, FAKE_RPC_SCRIPT);
 	await fs.chmod(scriptPath, 0o755);
@@ -312,7 +312,7 @@ function resolveDirectBridge(
 describe("sendDirectMessage multi-account routing", () => {
 	test("routes to the specified account bridge when accountId is provided", async () => {
 		const fake = await createFakeRpcBinary();
-		const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-gateway-direct-msg-routing-"));
+		const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "cornfield-gateway-direct-msg-routing-"));
 
 		try {
 			const opsDir = path.join(rootDir, "agents", "ops");
@@ -396,7 +396,7 @@ describe("sendDirectMessage multi-account routing", () => {
 
 	test("returns default bridge when accountId is omitted in single-account mode", async () => {
 		const fake = await createFakeRpcBinary();
-		const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-gateway-direct-msg-single-"));
+		const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "cornfield-gateway-direct-msg-single-"));
 
 		try {
 			const agentDir = path.join(rootDir, "agents", "default");

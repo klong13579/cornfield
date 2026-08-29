@@ -15,7 +15,7 @@
  *   3. Upsert discovered (robot, group) pairs into the sessions table and
  *      refresh each affected account's robot-context.md.
  *
- * Exposed as `omp-gateway robot-context probe [--dry-run]`.
+ * Exposed as `cornfield-gateway robot-context probe [--dry-run]`.
  */
 import { logger } from "@cornfield/utils";
 import type { RobotContextWriter } from "./robot-context";

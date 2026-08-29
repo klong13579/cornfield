@@ -15,7 +15,7 @@
  * to (and >= startedAt - tolerance) within the window.
  */
 /**
- * Unified Gateway command — started via the omp-gateway CLI (root subcommands).
+ * Unified Gateway command — started via the cornfield-gateway CLI (root subcommands).
  *
  * Manages IM channels, cron scheduler, agent bridge, and heartbeat.
  *
@@ -113,7 +113,7 @@ export default class Gateway extends Command {
 
 	async #runGateway(action: string | undefined, flags: Record<string, unknown>): Promise<void> {
 		if (!action) {
-			renderCommandHelp("omp-gateway", "", Gateway);
+			renderCommandHelp("cornfield-gateway", "", Gateway);
 			return;
 		}
 
@@ -124,7 +124,7 @@ export default class Gateway extends Command {
 				// --foreground: run in foreground (blocking). Used by the daemon child
 				// process and service mode (launchd/systemd). Default path daemonizes.
 				if (flags.foreground) {
-					process.title = "omp-gateway";
+					process.title = "cornfield-gateway";
 					const { Gateway: GW } = await import("../gateway");
 					const { loadConfig } = await import("../config");
 					const config = await loadConfig(configPath);
@@ -159,7 +159,7 @@ export default class Gateway extends Command {
 					const UNCAUGHT_WINDOW_MS = 60_000;
 					const UNCAUGHT_THRESHOLD = 10;
 
-					// Same error-boundary as omp-gateway cli.ts — a single async
+					// Same error-boundary as cornfield-gateway cli.ts — a single async
 					// rejection must not crash the daemon.
 					process.on("unhandledRejection", reason => {
 						logger.error("unhandledRejection in gateway process", {
@@ -230,7 +230,7 @@ export default class Gateway extends Command {
 
 				// Spawn detached child with --foreground.
 				// In bun dev mode: process.argv[1] is the .ts entry point.
-				// In compiled omp-gateway binary: process.argv[1] is the subcommand.
+				// In compiled cornfield-gateway binary: process.argv[1] is the subcommand.
 				const entry = process.argv[1];
 				const isDevMode = entry && (entry.endsWith(".ts") || entry.endsWith(".js"));
 				const childCmd = isDevMode
@@ -240,7 +240,7 @@ export default class Gateway extends Command {
 
 				const child = Bun.spawn({
 					cmd: childCmd,
-					argv0: "omp-gateway",
+					argv0: "cornfield-gateway",
 					stdin: "ignore",
 					stdout: "ignore",
 					stderr: "ignore",
@@ -506,8 +506,8 @@ export default class Gateway extends Command {
 			}
 			case "setup": {
 				// Direct in-process call into the setup wizard — no subprocess spawn.
-				// The legacy `omp-gateway install` path used `bun <cliPath> install`;
-				// now the wizard lives at `omp-gateway/src/setup.ts` and is invoked
+				// The legacy `cornfield-gateway install` path used `bun <cliPath> install`;
+				// now the wizard lives at `cornfield-gateway/src/setup.ts` and is invoked
 				// like any other library function.
 				const { runInteractiveSetup } = await import("../setup");
 				const result = await runInteractiveSetup({
@@ -522,7 +522,7 @@ export default class Gateway extends Command {
 				break;
 			}
 			case "help":
-				renderCommandHelp("omp-gateway", "", Gateway);
+				renderCommandHelp("cornfield-gateway", "", Gateway);
 				break;
 			default:
 				console.error(`Unknown action: ${action}`);
@@ -745,7 +745,7 @@ Cron management commands:
 		switch (sub) {
 			case "install": {
 				// No-arg: dev/prod is detected inside installService from process.argv[1].
-				// (Previously this resolved `<omp-gateway>/src/cli.ts` and passed it through,
+				// (Previously this resolved `<cornfield-gateway>/src/cli.ts` and passed it through,
 				// which only worked in dev mode and broke the compiled-binary install path.)
 				await installService();
 				console.log("Service installed. Run 'cornfield-gateway service start' to begin.");

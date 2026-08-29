@@ -187,7 +187,7 @@ for await (const chunk of Bun.stdin.stream()) {
 `;
 
 // ═══════════════════════════════════════════════════════════════════════
-// Helpers (modeled on packages/omp-gateway/test/agent-bridge.test.ts)
+// Helpers (modeled on packages/gateway/test/agent-bridge.test.ts)
 // ═══════════════════════════════════════════════════════════════════════
 
 interface FakeBinary {
@@ -195,7 +195,7 @@ interface FakeBinary {
 	cleanup: () => Promise<void>;
 }
 
-async function createFakeRpcBinary(script: string, prefix = "omp-gateway-crash-"): Promise<FakeBinary> {
+async function createFakeRpcBinary(script: string, prefix = "cornfield-gateway-crash-"): Promise<FakeBinary> {
 	const dir = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
 	const scriptPath = path.join(dir, "fake-rpc");
 	await Bun.write(scriptPath, script);

@@ -60,15 +60,15 @@ describe("gateway wire endpoint CORS", () => {
 		await Bun.write(fakePath, FAKE_WIRE_SCRIPT);
 		await fs.chmod(fakePath, 0o755);
 		port = 49000 + Math.floor(Math.random() * 2000);
-		savedPort = process.env.OMP_GATEWAY_WIRE_PORT;
-		process.env.OMP_GATEWAY_WIRE_PORT = String(port);
+		savedPort = process.env.CORNFIELD_GATEWAY_WIRE_PORT;
+		process.env.CORNFIELD_GATEWAY_WIRE_PORT = String(port);
 	});
 
 	afterEach(async () => {
 		if (gateway) await gateway.stop();
 		gateway = undefined;
-		if (savedPort === undefined) delete process.env.OMP_GATEWAY_WIRE_PORT;
-		else process.env.OMP_GATEWAY_WIRE_PORT = savedPort;
+		if (savedPort === undefined) delete process.env.CORNFIELD_GATEWAY_WIRE_PORT;
+		else process.env.CORNFIELD_GATEWAY_WIRE_PORT = savedPort;
 		await fs.rm(tmpDir, { recursive: true, force: true });
 	});
 

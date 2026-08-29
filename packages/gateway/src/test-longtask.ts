@@ -262,7 +262,7 @@ export async function runLongTaskTest(opts: LongTaskTestOptions): Promise<LongTa
 	const { dtConfig, agentDir } = await loadAccountConfig(opts.accountId, configPath);
 
 	// 1. Write the fake RPC binary
-	const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-gateway-longtask-test-"));
+	const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "cornfield-gateway-longtask-test-"));
 	const rpcPath = path.join(tmpDir, "fake-rpc");
 	await Bun.write(rpcPath, buildFakeRpcScript(opts.holdMs));
 	await fs.chmod(rpcPath, 0o755);

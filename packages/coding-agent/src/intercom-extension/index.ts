@@ -1413,14 +1413,14 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
 			client = nextClient;
 			attachClientHandlers(nextClient);
 			try {
-				// omp port: the intercom broker is hosted inside omp-gateway. There is
+				// omp port: the intercom broker is hosted inside cornfield-gateway. There is
 				// no autonomous broker spawn — a refused connection means the gateway is
 				// not running, and the extension surfaces that clearly below.
 				try {
 					await nextClient.connect(buildRegistration(), currentIntercomSessionId ?? currentSessionId);
 				} catch (connectError) {
 					throw new Error(
-						`Intercom broker unreachable: ${getErrorMessage(connectError)}. Start omp-gateway first — the broker is hosted inside the gateway.`,
+						`Intercom broker unreachable: ${getErrorMessage(connectError)}. Start cornfield-gateway first — the broker is hosted inside the gateway.`,
 					);
 				}
 				if (!getLiveContext(contextAtStart, generationAtStart)) {

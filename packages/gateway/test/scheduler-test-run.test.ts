@@ -77,7 +77,7 @@ function seedCorruptedTask(name: string): ScheduledTask {
 }
 
 beforeEach(() => {
-	corruptTestDir = fs.mkdtempSync(path.join(os.tmpdir(), "omp-gateway-corrupt-"));
+	corruptTestDir = fs.mkdtempSync(path.join(os.tmpdir(), "cornfield-gateway-corrupt-"));
 	corruptMarkerBaseDir = path.join(corruptTestDir, "scheduler");
 	fs.mkdirSync(corruptMarkerBaseDir, { recursive: true });
 	corruptStorage = new JsonFileStorage(path.join(corruptTestDir, "jobs.json"));

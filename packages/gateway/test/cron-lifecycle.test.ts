@@ -431,7 +431,7 @@ describe("cron timeout diagnostics bugfix", () => {
 	let gateway: Gateway;
 
 	beforeEach(async () => {
-		tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), "omp-gateway-diag-"));
+		tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), "cornfield-gateway-diag-"));
 		vi.spyOn(os, "homedir").mockReturnValue(tmpHome);
 
 		const fakeOmpPath = await makeFakeOmpScript(tmpHome, FAKE_OMP_HANG_SCRIPT);
@@ -503,7 +503,7 @@ describe("cron model restore failure logging", () => {
 	let errorSpy: ReturnType<typeof vi.spyOn>;
 
 	beforeEach(async () => {
-		tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), "omp-gateway-restore-"));
+		tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), "cornfield-gateway-restore-"));
 		vi.spyOn(os, "homedir").mockReturnValue(tmpHome);
 		setLogRoot(path.join(tmpHome, ".cornfield", "gateway-data", "scheduler", "logs"));
 
@@ -569,7 +569,7 @@ describe("cron warm-bridge fallback contract", () => {
 	let gateway: Gateway;
 
 	beforeEach(async () => {
-		tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), "omp-gateway-cron-fallback-"));
+		tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), "cornfield-gateway-cron-fallback-"));
 		vi.spyOn(os, "homedir").mockReturnValue(tmpHome);
 
 		const fakeOmpPath = await makeFakeOmpScript(tmpHome, FAKE_OMP_FALLBACK_SCRIPT);

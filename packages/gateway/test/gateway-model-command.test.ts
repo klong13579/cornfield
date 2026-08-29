@@ -91,7 +91,7 @@ interface Harness {
 }
 
 async function createHarness(): Promise<Harness> {
-	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-gateway-model-cmd-"));
+	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "cornfield-gateway-model-cmd-"));
 	const rpcPath = path.join(dir, "fake-rpc");
 	await Bun.write(rpcPath, FAKE_RPC_SCRIPT);
 	await fs.chmod(rpcPath, 0o755);

@@ -58,7 +58,7 @@ function makeTask(name: string, overrides: Partial<ScheduledTask> = {}): Omit<Sc
 }
 
 beforeEach(() => {
-	tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "omp-gateway-storage-"));
+	tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "cornfield-gateway-storage-"));
 	jobsPath = path.join(tmpDir, "jobs.json");
 });
 

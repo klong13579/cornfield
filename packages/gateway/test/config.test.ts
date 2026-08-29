@@ -85,7 +85,7 @@ describe("runInteractiveSetup", () => {
 	let savedHome: string | undefined;
 
 	beforeEach(async () => {
-		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-gateway-setup-test-"));
+		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "cornfield-gateway-setup-test-"));
 		configPath = path.join(tmpDir, "gateway.json");
 		// loadConfig does not consult HOME for the path argument, but keep
 		// HOME stable so downstream code that does (e.g. ensureAgentDir)

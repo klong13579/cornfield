@@ -132,7 +132,7 @@ interface Harness {
 }
 
 async function createHarness(): Promise<Harness> {
-	const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-gateway-runtime-"));
+	const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "cornfield-gateway-runtime-"));
 	const rpcPath = path.join(rootDir, "fake-rpc");
 	await Bun.write(rpcPath, FAKE_RPC_SCRIPT);
 	await fs.chmod(rpcPath, 0o755);
@@ -307,7 +307,7 @@ describe("real OMP gateway integration", () => {
 	realTest(
 		"parses a raw DingTalk message, calls real omp rpc, and writes the session log",
 		async () => {
-			const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-gateway-real-omp-"));
+			const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "cornfield-gateway-real-omp-"));
 			const ompPath = process.env.PI_GATEWAY_REAL_OMP_PATH ?? "omp";
 			const model = process.env.PI_GATEWAY_REAL_OMP_MODEL;
 			const prompt = process.env.PI_GATEWAY_REAL_OMP_PROMPT ?? "Reply with exactly: OK";
@@ -340,7 +340,7 @@ describe("real OMP gateway integration", () => {
 	realTest(
 		"accepts abort during a real omp rpc turn and returns to idle",
 		async () => {
-			const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-gateway-real-omp-abort-"));
+			const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "cornfield-gateway-real-omp-abort-"));
 			const ompPath = process.env.PI_GATEWAY_REAL_OMP_PATH ?? "omp";
 			const model = process.env.PI_GATEWAY_REAL_OMP_MODEL;
 			const prompt =

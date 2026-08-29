@@ -9,7 +9,7 @@
  *  4. Window with no match returns undefined
  *  5. Wide window: newest in by-date/ wins over older legacy
  */
-import { findAgentSessionPath } from "../packages/omp-gateway/src/scheduler/cli-commands";
+import { findAgentSessionPath } from "../packages/gateway/src/scheduler/cli-commands";
 import * as path from "node:path";
 import * as os from "node:os";
 import * as fs from "node:fs";

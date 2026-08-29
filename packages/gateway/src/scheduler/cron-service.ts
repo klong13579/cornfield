@@ -191,7 +191,7 @@ export interface PrefixContext {
  * the wording stays byte-equal across calls and tests can match against
  * it. The four rules are the load-bearing soft recursion guard — if you
  * edit them, audit the regression test in
- * `packages/omp-gateway/test/scheduler-cron-context-prefix.test.ts`.
+ * `packages/gateway/test/scheduler-cron-context-prefix.test.ts`.
  */
 const CRON_FOUR_RULES =
 	"Four rules for this run:\n" +

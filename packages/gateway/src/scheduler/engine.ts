@@ -182,7 +182,7 @@ export class SchedulerEngine {
 			// CLI/LLM (`nextRunAt`). parseSchedule re-derives "+<n>s" relative
 			// to THIS reload, so when the daemon tick lands after the writer's
 			// mutation the fire drifts past the writer's deadline and the CLI
-			// reports trigger_timeout (observed 2026-08-20: `omp-gateway cron
+			// reports trigger_timeout (observed 2026-08-20: `cornfield-gateway cron
 			// test-run` scheduled the one-shot 60-90s late twice in a row).
 			// The absolute target wins for test-run shapes.
 			const target =

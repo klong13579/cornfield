@@ -154,14 +154,14 @@ jobs:
         # leftover-HOME/env pollution into flaky failures). Serial is
         # deterministic: a leaked env kills the same file every run, which is
         # fixable. Cost ~1.5x wall time, offset by the 4-way shard below.
-        # omp-gateway runs in its own job (test_gateway) — its tests carry
+        # gateway runs in its own job (test_gateway) — its tests carry
         # process-global state (exitCode, wire port, brokers) and the
         # parallel-package sweep made them flaky (0-fail exit-1 runs).
         run: |
           set -e
           for dir in packages/*/; do
             pkg="${dir%/}"
-            [ "${pkg##*/}" = "omp-gateway" ] && continue
+            [ "${pkg##*/}" = "gateway" ] && continue
             [ -f "$pkg/package.json" ] || continue
             grep -q '"test"' "$pkg/package.json" || continue
             (cd "$pkg" && bun run test -- --shard="${{ matrix.shard }}" --parallel=1) &
@@ -205,7 +205,7 @@ jobs:
           name: cornfield-natives-linux-x64
           path: packages/natives/native
       - name: Test gateway (full suite)
-        run: bun --cwd=packages/omp-gateway run test -- --parallel=1
+        run: bun --cwd=packages/gateway run test -- --parallel=1
 
   install_methods:
     if: github.repository == 'klong13579/cornfield'

@@ -389,7 +389,7 @@ interface MediaRpc {
 }
 
 async function createMediaFakeRpcBinary(): Promise<MediaRpc> {
-	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-gateway-media-routing-rpc-"));
+	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "cornfield-gateway-media-routing-rpc-"));
 	const scriptPath = path.join(dir, "fake-rpc");
 	await Bun.write(scriptPath, FAKE_RPC_SCRIPT);
 	await fs.chmod(scriptPath, 0o755);
@@ -543,7 +543,7 @@ async function installMediaFetchOverride(host: string, port: number): Promise<()
 }
 
 async function precreateLocalMediaFiles(): Promise<{ dir: string; cleanup: () => Promise<void> }> {
-	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-gateway-media-routing-files-"));
+	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "cornfield-gateway-media-routing-files-"));
 	const pngBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 	const pdfBytes = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d]);
 	const mp4Bytes = new Uint8Array([0x00, 0x00, 0x00, 0x20, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d]);
@@ -858,7 +858,7 @@ interface ImageRpcHarness {
 }
 
 async function createImageAwareRpc(): Promise<ImageRpcHarness> {
-	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-gateway-image-rpc-"));
+	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "cornfield-gateway-image-rpc-"));
 	const scriptPath = path.join(dir, "fake-rpc-image");
 	const logPath = path.join(dir, "image-rpc.log");
 	await Bun.write(scriptPath, IMAGE_AWARE_FAKE_SCRIPT);

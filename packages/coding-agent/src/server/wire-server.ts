@@ -1848,7 +1848,7 @@ async function readSkillFrontmatterDescription(
 // 形状与旧直读代理一致（TaskRowDto / CronLogEntryDto / GatewayStatusDto），
 // 因此 web-app 消费方无需改动。
 
-const GATEWAY_WIRE_PORT = Number.parseInt(process.env.OMP_GATEWAY_WIRE_PORT ?? "7892", 10);
+const GATEWAY_WIRE_PORT = Number.parseInt(process.env.CORNFIELD_GATEWAY_WIRE_PORT ?? "7892", 10);
 
 async function callGatewayWire(command: {
 	type: string;

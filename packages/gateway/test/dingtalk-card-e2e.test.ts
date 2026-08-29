@@ -82,7 +82,7 @@ interface FakeRpc {
 }
 
 async function createFakeRpcBinary(): Promise<FakeRpc> {
-	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-gateway-card-rpc-"));
+	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "cornfield-gateway-card-rpc-"));
 	const scriptPath = path.join(dir, "fake-rpc");
 	await Bun.write(scriptPath, FAKE_RPC_SCRIPT);
 	await fs.chmod(scriptPath, 0o755);
@@ -489,7 +489,7 @@ for await (const chunk of Bun.stdin.stream()) {
 `;
 
 	test("streamCard splits into multiple cards on tool boundary", async () => {
-		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-gateway-seg-rpc-"));
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "cornfield-gateway-seg-rpc-"));
 		const scriptPath = path.join(dir, "fake-seg-rpc");
 		await Bun.write(scriptPath, MULTI_SEGMENT_RPC);
 		await fs.chmod(scriptPath, 0o755);

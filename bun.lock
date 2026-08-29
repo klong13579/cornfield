@@ -117,6 +117,25 @@
         "typescript": "catalog:",
       },
     },
+    "packages/gateway": {
+      "name": "@cornfield/gateway",
+      "version": "0.19.2",
+      "dependencies": {
+        "@cornfield/coding-agent": "workspace:*",
+        "@cornfield/utils": "catalog:",
+        "@sinclair/typebox": "catalog:",
+        "croner": "10.0.1",
+        "dingtalk-stream": "2.1.6-beta.1",
+        "zod": "catalog:",
+      },
+      "devDependencies": {
+        "@biomejs/biome": "catalog:",
+        "@dingtalk-real-ai/dingtalk-connector": "0.8.23",
+        "@types/bun": "catalog:",
+        "@typescript/native-preview": "catalog:",
+        "typescript": "catalog:",
+      },
+    },
     "packages/moa-extension": {
       "name": "@cornfield/moa-extension",
       "version": "0.19.2",
@@ -136,25 +155,6 @@
       "devDependencies": {
         "@napi-rs/cli": "catalog:",
         "@types/bun": "catalog:",
-      },
-    },
-    "packages/omp-gateway": {
-      "name": "@cornfield/gateway",
-      "version": "0.19.2",
-      "dependencies": {
-        "@cornfield/coding-agent": "workspace:*",
-        "@cornfield/utils": "catalog:",
-        "@sinclair/typebox": "catalog:",
-        "croner": "10.0.1",
-        "dingtalk-stream": "2.1.6-beta.1",
-        "zod": "catalog:",
-      },
-      "devDependencies": {
-        "@biomejs/biome": "catalog:",
-        "@dingtalk-real-ai/dingtalk-connector": "0.8.23",
-        "@types/bun": "catalog:",
-        "@typescript/native-preview": "catalog:",
-        "typescript": "catalog:",
       },
     },
     "packages/pi-client": {
@@ -511,7 +511,7 @@
 
     "@cornfield/desktop": ["@cornfield/desktop@workspace:packages/desktop"],
 
-    "@cornfield/gateway": ["@cornfield/gateway@workspace:packages/omp-gateway"],
+    "@cornfield/gateway": ["@cornfield/gateway@workspace:packages/gateway"],
 
     "@cornfield/moa-extension": ["@cornfield/moa-extension@workspace:packages/moa-extension"],
 

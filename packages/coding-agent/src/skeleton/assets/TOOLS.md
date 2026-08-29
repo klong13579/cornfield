@@ -116,13 +116,13 @@ Switch the current session model. Takes `query` (5-level fuzzy match) and option
 
 ### `cron` (gateway host tool — NOT a CLI)
 
-`cron` is an OMP **host tool** registered by the gateway on the `set_host_tools` RPC. The agent calls it as a regular LLM tool, NOT by shelling out to `omp-gateway cron ...`.
+`cron` is an OMP **host tool** registered by the gateway on the `set_host_tools` RPC. The agent calls it as a regular LLM tool, NOT by shelling out to `cornfield-gateway cron ...`.
 
-**Scope = agent (this account).** "My" in a cron context refers to the current agent (= this OMP subprocess / this account), not the user asking. All users in the same agent see the same task list; the agent owns its tasks. There is no per-user or per-conversation scope — `cron.list` returns ALL tasks in this agent, regardless of who created them or which chat is active. Each task records its creator in `createdByUserId` (audit field); if the user asks "which tasks did I create", call `cron.list` then filter the result client-side by `createdByUserId === <current sender staffId>`. See `docs/omp-gateway-cron-host-tool.md` §6.5 for the design rationale.
+**Scope = agent (this account).** "My" in a cron context refers to the current agent (= this OMP subprocess / this account), not the user asking. All users in the same agent see the same task list; the agent owns its tasks. There is no per-user or per-conversation scope — `cron.list` returns ALL tasks in this agent, regardless of who created them or which chat is active. Each task records its creator in `createdByUserId` (audit field); if the user asks "which tasks did I create", call `cron.list` then filter the result client-side by `createdByUserId === <current sender staffId>`. See `docs/cornfield-gateway-cron-host-tool.md` §6.5 for the design rationale.
 
 Actions: `add` / `list` / `show` / `update` / `remove` / `enable` / `disable` / `runs` / `test-run`.
 
-- MUST use the `cron` host tool for any scheduled-task operation. Do NOT run `omp-gateway cron create` / `update` / `list` / etc. from `bash` — that's the operator CLI path.
+- MUST use the `cron` host tool for any scheduled-task operation. Do NOT run `cornfield-gateway cron create` / `update` / `list` / etc. from `bash` — that's the operator CLI path.
 - MUST omit the `delivery` field on `cron.add` when the user is in a chat. The gateway auto-infers `{channel, accountId, toUserId}` for DM and `{channel, accountId, toConversationId}` for group from the active conversation. Do NOT read `gateway.json` / `BOOT.md` / call `dws` to look up the sender.
 - MUST set `agentDir` and `prompt` (not `command`) when `taskType: "agent"`. `agentDir` is the project root the agent should run in (the current agentDir — implicit from where the agent is running).
 - MUST set `command` (not `prompt`) when `taskType: "shell"`.

@@ -603,7 +603,7 @@ describe("enumerateAgentSessions", () => {
 
 describe("SQLiteSessionStore", () => {
 	let store: SQLiteSessionStore;
-	const dbPath = path.join(os.tmpdir(), `omp-gateway-test-${Date.now()}.db`);
+	const dbPath = path.join(os.tmpdir(), `cornfield-gateway-test-${Date.now()}.db`);
 
 	beforeAll(() => {
 		store = new SQLiteSessionStore(dbPath);

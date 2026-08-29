@@ -59,7 +59,7 @@ function cleanupExecutionLog(slug: string) {
 }
 
 beforeEach(() => {
-	testDir = fs.mkdtempSync(path.join(os.tmpdir(), "omp-gateway-cron-svc-"));
+	testDir = fs.mkdtempSync(path.join(os.tmpdir(), "cornfield-gateway-cron-svc-"));
 	dbPath = path.join(testDir, "jobs.json");
 	storage = new JsonFileStorage(dbPath);
 });

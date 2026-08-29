@@ -98,7 +98,7 @@ export function renderRobotContext(accountId: string, meta: RobotMeta, sessions:
 	const lines: string[] = [
 		"# Robot Context（机器人上下文，自动生成）",
 		"",
-		"> 本文件由 omp-gateway 自动维护（机器人身份 + 可触达的会话）。手动编辑会被覆盖。",
+		"> 本文件由 cornfield-gateway 自动维护（机器人身份 + 可触达的会话）。手动编辑会被覆盖。",
 		"",
 		"## 我的身份",
 		"",

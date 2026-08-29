@@ -23,7 +23,7 @@ let logPath: string;
 let log: CrashLog;
 
 beforeEach(async () => {
-	tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-gateway-crash-log-"));
+	tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "cornfield-gateway-crash-log-"));
 	logPath = path.join(tmpDir, "crash_log.jsonl");
 	log = new CrashLog(logPath);
 });

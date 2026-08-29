@@ -40,7 +40,7 @@ export function getAgentDirPath(
 }
 
 /**
- * omp port: the intercom runtime is a GLOBAL broker hosted inside omp-gateway
+ * omp port: the intercom runtime is a GLOBAL broker hosted inside cornfield-gateway
  * (not per-agentDir). The socket lives at `<agent-root>/intercom`, where
  * agent-root is the parent of the agent dir (default `~/.cornfield`). All processes
  * (TUI, gateway account agents) connect to the SAME socket, so they share one

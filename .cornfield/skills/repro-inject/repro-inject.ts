@@ -42,7 +42,7 @@
  *
  * 前置条件
  * ────────
- * - 网关跑着且 OMP_GATEWAY_TEST_MODE=1 (看 `lsof -iTCP:7890 -sTCP:LISTEN` 或
+ * - 网关跑着且 CORNFIELD_GATEWAY_TEST_MODE=1 (看 `lsof -iTCP:7890 -sTCP:LISTEN` 或
  *   `curl http://127.0.0.1:7890/test/health` 应该回 {"ok":true,"mode":"test-injection"})
  * - 目标账号在 gateway.json 里 enabled
  * - 走 db 路径: 该账号之前在钉钉跟 bot 聊过, gateway 写入了 session_webhook
@@ -54,10 +54,10 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { DWClient, type DWClientDownStream, TOPIC_ROBOT } from "dingtalk-stream";
-// Relative path goes 3 levels up (.cornfield/skills/repro-inject -> oh-my-pi) to reach the omp-gateway package.
+// Relative path goes 3 levels up (.cornfield/skills/repro-inject -> oh-my-pi) to reach the cornfield-gateway package.
 // 脚本与 skill 同住 于 .cornfield/skills/repro-inject/,保留原始 package 依赖而非复制。
-import { getDingTalkConfig, loadConfig } from "../../../packages/omp-gateway/src/config";
-import type { DingTalkRawMessage } from "../../../packages/omp-gateway/src/types";
+import { getDingTalkConfig, loadConfig } from "../../../packages/gateway/src/config";
+import type { DingTalkRawMessage } from "../../../packages/gateway/src/types";
 
 const STATE_PATH = path.join(os.homedir(), ".cornfield", "repro-state.json");
 const DEFAULT_GATEWAY = "http://127.0.0.1:7890";
@@ -441,7 +441,7 @@ async function grabWebhook(args: CliArgs): Promise<WebhookEntry> {
 	const client = new DWClient({
 		clientId: acct.appKey!,
 		clientSecret: acct.appSecret!,
-		ua: "omp-gateway-repro-inject/0.1",
+		ua: "cornfield-gateway-repro-inject/0.1",
 		debug: false,
 		autoReconnect: false,
 	});
@@ -753,7 +753,7 @@ async function main(): Promise<void> {
 	if (!(await pingGateway(args))) {
 		console.error(
 			`[repro] gateway test endpoint not reachable at ${args.gateway}. ` +
-				`Is OMP_GATEWAY_TEST_MODE=1 set on the running gateway? ` +
+				`Is CORNFIELD_GATEWAY_TEST_MODE=1 set on the running gateway? ` +
 				`Try: curl ${args.gateway}/test/health`,
 		);
 		process.exit(3);

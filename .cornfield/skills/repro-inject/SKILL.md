@@ -69,7 +69,7 @@ Without `--verify`, the script returns immediately after HTTP 200; the reply is 
 
 `--agent-dir` auto-fills from `gateway.json`'s `accounts.<id>.agentDir` when present. CI runners that bypass gateway.json must pass `--agent-dir` explicitly.
 
-**Cron task sub-flow.** Use the `cron` host tool with `action: "test-run"`, then capture with `--verify`. Use `--verify-timeout` ≥ 90000 (1.5x the default 60s gateway tick) so a slow tick + agent turn fits inside the wait; smaller values race the scheduler reload and give a false timeout. See `packages/omp-gateway/src/scheduler/test-run.ts` for the cron-tool contract.
+**Cron task sub-flow.** Use the `cron` host tool with `action: "test-run"`, then capture with `--verify`. Use `--verify-timeout` ≥ 90000 (1.5x the default 60s gateway tick) so a slow tick + agent turn fits inside the wait; smaller values race the scheduler reload and give a false timeout. See `packages/gateway/src/scheduler/test-run.ts` for the cron-tool contract.
 
 Completion criterion: HTTP 200 from `/test/inject`; if `--verify`, an assistant text block is printed within `--verify-timeout` (default 90s).
 

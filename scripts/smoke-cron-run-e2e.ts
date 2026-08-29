@@ -18,7 +18,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
-import { findAgentSessionPath } from "../packages/omp-gateway/src/scheduler/cli-commands";
+import { findAgentSessionPath } from "../packages/gateway/src/scheduler/cli-commands";
 import { sessionFilePath } from "../packages/coding-agent/src/session/session-paths";
 
 const sessionDir = path.join(os.homedir(), ".cornfield", "agent", "sessions", "-Desktop-Narwal-oh-my-pi");

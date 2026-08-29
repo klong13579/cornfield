@@ -180,7 +180,7 @@ const CRON_TOOL_DEFINITION: RpcHostToolDefinition = {
 		"`createdByUserId` and `createdByAccountId` on each task are audit fields; do not use them to filter by creator. " +
 		'Use `cron.list` to enumerate, then client-side filter by `createdByUserId` only if the user explicitly asks "which tasks did I create".\n\n' +
 		"Actions: `add` / `list` / `show` / `update` / `remove` / `enable` / `disable` / `runs` / `recent` / `test-run`.\n\n" +
-		"**MANDATORY: use this host tool, NOT `bash` + `omp-gateway cron ...` CLI.** Calling the CLI from bash bypasses delivery auto-inference and you will fail to set the sender's userId / conversationId correctly. The host tool reads the active chat context and fills delivery in for you. If you find yourself typing `omp-gateway cron` in a `bash` call, STOP and use this tool instead.\n\n" +
+		"**MANDATORY: use this host tool, NOT `bash` + `cornfield-gateway cron ...` CLI.** Calling the CLI from bash bypasses delivery auto-inference and you will fail to set the sender's userId / conversationId correctly. The host tool reads the active chat context and fills delivery in for you. If you find yourself typing `cornfield-gateway cron` in a `bash` call, STOP and use this tool instead.\n\n" +
 		"**`add` example (DM, agent task, 18:00 daily report):**\n" +
 		"```\n" +
 		"cron.add({\n" +
@@ -223,7 +223,7 @@ const CRON_TOOL_DEFINITION: RpcHostToolDefinition = {
 		"**When to use:** the user just added/updated a task and wants to confirm it works end-to-end. " +
 		"**`inMs` minimum:** runtime callers (this tool, the CLI) hard-reject `inMs < 60000` (1x gateway tick). The gateway engine tick reloads schedules from storage; if `inMs` is shorter than one tick, the reload runs AFTER `next_run_at` and the engine never sees the one-shot. Use `inMs >= 120000` (2x tick) to be safe. " +
 		"**Failure handling:** orphan-recovery safety net on every engine tick — if the engine fails to fire before `expiresAt`, the next tick restores the schedule from the marker and the task is back to its real cron. " +
-		"**CLI parity:** `omp-gateway cron test-run <name>` uses the same fire-and-forget core — it arms the one-shot, tells you the fire time, and exits; you confirm the result via `cron.runs` or the delivered card.\n\n" +
+		"**CLI parity:** `cornfield-gateway cron test-run <name>` uses the same fire-and-forget core — it arms the one-shot, tells you the fire time, and exits; you confirm the result via `cron.runs` or the delivered card.\n\n" +
 		"**Delivery rendering — `cron.deliveryMode` vs `task.delivery.mode` (orthogonal, do not conflate):**\n" +
 		"- `cron.deliveryMode` (gateway config, global) — `card` (default) or `text`. Decides the RENDERING format when a task is delivered. `card` renders the result as a DingTalk AI card with buttons; `text` sends a plain IM message. Operator flips this to fleet-wide toggle card vs text.\n" +
 		"- `task.delivery.mode` (per-task) — `announce` (default) or `none`. Decides WHETHER to deliver at all. `announce` triggers delivery after the run; `none` runs silently (no DingTalk message). Set `none` for tasks whose result is just a side-effect (cleanup, sync).\n" +
@@ -292,7 +292,9 @@ async function handleCronAction(args: CronToolArgs, ctx: CronToolContext): Promi
 			case "disable":
 				return handleSetStatus(args, "disabled", storage, ctx.accountId);
 			case "run":
-				return errResult("'run' via LLM is not yet supported; use `omp-gateway cron run <name>` from the CLI");
+				return errResult(
+					"'run' via LLM is not yet supported; use `cornfield-gateway cron run <name>` from the CLI",
+				);
 			case "runs":
 				return handleRuns(args, storage, ctx.accountId);
 			case "recent":

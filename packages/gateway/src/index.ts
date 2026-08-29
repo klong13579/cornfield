@@ -1,11 +1,11 @@
 /**
  * @cornfield/gateway
  *
- * IM gateway for Oh My Pi — the standalone daemon binary (`omp-gateway`)
+ * IM gateway for Oh My Pi — the standalone daemon binary (`cornfield-gateway`)
  * that hosts IM channels, the cron scheduler, and the agent bridge.
  *
  * Since the binary split: gateway daemon logic ships in this package and is
- * compiled to `~/.local/bin/omp-gateway`; the coding-agent (`omp`) is the
+ * compiled to `~/.local/bin/cornfield-gateway`; the coding-agent (`omp`) is the
  * agent runtime and is spawned on demand via `omp --mode wire-stdio` (Wire
  * protocol, pi-wire frames on stdio).
  *

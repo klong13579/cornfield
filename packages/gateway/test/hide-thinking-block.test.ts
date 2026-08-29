@@ -87,7 +87,7 @@ interface FakeRpc {
 }
 
 async function createFakeRpcBinary(): Promise<FakeRpc> {
-	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-gateway-hide-thinking-rpc-"));
+	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "cornfield-gateway-hide-thinking-rpc-"));
 	const scriptPath = path.join(dir, "fake-rpc");
 	await Bun.write(scriptPath, FAKE_RPC_SCRIPT);
 	await fs.chmod(scriptPath, 0o755);

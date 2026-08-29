@@ -40,7 +40,7 @@ afterEach(async () => {
 
 describe("executeScheduledCommand cwd", () => {
 	it("runs shell tasks in the given cwd", async () => {
-		workDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), "omp-gateway-cwd-shell-"));
+		workDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), "cornfield-gateway-cwd-shell-"));
 		// The test writes a marker file inside workDir and checks pwd
 		// resolves to workDir. We use a shell command that prints pwd
 		// to stdout.
@@ -75,7 +75,7 @@ describe("executeScheduledCommand cwd", () => {
 		// process's argument list without depending on the real omp
 		// binary. The shim sits in its own temp dir; the executor only
 		// takes the binary path, not a cwd requirement.
-		const shimDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), "omp-gateway-prefix-shim-"));
+		const shimDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), "cornfield-gateway-prefix-shim-"));
 		try {
 			const shimPath = path.join(shimDir, "omp-fake");
 			await Bun.write(shimPath, `#!/usr/bin/env sh\nfor a in "$@"; do printf '%s\\n' "$a"; done\n`);
@@ -384,7 +384,7 @@ describe("agentSessionPath round-trip (persistence fix)", () => {
 // the timed-out run as success (observed 2026-08-20 daily-kb-sync).
 describe("executeScheduledCommand timeout", () => {
 	it("reports 124 + timedOut for a clean-exiting subprocess killed by the timeout", async () => {
-		workDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), "omp-gateway-timeout-"));
+		workDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), "cornfield-gateway-timeout-"));
 		const scriptPath = path.join(workDir, "trap-exit-0.sh");
 		await Bun.write(scriptPath, `#!/usr/bin/env sh\ntrap 'exit 0' TERM\nwhile true; do sleep 1; done\n`);
 		await fsPromises.chmod(scriptPath, 0o755);

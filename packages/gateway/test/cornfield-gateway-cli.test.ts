@@ -1,8 +1,8 @@
 /**
- * omp-gateway CLI smoke — the standalone daemon binary's command table.
+ * cornfield-gateway CLI smoke — the standalone daemon binary's command table.
  *
- * Spawns the real `packages/omp-gateway/src/cli.ts` (the compiled
- * `omp-gateway` entrypoint) and exercises version, help, argv rewriting, and
+ * Spawns the real `packages/gateway/src/cli.ts` (the compiled
+ * `cornfield-gateway` entrypoint) and exercises version, help, argv rewriting, and
  * a read-only status probe against an isolated HOME. No gateway is started
  * and no system state is touched.
  */
@@ -35,7 +35,7 @@ async function runCli(args: string[], env: Record<string, string> = {}): Promise
 const isolatedHomes: string[] = [];
 
 async function isolatedHome(): Promise<string> {
-	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-gateway-cli-"));
+	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "cornfield-gateway-cli-"));
 	isolatedHomes.push(dir);
 	return dir;
 }
@@ -46,8 +46,8 @@ afterEach(async () => {
 	}
 });
 
-describe("omp-gateway CLI", () => {
-	test("--version prints the omp-gateway banner", async () => {
+describe("cornfield-gateway CLI", () => {
+	test("--version prints the cornfield-gateway banner", async () => {
 		const { stdout, exitCode } = await runCli(["--version"]);
 		expect(exitCode).toBe(0);
 		expect(stdout.trim()).toMatch(/^cornfield-gateway\//);

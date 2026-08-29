@@ -178,7 +178,7 @@ export async function runRpcMode(session: AgentSession): Promise<never> {
 	// Signal to RPC clients that the server is ready to accept commands. The
 	// protocol_version field is the wire handshake the gateway validates
 	// before treating this subprocess as compatible (see RPC_PROTOCOL_VERSION
-	// in packages/omp-gateway/src/agent-transport.ts — keep the value in sync).
+	// in packages/gateway/src/agent-transport.ts — keep the value in sync).
 	process.stdout.write(`${JSON.stringify({ type: "ready", protocol_version: 1, agent: "cornfield" })}\n`);
 	const output = (obj: RpcResponse | RpcExtensionUIRequest | object) => {
 		process.stdout.write(`${JSON.stringify(obj)}\n`);

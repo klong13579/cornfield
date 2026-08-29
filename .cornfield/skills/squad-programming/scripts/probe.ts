@@ -37,7 +37,7 @@ interface SessionInfo {
 
 /**
  * probeIntercomSessions — 直连 intercom broker 拉会话状态（不绕 herdr）。
- * broker = omp-gateway 托管的全局 IPC（~/.cornfield/intercom/broker.sock），
+ * broker = cornfield-gateway 托管的全局 IPC（~/.cornfield/intercom/broker.sock），
  * length-prefixed JSON 帧（4 字节大端长度 + payload）。
  * 发 {type:"list",requestId} → 收 {type:"sessions",sessions:SessionInfo[]}。
  * SessionInfo.status 即 omp 自身状态机（working/idle/done 等同源数据，herdr 只是镜像），

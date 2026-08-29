@@ -3,8 +3,8 @@
  * Build the `cornfield` coding-agent binary (packages/coding-agent/dist/cornfield).
  *
  * This is the agent runtime half of the gateway binary split — the gateway
- * daemon is built separately as `omp-gateway` by
- * `packages/omp-gateway/scripts/build-binary.ts` (see
+ * daemon is built separately as `cornfield-gateway` by
+ * `packages/gateway/scripts/build-binary.ts` (see
  * docs/gateway-binary-split-plan.md). Agent execution stays here and is
  * spawned by the gateway via `omp --mode rpc`.
  */

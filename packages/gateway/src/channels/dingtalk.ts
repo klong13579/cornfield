@@ -1685,7 +1685,7 @@ export class DingTalkChannel extends BaseChannel {
 			clientSecret: this.#config.appSecret,
 			ua: "cornfield-gateway/0.1.0",
 			debug: false,
-			autoReconnect: false, // omp-gateway has its own #doReconnect logic
+			autoReconnect: false, // cornfield-gateway has its own #doReconnect logic
 		});
 
 		// Connection lifecycle

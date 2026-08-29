@@ -245,7 +245,7 @@ describe("formatDeliveryFailureCount", () => {
 	let tmpLogRoot: string;
 
 	beforeEach(async () => {
-		tmpLogRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), "omp-gateway-fmt-delivery-"));
+		tmpLogRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), "cornfield-gateway-fmt-delivery-"));
 		setLogRoot(tmpLogRoot);
 		clearDeliveryFailureCache();
 	});

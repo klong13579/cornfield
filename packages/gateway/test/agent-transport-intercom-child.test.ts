@@ -58,7 +58,7 @@ async function waitForFile(p: string, timeoutMs = 5_000): Promise<void> {
 }
 
 beforeEach(async () => {
-	tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-gateway-intercom-child-"));
+	tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "cornfield-gateway-intercom-child-"));
 });
 
 afterEach(async () => {

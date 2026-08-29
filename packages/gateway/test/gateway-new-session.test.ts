@@ -113,7 +113,7 @@ describe("NewSessionHandler", () => {
 	let replies: OutboundMessage[];
 
 	beforeEach(async () => {
-		rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-gateway-new-session-"));
+		rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "cornfield-gateway-new-session-"));
 		rpcPath = path.join(rootDir, "fake-rpc");
 		await Bun.write(rpcPath, FAKE_RPC_SCRIPT);
 		await fs.chmod(rpcPath, 0o755);

@@ -1,7 +1,7 @@
 /**
  * Interactive DingTalk setup wizard.
  *
- * Replaces `omp-gateway install` / `cornfield-gateway setup` legacy behavior. Walks
+ * Replaces `cornfield-gateway install` / `cornfield-gateway setup` legacy behavior. Walks
  * the user through accountId, AppKey, AppSecret, RobotCode, agentDir and
  * (optional) mission file, then writes a complete gateway config to disk.
  *

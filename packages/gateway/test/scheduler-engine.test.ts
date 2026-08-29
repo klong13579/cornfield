@@ -49,7 +49,7 @@ function cleanup() {
 }
 
 beforeEach(() => {
-	testDir = fs.mkdtempSync(path.join(os.tmpdir(), "omp-gateway-test-"));
+	testDir = fs.mkdtempSync(path.join(os.tmpdir(), "cornfield-gateway-test-"));
 	dbPath = path.join(testDir, "jobs.json");
 	storage = new JsonFileStorage(dbPath);
 });
@@ -501,7 +501,7 @@ describe("SchedulerEngine — test-run post-fire restore", () => {
 	}
 
 	beforeEach(() => {
-		testDir = fs.mkdtempSync(path.join(os.tmpdir(), "omp-gateway-engine-restore-"));
+		testDir = fs.mkdtempSync(path.join(os.tmpdir(), "cornfield-gateway-engine-restore-"));
 		schedulerDir2 = path.join(testDir, ".cornfield", "gateway-data", "scheduler");
 		fs.mkdirSync(schedulerDir2, { recursive: true });
 		homedirSpy = vi.spyOn(os, "homedir").mockReturnValue(testDir);
@@ -749,7 +749,7 @@ describe("scheduler maxConcurrentRuns", () => {
 	let engine: SchedulerEngine;
 
 	beforeEach(() => {
-		testDir3 = fs.mkdtempSync(path.join(os.tmpdir(), "omp-gateway-concurrency-"));
+		testDir3 = fs.mkdtempSync(path.join(os.tmpdir(), "cornfield-gateway-concurrency-"));
 		storage3 = new JsonFileStorage(path.join(testDir3, "jobs.json"));
 	});
 
@@ -813,7 +813,7 @@ describe("JsonFileStorage — agentSessionPath persistence round-trip", () => {
 	let testDir4: string;
 
 	beforeEach(() => {
-		testDir4 = fs.mkdtempSync(path.join(os.tmpdir(), "omp-gateway-storage-persist-"));
+		testDir4 = fs.mkdtempSync(path.join(os.tmpdir(), "cornfield-gateway-storage-persist-"));
 		jobsPath4 = path.join(testDir4, "jobs.json");
 		setLogRoot(path.join(testDir4, "logs"));
 	});

@@ -25,7 +25,7 @@ import { clearStatusFileSync, getGatewayStatus, PID_FILE, STATUS_FILE } from "..
 describe("validateConfig (non-swallowing)", () => {
 	let tmpDir: string;
 	beforeEach(async () => {
-		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-gateway-doctor-cfg-"));
+		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "cornfield-gateway-doctor-cfg-"));
 	});
 	afterEach(async () => {
 		await fs.rm(tmpDir, { recursive: true, force: true });
@@ -71,7 +71,7 @@ describe("validateConfig (non-swallowing)", () => {
 describe("runDoctor end-to-end", () => {
 	let tmpDir: string;
 	beforeEach(async () => {
-		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-gateway-doctor-run-"));
+		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "cornfield-gateway-doctor-run-"));
 	});
 	afterEach(async () => {
 		await fs.rm(tmpDir, { recursive: true, force: true });
@@ -196,7 +196,7 @@ describe("status file fake-alive regression", () => {
 	let tmpDir: string;
 
 	beforeEach(async () => {
-		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-gateway-status-fakealive-"));
+		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "cornfield-gateway-status-fakealive-"));
 	});
 
 	afterEach(async () => {
