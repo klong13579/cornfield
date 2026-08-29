@@ -13,7 +13,7 @@
  * extension package never shadows the user's own `.omp/` configuration on
  * dedup.
  *
- * @see ./omp-extension-roots.ts
+ * @see ./cornfield-extension-roots.ts
  * @see ../../docs/extension-loading.md
  */
 import * as path from "node:path";
@@ -36,7 +36,7 @@ import type { CustomTool } from "../capability/tool";
 import { toolCapability } from "../capability/tool";
 import type { LoadContext, LoadResult } from "../capability/types";
 import { buildRuleFromMarkdown, createSourceMeta, loadFilesFromDir, scanSkillsFromDir } from "./helpers";
-import { listOmpExtensionRoots, type OmpExtensionRoot } from "./omp-extension-roots";
+import { listCornfieldExtensionRoots, type CornfieldExtensionRoot } from "./cornfield-extension-roots";
 
 const PROVIDER_ID = "omp-plugins";
 const DISPLAY_NAME = "OMP Extension Packages";
@@ -49,7 +49,7 @@ const PRIORITY = 90;
 // =============================================================================
 
 async function loadSkills(ctx: LoadContext): Promise<LoadResult<Skill>> {
-	const roots = await listOmpExtensionRoots(ctx);
+	const roots = await listCornfieldExtensionRoots(ctx);
 	const results = await Promise.all(
 		roots.map(root =>
 			scanSkillsFromDir(ctx, {
@@ -71,7 +71,7 @@ async function loadSkills(ctx: LoadContext): Promise<LoadResult<Skill>> {
 // =============================================================================
 
 async function loadSlashCommands(ctx: LoadContext): Promise<LoadResult<SlashCommand>> {
-	const roots = await listOmpExtensionRoots(ctx);
+	const roots = await listCornfieldExtensionRoots(ctx);
 	const results = await Promise.all(
 		roots.map(root =>
 			loadFilesFromDir<SlashCommand>(ctx, path.join(root.path, "commands"), PROVIDER_ID, root.level, {
@@ -97,7 +97,7 @@ async function loadSlashCommands(ctx: LoadContext): Promise<LoadResult<SlashComm
 // =============================================================================
 
 async function loadRules(ctx: LoadContext): Promise<LoadResult<Rule>> {
-	const roots = await listOmpExtensionRoots(ctx);
+	const roots = await listCornfieldExtensionRoots(ctx);
 	const results = await Promise.all(
 		roots.map(root =>
 			loadFilesFromDir<Rule>(ctx, path.join(root.path, "rules"), PROVIDER_ID, root.level, {
@@ -118,7 +118,7 @@ async function loadRules(ctx: LoadContext): Promise<LoadResult<Rule>> {
 // =============================================================================
 
 async function loadPrompts(ctx: LoadContext): Promise<LoadResult<Prompt>> {
-	const roots = await listOmpExtensionRoots(ctx);
+	const roots = await listCornfieldExtensionRoots(ctx);
 	const results = await Promise.all(
 		roots.map(root =>
 			loadFilesFromDir<Prompt>(ctx, path.join(root.path, "prompts"), PROVIDER_ID, root.level, {
@@ -146,8 +146,8 @@ async function loadPrompts(ctx: LoadContext): Promise<LoadResult<Prompt>> {
 const HOOK_TYPES: ReadonlyArray<"pre" | "post"> = ["pre", "post"];
 
 async function loadHooks(ctx: LoadContext): Promise<LoadResult<Hook>> {
-	const roots = await listOmpExtensionRoots(ctx);
-	const tasks: Array<{ root: OmpExtensionRoot; hookType: "pre" | "post" }> = [];
+	const roots = await listCornfieldExtensionRoots(ctx);
+	const tasks: Array<{ root: CornfieldExtensionRoot; hookType: "pre" | "post" }> = [];
 	for (const root of roots) {
 		for (const hookType of HOOK_TYPES) {
 			tasks.push({ root, hookType });
@@ -184,7 +184,7 @@ async function loadHooks(ctx: LoadContext): Promise<LoadResult<Hook>> {
 const TOOL_EXTENSIONS = ["json", "md", "ts", "js", "sh", "bash", "py"];
 
 async function loadTools(ctx: LoadContext): Promise<LoadResult<CustomTool>> {
-	const roots = await listOmpExtensionRoots(ctx);
+	const roots = await listCornfieldExtensionRoots(ctx);
 	const perRoot = await Promise.all(
 		roots.map(async root => {
 			const toolsDir = path.join(root.path, "tools");
@@ -276,11 +276,11 @@ interface RawMcpServer {
 }
 
 async function loadMCPServers(ctx: LoadContext): Promise<LoadResult<MCPServer>> {
-	const roots = await listOmpExtensionRoots(ctx);
+	const roots = await listCornfieldExtensionRoots(ctx);
 	const items: MCPServer[] = [];
 	const warnings: string[] = [];
 
-	const tasks: Array<{ root: OmpExtensionRoot; mcpPath: string }> = [];
+	const tasks: Array<{ root: CornfieldExtensionRoot; mcpPath: string }> = [];
 	for (const root of roots) {
 		for (const filename of MCP_FILENAMES) {
 			tasks.push({ root, mcpPath: path.join(root.path, filename) });

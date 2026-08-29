@@ -1,5 +1,5 @@
 /**
- * OMP extension package roots.
+ * Cornfield extension package roots.
  *
  * An "extension package root" is a directory configured via either
  * `extensions:` in user/project settings or the `--extension`/`-e` CLI flag
@@ -7,9 +7,9 @@
  * sub-directories (`skills/`, `hooks/`, `tools/`, `commands/`, `rules/`,
  * `prompts/`, `.mcp.json`) are wired into discovery by `omp-plugins.ts`.
  *
- * CLI-provided paths are injected via {@link injectOmpExtensionCliRoots}
+ * CLI-provided paths are injected via {@link injectCornfieldExtensionCliRoots}
  * before discovery runs; settings paths are read lazily from
- * `<scope>/settings.json` in {@link listOmpExtensionRoots} to mirror what
+ * `<scope>/settings.json` in {@link listCornfieldExtensionRoots} to mirror what
  * `loadExtensionModules` already does.
  *
  * @see ./omp-plugins.ts
@@ -24,7 +24,7 @@ import { getEnabledPlugins } from "../extensibility/plugins/loader";
 import { expandTilde } from "../tools/path-utils";
 
 /** A resolved extension package directory wired into the discovery surfaces. */
-export interface OmpExtensionRoot {
+export interface CornfieldExtensionRoot {
 	/** Absolute path to the package directory. */
 	path: string;
 	/** Stable display name (basename of the package directory). */
@@ -47,9 +47,9 @@ let injectedCliRoots: InjectedRoot[] = [];
  * entrypoints have no package sub-tree to scan.
  *
  * Call once during startup before any capability load. Repeated calls extend
- * the registered set; {@link clearOmpExtensionCliRoots} resets for tests.
+ * the registered set; {@link clearCornfieldExtensionCliRoots} resets for tests.
  */
-export function injectOmpExtensionCliRoots(paths: readonly string[], home: string, cwd: string): void {
+export function injectCornfieldExtensionCliRoots(paths: readonly string[], home: string, cwd: string): void {
 	if (paths.length === 0) return;
 	const expanded = paths.map(raw => {
 		const tilde = expandTilde(raw, home);
@@ -65,12 +65,12 @@ export function injectOmpExtensionCliRoots(paths: readonly string[], home: strin
 }
 
 /** Drop every CLI-injected root. Tests use this between cases. */
-export function clearOmpExtensionCliRoots(): void {
+export function clearCornfieldExtensionCliRoots(): void {
 	injectedCliRoots = [];
 }
 
 /** Inspect currently-injected CLI roots (read-only). Exposed for diagnostics + tests. */
-export function getInjectedOmpExtensionCliRoots(): readonly OmpExtensionRoot[] {
+export function getInjectedCornfieldExtensionCliRoots(): readonly CornfieldExtensionRoot[] {
 	return injectedCliRoots.map(({ path: p, level }) => ({ path: p, level, name: path.basename(p) }));
 }
 
@@ -120,11 +120,11 @@ async function isDirectory(p: string): Promise<boolean> {
  * Sources, in order of precedence (later entries with the same absolute path
  * are dropped):
  *
- * 1. CLI roots injected via {@link injectOmpExtensionCliRoots}
- * 2. Project `<cwd>/.omp/settings.json#extensions`
+ * 1. CLI roots injected via {@link injectCornfieldExtensionCliRoots}
+ * 2. Project `<cwd>/.cornfield/settings.json#extensions`
  * 3. User `~/.cornfield/agent/settings.json#extensions`
  * 4. Enabled plugins installed under `<plugins>/node_modules/` (e.g. via
- *    `omp install <pkg>` / `omp plugin install` / `omp plugin link`)
+ *    `cornfield install <pkg>` / `cornfield plugin install` / `cornfield plugin link`)
  *
  * Only entries that resolve to a directory on disk are returned; file
  * entrypoints contribute zero sub-discovery surface and are filtered out.
@@ -132,7 +132,7 @@ async function isDirectory(p: string): Promise<boolean> {
  * `package.json`, etc.) are logged at `debug` and degrade gracefully — the
  * other sources still surface.
  */
-export async function listOmpExtensionRoots(ctx: LoadContext): Promise<OmpExtensionRoot[]> {
+export async function listCornfieldExtensionRoots(ctx: LoadContext): Promise<CornfieldExtensionRoot[]> {
 	const { project, user } = scopeDirs(ctx);
 	const [projectExtensions, userExtensions, installedPlugins] = await Promise.all([
 		readSettingsExtensions(path.join(project, "settings.json")),
@@ -157,7 +157,7 @@ export async function listOmpExtensionRoots(ctx: LoadContext): Promise<OmpExtens
 	}
 
 	const directoryFlags = await Promise.all(unique.map(c => isDirectory(c.path)));
-	const roots: OmpExtensionRoot[] = [];
+	const roots: CornfieldExtensionRoot[] = [];
 	for (let i = 0; i < unique.length; i++) {
 		if (!directoryFlags[i]) continue;
 		const { path: p, level } = unique[i];

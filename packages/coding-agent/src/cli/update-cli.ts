@@ -86,22 +86,22 @@ function isPathInDirectory(filePath: string, directoryPath: string): boolean {
 
 type UpdateTarget = { method: "bun" } | { method: "binary"; path: string };
 
-function resolveUpdateMethod(ompPath: string, bunBinDir: string | undefined): "bun" | "binary" {
+function resolveUpdateMethod(cornfieldPath: string, bunBinDir: string | undefined): "bun" | "binary" {
 	if (!bunBinDir) return "binary";
-	return isPathInDirectory(ompPath, bunBinDir) ? "bun" : "binary";
+	return isPathInDirectory(cornfieldPath, bunBinDir) ? "bun" : "binary";
 }
 
-export function _resolveUpdateMethodForTest(ompPath: string, bunBinDir: string | undefined): "bun" | "binary" {
-	return resolveUpdateMethod(ompPath, bunBinDir);
+export function _resolveUpdateMethodForTest(cornfieldPath: string, bunBinDir: string | undefined): "bun" | "binary" {
+	return resolveUpdateMethod(cornfieldPath, bunBinDir);
 }
 async function resolveUpdateTarget(): Promise<UpdateTarget> {
 	const bunBinDir = await getBunGlobalBinDir();
-	const ompPath = resolveOmpPath();
+	const cornfieldPath = resolveCornfieldPath();
 
-	if (ompPath) {
-		const method = resolveUpdateMethod(ompPath, bunBinDir);
+	if (cornfieldPath) {
+		const method = resolveUpdateMethod(cornfieldPath, bunBinDir);
 		if (method === "bun") return { method };
-		return { method, path: ompPath };
+		return { method, path: cornfieldPath };
 	}
 
 	if (bunBinDir) return { method: "bun" };
@@ -190,7 +190,7 @@ function getBinaryName(): string {
 /**
  * Resolve the path that `omp` maps to in the user's PATH.
  */
-function resolveOmpPath(): string | undefined {
+function resolveCornfieldPath(): string | undefined {
 	return $which(APP_NAME) ?? undefined;
 }
 
@@ -200,18 +200,18 @@ function resolveOmpPath(): string | undefined {
 async function verifyInstalledVersion(
 	expectedVersion: string,
 ): Promise<{ ok: boolean; actual?: string; path?: string }> {
-	const ompPath = resolveOmpPath();
-	if (!ompPath) return { ok: false };
+	const cornfieldPath = resolveCornfieldPath();
+	if (!cornfieldPath) return { ok: false };
 	try {
-		const result = await $`${ompPath} --version`.quiet().nothrow();
-		if (result.exitCode !== 0) return { ok: false, path: ompPath };
+		const result = await $`${cornfieldPath} --version`.quiet().nothrow();
+		if (result.exitCode !== 0) return { ok: false, path: cornfieldPath };
 		const output = result.text().trim();
 		// Output format: "omp/X.Y.Z"
 		const match = output.match(/\/(\d+\.\d+\.\d+)/);
 		const actual = match?.[1];
-		return { ok: actual === expectedVersion, actual, path: ompPath };
+		return { ok: actual === expectedVersion, actual, path: cornfieldPath };
 	} catch {
-		return { ok: false, path: ompPath };
+		return { ok: false, path: cornfieldPath };
 	}
 }
 

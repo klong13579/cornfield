@@ -29,7 +29,7 @@ const PORT_FREE_TIMEOUT_MS = 5000;
 export interface SidecarOptions {
 	/** sidecar（`omp serve`）的工作目录，对应 web-app「工作目录」设置。 */
 	workspaceDir: string;
-	/** 打包后的 resources 目录（Electron `process.resourcesPath`），用于定位打包内嵌的 omp 二进制。 */
+	/** 打包后的 resources 目录（Electron `process.resourcesPath`），用于定位打包内嵌的 cornfield 二进制。 */
 	resourcesPath: string;
 }
 
@@ -57,8 +57,8 @@ export function resolveWorkspaceDir(override?: string): string {
 	return path.resolve(raw);
 }
 
-/** 解析 omp 二进制路径，优先级与 gateway 的 `resolveDefaultOmpPath` 对齐并前插打包内嵌路径。 */
-export function resolveOmpBinary(resourcesPath: string): string {
+/** 解析 cornfield 二进制路径，优先级与 gateway 的 `resolveDefaultOmpPath` 对齐并前插打包内嵌路径。 */
+export function resolveCornfieldBinary(resourcesPath: string): string {
 	const explicit = process.env.OMP_BINARY?.trim();
 	if (explicit) return explicit;
 
@@ -146,7 +146,7 @@ export async function probePortState(): Promise<PortState> {
 }
 
 function spawnSidecar(options: SidecarOptions): childProcess.ChildProcess {
-	const bin = resolveOmpBinary(options.resourcesPath);
+	const bin = resolveCornfieldBinary(options.resourcesPath);
 	const child = childProcess.spawn(bin, ["serve", "--port", String(SERVE_PORT), "--host", SERVE_HOST], {
 		cwd: options.workspaceDir,
 		env: { ...process.env, [SIDECAR_ENV]: "1" },

@@ -84,16 +84,16 @@ async function removeLegacyAgentSystemMd(agentDir: string): Promise<void> {
 /**
  * Ensure `.cornfield/SYSTEM.md` exists, creating it from the skeleton template if missing.
  */
-async function ensureOmpSystemMd(agentDir: string): Promise<void> {
-	const ompSystemMdEntry = SKELETON_FILES.find(f => f.relPath === ".cornfield/SYSTEM.md");
-	if (!ompSystemMdEntry) return;
+async function ensureCornfieldSystemMd(agentDir: string): Promise<void> {
+	const cornfieldSystemMdEntry = SKELETON_FILES.find(f => f.relPath === ".cornfield/SYSTEM.md");
+	if (!cornfieldSystemMdEntry) return;
 
 	const targetPath = path.join(agentDir, ".cornfield/SYSTEM.md");
 	try {
 		await fs.access(targetPath);
 	} catch {
 		await fs.mkdir(path.dirname(targetPath), { recursive: true });
-		await fs.writeFile(targetPath, ompSystemMdEntry.content, "utf-8");
+		await fs.writeFile(targetPath, cornfieldSystemMdEntry.content, "utf-8");
 	}
 }
 
@@ -292,7 +292,7 @@ export async function ensureAgentDir(agentDir: string): Promise<boolean> {
 
 	// Post-creation repair: clean up legacy trap file, ensure gateway prompt exists
 	await removeLegacyAgentSystemMd(agentDir);
-	await ensureOmpSystemMd(agentDir);
+	await ensureCornfieldSystemMd(agentDir);
 
 	return !missionExists;
 }
