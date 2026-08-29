@@ -101,7 +101,7 @@ image = { version = "0.25", default-features = false, features = [
    "gif",
    "webp",
 ] }
-webp = { version = "0.3", default-features = false, features = ["img"] }
+webp = "0.3"
 arboard = { version = "3.5.0", features = ["wayland-data-control"] }
 maudio = "0.1.6"
 flume = "0.11"
