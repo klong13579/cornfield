@@ -1,5 +1,5 @@
 /**
- * Wire protocol handshake — the `omp --mode wire-stdio` hello_ack contract.
+ * Wire protocol handshake — the `cornfield --mode wire-stdio` hello_ack contract.
  *
  * The gateway only accepts agent subprocesses that complete the wire hello
  * handshake: after the transport sends `hello`, the first stdout frame must
@@ -7,7 +7,7 @@
  * protocol: MULTIDEVICE_PROTOCOL_VERSION in packages/pi-wire/src/frames.ts).
  * Peers that answer `hello_error` (legacy binaries, no wire protocol support)
  * and peers that ack with an incompatible protocolVersion are REJECTED with a
- * diagnostic error naming the fix (upgrade omp) — hard cutover, no silent
+ * diagnostic error naming the fix (upgrade cornfield) — hard cutover, no silent
  * compatibility mode (see docs/gateway-binary-split-plan.md §5.4).
  */
 
@@ -52,7 +52,7 @@ const HELLO_ACK_V1 = JSON.stringify({
 const HELLO_ACK_BAD_VERSION = JSON.stringify({ type: "hello_ack", connectionId: "proto", protocolVersion: 0 });
 const HELLO_ERROR_LEGACY = JSON.stringify({
 	type: "hello_error",
-	error: "legacy binary: no wire protocol support, upgrade omp",
+	error: "legacy binary: no wire protocol support, upgrade cornfield",
 });
 
 describe("WireTransport protocol handshake", () => {
@@ -72,7 +72,7 @@ describe("WireTransport protocol handshake", () => {
 		const fake = await createFakeWire(respondThenExit(HELLO_ERROR_LEGACY));
 		const transport = new WireTransport({ ompPath: fake.path, readyTimeoutMs: 5_000 });
 		try {
-			await expect(transport.start()).rejects.toThrow(/hello rejected: legacy binary.*upgrade omp/s);
+			await expect(transport.start()).rejects.toThrow(/hello rejected: legacy binary.*upgrade cornfield/s);
 		} finally {
 			transport.stop();
 			await fake.cleanup();
@@ -96,7 +96,7 @@ describe("resolveDefaultOmpPath", () => {
 		// Use an empty temp dir as HOME — no ~/.local/bin/omp exists there.
 		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "proto-omp-path-"));
 		try {
-			expect(resolveDefaultOmpPath(dir)).toBe("omp");
+			expect(resolveDefaultOmpPath(dir)).toBe("cornfield");
 		} finally {
 			await fs.rm(dir, { recursive: true, force: true });
 		}
@@ -107,8 +107,8 @@ describe("resolveDefaultOmpPath", () => {
 		try {
 			const bin = path.join(dir, ".local", "bin");
 			await fs.mkdir(bin, { recursive: true });
-			await fs.writeFile(path.join(bin, "omp"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
-			expect(resolveDefaultOmpPath(dir)).toBe(path.join(bin, "omp"));
+			await fs.writeFile(path.join(bin, "cornfield"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+			expect(resolveDefaultOmpPath(dir)).toBe(path.join(bin, "cornfield"));
 		} finally {
 			await fs.rm(dir, { recursive: true, force: true });
 		}

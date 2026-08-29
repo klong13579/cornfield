@@ -75,7 +75,7 @@ describe("generateLspmuxPlist", () => {
 	it("emits a valid launchd agent pointing at the lspmux binary", () => {
 		const plist = lspmux.generateLspmuxPlist("/fake/bin/lspmux", "/Users/test");
 		expect(plist).toContain("<key>Label</key>");
-		expect(plist).toContain("com.narwal.pi-lspmux");
+		expect(plist).toContain("com.cornfield.lspmux");
 		expect(plist).toContain("/fake/bin/lspmux");
 		expect(plist).toContain("<string>server</string>");
 		expect(plist).toContain("<key>RunAtLoad</key>");
@@ -130,7 +130,7 @@ describe("ensureLspmuxServer", () => {
 		expect(writeMock).toHaveBeenCalledTimes(1);
 		const [plistPath, content] = writeMock.mock.calls[0];
 		expect(String(plistPath)).toContain("LaunchAgents");
-		expect(String(content)).toContain("com.narwal.pi-lspmux");
+		expect(String(content)).toContain("com.cornfield.lspmux");
 		expect(String(content)).toContain(binaryPath);
 		expect(String(content)).toContain("<string>server</string>");
 	});

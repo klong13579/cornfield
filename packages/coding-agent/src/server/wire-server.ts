@@ -125,6 +125,7 @@ export interface CommandContext {
 type WireSocket = Bun.ServerWebSocket<Connection | undefined>;
 
 const PROGRESS_EVENT_TYPES = new Set([
+	"message_start",
 	"message_update",
 	"message_end",
 	"tool_execution_start",

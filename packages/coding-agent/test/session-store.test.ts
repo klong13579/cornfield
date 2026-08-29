@@ -62,6 +62,8 @@ function makeStubSession(overrides: Partial<AgentSession> = {}) {
 		todoPhases: [],
 		activeToolNames: [],
 		queuedMessageCount: 0,
+		customCommands: [],
+		skills: [],
 		isCompacting: false,
 		isStreaming: false,
 		autoCompactionEnabled: true,

@@ -666,6 +666,7 @@ dependencies = [
  "brush-core",
  "brush-parser",
  "clap",
+ "crc32fast",
  "dashmap",
  "flate2",
  "flume",
