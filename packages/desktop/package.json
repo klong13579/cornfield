@@ -1,6 +1,6 @@
 {
 	"name": "@cornfield/desktop",
-	"version": "0.19.2",
+	"version": "1.0.0",
 	"private": true,
 	"author": "Magnum",
 	"description": "CornField 桌面壳（Electron）—— 托盘常驻 + 探测/拉起 CornField serve sidecar",

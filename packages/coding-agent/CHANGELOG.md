@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-08-29
+
 ### Changed
 
 - **去 omp 化品牌迁移**: `src/**` 符号/文件名/环境变量/用户可见标识对齐 cornfield（纯改名，无行为变化）——命令入口符号/文件名 `omp → cornfield`（A 档）；包 scope `@oh-my-pi/* → @cornfield/*`（B 档）；环境变量 `OMP_*`/`PI_* → CORNFIELD_*`（`CORNFIELD_AGENT_DIR`/`CORNFIELD_CONFIG_DIR`）；DAP 客户端标识 `clientID/clientName → cornfield/CornField`、commit agent system prompt 名称同步。

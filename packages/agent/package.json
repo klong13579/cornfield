@@ -1,7 +1,7 @@
 {
 	"type": "module",
 	"name": "@cornfield/agent",
-	"version": "0.19.2",
+	"version": "1.0.0",
 	"description": "General-purpose agent with transport abstraction, state management, and attachment support",
 	"homepage": "https://github.com/klong13579/cornfield",
 	"author": "Can Boluk",

@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-08-29
+
 ### Changed
 
 - **去 omp 化品牌迁移（不兼容替换）**: `src/dirs.ts` 环境变量/常量对齐 cornfield —— `PI_CONFIG_DIR → CORNFIELD_CONFIG_DIR`、`PI_CODING_AGENT_DIR → CORNFIELD_AGENT_DIR`，config 根目录 `.omp → .cornfield`、`~/.omp → ~/.cornfield`。旧 env 名不再识别。

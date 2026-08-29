@@ -1,7 +1,7 @@
 {
 	"type": "module",
 	"name": "@cornfield/wire",
-	"version": "0.19.2",
+	"version": "1.0.0",
 	"description": "Multidevice wire protocol types (frames, commands, protocol version) for CornField serve <-> client",
 	"homepage": "https://github.com/klong13579/cornfield",
 	"author": "Can Boluk",

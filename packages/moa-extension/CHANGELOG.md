@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-08-29
+
 ### Changed
 
 - **去 omp 化品牌迁移**: 包引用/环境变量/路径对齐 cornfield —— 包 scope `@oh-my-pi/* → @cornfield/*`，配置根路径 `~/.omp → ~/.cornfield`，环境变量 `OMP_*`/`PI_* → CORNFIELD_*`（`CORNFIELD_AGENT_DIR`/`CORNFIELD_CONFIG_DIR`，含 `src/subprocess.ts` env 替换）。纯改名，无行为变化。

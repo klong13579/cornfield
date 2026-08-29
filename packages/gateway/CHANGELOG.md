@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-08-29
+
 - **Changed: 去 omp 化品牌迁移**（`packages/omp-gateway → packages/gateway` 目录改名、`src/agent-bridge.ts`、`src/agent-transport-wire.ts`、`src/service-installer.ts`): 包目录对齐新名；运行期契约 `ompPath`/`ompSessionPath`/`resolveDefaultOmpPath → cornfieldPath`/`cornfieldSessionPath`/`resolveDefaultCornfieldPath`；持久化环境变量 `OMP_GATEWAY_TEST_MODE/OMP_GATEWAY_TEST_PORT → CORNFIELD_GATEWAY_TEST_MODE/CORNFIELD_GATEWAY_TEST_PORT`（`PERSISTED_ENV_VARS`/`PERSISTED_ENV_DEFAULTS` 与 launchd plist/systemd unit 安装同步）。
 
 - **Fixed: scheduler 默认二进制 omp→cornfield**（`src/scheduler/executor.ts`): 机器 PATH 已无 `omp`，未显式配置 `cornfieldPath` 的 cron agent 任务此前 spawn 直接失败；默认回退二进制名改为 `cornfield`。

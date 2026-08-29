@@ -1,6 +1,6 @@
 {
   "name": "@cornfield/gateway",
-  "version": "0.19.2",
+  "version": "1.0.0",
   "description": "IM gateway for CornField — connects AI agents to messaging platforms",
   "type": "module",
   "main": "./src/index.ts",
