@@ -20,7 +20,7 @@ const TODO_DISPLAY_TITLE = "TODO";
 const MAX_TODO_IN_WELCOME = 3;
 
 /**
- * Premium welcome screen with block-based OMP logo and two-column layout.
+ * Premium welcome screen with block-based CornField logo and two-column layout.
  */
 export class WelcomeComponent implements Component {
 	constructor(
@@ -74,17 +74,23 @@ export class WelcomeComponent implements Component {
 		const leftCol = showRightColumn ? dualLeftCol : boxWidth - 2;
 		const rightCol = showRightColumn ? dualRightCol : 0;
 
-		// Block-based Magnum "M" logo (gradient: platinum → midnight blue)
+		// Block-based CornField logo (arc + dot, matching cornfield-icon.svg)
 		// biome-ignore format: preserve ASCII art layout
-		const mLogo = ["███      ███", "████    ████", "██ ██  ██ ██", "██  ████  ██", "██   ██   ██"];
+		const cLogo = [
+			"    ████████",
+			"   ██       ",
+			"   ██      ■",
+			"   ██       ",
+			"    ████████",
+		];
 
 		// Apply gradient to logo
-		const logoColored = mLogo.map(line => this.#gradientLine(line));
+		const logoColored = cLogo.map(line => this.#gradientLine(line));
 
 		// Left column - centered content
 		const leftLines = [
 			"",
-			this.#centerText(theme.bold("Welcome back, Magnum,"), leftCol),
+			this.#centerText(theme.bold("Welcome to CornField,"), leftCol),
 			this.#centerText(theme.bold("have a nice day"), leftCol),
 			"",
 			...logoColored.map(l => this.#centerText(l, leftCol)),
@@ -213,14 +219,14 @@ export class WelcomeComponent implements Component {
 		return padding(leftPad) + text + padding(rightPad);
 	}
 
-	/** Apply platinum → midnight blue gradient to a string */
+	/** Apply white → gray gradient to a string */
 	#gradientLine(line: string): string {
 		const colors = [
-			"\x1b[38;5;189m", // bright platinum
-			"\x1b[38;5;153m", // light steel blue
-			"\x1b[38;5;117m", // sky blue
-			"\x1b[38;5;111m", // steel blue
-			"\x1b[38;5;75m", // midnight blue
+			"\x1b[38;5;255m", // white
+			"\x1b[38;5;252m", // light gray
+			"\x1b[38;5;250m", // gray
+			"\x1b[38;5;248m", // darker gray
+			"\x1b[38;5;245m", // mid gray
 		];
 		const reset = "\x1b[0m";
 

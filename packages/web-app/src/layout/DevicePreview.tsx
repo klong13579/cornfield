@@ -46,7 +46,7 @@ export function DevicePreview(): React.JSX.Element {
 						<div className="flex h-full max-h-[812px] w-[375px] flex-col overflow-hidden rounded-[40px] border border-hairline-strong bg-canvas shadow-[0_24px_64px_rgba(24,24,27,0.12)]">
 							<div className="flex h-11 shrink-0 items-center justify-between px-6 text-xs font-semibold text-ink">
 								<span>9:41</span>
-								<span>omp</span>
+								<span>cornfield</span>
 								<span>●●●</span>
 							</div>
 							<div className="min-h-0 flex-1">

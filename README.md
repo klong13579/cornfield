@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://github.com/klong13579/cornfield/blob/main/assets/hero.png?raw=true" alt="CornField Monorepo">
+  <img src="https://github.com/klong13579/cornfield/blob/main/assets/cornfield-black.svg?raw=true" alt="CornField" width="400">
 </p>
 
 <p align="center">

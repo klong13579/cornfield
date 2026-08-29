@@ -30,6 +30,8 @@ publish:
   provider: generic
   url: ""
 mac:
+  # 应用图标：build/icon.icns（由 assets/cornfield-icon.svg 生成，iconutil 打包）。
+  icon: build/icon.icns
   target:
     - dmg
     - zip
