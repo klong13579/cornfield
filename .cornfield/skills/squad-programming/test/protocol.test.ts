@@ -1,7 +1,7 @@
 /**
  * squad-programming worker 启动协议测试
  *
- * 测试 bootstrap.ts 的 workerBrief()——写进子 omp 开场 brief 的协议文本：
+ * 测试 bootstrap.ts 的 workerBrief()——写进子 cornfield 开场 brief 的协议文本：
  *   STARTED 汇报 / ask 带 to / ACK 回复 / GO 闸门与幂等 / CANCEL / 提交铁律
  *
  * 这些断言锁定「父侧调度（reconcile/GO）」与「worker 侧行为」的契约：

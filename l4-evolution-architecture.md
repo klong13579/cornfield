@@ -24,12 +24,12 @@
 
 | 子模块名称 | 所属域 | 功能定义 | 状态 |
 | :--- | :--- | :--- | :--- |
-| **Session Log Store** | Logs | `.omp/sessions/*.jsonl`。存储 Agent 行为全貌（意图、思维链、工具调用）。 | ✅ 已实现 |
-| **Activity Log Store** | Logs | `.omp/self-evolution/activity.jsonl`。存储系统元行为（优化、提取、评估结果）。 | ✅ 已实现 |
+| **Session Log Store** | Logs | `.cornfield/sessions/*.jsonl`。存储 Agent 行为全貌（意图、思维链、工具调用）。 | ✅ 已实现 |
+| **Activity Log Store** | Logs | `.cornfield/self-evolution/activity.jsonl`。存储系统元行为（优化、提取、评估结果）。 | ✅ 已实现 |
 | **Memory DB (SQLite)** | Memory | 管理 Memory 的 Watermark (进度水位线)、Thread 状态、并发锁。 | ✅ 已实现 |
 | **Evolution DB (SQLite)** | Evolution | 管理 Skills, Episodes, Conventions, Fit Scores 等结构化数据。 | ✅ 已实现 |
-| **Memory File System** | Memory | `.omp/memory/*.md`。存储 `MEMORY.md` (长期记忆) 和 `skills/` 目录。 | ✅ 已实现 |
-| **Evolution File System** | Evolution | `.omp/self-evolution/`。L4 将新增 `skills/` 目录和 `context_cache.md`，实现显性读写。 | 🚧 L4 规划 |
+| **Memory File System** | Memory | `.cornfield/memory/*.md`。存储 `MEMORY.md` (长期记忆) 和 `skills/` 目录。 | ✅ 已实现 |
+| **Evolution File System** | Evolution | `.cornfield/self-evolution/`。L4 将新增 `skills/` 目录和 `context_cache.md`，实现显性读写。 | 🚧 L4 规划 |
 
 ### 2.2 处理引擎层 (Processing Engine Layer)
 
@@ -90,7 +90,7 @@
 
 这是 L4 架构的核心增量。我们将重新定义两大日志系统的角色，使其从"只写"变为"读写闭环"。
 
-### 4.1 Session Log (`.omp/sessions/*.jsonl`) —— 进化的"原始素材"
+### 4.1 Session Log (`.cornfield/sessions/*.jsonl`) —— 进化的"原始素材"
 **定位**：记录 Agent 的**行为全貌**。
 
 | 挖掘场景 | 机制 | 输出物 |
@@ -99,7 +99,7 @@
 | **隐式规范提取 (Implicit Convention Mining)** | **意图与结果对比**：扫描 `user_message` 中的否定句（如"不要这样"、"换个方式"），结合 Agent 的后续修正行为，提取为显式的 `negative_rule`。 | Convention DB 中的高优规则 |
 | **动态上下文压缩 (Context Compression)** | **冗余检测**：识别长会话中 Agent 的"死循环"或"冗余工具调用"（如反复 read 同一文件）。 | 防呆指南 (Anti-Pattern Injection) |
 
-### 4.2 Activity Log (`.omp/self-evolution/activity.jsonl`) —— 进化的"体检报告"
+### 4.2 Activity Log (`.cornfield/self-evolution/activity.jsonl`) —— 进化的"体检报告"
 **定位**：记录系统的**元行为**。
 
 | 触发器类型 | 监控指标 (Event Pattern) | 触发动作 |

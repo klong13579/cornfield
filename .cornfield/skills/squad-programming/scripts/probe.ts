@@ -2,7 +2,7 @@
  * probe.ts — 子任务健康扫描（squad-programming 父盯盘机制）
  *
  * 作用：父不干等消息。定期对未终态子任务做三路探活：
- *   1. 进程存活（ps 按 worktree 路径匹配 omp）
+ *   1. 进程存活（ps 按 worktree 路径匹配 cornfield）
  *   2. agent 注册（herdr workspace list 的 agent_status）
  *   3. pane 输出尾部 + 错误签名扫描（API 连接断/进程退出/崩溃堆栈等）
  *
@@ -40,7 +40,7 @@ interface SessionInfo {
  * broker = cornfield-gateway 托管的全局 IPC（~/.cornfield/intercom/broker.sock），
  * length-prefixed JSON 帧（4 字节大端长度 + payload）。
  * 发 {type:"list",requestId} → 收 {type:"sessions",sessions:SessionInfo[]}。
- * SessionInfo.status 即 omp 自身状态机（working/idle/done 等同源数据，herdr 只是镜像），
+ * SessionInfo.status 即 cornfield 自身状态机（working/idle/done 等同源数据，herdr 只是镜像），
  * lastActivity 毫秒时间戳 = 活动新鲜度（不用再去 stat session JSONL）。
  */
 async function probeIntercomSessions(): Promise<Map<string, { status?: string; lastActivity?: number; sessionPath?: string }>> {
@@ -50,7 +50,7 @@ async function probeIntercomSessions(): Promise<Map<string, { status?: string; l
 	const requestId = crypto.randomUUID();
 	const regMsg = JSON.stringify({
 		type: "register",
-		session: { name: "omp-probe", cwd: "/", pid: process.pid, model: "", startedAt: Date.now(), lastActivity: Date.now() },
+		session: { name: "cornfield-probe", cwd: "/", pid: process.pid, model: "", startedAt: Date.now(), lastActivity: Date.now() },
 	});
 	const listMsg = JSON.stringify({ type: "list", requestId });
 	const frameOf = (payload: string): Buffer => {
@@ -210,11 +210,11 @@ async function main(): Promise<void> {
 				problems.push("会话日志缺失（未找到 session JSONL）");
 			}
 		}
-		// 1. 进程存活（omp + worktree 路径）
+		// 1. 进程存活（cornfield + worktree 路径）
 		if (s.worktree) {
 			const ps = await run(["ps", "aux"]);
-			const procLive = ps.out.includes(s.worktree) && ps.out.includes("omp");
-			if (!procLive) problems.push("进程未找到（omp 不匹配）");
+			const procLive = ps.out.includes(s.worktree) && ps.out.includes("cornfield");
+			if (!procLive) problems.push("进程未找到（cornfield 不匹配）");
 		}
 		// 2. agent 注册（herdr agent list 的运行态）
 		if (s.worktree && runtime === undefined) {

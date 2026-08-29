@@ -107,7 +107,7 @@ interface PromptCacheEntry {
 **磁盘快照**（可选，冷启动加速）：
 
 ```
-~/.omp/gateway-data/prompt-cache/<agent-hash>.json
+~/.cornfield/gateway-data/prompt-cache/<agent-hash>.json
 ```
 
 - 存储已渲染的 prompt 文本 + 文件 manifest

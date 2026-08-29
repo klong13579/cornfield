@@ -3,7 +3,7 @@ name: squad-programming
 version: 0.5.0
 description: >-
   并行编排：把一个大任务拆成 MECE 子任务，在多个 git worktree 里各起一个子
-  omp 并行工作，用 intercom 主从通信做求助与进度汇报。Use when the user wants
+  cornfield 并行工作，用 intercom 主从通信做求助与进度汇报。Use when the user wants
   把任务拆开同时做、并行开发、组队编程、多开几个 agent 一起干、worktree 并行、
   任务太大需要拆解并行执行。Skip for 单文件小改动、需要手工 review 的探索性任务。
 mutating: true
@@ -11,7 +11,7 @@ mutating: true
 
 <!--
   脚本与 schema 的权威源：
-  - scripts/bootstrap.ts  — 集结（建 worktree、写任务包、启动子 omp + pane 启动检查）的全部机械步骤
+  - scripts/bootstrap.ts  — 集结（建 worktree、写任务包、启动子 cornfield + pane 启动检查）的全部机械步骤
   - #任务包 schema        — .squad.json 的字段契约，拆解阶段产出，脚本按它执行
   用户视角的使用说明见 USAGE.md（不重复本文内容）。
   改流程时 SKILL.md 与脚本一起改；SKILL.md 是唯一事实源。
@@ -19,10 +19,10 @@ mutating: true
 
 # squad-programming
 
-> **squad** — 一个父 omp 当 coordinator，N 个子 omp 在隔离 worktree 里并行；worker 停在 GO 闸门，父按依赖与并发槽位发 GO 调度，全部经 gate 验证后回收。
+> **squad** — 一个父 cornfield 当 coordinator，N 个子 cornfield 在隔离 worktree 里并行；worker 停在 GO 闸门，父按依赖与并发槽位发 GO 调度，全部经 gate 验证后回收。
 ## Outcome
 
-用户的任务被拆成 MECE 子任务，每个子任务在自己的 worktree（或只读共享区）由独立子 omp 执行；子 omp 通过 intercom 向父求助/汇报；父按任务包的 gate 验证每个子任务并把通过合体验证的集成分支 + diff 预览**交接给用户**；用户确认后父自动合并到 base 分支，清理 worktree 和 agent，归档任务包。
+用户的任务被拆成 MECE 子任务，每个子任务在自己的 worktree（或只读共享区）由独立子 cornfield 执行；子 cornfield 通过 intercom 向父求助/汇报；父按任务包的 gate 验证每个子任务并把通过合体验证的集成分支 + diff 预览**交接给用户**；用户确认后父自动合并到 base 分支，清理 worktree 和 agent，归档任务包。
 
 ## 前置条件（不满足则 [blocked]）
 
@@ -30,7 +30,7 @@ mutating: true
 |---|---|
 | 在 Herdr 环境 | `test "${HERDR_ENV:-}" = 1` |
 | herdr ≥ 0.8.0 | `herdr --version`（bootstrap 结集前自动校验，tab/worktree --workspace 依赖） |
-| omp 可执行 | `command -v omp` 非空（bootstrap 用 omp 启 worker，不读 PI_INTERCOM_PI_BIN） |
+| cornfield 可执行 | `command -v cornfield` 非空（bootstrap 用 cornfield 启 worker，不读 PI_INTERCOM_PI_BIN——旧 pi CLI 兼容变量，已不使用） |
 | **模型 provider 配了 key** | `models.yml` 的 `apiKey` 引用的环境变量非空（如 `NARWAL_PLAN_API_KEY`）；list_models 目录里有 ≠ key 有 |
 | intercom 在线 | `intercom({ action: "status" })` 连通 |
 | 知道自己 session id | `intercom({ action: "list" })` 中自己的 id（bootstrap 传参用） |
@@ -52,7 +52,7 @@ mutating: true
 2. **顺序依赖不并行** — T2 需要 T1 的代码产物 → 合成同一执行序列（同一 worktree 接力，脚本只起一个 agent，agent 做完 T1 继续做 T2）；只有「契约式依赖」（先定接口/签名/proto 文件，双方基于契约独立开发）才允许作为 `deps` 并行。
 3. **每条 acceptance 可验证** — 能跑的命令或明确产物路径；写「做好」「完成」= 失败，重写。
 4. **只读子任务（review/research）isolation 用 `shared-read`** — 不建 worktree，直接并行读 repo。
-5. **worktree 路径不用手写** — 自动落在父 omp cwd 下：`<父cwd>/.worktrees/<branch 去/为->`（如 `feat/t1` → `.worktrees/feat-t1`）。任务包不写 `worktree` 字段；显式覆盖仅限特殊场景（磁盘位置、非父仓库）。
+5. **worktree 路径不用手写** — 自动落在父 cornfield cwd 下：`<父cwd>/.worktrees/<branch 去/为->`（如 `feat/t1` → `.worktrees/feat-t1`）。任务包不写 `worktree` 字段；显式覆盖仅限特殊场景（磁盘位置、非父仓库）。
 
 ### Step 0.3 生成 gate（三态，见 #gate 三态）
 
@@ -88,13 +88,13 @@ bun run .cornfield/skills/squad-programming/scripts/bootstrap.ts \
   [--dry-run]
 ```
 
-**工作区形态（用户要求，全链验证过）**：父 omp 当前所在 workspace = 任务包 workspace（label 自动改名为 `squadId`）；每个子任务 = 一棵**任务 worktree 树节点**（`herdr worktree create --workspace <父> --label "T<n> · <title 前 18 字>"`），树节点显示名必须语义化（不能裸 T1/T2）；worker（omp）直接起在树节点的 pane 里。Spaces 面板呈现：`任务包 workspace` └─ `T1 · 任务目的` / `T2 · …` / `T3 · …`。
+**工作区形态（用户要求，全链验证过）**：父 cornfield 当前所在 workspace = 任务包 workspace（label 自动改名为 `squadId`）；每个子任务 = 一棵**任务 worktree 树节点**（`herdr worktree create --workspace <父> --label "T<n> · <title 前 18 字>"`），树节点显示名必须语义化（不能裸 T1/T2）；worker（cornfield）直接起在树节点的 pane 里。Spaces 面板呈现：`任务包 workspace` └─ `T1 · 任务目的` / `T2 · …` / `T3 · …`。
 
 **依赖安装（bootstrap 自动）**：新 worktree 没有 node_modules，tsgo 的 `types: ["bun", "assets"]` 会解析失败（报「从未安装依赖」）。`bootstrap.ts` 在 `herdr worktree create` 成功后自动 `bun install`（检查 `worktreePath/node_modules`，幂等：已存在或复用已有节点则跳过；hoisted 缓存下秒级到分钟级）。不要手工补装，也不要对未装依赖的 worktree 直接开 worker。
 
 ```text
 任务包 workspace（父 pane 所在，label=squadId）
-├─ T1 · Artifacts 产物面板骨架   （worktree t1 · worker omp 在节点 pane）
+├─ T1 · Artifacts 产物面板骨架   （worktree t1 · worker cornfield 在节点 pane）
 ├─ T2 · Slash 命令真源接线       （worktree t2）
 └─ T3 · Queue 取消排队接线       （worktree t3）
 ```
@@ -102,11 +102,11 @@ bun run .cornfield/skills/squad-programming/scripts/bootstrap.ts \
 脚本对每个 `isolation: "worktree"` 子任务：
 1. **按任务名建 worktree** — `herdr worktree create --workspace <父ws> --branch <id小写> --base main --path .worktrees/<id小写> --label "T<n> · <title>"`。幂等：已存在则复用其 `open_workspace_id` 的 pane。**必须用 herdr worktree create**（不是 git worktree add）——它返回的展示 workspace 就是 Spaces 树的子节点（`WorkspaceInfo.worktree.is_linked_worktree`，herdr TUI 按它对主仓库下挂树）。
 2. **写入该 worktree 的 `.squad.json`**（回填 parent.cwd / worktree 实值）。
-3. **在树节点 pane 上起 worker** — `herdr pane run <节点pane> "bash <shell>"`，shell 内容 = `export PI_SUBAGENT_*; exec omp --model <档位模型> <brief>`。**必须 exec omp 直启**：herdr 的 agent 识别认 pane 前台进程，`script` 包装的 pane 前台是 script/bash → agents 列表永久缺位（实测）；`exec` 后前台就是 omp → 立即登记。env 注入（intercom 父 edge）走 shell export（`tab create --env` 会破坏 pane shell prompt，不用）。
+3. **在树节点 pane 上起 worker** — `herdr pane run <节点pane> "bash <shell>"`，shell 内容 = `export PI_SUBAGENT_*; exec cornfield --model <档位模型> <brief>`。**必须 exec cornfield 直启**：herdr 的 agent 识别认 pane 前台进程，`script` 包装的 pane 前台是 script/bash → agents 列表永久缺位（实测）；`exec` 后前台就是 cornfield → 立即登记。env 注入（intercom 父 edge）走 shell export（`tab create --env` 会破坏 pane shell prompt，不用）。
 
 `shared-read` 子任务不建 worktree：父 workspace 内 tab create + 同一 worker 启动方式。
 
-启动后脚本自动做 **agent 登记检查**：轮询 `herdr agent list` 确认每个 pane 的 omp 已登记（默认超时 60s，`--verify-timeout <ms>` 可调），失败带 pane 快照退出码 1。确认只是同步慢可 `--skip-verify` 绕过，父用 intercom 复核。
+启动后脚本自动做 **agent 登记检查**：轮询 `herdr agent list` 确认每个 pane 的 cornfield 已登记（默认超时 60s，`--verify-timeout <ms>` 可调），失败带 pane 快照退出码 1。确认只是同步慢可 `--skip-verify` 绕过，父用 intercom 复核。
 
 **Completion criterion**：脚本返回每个子任务的 paneId 且 agent 登记检查通过；接下来走 #Phase 1.5 的 worker/父两层 gate。
 
@@ -118,21 +118,21 @@ bun run .cornfield/skills/squad-programming/scripts/bootstrap.ts \
 
 ## 模型使用纪律（实测教训）
 
-- **选档位模型时必须确认该 provider 已配置 API key**（`models.yml` 的 `apiKey` 环境变量存在，如 `NARWAL_PLAN_API_KEY`）。`list_models` 只证明模型在目录里，**不证明 key**（实测 kimi-code/bailian 目录有模型但无 key，子 omp 直接 `No API key found for kimi-code`）。
+- **选档位模型时必须确认该 provider 已配置 API key**（`models.yml` 的 `apiKey` 环境变量存在，如 `NARWAL_PLAN_API_KEY`）。`list_models` 只证明模型在目录里，**不证明 key**（实测 kimi-code/bailian 目录有模型但无 key，子 cornfield 直接 `No API key found for kimi-code`）。
 - 多子任务并发同一 provider 会命中分钟级 TPM 配额（`429 insufficient_quota`，narwal/alibaba 都实测踩过）——降 `maxConcurrency` 或分档（mid/pro 与 cheap/flash 错峰）。
 - 档位模型按子任务类别分：重实现（UI/逻辑）用 mid，轻任务（简单接线/文档）用 cheap，不一刀切。
 
 ## Phase 1.5 — 准备检查（readiness gate）
 
-集结后**不许直接开工**。本阶段把「子 omp 正常打开 / 模型可访问 / 任务包已获取」三个前提全部验证绿灯，才进 Phase 2。三层检查：
+集结后**不许直接开工**。本阶段把「子 cornfield 正常打开 / 模型可访问 / 任务包已获取」三个前提全部验证绿灯，才进 Phase 2。三层检查：
 
-1. **脚本层（omp 活着）** — bootstrap 启动每个子任务后自动轮询 `herdr agent list`（默认 60s，`--verify-timeout <ms>` 可调）：pane 出现在 agent 列表 = omp TUI 已上线（✓）；
+1. **脚本层（cornfield 活着）** — bootstrap 启动每个子任务后自动轮询 `herdr agent list`（默认 60s，`--verify-timeout <ms>` 可调）：pane 出现在 agent 列表 = cornfield TUI 已上线（✓）；
    - pane 输出出现启动失败信号（`command not found` / `No such file or directory` / `Cannot find module`）→ 立即失败并给快照；
    - 超时未上线 → 打印各 pane 输出快照并以退出码 1 失败，不静默继续。确认只是 herdr 探测延迟后，可 `--skip-verify` 重跑绕过，父再用 intercom 复核。
-2. **worker 层（包已读 + 模型可访问）** — 每个子 omp 开场必须先过准备检查再碰任务：读任务包 → `list_models` 核对档位模型在可用列表（不在则 `switch_model` 到档内可用模型）→ 尝试向父发一次 `[T<n>] STARTED`。STARTED ack 本身要经过一次真实 LLM 调用 —— 一次证明三件事：omp 活着、模型可访问、任务包已获取。**但 STARTED 的确认以父 ask 拉动为准**（见下方父层 pull 机制）：
+2. **worker 层（包已读 + 模型可访问）** — 每个子 cornfield 开场必须先过准备检查再碰任务：读任务包 → `list_models` 核对档位模型在可用列表（不在则 `switch_model` 到档内可用模型）→ 尝试向父发一次 `[T<n>] STARTED`。STARTED ack 本身要经过一次真实 LLM 调用 —— 一次证明三件事：cornfield 活着、模型可访问、任务包已获取。**但 STARTED 的确认以父 ask 拉动为准**（见下方父层 pull 机制）：
    - **已知现象（实测复现）**：子进程主动 `send` 给父，在启动窗口期（首轮几十秒内）会报 `Session not found`——broker 的目标解析在子进程注册传播完成前不可用；窗口过后 send 恢复正常（批次一 T2/T3 延时消息均送达）。`ask`（父→子）不受影响，双向链路始终可靠。
    - **子侧行为**：STARTED 尝试 send 一次；报 `Session not found`/失败 → **不要重试刷屏、不要中断任务**，停在 GO 闸门等父的 ask/GO；收到父的 ask 确认时如实回复。终态（REVIEWING/COMPLETE/FAILED）与求助消息都在窗口期后，send 可靠送达。
-3. **父层 wait-gate（pull 模式）** — 父 **不干等** STARTED 消息，主动驱动确认：① 先 `intercom({ action: "pending" })` 清积压 ask（父在忙别的/重启时错过的请求在这里补收）；② `intercom({ action: "list" })` 轮询，等全部子进程登记成 `child of <父>`（注册可能晚于启动数十秒，实测）；③ 注册齐全后对每个子任务 `intercom({ action: "ask", to: <子>, ... })` 拉 STARTED 确认（ask 双向始终可靠，实测 100% 成功率），确认后立即落账 `squad-state.ts <stateFile> update <taskId> started`；④ ask 无响应 → `herdr pane read <paneId>` 快照定位（是否在干活 / 启动报错）；⑤ ask 失败且 pane 死 → 才标 `blocked`（`update <taskId> blocked`）并给原因（缺模型 key / 模型名写错 / PATH 缺 omp），修复后只重集结该子任务，不整波回滚。准备检查失败的 worker 首条消息可能是 BLOCKED/FAILED——`assembled -> blocked/failed` 是合法转移，直接落账。
+3. **父层 wait-gate（pull 模式）** — 父 **不干等** STARTED 消息，主动驱动确认：① 先 `intercom({ action: "pending" })` 清积压 ask（父在忙别的/重启时错过的请求在这里补收）；② `intercom({ action: "list" })` 轮询，等全部子进程登记成 `child of <父>`（注册可能晚于启动数十秒，实测）；③ 注册齐全后对每个子任务 `intercom({ action: "ask", to: <子>, ... })` 拉 STARTED 确认（ask 双向始终可靠，实测 100% 成功率），确认后立即落账 `squad-state.ts <stateFile> update <taskId> started`；④ ask 无响应 → `herdr pane read <paneId>` 快照定位（是否在干活 / 启动报错）；⑤ ask 失败且 pane 死 → 才标 `blocked`（`update <taskId> blocked`）并给原因（缺模型 key / 模型名写错 / PATH 缺 cornfield），修复后只重集结该子任务，不整波回滚。准备检查失败的 worker 首条消息可能是 BLOCKED/FAILED——`assembled -> blocked/failed` 是合法转移，直接落账。
 
 **Completion criterion**：每个子任务 `started`（STARTED 已确认并落账）或 `blocked` 并给出原因。
 
@@ -163,7 +163,7 @@ bun run .cornfield/skills/squad-programming/scripts/squad-state.ts ~/.cornfield/
 
 ## Phase 2 — 执行与协作
 
-### 子 omp 侧协议（写进启动 brief，agent 遵守）
+### 子 cornfield 侧协议（写进启动 brief，agent 遵守）
 
 1. **首件事读任务包** — 文件路径在启动 brief 里给出：worktree 场景为 `<cwd>/.squad.json`，shared 场景为 `/tmp/squad-<squadId>/<taskId>.squad.json`。任务、scope、gate、汇报协议、模型档位都在里面。读完立即做 #Phase 1.5 的准备检查汇报。
 2. **模型核对** — 用 `list_models` 确认分配模型在可用列表；不在 → `switch_model` 切到档内可用模型，并按实际生效模型汇报（启动参数失效兜底）。
@@ -180,9 +180,9 @@ bun run .cornfield/skills/squad-programming/scripts/squad-state.ts ~/.cornfield/
   ```bash
   bun run .cornfield/skills/squad-programming/scripts/probe.ts ~/.cornfield/squads/<squadId>/state.json
   ```
-  状态/新鲜度**直连 intercom broker 拿**（不绕 herdr——broker 是 omp 自身状态机，herdr 只是镜像；probe 走 `~/.cornfield/intercom/broker.sock` 注册+list 协议，`SessionInfo.status` + `lastActivity` 即权威）：进程存活（ps 按 worktree 路径匹配 omp）→ broker 注册态（会话在否/status）→ `lastActivity` 新鲜度 + pane 错误签名（**静默挂起**：`lastActivity` 长时间不更新——模型 API 响应挂起时 pid 在、pane 有残影，但已死机，实测 187s 静默案例；`PROBE_STALL_AFTER_S` 默认 240s）。输出 `[OK]/[WARN]`，有 WARN 退出码 1。
-  **WARN 处置阶梯（不直接判死）**：① 先看是否自愈——API 断连（`socket connection was closed` 等）是 provider 并发高时的常见噪声，omp 自带重试，worker 通常继续推进；② **静默挂起先用 ask 唤醒**（实测 ask 到达后 worker 立即恢复——ask 双向可靠，本身就是唤醒信号）；③ ask 无响应 + pane 无进展 → 记 `stalled` → 转用户拍板（重启该子任务 / 等 / 打回）。
-- 用 `intercom({ action: "children" })` 看子 omp 实时状态，不轮询消息。
+  状态/新鲜度**直连 intercom broker 拿**（不绕 herdr——broker 是 cornfield 自身状态机，herdr 只是镜像；probe 走 `~/.cornfield/intercom/broker.sock` 注册+list 协议，`SessionInfo.status` + `lastActivity` 即权威）：进程存活（ps 按 worktree 路径匹配 cornfield）→ broker 注册态（会话在否/status）→ `lastActivity` 新鲜度 + pane 错误签名（**静默挂起**：`lastActivity` 长时间不更新——模型 API 响应挂起时 pid 在、pane 有残影，但已死机，实测 187s 静默案例；`PROBE_STALL_AFTER_S` 默认 240s）。输出 `[OK]/[WARN]`，有 WARN 退出码 1。
+  **WARN 处置阶梯（不直接判死）**：① 先看是否自愈——API 断连（`socket connection was closed` 等）是 provider 并发高时的常见噪声，cornfield 自带重试，worker 通常继续推进；② **静默挂起先用 ask 唤醒**（实测 ask 到达后 worker 立即恢复——ask 双向可靠，本身就是唤醒信号）；③ ask 无响应 + pane 无进展 → 记 `stalled` → 转用户拍板（重启该子任务 / 等 / 打回）。
+- 用 `intercom({ action: "children" })` 看子 cornfield 实时状态，不轮询消息。
 - **每条状态消息落地 state.json**（父中断恢复的底账）:
   `bun run .cornfield/skills/squad-programming/scripts/squad-state.ts ~/.cornfield/squads/<squadId>/state.json update <taskId> <status> [一句话] [--force]`
   - 转移矩阵：`assembled -> started / blocked / failed`（blocked/failed = 准备检查失败或 pane 死），`started -> running / blocked / reviewing / failed`（running = GO 已发；reviewing 为容错），`running -> blocked / reviewing / complete / failed`，`blocked/reviewing -> started / running / complete / failed`。
@@ -193,11 +193,11 @@ bun run .cornfield/skills/squad-programming/scripts/squad-state.ts ~/.cornfield/
 - 收到子 ask → 立即 `reply` 决策或引导；`pending` 看堆积，`reply to <taskId>` 定向回复。
 - 收到 `[T<n>] BLOCKED` → 判断是缺信息（补）还是缺决策（转用户拍板，绝不代拍）。
 
-**Completion criterion**：所有子任务达到 `COMPLETE` 或 `FAILED`（由父向每个子 omp 确认一次最终状态），且 state.json 已同步为终态。
+**Completion criterion**：所有子任务达到 `COMPLETE` 或 `FAILED`（由父向每个子 cornfield 确认一次最终状态），且 state.json 已同步为终态。
 
 ## 父中断恢复（进程重启后接续）
 
-父 omp 进程中断（崩溃/重启/被 kill）时，子 omp 的进程和 worktree 不受影响，但父的管辖上下文（谁 STARTED、谁已 GO、谁卡在 ask）会丢。恢复入口只有一条命令：
+父 cornfield 进程中断（崩溃/重启/被 kill）时，子 cornfield 的进程和 worktree 不受影响，但父的管辖上下文（谁 STARTED、谁已 GO、谁卡在 ask）会丢。恢复入口只有一条命令：
 
 ```bash
 bun run .cornfield/skills/squad-programming/scripts/squad-state.ts <stateFile> reconcile
@@ -217,7 +217,7 @@ bun run .cornfield/skills/squad-programming/scripts/squad-state.ts <stateFile> r
 ## Phase 3 — 验收交接（skill 不合并代码）
 
 1. **提交检查**：交接前每个子任务必须已在分支**提交**（worker 收尾铁律，见启动 brief；未提交的交付父可代提交——只在 worktree 内 add/commit 源文件，排除 .squad.json/node_modules）。提交后 `git log <base>..<branch>` 应恰好是本次交付。
-2. **单任务验证**：对每个子任务在对应 worktree 跑 `gate.verifiers`（如 `bun check`、`bun test <scope>`）；失败 → 打回子 omp 修或标记 `FAILED` 上报用户。
+2. **单任务验证**：对每个子任务在对应 worktree 跑 `gate.verifiers`（如 `bun check`、`bun test <scope>`）；失败 → 打回子 cornfield 修或标记 `FAILED` 上报用户。
 3. **整体验证（integration worktree）— 强制门禁，≥2 个 complete 子任务时必须执行**：子任务**分开验了还不够**。任何 squad 有 ≥2 个子任务达到 complete，父**必须**把全部已完成分支合到一个 integration worktree 做合体验证——**无论子任务是否同域、文件是否相交**。判定依据不是「文件是否重叠」，而是「**合体后的产物才是交付物**」：
    - **契约式依赖也必须合体**：T1 定义类型/接口/加载逻辑，T2 消费/打包——即使各自改不同文件（单任务 gate 全绿），合体产物可能缺 T1 改动。实测案例（2026-08-21 打包 squad）：T1 改 `main.ts` 生产加载（`isPackaged → loadFile(renderer)`）、T2 改打包链路，单 worktree 验收各自通过；但打包只用 T2 worktree（不含 T1 改动）→ 产物 `main.js` 无 `isPackaged` 分支 → 装机白屏（占位页）。根因：验收没有走 integration worktree 合体。
    - **唯一豁免**：squad 只有 1 个子任务（无合体意义），或全部子任务为纯只读 research（无产物）。豁免必须能在交接清单里显式说明理由。
@@ -233,7 +233,7 @@ bun run .cornfield/skills/squad-programming/scripts/squad-state.ts <stateFile> r
 4. **交接**：父 agent 向用户展示集成分支（`<squadId>-integ`）的完整 diff 预览 + 整体验证结果 + 每个子任务的摘要。用户确认后（说「合吧」/「合并」/「merge」），父 agent 自动执行步骤 5。用户打回/丢弃时，分支和 worktree 保留不动。
 5. **合并与清理**（用户确认后自动执行，每步单独执行、确认 JSON 返回后再下一步，**禁止串行 `&&`**）——顺序铁律：**先合并到 base，再关 agent，再删 git worktree，最后归档**。
    - **① 合并到 base**：在 integration worktree 内执行 `git checkout <baseBranch> && git merge <squadId>-integ`（必要时代用户 push）。合并失败（冲突等）→ 停止，报告给用户，不继续清理。
-   - **② 关 agent**：子任务的 agent 节点 = herdr 树 workspace（`w57`/`w5A`…），里面跑的 omp 进程**不随 `git worktree remove` 消失**——实测删完 worktree 还残留 7 个 idle omp。逐个 `herdr workspace close <nodeWorkspaceId>`（= 关 pane + 杀进程 + 注销 intercom 会话）；之后验证判据三条：`ps aux | grep "omp --model"` 无残留、`herdr workspace list` 无 linked worktree 节点、`intercom({action:"list"})` 无该 squad 的子会话。
+   - **② 关 agent**：子任务的 agent 节点 = herdr 树 workspace（`w57`/`w5A`…），里面跑的 cornfield 进程**不随 `git worktree remove` 消失**——实测删完 worktree 还残留 7 个 idle cornfield。逐个 `herdr workspace close <nodeWorkspaceId>`（= 关 pane + 杀进程 + 注销 intercom 会话）；之后验证判据三条：`ps aux | grep "cornfield --model"` 无残留、`herdr workspace list` 无 linked worktree 节点、`intercom({action:"list"})` 无该 squad 的子会话。
    - **③ 删 worktree + 分支**：`git worktree remove --force <worktree路径>` + `git branch -D <branch>`（用户已确认合并/丢弃）；integration worktree 同法（`.worktrees/<squadId>-integ` + `git branch -D <squadId>-integ`）。
    - **④ 归档**：任务包移到 `~/.cornfield/squads/archive/<squadId>/`；清 `/tmp/squad-*.json` bundle。
    - **⑤ 还原父 workspace 名**：`herdr workspace rename <父wsId> <原名>`（集结时被 rename 为 squadId）。
@@ -255,7 +255,7 @@ bun run .cornfield/skills/squad-programming/scripts/squad-state.ts <stateFile> r
 | `high` | `narwal-plan/glm-5.3` | 重任务（复杂重构/跨模块改动），显式指定时使用 |
 | 禁用 | `narwal-plan/claude-opus-*`、`claude-sonnet-*` | 默认不启用；父显式在任务包指定才用 |
 
-档位是**单点配置**：子 omp 启动后若模型不在档位，`switch_model` 切回档内模型。禁用清单只增不减 —— 子 omp 禁止使用禁用清单内的模型，用户拍板才放行新贵档。
+档位是**单点配置**：子 cornfield 启动后若模型不在档位，`switch_model` 切回档内模型。禁用清单只增不减 —— 子 cornfield 禁止使用禁用清单内的模型，用户拍板才放行新贵档。
 
 ## 版本管理
 
@@ -290,7 +290,7 @@ bun run .cornfield/skills/squad-programming/scripts/squad-state.ts <stateFile> r
 | `explicit` | 用户明确给出验收标准 | `auto` |
 | `unknown` | 推导不出 | 强制 `human-review`，走 report-only |
 
-**report-only 降级**：unknown gate 的子任务，子 omp 只分析/产出报告，不 merge、不碰共享范围；父把结果 + 关键差异摆给用户，用户验收后才进下一波。安全不靠人懂，靠护栏（不合并是默认）。
+**report-only 降级**：unknown gate 的子任务，子 cornfield 只分析/产出报告，不 merge、不碰共享范围；父把结果 + 关键差异摆给用户，用户验收后才进下一波。安全不靠人懂，靠护栏（不合并是默认）。
 
 ## 任务包 schema（.squad.json）
 
@@ -307,7 +307,7 @@ bun run .cornfield/skills/squad-programming/scripts/squad-state.ts <stateFile> r
     "high": "narwal-plan/glm-5.3",               // 重任务档位，显式指定时使用
     "banned": ["narwal-plan/claude-opus-*", "narwal-plan/claude-sonnet-*"]
   },
-  "parent": { "target": "planner", "sessionId": "...", "name": "可选可读展示名" },  // cwd 可选：缺省 = bootstrap 运行目录（父 omp 会话 cwd），worktree 落 <父cwd>/.worktrees/；name 仅展示（worker brief 用），路由仍走 target
+  "parent": { "target": "planner", "sessionId": "...", "name": "可选可读展示名" },  // cwd 可选：缺省 = bootstrap 运行目录（父 cornfield 会话 cwd），worktree 落 <父cwd>/.worktrees/；name 仅展示（worker brief 用），路由仍走 target
   "subtasks": [
     {
       "id": "T1",
@@ -333,7 +333,7 @@ bun run .cornfield/skills/squad-programming/scripts/squad-state.ts <stateFile> r
 }
 ```
 
-## worker 启动指令模板（Phase 1 传给子 omp 的开场）
+## worker 启动指令模板（Phase 1 传给子 cornfield 的开场）
 
 ```
 你是 <taskId>（<title>）的实现者，属于 squad <squadId> 的 worker。
@@ -356,10 +356,10 @@ shared 场景 = /tmp 绝对路径），完整理解任务、scope、gate、汇�
 - **顺序依赖拆并行** — T2 靠 T1 产物仍拆两个并行 worktree → 合并冲突/串内容；正确做法：同一 worktree 接力。
 - **unknown gate 还 auto merge** — 推导不出验收标准就自动放行 = 帮你做决定；必须 human-review。
 - **为并行而并行** — 单一连续任务硬拆成 N 个子任务，集结/回收开销大于收益。
-- **贵模型默认跑** — 子 omp 没显式指定模型就随缘；必须按档位表赋值。
+- **贵模型默认跑** — 子 cornfield 没显式指定模型就随缘；必须按档位表赋值。
 - **父 agent 代拍板** — gate 未知或产品类验收，父只整理摘要，决策权交回用户。
 - **worktree 用 git worktree add 绕过 herdr** — 不产生树节点（Spaces 面板挂不上）；必须 `herdr worktree create`。
-- **script -q 包装启动 omp** — pane 前台进程是 script/bash，herdr agent 识别缺位（agents 列表看不到）；必须 `exec omp` 直启。
+- **script -q 包装启动 cornfield** — pane 前台进程是 script/bash，herdr agent 识别缺位（agents 列表看不到）；必须 `exec cornfield` 直启。
 - **拿单 worktree 产物当整体验收**（2026-08-21 实测）— 契约式依赖（T1 改接口/加载逻辑、T2 消费/打包）下，子任务文件不相交、单任务 gate 全绿，就跳过 integration 合体直接拿其中一个 worktree 的构建/打包产物验收 → 产物缺另一半改动，装机才暴露（实测：T2 worktree 打包缺 T1 的 `main.ts isPackaged` 分支 → 白屏）。**≥2 个 complete 子任务必须走 integrate.ts 合体验证，产物以合体后为准**。
 - **intercom ask 不带 to** — 按 cwd 优先路由，实测误投同目录活跃的其他会话（aion-ui）；ask 必须显式 to=父。
-- **agent.start 启动 omp** — agent_pane_busy / timeout / 名字不登记（本环境 5 轮反复失败）；pane run + exec omp 稳定。
+- **agent.start 启动 cornfield** — agent_pane_busy / timeout / 名字不登记（本环境 5 轮反复失败）；pane run + exec cornfield 稳定。

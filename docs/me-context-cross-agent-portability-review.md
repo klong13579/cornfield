@@ -56,7 +56,7 @@
 | Agent | 常见个人或项目级 skill 目录 | 当前主要障碍 | 推荐处理 |
 | --- | --- | --- | --- |
 | Codex | `~/.agents/skills/`、项目 `.agents/skills/` | 当前文档只指向 OMP；顶层 `version` 不通过 `skill-creator` 校验器 | 使用通用 `.agents/skills`；调整 frontmatter；必要时提供 `agents/openai.yaml` |
-| OMP | `~/.omp/agent/skills/`，并可发现 `.agents`、Claude、Codex 等来源 | 固定目录假设；原生 `.omp` 同名副本可能遮蔽共享版本 | 使用通用目录或明确指定原生入口；检测同名冲突和有效来源 |
+| OMP | `~/.cornfield/agent/skills/`，并可发现 `.agents`、Claude、Codex 等来源 | 固定目录假设；原生 `.cornfield` 同名副本可能遮蔽共享版本 | 使用通用目录或明确指定原生入口；检测同名冲突和有效来源 |
 | Claude Code | `~/.claude/skills/`、项目 `.claude/skills/` | 不应假设其自动发现 `.agents/skills`；专有配置语义不同 | 提供用户授权的 `.claude` 链接或受管理副本 |
 | Cursor | `~/.agents/skills/`、`~/.cursor/skills/` 及相应项目目录 | 能被发现不等于固定 OMP 路径能够运行 | 使用通用目录与宿主无关的脚本入口 |
 | Gemini CLI | `~/.gemini/skills/` 或 `~/.agents/skills/` | 原有安装命令、数据根目录和刷新流程绑定 OMP | 复用 `.agents/skills`；提供显式 reload 或状态检测 |
@@ -97,7 +97,7 @@ Claude Code 根据用户明确选择，再提供：
 - 所有 Agent 遇到同名 skill 都采用相同优先级。
 - 安装到三个目录就一定比安装到一个通用目录更安全。
 
-尤其是 OMP：已有 `.omp` 原生 skill 时，它可能优先于 `.agents` 中的新副本，造成“升级已经完成，但实际仍在运行旧代码”。
+尤其是 OMP：已有 `.cornfield` 原生 skill 时，它可能优先于 `.agents` 中的新副本，造成“升级已经完成，但实际仍在运行旧代码”。
 
 ## 4. 跨操作系统兼容矩阵
 
@@ -137,7 +137,7 @@ dws auth login --device
 但是，图谱脚本默认输入路径写死为：
 
 ```text
-~/.omp/agent/skills/me-context/real/corpus.jsonl
+~/.cornfield/agent/skills/me-context/real/corpus.jsonl
 ```
 
 安装脚本调用图谱时又没有显式传入 `--in`。
@@ -278,13 +278,13 @@ metadata:
 当前文档包含类似：
 
 ```text
-git clone <this-repo> ~/.omp/agent/skills/me-context
+git clone <this-repo> ~/.cornfield/agent/skills/me-context
 ```
 
 但目标仓库本身是包含多个 skill 的仓库。完整克隆后，实际文件位置会变成：
 
 ```text
-~/.omp/agent/skills/me-context/me-context/SKILL.md
+~/.cornfield/agent/skills/me-context/me-context/SKILL.md
 ```
 
 而多数 Agent 要求：
@@ -2768,7 +2768,7 @@ me-context sync status --format json
 - [ ] 通过 Codex `skill-creator` frontmatter 校验。
 - [ ] 可以从 `.agents/skills` 正确被 Codex、OMP 和至少一个其他 Agent 发现。
 - [ ] Claude Code 可以通过其自身目录加载。
-- [ ] 不依赖固定的 `~/.omp/agent` 目录。
+- [ ] 不依赖固定的 `~/.cornfield/agent` 目录。
 - [ ] Windows 原生可以完成安装、诊断和只读查询。
 - [ ] macOS、Linux、Windows 使用正确的数据根目录。
 - [ ] Windows 使用有效的用户级文件访问控制，而不是假设 `0600` 生效。

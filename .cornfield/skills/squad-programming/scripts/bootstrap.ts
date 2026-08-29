@@ -3,21 +3,21 @@
  *
  * 作用
  * ────
- * 按任务包（.squad.json schema）把用户任务集结成一组并行子 omp（最终形态，全链真实验证）：
+ * 按任务包（.squad.json schema）把用户任务集结成一组并行子 cornfield（最终形态，全链真实验证）：
  *   1. 父 workspace 改名任务包名（label=squadId，父 pane 所在 workspace 即任务包 workspace）
  *   2. isolation="worktree" → herdr worktree create（按任务名建树节点：分支/目录 = id 小写，
  *      label = "T<n> · <title 前 18 字>"），返回节点 workspace + pane —— Spaces 面板在父下挂树
- *   3. 每个子任务在其树节点 pane 上起 worker：bash -c 'export PI_SUBAGENT_*; exec omp --model <档> <brief>'
+ *   3. 每个子任务在其树节点 pane 上起 worker：bash -c 'export PI_SUBAGENT_*; exec cornfield --model <档> <brief>'
  *      —— exec 直启（agent 登记必需）；env 注入走 shell export（tab create --env 破坏 pane prompt）
  *   4. isolation="shared-*" → 父 workspace 内 tab create + 同款 worker 启动
- *   5. 启动后准备检查：轮询 herdr agent list 确认每个 pane 的 omp 已登记（agent.start 实验不稳定，不用）
+ *   5. 启动后准备检查：轮询 herdr agent list 确认每个 pane 的 cornfield 已登记（agent.start 实验不稳定，不用）
  *
  * 用法
  * ────
  *   # 只校验任务包 schema（不执行任何操作，Phase 0 的 completion 检查）
  *   bun run .cornfield/skills/squad-programming/scripts/bootstrap.ts --check <任务包路径>
  *
- *   # 集结（建 worktree / 写任务包 / 启动子 omp + 启动后准备检查）
+ *   # 集结（建 worktree / 写任务包 / 启动子 cornfield + 启动后准备检查）
  *   bun run .cornfield/skills/squad-programming/scripts/bootstrap.ts \
  *     --bundle <任务包绝对路径> \
  *     --parent-target <父 session 名或前缀> \
@@ -27,11 +27,11 @@
  * 前置条件
  * ────────
  * - HERDR_ENV=1（Herdr 环境），herdr ≥ 0.7.5（tab create 支持 --workspace）
- * - omp 在 PATH（或 OMP_BIN 指定）。不读 PI_INTERCOM_PI_BIN —— 那是旧 pi CLI，认证栈与本仓库不互通
+ * - cornfield 在 PATH（固定用 cornfield 命令，不再支持 OMP_BIN 覆盖）。不读 PI_INTERCOM_PI_BIN —— 旧 pi CLI 兼容变量，已不使用
  * - 脚本零依赖，不 import 任何 @oh-my-pi/* 包
  *
  * 输出：{ squadId, launched: [{ taskId, isolation, worktree?, paneId, model, briefPath }], verify } JSON。
- * 任何 herdr/omp 命令失败 / 准备检查未通过 → 退出码 1（集结失败不静默继续，由父 agent 决策）。
+ * 任何 herdr/cornfield 命令失败 / 准备检查未通过 → 退出码 1（集结失败不静默继续，由父 agent 决策）。
  */
 
 import * as fs from "node:fs";
@@ -298,7 +298,7 @@ function shellQuote(value: string): string {
 
 const VERIFY_POLL_MS = 2000;
 
-// 启动失败信号：shell/Bun 在 omp 无法启动时的确定性报错（无法从启动 brief 里误触发）。
+// 启动失败信号：shell/Bun 在 cornfield 无法启动时的确定性报错（无法从启动 brief 里误触发）。
 const BOOT_FAILURE_PATTERNS: Array<RegExp> = [
 	/\bcommand not found\b/,
 	/\bNo such file or directory\b/,
@@ -310,7 +310,7 @@ function hasBootFailureSignal(text: string): boolean {
 }
 
 function tryPaneRead(paneId: string): string {
-	// omp TUI 在 alternate screen 上，pane read 多为空 —— 快照仅供诊断，不用于判定。
+	// cornfield TUI 在 alternate screen 上，pane read 多为空 —— 快照仅供诊断，不用于判定。
 	// （实测 recent-unwrapped 能解码出 TUI 帧里的消息/bash 输出，主要信号还是靠 outLog，见 isPaneAlive）
 	try {
 		const result = Bun.spawnSync(
@@ -334,7 +334,7 @@ async function agentListPaneIds(): Promise<Set<string>> {
 	}
 }
 
-// 启动后准备检查（脚本层）：exec omp 启动后 herdr 会登记 agent（前台进程=omp），轮询 agent list 确认。
+// 启动后准备检查（脚本层）：exec cornfield 启动后 herdr 会登记 agent（前台进程=cornfield），轮询 agent list 确认。
 async function verifyLaunched(items: Array<{ taskId: string; paneId: string }>, timeoutMs: number): Promise<"ok" | "failed"> {
 	process.stderr.write(`准备检查: 确认 ${items.length} 个 agent 登记（agent list 探测，超时 ${Math.round(timeoutMs / 1000)}s）...\n`);
 	const deadline = Date.now() + timeoutMs;
@@ -370,11 +370,11 @@ async function verifyLaunched(items: Array<{ taskId: string; paneId: string }>, 
 		process.stderr.write(`准备检查失败: ${problems.length}/${items.length} 个子任务未通过：\n`);
 		for (const problem of problems) {
 			process.stderr.write(`  ✗ ${problem.taskId} (${problem.paneId}) — ${problem.reason}\n`);
-			process.stderr.write(`    pane 输出快照（omp TUI 在 alternate screen，空属正常，仅供排查）:\n`);
+			process.stderr.write(`    pane 输出快照（cornfield TUI 在 alternate screen，空属正常，仅供排查）:\n`);
 			process.stderr.write(`    ${(problem.snapshot.slice(0, 500) || "(空)").split("\n").map(line => `      ${line}`).join("\n")}\n`);
 		}
 		process.stderr.write(
-			"恢复建议: 按快照排查（omp 是否在 PATH、模型是否有 key/配额、brief 是否可解析）。若确认只是 agent list 同步慢，\n" +
+			"恢复建议: 按快照排查（cornfield 是否在 PATH、模型是否有 key/配额、brief 是否可解析）。若确认只是 agent list 同步慢，\n" +
 				"父 agent 可用 --skip-verify 重跑集结绕过，再用 intercom 复核，全部 STARTED 后进 Phase 2。\n",
 		);
 		return "failed";
@@ -385,7 +385,7 @@ async function verifyLaunched(items: Array<{ taskId: string; paneId: string }>, 
 }
 
 function resolveWorktree(subtask: Subtask, parentCwd: string): string {
-	// worktree 落点默认在父 omp 的 cwd 下：<父cwd>/.worktrees/<branch>
+	// worktree 落点默认在父 cornfield 的 cwd 下：<父cwd>/.worktrees/<branch>
 	// （branch 中 / 替换为 -，feat/t1 → feat-t1）；任务包显式 worktree 字段可覆盖（特殊场景）。
 	if (subtask.worktree) return subtask.worktree;
 	return path.join(parentCwd, ".worktrees", (subtask.branch ?? "").replaceAll("/", "-"));
@@ -471,7 +471,7 @@ function tabLabel(subtask: Subtask): string {
 	return `${subtask.id} · ${short || "task"}`;
 }
 
-// 子 omp 进程环境注入：PI_SUBAGENT_* 注册 intercom 父 edge（ask 自动路由 + 父 children 可见）。
+// 子 cornfield 进程环境注入：PI_SUBAGENT_* 注册 intercom 父 edge（ask 自动路由 + 父 children 可见）。
 // 注入位置 = 启动 shell 文件的 export 前缀（tab create --env 实测破坏 pane prompt，不用）。
 function envExports(bundle: Bundle, subtask: Subtask, index: number): string {
 	const entries: Array<[string, string]> = [
@@ -485,12 +485,12 @@ function envExports(bundle: Bundle, subtask: Subtask, index: number): string {
 }
 
 async function launchWorker(paneId: string, model: string, brief: string, name: string, envLine: string): Promise<void> {
-	// 在任务 pane 里启动 omp worker：bash -c 'export PI_SUBAGENT_*; exec omp …' ——
-	// exec 让前台进程就是 omp（herdr agent 识别认前台进程，实测 required）。
+	// 在任务 pane 里启动 cornfield worker：bash -c 'export PI_SUBAGENT_*; exec cornfield …' ——
+	// exec 让前台进程就是 cornfield（herdr agent 识别认前台进程，实测 required）。
 	const tmpDir = path.join(os.tmpdir(), "squad-launch");
 	if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
 	const shellFile = path.join(tmpDir, `${name}.sh`);
-	fs.writeFileSync(shellFile, `#!/bin/bash\n${envLine} exec ${shellQuote("omp")} --model ${shellQuote(model)} ${shellQuote(brief)}\n`);
+	fs.writeFileSync(shellFile, `#!/bin/bash\n${envLine} exec ${shellQuote("cornfield")} --model ${shellQuote(model)} ${shellQuote(brief)}\n`);
 	await run(["herdr", "pane", "run", paneId, `bash ${shellQuote(shellFile)}`], { quiet: true });
 }
 
@@ -637,7 +637,7 @@ async function main(): Promise<void> {
 	const tmpDir = path.join(os.tmpdir(), `squad-${bundle.squadId}`);
 	if (!dryRun) fs.mkdirSync(tmpDir, { recursive: true });
 
-	// worktree 落点仓库：parent.cwd（缺省 = bootstrap 运行目录，即父 omp 会话的 cwd）
+	// worktree 落点仓库：parent.cwd（缺省 = bootstrap 运行目录，即父 cornfield 会话的 cwd）
 	const parentCwd = path.resolve(bundle.parent.cwd ?? process.cwd());
 
 	// 父 workspace = 当前对话所在 workspace：改名任务包名，三个子 pane 直接挂载在它下面。
@@ -663,7 +663,7 @@ async function main(): Promise<void> {
 				// 先按任务名建 worktree（herdr 树子节点），worker 后续起在节点 pane
 				const node = await ensureTaskWorktree(subtask, bundle.baseBranch, workspaceId, cwd);
 				paneId = node.paneId;
-				// 回填实际 worktree 路径再写入任务包：子 omp 读 .squad.json 时 worktree 字段是解析后的实值
+				// 回填实际 worktree 路径再写入任务包：子 cornfield 读 .squad.json 时 worktree 字段是解析后的实值
 				writeJson(briefPath, {
 					...bundle,
 					parent: { ...bundle.parent, cwd: parentCwd },
@@ -678,7 +678,7 @@ async function main(): Promise<void> {
 
 		const brief = workerBrief(bundle, subtask, model, briefPath);
 		if (dryRun) {
-			const dryRunCommand = `herdr worktree create --workspace <父ws> --branch ${subtask.branch ?? ""} --path ${cwd} --label ${subtask.id} && herdr pane run <节点pane> "bash <shell>（export PI_SUBAGENT_*; exec omp --model ${model} <brief>）"`;
+			const dryRunCommand = `herdr worktree create --workspace <父ws> --branch ${subtask.branch ?? ""} --path ${cwd} --label ${subtask.id} && herdr pane run <节点pane> "bash <shell>（export PI_SUBAGENT_*; exec cornfield --model ${model} <brief>）"`;
 			result.push({ taskId: subtask.id, isolation: subtask.isolation, cwd, worktree: subtask.isolation === "worktree" ? cwd : null, briefPath, dryRunCommand });
 			continue;
 		}

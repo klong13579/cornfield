@@ -20,7 +20,7 @@
 ### 步骤 1：改默认阈值（已执行）
 
 ```yaml
-# ~/.omp/agent/config.yml
+# ~/.cornfield/agent/config.yml
 compaction:
   thresholdPercent: 50    # 从 75 降到 50
 ```
@@ -181,7 +181,7 @@ export function prepareCompaction(entries, settings) {
 
 ## 5. 进度
 
-- [x] 步骤 1：改阈值（hr3 + ~/.omp 已应用）
+- [x] 步骤 1：改阈值（hr3 + ~/.cornfield 已应用）
 - [ ] 步骤 2：Gateway 层安全网
 - [ ] 步骤 3：空闲压缩配置化
 - [ ] 步骤 4：Per-model 阈值

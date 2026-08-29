@@ -51,7 +51,7 @@ Agent 的自主学习系统。从 session 记录中提取技能（skills）、�
 _Avoid_: Training, fine-tuning, learning pipeline
 
 ### Skill
-从 Self-evolution 中提取的可复用上下文块。可以是编码惯例、工具使用模式、项目特有知识等。以 .md 文件形式存入 `~/.omp/agent/skills/`，通过 system prompt 注入 agent 上下文。
+从 Self-evolution 中提取的可复用上下文块。可以是编码惯例、工具使用模式、项目特有知识等。以 .md 文件形式存入 `~/.cornfield/agent/skills/`，通过 system prompt 注入 agent 上下文。
 _Avoid_: Convention, pattern, template
 
 ### Memory

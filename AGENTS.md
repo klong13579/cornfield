@@ -54,7 +54,7 @@ bun run release                  # bumps versions, finalizes CHANGELOGs, tags, p
 
 ### Restart gateway (after rebuild or config change)
 
-The canonical pattern for all gateway lifecycle operations. **Both `AGENTS.md`'s "DingTalk issue reproduction" section and `.omp/skills/repro-inject/SKILL.md` Step 1 point here** — do not duplicate this pattern elsewhere.
+The canonical pattern for all gateway lifecycle operations. **Both `AGENTS.md`'s "DingTalk issue reproduction" section and `.cornfield/skills/repro-inject/SKILL.md` Step 1 point here** — do not duplicate this pattern elsewhere.
 
 **Use `cornfield-gateway service` (graceful), not `launchctl kickstart -k` (SIGKILL).**
 
@@ -79,15 +79,15 @@ SIGKILL bypasses `gateway.stop()`, the restart-sentinel is never written, in-fli
 
 #### Stale pid
 
-`Gateway already running (PID xxx)` means a leftover `~/.omp/gateway-data/gateway.pid`. `rm` it and re-launch. **Do not `kill -9` the listed PID** — the previous run already exited, the listed process is unrelated.
+`Gateway already running (PID xxx)` means a leftover `~/.cornfield/gateway-data/gateway.pid`. `rm` it and re-launch. **Do not `kill -9` the listed PID** — the previous run already exited, the listed process is unrelated.
 
 #### Verify after restart
 
 ```bash
 curl -s http://127.0.0.1:7890/test/health   # → {"ok":true,"mode":"test-injection"}
-cat ~/.omp/gateway-data/gateway.pid
-cat ~/.omp/gateway-data/gateway.status.json | python3 -m json.tool | head -20
-tail -20 ~/.omp/gateway-data/logs/service.log | grep -E "BOOT|service start"
+cat ~/.cornfield/gateway-data/gateway.pid
+cat ~/.cornfield/gateway-data/gateway.status.json | python3 -m json.tool | head -20
+tail -20 ~/.cornfield/gateway-data/logs/service.log | grep -E "BOOT|service start"
 ```
 
 **Do not run** `bun run dev`, `bun test`, or `bun run check` unless the user instructs. Run only targeted tests for code you changed.
@@ -140,10 +140,10 @@ Extension products:
 1. **User input** → `modes/interactive-mode.ts` (TUI) or `modes/print-mode.ts` (non-interactive `-p`).
 2. **Agent loop** (`pi-agent-core`): user message → LLM provider (`pi-ai`) → tool calls → tool execution (`coding-agent/src/tools/`) → results back to LLM → repeat until done.
 3. **Tools** are built via `createTools()` (`packages/coding-agent/src/tools/index.ts`) which assembles `BUILTIN_TOOLS` + `HIDDEN_TOOLS` registries, gated by `Settings.isToolAllowed`.
-4. **Sessions** persist as JSONL under `~/.omp/agent/sessions/<cwd-encoded>/by-date/<YYYY-MM-DD>/<HHMMSS>[-<slug>]__<8hex>.jsonl`. This is the CLI agent's session log location.
-   - **Gateway agent sessions live elsewhere**: each gateway agent runs with its own `agentDir` (default `~/.omp/agents/<accountId>/`), and its session files are written under `<agentDir>/sessions/` — IM conversations as `<convId>.jsonl`, cron tasks as `cron_<timestamp>.jsonl` (`Date.now()` in ms). Do not look for gateway agent session logs under `~/.omp/agent/sessions/`.
-   - **Cron execution logs** (separate from agent sessions) are under `~/.omp/gateway-data/scheduler/logs/by-task/<slug>/<YYYY-MM-DD>.jsonl`.
-5. **Self-evolution** hooks into the agent lifecycle via an extension (`sdk.ts` registers it): extracts learnings from session traces, mines skills/conventions, stores in `~/.omp/self-evolution/evolution.db` (SQLite), injects context into future sessions.
+4. **Sessions** persist as JSONL under `~/.cornfield/agent/sessions/<cwd-encoded>/by-date/<YYYY-MM-DD>/<HHMMSS>[-<slug>]__<8hex>.jsonl`. This is the CLI agent's session log location.
+   - **Gateway agent sessions live elsewhere**: each gateway agent runs with its own `agentDir` (default `~/.cornfield/agents/<accountId>/`), and its session files are written under `<agentDir>/sessions/` — IM conversations as `<convId>.jsonl`, cron tasks as `cron_<timestamp>.jsonl` (`Date.now()` in ms). Do not look for gateway agent session logs under `~/.cornfield/agent/sessions/`.
+   - **Cron execution logs** (separate from agent sessions) are under `~/.cornfield/gateway-data/scheduler/logs/by-task/<slug>/<YYYY-MM-DD>.jsonl`.
+5. **Self-evolution** hooks into the agent lifecycle via an extension (`sdk.ts` registers it): extracts learnings from session traces, mines skills/conventions, stores in `~/.cornfield/self-evolution/evolution.db` (SQLite), injects context into future sessions.
 
 ### Native bindings
 
@@ -245,7 +245,7 @@ import { logger } from "@cornfield/utils";
 logger.error("MCP request failed", { url, method });
 ```
 
-Logs go to `~/.omp/logs/cornfield.YYYY-MM-DD.log` with automatic rotation via a custom `RotatingFileTransport` (replaces `winston-daily-rotate-file` which leaked FDs under Bun).
+Logs go to `~/.cornfield/logs/cornfield.YYYY-MM-DD.log` with automatic rotation via a custom `RotatingFileTransport` (replaces `winston-daily-rotate-file` which leaked FDs under Bun).
 
 ### TUI sanitization
 
@@ -322,7 +322,7 @@ Tests live in `packages/*/test/`, except `packages/cognitive-coordination` which
 ### Test isolation patterns
 
 ```typescript
-// HOME isolation (avoid polluting ~/.omp/agent/registry.json)
+// HOME isolation (avoid polluting ~/.cornfield/agent/registry.json)
 const isolatedHome = await fs.mkdtemp(path.join(os.tmpdir(), "omp-test-"));
 const savedHome = process.env.HOME;
 process.env.HOME = isolatedHome;
@@ -347,18 +347,18 @@ Reference implementation: `packages/gateway/src/test-longtask.ts` (long-task wat
 Steps:
 1. Write a fake RPC script that emits the agent response you want to test (e.g. text containing `![](https://...)` for image pipeline)
 2. Create `AgentBridge` with `ompPath` pointing to the fake script
-3. Create `DingTalkChannel` with real config from `~/.omp/gateway.json`
+3. Create `DingTalkChannel` with real config from `~/.cornfield/gateway.json`
 4. Build synthetic `InboundMessage` + `SessionRecord`
 5. Call `channel.streamCard(inbound, session, context, submit)`
 6. Verify the card was delivered (check DingTalk, check logs, or assert on `streamCard` return)
 
 This tests the full gateway pipeline (bridge → streamCard → card creation → API delivery) without LLM variance.
 
-### DingTalk issue reproduction (`.omp/skills/repro-inject/repro-inject.ts`)
+### DingTalk issue reproduction (`.cornfield/skills/repro-inject/repro-inject.ts`)
 
 For **issue reproduction** (not unit testing) — when the user reports a real DingTalk-side bug and you need to drive the full inbound path (real AgentBridge → real channel → real DM reply to the real DingTalk user) without manually opening DingTalk and typing each time. This is the production-path complement to the fake-RPC pattern above.
 
-**Tool:** `.omp/skills/repro-inject/repro-inject.ts` — POSTs a synthetic `DingTalkRawMessage` to the gateway's `POST /test/inject` endpoint. The gateway treats it as real, runs it through `channel.injectTestMessage` → the full `#handleMessage` pipeline → real `AgentBridge` → real `DingTalkChannel.sendMessage`. DM reply is sent to the actual DingTalk user (OAuth-DM fallback via `senderStaffId` if the webhook is rejected by DingTalk).
+**Tool:** `.cornfield/skills/repro-inject/repro-inject.ts` — POSTs a synthetic `DingTalkRawMessage` to the gateway's `POST /test/inject` endpoint. The gateway treats it as real, runs it through `channel.injectTestMessage` → the full `#handleMessage` pipeline → real `AgentBridge` → real `DingTalkChannel.sendMessage`. DM reply is sent to the actual DingTalk user (OAuth-DM fallback via `senderStaffId` if the webhook is rejected by DingTalk).
 
 **Prereq:** the gateway must be running with `OMP_GATEWAY_TEST_MODE=1` and `/test/inject` live. See the **Restart gateway** section above for the canonical start pattern. The same `launchctl kickstart -k` and stale-pid warnings apply.
 
@@ -368,21 +368,21 @@ For **issue reproduction** (not unit testing) — when the user reports a real D
 # Most common: default reads the most recent active webhook from the gateway's
 # sessions.db (gateway writes session_webhook on every inbound message). No need
 # to ask the user to send a real message first.
-bun run .omp/skills/repro-inject/repro-inject.ts --account hr --text "帮我看下这个工单"
+bun run .cornfield/skills/repro-inject/repro-inject.ts --account hr --text "帮我看下这个工单"
 
 # End-to-end with --verify: wait for the agent reply to land in DingTalk,
 # tail the session JSONL, confirm the round-trip:
-bun run .omp/skills/repro-inject/repro-inject.ts --account hr --text "试跑 daily-2000-calendar-push" \
+bun run .cornfield/skills/repro-inject/repro-inject.ts --account hr --text "试跑 daily-2000-calendar-push" \
   --verify --verify-timeout 160000
 
 # Cold start (sessions.db is empty for this account, e.g. the user has never
 # talked to this bot, or a fresh DB after a gateway reset). Open DingTalk on a
 # 2nd terminal and send one message within --timeout ms so the script can grab
 # a sessionWebhook from the real WS stream:
-bun run .omp/skills/repro-inject/repro-inject.ts --account hr --text "..." --grab-webhook
+bun run .cornfield/skills/repro-inject/repro-inject.ts --account hr --text "..." --grab-webhook
 
 # CI / pure-replay: db has no webhook, refuse to grab, exit non-zero:
-bun run .omp/skills/repro-inject/repro-inject.ts --account hr --text "..." --no-grab-fallback
+bun run .cornfield/skills/repro-inject/repro-inject.ts --account hr --text "..." --no-grab-fallback
 
 # Cron-task verification: ask the agent to run the `cron` host tool with
 # `action: "test-run"`. Use inMs >= 90000 (1.5x the default 60s gateway tick);
@@ -390,10 +390,10 @@ bun run .omp/skills/repro-inject/repro-inject.ts --account hr --text "..." --no-
 # from the gateway.json account config.
 ```
 
-**Webhook source priority** (see `.omp/skills/repro-inject/repro-inject.ts` header for the full contract):
+**Webhook source priority** (see `.cornfield/skills/repro-inject/repro-inject.ts` header for the full contract):
 1. `--webhook <url>` — explicit, one-shot, bypasses everything else
 2. `--grab-webhook` — explicit live grab from DingTalk WS
-3. `~/.omp/gateway-data/sessions.db` — **default**. Filters out test-residue
+3. `~/.cornfield/gateway-data/sessions.db` — **default**. Filters out test-residue
    conversation IDs (`repro-`, `-test-`, `-regress`, `e2e-`, `ci-test`) and
    non-`oapi.dingtalk.com` webhooks, picks the most recently updated active
    row. Override with `--gateway-data-dir <path>` if your data dir is non-default.
@@ -406,11 +406,11 @@ invalidation is more lenient than the docs suggest. A webhook whose
 a hint, not a hard deadline. `DingTalkChannel.sendMessage` always falls back
 to OAuth DM on `errcode 300001` regardless.
 
-**Distinction from "Gateway pipeline testing" (above):** that section is unit-level pipeline tests with a fake RPC script and `captureOutbound: true` (no real sends). This is end-to-end reproduction with real AgentBridge and real DingTalk sends — for when you need to prove the user's bug is reproducible outside the test harness, or for cron-task deliver verification where the only meaningful signal is "did DingTalk receive the message". Full Chinese usage and prereqs are in the script's header comment (`.omp/skills/repro-inject/repro-inject.ts:1-49`).
+**Distinction from "Gateway pipeline testing" (above):** that section is unit-level pipeline tests with a fake RPC script and `captureOutbound: true` (no real sends). This is end-to-end reproduction with real AgentBridge and real DingTalk sends — for when you need to prove the user's bug is reproducible outside the test harness, or for cron-task deliver verification where the only meaningful signal is "did DingTalk receive the message". Full Chinese usage and prereqs are in the script's header comment (`.cornfield/skills/repro-inject/repro-inject.ts:1-49`).
 
 **Known caveats:**
 - `cornfield-gateway service stop` waits for graceful drain. If the gateway is stuck, use `pkill -TERM` (not `kill -9`) — see "Restart gateway" above.
-- The script's local JSON cache at `~/.omp/repro-state.json` is now only populated by the `--grab-webhook` path (5 min TTL, for back-to-back injects on the same freshly-grabbed session). The primary webhook source is `sessions.db`. If a grab went stale, `--clear` empties the cache so the next inject re-grabs.
+- The script's local JSON cache at `~/.cornfield/repro-state.json` is now only populated by the `--grab-webhook` path (5 min TTL, for back-to-back injects on the same freshly-grabbed session). The primary webhook source is `sessions.db`. If a grab went stale, `--clear` empties the cache so the next inject re-grabs.
 - `omp gateway cron test-run` (CLI) and `cron.test-run` (LLM host tool) both share the same `runTestRun` core; see `packages/gateway/src/scheduler/test-run.ts` and `docs/...` for the scheduler-side contract.
 
 ### Running tests
@@ -467,10 +467,10 @@ Each package has its own `packages/*/CHANGELOG.md`. Format under `## [Unreleased
 
 ## User Data Directory
 
-Default: `~/.omp/` (override with `PI_CODING_AGENT_DIR`).
+Default: `~/.cornfield/` (override with `PI_CODING_AGENT_DIR`).
 
 ```
-~/.omp/
+~/.cornfield/
   agent/
     config.yml                 # user settings
     models.yml                 # model preferences
