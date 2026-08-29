@@ -81,8 +81,9 @@ export function isSystemPath(cwd: string): boolean {
 	return (
 		normalizedCwd === home ||
 		normalizedCwd.startsWith(path.join(home, getConfigDirName())) ||
-		normalizedCwd === path.join(home, getConfigDirName(), "self-evolution"),
+		normalizedCwd === path.join(home, getConfigDirName(), "self-evolution")
 	);
+}
 
 /**
  * Global-store memory root: encoded path under agent `memories/`.
