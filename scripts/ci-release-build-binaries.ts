@@ -14,7 +14,7 @@ interface BinaryTarget {
 const repoRoot = path.join(import.meta.dir, "..");
 const binariesDir = path.join(repoRoot, "packages", "coding-agent", "binaries");
 const entrypoint = "./packages/coding-agent/src/cli.ts";
-const gatewayEntrypoint = "./packages/cornfield-gateway/src/cli.ts";
+const gatewayEntrypoint = "./packages/gateway/src/cli.ts";
 const isDryRun = process.argv.includes("--dry-run");
 const targets: BinaryTarget[] = [
 	{
