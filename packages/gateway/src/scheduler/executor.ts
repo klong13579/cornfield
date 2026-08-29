@@ -94,7 +94,7 @@ export function scanCronPrompt(prompt: string): string | null {
  * Run a scheduled task command.
  *
  * - shell: executes via `sh -c <command>`
- * - agent: executes via `omp --print <command>` (requires ompBinary).
+ * - agent: executes via `cornfield --print <command>` (requires ompBinary).
  *   If the command contains injection patterns, execution is blocked.
  *
  * preScript: optional script run before the command; its stdout is
@@ -144,7 +144,7 @@ export async function executeScheduledCommand(
 	let proc: ReturnType<typeof Bun.spawn>;
 
 	if (taskType === "agent") {
-		const ompBinary = options.ompBinary ?? "omp";
+		const ompBinary = options.ompBinary ?? "cornfield";
 		const args = [ompBinary, "--print"];
 		if (options.skills?.length) {
 			args.push("--skills", options.skills.join(","));
