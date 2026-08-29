@@ -95,6 +95,11 @@ inferno = { version = "0.12", default-features = false }
 # flate2 1.1.10 引入 zlib-rs（运行时 SIMD dispatch 含 AVX-512 指令），
 # 被 CI 的 x86-64-v2/v3 变体 ISA 检查命中。pin 到 1.1.9（无 zlib-rs）保持产物低于 x86-64-v4。
 flate2 = "=1.1.9"
+# crc32fast 1.5.0+ 在 x86_64 上通过 #[target_feature(enable = "avx512f", enable = "vpclmulqdq")]
+# 无条件编译 AVX-512 CRC 路径（runtime dispatch，rustc >= 1.89 即有），绕过外层
+# -C target-cpu=x86-64-v2/v3 限制，导致 CI 的 ISA 门禁在 baseline/modern 产物中
+# 检出 zmm 指令。pin 到 1.4.2（仅 AVX2/PCLMULQDQ 变体，无 AVX-512）保持产物低于 x86-64-v4。
+crc32fast = "=1.4.2"
 image = { version = "0.25", default-features = false, features = [
    "png",
    "jpeg",
