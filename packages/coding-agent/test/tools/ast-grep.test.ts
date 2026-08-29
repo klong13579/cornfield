@@ -81,20 +81,17 @@ describe("ast_grep parse errors", () => {
 		}
 	});
 
-	it("parses PlusCal content through the tlaplus language aliases", async () => {
-		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ast-grep-tlaplus-"));
+	it("parses Go content through the go language aliases", async () => {
+		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ast-grep-go-"));
 		try {
-			const filePath = path.join(tempDir, "Spec.tla");
-			await Bun.write(
-				filePath,
-				`---- MODULE Spec ----\n(* --algorithm Demo\nvariables x = 0;\nbegin\n  Inc:\n    x := x + 1;\nend algorithm; *)\n====\n`,
-			);
+			const filePath = path.join(tempDir, "main.go");
+			await Bun.write(filePath, `package main\n\nfunc main() {}\n\nfunc Inc() {}\n`);
 
 			const tools = await createTools(createTestSession(tempDir));
 			const tool = tools.find(entry => entry.name === "ast_grep");
 			expect(tool).toBeDefined();
 
-			const result = await tool!.execute("ast-grep-tlaplus", {
+			const result = await tool!.execute("ast-grep-go", {
 				pat: "Inc",
 				path: filePath,
 			});

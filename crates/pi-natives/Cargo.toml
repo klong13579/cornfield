@@ -12,6 +12,21 @@ crate-type = ["cdylib"]
 [lints]
 workspace = true
 
+
+[features]
+default = ["full"]
+# full = CLI/TUI 全量功能集；client = 瘦身变体（不含语法高亮/剪贴板/PTY/音频/性能剖析）。
+# 被排掉的模块源码与依赖保留在仓库（optional dep），未来用 `--features full` 即恢复。
+full = [
+	"dep:syntect",
+	"dep:arboard",
+	"dep:portable-pty",
+	"dep:maudio",
+	"dep:objc2",
+	"dep:block2",
+	"dep:windows-sys",
+]
+client = []
 [dependencies]
 mimalloc = "0.1"
 tokio = { version = "1", features = ["full"] }
@@ -25,7 +40,7 @@ parking_lot = "0.12.5"
 dashmap = "6.1"
 clap = { version = "4", features = ["derive"] }
 os_pipe = "1"
-portable-pty = "0.9"
+portable-pty = { version = "0.9", optional = true }
 grep-regex = "0.1"
 grep-searcher = "0.1"
 grep-matcher = "0.1"
@@ -36,61 +51,28 @@ ast-grep-core = { version = "0.39", default-features = false, features = [
    "tree-sitter",
 ] }
 tree-sitter = "0.25"
-tree-sitter-astro = { version = "0.1.1", package = "tree-sitter-astro-next" }
 tree-sitter-bash = "0.25"
 tree-sitter-c = "0.24"
-tree-sitter-clojure = "0.1"
-tree-sitter-cmake = "0.7.1"
-tree-sitter-c-sharp = "0.23"
 tree-sitter-cpp = "0.23"
-tree-sitter-dart = "0.1"
 tree-sitter-css = "0.25"
 tree-sitter-diff = "0.1"
 tree-sitter-dockerfile = { version = "0.2.0", package = "tree-sitter-dockerfile-updated" }
-tree-sitter-elixir = "0.3"
-tree-sitter-erlang = "0.15.0"
 tree-sitter-go = "0.25"
-tree-sitter-graphql = "0.1.0"
-tree-sitter-haskell = "0.23"
-tree-sitter-hcl = "1.1"
 tree-sitter-html = "0.23"
-tree-sitter-ini = "1.4.0"
 tree-sitter-java = "0.23"
 tree-sitter-javascript = "0.25"
 tree-sitter-json = "0.23"
-tree-sitter-just = "0.2.0"
-tree-sitter-julia = "0.23"
-tree-sitter-kotlin = { version = "0.4", package = "tree-sitter-kotlin-sg" }
 tree-sitter-lua = "0.2"
-tree-sitter-make = "1.1"
 tree-sitter-md = "0.5"
-tree-sitter-nix = "0.3"
-tree-sitter-objc = "3.0"
-tree-sitter-ocaml = "0.24.2"
-tree-sitter-odin = "1.3"
-tree-sitter-perl = { package = "tree-sitter-perl-next", git = "https://github.com/PRRPCHT/tree-sitter-perl-next", rev = "3fe4ca4deb1296a0bf2bc64665b7d8a85b910d75" }
 tree-sitter-php = "0.24"
-tree-sitter-powershell = "0.26.3"
-tree-sitter-proto = "0.4.0"
 tree-sitter-python = "0.25"
-tree-sitter-r = "1.2.0"
 tree-sitter-regex = "0.25"
 tree-sitter-ruby = "0.23"
 tree-sitter-rust = "0.24"
-tree-sitter-scala = "0.24"
-tree-sitter-solidity = "1.2"
 tree-sitter-sql = { version = "0.3.11", package = "tree-sitter-sequel" }
-tree-sitter-starlark = "1.3"
-tree-sitter-svelte = { version = "0.1.1", package = "tree-sitter-svelte-next" }
-tree-sitter-swift = "0.7"
 tree-sitter-toml-ng = "0.7"
-tree-sitter-tlaplus = "1.5"
 tree-sitter-typescript = "0.23"
-tree-sitter-verilog = "1.0"
-tree-sitter-vue = { version = "0.1.0", package = "tree-sitter-vue-next" }
-tree-sitter-xml = "0.7"
 tree-sitter-yaml = "0.7"
-tree-sitter-zig = "1.1"
 inferno = { version = "0.12", default-features = false }
 # flate2 1.1.10 引入 zlib-rs（运行时 SIMD dispatch 含 AVX-512 指令），
 # 被 CI 的 x86-64-v2/v3 变体 ISA 检查命中。pin 到 1.1.9（无 zlib-rs）保持产物低于 x86-64-v4。
@@ -107,13 +89,13 @@ image = { version = "0.25", default-features = false, features = [
    "webp",
 ] }
 webp = "0.3"
-arboard = { version = "3.5.0", features = ["wayland-data-control"] }
-maudio = "0.1.6"
+arboard = { version = "3.5.0", features = ["wayland-data-control"], optional = true }
+maudio = { version = "0.1.6", optional = true }
 flume = "0.11"
 icy_sixel = "0.5"
 unicode-segmentation = "1.11"
 unicode-width = "0.2"
-syntect = { version = "5.3", default-features = false, features = [
+syntect = { version = "5.3", default-features = false, optional = true, features = [
    "default-syntaxes",
    "default-themes",
    "regex-fancy",
@@ -148,14 +130,14 @@ libc = "0.2"
 # the hermetic zig/musl/windows toolchains keep the bindgen-free pregen path,
 # whose bindings are correct for those platforms.
 [target.'cfg(target_os = "macos")'.dependencies]
-maudio = { version = "0.1.6", features = ["generate-bindings"] }
-objc2 = "0.6"
-block2 = "0.6"
+maudio = { version = "0.1.6", features = ["generate-bindings"], optional = true }
+objc2 = { version = "0.6", optional = true }
+block2 = { version = "0.6", optional = true }
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.55"
 
-windows-sys = { version = "0.61", features = [
+windows-sys = { version = "0.61", optional = true, features = [
    "Win32_Foundation",
    "Win32_Storage_ProjectedFileSystem",
    "Win32_System_Com",

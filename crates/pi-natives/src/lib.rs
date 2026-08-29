@@ -26,25 +26,33 @@ use mimalloc::MiMalloc;
 static GLOBAL: MiMalloc = MiMalloc;
 pub mod appearance;
 pub mod ast;
+#[cfg(feature = "full")]
 pub mod audio;
+#[cfg(feature = "full")]
 pub mod audio_vpio;
+#[cfg(feature = "full")]
 pub mod clipboard;
 pub mod fd;
 pub mod fs_cache;
 pub mod glob;
 pub mod glob_util;
 pub mod grep;
+#[cfg(feature = "full")]
 pub mod highlight;
 pub mod html;
 pub mod image;
+#[cfg(feature = "full")]
 pub mod keys;
 pub mod language;
 
 pub mod power;
 
 pub mod prof;
+
+#[cfg(feature = "full")]
 pub mod projfs_overlay;
 pub mod ps;
+#[cfg(feature = "full")]
 pub mod pty;
 pub mod shell;
 pub mod task;

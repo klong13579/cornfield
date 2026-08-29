@@ -240,11 +240,11 @@ describe("ast_edit tool schema", () => {
 		}
 	});
 
-	it("infers tlaplus from .tla files for AST edits", async () => {
-		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ast-edit-tlaplus-"));
+	it("infers go from .go files for AST edits", async () => {
+		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ast-edit-go-"));
 		try {
-			const filePath = path.join(tempDir, "Spec.tla");
-			await Bun.write(filePath, `---- MODULE Spec ----\nVARIABLE x\n\nInit == x = 0\n\nNext == x' = x + 1\n====\n`);
+			const filePath = path.join(tempDir, "main.go");
+			await Bun.write(filePath, `package main\n\nconst Init = 0\n`);
 			const queue = new ToolChoiceQueue();
 
 			const tools = await createTools(
@@ -257,7 +257,7 @@ describe("ast_edit tool schema", () => {
 			const tool = tools.find(entry => entry.name === "ast_edit");
 			expect(tool).toBeDefined();
 
-			const previewResult = await tool!.execute("ast-edit-tlaplus", {
+			const previewResult = await tool!.execute("ast-edit-go", {
 				ops: [{ pat: "Init", out: "Start" }],
 				path: filePath,
 			});
@@ -270,8 +270,8 @@ describe("ast_edit tool schema", () => {
 
 			queue.nextToolChoice();
 			const invoker = queue.peekInFlightInvoker()!;
-			await invoker({ action: "apply", reason: "apply tlaplus AST edit" });
-			expect(await Bun.file(filePath).text()).toContain("Start == x = 0");
+			await invoker({ action: "apply", reason: "apply go AST edit" });
+			expect(await Bun.file(filePath).text()).toContain("const Start = 0");
 		} finally {
 			await fs.rm(tempDir, { recursive: true, force: true });
 		}
