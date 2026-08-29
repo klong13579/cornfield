@@ -346,23 +346,17 @@ describe("isGatewayProcess", () => {
 	});
 
 	test("returns true for a process whose argv contains `gateway` and `--foreground`", async () => {
-		// `/usr/bin/yes <args>` is a real execve target: the kernel sees the
-		// full argv, `ps -o args=` reports it verbatim, and `yes` itself just
-		// spams lines forever while ignoring all args. This reproduces the
-		// exact shape a real gateway process has, without needing the
-		// gateway's own setup (DingTalk config, port binding, etc).
-		const child = Bun.spawn({
-			cmd: ["/usr/bin/yes", "gateway", "start", "--foreground"],
-			stdin: "ignore",
-			stdout: "ignore",
-			stderr: "ignore",
-		});
+		// Mock the `ps` probe: the logic under test is the argv token match,
+		// not Bun.spawn pid plumbing. On CI ubuntu runners the child pid of an
+		// external binary spawn (e.g. /usr/bin/yes) was observed to resolve to
+		// the bun-test runner itself, making the real-process variant
+		// environment-dependent. process.pid is alive so process.kill(pid, 0)
+		// inside isGatewayProcess passes, and the ps output is fully controlled.
+		const spy = mockPs("/usr/bin/yes gateway start --foreground");
 		try {
-			await Bun.sleep(50);
-			expect(await isGatewayProcess(child.pid)).toBe(true);
+			expect(await isGatewayProcess(process.pid)).toBe(true);
 		} finally {
-			child.kill();
-			await child.exited;
+			spy.mockRestore();
 		}
 	});
 
@@ -373,37 +367,42 @@ describe("isGatewayProcess", () => {
 	// the "cornfield-gateway" path segment both contain it, so the unchanged
 	// detection keeps working without an explicit argv rewrite.
 	test("returns true for the new binary shape `cornfield-gateway start --foreground`", async () => {
-		const child = Bun.spawn({
-			cmd: ["/usr/bin/yes", "cornfield-gateway", "start", "--foreground"],
-			stdin: "ignore",
-			stdout: "ignore",
-			stderr: "ignore",
-		});
+		const spy = mockPs("/usr/bin/yes cornfield-gateway start --foreground");
 		try {
-			await Bun.sleep(50);
-			expect(await isGatewayProcess(child.pid)).toBe(true);
+			expect(await isGatewayProcess(process.pid)).toBe(true);
 		} finally {
-			child.kill();
-			await child.exited;
+			spy.mockRestore();
 		}
 	});
 
 	test("returns true for the new dev shape `bun .../cornfield-gateway/src/cli.ts start --foreground`", async () => {
-		const child = Bun.spawn({
-			cmd: ["/usr/bin/yes", "bun", "packages/gateway/src/cli.ts", "start", "--foreground"],
-			stdin: "ignore",
-			stdout: "ignore",
-			stderr: "ignore",
-		});
+		const spy = mockPs("/usr/bin/yes bun packages/gateway/src/cli.ts start --foreground");
 		try {
-			await Bun.sleep(50);
-			expect(await isGatewayProcess(child.pid)).toBe(true);
+			expect(await isGatewayProcess(process.pid)).toBe(true);
 		} finally {
-			child.kill();
-			await child.exited;
+			spy.mockRestore();
+		}
+	});
+
+	test("returns false when argv lacks --foreground", async () => {
+		const spy = mockPs("/usr/bin/yes gateway start");
+		try {
+			expect(await isGatewayProcess(process.pid)).toBe(false);
+		} finally {
+			spy.mockRestore();
 		}
 	});
 });
+
+/** Stub the `ps -p <pid> -o command=` probe inside isGatewayProcess. */
+function mockPs(psOutput: string) {
+	return spyOn(Bun, "spawnSync").mockReturnValue({
+		exitCode: 0,
+		signalCode: null,
+		stdout: Buffer.from(psOutput),
+		stderr: Buffer.from(""),
+	} as unknown as ReturnType<typeof Bun.spawnSync>);
+}
 
 // ---------------------------------------------------------------------------
 // Gateway reload plan (end-to-end: no-op / cron-only / dataDir-only reloads)

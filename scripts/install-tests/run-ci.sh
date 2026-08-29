@@ -65,7 +65,7 @@ mkdir -p "$TARBALL_DIR"
 # the gateway, and the desktop app). Without an override for every
 # @cornfield/* dep, `bun add <tarball>` resolves the unpublished ones from
 # the registry at the current version and 404s mid-release.
-for pkg in utils natives ai agent tui stats coding-agent pi-wire pi-client omp-gateway self-evolution moa-extension cognitive-coordination; do
+for pkg in utils natives ai agent tui stats coding-agent pi-wire pi-client gateway self-evolution moa-extension cognitive-coordination; do
 	(
 		cd "$ROOT_DIR/packages/$pkg"
 		bun pm pack --destination "$TARBALL_DIR" --quiet >/dev/null
