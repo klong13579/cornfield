@@ -199,5 +199,5 @@ bun test packages/cognitive-coordination/src/ packages/self-evolution/src/
 
 ## Related
 
-- [`@cornfield/cognitive-coordination`](../cognitive-coordination/) — Unified skill registry, context assembler
+- [`@cornfield/cognitive-coordination`](../cognitive-coordination) — Unified skill registry, context assembler
 - [`l4-evolution-architecture.md`](../../l4-evolution-architecture.md) — Full architecture design document

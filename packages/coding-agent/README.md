@@ -8,7 +8,7 @@ For installation, setup, provider configuration, model roles, slash commands, an
 
 Package-specific references:
 - [CHANGELOG](./CHANGELOG.md)
-- [MCP configuration guide](../../docs/mcp-config.md)
-- [MCP runtime lifecycle](../../docs/mcp-runtime-lifecycle.md)
-- [MCP server/tool authoring](../../docs/mcp-server-tool-authoring.md)
+- [MCP configuration guide](../../docs/tools/mcp.md)
+- [MCP runtime lifecycle](../../docs/tools/mcp.md)
+- [MCP server/tool authoring](../../docs/tools/tool-authoring.md)
 - [DEVELOPMENT](./DEVELOPMENT.md)

@@ -20,7 +20,7 @@ openQuestions:
 
 ## 参考文档
 
-- docs/omp-evolution-architecture-v3.md（self-evolution 架构，待核实）
+- docs/self-evolution.md（self-evolution 架构，待核实）
 
 ## 验收情况
 

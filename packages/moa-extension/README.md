@@ -13,7 +13,7 @@ Implemented v1:
 - **Two-tier persistence** (pi-fusion-style): every run emits a bounded `moa-result` handoff (≤ `resumeContextBytes`, default 8 KB) and a chunked `moa-archive` of the full transcript (`moa.archive.v1` schema, 48 KB chunks, keyed by a stable `runId`)
 - `/moa transcript [runId]` to render the full archived transcript on demand
 - `/moa runs` to list archived runs in the current session
-- **5-stage pipeline (Discovery + Ask-user + Rewrite + Workers + Synthesis)**: closes the **Data Gap** (29.1% of multi-agent failures per AgentAsk 2026) by extracting a per-task Task Context Object (TCO), asking the user for missing inputs in TUI mode, and injecting the closed TCO into every worker / synthesis prompt. TUI mode shows up to 5 focused questions; gateway / cron falls back to `[assumed: non_interactive_fallback]` markers. See [`docs/moa-input-fulfillment.md`](../../docs/moa-input-fulfillment.md).
+- **5-stage pipeline (Discovery + Ask-user + Rewrite + Workers + Synthesis)**: closes the **Data Gap** (29.1% of multi-agent failures per AgentAsk 2026) by extracting a per-task Task Context Object (TCO), asking the user for missing inputs in TUI mode, and injecting the closed TCO into every worker / synthesis prompt. TUI mode shows up to 5 focused questions; gateway / cron falls back to `[assumed: non_interactive_fallback]` markers. See [`docs/moa-input-fulfillment.md`](../../docs/moa/moa.md).
 
 ## Setup
 
@@ -204,7 +204,7 @@ quality:
     grayMargin: 10
 ```
 
-Optional `quality.roleWeights` overrides per-role dimension weights. See [`docs/plans/2026-07-15-moa-quality-v2-design.md`](../../docs/plans/2026-07-15-moa-quality-v2-design.md) for the default weight table, judge contract, and archive `qualityMeta` fields.
+Optional `quality.roleWeights` overrides per-role dimension weights. See `docs/plans/2026-07-15-moa-quality-v2-design.md` for the default weight table, judge contract, and archive `qualityMeta` fields.
 
 ## Stage test harness (local / real LLM)
 

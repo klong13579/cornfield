@@ -219,4 +219,4 @@ full = assistant_text_with_thinking(message)
 ## Protocol Reference
 
 The canonical wire protocol still lives in the repo at
-[`docs/rpc.md`](../../docs/rpc.md).
+[`docs/rpc.md`](../../docs/agent/rpc.md).

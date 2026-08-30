@@ -61,5 +61,5 @@ bun test packages/cognitive-coordination/src/
 
 ## Related
 
-- [`@cornfield/self-evolution`](../self-evolution/) — Extension factory, storage, lifecycle hooks
+- [`@cornfield/self-evolution`](../self-evolution) — Extension factory, storage, lifecycle hooks
 - [`l4-evolution-architecture.md`](../../l4-evolution-architecture.md) — Architecture design

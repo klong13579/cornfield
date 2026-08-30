@@ -55,6 +55,7 @@
 |cron 任务表 / 执行日志 / 到期通知|稳定（只读）|TasksView + CronWatcher + 前端 cron 表达式构建器|
 |cron 新建 / 编辑 / 启停（写）|待实现|协议无 `set_cron` 类命令|
 |多 agent 注册表 / 详情 / 工作区浏览|稳定|/agents（lazy attach），AgentDetailView；P3 多 agent 升级|
+|创建新 Agent（新建入口）|未实现（需求已确认）|客户端只能浏览已存在 agent；新建仅 CLI 可行（`cornfield agent init` / `agent register`）。需求：用户在客户端即可创建新 agent（命名 / 指定位置 / 可选从 mission 种子创建），创建后出现在 agent 列表。自 2026-08-30 起为待实现需求|
 |审批 / 澄清 UI|待实现|PermissionHost / ApprovalCard / ClarifyCard 齐备，服务端有 permission-gate；但 `inject_permission` 为壳内 mock，**未接 agent-core 真实管线**|
 |多 agent 流水线编排|未实现|仅切换，无编排概念|
 |后台 / 并行任务视图|待实现|协议有 `get_async_job_snapshot`，前端无对应 UI|
