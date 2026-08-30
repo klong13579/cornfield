@@ -221,19 +221,6 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 		store: defaultSession.store,
 	});
 
-	// 启动即预挂载所有注册 agent（与 gateway 4 bridge 常驻语义对齐）：
-	// lazy attach 令 agent 在 serve 重启后全部回到"未挂载"，前端反复误读。
-	// 预挂载后列表恒显示空闲/运行中；单个实例化失败仅告警，不阻塞 serve 启动。
-	await Promise.allSettled(
-		metas.map(async meta => {
-			try {
-				await registry.attach(meta.id);
-			} catch (err) {
-				logger.warn("serve:preload attach failed", { agentId: meta.id, error: String(err) });
-			}
-		}),
-	);
-
 	const targets = new Set<WireCoreTarget>();
 	const addTarget = (t: WireCoreTarget): (() => void) => {
 		targets.add(t);
@@ -1680,6 +1667,22 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 		sessionId: defaultSession.session.sessionId,
 		agents: registry.listMetas().map(meta => meta.id),
 	});
+
+	// 启动即预挂载所有注册 agent（与 gateway bridge 常驻语义对齐）——挪到 listening 之后后台执行：
+	// 不阻塞 serve 就绪（桌面客户端「打开即连接」的关键）；列表仍立即完整（metas 只读加载），
+	// 每个 attach 完成后经 registry attached 事件自动广播 server_snapshot；实例化失败仅告警。
+	void Promise.allSettled(
+		registry
+			.listMetas()
+			.filter(meta => meta.id !== "default")
+			.map(async meta => {
+				try {
+					await registry.attach(meta.id);
+				} catch (err) {
+					logger.warn("serve:preload attach failed", { agentId: meta.id, error: String(err) });
+				}
+			}),
+	);
 
 	const stop = async (): Promise<void> => {
 		connections.clear();

@@ -69,7 +69,11 @@ export default class Serve extends Command {
 			// Settings.create({ agentDir }) 在 sessionFactory 内惰性创建）。后续 Settings.instance
 			// 读取（如 get_available_models 的 disabled 名单）依赖此初始化。
 			await Settings.init({ cwd });
-			await modelRegistry.refresh("online-if-uncached");
+			// 模型目录快速就位：静态 + 磁盘缓存本地加载（offline 不发网络），在线发现转后台补齐。
+			// serve 冷启动实测每次会并发拉 discoverable provider 列表等网络（4-10s 抖动），
+			// 是桌面客户端「打开首页要等几秒才显示连接上」的另一个根因；HTTP 30+ 连接等待时不阻塞启动。
+			await modelRegistry.refresh("offline");
+			modelRegistry.refreshInBackground("online-if-uncached");
 
 			const parsed = parseArgs(buildLaunchArgv(flags));
 			const sessionManager = await createSessionManager(parsed, cwd);
