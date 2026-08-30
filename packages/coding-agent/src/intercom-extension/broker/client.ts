@@ -69,6 +69,12 @@ export class IntercomClient extends EventEmitter {
 	private disconnectError: Error | null = null;
 	private livenessTimer: NodeJS.Timeout | null = null;
 	private livenessInFlight = false;
+	/**
+	 * Broker error text received before registration (e.g. registry full).
+	 * connect() rejects with this instead of letting the raw frame throw out
+	 * of the socket reader, which would crash the hosting process.
+	 */
+	private registrationError: Error | null = null;
 
 	private failPending(error: Error): void {
 		for (const pending of this.pendingSends.values()) {
@@ -166,6 +172,7 @@ export class IntercomClient extends EventEmitter {
 		if (this.socket) {
 			return Promise.reject(new Error("Already connected"));
 		}
+		this.registrationError = null;
 
 		return new Promise((resolve, reject) => {
 			let socket: net.Socket;
@@ -232,7 +239,12 @@ export class IntercomClient extends EventEmitter {
 					this.emit("disconnected", disconnectError);
 				}
 				if (wasConnecting) {
-					reject(new Error("Connection closed before registration"));
+					// A broker error frame before registration (e.g. "Too many
+					// registered intercom sessions") surfaces here as the clean
+					// rejection; fall back to a generic message for plain closes.
+					const registrationError = this.registrationError;
+					this.registrationError = null;
+					reject(registrationError ?? new Error("Connection closed before registration"));
 				}
 			};
 
@@ -462,7 +474,15 @@ export class IntercomClient extends EventEmitter {
 				}
 
 				if (this._sessionId === null) {
-					throw new Error(brokerMessage.error);
+					// Registration rejected by the broker (registry full, name
+					// collision, …). Do NOT throw from the socket reader: the
+					// framing layer would catch it and re-route it as a protocol
+					// error, and any other call path would leak it as an uncaught
+					// exception that kills the process. Tear down the socket so
+					// onClose rejects the pending connect() with this error.
+					this.registrationError = new Error(brokerMessage.error);
+					this.socket?.destroy();
+					break;
 				}
 				this.emit("error", new Error(brokerMessage.error));
 				break;

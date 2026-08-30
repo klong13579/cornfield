@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **intercom 注册被拒不崩溃：broker 满员时客户端优雅拒绝而非击穿进程**（`src/intercom-extension/broker/client.ts`, `packages/gateway/test/intercom-capacity-rejection.test.ts`）: 2026-08-30 压测实测（128 会话上限，`Too many registered intercom sessions`）暴露——注册期收到 broker `error` 帧时 `handleBrokerMessage` 从 socket reader 裸 throw，正常路径被 framing 转成 `connect()` 拒绝，但旁路（重复错误帧/其他调用路径）会以 uncaught 异常直接打死宿主进程。修复：注册前错误走显式通道（`registrationError` 字段 + 关 socket → `onClose` 以 broker 原文 reject），不再依赖 throw 间接转换；拒绝文案从 `Intercom protocol error: Failed to handle...` 包装变为 broker 原文。新增回归测试 `intercom-capacity-rejection.test.ts`（满员拒绝文案、无 crash、状态干净、可再次 connect）。
+
 ## [1.0.0] - 2026-08-29
 
 ### Changed
