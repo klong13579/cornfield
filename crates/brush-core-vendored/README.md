@@ -64,7 +64,7 @@ attitude :).
 
 ## 📝 License
 
-Available for use and distribution under the [MIT license](LICENSE).
+Available for use and distribution under the [MIT license](./LICENSE).
 
 ## ⌨️ Installation
 
