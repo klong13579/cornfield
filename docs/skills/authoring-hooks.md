@@ -255,6 +255,6 @@ export default function contextFilter(cornfield: HookAPI): void {
 
 ## Further reading
 
-- `docs/hooks.md` — hook subsystem internals, ordering rules, error propagation
-- `docs/extensions.md` — `ExtensionAPI` (superset of `HookAPI`)
+- `docs/extend/hooks.md` — hook subsystem internals, ordering rules, error propagation
+- `docs/extend/extensions.md` — `ExtensionAPI` (superset of `HookAPI`)
 - `docs/skills/examples/safety-hook/` — complete working example

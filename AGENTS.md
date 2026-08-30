@@ -438,15 +438,15 @@ Single workflow, triggered on push to `main`, `v*` tags, PRs, and manual dispatc
 
 ## Documentation
 
-`docs/` contains 50+ design and runtime docs. Key topics:
+`docs/` contains 60+ design and runtime docs, indexed in [`docs/README.md`](docs/README.md). Key topics:
 
-- **Runtime**: `session.md`, `memory.md`, `models.md`, `environment-variables.md`, `config-usage.md`, `compaction.md`, `secrets.md`
-- **Tools**: `custom-tools.md`, `bash-tool-runtime.md`, `resolve-tool-runtime.md`, `notebook-tool-runtime.md`, `python-repl.md`
-- **Extensibility**: `extensions.md`, `extension-loading.md`, `hooks.md`, `skills.md`, `marketplace.md`, `mcp-config.md`, `mcp-*.md`
-- **Natives**: `natives-architecture.md`, `natives-binding-contract.md`, `natives-addon-loader-runtime.md`, `natives-build-release-debugging.md`
+- **Runtime**: `agent/session.md`, `agent/memory.md`, `config/models.md`, `config/environment-variables.md`, `config/config-usage.md`, `agent/compaction.md`, `config/secrets.md`
+- **Tools**: `tools/tool-authoring.md`, `tools/bash-tool-runtime.md`, `tools/resolve-tool-runtime.md`, `tools/notebook-tool-runtime.md`, `tools/python-repl.md`
+- **Extensibility**: `extend/extensions.md`, `extend/hooks.md`, `extend/marketplace.md`, `extend/gemini-manifest.md`, `skills/skills.md`, `tools/mcp.md`
+- **Natives**: `natives/natives-architecture.md`, `natives/natives-binding-contract.md`, `natives/natives-addon-loader-runtime.md`, `natives/natives-build-release-debugging.md`
 - **Architecture deep-dive**: `packages/coding-agent/DEVELOPMENT.md` (~1189 lines) — boot sequence, full `src/` tree, orchestration internals.
-- **Self-evolution**: `docs/omp-evolution-architecture-v3.md`（v2/v2.1 已归档删除，历史在 `docs/moa-development-history.md` 之外）
-- **Gateway**: `packages/gateway/docs/`（含 `hermes-gateway-cron-architecture.md`、`gateway-design-v1.md` 等 6 篇）
+- **Self-evolution**: `self-evolution.md`（v2/v2.1 已归档删除）
+- **Gateway**: `gateway/gateway.md`, `gateway/cron.md`, `gateway/agent-bridge.md`, `gateway/im-agent-prompt.md`
 - **L4 Synapse**: `l4-evolution-architecture.md` (root, Chinese), `packages/cognitive-coordination/README.md`
 
 ## Changelog & Release

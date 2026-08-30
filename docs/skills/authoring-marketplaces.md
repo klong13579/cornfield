@@ -257,6 +257,6 @@ Local path sources also accept `~/` and absolute paths.
 
 ## Further reading
 
-- `docs/marketplace.md` — marketplace system internals, on-disk layout, command reference
+- `docs/extend/marketplace.md` — marketplace system internals, on-disk layout, command reference
 - `docs/skills/authoring-extensions.md` — how to author the extension modules inside plugins
 - `docs/skills/examples/mini-marketplace/` — minimal working marketplace example

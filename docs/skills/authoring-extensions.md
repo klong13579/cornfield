@@ -247,7 +247,7 @@ The derived name is the filename stem (or directory name for `index.ts`-style en
 
 ## Further reading
 
-- `docs/extensions.md` — runtime internals and full API surface reference
-- `docs/extension-loading.md` — detailed path resolution rules
-- `docs/hooks.md` — hook subsystem internals
+- `docs/extend/extensions.md` — runtime internals and full API surface reference
+- `docs/extend/extensions.md` — detailed path resolution rules
+- `docs/extend/hooks.md` — hook subsystem internals
 - `docs/skills/examples/hello-extension/` — complete working example
