@@ -39,8 +39,7 @@ function normalizePremiumRequests(value: number): number {
 const piSegment: StatusLineSegment = {
 	id: "pi",
 	render(_ctx) {
-		const content = theme.icon.pi ? `${theme.icon.pi} ` : "";
-		return { content: theme.fg("accent", content), visible: true };
+		return { content: theme.fg("accent", "cornfield "), visible: true };
 	},
 };
 
