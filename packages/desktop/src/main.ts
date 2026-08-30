@@ -118,7 +118,7 @@ function setupIpc(): void {
 	ipcMain.handle("update:install", () => installUpdate());
 	// 设置页重挂载时恢复"已下载"状态：检查 pending zip 是否存在。
 	ipcMain.handle("update:has-downloaded", () => {
-		return findDownloadedZip(path.join(os.homedir(), "Library", "Caches", updaterCacheDirName())) !== null;
+		return findDownloadedZip(updaterCacheDirs()) !== null;
 	});
 }
 
@@ -182,10 +182,10 @@ function checkForUpdates(): void {
 async function checkUpdatesManual(): Promise<{ ok: boolean; error?: string }> {
 	try {
 		const { autoUpdater } = electronUpdater;
-		const result = await autoUpdater.checkForUpdates();
+		await autoUpdater.checkForUpdates();
 		// electron-updater 在无新版本时只触发 update-not-available 事件，不 resolve 明确值——
 		// 这里依赖事件广播即可（main.ts configureUpdater 已注册 update-not-available）。
-		return { ok: true, ...(result?.updateInfo ? {} : {}) };
+		return { ok: true };
 	} catch (err) {
 		return { ok: false, error: err instanceof Error ? err.message : String(err) };
 	}
@@ -216,11 +216,11 @@ async function downloadUpdate(): Promise<{ ok: boolean; error?: string }> {
  */
 async function installUpdate(): Promise<{ ok: boolean; error?: string }> {
 	try {
-		// 下载缓存目录（electron-updater 的 updaterCacheDirName，app-update.yml 生成）。
-		const cacheDir = path.join(os.homedir(), "Library", "Caches", updaterCacheDirName());
-		const zipPath = findDownloadedZip(cacheDir);
+		// 下载缓存目录（electron-updater 的 updaterCacheDirName；兼容新旧目录名）。
+		const cacheDirs = updaterCacheDirs();
+		const zipPath = findDownloadedZip(cacheDirs);
 		if (!zipPath) {
-			throw new Error(`no downloaded update found in ${cacheDir}`);
+			throw new Error(`no downloaded update found in ${cacheDirs.join(", ")}`);
 		}
 		const appPath = app.getAppPath(); // …/CornField.app/Contents/Resources/app.asar
 		const bundleRoot = app.isPackaged ? path.dirname(path.dirname(path.dirname(appPath))) : "";
@@ -246,15 +246,41 @@ async function installUpdate(): Promise<{ ok: boolean; error?: string }> {
 	}
 }
 
-/** electron-updater 的缓存目录名（app-update.yml updaterCacheDirName；与它读 configOnDisk 一致）。
- * 注意：该值由包名 @cornfield/desktop 驱动（去 @ 与 /），不随 productName 变化
- * —— 改包名时必须同步此处与 app-update.yml。 */
+/** 旧版 electron-updater 缓存目录名（0.19.2 及更早：包名 @cornfield → sanitized "@cornfield" + "-updater"）。
+ * 兼容残留：旧版本下载完未安装的 zip 存在该目录，新版本安装更新时复用，避免重复下载。 */
+const LEGACY_UPDATER_CACHE_DIR_NAMES = ["@cornfieldupdater"] as const;
+
+/** electron-updater 当前实际使用的缓存目录名。
+ * 优先从打包内 app-update.yml 读 updaterCacheDirName（与 electron-updater 运行时 configOnDisk 同源）；
+ * electron-builder 生成推导链：sanitizeFileName(package.json name).toLowerCase() + "-updater"
+ * —— 由包名驱动（@cornfield/desktop → "@cornfielddesktop-updater"），与 appId/productName 无关。
+ * 读不到配置时回退到当前推导值（改包名时必须同步 app-update.yml 与这里）。 */
 function updaterCacheDirName(): string {
-	return "@cornfielddesktop-updater";
+	return readUpdaterCacheDirNameFromConfig() ?? "@cornfielddesktop-updater";
 }
 
-/** 在缓存目录找 electron-updater 落盘的待安装 zip（pending 或根目录的 *.zip，取最新的）。 */
-function findDownloadedZip(cacheDir: string): string | null {
+/** 全部候选缓存目录（当前实际目录在前，旧版遗留在后，去重），供 hasDownloadedZip/installUpdate 查找 zip。 */
+function updaterCacheDirs(): string[] {
+	const names = [updaterCacheDirName(), ...LEGACY_UPDATER_CACHE_DIR_NAMES];
+	return [...new Set(names)].map(name => path.join(os.homedir(), "Library", "Caches", name));
+}
+
+/** 与 electron-updater 同源读取 app-update.yml（打包：resourcesPath；开发：appPath 旁）里的 updaterCacheDirName。 */
+function readUpdaterCacheDirNameFromConfig(): string | null {
+	try {
+		const configPath = app.isPackaged
+			? path.join(process.resourcesPath, "app-update.yml")
+			: path.join(app.getAppPath(), "dev-app-update.yml");
+		const match = /^updaterCacheDirName:\s*["']?([^"'\r\n]*)/m.exec(fs.readFileSync(configPath, "utf8"));
+		const value = match?.[1]?.trim();
+		return value === undefined || value === "" ? null : value;
+	} catch {
+		return null;
+	}
+}
+
+/** 在单个缓存目录找 electron-updater 落盘的待安装 zip（pending 或根目录的 *.zip，取最新的）。 */
+function findDownloadedZipIn(cacheDir: string): string | null {
 	try {
 		const candidates: string[] = [];
 		for (const dir of [path.join(cacheDir, "pending"), cacheDir]) {
@@ -269,6 +295,15 @@ function findDownloadedZip(cacheDir: string): string | null {
 		return candidates[0] ?? null;
 	} catch {
 		// 目录不存在等
+	}
+	return null;
+}
+
+/** 逐目录找待安装 zip：当前目录（app-update.yml 推导）优先，旧版残留目录兜底。 */
+function findDownloadedZip(cacheDirs: readonly string[]): string | null {
+	for (const cacheDir of cacheDirs) {
+		const found = findDownloadedZipIn(cacheDir);
+		if (found !== null) return found;
 	}
 	return null;
 }

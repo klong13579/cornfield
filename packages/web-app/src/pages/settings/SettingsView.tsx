@@ -50,9 +50,9 @@ export function SettingsView(): React.JSX.Element {
 	const [workspaceError, setWorkspaceError] = useState<string | null>(null);
 	/** 桌面壳版本（Electron app.getVersion；网页直开无 window.api 时为 null）。 */
 	const [desktopVersion, setDesktopVersion] = useState<string | null>(null);
-	/** 新版本可用提示（desktop 壳更新事件；状态机 available→downloading→downloaded；idle=未检查/无更新）。 */
+	/** 新版本可用提示（desktop 壳更新事件；状态机 idle→checking→available/uptodate→downloading→downloaded→installing；error=任一步失败）。 */
 	const [updateState, setUpdateState] = useState<
-		"idle" | "checking" | "available" | "downloading" | "downloaded" | "installing" | "error"
+		"idle" | "checking" | "available" | "uptodate" | "downloading" | "downloaded" | "installing" | "error"
 	>("idle");
 	const [updateProgress, setUpdateProgress] = useState(0);
 	const [updateError, setUpdateError] = useState<string | null>(null);
@@ -106,16 +106,25 @@ export function SettingsView(): React.JSX.Element {
 	const [appKey, setAppKey] = useState("");
 	const [appSecret, setAppSecret] = useState("");
 
+	/** 更新流失败：带阶段前缀的错误文案（检查/下载/重启）并切 error 状态。 */
+	const failUpdate = (err: unknown, phase: "检查" | "下载" | "重启"): void => {
+		const detail = err instanceof Error ? err.message : typeof err === "string" ? err : "";
+		setUpdateError(detail === "" ? `${phase}更新失败` : `${phase}更新失败：${detail}`);
+		setUpdateState("error");
+	};
 	/** 用户点「检查更新」：显式触发 checkForUpdates，结果走 available/not-available 事件。 */
 	const checkUpdateNow = async (): Promise<void> => {
 		const api = (window as typeof window & { api?: DesktopBridgeApi }).api;
 		if (!api?.app?.checkUpdate) return;
 		setUpdateError(null);
 		setUpdateState("checking");
-		const res = await api.app.checkUpdate();
-		if (!res.ok) {
-			setUpdateError(res.error ?? "检查失败");
-			setUpdateState("error");
+		try {
+			const res = await api.app.checkUpdate();
+			if (!res.ok) {
+				failUpdate(res.error, "检查");
+			}
+		} catch (err) {
+			failUpdate(err, "检查");
 		}
 	};
 	/** 用户点「下载更新」：触发 electron-updater downloadUpdate，进度走 onUpdateProgress。 */
@@ -124,10 +133,13 @@ export function SettingsView(): React.JSX.Element {
 		if (!api?.app?.downloadUpdate) return;
 		setUpdateError(null);
 		setUpdateState("downloading");
-		const res = await api.app.downloadUpdate();
-		if (!res.ok) {
-			setUpdateError(res.error ?? "下载失败");
-			setUpdateState("error");
+		try {
+			const res = await api.app.downloadUpdate();
+			if (!res.ok) {
+				failUpdate(res.error, "下载");
+			}
+		} catch (err) {
+			failUpdate(err, "下载");
 		}
 	};
 	/** 用户点「重启更新」：quitAndInstall 立即重启应用完成安装。 */
@@ -136,10 +148,13 @@ export function SettingsView(): React.JSX.Element {
 		if (!api?.app?.installUpdate) return;
 		setUpdateError(null);
 		setUpdateState("installing");
-		const res = await api.app.installUpdate();
-		if (!res?.ok) {
-			setUpdateError(res?.error ?? "重启更新失败");
-			setUpdateState("error");
+		try {
+			const res = await api.app.installUpdate();
+			if (!res?.ok) {
+				failUpdate(res?.error, "重启");
+			}
+		} catch (err) {
+			failUpdate(err, "重启");
 		}
 	};
 
@@ -158,7 +173,7 @@ export function SettingsView(): React.JSX.Element {
 			})
 			.catch(() => {});
 		const unsubAvailable = api.app.onUpdateAvailable?.(() => setUpdateState("available"));
-		const unsubNotAvailable = api.app.onUpdateNotAvailable?.(() => setUpdateState("idle"));
+		const unsubNotAvailable = api.app.onUpdateNotAvailable?.(() => setUpdateState("uptodate"));
 		const unsubProgress = api.app.onUpdateProgress?.(p => {
 			setUpdateState("downloading");
 			setUpdateProgress(Math.round(p.percent));
@@ -195,16 +210,19 @@ export function SettingsView(): React.JSX.Element {
 						<Row k="桌面壳版本">
 							<span className="font-mono text-[11px] text-ink">{desktopVersion ?? "—"}</span>
 						</Row>
-						{(updateState === "idle" || updateState === "checking") && (
+						{(updateState === "idle" || updateState === "checking" || updateState === "uptodate") && (
 							<Row k="更新">
-								<button
-									type="button"
-									onClick={() => void checkUpdateNow()}
-									disabled={updateState === "checking"}
-									className="rounded border border-hairline px-2 py-0.5 text-[11px] font-medium text-ink-subtle hover:bg-surface-2 disabled:opacity-50"
-								>
-									{updateState === "checking" ? "检查中…" : "检查更新"}
-								</button>
+								<span className="flex items-center gap-2">
+									<button
+										type="button"
+										onClick={() => void checkUpdateNow()}
+										disabled={updateState === "checking"}
+										className="rounded border border-hairline px-2 py-0.5 text-[11px] font-medium text-ink-subtle hover:bg-surface-2 disabled:opacity-50"
+									>
+										{updateState === "checking" ? "检查中…" : "检查更新"}
+									</button>
+									{updateState === "uptodate" && <span className="text-[11px] text-ink-subtle">已是最新</span>}
+								</span>
 							</Row>
 						)}
 						{updateState !== "idle" && updateState !== "checking" && (
@@ -240,9 +258,7 @@ export function SettingsView(): React.JSX.Element {
 										</button>
 									)}
 									{updateState === "installing" && <span className="text-[11px]">正在重启…</span>}
-									{updateState === "error" && (
-										<span className="text-[11px] text-danger">更新下载失败：{updateError}</span>
-									)}
+									{updateState === "error" && <span className="text-[11px] text-danger">{updateError}</span>}
 								</span>
 							</Row>
 						)}
