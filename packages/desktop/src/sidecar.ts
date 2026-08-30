@@ -13,6 +13,8 @@ export const DEFAULT_WORKSPACE_DIR = path.join(os.homedir(), "workspace");
 const SIDECAR_DRAIN_MS = 3000;
 const PORT_FREE_POLL_INTERVAL_MS = 200;
 const PORT_FREE_TIMEOUT_MS = 5000;
+const SIDECAR_READY_POLL_INTERVAL_MS = 100;
+const SIDECAR_READY_TIMEOUT_MS = 15000;
 
 export interface SidecarOptions {
 	/** sidecar（`cornfield serve`）的工作目录，对应 web-app「工作目录」设置。 */
@@ -167,9 +169,22 @@ async function waitForPortFree(): Promise<void> {
 	}
 }
 
+/** 等待 sidecar 端口就绪：serve 冷启动要先经历几秒初始化（模型在线发现等网络 IO），
+ * 桌面壳在创建窗口前等它就位，renderer 首次连接即成功（「打开就连接上」）。
+ * 超时不抛异常：serve 真起不来时让 renderer 走 autoReconnect 兑底，不阻塞启动。 */
+async function waitForPortReady(): Promise<boolean> {
+	const deadline = Date.now() + SIDECAR_READY_TIMEOUT_MS;
+	while (Date.now() < deadline) {
+		if (await isPortListening(SERVE_HOST, SERVE_PORT)) return true;
+		await timers.setTimeout(SIDECAR_READY_POLL_INTERVAL_MS);
+	}
+	console.warn("desktop: sidecar 未在限定时间内就绪，renderer 将走 autoReconnect 重试");
+	return false;
+}
+
 /**
  * 确保 7891 上有一个 `cornfield serve` sidecar：
- * - 空闲 → spawn 新 sidecar（cwd=工作目录，注入 CORNFIELD_SIDECAR=1）；
+ * - 空闲 → spawn 新 sidecar（cwd=工作目录，注入 CORNFIELD_SIDECAR=1）并等待端口就绪；
  * - 被遗留的我方 sidecar 占用 → 接管：SIGTERM 后重启；
  * - 被非我方进程占用 → 复用，不杀、不重启（返回 `{ state: "reused" }`）。
  */
@@ -183,7 +198,10 @@ export async function ensureSidecar(options: SidecarOptions): Promise<SidecarHan
 		await waitForPortFree();
 	}
 	fs.mkdirSync(options.workspaceDir, { recursive: true });
-	return { child: spawnSidecar(options), state: "spawned" };
+	const child = spawnSidecar(options);
+	// 窗口创建前等服务就绪：避免 renderer 首连失败后显示数秒「重连中」再连上。
+	await waitForPortReady();
+	return { child, state: "spawned" };
 }
 
 /** 优雅终止 sidecar（SIGTERM，非 SIGKILL）；给一个排空窗口，超时后不再强杀。 */
