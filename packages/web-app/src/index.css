@@ -368,6 +368,24 @@ h1, h2, h3 {
 	border-radius: 1px;
 }
 
+/* ── 功能描述侧栏（AppSidebar）：图标下加 10px label，撑宽容纳 2-4 个中文字 ── */
+/* 仅 AppSidebar 使用；不动基础 .nav-item（SessionSidebar 折叠钮仍依赖 40px 方钮） */
+.nav-item-labeled {
+	width: 60px;
+	height: 44px;
+	flex-direction: column;
+	gap: 3px;
+}
+.nav-item-labeled .nav-item-label {
+	font-size: 10px;
+	font-weight: 500;
+	line-height: 1.3;
+	max-width: 56px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
 /* ── toggle（42×24 滑动开关）── */
 /* taste-skill: 着色阴影 */
 .toggle {
