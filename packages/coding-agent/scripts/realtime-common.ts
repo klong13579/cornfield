@@ -3,7 +3,7 @@
  *
  * Both scripts talk to the same gateway (narwal-plan by default) and resolve
  * credentials the same way: CLI --api-key > $NARWAL_PLAN_API_KEY >
- * ~/.omp/agent/models.yml. The voice whitelist below is the gateway's OWN
+ * ~/.cornfield/agent/models.yml. The voice whitelist below is the gateway's OWN
  * list, harvested from a live probe (see realtime-voice-probe.ts): the server
  * rejects any id not in this set, and it is longer than the official
  * Qwen-Audio-Realtime doc list (5 voices).
@@ -53,13 +53,13 @@ interface ProviderEntry {
 	baseUrl?: string;
 }
 
-/** Resolves gateway credentials: explicit > env > ~/.omp/agent/models.yml. */
+/** Resolves gateway credentials: explicit > env > ~/.cornfield/agent/models.yml. */
 export async function resolveRealtimeCredentials(
 	apiKey: string | undefined,
 	baseUrl: string,
 ): Promise<RealtimeCredentials> {
 	if (apiKey) return { baseUrl, apiKey };
-	const modelsPath = path.join(os.homedir(), ".omp", "agent", "models.yml");
+	const modelsPath = path.join(os.homedir(), ".cornfield", "agent", "models.yml");
 	let parsed: Record<string, unknown> | undefined;
 	try {
 		const text = await Bun.file(modelsPath).text();

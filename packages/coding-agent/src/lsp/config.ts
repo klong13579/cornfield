@@ -289,8 +289,8 @@ function getConfigPaths(cwd: string): string[] {
  *
  * Priority (highest to lowest):
  * 1. Project root: lsp.json/.lsp.json/lsp.yml/.lsp.yml/lsp.yaml/.lsp.yaml
- * 2. Project config dirs: .omp/lsp.*, .pi/lsp.*, .claude/lsp.* (+ hidden variants)
- * 3. User config dirs: ~/.cornfield/agent/lsp.*, ~/.pi/agent/lsp.*, ~/.claude/lsp.* (+ hidden variants)
+ * 2. Project config dirs: .cornfield/lsp.*, .claude/lsp.*, .codex/lsp.*, .gemini/lsp.* (+ hidden variants)
+ * 3. User config dirs: ~/.cornfield/agent/lsp.*, ~/.claude/agent/lsp.*, ~/.codex/lsp.*, ~/.gemini/lsp.* (+ hidden variants)
  * 4. User home root: ~/lsp.*, ~/.lsp.*
  * 5. Auto-detect from project markers + available binaries
  *

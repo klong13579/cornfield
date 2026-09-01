@@ -65,7 +65,7 @@ function usage(): string {
 function parseCliArgs(argv: string[]): LiveTestOptions {
 	const options: LiveTestOptions = {
 		input: "/tmp/live-in.wav",
-		outDir: path.join(os.homedir(), ".omp", "voice-samples", "live-test"),
+		outDir: path.join(os.homedir(), ".cornfield", "voice-samples", "live-test"),
 		model: "qwen-audio-3.0-realtime-flash",
 		baseUrl: "https://coder.narwal.com/v1",
 		apiKey: process.env.NARWAL_PLAN_API_KEY ?? "",

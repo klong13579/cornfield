@@ -75,7 +75,7 @@ function usage(): string {
 function parseCliArgs(argv: string[]): SampleOptions {
 	const options: SampleOptions = {
 		text: DEFAULT_TEXT,
-		outDir: path.join(os.homedir(), ".omp", "voice-samples"),
+		outDir: path.join(os.homedir(), ".cornfield", "voice-samples"),
 		model: "qwen-audio-3.0-realtime-flash",
 		baseUrl: "https://coder.narwal.com/v1",
 		apiKey: process.env.NARWAL_PLAN_API_KEY ?? "",
@@ -265,7 +265,7 @@ async function main(): Promise<void> {
 	}
 
 	const indexLines = [
-		`# omp realtime voice samples (${new Date().toISOString().slice(0, 10)})`,
+		`# cornfield realtime voice samples (${new Date().toISOString().slice(0, 10)})`,
 		`# text: ${resolved.text}`,
 		"",
 		'# play all: for f in ~/.cornfield/voice-samples/*.wav; do afplay "$f"; done',

@@ -54,7 +54,7 @@ The script's header comment (`repro-inject.ts:1-49`) spells out the full 4-level
 
 **Webhook freshness is a soft hint, not a hard deadline.** Hours-old webhooks usually still 200 OK. On `errcode 300001`, `DingTalkChannel.sendMessage` falls back to OAuth DM targeting the cached `senderStaffId` — stale row is recoverable, re-grab only if both routes fail.
 
-**Stale grab recovery.** The grab path caches into `~/.omp/repro-state.json` (5min TTL). If a grab went stale, `--clear` empties the cache so the next inject re-grabs from scratch.
+**Stale grab recovery.** The grab path caches into `~/.cornfield/repro-state.json` (5min TTL). If a grab went stale, `--clear` empties the cache so the next inject re-grabs from scratch.
 
 Completion criterion: one source is selected and the chosen flag (if any) is in the argv.
 

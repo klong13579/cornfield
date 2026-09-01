@@ -8,7 +8,7 @@
 # (and legacy interactive OMP runs) leaked session files into the OMP
 # default path:
 #
-#   ~/.omp/agent/sessions/<encoded-cwd>/by-date/<YYYY-MM-DD>/<HHMMSS>__<8hex>.jsonl
+#   ~/.cornfield/agent/sessions/<encoded-cwd>/by-date/<YYYY-MM-DD>/<HHMMSS>__<8hex>.jsonl
 #
 # The refactor moved all per-agent sessions under:
 #
@@ -25,14 +25,14 @@
 #   scripts/sweeps/abandoned-bydate.sh --root <dir> [--date YYYY-MM-DD] [--dry-run]
 #
 # Examples:
-#   # delete everything under ~/.omp/agent/sessions/<encoded-cwd>/by-date/
-#   scripts/sweeps/abandoned-bydate.sh --root ~/.omp/agent/sessions/-Desktop-Narwal-OMP-workspace-test-hr3
+#   # delete everything under ~/.cornfield/agent/sessions/<encoded-cwd>/by-date/
+#   scripts/sweeps/abandoned-bydate.sh --root ~/.cornfield/agent/sessions/-Desktop-Narwal-OMP-workspace-test-hr3
 #
 #   # only one day
-#   scripts/sweeps/abandoned-bydate.sh --root ~/.omp/agent/sessions/-Desktop-Narwal-OMP-workspace-test-hr3 --date 2026-06-30
+#   scripts/sweeps/abandoned-bydate.sh --root ~/.cornfield/agent/sessions/-Desktop-Narwal-OMP-workspace-test-hr3 --date 2026-06-30
 #
 #   # preview only
-#   scripts/sweeps/abandoned-bydate.sh --root ~/.omp/agent/sessions/-Desktop-Narwal-OMP-workspace-test-hr3 --dry-run
+#   scripts/sweeps/abandoned-bydate.sh --root ~/.cornfield/agent/sessions/-Desktop-Narwal-OMP-workspace-test-hr3 --dry-run
 #
 # Notes:
 #   - `--root` must be the encoded-cwd directory (the immediate parent of `by-date/`).

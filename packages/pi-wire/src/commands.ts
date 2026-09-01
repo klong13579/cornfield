@@ -258,7 +258,7 @@ export type WireExtensionCommand =
 	/**
 	 * W3 D3：只读拉取记忆投影（三分区：memory/user/project）。
 	 * - memory：self-evolution 记忆库（vector_embeddings 分区，按 importance 排序）
-	 * - user：~/.omp/user.md 内容（身份画像；缺失 → null）
+	 * - user：~/.cornfield/user.md 内容（身份画像；缺失 → null）
 	 * - project：当前项目记忆目录的 MEMORY.md / memory_summary.md / raw_memories.md
 	 *   （canonical evolution 目录优先，旧版扁平目录 agentDir/memories 回落）
 	 * 不依赖任何 attached session（不定向，锚定 serve 进程 cwd 的 default agent）。
@@ -301,7 +301,7 @@ export type WireExtensionCommand =
 	| { id?: string; type: "get_cron_logs"; taskId?: string; days?: number; limit?: number }
 	/**
 	 * P2-W3-3（B3 技能写协议）：启停一个技能。
-	 * serve 写 settings（~/.omp/agent/config.yml 的 skills.ignoredSkills 列表），随后
+	 * serve 写 settings（~/.cornfield/agent/config.yml 的 skills.ignoredSkills 列表），随后
 	 * 重发现 + 会话热重载，get_skills 立即反映。
 	 * - name：技能名（非空、不含路径分隔符）
 	 * - enabled：true 启用（从 ignoredSkills 移除）/ false 停用（追加）
@@ -312,7 +312,7 @@ export type WireExtensionCommand =
 	 * - provider 必填；modelId 缺省 = 整 provider 停用/恢复（写入 settings.disabledProviders）
 	 * - modelId 提供 = 精确模型停用/恢复（写入 settings.disabledModels，pattern 为
 	 *   `provider/modelId`，如 `narwal-plan/deepseek-v4-flash`）
-	 * 两者都持久化到 ~/.omp/agent/config.yml；get_available_models 立即反映（available
+	 * 两者都持久化到 ~/.cornfield/agent/config.yml；get_available_models 立即反映（available
 	 * 列表按 disabledProviders + disabledModels 过滤），响应返回值带两份名单供前端恢复入口。
 	 */
 	| {
@@ -336,14 +336,14 @@ export type WireExtensionCommand =
 	/**
 	 * 听记（VOICE-D：/voice 听记 tab）：上传一段浏览器录制的 16kHz 单声道 PCM WAV（base64），
 	 * 走 TUI /record 同源转写管线（本地 whisper 或 record.model API，超长自动分块），
-	 * 结果落 ~/.omp/listen/YYYY-MM-DD-<desc>.json（与 /record 同目录同格式）。
+	 * 结果落 ~/.cornfield/listen/YYYY-MM-DD-<desc>.json（与 /record 同目录同格式）。
 	 * - audio：PCM WAV base64（前端 encodeWav 产出，与 TUI 本地录音同标）
 	 * - desc：可选，文件名描述（缺省按时间自动命名）
 	 * 响应 { ok:true, text, path, model }；输入非法/转写失败 { ok:false, error }。
 	 */
 	| { id?: string; type: "record_transcribe"; audio: string; desc?: string }
 	/**
-	/** 听记历史（/listen 前端化）：列出 ~/.omp/listen/ 全部录音 json（文件名倒序），
+	/** 听记历史（/listen 前端化）：列出 ~/.cornfield/listen/ 全部录音 json（文件名倒序），
 	 * 返回元数据 + 转写全文（前端本地搜索/预览零延迟）。
 	 * 响应 { ok:true, recordings: [{ name, path, recordedAt, size, text }] }；目录缺失 → { ok:true, recordings: [] }。
 	 */
@@ -364,7 +364,7 @@ export type WireExtensionCommand =
 	| { id?: string; type: "list_remote_skills"; source?: string }
 	/** P0 收口：serve 端 skill hub —— 安装一个远程技能。 */
 	| { id?: string; type: "install_remote_skill"; source: string; name: string }
-	/** P0 收口：列出已配置的 MCP 服务器（~/.omp/agent/mcp.json）。 */
+	/** P0 收口：列出已配置的 MCP 服务器（~/.cornfield/agent/mcp.json）。 */
 	| { id?: string; type: "get_mcp_servers" }
 	/** P0 收口：新建/更新一个 MCP 服务器配置。 */
 	| { id?: string; type: "set_mcp_server"; name: string; command?: string; args?: string[]; enabled?: boolean }
@@ -419,7 +419,26 @@ export type WireExtensionCommand =
 	/** 写指定域并持久化到目标 agent 的 config.yml（sessionId 定向；与 set_skill_enabled/set_model_disabled 不双写）。 */
 	| { id?: string; type: "set_config"; sessionId?: string; key: string; value: unknown }
 	/** 工具开关语义视图（get_config 的域化封装）：返回目标 agent 每个工具的 enabled 开关 + python 工具模式。 */
-	| { id?: string; type: "get_tool_switches"; sessionId?: string };
+	| { id?: string; type: "get_tool_switches"; sessionId?: string }
+	/**
+	 * 会话诊断（P5 会话诊断）：对一条历史会话触发异步诊断。
+	 * 流程：serve 派生独立 `cornfield --mode rpc` 子进程（默认配置模型）→ 子 agent 按
+	 * session-diagnosis-orchestrator skill 做 6 维分析 + 根因融合 → 写 markdown 报告到
+	 * ~/.cornfield/agent/diagnosis-reports/<sessionId>_<ts>.md + 结构化摘要
+	 * 同目录 <sessionId>_<ts>.summary.json → 完成后可通过 list_diagnosis_reports 看到。
+	 * 不定向任何 attached session（纯文件 + 子进程数据路径）。
+	 */
+	| { id?: string; type: "diagnose_session"; sessionFile: string }
+	/**
+	 * 会话诊断索引（只读）：扫 diagnosis-reports/ 目录，返回全部诊断记录
+	 * （sessionId/severity/状态/时间/报告文件路径）。sessionFile 可选：定向单会话。
+	 */
+	| { id?: string; type: "list_diagnosis_reports"; sessionFile?: string }
+	/**
+	 * 取一份诊断报告全文（get_diagnosis_report）：按 reportId（文件名去扩展名）
+	 * 读 <reportId>.md（完整 markdown 报告）+ 同文件 .summary.json（结构化摘要）。
+	 */
+	| { id?: string; type: "get_diagnosis_report"; reportId: string };
 export type WireCommand = MultiplexCommand | WireExtensionCommand;
 
 /** 获取具体命令结构的 helper。 */

@@ -4,7 +4,7 @@ import type { SkillFrontmatter, UnifiedSkill } from "./types.js";
 
 /**
  * Unified Skill Registry
- * Loads skills from the canonical on-disk directory (~/.omp/self-evolution/skills/).
+ * Loads skills from the canonical on-disk directory (~/.cornfield/self-evolution/skills/).
  */
 export class UnifiedSkillRegistry {
 	/**

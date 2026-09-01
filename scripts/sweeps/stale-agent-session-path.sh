@@ -19,7 +19,7 @@
 #   scripts/sweeps/stale-agent-session-path.sh
 #
 #   # explicit db path
-#   scripts/sweeps/stale-agent-session-path.sh --db ~/.omp/scheduler.db
+#   scripts/sweeps/stale-agent-session-path.sh --db ~/.cornfield/scheduler.db
 #
 #   # preview only
 #   scripts/sweeps/stale-agent-session-path.sh --dry-run
@@ -72,8 +72,8 @@ done
 # Resolve default DB: gateway-data first, then legacy root.
 if [ -z "$DB_PATH" ]; then
 	for cand in \
-		"$HOME/.omp/gateway-data/scheduler/scheduler.db" \
-		"$HOME/.omp/scheduler.db"; do
+		"$HOME/.cornfield/gateway-data/scheduler/scheduler.db" \
+		"$HOME/.cornfield/scheduler.db"; do
 		if [ -s "$cand" ]; then
 			DB_PATH="$cand"
 			break

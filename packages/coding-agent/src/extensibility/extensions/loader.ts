@@ -519,7 +519,7 @@ export async function discoverAndLoadExtensions(
 		}
 	};
 
-	// 1. Discover extension modules via capability API (native .omp/.pi only)
+	// 1. Discover extension modules via capability API (native .cornfield only)
 	const discovered = await loadCapability<ExtensionModule>(extensionModuleCapability.id, { cwd });
 	for (const ext of discovered.items) {
 		if (ext._source.provider !== "native") continue;

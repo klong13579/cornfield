@@ -7,10 +7,10 @@
  * latency regressions are readable in seconds instead of hand-grepping logs.
  *
  * Sources:
- *   1. ~/.omp/logs/omp.YYYY-MM-DD.log{,.1..4} — controller lifecycle events
+ *   1. ~/.cornfield/logs/cornfield.YYYY-MM-DD.log{,.1..4} — controller lifecycle events
  *      (live phase / response.created / response.done / errors / stalls),
  *      grouped by pid. Rotation segments are all scanned.
- *   2. ~/.omp/agent/sessions/<cwd>/by-date/<date>/<id>.jsonl — the session
+ *   2. ~/.cornfield/agent/sessions/<cwd>/by-date/<date>/<id>.jsonl — the session
  *      tree: voice transcripts (customType "voice") + main-session messages.
  *
  * What it reports:
@@ -36,12 +36,12 @@
  *   - Active voice settings (endpointing / aec / vadSilenceMs) from config.
  *
  * Usage:
- *   bun run .omp/skills/voice-diag/voice-diag.ts              # latest voice session today
- *   bun run .omp/skills/voice-diag/voice-diag.ts --list       # candidate sessions today
- *   bun run .omp/skills/voice-diag/voice-diag.ts --session <path> [--pid N]
- *   bun run .omp/skills/voice-diag/voice-diag.ts --date 2026-08-06 --last 30
- *   bun run .omp/skills/voice-diag/voice-diag.ts --verbose    # + full merged timeline
- *   bun run .omp/skills/voice-diag/voice-diag.ts --gap 10     # silent-gap threshold (s)
+ *   bun run .cornfield/skills/voice-diag/voice-diag.ts              # latest voice session today
+ *   bun run .cornfield/skills/voice-diag/voice-diag.ts --list       # candidate sessions today
+ *   bun run .cornfield/skills/voice-diag/voice-diag.ts --session <path> [--pid N]
+ *   bun run .cornfield/skills/voice-diag/voice-diag.ts --date 2026-08-06 --last 30
+ *   bun run .cornfield/skills/voice-diag/voice-diag.ts --verbose    # + full merged timeline
+ *   bun run .cornfield/skills/voice-diag/voice-diag.ts --gap 10     # silent-gap threshold (s)
  */
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -64,7 +64,7 @@ const SESSION_ARG = flag("--session");
 const PID_ARG = flag("--pid") ? Number(flag("--pid")) : undefined;
 
 const HOME = os.homedir();
-const SESSIONS_ROOT = path.join(HOME, ".omp", "agent", "sessions");
+const SESSIONS_ROOT = path.join(HOME, ".cornfield", "agent", "sessions");
 
 // ------------------------------------------------------------- utilities ---
 
@@ -92,8 +92,8 @@ interface LogEvent {
 }
 
 function parseLogFiles(date: string): LogEvent[] {
-	// Rotation segments: omp.DATE.log, omp.DATE.log.1 … .4 (maxFiles 5).
-	const base = path.join(HOME, ".omp", "logs", `omp.${date}.log`);
+	// Rotation segments: cornfield.DATE.log, cornfield.DATE.log.1 … .4 (maxFiles 5).
+	const base = path.join(HOME, ".cornfield", "logs", `cornfield.${date}.log`);
 	const files = [base, `${base}.1`, `${base}.2`, `${base}.3`, `${base}.4`];
 	const out: LogEvent[] = [];
 	for (const file of files) {
@@ -209,7 +209,7 @@ function findVoiceSessions(date: string): Array<{ file: string; mtime: number; v
 
 function readVoiceSettings(): string {
 	try {
-		const text = fs.readFileSync(path.join(HOME, ".omp", "agent", "config.yml"), "utf8");
+		const text = fs.readFileSync(path.join(HOME, ".cornfield", "agent", "config.yml"), "utf8");
 		const get = (key: string): string => {
 			const m = text.match(new RegExp(`^\\s+${key}:\\s*(.+)$`, "m"));
 			return m ? m[1]!.trim() : "–";
@@ -386,7 +386,7 @@ if (LAST_MIN !== undefined) {
 const { recs, anomalies } = analyze(filtered, jsonl, GAP_S * 1000);
 
 console.log(`Voice session : ${target}`);
-console.log(`Pid           : ${pid ?? "(未找到匹配日志的 pid)"}   日志: ~/.omp/logs/omp.${DATE}.log{,.1..4}`);
+console.log(`Pid           : ${pid ?? "(未找到匹配日志的 pid)"}   日志: ~/.cornfield/logs/cornfield.${DATE}.log{,.1..4}`);
 console.log(`窗口          : ${fmt(t0)} – ${fmt(tEnd)} (${dur(tEnd - t0)})`);
 console.log(`Voice 设置    : ${readVoiceSettings()}`);
 console.log("");

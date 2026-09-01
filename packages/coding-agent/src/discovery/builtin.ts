@@ -1,7 +1,7 @@
 /**
- * Builtin Provider (.omp)
+ * Builtin Provider (.cornfield)
  *
- * Primary provider for OMP native configs. Supports all capabilities.
+ * Primary provider for cornfield native configs. Supports all capabilities.
  */
 import * as path from "node:path";
 import { logger, parseFrontmatter, tryParseJson } from "@cornfield/utils";
@@ -36,7 +36,7 @@ import {
 
 const PROVIDER_ID = "native";
 const DISPLAY_NAME = "OMP";
-const DESCRIPTION = "Native OMP configuration from ~/.omp and .omp/";
+const DESCRIPTION = "Native cornfield configuration from ~/.cornfield and .cornfield/";
 const PRIORITY = 100;
 
 const PATHS = SOURCE_PATHS.native;
@@ -913,7 +913,7 @@ async function loadContextFiles(ctx: LoadContext): Promise<LoadResult<ContextFil
 				_source: createSourceMeta(PROVIDER_ID, rootAgentsMd, "project"),
 			});
 			// Root-level extra prompt includes
-			// Also check .omp/ subdirectory for prompt-includes.json
+			// Also check .cornfield/ subdirectory for prompt-includes.json
 			const configDir = path.join(currentDir, PATHS.projectDir);
 			const configDirExists = await ifNonEmptyDir(currentDir, PATHS.projectDir);
 			const extraDirs = configDirExists ? [currentDir, configDir] : [currentDir];
@@ -939,7 +939,7 @@ async function loadContextFiles(ctx: LoadContext): Promise<LoadResult<ContextFil
 registerProvider<ContextFile>(contextFileCapability.id, {
 	id: PROVIDER_ID,
 	displayName: DISPLAY_NAME,
-	description: "Load AGENTS.md (+ prompt-includes.json) from .omp/ directories",
+	description: "Load AGENTS.md (+ prompt-includes.json) from .cornfield/ directories",
 	priority: PRIORITY,
 	load: loadContextFiles,
 });

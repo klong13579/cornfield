@@ -31,7 +31,7 @@ function makeInvertedBadge(label: string, color: ThemeColor): string {
 	return `${bgAnsi}\x1b[30m ${label} \x1b[39m\x1b[49m`;
 }
 
-const MODEL_FAILURES_FILE = path.join(homedir(), ".omp/agent/model-failures.json");
+const MODEL_FAILURES_FILE = path.join(homedir(), ".cornfield/agent/model-failures.json");
 
 function formatModelNumber(n: number): string {
 	if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;

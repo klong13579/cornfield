@@ -10,8 +10,8 @@
 #   scripts/sweeps/empty-cron-dirs.sh --agent-dir <path> [--dry-run]
 #
 # Examples:
-#   scripts/sweeps/empty-cron-dirs.sh --agent-dir ~/.omp/agents/hr
-#   scripts/sweeps/empty-cron-dirs.sh --agent-dir ~/.omp/agents/hr --dry-run
+#   scripts/sweeps/empty-cron-dirs.sh --agent-dir ~/.cornfield/agents/hr
+#   scripts/sweeps/empty-cron-dirs.sh --agent-dir ~/.cornfield/agents/hr --dry-run
 #
 # Notes:
 #   - Only matches the strict `cron_*` glob under `<agentDir>/sessions/`.

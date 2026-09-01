@@ -68,6 +68,7 @@ import { listAgentArtifacts, listSessionArtifacts } from "./artifacts";
 import { WireHostToolBridge } from "./host-tool-bridge";
 import { PERMISSION_TIMEOUT_OUTCOME, PermissionGate } from "./permission-gate";
 import { agentSessionsRoot, defaultSessionsRoot, indexSessions, type SessionIndexSource } from "./session-index";
+import { runDiagnosis, listDiagnosisReports, getDiagnosisReport } from "./diagnosis-runner";
 import {
 	type AgentMeta,
 	type AttachedSession,
@@ -425,6 +426,32 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 						return;
 					}
 					done({ messages: res.messages });
+					return;
+				}
+				case "diagnose_session": {
+					// 诊断会话：异步，立即返回 running 状态
+					const sf = command.sessionFile;
+					// 用 Bun.file 检查存在性，避免 import sync fs
+					if (!(await Bun.file(sf).exists())) {
+						fail(`session file not found: ${sf}`);
+						return;
+					}
+					const result = await runDiagnosis(sf);
+					done(result);
+					return;
+				}
+				case "list_diagnosis_reports": {
+					const result = listDiagnosisReports(command.sessionFile);
+					done(result);
+					return;
+				}
+				case "get_diagnosis_report": {
+					const result = getDiagnosisReport(command.reportId);
+					if (!result) {
+						fail(`report not found: ${command.reportId}`);
+						return;
+					}
+					done(result);
 					return;
 				}
 				case "fs_list": {
@@ -1171,7 +1198,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 
 				// ── Model ──
 				case "get_tool_switches": {
-					// 工具开关语义视图：config.yml 文件优先（与 .omp 显示一致），未配置项回落
+					// 工具开关语义视图：config.yml 文件优先（与 cornfield TUI 显示一致），未配置项回落
 					// 内核默认（session.settings，attach 时加载）。修改走 set_config 写同一文件。
 					try {
 						const config = await readAgentConfigYaml(agentConfigPathFor(attached.meta));
@@ -2400,7 +2427,7 @@ async function buildMemoryProjection(
 	const user = await readMemoryFileClipped(userPath);
 
 	// project 区：当前项目记忆目录的投影文件（MEMORY.md / memory_summary.md / raw_memories.md）
-	// getMemoryRoot 对系统路径（~/.omp 等）返回 undefined——该场景项目记忆不适用，置 null。
+	// getMemoryRoot 对系统路径（~/.cornfield 等）返回 undefined——该场景项目记忆不适用，置 null。
 	const memoryRoot = getMemoryRoot(agentDir, cwd);
 	const project = await buildProjectMemoryZone(memoryRoot, agentDir, cwd);
 

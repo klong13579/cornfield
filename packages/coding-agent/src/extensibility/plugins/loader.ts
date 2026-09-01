@@ -28,7 +28,7 @@ async function loadRuntimeConfig(): Promise<PluginRuntimeConfig> {
 }
 
 /**
- * Load project-local plugin overrides (checks .omp and .pi directories).
+ * Load project-local plugin overrides (checks .cornfield, .claude, .codex, .gemini directories).
  */
 async function loadProjectOverrides(cwd: string): Promise<ProjectPluginOverrides> {
 	for (const overridesPath of getConfigDirPaths("plugin-overrides.json", { user: false, cwd })) {

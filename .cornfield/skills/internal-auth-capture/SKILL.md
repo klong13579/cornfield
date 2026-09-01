@@ -16,7 +16,7 @@ disable-model-invocation: true
 
 ## Outcome
 
-一份完整的 `~/.omp/narwal-jwt.json` 种子文件，包含所有可自动登录的站点列表、每种凭证类型及其值（JWT / Bearer / session cookie）、失效时间，以及剩余需要独立登录的站点清单。所有成功登录的站点都已通过实际访问验证。
+一份完整的 `~/.cornfield/narwal-jwt.json` 种子文件，包含所有可自动登录的站点列表、每种凭证类型及其值（JWT / Bearer / session cookie）、失效时间，以及剩余需要独立登录的站点清单。所有成功登录的站点都已通过实际访问验证。
 
 ## 原理
 
@@ -111,7 +111,7 @@ function: "() => JSON.stringify({
 
 ### Step 4 — 归类整理 token，写入种子文件
 
-将所有获取的凭证写入 `~/.omp/narwal-jwt.json`，格式：
+将所有获取的凭证写入 `~/.cornfield/narwal-jwt.json`，格式：
 
 ```json
 {

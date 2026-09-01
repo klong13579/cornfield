@@ -1228,7 +1228,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			customTools.push(...getSearchTools());
 		}
 
-		// Discover and load custom tools from .omp/tools/, .claude/tools/, etc.
+		// Discover and load custom tools from .cornfield/tools/, .claude/tools/, etc.
 		const builtInToolNames = builtinTools.map(t => t.name);
 		const discoveredCustomTools = await logger.time(
 			"discoverAndLoadCustomTools",

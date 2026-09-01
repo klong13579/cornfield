@@ -814,7 +814,7 @@ async function main(): Promise<void> {
 		}
 	}
 
-	// 写 ~/.omp/repro-state.json 缓存: 只有 grab 路径需要 (5min 复用)。
+	// 写 ~/.cornfield/repro-state.json 缓存: 只有 grab 路径需要 (5min 复用)。
 	// db 路径已经有持久化, --webhook 是临时一次性。
 	if (entrySource === "grab") {
 		state.webhooks[webhookKey(entry.accountId, entry.conversationId)] = entry;
