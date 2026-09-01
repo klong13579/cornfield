@@ -41,9 +41,9 @@ describe("moa-config loader", () => {
 		expect(result.projectPath).toBeUndefined();
 	});
 
-	it("loads global config from $HOME/.omp/agent/moa.yml", async () => {
+	it("loads global config from $HOME/.cornfield/agent/moa.yml", async () => {
 		writeConfig(
-			path.join(fakeHome, ".omp", "agent"),
+			path.join(fakeHome, ".cornfield", "agent"),
 			"moa.yml",
 			`workers:
   - { name: divergent, model: narwal-plan/qwen3.5-flash }
@@ -53,35 +53,35 @@ synthesisModel: narwal-plan/deepseek-v4-pro-202606
 `,
 		);
 		const result = await loadMoaConfigOverrides(projectDir);
-		expect(result.globalPath).toEndWith("/.omp/agent/moa.yml");
+		expect(result.globalPath).toEndWith("/.cornfield/agent/moa.yml");
 		expect(result.projectPath).toBeUndefined();
 		expect(result.overrides.synthesisModel).toBe("narwal-plan/deepseek-v4-pro-202606");
 		expect(result.overrides.workers).toHaveLength(3);
 	});
 
-	it("loads project config from <projectRoot>/.omp/moa.yml", async () => {
+	it("loads project config from <projectRoot>/.cornfield/moa.yml", async () => {
 		writeConfig(
-			path.join(projectDir, ".omp"),
+			path.join(projectDir, ".cornfield"),
 			"moa.yml",
 			`synthesisModel: alibaba-coding-plan/kimi-k2.6
 `,
 		);
 		const result = await loadMoaConfigOverrides(projectDir);
-		expect(result.projectPath).toEndWith("/.omp/moa.yml");
+		expect(result.projectPath).toEndWith("/.cornfield/moa.yml");
 		expect(result.globalPath).toBeUndefined();
 		expect(result.overrides.synthesisModel).toBe("alibaba-coding-plan/kimi-k2.6");
 	});
 
 	it("project config wins on conflict (shallow merge)", async () => {
 		writeConfig(
-			path.join(fakeHome, ".omp", "agent"),
+			path.join(fakeHome, ".cornfield", "agent"),
 			"moa.yml",
 			`synthesisModel: narwal-plan/from-global
 timeoutMs: 100000
 `,
 		);
 		writeConfig(
-			path.join(projectDir, ".omp"),
+			path.join(projectDir, ".cornfield"),
 			"moa.yml",
 			`synthesisModel: narwal-plan/from-project
 `,
@@ -96,7 +96,7 @@ timeoutMs: 100000
 		const subdir = path.join(projectDir, "packages", "sub");
 		mkdirSync(subdir, { recursive: true });
 		writeConfig(
-			path.join(projectDir, ".omp"),
+			path.join(projectDir, ".cornfield"),
 			"moa.yml",
 			`synthesisModel: narwal-plan/walked-up
 `,
@@ -108,13 +108,13 @@ timeoutMs: 100000
 
 	it("does not look for project config when cwd is undefined", async () => {
 		writeConfig(
-			path.join(fakeHome, ".omp", "agent"),
+			path.join(fakeHome, ".cornfield", "agent"),
 			"moa.yml",
 			`synthesisModel: narwal-plan/global-only
 `,
 		);
 		writeConfig(
-			path.join(projectDir, ".omp"),
+			path.join(projectDir, ".cornfield"),
 			"moa.yml",
 			`synthesisModel: narwal-plan/project
 `,
@@ -127,7 +127,7 @@ timeoutMs: 100000
 
 	it("parses .json config files", async () => {
 		writeConfig(
-			path.join(fakeHome, ".omp", "agent"),
+			path.join(fakeHome, ".cornfield", "agent"),
 			"moa.json",
 			JSON.stringify({
 				synthesisModel: "alibaba-coding-plan/glm-5",
@@ -140,7 +140,7 @@ timeoutMs: 100000
 
 	it("returns empty overrides on malformed YAML (does not throw)", async () => {
 		writeConfig(
-			path.join(fakeHome, ".omp", "agent"),
+			path.join(fakeHome, ".cornfield", "agent"),
 			"moa.yml",
 			"workers: [unclosed bracket\n  - { name: divergent\n",
 		);
@@ -150,7 +150,7 @@ timeoutMs: 100000
 
 	it("returns empty overrides on malformed shape (array instead of object)", async () => {
 		writeConfig(
-			path.join(fakeHome, ".omp", "agent"),
+			path.join(fakeHome, ".cornfield", "agent"),
 			"moa.yml",
 			`- item1
 - item2
@@ -161,7 +161,7 @@ timeoutMs: 100000
 	});
 
 	it("picks moa.yml over moa.yaml over moa.json (first match in FILENAMES order)", async () => {
-		const dir = path.join(fakeHome, ".omp", "agent");
+		const dir = path.join(fakeHome, ".cornfield", "agent");
 		mkdirSync(dir, { recursive: true });
 		writeFileSync(path.join(dir, "moa.json"), JSON.stringify({ synthesisModel: "from-json" }));
 		writeFileSync(path.join(dir, "moa.yaml"), "synthesisModel: from-yaml\n");
@@ -175,7 +175,7 @@ timeoutMs: 100000
 		const orphanDir = mkTmp("moa-config-orphan");
 		try {
 			writeConfig(
-				path.join(orphanDir, ".omp"),
+				path.join(orphanDir, ".cornfield"),
 				"moa.yml",
 				`synthesisModel: narwal-plan/should-not-load
 `,

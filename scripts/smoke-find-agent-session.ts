@@ -9,13 +9,14 @@
  *  4. Window with no match returns undefined
  *  5. Wide window: newest in by-date/ wins over older legacy
  */
-import { findAgentSessionPath } from "../packages/gateway/src/scheduler/cli-commands";
+import { findAgentSessionPath } from "../packages/gateway/src/session-paths";
 import * as path from "node:path";
 import * as os from "node:os";
 import * as fs from "node:fs";
 
-const sessionsRoot = path.join(os.homedir(), ".cornfield", "agent", "sessions");
-const projectDir = path.join(sessionsRoot, "-Desktop-Narwal-oh-my-pi");
+const agentDir = path.join(os.homedir(), ".cornfield", "agent");
+const sessionsRoot = path.join(agentDir, "sessions");
+const projectDir = path.join(sessionsRoot, "-Desktop-Narwal-cornfield");
 
 let pass = 0;
 let fail = 0;
@@ -29,12 +30,35 @@ function check(label: string, cond: boolean, detail = "") {
 	}
 }
 
-console.log("\n[1] New layout: 004708__b8c75295.jsonl (use file mtime as the source of truth)");
+console.log("\n[1] New layout: newest file under by-date/ (use file mtime as the source of truth)");
 {
-	const target = path.join(projectDir, "by-date", "2026-06-20", "004708__b8c75295.jsonl");
-	const mtime = fs.statSync(target).mtimeMs;
-	const found = findAgentSessionPath(mtime - 100, mtime + 60_000);
-	check("returns the new-layout file", found === target, found ?? "undefined");
+	const byDateRoot = path.join(projectDir, "by-date");
+	const byDateFiles: string[] = [];
+	const walkByDate = (dir: string): void => {
+		let entries: fs.Dirent[];
+		try {
+			entries = fs.readdirSync(dir, { withFileTypes: true });
+		} catch {
+			return;
+		}
+		for (const ent of entries) {
+			const full = path.join(dir, ent.name);
+			if (ent.isDirectory()) {
+				walkByDate(full);
+			} else if (ent.isFile() && ent.name.endsWith(".jsonl")) {
+				byDateFiles.push(full);
+			}
+		}
+	};
+	walkByDate(byDateRoot);
+	if (byDateFiles.length === 0) {
+		console.log("  (no by-date files in this dir, skipping)");
+	} else {
+		const target = byDateFiles.sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs)[0]!;
+		const mtime = fs.statSync(target).mtimeMs;
+		const found = findAgentSessionPath(agentDir, mtime - 100, mtime + 60_000);
+		check("returns the new-layout file", found === target, found ?? "undefined");
+	}
 }
 
 console.log("\n[2] Legacy file: pick the most recent legacy file by name prefix");
@@ -50,20 +74,20 @@ console.log("\n[2] Legacy file: pick the most recent legacy file by name prefix"
 		const newest = legacyFiles[0]!;
 		const target = path.join(projectDir, newest);
 		const mtime = fs.statSync(target).mtimeMs;
-		const found = findAgentSessionPath(mtime - 100, mtime + 1000);
+		const found = findAgentSessionPath(agentDir, mtime - 100, mtime + 1000);
 		check("returns the legacy flat file", found === target, found ?? "undefined");
 	}
 }
 
 console.log("\n[3] Empty window: no match → undefined");
 {
-	const found = findAgentSessionPath(0, 1000);
+	const found = findAgentSessionPath(agentDir, 0, 1000);
 	check("returns undefined", found === undefined, found ?? "undefined");
 }
 
 console.log("\n[4] No match: window in ancient past → undefined");
 {
-	const found = findAgentSessionPath(Date.parse("2000-01-01T00:00:00Z"), Date.parse("2000-01-01T00:00:01Z"));
+	const found = findAgentSessionPath(agentDir, Date.parse("2000-01-01T00:00:00Z"), Date.parse("2000-01-01T00:00:01Z"));
 	check("returns undefined", found === undefined, found ?? "undefined");
 }
 
@@ -71,7 +95,7 @@ console.log("\n[5] Wide window (last 7 days): picks the file with the latest mti
 {
 	const now = Date.now();
 	const sevenDaysAgo = now - 7 * 24 * 60 * 60 * 1000;
-	const found = findAgentSessionPath(sevenDaysAgo, now + 60_000);
+	const found = findAgentSessionPath(agentDir, sevenDaysAgo, now + 60_000);
 	if (found) {
 		const rel = path.relative(projectDir, found);
 		const looksByDate = rel.startsWith(`by-date${path.sep}`);

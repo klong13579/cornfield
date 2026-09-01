@@ -1,10 +1,10 @@
 /**
  * Real e2e: /moa run with locked cost-lite 4-model layout loaded via
- * project `.omp/moa.yml` (not the developer's ~/.omp/agent/moa.yml).
+ * project `.cornfield/moa.yml` (not the developer's ~/.cornfield/agent/moa.yml).
  *
  * Isolation:
  *   - HOME → empty fake home (no global moa.yml bleed)
- *   - cwd → temp project with `.git` + `.omp/moa.yml` matching DEFAULT_* in settings.ts
+ *   - cwd → temp project with `.git` + `.cornfield/moa.yml` matching DEFAULT_* in settings.ts
  *   - CORNFIELD_AGENT_DIR → seeded agent dir (config/models)
  *   - no PI_MOA_SETTINGS_JSON
  *
@@ -125,7 +125,7 @@ async function waitForMoaResult(client: RpcClient, prompt: string, timeoutMs: nu
 }
 
 async function seedIsolatedAgentDir(agentDir: string): Promise<void> {
-	const userAgent = path.join(os.homedir(), ".omp", "agent");
+	const userAgent = path.join(os.homedir(), ".cornfield", "agent");
 	await Bun.write(path.join(agentDir, "config.yml"), await Bun.file(path.join(userAgent, "config.yml")).text());
 	await Bun.write(path.join(agentDir, "models.yml"), await Bun.file(path.join(userAgent, "models.yml")).text());
 }
@@ -144,10 +144,10 @@ describe.skipIf(!narwalApiKey || !alibabaApiKey)("moa e2e: cost-lite layout from
 
 		await fs.promises.mkdir(agentDir, { recursive: true });
 		await fs.promises.mkdir(path.join(projectDir, ".git"), { recursive: true });
-		await fs.promises.mkdir(path.join(projectDir, ".omp"), { recursive: true });
-		await fs.promises.mkdir(path.join(fakeHome, ".omp", "agent"), { recursive: true });
+		await fs.promises.mkdir(path.join(projectDir, ".cornfield"), { recursive: true });
+		await fs.promises.mkdir(path.join(fakeHome, ".cornfield", "agent"), { recursive: true });
 		await seedIsolatedAgentDir(agentDir);
-		await Bun.write(path.join(projectDir, ".omp", "moa.yml"), COST_LITE_MOA_YML);
+		await Bun.write(path.join(projectDir, ".cornfield", "moa.yml"), COST_LITE_MOA_YML);
 
 		client = new RpcClient({
 			cliPath: path.join(import.meta.dir, "..", "..", "coding-agent", "src", "cli.ts"),
@@ -158,7 +158,7 @@ describe.skipIf(!narwalApiKey || !alibabaApiKey)("moa e2e: cost-lite layout from
 				NARWAL_PLAN_API_KEY: narwalApiKey!,
 				ALIBABA_API_KEY: alibabaApiKey!,
 				PI_LOG_CONSOLE: "false",
-				// No PI_MOA_SETTINGS_JSON — project .omp/moa.yml is the source of truth.
+				// No PI_MOA_SETTINGS_JSON — project .cornfield/moa.yml is the source of truth.
 			},
 			provider: "narwal-plan",
 			model: "minimax-m3",

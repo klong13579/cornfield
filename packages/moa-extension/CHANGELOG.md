@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **MOA 配置加载路径 `.omp` → `.cornfield`**（`src/moa-config.ts`、`src/tco.ts`）: 全局配置从 `~/.omp/agent/moa.{yml,yaml,json}` 改为 `~/.cornfield/agent/moa.{yml,yaml,json}`，项目配置从 `<root>/.omp/moa.*` 改为 `<root>/.cornfield/moa.*`，`gatherDiscoveryContext` 读 user.md（`~/.cornfield/user.md`）与 moa.yml 同步对齐——此前注释已写 `.cornfield` 而实现仍读 `.omp`，导致实际位于 `~/.cornfield` 下的用户配置加载不到。
+
 ## [1.0.0] - 2026-08-29
 
 ### Changed

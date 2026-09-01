@@ -13,7 +13,7 @@ import type { MoaSettings } from "./types";
  * Locations:
  *   - Global:  `~/.cornfield/agent/moa.{yml,yaml,json}` (first match)
  *   - Project: walk up from cwd looking for `.git`, then check
- *              `<root>/.omp/moa.{yml,yaml,json}` (first match)
+ *              `<root>/.cornfield/moa.{yml,yaml,json}` (first match)
  *
  * Malformed YAML, unknown fields, or unreadable files are tolerated: the
  * loader logs a warning and returns whatever it could parse (or an empty
@@ -79,13 +79,13 @@ function findProjectRoot(cwd: string): string | undefined {
 function getGlobalMoaConfigPath(): string | undefined {
 	const home = process.env.HOME;
 	if (!home) return undefined;
-	return findExistingConfigFile(path.join(home, ".omp", "agent"));
+	return findExistingConfigFile(path.join(home, ".cornfield", "agent"));
 }
 
 function getProjectMoaConfigPath(cwd: string): string | undefined {
 	const root = findProjectRoot(cwd);
 	if (!root) return undefined;
-	return findExistingConfigFile(path.join(root, ".omp"));
+	return findExistingConfigFile(path.join(root, ".cornfield"));
 }
 
 export interface MoaConfigLoadResult {

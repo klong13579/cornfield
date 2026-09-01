@@ -119,11 +119,11 @@ function buildMoaSettingsEnv(): string {
 async function seedIsolatedAgentDir(agentDir: string): Promise<void> {
 	await Bun.write(
 		path.join(agentDir, "config.yml"),
-		await Bun.file(path.join(os.homedir(), ".omp", "agent", "config.yml")).text(),
+		await Bun.file(path.join(os.homedir(), ".cornfield", "agent", "config.yml")).text(),
 	);
 	await Bun.write(
 		path.join(agentDir, "models.yml"),
-		await Bun.file(path.join(os.homedir(), ".omp", "agent", "models.yml")).text(),
+		await Bun.file(path.join(os.homedir(), ".cornfield", "agent", "models.yml")).text(),
 	);
 }
 
