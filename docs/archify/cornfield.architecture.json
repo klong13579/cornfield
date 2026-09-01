@@ -1,0 +1,443 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "CornField 架构地图",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "main-path",
+        "label": "Agent 主链路",
+        "focus": [
+          "terminal",
+          "coding-agent",
+          "agent",
+          "ai",
+          "providers"
+        ],
+        "note": "从用户输入到模型调用：CLI/TUI → coding-agent → agent → ai → LLM Provider。"
+      },
+      {
+        "id": "im",
+        "label": "DingTalk 集成",
+        "focus": [
+          "dingtalk",
+          "gateway",
+          "coding-agent"
+        ],
+        "note": "IM 消息经 gateway 的 AgentBridge 走 RPC 驱动 coding-agent。"
+      },
+      {
+        "id": "web",
+        "label": "多端适配",
+        "focus": [
+          "webapp",
+          "wire",
+          "coding-agent"
+        ],
+        "note": "Web / Desktop 通过 wire 协议连接 serve 模式。"
+      }
+    ],
+    "repository": {
+      "url": "https://github.com/klong13579/cornfield.git",
+      "revision": "46b18aeddfb44cc7d24dc28cd2c7e7107f80f06c"
+    }
+  },
+  "components": [
+    {
+      "id": "terminal",
+      "type": "external",
+      "label": "终端用户",
+      "sublabel": "CLI / TUI / RPC",
+      "pos": [
+        40,
+        240
+      ],
+      "size": [
+        140,
+        56
+      ]
+    },
+    {
+      "id": "coding-agent",
+      "type": "backend",
+      "label": "@cornfield/coding-agent",
+      "sublabel": "CLI · 工具 · Session · 扩展",
+      "pos": [
+        290,
+        230
+      ],
+      "size": [
+        190,
+        72
+      ],
+      "tag": "组装层",
+      "sources": [
+        {
+          "path": "packages/coding-agent/src/sdk.ts",
+          "label": "createAgentSession"
+        }
+      ]
+    },
+    {
+      "id": "agent",
+      "type": "backend",
+      "label": "@cornfield/agent",
+      "sublabel": "Agent Loop · 状态 · 工具调用",
+      "pos": [
+        560,
+        240
+      ],
+      "size": [
+        150,
+        64
+      ],
+      "tag": "内核",
+      "sources": [
+        {
+          "path": "packages/agent/src/agent-loop.ts",
+          "label": "agentLoop"
+        }
+      ]
+    },
+    {
+      "id": "ai",
+      "type": "backend",
+      "label": "@cornfield/ai",
+      "sublabel": "Provider · 流式 · 认证",
+      "pos": [
+        800,
+        240
+      ],
+      "size": [
+        150,
+        64
+      ],
+      "sources": [
+        {
+          "path": "packages/ai/src/index.ts"
+        }
+      ]
+    },
+    {
+      "id": "providers",
+      "type": "external",
+      "label": "LLM Providers",
+      "sublabel": "多厂商 LLM",
+      "pos": [
+        1040,
+        240
+      ],
+      "size": [
+        140,
+        64
+      ]
+    },
+    {
+      "id": "tui",
+      "type": "frontend",
+      "label": "@cornfield/tui",
+      "sublabel": "终端差分渲染",
+      "pos": [
+        560,
+        80
+      ],
+      "size": [
+        150,
+        56
+      ],
+      "sources": [
+        {
+          "path": "packages/tui/src/index.ts"
+        }
+      ]
+    },
+    {
+      "id": "natives",
+      "type": "backend",
+      "label": "@cornfield/natives",
+      "sublabel": "Rust N-API 原生能力",
+      "pos": [
+        200,
+        80
+      ],
+      "size": [
+        150,
+        56
+      ],
+      "sources": [
+        {
+          "path": "crates/pi-natives/Cargo.toml",
+          "label": "pi-natives crate"
+        }
+      ]
+    },
+    {
+      "id": "gateway",
+      "type": "backend",
+      "label": "@cornfield/gateway",
+      "sublabel": "DingTalk · 调度 · Bridge",
+      "pos": [
+        290,
+        400
+      ],
+      "size": [
+        190,
+        64
+      ],
+      "sources": [
+        {
+          "path": "packages/gateway/src/gateway.ts"
+        },
+        {
+          "path": "packages/gateway/src/agent-bridge.ts",
+          "label": "AgentBridge"
+        }
+      ]
+    },
+    {
+      "id": "dingtalk",
+      "type": "external",
+      "label": "DingTalk",
+      "sublabel": "IM 渠道",
+      "pos": [
+        40,
+        400
+      ],
+      "size": [
+        140,
+        64
+      ]
+    },
+    {
+      "id": "wire",
+      "type": "messagebus",
+      "label": "wire + client",
+      "sublabel": "帧协议 · WebSocket 客户端",
+      "pos": [
+        800,
+        460
+      ],
+      "size": [
+        150,
+        56
+      ],
+      "sources": [
+        {
+          "path": "packages/pi-wire/src/frames.ts"
+        }
+      ]
+    },
+    {
+      "id": "webapp",
+      "type": "frontend",
+      "label": "web-app / desktop",
+      "sublabel": "React · Electron 壳",
+      "pos": [
+        1060,
+        460
+      ],
+      "size": [
+        160,
+        56
+      ],
+      "sources": [
+        {
+          "path": "packages/web-app/src/main.tsx"
+        }
+      ]
+    },
+    {
+      "id": "selfevo",
+      "type": "backend",
+      "label": "@cornfield/self-evolution",
+      "sublabel": "skill 提取 · episodic memory",
+      "pos": [
+        560,
+        410
+      ],
+      "size": [
+        190,
+        64
+      ],
+      "tag": "扩展",
+      "sources": [
+        {
+          "path": "packages/self-evolution/src/index.ts",
+          "label": "createSelfEvolutionExtension"
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "CornField Monorepo（Bun workspaces + crates）",
+      "wraps": [
+        "coding-agent",
+        "agent",
+        "ai",
+        "tui",
+        "natives",
+        "gateway",
+        "wire",
+        "webapp",
+        "selfevo"
+      ]
+    },
+    {
+      "kind": "security-group",
+      "label": "核心 Agent 运行链",
+      "wraps": [
+        "coding-agent",
+        "agent",
+        "ai"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "terminal-to-coding",
+      "from": "terminal",
+      "to": "coding-agent",
+      "label": "CLI 命令 / TUI 输入",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "left",
+      "labelAt": [
+        235,
+        267
+      ]
+    },
+    {
+      "id": "coding-to-agent",
+      "from": "coding-agent",
+      "to": "agent",
+      "label": "agentLoop()",
+      "fromSide": "right",
+      "toSide": "left",
+      "labelAt": [
+        520,
+        266
+      ]
+    },
+    {
+      "id": "agent-to-ai",
+      "from": "agent",
+      "to": "ai",
+      "label": "streamSimple()",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "ai-to-providers",
+      "from": "ai",
+      "to": "providers",
+      "label": "SDK / HTTP",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "coding-to-tui",
+      "from": "coding-agent",
+      "to": "tui",
+      "label": "渲染事件流",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "coding-to-natives",
+      "from": "coding-agent",
+      "to": "natives",
+      "label": "原生工具调用",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "dingtalk-to-gateway",
+      "from": "dingtalk",
+      "to": "gateway",
+      "label": "Stream（双向）",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "gateway-to-coding",
+      "from": "gateway",
+      "to": "coding-agent",
+      "label": "AgentBridge · RPC",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "coding-to-wire",
+      "from": "coding-agent",
+      "to": "wire",
+      "label": "serve 帧",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "via": [
+        [
+          385,
+          330
+        ],
+        [
+          875,
+          330
+        ]
+      ]
+    },
+    {
+      "id": "wire-to-webapp",
+      "from": "wire",
+      "to": "webapp",
+      "label": "WebSocket",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "coding-to-selfevo",
+      "from": "coding-agent",
+      "to": "selfevo",
+      "label": "会话 trace · skill 注入",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Agent 主链路",
+      "items": [
+        "utils → ai → agent → coding-agent：单向分层依赖",
+        "Agent Loop 在 agent 包内，coding-agent 只负责组装与工具",
+        "ModelRouter / ModelRegistry 负责模型切换与回退"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "产品与扩展",
+      "items": [
+        "gateway 经 AgentBridge 拉起 cornfield --mode rpc",
+        "web-app / desktop 经 wire+client 连 serve 模式",
+        "self-evolution 以扩展方式挂载，不侵入 Agent Loop",
+        "moa-extension / cognitive-coordination（WIP）"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "研发与可观测",
+      "items": [
+        "utils 为所有包提供 logger / dirs / CLI 底座",
+        "natives ↔ crates/pi-natives（Rust · N-API）",
+        "stats — 本地 usage dashboard",
+        "scripts / CI / docs / typescript-edit-benchmark"
+      ]
+    }
+  ]
+}

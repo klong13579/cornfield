@@ -39,6 +39,7 @@
 |client/desktop.md|桌面客户端功能说明（desktop + web-app + editor-extension + 协议）|真值（随版本更新盘点）|
 |client/editor-extension.md|编辑器扩展：现状摸底 + OpenSumi/Zed 借鉴 + 架构结论|设计（未开工）|
 |client/multidevice.md|多端架构（host + TUI/Web/PC/Mobile 接入）|设计（P0/P1 已实施，P2 规划中）|
+|client/project-container.md|项目容器（Project）+ Coding Task：现状/行业对照/领域模型/分期|设计（待拍板）|
 
 ## config — 配置与模型
 
