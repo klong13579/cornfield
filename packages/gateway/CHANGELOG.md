@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Removed
+
+- **移除误提交的 `packages/gateway/.omp/evolution/evolution.db*` 瞬态三件套**（`git rm --cached`）: 该 SQLite 主库为空、全部 schema 落在 WAL（708KB）——是 2026-08-16 误提交的未 checkpoint 运行时状态，gateway 源码无 self-evolution 引用、真实 evolution store 在 `~/.cornfield/self-evolution/`。`.gitignore` 增加 `packages/gateway/.omp/`。
+
 ## [1.0.0] - 2026-08-29
 
 - **Changed: 去 omp 化品牌迁移**（`packages/omp-gateway → packages/gateway` 目录改名、`src/agent-bridge.ts`、`src/agent-transport-wire.ts`、`src/service-installer.ts`): 包目录对齐新名；运行期契约 `ompPath`/`ompSessionPath`/`resolveDefaultOmpPath → cornfieldPath`/`cornfieldSessionPath`/`resolveDefaultCornfieldPath`；持久化环境变量 `OMP_GATEWAY_TEST_MODE/OMP_GATEWAY_TEST_PORT → CORNFIELD_GATEWAY_TEST_MODE/CORNFIELD_GATEWAY_TEST_PORT`（`PERSISTED_ENV_VARS`/`PERSISTED_ENV_DEFAULTS` 与 launchd plist/systemd unit 安装同步）。

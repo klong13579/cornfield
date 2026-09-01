@@ -69,7 +69,8 @@ scripts/session-stats/edit-analysis.csv
 # parallel-agent worktrees
 .wt/
 .gitnexus
-packages/self-evolution/.omp
+# 误提交的 evolution.db 瞬态三件套（2026-08-16）——运行时数据，不进 git
+packages/gateway/.omp/
 /.claude/
 
 # SQLite write-ahead-log sidecars (runtime state, not source)
