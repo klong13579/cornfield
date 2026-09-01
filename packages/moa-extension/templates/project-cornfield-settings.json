@@ -1,3 +1,3 @@
 {
-	"_comment": "MOA is bundled into omp as an inline extension (like swarm/autoresearch). No extensions path is required for /moa."
+	"_comment": "MOA is bundled into cornfield as an inline extension (like swarm/autoresearch). No extensions path is required for /moa."
 }
