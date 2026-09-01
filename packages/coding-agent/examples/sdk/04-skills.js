@@ -5,7 +5,7 @@
  * Discover, filter, merge, or replace them.
  */
 import { createAgentSession, discoverSkills, SessionManager } from "@cornfield/coding-agent";
-// Discover all skills from cwd/.omp/skills, ~/.omp/agent/skills, etc.
+// Discover all skills from cwd/.cornfield/skills, ~/.cornfield/agent/skills, etc.
 const { skills: allSkills } = await discoverSkills();
 console.log("Discovered skills:", allSkills.map(s => s.name));
 // Filter to specific skills

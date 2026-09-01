@@ -5,8 +5,8 @@
  * They provide a unified system for extensions, custom tools, commands, and more.
  *
  * Extension files are discovered from:
- * - ~/.omp/agent/extensions/ (legacy: ~/.pi/agent/extensions/)
- * - <cwd>/.omp/extensions/ (legacy: <cwd>/.pi/extensions/)
+ * - ~/.cornfield/agent/extensions/ (legacy: ~/.pi/agent/extensions/)
+ * - <cwd>/.cornfield/extensions/ (legacy: <cwd>/.pi/extensions/)
  * - Paths specified in settings.json "extensions" array
  * - Paths passed via --extension CLI flag
  *
@@ -16,9 +16,9 @@
 import { createAgentSession, SessionManager } from "@cornfield/coding-agent";
 // Extensions are loaded from disk, not passed inline to createAgentSession.
 // Use the discovery mechanism:
-//   1. Place extension files in ~/.omp/agent/extensions/ or .omp/extensions/
+//   1. Place extension files in ~/.cornfield/agent/extensions/ or .cornfield/extensions/
 //   2. Add paths to settings.json: { "extensions": ["./my-extension.ts"] }
-//   3. Use --extension flag: pi --extension ./my-extension.ts
+//   3. Use --extension flag: cornfield --extension ./my-extension.ts
 // To add additional extension paths beyond discovery:
 const { session } = await createAgentSession({
     additionalExtensionPaths: ["./my-logging-extension.ts", "./my-safety-extension.ts"],

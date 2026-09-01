@@ -4,8 +4,8 @@
  * Configure API key resolution via AuthStorage and ModelRegistry.
  */
 import { AuthStorage, createAgentSession, discoverAuthStorage, discoverModels, ModelRegistry, SessionManager, } from "@cornfield/coding-agent";
-// Default: discoverAuthStorage() uses ~/.omp/agent/agent.db
-// discoverModels() loads built-in + custom models from ~/.omp/agent/models.json
+// Default: discoverAuthStorage() uses ~/.cornfield/agent/agent.db
+// discoverModels() loads built-in + custom models from ~/.cornfield/agent/models.json
 const authStorage = await discoverAuthStorage();
 const modelRegistry = await discoverModels(authStorage);
 await createAgentSession({

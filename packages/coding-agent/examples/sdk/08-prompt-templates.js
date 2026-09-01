@@ -4,7 +4,7 @@
  * File-based templates that inject content when invoked with /templatename.
  */
 import { createAgentSession, discoverPromptTemplates, SessionManager, } from "@cornfield/coding-agent";
-// Discover templates from cwd/.pi/prompts/ and ~/.pi/agent/prompts/
+// Discover templates from cwd/.cornfield/prompts/ and ~/.cornfield/agent/prompts/
 const discovered = await discoverPromptTemplates();
 console.log("Discovered prompt templates:");
 for (const template of discovered) {

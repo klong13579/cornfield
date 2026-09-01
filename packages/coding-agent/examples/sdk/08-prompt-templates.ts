@@ -10,7 +10,7 @@ import {
 	SessionManager,
 } from "@cornfield/coding-agent";
 
-// Discover templates from cwd/.pi/prompts/ and ~/.pi/agent/prompts/
+// Discover templates from cwd/.cornfield/prompts/ and ~/.cornfield/agent/prompts/
 const discovered = await discoverPromptTemplates();
 console.log("Discovered prompt templates:");
 for (const template of discovered) {

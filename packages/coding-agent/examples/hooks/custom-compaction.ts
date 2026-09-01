@@ -10,7 +10,7 @@
  * which can be cheaper/faster than the main conversation model.
  *
  * Usage:
- *   omp --hook examples/hooks/custom-compaction.ts
+ *   cornfield --hook examples/hooks/custom-compaction.ts
  */
 import { complete, getModel } from "@cornfield/ai";
 import type { HookAPI } from "@cornfield/coding-agent";

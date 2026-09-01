@@ -19,7 +19,7 @@ import { createAgentSession, SessionManager } from "@cornfield/coding-agent";
 // Use the discovery mechanism:
 //   1. Place extension files in ~/.cornfield/agent/extensions/ or .cornfield/extensions/
 //   2. Add paths to settings.json: { "extensions": ["./my-extension.ts"] }
-//   3. Use --extension flag: pi --extension ./my-extension.ts
+//   3. Use --extension flag: cornfield --extension ./my-extension.ts
 
 // To add additional extension paths beyond discovery:
 const { session } = await createAgentSession({
