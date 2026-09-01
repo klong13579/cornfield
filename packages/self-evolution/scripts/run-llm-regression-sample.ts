@@ -37,7 +37,7 @@ const available = registry.getAvailable();
 const role = resolveRoleSelection(["smol", "default"], settings, available, registry);
 const model = role?.model;
 if (!model) {
-	console.error("No model available for LLM regression replay. Configure credentials in ~/.omp/agent/");
+	console.error("No model available for LLM regression replay. Configure credentials in ~/.cornfield/agent/");
 	closeEvolutionDb(cwd, globalStore);
 	process.exit(1);
 }

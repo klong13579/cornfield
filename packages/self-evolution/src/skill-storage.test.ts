@@ -31,12 +31,12 @@ describe("skill-storage", () => {
 
 	test("getUnifiedSkillsDir uses global user layout when globalStore", () => {
 		const dir = getUnifiedSkillsDir("/tmp/project", true);
-		expect(dir).toEndWith("/.omp/self-evolution/skills");
+		expect(dir).toEndWith("/.cornfield/self-evolution/skills");
 	});
 
 	test("getUnifiedSkillsDir uses project layout by default", () => {
 		const dir = getUnifiedSkillsDir("/tmp/project", false);
-		expect(dir).toEndWith("/.omp/skills");
+		expect(dir).toEndWith("/.cornfield/skills");
 	});
 
 	test("writeConsolidationSkills writes flat markdown files", async () => {

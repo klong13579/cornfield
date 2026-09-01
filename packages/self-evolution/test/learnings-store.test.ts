@@ -18,7 +18,7 @@ describe("SqliteLearningStore", () => {
 	test("insert and listForInjection respects pin", async () => {
 		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-lrn-"));
 		cwd = path.join(tmpDir, "repo");
-		await fs.mkdir(path.join(cwd, ".omp", "evolution"), { recursive: true });
+		await fs.mkdir(path.join(cwd, ".cornfield", "evolution"), { recursive: true });
 
 		const db = getEvolutionDb(cwd, false);
 		const store = new SqliteLearningStore(db);

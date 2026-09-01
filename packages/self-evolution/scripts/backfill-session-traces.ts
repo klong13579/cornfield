@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Backfill session_traces + regression_fixtures from episodes and ~/.omp/agent/sessions JSONL.
+ * Backfill session_traces + regression_fixtures from episodes and ~/.cornfield/agent/sessions JSONL.
  *
  * Usage:
  *   bun packages/self-evolution/scripts/backfill-session-traces.ts [limit] [--cwd <project>]

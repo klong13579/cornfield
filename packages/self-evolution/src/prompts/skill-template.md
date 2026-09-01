@@ -1,6 +1,6 @@
 # Skill 模板（OMP 标准）
 
-不满足本标准的 skill **不应写入** `<repo>/.omp/skills/`（保留在 DB 供演化，但不导出/不优先注入）。
+不满足本标准的 skill **不应写入** `<repo>/.cornfield/skills/`（保留在 DB 供演化，但不导出/不优先注入）。
 
 **机器可读指标**（`quality_score`、`times_*`、`population_*`）只放在 YAML frontmatter 或 DB，**禁止**出现在正文。
 

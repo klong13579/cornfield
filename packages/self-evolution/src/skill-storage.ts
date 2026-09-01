@@ -1,7 +1,7 @@
 /**
  * Canonical on-disk location for evolved + consolidated skills.
  *
- * All skill markdown lives under `<cwd>/.omp/skills/*.md` (project scope by default).
+ * All skill markdown lives under `<cwd>/.cornfield/skills/*.md` (project scope by default).
  */
 import * as fs from "node:fs/promises";
 import * as path from "node:path";

@@ -34,7 +34,7 @@ Requirements:
 - memory_md: full long-term memory document, curated and readable.
 - memory_summary: compact prompt-time memory guidance.
 - skills: reusable procedural playbooks. Empty array allowed.
-- **Evolution V3 only**: document learnings + SessionLearner + `.omp/evolution/learnings.md`. You **MUST NOT** mention ConventionExtractor, `conventions.md`, `conventions` SQLite table, convention regression, or procedural_rule/negative_rule convention types.
+- **Evolution V3 only**: document learnings + SessionLearner + `.cornfield/evolution/learnings.md`. You **MUST NOT** mention ConventionExtractor, `conventions.md`, `conventions` SQLite table, convention regression, or procedural_rule/negative_rule convention types.
 - If input raw_memories mention legacy conventions, you **MUST** drop or rewrite them to V3 learnings language.
 - Include a "## Self-Evolution System (V3)" section in memory_md when the project uses omp evolution.
 - Each skill.name maps to skills/<name>/.

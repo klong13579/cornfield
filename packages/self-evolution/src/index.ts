@@ -173,7 +173,7 @@ export const createSelfEvolutionExtension: ExtensionFactory = api => {
 	api.registerFlag("self-evolution-project-store", {
 		type: "boolean",
 		default: true,
-		description: "Per-project store (default): <cwd>/.omp/evolution/memory, evolution.db, skills",
+		description: "Per-project store (default): <cwd>/.cornfield/evolution/memory, evolution.db, skills",
 	});
 	api.registerFlag("self-evolution-regression-replay", {
 		type: "string",

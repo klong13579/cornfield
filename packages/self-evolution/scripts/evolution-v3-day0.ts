@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * V3 Day-0: backup MEMORY.md + learnings seed → clear project .omp → restore → seed → memory_summary.
+ * V3 Day-0: backup MEMORY.md + learnings seed → clear project .cornfield → restore → seed → memory_summary.
  *
  * Usage:
  *   bun packages/self-evolution/scripts/evolution-v3-day0.ts [--cwd <repo>] [--global-store]
@@ -28,7 +28,7 @@ const seedInRepo = path.join(evolutionDir, "learnings-seed.json");
 const seedExample = path.join(import.meta.dir, "../learnings-seed.example.json");
 
 const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-const backupRoot = path.join(repoCwd, ".omp", `v3-day0-backup-${stamp}`);
+const backupRoot = path.join(repoCwd, ".cornfield", `v3-day0-backup-${stamp}`);
 
 await fs.mkdir(backupRoot, { recursive: true });
 

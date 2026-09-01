@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Persist Alibaba Coding Plan API key to ~/.omp/agent/agent.db (same store omp uses).
+ * Persist Alibaba Coding Plan API key to ~/.cornfield/agent/agent.db (same store cornfield uses).
  * Does not touch bailian-coding-plan credentials unless --remove-bailian is passed.
  *
  * Usage:

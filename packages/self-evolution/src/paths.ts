@@ -3,7 +3,7 @@
  *
  * All state lives under the evolution root:
  * - **User scope** (default): `~/.cornfield/self-evolution/{memory,skills,evolution.db}`
- * - **Project scope** (`--self-evolution-project-store`): `<cwd>/.omp/evolution/{memory,skills,evolution.db}`
+ * - **Project scope** (`--self-evolution-project-store`): `<cwd>/.cornfield/evolution/{memory,skills,evolution.db}`
  * - **User evolution utilities**: `~/.cornfield/agent/evolution` (fit / cross-project; not mixed with project dirs)
  */
 import * as os from "node:os";
@@ -36,20 +36,20 @@ export function resolveUserEvolutionDir(agentDir?: string): string {
 	return path.join(agentDir ?? getAgentDir(), "evolution");
 }
 
-export function resolveProjectOmpDir(cwd: string): string {
+export function resolveProjectConfigDir(cwd: string): string {
 	return getProjectAgentDir(cwd);
 }
 
 export function resolveProjectMemoryDir(cwd: string): string {
-	return path.join(resolveProjectOmpDir(cwd), "memory");
+	return path.join(resolveProjectConfigDir(cwd), "memory");
 }
 
 export function resolveProjectEvolutionDir(cwd: string): string {
-	return path.join(resolveProjectOmpDir(cwd), "evolution");
+	return path.join(resolveProjectConfigDir(cwd), "evolution");
 }
 
 export function resolveProjectSkillsDir(cwd: string): string {
-	return path.join(resolveProjectOmpDir(cwd), "skills");
+	return path.join(resolveProjectConfigDir(cwd), "skills");
 }
 
 export function resolveProjectEvolutionDbPath(cwd: string): string {

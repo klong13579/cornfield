@@ -404,7 +404,7 @@ describe("Self-evolution commands — full coverage", () => {
 			expect(notified.length).toBe(1);
 			expect(notified[0]!.type).toBe("info");
 			expect(notified[0]!.message).toContain("Cleared");
-			expect(notified[0]!.message).toContain(".omp/evolution");
+			expect(notified[0]!.message).toContain(".cornfield/evolution");
 		});
 
 		test("cancels when user declines", async () => {

@@ -22,7 +22,7 @@ console.log("2. **Control**: same task with context injection disabled:");
 console.log("   ```bash");
 console.log("   bun packages/coding-agent/src/cli.ts --no-self-evolution-enable-nudge-context-injection");
 console.log("   ```");
-console.log("3. Compare `~/.omp/logs/omp.*.log` for `Nudge context injected` (treatment only).");
+console.log("3. Compare `~/.cornfield/logs/cornfield.*.log` for `Nudge context injected` (treatment only).");
 console.log("4. Run `/evolution audit` — check **Nudges** section (help rate, repeat rate).");
 console.log("5. Run `/evolution nudges` — ack useful types, dismiss noisy ones.");
 console.log("");

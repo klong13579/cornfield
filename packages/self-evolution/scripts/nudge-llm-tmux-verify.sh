@@ -68,9 +68,9 @@ run_job treatment "$TREATMENT_LOG" "${OUT_DIR}/treatment.exit"
 echo "Control (nudge injection OFF) ..."
 run_job control "$CONTROL_LOG" "${OUT_DIR}/control.exit" --no-self-evolution-enable-nudge-context-injection
 
-TODAY_LOG="${HOME}/.omp/logs/omp.$(date +%Y-%m-%d).log"
-DB_PATH="${HOME}/.omp/self-evolution/evolution.db"
-[[ -f "$DB_PATH" ]] || DB_PATH="${REPO_ROOT}/.omp/self-evolution/evolution.db"
+TODAY_LOG="${HOME}/.cornfield/logs/cornfield.$(date +%Y-%m-%d).log"
+DB_PATH="${HOME}/.cornfield/self-evolution/evolution.db"
+[[ -f "$DB_PATH" ]] || DB_PATH="${REPO_ROOT}/.cornfield/evolution/evolution.db"
 
 TREATMENT_EXIT="$(cat "${OUT_DIR}/treatment.exit" 2>/dev/null || echo missing)"
 CONTROL_EXIT="$(cat "${OUT_DIR}/control.exit" 2>/dev/null || echo missing)"

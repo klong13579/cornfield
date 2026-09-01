@@ -21,7 +21,7 @@ describe("evolution paths", () => {
 		}
 	});
 
-	it("uses project-local .omp layout when globalStore is false", () => {
+	it("uses project-local .cornfield layout when globalStore is false", () => {
 		tempDir = path.join(os.tmpdir(), `evolution-paths-${Date.now()}`);
 		const cwd = path.join(tempDir, "repo");
 		const layout = resolveEvolutionPathLayout(cwd, false);
@@ -30,9 +30,9 @@ describe("evolution paths", () => {
 		expect(layout.memoryDir).toBe(path.join(resolveProjectEvolutionDir(cwd), "memory"));
 		expect(layout.evolutionDir).toBe(resolveProjectEvolutionDir(cwd));
 		expect(layout.skillsDir).toBe(resolveProjectSkillsDir(cwd));
-		expect(layout.dbPath).toBe(path.join(cwd, ".omp", "evolution", "evolution.db"));
-		expect(layout.memoryDir).toBe(path.join(cwd, ".omp", "evolution", "memory"));
-		expect(layout.skillsDir).toBe(path.join(cwd, ".omp", "skills"));
+		expect(layout.dbPath).toBe(path.join(cwd, ".cornfield", "evolution", "evolution.db"));
+		expect(layout.memoryDir).toBe(path.join(cwd, ".cornfield", "evolution", "memory"));
+		expect(layout.skillsDir).toBe(path.join(cwd, ".cornfield", "skills"));
 	});
 
 	it("uses global user layout when globalStore is true", () => {
@@ -72,6 +72,6 @@ describe("evolution paths", () => {
 	it("resolveUserEvolutionDir is under agent dir not project", () => {
 		const agentDir = "/tmp/agent";
 		expect(resolveUserEvolutionDir(agentDir)).toBe(path.join(agentDir, "evolution"));
-		expect(resolveUserEvolutionDir(agentDir)).not.toContain(path.join("repo", ".omp"));
+		expect(resolveUserEvolutionDir(agentDir)).not.toContain(path.join("repo", ".cornfield"));
 	});
 });

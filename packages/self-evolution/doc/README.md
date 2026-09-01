@@ -78,8 +78,8 @@ This plugin is bundled with `pi-coding-agent` and loads automatically as an inli
 | `--no-self-evolution-llm-rerank` | — | — | Use keyword-only retrieval (no LLM rerank) |
 | `--no-self-evolution-enable-versioning` | — | — | Disable skill version snapshots |
 | `--no-self-evolution-enable-activity-log` | — | — | Disable JSONL activity logging |
-| `--self-evolution-global-store` | boolean | `true` | Global user store: `~/.omp/self-evolution` (default) |
-| `--self-evolution-project-store` | boolean | `false` | Per-repo `<cwd>/.omp/evolution/{memory,skills,evolution.db}` |
+| `--self-evolution-global-store` | boolean | `true` | Global user store: `~/.cornfield/self-evolution` (default) |
+| `--self-evolution-project-store` | boolean | `false` | Per-repo `<cwd>/.cornfield/evolution/{memory,skills,evolution.db}` |
 
 Example:
 
@@ -100,7 +100,7 @@ All commands are consolidated under `/evolution <subcommand>`. Old flat commands
 | `/evolution status` | Show statistics: episodes, skills, versions, sessions archived |
 | `/evolution skills [--detail]` | List evolved skills with quality, success rate, user rating; `--detail` shows score breakdown |
 | `/evolution rate <name> <1-5>` | Rate a skill 1-5 stars (affects quality score) |
-| `/evolution clear` | Delete `.omp/evolution/memory`, `.omp/evolution`, and `.omp/skills` for this project (after confirmation) |
+| `/evolution clear` | Delete `.cornfield/evolution/memory`, `.cornfield/evolution`, and `.cornfield/skills` for this project (after confirmation) |
 | `/evolution archive` | Archive low-quality skills (quality < 30, unused) |
 | `/evolution history <name>` | View version history for a skill |
 | `/evolution rollback <name> <version>` | Rollback a skill to a specific version |
@@ -115,7 +115,7 @@ All commands are consolidated under `/evolution <subcommand>`. Old flat commands
 | `/evolution log` | Evolution event timeline from activity log |
 | `/evolution nudges` | Recent nudges; `ack` / `dismiss` by id |
 | `/evolution stuck` | Open evolution escalations; `ack` / `resolve` |
-| `/evolution sync-skills` | Export DB skills to `.omp/skills/*.md` |
+| `/evolution sync-skills` | Export DB skills to `.cornfield/skills/*.md` |
 | `/evolution backfill-traces` | Rebuild `session_traces` from session JSONL |
 | `/evolution refresh-admission` | Re-run benefit admission + regression gates |
 | `/evolution regression` | List recent regression trials (keep/discard) |
@@ -154,10 +154,10 @@ before_agent_start next session:
 
 ## Storage
 
-**Default:** project-local under `<project-root>/.omp/` (memory, evolution DB + projections, skills). This keeps **project isolation** — skills and learnings from one repo do not leak into another.
+**Default:** project-local under `<project-root>/.cornfield/` (memory, evolution DB + projections, skills). This keeps **project isolation** — skills and learnings from one repo do not leak into another.
 
 ```
-<repo>/.omp/
+<repo>/.cornfield/
 ├── memory/
 │   ├── MEMORY.md
 │   ├── memory_summary.md
@@ -181,9 +181,9 @@ Logical groupings inside the single database file:
 | Evolution | `episodes`, `episodes_fts`, `skills`, `skill_versions`, `learnings`, `session_traces`, `regression_fixtures`, `regression_trials`, `evolution_escalations`, `episode_intents`, `workflow_patterns`, `user_profiles`, `episode_effectiveness`, `skill_effectiveness`, `episode_detailed_outcomes`, `episode_diagnoses`, `nudge_history`, `fit_scores`, `stats`, … |
 | Memory | `threads`, `stage1_outputs`, `jobs`, `vector_embeddings` |
 
-Session transcripts (JSONL) stay in `~/.omp/agent/sessions/`. Auth and CLI settings use `~/.omp/agent/agent.db` — memory/evolution rows are **not** stored there anymore.
+Session transcripts (JSONL) stay in `~/.cornfield/agent/sessions/`. Auth and CLI settings use `~/.cornfield/agent/agent.db` — memory/evolution rows are **not** stored there anymore.
 
-**Global user store (default):** `~/.omp/self-evolution/` and encoded paths under `~/.omp/agent/memories/`. Use `--self-evolution-project-store` for `<repo>/.omp/`; `migrate-evolution-data.sh` copies global data into a project tree when needed.
+**Global user store (default):** `~/.cornfield/self-evolution/` and encoded paths under `~/.cornfield/agent/memories/`. Use `--self-evolution-project-store` for `<repo>/.cornfield/`; `migrate-evolution-data.sh` copies global data into a project tree when needed.
 
 ### One-time migration
 
@@ -215,27 +215,27 @@ View recent operations:
 
 ```bash
 # All events
-cat .omp/evolution/activity.log
+cat .cornfield/evolution/activity.log
 
 # Last 20 events
-tail -20 .omp/evolution/activity.log
+tail -20 .cornfield/evolution/activity.log
 
 # Pretty-print
-cat .omp/evolution/activity.log | jq .
+cat .cornfield/evolution/activity.log | jq .
 ```
 
 Log rotates automatically at 10MB (keeps 3 files).
 
 ## Database Queries
 
-**Default DB path:** `<repo>/.omp/evolution/evolution.db`
+**Default DB path:** `<repo>/.cornfield/evolution/evolution.db`
 
-**Global user store path** (default): `~/.omp/self-evolution/evolution.db`
+**Global user store path** (default): `~/.cornfield/self-evolution/evolution.db`
 
 Use `sqlite3` from the repo root (column names must match current schema):
 
 ```bash
-DB=.omp/evolution/evolution.db
+DB=.cornfield/evolution/evolution.db
 
 # Recent episodes
 sqlite3 -header -column "$DB" \

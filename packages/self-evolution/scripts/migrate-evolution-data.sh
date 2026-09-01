@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Migrate global user-store OMP evolution + memory artifacts into <repo>/.omp/{memory,evolution,skills}
-# and merge memory_* rows from ~/.omp/agent/agent.db into project evolution.db
+# Migrate global user-store cornfield evolution + memory artifacts into <repo>/.cornfield/{memory,evolution,skills}
+# and merge memory_* rows from ~/.cornfield/agent/agent.db into project evolution.db
 set -euo pipefail
 
 REPO_ROOT="${1:-$(pwd)}"
@@ -50,13 +50,13 @@ try_recover_global_db() {
 }
 
 ENCODED="$(encode_project_path "$REPO_ROOT")"
-HOME_OMP="${HOME}/.omp"
+HOME_OMP="${HOME}/.cornfield"
 LEGACY_GLOBAL="${HOME_OMP}/self-evolution"
 LEGACY_MEM_FLAT="${HOME_OMP}/agent/memories/${ENCODED}"
 LEGACY_MEM_STATE="${HOME_OMP}/agent/memories/state/${ENCODED}"
 AGENT_DB="${HOME_OMP}/agent/agent.db"
 
-PROJ_OMP="${REPO_ROOT}/.omp"
+PROJ_OMP="${REPO_ROOT}/.cornfield"
 PROJ_MEMORY="${PROJ_OMP}/memory"
 PROJ_EVOLUTION="${PROJ_OMP}/evolution"
 PROJ_SKILLS="${PROJ_OMP}/skills"
@@ -126,7 +126,7 @@ for f in conventions.md system-diagnosis.md user_profile.md activity.log evoluti
 	fi
 done
 
-# 4) Old in-repo layout .omp/self-evolution/
+# 4) Old in-repo layout .cornfield/self-evolution/
 OLD_PROJ="${PROJ_OMP}/self-evolution"
 if [[ -d "$OLD_PROJ" ]]; then
 	for f in conventions.md system-diagnosis.md user_profile.md evolution_log.md; do
@@ -134,7 +134,7 @@ if [[ -d "$OLD_PROJ" ]]; then
 	done
 	if [[ -f "${OLD_PROJ}/evolution.db" ]] && sqlite_opens "${OLD_PROJ}/evolution.db"; then
 		if [[ ! -f "$DEST_DB" ]] || ! sqlite_opens "$DEST_DB"; then
-			echo "  import evolution.db from in-repo .omp/self-evolution"
+			echo "  import evolution.db from in-repo .cornfield/self-evolution"
 			copy_evolution_db_bundle "$OLD_PROJ" "$DEST_DB" || true
 		fi
 	fi

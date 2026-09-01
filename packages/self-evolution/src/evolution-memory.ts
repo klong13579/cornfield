@@ -21,7 +21,7 @@ export const EVOLUTION_MEMORY_SUBCOMMANDS = [
 	{ name: "enqueue", description: "Enqueue Phase2 memory consolidation" },
 	{ name: "rebuild", description: "Alias for enqueue" },
 	{ name: "refresh-summary", description: "Rebuild memory_summary.md from MEMORY.md" },
-	{ name: "clear", description: "Clear memory DB rows and .omp/memory artifacts only" },
+	{ name: "clear", description: "Clear memory DB rows and .cornfield/memory artifacts only" },
 ] as const;
 
 export interface RunEvolutionMemoryOptions {

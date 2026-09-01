@@ -14,12 +14,12 @@
  *   // ...
  *   await endTrace(writer, true);
  *
- * Each file is written to: ~/.omp/traces/external/<sessionId>.jsonl
+ * Each file is written to: ~/.cornfield/traces/external/<sessionId>.jsonl
  * The self-evolution pipeline will pick it up on the next omp start.
  */
 import * as fs from "node:fs/promises";
-import * as os from "node:os";
 import * as path from "node:path";
+import { resolveExternalTraceDir } from "../src/paths";
 
 export interface TraceWriter {
 	filePath: string;
@@ -27,7 +27,7 @@ export interface TraceWriter {
 	append(line: string): Promise<void>;
 }
 
-const TRACE_DIR = path.join(os.homedir(), ".omp", "traces", "external");
+const TRACE_DIR = resolveExternalTraceDir();
 
 async function ensureDir(dir: string): Promise<void> {
 	await fs.mkdir(dir, { recursive: true });
@@ -39,7 +39,7 @@ function isoTimestamp(): string {
 
 /**
  * Start a new external trace session.
- * Writes the session header to a new JSONL file in ~/.omp/traces/external/.
+ * Writes the session header to a new JSONL file in ~/.cornfield/traces/external/.
  */
 export async function beginTrace(sessionId: string, cwd: string, userPrompt: string): Promise<TraceWriter> {
 	await ensureDir(TRACE_DIR);

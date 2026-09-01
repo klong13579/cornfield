@@ -208,7 +208,7 @@ export async function generateAuditReport(
 	if (totalLearnings === 0) {
 		issues.push("No learnings in DB — run sessions or /evolution learnings seed after clear.");
 		recommendations.push(
-			"Copy learnings-seed.example.json to .omp/evolution/learnings-seed.json and run /evolution learnings seed.",
+			"Copy learnings-seed.example.json to .cornfield/evolution/learnings-seed.json and run /evolution learnings seed.",
 		);
 	} else if (injectable === 0) {
 		issues.push(
