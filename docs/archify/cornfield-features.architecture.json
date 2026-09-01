@@ -27,12 +27,11 @@
         "label": "工具集",
         "focus": [
           "tools",
-          "skills",
-          "extensions",
-          "voice",
-          "serve"
+          "skills-ext",
+          "config",
+          "voice-serve"
         ],
-        "note": "coding-agent 的 25+ 内置工具与扩展能力。"
+        "note": "coding-agent 的工具、技能与扩展能力。"
       },
       {
         "id": "gateway",
@@ -44,7 +43,7 @@
           "bridge",
           "gservice"
         ],
-        "note": "DingTalk 消息 + 定时任务经 gateway 调度。"
+        "note": "DingTalk 消息 + 定时任务。"
       },
       {
         "id": "evolution",
@@ -58,48 +57,68 @@
         ],
         "note": "会话经验提炼与回灌。"
       }
-    ],
-    "viewBox": [
-      1150,
-      800
     ]
   },
   "layout": {
     "mode": "grid",
     "origin": [
-      30,
-      40
+      40,
+      60
     ],
-    "cols": 4,
-    "gapX": 120,
-    "gapY": 40,
-    "cellW": 190,
-    "cellH": 56
+    "cols": 5,
+    "gapX": 110,
+    "gapY": 26,
+    "cellW": 160,
+    "cellH": 52
   },
   "components": [
     {
       "id": "terminal",
       "type": "external",
       "label": "终端用户",
-      "sublabel": "交互 / 非交互",
+      "sublabel": "交互 · 非交互",
       "row": 0,
-      "col": 0
+      "col": 0,
+      "size": [
+        160,
+        48
+      ]
     },
     {
       "id": "modes",
       "type": "backend",
       "label": "运行模式",
-      "sublabel": "session · rpc · acp",
+      "sublabel": "四运行模式",
       "row": 0,
-      "col": 1
+      "col": 1,
+      "size": [
+        160,
+        48
+      ]
     },
     {
       "id": "agent-loop",
       "type": "backend",
       "label": "Agent Loop",
-      "sublabel": "run loop · 防死循环",
+      "sublabel": "loop · doom 检测",
       "row": 0,
-      "col": 2
+      "col": 2,
+      "size": [
+        160,
+        48
+      ]
+    },
+    {
+      "id": "ai-stream",
+      "type": "backend",
+      "label": "流式与事件",
+      "sublabel": "流式调用",
+      "row": 0,
+      "col": 3,
+      "size": [
+        160,
+        48
+      ]
     },
     {
       "id": "providers",
@@ -107,31 +126,35 @@
       "label": "LLM Providers",
       "sublabel": "云模型",
       "row": 0,
-      "col": 3
+      "col": 4,
+      "size": [
+        160,
+        48
+      ]
     },
     {
       "id": "ai-providers",
       "type": "backend",
       "label": "Provider 适配",
-      "sublabel": "openai · gemini · azure",
+      "sublabel": "azure · codex · bedrock",
       "row": 1,
-      "col": 0
+      "col": 0,
+      "size": [
+        160,
+        48
+      ]
     },
     {
       "id": "ai-models",
       "type": "backend",
       "label": "模型注册表",
-      "sublabel": "models.json · thinking",
+      "sublabel": "模型注册 · thinking",
       "row": 1,
-      "col": 1
-    },
-    {
-      "id": "ai-stream",
-      "type": "backend",
-      "label": "流式与事件",
-      "sublabel": "streamSimple",
-      "row": 1,
-      "col": 2
+      "col": 1,
+      "size": [
+        160,
+        48
+      ]
     },
     {
       "id": "ai-auth",
@@ -139,19 +162,27 @@
       "label": "OAuth / 认证",
       "sublabel": "auth-storage",
       "row": 1,
-      "col": 3
+      "col": 2,
+      "size": [
+        160,
+        48
+      ]
     },
     {
       "id": "cli",
       "type": "backend",
       "label": "CLI 命令",
       "sublabel": "commit · grep · ssh",
-      "row": 2,
-      "col": 0,
+      "row": 1,
+      "col": 3,
       "sources": [
         {
           "path": "packages/coding-agent/src/cli.ts"
         }
+      ],
+      "size": [
+        160,
+        48
       ]
     },
     {
@@ -159,8 +190,12 @@
       "type": "backend",
       "label": "Session 管理",
       "sublabel": "JSONL · 恢复",
-      "row": 2,
-      "col": 1
+      "row": 1,
+      "col": 4,
+      "size": [
+        160,
+        48
+      ]
     },
     {
       "id": "agent-state",
@@ -168,143 +203,179 @@
       "label": "状态与工具调用",
       "sublabel": "消息 · 校验",
       "row": 2,
-      "col": 2
-    },
-    {
-      "id": "skills",
-      "type": "backend",
-      "label": "Skills / Slash",
-      "sublabel": "技能 · 命令",
-      "row": 2,
-      "col": 3
+      "col": 0,
+      "size": [
+        160,
+        48
+      ]
     },
     {
       "id": "tools",
       "type": "backend",
       "label": "工具集 25+",
-      "sublabel": "read · bash · LSP · MCP",
-      "row": 3,
-      "col": 0
+      "sublabel": "read · bash · lsp · mcp",
+      "row": 2,
+      "col": 1,
+      "size": [
+        160,
+        48
+      ]
     },
     {
-      "id": "extensions",
+      "id": "skills-ext",
       "type": "backend",
-      "label": "扩展生态",
-      "sublabel": "MOA · intercom",
-      "row": 3,
-      "col": 1
+      "label": "技能 / 扩展",
+      "sublabel": "skills · slash · 扩展",
+      "row": 2,
+      "col": 2,
+      "size": [
+        160,
+        48
+      ]
     },
     {
-      "id": "voice",
+      "id": "config",
       "type": "backend",
-      "label": "语音能力",
-      "sublabel": "STT · TTS",
-      "row": 3,
-      "col": 2
+      "label": "配置系统",
+      "sublabel": "settings · prompts",
+      "row": 2,
+      "col": 3,
+      "size": [
+        160,
+        48
+      ]
     },
     {
-      "id": "serve",
+      "id": "voice-serve",
       "type": "backend",
-      "label": "Serve / Live",
-      "sublabel": "wire · 委托",
-      "row": 3,
-      "col": 3
+      "label": "语音 · Serve",
+      "sublabel": "STT · TTS · serve",
+      "row": 2,
+      "col": 4,
+      "size": [
+        160,
+        48
+      ]
     },
     {
       "id": "dingtalk",
       "type": "external",
       "label": "DingTalk",
       "sublabel": "IM 渠道",
-      "row": 4,
-      "col": 0
+      "row": 3,
+      "col": 0,
+      "size": [
+        160,
+        48
+      ]
     },
     {
       "id": "dt-channel",
       "type": "backend",
       "label": "DingTalk 渠道",
       "sublabel": "stream · card",
-      "row": 4,
-      "col": 1
+      "row": 3,
+      "col": 1,
+      "size": [
+        160,
+        48
+      ]
     },
     {
       "id": "scheduler",
       "type": "backend",
       "label": "调度器",
       "sublabel": "cron · interval",
-      "row": 4,
-      "col": 2
+      "row": 3,
+      "col": 2,
+      "size": [
+        160,
+        48
+      ]
     },
     {
       "id": "bridge",
       "type": "backend",
       "label": "AgentBridge",
       "sublabel": "RPC 传输",
-      "row": 4,
-      "col": 3
+      "row": 3,
+      "col": 3,
+      "size": [
+        160,
+        48
+      ]
     },
     {
       "id": "gservice",
       "type": "backend",
       "label": "存储与生命周期",
-      "sublabel": "session-store · installer",
-      "row": 5,
-      "col": 0
+      "sublabel": "store · installer",
+      "row": 3,
+      "col": 4,
+      "size": [
+        160,
+        48
+      ]
     },
     {
       "id": "skillmine",
       "type": "backend",
       "label": "Skill 挖掘",
       "sublabel": "提取 · 版本化",
-      "row": 5,
-      "col": 1
+      "row": 4,
+      "col": 0,
+      "size": [
+        160,
+        48
+      ]
     },
     {
       "id": "episodic",
       "type": "backend",
       "label": "情景记忆",
-      "sublabel": "episodic · 向量",
-      "row": 5,
-      "col": 2
+      "sublabel": "episodic · 检索",
+      "row": 4,
+      "col": 1,
+      "size": [
+        160,
+        48
+      ]
     },
     {
       "id": "nudge",
       "type": "backend",
       "label": "Nudge 提醒",
       "sublabel": "检测 · 投递",
-      "row": 5,
-      "col": 3
+      "row": 4,
+      "col": 2,
+      "size": [
+        160,
+        48
+      ]
     },
     {
       "id": "regression",
       "type": "backend",
       "label": "回归重放",
       "sublabel": "trial · fixture",
-      "row": 6,
-      "col": 0
+      "row": 4,
+      "col": 3,
+      "size": [
+        160,
+        48
+      ]
     },
     {
-      "id": "utils",
+      "id": "base",
       "type": "backend",
-      "label": "基础工具",
-      "sublabel": "logger · dirs",
-      "row": 6,
-      "col": 1
-    },
-    {
-      "id": "natives",
-      "type": "backend",
-      "label": "原生能力",
-      "sublabel": "Rust N-API",
-      "row": 6,
-      "col": 2
-    },
-    {
-      "id": "webapp",
-      "type": "frontend",
-      "label": "web / desktop / tui",
-      "sublabel": "React · Electron · 终端",
-      "row": 6,
-      "col": 3
+      "label": "基础 / 前端",
+      "sublabel": "utils · natives · web",
+      "row": 4,
+      "col": 4,
+      "size": [
+        160,
+        48
+      ]
     }
   ],
   "boundaries": [
@@ -314,8 +385,8 @@
       "wraps": [
         "ai-providers",
         "ai-models",
-        "ai-stream",
-        "ai-auth"
+        "ai-auth",
+        "ai-stream"
       ]
     },
     {
@@ -334,10 +405,9 @@
         "cli",
         "session",
         "tools",
-        "skills",
-        "extensions",
-        "voice",
-        "serve"
+        "skills-ext",
+        "config",
+        "voice-serve"
       ]
     },
     {
@@ -373,21 +443,13 @@
       "id": "modes-to-agent",
       "from": "modes",
       "to": "agent-loop",
-      "label": "createAgentSession",
-      "labelAt": [
-        405,
-        112
-      ]
+      "label": "createAgentSession"
     },
     {
       "id": "agent-to-ai",
       "from": "agent-loop",
       "to": "ai-stream",
-      "label": "streamSimple",
-      "labelAt": [
-        430,
-        118
-      ]
+      "label": "streamSimple"
     },
     {
       "id": "ai-to-providers",
@@ -414,12 +476,6 @@
       "from": "scheduler",
       "to": "bridge",
       "label": "执行"
-    },
-    {
-      "id": "channel-to-gs",
-      "from": "dt-channel",
-      "to": "gservice",
-      "label": "会话存取"
     }
   ],
   "cards": [
@@ -427,42 +483,17 @@
       "dot": "cyan",
       "title": "coding-agent 工具集（25+）",
       "items": [
-        "文件：read · write · edit · find · search · ast-grep · ast-edit · archive · sqlite",
-        "执行：bash · python · notebook · ssh · vim · resolve",
-        "开发：LSP · DAP · debug · gh · review · checkpoint",
-        "网络：fetch · browser · inspect-image · image-gen",
-        "协作：irc · hub · task · recipe · todo · identity",
-        "模型：list-models · switch-model · job · yield"
+        "read · write · edit · find · search · ast · bash · python · notebook · ssh · LSP · DAP · MCP",
+        "fetch · browser · image · gh · review · irc · task · recipe · todo · list-models"
       ]
     },
     {
       "dot": "emerald",
-      "title": "gateway 调度与运维",
+      "title": "gateway 调度 · 自进化 · 模型",
       "items": [
-        "cron · interval · one-shot，engine + executor 分离",
-        "test-run 与执行日志（by-task JSONL）",
-        "host-tool：cron.test-run 等 LLM 可调用能力",
-        "多账号 agentDir 隔离，session_webhook 落库",
-        "service installer · restart-sentinel · crash-recovery"
-      ]
-    },
-    {
-      "dot": "rose",
-      "title": "自进化管线",
-      "items": [
-        "session trace → skill 提取 / episodic / 错误模式",
-        "学习准入 + 效果评估 + 版本化",
-        "Nudge 检测投递、回归重放防劣化",
-        "工作流挖掘与 prompt 注入回灌"
-      ]
-    },
-    {
-      "dot": "violet",
-      "title": "模型与认证",
-      "items": [
-        "openai · anthropic · gemini · azure · codex · bedrock · kimi · ollama · vertex",
-        "模型发现 · models.json 生成（勿手改）",
-        "OAuth / API key，usage 统计与 stats 面板"
+        "cron · interval · one-shot；host-tool；restart-sentinel · crash-recovery",
+        "trace → skill / episodic / nudge / regression；工作流挖掘",
+        "openai · anthropic · gemini · azure · codex · bedrock · kimi · ollama · vertex"
       ]
     }
   ]

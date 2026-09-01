@@ -1,5 +1,8 @@
 # CornField 文档索引
 
+> 🧭 **想按功能查（有哪些能力、状态如何）→ 读 [`FEATURES.md`](FEATURES.md)**（功能总览，单文件速览）
+> 本页是 `docs/` 的文档树索引。两个入口分工：FEATURES.md 管「功能树」，本页管「文档树」。
+
 > 本页面是 `docs/` 的唯一入口。规矩：
 > - **一个功能一篇文档**；新文档先查这里有没有同名/同主题，禁止分叉
 > - 文件名 = 功能名（小写 kebab），不带版本后缀（-v1/-v2.0）、不带产品旧名前缀（omp-）
@@ -39,7 +42,7 @@
 |client/desktop.md|桌面客户端功能说明（desktop + web-app + editor-extension + 协议）|真值（随版本更新盘点）|
 |client/editor-extension.md|编辑器扩展：现状摸底 + OpenSumi/Zed 借鉴 + 架构结论|设计（未开工）|
 |client/multidevice.md|多端架构（host + TUI/Web/PC/Mobile 接入）|设计（P0/P1 已实施，P2 规划中）|
-|client/project-container.md|项目容器（Project）+ Coding Task：现状/行业对照/领域模型/分期|设计（待拍板）|
+|client/agent-hub.md|数字员工中枢：Agent 核心 + 项目/任务/会话（前身 project-container.md）|设计（待拍板）|
 
 ## config — 配置与模型
 
