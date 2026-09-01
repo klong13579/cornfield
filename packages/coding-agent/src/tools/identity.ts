@@ -256,7 +256,7 @@ export class IdentityTool implements AgentTool<typeof identitySchema> {
 		const lines: string[] = [
 			"# Agent Identity",
 			"",
-			`- name: Oh My Pi (OMP) coding agent`,
+			`- name: CornField coding agent`,
 			`- version: ${VERSION}`,
 			`- working directory: ${this.session.cwd}`,
 		];

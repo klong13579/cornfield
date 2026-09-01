@@ -152,7 +152,7 @@ try {
 	const helpText = messageChunks
 		.map(n => (n.params as { update: { content?: { text?: string } } }).update.content?.text ?? "")
 		.join("");
-	if (!helpText.includes("Oh My Pi")) {
+	if (!helpText.includes("CornField")) {
 		fail(`agent message missing expected help text (head: ${helpText.slice(0, 200)})`);
 	}
 	console.log(`PASS prompt → stopReason=${prResult.stopReason}, agent_message_chunks=${messageChunks.length}`);

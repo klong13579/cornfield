@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-omp 交互动效候选 — 三合一演示（球体旋转 / thinking 波浪 / solving 条带）
+cornfield 交互动效候选 — 三合一演示（球体旋转 / thinking 波浪 / solving 条带）
 
-按 omp 实际尺寸：每段 100×10 字符（welcome maxWidth=100 参考），三段竖排，
+按 cornfield 实际尺寸：每段 100×10 字符（welcome maxWidth=100 参考），三段竖排，
 左侧状态标签，60fps 差分播放。
 
 用法：
@@ -18,7 +18,7 @@ import shutil
 import sys
 import time
 
-# ── 段尺寸（omp 内容区宽度 ~100）──
+# ── 段尺寸（cornfield 内容区宽度 ~100）──
 SEG_W, SEG_H = 100, 12
 GAP = 1                      # 段间空行
 LABEL_W = 18                 # 左侧标签列宽

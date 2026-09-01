@@ -135,7 +135,7 @@ cornfield-gateway config                      # 打印当前生效配置
 
 定时任务通过 LLM 可见的 `cron` host tool 管理（详见 `TOOLS.md` 的 `cron (gateway host tool)` 章节）。
 
-- 例外（operator 路径，不经 LLM）：(1) gateway 启动 / OMP 不可用时的灾难恢复；(2) CI / 脚本化批量管理；(3) 无 active chat context 时（`getActiveChatContext()` 返回 `undefined`）host tool 会要求显式 delivery。
+- 例外（operator 路径，不经 LLM）：(1) gateway 启动 / CornField 不可用时的灾难恢复；(2) CI / 脚本化批量管理；(3) 无 active chat context 时（`getActiveChatContext()` 返回 `undefined`）host tool 会要求显式 delivery。
 
 #### agent 工作区管理
 

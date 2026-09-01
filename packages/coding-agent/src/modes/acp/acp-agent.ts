@@ -199,7 +199,7 @@ export class AcpAgent implements Agent {
 				{
 					id: "agent",
 					name: "Agent-managed authentication",
-					description: "Oh My Pi uses its existing local authentication and provider configuration.",
+					description: "CornField uses its existing local authentication and provider configuration.",
 				},
 			],
 			agentCapabilities: {
@@ -1039,7 +1039,7 @@ export class AcpAgent implements Agent {
 		switch (cmd.name) {
 			case "help":
 				return [
-					"Oh My Pi — ACP-mode commands:",
+					"CornField — ACP-mode commands:",
 					"  /help            Show this help",
 					"  /compact [hint]  Compact session context (optional guidance)",
 					"",

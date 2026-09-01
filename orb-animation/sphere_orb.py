@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-omp 交互动效候选 — 深度明暗圆点球体旋转
+cornfield 交互动效候选 — 深度明暗圆点球体旋转
 
 视觉语言参考 thinking-orbs（https://github.com/Jakubantalik/thinking-orbs）：
   - 稀疏圆点球（fib 分布），点大小随 3D 深度：近 `●` 大 / 中 `•` / 远 `·` 小

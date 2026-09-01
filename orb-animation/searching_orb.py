@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-omp 交互动效候选 — searching（扫描子午线）
+cornfield 交互动效候选 — searching（扫描子午线）
 
 基于 sphere_orb.py 的管线（深度明暗圆点 + 60fps 离线烘焙 + 差分播放）。
 移植 thinking-orbs lattice.ts drawGlobe（MIT）：

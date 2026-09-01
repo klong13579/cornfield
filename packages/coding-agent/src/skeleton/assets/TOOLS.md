@@ -4,7 +4,7 @@
 >
 > This file is **always-on** (injected via `prompt-includes.json`).
 > Per design §4 principle 2: **tool-level rules are co-located with the tool description**.
-> Use `MUST` / `MUST NOT` / `NEVER` in this file — OMP extracts them into `<hard-constraints>`.
+> Use `MUST` / `MUST NOT` / `NEVER` in this file — CornField extracts them into `<hard-constraints>`.
 
 ## 工具选择原则
 
@@ -13,7 +13,7 @@
 3. **读取工具 > 修改工具** — 动刀前先充分理解
 4. **即时验证 > 事后调试** — 修改后立即验证
 
-## OMP 内置工具
+## CornField 内置工具
 
 ### `read`
 Read a file or URL.
@@ -22,7 +22,7 @@ Read a file or URL.
 - MUST NOT read files larger than the configured `read.defaultLimit` without paging.
 - MUST use `read` for office documents (PPT, PPTX, DOC, DOCX, XLS, XLSX, RTF, EPUB) instead of `bash` + Python scripts — `read` converts them to markdown text via markit-ai, preserving structured content.
 - MUST NOT use `bash` `python3 -c "zipfile"` or similar to manually extract text from Office XML — let `read` handle the conversion.
-- **PDF 例外**：OMP `read` 工具缺 mupdf 运行时依赖，无法解析 PDF。使用 `python3` + `fitz` 代替：
+- **PDF 例外**：CornField `read` 工具缺 mupdf 运行时依赖，无法解析 PDF。使用 `python3` + `fitz` 代替：
   `python3 -c "import fitz; doc = fitz.open('/tmp/f.pdf'); [print(page.get_text()) for page in doc]"`
 
 ### `search`
@@ -116,9 +116,9 @@ Switch the current session model. Takes `query` (5-level fuzzy match) and option
 
 ### `cron` (gateway host tool — NOT a CLI)
 
-`cron` is an OMP **host tool** registered by the gateway on the `set_host_tools` RPC. The agent calls it as a regular LLM tool, NOT by shelling out to `cornfield-gateway cron ...`.
+`cron` is a CornField **host tool** registered by the gateway on the `set_host_tools` RPC. The agent calls it as a regular LLM tool, NOT by shelling out to `cornfield-gateway cron ...`.
 
-**Scope = agent (this account).** "My" in a cron context refers to the current agent (= this OMP subprocess / this account), not the user asking. All users in the same agent see the same task list; the agent owns its tasks. There is no per-user or per-conversation scope — `cron.list` returns ALL tasks in this agent, regardless of who created them or which chat is active. Each task records its creator in `createdByUserId` (audit field); if the user asks "which tasks did I create", call `cron.list` then filter the result client-side by `createdByUserId === <current sender staffId>`. See `docs/cornfield-gateway-cron-host-tool.md` §6.5 for the design rationale.
+**Scope = agent (this account).** "My" in a cron context refers to the current agent (= this CornField subprocess / this account), not the user asking. All users in the same agent see the same task list; the agent owns its tasks. There is no per-user or per-conversation scope — `cron.list` returns ALL tasks in this agent, regardless of who created them or which chat is active. Each task records its creator in `createdByUserId` (audit field); if the user asks "which tasks did I create", call `cron.list` then filter the result client-side by `createdByUserId === <current sender staffId>`. See `docs/cornfield-gateway-cron-host-tool.md` §6.5 for the design rationale.
 
 Actions: `add` / `list` / `show` / `update` / `remove` / `enable` / `disable` / `runs` / `test-run`.
 
@@ -152,9 +152,9 @@ No `delivery` field — gateway infers `{channel, accountId, toUserId}` from the
 
 ### `bridge_status` (gateway host tool — read-only diagnostic)
 
-`bridge_status` is an OMP **host tool** registered by the gateway on the `set_host_tools` RPC. It returns the AgentBridge's current snapshot (lifecycle state, circuit breaker, crash recovery, queue depth) plus a derived `summary` field. No parameters.
+`bridge_status` is a CornField **host tool** registered by the gateway on the `set_host_tools` RPC. It returns the AgentBridge's current snapshot (lifecycle state, circuit breaker, crash recovery, queue depth) plus a derived `summary` field. No parameters.
 
-**Scope = this agent's bridge** (the OMP subprocess serving this account). The LLM should call this when:
+**Scope = this agent's bridge** ((the CornField subprocess serving this account)). The LLM should call this when:
 - The user reports a message wasn't delivered and the LLM suspects the bridge is the cause
 - The LLM's own tool call returned a "system busy" / "circuit open" error and it needs to know when to retry
 - The LLM needs to confirm the bridge is healthy before promising the user a follow-up
@@ -164,8 +164,8 @@ No `delivery` field — gateway infers `{channel, accountId, toUserId}` from the
 **State field is the primary signal**:
 - `idle` — healthy, ready. No action needed.
 - `busy` — processing a prompt (see `activePromptId`). Wait for it to finish.
-- `starting` — bridge spawning OMP; first prompt may take a few seconds.
-- `stopped` — OMP subprocess is down. Tell the user the agent is unavailable.
-- `restarting` — OMP crashed, gateway is restarting with backoff. Brief window of unavailability.
+- `starting` — bridge spawning CornField; first prompt may take a few seconds.
+- `stopped` — CornField subprocess is down. Tell the user the agent is unavailable.
+- `restarting` — CornField crashed, gateway is restarting with backoff. Brief window of unavailability.
 - `degraded` — circuit breaker open after consecutive failures. New prompts fast-fail until cooldown (default 30s) expires. Read `circuitFailures` and `circuitOpenedAt` to estimate when retries will be accepted.
 - `error` — too many crashes; bridge is suppressed and NOT auto-restarting. Operator (human) must intervene. Tell the user the agent is down and the gateway operator needs to restart it.

@@ -2,7 +2,7 @@
  * Task tool - Delegate tasks to specialized agents.
  *
  * Discovers agent definitions from:
- *   - Bundled agents (shipped with omp-coding-agent)
+ *   - Bundled agents (shipped with cornfield-coding-agent)
  *   - ~/.cornfield/agent/agents/*.md (user-level)
  *   - .cornfield/agents/*.md (project-level)
  *

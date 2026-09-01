@@ -54,7 +54,7 @@
 		"fileTypes": [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"],
 		"rootMarkers": ["package.json", "tsconfig.json", "jsconfig.json"],
 		"initOptions": {
-			"hostInfo": "omp-coding-agent",
+			"hostInfo": "cornfield-coding-agent",
 			"preferences": {
 				"includeInlayParameterNameHints": "all",
 				"includeInlayVariableTypeHints": true,

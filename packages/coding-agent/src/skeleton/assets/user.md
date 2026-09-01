@@ -40,7 +40,7 @@
 - pet_peeves: 任务不闭环、胡说八道、工作结果不稳定
 - team_size: 约 50 人
 - communication_style: on the table talking，直说，不绕弯
-- tools: OMP、钉钉、xmind、飞书、Codex、Qwen 等
+- tools: CornField、钉钉、xmind、飞书、Codex、Qwen 等
 ## thinking
 - tech_depth: 需要背景铺垫，不要假设我能直接读懂技术细节和 tradeoff
 - team_structure: 50 人分四组：世界模型、行为智能、软件系统、机电系统

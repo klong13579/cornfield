@@ -573,7 +573,7 @@ export class AgentSession {
 			return;
 		}
 		try {
-			this.#powerAssertion = MacOSPowerAssertion.start({ reason: "Oh My Pi agent session" });
+			this.#powerAssertion = MacOSPowerAssertion.start({ reason: "CornField agent session" });
 		} catch (error) {
 			logger.warn("Failed to acquire macOS power assertion", { error: String(error) });
 		}

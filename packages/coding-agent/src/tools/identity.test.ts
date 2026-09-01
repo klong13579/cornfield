@@ -190,7 +190,7 @@ describe("identity tool — whoRu", () => {
 		const tool = makeTool();
 		const result = await tool.execute("call-1", { action: "whoRu" });
 		const text = (result.content[0] as { text: string }).text;
-		expect(text).toContain("Oh My Pi (OMP) coding agent");
+		expect(text).toContain("CornField coding agent");
 		expect(text).toContain(`working directory: ${tmpDir}`);
 		expect(text).toMatch(/version: \d+\.\d+\.\d+/);
 	});

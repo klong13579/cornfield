@@ -1125,7 +1125,7 @@ export const imageGenTool: CustomTool<typeof imageGenSchema, ImageGenToolDetails
 					headers: {
 						"Content-Type": "application/json",
 						Authorization: `Bearer ${apiKey.apiKey}`,
-						"X-Title": "Oh-My-Pi",
+						"X-Title": "CornField",
 					},
 					body: JSON.stringify(requestBody),
 					signal: requestSignal,

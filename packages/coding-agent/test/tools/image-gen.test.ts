@@ -76,7 +76,7 @@ describe("imageGenTool", () => {
 
 		const result = await imageGenTool.execute("call-1", { subject: "a cat" }, undefined, ctx);
 		expect(result.content[0].type).toBe("text");
-		expect(getHeaderValue(requestHeaders, "X-Title")).toBe("Oh-My-Pi");
+		expect(getHeaderValue(requestHeaders, "X-Title")).toBe("CornField");
 	});
 
 	it("e2e writes OpenAI Responses image_generation WebP output to a temp file", async () => {

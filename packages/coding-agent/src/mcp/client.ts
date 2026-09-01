@@ -44,7 +44,7 @@ const CONNECTION_TIMEOUT_MS = 30_000;
 
 /** Client info sent during initialization */
 const CLIENT_INFO = {
-	name: "omp-coding-agent",
+	name: "cornfield-coding-agent",
 	version: "1.0.0",
 };
 

@@ -766,7 +766,7 @@ export function openrouterModelManagerOptions(
 				baseUrl,
 				apiKey,
 				headers: {
-					"X-Title": "Oh-My-Pi",
+					"X-Title": "CornField",
 				},
 				filterModel: (entry: OpenAICompatibleModelRecord) => {
 					const params = entry.supported_parameters;
