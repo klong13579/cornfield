@@ -9,7 +9,7 @@ import { KindBadge } from "./AgentsView";
 
 /**
  * Agent 详情（FR-2）—— 6 tab：Skills / 模型 / 工具 / 画像 / 文件 / Prompts。
- * 数据源：Skills 读 .omp/skills 真实列表（fs_list+SKILL.md）、画像读 mission.md+user.md、
+ * 数据源：Skills 读 .cornfield/skills 真实列表（fs_list+SKILL.md）、画像读 mission.md+user.md、
  * 模型接 get_available_models/set_model 真命令、画像实时建模待连接器路径（缺口 B5）。
  */
 
@@ -25,7 +25,7 @@ const TABS: { id: TabId; label: string }[] = [
 	{ id: "prompts", label: "Prompts" },
 ];
 
-// 技能列表改为真实数据：fs_list 读 .omp/skills/ 目录（serve skillCount 同源）。
+// 技能列表改为真实数据：fs_list 读 .cornfield/skills/ 目录（serve skillCount 同源）。
 // 版本/描述从各 skill 的 SKILL.md frontmatter 解析（fs_read）。
 
 const THINKING_LEVELS = ["off", "low", "medium", "high"];
@@ -669,13 +669,13 @@ function SkillsView({ agentId }: { agentId: string }): React.JSX.Element {
 		if (!view.connected) return; // 连接就绪后再拉，避免 fs_list 在握手期失败
 		const load = async (): Promise<void> => {
 			try {
-				const { entries } = await store.fsList(agentId, ".omp/skills");
+				const { entries } = await store.fsList(agentId, ".cornfield/skills");
 				const dirs = entries.filter(e => e.type === "dir");
 				const infos = await Promise.all(
 					dirs.map(async d => {
 						// 读 SKILL.md frontmatter（可能不在顶层而在一级子目录，容错）
 						try {
-							const { text } = await store.fsRead(agentId, `.omp/skills/${d.name}/SKILL.md`);
+							const { text } = await store.fsRead(agentId, `.cornfield/skills/${d.name}/SKILL.md`);
 							const fm = parseFrontmatter(text);
 							return { name: fm.name ?? d.name, desc: fm.desc, version: fm.version };
 						} catch {
@@ -710,7 +710,7 @@ function SkillsView({ agentId }: { agentId: string }): React.JSX.Element {
 	if (skills.length === 0) {
 		return (
 			<div className="px-1 py-8 text-center text-[12px] text-ink-faint">
-				该 agent 没有已安装技能（.omp/skills/ 为空）
+				该 agent 没有已安装技能（.cornfield/skills/ 为空）
 			</div>
 		);
 	}
@@ -736,7 +736,7 @@ function SkillsView({ agentId }: { agentId: string }): React.JSX.Element {
 				</div>
 			))}
 			<div className="mt-3 text-[11px] text-ink-faint">
-				{skills.length} 个已安装技能（.omp/skills/ 真实列表）；启用/停用待 set_skill_enabled 协议。
+				{skills.length} 个已安装技能（.cornfield/skills/ 真实列表）；启用/停用待 set_skill_enabled 协议。
 			</div>
 		</div>
 	);
