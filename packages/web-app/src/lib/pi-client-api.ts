@@ -104,6 +104,48 @@ export interface McpServerDto {
 	enabled: boolean;
 }
 
+/** 诊断报告列表项（list_diagnosis_reports 返回）。 */
+export interface DiagnosisReportListItemDto {
+	reportId: string;
+	sessionId: string;
+	sessionFile?: string;
+	/** P0/P1/P2/P3 */
+	severity: string;
+	/** A-F */
+	delivery: string;
+	/** A-F */
+	process: string;
+	title: string;
+	reportAt?: string;
+	reportPath?: string;
+}
+
+/** 诊断报告摘要（get_diagnosis_report → summary）。 */
+export interface DiagnosisSummaryDto {
+	reportId: string;
+	sessionId: string;
+	sessionFile?: string;
+	severity: string;
+	delivery: string;
+	process: string;
+	title: string;
+	rootCause?: string;
+	topActions?: string[];
+	/** dimensionKey → detail */
+	dimensions?: Record<string, DiagnosisDimensionDto>;
+	reportAt?: string;
+	hasSummary?: boolean;
+}
+
+/** 单维度详情。 */
+export interface DiagnosisDimensionDto {
+	state: "ok" | "warn" | "fail";
+	summary: string;
+	basis?: string;
+	rows?: { label: string; value: string }[];
+	evidence?: { turn: number; kind: string; quote: string }[];
+	fix?: string;
+}
 /**
  * serve get_session_messages 返回的 message 条目 —— 与 get_messages 的 AgentMessage 同型
  * （前端渲染子集即 wire MessageDto：user/assistant/toolResult，含独立 toolResult 顶层消息）。
@@ -195,6 +237,12 @@ export interface PiClient {
 	/** 历史会话索引（list_sessions；be-dev 就绪后返回真数据，未实现时返回基础查询）。 */
 	listSessions(): Promise<SessionRecordSummary[]>;
 
+	/** 诊断会话（diagnose_session；异步启动诊断，返回任务句柄）。 */
+	diagnoseSession(sessionFile: string): Promise<{ reportId: string; sessionId: string; state: "running" | "done" }>;
+	/** 列出诊断报告与后台任务（list_diagnosis_reports）。 */
+	listDiagnosisReports(sessionFile?: string): Promise<{ reports: DiagnosisReportListItemDto[]; tasks: any[] }>;
+	/** 获取单个诊断报告详情（get_diagnosis_report）。 */
+	getDiagnosisReport(reportId: string): Promise<{ markdown: string; summary: DiagnosisSummaryDto } | null>;
 	// ── 文件系统（Agent 详情页只读浏览）──
 	/** 列出 agent workspace 目录（fs_list，相对 agentDir；省略 path = 根）。 */
 	fsList(sessionId: string, path?: string): Promise<{ entries: FsEntryDto[] }>;

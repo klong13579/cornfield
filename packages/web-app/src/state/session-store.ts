@@ -471,6 +471,21 @@ export class SessionStore {
 		return this.#client.getSessionMessages(file);
 	}
 
+	/** 诊断会话（diagnose_session；异步启动诊断，返回任务句柄）。 */
+	diagnoseSession(sessionFile: string): Promise<{ reportId: string; sessionId: string; state: 'running' | 'done' }> {
+		return this.#client.diagnoseSession(sessionFile);
+	}
+
+	/** 列出诊断报告与后台任务（list_diagnosis_reports）。 */
+	listDiagnosisReports(sessionFile?: string): Promise<{ reports: any[]; tasks: any[] }> {
+		return this.#client.listDiagnosisReports(sessionFile);
+	}
+
+	/** 获取单个诊断报告详情（get_diagnosis_report）。 */
+	getDiagnosisReport(reportId: string): Promise<{ markdown: string; summary: any } | null> {
+		return this.#client.getDiagnosisReport(reportId);
+	}
+
 	async openHistorySession(record: { id: string; agent: string; sessionFile?: string; cwd?: string }): Promise<void> {
 		const agents = this.#client.getServerAgents();
 		const agentId = agents.find(a => a.id === record.agent || a.name === record.agent)?.id ?? record.agent;

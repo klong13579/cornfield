@@ -5,6 +5,7 @@
 export * from "./agents";
 export * from "./artifacts";
 export * from "./cron";
+export * from "./diagnosis";
 export * from "./events";
 export * from "./memory";
 export * from "./models";

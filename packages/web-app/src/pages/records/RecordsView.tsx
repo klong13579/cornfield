@@ -1,4 +1,4 @@
-import { MessageSquare, Play, Search } from "lucide-react";
+import { MessageSquare, Play, Search, Stethoscope } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -10,6 +10,21 @@ import {
 } from "../../lib/records";
 import { useSessionStore } from "../../state/session-store";
 import { useSession } from "../../state/use-session";
+
+/** Severity → badge class mapping. */
+const severityBadgeClass: Record<string, string> = {
+	P0: "badge fail",
+	P1: "badge run",
+	P2: "badge done",
+	P3: "badge done",
+};
+
+/** Diagnosis report cached per sessionFile. */
+interface DiagReport {
+	reportId: string;
+	sessionId: string;
+	severity: string;
+}
 
 /**
  * 会话记录列表（FR-3）—— 行式列表（15px 名称 + 状态 badge）+ 筛选/搜索 + 操作列。
@@ -27,6 +42,8 @@ export function RecordsView(): React.JSX.Element {
 	const [agentFilter, setAgentFilter] = useState("all");
 	const [statusFilter, setStatusFilter] = useState<"all" | RecordStatus>("all");
 	const [query, setQuery] = useState("");
+	const [diagReports, setDiagReports] = useState<Map<string, DiagReport>>(new Map());
+	const [diagnosing, setDiagnosing] = useState<Set<string>>(new Set());
 
 	const [currentSummary, setCurrentSummary] = useState<SessionRecordSummary | null>(null);
 	// serve list_sessions 真索引（连接就绪后拉取）
@@ -50,6 +67,23 @@ export function RecordsView(): React.JSX.Element {
 			)
 			.catch(() => undefined);
 	}, [store, view.connected]);
+
+	// Load existing diagnosis reports on mount
+	useEffect(() => {
+		store.listDiagnosisReports().then(({ reports }) => {
+			const map = new Map<string, DiagReport>();
+			for (const r of reports) {
+				if (r.sessionFile) {
+					map.set(r.sessionFile, {
+						reportId: r.reportId,
+						sessionId: r.sessionId,
+						severity: r.severity,
+					});
+				}
+			}
+			setDiagReports(map);
+		}).catch(() => undefined);
+	}, [store]);
 
 	// list_sessions：连接就绪后拉真索引；未连接/失败时保持空列表（不造数据）
 	useEffect(() => {
@@ -162,47 +196,97 @@ export function RecordsView(): React.JSX.Element {
 
 				{/* 行式列表 */}
 				<div className="divide-y divide-hairline rounded-lg border border-hairline bg-surface">
-					{filtered.map(row => (
-						<div key={row.id} className="flex items-center gap-4 px-4 py-3 transition-colors hover:bg-surface-2">
-							<div className="min-w-0 flex-1">
-								<div className="truncate text-[15px] font-medium text-ink">{row.name}</div>
-								<div className="mt-0.5 text-[12px] text-ink-subtle">
-									{row.agent} · {formatDate(new Date(row.startedAt))}
+					{filtered.map(row => {
+						const sf = row.sessionFile;
+						const report = sf ? diagReports.get(sf) : undefined;
+						return (
+							<div key={row.id} className="flex items-center gap-4 px-4 py-3 transition-colors hover:bg-surface-2">
+								{report && (
+									<button
+										type="button"
+										className={`${severityBadgeClass[report.severity] ?? "badge done"} mr-2 shrink-0 cursor-pointer text-[11px] font-medium`}
+										onClick={e => {
+											e.stopPropagation();
+											navigate(`/records/${report.sessionId}/diagnosis`, { state: { reportId: report.reportId } });
+										}}
+									>
+										{report.severity}
+									</button>
+								)}
+								<div className="min-w-0 flex-1">
+									<div className="truncate text-[15px] font-medium text-ink">{row.name}</div>
+									<div className="mt-0.5 text-[12px] text-ink-subtle">
+										{row.agent} · {formatDate(new Date(row.startedAt))}
+									</div>
+								</div>
+								<span className="w-[52px] shrink-0 text-right font-mono text-[12px] text-ink-faint">
+									{row.messageCount}
+								</span>
+								<StatusBadge status={row.status} />
+								<div className="flex w-[92px] shrink-0 justify-end gap-3 text-[12px]">
+									<button
+										type="button"
+										className="flex items-center gap-1 text-ink-muted transition-colors hover:text-ink"
+										onClick={e => {
+											e.stopPropagation();
+											openSession(row);
+										}}
+									>
+										<Play size={11} strokeWidth={1.5} />
+										回放
+									</button>
+									<button
+										type="button"
+										className={`flex items-center gap-1 text-ink-muted transition-colors hover:text-ink ${!sf ? 'opacity-40 cursor-not-allowed' : ''}`}
+										disabled={!sf || diagnosing.has(sf ?? '')}
+										onClick={e => {
+											e.stopPropagation();
+											if (!sf) return;
+											setDiagnosing(prev => new Set(prev).add(sf));
+											store.diagnoseSession(sf).finally(() => {
+												setDiagnosing(prev => {
+													const next = new Set(prev);
+													next.delete(sf);
+													return next;
+												});
+												// Refresh reports after diagnosis completes
+												store.listDiagnosisReports().then(({ reports }) => {
+													const map = new Map<string, DiagReport>();
+													for (const r of reports) {
+														if (r.sessionFile) {
+															map.set(r.sessionFile, {
+																reportId: r.reportId,
+																sessionId: r.sessionId,
+																severity: r.severity,
+															});
+														}
+													}
+													setDiagReports(map);
+												}).catch(() => undefined);
+											});
+										}}
+									>
+										<Stethoscope size={11} strokeWidth={1.5} />
+										{diagnosing.has(sf ?? '') ? '诊断中…' : '诊断'}
+									</button>
+									<button
+										type="button"
+										className="text-ink-faint transition-colors hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
+										onClick={e => {
+											e.stopPropagation();
+											handleExport(row);
+										}}
+										disabled={row.id !== CURRENT_SESSION_ID}
+										title={
+											row.id === CURRENT_SESSION_ID ? "导出当前会话 JSONL" : "历史会话导出待后端 JSONL 读取命令"
+										}
+									>
+										导出
+									</button>
 								</div>
 							</div>
-							<span className="w-[52px] shrink-0 text-right font-mono text-[12px] text-ink-faint">
-								{row.messageCount}
-							</span>
-							<StatusBadge status={row.status} />
-							<div className="flex w-[92px] shrink-0 justify-end gap-3 text-[12px]">
-								<button
-									type="button"
-									className="flex items-center gap-1 text-ink-muted transition-colors hover:text-ink"
-									onClick={e => {
-										e.stopPropagation();
-										openSession(row);
-									}}
-								>
-									<Play size={11} strokeWidth={1.5} />
-									回放
-								</button>
-								<button
-									type="button"
-									className="text-ink-faint transition-colors hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
-									onClick={e => {
-										e.stopPropagation();
-										handleExport(row);
-									}}
-									disabled={row.id !== CURRENT_SESSION_ID}
-									title={
-										row.id === CURRENT_SESSION_ID ? "导出当前会话 JSONL" : "历史会话导出待后端 JSONL 读取命令"
-									}
-								>
-									导出
-								</button>
-							</div>
-						</div>
-					))}
+						);
+					})}
 					{filtered.length === 0 && (
 						<div className="flex flex-col items-center gap-2 px-4 py-14">
 							<MessageSquare className="size-8 text-ink-faint" />

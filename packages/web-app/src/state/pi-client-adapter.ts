@@ -25,6 +25,8 @@ import type {
 import type {
 	AgentMessageDto,
 	ArtifactDto,
+	DiagnosisReportListItemDto,
+	DiagnosisSummaryDto,
 	FsEntryDto,
 	FsImageResult,
 	GatewayAccountPatchDto,
@@ -411,6 +413,27 @@ export class PiClientAdapter implements PiClient {
 			console.warn("[web-app] list_sessions unavailable", err);
 			return [];
 		}
+	}
+
+	async diagnoseSession(sessionFile: string): Promise<{ reportId: string; sessionId: string; state: "running" | "done" }> {
+		return this.#req<{ reportId: string; sessionId: string; state: "running" | "done" }>({
+			type: "diagnose_session",
+			sessionFile,
+		} as never);
+	}
+
+	async listDiagnosisReports(sessionFile?: string): Promise<{ reports: DiagnosisReportListItemDto[]; tasks: unknown[] }> {
+		return this.#req<{ reports: DiagnosisReportListItemDto[]; tasks: unknown[] }>({
+			type: "list_diagnosis_reports",
+			sessionFile,
+		} as never);
+	}
+
+	async getDiagnosisReport(reportId: string): Promise<{ markdown: string; summary: DiagnosisSummaryDto } | null> {
+		return this.#req<{ markdown: string; summary: DiagnosisSummaryDto } | null>({
+			type: "get_diagnosis_report",
+			reportId,
+		} as never);
 	}
 
 	/** 列出 agent workspace 目录（fs_list；name/type/size，目录在前）。 */

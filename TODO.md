@@ -3,7 +3,6 @@
 > Current task state. The agent updates this file as work progresses; an empty TODO is a valid state.
 
 ## 待办
-- [ ] narwal-plan login 功能验收
 - [ ] Agent 客户端配置验证 → topics/agent-client-config.md
 - [ ] web-search tool 功能升级，提升搜索能力。
 - [ ] web-search 搜索的页面在客户端显示列表，并支持点击查看。
@@ -18,13 +17,14 @@
 - [ ] 学习使用herdr-board 功能
 - [ ] 钉钉机器人帮助我读取群消息和文档链接，帮我自动提取，并且识别重要的事项，是的话记录待办并提醒我。 → topics/dingtalk-extract-important-todos.md
 - [ ] omp 添加前端框架
-- [ ] session 诊断优化：诊断结果 → learning/nudge/regression 三阶段落地 → topics/session-diagnosis-loop.md
+- [ ] 复用 WikiSkill 开源项目：在 Cornfield self-evolution 中落地 Pattern → Proposal → Validation → Outcome 闭环 → topics/wikiskill-cornfield-integration.md
 - [ ] omp 本地增加定时器功能
 - [ ] 独立验证者：执行与验证分离，数字员工结果由独立进程验收 → topics/independent-verifier.md
 - [ ] OMP 桌面客户端：主 app（Tauri）+ 编辑器（fork Zed）→ topics/omp-client-design.md
 
 ## 已完成
 
+- [x] narwal-plan login 功能验收（herdr 实测 /login → 凭据入库 → 无 models.yml 运行 + 动态拉取网关模型 97 个）
 - [x] fork herdr 新增 cornfield AgentKind 定制版（herdr 集成方案 B，暂缓）
 - [x] 去 omp 化：oh-my-pi → CornField 改名（P0✓ standalone 仓库已创建并迁移；完工 v1.0.0 2026-08-29） → topics/de-omp-mika-rename.md
 - [x] omp2omp 通信机制
