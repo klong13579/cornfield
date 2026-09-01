@@ -251,4 +251,62 @@ describe("intercom message history", () => {
 			await fs.rm(persistDir, { recursive: true, force: true });
 		}
 	}, 20_000);
+
+	test("e2e: busy agent retrieves missed command via history", async () => {
+		// Scenario: Alice is connected but "busy" (not actively processing incoming
+		// messages). Bob sends a command. Alice later queries history, finds the
+		// message, and reads it to take action.
+		const alice = new IntercomClient();
+		const bob = new IntercomClient();
+		try {
+			await alice.connect(registration("alice-e2e"));
+			await bob.connect(registration("bob-e2e"));
+			await Bun.sleep(50);
+
+			// Bob sends a command message to Alice
+			const cmdMsg = "帮我查一下今天的工单状态";
+			const result = await bob.send("alice-e2e", {
+				text: cmdMsg,
+				attachments: [
+					{
+						type: "file",
+						name: "daily-report.md",
+						content: "2026-09-01 工单摘要",
+						path: "/data/reports/daily-report.md",
+					},
+				],
+			});
+			expect(result.delivered).toBe(true);
+
+			// Alice is "busy" — she was connected but didn't see the message come in.
+			// Now she queries history to find missed messages.
+			const entries = await alice.history({ direction: "in", limit: 10 });
+			expect(entries.length).toBeGreaterThanOrEqual(1);
+
+			// Find the specific command message
+			const cmdEntry = entries.find(e => e.message.content.text === cmdMsg);
+			expect(cmdEntry).toBeDefined();
+			expect(cmdEntry!.queued).toBe(false); // was delivered live but missed
+			expect(cmdEntry!.from.name).toBe("bob-e2e");
+
+			// Alice reads the message content and decides what to do with it.
+			// In the real system, the LLM agent would see this text in the
+			// history output and act on it.
+			const cmdText = cmdEntry!.message.content.text;
+			expect(cmdText).toBe(cmdMsg);
+			expect(cmdText.includes("工单")).toBe(true);
+			expect(cmdText.includes("状态")).toBe(true);
+
+			// Alice also reads the attachment for context
+			const att = cmdEntry!.message.content.attachments?.[0];
+			expect(att).toBeDefined();
+			expect(att!.type).toBe("file");
+			expect(att!.name).toBe("daily-report.md");
+			expect(att!.path).toBe("/data/reports/daily-report.md");
+			expect(att!.content).toBe("2026-09-01 工单摘要");
+		} finally {
+			await alice.disconnect();
+			await bob.disconnect();
+		}
+	}, 15_000);
 });
