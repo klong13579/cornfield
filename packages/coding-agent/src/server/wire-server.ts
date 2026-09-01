@@ -75,6 +75,7 @@ import {
 	type SessionFactory,
 	SessionRegistry,
 } from "./session-registry";
+import { clearStatsCache, getCachedStats, setCachedStats } from "./stats-cache";
 
 export interface WireServerOptions {
 	host: string;
@@ -595,11 +596,21 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 					// W3 D1：与 `omp stats --json` 同源——先增量同步会话文件再读聚合。
 					// 只读转发 stats.db（本地聚合缓存），不触碰任何 attached session。
 					// W3 D2：可选 period 对聚合做时间窗口；响应附带 models.json 单价目录。
+					// 性能：聚合查询扫全量 messages 表 ~700ms-1s——TTL 10s 内同 period 复用响应
+					//（sync 有新条目即刻失效，保证数据新鲜度）；固定时间序列随包缓存不重算。
 					try {
-						await syncAllSessions();
+						const synced = await syncAllSessions();
+						if (synced.processed > 0) clearStatsCache();
+						const cached = getCachedStats(command.period);
+						if (cached) {
+							done(cached);
+							return;
+						}
 						const periodMs = parseStatsPeriod(command.period);
 						const stats = await getDashboardStats(periodMs);
-						done({ ...stats, priceCatalog: buildModelPriceCatalog(stats.byModel) });
+						const value = { ...stats, priceCatalog: buildModelPriceCatalog(stats.byModel) };
+						setCachedStats(command.period, value);
+						done(value);
 					} catch (err) {
 						fail(`stats unavailable: ${String(err)}`);
 					}

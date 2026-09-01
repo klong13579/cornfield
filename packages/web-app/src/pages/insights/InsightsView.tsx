@@ -125,15 +125,25 @@ export function InsightsView(): React.JSX.Element {
 	const [period, setPeriod] = useState<StatsPeriodDto>("7d");
 	const [stats, setStats] = useState<DashboardStatsDto | null>(null);
 	const [sessions, setSessions] = useState<SessionRecordSummary[]>([]);
+	const [fetching, setFetching] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 
+	// stale-while-revalidate：切 period 时旧 stats 保持显示直到新数据到达，
+	// 只在无任何历史数据时才展示整页 loading；请求失败保留旧数据 + 提示。
 	useEffect(() => {
 		if (!view.connected) return;
 		setError(null);
+		setFetching(true);
 		void store
 			.fetchStats(period)
-			.then(setStats)
-			.catch(err => setError(err instanceof Error ? err.message : String(err)));
+			.then(s => {
+				setStats(s);
+				setFetching(false);
+			})
+			.catch(err => {
+				setError(err instanceof Error ? err.message : String(err));
+				setFetching(false);
+			});
 	}, [store, view.connected, period]);
 
 	useEffect(() => {
@@ -181,16 +191,23 @@ export function InsightsView(): React.JSX.Element {
 	return (
 		<div className="px-10 pt-8 pb-12">
 			<div className="page-wide">
-				<Header period={period} onPeriod={setPeriod} />
+				<Header period={period} onPeriod={setPeriod} refreshing={fetching && stats !== null} />
 
-				{error && <div className="py-20 text-center text-[13px] text-ink-faint">用量统计不可用：{error}</div>}
+				{error && !stats && (
+					<div className="py-20 text-center text-[13px] text-ink-faint">用量统计不可用：{error}</div>
+				)}
 				{!stats && !error && <div className="py-20 text-center text-[13px] text-ink-faint">加载用量统计…</div>}
+				{stats && error && (
+					<div className="mb-4 rounded-lg border border-hairline bg-surface px-3 py-2 text-[12px] text-ink-subtle">
+						用量统计刷新失败（显示上次数据）：{error}
+					</div>
+				)}
 				{stats && empty && (
 					<div className="py-20 text-center text-[13px] text-ink-faint">
 						暂无用量数据——运行会话后 serve 会自动同步并聚合
 					</div>
 				)}
-				{stats && !empty && !error && (
+				{stats && !empty && (
 					<div className="space-y-8">
 						<KpiCards overall={stats.overall} />
 						<TrendStrip points={trend} max={trendMax} period={period} />
@@ -206,26 +223,36 @@ export function InsightsView(): React.JSX.Element {
 function Header({
 	period,
 	onPeriod,
+	refreshing = false,
 }: {
 	period: StatsPeriodDto;
 	onPeriod: (p: StatsPeriodDto) => void;
+	refreshing?: boolean;
 }): React.JSX.Element {
 	return (
 		<div className="mb-7 flex items-center justify-between gap-4">
 			<h1 className="text-[32px] font-semibold tracking-[-0.8px] text-ink">用量</h1>
-			<div className="flex items-center gap-0.5 rounded-lg border border-hairline bg-surface p-0.5">
-				{PERIODS.map(p => (
-					<button
-						key={p.id}
-						type="button"
-						onClick={() => onPeriod(p.id)}
-						className={`rounded-md px-3 py-1.5 text-[12.5px] transition-colors ${
-							period === p.id ? "bg-accent text-on-accent" : "text-ink-subtle hover:text-ink"
-						}`}
-					>
-						{p.label}
-					</button>
-				))}
+			<div className="flex items-center gap-3">
+				{refreshing && (
+					<div className="flex items-center gap-2 text-[12px] text-ink-faint">
+						<span className="h-3 w-3 animate-spin rounded-full border-2 border-ink-faint/30 border-t-ink-faint" />
+						更新中…
+					</div>
+				)}
+				<div className="flex items-center gap-0.5 rounded-lg border border-hairline bg-surface p-0.5">
+					{PERIODS.map(p => (
+						<button
+							key={p.id}
+							type="button"
+							onClick={() => onPeriod(p.id)}
+							className={`rounded-md px-3 py-1.5 text-[12.5px] transition-colors ${
+								period === p.id ? "bg-accent text-on-accent" : "text-ink-subtle hover:text-ink"
+							}`}
+						>
+							{p.label}
+						</button>
+					))}
+				</div>
 			</div>
 		</div>
 	);
