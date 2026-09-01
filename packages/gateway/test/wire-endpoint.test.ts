@@ -181,4 +181,81 @@ describe("gateway wire endpoint", () => {
 		const res = await handleGatewayWireCommand({ type: "bogus" }, deps);
 		expect(res.ok).toBe(false);
 	});
+
+	test("set_gateway_account requires accountId and patch object", async () => {
+		const noId = await handleGatewayWireCommand({ type: "set_gateway_account", patch: {} }, deps);
+		expect(noId.ok).toBe(false);
+		if (!noId.ok) expect(noId.error).toContain("accountId");
+
+		const noPatch = await handleGatewayWireCommand({ type: "set_gateway_account", accountId: "hr" }, deps);
+		expect(noPatch.ok).toBe(false);
+		if (!noPatch.ok) expect(noPatch.error).toContain("patch");
+
+		// empty whitelist patch → rejected at the wire layer
+		const empty = await handleGatewayWireCommand({ type: "set_gateway_account", accountId: "hr", patch: {} }, deps);
+		expect(empty.ok).toBe(false);
+		if (!empty.ok) expect(empty.error).toContain("whitelisted");
+	});
+
+	test("set_gateway_account forwards whitelisted fields and drops credentials", async () => {
+		let received: { accountId: string; patch: Record<string, unknown> } | null = null;
+		deps.applyGatewayAccountPatch = async (accountId, patch) => {
+			received = { accountId, patch: patch as Record<string, unknown> };
+			return { ok: true, result: { accountId, account: {} } };
+		};
+
+		const res = await handleGatewayWireCommand(
+			{
+				type: "set_gateway_account",
+				accountId: "hr",
+				patch: {
+					enabled: false,
+					robotName: "M-Code",
+					deniedTools: ["ast_edit"],
+					hideThinkingBlock: true,
+					// 凭证注入必须被白名单过滤掉
+					appSecret: "pwned",
+					appKey: "pwned",
+				},
+			},
+			deps,
+		);
+
+		expect(res.ok).toBe(true);
+		expect(received).not.toBeNull();
+		expect(received?.accountId).toBe("hr");
+		expect(received?.patch).toEqual({
+			enabled: false,
+			robotName: "M-Code",
+			deniedTools: ["ast_edit"],
+			hideThinkingBlock: true,
+		});
+		expect(received?.patch).not.toHaveProperty("appSecret");
+		expect(received?.patch).not.toHaveProperty("appKey");
+	});
+
+	test("set_gateway_account errors when patch deps not wired", async () => {
+		const res = await handleGatewayWireCommand(
+			{ type: "set_gateway_account", accountId: "hr", patch: { enabled: false } },
+			deps,
+		);
+		expect(res.ok).toBe(false);
+		if (!res.ok) expect(res.error).toContain("not available");
+	});
+
+	test("reload_gateway calls the reload deps and errors when unwired", async () => {
+		let reloaded = false;
+		deps.reloadGateway = async () => {
+			reloaded = true;
+			return { ok: true, result: { reloaded: true } };
+		};
+		const res = await handleGatewayWireCommand({ type: "reload_gateway" }, deps);
+		expect(res.ok).toBe(true);
+		expect(reloaded).toBe(true);
+
+		delete deps.reloadGateway;
+		const unwired = await handleGatewayWireCommand({ type: "reload_gateway" }, deps);
+		expect(unwired.ok).toBe(false);
+		if (!unwired.ok) expect(unwired.error).toContain("not available");
+	});
 });

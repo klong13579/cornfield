@@ -24,7 +24,14 @@ import { AgentBridge, type AgentBridgeOptions } from "./agent-bridge";
 import { createBridgeStatusToolDefinitions } from "./bridge-status-tool";
 import { DingTalkChannel } from "./channels/dingtalk";
 import { ChannelRegistry } from "./channels/registry";
-import { getDataDir, getDingTalkConfig, getEnabledChannels } from "./config";
+import {
+	getDataDir,
+	getDingTalkConfig,
+	getEnabledChannels,
+	loadConfig,
+	saveConfig,
+	validateAndNormalizeConfig,
+} from "./config";
 import { resolveDisabledExtensions, resolveHideThinkingBlock } from "./config-settings";
 import { defaultCrashLog } from "./crash-log";
 import { createDingtalkAttachmentToolDefinitions } from "./dingtalk-attachment-tool";
@@ -46,13 +53,14 @@ import { SQLiteSessionStore } from "./session-store";
 import { SkillCache } from "./skill-cache";
 import type {
 	ChannelHealth,
+	DingTalkConfig,
 	DingtalkAccountConfig,
 	GatewayConfig,
 	InboundMessage,
 	OutboundMessage,
 	SessionRecord,
 } from "./types";
-import { handleGatewayWireCommand } from "./wire-endpoint";
+import { type GatewayAccountPatch, type GatewayWireResult, handleGatewayWireCommand } from "./wire-endpoint";
 
 export function buildChannelKey(channelId: string, accountId?: string): string {
 	return accountId ? `${channelId}:${accountId}` : channelId;
@@ -765,6 +773,57 @@ export class Gateway {
 		logger.debug("Removed DingTalk account", { accountId });
 	}
 
+	/**
+	 * 动态账号热生效（G10，set_gateway_account wire 命令的进程内实现）：
+	 * 将白名单 patch 合并进 gateway.json 的 accounts.<id>，原子落盘后触发
+	 * 进程内 reload —— reload 的 diff 计划只重建受影响账号的 bridge/channel，
+	 * 不重启 gateway。enabled=false 走 remove（#addAccount 对 disabled 直接跳过），
+	 * enabled=true 走 add（注册 agentDir + spawn bridge + 钉钉 WS 连接）。
+	 *
+	 * 落盘前用 validateAndNormalizeConfig 校验合并形态，拒绝写入 loadConfig()
+	 * 会静默降级为 DEFAULT_CONFIG 的坏配置（与 setup 向导同源防呆）。
+	 */
+	async #applyGatewayAccountPatch(accountId: string, patch: GatewayAccountPatch): Promise<GatewayWireResult> {
+		// 从磁盘重读（权威源），避免覆盖 CLI/其他入口的并发修改。
+		const onDisk = await loadConfig();
+		const dt = onDisk.channels.dingtalk as DingTalkConfig | undefined;
+		const account = dt?.accounts?.[accountId];
+		if (!account) {
+			return { ok: false, error: `unknown account: ${accountId}` };
+		}
+
+		const merged: DingtalkAccountConfig = {
+			...account,
+			...patch,
+		};
+		const nextConfig: GatewayConfig = {
+			...onDisk,
+			channels: {
+				...onDisk.channels,
+				dingtalk: {
+					...dt,
+					accounts: {
+						...dt.accounts,
+						[accountId]: merged,
+					},
+				},
+			},
+		};
+
+		try {
+			validateAndNormalizeConfig(nextConfig);
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			logger.error("gateway:account-patch rejected by schema", { accountId, patch, error: message });
+			return { ok: false, error: `invalid account config: ${message}` };
+		}
+
+		await saveConfig(nextConfig);
+		await this.reload(nextConfig);
+		logger.info("gateway:account-patch applied", { accountId, patch });
+		return { ok: true, result: { accountId, account: merged } };
+	}
+
 	async stop(): Promise<void> {
 		if (!this.#running) return;
 
@@ -1297,6 +1356,12 @@ export class Gateway {
 						storage: schedulerStorage,
 						reloadScheduler: () => {
 							this.#cronLifecycle.engineReload();
+						},
+						applyGatewayAccountPatch: (accountId, patch) => this.#applyGatewayAccountPatch(accountId, patch),
+						reloadGateway: async () => {
+							const next = await loadConfig();
+							await this.reload(next);
+							return { ok: true, result: { reloaded: true } };
 						},
 						gatewayStatus: async () => {
 							const st = await this.getStatus();

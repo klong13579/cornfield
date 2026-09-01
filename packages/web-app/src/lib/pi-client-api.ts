@@ -83,6 +83,19 @@ export interface GatewayStatusDto {
 	scheduler?: { running?: boolean; taskCount?: number } | null;
 }
 
+/**
+ * 账号级动态可 patch 字段（set_gateway_account 写面，与 gateway wire 白名单一致）。
+ * 凭证类（appSecret/appKey）刻意不在内 —— 前端不落明文密钥。
+ */
+export interface GatewayAccountPatchDto {
+	enabled?: boolean;
+	robotName?: string;
+	robotCode?: string;
+	agentDir?: string;
+	deniedTools?: string[];
+	hideThinkingBlock?: boolean;
+}
+
 /** MCP 服务器条目（get_mcp_servers 返回；serve 端契约命令，与 m1 字符串契约对接）。 */
 export interface McpServerDto {
 	name: string;
@@ -195,6 +208,16 @@ export interface PiClient {
 	artifactPreviewUrl(agentId: string, path: string): string;
 	/** 本机 gateway 运行状态（gateway_status；未运行/文件缺失抛错）。 */
 	gatewayStatus(): Promise<GatewayStatusDto>;
+
+	/**
+	 * 动态账号热生效（set_gateway_account）：写 gateway.json accounts.<id> 白名单
+	 * 字段并触发 gateway 进程内 reload（只重建受影响账号，不重启 gateway）。
+	 * appSecret/appKey 不在写面 —— 凭证维护走 `$ENV_VAR` 引用或 setup 向导。
+	 */
+	setGatewayAccount(accountId: string, patch: GatewayAccountPatchDto): Promise<{ ok: boolean }>;
+
+	/** 进程内 reload（reload_gateway；兜底手动触发配置热生效）。 */
+	reloadGateway(): Promise<{ ok: boolean }>;
 
 	// ── 用量统计（W3 D2 InsightsPanel）──
 	/**

@@ -87,6 +87,8 @@ async function loadDingtalkConfigs(): Promise<Map<string, DingtalkAgentConfigDto
 				appKey: typeof cfg.appKey === "string" ? cfg.appKey : undefined,
 				robotCode: typeof cfg.robotCode === "string" ? cfg.robotCode : undefined,
 				hideThinkingBlock: typeof cfg.hideThinkingBlock === "boolean" ? cfg.hideThinkingBlock : undefined,
+				deniedTools: Array.isArray(cfg.deniedTools) ? (cfg.deniedTools as string[]) : undefined,
+				agentDir: typeof cfg.agentDir === "string" ? cfg.agentDir : undefined,
 			});
 		}
 	} catch (err) {

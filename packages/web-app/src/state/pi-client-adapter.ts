@@ -27,6 +27,7 @@ import type {
 	ArtifactDto,
 	FsEntryDto,
 	FsImageResult,
+	GatewayAccountPatchDto,
 	GatewayStatusDto,
 	ListenRecordingDto,
 	McpServerDto,
@@ -466,6 +467,16 @@ export class PiClientAdapter implements PiClient {
 	/** 本机 gateway 运行状态（gateway_status；gateway 生产端点直连）。 */
 	async gatewayStatus(): Promise<GatewayStatusDto> {
 		return this.#gatewayWire<GatewayStatusDto>({ type: "gateway_status" });
+	}
+
+	/** 动态账号热生效（set_gateway_account；gateway 写 gateway.json + 进程内 reload）。 */
+	async setGatewayAccount(accountId: string, patch: GatewayAccountPatchDto): Promise<{ ok: boolean }> {
+		return this.#gatewayWire<{ ok: boolean }>({ type: "set_gateway_account", accountId, patch });
+	}
+
+	/** 进程内 reload（reload_gateway；兜底手动触发配置热生效）。 */
+	async reloadGateway(): Promise<{ ok: boolean }> {
+		return this.#gatewayWire<{ ok: boolean }>({ type: "reload_gateway" });
 	}
 
 	/** 本地用量统计（get_stats；period 可选时间窗口，无数据/失败抛错由调用方空态）。 */

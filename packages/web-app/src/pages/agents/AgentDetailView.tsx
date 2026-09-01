@@ -1,6 +1,7 @@
 import type { HostToolDefinitionDto, ModelInfoDto, ToolSwitchDto, ToolSwitchesDto } from "@cornfield/wire";
 import { X } from "lucide-react";
 import { useEffect, useState } from "react";
+import type { GatewayAccountPatchDto } from "../../lib/pi-client-api";
 import { useSessionStore } from "../../state/session-store";
 import { useSession } from "../../state/use-session";
 import { FileExplorer } from "../workspace/FileExplorer";
@@ -277,12 +278,39 @@ function statusText(status?: string): string {
 
 // ─────────────────────────────────────────────────────────────────────
 // 钉钉 tab：agent 绑定的机器人配置（gateway.json channels.dingtalk.accounts）
+// 可编辑白名单：enabled/robotName/agentDir/deniedTools/hideThinkingBlock。
+// 保存 → set_gateway_account → gateway 进程内 reload（热生效，不重启）。
+// 凭证（appSecret/appKey）不可在此编辑 —— 走 `$ENV_VAR` 引用或 setup 向导。
 // ─────────────────────────────────────────────────────────────────────
+
+const DYNAMIC_TOOL_OPTIONS = [
+	"ast_edit",
+	"lsp",
+	"debug",
+	"notebook",
+	"recipe",
+	"irc",
+	"github",
+	"ssh",
+	"inspect_image",
+	"browser",
+	"render_mermaid",
+];
 
 function DingtalkView({ agentId }: { agentId: string }): React.JSX.Element {
 	const view = useSession();
+	const store = useSessionStore();
 	const agent = view.agents.find(a => a.id === agentId);
 	const dt = agent?.dingtalk;
+	// 编辑态（全量工具候选供多选；保存时只提交选中项）
+	const [deniedDraft, setDeniedDraft] = useState<string[] | null>(null);
+	const [robotNameDraft, setRobotNameDraft] = useState<string | null>(null);
+	const [enabledDraft, setEnabledDraft] = useState<boolean | null>(null);
+	const [hideThinkingDraft, setHideThinkingDraft] = useState<boolean | null>(null);
+	const [agentDirDraft, setAgentDirDraft] = useState<string | null>(null);
+	const [saving, setSaving] = useState(false);
+	const [saveMsg, setSaveMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
 	if (!dt) {
 		return (
 			<div className="rounded-lg border border-dashed border-hairline-strong bg-surface px-4 py-8 text-center text-[12px] text-ink-faint">
@@ -290,27 +318,165 @@ function DingtalkView({ agentId }: { agentId: string }): React.JSX.Element {
 			</div>
 		);
 	}
-	const rows: [string, string][] = [
-		["机器人名", dt.robotName ?? "—"],
-		["状态", dt.enabled ? "启用中" : "已停用"],
+
+	const denied = deniedDraft ?? dt.deniedTools ?? [];
+	const robotName = robotNameDraft ?? dt.robotName ?? "";
+	const enabled = enabledDraft ?? dt.enabled ?? true;
+	const hideThinking = hideThinkingDraft ?? dt.hideThinkingBlock ?? false;
+	const agentDir = agentDirDraft ?? agent?.agentDir ?? "";
+
+	/** 提交 patch（仅变更的字段）+ 触发 gateway 热生效。 */
+	const save = async (): Promise<void> => {
+		setSaving(true);
+		setSaveMsg(null);
+		const patch: GatewayAccountPatchDto = {};
+		if (deniedDraft !== null) patch.deniedTools = deniedDraft;
+		if (robotNameDraft !== null) patch.robotName = robotNameDraft;
+		if (enabledDraft !== null) patch.enabled = enabledDraft;
+		if (hideThinkingDraft !== null) patch.hideThinkingBlock = hideThinkingDraft;
+		if (agentDirDraft !== null) patch.agentDir = agentDirDraft;
+		try {
+			const res = await store.setGatewayAccount(agentId, patch);
+			// 成功后清空草稿（本地态回落到新权威值）
+			setDeniedDraft(null);
+			setRobotNameDraft(null);
+			setEnabledDraft(null);
+			setHideThinkingDraft(null);
+			setAgentDirDraft(null);
+			setSaveMsg({ ok: res.ok, text: res.ok ? "已保存并热生效（gateway 未重启）" : "保存失败" });
+		} catch (err) {
+			setSaveMsg({ ok: false, text: `保存失败：${err instanceof Error ? err.message : String(err)}` });
+		} finally {
+			setSaving(false);
+		}
+	};
+
+	const dirty =
+		deniedDraft !== null ||
+		robotNameDraft !== null ||
+		enabledDraft !== null ||
+		hideThinkingDraft !== null ||
+		agentDirDraft !== null;
+	const toggleDenied = (tool: string): void => {
+		setDeniedDraft(prev => {
+			const base = prev ?? dt.deniedTools ?? [];
+			return base.includes(tool) ? base.filter(t => t !== tool) : [...base, tool];
+		});
+	};
+
+	// 只读区：凭证信息（不可编辑）
+	const readOnlyRows: [string, string][] = [
 		["appKey", dt.appKey ?? "—"],
 		["robotCode", dt.robotCode ?? "—"],
-		["隐藏思考块", dt.hideThinkingBlock ? "是" : "否"],
-		["绑定 agentDir", agent?.agentDir ?? "—"],
 	];
+
 	return (
-		<div className="max-w-[560px]">
-			<div className="divide-y divide-hairline rounded-lg border border-hairline bg-surface">
-				{rows.map(([k, v]) => (
-					<div key={k} className="flex items-center gap-3 px-4 py-2.5">
-						<span className="w-[120px] shrink-0 text-[12px] text-ink-subtle">{k}</span>
-						<span className="min-w-0 flex-1 truncate font-mono text-[12px] text-ink">{v}</span>
+		<div className="flex max-w-[640px] flex-col gap-6">
+			<section>
+				<h4 className="mb-2 section-title text-ink-faint">启停与身份</h4>
+				<div className="divide-y divide-hairline rounded-lg border border-hairline bg-surface">
+					<div className="flex items-center gap-3 px-4 py-2.5">
+						<span className="w-[120px] shrink-0 text-[12px] text-ink-subtle">启用</span>
+						<span className="flex min-w-0 flex-1 items-center gap-2 text-[13px] text-ink">
+							<button
+								type="button"
+								role="switch"
+								aria-checked={enabled}
+								className={`toggle shrink-0 ${enabled ? "on" : ""}`}
+								onClick={() => setEnabledDraft(!enabled)}
+							/>
+							<span className="text-[11px] text-ink-faint">
+								关闭后该账号钉钉断连 + bridge 停止（保存即热生效，不重启 gateway）
+							</span>
+						</span>
 					</div>
-				))}
-			</div>
-			<div className="mt-3 text-[11px] text-ink-faint">
+					<div className="flex items-center gap-3 px-4 py-2.5">
+						<label className="w-[120px] shrink-0 text-[12px] text-ink-subtle" htmlFor={`dt-robotname-${agentId}`}>
+							机器人名
+						</label>
+						<input
+							id={`dt-robotname-${agentId}`}
+							value={robotName}
+							onChange={e => setRobotNameDraft(e.target.value)}
+							placeholder="M-HR"
+							className="min-w-0 flex-1 rounded border border-hairline bg-surface-2 px-2.5 py-1.5 font-mono text-[12px] text-ink outline-none focus:border-accent"
+						/>
+					</div>
+					<div className="flex items-center gap-3 px-4 py-2.5">
+						<label className="w-[120px] shrink-0 text-[12px] text-ink-subtle" htmlFor={`dt-agentdir-${agentId}`}>
+							agentDir
+						</label>
+						<input
+							id={`dt-agentdir-${agentId}`}
+							value={agentDir}
+							onChange={e => setAgentDirDraft(e.target.value)}
+							placeholder="/Users/.../OMP-workspace-test/mcode"
+							className="min-w-0 flex-1 rounded border border-hairline bg-surface-2 px-2.5 py-1.5 font-mono text-[12px] text-ink outline-none focus:border-accent"
+						/>
+					</div>
+					<div className="flex items-center gap-3 px-4 py-2.5">
+						<span className="w-[120px] shrink-0 text-[12px] text-ink-subtle">隐藏思考块</span>
+						<button
+							type="button"
+							role="switch"
+							aria-checked={hideThinking}
+							className={`toggle shrink-0 ${hideThinking ? "on" : ""}`}
+							onClick={() => setHideThinkingDraft(!hideThinking)}
+						/>
+					</div>
+					{readOnlyRows.map(([k, v]) => (
+						<div key={k} className="flex items-center gap-3 px-4 py-2.5">
+							<span className="w-[120px] shrink-0 text-[12px] text-ink-subtle">{k}</span>
+							<span className="min-w-0 flex-1 truncate font-mono text-[12px] text-ink">{v}</span>
+						</div>
+					))}
+				</div>
+			</section>
+
+			<section>
+				<h4 className="mb-2 section-title text-ink-faint">工具黑名单（deniedTools，账号级）</h4>
+				<div className="flex flex-wrap gap-1.5 rounded-lg border border-hairline bg-surface p-3">
+					{DYNAMIC_TOOL_OPTIONS.map(tool => {
+						const isDenied = denied.includes(tool);
+						return (
+							<button
+								key={tool}
+								type="button"
+								onClick={() => toggleDenied(tool)}
+								className={`cursor-pointer rounded px-2 py-1 font-mono text-[11px] transition-colors ${
+									isDenied
+										? "bg-danger-dim text-ink"
+										: "border border-hairline bg-surface-2 text-ink-subtle hover:bg-surface"
+								}`}
+							>
+								{tool}
+							</button>
+						);
+					})}
+				</div>
+				<div className="mt-2 text-[11px] text-ink-faint">
+					黑名单内的工具对 LLM 不可见（账号级；与内核 config.yml 工具开关是两个面）
+				</div>
+			</section>
+
+			<section className="flex items-center gap-3">
+				<button
+					type="button"
+					className="btn btn-sm shrink-0"
+					onClick={() => void save()}
+					disabled={saving || !dirty}
+				>
+					{saving ? "保存中…" : dirty ? "保存并生效" : "已同步"}
+				</button>
+				{saveMsg && (
+					<span className={`text-[12px] ${saveMsg.ok ? "text-success" : "text-danger"}`}>{saveMsg.text}</span>
+				)}
+				{dirty && <span className="text-[11px] text-ink-faint">有未保存修改</span>}
+			</section>
+
+			<div className="mt-1 text-[11px] text-ink-faint">
 				配置来源：~/.cornfield/gateway.json → channels.dingtalk.accounts（按 accountId 匹配 agent）。appSecret
-				不展示。
+				不展示、不可在此修改（凭证走 `$ENV_VAR` 引用或 setup 向导）。
 			</div>
 		</div>
 	);

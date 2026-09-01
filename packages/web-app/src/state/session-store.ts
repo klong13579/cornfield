@@ -25,6 +25,7 @@ import { loadNotifyPrefs, notifyGuarded } from "../lib/notifications";
 import type {
 	ArtifactDto,
 	FsEntryDto,
+	GatewayAccountPatchDto,
 	GatewayStatusDto,
 	ListenRecordingDto,
 	McpServerDto,
@@ -551,6 +552,16 @@ export class SessionStore {
 	/** 本机 gateway 运行状态（gateway_status，代理到 pi-client）。 */
 	gatewayStatus(): Promise<GatewayStatusDto> {
 		return this.#client.gatewayStatus();
+	}
+
+	/** 动态账号热生效（set_gateway_account，代理到 pi-client）。 */
+	setGatewayAccount(accountId: string, patch: GatewayAccountPatchDto): Promise<{ ok: boolean }> {
+		return this.#client.setGatewayAccount(accountId, patch);
+	}
+
+	/** 进程内 reload（reload_gateway，代理到 pi-client；兜底手动触发热生效）。 */
+	reloadGateway(): Promise<{ ok: boolean }> {
+		return this.#client.reloadGateway();
 	}
 
 	/** 本地用量统计（get_stats，代理到 pi-client；展示层自行持有状态）。 */

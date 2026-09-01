@@ -6,6 +6,7 @@
  * for the unified gateway architecture.
  */
 
+import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { isEnoent, logger } from "@cornfield/utils";
@@ -357,6 +358,21 @@ export function getEnabledChannels(config: GatewayConfig): Array<{ id: string; c
 	}
 
 	return result;
+}
+
+/**
+ * Atomically persist the gateway config to disk.
+ *
+ * `loadConfig()` silently falls back to DEFAULT_CONFIG on parse/validation
+ * failure, so a torn write would look like a user reset to defaults on the
+ * next boot. Write to a sibling tmp then rename (atomic on POSIX) so the
+ * file on disk is either the complete old config or the complete new one.
+ */
+export async function saveConfig(config: GatewayConfig, configPath?: string): Promise<void> {
+	const filePath = configPath ?? getConfigPath();
+	const tmpPath = `${filePath}.tmp`;
+	await Bun.write(tmpPath, JSON.stringify(config, null, 2));
+	await fs.rename(tmpPath, filePath);
 }
 
 export type { GatewayConfig } from "./types";

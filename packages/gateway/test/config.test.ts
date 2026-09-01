@@ -13,7 +13,14 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { ZodError } from "zod";
-import { getConfigPath, getDataDir, getDingTalkConfig, loadConfig, validateAndNormalizeConfig } from "../src/config";
+import {
+	getConfigPath,
+	getDataDir,
+	getDingTalkConfig,
+	loadConfig,
+	saveConfig,
+	validateAndNormalizeConfig,
+} from "../src/config";
 import { runInteractiveSetup } from "../src/setup";
 
 // ---------------------------------------------------------------------------
@@ -72,6 +79,57 @@ describe("config", () => {
 		} finally {
 			if (previous !== undefined) process.env.PI_GATEWAY_MISSING_SECRET = previous;
 		}
+	});
+
+	describe("saveConfig", () => {
+		it("writes then reloads the config round-trip without leaking tmp file", async () => {
+			const dir = await fs.mkdtemp(path.join(os.tmpdir(), "cornfield-gateway-save-1"));
+			try {
+				const cfgPath = path.join(dir, "gateway.json");
+				const config = {
+					channels: {
+						dingtalk: { enabled: true, accounts: { hr: { appKey: "k", appSecret: "s" } } },
+					},
+				};
+
+				await saveConfig(config, cfgPath);
+				const loaded = await loadConfig(cfgPath);
+				expect(loaded.channels.dingtalk?.accounts?.hr?.appKey).toBe("k");
+
+				// 原子写不应遗留 tmp 文件
+				const leftover = await fs
+					.access(`${cfgPath}.tmp`)
+					.then(() => true)
+					.catch(() => false);
+				expect(leftover).toBe(false);
+			} finally {
+				await fs.rm(dir, { recursive: true, force: true });
+			}
+		});
+
+		it("overwrites existing config atomically and preserves unchanged fields", async () => {
+			const dir = await fs.mkdtemp(path.join(os.tmpdir(), "cornfield-gateway-save-2"));
+			try {
+				const cfgPath = path.join(dir, "gateway.json");
+				await saveConfig(
+					{
+						channels: {
+							dingtalk: {
+								enabled: true,
+								accounts: { hr: { appKey: "k", appSecret: "s", enabled: true, robotName: "M-HR" } },
+							},
+						},
+						session: { idleTimeoutMinutes: 240 },
+					},
+					cfgPath,
+				);
+				const loaded = await loadConfig(cfgPath);
+				expect(loaded.session?.idleTimeoutMinutes).toBe(240);
+				expect(loaded.channels.dingtalk?.accounts?.hr?.robotName).toBe("M-HR");
+			} finally {
+				await fs.rm(dir, { recursive: true, force: true });
+			}
+		});
 	});
 });
 

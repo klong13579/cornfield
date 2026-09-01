@@ -20,12 +20,35 @@ import type { ScheduledTask, SchedulerStorage } from "./scheduler/types";
 /** cron 日志 output/stderr 截断上限（与旧 serve 直读代理一致）。 */
 const CRON_LOG_MAX_OUTPUT = 2048;
 
+/**
+ * 账号级动态可 patch 的白名单字段（set_gateway_account 写面）。
+ *
+ * 刻意不含 appSecret/appKey：凭证类写回需走 `$ENV_VAR` 引用或 setup 向导，
+ * 不在动态热生效面暴露明文密钥。
+ */
+export interface GatewayAccountPatch {
+	enabled?: boolean;
+	robotName?: string;
+	robotCode?: string;
+	agentDir?: string;
+	deniedTools?: string[];
+	hideThinkingBlock?: boolean;
+}
+
 export interface GatewayWireDeps {
 	storage: SchedulerStorage;
 	/** scheduler reload 触发（test-run 用；gateway 启动时装配）。 */
 	reloadScheduler?: () => Promise<void> | void;
 	/** gateway 进程内状态（旧 status.json 的权威源；live gateway stale=false）。 */
 	gatewayStatus: () => Promise<GatewayStatusPayload> | GatewayStatusPayload;
+	/**
+	 * 动态账号热生效（set_gateway_account）：写 gateway.json accounts.<id> 白名单
+	 * 字段并触发进程内 reload（只重建受影响账号 bridge/channel）。未装配（如
+	 * serve 直连路径）时命令返回明确错误。
+	 */
+	applyGatewayAccountPatch?: (accountId: string, patch: GatewayAccountPatch) => Promise<GatewayWireResult>;
+	/** 进程内 reload（reload_gateway；fallback 重新 loadConfig + reload）。 */
+	reloadGateway?: () => Promise<GatewayWireResult>;
 }
 
 /** 与旧 serve readGatewayStatus 输出同形的状态负载（web-app GatewayStatusDto）。 */
@@ -208,6 +231,50 @@ export async function handleGatewayWireCommand(
 
 		case "gateway_status": {
 			return { ok: true, result: await deps.gatewayStatus() };
+		}
+
+		// 动态账号热生效（G10）：写 gateway.json accounts.<id> 白名单字段 → 进程内
+		// reload（只重建受影响账号 bridge/channel），不重启 gateway。凭证类字段
+		// （appSecret/appKey）不在白名单——前端不落明文密钥，维护走 `$ENV_VAR` 引用或 setup 向导。
+		case "set_gateway_account": {
+			const accountId = typeof command.accountId === "string" ? command.accountId : "";
+			const rawPatch = command.patch;
+			if (!accountId) {
+				return { ok: false, error: "set_gateway_account requires accountId" };
+			}
+			if (!rawPatch || typeof rawPatch !== "object" || Array.isArray(rawPatch)) {
+				return { ok: false, error: "set_gateway_account requires patch object" };
+			}
+			// 白名单过滤：只接受账号级动态字段，拒绝未知键（防配置注入）。
+			// 先做字段校验（调用方错误）再检查 deps —— 空 patch 在任何端点上都是坏请求。
+			const PATCH_FIELDS = new Set([
+				"enabled",
+				"robotName",
+				"robotCode",
+				"agentDir",
+				"deniedTools",
+				"hideThinkingBlock",
+			]);
+			const patch: GatewayAccountPatch = {};
+			for (const [key, value] of Object.entries(rawPatch)) {
+				if (PATCH_FIELDS.has(key)) {
+					(patch as Record<string, unknown>)[key] = value;
+				}
+			}
+			if (Object.keys(patch).length === 0) {
+				return { ok: false, error: "set_gateway_account: no whitelisted fields in patch" };
+			}
+			if (!deps.applyGatewayAccountPatch) {
+				return { ok: false, error: "gateway account patch not available on this endpoint" };
+			}
+			return deps.applyGatewayAccountPatch(accountId, patch);
+		}
+
+		case "reload_gateway": {
+			if (!deps.reloadGateway) {
+				return { ok: false, error: "gateway reload not available on this endpoint" };
+			}
+			return deps.reloadGateway();
 		}
 
 		default:

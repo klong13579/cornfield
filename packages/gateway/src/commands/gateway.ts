@@ -27,12 +27,14 @@ import * as path from "node:path";
 import { logger } from "@cornfield/utils";
 import { Args, Command, Flags, renderCommandHelp } from "@cornfield/utils/cli";
 import { clearStatusFileSync } from "../gateway-daemon";
+import type { DingTalkConfig, DingtalkAccountConfig } from "../types";
 
 const ACTIONS = [
 	"start",
 	"stop",
 	"status",
 	"reload",
+	"account",
 	"doctor",
 	"config",
 	"cron",
@@ -49,7 +51,7 @@ export default class Gateway extends Command {
 	static args = {
 		action: Args.string({
 			description:
-				"Gateway action: start | stop | status | doctor | reload | config | cron | robot-context | service | test-longtask | help",
+				"Gateway action: start | stop | status | doctor | reload | account | config | cron | robot-context | service | test-longtask | help",
 			required: false,
 			options: ACTIONS,
 		}),
@@ -71,6 +73,11 @@ export default class Gateway extends Command {
 		"  cornfield-gateway stop                         Stop gateway (via PID file)",
 		"  cornfield-gateway status                       Show running status & PID",
 		"  cornfield-gateway reload                        Reload config without restart (SIGHUP)",
+		"",
+		"  ======== 动态账号启停（热生效） ========",
+		"  cornfield-gateway account list                  List accounts + enabled state",
+		"  cornfield-gateway account enable <id>           Enable DingTalk account (hot reload, no restart)",
+		"  cornfield-gateway account disable <id>          Disable DingTalk account (hot reload, no restart)",
 		"  cornfield-gateway doctor                       Run health checks (config, creds, channels, scheduler)",
 		"  cornfield-gateway doctor --fix                 Apply safe fixes (clear stale state, fail orphaned execs)",
 		"",
@@ -332,90 +339,12 @@ export default class Gateway extends Command {
 				break;
 			}
 			case "reload": {
-				// SIGHUP-based reload crashes the bun process when sent from
-				// the same parent (Bun async signal handler bug). We pick a path
-				// based on what's actually running:
-				//
-				//   1. Service installed → stopService / startService (launchd/systemd
-				//      KeepAlive handles the gap). We poll the new PID rather than
-				//      blind-sleeping because launchd's KeepAlive backoff can be
-				//      several seconds.
-				//   2. Service not installed, PID file alive → SIGHUP the running
-				//      gateway. The gateway's SIGHUP handler (set up in the
-				//      `--foreground` path) does an in-process config reload and
-				//      avoids a process restart. We verify the PID is still
-				//      alive AND is actually our gateway (not a PID-recycled
-				//      unrelated process) by inspecting the command line.
-				//   3. Nothing running → clean error.
-				const { isServiceInstalled, stopService, startService, getServiceStatus } = await import(
-					"../service-installer"
-				);
-				const { getGatewayStatus, isGatewayProcess } = await import("../gateway-daemon");
+				await this.#reloadRunningGateway();
+				break;
+			}
 
-				if (await isServiceInstalled()) {
-					const oldStatus = await getServiceStatus();
-					const oldPid = oldStatus.running ? oldStatus.pid : undefined;
-					await stopService();
-					// Wait until the service is actually stopped. launchd's bootout
-					// returns immediately even though the unload is asynchronous;
-					// a subsequent bootstrap too soon after can hit
-					// "Bootstrap failed: 5: Input/output error".
-					const stopDeadline = Date.now() + 5_000;
-					while (Date.now() < stopDeadline) {
-						const s = await getServiceStatus();
-						if (!s.running) break;
-						await Bun.sleep(100);
-					}
-					await startService();
-					// Wait for the new PID to appear (up to 10s). launchd's
-					// KeepAlive backoff can be ~5s on macOS.
-					const deadline = Date.now() + 10_000;
-					let newPid: number | undefined;
-					while (Date.now() < deadline) {
-						const next = await getServiceStatus();
-						if (next.running && next.pid && next.pid !== oldPid) {
-							newPid = next.pid;
-							break;
-						}
-						await Bun.sleep(250);
-					}
-					if (newPid) {
-						console.log(`Gateway restarted via system service (new PID ${newPid}).`);
-					} else {
-						console.log("Gateway restart requested; new PID not yet visible (check `cornfield-gateway status`).");
-					}
-					return;
-				}
-
-				const status = await getGatewayStatus();
-				if (status.running && status.pid) {
-					// Verify the PID is actually our gateway — not a recycled PID
-					// owned by some unrelated process. `isGatewayProcess` checks
-					// liveness AND argv identity (gateway + --foreground tokens).
-					if (!(await isGatewayProcess(status.pid))) {
-						console.error(
-							`PID ${status.pid} from gateway.pid is no longer our gateway process ` +
-								`(stale PID file or PID was recycled). Refusing to send SIGHUP.`,
-						);
-						process.exitCode = 1;
-						return;
-					}
-					try {
-						process.kill(status.pid, "SIGHUP");
-						console.log(`Sent SIGHUP to gateway (PID ${status.pid}) — in-process reload.`);
-					} catch (err) {
-						console.error(
-							`Failed to send SIGHUP to gateway (PID ${status.pid}): ${err instanceof Error ? err.message : String(err)}`,
-						);
-						process.exitCode = 1;
-					}
-					return;
-				}
-
-				console.error(
-					"Gateway is not running and not installed as a system service. Use `cornfield-gateway start` first.",
-				);
-				process.exitCode = 1;
+			case "account": {
+				await this.#handleAccount(process.argv, configPath);
 				break;
 			}
 			case "doctor": {
@@ -563,6 +492,172 @@ export default class Gateway extends Command {
 				);
 			}
 		}
+	}
+
+	/**
+	 * Reload the running gateway config without a process restart.
+	 *
+	 * SIGHUP-based reload crashes the bun process when sent from the same
+	 * parent (Bun async signal handler bug), so we pick the path based on
+	 * what's actually running:
+	 *
+	 *   1. Service installed → stopService / startService (launchd/systemd
+	 *      KeepAlive handles the gap), polling for the new PID.
+	 *   2. Service not installed, PID file alive → SIGHUP the running gateway
+	 *      (its `--foreground` handler does an in-process config reload).
+	 *      PID liveness AND identity (argv) are verified first.
+	 *   3. Nothing running → clean error.
+	 */
+	async #reloadRunningGateway(): Promise<void> {
+		const { isServiceInstalled, stopService, startService, getServiceStatus } = await import("../service-installer");
+		const { getGatewayStatus, isGatewayProcess } = await import("../gateway-daemon");
+
+		if (await isServiceInstalled()) {
+			const oldStatus = await getServiceStatus();
+			const oldPid = oldStatus.running ? oldStatus.pid : undefined;
+			await stopService();
+			const stopDeadline = Date.now() + 5_000;
+			while (Date.now() < stopDeadline) {
+				const s = await getServiceStatus();
+				if (!s.running) break;
+				await Bun.sleep(100);
+			}
+			await startService();
+			const deadline = Date.now() + 10_000;
+			let newPid: number | undefined;
+			while (Date.now() < deadline) {
+				const next = await getServiceStatus();
+				if (next.running && next.pid && next.pid !== oldPid) {
+					newPid = next.pid;
+					break;
+				}
+				await Bun.sleep(250);
+			}
+			if (newPid) {
+				console.log(`Gateway restarted via system service (new PID ${newPid}).`);
+			} else {
+				console.log("Gateway restart requested; new PID not yet visible (check `cornfield-gateway status`).");
+			}
+			return;
+		}
+
+		const status = await getGatewayStatus();
+		if (status.running && status.pid) {
+			if (!(await isGatewayProcess(status.pid))) {
+				console.error(
+					`PID ${status.pid} from gateway.pid is no longer our gateway process ` +
+						`(stale PID file or PID was recycled). Refusing to send SIGHUP.`,
+				);
+				process.exitCode = 1;
+				return;
+			}
+			try {
+				process.kill(status.pid, "SIGHUP");
+				console.log(`Sent SIGHUP to gateway (PID ${status.pid}) — in-process reload.`);
+			} catch (err) {
+				console.error(
+					`Failed to send SIGHUP to gateway (PID ${status.pid}): ${err instanceof Error ? err.message : String(err)}`,
+				);
+				process.exitCode = 1;
+			}
+			return;
+		}
+
+		console.error(
+			"Gateway is not running and not installed as a system service. Use `cornfield-gateway start` first.",
+		);
+		process.exitCode = 1;
+	}
+
+	/**
+	 * 动态账号启停（热生效）：`account list|enable <id>|disable <id>`。
+	 *
+	 * 写 gateway.json 的 accounts.<id>.enabled，然后走 reload 路径（SIGHUP/
+	 * 服务重启）让运行中的 gateway 捕获变化 —— 启停账号不依赖手工编辑配置。
+	 * appSecret/appKey 不可在此路径修改（凭证走 `$ENV_VAR` 或 setup 向导）。
+	 */
+	async #handleAccount(argv: string[], configPath?: string): Promise<void> {
+		const { loadConfig, saveConfig, getConfigPath, validateAndNormalizeConfig } = await import("../config");
+		const idx = argv.indexOf("account");
+		const sub = idx >= 0 ? argv[idx + 1] : undefined;
+		const id = idx >= 0 ? argv[idx + 2] : undefined;
+
+		if (sub === "list") {
+			const config = await loadConfig(configPath);
+			const { getDingTalkConfig } = await import("../config");
+			const dt = getDingTalkConfig(config);
+			const accounts = dt?.accounts ?? {};
+			if (Object.keys(accounts).length === 0) {
+				console.log("No DingTalk accounts configured.");
+				return;
+			}
+			console.log("DingTalk accounts:");
+			for (const [accountId, account] of Object.entries(accounts)) {
+				console.log(
+					`  ${accountId}: ${(account.enabled ?? true) ? "enabled" : "disabled"}` +
+						(account.robotName ? ` (${account.robotName})` : "") +
+						(account.agentDir ? ` → ${account.agentDir}` : ""),
+				);
+			}
+			return;
+		}
+
+		if (sub !== "enable" && sub !== "disable") {
+			console.error("Usage: cornfield-gateway account <list|enable|disable> [accountId]");
+			process.exitCode = 1;
+			return;
+		}
+		if (!id) {
+			console.error(`cornfield-gateway account ${sub} requires an account id`);
+			process.exitCode = 1;
+			return;
+		}
+
+		const config = await loadConfig(configPath);
+		const raw = config.channels.dingtalk as DingTalkConfig | undefined;
+		const account = raw?.accounts?.[id];
+		if (!account) {
+			console.error(
+				`Unknown account: ${id} (accounts in gateway.json: ${Object.keys(raw?.accounts ?? {}).join(", ") || "none"})`,
+			);
+			process.exitCode = 1;
+			return;
+		}
+
+		const enabled = sub === "enable";
+		const next = {
+			...config,
+			channels: {
+				...config.channels,
+				dingtalk: {
+					...(raw as DingTalkConfig),
+					accounts: {
+						...raw.accounts,
+						[id]: { ...account, enabled } as DingtalkAccountConfig,
+					},
+				},
+			},
+		};
+
+		try {
+			validateAndNormalizeConfig(next);
+		} catch (err) {
+			console.error(`Refusing to write invalid config: ${err instanceof Error ? err.message : String(err)}`);
+			process.exitCode = 1;
+			return;
+		}
+
+		await saveConfig(next, configPath);
+		console.log(`✅ Account ${id} → ${enabled ? "enabled" : "disabled"} (${getConfigPath()})`);
+
+		// 热生效：修复 gateway.json 后让运行中的 gateway 重载（不重启进程）。
+		const { getGatewayStatus } = await import("../gateway-daemon");
+		const status = await getGatewayStatus();
+		if (!status.running) {
+			console.log("Gateway is not running — change will apply on next start.");
+			return;
+		}
+		await this.#reloadRunningGateway();
 	}
 
 	// ═══════════════════════════════════════════════════════════════════

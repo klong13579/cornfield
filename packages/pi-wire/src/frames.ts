@@ -59,6 +59,10 @@ export interface DingtalkAgentConfigDto {
 	robotCode?: string;
 	/** 卡片渲染隐藏思考块（账号级偏好）。 */
 	hideThinkingBlock?: boolean;
+	/** 账号级工具黑名单（gateway.json accounts.<id>.deniedTools；来自 gateway.json，非 config.yml）。 */
+	deniedTools?: string[];
+	/** 账号绑定的 agent 工作目录（gateway.json accounts.<id>.agentDir）。 */
+	agentDir?: string;
 }
 
 /**
