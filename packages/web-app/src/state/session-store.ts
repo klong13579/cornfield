@@ -139,8 +139,9 @@ function cloneView(v: SessionView): SessionView {
  * - session_snapshot 到达 → 缓存更新，瞬态层清空，视图整体重建（权威）
  * - progress 到达 → 仅作用在瞬态层（视图克隆上增量），绝不移入缓存
  * 与 pi-wire「progress 不得归约为状态」语义一致。
+ * 类本身导出供测试直接实例化（单例导出见文件底部）。
  */
-class SessionStore {
+export class SessionStore {
 	#client!: PiClient;
 	#view: SessionView | null = null;
 	#listeners = new Set<() => void>();
@@ -233,7 +234,34 @@ class SessionStore {
 	}
 
 	prompt(text: string, sessionId?: string, images?: ImageContentDto[]): void {
-		void this.#run(() => this.#client.prompt(text, sessionId, images));
+		// SERVE-1 回归：本地乐观回显。发送即出现在当前转录（不再等服务端帧回推，否则路由异常时页面毫无反馈）；
+		// 目标 agent 的权威快照/流式帧到达后自然替换或推进；命令失败则把回显消息标错。
+		const echoId = this.#echoUserPrompt(text);
+		this.#client
+			.prompt(text, sessionId, images)
+			.then(() => this.#clearCommandError())
+			.catch(err => this.#failUserPrompt(echoId, err));
+	}
+
+	/** 乐观回显：把用户消息立即挂到当前转录（快照到达后由权威消息替换）。返回回显 id 供失败标错。 */
+	#echoUserPrompt(text: string): string {
+		const id = `echo-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+		const view = cloneView(this.getSnapshot());
+		view.messages.push({ id, role: "user", text, tools: [], done: false });
+		this.#view = view;
+		this.#notify();
+		return id;
+	}
+
+	/** 发送失败：命令错误提示条 + 回显消息标错（不再悬挂「发送中」）。 */
+	#failUserPrompt(echoId: string, err: unknown): void {
+		const msg = errorMessageOf(err);
+		const view = cloneView(this.getSnapshot());
+		view.commandError = `命令失败（未连接）：${msg}`;
+		view.messages = view.messages.map(m => (m.id === echoId ? { ...m, error: msg, done: true } : m));
+		this.#view = view;
+		this.#notify();
+		void notifyGuarded("出错告警 · 命令失败", msg.slice(0, 120), "cornfield-notify-errors");
 	}
 
 	abort(): void {

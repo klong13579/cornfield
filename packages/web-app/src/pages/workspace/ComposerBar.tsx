@@ -138,6 +138,19 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 		refreshCommands();
 	}, [store, view.connected]);
 
+	/**
+	 * SERVE-1 回归：输入框 agent 跟随当前视图焦点（openHistorySession / Agent 卡片 / 下拉切换
+	 * 都会改 view.activeAgentId）。此前 ComposerBar 只看 agents[0] 初值——在 hr 会话视图里发消息
+	 * 实际投给了 default：消息进了 default 的会话、回推帧又被连接焦点过滤，页面无任何显示。
+	 * 手动下拉切换会同步 switch_session（activeAgentId 变到同值，不回弹）。
+	 */
+	useEffect(() => {
+		if (!view.activeAgentId) return;
+		if (view.agents.some(a => a.id === view.activeAgentId)) {
+			setAgentId(view.activeAgentId);
+		}
+	}, [view.activeAgentId, view.agents]);
+
 	/** 模型按 provider 分组；当前模型所在 provider 置顶，其余保持 serve 返回顺序。 */
 	const modelGroups = useMemo(() => groupModelsByProvider(modelList, view.model), [modelList, view.model]);
 	/** 当前模型的 provider（顶栏按钮 logo 用）。 */
