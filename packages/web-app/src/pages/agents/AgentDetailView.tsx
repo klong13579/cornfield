@@ -302,14 +302,43 @@ function DingtalkView({ agentId }: { agentId: string }): React.JSX.Element {
 	const store = useSessionStore();
 	const agent = view.agents.find(a => a.id === agentId);
 	const dt = agent?.dingtalk;
-	// 编辑态（全量工具候选供多选；保存时只提交选中项）
+	// 草稿态（用户本次未保存的编辑）
 	const [deniedDraft, setDeniedDraft] = useState<string[] | null>(null);
 	const [robotNameDraft, setRobotNameDraft] = useState<string | null>(null);
 	const [enabledDraft, setEnabledDraft] = useState<boolean | null>(null);
 	const [hideThinkingDraft, setHideThinkingDraft] = useState<boolean | null>(null);
 	const [agentDirDraft, setAgentDirDraft] = useState<string | null>(null);
+	// 已保存态（本地权威）：保存成功后写入，覆盖 serve 陈旧快照（dt 只在 serve 启动时读一次
+	// gateway.json，disable 后不会自动刷新 —— 不回落到 dt 是「保存后 toggle 弹回」的修复）。
+	const [savedDenied, setSavedDenied] = useState<string[] | null>(null);
+	const [savedRobotName, setSavedRobotName] = useState<string | null>(null);
+	const [savedEnabled, setSavedEnabled] = useState<boolean | null>(null);
+	const [savedHideThinking, setSavedHideThinking] = useState<boolean | null>(null);
+	const [savedAgentDir, setSavedAgentDir] = useState<string | null>(null);
 	const [saving, setSaving] = useState(false);
 	const [saveMsg, setSaveMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+	// 问题 1 修复：详情页每次进入时拉 gateway_status 取真实启停态作为初始值 ——
+	// serve 快照（dt.enabled）只在 serve 启动时读一次 gateway.json，停用后不刷新，
+	// 直接回落会让 toggle 显示过期的「启用」；gateway 账号表（运行中账号）才是权威。
+	useEffect(() => {
+		if (!view.connected) return;
+		let cancelled = false;
+		const load = async (): Promise<void> => {
+			try {
+				const s = await store.gatewayStatus();
+				if (cancelled || s.stale) return;
+				// 账号在 gateway 账号表中 = 运行中；不在 = 已停用。未绑定钉钉（dt 不存在）已在上方 return。
+				setSavedEnabled(s.accounts.some(a => a.accountId === agentId));
+			} catch {
+				// gateway 未运行 → 保留 serve 快照兜底，不覆盖
+			}
+		};
+		void load();
+		return () => {
+			cancelled = true;
+		};
+	}, [agentId, store, view.connected]);
 
 	if (!dt) {
 		return (
@@ -319,11 +348,12 @@ function DingtalkView({ agentId }: { agentId: string }): React.JSX.Element {
 		);
 	}
 
-	const denied = deniedDraft ?? dt.deniedTools ?? [];
-	const robotName = robotNameDraft ?? dt.robotName ?? "";
-	const enabled = enabledDraft ?? dt.enabled ?? true;
-	const hideThinking = hideThinkingDraft ?? dt.hideThinkingBlock ?? false;
-	const agentDir = agentDirDraft ?? agent?.agentDir ?? "";
+	// 显示值：草稿 > 已保存（本地权威）> serve 快照（初始兜底）
+	const denied = deniedDraft ?? savedDenied ?? dt.deniedTools ?? [];
+	const robotName = robotNameDraft ?? savedRobotName ?? dt.robotName ?? "";
+	const enabled = enabledDraft ?? savedEnabled ?? dt.enabled ?? true;
+	const hideThinking = hideThinkingDraft ?? savedHideThinking ?? dt.hideThinkingBlock ?? false;
+	const agentDir = agentDirDraft ?? savedAgentDir ?? agent?.agentDir ?? "";
 
 	/** 提交 patch（仅变更的字段）+ 触发 gateway 热生效。 */
 	const save = async (): Promise<void> => {
@@ -337,7 +367,12 @@ function DingtalkView({ agentId }: { agentId: string }): React.JSX.Element {
 		if (agentDirDraft !== null) patch.agentDir = agentDirDraft;
 		try {
 			const res = await store.setGatewayAccount(agentId, patch);
-			// 成功后清空草稿（本地态回落到新权威值）
+			// 成功后：草稿写入已保存态（本地权威，不回落到陈旧快照），清空草稿
+			if (deniedDraft !== null) setSavedDenied(deniedDraft);
+			if (robotNameDraft !== null) setSavedRobotName(robotNameDraft);
+			if (enabledDraft !== null) setSavedEnabled(enabledDraft);
+			if (hideThinkingDraft !== null) setSavedHideThinking(hideThinkingDraft);
+			if (agentDirDraft !== null) setSavedAgentDir(agentDirDraft);
 			setDeniedDraft(null);
 			setRobotNameDraft(null);
 			setEnabledDraft(null);
@@ -359,7 +394,7 @@ function DingtalkView({ agentId }: { agentId: string }): React.JSX.Element {
 		agentDirDraft !== null;
 	const toggleDenied = (tool: string): void => {
 		setDeniedDraft(prev => {
-			const base = prev ?? dt.deniedTools ?? [];
+			const base = prev ?? savedDenied ?? dt.deniedTools ?? [];
 			return base.includes(tool) ? base.filter(t => t !== tool) : [...base, tool];
 		});
 	};

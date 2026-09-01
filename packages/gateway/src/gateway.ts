@@ -821,7 +821,10 @@ export class Gateway {
 		await saveConfig(nextConfig);
 		await this.reload(nextConfig);
 		logger.info("gateway:account-patch applied", { accountId, patch });
-		return { ok: true, result: { accountId, account: merged } };
+		// 返回给 wire 客户端的账号对象必须剔除凭证：appSecret 不在白名单写面，
+		// 也不应经响应泄露（前端不渲染，但协议层不能透传明文密钥）。
+		const { appSecret: _secret, appKey: _key, ...safeAccount } = merged;
+		return { ok: true, result: { accountId, account: safeAccount } };
 	}
 
 	async stop(): Promise<void> {

@@ -21,6 +21,8 @@ openQuestions:
 ## 进度记录
 
 - 2026-09-01 — 文档完成，两份待办（Agent 客户端配置验证 / gateway agent 动态注册启停）已链接本 topic 作为验收基线
+- 2026-09-01 — 热生效闭环落地：set_gateway_account/reload_gateway wire 命令 + CLI account enable/disable + 前端钉钉 tab 编辑化 + saveConfig 原子写；真实端点闭环验收通过（PID 不变 + bridge 翻转 + secret 不泄露）
+- 2026-09-01 — 方向 2（真·总开关）落地：工作台 ComposerBar 停用账号置灰 + 发送拦截 + 提示；修复保存后 toggle 弹回（saved 层覆盖 serve 陈旧快照）
 ---
 
 ## 0. 三层配置模型（用户纠偏后）

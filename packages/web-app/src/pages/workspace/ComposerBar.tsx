@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ContextRing } from "../../components/ContextRing";
 import { ProviderLogo } from "../../components/ProviderLogo";
+import type { GatewayStatusDto } from "../../lib/pi-client-api";
 import { useSessionStore } from "../../state/session-store";
 import { getUiStore, useUiState } from "../../state/ui-store";
 import { useSession } from "../../state/use-session";
@@ -84,6 +85,10 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 	const [slashOpen, setSlashOpen] = useState(false);
 	const [slashIndex, setSlashIndex] = useState(0);
 	const [slashCommands, setSlashCommands] = useState<SlashCommandDef[]>(DEFAULT_COMMANDS);
+	/** 发送拦截提示（方向 2：停用账号禁止从工作台发起会话）。 */
+	const [blockedMsg, setBlockedMsg] = useState<string | null>(null);
+	/** gateway 运行态账号表（gateway_status；15s 轮询，判定账号在线/停用）。 */
+	const [gwStatus, setGwStatus] = useState<GatewayStatusDto | null>(null);
 	/** ui.draft 是输入区唯一事实源（含 ?q= 直达种子——由 WorkspaceView 在挂载时写入一次、发送后清空）。
 	 * 不再回退 autoFocusDraft：否则种子成为永久 fallback，用户清空输入后文本立即恢复。 */
 	const value = ui.draft;
@@ -137,6 +142,39 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 		refreshModels();
 		refreshCommands();
 	}, [store, view.connected]);
+
+	/** gateway 账号在线表（gateway_status 15s 轮询）。停用账号（enabled:false）会从 accounts 消失，据此判定可对话性。 */
+	useEffect(() => {
+		if (!view.connected) return;
+		let cancelled = false;
+		const load = async (): Promise<void> => {
+			try {
+				const s = await store.gatewayStatus();
+				if (!cancelled) setGwStatus(s);
+			} catch {
+				// gateway 未运行/不可达 → 保留 null：不拦截（本地 serve 能力仍可用）
+				if (!cancelled) setGwStatus(null);
+			}
+		};
+		void load();
+		const t = setInterval(() => void load(), 15_000);
+		return () => {
+			cancelled = true;
+			clearInterval(t);
+		};
+	}, [store, view.connected]);
+
+	/**
+	 * 账号是否已停用（方向 2 判定）：gateway 运行中（非 stale）+ 该 agent 绑定了钉钉 +
+	 * accountId 不在 gateway 账号表 = 停用。未绑定钉钉的 agent（如 default 本地 agent）
+	 * 永远可对话 —— 不按 gateway 账号表判定。
+	 */
+	const isAccountStopped = (id: string): boolean => {
+		if (!gwStatus || gwStatus.stale) return false; // gateway 未运行/状态陈旧 → 不拦截
+		const meta = view.agents.find(a => a.id === id);
+		if (!meta?.dingtalk) return false; // 未绑定钉钉（default 等本地 agent）→ 不拦截
+		return !gwStatus.accounts.some(a => a.accountId === id);
+	};
 
 	/**
 	 * SERVE-1 回归：输入框 agent 跟随当前视图焦点（openHistorySession / Agent 卡片 / 下拉切换
@@ -198,6 +236,15 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 	const send = () => {
 		const text = value.trim();
 		if (!text) return;
+		// 方向 2：停用账号（gateway 侧 enabled:false）禁止从工作台发起会话
+		if (agentId && isAccountStopped(agentId)) {
+			setBlockedMsg(
+				`@${agent?.name ?? "该 agent"} 已停用（gateway 账号 enabled=false），请在 Agent 管理 → 钉钉 tab 重新启用后再发起会话。`,
+			);
+			setShowAgentMenu(false);
+			return;
+		}
+		setBlockedMsg(null);
 		getUiStore().setDraft("");
 		store.prompt(text, agentId, attachments.length > 0 ? attachments : undefined);
 		setAttachments([]);
@@ -266,7 +313,11 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 						ref={textRef}
 						rows={1}
 						value={value}
-						placeholder={`@${agent?.name ?? "Agent"} 发消息，或直接提问…`}
+						placeholder={
+							agentId && isAccountStopped(agentId)
+								? `@${agent?.name ?? "Agent"} 已停用，无法发起会话`
+								: `@${agent?.name ?? "Agent"} 发消息，或直接提问…`
+						}
 						onChange={e => {
 							const v = e.target.value;
 							getUiStore().setDraft(v);
@@ -295,6 +346,11 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 									)}
 								</span>
 								<span className="font-medium text-ink">@{agent?.name ?? "Agent"}</span>
+								{agentId && isAccountStopped(agentId) && (
+									<span className="rounded bg-danger/10 px-1 py-px text-[9px] font-medium text-danger">
+										已停用
+									</span>
+								)}
 								<ChevronDown size={11} strokeWidth={1.5} className="text-ink-faint" />
 							</button>
 							{showAgentMenu && (
@@ -309,38 +365,47 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 											</div>
 											{view.agents
 												.filter(a => a.workspace === ws)
-												.map(a => (
-													<button
-														key={a.id}
-														type="button"
-														className={`flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] transition-colors hover:bg-surface-3 ${a.id === agentId ? "bg-accent-dim" : ""}`}
-														onClick={() => {
-															setAgentId(a.id);
-															store.attach(a.id); // lazy attach（幂等）
-															store.switchSession(a.id); // 切 active：后续 prompt 默认发往该 agent
-															setShowAgentMenu(false);
-														}}
-													>
-														<span className="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-surface-2 text-[9px] font-semibold">
-															{a.face}
-														</span>
-														<span className="min-w-0 flex-1">
-															<span className="flex items-center gap-1.5 text-ink">
-																@{a.name}
-																<span
-																	className={`h-1.5 w-1.5 shrink-0 rounded-full ${statusDot(a.status)}`}
-																	title={statusLabel(a.status)}
-																/>
+												.map(a => {
+													const stopped = isAccountStopped(a.id);
+													return (
+														<button
+															key={a.id}
+															type="button"
+															className={`flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] transition-colors hover:bg-surface-3 ${a.id === agentId ? "bg-accent-dim" : ""} ${stopped ? "opacity-60" : ""}`}
+															onClick={() => {
+																setAgentId(a.id);
+																setBlockedMsg(null);
+																store.attach(a.id); // lazy attach（幂等）
+																store.switchSession(a.id); // 切 active：后续 prompt 默认发往该 agent
+																setShowAgentMenu(false);
+															}}
+														>
+															<span className="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-surface-2 text-[9px] font-semibold">
+																{a.face}
 															</span>
-															<span className="text-[10px] text-ink-faint">
-																{a.skillsCount ?? 0} 技能 · {a.cronCount ?? 0} 定时
+															<span className="min-w-0 flex-1">
+																<span className="flex items-center gap-1.5 text-ink">
+																	@{a.name}
+																	<span
+																		className={`h-1.5 w-1.5 shrink-0 rounded-full ${statusDot(a.status)}`}
+																		title={statusLabel(a.status)}
+																	/>
+																	{stopped && (
+																		<span className="rounded bg-danger/10 px-1 py-px text-[9px] font-medium text-danger">
+																			已停用
+																		</span>
+																	)}
+																</span>
+																<span className="text-[10px] text-ink-faint">
+																	{a.skillsCount ?? 0} 技能 · {a.cronCount ?? 0} 定时
+																</span>
 															</span>
-														</span>
-														<span className="ml-auto shrink-0 text-[10px] text-ink-faint">
-															{a.kind === "coding" ? "CODING" : "WORKER"}
-														</span>
-													</button>
-												))}
+															<span className="ml-auto shrink-0 text-[10px] text-ink-faint">
+																{a.kind === "coding" ? "CODING" : "WORKER"}
+															</span>
+														</button>
+													);
+												})}
 										</div>
 									))}
 								</div>
@@ -497,6 +562,12 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 						</button>
 					</div>
 				</div>
+				{blockedMsg && (
+					<div className="mt-1.5 flex items-start gap-1.5 rounded-md border border-danger/30 bg-danger/5 px-2.5 py-1.5 text-[11px] text-danger">
+						<span className="shrink-0 font-medium">无法发送：</span>
+						<span className="min-w-0">{blockedMsg}</span>
+					</div>
+				)}
 				<div className="mt-1.5 flex gap-3.5 text-[11px] text-ink-faint">
 					<span>
 						<span className="kbd">Enter</span> 发送 · <span className="kbd">Shift+Enter</span> 换行 ·{" "}

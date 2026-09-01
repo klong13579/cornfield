@@ -54,11 +54,28 @@ export function AgentsView(): React.JSX.Element {
 	const bridgeState = (account: string): string | undefined =>
 		gwStatus?.accounts.find(a => a.accountId === account)?.bridgeState;
 
+	/**
+	 * 账号是否已停用（与 ComposerBar 同源判定）：gateway 运行中 + 绑定了钉钉 +
+	 * accountId 不在 gateway 账号表 = 停用。未绑定钉钉的本地 agent（default）不算。
+	 */
+	const isAccountStopped = (agent: AgentInfoDto): boolean => {
+		if (!gwStatus || gwStatus.stale) return false;
+		if (!agent.dingtalk) return false;
+		return !gwStatus.accounts.some(a => a.accountId === agent.id);
+	};
+
 	const workspaces = useMemo(() => Array.from(new Set(agents.map(a => a.workspace))), [agents]);
 
 	const filtered = agents.filter(agent => {
 		if (wsFilter !== "all" && agent.workspace !== wsFilter) return false;
-		if (statusFilter !== "all" && agent.status !== statusFilter) return false;
+		// 停用态：gateway 账号停用视为 stopped（serve 快照仍可能是 idle）
+		const stopped = isAccountStopped(agent);
+		if (statusFilter !== "all") {
+			const matches = stopped
+				? agent.status === statusFilter || statusFilter === "stopped"
+				: agent.status === statusFilter;
+			if (!matches) return false;
+		}
 		if (query && !agent.name.toLowerCase().includes(query.toLowerCase())) return false;
 		return true;
 	});
@@ -165,6 +182,7 @@ export function AgentsView(): React.JSX.Element {
 										key={agent.id}
 										agent={agent}
 										gatewayBridge={bridgeState(agent.id)}
+										stopped={isAccountStopped(agent)}
 										onOpen={() => navigate(`/agents/${agent.id}`)}
 										onSession={() => {
 											store.attach(agent.id); // lazy attach（幂等）
@@ -185,25 +203,29 @@ export function AgentsView(): React.JSX.Element {
 function AgentCard({
 	agent,
 	gatewayBridge,
+	stopped,
 	onOpen,
 	onSession,
 }: {
 	agent: AgentInfoDto;
 	/** gateway 侧 bridge 状态（gateway.status.json；无则 undefined）。 */
 	gatewayBridge?: string;
+	/** gateway 账号已停用（enabled:false，不在账号表）；覆盖 serve 快照状态显示。 */
+	stopped: boolean;
 	onOpen: () => void;
 	onSession: () => void;
 }): React.JSX.Element {
-	const dotClass =
-		agent.status === "online"
+	// 停用态优先：gateway 账号下线（或禁用）→ 显示红色「已停用」，覆盖 serve 快照的 idle/online。
+	const dotClass = stopped
+		? "bg-danger"
+		: agent.status === "online"
 			? "bg-success"
 			: agent.status === "busy"
 				? "bg-warning animate-pulse"
-				: agent.status === "idle"
-					? "bg-ink-faint"
-					: "bg-ink-faint";
-	const statusLabel =
-		agent.status === "online"
+				: "bg-ink-faint";
+	const statusLabel = stopped
+		? "已停用"
+		: agent.status === "online"
 			? "运行中"
 			: agent.status === "busy"
 				? "执行中"
@@ -225,6 +247,14 @@ function AgentCard({
 								title={`钉钉机器人：${agent.dingtalk.robotName ?? agent.dingtalk.appKey ?? "未命名"} · 启用中`}
 							>
 								钉钉
+							</span>
+						)}
+						{stopped && agent.dingtalk && (
+							<span
+								className="badge fail"
+								title={`钉钉机器人：${agent.dingtalk.robotName ?? agent.dingtalk.appKey ?? "未命名"} · 已停用（gateway 账号 enabled=false）`}
+							>
+								钉钉已停用
 							</span>
 						)}
 					</div>

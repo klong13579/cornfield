@@ -469,14 +469,21 @@ export class PiClientAdapter implements PiClient {
 		return this.#gatewayWire<GatewayStatusDto>({ type: "gateway_status" });
 	}
 
-	/** 动态账号热生效（set_gateway_account；gateway 写 gateway.json + 进程内 reload）。 */
+	/** 动态账号热生效（set_gateway_account；gateway 写 gateway.json + 进程内 reload）。
+	 * HTTP 层已验 data.ok === true（#gatewayWire），这里把 result 收束为契约要求的 { ok: true }。 */
 	async setGatewayAccount(accountId: string, patch: GatewayAccountPatchDto): Promise<{ ok: boolean }> {
-		return this.#gatewayWire<{ ok: boolean }>({ type: "set_gateway_account", accountId, patch });
+		await this.#gatewayWire<{ accountId: string; account: unknown }>({
+			type: "set_gateway_account",
+			accountId,
+			patch,
+		});
+		return { ok: true };
 	}
 
 	/** 进程内 reload（reload_gateway；兜底手动触发配置热生效）。 */
 	async reloadGateway(): Promise<{ ok: boolean }> {
-		return this.#gatewayWire<{ ok: boolean }>({ type: "reload_gateway" });
+		await this.#gatewayWire<unknown>({ type: "reload_gateway" });
+		return { ok: true };
 	}
 
 	/** 本地用量统计（get_stats；period 可选时间窗口，无数据/失败抛错由调用方空态）。 */

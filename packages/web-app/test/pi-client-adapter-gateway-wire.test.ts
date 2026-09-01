@@ -89,6 +89,34 @@ describe("PiClientAdapter gateway wire 直连", () => {
 		await expect(adapter.getCronTasks()).rejects.toThrow("scheduler not started");
 	});
 
+	test("setGatewayAccount 发白名单 patch 并返回 { ok: true }（契约回归）", async () => {
+		const { requests } = mockFetch({ accountId: "mcode", account: { enabled: false } });
+		const adapter = newAdapter();
+
+		const res = await adapter.setGatewayAccount("mcode", { enabled: false });
+
+		// 回归锁定：契约要求 { ok: boolean }，不得把 wire result（{accountId, account}）直接透传
+		expect(res).toEqual({ ok: true });
+		const req = lastRequest(requests);
+		expect(req.url).toBe(WIRE_URL);
+		expect(req.body).toMatchObject({ type: "set_gateway_account", accountId: "mcode", patch: { enabled: false } });
+	});
+
+	test("setGatewayAccount 收到 unknown account 抛错而非静默成功", async () => {
+		mockFetch(undefined, 400, "unknown account: nope");
+		const adapter = newAdapter();
+		await expect(adapter.setGatewayAccount("nope", { enabled: true })).rejects.toThrow("unknown account: nope");
+	});
+
+	test("reloadGateway 返回 { ok: true }（契约回归）", async () => {
+		const { requests } = mockFetch({ reloaded: true });
+		const adapter = newAdapter();
+
+		const res = await adapter.reloadGateway();
+		expect(res).toEqual({ ok: true });
+		expect(lastRequest(requests).body.type).toBe("reload_gateway");
+	});
+
 	test("gateway 端点不可达（fetch reject）→ 抛出错误", async () => {
 		spyOn(globalThis, "fetch").mockRejectedValue(new TypeError("fetch failed"));
 		const adapter = newAdapter();
