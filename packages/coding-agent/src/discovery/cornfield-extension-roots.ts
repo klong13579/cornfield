@@ -5,14 +5,14 @@
  * `extensions:` in user/project settings or the `--extension`/`-e` CLI flag
  * that points to a packaged extension on disk. The package's standard
  * sub-directories (`skills/`, `hooks/`, `tools/`, `commands/`, `rules/`,
- * `prompts/`, `.mcp.json`) are wired into discovery by `omp-plugins.ts`.
+ * `prompts/`, `.mcp.json`) are wired into discovery by `cornfield-plugins.ts`.
  *
  * CLI-provided paths are injected via {@link injectCornfieldExtensionCliRoots}
  * before discovery runs; settings paths are read lazily from
  * `<scope>/settings.json` in {@link listCornfieldExtensionRoots} to mirror what
  * `loadExtensionModules` already does.
  *
- * @see ./omp-plugins.ts
+ * @see ./cornfield-plugins.ts
  * @see ./builtin.ts `loadExtensionModules`
  */
 import * as fs from "node:fs/promises";

@@ -38,7 +38,7 @@ import type { LoadContext, LoadResult } from "../capability/types";
 import { type CornfieldExtensionRoot, listCornfieldExtensionRoots } from "./cornfield-extension-roots";
 import { buildRuleFromMarkdown, createSourceMeta, loadFilesFromDir, scanSkillsFromDir } from "./helpers";
 
-const PROVIDER_ID = "omp-plugins";
+const PROVIDER_ID = "cornfield-plugins";
 const DISPLAY_NAME = "OMP Extension Packages";
 const DESCRIPTION =
 	"Sub-discovery (skills, hooks, tools, commands, rules, prompts, .mcp.json) inside extension packages";
@@ -295,8 +295,8 @@ async function loadMCPServers(ctx: LoadContext): Promise<LoadResult<MCPServer>> 
 
 		const parsed = tryParseJson<{ mcpServers?: Record<string, unknown> }>(raw);
 		if (!parsed) {
-			warnings.push(`[omp-plugins] Invalid JSON in ${mcpPath}`);
-			logger.warn(`[omp-plugins] Invalid JSON in ${mcpPath}`);
+			warnings.push(`[cornfield-plugins] Invalid JSON in ${mcpPath}`);
+			logger.warn(`[cornfield-plugins] Invalid JSON in ${mcpPath}`);
 			continue;
 		}
 		const servers = parsed.mcpServers;
@@ -306,7 +306,7 @@ async function loadMCPServers(ctx: LoadContext): Promise<LoadResult<MCPServer>> 
 			if (!serverCfg || typeof serverCfg !== "object" || Array.isArray(serverCfg)) continue;
 			const cfg = serverCfg as RawMcpServer;
 			if (typeof cfg.command !== "string" && typeof cfg.url !== "string") {
-				warnings.push(`[omp-plugins] Skipping MCP server "${serverName}" in ${mcpPath}: missing command or url`);
+				warnings.push(`[cornfield-plugins] Skipping MCP server "${serverName}" in ${mcpPath}: missing command or url`);
 				continue;
 			}
 			items.push({

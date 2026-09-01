@@ -113,7 +113,7 @@ export class PluginManager {
 					pkgJsonPath,
 					JSON.stringify(
 						{
-							name: "omp-plugins",
+							name: "cornfield-plugins",
 							private: true,
 							dependencies: {},
 						},
