@@ -1,4 +1,4 @@
-import { MessageSquare, Play, Search, Stethoscope } from "lucide-react";
+import { ChevronRight, MessageSquare, Play, Search, Stethoscope } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -70,6 +70,7 @@ export function RecordsView(): React.JSX.Element {
 
 	// Load existing diagnosis reports on mount
 	useEffect(() => {
+		if (!view.connected) return;
 		store.listDiagnosisReports().then(({ reports }) => {
 			const map = new Map<string, DiagReport>();
 			for (const r of reports) {
@@ -83,7 +84,7 @@ export function RecordsView(): React.JSX.Element {
 			}
 			setDiagReports(map);
 		}).catch(() => undefined);
-	}, [store]);
+	}, [store, view.connected]);
 
 	// list_sessions：连接就绪后拉真索引；未连接/失败时保持空列表（不造数据）
 	useEffect(() => {
@@ -269,6 +270,18 @@ export function RecordsView(): React.JSX.Element {
 										<Stethoscope size={11} strokeWidth={1.5} />
 										{diagnosing.has(sf ?? '') ? '诊断中…' : '诊断'}
 									</button>
+									{report && (
+										<button
+											type="button"
+											className="flex items-center gap-0.5 text-ink-muted transition-colors hover:text-ink"
+											onClick={e => {
+												e.stopPropagation();
+												navigate(`/records/${report.sessionId}/diagnosis`, { state: { reportId: report.reportId } });
+											}}
+										>
+											报告 <ChevronRight size={11} strokeWidth={1.5} />
+										</button>
+									)}
 									<button
 										type="button"
 										className="text-ink-faint transition-colors hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
