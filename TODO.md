@@ -3,6 +3,17 @@
 > Current task state. The agent updates this file as work progresses; an empty TODO is a valid state.
 
 ## 待办
+- [ ] narwal-plan login 功能验收
+- [ ] Agent 客户端配置验证 → topics/agent-client-config.md
+- [ ] web-search tool 功能升级，提升搜索能力。
+- [ ] web-search 搜索的页面在客户端显示列表，并支持点击查看。
+- [ ] 深挖组队编程：升级grill + squad-programming 组合技能。
+- [ ] gateway agent 增加动态注册能力，动态enable 和 disable 能力。 → topics/agent-client-config.md
+- [ ] cronfield 功能管理与说明。
+- [ ] dataAgent 增加本体论能力v1.0
+- [ ] 客户端开机首页默认显示每天日程和待办。
+- [ ] 功能管理能力（进度，状态，完成情况，验收情况）结合待办管理升级。
+- [ ] 客户端语音功能优化（ASR + TTS）
 - [ ] 统一协议层：TUI/web/桌面/IM 四前端收敛到一套 Wire（P0✓ P1✓ P2✓ 含实机验收；P3 TUI 代码完成在 feat/agent-work 未合 main，暂缓） → topics/unified-protocol-layer.md
 - [ ] 学习使用herdr-board 功能
 - [ ] 钉钉机器人帮助我读取群消息和文档链接，帮我自动提取，并且识别重要的事项，是的话记录待办并提醒我。 → topics/dingtalk-extract-important-todos.md
