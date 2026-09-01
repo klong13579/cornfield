@@ -1,7 +1,7 @@
 import * as path from "node:path";
 import { isEnoent, logger } from "@cornfield/utils";
 import { randomUUID } from "crypto";
-import { type Stats, statSync, unlinkSync, writeFileSync } from "fs";
+import { type Stats, appendFileSync, existsSync, readFileSync, statSync, unlinkSync, writeFileSync } from "fs";
 import net from "net";
 import { getAskTimeoutMs } from "./config";
 import { sameCwd } from "./cwd";
@@ -19,7 +19,7 @@ import {
 	restrictIntercomRuntimeFile,
 } from "./paths";
 import { isMessage, isMessageReceipt, isSessionId, isSessionRegistration } from "./protocol";
-import type { BrokerMessage, ExtensionCapability, Message, MessageControl, SessionInfo } from "./types";
+import type { BrokerMessage, ExtensionCapability, HistoryEntry, Message, MessageControl, SessionInfo } from "./types";
 import { EXTENSION_BUS_FEATURE } from "./types";
 
 const INTERCOM_DIR = getIntercomDirPath();
@@ -46,6 +46,8 @@ const MAILBOX_MESSAGE_RETENTION_MS = 24 * 60 * 60 * 1000;
 const MAX_MAILBOX_MESSAGES = 256;
 const SOCKET_CLOSE_DRAIN_TIMEOUT_MS = 2_000;
 const SOCKET_LISTEN_TIMEOUT_MS = 5_000;
+const HISTORY_JOURNAL_MAX_ENTRIES = 2000;
+const HISTORY_JOURNAL_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 
 function serializedPayloadSize(payload: unknown): number | null {
 	try {
@@ -149,11 +151,13 @@ function withTimeout<T>(promise: Promise<T>, ms: number, what: string): Promise<
 }
 
 export class IntercomBroker {
+	#journalPath: string;
 	private sessions = new Map<string, ConnectedSession>();
 	private askEdges = new Map<string, AskEdge>();
 	private messageReceiptRoutes = new Map<string, MessageReceiptRoute>();
 	private disconnectedSessions = new Map<string, DisconnectedSession>();
 	private mailboxMessages: MailboxMessage[] = [];
+	private historyEntries: HistoryEntry[] = [];
 	private connections = new Set<net.Socket>();
 	private unregisteredConnections = new Set<net.Socket>();
 	private server: net.Server;
@@ -192,7 +196,8 @@ export class IntercomBroker {
 		} else {
 			ensureIntercomRuntimeDir(runtimeDir);
 		}
-		this.extensionStateManager = new ExtensionStateManager(runtimeDir);
+		this.#journalPath = path.join(runtimeDir, "journal.jsonl");
+	this.extensionStateManager = new ExtensionStateManager(runtimeDir);
 		// NOTE: stale-socket cleanup happens in start() AFTER a liveness probe —
 		// an unconditional unlink here would delete a live broker's socket file
 		// (its listener keeps running but new clients get ENOENT).
@@ -346,6 +351,7 @@ export class IntercomBroker {
 							? this.listenTarget
 							: `${this.listenTarget.host}:${this.listenTarget.port}`,
 				});
+				this.loadJournal();
 				this.#startSocketWatch();
 				resolveListen();
 			};
@@ -853,6 +859,7 @@ export class IntercomBroker {
 						to: target.info.id,
 						createdAt: brokerReceivedAt,
 					});
+					this.appendJournalEntry(fromSession.info, target.info, deliveredMessage, false);
 					writeMessage(socket, { type: "delivered", messageId: message.id });
 					break;
 				}
@@ -936,11 +943,13 @@ export class IntercomBroker {
 							to: liveMailboxTarget.info.id,
 							createdAt: brokerReceivedAt,
 						});
+						this.appendJournalEntry(fromSession.info, liveMailboxTarget.info, deliveredMessage, false);
 					} else {
 						if (!this.isFrameDeliverable(socket, message, { type: "message", from: fromSession.info, message })) {
 							break;
 						}
 						this.queueMailboxMessage(fromSession.info, target, message, brokerReceivedAt);
+						this.appendJournalEntry(fromSession.info, target, message, true);
 					}
 					if (message.replyTo) {
 						this.askEdges.delete(message.replyTo);
@@ -1153,6 +1162,19 @@ export class IntercomBroker {
 
 			case "extension_state_commit": {
 				this.handleExtensionStateCommit(socket, currentId, clientMessage);
+				break;
+			}
+
+			case "history": {
+				if (!currentId) {
+					throw new Error("Received history before register");
+				}
+				const { requestId, limit = 20, since, direction = "in" } = clientMessage;
+				if (typeof requestId !== "string") {
+					throw new Error("Invalid history requestId");
+				}
+				const entries = this.queryHistory(currentId, { limit, since, direction });
+				writeMessage(socket, { type: "history", requestId, entries });
 				break;
 			}
 
@@ -1744,6 +1766,132 @@ export class IntercomBroker {
 					});
 				}
 			}
+		}
+	}
+
+	private loadJournal(): void {
+		try {
+			if (!existsSync(this.#journalPath)) {
+				return;
+			}
+			const raw = readFileSync(this.#journalPath, "utf-8");
+			const lines = raw.split("\n").filter(Boolean);
+			const entries: HistoryEntry[] = [];
+			const now = Date.now();
+			const cutoff = now - HISTORY_JOURNAL_RETENTION_MS;
+			for (let i = lines.length - 1; i >= 0; i--) {
+				if (entries.length >= HISTORY_JOURNAL_MAX_ENTRIES) break;
+				try {
+					const entry = JSON.parse(lines[i]!) as HistoryEntry;
+					if (entry.at >= cutoff) {
+						entries.push(entry);
+					}
+				} catch {
+					// Skip corrupt lines
+				}
+			}
+			entries.reverse();
+			this.historyEntries = entries;
+		} catch (err) {
+			logger.error("Failed to load intercom journal", { error: err instanceof Error ? err.message : String(err) });
+		}
+	}
+
+	private appendJournalEntry(
+		from: SessionInfo,
+		to: SessionInfo,
+		message: Message,
+		queued: boolean,
+	): void {
+		const entry: HistoryEntry = {
+			from: { id: from.id, name: from.name, cwd: from.cwd, runtimeFallbackAlias: from.runtimeFallbackAlias },
+			to: { id: to.id, name: to.name, cwd: to.cwd, runtimeFallbackAlias: to.runtimeFallbackAlias },
+			message,
+			at: message.brokerReceivedAt ?? Date.now(),
+			queued,
+		};
+		this.historyEntries.push(entry);
+		try {
+			appendFileSync(this.#journalPath, JSON.stringify(entry) + "\n", { mode: INTERCOM_RUNTIME_FILE_MODE });
+		} catch (err) {
+			logger.error("Failed to append intercom journal entry", {
+				error: err instanceof Error ? err.message : String(err),
+			});
+		}
+		if (this.historyEntries.length > HISTORY_JOURNAL_MAX_ENTRIES + 100) {
+			this.pruneJournalAndCompact();
+		}
+	}
+
+	private queryHistory(
+		sessionId: string,
+		options: { limit: number; since?: number; direction: "in" | "out" | "both" },
+	): HistoryEntry[] {
+		const now = Date.now();
+		const cutoff = now - HISTORY_JOURNAL_RETENTION_MS;
+
+		// Resolve the current session's identity (name+cwd) for mailbox-style matching
+		// so that a reconnected session with a new sessionId still sees its history.
+		const currentSession = this.sessions.get(sessionId);
+		const currentName = currentSession?.info.name?.toLowerCase();
+		const currentCwd = currentSession?.info.cwd;
+
+		const filtered = this.historyEntries.filter(entry => {
+			if (entry.at < cutoff) return false;
+			if (options.direction === "in" || options.direction === "both") {
+				if (entry.to.id === sessionId) return true;
+				// Match by name+cwd identity when sessionId changed (reconnect)
+				if (currentName && currentCwd && !currentSession?.info.runtimeFallbackAlias) {
+					if (
+						entry.to.name?.toLowerCase() === currentName &&
+						!entry.to.runtimeFallbackAlias &&
+						sameCwd(entry.to.cwd, currentCwd)
+					) {
+						return true;
+					}
+				}
+			}
+			if (options.direction === "out" || options.direction === "both") {
+				if (entry.from.id === sessionId) return true;
+				if (currentName && currentCwd && !currentSession?.info.runtimeFallbackAlias) {
+					if (
+						entry.from.name?.toLowerCase() === currentName &&
+						!entry.from.runtimeFallbackAlias &&
+						sameCwd(entry.from.cwd, currentCwd)
+					) {
+						return true;
+					}
+				}
+			}
+			return false;
+		});
+
+		filtered.sort((a, b) => b.at - a.at);
+
+		if (options.since !== undefined) {
+			const sinceCutoff = options.since;
+			return filtered.filter(e => e.at >= sinceCutoff).slice(0, options.limit);
+		}
+
+		return filtered.slice(0, options.limit);
+	}
+
+	private pruneJournalAndCompact(): void {
+		const now = Date.now();
+		const cutoff = now - HISTORY_JOURNAL_RETENTION_MS;
+		let compacted = this.historyEntries.filter(e => e.at >= cutoff);
+		if (compacted.length > HISTORY_JOURNAL_MAX_ENTRIES) {
+			compacted.sort((a, b) => b.at - a.at);
+			compacted.length = HISTORY_JOURNAL_MAX_ENTRIES;
+		}
+		this.historyEntries = compacted;
+		try {
+			const content = compacted.map(e => JSON.stringify(e)).join("\n") + "\n";
+			writeFileSync(this.#journalPath, content, { mode: INTERCOM_RUNTIME_FILE_MODE });
+		} catch (err) {
+			logger.error("Failed to compact intercom journal", {
+				error: err instanceof Error ? err.message : String(err),
+			});
 		}
 	}
 

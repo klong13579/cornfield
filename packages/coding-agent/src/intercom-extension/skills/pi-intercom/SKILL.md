@@ -143,7 +143,8 @@ workers.forEach(w =>
 
 ### Pattern 5: Send with Attachments
 
-Share code snippets, files, or context:
+Share code snippets, files, or context — but ONLY content under ~1KB inline
+(see 长内容传输（Large Payload） for the threshold):
 
 ```typescript
 intercom({
@@ -161,6 +162,10 @@ intercom({
   }]
 })
 ```
+
+Content larger than ~1KB (full files, long diffs, reviews): write it to a file
+first, then send only the absolute path + one-line summary — see
+长内容传输（Large Payload）. Never inline the full body.
 
 ### Pattern 6: Cross-Codebase Peer Messages
 
@@ -270,6 +275,7 @@ new visible project panes should go through the supervisor.
 | `ask` | Blocks until reply (10 min default, configurable with `PI_INTERCOM_ASK_TIMEOUT_MS`) | You need an answer to continue |
 | `reply` | Resolves by explicit `replyTo`, or the unique pending ask; multiple pending asks fail loud and require `to`/`replyTo` | You were asked something and need to answer naturally |
 | `pending` | Lists unresolved inbound asks | You need to see who is waiting before replying |
+| `history` | Returns recently received/sent messages | You missed a `send` while busy; async recovery |
 | `list` | Returns all sessions with live status | You need to discover targets or choose an idle peer |
 | `status` | Returns your connection state | Troubleshooting |
 
@@ -309,6 +315,91 @@ if (result.isError && result.content[0].text.includes("Mutual ask refused")) {
 - **Ambiguity stays unthreaded**: Zero or multiple matching asks leave the send as an ordinary message
 - **Confirmation dialogs**: If `confirmSend: true` in config, interactive sessions confirm ordinary and inferred sends
 - **Explicit replies skip confirmation**: A caller-supplied `replyTo` skips the dialog
+
+## 长内容传输（Large Payload）
+
+长内容一律不直接发正文。实测事故：一个 cornfield agent 用 `send` + attachment 全文发送 16KB review，`send` 是 fire-and-forget，主会话当时在等待循环、没有新轮次接收，消息直接丢失。约定：payload 进文件，intercom 只发「文件绝对路径 + 一句话摘要」。
+
+### 阈值（Threshold）
+
+- message 正文 + attachment 内容合计超过约 **1KB**：一律不直接发正文（整文件内容、长 diff、长 review、长日志都算）。
+- 1KB 以下的小片段可走 inline snippet（见 Pattern 5）。
+
+### 文件先行（File First）
+
+1. 先用 `Bun.write` 把全文写到临时文件：目录用 `/tmp/` 或 `~/.cornfield/intercom/`（`Bun.write` 自动建父目录）；文件名带目标会话名 + 时间戳，例如：
+   `/tmp/intercom-arch1-20260901-153000.md`
+2. intercom 只发：**文件绝对路径 + 一句话摘要**。message 和 attachment 里都不贴正文。
+
+### attachment 携带路径，不携带正文
+
+intercom 的 attachment schema 没有独立的 `path` 字段（`Attachment = { type, name, content, language? }`），且 `content` 无论什么 type 都会注入接收方可见正文。所以 `type: "file"` 用 `name` 放绝对路径，`content` 只放一句话摘要——正文留在文件里，接收方按需 `read`：
+
+```typescript
+// GOOD: content 只有摘要；正文在文件里，接收方 read 取全文（不注入正文）
+intercom({
+  action: "send",
+  to: "arch1",
+  message: "Review 完成",
+  attachments: [{
+    type: "file",
+    name: "/tmp/intercom-arch1-20260901-153000.md",   // 绝对路径
+    content: "16KB review: intercom 长内容传输约定"     // 一句话摘要，不是正文
+  }]
+})
+```
+
+```typescript
+// BAD: 大段正文塞进 content —— 注入接收方正文，且 send 可能丢消息
+attachments: [{ type: "file", name: "review.md", content: "<大段正文>" }]
+```
+
+### 传结论用 `ask`，`send` 仅限无需回应的通知
+
+| 目的 | 用 | 原因 |
+|------|----|------|
+| 传结论 / 需要确认对方收到 | `ask`（阻塞等回复，默认 10 分钟超时，可配 `PI_INTERCOM_ASK_TIMEOUT_MS`） | `send` 是 fire-and-forget，接收方忙/在等待循环时没有新轮次取件，消息会丢 |
+| 无需回应 / 通知、进度更新 | `send` | 不阻塞发送方 |
+
+review、任务结果、结论这类「送达即完成」的传递一律 `ask`；`send` 只能用于丢了也无妨的通知。
+
+### 接收方约定（Receiver Contract）
+
+- 收到 `type: "file"` attachment 或正文里的绝对路径：先 `read` 取全文，再回复。
+- 路径读不到 / 不确定指什么：先 `ask` 对方确认，不猜、不复述。
+
+## 历史消息查询（History）
+
+`send` 丢的消息不是永久丢失——broker 会持久化每条已接受的消息到 `~/.cornfield/intercom/journal.jsonl`，任意会话可通过 `history` action 查询最近的收/发记录，用于异步恢复。
+
+```typescript
+// 查询最近 20 条发给我的消息（默认按时间倒序）
+intercom({ action: "history" })
+// → [14:30:00] ← worker: review complete (📄/tmp/...)
+// → [14:25:00] ← planner: check if PR is ready
+
+// 查询我发出去的消息
+intercom({ action: "history", direction: "out" })
+
+// 查询双方消息
+intercom({ action: "history", direction: "both", limit: 50 })
+
+// 查询某个时间点之后的消息（e.g., 我上次 check 的时间戳）
+intercom({ action: "history", since: 1725180000000 })
+```
+
+### 何时使用
+
+- 怀疑 `send` 的消息在对方忙时丢失时
+- 自己完成一个长任务后，想检查其间有没有人发消息过来
+- 故障排查：`history` 比询问对方更快
+
+### 注意事项
+
+- 仅返回当前会话（sessionId）相关的消息，不会跨会话读取
+- 日志保留 7 天，最多 2000 条；超限时自动压缩
+- 仅记录 broker 接受的 send（被 `isFrameDeliverable` 拒绝的过大消息不会记录）
+- `queued` 标记表示消息发送时对方已离线，已进入邮箱队列
 
 ## Best Practices
 
@@ -379,6 +470,10 @@ if (!result.delivered) {
   await intercom({ action: "list" });
 }
 ```
+
+**"Message sent but never received"**
+`send` is fire-and-forget; if the recipient was busy (in a wait loop, no new turn), the message may be lost. Check `intercom({ action: "history" })` to see queued or delivered-but-unprocessed messages. If the entry exists with `queued: false`, it was delivered to the recipient's runtime — the recipient may need to check its incoming queue. If `queued: true`, the recipient was offline and the message will be delivered on reconnect.
+```
 Replies to recently disconnected explicitly named senders can be queued by the broker and delivered if that sender reconnects with the same name and directory. Runtime-only `subagent-chat-...` aliases are not reconnect identities. New `send` calls may target a known live or recently disconnected session; blocking `ask` calls require a live target.
 
 **Ask timeout**
@@ -421,7 +516,9 @@ intercom({ action: "status" })
 ### Research → Implementation Handoff
 
 ```typescript
-// Research session finds relevant code
+// Research session finds relevant code — short diff (<1KB) inline is fine;
+// larger findings: write the file first, send only path + summary
+// (see 长内容传输（Large Payload）)
 intercom({
   action: "send",
   to: "impl-session",
@@ -471,7 +568,8 @@ intercom({ action: "send", to: "planner", message: "Task-3 complete. All done." 
 ```typescript
 // For tasks that might exceed the ask timeout, use send + periodic asks
 
-// 1. Initial send with full context
+// 1. Initial send with context (keep ≤ ~1KB; larger context: file path + summary,
+//    see 长内容传输（Large Payload）)
 intercom({
   action: "send",
   to: "worker",

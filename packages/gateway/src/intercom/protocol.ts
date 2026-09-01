@@ -68,7 +68,10 @@ function isAttachment(value: unknown): value is Attachment {
 		return false;
 	}
 
-	return value.language === undefined || typeof value.language === "string";
+	return (
+		(value.language === undefined || typeof value.language === "string") &&
+		(value.path === undefined || typeof value.path === "string")
+	);
 }
 
 export function isMessage(value: unknown): value is Message {

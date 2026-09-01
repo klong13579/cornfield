@@ -112,6 +112,23 @@ intercom({
     content: "function validate(user: User) { ... }"
   }]
 })
+
+// Large content: send file path + one-line summary, not the full body
+// (see 长内容传输（Large Payload） convention in the pi-intercom skill)
+intercom({
+  action: "send",
+  to: "arch1",
+  message: "Review complete",
+  attachments: [{
+    type: "file",
+    name: "/tmp/intercom-arch1-20260901-153000.md",
+    content: "Review summary"
+  }]
+})
+
+// Read missed async messages (history)
+intercom({ action: "history" })
+intercom({ action: "history", direction: "both" })
 ```
 
 ### Receiving Messages
@@ -128,6 +145,21 @@ See auth.ts:142-156.
 ```
 
 The reply hint (enabled by default) points to `intercom({ action: "reply", ... })`, so recipients do not need raw sender or `replyTo` IDs. Idle recipients get a new turn immediately; busy interactive recipients receive the message through Pi's steering queue at the next safe model boundary without aborting the active turn. Attachment content is included in the agent-visible body, and messages are rendered inline and stored in Pi session history.
+
+### Large Payload Convention
+
+Content over ~1KB (full files, long diffs, reviews) **MUST NOT** be sent inline.
+Instead: write the content to a file with `Bun.write`, then send only the absolute
+path + one-line summary (`type: "file"` attachment with `name` = path, `content` =
+summary). The receiver reads the file on demand. See the `长内容传输（Large Payload）`
+section in the pi-intercom skill for full details.
+
+### History (Async Recovery)
+
+The broker persists all accepted messages to `~/.cornfield/intercom/journal.jsonl`.
+Use `intercom({ action: "history" })` to query recently received/sent messages.
+This is the primary recovery mechanism for `send` messages that were lost while
+the recipient was busy (in a wait loop, no new turn).
 
 ## Workflow: Planner-Worker Coordination
 

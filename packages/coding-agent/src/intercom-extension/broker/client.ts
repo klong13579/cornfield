@@ -5,6 +5,7 @@ import type {
 	Attachment,
 	BrokerMessage,
 	ClientMessage,
+	HistoryEntry,
 	Message,
 	MessageControl,
 	MessageReceipt,
@@ -64,6 +65,10 @@ export class IntercomClient extends EventEmitter {
 	private _features = new Set<string>();
 	private pendingSends = new Map<string, { resolve: (r: SendResult) => void; reject: (e: Error) => void }>();
 	private pendingLists = new Map<string, { resolve: (sessions: SessionInfo[]) => void; reject: (e: Error) => void }>();
+	private pendingHistories = new Map<
+		string,
+		{ resolve: (entries: HistoryEntry[]) => void; reject: (e: Error) => void }
+	>();
 	private nextSenderSequence = 1;
 	private disconnecting = false;
 	private disconnectError: Error | null = null;
@@ -85,6 +90,10 @@ export class IntercomClient extends EventEmitter {
 			pending.reject(error);
 		}
 		this.pendingLists.clear();
+		for (const pending of this.pendingHistories.values()) {
+			pending.reject(error);
+		}
+		this.pendingHistories.clear();
 	}
 
 	get sessionId(): string | null {
@@ -373,6 +382,22 @@ export class IntercomClient extends EventEmitter {
 				break;
 			}
 
+			case "history": {
+				const { requestId, entries } = brokerMessage;
+				if (typeof requestId !== "string" || !Array.isArray(entries)) {
+					throw new Error("Invalid history message");
+				}
+
+				const pending = this.pendingHistories.get(requestId);
+				if (!pending) {
+					return;
+				}
+
+				this.pendingHistories.delete(requestId);
+				pending.resolve(entries as HistoryEntry[]);
+				break;
+			}
+
 			case "message": {
 				const { from, message } = brokerMessage;
 				if (!isSessionInfo(from) || !isMessage(message)) {
@@ -602,6 +627,45 @@ export class IntercomClient extends EventEmitter {
 		if (!this.supportsFeature(EXTENSION_BUS_FEATURE)) return;
 		const socket = this.requireActiveSocket();
 		writeMessage(socket, { type: "extension_capabilities_update", extensions: extensions ?? [] });
+	}
+
+	history(options: {
+		limit?: number;
+		since?: number;
+		direction?: "in" | "out" | "both";
+	} = {}): Promise<HistoryEntry[]> {
+		let socket: net.Socket;
+		try {
+			socket = this.requireActiveSocket();
+		} catch (error) {
+			return Promise.reject(toError(error));
+		}
+
+		return new Promise((resolve, reject) => {
+			const requestId = randomUUID();
+			const wrappedResolve = (entries: HistoryEntry[]) => {
+				clearTimeout(timeout);
+				resolve(entries);
+			};
+			const wrappedReject = (error: Error) => {
+				clearTimeout(timeout);
+				reject(error);
+			};
+			const timeout = setTimeout(() => {
+				if (this.pendingHistories.has(requestId)) {
+					this.pendingHistories.delete(requestId);
+					wrappedReject(new Error("History request timeout"));
+				}
+			}, 10000);
+			this.pendingHistories.set(requestId, { resolve: wrappedResolve, reject: wrappedReject });
+			try {
+				writeMessage(socket, { type: "history", requestId, limit: options.limit, since: options.since, direction: options.direction });
+			} catch (error) {
+				clearTimeout(timeout);
+				this.pendingHistories.delete(requestId);
+				reject(toError(error));
+			}
+		});
 	}
 
 	listSessions(options: { timeoutMs?: number } = {}): Promise<SessionInfo[]> {

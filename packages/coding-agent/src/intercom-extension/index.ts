@@ -115,10 +115,14 @@ function toError(error: unknown): Error {
 function formatAttachments(attachments: Attachment[]): string {
 	let text = "";
 	for (const att of attachments) {
+		text += `\n\n---\nAttachment: ${att.name}`;
+		if (att.path) {
+			text += ` (file: ${att.path})`;
+		}
 		if (att.language) {
-			text += `\n\n---\nAttachment: ${att.name}\n~~~${att.language}\n${att.content}\n~~~`;
+			text += `\n~~~${att.language}\n${att.content}\n~~~`;
 		} else {
-			text += `\n\n---\nAttachment: ${att.name}\n${att.content}`;
+			text += `\n${att.content}`;
 		}
 	}
 	return text;
@@ -633,6 +637,7 @@ const INTERCOM_ACTIONS: Array<{ name: string; description: string }> = [
 	{ name: "pending", description: "List unresolved inbound asks" },
 	{ name: "status", description: "Show connection status" },
 	{ name: "cancel", description: "Request cancellation of a sent message" },
+	{ name: "history", description: "Read recently received/sent messages" },
 ];
 const INTERCOM_TARGET_ACTIONS = new Set(["send", "ask", "reply"]);
 
@@ -2346,16 +2351,17 @@ Usage:
   intercom({ action: "cancel", messageId: "..." })                 → Request cancellation of a sent message
   intercom({ action: "reply", message: "..." })                      → Reply to the active/single pending ask
   intercom({ action: "pending" })                                      → List unresolved inbound asks
-  intercom({ action: "status" })                  → Show connection status`,
+  intercom({ action: "status" })                  → Show connection status
+  intercom({ action: "history" })                 → Read recently received/sent messages (async recovery)`,
 			promptSnippet:
 				"Use to coordinate with other local pi sessions: list peers, monitor child sessions, send updates, ask for help, or check intercom connectivity.",
 
 			parameters: Type.Object({
 				action: StringEnum(
-					["list", "list-cwd", "children", "send", "ask", "reply", "pending", "status", "cancel"] as const,
+					["list", "list-cwd", "children", "send", "ask", "reply", "pending", "status", "cancel", "history"] as const,
 					{
 						description:
-							"Action: 'list', 'list-cwd', 'children', 'send', 'ask', 'reply', 'pending', 'status', or 'cancel'",
+							"Action: 'list', 'list-cwd', 'children', 'send', 'ask', 'reply', 'pending', 'status', 'cancel', or 'history'",
 					},
 				),
 				to: Type.Optional(
@@ -2376,6 +2382,12 @@ Usage:
 							name: Type.String(),
 							content: Type.String(),
 							language: Type.Optional(Type.String()),
+							path: Type.Optional(
+								Type.String({
+									description:
+										"Absolute path of a file the receiver should read for full content (long payloads). When set, content holds only a one-line summary — see the Large Payload convention in the pi-intercom skill.",
+								}),
+							),
 						}),
 					),
 				),
@@ -2418,6 +2430,21 @@ Usage:
 						description: "For openProjectPaneIfMissing, focus the new Herdr pane. Defaults to true.",
 					}),
 				),
+				limit: Type.Optional(
+					Type.Number({
+						description: "Max history entries to return (default 20, max 100). Only for action 'history'.",
+					}),
+				),
+				since: Type.Optional(
+					Type.Number({
+						description: "Return only entries at or after this timestamp (epoch ms). Only for action 'history'.",
+					}),
+				),
+				direction: Type.Optional(
+					Type.String({
+						description: "Filter direction: 'in' (received by me, default), 'out' (sent by me), 'both'. Only for action 'history'.",
+					}),
+				),
 			}),
 
 			async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
@@ -2445,6 +2472,9 @@ Usage:
 					cwd,
 					openProjectPaneIfMissing,
 					focus,
+					limit,
+					since,
+					direction,
 				} = params;
 
 				switch (action) {
@@ -2962,6 +2992,42 @@ Usage:
 						} catch (error) {
 							return {
 								content: [{ type: "text", text: `Failed to reply: ${getErrorMessage(error)}` }],
+								details: { error: true },
+							};
+						}
+					}
+
+					case "history": {
+						try {
+							const entries = await connectedClient.history({
+								limit: limit ?? 20,
+								since,
+								direction: direction ?? "in",
+							});
+							if (entries.length === 0) {
+								return {
+									content: [{ type: "text", text: "No recent messages found." }],
+									details: {},
+								};
+							}
+							const now = Date.now();
+							const lines = entries.map(e => {
+								const ts = new Date(e.at).toLocaleTimeString("zh-CN", { hour12: false });
+								const dir = e.from.id === connectedClient.sessionId ? "→" : "←";
+								const peer = e.to.id === connectedClient.sessionId
+									? (e.from.name || e.from.id.slice(0, 8))
+									: (e.to.name || e.to.id.slice(0, 8));
+								const preview = e.message.content.text.replace(/\s+/g, " ").slice(0, 80);
+								const fileHint = e.message.content.attachments?.find(a => a.path)?.path ?? "";
+								return `[${ts}] ${dir} ${peer}${e.queued ? " (queued)" : ""}${fileHint ? ` 📄${fileHint}` : ""}: ${preview}`;
+							});
+							return {
+								content: [{ type: "text", text: `**Recent messages:**\n${lines.join("\n")}` }],
+								details: { count: entries.length },
+							};
+						} catch (error) {
+							return {
+								content: [{ type: "text", text: `Failed to read history: ${getErrorMessage(error)}` }],
 								details: { error: true },
 							};
 						}

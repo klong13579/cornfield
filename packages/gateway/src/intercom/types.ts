@@ -52,6 +52,18 @@ export interface Attachment {
 	name: string;
 	content: string;
 	language?: string;
+	/** Absolute path of a file the receiver should read for full content (long payloads).
+	 *  When set, content holds only a one-line summary — see the Large Payload
+	 *  convention in the pi-intercom skill. */
+	path?: string;
+}
+
+export interface HistoryEntry {
+	from: { id: string; name?: string; cwd: string; runtimeFallbackAlias?: boolean };
+	to: { id: string; name?: string; cwd: string; runtimeFallbackAlias?: boolean };
+	message: Message;
+	at: number;
+	queued: boolean;
 }
 
 export type MessageReceiptStatus =
@@ -110,6 +122,13 @@ export type ClientMessage =
 			contextWindow?: number | null;
 	  }
 	| {
+			type: "history";
+			requestId: string;
+			limit?: number;
+			since?: number;
+			direction?: "in" | "out" | "both";
+	  }
+	| {
 			type: "extension_publish";
 			namespace: string;
 			audience: "owner" | "capable";
@@ -137,6 +156,7 @@ export type BrokerMessage =
 	| { type: "delivery_failed"; messageId: string; reason: string }
 	| { type: "message_receipt"; from: SessionInfo; receipt: MessageReceipt }
 	| { type: "message_control"; from: SessionInfo; control: MessageControl }
+	| { type: "history"; requestId: string; entries: HistoryEntry[] }
 	| { type: "extension_owner"; namespace: string; ownerId?: string; ownerEpoch?: string }
 	| {
 			type: "extension_message";
