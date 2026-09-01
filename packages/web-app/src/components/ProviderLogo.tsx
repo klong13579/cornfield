@@ -29,9 +29,11 @@ function fallbackInitial(provider: string): string {
 /**
  * 按模型 id 前缀推断品牌（网关 provider 下一车各品牌模型，如 narwal-plan 下挂 glm/minimax/qwen/deepseek）。
  * 命中返回 PROVIDER_META 键；未命中返回 null（由调用方落 provider 组 logo）。
+ * 归一：先去 provider 前缀（`narwal-plan/deepseek-v4-flash` → `deepseek-v4-flash`），
+ * 兼容网关/回放会话里的带前缀模型串；裸 id 原样匹配。
  */
 export function brandKeyOfModel(modelId: string): string | null {
-	const id = modelId.toLowerCase();
+	const id = modelId.toLowerCase().replace(/^[^/]+\//, "");
 	if (id.startsWith("qwen")) return "qwen";
 	if (id.startsWith("minimax")) return "minimax";
 	if (id.startsWith("deepseek")) return "deepseek";

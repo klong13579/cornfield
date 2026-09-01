@@ -1,4 +1,5 @@
 import { Orb } from "../components/Orb";
+import { brandKeyOfModel, ProviderLogo } from "../components/ProviderLogo";
 import type { ToolView } from "../state/session-store";
 import { ActivityFold } from "./ActivityFold";
 import { Markdown } from "./Markdown";
@@ -55,9 +56,13 @@ export function AssistantTurn({
 	onFork,
 	className = "",
 }: AssistantTurnProps): React.JSX.Element {
+	// 转录头像：能识别品牌的模型显示品牌 logo，未识别保持 π（应用身份占位）。
+	const brandKey = model ? brandKeyOfModel(model) : null;
 	return (
 		<div className={`msg-row flex gap-3${className ? ` ${className}` : ""}`}>
-			<div className="avatar assistant shrink-0">π</div>
+			<div className="avatar assistant shrink-0">
+				{brandKey ? <ProviderLogo provider={brandKey} modelId={model} size={15} /> : "π"}
+			</div>
 			<div className="min-w-0 flex-1">
 				<div className="mb-1.5 flex items-center gap-2 text-[11px] tracking-[0.02em] text-ink-faint">
 					<span>{model ?? "—"}</span>
