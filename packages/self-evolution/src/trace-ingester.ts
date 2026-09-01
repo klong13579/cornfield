@@ -11,7 +11,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { logger } from "@cornfield/utils";
 import { resolveExternalTraceDir } from "./paths";
-import { parseOmpSessionJsonlToTrace } from "./regression/omp-session-to-trace";
+import { parseSessionJsonlToTrace } from "./regression/session-jsonl-to-trace";
 import type { Episode, SessionTrace } from "./types";
 
 export interface ExternalTraceScanResult {
@@ -108,7 +108,7 @@ export async function parseExternalTraceFile(
 		filesModified: [],
 	};
 
-	const trace = parseOmpSessionJsonlToTrace(text, episode);
+	const trace = parseSessionJsonlToTrace(text, episode);
 	if (!trace) return undefined;
 
 	// Mark as external source

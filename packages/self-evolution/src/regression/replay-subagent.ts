@@ -4,7 +4,7 @@ import regressionReplaySubagentTemplate from "../prompts/regression-replay-subag
 import type { EvolvedSkill, RegressionFixture } from "../types";
 import { applyToolChainCompareToVerdict, compareFixtureToReplayChain } from "./compare-tool-chains";
 import { formatFixtureToolChainSummary } from "./fixture-tool-chain";
-import { extractReplayVerdictFromJsonStream, parseOmpJsonEventStreamToTraceEntries } from "./parse-omp-json-events";
+import { extractReplayVerdictFromJsonStream, parseJsonEventStreamToTraceEntries } from "./parse-json-events";
 import { type FixtureReplayResult, fixtureLogText } from "./replay";
 import { fixtureReplayResultFromInterpretation, interpretSubagentReplayOutcome } from "./replay-contract";
 import type { RegressionReplayRuntime } from "./replay-runtime";
@@ -56,7 +56,7 @@ async function runSubagentReplay(
 	const stdout = await readChildOutput(proc.stdout);
 	const stderr = await readChildOutput(proc.stderr);
 	const combined = `${stdout}\n${stderr}`;
-	const replayEntries = parseOmpJsonEventStreamToTraceEntries(stdout);
+	const replayEntries = parseJsonEventStreamToTraceEntries(stdout);
 	const chainCompare = replayEntries.length > 0 ? compareFixtureToReplayChain(fixture, replayEntries) : undefined;
 
 	const jsonVerdict = extractReplayVerdictFromJsonStream(stdout);

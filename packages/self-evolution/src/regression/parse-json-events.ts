@@ -18,7 +18,7 @@ function extractAssistantText(content: unknown): string {
 	return parts.join("\n");
 }
 
-export function parseOmpJsonEventStreamToTraceEntries(stdout: string): TraceEntry[] {
+export function parseJsonEventStreamToTraceEntries(stdout: string): TraceEntry[] {
 	const entries: TraceEntry[] = [];
 	let ts = 0;
 

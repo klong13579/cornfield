@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { parseOmpSessionJsonlToTrace } from "../src/regression/omp-session-to-trace";
+import { parseSessionJsonlToTrace } from "../src/regression/session-jsonl-to-trace";
 import type { Episode } from "../src/types";
 
-describe("parseOmpSessionJsonlToTrace", () => {
+describe("parseSessionJsonlToTrace", () => {
 	test("reconstructs tool calls and errors from session messages", () => {
 		const episode: Episode = {
 			id: "ep-1",
@@ -52,7 +52,7 @@ describe("parseOmpSessionJsonlToTrace", () => {
 			}),
 		].join("\n");
 
-		const trace = parseOmpSessionJsonlToTrace(jsonl, episode);
+		const trace = parseSessionJsonlToTrace(jsonl, episode);
 		expect(trace).toBeDefined();
 		expect(trace!.userPrompt).toBe("fix the bug");
 		expect(trace!.errorCount).toBeGreaterThanOrEqual(1);

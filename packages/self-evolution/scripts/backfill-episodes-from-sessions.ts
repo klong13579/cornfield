@@ -15,7 +15,7 @@ import { resolveEvolutionProjectionDir } from "../src/paths";
 import { projectLearnings } from "../src/projection/learnings";
 import { projectSystemDiagnosis } from "../src/projection/system-diagnosis";
 import { buildRegressionFixtureFromTrace } from "../src/regression/fixture-from-trace";
-import { parseOmpSessionJsonlToTrace } from "../src/regression/omp-session-to-trace";
+import { parseSessionJsonlToTrace } from "../src/regression/session-jsonl-to-trace";
 import { closeEvolutionDb, getEvolutionDb, initSchema } from "../src/storage/db";
 import { SqliteEpisodeStore } from "../src/storage/episodes";
 import { SqliteRegressionFixtureStore } from "../src/storage/regression-fixtures";
@@ -191,7 +191,7 @@ export async function backfillEpisodesFromSessions(opts: {
 			filesModified: [],
 		};
 
-		const trace = parseOmpSessionJsonlToTrace(text, stub);
+		const trace = parseSessionJsonlToTrace(text, stub);
 		if (!trace) {
 			result.parseSkipped++;
 			continue;

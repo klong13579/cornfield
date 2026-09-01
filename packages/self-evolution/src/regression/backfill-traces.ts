@@ -7,7 +7,7 @@ import { logger } from "@cornfield/utils";
 import type { EpisodeStore, RegressionFixtureStore, SessionTraceStore } from "../storage/types";
 import type { Episode, SessionTrace } from "../types";
 import { buildRegressionFixtureFromTrace } from "./fixture-from-trace";
-import { parseOmpSessionJsonlToTrace } from "./omp-session-to-trace";
+import { parseSessionJsonlToTrace } from "./session-jsonl-to-trace";
 
 export interface BackfillSessionTracesResult {
 	scanned: number;
@@ -73,7 +73,7 @@ export async function hydrateSessionTraceFromJsonlIfRicher(
 	if (!jsonlPath) return trace;
 	try {
 		const text = await Bun.file(jsonlPath).text();
-		const parsed = parseOmpSessionJsonlToTrace(text, episode);
+		const parsed = parseSessionJsonlToTrace(text, episode);
 		if (parsed && shouldUpgradeTraceFromJsonl(trace, parsed)) {
 			return { ...parsed, backgroundModel: trace.backgroundModel ?? parsed.backgroundModel };
 		}
@@ -129,7 +129,7 @@ export async function backfillSessionTracesFromEpisodes(opts: {
 		if (jsonlPath) {
 			try {
 				const text = await Bun.file(jsonlPath).text();
-				parsedFromJsonl = parseOmpSessionJsonlToTrace(text, episode);
+				parsedFromJsonl = parseSessionJsonlToTrace(text, episode);
 			} catch (err) {
 				logger.debug("Backfill: failed to parse session jsonl", { jsonlPath, error: String(err) });
 			}

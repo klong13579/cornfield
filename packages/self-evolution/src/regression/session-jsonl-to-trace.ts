@@ -63,7 +63,7 @@ function extractToolCalls(content: unknown): Array<{ name: string; args?: unknow
 	return calls;
 }
 
-export function parseOmpSessionJsonlToTrace(jsonlText: string, episode: Episode): SessionTrace | undefined {
+export function parseSessionJsonlToTrace(jsonlText: string, episode: Episode): SessionTrace | undefined {
 	const lines = jsonlText.split("\n").filter(l => l.trim().length > 0);
 	let header: SessionHeader | undefined;
 	const entries: TraceEntry[] = [];

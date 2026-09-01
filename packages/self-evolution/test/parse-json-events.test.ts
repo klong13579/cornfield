@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
 	extractReplayVerdictFromJsonStream,
-	parseOmpJsonEventStreamToTraceEntries,
-} from "../src/regression/parse-omp-json-events";
+	parseJsonEventStreamToTraceEntries,
+} from "../src/regression/parse-json-events";
 
-describe("parseOmpJsonEventStreamToTraceEntries", () => {
+describe("parseJsonEventStreamToTraceEntries", () => {
 	test("maps tool_execution events to trace entries", () => {
 		const stdout = [
 			JSON.stringify({
@@ -22,7 +22,7 @@ describe("parseOmpJsonEventStreamToTraceEntries", () => {
 			}),
 		].join("\n");
 
-		const entries = parseOmpJsonEventStreamToTraceEntries(stdout);
+		const entries = parseJsonEventStreamToTraceEntries(stdout);
 		expect(entries).toHaveLength(2);
 		expect(entries[0]?.type).toBe("tool_call");
 		expect(entries[0]?.toolName).toBe("read");
