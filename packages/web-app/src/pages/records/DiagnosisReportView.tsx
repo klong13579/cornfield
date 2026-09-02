@@ -207,6 +207,7 @@ function StructuredReport({ summary, markdown }: { summary: DiagnosisSummaryDto;
 								expanded={expanded}
 								onToggle={() => toggleDim(key)}
 								sessionId={summary.sessionId}
+								sessionFile={summary.sessionFile}
 							/>
 						);
 					})}
@@ -270,6 +271,7 @@ function DimCard({
 	expanded,
 	onToggle,
 	sessionId,
+	sessionFile,
 }: {
 	label: string;
 	state: DimState;
@@ -281,6 +283,7 @@ function DimCard({
 	expanded: boolean;
 	onToggle: () => void;
 	sessionId?: string;
+	sessionFile?: string;
 }): React.JSX.Element {
 	const navigate = useNavigate();
 	const colorCls = state === "ok" ? "text-success" : state === "warn" ? "text-warning" : "text-danger";
@@ -346,7 +349,7 @@ function DimCard({
 										onClick={e => {
 											e.stopPropagation();
 											if (sessionId) {
-												window.location.hash = `#/records/${sessionId}`;
+												navigate(`/records/${sessionId}`, { state: { sessionFile, initialTurn: ev.turn } });
 											}
 										}}
 									>
