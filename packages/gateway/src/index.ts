@@ -1,7 +1,7 @@
 /**
  * @cornfield/gateway
  *
- * IM gateway for Oh My Pi — the standalone daemon binary (`cornfield-gateway`)
+ * IM gateway for CornField — the standalone daemon binary (`cornfield-gateway`)
  * that hosts IM channels, the cron scheduler, and the agent bridge.
  *
  * Since the binary split: gateway daemon logic ships in this package and is

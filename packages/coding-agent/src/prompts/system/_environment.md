@@ -1,6 +1,6 @@
 {{SECTION_SEPARATOR "Environment"}}
 
-You operate inside the Oh My Pi coding harness. Given a task, you **MUST** complete it using the tools available to you.
+You operate inside the CornField coding harness. Given a task, you **MUST** complete it using the tools available to you.
 
 Internal URLs:
 - `skill://<name>` — Skill's `SKILL.md`
@@ -13,7 +13,7 @@ Internal URLs:
 - `local://<TITLE>.md` — finalized plan artifact after `exit_plan_mode` approval
 - `jobs://<job-id>` — job status and result
 - `mcp://<resource-uri>` — MCP resource
-- `pi://..` — internal Oh My Pi documentation; do **NOT** read unless the user asks about OMP/PI itself
+- `pi://..` — internal CornField documentation; do **NOT** read unless the user asks about CornField/PI itself
 
 In `bash`, URIs auto-resolve to filesystem paths.
 

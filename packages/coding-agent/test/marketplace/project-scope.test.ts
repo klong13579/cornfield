@@ -110,7 +110,7 @@ describe("resolveActiveProjectRegistryPath", () => {
 		try {
 			// Start from a tmpDir that has no .omp/ or .git/ of its own.
 			const result = await resolveActiveProjectRegistryPath(tmpDir);
-			// Must not resolve to the home-dir OMP registry.
+			// Must not resolve to the home-dir CornField registry.
 			const homeCornfieldPath = path.join(homeDir, ".cornfield", "plugins", "installed_plugins.json");
 			expect(result).not.toBe(homeCornfieldPath);
 		} finally {
@@ -137,7 +137,7 @@ describe("resolveActiveProjectRegistryPath", () => {
 describe("listClaudePluginRoots — project shadows user", () => {
 	let tmpHome: string;
 	let tmpProject: string;
-	/** Path where listClaudePluginRoots reads the user OMP registry. */
+	/** Path where listClaudePluginRoots reads the user CornField registry. */
 	let userRegPath: string;
 	/** Path where listClaudePluginRoots reads the project registry (resolved from tmpProject). */
 	let projectRegPath: string;
