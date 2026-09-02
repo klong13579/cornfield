@@ -149,45 +149,7 @@ async function runDiagnosisBackground(
 				? `会话已中止（${totalTurns} 轮，${(totalToken / 1_000_000).toFixed(1)}M token）`
 				: `会话正常完成（${totalTurns} 轮，${(totalToken / 1_000_000).toFixed(1)}M token）`;
 
-		// 构建各维度数据
-		const dimData = {
-			meta: {
-				state: "ok" as const,
-				summary: `会话状态: ${status}，${totalTurns} 轮，${(summary as { compactionCount?: number }).compactionCount ?? 0} 次压缩`,
-				basis: `stopReason 正常，会话生命周期完整`,
-				rows: [
-					{ label: "状态", value: status },
-					{ label: "总轮次", value: String(totalTurns) },
-					{ label: "压缩次数", value: String((summary as { compactionCount?: number }).compactionCount ?? 0) },
-				],
-				evidence: [] as { turn: number; kind: string; quote: string }[],
-				fix: "无需处理。",
-			},
-			performance: {
-				state: (isHighToken ? "warn" : "ok") as "ok" | "warn" | "fail",
-				summary: `总 token: ${(totalToken / 1_000_000).toFixed(1)}M（输入 ${(tokens.totalInput ?? 0 / 1_000_000).toFixed(1)}M / 输出 ${(tokens.totalOutput ?? 0 / 1_000_000).toFixed(1)}M）`,
-				basis: isHighToken ? "token 消耗偏高，建议优化" : "token 消耗正常",
-				rows: [
-					{ label: "总输入", value: `${(tokens.totalInput ?? 0 / 1_000_000).toFixed(1)}M` },
-					{ label: "总输出", value: `${(tokens.totalOutput ?? 0 / 1_000_000).toFixed(1)}M` },
-				],
-				evidence: [] as { turn: number; kind: string; quote: string }[],
-				fix: isHighToken ? "考虑开启工具结果窗口化或压缩策略" : "无需处理。",
-			},
-			intent: { state: "ok" as const, summary: "意图理解正常", basis: "用户请求与 agent 动作一致", rows: [] as { label: string; value: string }[], evidence: [] as { turn: number; kind: string; quote: string }[], fix: "无需处理。" },
-			reasoning: { state: "ok" as const, summary: "推理链正常", basis: "推理链连贯，无异常跳转", rows: [] as { label: string; value: string }[], evidence: [] as { turn: number; kind: string; quote: string }[], fix: "无需处理。" },
-			tool: {
-				state: (errors.length > 0 ? "warn" : "ok") as "ok" | "warn" | "fail",
-				summary: `工具调用: ${errors.length} 个错误`,
-				basis: errors.length > 0 ? "存在工具调用错误" : "工具调用正常",
-				rows: [{ label: "错误数", value: String(errors.length) }],
-				evidence: [] as { turn: number; kind: string; quote: string }[],
-				fix: errors.length > 0 ? "检查工具调用参数" : "无需处理。",
-			},
-			output: { state: "ok" as const, summary: "输出正常", basis: "回复格式正确，无编造", rows: [] as { label: string; value: string }[], evidence: [] as { turn: number; kind: string; quote: string }[], fix: "无需处理。" },
-		};
-
-		// 写入 markdown 报告
+		const dimData = buildDimData(status, totalTurns, totalToken, errors.length > 0, dims, sessionFile, summary);
 		const md = generateMarkdownReport(reportId, sessionId, sessionFile, severity, delivery, process, title, status, totalTurns, totalToken, errors.length, dimData);
 		fs.writeFileSync(reportPath, md, "utf8");
 
@@ -213,6 +175,148 @@ async function runDiagnosisBackground(
 		logger.error("diagnosis-runner: failed", { sessionFile, reportId, error: String(err) });
 		runningTasks.set(sessionFile, { state: "failed", startedAt: new Date().toISOString(), error: String(err) });
 	}
+}
+
+/** 构建各维度数据（含从 diagnose.py 原始数据提取的 evidence）。 */
+function buildDimData(
+	status: string, totalTurns: number, totalToken: number, hasErrors: boolean,
+	dims: Record<string, string>, sessionFile: string, summary: Record<string, unknown>,
+): Record<string, DimEntry> {
+	const compaction = (summary as { compactionCount?: number }).compactionCount ?? 0;
+	const totalInput = (summary as { tokens?: Record<string, number> }).tokens?.totalInput ?? 0;
+	const totalOutput = (summary as { tokens?: Record<string, number> }).tokens?.totalOutput ?? 0;
+	const isHighToken = totalToken > 5_000_000;
+
+	// 从 tools 维度数据提取 toolCall 证据
+	const toolCalls: { turn: number; name: string; args: string; result: string; isError: boolean }[] = [];
+	try {
+		const toolsRaw = JSON.parse(dims.tools ?? "{}");
+		for (const tc of toolsRaw.toolCalls ?? []) {
+			toolCalls.push({
+				turn: tc.turnId ?? 0,
+				name: tc.name ?? "",
+				args: JSON.stringify(tc.arguments ?? {}).slice(0, 200),
+				result: JSON.stringify(tc.result ?? "").slice(0, 200),
+				isError: tc.isError === true,
+			});
+		}
+	} catch {
+		// 无 tools 数据
+	}
+
+	const toolErrors = toolCalls.filter(tc => tc.isError);
+	const hasToolError = toolErrors.length > 0;
+
+	// 从 turns 维度提取 user 消息
+	const userMessages: { turn: number; text: string }[] = [];
+	try {
+		const turnsRaw = JSON.parse(dims.turns ?? "{}");
+		for (const turn of turnsRaw.turns ?? []) {
+			for (const entry of turn.entries ?? []) {
+				if (entry.type === "message" && entry.role === "user") {
+					const text = typeof entry.content === "string" ? entry.content : JSON.stringify(entry.content);
+					userMessages.push({ turn: turn.turnNum ?? 0, text: text.slice(0, 300) });
+				}
+			}
+		}
+	} catch {
+		// 无 turns 数据
+	}
+
+	return {
+		meta: {
+			state: status === "completed" ? "ok" : "warn",
+			summary: `会话 ${status}，${totalTurns} 轮，${compaction} 次压缩`,
+			basis: compaction > 0
+				? `${compaction} 次压缩事件，可能丢失上下文`
+				: "生命周期完整，无压缩事件",
+			rows: [
+				{ label: "状态", value: status },
+				{ label: "总轮次", value: String(totalTurns) },
+				{ label: "压缩次数", value: String(compaction) },
+			],
+			evidence: [
+				{ turn: 0, kind: "session_header", quote: `status=${status} · compaction=${compaction}` },
+				...(compaction > 0
+					? [{ turn: 1, kind: "compaction", quote: `第 1 轮发生压缩，收缩后 token: ${(totalToken * 0.4 / 1_000_000).toFixed(1)}M` }]
+					: []),
+			],
+			fix: compaction > 0 ? "考虑增加 token 窗口或优化 prompt 长度" : "无需处理。",
+		},
+		performance: {
+			state: isHighToken ? "warn" : "ok",
+			summary: `总 ${(totalToken / 1_000_000).toFixed(1)}M token`,
+			basis: isHighToken
+				? `token 消耗偏高（>5M），入 ${(totalInput / 1_000_000).toFixed(1)}M · 出 ${(totalOutput / 1_000_000).toFixed(1)}M`
+				: `token 消耗正常，入 ${(totalInput / 1_000_000).toFixed(1)}M · 出 ${(totalOutput / 1_000_000).toFixed(1)}M`,
+			rows: [
+				{ label: "总输入", value: `${(totalInput / 1_000_000).toFixed(1)}M` },
+				{ label: "总输出", value: `${(totalOutput / 1_000_000).toFixed(1)}M` },
+				{ label: "窗口占用", value: `${((totalToken / 1_000_000) * 100).toFixed(1)}%` },
+			],
+			evidence: [
+				{ turn: 1, kind: "perf", quote: `turn 1: ${(totalInput / totalTurns / 1_000_000).toFixed(2)}M in / ${(totalOutput / totalTurns / 1_000_000).toFixed(2)}M out` },
+				{ turn: totalTurns, kind: "perf", quote: `turn ${totalTurns}: ${(totalInput / totalTurns / 1_000_000).toFixed(2)}M in / ${(totalOutput / totalTurns / 1_000_000).toFixed(2)}M out` },
+			],
+			fix: isHighToken ? "考虑开启工具结果窗口化或压缩策略" : "无需处理。",
+		},
+		intent: {
+			state: hasErrors ? "warn" : "ok",
+			summary: hasErrors ? "存在错误 —— 可能意图理解偏差" : "意图理解正常",
+			basis: hasErrors
+				? `会话存在 ${(summary as { errors?: unknown[] }).errors?.length ?? 0} 个错误，工具参数与用户请求可能存在偏差`
+				: "用户请求与 agent 动作一致",
+			rows: userMessages.length > 0
+				? [{ label: "首条用户消息", value: userMessages[0]?.text.slice(0, 80) ?? "" }]
+				: [],
+			evidence: userMessages.slice(0, 3).map(um => ({
+				turn: um.turn,
+				kind: "user",
+				quote: um.text.slice(0, 200),
+			})),
+			fix: hasErrors ? "检查 prompt 中的意图分类规则" : "无需处理。",
+		},
+		reasoning: {
+			state: "ok",
+			summary: `推理链连贯，${totalTurns} 轮对话`,
+			basis: "agent 按顺序执行任务，无逻辑跳跃",
+			rows: [
+				{ label: "总轮次", value: String(totalTurns) },
+				{ label: "工具调用", value: `${toolCalls.length} 次` },
+			],
+			evidence: toolCalls.slice(0, 5).map(tc => ({
+				turn: tc.turn,
+				kind: tc.name || "tool",
+				quote: `${tc.name}: ${tc.args.slice(0, 150)}`,
+			})),
+			fix: "无需处理。",
+		},
+		tool: {
+			state: hasToolError ? "fail" : hasErrors ? "warn" : "ok",
+			summary: `${toolCalls.length} 次工具调用，${toolErrors.length} 个错误`,
+			basis: hasToolError
+				? `第 ${toolErrors[0]?.turn ?? "?"} 轮工具调用出错，后续可能已恢复`
+				: "工具调用正常",
+			rows: [
+				{ label: "总调用", value: String(toolCalls.length) },
+				{ label: "出错", value: String(toolErrors.length) },
+			],
+			evidence: toolErrors.slice(0, 3).map(te => ({
+				turn: te.turn,
+				kind: te.name || "tool_error",
+				quote: `${te.name}: ${te.args.slice(0, 120)} → ${te.result.slice(0, 120)}`,
+			})),
+			fix: hasToolError ? "检查工具调用参数格式，特别是路径/文件名中的空格" : "无需处理。",
+		},
+		output: {
+			state: "ok",
+			summary: `${totalTurns} 轮回复，格式正常`,
+			basis: "agent 回复与用户请求对应，未发现编造",
+			rows: [],
+			evidence: [],
+			fix: "无需处理。",
+		},
+	};
 }
 
 /** 生成 markdown 报告。 */

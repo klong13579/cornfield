@@ -303,9 +303,13 @@ function DimCard({
 									<span className="shrink-0 rounded bg-accent-dim px-1.5 py-0.5 font-mono text-[10px] text-ink-muted">
 										Turn {ev.turn}
 									</span>
-									<span className="shrink-0 text-[10px] text-ink-faint">{ev.kind}</span>
-									<span className="min-w-0 truncate text-ink-muted">{ev.quote}</span>
-								</div>
+										<span className="shrink-0 rounded bg-accent-dim px-1.5 py-0.5 font-mono text-[10px] text-ink-faint">
+											{ev.kind}
+										</span>
+										<div className="min-w-0 flex-1">
+											<pre className="m-0 whitespace-pre-wrap break-all font-mono text-[11px] leading-relaxed text-ink-muted">{ev.quote}</pre>
+										</div>
+									</div>
 							))}
 						</div>
 					)}
