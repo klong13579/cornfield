@@ -144,25 +144,62 @@ function buildAnthropicReferenceMap(
 	return merged;
 }
 
+const VARIANT_SUFFIXES = [
+	"flash",
+	"free",
+	"turbo",
+	"thinking",
+	"vision",
+	"nvfp4",
+	"fp8",
+	"fp4",
+	"bf16",
+	"int8",
+	"int4",
+	"exacto",
+	"nitro",
+	"original",
+	"optimized",
+] as const;
+
+function findParentReference<TApi extends Api>(
+	modelId: string,
+	references: Map<string, Model<TApi>> | undefined,
+): Model<TApi> | undefined {
+	if (!references) return undefined;
+	// Try stripping each variant suffix, longest first.
+	for (const suffix of VARIANT_SUFFIXES) {
+		const suffixPattern = `-${suffix}`;
+		if (modelId.endsWith(suffixPattern)) {
+			const parentId = modelId.slice(0, -suffixPattern.length);
+			const parent = references.get(parentId);
+			if (parent) return parent;
+		}
+	}
+	return undefined;
+}
+
 function mapWithBundledReference<TApi extends Api>(
 	entry: OpenAICompatibleModelRecord,
 	defaults: Model<TApi>,
 	reference: Model<TApi> | undefined,
+	references?: Map<string, Model<TApi>>,
 ): Model<TApi> {
 	const name = toModelName(entry.name, reference?.name ?? defaults.name);
-	if (!reference) {
+	const resolvedRef = reference ?? findParentReference(defaults.id, references);
+	if (!resolvedRef) {
 		return {
 			...defaults,
 			name,
 		};
 	}
 	return {
-		...reference,
+		...resolvedRef,
 		id: defaults.id,
 		name,
 		baseUrl: defaults.baseUrl,
-		contextWindow: toPositiveNumber(entry.context_length, reference.contextWindow),
-		maxTokens: toPositiveNumber(entry.max_completion_tokens, reference.maxTokens),
+		contextWindow: toPositiveNumber(entry.context_length, resolvedRef.contextWindow),
+		maxTokens: toPositiveNumber(entry.max_completion_tokens, resolvedRef.maxTokens),
 	};
 }
 
@@ -384,7 +421,7 @@ function createSimpleOpenAICompletionsOptions(
 					apiKey,
 					mapModel: (entry, defaults) => {
 						const reference = references.get(defaults.id);
-						return mapWithBundledReference(entry, defaults, reference);
+						return mapWithBundledReference(entry, defaults, reference, references);
 					},
 				}),
 		}),
@@ -411,7 +448,7 @@ function createSimpleAnthropicProviderOptions(
 					headers: buildAnthropicDiscoveryHeaders(apiKey),
 					mapModel: (entry, defaults) => {
 						const reference = references.get(defaults.id);
-						const model = mapWithBundledReference(entry, defaults, reference);
+						const model = mapWithBundledReference(entry, defaults, reference, references);
 						return {
 							...model,
 							name: toModelName(entry.display_name, model.name),
@@ -448,7 +485,7 @@ export function openaiModelManagerOptions(config?: OpenAIModelManagerConfig): Mo
 					filterModel: (_entry, model) => isLikelyOpenAIResponsesModelId(model.id, references),
 					mapModel: (entry, defaults) => {
 						const reference = references.get(defaults.id);
-						return mapWithBundledReference(entry, defaults, reference);
+						return mapWithBundledReference(entry, defaults, reference, references);
 					},
 				}),
 		}),
@@ -613,7 +650,7 @@ export function fireworksModelManagerOptions(
 					mapModel: (entry, defaults) => {
 						const publicModelId = toFireworksPublicModelId(defaults.id);
 						const reference = modelsDevReferences.get(publicModelId) ?? bundledReferences(publicModelId);
-						const model = mapWithBundledReference(entry, defaults, reference);
+						const model = mapWithBundledReference(entry, defaults, reference, modelsDevReferences);
 						return {
 							...model,
 							id: publicModelId,
@@ -722,7 +759,7 @@ export function ollamaModelManagerOptions(config?: OllamaModelManagerConfig): Mo
 							maxTokens: OLLAMA_DEFAULT_MAX_TOKENS,
 						};
 					}
-					return mapWithBundledReference(entry, defaults, reference);
+					return mapWithBundledReference(entry, defaults, reference, references);
 				},
 			});
 			if (openAiCompatible && openAiCompatible.length > 0) {
@@ -977,7 +1014,7 @@ export function alibabaCodingPlanModelManagerOptions(
 				apiKey,
 				mapModel: (entry, defaults) => {
 					const reference = references.get(defaults.id);
-					const model = mapWithBundledReference(entry, defaults, reference);
+					const model = mapWithBundledReference(entry, defaults, reference, references);
 					Object.assign(model, {
 						category: inferProbeCategory(model.id),
 						name: `${emojiForCategory(inferProbeCategory(model.id))} ${model.name}`,
@@ -1106,7 +1143,7 @@ export function bailianCodingPlanModelManagerOptions(
 				apiKey,
 				mapModel: (entry, defaults) => {
 					const reference = references.get(defaults.id);
-					return mapWithBundledReference(entry, defaults, reference);
+					return mapWithBundledReference(entry, defaults, reference, references);
 				},
 			}),
 	};
@@ -1145,7 +1182,7 @@ export function narwalPlanModelManagerOptions(
 				apiKey,
 				mapModel: (entry, defaults) => {
 					const reference = references.get(defaults.id);
-					const model = mapWithBundledReference(entry, defaults, reference);
+					const model = mapWithBundledReference(entry, defaults, reference, references);
 					Object.assign(model, { category: inferProbeCategory(model.id) });
 					return model;
 				},
@@ -1283,7 +1320,7 @@ export function lmStudioModelManagerOptions(
 				apiKey,
 				mapModel: (entry, defaults) => {
 					const reference = references.get(defaults.id);
-					return mapWithBundledReference(entry, defaults, reference);
+					return mapWithBundledReference(entry, defaults, reference, references);
 				},
 			}),
 	};
@@ -1364,7 +1401,7 @@ export function veniceModelManagerOptions(
 				apiKey,
 				mapModel: (entry, defaults) => {
 					const reference = references.get(defaults.id);
-					const model = mapWithBundledReference(entry, defaults, reference);
+					const model = mapWithBundledReference(entry, defaults, reference, references);
 					return {
 						...model,
 						compat: { ...model.compat, supportsUsageInStreaming: false },
@@ -1415,7 +1452,7 @@ export function moonshotModelManagerOptions(
 					apiKey,
 					mapModel: (entry, defaults) => {
 						const reference = references.get(defaults.id);
-						const model = mapWithBundledReference(entry, defaults, reference);
+						const model = mapWithBundledReference(entry, defaults, reference, references);
 						const id = model.id.toLowerCase();
 						const isThinking = id.includes("thinking");
 						const isVision = id.includes("vision") || id.includes("vl") || id.includes("k2.5");
@@ -1516,7 +1553,7 @@ export function xiaomiModelManagerOptions(
 					filterModel: (_entry, model) => !model.id.includes("-tts"),
 					mapModel: (entry, defaults) => {
 						const reference = references.get(defaults.id);
-						const model = mapWithBundledReference(entry, defaults, reference);
+						const model = mapWithBundledReference(entry, defaults, reference, references);
 						return {
 							...model,
 							name: toModelName(entry.display_name, model.name),
@@ -1553,7 +1590,7 @@ export function litellmModelManagerOptions(
 				apiKey,
 				mapModel: (entry, defaults) => {
 					const reference = references.get(defaults.id);
-					return mapWithBundledReference(entry, defaults, reference);
+					return mapWithBundledReference(entry, defaults, reference, references);
 				},
 			}),
 	};
@@ -1582,7 +1619,7 @@ export function vllmModelManagerOptions(config?: VllmModelManagerConfig): ModelM
 				apiKey,
 				mapModel: (entry, defaults) => {
 					const reference = references.get(defaults.id);
-					return mapWithBundledReference(entry, defaults, reference);
+					return mapWithBundledReference(entry, defaults, reference, references);
 				},
 			}),
 	};

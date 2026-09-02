@@ -278,11 +278,21 @@ function preferDiscoveryName(discoveryName: string, fallbackName: string, modelI
 	return normalizedDiscoveryName;
 }
 
+const UNK_CONTEXT_WINDOW = 222_222;
+const UNK_MAX_TOKENS = 8_888;
+
 function preferDiscoveryLimit(discoveryLimit: number, fallbackLimit: number): number {
 	if (!Number.isFinite(discoveryLimit) || discoveryLimit <= 0) {
 		return fallbackLimit;
 	}
 	if (discoveryLimit === 4096 && fallbackLimit > discoveryLimit) {
+		return fallbackLimit;
+	}
+	// Respect sentinel values used as "unknown" placeholders by model discovery
+	// when the provider's API doesn't return the corresponding field. Fall back
+	// to the existing model's value so the placeholder doesn't override the
+	// correct value from static seeds or models.dev references.
+	if (discoveryLimit === UNK_CONTEXT_WINDOW || discoveryLimit === UNK_MAX_TOKENS) {
 		return fallbackLimit;
 	}
 	return discoveryLimit;
