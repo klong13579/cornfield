@@ -253,7 +253,7 @@ export function PlaybackView(): React.JSX.Element {
 															</span>
 														</button>
 														{tool.argsText && (
-															<div className="args">
+															<div className={`args ${tool.state === "fail" ? "text-danger" : ""}`}>
 																{open
 																	? tool.argsText
 																	: tool.argsText.length > 120
@@ -261,13 +261,13 @@ export function PlaybackView(): React.JSX.Element {
 																		: tool.argsText}
 															</div>
 														)}
-														{tool.result && (
-															<div className="result">
-																{open
-																	? tool.result
-																	: tool.result.length > 200
-																		? `${tool.result.slice(0, 200)}…`
-																		: tool.result}
+																		{tool.result && (
+																		<div className={`result ${tool.state === "fail" ? "text-danger" : ""}`}>
+																			{open
+																				? tool.result
+																				: tool.result.length > 200
+																					? `${tool.result.slice(0, 200)}…`
+																					: tool.result}
 															</div>
 														)}
 													</div>
