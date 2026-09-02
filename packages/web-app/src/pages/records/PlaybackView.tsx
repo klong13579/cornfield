@@ -87,6 +87,14 @@ export function PlaybackView(): React.JSX.Element {
 		};
 	}, [id, store, sessionFile]);
 
+	// Seek to initial turn when navigating from diagnosis report
+	useEffect(() => {
+		const initialTurn = (location.state as { initialTurn?: number } | null)?.initialTurn;
+		if (initialTurn !== undefined && initialTurn !== null && timeline) {
+			playback.seek(initialTurn);
+		}
+	}, [timeline, location.state]);
+
 	const playback = usePlayback(timeline?.length ?? 0);
 	const revealed = useMemo(() => (timeline ? timeline.slice(0, playback.step) : []), [timeline, playback.step]);
 	const currentIndex = playback.step - 1;

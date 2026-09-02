@@ -1,6 +1,6 @@
-import { ChevronDown, ChevronRight, ClipboardList } from "lucide-react";
+import { ChevronDown, ChevronRight, ClipboardList, FileText, MessageSquare } from "lucide-react";
 import { useEffect, useState } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import type { DiagnosisSummaryDto } from "../../lib/pi-client-api";
 import { useSessionStore } from "../../state/session-store";
@@ -102,7 +102,7 @@ export function DiagnosisReportView(): React.JSX.Element {
 
 	// Has structured summary → render structured content
 	if (summary?.hasSummary !== false || summary) {
-		return <StructuredReport summary={summary!} />;
+		return <StructuredReport summary={summary!} markdown={markdown} />;
 	}
 
 	// Fallback: render raw markdown
@@ -127,8 +127,10 @@ export function DiagnosisReportView(): React.JSX.Element {
 
 /* ── Structured report rendering ─────────────────────────────────────── */
 
-function StructuredReport({ summary }: { summary: DiagnosisSummaryDto }): React.JSX.Element {
+function StructuredReport({ summary, markdown }: { summary: DiagnosisSummaryDto; markdown?: string }): React.JSX.Element {
 	const [expandedDims, setExpandedDims] = useState<Set<string>>(new Set());
+	const [showFullReport, setShowFullReport] = useState(false);
+	const navigate = useNavigate();
 
 	const toggleDim = (dim: string) => {
 		setExpandedDims(prev => {
@@ -204,10 +206,44 @@ function StructuredReport({ summary }: { summary: DiagnosisSummaryDto }): React.
 								fix={dim.fix}
 								expanded={expanded}
 								onToggle={() => toggleDim(key)}
+								sessionId={summary.sessionId}
 							/>
 						);
 					})}
 				</div>
+
+				{/* Full report + session log links */}
+				<div className="mt-6 flex flex-wrap gap-3">
+					<button
+						type="button"
+						className="btn flex items-center gap-1.5 text-[12px] px-4 py-2"
+						onClick={() => setShowFullReport(o => !o)}
+					>
+						<FileText size={13} strokeWidth={1.5} />
+						{showFullReport ? "收起完整报告" : "查看完整报告"}
+					</button>
+					{summary.sessionFile && (
+						<Link
+							to={`/records/${summary.sessionId}`}
+							state={{ sessionFile: summary.sessionFile }}
+							className="btn flex items-center gap-1.5 text-[12px] px-4 py-2 no-underline"
+						>
+							<MessageSquare size={13} strokeWidth={1.5} />
+							查看会话日志
+						</Link>
+					)}
+				</div>
+
+				{/* Full markdown report */}
+				{showFullReport && markdown && (
+					<div className="mt-4 rounded-lg border border-hairline bg-surface p-6">
+						<div className="prose prose-sm max-w-none text-ink">
+							{markdown.split("\n").map((line, i) => (
+								<p key={i} className="text-[12px] leading-relaxed">{line || "\u00A0"}</p>
+							))}
+						</div>
+					</div>
+				)}
 			</div>
 		</div>
 	);
@@ -233,6 +269,7 @@ function DimCard({
 	fix,
 	expanded,
 	onToggle,
+	sessionId,
 }: {
 	label: string;
 	state: DimState;
@@ -243,7 +280,9 @@ function DimCard({
 	fix?: string;
 	expanded: boolean;
 	onToggle: () => void;
+	sessionId?: string;
 }): React.JSX.Element {
+	const navigate = useNavigate();
 	const colorCls = state === "ok" ? "text-success" : state === "warn" ? "text-warning" : "text-danger";
 	const mark = state === "ok" ? "✓" : state === "warn" ? "△" : "✕";
 	const borderCls = state === "fail" ? "border-danger/40" : state === "warn" ? "border-warning/40" : "border-hairline";
@@ -300,9 +339,19 @@ function DimCard({
 									key={i}
 									className="flex items-center gap-2 rounded-md bg-surface-2 px-3 py-1.5 text-[11.5px]"
 								>
-									<span className="shrink-0 rounded bg-accent-dim px-1.5 py-0.5 font-mono text-[10px] text-ink-muted">
+									<button
+										type="button"
+										className="shrink-0 rounded bg-accent-dim px-1.5 py-0.5 font-mono text-[10px] text-ink-muted hover:bg-accent hover:text-on-accent transition-colors"
+										title="跳转到第 {ev.turn} 步回放"
+										onClick={e => {
+											e.stopPropagation();
+											if (sessionId) {
+												window.location.hash = `#/records/${sessionId}`;
+											}
+										}}
+									>
 										Turn {ev.turn}
-									</span>
+									</button>
 										<span className="shrink-0 rounded bg-accent-dim px-1.5 py-0.5 font-mono text-[10px] text-ink-faint">
 											{ev.kind}
 										</span>
