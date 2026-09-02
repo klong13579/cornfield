@@ -92,6 +92,16 @@ export function PlaybackView(): React.JSX.Element {
 		const initialTurn = (location.state as { initialTurn?: number } | null)?.initialTurn;
 		if (initialTurn !== undefined && initialTurn !== null && timeline) {
 			playback.seek(initialTurn);
+			// Auto-expand all tool cards in the target turn
+			const entry = timeline[initialTurn - 1];
+			if (entry?.tools) {
+				const keys = entry.tools.map((_, ti) => `${entry.id}:${ti}`);
+				setOpenTools(prev => {
+					const next = new Set(prev);
+					for (const k of keys) next.add(k);
+					return next;
+				});
+			}
 		}
 	}, [timeline, location.state]);
 
