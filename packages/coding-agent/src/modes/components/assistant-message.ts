@@ -5,6 +5,7 @@ import { formatNumber } from "@cornfield/utils";
 import { settings } from "../../config/settings";
 import { getMarkdownTheme, theme } from "../../modes/theme/theme";
 import { resolveImageOptions } from "../../tools/render-utils";
+import { convertToPng } from "../../utils/image-convert";
 
 /**
  * Component that renders a complete assistant message
@@ -13,6 +14,10 @@ export class AssistantMessageComponent extends Container {
 	#contentContainer: Container;
 	#lastMessage?: AssistantMessage;
 	#toolImagesByCallId = new Map<string, ImageContent[]>();
+	/** Tool images converted to PNG for the Kitty protocol, keyed by `${toolCallId}#${index}`. */
+	#convertedToolImages = new Map<string, { data: string; mimeType: string }>();
+	/** Keys of tool images whose async PNG conversion is in flight. */
+	#pendingToolImageConversions = new Set<string>();
 	#usageInfo?: Usage;
 
 	constructor(
@@ -49,8 +54,24 @@ export class AssistantMessageComponent extends Container {
 		} else {
 			this.#toolImagesByCallId.set(toolCallId, validImages);
 		}
+		// Images for this tool call were replaced — drop cached conversions so stale data is never rendered.
+		this.#clearToolImageConversions(toolCallId);
 		if (this.#lastMessage) {
 			this.updateContent(this.#lastMessage);
+		}
+	}
+
+	#toolImageConversionKey(toolCallId: string, index: number): string {
+		return `${toolCallId}#${index}`;
+	}
+
+	#clearToolImageConversions(toolCallId: string): void {
+		const prefix = `${toolCallId}#`;
+		for (const key of this.#convertedToolImages.keys()) {
+			if (key.startsWith(prefix)) this.#convertedToolImages.delete(key);
+		}
+		for (const key of this.#pendingToolImageConversions) {
+			if (key.startsWith(prefix)) this.#pendingToolImageConversions.delete(key);
 		}
 	}
 
@@ -61,27 +82,63 @@ export class AssistantMessageComponent extends Container {
 		}
 	}
 
-	#renderToolImages(): void {
-		const images = Array.from(this.#toolImagesByCallId.values()).flat();
-		if (images.length === 0) return;
-
-		this.#contentContainer.addChild(new Spacer(1));
-		for (const image of images) {
-			if (
-				TERMINAL.imageProtocol &&
-				(TERMINAL.imageProtocol !== ImageProtocol.Kitty || image.mimeType === "image/png")
-			) {
-				this.#contentContainer.addChild(
-					new Image(
-						image.data,
-						image.mimeType,
-						{ fallbackColor: (text: string) => theme.fg("toolOutput", text) },
-						resolveImageOptions(),
-					),
-				);
-				continue;
+	/**
+	 * Kick off async conversion of non-PNG tool images to PNG for the Kitty graphics
+	 * protocol (which requires PNG). Completion re-renders the message so the image
+	 * appears in place of the text placeholder shown while converting.
+	 */
+	#kickOffToolImageConversions(): void {
+		if (!TERMINAL.imageProtocol || TERMINAL.imageProtocol !== ImageProtocol.Kitty) return;
+		for (const [toolCallId, images] of this.#toolImagesByCallId) {
+			for (let i = 0; i < images.length; i++) {
+				const image = images[i];
+				const key = this.#toolImageConversionKey(toolCallId, i);
+				if (image.mimeType === "image/png" || !image.data) continue;
+				if (this.#convertedToolImages.has(key) || this.#pendingToolImageConversions.has(key)) continue;
+				this.#pendingToolImageConversions.add(key);
+				const originalData = image.data;
+				void convertToPng(originalData, image.mimeType).then(converted => {
+					this.#pendingToolImageConversions.delete(key);
+					if (!converted) return;
+					// Stale guard: the images for this tool call may have been replaced while converting.
+					const current = this.#toolImagesByCallId.get(toolCallId)?.[i];
+					if (!current || current.data !== originalData) return;
+					this.#convertedToolImages.set(key, converted);
+					if (this.#lastMessage) {
+						this.updateContent(this.#lastMessage);
+					}
+				});
 			}
-			this.#contentContainer.addChild(new Text(theme.fg("toolOutput", `[Image: ${image.mimeType}]`), 1, 0));
+		}
+	}
+
+	#renderToolImages(): void {
+		if (this.#toolImagesByCallId.size === 0) return;
+
+		this.#kickOffToolImageConversions();
+		this.#contentContainer.addChild(new Spacer(1));
+		for (const [toolCallId, images] of this.#toolImagesByCallId) {
+			for (let i = 0; i < images.length; i++) {
+				const image = images[i];
+				const converted = this.#convertedToolImages.get(this.#toolImageConversionKey(toolCallId, i));
+				const data = converted?.data ?? image.data;
+				const mimeType = converted?.mimeType ?? image.mimeType;
+				if (
+					TERMINAL.imageProtocol &&
+					(TERMINAL.imageProtocol !== ImageProtocol.Kitty || mimeType === "image/png")
+				) {
+					this.#contentContainer.addChild(
+						new Image(
+							data,
+							mimeType,
+							{ fallbackColor: (text: string) => theme.fg("toolOutput", text) },
+							resolveImageOptions(),
+						),
+					);
+					continue;
+				}
+				this.#contentContainer.addChild(new Text(theme.fg("toolOutput", `[Image: ${image.mimeType}]`), 1, 0));
+			}
 		}
 	}
 
