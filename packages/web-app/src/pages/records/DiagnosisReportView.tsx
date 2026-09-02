@@ -1,6 +1,6 @@
 import { ChevronDown, ChevronRight, ClipboardList, FileText, MessageSquare } from "lucide-react";
 import { useEffect, useState } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 
 import type { DiagnosisSummaryDto } from "../../lib/pi-client-api";
 import { useSessionStore } from "../../state/session-store";
@@ -22,9 +22,13 @@ type DimState = "ok" | "warn" | "fail";
 
 export function DiagnosisReportView(): React.JSX.Element {
 	const location = useLocation();
+	const [searchParams] = useSearchParams();
 	const store = useSessionStore();
 
-	const reportId = ((location.state as { reportId?: string } | null)?.reportId ?? null) as string | null;
+	const stateReportId = ((location.state as { reportId?: string } | null)?.reportId ?? null) as string | null;
+	// 优先从 state 取，缺省从 ?reportId= 取（hash 路由直接 URL 访问降级）
+	const paramsReportId = searchParams.get("reportId");
+	const reportId = stateReportId ?? paramsReportId;
 
 	const [summary, setSummary] = useState<DiagnosisSummaryDto | null>(null);
 	const [markdown, setMarkdown] = useState<string>("");
