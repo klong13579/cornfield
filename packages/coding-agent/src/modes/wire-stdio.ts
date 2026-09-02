@@ -753,6 +753,20 @@ export async function runWireStdioMode(session: AgentSession): Promise<never> {
 			case "list_commands":
 			case "set_skill_enabled":
 			case "set_model_disabled":
+			case "get_model_catalog":
+			case "get_providers":
+			case "get_provider":
+			case "start_provider_oauth":
+			case "complete_provider_oauth":
+			case "save_provider_api_key":
+			case "delete_provider_api_key":
+			case "set_provider_base_url":
+			case "disconnect_provider":
+			case "refresh_provider":
+			case "refresh_catalog":
+			case "test_model":
+			case "get_config_scope":
+			case "restore_config_inheritance":
 			case "inject_permission":
 			case "permission_respond":
 			case "record_transcribe":

@@ -7,13 +7,23 @@ import { Settings } from "../src/config/settings";
 describe("resolveFallbackModels", () => {
 	const registry = {} as ModelRegistry;
 
-	test("未配置 modelFallbacks → 返回空列表（不抛）", () => {
+	test("未配置回退链 → 返回空列表（不抛）", () => {
 		const settings = Settings.isolated();
 		expect(resolveFallbackModels(settings, registry, [])).toEqual([]);
 	});
 
-	test("settings.get('modelFallbacks') 有 schema 默认值", () => {
-		expect(Settings.isolated().get("modelFallbacks")).toEqual([]);
+	test("settings.get('modelRoutes') 有 schema 默认值", () => {
+		expect(Settings.isolated().get("modelRoutes")).toEqual({});
+	});
+
+	test("default 角色回退链来自 modelRoutes.fallbacks（空 available 时逐项解析失败跳过）", () => {
+		const settings = Settings.isolated({
+			modelRoutes: {
+				default: { primary: "a/one", fallbacks: ["b/two", "b/two"] },
+			},
+		});
+		// 解析需真实可用模型；空列表 → 每项解析失败跳过并告警，结果仍为空且不抛
+		expect(resolveFallbackModels(settings, registry, [])).toEqual([]);
 	});
 });
 

@@ -13,7 +13,7 @@ import {
 	Mic,
 	SlidersHorizontal,
 } from "lucide-react";
-import { createHashRouter, useNavigate, useParams } from "react-router-dom";
+import { createHashRouter, Navigate, type RouteObject, useNavigate, useParams } from "react-router-dom";
 import { AppShell } from "./layout/AppShell";
 import { registerPanel } from "./layout/panel-registry";
 import { AgentDetailView } from "./pages/agents/AgentDetailView";
@@ -21,7 +21,10 @@ import { AgentsView } from "./pages/agents/AgentsView";
 import { HomeView } from "./pages/home/HomeView";
 import { InsightsView } from "./pages/insights/InsightsView";
 import { MemoryView } from "./pages/memory/MemoryView";
+import { CatalogView } from "./pages/models/CatalogView";
 import { ModelsView } from "./pages/models/ModelsView";
+import { ProvidersView } from "./pages/models/ProvidersView";
+import { RuntimeConfigView } from "./pages/models/RuntimeConfigView";
 import DiagnosisReportView from "./pages/records/DiagnosisReportView";
 import { PlaybackView } from "./pages/records/PlaybackView";
 import { RecordsView } from "./pages/records/RecordsView";
@@ -98,9 +101,11 @@ function registerAllPanels(): void {
 		mount: () => TodoView,
 	});
 
+	// 模型控制中心（#01）：/models 壳 + 三个子工作区（catalog/providers/config），
+	// index 重定向 /models/catalog——子路由深链可达，侧栏仍指向 /models。
 	registerPanel({
 		id: "models",
-		title: "模型市场",
+		title: "模型控制中心",
 		icon: Cpu,
 		group: "primary",
 		order: 7,
@@ -248,12 +253,31 @@ export const PAGE_META: PageMeta[] = [
 	{
 		id: "models",
 		path: "/models",
-		name: "模型市场",
-		breadcrumb: "模型市场",
+		name: "模型控制中心",
+		breadcrumb: "模型控制中心",
 		group: "primary",
 		order: 7,
 		icon: Cpu,
-		protocol: ["get_available_models"],
+		protocol: [
+			"get_model_catalog",
+			"get_model_selection",
+			"get_providers",
+			"get_provider",
+			"start_provider_oauth",
+			"complete_provider_oauth",
+			"save_provider_api_key",
+			"delete_provider_api_key",
+			"set_provider_base_url",
+			"disconnect_provider",
+			"refresh_provider",
+			"refresh_catalog",
+			"test_model",
+			"get_config_scope",
+			"restore_config_inheritance",
+			"set_config",
+			"set_model",
+			"set_model_temporary",
+		],
 	},
 	{
 		id: "insights",
@@ -309,8 +333,29 @@ export const PAGE_META: PageMeta[] = [
 
 /** @deprecated 使用 findPanelByPath */
 export function findPageMeta(pathname: string): PageMeta | undefined {
-	return PAGE_META.find(p => p.path === pathname) ?? PAGE_META.find(p => pathname.startsWith(p.path));
+	// 最长前缀匹配（精确命中 = 前缀特例；"/" 仅兜底）。
+	// 旧的 startsWith 首次命中会让任意子路径（如 /models/catalog）都落到 home —— 控制中心子路由面包屑必须命中父 panel。
+	const hit = PAGE_META.filter(p => p.path === pathname || (p.path !== "/" && pathname.startsWith(`${p.path}/`)))
+		.sort((a, b) => b.path.length - a.path.length)
+		.at(0);
+	return hit ?? PAGE_META.find(p => p.path === "/");
 }
+
+// ── /models 子路由表（模型控制中心 #01）─────────────────────────────
+// index 重定向到 /models/catalog；三个子工作区独立成路由（深链可达）。
+// 导出为数据（而非内联进 createHashRouter）供测试在无 DOM 环境以 memory router 复用。
+export const modelsRoutes: RouteObject[] = [
+	{
+		path: "/models",
+		element: <ModelsView />,
+		children: [
+			{ index: true, element: <Navigate to="/models/catalog" replace /> },
+			{ path: "catalog", element: <CatalogView /> },
+			{ path: "providers", element: <ProvidersView /> },
+			{ path: "config", element: <RuntimeConfigView /> },
+		],
+	},
+];
 
 // ── 路由导出 ──────────────────────────────────────────────────────────
 
@@ -336,7 +381,7 @@ export const router = createHashRouter([
 
 			{ path: "/voice", element: <VoiceView /> },
 			{ path: "/todo", element: <TodoView /> },
-			{ path: "/models", element: <ModelsView /> },
+			...modelsRoutes,
 			{ path: "/insights", element: <InsightsView /> },
 			{ path: "/memory", element: <MemoryView /> },
 			{ path: "/tasks", element: <TasksView /> },

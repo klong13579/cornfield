@@ -37,16 +37,20 @@ describe("plan mode thinking level", () => {
 		tempDir.removeSync();
 	});
 
-	function createSessionWithRoles(modelRoles: Record<string, string>): AgentSession {
+	function createSessionWithRoles(primaries: Record<string, string>): AgentSession {
 		const sonnet = modelRegistry.find("anthropic", "claude-sonnet-4-5");
 		if (!sonnet) throw new Error("Expected claude-sonnet-4-5 to exist in registry");
+
+		const modelRoutes = Object.fromEntries(
+			Object.entries(primaries).map(([role, primary]) => [role, { primary, fallbacks: [] }]),
+		);
 
 		session = new AgentSession({
 			agent: new Agent({
 				initialState: { model: sonnet, systemPrompt: "Test", tools: [], messages: [] },
 			}),
 			sessionManager: SessionManager.inMemory(),
-			settings: Settings.isolated({ modelRoles }),
+			settings: Settings.isolated({ modelRoutes }),
 			modelRegistry,
 		});
 		return session;

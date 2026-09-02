@@ -56,7 +56,7 @@
 - `TOOLS.md` — add tool-level `MUST` / `MUST NOT` rules co-located with each tool (design §4 principle 2).
 - `TODO.md` — track the current task; updated by the agent as work progresses.
 - `prompt-includes.json` — change which files are injected as always-on.
-- `.cornfield/config.yml` — change `modelRoles.default` to switch the active model.
+- `.cornfield/config.yml` — change `modelRoutes.default.primary` to switch the active model.
 - `.cornfield/SYSTEM.md` — gateway agent system prompt baseline; edit to customize behavior. Leave empty to fall back to CornField's built-in prompt.
 
 ## Global hard constraints

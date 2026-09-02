@@ -3,6 +3,8 @@ import { PiClient as WirePiClient } from "@cornfield/client";
 import type {
 	AgentInfoDto,
 	AvailableModelsDto,
+	ConfigInheritanceRestoreDto,
+	ConfigScopeDto,
 	ConnectionInfoDto,
 	CronLogEntryDto,
 	DashboardStatsDto,
@@ -12,7 +14,14 @@ import type {
 	HostToolDefinitionDto,
 	ImageContentDto,
 	MemoryProjectionDto,
+	ModelCatalogDto,
+	ModelSelectionDto,
+	ModelTestResultDto,
 	ProgressEventDto,
+	ProviderDisconnectResultDto,
+	ProviderListDto,
+	ProviderOAuthStartDto,
+	ProviderStatusDto,
 	SessionSnapshotDto,
 	SkillDto,
 	StatsPeriodDto,
@@ -280,8 +289,9 @@ export class PiClientAdapter implements PiClient {
 
 	/**
 	 * 真实模型列表（get_available_models → serve 真 Model[]，已按 disabledProviders /
-	 * disabledModels 过滤）。未连接/命令失败返回空数组，UI 显示「未连接/不可用」空态；
-	 * 绝不回退内置假数据（HF-1）。
+	 * disabledModels 过滤）。绝不回退内置假数据（HF-1）。
+	 * 失败契约：未连接/命令失败时抛错（不吞错、不返回空数组），由调用方
+	 * （模型目录 CatalogView 等）渲染错误态 + 重试入口。
 	 * 映射补齐真实字段：name/reasoning/cost/contextWindow（数字→“200K”格式化，原始值保留供排序）。
 	 * 响应附带停用名单（disabledProviders/disabledModels）供「已停用」分区恢复入口。
 	 */
@@ -331,6 +341,105 @@ export class PiClientAdapter implements PiClient {
 			disabledProviders: result.disabledProviders ?? [],
 			disabledModels: result.disabledModels ?? [],
 		};
+	}
+
+	// ── 模型控制中心（#02 全量目录 / #03 Provider 接入 / #05 配置作用域）──
+	// 敏感约束：apiKey/code 只进写命令请求载荷（serve 写入 AuthCredentialStore）；
+	// 任何响应只含 DTO 的 maskedKey 掩码片段，本层不做任何明文落盘/日志。
+
+	/** #02 全量模型目录（get_model_catalog：全部已知模型 + 六态 status + 目录元数据）。 */
+	fetchModelCatalog(): Promise<ModelCatalogDto> {
+		return this.#req<ModelCatalogDto>({ type: "get_model_catalog" });
+	}
+
+	/** #05 模型选择两层视图（get_model_selection）。 */
+	fetchModelSelection(): Promise<ModelSelectionDto> {
+		return this.#req<ModelSelectionDto>({ type: "get_model_selection" });
+	}
+
+	/** 会话级临时切换模型（set_model_temporary：仅本会话，不写 settings）。 */
+	setModelTemporary(providerId: string, modelId: string): Promise<void> {
+		return this.#req({ type: "set_model_temporary", provider: providerId, modelId }).then(() => undefined);
+	}
+
+	/** 持久化默认模型（set_model：serve 侧写 settings.modelRoutes.default.primary 并持久化）。 */
+	setPersistentDefaultModel(providerId: string, modelId: string): Promise<void> {
+		return this.#req({ type: "set_model", provider: providerId, modelId }).then(() => undefined);
+	}
+
+	/** #05 按作用域写配置（set_config；scope 缺省 serve 侧 = global）。 */
+	setConfigValue(key: string, value: unknown, scope: "global" | "project"): Promise<void> {
+		return this.#req({ type: "set_config", key, value, scope }).then(() => undefined);
+	}
+
+	/** #03 Provider 状态列表（get_providers）。 */
+	fetchProviders(): Promise<ProviderListDto> {
+		return this.#req<ProviderListDto>({ type: "get_providers" });
+	}
+
+	/** #03 单个 Provider 状态（get_provider；未知 providerId 抛错由调用方渲染）。 */
+	fetchProvider(providerId: string): Promise<ProviderStatusDto> {
+		return this.#req<ProviderStatusDto>({ type: "get_provider", providerId });
+	}
+
+	/** #03 发起 OAuth 登录（start_provider_oauth）。 */
+	startProviderOauth(providerId: string): Promise<ProviderOAuthStartDto> {
+		return this.#req<ProviderOAuthStartDto>({ type: "start_provider_oauth", providerId });
+	}
+
+	/** #03 提交 OAuth 手输 code / 粘贴 key（complete_provider_oauth）。 */
+	completeProviderOauth(providerId: string, code: string): Promise<ProviderStatusDto> {
+		return this.#req<ProviderStatusDto>({ type: "complete_provider_oauth", providerId, code });
+	}
+
+	/** #03 保存/替换 API Key（save_provider_api_key；明文只进请求载荷）。 */
+	saveProviderApiKey(providerId: string, apiKey: string): Promise<ProviderStatusDto> {
+		return this.#req<ProviderStatusDto>({ type: "save_provider_api_key", providerId, apiKey });
+	}
+
+	/** #03 删除已存 API Key（delete_provider_api_key；幂等）。 */
+	deleteProviderApiKey(providerId: string): Promise<ProviderStatusDto> {
+		return this.#req<ProviderStatusDto>({ type: "delete_provider_api_key", providerId });
+	}
+
+	/** #03 设置自定义 Base URL（set_provider_base_url；null 清除覆盖）。 */
+	setProviderBaseUrl(providerId: string, baseUrl: string | null): Promise<ProviderStatusDto> {
+		return this.#req<ProviderStatusDto>({ type: "set_provider_base_url", providerId, baseUrl });
+	}
+
+	/** #03 断开 provider（disconnect_provider；force 缺省 false——有依赖时 ok:true +
+	 * disconnected:false + dependencies 清单，不走错误通道）。 */
+	disconnectProvider(providerId: string, force: boolean): Promise<ProviderDisconnectResultDto> {
+		return this.#req<ProviderDisconnectResultDto>({
+			type: "disconnect_provider",
+			providerId,
+			...(force ? { force: true } : {}),
+		});
+	}
+
+	/** #03 单 provider 目录刷新（refresh_provider；online 强制）。 */
+	refreshProvider(providerId: string): Promise<ProviderStatusDto> {
+		return this.#req<ProviderStatusDto>({ type: "refresh_provider", providerId });
+	}
+
+	/** #04 全量目录刷新（refresh_catalog；registry 级并行，返回刷新后的完整目录）。 */
+	refreshCatalog(): Promise<ModelCatalogDto> {
+		return this.#req<ModelCatalogDto>({ type: "refresh_catalog" });
+	}
+
+	/** #04 单模型连通性测试（test_model；真实调用会产生费用，UI 必须先确认）。 */
+	testModel(providerId: string, modelId: string): Promise<ModelTestResultDto> {
+		return this.#req<ModelTestResultDto>({ type: "test_model", providerId, modelId });
+	}
+
+	/** #05 配置作用域读取（get_config_scope）。 */
+	fetchConfigScope(): Promise<ConfigScopeDto> {
+		return this.#req<ConfigScopeDto>({ type: "get_config_scope" });
+	}
+
+	/** #05 恢复继承（restore_config_inheritance；删除项目覆盖键而非复制值）。 */
+	restoreConfigInheritance(key: string): Promise<ConfigInheritanceRestoreDto> {
+		return this.#req<ConfigInheritanceRestoreDto>({ type: "restore_config_inheritance", key });
 	}
 
 	// ── P3 多 Agent ──
@@ -415,14 +524,18 @@ export class PiClientAdapter implements PiClient {
 		}
 	}
 
-	async diagnoseSession(sessionFile: string): Promise<{ reportId: string; sessionId: string; state: "running" | "done" }> {
+	async diagnoseSession(
+		sessionFile: string,
+	): Promise<{ reportId: string; sessionId: string; state: "running" | "done" }> {
 		return this.#req<{ reportId: string; sessionId: string; state: "running" | "done" }>({
 			type: "diagnose_session",
 			sessionFile,
 		} as never);
 	}
 
-	async listDiagnosisReports(sessionFile?: string): Promise<{ reports: DiagnosisReportListItemDto[]; tasks: unknown[] }> {
+	async listDiagnosisReports(
+		sessionFile?: string,
+	): Promise<{ reports: DiagnosisReportListItemDto[]; tasks: unknown[] }> {
 		return this.#req<{ reports: DiagnosisReportListItemDto[]; tasks: unknown[] }>({
 			type: "list_diagnosis_reports",
 			sessionFile,

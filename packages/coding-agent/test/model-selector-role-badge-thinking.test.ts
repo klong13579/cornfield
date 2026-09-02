@@ -62,12 +62,12 @@ describe("ModelSelector role badge thinking display", () => {
 		if (!model) throw new Error("Expected bundled model anthropic/claude-sonnet-4-5");
 
 		const settings = Settings.isolated({
-			modelRoles: {
-				default: `${model.provider}/${model.id}`,
-				smol: `${model.provider}/${model.id}:minimal`,
-				slow: `${model.provider}/${model.id}`,
-				plan: `${model.provider}/${model.id}:high`,
-				commit: `${model.provider}/${model.id}:medium`,
+			modelRoutes: {
+				default: { primary: `${model.provider}/${model.id}`, fallbacks: [] },
+				smol: { primary: `${model.provider}/${model.id}:minimal`, fallbacks: [] },
+				slow: { primary: `${model.provider}/${model.id}`, fallbacks: [] },
+				plan: { primary: `${model.provider}/${model.id}:high`, fallbacks: [] },
+				commit: { primary: `${model.provider}/${model.id}:medium`, fallbacks: [] },
 			},
 		});
 
@@ -95,17 +95,17 @@ describe("ModelSelector role badge thinking display", () => {
 		expect(menuRendered).toContain("Set as COMMIT (Commit)");
 	});
 
-	test("shows custom roles from cycleOrder/modelRoles and honors built-in metadata overrides", async () => {
+	test("shows custom roles from cycleOrder/modelRoutes and honors built-in metadata overrides", async () => {
 		installTestTheme();
 		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
 		if (!model) throw new Error("Expected bundled model anthropic/claude-sonnet-4-5");
 
 		const settings = Settings.isolated({
 			cycleOrder: ["smol", "custom-fast", "default"],
-			modelRoles: {
-				default: `${model.provider}/${model.id}`,
-				"custom-fast": `${model.provider}/${model.id}:low`,
-				smol: `${model.provider}/${model.id}`,
+			modelRoutes: {
+				default: { primary: `${model.provider}/${model.id}`, fallbacks: [] },
+				"custom-fast": { primary: `${model.provider}/${model.id}:low`, fallbacks: [] },
+				smol: { primary: `${model.provider}/${model.id}`, fallbacks: [] },
 			},
 			modelTags: {
 				smol: { name: "Quick", color: "error" },

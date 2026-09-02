@@ -1,292 +1,236 @@
-import type { AvailableModelsDto } from "@cornfield/wire";
-import { useEffect, useState } from "react";
+import type { ConfigScopeDto, ModelCatalogDto, ProviderListDto } from "@cornfield/wire";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link, NavLink, Outlet } from "react-router-dom";
 import { useSessionStore } from "../../state/session-store";
 import { useSession } from "../../state/use-session";
+import type { ControlCenterException, ExceptionSeverity } from "./exceptions";
+import { catalogHealth, deriveExceptions } from "./exceptions";
+import { subscribeMccDataChanged } from "./providers/mcc-sync";
 
 /**
- * 模型市场（FR-6）—— get_available_models 按 Provider 分组 + set_model 切换 + 停用管理。
- * 停用（W3 模型禁用写协议 set_model_disabled）：
- * - provider 组头「停用」= 整 provider 停用（写 settings.disabledProviders）
- * - 模型行「停用」= 精确模型停用（写 settings.disabledModels `provider/modelId`）
- * 停用即从可用列表消失（服务端过滤），页面底部「已停用」分区可一键恢复。
- * 视觉主角：当前模型 hero（accent 描边大区块），其余模型行式排列。
- * 筛选：全部 / 支持 thinking / 高上下文 / 最新（启发式，真实渠道以 serve 返回为准）。
+ * 模型控制中心（#01 骨架；#08 异常区）—— /models 壳 + 三个子工作区（router.tsx modelsRoutes）：
+ * - /models/catalog  模型目录（原模型市场能力整体归位，CatalogView）
+ * - /models/providers Provider 管理（ProvidersView + ProviderCard）
+ * - /models/config   运行时配置（RuntimeConfigView）
+ * /models 经 index 路由重定向到 /models/catalog。
+ *
+ * 壳承载：
+ * - 顶部状态条（当前会话模型 / 配置作用域 / 目录状态 / 异常数量）——异常数与目录状态
+ *   为壳层自拉三份数据（get_providers + get_model_catalog + get_config_scope）的派生值；
+ * - 异常区（#08）：expandable 异常清单，每项带严重级别与跳转入口；无异常不占空间；
+ * - 断连提示（明确文案 + 重试入口）与命令错误提示（store commandError，含 set_model 失败）。
+ *
+ * 异常数据流：ProviderCard 写动作成功 → mcc-sync notifyMccDataChanged → 壳层重拉三份
+ * 数据 → deriveExceptions 重新推导。断开后失效待修复异常随之出现，重新接入后自动消失
+ * （纯派生态，无清理动作）。
  */
-type Filter = "all" | "thinking" | "long" | "new";
-const FILTERS: { id: Filter; label: string }[] = [
-	{ id: "all", label: "全部" },
-	{ id: "thinking", label: "支持 thinking" },
-	{ id: "long", label: "高上下文" },
-	{ id: "new", label: "最新" },
+const TABS: { to: string; label: string }[] = [
+	{ to: "/models/catalog", label: "模型目录" },
+	{ to: "/models/providers", label: "Provider" },
+	{ to: "/models/config", label: "运行时配置" },
 ];
+
+/** 严重级别徽章（badge 色板见 index.css：fail=红，run=琥珀）。 */
+const SEVERITY_BADGES: Record<ExceptionSeverity, { label: string; className: string }> = {
+	critical: { label: "严重", className: "badge fail" },
+	warning: { label: "警告", className: "badge run" },
+};
+
+/** 异常跳转入口文案（按目标工作区区分）。 */
+const TARGET_LABELS: Record<ControlCenterException["target"], string> = {
+	"/models/providers": "去 Provider 工作区",
+	"/models/config": "去运行时配置",
+	"/models/catalog": "去模型目录",
+};
 
 export function ModelsView(): React.JSX.Element {
 	const view = useSession();
 	const store = useSessionStore();
-	const [data, setData] = useState<AvailableModelsDto | null>(null);
-	const [filter, setFilter] = useState<Filter>("all");
-	const [isLoading, setIsLoading] = useState(true);
-	/** in-flight 停用/恢复目标（`provider` 或 `provider/modelId`），期间禁用所有开关。 */
-	const [busy, setBusy] = useState<string | null>(null);
+	const [providers, setProviders] = useState<ProviderListDto | null>(null);
+	const [catalog, setCatalog] = useState<ModelCatalogDto | null>(null);
+	const [scope, setScope] = useState<ConfigScopeDto | null>(null);
+	/** 异常区数据拉取失败（状态条标注，不弹 banner——子视图有各自的错误呈现）。 */
+	const [dataUnavailable, setDataUnavailable] = useState(false);
+	/** 异常清单展开态（仅异常数 > 0 时可展开；无异常不占空间）。 */
+	const [exceptionsOpen, setExceptionsOpen] = useState(false);
 
-	const models = data?.models ?? [];
-
-	useEffect(() => {
-		if (!view.connected) return; // 未连接时跳过，连接后再拉（避免先于 WS open 的一次性失败）
-		void store.fetchModels().then(setData);
-		setIsLoading(false);
+	/** 重拉三份异常区数据（settle 全部完成后再统一落状态，避免半新半旧推导）。 */
+	const loadExceptionData = useCallback(() => {
+		if (!view.connected) return;
+		Promise.allSettled([store.fetchProviders(), store.fetchModelCatalog(), store.fetchConfigScope()]).then(
+			([p, c, s]) => {
+				setProviders(p.status === "fulfilled" ? p.value : null);
+				setCatalog(c.status === "fulfilled" ? c.value : null);
+				setScope(s.status === "fulfilled" ? s.value : null);
+				setDataUnavailable(p.status === "rejected" || c.status === "rejected" || s.status === "rejected");
+			},
+		);
 	}, [store, view.connected]);
 
-	const current = view.model;
-	const currentInfo =
-		models.find(m => m.id === current) ??
-		(current
-			? {
-					id: current,
-					provider: current.split("/")[0] ?? "serve",
-					description: "当前会话模型（serve 快照）· get_available_models 真实现后进入列表",
-					supportsThinking:
-						view.thinkingLevel !== undefined && view.thinkingLevel !== null && view.thinkingLevel !== "off",
-				}
-			: undefined);
+	useEffect(() => {
+		loadExceptionData();
+	}, [loadExceptionData]);
 
-	const visible = models.filter(m => {
-		switch (filter) {
-			case "thinking":
-				return m.supportsThinking;
-			case "long":
-				return contextK(m.contextWindow) >= 200;
-			case "new":
-				return models.indexOf(m) < 2;
-			default:
-				return true;
-		}
-	});
+	// ProviderCard 写动作（断开 / 凭据 / 端点 / 目录刷新）后重拉，异常区随之更新；
+	// loadExceptionData 内部自带 connected 守卫，断连期间的事件不触发请求
+	useEffect(() => subscribeMccDataChanged(loadExceptionData), [loadExceptionData]);
 
-	/** 停用/恢复 provider 或模型后重拉全量（models 会被服务端过滤，停用名单随响应更新）。 */
-	const toggleDisabled = async (target: string, provider: string, modelId: string | undefined, disabled: boolean) => {
-		if (busy) return;
-		setBusy(target);
-		try {
-			await store.setModelDisabled(provider, modelId, disabled);
-			setData(await store.fetchModels());
-		} catch {
-			// 命令失败（未连接等）：保留现列表，不改变本地视图
-		} finally {
-			setBusy(null);
-		}
-	};
-
-	const totalDisabled = (data?.disabledProviders.length ?? 0) + (data?.disabledModels.length ?? 0);
+	const exceptions = useMemo(() => deriveExceptions({ providers, catalog, scope }), [providers, catalog, scope]);
+	const health = catalogHealth(catalog);
+	const catalogTitle = catalog
+		? health.staleCount > 0
+			? `${health.staleCount} 个 Provider 目录为非权威数据（缓存 / 回落）`
+			: "全部 Provider 目录为权威数据"
+		: "目录状态未知（数据未就绪或拉取失败）";
+	const exceptionTitle = dataUnavailable ? "异常数据不可用（拉取失败）" : "异常数量（点击展开 / 收起清单）";
 
 	return (
 		<div className="px-10 pt-8 pb-12">
 			<div className="page-wide">
-				<h1 className="mb-7 flex items-baseline gap-3.5 text-[32px] font-semibold tracking-[-0.8px] text-ink">
-					<span>模型</span>
-					<span className="text-[13px] font-normal tracking-normal text-ink-faint">
-						{totalDisabled > 0 ? `${totalDisabled} 个已停用 · 底部可恢复` : "停用 provider 或单模型在列表内操作"}
-					</span>
-				</h1>
+				<h1 className="mb-6 text-[32px] font-semibold tracking-[-0.8px] text-ink">模型控制中心</h1>
 
-				{currentInfo && (
-					<div className="mb-8 flex items-center gap-5 rounded-xl border border-accent bg-surface px-7 py-6">
-						<div className="flex-1">
-							<span className="section-title">当前使用</span>
-							<div className="font-mono text-[24px] font-semibold tracking-[-0.02em] text-ink">
-								{currentInfo.id}
-							</div>
-							<div className="mt-0.5 text-[13px] text-ink-subtle">{currentInfo.provider}</div>
-							<div className="mt-3 flex gap-6">
-								<HeroSpec label="上下文" value={currentInfo.contextWindow ?? "—"} />
-								<HeroSpec label="价格" value={currentInfo.price ?? "—"} />
-								<span className="text-3xs text-ink-faint">每百万 tokens（输入 / 输出）</span>
-							</div>
-							{currentInfo.supportsThinking && (
-								<div className="mt-3 flex gap-1.5">
-									<span className="rounded bg-accent-dim px-2 py-0.5 font-mono text-[11px] text-accent">
-										thinking
-									</span>
-								</div>
-							)}
+				{/* 顶部状态条 */}
+				<div className="mb-6 flex items-center gap-8 rounded-xl border border-hairline bg-surface px-5 py-3.5">
+					<StatusItem label="当前会话模型" value={view.model ?? "—"} mono />
+					<StatusItem
+						label="配置作用域"
+						value="全局"
+						title="本票固定为「全局」占位；per-agent 作用域后续 ticket 落地"
+					/>
+					<StatusItem label="目录状态" value={health.label} title={catalogTitle} danger={health.staleCount > 0} />
+					{exceptions.length > 0 ? (
+						<button
+							type="button"
+							className="flex items-baseline gap-2 rounded px-1 transition-colors hover:bg-surface-2"
+							onClick={() => setExceptionsOpen(open => !open)}
+							title={exceptionTitle}
+						>
+							<span className="text-[11px] text-ink-faint">异常</span>
+							<span className="text-[13px] font-medium text-danger">{exceptions.length}</span>
+							<span className="text-[11px] text-ink-faint">{exceptionsOpen ? "收起 ▲" : "展开 ▼"}</span>
+						</button>
+					) : (
+						<StatusItem label="异常" value={dataUnavailable ? "—" : "0"} title={exceptionTitle} />
+					)}
+				</div>
+
+				{/* 异常区：可展开清单（无异常不渲染，不占空间） */}
+				{exceptions.length > 0 && exceptionsOpen && (
+					<div className="mb-6 overflow-hidden rounded-xl border border-danger/40 bg-surface">
+						<div className="flex items-baseline justify-between border-b border-hairline px-5 py-3">
+							<span className="section-title text-[13px]">异常清单</span>
+							<span className="text-[11px] text-ink-faint">
+								{exceptions.length} 项 · 严重 {exceptions.filter(e => e.severity === "critical").length} · 警告{" "}
+								{exceptions.filter(e => e.severity === "warning").length}
+							</span>
 						</div>
-						<span className="rounded-md bg-accent px-4 py-2 text-[13px] font-medium text-on-accent">使用中</span>
+						<div className="divide-y divide-hairline">
+							{exceptions.map(item => (
+								<ExceptionRow key={exceptionKey(item)} item={item} />
+							))}
+						</div>
 					</div>
 				)}
 
-				{/* 筛选 seg */}
+				{/* 二级导航 */}
 				<div className="mb-6 flex w-fit gap-0.5 rounded-md border border-hairline bg-surface-2 p-0.5">
-					{FILTERS.map(f => (
-						<button
-							key={f.id}
-							type="button"
-							className={`rounded px-3 py-1 text-[12px] transition-colors ${filter === f.id ? "bg-accent-dim font-medium text-ink" : "text-ink-subtle hover:text-ink"}`}
-							onClick={() => setFilter(f.id)}
+					{TABS.map(tab => (
+						<NavLink
+							key={tab.to}
+							to={tab.to}
+							className={({ isActive }) =>
+								`rounded px-3 py-1 text-[12px] transition-colors ${isActive ? "bg-accent-dim font-medium text-ink" : "text-ink-subtle hover:text-ink"}`
+							}
 						>
-							{f.label}
-						</button>
+							{tab.label}
+						</NavLink>
 					))}
 				</div>
 
-				{/* Provider 分组 */}
-				{Array.from(new Set(visible.map(m => m.provider))).map(provider => (
-					<div key={provider} className="mb-7">
-						<div className="mb-2 flex items-baseline gap-2.5">
-							<span className="section-title">{provider}</span>
-							<span className="font-mono text-[10px] text-ink-faint">
-								{visible.filter(m => m.provider === provider).length}
-							</span>
-							<button
-								type="button"
-								disabled={busy !== null}
-								title={`停用整个 ${provider} provider`}
-								className="ml-auto rounded px-1.5 py-0.5 text-[11px] text-ink-faint transition-colors hover:bg-danger/10 hover:text-danger disabled:cursor-not-allowed disabled:opacity-40"
-								onClick={() => void toggleDisabled(provider, provider, undefined, true)}
-							>
-								停用
-							</button>
+				{/* 命令错误（store 暴露）—— 可诊断 + 可清除；计入异常区之外的独立呈现，不折算计数 */}
+				{view.commandError && (
+					<div className="mb-6 flex items-center gap-3 rounded-lg border border-danger/40 bg-danger/5 px-4 py-2.5 text-[12px] text-danger">
+						<span className="flex-1">{view.commandError}</span>
+						<button
+							type="button"
+							className="shrink-0 rounded border border-danger/30 px-2 py-0.5 transition-colors hover:bg-danger/10"
+							onClick={() => store.clearCommandError()}
+						>
+							清除
+						</button>
+					</div>
+				)}
+
+				{!view.connected ? (
+					/* 断连：明确提示 + 重试入口（不再永久骨架屏，也不渲染子工作区） */
+					<div className="rounded-xl border border-hairline bg-surface px-6 py-12 text-center">
+						<div className="text-[14px] font-medium text-ink">与 serve 未连接</div>
+						<div className="mt-1.5 text-[12px] text-ink-subtle">
+							模型目录、Provider 与运行时配置都依赖 serve 连接（{view.wsUrl}）
 						</div>
-						{visible
-							.filter(m => m.provider === provider)
-							.map(m => (
-								<div
-									key={m.id}
-									className={`flex items-center gap-4 border-b border-hairline px-1 py-3.5 transition-colors last:border-b-0 hover:bg-surface ${m.id === current ? "bg-accent-dim/40" : ""}`}
-								>
-									<div className="min-w-0 flex-1">
-										<div className="flex items-center gap-2">
-											<span className="font-mono text-[15px] font-semibold tracking-[-0.02em] text-ink">
-												{m.id}
-											</span>
-											{m.id === current && <span className="badge done">当前</span>}
-										</div>
-										<div className="mt-0.5 text-[12px] text-ink-subtle">{m.description}</div>
-									</div>
-									<span className="w-[140px] shrink-0 font-mono text-xs">{m.contextWindow}</span>
-									<span className="flex shrink-0 gap-1">
-										{m.supportsThinking ? (
-											<span className="rounded bg-accent-dim px-1.5 py-px font-mono text-3xs text-accent">
-												thinking
-											</span>
-										) : (
-											<span className="rounded px-1.5 py-px font-mono text-3xs text-ink-faint">—</span>
-										)}
-									</span>
-									<button
-										type="button"
-										disabled={busy !== null}
-										title={`停用 ${m.id}`}
-										className="shrink-0 rounded px-1.5 py-1 text-[11px] text-ink-faint transition-colors hover:bg-danger/10 hover:text-danger disabled:cursor-not-allowed disabled:opacity-40"
-										onClick={() => void toggleDisabled(`${provider}/${m.id}`, provider, m.id, true)}
-									>
-										停用
-									</button>
-									<button
-										type="button"
-										className="btn btn-sm shrink-0"
-										disabled={m.id === current}
-										onClick={() => store.setModel(m.id, m.provider)}
-									>
-										{m.id === current ? "使用中" : "使用此模型"}
-									</button>
-								</div>
-							))}
+						<button type="button" className="btn btn-sm mt-5" onClick={() => void store.connect()}>
+							重试连接
+						</button>
 					</div>
-				))}
-
-				{isLoading ? (
-					<>
-						<div className="skeleton h-10 w-full" />
-						<div className="skeleton h-10 w-full" />
-						<div className="skeleton h-10 w-full" />
-						<div className="skeleton h-10 w-full" />
-					</>
-				) : models.length === 0 ? (
-					<div className="py-16 text-center text-[13px] text-ink-faint">
-						{data
-							? "没有可用模型——当前 provider 均已停用，底部可恢复"
-							: "模型列表加载中（get_available_models）…"}
-					</div>
-				) : null}
-
-				{/* 已停用分区：provider / 模型 两类，一键恢复 */}
-				{totalDisabled > 0 && (
-					<div className="mt-10 overflow-hidden rounded-xl border border-hairline bg-surface">
-						<div className="flex items-baseline justify-between border-b border-hairline px-5 py-3">
-							<span className="section-title">已停用</span>
-							<span className="font-mono text-[11px] text-ink-faint">{totalDisabled} 项</span>
-						</div>
-
-						{data?.disabledProviders.length ? (
-							<div className="px-5 pt-3">
-								<div className="mb-1.5 section-title">Provider</div>
-								{data.disabledProviders.map(provider => (
-									<div
-										key={provider}
-										className="flex items-center gap-3 border-b border-hairline px-1 py-2.5 last:border-b-0"
-									>
-										<span className="font-mono text-[13px] text-ink">{provider}</span>
-										<span className="text-3xs text-ink-faint">整 provider 停用</span>
-										<button
-											type="button"
-											disabled={busy !== null}
-											className="ml-auto shrink-0 rounded border border-hairline bg-surface-2 px-2.5 py-1 text-[11.5px] text-ink-subtle transition-colors hover:border-hairline-strong hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
-											onClick={() => void toggleDisabled(provider, provider, undefined, false)}
-										>
-											恢复
-										</button>
-									</div>
-								))}
-							</div>
-						) : null}
-
-						{data?.disabledModels.length ? (
-							<div className="px-5 pt-3 pb-3">
-								<div className="mb-1.5 section-title">模型</div>
-								{data.disabledModels.map(pattern => {
-									const provider = pattern.split("/")[0] ?? "";
-									return (
-										<div
-											key={pattern}
-											className="flex items-center gap-3 border-b border-hairline px-1 py-2.5 last:border-b-0"
-										>
-											<span className="truncate font-mono text-[13px] text-ink">{pattern}</span>
-											<button
-												type="button"
-												disabled={busy !== null}
-												className="ml-auto shrink-0 rounded border border-hairline bg-surface-2 px-2.5 py-1 text-[11.5px] text-ink-subtle transition-colors hover:border-hairline-strong hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
-												onClick={() => {
-													const modelId = pattern.slice(provider.length + 1);
-													void toggleDisabled(pattern, provider, modelId, false);
-												}}
-											>
-												恢复
-											</button>
-										</div>
-									);
-								})}
-							</div>
-						) : null}
-					</div>
+				) : (
+					<Outlet />
 				)}
 			</div>
 		</div>
 	);
 }
 
-function HeroSpec({ label, value }: { label: string; value: string }): React.JSX.Element {
+/** 异常行唯一键：kind + 定位信息（provider / role+position / model），清单重排稳定。 */
+function exceptionKey(item: ControlCenterException): string {
+	if (item.providerId) return `${item.kind}:${item.providerId}`;
+	if (item.role) return `${item.kind}:${item.role}:${item.position ?? ""}:${item.model ?? ""}`;
+	return item.kind;
+}
+
+/** 异常清单行：严重级别徽章 + 标题 + 处置说明 + 跳转入口。 */
+function ExceptionRow({ item }: { item: ControlCenterException }): React.JSX.Element {
+	const badge = SEVERITY_BADGES[item.severity];
 	return (
-		<div className="text-[12px] text-ink-subtle">
-			<b className="block font-mono text-[15px] font-semibold text-ink">{value}</b>
-			{label}
+		<div className="flex items-start gap-3 px-5 py-2.5">
+			<span className={`${badge.className} mt-0.5 shrink-0`}>{badge.label}</span>
+			<div className="min-w-0 flex-1">
+				<div className="text-[13px] font-medium text-ink">{item.title}</div>
+				<div className="mt-0.5 text-[12px] leading-relaxed text-ink-subtle">{item.detail}</div>
+				{item.role && (
+					<div className="mt-0.5 font-mono text-[11px] text-ink-faint">
+						{item.role} · {item.position} → {item.model}
+					</div>
+				)}
+			</div>
+			<Link
+				to={item.target}
+				className="mt-0.5 shrink-0 rounded border border-hairline bg-surface-2 px-2.5 py-1 text-[11.5px] text-ink-subtle transition-colors hover:border-hairline-strong hover:text-ink"
+			>
+				{TARGET_LABELS[item.target]}
+			</Link>
 		</div>
 	);
 }
 
-function contextK(raw: string | undefined): number {
-	if (!raw) return 0;
-	const match = /(\d+(?:\.\d+)?)(K|M)/i.exec(raw);
-	if (!match) return 0;
-	const num = Number.parseFloat(match[1]);
-	return match[2].toLowerCase() === "m" ? num * 1000 : num;
+function StatusItem({
+	label,
+	value,
+	mono,
+	danger,
+	title,
+}: {
+	label: string;
+	value: string;
+	mono?: boolean;
+	danger?: boolean;
+	title?: string;
+}): React.JSX.Element {
+	return (
+		<div className="flex items-baseline gap-2" title={title}>
+			<span className="text-[11px] text-ink-faint">{label}</span>
+			<span className={`${mono ? "font-mono" : ""} text-[13px] font-medium ${danger ? "text-danger" : "text-ink"}`}>
+				{value}
+			</span>
+		</div>
+	);
 }

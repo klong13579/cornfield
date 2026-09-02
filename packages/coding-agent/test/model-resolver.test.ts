@@ -481,7 +481,7 @@ describe("resolveModelRoleValue", () => {
 describe("resolveAgentModelPatterns", () => {
 	test("falls back to the active session model when pi/task is unset", () => {
 		const settings = Settings.isolated({
-			modelRoles: { default: "anthropic/claude-sonnet-4-5" },
+			modelRoutes: { default: { primary: "anthropic/claude-sonnet-4-5", fallbacks: [] } },
 		});
 
 		const result = resolveAgentModelPatterns({
@@ -495,9 +495,9 @@ describe("resolveAgentModelPatterns", () => {
 
 	test("uses the configured task role before falling back to the session model", () => {
 		const settings = Settings.isolated({
-			modelRoles: {
-				default: "openai/gpt-4o",
-				task: "anthropic/claude-sonnet-4-5:high",
+			modelRoutes: {
+				default: { primary: "openai/gpt-4o", fallbacks: [] },
+				task: { primary: "anthropic/claude-sonnet-4-5:high", fallbacks: [] },
 			},
 		});
 
@@ -512,8 +512,8 @@ describe("resolveAgentModelPatterns", () => {
 
 	test("expands pi/designer to priority defaults", () => {
 		const settings = Settings.isolated({
-			modelRoles: {
-				default: "anthropic/claude-sonnet-4-5",
+			modelRoutes: {
+				default: { primary: "anthropic/claude-sonnet-4-5", fallbacks: [] },
 			},
 		});
 
@@ -534,9 +534,9 @@ describe("resolveAgentModelPatterns", () => {
 
 	test("prefers configured designer role override over priority defaults", () => {
 		const settings = Settings.isolated({
-			modelRoles: {
-				default: "anthropic/claude-sonnet-4-5",
-				designer: "openai/gpt-4o",
+			modelRoutes: {
+				default: { primary: "anthropic/claude-sonnet-4-5", fallbacks: [] },
+				designer: { primary: "openai/gpt-4o", fallbacks: [] },
 			},
 		});
 

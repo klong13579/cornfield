@@ -25,6 +25,7 @@ import {
 	SKELETON_FILES,
 	unregisterAgent,
 } from "@cornfield/coding-agent/skeleton";
+import { migrateLegacyModelConfig } from "../config/model-routes";
 import { MECE_FILES, type MeceContext, runMeceChecks, runMeceRepairs } from "./mece-rules";
 import { runSemanticAudit, type SemanticViolation } from "./semantic-audit";
 
@@ -645,15 +646,16 @@ async function runSemanticPhaseInner(
 	meceCtx: MeceContext,
 ): Promise<{ violations: SemanticViolation[]; model?: string; error?: string }> {
 	try {
-		// Read agentDir's .cornfield/config.yml for modelRoles.default
+		// Read agentDir's .cornfield/config.yml for modelRoutes default/smol primary
+		// （经统一迁移函数读取：旧 modelRoles 配置无需先落盘迁移即可被校验识别）
 		const configPath = path.join(agentDir, ".cornfield", "config.yml");
 		let modelRoleStr: string | undefined;
 		try {
 			const configText = await Bun.file(configPath).text();
 			if (typeof Bun.YAML?.parse === "function") {
-				const parsed = Bun.YAML.parse(configText) as Record<string, unknown>;
-				const roles = parsed?.modelRoles as Record<string, string> | undefined;
-				modelRoleStr = roles?.default ?? roles?.smol;
+				const parsed = Bun.YAML.parse(configText) as Record<string, unknown> | null;
+				const { routes } = migrateLegacyModelConfig(parsed ?? {});
+				modelRoleStr = routes.default?.primary ?? routes.smol?.primary;
 			}
 		} catch {
 			// Config read failed — fall back to global

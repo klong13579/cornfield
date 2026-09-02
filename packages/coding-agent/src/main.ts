@@ -495,7 +495,7 @@ export async function buildSessionOptions(
 			}
 		} else if (resolved.model) {
 			options.model = resolved.model;
-			settings.overrideModelRoles({
+			settings.overrideModelRoutes({
 				default: resolved.selector ?? `${resolved.model.provider}/${resolved.model.id}`,
 			});
 			if (!parsed.thinking && resolved.thinkingLevel) {
@@ -713,7 +713,7 @@ export async function runRootCommand(parsed: Args, rawArgs: string[]): Promise<v
 	const slowModel = parsedArgs.slow ?? $env.PI_SLOW_MODEL;
 	const planModel = parsedArgs.plan ?? $env.PI_PLAN_MODEL;
 	if (smolModel || slowModel || planModel) {
-		settings.overrideModelRoles({
+		settings.overrideModelRoutes({
 			smol: smolModel,
 			slow: slowModel,
 			plan: planModel,

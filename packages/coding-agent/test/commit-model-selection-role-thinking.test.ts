@@ -20,7 +20,9 @@ function createSettings(modelRoles: Record<string, string>) {
 			modelRoles[role] = value;
 		},
 		get(path: string) {
-			if (path === "modelRoles") return modelRoles;
+			if (path === "modelRoutes") {
+				return Object.fromEntries(Object.entries(modelRoles).map(([role, primary]) => [role, { primary, fallbacks: [] }]));
+			}
 			return undefined;
 		},
 	} as never;

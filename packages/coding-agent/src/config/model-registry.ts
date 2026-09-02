@@ -91,7 +91,7 @@ export function getKnownRoleIds(settings: Settings): string[] {
 	};
 
 	for (const role of settings.get("cycleOrder")) addRole(role);
-	for (const role of Object.keys(settings.getModelRoles())) addRole(role);
+	for (const role of Object.keys(settings.getModelRoutes())) addRole(role);
 	for (const role of Object.keys(settings.get("modelTags"))) addRole(role);
 
 	return roles;
@@ -2130,6 +2130,15 @@ export class ModelRegistry {
 		return this.#discoverableProviders
 			.filter(provider => !disabledProviders.has(provider.provider))
 			.map(provider => provider.provider);
+	}
+
+	/**
+	 * Whether the provider is keyless (no credentials required; e.g. local llama.cpp or
+	 * models.yml providers declared without apiKey). Mirrors the keyless bypass in
+	 * #isModelAvailable — catalog status derivation (#02) must agree with getAvailable.
+	 */
+	isKeylessProvider(provider: string): boolean {
+		return this.#keylessProviders.has(provider);
 	}
 
 	getProviderDiscoveryState(provider: string): ProviderDiscoveryState | undefined {

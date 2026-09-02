@@ -2,6 +2,8 @@ import type {
 	AgentInfoDto,
 	ArtifactDto,
 	AvailableModelsDto,
+	ConfigInheritanceRestoreDto,
+	ConfigScopeDto,
 	ConnectionInfoDto,
 	CronLogEntryDto,
 	DashboardStatsDto,
@@ -11,6 +13,13 @@ import type {
 	ImageContentDto,
 	MemoryProjectionDto,
 	MessageDto,
+	ModelCatalogDto,
+	ModelSelectionDto,
+	ModelTestResultDto,
+	ProviderDisconnectResultDto,
+	ProviderListDto,
+	ProviderOAuthStartDto,
+	ProviderStatusDto,
 	SessionSnapshotDto,
 	SkillDto,
 	StatsPeriodDto,
@@ -210,6 +219,44 @@ export interface PiClient {
 		modelId: string | undefined,
 		disabled: boolean,
 	): Promise<{ ok: boolean; disabledProviders: string[]; disabledModels: string[] }>;
+
+	// ── 模型控制中心（#02 全量目录 / #03 Provider 接入 / #05 配置作用域）──
+	/** #02 全量模型目录（get_model_catalog：含未接入 provider，六态 status 区分）。 */
+	fetchModelCatalog(): Promise<ModelCatalogDto>;
+	/** #05 模型选择两层视图（get_model_selection：会话临时/持久默认语义读写两侧可区分）。 */
+	fetchModelSelection(): Promise<ModelSelectionDto>;
+	/** 会话级临时切换模型（set_model_temporary：仅本会话，不写 settings）。 */
+	setModelTemporary(providerId: string, modelId: string): Promise<void>;
+	/** 持久化默认模型（set_model：serve 侧写 settings.modelRoutes.default.primary 并持久化）。 */
+	setPersistentDefaultModel(providerId: string, modelId: string): Promise<void>;
+	/** #05 按作用域写配置（set_config；global 写全局 config.yml，project 写 .cornfield/config.yml）。 */
+	setConfigValue(key: string, value: unknown, scope: "global" | "project"): Promise<void>;
+	/** #03 Provider 状态列表（get_providers；响应只含掩码密钥，不回显明文）。 */
+	fetchProviders(): Promise<ProviderListDto>;
+	/** #03 单个 Provider 状态（get_provider；未知 providerId 抛错）。 */
+	fetchProvider(providerId: string): Promise<ProviderStatusDto>;
+	/** #03 发起 OAuth 登录（start_provider_oauth；requiresManualCode 流需随后 completeProviderOauth）。 */
+	startProviderOauth(providerId: string): Promise<ProviderOAuthStartDto>;
+	/** #03 提交 OAuth 手输 code / 粘贴 key（complete_provider_oauth）；返回最新状态。 */
+	completeProviderOauth(providerId: string, code: string): Promise<ProviderStatusDto>;
+	/** #03 保存/替换 API Key（save_provider_api_key；明文只进请求载荷，响应仅掩码）。 */
+	saveProviderApiKey(providerId: string, apiKey: string): Promise<ProviderStatusDto>;
+	/** #03 删除已存 API Key（delete_provider_api_key；幂等）。 */
+	deleteProviderApiKey(providerId: string): Promise<ProviderStatusDto>;
+	/** #03 设置自定义 Base URL（set_provider_base_url；null 清除覆盖）。 */
+	setProviderBaseUrl(providerId: string, baseUrl: string | null): Promise<ProviderStatusDto>;
+	/** #03 断开 provider（disconnect_provider；有依赖未 force 时 disconnected:false + 依赖清单）。 */
+	disconnectProvider(providerId: string, force: boolean): Promise<ProviderDisconnectResultDto>;
+	/** #03 单 provider 目录刷新（refresh_provider；online 强制）。 */
+	refreshProvider(providerId: string): Promise<ProviderStatusDto>;
+	/** #04 全量目录刷新（refresh_catalog；registry 级并行，返回刷新后的完整目录）。 */
+	refreshCatalog(): Promise<ModelCatalogDto>;
+	/** #04 单模型连通性测试（test_model；真实调用会产生费用，UI 必须先确认）。 */
+	testModel(providerId: string, modelId: string): Promise<ModelTestResultDto>;
+	/** #05 配置作用域读取（get_config_scope：hasProjectConfig + 可覆盖键三层取值）。 */
+	fetchConfigScope(): Promise<ConfigScopeDto>;
+	/** #05 恢复继承（restore_config_inheritance：删除项目覆盖键而非复制值）。 */
+	restoreConfigInheritance(key: string): Promise<ConfigInheritanceRestoreDto>;
 
 	// ── P3 多 Agent ──
 	/** 拉取注册表 agent 元数据列表（list_agents，不触发 attach）。 */

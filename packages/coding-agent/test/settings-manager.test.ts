@@ -56,7 +56,7 @@ describe("Settings", () => {
 			// Seed initial settings in config.yml
 			await writeSettings({
 				theme: "dark",
-				modelRoles: { default: "claude-sonnet" },
+				modelRoutes: { default: { primary: "claude-sonnet", fallbacks: [] } },
 			});
 
 			// Settings loads the initial state
@@ -65,7 +65,7 @@ describe("Settings", () => {
 			// Simulate external edit (e.g., user modifying DB directly or another process)
 			await writeSettings({
 				theme: { dark: "anthracite" },
-				modelRoles: { default: "claude-sonnet" },
+				modelRoutes: { default: { primary: "claude-sonnet", fallbacks: [] } },
 				enabledModels: ["claude-opus-4-5", "gpt-5.2-codex"],
 			});
 
@@ -77,18 +77,20 @@ describe("Settings", () => {
 			expect(savedSettings.enabledModels).toEqual(["claude-opus-4-5", "gpt-5.2-codex"]);
 			expect(savedSettings.defaultThinkingLevel).toBe(Effort.High);
 			expect(savedSettings.theme).toEqual({ dark: "anthracite" });
-			expect((savedSettings.modelRoles as { default?: string } | undefined)?.default).toBe("claude-sonnet");
+			expect((savedSettings.modelRoutes as { default?: { primary?: string } } | undefined)?.default?.primary).toBe(
+				"claude-sonnet",
+			);
 		});
 
 		it("should preserve custom settings when changing theme", async () => {
 			await writeSettings({
-				modelRoles: { default: "claude-sonnet" },
+				modelRoutes: { default: { primary: "claude-sonnet", fallbacks: [] } },
 			});
 
 			const settings = await Settings.init({ cwd: projectDir, agentDir });
 
 			await writeSettings({
-				modelRoles: { default: "claude-sonnet" },
+				modelRoutes: { default: { primary: "claude-sonnet", fallbacks: [] } },
 				shellPath: "/bin/zsh",
 				extensions: ["/path/to/extension.ts"],
 			});

@@ -7,13 +7,14 @@
  *
  * 用法（agentDir `config.yml`）：
  * ```yaml
- * modelRoles:
- *   default: alibaba-coding-plan/deepseek-v4-flash
- * modelFallbacks:
- *   - narwal-plan/deepseek-v4-flash-0731
- *   - narwal-plan/qwen3.7-plus
+ * modelRoutes:
+ *   default:
+ *     primary: alibaba-coding-plan/deepseek-v4-flash
+ *     fallbacks:
+ *       - narwal-plan/deepseek-v4-flash-0731
+ *       - narwal-plan/qwen3.7-plus
  * ```
- * `modelFallbacks` 是本 agent 的备用模型列表（字符串，与 modelRoles 同格式）。
+ * 每个角色拥有独立的主模型与有序回退链（modelRoutes，见 model-routes.ts）。
  *
  * 触发条件：401（鉴权）/ 429（限流）/ 5xx / 网络错误（TypeError /
  * ECONNRESET / timeout）。主动取消（AbortError）**不**触发回退。
@@ -28,9 +29,6 @@ import { logger } from "@cornfield/utils";
 import type { ModelRegistry } from "./model-registry";
 import { resolveModelRoleValue } from "./model-resolver";
 import type { Settings } from "./settings";
-
-/** settings.modelFallbacks 键名。 */
-export const MODEL_FALLBACKS_KEY = "modelFallbacks";
 
 /** 判定一次 LLM 失败是否值得切备用模型重试。 */
 export function isRetryableError(err: unknown): boolean {
@@ -49,7 +47,7 @@ export function isRetryableError(err: unknown): boolean {
 }
 
 /**
- * 从 settings 解析当前 agent 的 fallback 模型列表（与主模型同一套解析逻辑，
+ * 从 settings 解析 default 角色的回退链（与主模型同一套解析逻辑，
  * 含 thinking level；去重；解析失败的条目跳过并告警）。
  */
 export function resolveFallbackModels(
@@ -57,9 +55,7 @@ export function resolveFallbackModels(
 	registry: ModelRegistry,
 	availableModels: Model<Api>[],
 ): Model<Api>[] {
-	const raw = settings.get(MODEL_FALLBACKS_KEY) as unknown;
-	if (raw === undefined || raw === null) return [];
-	const specs = (Array.isArray(raw) ? raw : typeof raw === "string" ? [raw] : []) as string[];
+	const specs = settings.getModelRoute("default")?.fallbacks ?? [];
 	const out: Model<Api>[] = [];
 	for (const spec of specs) {
 		try {

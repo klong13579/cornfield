@@ -4,11 +4,13 @@
  */
 export * from "./agents";
 export * from "./artifacts";
+export * from "./config-scope";
 export * from "./cron";
 export * from "./diagnosis";
 export * from "./events";
 export * from "./memory";
 export * from "./models";
+export * from "./providers";
 export * from "./session";
 export * from "./skills";
 export * from "./stats";

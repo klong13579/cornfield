@@ -1,6 +1,7 @@
 import { THINKING_EFFORTS } from "@cornfield/ai";
 import { TASK_SIMPLE_MODES } from "../task/simple-mode";
 import { EDIT_MODES } from "../utils/edit-mode";
+import type { ModelRoleRoute } from "./model-routes";
 
 /** Unified settings schema - single source of truth for all settings.
  * Unified settings schema - single source of truth for all settings.
@@ -157,7 +158,7 @@ export interface ModelTagsSettings {
 // Typed defaults for array/record settings — named constants avoid `as` casts
 // under `as const` while still letting SettingValue infer the correct element type.
 const EMPTY_STRING_ARRAY: string[] = [];
-const EMPTY_STRING_RECORD: Record<string, string> = {};
+const EMPTY_MODEL_ROUTES_RECORD: Record<string, ModelRoleRoute> = {};
 const DEFAULT_CYCLE_ORDER: string[] = ["smol", "default", "slow"];
 const EMPTY_MODEL_TAGS_RECORD: ModelTagsSettings = {};
 export const DEFAULT_BASH_INTERCEPTOR_RULES: BashInterceptorRule[] = [
@@ -246,10 +247,7 @@ export const SETTINGS_SCHEMA = {
 
 	disabledExtensions: { type: "array", default: EMPTY_STRING_ARRAY },
 
-	modelRoles: { type: "record", default: EMPTY_STRING_RECORD },
-
-	// 主模型失败（401/429/5xx/网络错误）时依次重试的备用模型，格式同 modelRoles 取值
-	modelFallbacks: { type: "array", default: EMPTY_STRING_ARRAY },
+	modelRoutes: { type: "record", default: EMPTY_MODEL_ROUTES_RECORD },
 
 	pinned: { type: "array", default: EMPTY_STRING_ARRAY },
 

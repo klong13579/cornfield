@@ -71,8 +71,8 @@ describe("component escape bindings", () => {
 		}
 
 		const settings = Settings.isolated({
-			modelRoles: {
-				default: `${model.provider}/${model.id}`,
+			modelRoutes: {
+				default: { primary: `${model.provider}/${model.id}`, fallbacks: [] },
 			},
 		});
 		const modelRegistry = {

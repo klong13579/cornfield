@@ -8,6 +8,8 @@ import { getAgentDir, getConfigRootDir, isEnoent, logger, parseFrontmatter } fro
 import type {
 	AgentMessageDto,
 	ClientFrame,
+	ConfigScope,
+	ModelSelectionDto,
 	PermissionRequestPush,
 	ServerFrame,
 	ToolSwitchesDto,
@@ -20,7 +22,8 @@ import type {
 import { MULTIDEVICE_PROTOCOL_VERSION } from "@cornfield/wire";
 import { YAML } from "bun";
 import { withFileLock } from "../config/file-lock";
-import { type SettingPath, Settings } from "../config/settings";
+import { parseModelString } from "../config/model-resolver";
+import { getDefault, SETTINGS_SCHEMA, type SettingPath, Settings } from "../config/settings";
 import {
 	DEFAULT_EDIT_MODE,
 	type EditMode,
@@ -65,10 +68,10 @@ import { invalidateFsScanAfterWrite } from "../tools/fs-cache-invalidation";
 import type { TodoPhase } from "../tools/todo-write";
 import * as git from "../utils/git";
 import { listAgentArtifacts, listSessionArtifacts } from "./artifacts";
+import { getDiagnosisReport, listDiagnosisReports, runDiagnosis } from "./diagnosis-runner";
 import { WireHostToolBridge } from "./host-tool-bridge";
 import { PERMISSION_TIMEOUT_OUTCOME, PermissionGate } from "./permission-gate";
 import { agentSessionsRoot, defaultSessionsRoot, indexSessions, type SessionIndexSource } from "./session-index";
-import { runDiagnosis, listDiagnosisReports, getDiagnosisReport } from "./diagnosis-runner";
 import {
 	type AgentMeta,
 	type AttachedSession,
@@ -892,19 +895,95 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 						fail(`unknown agent: ${agentId}`);
 						return;
 					}
-					const cmd = command as { key: string; value?: unknown };
+					const cmd = command as { key: string; value?: unknown; scope?: ConfigScope };
 					const key = cmd.key.trim();
 					if (!key) {
 						fail("key is required");
 						return;
 					}
+					// #05 作用域写入：scope 缺省 = global（agentDir/config.yml 现行为）；
+					// project 写 <agentDir>/.cornfield/config.yml（文件不存在时创建）。
+					const scope: ConfigScope = cmd.scope ?? "global";
+					const targetPath = scope === "project" ? agentProjectConfigPathFor(meta) : agentConfigPathFor(meta);
 					try {
-						const config = await readAgentConfigYaml(agentConfigPathFor(meta));
+						const config = await readAgentConfigYaml(targetPath);
 						configSetByPath(config, key.split("."), cmd.value);
-						await writeAgentConfigYaml(agentConfigPathFor(meta), config);
-						done({ ok: true, key, value: cmd.value });
+						await writeAgentConfigYaml(targetPath, config);
+						done({ ok: true, key, value: cmd.value, scope });
 					} catch (err) {
 						fail(`set_config failed: ${err instanceof Error ? err.message : String(err)}`);
+					}
+					return;
+				}
+				// ── 配置作用域（#05）：与 get_config/set_config 同源 per-agent 文件读解 ──
+				case "get_config_scope": {
+					const agentId = (command as { sessionId?: string }).sessionId ?? ctx.activeAgentId;
+					const meta = registry.getMeta(agentId);
+					if (!meta) {
+						fail(`unknown agent: ${agentId}`);
+						return;
+					}
+					try {
+						const globalPath = agentConfigPathFor(meta);
+						const projectPath = agentProjectConfigPathFor(meta);
+						const globalConfig = await readAgentConfigYaml(globalPath);
+						const projectConfig = await readAgentConfigYaml(projectPath);
+						// 与 Settings#hasProjectConfigFile 同源：文件存在即 true（空文件也算）
+						const hasProjectConfig = await Bun.file(projectPath).exists();
+						const keys = (Object.keys(SETTINGS_SCHEMA) as SettingPath[]).map(settingsKey => {
+							const segments = settingsKey.split(".");
+							const projectValue = configGetByPath(projectConfig, segments);
+							const globalValue = configGetByPath(globalConfig, segments);
+							return {
+								key: settingsKey,
+								overridden: projectValue !== undefined,
+								...(projectValue !== undefined ? { projectValue } : {}),
+								...(globalValue !== undefined ? { globalValue } : {}),
+								effectiveValue: configMergeValues(globalValue, projectValue) ?? getDefault(settingsKey),
+							};
+						});
+						done({
+							hasProjectConfig,
+							...(hasProjectConfig ? { projectConfigPath: projectPath } : {}),
+							globalConfigPath: globalPath,
+							keys,
+						});
+					} catch (err) {
+						fail(`get_config_scope failed: ${err instanceof Error ? err.message : String(err)}`);
+					}
+					return;
+				}
+				case "restore_config_inheritance": {
+					const agentId = (command as { sessionId?: string }).sessionId ?? ctx.activeAgentId;
+					const meta = registry.getMeta(agentId);
+					if (!meta) {
+						fail(`unknown agent: ${agentId}`);
+						return;
+					}
+					const key = (command as { key?: string }).key?.trim();
+					if (!key) {
+						fail("key is required");
+						return;
+					}
+					const projectPath = agentProjectConfigPathFor(meta);
+					try {
+						const projectConfig = await readAgentConfigYaml(projectPath);
+						const removed = configDeleteByPath(projectConfig, key.split("."));
+						if (removed) {
+							await writeAgentConfigYaml(projectPath, projectConfig);
+						}
+						// 删除后的生效值回落全局/ schema 默认（项目覆盖已不存在）
+						const globalValue = configGetByPath(
+							await readAgentConfigYaml(agentConfigPathFor(meta)),
+							key.split("."),
+						);
+						done({
+							key,
+							removed,
+							effectiveValue: globalValue ?? getDefault(key as SettingPath),
+						});
+					} catch (err) {
+						fail(`restore_config_inheritance failed: ${err instanceof Error ? err.message : String(err)}`);
 					}
 					return;
 				}
@@ -928,6 +1007,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 			const MUTATING_NO_EVENT = new Set([
 				"set_todos",
 				"set_model",
+				"set_model_temporary",
 				"set_thinking_level",
 				"cycle_thinking_level",
 				"cycle_model",
@@ -1279,6 +1359,136 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 						disabledProviders: currentSettings.get("disabledProviders") ?? [],
 						disabledModels: currentSettings.get("disabledModels") ?? [],
 					});
+					break;
+				}
+
+				// ── 模型控制中心（#02 全量目录 / #03 Provider 接入）──
+				// handler 全部在 AgentSession（session.modelRegistry/authStorage/settings 共享
+				// 链路）；响应不回显明文密钥，apiKey/code 只进写命令请求载荷。
+				case "get_model_catalog": {
+					try {
+						done(await session.buildModelCatalog());
+					} catch (err) {
+						fail(`get_model_catalog failed: ${err instanceof Error ? err.message : String(err)}`);
+					}
+					break;
+				}
+				case "get_model_selection": {
+					// #05 模型选择读侧：session.source 标记 temporary/persistent/registry-default；
+					// persistedDefault 独立给出持久化层取值（settings.modelRoles.default，可带 thinking 后缀）。
+					const current = session.model;
+					const persistedRaw = session.settings.getModelRole("default");
+					const persisted = persistedRaw ? parseModelString(persistedRaw) : undefined;
+					const source: ModelSelectionDto["session"]["source"] = !persisted
+						? "registry-default"
+						: current && persisted.provider === current.provider && persisted.id === current.id
+							? "persistent"
+							: "temporary";
+					if (current) {
+						done({
+							session: { provider: current.provider, modelId: current.id, source },
+							persistedDefault: persisted ? { provider: persisted.provider, modelId: persisted.id } : null,
+						});
+					} else if (persisted) {
+						// 尚无会话模型（模型解析失败的启动边态）：回落持久化默认
+						done({
+							session: { provider: persisted.provider, modelId: persisted.id, source: "persistent" },
+							persistedDefault: { provider: persisted.provider, modelId: persisted.id },
+						});
+					} else {
+						fail("no model selected: session has no model and no persisted default");
+					}
+					break;
+				}
+				case "get_providers": {
+					try {
+						done(await session.listProviders());
+					} catch (err) {
+						fail(`get_providers failed: ${err instanceof Error ? err.message : String(err)}`);
+					}
+					break;
+				}
+				case "get_provider": {
+					try {
+						done(await session.getProviderStatus(command.providerId));
+					} catch (err) {
+						fail(`get_provider failed: ${err instanceof Error ? err.message : String(err)}`);
+					}
+					break;
+				}
+				case "start_provider_oauth": {
+					try {
+						done(await session.startProviderOauth(command.providerId));
+					} catch (err) {
+						fail(`start_provider_oauth failed: ${err instanceof Error ? err.message : String(err)}`);
+					}
+					break;
+				}
+				case "complete_provider_oauth": {
+					try {
+						done(await session.completeProviderOauth(command.providerId, command.code ?? ""));
+					} catch (err) {
+						fail(`complete_provider_oauth failed: ${err instanceof Error ? err.message : String(err)}`);
+					}
+					break;
+				}
+				case "save_provider_api_key": {
+					try {
+						done(await session.saveProviderApiKey(command.providerId, command.apiKey));
+					} catch (err) {
+						fail(`save_provider_api_key failed: ${err instanceof Error ? err.message : String(err)}`);
+					}
+					break;
+				}
+				case "delete_provider_api_key": {
+					try {
+						done(await session.deleteProviderApiKey(command.providerId));
+					} catch (err) {
+						fail(`delete_provider_api_key failed: ${err instanceof Error ? err.message : String(err)}`);
+					}
+					break;
+				}
+				case "set_provider_base_url": {
+					try {
+						done(await session.setProviderBaseUrl(command.providerId, command.baseUrl));
+					} catch (err) {
+						fail(`set_provider_base_url failed: ${err instanceof Error ? err.message : String(err)}`);
+					}
+					break;
+				}
+				case "disconnect_provider": {
+					try {
+						// 依赖检查结果是命令的正常结果（ok:true + disconnected:false），不走错误通道
+						done(await session.disconnectProvider(command.providerId, command.force ?? false));
+					} catch (err) {
+						fail(`disconnect_provider failed: ${err instanceof Error ? err.message : String(err)}`);
+					}
+					break;
+				}
+				case "refresh_provider": {
+					try {
+						done(await session.refreshProviderCatalog(command.providerId));
+					} catch (err) {
+						fail(`refresh_provider failed: ${err instanceof Error ? err.message : String(err)}`);
+					}
+					break;
+				}
+				case "refresh_catalog": {
+					try {
+						// #04 全量刷新：单 provider 失败不抛——错误在返回目录的 providers[].refreshError/stale 里
+						done(await session.refreshFullCatalog());
+					} catch (err) {
+						fail(`refresh_catalog failed: ${err instanceof Error ? err.message : String(err)}`);
+					}
+					break;
+				}
+				case "test_model": {
+					try {
+						// #04 连通性测试：真实调用（可能产生费用，UI 已确认）；结果六类 outcome，不伪装成功
+						done(await session.testModel(command.providerId, command.modelId));
+					} catch (err) {
+						fail(`test_model failed: ${err instanceof Error ? err.message : String(err)}`);
+					}
 					break;
 				}
 
@@ -2653,6 +2863,13 @@ function agentConfigPathFor(meta: AgentMeta): string {
 	return meta.id === "default" ? path.join(getAgentDir(), "config.yml") : path.join(meta.agentDir, "config.yml");
 }
 
+/** #05 项目级配置路径（Settings 的 project 覆盖层同源：<cwd>/.cornfield/config.yml；
+ * serve 装配时 agent 的 cwd = agentDir，default agent 的 meta.agentDir = 启动目录）。 */
+function agentProjectConfigPathFor(meta: AgentMeta): string {
+	const cwd = meta.id === "default" ? process.cwd() : meta.agentDir;
+	return path.join(cwd, ".cornfield", "config.yml");
+}
+
 async function readAgentConfigYaml(filePath: string): Promise<Record<string, unknown>> {
 	try {
 		const raw = await Bun.file(filePath).text();
@@ -2696,4 +2913,54 @@ function configSetByPath(obj: Record<string, unknown>, segments: string[], value
 		current = current[segment] as Record<string, unknown>;
 	}
 	current[segments[segments.length - 1]] = value;
+}
+
+/** 删除指定路径的键（#05 恢复继承）；父对象空了则逐级剪枝。返回是否实际删除。 */
+function configDeleteByPath(obj: Record<string, unknown>, segments: string[]): boolean {
+	const stack: Array<{ parent: Record<string, unknown>; segment: string }> = [];
+	let current: unknown = obj;
+	for (let i = 0; i < segments.length - 1; i++) {
+		const segment = segments[i];
+		if (current === null || typeof current !== "object") return false;
+		const parent = current as Record<string, unknown>;
+		if (!(segment in parent)) return false;
+		stack.push({ parent, segment });
+		current = parent[segment];
+	}
+	if (current === null || typeof current !== "object") return false;
+	const leaf = current as Record<string, unknown>;
+	const last = segments[segments.length - 1];
+	if (!(last in leaf)) return false;
+	delete leaf[last];
+	for (let i = stack.length - 1; i >= 0; i--) {
+		const { parent, segment } = stack[i];
+		const child = parent[segment];
+		if (typeof child === "object" && child !== null && !Array.isArray(child) && Object.keys(child).length === 0) {
+			delete parent[segment];
+		} else {
+			break;
+		}
+	}
+	return true;
+}
+
+/** #05 effectiveValue：project 覆盖在 global 之上（与 Settings#deepMerge 同语义：
+ * 两侧都是普通对象时递归合并，否则 project 胜出）。 */
+function configMergeValues(globalValue: unknown, projectValue: unknown): unknown {
+	if (projectValue === undefined) return globalValue;
+	if (
+		typeof projectValue === "object" &&
+		projectValue !== null &&
+		!Array.isArray(projectValue) &&
+		typeof globalValue === "object" &&
+		globalValue !== null &&
+		!Array.isArray(globalValue)
+	) {
+		const merged: Record<string, unknown> = { ...(globalValue as Record<string, unknown>) };
+		for (const [key, value] of Object.entries(projectValue as Record<string, unknown>)) {
+			merged[key] = configMergeValues((globalValue as Record<string, unknown>)[key], value);
+		}
+		return merged;
+	}
+	return projectValue;
 }

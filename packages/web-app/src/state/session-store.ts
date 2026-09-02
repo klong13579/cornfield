@@ -1,6 +1,8 @@
 import type {
 	AgentInfoDto,
 	AvailableModelsDto,
+	ConfigInheritanceRestoreDto,
+	ConfigScopeDto,
 	CronLogEntryDto,
 	DashboardStatsDto,
 	DisabledSkillDto,
@@ -10,8 +12,15 @@ import type {
 	MemoryProjectionDto,
 	MessageContentDto,
 	MessageDto,
+	ModelCatalogDto,
+	ModelSelectionDto,
+	ModelTestResultDto,
 	PermissionRequestDto,
 	ProgressEventDto,
+	ProviderDisconnectResultDto,
+	ProviderListDto,
+	ProviderOAuthStartDto,
+	ProviderStatusDto,
 	SessionPhaseDto,
 	SessionSnapshotDto,
 	SkillDto,
@@ -277,8 +286,9 @@ export class SessionStore {
 		void this.#run(() => this.#client.newSession());
 	}
 
+	/** 切换模型（set_model）。失败不再静默：错误写 view.commandError，由模型控制中心/工作台提示条渲染。 */
 	setModel(modelId: string, provider?: string, agentId?: string): void {
-		void this.#client.setModel(modelId, provider, agentId).catch(() => undefined);
+		void this.#run(() => this.#client.setModel(modelId, provider, agentId));
 	}
 
 	setThinkingLevel(level: string, agentId?: string): void {
@@ -381,7 +391,8 @@ export class SessionStore {
 	}
 
 	/**
-	 * 拉取模型市场数据（get_available_models：models + 停用名单）；展示层自行持有。
+	 * 拉取模型目录数据（get_available_models：models + 停用名单）；展示层自行持有，
+	 * 失败抛错由调用方（模型目录 CatalogView）渲染错误态。
 	 */
 	fetchModels(): Promise<AvailableModelsDto> {
 		return this.#client.getAvailableModels();
@@ -399,6 +410,100 @@ export class SessionStore {
 		disabled: boolean,
 	): Promise<{ ok: boolean; disabledProviders: string[]; disabledModels: string[] }> {
 		return this.#client.setModelDisabled(provider, modelId, disabled);
+	}
+
+	// ── 模型控制中心（#02 全量目录 / #03 Provider 接入 / #05 配置作用域）──
+	// 契约方法（与 UI 并行开发约定）：失败抛错由调用方渲染错误态；敏感值（apiKey/code）
+	// 只透传进请求载荷，本层不落日志。
+
+	/** #02 全量模型目录（get_model_catalog；含未接入 provider，六态 status 区分）。 */
+	fetchModelCatalog(): Promise<ModelCatalogDto> {
+		return this.#client.fetchModelCatalog();
+	}
+
+	/** #05 模型选择两层视图（get_model_selection；临时/持久默认读写两侧可区分）。 */
+	fetchModelSelection(): Promise<ModelSelectionDto> {
+		return this.#client.fetchModelSelection();
+	}
+
+	/** 会话级临时切换模型（set_model_temporary；仅本会话，不写 settings）。 */
+	setModelTemporary(providerId: string, modelId: string): Promise<void> {
+		return this.#client.setModelTemporary(providerId, modelId);
+	}
+
+	/** #03 Provider 状态列表（get_providers；响应只含掩码密钥）。 */
+	fetchProviders(): Promise<ProviderListDto> {
+		return this.#client.fetchProviders();
+	}
+
+	/** #03 单个 Provider 状态（get_provider；未知 providerId 抛错）。 */
+	fetchProvider(providerId: string): Promise<ProviderStatusDto> {
+		return this.#client.fetchProvider(providerId);
+	}
+
+	/** #03 发起 OAuth 登录（start_provider_oauth；requiresManualCode 流需随后 completeProviderOauth）。 */
+	startProviderOauth(providerId: string): Promise<ProviderOAuthStartDto> {
+		return this.#client.startProviderOauth(providerId);
+	}
+
+	/** #03 提交 OAuth 手输 code / 粘贴 key（complete_provider_oauth）；返回最新状态。 */
+	completeProviderOauth(providerId: string, code: string): Promise<ProviderStatusDto> {
+		return this.#client.completeProviderOauth(providerId, code);
+	}
+
+	/** #03 保存/替换 API Key（save_provider_api_key；明文只进请求载荷，响应仅掩码）。 */
+	saveProviderApiKey(providerId: string, apiKey: string): Promise<ProviderStatusDto> {
+		return this.#client.saveProviderApiKey(providerId, apiKey);
+	}
+
+	/** #03 删除已存 API Key（delete_provider_api_key；幂等）。 */
+	deleteProviderApiKey(providerId: string): Promise<ProviderStatusDto> {
+		return this.#client.deleteProviderApiKey(providerId);
+	}
+
+	/** #03 设置自定义 Base URL（set_provider_base_url；null 清除覆盖）。 */
+	setProviderBaseUrl(providerId: string, baseUrl: string | null): Promise<ProviderStatusDto> {
+		return this.#client.setProviderBaseUrl(providerId, baseUrl);
+	}
+
+	/** #03 断开 provider（disconnect_provider；有依赖未 force 时 disconnected:false + 依赖清单）。 */
+	disconnectProvider(providerId: string, force: boolean): Promise<ProviderDisconnectResultDto> {
+		return this.#client.disconnectProvider(providerId, force);
+	}
+
+	/** #03 单 provider 目录刷新（refresh_provider；online 强制）。 */
+	refreshProvider(providerId: string): Promise<ProviderStatusDto> {
+		return this.#client.refreshProvider(providerId);
+	}
+
+	/** #04 全量目录刷新（refresh_catalog；registry 级并行，返回刷新后的完整目录）。 */
+	refreshCatalog(): Promise<ModelCatalogDto> {
+		return this.#client.refreshCatalog();
+	}
+
+	/** #04 单模型连通性测试（test_model；真实调用会产生费用，UI 必须先确认）。 */
+	testModel(providerId: string, modelId: string): Promise<ModelTestResultDto> {
+		return this.#client.testModel(providerId, modelId);
+	}
+
+	/** #05 配置作用域读取（get_config_scope；hasProjectConfig + 可覆盖键三层取值）。 */
+	fetchConfigScope(): Promise<ConfigScopeDto> {
+		return this.#client.fetchConfigScope();
+	}
+
+	/** #05 恢复继承（restore_config_inheritance；删除项目覆盖键而非复制值）。 */
+	restoreConfigInheritance(key: string): Promise<ConfigInheritanceRestoreDto> {
+		return this.#client.restoreConfigInheritance(key);
+	}
+
+	/** #05 按作用域写配置（set_config；global 写全局 config.yml，project 写 .cornfield/config.yml）。 */
+	setConfigValue(key: string, value: unknown, scope: "global" | "project"): Promise<void> {
+		return this.#client.setConfigValue(key, value, scope);
+	}
+
+	/** 持久化默认模型（set_model：写 settings.modelRoutes.default.primary 并持久化到 config.yml）。 */
+	setPersistentDefaultModel(providerId: string, modelId: string): Promise<void> {
+		return this.#client.setPersistentDefaultModel(providerId, modelId);
 	}
 
 	/** 拉取注册表 agent 列表（list_agents）并刷新视图。 */
@@ -472,7 +577,7 @@ export class SessionStore {
 	}
 
 	/** 诊断会话（diagnose_session；异步启动诊断，返回任务句柄）。 */
-	diagnoseSession(sessionFile: string): Promise<{ reportId: string; sessionId: string; state: 'running' | 'done' }> {
+	diagnoseSession(sessionFile: string): Promise<{ reportId: string; sessionId: string; state: "running" | "done" }> {
 		return this.#client.diagnoseSession(sessionFile);
 	}
 

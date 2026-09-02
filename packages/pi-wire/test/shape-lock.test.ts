@@ -45,6 +45,55 @@ type _AssertMcpSet = _McpSet extends {
 	: never;
 const _mcpSetShape: _AssertMcpSet = true;
 
+type _ModelCatalog = WireCommandOfType<"get_model_catalog">;
+type _AssertModelCatalog = _ModelCatalog extends { type: "get_model_catalog"; sessionId?: string } ? true : never;
+const _modelCatalogShape: _AssertModelCatalog = true;
+
+type _SaveProviderKey = WireCommandOfType<"save_provider_api_key">;
+type _AssertSaveProviderKey = _SaveProviderKey extends {
+	type: "save_provider_api_key";
+	providerId: string;
+	apiKey: string;
+}
+	? true
+	: never;
+const _saveProviderKeyShape: _AssertSaveProviderKey = true;
+
+type _DisconnectProvider = WireCommandOfType<"disconnect_provider">;
+type _AssertDisconnectProvider = _DisconnectProvider extends {
+	type: "disconnect_provider";
+	providerId: string;
+	force?: boolean;
+}
+	? true
+	: never;
+const _disconnectProviderShape: _AssertDisconnectProvider = true;
+
+type _SetConfigScoped = WireCommandOfType<"set_config">;
+type _AssertSetConfigScoped = _SetConfigScoped extends {
+	type: "set_config";
+	key: string;
+	value: unknown;
+	scope?: "global" | "project";
+}
+	? true
+	: never;
+const _setConfigScopedShape: _AssertSetConfigScoped = true;
+
+type _TestModel = WireCommandOfType<"test_model">;
+type _AssertTestModel = _TestModel extends {
+	type: "test_model";
+	providerId: string;
+	modelId: string;
+}
+	? true
+	: never;
+const _testModelShape: _AssertTestModel = true;
+
+type _RefreshCatalog = WireCommandOfType<"refresh_catalog">;
+type _AssertRefreshCatalog = _RefreshCatalog extends { type: "refresh_catalog" } ? true : never;
+const _refreshCatalogShape: _AssertRefreshCatalog = true;
+
 // ── 运行时命令清单快照 ──
 
 const COMMAND_TYPES = [
@@ -127,6 +176,10 @@ const COMMAND_TYPES = [
 	"record_transcribe",
 	"listen_list",
 	"list_artifacts",
+	// 会话诊断（P5）
+	"diagnose_session",
+	"list_diagnosis_reports",
+	"get_diagnosis_report",
 	// P0 收口（skill hub + MCP）
 	"list_remote_skills",
 	"install_remote_skill",
@@ -154,6 +207,22 @@ const COMMAND_TYPES = [
 	"get_config",
 	"set_config",
 	"get_tool_switches",
+	// 模型控制中心（#02 全量目录 / #03 Provider 接入 / #05 配置作用域）
+	"get_model_catalog",
+	"get_providers",
+	"get_provider",
+	"start_provider_oauth",
+	"complete_provider_oauth",
+	"save_provider_api_key",
+	"delete_provider_api_key",
+	"set_provider_base_url",
+	"disconnect_provider",
+	"refresh_provider",
+	"refresh_catalog",
+	"test_model",
+	"get_config_scope",
+	"restore_config_inheritance",
+	"get_model_selection",
 ] as const satisfies readonly string[];
 
 /** 从 WireCommand union 提取 type 字面量（编译期核对清单）。 */

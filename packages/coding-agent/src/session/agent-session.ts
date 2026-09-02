@@ -15,7 +15,6 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-
 import {
 	type Agent,
 	AgentBusyError,
@@ -44,11 +43,13 @@ import type {
 } from "@cornfield/ai";
 import {
 	calculateRateLimitBackoffMs,
+	getEnvApiKey,
 	getSupportedEfforts,
 	isContextOverflow,
 	isUnexpectedSocketCloseMessage,
 	isUsageLimitError,
 	modelsAreEqual,
+	PROVIDER_DESCRIPTORS,
 	parseRateLimitReason,
 	streamSimple,
 } from "@cornfield/ai";
@@ -56,14 +57,32 @@ import { killTree, MacOSPowerAssertion } from "@cornfield/natives";
 import {
 	abortableSleep,
 	getAgentDbPath,
+	getAgentDir,
 	isEnoent,
+	isRecord,
 	logger,
 	prompt,
 	Snowflake,
 	setNativeKillTree,
 } from "@cornfield/utils";
+import type {
+	ModelCatalogDto,
+	ModelCatalogEntryDto,
+	ModelCatalogStatus,
+	ModelTestResultDto,
+	ProviderCatalogMetaDto,
+	ProviderConnectionStatus,
+	ProviderCredentialSource,
+	ProviderDependencyDto,
+	ProviderDisconnectResultDto,
+	ProviderListDto,
+	ProviderOAuthStartDto,
+	ProviderStatusDto,
+} from "@cornfield/wire";
+import { YAML } from "bun";
 import type { AsyncJob, AsyncJobManager } from "../async";
 import type { Rule } from "../capability/rule";
+import { withFileLock } from "../config/file-lock";
 import { MODEL_ROLE_IDS, type ModelRegistry } from "../config/model-registry";
 import {
 	extractExplicitThinkingSelector,
@@ -172,6 +191,7 @@ import {
 	type FileMentionMessage,
 	type PythonExecutionMessage,
 } from "./messages";
+import { MODEL_TEST_UNSUPPORTED_CATEGORIES, runModelConnectivityProbe } from "./model-connectivity";
 import { computeRetryFallbackCooldown, RETRY_FALLBACK_FLAPPING_WINDOW_MS } from "./retry-fallback-cooldown";
 import { formatSessionDumpText } from "./session-dump-format";
 import type {
@@ -3934,6 +3954,428 @@ export class AgentSession {
 	}
 
 	// =========================================================================
+	// Model Control Center（#02 全量目录 / #03 Provider 接入）
+	// =========================================================================
+	// 数据源纪律：models.json 是生成文件，目录数据一律来自 ModelRegistry 运行时链路
+	// （getAll/getProviderDiscoveryState/authStorage）。响应不回显明文密钥——只允许
+	// ProviderStatusDto.maskedKey 掩码片段；apiKey/code 只出现在写命令的请求载荷里。
+
+	/** #02 全量模型目录（get_model_catalog）：全部已知模型（含未接入 provider），
+	 * 按 ModelCatalogStatus 六态优先级推导（disabled → provider-not-configured →
+	 * credential-invalid（当前 AuthStorage 无持久化失效信号，暂不可达）→ local-offline →
+	 * catalog-stale → available）。 */
+	async buildModelCatalog(): Promise<ModelCatalogDto> {
+		const registry = this.#modelRegistry;
+		const all = registry.getAll();
+		const disabledProviders = new Set(this.settings.get("disabledProviders") ?? []);
+		const disabledModels = new Set(this.settings.get("disabledModels") ?? []);
+		// modelRoutes 角色主模型（`provider/modelId[:level]`）→ 命中模型的角色名列表
+		const rolesByModel = new Map<string, string[]>();
+		for (const [role, route] of Object.entries(this.settings.getModelRoutes())) {
+			if (!route.primary) continue;
+			const parsed = parseModelString(route.primary);
+			if (!parsed) continue;
+			const key = `${parsed.provider}/${parsed.id}`;
+			const list = rolesByModel.get(key) ?? [];
+			list.push(role);
+			rolesByModel.set(key, list);
+		}
+
+		const providerIds = [...new Set(all.map(m => m.provider))];
+		const discoveryByProvider = new Map(providerIds.map(p => [p, registry.getProviderDiscoveryState(p)]));
+		const localByProvider = new Map(providerIds.map(p => [p, isLocalProviderId(p, all)]));
+
+		const models: ModelCatalogEntryDto[] = all.map(model => {
+			const selector = formatModelString(model);
+			const discovery = discoveryByProvider.get(model.provider);
+			const local = localByProvider.get(model.provider) ?? false;
+			let status: ModelCatalogStatus = "available";
+			let statusDetail: string | undefined;
+			if (disabledProviders.has(model.provider) || disabledModels.has(selector)) {
+				status = "disabled";
+			} else if (!registry.isKeylessProvider(model.provider) && !registry.authStorage.hasAuth(model.provider)) {
+				status = "provider-not-configured";
+			} else if (local && discovery?.status === "unavailable") {
+				status = "local-offline";
+				statusDetail = discovery.error;
+			} else if (discovery?.stale === true) {
+				status = "catalog-stale";
+				statusDetail = discovery.error;
+			}
+			return {
+				provider: model.provider,
+				id: model.id,
+				name: model.name,
+				status,
+				...(statusDetail ? { statusDetail } : {}),
+				pricing: { ...model.cost },
+				capabilities: {
+					thinking: model.reasoning === true,
+					vision: model.input.includes("image"),
+					tools: !(model.category && CATALOG_NO_TOOL_CATEGORIES.has(model.category)),
+					inputModalities: model.input,
+				},
+				contextWindowTokens: model.contextWindow,
+				roles: rolesByModel.get(selector) ?? [],
+				...(model.category ? { category: model.category } : {}),
+			};
+		});
+
+		const providerMetas: ProviderCatalogMetaDto[] = providerIds.map(providerId => {
+			const discovery = discoveryByProvider.get(providerId);
+			const descriptor = PROVIDER_DESCRIPTORS.find(d => d.providerId === providerId);
+			return {
+				providerId,
+				...(descriptor?.catalogDiscovery?.label ? { displayName: descriptor.catalogDiscovery.label } : {}),
+				// 来源链（static → models-dev → cache → dynamic）的实际胜出者：运行期唯一
+				// 可区分的信号是 discovery 状态（ok=dynamic / cached=cache）；无发现配置 =
+				// bundled 静态目录。models-dev 回落与 static 在合并结果中不可区分（报告已记）。
+				source: discovery?.status === "ok" ? "dynamic" : discovery?.status === "cached" ? "cache" : "static",
+				...(discovery?.fetchedAt ? { lastRefreshAt: new Date(discovery.fetchedAt).toISOString() } : {}),
+				stale: discovery?.stale ?? false,
+				discoveredCount: all.filter(m => m.provider === providerId).length,
+				...(discovery?.error ? { refreshError: discovery.error } : {}),
+			};
+		});
+
+		return {
+			models,
+			providers: providerMetas,
+			disabledProviders: [...disabledProviders],
+			disabledModels: [...disabledModels],
+			generatedAt: new Date().toISOString(),
+		};
+	}
+
+	/** #03 Provider 状态列表（get_providers）。不回显明文密钥。 */
+	async listProviders(): Promise<ProviderListDto> {
+		const providerIds = [...new Set(this.#modelRegistry.getAll().map(m => m.provider))];
+		const providers = await Promise.all(providerIds.map(id => this.getProviderStatus(id)));
+		return { providers };
+	}
+
+	/** #03 单个 Provider 状态（get_provider）；未知 provider 抛错（wire 面 → ok:false）。 */
+	async getProviderStatus(providerId: string): Promise<ProviderStatusDto> {
+		const models = this.#modelsOfProvider(providerId);
+		if (models.length === 0 && !this.#modelRegistry.authStorage.has(providerId)) {
+			throw new Error(`unknown provider: ${providerId}`);
+		}
+		const authStorage = this.#modelRegistry.authStorage;
+		const stored = authStorage.getAll()[providerId];
+		const storedList = stored === undefined ? [] : Array.isArray(stored) ? stored : [stored];
+		const discovery = this.#modelRegistry.getProviderDiscoveryState(providerId);
+		const local = isLocalProviderId(providerId, models);
+		const keyless = this.#modelRegistry.isKeylessProvider(providerId);
+		const envPresent = getEnvApiKey(providerId) !== undefined;
+
+		let credentialSource: ProviderCredentialSource = "none";
+		let maskedKey: string | undefined;
+		let oauthExpiresAt: string | undefined;
+		if (storedList.some(c => c.type === "api_key")) {
+			credentialSource = "api-key";
+			const peeked = await authStorage.peekApiKey(providerId);
+			maskedKey = peeked ? maskSecretKey(peeked) : undefined;
+		} else if (storedList.some(c => c.type === "oauth")) {
+			credentialSource = "oauth";
+			const oauth = authStorage.getOAuthCredential(providerId);
+			if (oauth && Number.isFinite(oauth.expires)) {
+				oauthExpiresAt = new Date(oauth.expires).toISOString();
+			}
+		} else if (envPresent) {
+			credentialSource = "env";
+		} else if (authStorage.hasAuth(providerId)) {
+			// models.yml 自定义 provider 的 fallback key（AuthStorage fallbackResolver）
+			credentialSource = "api-key";
+			const peeked = await authStorage.peekApiKey(providerId);
+			maskedKey = peeked ? maskSecretKey(peeked) : undefined;
+		}
+
+		let status: ProviderConnectionStatus = "connected";
+		let statusDetail: string | undefined;
+		if (credentialSource === "none" && !keyless) {
+			status = "not-configured";
+		} else if (
+			credentialSource === "oauth" &&
+			oauthExpiresAt !== undefined &&
+			Date.parse(oauthExpiresAt) - Date.now() < OAUTH_EXPIRING_WINDOW_MS
+		) {
+			status = "oauth-expiring";
+		} else if (local && discovery?.status === "unavailable") {
+			status = "local-offline";
+			statusDetail = discovery.error;
+		} else if (!local && discovery?.status === "unavailable") {
+			status = "unreachable";
+			statusDetail = discovery.error;
+		}
+
+		const descriptor = PROVIDER_DESCRIPTORS.find(d => d.providerId === providerId);
+		const baseUrlOverride = await readProviderBaseUrlOverride(providerId);
+		return {
+			providerId,
+			...(descriptor?.catalogDiscovery?.label ? { displayName: descriptor.catalogDiscovery.label } : {}),
+			status,
+			credentialSource,
+			...(maskedKey ? { maskedKey } : {}),
+			...(descriptor?.catalogDiscovery?.envVars?.length ? { envVarNames: descriptor.catalogDiscovery.envVars } : {}),
+			...(envPresent ? { envVarPresent: true } : { envVarPresent: false }),
+			...(oauthExpiresAt ? { oauthExpiresAt } : {}),
+			...(local ? { local: true } : {}),
+			...(baseUrlOverride ? { baseUrl: baseUrlOverride } : {}),
+			modelCount: models.length,
+			...(discovery?.fetchedAt ? { lastRefreshAt: new Date(discovery.fetchedAt).toISOString() } : {}),
+			catalogStale: discovery?.stale ?? false,
+			...(statusDetail ? { statusDetail } : {}),
+		};
+	}
+
+	/** #03 发起 OAuth 登录（start_provider_oauth）。手输 code/paste key 流在后台挂起等
+	 * complete_provider_oauth 回填；浏览器回调/轮询流后台自完成（get_provider 轮询收口）。 */
+	async startProviderOauth(providerId: string): Promise<ProviderOAuthStartDto> {
+		this.#requireKnownProvider(providerId);
+		if (!OAUTH_LOGIN_PROVIDERS.has(providerId)) {
+			throw new Error(`provider does not support OAuth login: ${providerId} (save an API key instead)`);
+		}
+		if (oauthFlows.has(providerId)) {
+			throw new Error(`OAuth login already in progress for provider: ${providerId}`);
+		}
+		const flow: ProviderOauthFlow = {
+			channel: new OauthCodeChannel(),
+			authUrl: undefined,
+			instructions: undefined,
+			authReady: Promise.withResolvers<void>(),
+			settled: Promise.withResolvers<{ ok: true } | { ok: false; error: string }>(),
+		};
+		oauthFlows.set(providerId, flow);
+		void this.#modelRegistry.authStorage
+			.login(providerId, {
+				onAuth: info => {
+					flow.authUrl = info.url;
+					flow.instructions = info.instructions;
+					flow.authReady.resolve();
+				},
+				// allowEmpty 提示（本地 token/配置问询，如 github-copilot 的企业域名）直接放行；
+				// 其余手输提示挂起，直到 complete_provider_oauth 提交 code。
+				onPrompt: (promptInfo: { message: string; allowEmpty?: boolean }) =>
+					promptInfo.allowEmpty ? Promise.resolve("") : flow.channel.wait(),
+				onProgress: () => {},
+			})
+			.then(() => flow.settled.resolve({ ok: true }))
+			.catch((err: unknown) =>
+				flow.settled.resolve({ ok: false, error: err instanceof Error ? err.message : String(err) }),
+			)
+			.finally(() => {
+				flow.channel.drain();
+				if (oauthFlows.get(providerId) === flow) {
+					oauthFlows.delete(providerId);
+				}
+			});
+		// 授权 URL 多数流在登录启动时同步回调；device-code 等网络流给 3s 捕获窗口
+		await Promise.race([flow.authReady.promise, abortableSleep(3_000)]);
+		return {
+			...(flow.authUrl ? { authUrl: flow.authUrl } : {}),
+			...(flow.instructions ? { instructions: flow.instructions } : {}),
+			requiresManualCode: OAUTH_MANUAL_CODE_PROVIDERS.has(providerId) || OAUTH_PASTE_KEY_PROVIDERS.has(providerId),
+		};
+	}
+
+	/** #03 提交 OAuth 手输 code / 粘贴 key（complete_provider_oauth）；返回最新状态。 */
+	async completeProviderOauth(providerId: string, code: string): Promise<ProviderStatusDto> {
+		this.#requireKnownProvider(providerId);
+		const trimmed = code.trim();
+		if (!trimmed) {
+			throw new Error("code is required");
+		}
+		const flow = oauthFlows.get(providerId);
+		if (!flow) {
+			// 幂等回落：浏览器回调流可能已在后台完成登录——已连接则视为成功
+			const status = await this.getProviderStatus(providerId);
+			if (status.credentialSource !== "none") {
+				return status;
+			}
+			throw new Error(`no pending OAuth login for provider: ${providerId}`);
+		}
+		flow.channel.submit(trimmed);
+		const outcome = await Promise.race([
+			flow.settled.promise,
+			abortableSleep(60_000).then((): { ok: true } | { ok: false; error: string } => ({
+				ok: false,
+				error: "OAuth login timed out",
+			})),
+		]);
+		if (!outcome.ok) {
+			throw new Error(`OAuth login failed: ${outcome.error}`);
+		}
+		return this.getProviderStatus(providerId);
+	}
+
+	/** #03 保存/替换 API Key（save_provider_api_key；幂等 upsert——AuthCredentialStore
+	 * 写入路径 replaceAuthCredentialsForProvider）。apiKey 只进本请求载荷，不落日志。 */
+	async saveProviderApiKey(providerId: string, apiKey: string): Promise<ProviderStatusDto> {
+		this.#requireKnownProvider(providerId);
+		const trimmed = apiKey.trim();
+		if (!trimmed) {
+			throw new Error("apiKey is required");
+		}
+		await this.#modelRegistry.authStorage.set(providerId, { type: "api_key", key: trimmed });
+		return this.getProviderStatus(providerId);
+	}
+
+	/** #03 删除已存 API Key（delete_provider_api_key；幂等——仅删 api_key，保留 OAuth）。 */
+	async deleteProviderApiKey(providerId: string): Promise<ProviderStatusDto> {
+		this.#requireKnownProvider(providerId);
+		const authStorage = this.#modelRegistry.authStorage;
+		const stored = authStorage.getAll()[providerId];
+		const storedList = stored === undefined ? [] : Array.isArray(stored) ? stored : [stored];
+		if (storedList.some(c => c.type === "api_key")) {
+			await authStorage.set(
+				providerId,
+				storedList.filter(c => c.type !== "api_key"),
+			);
+		}
+		return this.getProviderStatus(providerId);
+	}
+
+	/** #03 设置自定义 Base URL（set_provider_base_url；baseUrl=null 清除覆盖）。
+	 * 持久化到 <agentDir>/models.yml providers.<id>.baseUrl（用户配置文件，非生成
+	 * models.json），写后 offline 重载使覆盖立即生效。 */
+	async setProviderBaseUrl(providerId: string, baseUrl: string | null): Promise<ProviderStatusDto> {
+		this.#requireKnownProvider(providerId);
+		const configPath = path.join(getAgentDir(), "models.yml");
+		const config = await readModelsYml(configPath);
+		if (baseUrl === null || baseUrl.trim() === "") {
+			const providers = isRecord(config.providers) ? (config.providers as Record<string, unknown>) : undefined;
+			const entry = providers?.[providerId];
+			if (providers && isRecord(entry)) {
+				delete entry.baseUrl;
+				if (Object.keys(entry).length === 0) {
+					delete providers[providerId];
+				}
+				await writeModelsYml(configPath, config);
+				await this.#modelRegistry.refreshProvider(providerId, "offline");
+			}
+			// 无覆盖时幂等：不落盘
+		} else {
+			const normalized = baseUrl.trim();
+			try {
+				const parsedUrl = new URL(normalized);
+				if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
+					throw new Error(`unsupported protocol: ${parsedUrl.protocol}`);
+				}
+			} catch {
+				throw new Error(`invalid baseUrl for provider ${providerId}: must be an http(s) URL`);
+			}
+			if (!isRecord(config.providers)) {
+				config.providers = {};
+			}
+			const providers = config.providers as Record<string, Record<string, unknown>>;
+			if (!isRecord(providers[providerId])) {
+				providers[providerId] = {};
+			}
+			const entry = providers[providerId] as Record<string, unknown>;
+			entry.baseUrl = normalized;
+			await writeModelsYml(configPath, config);
+			await this.#modelRegistry.refreshProvider(providerId, "offline");
+		}
+		return this.getProviderStatus(providerId);
+	}
+
+	/** #03 断开 provider（disconnect_provider）。存在依赖且未 force 时不断开——依赖
+	 * 检查结果是命令的正常结果（DTO 约定），不是错误通道。force=true 清除全部凭据。 */
+	async disconnectProvider(providerId: string, force: boolean): Promise<ProviderDisconnectResultDto> {
+		this.#requireKnownProvider(providerId);
+		const dependencies = this.#providerDependencies(providerId);
+		if (dependencies.length > 0 && !force) {
+			return { disconnected: false, dependencies, provider: await this.getProviderStatus(providerId) };
+		}
+		await this.#modelRegistry.authStorage.remove(providerId);
+		return { disconnected: true, dependencies, provider: await this.getProviderStatus(providerId) };
+	}
+
+	/** #03 单 provider 目录刷新（refresh_provider）：online 强制，绕过缓存 TTL。 */
+	async refreshProviderCatalog(providerId: string): Promise<ProviderStatusDto> {
+		this.#requireKnownProvider(providerId);
+		await this.#modelRegistry.refreshProvider(providerId, "online");
+		return this.getProviderStatus(providerId);
+	}
+
+	/** #04 全量目录刷新（refresh_catalog）：registry.refresh("online") 一次并行刷新全部 provider，
+	 * 返回刷新后的完整目录。选服务端 registry.refresh 而非客户端循环 refresh_provider：
+	 * #refreshRuntimeDiscoveries 对全部可发现 provider 内部 Promise.all 并行，且单 provider 失败
+	 * 只写 discovery state（stale/refreshError，缓存保留、列表不清空）；客户端循环会串行发起
+	 * N 次 online 刷新，且每次 refresh_provider 都触发 #reloadStaticModels 全量重载。 */
+	async refreshFullCatalog(): Promise<ModelCatalogDto> {
+		await this.#modelRegistry.refresh("online");
+		return this.buildModelCatalog();
+	}
+
+	/** #04 单模型连通性测试（test_model）：一次最小真实调用（会产生真实 API 调用与费用，
+	 * UI 必须先确认）。复用 completeSimple 与真实会话同一条适配链路（见 model-connectivity.ts）。
+	 * 未知 provider/model、未配置凭据、非对话模型（asr/tts/embedding/image/video）走错误通道。 */
+	async testModel(providerId: string, modelId: string): Promise<ModelTestResultDto> {
+		this.#requireKnownProvider(providerId);
+		const model = this.#modelRegistry.find(providerId, modelId);
+		if (!model) {
+			throw new Error(`unknown model: ${providerId}/${modelId}`);
+		}
+		if (model.category && MODEL_TEST_UNSUPPORTED_CATEGORIES.has(model.category)) {
+			throw new Error(
+				`model ${providerId}/${modelId} is a ${model.category} model; connectivity test supports chat models only`,
+			);
+		}
+		const apiKey = await this.#modelRegistry.getApiKey(model, this.sessionId);
+		if (!apiKey) {
+			throw new Error(`no credentials configured for provider: ${providerId}`);
+		}
+		const probe = await runModelConnectivityProbe(model, apiKey);
+		return {
+			provider: providerId,
+			modelId,
+			outcome: probe.outcome,
+			latencyMs: probe.latencyMs,
+			message: probe.message,
+			...(probe.httpStatus !== undefined ? { httpStatus: probe.httpStatus } : {}),
+		};
+	}
+
+	/** 断开依赖检查：会话当前模型 / modelRoutes 角色主模型 / 各角色回退链。 */
+	#providerDependencies(providerId: string): ProviderDependencyDto[] {
+		const deps: ProviderDependencyDto[] = [];
+		const current = this.model;
+		if (current && current.provider === providerId) {
+			deps.push({ kind: "session-model", ref: this.sessionId, model: formatModelString(current) });
+		}
+		for (const [role, route] of Object.entries(this.settings.getModelRoutes())) {
+			if (route.primary) {
+				const parsed = parseModelString(route.primary);
+				if (parsed?.provider === providerId) {
+					deps.push({ kind: "role-binding", ref: role, model: `${parsed.provider}/${parsed.id}` });
+				}
+			}
+			route.fallbacks.forEach((spec, index) => {
+				const parsed = parseModelString(spec);
+				if (parsed?.provider === providerId) {
+					deps.push({
+						kind: "model-fallback",
+						ref: `${role}[${index}]`,
+						model: `${parsed.provider}/${parsed.id}`,
+					});
+				}
+			});
+		}
+		return deps;
+	}
+
+	#requireKnownProvider(providerId: string): void {
+		if (this.#modelsOfProvider(providerId).length === 0 && !this.#modelRegistry.authStorage.has(providerId)) {
+			throw new Error(`unknown provider: ${providerId}`);
+		}
+	}
+
+	#modelsOfProvider(providerId: string): Model[] {
+		return this.#modelRegistry.getAll().filter(m => m.provider === providerId);
+	}
+
+	// =========================================================================
 	// Thinking Level Management
 	// =========================================================================
 
@@ -7274,4 +7716,162 @@ export class AgentSession {
 	get extensionRunner(): ExtensionRunner | undefined {
 		return this.#extensionRunner;
 	}
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 模型控制中心（#02/#03）模块级共享：OAuth 登录流状态 + 纯函数派生。
+// oauthFlows 按 provider 键控且进程共享——凭据库进程共享，start 与 complete
+// 可能落在不同 AgentSession 实例上（UI 中途切换 agent）。
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** OAuth 手输 code 提交 ↔ onPrompt 挂起等待 的桥（每登录流一个）。 */
+class OauthCodeChannel {
+	#waiters: Array<(code: string) => void> = [];
+	#queued: string | undefined;
+
+	/** complete_provider_oauth 提交：有等待者直接唤醒，否则先入队（登录启动竞速）。 */
+	submit(code: string): void {
+		const waiter = this.#waiters.shift();
+		if (waiter) {
+			waiter(code);
+			return;
+		}
+		this.#queued = code;
+	}
+
+	/** onPrompt 手输等待；入队过 code 则立即消费。 */
+	wait(): Promise<string> {
+		if (this.#queued !== undefined) {
+			const code = this.#queued;
+			this.#queued = undefined;
+			return Promise.resolve(code);
+		}
+		return new Promise(resolve => this.#waiters.push(resolve));
+	}
+
+	/** 流结束后唤醒残留等待者：空串在 parseCallbackInput 走无效分支，
+	 * OAuthCallbackFlow 手输循环随 callbackPromise 已 resolve 而自然退出。 */
+	drain(): void {
+		for (const waiter of this.#waiters.splice(0)) {
+			waiter("");
+		}
+		this.#queued = undefined;
+	}
+}
+
+interface ProviderOauthFlow {
+	channel: OauthCodeChannel;
+	authUrl?: string;
+	instructions?: string;
+	authReady: PromiseWithResolvers<void>;
+	settled: PromiseWithResolvers<{ ok: true } | { ok: false; error: string }>;
+}
+
+const oauthFlows = new Map<string, ProviderOauthFlow>();
+
+/**
+ * OAuth 登录流分类 —— 与 @cornfield/ai auth-storage.ts login() switch 手工同步：
+ * - MANUAL_CODE：OAuthCallbackFlow 系（浏览器回调与手输 code 竞速）
+ * - PASTE_KEY：打开控制台 → 粘贴 key（onPrompt 阻塞等待提交）
+ * 其余（device 轮询 / allowEmpty 本地 token）后台自完成，requiresManualCode=false。
+ */
+const OAUTH_MANUAL_CODE_PROVIDERS = new Set([
+	"anthropic",
+	"google-gemini-cli",
+	"google-antigravity",
+	"openai-codex",
+	"gitlab-duo",
+]);
+const OAUTH_PASTE_KEY_PROVIDERS = new Set([
+	"alibaba-coding-plan",
+	"bailian-coding-plan",
+	"cloudflare-ai-gateway",
+	"cerebras",
+	"fireworks",
+	"huggingface",
+	"kagi",
+	"litellm",
+	"minimax-code",
+	"minimax-code-cn",
+	"nanogpt",
+	"narwal-plan",
+	"nvidia",
+	"opencode-go",
+	"opencode-zen",
+	"parallel",
+	"perplexity",
+	"qianfan",
+	"qwen-portal",
+	"synthetic",
+	"tavily",
+	"together",
+	"venice",
+	"vercel-ai-gateway",
+	"xiaomi",
+	"zenmux",
+	"zai",
+]);
+const OAUTH_LOGIN_PROVIDERS = new Set([
+	...OAUTH_MANUAL_CODE_PROVIDERS,
+	...OAUTH_PASTE_KEY_PROVIDERS,
+	// 后台自完成流（device 轮询 / allowEmpty 本地 token）
+	"github-copilot",
+	"cursor",
+	"kimi-code",
+	"kilo",
+	"lm-studio",
+	"ollama",
+	"ollama-cloud",
+	"vllm",
+]);
+
+/** 本地 provider（进程不可达 → local-offline 判定依据）。 */
+const LOCAL_PROVIDER_IDS = new Set(["ollama", "ollama-cloud", "lm-studio", "llama.cpp", "vllm"]);
+
+/** OAuth token 临近过期阈值（ProviderConnectionStatus.oauth-expiring 提示续期）。 */
+const OAUTH_EXPIRING_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/** 无工具调用能力的模型分类（capabilities.tools=false）。 */
+const CATALOG_NO_TOOL_CATEGORIES = new Set(["asr", "tts", "embedding"]);
+
+function isLocalProviderId(providerId: string, models: readonly Model[]): boolean {
+	if (LOCAL_PROVIDER_IDS.has(providerId)) return true;
+	return models.some(m => /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])/.test(m.baseUrl));
+}
+
+/** 密钥掩码（ProviderStatusDto.maskedKey）：只保留头尾少量片段；任何日志/错误不得携带明文。 */
+function maskSecretKey(key: string): string {
+	const trimmed = key.trim();
+	if (trimmed.length <= 8) return "••••";
+	return `${trimmed.slice(0, 4)}…${trimmed.slice(-4)}`;
+}
+
+async function readModelsYml(configPath: string): Promise<Record<string, unknown>> {
+	try {
+		const raw = await Bun.file(configPath).text();
+		const parsed = YAML.parse(raw) as unknown;
+		return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : {};
+	} catch (err) {
+		if (isEnoent(err)) return {};
+		throw err;
+	}
+}
+
+async function writeModelsYml(configPath: string, config: Record<string, unknown>): Promise<void> {
+	await fs.promises.mkdir(path.dirname(configPath), { recursive: true });
+	await withFileLock(configPath, async () => {
+		const tmpPath = `${configPath}.tmp`;
+		await fs.promises.writeFile(tmpPath, YAML.stringify(config, null, 2), { encoding: "utf8" });
+		await fs.promises.rename(tmpPath, configPath);
+	});
+}
+
+/** 读 providers.<id>.baseUrl 自定义覆盖（models.yml 用户配置；未覆盖 undefined）。 */
+async function readProviderBaseUrlOverride(providerId: string): Promise<string | undefined> {
+	const config = await readModelsYml(path.join(getAgentDir(), "models.yml"));
+	if (!isRecord(config.providers)) return undefined;
+	const entry = (config.providers as Record<string, unknown>)[providerId];
+	if (!isRecord(entry)) return undefined;
+	const baseUrl = entry.baseUrl;
+	return typeof baseUrl === "string" && baseUrl.trim() ? baseUrl.trim() : undefined;
 }

@@ -159,10 +159,10 @@ describe("skeleton", () => {
 		expect(content).toContain("安全与授权");
 	});
 
-	test(".cornfield/config.yml contains modelRoles default and theme", async () => {
+	test(".cornfield/config.yml contains modelRoutes default and theme", async () => {
 		await ensureAgentDir(tmpDir);
 		const content = await Bun.file(path.join(tmpDir, ".cornfield/config.yml")).text();
-		expect(content).toContain("modelRoles");
+		expect(content).toContain("modelRoutes");
 		expect(content).toContain("default");
 		expect(content).toContain("theme");
 	});

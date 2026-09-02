@@ -70,29 +70,29 @@ describe("config CLI schema coverage", () => {
 
 		const lines = logSpy.mock.calls.map(call => String(call[0] ?? ""));
 		const plainLines = lines.map(line => Bun.stripANSI(line));
-		const modelRolesLine = plainLines.find(line => line.includes("modelRoles ="));
-		expect(modelRolesLine).toBeDefined();
-		const plainModelRolesLine = String(modelRolesLine);
-		expect(plainModelRolesLine).toContain("modelRoles =");
-		expect(plainModelRolesLine).toContain("(record)");
-		expect(plainModelRolesLine).toContain("{");
-		expect(plainModelRolesLine).toContain("}");
-		expect(plainModelRolesLine).not.toContain("[object Object]");
+		const modelRoutesLine = plainLines.find(line => line.includes("modelRoutes ="));
+		expect(modelRoutesLine).toBeDefined();
+		const plainModelRoutesLine = String(modelRoutesLine);
+		expect(plainModelRoutesLine).toContain("modelRoutes =");
+		expect(plainModelRoutesLine).toContain("(record)");
+		expect(plainModelRoutesLine).toContain("{");
+		expect(plainModelRoutesLine).toContain("}");
+		expect(plainModelRoutesLine).not.toContain("[object Object]");
 	});
 
 	it("sets and gets record settings as JSON objects", async () => {
 		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-		const recordValue = '{"default":"claude-opus-4-6"}';
+		const recordValue = '{"default":{"primary":"claude-opus-4-6","fallbacks":[]}}';
 
-		await runConfigCommand({ action: "set", key: "modelRoles", value: recordValue, flags: { json: true } });
-		await runConfigCommand({ action: "get", key: "modelRoles", flags: { json: true } });
+		await runConfigCommand({ action: "set", key: "modelRoutes", value: recordValue, flags: { json: true } });
+		await runConfigCommand({ action: "get", key: "modelRoutes", flags: { json: true } });
 
 		const payload = logSpy.mock.calls.at(-1)?.[0];
 		expect(typeof payload).toBe("string");
 		const parsed = JSON.parse(String(payload)) as { key: string; value: unknown; type: string };
-		expect(parsed.key).toBe("modelRoles");
+		expect(parsed.key).toBe("modelRoutes");
 		expect(parsed.type).toBe("record");
-		expect(parsed.value).toEqual({ default: "claude-opus-4-6" });
+		expect(parsed.value).toEqual({ default: { primary: "claude-opus-4-6", fallbacks: [] } });
 	});
 
 	it("sets and gets array settings as JSON arrays", async () => {

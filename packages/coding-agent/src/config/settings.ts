@@ -32,6 +32,13 @@ import { AgentStorage } from "../session/agent-storage";
 import { type EditMode, normalizeEditMode } from "../utils/edit-mode";
 import { withFileLock } from "./file-lock";
 import {
+	MODEL_ROUTES_KEY,
+	type ModelRoleRoute,
+	migrateLegacyModelConfig,
+	normalizeModelRoutes,
+	normalizeRoute,
+} from "./model-routes";
+import {
 	type BashInterceptorRule,
 	type GroupPrefix,
 	type GroupTypeMap,
@@ -372,38 +379,56 @@ export class Settings {
 	}
 
 	/**
-	 * Set a model role (helper for modelRoles record).
+	 * Set a model role's primary model (helper for modelRoutes record).
 	 *
 	 * Writes to project level if a project-level .cornfield/config.yml exists (so reads
 	 * and writes are consistent — project overrides global in the merged view).
-	 * Otherwise writes to global.
+	 * Otherwise writes to global. Preserves the role's existing fallback chain.
 	 */
 	setModelRole(role: ModelRole | string, modelId: string): void {
-		const current = this.get("modelRoles");
-		const updated = { ...current, [role]: modelId };
+		const routes = this.getModelRoutes();
+		routes[role] = { primary: modelId, fallbacks: routes[role]?.fallbacks ?? [] };
+		this.#writeModelRoutes(routes);
+	}
 
+	/**
+	 * Replace a role's full route (primary + ordered fallback chain).
+	 * A route without primary and without fallbacks deletes the role entry.
+	 */
+	setModelRoute(role: ModelRole | string, route: ModelRoleRoute): void {
+		const routes = this.getModelRoutes();
+		const normalized = normalizeRoute(route);
+		if (normalized) routes[role] = normalized;
+		else delete routes[role];
+		this.#writeModelRoutes(routes);
+	}
+
+	/**
+	 * Get a role's primary model spec (helper over modelRoutes; undefined if role unconfigured).
+	 * 保留旧签名：角色绑定读取方（resolver/selector/serve）无需感知回退链表示。
+	 */
+	getModelRole(role: ModelRole | string): string | undefined {
+		return this.getModelRoutes()[role]?.primary;
+	}
+
+	/** Get a role's route (primary + ordered fallback chain), or undefined if unconfigured. */
+	getModelRoute(role: ModelRole | string): ModelRoleRoute | undefined {
+		return this.getModelRoutes()[role];
+	}
+
+	/** Get all model routes (normalized view of the modelRoutes record). */
+	getModelRoutes(): Record<string, ModelRoleRoute> {
+		return normalizeModelRoutes(this.get(MODEL_ROUTES_KEY));
+	}
+
+	#writeModelRoutes(routes: Record<string, ModelRoleRoute>): void {
 		if (this.#hasProjectConfigFile) {
-			setByPath(this.#project, ["modelRoles"], updated);
+			setByPath(this.#project, [MODEL_ROUTES_KEY], routes);
 			this.#rebuildMerged();
 			void this.#saveProjectConfig();
 		} else {
-			this.set("modelRoles", updated);
+			this.set(MODEL_ROUTES_KEY, routes);
 		}
-	}
-
-	/**
-	 * Get a model role (helper for modelRoles record).
-	 */
-	getModelRole(role: ModelRole | string): string | undefined {
-		const roles = this.get("modelRoles");
-		return roles[role];
-	}
-
-	/**
-	 * Get all model roles (helper for modelRoles record).
-	 */
-	getModelRoles(): ReadOnlyDict<string> {
-		return this.get("modelRoles");
 	}
 
 	/**
@@ -468,16 +493,16 @@ export class Settings {
 	}
 
 	/*
-	 * Override model roles (helper for modelRoles record).
+	 * Override role primary models at runtime (not persisted; fallback chains preserved).
 	 */
-	overrideModelRoles(roles: ReadOnlyDict<string>): void {
-		const prev = this.get("modelRoles");
-		for (const [role, modelId] of Object.entries(roles)) {
+	overrideModelRoutes(primaries: ReadOnlyDict<string>): void {
+		const routes = this.getModelRoutes();
+		for (const [role, modelId] of Object.entries(primaries)) {
 			if (modelId) {
-				prev[role] = modelId;
+				routes[role] = { primary: modelId, fallbacks: routes[role]?.fallbacks ?? [] };
 			}
 		}
-		this.override("modelRoles", prev);
+		this.override(MODEL_ROUTES_KEY, routes);
 	}
 
 	/**
@@ -533,7 +558,28 @@ export class Settings {
 			if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
 				return {};
 			}
-			return this.#migrateRawSettings(parsed as RawSettings);
+			const raw = parsed as RawSettings;
+			// 旧 modelRoles/modelFallbacks → modelRoutes：读入即迁移并重写文件（幂等）
+			const legacy = migrateLegacyModelConfig(raw);
+			if (legacy.changed && this.#persist) {
+				delete raw.modelRoles;
+				delete raw.modelFallbacks;
+				if (Object.keys(legacy.routes).length > 0) {
+					raw.modelRoutes = legacy.routes;
+				} else {
+					delete raw.modelRoutes;
+				}
+				try {
+					await Bun.write(filePath, YAML.stringify(raw, null, 2));
+					logger.info("Settings: migrated legacy model config to modelRoutes", { path: filePath });
+				} catch (err) {
+					logger.warn("Settings: failed to rewrite migrated model config", {
+						path: filePath,
+						err: String(err),
+					});
+				}
+			}
+			return this.#migrateRawSettings(raw);
 		} catch (error) {
 			if (isEnoent(error)) return {};
 			logger.warn("Settings: failed to load", { path: filePath, error: String(error) });

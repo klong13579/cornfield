@@ -80,6 +80,12 @@ export interface WireHashlineEditEntry {
 export type WireEditEntry = WireReplaceEditEntry | WirePatchEditEntry | WireHashlineEditEntry;
 
 /**
+ * 配置写入作用域（#05 配置作用域；读取侧 ConfigScopeDto 同语义）。
+ * global = <agentDir>/config.yml；project = <cwd>/.cornfield/config.yml（Settings 项目覆盖层）。
+ */
+export type ConfigScope = "global" | "project";
+
+/**
  * Multiplex 命令 — P3 升级后每条命令均可带 `sessionId` 参数定向 agent。
  */
 export type MultiplexCommand =
@@ -416,8 +422,13 @@ export type WireExtensionCommand =
 	| { id?: string; type: "git_branches"; sessionId?: string }
 	/** 配置读写（票 03）：读目标 agent 的 config.yml 域（sessionId 定向，缺省 active）。 */
 	| { id?: string; type: "get_config"; sessionId?: string; key?: string }
-	/** 写指定域并持久化到目标 agent 的 config.yml（sessionId 定向；与 set_skill_enabled/set_model_disabled 不双写）。 */
-	| { id?: string; type: "set_config"; sessionId?: string; key: string; value: unknown }
+	/**
+	 * 写指定域并持久化（sessionId 定向；与 set_skill_enabled/set_model_disabled 不双写）。
+	 * #05 起支持按作用域写：scope 缺省 = "global"（现行为，写 agentDir/config.yml）；
+	 * "project" 写 <cwd>/.cornfield/config.yml（文件不存在时创建）。record 值（如 modelRoles）
+	 * 整键替换，与 Settings.set 语义一致。
+	 */
+	| { id?: string; type: "set_config"; sessionId?: string; key: string; value: unknown; scope?: ConfigScope }
 	/** 工具开关语义视图（get_config 的域化封装）：返回目标 agent 每个工具的 enabled 开关 + python 工具模式。 */
 	| { id?: string; type: "get_tool_switches"; sessionId?: string }
 	/**
@@ -438,7 +449,82 @@ export type WireExtensionCommand =
 	 * 取一份诊断报告全文（get_diagnosis_report）：按 reportId（文件名去扩展名）
 	 * 读 <reportId>.md（完整 markdown 报告）+ 同文件 .summary.json（结构化摘要）。
 	 */
-	| { id?: string; type: "get_diagnosis_report"; reportId: string };
+	| { id?: string; type: "get_diagnosis_report"; reportId: string }
+	// ── 模型控制中心（#02 全量目录 / #03 Provider 接入 / #04 刷新与连通测试 / #05 配置作用域）──
+	/**
+	 * #02 全量模型目录（AvailableModelsDto 的 v2）：get_available_models 只返回可用集，
+	 * 本命令返回全部已知模型（含未接入 Provider），按 ModelCatalogStatus 六态区分；
+	 * 响应附每个 provider 的目录元数据（来源/上次刷新/stale/发现数/刷新错误）与两份停用名单
+	 * （恢复入口）。结果形状 ModelCatalogDto；目录构建失败走标准 ok:false 通道。
+	 */
+	| { id?: string; type: "get_model_catalog"; sessionId?: string }
+	/**
+	 * #03 Provider 状态列表（ProviderStatusDto：连接状态/凭据来源/掩码/env 候选/模型数/
+	 * 目录新鲜度）。响应不回显明文密钥。
+	 */
+	| { id?: string; type: "get_providers"; sessionId?: string }
+	/** #03 单个 Provider 状态详情（ProviderStatusDto）；未知 providerId → ok:false。 */
+	| { id?: string; type: "get_provider"; sessionId?: string; providerId: string }
+	/**
+	 * #03 发起 OAuth 登录。返回授权 URL 与说明（ProviderOAuthStartDto）；
+	 * requiresManualCode=true 的流需随后调 complete_provider_oauth 提交 code，
+	 * 其余流 serve 端后台完成、前端以 get_provider 轮询收口。
+	 * 同一 provider 已有进行中的登录流 → ok:false。
+	 */
+	| { id?: string; type: "start_provider_oauth"; sessionId?: string; providerId: string }
+	/** #03 提交 OAuth 手输 code（仅 start_provider_oauth.requiresManualCode 流）；返回最新 ProviderStatusDto。 */
+	| { id?: string; type: "complete_provider_oauth"; sessionId?: string; providerId: string; code?: string }
+	/**
+	 * #03 保存/替换 API Key（幂等 upsert：同 provider 既有 Key 即替换）。apiKey 只进请求——
+	 * 响应 ProviderStatusDto 仅含掩码片段，不回显明文。
+	 */
+	| { id?: string; type: "save_provider_api_key"; sessionId?: string; providerId: string; apiKey: string }
+	/**
+	 * #03 删除已存 API Key（幂等：未存储也 ok:true 返回当前状态——凭据来源回落 env/none）。
+	 * 返回删除后的 ProviderStatusDto。
+	 */
+	| { id?: string; type: "delete_provider_api_key"; sessionId?: string; providerId: string }
+	/** #03 设置自定义 Base URL（baseUrl=null 清除覆盖恢复目录默认）；返回更新后的 ProviderStatusDto。 */
+	| { id?: string; type: "set_provider_base_url"; sessionId?: string; providerId: string; baseUrl: string | null }
+	/**
+	 * #03 断开 provider（清除凭据 + 恢复未接入态）。存在依赖（会话当前模型 / modelRoutes 角色主模型 /
+	 * 各角色回退链引用该 provider）且 force 缺省 false 时不断开：ok:true +
+	 * disconnected:false + dependencies 清单，前端确认后 force=true 重发（ProviderDisconnectResultDto）。
+	 */
+	| { id?: string; type: "disconnect_provider"; sessionId?: string; providerId: string; force?: boolean }
+	/** #03 单 provider 目录刷新（online 强制，绕过缓存 TTL）；返回刷新后的 ProviderStatusDto。 */
+	| { id?: string; type: "refresh_provider"; sessionId?: string; providerId: string }
+	/**
+	 * #04 全量目录刷新（refresh_catalog）：registry 级 online 并行刷新全部 provider
+	 * （#refreshRuntimeDiscoveries 内部 Promise.all 并行 + 单 provider 失败隔离进
+	 * discovery state），比客户端循环 refresh_provider 少 N-1 次静态重载与往返。
+	 * 返回刷新后的完整目录（ModelCatalogDto，同 get_model_catalog）；单 provider 失败不抛——
+	 * 错误进 providers[].refreshError/stale（保留上次有效目录并标记过期，不清空列表）。
+	 */
+	| { id?: string; type: "refresh_catalog"; sessionId?: string }
+	/**
+	 * #04 单模型连通性测试（test_model）：对指定模型发起一次最小真实调用（1 条用户消息 +
+	 * max_tokens 16，走 completeSimple 与真实会话同一条 API 适配链路），会产生真实 API 调用
+	 * 并可能产生费用——UI 必须先确认再执行。结果按 ModelTestOutcome 六类区分（不伪装成功）。
+	 * 未知 provider/model、未配置凭据、非对话模型（asr/tts/embedding）走 ok:false 错误通道。
+	 */
+	| { id?: string; type: "test_model"; sessionId?: string; providerId: string; modelId: string }
+	/**
+	 * #05 配置作用域读取：项目配置是否存在 + 可覆盖键逐键 project/global/effective 三层取值
+	 * （ConfigScopeDto）。
+	 */
+	| { id?: string; type: "get_config_scope"; sessionId?: string }
+	/**
+	 * #05 恢复继承：删除该键的项目覆盖（.cornfield/config.yml 中删除而非复制全局值），
+	 * 生效值回落全局/schema 默认。返回 ConfigInheritanceRestoreDto（removed + 删除后生效值）。
+	 */
+	| { id?: string; type: "restore_config_inheritance"; sessionId?: string; key: string }
+	/**
+	 * #05 模型选择读取（ModelSelectionDto）：当前会话生效模型（source 标记
+	 * temporary/persistent/registry-default）+ 持久化默认模型（settings.modelRoles.default）。
+	 * 与写侧 set_model（持久）/ set_model_temporary（会话）配对，临时/持久语义读写两侧可区分。
+	 */
+	| { id?: string; type: "get_model_selection"; sessionId?: string };
 export type WireCommand = MultiplexCommand | WireExtensionCommand;
 
 /** 获取具体命令结构的 helper。 */
