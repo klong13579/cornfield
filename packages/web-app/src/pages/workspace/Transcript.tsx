@@ -50,7 +50,7 @@ export function Transcript(): React.JSX.Element {
 
 	return (
 		<div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-6 pt-7 pb-3">
-			<div aria-live="polite" className="mx-auto flex max-w-[760px] flex-col gap-7">
+			<div aria-live="polite" className="mx-auto flex max-w-[1100px] flex-col gap-7">
 				{rows.map(({ msg, entryId }) => (
 					<MessageRow key={msg.id} msg={msg} entryId={entryId} />
 				))}

@@ -295,7 +295,7 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 
 	return (
 		<div className="shrink-0 border-t border-hairline bg-surface px-4.5 pt-3.5 pb-3">
-			<div className="relative mx-auto max-w-[760px]">
+			<div className="relative mx-auto max-w-[1100px]">
 				{slashOpen && (
 					<div className="relative z-menu">
 						<SlashPalette

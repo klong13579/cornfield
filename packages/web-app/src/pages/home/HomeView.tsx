@@ -82,7 +82,7 @@ export function HomeView(): React.JSX.Element {
 
 	return (
 		<div className="flex h-full min-h-0 flex-col items-center justify-center gap-7 overflow-y-auto px-8 py-12">
-			<div className="flex w-full max-w-[640px] flex-col items-center gap-7">
+			<div className="flex w-full max-w-[760px] flex-col items-center gap-10">
 				{/* Greeting */}
 				<div className="rise-in flex flex-col items-center text-center">
 					<div className="flex items-center justify-center gap-3.5">
@@ -132,7 +132,7 @@ export function HomeView(): React.JSX.Element {
 				</div>
 
 				{/* Composer */}
-				<div className="rise-in flex w-full max-w-[560px] items-end gap-2.5 rounded-lg border border-hairline bg-surface-2 py-2 pr-2 pl-4.5 transition-[border-color,box-shadow] duration-150 [animation-delay:360ms] focus-within:border-accent focus-within:shadow-[0_0_0_3px_var(--color-accent-dim)]">
+				<div className="rise-in flex w-full max-w-[760px] items-end gap-2.5 rounded-lg border border-hairline bg-surface-2 py-2 pr-2 pl-4.5 transition-[border-color,box-shadow] duration-150 [animation-delay:360ms] focus-within:border-accent focus-within:shadow-[0_0_0_3px_var(--color-accent-dim)]">
 					<input
 						id="home-composer"
 						value={query}
@@ -152,7 +152,7 @@ export function HomeView(): React.JSX.Element {
 						<ArrowRight size={16} strokeWidth={1.5} />
 					</button>
 				</div>
-				<div className="rise-in flex w-full max-w-[560px] justify-center gap-4 text-[11px] text-ink-faint [animation-delay:440ms]">
+				<div className="rise-in flex w-full max-w-[760px] justify-center gap-4 text-[11px] text-ink-faint [animation-delay:440ms]">
 					<span>
 						<span className="kbd">Enter</span> 发送直达会话工作台
 					</span>
@@ -160,7 +160,7 @@ export function HomeView(): React.JSX.Element {
 
 				{/* 最近活跃 */}
 				{recent.length > 0 && (
-					<div className="rise-in w-full max-w-[560px] [animation-delay:520ms]">
+					<div className="rise-in w-full max-w-[760px] [animation-delay:520ms]">
 						<div className="mb-2.5 text-center text-[10px] font-semibold tracking-[0.08em] text-ink-faint uppercase">
 							最近活跃
 						</div>
