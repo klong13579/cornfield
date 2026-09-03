@@ -1,14 +1,14 @@
 import type { ConfigScope, ConfigScopeDto, ConfigScopeKeyDto } from "@cornfield/wire";
 import { useState } from "react";
-import { FEATURED_SCOPE_KEY_META, splitScopeKeys, type ScopeKeyEditor } from "./scope-keys";
+import { FEATURED_SCOPE_KEY_META, groupAdvancedKeys, splitScopeKeys, type ScopeKeyEditor } from "./scope-keys";
 import { formatConfigValue, parseConfigDraft, toScopeKeyView } from "./scope-view";
 
 /**
- * 逐键配置平铺矩阵（#05 + UX 策展 v2）：精选高频键与高级键均以紧凑网格卡片呈现
- * （响应式 1-4 列），一屏可见键数远高于列表布局。收起态只显示 标签/键名 + 覆盖徽标 +
- * 生效值；点击整卡进入编辑——展开面板内保留完整三层取值（项目/全局/生效）、
- * 精选键中文说明、恢复继承与编辑控件。同一时刻至多一个编辑器打开。
- * 编辑器按页面级写入作用域（writeTarget）提交 setConfigValue（JSON 校验，非法不提交）。
+ * 逐键配置平铺矩阵（#05 + UX 策展 v2）：精选高频键网格置顶；其余键按 schema ui.tab
+ * 中文分组折叠（组内网格）。收起态只显示 标签/键名 + 覆盖徽标 + 生效值；点击整卡进入编辑——
+ * 展开面板内保留完整三层取值（项目/全局/生效）、精选键中文说明、恢复继承与编辑控件。
+ * 同一时刻至多一个编辑器打开。编辑器按页面级写入作用域（writeTarget）提交 setConfigValue
+ * （JSON 校验，非法不提交）。
  */
 interface ScopeKeysSectionProps {
 	scope: ConfigScopeDto;
@@ -227,7 +227,8 @@ export function ScopeKeysSection({
 	const [editingKey, setEditingKey] = useState<string | null>(null);
 	const [draft, setDraft] = useState("");
 	const [draftError, setDraftError] = useState<string | null>(null);
-	const [advancedOpen, setAdvancedOpen] = useState(false);
+	/** 展开的分组（可多组并行；空 = 全部收起）。 */
+	const [openGroups, setOpenGroups] = useState<ReadonlySet<string>>(new Set());
 
 	const openEditor = (key: string, currentValue: unknown): void => {
 		setEditingKey(key);
@@ -289,6 +290,7 @@ export function ScopeKeysSection({
 	}
 
 	const { featured, advanced } = splitScopeKeys(scope.keys);
+	const groups = groupAdvancedKeys(advanced);
 
 	/** 网格容器：响应式 1-4 列，items-start 保证展开的长卡不拉伸同排卡片。 */
 	const renderGrid = (keys: ConfigScopeKeyDto[], isFeatured: boolean): React.JSX.Element => (
@@ -318,21 +320,38 @@ export function ScopeKeysSection({
 			{/* 精选高频键：人话标签平铺置顶 */}
 			{renderGrid(featured, true)}
 
-			{/* 高级键：默认折叠，展开后同款网格 */}
-			{advanced.length > 0 && (
-				<div className="rounded-xl border border-hairline bg-surface">
-					<button
-						type="button"
-						className="flex w-full items-center gap-2 px-4 py-2.5 text-left transition-colors hover:bg-surface-2"
-						onClick={() => setAdvancedOpen(open => !open)}
-					>
-						<span className="text-[13px] font-semibold text-ink">高级配置</span>
-						<span className="rounded bg-surface-2 px-1.5 py-px font-mono text-3xs text-ink-faint">
-							{advanced.length} 项
-						</span>
-						<span className="ml-auto text-[11.5px] text-ink-faint">{advancedOpen ? "收起" : "展开"}</span>
-					</button>
-					{advancedOpen && <div className="border-t border-hairline p-3">{renderGrid(advanced, false)}</div>}
+			{/* 高级键：按 schema ui.tab 中文分组折叠，组内同款网格，默认全收起 */}
+			{groups.length > 0 && (
+				<div className="space-y-2">
+					{groups.map(g => {
+						const open = openGroups.has(g.tab);
+						return (
+							<div key={g.tab} className="rounded-xl border border-hairline bg-surface">
+								<button
+									type="button"
+									className="flex w-full items-center gap-2 px-4 py-2.5 text-left transition-colors hover:bg-surface-2"
+									onClick={() =>
+										setOpenGroups(prev => {
+											const next = new Set(prev);
+											if (next.has(g.tab)) next.delete(g.tab);
+											else next.add(g.tab);
+											return next;
+										})
+									}
+								>
+									<span className="text-[13px] font-semibold text-ink">{g.label}</span>
+									<span className="rounded bg-surface-2 px-1.5 py-px font-mono text-3xs text-ink-faint">
+										{g.keys.length} 项
+									</span>
+									{g.tab === "system" && (
+										<span className="text-[10.5px] text-ink-faint">schema 未归类的名单与状态键</span>
+									)}
+									<span className="ml-auto text-[11.5px] text-ink-faint">{open ? "收起" : "展开"}</span>
+								</button>
+								{open && <div className="border-t border-hairline p-3">{renderGrid(g.keys, false)}</div>}
+							</div>
+						);
+					})}
 				</div>
 			)}
 		</div>

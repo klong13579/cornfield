@@ -8,6 +8,8 @@
 
 ### Changed
 
+- **高级配置键按 schema 分组**（`src/pages/models/config/scope-keys.ts`, `ScopeKeysSection.tsx`; 协议 `packages/pi-wire` `ConfigScopeKeyDto.uiTab` + wire-server 填充）: 高级键按 schema ui.tab 中文分组折叠（交互/编辑器/外观/模型/上下文/工具/Provider/任务，schema 未归类的 76 键归「基础与系统」），组内网格平铺、默认全收起。
+
 - **Provider 工作区排序**（`src/pages/models/ProvidersView.tsx`）: 已连接 provider 置顶（稳定分组，组内保持服务端顺序），未接入/异常沉底。
 
 - **逐键配置平铺矩阵**（`src/pages/models/config/ScopeKeysSection.tsx`）: 列表改为响应式网格（1-4 列，精选键与高级键同款紧凑卡片），一屏可见键数数倍提升。收起态只显示标签/键名 + 覆盖徽标 + 生效值；点击整卡展开编辑面板（保留完整三层取值、精选键中文说明、恢复继承、按 schema 类型的编辑控件）。

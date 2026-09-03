@@ -9,6 +9,8 @@
 export interface ConfigScopeKeyDto {
 	/** settings 键（如 "modelRoutes"、"defaultThinkingLevel"）。 */
 	key: string;
+	/** schema ui.tab 分组名（如 "model"、"tools"；schema 未声明 ui.tab 时省略）。 */
+	uiTab?: string;
 	/** 项目配置已覆盖该键。 */
 	overridden: boolean;
 	/** 项目值（.cornfield/config.yml；未覆盖省略）。 */

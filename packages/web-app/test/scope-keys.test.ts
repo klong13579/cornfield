@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import type { ConfigScopeKeyDto } from "@cornfield/wire";
-import { FEATURED_SCOPE_KEY_META, FEATURED_SCOPE_KEY_ORDER, splitScopeKeys } from "../src/pages/models/config/scope-keys";
+import {
+	FEATURED_SCOPE_KEY_META,
+	FEATURED_SCOPE_KEY_ORDER,
+	groupAdvancedKeys,
+	splitScopeKeys,
+} from "../src/pages/models/config/scope-keys";
 
 function key(key: string, overrides: Partial<ConfigScopeKeyDto> = {}): ConfigScopeKeyDto {
 	return {
@@ -76,5 +81,37 @@ describe("splitScopeKeys", () => {
 			}
 		}
 		expect(kinds).toEqual({ enum: 5, boolean: 4, number: 3 });
+	});
+});
+
+describe("groupAdvancedKeys", () => {
+	test("按 uiTab 分组：已知 tab 按固定顺序，组内字母序", () => {
+		const dto = (key: string, uiTab?: string): ConfigScopeKeyDto => ({
+			key,
+			...(uiTab ? { uiTab } : {}),
+			overridden: false,
+			effectiveValue: null,
+		});
+		const groups = groupAdvancedKeys([
+			dto("tools.zeta", "tools"),
+			dto("tools.alpha", "tools"),
+			dto("model.m1", "model"),
+			dto("plain.noTab"),
+			dto("tasks.t1", "tasks"),
+		]);
+		expect(groups.map(g => g.tab)).toEqual(["model", "tools", "tasks", "system"]);
+		expect(groups.map(g => g.label)).toEqual(["模型", "工具", "任务", "基础与系统"]);
+		expect(groups[0]!.keys.map(k => k.key)).toEqual(["model.m1"]);
+		expect(groups[1]!.keys.map(k => k.key)).toEqual(["tools.alpha", "tools.zeta"]);
+		expect(groups[3]!.keys.map(k => k.key)).toEqual(["plain.noTab"]);
+	});
+
+	test("未知 tab 不丢弃：按字母序排在已知组与 system 之后", () => {
+		const groups = groupAdvancedKeys([
+			{ key: "a", uiTab: "zebra", overridden: false, effectiveValue: null },
+			{ key: "b", uiTab: "alpha-new", overridden: false, effectiveValue: null },
+			{ key: "c", overridden: false, effectiveValue: null },
+		]);
+		expect(groups.map(g => g.tab)).toEqual(["system", "alpha-new", "zebra"]);
 	});
 });

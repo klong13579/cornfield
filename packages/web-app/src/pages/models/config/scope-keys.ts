@@ -69,3 +69,69 @@ export function splitScopeKeys(keys: ConfigScopeKeyDto[]): {
 	}
 	return { featured, advanced: [...byKey.values()] };
 }
+
+/** schema ui.tab → 中文分组名（顺序即展示顺序）。 */
+export const ADVANCED_TAB_ORDER = [
+	"interaction",
+	"editing",
+	"appearance",
+	"model",
+	"context",
+	"tools",
+	"providers",
+	"tasks",
+] as const;
+
+export const ADVANCED_TAB_LABELS: Readonly<Record<string, string>> = {
+	interaction: "交互",
+	editing: "编辑器",
+	appearance: "外观",
+	model: "模型",
+	context: "上下文",
+	tools: "工具",
+	providers: "Provider",
+	tasks: "任务",
+};
+
+export interface AdvancedKeyGroup {
+	/** schema ui.tab 原始名；未声明 tab 的键归 "system"。 */
+	tab: string;
+	/** 中文组名。 */
+	label: string;
+	keys: ConfigScopeKeyDto[];
+}
+
+/**
+ * 高级键按 schema ui.tab 分组：已知 tab 按 ADVANCED_TAB_ORDER 排序，
+ * schema 未声明 tab 的键（名单/系统状态类）归末尾「基础与系统」组；组内按键名字母序。
+ */
+export function groupAdvancedKeys(keys: ConfigScopeKeyDto[]): AdvancedKeyGroup[] {
+	const byTab = new Map<string, ConfigScopeKeyDto[]>();
+	for (const dto of keys) {
+		const tab = dto.uiTab ?? "system";
+		const bucket = byTab.get(tab);
+		if (bucket) bucket.push(dto);
+		else byTab.set(tab, [dto]);
+	}
+	const order = [...ADVANCED_TAB_ORDER, "system"];
+	const groups: AdvancedKeyGroup[] = [];
+	for (const tab of order) {
+		const bucket = byTab.get(tab);
+		if (!bucket?.length) continue;
+		byTab.delete(tab);
+		groups.push({
+			tab,
+			label: tab === "system" ? "基础与系统" : (ADVANCED_TAB_LABELS[tab] ?? tab),
+			keys: bucket.sort((a, b) => a.key.localeCompare(b.key)),
+		});
+	}
+	// schema 新增的未知 tab：按字母序排在已知组之后（不丢弃）
+	for (const [tab, bucket] of [...byTab.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+		groups.push({
+			tab,
+			label: ADVANCED_TAB_LABELS[tab] ?? tab,
+			keys: bucket.sort((a, b) => a.key.localeCompare(b.key)),
+		});
+	}
+	return groups;
+}
