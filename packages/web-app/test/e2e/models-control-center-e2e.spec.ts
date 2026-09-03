@@ -241,7 +241,9 @@ test("模型控制中心闭环：目录 / Provider / 运行配置", async ({ pag
 		const roleSection = page.locator("section").filter({ hasText: "角色配置" }).filter({ hasText: "新增角色" });
 		const defaultRow = roleSection.locator("div.px-5.py-3", { hasText: "DEFAULT" }).first();
 		await defaultRow.getByRole("button", { name: "编辑", exact: true }).click();
-		const primaryInput = defaultRow.locator('input[list="role-editor-model-options"]').first();
+		// combobox（ModelCombobox）以 aria-label + 显式 role="combobox" 定位；fill 输入自由文本，
+		// 浮层出现不阻断后续点击（blur 先关浮层）
+		const primaryInput = defaultRow.getByRole("combobox", { name: "角色主模型" }).first();
 
 		// 校验闸门：目录不存在的模型 → error 禁止保存
 		await primaryInput.fill("no-such-provider/bogus-model-xyz");
@@ -266,6 +268,16 @@ test("模型控制中心闭环：目录 / Provider / 运行配置", async ({ pag
 		const projectConfig = await fsp.readFile(path.join(isoHome, ".cornfield", "config.yml"), "utf8");
 		expect(projectConfig).toContain("modelRoutes");
 		expect(projectConfig).toContain(TARGET_MODEL);
+
+		// 快捷隐藏（#05 补充）：模型选择区两步确认隐藏 provider → 写全局停用名单，选择器分组消失。
+		// 放在最后：隐藏后该 provider 不再可用，不影响前面的目录/角色断言
+		const hiddenProvider = "alibaba-coding-plan";
+		await page.getByRole("button", { name: `隐藏 ${hiddenProvider}` }).click();
+		await page.getByRole("button", { name: `确认隐藏 ${hiddenProvider}？` }).click();
+		await expect(page.getByText(`已隐藏 provider「${hiddenProvider}」`)).toBeVisible({ timeout: 15_000 });
+		await expect(page.getByRole("button", { name: `隐藏 ${hiddenProvider}` })).toHaveCount(0);
+		const globalConfig = await fsp.readFile(path.join(isoHome, ".cornfield", "agent", "config.yml"), "utf8");
+		expect(globalConfig).toContain(hiddenProvider); // disabledProviders 已落盘全局配置
 
 		await page.screenshot({ path: "test-results/mcc-final.png", fullPage: true });
 	} catch (err) {

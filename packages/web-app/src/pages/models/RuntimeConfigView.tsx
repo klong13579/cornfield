@@ -225,6 +225,32 @@ export function RuntimeConfigView(): React.JSX.Element {
 		setBusy(null);
 	};
 
+	/** 快捷隐藏 provider（同 Provider 工作区停用链路：写全局停用名单 disabledProviders）。 */
+	const hideProvider = async (provider: string): Promise<void> => {
+		if (busy) return;
+		setBusy(`hide:${provider}`);
+		setActionError(null);
+		setNotice(null);
+		try {
+			await store.setModelDisabled(provider, undefined, true);
+		} catch (err) {
+			setActionError(`隐藏 provider 失败：${errorText(err)}`);
+			setBusy(null);
+			return;
+		}
+		// 停用已提交；刷新失败不推翻停用事实，只报刷新问题（重进页面目录/选择器都会同步）
+		try {
+			setCatalog(await store.fetchModelCatalog());
+			await refreshScopeAndSelection();
+		} catch (err) {
+			setActionError(`已隐藏 ${provider}，但刷新目录失败：${errorText(err)}`);
+			setBusy(null);
+			return;
+		}
+		setNotice(`已隐藏 provider「${provider}」：其模型已从选择器移除（写全局停用名单，可在 Provider 工作区恢复）`);
+		setBusy(null);
+	};
+
 	const inheritance = scopeData ? toScopeInheritanceView(scopeData) : null;
 	/** 写入目标路径提示：项目不存在时明确「首次写入时新建」。 */
 	const writeTargetPath =
@@ -365,6 +391,7 @@ export function RuntimeConfigView(): React.JSX.Element {
 							busy={busy !== null}
 							onTemporary={(provider, modelId) => void temporaryModel(provider, modelId)}
 							onPersist={(provider, modelId) => void persistModel(provider, modelId)}
+							onHideProvider={hideProvider}
 						/>
 					</section>
 

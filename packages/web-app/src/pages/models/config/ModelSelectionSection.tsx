@@ -1,5 +1,6 @@
 import type { ModelCatalogDto, ModelSelectionDto } from "@cornfield/wire";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { availableModels, groupModelsByProvider } from "./model-options";
 import { splitModelRef, toModelSelectionView } from "./scope-view";
 
 /**
@@ -14,6 +15,8 @@ interface ModelSelectionSectionProps {
 	busy: boolean;
 	onTemporary(provider: string, modelId: string): void;
 	onPersist(provider: string, modelId: string): void;
+	/** 快捷隐藏 provider（写全局停用名单 disabledProviders，同 Provider 工作区链路）；缺省不渲染入口。 */
+	onHideProvider?(provider: string): Promise<void>;
 }
 
 export function ModelSelectionSection({
@@ -22,16 +25,26 @@ export function ModelSelectionSection({
 	busy,
 	onTemporary,
 	onPersist,
+	onHideProvider,
 }: ModelSelectionSectionProps): React.JSX.Element {
 	const [picked, setPicked] = useState("");
+	/** 两步确认：已点一下待确认的 provider（再点执行，4s 无操作自动解除）。 */
+	const [armed, setArmed] = useState<string | null>(null);
+	const [hiding, setHiding] = useState(false);
+	useEffect(() => {
+		if (!armed) return;
+		const t = setTimeout(() => setArmed(null), 4000);
+		return () => clearTimeout(t);
+	}, [armed]);
 	const view = toModelSelectionView(selection);
 	const sessionRef = `${view.sessionProvider}/${view.sessionModelId}`;
 	const persistedRef = view.persistedDefault
 		? `${view.persistedDefault.provider}/${view.persistedDefault.modelId}`
 		: null;
 	const pickedRef = picked ? splitModelRef(picked) : null;
-	// v2 目录含全部已知模型；选择器只提供可切换的 available 模型（其余状态在目录页可见可诊断）
-	const models = (catalog?.models ?? []).filter(m => m.status === "available");
+	// v2 目录含全部已知模型；选择器只提供可切换的 available 模型（其余状态在目录页可见可诊断），按 provider 分组
+	const models = useMemo(() => availableModels(catalog?.models ?? []), [catalog]);
+	const groups = useMemo(() => groupModelsByProvider(models), [models]);
 
 	const temporaryDisabled = busy || !pickedRef || picked === sessionRef;
 	const persistDisabled = busy || !pickedRef || picked === persistedRef;
@@ -78,10 +91,14 @@ export function ModelSelectionSection({
 						onChange={e => setPicked(e.target.value)}
 					>
 						<option value="">{models.length > 0 ? "选择模型…" : "无可用模型"}</option>
-						{models.map(m => (
-							<option key={`${m.provider}/${m.id}`} value={`${m.provider}/${m.id}`}>
-								{m.provider}/{m.id}
-							</option>
+						{groups.map(g => (
+							<optgroup key={g.provider} label={`${g.provider} · ${g.models.length}`}>
+								{g.models.map(m => (
+									<option key={`${m.provider}/${m.id}`} value={`${m.provider}/${m.id}`}>
+										{m.id}
+									</option>
+								))}
+							</optgroup>
 						))}
 					</select>
 					<button
@@ -111,6 +128,45 @@ export function ModelSelectionSection({
 					两条链路语义不同：临时切换仅影响当前会话且不落盘；持久默认写入全局配置（modelRoutes.default.primary）并持久生效。
 					{view.diverged && " 当前会话模型与持久默认不一致。"}
 				</div>
+				{onHideProvider && groups.length > 0 && (
+					<div className="mt-2.5 flex flex-wrap items-center gap-1.5 border-t border-hairline pt-2.5">
+						<span className="text-[11px] text-ink-faint">多了不想要的 Provider？</span>
+						{groups.map(g => {
+							const isArmed = armed === g.provider;
+							return (
+								<button
+									key={g.provider}
+									type="button"
+									aria-label={isArmed ? `确认隐藏 ${g.provider}？` : `隐藏 ${g.provider}`}
+									className={`rounded border px-1.5 py-px font-mono text-[10.5px] transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+										isArmed
+											? "border-danger/40 text-danger"
+											: "border-hairline bg-surface-2 text-ink-subtle hover:border-hairline-strong hover:text-ink"
+										} ${hiding && !isArmed ? "opacity-40" : ""}`}
+									disabled={busy || (hiding && !isArmed)}
+									title={`两步确认隐藏 ${g.provider}（写全局停用名单，可在 Provider 工作区恢复）`}
+									onClick={() => {
+										if (hiding) return;
+										if (!isArmed) {
+											setArmed(g.provider);
+											return;
+										}
+										setHiding(true);
+										void onHideProvider(g.provider)
+											.catch(() => {}) // 失败由页面层 actionError 呈现，此处仅复位本地状态
+											.finally(() => {
+												setHiding(false);
+												setArmed(null);
+											});
+									}}
+								>
+									{hiding && isArmed ? `隐藏中…` : isArmed ? `确认隐藏 ${g.provider}？` : `${g.provider} ✕`}
+								</button>
+							);
+						})}
+						<span className="text-[10.5px] text-ink-faint">两步确认，写全局停用名单，可在 Provider 工作区恢复</span>
+					</div>
+				)}
 			</div>
 		</div>
 	);

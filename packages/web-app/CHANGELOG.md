@@ -2,7 +2,13 @@
 
 ## [Unreleased]
 
+### Added
+
+- **模型选择区快捷隐藏 Provider**（`src/pages/models/config/ModelSelectionSection.tsx`, `RuntimeConfigView.tsx`）: 选择器下方新增 Provider 隐藏 chips，两步确认（再点执行，4s 自动解除）写全局停用名单（复用 Provider 工作区的 setModelDisabled 链路，协议零改动）；隐藏后目录/选择器实时同步，恢复入口在 Provider 工作区。
+
 ### Changed
+
+- **运行时配置编辑三化**（`src/pages/models/config/`）: ① 置顶键内联编辑器按 schema 真实类型渲染控件——5 个枚举键下拉（附当前值兑底项）、4 个布尔键真假下拉、3 个数字键数字输入，高级组仍为 JSON 编辑；② 模型候选仅列 available（角色编辑器原 datalist 喂全量 2874 项，改为 ModelCombobox 内部过滤）；③ 候选按 provider 分组（select 原生 optgroup + combobox 分组浮层，共享 model-options 纯函数）。combobox 保留自由输入（保存前校验闸门依赖输入目录外模型测禁存），键盘可达（↑↓/Enter/Esc）。
 
 - **逐键配置人话化策展**（`src/pages/models/config/ScopeKeysSection.tsx`, `scope-keys.ts`）: 运行配置页不再全量平铺 267 个 schema 键。精选 12 个高频键置顶（思考档位/采样温度/自动压缩/压缩阈值/压缩策略/上下文自动升级/卡死检测/API 重试/回退回归/跟进模式/自动恢复/Python 工具模式），配中文人话标签与一句话说明；其余键全部进入「高级配置」折叠组（默认收起，展开后三层展示与编辑功能完整）。纯展示层策展，协议与 schema 不变。
 
