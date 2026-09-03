@@ -1,0 +1,66 @@
+import { describe, expect, test } from "bun:test";
+import type { ConfigScopeKeyDto } from "@cornfield/wire";
+import { FEATURED_SCOPE_KEY_META, FEATURED_SCOPE_KEY_ORDER, splitScopeKeys } from "../src/pages/models/config/scope-keys";
+
+function key(key: string, overrides: Partial<ConfigScopeKeyDto> = {}): ConfigScopeKeyDto {
+	return {
+		key,
+		overridden: false,
+		effectiveValue: null,
+		...overrides,
+	};
+}
+
+describe("splitScopeKeys", () => {
+	test("精选键按精选顺序输出（而非 schema 顺序）", () => {
+		const { featured } = splitScopeKeys([
+			key("python.toolMode"),
+			key("temperature"),
+			key("defaultThinkingLevel"),
+		]);
+		expect(featured.map(k => k.key)).toEqual(["defaultThinkingLevel", "temperature", "python.toolMode"]);
+	});
+
+	test("schema 中不存在的精选键自动跳过，不产出幽灵条目", () => {
+		const { featured, advanced } = splitScopeKeys([key("defaultThinkingLevel"), key("theme.color")]);
+		expect(featured.map(k => k.key)).toEqual(["defaultThinkingLevel"]);
+		expect(advanced.map(k => k.key)).toEqual(["theme.color"]);
+	});
+
+	test("非精选键全部落入 advanced 且保持原顺序", () => {
+		const { advanced } = splitScopeKeys([
+			key("b.beta"),
+			key("defaultThinkingLevel"),
+			key("a.alpha"),
+			key("temperature"),
+		]);
+		expect(advanced.map(k => k.key)).toEqual(["b.beta", "a.alpha"]);
+	});
+
+	test("同一键不会同时出现在 featured 与 advanced", () => {
+		const all = [...FEATURED_SCOPE_KEY_ORDER.map(k => key(k)), key("extra.x")];
+		const { featured, advanced } = splitScopeKeys(all);
+		const featuredSet = new Set(featured.map(k => k.key));
+		for (const k of advanced) {
+			expect(featuredSet.has(k.key)).toBe(false);
+		}
+		expect(featured.length + advanced.length).toBe(all.length);
+	});
+
+	test("空键集 → 两侧皆空", () => {
+		const { featured, advanced } = splitScopeKeys([]);
+		expect(featured).toEqual([]);
+		expect(advanced).toEqual([]);
+	});
+
+	test("精选清单不变量：每个精选键都有中文标签与说明，且无重复", () => {
+		expect(FEATURED_SCOPE_KEY_META.size).toBe(FEATURED_SCOPE_KEY_ORDER.length);
+		for (const k of FEATURED_SCOPE_KEY_ORDER) {
+			const meta = FEATURED_SCOPE_KEY_META.get(k);
+			expect(meta).toBeDefined();
+			expect(meta!.label.length).toBeGreaterThan(0);
+			expect(meta!.description.length).toBeGreaterThan(0);
+			expect(meta!.label).not.toMatch(/^[\x20-\x7E]+$/); // 标签必须是中文（含非 ASCII）
+		}
+	});
+});
