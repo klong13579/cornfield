@@ -1,5 +1,6 @@
 import type { ConfigScope, ConfigScopeDto, ModelCatalogDto } from "@cornfield/wire";
 import { useEffect, useMemo, useState } from "react";
+import { ModelCombobox } from "./ModelCombobox";
 import {
 	addCustomRole,
 	addFallback,
@@ -54,7 +55,8 @@ import {
  *   空主模型但有回退链允许保存并明示「仅回退链生效」。
  * - 保存：确认弹窗展示作用域 + 逐角色逐字段 diff，确认后由页面层一次 setConfigValue 整键写入
  *   modelRoutes（失败时草稿保留且不应用部分配置），成功后页面重拉作用域与目录。
- * - 键盘可达：回退排序提供 ▲▼ 按钮作为拖拽的等价替代；模型选择为原生 datalist（输入即过滤）。
+ * - 键盘可达：回退排序提供 ▲▼ 按钮作为拖拽的等价替代；模型选择为 ModelCombobox
+ *   （available 过滤 + provider 分组浮层，保留自由输入以支持校验闸门）。
  */
 interface RoleEditorSectionProps {
 	scope: ConfigScopeDto;
@@ -685,13 +687,13 @@ export function RoleEditorSection({
 												</button>
 											)}
 										</div>
-										<input
+										<ModelCombobox
 											className="w-full rounded-md border border-hairline bg-surface px-2.5 py-1.5 font-mono text-[12px] text-ink outline-none focus:border-accent"
+											models={catalogModels}
 											value={entry.primary}
-											list="role-editor-model-options"
 											placeholder={effectiveRoute?.primary ?? "provider/modelId"}
-											spellCheck={false}
-											onChange={e => mutate(setPrimary(draft, entry.uid, e.target.value))}
+											ariaLabel="角色主模型"
+											onChange={v => mutate(setPrimary(draft, entry.uid, v))}
 										/>
 										{entryValidation?.issues
 											.filter(i => i.field === "primary")
@@ -783,15 +785,15 @@ export function RoleEditorSection({
 											})}
 										</ol>
 										<div className="mt-2 flex items-center gap-2">
-											<input
+											<ModelCombobox
 												className="min-w-0 flex-1 rounded-md border border-hairline bg-surface px-2.5 py-1 font-mono text-[12px] text-ink outline-none focus:border-accent"
+												models={catalogModels}
 												value={fallbackInput[entry.uid] ?? ""}
-												list="role-editor-model-options"
 												placeholder="添加回退模型：provider/modelId"
-												spellCheck={false}
-												onChange={e => setFallbackInput({ ...fallbackInput, [entry.uid]: e.target.value })}
-												onKeyDown={e => {
-													if (e.key === "Enter" && (fallbackInput[entry.uid] ?? "").trim()) {
+												ariaLabel="添加回退模型"
+												onChange={v => setFallbackInput({ ...fallbackInput, [entry.uid]: v })}
+												onEnter={() => {
+													if ((fallbackInput[entry.uid] ?? "").trim()) {
 														mutate(addFallback(draft, entry.uid, fallbackInput[entry.uid] ?? ""));
 														setFallbackInput({ ...fallbackInput, [entry.uid]: "" });
 													}
@@ -905,14 +907,7 @@ export function RoleEditorSection({
 				))}
 			</div>
 
-			{/* 模型搜索候选（原生 datalist：输入即过滤，键盘可达） */}
-			<datalist id="role-editor-model-options">
-				{catalogModels.map(m => (
-					<option key={`${m.provider}/${m.id}`} value={`${m.provider}/${m.id}`}>
-						{m.name}
-					</option>
-				))}
-			</datalist>
+			{/* 模型搜索候选由 ModelCombobox 内联渲染（available 过滤 + provider 分组） */}
 
 			{confirmOpen && (
 				<SaveConfirmDialog

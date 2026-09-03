@@ -1,6 +1,6 @@
 import type { ConfigScope, ConfigScopeDto, ConfigScopeKeyDto } from "@cornfield/wire";
 import { useState } from "react";
-import { FEATURED_SCOPE_KEY_META, splitScopeKeys } from "./scope-keys";
+import { FEATURED_SCOPE_KEY_META, splitScopeKeys, type ScopeKeyEditor } from "./scope-keys";
 import { formatConfigValue, parseConfigDraft, toScopeKeyView } from "./scope-view";
 
 /**
@@ -71,6 +71,62 @@ function ScopeKeyCard({
 	const meta = FEATURED_SCOPE_KEY_META.get(dto.key);
 	/** 编辑器预填基准：写入目标作用域的当前值，未设置则用生效值。 */
 	const prefillBase = writeTarget === "project" ? dto.projectValue : dto.globalValue;
+	const editor: ScopeKeyEditor | undefined = FEATURED_SCOPE_KEY_META.get(dto.key)?.editor;
+
+	/** 编辑面板头部提示随编辑器形态变化。 */
+	const editorHint =
+		editor === undefined
+			? "整键替换（JSON）"
+			: editor.kind === "enum"
+				? "枚举值（下拉选择）"
+				: editor.kind === "boolean"
+					? "布尔值"
+					: "数值";
+
+	/** 非编辑器态的通用输入控件。 */
+	const jsonEditor = (
+		<textarea
+			className="h-28 w-full resize-y rounded-md border border-hairline bg-surface px-2.5 py-2 font-mono text-[12px] text-ink outline-none focus:border-accent"
+			value={draft}
+			onChange={e => onDraftChange(e.target.value)}
+			spellCheck={false}
+		/>
+	);
+
+	const editorControl =
+		editor === undefined ? (
+			jsonEditor
+		) : editor.kind === "enum" ? (
+			<select
+				className="w-full rounded-md border border-hairline bg-surface-2 px-2.5 py-1.5 font-mono text-[12px] text-ink outline-none focus:border-accent"
+				value={draft}
+				onChange={e => onDraftChange(e.target.value)}
+			>
+				{draft !== "" && !editor.values.includes(draft) && <option value={draft}>{`${draft}（当前配置值）`}</option>}
+				{editor.values.map(v => (
+					<option key={v} value={v}>
+						{v}
+					</option>
+				))}
+			</select>
+		) : editor.kind === "boolean" ? (
+			<select
+				className="w-full rounded-md border border-hairline bg-surface-2 px-2.5 py-1.5 font-mono text-[12px] text-ink outline-none focus:border-accent"
+				value={draft}
+				onChange={e => onDraftChange(e.target.value)}
+			>
+				<option value="true">真（true）</option>
+				<option value="false">假（false）</option>
+			</select>
+		) : (
+			<input
+				type="number"
+				step="any"
+				className="w-full rounded-md border border-hairline bg-surface px-2.5 py-1.5 font-mono text-[12px] text-ink outline-none focus:border-accent"
+				value={draft}
+				onChange={e => onDraftChange(e.target.value)}
+			/>
+		);
 
 	return (
 		<div
@@ -139,14 +195,9 @@ function ScopeKeyCard({
 						<span className="font-mono text-ink-subtle">
 							{writeTarget === "global" ? "全局配置" : "项目配置"}
 						</span>
-						<span>· 整键替换（JSON）；当前生效值 {formatConfigValue(dto.effectiveValue)}</span>
+						<span>· {editorHint}；当前生效值 {formatConfigValue(dto.effectiveValue)}</span>
 					</div>
-					<textarea
-						className="h-28 w-full resize-y rounded-md border border-hairline bg-surface px-2.5 py-2 font-mono text-[12px] text-ink outline-none focus:border-accent"
-						value={draft}
-						onChange={e => onDraftChange(e.target.value)}
-						spellCheck={false}
-					/>
+					{editorControl}
 					{draftError && <div className="mt-1.5 text-[11.5px] text-danger">{draftError}</div>}
 					<div className="mt-2.5 flex gap-2">
 						<button
@@ -186,7 +237,16 @@ export function ScopeKeysSection({
 
 	const openEditor = (key: string, currentValue: unknown): void => {
 		setEditingKey(key);
-		setDraft(currentValue === undefined ? "" : JSON.stringify(currentValue, null, 2));
+		const kind = FEATURED_SCOPE_KEY_META.get(key)?.editor?.kind;
+		if (kind === "enum") {
+			setDraft(currentValue === undefined || currentValue === null ? "" : String(currentValue));
+		} else if (kind === "boolean") {
+			setDraft(currentValue === undefined ? "false" : String(Boolean(currentValue)));
+		} else if (kind === "number") {
+			setDraft(currentValue === undefined || currentValue === null ? "" : String(currentValue));
+		} else {
+			setDraft(currentValue === undefined ? "" : JSON.stringify(currentValue, null, 2));
+		}
 		setDraftError(null);
 	};
 
@@ -197,12 +257,32 @@ export function ScopeKeysSection({
 	};
 
 	const submitDraft = (key: string): void => {
-		const parsed = parseConfigDraft(draft);
-		if (!parsed.ok) {
-			setDraftError(parsed.error);
-			return;
+		const editor = FEATURED_SCOPE_KEY_META.get(key)?.editor;
+		let value: unknown;
+		if (editor?.kind === "enum") {
+			if (draft === "") {
+				setDraftError("请选择一个值");
+				return;
+			}
+			value = draft;
+		} else if (editor?.kind === "boolean") {
+			value = draft === "true";
+		} else if (editor?.kind === "number") {
+			const n = Number(draft);
+			if (draft.trim() === "" || !Number.isFinite(n)) {
+				setDraftError("请输入有效数字");
+				return;
+			}
+			value = n;
+		} else {
+			const parsed = parseConfigDraft(draft);
+			if (!parsed.ok) {
+				setDraftError(parsed.error);
+				return;
+			}
+			value = parsed.value;
 		}
-		onWrite(key, parsed.value, writeTarget);
+		onWrite(key, value, writeTarget);
 		closeEditor();
 	};
 

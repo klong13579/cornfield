@@ -63,4 +63,18 @@ describe("splitScopeKeys", () => {
 			expect(meta!.label).not.toMatch(/^[\x20-\x7E]+$/); // 标签必须是中文（含非 ASCII）
 		}
 	});
+
+	test("编辑器元数据不变量：全部精选键都有 editor，且 5 枚举 / 4 布尔 / 3 数字", () => {
+		const kinds = { enum: 0, boolean: 0, number: 0 } as Record<string, number>;
+		for (const k of FEATURED_SCOPE_KEY_ORDER) {
+			const editor = FEATURED_SCOPE_KEY_META.get(k)!.editor;
+			expect(editor).toBeDefined();
+			kinds[editor!.kind] += 1;
+			if (editor!.kind === "enum") {
+				expect(editor!.values.length).toBeGreaterThan(0);
+				expect(new Set(editor!.values).size).toBe(editor!.values.length); // 无重复取值
+			}
+		}
+		expect(kinds).toEqual({ enum: 5, boolean: 4, number: 3 });
+	});
 });
