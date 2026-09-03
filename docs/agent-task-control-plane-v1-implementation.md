@@ -14,7 +14,8 @@
 - `packages/coding-agent/src/live/task-router.ts`：已有运行中任务的 status/steer/cancel 语义，但它是语音主会话路由，不应直接承担持久 Task 控制面。
 - `docs/agent/task-discovery.md`：已有 AgentDefinition 发现和执行时约束说明。
 
-v1 新增控制面应作为独立模块接入，不重写现有 TaskTool。现有 TaskTool 继续服务 session 内即时 subagent；其 Agent discovery、输出 schema 和事件契约可复用，但现有 `executor.ts` 是进程内执行器，不能冒充已确定的独立进程 TaskRun 边界。
+v1 新增控制面应作为独立模块接入，不重写现有 TaskTool。现有 TaskTool 继续服务 session 内即时 subagent；其 Agent discovery、输出 schema 和事件契约可复用，但现有 `executor.ts` 是进程内执行器，不能冒充已确定的独立进程 TaskRun 边界。default Agent 的业务 agentDir/workspace 统一为 `~/cf-workspace`，通过现有 skeleton 初始化；全局用户配置目录不再作为 default Agent 的业务 workspace。
+- 当前 skeleton 初始化：`packages/coding-agent/src/skeleton/assets.ts` / `ensure.ts` / `dirs.ts` 提供 Agent 文件和目录骨架；TODO.md 已存在，`topics/` 尚未列入目录骨架。
 
 ## 2. 模块边界
 
@@ -38,6 +39,10 @@ packages/coding-agent/src/task-control/
 ```
 
 CLI/TUI/Web adapters should depend on the domain/store interfaces, not SQL. The first implementation can expose CLI/SDK operations before adding a visual board.
+- `~/cf-workspace` 按 skeleton 初始化，且 skeleton 必须增加 `topics/` 目录；TODO.md 使用 skeleton 模板。
+- 不自动执行 `git init`；代码 Task 另行绑定用户选择的 `repositoryRoot + baseRevision`。
+- `~/cf-workspace/.cornfield/config.yml` 是 default Agent 的模型配置来源；不创建 Task/Worker 第二份模型配置。
+- `~/cf-workspace/.cornfield/config.yml` 是 default Agent 的模型和运行配置来源；首次初始化将旧 `~/.cornfield/agent/config.yml` 合并迁移，旧文件只作备份，不再作为 default Agent 运行时真源。其他 Agent 继续使用各自 agentDir 配置。
 
 ## 3. Domain types
 
@@ -57,7 +62,7 @@ export type WorkspacePolicy = "shared" | "worktree" | "none";
 export type Priority = "P0" | "P1" | "P2" | "P3";
 ```
 
-TaskSpec must include stable `taskId`, title, kind=`code`, `agentId` (v1 fixed to `default`), repository, priority, source references, `sourceRevision`, `taskRevision`, `specSnapshot`, workspace policy, dependencies, completion contract, and audit timestamps. TaskRun must include taskId, attempt, session/process references, resolved cwd, effective model snapshot, status, timestamps, workspace path, structured result, and error. Verification must include taskId/runId, verifier identity, checks, evidence, status, and decision timestamps.
+TaskSpec must include stable `taskId`, title, kind=`code`, `agentId` (v1 fixed to `default`), bound repository root and base revision, priority, source references, `sourceRevision`, `taskRevision`, `specSnapshot`, workspace policy, dependencies, completion contract, and audit timestamps. TaskRun must include taskId, attempt, session/process references, resolved cwd, effective model snapshot, status, timestamps, worktree path, structured result, and error. Verification must include taskId/runId, verifier identity, checks, evidence, status, and decision timestamps.
 
 Do not add Task-level permissions, deadline, budget, network, or multi-repository fields in v1.
 
@@ -156,7 +161,7 @@ All status writes occur in transactions that validate the transition and append 
 
 ## 5. Source synchronizer
 
-`source-sync.ts` reads only the project-root TODO.md and linked topic files, following `project-todo` scope rules. It must:
+`source-sync.ts` reads only default Agent workspace files `~/cf-workspace/TODO.md` and linked `~/cf-workspace/topics/` (not the currently selected code repository), following `project-todo` scope rules. It must:
 
 1. Resolve project root using existing project conventions.
 2. Assign stable IDs without using title/path/hash as identity; persist the mapping in `source_items` and add topic IDs only when the source format supports it.
@@ -186,8 +191,11 @@ rejectProposal(proposalId)  → rejected
 
 - repository is one Git repository;
 - objective/taskPrompt/outcome/verifiers/evidence are present;
+- On first client access, call the existing skeleton ensure path for `~/cf-workspace`; the ensure operation must be additive/idempotent and create the skeleton `TODO.md`, `topics/`, and runtime files.
+- Do not run `git init` during workspace initialization.
 - `agentId` is `default` and the live serve default session is available;
-- repository matches the current serve project root;
+- code Tasks bind an explicit Git repository root and creation-time base revision;
+- a code Task without a Git repository remains incomplete;
 - workspace policy is valid;
 - blocking dependencies are accepted;
 - high-risk policy requires approval when applicable;
@@ -219,7 +227,7 @@ retry(taskId, reason)
 resume(taskId)
 ```
 
-`startRun` 创建新的 TaskRun，并以独立进程启动欢迎页 `default` Agent 的独立 AgentSession。v1 不提供 Agent/Worker Profile 选择：Task 固定 `agentId = default`，workspace/repository 取当前 `cornfield serve` 项目根；子进程复用 default Agent 的现有设置与模型解析链，只把实际生效模型写入 TaskRun。不得新建第二份模型配置文件，也不提供 Task/Run 级模型覆盖。子进程复用现有 `createAgentSession`、Agent discovery、session 持久化和事件协议，但不直接调用进程内的 `executor.ts` 作为运行边界。Task 的 `specSnapshot`、显式 `taskPrompt`、source topic/revision 和 workspace 通过静态启动协议传入。一个 Task 可有多个顺序 Run，但同一时刻只允许一个 active Run。
+`startRun` 创建新的 TaskRun，并以独立进程启动欢迎页 `default` Agent 的独立 AgentSession。v1 不提供 Agent/Worker Profile 选择：Task 固定 `agentId = default`，default Agent 的 agentDir/workspace 固定为 `~/cf-workspace`，模型配置复用 `~/cf-workspace/.cornfield/config.yml` 的现有解析链；代码 Task 仍使用创建时固化的 `repositoryRoot + baseRevision` 创建 worktree。只把实际生效模型写入 TaskRun。不得新建第二份模型配置文件，也不提供 Task/Run 级模型覆盖。子进程复用现有 `createAgentSession`、Agent discovery、session 持久化和事件协议，但不直接调用进程内的 `executor.ts` 作为运行边界。Task 的 `specSnapshot`、显式 `taskPrompt`、source topic/revision 和 workspace 通过静态启动协议传入。一个 Task 可有多个顺序 Run，但同一时刻只允许一个 active Run。
 
 Worker lifecycle messages must be normalized into TaskRun events. Completion requires the structured report fields `outcome`, `summary`, `changedFiles`, `artifacts`, verification attempts/results, residual risks, blockers, and next action. A natural-language “done” is invalid as the complete report.
 
