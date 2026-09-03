@@ -1,5 +1,5 @@
 import type { ProviderStatusDto } from "@cornfield/wire";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSession } from "../../state/use-session";
 import { ProviderCard } from "./providers/ProviderCard";
 import { errorText, statusHint } from "./providers/provider-display";
@@ -78,7 +78,14 @@ export function ProvidersView(): React.JSX.Element {
 		setProviders(prev => (prev ? prev.map(p => (p.providerId === next.providerId ? next : p)) : prev));
 	}, []);
 
-	const list = providers ?? [];
+	// 已连接置顶（稳定分组：组内保持 serve 原序），未接入/异常沉底
+	const list = useMemo(() => {
+		const all = providers ?? [];
+		const connected: ProviderStatusDto[] = [];
+		const rest: ProviderStatusDto[] = [];
+		for (const p of all) (p.status === "connected" ? connected : rest).push(p);
+		return [...connected, ...rest];
+	}, [providers]);
 	const connectedCount = list.filter(p => p.status === "connected").length;
 	const problemCount = list.filter(p => statusHint(p.status) !== null).length;
 
