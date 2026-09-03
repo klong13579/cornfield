@@ -31,6 +31,59 @@ python3 ~/.cornfield/agent/skills/session-diagnosis-data/scripts/diagnose.py --s
 
 逐一分析每个维度的数据。
 
+### 步骤 2b：用户纠正分析
+
+运行：
+
+```bash
+python3 ~/.cornfield/agent/skills/session-diagnosis-data/scripts/diagnose.py --session "{{sessionFile}}" --filter corrections
+```
+
+`diagnose.py` 用关键词匹配粗筛了候选消息。你的任务是**精过滤 + 分类**。
+
+#### 第一步：过滤误报
+
+以下情况是**误报**，应丢弃（不纳入 `corrections` 输出）：
+
+| 误报类型 | 特征 | 示例 |
+|---|---|---|
+| 初始需求 | 会话首条消息，用户提出任务需求，不是对 agent 输出的纠正 | "帮我改一下代码" / "增加XX功能" |
+| 描述性提及 | 用户只是在描述「纠正」这个概念，并非在纠正 agent | "增加对对话结果的判断和纠正功能" |
+| 普通指令 | 用户发指令让 agent 做某事，但 agent 还没做出任何输出 | "把这个文件读一下" / "查一下今天天气" |
+| 后续追问 | 用户在已有基础上追问细节，不是否定了 agent 的结论 | "那性能呢" / "还有没有其他方案" |
+
+**判断标准：** 用户是否在**回应 agent 刚说过/做过的事**并表达不认同/修正？如果是 → 保留。如果用户只是提新需求、追问、或描述概念 → 丢弃。
+
+#### 第二步：分类真纠正
+
+对保留下来的纠正记录，判断：
+
+**1. targetDim — 纠正的是哪个维度？**
+
+| 维度 | 判断依据 | 典型用户话术 |
+|---|---|---|
+| `intent` | 用户说 agent 理解错了需求，纠正的是对用户意图的理解 | "你理解错了" / "我要的是 A 不是 B" / "我的意思是" |
+| `output` | 用户说 agent 的输出内容有问题（代码/方案/回复） | "这个代码不对" / "结果有 bug" / "你这个方案不行" |
+| `tool` | 用户说工具调用结果不对，或操作方式不对 | "你改错了文件" / "不是这个路径" / "你查的数据不对" |
+| `reasoning` | 用户说 agent 的推理逻辑有问题 | "你的推理有问题" / "这个逻辑不通" / "因果关系不对" |
+| `meta` | 用户纠正会话行为（如叫停、切换话题） | "别做了" / "停" / "换一个话题" |
+
+**2. intent — 纠正意图：**
+- `correction`：用户指正 agent 的错误（"你说错了，应该是 X"）
+- `clarification`：用户补充说明自己的需求（"我补充一下，还要求 X"）
+- `rejection`：用户拒绝 agent 的输出（"这个不对，重做"）
+
+**3. isValid — 纠正是否合理：**
+- `true`：用户说得对，agent 确实有问题
+- `false`：用户误解了（agent 其实是对的），或用户的需求不合理
+
+**4. isResolved — 纠正后 agent 是否修复了问题：**
+- 看纠正后的后续对话，agent 是否按用户指正的方向改进了
+- `true`：agent 理解并修正了
+- `false`：agent 未修正或修正失败
+
+输出到 structured summary 的 `corrections` 数组。如果全部是误报，输出空数组。
+
 ### 步骤 3：跨维度分析
 
 汇总 6 个维度的发现：
@@ -73,7 +126,18 @@ python3 ~/.cornfield/agent/skills/session-diagnosis-data/scripts/diagnose.py --s
     "tool": { ... },
     "output": { ... }
   },
-  "reportAt": "ISO 时间戳"
+  "corrections": [
+    {
+      "turn": 5,
+      "userText": "你理解错了，我要的是 A 不是 B",
+      "targetDim": "intent",
+      "intent": "correction",
+      "isValid": true,
+      "isResolved": false,
+      "precedingContext": "assistant 回复了 B 方案..."
+    }
+  ],
+  "reportAt": "ISO 时间戳
 }
 ```
 

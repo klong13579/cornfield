@@ -4,7 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { resolveGlobalMemoryRootCandidates } from "@cornfield/self-evolution/paths";
 import { buildModelPriceCatalog, getDashboardStats, syncAllSessions } from "@cornfield/stats";
-import { getAgentDir, getConfigRootDir, isEnoent, logger, parseFrontmatter } from "@cornfield/utils";
+import { getAgentDir, getConfigRootDir, isEnoent, logger, parseFrontmatter, prompt } from "@cornfield/utils";
 import type {
 	AgentMessageDto,
 	ClientFrame,
@@ -68,7 +68,8 @@ import { invalidateFsScanAfterWrite } from "../tools/fs-cache-invalidation";
 import type { TodoPhase } from "../tools/todo-write";
 import * as git from "../utils/git";
 import { listAgentArtifacts, listSessionArtifacts } from "./artifacts";
-import { getDiagnosisReport, listDiagnosisReports, runDiagnosis } from "./diagnosis-runner";
+import { getDiagnosisReport, listDiagnosisReports, runSimpleDiagnosis } from "./diagnosis-runner";
+import diagnoseSessionPrompt from "../prompts/diagnose-session.md" with { type: "text" };
 import { WireHostToolBridge } from "./host-tool-bridge";
 import { PERMISSION_TIMEOUT_OUTCOME, PermissionGate } from "./permission-gate";
 import { agentSessionsRoot, defaultSessionsRoot, indexSessions, type SessionIndexSource } from "./session-index";
@@ -311,6 +312,26 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 		return { agentId, attached };
 	};
 
+	/** 从 session JSONL 首行提取 session id。 */
+	function readSessionId(sessionFile: string): string {
+		try {
+			const firstLine = require("node:fs").readFileSync(sessionFile, "utf8").split("\n")[0] ?? "";
+			const parsed = JSON.parse(firstLine) as { id?: string };
+			return parsed.id ?? `session-${Date.now()}`;
+		} catch {
+			return `session-${Date.now()}`;
+		}
+	}
+
+	/** 生成 reportId：<safeSessionId>_<YYYYMMDD-HHMMSS> */
+	function generateReportId(sessionId: string): string {
+		const safe = sessionId.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64);
+		const now = new Date();
+		const pad = (n: number) => String(n).padStart(2, "0");
+		const ts = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+		return `${safe}_${ts}`;
+	}
+
 	const handleCommand = async (
 		ctx: CommandContext,
 		command: WireCommand,
@@ -432,15 +453,50 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 					return;
 				}
 				case "diagnose_session": {
-					// 诊断会话：异步，立即返回 running 状态
+					// 诊断会话：先做简单路径（快速出 fallback），再用 runEphemeralTurn 做 LLM 深度分析
 					const sf = command.sessionFile;
-					// 用 Bun.file 检查存在性，避免 import sync fs
 					if (!(await Bun.file(sf).exists())) {
 						fail(`session file not found: ${sf}`);
 						return;
 					}
-					const result = await runDiagnosis(sf);
-					done(result);
+
+					// 生成 reportId 和路径
+					const sessionId = readSessionId(sf);
+					const reportId = generateReportId(sessionId);
+					const reportsDir = path.join(getAgentDir(), "diagnosis-reports");
+					const reportPath = path.join(reportsDir, `${reportId}.md`);
+					const summaryPath = path.join(reportsDir, `${reportId}.summary.json`);
+
+					// 幂等
+					if (await Bun.file(reportPath).exists()) {
+						done({ reportId, sessionId, state: "done" });
+						return;
+					}
+
+					// 异步后台：先简单路径写 fallback，再用 runEphemeralTurn 做 LLM 深度分析
+					(async () => {
+						try {
+							await runSimpleDiagnosis(sf, reportId, sessionId, reportsDir, reportPath, summaryPath);
+
+							// LLM 深度分析（in-process ephemeral turn）
+							const target = resolveTarget(ctx, {});
+							if (!("error" in target)) {
+								const rendered = prompt.render(diagnoseSessionPrompt, {
+									sessionFile: sf,
+									reportPath,
+									summaryPath,
+									reportId,
+								});
+								await target.attached.session.runEphemeralTurn({ promptText: rendered });
+							}
+						} catch (err) {
+							logger.error("diagnose_session: LLM analysis failed, fallback kept", {
+								sessionFile: sf, error: String(err),
+							});
+						}
+					})();
+
+					done({ reportId, sessionId, state: "running" });
 					return;
 				}
 				case "list_diagnosis_reports": {

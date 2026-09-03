@@ -89,20 +89,22 @@ export function PlaybackView(): React.JSX.Element {
 		};
 	}, [id, store, sessionFile]);
 
-	// Seek to initial turn when navigating from diagnosis report
+	// Seek to matching entry when navigating from diagnosis report (corrections section)
 	useEffect(() => {
-		const initialTurn = (location.state as { initialTurn?: number } | null)?.initialTurn;
-		if (initialTurn !== undefined && initialTurn !== null && timeline) {
-			playback.seek(initialTurn);
-			// Auto-expand all tool cards in the target turn
-			const entry = timeline[initialTurn - 1];
-			if (entry?.tools) {
-				const keys = entry.tools.map((_, ti) => `${entry.id}:${ti}`);
-				setOpenTools(prev => {
-					const next = new Set(prev);
-					for (const k of keys) next.add(k);
-					return next;
-				});
+		const searchText = (location.state as { searchText?: string } | null)?.searchText;
+		if (searchText && timeline && timeline.length > 0) {
+			const idx = timeline.findIndex(e => e.text.includes(searchText));
+			if (idx >= 0) {
+				playback.seek(idx + 1);
+				const entry = timeline[idx];
+				if (entry?.tools) {
+					const keys = entry.tools.map((_, ti) => `${entry.id}:${ti}`);
+					setOpenTools(prev => {
+						const next = new Set(prev);
+						for (const k of keys) next.add(k);
+						return next;
+					});
+				}
 			}
 		}
 	}, [timeline, location.state]);

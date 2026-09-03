@@ -130,6 +130,16 @@ export interface DiagnosisReportListItemDto {
 }
 
 /** 诊断报告摘要（get_diagnosis_report → summary）。 */
+export interface UserCorrectionDto {
+	turn: number;
+	userText: string;
+	targetDim: "intent" | "tool" | "output" | "reasoning" | "meta";
+	intent: "correction" | "clarification" | "rejection";
+	isValid: boolean;
+	isResolved: boolean;
+	precedingContext: string;
+}
+
 export interface DiagnosisSummaryDto {
 	reportId: string;
 	sessionId: string;
@@ -142,6 +152,7 @@ export interface DiagnosisSummaryDto {
 	topActions?: string[];
 	/** dimensionKey → detail */
 	dimensions?: Record<string, DiagnosisDimensionDto>;
+	corrections?: UserCorrectionDto[];
 	reportAt?: string;
 	hasSummary?: boolean;
 }

@@ -40,6 +40,24 @@ export interface DiagnosisDimDetailDto {
 	fix: string;
 }
 
+/** 用户纠正记录（诊断时从会话 JSONL 自动提取）。 */
+export interface UserCorrectionDto {
+	/** 会话轮次。 */
+	turn: number;
+	/** 用户纠正消息原文。 */
+	userText: string;
+	/** 被纠正的维度。 */
+	targetDim: "intent" | "tool" | "output" | "reasoning" | "meta";
+	/** 纠正意图：correction（纠错）/ clarification（澄清）/ rejection（拒绝）。 */
+	intent: "correction" | "clarification" | "rejection";
+	/** 纠正是否合理。 */
+	isValid: boolean;
+	/** 纠正后 agent 是否修复成功。 */
+	isResolved: boolean;
+	/** 纠正前最近的 assistant 回复摘要。 */
+	precedingContext: string;
+}
+
 /** 结构化诊断摘要（<reportId>.summary.json 内容；list/get 返回）。 */
 export interface DiagnosisSummaryDto {
 	/** 报告 id（文件名去扩展名，如 `s1_20260901-091812`）。 */
@@ -59,6 +77,8 @@ export interface DiagnosisSummaryDto {
 	topActions: [string, string];
 	/** 六维度判定 key → 详情。 */
 	dimensions: Record<string, DiagnosisDimDetailDto>;
+	/** 用户纠正记录。 */
+	corrections?: UserCorrectionDto[];
 	/** 诊断完成时间（ISO）。 */
 	reportAt: string;
 }

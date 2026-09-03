@@ -15,7 +15,8 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { getAgentDir, isEnoent, logger } from "@cornfield/utils";
-import type { DiagnosisReportListItemDto, DiagnosisSummaryDto, DiagnosisTaskStateDto } from "@cornfield/wire";
+import type { DiagnosisReportListItemDto, DiagnosisSummaryDto, DiagnosisTaskStateDto, UserCorrectionDto } from "@cornfield/wire";
+
 
 /** 诊断报告根目录 ~/.cornfield/agent/diagnosis-reports/ */
 function reportsDir(): string {
@@ -40,30 +41,6 @@ function extractSessionId(sessionFile: string): string | null {
 	} catch {
 		return null;
 	}
-}
-
-/** 运行 diagnose.py 提取数据（超时 30s）。 */
-function runDiagnosePy(sessionFile: string, filter: string): string {
-	const script = path.join(os.homedir(), ".cornfield/agent/skills/session-diagnosis-data/scripts/diagnose.py");
-	const result = Bun.spawnSync(["python3", script, "--session", sessionFile, "--filter", filter], {
-		timeout: 30000,
-	});
-	if (result.exitCode !== 0) {
-		throw new Error(`diagnose.py --filter ${filter} failed (exit ${result.exitCode}): ${result.stderr.toString().slice(0, 200)}`);
-	}
-	return result.stdout.toString();
-}
-
-/** 运行 diagnose.py 获取摘要。 */
-function runDiagnoseSummary(sessionFile: string): string {
-	const script = path.join(os.homedir(), ".cornfield/agent/skills/session-diagnosis-data/scripts/diagnose.py");
-	const result = Bun.spawnSync(["python3", script, "--session", sessionFile, "--summary"], {
-		timeout: 30000,
-	});
-	if (result.exitCode !== 0) {
-		throw new Error(`diagnose.py --summary failed (exit ${result.exitCode}): ${result.stderr.toString().slice(0, 200)}`);
-	}
-	return result.stdout.toString();
 }
 
 // ── 运行中任务状态 ──
@@ -100,7 +77,7 @@ export async function runDiagnosis(sessionFile: string): Promise<{
 	return { reportId, sessionId, state: "running" };
 }
 
-/** 后台：提取数据 + 生成报告。 */
+/** 后台：提取数据 + 生成报告（简单路径，TypeScript 直接构建）。 */
 async function runDiagnosisBackground(
 	sessionFile: string,
 	reportId: string,
@@ -111,73 +88,113 @@ async function runDiagnosisBackground(
 	const summaryPath = path.join(dir, `${reportId}.summary.json`);
 
 	try {
-		logger.info("diagnosis-runner: extracting data", { sessionFile, reportId });
-
-		// 1. 提取摘要数据
-		const summaryJson = runDiagnoseSummary(sessionFile);
-		const summary = JSON.parse(summaryJson) as Record<string, unknown>;
-
-		// 2. 提取各维度数据（6 个 filter）
-		const dims: Record<string, string> = {};
-		for (const filter of ["meta", "performance", "turns", "reasoning", "tools", "output"]) {
-			try {
-				dims[filter] = runDiagnosePy(sessionFile, filter);
-			} catch (err) {
-				logger.warn("diagnosis-runner: filter failed", { filter, error: String(err) });
-				dims[filter] = "{}";
-			}
-		}
-
-		// 3. 生成简单诊断报告（基于提取的数据）
-		const status = (summary as { status?: string }).status ?? "unknown";
-		const totalTurns = (summary as { totalTurns?: number }).totalTurns ?? 0;
-		const tokens = (summary as { tokens?: Record<string, number> }).tokens ?? {};
-		const errors = (summary as { errors?: unknown[] }).errors ?? [];
-
-		// 生成报告
-		const severity = errors.length > 0 ? "P1" : status === "aborted" ? "P2" : "P3";
-		const delivery = errors.length > 0 ? "C" : status === "completed" ? "B" : "D";
-		const process = errors.length > 0 ? "C" : "B";
-
-		// 从总 token 判断是否偏高
-		const totalToken = tokens.totalTokens ?? 0;
-		const isHighToken = totalToken > 5_000_000;
-
-		const title = errors.length > 0
-			? `会话存在 ${errors.length} 个错误（${totalTurns} 轮，${(totalToken / 1_000_000).toFixed(1)}M token）`
-			: status === "aborted"
-				? `会话已中止（${totalTurns} 轮，${(totalToken / 1_000_000).toFixed(1)}M token）`
-				: `会话正常完成（${totalTurns} 轮，${(totalToken / 1_000_000).toFixed(1)}M token）`;
-
-		const dimData = buildDimData(status, totalTurns, totalToken, errors.length > 0, dims, sessionFile, summary);
-		const md = generateMarkdownReport(reportId, sessionId, sessionFile, severity, delivery, process, title, status, totalTurns, totalToken, errors.length, dimData);
-		fs.writeFileSync(reportPath, md, "utf8");
-
-		// 写入结构化摘要
-		const summaryDto: DiagnosisSummaryDto = {
-			reportId,
-			sessionId,
-			sessionFile,
-			severity: severity as "P0" | "P1" | "P2" | "P3",
-			delivery: delivery as "A" | "B" | "C" | "D" | "F",
-			process: process as "A" | "B" | "C" | "D" | "F",
-			title,
-			rootCause: `会话 ${status}，${totalTurns} 轮对话，${errors.length} 个错误，${(totalToken / 1_000_000).toFixed(1)}M token`,
-			topActions: ["查看详细诊断报告", "根据故障等级决定修复优先级"],
-			dimensions: dimData,
-			reportAt: new Date().toISOString(),
-		};
-		fs.writeFileSync(summaryPath, JSON.stringify(summaryDto, null, 2), "utf8");
-
-		runningTasks.set(sessionFile, { state: "done", startedAt: new Date().toISOString(), reportId });
-		logger.info("diagnosis-runner: completed", { sessionFile, reportId });
+		await runSimpleDiagnosis(sessionFile, reportId, sessionId, dir, reportPath, summaryPath);
 	} catch (err) {
-		logger.error("diagnosis-runner: failed", { sessionFile, reportId, error: String(err) });
+		logger.error("diagnosis-runner: background task failed", { sessionFile, error: String(err) });
 		runningTasks.set(sessionFile, { state: "failed", startedAt: new Date().toISOString(), error: String(err) });
 	}
 }
 
+/** 简单诊断路径（TypeScript 直接构建，不用 LLM）—— 作为 LLM 路径的回退。 */
+export async function runSimpleDiagnosis(
+	sessionFile: string,
+	reportId: string,
+	sessionId: string,
+	dir: string,
+	reportPath: string,
+	summaryPath: string,
+): Promise<void> {
+	// 运行 diagnose.py 提取数据
+	const runPy = (filter: string): string => {
+		const script = path.join(os.homedir(), ".cornfield/agent/skills/session-diagnosis-data/scripts/diagnose.py");
+		const result = Bun.spawnSync(["python3", script, "--session", sessionFile, "--filter", filter], {
+			timeout: 30000,
+		});
+		if (result.exitCode !== 0) {
+			throw new Error(`diagnose.py --filter ${filter} failed (exit ${result.exitCode}): ${result.stderr.toString().slice(0, 200)}`);
+		}
+		return result.stdout.toString();
+	};
+
+	const runSummary = (): string => {
+		const script = path.join(os.homedir(), ".cornfield/agent/skills/session-diagnosis-data/scripts/diagnose.py");
+		const result = Bun.spawnSync(["python3", script, "--session", sessionFile, "--summary"], {
+			timeout: 30000,
+		});
+		if (result.exitCode !== 0) {
+			throw new Error(`diagnose.py --summary failed (exit ${result.exitCode}): ${result.stderr.toString().slice(0, 200)}`);
+		}
+		return result.stdout.toString();
+	};
+
+	logger.info("diagnosis-runner: running simple diagnosis", { sessionFile, reportId });
+
+	const summaryJson = runSummary();
+	const summary = JSON.parse(summaryJson) as Record<string, unknown>;
+
+	const dims: Record<string, string> = {};
+	for (const filter of ["meta", "performance", "turns", "reasoning", "tools", "output", "corrections"]) {
+		try {
+			dims[filter] = runPy(filter);
+		} catch (err) {
+			logger.warn("diagnosis-runner: filter failed", { filter, error: String(err) });
+			dims[filter] = "{}";
+		}
+	}
+
+	const status = (summary as { status?: string }).status ?? "unknown";
+	const totalTurns = (summary as { totalTurns?: number }).totalTurns ?? 0;
+	const tokens = (summary as { tokens?: Record<string, number> }).tokens ?? {};
+	const errors = (summary as { errors?: unknown[] }).errors ?? [];
+
+	const severity = errors.length > 0 ? "P1" : status === "aborted" ? "P2" : "P3";
+	const delivery = errors.length > 0 ? "C" : status === "completed" ? "B" : "D";
+	const process = errors.length > 0 ? "C" : "B";
+	const totalToken = tokens.totalTokens ?? 0;
+
+	const title = errors.length > 0
+		? `会话存在 ${errors.length} 个错误（${totalTurns} 轮，${(totalToken / 1_000_000).toFixed(1)}M token）`
+		: status === "aborted"
+			? `会话已中止（${totalTurns} 轮，${(totalToken / 1_000_000).toFixed(1)}M token）`
+			: `会话正常完成（${totalTurns} 轮，${(totalToken / 1_000_000).toFixed(1)}M token）`;
+
+	const dimData = buildDimData(status, totalTurns, totalToken, errors.length > 0, dims, sessionFile, summary);
+	const corrections = parseCorrections(dims.corrections);
+	const md = generateMarkdownReport(reportId, sessionId, sessionFile, severity, delivery, process, title, status, totalTurns, totalToken, errors.length, dimData, corrections);
+	fs.writeFileSync(reportPath, md, "utf8");
+
+	const summaryDto: DiagnosisSummaryDto = {
+		reportId,
+		sessionId,
+		sessionFile,
+		severity: severity as "P0" | "P1" | "P2" | "P3",
+		delivery: delivery as "A" | "B" | "C" | "D" | "F",
+		process: process as "A" | "B" | "C" | "D" | "F",
+		title,
+		rootCause: `会话 ${status}，${totalTurns} 轮对话，${errors.length} 个错误，${(totalToken / 1_000_000).toFixed(1)}M token`,
+		topActions: ["查看详细诊断报告", "根据故障等级决定修复优先级"],
+		dimensions: dimData,
+		corrections: parseCorrections(dims.corrections),
+		reportAt: new Date().toISOString(),
+	};
+	fs.writeFileSync(summaryPath, JSON.stringify(summaryDto, null, 2), "utf8");
+
+	runningTasks.set(sessionFile, { state: "done", startedAt: new Date().toISOString(), reportId });
+	logger.info("diagnosis-runner: simple diagnosis completed", { sessionFile, reportId });
+}
+
+// ── 以下函数与之前一致（buildDimData，formatCorrections，generateMarkdownReport，scanReports，等）──
+
 /** 构建各维度数据（含从 diagnose.py 原始数据提取的 evidence）。 */
+interface DimEntry {
+	state: "ok" | "warn" | "fail";
+	summary: string;
+	basis: string;
+	rows: { label: string; value: string }[];
+	evidence: { turn: number; kind: string; quote: string }[];
+	fix: string;
+}
+
 function buildDimData(
 	status: string, totalTurns: number, totalToken: number, hasErrors: boolean,
 	dims: Record<string, string>, sessionFile: string, summary: Record<string, unknown>,
@@ -187,7 +204,6 @@ function buildDimData(
 	const totalOutput = (summary as { tokens?: Record<string, number> }).tokens?.totalOutput ?? 0;
 	const isHighToken = totalToken > 5_000_000;
 
-	// 从 tools 维度数据提取 toolCall 证据
 	const toolCalls: { turn: number; name: string; args: string; result: string; isError: boolean }[] = [];
 	try {
 		const toolsRaw = JSON.parse(dims.tools ?? "{}");
@@ -207,7 +223,6 @@ function buildDimData(
 	const toolErrors = toolCalls.filter(tc => tc.isError);
 	const hasToolError = toolErrors.length > 0;
 
-	// 从 turns 维度提取 user 消息
 	const userMessages: { turn: number; text: string }[] = [];
 	try {
 		const turnsRaw = JSON.parse(dims.turns ?? "{}");
@@ -319,13 +334,34 @@ function buildDimData(
 	};
 }
 
+/** 格式化纠正记录为 markdown 文本。 */
+function formatCorrections(corrections?: UserCorrectionDto[]): string {
+	if (!corrections || corrections.length === 0) return '';
+	const lines: string[] = ['\n## 用户纠正记录'];
+	for (const c of corrections) {
+		lines.push('');
+		lines.push('### 第 ' + c.turn + ' 轮 - ' + c.targetDim);
+		lines.push('- 用户原文: "' + c.userText + '"');
+		lines.push('- 纠正意图: ' + c.intent);
+		lines.push('- 是否合理: ' + (c.isValid ? '是' : '否'));
+		lines.push('- 是否修复: ' + (c.isResolved ? '是' : '否'));
+		lines.push('- 上下文: ' + c.precedingContext);
+	}
+	return lines.join('\n');
+}
+
 /** 生成 markdown 报告。 */
 function generateMarkdownReport(
 	reportId: string, sessionId: string, sessionFile: string,
 	severity: string, delivery: string, process: string, title: string,
 	status: string, totalTurns: number, totalToken: number, errorCount: number,
-	dims: Record<string, { state: string; summary: string; basis: string; rows: { label: string; value: string }[]; evidence: { turn: number; kind: string; quote: string }[]; fix: string }>,
+	dims: Record<string, DimEntry>,
+	corrections?: UserCorrectionDto[],
 ): string {
+	const corrSection = corrections && corrections.length > 0
+		? formatCorrections(corrections)
+		: '';
+
 	return `# Agent Session 诊断报告
 
 ## 会话基础信息
@@ -382,6 +418,7 @@ ${dims.tool.rows.map(r => `- ${r.label}: ${r.value}`).join("\n")}
 ${dims.output.summary}
 判定依据: ${dims.output.basis}
 修复建议: ${dims.output.fix}
+${corrSection}
 `;
 }
 
@@ -462,4 +499,15 @@ export function getDiagnosisReport(reportId: string): {
 	}
 
 	return { markdown, summary };
+}
+
+/** 从 diagnose.py --filter corrections 输出解析用户纠正记录。 */
+function parseCorrections(raw: string | undefined): UserCorrectionDto[] {
+	if (!raw || raw === "{}") return [];
+	try {
+		const parsed = JSON.parse(raw) as { corrections?: UserCorrectionDto[] };
+		return parsed.corrections ?? [];
+	} catch {
+		return [];
+	}
 }

@@ -1,8 +1,8 @@
-import { ChevronDown, ChevronRight, ClipboardList, FileText, MessageSquare } from "lucide-react";
+import { ChevronDown, ChevronRight, ClipboardList, FileText, MessageSquare, ThumbsUp, ThumbsDown, AlertTriangle } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 
-import type { DiagnosisSummaryDto } from "../../lib/pi-client-api";
+import type { DiagnosisSummaryDto, UserCorrectionDto } from "../../lib/pi-client-api";
 import { useSessionStore } from "../../state/session-store";
 
 /**
@@ -217,6 +217,11 @@ function StructuredReport({ summary, markdown }: { summary: DiagnosisSummaryDto;
 					})}
 				</div>
 
+				{/* User corrections section */}
+				{summary.corrections && summary.corrections.length > 0 && (
+					<CorrectionsSection corrections={summary.corrections} sessionId={summary.sessionId} sessionFile={summary.sessionFile} />
+				)}
+
 				{/* Full report + session log links */}
 				<div className="mt-6 flex flex-wrap gap-3">
 					<button
@@ -353,7 +358,7 @@ function DimCard({
 										onClick={e => {
 											e.stopPropagation();
 											if (sessionId) {
-												navigate(`/records/${sessionId}`, { state: { sessionFile, initialTurn: ev.turn } });
+												navigate(`/records/${sessionId}`, { state: { sessionFile, searchText: ev.quote } });
 											}
 										}}
 									>
@@ -381,6 +386,93 @@ function DimCard({
 					)}
 				</div>
 			)}
+		</div>
+	);
+}
+
+/* ── User corrections section ──────────────────────────────────────────── */
+
+const DIM_LABELS: Record<string, string> = {
+	intent: "意图理解",
+	tool: "工具调用",
+	output: "输出生成",
+	reasoning: "推理规划",
+	meta: "元数据",
+};
+
+const INTENT_LABELS: Record<string, string> = {
+	correction: "纠错",
+	clarification: "澄清",
+	rejection: "拒绝",
+};
+
+function CorrectionsSection({ corrections, sessionId, sessionFile }: {
+	corrections: UserCorrectionDto[];
+	sessionId?: string;
+	sessionFile?: string;
+}): React.JSX.Element {
+	const navigate = useNavigate();
+
+	return (
+		<div className="mt-6">
+			<div className="flex items-center gap-2 mb-3">
+				<AlertTriangle size={14} strokeWidth={1.5} className="text-warning" />
+				<div className="text-[11px] font-semibold tracking-[0.08em] text-ink-faint uppercase">
+					用户纠正记录 · {corrections.length} 条
+				</div>
+			</div>
+			<div className="flex flex-col gap-2">
+				{[...corrections].reverse().map((c, i) => {
+					const dimLabel = DIM_LABELS[c.targetDim] ?? c.targetDim;
+					const intentLabel = INTENT_LABELS[c.intent] ?? c.intent;
+					const intentCls = c.intent === "correction" ? "bg-danger/10 text-danger" : c.intent === "rejection" ? "bg-warning/10 text-warning" : "bg-accent-dim text-ink";
+					return (
+						<div key={i} className="rounded-lg border border-hairline bg-surface p-3.5">
+							<div className="flex items-center gap-2 mb-2">
+								<button
+									type="button"
+									className="shrink-0 rounded bg-accent-dim px-1.5 py-0.5 font-mono text-[10px] text-ink-muted hover:bg-accent hover:text-on-accent transition-colors"
+									title="跳转到第 {c.turn} 步回放"
+									onClick={() => {
+										if (sessionId) {
+											navigate(`/records/${sessionId}`, {
+												state: { sessionFile, searchText: c.userText },
+											});
+										}
+									}}
+								>
+									Turn {c.turn}
+								</button>
+								<span className="rounded bg-surface-2 px-1.5 py-0.5 text-[10px] font-medium text-ink-muted">
+									{dimLabel}
+								</span>
+								<span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${intentCls}`}>
+									{intentLabel}
+								</span>
+								{c.isValid ? (
+									<ThumbsUp size={11} strokeWidth={1.5} className="text-success" />
+								) : (
+									<ThumbsDown size={11} strokeWidth={1.5} className="text-danger" />
+								)}
+								{c.isResolved ? (
+									<span className="badge done ml-auto">已修复</span>
+								) : (
+									<span className="badge run ml-auto">未修复</span>
+								)}
+							</div>
+							<div className="mb-1.5 rounded-md bg-surface-2 px-3 py-2 text-[12px] leading-relaxed text-ink-muted">
+								{c.userText}
+							</div>
+							{c.precedingContext && (
+								<div className="text-[11px] text-ink-faint">
+									<span className="font-semibold tracking-[0.08em] uppercase">上下文：</span>
+									{c.precedingContext}
+								</div>
+							)}
+						</div>
+					);
+				})}
+			</div>
 		</div>
 	);
 }
