@@ -80,4 +80,5 @@ export {
 } from "./service-installer";
 export { SessionManager } from "./session-manager";
 export { SQLiteSessionStore } from "./session-store";
+export type { GatewayGroupInfo, GatewayAccountPatch, GatewayWireResult } from "./wire-endpoint";
 export type * from "./types";

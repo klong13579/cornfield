@@ -1,7 +1,7 @@
 import type { HostToolDefinitionDto, ModelInfoDto, ToolSwitchDto, ToolSwitchesDto } from "@cornfield/wire";
 import { X } from "lucide-react";
 import { useEffect, useState } from "react";
-import type { GatewayAccountPatchDto } from "../../lib/pi-client-api";
+import type { GatewayAccountPatchDto, GatewayGroupInfo } from "../../lib/pi-client-api";
 import { useSessionStore } from "../../state/session-store";
 import { useSession } from "../../state/use-session";
 import { FileExplorer } from "../workspace/FileExplorer";
@@ -317,10 +317,9 @@ function DingtalkView({ agentId }: { agentId: string }): React.JSX.Element {
 	const [savedAgentDir, setSavedAgentDir] = useState<string | null>(null);
 	const [saving, setSaving] = useState(false);
 	const [saveMsg, setSaveMsg] = useState<{ ok: boolean; text: string } | null>(null);
+	const [groups, setGroups] = useState<GatewayGroupInfo[] | null>(null);
 
-	// 问题 1 修复：详情页每次进入时拉 gateway_status 取真实启停态作为初始值 ——
-	// serve 快照（dt.enabled）只在 serve 启动时读一次 gateway.json，停用后不刷新，
-	// 直接回落会让 toggle 显示过期的「启用」；gateway 账号表（运行中账号）才是权威。
+	// 拉 gateway_status 取启停态 + 群列表；每 15s 刷新（群列表动态变化）。
 	useEffect(() => {
 		if (!view.connected) return;
 		let cancelled = false;
@@ -328,15 +327,23 @@ function DingtalkView({ agentId }: { agentId: string }): React.JSX.Element {
 			try {
 				const s = await store.gatewayStatus();
 				if (cancelled || s.stale) return;
-				// 账号在 gateway 账号表中 = 运行中；不在 = 已停用。未绑定钉钉（dt 不存在）已在上方 return。
-				setSavedEnabled(s.accounts.some(a => a.accountId === agentId));
+				const account = s.accounts.find(a => a.accountId === agentId);
+				if (account) {
+					setSavedEnabled(true);
+					setGroups((account.groups ?? []).filter(g => g.channelId === "dingtalk"));
+				} else {
+					setSavedEnabled(false);
+					setGroups(null);
+				}
 			} catch {
 				// gateway 未运行 → 保留 serve 快照兜底，不覆盖
 			}
 		};
 		void load();
+		const t = setInterval(() => { if (view.connected) void load(); }, 15_000);
 		return () => {
 			cancelled = true;
+			clearInterval(t);
 		};
 	}, [agentId, store, view.connected]);
 
@@ -465,6 +472,44 @@ function DingtalkView({ agentId }: { agentId: string }): React.JSX.Element {
 							<span className="min-w-0 flex-1 truncate font-mono text-[12px] text-ink">{v}</span>
 						</div>
 					))}
+				</div>
+			</section>
+
+			{/* 所在群列表（来自 gateway sessions.db，按 channelId 过滤；未来可扩展飞书等通道） */}
+			<section>
+				<h4 className="mb-2 section-title text-ink-faint">
+					所在群（钉钉）
+					{groups !== null && (
+						<span className="ml-1 text-2xs text-ink-faint">{groups.length} 群</span>
+					)}
+				</h4>
+				{groups === null ? (
+					<div className="rounded-lg border border-dashed border-hairline-strong bg-surface px-4 py-6 text-center text-[12px] text-ink-faint">
+						gateway 未运行或该账号未连接
+					</div>
+				) : groups.length === 0 ? (
+					<div className="rounded-lg border border-dashed border-hairline-strong bg-surface px-4 py-6 text-center text-[12px] text-ink-faint">
+						暂无群会话——机器人收到群消息后自动补充
+					</div>
+				) : (
+					<div className="divide-y divide-hairline rounded-lg border border-hairline bg-surface">
+						{groups.map(g => (
+							<div key={g.conversationId} className="flex items-center gap-3 px-4 py-2.5">
+								<span className="min-w-0 flex-1">
+									<span className="block text-[13px] text-ink">{g.title}</span>
+									<span className="block truncate font-mono text-[11px] text-ink-faint">
+										{g.conversationId}
+									</span>
+								</span>
+								<span className="shrink-0 text-[11px] text-ink-faint">
+									{new Date(g.lastActive).toLocaleDateString("zh-CN", { month: "short", day: "numeric" })}
+								</span>
+							</div>
+						))}
+					</div>
+				)}
+				<div className="mt-2 text-[11px] text-ink-faint">
+					仅显示机器人收到过消息的群；运行 cornfield-gateway robot-context probe 可主动探测全量群
 				</div>
 			</section>
 

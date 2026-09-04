@@ -76,6 +76,13 @@ export interface RemoteSkillItemDto {
 	version?: string;
 }
 
+export interface GatewayGroupInfo {
+	channelId: string;
+	title: string;
+	conversationId: string;
+	lastActive: number;
+}
+
 /** gateway 运行状态（gateway_status 命令转发 gateway.status.json）。 */
 export interface GatewayStatusDto {
 	pid?: number;
@@ -88,6 +95,7 @@ export interface GatewayStatusDto {
 		bridgeState?: string;
 		channelConnected?: boolean;
 		agentDir?: string;
+		groups?: GatewayGroupInfo[];
 	}[];
 	scheduler?: { running?: boolean; taskCount?: number } | null;
 }

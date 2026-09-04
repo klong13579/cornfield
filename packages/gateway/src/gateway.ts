@@ -60,7 +60,7 @@ import type {
 	OutboundMessage,
 	SessionRecord,
 } from "./types";
-import { type GatewayAccountPatch, type GatewayWireResult, handleGatewayWireCommand } from "./wire-endpoint";
+import { type GatewayAccountPatch, type GatewayGroupInfo, type GatewayWireResult, handleGatewayWireCommand } from "./wire-endpoint";
 
 export function buildChannelKey(channelId: string, accountId?: string): string {
 	return accountId ? `${channelId}:${accountId}` : channelId;
@@ -1368,6 +1368,14 @@ export class Gateway {
 						},
 						gatewayStatus: async () => {
 							const st = await this.getStatus();
+							const allSessions = (await this.#store?.getActiveSessions()) ?? [];
+							const sessionsByAccount = new Map<string, GatewayGroupInfo[]>();
+							for (const s of allSessions) {
+								if (!s.isGroup || !s.conversationTitle) continue;
+								const list = sessionsByAccount.get(s.accountId) ?? [];
+								list.push({ channelId: s.channelId, title: s.conversationTitle, conversationId: s.conversationId, lastActive: s.updatedAt });
+								sessionsByAccount.set(s.accountId, list);
+							}
 							return {
 								pid: process.pid,
 								statusWrittenAt: Date.now(),
@@ -1378,6 +1386,9 @@ export class Gateway {
 									bridgeState: a.bridgeState,
 									channelConnected: a.channelConnected,
 									agentDir: a.agentDir,
+									groups: (sessionsByAccount.get(a.accountId) ?? [])
+										.sort((g1, g2) => g2.lastActive - g1.lastActive)
+										.slice(0, 50),
 								})),
 								scheduler: st.scheduler,
 							};

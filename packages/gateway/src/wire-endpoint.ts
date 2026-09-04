@@ -51,6 +51,14 @@ export interface GatewayWireDeps {
 	reloadGateway?: () => Promise<GatewayWireResult>;
 }
 
+/** 群信息（gateway sessions.db 中 isGroup=true 的记录）。 */
+export interface GatewayGroupInfo {
+	channelId: string;
+	title: string;
+	conversationId: string;
+	lastActive: number;
+}
+
 /** 与旧 serve readGatewayStatus 输出同形的状态负载（web-app GatewayStatusDto）。 */
 export interface GatewayStatusPayload {
 	pid: number;
@@ -62,6 +70,7 @@ export interface GatewayStatusPayload {
 		bridgeState?: string;
 		channelConnected?: boolean;
 		agentDir?: string;
+		groups?: GatewayGroupInfo[];
 	}>;
 	scheduler: { running?: boolean; taskCount?: number } | null;
 }
