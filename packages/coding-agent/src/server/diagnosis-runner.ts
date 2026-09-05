@@ -21,6 +21,7 @@ import type {
 	DiagnosisTaskStateDto,
 	UserCorrectionDto,
 } from "@cornfield/wire";
+import { upsertDiagnosisReport } from "./diagnosis-aggregation";
 
 /** 诊断报告根目录 ~/.cornfield/agent/diagnosis-reports/ */
 function reportsDir(): string {
@@ -200,6 +201,13 @@ export async function runSimpleDiagnosis(
 		reportAt: new Date().toISOString(),
 	};
 	fs.writeFileSync(summaryPath, JSON.stringify(summaryDto, null, 2), "utf8");
+
+	// 写入聚合数据库（不阻塞诊断完成）
+	try {
+		upsertDiagnosisReport(summaryDto, reportPath);
+	} catch {
+		// 聚合写入失败不影响诊断本身
+	}
 
 	runningTasks.set(sessionFile, { state: "done", startedAt: new Date().toISOString(), reportId });
 	logger.info("diagnosis-runner: simple diagnosis completed", { sessionFile, reportId });

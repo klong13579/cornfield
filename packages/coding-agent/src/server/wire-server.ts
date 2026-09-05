@@ -69,6 +69,7 @@ import { invalidateFsScanAfterWrite } from "../tools/fs-cache-invalidation";
 import type { TodoPhase } from "../tools/todo-write";
 import * as git from "../utils/git";
 import { listAgentArtifacts, listSessionArtifacts } from "./artifacts";
+import { aggregateDiagnosis } from "./diagnosis-aggregation";
 import { getDiagnosisReport, listDiagnosisReports, runSimpleDiagnosis } from "./diagnosis-runner";
 import { WireHostToolBridge } from "./host-tool-bridge";
 import { PERMISSION_TIMEOUT_OUTCOME, PermissionGate } from "./permission-gate";
@@ -512,6 +513,21 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 						return;
 					}
 					done(result);
+					return;
+				}
+				case "aggregate_diagnosis": {
+					const { since, until, agentId } = command as {
+						type: string;
+						since?: number;
+						until?: number;
+						agentId?: string;
+					};
+					try {
+						const result = aggregateDiagnosis({ since, until, agentId });
+						done(result);
+					} catch (err) {
+						fail(`aggregate_diagnosis failed: ${err instanceof Error ? err.message : String(err)}`);
+					}
 					return;
 				}
 				case "fs_list": {

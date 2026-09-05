@@ -180,6 +180,7 @@ const COMMAND_TYPES = [
 	"diagnose_session",
 	"list_diagnosis_reports",
 	"get_diagnosis_report",
+	"aggregate_diagnosis",
 	// P0 收口（skill hub + MCP）
 	"list_remote_skills",
 	"install_remote_skill",

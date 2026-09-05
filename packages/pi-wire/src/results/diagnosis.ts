@@ -99,6 +99,24 @@ export interface DiagnosisReportListItemDto {
 	hasSummary: boolean;
 }
 
+/** 多会话诊断聚合统计。 */
+export interface DiagnosisAggregationDto {
+	/** 时间范围内诊断会话总数。 */
+	totalSessions: number;
+	/** 故障等级分布。 */
+	severityDistribution: Record<string, number>;
+	/** 6 维度失败率（各维度 ok/warn/fail 计数 + failRate）。 */
+	dimensionFailureRates: Record<string, { ok: number; warn: number; fail: number; failRate: number }>;
+	/** 交付物质量分布。 */
+	deliveryDistribution: Record<string, number>;
+	/** 过程质量分布。 */
+	processDistribution: Record<string, number>;
+	/** 最常见根因。 */
+	topIssues: Array<{ title: string; count: number; severity: string }>;
+	/** 按周趋势。 */
+	weeklyTrend: Array<{ weekStart: string; total: number; p0: number; p1: number; p2: number; p3: number }>;
+}
+
 /** 诊断进行中/失败的任务状态（前端轮询诊断按钮用）。 */
 export interface DiagnosisTaskStateDto {
 	sessionFile: string;

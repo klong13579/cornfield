@@ -5,6 +5,7 @@ import type {
 	ConfigScopeDto,
 	CronLogEntryDto,
 	DashboardStatsDto,
+	DiagnosisAggregationDto,
 	DisabledSkillDto,
 	EnvironmentSummaryDto,
 	HostToolDefinitionDto,
@@ -589,6 +590,11 @@ export class SessionStore {
 	/** 获取单个诊断报告详情（get_diagnosis_report）。 */
 	getDiagnosisReport(reportId: string): Promise<{ markdown: string; summary: any } | null> {
 		return this.#client.getDiagnosisReport(reportId);
+	}
+
+	/** 多会话诊断聚合统计（aggregate_diagnosis）。 */
+	aggregateDiagnosis(opts?: { since?: number; until?: number; agentId?: string }): Promise<DiagnosisAggregationDto> {
+		return this.#client.aggregateDiagnosis(opts);
 	}
 
 	async openHistorySession(record: { id: string; agent: string; sessionFile?: string; cwd?: string }): Promise<void> {

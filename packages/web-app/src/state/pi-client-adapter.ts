@@ -34,6 +34,7 @@ import type {
 import type {
 	AgentMessageDto,
 	ArtifactDto,
+	DiagnosisAggregationDto,
 	DiagnosisReportListItemDto,
 	DiagnosisSummaryDto,
 	FsEntryDto,
@@ -546,6 +547,17 @@ export class PiClientAdapter implements PiClient {
 		return this.#req<{ markdown: string; summary: DiagnosisSummaryDto } | null>({
 			type: "get_diagnosis_report",
 			reportId,
+		} as never);
+	}
+
+	async aggregateDiagnosis(opts?: {
+		since?: number;
+		until?: number;
+		agentId?: string;
+	}): Promise<DiagnosisAggregationDto> {
+		return this.#req<DiagnosisAggregationDto>({
+			type: "aggregate_diagnosis",
+			...(opts ?? {}),
 		} as never);
 	}
 

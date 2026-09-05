@@ -450,6 +450,11 @@ export type WireExtensionCommand =
 	 * 读 <reportId>.md（完整 markdown 报告）+ 同文件 .summary.json（结构化摘要）。
 	 */
 	| { id?: string; type: "get_diagnosis_report"; reportId: string }
+	/**
+	 * 多会话诊断聚合统计（aggregate_diagnosis）：按时间范围/agent 聚合所有诊断报告，
+	 * 返回 severity 分布、维度失败率、趋势等。数据来自 SQLite 聚合表（diagnosis-reports.db）。
+	 */
+	| { id?: string; type: "aggregate_diagnosis"; since?: number; until?: number; agentId?: string }
 	// ── 模型控制中心（#02 全量目录 / #03 Provider 接入 / #04 刷新与连通测试 / #05 配置作用域）──
 	/**
 	 * #02 全量模型目录（AvailableModelsDto 的 v2）：get_available_models 只返回可用集，

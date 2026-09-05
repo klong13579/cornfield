@@ -165,6 +165,16 @@ export interface DiagnosisSummaryDto {
 	hasSummary?: boolean;
 }
 
+export interface DiagnosisAggregationDto {
+	totalSessions: number;
+	severityDistribution: Record<string, number>;
+	dimensionFailureRates: Record<string, { ok: number; warn: number; fail: number; failRate: number }>;
+	deliveryDistribution: Record<string, number>;
+	processDistribution: Record<string, number>;
+	topIssues: Array<{ title: string; count: number; severity: string }>;
+	weeklyTrend: Array<{ weekStart: string; total: number; p0: number; p1: number; p2: number; p3: number }>;
+}
+
 /** 单维度详情。 */
 export interface DiagnosisDimensionDto {
 	state: "ok" | "warn" | "fail";
@@ -309,6 +319,8 @@ export interface PiClient {
 	listDiagnosisReports(sessionFile?: string): Promise<{ reports: DiagnosisReportListItemDto[]; tasks: any[] }>;
 	/** 获取单个诊断报告详情（get_diagnosis_report）。 */
 	getDiagnosisReport(reportId: string): Promise<{ markdown: string; summary: DiagnosisSummaryDto } | null>;
+	/** 多会话诊断聚合统计（aggregate_diagnosis）。 */
+	aggregateDiagnosis(opts?: { since?: number; until?: number; agentId?: string }): Promise<DiagnosisAggregationDto>;
 	// ── 文件系统（Agent 详情页只读浏览）──
 	/** 列出 agent workspace 目录（fs_list，相对 agentDir；省略 path = 根）。 */
 	fsList(sessionId: string, path?: string): Promise<{ entries: FsEntryDto[] }>;
