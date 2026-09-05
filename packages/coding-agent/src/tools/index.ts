@@ -42,6 +42,7 @@ import { PythonTool } from "./python";
 import { ReadTool } from "./read";
 import { RecipeTool } from "./recipe";
 import { RenderMermaidTool } from "./render-mermaid";
+import { ProjectContextTool } from "./project-context";
 import { createReportToolIssueTool, isAutoQaEnabled } from "./report-tool-issue";
 import { ResolveTool } from "./resolve";
 import { reportFindingTool } from "./review";
@@ -83,6 +84,7 @@ export * from "./python";
 export * from "./read";
 export * from "./recipe";
 export * from "./render-mermaid";
+export * from "./project-context";
 export * from "./report-tool-issue";
 export * from "./resolve";
 export * from "./search";
@@ -240,6 +242,7 @@ export const BUILTIN_TOOLS: Record<string, ToolFactory> = {
 	task: s => TaskTool.create(s),
 	job: JobTool.createIf,
 	recipe: RecipeTool.createIf,
+	project_context: s => new ProjectContextTool(s),
 	irc: IrcTool.createIf,
 	todo_write: s => new TodoWriteTool(s),
 	web_search: s => new WebSearchTool(s),
