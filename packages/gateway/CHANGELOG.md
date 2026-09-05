@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Agent 详情页展示钉钉机器人所在群**（`src/wire-endpoint.ts`、`src/gateway.ts`): GatewayGroupInfo 类型（channelId/title/conversationId/lastActive），gateway_status 返回 account 级的 groups 列表（来自 sessions.db 的 isGroup 会话，按 lastActive 倒序，上限 50 条）。channelId 预留飞书扩展。
+
 ### Removed
 
 - **移除误提交的 `packages/gateway/.omp/evolution/evolution.db*` 瞬态三件套**（`git rm --cached`）: 该 SQLite 主库为空、全部 schema 落在 WAL（708KB）——是 2026-08-16 误提交的未 checkpoint 运行时状态，gateway 源码无 self-evolution 引用、真实 evolution store 在 `~/.cornfield/self-evolution/`。`.gitignore` 增加 `packages/gateway/.omp/`。

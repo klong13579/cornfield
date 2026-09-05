@@ -4,6 +4,8 @@
 
 ### Added
 
+- **Agent 详情页钉钉 tab 显示所在群列表**（`src/pages/agents/AgentDetailView.tsx`）: DingtalkView 新增「所在群（钉钉）」section，展示群名/conversationId/最近活跃日期，每 15s 自动刷新。数据来自 gateway_status 的 groups 字段，按 channelId 过滤预留飞书扩展。
+
 - **模型选择区快捷隐藏 Provider**（`src/pages/models/config/ModelSelectionSection.tsx`, `RuntimeConfigView.tsx`）: 选择器下方新增 Provider 隐藏 chips，两步确认（再点执行，4s 自动解除）写全局停用名单（复用 Provider 工作区的 setModelDisabled 链路，协议零改动）；隐藏后目录/选择器实时同步，恢复入口在 Provider 工作区。
 
 ### Changed
