@@ -3014,7 +3014,7 @@ Usage:
 							const entries = await connectedClient.history({
 								limit: limit ?? 20,
 								since,
-								direction: direction ?? "in",
+								direction: (direction ?? "in") as "in" | "out" | "both",
 							});
 							if (entries.length === 0) {
 								return {

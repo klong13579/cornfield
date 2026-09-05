@@ -1169,7 +1169,17 @@ export class IntercomBroker {
 				if (!currentId) {
 					throw new Error("Received history before register");
 				}
-				const { requestId, limit = 20, since, direction = "in" } = clientMessage;
+				const {
+					requestId,
+					limit = 20,
+					since,
+					direction = "in",
+				} = clientMessage as unknown as {
+					requestId: unknown;
+					limit?: number;
+					since?: number;
+					direction?: "in" | "out" | "both";
+				};
 				if (typeof requestId !== "string") {
 					throw new Error("Invalid history requestId");
 				}

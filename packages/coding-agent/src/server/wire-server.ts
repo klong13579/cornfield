@@ -991,7 +991,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 							const segments = settingsKey.split(".");
 							const projectValue = configGetByPath(projectConfig, segments);
 							const globalValue = configGetByPath(globalConfig, segments);
-							const uiTab = SETTINGS_SCHEMA[settingsKey]?.ui?.tab;
+							const uiTab = (SETTINGS_SCHEMA[settingsKey] as { ui?: { tab?: string } } | undefined)?.ui?.tab;
 							return {
 								key: settingsKey,
 								...(uiTab ? { uiTab } : {}),
