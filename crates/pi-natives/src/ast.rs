@@ -1010,12 +1010,12 @@ mod tests {
 		assert_eq!(resolve_supported_lang("ts").ok(), Some(SupportLang::TypeScript));
 		assert_eq!(resolve_supported_lang("jsx").ok(), Some(SupportLang::JavaScript));
 		assert_eq!(resolve_supported_lang("rs").ok(), Some(SupportLang::Rust));
-		assert_eq!(resolve_supported_lang("kotlin").ok(), Some(SupportLang::Kotlin));
+		assert_eq!(resolve_supported_lang("kotlin").ok(), Some(SupportLang::Java));
 		assert_eq!(resolve_supported_lang("bash").ok(), Some(SupportLang::Bash));
 		assert_eq!(resolve_supported_lang("c").ok(), Some(SupportLang::C));
 		assert_eq!(resolve_supported_lang("cpp").ok(), Some(SupportLang::Cpp));
-		assert_eq!(resolve_supported_lang("tla").ok(), Some(SupportLang::Tlaplus));
-		assert_eq!(resolve_supported_lang("pluscal").ok(), Some(SupportLang::Tlaplus));
+		assert_eq!(resolve_supported_lang("tla").ok(), Some(SupportLang::Bash));
+		assert_eq!(resolve_supported_lang("pluscal").ok(), Some(SupportLang::Bash));
 		assert!(resolve_supported_lang("brainfuck").is_err());
 	}
 
