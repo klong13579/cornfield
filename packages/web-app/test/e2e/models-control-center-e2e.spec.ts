@@ -279,13 +279,16 @@ test("模型控制中心闭环：目录 / Provider / 运行配置", async ({ pag
 		// Settings 落盘是 100ms debounce 后台写，不能读后即断言——轮询直到写盘完成
 		const globalConfigPath = path.join(isoHome, ".cornfield", "agent", "config.yml");
 		await expect
-			.poll(async () => {
-				try {
-					return await fsp.readFile(globalConfigPath, "utf8");
-				} catch {
-					return ""; // debounce 未落盘
-				}
-			}, { timeout: 10_000 })
+			.poll(
+				async () => {
+					try {
+						return await fsp.readFile(globalConfigPath, "utf8");
+					} catch {
+						return ""; // debounce 未落盘
+					}
+				},
+				{ timeout: 10_000 },
+			)
 			.toContain(hiddenProvider); // disabledProviders 已落盘全局配置
 
 		await page.screenshot({ path: "test-results/mcc-final.png", fullPage: true });

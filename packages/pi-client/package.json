@@ -1,7 +1,7 @@
 {
 	"type": "module",
 	"name": "@cornfield/client",
-	"version": "1.0.0",
+	"version": "1.1.0",
 	"description": "WebSocket client for CornField serve (wire protocol): connection state machine, request id correlation, exponential backoff reconnect, snapshot cache, subscribe-across-reconnect",
 	"homepage": "https://github.com/klong13579/cornfield",
 	"author": "Can Boluk",

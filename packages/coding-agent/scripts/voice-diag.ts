@@ -386,7 +386,9 @@ if (LAST_MIN !== undefined) {
 const { recs, anomalies } = analyze(filtered, jsonl, GAP_S * 1000);
 
 console.log(`Voice session : ${target}`);
-console.log(`Pid           : ${pid ?? "(未找到匹配日志的 pid)"}   日志: ~/.cornfield/logs/cornfield.${DATE}.log{,.1..4}`);
+console.log(
+	`Pid           : ${pid ?? "(未找到匹配日志的 pid)"}   日志: ~/.cornfield/logs/cornfield.${DATE}.log{,.1..4}`,
+);
 console.log(`窗口          : ${fmt(t0)} – ${fmt(tEnd)} (${dur(tEnd - t0)})`);
 console.log(`Voice 设置    : ${readVoiceSettings()}`);
 console.log("");

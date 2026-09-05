@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-09-05
+
 ### Added
 
 - **Agent 详情页钉钉 tab 显示所在群列表**（`src/pages/agents/AgentDetailView.tsx`）: DingtalkView 新增「所在群（钉钉）」section，展示群名/conversationId/最近活跃日期，每 15s 自动刷新。数据来自 gateway_status 的 groups 字段，按 channelId 过滤预留飞书扩展。

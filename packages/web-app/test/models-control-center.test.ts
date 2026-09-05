@@ -1,7 +1,7 @@
+import { afterEach, describe, expect, it, mock } from "bun:test";
 import type { PiWebSocketCtor, PiWebSocketLike } from "@cornfield/client";
 import type { SessionSnapshotDto } from "@cornfield/wire";
 import type { ReactElement } from "react";
-import { afterEach, describe, expect, it, mock } from "bun:test";
 import { getPanels } from "../src/layout/panel-registry";
 import { PiClientAdapter, type ServeConnectionConfig } from "../src/state/pi-client-adapter";
 import { SessionStore } from "../src/state/session-store";

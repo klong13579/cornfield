@@ -15,15 +15,17 @@ function parseCorrections(raw: string | undefined): Array<{
 }> {
 	if (!raw || raw === "{}") return [];
 	try {
-		const parsed = JSON.parse(raw) as { corrections?: Array<{
-			turn: number;
-			userText: string;
-			targetDim: "intent" | "tool" | "output" | "reasoning" | "meta";
-			intent: "correction" | "clarification" | "rejection";
-			isValid: boolean;
-			isResolved: boolean;
-			precedingContext: string;
-		}> };
+		const parsed = JSON.parse(raw) as {
+			corrections?: Array<{
+				turn: number;
+				userText: string;
+				targetDim: "intent" | "tool" | "output" | "reasoning" | "meta";
+				intent: "correction" | "clarification" | "rejection";
+				isValid: boolean;
+				isResolved: boolean;
+				precedingContext: string;
+			}>;
+		};
 		return parsed.corrections ?? [];
 	} catch {
 		return [];
@@ -160,7 +162,15 @@ test("DiagnosisSummaryDto 的 corrections 字段可正确赋值", () => {
 	};
 	// 赋值 corrections
 	dto.corrections = [
-		{ turn: 1, userText: "test", targetDim: "intent", intent: "correction", isValid: true, isResolved: false, precedingContext: "ctx" },
+		{
+			turn: 1,
+			userText: "test",
+			targetDim: "intent",
+			intent: "correction",
+			isValid: true,
+			isResolved: false,
+			precedingContext: "ctx",
+		},
 	];
 	expect(dto.corrections).toHaveLength(1);
 	expect(dto.corrections[0].targetDim).toBe("intent");

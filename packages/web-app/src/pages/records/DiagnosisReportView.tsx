@@ -1,4 +1,13 @@
-import { ChevronDown, ChevronRight, ClipboardList, FileText, MessageSquare, ThumbsUp, ThumbsDown, AlertTriangle } from "lucide-react";
+import {
+	AlertTriangle,
+	ChevronDown,
+	ChevronRight,
+	ClipboardList,
+	FileText,
+	MessageSquare,
+	ThumbsDown,
+	ThumbsUp,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 
@@ -131,10 +140,16 @@ export function DiagnosisReportView(): React.JSX.Element {
 
 /* ── Structured report rendering ─────────────────────────────────────── */
 
-function StructuredReport({ summary, markdown }: { summary: DiagnosisSummaryDto; markdown?: string }): React.JSX.Element {
+function StructuredReport({
+	summary,
+	markdown,
+}: {
+	summary: DiagnosisSummaryDto;
+	markdown?: string;
+}): React.JSX.Element {
 	const [expandedDims, setExpandedDims] = useState<Set<string>>(new Set());
 	const [showFullReport, setShowFullReport] = useState(false);
-	const navigate = useNavigate();
+	const _navigate = useNavigate();
 
 	const toggleDim = (dim: string) => {
 		setExpandedDims(prev => {
@@ -219,7 +234,11 @@ function StructuredReport({ summary, markdown }: { summary: DiagnosisSummaryDto;
 
 				{/* User corrections section */}
 				{summary.corrections && summary.corrections.length > 0 && (
-					<CorrectionsSection corrections={summary.corrections} sessionId={summary.sessionId} sessionFile={summary.sessionFile} />
+					<CorrectionsSection
+						corrections={summary.corrections}
+						sessionId={summary.sessionId}
+						sessionFile={summary.sessionFile}
+					/>
 				)}
 
 				{/* Full report + session log links */}
@@ -249,7 +268,9 @@ function StructuredReport({ summary, markdown }: { summary: DiagnosisSummaryDto;
 					<div className="mt-4 rounded-lg border border-hairline bg-surface p-6">
 						<div className="prose prose-sm max-w-none text-ink">
 							{markdown.split("\n").map((line, i) => (
-								<p key={i} className="text-[12px] leading-relaxed">{line || "\u00A0"}</p>
+								<p key={i} className="text-[12px] leading-relaxed">
+									{line || "\u00A0"}
+								</p>
 							))}
 						</div>
 					</div>
@@ -364,13 +385,15 @@ function DimCard({
 									>
 										Turn {ev.turn}
 									</button>
-										<span className="shrink-0 rounded bg-accent-dim px-1.5 py-0.5 font-mono text-[10px] text-ink-faint">
-											{ev.kind}
-										</span>
-										<div className="min-w-0 flex-1">
-											<pre className="m-0 whitespace-pre-wrap break-all font-mono text-[11px] leading-relaxed text-ink-muted">{ev.quote}</pre>
-										</div>
+									<span className="shrink-0 rounded bg-accent-dim px-1.5 py-0.5 font-mono text-[10px] text-ink-faint">
+										{ev.kind}
+									</span>
+									<div className="min-w-0 flex-1">
+										<pre className="m-0 whitespace-pre-wrap break-all font-mono text-[11px] leading-relaxed text-ink-muted">
+											{ev.quote}
+										</pre>
 									</div>
+								</div>
 							))}
 						</div>
 					)}
@@ -406,7 +429,11 @@ const INTENT_LABELS: Record<string, string> = {
 	rejection: "拒绝",
 };
 
-function CorrectionsSection({ corrections, sessionId, sessionFile }: {
+function CorrectionsSection({
+	corrections,
+	sessionId,
+	sessionFile,
+}: {
 	corrections: UserCorrectionDto[];
 	sessionId?: string;
 	sessionFile?: string;
@@ -425,7 +452,12 @@ function CorrectionsSection({ corrections, sessionId, sessionFile }: {
 				{[...corrections].reverse().map((c, i) => {
 					const dimLabel = DIM_LABELS[c.targetDim] ?? c.targetDim;
 					const intentLabel = INTENT_LABELS[c.intent] ?? c.intent;
-					const intentCls = c.intent === "correction" ? "bg-danger/10 text-danger" : c.intent === "rejection" ? "bg-warning/10 text-warning" : "bg-accent-dim text-ink";
+					const intentCls =
+						c.intent === "correction"
+							? "bg-danger/10 text-danger"
+							: c.intent === "rejection"
+								? "bg-warning/10 text-warning"
+								: "bg-accent-dim text-ink";
 					return (
 						<div key={i} className="rounded-lg border border-hairline bg-surface p-3.5">
 							<div className="flex items-center gap-2 mb-2">

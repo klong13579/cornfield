@@ -58,6 +58,7 @@ import type { MCPServerConfig } from "../mcp/types";
 import { getMemoryDb, getMemoryRoot, releaseMemoryDb, resolveMemoryDbPath } from "../memories";
 import { loadSectionsFromDb } from "../memories/projection";
 import { normalizeHostToolDefinitions } from "../modes/rpc/rpc-mode";
+import diagnoseSessionPrompt from "../prompts/diagnose-session.md" with { type: "text" };
 import { discoverSkills } from "../sdk";
 import type { AgentSession } from "../session/agent-session";
 import { getDefaultSessionDirName } from "../session/session-manager";
@@ -69,7 +70,6 @@ import type { TodoPhase } from "../tools/todo-write";
 import * as git from "../utils/git";
 import { listAgentArtifacts, listSessionArtifacts } from "./artifacts";
 import { getDiagnosisReport, listDiagnosisReports, runSimpleDiagnosis } from "./diagnosis-runner";
-import diagnoseSessionPrompt from "../prompts/diagnose-session.md" with { type: "text" };
 import { WireHostToolBridge } from "./host-tool-bridge";
 import { PERMISSION_TIMEOUT_OUTCOME, PermissionGate } from "./permission-gate";
 import { agentSessionsRoot, defaultSessionsRoot, indexSessions, type SessionIndexSource } from "./session-index";
@@ -491,7 +491,8 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 							}
 						} catch (err) {
 							logger.error("diagnose_session: LLM analysis failed, fallback kept", {
-								sessionFile: sf, error: String(err),
+								sessionFile: sf,
+								error: String(err),
 							});
 						}
 					})();

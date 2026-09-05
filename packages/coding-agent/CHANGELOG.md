@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-09-05
+
 ### Added
 
 - **模型控制中心 serve 侧协议与角色级路由**（`src/server/wire-server.ts`, `src/session/agent-session.ts`, `src/session/model-connectivity.ts`, `src/config/model-routes.ts`, `src/config/settings.ts`）: 新增 15 条 wire 命令（get_model_catalog / get_model_selection / get_providers / get_provider / start_provider_oauth / complete_provider_oauth / save_provider_api_key / delete_provider_api_key / set_provider_base_url / disconnect_provider / refresh_provider / refresh_catalog / test_model / get_config_scope / restore_config_inheritance + set_model_temporary、set_config scope）；配置表示统一为 `modelRoutes`（角色 → `{primary, fallbacks}`），Settings 加载时幂等迁移旧 `modelRoles`/`modelFallbacks` 并重写 config.yml；断开依赖检查覆盖各角色主模型与回退链；连通性测试复用 completeSimple 真实链路并按 auth/permission/rate-limit/network/timeout 归因；`getModelRole`/`setModelRole` API 面保留（语义为主模型），新增 `getModelRoute`/`setModelRoute`/`getModelRoutes`/`overrideModelRoutes`。

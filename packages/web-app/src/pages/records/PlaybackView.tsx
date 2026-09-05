@@ -2,7 +2,7 @@ import { Pause, Play, Search, SkipBack, SkipForward, XCircle } from "lucide-reac
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
-import { CURRENT_SESSION_ID, type BranchPoint, type PlaybackEntry, toPlaybackEntries } from "../../lib/records";
+import { type BranchPoint, CURRENT_SESSION_ID, type PlaybackEntry, toPlaybackEntries } from "../../lib/records";
 import { type PlaybackSpeed, usePlayback } from "../../lib/use-playback";
 import { useSessionStore } from "../../state/session-store";
 
@@ -126,7 +126,9 @@ export function PlaybackView(): React.JSX.Element {
 		const q = searchQuery.toLowerCase();
 		return timeline
 			.map((entry, i) => {
-				const text = [entry.text, ...(entry.tools?.map(t => t.name + " " + t.argsText + " " + (t.result ?? "")) ?? [])].join(" ").toLowerCase();
+				const text = [entry.text, ...(entry.tools?.map(t => `${t.name} ${t.argsText} ${t.result ?? ""}`) ?? [])]
+					.join(" ")
+					.toLowerCase();
 				return text.includes(q) ? i : -1;
 			})
 			.filter((i): i is number => i >= 0);
@@ -208,26 +210,23 @@ export function PlaybackView(): React.JSX.Element {
 						<Search size={12} strokeWidth={1.5} className="shrink-0 text-ink-faint" />
 						<input
 							value={searchQuery}
-							onChange={e => { setSearchQuery(e.target.value); setSearchIdx(0); }}
+							onChange={e => {
+								setSearchQuery(e.target.value);
+								setSearchIdx(0);
+							}}
 							placeholder="搜索会话内容…"
 							className="w-full border-none bg-transparent text-[12px] text-ink outline-none placeholder:text-ink-faint"
 						/>
 					</div>
 					{searchMatches.length > 0 && (
 						<div className="flex items-center gap-1.5 text-[11px] text-ink-subtle">
-							<span>{searchIdx + 1}/{searchMatches.length}</span>
-							<button
-								type="button"
-								className="cbtn !px-1.5 !py-0.5"
-								onClick={() => goToSearchMatch(-1)}
-							>
+							<span>
+								{searchIdx + 1}/{searchMatches.length}
+							</span>
+							<button type="button" className="cbtn !px-1.5 !py-0.5" onClick={() => goToSearchMatch(-1)}>
 								↑
 							</button>
-							<button
-								type="button"
-								className="cbtn !px-1.5 !py-0.5"
-								onClick={() => goToSearchMatch(1)}
-							>
+							<button type="button" className="cbtn !px-1.5 !py-0.5" onClick={() => goToSearchMatch(1)}>
 								↓
 							</button>
 						</div>
@@ -281,7 +280,9 @@ export function PlaybackView(): React.JSX.Element {
 												{entry.model ?? "—"}
 											</div>
 											{entry.text && (
-												<div className={`leading-relaxed ${searchMatches.includes(i) && searchMatches[searchIdx] === i ? "rounded-md bg-warning/10 border border-warning px-3 py-2" : "text-ink-muted"}`}>
+												<div
+													className={`leading-relaxed ${searchMatches.includes(i) && searchMatches[searchIdx] === i ? "rounded-md bg-warning/10 border border-warning px-3 py-2" : "text-ink-muted"}`}
+												>
 													{entry.text.split("\n\n").map((p, pi) => (
 														<p key={pi} className="mb-2 last:mb-0">
 															{p}
@@ -321,13 +322,13 @@ export function PlaybackView(): React.JSX.Element {
 																		: tool.argsText}
 															</div>
 														)}
-																		{tool.result && (
-																		<div className={`result ${tool.state === "fail" ? "text-danger" : ""}`}>
-																			{open
-																				? tool.result
-																				: tool.result.length > 200
-																					? `${tool.result.slice(0, 200)}…`
-																					: tool.result}
+														{tool.result && (
+															<div className={`result ${tool.state === "fail" ? "text-danger" : ""}`}>
+																{open
+																	? tool.result
+																	: tool.result.length > 200
+																		? `${tool.result.slice(0, 200)}…`
+																		: tool.result}
 															</div>
 														)}
 													</div>

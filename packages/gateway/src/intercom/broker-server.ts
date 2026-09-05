@@ -1,7 +1,7 @@
 import * as path from "node:path";
 import { isEnoent, logger } from "@cornfield/utils";
 import { randomUUID } from "crypto";
-import { type Stats, appendFileSync, existsSync, readFileSync, statSync, unlinkSync, writeFileSync } from "fs";
+import { appendFileSync, existsSync, readFileSync, type Stats, statSync, unlinkSync, writeFileSync } from "fs";
 import net from "net";
 import { getAskTimeoutMs } from "./config";
 import { sameCwd } from "./cwd";
@@ -197,7 +197,7 @@ export class IntercomBroker {
 			ensureIntercomRuntimeDir(runtimeDir);
 		}
 		this.#journalPath = path.join(runtimeDir, "journal.jsonl");
-	this.extensionStateManager = new ExtensionStateManager(runtimeDir);
+		this.extensionStateManager = new ExtensionStateManager(runtimeDir);
 		// NOTE: stale-socket cleanup happens in start() AFTER a liveness probe —
 		// an unconditional unlink here would delete a live broker's socket file
 		// (its listener keeps running but new clients get ENOENT).
@@ -1797,12 +1797,7 @@ export class IntercomBroker {
 		}
 	}
 
-	private appendJournalEntry(
-		from: SessionInfo,
-		to: SessionInfo,
-		message: Message,
-		queued: boolean,
-	): void {
+	private appendJournalEntry(from: SessionInfo, to: SessionInfo, message: Message, queued: boolean): void {
 		const entry: HistoryEntry = {
 			from: { id: from.id, name: from.name, cwd: from.cwd, runtimeFallbackAlias: from.runtimeFallbackAlias },
 			to: { id: to.id, name: to.name, cwd: to.cwd, runtimeFallbackAlias: to.runtimeFallbackAlias },
@@ -1812,7 +1807,7 @@ export class IntercomBroker {
 		};
 		this.historyEntries.push(entry);
 		try {
-			appendFileSync(this.#journalPath, JSON.stringify(entry) + "\n", { mode: INTERCOM_RUNTIME_FILE_MODE });
+			appendFileSync(this.#journalPath, `${JSON.stringify(entry)}\n`, { mode: INTERCOM_RUNTIME_FILE_MODE });
 		} catch (err) {
 			logger.error("Failed to append intercom journal entry", {
 				error: err instanceof Error ? err.message : String(err),
@@ -1879,14 +1874,14 @@ export class IntercomBroker {
 	private pruneJournalAndCompact(): void {
 		const now = Date.now();
 		const cutoff = now - HISTORY_JOURNAL_RETENTION_MS;
-		let compacted = this.historyEntries.filter(e => e.at >= cutoff);
+		const compacted = this.historyEntries.filter(e => e.at >= cutoff);
 		if (compacted.length > HISTORY_JOURNAL_MAX_ENTRIES) {
 			compacted.sort((a, b) => b.at - a.at);
 			compacted.length = HISTORY_JOURNAL_MAX_ENTRIES;
 		}
 		this.historyEntries = compacted;
 		try {
-			const content = compacted.map(e => JSON.stringify(e)).join("\n") + "\n";
+			const content = `${compacted.map(e => JSON.stringify(e)).join("\n")}\n`;
 			writeFileSync(this.#journalPath, content, { mode: INTERCOM_RUNTIME_FILE_MODE });
 		} catch (err) {
 			logger.error("Failed to compact intercom journal", {

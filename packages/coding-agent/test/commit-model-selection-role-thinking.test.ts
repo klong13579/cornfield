@@ -21,7 +21,9 @@ function createSettings(modelRoles: Record<string, string>) {
 		},
 		get(path: string) {
 			if (path === "modelRoutes") {
-				return Object.fromEntries(Object.entries(modelRoles).map(([role, primary]) => [role, { primary, fallbacks: [] }]));
+				return Object.fromEntries(
+					Object.entries(modelRoles).map(([role, primary]) => [role, { primary, fallbacks: [] }]),
+				);
 			}
 			return undefined;
 		},

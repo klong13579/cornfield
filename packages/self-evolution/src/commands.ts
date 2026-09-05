@@ -190,7 +190,10 @@ const EVOLUTION_SUBCOMMANDS = [
 	{ name: "status", description: "Show statistics (episodes, skills, versions)" },
 	{ name: "skills", description: "List evolved skills" },
 	{ name: "rate", description: "Rate a skill" },
-	{ name: "clear", description: "Delete .cornfield/evolution/memory + .cornfield/evolution + .cornfield/skills (full project reset)" },
+	{
+		name: "clear",
+		description: "Delete .cornfield/evolution/memory + .cornfield/evolution + .cornfield/skills (full project reset)",
+	},
 	{ name: "memory", description: "Memory hub: search, view, enqueue, clear (memory only), …" },
 	{ name: "archive", description: "Archive low-quality skills" },
 	{ name: "history", description: "View version history for a skill" },

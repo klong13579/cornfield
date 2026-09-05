@@ -24,7 +24,11 @@ describe("availableModels", () => {
 });
 
 describe("filterModels", () => {
-	const list = [model("narwal-plan", "claude-haiku-4-5"), model("narwal-plan", "glm-4.7", { name: "智谱 GLM" }), model("kimi-code", "kimi-latest")];
+	const list = [
+		model("narwal-plan", "claude-haiku-4-5"),
+		model("narwal-plan", "glm-4.7", { name: "智谱 GLM" }),
+		model("kimi-code", "kimi-latest"),
+	];
 
 	test("空查询返回原列表（同引用）", () => {
 		expect(filterModels(list, "  ")).toBe(list);

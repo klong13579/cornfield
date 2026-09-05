@@ -340,7 +340,9 @@ function DingtalkView({ agentId }: { agentId: string }): React.JSX.Element {
 			}
 		};
 		void load();
-		const t = setInterval(() => { if (view.connected) void load(); }, 15_000);
+		const t = setInterval(() => {
+			if (view.connected) void load();
+		}, 15_000);
 		return () => {
 			cancelled = true;
 			clearInterval(t);
@@ -479,9 +481,7 @@ function DingtalkView({ agentId }: { agentId: string }): React.JSX.Element {
 			<section>
 				<h4 className="mb-2 section-title text-ink-faint">
 					所在群（钉钉）
-					{groups !== null && (
-						<span className="ml-1 text-2xs text-ink-faint">{groups.length} 群</span>
-					)}
+					{groups !== null && <span className="ml-1 text-2xs text-ink-faint">{groups.length} 群</span>}
 				</h4>
 				{groups === null ? (
 					<div className="rounded-lg border border-dashed border-hairline-strong bg-surface px-4 py-6 text-center text-[12px] text-ink-faint">

@@ -629,11 +629,9 @@ export class IntercomClient extends EventEmitter {
 		writeMessage(socket, { type: "extension_capabilities_update", extensions: extensions ?? [] });
 	}
 
-	history(options: {
-		limit?: number;
-		since?: number;
-		direction?: "in" | "out" | "both";
-	} = {}): Promise<HistoryEntry[]> {
+	history(
+		options: { limit?: number; since?: number; direction?: "in" | "out" | "both" } = {},
+	): Promise<HistoryEntry[]> {
 		let socket: net.Socket;
 		try {
 			socket = this.requireActiveSocket();
@@ -659,7 +657,13 @@ export class IntercomClient extends EventEmitter {
 			}, 10000);
 			this.pendingHistories.set(requestId, { resolve: wrappedResolve, reject: wrappedReject });
 			try {
-				writeMessage(socket, { type: "history", requestId, limit: options.limit, since: options.since, direction: options.direction });
+				writeMessage(socket, {
+					type: "history",
+					requestId,
+					limit: options.limit,
+					since: options.since,
+					direction: options.direction,
+				});
 			} catch (error) {
 				clearTimeout(timeout);
 				this.pendingHistories.delete(requestId);

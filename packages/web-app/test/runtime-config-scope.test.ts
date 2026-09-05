@@ -176,7 +176,11 @@ describe("临时/持久语义分离（toModelSelectionView + describeModelWrite�
 
 describe("恢复继承与按作用域写入结果文案", () => {
 	it("恢复继承 removed=true：文案明确删除覆盖而非复制全局值，并报回落生效值", () => {
-		const text = describeRestore({ key: "modelRoutes", removed: true, effectiveValue: { default: { primary: "g/m2", fallbacks: [] } } });
+		const text = describeRestore({
+			key: "modelRoutes",
+			removed: true,
+			effectiveValue: { default: { primary: "g/m2", fallbacks: [] } },
+		});
 		expect(text).toContain("modelRoutes");
 		expect(text).toContain("删除");
 		expect(text).toContain("不会把全局值复制进项目文件");

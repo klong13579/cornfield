@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-09-05
+
 ### Fixed
 
 - **模型发现元数据不再被哨兵值/变体模型污染**（`src/model-manager.ts`, `src/provider-models/openai-compat.ts`）: 发现侧拿不到字段时填的「未知」哨兵（contextWindow 222222 / maxTokens 8888）不再覆盖静态种子与 models.dev 参考里的真实上限；`mapWithBundledReference` 支持剥离变体后缀（flash/free/turbo/thinking/fp8 等量化与变体名）后匹配父模型元数据，openai-compat 系 8 个 provider 选项构建器全部接入。

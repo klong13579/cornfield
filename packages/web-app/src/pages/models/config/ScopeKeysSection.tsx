@@ -1,6 +1,6 @@
 import type { ConfigScope, ConfigScopeDto, ConfigScopeKeyDto } from "@cornfield/wire";
 import { useState } from "react";
-import { FEATURED_SCOPE_KEY_META, groupAdvancedKeys, splitScopeKeys, type ScopeKeyEditor } from "./scope-keys";
+import { FEATURED_SCOPE_KEY_META, groupAdvancedKeys, type ScopeKeyEditor, splitScopeKeys } from "./scope-keys";
 import { formatConfigValue, parseConfigDraft, toScopeKeyView } from "./scope-view";
 
 /**
@@ -95,7 +95,9 @@ function ScopeKeyCard({
 				value={draft}
 				onChange={e => onDraftChange(e.target.value)}
 			>
-				{draft !== "" && !editor.values.includes(draft) && <option value={draft}>{`${draft}（当前配置值）`}</option>}
+				{draft !== "" && !editor.values.includes(draft) && (
+					<option value={draft}>{`${draft}（当前配置值）`}</option>
+				)}
 				{editor.values.map(v => (
 					<option key={v} value={v}>
 						{v}
@@ -161,7 +163,9 @@ function ScopeKeyCard({
 			{/* 展开面板：说明 + 三层取值 + 编辑控件 + 恢复继承 */}
 			{editing && (
 				<div className="mt-2 border-t border-hairline pt-2">
-					{featured && meta && <div className="mb-1.5 text-[11px] leading-relaxed text-ink-subtle">{meta.description}</div>}
+					{featured && meta && (
+						<div className="mb-1.5 text-[11px] leading-relaxed text-ink-subtle">{meta.description}</div>
+					)}
 					<div className="mb-2 space-y-0.5">
 						{view.rows.map(row => (
 							<div key={row.layer} className="flex items-baseline gap-2">
@@ -177,8 +181,12 @@ function ScopeKeyCard({
 					</div>
 					<div className="mb-1.5 flex items-baseline gap-2 text-[10.5px] text-ink-faint">
 						<span>写入目标</span>
-						<span className="font-mono text-ink-subtle">{writeTarget === "global" ? "全局配置" : "项目配置"}</span>
-						<span>· {editorHint}；当前生效值 {formatConfigValue(dto.effectiveValue)}</span>
+						<span className="font-mono text-ink-subtle">
+							{writeTarget === "global" ? "全局配置" : "项目配置"}
+						</span>
+						<span>
+							· {editorHint}；当前生效值 {formatConfigValue(dto.effectiveValue)}
+						</span>
 					</div>
 					{editorControl}
 					{draftError && <div className="mt-1.5 text-[11px] text-danger">{draftError}</div>}

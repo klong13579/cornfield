@@ -15,8 +15,12 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { getAgentDir, isEnoent, logger } from "@cornfield/utils";
-import type { DiagnosisReportListItemDto, DiagnosisSummaryDto, DiagnosisTaskStateDto, UserCorrectionDto } from "@cornfield/wire";
-
+import type {
+	DiagnosisReportListItemDto,
+	DiagnosisSummaryDto,
+	DiagnosisTaskStateDto,
+	UserCorrectionDto,
+} from "@cornfield/wire";
 
 /** 诊断报告根目录 ~/.cornfield/agent/diagnosis-reports/ */
 function reportsDir(): string {
@@ -45,7 +49,10 @@ function extractSessionId(sessionFile: string): string | null {
 
 // ── 运行中任务状态 ──
 
-const runningTasks = new Map<string, { state: "running" | "done" | "failed"; reportId?: string; error?: string; startedAt: string }>();
+const runningTasks = new Map<
+	string,
+	{ state: "running" | "done" | "failed"; reportId?: string; error?: string; startedAt: string }
+>();
 
 /** 启动一条诊断。返回 { reportId, sessionId, state }。立即返回，后台异步跑。 */
 export async function runDiagnosis(sessionFile: string): Promise<{
@@ -78,11 +85,7 @@ export async function runDiagnosis(sessionFile: string): Promise<{
 }
 
 /** 后台：提取数据 + 生成报告（简单路径，TypeScript 直接构建）。 */
-async function runDiagnosisBackground(
-	sessionFile: string,
-	reportId: string,
-	sessionId: string,
-): Promise<void> {
+async function runDiagnosisBackground(sessionFile: string, reportId: string, sessionId: string): Promise<void> {
 	const dir = reportsDir();
 	const reportPath = path.join(dir, `${reportId}.md`);
 	const summaryPath = path.join(dir, `${reportId}.summary.json`);
@@ -100,7 +103,7 @@ export async function runSimpleDiagnosis(
 	sessionFile: string,
 	reportId: string,
 	sessionId: string,
-	dir: string,
+	_dir: string,
 	reportPath: string,
 	summaryPath: string,
 ): Promise<void> {
@@ -111,7 +114,9 @@ export async function runSimpleDiagnosis(
 			timeout: 30000,
 		});
 		if (result.exitCode !== 0) {
-			throw new Error(`diagnose.py --filter ${filter} failed (exit ${result.exitCode}): ${result.stderr.toString().slice(0, 200)}`);
+			throw new Error(
+				`diagnose.py --filter ${filter} failed (exit ${result.exitCode}): ${result.stderr.toString().slice(0, 200)}`,
+			);
 		}
 		return result.stdout.toString();
 	};
@@ -122,7 +127,9 @@ export async function runSimpleDiagnosis(
 			timeout: 30000,
 		});
 		if (result.exitCode !== 0) {
-			throw new Error(`diagnose.py --summary failed (exit ${result.exitCode}): ${result.stderr.toString().slice(0, 200)}`);
+			throw new Error(
+				`diagnose.py --summary failed (exit ${result.exitCode}): ${result.stderr.toString().slice(0, 200)}`,
+			);
 		}
 		return result.stdout.toString();
 	};
@@ -152,15 +159,30 @@ export async function runSimpleDiagnosis(
 	const process = errors.length > 0 ? "C" : "B";
 	const totalToken = tokens.totalTokens ?? 0;
 
-	const title = errors.length > 0
-		? `会话存在 ${errors.length} 个错误（${totalTurns} 轮，${(totalToken / 1_000_000).toFixed(1)}M token）`
-		: status === "aborted"
-			? `会话已中止（${totalTurns} 轮，${(totalToken / 1_000_000).toFixed(1)}M token）`
-			: `会话正常完成（${totalTurns} 轮，${(totalToken / 1_000_000).toFixed(1)}M token）`;
+	const title =
+		errors.length > 0
+			? `会话存在 ${errors.length} 个错误（${totalTurns} 轮，${(totalToken / 1_000_000).toFixed(1)}M token）`
+			: status === "aborted"
+				? `会话已中止（${totalTurns} 轮，${(totalToken / 1_000_000).toFixed(1)}M token）`
+				: `会话正常完成（${totalTurns} 轮，${(totalToken / 1_000_000).toFixed(1)}M token）`;
 
 	const dimData = buildDimData(status, totalTurns, totalToken, errors.length > 0, dims, sessionFile, summary);
 	const corrections = parseCorrections(dims.corrections);
-	const md = generateMarkdownReport(reportId, sessionId, sessionFile, severity, delivery, process, title, status, totalTurns, totalToken, errors.length, dimData, corrections);
+	const md = generateMarkdownReport(
+		reportId,
+		sessionId,
+		sessionFile,
+		severity,
+		delivery,
+		process,
+		title,
+		status,
+		totalTurns,
+		totalToken,
+		errors.length,
+		dimData,
+		corrections,
+	);
 	fs.writeFileSync(reportPath, md, "utf8");
 
 	const summaryDto: DiagnosisSummaryDto = {
@@ -196,8 +218,13 @@ interface DimEntry {
 }
 
 function buildDimData(
-	status: string, totalTurns: number, totalToken: number, hasErrors: boolean,
-	dims: Record<string, string>, sessionFile: string, summary: Record<string, unknown>,
+	status: string,
+	totalTurns: number,
+	totalToken: number,
+	hasErrors: boolean,
+	dims: Record<string, string>,
+	_sessionFile: string,
+	summary: Record<string, unknown>,
 ): Record<string, DimEntry> {
 	const compaction = (summary as { compactionCount?: number }).compactionCount ?? 0;
 	const totalInput = (summary as { tokens?: Record<string, number> }).tokens?.totalInput ?? 0;
@@ -242,9 +269,7 @@ function buildDimData(
 		meta: {
 			state: status === "completed" ? "ok" : "warn",
 			summary: `会话 ${status}，${totalTurns} 轮，${compaction} 次压缩`,
-			basis: compaction > 0
-				? `${compaction} 次压缩事件，可能丢失上下文`
-				: "生命周期完整，无压缩事件",
+			basis: compaction > 0 ? `${compaction} 次压缩事件，可能丢失上下文` : "生命周期完整，无压缩事件",
 			rows: [
 				{ label: "状态", value: status },
 				{ label: "总轮次", value: String(totalTurns) },
@@ -253,7 +278,13 @@ function buildDimData(
 			evidence: [
 				{ turn: 0, kind: "session_header", quote: `status=${status} · compaction=${compaction}` },
 				...(compaction > 0
-					? [{ turn: 1, kind: "compaction", quote: `第 1 轮发生压缩，收缩后 token: ${(totalToken * 0.4 / 1_000_000).toFixed(1)}M` }]
+					? [
+							{
+								turn: 1,
+								kind: "compaction",
+								quote: `第 1 轮发生压缩，收缩后 token: ${((totalToken * 0.4) / 1_000_000).toFixed(1)}M`,
+							},
+						]
 					: []),
 			],
 			fix: compaction > 0 ? "考虑增加 token 窗口或优化 prompt 长度" : "无需处理。",
@@ -270,8 +301,16 @@ function buildDimData(
 				{ label: "窗口占用", value: `${((totalToken / 1_000_000) * 100).toFixed(1)}%` },
 			],
 			evidence: [
-				{ turn: 1, kind: "perf", quote: `turn 1: ${(totalInput / totalTurns / 1_000_000).toFixed(2)}M in / ${(totalOutput / totalTurns / 1_000_000).toFixed(2)}M out` },
-				{ turn: totalTurns, kind: "perf", quote: `turn ${totalTurns}: ${(totalInput / totalTurns / 1_000_000).toFixed(2)}M in / ${(totalOutput / totalTurns / 1_000_000).toFixed(2)}M out` },
+				{
+					turn: 1,
+					kind: "perf",
+					quote: `turn 1: ${(totalInput / totalTurns / 1_000_000).toFixed(2)}M in / ${(totalOutput / totalTurns / 1_000_000).toFixed(2)}M out`,
+				},
+				{
+					turn: totalTurns,
+					kind: "perf",
+					quote: `turn ${totalTurns}: ${(totalInput / totalTurns / 1_000_000).toFixed(2)}M in / ${(totalOutput / totalTurns / 1_000_000).toFixed(2)}M out`,
+				},
 			],
 			fix: isHighToken ? "考虑开启工具结果窗口化或压缩策略" : "无需处理。",
 		},
@@ -281,9 +320,8 @@ function buildDimData(
 			basis: hasErrors
 				? `会话存在 ${(summary as { errors?: unknown[] }).errors?.length ?? 0} 个错误，工具参数与用户请求可能存在偏差`
 				: "用户请求与 agent 动作一致",
-			rows: userMessages.length > 0
-				? [{ label: "首条用户消息", value: userMessages[0]?.text.slice(0, 80) ?? "" }]
-				: [],
+			rows:
+				userMessages.length > 0 ? [{ label: "首条用户消息", value: userMessages[0]?.text.slice(0, 80) ?? "" }] : [],
 			evidence: userMessages.slice(0, 3).map(um => ({
 				turn: um.turn,
 				kind: "user",
@@ -309,9 +347,7 @@ function buildDimData(
 		tool: {
 			state: hasToolError ? "fail" : hasErrors ? "warn" : "ok",
 			summary: `${toolCalls.length} 次工具调用，${toolErrors.length} 个错误`,
-			basis: hasToolError
-				? `第 ${toolErrors[0]?.turn ?? "?"} 轮工具调用出错，后续可能已恢复`
-				: "工具调用正常",
+			basis: hasToolError ? `第 ${toolErrors[0]?.turn ?? "?"} 轮工具调用出错，后续可能已恢复` : "工具调用正常",
 			rows: [
 				{ label: "总调用", value: String(toolCalls.length) },
 				{ label: "出错", value: String(toolErrors.length) },
@@ -336,31 +372,37 @@ function buildDimData(
 
 /** 格式化纠正记录为 markdown 文本。 */
 function formatCorrections(corrections?: UserCorrectionDto[]): string {
-	if (!corrections || corrections.length === 0) return '';
-	const lines: string[] = ['\n## 用户纠正记录'];
+	if (!corrections || corrections.length === 0) return "";
+	const lines: string[] = ["\n## 用户纠正记录"];
 	for (const c of corrections) {
-		lines.push('');
-		lines.push('### 第 ' + c.turn + ' 轮 - ' + c.targetDim);
-		lines.push('- 用户原文: "' + c.userText + '"');
-		lines.push('- 纠正意图: ' + c.intent);
-		lines.push('- 是否合理: ' + (c.isValid ? '是' : '否'));
-		lines.push('- 是否修复: ' + (c.isResolved ? '是' : '否'));
-		lines.push('- 上下文: ' + c.precedingContext);
+		lines.push("");
+		lines.push(`### 第 ${c.turn} 轮 - ${c.targetDim}`);
+		lines.push(`- 用户原文: "${c.userText}"`);
+		lines.push(`- 纠正意图: ${c.intent}`);
+		lines.push(`- 是否合理: ${c.isValid ? "是" : "否"}`);
+		lines.push(`- 是否修复: ${c.isResolved ? "是" : "否"}`);
+		lines.push(`- 上下文: ${c.precedingContext}`);
 	}
-	return lines.join('\n');
+	return lines.join("\n");
 }
 
 /** 生成 markdown 报告。 */
 function generateMarkdownReport(
-	reportId: string, sessionId: string, sessionFile: string,
-	severity: string, delivery: string, process: string, title: string,
-	status: string, totalTurns: number, totalToken: number, errorCount: number,
+	_reportId: string,
+	sessionId: string,
+	sessionFile: string,
+	severity: string,
+	delivery: string,
+	process: string,
+	title: string,
+	status: string,
+	totalTurns: number,
+	totalToken: number,
+	_errorCount: number,
 	dims: Record<string, DimEntry>,
 	corrections?: UserCorrectionDto[],
 ): string {
-	const corrSection = corrections && corrections.length > 0
-		? formatCorrections(corrections)
-		: '';
+	const corrSection = corrections && corrections.length > 0 ? formatCorrections(corrections) : "";
 
 	return `# Agent Session 诊断报告
 
@@ -465,10 +507,11 @@ function scanReports(): DiagnosisReportListItemDto[] {
 }
 
 /** 诊断报告列表。sessionFile 可选过滤。 */
-export function listDiagnosisReports(sessionFile?: string): { reports: DiagnosisReportListItemDto[]; tasks: DiagnosisTaskStateDto[] } {
-	const reports = sessionFile
-		? scanReports().filter(r => r.sessionFile === sessionFile)
-		: scanReports();
+export function listDiagnosisReports(sessionFile?: string): {
+	reports: DiagnosisReportListItemDto[];
+	tasks: DiagnosisTaskStateDto[];
+} {
+	const reports = sessionFile ? scanReports().filter(r => r.sessionFile === sessionFile) : scanReports();
 
 	const tasks: DiagnosisTaskStateDto[] = [];
 	for (const [sf, state] of runningTasks.entries()) {

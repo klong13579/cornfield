@@ -2358,7 +2358,18 @@ Usage:
 
 			parameters: Type.Object({
 				action: StringEnum(
-					["list", "list-cwd", "children", "send", "ask", "reply", "pending", "status", "cancel", "history"] as const,
+					[
+						"list",
+						"list-cwd",
+						"children",
+						"send",
+						"ask",
+						"reply",
+						"pending",
+						"status",
+						"cancel",
+						"history",
+					] as const,
 					{
 						description:
 							"Action: 'list', 'list-cwd', 'children', 'send', 'ask', 'reply', 'pending', 'status', 'cancel', or 'history'",
@@ -2442,7 +2453,8 @@ Usage:
 				),
 				direction: Type.Optional(
 					Type.String({
-						description: "Filter direction: 'in' (received by me, default), 'out' (sent by me), 'both'. Only for action 'history'.",
+						description:
+							"Filter direction: 'in' (received by me, default), 'out' (sent by me), 'both'. Only for action 'history'.",
 					}),
 				),
 			}),
@@ -3010,13 +3022,14 @@ Usage:
 									details: {},
 								};
 							}
-							const now = Date.now();
+							const _now = Date.now();
 							const lines = entries.map(e => {
 								const ts = new Date(e.at).toLocaleTimeString("zh-CN", { hour12: false });
 								const dir = e.from.id === connectedClient.sessionId ? "→" : "←";
-								const peer = e.to.id === connectedClient.sessionId
-									? (e.from.name || e.from.id.slice(0, 8))
-									: (e.to.name || e.to.id.slice(0, 8));
+								const peer =
+									e.to.id === connectedClient.sessionId
+										? e.from.name || e.from.id.slice(0, 8)
+										: e.to.name || e.to.id.slice(0, 8);
 								const preview = e.message.content.text.replace(/\s+/g, " ").slice(0, 80);
 								const fileHint = e.message.content.attachments?.find(a => a.path)?.path ?? "";
 								return `[${ts}] ${dir} ${peer}${e.queued ? " (queued)" : ""}${fileHint ? ` 📄${fileHint}` : ""}: ${preview}`;

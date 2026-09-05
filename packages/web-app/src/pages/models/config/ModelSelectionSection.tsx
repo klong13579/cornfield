@@ -142,7 +142,7 @@ export function ModelSelectionSection({
 										isArmed
 											? "border-danger/40 text-danger"
 											: "border-hairline bg-surface-2 text-ink-subtle hover:border-hairline-strong hover:text-ink"
-										} ${hiding && !isArmed ? "opacity-40" : ""}`}
+									} ${hiding && !isArmed ? "opacity-40" : ""}`}
 									disabled={busy || (hiding && !isArmed)}
 									title={`两步确认隐藏 ${g.provider}（写全局停用名单，可在 Provider 工作区恢复）`}
 									onClick={() => {
@@ -164,7 +164,9 @@ export function ModelSelectionSection({
 								</button>
 							);
 						})}
-						<span className="text-[10.5px] text-ink-faint">两步确认，写全局停用名单，可在 Provider 工作区恢复</span>
+						<span className="text-[10.5px] text-ink-faint">
+							两步确认，写全局停用名单，可在 Provider 工作区恢复
+						</span>
 					</div>
 				)}
 			</div>

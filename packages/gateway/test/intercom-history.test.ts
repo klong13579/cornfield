@@ -224,7 +224,10 @@ describe("intercom message history", () => {
 			// Start a new broker on the same dir
 			// Verify journal file was written
 			const journalPath = path.join(intercomDir, "journal.jsonl");
-			const journalExists = await fs.stat(journalPath).then(() => true, () => false);
+			const journalExists = await fs.stat(journalPath).then(
+				() => true,
+				() => false,
+			);
 			expect(journalExists).toBe(true);
 			if (journalExists) {
 				const journalContent = await fs.readFile(journalPath, "utf-8");

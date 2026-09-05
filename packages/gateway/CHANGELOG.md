@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-09-05
+
 ### Added
 
 - **Agent 详情页展示钉钉机器人所在群**（`src/wire-endpoint.ts`、`src/gateway.ts`): GatewayGroupInfo 类型（channelId/title/conversationId/lastActive），gateway_status 返回 account 级的 groups 列表（来自 sessions.db 的 isGroup 会话，按 lastActive 倒序，上限 50 条）。channelId 预留飞书扩展。

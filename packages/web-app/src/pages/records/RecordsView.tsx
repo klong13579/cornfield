@@ -71,19 +71,22 @@ export function RecordsView(): React.JSX.Element {
 	// Load existing diagnosis reports on mount
 	useEffect(() => {
 		if (!view.connected) return;
-		store.listDiagnosisReports().then(({ reports }) => {
-			const map = new Map<string, DiagReport>();
-			for (const r of reports) {
-				if (r.sessionFile) {
-					map.set(r.sessionFile, {
-						reportId: r.reportId,
-						sessionId: r.sessionId,
-						severity: r.severity,
-					});
+		store
+			.listDiagnosisReports()
+			.then(({ reports }) => {
+				const map = new Map<string, DiagReport>();
+				for (const r of reports) {
+					if (r.sessionFile) {
+						map.set(r.sessionFile, {
+							reportId: r.reportId,
+							sessionId: r.sessionId,
+							severity: r.severity,
+						});
+					}
 				}
-			}
-			setDiagReports(map);
-		}).catch(() => undefined);
+				setDiagReports(map);
+			})
+			.catch(() => undefined);
 	}, [store, view.connected]);
 
 	// list_sessions：连接就绪后拉真索引；未连接/失败时保持空列表（不造数据）
@@ -201,14 +204,19 @@ export function RecordsView(): React.JSX.Element {
 						const sf = row.sessionFile;
 						const report = sf ? diagReports.get(sf) : undefined;
 						return (
-							<div key={row.id} className="flex items-center gap-4 px-4 py-3 transition-colors hover:bg-surface-2">
+							<div
+								key={row.id}
+								className="flex items-center gap-4 px-4 py-3 transition-colors hover:bg-surface-2"
+							>
 								{report && (
 									<button
 										type="button"
 										className={`${severityBadgeClass[report.severity] ?? "badge done"} mr-2 shrink-0 cursor-pointer text-[11px] font-medium`}
 										onClick={e => {
 											e.stopPropagation();
-											navigate(`/records/${report.sessionId}/diagnosis`, { state: { reportId: report.reportId } });
+											navigate(`/records/${report.sessionId}/diagnosis`, {
+												state: { reportId: report.reportId },
+											});
 										}}
 									>
 										{report.severity}
@@ -238,8 +246,8 @@ export function RecordsView(): React.JSX.Element {
 									</button>
 									<button
 										type="button"
-										className={`flex items-center gap-1 text-ink-muted transition-colors hover:text-ink ${!sf ? 'opacity-40 cursor-not-allowed' : ''}`}
-										disabled={!sf || diagnosing.has(sf ?? '')}
+										className={`flex items-center gap-1 text-ink-muted transition-colors hover:text-ink ${!sf ? "opacity-40 cursor-not-allowed" : ""}`}
+										disabled={!sf || diagnosing.has(sf ?? "")}
 										onClick={e => {
 											e.stopPropagation();
 											if (!sf) return;
@@ -251,24 +259,27 @@ export function RecordsView(): React.JSX.Element {
 													return next;
 												});
 												// Refresh reports after diagnosis completes
-												store.listDiagnosisReports().then(({ reports }) => {
-													const map = new Map<string, DiagReport>();
-													for (const r of reports) {
-														if (r.sessionFile) {
-															map.set(r.sessionFile, {
-																reportId: r.reportId,
-																sessionId: r.sessionId,
-																severity: r.severity,
-															});
+												store
+													.listDiagnosisReports()
+													.then(({ reports }) => {
+														const map = new Map<string, DiagReport>();
+														for (const r of reports) {
+															if (r.sessionFile) {
+																map.set(r.sessionFile, {
+																	reportId: r.reportId,
+																	sessionId: r.sessionId,
+																	severity: r.severity,
+																});
+															}
 														}
-													}
-													setDiagReports(map);
-												}).catch(() => undefined);
+														setDiagReports(map);
+													})
+													.catch(() => undefined);
 											});
 										}}
 									>
 										<Stethoscope size={11} strokeWidth={1.5} />
-										{diagnosing.has(sf ?? '') ? '诊断中…' : '诊断'}
+										{diagnosing.has(sf ?? "") ? "诊断中…" : "诊断"}
 									</button>
 									{report && (
 										<button
@@ -276,7 +287,9 @@ export function RecordsView(): React.JSX.Element {
 											className="flex items-center gap-0.5 text-ink-muted transition-colors hover:text-ink"
 											onClick={e => {
 												e.stopPropagation();
-												navigate(`/records/${report.sessionId}/diagnosis`, { state: { reportId: report.reportId } });
+												navigate(`/records/${report.sessionId}/diagnosis`, {
+													state: { reportId: report.reportId },
+												});
 											}}
 										>
 											报告 <ChevronRight size={11} strokeWidth={1.5} />
@@ -291,7 +304,9 @@ export function RecordsView(): React.JSX.Element {
 										}}
 										disabled={row.id !== CURRENT_SESSION_ID}
 										title={
-											row.id === CURRENT_SESSION_ID ? "导出当前会话 JSONL" : "历史会话导出待后端 JSONL 读取命令"
+											row.id === CURRENT_SESSION_ID
+												? "导出当前会话 JSONL"
+												: "历史会话导出待后端 JSONL 读取命令"
 										}
 									>
 										导出

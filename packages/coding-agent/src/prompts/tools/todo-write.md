@@ -1,9 +1,9 @@
 Manages a phased task list. Pass `ops`: a flat array of operations.
 The next pending task is auto-promoted to `in_progress` after each completion.
 
-> **IMPORTANT**: `ops` must be a **native JSON array**, NOT a JSON string. Do NOT wrap the array in quotes. For example, pass `ops=[{op:"init",list:[...]}]`, NOT `ops="[{op:\"init\",list:[...]}]"`.
+> **IMPORTANT**: `ops` must be a **native JSON array**, NOT a JSON string. Do NOT wrap the array in quotes. For example, pass `ops=[{op:"init",list:[…]}]`, NOT `ops="[{op:\"init\",list:[…]}]"`.
 
-> **IMPORTANT**: `items` (in `init` and `append`) must be a **flat array of strings** — each element is the task content itself, not a wrapper. Do NOT model each task as `{task: "..."}` or any object. The schema is `Type.Array(Type.String())`. Pass `items=["Scaffold crate","Wire workspace"]`, NOT `items=[{task:"Scaffold crate",item:{...}}, ...]`. Wrapping each string in an object triggers a validation error and a per-element recovery pass.
+> **IMPORTANT**: `items` (in `init` and `append`) must be a **flat array of strings** — each element is the task content itself, not a wrapper. Do NOT model each task as `{task: "…"}` or any object. The schema is `Type.Array(Type.String())`. Pass `items=["Scaffold crate","Wire workspace"]`, NOT `items=[{task:"Scaffold crate",item:{…}}, …]`. Wrapping each string in an object triggers a validation error and a per-element recovery pass.
 
 ## Operations
 

@@ -60,7 +60,12 @@ import type {
 	OutboundMessage,
 	SessionRecord,
 } from "./types";
-import { type GatewayAccountPatch, type GatewayGroupInfo, type GatewayWireResult, handleGatewayWireCommand } from "./wire-endpoint";
+import {
+	type GatewayAccountPatch,
+	type GatewayGroupInfo,
+	type GatewayWireResult,
+	handleGatewayWireCommand,
+} from "./wire-endpoint";
 
 export function buildChannelKey(channelId: string, accountId?: string): string {
 	return accountId ? `${channelId}:${accountId}` : channelId;
@@ -1373,7 +1378,12 @@ export class Gateway {
 							for (const s of allSessions) {
 								if (!s.isGroup || !s.conversationTitle) continue;
 								const list = sessionsByAccount.get(s.accountId) ?? [];
-								list.push({ channelId: s.channelId, title: s.conversationTitle, conversationId: s.conversationId, lastActive: s.updatedAt });
+								list.push({
+									channelId: s.channelId,
+									title: s.conversationTitle,
+									conversationId: s.conversationId,
+									lastActive: s.updatedAt,
+								});
 								sessionsByAccount.set(s.accountId, list);
 							}
 							return {

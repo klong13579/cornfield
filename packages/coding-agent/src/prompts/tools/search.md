@@ -1,7 +1,7 @@
 Searches files using powerful regex matching.
 
 <instruction>
-- **REQUIRED**: Both `pattern` (regex) and `path` (search scope) MUST be provided. A call with only one or neither will fail validation.
+- **REQUIRED**: Both `pattern` (regex) and `path` (search scope) **MUST** be provided. A call with only one or neither will fail validation.
   - ✅ CORRECT: `{"path": "src/", "pattern": "TODO"}`
   - ❌ WRONG: `{"pattern": "TODO"}` (missing `path`)
   - ❌ WRONG: `{}` (missing both)

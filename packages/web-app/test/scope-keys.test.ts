@@ -18,11 +18,7 @@ function key(key: string, overrides: Partial<ConfigScopeKeyDto> = {}): ConfigSco
 
 describe("splitScopeKeys", () => {
 	test("精选键按精选顺序输出（而非 schema 顺序）", () => {
-		const { featured } = splitScopeKeys([
-			key("python.toolMode"),
-			key("temperature"),
-			key("defaultThinkingLevel"),
-		]);
+		const { featured } = splitScopeKeys([key("python.toolMode"), key("temperature"), key("defaultThinkingLevel")]);
 		expect(featured.map(k => k.key)).toEqual(["defaultThinkingLevel", "temperature", "python.toolMode"]);
 	});
 

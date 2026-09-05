@@ -4,7 +4,6 @@ Inspect the live agent roster — every agent (the main session plus all
 subagents) currently alive in this process, with what each one is doing.
 
 ## Operations
-
 - `op: "list"` (default) — all peers visible to you, each with kind, status,
   current activity, and time since last activity. Use this to see who is
   around and what they are working on.
@@ -14,12 +13,12 @@ subagents) currently alive in this process, with what each one is doing.
 
 ## Relationship to other tools
 
-| Need | Tool |
+|Need|Tool|
 |---|---|
-| Roster inspection / what is everyone doing | **hub** (`op: "list"` / `"show"`) |
-| Message a live agent and read its reply | `irc` (`op: "send"`) |
-| Wait for background jobs / cancel them | `job` (`poll` / `cancel`) |
-| Spawn subagents | `task` |
+|Roster inspection / what is everyone doing|**hub** (`op: "list"` / `"show"`)|
+|Message a live agent and read its reply|`irc` (`op: "send"`)|
+|Wait for background jobs / cancel them|`job` (`poll` / `cancel`)|
+|Spawn subagents|`task`|
 
 The hub tool is read-only: it does not message, kill, or revive agents.
 Killing a peer is a destructive action and belongs to a human operator.
