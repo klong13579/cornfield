@@ -120,7 +120,7 @@ toml = "0.8"
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
-# Regenerate miniaudio FFI bindings from the compiled headers on macOS only.
+# Regenerate miniaudio FFI bindings from the compiled headers on macOS and Linux ARM64.
 # The maudio-sys pregenerated `unix.rs` bindings are Linux-shaped: their
 # `ma_device`/`ma_context` backend-state unions omit the `#ifdef
 # MA_SUPPORT_COREAUDIO` members that the macOS build of miniaudio.c actually
@@ -129,7 +129,10 @@ libc = "0.2"
 # darwin builds with host Xcode (libclang available), so bindgen is fine here;
 # the hermetic zig/musl/windows toolchains keep the bindgen-free pregen path,
 # whose bindings are correct for those platforms.
-[target.'cfg(target_os = "macos")'.dependencies]
+# On Linux ARM64, the pre-generated bindings have a c_char type mismatch
+# (i8 vs u8) that breaks compilation; regenerate with bindgen to get the
+# correct ARM64 AAPCS ABI (char = unsigned char = u8).
+[target.'cfg(any(target_os = "macos", all(target_os = "linux", target_arch = "aarch64")))'.dependencies]
 maudio = { version = "0.1.6", features = ["generate-bindings"], optional = true }
 objc2 = { version = "0.6", optional = true }
 block2 = { version = "0.6", optional = true }
