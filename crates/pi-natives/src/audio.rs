@@ -151,7 +151,7 @@ impl PlaybackStream {
 			.playback_channels(AUDIO_CHANNELS)
 			.period_size_millis(PLAYBACK_PERIOD_MS)
 			.performance_profile(PerformanceProfile::LowLatency)
-			.backends(AUDIO_BACKENDS);
+			.backends(AUDIO_BACKENDS.iter().copied());
 		let mut device = builder
 			.with_callback(move |_device, output| {
 				fill_playback(
@@ -289,7 +289,7 @@ where
 		.capture_channels(AUDIO_CHANNELS)
 		.period_size_millis(CAPTURE_PERIOD_MS)
 		.performance_profile(PerformanceProfile::LowLatency)
-		.backends(AUDIO_BACKENDS);
+		.backends(AUDIO_BACKENDS.iter().copied());
 	let mut device = builder
 		.with_callback(move |_device, samples| {
 			if !samples.is_empty() {
