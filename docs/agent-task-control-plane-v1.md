@@ -19,12 +19,11 @@ Kanban 是控制协议的投影，不以视觉看板为第一目标。
 - 人工触发整理 Agent，生成 proposal
 - 一次确认、批量生成 Task 集合
 - Task 依赖（blocks / informs）
-- v1 Task 固定绑定欢迎页当前 `default` Agent，由人/Lead 手动启动
-- 客户端默认 workspace 为 `~/cf-workspace`；首次访问时确保目录存在
+- v1 Task 固定绑定欢迎页当前 `default` Agent，由人/Lead 手动启动 Main Worker
 - 独立 AgentSession 与进程执行
 - 代码任务默认独立 worktree
 - TaskRun 历史、结构化交付报告
-- 独立 Verification
+- 验收证据与 Verification 辅助检查
 - 显式合并
 - 失败、重试、暂停、取消、恢复
 - 状态、事件和验收审计
@@ -43,7 +42,8 @@ TODO/topic → Proposal → Task[] → TaskRun[] → Verification[]
 - Task：可独立派发和验收的持久工作单元。
 - TaskRun：一次具体执行及其事实。
 - Agent：长期身份、agentDir、指令、工具、记忆和运行配置；v1 先只支持 serve 自带的 `default` Agent。
-- Worker：`default` Agent 为某个 TaskRun 启动的执行角色，不是独立配置主体。
+- Main Worker：每个 Topic Package 一个独立的 default Agent 执行实例，负责子 Task 分解、分配、调度、监督和验收。
+- Worker：Main Worker 为某个子 TaskRun 启动的执行角色，不是独立配置主体。
 - Default workspace：`~/cf-workspace`，作为 default Agent 的完整 agentDir，使用 Agent skeleton 初始化；其中包含 `TODO.md`、`topics/`、`.cornfield/config.yml`、sessions 和其他骨架文件。
 - Code repository：用户选择的 Git 仓库，与 default Agent workspace 分开。
 - AgentSession/Process：TaskRun 的运行载体。
@@ -52,21 +52,25 @@ TODO/topic → Proposal → Task[] → TaskRun[] → Verification[]
 
 ## 4. 角色
 
-Human/Lead 触发整理、审核提案、指定 Worker、启动/暂停/取消/重试、处理阻塞、验收后合并。
+Human/Lead 触发 Grill、审核 Topic 目标和 Task Package、手动启动 Main Worker、处理 waiting_user、高风险决策并在 Package 验收后合并。
 
-Organizer Agent 读取 TODO/topic，提出拆分、依赖、验收、风险和缺失信息；不得直接 ready、claim、启动或伪造决策。
+Main Worker 读取已确认的 Topic Package，分解和分配子 Task，按依赖调度子 Worker，监控运行，处理 blocked/waiting_user，检查交付报告和验收标准，决定子 Task `accepted` 或 `rework`，汇总 Package 结果；不得修改已确认目标、代替 Human/Lead 做高风险决策或自行合并。
 
-Worker 在工作区执行 Task，汇报状态并提交结构化交付报告；不得自行 accepted 或合并。
+Worker 在指定工作区执行具体子 Task，汇报状态并提交结构化交付报告；不得自行 accepted、修改 Task 契约或合并。
 
-Verifier 执行预配置检查并输出 passed/rejected。
+Verifier/验证工具为 Main Worker 提供检查证据；Main Worker 负责子 Task 的验收结论。
 
 ## 5. 来源与整理流程
 
 ```text
 TODO/topic 新增 → triage（不启动模型）
-triage → 人/Lead 显式触发 Organizer → proposal_ready
-proposal_ready → 人/Lead 整体确认 → 批量生成 Task
-Task → preflight → ready / incomplete / blocked / awaiting_approval
+triage → Grill → Topic 目标确认 → Task Package proposal
+proposal → 人/Lead 确认 → Task Package approved
+approved → 人/Lead 手动启动 Main Worker
+Main Worker → 分解/派发子 Task → 子 Worker 执行
+子 Worker → 交付报告 → Main Worker 验收
+验收拒绝 → rework → 子 Worker 新 TaskRun
+全部子 Task accepted → Package review → 人/Lead 合并
 ```
 
 一条 TODO/topic 可生成一个或多个 Task；Topic 不是 Task。v1 的 TODO/topic 来源固定为 `~/cf-workspace/TODO.md` 与 `~/cf-workspace/topics/`，代码 Task 的 `repositoryRoot` 是独立的用户选择资源。裸 TODO 默认 triage，不自动执行。
@@ -80,9 +84,9 @@ triage → organizing → proposal_ready → draft → preflight → ready
 → claimed → running → review → accepted
 ```
 
-异常状态：`incomplete`（定义缺失）、`blocked`（外部条件/依赖未满足）、`awaiting_approval`（等人工授权）、`rework`（验收拒绝）、`paused`（可恢复）、`stale`（claim/heartbeat 异常）、`rejected`（定义被否决）、`cancelled`（明确终止且不可恢复）。
+异常状态：`incomplete`（定义缺失）、`blocked`（外部依赖/前置 Task 未满足）、`awaiting_approval`（等人工授权）、`waiting_user`（等用户输入或决策）、`rework`（Main Worker 验收拒绝）、`paused`（可恢复）、`stale`（claim/heartbeat 异常）、`rejected`（定义被否决）、`cancelled`（明确终止且不可恢复）。
 
-硬规则：`TaskRun succeeded ≠ Task accepted`；Verification passed 才能 accepted；Verification rejected 进入 rework；只有 accepted 才解除 blocks 依赖。
+硬规则：`TaskRun succeeded ≠ Task accepted`；Main Worker 根据验收证据决定子 Task `accepted`；验收拒绝进入 `rework`；只有 accepted 才解除 blocks 依赖。
 
 ## 7. Task 完成契约
 
@@ -97,11 +101,13 @@ Task 必须绑定一个 Agent、一个 repository/workspace、优先级 P0/P1/P2
 
 ## 8. 执行与生命周期
 
-一个 Task 可有多个连续 TaskRun，同一时刻只能有一个 active Worker。失败或拒绝保留原 Task，追加新 Run；目标实质变化则关闭旧 Task、新建 Task。
+一个 Topic Package 有且只有一个 Main Worker；Main Worker 可以管理多个子 Task Worker。一个子 Task 可有多个连续 TaskRun，同一时刻只能有一个 active Worker。
 
 ```text
-TaskRun: queued → starting → running → succeeded | failed | timeout | cancelled
-Verification: unverified → verifying → passed | rejected
+Main Worker: queued → starting → decomposing → dispatching → supervising → package_review → package_accepted
+子 Task: draft → ready → claimed → running → submitted → accepted
+验收拒绝: submitted → rework → claimed
+需要用户: running/submitted → waiting_user → running
 ```
 
 Worker 必须返回 `outcome`、`summary`、`changedFiles`、`artifacts`、验证尝试/结果、残余风险、阻塞和下一步。
@@ -115,6 +121,7 @@ workspacePolicy: shared | worktree | none
 ```
 
 代码修改默认 worktree；只读任务可 shared/read-only；外部业务任务不在 v1 执行。Worker 只改自己的工作区。Verifier 通过后由 Lead/人工显式合并，Worker 不得自行合并。
+Main Worker 负责子 Task 验收：读取 Task 快照、交付报告、changed files、验证结果、实际 diff 和会话事件；通过则 `accepted`，不通过则 `rework` 并生成结构化 findings/requiredChanges。Main Worker 可调用验证命令或 Verifier Worker，但不能把子 Worker 自验直接当作通过。
 
 ## 10. 依赖与版本
 
@@ -146,7 +153,7 @@ UI/intercom      展示或事件通道，不是状态真源
 - 同一 Task 同时最多一个 active Worker，claim 可追溯。
 - 每次执行都有独立 TaskRun，失败不覆盖历史。
 - 进程重启可通过 Session/transcript 恢复；paused 可恢复，cancelled 不可恢复。
-- 普通代码 Task 默认进入独立 Verification；Worker succeeded 不直接 accepted。
+- Main Worker 根据验收证据决定子 Task `accepted`；普通代码 Task 仍必须有独立验证证据，Worker 自验不能直接通过。
 - 验收拒绝进入 rework；Worktree 在验收前不进入主分支。
 - 通过验收且人工确认后才允许合并。
 - 所有状态、执行、失败和验收证据可追溯。
@@ -154,3 +161,23 @@ UI/intercom      展示或事件通道，不是状态真源
 - Default Agent 的配置根为 `~/cf-workspace/.cornfield/config.yml`；首次初始化时将旧 `~/.cornfield/agent/config.yml` 内容合并迁移到该文件，旧文件保留为备份但不再作为 default Agent 运行时真源。
 - 其他 Agent 继续使用各自 `<agentDir>/.cornfield/config.yml`；全局系统配置与 Agent 业务配置的拆分另行定义。
 - 所有通过 Agent skeleton 初始化的 agentDir 默认包含 `TODO.md` 和 `topics/`；default Agent 的 agentDir 固定为 `~/cf-workspace`。
+- 每个 Topic Package 只能手动启动一个独立 Main Worker。
+- Main Worker 可以分解、派发、调度并验收子 Task；子 Task 验收拒绝可回到 rework 并创建新的 TaskRun。
+- Main Worker 遇到关键不确定性必须进入 `waiting_user`，不能自行猜测继续。
+Package 全部 required 子 Task accepted 且 Main Worker 形成汇总后，才显示“合并到主分支”；合并仍需 Human/Lead 显式确认。
+
+## 13. 版本记录
+
+### v1.1 — Main Worker 编排模型
+
+- 每个 Topic Package 一个独立 Main Worker。
+- Main Worker 负责子 Task 分解、分配、调度、监督和验收。
+- 子 Worker 验收不通过时，由 Main Worker 生成 findings/requiredChanges，打回 rework，并安排新的 TaskRun。
+- Main Worker 手动启动；关键不确定性进入 `waiting_user`。
+- Main Worker 不能代替 Human/Lead 做高风险决策或最终合并。
+- `Verifier` 从验收责任人调整为 Main Worker 可调用的证据提供者。
+
+### v1.0 — 初始控制面定义
+
+- TODO/topic → triage → proposal → Task → TaskRun → Verification。
+- default Agent、`~/cf-workspace`、单仓库、worktree、人工派发和显式合并。

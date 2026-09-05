@@ -36,6 +36,7 @@ packages/coding-agent/src/task-control/
   verification.ts       # verifier lifecycle
   recovery.ts           # resume/stale inspection; no auto reclaim
   index.ts              # public exports
+  main-worker.ts        # Topic Package Main Worker lifecycle, decomposition, scheduling, supervision, acceptance
 ```
 
 CLI/TUI/Web adapters should depend on the domain/store interfaces, not SQL. The first implementation can expose CLI/SDK operations before adding a visual board.
@@ -55,14 +56,15 @@ export type TaskStatus =
   | "running" | "review" | "rework" | "paused" | "stale" | "accepted"
   | "rejected" | "cancelled";
 
-export type TaskRunStatus = "queued" | "starting" | "running" | "succeeded" | "failed" | "timeout" | "cancelled";
+export type TaskRunStatus = "queued" | "starting" | "running" | "waiting_user" | "submitted" | "failed" | "timeout" | "cancelled";
 export type VerificationStatus = "unverified" | "verifying" | "passed" | "rejected";
 export type DependencyType = "blocks" | "informs";
 export type WorkspacePolicy = "shared" | "worktree" | "none";
 export type Priority = "P0" | "P1" | "P2" | "P3";
 ```
+export type MainWorkerStatus = "queued" | "starting" | "decomposing" | "dispatching" | "supervising" | "waiting_user" | "package_review" | "package_accepted" | "failed" | "cancelled";
 
-TaskSpec must include stable `taskId`, title, kind=`code`, `agentId` (v1 fixed to `default`), bound repository root and base revision, priority, source references, `sourceRevision`, `taskRevision`, `specSnapshot`, workspace policy, dependencies, completion contract, and audit timestamps. TaskRun must include taskId, attempt, session/process references, resolved cwd, effective model snapshot, status, timestamps, worktree path, structured result, and error. Verification must include taskId/runId, verifier identity, checks, evidence, status, and decision timestamps.
+TaskSpec must include stable `taskId`, title, kind=`code`, `topicPackageId`, `agentId` (v1 fixed to `default`), bound repository root and base revision, priority, source references, `sourceRevision`, `taskRevision`, `specSnapshot`, workspace policy, dependencies, completion contract, and audit timestamps. Each Topic Package has exactly one Main Worker record and one Main Worker Session. TaskRun must include taskId, attempt, session/process references, resolved cwd, effective model snapshot, status, timestamps, worktree path, structured result, and error. Verification records are evidence consumed by Main Worker; Main Worker owns the child Task acceptance decision. Verification must include taskId/runId, verifier identity, checks, evidence, status, and decision timestamps.
 
 Do not add Task-level permissions, deadline, budget, network, or multi-repository fields in v1.
 
@@ -154,7 +156,28 @@ CREATE TABLE task_events (
   payload_json TEXT NOT NULL,
   actor TEXT NOT NULL,
   created_at INTEGER NOT NULL
-);
+ );
+CREATE TABLE task_packages (
+  id TEXT PRIMARY KEY,
+  topic_id TEXT NOT NULL REFERENCES source_items(id),
+  revision INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  main_worker_session_id TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+ );
+CREATE TABLE main_workers (
+  id TEXT PRIMARY KEY,
+  task_package_id TEXT NOT NULL REFERENCES task_packages(id),
+  agent_id TEXT NOT NULL CHECK (agent_id = 'default'),
+  session_id TEXT,
+  process_id INTEGER,
+  status TEXT NOT NULL,
+  result_json TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  UNIQUE(task_package_id)
+ );
 ```
 
 All status writes occur in transactions that validate the transition and append an event. Claim must use a conditional update (`status='ready'`) so two callers cannot claim the same Task. History rows are append-only; no destructive update of Run or Verification facts.
@@ -235,7 +258,7 @@ Heartbeat writes are periodic updates to the active Run/claim record. Lease expi
 
 ## 9. Verification and merge boundary
 
-`verification.ts` starts a Verification only after TaskRun `succeeded` and Task enters `review`. Ordinary code Tasks use an independent verifier by default; high-risk Tasks require additional Human/Lead approval. Verifier checks the Task snapshot and the actual worktree, records command/evidence results, and may only transition to `passed` or `rejected`.
+`verification.ts` provides checks and evidence to Main Worker after a child TaskRun is submitted. Main Worker owns the child acceptance decision: it reads the Task snapshot, Worker report, changed files, verification evidence, diff and session events; pass transitions the child to `accepted`, while rejection creates structured `findings`/`requiredChanges` and transitions it to `rework`. High-risk Package decisions still require Human/Lead approval.
 
 `passed` transitions Task to `accepted`; `rejected` transitions Task to `rework`. Merge is a separate explicit Lead/Human operation after accepted. Worker processes have no merge authority in the control-plane API.
 
@@ -255,6 +278,7 @@ Targeted tests must cover:
 - proposal validation and atomic batch creation;
 - every legal and illegal status transition;
 - concurrent claim allowing exactly one winner;
+- Main Worker lifecycle, decomposition, child dispatch, supervision, waiting_user, acceptance, rework and package summary.
 - blocks vs informs dependency semantics;
 - one active Run invariant and sequential retry history;
 - structured report validation;
@@ -276,6 +300,26 @@ Do not use `mock.module()`. Use real storage and `vi.spyOn` only for narrow runt
 6. TaskRun/session bridge and structured result persistence.
 7. Verification and merge gate.
 8. Recovery/stale inspection.
-9. CLI/read-only projection, then UI.
+9. Main Worker lifecycle, child dispatch, acceptance and package summary.
+10. CLI/read-only projection, then UI.
 
 Before modifying any existing function/class, run references and GitNexus impact analysis; before commit run `detect_changes`. Existing TaskTool remains unchanged until a separate adapter seam is proven necessary.
+
+`acceptProposal` atomically creates one Task Package, its Main Worker record, all child Tasks, and dependency edges; partial creation is forbidden. `startMainWorker(packageId)` is a Human/Lead command; it creates the independent Main Worker Session but does not auto-start child Workers until the Main Worker dispatches them.
+
+`startMainWorker(packageId)` creates a new independent Main Worker Session/process bound to the approved Task Package. Main Worker receives the package snapshot, decomposes and dispatches child Tasks, monitors their TaskRuns, handles `waiting_user`/`blocked`, and owns child acceptance. A child rejection produces structured `findings`/`requiredChanges`, transitions the child to `rework`, and schedules a later TaskRun; it does not mutate the approved package contract.
+
+- Main Worker package status and child acceptance decisions are persisted independently from child TaskRun status.
+- A Main Worker cannot start before explicit Human/Lead command.
+- `waiting_user` is a normal resumable Main Worker/TaskRun state, not an execution failure.
+
+## 14. 版本记录
+
+### v1.1 — Main Worker 编排模型
+
+- 每个 Topic Package 一个独立 Main Worker。
+- Main Worker 负责子 Task 分解、分配、调度、监督和验收。
+- 子 Worker 验收不通过时，由 Main Worker 生成 findings/requiredChanges，打回 rework，并安排新的 TaskRun。
+- Main Worker 手动启动；关键不确定性进入 `waiting_user`。
+- Main Worker 不能代替 Human/Lead 做高风险决策或最终合并。
+- Verifier 从验收责任人调整为 Main Worker 可调用的证据提供者。
