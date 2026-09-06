@@ -1,4 +1,4 @@
-import { BarChart3, ChevronRight, MessageSquare, Play, Search, Stethoscope, Activity } from "lucide-react";
+import { Activity, BarChart3, ChevronRight, MessageSquare, Play, Search, Stethoscope } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { DiagnosisAggregationDto } from "../../lib/pi-client-api";
@@ -116,7 +116,8 @@ export function RecordsView(): React.JSX.Element {
 			const { reports } = await store.listDiagnosisReports();
 			const map = new Map<string, DiagReport>();
 			for (const r of reports) {
-				if (r.sessionFile) map.set(r.sessionFile, { reportId: r.reportId, sessionId: r.sessionId, severity: r.severity });
+				if (r.sessionFile)
+					map.set(r.sessionFile, { reportId: r.reportId, sessionId: r.sessionId, severity: r.severity });
 			}
 			setDiagReports(map);
 		} catch {}
@@ -352,7 +353,7 @@ export function RecordsView(): React.JSX.Element {
 																	state: { sessionFile: row.sessionFile, name: row.name },
 																});
 															}
-													  }
+														}
 													: undefined
 											}
 										/>
@@ -713,7 +714,11 @@ function StatusBadge({ status, onClick }: { status: RecordStatus; onClick?: () =
 	const label = recordStatusLabel(status);
 	if (onClick) {
 		return (
-			<button type="button" className={`${cls} w-[56px] shrink-0 cursor-pointer text-center transition-colors hover:opacity-80`} onClick={onClick}>
+			<button
+				type="button"
+				className={`${cls} w-[56px] shrink-0 cursor-pointer text-center transition-colors hover:opacity-80`}
+				onClick={onClick}
+			>
 				{label}
 			</button>
 		);
