@@ -461,9 +461,18 @@ Each package has its own `packages/*/CHANGELOG.md`. Format under `## [Unreleased
 
 1. Add entries to `## [Unreleased]` in affected `packages/*/CHANGELOG.md`.
 2. Run `bun scripts/release.ts X.Y.Z` (must be on `main`, clean tree, version > latest tag).
-3. Script: bumps all `package.json` + root catalog `@oh-my-pi/*` + `Cargo.toml`, finalizes CHANGELOGs (`## [Unreleased]` → `## [X.Y.Z] - YYYY-MM-DD`), runs `bun run check`, commits `chore: bump version to X.Y.Z`, tags `vX.Y.Z`, pushes.
-4. CI builds natives + binaries, creates GitHub Release, publishes 7 packages to npm.
-5. `bun scripts/release.ts watch` — polls CI status, tails failed job logs.
+3. Script: verifies the latest `main` CI run is green, bumps all `package.json` + root catalog `@oh-my-pi/*` + `Cargo.toml`, finalizes CHANGELOGs (`## [Unreleased]` → `## [X.Y.Z] - YYYY-MM-DD`), runs `bun run check`, commits `chore: bump version to X.Y.Z`, pushes `main`.
+4. **Preflight (the one-shot-release gate):** the script dispatches the full release matrix in dry-run mode (`workflow_dispatch` + `trigger_release=true` + `dry_run=true` — release_binary/release_desktop build everything, but no GitHub Release is created and nothing is published) and watches it to green. Nothing is tagged until the preflight passes, so the exact commit being tagged has already run the full 5-platform matrix once.
+5. Only then the script tags `vX.Y.Z`, pushes it, and watches the real release run to green (`bun scripts/release.ts watch` tails failed job logs). On a preflight failure nothing was tagged — fix on `main`, push, re-run. Emergency bypass: `bun scripts/release.ts X.Y.Z --skip-preflight`.
+
+**Release-time CI facts** (`.github/workflows/ci.yml`):
+- The full 5-platform native matrix (linux x64/arm64, macOS x64/arm64, Windows) runs on every main push / PR that touches Rust (`crates/`, `Cargo.toml`, `Cargo.lock`, `packages/natives/`) plus every tag / release dispatch — cross-compile breakage surfaces on the branch, not at release time. Pure TS changes only run the linux-x64 job.
+- Distribution is GitHub Releases only (binaries, natives, desktop dmg/zip/`latest-mac.yml`). The npm registry is **not** a distribution channel: no `@cornfield/*` package has ever been published (the CI publish step only runs when the `NPM_TOKEN` secret is set). Both the CLI (`cornfield update` / startup check) and the desktop updater check GitHub for new versions.
+- A failed release run (tag or manual release dispatch) notifies the DingTalk group robot via the `DINGTALK_RELEASE_WEBHOOK` repo secret (skips silently when unset).
+
+**Vendored crates** under `crates/` (excluded from the workspace, wired via `[patch.crates-io]`):
+- `brush-core-vendored` / `brush-builtins-vendored` — vendored brush shell.
+- `maudio-vendored` — maudio 0.1.14 + a one-line `c_char` cast (upstream cannot compile on c_char-unsigned targets like aarch64-linux). Sync by re-copying the crate source from crates.io and re-applying the fix documented in `crates/maudio-vendored/Cargo.toml`.
 
 ## User Data Directory
 

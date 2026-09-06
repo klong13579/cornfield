@@ -5,6 +5,13 @@
  * Usage:
  *   bun scripts/release.ts <version>   Full release (preflight, version, changelog, commit, push, watch)
  *   bun scripts/release.ts watch       Watch CI for current commit
+ *   bun scripts/release.ts <version> --skip-preflight   Skip main-CI + dry-run preflight gates (emergency only)
+ *
+ * Flow: bump → commit → push main → dry-run the full release matrix
+ * (release_binary/release_desktop build, no GitHub Release created) → tag only
+ * when the preflight is green → push tag → watch the real release run.
+ * This is what makes one-shot releases the norm: every matrix that runs at
+ * release time has already run and passed once on the exact commit being tagged.
  *
  * Example: bun scripts/release.ts 3.10.0
  */
@@ -183,7 +190,57 @@ function compareVersions(a: string, b: string): number {
 	return aPatch - bPatch;
 }
 
-async function cmdRelease(version: string): Promise<void> {
+async function assertMainCiGreen(): Promise<void> {
+	console.log("Checking latest main CI run...");
+	const out = await $`gh run list --branch main --event push --limit 1 --json status,conclusion,databaseId`.quiet().nothrow().text();
+	let run: { status: string; conclusion: string | null; databaseId: number } | undefined;
+	try {
+		const runs = JSON.parse(out) as Array<{ status: string; conclusion: string | null; databaseId: number }>;
+		run = runs[0];
+	} catch {
+		run = undefined;
+	}
+	if (!run) {
+		console.log("  No recent main push run found — continuing");
+		return;
+	}
+	if (run.status !== "completed" || run.conclusion !== "success") {
+		console.error(
+			`Error: latest main CI run #${run.databaseId} is ${run.status}/${run.conclusion ?? "unknown"}.`,
+		);
+		console.error("  Release assumes a green main. Fix and re-run (or bypass with --skip-preflight).");
+		process.exit(1);
+	}
+	console.log(`  main CI green (run #${run.databaseId})`);
+}
+
+async function commitIfDirty(message: string): Promise<void> {
+	const changed = (await git(["status", "--porcelain"]).text()).trim();
+	if (!changed) {
+		console.log("  No changes to commit (already bumped on a previous attempt)");
+		return;
+	}
+	await git(["add", "."]);
+	await git(["commit", "-m", message]);
+}
+
+async function runPreflight(version: string): Promise<boolean> {
+	console.log(`Dispatching full release matrix in dry-run mode for v${version}...`);
+	const dispatch =
+		await $`gh workflow run ci.yml --ref main -f trigger_release=true -f dry_run=true -f skip_npm=true -f release_tag=v${version}`
+			.quiet()
+			.nothrow();
+	if (dispatch.exitCode !== 0) {
+		console.error(
+			`Failed to dispatch dry-run workflow (exit ${dispatch.exitCode}). Is gh authed with workflow scope?`,
+		);
+		return false;
+	}
+	console.log("  Dry-run dispatched — watching until the full matrix finishes...");
+	return watchCI();
+}
+
+async function cmdRelease(version: string, skipPreflight: boolean): Promise<void> {
 	console.log("\n=== Release Script ===\n");
 
 	// 1. Pre-flight checks
@@ -210,6 +267,11 @@ async function cmdRelease(version: string): Promise<void> {
 		process.exit(1);
 	}
 	console.log(`  Version ${version} > ${latestTag}\n`);
+
+	// 1b. Main must be green before we build a release on top of it
+	if (!skipPreflight) {
+		await assertMainCiGreen();
+	}
 
 	// 2. Update package versions
 	console.log(`Updating package versions to ${version}…`);
@@ -290,20 +352,44 @@ async function cmdRelease(version: string): Promise<void> {
 	await $`bun run check`;
 	console.log();
 
-	// 7. Commit and tag
-	console.log("Committing and tagging...");
-	await git(["add", "."]);
-	await git(["commit", "-m", `chore: bump version to ${version}`]);
-	await git(["tag", `v${version}`]);
+	// 7. Commit + push main (no tag yet — preflight runs against the exact
+	//    commit that would be tagged, so nothing is published until the full
+	//    release matrix has already gone green once)
+	console.log("Committing version bump...");
+	await commitIfDirty(`chore: bump version to ${version}`);
 	console.log();
 
-	// 8. Push
-	console.log("Pushing to remote...");
+	console.log("Pushing main...");
 	await git(["push", "origin", "main"]);
+	console.log();
+
+	// 8. Preflight: dispatch the full release matrix in dry-run mode
+	//    (release_binary + release_desktop build everything, but the GitHub
+	//    Release is not created and npm is not published). A green preflight is
+	//    the gate for tagging — the tag push then re-runs the same matrix,
+	//    which is now expected to pass, instead of being the first place it
+	//    ever runs.
+	if (!skipPreflight) {
+		const preflightOk = await runPreflight(version);
+		if (!preflightOk) {
+			console.error("\nPreflight failed — nothing was tagged or published.");
+			console.error("Fix on main, push, then re-run:");
+			console.error(`  bun scripts/release.ts ${version}`);
+			process.exit(1);
+		}
+		console.log("\n=== Preflight green — tagging ===");
+	} else {
+		console.log("Skipping preflight (--skip-preflight)");
+	}
+	console.log();
+
+	// 9. Tag + push (triggers the real release run)
+	await git(["tag", `v${version}`]);
+	console.log(`Tagged v${version}, pushing...`);
 	await git(["push", "origin", `v${version}`]);
 	console.log();
 
-	// 9. Watch CI
+	// 10. Watch the real release run
 	console.log("Watching CI...");
 	const success = await watchCI();
 
@@ -311,7 +397,7 @@ async function cmdRelease(version: string): Promise<void> {
 		console.log(`=== Released v${version} ===`);
 	} else {
 		console.log("\nTo retry after fixing (repeat until CI passes):");
-		console.log("  git commit -m \"fix: <brief description>\"");
+		console.log('  git commit -m "fix: <brief description>"');
 		console.log("  git push origin main");
 		console.log(`  git tag -f v${version} && git push origin v${version} --force`);
 		console.log("  bun scripts/release.ts watch");
@@ -327,19 +413,23 @@ const arg = process.argv[2];
 
 if (!arg) {
 	console.error("Usage:");
-	console.error("  bun scripts/release.ts <version>   Full release");
+	console.error("  bun scripts/release.ts <version>   Full release (bump → preflight dry-run → tag → watch)");
 	console.error("  bun scripts/release.ts watch       Watch CI for current commit");
+	console.error("  bun scripts/release.ts <version> --skip-preflight   Emergency: skip main-CI + preflight gates");
 	process.exit(1);
 }
+
+const skipPreflight = process.argv.includes("--skip-preflight");
 
 if (arg === "watch") {
 	await cmdWatch();
 } else if (/^\d+\.\d+\.\d+/.test(arg)) {
-	await cmdRelease(arg);
+	await cmdRelease(arg, skipPreflight);
 } else {
 	console.error(`Unknown command or invalid version: ${arg}`);
 	console.error("Usage:");
-	console.error("  bun scripts/release.ts <version>   Full release");
+	console.error("  bun scripts/release.ts <version>   Full release (bump → preflight dry-run → tag → watch)");
 	console.error("  bun scripts/release.ts watch       Watch CI for current commit");
+	console.error("  bun scripts/release.ts <version> --skip-preflight   Emergency: skip main-CI + preflight gates");
 	process.exit(1);
 }
