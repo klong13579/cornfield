@@ -167,8 +167,17 @@ export async function runSimpleDiagnosis(
 				? `会话已中止（${totalTurns} 轮，${(totalToken / 1_000_000).toFixed(1)}M token）`
 				: `会话正常完成（${totalTurns} 轮，${(totalToken / 1_000_000).toFixed(1)}M token）`;
 
-	const dimData = buildDimData(status, totalTurns, totalToken, errors.length > 0, dims, sessionFile, summary);
 	const corrections = parseCorrections(dims.corrections);
+	const dimData = buildDimData(
+		status,
+		totalTurns,
+		totalToken,
+		errors.length > 0,
+		dims,
+		sessionFile,
+		summary,
+		corrections,
+	);
 	const md = generateMarkdownReport(
 		reportId,
 		sessionId,
@@ -197,7 +206,7 @@ export async function runSimpleDiagnosis(
 		rootCause: `会话 ${status}，${totalTurns} 轮对话，${errors.length} 个错误，${(totalToken / 1_000_000).toFixed(1)}M token`,
 		topActions: ["查看详细诊断报告", "根据故障等级决定修复优先级"],
 		dimensions: dimData,
-		corrections: parseCorrections(dims.corrections),
+		corrections,
 		reportAt: new Date().toISOString(),
 	};
 	fs.writeFileSync(summaryPath, JSON.stringify(summaryDto, null, 2), "utf8");
@@ -233,6 +242,7 @@ function buildDimData(
 	dims: Record<string, string>,
 	_sessionFile: string,
 	summary: Record<string, unknown>,
+	corrections: UserCorrectionDto[],
 ): Record<string, DimEntry> {
 	const compaction = (summary as { compactionCount?: number }).compactionCount ?? 0;
 	const totalInput = (summary as { tokens?: Record<string, number> }).tokens?.totalInput ?? 0;
@@ -375,6 +385,56 @@ function buildDimData(
 			evidence: [],
 			fix: "无需处理。",
 		},
+		// 用户纠偏维度（用户反馈信号层：规则推导，不耗 LLM）
+		corrections: buildCorrectionsDim(corrections),
+	};
+}
+
+/**
+ * 从用户纠偏记录推导「用户反馈」维度判定。
+ * 规则：
+ * - 无纠偏记录 → ok（用户未指出偏差）
+ * - 存在未解决反馈 → fail（用户指出且未被修复，交付未闭环）
+ * - 存在纠错/拒绝类反馈且已解决 → warn（过程曾被纠偏，虽已修正）
+ * - 仅澄清类且已解决 → ok（澄清是正常沟通，非交付偏差）
+ */
+function buildCorrectionsDim(corrections: UserCorrectionDto[]): DimEntry {
+	const n = corrections.length;
+	const unresolved = corrections.filter(c => !c.isResolved).length;
+	const realCorrections = corrections.filter(c => c.intent === "correction" || c.intent === "rejection").length;
+
+	let state: DimEntry["state"] = "ok";
+	if (unresolved > 0) state = "fail";
+	else if (realCorrections > 0) state = "warn";
+
+	const basis =
+		n === 0
+			? "整个会话未发现用户纠偏"
+			: unresolved > 0
+				? `${unresolved}/${n} 条用户反馈未解决（用户指出的问题未在本会话闭环）`
+				: realCorrections > 0
+					? `${realCorrections} 条纠错/拒绝已解决——过程存在偏差但已修正`
+					: "仅澄清类沟通，非交付偏差";
+
+	return {
+		state,
+		summary: n === 0 ? "无用户纠偏" : `${n} 条用户反馈，${unresolved} 条未解决`,
+		basis,
+		rows: corrections.map((c, i) => ({
+			label: `#${i + 1} 第${c.turn}轮`,
+			value: `${c.intent} · ${c.isResolved ? "已解决" : "未解决"} · ${c.userText.slice(0, 60)}`,
+		})),
+		evidence: corrections.slice(0, 3).map(c => ({
+			turn: c.turn,
+			kind: c.intent,
+			quote: c.userText.slice(0, 200),
+		})),
+		fix:
+			unresolved > 0
+				? "针对未解决的用户反馈继续修正，或显式记录为遗留事项交付用户确认"
+				: realCorrections > 0
+					? "后续收到需求先复述对齐，减少中途纠偏"
+					: "无需处理。",
 	};
 }
 

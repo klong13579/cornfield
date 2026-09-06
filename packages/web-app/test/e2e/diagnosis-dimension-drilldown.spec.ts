@@ -189,7 +189,7 @@ test("诊断大盘工具维度点击下钻 + 详情页展开", async ({ page }) 
 		await page.goto(`http://127.0.0.1:${APP_PORT}/#/records`, { waitUntil: "domcontentloaded" });
 
 		await page.getByRole("button", { name: "健康度大盘" }).click();
-		await page.getByText("6 维度失败率").waitFor({ state: "visible", timeout: 30_000 });
+		await page.getByText("诊断维度失败率").waitFor({ state: "visible", timeout: 30_000 });
 
 		const toolCard = page.getByRole("button", { name: /^工具/ }).first();
 		await toolCard.waitFor({ state: "visible", timeout: 30_000 });

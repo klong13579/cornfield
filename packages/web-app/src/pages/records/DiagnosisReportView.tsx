@@ -25,6 +25,7 @@ const DIMS = [
 	["reasoning", "推理规划"],
 	["tool", "工具调用链路"],
 	["output", "输出生成"],
+	["corrections", "用户纠偏"],
 ] as const;
 
 type DimState = "ok" | "warn" | "fail";

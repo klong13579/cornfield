@@ -9,9 +9,9 @@ import {
 	recordStatusLabel,
 	type SessionRecordSummary,
 } from "../../lib/records";
+import { DIMENSION_LABELS } from "../../lib/records-dimensions";
 import { useSessionStore } from "../../state/session-store";
 import { useSession } from "../../state/use-session";
-import { DIMENSION_LABELS } from "../../lib/records-dimensions";
 
 /** Severity → badge class mapping. */
 const severityBadgeClass: Record<string, string> = {
@@ -560,7 +560,7 @@ export function RecordsView(): React.JSX.Element {
 									{/* 左列：6 维度失败率 + 根因 TOP 10 */}
 									<div>
 										<section className="mb-6">
-											<h4 className="mb-2 section-title text-ink-faint">6 维度失败率</h4>
+											<h4 className="mb-2 section-title text-ink-faint">诊断维度失败率</h4>
 											<div className="grid grid-cols-2 gap-3">
 												{Object.entries(DIMENSION_LABELS).map(([key, label]) => {
 													const dim = aggregation.dimensionFailureRates[key];

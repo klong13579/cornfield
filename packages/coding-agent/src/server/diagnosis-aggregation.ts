@@ -49,7 +49,7 @@ export interface DiagnosisAggregationDto {
 
 // ── 常量 ──
 
-const DIMENSION_KEYS = ["meta", "performance", "intent", "reasoning", "tool", "output"] as const;
+const DIMENSION_KEYS = ["meta", "performance", "intent", "reasoning", "tool", "output", "corrections"] as const;
 
 const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS diagnosis_reports (
@@ -69,6 +69,7 @@ CREATE TABLE IF NOT EXISTS diagnosis_reports (
   dim_reasoning TEXT,
   dim_tools TEXT,
   dim_output TEXT,
+  dim_corrections TEXT,
   summary_path TEXT,
   report_path TEXT
 );
@@ -93,6 +94,12 @@ export function getAggregationDb(): Database {
 		.map(s => s.trim())
 		.filter(s => s.length > 0)) {
 		_db.exec(`${stmt};`);
+	}
+	// 老库迁移：dim_corrections 为后加列（已有库 CREATE TABLE 不会补列）
+	try {
+		_db.run("ALTER TABLE diagnosis_reports ADD COLUMN dim_corrections TEXT");
+	} catch {
+		// 列已存在（新库已建表 / 已迁移过）——幂等忽略
 	}
 	return _db;
 }
@@ -138,14 +145,15 @@ export function upsertDiagnosisReport(summary: DiagnosisSummaryDto, reportPath: 
 		const dimReason = extractDimState(summary, "reasoning");
 		const dimTools = extractDimState(summary, "tool");
 		const dimOutput = extractDimState(summary, "output");
+		const dimCorrections = extractDimState(summary, "corrections");
 
 		const stmt = db.prepare(
 			`INSERT OR REPLACE INTO diagnosis_reports
 			 (id, session_id, session_file, agent_id, severity, delivery, process, title,
 			  created_at, session_date,
-			  dim_meta, dim_performance, dim_intent, dim_reasoning, dim_tools, dim_output,
+			  dim_meta, dim_performance, dim_intent, dim_reasoning, dim_tools, dim_output, dim_corrections,
 			  summary_path, report_path)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		);
 		stmt.run(
 			summary.reportId,
@@ -164,6 +172,7 @@ export function upsertDiagnosisReport(summary: DiagnosisSummaryDto, reportPath: 
 			dimReason,
 			dimTools,
 			dimOutput,
+			dimCorrections,
 			null, // summary_path — 由调用方填写
 			reportPath,
 		);
@@ -276,7 +285,7 @@ export function aggregateDiagnosis(opts: AggregationOpts = {}): DiagnosisAggrega
 		const dimensionReports: DiagnosisAggregationDto["dimensionReports"] = {};
 		const reportRows = db
 			.prepare(
-				`SELECT id, session_id, session_file, severity, title, created_at, dim_meta, dim_performance, dim_intent, dim_reasoning, dim_tools, dim_output FROM diagnosis_reports ${where} ORDER BY created_at DESC`,
+				`SELECT id, session_id, session_file, severity, title, created_at, dim_meta, dim_performance, dim_intent, dim_reasoning, dim_tools, dim_output, dim_corrections FROM diagnosis_reports ${where} ORDER BY created_at DESC`,
 			)
 			.all(...params) as Array<Record<string, string | null>>;
 		for (const row of reportRows) {

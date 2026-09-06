@@ -2,7 +2,7 @@
  * 六维诊断共享常量 —— RecordsView 大盘与维度聚合页共用，避免 label/order 双份漂移。
  */
 
-export const DIMENSION_ORDER = ["meta", "performance", "intent", "reasoning", "tool", "output"] as const;
+export const DIMENSION_ORDER = ["meta", "performance", "intent", "reasoning", "tool", "output", "corrections"] as const;
 
 export type DimensionKey = (typeof DIMENSION_ORDER)[number];
 
@@ -13,6 +13,7 @@ export const DIMENSION_LABELS: Record<string, string> = {
 	reasoning: "推理",
 	tool: "工具",
 	output: "输出",
+	corrections: "用户纠偏",
 };
 
 /** 维度判定状态 → 语义文案。 */
