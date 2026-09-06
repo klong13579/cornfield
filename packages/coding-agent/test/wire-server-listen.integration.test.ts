@@ -174,10 +174,12 @@ describe("listen_list（隔离根）", () => {
 			const r = res.result as { text: string; path: string; model: string };
 			expect(r.text.length).toBeGreaterThan(0);
 			expect(r.path).toContain("listen");
-			// 落盘 json 与返回文本一致（与 TUI /record 同格式）
+			// 落盘 json 与返回文本一致（与 TUI /record 同格式）+ 原始音频已留档
 			const saved = JSON.parse(await fsp.readFile(r.path, "utf-8")) as { version: number; text: string };
 			expect(saved.version).toBe(1);
 			expect(saved.text).toBe(r.text);
+			const audioPath = path.join(path.dirname(r.path), "audio", `${path.basename(r.path, ".json")}.wav`);
+			await expect(fsp.stat(audioPath).then(s => s.size > 0)).resolves.toBe(true);
 		},
 		300_000,
 	);
@@ -256,6 +258,13 @@ describe("listen_list（隔离根）", () => {
 			expect(r.path).toContain("listen");
 			const saved = JSON.parse(await fsp.readFile(r.path, "utf-8")) as { version: number; text: string };
 			expect(saved.text).toBe(r.text);
+			// 留档音频存在，且 listen_list 带回 audio 字段
+			const audioPath = path.join(path.dirname(r.path), "audio", `${path.basename(r.path, ".json")}.wav`);
+			await expect(fsp.stat(audioPath).then(s => s.size > 0)).resolves.toBe(true);
+			const list = await sendCommand({ type: "listen_list" });
+			expect(list.ok).toBe(true);
+			const recs = (list.result as { recordings: Array<{ name: string; audio?: string }> }).recordings;
+			expect(recs.find(x => x.name === path.basename(r.path))?.audio).toBe(`${path.basename(r.path, ".json")}.wav`);
 		},
 		300_000,
 	);

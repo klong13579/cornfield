@@ -68,6 +68,7 @@ import {
 	appendChunkedListenUpload,
 	beginChunkedListenUpload,
 	finishChunkedListenUpload,
+	getListenDir,
 	listListenRecordings,
 	saveListenText,
 	transcribeAudioWithDefaults,
@@ -681,7 +682,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 						const { text, model } = await transcribeAudioWithDefaults(tmpPath, {
 							modelRegistry: defaultModelRegistry,
 						});
-						const savedPath = await saveListenText(text, desc);
+						const savedPath = await saveListenText(text, desc, tmpPath);
 						done({ ok: true, text, path: savedPath, model });
 					} catch (err) {
 						fail(err instanceof Error ? err.message : "transcription failed");
@@ -732,7 +733,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 						const { text, model } = await transcribeAudioWithDefaults(tmpPath, {
 							modelRegistry: defaultModelRegistry,
 						});
-						const savedPath = await saveListenText(text, finished.desc);
+						const savedPath = await saveListenText(text, finished.desc, finished.path);
 						done({ ok: true, text, path: savedPath, model });
 					} catch (err) {
 						fail(err instanceof Error ? err.message : "transcription failed");
@@ -2019,6 +2020,18 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 				if (!target.ok) return new Response(target.error, { status: 400 });
 				return servePreviewFile(target.path);
 			}
+			// VOICE-D 听记音频回放：/listen-audio/<file>（listen/audio 目录内，只读，仅 .wav）。
+			// token 校验同 /preview（空 token 本地免鉴权）。
+			if (url.pathname.startsWith("/listen-audio/")) {
+				if (token !== "" && url.searchParams.get("token") !== token)
+					return new Response("unauthorized", { status: 401 });
+				const file = decodeURIComponent(url.pathname.slice("/listen-audio/".length));
+				// 拒绝路径穿越（不限制字符集——录音文件名含任意 Unicode）；剩余部分仅作 docroot 内相对名
+				if (!file || file.includes("/") || file.includes("\\") || file.includes(".."))
+					return new Response("bad request", { status: 400 });
+				if (!file.endsWith(".wav")) return new Response("bad request", { status: 400 });
+				return serveListenAudioFile(path.join(getListenDir(), "audio", file));
+			}
 			if (url.pathname !== "/ws") return new Response("not found", { status: 404 });
 			// token 为空 = 本地免鉴权（仅绑 127.0.0.1）；非空时 URL query 与 hello 帧都要校验
 			if (token !== "" && url.searchParams.get("token") !== token)
@@ -2689,6 +2702,22 @@ async function servePreviewFile(filePath: string): Promise<Response> {
 	} catch (err) {
 		if (isEnoent(err)) return new Response("not found", { status: 404 });
 		logger.warn("serve:preview-read-failed", { file: filePath, error: String(err) });
+		return new Response("internal error", { status: 500 });
+	}
+}
+
+/** 听记音频回放（/listen-audio 路由）：listen/audio 内 .wav → Response。不存在 → 404。 */
+async function serveListenAudioFile(filePath: string): Promise<Response> {
+	try {
+		const f = Bun.file(filePath);
+		const stat = await f.stat();
+		if (!stat.isFile()) return new Response("not a file", { status: 404 });
+		return new Response(f, {
+			headers: { "content-type": "audio/wav", "cache-control": "no-store" },
+		});
+	} catch (err) {
+		if (isEnoent(err)) return new Response("not found", { status: 404 });
+		logger.warn("serve:listen-audio-read-failed", { file: filePath, error: String(err) });
 		return new Response("internal error", { status: 500 });
 	}
 }

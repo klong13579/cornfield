@@ -1,9 +1,12 @@
-import { Clipboard, Download, FileText, ListTodo, Mic, Send, Square } from "lucide-react";
+import { Clipboard, Download, FileText, ListTodo, Mic, Pause, Play, Send, Square } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { Orb } from "../../components/Orb";
 import { encodeWavPcm16, WAV_TARGET_SAMPLE_RATE } from "../../lib/audio-encode";
 import type { ListenRecordingDto } from "../../lib/pi-client-api";
+import { serveHttpBase } from "../../state/pi-client-adapter";
 import { useSessionStore } from "../../state/session-store";
+import { useSession } from "../../state/use-session";
 
 /**
  * 听记（VOICE-D）—— TUI /record 的 web 前端：浏览器录音 → 16kHz PCM WAV →
@@ -66,6 +69,51 @@ export function ListenView(): React.JSX.Element {
 	/** AudioContext 实际采样率（stopCapture 后 ctx 关闭，仍可取）。 */
 	const sampleRateRef = useRef(48_000);
 
+	// ── Agent 回复回显：发送转写后监听当前会话流，新 assistant 消息就地展示 ──
+	const view = useSession();
+	const awaitingReply = useRef(false);
+	const lastAssistantIdAtSend = useRef<string>("");
+	const [agentReply, setAgentReply] = useState<{ id: string; text: string } | null>(null);
+	const lastShownReplyId = useRef<string>("");
+
+	useEffect(() => {
+		if (!awaitingReply.current) return;
+		const last = [...view.messages].reverse().find(m => m.role === "assistant" && m.text && m.text.length > 0);
+		if (!last || last.id === lastAssistantIdAtSend.current || last.id === lastShownReplyId.current) return;
+		awaitingReply.current = false;
+		lastShownReplyId.current = last.id;
+		setAgentReply({ id: last.id, text: last.text ?? "" });
+	}, [view.messages]);
+
+	// ── 音频回放（留档的原始 WAV，经 serve /listen-audio 静态路由） ──
+	const audioElRef = useRef<HTMLAudioElement | null>(null);
+	const [playingName, setPlayingName] = useState<string | null>(null);
+	const togglePlayback = (rec: ListenRecordingDto) => {
+		if (!rec.audio) return;
+		if (playingName === rec.name) {
+			audioElRef.current?.pause();
+			setPlayingName(null);
+			return;
+		}
+		audioElRef.current?.pause();
+		const { base, token } = serveHttpBase();
+		const sep = token ? "?" : "";
+		const el = new Audio(
+			`${base}/listen-audio/${encodeURIComponent(rec.audio)}${sep}token=${encodeURIComponent(token)}`,
+		);
+		el.onended = () => setPlayingName(null);
+		el.onerror = () => {
+			setPlayingName(null);
+			setError("音频回放失败：文件缺失或 serve 未运行。");
+		};
+		audioElRef.current = el;
+		setPlayingName(rec.name);
+		void el.play().catch(() => {
+			setPlayingName(null);
+			setError("音频回放失败：浏览器拒绝了自动播放。");
+		});
+	};
+
 	// 历史：挂载时拉取一次（TUI /listen 同数据）
 	useEffect(() => {
 		let cancelled = false;
@@ -83,6 +131,7 @@ export function ListenView(): React.JSX.Element {
 	useEffect(() => {
 		return () => {
 			stopCapture();
+			audioElRef.current?.pause();
 		};
 		// eslint-disable-next-line react-hooks/exhaustive-deps -- 卸载清理
 	}, []);
@@ -234,6 +283,10 @@ export function ListenView(): React.JSX.Element {
 	// ── done 操作组（历史行复用：传 rec.text 即可对旧录音二次加工）──
 	const agentPrompt = (prefix: string, text = result?.text ?? "") => {
 		if (!text.trim()) return;
+		// 回显：快照当前最后一条 assistant，之后到达的新回复就地展示
+		lastAssistantIdAtSend.current = [...view.messages].reverse().find(m => m.role === "assistant")?.id ?? "";
+		awaitingReply.current = true;
+		setAgentReply(null);
 		store.prompt(`${prefix}\n\n${text}`);
 		setNotice(`已发送给 Agent 处理（${prefix.slice(0, 12)}…）`);
 	};
@@ -403,6 +456,31 @@ export function ListenView(): React.JSX.Element {
 				</div>
 			)}
 
+			{/* Agent 回复回显卡：发送转写后，最新回复就地展示 */}
+			{agentReply && (
+				<div className="w-full page-narrow rounded-xl border border-accent/30 bg-surface-2 px-4 py-3">
+					<div className="mb-1.5 flex items-center gap-2">
+						<span className="text-[11px] font-semibold tracking-[0.08em] text-ink-faint uppercase">
+							Agent 回复
+						</span>
+						<span style={{ flex: 1 }} />
+						<Link to="/workspace" className="link text-[11px]">
+							去工作台查看完整会话
+						</Link>
+						<button
+							type="button"
+							className="rounded px-1.5 text-[11px] text-ink-faint hover:text-ink"
+							onClick={() => setAgentReply(null)}
+						>
+							关闭
+						</button>
+					</div>
+					<pre className="max-h-[200px] overflow-y-auto text-[13px] leading-relaxed whitespace-pre-wrap text-ink">
+						{agentReply.text}
+					</pre>
+				</div>
+			)}
+
 			{/* ── 历史记录（listen_list） ── */}
 			<div className="mt-4 w-full page-narrow">
 				<div className="mb-2 flex items-center gap-3">
@@ -441,6 +519,24 @@ export function ListenView(): React.JSX.Element {
 										<span className="badge neutral">whisper</span>
 									</span>
 								</span>
+								{rec.audio && (
+									<button
+										type="button"
+										className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-hairline bg-surface text-ink-muted transition-colors hover:text-ink"
+										title={playingName === rec.name ? "暂停回放" : "回放原始录音"}
+										aria-label={playingName === rec.name ? "暂停回放" : "回放原始录音"}
+										onClick={e => {
+											e.stopPropagation();
+											togglePlayback(rec);
+										}}
+									>
+										{playingName === rec.name ? (
+											<Pause size={13} strokeWidth={1.5} />
+										) : (
+											<Play size={13} strokeWidth={1.5} />
+										)}
+									</button>
+								)}
 								<button
 									type="button"
 									className="rounded border border-hairline bg-surface px-2.5 py-1 text-[11px] text-ink-muted transition-colors hover:text-ink"

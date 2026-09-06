@@ -57,6 +57,8 @@ export interface ListenRecordingDto {
 	recordedAt: string;
 	size: number;
 	text: string;
+	/** 原始音频文件名（/listen-audio/<audio>?token= 回放）；缺省 = 未留档。 */
+	audio?: string;
 }
 
 /**

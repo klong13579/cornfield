@@ -288,7 +288,7 @@ export class ListenController {
 			});
 			this.#lastUsedModel = model;
 			this.#setState("saving");
-			const savedFile = await saveListenText(text, description);
+			const savedFile = await saveListenText(text, description, tempFile);
 			this.#lastSavedPath = savedFile;
 			this.#setState("idle");
 			const modelLabel = this.#lastUsedModel ?? "";
@@ -328,7 +328,11 @@ export class ListenController {
 			});
 			this.#lastUsedModel = model;
 			this.#setState("saving");
-			const savedFile = await saveListenText(text, description ?? path.basename(filePath, path.extname(filePath)));
+			const savedFile = await saveListenText(
+				text,
+				description ?? path.basename(filePath, path.extname(filePath)),
+				filePath,
+			);
 			this.#lastSavedPath = savedFile;
 			this.#setState("idle");
 			const modelLabel = this.#lastUsedModel ?? "";

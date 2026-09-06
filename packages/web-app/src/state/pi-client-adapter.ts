@@ -126,6 +126,15 @@ function toWsUrl(config: ServeConnectionConfig): string {
 	return `${config.wsUrl}${sep}token=${encodeURIComponent(config.token)}`;
 }
 
+/** serve HTTP 基址 + token（静态路由如 /listen-audio 用）：wsUrl → http(s) 基址。 */
+export function serveHttpBase(): { base: string; token: string } {
+	const config = loadServeConfig();
+	return {
+		base: config.wsUrl.replace(/^ws(s?):/, "http$1:").replace(/\/ws\/?$/, ""),
+		token: config.token,
+	};
+}
+
 export class PiClientAdapter implements PiClient {
 	#client: WirePiClient;
 	#sessionId: string | null = null;

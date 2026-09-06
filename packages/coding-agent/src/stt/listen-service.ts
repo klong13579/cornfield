@@ -31,6 +31,8 @@ export interface ListenRecordingSummary {
 	size: number;
 	/** 转写全文。 */
 	text: string;
+	/** 原始音频文件名（listen/audio/<stem>.wav，留档后存在）；缺省 = 未留档。 */
+	audio?: string;
 }
 
 /** 单个音频的转写结果。 */
@@ -40,9 +42,20 @@ export interface TranscribeAudioResult {
 	model: string;
 }
 
-function getListenDir(): string {
+export function getListenDir(): string {
 	const base = getConfigRootDir();
 	const d = path.join(base, "listen");
+	try {
+		fs.mkdirSync(d, { recursive: true });
+	} catch {
+		/* exists */
+	}
+	return d;
+}
+
+/** 原始音频留档目录（listen/audio/），与转写 json 同名（.wav）。 */
+function getListenAudioDir(): string {
+	const d = path.join(getListenDir(), "audio");
 	try {
 		fs.mkdirSync(d, { recursive: true });
 	} catch {
@@ -167,8 +180,12 @@ export async function transcribeAudioWithDefaults(
 	return { text: joined, model };
 }
 
-/** 转写文本落盘 `~/.cornfield/listen/<buildFilename>.json`，返回绝对路径。 */
-export async function saveListenText(text: string, description?: string): Promise<string> {
+/**
+ * 转写文本落盘 `~/.cornfield/listen/<buildFilename>.json`，返回绝对路径。
+ * wavPath 提供时（TUI /record / wire 单帧 / 分帧 end 都传），原始音频拷贝留档到
+ * `listen/audio/<同名>.wav`（转写成功才留档；拷贝失败不影响文本落盘）。
+ */
+export async function saveListenText(text: string, description?: string, wavPath?: string): Promise<string> {
 	const dir = getListenDir();
 	const out = path.join(dir, buildFilename(description));
 	await fsp.writeFile(
@@ -176,6 +193,13 @@ export async function saveListenText(text: string, description?: string): Promis
 		JSON.stringify({ version: 1, recorded_at: new Date().toISOString(), text }, null, 2),
 		"utf-8",
 	);
+	if (wavPath) {
+		const stem = path.basename(out, ".json");
+		const audioOut = path.join(getListenAudioDir(), `${stem}.wav`);
+		await fsp.copyFile(wavPath, audioOut).catch(err => {
+			logger.warn("Failed to archive listen audio", { wavPath, audioOut, err: String(err) });
+		});
+	}
 	return out;
 }
 
@@ -191,12 +215,19 @@ export async function listListenRecordings(): Promise<ListenRecordingSummary[]> 
 			const raw = await fsp.readFile(full, "utf-8");
 			const data = JSON.parse(raw) as { recorded_at?: string; text?: string };
 			const stat = await fsp.stat(full);
+			const stem = name.replace(/\.json$/, "");
+			const audioPath = path.join(getListenAudioDir(), `${stem}.wav`);
+			const hasAudio = await fsp.access(audioPath).then(
+				() => true,
+				() => false,
+			);
 			recordings.push({
 				name,
 				path: full,
 				recordedAt: typeof data.recorded_at === "string" ? data.recorded_at : stat.mtime.toISOString(),
 				size: stat.size,
 				text: typeof data.text === "string" ? data.text : "",
+				...(hasAudio ? { audio: `${stem}.wav` } : {}),
 			});
 		} catch (err) {
 			logger.warn("Skipping unreadable recording", { file: name, err: String(err) });
