@@ -279,7 +279,15 @@ try {
 		await installBinary(builtAddonPath, canonicalAddonPath);
 	}
 
-	await installGeneratedBindings(buildOutputDir);
+	// Cross builds (e.g. linux-arm64 from a macOS host) skip the generated
+	// index.d.ts/index.js install: napi emits the *target* platform's docs there
+	// (e.g. the AudioVoiceSession stub on linux), which would clobber the
+	// repo-tracked host-platform declarations. The .node artifact is what a
+	// cross build produces; type declarations are platform-agnostic and already
+	// tracked. Host builds keep updating them (generateEnumExports depends on it).
+	if (!isCrossCompile) {
+		await installGeneratedBindings(buildOutputDir);
+	}
 
 	await generateEnumExports();
 

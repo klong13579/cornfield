@@ -129,22 +129,29 @@ libc = "0.2"
 # darwin builds with host Xcode (libclang available), so bindgen is fine here;
 # the hermetic zig/musl/windows toolchains keep the bindgen-free pregen path,
 # whose bindings are correct for those platforms.
-# On Linux ARM64, the pre-generated bindings have a c_char type mismatch
-# (i8 vs u8) that breaks compilation; regenerate with bindgen to get the
-# correct ARM64 AAPCS ABI (char = unsigned char = u8).
+# macOS only: objc2/block2 are used by the audio_vpio.rs
+# `#[cfg(target_os = "macos")]` module and MUST NOT be compiled on Linux —
+# objc2 hard-fails with a compile_error! on non-Apple targets. The `full`
+# feature activates `dep:objc2`/`dep:block2` on every platform; keeping them in
+# a macos-only target block makes that activation a no-op on Linux (Cargo
+# ignores a feature reference when the optional dep is not declared for the
+# target).
 #
-# objc2/block2 are macOS-only (audio_vpio.rs `#[cfg(target_os = "macos")]`
-# module) and MUST NOT be compiled on Linux — objc2 hard-fails with a
-# compile_error! on non-Apple targets. The `full` feature activates
-# `dep:objc2`/`dep:block2` on every platform; keeping them in a macos-only
-# target block makes that activation a no-op on Linux (Cargo ignores a
-# feature reference when the optional dep is not declared for the target).
-[target.'cfg(any(target_os = "macos", all(target_os = "linux", target_arch = "aarch64")))'.dependencies]
-maudio = { version = "0.1.6", features = ["generate-bindings"], optional = true }
-
+# maudio on macOS regenerates miniaudio bindings with bindgen (the pregen
+# `unix.rs` is Linux-shaped and omits the CoreAudio backend members). Linux
+# ARM64 uses maudio-sys's pregenerated aarch64-unknown-linux-gnu bindings
+# (no generate-bindings): bindgen there would need a cross clang with an
+# aarch64-linux sysroot (pthread.h etc.), which is not available on macOS
+# hosts — the local linux-arm64 cross-build would fail before compiling
+# anything. The pregen bindings are equivalent (core::ffi::c_char, resolved
+# to u8 on aarch64 by the Rust target).
 [target.'cfg(target_os = "macos")'.dependencies]
+maudio = { version = "0.1.6", features = ["generate-bindings"], optional = true }
 objc2 = { version = "0.6", optional = true }
 block2 = { version = "0.6", optional = true }
+
+[target.'cfg(all(target_os = "linux", target_arch = "aarch64"))'.dependencies]
+maudio = { version = "0.1.6", optional = true }
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.55"
