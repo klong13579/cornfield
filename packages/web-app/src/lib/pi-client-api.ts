@@ -168,6 +168,10 @@ export interface DiagnosisSummaryDto {
 export interface DiagnosisAggregationDto {
 	totalSessions: number;
 	severityDistribution: Record<string, number>;
+	dimensionReports?: Record<
+		string,
+		Array<{ reportId: string; sessionId: string; sessionFile: string; severity: string; title: string }>
+	>;
 	dimensionFailureRates: Record<string, { ok: number; warn: number; fail: number; failRate: number }>;
 	deliveryDistribution: Record<string, number>;
 	processDistribution: Record<string, number>;

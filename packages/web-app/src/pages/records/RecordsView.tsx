@@ -565,8 +565,27 @@ export function RecordsView(): React.JSX.Element {
 													if (!dim) return null;
 													const total = dim.ok + dim.warn + dim.fail;
 													return (
-														<div key={key} className="rounded-lg border border-hairline bg-surface p-3">
-															<div className="flex items-center justify-between mb-2">
+														<button
+															type="button"
+															key={key}
+															className="w-full rounded-lg border border-hairline bg-surface p-3 text-left transition-colors hover:border-accent/50 hover:bg-surface-2"
+															onClick={() => {
+																const reports = aggregation.dimensionReports?.[key] ?? [];
+																const report =
+																	reports.find(r => r.severity === "P0" || r.severity === "P1") ??
+																	reports[0];
+																if (!report) return;
+																navigate(`/records/${report.sessionId}/diagnosis`, {
+																	state: { reportId: report.reportId },
+																});
+															}}
+															title={
+																aggregation.dimensionReports?.[key]?.length
+																	? `查看${label}维度报告`
+																	: `暂无${label}维度报告`
+															}
+														>
+															<div className="mb-2 flex items-center justify-between">
 																<span className="text-[13px] font-medium text-ink">{label}</span>
 																<span
 																	className={`text-[12px] font-medium ${dim.failRate > 0.3 ? "text-danger" : dim.failRate > 0.1 ? "text-warning" : "text-success"}`}
@@ -574,26 +593,26 @@ export function RecordsView(): React.JSX.Element {
 																	{(dim.failRate * 100).toFixed(0)}% 失败
 																</span>
 															</div>
-															<div className="flex h-2 rounded-full bg-surface-3 overflow-hidden">
+															<div className="flex h-2 overflow-hidden rounded-full bg-surface-3">
 																<div
 																	className="bg-success transition-all"
-																	style={{ width: `${(dim.ok / total) * 100}%` }}
+																	style={{ width: `${total > 0 ? (dim.ok / total) * 100 : 0}%` }}
 																/>
 																<div
 																	className="bg-warning transition-all"
-																	style={{ width: `${(dim.warn / total) * 100}%` }}
+																	style={{ width: `${total > 0 ? (dim.warn / total) * 100 : 0}%` }}
 																/>
 																<div
 																	className="bg-danger transition-all"
-																	style={{ width: `${(dim.fail / total) * 100}%` }}
+																	style={{ width: `${total > 0 ? (dim.fail / total) * 100 : 0}%` }}
 																/>
 															</div>
 															<div className="mt-1.5 flex gap-3 text-[11px] text-ink-faint">
-																<span>✅ {dim.ok}</span>
-																<span>⚠️ {dim.warn}</span>
-																<span>❌ {dim.fail}</span>
+																<span>正常 {dim.ok}</span>
+																<span>警告 {dim.warn}</span>
+																<span>失败 {dim.fail}</span>
 															</div>
-														</div>
+														</button>
 													);
 												})}
 											</div>

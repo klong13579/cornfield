@@ -28,6 +28,10 @@ export interface DimAggregationDto {
 export interface DiagnosisAggregationDto {
 	totalSessions: number;
 	severityDistribution: { P0: number; P1: number; P2: number; P3: number };
+	dimensionReports?: Record<
+		string,
+		Array<{ reportId: string; sessionId: string; sessionFile: string; severity: string; title: string }>
+	>;
 	dimensionFailureRates: Record<string, DimAggregationDto>;
 	deliveryDistribution: Record<string, number>;
 	processDistribution: Record<string, number>;
@@ -177,6 +181,8 @@ export function aggregateDiagnosis(opts: AggregationOpts = {}): DiagnosisAggrega
 	const empty = (): DiagnosisAggregationDto => ({
 		totalSessions: 0,
 		severityDistribution: { P0: 0, P1: 0, P2: 0, P3: 0 },
+		dimensionReports: {},
+
 		dimensionFailureRates: {},
 		deliveryDistribution: {},
 		processDistribution: {},
@@ -255,6 +261,30 @@ export function aggregateDiagnosis(opts: AggregationOpts = {}): DiagnosisAggrega
 			};
 		}
 
+		// ── dimensionReports：支持从聚合维度卡片下钻到具体报告 ──
+
+		const dimensionReports: DiagnosisAggregationDto["dimensionReports"] = {};
+		const reportRows = db
+			.prepare(
+				`SELECT id, session_id, session_file, severity, title, dim_meta, dim_performance, dim_intent, dim_reasoning, dim_tools, dim_output FROM diagnosis_reports ${where} ORDER BY created_at DESC`,
+			)
+			.all(...params) as Array<Record<string, string | null>>;
+		for (const row of reportRows) {
+			for (const dim of DIMENSION_KEYS) {
+				const state = row[dim === "tool" ? "dim_tools" : `dim_${dim}`];
+				if (state !== "ok" && state !== "warn" && state !== "fail") continue;
+				const reports = dimensionReports[dim] ?? [];
+				reports.push({
+					reportId: row.id ?? "",
+					sessionId: row.session_id ?? "",
+					sessionFile: row.session_file ?? "",
+					severity: row.severity ?? "P3",
+					title: row.title ?? "诊断报告",
+				});
+				dimensionReports[dim] = reports;
+			}
+		}
+
 		// ── deliveryDistribution ──
 		const deliveryRows = db
 			.prepare(
@@ -325,6 +355,8 @@ export function aggregateDiagnosis(opts: AggregationOpts = {}): DiagnosisAggrega
 			totalSessions,
 			severityDistribution,
 			dimensionFailureRates,
+			dimensionReports,
+
 			deliveryDistribution,
 			processDistribution,
 			topIssues,

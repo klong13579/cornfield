@@ -106,6 +106,11 @@ export interface DiagnosisAggregationDto {
 	/** 故障等级分布。 */
 	severityDistribution: Record<string, number>;
 	/** 6 维度失败率（各维度 ok/warn/fail 计数 + failRate）。 */
+	/** 按维度下钻的报告索引。 */
+	dimensionReports?: Record<
+		string,
+		Array<{ reportId: string; sessionId: string; sessionFile: string; severity: string; title: string }>
+	>;
 	dimensionFailureRates: Record<string, { ok: number; warn: number; fail: number; failRate: number }>;
 	/** 交付物质量分布。 */
 	deliveryDistribution: Record<string, number>;
