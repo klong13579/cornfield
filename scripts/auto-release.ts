@@ -20,15 +20,11 @@ import * as path from "node:path";
 import { $, Glob } from "bun";
 
 const repoRoot = process.cwd();
+const isDryRun = process.argv.includes("--dry-run");
 const changelogGlob = new Glob("packages/*/CHANGELOG.md");
 const packageJsonGlob = new Glob("packages/*/package.json");
-const cargoTomlGlob = new Glob("crates/*/Cargo.toml");
 
 const token = process.env.GH_TOKEN;
-if (!token) {
-	console.error("GH_TOKEN (PAT with contents: write) is required — push must re-trigger workflows.");
-	process.exit(1);
-}
 
 function git(args: readonly string[]) {
 	return $`git -c core.fsmonitor=false ${args}`;
@@ -142,6 +138,14 @@ console.log("Finalizing CHANGELOGs…");
 await updateChangelogsForRelease(nextVersion);
 
 // 6. Commit + push main, then tag + push
+if (isDryRun) {
+	console.log(`DRY-RUN: would commit, push main and tag v${nextVersion} — leaving working tree modified for inspection.`);
+	process.exit(0);
+}
+if (!token) {
+	console.error("GH_TOKEN (PAT with contents: write) is required — push must re-trigger workflows.");
+	process.exit(1);
+}
 console.log("Committing…");
 await git(["add", "."]);
 await git(["commit", "-m", `chore: auto bump version to ${nextVersion} (${isWeeklyMinor ? "weekly minor" : "daily patch"})`]);
