@@ -41,6 +41,7 @@ packages/ai/test/.temp-images/
 
 # Project specific
 !.cornfield/
+.cornfield/workspace.json
 .cornfield/plugins/
 .cornfield/self-evolution/
 .cornfield/design-refs/
