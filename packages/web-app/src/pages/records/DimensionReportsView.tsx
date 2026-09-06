@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import type { DiagnosisAggregationDto } from "../../lib/pi-client-api";
-import { DIMENSION_LABELS, DIM_STATE_BADGE, DIM_STATE_LABELS, dimensionLabel } from "../../lib/records-dimensions";
+import { DIM_STATE_BADGE, DIM_STATE_LABELS, DIMENSION_LABELS, dimensionLabel } from "../../lib/records-dimensions";
 import { useSessionStore } from "../../state/session-store";
 import { useSession } from "../../state/use-session";
 
