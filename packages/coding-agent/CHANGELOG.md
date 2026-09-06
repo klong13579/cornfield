@@ -6,6 +6,10 @@
 
 - **听记分帧上传协议 + 原始音频留档 + 回放路由**（`src/server/wire-server.ts`, `src/stt/listen-service.ts`, `src/stt/listen-controller.ts`, `src/modes/wire-stdio.ts`）: 新增 record_transcribe_begin/chunk/end 三条 wire 命令——长录音 base64 超 Bun WS 单帧 16MB 上限（实测 24MB 断连 code 1006）时前端分帧上传，服务端流式落盘临时 WAV 后走与单帧命令相同的转写管线；chunk seq 严格递增校验、256MB 硬顶、15min TTL 回收半途而废的上传。转写成功的原始 WAV 拷贝留档到 `listen/audio/<同名>.wav`（TUI /record、外部文件转写、wire 单帧/分帧同行为）；listen_list 返回 audio 字段；新增 GET /listen-audio/<file> 鉴权静态路由（token 同 /preview，拒绝路径穿越）供前端回放。
 
+### Fixed
+
+- **`cornfield update` / 启动版本检查源 npm → GitHub Releases**（`src/cli/update-cli.ts`, `src/main.ts`）: npm registry 从未发布过任何 `@cornfield/*` 包（CI 的 publish step 因无 `NPM_TOKEN` 一直静默跳过），旧的 registry 检查源恒 404——手动 `cornfield update` 必报 `Failed to check for updates: Not Found`，启动自动检查永远查不到新版本（v1.0.0/v1.1.0 期间 CLI 升级链路一直是死的）。改为 GitHub Releases API（`releases/latest`），与桌面 electron-updater 同源；`main.ts` 启动检查复用同一解析函数。顺带删除依赖不存在 npm 包的 bun 全局更新分支与不支持 pre-release 的手写版本比较（统一 `Bun.semver`）。
+
 ## [1.1.0] - 2026-09-05
 
 ### Added
