@@ -16,7 +16,7 @@
     },
     "packages/agent": {
       "name": "@cornfield/agent",
-      "version": "1.1.0",
+      "version": "1.1.1",
       "dependencies": {
         "@cornfield/ai": "catalog:",
         "@cornfield/natives": "catalog:",
@@ -29,7 +29,7 @@
     },
     "packages/ai": {
       "name": "@cornfield/ai",
-      "version": "1.1.0",
+      "version": "1.1.1",
       "bin": {
         "cornfield-ai": "./src/cli.ts",
       },
@@ -56,7 +56,7 @@
     },
     "packages/coding-agent": {
       "name": "@cornfield/coding-agent",
-      "version": "1.1.0",
+      "version": "1.1.1",
       "bin": {
         "cornfield": "src/cli.ts",
       },
@@ -96,14 +96,14 @@
     },
     "packages/cognitive-coordination": {
       "name": "@cornfield/cognitive-coordination",
-      "version": "1.1.0",
+      "version": "1.1.1",
       "dependencies": {
         "@cornfield/utils": "workspace:*",
       },
     },
     "packages/desktop": {
       "name": "@cornfield/desktop",
-      "version": "1.1.0",
+      "version": "1.1.1",
       "dependencies": {
         "electron-updater": "^6.8.9",
       },
@@ -120,7 +120,7 @@
     },
     "packages/gateway": {
       "name": "@cornfield/gateway",
-      "version": "1.1.0",
+      "version": "1.1.1",
       "dependencies": {
         "@cornfield/coding-agent": "workspace:*",
         "@cornfield/utils": "catalog:",
@@ -139,7 +139,7 @@
     },
     "packages/moa-extension": {
       "name": "@cornfield/moa-extension",
-      "version": "1.1.0",
+      "version": "1.1.1",
       "dependencies": {
         "@cornfield/utils": "workspace:*",
       },
@@ -152,7 +152,7 @@
     },
     "packages/natives": {
       "name": "@cornfield/natives",
-      "version": "1.1.0",
+      "version": "1.1.1",
       "devDependencies": {
         "@napi-rs/cli": "catalog:",
         "@types/bun": "catalog:",
@@ -160,7 +160,7 @@
     },
     "packages/pi-client": {
       "name": "@cornfield/client",
-      "version": "1.1.0",
+      "version": "1.1.1",
       "dependencies": {
         "@cornfield/wire": "catalog:",
       },
@@ -170,7 +170,7 @@
     },
     "packages/pi-wire": {
       "name": "@cornfield/wire",
-      "version": "1.1.0",
+      "version": "1.1.1",
       "dependencies": {
         "@cornfield/agent": "catalog:",
         "@cornfield/ai": "catalog:",
@@ -181,7 +181,7 @@
     },
     "packages/self-evolution": {
       "name": "@cornfield/self-evolution",
-      "version": "1.1.0",
+      "version": "1.1.1",
       "dependencies": {
         "@cornfield/ai": "catalog:",
         "@cornfield/coding-agent": "catalog:",
@@ -195,7 +195,7 @@
     },
     "packages/stats": {
       "name": "@cornfield/stats",
-      "version": "1.1.0",
+      "version": "1.1.1",
       "bin": {
         "cornfield-stats": "./src/index.ts",
       },
@@ -220,7 +220,7 @@
     },
     "packages/tui": {
       "name": "@cornfield/tui",
-      "version": "1.1.0",
+      "version": "1.1.1",
       "dependencies": {
         "@cornfield/natives": "catalog:",
         "@cornfield/utils": "catalog:",
@@ -260,7 +260,7 @@
     },
     "packages/utils": {
       "name": "@cornfield/utils",
-      "version": "1.1.0",
+      "version": "1.1.1",
       "dependencies": {
         "beautiful-mermaid": "catalog:",
         "handlebars": "catalog:",
@@ -324,16 +324,16 @@
     "@biomejs/biome": "^2.4.13",
     "@bufbuild/protobuf": "^2.12.0",
     "@bufbuild/protoc-gen-es": "^2.12.0",
-    "@cornfield/agent": "1.1.0",
-    "@cornfield/ai": "1.1.0",
-    "@cornfield/client": "1.1.0",
-    "@cornfield/coding-agent": "1.1.0",
-    "@cornfield/natives": "1.1.0",
-    "@cornfield/self-evolution": "1.1.0",
-    "@cornfield/stats": "1.1.0",
-    "@cornfield/tui": "1.1.0",
-    "@cornfield/utils": "1.1.0",
-    "@cornfield/wire": "1.1.0",
+    "@cornfield/agent": "1.1.1",
+    "@cornfield/ai": "1.1.1",
+    "@cornfield/client": "1.1.1",
+    "@cornfield/coding-agent": "1.1.1",
+    "@cornfield/natives": "1.1.1",
+    "@cornfield/self-evolution": "1.1.1",
+    "@cornfield/stats": "1.1.1",
+    "@cornfield/tui": "1.1.1",
+    "@cornfield/utils": "1.1.1",
+    "@cornfield/wire": "1.1.1",
     "@google/genai": "^1.50.1",
     "@mozilla/readability": "^0.6.0",
     "@napi-rs/cli": "3.6.2",
@@ -620,7 +620,7 @@
 
     "@iconify/types": ["@iconify/types@2.0.0", "", {}, "sha512-+wluvCrRhXrhyOmRDJ3q8mux9JkKy5SJ/v8ol2tu4FVjyYvtEzkc/3pK15ET6RKg4b4w4BmTk1+gsCUhf21Ykg=="],
 
-    "@iconify/utils": ["@iconify/utils@3.1.5", "", { "dependencies": { "@antfu/install-pkg": "^2.0.1", "@iconify/types": "^2.0.0", "import-meta-resolve": "^4.2.0" } }, "sha512-nT+AWyh5caHY6xa0PdLXpUooIz6l7qsT+adqsCTYBfbdn5Q18VrWs2fvuTa7KEoJnPBfEPqWkmAIht0EHtCi2A=="],
+    "@iconify/utils": ["@iconify/utils@3.1.6", "", { "dependencies": { "@antfu/install-pkg": "^2.0.1", "@iconify/types": "^2.0.0", "import-meta-resolve": "^4.2.0" } }, "sha512-9n9RQsMcfgXa8aXrHIMGAFwlm+YpY/HxRqBgCQzeMMimdOBA7hvfqDdWE/Zg5sr5SinaY78zYTPkSfG7Sy+moA=="],
 
     "@inquirer/ansi": ["@inquirer/ansi@2.0.8", "", {}, "sha512-WpQM+Ti6Z40EFwwt+uL2p4UabT+W179zHp6HhLVOzfbwnVn05IPO/eXIZXGNqcT1jbQ15SujNLzQ39k4QPPxBQ=="],
 
@@ -1394,7 +1394,7 @@
 
     "domhandler": ["domhandler@6.0.1", "", { "dependencies": { "domelementtype": "^3.0.0" } }, "sha512-gYzvtM72ZtxQO0T048kd6HWSbbGCNOUwcnfQ01cqIJ4X2IYKFFHZ5mKvrQETcFXxsRObZulDaKmy//R7TPtsBg=="],
 
-    "dompurify": ["dompurify@3.4.14", "", { "optionalDependencies": { "@types/trusted-types": "^2.0.7" } }, "sha512-dVoH9z+MY+C9IilgGCk3YfFqjLi3fChm2OiKJMzh6axrJ5qwxqWaZamgmHrpv22CN/KdbZJuGEGgfQoL00LTdg=="],
+    "dompurify": ["dompurify@3.4.15", "", { "optionalDependencies": { "@types/trusted-types": "^2.0.7" } }, "sha512-EUBjM+B+lkDE41iE82DDSCfkoPGfXx8IxFxPMjNzm/Uk4xDet77rTN9wqlxlVg71kK7XGuUMv6wUxJUwwv+Xyw=="],
 
     "domutils": ["domutils@4.0.2", "", { "dependencies": { "dom-serializer": "^3.0.0", "domelementtype": "^3.0.0", "domhandler": "^6.0.0" } }, "sha512-qI4JLRKnSzqFqr7hAlS5xQDusBCjKSEG4t4+7aNrIQMHBcsC2TGEhuyABJdYkgSewL57PNLYEiibY2iPKhKpaA=="],
 
@@ -2374,11 +2374,11 @@
 
     "@electron/osx-sign/isbinaryfile": ["isbinaryfile@4.0.10", "", {}, "sha512-iHrqe5shvBUcFbmZq9zOQHBoeOhZJu6RQGrDpBgenUm/Am+F3JM2MgQj+rK3Z601fzrL5gLZWtAPH2OBaSVcyw=="],
 
-    "@electron/universal/fs-extra": ["fs-extra@11.3.1", "", { "dependencies": { "graceful-fs": "^4.2.0", "jsonfile": "^6.0.1", "universalify": "^2.0.0" } }, "sha512-eXvGGwZ5CL17ZSwHWd3bbgk7UUpF6IFHtP57NYYakPvHOs8GDgDe5KJI36jIJzDkJ6eJjuzRA8eBQb6SkKue0g=="],
+    "@electron/universal/fs-extra": ["fs-extra@11.4.0", "", { "dependencies": { "graceful-fs": "^4.2.0", "jsonfile": "^6.0.1", "universalify": "^2.0.0" } }, "sha512-EQsFzMUJkCKGr1ePqlYADkIUmHW1s3ZXr5Yqy6wbGrfUCphpl2maM/kyOIRA2HpP3AaFQTZXD4ldjek+nccddA=="],
 
     "@electron/universal/minimatch": ["minimatch@9.0.9", "", { "dependencies": { "brace-expansion": "^2.0.2" } }, "sha512-OBwBN9AL4dqmETlpS2zasx+vTeWclWzkblfZk7KTA5j3jeOONz/tRCnZomUyvNg83wL5Zv9Ss6HMJXAgL8R2Yg=="],
 
-    "@electron/windows-sign/fs-extra": ["fs-extra@11.3.1", "", { "dependencies": { "graceful-fs": "^4.2.0", "jsonfile": "^6.0.1", "universalify": "^2.0.0" } }, "sha512-eXvGGwZ5CL17ZSwHWd3bbgk7UUpF6IFHtP57NYYakPvHOs8GDgDe5KJI36jIJzDkJ6eJjuzRA8eBQb6SkKue0g=="],
+    "@electron/windows-sign/fs-extra": ["fs-extra@11.4.0", "", { "dependencies": { "graceful-fs": "^4.2.0", "jsonfile": "^6.0.1", "universalify": "^2.0.0" } }, "sha512-EQsFzMUJkCKGr1ePqlYADkIUmHW1s3ZXr5Yqy6wbGrfUCphpl2maM/kyOIRA2HpP3AaFQTZXD4ldjek+nccddA=="],
 
     "@inquirer/core/signal-exit": ["signal-exit@4.1.0", "", {}, "sha512-bzyZ1e88w9O1iNJbKnOlvYTrWPDl46O1bG0D3XInv+9tkPrxrN8jUUTiFlDkkmKWgn1M6CfIA13SuGqOa9Korw=="],
 
