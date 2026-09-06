@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Agent 核心概念与关联关系",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "viewBox": [1200, 800]
+  },
+  "components": [
+    {"id":"agent","type":"backend","label":"Agent","sublabel":"身份 配置 记忆 模型 能力边界","pos":[420,80],"size":[260,100]},
+    {"id":"home","type":"database","label":"AgentHome","sublabel":"default: ~/cf-workspace","pos":[420,240],"size":[260,100]},
+    {"id":"board","type":"backend","label":"Board","sublabel":"Task 持久管理边界","pos":[80,420],"size":[260,100]},
+    {"id":"topic","type":"backend","label":"Topic","sublabel":"长期目标与上下文","pos":[420,420],"size":[260,100]},
+    {"id":"repo","type":"database","label":"Repository","sublabel":"代码项目 Git 基线","pos":[80,620],"size":[260,100]},
+    {"id":"workspace","type":"backend","label":"TaskRun Workspace","sublabel":"某次执行的实际工作目录","pos":[420,620],"size":[260,100]},
+    {"id":"process","type":"cloud","label":"Process","sublabel":"Agent / TaskRun 运行载体","pos":[820,240],"size":[260,100]},
+    {"id":"session","type":"messagebus","label":"Session","sublabel":"对话 工具事件 历史","pos":[820,420],"size":[260,100]}
+  ],
+  "connections": [
+    {"from":"agent","to":"home","label":"owns / loads","labelDy":24},
+    {"from":"home","to":"board","label":"hosts"},
+    {"from":"board","to":"topic","label":"organizes","labelDy":-28},
+    {"from":"topic","to":"repo","label":"Task targets"},
+    {"from":"repo","to":"workspace","label":"base to worktree","labelDy":-28},
+    {"from":"agent","to":"process","label":"runs as"},
+    {"from":"process","to":"session","label":"hosts","labelDx":48},
+    {"from":"session","to":"workspace","label":"operates in"},
+    {"from":"topic","to":"session","label":"context snapshot"}
+  ]
+}

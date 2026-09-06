@@ -4,6 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { app, BrowserWindow, ipcMain, Menu, nativeImage, Tray } from "electron";
 import electronUpdater from "electron-updater";
+import { initFileLogging, updaterLogger } from "./logger.js";
 import {
 	DEFAULT_WORKSPACE_DIR,
 	ensureSidecar,
@@ -29,6 +30,24 @@ let _tray: Tray | null = null;
 let sidecar: SidecarHandle | null = null;
 let workspaceDir: string = DEFAULT_WORKSPACE_DIR;
 let isQuitting = false;
+
+// 壳主进程文件日志：GUI 启动（Finder/Dock）时 stderr 被系统丢弃，console 输出无处可查。
+// 候选目录按序取第一个可写的；全失败退 null（仅 stderr，保持旧行为）。
+// packaged: ~/Library/Logs/CornField/main.log；dev: ~/Library/Logs/@cornfield/desktop/main.log。
+const logDirCandidates: Array<string | null> = [];
+try {
+	logDirCandidates.push(app.getPath("logs"));
+} catch {
+	// ready 前个别 path 不可得：跳过该候选。
+}
+try {
+	logDirCandidates.push(path.join(app.getPath("userData"), "logs"));
+} catch {
+	// ready 前不可得：跳过该候选。
+}
+logDirCandidates.push(null);
+initFileLogging(logDirCandidates);
+console.info(`desktop: startup v${app.getVersion()} pid=${process.pid}`);
 
 function createMainWindow(): BrowserWindow {
 	const win = new BrowserWindow({
@@ -139,6 +158,8 @@ function configureUpdater(): void {
 	// 镜像开关：大陆环境可 export CORNFIELD_UPDATE_MIRROR=https://… 切到私有 generic 源。
 	// 兼容旧名 OMP_UPDATE_MIRROR（已弃用，保留读取）。
 	const { autoUpdater } = electronUpdater;
+	// updater 内部日志（feed 检查/下载/校验失败）接入文件日志；初始化失败时退回 console（旧行为）。
+	autoUpdater.logger = updaterLogger;
 	const mirror = process.env.CORNFIELD_UPDATE_MIRROR?.trim() ?? process.env.OMP_UPDATE_MIRROR?.trim();
 	if (mirror) {
 		autoUpdater.setFeedURL({ provider: "generic", url: mirror });
@@ -345,6 +366,7 @@ exit 0
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
 
 if (!gotSingleInstanceLock) {
+	console.warn("desktop: 已有实例占用 single-instance lock，本实例退出");
 	app.quit();
 } else {
 	app.on("second-instance", () => showMainWindow());
@@ -352,6 +374,7 @@ if (!gotSingleInstanceLock) {
 	app.whenReady().then(async () => {
 		workspaceDir = resolveWorkspaceDir(undefined);
 		sidecar = await ensureSidecar({ workspaceDir, resourcesPath: process.resourcesPath });
+		console.info(`desktop: sidecar ${sidecar.state}（workspaceDir=${workspaceDir}）`);
 		setupIpc();
 		mainWindow = createMainWindow();
 		_tray = createTray();
@@ -373,6 +396,7 @@ if (!gotSingleInstanceLock) {
 	});
 
 	app.on("before-quit", () => {
+		console.info(`desktop: before-quit（isQuitting=${isQuitting}）`);
 		isQuitting = true;
 		if (sidecar) {
 			terminateSidecar(sidecar).catch(() => {});

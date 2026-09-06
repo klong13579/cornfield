@@ -22,6 +22,7 @@
 	},
 	"devDependencies": {
 		"@biomejs/biome": "catalog:",
+		"@types/bun": "catalog:",
 		"@types/node": "^24.9.0",
 		"@typescript/native-preview": "catalog:",
 		"electron": "43.4.1",
