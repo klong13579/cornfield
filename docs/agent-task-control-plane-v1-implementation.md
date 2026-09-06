@@ -1,6 +1,8 @@
 # Agent 持久任务控制面 v1：实现规格
 
-> 本文是基于当前仓库结构的 v1 实现边界。功能定义见 `docs/agent-task-control-plane-v1.md`。
+> 本文是 Agent Client 总体架构中的 Task Control Plane 子系统实现规格。上层架构、现状评审和分阶段路线见 `docs/agent-client-architecture-v1.md`。
+
+> 本规格保留代码研发试点的边界；其中 `agentId=default`、`kind=code`、Git repository/worktree 等约束不得被误读为整个 Agent Client 的长期模型。
 
 ## 1. 接入边界
 

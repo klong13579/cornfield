@@ -1,8 +1,8 @@
 # Agent 持久任务控制面 v1：功能定义
 
-## 1. 目标
+> 本文是 Agent Client 总体架构中的 Task Control Plane 子系统设计，不代表整个产品架构。总体架构见 `docs/agent-client-architecture-v1.md`。
 
-建立一个持久化 Agent 任务控制面，把研发事项从记录推进到可整理、可派发、可执行、可恢复、可验收、可追溯。
+> v1 先覆盖代码研发交付；Agent、User Model、知识库、DingTalk Observation 和跨 Agent 协作由上层架构分阶段接入。
 
 ```text
 TODO/topic → triage → proposal → Task → TaskRun → Verification → 人工合并 → 回写
