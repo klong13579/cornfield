@@ -426,6 +426,16 @@ export interface PiClient {
 	/** 听记历史（listen_list：~/.cornfield/listen/ 全部录音 json，名称倒序 + 转写全文，前端本地搜索/预览）。 */
 	listenList(): Promise<{ ok: boolean; recordings: ListenRecordingDto[] }>;
 
+	/**
+	 * 分帧转写（长录音）：base64 超 Bun WS 单帧 16MB 上限时走 begin→chunk→end。
+	 * onProgress 每帧上报累计已传帧数/总帧数，用于「上传中 x/y」提示。
+	 */
+	recordTranscribeChunked(
+		audioBase64: string,
+		desc?: string,
+		onProgress?: (sent: number, total: number) => void,
+	): Promise<{ ok: boolean; text: string; path: string; model: string; error?: string }>;
+
 	// ── MCP 服务器管理（设置页；契约命令 get_mcp_servers / set_mcp_server / remove_mcp_server / test_mcp_server，由 serve 端并行实现）──
 	/** 列出 MCP 服务器（get_mcp_servers；读 ~/.cornfield/agent/mcp.json 的 mcpServers）。 */
 	getMcpServers(): Promise<{ servers: McpServerDto[] }>;

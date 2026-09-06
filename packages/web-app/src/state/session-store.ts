@@ -774,6 +774,15 @@ export class SessionStore {
 		return this.#client.listenList();
 	}
 
+	/** 听记分帧转写（长录音；begin→chunk→end，同短连接）。 */
+	recordTranscribeChunked(
+		audioBase64: string,
+		desc?: string,
+		onProgress?: (sent: number, total: number) => void,
+	): Promise<{ ok: boolean; text: string; path: string; model: string; error?: string }> {
+		return this.#client.recordTranscribeChunked(audioBase64, desc, onProgress);
+	}
+
 	/** gateway cron 任务表（get_cron_tasks，代理到 pi-client）。 */
 	fetchCronTasks(): Promise<{ tasks: TaskRowDto[] }> {
 		return this.#client.getCronTasks();

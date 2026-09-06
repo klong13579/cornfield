@@ -349,6 +349,17 @@ export type WireExtensionCommand =
 	 */
 	| { id?: string; type: "record_transcribe"; audio: string; desc?: string }
 	/**
+	 * 听记分帧上传（VOICE-D）：长录音 base64 超 Bun WS 单帧 16MB 上限（实测 24MB 断连
+	 * code 1006），前端改走 begin → chunk(seq 严格递增，从 1 起) → end 三命令；服务端
+	 * 流式落盘临时 WAV 后走与单帧命令相同的转写管线。半途而废的上传由 TTL 定时器回收。
+	 * - begin：{ totalBytes?, desc? } → { ok:true, uploadId }
+	 * - chunk：{ uploadId, seq, data(b64) } → { ok:true, received }；乱序/超限丢弃整个上传
+	 * - end：{ uploadId } → 转写 + 落盘，响应同 record_transcribe
+	 */
+	| { id?: string; type: "record_transcribe_begin"; totalBytes?: number; desc?: string }
+	| { id?: string; type: "record_transcribe_chunk"; uploadId: string; seq: number; data: string }
+	| { id?: string; type: "record_transcribe_end"; uploadId: string }
+	/**
 	/** 听记历史（/listen 前端化）：列出 ~/.cornfield/listen/ 全部录音 json（文件名倒序），
 	 * 返回元数据 + 转写全文（前端本地搜索/预览零延迟）。
 	 * 响应 { ok:true, recordings: [{ name, path, recordedAt, size, text }] }；目录缺失 → { ok:true, recordings: [] }。

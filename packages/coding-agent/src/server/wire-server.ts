@@ -63,7 +63,15 @@ import { discoverSkills } from "../sdk";
 import type { AgentSession } from "../session/agent-session";
 import { getDefaultSessionDirName } from "../session/session-manager";
 import type { SessionStore } from "../session/session-store";
-import { listListenRecordings, saveListenText, transcribeAudioWithDefaults } from "../stt/listen-service";
+import {
+	abortChunkedListenUpload,
+	appendChunkedListenUpload,
+	beginChunkedListenUpload,
+	finishChunkedListenUpload,
+	listListenRecordings,
+	saveListenText,
+	transcribeAudioWithDefaults,
+} from "../stt/listen-service";
 import type { ToolSession } from "../tools";
 import { invalidateFsScanAfterWrite } from "../tools/fs-cache-invalidation";
 import type { TodoPhase } from "../tools/todo-write";
@@ -679,6 +687,57 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 						fail(err instanceof Error ? err.message : "transcription failed");
 					} finally {
 						await fs.rm(tmpPath, { force: true }).catch(() => {});
+					}
+					return;
+				}
+				case "record_transcribe_begin": {
+					// VOICE-D 分帧上传：长录音 base64 超 Bun WS 单帧 16MB 上限，前端按 begin→chunk→end 分帧。
+					const opts = command as { totalBytes?: unknown; desc?: unknown };
+					try {
+						const uploadId = await beginChunkedListenUpload({
+							...(typeof opts.totalBytes === "number" ? { totalBytes: opts.totalBytes } : {}),
+							...(typeof opts.desc === "string" && opts.desc ? { desc: opts.desc } : {}),
+						});
+						done({ ok: true, uploadId });
+					} catch (err) {
+						fail(err instanceof Error ? err.message : "begin upload failed");
+					}
+					return;
+				}
+				case "record_transcribe_chunk": {
+					const c = command as { uploadId?: unknown; seq?: unknown; data?: unknown };
+					if (typeof c.uploadId !== "string" || typeof c.seq !== "number" || typeof c.data !== "string") {
+						fail("uploadId, seq (number), data (base64) required");
+						return;
+					}
+					try {
+						const received = await appendChunkedListenUpload(c.uploadId, c.seq, c.data);
+						done({ ok: true, received });
+					} catch (err) {
+						await abortChunkedListenUpload(c.uploadId);
+						fail(err instanceof Error ? err.message : "chunk failed");
+					}
+					return;
+				}
+				case "record_transcribe_end": {
+					const c = command as { uploadId?: unknown };
+					if (typeof c.uploadId !== "string") {
+						fail("uploadId required");
+						return;
+					}
+					let tmpPath: string | null = null;
+					try {
+						const finished = await finishChunkedListenUpload(c.uploadId);
+						tmpPath = finished.path;
+						const { text, model } = await transcribeAudioWithDefaults(tmpPath, {
+							modelRegistry: defaultModelRegistry,
+						});
+						const savedPath = await saveListenText(text, finished.desc);
+						done({ ok: true, text, path: savedPath, model });
+					} catch (err) {
+						fail(err instanceof Error ? err.message : "transcription failed");
+					} finally {
+						if (tmpPath) await fs.rm(tmpPath, { force: true }).catch(() => {});
 					}
 					return;
 				}

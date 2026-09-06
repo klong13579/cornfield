@@ -795,6 +795,71 @@ export class PiClientAdapter implements PiClient {
 		}
 	}
 
+	/**
+	 * 听记分帧转写（长录音）：单帧 base64 超 Bun WS 16MB 上限会断连（code 1006 实测），
+	 * 改走 begin→chunk→end，服务端流式落盘后走同一转写管线。独立短连接 + 30 分钟超时。
+	 */
+	async recordTranscribeChunked(
+		audioBase64: string,
+		desc?: string,
+		onProgress?: (sent: number, total: number) => void,
+	): Promise<{ ok: boolean; text: string; path: string; model: string; error?: string }> {
+		const config = loadServeConfig();
+		const client = new WirePiClient({
+			url: toWsUrl(config),
+			token: config.token,
+			autoReconnect: false,
+			requestTimeoutMs: 1_800_000,
+			...(this.#wsCtor ? { webSocketCtor: this.#wsCtor } : {}),
+		});
+		try {
+			await client.connect();
+			const begin = await client.request<{ ok?: boolean; uploadId?: string; error?: string }>({
+				type: "record_transcribe_begin",
+				totalBytes: Math.floor(audioBase64.length * 0.75),
+				...(desc ? { desc } : {}),
+			} as never);
+			if (!begin.ok || !begin.uploadId) {
+				return { ok: false, text: "", path: "", model: "", error: begin.error ?? "begin upload failed" };
+			}
+			// 每帧 b64 字符数取 4 的倍数（不切坏 base64 组），解码后 ≈1.5MB，远低于 16MB 单帧上限
+			const B64_CHUNK_CHARS = 2_000_000;
+			const totalChunks = Math.ceil(audioBase64.length / B64_CHUNK_CHARS);
+			for (let seq = 1, off = 0; off < audioBase64.length; seq++, off += B64_CHUNK_CHARS) {
+				const part = audioBase64.slice(off, off + B64_CHUNK_CHARS);
+				const chunk = await client.request<{ ok?: boolean; error?: string }>({
+					type: "record_transcribe_chunk",
+					uploadId: begin.uploadId,
+					seq,
+					data: part,
+				} as never);
+				if (!chunk.ok) {
+					return { ok: false, text: "", path: "", model: "", error: chunk.error ?? "chunk upload failed" };
+				}
+				onProgress?.(seq, totalChunks);
+			}
+			const end = await client.request<{
+				ok?: boolean;
+				text?: string;
+				path?: string;
+				model?: string;
+				error?: string;
+			}>({
+				type: "record_transcribe_end",
+				uploadId: begin.uploadId,
+			} as never);
+			return {
+				ok: end.ok === true,
+				text: end.text ?? "",
+				path: end.path ?? "",
+				model: end.model ?? "",
+				...(end.error ? { error: end.error } : {}),
+			};
+		} finally {
+			client.close("record_transcribe_chunked done");
+		}
+	}
+
 	/** 听记历史（listen_list；~/.cornfield/listen/ 全部录音，名称倒序 + 转写全文）。 */
 	async listenList(): Promise<{ ok: boolean; recordings: ListenRecordingDto[] }> {
 		const result = await this.#req<{ ok?: boolean; recordings?: ListenRecordingDto[] | null }>({

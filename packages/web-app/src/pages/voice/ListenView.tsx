@@ -7,20 +7,26 @@ import { useSessionStore } from "../../state/session-store";
 
 /**
  * 听记（VOICE-D）—— TUI /record 的 web 前端：浏览器录音 → 16kHz PCM WAV →
- * serve record_transcribe（TUI /record 同源转写管线：本地 whisper / record.model API，
+ * serve record_transcribe（TUI /record 同源转写管线：record.model API / 本地 whisper，
  * 自动分块）→ 落 ~/.cornfield/listen/（与 /record 同目录同格式）。历史 = listen_list 全量加载。
  *
  * 四态：idle（orb breathing 静止帧）→ recording（orb listening 动效 + 7 格电平 + 计时）
- * → transcribing（orb working）→ done（文本卡 + 操作组：整理纪要/提取待办/发 Agent/
- * 复制/导出 .md）。错误/权限拒绝落 error 态提示。
+ * → transcribing（orb working；大 payload 分帧上传带进度）→ done（文本卡 + 操作组：整理纪要/
+ * 提取待办/发 Agent/复制/导出 .md）。错误/权限拒绝落 error 态提示。
+ * 历史（listen_list）同样可一键发送 Agent 二次加工。
  */
 
 type ListenPhase = "idle" | "recording" | "transcribing" | "done";
 
 const LEVEL_BAR_CELLS = 7;
 const LEVEL_EMIT_MS = 90;
-/** 录音上限（serve 端 stt.maxRecordingSec 默认 60；前端同值提示）。 */
-const MAX_RECORDING_MS = 60_000;
+/**
+ * 录音上限（前端 30 分钟；服务端 stt.maxRecordingSec 默认 2h，实际以服务端为准）。
+ * 30min ≈ 57MB WAV（16kHz PCM16），分帧上传内存/传输均在安全区。
+ */
+const MAX_RECORDING_MS = 30 * 60_000;
+/** 单帧命令的 b64 长度上限：超过走分帧（Bun WS 单帧 16MB 硬顶，实测 24MB 断连 code 1006）。 */
+const SINGLE_FRAME_B64_LIMIT = 12 * 1024 * 1024;
 
 function formatClock(totalSec: number): string {
 	const m = String(Math.floor(totalSec / 60)).padStart(2, "0");
@@ -48,6 +54,7 @@ export function ListenView(): React.JSX.Element {
 	const [elapsed, setElapsed] = useState(0);
 	const [levels, setLevels] = useState<number[]>(new Array(LEVEL_BAR_CELLS).fill(0));
 	const [result, setResult] = useState<{ text: string; path: string; model: string } | null>(null);
+	const [uploadProgress, setUploadProgress] = useState<string | null>(null);
 	const [recordings, setRecordings] = useState<ListenRecordingDto[]>([]);
 	const [search, setSearch] = useState("");
 	const [openName, setOpenName] = useState<string | null>(null);
@@ -101,7 +108,14 @@ export function ListenView(): React.JSX.Element {
 			setError("无法访问麦克风：浏览器权限被拒绝或未授权。请检查地址栏麦克风权限后重试。");
 			return;
 		}
-		const ctx = new AudioContext();
+		const ctx = (() => {
+			// 优先 16kHz 直采（省 2/3 内存与上传体积）；浏览器拒绝时回退默认采样率（编码时重采样）
+			try {
+				return new AudioContext({ sampleRate: 16_000 });
+			} catch {
+				return new AudioContext();
+			}
+		})();
 		sampleRateRef.current = ctx.sampleRate;
 		const source = ctx.createMediaStreamSource(stream);
 		const analyser = ctx.createAnalyser();
@@ -186,7 +200,13 @@ export function ListenView(): React.JSX.Element {
 
 		setPhase("transcribing");
 		try {
-			const res = await store.recordTranscribe(b64);
+			const res =
+				b64.length > SINGLE_FRAME_B64_LIMIT
+					? await store.recordTranscribeChunked(b64, undefined, (sent, total) =>
+							setUploadProgress(`分帧上传 ${sent}/${total}`),
+						)
+					: await store.recordTranscribe(b64);
+			setUploadProgress(null);
 			if (!res.ok || !res.text) {
 				setPhase("idle");
 				setError(res.error ?? "转写失败：未返回文本。");
@@ -198,6 +218,7 @@ export function ListenView(): React.JSX.Element {
 			const list = await store.listenList();
 			if (list.ok) setRecordings(list.recordings);
 		} catch (err) {
+			setUploadProgress(null);
 			setPhase("idle");
 			setError(`转写失败：${err instanceof Error ? err.message : String(err)}`);
 		}
@@ -210,10 +231,10 @@ export function ListenView(): React.JSX.Element {
 		setPhase("idle");
 	};
 
-	// ── done 操作组 ──
-	const agentPrompt = (prefix: string) => {
-		if (!result?.text.trim()) return;
-		store.prompt(`${prefix}\n\n${result.text}`);
+	// ── done 操作组（历史行复用：传 rec.text 即可对旧录音二次加工）──
+	const agentPrompt = (prefix: string, text = result?.text ?? "") => {
+		if (!text.trim()) return;
+		store.prompt(`${prefix}\n\n${text}`);
 		setNotice(`已发送给 Agent 处理（${prefix.slice(0, 12)}…）`);
 	};
 
@@ -264,7 +285,9 @@ export function ListenView(): React.JSX.Element {
 
 			{/* idle / done 提示 */}
 			{phase === "idle" && (
-				<div className="text-[13px] text-ink-faint">点击圆球开始录音（上限 60s），或从下方历史选择已有录音整理</div>
+				<div className="text-[13px] text-ink-faint">
+					点击圆球开始录音（上限 30 分钟），或从下方历史选择已有录音整理
+				</div>
 			)}
 
 			{/* recording：电平条 + 计时 + 停止/取消 */}
@@ -300,11 +323,13 @@ export function ListenView(): React.JSX.Element {
 			{/* transcribing */}
 			{phase === "transcribing" && (
 				<>
-					<div className="text-[13px] text-ink-muted">转写中…（本地 whisper / record.model，长录音自动分块）</div>
+					<div className="text-[13px] text-ink-muted">
+						转写中…（record.model API / 本地 whisper，长录音自动分块）
+					</div>
 					<div className="h-[5px] w-[200px] overflow-hidden rounded-[3px] bg-surface-3">
 						<i className="block h-full w-full animate-pulse rounded-[3px] bg-success" />
 					</div>
-					<div className="font-mono text-[11px] text-ink-faint">请勿关闭页面</div>
+					<div className="font-mono text-[11px] text-ink-faint">{uploadProgress ?? "请勿关闭页面"}</div>
 				</>
 			)}
 
@@ -422,6 +447,28 @@ export function ListenView(): React.JSX.Element {
 									onClick={() => setOpenName(prev => (prev === rec.name ? null : rec.name))}
 								>
 									{openName === rec.name ? "收起" : "查看"}
+								</button>
+								<button
+									type="button"
+									className="rounded border border-hairline bg-surface px-2.5 py-1 text-[11px] text-ink-muted transition-colors hover:text-ink"
+									title="整理为会议纪要"
+									onClick={e => {
+										e.stopPropagation();
+										agentPrompt("请把以下录音转写整理成会议纪要，列出要点和结论：", rec.text);
+									}}
+								>
+									纪要
+								</button>
+								<button
+									type="button"
+									className="rounded border border-hairline bg-surface px-2.5 py-1 text-[11px] text-ink-muted transition-colors hover:text-ink"
+									title="提取待办事项"
+									onClick={e => {
+										e.stopPropagation();
+										agentPrompt("请从以下录音转写中提取待办事项（负责人/截止/内容）：", rec.text);
+									}}
+								>
+									待办
 								</button>
 								<button
 									type="button"

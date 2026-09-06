@@ -12,6 +12,7 @@
  */
 import * as fs from "node:fs";
 import * as fsp from "node:fs/promises";
+import * as os from "node:os";
 import * as path from "node:path";
 import { getConfigRootDir, logger } from "@cornfield/utils";
 import type { ModelRegistry } from "../config/model-registry";
@@ -203,4 +204,101 @@ export async function listListenRecordings(): Promise<ListenRecordingSummary[]> 
 	}
 	recordings.sort((a, b) => (a.name < b.name ? 1 : a.name > b.name ? -1 : 0));
 	return recordings;
+}
+
+// ── 分帧上传（VOICE-D）：长录音 base64 超过 Bun WS 单帧 16MB 上限会直接断连，
+// 前端对大 payload 按 begin → chunk(seq 单调递增) → end 三命令分帧，服务端流式落盘
+// 临时 WAV 后走与单帧命令相同的转写管线。半途而废的上传由 TTL 定时器回收。
+
+const CHUNK_UPLOAD_TTL_MS = 15 * 60_000;
+/** 磁盘回收上限：单次上传的解码后字节数（2h × 16kHz PCM16 ≈ 230MB，取 256MB 硬顶）。 */
+const MAX_CHUNKED_UPLOAD_BYTES = 256 * 1024 * 1024;
+
+interface ChunkedUploadState {
+	path: string;
+	handle: fsp.FileHandle;
+	received: number;
+	lastSeq: number;
+	desc?: string;
+	timer: ReturnType<typeof setTimeout>;
+}
+
+const chunkedUploads = new Map<string, ChunkedUploadState>();
+
+export interface ChunkedUploadFinish {
+	path: string;
+	bytes: number;
+	desc?: string;
+}
+
+function disposeChunkedUpload(id: string, state: ChunkedUploadState, removeFile: boolean): void {
+	clearTimeout(state.timer);
+	chunkedUploads.delete(id);
+	void state.handle.close().catch(() => {});
+	if (removeFile) void fsp.rm(state.path, { force: true }).catch(() => {});
+}
+
+/** 开启一次分帧上传，返回 uploadId。totalBytes 仅作展示/校验参考，硬顶以实际累计字节为准。 */
+export async function beginChunkedListenUpload(opts?: { totalBytes?: number; desc?: string }): Promise<string> {
+	if (
+		opts?.totalBytes !== undefined &&
+		(!Number.isFinite(opts.totalBytes) || opts.totalBytes < 0 || opts.totalBytes > MAX_CHUNKED_UPLOAD_BYTES)
+	) {
+		throw new Error(`totalBytes out of range (0..${MAX_CHUNKED_UPLOAD_BYTES})`);
+	}
+	const id = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+	const uploadPath = path.join(os.tmpdir(), `omp-web-listen-chunk-${id}.wav`);
+	const handle = await fsp.open(uploadPath, "w");
+	const state: ChunkedUploadState = {
+		path: uploadPath,
+		handle,
+		received: 0,
+		lastSeq: 0,
+		...(opts?.desc ? { desc: opts.desc } : {}),
+		timer: setTimeout(() => {
+			logger.warn("Chunked listen upload expired, discarding", { uploadId: id, received: state.received });
+			disposeChunkedUpload(id, state, true);
+		}, CHUNK_UPLOAD_TTL_MS),
+	};
+	chunkedUploads.set(id, state);
+	return id;
+}
+
+/** 追加一帧（seq 从 1 开始、必须严格递增）。失败时自动丢弃该上传。返回累计字节数。 */
+export async function appendChunkedListenUpload(uploadId: string, seq: number, dataBase64: string): Promise<number> {
+	const state = chunkedUploads.get(uploadId);
+	if (!state) throw new Error("upload not found or expired — restart the upload");
+	if (!Number.isInteger(seq) || seq !== state.lastSeq + 1) {
+		disposeChunkedUpload(uploadId, state, true);
+		throw new Error(`chunk seq out of order (expected ${state.lastSeq + 1}, got ${seq})`);
+	}
+	const bytes = Buffer.from(dataBase64, "base64");
+	if (state.received + bytes.length > MAX_CHUNKED_UPLOAD_BYTES) {
+		disposeChunkedUpload(uploadId, state, true);
+		throw new Error(`upload exceeds ${MAX_CHUNKED_UPLOAD_BYTES} bytes`);
+	}
+	await state.handle.write(bytes);
+	state.received += bytes.length;
+	state.lastSeq = seq;
+	return state.received;
+}
+
+/** 结束上传：关闭并移出管理表，返回临时文件路径（调用方转写完成后负责删除）。 */
+export async function finishChunkedListenUpload(uploadId: string): Promise<ChunkedUploadFinish> {
+	const state = chunkedUploads.get(uploadId);
+	if (!state) throw new Error("upload not found or expired — restart the upload");
+	if (state.received < 100) {
+		disposeChunkedUpload(uploadId, state, true);
+		throw new Error("audio is empty or too small");
+	}
+	clearTimeout(state.timer);
+	chunkedUploads.delete(uploadId);
+	await state.handle.close().catch(() => {});
+	return { path: state.path, bytes: state.received, ...(state.desc ? { desc: state.desc } : {}) };
+}
+
+/** 放弃上传（幂等）：不存在时静默返回。 */
+export async function abortChunkedListenUpload(uploadId: string): Promise<void> {
+	const state = chunkedUploads.get(uploadId);
+	if (state) disposeChunkedUpload(uploadId, state, true);
 }

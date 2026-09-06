@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- **听记分帧上传协议**（`src/server/wire-server.ts`, `src/stt/listen-service.ts`, `src/modes/wire-stdio.ts`）: 新增 record_transcribe_begin/chunk/end 三条 wire 命令——长录音 base64 超 Bun WS 单帧 16MB 上限（实测 24MB 断连 code 1006）时前端分帧上传，服务端流式落盘临时 WAV 后走与单帧命令相同的转写管线；chunk seq 严格递增校验、256MB 硬顶、15min TTL 回收半途而废的上传。
+
 ## [1.1.0] - 2026-09-05
 
 ### Added

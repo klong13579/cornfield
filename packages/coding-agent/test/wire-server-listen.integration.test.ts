@@ -181,4 +181,82 @@ describe("listen_list（隔离根）", () => {
 		},
 		300_000,
 	);
+
+	// ── 分帧上传（VOICE-D）：begin → chunk(seq 严格递增) → end，服务端流式落盘后同管线转写 ──
+
+	describe("record_transcribe 分帧协议（不触模型）", () => {
+		test("chunk seq 乱序 → ok:false + 上传被丢弃", async () => {
+			const begin = await sendCommand({ type: "record_transcribe_begin", totalBytes: 1000 });
+			expect(begin.ok).toBe(true);
+			const uploadId = (begin.result as { uploadId: string }).uploadId;
+			expect(uploadId).toBeTruthy();
+
+			const bad = await sendCommand({ type: "record_transcribe_chunk", uploadId, seq: 2, data: "AAAA" });
+			expect(bad.ok).toBe(false);
+			expect(String(bad.error)).toContain("out of order");
+
+			// 失败帧后上传已回收：end 必须报 not found
+			const end = await sendCommand({ type: "record_transcribe_end", uploadId });
+			expect(end.ok).toBe(false);
+			expect(String(end.error)).toContain("not found");
+		});
+
+		test("缺少参数 → ok:false", async () => {
+			const noArgs = await sendCommand({ type: "record_transcribe_chunk" });
+			expect(noArgs.ok).toBe(false);
+			const noId = await sendCommand({ type: "record_transcribe_end" });
+			expect(noId.ok).toBe(false);
+		});
+
+		test("垃圾音频分帧完整上传 → end 转写阶段优雅失败", async () => {
+			const begin = await sendCommand({ type: "record_transcribe_begin", desc: "e2e-garbage" });
+			const uploadId = (begin.result as { uploadId: string }).uploadId;
+			const payload = Buffer.from("x".repeat(2048), "utf-8").toString("base64");
+			const c1 = await sendCommand({ type: "record_transcribe_chunk", uploadId, seq: 1, data: payload });
+			expect(c1.ok).toBe(true);
+			expect((c1.result as { received: number }).received).toBe(2048);
+			const end = await sendCommand({ type: "record_transcribe_end", uploadId }, 120_000);
+			// 非 WAV 字节 → 转写失败（协议本身全链路走通）
+			expect(end.ok).toBe(false);
+		}, 180_000);
+	});
+
+	const realChunked = test.skipIf(!process.env.E2E);
+	realChunked(
+		"record_transcribe 分帧：真实 WAV 三帧上传 → 转写 + 落盘一致",
+		async () => {
+			const wavPath = path.join(repoRoot, "packages/web-app/public/test-voice.wav");
+			const b64 = Buffer.from(await fsp.readFile(wavPath)).toString("base64");
+			const begin = await sendCommand({ type: "record_transcribe_begin", desc: "e2e-voice-chunked" });
+			expect(begin.ok).toBe(true);
+			const uploadId = (begin.result as { uploadId: string }).uploadId;
+
+			// 切三帧（帧长取 4 的倍数，不切坏 base64 组）
+			const frameChars = Math.ceil(b64.length / 3 / 4) * 4;
+			let seq = 1;
+			let lastReceived = 0;
+			for (let off = 0; off < b64.length; off += frameChars, seq++) {
+				const chunk = await sendCommand({
+					type: "record_transcribe_chunk",
+					uploadId,
+					seq,
+					data: b64.slice(off, off + frameChars),
+				});
+				expect(chunk.ok).toBe(true);
+				lastReceived = (chunk.result as { received: number }).received;
+			}
+			// 多帧（协议真分帧）且累计字节 = 原始 WAV 字节数
+			expect(seq - 1).toBeGreaterThanOrEqual(2);
+			expect(lastReceived).toBe((await fsp.stat(wavPath)).size);
+
+			const end = await sendCommand({ type: "record_transcribe_end", uploadId }, 240_000);
+			expect(end.ok).toBe(true);
+			const r = end.result as { text: string; path: string; model: string };
+			expect(r.text.length).toBeGreaterThan(0);
+			expect(r.path).toContain("listen");
+			const saved = JSON.parse(await fsp.readFile(r.path, "utf-8")) as { version: number; text: string };
+			expect(saved.text).toBe(r.text);
+		},
+		300_000,
+	);
 });

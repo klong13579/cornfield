@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- **听记长录音：分帧上传 + 30 分钟上限 + 历史二次加工**（`src/pages/voice/ListenView.tsx`, `src/state/pi-client-adapter.ts`, `src/state/session-store.ts`, `src/lib/pi-client-api.ts`）: 录音上限 60s → 30 分钟；AudioContext 优先 16kHz 直采（省 2/3 内存与上传体积）；b64 超 12MB 自动切换 record_transcribe_begin/chunk/end 分帧上传（Bun WS 单帧 16MB 硬顶，实测 24MB 断连），转写中显示分帧上传进度；历史列表每行新增「纪要」「待办」按钮，旧录音可一键发送 Agent 二次加工。
+
 ## [1.1.0] - 2026-09-05
 
 ### Added

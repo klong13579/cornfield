@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- **听记分帧上传命令类型**（`src/commands.ts`）: 新增 record_transcribe_begin / record_transcribe_chunk / record_transcribe_end 三条命令类型——长录音 base64 超 Bun WS 单帧 16MB 上限时前端分帧上传。
+
 ## [1.1.0] - 2026-09-05
 
 ### Added
