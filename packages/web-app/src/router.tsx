@@ -26,6 +26,7 @@ import { ModelsView } from "./pages/models/ModelsView";
 import { ProvidersView } from "./pages/models/ProvidersView";
 import { RuntimeConfigView } from "./pages/models/RuntimeConfigView";
 import DiagnosisReportView from "./pages/records/DiagnosisReportView";
+import { DimensionReportsView } from "./pages/records/DimensionReportsView";
 import { PlaybackView } from "./pages/records/PlaybackView";
 import { RecordsView } from "./pages/records/RecordsView";
 import { SettingsView } from "./pages/settings/SettingsView";
@@ -378,6 +379,7 @@ export const router = createHashRouter([
 			{ path: "/records", element: <RecordsView /> },
 			{ path: "/records/:id", element: <PlaybackView /> },
 			{ path: "/records/:sessionId/diagnosis", element: <DiagnosisReportView /> },
+			{ path: "/records/dimension/:dim", element: <DimensionReportsView /> },
 
 			{ path: "/voice", element: <VoiceView /> },
 			{ path: "/todo", element: <TodoView /> },

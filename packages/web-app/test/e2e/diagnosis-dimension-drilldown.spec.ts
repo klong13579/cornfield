@@ -97,7 +97,15 @@ test("诊断大盘工具维度点击下钻 + 详情页展开", async ({ page }) 
 	const serveUrl = `ws://127.0.0.1:${servePort}/ws`;
 	const serve = spawn(
 		"bun",
-		[`${repoRoot}/packages/coding-agent/src/cli.ts`, "serve", "--port", String(servePort), "--host", "127.0.0.1", "--no-extensions"],
+		[
+			`${repoRoot}/packages/coding-agent/src/cli.ts`,
+			"serve",
+			"--port",
+			String(servePort),
+			"--host",
+			"127.0.0.1",
+			"--no-extensions",
+		],
 		{ env: { ...process.env, PI_NO_TITLE: "1", CORNFIELD_AGENT_DIR: isoDir } },
 	);
 	const preview = spawn(
@@ -124,7 +132,12 @@ test("诊断大盘工具维度点击下钻 + 详情页展开", async ({ page }) 
 				const helloDone = new Promise<void>((resolve, reject) => {
 					const t = setTimeout(() => reject(new Error("hello_ack timeout")), 10_000);
 					ws.onmessage = (e: MessageEvent) => {
-						const frame = JSON.parse(String(e.data)) as { type?: string; id?: string; result?: unknown; error?: string };
+						const frame = JSON.parse(String(e.data)) as {
+							type?: string;
+							id?: string;
+							result?: unknown;
+							error?: string;
+						};
 						if (frame.type === "hello_ack") {
 							clearTimeout(t);
 							resolve();
@@ -182,11 +195,21 @@ test("诊断大盘工具维度点击下钻 + 详情页展开", async ({ page }) 
 		await toolCard.waitFor({ state: "visible", timeout: 30_000 });
 		expect(await toolCard.isEnabled()).toBe(true);
 
-		// ── 4. 点击 → 断言跳转诊断详情页 ──
+		// ── 4. 点击 → 先到维度聚合页（多报告列表），点行进单报告 ──
 		await toolCard.click();
+		await page.waitForURL(/#\/records\/dimension\/tool/, { timeout: 30_000 });
+		// 聚合列表断言：出现维度标题 + 异常/全部 toggle + 至少一行报告
+		await page.getByRole("heading", { name: /工具维度报告/ }).waitFor({ state: "visible", timeout: 30_000 });
+		const firstReportRow = page.locator(".divide-y button").first();
+		await firstReportRow.waitFor({ state: "visible", timeout: 30_000 });
+		const rowCount = await page.locator(".divide-y button").count();
+		expect(rowCount).toBeGreaterThan(0);
+
+		// ── 5. 点第一行 → 单会话诊断详情页 ──
+		await firstReportRow.click();
 		await page.waitForURL(/#\/records\/[^/]+\/diagnosis/, { timeout: 30_000 });
 
-		// ── 5. 详情页「工具调用链路」卡展开 ──
+		// ── 6. 详情页「工具调用链路」卡展开 ──
 		const toolDim = page.getByRole("button", { name: /工具调用链路/ }).first();
 		await toolDim.waitFor({ state: "visible", timeout: 30_000 });
 		await toolDim.click();

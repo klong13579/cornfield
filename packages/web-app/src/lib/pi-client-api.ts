@@ -170,7 +170,15 @@ export interface DiagnosisAggregationDto {
 	severityDistribution: Record<string, number>;
 	dimensionReports?: Record<
 		string,
-		Array<{ reportId: string; sessionId: string; sessionFile: string; severity: string; title: string }>
+		Array<{
+			reportId: string;
+			sessionId: string;
+			sessionFile: string;
+			severity: string;
+			title: string;
+			dimState: "ok" | "warn" | "fail";
+			reportAt: string;
+		}>
 	>;
 	dimensionFailureRates: Record<string, { ok: number; warn: number; fail: number; failRate: number }>;
 	deliveryDistribution: Record<string, number>;

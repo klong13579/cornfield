@@ -109,7 +109,17 @@ export interface DiagnosisAggregationDto {
 	/** 按维度下钻的报告索引。 */
 	dimensionReports?: Record<
 		string,
-		Array<{ reportId: string; sessionId: string; sessionFile: string; severity: string; title: string }>
+		Array<{
+			reportId: string;
+			sessionId: string;
+			sessionFile: string;
+			severity: string;
+			title: string;
+			/** 该报告在该维度上的判定状态（ok/warn/fail）。 */
+			dimState: "ok" | "warn" | "fail";
+			/** 报告生成时间 ISO。 */
+			reportAt: string;
+		}>
 	>;
 	dimensionFailureRates: Record<string, { ok: number; warn: number; fail: number; failRate: number }>;
 	/** 交付物质量分布。 */

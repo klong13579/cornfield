@@ -30,7 +30,15 @@ export interface DiagnosisAggregationDto {
 	severityDistribution: { P0: number; P1: number; P2: number; P3: number };
 	dimensionReports?: Record<
 		string,
-		Array<{ reportId: string; sessionId: string; sessionFile: string; severity: string; title: string }>
+		Array<{
+			reportId: string;
+			sessionId: string;
+			sessionFile: string;
+			severity: string;
+			title: string;
+			dimState: "ok" | "warn" | "fail";
+			reportAt: string;
+		}>
 	>;
 	dimensionFailureRates: Record<string, DimAggregationDto>;
 	deliveryDistribution: Record<string, number>;
@@ -268,7 +276,7 @@ export function aggregateDiagnosis(opts: AggregationOpts = {}): DiagnosisAggrega
 		const dimensionReports: DiagnosisAggregationDto["dimensionReports"] = {};
 		const reportRows = db
 			.prepare(
-				`SELECT id, session_id, session_file, severity, title, dim_meta, dim_performance, dim_intent, dim_reasoning, dim_tools, dim_output FROM diagnosis_reports ${where} ORDER BY created_at DESC`,
+				`SELECT id, session_id, session_file, severity, title, created_at, dim_meta, dim_performance, dim_intent, dim_reasoning, dim_tools, dim_output FROM diagnosis_reports ${where} ORDER BY created_at DESC`,
 			)
 			.all(...params) as Array<Record<string, string | null>>;
 		for (const row of reportRows) {
@@ -282,6 +290,8 @@ export function aggregateDiagnosis(opts: AggregationOpts = {}): DiagnosisAggrega
 					sessionFile: row.session_file ?? "",
 					severity: row.severity ?? "P3",
 					title: row.title ?? "诊断报告",
+					dimState: state,
+					reportAt: row.created_at ? new Date(Number(row.created_at)).toISOString() : new Date(0).toISOString(),
 				});
 				dimensionReports[dim] = reports;
 			}

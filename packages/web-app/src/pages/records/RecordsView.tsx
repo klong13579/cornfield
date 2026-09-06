@@ -11,6 +11,7 @@ import {
 } from "../../lib/records";
 import { useSessionStore } from "../../state/session-store";
 import { useSession } from "../../state/use-session";
+import { DIMENSION_LABELS } from "../../lib/records-dimensions";
 
 /** Severity → badge class mapping. */
 const severityBadgeClass: Record<string, string> = {
@@ -21,14 +22,6 @@ const severityBadgeClass: Record<string, string> = {
 };
 
 /** Diagnosis report cached per sessionFile. */
-const DIMENSION_LABELS: Record<string, string> = {
-	meta: "元数据",
-	performance: "性能",
-	intent: "意图",
-	reasoning: "推理",
-	tool: "工具",
-	output: "输出",
-};
 
 const QUALITY_BAR_CLASSES: Record<string, string> = {
 	A: "bg-success",
@@ -571,27 +564,26 @@ export function RecordsView(): React.JSX.Element {
 											<div className="grid grid-cols-2 gap-3">
 												{Object.entries(DIMENSION_LABELS).map(([key, label]) => {
 													const dim = aggregation.dimensionFailureRates[key];
+													const dimReports = aggregation.dimensionReports?.[key] ?? [];
 													if (!dim) return null;
 													const total = dim.ok + dim.warn + dim.fail;
 													return (
 														<button
 															type="button"
 															key={key}
-															disabled={!aggregation.dimensionReports?.[key]?.length}
+															disabled={dimReports.length === 0}
 															className="w-full rounded-lg border border-hairline bg-surface p-3 text-left transition-colors enabled:hover:border-accent/50 enabled:hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-60"
 															onClick={() => {
-																const reports = aggregation.dimensionReports?.[key] ?? [];
-																const report =
-																	reports.find(r => r.severity === "P0" || r.severity === "P1") ??
-																	reports[0];
-																if (!report) return;
-																navigate(`/records/${report.sessionId}/diagnosis`, {
-																	state: { reportId: report.reportId },
-																});
+																const params = new URLSearchParams();
+																if (aggPeriod !== "all") params.set("period", aggPeriod);
+																if (aggAgent !== "all") params.set("agent", aggAgent);
+																navigate(
+																	`/records/dimension/${key}${params.size > 0 ? `?${params.toString()}` : ""}`,
+																);
 															}}
 															title={
-																aggregation.dimensionReports?.[key]?.length
-																	? `查看${label}维度报告`
+																dimReports.length > 0
+																	? `查看${label}维度报告（${dimReports.length} 份）`
 																	: `当前筛选范围内暂无${label}维度报告`
 															}
 														>
