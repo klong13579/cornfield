@@ -67,6 +67,15 @@ jobs:
       - name: Detect Rust-related changes
         id: diff
         run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            # Manual dispatch (incl. the dry-run release preflight) always runs
+            # the full matrix. Do not rely on `inputs`/`github.ref` in the
+            # matrix include expression below — `inputs` is not reliably
+            # evaluated there (observed: a dispatch with trigger_release=true
+            # expanded only the linux-x64 job).
+            echo "rust_changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           range=""
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             range="${{ github.event.pull_request.base.sha }}...${GITHUB_SHA}"
@@ -93,7 +102,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ (startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.trigger_release == 'true') || needs.detect_rust_changes.outputs.rust_changed == 'true') && fromJSON('[
+        include: ${{ (startsWith(github.ref, 'refs/tags/v') || needs.detect_rust_changes.outputs.rust_changed == 'true') && fromJSON('[
           {"os":"ubuntu-22.04","platform":"linux","arch":"x64","variants":"baseline modern","rust_checks":true},
           {"os":"ubuntu-22.04","platform":"linux","arch":"arm64","target":"aarch64-unknown-linux-gnu"},
           {"os":"macos-15-intel","platform":"darwin","arch":"x64","variants":"baseline modern"},
@@ -312,7 +321,7 @@ jobs:
           fi
 
   release_binary:
-    if: (startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.trigger_release == 'true')) && needs.check_latest_tag.outputs.is_latest == 'true'
+    if: (startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.trigger_release == true)) && needs.check_latest_tag.outputs.is_latest == 'true'
     needs: [check_latest_tag, check, native]
     strategy:
       fail-fast: false
@@ -393,7 +402,7 @@ jobs:
             ${{ matrix.gateway_path }}
 
   release_desktop:
-    if: (startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.trigger_release == 'true')) && needs.check_latest_tag.outputs.is_latest == 'true'
+    if: (startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.trigger_release == true)) && needs.check_latest_tag.outputs.is_latest == 'true'
     needs: [check_latest_tag, check, native]
     runs-on: macos-14
     permissions:
@@ -430,7 +439,7 @@ jobs:
             packages/desktop/dist/*.blockmap
 
   release:
-    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.trigger_release == 'true')
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.trigger_release == true)
     needs: [release_binary, release_desktop]
     runs-on: ubuntu-22.04
     permissions:
@@ -512,7 +521,7 @@ jobs:
     # nobody noticed" situation repeat (v1.1.0 sat broken for a day). Requires the
     # DINGTALK_RELEASE_WEBHOOK repo secret (DingTalk group robot webhook); skips
     # silently when unset.
-    if: failure() && (startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.trigger_release == 'true'))
+    if: failure() && (startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.trigger_release == true))
     needs: [release]
     runs-on: ubuntu-22.04
     steps:
