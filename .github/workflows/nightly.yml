@@ -1,0 +1,37 @@
+# Nightly auto-release — version cadence:
+#   daily: bump patch of the latest v* tag (02:00 Beijing = 18:00 UTC)
+#   weekly: Beijing Sunday bumps the minor instead (patch resets to 0)
+#   major: manual only via `bun scripts/release.ts <X>.0.0`
+#
+# Skips when main has no commits past the latest tag. On a change the script
+# bumps versions, commits, pushes main, tags v<next> and pushes the tag — the
+# tag push runs the normal full release pipeline in CI.yml.
+#
+# Requires the AUTO_RELEASE_TOKEN repo secret: a PAT with `contents: write`.
+# GITHUB_TOKEN pushes do NOT re-trigger workflows, so a PAT is mandatory for
+# the tag push to start the release run.
+name: Nightly auto-release
+
+on:
+  schedule:
+    - cron: "0 18 * * *" # 02:00 Beijing
+  workflow_dispatch: # manual trigger for testing
+
+permissions:
+  contents: write
+
+jobs:
+  auto_release:
+    runs-on: ubuntu-22.04
+    if: github.repository == 'klong13579/cornfield'
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3"
+      - name: Run auto-release (bump + commit + push main + tag)
+        env:
+          GH_TOKEN: ${{ secrets.AUTO_RELEASE_TOKEN }}
+        run: bun scripts/auto-release.ts
