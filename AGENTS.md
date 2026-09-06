@@ -44,6 +44,7 @@ bun test path/to/file.test.ts    # single file — only run tests you added/chan
 # Build
 bun build                        # per-workspace build (if present)
 bun build:native                 # build Rust native addons (packages/natives)
+bun run build:native:linux-arm64  # cross-compile natives for linux-arm64 via zig (prereq: rustup target add aarch64-unknown-linux-gnu) — run this locally before pushing Rust/natives changes
 
 # Generate models (never edit models.json by hand)
 bun generate-models              # = bun --cwd=packages/ai run generate-models

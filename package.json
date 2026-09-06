@@ -90,6 +90,7 @@
 		"test:intercom": "bun run --cwd=packages/gateway test test/intercom-inbound-concurrency.test.ts test/intercom-parent-child.test.ts test/intercom-parent-child-e2e.test.ts 2>&1 && bun run --cwd=packages/coding-agent test test/intercom-extension/ 2>&1",
 		"build": "bun run --workspaces --if-present build && cd packages/desktop && bun x electron-builder",
 		"build:native": "bun --cwd=packages/natives run build",
+		"build:native:linux-arm64": "bun scripts/build-native-linux-arm64.ts",
 		"test": "bun run --parallel test:ts test:rs",
 		"test:ts": "bun run --workspaces --if-present test -- --only-failures",
 		"test:rs": "bun scripts/run-rs-task.ts test:rs",
