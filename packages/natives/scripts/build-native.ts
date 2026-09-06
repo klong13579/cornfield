@@ -284,12 +284,18 @@ try {
 	// (e.g. the AudioVoiceSession stub on linux), which would clobber the
 	// repo-tracked host-platform declarations. The .node artifact is what a
 	// cross build produces; type declarations are platform-agnostic and already
-	// tracked. Host builds keep updating them (generateEnumExports depends on it).
+	// tracked. Host builds keep updating them.
+	//
+	// generateEnumExports is likewise host-build-only: it rewrites the
+	// repo-tracked native/index.d.ts & index.js in place, and on a cross build
+	// that index.d.ts is the committed host-platform copy whose `const enum`s
+	// were already normalized to `declare enum` by the last host build — running
+	// it there would find zero const enums and throw. Cross builds only produce
+	// the .node artifact; bindings stay host-maintained.
 	if (!isCrossCompile) {
 		await installGeneratedBindings(buildOutputDir);
+		await generateEnumExports();
 	}
-
-	await generateEnumExports();
 
 	console.log("Build complete.");
 } finally {
