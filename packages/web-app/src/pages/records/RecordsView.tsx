@@ -30,6 +30,15 @@ const DIMENSION_LABELS: Record<string, string> = {
 	output: "输出",
 };
 
+const QUALITY_BAR_CLASSES: Record<string, string> = {
+	A: "bg-success",
+	B: "bg-success/80",
+	C: "bg-warning",
+	D: "bg-warning/80",
+	E: "bg-danger/80",
+	F: "bg-danger",
+};
+
 interface DiagReport {
 	reportId: string;
 	sessionId: string;
@@ -568,7 +577,8 @@ export function RecordsView(): React.JSX.Element {
 														<button
 															type="button"
 															key={key}
-															className="w-full rounded-lg border border-hairline bg-surface p-3 text-left transition-colors hover:border-accent/50 hover:bg-surface-2"
+															disabled={!aggregation.dimensionReports?.[key]?.length}
+															className="w-full rounded-lg border border-hairline bg-surface p-3 text-left transition-colors enabled:hover:border-accent/50 enabled:hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-60"
 															onClick={() => {
 																const reports = aggregation.dimensionReports?.[key] ?? [];
 																const report =
@@ -582,7 +592,7 @@ export function RecordsView(): React.JSX.Element {
 															title={
 																aggregation.dimensionReports?.[key]?.length
 																	? `查看${label}维度报告`
-																	: `暂无${label}维度报告`
+																	: `当前筛选范围内暂无${label}维度报告`
 															}
 														>
 															<div className="mb-2 flex items-center justify-between">
@@ -682,7 +692,7 @@ export function RecordsView(): React.JSX.Element {
 															</span>
 															<div className="flex-1 h-3 rounded bg-surface-3 overflow-hidden">
 																<div
-																	className="h-full rounded bg-accent-dim transition-all"
+																	className={`h-full rounded ${QUALITY_BAR_CLASSES[k.trim().toUpperCase()] ?? "bg-accent-dim"} transition-all`}
 																	style={{
 																		width: `${aggregation.totalSessions > 0 ? (v / aggregation.totalSessions) * 100 : 0}%`,
 																	}}
@@ -703,7 +713,7 @@ export function RecordsView(): React.JSX.Element {
 															</span>
 															<div className="flex-1 h-3 rounded bg-surface-3 overflow-hidden">
 																<div
-																	className="h-full rounded bg-accent-dim transition-all"
+																	className={`h-full rounded ${QUALITY_BAR_CLASSES[k.trim().toUpperCase()] ?? "bg-accent-dim"} transition-all`}
 																	style={{
 																		width: `${aggregation.totalSessions > 0 ? (v / aggregation.totalSessions) * 100 : 0}%`,
 																	}}

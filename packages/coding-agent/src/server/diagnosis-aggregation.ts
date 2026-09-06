@@ -211,6 +211,8 @@ export function aggregateDiagnosis(opts: AggregationOpts = {}): DiagnosisAggrega
 		}
 
 		const where = whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
+		// 条件追加：无过滤（where=""）时也要产出合法 WHERE 子句，避免 `FROM t AND …` 语法错误
+		const whereAnd = (cond: string): string => (where ? `${where} AND ${cond}` : `WHERE ${cond}`);
 
 		// ── totalSessions ──
 		const countRow = db.prepare(`SELECT COUNT(*) as cnt FROM diagnosis_reports ${where}`).get(...params) as
@@ -309,7 +311,7 @@ export function aggregateDiagnosis(opts: AggregationOpts = {}): DiagnosisAggrega
 		const topIssuesRows = db
 			.prepare(
 				`SELECT title, COUNT(*) as count, severity FROM diagnosis_reports
-				 ${where} AND title IS NOT NULL
+				 ${whereAnd("title IS NOT NULL")}
 				 GROUP BY title ORDER BY count DESC LIMIT 10`,
 			)
 			.all(...params) as { title: string; count: number; severity: string }[];
@@ -331,7 +333,7 @@ export function aggregateDiagnosis(opts: AggregationOpts = {}): DiagnosisAggrega
 					SUM(CASE WHEN severity = 'P2' THEN 1 ELSE 0 END) as p2,
 					SUM(CASE WHEN severity = 'P3' THEN 1 ELSE 0 END) as p3
 				 FROM diagnosis_reports
-				 ${where} AND session_date IS NOT NULL
+				 ${whereAnd("session_date IS NOT NULL")}
 				 GROUP BY week_start ORDER BY week_start DESC LIMIT 52`,
 			)
 			.all(...params) as {

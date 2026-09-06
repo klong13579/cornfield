@@ -477,6 +477,9 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 					// 异步后台：先简单路径写 fallback，再用 runEphemeralTurn 做 LLM 深度分析
 					(async () => {
 						try {
+							// reportsDir 可能尚不存在（首诊/全新 agentDir），不建目录则
+							// runSimpleDiagnosis 写文件 ENOENT，诊断永远落不了库
+							await fs.mkdir(reportsDir, { recursive: true });
 							await runSimpleDiagnosis(sf, reportId, sessionId, reportsDir, reportPath, summaryPath);
 
 							// LLM 深度分析（in-process ephemeral turn）
