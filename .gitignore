@@ -78,3 +78,7 @@ packages/gateway/.omp/
 *.db-wal
 playwright-report/
 test-results/
+
+# Ticket packages (process artifacts, not source)
+.scratch/
+
