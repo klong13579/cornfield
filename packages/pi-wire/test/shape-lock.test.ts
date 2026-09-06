@@ -174,6 +174,9 @@ const COMMAND_TYPES = [
 	"inject_permission",
 	"permission_respond",
 	"record_transcribe",
+	"record_transcribe_begin",
+	"record_transcribe_chunk",
+	"record_transcribe_end",
 	"listen_list",
 	"list_artifacts",
 	// 会话诊断（P5）
