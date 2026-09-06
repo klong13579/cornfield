@@ -4,11 +4,9 @@
 
 ## 待办
 - [ ] task agent 调用梳理
-- [ ] Agent 客户端配置验证 → topics/agent-client-config.md
 - [ ] web-search tool 功能升级，提升搜索能力。
 - [ ] web-search 搜索的页面在客户端显示列表，并支持点击查看。
 - [ ] 深挖组队编程：升级grill + squad-programming 组合技能。
-- [ ] gateway agent 增加动态注册能力，动态enable 和 disable 能力。 → topics/agent-client-config.md
 - [ ] cronfield 功能管理与说明。
 - [ ] dataAgent 增加本体论能力v1.0
 - [ ] 客户端开机首页默认显示每天日程和待办。
@@ -17,7 +15,6 @@
 - [ ] 统一协议层：TUI/web/桌面/IM 四前端收敛到一套 Wire（P0✓ P1✓ P2✓ 含实机验收；P3 TUI 代码完成在 feat/agent-work 未合 main，暂缓） → topics/unified-protocol-layer.md
 - [ ] 学习使用herdr-board 功能
 - [ ] 钉钉机器人帮助我读取群消息和文档链接，帮我自动提取，并且识别重要的事项，是的话记录待办并提醒我。 → topics/dingtalk-extract-important-todos.md
-- [ ] omp 添加前端框架
 - [ ] 复用 WikiSkill 开源项目：在 Cornfield self-evolution 中落地 Pattern → Proposal → Validation → Outcome 闭环 → topics/wikiskill-cornfield-integration.md
 - [ ] omp 本地增加定时器功能
 - [ ] 独立验证者：执行与验证分离，数字员工结果由独立进程验收 → topics/independent-verifier.md
@@ -25,6 +22,9 @@
 
 ## 已完成
 
+- [x] omp 添加前端框架
+- [x] gateway agent 增加动态注册能力，动态enable 和 disable 能力。 → topics/agent-client-config.md
+- [x] Agent 客户端配置验证 → topics/agent-client-config.md
 - [x] narwal-plan login 功能验收（herdr 实测 /login → 凭据入库 → 无 models.yml 运行 + 动态拉取网关模型 97 个）
 - [x] fork herdr 新增 cornfield AgentKind 定制版（herdr 集成方案 B，暂缓）
 - [x] 去 omp 化：oh-my-pi → CornField 改名（P0✓ standalone 仓库已创建并迁移；完工 v1.0.0 2026-08-29） → topics/de-omp-mika-rename.md
