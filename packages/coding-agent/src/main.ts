@@ -19,6 +19,7 @@ import { processFileArguments } from "./cli/file-processor";
 import { buildInitialMessage } from "./cli/initial-message";
 import { listModels } from "./cli/list-models";
 import { selectSession } from "./cli/session-picker";
+import { fetchLatestReleaseFromGithub, REPO } from "./cli/update-cli";
 import { findConfigFile } from "./config";
 import { ModelRegistry, ModelsConfigFile } from "./config/model-registry";
 import { resolveCliModel, resolveModelRoleValue, resolveModelScope, type ScopedModel } from "./config/model-resolver";
@@ -55,14 +56,14 @@ import { getChangelogPath, getNewEntries, parseChangelog } from "./utils/changel
 import type { EventBus } from "./utils/event-bus";
 
 const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
-const UPDATE_CHECK_TIMEOUT_MS = 8_000; // 8 seconds — npm registry can take 6s from CN
+const UPDATE_CHECK_TIMEOUT_MS = 8_000; // 8 seconds — GitHub API can be slow from CN
 
 async function checkForNewVersion(currentVersion: string): Promise<string | undefined> {
 	if (!settings.get("startup.checkUpdate")) {
 		return;
 	}
 
-	// Use cached result if checked recently — avoids a 6s npm registry fetch on every launch.
+	// Use cached result if checked recently — avoids a GitHub API fetch on every launch.
 	const lastCheck = settings.get("lastUpdateCheck");
 	if (lastCheck > 0 && Date.now() - lastCheck < UPDATE_CHECK_INTERVAL_MS) {
 		const cached = settings.get("latestVersion");
@@ -75,20 +76,16 @@ async function checkForNewVersion(currentVersion: string): Promise<string | unde
 	try {
 		const controller = new AbortController();
 		const timeout = setTimeout(() => controller.abort(), UPDATE_CHECK_TIMEOUT_MS);
-		const response = await fetch("https://registry.npmjs.org/@cornfield/coding-agent/latest", {
-			signal: controller.signal,
-		});
+		// GitHub Releases API — same source as `cornfield update` and the desktop
+		// updater. The npm registry is not a distribution channel for this
+		// project, so the old npm check always 404'd and never saw a release.
+		const release = await fetchLatestReleaseFromGithub(REPO, controller.signal);
 		clearTimeout(timeout);
-		if (!response.ok) return undefined;
-
-		const data = (await response.json()) as { version?: string };
-		const latestVersion = data.version;
+		const latestVersion = release.version;
 		settings.set("lastUpdateCheck", Date.now());
-		if (latestVersion) {
-			settings.set("latestVersion", latestVersion);
-		}
+		settings.set("latestVersion", latestVersion);
 
-		if (latestVersion && Bun.semver.order(latestVersion, currentVersion) > 0) {
+		if (Bun.semver.order(latestVersion, currentVersion) > 0) {
 			return latestVersion;
 		}
 

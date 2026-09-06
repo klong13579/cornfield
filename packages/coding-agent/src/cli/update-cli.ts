@@ -1,19 +1,19 @@
 /**
  * Update CLI command handler.
  *
- * Handles `omp update` to check for and install updates.
- * Uses bun if available, otherwise downloads binary from GitHub releases.
+ * Handles `cornfield update` to check for and install updates.
+ * Version source: GitHub Releases API. Install method: download the release
+ * binary from GitHub Releases — the npm registry is not a distribution
+ * channel (no @cornfield/* package has ever been published there).
  */
 import * as fs from "node:fs";
-import * as path from "node:path";
 import { pipeline } from "node:stream/promises";
 import { $which, APP_NAME, isEnoent, VERSION } from "@cornfield/utils";
 import { $ } from "bun";
 import chalk from "chalk";
 import { theme } from "../modes/theme/theme";
 
-const REPO = "klong13579/cornfield";
-const PACKAGE = "@cornfield/coding-agent";
+export const REPO = "klong13579/cornfield";
 
 interface ReleaseInfo {
 	tag: string;
@@ -35,116 +35,37 @@ export function parseUpdateArgs(args: string[]): { force: boolean; check: boolea
 	};
 }
 
-async function getBunGlobalBinDir(): Promise<string | undefined> {
-	if (!$which("bun")) return undefined;
-	try {
-		const result = await $`bun pm bin -g`.quiet().nothrow();
-		if (result.exitCode !== 0) return undefined;
-		const output = result.text().trim();
-		return output.length > 0 ? output : undefined;
-	} catch {
-		return undefined;
-	}
-}
-
-function normalizePathForComparison(filePath: string): string {
-	const normalized = path.normalize(filePath);
-	if (process.platform === "win32") return normalized.toLowerCase();
-	return normalized;
-}
-
-function tryRealpath(p: string): string | undefined {
-	try {
-		return fs.realpathSync.native(p);
-	} catch {
-		return undefined;
-	}
-}
-
-function isPathInDirectoryLexical(filePath: string, directoryPath: string): boolean {
-	const normalizedPath = normalizePathForComparison(path.resolve(filePath));
-	const normalizedDirectory = normalizePathForComparison(path.resolve(directoryPath));
-	const relativePath = path.relative(normalizedDirectory, normalizedPath);
-	return relativePath === "" || (!relativePath.startsWith("..") && !path.isAbsolute(relativePath));
-}
-
-function isPathInDirectory(filePath: string, directoryPath: string): boolean {
-	if (isPathInDirectoryLexical(filePath, directoryPath)) return true;
-	// Layer realpath resolution on top of the lexical guard. On Windows, ~/.bun
-	// is a junction when Bun is installed via Scoop, so `bun pm bin -g` and the
-	// PATH-resolved omp path can refer to the same directory through different
-	// strings. path.resolve does not traverse junctions/symlinks; realpath does.
-	// Resolve the file's parent directory to tolerate the file itself not yet
-	// existing (e.g. a fresh install path) while still catching link-traversed
-	// equality once the directory exists.
-	const fileDir = tryRealpath(path.dirname(path.resolve(filePath)));
-	const dirReal = tryRealpath(path.resolve(directoryPath));
-	if (!fileDir || !dirReal) return false;
-	const resolvedFile = path.join(fileDir, path.basename(filePath));
-	return isPathInDirectoryLexical(resolvedFile, dirReal);
-}
-
-type UpdateTarget = { method: "bun" } | { method: "binary"; path: string };
-
-function resolveUpdateMethod(cornfieldPath: string, bunBinDir: string | undefined): "bun" | "binary" {
-	if (!bunBinDir) return "binary";
-	return isPathInDirectory(cornfieldPath, bunBinDir) ? "bun" : "binary";
-}
-
-export function _resolveUpdateMethodForTest(cornfieldPath: string, bunBinDir: string | undefined): "bun" | "binary" {
-	return resolveUpdateMethod(cornfieldPath, bunBinDir);
-}
-async function resolveUpdateTarget(): Promise<UpdateTarget> {
-	const bunBinDir = await getBunGlobalBinDir();
-	const cornfieldPath = resolveCornfieldPath();
-
-	if (cornfieldPath) {
-		const method = resolveUpdateMethod(cornfieldPath, bunBinDir);
-		if (method === "bun") return { method };
-		return { method, path: cornfieldPath };
-	}
-
-	if (bunBinDir) return { method: "bun" };
-
-	throw new Error(`Could not resolve ${APP_NAME} binary path in PATH`);
+/**
+ * Get the latest release info from the GitHub Releases API.
+ *
+ * Same source as the desktop app's electron-updater feed. The npm registry is
+ * NOT a distribution channel for this project — no @cornfield/* package has
+ * ever been published there — so the previous npm check 404'd unconditionally
+ * and version checks could never see a new release.
+ */
+async function getLatestRelease(): Promise<ReleaseInfo> {
+	return fetchLatestReleaseFromGithub(REPO);
 }
 
 /**
- * Get the latest release info from the npm registry.
- * Uses npm instead of GitHub API to avoid unauthenticated rate limiting.
+ * Fetch the latest stable release of `repo` (owner/name) from the GitHub
+ * Releases API. Exported so the startup check in main.ts shares one source
+ * and one parsing path with the manual `update` command.
  */
-async function getLatestRelease(): Promise<ReleaseInfo> {
-	const response = await fetch(`https://registry.npmjs.org/${PACKAGE}/latest`);
+export async function fetchLatestReleaseFromGithub(repo: string, signal?: AbortSignal): Promise<ReleaseInfo> {
+	const response = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
+		headers: { Accept: "application/vnd.github+json", "User-Agent": APP_NAME },
+		signal,
+	});
 	if (!response.ok) {
 		throw new Error(`Failed to fetch release info: ${response.statusText}`);
 	}
-
-	const data = (await response.json()) as { version: string };
-	const version = data.version;
-	const tag = `v${version}`;
-
-	return {
-		tag,
-		version,
-	};
-}
-
-/**
- * Compare semver versions. Returns:
- * - negative if a < b
- * - 0 if a == b
- * - positive if a > b
- */
-function compareVersions(a: string, b: string): number {
-	const pa = a.split(".").map(Number);
-	const pb = b.split(".").map(Number);
-
-	for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-		const na = pa[i] || 0;
-		const nb = pb[i] || 0;
-		if (na !== nb) return na - nb;
+	const data = (await response.json()) as { tag_name?: string };
+	const tag = data.tag_name;
+	if (!tag) {
+		throw new Error("Failed to fetch release info: releases/latest returned no tag_name");
 	}
-	return 0;
+	return { tag, version: tag.replace(/^v/, "") };
 }
 
 /**
@@ -188,14 +109,14 @@ function getBinaryName(): string {
 }
 
 /**
- * Resolve the path that `omp` maps to in the user's PATH.
+ * Resolve the path that `cornfield` maps to in the user's PATH.
  */
 function resolveCornfieldPath(): string | undefined {
 	return $which(APP_NAME) ?? undefined;
 }
 
 /**
- * Run the resolved omp binary and check if it reports the expected version.
+ * Run the resolved cornfield binary and check if it reports the expected version.
  */
 async function verifyInstalledVersion(
 	expectedVersion: string,
@@ -206,7 +127,7 @@ async function verifyInstalledVersion(
 		const result = await $`${cornfieldPath} --version`.quiet().nothrow();
 		if (result.exitCode !== 0) return { ok: false, path: cornfieldPath };
 		const output = result.text().trim();
-		// Output format: "omp/X.Y.Z"
+		// Output format: "cornfield/X.Y.Z"
 		const match = output.match(/\/(\d+\.\d+\.\d+)/);
 		const actual = match?.[1];
 		return { ok: actual === expectedVersion, actual, path: cornfieldPath };
@@ -240,19 +161,6 @@ async function printVerification(expectedVersion: string): Promise<void> {
 			`You may need to reinstall: curl -fsSL https://raw.githubusercontent.com/${REPO}/main/install.sh | bash`,
 		),
 	);
-}
-
-/**
- * Update via bun package manager.
- */
-async function updateViaBun(expectedVersion: string): Promise<void> {
-	console.log(chalk.dim("Updating via bun..."));
-	const result = await $`bun install -g ${PACKAGE}@${expectedVersion}`.nothrow();
-	if (result.exitCode !== 0) {
-		throw new Error(`bun install failed with exit code ${result.exitCode}`);
-	}
-
-	await printVerification(expectedVersion);
 }
 
 /**
@@ -320,7 +228,7 @@ export async function runUpdateCommand(opts: { force: boolean; check: boolean })
 		process.exit(1);
 	}
 
-	const comparison = compareVersions(release.version, VERSION);
+	const comparison = Bun.semver.order(release.version, VERSION);
 
 	if (comparison <= 0 && !opts.force) {
 		console.log(chalk.green(`${theme.status.success} Already up to date`));
@@ -338,14 +246,14 @@ export async function runUpdateCommand(opts: { force: boolean; check: boolean })
 		return;
 	}
 
-	// Choose update method based on the prioritized omp binary in PATH
+	// Every install is a release binary (the npm registry is not a distribution
+	// channel), so update the PATH-resolved binary in place.
 	try {
-		const target = await resolveUpdateTarget();
-		if (target.method === "bun") {
-			await updateViaBun(release.version);
-		} else {
-			await updateViaBinaryAt(target.path, release.version);
+		const cornfieldPath = resolveCornfieldPath();
+		if (!cornfieldPath) {
+			throw new Error(`Could not resolve ${APP_NAME} binary path in PATH`);
 		}
+		await updateViaBinaryAt(cornfieldPath, release.version);
 	} catch (err) {
 		console.error(chalk.red(`Update failed: ${err}`));
 		process.exit(1);
