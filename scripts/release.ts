@@ -57,7 +57,7 @@ async function watchCI(): Promise<boolean> {
 					jobs: Array<{ name: string; databaseId: number; status: string; conclusion: string | null }>;
 				};
 				for (const job of jobs) {
-					if (job.status === "completed" && job.conclusion !== "success" && job.conclusion !== "skipped") {
+					if (job.status === "completed" && job.conclusion !== "success" && job.conclusion !== "skipped" && job.conclusion !== "cancelled") {
 						failedJobs.push({
 							workflow: run.name,
 							job: job.name,
@@ -88,7 +88,7 @@ async function watchCI(): Promise<boolean> {
 
 		// Check workflow-level status
 		const pending = runs.filter((r) => r.status !== "completed");
-		const failed = runs.filter((r) => r.status === "completed" && r.conclusion !== "success");
+		const failed = runs.filter((r) => r.status === "completed" && r.conclusion !== "success" && r.conclusion !== "cancelled");
 		const passed = runs.filter((r) => r.status === "completed" && r.conclusion === "success");
 
 		console.log(`  ${passed.length} passed, ${pending.length} pending, ${failed.length} failed`);
@@ -104,7 +104,7 @@ async function watchCI(): Promise<boolean> {
 						jobs: Array<{ name: string; databaseId: number; status: string; conclusion: string | null }>;
 					};
 					for (const job of jobs) {
-						if (job.conclusion !== "success" && job.conclusion !== "skipped") {
+						if (job.conclusion !== "success" && job.conclusion !== "skipped" && job.conclusion !== "cancelled") {
 							const log = await $`gh run view --job ${job.databaseId} --log-failed`.quiet().nothrow().text();
 							if (log.trim()) {
 								const lines = log.trimEnd().split("\n");
