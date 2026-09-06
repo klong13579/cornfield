@@ -1,0 +1,40 @@
+# Vendored copy of maudio 0.1.14 (MIT, https://github.com/someotherself/maudio)
+# with a single downstream fix: logging.rs `_ma_log_post` passes a `*const i8`
+# to maudio-sys's `ma_log_post`, whose parameter is `*const core::ffi::c_char`.
+# On targets where `c_char` is unsigned (aarch64-linux, aarch64-android,
+# aarch64-pc-windows-msvc) that is a type error, so upstream maudio cannot
+# compile there. The vendored copy casts through `core::ffi::c_char` so the
+# dead helper compiles on every target maudio-sys ships pregenerated bindings
+# for. Sync by re-copying from crates.io and re-applying the one-line fix.
+[package]
+edition = "2021"
+rust-version = "1.70"
+name = "maudio"
+version = "0.1.14"
+description = "All-in-one cross-platform audio library for Rust, powered by miniaudio."
+homepage = "https://github.com/someotherself/maudio"
+documentation = "https://docs.rs/maudio/latest/maudio/"
+readme = "README.md"
+keywords = ["audio", "miniaudio", "playback", "recording", "dsp"]
+categories = ["multimedia::audio", "multimedia"]
+license = "MIT"
+repository = "https://github.com/someotherself/maudio"
+
+[features]
+ci-tests = []
+debug-build = ["maudio-sys/debug-build"]
+default = ["engine"]
+engine = ["maudio-sys/engine"]
+external-lib = ["maudio-sys/external-lib"]
+generate-bindings = ["maudio-sys/generate-bindings"]
+supplybin = ["maudio-sys/supplybin"]
+use-global-allocator = []
+vorbis = ["maudio-sys/vorbis"]
+worklet = ["maudio-sys/worklet"]
+
+[lib]
+name = "maudio"
+path = "src/lib.rs"
+
+[dependencies.maudio-sys]
+version = "0.1.9"

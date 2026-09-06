@@ -1799,8 +1799,6 @@ dependencies = [
 [[package]]
 name = "maudio"
 version = "0.1.14"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "98c97a66a1cadd13582f07e67ad798486aac379bdb95db0b3a12c0ac19783aaa"
 dependencies = [
  "maudio-sys",
 ]
