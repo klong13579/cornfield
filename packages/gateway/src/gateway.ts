@@ -237,6 +237,7 @@ export async function createAccountBridgeOptions(
 		deniedTools: account.deniedTools,
 		accountId,
 		intercomParent: account.intercomParent,
+		sessionName: accountId,
 		// Each bridge gets a shared crash log sink so per-account crash /
 		// recovery / suppressed events are persisted to disk and survive
 		// gateway restarts. Tests can pass their own `CrashLog` instance

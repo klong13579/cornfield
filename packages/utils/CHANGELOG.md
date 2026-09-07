@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **RotatingFileTransport 多进程互覆写：FileSink 无追加语义，改用 O_APPEND fd** (`src/rotating-file-transport.ts`, `test/logger-rotation.test.ts`): `Bun.file().writer()` 总是从 offset 0 写且静默忽略 `{ append: true }`——所有 cornfield 进程（TUI 会话、gateway、其 wire-stdio 子进程）共用同一份按日文件时互相从文件头覆写：先启动的长生命周期进程（gateway 及其子进程）的日志被后续打开者抹掉，自己的写入也继续打在过期偏移上，文件内容变成各进程偏移交错的碎片。实测表现为 gateway 子进程「完全不写日志」。改为 `fs.openSync(path, "a")` 持有单个 O_APPEND fd、`fs.writeSync` 逐行写入（rotation/close 生命周期不变，无 FD churn）；新增双写者并发回归测试。
+
 ## [1.0.0] - 2026-08-29
 
 ### Changed

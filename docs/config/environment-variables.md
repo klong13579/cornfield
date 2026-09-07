@@ -271,6 +271,7 @@ Extra conditional behavior:
 | `CORNFIELD_SLOW_MODEL`              | Ephemeral model-role override for `slow` (CLI `--slow` takes precedence)                           |
 | `CORNFIELD_PLAN_MODEL`              | Ephemeral model-role override for `plan` (CLI `--plan` takes precedence)                           |
 | `CORNFIELD_NO_TITLE`                | If set (any non-empty value), disables auto session title generation on first user message         |
+| `PI_SESSION_NAME`            | Default session name for unnamed sessions. Set by the gateway on its wire-stdio children (value = account id) so gateway agents are identifiable on the intercom roster; a name persisted in the session file always wins |
 | `NULL_PROMPT`                | If `true`, system prompt builder returns empty string                                              |
 | `CORNFIELD_BLOCKED_AGENT`           | Blocks a specific subagent type in task tool                                                       |
 | `CORNFIELD_SUBPROCESS_CMD`          | Overrides subagent spawn command (`cornfield` / `cornfield.cmd` resolution bypass)                             |

@@ -6,8 +6,10 @@
  *   - WireTransport injects PI_SUBAGENT_ORCHESTRATOR_TARGET/_RUN_ID/_CHILD_AGENT/
  *     _CHILD_INDEX into the spawned omp child when `intercomParent` is set;
  *     without it, no child env leaks into the process.
+ *   - WireTransport injects PI_SESSION_NAME when `sessionName` is set
+ *     (gateway account identity for the intercom roster).
  *   - createAccountBridgeOptions forwards `account.intercomParent` into the
- *     bridge options.
+ *     bridge options and the accountId as `sessionName`.
  *
  * The bridge-level hop (AgentBridgeOptions → WireTransport) is type-checked
  * only; the runtime contract is the transport env + options factory below.
@@ -30,6 +32,7 @@ fs.writeFileSync(
     runId: process.env.PI_SUBAGENT_RUN_ID ?? null,
     agent: process.env.PI_SUBAGENT_CHILD_AGENT ?? null,
     index: process.env.PI_SUBAGENT_CHILD_INDEX ?? null,
+    sessionName: process.env.PI_SESSION_NAME ?? null,
   }),
 );
 // Wire handshake: reply hello_ack so WireTransport.start() resolves.
@@ -85,6 +88,7 @@ describe("WireTransport intercom child env", () => {
 			expect(env.runId).toBeTruthy();
 			expect(env.agent).toBe("gateway-account");
 			expect(env.index).toBe("0");
+			expect(env.sessionName).toBeNull();
 		} finally {
 			await transport.stop();
 			delete (process.env as Record<string, unknown>).__INTERCOM_CHILD_DUMP;
@@ -108,6 +112,28 @@ describe("WireTransport intercom child env", () => {
 			expect(env.runId).toBeNull();
 			expect(env.agent).toBeNull();
 			expect(env.index).toBeNull();
+			expect(env.sessionName).toBeNull();
+		} finally {
+			await transport.stop();
+			delete (process.env as Record<string, unknown>).__INTERCOM_CHILD_DUMP;
+		}
+	});
+
+	test("injects PI_SESSION_NAME when sessionName is set", async () => {
+		const scriptPath = await writeScript();
+		const outPath = path.join(tmpDir, "env-dump-name.json");
+		const transport = new WireTransport({
+			cornfieldPath: scriptPath,
+			readyTimeoutMs: 5_000,
+			sessionName: "hr",
+			cwd: tmpDir,
+		});
+		(process.env as Record<string, unknown>).__INTERCOM_CHILD_DUMP = outPath;
+		try {
+			await transport.start();
+			await waitForFile(outPath);
+			const env = JSON.parse(await Bun.file(outPath).text()) as Record<string, string | null>;
+			expect(env.sessionName).toBe("hr");
 		} finally {
 			await transport.stop();
 			delete (process.env as Record<string, unknown>).__INTERCOM_CHILD_DUMP;
@@ -126,13 +152,14 @@ describe("createAccountBridgeOptions intercomParent passthrough", () => {
 		expect(options.intercomParent).toBe("main-omp");
 	});
 
-	test("leaves intercomParent undefined when the account has none", async () => {
+	test("sets sessionName to the accountId", async () => {
 		const options = await createAccountBridgeOptions(
 			{},
 			"hr-account",
 			{ appKey: "a", appSecret: "s" },
 			path.join(tmpDir, "agent"),
 		);
+		expect(options.sessionName).toBe("hr-account");
 		expect(options.intercomParent).toBeUndefined();
 	});
 });

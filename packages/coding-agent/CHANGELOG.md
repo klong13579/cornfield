@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **Intercom 重连链在首次后台重试失败后永久断裂** (`src/intercom-extension/index.ts`, `test/intercom-reconnect.test.ts`): `ensureConnected` 在 catch 块内调用 `scheduleReconnect()`，但此时 `reconnectPromise` 尚未被 finally 清除，`scheduleReconnect` 的守卫把它当作「已有重试在排队」而静默 no-op——重试链在第一次后台重试失败后死亡。后果：一个进程一生只有启动 + 一次重试共两次连接机会，两次都失败（如 gateway 启动风暴期）则该 session 从 broker 名册永久消失。2026-09-07 实测：gateway 的 hr/algorithm 两个账号子进程失败后 24h 不可见。重试调度移入 finally（promise 清理之后），保留 background-only 语义；新增 fake-broker 回归测试（启动故障恢复 / 掉线重连 / 健康对照）。
+
+### Added
+
+- **`PI_SESSION_NAME` 会话名回落** (`src/session/session-manager.ts`, `test/session-manager/session-name-env.test.ts`): 未命名的 session 回落读取 `PI_SESSION_NAME` 环境变量（gateway 注入 accountId），intercom 名册/serve 注册表不再显示匿名 `subagent-chat-…` alias；session 文件内已持久化的名字始终优先。
+
 ## [1.1.1] - 2026-09-06
 
 ### Added

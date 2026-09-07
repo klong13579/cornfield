@@ -100,6 +100,10 @@ export interface WireTransportOptions {
 	hostToolHandler?: HostToolCallHandler;
 	/** Intercom parent target. */
 	intercomParent?: string;
+	/** Session identity injected as `PI_SESSION_NAME` so the child's sessions
+	 *  are named (e.g. the gateway account id) instead of falling back to the
+	 *  anonymous `subagent-chat-…` intercom alias. */
+	sessionName?: string;
 }
 
 export class WireTransportError extends Error {
@@ -311,6 +315,7 @@ export class WireTransport {
 				env: {
 					...process.env,
 					...resolveCredentialEnvVars(),
+					...(this.#options.sessionName ? { PI_SESSION_NAME: this.#options.sessionName } : {}),
 					...(this.#options.intercomParent
 						? {
 								PI_SUBAGENT_ORCHESTRATOR_TARGET: this.#options.intercomParent,

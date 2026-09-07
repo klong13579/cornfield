@@ -1,5 +1,5 @@
 /**
- * Bun-native rotating file transport for winston.
+ * Rotating file transport for winston (append-mode, fd-based).
  *
  * Replaces `winston-daily-rotate-file` + `file-stream-rotator`, which leak
  * file descriptors under Bun: `stream.end()` is async and the rotator
@@ -7,8 +7,13 @@
  * old FD to close. Over time (especially in a tight render loop after an
  * abort), dozens of orphaned FDs accumulate.
  *
- * This transport uses `Bun.file().writer()` (Bun.FileSink) which provides
- * synchronous `write()` and `end()` with reliable FD lifecycle management.
+ * This transport holds one POSIX append-mode fd (`fs.openSync(path, "a")`)
+ * and writes each line with `fs.writeSync`. O_APPEND is required because
+ * every cornfield process (TUI sessions, the gateway, its wire-stdio agent
+ * children) opens the same daily file: `Bun.file().writer()` (FileSink)
+ * always writes from offset 0 and silently ignores `{ append: true }`, so
+ * concurrent processes overwrote each other from the top of the file
+ * (2026-09-07: gateway agent children appeared to log nothing at all).
  *
  * Features:
  *   - Date-based filenames: `cornfield.YYYY-MM-DD.log`
@@ -65,7 +70,7 @@ export class RotatingFileTransport extends Transport {
 	readonly #maxBytes: number;
 	readonly #maxFiles: number;
 
-	#writer: Bun.FileSink | null = null;
+	#fd: number | null = null;
 	#currentPath: string;
 	#currentDate: string;
 	#currentSize = 0;
@@ -91,7 +96,12 @@ export class RotatingFileTransport extends Transport {
 	}
 
 	#open(): void {
-		this.#writer = Bun.file(this.#currentPath).writer();
+		// O_APPEND is mandatory: see the module doc. Every cornfield process
+		// (TUI sessions, gateway, wire-stdio children) opens the same daily
+		// file; without O_APPEND each opener starts at offset 0 and overwrites
+		// the others from the top. FileSink cannot append (its `append` option
+		// is silently ignored), so this transport uses a raw append fd.
+		this.#fd = fs.openSync(this.#currentPath, "a");
 		try {
 			const stat = fs.statSync(this.#currentPath);
 			this.#currentSize = stat.size;
@@ -101,10 +111,8 @@ export class RotatingFileTransport extends Transport {
 	}
 
 	#rotate(): void {
-		// Flush and close the current writer.
-		this.#writer?.flush();
-		this.#writer?.end();
-		this.#writer = null;
+		// Close the current fd before renaming.
+		this.#closeFd();
 
 		// Rename current file to .1, shift existing .N to .N+1.
 		this.#shiftRotatedFiles();
@@ -171,12 +179,10 @@ export class RotatingFileTransport extends Transport {
 		const newDate = formatDate(new Date(), this.#datePattern);
 		if (newDate !== this.#currentDate) {
 			this.#currentDate = newDate;
-			// Date changed — close current writer, open new date file.
+			// Date changed — close current fd, open new date file.
 			// No renaming needed; the old date file stays as-is.
-			this.#writer?.flush();
-			this.#writer?.end();
-			this.#writer = null;
-			this.#currentPath = this.#buildPath(this.#currentDate);
+			this.#closeFd();
+			this.#currentPath = this.#buildPath(newDate);
 			this.#currentSize = 0;
 			this.#open();
 		}
@@ -198,17 +204,32 @@ export class RotatingFileTransport extends Transport {
 			this.#rotate();
 		}
 
-		this.#writer?.write(line);
-		this.#currentSize += lineBytes;
+		try {
+			if (this.#fd !== null) {
+				fs.writeSync(this.#fd, line);
+				this.#currentSize += lineBytes;
+			}
+		} catch (error) {
+			this.emit("error", error, info);
+		}
 		this.emit("logged", info);
 		callback();
 	}
 
 	override close(): void {
-		this.#writer?.flush();
-		this.#writer?.end();
-		this.#writer = null;
+		this.#closeFd();
 		this.emit("finish");
+	}
+
+	#closeFd(): void {
+		if (this.#fd !== null) {
+			try {
+				fs.closeSync(this.#fd);
+			} catch {
+				// fd already closed
+			}
+			this.#fd = null;
+		}
 	}
 }
 

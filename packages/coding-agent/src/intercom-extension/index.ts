@@ -1388,7 +1388,8 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
 			}
 			reconnectAttempt += 1;
 			void ensureConnected("background").catch(() => {
-				// ensureConnected("background") already queued the next retry.
+				// Failure handling (including the next retry) lives in
+				// ensureConnected's finally block.
 			});
 		}, getReconnectDelayMs());
 	}
@@ -1413,6 +1414,7 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
 		}
 		// TS strict mode rejects a const IIFE self-reference (TDZ); declare first, assign after.
 		let nextReconnectPromise!: Promise<IntercomClient>;
+		let failure: unknown;
 		const ensureTask = (async () => {
 			const nextClient = new IntercomClient();
 			client = nextClient;
@@ -1443,14 +1445,22 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
 				if (client === nextClient) {
 					client = null;
 				}
-				if (reason === "background" && getLiveContext(contextAtStart, generationAtStart)) {
-					scheduleReconnect();
-				}
+				failure = error;
 				throw toError(error);
 			} finally {
 				if (reconnectPromise === nextReconnectPromise) {
 					reconnectPromise = null;
 					reconnectPromiseGeneration = null;
+				}
+				// Schedule the retry AFTER the finally block cleared
+				// reconnectPromise: scheduleReconnect() treats a live promise
+				// as "a retry is already queued" and no-ops. Calling it from
+				// the catch (before finally ran) silently killed the retry
+				// chain on the first failed background attempt, leaving the
+				// session permanently absent from the broker roster
+				// (2026-09-07: gateway hr/algorithm agents missing for 24h).
+				if (failure !== undefined && reason === "background" && getLiveContext(contextAtStart, generationAtStart)) {
+					scheduleReconnect();
 				}
 			}
 		})();

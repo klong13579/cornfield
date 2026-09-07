@@ -111,6 +111,9 @@ export interface AgentBridgeOptions {
 	 *  spawned `omp --mode rpc` registers on the intercom broker as a child
 	 *  of that session (auto completion reports, ask→parent routing). */
 	intercomParent?: string;
+	/** Session identity injected as `PI_SESSION_NAME` into the child, so its
+	 *  sessions carry a stable name (intercom roster, serve registry). */
+	sessionName?: string;
 	/** Host tool dispatcher wired to the gateway's HostToolDispatcher. When
 	 *  set, the bridge sends `set_host_tools` to OMP on each `ready` event
 	 *  and routes `host_tool_call` frames to the dispatcher. */
@@ -188,6 +191,7 @@ export class AgentBridge {
 			model: options.model,
 			cwd: options.cwd,
 			intercomParent: options.intercomParent,
+			sessionName: options.sessionName,
 			hostToolHandler: options.hostToolDispatcher
 				? (call, reply) => {
 						options.hostToolDispatcher!.setWriter((id, body) => {

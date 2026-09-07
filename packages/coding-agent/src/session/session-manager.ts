@@ -2225,8 +2225,19 @@ export class SessionManager {
 		return this.#titleSource;
 	}
 
+	/**
+	 * Session name, falling back to `PI_SESSION_NAME` for unnamed sessions.
+	 *
+	 * The gateway sets `PI_SESSION_NAME` to the account id on its wire-stdio
+	 * children so every conversation session they serve is identifiable
+	 * (intercom roster, serve registry) instead of falling back to the
+	 * anonymous `subagent-chat-…` alias. A name persisted in the session file
+	 * always wins over the env default.
+	 */
 	getSessionName(): string | undefined {
-		return this.#sessionName;
+		if (this.#sessionName) return this.#sessionName;
+		const envName = process.env.PI_SESSION_NAME?.trim();
+		return envName || undefined;
 	}
 
 	/** Strip C0/C1 control characters (includes ESC, so removes ANSI sequences) and collapse whitespace. */

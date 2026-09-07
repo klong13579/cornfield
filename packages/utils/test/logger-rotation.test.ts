@@ -93,6 +93,42 @@ describe("RotatingFileTransport", () => {
 		}
 	});
 
+	test("concurrent transports append instead of clobbering each other", () => {
+		// Two writers on the same daily file (e.g. gateway + its wire-stdio
+		// children) must behave like O_APPEND. Without `append: true` each
+		// FileSink starts at offset 0 and overwrites the other's content.
+		const logsDir = path.join(tmpHome, "logs");
+		fs.mkdirSync(logsDir, { recursive: true });
+		const file = path.join(logsDir, `omp.${new Date().toISOString().slice(0, 10)}.log`);
+
+		const transportA = new RotatingFileTransport({
+			dirname: logsDir,
+			filename: "omp.%DATE%.log",
+			datePattern: "YYYY-MM-DD",
+			maxSize: "100m",
+			maxFiles: 5,
+		});
+		const loggerA = winston.createLogger({ level: "info", transports: [transportA] });
+		loggerA.info("first writer line");
+		transportA.close();
+
+		// Second process opens the same file after the first one wrote.
+		const transportB = new RotatingFileTransport({
+			dirname: logsDir,
+			filename: "omp.%DATE%.log",
+			datePattern: "YYYY-MM-DD",
+			maxSize: "100m",
+			maxFiles: 5,
+		});
+		const loggerB = winston.createLogger({ level: "info", transports: [transportB] });
+		loggerB.info("second writer line");
+		transportB.close();
+
+		const content = fs.readFileSync(file, "utf-8");
+		expect(content).toContain("first writer line");
+		expect(content).toContain("second writer line");
+	});
+
 	test("close() flushes pending writes to disk", () => {
 		const logsDir = path.join(tmpHome, "logs");
 		fs.mkdirSync(logsDir, { recursive: true });
