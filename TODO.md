@@ -3,6 +3,9 @@
 > Current task state. The agent updates this file as work progresses; an empty TODO is a valid state.
 
 ## 待办
+- [ ] [P1] 最终验证
+- [ ] [P1] B层验证2
+- [ ] g-brain 实体建模
 - [ ] task agent 调用梳理
 - [ ] web-search tool 功能升级，提升搜索能力。
 - [ ] web-search 搜索的页面在客户端显示列表，并支持点击查看。
