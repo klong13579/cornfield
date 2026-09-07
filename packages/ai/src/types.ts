@@ -83,6 +83,13 @@ export interface ThinkingConfig {
 	minLevel: Effort;
 	/** Most intensive supported user-facing effort level. */
 	maxLevel: Effort;
+	/**
+	 * Explicit supported effort set. Overrides the min/max range when present —
+	 * for models whose upstream accepts a non-contiguous level set (e.g.
+	 * narwal-plan/glm-5.3-flash only accepts low/high/max and 400s on medium).
+	 * When absent, every level in [minLevel, maxLevel] is considered supported.
+	 */
+	levels?: readonly Effort[];
 	/** Optional default effort applied when this model is selected. Falls back to global default if absent. */
 	defaultLevel?: Effort;
 	/** Provider-specific transport used to encode the selected effort. */

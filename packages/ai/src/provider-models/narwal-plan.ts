@@ -664,6 +664,37 @@ export const NARWAL_PLAN_STATIC_MODELS: readonly Model<"openai-completions">[] =
 		},
 	},
 	{
+		// Always-thinking variant that only accepts reasoning_effort low/high/max —
+		// upstream 400s on medium ("该模型始终思考，不支持关闭思考；请使用 low、high 或 max")
+		// and on thinking disabled. The explicit `levels` set keeps the resolver's
+		// -flash parent lookup (which would inherit glm-5.3's contiguous range and
+		// bless "medium") from producing requests the upstream rejects.
+		id: "glm-5.3-flash",
+		name: "GLM 5.3 Flash",
+		api: "openai-completions",
+		provider: "narwal-plan",
+		baseUrl: "https://coder.narwal.com/v1",
+		reasoning: true,
+		input: ["text"],
+		cost: {
+			input: 1.0,
+			output: 3.0,
+			cacheRead: 0.2,
+			cacheWrite: 0,
+		},
+		contextWindow: 1000000,
+		maxTokens: 128000,
+		thinking: {
+			mode: "effort",
+			minLevel: Effort.Low,
+			maxLevel: Effort.XHigh,
+			levels: [Effort.Low, Effort.High, Effort.XHigh],
+		},
+		compat: {
+			supportsDeveloperRole: false,
+		},
+	},
+	{
 		id: "gpt-5.6-luna",
 		name: "GPT 5.6 Luna",
 		api: "openai-completions",

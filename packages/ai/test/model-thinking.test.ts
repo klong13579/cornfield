@@ -4,6 +4,7 @@ import {
 	clampThinkingLevelForModel,
 	Effort,
 	enrichModelThinking,
+	getSupportedEfforts,
 	linkOpenAIPromotionTargets,
 	mapEffortToAnthropicAdaptiveEffort,
 	mapEffortToGoogleThinkingLevel,
@@ -525,5 +526,86 @@ describe("model thinking runtime helpers", () => {
 		} satisfies Model<"openai-responses">);
 
 		expect(model.thinking).toBeUndefined();
+	});
+});
+
+describe("explicit thinking level sets (non-contiguous upstream support)", () => {
+	const CATALOG_MODEL_ID = "glm-5.3-flash";
+
+	it("ships glm-5.3-flash with the explicit low/high/xhigh level set", () => {
+		const model = getBundledModel("narwal-plan", CATALOG_MODEL_ID);
+		expect(model).toBeDefined();
+		expect(model!.reasoning).toBe(true);
+		expect(model!.thinking?.levels).toEqual([Effort.Low, Effort.High, Effort.XHigh]);
+	});
+
+	it("getSupportedEfforts returns the explicit set without medium", () => {
+		const model = getBundledModel("narwal-plan", CATALOG_MODEL_ID)!;
+		expect(getSupportedEfforts(model)).toEqual([Effort.Low, Effort.High, Effort.XHigh]);
+	});
+
+	it("clamps medium down to low instead of sending a rejected effort", () => {
+		const model = getBundledModel("narwal-plan", CATALOG_MODEL_ID)!;
+		expect(clampThinkingLevelForModel(model, Effort.Medium)).toBe(Effort.Low);
+		expect(clampThinkingLevelForModel(model, Effort.Minimal)).toBe(Effort.Low);
+		expect(clampThinkingLevelForModel(model, Effort.High)).toBe(Effort.High);
+		expect(clampThinkingLevelForModel(model, Effort.XHigh)).toBe(Effort.XHigh);
+	});
+
+	it("requireSupportedEffort rejects medium with the explicit set", () => {
+		const model = getBundledModel("narwal-plan", CATALOG_MODEL_ID)!;
+		expect(() => requireSupportedEffort(model, Effort.Medium)).toThrow(
+			/Supported efforts: low, high, xhigh/,
+		);
+	});
+
+	it("enrichModelThinking preserves the explicit set instead of re-inferring a range", () => {
+		const model = enrichModelThinking({
+			id: CATALOG_MODEL_ID,
+			name: "GLM 5.3 Flash",
+			api: "openai-completions",
+			provider: "narwal-plan",
+			baseUrl: "https://coder.narwal.com/v1",
+			reasoning: true,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 200000,
+			maxTokens: 32000,
+			thinking: {
+				mode: "effort",
+				minLevel: Effort.Low,
+				maxLevel: Effort.XHigh,
+				levels: [Effort.Low, Effort.High, Effort.XHigh],
+			},
+		} satisfies Model<"openai-completions">);
+
+		expect(model.thinking?.levels).toEqual([Effort.Low, Effort.High, Effort.XHigh]);
+	});
+
+	it("applyGeneratedModelPolicies preserves the explicit set (generator clobber regression)", () => {
+		const models: Model<"openai-completions">[] = [
+			{
+				id: CATALOG_MODEL_ID,
+				name: "GLM-5.3-Flash",
+				api: "openai-completions",
+				provider: "narwal-plan",
+				baseUrl: "https://coder.narwal.com/v1",
+				reasoning: true,
+				input: ["text", "image"],
+				cost: { input: 1, output: 3, cacheRead: 0.2, cacheWrite: 0 },
+				contextWindow: 1000000,
+				maxTokens: 128000,
+				thinking: {
+					mode: "effort",
+					minLevel: Effort.Low,
+					maxLevel: Effort.XHigh,
+					levels: [Effort.Low, Effort.High, Effort.XHigh],
+				},
+				compat: { supportsDeveloperRole: false },
+			},
+		];
+
+		applyGeneratedModelPolicies(models);
+		expect(models[0]!.thinking?.levels).toEqual([Effort.Low, Effort.High, Effort.XHigh]);
 	});
 });

@@ -409,6 +409,12 @@ function applyOpenAICatalogPolicy(model: ApiModel<Api>, parsedModel: OpenAIModel
 }
 
 function inferModelThinking<TApi extends Api>(model: ApiModel<TApi>): ThinkingConfig {
+	// An explicit `levels` set is authored metadata (e.g. glm-5.3-flash only
+	// accepts low/high/max upstream). Inference can only guess a contiguous
+	// range, so it must never overwrite it.
+	if (model.thinking?.levels && model.thinking.levels.length > 0) {
+		return model.thinking;
+	}
 	const parsedModel = parseKnownModel(model.id);
 	const efforts = inferSupportedEfforts(parsedModel, model);
 	const minLevel = efforts[0];
@@ -433,10 +439,26 @@ function normalizeThinkingConfig(thinking: ThinkingConfig | undefined): Thinking
 function thinkingsEqual(left: ThinkingConfig | undefined, right: ThinkingConfig | undefined): boolean {
 	if (left === right) return true;
 	if (!left || !right) return false;
-	return left.mode === right.mode && left.minLevel === right.minLevel && left.maxLevel === right.maxLevel;
+	if (left.mode !== right.mode || left.minLevel !== right.minLevel || left.maxLevel !== right.maxLevel) {
+		return false;
+	}
+	const leftLevels = left.levels;
+	const rightLevels = right.levels;
+	if (leftLevels === rightLevels) return true;
+	if (!leftLevels || !rightLevels) return false;
+	return (
+		leftLevels.length === rightLevels.length && leftLevels.every((level, i) => level === rightLevels[i])
+	);
 }
 
 function expandEffortRange(thinking: ThinkingConfig): readonly Effort[] {
+	// An explicit level set wins over the min/max range: some models only
+	// accept a non-contiguous set of efforts (e.g. glm-5.3-flash: low/high/max,
+	// no medium — upstream 400s on anything else).
+	if (thinking.levels && thinking.levels.length > 0) {
+		const known = thinking.levels.filter(l => THINKING_EFFORTS.includes(l));
+		return [...known].sort((a, b) => THINKING_EFFORTS.indexOf(a) - THINKING_EFFORTS.indexOf(b));
+	}
 	const minIndex = THINKING_EFFORTS.indexOf(thinking.minLevel);
 	const maxIndex = THINKING_EFFORTS.indexOf(thinking.maxLevel);
 	if (minIndex === -1 || maxIndex === -1 || minIndex > maxIndex) {

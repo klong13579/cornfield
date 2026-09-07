@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **glm-5.3-flash 拒绝 medium thinking 导致 dataAgent 全部请求 400** (`src/model-thinking.ts`, `src/types.ts`, `src/provider-models/narwal-plan.ts`, `src/models.json`, `test/model-thinking.test.ts`): narwal-plan/glm-5.3-flash 是始终思考模型，上游只接受 reasoning_effort low/high/max（实测 medium 与 thinking disabled 均 400「该模型始终思考，不支持关闭思考」）。该 id 不在静态种子里，discovery 的 `-flash` 父引用回退让它继承了 glm-5.3 的连续区间 minimal..xhigh，`medium` 被视为合法并直发上游 → 400，gateway 钉钉侧所有回复变成「LLM 请求失败：服务暂时不稳定」。修复：`ThinkingConfig` 新增可选 `levels`（显式支持集合，非连续），推断与 generator 重建（refreshModelThinking/inferModelThinking）不得覆盖显式集合；补 glm-5.3-flash 静态种子（levels low/high/xhigh），请求前 clamp 把 medium/minimal 钉到 low。
+
 ## [1.1.0] - 2026-09-05
 
 ### Fixed
