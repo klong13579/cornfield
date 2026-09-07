@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **桌面壳打包缺 `--bundle` 导致启动即崩**（`package.json` build）：esbuild 不带 `--bundle` 时只转译入口、不产出本地模块，`src/logger.ts`（1.1.0 加入）从未被打包；`dist/main.js` 保留 `import ... from "./logger.js"` 运行时引用，asar 内无该文件 → 主进程 ESM 链接阶段抛 `ERR_MODULE_NOT_FOUND`，1.1.0/1.1.1 桌面客户端一启动就崩且无日志可查。改为对 main/sidecar/preload 逐个 `--bundle --packages=external`：本地模块（logger）内联进 main.js，`electron`/`electron-updater` 保持 external 从 asar node_modules 解析；preload 改 `--outfile` 直出 `.cjs`，不再用 `--out-extension` hack。
+
 ## [1.1.1] - 2026-09-06
 
 ### Added

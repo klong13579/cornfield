@@ -8,7 +8,7 @@
 	"main": "dist/main.js",
 	"scripts": {
 		"dev": "bun run build && electron .",
-		"build": "esbuild src/main.ts src/sidecar.ts --outdir=dist --platform=node --target=node22 --format=esm && esbuild src/preload.ts --outdir=dist --platform=node --target=node22 --format=cjs --out-extension:.js=.cjs",
+		"build": "esbuild src/main.ts --bundle --packages=external --outfile=dist/main.js --platform=node --target=node22 --format=esm && esbuild src/sidecar.ts --bundle --packages=external --outfile=dist/sidecar.js --platform=node --target=node22 --format=esm && esbuild src/preload.ts --bundle --packages=external --outfile=dist/preload.cjs --platform=node --target=node22 --format=cjs",
 		"dist": "bun run build && electron-builder",
 		"build:desktop": "bun scripts/build.ts",
 		"check": "biome check . && bun run check:types",
