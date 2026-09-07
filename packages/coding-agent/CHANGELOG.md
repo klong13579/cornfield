@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **Intercom 发送消息的 TUI 显示改为 bash 式多行预览** (`src/intercom-extension/index.ts`, `src/intercom-extension/ui/message-body.ts`, `test/intercom-extension/message-body.test.ts`): `intercom` 与 `contact_supervisor` 发出的消息正文不再压成单行 96 字符截断，改为宽度感知折行、收起时显示前 10 个视觉行 + `… (N more lines, Ctrl+O to expand)`，Ctrl+O 展开后显示完整内容（与 bash 输出展示一致）。`contact_supervisor` 同款单行预览一并替换，删除不再使用的 `previewText`。
+
 ### Fixed
 
 - **Intercom 重连链在首次后台重试失败后永久断裂** (`src/intercom-extension/index.ts`, `test/intercom-reconnect.test.ts`): `ensureConnected` 在 catch 块内调用 `scheduleReconnect()`，但此时 `reconnectPromise` 尚未被 finally 清除，`scheduleReconnect` 的守卫把它当作「已有重试在排队」而静默 no-op——重试链在第一次后台重试失败后死亡。后果：一个进程一生只有启动 + 一次重试共两次连接机会，两次都失败（如 gateway 启动风暴期）则该 session 从 broker 名册永久消失。2026-09-07 实测：gateway 的 hr/algorithm 两个账号子进程失败后 24h 不可见。重试调度移入 finally（promise 清理之后），保留 background-only 语义；新增 fake-broker 回归测试（启动故障恢复 / 掉线重连 / 健康对照）。

@@ -42,6 +42,7 @@ import type {
 import { EXTENSION_BUS_FEATURE } from "./types";
 import { ComposeOverlay, type ComposeResult } from "./ui/compose";
 import { InlineMessageComponent } from "./ui/inline-message";
+import { createMessageBodyComponent } from "./ui/message-body";
 import { SessionListOverlay } from "./ui/session-list";
 
 const SUBAGENT_CONTROL_INTERCOM_EVENT = "subagent:control-intercom";
@@ -519,16 +520,6 @@ function formatSessionListRow(session: SessionInfo, currentCwd: string, isSelf: 
 	].filter((tag): tag is string => Boolean(tag));
 	const suffix = tags.length ? ` [${tags.join(", ")}]` : "";
 	return `• ${name} (${idPrefix}) — ${session.cwd} (${session.model}${formatContextUsage(session)})${suffix}`;
-}
-function previewText(value: unknown, maxLength = 72): string | undefined {
-	if (typeof value !== "string") {
-		return undefined;
-	}
-	const normalized = value.replace(/\s+/g, " ").trim();
-	if (!normalized) {
-		return undefined;
-	}
-	return normalized.length > maxLength ? `${normalized.slice(0, maxLength - 1)}…` : normalized;
 }
 function firstTextContent(result: { content?: Array<{ type: string; text?: string }> }): string {
 	return (
@@ -2288,25 +2279,22 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
 						};
 					}
 				},
-				renderCall(args, theme) {
+				renderCall(args, theme, context) {
 					const reason = typeof args.reason === "string" ? args.reason : "contact";
-					const messagePreview = previewText(args.message, 96);
 					const interview =
 						args.interview && typeof args.interview === "object"
 							? (args.interview as { title?: unknown })
 							: undefined;
-					let text = theme.fg("toolTitle", theme.bold("contact_supervisor "));
-					text += theme.fg(
+					let header = theme.fg("toolTitle", theme.bold("contact_supervisor "));
+					header += theme.fg(
 						reason === "need_decision" ? "warning" : reason === "progress_update" ? "muted" : "accent",
 						reason,
 					);
 					if (typeof interview?.title === "string" && interview.title.trim()) {
-						text += ` ${theme.fg("accent", interview.title.trim())}`;
+						header += ` ${theme.fg("accent", interview.title.trim())}`;
 					}
-					if (messagePreview) {
-						text += `\n  ${theme.fg("dim", messagePreview)}`;
-					}
-					return new Text(text, 0, 0);
+					const message = typeof args.message === "string" ? args.message : "";
+					return createMessageBodyComponent(header, message, theme, () => context?.expanded ?? false);
 				},
 				renderResult(result, { isPartial }, theme, context) {
 					if (isPartial) {
@@ -3106,23 +3094,20 @@ Usage:
 						};
 				}
 			},
-			renderCall(args, theme) {
+			renderCall(args, theme, context) {
 				const action = typeof args.action === "string" ? args.action : "intercom";
 				const target = typeof args.to === "string" && args.to.trim() ? args.to.trim() : undefined;
-				const messagePreview = previewText(args.message, 96);
 				const attachmentCount = Array.isArray(args.attachments) ? args.attachments.length : 0;
-				let text = theme.fg("toolTitle", theme.bold("intercom "));
-				text += theme.fg(action === "ask" ? "warning" : action === "reply" ? "success" : "accent", action);
+				let header = theme.fg("toolTitle", theme.bold("intercom "));
+				header += theme.fg(action === "ask" ? "warning" : action === "reply" ? "success" : "accent", action);
 				if (target) {
-					text += ` ${theme.fg("muted", "→")} ${theme.fg("accent", target)}`;
+					header += ` ${theme.fg("muted", "→")} ${theme.fg("accent", target)}`;
 				}
 				if (attachmentCount > 0) {
-					text += ` ${theme.fg("dim", `(${attachmentCount} attachment${attachmentCount === 1 ? "" : "s"})`)}`;
+					header += ` ${theme.fg("dim", `(${attachmentCount} attachment${attachmentCount === 1 ? "" : "s"})`)}`;
 				}
-				if (messagePreview) {
-					text += `\n  ${theme.fg("dim", messagePreview)}`;
-				}
-				return new Text(text, 0, 0);
+				const message = typeof args.message === "string" ? args.message : "";
+				return createMessageBodyComponent(header, message, theme, () => context?.expanded ?? false);
 			},
 			renderResult(result, { isPartial }, theme, context) {
 				if (isPartial) {
