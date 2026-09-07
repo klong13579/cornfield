@@ -544,4 +544,240 @@ for await (const chunk of Bun.stdin.stream()) {
 			await fs.rm(dir, { recursive: true, force: true });
 		}
 	});
+
+	// Regression (M-SW 2026-09-07): a tool-only boundary (thinking +
+	// tool call, no user-visible text) must NOT split the card. Before
+	// the fix, every tool call in a chain produced its own DingTalk
+	// message — a 26-tool-call run spammed ~25 cards. After the fix the
+	// whole chain stays on one card; tool blocks accumulate in the
+	// blockList and the single FINISHED carries them all.
+	const TOOL_CHAIN_RPC = `#!/usr/bin/env bun
+let buffer = "";
+function emit(value) { process.stdout.write(JSON.stringify(value) + "\\n"); }
+function pushEvent(event) { emit({ type: "push", event: { type: "progress", sessionId: "s1", event } }); }
+async function handleFrame(frame) {
+  if (frame.type === "hello") {
+    emit({ type: "hello_ack", connectionId: "chain", protocolVersion: 1 });
+    return;
+  }
+  if (frame.type !== "request") return;
+  const cmd = frame.command;
+  if (cmd.type === "switch_session") {
+    emit({ type: "response", id: frame.id, ok: true, result: { cancelled: false } });
+    return;
+  }
+  if (cmd.type === "prompt") {
+    emit({ type: "response", id: frame.id, ok: true });
+    for (let i = 1; i <= 4; i++) {
+      pushEvent({ type: "message_update", assistantMessageEvent: { type: "thinking_delta", delta: "reasoning step " + i }, message: { role: "assistant", content: [] } });
+      pushEvent({ type: "message_update", assistantMessageEvent: { type: "toolcall_end", toolCall: { id: "tc" + i, name: "bash", arguments: { command: "step " + i } } }, message: { role: "assistant", content: [] } });
+      pushEvent({ type: "message_end", message: { role: "assistant", content: [], model: "test-model", provider: "test", usage: { input: 5, output: 2, cacheRead: 0, cacheWrite: 0, totalTokens: 7 }, duration: 50 } });
+      pushEvent({ type: "message_end", message: { role: "toolResult", toolCallId: "tc" + i, toolName: "bash", content: [{ type: "text", text: "result " + i }] } });
+    }
+    pushEvent({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "All done.", contentIndex: 0 }, message: { role: "assistant", content: [] } });
+    pushEvent({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "All done." }], model: "test-model", provider: "test", usage: { input: 5, output: 2, cacheRead: 0, cacheWrite: 0, totalTokens: 7 }, duration: 50 } });
+    pushEvent({ type: "agent_end" });
+    return;
+  }
+  if (cmd.type === "abort") {
+    emit({ type: "response", id: frame.id, ok: true });
+  }
+}
+for await (const chunk of Bun.stdin.stream()) {
+  buffer += new TextDecoder().decode(chunk);
+  let idx = buffer.indexOf("\\n");
+  while (idx !== -1) {
+    const line = buffer.slice(0, idx).trim();
+    buffer = buffer.slice(idx + 1);
+    if (!line) { idx = buffer.indexOf("\\n"); continue; }
+    await handleFrame(JSON.parse(line));
+    idx = buffer.indexOf("\\n");
+  }
+}
+`;
+
+	test("tool-only chain stays on ONE card (no split at tool boundaries)", async () => {
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "cornfield-gateway-chain-rpc-"));
+		const scriptPath = path.join(dir, "fake-chain-rpc");
+		await Bun.write(scriptPath, TOOL_CHAIN_RPC);
+		await fs.chmod(scriptPath, 0o755);
+		const server = await startFakeCardServer();
+		try {
+			const restore = await installCardApiBaseForTest(server.host, server.port);
+			try {
+				const chainBridge = new AgentBridge({ cornfieldPath: scriptPath });
+				await chainBridge.start();
+
+				const channel = new DingTalkChannel();
+				channel.setAccountId("ops");
+				channel.setConfig(makeDingTalkConfig(server.port));
+
+				const inbound = makeMessage("run the chain", "conv-chain-1");
+				const session = makeSession("/tmp/chain-1.jsonl", "conv-chain-1");
+				const submit = (
+					handlers?: Parameters<typeof channel.streamCard>[3],
+				): ReturnType<typeof chainBridge.forwardWithMeta> =>
+					chainBridge.forwardWithMeta(inbound, session, handlers);
+
+				await channel.streamCard(
+					inbound,
+					session,
+					{ accountId: "ops", agentName: "ops-bot", dapiCalls: 0 },
+					submit,
+				);
+
+				// ONE card for the whole tool chain: one create, one FINISHED.
+				const creates = server.calls.filter(c => c.method === "POST" && c.path === "/v1.0/card/instances");
+				expect(creates.length).toBe(1);
+				const finishes = server.calls.filter(
+					c =>
+						c.method === "PUT" &&
+						c.path === "/v1.0/card/instances" &&
+						(c.body as any)?.cardData?.cardParamMap?.flowStatus === "3",
+				);
+				expect(finishes.length).toBe(1);
+
+				// The single finished card carries all 4 tool blocks + the answer.
+				const map = (finishes[0] as any)?.body?.cardData?.cardParamMap;
+				expect(map?.content).toContain("All done.");
+				const blockList = JSON.parse(map.blockList);
+				const toolBlocks = blockList.filter((b: { type: number }) => b.type === 2);
+				expect(toolBlocks.length).toBe(4);
+				const answerBlocks = blockList.filter((b: { type: number }) => b.type === 0);
+				expect(answerBlocks.length).toBe(1);
+				expect(answerBlocks[0].markdown).toContain("All done.");
+
+				chainBridge.stop();
+			} finally {
+				restore();
+				server.stop();
+			}
+		} finally {
+			await fs.rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	// Narration segments (user-visible text) still become their own
+	// cards; only tool-only turns merge into the current card.
+	// Flow: think+tool / think+tool / text2+tool / text-final →
+	//   card 1 = text2 + accumulated think/tool blocks
+	//   card 2 = final answer
+	const NARRATION_RPC = `#!/usr/bin/env bun
+let buffer = "";
+function emit(value) { process.stdout.write(JSON.stringify(value) + "\\n"); }
+function pushEvent(event) { emit({ type: "push", event: { type: "progress", sessionId: "s1", event } }); }
+async function handleFrame(frame) {
+  if (frame.type === "hello") {
+    emit({ type: "hello_ack", connectionId: "narr", protocolVersion: 1 });
+    return;
+  }
+  if (frame.type !== "request") return;
+  const cmd = frame.command;
+  if (cmd.type === "switch_session") {
+    emit({ type: "response", id: frame.id, ok: true, result: { cancelled: false } });
+    return;
+  }
+  if (cmd.type === "prompt") {
+    emit({ type: "response", id: frame.id, ok: true });
+    // Turn 1: thinking + tool, no text
+    pushEvent({ type: "message_update", assistantMessageEvent: { type: "thinking_delta", delta: "thinking 1" }, message: { role: "assistant", content: [] } });
+    pushEvent({ type: "message_update", assistantMessageEvent: { type: "toolcall_end", toolCall: { id: "n1", name: "search", arguments: { q: 1 } } }, message: { role: "assistant", content: [] } });
+    pushEvent({ type: "message_end", message: { role: "assistant", content: [], model: "test-model", provider: "test", usage: { input: 5, output: 2, cacheRead: 0, cacheWrite: 0, totalTokens: 7 }, duration: 50 } });
+    pushEvent({ type: "message_end", message: { role: "toolResult", toolCallId: "n1", toolName: "search", content: [{ type: "text", text: "r1" }] } });
+    // Turn 2: thinking + tool, no text
+    pushEvent({ type: "message_update", assistantMessageEvent: { type: "thinking_delta", delta: "thinking 2" }, message: { role: "assistant", content: [] } });
+    pushEvent({ type: "message_update", assistantMessageEvent: { type: "toolcall_end", toolCall: { id: "n2", name: "read", arguments: { p: 2 } } }, message: { role: "assistant", content: [] } });
+    pushEvent({ type: "message_end", message: { role: "assistant", content: [], model: "test-model", provider: "test", usage: { input: 5, output: 2, cacheRead: 0, cacheWrite: 0, totalTokens: 7 }, duration: 50 } });
+    pushEvent({ type: "message_end", message: { role: "toolResult", toolCallId: "n2", toolName: "read", content: [{ type: "text", text: "r2" }] } });
+    // Turn 3: narration text + tool
+    pushEvent({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "Found the base.", contentIndex: 0 }, message: { role: "assistant", content: [] } });
+    pushEvent({ type: "message_update", assistantMessageEvent: { type: "toolcall_end", toolCall: { id: "n3", name: "query", arguments: { t: 3 } } }, message: { role: "assistant", content: [] } });
+    pushEvent({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "Found the base." }], model: "test-model", provider: "test", usage: { input: 5, output: 2, cacheRead: 0, cacheWrite: 0, totalTokens: 7 }, duration: 50 } });
+    pushEvent({ type: "message_end", message: { role: "toolResult", toolCallId: "n3", toolName: "query", content: [{ type: "text", text: "r3" }] } });
+    // Turn 4: final answer, no tool
+    pushEvent({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "Final answer here.", contentIndex: 0 }, message: { role: "assistant", content: [] } });
+    pushEvent({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "Final answer here." }], model: "test-model", provider: "test", usage: { input: 5, output: 2, cacheRead: 0, cacheWrite: 0, totalTokens: 7 }, duration: 50 } });
+    pushEvent({ type: "agent_end" });
+    return;
+  }
+  if (cmd.type === "abort") {
+    emit({ type: "response", id: frame.id, ok: true });
+  }
+}
+for await (const chunk of Bun.stdin.stream()) {
+  buffer += new TextDecoder().decode(chunk);
+  let idx = buffer.indexOf("\\n");
+  while (idx !== -1) {
+    const line = buffer.slice(0, idx).trim();
+    buffer = buffer.slice(idx + 1);
+    if (!line) { idx = buffer.indexOf("\\n"); continue; }
+    await handleFrame(JSON.parse(line));
+    idx = buffer.indexOf("\\n");
+  }
+}
+`;
+
+	test("narration segments still split; tool-only turns merge", async () => {
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "cornfield-gateway-narr-rpc-"));
+		const scriptPath = path.join(dir, "fake-narr-rpc");
+		await Bun.write(scriptPath, NARRATION_RPC);
+		await fs.chmod(scriptPath, 0o755);
+		const server = await startFakeCardServer();
+		try {
+			const restore = await installCardApiBaseForTest(server.host, server.port);
+			try {
+				const narrBridge = new AgentBridge({ cornfieldPath: scriptPath });
+				await narrBridge.start();
+
+				const channel = new DingTalkChannel();
+				channel.setAccountId("ops");
+				channel.setConfig(makeDingTalkConfig(server.port));
+
+				const inbound = makeMessage("narrate and check", "conv-narr-1");
+				const session = makeSession("/tmp/narr-1.jsonl", "conv-narr-1");
+				const submit = (
+					handlers?: Parameters<typeof channel.streamCard>[3],
+				): ReturnType<typeof narrBridge.forwardWithMeta> => narrBridge.forwardWithMeta(inbound, session, handlers);
+
+				await channel.streamCard(
+					inbound,
+					session,
+					{ accountId: "ops", agentName: "ops-bot", dapiCalls: 0 },
+					submit,
+				);
+
+				// Two narration segments → two creates, two FINISHEDs.
+				const creates = server.calls.filter(c => c.method === "POST" && c.path === "/v1.0/card/instances");
+				expect(creates.length).toBe(2);
+				const finishes = server.calls.filter(
+					c =>
+						c.method === "PUT" &&
+						c.path === "/v1.0/card/instances" &&
+						(c.body as any)?.cardData?.cardParamMap?.flowStatus === "3",
+				);
+				expect(finishes.length).toBe(2);
+
+				// Card 1 (finished at the text2+tool boundary) carries the
+				// narration text plus the two prior tool blocks (turns 1-2
+				// merged in, no split).
+				const firstMap = (finishes[0] as any)?.body?.cardData?.cardParamMap;
+				expect(firstMap?.content).toContain("Found the base.");
+				expect(firstMap?.content).not.toContain("Final answer");
+				const firstBlocks = JSON.parse(firstMap.blockList);
+				expect(firstBlocks.filter((b: { type: number }) => b.type === 2).length).toBeGreaterThanOrEqual(2);
+				expect(firstBlocks.filter((b: { type: number }) => b.type === 0).length).toBe(1);
+
+				// Card 2 (final answer) is finished on agent_end.
+				const secondMap = (finishes[1] as any)?.body?.cardData?.cardParamMap;
+				expect(secondMap?.content).toContain("Final answer here.");
+
+				narrBridge.stop();
+			} finally {
+				restore();
+				server.stop();
+			}
+		} finally {
+			await fs.rm(dir, { recursive: true, force: true });
+		}
+	});
 });

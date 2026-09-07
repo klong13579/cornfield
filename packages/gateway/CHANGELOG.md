@@ -6,6 +6,10 @@
 
 - **Gateway 子进程注入 `PI_SESSION_NAME`** (`src/gateway.ts`, `src/agent-bridge.ts`, `src/agent-transport-wire.ts`, `test/agent-transport-intercom-child.test.ts`): `createAccountBridgeOptions` 把 accountId 作为 `sessionName` 传入 bridge → WireTransport 注入 `PI_SESSION_NAME` 环境变量，gateway agent 的会话在 intercom 名册/serve 注册表里以账号名（如 `hr`）呈现，不再显示匿名 `subagent-chat-…` fallback alias；单账号默认 bridge 不注入（保持原行为）。
 
+### Fixed
+
+- **AI Card 拆分改为只认文本段，纯工具调用边界不再拆卡** (`src/channels/dingtalk.ts`, `test/dingtalk-card-e2e.test.ts`): `streamCard` 的 `onToolResult` 拆分条件去掉「blocks 含非 STOP 块即拆」分支——此前 thinking+tool（无可见文本）的轮次只要当前卡已累积工具块就会 finish 旧卡并新建卡，长工具链（实测一次查 AI 表格 26 次调用）在钉钉刷出约等于工具调用数的卡片；现在只有携带可见文本的 assistant 段才拆卡（Hermes-style 分卡保留），工具块持续 patch 进当前卡。回归测试（fake-RPC + fake 卡片服务器）：纯工具链 4 轮断言 1 create + 1 FINISHED（4 工具块 + 1 答案块收在同一卡）；叙述混合场景断言按文本段拆为 2 卡。
+
 ## [1.1.0] - 2026-09-05
 
 ### Added

@@ -660,11 +660,16 @@ export class DingTalkChannel extends BaseChannel {
 		//   2. final flush (answer block + chrome fields) on agent_end
 		//
 		// Multi-card segment splitting (Hermes-style): each assistant
-		// message that precedes a tool-call boundary becomes its own
-		// finalized card. When onAssistantMessageEnd fires, we mark a
-		// pending segment break. The next onTextDelta finalizes the old
-		// card (FINISHED) and creates a fresh card for the new text.
-		// The last card is finalized with full chrome on agent_end.
+		// message that carries a user-visible TEXT segment becomes its
+		// own finalized card. When onAssistantMessageEnd fires, we mark
+		// a pending segment break. If the pending text is non-empty at
+		// the next boundary (onTextDelta or onToolResult), the old card
+		// is finalized (FINISHED) and a fresh card is created.
+		// Tool-call-only boundaries (thinking + tool call, no text) do
+		// NOT split: the tool block patches into the current card, so a
+		// long tool chain stays on one card instead of spamming one
+		// DingTalk message per tool call. The last card is finalized
+		// with full chrome on agent_end.
 		let currentCard = card;
 		const cards: AICardInstance[] = [card];
 		const blocks: CardBlock[] = [];
@@ -845,11 +850,12 @@ export class DingTalkChannel extends BaseChannel {
 					hasPending: pendingTools.has(result.id),
 				});
 				// If a segment break is pending (onAssistantMessageEnd
-				// fired but no onTextDelta came — e.g. agent only
-				// produced thinking text), trigger the split here.
+				// fired), split only when the segment carries visible
+				// text. Tool-only boundaries fall through: the tool block
+				// below patches into the current card.
 				if (pendingSegmentBreak) {
 					pendingSegmentBreak = false;
-					if (segmentText.trim() || blocks.some(b => b.type !== BlockType.STOP)) {
+					if (segmentText.trim()) {
 						// Capture pending tool info before clearing.
 						const pending = pendingTools.get(result.id) ?? { name: result.name, args: null };
 						// Same capture+reset+async-split as onTextDelta path.
