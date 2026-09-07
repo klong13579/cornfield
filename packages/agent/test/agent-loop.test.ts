@@ -274,6 +274,69 @@ describe("agentLoop with AgentMessage", () => {
 		expect(contexts[1]?.index).toBe(1);
 	});
 
+	it("lists available tools when the model calls an unknown tool", async () => {
+		const toolSchema = Type.Object({ value: Type.String() });
+		const makeTool = (name: string): AgentTool<typeof toolSchema, { value: string }> => ({
+			name,
+			label: name,
+			description: `${name} tool`,
+			parameters: toolSchema,
+			async execute(_toolCallId, params) {
+				return { content: [{ type: "text", text: `echoed: ${params.value}` }], details: { value: params.value } };
+			},
+		});
+
+		const context: AgentContext = {
+			systemPrompt: "",
+			messages: [],
+			tools: [makeTool("read"), makeTool("search")],
+		};
+
+		const userPrompt: AgentMessage = createUserMessage("run bash");
+
+		const config: AgentLoopConfig = {
+			model: createModel(),
+			convertToLlm: identityConverter,
+		};
+
+		let callIndex = 0;
+		const streamFn = () => {
+			const stream = new MockAssistantStream();
+			queueMicrotask(() => {
+				if (callIndex === 0) {
+					const message = createAssistantMessage(
+						[{ type: "toolCall", id: "tool-1", name: "bash", arguments: { value: "ls" } }],
+						"toolUse",
+					);
+					stream.push({ type: "done", reason: "toolUse", message });
+				} else {
+					const message = createAssistantMessage([{ type: "text", text: "done" }]);
+					stream.push({ type: "done", reason: "stop", message });
+				}
+				callIndex++;
+			});
+			return stream;
+		};
+
+		const stream = agentLoop([userPrompt], context, config, undefined, streamFn);
+
+		for await (const _ of stream) {
+			// consume
+		}
+
+		const messages = await stream.result();
+		const toolResult = messages.find(
+			(message): message is ToolResultMessage => message.role === "toolResult" && message.toolName === "bash",
+		);
+		expect(toolResult).toBeDefined();
+		expect(toolResult?.isError).toBe(true);
+		const text = toolResult?.content
+			.map(c => (c.type === "text" ? c.text : ""))
+			.join(" ");
+		expect(text).toContain("Tool bash not found");
+		expect(text).toContain("Available tools: read, search");
+	});
+
 	it("should handle tool calls and results", async () => {
 		const toolSchema = Type.Object({ value: Type.String() });
 		const executed: string[] = [];

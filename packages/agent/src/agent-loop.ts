@@ -765,7 +765,10 @@ async function executeToolCalls(
 		let isError = false;
 
 		try {
-			if (!tool) throw new Error(`Tool ${toolCall.name} not found`);
+			if (!tool) {
+				const available = (tools ?? []).map(t => t.name).join(", ");
+				throw new Error(`Tool ${toolCall.name} not found. Available tools: ${available || "(none)"}`);
+			}
 
 			let effectiveArgs: Record<string, unknown>;
 			try {
