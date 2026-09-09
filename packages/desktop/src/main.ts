@@ -12,6 +12,7 @@ import {
 	type SidecarHandle,
 	terminateSidecar,
 } from "./sidecar.js";
+import { cleanupStaleUpdateZips, compareVersions, listZipFilesIn, readVersionFromUpdateZip } from "./update.js";
 
 const TRAY_ICON_DATA_URL =
 	"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAMUlEQVR42mNgoBH4jwNTpJkoQ/4TiSnSjNWQ/2TiUQOoaQDF0UiVhESVpEyVzEQSAADQgJtl5l/1yAAAAABJRU5ErkJggg==";
@@ -135,9 +136,13 @@ function setupIpc(): void {
 	ipcMain.handle("update:check", () => checkUpdatesManual());
 	ipcMain.handle("update:download", () => downloadUpdate());
 	ipcMain.handle("update:install", () => installUpdate());
-	// 设置页重挂载时恢复"已下载"状态：检查 pending zip 是否存在。
-	ipcMain.handle("update:has-downloaded", () => {
-		return findDownloadedZip(updaterCacheDirs()) !== null;
+	// 设置页重挂载时恢复"已下载"状态：只有缓存里存在"可用"的待装 zip 才算——
+	// zip 缺失或版本旧于当前（陈旧下载残留）都视为未下载，避免「重启更新」按钮被旧包点亮。
+	ipcMain.handle("update:has-downloaded", async () => {
+		const zipPath = findDownloadedZip(updaterCacheDirs());
+		if (zipPath === null) return false;
+		const zipVersion = await readVersionFromUpdateZip(zipPath);
+		return zipVersion !== null && compareVersions(zipVersion, app.getVersion()) >= 0;
 	});
 }
 
@@ -212,11 +217,20 @@ async function checkUpdatesManual(): Promise<{ ok: boolean; error?: string }> {
 	}
 }
 
-/** renderer 请求下载新版本（update:download IPC）。 */
+/** renderer 手动触发下载（update:download IPC）。下载成功后清理缓存里其它残留 zip。 */
 async function downloadUpdate(): Promise<{ ok: boolean; error?: string }> {
 	try {
 		const { autoUpdater } = electronUpdater;
-		await autoUpdater.downloadUpdate();
+		const downloaded = await autoUpdater.downloadUpdate();
+		const downloadedPaths = Array.isArray(downloaded) ? downloaded : [];
+		if (downloadedPaths.length > 0) {
+			// 清理缓存中其它版本残留：陈旧 pending 会被 installUpdate/"已下载"误判（实测曾覆盖成旧坏包）。
+			try {
+				await cleanupStaleUpdateZips(updaterCacheDirs(), downloadedPaths);
+			} catch (err) {
+				console.warn("desktop: 清理过期更新缓存失败", err instanceof Error ? err.message : String(err));
+			}
+		}
 		return { ok: true };
 	} catch (err) {
 		return { ok: false, error: err instanceof Error ? err.message : String(err) };
@@ -247,6 +261,18 @@ async function installUpdate(): Promise<{ ok: boolean; error?: string }> {
 		const bundleRoot = app.isPackaged ? path.dirname(path.dirname(path.dirname(appPath))) : "";
 		if (!bundleRoot?.endsWith(".app")) {
 			throw new Error(`cannot determine .app bundle root from ${appPath}`);
+		}
+		// 版本门禁：陈旧缓存 zip（旧版下载残留）一旦点击「重启更新」会用旧包覆盖当前安装。
+		// 实测缓存遗留的 1.1.0 zip 把健康的 1.1.1 应用替换成缺 logger.js 的坏包（启动即崩）。
+		// zip 旧于当前版本或损坏读不出版本 → 拒绝替换，提示重新下载。
+		const zipVersion = await readVersionFromUpdateZip(zipPath);
+		if (zipVersion === null) {
+			throw new Error(`更新包损坏、无法读取版本（${path.basename(zipPath)}），已取消安装，请重新「检查更新」下载。`);
+		}
+		if (compareVersions(zipVersion, app.getVersion()) < 0) {
+			throw new Error(
+				`缓存的更新包版本过旧（${zipVersion} < ${app.getVersion()}），已取消安装，请重新「检查更新」下载。`,
+			);
 		}
 		// 先干净终止 sidecar（等退出/排空），否则 bootstrap 脚本的 pgrep 会误匹配
 		// sidecar（argv 含 CornField.app 路径）导致替换失败或 open 新实例端口冲突。
@@ -300,24 +326,12 @@ function readUpdaterCacheDirNameFromConfig(): string | null {
 	}
 }
 
-/** 在单个缓存目录找 electron-updater 落盘的待安装 zip（pending 或根目录的 *.zip，取最新的）。 */
+/** 在单个缓存目录找 electron-updater 落盘的待安装 zip（pending 或根目录的 *.zip，取 mtime 最新的）。 */
 function findDownloadedZipIn(cacheDir: string): string | null {
-	try {
-		const candidates: string[] = [];
-		for (const dir of [path.join(cacheDir, "pending"), cacheDir]) {
-			const entries = fs.readdirSync(dir);
-			for (const e of entries) {
-				if (e.endsWith(".zip")) candidates.push(path.join(dir, e));
-			}
-		}
-		if (candidates.length === 0) return null;
-		// 取 mtime 最新的：多次下载残留时避免装到旧版本。
-		candidates.sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
-		return candidates[0] ?? null;
-	} catch {
-		// 目录不存在等
-	}
-	return null;
+	const candidates = listZipFilesIn(cacheDir);
+	if (candidates.length === 0) return null;
+	candidates.sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
+	return candidates[0] ?? null;
 }
 
 /** 逐目录找待安装 zip：当前目录（app-update.yml 推导）优先，旧版残留目录兜底。 */
