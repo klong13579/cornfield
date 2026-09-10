@@ -187,19 +187,24 @@ function mapWithBundledReference<TApi extends Api>(
 ): Model<TApi> {
 	const name = toModelName(entry.name, reference?.name ?? defaults.name);
 	const resolvedRef = reference ?? findParentReference(defaults.id, references);
-	if (!resolvedRef) {
-		return {
-			...defaults,
-			name,
-		};
-	}
+	// Gateways spell the same limits differently, so read every spelling before falling
+	// back to seed metadata: the window arrives as `context_window` (vLLM/narwal-style)
+	// or `context_length` (OpenAI-style); the output ceiling as `max_completion_tokens`
+	// (OpenAI), `max_output_tokens` (vLLM/narwal) or `max_tokens` (legacy alias).
+	// Ids that match no seed entry land on the bundled UNK placeholders (222222 / 8888)
+	// — reading the fields here is what keeps those placeholders from overriding the
+	// values the provider actually reported.
+	const fallback = resolvedRef ?? defaults;
 	return {
-		...resolvedRef,
+		...fallback,
 		id: defaults.id,
 		name,
 		baseUrl: defaults.baseUrl,
-		contextWindow: toPositiveNumber(entry.context_length, resolvedRef.contextWindow),
-		maxTokens: toPositiveNumber(entry.max_completion_tokens, resolvedRef.maxTokens),
+		contextWindow: toPositiveNumber(entry.context_window ?? entry.context_length, fallback.contextWindow),
+		maxTokens: toPositiveNumber(
+			entry.max_completion_tokens ?? entry.max_output_tokens ?? entry.max_tokens,
+			fallback.maxTokens,
+		),
 	};
 }
 

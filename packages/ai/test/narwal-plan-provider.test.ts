@@ -16,6 +16,17 @@ import { loginNarwalPlan } from "../src/utils/oauth/narwal-plan";
 const originalNarwalApiKey = Bun.env.NARWAL_PLAN_API_KEY;
 const originalFetch = global.fetch;
 
+/** Stub `GET /v1/models` with a gateway payload in the vLLM/narwal field spelling. */
+function gatewayModelsFetch(data: unknown[]): typeof fetch {
+	return vi.fn(
+		async () =>
+			new Response(JSON.stringify({ data }), {
+				status: 200,
+				headers: { "Content-Type": "application/json" },
+			}),
+	) as unknown as typeof fetch;
+}
+
 afterEach(() => {
 	if (originalNarwalApiKey === undefined) {
 		delete Bun.env.NARWAL_PLAN_API_KEY;
@@ -72,6 +83,47 @@ describe("narwal-plan provider support", () => {
 		expect(options.fetchDynamicModels).toBeDefined();
 		expect(options.staticModels?.length).toBe(NARWAL_PLAN_STATIC_MODELS.length);
 		expect(NARWAL_PLAN_STATIC_MODELS.length).toBeGreaterThan(30);
+	});
+
+	it("keeps gateway-reported limits for ids with no seed entry", async () => {
+		// The gateway reports limits in vLLM spelling (`context_window` / `max_output_tokens`).
+		// `deepseek-v4.1-flash` has no seed entry and no variant-suffix parent, so before this
+		// it fell back to the bundled UNK placeholders (222222 ctx / 8888 maxTokens).
+		global.fetch = gatewayModelsFetch([
+			{
+				id: "deepseek-v4.1-flash",
+				object: "model",
+				context_window: 1_000_000,
+				context_length: 1_000_000,
+				max_output_tokens: 384_000,
+				max_tokens: 384_000,
+			},
+		]);
+
+		const models = (await narwalPlanModelManagerOptions({ apiKey: "sk-narwal-test" }).fetchDynamicModels?.()) ?? [];
+		const discovered = models.find(model => model.id === "deepseek-v4.1-flash");
+
+		expect(discovered).toBeDefined();
+		expect(discovered?.contextWindow).toBe(1_000_000);
+		expect(discovered?.maxTokens).toBe(384_000);
+	});
+
+	it("prefers gateway limits over seed limits but keeps seed cost metadata", async () => {
+		global.fetch = gatewayModelsFetch([
+			{
+				id: "deepseek-v4-flash-0731",
+				object: "model",
+				context_length: 1_000_000,
+				max_output_tokens: 393_216,
+			},
+		]);
+
+		const models = (await narwalPlanModelManagerOptions({ apiKey: "sk-narwal-test" }).fetchDynamicModels?.()) ?? [];
+		const seeded = models.find(model => model.id === "deepseek-v4-flash-0731");
+
+		expect(seeded).toBeDefined();
+		expect(seeded?.maxTokens).toBe(393_216);
+		expect(seeded?.cost.input).toBe(0.14);
 	});
 });
 
