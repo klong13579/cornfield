@@ -27,6 +27,8 @@ type QueuedMessages = {
 };
 
 export class UiHelpers {
+	#renderedCustomMessageSignatures = new Set<string>();
+
 	constructor(private ctx: InteractiveModeContext) {}
 
 	/** Extract text content from a user message */
@@ -238,6 +240,26 @@ export class UiHelpers {
 				const _exhaustive: never = message;
 			}
 		}
+	}
+
+	/**
+	 * Append a custom message (extension/hook/injected) to the chat at most once.
+	 *
+	 * Deduped by role/customType/timestamp: a message that already streamed through
+	 * `message_start` must not be rendered twice when its sender also asks for a display
+	 * update. Renders incrementally — never rebuilds the chat — so an inbound message
+	 * cannot reset the viewport or re-order the transcript.
+	 *
+	 * @returns true when this call rendered the message.
+	 */
+	renderCustomMessageOnce(message: AgentMessage): boolean {
+		if (message.role !== "custom" && message.role !== "hookMessage") return false;
+		const signature = `${message.role}:${message.customType}:${message.timestamp}`;
+		if (this.#renderedCustomMessageSignatures.has(signature)) return false;
+		this.#renderedCustomMessageSignatures.add(signature);
+		this.ctx.addMessageToChat(message);
+		this.ctx.ui.requestRender();
+		return true;
 	}
 
 	/**

@@ -22,7 +22,6 @@ type AgentSessionEventHandlers = {
 export class EventController {
 	#lastReadGroup: ReadToolGroupComponent | undefined = undefined;
 	#lastThinkingCount = 0;
-	#renderedCustomMessages = new Set<string>();
 	#lastIntent: string | undefined = undefined;
 	readonly #waitingForModelMessage = "Thinking… (esc to interrupt)";
 	#backgroundToolCallIds = new Set<string>();
@@ -178,14 +177,9 @@ export class EventController {
 
 	async #handleMessageStart(event: Extract<AgentSessionEvent, { type: "message_start" }>): Promise<void> {
 		if (event.message.role === "hookMessage" || event.message.role === "custom") {
-			const signature = `${event.message.role}:${event.message.customType}:${event.message.timestamp}`;
-			if (this.#renderedCustomMessages.has(signature)) {
-				return;
+			if (this.ctx.renderCustomMessageOnce(event.message)) {
+				this.#resetReadGroup();
 			}
-			this.#renderedCustomMessages.add(signature);
-			this.#resetReadGroup();
-			this.ctx.addMessageToChat(event.message);
-			this.ctx.ui.requestRender();
 		} else if (event.message.role === "user") {
 			const textContent = this.ctx.getUserMessageText(event.message);
 			const imageCount =
@@ -233,14 +227,9 @@ export class EventController {
 	}
 
 	async #handleIrcMessage(event: Extract<AgentSessionEvent, { type: "irc_message" }>): Promise<void> {
-		const signature = `${event.message.role}:${event.message.customType}:${event.message.timestamp}`;
-		if (this.#renderedCustomMessages.has(signature)) {
-			return;
+		if (this.ctx.renderCustomMessageOnce(event.message)) {
+			this.#resetReadGroup();
 		}
-		this.#renderedCustomMessages.add(signature);
-		this.#resetReadGroup();
-		this.ctx.addMessageToChat(event.message);
-		this.ctx.ui.requestRender();
 	}
 
 	async #handleMessageUpdate(event: Extract<AgentSessionEvent, { type: "message_update" }>): Promise<void> {

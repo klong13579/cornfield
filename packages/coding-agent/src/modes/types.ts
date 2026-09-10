@@ -156,6 +156,17 @@ export interface InteractiveModeContext {
 	finishPendingSubmission(input: SubmittedUserInput): void;
 	isKnownSlashCommand(text: string): boolean;
 	addMessageToChat(message: AgentMessage, options?: { populateHistory?: boolean }): void;
+	/**
+	 * Append a custom message (extension/hook/injected) to the chat at most once.
+	 *
+	 * Deduped by role/customType/timestamp: a message that already streamed through
+	 * `message_start` must not be rendered a second time when the sender also asks for
+	 * a display update. Renders incrementally — never rebuilds the chat — so an inbound
+	 * message cannot reset the viewport or re-order the transcript.
+	 *
+	 * @returns true when this call rendered the message.
+	 */
+	renderCustomMessageOnce(message: AgentMessage): boolean;
 	renderSessionContext(
 		sessionContext: SessionContext,
 		options?: { updateFooter?: boolean; populateHistory?: boolean },

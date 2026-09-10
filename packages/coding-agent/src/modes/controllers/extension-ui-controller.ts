@@ -21,6 +21,7 @@ import { HookInputComponent } from "../../modes/components/hook-input";
 import { HookSelectorComponent } from "../../modes/components/hook-selector";
 import { getAvailableThemesWithPaths, getThemeByName, setTheme, type Theme, theme } from "../../modes/theme/theme";
 import type { InteractiveModeContext } from "../../modes/types";
+import type { CustomMessage } from "../../session/messages";
 import { setSessionTerminalTitle, setTerminalTitle } from "../../utils/title-generator";
 
 const MAX_WIDGET_LINES = 10;
@@ -84,7 +85,7 @@ export class ExtensionUiController {
 				const wasStreaming = this.ctx.session.isStreaming;
 				this.ctx.session
 					.sendCustomMessage(message, options)
-					.then(() => this.#applyCustomMessageDisplay(wasStreaming, message.display))
+					.then(created => this.#applyCustomMessageDisplay(wasStreaming, created))
 					.catch((err: unknown) => {
 						this.ctx.showError(
 							`Extension sendMessage failed: ${err instanceof Error ? err.message : String(err)}`,
@@ -362,7 +363,7 @@ export class ExtensionUiController {
 				const wasStreaming = this.ctx.session.isStreaming;
 				this.ctx.session
 					.sendCustomMessage(message, options)
-					.then(() => this.#applyCustomMessageDisplay(wasStreaming, message.display))
+					.then(created => this.#applyCustomMessageDisplay(wasStreaming, created))
 					.catch((err: unknown) => {
 						const errorText = `Extension sendMessage failed: ${err instanceof Error ? err.message : String(err)}`;
 						if (this.ctx.isBackgrounded) {
@@ -981,12 +982,15 @@ export class ExtensionUiController {
 		});
 	};
 
-	#applyCustomMessageDisplay(wasStreaming: boolean, shouldDisplay: boolean | undefined): void {
-		// For non-streaming cases with display=true, update UI
-		// (streaming cases update via message_end event)
-		if (!this.ctx.isBackgrounded && !wasStreaming && shouldDisplay) {
-			this.ctx.rebuildChatFromMessages();
-		}
+	#applyCustomMessageDisplay(wasStreaming: boolean, message: CustomMessage<unknown>): void {
+		// Non-streaming sends produce no message_start/message_end event, so the message has
+		// to be appended to the chat here. Append it incrementally instead of rebuilding:
+		// a rebuild re-converts every session entry, resets the viewport, and re-orders the
+		// transcript (compaction summaries are deferred to the bottom), so each inbound
+		// message read as a fresh compaction. renderCustomMessageOnce keeps it to a single
+		// copy when a triggered turn already rendered the same message.
+		if (this.ctx.isBackgrounded || wasStreaming || !message.display) return;
+		this.ctx.renderCustomMessageOnce(message);
 	}
 
 	#createHookDialogState(

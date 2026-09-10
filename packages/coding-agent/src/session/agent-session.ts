@@ -3270,11 +3270,15 @@ export class AgentSession {
 	 * - Streaming: queue as steer/follow-up or store for next turn
 	 * - Not streaming + triggerTurn: appends to state/session, starts new turn
 	 * - Not streaming + no trigger: appends to state/session, no turn
+	 *
+	 * @returns The message that was appended, queued, or prompted. Callers that render
+	 * it (TUI custom-message display) need this instance: its `timestamp` is minted
+	 * here and is the key the render dedupe matches on.
 	 */
 	async sendCustomMessage<T = unknown>(
 		message: Pick<CustomMessage<T>, "customType" | "content" | "display" | "details" | "attribution">,
 		options?: { triggerTurn?: boolean; deliverAs?: "steer" | "followUp" | "nextTurn" },
-	): Promise<void> {
+	): Promise<CustomMessage<T>> {
 		const appMessage: CustomMessage<T> = {
 			role: "custom",
 			customType: message.customType,
@@ -3287,7 +3291,7 @@ export class AgentSession {
 		if (this.isStreaming) {
 			if (options?.deliverAs === "nextTurn") {
 				this.#queueHiddenNextTurnMessage(appMessage, options?.triggerTurn ?? false);
-				return;
+				return appMessage;
 			}
 
 			if (options?.deliverAs === "followUp") {
@@ -3302,13 +3306,13 @@ export class AgentSession {
 				);
 				this.agent.steer(appMessage);
 			}
-			return;
+			return appMessage;
 		}
 
 		if (options?.deliverAs === "nextTurn") {
 			if (options?.triggerTurn) {
 				await this.agent.prompt(appMessage);
-				return;
+				return appMessage;
 			}
 			this.agent.appendMessage(appMessage);
 			this.sessionManager.appendCustomMessageEntry(
@@ -3318,12 +3322,12 @@ export class AgentSession {
 				message.details,
 				message.attribution ?? "agent",
 			);
-			return;
+			return appMessage;
 		}
 
 		if (options?.triggerTurn) {
 			await this.agent.prompt(appMessage);
-			return;
+			return appMessage;
 		}
 
 		this.agent.appendMessage(appMessage);
@@ -3334,6 +3338,7 @@ export class AgentSession {
 			message.details,
 			message.attribution ?? "agent",
 		);
+		return appMessage;
 	}
 
 	/**

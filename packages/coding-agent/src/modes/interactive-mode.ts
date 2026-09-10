@@ -1532,6 +1532,10 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.#uiHelpers.addMessageToChat(message, options);
 	}
 
+	renderCustomMessageOnce(message: AgentMessage): boolean {
+		return this.#uiHelpers.renderCustomMessageOnce(message);
+	}
+
 	renderSessionContext(
 		sessionContext: SessionContext,
 		options?: { updateFooter?: boolean; populateHistory?: boolean },
