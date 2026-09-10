@@ -298,6 +298,33 @@ function preferDiscoveryLimit(discoveryLimit: number, fallbackLimit: number): nu
 	return discoveryLimit;
 }
 
+/**
+ * Drop newly discovered models whose context window no source could resolve.
+ *
+ * A model that reaches catalog generation with `UNK_CONTEXT_WINDOW` was described by
+ * neither provider discovery, a seed reference, nor models.dev. Baking it would ship a
+ * 222222-token window that corrupts context math (compaction thresholds, overflow
+ * detection, usage percentages) while live discovery still surfaces the model at
+ * runtime — so the bundled catalog is better off without it.
+ *
+ * Models that already exist in the previous catalog are always kept: refreshing must
+ * never delete a model a user has already pinned, enabled, or routed to.
+ */
+export function dropUnresolvedNewModels<TApi extends Api>(
+	models: readonly Model<TApi>[],
+	previousModels: readonly Model<TApi>[],
+): { models: Model<TApi>[]; dropped: string[] } {
+	const knownIds = new Set(previousModels.map(model => `${model.provider}/${model.id}`));
+	const dropped: string[] = [];
+	const kept = models.filter(model => {
+		if (model.contextWindow !== UNK_CONTEXT_WINDOW) return true;
+		if (knownIds.has(`${model.provider}/${model.id}`)) return true;
+		dropped.push(`${model.provider}/${model.id}`);
+		return false;
+	});
+	return { models: kept, dropped };
+}
+
 function normalizeModelList<TApi extends Api>(value: unknown): Model<TApi>[] {
 	if (!Array.isArray(value)) {
 		return [];

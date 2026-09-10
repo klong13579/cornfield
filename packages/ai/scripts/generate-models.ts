@@ -12,7 +12,7 @@ const COPILOT_PREMIUM_MULTIPLIERS: Record<string, number> = {
 import * as path from "node:path";
 import { $env } from "@cornfield/utils";
 import { AuthCredentialStore } from "../src/auth-storage";
-import { createModelManager } from "../src/model-manager";
+import { createModelManager, dropUnresolvedNewModels } from "../src/model-manager";
 import {
 	applyGeneratedModelPolicies,
 	BAILIAN_CODING_PLAN_FALLBACK_MODEL,
@@ -369,6 +369,21 @@ async function generateModels() {
 	}
 
 	allModels = applyGlobalModelsDevFallback(allModels, modelsDevModels);
+	// Models whose context window stayed unresolved (no discovery, no seed reference, no
+	// models.dev entry) are not baked: a UNK window (222222) corrupts context math, and
+	// live discovery still surfaces these ids at runtime. Entries already present in the
+	// previous catalog are kept regardless, so a refresh never deletes known models.
+	const previousModels = Object.values(prevModelsJson as Record<string, Record<string, Model>>).flatMap(provider =>
+		Object.values(provider),
+	);
+	const resolvedLimits = dropUnresolvedNewModels(allModels, previousModels);
+	if (resolvedLimits.dropped.length > 0) {
+		const sample = resolvedLimits.dropped.slice(0, 3).join(", ");
+		console.log(
+			`Skipped ${resolvedLimits.dropped.length} newly discovered models with unresolved context windows (e.g. ${sample})`,
+		);
+	}
+	allModels = resolvedLimits.models;
 	allModels = applyPremiumMultiplierOverrides(allModels);
 	allModels = applyCodexPricingFallback(allModels);
 	applyGeneratedModelPolicies(allModels);
