@@ -330,9 +330,7 @@ describe("agentLoop with AgentMessage", () => {
 		);
 		expect(toolResult).toBeDefined();
 		expect(toolResult?.isError).toBe(true);
-		const text = toolResult?.content
-			.map(c => (c.type === "text" ? c.text : ""))
-			.join(" ");
+		const text = toolResult?.content.map(c => (c.type === "text" ? c.text : "")).join(" ");
 		expect(text).toContain("Tool bash not found");
 		expect(text).toContain("Available tools: read, search");
 	});

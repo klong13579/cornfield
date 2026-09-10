@@ -554,9 +554,7 @@ describe("explicit thinking level sets (non-contiguous upstream support)", () =>
 
 	it("requireSupportedEffort rejects medium with the explicit set", () => {
 		const model = getBundledModel("narwal-plan", CATALOG_MODEL_ID)!;
-		expect(() => requireSupportedEffort(model, Effort.Medium)).toThrow(
-			/Supported efforts: low, high, xhigh/,
-		);
+		expect(() => requireSupportedEffort(model, Effort.Medium)).toThrow(/Supported efforts: low, high, xhigh/);
 	});
 
 	it("enrichModelThinking preserves the explicit set instead of re-inferring a range", () => {
