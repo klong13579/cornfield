@@ -14,7 +14,7 @@ on:
         type: boolean
         default: false
       trigger_release:
-        description: "Build 5-platform binaries and create a GitHub Release (push triggers are disabled on this repo)"
+        description: "Build the macOS release artifacts (CLI + desktop) and create a GitHub Release (push triggers are disabled on this repo)"
         type: boolean
         default: false
       dry_run:
@@ -51,12 +51,14 @@ jobs:
         run: bun run ci:check:full
 
   detect_rust_changes:
-    # Release/tag and manual-release runs always build the full 5-platform native
-    # matrix. For plain main pushes and PRs this job decides whether the change
-    # touches the Rust/native stack (crates/, Cargo.toml, Cargo.lock,
-    # packages/natives/) and, if so, widens the native matrix to all platforms —
-    # so cross-compile breakage (linux-arm64, windows, intel-mac) surfaces on the
-    # branch/PR instead of at release time.
+    # Release/tag and manual-release runs always build the full native matrix
+    # (linux-x64 + darwin-arm64). For plain main pushes and PRs this job decides
+    # whether the change touches the Rust/native stack (crates/, Cargo.toml,
+    # Cargo.lock, packages/natives/) and, if so, widens the native matrix to
+    # both — so darwin-arm64 breakage surfaces on the branch/PR instead of at
+    # release time. Releases are macOS-only: linux-arm64 and win32-x64 are not
+    # built anywhere in CI. Verify aarch64-linux changes locally with
+    # `bun run build:native:linux-arm64`.
     runs-on: ubuntu-22.04
     outputs:
       rust_changed: ${{ steps.diff.outputs.rust_changed }}
@@ -101,13 +103,14 @@ jobs:
     needs: [detect_rust_changes]
     strategy:
       fail-fast: false
+      # linux-x64 is not a release platform — it stays because `test` and
+      # `test_gateway` download cornfield-natives-linux-x64, and it is the only
+      # entry carrying `rust_checks` (clippy / rustfmt / nextest). darwin-arm64
+      # is the only shipped platform.
       matrix:
         include: ${{ (startsWith(github.ref, 'refs/tags/v') || needs.detect_rust_changes.outputs.rust_changed == 'true') && fromJSON('[
           {"os":"ubuntu-22.04","platform":"linux","arch":"x64","variants":"baseline modern","rust_checks":true},
-          {"os":"ubuntu-22.04","platform":"linux","arch":"arm64","target":"aarch64-unknown-linux-gnu"},
-          {"os":"macos-15-intel","platform":"darwin","arch":"x64","variants":"baseline modern"},
-          {"os":"macos-14","platform":"darwin","arch":"arm64"},
-          {"os":"windows-latest","platform":"win32","arch":"x64","variants":"baseline modern"}
+          {"os":"macos-14","platform":"darwin","arch":"arm64"}
           ]') || fromJSON('[
           {"os":"ubuntu-22.04","platform":"linux","arch":"x64","variants":"baseline modern","rust_checks":true}
           ]') }}
@@ -120,13 +123,9 @@ jobs:
         with:
           toolchain: nightly-2026-04-29
           components: ${{ matrix.rust_checks && 'clippy, rustfmt' || '' }}
-          targets: ${{ matrix.target }}
-      - name: Ensure cross-compilation target is installed
-        if: matrix.target
-        run: rustup target add ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
         with:
-          key: ${{ matrix.target }}
+          key: ${{ matrix.platform }}-${{ matrix.arch }}
           cache-workspace-crates: true
       - uses: oven-sh/setup-bun@v2
         with:
@@ -135,11 +134,6 @@ jobs:
         with:
           version: 0.15.2
       - run: bun install --frozen-lockfile
-      - name: Install cross-compilation toolchain
-        if: matrix.target == 'aarch64-unknown-linux-gnu'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu
       - name: Rust checks
         if: matrix.rust_checks
         run: bun run check:rs
@@ -152,11 +146,9 @@ jobs:
         run: bun run test:rs
       - name: Build native addon(s)
         env:
-          CROSS_TARGET: ${{ matrix.target }}
           TARGET_PLATFORM: ${{ matrix.platform }}
           TARGET_ARCH: ${{ matrix.arch }}
           TARGET_VARIANTS: ${{ matrix.variants }}
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
         shell: bash
         run: |
           bun run ci:build:native
@@ -325,33 +317,16 @@ jobs:
     needs: [check_latest_tag, check, native]
     strategy:
       fail-fast: false
+      # Single-entry matrix on purpose: releases are macOS-only. The job body is
+      # platform-agnostic, so re-adding a platform is one entry here plus the
+      # matching RELEASE_TARGETS in the `release` job below.
       matrix:
         include:
-          - os: ubuntu-22.04
-            target_id: linux-x64
-            native_artifact: cornfield-natives-linux-x64
-            binary_path: packages/coding-agent/binaries/cornfield-linux-x64
-            gateway_path: packages/coding-agent/binaries/cornfield-gateway-linux-x64
-          - os: ubuntu-24.04-arm
-            target_id: linux-arm64
-            native_artifact: cornfield-natives-linux-arm64
-            binary_path: packages/coding-agent/binaries/cornfield-linux-arm64
-            gateway_path: packages/coding-agent/binaries/cornfield-gateway-linux-arm64
-          - os: macos-15-intel
-            target_id: darwin-x64
-            native_artifact: cornfield-natives-darwin-x64
-            binary_path: packages/coding-agent/binaries/cornfield-darwin-x64
-            gateway_path: packages/coding-agent/binaries/cornfield-gateway-darwin-x64
           - os: macos-14
             target_id: darwin-arm64
             native_artifact: cornfield-natives-darwin-arm64
             binary_path: packages/coding-agent/binaries/cornfield-darwin-arm64
             gateway_path: packages/coding-agent/binaries/cornfield-gateway-darwin-arm64
-          - os: windows-latest
-            target_id: win32-x64
-            native_artifact: cornfield-natives-win32-x64
-            binary_path: packages/coding-agent/binaries/cornfield-windows-x64.exe
-            gateway_path: packages/coding-agent/binaries/cornfield-gateway-windows-x64.exe
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
@@ -378,21 +353,10 @@ jobs:
           RELEASE_TARGETS: ${{ matrix.target_id }}
         run: bun run ci:release:build-binaries
       - name: Smoke release binary
-        if: runner.os != 'Windows'
         run: |
           runtime_dir="$(mktemp -d)"
           HOME="$runtime_dir/home" XDG_DATA_HOME="$runtime_dir/xdg" "${{ matrix.binary_path }}" --version
           HOME="$runtime_dir/home" XDG_DATA_HOME="$runtime_dir/xdg" "${{ matrix.gateway_path }}" --version
-      - name: Smoke release binary (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $runtimeDir = Join-Path $env:TEMP ("cornfield-runtime-" + [System.Guid]::NewGuid().ToString("N"))
-          New-Item -ItemType Directory -Force -Path $runtimeDir | Out-Null
-          $env:HOME = Join-Path $runtimeDir "home"
-          $env:XDG_DATA_HOME = Join-Path $runtimeDir "xdg"
-          & "${{ matrix.binary_path }}" --version
-          & "${{ matrix.gateway_path }}" --version
       - name: Upload release binary artifact
         uses: actions/upload-artifact@v5
         with:
@@ -446,6 +410,11 @@ jobs:
       contents: write
     env:
       NPM_TOKEN_SET: ${{ secrets.NPM_TOKEN != '' }}
+      # The shipped target set, in one place for this job: the native addons it
+      # verifies and publishes, and the archives it builds. macOS-only — the
+      # linux-x64 natives in this run exist for the test jobs, not for release.
+      RELEASE_TARGETS: darwin-arm64
+      PI_NATIVE_EXPECTED_ADDONS: darwin-arm64
     steps:
       - uses: actions/checkout@v5
         with:
@@ -478,7 +447,7 @@ jobs:
       - name: Download native addons
         uses: actions/download-artifact@v5
         with:
-          pattern: cornfield-natives-*
+          pattern: cornfield-natives-darwin-*
           path: packages/natives/native
           merge-multiple: true
       - name: Verify native addons
@@ -497,8 +466,8 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         # Skipped in dry-run preflight (workflow_dispatch with dry_run=true):
-        # release_binary / release_desktop still build everything so the
-        # preflight validates the full matrix the tag push will re-run.
+        # release_binary / release_desktop still build the shipped artifacts so
+        # the preflight validates the macOS release path the tag push will re-run.
         if: github.event_name != 'workflow_dispatch' || !inputs.dry_run
         with:
           tag_name: "${{ (github.event_name == 'workflow_dispatch' && inputs.release_tag) || github.ref_name }}"

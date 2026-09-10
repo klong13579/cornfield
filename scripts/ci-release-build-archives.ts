@@ -3,6 +3,7 @@
 import { $ } from "bun";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import { parseRequestedTargets, selectReleaseTargets } from "./release-targets";
 
 interface ArchiveTarget {
 	id: string;
@@ -99,11 +100,13 @@ async function createArchive(target: ArchiveTarget): Promise<void> {
 }
 
 async function main(): Promise<void> {
+	const selectedTargets = selectReleaseTargets(targets, parseRequestedTargets("RELEASE_TARGETS"));
+
 	await fs.mkdir(binariesDir, { recursive: true });
 	await fs.rm(archivesDir, { recursive: true, force: true });
 	await fs.mkdir(archivesDir, { recursive: true });
 
-	for (const target of targets) {
+	for (const target of selectedTargets) {
 		await createArchive(target);
 	}
 

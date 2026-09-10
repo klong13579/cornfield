@@ -4,10 +4,11 @@
  * on a macOS/Linux host using zig as the C compiler + linker — no
  * aarch64-linux-gnu toolchain needed.
  *
- * This is the local verification channel for the linux-arm64 platform that
- * historically only ran in CI at release time (v1.1.0 burned three CI runs on
- * aarch64-only compile breakage before this existed). Run it before pushing
- * changes that touch `crates/pi-natives` or its Cargo.toml/Cargo.lock.
+ * This is the ONLY verification channel for the linux-arm64 platform: CI used to
+ * build it at release time (v1.1.0 burned three CI runs on aarch64-only compile
+ * breakage before this existed), but releases are macOS-only now and CI no
+ * longer compiles aarch64-linux at all. Run it before pushing changes that touch
+ * `crates/pi-natives` or its Cargo.toml/Cargo.lock.
  *
  * Prereqs: zig on PATH (brew install zig), rustup target installed:
  *   rustup target add aarch64-unknown-linux-gnu

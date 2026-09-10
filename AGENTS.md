@@ -44,7 +44,7 @@ bun test path/to/file.test.ts    # single file — only run tests you added/chan
 # Build
 bun build                        # per-workspace build (if present)
 bun build:native                 # build Rust native addons (packages/natives)
-bun run build:native:linux-arm64  # cross-compile natives for linux-arm64 via zig (prereq: rustup target add aarch64-unknown-linux-gnu) — run this locally before pushing Rust/natives changes
+bun run build:native:linux-arm64  # cross-compile natives for linux-arm64 via zig (prereq: rustup target add aarch64-unknown-linux-gnu) — the ONLY aarch64-linux check left: CI no longer builds that platform
 
 # Generate models (never edit models.json by hand)
 bun generate-models              # = bun --cwd=packages/ai run generate-models
@@ -289,7 +289,7 @@ Then regenerate: `bun --cwd=packages/ai run generate-models`.
 |`scripts/release.ts`|Release pipeline (version bump, CHANGELOG finalization, tag, CI watch).|
 |`scripts/run-rs-task.ts`|Rust task runner (skips locally if no `.rs` changed).|
 |`scripts/ci-build-native.ts`|Native addon build for CI (baseline/modern variant selection).|
-|`scripts/ci-release-build-binaries.ts`|Cross-compile `cornfield` binary for 5 targets via `bun build --compile`.|
+|`scripts/ci-release-build-binaries.ts`|Cross-compile `cornfield` for the targets in `RELEASE_TARGETS` (macOS-only today) via `bun build --compile`.|
 |`scripts/ci-release-publish.ts`|Publish 7 packages to npm in dep order.|
 |`scripts/install.sh` / `install.ps1`|End-user installers (bun-source / binary modes).|
 
@@ -431,10 +431,10 @@ Coverage is not enforced (no `bunfig.toml` coverage config).
 Single workflow, triggered on push to `main`, `v*` tags, PRs, and manual dispatch:
 
 1. **check** — biome + tsgo (ubuntu, no Rust).
-2. **native** — matrix build of `pi-natives` for 5 OS/arch targets on tags (linux-x64 baseline+modern, linux-arm64, macOS x64/arm64, Windows); just linux-x64 on PRs.
+2. **native** — matrix build of `pi-natives`: linux-x64 (baseline+modern, carries the Rust checks) always, plus darwin-arm64 on tags / Rust-touching changes. Releases are macOS-only; linux-x64 exists because `test` / `test_gateway` consume its addon, not because it ships.
 3. **test** — full `ci:test:full` + `ci:test:smoke`, installs system deps (cairo, pango, libjpeg, libgif, librsvg2, fd, ripgrep, imagemagick).
 4. **install_methods** — binary / source-link / tarball install smoke via `scripts/install-tests/run-ci.sh`.
-5. **release_binary** (tags only) — cross-compile `cornfield` for 5 targets, smoke-run in isolated HOME.
+5. **release_binary** (tags only) — cross-compile `cornfield` for the shipped macOS target (`darwin-arm64`), smoke-run in isolated HOME.
 6. **release** (tags only) — verify natives, build archives, GitHub Release, npm publish (7 packages in dep order).
 
 ## Documentation
@@ -463,11 +463,13 @@ Each package has its own `packages/*/CHANGELOG.md`. Format under `## [Unreleased
 1. Add entries to `## [Unreleased]` in affected `packages/*/CHANGELOG.md`.
 2. Run `bun scripts/release.ts X.Y.Z` (must be on `main`, clean tree, version > latest tag).
 3. Script: verifies the latest `main` CI run is green, bumps all `package.json` + root catalog `@oh-my-pi/*` + `Cargo.toml`, finalizes CHANGELOGs (`## [Unreleased]` → `## [X.Y.Z] - YYYY-MM-DD`), runs `bun run check`, commits `chore: bump version to X.Y.Z`, pushes `main`.
-4. **Preflight (the one-shot-release gate):** the script dispatches the full release matrix in dry-run mode (`workflow_dispatch` + `trigger_release=true` + `dry_run=true` — release_binary/release_desktop build everything, but no GitHub Release is created and nothing is published) and watches it to green. Nothing is tagged until the preflight passes, so the exact commit being tagged has already run the full 5-platform matrix once.
+4. **Preflight (the one-shot-release gate):** the script dispatches the full release matrix in dry-run mode (`workflow_dispatch` + `trigger_release=true` + `dry_run=true` — release_binary/release_desktop build everything, but no GitHub Release is created and nothing is published) and watches it to green. Nothing is tagged until the preflight passes, so the exact commit being tagged has already run the full release matrix once.
 5. Only then the script tags `vX.Y.Z`, pushes it, and watches the real release run to green (`bun scripts/release.ts watch` tails failed job logs). On a preflight failure nothing was tagged — fix on `main`, push, re-run. Emergency bypass: `bun scripts/release.ts X.Y.Z --skip-preflight`.
 
 **Release-time CI facts** (`.github/workflows/ci.yml`):
-- The full 5-platform native matrix (linux x64/arm64, macOS x64/arm64, Windows) runs on every main push / PR that touches Rust (`crates/`, `Cargo.toml`, `Cargo.lock`, `packages/natives/`) plus every tag / release dispatch — cross-compile breakage surfaces on the branch, not at release time. Pure TS changes only run the linux-x64 job.
+- Releases are **macOS-only**. The shipped set is `cornfield-darwin-arm64` + `cornfield-gateway-darwin-arm64` + `cornfield_natives.darwin-arm64.node` (+ the matching `.tar.gz`) and the desktop dmg/zip/`latest-mac.yml`. `linux-arm64`, `darwin-x64` and `win32-x64` are no longer built anywhere in CI; the release scripts keep their full target tables, so re-adding a platform is a `ci.yml` matrix entry plus a `RELEASE_TARGETS` value, not a rewrite.
+- The native matrix is linux-x64 plus darwin-arm64 (the latter only on tags / Rust-touching changes). linux-x64 is **not** a release platform: it exists because `test` / `test_gateway` download `cornfield-natives-linux-x64`, and it is the only entry that runs clippy / rustfmt / nextest. Pure TS changes run only the linux-x64 job.
+- `scripts/install.sh` (Linux) and `install.ps1` (Windows) still target the old platform set — their release assets no longer exist, so those installers, and `cornfield update` on Linux/Windows, fail at download. macOS is unaffected.
 - Distribution is GitHub Releases only (binaries, natives, desktop dmg/zip/`latest-mac.yml`). The npm registry is **not** a distribution channel: no `@cornfield/*` package has ever been published (the CI publish step only runs when the `NPM_TOKEN` secret is set). Both the CLI (`cornfield update` / startup check) and the desktop updater check GitHub for new versions.
 - A failed release run (tag or manual release dispatch) notifies the DingTalk group robot via the `DINGTALK_RELEASE_WEBHOOK` repo secret (skips silently when unset).
 

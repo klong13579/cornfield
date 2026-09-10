@@ -2,6 +2,7 @@
 
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import { parseRequestedTargets, selectReleaseTargets } from "./release-targets";
 
 interface BinaryTarget {
 	id: string;
@@ -53,25 +54,6 @@ const targets: BinaryTarget[] = [
 		outfile: "packages/coding-agent/binaries/cornfield-windows-x64.exe",
 	},
 ];
-
-function parseRequestedTargets(): Set<string> | null {
-	const flagIndex = process.argv.findIndex(arg => arg === "--targets");
-	const flagValue =
-		flagIndex >= 0
-			? process.argv[flagIndex + 1]
-			: process.argv.find(arg => arg.startsWith("--targets="))?.split("=", 2)[1] ?? Bun.env.RELEASE_TARGETS;
-
-	if (!flagValue) {
-		return null;
-	}
-
-	return new Set(
-		flagValue
-			.split(",")
-			.map(value => value.trim())
-			.filter(Boolean),
-	);
-}
 
 function shouldAdhocSignDarwinBinary(target: BinaryTarget): boolean {
 	return target.platform === "darwin" && process.platform === "darwin";
@@ -204,23 +186,7 @@ async function resetArtifacts(): Promise<void> {
 }
 
 async function main(): Promise<void> {
-	const requestedTargets = parseRequestedTargets();
-	const selectedTargets = requestedTargets
-		? targets.filter(target => requestedTargets.has(target.id))
-		: targets;
-
-	if (requestedTargets) {
-		const unknownTargets = [...requestedTargets].filter(
-			requestedTarget => !targets.some(target => target.id === requestedTarget),
-		);
-		if (unknownTargets.length > 0) {
-			throw new Error(`Unknown release target(s): ${unknownTargets.join(", ")}`);
-		}
-	}
-
-	if (selectedTargets.length === 0) {
-		throw new Error("No release targets selected.");
-	}
+	const selectedTargets = selectReleaseTargets(targets, parseRequestedTargets("RELEASE_TARGETS"));
 
 	await fs.mkdir(binariesDir, { recursive: true });
 	await generateBundle();

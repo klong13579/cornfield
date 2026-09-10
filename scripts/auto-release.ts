@@ -11,7 +11,8 @@
  * Skips entirely when main has no commits beyond the latest v* tag (no empty
  * releases). On a change: bumps versions, finalizes CHANGELOGs, commits,
  * pushes main, tags v<next> and pushes the tag — the tag push runs the normal
- * full release pipeline (5-platform matrix → release_binary → release).
+ * full release pipeline (native matrix → release_binary → release_desktop →
+ * release).
  *
  * Requires a PAT with `contents: write` in GH_TOKEN (repo secret
  * AUTO_RELEASE_TOKEN); GITHUB_TOKEN pushes do not re-trigger workflows.
