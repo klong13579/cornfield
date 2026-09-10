@@ -164,16 +164,30 @@ export function refreshModelThinking<TApi extends Api>(model: ApiModel<TApi>): A
 }
 
 /**
+ * Provider entries that upstream advertises but the bundled catalog must not ship.
+ *
+ * Copilot's `/models` (and models.dev's mirror of it) list GPT-5.4 nano, while the GPT-5.4
+ * family is bundled for `openai` / `openai-codex` only — the invariant is pinned by
+ * `test/model-thinking.test.ts` ("does not bundle GitHub Copilot GPT-5.4 nano").
+ */
+const EXCLUDED_GENERATED_MODEL_IDS = new Set(["github-copilot/gpt-5.4-nano"]);
+
+/**
  * Apply upstream metadata corrections to a mutable array of models.
  *
  * Each model is first normalized through `refreshModelThinking()` so generated
  * catalogs keep canonical thinking metadata and policy fixes in one pass.
  */
 export function applyGeneratedModelPolicies(models: ApiModel<Api>[]): void {
-	for (let index = 0; index < models.length; index++) {
-		const model = refreshModelThinking(models[index]!);
-		applyGeneratedModelPolicy(model);
-		models[index] = model;
+	for (let index = models.length - 1; index >= 0; index--) {
+		const model = models[index]!;
+		if (EXCLUDED_GENERATED_MODEL_IDS.has(`${model.provider}/${model.id}`)) {
+			models.splice(index, 1);
+			continue;
+		}
+		const refreshed = refreshModelThinking(model);
+		applyGeneratedModelPolicy(refreshed);
+		models[index] = refreshed;
 	}
 }
 
@@ -446,9 +460,7 @@ function thinkingsEqual(left: ThinkingConfig | undefined, right: ThinkingConfig 
 	const rightLevels = right.levels;
 	if (leftLevels === rightLevels) return true;
 	if (!leftLevels || !rightLevels) return false;
-	return (
-		leftLevels.length === rightLevels.length && leftLevels.every((level, i) => level === rightLevels[i])
-	);
+	return leftLevels.length === rightLevels.length && leftLevels.every((level, i) => level === rightLevels[i]);
 }
 
 function expandEffortRange(thinking: ThinkingConfig): readonly Effort[] {

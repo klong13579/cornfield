@@ -9416,34 +9416,6 @@
 				"maxLevel": "xhigh"
 			}
 		},
-		"gpt-5.4-nano": {
-			"id": "gpt-5.4-nano",
-			"name": "GPT-5.4 nano",
-			"api": "openai-responses",
-			"provider": "github-copilot",
-			"baseUrl": "https://api.githubcopilot.com",
-			"reasoning": true,
-			"input": [
-				"text",
-				"image"
-			],
-			"cost": {
-				"input": 0.2,
-				"output": 1.25,
-				"cacheRead": 0.02,
-				"cacheWrite": 0
-			},
-			"contextWindow": 400000,
-			"maxTokens": 128000,
-			"headers": {
-				"User-Agent": "opencode/1.3.15"
-			},
-			"thinking": {
-				"mode": "effort",
-				"minLevel": "low",
-				"maxLevel": "xhigh"
-			}
-		},
 		"gpt-5.5": {
 			"id": "gpt-5.5",
 			"name": "GPT-5.5",
