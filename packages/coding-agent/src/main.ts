@@ -551,6 +551,11 @@ export async function buildSessionOptions(
 				? (scopedModel.thinkingLevel ?? defaultThinkingLevel)
 				: defaultThinkingLevel,
 		}));
+		// Keep the raw patterns: the model selector re-resolves the scope from them after
+		// refreshing discovery, so models that appear (or patterns that changed) are picked
+		// up without restarting the session.
+		options.modelPatterns = parsed.models ?? settings.get("enabledModels");
+		options.modelPatternsFromSettings = parsed.models === undefined;
 	}
 
 	// API key from CLI - set in authStorage

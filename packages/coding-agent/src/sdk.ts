@@ -175,6 +175,10 @@ export interface CreateAgentSessionOptions {
 	thinkingLevel?: ThinkingLevel;
 	/** Models available for cycling (Ctrl+P in interactive mode) */
 	scopedModels?: Array<{ model: Model; thinkingLevel?: ThinkingLevel }>;
+	/** Patterns `scopedModels` was resolved from (`--models` or `enabledModels`), so the session can re-resolve its scope after discovery changes. */
+	modelPatterns?: string[];
+	/** True when `modelPatterns` came from `enabledModels` settings rather than `--models`. */
+	modelPatternsFromSettings?: boolean;
 
 	/** System prompt. String replaces default, function receives default and returns final. */
 	systemPrompt?: string | ((defaultPrompt: string) => string);
@@ -1791,6 +1795,8 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			settings,
 			pythonKernelOwnerId,
 			scopedModels: options.scopedModels,
+			modelPatterns: options.modelPatterns,
+			modelPatternsFromSettings: options.modelPatternsFromSettings,
 			promptTemplates,
 			slashCommands,
 			extensionRunner,

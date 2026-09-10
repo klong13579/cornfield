@@ -14,6 +14,8 @@
 
 ### Added
 
+- **模型选择器打开即刷新网关目录并重解析 scope** (`src/modes/components/model-selector.ts`, `src/modes/controllers/selector-controller.ts`, `src/session/agent-session.ts`, `src/sdk.ts`, `src/main.ts`, `test/model-selector-refresh-discovery.test.ts`, `test/agent-session-refresh-model-scope.test.ts`): 选择器此前只在切到单个 provider 页时才在线刷新，且在 `--models`/`enabledModels` 作用域下直接跳过刷新；而列表源是会话启动时算好一次就固定的 `scopedModels` 快照，于是网关新增的模型、或改宽的 allowlist 模式都要重启会话才能看到（实测：`deepseek-v4.1-flash` 已在目录里，选择器却搜不到）。现在打开选择器会后台刷新「scope 覆盖到的 provider」（`refreshProvider(p, "online")`，30s 节流 + 同一 promise 复用；无 scope 时退化为带 TTL 的全量刷新），完成后调新增的 `AgentSession.refreshModelScope()` 按最新目录重解析 scope 并就地重建列表；单个 provider 失败只降级为缓存列表并在 hint 行提示，不阻塞选择器。Ctrl+R 强制刷新（绕过节流），hint 行同时展示目录新鲜度（`Model list from 3m ago · Ctrl+R to refresh`）。`enabledModels` 来自设置时会重新读取设置，因此改 pattern 后无需重启会话。
+
 - **`PI_SESSION_NAME` 会话名回落** (`src/session/session-manager.ts`, `test/session-manager/session-name-env.test.ts`): 未命名的 session 回落读取 `PI_SESSION_NAME` 环境变量（gateway 注入 accountId），intercom 名册/serve 注册表不再显示匿名 `subagent-chat-…` alias；session 文件内已持久化的名字始终优先。
 
 ## [1.1.1] - 2026-09-06

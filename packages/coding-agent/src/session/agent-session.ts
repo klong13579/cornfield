@@ -91,6 +91,7 @@ import {
 	parseModelString,
 	type ResolvedModelRoleValue,
 	resolveModelRoleValue,
+	resolveModelScope,
 } from "../config/model-resolver";
 import { expandPromptTemplate, type PromptTemplate } from "../config/prompt-templates";
 import type { Settings, SkillsSettings } from "../config/settings";
@@ -248,6 +249,10 @@ export interface AgentSessionConfig {
 	asyncJobManager?: AsyncJobManager;
 	/** Models to cycle through with Ctrl+P (from --models flag) */
 	scopedModels?: Array<{ model: Model; thinkingLevel?: ThinkingLevel }>;
+	/** Patterns `scopedModels` was resolved from (`--models` or `enabledModels`). Lets the session re-resolve its scope after discovery changes. */
+	modelPatterns?: string[];
+	/** True when `modelPatterns` came from `enabledModels` settings rather than `--models`: re-resolve reads the setting again, so config edits land without a restart. */
+	modelPatternsFromSettings?: boolean;
 	/** Initial session thinking selector. */
 	thinkingLevel?: ThinkingLevel;
 	/** Prompt templates for expansion */
@@ -460,6 +465,8 @@ export class AgentSession {
 
 	#asyncJobManager: AsyncJobManager | undefined = undefined;
 	#scopedModels: Array<{ model: Model; thinkingLevel?: ThinkingLevel }>;
+	#modelPatterns: string[];
+	#modelPatternsFromSettings: boolean;
 	#thinkingLevel: ThinkingLevel | undefined;
 	#promptTemplates: PromptTemplate[];
 	#slashCommands: FileSlashCommand[];
@@ -622,6 +629,8 @@ export class AgentSession {
 		this.#asyncJobManager = config.asyncJobManager;
 		this.#pythonKernelOwnerId = config.pythonKernelOwnerId ?? `agent-session:${Snowflake.next()}`;
 		this.#scopedModels = config.scopedModels ?? [];
+		this.#modelPatterns = config.modelPatterns ?? [];
+		this.#modelPatternsFromSettings = config.modelPatternsFromSettings ?? false;
 		this.#thinkingLevel = config.thinkingLevel;
 		this.#promptTemplates = config.promptTemplates ?? [];
 		this.#slashCommands = config.slashCommands ?? [];
@@ -2486,6 +2495,26 @@ export class AgentSession {
 	/** Scoped models for cycling (from --models flag) */
 	get scopedModels(): ReadonlyArray<{ model: Model; thinkingLevel?: ThinkingLevel }> {
 		return this.#scopedModels;
+	}
+
+	/**
+	 * Re-resolve the session's model scope from its configured patterns.
+	 *
+	 * `scopedModels` is a snapshot taken at session start. When discovery brings in new
+	 * models — or an allowlist pattern is widened — that snapshot goes stale and the model
+	 * selector (and Ctrl+P cycling) keeps offering the old set until the session restarts.
+	 * The selector calls this after refreshing provider discovery so newly matching models
+	 * become selectable in place. No-op when the session runs without patterns.
+	 */
+	async refreshModelScope(): Promise<void> {
+		// `--models` pins the scope for the session; `enabledModels` is configuration and is
+		// re-read so a pattern edited in another window takes effect on the next open.
+		const patterns = this.#modelPatternsFromSettings ? this.settings.get("enabledModels") : this.#modelPatterns;
+		if (patterns.length === 0) return;
+		const scoped = await resolveModelScope(patterns, this.#modelRegistry, {
+			usageOrder: this.settings.getStorage()?.getModelUsageOrder(),
+		});
+		this.#scopedModels = scoped.map(item => ({ model: item.model, thinkingLevel: item.thinkingLevel }));
 	}
 
 	/** Prompt templates */

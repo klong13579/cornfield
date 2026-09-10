@@ -495,7 +495,16 @@ export class SelectorController {
 					done();
 					this.ctx.ui.requestRender();
 				},
-				options,
+				{
+					...options,
+					// The selector refreshes provider discovery when it opens; re-resolve the session
+					// scope so models that just appeared (or patterns that changed) become selectable
+					// without restarting the session.
+					resyncScope: async () => {
+						await this.ctx.session.refreshModelScope();
+						return this.ctx.session.scopedModels;
+					},
+				},
 			);
 			return { component: selector, focus: selector };
 		});

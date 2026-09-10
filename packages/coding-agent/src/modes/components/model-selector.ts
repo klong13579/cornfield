@@ -111,6 +111,16 @@ interface ScopedModelItem {
 	thinkingLevel?: string;
 }
 
+/** Re-resolve the session's `--models` / `enabledModels` scope against the live catalog. */
+type ModelScopeResolver = () => Promise<ReadonlyArray<ScopedModelItem>>;
+
+/**
+ * Opening the selector refreshes provider discovery, so rapid open/close cycles must not
+ * hammer the gateway: a provider refreshed within this window is left alone (Ctrl+R forces).
+ */
+const PROVIDER_REFRESH_TTL_MS = 30_000;
+const providerRefreshedAt = new Map<string, number>();
+
 interface RoleAssignment {
 	model: Model;
 	thinkingLevel: ThinkingLevel;
@@ -206,6 +216,12 @@ export class ModelSelectorComponent extends Container {
 	#errorMessage?: unknown;
 	#tui: TUI;
 	#scopedModels: ReadonlyArray<ScopedModelItem>;
+	#resyncScope: ModelScopeResolver | undefined;
+	#hint: string;
+	#hintText: Text;
+	#statusMessage: string | undefined;
+	#refreshing = false;
+	#dismissed = false;
 	#temporaryOnly: boolean;
 
 	#menuRoleActions: MenuRoleAction[] = [];
@@ -235,7 +251,7 @@ export class ModelSelectorComponent extends Container {
 		scopedModels: ReadonlyArray<ScopedModelItem>,
 		onSelect: (model: Model, role: string | null, thinkingLevel?: ThinkingLevel, selector?: string) => void,
 		onCancel: () => void,
-		options?: { temporaryOnly?: boolean; initialSearchInput?: string },
+		options?: { temporaryOnly?: boolean; initialSearchInput?: string; resyncScope?: ModelScopeResolver },
 	) {
 		super();
 
@@ -243,6 +259,7 @@ export class ModelSelectorComponent extends Container {
 		this.#settings = settings;
 		this.#modelRegistry = modelRegistry;
 		this.#scopedModels = scopedModels;
+		this.#resyncScope = options?.resyncScope;
 		this.#onSelectCallback = onSelect;
 		this.#onCancelCallback = onCancel;
 		this.#temporaryOnly = options?.temporaryOnly ?? false;
@@ -258,12 +275,14 @@ export class ModelSelectorComponent extends Container {
 		this.addChild(new DynamicBorder());
 		this.addChild(new Spacer(1));
 
-		// Add hint about model filtering
-		const hintText =
+		// Add hint about model filtering, plus discovery freshness on the same row (a pane too
+		// short for a second header line must still show both).
+		this.#hint =
 			scopedModels.length > 0
 				? "Showing models from --models scope"
 				: "Only showing models with configured API keys (see README for details)";
-		this.addChild(new Text(theme.fg("warning", hintText), 0, 0));
+		this.#hintText = new Text(this.#hintLine(), 0, 0);
+		this.addChild(this.#hintText);
 		this.addChild(new Spacer(1));
 
 		// Create header container for tab bar
@@ -314,7 +333,116 @@ export class ModelSelectorComponent extends Container {
 			}
 			// Request re-render after models are loaded
 			this.#tui.requestRender();
+			// Then correct the (possibly cached) list against live provider discovery.
+			void this.#refreshDiscovery();
 		});
+	}
+
+	/**
+	 * Idempotent cleanup invoked when the TUI removes the selector. Late refresh results
+	 * must not touch a component the user already left.
+	 */
+	dispose(): void {
+		this.#dismissed = true;
+	}
+
+	/** Providers the current scope can pick from; empty when the session is unscoped. */
+	#scopeProviders(): string[] {
+		return [...new Set(this.#scopedModels.map(scoped => scoped.model.provider))];
+	}
+
+	/** Oldest discovery timestamp across the scoped providers (what the list is based on). */
+	#oldestScopedDiscoveryAge(): string | undefined {
+		let oldest: number | undefined;
+		for (const provider of this.#scopeProviders()) {
+			const fetchedAt = this.#modelRegistry.getProviderDiscoveryState(provider)?.fetchedAt;
+			if (typeof fetchedAt === "number" && (oldest === undefined || fetchedAt < oldest)) {
+				oldest = fetchedAt;
+			}
+		}
+		return this.#formatDiscoveryAge(oldest);
+	}
+
+	#statusSuffix(): string {
+		if (this.#statusMessage) {
+			return this.#statusMessage;
+		}
+		const age = this.#oldestScopedDiscoveryAge();
+		const hint = "Ctrl+R to refresh";
+		return age ? `Model list from ${age} · ${hint}` : hint;
+	}
+
+	#hintLine(): string {
+		const suffix = this.#statusSuffix();
+		return theme.fg("warning", this.#hint) + (suffix ? theme.fg("dim", ` · ${suffix}`) : "");
+	}
+
+	#renderStatus(): void {
+		this.#hintText.setText(this.#hintLine());
+	}
+
+	/**
+	 * Refresh provider discovery, then re-resolve the session scope and rebuild the list in
+	 * place. Opening the selector is the moment the user asks "what can I pick right now?",
+	 * so this is where a stale catalog (or a scope snapshot taken at session start) gets
+	 * corrected — the cached list stays usable until the refresh lands.
+	 */
+	async #refreshDiscovery(options: { force?: boolean } = {}): Promise<void> {
+		if (this.#refreshing) return;
+		this.#refreshing = true;
+		this.#statusMessage = "Refreshing model list…";
+		this.#renderStatus();
+
+		try {
+			const providers = this.#scopeProviders();
+			const now = Date.now();
+			const due = providers.filter(
+				provider =>
+					options.force === true || now - (providerRefreshedAt.get(provider) ?? 0) > PROVIDER_REFRESH_TTL_MS,
+			);
+			let failures = 0;
+			if (due.length > 0) {
+				// allSettled: one unreachable provider must not abort the others, and the cached
+				// list stays usable either way.
+				const results = await Promise.allSettled(
+					due.map(async provider => {
+						await this.#modelRegistry.refreshProvider(provider, "online");
+						providerRefreshedAt.set(provider, Date.now());
+					}),
+				);
+				failures = results.filter(result => result.status === "rejected").length;
+			} else if (providers.length === 0) {
+				// Unscoped sessions list every provider: refresh with the cache TTL so opening the
+				// selector never blocks on a full sweep and never hammers the gateway.
+				await this.#modelRegistry.refresh("online-if-uncached");
+			}
+
+			const resynced = await this.#resyncScope?.();
+			if (resynced) this.#scopedModels = resynced;
+			if (this.#dismissed) return;
+
+			await this.#loadModels();
+			this.#buildProviderTabs();
+			this.#updateTabBar();
+			this.#statusMessage =
+				failures > 0
+					? `Live refresh failed for ${failures}/${due.length} provider(s); showing cached data`
+					: undefined;
+			const query = this.#searchInput.getValue();
+			if (query) {
+				this.#filterModels(query);
+			} else {
+				this.#updateList();
+			}
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			this.#statusMessage = `Refresh failed (${message}); showing cached list`;
+		} finally {
+			this.#refreshing = false;
+		}
+
+		this.#renderStatus();
+		if (!this.#dismissed) this.#tui.requestRender();
 	}
 
 	#buildMenuRoleActions(): void {
@@ -1058,6 +1186,12 @@ export class ModelSelectorComponent extends Container {
 	}
 
 	handleInput(keyData: string): void {
+		// Ctrl+R works in every layer (including while the search input has focus): a forced
+		// live refresh of the scoped providers, past the open-time throttle.
+		if (matchesKey(keyData, "ctrl+r")) {
+			void this.#refreshDiscovery({ force: true });
+			return;
+		}
 		if (this.#isMenuOpen) {
 			this.#handleMenuInput(keyData);
 			return;

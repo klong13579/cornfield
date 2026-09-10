@@ -23,6 +23,10 @@ function createSelector(model: Model, settings: Settings): ModelSelectorComponen
 		getDiscoverableProviders: () => [],
 		getCanonicalModels: () => [],
 		resolveCanonicalModel: () => undefined,
+		// The selector reports discovery freshness and refreshes the scoped providers on open.
+		getProviderDiscoveryState: () => undefined,
+		refresh: async () => {},
+		refreshProvider: async () => {},
 	} as unknown as ModelRegistry;
 	const ui = {
 		requestRender: vi.fn(),
