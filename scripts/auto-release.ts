@@ -16,13 +16,12 @@
  * Requires a PAT with `contents: write` in GH_TOKEN (repo secret
  * AUTO_RELEASE_TOKEN); GITHUB_TOKEN pushes do not re-trigger workflows.
  */
-import * as path from "node:path";
 import { $, Glob } from "bun";
+import { bumpRepoVersions } from "./version-bump";
 
 const repoRoot = process.cwd();
 const isDryRun = process.argv.includes("--dry-run");
 const changelogGlob = new Glob("packages/*/CHANGELOG.md");
-const packageJsonGlob = new Glob("packages/*/package.json");
 
 const token = process.env.GH_TOKEN;
 
@@ -100,32 +99,12 @@ const [major, minor, patch] = parseVersion(latestTag);
 const nextVersion = isWeeklyMinor ? `${major}.${minor + 1}.0` : `${major}.${minor}.${patch + 1}`;
 console.log(`  cadence: ${isWeeklyMinor ? "weekly (minor)" : "daily (patch)"} → next: v${nextVersion}`);
 
-// 3. Bump package versions (mirror of scripts/release.ts)
+// 3. Bump package versions, root catalog pins and the Rust workspace version
+//    (shared with scripts/release.ts — see scripts/version-bump.ts)
 console.log(`Bumping package versions to ${nextVersion}…`);
-const versionLinkedPrivate = new Set(["@cornfield/desktop"]);
-const pkgJsonPaths = await Array.fromAsync(packageJsonGlob.scan(repoRoot));
-const bumpPaths: string[] = [];
-for (const p of pkgJsonPaths) {
-	const pkg = (await Bun.file(p).json()) as { private?: boolean; name: string };
-	if (pkg.private && !versionLinkedPrivate.has(pkg.name)) {
-		console.log(`  Skipping ${pkg.name} (private)`);
-		continue;
-	}
-	bumpPaths.push(p);
-}
-await $`sd '"version": "[^"]+"' ${`"version": "${nextVersion}"`} ${bumpPaths}`;
-
-console.log("Updating root catalog @cornfield/* …");
-const rootPkgPath = path.join(repoRoot, "package.json");
-let rootPkgRaw = await Bun.file(rootPkgPath).text();
-rootPkgRaw = rootPkgRaw.replace(/("@cornfield\/[^"]+":\s*)"[^"]+"/g, `$1"${nextVersion}"`);
-await Bun.write(rootPkgPath, rootPkgRaw);
-
-console.log("Updating Rust workspace version…");
-const cargoTomlPath = path.join(repoRoot, "Cargo.toml");
-let cargoRaw = await Bun.file(cargoTomlPath).text();
-cargoRaw = cargoRaw.replace(/^version = "[^"]+"/m, `version = "${nextVersion}"`);
-await Bun.write(cargoTomlPath, cargoRaw);
+const bump = await bumpRepoVersions(repoRoot, nextVersion);
+for (const name of bump.skipped) console.log(`  Skipping ${name} (private)`);
+console.log(`  Bumped ${bump.bumped.length} packages, root catalog and Cargo.toml`);
 
 // 4. Regenerate lockfiles
 console.log("Regenerating lockfiles…");

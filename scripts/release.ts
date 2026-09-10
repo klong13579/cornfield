@@ -17,9 +17,9 @@
  */
 
 import { $, Glob } from "bun";
+import { bumpRepoVersions } from "./version-bump";
 
 const changelogGlob = new Glob("packages/*/CHANGELOG.md");
-const packageJsonGlob = new Glob("packages/*/package.json");
 const cargoTomlGlob = new Glob("crates/*/Cargo.toml");
 
 function git(args: readonly string[]) {
@@ -273,55 +273,26 @@ async function cmdRelease(version: string, skipPreflight: boolean): Promise<void
 		await assertMainCiGreen();
 	}
 
-	// 2. Update package versions
+	// 2. Update package versions, root catalog pins and the Rust workspace version
 	console.log(`Updating package versions to ${version}…`);
-	const pkgJsonPaths = await Array.fromAsync(packageJsonGlob.scan("."));
-
-	// private 但版本必须随主版本联动的包（不打 npm，但桌面壳的 electron-updater 靠
-	// package.json version 判断新版本 —— 0.0.0 永不比旧版本高，更新链路会永久判为已最新）。
-	const versionLinkedPrivate = new Set(["@cornfield/desktop"]);
-
-	// Filter out private packages（版本联动白名单除外）
-	const publicPkgPaths: string[] = [];
-	for (const pkgPath of pkgJsonPaths) {
-		const pkgJson = await Bun.file(pkgPath).json();
-		if (pkgJson.private && !versionLinkedPrivate.has(pkgJson.name)) {
-			console.log(`  Skipping ${pkgJson.name} (private)`);
-			continue;
-		}
-		publicPkgPaths.push(pkgPath);
-	}
-
-	await $`sd '"version": "[^"]+"' ${`"version": "${version}"`} ${publicPkgPaths}`;
+	const bump = await bumpRepoVersions(".", version);
+	for (const name of bump.skipped) console.log(`  Skipping ${name} (private)`);
 
 	// Verify
 	console.log("  Verifying versions:");
-	for (const pkgPath of publicPkgPaths) {
-		const pkgJson = await Bun.file(pkgPath).json();
-		console.log(`    ${pkgJson.name}: ${pkgJson.version}`);
+	for (const name of bump.bumped) {
+		console.log(`    ${name}: ${version}`);
 	}
 	console.log();
 
-	// Update @cornfield/* catalog entries in root package.json
-	console.log("Updating root catalog versions...");
-	let rootPkgRaw = await Bun.file("package.json").text();
-	rootPkgRaw = rootPkgRaw.replace(
-		/("@cornfield\/[^"]+":\s*)"[^"]+"/g,
-		`$1"${version}"`,
-	);
-	await Bun.write("package.json", rootPkgRaw);
-	console.log("  Updated root catalog @cornfield/* entries");
-
-	// 3. Update Rust workspace version
-	console.log(`Updating Rust workspace version to ${version}…`);
-	await $`sd '^version = "[^"]+"' ${`version = "${version}"`} Cargo.toml`;
-
-	// Verify
+	// 3. Read the Rust workspace version back and list the crates inheriting it
 	const cargoToml = await Bun.file("Cargo.toml").text();
 	const versionMatch = cargoToml.match(/^\[workspace\.package\][\s\S]*?^version = "([^"]+)"/m);
-	if (versionMatch) {
-		console.log(`  workspace: ${versionMatch[1]}`);
+	if (!versionMatch) {
+		console.error("Error: [workspace.package] version not found in Cargo.toml");
+		process.exit(1);
 	}
+	console.log(`  workspace: ${versionMatch[1]}`);
 
 	// List crates using workspace version
 	for await (const cargoPath of cargoTomlGlob.scan(".")) {
