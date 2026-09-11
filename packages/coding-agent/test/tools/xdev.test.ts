@@ -142,9 +142,13 @@ describe("createTools with mounting", () => {
 		}
 		// `buildXdevDeviceCatalog` silently falls back to the description's first
 		// line, so a device with no declared summary ships description prose into
-		// the system-prompt catalog and nothing fails. This is that assertion.
+		// the system-prompt catalog and nothing fails. These are that assertion.
 		expect(blank).toEqual([]);
 		expect(multiline).toEqual([]);
+		const fellBackToDescription = buildXdevDeviceCatalog(devices)
+			.entries.filter(entry => entry.summary !== (devices.get(entry.name)?.summary ?? "").trim())
+			.map(entry => entry.name);
+		expect(fellBackToDescription).toEqual([]);
 	});
 
 	it("keeps top-level exposure identical to pre-xdev behavior when the switch is off", async () => {
