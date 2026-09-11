@@ -123,6 +123,30 @@ describe("createTools with mounting", () => {
 		expect(names.has("web_search")).toBe(true);
 	});
 
+	it("gives every mounted device a non-empty, single-line summary", async () => {
+		await mockNonTestRuntime();
+		Bun.env.PI_PYTHON_SKIP_CHECK = "1";
+		const session = createTestSession({ settings: Settings.isolated({ "tools.xdev": true }) });
+		await createTools(session);
+		const devices = session.xdevDevices!;
+		expect(devices.size).toBeGreaterThan(0);
+		const blank: string[] = [];
+		const multiline: string[] = [];
+		for (const [name, tool] of devices) {
+			const summary = (tool.summary ?? "").trim();
+			if (summary.length === 0) {
+				blank.push(name);
+			} else if (summary.includes("\n")) {
+				multiline.push(name);
+			}
+		}
+		// `buildXdevDeviceCatalog` silently falls back to the description's first
+		// line, so a device with no declared summary ships description prose into
+		// the system-prompt catalog and nothing fails. This is that assertion.
+		expect(blank).toEqual([]);
+		expect(multiline).toEqual([]);
+	});
+
 	it("keeps top-level exposure identical to pre-xdev behavior when the switch is off", async () => {
 		await mockNonTestRuntime();
 		Bun.env.PI_PYTHON_SKIP_CHECK = "1";

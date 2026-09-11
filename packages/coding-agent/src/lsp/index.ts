@@ -1113,6 +1113,8 @@ export function createLspWritethrough(cwd: string, options?: WritethroughOptions
 export class LspTool implements AgentTool<typeof lspSchema, LspToolDetails, Theme> {
 	readonly name = "lsp";
 	readonly label = "LSP";
+	readonly loadMode = "discoverable" as const;
+	readonly summary = "Answers semantic questions about code symbols: definitions, references, types, diagnostics.";
 	readonly description: string;
 	readonly parameters = lspSchema;
 	readonly renderCall = renderCall;
