@@ -195,6 +195,8 @@ function validateTaskModeParams(simpleMode: TaskSimpleMode, params: TaskParams):
 export class TaskTool implements AgentTool<TSchema, TaskToolDetails, Theme> {
 	readonly name = "task";
 	readonly label = "Task";
+	readonly loadMode = "essential" as const;
+	readonly summary = "Runs independent workstreams in parallel through specialized subagents.";
 	readonly strict = true;
 	readonly renderResult = renderResult;
 	readonly #discoveredAgents: AgentDefinition[];
