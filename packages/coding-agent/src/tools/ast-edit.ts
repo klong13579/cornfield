@@ -71,6 +71,8 @@ export interface AstEditToolDetails {
 export class AstEditTool implements AgentTool<typeof astEditSchema, AstEditToolDetails> {
 	readonly name = "ast_edit";
 	readonly label = "AST Edit";
+	readonly loadMode = "discoverable" as const;
+	readonly summary = "Perform AST-aware code edits (structural refactoring)";
 	readonly description: string;
 	readonly parameters = astEditSchema;
 	readonly strict = true;

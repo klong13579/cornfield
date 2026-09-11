@@ -597,6 +597,8 @@ export const debugToolRenderer = {
 export class DebugTool implements AgentTool<typeof debugSchema, DebugToolDetails> {
 	readonly name = "debug";
 	readonly label = "Debug";
+	readonly loadMode = "discoverable" as const;
+	readonly summary = "Debug a running process with DAP (debugger adapter protocol)";
 	readonly description: string;
 	readonly parameters = debugSchema;
 	readonly strict = true;

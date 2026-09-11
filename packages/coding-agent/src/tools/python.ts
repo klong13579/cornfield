@@ -149,6 +149,8 @@ export interface PythonToolOptions {
 export class PythonTool implements AgentTool<typeof pythonSchema> {
 	readonly name = "python";
 	readonly label = "Python";
+	readonly loadMode = "discoverable" as const;
+	readonly summary = "Execute Python code in a persistent IPython kernel";
 	get description(): string {
 		return getPythonToolDescription();
 	}
