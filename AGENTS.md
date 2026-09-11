@@ -455,14 +455,14 @@ Single workflow, triggered on push to `main`, `v*` tags, PRs, and manual dispatc
 Each package has its own `packages/*/CHANGELOG.md`. Format under `## [Unreleased]`:
 
 - `### Added` / `### Changed` / `### Fixed` / `### Removed` / `### Breaking Changes`
-- Attribution: internal issues `([#123](https://github.com/can1357/oh-my-pi/issues/123))`, external PRs `([#456](.../pull/456) by [@user](...))`
+- Attribution: internal issues `([#123](https://github.com/klong13579/cornfield/issues/123))`, external PRs `([#456](.../pull/456) by [@user](...))`
 - New entries always go under `## [Unreleased]`. Released version sections are immutable.
 
 **Release flow** (`scripts/release.ts`):
 
 1. Add entries to `## [Unreleased]` in affected `packages/*/CHANGELOG.md`.
 2. Run `bun scripts/release.ts X.Y.Z` (must be on `main`, clean tree, version > latest tag).
-3. Script: verifies the latest `main` CI run is green, bumps all `package.json` + root catalog `@oh-my-pi/*` + `Cargo.toml`, finalizes CHANGELOGs (`## [Unreleased]` → `## [X.Y.Z] - YYYY-MM-DD`), runs `bun run check`, commits `chore: bump version to X.Y.Z`, pushes `main`.
+3. Script: verifies the latest `main` CI run is green, bumps all `package.json` + root catalog `@cornfield/*` + `Cargo.toml`, finalizes CHANGELOGs (`## [Unreleased]` → `## [X.Y.Z] - YYYY-MM-DD`), runs `bun run check`, commits `chore: bump version to X.Y.Z`, pushes `main`.
 4. **Preflight (the one-shot-release gate):** the script dispatches the full release matrix in dry-run mode (`workflow_dispatch` + `trigger_release=true` + `dry_run=true` — release_binary/release_desktop build everything, but no GitHub Release is created and nothing is published) and watches it to green. Nothing is tagged until the preflight passes, so the exact commit being tagged has already run the full release matrix once.
 5. Only then the script tags `vX.Y.Z`, pushes it, and watches the real release run to green (`bun scripts/release.ts watch` tails failed job logs). On a preflight failure nothing was tagged — fix on `main`, push, re-run. Emergency bypass: `bun scripts/release.ts X.Y.Z --skip-preflight`.
 
