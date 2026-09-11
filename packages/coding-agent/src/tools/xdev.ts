@@ -31,13 +31,6 @@ type Tool = AgentTool<any, any, any>;
  */
 export const XDEV_KEEP_TOP_LEVEL: readonly string[] = ["web_search", "search_tool_bm25", "irc", "hub"];
 
-/**
- * Fallback `internal` tool names until the annotation batch (A4) declares
- * `loadMode: "internal"` on the tools themselves. Runtime-injected control
- * tools must never be mounted as devices — they are injection-only.
- */
-const INTERNAL_TOOL_NAME_FALLBACK: readonly string[] = ["resolve", "yield", "report_finding", "report_tool_issue"];
-
 /** How many characters of device catalog may be injected into the system prompt. */
 export const XDEV_PROMPT_BUDGET_CHARS = 2000;
 
@@ -76,10 +69,9 @@ export function splitToolsForXdev(tools: Tool[]): XdevSplit {
 	const devices = new Map<string, Tool>();
 	for (const tool of tools) {
 		const mode = resolveLoadMode(tool.name, tool.loadMode);
-		const keepTopLevel =
-			mode !== "discoverable" ||
-			XDEV_KEEP_TOP_LEVEL.includes(tool.name) ||
-			INTERNAL_TOOL_NAME_FALLBACK.includes(tool.name);
+		// `internal` tools resolve to a non-discoverable mode from their own
+		// `loadMode` declaration, so they stay top-level here without a name list.
+		const keepTopLevel = mode !== "discoverable" || XDEV_KEEP_TOP_LEVEL.includes(tool.name);
 		if (!keepTopLevel) {
 			if (devices.has(tool.name)) {
 				throw new Error(`Duplicate xd device name: ${tool.name}`);
