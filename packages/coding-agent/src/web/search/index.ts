@@ -214,7 +214,7 @@ export class WebSearchTool implements AgentTool<typeof webSearchSchema, SearchRe
 	readonly name = "web_search";
 	readonly label = "Web Search";
 	readonly loadMode = "essential" as const;
-	readonly summary = "Finds current information on the web beyond what the model already knows.";
+	readonly summary = "Finds up-to-date information on the web.";
 	readonly description: string;
 	readonly parameters = webSearchSchema;
 	readonly strict = true;

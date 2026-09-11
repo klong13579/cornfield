@@ -818,7 +818,7 @@ export class BrowserTool implements AgentTool<typeof browserSchema, BrowserToolD
 	readonly name = "puppeteer";
 	readonly label = "Puppeteer";
 	readonly loadMode = "discoverable" as const;
-	readonly summary = "Drives a real browser to navigate pages, interact with them, and extract their content.";
+	readonly summary = "Drives a browser to navigate pages, interact with them, and extract their content.";
 	readonly description: string;
 	readonly parameters = browserSchema;
 	readonly strict = true;

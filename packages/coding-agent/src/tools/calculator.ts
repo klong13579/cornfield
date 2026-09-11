@@ -397,7 +397,7 @@ export class CalculatorTool implements AgentTool<typeof calculatorSchema, Calcul
 	readonly name = "calc";
 	readonly label = "Calc";
 	readonly loadMode = "discoverable" as const;
-	readonly summary = "Evaluates arithmetic expressions exactly instead of estimating them.";
+	readonly summary = "Evaluates mathematical expressions without relying on mental arithmetic.";
 	readonly description: string;
 	readonly parameters = calculatorSchema;
 	readonly strict = true;
