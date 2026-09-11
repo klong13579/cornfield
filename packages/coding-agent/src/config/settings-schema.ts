@@ -2027,26 +2027,6 @@ export const SETTINGS_SCHEMA = {
 		ui: { tab: "tools", label: "MCP Project Config", description: "Load .mcp.json/mcp.json from project root" },
 	},
 
-	"mcp.discoveryMode": {
-		type: "boolean",
-		default: false,
-		ui: {
-			tab: "tools",
-			label: "MCP Tool Discovery",
-			description: "Hide MCP tools by default and expose them through a tool discovery tool",
-		},
-	},
-
-	"mcp.discoveryDefaultServers": {
-		type: "array",
-		default: [] as string[],
-		ui: {
-			tab: "tools",
-			label: "MCP Discovery Default Servers",
-			description: "Keep MCP tools from these servers visible while discovery mode hides other MCP tools",
-		},
-	},
-
 	"mcp.notifications": {
 		type: "boolean",
 		default: false,

@@ -76,8 +76,8 @@ describe("splitToolsForXdev", () => {
 	});
 
 	it("honors XDEV_KEEP_TOP_LEVEL for prompt-coupled discoverable tools", () => {
-		const split = splitToolsForXdev([fakeTool("web_search"), fakeTool("search_tool_bm25")]);
-		expect(split.topLevel.map(t => t.name).sort()).toEqual(["search_tool_bm25", "web_search"]);
+		const split = splitToolsForXdev([fakeTool("web_search"), fakeTool("irc"), fakeTool("hub")]);
+		expect(split.topLevel.map(t => t.name).sort()).toEqual(["hub", "irc", "web_search"]);
 		expect(split.devices.size).toBe(0);
 	});
 });

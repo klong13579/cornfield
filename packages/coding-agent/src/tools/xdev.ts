@@ -18,6 +18,7 @@
 import type { AgentTool } from "@cornfield/agent";
 import { isBunTestRuntime } from "@cornfield/utils";
 import type { Settings } from "../config/settings";
+import { isMCPToolName } from "../mcp/discoverable-tool-metadata";
 import { resolveLoadMode } from "./essential-tools";
 
 type Tool = AgentTool<any, any, any>;
@@ -29,7 +30,7 @@ type Tool = AgentTool<any, any, any>;
  * call by name because prompts or harness flows reference them directly and the
  * model cannot be assumed to know the xd protocol (upstream incident #5973).
  */
-export const XDEV_KEEP_TOP_LEVEL: readonly string[] = ["web_search", "search_tool_bm25", "irc", "hub"];
+export const XDEV_KEEP_TOP_LEVEL: readonly string[] = ["web_search", "irc", "hub"];
 
 /** How many characters of device catalog may be injected into the system prompt. */
 export const XDEV_PROMPT_BUDGET_CHARS = 2000;
@@ -84,6 +85,28 @@ export function splitToolsForXdev(tools: Tool[]): XdevSplit {
 	const overlap = topLevel.filter(t => devices.has(t.name));
 	if (overlap.length > 0) {
 		throw new Error(`xd split invariant violated, tools in both sets: ${overlap.map(t => t.name).join(", ")}`);
+	}
+	return { topLevel, devices };
+}
+
+/**
+ * Split tools registered after `createTools` (MCP tools) for xd:// mounting.
+ *
+ * `createTools` splits built-in tools inside its own run; MCP tools are
+ * registered afterwards, so they need their own pass. Only MCP tools move to
+ * devices — extension and custom tools are deliberately left top-level:
+ * mounting them is a separate decision and reclassifying them here would
+ * silently change their reachability.
+ */
+export function splitPostRegistrationMCPToolsForXdev(tools: Tool[]): XdevSplit {
+	const topLevel: Tool[] = [];
+	const devices = new Map<string, Tool>();
+	for (const tool of tools) {
+		if (isMCPToolName(tool.name)) {
+			devices.set(tool.name, tool);
+		} else {
+			topLevel.push(tool);
+		}
 	}
 	return { topLevel, devices };
 }

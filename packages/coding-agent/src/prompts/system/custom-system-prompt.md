@@ -191,12 +191,6 @@ Some tools are mounted as devices instead of direct tool calls. Inspect a device
 {{/if}}
 {{/if}}
 
-{{#if mcpDiscoveryMode}}
-### MCP tool discovery
-{{#if hasMCPDiscoveryServers}}Discoverable MCP servers in this session: {{#list mcpDiscoveryServerSummaries join=", "}}{{this}}{{/list}}.{{/if}}
-If the task may involve external systems, SaaS APIs, chat, tickets, databases, deployments, or other non-local integrations, you **SHOULD** call `{{toolRefs.search_tool_bm25}}` before concluding no such tool exists.
-{{/if}}
-
 {{#ifAny (includes tools "python") (includes tools "bash")}}
 ### Tool priority
 1. Use specialized tools first{{#ifAny (includes tools "read") (includes tools "grep") (includes tools "glob") (includes tools "edit") (includes tools "lsp")}}: {{#has tools "read"}}`{{toolRefs.read}}`, {{/has}}{{#has tools "grep"}}`{{toolRefs.grep}}`, {{/has}}{{#has tools "glob"}}`{{toolRefs.glob}}`, {{/has}}{{#has tools "edit"}}`{{toolRefs.edit}}`, {{/has}}{{#has tools "lsp"}}`{{toolRefs.lsp}}`{{/has}}{{/ifAny}}

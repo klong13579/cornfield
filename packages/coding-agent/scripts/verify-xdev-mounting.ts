@@ -19,9 +19,11 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { Settings } from "@cornfield/coding-agent/config/settings";
+import { XdevProtocolHandler } from "@cornfield/coding-agent/internal-urls/xd-protocol";
 import { buildSystemPrompt } from "@cornfield/coding-agent/system-prompt";
-import { createTools, type ToolSession } from "@cornfield/coding-agent/tools";
-import { buildXdevDeviceCatalog } from "@cornfield/coding-agent/tools/xdev";
+import { createTools, type ToolSession, WriteTool } from "@cornfield/coding-agent/tools";
+import { buildXdevDeviceCatalog, splitPostRegistrationMCPToolsForXdev } from "@cornfield/coding-agent/tools/xdev";
+import { Type } from "@sinclair/typebox";
 
 type Tool = Awaited<ReturnType<typeof createTools>>[number];
 
@@ -41,11 +43,10 @@ const ESSENTIAL = [
 	"exit_plan_mode",
 	"identity",
 	"web_search",
-	"search_tool_bm25",
 ];
 
 /** Discoverable tools that stay top-level because prompts call them by name. */
-const KEEP_TOP_LEVEL = ["web_search", "search_tool_bm25", "irc", "hub"];
+const KEEP_TOP_LEVEL = ["web_search", "irc", "hub"];
 
 const failures: string[] = [];
 
@@ -189,6 +190,81 @@ check(
 check(
 	"no devices → no catalog section (no token cost when nothing is mounted)",
 	!noDevicePrompt.includes("Mounted devices"),
+);
+
+// ── Case 6: post-registration MCP tools mount as devices ────────────────────
+// MCP tools register after createTools (sdk.ts), so their device split is a
+// separate pass. Prove the reachability chain in a real bun process: the split
+// mounts only MCP tools, read xd:// lists them all (surviving the prompt-catalog
+// budget truncation), and write xd://<name> executes one.
+function fakeRegisteredTool(name: string, description: string): Tool {
+	return {
+		name,
+		description,
+		parameters: Type.Object({ query: Type.String() }),
+		execute: async (_toolCallId: string, args: { query: string }) => ({
+			content: [{ type: "text", text: `executed ${name} (${args.query})` }],
+			details: {},
+		}),
+	} as unknown as Tool;
+}
+
+const postRegTools = [
+	fakeRegisteredTool("mcp__github_create_issue", "Create a GitHub issue"),
+	fakeRegisteredTool("mcp__github_list_pull_requests", "List pull requests"),
+	fakeRegisteredTool("my_custom_tool", "A non-MCP custom tool"),
+];
+const postSplit = splitPostRegistrationMCPToolsForXdev(postRegTools);
+check(
+	"post-registration split mounts only MCP tools as devices",
+	[...postSplit.devices.keys()].sort().join(",") === "mcp__github_create_issue,mcp__github_list_pull_requests",
+	`devices: ${[...postSplit.devices.keys()].join(", ") || "none"}`,
+);
+check(
+	"post-registration split keeps non-MCP tools top-level",
+	postSplit.topLevel.map(tool => tool.name).join(",") === "my_custom_tool",
+	`topLevel: ${postSplit.topLevel.map(tool => tool.name).join(", ") || "none"}`,
+);
+
+const mcpHandler = new XdevProtocolHandler({ getDevices: () => postSplit.devices });
+const mcpCatalog = await mcpHandler.resolve({ rawHost: "" } as never);
+check(
+	"read xd:// lists every mounted MCP device",
+	mcpCatalog.content.includes("xd://mcp__github_create_issue") &&
+		mcpCatalog.content.includes("xd://mcp__github_list_pull_requests"),
+);
+const mcpManual = await mcpHandler.resolve({ rawHost: "mcp__github_create_issue" } as never);
+check("read xd://<mcp tool> returns its wire schema", mcpManual.content.includes('"query"'));
+
+const mcpSession: ToolSession = {
+	cwd: fs.mkdtempSync(path.join(os.tmpdir(), "xdev-verify-mcp-")),
+	hasUI: false,
+	getSessionFile: () => null,
+	getSessionSpawns: () => "*",
+	settings: Settings.isolated({ "tools.xdev": true }),
+	xdevDevices: postSplit.devices,
+};
+const mcpWrite = new WriteTool(mcpSession);
+const mcpExec = await mcpWrite.execute("mcp-exec", {
+	path: "xd://mcp__github_create_issue",
+	content: JSON.stringify({ query: "hello" }),
+});
+check(
+	"write xd://<mcp tool> executes the device",
+	(mcpExec.content[0] as { text?: string }).text === "executed mcp__github_create_issue (hello)",
+);
+
+const manyDevices = new Map<string, Tool>();
+for (let i = 0; i < 500; i++) {
+	manyDevices.set(`mcp__server_tool_${i}`, fakeRegisteredTool(`mcp__server_tool_${i}`, `Tool ${i}`));
+}
+const promptCatalog = buildXdevDeviceCatalog(manyDevices);
+const fullCatalogHandler = new XdevProtocolHandler({ getDevices: () => manyDevices });
+const fullCatalog = await fullCatalogHandler.resolve({ rawHost: "" } as never);
+check(
+	"read xd:// returns the FULL catalog even when the prompt catalog truncates",
+	promptCatalog.truncated > 0 && fullCatalog.content.includes("xd://mcp__server_tool_499"),
+	`prompt catalog: ${promptCatalog.entries.length} entries (+${promptCatalog.truncated} truncated); read xd:// reaches the last device`,
 );
 
 console.log(failures.length === 0 ? "\nALL PASS" : `\n${failures.length} FAILURE(S):\n- ${failures.join("\n- ")}`);

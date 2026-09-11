@@ -67,7 +67,6 @@ const baseRenderContext: prompt.TemplateContext = {
 		web_search: "web_search",
 		todo: "todo",
 		inspect_image: "inspect_image",
-		search_tool_bm25: "search_tool_bm25",
 		lsp: "lsp",
 		ast_grep: "ast_grep",
 		ast_edit: "ast_edit",
@@ -299,8 +298,6 @@ describe("system Handlebars prompt templates", () => {
 				{ name: "validate-boundaries", content: "Validate inputs at boundaries.", path: "/tmp/rule.md" },
 			],
 			intentField: INTENT_FIELD,
-			mcpDiscoveryMode: true,
-			mcpDiscoveryServerSummaries: ["github (2 tools)"],
 			eagerTasks: true,
 		});
 
@@ -322,30 +319,11 @@ describe("system Handlebars prompt templates", () => {
 				{ name: "validate-boundaries", content: "Validate inputs at boundaries.", path: "/tmp/rule.md" },
 			],
 			intentField: INTENT_FIELD,
-			mcpDiscoveryMode: true,
-			mcpDiscoveryServerSummaries: ["github (2 tools)"],
 			eagerTasks: true,
 		});
 
 		expect(rendered).not.toContain("<no-yield-rules>");
 		expect(countTokens(rendered)).toBeLessThan(12_000);
-	});
-
-	test("system-prompt renders MCP discovery hint when enabled", async () => {
-		const templatePath = path.join(systemPromptsDir, "system-prompt.md");
-		const template = await Bun.file(templatePath).text();
-
-		const rendered = prompt.render(template, {
-			...baseRenderContext,
-			mcpDiscoveryMode: true,
-			hasMCPDiscoveryServers: true,
-			mcpDiscoveryServerSummaries: ["github (2 tools)", "slack (1 tool)"],
-		});
-
-		expect(rendered).toContain("### MCP tool discovery");
-		expect(rendered).toContain("Discoverable MCP servers in this session: github (2 tools), slack (1 tool).");
-		expect(rendered).not.toContain("Example discoverable MCP tools:");
-		expect(rendered).toContain("call `search_tool_bm25` before concluding no such tool exists");
 	});
 
 	test("buildSystemPrompt deduplicates always-apply rules already present in SYSTEM.md", async () => {

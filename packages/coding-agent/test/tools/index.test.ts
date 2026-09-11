@@ -23,25 +23,6 @@ function createSettingsWithOverrides(overrides: Partial<Record<SettingPath, unkn
 	});
 }
 
-function createDiscoverySessionHooks(): Partial<ToolSession> {
-	const selected: string[] = [];
-	return {
-		isMCPDiscoveryEnabled: () => true,
-		getDiscoverableMCPTools: () => [],
-		getSelectedMCPToolNames: () => [...selected],
-		activateDiscoveredMCPTools: async toolNames => {
-			const activated: string[] = [];
-			for (const name of toolNames) {
-				if (!selected.includes(name)) {
-					selected.push(name);
-					activated.push(name);
-				}
-			}
-			return activated;
-		},
-	};
-}
-
 describe("createTools", () => {
 	afterEach(() => {
 		vi.restoreAllMocks();
@@ -228,19 +209,6 @@ describe("createTools", () => {
 		expect(names).not.toContain("browser");
 		expect(names).not.toContain("inspect_image");
 		expect(names).not.toContain("calc");
-	});
-
-	it("includes search_tool_bm25 when MCP tool discovery is enabled and executable", async () => {
-		const session = createTestSession({
-			settings: createSettingsWithOverrides({
-				"mcp.discoveryMode": true,
-			}),
-			...createDiscoverySessionHooks(),
-		});
-		const tools = await createTools(session);
-		const names = tools.map(t => t.name);
-
-		expect(names).toContain("search_tool_bm25");
 	});
 
 	it("HIDDEN_TOOLS contains review tools", () => {

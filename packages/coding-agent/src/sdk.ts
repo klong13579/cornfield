@@ -91,12 +91,6 @@ import { disposeAllKernelSessions, disposeKernelSessionsByOwner } from "./ipy/ex
 import { shutdownAll as shutdownLspClients } from "./lsp/client";
 import { LSP_STARTUP_EVENT_CHANNEL, type LspStartupEvent } from "./lsp/startup-events";
 import { discoverAndLoadMCPTools, type MCPManager, type MCPToolsLoadResult } from "./mcp";
-import {
-	collectDiscoverableMCPTools,
-	formatDiscoverableMCPToolServerSummary,
-	selectDiscoverableMCPToolNamesByServer,
-	summarizeDiscoverableMCPTools,
-} from "./mcp/discoverable-tool-metadata";
 import { buildMemoryToolDeveloperInstructions, getMemoryRoot, startMemoryStartupTask } from "./memories";
 import asyncResultTemplate from "./prompts/tools/async-result.md" with { type: "text" };
 import { AgentRegistry, MAIN_AGENT_ID } from "./registry/agent-registry";
@@ -137,10 +131,10 @@ import {
 	PythonTool,
 	ReadTool,
 	ResolveTool,
-	renderSearchToolBm25Description,
 	SearchTool,
 	setPreferredImageProvider,
 	setPreferredSearchProvider,
+	splitPostRegistrationMCPToolsForXdev,
 	type Tool,
 	type ToolSession,
 	WebSearchTool,
@@ -1446,6 +1440,20 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 				.map(tool => CustomToolAdapter.wrap(tool, customToolContext));
 		}
 
+		// xd:// mounting extended to tools registered after createTools (MCP tools):
+		// createTools split built-in tools inside its own run; MCP tools register
+		// later, so their device split happens here. Only MCP tools move to devices.
+		if (toolSession.xdevDevices) {
+			const extensionSplit = splitPostRegistrationMCPToolsForXdev(wrappedExtensionTools);
+			for (const [name, tool] of extensionSplit.devices) {
+				if (toolSession.xdevDevices.has(name)) {
+					throw new Error(`Duplicate xd device name: ${name}`);
+				}
+				toolSession.xdevDevices.set(name, tool);
+			}
+			wrappedExtensionTools = extensionSplit.topLevel;
+		}
+
 		// All built-in tools are active (conditional tools like git/ask return null from factory if disabled)
 		const toolRegistry = new Map<string, Tool>();
 		for (const tool of builtinTools) {
@@ -1489,13 +1497,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		const rebuildSystemPrompt = async (toolNamesInput: string[], tools: Map<string, AgentTool>): Promise<string> => {
 			const toolNames = [...toolNamesInput].sort();
 			toolContextStore.setToolNames(toolNames);
-			const discoverableMCPTools = mcpDiscoveryEnabled ? collectDiscoverableMCPTools(tools.values()) : [];
-			const discoverableMCPSummary = summarizeDiscoverableMCPTools(discoverableMCPTools);
-			const hasDiscoverableMCPTools =
-				mcpDiscoveryEnabled && toolNames.includes("search_tool_bm25") && discoverableMCPTools.length > 0;
-			const promptTools = buildSystemPromptToolMetadata(tools, {
-				search_tool_bm25: { description: renderSearchToolBm25Description(discoverableMCPTools) },
-			});
+			const promptTools = buildSystemPromptToolMetadata(tools);
 			// Extension-provided tool snippets/guidelines (ToolDefinition.promptSnippet / promptGuidelines)
 			const extensionToolSnippets = registeredTools
 				.map(tool => tool.definition.promptSnippet)
@@ -1534,8 +1536,6 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 				appendSystemPrompt: appendPrompt,
 				repeatToolDescriptions,
 				intentField,
-				mcpDiscoveryMode: hasDiscoverableMCPTools,
-				mcpDiscoveryServerSummaries: discoverableMCPSummary.servers.map(formatDiscoverableMCPToolServerSummary),
 				eagerTasks,
 				secretsEnabled,
 				toolSnippets: extensionToolSnippets,
@@ -1560,8 +1560,6 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 					appendSystemPrompt: appendPrompt,
 					repeatToolDescriptions,
 					intentField,
-					mcpDiscoveryMode: hasDiscoverableMCPTools,
-					mcpDiscoveryServerSummaries: discoverableMCPSummary.servers.map(formatDiscoverableMCPToolServerSummary),
 					eagerTasks,
 					secretsEnabled,
 					toolSnippets: extensionToolSnippets,
@@ -1578,7 +1576,6 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			toolNamesFromRegistry;
 		const normalizedRequested = requestedToolNames.filter(name => toolRegistry.has(name));
 		const includeExitPlanMode = requestedToolNames.includes("exit_plan_mode");
-		const mcpDiscoveryEnabled = settings.get("mcp.discoveryMode") ?? false;
 		const defaultInactiveToolNames = new Set(
 			registeredTools.filter(tool => tool.definition.defaultInactive).map(tool => tool.definition.name),
 		);
@@ -1588,38 +1585,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		const initialRequestedActiveToolNames = options.toolNames
 			? requestedActiveToolNames
 			: requestedActiveToolNames.filter(name => !defaultInactiveToolNames.has(name));
-		const explicitlyRequestedMCPToolNames = options.toolNames
-			? requestedActiveToolNames.filter(name => name.startsWith("mcp__"))
-			: [];
-		const discoveryDefaultServers = new Set(
-			(settings.get("mcp.discoveryDefaultServers") ?? []).map(serverName => serverName.trim()).filter(Boolean),
-		);
-		const discoveryDefaultServerToolNames = mcpDiscoveryEnabled
-			? selectDiscoverableMCPToolNamesByServer(
-					collectDiscoverableMCPTools(toolRegistry.values()),
-					discoveryDefaultServers,
-				)
-			: [];
-		let initialSelectedMCPToolNames: string[] = [];
-		let defaultSelectedMCPToolNames: string[] = [];
-		let initialToolNames = [...initialRequestedActiveToolNames];
-		if (mcpDiscoveryEnabled) {
-			const restoredSelectedMCPToolNames = existingSession.selectedMCPToolNames.filter(name =>
-				toolRegistry.has(name),
-			);
-			defaultSelectedMCPToolNames = [
-				...new Set([...discoveryDefaultServerToolNames, ...explicitlyRequestedMCPToolNames]),
-			];
-			initialSelectedMCPToolNames = existingSession.hasPersistedMCPToolSelection
-				? restoredSelectedMCPToolNames
-				: [...new Set([...restoredSelectedMCPToolNames, ...defaultSelectedMCPToolNames])];
-			initialToolNames = [
-				...new Set([
-					...initialRequestedActiveToolNames.filter(name => !name.startsWith("mcp__")),
-					...initialSelectedMCPToolNames,
-				]),
-			];
-		}
+		const initialToolNames = [...initialRequestedActiveToolNames];
 
 		// Custom tools and extension-registered tools are always included regardless of toolNames filter
 		const alwaysInclude: string[] = [
@@ -1627,9 +1593,6 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			...registeredTools.filter(t => !t.definition.defaultInactive).map(t => t.definition.name),
 		];
 		for (const name of alwaysInclude) {
-			if (mcpDiscoveryEnabled && name.startsWith("mcp__")) {
-				continue;
-			}
 			if (toolRegistry.has(name) && !initialToolNames.includes(name)) {
 				initialToolNames.push(name);
 			}
@@ -1818,11 +1781,6 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			onResponse,
 			convertToLlm: convertToLlmFinal,
 			rebuildSystemPrompt,
-			mcpDiscoveryEnabled,
-			initialSelectedMCPToolNames,
-			defaultSelectedMCPToolNames,
-			persistInitialMCPToolSelection: !hasExistingSession,
-			defaultSelectedMCPServerNames: [...discoveryDefaultServers],
 			ttsrManager,
 			obfuscator,
 			asyncJobManager,

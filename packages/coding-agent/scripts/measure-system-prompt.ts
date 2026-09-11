@@ -48,8 +48,6 @@ const full = await buildSystemPrompt({
 	appendSystemPrompt: "Appendix instructions",
 	alwaysApplyRules: [{ name: "validate-boundaries", content: "Validate inputs at boundaries.", path: "/tmp/rule.md" }],
 	intentField: INTENT_FIELD,
-	mcpDiscoveryMode: true,
-	mcpDiscoveryServerSummaries: ["github (2 tools)"],
 	eagerTasks: true,
 });
 

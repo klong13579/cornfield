@@ -48,7 +48,6 @@ import { createReportToolIssueTool, isAutoQaEnabled } from "./report-tool-issue"
 import { ResolveTool } from "./resolve";
 import { reportFindingTool } from "./review";
 import { SearchTool } from "./search";
-import { SearchToolBm25Tool } from "./search-tool-bm25";
 import { loadSshTool } from "./ssh";
 import { SwitchModelTool } from "./switch-model";
 import { type TodoPhase, TodoWriteTool } from "./todo-write";
@@ -90,7 +89,6 @@ export * from "./render-mermaid";
 export * from "./report-tool-issue";
 export * from "./resolve";
 export * from "./search";
-export * from "./search-tool-bm25";
 export * from "./ssh";
 export * from "./todo-write";
 export * from "./vim";
@@ -254,7 +252,6 @@ export const BUILTIN_TOOLS: Record<string, ToolFactory> = {
 	write: s => new WriteTool(s),
 	switch_model: s => new SwitchModelTool(s),
 	list_models: s => new ListModelsTool(s),
-	search_tool_bm25: SearchToolBm25Tool.createIf,
 };
 
 export const HIDDEN_TOOLS: Record<string, ToolFactory> = {
@@ -427,7 +424,6 @@ export async function createTools(session: ToolSession, toolNames?: string[]): P
 		if (name === "switch_model") return session.settings.get("switchModel.enabled");
 		if (name === "inspect_image") return session.settings.get("inspect_image.enabled");
 		if (name === "web_search") return session.settings.get("web_search.enabled");
-		if (name === "search_tool_bm25") return session.settings.get("mcp.discoveryMode");
 		if (name === "calc") return session.settings.get("calc.enabled");
 		if (name === "browser") return session.settings.get("browser.enabled");
 		if (name === "checkpoint" || name === "rewind") return session.settings.get("checkpoint.enabled");
