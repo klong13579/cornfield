@@ -137,6 +137,10 @@ function renderFallbackResult(text: string, theme: Theme): Component {
 export class SearchToolBm25Tool implements AgentTool<typeof searchToolBm25Schema, SearchToolBm25Details> {
 	readonly name = "search_tool_bm25";
 	readonly label = "SearchToolBm25";
+	// The only MCP discovery entry point: once mounted behind xd:// the model loses the
+	// ability to discover MCP tools at all, so it stays in the selectable set.
+	readonly loadMode = "essential" as const;
+	readonly summary = "Finds available MCP tools from a description of what is needed.";
 	get description(): string {
 		return renderSearchToolBm25Description(getDiscoverableMCPToolsForDescription(this.session));
 	}

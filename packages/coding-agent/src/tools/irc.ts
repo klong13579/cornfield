@@ -74,6 +74,8 @@ export interface IrcDetails {
 export class IrcTool implements AgentTool<typeof ircSchema, IrcDetails> {
 	readonly name = "irc";
 	readonly label = "IRC";
+	readonly loadMode = "discoverable" as const;
+	readonly summary = "Lets live agents message each other to coordinate in-flight work.";
 	readonly description: string;
 	readonly parameters = ircSchema;
 	readonly strict = true;
