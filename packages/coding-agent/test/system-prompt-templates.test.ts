@@ -413,7 +413,7 @@ describe("system Handlebars prompt templates", () => {
 		});
 
 		expect(systemPrompt).toContain("Edit: `apply_patch`");
-		expect(systemPrompt).toContain("`read`, `search`, `find`, `apply_patch`, `lsp`");
+		expect(systemPrompt).toContain("`read`, `grep`, `glob`, `apply_patch`, `lsp`");
 		expect(systemPrompt).toContain("Use `apply_patch` for surgical text changes");
 		expect(systemPrompt).not.toContain("Edit: `edit`");
 	});
