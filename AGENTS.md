@@ -28,7 +28,8 @@ bun dev                          # = bun --cwd=packages/coding-agent src/cli.ts
 # Checks (TS + Rust)
 bun check                        # parallel: check:ts + check:rs
 bun check:ts                     # biome check . + tsgo per-workspace
-bun check:rs                     # cargo fmt --check + clippy (skips if no .rs changed locally)
+bun check:rs                     # cargo fmt + clippy per workspace member (skips only when neither the working tree nor this branch's commits touch Rust; workspace-wide cargo commands cannot run inside a git worktree)
+bun run --cwd=packages/coding-agent verify:xdev  # xd:// mount pipeline — MUST run outside bun test: mounting is off under that runtime, so unit tests never exercise the mounted path
 
 # Lint / Format / Auto-fix
 bun lint                         # parallel: lint:ts + lint:rs
