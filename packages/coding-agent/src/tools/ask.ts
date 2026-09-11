@@ -333,6 +333,8 @@ type AskParams = AskToolInput;
 export class AskTool implements AgentTool<typeof askSchema, AskToolDetails> {
 	readonly name = "ask";
 	readonly label = "Ask";
+	readonly loadMode = "essential" as const;
+	readonly summary = "Asks the user to decide when the work cannot proceed on the agent's own judgment.";
 	readonly description: string;
 	readonly parameters = askSchema;
 	readonly strict = true;
