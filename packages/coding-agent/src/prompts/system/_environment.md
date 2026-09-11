@@ -56,6 +56,17 @@ Most tools have a `{{intentField}}` parameter. Fill it with a concise intent in 
 </intent-field>
 {{/if}}
 
+{{#if xdevDevices.entries.length}}
+### Mounted devices (xd://)
+Some tools are mounted as devices instead of direct tool calls. Inspect a device with `read` (`read xd://` lists all devices; `read xd://<name>` shows a device's manual and wire schema); execute it with `write` (path `xd://<name>`, content = JSON arguments matching the device's wire schema).
+{{#each xdevDevices.entries}}
+- `xd://{{name}}` — {{summary}}
+{{/each}}
+{{#if xdevDevices.truncated}}
+- …{{xdevDevices.truncated}} more devices omitted; use `read xd://` for the full catalog.
+{{/if}}
+{{/if}}
+
 {{#if mcpDiscoveryMode}}
 ### MCP tool discovery
 {{#if hasMCPDiscoveryServers}}Discoverable MCP servers in this session: {{#list mcpDiscoveryServerSummaries join=", "}}{{this}}{{/list}}.{{/if}}

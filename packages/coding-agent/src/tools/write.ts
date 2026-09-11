@@ -6,6 +6,7 @@ import type { Component } from "@cornfield/tui";
 import { Text } from "@cornfield/tui";
 import { isEnoent, isRecord, prompt, untilAborted } from "@cornfield/utils";
 import { type Static, Type } from "@sinclair/typebox";
+import { Value } from "@sinclair/typebox/value";
 import { unzipSync, zipSync } from "fflate";
 import { stripHashlinePrefixes } from "../edit";
 import type { RenderResultOptions } from "../extensibility/custom-tools/types";
@@ -17,6 +18,7 @@ import { Ellipsis, Hasher, type RenderCache, renderStatusLine, truncateToWidth }
 import { resolveFileDisplayMode } from "../utils/file-display-mode";
 import { parseArchivePathCandidates } from "./archive-reader";
 import { assertEditableFile } from "./auto-generated-guard";
+import { normalizeToolName } from "./builtin-names";
 import { invalidateFsScanAfterWrite } from "./fs-cache-invalidation";
 import { type OutputMeta, outputMeta } from "./output-meta";
 import { formatPathRelativeToCwd } from "./path-utils";
@@ -423,40 +425,42 @@ export class WriteTool implements AgentTool<typeof writeSchema, WriteToolDetails
 		return untilAborted(signal, async () => {
 			// Strip hashline display prefixes (LINE+ID|) if the model copied them from read output
 			const { text: cleanContent, stripped } = stripWriteContent(this.session, content);
-			const resolvedArchivePath = await this.#resolveArchiveWritePath(path);
-			if (resolvedArchivePath) {
-				enforcePlanModeWrite(this.session, resolvedArchivePath.archivePath, {
-					op: resolvedArchivePath.exists ? "update" : "create",
-				});
 
-				const archiveResult = await this.#writeArchiveEntry(cleanContent, resolvedArchivePath);
-				if (stripped) {
-					const firstText = archiveResult.content.find(
-						(block): block is { type: "text"; text: string } =>
-							block.type === "text" && typeof block.text === "string",
-					);
-					if (firstText) {
-						firstText.text += `\nNote: auto-stripped hashline display prefixes from content before writing.`;
-					}
+			// Single virtual-path dispatch table: every non-plain-path write target
+			// (xd:// device execution, `archive.zip:entry` and `db.sqlite:table`
+			// concatenation paths) is one entry tried in order; plain filesystem
+			// writes are the terminal fallback. There is no second dispatch path.
+			const dispatch: Array<{
+				try(path: string, text: string): Promise<AgentToolResult<WriteToolDetails> | null>;
+			}> = [
+				{
+					try: (p, text) => this.#writeXdDevice(p, text, signal, _onUpdate, context),
+				},
+				{
+					try: async (p, text) => {
+						const resolved = await this.#resolveArchiveWritePath(p);
+						if (!resolved) return null;
+						enforcePlanModeWrite(this.session, resolved.archivePath, {
+							op: resolved.exists ? "update" : "create",
+						});
+						return this.#writeArchiveEntry(text, resolved);
+					},
+				},
+				{
+					try: async (p, text) => {
+						const resolved = await this.#resolveSqliteWritePath(p);
+						if (!resolved) return null;
+						enforcePlanModeWrite(this.session, resolved.sqlitePath, { op: "update" });
+						return this.#writeSqliteRow(p, text, resolved);
+					},
+				},
+			];
+
+			for (const entry of dispatch) {
+				const result = await entry.try(path, cleanContent);
+				if (result) {
+					return this.#noteHashlineStripping(result, stripped);
 				}
-				return archiveResult;
-			}
-
-			const resolvedSqlitePath = await this.#resolveSqliteWritePath(path);
-			if (resolvedSqlitePath) {
-				enforcePlanModeWrite(this.session, resolvedSqlitePath.sqlitePath, { op: "update" });
-
-				const sqliteResult = await this.#writeSqliteRow(path, cleanContent, resolvedSqlitePath);
-				if (stripped) {
-					const firstText = sqliteResult.content.find(
-						(block): block is { type: "text"; text: string } =>
-							block.type === "text" && typeof block.text === "string",
-					);
-					if (firstText) {
-						firstText.text += `\nNote: auto-stripped hashline display prefixes from content before writing.`;
-					}
-				}
-				return sqliteResult;
 			}
 
 			enforcePlanModeWrite(this.session, path, { op: "create" });
@@ -472,27 +476,83 @@ export class WriteTool implements AgentTool<typeof writeSchema, WriteToolDetails
 			invalidateFsScanAfterWrite(absolutePath);
 
 			const displayPath = formatPathRelativeToCwd(absolutePath, this.session.cwd);
-			let resultText = `Successfully wrote ${cleanContent.length} bytes to ${displayPath}`;
-			if (stripped) {
-				resultText += `\nNote: auto-stripped hashline display prefixes from content before writing.`;
-			}
-			if (!diagnostics) {
-				return {
-					content: [{ type: "text", text: resultText }],
-					details: {},
-				};
-			}
-
-			return {
-				content: [{ type: "text", text: resultText }],
-				details: {
-					diagnostics,
-					meta: outputMeta()
-						.diagnostics(diagnostics.summary, diagnostics.messages ?? [])
-						.get(),
-				},
-			};
+			const resultText = `Successfully wrote ${cleanContent.length} bytes to ${displayPath}`;
+			const plainResult: AgentToolResult<WriteToolDetails> = diagnostics
+				? {
+						content: [{ type: "text", text: resultText }],
+						details: {
+							diagnostics,
+							meta: outputMeta()
+								.diagnostics(diagnostics.summary, diagnostics.messages ?? [])
+								.get(),
+						},
+					}
+				: { content: [{ type: "text", text: resultText }], details: {} };
+			return this.#noteHashlineStripping(plainResult, stripped);
 		});
+	}
+
+	/** Append the hashline-stripping note to the first text block, if any prefixes were stripped. */
+	#noteHashlineStripping(
+		result: AgentToolResult<WriteToolDetails>,
+		stripped: boolean,
+	): AgentToolResult<WriteToolDetails> {
+		if (!stripped) return result;
+		const firstText = result.content.find(
+			(block): block is { type: "text"; text: string } => block.type === "text" && typeof block.text === "string",
+		);
+		if (firstText) {
+			firstText.text += `\nNote: auto-stripped hashline display prefixes from content before writing.`;
+		}
+		return result;
+	}
+
+	/**
+	 * Execute a mounted xd:// device through the write transport.
+	 * Returns null when `path` is not an xd:// URL (falls through the dispatch table).
+	 */
+	async #writeXdDevice(
+		path: string,
+		content: string,
+		signal?: AbortSignal,
+		onUpdate?: AgentToolUpdateCallback<WriteToolDetails>,
+		context?: AgentToolContext,
+	): Promise<AgentToolResult<WriteToolDetails> | null> {
+		const match = path.match(/^xd:\/\/(.+)$/i);
+		if (!match) return null;
+		const name = normalizeToolName(match[1]!.replace(/^\/+|\/+$/g, ""));
+		if (!name) {
+			throw new ToolError("xd:// write requires a device name, e.g. xd://<tool>");
+		}
+		const devices = this.session.xdevDevices;
+		const device = devices?.get(name);
+		if (!device) {
+			const available = devices && devices.size > 0 ? Array.from(devices.keys()).join(", ") : "none";
+			throw new ToolError(
+				`Unknown xd device: ${name}\nMounted devices: ${available}\nUse read xd:// for the catalog.`,
+			);
+		}
+
+		let args: unknown;
+		try {
+			args = Bun.JSON5.parse(content);
+		} catch (error) {
+			throw new ToolError(
+				`xd:// write content must be valid JSON: ${error instanceof Error ? error.message : String(error)}`,
+			);
+		}
+		if (!isRecord(args)) {
+			throw new ToolError("xd:// write content must be a JSON object of tool arguments");
+		}
+		if (!Value.Check(device.parameters, args)) {
+			const errors = Array.from(Value.Errors(device.parameters, args))
+				.map(e => `${e.path || "(root)"}: ${e.message}`)
+				.join("; ");
+			throw new ToolError(`Arguments do not match the wire schema of xd://${name}: ${errors}`);
+		}
+
+		const toolCallId = `xd-${crypto.randomUUID()}`;
+		return (await device.execute(toolCallId, args, signal, onUpdate, context)) as AgentToolResult<WriteToolDetails>;
 	}
 }
 

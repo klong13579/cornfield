@@ -24,6 +24,7 @@ import { AstEditTool } from "./ast-edit";
 import { AstGrepTool } from "./ast-grep";
 import { BashTool } from "./bash";
 import { BrowserTool } from "./browser";
+import { normalizeToolName } from "./builtin-names";
 import { CalculatorTool } from "./calculator";
 import { type CheckpointState, CheckpointTool, RewindTool } from "./checkpoint";
 import { DebugTool } from "./debug";
@@ -52,6 +53,7 @@ import { loadSshTool } from "./ssh";
 import { SwitchModelTool } from "./switch-model";
 import { type TodoPhase, TodoWriteTool } from "./todo-write";
 import { WriteTool } from "./write";
+import { splitToolsForXdev, xdevMountingActive } from "./xdev";
 import { YieldTool } from "./yield";
 
 // Exa MCP tools (22 tools)
@@ -93,6 +95,7 @@ export * from "./ssh";
 export * from "./todo-write";
 export * from "./vim";
 export * from "./write";
+export * from "./xdev";
 export * from "./yield";
 
 /** Tool type (AgentTool from pi-ai) */
@@ -213,6 +216,8 @@ export interface ToolSession {
 
 	/** Queue a hidden message to be injected at the next agent turn. */
 	queueDeferredMessage?(message: CustomMessage): void;
+	/** Tools mounted as xd:// devices (ADR-0003). Populated by createTools when mounting is active; absent otherwise. */
+	xdevDevices?: Map<string, Tool>;
 }
 
 type ToolFactory = (session: ToolSession) => Tool | null | Promise<Tool | null>;
@@ -300,7 +305,9 @@ export async function createTools(session: ToolSession, toolNames?: string[]): P
 	const includeYield = session.requireYieldTool === true;
 	const enableLsp = session.enableLsp ?? true;
 	const requestedTools =
-		toolNames && toolNames.length > 0 ? [...new Set(toolNames.map(name => name.toLowerCase()))] : undefined;
+		toolNames && toolNames.length > 0
+			? [...new Set(toolNames.map(name => normalizeToolName(name).toLowerCase()))]
+			: undefined;
 	if (requestedTools && !requestedTools.includes("exit_plan_mode")) {
 		requestedTools.push("exit_plan_mode");
 	}
@@ -475,6 +482,16 @@ export async function createTools(session: ToolSession, toolNames?: string[]): P
 		if (qaTool) {
 			tools.push(wrapToolWithMetaNotice(qaTool));
 		}
+	}
+
+	// xd:// device mounting (ADR-0003): discoverable tools become xd:// devices
+	// reachable through the read/write transport instead of direct tool calls.
+	// Runtime-injected internal tools (yield/resolve/report_tool_issue above)
+	// are already in `tools` at this point and stay top-level.
+	if (xdevMountingActive(session.settings, requestedTools !== undefined)) {
+		const split = splitToolsForXdev(tools);
+		session.xdevDevices = split.devices;
+		return split.topLevel;
 	}
 
 	return tools;

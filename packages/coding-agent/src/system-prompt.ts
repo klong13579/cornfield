@@ -557,6 +557,8 @@ export interface BuildSystemPromptOptions {
 	secretsEnabled?: boolean;
 	/** One-line snippets for extension-provided tools (ToolDefinition.promptSnippet). Rendered under an "Available tools" section. */
 	toolSnippets?: string[];
+	/** Budget-constrained xd:// device catalog; rendered as a "Mounted devices" section when devices are mounted. */
+	xdevDevices?: { entries: Array<{ name: string; summary: string }>; truncated: number };
 	/** Guideline bullets for extension-provided tools (ToolDefinition.promptGuidelines). Rendered under a "Tool Guidelines" section. */
 	toolGuidelines?: string[];
 }
@@ -586,6 +588,7 @@ export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}):
 		secretsEnabled = false,
 		toolSnippets = [],
 		toolGuidelines = [],
+		xdevDevices,
 	} = options;
 	const resolvedCwd = cwd ?? getProjectDir();
 
@@ -750,6 +753,7 @@ export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}):
 		secretsEnabled,
 		toolSnippets,
 		toolGuidelines,
+		xdevDevices,
 		skills: _filteredSkills,
 		hasMissionMd,
 		userProfile,

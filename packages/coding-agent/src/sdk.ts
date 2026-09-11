@@ -85,6 +85,7 @@ import {
 	PiProtocolHandler,
 	RuleProtocolHandler,
 	SkillProtocolHandler,
+	XdevProtocolHandler,
 } from "./internal-urls";
 import { disposeAllKernelSessions, disposeKernelSessionsByOwner } from "./ipy/executor";
 import { shutdownAll as shutdownLspClients } from "./lsp/client";
@@ -123,6 +124,7 @@ import { parseThinkingLevel, resolveThinkingLevelForModel, toReasoningEffort } f
 import {
 	BashTool,
 	BUILTIN_TOOLS,
+	buildXdevDeviceCatalog,
 	createTools,
 	discoverStartupLspServers,
 	EditTool,
@@ -1170,6 +1172,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		internalRouter.register(new PiProtocolHandler());
 		internalRouter.register(new JobsProtocolHandler({ getAsyncJobManager: () => asyncJobManager }));
 		internalRouter.register(new McpProtocolHandler({ getMcpManager: () => mcpManager }));
+		internalRouter.register(new XdevProtocolHandler({ getDevices: () => toolSession.xdevDevices ?? new Map() }));
 		toolSession.internalRouter = internalRouter;
 		toolSession.getArtifactsDir = getArtifactsDir;
 		toolSession.agentOutputManager = new AgentOutputManager(
@@ -1481,6 +1484,8 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		const repeatToolDescriptions = settings.get("repeatToolDescriptions");
 		const eagerTasks = settings.get("task.eager");
 		const intentField = settings.get("tools.intentTracing") || $flag("PI_INTENT_TRACING") ? INTENT_FIELD : undefined;
+		const xdevDevices = toolSession.xdevDevices;
+		const xdevPromptCatalog = xdevDevices && xdevDevices.size > 0 ? buildXdevDeviceCatalog(xdevDevices) : undefined;
 		const rebuildSystemPrompt = async (toolNamesInput: string[], tools: Map<string, AgentTool>): Promise<string> => {
 			const toolNames = [...toolNamesInput].sort();
 			toolContextStore.setToolNames(toolNames);
@@ -1535,6 +1540,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 				secretsEnabled,
 				toolSnippets: extensionToolSnippets,
 				toolGuidelines: extensionToolGuidelines,
+				xdevDevices: xdevPromptCatalog,
 			});
 
 			if (options.systemPrompt === undefined) {
@@ -1560,6 +1566,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 					secretsEnabled,
 					toolSnippets: extensionToolSnippets,
 					toolGuidelines: extensionToolGuidelines,
+					xdevDevices: xdevPromptCatalog,
 				});
 			}
 			return options.systemPrompt(defaultPrompt);
