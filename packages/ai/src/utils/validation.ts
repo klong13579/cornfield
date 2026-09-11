@@ -957,7 +957,7 @@ export function validateToolArguments(tool: Tool, toolCall: ToolCall): ToolCall[
 			}
 		}
 
-		if (toolName === "todo_write" && Array.isArray(args.ops)) {
+		if (toolName === "todo" && Array.isArray(args.ops)) {
 			for (const op of args.ops) {
 				if (typeof op === "object" && op !== null && Array.isArray((op as Record<string, unknown>).list)) {
 					const list = (op as Record<string, unknown>).list as Record<string, unknown>[];
