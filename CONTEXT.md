@@ -29,7 +29,7 @@ _Avoid_: Active tools, selected tools
 _Avoid_: Hidden tools, inactive tools
 
 ### Load Mode
-Tool 的呈现与调用入口策略，由 Tool 自身声明：`essential` 表示始终以顶层 function tool 呈现，`discoverable` 表示在 `tools.xdev` 开启时挂载为 `xd://` 设备，`internal` 表示不可由配置、发现或显式 `toolNames` 选中，只能由拥有它的运行时注入（注入后模型可正常调用）。它不表达具体操作是否获准执行。
+Tool 的呈现与调用入口策略，由 Tool 自身声明：`essential` 表示始终以顶层 function tool 呈现，`discoverable` 表示在 `tools.xdev` 开启时挂载为 `xd://` 设备，`internal` 表示不可由用户配置、设置或发现结果启用，只能由拥有它的运行时注入——Agent 定义的工具清单与显式工具清单 API 都属注入通道（注入后模型可正常调用）。它不表达具体操作是否获准执行。
 _Avoid_: Permission, enabled state
 
 ### xd:// 挂载
