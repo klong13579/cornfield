@@ -216,7 +216,7 @@ describe("runAgentShow", () => {
 	test("lists tools from TOOLS.md `### \\`<name>\\`` headings", async () => {
 		await runAgentInit({ name: "alpha", dir: tmpDir });
 		const result = await runAgentShow({ name: "alpha", dir: tmpDir });
-		// The skeleton TOOLS.md declares read, search, find, bash, write, edit
+		// The skeleton TOOLS.md declares read, grep, glob, bash, write, edit
 		expect(result.tools).toContain("read");
 		expect(result.tools).toContain("grep");
 		expect(result.tools).toContain("bash");

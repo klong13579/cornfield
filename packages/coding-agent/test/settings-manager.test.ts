@@ -193,12 +193,12 @@ describe("Settings", () => {
 			// 独立实例写自己的 config.yml
 			const opsFile = YAML.parse(await Bun.file(path.join(opsDir, "config.yml")).text()) as Record<string, unknown>;
 			expect(opsFile.theme).toEqual({ dark: "dark" });
-			expect(opsFile.search).toEqual({ enabled: false });
+			expect(opsFile.grep).toEqual({ enabled: false });
 
 			// 全局单例的文件不被动到
 			const globalFile = await readSettings();
 			expect(globalFile.theme).toEqual({ dark: "light" });
-			expect(globalFile.search).toBeUndefined();
+			expect(globalFile.grep).toBeUndefined();
 		});
 
 		it("reloads existing per-agent config.yml on create (双进程/重启后同文件语义)", async () => {

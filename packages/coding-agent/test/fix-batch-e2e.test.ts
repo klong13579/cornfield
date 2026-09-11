@@ -79,7 +79,7 @@ describe("edit tool edits schema — accept both object and array", () => {
 	});
 });
 
-describe("read tool — NOT FOUND error includes find/search hint", () => {
+describe("read tool — NOT FOUND error includes glob/grep hint", () => {
 	let tmpDir: string;
 	let readTool: ReadTool;
 
@@ -92,9 +92,9 @@ describe("read tool — NOT FOUND error includes find/search hint", () => {
 		fs.rmSync(tmpDir, { recursive: true, force: true });
 	});
 
-	it("includes `find` and `search` in the error for non-existent paths", async () => {
+	it("includes `glob` and `grep` in the error for non-existent paths", async () => {
 		await expect(readTool.execute("not-found", { path: path.join(tmpDir, "nonexistent.md") })).rejects.toThrow(
-			/`find`.*`search`|`search`.*`find`/,
+			/`glob`.*`grep`|`grep`.*`glob`/,
 		);
 	});
 });

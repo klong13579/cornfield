@@ -25,16 +25,16 @@ Read a file or URL.
 - **PDF 例外**：CornField `read` 工具缺 mupdf 运行时依赖，无法解析 PDF。使用 `python3` + `fitz` 代替：
   `python3 -c "import fitz; doc = fitz.open('/tmp/f.pdf'); [print(page.get_text()) for page in doc]"`
 
-### `search`
+### `grep`
 Search text across files.
 
 - MUST narrow by `path` before running on a large repo.
-- MUST prefer `search` over manual `cat` / `head` / `tail` / `rg` pipelines.
+- MUST prefer `grep` over manual `cat` / `head` / `tail` / `rg` pipelines.
 
-### `find`
+### `glob`
 Find files by glob pattern.
 
-- MUST use `find` instead of shell globbing (`ls **/*.ts` etc.).
+- MUST use `glob` instead of shell globbing (`ls **/*.ts` etc.).
 - MUST narrow results with a specific `pattern` to avoid excessive output.
 
 ### `lsp`
@@ -52,12 +52,12 @@ Analyze image content via vision model (independent of session model's image sup
 ### `bash`
 Execute shell commands.
 
-- MUST use `read` / `search` instead of `cat` / `head` / `tail` for inspection.
+- MUST use `read` / `grep` instead of `cat` / `head` / `tail` for inspection.
 - MUST NOT run interactive commands (`vim`, `less`, `ssh` without batch flags).
 - MUST NOT pipe untrusted input to `sh` / `bash`.
 - MUST redirect large output to a file and read it back with `read`.
 - MUST use full, non-truncated `python3 -c 'import json,sys; print(json.load(sys.stdin))'` (or `jq .`) when parsing JSON from stdin. Never rely on the AI Card's preview of a truncated `python3 -c "import sy…"` — the gateway-side rendering clips long arguments and `{}` is what an empty result *and* a parse failure both render to. If you cannot read the full command back, switch to the `read` tool on the JSON file directly.
-- MUST NOT use a `python3 -c` one-liner to look up a known field in a config file when a `read` + `search` would do.
+- MUST NOT use a `python3 -c` one-liner to look up a known field in a config file when a `read` + `grep` would do.
 
 ### `write`
 Create or overwrite a file.

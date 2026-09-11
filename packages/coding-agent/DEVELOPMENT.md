@@ -895,7 +895,7 @@ Bundled agent definitions are implemented in `packages/coding-agent/src/task/age
 
 - `PI_BLOCKED_AGENT` prevents self-recursive spawn of a specific agent.
 - Parent spawn policy (`session.getSessionSpawns()`) gates whether a child can be launched.
-- In plan mode (`session.getPlanModeState?.().enabled`), effective subagent tools are replaced with a restricted set (`read`, `grep`, `find`, `ls`, `lsp`, `fetch`, `web_search`) and child spawning is disabled for that effective agent (`spawns: undefined`).
+- In plan mode (`session.getPlanModeState?.().enabled`), effective subagent tools are replaced with a restricted set (`read`, `grep`, `glob`, `ls`, `lsp`, `fetch`, `web_search`) and child spawning is disabled for that effective agent (`spawns: undefined`).
 
 ## Execution Boundary: In-Process Session, Not OS Subprocess
 
@@ -926,7 +926,7 @@ What _is_ isolated is execution context and artifacts, not process memory:
 - Removes `task` when max recursion depth is reached (`task.maxRecursionDepth`).
 - Expands legacy `exec` alias into `python` and/or `bash` based on `python.toolMode`.
 - Forces `requireYieldTool: true` in `createAgentSession(...)`.
-- Filters parent-owned tools out of child tools (`todo_write` is removed).
+- Filters parent-owned tools out of child tools (`todo` is removed).
 
 If parent MCP connections exist, executor creates in-process MCP proxy tools with `createMCPProxyTools(...)` so children reuse parent MCP connectivity rather than creating independent MCP sessions.
 
