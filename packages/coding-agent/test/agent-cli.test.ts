@@ -218,7 +218,7 @@ describe("runAgentShow", () => {
 		const result = await runAgentShow({ name: "alpha", dir: tmpDir });
 		// The skeleton TOOLS.md declares read, search, find, bash, write, edit
 		expect(result.tools).toContain("read");
-		expect(result.tools).toContain("search");
+		expect(result.tools).toContain("grep");
 		expect(result.tools).toContain("bash");
 		expect(result.tools).toContain("write");
 		expect(result.tools).toContain("edit");

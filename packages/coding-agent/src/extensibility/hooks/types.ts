@@ -496,13 +496,13 @@ export interface WriteToolResultEvent extends ToolResultEventBase {
 
 /** Tool result event for search tool */
 export interface SearchToolResultEvent extends ToolResultEventBase {
-	toolName: "search";
+	toolName: "grep";
 	details: SearchToolDetails | undefined;
 }
 
 /** Tool result event for find tool */
 export interface FindToolResultEvent extends ToolResultEventBase {
-	toolName: "find";
+	toolName: "glob";
 	details: FindToolDetails | undefined;
 }
 

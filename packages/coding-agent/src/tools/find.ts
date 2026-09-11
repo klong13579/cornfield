@@ -163,7 +163,7 @@ function formatIncompleteLabel(incomplete: FindIncomplete): string {
 }
 
 export class FindTool implements AgentTool<typeof findSchema, FindToolDetails> {
-	readonly name = "find";
+	readonly name = "glob";
 	readonly label = "Find";
 	readonly loadMode = "essential" as const;
 	readonly summary = "Finds files by glob pattern.";
@@ -244,7 +244,7 @@ export class FindTool implements AgentTool<typeof findSchema, FindToolDetails> {
 				const rawOutput = limited.join("\n");
 				const truncation = truncateHead(rawOutput, { maxLines: Number.MAX_SAFE_INTEGER });
 				const sidecarId = truncation.truncated
-					? await persistToolOutputArtifact(this.session, "find", rawOutput)
+					? await persistToolOutputArtifact(this.session, "glob", rawOutput)
 					: undefined;
 				if (sidecarId) truncation.artifactId = sidecarId;
 				// The incomplete marker is appended after truncation so it survives the

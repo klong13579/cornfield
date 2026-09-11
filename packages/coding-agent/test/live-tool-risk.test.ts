@@ -7,13 +7,13 @@ import { classifyToolRisk, describeToolCall } from "../src/live/tool-risk";
 
 describe("classifyToolRisk", () => {
 	test("read-only tools are green", () => {
-		for (const name of ["read", "search", "find", "ast_grep", "lsp", "web_search", "calc", "list_models"]) {
+		for (const name of ["read", "grep", "glob", "ast_grep", "lsp", "web_search", "calc", "list_models"]) {
 			expect(classifyToolRisk(name, {})).toBe("green");
 		}
 	});
 
 	test("file/state mutation tools are yellow", () => {
-		for (const name of ["edit", "write", "ast_edit", "notebook", "todo_write", "task", "irc", "rewind"]) {
+		for (const name of ["edit", "write", "ast_edit", "notebook", "todo", "task", "irc", "rewind"]) {
 			expect(classifyToolRisk(name, {})).toBe("yellow");
 		}
 	});

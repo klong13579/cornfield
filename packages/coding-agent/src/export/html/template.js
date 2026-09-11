@@ -76,8 +76,8 @@
 
         // Create nodes
         for (const entry of entries) {
-          nodeMap.set(entry.id, { 
-            entry, 
+          nodeMap.set(entry.id, {
+            entry,
             children: [],
             label: labelMap.get(entry.id)
           });
@@ -169,7 +169,7 @@
         const stack = [];
 
         // Add roots (prioritize branch containing active leaf)
-        const orderedRoots = [...roots].sort((a, b) => 
+        const orderedRoots = [...roots].sort((a, b) =>
           Number(containsActive.get(b)) - Number(containsActive.get(a))
         );
         for (let i = orderedRoots.length - 1; i >= 0; i--) {
@@ -186,7 +186,7 @@
           const multipleChildren = children.length > 1;
 
           // Order children (active branch first)
-          const orderedChildren = [...children].sort((a, b) => 
+          const orderedChildren = [...children].sort((a, b) =>
             Number(containsActive.get(b)) - Number(containsActive.get(a))
           );
 
@@ -417,8 +417,8 @@
           }
           case 'grep':
             return `[grep: /${args.pattern || ''}/ in ${shortenPath(String(args.path || '.'))}]`;
-          case 'find':
-            return `[find: ${args.pattern || ''} in ${shortenPath(String(args.path || '.'))}]`;
+          case 'glob':
+            return `[glob: ${args.pattern || ''} in ${shortenPath(String(args.path || '.'))}]`;
           case 'ls':
             return `[ls: ${shortenPath(String(args.path || '.'))}]`;
           default: {
@@ -936,7 +936,7 @@
         const pattern = str(args.pattern);
         const patHtml = pattern === null ? invalidArgHtml() : escapeHtml(pattern);
         const badges = args.limit ? ['limit=' + args.limit] : null;
-        let html = toolHead('find', '<span class="tool-pattern">' + patHtml + '</span>', badges);
+        let html = toolHead('glob', '<span class="tool-pattern">' + patHtml + '</span>', badges);
         if (result) {
           const output = ctx.getResultText();
           if (output) html += formatExpandableOutput(output, 10);
@@ -975,7 +975,7 @@
       }
 
       function renderTodoWrite(name, args, result, ctx) {
-        let html = toolHead('todo_write');
+        let html = toolHead('todo');
         const ops = Array.isArray(args.ops) ? args.ops : null;
         if (ops) {
           html += '<div class="tool-args">';
@@ -1270,9 +1270,9 @@
         ast_edit: renderAstEdit,
         ast_grep: renderAstGrep,
         grep: renderGrep,
-        find: renderFind,
+        glob: renderFind,
         lsp: renderLsp,
-        todo_write: renderTodoWrite,
+        todo: renderTodoWrite,
         task: renderTask,
         web_search: renderWebSearch,
         fetch: renderFetch,
@@ -1440,7 +1440,7 @@
               }
             }
 
-            const text = typeof content === 'string' ? content : 
+            const text = typeof content === 'string' ? content :
               content.filter(c => c.type === 'text').map(c => c.text).join('\n');
             if (text.trim()) {
               html += `<div class="markdown-content">${safeMarkedParse(text)}</div>`;

@@ -100,10 +100,10 @@ describe("LiveConsultBridge", () => {
 		const pending = bridge.consult("读 TODO.md");
 		await Bun.sleep(10);
 		session.emit({ type: "tool_execution_start", toolName: "read", args: { path: "TODO.md" } });
-		session.emit({ type: "tool_execution_start", toolName: "search", args: { pattern: "待办" } });
+		session.emit({ type: "tool_execution_start", toolName: "grep", args: { pattern: "待办" } });
 		session.emit({ type: "agent_end", messages: assistantMessages("3 条。") });
 		await pending;
-		expect(activity).toEqual(["read: TODO.md", "search: 待办"]);
+		expect(activity).toEqual(["read: TODO.md", "grep: 待办"]);
 	});
 
 	test("timeout resolves with a spoken-friendly message", async () => {

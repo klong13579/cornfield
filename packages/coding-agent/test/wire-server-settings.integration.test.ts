@@ -101,34 +101,34 @@ test("serve per-agent 配置：get_tool_switches + set_config 定向写各自 co
 		};
 		expect(Array.isArray(sw.tools)).toBe(true);
 		expect(sw.tools.length).toBeGreaterThan(10);
-		const searchSwitch = sw.tools.find(t => t.tool === "search");
+		const searchSwitch = sw.tools.find(t => t.tool === "grep");
 		expect(searchSwitch).toBeDefined();
-		expect(searchSwitch?.path).toBe("search.enabled");
+		expect(searchSwitch?.path).toBe("grep.enabled");
 		expect(searchSwitch?.enabled).toBe(true); // 默认开启
 		expect(sw.pythonToolMode).toBe("both");
 		// 每项都带可写回路径
 		for (const t of sw.tools) expect(t.path.length).toBeGreaterThan(0);
 
 		// ── 2. set_config(sessionId) 定向写 hr 的 config.yml（文件级验证）──
-		const setResp = await conn.request({ type: "set_config", sessionId: "hr", key: "search.enabled", value: false });
+		const setResp = await conn.request({ type: "set_config", sessionId: "hr", key: "grep.enabled", value: false });
 		expect(setResp.ok).toBe(true);
 		const hrFile = YAML.parse(await Bun.file(hrConfigPath).text()) as Record<string, unknown>;
-		expect(hrFile.search).toEqual({ enabled: false });
+		expect(hrFile.grep).toEqual({ enabled: false });
 
 		// ── 3. get_config / get_tool_switches 反映文件值（显示 = 文件）──
-		const getResp = await conn.request({ type: "get_config", sessionId: "hr", key: "search.enabled" });
+		const getResp = await conn.request({ type: "get_config", sessionId: "hr", key: "grep.enabled" });
 		expect(getResp.ok).toBe(true);
 		expect((getResp.result as { config: unknown }).config).toBe(false);
 		const swAfter = await conn.request({ type: "get_tool_switches", sessionId: "hr" });
 		const searchAfter = ((swAfter.result as { tools: Array<{ tool: string; enabled: boolean }> }).tools ?? []).find(
-			t => t.tool === "search",
+			t => t.tool === "grep",
 		);
 		expect(searchAfter?.enabled).toBe(false);
 
 		// ── 4. 隔离：ops 的开关不受 hr 影响，且文件不被污染 ──
 		const opsSw = await conn.request({ type: "get_tool_switches", sessionId: "ops" });
 		const opsSearch = ((opsSw.result as { tools: Array<{ tool: string; enabled: boolean }> }).tools ?? []).find(
-			t => t.tool === "search",
+			t => t.tool === "grep",
 		);
 		expect(opsSearch?.enabled).toBe(true);
 		await expect(Bun.file(opsConfigPath).exists()).resolves.toBe(false); // ops 的 config.yml 未被创建

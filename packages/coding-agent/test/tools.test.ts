@@ -1229,7 +1229,7 @@ function b() {
 			const content = ["before", "match one", "after", "middle", "match two", "after two"].join("\n");
 			fs.writeFileSync(testFile, content);
 
-			const contextSettings = Settings.isolated({ "search.contextBefore": 1, "search.contextAfter": 1 });
+			const contextSettings = Settings.isolated({ "grep.contextBefore": 1, "grep.contextAfter": 1 });
 			const contextSearchTool = wrapToolWithMetaNotice(
 				new SearchTool(createTestToolSession(testDir, contextSettings)),
 			);

@@ -1011,7 +1011,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 			}
 
 			const subagentToolNames = session.getActiveToolNames();
-			const parentOwnedToolNames = new Set(["todo_write"]);
+			const parentOwnedToolNames = new Set(["todo"]);
 			const filteredSubagentTools = subagentToolNames.filter(name => !parentOwnedToolNames.has(name));
 			if (filteredSubagentTools.length !== subagentToolNames.length) {
 				await session.setActiveToolsByName(filteredSubagentTools);

@@ -13,16 +13,15 @@
 
 /**
  * Legacy alias → canonical builtin registry key.
- *
- * `find → glob`, `search → grep`, `todo_write → todo` are the renames planned
- * for the name-normalization batch (ADR-0003); they are pre-wired here so that
- * references using the future canonical names already resolve to the current
- * registry keys.
+ * `find → glob`, `search → grep`, `todo_write → todo` are the renames landed by the
+ * name-normalization batch (ADR-0003). The canonical registry keys are now
+ * `glob` / `grep` / `todo`; the legacy names above map onto them so old
+ * references keep resolving to the same tool. Removal is a separate ticket.
  */
 export const LEGACY_TOOL_NAME_ALIASES: Readonly<Record<string, string>> = {
-	glob: "find",
-	grep: "search",
-	todo: "todo_write",
+	find: "glob",
+	search: "grep",
+	todo_write: "todo",
 };
 
 /**

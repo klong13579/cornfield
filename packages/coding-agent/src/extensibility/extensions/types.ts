@@ -809,12 +809,12 @@ export interface WriteToolCallEvent extends ToolCallEventBase {
 }
 
 export interface SearchToolCallEvent extends ToolCallEventBase {
-	toolName: "search";
+	toolName: "grep";
 	input: SearchToolInput;
 }
 
 export interface FindToolCallEvent extends ToolCallEventBase {
-	toolName: "find";
+	toolName: "glob";
 	input: FindToolInput;
 }
 
@@ -862,12 +862,12 @@ export interface WriteToolResultEvent extends ToolResultEventBase {
 }
 
 export interface SearchToolResultEvent extends ToolResultEventBase {
-	toolName: "search";
+	toolName: "grep";
 	details: SearchToolDetails | undefined;
 }
 
 export interface FindToolResultEvent extends ToolResultEventBase {
-	toolName: "find";
+	toolName: "glob";
 	details: FindToolDetails | undefined;
 }
 
@@ -910,8 +910,8 @@ export function isToolCallEventType(toolName: "bash", event: ToolCallEvent): eve
 export function isToolCallEventType(toolName: "read", event: ToolCallEvent): event is ReadToolCallEvent;
 export function isToolCallEventType(toolName: "edit", event: ToolCallEvent): event is EditToolCallEvent;
 export function isToolCallEventType(toolName: "write", event: ToolCallEvent): event is WriteToolCallEvent;
-export function isToolCallEventType(toolName: "search", event: ToolCallEvent): event is SearchToolCallEvent;
-export function isToolCallEventType(toolName: "find", event: ToolCallEvent): event is FindToolCallEvent;
+export function isToolCallEventType(toolName: "grep", event: ToolCallEvent): event is SearchToolCallEvent;
+export function isToolCallEventType(toolName: "glob", event: ToolCallEvent): event is FindToolCallEvent;
 export function isToolCallEventType<TName extends string, TInput extends Record<string, unknown>>(
 	toolName: TName,
 	event: ToolCallEvent,

@@ -143,7 +143,7 @@ export function getLatestTodoPhasesFromEntries(entries: SessionEntry[]): TodoPha
 		}
 		if (entry.type !== "message") continue;
 		const message = entry.message as { role?: string; toolName?: string; details?: unknown; isError?: boolean };
-		if (message.role !== "toolResult" || message.toolName !== "todo_write" || message.isError) continue;
+		if (message.role !== "toolResult" || message.toolName !== "todo" || message.isError) continue;
 
 		const details = message.details as { phases?: unknown } | undefined;
 		if (!details || !Array.isArray(details.phases)) continue;
@@ -501,7 +501,7 @@ function formatSummary(phases: TodoPhase[], errors: string[]): string {
 // =============================================================================
 
 export class TodoWriteTool implements AgentTool<typeof todoWriteSchema, TodoWriteToolDetails> {
-	readonly name = "todo_write";
+	readonly name = "todo";
 	readonly label = "Todo Write";
 	readonly loadMode = "essential" as const;
 	readonly summary = "Tracks a multi-step plan so progress survives across turns.";

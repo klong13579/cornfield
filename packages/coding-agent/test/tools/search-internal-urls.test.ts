@@ -35,7 +35,7 @@ describe("SearchTool internal URL resolution", () => {
 			hasUI: false,
 			getSessionFile: () => null,
 			getSessionSpawns: () => "*",
-			settings: Settings.isolated({ "search.contextBefore": 0, "search.contextAfter": 0 }),
+			settings: Settings.isolated({ "grep.contextBefore": 0, "grep.contextAfter": 0 }),
 			...overrides,
 		};
 	}

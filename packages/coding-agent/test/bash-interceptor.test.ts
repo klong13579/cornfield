@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { checkBashInterception } from "@cornfield/coding-agent/tools/bash-interceptor";
 
-const ALL_TOOLS = ["bash", "read", "search", "find", "edit", "write"];
+const ALL_TOOLS = ["bash", "read", "grep", "glob", "edit", "write"];
 
 describe("bash-interceptor: skill shell command", () => {
 	it("blocks `skill foo` and suggests read tool", () => {
@@ -60,7 +60,7 @@ describe("bash-interceptor: skill shell command", () => {
 	});
 
 	it("does NOT block when `read` tool is unavailable (guard works)", () => {
-		const result = checkBashInterception("skill foo", ["bash", "search", "find", "edit", "write"]);
+		const result = checkBashInterception("skill foo", ["bash", "grep", "glob", "edit", "write"]);
 		expect(result.block).toBe(false);
 	});
 
@@ -81,13 +81,13 @@ describe("bash-interceptor: existing rules regression", () => {
 	it("still blocks `grep pattern file`", () => {
 		const result = checkBashInterception("grep foo file.txt", ALL_TOOLS);
 		expect(result.block).toBe(true);
-		expect(result.suggestedTool).toBe("search");
+		expect(result.suggestedTool).toBe("grep");
 	});
 
 	it("still blocks `find dir -name foo`", () => {
 		const result = checkBashInterception("find . -name '*.ts'", ALL_TOOLS);
 		expect(result.block).toBe(true);
-		expect(result.suggestedTool).toBe("find");
+		expect(result.suggestedTool).toBe("glob");
 	});
 
 	it("still blocks `sed -i ...`", () => {

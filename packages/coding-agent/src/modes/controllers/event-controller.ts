@@ -478,13 +478,13 @@ export class EventController {
 				this.ctx.ui.requestRender();
 			}
 		}
-		// Update todo display when todo_write tool completes
-		if (event.toolName === "todo_write" && !event.isError) {
+		// Update todo display when todo tool completes
+		if (event.toolName === "todo" && !event.isError) {
 			const details = event.result.details as { phases?: TodoPhase[] } | undefined;
 			if (details?.phases) {
 				this.ctx.setTodos(details.phases);
 			}
-		} else if (event.toolName === "todo_write" && event.isError) {
+		} else if (event.toolName === "todo" && event.isError) {
 			const textContent = event.result.content.find(
 				(content: { type: string; text?: string }) => content.type === "text",
 			)?.text;

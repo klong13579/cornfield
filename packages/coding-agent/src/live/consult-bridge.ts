@@ -6,7 +6,7 @@
  * text for the realtime model to verbalize.
  *
  * Read-only is a HARD guarantee, not a prompt suggestion: after session
- * creation the tool set is replaced with a whitelist (read/search/find/
+ * creation the tool set is replaced with a whitelist (read/grep/glob/
  * ast_grep/calc/web_search/list_models + a custom read-only git_status tool).
  * Ambient room noise can and does trigger consults (proven in the P0b E2E), so
  * nothing here may be able to mutate anything.
@@ -22,8 +22,8 @@ import type { AgentSession } from "../session/agent-session";
 /** Tools the voice consult session is allowed to keep. Everything else is dropped. */
 const READONLY_TOOL_WHITELIST = new Set([
 	"read",
-	"search",
-	"find",
+	"grep",
+	"glob",
 	"ast_grep",
 	"calc",
 	"web_search",

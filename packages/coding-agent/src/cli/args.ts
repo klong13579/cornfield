@@ -6,6 +6,7 @@ import { APP_NAME, CONFIG_DIR_NAME, logger } from "@cornfield/utils";
 import chalk from "chalk";
 import { parseEffort } from "../thinking";
 import { BUILTIN_TOOLS } from "../tools";
+import { normalizeToolName } from "../tools/builtin-names";
 
 export type Mode = "text" | "json" | "rpc" | "acp" | "wire-stdio";
 
@@ -133,8 +134,9 @@ export function parseArgs(args: string[], extensionFlags?: Map<string, { type: "
 				.filter(Boolean);
 			const validTools: string[] = [];
 			for (const name of toolNames) {
-				if (name in BUILTIN_TOOLS) {
-					validTools.push(name);
+				const canonical = normalizeToolName(name);
+				if (canonical in BUILTIN_TOOLS) {
+					validTools.push(canonical);
 				} else {
 					logger.warn("Unknown tool passed to --tools", {
 						tool: name,
@@ -279,7 +281,7 @@ ${chalk.bold("Available Tools (default-enabled unless noted):")}
   inspect_image - Analyze images with a vision model
   browser       - Browser automation (Puppeteer)
   task          - Launch sub-agents for parallel tasks
-  todo_write    - Manage todo/task lists
+  todo          - Manage todo/task lists
   web_search    - Search the web
   ask           - Ask user questions (interactive mode only)
 

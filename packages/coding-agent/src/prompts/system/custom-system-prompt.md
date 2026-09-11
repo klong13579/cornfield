@@ -199,17 +199,17 @@ If the task may involve external systems, SaaS APIs, chat, tickets, databases, d
 
 {{#ifAny (includes tools "python") (includes tools "bash")}}
 ### Tool priority
-1. Use specialized tools first{{#ifAny (includes tools "read") (includes tools "search") (includes tools "find") (includes tools "edit") (includes tools "lsp")}}: {{#has tools "read"}}`{{toolRefs.read}}`, {{/has}}{{#has tools "search"}}`{{toolRefs.search}}`, {{/has}}{{#has tools "find"}}`{{toolRefs.find}}`, {{/has}}{{#has tools "edit"}}`{{toolRefs.edit}}`, {{/has}}{{#has tools "lsp"}}`{{toolRefs.lsp}}`{{/has}}{{/ifAny}}
+1. Use specialized tools first{{#ifAny (includes tools "read") (includes tools "grep") (includes tools "glob") (includes tools "edit") (includes tools "lsp")}}: {{#has tools "read"}}`{{toolRefs.read}}`, {{/has}}{{#has tools "grep"}}`{{toolRefs.grep}}`, {{/has}}{{#has tools "glob"}}`{{toolRefs.glob}}`, {{/has}}{{#has tools "edit"}}`{{toolRefs.edit}}`, {{/has}}{{#has tools "lsp"}}`{{toolRefs.lsp}}`{{/has}}{{/ifAny}}
 2. Python: logic, loops, processing, display
 3. Bash: simple one-liners only
 You **MUST NOT** use Python or Bash when a specialized tool exists.
 {{/ifAny}}
 
-{{#ifAny (includes tools "read") (includes tools "write") (includes tools "search") (includes tools "find") (includes tools "edit")}}
+{{#ifAny (includes tools "read") (includes tools "write") (includes tools "grep") (includes tools "glob") (includes tools "edit")}}
 {{#has tools "read"}}- Use `{{toolRefs.read}}`, not `cat` or `ls`. `{{toolRefs.read}}` on a directory path lists its entries.{{/has}}
 {{#has tools "write"}}- Use `{{toolRefs.write}}`, not shell redirection.{{/has}}
-{{#has tools "search"}}- Use `{{toolRefs.search}}`, not shell regex search.{{/has}}
-{{#has tools "find"}}- Use `{{toolRefs.find}}`, not shell file globbing.{{/has}}
+{{#has tools "grep"}}- Use `{{toolRefs.grep}}`, not shell regex search.{{/has}}
+{{#has tools "glob"}}- Use `{{toolRefs.glob}}`, not shell file globbing.{{/has}}
 {{#has tools "edit"}}- Use `{{toolRefs.edit}}` for surgical text changes, not `sed`.{{/has}}
 {{/ifAny}}
 
@@ -221,7 +221,7 @@ You **MUST NOT** use Python or Bash when a specialized tool exists.
 Don't open a file hoping. Hope is not a strategy.
 
 {{#has tools "grep"}}- Use `{{toolRefs.grep}}` to locate targets.{{/has}}
-{{#has tools "find"}}- Use `{{toolRefs.find}}` to map structure.{{/has}}
+{{#has tools "glob"}}- Use `{{toolRefs.glob}}` to map structure.{{/has}}
 {{#has tools "read"}}- Use `{{toolRefs.read}}` with offset or limit rather than whole-file reads when practical.{{/has}}
 {{#has tools "task"}}- Use `{{toolRefs.task}}` for investigate+edit when available.{{/has}}
 <tool-persistence>

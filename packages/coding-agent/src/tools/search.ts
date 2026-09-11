@@ -77,7 +77,7 @@ export interface SearchToolDetails {
 type SearchParams = Static<typeof searchSchema>;
 
 export class SearchTool implements AgentTool<typeof searchSchema, SearchToolDetails> {
-	readonly name = "search";
+	readonly name = "grep";
 	readonly label = "Search";
 	readonly description: string;
 	readonly parameters = searchSchema;
@@ -113,8 +113,8 @@ export class SearchTool implements AgentTool<typeof searchSchema, SearchToolDeta
 			if (normalizedSkip < 0 || !Number.isFinite(normalizedSkip)) {
 				throw new ToolError("Skip must be a non-negative number");
 			}
-			const normalizedContextBefore = this.session.settings.get("search.contextBefore");
-			const normalizedContextAfter = this.session.settings.get("search.contextAfter");
+			const normalizedContextBefore = this.session.settings.get("grep.contextBefore");
+			const normalizedContextAfter = this.session.settings.get("grep.contextAfter");
 			const ignoreCase = i ?? false;
 			const useGitignore = gitignore ?? true;
 			const patternHasNewline = normalizedPattern.includes("\n") || normalizedPattern.includes("\\n");
@@ -357,7 +357,7 @@ export class SearchTool implements AgentTool<typeof searchSchema, SearchToolDeta
 			const rawOutput = outputLines.join("\n");
 			const truncation = truncateHead(rawOutput, { maxLines: Number.MAX_SAFE_INTEGER });
 			const sidecarId = truncation.truncated
-				? await persistToolOutputArtifact(this.session, "search", rawOutput)
+				? await persistToolOutputArtifact(this.session, "grep", rawOutput)
 				: undefined;
 			if (sidecarId) truncation.artifactId = sidecarId;
 			const output = truncation.content + (sidecarId ? `\n\n${formatFullOutputReference(sidecarId)}` : "");

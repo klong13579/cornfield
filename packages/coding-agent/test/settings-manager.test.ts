@@ -183,12 +183,12 @@ describe("Settings", () => {
 			await fs.mkdirSync(opsDir, { recursive: true });
 			const agent = await Settings.create({ cwd: opsDir, agentDir: opsDir });
 			agent.set("theme.dark", "dark");
-			agent.set("search.enabled", false);
+			agent.set("grep.enabled", false);
 			await agent.flush();
 
 			// 全局单例不受影响（内存 + 默认值）
 			expect(global.get("theme.dark")).toBe("light");
-			expect(global.get("search.enabled")).toBe(true);
+			expect(global.get("grep.enabled")).toBe(true);
 
 			// 独立实例写自己的 config.yml
 			const opsFile = YAML.parse(await Bun.file(path.join(opsDir, "config.yml")).text()) as Record<string, unknown>;
@@ -208,8 +208,8 @@ describe("Settings", () => {
 			await Bun.write(path.join(opsDir, "config.yml"), YAML.stringify({ search: { enabled: false } }, null, 2));
 
 			const agent = await Settings.create({ cwd: opsDir, agentDir: opsDir });
-			expect(agent.get("search.enabled")).toBe(false);
-			expect(agent.get("find.enabled")).toBe(true); // 未配置路径回落内核默认
+			expect(agent.get("grep.enabled")).toBe(false);
+			expect(agent.get("glob.enabled")).toBe(true); // 未配置路径回落内核默认
 		});
 	});
 });

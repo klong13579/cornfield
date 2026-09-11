@@ -106,6 +106,19 @@ function setByPath(obj: RawSettings, segments: string[], value: unknown): void {
 	current[segments[segments.length - 1]] = value;
 }
 
+/**
+ * Legacy → canonical config key groups for the ADR-0003 tool-name renames
+ * (find→glob, search→grep). Old keys keep reading via #migrateRawSettings;
+ * removal is a separate ticket.
+ */
+const RENAMED_SETTING_GROUPS: ReadonlyArray<readonly [string, string]> = [
+	["find", "glob"],
+	["search", "grep"],
+];
+
+/** Groups already reported once, to keep the deprecation notice from spamming. */
+const reportedRenamedSettingGroups = new Set<string>();
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Settings Class
 // ═══════════════════════════════════════════════════════════════════════════
@@ -703,6 +716,36 @@ export class Settings {
 			if (segmentOptions && "plan_mode" in segmentOptions && !("mode" in segmentOptions)) {
 				segmentOptions.mode = segmentOptions.plan_mode;
 				delete segmentOptions.plan_mode;
+			}
+		}
+
+		// find→glob / search→grep: old keys keep reading (migrated here); removal separate ticket.
+		for (const [legacyGroup, canonicalGroup] of RENAMED_SETTING_GROUPS) {
+			const legacy = raw[legacyGroup];
+			if (!legacy || typeof legacy !== "object" || Array.isArray(legacy)) continue;
+			const canonical =
+				typeof raw[canonicalGroup] === "object" &&
+				raw[canonicalGroup] !== null &&
+				!Array.isArray(raw[canonicalGroup])
+					? (raw[canonicalGroup] as RawSettings)
+					: {};
+			let migrated = false;
+			for (const [key, value] of Object.entries(legacy as Record<string, unknown>)) {
+				if (value !== undefined && !(key in canonical)) {
+					canonical[key] = value;
+					migrated = true;
+				}
+			}
+			delete raw[legacyGroup];
+			if (migrated) {
+				raw[canonicalGroup] = canonical;
+				if (!reportedRenamedSettingGroups.has(legacyGroup)) {
+					reportedRenamedSettingGroups.add(legacyGroup);
+					logger.warn(`Settings: deprecated "${legacyGroup}.*" keys — use "${canonicalGroup}.*"`, {
+						legacyGroup,
+						canonicalGroup,
+					});
+				}
 			}
 		}
 

@@ -11,8 +11,8 @@ export type ToolRiskLevel = "green" | "yellow" | "red";
 /** Read-only or harness-internal tools — execute without asking. */
 const GREEN_TOOLS = new Set([
 	"read",
-	"search",
-	"find",
+	"grep",
+	"glob",
 	"ast_grep",
 	"lsp",
 	"web_search",
@@ -38,7 +38,7 @@ const YELLOW_TOOLS = new Set([
 	"write",
 	"ast_edit",
 	"notebook",
-	"todo_write",
+	"todo",
 	"task",
 	"irc",
 	"identity",
@@ -165,7 +165,7 @@ export function describeToolCall(toolName: string, input: Record<string, unknown
 			return path ? `写入 ${path}` : "写入文件";
 		case "notebook":
 			return path ? `编辑 ${path}` : "编辑 notebook";
-		case "todo_write":
+		case "todo":
 			return "更新任务清单";
 		case "bash": {
 			const command = firstString(input, ["command"]);

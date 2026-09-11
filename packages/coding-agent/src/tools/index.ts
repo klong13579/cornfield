@@ -235,8 +235,8 @@ export const BUILTIN_TOOLS: Record<string, ToolFactory> = {
 	edit: s => new EditTool(s),
 	github: GithubTool.createIf,
 	hub: HubTool.createIf,
-	find: s => new FindTool(s),
-	search: s => new SearchTool(s),
+	glob: s => new FindTool(s),
+	grep: s => new SearchTool(s),
 	lsp: LspTool.createIf,
 	notebook: s => new NotebookTool(s),
 	read: s => new ReadTool(s),
@@ -249,7 +249,7 @@ export const BUILTIN_TOOLS: Record<string, ToolFactory> = {
 	recipe: RecipeTool.createIf,
 	project_context: s => new ProjectContextTool(s),
 	irc: IrcTool.createIf,
-	todo_write: s => new TodoWriteTool(s),
+	todo: s => new TodoWriteTool(s),
 	web_search: s => new WebSearchTool(s),
 	write: s => new WriteTool(s),
 	switch_model: s => new SwitchModelTool(s),
@@ -389,7 +389,7 @@ export async function createTools(session: ToolSession, toolNames?: string[]): P
 	// Auto-include AST counterparts when their text-based sibling is present
 	if (requestedTools) {
 		if (
-			requestedTools.includes("search") &&
+			requestedTools.includes("grep") &&
 			!requestedTools.includes("ast_grep") &&
 			session.settings.get("astGrep.enabled")
 		) {
@@ -416,9 +416,9 @@ export async function createTools(session: ToolSession, toolNames?: string[]): P
 		if (name === "bash") return allowBash;
 		if (name === "python") return allowPython;
 		if (name === "debug") return session.settings.get("debug.enabled");
-		if (name === "todo_write") return !includeYield && session.settings.get("todo.enabled");
-		if (name === "find") return session.settings.get("find.enabled");
-		if (name === "search") return session.settings.get("search.enabled");
+		if (name === "todo") return !includeYield && session.settings.get("todo.enabled");
+		if (name === "glob") return session.settings.get("glob.enabled");
+		if (name === "grep") return session.settings.get("grep.enabled");
 		if (name === "github") return session.settings.get("github.enabled");
 		if (name === "ast_grep") return session.settings.get("astGrep.enabled");
 		if (name === "ast_edit") return session.settings.get("astEdit.enabled");

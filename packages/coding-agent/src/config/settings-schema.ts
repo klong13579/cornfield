@@ -169,13 +169,13 @@ export const DEFAULT_BASH_INTERCEPTOR_RULES: BashInterceptorRule[] = [
 	},
 	{
 		pattern: "^\\s*(grep|rg|ripgrep|ag|ack)\\s+",
-		tool: "search",
-		message: "Use the `search` tool instead of grep/rg. It respects .gitignore and provides structured output.",
+		tool: "grep",
+		message: "Use the `grep` tool instead of grep/rg. It respects .gitignore and provides structured output.",
 	},
 	{
 		pattern: "^\\s*(find|fd|locate)\\s+.*(-name|-iname|-type|--type|-glob)",
-		tool: "find",
-		message: "Use the `find` tool instead of find/fd. It respects .gitignore and is faster for glob patterns.",
+		tool: "glob",
+		message: "Use the `glob` tool instead of find/fd. It respects .gitignore and is faster for glob patterns.",
 	},
 	{
 		pattern: "^\\s*sed\\s+(-i|--in-place)",
@@ -1673,7 +1673,7 @@ export const SETTINGS_SCHEMA = {
 	"todo.enabled": {
 		type: "boolean",
 		default: true,
-		ui: { tab: "tools", label: "Todos", description: "Enable the todo_write tool for task tracking" },
+		ui: { tab: "tools", label: "Todos", description: "Enable the todo tool for task tracking" },
 	},
 
 	"todo.reminders": {
@@ -1704,36 +1704,36 @@ export const SETTINGS_SCHEMA = {
 	},
 
 	// Search and AST tools
-	"find.enabled": {
+	"glob.enabled": {
 		type: "boolean",
 		default: true,
-		ui: { tab: "tools", label: "Find", description: "Enable the find tool for file searching" },
+		ui: { tab: "tools", label: "Find", description: "Enable the glob tool for file searching" },
 	},
 
-	"search.enabled": {
+	"grep.enabled": {
 		type: "boolean",
 		default: true,
-		ui: { tab: "tools", label: "Search", description: "Enable the search tool for content searching" },
+		ui: { tab: "tools", label: "Search", description: "Enable the grep tool for content searching" },
 	},
 
-	"search.contextBefore": {
+	"grep.contextBefore": {
 		type: "number",
 		default: 1,
 		ui: {
 			tab: "tools",
 			label: "Search Context Before",
-			description: "Lines of context before each search match",
+			description: "Lines of context before each grep match",
 			submenu: true,
 		},
 	},
 
-	"search.contextAfter": {
+	"grep.contextAfter": {
 		type: "number",
 		default: 3,
 		ui: {
 			tab: "tools",
 			label: "Search Context After",
-			description: "Lines of context after each search match",
+			description: "Lines of context after each grep match",
 			submenu: true,
 		},
 	},

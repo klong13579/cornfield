@@ -64,9 +64,9 @@ describe("tool path root alias", () => {
 
 	it("searches from cwd when path is slash", async () => {
 		const tools = await createTools(createTestSession(tempDir));
-		const tool = tools.find(entry => entry.name === "search");
+		const tool = tools.find(entry => entry.name === "grep");
 		expect(tool).toBeDefined();
-		if (!tool) throw new Error("Missing search tool");
+		if (!tool) throw new Error("Missing grep tool");
 
 		const result = await tool.execute("search-root-alias", {
 			pattern: "root-alias-needle",
@@ -94,9 +94,9 @@ describe("tool path root alias", () => {
 
 	it("finds from cwd when pattern is slash", async () => {
 		const tools = await createTools(createTestSession(tempDir));
-		const tool = tools.find(entry => entry.name === "find");
+		const tool = tools.find(entry => entry.name === "glob");
 		expect(tool).toBeDefined();
-		if (!tool) throw new Error("Missing find tool");
+		if (!tool) throw new Error("Missing glob tool");
 
 		const result = await tool.execute("find-root-alias", {
 			pattern: "/",

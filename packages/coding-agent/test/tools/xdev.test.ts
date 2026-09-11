@@ -20,13 +20,15 @@ function createTestSession(overrides: Partial<ToolSession> = {}): ToolSession {
 
 describe("normalizeToolName", () => {
 	it("maps legacy aliases to the same canonical tool", () => {
-		expect(normalizeToolName("glob")).toBe("find");
-		expect(normalizeToolName("grep")).toBe("search");
-		expect(normalizeToolName("todo")).toBe("todo_write");
+		expect(normalizeToolName("find")).toBe("glob");
+		expect(normalizeToolName("search")).toBe("grep");
+		expect(normalizeToolName("todo_write")).toBe("todo");
 	});
 
 	it("leaves canonical names, plugin, and MCP names untouched", () => {
-		expect(normalizeToolName("find")).toBe("find");
+		expect(normalizeToolName("glob")).toBe("glob");
+		expect(normalizeToolName("grep")).toBe("grep");
+		expect(normalizeToolName("todo")).toBe("todo");
 		expect(normalizeToolName("mcp__exa__search")).toBe("mcp__exa__search");
 		expect(normalizeToolName("my-plugin:tool")).toBe("my-plugin:tool");
 	});
@@ -159,7 +161,7 @@ describe("createTools with mounting", () => {
 		expect(session.xdevDevices).toBeUndefined();
 		// every builtin essential/discoverable tool remains directly callable
 		const names = tools.map(t => t.name);
-		for (const name of ["read", "write", "edit", "find", "search", "bash", "task", "todo_write", "notebook"]) {
+		for (const name of ["read", "write", "edit", "glob", "grep", "bash", "task", "todo", "notebook"]) {
 			expect(names).toContain(name);
 		}
 	});

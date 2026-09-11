@@ -33,7 +33,7 @@ describe("TodoWriteTool auto-start behavior", () => {
 		const tasks = result.details?.phases[0]?.tasks ?? [];
 		expect(tasks.map(task => task.status)).toEqual(["in_progress", "pending"]);
 		const summary = result.content.find(part => part.type === "text");
-		if (summary?.type !== "text") throw new Error("Expected text summary from todo_write");
+		if (summary?.type !== "text") throw new Error("Expected text summary from todo");
 		expect(summary.text).toContain("Remaining items (2):");
 		expect(summary.text).toContain("status [in_progress] (Execution)");
 		expect(summary.text).toContain("diagnostics [pending] (Execution)");
@@ -55,14 +55,14 @@ describe("TodoWriteTool auto-start behavior", () => {
 		const tasks = result.details?.phases[0]?.tasks ?? [];
 		expect(tasks.map(task => task.status)).toEqual(["completed", "in_progress"]);
 		const summary = result.content.find(part => part.type === "text");
-		if (summary?.type !== "text") throw new Error("Expected text summary from todo_write");
+		if (summary?.type !== "text") throw new Error("Expected text summary from todo");
 		expect(summary.text).toContain("Remaining items (1):");
 		expect(summary.text).toContain("diagnostics [in_progress] (Execution)");
 
 		const completedResult = await tool.execute("call-3", { ops: [{ op: "done", task: "diagnostics" }] });
 		const completedSummary = completedResult.content.find(part => part.type === "text");
 		if (completedSummary?.type !== "text") {
-			throw new Error("Expected text summary from todo_write");
+			throw new Error("Expected text summary from todo");
 		}
 		expect(completedSummary.text).toContain("Remaining items: none.");
 	});

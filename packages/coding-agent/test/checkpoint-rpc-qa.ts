@@ -120,7 +120,7 @@ async function main() {
 
 		const hasCheckpoint = toolSequence.includes("checkpoint");
 		const hasRewind = toolSequence.includes("rewind");
-		const hasFind = toolSequence.includes("find");
+		const hasFind = toolSequence.includes("glob");
 		const hasRead = toolSequence.includes("read");
 
 		const activeHasRewindReport = messages.some(
@@ -132,7 +132,7 @@ async function main() {
 			.map(message => message.toolName);
 
 		const activeHasRewindResult = activeToolResults.includes("rewind");
-		const activeHasFindResult = activeToolResults.includes("find");
+		const activeHasFindResult = activeToolResults.includes("glob");
 		const activeHasReadResult = activeToolResults.includes("read");
 
 		const rewindReportEntries = customMessages.filter(entry => entry.customType === "rewind-report");

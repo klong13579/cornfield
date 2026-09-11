@@ -106,13 +106,13 @@ export function mapToolKind(toolName: string): ToolKind {
 		case "bash":
 		case "python":
 			return "execute";
-		case "search":
-		case "find":
+		case "grep":
+		case "glob":
 		case "ast_grep":
 			return "search";
 		case "web_search":
 			return "fetch";
-		case "todo_write":
+		case "todo":
 			return "think";
 		default:
 			return "other";

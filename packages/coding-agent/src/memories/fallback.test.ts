@@ -21,7 +21,7 @@ describe("Memory Fallback Logic", () => {
 
 	test("buildRawMemory formats signals correctly", () => {
 		const signals = {
-			toolSequence: ["read", "search", "edit"],
+			toolSequence: ["read", "grep", "edit"],
 			filesModified: ["src/foo.ts", "src/bar.ts"],
 			userCorrections: ["Use async/await"],
 			errorCount: 1,

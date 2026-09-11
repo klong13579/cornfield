@@ -161,13 +161,13 @@ const PROGRESS_EVENT_TYPES = new Set([
  * search_tool_bm25 依赖 mcp.discoveryMode（非布尔枚举），不列。
  */
 const TOOL_SWITCH_DEFS: Array<{ tool: string; label: string; path: SettingPath }> = [
-	{ tool: "find", label: "find 文件查找", path: "find.enabled" },
-	{ tool: "search", label: "search 内容搜索", path: "search.enabled" },
+	{ tool: "glob", label: "glob 文件查找", path: "glob.enabled" },
+	{ tool: "grep", label: "grep 内容搜索", path: "grep.enabled" },
 	{ tool: "ast_grep", label: "ast_grep 结构搜索", path: "astGrep.enabled" },
 	{ tool: "ast_edit", label: "ast_edit 结构改写", path: "astEdit.enabled" },
 	{ tool: "lsp", label: "lsp 代码智能", path: "lsp.enabled" },
 	{ tool: "debug", label: "debug 调试器", path: "debug.enabled" },
-	{ tool: "todo_write", label: "todo_write 任务看板", path: "todo.enabled" },
+	{ tool: "todo", label: "todo 任务看板", path: "todo.enabled" },
 	{ tool: "github", label: "github 集成", path: "github.enabled" },
 	{ tool: "render_mermaid", label: "render_mermaid 图表渲染", path: "renderMermaid.enabled" },
 	{ tool: "notebook", label: "notebook Jupyter 笔记本", path: "notebook.enabled" },

@@ -11,10 +11,10 @@ Finalized plan artifact: `{{finalPlanFilePath}}`
 <instruction>
 You **MUST** execute this plan step by step from `{{finalPlanFilePath}}`. You have full tool access.
 You **MUST** verify each step before proceeding to the next.
-{{#has tools "todo_write"}}
-Before execution, you **MUST** initialize todo tracking for this plan with `todo_write`.
-After each completed step, you **MUST** immediately update `todo_write` so progress stays visible.
-If a `todo_write` call fails, you **MUST** fix the todo payload and retry before continuing silently.
+{{#has tools "todo"}}
+Before execution, you **MUST** initialize todo tracking for this plan with `todo`.
+After each completed step, you **MUST** immediately update `todo` so progress stays visible.
+If a `todo` call fails, you **MUST** fix the todo payload and retry before continuing silently.
 {{/has}}
 </instruction>
 

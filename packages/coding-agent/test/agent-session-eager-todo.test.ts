@@ -191,8 +191,8 @@ describe("AgentSession eager todo enforcement", () => {
 
 		expect(observedCalls).toHaveLength(1);
 		expect(observedCalls[0]).toEqual({
-			toolChoice: "todo_write",
-			toolNames: ["todo_write", "bash"],
+			toolChoice: "todo",
+			toolNames: ["todo", "bash"],
 			messageRoles: ["user", "user"],
 			messageTexts: [
 				expect.stringContaining("Before doing substantive work on the upcoming user request"),
@@ -208,7 +208,7 @@ describe("AgentSession eager todo enforcement", () => {
 
 	it("initializes todos once, then continues within the same user turn", async () => {
 		scriptedResponses = [
-			createToolCallAssistantMessage("todo_write", {
+			createToolCallAssistantMessage("todo", {
 				ops: [
 					{
 						op: "init",
@@ -224,8 +224,8 @@ describe("AgentSession eager todo enforcement", () => {
 		expect(streamCallCount).toBe(2);
 		expect(observedCalls).toHaveLength(2);
 		expect(observedCalls[0]).toEqual({
-			toolChoice: "todo_write",
-			toolNames: ["todo_write", "bash"],
+			toolChoice: "todo",
+			toolNames: ["todo", "bash"],
 			messageRoles: ["user", "user"],
 			messageTexts: [
 				expect.stringContaining("Before doing substantive work on the upcoming user request"),
@@ -247,7 +247,7 @@ describe("AgentSession eager todo enforcement", () => {
 		expect(observedCalls).toHaveLength(1);
 		expect(observedCalls[0]).toEqual({
 			toolChoice: undefined,
-			toolNames: ["todo_write", "bash"],
+			toolNames: ["todo", "bash"],
 			messageRoles: ["user"],
 			messageTexts: ["list all work trees?"],
 			lastMessageRole: "user",
@@ -261,7 +261,7 @@ describe("AgentSession eager todo enforcement", () => {
 		expect(observedCalls).toHaveLength(1);
 		expect(observedCalls[0]).toEqual({
 			toolChoice: undefined,
-			toolNames: ["todo_write", "bash"],
+			toolNames: ["todo", "bash"],
 			messageRoles: ["user"],
 			messageTexts: ["list all work trees!"],
 			lastMessageRole: "user",
@@ -273,7 +273,7 @@ describe("AgentSession eager todo enforcement", () => {
 		// First prompt: eager todo fires
 		await session.prompt("refactor the parser module");
 		expect(observedCalls).toHaveLength(1);
-		expect(observedCalls[0]?.toolChoice).toBe("todo_write");
+		expect(observedCalls[0]?.toolChoice).toBe("todo");
 
 		// Second prompt: eager todo must NOT fire
 		observedCalls.length = 0;
@@ -281,7 +281,7 @@ describe("AgentSession eager todo enforcement", () => {
 		expect(observedCalls).toHaveLength(1);
 		expect(observedCalls[0]).toEqual({
 			toolChoice: undefined,
-			toolNames: ["todo_write", "bash"],
+			toolNames: ["todo", "bash"],
 			messageRoles: expect.arrayContaining(["user"]),
 			messageTexts: expect.arrayContaining(["actually skip that, just fix the typo"]),
 			lastMessageRole: "user",

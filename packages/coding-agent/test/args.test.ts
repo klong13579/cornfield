@@ -220,7 +220,7 @@ describe("parseArgs", () => {
 
 		test("lowercases tool names passed to --tools", () => {
 			const result = parseArgs(["--tools", "Read,Search"]);
-			expect(result.tools).toEqual(["read", "search"]);
+			expect(result.tools).toEqual(["read", "grep"]);
 		});
 
 		test("parses --tools=value with equals syntax", () => {

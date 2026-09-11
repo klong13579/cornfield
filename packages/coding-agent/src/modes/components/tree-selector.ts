@@ -665,15 +665,15 @@ class TreeList implements Component {
 					.slice(0, 50);
 				return `[bash: ${cmd}${rawCmd.length > 50 ? "..." : ""}]`;
 			}
-			case "search": {
+			case "grep": {
 				const pattern = String(args.pattern || "");
 				const path = shortenPath(String(args.path || "."));
-				return `[search: /${pattern}/ in ${path}]`;
+				return `[grep: /${pattern}/ in ${path}]`;
 			}
-			case "find": {
+			case "glob": {
 				const pattern = String(args.pattern || "");
 				const path = shortenPath(String(args.path || "."));
-				return `[find: ${pattern} in ${path}]`;
+				return `[glob: ${pattern} in ${path}]`;
 			}
 			case "ls": {
 				const path = shortenPath(String(args.path || "."));
