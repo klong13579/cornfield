@@ -292,4 +292,8 @@ module.exports.SamplingFilter = {
   Gaussian: 4,
   Lanczos3: 5,
 };
+module.exports.SearchEngine = {
+  Rust: 'rust',
+  Pcre2: 'pcre2',
+};
 // --- end generated const enum exports ---

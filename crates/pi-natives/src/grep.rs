@@ -16,6 +16,10 @@ use std::{
 
 use globset::GlobSet;
 use grep_matcher::Matcher;
+#[cfg(feature = "grep-pcre2")]
+use grep_pcre2::{
+	RegexMatcher as Pcre2RegexMatcher, RegexMatcherBuilder as Pcre2RegexMatcherBuilder,
+};
 use grep_regex::RegexMatcherBuilder;
 use grep_searcher::{
 	BinaryDetection, Searcher, SearcherBuilder, Sink, SinkContext, SinkContextKind, SinkMatch,
@@ -48,6 +52,19 @@ pub enum GrepOutputMode {
 	FilesWithMatches,
 }
 
+/// Which regex engine to use for matching.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[napi(string_enum)]
+pub enum SearchEngine {
+	/// Rust regex engine (default). Linear-time; no lookaround or
+	/// backreferences.
+	#[napi(value = "rust")]
+	Rust,
+	/// PCRE2 engine. Supports lookaround and backreferences; explicit opt-in.
+	#[napi(value = "pcre2")]
+	Pcre2,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum OutputMode {
 	Content,
@@ -78,6 +95,9 @@ pub struct SearchOptions {
 	pub max_columns:    Option<u32>,
 	/// Output mode (content or count).
 	pub mode:           Option<GrepOutputMode>,
+	/// Regex engine (default "rust"); use "pcre2" for lookaround/backreference
+	/// support.
+	pub engine:         Option<SearchEngine>,
 }
 
 /// Options for searching files on disk.
@@ -115,6 +135,9 @@ pub struct GrepOptions<'env> {
 	pub max_columns:    Option<u32>,
 	/// Output mode (content, filesWithMatches, or count).
 	pub mode:           Option<GrepOutputMode>,
+	/// Regex engine (default "rust"); use "pcre2" for lookaround/backreference
+	/// support.
+	pub engine:         Option<SearchEngine>,
 	/// Abort signal for cancelling the operation.
 	pub signal:         Option<Unknown<'env>>,
 	/// Timeout in milliseconds for the operation.
@@ -506,16 +529,16 @@ struct SearchParams {
 	offset:         u64,
 }
 
-fn run_search(
-	matcher: &grep_regex::RegexMatcher,
+fn run_search<M: Matcher>(
+	matcher: &M,
 	content: &[u8],
 	params: SearchParams,
 ) -> io::Result<SearchResultInternal> {
 	run_search_reader(matcher, Cursor::new(content), params)
 }
 
-fn run_search_reader<R: Read>(
-	matcher: &grep_regex::RegexMatcher,
+fn run_search_reader<M: Matcher, R: Read>(
+	matcher: &M,
 	reader: R,
 	params: SearchParams,
 ) -> io::Result<SearchResultInternal> {
@@ -663,6 +686,7 @@ struct GrepConfig {
 	context:        Option<u32>,
 	max_columns:    Option<u32>,
 	mode:           Option<GrepOutputMode>,
+	engine:         Option<SearchEngine>,
 }
 
 fn collect_files(
@@ -889,7 +913,10 @@ mod tests {
 		time::{SystemTime, UNIX_EPOCH},
 	};
 
-	use super::{GrepConfig, escape_unescaped_parentheses, grep_sync, sanitize_braces};
+	use super::{
+		GrepConfig, SearchEngine, SearchOptions, SearchResult, escape_unescaped_parentheses,
+		grep_sync, sanitize_braces, search_sync,
+	};
 	use crate::task;
 
 	struct TempDirGuard(PathBuf);
@@ -953,6 +980,7 @@ mod tests {
 			context:        None,
 			max_columns:    None,
 			mode:           None,
+			engine:         None,
 		}
 	}
 
@@ -1031,9 +1059,92 @@ mod tests {
 		assert_eq!(result.files_searched, 0);
 		assert_eq!(result.limit_reached, None);
 	}
+
+	fn run_engine_search(pattern: &str, content: &str, engine: SearchEngine) -> SearchResult {
+		search_sync(content.as_bytes(), SearchOptions {
+			pattern:        pattern.to_string(),
+			ignore_case:    None,
+			multiline:      None,
+			max_count:      None,
+			offset:         None,
+			context_before: None,
+			context_after:  None,
+			context:        None,
+			max_columns:    None,
+			mode:           None,
+			engine:         Some(engine),
+		})
+	}
+
+	#[test]
+	fn rust_engine_still_matches_plain_regex_by_default() {
+		let result = run_engine_search(r"foo\s+\w+", "foo bar\nbaz\n", SearchEngine::Rust);
+		assert!(result.error.is_none(), "unexpected error: {:?}", result.error);
+		assert_eq!(result.match_count, 1);
+		assert_eq!(result.matches.len(), 1);
+		assert_eq!(result.matches[0].line, "foo bar");
+	}
+
+	#[test]
+	fn rust_engine_rejects_lookaround() {
+		let result = run_engine_search(r"foo(?=bar)", "foobar\n", SearchEngine::Rust);
+		assert!(
+			result.error.is_some(),
+			"rust engine must reject lookaround instead of silently falling back"
+		);
+	}
+
+	#[cfg(feature = "grep-pcre2")]
+	#[test]
+	fn pcre2_engine_supports_lookaround() {
+		let result = run_engine_search(r"foo(?=bar)", "foobar\nfoobaz\n", SearchEngine::Pcre2);
+		assert!(result.error.is_none(), "unexpected error: {:?}", result.error);
+		assert_eq!(result.match_count, 1);
+		assert_eq!(result.matches.len(), 1);
+		assert_eq!(result.matches[0].line, "foobar");
+	}
+
+	#[cfg(feature = "grep-pcre2")]
+	#[test]
+	fn pcre2_engine_supports_backreferences() {
+		let result = run_engine_search(r"(\w+)\s+\1", "the the cat\nfoo bar\n", SearchEngine::Pcre2);
+		assert!(result.error.is_none(), "unexpected error: {:?}", result.error);
+		assert_eq!(result.match_count, 1);
+		assert_eq!(result.matches.len(), 1);
+		assert_eq!(result.matches[0].line, "the the cat");
+	}
+
+	#[cfg(not(feature = "grep-pcre2"))]
+	#[test]
+	fn pcre2_engine_errors_when_unavailable() {
+		let result = run_engine_search(r"foo(?=bar)", "foobar\n", SearchEngine::Pcre2);
+		assert!(result.error.is_some(), "pcre2 must error when unavailable, not silently fall back");
+		let message = result.error.unwrap();
+		assert!(message.contains("not available"), "unexpected error message: {message}");
+	}
+}
+
+enum SearchMatcher {
+	Rust(grep_regex::RegexMatcher),
+	#[cfg(feature = "grep-pcre2")]
+	Pcre2(Pcre2RegexMatcher),
 }
 
 fn build_matcher(
+	pattern: &str,
+	engine: SearchEngine,
+	ignore_case: bool,
+	multiline: bool,
+) -> Result<SearchMatcher> {
+	match engine {
+		SearchEngine::Rust => {
+			build_rust_matcher(pattern, ignore_case, multiline).map(SearchMatcher::Rust)
+		},
+		SearchEngine::Pcre2 => build_pcre2_matcher(pattern, ignore_case, multiline),
+	}
+}
+
+fn build_rust_matcher(
 	pattern: &str,
 	ignore_case: bool,
 	multiline: bool,
@@ -1055,13 +1166,35 @@ fn build_matcher(
 	}
 }
 
+#[cfg(feature = "grep-pcre2")]
+fn build_pcre2_matcher(pattern: &str, ignore_case: bool, multiline: bool) -> Result<SearchMatcher> {
+	let matcher = Pcre2RegexMatcherBuilder::new()
+		.caseless(ignore_case)
+		.multi_line(multiline)
+		.build(pattern)
+		.map_err(|err| Error::from_reason(format!("PCRE2 regex error: {err}")))?;
+	Ok(SearchMatcher::Pcre2(matcher))
+}
+
+#[cfg(not(feature = "grep-pcre2"))]
+fn build_pcre2_matcher(
+	_pattern: &str,
+	_ignore_case: bool,
+	_multiline: bool,
+) -> Result<SearchMatcher> {
+	Err(Error::from_reason(
+		"PCRE2 engine is not available in this build; rebuild with default features to enable pcre2 \
+		 matching",
+	))
+}
+
 // ---------------------------------------------------------------------------
 // File / directory search orchestration
 // ---------------------------------------------------------------------------
 
-fn run_parallel_search(
+fn run_parallel_search<M: Matcher + Sync>(
 	entries: &[FileEntry],
-	matcher: &grep_regex::RegexMatcher,
+	matcher: &M,
 	params: SearchParams,
 ) -> Vec<FileSearchResult> {
 	let file_params = SearchParams { max_count: None, offset: 0, ..params };
@@ -1086,9 +1219,9 @@ fn run_parallel_search(
 	results
 }
 
-fn run_sequential_search(
+fn run_sequential_search<M: Matcher + Sync>(
 	entries: &[FileEntry],
-	matcher: &grep_regex::RegexMatcher,
+	matcher: &M,
 	params: SearchParams,
 ) -> (Vec<GrepMatch>, u64, u32, u32, bool) {
 	let SearchParams { mode, max_count, offset, .. } = params;
@@ -1169,6 +1302,42 @@ fn run_sequential_search(
 	(matches, total_matches, files_with_matches, files_searched, limit_reached)
 }
 
+fn search_with(
+	matcher: &SearchMatcher,
+	content: &[u8],
+	params: SearchParams,
+) -> io::Result<SearchResultInternal> {
+	match matcher {
+		SearchMatcher::Rust(m) => run_search(m, content, params),
+		#[cfg(feature = "grep-pcre2")]
+		SearchMatcher::Pcre2(m) => run_search(m, content, params),
+	}
+}
+
+fn parallel_search_with(
+	matcher: &SearchMatcher,
+	entries: &[FileEntry],
+	params: SearchParams,
+) -> Vec<FileSearchResult> {
+	match matcher {
+		SearchMatcher::Rust(m) => run_parallel_search(entries, m, params),
+		#[cfg(feature = "grep-pcre2")]
+		SearchMatcher::Pcre2(m) => run_parallel_search(entries, m, params),
+	}
+}
+
+fn sequential_search_with(
+	matcher: &SearchMatcher,
+	entries: &[FileEntry],
+	params: SearchParams,
+) -> (Vec<GrepMatch>, u64, u32, u32, bool) {
+	match matcher {
+		SearchMatcher::Rust(m) => run_sequential_search(entries, m, params),
+		#[cfg(feature = "grep-pcre2")]
+		SearchMatcher::Pcre2(m) => run_sequential_search(entries, m, params),
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Sync entry points
 // ---------------------------------------------------------------------------
@@ -1177,7 +1346,8 @@ fn search_sync(content: &[u8], options: SearchOptions) -> SearchResult {
 	let ignore_case = options.ignore_case.unwrap_or(false);
 	let multiline = options.multiline.unwrap_or(false);
 	let mode = parse_output_mode(options.mode);
-	let matcher = match build_matcher(&options.pattern, ignore_case, multiline) {
+	let engine = options.engine.unwrap_or(SearchEngine::Rust);
+	let matcher = match build_matcher(&options.pattern, engine, ignore_case, multiline) {
 		Ok(matcher) => matcher,
 		Err(err) => return empty_search_result(Some(err.to_string())),
 	};
@@ -1189,7 +1359,7 @@ fn search_sync(content: &[u8], options: SearchOptions) -> SearchResult {
 	let offset = options.offset.unwrap_or(0) as u64;
 	let params =
 		SearchParams { context_before, context_after, max_columns, mode, max_count, offset };
-	let result = match run_search(&matcher, content, params) {
+	let result = match search_with(&matcher, content, params) {
 		Ok(result) => result,
 		Err(err) => return empty_search_result(Some(err.to_string())),
 	};
@@ -1213,7 +1383,8 @@ fn grep_sync(
 	let ignore_case = options.ignore_case.unwrap_or(false);
 	let multiline = options.multiline.unwrap_or(false);
 	let output_mode = parse_output_mode(options.mode);
-	let matcher = build_matcher(&options.pattern, ignore_case, multiline)?;
+	let engine = options.engine.unwrap_or(SearchEngine::Rust);
+	let matcher = build_matcher(&options.pattern, engine, ignore_case, multiline)?;
 
 	let (context_before, context_after) =
 		resolve_context(options.context, options.context_before, options.context_after);
@@ -1273,7 +1444,7 @@ fn grep_sync(
 			});
 		};
 
-		let search = run_search(&matcher, bytes.as_slice(), params)
+		let search = search_with(&matcher, bytes.as_slice(), params)
 			.map_err(|err| Error::from_reason(format!("Search failed: {err}")))?;
 
 		if search.match_count == 0 {
@@ -1366,7 +1537,7 @@ fn grep_sync(
 
 	let allow_parallel = max_count.is_none() && offset == 0;
 	if allow_parallel {
-		let results = run_parallel_search(&entries, &matcher, params);
+		let results = parallel_search_with(&matcher, &entries, params);
 		let mut matches = Vec::new();
 		let mut total_matches = 0u64;
 		let mut files_with_matches = 0u32;
@@ -1432,7 +1603,7 @@ fn grep_sync(
 	}
 
 	let (matches, total_matches, files_with_matches, files_searched, limit_reached) =
-		run_sequential_search(&entries, &matcher, params);
+		sequential_search_with(&matcher, &entries, params);
 
 	// Fire callbacks for sequential search results
 	if let Some(callback) = on_match {
@@ -1519,9 +1690,18 @@ pub fn has_match(
 		},
 	};
 
-	let matcher =
-		build_matcher(pattern_ref, ignore_case.unwrap_or(false), multiline.unwrap_or(false))?;
-	Ok(matcher.is_match(content_slice).unwrap_or(false))
+	let matcher = build_matcher(
+		pattern_ref,
+		SearchEngine::Rust,
+		ignore_case.unwrap_or(false),
+		multiline.unwrap_or(false),
+	)?;
+	let is_match = match &matcher {
+		SearchMatcher::Rust(m) => m.is_match(content_slice).unwrap_or(false),
+		#[cfg(feature = "grep-pcre2")]
+		SearchMatcher::Pcre2(m) => m.is_match(content_slice).unwrap_or(false),
+	};
+	Ok(is_match)
 }
 
 /// Search files for a regex pattern.
@@ -1555,6 +1735,7 @@ pub fn grep(
 		context,
 		max_columns,
 		mode,
+		engine,
 		timeout_ms,
 		signal,
 	} = options;
@@ -1576,6 +1757,7 @@ pub fn grep(
 		context,
 		max_columns,
 		mode,
+		engine,
 	};
 	let ct = task::CancelToken::new(timeout_ms, signal);
 	task::blocking("grep", ct, move |ct| grep_sync(config, on_match.as_ref(), ct))

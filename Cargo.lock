@@ -672,6 +672,7 @@ dependencies = [
  "flume",
  "globset",
  "grep-matcher",
+ "grep-pcre2",
  "grep-regex",
  "grep-searcher",
  "html-to-markdown-rs",
@@ -1264,6 +1265,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f9417543f4870fc8f1c8e1af870afae2431007626d9e703fce6471c468d33847"
 dependencies = [
  "memchr",
+]
+
+[[package]]
+name = "grep-pcre2"
+version = "0.1.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b752bb6f57dd3716e55b63a33ca05b5825c3d66cd427468874a5564af6ca365c"
+dependencies = [
+ "grep-matcher",
+ "log",
+ "pcre2",
 ]
 
 [[package]]
@@ -2239,6 +2251,28 @@ dependencies = [
  "redox_syscall 0.5.18",
  "smallvec",
  "windows-link",
+]
+
+[[package]]
+name = "pcre2"
+version = "0.2.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9e970b0fcce0c7ee6ef662744ff711f21ccd6f11b7cf03cd187a80e89797fc67"
+dependencies = [
+ "libc",
+ "log",
+ "pcre2-sys",
+]
+
+[[package]]
+name = "pcre2-sys"
+version = "0.2.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "18b9073c1a2549bd409bf4a32c94d903bb1a09bf845bc306ae148897fa0760a4"
+dependencies = [
+ "cc",
+ "libc",
+ "pkg-config",
 ]
 
 [[package]]

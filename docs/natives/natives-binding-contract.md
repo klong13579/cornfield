@@ -112,6 +112,11 @@ Native enums are represented in generated declarations and also appended to `mod
 - `KeyEventType`
 - `MacOSAppearance`
 - `SamplingFilter`
+- `SearchEngine`
+
+## Regex engine selection
+
+`grep` and `search` options accept an optional `engine` field: `"rust"` (default) or `"pcre2"` (explicit opt-in). The PCRE2 engine adds lookaround and backreference support that the Rust regex engine rejects. When `"pcre2"` is requested on a build without pcre2 support (the `client` feature omits `grep-pcre2`), the call errors explicitly instead of silently falling back. `SearchEngine` is exported as a runtime enum object (`Rust` / `Pcre2`).
 
 ## Error behavior and caveats
 
