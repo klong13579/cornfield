@@ -279,11 +279,29 @@ export type AgentToolExecFn<TParameters extends TSchema = TSchema, TDetails = an
 	context?: AgentToolContext,
 ) => Promise<AgentToolResult<TDetails, TParameters>>;
 
+/**
+ * How a tool is presented to the model.
+ * - "essential": always present in the model's selectable tool set.
+ * - "discoverable": mounted behind the xd:// device, reachable through the read/write transport.
+ * - "internal": only injectable by its owning runtime; never selectable via config,
+ *   discovery, or explicit toolNames. Constrains injection right, not scheduling right
+ *   (once injected, the model may call it normally).
+ */
+export type ToolLoadMode = "essential" | "discoverable" | "internal";
+
 // AgentTool extends Tool but adds the execute function
 export interface AgentTool<TParameters extends TSchema = TSchema, TDetails = any, TTheme = unknown>
 	extends Tool<TParameters> {
 	// A human-readable label for the tool to be displayed in UI
 	label: string;
+	/**
+	 * Presentation/load mode controlling how this tool enters the model's selectable set.
+	 * Optional — when absent, the centralized essential list resolves the default from the
+	 * tool name (in-list → "essential", else "discoverable"); an explicit value always wins.
+	 */
+	loadMode?: ToolLoadMode;
+	/** One-sentence summary of what problem this tool solves. UI/presentation only, distinct from the LLM `description`. */
+	summary?: string;
 	/** If true, tool is excluded unless explicitly listed in --tools or agent's tools field */
 	hidden?: boolean;
 	/** If true, tool can stage a pending action that requires explicit resolution via the resolve tool. */
