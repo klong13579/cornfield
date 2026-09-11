@@ -118,6 +118,8 @@ Native enums are represented in generated declarations and also appended to `mod
 
 `grep` and `search` options accept an optional `engine` field: `"rust"` (default) or `"pcre2"` (explicit opt-in). The PCRE2 engine adds lookaround and backreference support that the Rust regex engine rejects. When `"pcre2"` is requested on a build without pcre2 support (the `client` feature omits `grep-pcre2`), the call errors explicitly instead of silently falling back. `SearchEngine` is exported as a runtime enum object (`Rust` / `Pcre2`).
 
+PCRE2 is always statically linked from the bundled sources: `.cargo/config.toml` sets `PCRE2_SYS_STATIC=1` so the native addon never gains a non-system dynamic dependency (e.g. `/opt/homebrew/opt/pcre2/lib/libpcre2-8.0.dylib`). A non-system dynamic dependency would break release binaries on machines that lack that library, so the addon must stay free of them.
+
 ## Error behavior and caveats
 
 - Addon load failure or unsupported platform throws during package import from `native/index.js`.

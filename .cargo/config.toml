@@ -1,0 +1,7 @@
+# 强制 pcre2-sys 静态编译 bundled PCRE2，禁止链接系统/brew/apt 的 libpcre2-8。
+# 否则 pcre2-sys 在探测到系统 libpcre2-8 时走后一条动态链接分支，release 产物会带上
+# /opt/homebrew/opt/pcre2/lib/libpcre2-8.0.dylib 这类非系统动态依赖 —— 出货后用户机器
+# 无对应库即 addon 加载失败。natives addon 不得动态链接任何非系统库。
+# force=true：即使调用者环境已存在同名变量也强制覆盖，保证「同一份提交 → 同一份产物」不依赖环境巧合。
+[env]
+PCRE2_SYS_STATIC = { value = "1", force = true }
