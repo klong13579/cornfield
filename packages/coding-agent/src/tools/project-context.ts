@@ -25,6 +25,8 @@ const TODO_MAX_LINES = 12;
 export class ProjectContextTool implements AgentTool<typeof projectContextSchema, ProjectContextDetails> {
 	readonly name = "project_context";
 	readonly label = "ProjectContext";
+	readonly loadMode = "essential" as const;
+	readonly summary = "Orients the agent in the current project: root, git state, project docs, and pending todos.";
 	readonly description =
 		"Inspect structured project context: roots, git status, context files, TODO, and available recipes.";
 	readonly parameters = projectContextSchema;

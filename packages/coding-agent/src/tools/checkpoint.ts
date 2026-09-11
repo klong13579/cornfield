@@ -49,6 +49,10 @@ function isTopLevelSession(session: ToolSession): boolean {
 export class CheckpointTool implements AgentTool<typeof checkpointSchema, CheckpointToolDetails> {
 	readonly name = "checkpoint";
 	readonly label = "Checkpoint";
+	// Opt-in investigation loop (checkpoint.enabled defaults off), so it mounts as an xd:// device
+	// instead of occupying top-level schema in every session.
+	readonly loadMode = "discoverable" as const;
+	readonly summary = "Marks a return point before an open-ended investigation.";
 	readonly description: string;
 	readonly parameters = checkpointSchema;
 	readonly strict = true;
@@ -92,6 +96,9 @@ export class CheckpointTool implements AgentTool<typeof checkpointSchema, Checkp
 export class RewindTool implements AgentTool<typeof rewindSchema, RewindToolDetails> {
 	readonly name = "rewind";
 	readonly label = "Rewind";
+	// Same opt-in loop as checkpoint: discoverable, not part of the top-level tool set.
+	readonly loadMode = "discoverable" as const;
+	readonly summary = "Rolls the conversation back to an earlier checkpoint while keeping its findings.";
 	readonly description: string;
 	readonly parameters = rewindSchema;
 	readonly strict = true;

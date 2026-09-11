@@ -503,6 +503,8 @@ function formatSummary(phases: TodoPhase[], errors: string[]): string {
 export class TodoWriteTool implements AgentTool<typeof todoWriteSchema, TodoWriteToolDetails> {
 	readonly name = "todo_write";
 	readonly label = "Todo Write";
+	readonly loadMode = "essential" as const;
+	readonly summary = "Tracks a multi-step plan so progress survives across turns.";
 	readonly description: string;
 	readonly parameters = todoWriteSchema;
 	readonly concurrency = "exclusive";

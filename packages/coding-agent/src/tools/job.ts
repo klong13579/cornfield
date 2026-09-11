@@ -76,6 +76,8 @@ export interface JobToolDetails {
 export class JobTool implements AgentTool<typeof jobSchema, JobToolDetails> {
 	readonly name = "job";
 	readonly label = "Job";
+	readonly loadMode = "essential" as const;
+	readonly summary = "Keeps long-running background work visible and retrievable.";
 	readonly description: string;
 	readonly parameters = jobSchema;
 	readonly strict = true;
