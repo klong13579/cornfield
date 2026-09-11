@@ -55,6 +55,8 @@ function formatReasoning(m: Model): string {
 export class ListModelsTool implements AgentTool<typeof listModelsSchema, ListModelsToolDetails> {
 	readonly name = "list_models";
 	readonly label = "ListModels";
+	readonly loadMode = "discoverable" as const;
+	readonly summary = "Shows which models the session can call, and which one is active.";
 	readonly description: string;
 	readonly parameters = listModelsSchema;
 	readonly strict = false;

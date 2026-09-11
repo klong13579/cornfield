@@ -41,6 +41,8 @@ function extractResponseText(message: AssistantMessage): string {
 export class InspectImageTool implements AgentTool<typeof inspectImageSchema, InspectImageToolDetails> {
 	readonly name = "inspect_image";
 	readonly label = "InspectImage";
+	readonly loadMode = "discoverable" as const;
+	readonly summary = "Answers questions about what an image file contains.";
 	readonly description: string;
 	readonly parameters = inspectImageSchema;
 	readonly strict = false;

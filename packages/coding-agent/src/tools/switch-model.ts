@@ -43,6 +43,8 @@ export interface SwitchModelToolDetails {
 export class SwitchModelTool implements AgentTool<typeof switchModelSchema, SwitchModelToolDetails> {
 	readonly name = "switch_model";
 	readonly label = "SwitchModel";
+	readonly loadMode = "discoverable" as const;
+	readonly summary = "Switches the session to a different model.";
 	readonly description: string;
 	readonly parameters = switchModelSchema;
 	readonly strict = false;

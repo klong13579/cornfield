@@ -35,6 +35,8 @@ export interface RenderMermaidToolDetails {
 export class RenderMermaidTool implements AgentTool<typeof renderMermaidSchema, RenderMermaidToolDetails> {
 	readonly name = "render_mermaid";
 	readonly label = "RenderMermaid";
+	readonly loadMode = "discoverable" as const;
+	readonly summary = "Renders Mermaid diagram source as a diagram that can be read in the terminal.";
 	readonly description: string;
 	readonly parameters = renderMermaidSchema;
 	readonly strict = true;
