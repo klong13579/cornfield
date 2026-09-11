@@ -1931,6 +1931,18 @@ export const SETTINGS_SCHEMA = {
 		},
 	},
 
+	// Tool presentation
+	"tools.xdev": {
+		type: "boolean",
+		default: true,
+		ui: {
+			tab: "tools",
+			label: "Mount Tools as Devices",
+			description:
+				"Present non-essential tools as xd:// devices instead of top-level tools (turn off to expose every tool at the top level)",
+		},
+	},
+
 	// Tool execution
 	"tools.intentTracing": {
 		type: "boolean",
