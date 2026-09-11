@@ -489,7 +489,7 @@ export class EventController {
 				(content: { type: string; text?: string }) => content.type === "text",
 			)?.text;
 			this.ctx.showWarning(
-				`Todo update failed${textContent ? `: ${textContent}` : ". Progress may be stale until todo_write succeeds."}`,
+				`Todo update failed${textContent ? `: ${textContent}` : ". Progress may be stale until todo succeeds."}`,
 			);
 		}
 		if (event.toolName === "exit_plan_mode" && !event.isError) {

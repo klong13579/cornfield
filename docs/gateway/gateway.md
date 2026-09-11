@@ -1038,7 +1038,7 @@ CREATE TABLE sessions (
 **安全性约束：**
 
 - **`accountId` 对 agent 任务为必填:** 无 `accountId` 的 agent 任务无法使用 warm bridge,只能走 fallback `cornfield --print` 路径。Gateway 启动时扫描所有旧任务,`cron reconcile` 命令可批量补填缺失的 accountId。
-- **工具隔离:** Agent 进程收到 `enabledToolsets` 后,只在指定工具集内推理。当前硬编码为 `["read", "search", "bash", "write", "edit", "find", "replace", "todo_write", "web_search"]`,向 agent prompt 注入 [CRON-CONTEXT] 前缀声明工具限制。
+- **工具隔离:** Agent 进程收到任务配置字段 `enabledToolsets` 后,只在指定工具集内推理（示例:`["read", "grep", "bash", "write", "edit", "glob", "replace", "todo", "web_search"]`）,并向 agent prompt 注入 [CRON-CONTEXT] 前缀声明工具限制。
 - **At-most-once 语义:** Engine 在触发执行前先将 `nextRunAt` 推进到下一次(而不是执行后再设)。若执行中进程崩溃,重启后不会重放已推进的任务。
 - **Grace Window:** 任务超过 nextRunAt 的宽限期后跳过本次执行。宽限期 = 两次 cron 间隔的一半(最短 2min,最长 2h)。防止网关重启后任务积压爆炸。
 - **FD 级排他锁:** Scheduler daemon 使用文件描述符级别排他锁(`flock(LOCK_EX)`)替代之前的 `mkdir` 锁,崩溃时由 OS 自动释放,不会留下残留锁文件。

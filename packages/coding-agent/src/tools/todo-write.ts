@@ -307,7 +307,7 @@ function applyParams(phases: TodoPhase[], params: TodoWriteParams): { phases: To
 	return { phases: next, errors };
 }
 
-/** Apply an array of `todo_write`-style ops to existing phases. Used by /todo slash command. */
+/** Apply an array of `todo`-style ops to existing phases. Used by /todo slash command. */
 export function applyOpsToPhases(
 	currentPhases: TodoPhase[],
 	ops: TodoWriteParams["ops"],

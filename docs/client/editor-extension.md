@@ -153,7 +153,7 @@
 | github | `tools/gh.ts` + `discovery/github.ts` | `GithubTool.createIf` | gh CLI 包装 | ⚠ 不直接 |
 | hub | `tools/hub.ts` | `HubTool.createIf` | cross-session 调度 | ⚠ 不直接 |
 | git | `commit/agentic/tools/*` + `autoresearch/git.ts` + `modes/components/status-line/git-utils.ts` | 多个内部 helper | status/diff/overview/file-diff/hunk — 全部给 TUI/agent 用 | ⚠ 不直接 |
-| 其它 | ask/calculator/checkpoint/debug/identity/inspect_image/job/list_models/notebook/python/recipe/render_mermaid/report_tool_issue/resolve/review/search-tool-bm25/ssh/switch_model/task/todo_write/vim/web_search/yield/image-gen/... | 见 `tools/index.ts:84-115` | 28 个 tool + 5 个 hidden | ⚠ 不直接 |
+| 其它 | ask/calculator/checkpoint/debug/identity/inspect_image/job/list_models/notebook/python/recipe/render_mermaid/report_tool_issue/resolve/review/search-tool-bm25/ssh/switch_model/task/todo/vim/web_search/yield/image-gen/... | 见 `tools/index.ts:84-115` | 28 个 tool + 5 个 hidden | ⚠ 不直接 |
 
 > ⚠ 工具层覆盖度的关键结论：**所有工具都是「给 Agent 调」，不是「给前端调」**。前端能「读」+「读图」（wire `fs_read`/`fs_read_image`），但**写/编辑/diff/git/IDE bash 调用都没有 wire 命令面**——这是编辑器扩展第一道缺口。
 

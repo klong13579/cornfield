@@ -393,9 +393,9 @@ A `ToolFactory` is `(session: ToolSession) => Tool | null | Promise<Tool | null>
 2. Resolves Python mode via `PI_PY` override (`getPythonModeFromEnv()`) or `session.settings.get("python.toolMode")`.
 3. Performs Python kernel preflight/warmup when applicable (`checkPythonKernelAvailability`, `warmPythonEnvironment`).
 4. Computes effective gating (`isToolAllowed`) from settings and runtime state:
-   - feature toggles (`find.enabled`, `grep.enabled`, etc.)
+   - feature toggles (`glob.enabled`, `grep.enabled`, etc.)
    - recursion guard for `task` (`task.maxRecursionDepth` vs `session.taskDepth`)
-   - yield mode (`requireYieldTool`) and `todo_write` suppression
+   - yield mode (`requireYieldTool`) and `todo` suppression
 5. Instantiates selected tools in parallel with `Promise.all`, records slow factory timings when `PI_TIMING=1`, and wraps results with `wrapToolWithMetaNotice`.
 6. Includes `resolve` only when at least one instantiated tool has `deferrable: true` (deferred preview/apply workflows).
 
