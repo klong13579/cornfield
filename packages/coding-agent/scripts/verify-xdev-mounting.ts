@@ -21,6 +21,7 @@ import * as path from "node:path";
 import { Settings } from "@cornfield/coding-agent/config/settings";
 import { buildSystemPrompt } from "@cornfield/coding-agent/system-prompt";
 import { createTools, type ToolSession } from "@cornfield/coding-agent/tools";
+import { buildXdevDeviceCatalog } from "@cornfield/coding-agent/tools/xdev";
 
 type Tool = Awaited<ReturnType<typeof createTools>>[number];
 
@@ -114,7 +115,22 @@ check(
 			.filter(tool => (tool.summary ?? "").trim() === "")
 			.map(tool => tool.name)
 			.join(", ") || "none"
-	} — an empty summary renders a blank entry in the device catalog the model reads`,
+	} — with no declared summary the catalog falls back to the description's first line
+	(buildXdevDeviceCatalog), shipping description prose into the system prompt in place of a
+	purpose-written one-liner`,
+);
+
+// The prompt the model actually reads. `buildXdevDeviceCatalog` silently falls back
+// to `tool.description` when no summary is declared, so checking `tool.summary` alone
+// leaves that fallback free to ship arbitrary description prose into the catalog.
+const catalog = buildXdevDeviceCatalog(devices ?? new Map());
+const notDeclared = catalog.entries
+	.filter(entry => entry.summary !== (devices?.get(entry.name)?.summary ?? "").trim())
+	.map(entry => entry.name);
+check(
+	"the device catalog renders each device's declared summary, not a description fallback",
+	notDeclared.length === 0,
+	`fell back to description: ${notDeclared.join(", ") || "none"}`,
 );
 
 // ── Case 2: explicit tool list → mounting off (runtime injection boundary) ──
