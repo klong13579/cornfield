@@ -2,11 +2,19 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Tool 呈现协议：`xd://` 设备挂载**（`src/tools/xdev.ts`、`src/tools/essential-tools.ts`、`src/internal-urls/xd-protocol.ts`、`src/config/settings-schema.ts`、`src/system-prompt.ts`、`src/prompts/system/*`，ADR-0003）：Tool 分 Catalog / Enabled Set / Discoverable Set 三层，每个 Tool 声明 `loadMode`（`essential`/`discoverable`/`internal`）与单行 `summary`；`discoverable` 在 `tools.xdev`（默认开启）下卸载为 `xd://` 设备，由 `read`/`write` 承担 transport（二者因此永不挂载），模型经系统提示的设备目录发现并按需取用。`internal` 为本仓扩展，约束**注入权**而非调度权。规范名与 legacy 别名分两层。
+- **`find` 超时返回部分结果并标注不完整**（`src/tools/find.ts`, `test/tools/find-timeout.test.ts`）：超时不再丢弃已收集结果并报错，改为返回部分结果并标 `incomplete:{reason,timeoutMs}`；不完整且 0 文件时不再渲染成 “No files found”——那是在断言一个它并不知道的否定。
+- **`xd://` 挂载与原生链接的门禁**（`packages/coding-agent/scripts/verify-xdev-mounting.ts`、`scripts/ci-release-verify-natives.ts`、`packages/natives/test/build-safety.test.ts`）：前者必须在 `bun test` 之外运行——挂载在该运行时下恒关，整套单测跑的都是 legacy 顶层列表，挂载路径永远不被执行（实测：`lsp` 以未声明摘要被挂载，944 个单测全绿）。断言覆盖挂载生效 / essential 留顶层 / 两集合不相交 / keep-list / `read`+`write` 不做设备 / 每个设备声明摘要非空（并禁止回落渲染 description）/ 分区等式 / 默认开启 / 双路径提示注入。后者新增“交付的 darwin addon 不得动态链接非系统库”检查。
+
 ### Changed
 
 - **Intercom 发送消息的 TUI 显示改为 bash 式多行预览** (`src/intercom-extension/index.ts`, `src/intercom-extension/ui/message-body.ts`, `test/intercom-extension/message-body.test.ts`): `intercom` 与 `contact_supervisor` 发出的消息正文不再压成单行 96 字符截断，改为宽度感知折行、收起时显示前 10 个视觉行 + `… (N more lines, Ctrl+O to expand)`，Ctrl+O 展开后显示完整内容（与 bash 输出展示一致）。`contact_supervisor` 同款单行预览一并替换，删除不再使用的 `previewText`。
 
 ### Fixed
+
+- **Rust 门禁漏检已提交的改动，且在 git worktree 里不可运行**（`scripts/run-rs-task.ts`）：`hasRustAffectingChanges()` 原先只看 `git status`（未提交改动），改动一旦 commit，`check:rs` 就静默跳过并打印绿色（实测：提交了 `crates/pi-natives/src/grep.rs` 的 worktree 报 “no Rust-affecting changes”）。现同时检查本分支相对 base 的已提交改动，无法解析 base 时保守执行；并把 `fmt --all` / `clippy --workspace` / `nextest --workspace` 改为按 workspace 成员逐包调用——workspace 级调用在任何 git worktree 里都失败（cargo 把被 exclude 的 vendored crate 解析到主检出的 workspace）。
 
 - **入站自定义消息触发聊天区整体重建（心跳 intercom 造成整屏重绘 + compaction 卡被重新贴到底部）** (`src/modes/controllers/extension-ui-controller.ts`, `src/modes/utils/ui-helpers.ts`, `src/modes/interactive-mode.ts`, `src/modes/types.ts`, `src/modes/controllers/event-controller.ts`, `src/session/agent-session.ts`, `test/modes/utils/ui-helpers-custom-message-once.test.ts`, `test/modes/controllers/extension-ui-custom-message-display.test.ts`): `ExtensionUiController.#applyCustomMessageDisplay` 对每条 `display:true` 的扩展消息（心跳 intercom 的 `Subagent completed its task round` 等）都调 `rebuildChatFromMessages()`——即 `chatContainer.clear()` + `buildDisplaySessionContext()` 全量重渲染。副作用三条：视口被拉回最新、1500+ entries 的会话每次入站全量重建、且 `renderSessionContext` 会把 compaction summary 延迟渲染到聊天区**最底部**（`deferredMessages`），于是 `[compaction] Compacted from 565,507 tokens` 这张卡随着每次入站消息重新出现在最新消息旁边，看起来像「又压了一次」（实测 2026-09-10 的 dtc squad 会话，日志里只有一条 compaction）。改为增量追加：新增 `UiHelpers.renderCustomMessageOnce`（按 role/customType/timestamp 去重——触发 turn 的消息已由 `agent-loop.ts` 的 `message_start` 渲染过，第二次请求直接跳过），`#applyCustomMessageDisplay` 不再重建；`event-controller` 的两处自定义消息渲染（`message_start` / `irc_message`）改走同一方法，去重集合由 `EventController` 收口到 `UiHelpers`。`AgentSession.sendCustomMessage` 现在返回它实际写入/投递的那条 `CustomMessage`（timestamp 在内部 mint，调用方无法自行重建去重签名）。
 
