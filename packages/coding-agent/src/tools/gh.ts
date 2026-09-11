@@ -1862,6 +1862,8 @@ function buildTextResult(
 export class GithubTool implements AgentTool<typeof githubSchema, GhToolDetails> {
 	readonly name = "github";
 	readonly label = "GitHub";
+	readonly loadMode = "discoverable" as const;
+	readonly summary = "Reads and acts on GitHub repositories, issues, pull requests, and Actions runs.";
 	readonly description = prompt.render(githubDescription);
 	readonly parameters = githubSchema;
 	readonly strict = true;

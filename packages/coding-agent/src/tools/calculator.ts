@@ -396,6 +396,8 @@ type CalculatorParams = Static<typeof calculatorSchema>;
 export class CalculatorTool implements AgentTool<typeof calculatorSchema, CalculatorToolDetails> {
 	readonly name = "calc";
 	readonly label = "Calc";
+	readonly loadMode = "discoverable" as const;
+	readonly summary = "Evaluates mathematical expressions without relying on mental arithmetic.";
 	readonly description: string;
 	readonly parameters = calculatorSchema;
 	readonly strict = true;

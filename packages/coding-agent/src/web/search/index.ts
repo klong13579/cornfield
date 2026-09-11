@@ -213,6 +213,8 @@ export async function runSearchQuery(
 export class WebSearchTool implements AgentTool<typeof webSearchSchema, SearchRenderDetails> {
 	readonly name = "web_search";
 	readonly label = "Web Search";
+	readonly loadMode = "essential" as const;
+	readonly summary = "Finds up-to-date information on the web.";
 	readonly description: string;
 	readonly parameters = webSearchSchema;
 	readonly strict = true;
