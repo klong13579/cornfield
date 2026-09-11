@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { hasAvx512Markers } from "../../../scripts/ci-release-verify-natives";
+import { findNonSystemDependencies, hasAvx512Markers } from "../../../scripts/ci-release-verify-natives";
 import { buildZigArgs } from "../scripts/zig-safe-wrapper";
 
 describe("native build safety", () => {
@@ -43,6 +43,40 @@ describe("native build safety", () => {
 		it("ignores AVX-512-like text outside the instruction column", () => {
 			expect(hasAvx512Markers("0000000000000000 <worker_k1>:")).toBe(false);
 			expect(hasAvx512Markers("Disassembly of section .text.zmm0_helper:")).toBe(false);
+		});
+	});
+
+	describe("findNonSystemDependencies", () => {
+		it("flags a non-system (e.g. Homebrew) dependency", () => {
+			const dump = [
+				"/repo/packages/natives/native/cornfield_natives.darwin-arm64.node:",
+				"\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1345.100.2)",
+				"\t/opt/homebrew/opt/pcre2/lib/libpcre2-8.0.dylib (compatibility version 16.0.0, current version 16.0.0)",
+			].join("\n");
+			expect(findNonSystemDependencies(dump)).toEqual(["/opt/homebrew/opt/pcre2/lib/libpcre2-8.0.dylib"]);
+		});
+
+		it("accepts system libraries/frameworks and the addon's own install_name", () => {
+			const dump = [
+				"/repo/packages/natives/native/cornfield_natives.darwin-arm64.node:",
+				"\t/repo/target/aarch64-apple-darwin/ci/deps/libcornfield_natives.dylib (compatibility version 0.0.0, current version 0.0.0)",
+				"\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1345.100.2)",
+				"\t/usr/lib/libobjc.A.dylib (compatibility version 1.0.0, current version 228.0.0)",
+				"\t/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation (compatibility version 150.0.0, current version 2420.0.0)",
+			].join("\n");
+			expect(findNonSystemDependencies(dump)).toEqual([]);
+		});
+
+		it("flags an rpath dependency: user machines cannot be assumed to provide it", () => {
+			const dump = [
+				"binary:",
+				"\t@rpath/libpcre2-8.0.dylib (compatibility version 16.0.0, current version 16.0.0)",
+			].join("\n");
+			expect(findNonSystemDependencies(dump)).toEqual(["@rpath/libpcre2-8.0.dylib"]);
+		});
+
+		it("ignores the header line and blank lines", () => {
+			expect(findNonSystemDependencies("\n/repo/x.node:\n\n")).toEqual([]);
 		});
 	});
 });

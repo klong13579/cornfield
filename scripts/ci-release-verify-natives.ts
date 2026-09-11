@@ -45,6 +45,48 @@ export function hasAvx512Markers(disassembly: string): boolean {
 	return findAvx512Markers(disassembly).length > 0;
 }
 
+const DARWIN_SYSTEM_PREFIXES = ["/usr/lib/", "/System/"];
+/** The addon's own install_name — `otool -L` lists it as a self-reference. */
+const SELF_INSTALL_NAME = /(^|\/)libcornfield_natives\.dylib$/;
+
+/**
+ * Non-system dynamic dependencies reported by `otool -L`.
+ *
+ * A released binary may only link libraries every user machine already has. A
+ * dependency such as `/opt/homebrew/opt/pcre2/lib/libpcre2-8.0.dylib` makes the
+ * addon fail to load for anyone without Homebrew — measured 2026-09-11, when
+ * pcre2-sys picked up the local library instead of its bundled sources; fixed by
+ * pinning `PCRE2_SYS_STATIC=1` in `.cargo/config.toml`. This check is what makes
+ * that invariant hold for the next dependency too.
+ */
+export function findNonSystemDependencies(otoolOutput: string): string[] {
+	const deps: string[] = [];
+	for (const rawLine of otoolOutput.split("\n")) {
+		const line = rawLine.trim();
+		if (line === "" || line.endsWith(":")) continue;
+		const match = /^([/@][^\s(]*)/.exec(line);
+		if (!match) continue;
+		const dep = match[1] ?? "";
+		if (dep === "") continue;
+		if (DARWIN_SYSTEM_PREFIXES.some((prefix) => dep.startsWith(prefix))) continue;
+		if (SELF_INSTALL_NAME.test(dep)) continue;
+		deps.push(dep);
+	}
+	return deps;
+}
+
+function linkedLibraries(binaryPath: string): string {
+	const otoolPath = Bun.which("otool");
+	if (!otoolPath) {
+		throw new Error("otool is required to verify darwin native linkage contracts.");
+	}
+	const result = Bun.spawnSync([otoolPath, "-L", binaryPath], { stdout: "pipe", stderr: "pipe" });
+	if (result.exitCode !== 0) {
+		throw new Error(`otool failed for ${binaryPath}: ${result.stderr.toString("utf-8").trim()}`);
+	}
+	return result.stdout.toString("utf-8");
+}
+
 function disassemble(binaryPath: string): string {
 	const objdumpPath = Bun.which("objdump");
 	if (!objdumpPath) {
@@ -112,6 +154,32 @@ async function main(): Promise<void> {
 
 	if (isaFailures.length > 0) {
 		for (const failure of isaFailures) {
+			console.error(failure);
+		}
+		process.exit(1);
+	}
+
+	// Linkage contract: only macOS addons are checked, because only they ship
+	// (AGENTS.md: releases are macOS-only; the linux-x64 addon exists so the test
+	// jobs can run).
+	const linkageFailures: string[] = [];
+	for (const platform of expectedAddons.filter((entry) => entry.startsWith("darwin-"))) {
+		const filename = `cornfield_natives.${platform}.node`;
+		const binaryPath = path.join(nativeDir, filename);
+		const nonSystem = findNonSystemDependencies(linkedLibraries(binaryPath));
+		if (nonSystem.length > 0) {
+			linkageFailures.push(
+				`${filename} links non-system libraries:\n${nonSystem.join("\n")}\n` +
+					"A released addon must not depend on libraries user machines may lack. " +
+					"For the pcre2 case, keep `PCRE2_SYS_STATIC = { value = \"1\", force = true }` in .cargo/config.toml.",
+			);
+			continue;
+		}
+		console.log(`OK ${filename} links only system libraries`);
+	}
+
+	if (linkageFailures.length > 0) {
+		for (const failure of linkageFailures) {
 			console.error(failure);
 		}
 		process.exit(1);
