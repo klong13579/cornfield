@@ -29,6 +29,8 @@ type RecipeRenderResult = {
 export class RecipeTool implements AgentTool<typeof recipeSchema, BashToolDetails, Theme> {
 	readonly name = "recipe";
 	readonly label = "Run";
+	readonly loadMode = "discoverable" as const;
+	readonly summary = "Run a task from the project's task runners";
 	readonly description: string;
 	readonly parameters = recipeSchema;
 	readonly strict = true;

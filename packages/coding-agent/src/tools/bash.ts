@@ -268,6 +268,8 @@ function formatTimeoutClampNotice(requestedTimeoutSec: number, effectiveTimeoutS
 export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
 	readonly name = "bash";
 	readonly label = "Bash";
+	readonly loadMode = "essential" as const;
+	readonly summary = "Execute shell commands in a shell session";
 	readonly description: string;
 	readonly parameters: BashToolSchema;
 	readonly concurrency = "exclusive";
