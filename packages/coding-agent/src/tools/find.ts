@@ -48,6 +48,20 @@ export type FindToolInput = Static<typeof findSchema>;
 const DEFAULT_LIMIT = 1000;
 const GLOB_TIMEOUT_MS = 5000;
 
+/**
+ * Set when the search stopped before covering its whole scope.
+ *
+ * The distinction is load-bearing for the model: `files` holding N entries and
+ * `files` holding the N entries *an unfinished search reached* are different
+ * claims, and only one of them supports "there is no such file".
+ */
+export interface FindIncomplete {
+	/** Why the search stopped early. */
+	reason: "timeout";
+	/** The time budget that was exhausted, in milliseconds. */
+	timeoutMs: number;
+}
+
 export interface FindToolDetails {
 	truncation?: TruncationResult;
 	resultLimitReached?: number;
@@ -57,6 +71,8 @@ export interface FindToolDetails {
 	fileCount?: number;
 	files?: string[];
 	truncated?: boolean;
+	/** Present when the search was cut short; `files` is then a partial result set. */
+	incomplete?: FindIncomplete;
 	error?: string;
 }
 
@@ -78,22 +94,92 @@ export interface FindOperations {
 export interface FindToolOptions {
 	/** Custom operations for find. Default: local filesystem + rg */
 	operations?: FindOperations;
+	/**
+	 * Time budget for the native filesystem walk, in milliseconds
+	 * (default {@link GLOB_TIMEOUT_MS}). Custom `operations` are not subject to it.
+	 * Exhausting the budget returns the matches collected so far, marked incomplete.
+	 */
+	globTimeoutMs?: number;
+}
+
+/** A match streamed by the native walker before the search finished. */
+export interface CollectedFindMatch {
+	/** Path as displayed to the model, normalized against the session cwd. */
+	path: string;
+	/** Modification time in ms since epoch; 0 when the walker reported none. */
+	mtime: number;
+}
+
+/**
+ * Normalize the matches streamed before a search was cut short.
+ *
+ * Rules, in order:
+ * 1. **Deduplicate by display path** — first sighting wins. Distinct native
+ *    entries can collapse onto one display path (a directory and its
+ *    trailing-slash form, a symlink and its target), and a rescan can stream an
+ *    entry twice.
+ * 2. **Sort by mtime descending, then path ascending.** The complete-result path
+ *    takes its order from the native walker; this path collects in scan order,
+ *    which is not mtime-ordered, so it must sort. The path tiebreak keeps equal
+ *    mtimes — the common case, since mtimes are coarse — from producing an
+ *    order that differs run to run.
+ *
+ * The caller's result limit is applied afterwards, by the shared result builder.
+ */
+export function resolvePartialMatchPaths(collected: readonly CollectedFindMatch[]): string[] {
+	const seen = new Set<string>();
+	const unique: CollectedFindMatch[] = [];
+	for (const match of collected) {
+		if (seen.has(match.path)) continue;
+		seen.add(match.path);
+		unique.push(match);
+	}
+	unique.sort((a, b) => b.mtime - a.mtime || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+	return unique.map(match => match.path);
+}
+
+/** Render a time budget compactly ("5s", "1.5s", "50ms"). */
+function formatBudget(ms: number): string {
+	if (ms < 1000) return `${ms}ms`;
+	const seconds = ms / 1000;
+	return `${Number.isInteger(seconds) ? seconds : seconds.toFixed(1)}s`;
+}
+
+/**
+ * One-line marker for a partial result set, shared by the model-facing text and
+ * the TUI. It must survive output truncation, so callers append it last.
+ */
+function formatIncompleteNotice(incomplete: FindIncomplete, collected: number): string {
+	const found =
+		collected > 0
+			? `the ${collected} result${collected === 1 ? "" : "s"} above are only what the search reached before the cut-off`
+			: "no results were collected before the cut-off";
+	return `[Incomplete: find timed out after ${formatBudget(incomplete.timeoutMs)}; ${found}. The scope was not fully searched, so this is not proof the files do not exist. Narrow the pattern or scope to get a complete list.]`;
+}
+
+/** TUI one-liner for a cut-short search; the model-facing notice carries the rest. */
+function formatIncompleteLabel(incomplete: FindIncomplete): string {
+	return `find timed out after ${formatBudget(incomplete.timeoutMs)} — the scope was not fully searched`;
 }
 
 export class FindTool implements AgentTool<typeof findSchema, FindToolDetails> {
 	readonly name = "find";
 	readonly label = "Find";
+	readonly loadMode = "essential" as const;
+	readonly summary = "Finds files by glob pattern.";
 	readonly description: string;
 	readonly parameters = findSchema;
 	readonly strict = true;
 
 	readonly #customOps?: FindOperations;
+	readonly #globTimeoutMs: number;
 
 	constructor(
 		private readonly session: ToolSession,
 		options?: FindToolOptions,
 	) {
 		this.#customOps = options?.operations;
+		this.#globTimeoutMs = options?.globTimeoutMs ?? GLOB_TIMEOUT_MS;
 		this.description = prompt.render(findDescription);
 	}
 
@@ -130,7 +216,7 @@ export class FindTool implements AgentTool<typeof findSchema, FindToolDetails> {
 				throw new ToolError("Limit must be a positive number");
 			}
 			const includeHidden = hidden ?? true;
-			const timeoutSignal = AbortSignal.timeout(GLOB_TIMEOUT_MS);
+			const timeoutSignal = AbortSignal.timeout(this.#globTimeoutMs);
 			const combinedSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
 			const formatMatchPath = (matchPath: string, fileType?: natives.FileType): string => {
 				const hadTrailingSlash = matchPath.endsWith("/") || matchPath.endsWith("\\");
@@ -140,10 +226,16 @@ export class FindTool implements AgentTool<typeof findSchema, FindToolDetails> {
 				});
 			};
 
-			const buildResult = async (files: string[]): Promise<AgentToolResult<FindToolDetails>> => {
+			const buildResult = async (
+				files: string[],
+				incomplete?: FindIncomplete,
+			): Promise<AgentToolResult<FindToolDetails>> => {
 				if (files.length === 0) {
-					const details: FindToolDetails = { scopePath, fileCount: 0, files: [], truncated: false };
-					return toolResult(details).text("No files found matching pattern").done();
+					const details: FindToolDetails = { scopePath, fileCount: 0, files: [], truncated: false, incomplete };
+					// A search cut short having collected nothing is not the same claim as
+					// "no files found" — the scope was never fully searched, so say so.
+					const text = incomplete ? formatIncompleteNotice(incomplete, 0) : "No files found matching pattern";
+					return toolResult(details).text(text).done();
 				}
 
 				const listLimit = applyListLimit(files, { limit: effectiveLimit });
@@ -155,7 +247,13 @@ export class FindTool implements AgentTool<typeof findSchema, FindToolDetails> {
 					? await persistToolOutputArtifact(this.session, "find", rawOutput)
 					: undefined;
 				if (sidecarId) truncation.artifactId = sidecarId;
-				const output = truncation.content + (sidecarId ? `\n\n${formatFullOutputReference(sidecarId)}` : "");
+				// The incomplete marker is appended after truncation so it survives the
+				// head-cut; a partial list the model mistakes for a complete one is the
+				// exact failure this path exists to prevent.
+				const output =
+					truncation.content +
+					(sidecarId ? `\n\n${formatFullOutputReference(sidecarId)}` : "") +
+					(incomplete ? `\n\n${formatIncompleteNotice(incomplete, limited.length)}` : "");
 
 				const details: FindToolDetails = {
 					scopePath,
@@ -164,6 +262,7 @@ export class FindTool implements AgentTool<typeof findSchema, FindToolDetails> {
 					truncated: Boolean(limitMeta.resultLimit || truncation.truncated),
 					resultLimitReached: limitMeta.resultLimit?.reached,
 					truncation: truncation.truncated ? truncation : undefined,
+					incomplete,
 				};
 
 				const resultBuilder = toolResult(details)
@@ -215,7 +314,7 @@ export class FindTool implements AgentTool<typeof findSchema, FindToolDetails> {
 			}
 
 			let matches: natives.GlobMatch[];
-			const onUpdateMatches: string[] = [];
+			const collected: CollectedFindMatch[] = [];
 			const updateIntervalMs = 200;
 			let lastUpdate = 0;
 			const emitUpdate = () => {
@@ -223,25 +322,26 @@ export class FindTool implements AgentTool<typeof findSchema, FindToolDetails> {
 				const now = Date.now();
 				if (now - lastUpdate < updateIntervalMs) return;
 				lastUpdate = now;
+				const paths = collected.map(match => match.path);
 				const details: FindToolDetails = {
 					scopePath,
-					fileCount: onUpdateMatches.length,
-					files: onUpdateMatches.slice(),
+					fileCount: paths.length,
+					files: paths,
 					truncated: false,
 				};
 				onUpdate({
-					content: [{ type: "text", text: onUpdateMatches.join("\n") }],
+					content: [{ type: "text", text: paths.join("\n") }],
 					details,
 				});
 			};
-			const onMatch = onUpdate
-				? (err: Error | null, match: natives.GlobMatch | null) => {
-						if (err || signal?.aborted || !match?.path) return;
-						const relativePath = formatMatchPath(match.path, match.fileType);
-						onUpdateMatches.push(relativePath);
-						emitUpdate();
-					}
-				: undefined;
+			// Collects unconditionally, not just while a UI is listening: the time budget
+			// below can cut the walk short at any moment, and whatever streamed by then is
+			// the only result set that survives the cut.
+			const onMatch = (err: Error | null, match: natives.GlobMatch | null) => {
+				if (err || signal?.aborted || !match?.path) return;
+				collected.push({ path: formatMatchPath(match.path, match.fileType), mtime: match.mtime ?? 0 });
+				emitUpdate();
+			};
 
 			const doGlob = async (useGitignore: boolean) =>
 				untilAborted(combinedSignal, () =>
@@ -269,8 +369,13 @@ export class FindTool implements AgentTool<typeof findSchema, FindToolDetails> {
 			} catch (error) {
 				if (error instanceof Error && error.name === "AbortError") {
 					if (timeoutSignal.aborted && !signal?.aborted) {
-						const timeoutSeconds = Math.max(1, Math.round(GLOB_TIMEOUT_MS / 1000));
-						throw new ToolError(`find timed out after ${timeoutSeconds}s`);
+						// The budget ran out with the walk unfinished. Return what streamed
+						// before the cut, explicitly marked incomplete, rather than discarding
+						// the search and reporting a bare failure.
+						return await buildResult(resolvePartialMatchPaths(collected), {
+							reason: "timeout",
+							timeoutMs: this.#globTimeoutMs,
+						});
 					}
 					throw new ToolAbortError();
 				}
@@ -381,21 +486,30 @@ export const findToolRenderer = {
 		const fileCount = details?.fileCount ?? 0;
 		const truncation = details?.truncation ?? details?.meta?.truncation;
 		const limits = details?.meta?.limits;
+		const incomplete = details?.incomplete;
 		const truncated = Boolean(details?.truncated || truncation || details?.resultLimitReached || limits?.resultLimit);
 		const files = details?.files ?? [];
 
 		if (fileCount === 0) {
+			// An incomplete empty search is not "No files found": the scope was never
+			// fully walked, so the empty-message rendering would state something the
+			// result does not know.
+			const emptyMeta = incomplete ? ["0 files", uiTheme.fg("warning", "incomplete")] : ["0 files"];
 			const header = renderStatusLine(
-				{ icon: "warning", title: "Find", description: args?.pattern, meta: ["0 files"] },
+				{ icon: "warning", title: "Find", description: args?.pattern, meta: emptyMeta },
 				uiTheme,
 			);
-			return new Text([header, formatEmptyMessage("No files found", uiTheme)].join("\n"), 0, 0);
+			const body = incomplete
+				? uiTheme.fg("warning", formatIncompleteLabel(incomplete))
+				: formatEmptyMessage("No files found", uiTheme);
+			return new Text([header, body].join("\n"), 0, 0);
 		}
 		const meta: string[] = [formatCount("file", fileCount)];
 		if (details?.scopePath) meta.push(`in ${details.scopePath}`);
 		if (truncated) meta.push(uiTheme.fg("warning", "truncated"));
+		if (incomplete) meta.push(uiTheme.fg("warning", "incomplete"));
 		const header = renderStatusLine(
-			{ icon: truncated ? "warning" : "success", title: "Find", description: args?.pattern, meta },
+			{ icon: truncated || incomplete ? "warning" : "success", title: "Find", description: args?.pattern, meta },
 			uiTheme,
 		);
 
@@ -409,6 +523,9 @@ export const findToolRenderer = {
 		const extraLines: string[] = [];
 		if (truncationReasons.length > 0) {
 			extraLines.push(uiTheme.fg("warning", `truncated: ${truncationReasons.join(", ")}`));
+		}
+		if (incomplete) {
+			extraLines.push(uiTheme.fg("warning", `incomplete: ${formatIncompleteLabel(incomplete)}`));
 		}
 
 		let cached: RenderCache | undefined;
