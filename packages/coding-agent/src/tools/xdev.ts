@@ -29,7 +29,7 @@ type Tool = AgentTool<any, any, any>;
  * call by name because prompts or harness flows reference them directly and the
  * model cannot be assumed to know the xd protocol (upstream incident #5973).
  */
-export const XDEV_KEEP_TOP_LEVEL: readonly string[] = ["web_search", "search_tool_bm25"];
+export const XDEV_KEEP_TOP_LEVEL: readonly string[] = ["web_search", "search_tool_bm25", "irc", "hub"];
 
 /**
  * Fallback `internal` tool names until the annotation batch (A4) declares
