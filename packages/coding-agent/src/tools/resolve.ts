@@ -111,6 +111,8 @@ export function queueResolveHandler(
 export class ResolveTool implements AgentTool<typeof resolveSchema, ResolveToolDetails> {
 	readonly name = "resolve";
 	readonly label = "Resolve";
+	readonly loadMode = "internal" as const;
+	readonly summary = "Applies or discards a change waiting on explicit approval.";
 	readonly hidden = true;
 	readonly description: string;
 	readonly parameters = resolveSchema;

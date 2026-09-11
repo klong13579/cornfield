@@ -42,6 +42,8 @@ export interface ExitPlanModeDetails {
 export class ExitPlanModeTool implements AgentTool<typeof exitPlanModeSchema, ExitPlanModeDetails> {
 	readonly name = "exit_plan_mode";
 	readonly label = "ExitPlanMode";
+	readonly loadMode = "essential" as const;
+	readonly summary = "Hands a finalized plan to the user for approval.";
 	readonly description: string;
 	readonly parameters = exitPlanModeSchema;
 	readonly strict = true;

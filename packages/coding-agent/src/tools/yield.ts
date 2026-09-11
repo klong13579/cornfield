@@ -43,6 +43,8 @@ function formatAjvErrors(errors: ErrorObject[] | null | undefined): string {
 export class YieldTool implements AgentTool<TSchema, YieldDetails> {
 	readonly name = "yield";
 	readonly label = "Submit Result";
+	readonly loadMode = "internal" as const;
+	readonly summary = "Returns structured output to finish a subagent task.";
 	readonly description =
 		"Finish the task with structured JSON output. Call exactly once at the end of the task.\n\n" +
 		'Pass `result: { data: <your output> }` for success, or `result: { error: "message" }` for failure.\n' +

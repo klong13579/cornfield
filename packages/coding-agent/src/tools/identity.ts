@@ -224,6 +224,8 @@ const EMPTY_TEMPLATE = `# User
 export class IdentityTool implements AgentTool<typeof identitySchema> {
 	readonly name = "identity";
 	readonly label = "Identity";
+	readonly loadMode = "essential" as const;
+	readonly summary = "Recalls who the agent and the user are, and updates the stored user profile.";
 	readonly description: string;
 	readonly parameters = identitySchema;
 	readonly strict = true;

@@ -133,6 +133,8 @@ export function parseReportFindingDetails(value: unknown): ReportFindingDetails 
 export const reportFindingTool: AgentTool<typeof ReportFindingParams, ReportFindingDetails, Theme> = {
 	name: "report_finding",
 	label: "Report Finding",
+	loadMode: "internal" as const,
+	summary: "Records a code-review finding so the review can be summarized as a list.",
 	description: "Report a code review finding. Use this for each issue found. Call yield when done.",
 	parameters: ReportFindingParams,
 	intent: "omit",

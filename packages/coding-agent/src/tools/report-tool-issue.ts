@@ -57,6 +57,8 @@ export function createReportToolIssueTool(session: ToolSession): AgentTool {
 	return {
 		name: "report_tool_issue",
 		label: "Report Tool Issue",
+		loadMode: "internal" as const,
+		summary: "Records unexpected tool behavior so it can be followed up.",
 		strict: false,
 		description: "Report unexpected tool behavior for automated QA tracking.",
 		parameters: ReportToolIssueParams,

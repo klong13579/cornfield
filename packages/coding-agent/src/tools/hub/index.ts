@@ -43,6 +43,8 @@ type HubParams = Static<typeof hubSchema>;
 export class HubTool implements AgentTool<typeof hubSchema, HubDetails> {
 	readonly name = "hub";
 	readonly label = "Hub";
+	readonly loadMode = "discoverable" as const;
+	readonly summary = "Shows what every other live agent is currently working on.";
 	readonly description: string;
 	readonly parameters = hubSchema;
 	readonly strict = true;
