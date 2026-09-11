@@ -14,30 +14,86 @@ const RUST_AFFECTING_FILE_NAMES = [
 	"rustfmt.toml",
 	".rustfmt.toml",
 ] as const satisfies readonly string[];
-const TASK_COMMANDS = {
-	"check:rs": [
-		["cargo", "fmt", "--all", "--", "--check"],
-		["cargo", "clippy", "--workspace", "--", "-D", "warnings"],
-	],
-	"fix:rs": [
-		["cargo", "fmt", "--all"],
-		[
-			"cargo",
-			"clippy",
-			"--workspace",
-			"--fix",
-			"--allow-dirty",
-			"--no-deps",
-			"--allow-staged",
-			"--allow-no-vcs",
-		],
-	],
-	"fmt:rs": [["cargo", "fmt", "--all"]],
-	"lint:rs": [["cargo", "clippy", "--workspace", "--", "-D", "warnings"]],
-	"test:rs": [["cargo", "nextest", "run", "--workspace", "--status-level=fail", "--final-status-level=fail"]],
-} as const satisfies Record<string, readonly (readonly string[])[]>;
+type RustTaskName = "check:rs" | "fix:rs" | "fmt:rs" | "lint:rs" | "test:rs";
 
-type RustTaskName = keyof typeof TASK_COMMANDS;
+const RUST_TASK_NAMES: readonly RustTaskName[] = ["check:rs", "fix:rs", "fmt:rs", "lint:rs", "test:rs"];
+
+/**
+ * Commands for a Rust task, scoped to explicit workspace members.
+ *
+ * Why not the workspace-wide form (`fmt --all` / `clippy --workspace` /
+ * `nextest run --workspace`): those FAIL inside a `git worktree` of this
+ * repository. Cargo re-discovers the vendored crates under `crates/` and
+ * resolves them against the MAIN checkout's workspace:
+ *
+ *   current package believes it's in a workspace when it's not:
+ *   current:   <worktree>/crates/brush-builtins-vendored/Cargo.toml
+ *   workspace: <main>/Cargo.toml
+ *
+ * Measured 2026-09-11 in two different worktrees, on a branch that does not
+ * touch the root manifest; the same command passes in the main checkout.
+ *
+ * The per-member form is equivalent — a workspace-wide flag means "all
+ * members", and this workspace's only member is `cornfield-natives`
+ * (`members = ["crates/*"]` minus three `exclude` entries) — and it runs both
+ * in the main checkout and in worktrees.
+ */
+function rustCommands(task: RustTaskName, members: readonly string[]): string[][] {
+	const fmtCheck = members.map((name) => ["cargo", "fmt", "-p", name, "--", "--check"]);
+	const clippyCheck = members.map((name) => ["cargo", "clippy", "-p", name, "--", "-D", "warnings"]);
+	switch (task) {
+		case "check:rs":
+			return [...fmtCheck, ...clippyCheck];
+		case "fmt:rs":
+			return members.map((name) => ["cargo", "fmt", "-p", name]);
+		case "lint:rs":
+			return clippyCheck;
+		case "fix:rs":
+			return [
+				...members.map((name) => ["cargo", "fmt", "-p", name]),
+				...members.map((name) => [
+					"cargo",
+					"clippy",
+					"-p",
+					name,
+					"--fix",
+					"--allow-dirty",
+					"--no-deps",
+					"--allow-staged",
+					"--allow-no-vcs",
+				]),
+			];
+		case "test:rs":
+			return members.map((name) => [
+				"cargo",
+				"nextest",
+				"run",
+				"-p",
+				name,
+				"--status-level=fail",
+				"--final-status-level=fail",
+			]);
+	}
+}
+
+/**
+ * Workspace member names. `--no-deps` keeps this cheap and worktree-safe
+ * (it does not resolve the dependency graph, so it avoids the vendored-crate
+ * workspace problem above).
+ */
+async function workspaceMemberNames(): Promise<string[] | null> {
+	const result = await $`cargo metadata --no-deps --format-version 1`.cwd(repoRoot).quiet().nothrow();
+	if (result.exitCode !== 0) return null;
+	try {
+		const parsed = JSON.parse(result.stdout.toString()) as { packages?: Array<{ name?: unknown }> };
+		const names = (parsed.packages ?? [])
+			.map((entry) => entry.name)
+			.filter((name): name is string => typeof name === "string" && name !== "");
+		return names.length > 0 ? names : null;
+	} catch {
+		return null;
+	}
+}
 
 const repoRoot = path.join(import.meta.dir, "..");
 const taskName = process.argv[2];
@@ -52,15 +108,27 @@ if (!(isCI() || (await hasRustAffectingChanges()))) {
 	process.exit(0);
 }
 
-for (const command of TASK_COMMANDS[taskName]) {
+for (const command of await rustCommandsFor(taskName)) {
+	console.log(`$ ${command.join(" ")}`);
 	const exitCode = await runCommand(command);
 	if (exitCode !== 0) {
 		process.exit(exitCode);
 	}
 }
 
+async function rustCommandsFor(task: RustTaskName): Promise<string[][]> {
+	const members = await workspaceMemberNames();
+	if (members === null) {
+		console.error(
+			"Failed to enumerate workspace members (cargo metadata --no-deps) — cannot run the Rust checks, refusing to report success.",
+		);
+		process.exit(1);
+	}
+	return rustCommands(task, members);
+}
+
 function isRustTaskName(value: string | undefined): value is RustTaskName {
-	return value != null && value in TASK_COMMANDS;
+	return value != null && (RUST_TASK_NAMES as readonly string[]).includes(value);
 }
 
 function isCI(): boolean {
@@ -71,14 +139,53 @@ function isCI(): boolean {
 }
 
 async function hasRustAffectingChanges(): Promise<boolean> {
+	const uncommitted = await uncommittedPaths();
+	if (uncommitted === null) {
+		console.warn(`Warning: failed to inspect git status. Running ${taskName} conservatively.`);
+		return true;
+	}
+	if (uncommitted.some(isRustAffectingPath)) return true;
+
+	// `git status` only sees the working tree. A change that was already COMMITTED
+	// was therefore invisible here, and the Rust checks were skipped silently while
+	// printing a green result (measured 2026-09-11: a worktree whose commit touched
+	// crates/pi-natives/src/grep.rs reported "no Rust-affecting changes"). Diff the
+	// branch against its base as well: a false run costs a minute, a false skip ships
+	// broken Rust.
+	const committed = await committedPathsSinceBase();
+	if (committed === null) {
+		console.warn(
+			`Warning: no base ref (@{u}/origin/main/main) to diff against, so committed Rust changes cannot be ruled out. Running ${taskName} conservatively.`,
+		);
+		return true;
+	}
+	return committed.some(isRustAffectingPath);
+}
+
+async function uncommittedPaths(): Promise<string[] | null> {
 	const result = await $`git status --porcelain -z`.cwd(repoRoot).quiet().nothrow();
 	if (result.exitCode !== 0) {
 		const stderr = result.stderr.toString().trim();
-		const suffix = stderr === "" ? `exit ${result.exitCode}` : stderr;
-		console.warn(`Warning: failed to inspect git status: ${suffix}. Running ${taskName} conservatively.`);
-		return true;
+		console.warn(`Warning: failed to inspect git status: ${stderr === "" ? `exit ${result.exitCode}` : stderr}.`);
+		return null;
 	}
-	return getChangedPathsFromPorcelain(result.stdout).some(isRustAffectingPath);
+	return getChangedPathsFromPorcelain(result.stdout);
+}
+
+async function resolveBaseRef(): Promise<string | null> {
+	for (const ref of ["@{u}", "origin/HEAD", "origin/main", "main"]) {
+		const probe = await $`git rev-parse --verify --quiet ${ref}`.cwd(repoRoot).quiet().nothrow();
+		if (probe.exitCode === 0 && probe.stdout.toString().trim() !== "") return ref;
+	}
+	return null;
+}
+
+async function committedPathsSinceBase(): Promise<string[] | null> {
+	const base = await resolveBaseRef();
+	if (base === null) return null;
+	const diff = await $`git diff --name-only -z ${`${base}...HEAD`}`.cwd(repoRoot).quiet().nothrow();
+	if (diff.exitCode !== 0) return null;
+	return new TextDecoder().decode(diff.stdout).split("\0").filter(Boolean);
 }
 
 function getChangedPathsFromPorcelain(buf: Uint8Array): string[] {
