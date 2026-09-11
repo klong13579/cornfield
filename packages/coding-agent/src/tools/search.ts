@@ -1,7 +1,7 @@
 import * as path from "node:path";
 import type { AgentTool, AgentToolContext, AgentToolResult, AgentToolUpdateCallback } from "@cornfield/agent";
 
-import { type GrepMatch, GrepOutputMode, type GrepResult, grep } from "@cornfield/natives";
+import { type GrepMatch, GrepOutputMode, type GrepResult, grep, SearchEngine } from "@cornfield/natives";
 import type { Component } from "@cornfield/tui";
 import { Text } from "@cornfield/tui";
 import { prompt, untilAborted } from "@cornfield/utils";
@@ -44,6 +44,11 @@ const searchSchema = Type.Object({
 	i: Type.Optional(Type.Boolean({ description: "case-insensitive search", default: false })),
 	gitignore: Type.Optional(Type.Boolean({ description: "respect gitignore", default: true })),
 	skip: Type.Optional(Type.Number({ description: "matches to skip", default: 0 })),
+	engine: Type.Optional(
+		Type.Union([Type.Literal("rust"), Type.Literal("pcre2")], {
+			description: "regex engine: rust (default, linear-time) or pcre2 (supports lookaround/backreference)",
+		}),
+	),
 });
 
 export type SearchToolInput = Static<typeof searchSchema>;
@@ -77,6 +82,8 @@ export class SearchTool implements AgentTool<typeof searchSchema, SearchToolDeta
 	readonly description: string;
 	readonly parameters = searchSchema;
 	readonly strict = true;
+	readonly loadMode = "essential" as const;
+	readonly summary = "Searches file contents for regex matches.";
 
 	constructor(private readonly session: ToolSession) {
 		const displayMode = resolveFileDisplayMode(session);
@@ -93,7 +100,8 @@ export class SearchTool implements AgentTool<typeof searchSchema, SearchToolDeta
 		_onUpdate?: AgentToolUpdateCallback<SearchToolDetails>,
 		_toolContext?: AgentToolContext,
 	): Promise<AgentToolResult<SearchToolDetails>> {
-		const { pattern, path: searchDir, i, gitignore, skip } = params;
+		const { pattern, path: searchDir, i, gitignore, skip, engine } = params;
+		const engineMode = engine === "pcre2" ? SearchEngine.Pcre2 : SearchEngine.Rust;
 
 		return untilAborted(signal, async () => {
 			const normalizedPattern = pattern.trim();
@@ -180,6 +188,7 @@ export class SearchTool implements AgentTool<typeof searchSchema, SearchToolDeta
 								contextAfter: normalizedContextAfter,
 								maxColumns: DEFAULT_MAX_COLUMN,
 								mode: effectiveOutputMode,
+								engine: engineMode,
 							},
 							undefined,
 						);
@@ -212,6 +221,7 @@ export class SearchTool implements AgentTool<typeof searchSchema, SearchToolDeta
 							contextAfter: normalizedContextAfter,
 							maxColumns: DEFAULT_MAX_COLUMN,
 							mode: effectiveOutputMode,
+							engine: engineMode,
 						},
 						undefined,
 					);

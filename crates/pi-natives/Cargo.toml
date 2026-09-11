@@ -25,7 +25,10 @@ full = [
 	"dep:objc2",
 	"dep:block2",
 	"dep:windows-sys",
+	"grep-pcre2",
 ]
+grep-pcre2 = ["dep:grep-pcre2"]
+
 client = []
 [dependencies]
 mimalloc = "0.1"
@@ -42,6 +45,7 @@ clap = { version = "4", features = ["derive"] }
 os_pipe = "1"
 portable-pty = { version = "0.9", optional = true }
 grep-regex = "0.1"
+grep-pcre2 = { version = "0.1", optional = true }
 grep-searcher = "0.1"
 grep-matcher = "0.1"
 globset = "0.4"

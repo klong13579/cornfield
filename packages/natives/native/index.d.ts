@@ -646,6 +646,11 @@ export interface GrepOptions {
   maxColumns?: number
   /** Output mode (content, filesWithMatches, or count). */
   mode?: GrepOutputMode
+  /**
+   * Regex engine (default "rust"); use "pcre2" for lookaround/backreference
+   * support.
+   */
+  engine?: SearchEngine
   /** Abort signal for cancelling the operation. */
   signal?: unknown
   /** Timeout in milliseconds for the operation. */
@@ -1036,6 +1041,17 @@ export declare function sanitizeText(text: string): string
  */
 export declare function search(content: string | Uint8Array, options: SearchOptions): SearchResult
 
+/** Which regex engine to use for matching. */
+export declare enum SearchEngine {
+  /**
+   * Rust regex engine (default). Linear-time; no lookaround or
+   * backreferences.
+   */
+  Rust = 'rust',
+  /** PCRE2 engine. Supports lookaround and backreferences; explicit opt-in. */
+  Pcre2 = 'pcre2'
+}
+
 /** Options for searching file content. */
 export interface SearchOptions {
   /** Regex pattern to search for. */
@@ -1058,6 +1074,11 @@ export interface SearchOptions {
   maxColumns?: number
   /** Output mode (content or count). */
   mode?: GrepOutputMode
+  /**
+   * Regex engine (default "rust"); use "pcre2" for lookaround/backreference
+   * support.
+   */
+  engine?: SearchEngine
 }
 
 /** Result of searching content. */

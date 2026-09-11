@@ -71,7 +71,7 @@ Terminology follows `docs/natives/natives-architecture.md`:
 
 ### Search/collection semantics
 
-- Regex engine: `grep_regex::RegexMatcherBuilder` with `ignoreCase` and `multiline`.
+- Regex engine: `grep_regex::RegexMatcherBuilder` with `ignoreCase` and `multiline` by default, or `grep_pcre2::RegexMatcherBuilder` (with `caseless`/`multi_line`) when `engine: "pcre2"` is selected.
 - Context resolution:
   - `contextBefore/contextAfter` override legacy `context`.
   - Non-content modes do not collect context.
@@ -103,6 +103,15 @@ Terminology follows `docs/natives/natives-architecture.md`:
 - Invalid repetition-like braces are escaped (`{`/`}` -> `\{`/`\}`) when they cannot form `{N}`, `{N,}`, `{N,M}`.
 - This prevents common literal-template fragments (for example `${platform}`) from failing as malformed repetition.
 - Remaining invalid regex syntax still returns a regex error.
+
+### PCRE2 engine
+
+The regex engine is selected by the optional `engine` field (`"rust"` default, `"pcre2"` opt-in):
+
+- Rust engine (`grep_regex`): linear-time, no lookaround or backreferences. Behavior is unchanged when `engine` is omitted.
+- PCRE2 engine (`grep_pcre2`): supports lookaround and backreferences. The pattern is passed through without the Rust-engine brace/parenthesis sanitization, which would corrupt constructs like `(?<=...)`.
+
+When `"pcre2"` is selected on a build compiled without pcre2 support (the `client` feature omits `grep-pcre2`), matcher construction returns an explicit error rather than silently falling back to the Rust engine.
 
 ## 2) File discovery (`glob`) and fuzzy path search (`fuzzyFind`)
 
