@@ -13,8 +13,31 @@ Agent 与用户之间的一段有边界对话。以 JSONL 文件持久化，由 
 _Avoid_: Chat, thread, conversation
 
 ### Tool
-Agent 可调用的具名能力（读、写、bash、搜索、代码编辑等）。每个 Tool 有唯一名称、参数描述和 handler 实现。注册在 `createTools()` 中，可被 settings 按名启用/禁用。
+Agent 可调用的具名能力，具有稳定名称、输入契约和结果语义。Tool 是否已知、是否当前可调用、是否向模型直接展示，是彼此独立的状态。
 _Avoid_: Function, action, command
+
+### Tool Catalog
+Catalog 是静态 Tool 定义的唯一真源：每个条目同时包含规范名称、factory 与 Tool Metadata。现有 `BUILTIN_TOOLS` 和 `HIDDEN_TOOLS` 仅作为从 Catalog 派生的兼容导出，供现有调用方使用，不再与 Catalog 并列维护。
+_Avoid_: Tool registry, tool list
+
+### Enabled Tool Set
+当前 Session 经配置、环境和 Agent 边界允许调用的 Tool 集合。Enabled Tool 可以直接展示给模型，也可以通过发现协议间接呈现；具体调用仍须通过运行时权限审批。
+_Avoid_: Active tools, selected tools
+
+### Discoverable Tool Set
+当前 Session 已知、属于 Enabled Tool Set、但不直接向模型展示，通过 `xd://` 挂载按需呈现的 Tool 集合。`internal` Tool 不属于此集合。
+_Avoid_: Hidden tools, inactive tools
+
+### Load Mode
+Tool 的呈现与调用入口策略，由 Tool 自身声明：`essential` 表示始终以顶层 function tool 呈现，`discoverable` 表示在 `tools.xdev` 开启时挂载为 `xd://` 设备，`internal` 表示不可由配置、发现或显式 `toolNames` 选中，只能由拥有它的运行时注入（注入后模型可正常调用）。它不表达具体操作是否获准执行。
+_Avoid_: Permission, enabled state
+
+### xd:// 挂载
+将 `discoverable` Tool 从模型顶层 tools 数组卸载、改以内部 URL 设备呈现的机制：`read xd://` 列出设备，`read xd://<tool>` 取文档与参数 schema，`write xd://<tool>` 传 JSON 参数执行。由 `read`/`write` 承担 transport，二者因此永不挂载。
+
+### Tool Metadata
+Tool 的静态呈现元数据，由 Tool 自身按规范名声明：Load Mode，以及用于发现与目录展示的稳定能力摘要（`internal` Tool 摘要可为空）。摘要只说明 Tool 能解决什么问题，不复制完整 description，不包含参数、权限、启用条件或使用指导。集中 essential 名单只做兜底，防止 adapter 或 UI 重注册把核心 Tool 静默降级为 `discoverable`。Tool 的动态说明、参数、权限、启用条件和实现不属于 Tool Metadata。
+_Avoid_: Tool spec, Tool configuration
 
 ### Provider
 LLM 提供商（OpenAI、Anthropic、Codex、Google Gemini 等）。每个 provider 有自己的 API 格式和认证方式，由 pi-ai 封装为统一接口。

@@ -3,6 +3,7 @@
 > Current task state. The agent updates this file as work progresses; an empty TODO is a valid state.
 
 ## 待办
+- [ ] Tool 呈现协议迁移：采用上游 xd:// 设备挂载 → topics/tool-presentation-xdev.md
 - [ ] [P1] 最终验证
 - [ ] [P1] B层验证2
 - [ ] g-brain 实体建模

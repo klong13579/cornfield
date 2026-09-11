@@ -142,6 +142,7 @@
 |---|---|---|
 |adr/0001-gateway-bridge-process-model.md|Gateway bridge 进程模型|决策（已采纳）|
 |adr/0002-unified-protocol-layer.md|统一协议层|决策（已采纳）|
+|adr/0003-tool-presentation-xdev.md|采用上游 xd:// 作为 Tool 呈现协议|决策（已采纳）|
 
 ## 根级
 
