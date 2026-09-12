@@ -431,6 +431,12 @@ function resolveAutoresearchRelativePath(
 	workDir: string,
 	rawPath: string,
 ): { ok: false; reason: string } | { ok: true; relativePath: string } {
+	// Deliberate fail-closed. Scope validation cannot evaluate an internal URL against the
+	// research scope, so every internal URL is refused here. That includes `xd://` device
+	// execution (`write xd://<name>`): running a device is an arbitrary tool call, and the
+	// scoped-editing guard has no way to judge whether it stays inside scope. Refusing is
+	// the intended trade-off (see ADR-0003 impact assessment §2④); allowing it would let
+	// scope constraints be bypassed through a device.
 	if (looksLikeInternalUrl(rawPath)) {
 		return {
 			ok: false,

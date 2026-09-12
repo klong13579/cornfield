@@ -104,6 +104,8 @@ tail -20 ~/.cornfield/gateway-data/logs/service.log | grep -E "BOOT|service star
 
 Skipping step 1+2 makes "live test" silently exercise the **old** binary, masking source-level changes. Quick check: `file ~/.local/bin/cornfield` (should be `Mach-O 64-bit executable arm64`) and `ls -la ~/.local/bin/cornfield packages/coding-agent/dist/cornfield` (mtimes should match within the same minute after a build).
 
+**Native addon (`packages/natives/native/*.node`)** is a gitignored build artifact, so it does **not** travel with a merge or a pull. After merging or pulling anything that touches `crates/pi-natives` (or its `Cargo.toml` / `Cargo.lock`), run `bun run build:native` **in that checkout** before running tests or the CLI. The failure mode is not a build error — it is a runtime error: code that references a newer native export dereferences `undefined` on a stale addon (measured: `SearchEngine` missing from an addon built before PCRE2 landed made every `search` call throw). The build reuses an isolated `target/napi-build/<triple>-<variant>` directory and regenerates `index.js` / `index.d.ts`; if those tracked generated files diff afterwards, the committed copies were stale.
+
 ## Architecture & Data Flow
 
 ### Boot sequence (coding-agent)
