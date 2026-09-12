@@ -18,6 +18,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { validateToolArguments } from "@cornfield/ai";
 import { Settings } from "@cornfield/coding-agent/config/settings";
 import { XdevProtocolHandler } from "@cornfield/coding-agent/internal-urls/xd-protocol";
 import { buildSystemPrompt } from "@cornfield/coding-agent/system-prompt";
@@ -235,13 +236,50 @@ const mcpSession: ToolSession = {
 	xdevDevices: postSplit.devices,
 };
 const mcpWrite = new WriteTool(mcpSession);
-const mcpExec = await mcpWrite.execute("mcp-exec", {
-	path: "xd://mcp__github_create_issue",
-	content: JSON.stringify({ query: "hello" }),
-});
+// The model path is validateToolArguments (AJV over tool.parameters) BEFORE
+// execute — not execute alone. A gate that calls execute directly skips the
+// layer that rejected `content: {}` in the wild, keeping a broken schema green.
+// Mirrors packages/agent/src/agent-loop.ts (validateToolArguments → execute).
+const execDevice = async (content: unknown) => {
+	const toolCall = {
+		type: "toolCall" as const,
+		id: "mcp-exec",
+		name: "write",
+		arguments: { path: "xd://mcp__github_create_issue", content },
+	};
+	const validated = validateToolArguments(mcpWrite, toolCall);
+	return mcpWrite.execute("mcp-exec", validated as never);
+};
+
+const objExec = await execDevice({ query: "hello" });
 check(
-	"write xd://<mcp tool> executes the device",
-	(mcpExec.content[0] as { text?: string }).text === "executed mcp__github_create_issue (hello)",
+	"write xd://<mcp tool> with OBJECT content validates and executes the device",
+	(objExec.content[0] as { text?: string }).text === "executed mcp__github_create_issue (hello)",
+);
+
+const strExec = await execDevice(JSON.stringify({ query: "hello" }));
+check(
+	"write xd://<mcp tool> with STRING content still validates and executes",
+	(strExec.content[0] as { text?: string }).text === "executed mcp__github_create_issue (hello)",
+);
+
+let fileWriteRejected = "";
+try {
+	const fileToolCall = {
+		type: "toolCall" as const,
+		id: "file-exec",
+		name: "write",
+		arguments: { path: "out.txt", content: { query: "hello" } },
+	};
+	const fileValidated = validateToolArguments(mcpWrite, fileToolCall);
+	await mcpWrite.execute("file-exec", fileValidated as never);
+} catch (error) {
+	fileWriteRejected = error instanceof Error ? error.message : String(error);
+}
+check(
+	"object content for a plain file write is rejected with a clear error",
+	fileWriteRejected.includes("must be a string for non-device writes"),
+	`rejected: ${fileWriteRejected || "none"}`,
 );
 
 const manyDevices = new Map<string, Tool>();
