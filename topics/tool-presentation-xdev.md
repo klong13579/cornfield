@@ -8,10 +8,10 @@ doneWhen: |-
   - 挂载开关关闭时，顶层工具暴露与改造前一致
   - internal 工具不可由用户配置、设置或发现结果启用（运行时注入通道除外，见 ADR-0003）
   - 两条系统提示路径都包含设备说明，SYSTEM.md 覆盖场景下不消失
-lastActivity: 2026-09-12 18:32
+lastActivity: 2026-09-12 19:21
 sessionRefs:
   - ~/.cornfield/agent/sessions (tool1)
-nextAction: 已完成并合入 main（当前 main = e7779db8c6）。远端 origin/main 未 push（领先 40 提交）。回退锚点：`git reset --hard pre-tool-xdev-batch`。
+nextAction: 已全部合入 main（`2aa75cc3c7`）并完成清理。剩余待用户表态：是否 push 远端（领先 origin 50+ 提交）、是否清理非本批的 4 棵工作树（agent-client-m1 / coord-* / squad-20260909-coord-p0-integ）。
 artifacts:
   - docs/adr/0003-tool-presentation-xdev.md
   - CONTEXT.md（Tool Catalog / Enabled Tool Set / Discoverable Tool Set / Load Mode / xd:// 挂载 / Tool Metadata）
@@ -313,6 +313,17 @@ openQuestions:
   **J2 回答了我要求的关键前提**：`validateToolArguments`（`packages/ai/src/utils/validation.ts:864` → `compileSchema(tool.parameters):867`）用**原始 TypeBox schema + AJV** ⇒ 联合不被 strict/CCA 归一化削掉，修改确实生效；`prepareSchemaForCCA`（仅 provider 广告层）会把联合塌缩成 string（lossy，字符串形态仍可用）；**代价：OpenAI strict 因对象变体不可表示而对 `write` 退化为非 strict**（J2 主动报出，用户已接受）。
   **门禁升级（本次最有价值）**：Case 6 从直调 `WriteTool.execute` 改为经 `validateToolArguments → execute`（镜像 `agent-loop.ts`），并断言对象/字符串/文件写对象三条路径；注释里写明了「旧门禁之所以绿着而坏着，是因为它绕过了拒掉 `content: {}` 的那一层」。
   **端到端复验（用户要求，重建二进制 + 原子安装 + 全新 herdr 会话 `w95:p3`）**：① 对象形态执行设备 `xd://list_models` → **成功**，返回 362 个模型的真实列表；② 文件写入传对象 → **明确报错** `write content must be a string for non-device writes: object content is only valid with an xd:// path`（非静默 stringify）。新会话自行总结出修复后的契约。
+
+- 2026-09-12 19:21 — 【用户指令「合并到 main 然后执行清理（含测试会话）」—— 已完成】
+  ① 合并：`feat/xdev7-evaljs`（仅移植方案文档，实现按用户决定「先不做」已合入记录）以 `--no-ff` 合入 ⇒ main = `2aa75cc3c7`；`check:tools` 2193 文件通过。至此**本批 11 个分支全部在 main 里**（逐一 `merge-base --is-ancestor` 核过）。
+  ② 测试会话：关掉专为测试开的两个 tab（`w95:t2` tool-test、`w95:t3` write-fix-test），自己的会话 `w95:t1` 保留。
+  ③ worker 节点：关 wA3/wA4/wA5/wA6 四个。
+  ④ 工作树：删本批 6 棵（feat-xdev4-j1/j2、feat-xdev5-k1/k2、squad-20260912-tool-xdev-w4-integ/w5-integ）—— **先关 agent 再删，6 棵全部干净删除、无一需要 `rm -rf` 兜底**，验证了 skill 那条「先关 agent 再删 worktree」的硬化规则有效。
+  ⑤ 分支：删 11/11（均已并入 main）。
+  ⑥ 归档：w4/w5 任务包移入 `~/.cornfield/squads/archive/`（连同早前的 4 个，本批共 6 个已归档）。
+  ⑦ 工作区名已还原（w95 = `cornfield`）。
+  ⑧ 磁盘：**51Gi 可用**（清理释放约 8G）。
+  ＊未触碰（非本批）：`feat-agent-client-m1`、`feat-coord-backend-p0`、`feat-coord-frontend-p0`、`squad-20260909-coord-p0-integ` 四棵工作树。
 
 ## 批注
 
