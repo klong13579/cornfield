@@ -8,6 +8,12 @@ import type { ToolLoadMode } from "@cornfield/agent";
  * is listed here, otherwise "discoverable". Keeping this list centralized in one
  * place prevents adapter/UI re-registration from silently downgrading a core
  * tool to "discoverable".
+ *
+ * `web_search` is listed here even though `WebSearchTool` already declares
+ * `loadMode: "essential"`. The declaration alone loses to adapter/UI
+ * re-registration that drops the field (upstream #5764), leaving a harness-
+ * coupled tool to be mounted as a device the model can no longer call by name
+ * (#5973). Name-listing it keeps the fallback authoritative.
  */
 export const ESSENTIAL_BUILTIN_TOOL_NAMES: readonly string[] = [
 	"read",
@@ -23,6 +29,7 @@ export const ESSENTIAL_BUILTIN_TOOL_NAMES: readonly string[] = [
 	"todo",
 	"exit_plan_mode",
 	"identity",
+	"web_search",
 ];
 
 /**
