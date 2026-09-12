@@ -26,11 +26,15 @@ type Tool = AgentTool<any, any, any>;
 /**
  * Discoverable tools that stay top-level even under mounting.
  *
- * First-version keep list per ADR-0003: tools that the model must be able to
- * call by name because prompts or harness flows reference them directly and the
- * model cannot be assumed to know the xd protocol (upstream incident #5973).
+ * Re-reviewed ADR-0003 (2026-09-12): only genuinely `discoverable` tools that
+ * prompts or harness flows call by name stay here. `irc` and `hub` are the
+ * multi-agent coordination surface (subagent prompt calls `irc` by name; `hub`
+ * is its read-only roster companion). `web_search` moved to the essential name
+ * list — it declares `loadMode: "essential"`, so this keep-list entry would be
+ * dead weight here (its top-level-ness comes from the essential declaration,
+ * not this list).
  */
-export const XDEV_KEEP_TOP_LEVEL: readonly string[] = ["web_search", "irc", "hub"];
+export const XDEV_KEEP_TOP_LEVEL: readonly string[] = ["irc", "hub"];
 
 /** How many characters of device catalog may be injected into the system prompt. */
 export const XDEV_PROMPT_BUDGET_CHARS = 2000;
