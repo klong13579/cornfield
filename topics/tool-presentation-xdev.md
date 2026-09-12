@@ -8,10 +8,10 @@ doneWhen: |-
   - 挂载开关关闭时，顶层工具暴露与改造前一致
   - internal 工具不可由用户配置、设置或发现结果启用（运行时注入通道除外，见 ADR-0003）
   - 两条系统提示路径都包含设备说明，SYSTEM.md 覆盖场景下不消失
-lastActivity: 2026-09-12 19:21
+lastActivity: 2026-09-13 04:24
 sessionRefs:
   - ~/.cornfield/agent/sessions (tool1)
-nextAction: 已全部合入 main 并 push 到 origin（main = 0263605546）。剩余待用户表态：是否清理非本批的 4 棵工作树（feat-agent-client-m1 / feat-coord-backend-p0 / feat-coord-frontend-p0 / squad-20260909-coord-p0-integ）。
+nextAction: 已发布 v1.1.4（tag + GitHub Release + 全部产物）。剩余可选项：三个 pre-* tag 已在远端；非本批 4 棵工作树未清（等用户确认）。
 artifacts:
   - docs/adr/0003-tool-presentation-xdev.md
   - CONTEXT.md（Tool Catalog / Enabled Tool Set / Discoverable Tool Set / Load Mode / xd:// 挂载 / Tool Metadata）
@@ -324,6 +324,15 @@ openQuestions:
   ⑦ 工作区名已还原（w95 = `cornfield`）。
   ⑧ 磁盘：**51Gi 可用**（清理释放约 8G）。
   ＊未触碰（非本批）：`feat-agent-client-m1`、`feat-coord-backend-p0`、`feat-coord-frontend-p0`、`squad-20260909-coord-p0-integ` 四棵工作树。
+
+- 2026-09-13 04:24 — 【v1.1.4 已发布】三个 pre-* tag 推送后，用户要求「发布一个新版本 1.1.4」，走仓库自己的 `bun scripts/release.ts 1.1.4`。
+  **第一次尝试：preflight 失败（而且这正是它该有的行为）**。`release` job 死在我这批次新增的那道检查上：验 darwin 产物的 job 跑在 ubuntu 上，而 `ci-release-verify-natives.ts` 的「addon 不得动态链接非系统库」检查写死了 `otool` → `Bun.which("otool")` 为空即抛错。**结果：没打 tag、没发布**（失败通知已发）。
+  **修法（不跳过检查）**：改为进程内解析 Mach-O 加载命令（`LC_LOAD_DYLIB`/`LC_LOAD_WEAK_DYLIB`/`LC_REEXPORT_DYLIB`，支持 fat 多架构切片），出货门禁在任何宿主上都会真执行。验证：单测 15/15；与真实 addon 的 `otool -L` 逐条比对 8==8 一致（otool 首行是 dylib 自身 install_name/LC_ID_DYLIB，非依赖——旧实现要靠正则滤掉，读加载命令天然不含，且能抓出真正外链的同名库）。**过程中我自己引入一个 fat 头端序 bug**：把 `DataView.getUint32` 的 `littleEndian` 参数命名成 `bigEndian` 直接传入，语义反了 —— **是单元测试当场抓出来的**，已修并改对命名。
+  **第二次尝试：preflight success → tag v1.1.4（2afa46fd86）→ 推送**。
+  **tag 触发的 run 被 GitHub 卡在 queued 近一小时**（同仓库 dispatch run 秒起，说明是 tag-ref 那条队列）；GitHub 状态页显示 All Systems Operational、仓库是 public（无额度限制）→ 排除故障与计费原因。按 workflow 自己的设计（`trigger_release` 输入说明原文：push triggers are disabled on this repo），**Cancel 卡死的 tag run + `gh workflow run ci.yml -f trigger_release=true -f dry_run=false -f skip_npm=true -f release_tag=v1.1.4`** → run 34715705892 **15/15 job 全绿**（含上次失败的 `release` job ✓ 修复在真实发布路径上再次验证）。
+  **产物**（10 个，均已上线）：`cornfield-darwin-arm64`(124.3MB)、`cornfield-gateway-darwin-arm64`(110.7MB)、`cornfield_natives.darwin-arm64.node`(33.0MB)、`cornfield-darwin-arm64.tar.gz`(85.2MB)、`CornField-1.1.4-arm64.dmg`/`.zip`(各 162.4MB)+blockmap、`latest-mac.yml`、`builder-debug.yml`。URL: https://github.com/klong13579/cornfield/releases/tag/v1.1.4
+  **发布前补账**：`[Unreleased]` 缺 D1 名称规范化、M1（MCP→`xd://`）、K1 弃用提示、`write` 契约修复、M1 残留移除、self-evolution/ai/gateway 的对应条目 —— 上版这些是**漏报**，已补齐并随 1.1.4 定稿。
+  **顺手修了 release.ts 一处真 bug**：版本门禁用 bare `git describe --tags` 当「上一版」，任何非版本 tag（如本批的 `pre-*` 回退锚点）都会让它读到 `pre-write-fix` 并抛 `Invalid version`；改用仓库里 `auto-release.ts` 已有的 `--match "v[0-9]*"` 写法。
 
 ## 批注
 
