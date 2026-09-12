@@ -141,11 +141,19 @@ Extension products:
 
 1. **User input** → `modes/interactive-mode.ts` (TUI) or `modes/print-mode.ts` (non-interactive `-p`).
 2. **Agent loop** (`pi-agent-core`): user message → LLM provider (`pi-ai`) → tool calls → tool execution (`coding-agent/src/tools/`) → results back to LLM → repeat until done.
-3. **Tools** are built via `createTools()` (`packages/coding-agent/src/tools/index.ts`) which assembles `BUILTIN_TOOLS` + `HIDDEN_TOOLS` registries, gated by `Settings.isToolAllowed`.
+3. **Tools** are built via `createTools()` (`packages/coding-agent/src/tools/index.ts`) which assembles `BUILTIN_TOOLS` + `HIDDEN_TOOLS` registries, gated by `Settings.isToolAllowed`, and then splits the result into the Enabled Set — see **Tool presentation (xd:// devices)** below.
 4. **Sessions** persist as JSONL under `~/.cornfield/agent/sessions/<cwd-encoded>/by-date/<YYYY-MM-DD>/<HHMMSS>[-<slug>]__<8hex>.jsonl`. This is the CLI agent's session log location.
    - **Gateway agent sessions live elsewhere**: each gateway agent runs with its own `agentDir` (default `~/.cornfield/agents/<accountId>/`), and its session files are written under `<agentDir>/sessions/` — IM conversations as `<convId>.jsonl`, cron tasks as `cron_<timestamp>.jsonl` (`Date.now()` in ms). Do not look for gateway agent session logs under `~/.cornfield/agent/sessions/`.
    - **Cron execution logs** (separate from agent sessions) are under `~/.cornfield/gateway-data/scheduler/logs/by-task/<slug>/<YYYY-MM-DD>.jsonl`.
 5. **Self-evolution** hooks into the agent lifecycle via an extension (`sdk.ts` registers it): extracts learnings from session traces, mines skills/conventions, stores in `~/.cornfield/self-evolution/evolution.db` (SQLite), injects context into future sessions.
+
+### Tool presentation (xd:// devices)
+
+Tool presentation is a layer on top of the registries: every built-in tool declares a **Load Mode** (`essential` / `discoverable` / `internal`) plus a one-line `summary`, and `createTools()` partitions the constructed set into a top-level set and an **`xd://` device set**. The model reaches devices through `read xd://` (list) and `write xd://<name>` (execute) — those two transport tools are therefore never mounted. MCP tools are added to the device set *after* `createTools()` returns (`sdk.ts`), which is why a `loadMode` declaration alone does not move them.
+
+- **Contract**: `docs/adr/0003-tool-presentation-xdev.md`. Vocabulary: `CONTEXT.md` (Tool Catalog / Enabled Tool Set / Discoverable Tool Set / Load Mode / `xd://` 挂载 / Tool Metadata).
+- **Canonical names** live in `src/tools/builtin-names.ts`; legacy names (`find` → `glob`, `search` → `grep`, `todo_write` → `todo`) resolve through its alias map. Config keys follow the same rule: `find.*` / `search.*` are migrated on read only and are never rewritten on disk. **Any judgement made outside that normalization boundary — a literal `name === "find"` in another package, a hardcoded name set — silently loses the alias.** Grep for the canonical name when in doubt.
+- **Gate**: `bun run --cwd=packages/coding-agent verify:xdev`. It **MUST** run outside `bun test`: `xdevMountingActive()` is off under that runtime, so the unit suite never exercises the mounted path (a defect there ships green — that is how `lsp` shipped with no summary).
 
 ### Native bindings
 
@@ -162,8 +170,12 @@ packages/
     commands/                 # subcommand implementations (commit, config, grep, ...)
     cli/                      # CLI helpers (arg parsing, session picker, file processor)
     tools/                    # 25+ tool implementations + createTools() registry
-      index.ts                # BUILTIN_TOOLS / HIDDEN_TOOLS registries
+      index.ts                # BUILTIN_TOOLS / HIDDEN_TOOLS registries; createTools() also computes the Enabled Set (see Tool presentation)
+      builtin-names.ts        # canonical tool names + legacy alias map (find→glob, search→grep, todo_write→todo)
       bash.ts, read.ts, write.ts, edit.ts, find.ts, search.ts
+        # NOTE: file name != tool name. find.ts hosts the `glob` tool, search.ts hosts
+        # `grep`, todo-write.ts hosts `todo`. Old names survive only as aliases in
+        # builtin-names.ts, so there is no glob.ts/grep.ts to find — search by tool name.
       ast-grep.ts, ast-edit.ts, lsp/, debug.ts, python.ts, task.ts, ...
       render-utils.ts         # TUI sanitization helpers (replaceTabs, truncateToWidth)
     modes/                    # interactive, print, rpc, acp
