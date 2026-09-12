@@ -8,7 +8,7 @@ doneWhen: |-
   - 挂载开关关闭时，顶层工具暴露与改造前一致
   - internal 工具不可由用户配置、设置或发现结果启用（运行时注入通道除外，见 ADR-0003）
   - 两条系统提示路径都包含设备说明，SYSTEM.md 覆盖场景下不消失
-lastActivity: 2026-09-12 14:22
+lastActivity: 2026-09-12 14:23
 sessionRefs:
   - ~/.cornfield/agent/sessions (tool1)
 nextAction: 已完成并合入 main（当前 main = e7779db8c6）。远端 origin/main 未 push（领先 40 提交）。回退锚点：`git reset --hard pre-tool-xdev-batch`。
@@ -29,7 +29,7 @@ decisions:
   - 2026-09-11 接管 tool2 的 4 项工作，单人执行
   - 2026-09-11 【约束】所有修改必须合入 worktree 的验证分支；合入 main 必须用户明确同意
 openQuestions:
-  - 旧名移除（别名表 find→glob / search→grep / todo_write→todo + 配置 key 只读兼容层）未排期 —— ADR 明确「另开一票」
+  - 旧名移除（别名表 find→glob / search→grep / todo_write→todo + 配置 key 只读兼容层）未排期 —— ADR 明确「另开一票」。**K1 已交出改动面地图（开出该票时直接用）**：硬编码旧名集中在 2 个源文件（`builtin-names.ts` 别名表、`settings.ts` 的 RENAMED_SETTING_GROUPS+迁移循环）+ 7 处 prompt（`agents/{explore,librarian,plan,reviewer,test}.md` 的 tools: frontmatter、`agents/task.md` 与 `live/consult-instructions.md` 散文，均已在 K1 改为 canonical）+ 2 处测试；**纯调用方无需改**（只走 normalizeToolName）：`cli/args.ts`、`tools/index.ts`、`tools/write.ts`、`internal-urls/xd-protocol.ts`；**不出手**：`packages/ai` 的 todo_write（schema 示例）与 moa-extension prompts（示例工具名）
   - MCP 会话侧残留：`agent-session.ts` 仍留有整套 discovery 子系统（#mcpDiscoveryEnabled / #discoverableMCPTools / #discoverableMCPSearchIndex / #selectedMCPToolNames / refreshMCPTools / #persistSelectedMCPToolNamesIfChanged），而设置入口已退场 ⇒ 无法再被配置开启的旧设计残留
   - `read`/`write` 的影响面单独评估（ADR 后果段要求：gateway / 子 Agent / RPC host tool / 自演化路径共用）—— 未见任何评估记录
   - 两份「首版」名单（essential 名单、XDEV_KEEP_TOP_LEVEL）的复评未排期
@@ -279,6 +279,8 @@ openQuestions:
 - 2026-09-12 14:22 — 【skill 修复：`integrate.ts --force` 删不掉旧集成区】实测 `Directory not empty`（exit 255，rust-analyzer/cargo 占着旧区 target/）—— 与 skill 已记的「herdr workspace close 不回收子孙进程」同根，但 `integrate.ts` 自己不先清进程。已新增 `removeWorktree()`：先按路径回收构建类子进程 → 再 `git worktree remove --force` → 仍失败则 `rm -rf` + `prune`。**真实重建验证**：同一条命令由失败转 exit 0。skill 0.6.4。
 
 - 2026-09-12 14:22 — 【我的流程失误（第三次同类）】验完 K1 却忘了先回写状态就调集成 ⇒ 首次只合了 K2，必须 `--force` 重建。加上「给 K1/K2 的 base 值是旧值」与「边界通告发出时机」，**本批我给执行方的前提已错三次，三次都是执行方核出来的**。
+
+- 2026-09-12 14:23 — 【K1 清点地图已归档（供下一个「旧名移除」票直接用）】见 openQuestions 那行。其判别方法值得复用：**区分「硬编码旧名」与「只是走 normalizeToolName 的纯调用方」** —— 后者不需改，无脑替换会 churn 四个文件并让真实影响面被噪音淹没。
 
 ## 批注
 
