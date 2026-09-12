@@ -334,6 +334,8 @@ openQuestions:
   **发布前补账**：`[Unreleased]` 缺 D1 名称规范化、M1（MCP→`xd://`）、K1 弃用提示、`write` 契约修复、M1 残留移除、self-evolution/ai/gateway 的对应条目 —— 上版这些是**漏报**，已补齐并随 1.1.4 定稿。
   **顺手修了 release.ts 一处真 bug**：版本门禁用 bare `git describe --tags` 当「上一版」，任何非版本 tag（如本批的 `pre-*` 回退锚点）都会让它读到 `pre-write-fix` 并抛 `Invalid version`；改用仓库里 `auto-release.ts` 已有的 `--match "v[0-9]*"` 写法。
 
+- 2026-09-13 04:28 — 【发布产物已独立验证】不只看 CI 结论，我把发布的产物拉下来自己跑了一遍：`cornfield-darwin-arm64.tar.gz` 与 `cornfield_natives.darwin-arm64.node` 字节数与 GitHub API 报告完全一致（85,215,782 / 32,996,464，SHA256 已记录），gzip 完整性 OK；解包后 `./cornfield --version` → `cornfield/1.1.4`、`./cornfield-gateway --version` → `cornfield-gateway/1.1.4`、`file` → Mach-O arm64。并用这次修复的那道检查验了**已发布的** addon（`PI_NATIVE_VERIFY_DIR=/tmp/cf-rel`）rc 0、`links only system libraries` —— 闭环。※ 顺带一条环境事实：`gh release download` 拉大产物在本机只有约 3.5 KB/s，直连 `curl` 同 URL 有 1.69 MB/s（差 500 倍）—— 以后再拉发布产物用 curl。
+
 ## 批注
 
 Phase 3 起需现场查代码补每票的 scope.files：squad 硬规则要求各票文件范围互不相交，read/write/find/search/edit 的呈现标注已并入对应能力票以避免同文件被两票修改。原生 PCRE2 票的验证链与其余票不同（cargo 与原生构建），转译时不要套用默认推导。
