@@ -8,7 +8,7 @@ doneWhen: |-
   - 挂载开关关闭时，顶层工具暴露与改造前一致
   - internal 工具不可由用户配置、设置或发现结果启用（运行时注入通道除外，见 ADR-0003）
   - 两条系统提示路径都包含设备说明，SYSTEM.md 覆盖场景下不消失
-lastActivity: 2026-09-12 15:11
+lastActivity: 2026-09-12 16:01
 sessionRefs:
   - ~/.cornfield/agent/sessions (tool1)
 nextAction: 已完成并合入 main（当前 main = e7779db8c6）。远端 origin/main 未 push（领先 40 提交）。回退锚点：`git reset --hard pre-tool-xdev-batch`。
@@ -300,6 +300,13 @@ openQuestions:
   建议：四个「取决于」都先不做，等出现明确需求（模型自管记忆 / 内置安全扫描 / 进程内求值 JS）再立项。
 
 - 2026-09-12 15:11 — 【待合并分支清单（均基于 main / main 未动，互不相交或已包含关系）】等用户一句“合”：① `squad-20260912-tool-xdev-w5-integ`（w4+w5 四票，含 J1 清死代码 1296 行、J2 影响面评估、K1 弃用告警、K2 名单收敛）；② `feat/xdev6-followups`（AGENTS.md addon 重建要求 + autoresearch fail-closed 注释）；③ `feat/xdev6-selfevo`（自演化不再把 xd:// 当文件修改）；④ `feat/xdev6-tooleval`（移植评估报告，纯文档）。
+
+- 2026-09-12 16:01 — 【合并 + build + herdr 真会话测试（用户指令）】四份分支合入 main（`4c0228d805`，四笔 --no-ff，零冲突），打 tag `pre-tool-xdev-w4w5`（=`af74c3eff4`）；build 出新二进制并**原子替换**（`cp` 到 /tmp 再 `mv`，- 124,459,600 字节，`--version` cornfield/1.1.1 可跑）；herdr 新开 tab（pane `w95:p2`，工作区名已还原为 cornfield）起真实会话（模型 `narwal-plan/minimax-m3`，cwd = 本仓，分支 main）。
+- 2026-09-12 16:01 — 【测试矩阵结果】✅ 通过：① 工具目录 + 挂载设备（直接工具 18 个含 `glob`/`grep`/`todo`；设备含 14 个 + **11 个 MCP 工具**；它自己总结出「read/write 是 transport、从不挂载」）；② `read xd://` / `read xd://<name>` 列出与 wire schema 均通；③④ `glob`/`grep` 真实检索命中；⑦⑧ `todo` 规范名可用 + **旧名 `find`/`search`/`todo_write` 均解析到 canonical 且每进程仅 warn 一次**（新会话还主动声明「只验了 alias 函数层、调用点层未验」，纪律好）；⑨⑩ `tools.xdev=false` 与旧配置 key 告警已由门禁脚本/K1 测试覆盖。
+- 2026-09-12 16:01 — ✗ **真缺陷（P0，已合入 main）：`write xd://<name>` 设备执行实际不可用**。现象：`Validation failed for tool "write": content: must be string`（两个不同模型各踩一次：minimax-m3 与父本人）。根因：`write.ts:51` `content: Type.String()` 只收字符串，而 `#writeXdDevice`（`:514`）先把它 `JSON.parse` 成对象（`:540`/`:545`）；设备手册措辞是「content = 下方 JSON 参数」⇒ **读着像对象** → 模型按对象传 → **在路由到设备之前就被 schema 拒掉**。
+- 2026-09-12 16:01 — ✗ **门禁盲区（同一教训第五种形态）**：`verify-xdev-mounting.ts` 的 Case 6 **直接调 `WriteTool.execute` 并传字符串化 JSON**，绕过了「模型 → schema 校验」这一层 ⇒ **门禁绿着而功能不可用**。⇒ 修法要求（已派 J2）：schema 接受 `string | object`、设备分支两种都吃、文件写入仍要求 string，且门禁改为**经真实校验函数**后再执行。
+- 2026-09-12 16:01 — 【测试 ⑤ 的结论：pcre2 是好的，是模型没传参】新会话声称传了 `engine: "pcre2"` 但两条错误逐字相同 ⇒ 未生效。父独立定位：**工具层探针直调 `grep` 工具，`engine: "pcre2"` 的 lookahead 匹配成功、默认仍走 rust 且报 look-around 不支持** ⇒ 接线与 natives 均正常。另排除了「二进制内嵌的旧 addon」：若 `SearchEngine` 为 undefined，`search.ts` 无条件解引用会抛 TypeError，而该会话 `grep` 正常返回结果 ⇒ addon 正常。⇒ 结论是模型自报不准（它自己标了 `[inference]` 并问要不要报工具偏差）。
+- 2026-09-12 16:01 — 【整包 24 fail 的 A/B 判定：非回归】合并后整包 3640 pass / 411 skip / 24 fail / 2 errors（4075 用例）；基线为 22 fail。对其中两条不认识的失败（`serve 多 Agent`、`ModelRegistry refresh`）做 A/B：**合并前 tag 与合并后 main 各跑同一组，结果逐项相同（19 pass / 2 fail / 1 error）** ⇒ 既有问题。剩余计数差异落在 compaction 超时、serve 未就绪等随负载波动的家族（同机同时跑 cargo 构建/多会话）。
 
 ## 批注
 
