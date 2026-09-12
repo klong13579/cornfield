@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.1.4] - 2026-09-12
+
 ### Fixed
 
 - Tool-not-found errors in `executeToolCalls` now list the agent's available tools (e.g. `Tool bash not found. Available tools: read, search, ...`), so models calling tools outside their restricted toolset (e.g. read-only `explore` subagents) can self-correct on the first failure instead of retrying blindly.

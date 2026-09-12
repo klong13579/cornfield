@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.1.4] - 2026-09-12
+
 ### Added
 
 - **PCRE2 正则引擎（可选）**（`crates/pi-natives/src/grep.rs`, `Cargo.toml`, `.cargo/config.toml`）：`grep`/`search` 新增可选 `engine` 字段（`"rust"` 默认 / `"pcre2"` 显式选用），`SearchEngine` 以 string_enum 导出。PCRE2 支持 Rust 引擎拒绝的 lookaround 与反向引用，且**不**做 Rust 路径的 brace/paren 清洗（否则写坏 `(?<=...)`）；未编译 PCRE2 的构建（`client` feature）下显式报错而非静默回落。`.cargo/config.toml` 以 `PCRE2_SYS_STATIC = { value = "1", force = true }` 强制静态链入 bundled 源码，使 addon 不带非系统动态依赖（否则会用构建机上的 libpcre2，装机机无此库即加载失败）。

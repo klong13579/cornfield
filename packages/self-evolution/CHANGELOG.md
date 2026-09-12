@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.1.4] - 2026-09-12
+
 ### Fixed
 
 - **自演化把 `xd://` 等内部 URL 误判为文件修改**（`src/internal-url-path.ts`、`src/trace-analyzer.ts`、`src/feedback-tracker.ts`、`src/memory/index.ts`、`src/trace.ts`、`test/xd-url-file-classification.test.ts`；+151/−12）：轨迹分析按「路径是否像文件」给改动分类，`xd://list_models` 这类设备调用被当成文件写入计入学习信号，污染挖掘出的模式。新增统一判定（`^[a-z][a-z0-9+.-]*://` 视为内部 URL 并排除），补 119 行分类回归测试。

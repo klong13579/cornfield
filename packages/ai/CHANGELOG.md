@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.1.4] - 2026-09-12
+
 ### Changed
 
 - **工具名归一化跟随：`find` → `glob`、`todo_write` → `todo`**（`src/providers/anthropic.ts`、`src/providers/cursor.ts`、`src/utils/validation.ts`）：Anthropic strict 工具允许列表、Cursor 原生工具名集合、`todo_write` 参数特判三处按新规范名更新——它们都按字面量比对工具名，落在别名机制之外，改名必须逐处跟进。

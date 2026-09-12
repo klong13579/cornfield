@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.1.4] - 2026-09-12
+
 ### Added
 
 - **Tool 呈现协议：`xd://` 设备挂载**（`src/tools/xdev.ts`、`src/tools/essential-tools.ts`、`src/internal-urls/xd-protocol.ts`、`src/config/settings-schema.ts`、`src/system-prompt.ts`、`src/prompts/system/*`，ADR-0003）：Tool 分 Catalog / Enabled Set / Discoverable Set 三层，每个 Tool 声明 `loadMode`（`essential`/`discoverable`/`internal`）与单行 `summary`；`discoverable` 在 `tools.xdev`（默认开启）下卸载为 `xd://` 设备，由 `read`/`write` 承担 transport（二者因此永不挂载），模型经系统提示的设备目录发现并按需取用。`internal` 为本仓扩展，约束**注入权**而非调度权。规范名与 legacy 别名分两层。

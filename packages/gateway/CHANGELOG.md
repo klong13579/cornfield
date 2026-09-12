@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.1.4] - 2026-09-12
+
 ### Added
 
 - **Gateway 子进程注入 `PI_SESSION_NAME`** (`src/gateway.ts`, `src/agent-bridge.ts`, `src/agent-transport-wire.ts`, `test/agent-transport-intercom-child.test.ts`): `createAccountBridgeOptions` 把 accountId 作为 `sessionName` 传入 bridge → WireTransport 注入 `PI_SESSION_NAME` 环境变量，gateway agent 的会话在 intercom 名册/serve 注册表里以账号名（如 `hr`）呈现，不再显示匿名 `subagent-chat-…` fallback alias；单账号默认 bridge 不注入（保持原行为）。
