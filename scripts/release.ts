@@ -261,7 +261,14 @@ async function cmdRelease(version: string, skipPreflight: boolean): Promise<void
 	}
 	console.log("  Working directory clean");
 
-	const latestTag = (await git(["describe", "--tags", "--abbrev=0"]).text()).trim();
+	// Version tags only: bare `git describe --tags` returns whichever tag sits
+	// closest on main's history, so a non-version tag (rollback anchors like
+	// `pre-write-fix`) would win and compareVersions would throw on the name.
+	const latestTag = (await git(["describe", "--tags", "--abbrev=0", "--match", "v[0-9]*"]).quiet().nothrow().text()).trim();
+	if (!latestTag) {
+		console.error("Error: no version tag (v*) reachable from HEAD — cannot determine the previous release.");
+		process.exit(1);
+	}
 	if (compareVersions(version, latestTag) <= 0) {
 		console.error(`Error: Version ${version} must be greater than latest tag ${latestTag}`);
 		process.exit(1);
