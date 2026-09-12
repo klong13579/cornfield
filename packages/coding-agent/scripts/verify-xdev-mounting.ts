@@ -22,31 +22,21 @@ import { Settings } from "@cornfield/coding-agent/config/settings";
 import { XdevProtocolHandler } from "@cornfield/coding-agent/internal-urls/xd-protocol";
 import { buildSystemPrompt } from "@cornfield/coding-agent/system-prompt";
 import { createTools, type ToolSession, WriteTool } from "@cornfield/coding-agent/tools";
-import { buildXdevDeviceCatalog, splitPostRegistrationMCPToolsForXdev } from "@cornfield/coding-agent/tools/xdev";
+import { ESSENTIAL_BUILTIN_TOOL_NAMES } from "@cornfield/coding-agent/tools/essential-tools";
+import {
+	buildXdevDeviceCatalog,
+	splitPostRegistrationMCPToolsForXdev,
+	XDEV_KEEP_TOP_LEVEL,
+} from "@cornfield/coding-agent/tools/xdev";
 import { Type } from "@sinclair/typebox";
 
 type Tool = Awaited<ReturnType<typeof createTools>>[number];
 
-/** Tools that must always stay callable by name, whatever the mounting state. */
-const ESSENTIAL = [
-	"read",
-	"write",
-	"edit",
-	"glob",
-	"grep",
-	"bash",
-	"ask",
-	"task",
-	"job",
-	"project_context",
-	"todo",
-	"exit_plan_mode",
-	"identity",
-	"web_search",
-];
+/** Tools that must always stay callable by name, whatever the mounting state (ADR-0003 reviewed set). */
+const ESSENTIAL = ESSENTIAL_BUILTIN_TOOL_NAMES;
 
-/** Discoverable tools that stay top-level because prompts call them by name. */
-const KEEP_TOP_LEVEL = ["web_search", "irc", "hub"];
+/** Discoverable tools that stay top-level because prompts/harness call them by name. */
+const KEEP_TOP_LEVEL = XDEV_KEEP_TOP_LEVEL;
 
 const failures: string[] = [];
 

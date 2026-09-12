@@ -108,8 +108,9 @@ function setByPath(obj: RawSettings, segments: string[], value: unknown): void {
 
 /**
  * Legacy → canonical config key groups for the ADR-0003 tool-name renames
- * (find→glob, search→grep). Old keys keep reading via #migrateRawSettings;
- * removal is a separate ticket.
+ * (find→glob, search→grep). Old keys keep reading via #migrateRawSettings with
+ * an explicit deprecation warning; the compat read itself is removed in a
+ * follow-up ticket (ADR-0003 "旧名移除").
  */
 const RENAMED_SETTING_GROUPS: ReadonlyArray<readonly [string, string]> = [
 	["find", "glob"],
@@ -719,10 +720,21 @@ export class Settings {
 			}
 		}
 
-		// find→glob / search→grep: old keys keep reading (migrated here); removal separate ticket.
+		// find→glob / search→grep: old keys keep reading (migrated here). A deprecation
+		// warning is emitted as soon as the legacy group is DETECTED — before the compat
+		// read is ever removed — so no legacy key can silently disappear. The compat read
+		// itself is removed in a follow-up ticket (ADR-0003 "旧名移除"), after users have
+		// had a release to migrate off the deprecated keys.
 		for (const [legacyGroup, canonicalGroup] of RENAMED_SETTING_GROUPS) {
 			const legacy = raw[legacyGroup];
 			if (!legacy || typeof legacy !== "object" || Array.isArray(legacy)) continue;
+			if (!reportedRenamedSettingGroups.has(legacyGroup)) {
+				reportedRenamedSettingGroups.add(legacyGroup);
+				logger.warn(`Settings: "${legacyGroup}.*" keys are deprecated — use "${canonicalGroup}.*"`, {
+					legacyGroup,
+					canonicalGroup,
+				});
+			}
 			const canonical =
 				typeof raw[canonicalGroup] === "object" &&
 				raw[canonicalGroup] !== null &&
@@ -739,13 +751,6 @@ export class Settings {
 			delete raw[legacyGroup];
 			if (migrated) {
 				raw[canonicalGroup] = canonical;
-				if (!reportedRenamedSettingGroups.has(legacyGroup)) {
-					reportedRenamedSettingGroups.add(legacyGroup);
-					logger.warn(`Settings: deprecated "${legacyGroup}.*" keys — use "${canonicalGroup}.*"`, {
-						legacyGroup,
-						canonicalGroup,
-					});
-				}
 			}
 		}
 
