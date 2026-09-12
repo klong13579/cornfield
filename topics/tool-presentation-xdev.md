@@ -8,7 +8,7 @@ doneWhen: |-
   - 挂载开关关闭时，顶层工具暴露与改造前一致
   - internal 工具不可由用户配置、设置或发现结果启用（运行时注入通道除外，见 ADR-0003）
   - 两条系统提示路径都包含设备说明，SYSTEM.md 覆盖场景下不消失
-lastActivity: 2026-09-12 12:42
+lastActivity: 2026-09-12 12:52
 sessionRefs:
   - ~/.cornfield/agent/sessions (tool1)
 nextAction: 已完成并合入 main（当前 main = e7779db8c6）。远端 origin/main 未 push（领先 40 提交）。回退锚点：`git reset --hard pre-tool-xdev-batch`。
@@ -250,7 +250,13 @@ openQuestions:
 - 2026-09-12 12:42 — 【w5 备包（未启动，等槽位）】`squad-20260912-tool-xdev-w5`：**K1** 旧名移除（删除前必须先加显式提示 —— 否则老 config 的 `find.enabled: false` 会静默变默认 true）；**K2** 两份首版名单复评（依据以真实运行时为准）。文件重叠提醒：K2 与 J2 都写 `docs/adr/0003`，不可同时开。
 
 - 2026-09-12 12:42 — 【重要发现：合并后 addon 陈旧会使 search 每次调用抛错】主检出的 `packages/natives/native/cornfield_natives.darwin-arm64.node` 仍是 9月11日 12:48（PCRE2 之前）的产物，而 main 的代码已含 PCRE2。`search.ts` 无条件解引用 `SearchEngine.Rust/Pcre2`，旧 addon 上该导出不存在 ⇒ **从源码跑 main 时 search 必抛错**（不是“少个可选引擎”，是运行时崩溃；且症状不是构建失败）。
-⇒ **可推广：`*.node` 是 gitignore 的构建产物，不随合并/拉取走；凡触及 `crates/pi-natives` 或其 Cargo 文件的改动合并后，每个检出都要重建一次。**已后台重建主检出 addon；并提议在 AGENTS.md 的构建段加一句明确要求。（`native-addon.ts` 只覆盖集成/子任务工作树，管不到主检出。）
+⇒ **可推广：`*.node` 是 gitignore 的构建产物，不随合并/拉取走；凡触及 `crates/pi-natives` 或其 Cargo 文件的改动合并后，每个检出都要重建一次。**已后台重建主检出 addon —— **重建完成且验证：addon mtime 09-12 12:45、size 33,226,336、探针 `SearchEngine=true`**；构建输出还显示 `Generated 10 enum exports in index.js, fixed 10 const enums in index.d.ts`，而 `git status` 显示**生成文件零差异** ⇒ 仓库跟踪态与构建产物一致。（`native-addon.ts` 只覆盖集成/子任务工作树，管不到主检出。）另：构建使用隔离的 `target/napi-build/<triple>-<variant>`，不是共享的主 `target/`。
+
+- 2026-09-12 12:52 — 【J2 交付并验收（w4）】commit `8d4d61592d`，新增 `docs/adr/0003-read-write-xdev-impact-assessment.md`（**独立文件、未改 ADR 本体** ⇒ 原以为的与 K2 的文件重叠不存在）。四条路径逐项取证、每条落到 `文件:行`：gateway 子 Agent 不受影响（唯一接触点是长任务卡片摘要的**展示**，`dingtalk.ts:3310-3317`）；RPC host tool 不受影响（read/write 非 host tool）；**自演化受影响**（`trace.ts:242-247` 把 `write` 的 `args.path` 无差别加入 `filesModified` ⇒ `xd://<name>` 污染元数据、`write` 误计为文件修改、workflow 序列丢设备名；共 6 处引用，性质为启发式降级非崩溃）；**autoresearch 受影响**（`autoresearch/index.ts:434-439` 的 `looksLikeInternalUrl` 守卫恒拦 `write xd://<name>`，错误文本读起来像有意为之但无注释）。父复核：抽查其中两处引用（`trace.ts:243-247`、`autoresearch/index.ts:434-439`）**逐字属实** ✓；`check:tools` 通过；只写 docs/ 未改代码。⇒ 结论：**ADR 当初写「影响面需单独评估」是对的 —— 一笔没人做的评估确实藏着真问题。**
+
+- 2026-09-12 12:52 — 【K1/K2 开池（w5）】K1 旧名移除（先提示再收兼容读）、K2 首版名单复评。**K2 的 GO 我按住了**，理由是它与 J2 都写 `docs/adr/0003` —— 事后证明该重叠不存在（J2 新建了独立文件），已放行并告知。⇒ **可推广的 skill 改进**：`reconcile` 只算依赖与槽位，**看不到「两票写同一文件」**。而任务包里已经有 `scope.files` ⇒ 调度器完全可以做「声明文件重叠则不共调度」的检查（本批 D1 与 M1 同改 `prompts/**` 与同一个测试文件，就是人肉发现的）。
+
+- 2026-09-12 12:52 — 【执行方三次纠正我的错误前提】① G1 纠正我对 `lsp` 缺陷的描述（目录不是渲染空条目，而是回落渲染 description 首行）；② D1 核出配置 key 改名会让 `find.enabled: false` 静默变默认 true；③ K1/K2 各自核出我给的 base 值过期（实际 main 已是 `3686fb367d`，我在发消息后又提交了一笔台账）。⇒ **给执行方的前提同样需要被核**，这一条在 GO 里已对它们明说。
 
 ## 批注
 
