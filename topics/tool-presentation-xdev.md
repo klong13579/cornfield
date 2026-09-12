@@ -1,17 +1,17 @@
 ---
 name: Tool 呈现协议迁移：采用上游 xd:// 设备挂载
-status: active
+status: done
 objective: 移植上游 oh-my-pi 已验证的 Tool 呈现设计（Catalog / Enabled Tool Set / Discoverable Tool Set 三层 + Load Mode + xd:// 设备挂载），并承接 tool2 让出的 4 项工具能力
 doneWhen: |-
-  - 18 票全部 complete 并通过各自 gate
+  - 交付票全部 complete 并通过各自 gate（第一期 12 张 + 第二期 2 张；3 张经前提核验移除或降级，理由见批注）
   - 合体验证通过（≥2 个 complete 子任务必须走 integration worktree）
   - 挂载开关关闭时，顶层工具暴露与改造前一致
   - internal 工具不可由用户配置、设置或发现结果启用（运行时注入通道除外，见 ADR-0003）
   - 两条系统提示路径都包含设备说明，SYSTEM.md 覆盖场景下不消失
-lastActivity: 2026-09-12 12:01
+lastActivity: 2026-09-12 12:21
 sessionRefs:
   - ~/.cornfield/agent/sessions (tool1)
-nextAction: 第二期（D1+M1）已完成并集成到 squad-20260911-tool-xdev-w3-integ（base = w2b-integ，含两期全部工作）；等用户验收 + 是否合 main；磁盘两缓存项(11G)与主检出 target/(26G)仍等用户。
+nextAction: 已完成并合入 main（当前 main = e7779db8c6）。远端 origin/main 未 push（领先 40 提交）。回退锚点：`git reset --hard pre-tool-xdev-batch`。
 artifacts:
   - docs/adr/0003-tool-presentation-xdev.md
   - CONTEXT.md（Tool Catalog / Enabled Tool Set / Discoverable Tool Set / Load Mode / xd:// 挂载 / Tool Metadata）
@@ -227,6 +227,16 @@ openQuestions:
 
 - 2026-09-12 12:01 — 【磁盘清理（用户「3 清」）】删 `~/.bun/install/cache` 7.7G + `~/.cargo/registry` 3.6G + 主检出 `target/` 26G；**磁盘 16Gi → 50Gi 可用**（+34G，占用 97%→89%）。动手前已确认无构建在跑（仅 `lspmux` 常驻进程，非构建，未动）。
   代价：下次 `bun install` 与 Rust 构建走冷启动（重下/重编）。交付物不受影响 —— addon 在 `packages/natives/native/`，不在 `target/` 内。
+
+- 2026-09-12 12:21 — 【合并】用户确认「合并 main」；因 main 是本批基点，执行 **fast-forward**：`main` 由 `8daba81c48` 前进到 `e90f75c74c`（38 提交 / 129 文件 / +2614 −1592），无 merge commit。**合上去的树与我验过的树是同一棵树**（ff 的代价优势：无需重跑门禁）。
+
+- 2026-09-12 12:21 — 【Tag（用户要求「先打 tag 再合并」，与我的合并动作交叉）】`pre-tool-xdev-batch` → `8daba81c48`（annotated，描述写清两期内容与回退/分层检查点）。它回答「测试出问题怎么找回正常 commit」：三层回退 `git reset --hard pre-tool-xdev-batch` / `87c51720b9`（第一期末）/ `e90f75c74c`（第二期末），再细一级用 `git bisect`，**判据必须用那条出问题的具体测试**（整包有 ~20 条环境性失败，拿它当判据会让 bisect 失效）。
+
+- 2026-09-12 12:21 — 【清理（skill Phase 3 步骤 5）】关 w3 两个 agent 节点；删本批 6 棵 worktree；删 **16/16** 已合并分支（均含在 main 中）；4 个 squad 任务包归档至 `~/.cornfield/squads/archive/`。未触碰非本批的 `feat-agent-client-m1` / `feat-coord-*` / `squad-20260909-coord-p0-integ`。磁盘 16Gi → 57Gi。
+
+- 2026-09-12 12:21 — 【AGENTS.md 更新（用户「改」）】commit `e7779db8c6`，三处：① `tools/` 清单标注 **文件名 ≠ 工具名**（find.ts 承载 glob、search.ts 承载 grep、todo-write.ts 承载 todo，且不存在 glob.ts/grep.ts —— 已核实），并把 builtin-names.ts 列入；② 新增「Tool presentation (xd:// devices)」小节（三层、Load Mode、read/write 作 transport、MCP 工具在 createTools 返回后才进设备集、配置 key 只读迁移，以及「在归一化边界之外做字面量判断会静默失去别名」）；③ 门禁写明 `verify:xdev` 必须在 `bun test` 之外运行及原因。
+
+- 2026-09-12 12:21 — 【上游对齐已核实（用户问「glob/grep 和远程一样了吗」）】拉 `can1357/oh-my-pi` 的 `packages/coding-agent/src/tools/builtin-names.ts`：`BUILTIN_TOOL_NAMES` 含 **`glob`/`grep`/`todo`**，`LEGACY_BUILTIN_TOOL_NAME_ALIASES` = `search→grep`、`find→glob` ⇒ **规范名与别名方向均与上游逐字一致**。额外发现：**上游自身也有同类不一致** —— 其规范名是 `todo`，而其 `ai/utils/validation.ts` 按 `todo_write` 匹配；我们在本批把这类跨包字面载体在自家仓里修干净了（4 处），这一点上比上游更自洽。另：`origin` 是用户的 `klong13579/cornfield`（与上游不是同一远端），**本地 main 领先 origin 40 提交，未 push**。
 
 ## 批注
 
