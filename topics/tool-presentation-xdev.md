@@ -8,7 +8,7 @@ doneWhen: |-
   - 挂载开关关闭时，顶层工具暴露与改造前一致
   - internal 工具不可由用户配置、设置或发现结果启用（运行时注入通道除外，见 ADR-0003）
   - 两条系统提示路径都包含设备说明，SYSTEM.md 覆盖场景下不消失
-lastActivity: 2026-09-12 13:30
+lastActivity: 2026-09-12 14:22
 sessionRefs:
   - ~/.cornfield/agent/sessions (tool1)
 nextAction: 已完成并合入 main（当前 main = e7779db8c6）。远端 origin/main 未 push（领先 40 提交）。回退锚点：`git reset --hard pre-tool-xdev-batch`。
@@ -269,6 +269,16 @@ openQuestions:
 - 2026-09-12 13:30 — 【教训三（我自己的操作错）】我把验证命令用 `&&`/`;` 链在重建命令后面，结果重建失败后半删状态的工作树上跑出一堆无意义输出（"no matches" / "Could not change directory"）。⇒ **不要把验证链在可能失败的命令后面；先看退出码。**
 
 - 2026-09-12 13:30 — 【教训四：「空闲等 GO」是常态，需父发消息唤醒】j2 / k1 / k2 三例：GO 投递成功，但 worker 空闲后不自行恢复，探活报「静默挂起：会话 N 秒未写入、业务态 running 但运行态 idle」。skill 自带的 `probe.ts` 正是为此设计（它写明「父请复核」），**父的补救动作就是再发一条消息**；「GO 幂等可补发」那条规则是配套。nudge 后 k1/k2 立即产出提交。
+
+- 2026-09-12 14:22 — 【K1 交付并验收（w5）】`7e70ab4c1f`（11 文件 +93/−26）。**选择「先提示、下个版本再删」路径**（我明确允许的更稳选项）：`builtin-names.ts` 的 `normalizeToolName` 对旧名告警；`settings.ts` 把旧配置组的告警**从「迁移时才报」改为「检测即报」**（代码注释写明理由：先给用户一个版本迁移，移除另开票）；6 个 agent 定义的 `tools:` frontmatter 旧名改规范名（这样以后删别名也不会断）。父复验：check ✓ / test/tools 945 用例 0 fail ✓ / verify:xdev ALL PASS ✓ / settings-manager 11 pass ✓；并**读代码确认了「检测即报」**（`settings.ts:728-736`，只要旧组存在就 warn，不依赖是否发生迁移）。。⇒ 老 `find.enabled: false` 不会静默变默认 true。
+
+- 2026-09-12 14:22 — 【K2 交付并验收（w5）】`6bdc440f69`（4 文件 +55/−26）：`web_search` 从 `XDEV_KEEP_TOP_LEVEL` 移入 essential 名单。**死引用论断属实**（已验：`web/search/index.ts:216` 早已声明 `loadMode="essential"`）；keep-list 收敛为 `["irc","hub"]`；**我把门禁脚本里硬编码的两份名单改成了 import 权威真源**（「我留下的重复表示，被它修掉了」）。`detect_changes`：0 符号 / risk=low。
+
+- 2026-09-12 14:22 — 【w4+w5 整体集成】先把 w4 集成区并入 K1/K2 工作树（两处均干净合入、零冲突），再集成两票 → `squad-20260912-tool-xdev-w5-integ`（base = main，含**两轮全部**工作；集成历史可见 w4 的合并在内）。门禁：check ✓ / test/tools 945 用例 0 fail ✓ / verify:xdev ALL PASS ✓ / settings-manager+legacy-mcp-selection **12 pass** ✓。整包：首次 21 fail/**3** errors → 重跑 22 fail/**2** errors ⇒ **多的那 1 个 error 是运行间波动，非回归**（两次失败名均落在已知环境性家族：compaction 超时、gh/serve 的临时 HOME ENOENT）。
+
+- 2026-09-12 14:22 — 【skill 修复：`integrate.ts --force` 删不掉旧集成区】实测 `Directory not empty`（exit 255，rust-analyzer/cargo 占着旧区 target/）—— 与 skill 已记的「herdr workspace close 不回收子孙进程」同根，但 `integrate.ts` 自己不先清进程。已新增 `removeWorktree()`：先按路径回收构建类子进程 → 再 `git worktree remove --force` → 仍失败则 `rm -rf` + `prune`。**真实重建验证**：同一条命令由失败转 exit 0。skill 0.6.4。
+
+- 2026-09-12 14:22 — 【我的流程失误（第三次同类）】验完 K1 却忘了先回写状态就调集成 ⇒ 首次只合了 K2，必须 `--force` 重建。加上「给 K1/K2 的 base 值是旧值」与「边界通告发出时机」，**本批我给执行方的前提已错三次，三次都是执行方核出来的**。
 
 ## 批注
 
