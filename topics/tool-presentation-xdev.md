@@ -8,7 +8,7 @@ doneWhen: |-
   - 挂载开关关闭时，顶层工具暴露与改造前一致
   - internal 工具不可由用户配置、设置或发现结果启用（运行时注入通道除外，见 ADR-0003）
   - 两条系统提示路径都包含设备说明，SYSTEM.md 覆盖场景下不消失
-lastActivity: 2026-09-12 14:56
+lastActivity: 2026-09-12 15:11
 sessionRefs:
   - ~/.cornfield/agent/sessions (tool1)
 nextAction: 已完成并合入 main（当前 main = e7779db8c6）。远端 origin/main 未 push（领先 40 提交）。回退锚点：`git reset --hard pre-tool-xdev-batch`。
@@ -290,6 +290,16 @@ openQuestions:
 - 2026-09-12 14:56 — 【J2 自演化修复验收】选方案 (a)：新增守卫 `internal-url-path.ts`（正则 `^[a-z][a-z0-9+.-]*://`，`xd://`/`agent://`/`skill://` 均识别，Windows `C:\` 不误判），统一应用于 `summarizeTrace` / `TraceAnalyzer`（slowLoop+efficiency+revert）/ `FeedbackTracker#extractEditPath` / `memory extractSignalsFromTrace` 共五处。证据：6 条新增行为测试**修复前红、修复后绿**。
   **基线声明已由父独立核实**：main 上同一套件 443 pass / **16 fail**；其分支 449 pass / **16 fail** —— 失败数完全相同，多出的 6 pass 即新增测试。（“这些失败是既有的”是执行方最易含糊过去的一句，故特意去核。）
   选 (a) 的理由成立：`args.path` 仍在 ⇒ 设备名未丢（方案 b 想解决的“信息丢失”在 a 下不成立），不需为 b 立票。
+
+- 2026-09-12 15:11 — 【上游缺失工具移植评估（K1 产出，用户问“还有哪些 tool 不一样、需要移植”）】用户问题背景：上游有、我们零痕迹的 12 个工具（10 内置 + 2 隐藏）。报告 `docs/upstream-tool-port-evaluation.md` @ 分支 `feat/xdev6-tooleval`（commit `4168c74224`），四栏逐工具取证，父已整份阅读并验引用。结论：
+  ⓐ **只有 `eval` 明确值得**（且只值 js 半边）：其 py 半边与我们 `python` 功能等价（持久 IPython 内核 + cells + timeout/reset + 图像/JSON 输出），真正增量是**持久 JS VM 后端**与执行内委派。前提：真有「进程内求值 JS」需求。
+  ⓑ **不值得**：`think`（与 provider 原生 reasoning 重叠）、`manage_skill`（我们无 managed-skill 分层）、`memory_edit` 单看（只支持 mnemopi）。
+  ⓒ **四个「取决于」（按牵引力）**：① 记忆四件套 + `learn` —— **本质是一个架构决策**（要不要模型可调用的长期记忆后端），硬证据：五个工具全挂在 `memory.backend ∈ {hindsight,mnemopi}` 上，而我仓搜 `memory.backend`/`mnemopi`/`hindsight`/`experimentalContextManagement` **零命中**（已独立核实）⇒ 移植=搬整套后端 + 换调度范式（上游模型显式调度记忆 vs 我们框架自动注入）；② `security_scan` —— 需连带 `src/security/` 整套；**与 `report_finding` 无实质重叠**（一者扫描产生、一者只记录）；③ `context_notes`/`new_context` —— 实验性「模型主动管上下文」，门控 `compaction.experimentalContextManagement`，与我们的自动 compaction 不同路线；④ `goal`（隐藏）—— 带 token 预算的目标模式，需先与 plan-mode 划界。
+  ⓓ **命名勘误（我的错）**：我先前清单写了 `memory_recall/reflect/retain`，上游真实 wire name 是 `recall`/`reflect`/`retain`（仅 `memory_edit` 带前缀，上游源码行号已给）。**本批第四次由执行方纠出我的错**（前三次：lsp 描述、配置 key 陷阱、base 值过期）——同一模式：转写时丢了来源。
+  ⓔ 留白：`eval` 的 js 后端实现（Bun/Node/自研）标为未确认，真要移植需另起调研。
+  建议：四个「取决于」都先不做，等出现明确需求（模型自管记忆 / 内置安全扫描 / 进程内求值 JS）再立项。
+
+- 2026-09-12 15:11 — 【待合并分支清单（均基于 main / main 未动，互不相交或已包含关系）】等用户一句“合”：① `squad-20260912-tool-xdev-w5-integ`（w4+w5 四票，含 J1 清死代码 1296 行、J2 影响面评估、K1 弃用告警、K2 名单收敛）；② `feat/xdev6-followups`（AGENTS.md addon 重建要求 + autoresearch fail-closed 注释）；③ `feat/xdev6-selfevo`（自演化不再把 xd:// 当文件修改）；④ `feat/xdev6-tooleval`（移植评估报告，纯文档）。
 
 ## 批注
 
