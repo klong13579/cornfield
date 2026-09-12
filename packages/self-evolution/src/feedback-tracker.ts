@@ -1,6 +1,7 @@
 /**
  * FeedbackTracker: tracks whether injected episodes were helpful.
  */
+import { isInternalUrlPath } from "./internal-url-path";
 import type { DetailedOutcomeStore, EffectivenessStore, SkillEffectivenessStore } from "./storage/types";
 import type { InjectionOutcome, SessionTrace } from "./types";
 
@@ -246,7 +247,7 @@ export class FeedbackTracker {
 		if (!args || typeof args !== "object") return undefined;
 		const a = args as Record<string, unknown>;
 		const p = a.path ?? a.file_path;
-		return typeof p === "string" ? p : undefined;
+		return typeof p === "string" && !isInternalUrlPath(p) ? p : undefined;
 	}
 }
 

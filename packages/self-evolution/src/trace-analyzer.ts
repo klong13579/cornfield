@@ -9,6 +9,7 @@
  */
 import type { Model } from "@cornfield/ai";
 import { logger, prompt } from "@cornfield/utils";
+import { isInternalUrlPath } from "./internal-url-path";
 import traceAnalysisSystemTemplate from "./prompts/trace-analysis.md" with { type: "text" };
 import traceAnalysisInputTemplate from "./prompts/trace-analysis-input.md" with { type: "text" };
 import type {
@@ -86,6 +87,14 @@ const READ_FAILURE_SIGNATURES: Array<{
 ];
 
 const PROMPT_TOOL_HINTS = ["bash", "read", "edit", "write", "grep", "search", "find", "task"] as const;
+
+/** True when a tool call is a real file modification — not an xd:// device execution. */
+function isFileModificationCall(call: TraceEntry): boolean {
+	if (call.toolName === "edit" || call.toolName === "ast_edit") return true;
+	if (call.toolName !== "write") return false;
+	const path = (call.args as Record<string, unknown>)?.path;
+	return typeof path === "string" && !isInternalUrlPath(path);
+}
 
 export function inferToolHintFromUserPrompt(prompt: string): string | undefined {
 	const lower = prompt.toLowerCase();
@@ -483,11 +492,7 @@ export class TraceAnalyzer {
 	 */
 	#detectSlowLoop(paired: PairedToolCall[]): boolean {
 		if (paired.length < 5) return false;
-		const hasMod = paired.some(
-			p =>
-				!p.result.isError &&
-				(p.call.toolName === "write" || p.call.toolName === "edit" || p.call.toolName === "ast_edit"),
-		);
+		const hasMod = paired.some(p => !p.result.isError && isFileModificationCall(p.call));
 		return !hasMod;
 	}
 
@@ -496,9 +501,7 @@ export class TraceAnalyzer {
 	 */
 	#computeToolEfficiency(paired: PairedToolCall[]): number {
 		if (paired.length === 0) return 1;
-		const modCalls = paired.filter(
-			p => p.call.toolName === "write" || p.call.toolName === "edit" || p.call.toolName === "ast_edit",
-		);
+		const modCalls = paired.filter(p => isFileModificationCall(p.call));
 		if (modCalls.length === 0) return 1;
 		const successful = modCalls.filter(p => !p.result.isError).length;
 		return successful / modCalls.length;
@@ -670,7 +673,7 @@ export class TraceAnalyzer {
 			const lastTwo = editEntries.slice(-2);
 			const pathA = this.#extractPath(lastTwo[0].call.args);
 			const pathB = this.#extractPath(lastTwo[1].call.args);
-			if (pathA && pathB && pathA === pathB) {
+			if (pathA && pathB && pathA === pathB && !isInternalUrlPath(pathA)) {
 				// Both edits to the same file — potential revert
 				signals.userRevertedEdit = true;
 			}
