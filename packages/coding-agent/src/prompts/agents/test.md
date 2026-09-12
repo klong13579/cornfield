@@ -1,7 +1,7 @@
 ---
 name: test
 description: Simulates real user operations (CLI, slash commands, tmux) and proves behavior from observable outcomes — not placebo unit/integration tests.
-tools: read, search, find, bash, lsp, ast_grep, edit, write
+tools: read, grep, glob, bash, lsp, ast_grep, edit, write
 model: pi/smol
 thinking-level: medium
 output:

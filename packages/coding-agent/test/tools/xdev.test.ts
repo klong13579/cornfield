@@ -3,8 +3,9 @@ import { Settings } from "@cornfield/coding-agent/config/settings";
 import { XdevProtocolHandler } from "@cornfield/coding-agent/internal-urls/xd-protocol";
 import type { ToolSession } from "@cornfield/coding-agent/tools";
 import { createTools, WriteTool } from "@cornfield/coding-agent/tools";
-import { normalizeToolName } from "@cornfield/coding-agent/tools/builtin-names";
+import { _resetToolNameWarningsForTest, normalizeToolName } from "@cornfield/coding-agent/tools/builtin-names";
 import { buildXdevDeviceCatalog, splitToolsForXdev, xdevMountingActive } from "@cornfield/coding-agent/tools/xdev";
+import { logger } from "@cornfield/utils";
 import { Type } from "@sinclair/typebox";
 
 function createTestSession(overrides: Partial<ToolSession> = {}): ToolSession {
@@ -31,6 +32,27 @@ describe("normalizeToolName", () => {
 		expect(normalizeToolName("todo")).toBe("todo");
 		expect(normalizeToolName("mcp__exa__search")).toBe("mcp__exa__search");
 		expect(normalizeToolName("my-plugin:tool")).toBe("my-plugin:tool");
+	});
+});
+
+describe("normalizeToolName deprecation warning", () => {
+	afterEach(() => {
+		vi.restoreAllMocks();
+		_resetToolNameWarningsForTest();
+	});
+
+	it("warns each legacy name once and still resolves to the canonical tool", () => {
+		_resetToolNameWarningsForTest();
+		const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => {});
+		expect(normalizeToolName("find")).toBe("glob");
+		expect(normalizeToolName("find")).toBe("glob"); // duplicate: no second warn
+		expect(normalizeToolName("search")).toBe("grep");
+		expect(normalizeToolName("todo_write")).toBe("todo");
+		expect(warnSpy).toHaveBeenCalledTimes(3);
+		const messages = warnSpy.mock.calls.map(c => String(c[0]));
+		expect(messages.some(m => m.includes("find") && m.includes("glob"))).toBe(true);
+		expect(messages.some(m => m.includes("search") && m.includes("grep"))).toBe(true);
+		expect(messages.some(m => m.includes("todo_write") && m.includes("todo"))).toBe(true);
 	});
 });
 

@@ -1,10 +1,10 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { Effort } from "@cornfield/ai";
 import { _resetSettingsForTest, Settings } from "@cornfield/coding-agent/config/settings";
-import { getProjectAgentDir, Snowflake } from "@cornfield/utils";
+import { getProjectAgentDir, logger, Snowflake } from "@cornfield/utils";
 import { YAML } from "bun";
 
 describe("Settings", () => {
@@ -210,6 +210,17 @@ describe("Settings", () => {
 			const agent = await Settings.create({ cwd: opsDir, agentDir: opsDir });
 			expect(agent.get("grep.enabled")).toBe(false);
 			expect(agent.get("glob.enabled")).toBe(true); // 未配置路径回落内核默认
+		});
+		it("warns when a deprecated find.* config group is detected", async () => {
+			const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => {});
+			await writeSettings({ find: { enabled: false } });
+			const agent = await Settings.create({ cwd: projectDir, agentDir });
+			// 兼容读仍生效：旧 key 继续工作
+			expect(agent.get("glob.enabled")).toBe(false);
+			// 弃用被显式提示，绝不静默
+			const messages = warnSpy.mock.calls.map(c => String(c[0]));
+			expect(messages.some(m => m.includes("find") && m.includes("glob"))).toBe(true);
+			vi.restoreAllMocks();
 		});
 	});
 });
