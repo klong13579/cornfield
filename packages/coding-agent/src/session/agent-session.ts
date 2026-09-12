@@ -131,14 +131,7 @@ import {
 	executePython as executePythonCommand,
 	type PythonResult,
 } from "../ipy/executor";
-import {
-	buildDiscoverableMCPSearchIndex,
-	collectDiscoverableMCPTools,
-	type DiscoverableMCPSearchIndex,
-	type DiscoverableMCPTool,
-	isMCPToolName,
-	selectDiscoverableMCPToolNamesByServer,
-} from "../mcp/discoverable-tool-metadata";
+import { isMCPToolName } from "../mcp/discoverable-tool-metadata";
 import { getCurrentThemeName, theme } from "../modes/theme/theme";
 import type { PlanModeState } from "../plan-mode/state";
 import autoContinuePrompt from "../prompts/system/auto-continue.md" with { type: "text" };
@@ -282,16 +275,6 @@ export interface AgentSessionConfig {
 	convertToLlm?: (messages: AgentMessage[]) => Message[] | Promise<Message[]>;
 	/** System prompt builder that can consider tool availability */
 	rebuildSystemPrompt?: (toolNames: string[], tools: Map<string, AgentTool>) => Promise<string>;
-	/** Enable hidden-by-default MCP tool discovery for this session. */
-	mcpDiscoveryEnabled?: boolean;
-	/** MCP tool names to activate for the current session when discovery mode is enabled. */
-	initialSelectedMCPToolNames?: string[];
-	/** Whether constructor-provided MCP defaults should be persisted immediately. */
-	persistInitialMCPToolSelection?: boolean;
-	/** MCP server names whose tools should seed discovery-mode sessions whenever those servers are connected. */
-	defaultSelectedMCPServerNames?: string[];
-	/** MCP tool names that should seed brand-new sessions created from this AgentSession. */
-	defaultSelectedMCPToolNames?: string[];
 	/** TTSR manager for time-traveling stream rules */
 	ttsrManager?: TtsrManager;
 	/** Secret obfuscator for deobfuscating streaming edit content */
@@ -560,14 +543,7 @@ export class AgentSession {
 	#convertToLlm: (messages: AgentMessage[]) => Message[] | Promise<Message[]>;
 	#rebuildSystemPrompt: ((toolNames: string[], tools: Map<string, AgentTool>) => Promise<string>) | undefined;
 	#baseSystemPrompt: string;
-	#mcpDiscoveryEnabled = false;
-	#discoverableMCPTools = new Map<string, DiscoverableMCPTool>();
-	#discoverableMCPSearchIndex: DiscoverableMCPSearchIndex | null = null;
-	#selectedMCPToolNames = new Set<string>();
 	#rpcHostToolNames = new Set<string>();
-	#defaultSelectedMCPServerNames = new Set<string>();
-	#defaultSelectedMCPToolNames = new Set<string>();
-	#sessionDefaultSelectedMCPToolNames = new Map<string, string[]>();
 
 	// TTSR manager for time-traveling stream rules
 	#ttsrManager: TtsrManager | undefined = undefined;
@@ -648,27 +624,6 @@ export class AgentSession {
 		this.#convertToLlm = config.convertToLlm ?? convertToLlm;
 		this.#rebuildSystemPrompt = config.rebuildSystemPrompt;
 		this.#baseSystemPrompt = this.agent.state.systemPrompt;
-		this.#mcpDiscoveryEnabled = config.mcpDiscoveryEnabled ?? false;
-		this.#setDiscoverableMCPTools(this.#collectDiscoverableMCPToolsFromRegistry());
-		this.#selectedMCPToolNames = new Set(config.initialSelectedMCPToolNames ?? []);
-		this.#defaultSelectedMCPServerNames = new Set(config.defaultSelectedMCPServerNames ?? []);
-		this.#defaultSelectedMCPToolNames = new Set(config.defaultSelectedMCPToolNames ?? []);
-		this.#pruneSelectedMCPToolNames();
-		const persistedSelectedMCPToolNames = this.buildDisplaySessionContext().selectedMCPToolNames;
-		const currentSelectedMCPToolNames = this.getSelectedMCPToolNames();
-		const persistInitialMCPToolSelection =
-			config.persistInitialMCPToolSelection ?? this.sessionManager.getBranch().length === 0;
-		if (
-			this.#mcpDiscoveryEnabled &&
-			persistInitialMCPToolSelection &&
-			!this.#selectedMCPToolNamesMatch(persistedSelectedMCPToolNames, currentSelectedMCPToolNames)
-		) {
-			this.sessionManager.appendMCPToolSelection(currentSelectedMCPToolNames);
-		}
-		this.#rememberSessionDefaultSelectedMCPToolNames(
-			this.sessionManager.getSessionFile(),
-			this.#getConfiguredDefaultSelectedMCPToolNames(),
-		);
 		this.#ttsrManager = config.ttsrManager;
 		this.#obfuscator = config.obfuscator;
 		this.#agentId = config.agentId;
@@ -2086,66 +2041,6 @@ export class AgentSession {
 		return this.#retryAttempt;
 	}
 
-	#collectDiscoverableMCPToolsFromRegistry(): Map<string, DiscoverableMCPTool> {
-		return new Map(collectDiscoverableMCPTools(this.#toolRegistry.values()).map(tool => [tool.name, tool] as const));
-	}
-
-	#setDiscoverableMCPTools(discoverableMCPTools: Map<string, DiscoverableMCPTool>): void {
-		this.#discoverableMCPTools = discoverableMCPTools;
-		this.#discoverableMCPSearchIndex = null;
-	}
-
-	#filterSelectableMCPToolNames(toolNames: Iterable<string>): string[] {
-		return Array.from(toolNames).filter(name => this.#discoverableMCPTools.has(name) && this.#toolRegistry.has(name));
-	}
-
-	#getConfiguredDefaultSelectedMCPToolNames(): string[] {
-		return this.#filterSelectableMCPToolNames([
-			...this.#defaultSelectedMCPToolNames,
-			...selectDiscoverableMCPToolNamesByServer(
-				this.#discoverableMCPTools.values(),
-				this.#defaultSelectedMCPServerNames,
-			),
-		]);
-	}
-
-	#pruneSelectedMCPToolNames(): void {
-		this.#selectedMCPToolNames = new Set(this.#filterSelectableMCPToolNames(this.#selectedMCPToolNames));
-	}
-
-	#selectedMCPToolNamesMatch(left: string[], right: string[]): boolean {
-		return left.length === right.length && left.every((name, index) => name === right[index]);
-	}
-
-	#rememberSessionDefaultSelectedMCPToolNames(
-		sessionFile: string | null | undefined,
-		toolNames: Iterable<string>,
-	): void {
-		if (!sessionFile) return;
-		this.#sessionDefaultSelectedMCPToolNames.set(
-			path.resolve(sessionFile),
-			this.#filterSelectableMCPToolNames(toolNames),
-		);
-	}
-
-	#getSessionDefaultSelectedMCPToolNames(sessionFile: string | null | undefined): string[] {
-		if (!sessionFile) return [];
-		return this.#sessionDefaultSelectedMCPToolNames.get(path.resolve(sessionFile)) ?? [];
-	}
-
-	#persistSelectedMCPToolNamesIfChanged(previousSelectedMCPToolNames: string[]): void {
-		if (!this.#mcpDiscoveryEnabled) return;
-		const nextSelectedMCPToolNames = this.getSelectedMCPToolNames();
-		if (this.#selectedMCPToolNamesMatch(previousSelectedMCPToolNames, nextSelectedMCPToolNames)) {
-			return;
-		}
-		this.sessionManager.appendMCPToolSelection(nextSelectedMCPToolNames);
-	}
-
-	#getActiveNonMCPToolNames(): string[] {
-		return this.getActiveToolNames().filter(name => !isMCPToolName(name) && this.#toolRegistry.has(name));
-	}
-
 	/**
 	 * Get the names of currently active tools.
 	 * Returns the names of tools currently set on the agent.
@@ -2191,55 +2086,8 @@ export class AgentSession {
 		}
 	}
 
-	isMCPDiscoveryEnabled(): boolean {
-		return this.#mcpDiscoveryEnabled;
-	}
-
-	getDiscoverableMCPTools(): DiscoverableMCPTool[] {
-		return Array.from(this.#discoverableMCPTools.values());
-	}
-
-	getDiscoverableMCPSearchIndex(): DiscoverableMCPSearchIndex {
-		if (!this.#discoverableMCPSearchIndex) {
-			this.#discoverableMCPSearchIndex = buildDiscoverableMCPSearchIndex(this.#discoverableMCPTools.values());
-		}
-		return this.#discoverableMCPSearchIndex;
-	}
-
-	getSelectedMCPToolNames(): string[] {
-		if (!this.#mcpDiscoveryEnabled) {
-			return this.getActiveToolNames().filter(name => isMCPToolName(name) && this.#toolRegistry.has(name));
-		}
-		return this.#filterSelectableMCPToolNames(this.#selectedMCPToolNames);
-	}
-
-	async activateDiscoveredMCPTools(toolNames: string[]): Promise<string[]> {
-		const nextSelectedMCPToolNames = new Set(this.#selectedMCPToolNames);
-		const activated: string[] = [];
-		for (const name of toolNames) {
-			if (!isMCPToolName(name) || !this.#discoverableMCPTools.has(name) || !this.#toolRegistry.has(name)) {
-				continue;
-			}
-			nextSelectedMCPToolNames.add(name);
-			activated.push(name);
-		}
-		if (activated.length === 0) {
-			return [];
-		}
-		const nextActive = [
-			...this.#getActiveNonMCPToolNames(),
-			...this.#filterSelectableMCPToolNames(nextSelectedMCPToolNames),
-		];
-		await this.setActiveToolsByName(nextActive);
-		return [...new Set(activated)];
-	}
-
-	async #applyActiveToolsByName(
-		toolNames: string[],
-		options?: { persistMCPSelection?: boolean; previousSelectedMCPToolNames?: string[] },
-	): Promise<void> {
+	async #applyActiveToolsByName(toolNames: string[]): Promise<void> {
 		toolNames = [...new Set(toolNames.map(name => name.toLowerCase()))];
-		const previousSelectedMCPToolNames = options?.previousSelectedMCPToolNames ?? this.getSelectedMCPToolNames();
 		const tools: AgentTool[] = [];
 		const validToolNames: string[] = [];
 		for (const name of toolNames) {
@@ -2257,22 +2105,12 @@ export class AgentSession {
 				validToolNames.push("report_tool_issue");
 			}
 		}
-		if (this.#mcpDiscoveryEnabled) {
-			this.#selectedMCPToolNames = new Set(
-				validToolNames.filter(
-					name => isMCPToolName(name) && this.#discoverableMCPTools.has(name) && this.#toolRegistry.has(name),
-				),
-			);
-		}
 		this.agent.setTools(tools);
 
 		// Rebuild base system prompt with new tool set
 		if (this.#rebuildSystemPrompt) {
 			this.#baseSystemPrompt = await this.#rebuildSystemPrompt(validToolNames, this.#toolRegistry);
 			this.agent.setSystemPrompt(this.#baseSystemPrompt);
-		}
-		if (options?.persistMCPSelection !== false) {
-			this.#persistSelectedMCPToolNamesIfChanged(previousSelectedMCPToolNames);
 		}
 	}
 
@@ -2286,25 +2124,6 @@ export class AgentSession {
 		await this.#applyActiveToolsByName(toolNames);
 	}
 
-	async #restoreMCPSelectionsForSessionContext(
-		sessionContext: SessionContext,
-		options?: { fallbackSelectedMCPToolNames?: Iterable<string> },
-	): Promise<void> {
-		if (!this.#mcpDiscoveryEnabled) return;
-		const nextActiveNonMCPToolNames = this.#getActiveNonMCPToolNames();
-		const fallbackSelectedMCPToolNames =
-			options?.fallbackSelectedMCPToolNames ?? this.#getConfiguredDefaultSelectedMCPToolNames();
-		const restoredMCPToolNames = sessionContext.hasPersistedMCPToolSelection
-			? this.#filterSelectableMCPToolNames(sessionContext.selectedMCPToolNames)
-			: this.#filterSelectableMCPToolNames(fallbackSelectedMCPToolNames);
-		this.#rememberSessionDefaultSelectedMCPToolNames(
-			this.sessionFile,
-			this.#getConfiguredDefaultSelectedMCPToolNames(),
-		);
-		await this.#applyActiveToolsByName([...nextActiveNonMCPToolNames, ...restoredMCPToolNames], {
-			persistMCPSelection: false,
-		});
-	}
 	/** Rebuild the base system prompt using the current active tool set. */
 	async refreshBaseSystemPrompt(): Promise<void> {
 		if (!this.#rebuildSystemPrompt) return;
@@ -2318,7 +2137,10 @@ export class AgentSession {
 	 * This allows /mcp add/remove/reauth to take effect without restarting the session.
 	 */
 	async refreshMCPTools(mcpTools: CustomTool[]): Promise<void> {
-		const previousSelectedMCPToolNames = this.getSelectedMCPToolNames();
+		const activeToolNames = this.getActiveToolNames();
+		const activeNonMcpNames = activeToolNames.filter(name => !isMCPToolName(name) && this.#toolRegistry.has(name));
+		const activeMcpNames = activeToolNames.filter(name => isMCPToolName(name));
+
 		const existingNames = Array.from(this.#toolRegistry.keys());
 		for (const name of existingNames) {
 			if (isMCPToolName(name)) {
@@ -2345,21 +2167,8 @@ export class AgentSession {
 			this.#toolRegistry.set(finalTool.name, finalTool);
 		}
 
-		this.#setDiscoverableMCPTools(this.#collectDiscoverableMCPToolsFromRegistry());
-		this.#pruneSelectedMCPToolNames();
-		if (!this.buildDisplaySessionContext().hasPersistedMCPToolSelection) {
-			this.#selectedMCPToolNames = new Set([
-				...this.#selectedMCPToolNames,
-				...this.#getConfiguredDefaultSelectedMCPToolNames(),
-			]);
-		}
-		this.#rememberSessionDefaultSelectedMCPToolNames(
-			this.sessionFile,
-			this.#getConfiguredDefaultSelectedMCPToolNames(),
-		);
-
-		const nextActive = [...this.#getActiveNonMCPToolNames(), ...this.getSelectedMCPToolNames()];
-		await this.#applyActiveToolsByName(nextActive, { previousSelectedMCPToolNames });
+		const survivingMcpNames = activeMcpNames.filter(name => this.#toolRegistry.has(name));
+		await this.setActiveToolsByName([...activeNonMcpNames, ...survivingMcpNames]);
 	}
 
 	/**
@@ -3619,13 +3428,6 @@ export class AgentSession {
 	 */
 	async newSession(options?: NewSessionOptions): Promise<boolean> {
 		const previousSessionFile = this.sessionFile;
-		const nextDiscoverySessionToolNames = this.#mcpDiscoveryEnabled
-			? [
-					...this.#getActiveNonMCPToolNames(),
-					...this.#filterSelectableMCPToolNames(this.#defaultSelectedMCPToolNames),
-				]
-			: undefined;
-
 		// Emit session_before_switch event with reason "new" (can be cancelled)
 		if (this.#extensionRunner?.hasHandlers("session_before_switch")) {
 			const result = (await this.#extensionRunner.emit({
@@ -3662,16 +3464,6 @@ export class AgentSession {
 
 		this.sessionManager.appendThinkingLevelChange(this.thinkingLevel);
 		this.sessionManager.appendServiceTierChange(this.serviceTier ?? null);
-		if (nextDiscoverySessionToolNames) {
-			await this.#applyActiveToolsByName(nextDiscoverySessionToolNames, { persistMCPSelection: false });
-			if (this.getSelectedMCPToolNames().length > 0) {
-				this.sessionManager.appendMCPToolSelection(this.getSelectedMCPToolNames());
-			}
-		}
-		this.#rememberSessionDefaultSelectedMCPToolNames(
-			this.sessionFile,
-			this.#getConfiguredDefaultSelectedMCPToolNames(),
-		);
 
 		this.#todoReminderCount = 0;
 		this.#planReferenceSent = false;
@@ -7019,13 +6811,8 @@ export class AgentSession {
 		const previousModel = this.model;
 		const previousThinkingLevel = this.#thinkingLevel;
 		const previousServiceTier = this.agent.serviceTier;
-		const previousSelectedMCPToolNames = new Set(this.#selectedMCPToolNames);
-		const previousTools = [...this.agent.state.tools];
 		const previousBaseSystemPrompt = this.#baseSystemPrompt;
 		const previousSystemPrompt = this.agent.state.systemPrompt;
-		const previousFallbackSelectedMCPToolNames = previousSessionFile
-			? this.#getSessionDefaultSelectedMCPToolNames(previousSessionFile)
-			: undefined;
 
 		this.#steeringMessages = [];
 		this.#followUpMessages = [];
@@ -7040,8 +6827,6 @@ export class AgentSession {
 			const didReloadConversationChange =
 				!switchingToDifferentSession &&
 				this.#didSessionMessagesChange(previousSessionContext.messages, sessionContext.messages);
-			const fallbackSelectedMCPToolNames = this.#getSessionDefaultSelectedMCPToolNames(sessionPath);
-			await this.#restoreMCPSelectionsForSessionContext(sessionContext, { fallbackSelectedMCPToolNames });
 
 			// Emit session_switch event to hooks
 			if (this.#extensionRunner) {
@@ -7109,23 +6894,6 @@ export class AgentSession {
 		} catch (error) {
 			this.sessionManager.restoreState(previousSessionState);
 			this.agent.sessionId = previousSessionState.sessionId;
-			let restoreMcpError: unknown;
-			try {
-				await this.#restoreMCPSelectionsForSessionContext(previousSessionContext, {
-					fallbackSelectedMCPToolNames: previousFallbackSelectedMCPToolNames,
-				});
-			} catch (mcpError) {
-				restoreMcpError = mcpError;
-				logger.warn("Failed to restore MCP selections after switch error", {
-					previousSessionFile,
-					targetSessionFile: sessionPath,
-					error: String(mcpError),
-				});
-				this.#selectedMCPToolNames = new Set(previousSelectedMCPToolNames);
-				this.agent.setTools(previousTools);
-				this.#baseSystemPrompt = previousBaseSystemPrompt;
-				this.agent.setSystemPrompt(previousSystemPrompt);
-			}
 			this.#baseSystemPrompt = previousBaseSystemPrompt;
 			this.agent.setSystemPrompt(previousSystemPrompt);
 			this.agent.replaceMessages(previousAgentMessages);
@@ -7141,9 +6909,6 @@ export class AgentSession {
 			this.agent.serviceTier = previousServiceTier;
 			this.#syncTodoPhasesFromBranch();
 			this.#reconnectToAgent();
-			if (restoreMcpError) {
-				throw restoreMcpError;
-			}
 			throw error;
 		}
 	}
@@ -7203,8 +6968,6 @@ export class AgentSession {
 
 		// Reload messages from entries (works for both file and in-memory mode)
 		const sessionContext = this.buildDisplaySessionContext();
-
-		await this.#restoreMCPSelectionsForSessionContext(sessionContext);
 
 		// Emit session_branch event to hooks (after branch completes)
 		if (this.#extensionRunner) {
@@ -7377,7 +7140,6 @@ export class AgentSession {
 		// Update agent state — build display context to populate agent messages.
 		const stateContext = this.sessionManager.buildSessionContext();
 		const displayContext = deobfuscateSessionContext(stateContext, this.#obfuscator);
-		await this.#restoreMCPSelectionsForSessionContext(displayContext);
 		this.agent.replaceMessages(displayContext.messages);
 		this.#syncTodoPhasesFromBranch();
 		this.#closeCodexProviderSessionsForHistoryRewrite();
