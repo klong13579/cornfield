@@ -1408,9 +1408,7 @@ export class MCPCommandController {
 		try {
 			const connection = await this.ctx.mcpManager.reconnectServer(name);
 			if (connection) {
-				// refreshMCPTools re-registers tools and preserves the user's prior
-				// MCP tool selection. No need to call activateDiscoveredMCPTools —
-				// that would broaden the selection to all server tools.
+				// refreshMCPTools re-registers tools and preserves the previously-active MCP tools.
 				await this.ctx.session.refreshMCPTools(this.ctx.mcpManager.getTools());
 				const serverTools = this.ctx.mcpManager.getTools().filter(t => t.mcpServerName === name);
 				this.#showMessage(
