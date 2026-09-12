@@ -10,6 +10,7 @@ import type {
 	ToolExecutionEndEvent,
 	ToolExecutionStartEvent,
 } from "@cornfield/coding-agent/extensibility/extensions";
+import { isInternalUrlPath } from "./internal-url-path";
 import { NudgeDetector } from "./nudge-detector";
 import type { Nudge, QueuedAgentNudge, SessionTrace } from "./types";
 
@@ -242,7 +243,7 @@ export function summarizeTrace(trace: SessionTrace): {
 			// Heuristic: detect file-modifying tools
 			if (entry.toolName === "write" || entry.toolName === "edit" || entry.toolName === "ast_edit") {
 				const path = (entry.args as Record<string, unknown>)?.path;
-				if (typeof path === "string") {
+				if (typeof path === "string" && !isInternalUrlPath(path)) {
 					filesModified.add(path);
 				}
 			}

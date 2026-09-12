@@ -10,6 +10,7 @@ import { resolveModelRoleValue } from "@cornfield/coding-agent/config/model-reso
 import type { Settings } from "@cornfield/coding-agent/config/settings";
 import type { AgentSession } from "@cornfield/coding-agent/session/agent-session";
 import { logger, parseJsonlLenient, prompt } from "@cornfield/utils";
+import { isInternalUrlPath } from "../internal-url-path";
 import { getMemoryRoot } from "../paths";
 import { ensureUnifiedSkillStorage, importConsolidationSkillsToDb, writeConsolidationSkills } from "../skill-storage";
 import { sanitizeConsolidatedMemoryMd, sanitizeConsolidatedMemorySummary } from "./consolidation-v3";
@@ -1263,7 +1264,7 @@ function extractSignalsFromTrace(rolloutPath: string): ExtractedSignals {
 				toolsUsed.add(entry.toolName);
 				if (entry.toolName === "write" || entry.toolName === "edit" || entry.toolName === "ast_edit") {
 					const p = entry.args?.path;
-					if (typeof p === "string") filesModified.add(p);
+					if (typeof p === "string" && !isInternalUrlPath(p)) filesModified.add(p);
 				}
 			}
 
