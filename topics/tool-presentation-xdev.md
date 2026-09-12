@@ -8,7 +8,7 @@ doneWhen: |-
   - 挂载开关关闭时，顶层工具暴露与改造前一致
   - internal 工具不可由用户配置、设置或发现结果启用（运行时注入通道除外，见 ADR-0003）
   - 两条系统提示路径都包含设备说明，SYSTEM.md 覆盖场景下不消失
-lastActivity: 2026-09-12 14:23
+lastActivity: 2026-09-12 14:56
 sessionRefs:
   - ~/.cornfield/agent/sessions (tool1)
 nextAction: 已完成并合入 main（当前 main = e7779db8c6）。远端 origin/main 未 push（领先 40 提交）。回退锚点：`git reset --hard pre-tool-xdev-batch`。
@@ -31,7 +31,7 @@ decisions:
 openQuestions:
   - 旧名移除（别名表 find→glob / search→grep / todo_write→todo + 配置 key 只读兼容层）未排期 —— ADR 明确「另开一票」。**K1 已交出改动面地图（开出该票时直接用）**：硬编码旧名集中在 2 个源文件（`builtin-names.ts` 别名表、`settings.ts` 的 RENAMED_SETTING_GROUPS+迁移循环）+ 7 处 prompt（`agents/{explore,librarian,plan,reviewer,test}.md` 的 tools: frontmatter、`agents/task.md` 与 `live/consult-instructions.md` 散文，均已在 K1 改为 canonical）+ 2 处测试；**纯调用方无需改**（只走 normalizeToolName）：`cli/args.ts`、`tools/index.ts`、`tools/write.ts`、`internal-urls/xd-protocol.ts`；**不出手**：`packages/ai` 的 todo_write（schema 示例）与 moa-extension prompts（示例工具名）
   - MCP 会话侧残留：`agent-session.ts` 仍留有整套 discovery 子系统（#mcpDiscoveryEnabled / #discoverableMCPTools / #discoverableMCPSearchIndex / #selectedMCPToolNames / refreshMCPTools / #persistSelectedMCPToolNamesIfChanged），而设置入口已退场 ⇒ 无法再被配置开启的旧设计残留
-  - `read`/`write` 的影响面单独评估（ADR 后果段要求：gateway / 子 Agent / RPC host tool / 自演化路径共用）—— 未见任何评估记录
+  - `read`/`write` 影响面评估：**已完成**（J2，`docs/adr/0003-read-write-xdev-impact-assessment.md`）；其中拓出的自演化缺陷**已修复**（见批注）。
   - 两份「首版」名单（essential 名单、XDEV_KEEP_TOP_LEVEL）的复评未排期
   - 【新增】合并/拉取任何触及 crates/pi-natives 的改动后，各检出必须重建 addon（gitignore 产物不随合并走）—— 主检出于本批就中过：见批注
 ---
@@ -281,6 +281,15 @@ openQuestions:
 - 2026-09-12 14:22 — 【我的流程失误（第三次同类）】验完 K1 却忘了先回写状态就调集成 ⇒ 首次只合了 K2，必须 `--force` 重建。加上「给 K1/K2 的 base 值是旧值」与「边界通告发出时机」，**本批我给执行方的前提已错三次，三次都是执行方核出来的**。
 
 - 2026-09-12 14:23 — 【K1 清点地图已归档（供下一个「旧名移除」票直接用）】见 openQuestions 那行。其判别方法值得复用：**区分「硬编码旧名」与「只是走 normalizeToolName 的纯调用方」** —— 后者不需改，无脑替换会 churn 四个文件并让真实影响面被噪音淹没。
+
+- 2026-09-12 14:56 — 【用户指定做 2/5/6，不做 1/3/4】合并、push、清非本批工作树均**不做**。三个作业处置：
+  ⓐ **2 AGENTS.md addon 重建要求** —— 我自己做：commit `92cbcf1f8f` @ 分支 `feat/xdev6-followups`（基于 main）。“Build & deploy model”段新增：`*.node` 不随合并/拉取走；触及 `crates/pi-natives` 的改动合入后必须在该检出 `bun run build:native`；**并把症状写进去**（不是构建报错而是运行时报错：引用的原生导出在旧 addon 上不存在则解引用 undefined，实测 `SearchEngine` 缺失使每次 `search` 调用抛错）。
+  ⓑ **6 autoresearch 守卫注释** —— 同分支：写明该守卫是有意为之的 fail-closed，**包括 `write xd://<name>` 的设备执行**（放开等于让 scope 约束可被设备绕过）。历史查明：守卫由 can1357 于 2026-03-23 随 scope 校验系统加入，**早于 xd:// 存在**。
+  ⓒ **5 自演化修复** —— 派给池中的 J2（它写过那份评估）：commit `aa8778b4ec` @ `feat/xdev6-selfevo`，6 文件 +151/−12。
+
+- 2026-09-12 14:56 — 【J2 自演化修复验收】选方案 (a)：新增守卫 `internal-url-path.ts`（正则 `^[a-z][a-z0-9+.-]*://`，`xd://`/`agent://`/`skill://` 均识别，Windows `C:\` 不误判），统一应用于 `summarizeTrace` / `TraceAnalyzer`（slowLoop+efficiency+revert）/ `FeedbackTracker#extractEditPath` / `memory extractSignalsFromTrace` 共五处。证据：6 条新增行为测试**修复前红、修复后绿**。
+  **基线声明已由父独立核实**：main 上同一套件 443 pass / **16 fail**；其分支 449 pass / **16 fail** —— 失败数完全相同，多出的 6 pass 即新增测试。（“这些失败是既有的”是执行方最易含糊过去的一句，故特意去核。）
+  选 (a) 的理由成立：`args.path` 仍在 ⇒ 设备名未丢（方案 b 想解决的“信息丢失”在 a 下不成立），不需为 b 立票。
 
 ## 批注
 
