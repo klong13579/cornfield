@@ -8,7 +8,7 @@ doneWhen: |-
   - 挂载开关关闭时，顶层工具暴露与改造前一致
   - internal 工具不可由用户配置、设置或发现结果启用（运行时注入通道除外，见 ADR-0003）
   - 两条系统提示路径都包含设备说明，SYSTEM.md 覆盖场景下不消失
-lastActivity: 2026-09-12 12:21
+lastActivity: 2026-09-12 12:42
 sessionRefs:
   - ~/.cornfield/agent/sessions (tool1)
 nextAction: 已完成并合入 main（当前 main = e7779db8c6）。远端 origin/main 未 push（领先 40 提交）。回退锚点：`git reset --hard pre-tool-xdev-batch`。
@@ -33,6 +33,7 @@ openQuestions:
   - MCP 会话侧残留：`agent-session.ts` 仍留有整套 discovery 子系统（#mcpDiscoveryEnabled / #discoverableMCPTools / #discoverableMCPSearchIndex / #selectedMCPToolNames / refreshMCPTools / #persistSelectedMCPToolNamesIfChanged），而设置入口已退场 ⇒ 无法再被配置开启的旧设计残留
   - `read`/`write` 的影响面单独评估（ADR 后果段要求：gateway / 子 Agent / RPC host tool / 自演化路径共用）—— 未见任何评估记录
   - 两份「首版」名单（essential 名单、XDEV_KEEP_TOP_LEVEL）的复评未排期
+  - 【新增】合并/拉取任何触及 crates/pi-natives 的改动后，各检出必须重建 addon（gitignore 产物不随合并走）—— 主检出于本批就中过：见批注
 ---
 
 ## 当前状态（2026-09-11）
@@ -239,6 +240,17 @@ openQuestions:
 - 2026-09-12 12:21 — 【AGENTS.md 更新（用户「改」）】commit `e7779db8c6`，三处：① `tools/` 清单标注 **文件名 ≠ 工具名**（find.ts 承载 glob、search.ts 承载 grep、todo-write.ts 承载 todo，且不存在 glob.ts/grep.ts —— 已核实），并把 builtin-names.ts 列入；② 新增「Tool presentation (xd:// devices)」小节（三层、Load Mode、read/write 作 transport、MCP 工具在 createTools 返回后才进设备集、配置 key 只读迁移，以及「在归一化边界之外做字面量判断会静默失去别名」）；③ 门禁写明 `verify:xdev` 必须在 `bun test` 之外运行及原因。
 
 - 2026-09-12 12:21 — 【上游对齐已核实（用户问「glob/grep 和远程一样了吗」）】拉 `can1357/oh-my-pi` 的 `packages/coding-agent/src/tools/builtin-names.ts`：`BUILTIN_TOOL_NAMES` 含 **`glob`/`grep`/`todo`**，`LEGACY_BUILTIN_TOOL_NAME_ALIASES` = `search→grep`、`find→glob` ⇒ **规范名与别名方向均与上游逐字一致**。额外发现：**上游自身也有同类不一致** —— 其规范名是 `todo`，而其 `ai/utils/validation.ts` 按 `todo_write` 匹配；我们在本批把这类跨包字面载体在自家仓里修干净了（4 处），这一点上比上游更自洽。另：`origin` 是用户的 `klong13579/cornfield`（与上游不是同一远端），**本地 main 领先 origin 40 提交，未 push**。
+
+- 2026-09-12 12:42 — 【文档两处过期已修】commit `19f65688be`：ADR-0003 的 essential 清单原按旧名（find/search/todo_write）书写（那是现状描述、非历史决策），改为规范名并注明旧名走别名；台账 openQuestions 里的「配置 key 与提示词改名未排期」已过期（第二期已做），换成四项真实开放项。
+
+- 2026-09-12 12:42 — 【与上游的工具清单比对（用户问）】本地 31 个内置工具 vs 上游 28 个：共有 **18**（ask/ast_edit/ast_grep/bash/checkpoint/debug/edit/github/glob/grep/hub/lsp/read/rewind/task/todo/web_search/write），仅本地 **13**（browser/calc/inspect_image/irc/job/list_models/notebook/project_context/python/recipe/render_mermaid/ssh/switch_model），仅上游 **10**（context_notes/eval/learn/manage_skill/memory_edit/new_context/recall/reflect/retain/security_scan）。隐藏工具：本地 6（exit_plan_mode/identity/report_finding/report_tool_issue/resolve/yield），上游 3（yield/goal/think）仅 yield 共有。⇒ 改名使 `glob`/`grep`/`todo` 从「仅本地」变为「共有」，与上游对齐得到印证。
+
+- 2026-09-12 12:42 — 【w4 开池（用户：开多个 worker 作为进程池接作业）】按建议先做两项、留下一轮两项。任务包 `squad-20260912-tool-xdev-w4`（base = main `19f65688be`）：**J1** 清理 MCP 会话侧残留（`agent-session.ts` 仍留有设置入口已删除的整套 discovery 子系统）；**J2** read/write 影响面评估（ADR 后果段要求、从未做过）。两票 scope 不相交（J1 动 session、J2 只写 docs）。给 J1 的第一条硬要求是**先证明不可达再删**（本批已有三票因跳过前置核验而白做）；给 J2 的是**每条结论必须有引用，不确定写「未确定」**。
+
+- 2026-09-12 12:42 — 【w5 备包（未启动，等槽位）】`squad-20260912-tool-xdev-w5`：**K1** 旧名移除（删除前必须先加显式提示 —— 否则老 config 的 `find.enabled: false` 会静默变默认 true）；**K2** 两份首版名单复评（依据以真实运行时为准）。文件重叠提醒：K2 与 J2 都写 `docs/adr/0003`，不可同时开。
+
+- 2026-09-12 12:42 — 【重要发现：合并后 addon 陈旧会使 search 每次调用抛错】主检出的 `packages/natives/native/cornfield_natives.darwin-arm64.node` 仍是 9月11日 12:48（PCRE2 之前）的产物，而 main 的代码已含 PCRE2。`search.ts` 无条件解引用 `SearchEngine.Rust/Pcre2`，旧 addon 上该导出不存在 ⇒ **从源码跑 main 时 search 必抛错**（不是“少个可选引擎”，是运行时崩溃；且症状不是构建失败）。
+⇒ **可推广：`*.node` 是 gitignore 的构建产物，不随合并/拉取走；凡触及 `crates/pi-natives` 或其 Cargo 文件的改动合并后，每个检出都要重建一次。**已后台重建主检出 addon；并提议在 AGENTS.md 的构建段加一句明确要求。（`native-addon.ts` 只覆盖集成/子任务工作树，管不到主检出。）
 
 ## 批注
 
